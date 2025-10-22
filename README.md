@@ -1,6 +1,7 @@
 AMOURANTH RTX © 2025 by Zachary Geurts gzac5314@gmail.com is licensed under [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0)  
 Unreal developers may consider some of this parody.  
 Windows toolchain currently under development.  
+Hearer and Console are not part of the RTX program.  
 
 [AMOURANTH RTX Video](https://x.com/i/status/1980885384893722784)  
 
