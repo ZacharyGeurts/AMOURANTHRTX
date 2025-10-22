@@ -3,7 +3,7 @@ AMOURANTH RTX © 2025 by Zachary Geurts gzac5314@gmail.com is licensed under [CC
 [AMOURANTH RTX Video](https://x.com/i/status/1980885384893722784)  
 
 **C++20** using **SDL3**, **Vulkan**, and **GLM**.
-**Custom RTX pipelines...VROOM**
+**Custom RTX pipelines...VROOM**  
 This is a good lunch break program other than the license restricting commercial work.  
 Have a look. I promise to get libraries in the future.  
 
