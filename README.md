@@ -3,7 +3,7 @@ AMOURANTH RTX © 2025 by Zachary Geurts gzac5314@gmail.com is licensed under [CC
 Substitute **dark** with **NURB**  
 Non-uniform rational basis spline is a mathematical model that is representing curves and surfaces.
 
-<img width="4096" height="2160" alt="Screenshot from 2025-10-22 02-48-10" src="https://github.com/user-attachments/assets/a0f80dfc-12d2-4bcc-9df1-1d01a8e0e48e" />  
+<img width="409" height="216" alt="Screenshot from 2025-10-22 02-48-10" src="https://github.com/user-attachments/assets/a0f80dfc-12d2-4bcc-9df1-1d01a8e0e48e" />  
 
 # Universal Equation  🇺🇸  VS  🇷🇺  VS  🇸🇬  VS  🇨🇳  VS 🇬🇧  VS  🇫🇷  VS  🇲🇽 VS 🇰🇷  VS  🇫🇮  VS  🇯🇵  VS  🇨🇦  VS  🏴󠁧󠁢󠁳󠁣󠁴󠁿  VS  🇦🇺  ...  
 **Never condone violence, incorrectness, nor the new Oxford comma.**  
@@ -22,10 +22,10 @@ Ensure code follows C++20 standards and includes proper error handling.
 I am now a stickler for OMP parallelization and memory safety with C++20 and the advent of AI coding.  
 
 ## Built on AMOURANTH RTX.  
-A ground up RTX engine for developers.  
+A ground up SDL3 and Vulkan with RTX engine.  
 RTX 3060 Ti and higher, RX 6800 and up.  
 
-**Platform**: Currently Linux-only  with implementations for Windows  
+**Platform**: Currently Linux-only with toolchain work being implemented SDK style.  
 If you have a problem or need assistance please open an issue here on github.  
 
 Modular design. Modify with your favorite AI coding program.  
