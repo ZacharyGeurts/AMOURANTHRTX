@@ -1,7 +1,7 @@
 AMOURANTH RTX © 2025 by Zachary Geurts gzac5314@gmail.com is licensed under [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0)
 [AMOURANTH RTX Video](https://x.com/i/status/1980885384893722784)  
 Substitute **dark** with **NURB**  
-Non-uniform rational basis spline is a mathematical model that is representing curves and surfaces.
+Non-uniform rational basis spline is a mathematical model that is representing curves and surfaces.  
 Layman's summation: GodWave increases.  
 <img width="409" height="216" alt="Screenshot from 2025-10-22 02-48-10" src="https://github.com/user-attachments/assets/a0f80dfc-12d2-4bcc-9df1-1d01a8e0e48e" />  
 
