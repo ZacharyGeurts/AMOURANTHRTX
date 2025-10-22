@@ -5,8 +5,8 @@
 // Optimized for high-end GPUs with 8 GB VRAM (e.g., NVIDIA RTX 3070, AMD RX 6800).
 // Zachary Geurts 2025
 
-#ifndef VULKAN_PIPELINE_MANAGER_HPP
-#define VULKAN_PIPELINE_MANAGER_HPP
+#ifndef VULKANPIPELINEMANAGER_HPP
+#define VULKANPIPELINEMANAGER_HPP
 
 #include <vulkan/vulkan.h>
 #include <glm/glm.hpp>
@@ -128,6 +128,7 @@ public:
     void createShaderBindingTable();
     void recordGraphicsCommands(VkCommandBuffer commandBuffer, VkFramebuffer framebuffer, VkDescriptorSet descriptorSet, uint32_t width, uint32_t height, VkImage denoiseImage);
     void recordComputeCommands(VkCommandBuffer commandBuffer, VkImage outputImage, VkDescriptorSet descriptorSet, uint32_t width, uint32_t height);
+    void recordRayTracingCommands(VkCommandBuffer commandBuffer, VkImage outputImage, VkDescriptorSet descriptorSet, uint32_t width, uint32_t height); // Added
 
     VkPipeline getGraphicsPipeline() const { return graphicsPipeline_ ? graphicsPipeline_->get() : VK_NULL_HANDLE; }
     VkPipelineLayout getGraphicsPipelineLayout() const { return graphicsPipelineLayout_ ? graphicsPipelineLayout_->get() : VK_NULL_HANDLE; }
@@ -168,4 +169,4 @@ private:
 
 } // namespace VulkanRTX
 
-#endif // VULKAN_PIPELINE_MANAGER_HPP
+#endif // VULKANPIPELINEMANAGER_HPP

@@ -1,23 +1,5 @@
-// AMOURANTH RTX Engine, October 2025 - Entry point for the application.
-// This file serves as the program's main entry point, responsible for:
-// - Validating minimum resolution requirements (320x200) to ensure Vulkan swapchain compatibility.
-// - Instantiating the Application class with user-specified (or default) window dimensions.
-// - Running the application's event loop (via Application::run()).
-// - Catching and logging any exceptions with a timestamp for debugging.
-// Key features:
-// - Error handling: Catches std::exception and logs with local timestamp to stderr.
-// - Resolution clamping: Enforces minimum size to prevent Vulkan validation errors.
-// - Simplicity: Minimal main function; all logic delegated to Application class.
-// - Extensibility: Easy to modify resolution or add command-line parsing (e.g., for variable sizes).
-// - Platform support: Designed for Linux and Windows; enforces 1280x720 default resolution.
-// Requirements:
-// - Application class from main.hpp (integrates SDL3, Vulkan, and engine logic).
-// - Compiled with -O3 -std=c++20 -Wall -Wextra -g -fopenmp -Iinclude (for OpenMP and debugging).
-// Usage: Compile and run; the app launches a Vulkan window with the Dimensional Navigator renderer.
-// Notes:
-// - On error: Logs "[YYYY-MM-DD HH:MM:SS] Error: <message>" and exits with code 1.
-// - For debugging: Use Vulkan validation layers to catch GPU issues; enable SDL3 logging for input/window events.
-// - X11 BadMatch: Ensure SDL3 window attributes match Vulkan surface requirements (e.g., SDL_WINDOW_VULKAN).
+// AMOURANTH RTX Engine, October 2025
+// Zachary Geurts 2025
 
 #include "main.hpp"  // Include the Application class header (defines the main engine coordinator).
 #include <iostream>  // For std::cerr (error logging) and std::endl (output flushing).
@@ -38,18 +20,10 @@ int main() {
             throw std::runtime_error(ss.str());
         }
 
-        // Instantiate the Application class, passing title and resolution.
-        // This triggers SDL3 window creation, Vulkan initialization, and engine setup.
-        // Application constructor handles OpenMP configuration, simulator/renderer creation, and Vulkan resources.
-        Application app("Dimensional Navigator", width, height);
-
-        // Start the main event loop: Handles rendering, input, resize, and quitting.
-        // Runs until user closes window (e.g., Alt+F4, SDL_QUIT event).
-        // Delegates to SDL3Initializer::eventLoop for cross-platform compatibility.
+        Application app("AMOURANTH RTX", width, height);
         app.run();
-    } catch (const std::exception& e) {
-        // Catch any std::exception thrown during initialization or runtime (e.g., Vulkan failures, SDL3 errors).
-        // Generate a timestamp for logging to aid debugging (e.g., correlate with Vulkan validation output).
+
+    } catch (const std::exception& e) {        
         std::time_t now = std::time(nullptr);  // Get current time as Unix timestamp.
         char timeStr[64];                      // Buffer for formatted timestamp (YYYY-MM-DD HH:MM:SS).
         std::strftime(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S", std::localtime(&now));  // Format local time.

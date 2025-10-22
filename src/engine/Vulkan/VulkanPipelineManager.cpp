@@ -276,7 +276,7 @@ void VulkanPipelineManager::createRayTracingDescriptorSetLayout() {
     bindings[1].binding = static_cast<uint32_t>(DescriptorBindings::StorageImage);
     bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
     bindings[1].descriptorCount = 1;
-    bindings[1].stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR;
+    bindings[1].stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_COMPUTE_BIT;
     bindings[1].pImmutableSamplers = nullptr;
 
     bindings[2].binding = static_cast<uint32_t>(DescriptorBindings::CameraUBO);
@@ -300,7 +300,7 @@ void VulkanPipelineManager::createRayTracingDescriptorSetLayout() {
     bindings[5].binding = static_cast<uint32_t>(DescriptorBindings::DenoiseImage);
     bindings[5].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
     bindings[5].descriptorCount = 1;
-    bindings[5].stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR;
+    bindings[5].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
     bindings[5].pImmutableSamplers = nullptr;
 
     bindings[6].binding = static_cast<uint32_t>(DescriptorBindings::EnvMap);
@@ -385,35 +385,14 @@ void VulkanPipelineManager::createGraphicsPipeline(int width, int height) {
         }
     };
 
-    VkVertexInputBindingDescription bindingDescription = {
-        .binding = 0,
-        .stride = sizeof(glm::vec3) + sizeof(glm::vec2),
-        .inputRate = VK_VERTEX_INPUT_RATE_VERTEX
-    };
-
-    std::array<VkVertexInputAttributeDescription, 2> attributeDescriptions = {
-        VkVertexInputAttributeDescription{
-            .location = 0,
-            .binding = 0,
-            .format = VK_FORMAT_R32G32B32_SFLOAT,
-            .offset = 0
-        },
-        VkVertexInputAttributeDescription{
-            .location = 1,
-            .binding = 0,
-            .format = VK_FORMAT_R32G32_SFLOAT,
-            .offset = sizeof(glm::vec3)
-        }
-    };
-
     VkPipelineVertexInputStateCreateInfo vertexInputInfo = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
         .pNext = nullptr,
         .flags = 0,
-        .vertexBindingDescriptionCount = 1,
-        .pVertexBindingDescriptions = &bindingDescription,
-        .vertexAttributeDescriptionCount = static_cast<uint32_t>(attributeDescriptions.size()),
-        .pVertexAttributeDescriptions = attributeDescriptions.data()
+        .vertexBindingDescriptionCount = 0,
+        .pVertexBindingDescriptions = nullptr,
+        .vertexAttributeDescriptionCount = 0,
+        .pVertexAttributeDescriptions = nullptr
     };
 
     VkPipelineInputAssemblyStateCreateInfo inputAssembly = {
@@ -455,7 +434,7 @@ void VulkanPipelineManager::createGraphicsPipeline(int width, int height) {
         .depthClampEnable = VK_FALSE,
         .rasterizerDiscardEnable = VK_FALSE,
         .polygonMode = VK_POLYGON_MODE_FILL,
-        .cullMode = VK_CULL_MODE_BACK_BIT,
+        .cullMode = VK_CULL_MODE_NONE,
         .frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE,
         .depthBiasEnable = VK_FALSE,
         .depthBiasConstantFactor = 0.0f,
@@ -1137,7 +1116,7 @@ void VulkanPipelineManager::recordGraphicsCommands(VkCommandBuffer commandBuffer
     vkCmdPushConstants(commandBuffer, graphicsPipelineLayout_->get(),
                        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                        0, sizeof(GraphicsPushConstants), &pushConstants);
-    vkCmdDraw(commandBuffer, 3, 1, 0, 0);
+    vkCmdDraw(commandBuffer, 3, 1, 0, 0); // Draw full-screen triangle
     vkCmdEndRenderPass(commandBuffer);
 
     if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS) {
@@ -1190,7 +1169,7 @@ void VulkanPipelineManager::recordComputeCommands(VkCommandBuffer commandBuffer,
                          0, 0, nullptr, 0, nullptr, 1, &imageBarrier);
 
     vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline_->get());
-    LOG_DEBUG_CAT("PipelineManager", "Binding compute pipeline: {:p}, descriptorSet: {:p}",
+    LOG_DEBUG_CAT("PipelineManager", "Binding compute pipeline: {:p}, descriptorSet={:p}",
                   static_cast<void*>(computePipeline_->get()), static_cast<void*>(descriptorSet));
     vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, computePipelineLayout_->get(), 0, 1, &descriptorSet, 0, nullptr);
 
@@ -1226,6 +1205,100 @@ void VulkanPipelineManager::recordComputeCommands(VkCommandBuffer commandBuffer,
         throw std::runtime_error("Failed to end compute command buffer");
     }
     LOG_INFO_CAT("PipelineManager", "Recorded compute commands for outputImage {:p}", static_cast<void*>(outputImage));
+}
+
+void VulkanPipelineManager::recordRayTracingCommands(VkCommandBuffer commandBuffer, VkImage outputImage,
+                                                    VkDescriptorSet descriptorSet, uint32_t width, uint32_t height) {
+    if (commandBuffer == VK_NULL_HANDLE || outputImage == VK_NULL_HANDLE || descriptorSet == VK_NULL_HANDLE) {
+        LOG_ERROR_CAT("PipelineManager", "Invalid handle in recordRayTracingCommands: commandBuffer={:p}, outputImage={:p}, descriptorSet={:p}",
+                      static_cast<void*>(commandBuffer), static_cast<void*>(outputImage), static_cast<void*>(descriptorSet));
+        throw std::runtime_error("Invalid handle in recordRayTracingCommands");
+    }
+
+    VkCommandBufferBeginInfo beginInfo = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .pNext = nullptr,
+        .flags = 0,
+        .pInheritanceInfo = nullptr
+    };
+
+    if (vkBeginCommandBuffer(commandBuffer, &beginInfo) != VK_SUCCESS) {
+        LOG_ERROR_CAT("PipelineManager", "Failed to begin ray-tracing command buffer");
+        throw std::runtime_error("Failed to begin ray-tracing command buffer");
+    }
+
+    // Transition output image to GENERAL layout
+    VkImageMemoryBarrier imageBarrier = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .pNext = nullptr,
+        .srcAccessMask = 0,
+        .dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
+        .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+        .newLayout = VK_IMAGE_LAYOUT_GENERAL,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .image = outputImage,
+        .subresourceRange = {
+            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .baseMipLevel = 0,
+            .levelCount = 1,
+            .baseArrayLayer = 0,
+            .layerCount = 1
+        }
+    };
+    vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
+                         0, 0, nullptr, 0, nullptr, 1, &imageBarrier);
+
+    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, rayTracingPipeline_->get());
+    LOG_DEBUG_CAT("PipelineManager", "Binding ray-tracing pipeline: {:p}, descriptorSet={:p}",
+                  static_cast<void*>(rayTracingPipeline_->get()), static_cast<void*>(descriptorSet));
+    vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, rayTracingPipelineLayout_->get(),
+                            0, 1, &descriptorSet, 0, nullptr);
+
+    MaterialData::PushConstants pushConstants = {
+        .clearColor = glm::vec4(0.0f, 0.0f, 0.0f, 1.0f),
+        .cameraPosition = glm::vec3(0.0f, 0.0f, 5.0f),
+        .lightDirection = glm::vec3(0.0f, -1.0f, -1.0f),
+        .lightIntensity = 1.0f,
+        .samplesPerPixel = 1u,
+        .maxDepth = 2u,
+        .maxBounces = 2u,
+        .russianRoulette = 0.8f
+    };
+    vkCmdPushConstants(commandBuffer, rayTracingPipelineLayout_->get(),
+                       VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR,
+                       0, sizeof(MaterialData::PushConstants), &pushConstants);
+
+    VkStridedDeviceAddressRegionKHR raygenSbt = sbt_.raygen;
+    VkStridedDeviceAddressRegionKHR missSbt = sbt_.miss;
+    VkStridedDeviceAddressRegionKHR hitSbt = sbt_.hit;
+    VkStridedDeviceAddressRegionKHR callableSbt = sbt_.callable;
+
+    // Resolve vkCmdTraceRaysKHR function pointer
+    auto vkCmdTraceRaysKHR = reinterpret_cast<PFN_vkCmdTraceRaysKHR>(
+        vkGetDeviceProcAddr(context_.device, "vkCmdTraceRaysKHR"));
+    if (!vkCmdTraceRaysKHR) {
+        LOG_ERROR_CAT("PipelineManager", "Failed to get vkCmdTraceRaysKHR function pointer");
+        throw std::runtime_error("Failed to get vkCmdTraceRaysKHR function pointer");
+    }
+
+    vkCmdTraceRaysKHR(commandBuffer, &raygenSbt, &missSbt, &hitSbt, &callableSbt, width, height, 1);
+
+    // Transition output image for graphics pipeline
+    imageBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    imageBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    imageBarrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+    imageBarrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    imageBarrier.srcQueueFamilyIndex = platformConfig_.graphicsQueueFamily;
+    imageBarrier.dstQueueFamilyIndex = platformConfig_.graphicsQueueFamily;
+    vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                         0, 0, nullptr, 0, nullptr, 1, &imageBarrier);
+
+    if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS) {
+        LOG_ERROR_CAT("PipelineManager", "Failed to end ray-tracing command buffer");
+        throw std::runtime_error("Failed to end ray-tracing command buffer");
+    }
+    LOG_INFO_CAT("PipelineManager", "Recorded ray-tracing commands for outputImage {:p}", static_cast<void*>(outputImage));
 }
 
 } // namespace VulkanRTX
