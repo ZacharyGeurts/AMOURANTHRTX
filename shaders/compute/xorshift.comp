@@ -1,0 +1,16 @@
+#version 460
+#extension GL_EXT_nonuniform_qualifier : require
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+layout(binding = 1, rgba32f) uniform image2D storageImage;
+layout(binding = 5, rgba32f) writeonly uniform image2D denoiseImage;
+
+void main() {
+    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    
+    // Simple pass-through for demonstration (replace with actual denoising if needed)
+    vec4 color = imageLoad(storageImage, pixel);
+    
+    imageStore(denoiseImage, pixel, color);
+}
