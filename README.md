@@ -40,32 +40,6 @@ Commercial distribution is percentage based accountable upon release.
 - **Why AMOURANTH?** They said they were hiring so I figured I would try to bring in a customer.  
 
 ![gif](https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/media/gif.gif)  
-**Watch the gif and vidoes and may you find God.**  
-See the videos below for better quality and history.  
-**v2.00 Console**:[v2.00 Console](https://x.com/i/status/1974599285510676625)  
-**v1.98 Universe**: [v1.98 Universe](https://x.com/i/status/1972786018505171245)  
-**v1.97 Engine**: [v1.97 Engine](https://x.com/i/status/1972655725357728071)  
-**v1.96 1D Tribute**: [v1.96 Tribute](https://x.com/i/status/1972352391099113786)  
-**v1.96 Dots Field**: [v1.96 Dots](https://x.com/i/status/1972131523173536122)  
-**v1.95 Dots Field**: [v1.95 Dots](https://x.com/i/status/1971825508657823895)  
-**v1.94 Dots Spot**: [v1.94 Dots](https://x.com/i/status/1971438640623673754)  
-**v1.94 Dark Dots**: [v1.94 Dots](https://x.com/i/status/1971419671850254658)  
-
-**v1.93 Dots**: [v1.93 Dots](https://x.com/i/status/1971018327645704700)  
-**v1.91 Dots**: [v1.91 Dots](https://x.com/i/status/1970647974729654696)  
-**v1.9 Dots**: [v1.9 Dots](https://x.com/i/status/1970589215638593968)  
-**WIP Boob Ross**: [WIP Video](https://x.com/i/status/1970335014677299254)  
-
-**v1.8 White Gold**: [Latest Video](https://x.com/i/status/1968332417498046881)  
-**Older Video**: [Shader Video](https://x.com/i/status/1967808016453124126)  
-**Last Math Video**: [Older Math Video](https://x.com/i/status/1967685833982652583)  
-**Older Video**: [9D-1D](https://x.com/i/status/1967431708258804189)  
-**Older Video**: [Co-Pilot Update](https://github.com/user-attachments/assets/4a730d87-8b38-428e-bd5e-79c51921b67b)  
-**Shader Update**: [Old WIP](https://github.com/user-attachments/assets/1a259212-3314-424f-b997-7792e8ac9066)  
-**Old Video**: [Old WIP](https://github.com/user-attachments/assets/2980fe0d-1204-4a53-b6a4-cdf4f3eca072)  
-**Old Video**: [Old WIP](https://github.com/user-attachments/assets/c1b983bf-bdd9-4ae7-b8bb-fc7a1debdbef)  
-**Previous**: [Older WIP](https://github.com/ZacharyGeurts/universal_equation/blob/main/media/wip2.mov)  
-**Previous Previous**: [Older Version](https://github.com/user-attachments/assets/344232f5-e7b8-4485-af40-5a302873f88c)  
 
 ## Overview
 The **Dimensional Navigator** is a computational visualization tool built in **C++** using **SDL3**, **Vulkan**, and **GLM**. It visual displays the outputs of the **UniversalEquation** class, which models dimensional interactions across dimensions. The visualization displays symmetric positive and negative energy fluctuations influenced by matter and energy, featuring real-time interactivity.  
