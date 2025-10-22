@@ -9,7 +9,7 @@ chmod +x linux.sh
 ./linux.sh clean
 ```
 
-**NURBS**  
+**Other work**  
 Results are used with Non-uniform rational basis splines, a mathematical model that is representing curves and surfaces.  
 Layman's summation: GodWave increases.  
 <img width="409" height="216" alt="Screenshot from 2025-10-22 02-48-10" src="https://github.com/user-attachments/assets/a0f80dfc-12d2-4bcc-9df1-1d01a8e0e48e" /> ![uel](https://github.com/user-attachments/assets/31bc27e6-6ae7-417e-b331-e2e5bdb307dc)  
