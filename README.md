@@ -1,15 +1,16 @@
-AMOURANTH RTX © 2025 by Zachary Geurts gzac5314@gmail.com is licensed under [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0)
+AMOURANTH RTX © 2025 by Zachary Geurts gzac5314@gmail.com is licensed under [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0)  
 
 [AMOURANTH RTX Video](https://x.com/i/status/1980885384893722784)  
 
-**C++20** using **SDL3**, **Vulkan**, and **GLM**.
+**C++20** using **SDL3**, **Vulkan**, and **GLM**.  
 **Custom RTX pipelines.**  
 This is a good lunch break program other than the license restricting commercial work.  
 Have a look. I promise to get libraries in the future.  
 
 Why choose AMARANTH RTX? Just Better.
-<img width="1297" height="1800" alt="JustBetter" src="https://github.com/user-attachments/assets/0e273bbc-333b-4110-bc8d-acf0796f20c3" />
+<img width="1297" height="1800" alt="JustBetter" src="https://github.com/user-attachments/assets/0e273bbc-333b-4110-bc8d-acf0796f20c3" />  
 We have months of experience of driving Grok through traffic cones and expect to hit fewer.  
+<img width="1282" height="1645" alt="buffer" src="https://github.com/user-attachments/assets/28950e5a-2caf-49f9-b961-8a2510780a82" />  
 
 - **Distribution**: gzac5314@gmail.com for AMOURANTH RTX engine license  
 if you want to sell something it will not be over 3% sales and not over transfer fees.  
