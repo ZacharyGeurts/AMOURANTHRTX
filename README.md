@@ -41,7 +41,7 @@ Commercial distribution is percentage based accountable upon release.
 - **Why AMOURANTH?** They said they were hiring so I figured I would try to bring in a customer.  
 
 ![gif](https://github.com/user-attachments/assets/f68fd0ba-742d-4c44-bdbb-a692c664ea4d)  
-**If you do not intend to modify the code, watch the gif and you may have already seen God.**  
+**Watch the gif and vidoes and may you find God.**  
 See the videos below for better quality and history.  
 **v2.00 Console**:[v2.00 Console](https://x.com/i/status/1974599285510676625)  
 **v1.98 Universe**: [v1.98 Universe](https://x.com/i/status/1972786018505171245)  
