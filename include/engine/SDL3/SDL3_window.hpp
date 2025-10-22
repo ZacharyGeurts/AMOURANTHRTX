@@ -14,6 +14,10 @@
 
 #include "engine/SDL3/SDL3_init.hpp"
 
+namespace VulkanRTX {
+    class VulkanRenderer;  // Forward declaration
+}
+
 namespace SDL3Initializer {
 
 struct SDLWindowDeleter {
@@ -30,6 +34,10 @@ SDLWindowPtr createWindow(
 );
 
 SDL_Window* getWindow(const SDLWindowPtr& window);
+
+bool pollEventsForResize(const SDLWindowPtr& window, int& newWidth, int& newHeight, bool& shouldQuit, bool& toggleFullscreenKey);
+
+void toggleFullscreen(SDLWindowPtr& window, VulkanRTX::VulkanRenderer& renderer);
 
 } // namespace SDL3Initializer
 

@@ -1,12 +1,14 @@
 // src/engine/SDL3/SDL3_window.cpp
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts gzac5314@gmail.com is licensed under CC BY-NC 4.0
 // SDL3 window creation and management.
-// Dependencies: SDL3, Vulkan 1.3+, C++20 standard library, logging.hpp, Vulkan_init.hpp.
+// Dependencies: SDL3, Vulkan 1.3+, C++20 standard library, logging.hpp, Vulkan_init.hpp, Dispose.hpp.
 // Supported platforms: Linux, Windows.
 // Zachary Geurts 2025
 
 #include "engine/SDL3/SDL3_window.hpp"
+#include "engine/Vulkan/VulkanRenderer.hpp"
 #include "engine/Vulkan/Vulkan_init.hpp"
+#include "engine/Dispose.hpp"
 #include "engine/logging.hpp"
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
@@ -17,25 +19,23 @@
 #include <string>
 #include <cstring>
 #include <format>
+#include <set>
 
 namespace SDL3Initializer {
 
 void SDLWindowDeleter::operator()(SDL_Window* w) const {
-    if (w) {
-        LOG_INFO("Window", "Destroying SDL window", std::source_location::current());
-        SDL_DestroyWindow(w);
-    }
+    Dispose::destroyWindow(w);
 }
 
 SDLWindowPtr createWindow(const char* title, int w, int h, Uint32 flags) {
     LOG_INFO("Window", "Creating SDL window with title={}, width={}, height={}, flags=0x{:x}", 
              title, w, h, flags, std::source_location::current());
 
-    flags |= SDL_WINDOW_VULKAN;
+    flags |= SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE;
 
     SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "wayland,x11");
 
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) == 0) {
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) != 0) {
         LOG_ERROR("Window", "SDL_Init failed: {}", SDL_GetError(), std::source_location::current());
         throw std::runtime_error(std::string("SDL_Init failed: ") + SDL_GetError());
     }
@@ -43,7 +43,7 @@ SDLWindowPtr createWindow(const char* title, int w, int h, Uint32 flags) {
     SDLWindowPtr window(SDL_CreateWindow(title, w, h, flags));
     if (!window) {
         LOG_ERROR("Window", "SDL_CreateWindow failed: {}", SDL_GetError(), std::source_location::current());
-        SDL_Quit();
+        Dispose::quitSDL();
         throw std::runtime_error(std::string("SDL_CreateWindow failed: ") + SDL_GetError());
     }
 
@@ -52,7 +52,7 @@ SDLWindowPtr createWindow(const char* title, int w, int h, Uint32 flags) {
     const char* const* sdlExtensions = SDL_Vulkan_GetInstanceExtensions(&extensionCount);
     if (sdlExtensions == nullptr || extensionCount == 0) {
         LOG_ERROR("Window", "SDL_Vulkan_GetInstanceExtensions failed: {}", SDL_GetError(), std::source_location::current());
-        SDL_Quit();
+        Dispose::quitSDL();
         throw std::runtime_error(std::string("SDL_Vulkan_GetInstanceExtensions failed: ") + SDL_GetError());
     }
     std::vector<const char*> extensions(sdlExtensions, sdlExtensions + extensionCount);
@@ -113,7 +113,7 @@ SDLWindowPtr createWindow(const char* title, int w, int h, Uint32 flags) {
     VkResult result = vkCreateInstance(&createInfo, nullptr, &instance);
     if (result != VK_SUCCESS) {
         LOG_ERROR("Window", "vkCreateInstance failed with result={}", static_cast<int>(result), std::source_location::current());
-        SDL_Quit();
+        Dispose::quitSDL();
         throw std::runtime_error("vkCreateInstance failed: " + std::to_string(static_cast<int>(result)));
     }
     LOG_DEBUG("Window", "Temporary Vulkan instance created successfully: instance={:p}", static_cast<void*>(instance), std::source_location::current());
@@ -122,8 +122,8 @@ SDLWindowPtr createWindow(const char* title, int w, int h, Uint32 flags) {
     VkSurfaceKHR surface = VK_NULL_HANDLE;
     if (!SDL_Vulkan_CreateSurface(window.get(), instance, nullptr, &surface) || surface == VK_NULL_HANDLE) {
         LOG_ERROR("Window", "SDL_Vulkan_CreateSurface failed: {}", SDL_GetError(), std::source_location::current());
-        vkDestroyInstance(instance, nullptr);
-        SDL_Quit();
+        Dispose::destroyInstance(instance);
+        Dispose::quitSDL();
         throw std::runtime_error(std::string("SDL_Vulkan_CreateSurface failed: ") + SDL_GetError());
     }
     LOG_DEBUG("Window", "Temporary Vulkan surface created successfully: surface={:p}", static_cast<void*>(surface), std::source_location::current());
@@ -132,9 +132,9 @@ SDLWindowPtr createWindow(const char* title, int w, int h, Uint32 flags) {
     VkPhysicalDevice physicalDevice = VulkanInitializer::findPhysicalDevice(instance, surface, true);
     if (physicalDevice == VK_NULL_HANDLE) {
         LOG_ERROR("Window", "No suitable Vulkan physical device found", std::source_location::current());
-        vkDestroySurfaceKHR(instance, surface, nullptr);
-        vkDestroyInstance(instance, nullptr);
-        SDL_Quit();
+        Dispose::destroySurfaceKHR(instance, surface);
+        Dispose::destroyInstance(instance);
+        Dispose::quitSDL();
         throw std::runtime_error("No suitable Vulkan physical device found");
     }
 
@@ -143,9 +143,9 @@ SDLWindowPtr createWindow(const char* title, int w, int h, Uint32 flags) {
     vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &queueFamilyCount, nullptr);
     if (queueFamilyCount == 0) {
         LOG_ERROR("Window", "No queue families found for physical device", std::source_location::current());
-        vkDestroySurfaceKHR(instance, surface, nullptr);
-        vkDestroyInstance(instance, nullptr);
-        SDL_Quit();
+        Dispose::destroySurfaceKHR(instance, surface);
+        Dispose::destroyInstance(instance);
+        Dispose::quitSDL();
         throw std::runtime_error("No queue families found for physical device");
     }
 
@@ -164,9 +164,9 @@ SDLWindowPtr createWindow(const char* title, int w, int h, Uint32 flags) {
     }
     if (!surfaceSupported) {
         LOG_ERROR("Window", "Vulkan surface not supported by any queue family", std::source_location::current());
-        vkDestroySurfaceKHR(instance, surface, nullptr);
-        vkDestroyInstance(instance, nullptr);
-        SDL_Quit();
+        Dispose::destroySurfaceKHR(instance, surface);
+        Dispose::destroyInstance(instance);
+        Dispose::quitSDL();
         throw std::runtime_error("Vulkan surface not supported by any queue family");
     }
 
@@ -190,11 +190,19 @@ SDLWindowPtr createWindow(const char* title, int w, int h, Uint32 flags) {
         requiredExtSet.erase(ext.extensionName);
     }
     if (!requiredExtSet.empty()) {
-        LOG_ERROR("Window", "Mandatory RTX extension(s) not supported: {}", formatSet(requiredExtSet), std::source_location::current());
-        vkDestroySurfaceKHR(instance, surface, nullptr);
-        vkDestroyInstance(instance, nullptr);
-        SDL_Quit();
-        throw std::runtime_error("Mandatory RTX extension(s) not supported");
+        std::string missingExts;
+        for (const auto& ext : requiredExtSet) {
+            missingExts += ext + ", ";
+        }
+        if (!missingExts.empty()) {
+            missingExts.pop_back(); 
+            missingExts.pop_back();
+        }
+        LOG_ERROR("Window", "Mandatory RTX extension(s) not supported: {}", missingExts, std::source_location::current());
+        Dispose::destroySurfaceKHR(instance, surface);
+        Dispose::destroyInstance(instance);
+        Dispose::quitSDL();
+        throw std::runtime_error("Mandatory RTX extension(s) not supported: " + missingExts);
     }
     LOG_DEBUG("Window", "Mandatory RTX extensions verified on physical device", std::source_location::current());
 
@@ -284,38 +292,38 @@ SDLWindowPtr createWindow(const char* title, int w, int h, Uint32 flags) {
     // Verify key features
     if (!bufferDeviceAddressFeatures.bufferDeviceAddress) {
         LOG_ERROR("Window", "Buffer device address feature not supported for ray tracing", std::source_location::current());
-        vkDestroySurfaceKHR(instance, surface, nullptr);
-        vkDestroyInstance(instance, nullptr);
-        SDL_Quit();
+        Dispose::destroySurfaceKHR(instance, surface);
+        Dispose::destroyInstance(instance);
+        Dispose::quitSDL();
         throw std::runtime_error("Physical device does not support bufferDeviceAddress for ray tracing");
     }
     if (!descriptorIndexingFeatures.descriptorBindingPartiallyBound) {
         LOG_ERROR("Window", "Descriptor binding partially bound feature not supported for ray tracing", std::source_location::current());
-        vkDestroySurfaceKHR(instance, surface, nullptr);
-        vkDestroyInstance(instance, nullptr);
-        SDL_Quit();
+        Dispose::destroySurfaceKHR(instance, surface);
+        Dispose::destroyInstance(instance);
+        Dispose::quitSDL();
         throw std::runtime_error("Physical device does not support descriptorBindingPartiallyBound for ray tracing");
     }
     if (!accelerationStructureFeatures.accelerationStructure) {
         LOG_ERROR("Window", "Acceleration structure feature not supported for ray tracing", std::source_location::current());
-        vkDestroySurfaceKHR(instance, surface, nullptr);
-        vkDestroyInstance(instance, nullptr);
-        SDL_Quit();
+        Dispose::destroySurfaceKHR(instance, surface);
+        Dispose::destroyInstance(instance);
+        Dispose::quitSDL();
         throw std::runtime_error("Physical device does not support accelerationStructure for ray tracing");
     }
     if (!rayTracingPipelineFeatures.rayTracingPipeline) {
         LOG_ERROR("Window", "Ray tracing pipeline feature not supported", std::source_location::current());
-        vkDestroySurfaceKHR(instance, surface, nullptr);
-        vkDestroyInstance(instance, nullptr);
-        SDL_Quit();
+        Dispose::destroySurfaceKHR(instance, surface);
+        Dispose::destroyInstance(instance);
+        Dispose::quitSDL();
         throw std::runtime_error("Physical device does not support rayTracingPipeline");
     }
 
     LOG_DEBUG("Window", "RTX features verified on physical device", std::source_location::current());
 
     // Clean up temporary Vulkan resources
-    vkDestroySurfaceKHR(instance, surface, nullptr);
-    vkDestroyInstance(instance, nullptr);
+    Dispose::destroySurfaceKHR(instance, surface);
+    Dispose::destroyInstance(instance);
 
     const char* videoDriver = SDL_GetCurrentVideoDriver();
     LOG_INFO("Window", "SDL window created with video driver: {}, flags=0x{:x}", 
@@ -329,6 +337,82 @@ SDLWindowPtr createWindow(const char* title, int w, int h, Uint32 flags) {
 SDL_Window* getWindow(const SDLWindowPtr& window) {
     LOG_DEBUG("Window", "Retrieving SDL window", std::source_location::current());
     return window.get();
+}
+
+bool pollEventsForResize(const SDLWindowPtr& window, int& newWidth, int& newHeight, bool& shouldQuit, bool& toggleFullscreenKey) {
+    (void)window; // Suppress unused parameter warning
+    LOG_DEBUG("Window", "Polling SDL events for resize", std::source_location::current());
+    SDL_Event event;
+    bool resized = false;
+    shouldQuit = false;
+    toggleFullscreenKey = false;
+
+    SDL_PumpEvents(); // Flush pending events to prevent blocking
+
+    while (SDL_PollEvent(&event)) {
+        switch (event.type) {
+            case SDL_EVENT_QUIT:
+                LOG_INFO("Window", "Quit event received", std::source_location::current());
+                shouldQuit = true;
+                return false;
+            case SDL_EVENT_KEY_DOWN:
+                if (event.key.key == SDLK_F11) {
+                    toggleFullscreenKey = true;
+                    LOG_INFO("Window", "F11 pressed: toggling fullscreen", std::source_location::current());
+                }
+                break;
+            case SDL_EVENT_WINDOW_RESIZED:
+                newWidth = event.window.data1;
+                newHeight = event.window.data2;
+                resized = true;
+                LOG_DEBUG("Window", "Window resized to {}x{}", newWidth, newHeight, std::source_location::current());
+                break;
+            case SDL_EVENT_WINDOW_MOVED:
+            case SDL_EVENT_WINDOW_MOUSE_ENTER:
+            case SDL_EVENT_WINDOW_MOUSE_LEAVE:
+            case SDL_EVENT_WINDOW_FOCUS_GAINED:
+            case SDL_EVENT_WINDOW_FOCUS_LOST:
+            case SDL_EVENT_WINDOW_MINIMIZED:
+            case SDL_EVENT_WINDOW_MAXIMIZED:
+            case SDL_EVENT_WINDOW_RESTORED:
+                // Handle other window events if needed
+                break;
+            default:
+                // Ignore other events
+                break;
+        }
+    }
+
+    return resized;
+}
+
+void toggleFullscreen(SDLWindowPtr& window, VulkanRTX::VulkanRenderer& renderer) {
+    SDL_Window* win = window.get();
+    bool isFullscreen = (SDL_GetWindowFlags(win) & SDL_WINDOW_FULLSCREEN) != 0;
+    LOG_INFO("Window", "Toggling fullscreen: current={}", isFullscreen ? "yes" : "no", std::source_location::current());
+
+    // Ensure Vulkan device is idle
+    VkDevice device = renderer.getDevice();
+    if (device != VK_NULL_HANDLE) {
+        LOG_DEBUG("Window", "Calling vkDeviceWaitIdle before fullscreen toggle", std::source_location::current());
+        vkDeviceWaitIdle(device);
+    }
+
+    // Toggle borderless fullscreen
+    int fullscreenState = isFullscreen ? 0 : 1; // 0 for windowed, 1 for fullscreen
+    if (SDL_SetWindowFullscreen(win, fullscreenState) != 0) {
+        LOG_ERROR("Window", "SDL_SetWindowFullscreen failed: {}", SDL_GetError(), std::source_location::current());
+        return;
+    }
+
+    // Wait a frame for SDL to process
+    SDL_Delay(16); // ~60 FPS tick
+
+    // Get new size and resize renderer
+    int newW, newH;
+    SDL_GetWindowSize(win, &newW, &newH);
+    renderer.handleResize(newW, newH);
+    LOG_INFO("Window", "Fullscreen toggled to {}x{}", newW, newH, std::source_location::current());
 }
 
 } // namespace SDL3Initializer
