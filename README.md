@@ -1,7 +1,5 @@
 AMOURANTH RTX © 2025 by Zachary Geurts gzac5314@gmail.com is licensed under [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0)
 
-## Down for repair. Grab a release or watch videos below.  
-
 Substitute **dark** with **NURB**  
 Non-uniform rational basis spline is a mathematical model that is representing curves and surfaces.
 
