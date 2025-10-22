@@ -8,6 +8,11 @@ Windows toolchain currently under development.
 **Custom RTX pipelines.**  
 This is a good lunch break program other than the license restricting commercial work.  
 Have a look. I promise to get libraries in the future.  
+```
+git clone https://github.com/ZacharyGeurts/AMOURANTHRTX
+chmod +x linux.sh
+./linux.sh clean
+```
 
 Why choose AMARANTH RTX? Just Better.
 <img width="1297" height="1800" alt="JustBetter" src="https://github.com/user-attachments/assets/0e273bbc-333b-4110-bc8d-acf0796f20c3" />  
@@ -23,11 +28,6 @@ if you want to sell something it will not be over 3% sales and not over transfer
 I would be taking a 1% to their 2% as far as distribution ratio.  
 If they do not like my stealing their brand, they can come to Michigan and stream the firing.  
 https://www.twitch.tv/AMOURANTH
-```
-git clone https://github.com/ZacharyGeurts/AMOURANTHRTX
-chmod +x linux.sh
-./linux.sh clean
-```
 
 **Other work**  
 Results are used with Non-uniform rational basis splines, a mathematical model that is representing curves and surfaces.  
