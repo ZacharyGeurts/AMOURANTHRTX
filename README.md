@@ -1,7 +1,9 @@
 AMOURANTH RTX © 2025 by Zachary Geurts gzac5314@gmail.com is licensed under [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0)
-[AMOURANTH RTX](https://x.com/i/status/1980885384893722784)  
+[AMOURANTH RTX Video](https://x.com/i/status/1980885384893722784)  
 Substitute **dark** with **NURB**  
 Non-uniform rational basis spline is a mathematical model that is representing curves and surfaces.
+
+<img width="4096" height="2160" alt="Screenshot from 2025-10-22 02-48-10" src="https://github.com/user-attachments/assets/a0f80dfc-12d2-4bcc-9df1-1d01a8e0e48e" />  
 
 # Dimensional Navigator  🇺🇸  VS  🇷🇺  VS  🇸🇬  VS  🇨🇳  VS 🇬🇧  VS  🇫🇷  VS  🇲🇽 VS 🇰🇷  VS  🇫🇮  VS  🇯🇵  VS  🇨🇦  VS  🏴󠁧󠁢󠁳󠁣󠁴󠁿  VS  🇦🇺  ...  
 **Never condone violence, incorrectness, nor the new Oxford comma.**  
@@ -18,11 +20,7 @@ It is a glorified calculator and you can set it to experimental theory.
 Contributions are welcome!  
 Please submit pull requests or open issues on the repository.  
 Ensure code follows C++20 standards and includes proper error handling.  
-I am now a stickler for OMP parallelization and memory safety with the advent of AI coding.  
-
-## The universal_equation is three files and current with the best research up through 2025.  
-All files are modular for AI updates.  
-
+I am now a stickler for OMP parallelization and memory safety with C++20 and the advent of AI coding.  
 
 ## Built on AMOURANTH RTX.  
 A ground up RTX engine for developers.  
@@ -36,8 +34,11 @@ This project uses an SDL3 Vulkan backend for rendering including a robust RTX pi
 Chosen from idiocy, ignorance, and patience.  
 I solved my math problem, so mostly progressing the engine. 
 
-Software with free distribution can use all of this software without any restrictions or terms.  
+Software with free distribution can use all of this software with free license terms.  
 Commercial SDL3 and Vulkan development requires AMOURANTH RTX engine license.  
+Commercial distribution is percentage based accountable upon release.  
+- **Distribution**: gzac5314@gmail.com for AMOURANTH RTX engine license  
+- **Why AMOURANTH?** They said they were hiring so I figured I would try to bring in a customer.  
 
 ![gif](https://github.com/user-attachments/assets/f68fd0ba-742d-4c44-bdbb-a692c664ea4d)  
 **If you do not intend to modify the code, watch the gif and you may have already seen God.**  
@@ -66,15 +67,6 @@ See the videos below for better quality and history.
 **Old Video**: [Old WIP](https://github.com/user-attachments/assets/c1b983bf-bdd9-4ae7-b8bb-fc7a1debdbef)  
 **Previous**: [Older WIP](https://github.com/ZacharyGeurts/universal_equation/blob/main/media/wip2.mov)  
 **Previous Previous**: [Older Version](https://github.com/user-attachments/assets/344232f5-e7b8-4485-af40-5a302873f88c)  
-
-
-## Licensing
-This is **not free (as in freedom) software**. It is provided for **educational purposes only**.  
-- **Restrictions**: You may not sell unlicensed software or require any compensation from users.  
-- **Distribution**: Projects using UE code must be distributed freely (no cost).  
-- **Commercial use of AMOURANTH RTX engine requires license**  
-- **Distribution**: gzac5314@gmail.com for AMOURANTH RTX engine license  
-- **Why AMOURANTH?** They said they were hiring so I figured I would try to bring in a customer.  
 
 ## Overview
 The **Dimensional Navigator** is a computational visualization tool built in **C++** using **SDL3**, **Vulkan**, and **GLM**. It visual displays the outputs of the **UniversalEquation** class, which models dimensional interactions across dimensions. The visualization displays symmetric positive and negative energy fluctuations influenced by matter and energy, featuring real-time interactivity.  
