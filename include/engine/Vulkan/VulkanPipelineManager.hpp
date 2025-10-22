@@ -1,7 +1,8 @@
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts gzac5314@gmail.com is licensed under CC BY-NC 4.0
 // Vulkan pipeline management header.
 // Dependencies: Vulkan 1.3+, GLM, VulkanCore.hpp, Vulkan_init.hpp, VulkanRTX_Setup.hpp, logging.hpp, Dispose.hpp.
-// Supported platforms: Linux, Windows.
+// Supported platforms: Linux, Windows, Consoles (PS5, Xbox Series X).
+// Optimized for high-end GPUs with 8 GB VRAM (e.g., NVIDIA RTX 3070, AMD RX 6800).
 // Zachary Geurts 2025
 
 #ifndef VULKAN_PIPELINE_MANAGER_HPP
@@ -12,12 +13,23 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <unordered_map>
 #include "engine/Vulkan/VulkanCore.hpp"
 #include "engine/Vulkan/VulkanRTX_Setup.hpp"
 #include "engine/Dispose.hpp"
 #include "engine/logging.hpp"
 
+#ifdef ENABLE_VULKAN_DEBUG
+#include <vulkan/vulkan_ext_debug_utils.h>
+#endif
+
 namespace VulkanRTX {
+
+struct PlatformConfig {
+    uint32_t graphicsQueueFamily = 0;
+    uint32_t computeQueueFamily = 0;
+    bool preferDeviceLocalMemory = true; // Consoles prefer device-local memory
+};
 
 struct ShaderBindingTable {
     VkStridedDeviceAddressRegionKHR raygen{0, 0, 0};
@@ -40,12 +52,12 @@ struct ShaderBindingTable {
         if (buffer != VK_NULL_HANDLE && destroyBufferFunc != nullptr) {
             destroyBufferFunc(device, buffer, nullptr);
             buffer = VK_NULL_HANDLE;
-            LOG_DEBUG("Destroyed SBT buffer: {:p}", static_cast<void*>(buffer));
+            LOG_DEBUG_CAT("PipelineManager", "Destroyed SBT buffer: {:p}", static_cast<void*>(buffer));
         }
         if (memory != VK_NULL_HANDLE && freeMemoryFunc != nullptr) {
             freeMemoryFunc(device, memory, nullptr);
             memory = VK_NULL_HANDLE;
-            LOG_DEBUG("Freed SBT memory: {:p}", static_cast<void*>(memory));
+            LOG_DEBUG_CAT("PipelineManager", "Freed SBT memory: {:p}", static_cast<void*>(memory));
         }
     }
 
@@ -71,11 +83,11 @@ struct ShaderBindingTable {
         if (this != &other) {
             if (buffer != VK_NULL_HANDLE && destroyBufferFunc != nullptr) {
                 destroyBufferFunc(device, buffer, nullptr);
-                LOG_DEBUG("Destroyed SBT buffer: {:p}", static_cast<void*>(buffer));
+                LOG_DEBUG_CAT("PipelineManager", "Destroyed SBT buffer: {:p}", static_cast<void*>(buffer));
             }
             if (memory != VK_NULL_HANDLE && freeMemoryFunc != nullptr) {
                 freeMemoryFunc(device, memory, nullptr);
-                LOG_DEBUG("Freed SBT memory: {:p}", static_cast<void*>(memory));
+                LOG_DEBUG_CAT("PipelineManager", "Freed SBT memory: {:p}", static_cast<void*>(memory));
             }
 
             raygen = other.raygen;
@@ -127,9 +139,13 @@ public:
     const ShaderBindingTable& getShaderBindingTable() const { return sbt_; }
 
 private:
-    static VkShaderModule loadShader(VkDevice device, const std::string& filename);
+    void createPipelineCache();
     void createRayTracingDescriptorSetLayout();
     void createGraphicsDescriptorSetLayout();
+    VkShaderModule loadShader(VkDevice device, const std::string& shaderType);
+#ifdef ENABLE_VULKAN_DEBUG
+    void setupDebugCallback();
+#endif
 
     Vulkan::Context& context_;
     int width_;
@@ -141,8 +157,13 @@ private:
     std::unique_ptr<VulkanResource<VkPipeline, PFN_vkDestroyPipeline>> graphicsPipeline_;
     std::unique_ptr<VulkanResource<VkPipelineLayout, PFN_vkDestroyPipelineLayout>> graphicsPipelineLayout_;
     VkRenderPass renderPass_;
-    std::vector<std::string> shaderPaths_;
+    VkPipelineCache pipelineCache_;
+    std::unordered_map<std::string, std::string> shaderPaths_;
     ShaderBindingTable sbt_;
+    PlatformConfig platformConfig_;
+#ifdef ENABLE_VULKAN_DEBUG
+    VkDebugUtilsMessengerEXT debugMessenger_;
+#endif
 };
 
 } // namespace VulkanRTX
