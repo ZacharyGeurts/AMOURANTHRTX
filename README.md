@@ -4,6 +4,7 @@ AMOURANTH RTX © 2025 by Zachary Geurts gzac5314@gmail.com is licensed under [CC
 This is a good lunch break program other than the license restricting commercial work.  
 Have a look. I promise to get libraries in the future.  
 ```
+git clone https://github.com/ZacharyGeurts/AMOURANTHRTX
 chmod +x linux.sh
 ./linux.sh clean
 ```
