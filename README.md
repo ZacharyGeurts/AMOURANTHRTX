@@ -25,9 +25,8 @@ Image lies. I aien't test shit.
 <img width="1564" height="2160" alt="Screenshot from 2025-10-22 11-14-40" src="https://github.com/user-attachments/assets/1d558846-c910-4104-9212-8a024f069dc8" />
 
 - **Distribution**: gzac5314@gmail.com for AMOURANTH RTX engine license  
-if you want to sell something it will not be over 3% sales and not over transfer fees.  
 - **Why AMOURANTH?** They said they were hiring so I figured I would try to bring in a customer.  
-I would be taking a 1% to their 2% as far as distribution ratio.  
+I would be taking a 1/3rd to their 2/3rd as far as distribution ratio.  
 If they do not like my stealing their brand, they can come to Michigan and stream the firing.  
 https://www.twitch.tv/AMOURANTH
 
