@@ -3,6 +3,12 @@ AMOURANTH RTX © 2025 by Zachary Geurts gzac5314@gmail.com is licensed under [CC
 
 This is a good lunch break program other than the license restricting commercial work.  
 Have a look. I promise to get libraries in the future.  
+
+- **Distribution**: gzac5314@gmail.com for AMOURANTH RTX engine license  
+if you want to sell something it will not be over 3% sales and not over transfer fees.  
+- **Why AMOURANTH?** They said they were hiring so I figured I would try to bring in a customer.  
+I would be taking a 1% to their 2% as far as distribution ratio.  
+If they do not like my stealing their brand, they can come to Michigan and stream firing me.  
 ```
 git clone https://github.com/ZacharyGeurts/AMOURANTHRTX
 chmod +x linux.sh
@@ -47,8 +53,6 @@ I solved my math problem, so mostly progressing the engine.
 Software with free distribution can use all of this software with free license terms.  
 Commercial SDL3 and Vulkan development requires AMOURANTH RTX engine license.  
 Commercial distribution is percentage based accountable upon release.  
-- **Distribution**: gzac5314@gmail.com for AMOURANTH RTX engine license  
-- **Why AMOURANTH?** They said they were hiring so I figured I would try to bring in a customer.  
 
 ![gif](https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/media/gif.gif)  
 
