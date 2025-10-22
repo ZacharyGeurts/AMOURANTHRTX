@@ -15,7 +15,7 @@ Climb inside the blanket and have a look around.
 
 I think this proves the number 1 is real and 0 is not real.  
 Grab the latest release if only interested in the Universal Equation.  
-It is a glorified calculator and you can set it to experimental theory.  
+It is a Glorified calculator and you can set it to experimental theory.  
 
 Contributions are welcome!  
 Please submit pull requests or open issues on the repository.  
