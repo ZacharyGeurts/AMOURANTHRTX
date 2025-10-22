@@ -1,4 +1,5 @@
-// AMOURANTH RTX Engine, October 2025 - Vulkan swapchain management.
+// AMOURANTH RTX Engine © 2025 by Zachary Geurts gzac5314@gmail.com is licensed under CC BY-NC 4.0
+// Vulkan swapchain management implementation.
 // Dependencies: Vulkan 1.3+, VulkanCore.hpp, Vulkan_init.hpp, logging.hpp.
 // Supported platforms: Linux, Windows.
 // Zachary Geurts 2025
@@ -7,7 +8,7 @@
 #include <stdexcept>
 #include <source_location>
 #include <algorithm>
-#include <format>  // For std::format
+#include <format>
 
 #define VK_CHECK(result, msg) if ((result) != VK_SUCCESS) { \
     LOG_ERROR("Vulkan error: {} (VkResult: {}, File: {}, Line: {}, Function: {})", \
@@ -30,10 +31,15 @@ VulkanSwapchainManager::VulkanSwapchainManager(Vulkan::Context& context, VkSurfa
       presentQueueFamilyIndex_(context_.presentQueueFamilyIndex),
       maxFramesInFlight_(0) {
     LOG_INFO("Entering VulkanSwapchainManager constructor with surface={:p}", static_cast<void*>(surface));
-    LOG_DEBUG("Step 1: Validating surface input");
+    LOG_DEBUG("Step 1: Validating inputs");
     if (surface == VK_NULL_HANDLE) {
         LOG_ERROR("Invalid surface provided (surface={:p}) at {}", static_cast<void*>(surface), std::source_location::current());
         throw std::runtime_error("Invalid surface");
+    }
+    if (graphicsQueueFamilyIndex_ == UINT32_MAX || presentQueueFamilyIndex_ == UINT32_MAX) {
+        LOG_ERROR("Invalid queue family indices: graphicsQueueFamilyIndex_={}, presentQueueFamilyIndex_={}",
+                  graphicsQueueFamilyIndex_, presentQueueFamilyIndex_);
+        throw std::runtime_error("Invalid queue family indices");
     }
     LOG_DEBUG("Step 2: Assigning surface to context");
     context_.surface = surface;
@@ -125,7 +131,13 @@ void VulkanSwapchainManager::initializeSwapchain(int width, int height) {
         throw std::runtime_error("Invalid surface capabilities");
     }
 
-    // Additional check for degenerate extents (common on Linux if window not shown/resized)
+    // Check for storage image support
+    LOG_DEBUG("Step 4: Checking for VK_IMAGE_USAGE_STORAGE_BIT support");
+    if (!(capabilities.supportedUsageFlags & VK_IMAGE_USAGE_STORAGE_BIT)) {
+        LOG_WARNING("Swapchain does not support VK_IMAGE_USAGE_STORAGE_BIT; compute operations may be limited");
+    }
+
+    // Additional check for degenerate extents
     if (capabilities.minImageExtent.width == 0 || capabilities.minImageExtent.height == 0 ||
         capabilities.maxImageExtent.width == 0 || capabilities.maxImageExtent.height == 0) {
         LOG_ERROR("Degenerate surface extents: min={}x{}, max={}x{} (surface not ready? Ensure SDL_ShowWindow called)",
@@ -135,7 +147,7 @@ void VulkanSwapchainManager::initializeSwapchain(int width, int height) {
     }
 
     // Query surface formats
-    LOG_DEBUG("Step 4: Querying surface formats (first pass to get count)");
+    LOG_DEBUG("Step 5: Querying surface formats (first pass to get count)");
     uint32_t formatCount;
     result = vkGetPhysicalDeviceSurfaceFormatsKHR(context_.physicalDevice, context_.surface, &formatCount, nullptr);
     if (result != VK_SUCCESS || formatCount == 0) {
@@ -143,9 +155,9 @@ void VulkanSwapchainManager::initializeSwapchain(int width, int height) {
         throw std::runtime_error("No surface formats available");
     }
     LOG_DEBUG("Queried {} available surface formats", formatCount);
-    LOG_DEBUG("Step 5: Allocating formats vector with size={}", formatCount);
+    LOG_DEBUG("Step 6: Allocating formats vector with size={}", formatCount);
     std::vector<VkSurfaceFormatKHR> formats(formatCount);
-    LOG_DEBUG("Step 6: Retrieving surface formats");
+    LOG_DEBUG("Step 7: Retrieving surface formats");
     VK_CHECK(vkGetPhysicalDeviceSurfaceFormatsKHR(context_.physicalDevice, context_.surface, &formatCount, formats.data()),
              "Failed to query surface formats");
     LOG_DEBUG("Retrieved {} surface formats", formatCount);
@@ -154,7 +166,7 @@ void VulkanSwapchainManager::initializeSwapchain(int width, int height) {
     }
 
     // Query present modes
-    LOG_DEBUG("Step 7: Querying present modes (first pass to get count)");
+    LOG_DEBUG("Step 8: Querying present modes (first pass to get count)");
     uint32_t presentModeCount;
     result = vkGetPhysicalDeviceSurfacePresentModesKHR(context_.physicalDevice, context_.surface, &presentModeCount, nullptr);
     if (result != VK_SUCCESS || presentModeCount == 0) {
@@ -162,9 +174,9 @@ void VulkanSwapchainManager::initializeSwapchain(int width, int height) {
         throw std::runtime_error("No present modes available");
     }
     LOG_DEBUG("Queried {} available present modes", presentModeCount);
-    LOG_DEBUG("Step 8: Allocating presentModes vector with size={}", presentModeCount);
+    LOG_DEBUG("Step 9: Allocating presentModes vector with size={}", presentModeCount);
     std::vector<VkPresentModeKHR> presentModes(presentModeCount);
-    LOG_DEBUG("Step 9: Retrieving present modes");
+    LOG_DEBUG("Step 10: Retrieving present modes");
     VK_CHECK(vkGetPhysicalDeviceSurfacePresentModesKHR(context_.physicalDevice, context_.surface, &presentModeCount, presentModes.data()),
              "Failed to query present modes");
     LOG_DEBUG("Retrieved {} present modes", presentModeCount);
@@ -173,7 +185,7 @@ void VulkanSwapchainManager::initializeSwapchain(int width, int height) {
     }
 
     // Choose surface format
-    LOG_DEBUG("Step 10: Selecting surface format");
+    LOG_DEBUG("Step 11: Selecting surface format");
     VkSurfaceFormatKHR surfaceFormat = formats[0];
     LOG_DEBUG("Default surface format: format={}, colorSpace={}", static_cast<uint32_t>(surfaceFormat.format), static_cast<uint32_t>(surfaceFormat.colorSpace));
     bool preferredFormatFound = false;
@@ -193,7 +205,7 @@ void VulkanSwapchainManager::initializeSwapchain(int width, int height) {
     LOG_DEBUG("Assigned swapchainImageFormat_: {}", static_cast<uint32_t>(swapchainImageFormat_));
 
     // Choose present mode
-    LOG_DEBUG("Step 11: Selecting present mode");
+    LOG_DEBUG("Step 12: Selecting present mode");
     VkPresentModeKHR presentMode = VK_PRESENT_MODE_FIFO_KHR;
     LOG_DEBUG("Default present mode: VK_PRESENT_MODE_FIFO_KHR");
     bool mailboxModeFound = false;
@@ -211,11 +223,11 @@ void VulkanSwapchainManager::initializeSwapchain(int width, int height) {
     LOG_DEBUG("Assigned presentMode: {}", static_cast<uint32_t>(presentMode));
 
     // Choose extent
-    LOG_DEBUG("Step 12: Selecting swapchain extent");
+    LOG_DEBUG("Step 13: Selecting swapchain extent");
     swapchainExtent_ = capabilities.currentExtent;
     LOG_DEBUG("Initial swapchain extent from capabilities: {}x{}", swapchainExtent_.width, swapchainExtent_.height);
     if (swapchainExtent_.width == 0 || swapchainExtent_.height == 0) {
-        LOG_DEBUG("Step 13: Adjusting extent due to invalid currentExtent (0x0)");
+        LOG_DEBUG("Step 14: Adjusting extent due to invalid currentExtent (0x0)");
         swapchainExtent_.width = std::clamp(static_cast<uint32_t>(width), capabilities.minImageExtent.width, capabilities.maxImageExtent.width);
         swapchainExtent_.height = std::clamp(static_cast<uint32_t>(height), capabilities.minImageExtent.height, capabilities.maxImageExtent.height);
         LOG_DEBUG("Adjusted swapchain extent to {}x{} based on requested width={} and height={}",
@@ -228,24 +240,24 @@ void VulkanSwapchainManager::initializeSwapchain(int width, int height) {
     LOG_DEBUG("Final swapchain extent: {}x{}", swapchainExtent_.width, swapchainExtent_.height);
 
     // Choose image count
-    LOG_DEBUG("Step 14: Selecting image count");
+    LOG_DEBUG("Step 15: Selecting image count");
     imageCount_ = capabilities.minImageCount + 1;
     LOG_DEBUG("Requested image count: {} (minImageCount={} + 1)", imageCount_, capabilities.minImageCount);
     if (capabilities.maxImageCount > 0 && imageCount_ > capabilities.maxImageCount) {
-        LOG_DEBUG("Step 15: Clamping image count to maxImageCount");
+        LOG_DEBUG("Step 16: Clamping image count to maxImageCount");
         imageCount_ = capabilities.maxImageCount;
         LOG_DEBUG("Clamped image count to maxImageCount: {}", imageCount_);
     }
     LOG_INFO("Selected swapchain image count: {}", imageCount_);
 
     // Queue families
-    LOG_DEBUG("Step 16: Validating queue family indices");
+    LOG_DEBUG("Step 17: Validating queue family indices");
     if (graphicsQueueFamilyIndex_ == UINT32_MAX || presentQueueFamilyIndex_ == UINT32_MAX) {
         LOG_ERROR("Invalid queue family indices: graphicsQueueFamilyIndex_={}, presentQueueFamilyIndex_={}",
                   graphicsQueueFamilyIndex_, presentQueueFamilyIndex_);
         throw std::runtime_error("Invalid queue family indices");
     }
-    LOG_DEBUG("Step 17: Configuring queue families");
+    LOG_DEBUG("Step 18: Configuring queue families");
     std::vector<uint32_t> queueFamilies;
     VkSharingMode sharingMode = VK_SHARING_MODE_EXCLUSIVE;
     if (graphicsQueueFamilyIndex_ != presentQueueFamilyIndex_) {
@@ -259,7 +271,7 @@ void VulkanSwapchainManager::initializeSwapchain(int width, int height) {
     }
 
     // Create swapchain
-    LOG_DEBUG("Step 18: Preparing swapchain creation");
+    LOG_DEBUG("Step 19: Preparing swapchain creation");
     VkSwapchainCreateInfoKHR createInfo{
         .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
         .pNext = nullptr,
@@ -270,7 +282,7 @@ void VulkanSwapchainManager::initializeSwapchain(int width, int height) {
         .imageColorSpace = surfaceFormat.colorSpace,
         .imageExtent = swapchainExtent_,
         .imageArrayLayers = 1,
-        .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+        .imageUsage = static_cast<VkImageUsageFlags>(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | (capabilities.supportedUsageFlags & VK_IMAGE_USAGE_STORAGE_BIT ? VK_IMAGE_USAGE_STORAGE_BIT : 0)),
         .imageSharingMode = sharingMode,
         .queueFamilyIndexCount = static_cast<uint32_t>(queueFamilies.size()),
         .pQueueFamilyIndices = queueFamilies.data(),
@@ -287,9 +299,11 @@ void VulkanSwapchainManager::initializeSwapchain(int width, int height) {
               static_cast<uint32_t>(createInfo.preTransform), static_cast<uint32_t>(createInfo.compositeAlpha),
               static_cast<uint32_t>(createInfo.presentMode), createInfo.clipped);
 
-    LOG_DEBUG("Step 19: Creating swapchain");
+    LOG_DEBUG("Step 20: Creating swapchain");
     result = vkCreateSwapchainKHR(context_.device, &createInfo, nullptr, &swapchain_);
-    if (result != VK_SUCCESS) {
+    if (result == VK_SUBOPTIMAL_KHR) {
+        LOG_WARNING("Swapchain created but is suboptimal: VkResult=VK_SUBOPTIMAL_KHR, may impact performance");
+    } else if (result != VK_SUCCESS) {
         LOG_ERROR("Failed to create swapchain: VkResult={}, File: {}, Line: {}, Function: {}",
                   static_cast<int>(result), std::source_location::current().file_name(),
                   std::source_location::current().line(), std::source_location::current().function_name());
@@ -300,7 +314,7 @@ void VulkanSwapchainManager::initializeSwapchain(int width, int height) {
              swapchainExtent_.width, swapchainExtent_.height);
 
     // Retrieve swapchain images
-    LOG_DEBUG("Step 20: Querying swapchain image count");
+    LOG_DEBUG("Step 21: Querying swapchain image count");
     result = vkGetSwapchainImagesKHR(context_.device, swapchain_, &imageCount_, nullptr);
     if (result != VK_SUCCESS || imageCount_ == 0) {
         LOG_ERROR("Failed to get swapchain image count: VkResult={}, imageCount={}", static_cast<int>(result), imageCount_);
@@ -311,9 +325,9 @@ void VulkanSwapchainManager::initializeSwapchain(int width, int height) {
         throw std::runtime_error("Empty swapchain images - check surface/window readiness");
     }
     LOG_DEBUG("Queried swapchain image count: {}", imageCount_);
-    LOG_DEBUG("Step 21: Resizing swapchainImages_ to size={}", imageCount_);
+    LOG_DEBUG("Step 22: Resizing swapchainImages_ to size={}", imageCount_);
     swapchainImages_.resize(imageCount_);
-    LOG_DEBUG("Step 22: Retrieving swapchain images");
+    LOG_DEBUG("Step 23: Retrieving swapchain images");
     result = vkGetSwapchainImagesKHR(context_.device, swapchain_, &imageCount_, swapchainImages_.data());
     if (result != VK_SUCCESS) {
         LOG_ERROR("Failed to retrieve swapchain images: VkResult={}, File: {}, Line: {}, Function: {}",
@@ -333,11 +347,11 @@ void VulkanSwapchainManager::initializeSwapchain(int width, int height) {
     }
 
     // Create image views
-    LOG_DEBUG("Step 23: Resizing swapchainImageViews_ to size={}", imageCount_);
+    LOG_DEBUG("Step 24: Resizing swapchainImageViews_ to size={}", imageCount_);
     swapchainImageViews_.resize(imageCount_);
     LOG_DEBUG("Resized swapchainImageViews_ to size={}", swapchainImageViews_.size());
     for (uint32_t i = 0; i < imageCount_; ++i) {
-        LOG_DEBUG("Step 24.{}: Creating image view for swapchain image[{}] at {:p}", i + 1, i, static_cast<void*>(swapchainImages_[i]));
+        LOG_DEBUG("Step 25.{}: Creating image view for swapchain image[{}] at {:p}", i + 1, i, static_cast<void*>(swapchainImages_[i]));
         VkImageViewCreateInfo viewInfo{
             .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
             .pNext = nullptr,
@@ -364,13 +378,13 @@ void VulkanSwapchainManager::initializeSwapchain(int width, int height) {
     }
 
     // Set max frames
-    LOG_DEBUG("Step 25: Setting maxFramesInFlight_");
+    LOG_DEBUG("Step 26: Setting maxFramesInFlight_");
     maxFramesInFlight_ = std::min(MAX_FRAMES_IN_FLIGHT, imageCount_);
     LOG_INFO("Set maxFramesInFlight_ to {} (constrained by MAX_FRAMES_IN_FLIGHT={} and imageCount={})",
              maxFramesInFlight_, MAX_FRAMES_IN_FLIGHT, imageCount_);
 
     // Update context (only non-vector fields; vectors fetched via getters)
-    LOG_DEBUG("Step 26: Updating Vulkan context (non-vector fields only)");
+    LOG_DEBUG("Step 27: Updating Vulkan context (non-vector fields only)");
     context_.swapchain = swapchain_;
     context_.swapchainImageFormat = swapchainImageFormat_;
     context_.swapchainExtent = swapchainExtent_;
