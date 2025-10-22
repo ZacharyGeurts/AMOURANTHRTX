@@ -1,10 +1,5 @@
-// VulkanRenderer.hpp
+// In include/engine/Vulkan/VulkanRenderer.hpp
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts gzac5314@gmail.com is licensed under CC BY-NC 4.0
-// Vulkan renderer header.
-// Dependencies: Vulkan 1.3+, VulkanCore.hpp, VulkanRTX_Setup.hpp, logging.hpp.
-// Supported platforms: Linux, Windows.
-// Zachary Geurts 2025
-
 #pragma once
 #ifndef VULKAN_RENDERER_HPP
 #define VULKAN_RENDERER_HPP
@@ -30,6 +25,11 @@ struct UniformBufferObject; // Forward declaration
 class Camera; // Forward declaration
 
 namespace VulkanRTX {
+
+struct Vertex {
+    alignas(16) glm::vec3 pos;
+    alignas(8) glm::vec2 uv;
+};
 
 struct Frame {
     VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
@@ -57,7 +57,11 @@ public:
     void cleanup() noexcept;
 
     VkDevice getDevice() const { return context_.device; }
-    const VulkanRTX& getVulkanRTX() const { return *rtx_; } // Add access to VulkanRTX
+    const VulkanRTX& getVulkanRTX() const { return *rtx_; }
+
+    std::vector<glm::vec3> getVertices() const;
+    std::vector<Vertex> getFullVertices() const; // Added declaration
+    std::vector<uint32_t> getIndices() const;
 
 private:
     void createSwapchain(int width, int height);
@@ -71,8 +75,6 @@ private:
                                   VkAccelerationStructureKHR tlas);
     void denoiseImage(VkCommandBuffer cmdBuffer, VkImage inputImage, VkImageView inputImageView,
                       VkImage outputImage, VkImageView outputImageView);
-    std::vector<glm::vec3> getVertices() const;
-    std::vector<uint32_t> getIndices() const;
 
     int width_;
     int height_;
@@ -93,7 +95,7 @@ private:
     VkSampler envMapSampler_;
     VkDescriptorSetLayout computeDescriptorSetLayout_;
     Vulkan::Context context_;
-    std::unique_ptr<VulkanRTX> rtx_; // Manages ray-tracing resources
+    std::unique_ptr<VulkanRTX> rtx_;
     std::unique_ptr<VulkanSwapchainManager> swapchainManager_;
     std::unique_ptr<VulkanPipelineManager> pipelineManager_;
     std::unique_ptr<VulkanBufferManager> bufferManager_;

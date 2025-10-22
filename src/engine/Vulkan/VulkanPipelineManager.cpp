@@ -705,6 +705,11 @@ void VulkanPipelineManager::createComputePipeline() {
     vkDestroyShaderModule(context_.device, computeShaderModule, nullptr);
 }
 
+// Updated createShaderBindingTable function to fix SBT region layout
+// Handles are copied in region order: raygen (group 0), primary miss (group 1), shadow miss (group 3), hit group (group 2)
+// Miss region now spans 2 entries (primary at index 0, shadow at index 1)
+// Hit region at position 3
+
 void VulkanPipelineManager::createShaderBindingTable() {
     LOG_DEBUG_CAT("PipelineManager", "Creating shader binding table");
     VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProperties = {};
@@ -717,9 +722,12 @@ void VulkanPipelineManager::createShaderBindingTable() {
 
     const uint32_t handleSize = rtProperties.shaderGroupHandleSize;
     const uint32_t handleAlignment = rtProperties.shaderGroupHandleAlignment;
-    const uint32_t groupCount = 4; // Raygen, Miss, Closest Hit, Shadow Miss
+    const uint32_t raygenGroupCount = 1;
+    const uint32_t missGroupCount = 2; // Primary and shadow miss
+    const uint32_t hitGroupCount = 1;
+    const uint32_t callableGroupCount = 0;
     const uint32_t handleSizeAligned = (handleSize + handleAlignment - 1) & ~(handleAlignment - 1);
-    const VkDeviceSize sbtSize = handleSizeAligned * groupCount;
+    const VkDeviceSize sbtSize = (raygenGroupCount + missGroupCount + hitGroupCount + callableGroupCount) * static_cast<VkDeviceSize>(handleSizeAligned);
 
     VkBufferCreateInfo bufferInfo = {
         .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
@@ -783,8 +791,9 @@ void VulkanPipelineManager::createShaderBindingTable() {
 
     sbt_ = ShaderBindingTable(context_.device, sbtBuffer, sbtMemory, vkDestroyBuffer, vkFreeMemory);
 
-    std::vector<uint8_t> shaderGroupHandles(sbtSize);
-    if (vkGetRayTracingShaderGroupHandlesKHR(context_.device, rayTracingPipeline_->get(), 0, groupCount, sbtSize, shaderGroupHandles.data()) != VK_SUCCESS) {
+    // Get all handles (0: raygen, 1: primary miss, 2: hit, 3: shadow miss)
+    std::vector<uint8_t> shaderGroupHandles((raygenGroupCount + missGroupCount + hitGroupCount + callableGroupCount) * handleSize);
+    if (vkGetRayTracingShaderGroupHandlesKHR(context_.device, rayTracingPipeline_->get(), 0, raygenGroupCount + missGroupCount + hitGroupCount + callableGroupCount, shaderGroupHandles.size(), shaderGroupHandles.data()) != VK_SUCCESS) {
         LOG_ERROR_CAT("PipelineManager", "Failed to get shader group handles");
         throw std::runtime_error("Failed to get shader group handles");
     }
@@ -799,9 +808,22 @@ void VulkanPipelineManager::createShaderBindingTable() {
         throw std::runtime_error("Mapped SBT memory is null");
     }
 
-    for (uint32_t i = 0; i < groupCount; ++i) {
-        memcpy(static_cast<uint8_t*>(mappedData) + (i * handleSizeAligned), shaderGroupHandles.data() + (i * handleSize), handleSize);
-    }
+    uint64_t currentOffset = 0;
+    // Raygen region: group 0
+    memcpy(static_cast<uint8_t*>(mappedData) + currentOffset, shaderGroupHandles.data() + 0 * handleSize, handleSize);
+    currentOffset += handleSizeAligned;
+
+    // Miss region: primary miss (group 1), shadow miss (group 3)
+    memcpy(static_cast<uint8_t*>(mappedData) + currentOffset, shaderGroupHandles.data() + 1 * handleSize, handleSize);
+    currentOffset += handleSizeAligned;
+    memcpy(static_cast<uint8_t*>(mappedData) + currentOffset, shaderGroupHandles.data() + 3 * handleSize, handleSize);
+    currentOffset += handleSizeAligned;
+
+    // Hit region: hit group (group 2)
+    memcpy(static_cast<uint8_t*>(mappedData) + currentOffset, shaderGroupHandles.data() + 2 * handleSize, handleSize);
+    currentOffset += handleSizeAligned;
+
+    // Callable region: empty
     vkUnmapMemory(context_.device, sbtMemory);
 
     VkBufferDeviceAddressInfo bufferAddressInfo = {
@@ -817,13 +839,14 @@ void VulkanPipelineManager::createShaderBindingTable() {
     }
     VkDeviceAddress sbtAddress = vkGetBufferDeviceAddress(context_.device, &bufferAddressInfo);
 
+    // Update SBT regions (assuming ShaderBindingTableRegionKHR {deviceAddress, size, stride})
     sbt_.raygen = {sbtAddress, handleSizeAligned, handleSizeAligned};
-    sbt_.miss = {sbtAddress + handleSizeAligned, handleSizeAligned, handleSizeAligned};
-    sbt_.hit = {sbtAddress + 2 * handleSizeAligned, handleSizeAligned, handleSizeAligned};
-    sbt_.callable = {sbtAddress + 3 * handleSizeAligned, handleSizeAligned, handleSizeAligned};
+    sbt_.miss = {sbtAddress + 1ULL * handleSizeAligned, 2ULL * handleSizeAligned, handleSizeAligned};
+    sbt_.hit = {sbtAddress + 3ULL * handleSizeAligned, handleSizeAligned, handleSizeAligned};
+    sbt_.callable = {0, 0, 0}; // Empty
 
-    LOG_INFO_CAT("PipelineManager", "Created shader binding table with size: {}, raygen={:x}, miss={:x}, hit={:x}, callable={:x}",
-                 sbtSize, sbt_.raygen.deviceAddress, sbt_.miss.deviceAddress, sbt_.hit.deviceAddress, sbt_.callable.deviceAddress);
+    LOG_INFO_CAT("PipelineManager", "Created shader binding table with size: {}, raygen={:x}, miss={:x} (size {}), hit={:x}, callable={:x}",
+                 sbtSize, sbt_.raygen.deviceAddress, sbt_.miss.deviceAddress, sbt_.miss.size, sbt_.hit.deviceAddress, sbt_.callable.deviceAddress);
 }
 
 void VulkanPipelineManager::recordGraphicsCommands(VkCommandBuffer commandBuffer, VkFramebuffer framebuffer, VkDescriptorSet descriptorSet, uint32_t width, uint32_t height, VkImage denoiseImage) {

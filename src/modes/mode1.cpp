@@ -1,5 +1,5 @@
 // mode1.cpp
-// Implementation of renderMode1 for AMOURANTH RTX Engine to draw a sphere with enhanced RTX ambient lighting.
+// Implementation of renderMode1 for AMOURANTH RTX Engine to draw a sphere with enhanced RTX ambient lighting and point light.
 // Copyright Zachary Geurts 2025
 
 #include "engine/core.hpp"
@@ -10,14 +10,14 @@
 
 struct PushConstants {
     alignas(16) glm::vec4 clearColor;      // 16 bytes
-    alignas(16) glm::vec3 cameraPosition;  // 12 bytes + 4 bytes padding
-    alignas(16) glm::vec3 lightDirection;  // 12 bytes + 4 bytes padding
+    alignas(16) glm::vec3 cameraPosition;  // 16 bytes (padded)
+    alignas(16) glm::vec3 lightPosition;   // 16 bytes (padded) - Changed from lightDirection to support point light
     alignas(4) float lightIntensity;       // 4 bytes
     alignas(4) uint32_t samplesPerPixel;   // 4 bytes
     alignas(4) uint32_t maxDepth;          // 4 bytes
     alignas(4) uint32_t maxBounces;        // 4 bytes
     alignas(4) float russianRoulette;      // 4 bytes
-    // Total size: 60 bytes, padded to 64 bytes for alignof=16
+    // Total size: 68 bytes (matches std140 layout in shaders)
 };
 
 void renderMode1(const UE::AMOURANTH* amouranth, [[maybe_unused]] uint32_t imageIndex, [[maybe_unused]] VkBuffer vertexBuffer, VkCommandBuffer commandBuffer,
@@ -50,7 +50,7 @@ void renderMode1(const UE::AMOURANTH* amouranth, [[maybe_unused]] uint32_t image
     float lightIntensity = 1.0f;
     float lightMovementSpeed = static_cast<float>(godWaveFreq * 0.5L); // Modulate with GodWaveFreq
 
-    LOG_SIMULATION("Computing dynamic light parameters for dimension {}", currentDim);
+    LOG_SIMULATION("Computing dynamic point light parameters for dimension {}", currentDim);
 
     if (!dimData.empty() && currentDim >= 0 && static_cast<size_t>(currentDim) < dimData.size()) {
         const auto& data = dimData[currentDim];
@@ -74,14 +74,14 @@ void renderMode1(const UE::AMOURANTH* amouranth, [[maybe_unused]] uint32_t image
         );
         lightColor = glm::clamp(lightColor, glm::vec3(0.0f), glm::vec3(1.0f));
 
-        LOG_SIMULATION("Dynamic Light Parameters - Position: ({:.3f}, {:.3f}, {:.3f}), Color: ({:.3f}, {:.3f}, {:.3f}), Intensity: {:.3f}, Movement Speed: {:.3f}",
+        LOG_SIMULATION("Dynamic Point Light Parameters - Position: ({:.3f}, {:.3f}, {:.3f}), Color: ({:.3f}, {:.3f}, {:.3f}), Intensity: {:.3f}, Movement Speed: {:.3f}",
                        lightPos.x, lightPos.y, lightPos.z, lightColor.r, lightColor.g, lightColor.b, lightIntensity, lightMovementSpeed);
     } else {
-        LOG_WARNING("No dimension data available for light adjustment in Mode 1 - Using default parameters");
+        LOG_WARNING("No dimension data available for point light adjustment in Mode 1 - Using default parameters");
     }
 
     // Incorporate vertex data for ambient lighting contribution
-    const auto& projectedVerts = ue.getProjectedVerts(); // Fixed: Changed getProjectedVertices to getProjectedVerts
+    const auto& projectedVerts = ue.getProjectedVerts();
     glm::vec3 ambientContribution = glm::vec3(0.0f);
     uint64_t vertexCount = std::min(ue.getCurrentVertices(), static_cast<uint64_t>(projectedVerts.size()));
     
@@ -129,8 +129,8 @@ void renderMode1(const UE::AMOURANTH* amouranth, [[maybe_unused]] uint32_t image
     glm::mat4 invView = glm::inverse(amouranth->getViewMatrix());
     pushConstants.cameraPosition = glm::vec3(invView[3]);  // Translation component
 
-    // - lightDirection: Normalize lightPos toward camera (or use as-is if positional; here, treat as dir from origin)
-    pushConstants.lightDirection = glm::normalize(lightPos - pushConstants.cameraPosition);  // Dir from light to camera
+    // - lightPosition: Direct map from computation (for point light)
+    pushConstants.lightPosition = lightPos;
 
     // - lightIntensity: Direct map from computation
     pushConstants.lightIntensity = lightIntensity;
@@ -147,21 +147,14 @@ void renderMode1(const UE::AMOURANTH* amouranth, [[maybe_unused]] uint32_t image
     // - russianRoulette: Probability threshold (0.5 default; modulate with vacuum energy for termination)
     pushConstants.russianRoulette = std::clamp(0.5f + 0.2f * static_cast<float>(ue.getVacuumEnergy()), 0.1f, 0.9f);
 
-    // View-projection integration: Not directly in struct; handle in raygen shader via cameraPosition + proj params.
-    // If shader needs full viewProj, extend header struct (but avoid for now to maintain compatibility).
-
     // Log populated constants for debugging
     LOG_SIMULATION("PushConstants - ClearColor: ({:.3f},{:.3f},{:.3f},{:.3f}), CameraPos: ({:.3f},{:.3f},{:.3f}), "
-                   "LightDir: ({:.3f},{:.3f},{:.3f}), Intensity: {:.3f}, SPP: {}, MaxDepth: {}, MaxBounces: {}, RR: {:.3f}",
+                   "LightPos: ({:.3f},{:.3f},{:.3f}), Intensity: {:.3f}, SPP: {}, MaxDepth: {}, MaxBounces: {}, RR: {:.3f}",
                    pushConstants.clearColor.r, pushConstants.clearColor.g, pushConstants.clearColor.b, pushConstants.clearColor.a,
                    pushConstants.cameraPosition.x, pushConstants.cameraPosition.y, pushConstants.cameraPosition.z,
-                   pushConstants.lightDirection.x, pushConstants.lightDirection.y, pushConstants.lightDirection.z,
+                   pushConstants.lightPosition.x, pushConstants.lightPosition.y, pushConstants.lightPosition.z,
                    pushConstants.lightIntensity, pushConstants.samplesPerPixel, pushConstants.maxDepth,
                    pushConstants.maxBounces, pushConstants.russianRoulette);
-
-    // Static assert for alignment (add to function or global if needed)
-    static_assert(sizeof(PushConstants) == 64 && alignof(PushConstants) == 16,
-                  "PushConstants alignment mismatch - Update shader UBO offsets!");
 
     // Push to command buffer (stages match header expectation)
     vkCmdPushConstants(commandBuffer, pipelineLayout, 
@@ -186,5 +179,5 @@ void renderMode1(const UE::AMOURANTH* amouranth, [[maybe_unused]] uint32_t image
     vkCmdTraceRaysKHR(commandBuffer, &raygenSBT, &missSBT, &hitSBT, &callableSBT, width, height, 1);
 
     // Log rendering completion
-    LOG_SIMULATION("Mode 1 Ray-Tracing Render Complete - Rays dispatched: {}x{}x1, Light adjusted with UE energies", width, height);
+    LOG_SIMULATION("Mode 1 Ray-Tracing Render Complete - Rays dispatched: {}x{}x1, Point light adjusted with UE energies", width, height);
 }

@@ -13,7 +13,6 @@
 #include <iomanip>
 #include <span>
 #include <chrono>
-#include <span>
 
 namespace VulkanRTX {
 
@@ -37,7 +36,7 @@ VulkanRenderer::VulkanRenderer(int width, int height, void* window, const std::v
       envMapSampler_(VK_NULL_HANDLE),
       computeDescriptorSetLayout_(VK_NULL_HANDLE),
       context_() {
-        LOG_DEBUG("Constructing VulkanRenderer with width={}, height={}, window={:p}", width, height, window);
+    LOG_DEBUG("Constructing VulkanRenderer with width={}, height={}, window={:p}", width, height, window);
     if (width <= 0 || height <= 0 || window == nullptr) {
         LOG_ERROR("Invalid window parameters: width={}, height={}, window={:p}", width, height, window);
         throw std::invalid_argument("Invalid window parameters");
@@ -68,6 +67,23 @@ VulkanRenderer::VulkanRenderer(int width, int height, void* window, const std::v
     }
     context_.resourceManager.addCommandPool(context_.commandPool);
     LOG_INFO("Created command pool: {:p} and added to resource manager", static_cast<void*>(context_.commandPool));
+
+    // Create dedicated compute descriptor set layout before pipeline manager
+    VkDescriptorSetLayoutBinding computeBindings[] = {
+        {0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},
+        {1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr}
+    };
+    VkDescriptorSetLayoutCreateInfo computeLayoutInfo = {};
+    computeLayoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    computeLayoutInfo.pNext = nullptr;
+    computeLayoutInfo.bindingCount = 2;
+    computeLayoutInfo.pBindings = computeBindings;
+    if (vkCreateDescriptorSetLayout(context_.device, &computeLayoutInfo, nullptr, &computeDescriptorSetLayout_) != VK_SUCCESS) {
+        LOG_ERROR("Failed to create compute descriptor set layout");
+        throw std::runtime_error("Failed to create compute descriptor set layout");
+    }
+    context_.resourceManager.addDescriptorSetLayout(computeDescriptorSetLayout_);
+    LOG_DEBUG("Created compute descriptor set layout: {:p}", static_cast<void*>(computeDescriptorSetLayout_));
 
     swapchainManager_ = std::make_unique<VulkanSwapchainManager>(context_, context_.surface);
     swapchainManager_->initializeSwapchain(width_, height_);
@@ -100,27 +116,11 @@ VulkanRenderer::VulkanRenderer(int width, int height, void* window, const std::v
     LOG_DEBUG("Created ray-tracing, graphics, and compute pipelines; context_.rayTracingPipeline={:p}",
               static_cast<void*>(context_.rayTracingPipeline));
 
-    VkDescriptorSetLayoutBinding computeBindings[] = {
-        {0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},
-        {1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr}
-    };
-    VkDescriptorSetLayoutCreateInfo computeLayoutInfo = {};
-    computeLayoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    computeLayoutInfo.pNext = nullptr;
-    computeLayoutInfo.bindingCount = 2;
-    computeLayoutInfo.pBindings = computeBindings;
-    if (vkCreateDescriptorSetLayout(context_.device, &computeLayoutInfo, nullptr, &computeDescriptorSetLayout_) != VK_SUCCESS) {
-        LOG_ERROR("Failed to create compute descriptor set layout");
-        throw std::runtime_error("Failed to create compute descriptor set layout");
-    }
-    context_.resourceManager.addDescriptorSetLayout(computeDescriptorSetLayout_);
-    LOG_DEBUG("Created compute descriptor set layout: {:p}", static_cast<void*>(computeDescriptorSetLayout_));
-
     bufferManager_ = std::make_unique<VulkanBufferManager>(
-    	context_,
+        context_,
         std::span<const glm::vec3>(getVertices()),
         std::span<const uint32_t>(getIndices())
-	);
+    );
     LOG_DEBUG("Created VulkanBufferManager");
 
     bufferManager_->createUniformBuffers(MAX_FRAMES_IN_FLIGHT);
@@ -131,7 +131,7 @@ VulkanRenderer::VulkanRenderer(int width, int height, void* window, const std::v
         context_.uniformBufferMemories[i] = bufferManager_->getUniformBufferMemory(i);
         if (!context_.uniformBuffers[i] || !context_.uniformBufferMemories[i]) {
             LOG_ERROR("Failed to get uniform buffer[{}] or memory: buffer={:p}, memory={:p}",
-                                                i, static_cast<void*>(context_.uniformBuffers[i]), static_cast<void*>(context_.uniformBufferMemories[i]));
+                      i, static_cast<void*>(context_.uniformBuffers[i]), static_cast<void*>(context_.uniformBufferMemories[i]));
             throw std::runtime_error("Failed to get uniform buffer or memory");
         }
     }
@@ -151,15 +151,15 @@ VulkanRenderer::VulkanRenderer(int width, int height, void* window, const std::v
                                          context_.resourceManager);
     if (!context_.storageImage || !context_.storageImageMemory || !context_.storageImageView) {
         LOG_ERROR("Failed to create storage image: image={:p}, memory={:p}, view={:p}",
-                                            static_cast<void*>(context_.storageImage), static_cast<void*>(context_.storageImageMemory),
-                                            static_cast<void*>(context_.storageImageView));
+                  static_cast<void*>(context_.storageImage), static_cast<void*>(context_.storageImageMemory),
+                  static_cast<void*>(context_.storageImageView));
         throw std::runtime_error("Failed to create storage image");
     }
     LOG_DEBUG("Created storage image: image={:p}, memory={:p}, view={:p}",
-                                        static_cast<void*>(context_.storageImage), static_cast<void*>(context_.storageImageMemory),
-                                        static_cast<void*>(context_.storageImageView));
+              static_cast<void*>(context_.storageImage), static_cast<void*>(context_.storageImageMemory),
+              static_cast<void*>(context_.storageImageView));
 
-    // FIX: Initial transition for storageImage from UNDEFINED to GENERAL
+    // Initial transition for storageImage from UNDEFINED to GENERAL
     {
         VkCommandBuffer initCmd = VulkanInitializer::beginSingleTimeCommands(context_);
         VkImageMemoryBarrier initBarrier{};
@@ -181,15 +181,15 @@ VulkanRenderer::VulkanRenderer(int width, int height, void* window, const std::v
                                          context_.resourceManager);
     if (!denoiseImage_ || !denoiseImageMemory_ || !denoiseImageView_) {
         LOG_ERROR("Failed to create denoise image: image={:p}, memory={:p}, view={:p}",
-                                            static_cast<void*>(denoiseImage_), static_cast<void*>(denoiseImageMemory_),
-                                            static_cast<void*>(denoiseImageView_));
+                  static_cast<void*>(denoiseImage_), static_cast<void*>(denoiseImageMemory_),
+                  static_cast<void*>(denoiseImageView_));
         throw std::runtime_error("Failed to create denoise image");
     }
     LOG_DEBUG("Created denoise image: image={:p}, memory={:p}, view={:p}",
-                                        static_cast<void*>(denoiseImage_), static_cast<void*>(denoiseImageMemory_),
-                                        static_cast<void*>(denoiseImageView_));
+              static_cast<void*>(denoiseImage_), static_cast<void*>(denoiseImageMemory_),
+              static_cast<void*>(denoiseImageView_));
 
-    // FIX: Initial transition for denoiseImage from UNDEFINED to GENERAL
+    // Initial transition for denoiseImage from UNDEFINED to GENERAL
     {
         VkCommandBuffer initCmd = VulkanInitializer::beginSingleTimeCommands(context_);
         VkImageMemoryBarrier initBarrier{};
@@ -229,9 +229,9 @@ VulkanRenderer::VulkanRenderer(int width, int height, void* window, const std::v
 
     constexpr uint32_t MATERIAL_COUNT = 128;
     constexpr uint32_t DIMENSION_COUNT = 1;
-    [[maybe_unused]] VkDeviceSize materialBufferSize = sizeof(MaterialData) * MATERIAL_COUNT;
+    VkDeviceSize materialBufferSize = sizeof(MaterialData) * MATERIAL_COUNT;
     VkDeviceSize dimensionBufferSize = sizeof(UE::DimensionData) * DIMENSION_COUNT;
-    initializeAllBufferData(MAX_FRAMES_IN_FLIGHT, 0, dimensionBufferSize);
+    initializeAllBufferData(MAX_FRAMES_IN_FLIGHT, materialBufferSize, dimensionBufferSize);
     LOG_DEBUG("Initialized material and dimension buffers");
 
     createAccelerationStructures();
@@ -303,7 +303,7 @@ VulkanRenderer::VulkanRenderer(int width, int height, void* window, const std::v
         frames_[i].graphicsDescriptorSet = graphicsSets[i];
         frames_[i].computeDescriptorSet = computeSets[i];
         LOG_DEBUG("Allocated descriptor sets for frame {}: rayTracing={:p}, graphics={:p}, compute={:p}",
-                                            i, static_cast<void*>(rayTracingSets[i]), static_cast<void*>(graphicsSets[i]), static_cast<void*>(computeSets[i]));
+                  i, static_cast<void*>(rayTracingSets[i]), static_cast<void*>(graphicsSets[i]), static_cast<void*>(computeSets[i]));
     }
 
     for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
@@ -320,12 +320,9 @@ VulkanRenderer::~VulkanRenderer() {
 
 void VulkanRenderer::cleanup() noexcept {
     try {
-        // Destroy frame sync objects (add command buffer destruction if not managed elsewhere)
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
             auto& frame = frames_[i];
             if (frame.commandBuffer != VK_NULL_HANDLE) {
-                // Assuming command pool is managed by swapchainManager_; free via pool if needed
-                // vkFreeCommandBuffers(context_.device, commandPool, 1, &frame.commandBuffer);
                 frame.commandBuffer = VK_NULL_HANDLE;
             }
             if (frame.fence != VK_NULL_HANDLE) {
@@ -340,11 +337,9 @@ void VulkanRenderer::cleanup() noexcept {
                 vkDestroySemaphore(context_.device, frame.imageAvailableSemaphore, nullptr);
                 frame.imageAvailableSemaphore = VK_NULL_HANDLE;
             }
-            // Descriptor sets: assume managed by bufferManager_ or pipelineManager_
         }
         frames_.clear();
 
-        // Destroy material buffers (direct members, explicit cleanup)
         for (size_t i = 0; i < materialBuffers_.size(); ++i) {
             if (materialBuffers_[i] != VK_NULL_HANDLE) {
                 vkDestroyBuffer(context_.device, materialBuffers_[i], nullptr);
@@ -358,7 +353,6 @@ void VulkanRenderer::cleanup() noexcept {
         materialBuffers_.clear();
         materialBufferMemory_.clear();
 
-        // Destroy dimension buffers (direct members, explicit cleanup)
         for (size_t i = 0; i < dimensionBuffers_.size(); ++i) {
             if (dimensionBuffers_[i] != VK_NULL_HANDLE) {
                 vkDestroyBuffer(context_.device, dimensionBuffers_[i], nullptr);
@@ -372,7 +366,6 @@ void VulkanRenderer::cleanup() noexcept {
         dimensionBuffers_.clear();
         dimensionBufferMemory_.clear();
 
-        // Destroy denoise image resources
         if (denoiseSampler_ != VK_NULL_HANDLE) {
             vkDestroySampler(context_.device, denoiseSampler_, nullptr);
             denoiseSampler_ = VK_NULL_HANDLE;
@@ -390,7 +383,6 @@ void VulkanRenderer::cleanup() noexcept {
             denoiseImage_ = VK_NULL_HANDLE;
         }
 
-        // Destroy environment map resources
         if (envMapSampler_ != VK_NULL_HANDLE) {
             vkDestroySampler(context_.device, envMapSampler_, nullptr);
             envMapSampler_ = VK_NULL_HANDLE;
@@ -408,26 +400,20 @@ void VulkanRenderer::cleanup() noexcept {
             envMapImage_ = VK_NULL_HANDLE;
         }
 
-        // Destroy compute descriptor set layout (if not managed by pipelineManager_)
         if (computeDescriptorSetLayout_ != VK_NULL_HANDLE) {
             vkDestroyDescriptorSetLayout(context_.device, computeDescriptorSetLayout_, nullptr);
             computeDescriptorSetLayout_ = VK_NULL_HANDLE;
         }
 
-        // Trigger cleanup via destructors of managers (no explicit cleanup() method needed)
-        // Order: destroy dependent resources before managers
-        bufferManager_.reset();  // Dtor handles any remaining buffers/descriptor pools
-        pipelineManager_.reset();  // Dtor handles all pipelines, including rtPipeline and rtPipelineLayout
-        swapchainManager_.reset();  // Dtor handles swapchain, framebuffers, command pools, etc.
-        rtx_.reset();  // Dtor handles acceleration structures, etc.
+        bufferManager_.reset();
+        pipelineManager_.reset();
+        swapchainManager_.reset();
+        rtx_.reset();
 
-        // Reset raw handles to null to prevent any potential double destruction in ~VulkanRenderer
         rtPipeline_ = VK_NULL_HANDLE;
         rtPipelineLayout_ = VK_NULL_HANDLE;
-
-        // Context cleanup (device, instance, etc.) should be handled by VulkanCore or higher level
     } catch (...) {
-        // noexcept, so swallow exceptions; log if needed
+        // noexcept, so swallow exceptions
     }
 }
 
@@ -445,8 +431,8 @@ void VulkanRenderer::createSwapchain(int width, int height) {
     context_.swapchainImages = swapchainManager_->getSwapchainImages();
     context_.swapchainImageViews = swapchainManager_->getSwapchainImageViews();
     LOG_DEBUG("Swapchain created: extent={}x{}, imageCount={}, viewCount={}",
-                                        context_.swapchainExtent.width, context_.swapchainExtent.height,
-                                        context_.swapchainImages.size(), context_.swapchainImageViews.size());
+              context_.swapchainExtent.width, context_.swapchainExtent.height,
+              context_.swapchainImages.size(), context_.swapchainImageViews.size());
     if (context_.swapchainImageViews.empty()) {
         LOG_ERROR("Swapchain image views are empty after creation");
         throw std::runtime_error("Failed to create swapchain image views");
@@ -546,11 +532,11 @@ void VulkanRenderer::createEnvironmentMap() {
                                    stagingBuffer, stagingMemory, nullptr, context_.resourceManager);
     if (!stagingBuffer || !stagingMemory) {
         LOG_ERROR("Failed to create staging buffer for environment map: buffer={:p}, memory={:p}",
-                                            static_cast<void*>(stagingBuffer), static_cast<void*>(stagingMemory));
+                  static_cast<void*>(stagingBuffer), static_cast<void*>(stagingMemory));
         throw std::runtime_error("Failed to create staging buffer for environment map");
     }
     LOG_DEBUG("Created staging buffer for environment map: buffer={:p}, memory={:p}",
-                                        static_cast<void*>(stagingBuffer), static_cast<void*>(stagingMemory));
+              static_cast<void*>(stagingBuffer), static_cast<void*>(stagingMemory));
 
     void* data;
     if (vkMapMemory(context_.device, stagingMemory, 0, envMapData.size(), 0, &data) != VK_SUCCESS) {
@@ -665,7 +651,7 @@ void VulkanRenderer::createEnvironmentMap() {
     LOG_DEBUG("Cleaned up staging buffer and memory for environment map");
 }
 
-void VulkanRenderer::initializeAllBufferData(uint32_t maxFrames, VkDeviceSize /*uniformBufferSize*/, VkDeviceSize dimensionBufferSize) {
+void VulkanRenderer::initializeAllBufferData(uint32_t maxFrames, VkDeviceSize materialBufferSize, VkDeviceSize dimensionBufferSize) {
     LOG_DEBUG("Initializing all buffer data for {} frames", maxFrames);
     if (maxFrames != MAX_FRAMES_IN_FLIGHT) {
         LOG_ERROR("Mismatch in maxFrames: {} (expected: {})", maxFrames, MAX_FRAMES_IN_FLIGHT);
@@ -676,8 +662,6 @@ void VulkanRenderer::initializeAllBufferData(uint32_t maxFrames, VkDeviceSize /*
     dimensionBuffers_.resize(maxFrames);
     dimensionBufferMemory_.resize(maxFrames);
 
-    constexpr uint32_t MATERIAL_COUNT = 128;
-    VkDeviceSize materialBufferSize = sizeof(MaterialData) * MATERIAL_COUNT;
     VkMemoryAllocateFlagsInfo allocFlagsInfo = {};
     allocFlagsInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO;
     allocFlagsInfo.pNext = nullptr;
@@ -690,11 +674,11 @@ void VulkanRenderer::initializeAllBufferData(uint32_t maxFrames, VkDeviceSize /*
                                        materialBuffers_[i], materialBufferMemory_[i], &allocFlagsInfo, context_.resourceManager);
         if (!materialBuffers_[i] || !materialBufferMemory_[i]) {
             LOG_ERROR("Failed to create material buffer[{}]: buffer={:p}, memory={:p}",
-                                                i, static_cast<void*>(materialBuffers_[i]), static_cast<void*>(materialBufferMemory_[i]));
+                      i, static_cast<void*>(materialBuffers_[i]), static_cast<void*>(materialBufferMemory_[i]));
             throw std::runtime_error("Failed to create material buffer");
         }
         LOG_DEBUG("Created material buffer[{}]: buffer={:p}, memory={:p}",
-                                            i, static_cast<void*>(materialBuffers_[i]), static_cast<void*>(materialBufferMemory_[i]));
+                  i, static_cast<void*>(materialBuffers_[i]), static_cast<void*>(materialBufferMemory_[i]));
 
         VulkanInitializer::createBuffer(context_.device, context_.physicalDevice, dimensionBufferSize,
                                        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
@@ -702,11 +686,11 @@ void VulkanRenderer::initializeAllBufferData(uint32_t maxFrames, VkDeviceSize /*
                                        dimensionBuffers_[i], dimensionBufferMemory_[i], &allocFlagsInfo, context_.resourceManager);
         if (!dimensionBuffers_[i] || !dimensionBufferMemory_[i]) {
             LOG_ERROR("Failed to create dimension buffer[{}]: buffer={:p}, memory={:p}",
-                                                i, static_cast<void*>(dimensionBuffers_[i]), static_cast<void*>(dimensionBufferMemory_[i]));
+                      i, static_cast<void*>(dimensionBuffers_[i]), static_cast<void*>(dimensionBufferMemory_[i]));
             throw std::runtime_error("Failed to create dimension buffer");
         }
         LOG_DEBUG("Created dimension buffer[{}]: buffer={:p}, memory={:p}",
-                                            i, static_cast<void*>(dimensionBuffers_[i]), static_cast<void*>(dimensionBufferMemory_[i]));
+                  i, static_cast<void*>(dimensionBuffers_[i]), static_cast<void*>(dimensionBufferMemory_[i]));
 
         initializeBufferData(i, materialBufferSize, dimensionBufferSize);
     }
@@ -738,7 +722,7 @@ void VulkanRenderer::initializeBufferData(uint32_t frameIndex, VkDeviceSize mate
     VkDeviceSize requiredDimensionSize = sizeof(UE::DimensionData) * DIMENSION_COUNT;
     if (materialSize < requiredMaterialSize || dimensionSize < requiredDimensionSize) {
         LOG_ERROR("Insufficient buffer sizes: materialSize={} (required={}), dimensionSize={} (required={})",
-                                            materialSize, requiredMaterialSize, dimensionSize, requiredDimensionSize);
+                  materialSize, requiredMaterialSize, dimensionSize, requiredDimensionSize);
         throw std::runtime_error("Insufficient buffer sizes for material or dimension data");
     }
 
@@ -746,14 +730,14 @@ void VulkanRenderer::initializeBufferData(uint32_t frameIndex, VkDeviceSize mate
     vkGetBufferMemoryRequirements(context_.device, materialBuffers_[frameIndex], &materialMemReq);
     if (materialMemReq.size < requiredMaterialSize) {
         LOG_ERROR("Material buffer[{}] size {} too small for {} materials (required: {})",
-                                            frameIndex, materialMemReq.size, MATERIAL_COUNT, requiredMaterialSize);
+                  frameIndex, materialMemReq.size, MATERIAL_COUNT, requiredMaterialSize);
         throw std::runtime_error("Material buffer size too small");
     }
     VkMemoryRequirements dimensionMemReq;
     vkGetBufferMemoryRequirements(context_.device, dimensionBuffers_[frameIndex], &dimensionMemReq);
     if (dimensionMemReq.size < requiredDimensionSize) {
         LOG_ERROR("Dimension buffer[{}] size {} too small for {} dimensions (required: {})",
-                                            frameIndex, dimensionMemReq.size, DIMENSION_COUNT, requiredDimensionSize);
+                  frameIndex, dimensionMemReq.size, DIMENSION_COUNT, requiredDimensionSize);
         throw std::runtime_error("Dimension buffer size too small");
     }
 
@@ -779,11 +763,11 @@ void VulkanRenderer::initializeBufferData(uint32_t frameIndex, VkDeviceSize mate
                                    materialStagingBuffer, materialStagingBufferMemory, nullptr, context_.resourceManager);
     if (!materialStagingBuffer || !materialStagingBufferMemory) {
         LOG_ERROR("Failed to create material staging buffer or memory: buffer={:p}, memory={:p}",
-                                            static_cast<void*>(materialStagingBuffer), static_cast<void*>(materialStagingBufferMemory));
+                  static_cast<void*>(materialStagingBuffer), static_cast<void*>(materialStagingBufferMemory));
         throw std::runtime_error("Failed to create material staging buffer");
     }
     LOG_DEBUG("Created material staging buffer: buffer={:p}, memory={:p}",
-                                        static_cast<void*>(materialStagingBuffer), static_cast<void*>(materialStagingBufferMemory));
+              static_cast<void*>(materialStagingBuffer), static_cast<void*>(materialStagingBufferMemory));
 
     void* data;
     if (vkMapMemory(context_.device, materialStagingBufferMemory, 0, requiredMaterialSize, 0, &data) != VK_SUCCESS) {
@@ -827,11 +811,11 @@ void VulkanRenderer::initializeBufferData(uint32_t frameIndex, VkDeviceSize mate
                                    dimensionStagingBuffer, dimensionStagingBufferMemory, nullptr, context_.resourceManager);
     if (!dimensionStagingBuffer || !dimensionStagingBufferMemory) {
         LOG_ERROR("Failed to create dimension staging buffer or memory: buffer={:p}, memory={:p}",
-                                            static_cast<void*>(dimensionStagingBuffer), static_cast<void*>(dimensionStagingBufferMemory));
+                  static_cast<void*>(dimensionStagingBuffer), static_cast<void*>(dimensionStagingBufferMemory));
         throw std::runtime_error("Failed to create dimension staging buffer");
     }
     LOG_DEBUG("Created dimension staging buffer: buffer={:p}, memory={:p}",
-                                        static_cast<void*>(dimensionStagingBuffer), static_cast<void*>(dimensionStagingBufferMemory));
+              static_cast<void*>(dimensionStagingBuffer), static_cast<void*>(dimensionStagingBufferMemory));
 
     if (vkMapMemory(context_.device, dimensionStagingBufferMemory, 0, requiredDimensionSize, 0, &data) != VK_SUCCESS) {
         LOG_ERROR("Failed to map dimension staging buffer memory");
@@ -852,7 +836,7 @@ void VulkanRenderer::initializeBufferData(uint32_t frameIndex, VkDeviceSize mate
     LOG_DEBUG("Cleaned up dimension staging buffer and memory");
 
     LOG_INFO("Initialized material buffer ({} materials, size={}) and dimension buffer ({} dimensions, size={}) for frame {}",
-                                       MATERIAL_COUNT, materialSize, DIMENSION_COUNT, dimensionSize, frameIndex);
+             MATERIAL_COUNT, materialSize, DIMENSION_COUNT, dimensionSize, frameIndex);
 }
 
 void VulkanRenderer::updateDescriptorSetForFrame(uint32_t frameIndex, VkAccelerationStructureKHR tlas) {
@@ -994,7 +978,7 @@ void VulkanRenderer::updateGraphicsDescriptorSet(uint32_t frameIndex) {
     }
     if (!denoiseImageView_ || !denoiseSampler_) {
         LOG_ERROR("Invalid denoise resources: imageView={:p}, sampler={:p}",
-                                            static_cast<void*>(denoiseImageView_), static_cast<void*>(denoiseSampler_));
+                  static_cast<void*>(denoiseImageView_), static_cast<void*>(denoiseSampler_));
         return;
     }
 
@@ -1032,7 +1016,7 @@ void VulkanRenderer::updateComputeDescriptorSet(uint32_t frameIndex) {
     }
     if (!context_.storageImageView || !denoiseImageView_) {
         LOG_ERROR("Invalid image views: storageImageView={:p}, denoiseImageView={:p}",
-                                            static_cast<void*>(context_.storageImageView), static_cast<void*>(denoiseImageView_));
+                  static_cast<void*>(context_.storageImageView), static_cast<void*>(denoiseImageView_));
         return;
     }
 
@@ -1111,12 +1095,11 @@ void VulkanRenderer::renderFrame(const Camera& camera) {
     LOG_DEBUG("Rendering frame {}", currentFrame_);
     if (!context_.device || frames_.empty() || currentFrame_ >= frames_.size()) {
         LOG_ERROR("Invalid state: device={:p}, frames.size={}, currentFrame={}",
-                                            static_cast<void*>(context_.device), frames_.size(), currentFrame_);
+                  static_cast<void*>(context_.device), frames_.size(), currentFrame_);
         throw std::runtime_error("Invalid render state");
     }
 
-    // FIX: Add detailed error handling for vkWaitForFences
-    (void)vkWaitForFences(context_.device, 1, &frames_[currentFrame_].fence, VK_TRUE, UINT64_MAX);
+    vkWaitForFences(context_.device, 1, &frames_[currentFrame_].fence, VK_TRUE, UINT64_MAX);
     vkResetFences(context_.device, 1, &frames_[currentFrame_].fence);
 
     uint32_t imageIndex;
@@ -1161,12 +1144,12 @@ void VulkanRenderer::renderFrame(const Camera& camera) {
     MaterialData::PushConstants pushConstants = {
         .clearColor = glm::vec4(0.0f, 0.0f, 0.0f, 1.0f),
         .cameraPosition = camera.getPosition(),
-        .lightDirection = glm::normalize(glm::vec3(1.0f, -1.0f, -1.0f)),
-        .lightIntensity = 1.0f,
+        .lightDirection = glm::vec3(2.0f, 2.0f, 2.0f),
+        .lightIntensity = 5.0f,
         .samplesPerPixel = 1u,
         .maxDepth = 5u,
         .maxBounces = 3u,
-        .russianRoulette = 0.0f
+        .russianRoulette = 0.8f
     };
 
     VkCommandBufferBeginInfo beginInfo = {};
@@ -1195,7 +1178,7 @@ void VulkanRenderer::renderFrame(const Camera& camera) {
     graphicsBarrier.image = denoiseImage_;
     graphicsBarrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
     LOG_DEBUG("Barrier for denoiseImage {:p}: oldLayout=GENERAL, newLayout=SHADER_READ_ONLY_OPTIMAL",
-                                        static_cast<void*>(denoiseImage_));
+              static_cast<void*>(denoiseImage_));
     vkCmdPipelineBarrier(frames_[currentFrame_].commandBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
                          0, 0, nullptr, 0, nullptr, 1, &graphicsBarrier);
 
@@ -1206,18 +1189,18 @@ void VulkanRenderer::renderFrame(const Camera& camera) {
     renderPassInfo.framebuffer = context_.framebuffers[imageIndex];
     renderPassInfo.renderArea.offset = {0, 0};
     renderPassInfo.renderArea.extent = context_.swapchainExtent;
-    VkClearValue clearColor = {{{0.0f, 0.0f, 0.0f, 1.0f}}};
+    VkClearValue clearColor = {{{0.2f, 0.2f, 0.3f, 1.0f}}};
     renderPassInfo.clearValueCount = 1;
     renderPassInfo.pClearValues = &clearColor;
     if (!renderPassInfo.renderPass || !renderPassInfo.framebuffer) {
         LOG_ERROR("Invalid render pass or framebuffer: renderPass={:p}, framebuffer={:p}",
-                                            static_cast<void*>(renderPassInfo.renderPass), static_cast<void*>(renderPassInfo.framebuffer));
+                  static_cast<void*>(renderPassInfo.renderPass), static_cast<void*>(renderPassInfo.framebuffer));
         throw std::runtime_error("Invalid render pass or framebuffer");
     }
     LOG_DEBUG("Render pass: {:p}, framebuffer[{}]: {:p}, extent: {}x{}",
-                                        static_cast<void*>(renderPassInfo.renderPass), imageIndex,
-                                        static_cast<void*>(renderPassInfo.framebuffer),
-                                        context_.swapchainExtent.width, context_.swapchainExtent.height);
+              static_cast<void*>(renderPassInfo.renderPass), imageIndex,
+              static_cast<void*>(renderPassInfo.framebuffer),
+              context_.swapchainExtent.width, context_.swapchainExtent.height);
     vkCmdBeginRenderPass(frames_[currentFrame_].commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
 
     VkViewport viewport = {};
@@ -1228,34 +1211,39 @@ void VulkanRenderer::renderFrame(const Camera& camera) {
     viewport.minDepth = 0.0f;
     viewport.maxDepth = 1.0f;
     LOG_DEBUG("Viewport: x={}, y={}, width={}, height={}, minDepth={}, maxDepth={}",
-                                        viewport.x, viewport.y, viewport.width, viewport.height, viewport.minDepth, viewport.maxDepth);
+              viewport.x, viewport.y, viewport.width, viewport.height, viewport.minDepth, viewport.maxDepth);
     vkCmdSetViewport(frames_[currentFrame_].commandBuffer, 0, 1, &viewport);
 
     VkRect2D scissor = {};
     scissor.offset = {0, 0};
     scissor.extent = context_.swapchainExtent;
     LOG_DEBUG("Scissor: offset=({},{}), extent={}x{}",
-                                        scissor.offset.x, scissor.offset.y, scissor.extent.width, scissor.extent.height);
+              scissor.offset.x, scissor.offset.y, scissor.extent.width, scissor.extent.height);
     vkCmdSetScissor(frames_[currentFrame_].commandBuffer, 0, 1, &scissor);
 
     VkPipeline graphicsPipeline = pipelineManager_->getGraphicsPipeline();
     VkPipelineLayout graphicsPipelineLayout = pipelineManager_->getGraphicsPipelineLayout();
     if (!graphicsPipeline || !graphicsPipelineLayout) {
         LOG_ERROR("Invalid graphics pipeline state: pipeline={:p}, layout={:p}",
-                                            static_cast<void*>(graphicsPipeline), static_cast<void*>(graphicsPipelineLayout));
+                  static_cast<void*>(graphicsPipeline), static_cast<void*>(graphicsPipelineLayout));
         throw std::runtime_error("Invalid graphics pipeline state");
     }
     LOG_DEBUG("Binding graphics pipeline: {:p}, layout: {:p}",
-                                        static_cast<void*>(graphicsPipeline), static_cast<void*>(graphicsPipelineLayout));
+              static_cast<void*>(graphicsPipeline), static_cast<void*>(graphicsPipelineLayout));
     vkCmdBindPipeline(frames_[currentFrame_].commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
     if (frames_[currentFrame_].graphicsDescriptorSet == VK_NULL_HANDLE) {
         LOG_ERROR("Null graphics descriptor set for frame {}", currentFrame_);
         throw std::runtime_error("Null graphics descriptor set");
     }
     LOG_DEBUG("Binding graphics descriptor set: {:p} for frame {}", 
-                                        static_cast<void*>(frames_[currentFrame_].graphicsDescriptorSet), currentFrame_);
+              static_cast<void*>(frames_[currentFrame_].graphicsDescriptorSet), currentFrame_);
     vkCmdBindDescriptorSets(frames_[currentFrame_].commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
                             graphicsPipelineLayout, 0, 1, &frames_[currentFrame_].graphicsDescriptorSet, 0, nullptr);
+
+    vkCmdPushConstants(frames_[currentFrame_].commandBuffer, graphicsPipelineLayout,
+                       VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                       0, sizeof(MaterialData::PushConstants), &pushConstants);
+    LOG_DEBUG("Pushed constants for graphics pipeline");
 
     VkBuffer vertexBuffer = bufferManager_->getVertexBuffer();
     VkDeviceSize offsets[] = {0};
@@ -1265,11 +1253,10 @@ void VulkanRenderer::renderFrame(const Camera& camera) {
     LOG_DEBUG("Issued draw command for 3 vertices");
     vkCmdEndRenderPass(frames_[currentFrame_].commandBuffer);
 
-    // FIX: Transition denoiseImage back to GENERAL for next frame's compute stage
     VkImageMemoryBarrier postGraphicsBarrier = {};
     postGraphicsBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
     postGraphicsBarrier.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
-    postGraphicsBarrier.dstAccessMask = VK_ACCESS_NONE; // Prepare for next frame's compute write
+    postGraphicsBarrier.dstAccessMask = VK_ACCESS_NONE;
     postGraphicsBarrier.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     postGraphicsBarrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
     postGraphicsBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
@@ -1277,7 +1264,7 @@ void VulkanRenderer::renderFrame(const Camera& camera) {
     postGraphicsBarrier.image = denoiseImage_;
     postGraphicsBarrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
     LOG_DEBUG("Post-graphics barrier for denoiseImage {:p}: oldLayout=SHADER_READ_ONLY_OPTIMAL, newLayout=GENERAL",
-                                        static_cast<void*>(denoiseImage_));
+              static_cast<void*>(denoiseImage_));
     vkCmdPipelineBarrier(frames_[currentFrame_].commandBuffer, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
                          0, 0, nullptr, 0, nullptr, 1, &postGraphicsBarrier);
 
@@ -1300,10 +1287,13 @@ void VulkanRenderer::renderFrame(const Camera& camera) {
     submitInfo.signalSemaphoreCount = 1;
     submitInfo.pSignalSemaphores = signalSemaphores;
     LOG_DEBUG("Submitting queue with imageSemaphore={:p}, renderSemaphore={:p}, commandBuffer={:p}",
-                                        static_cast<void*>(frames_[currentFrame_].imageAvailableSemaphore),
-                                        static_cast<void*>(frames_[currentFrame_].renderFinishedSemaphore),
-                                        static_cast<void*>(frames_[currentFrame_].commandBuffer));
-    (void)vkQueueSubmit(context_.graphicsQueue, 1, &submitInfo, frames_[currentFrame_].fence);
+              static_cast<void*>(frames_[currentFrame_].imageAvailableSemaphore),
+              static_cast<void*>(frames_[currentFrame_].renderFinishedSemaphore),
+              static_cast<void*>(frames_[currentFrame_].commandBuffer));
+    if (vkQueueSubmit(context_.graphicsQueue, 1, &submitInfo, frames_[currentFrame_].fence) != VK_SUCCESS) {
+        LOG_ERROR("Failed to submit queue");
+        throw std::runtime_error("Failed to submit queue");
+    }
 
     VkPresentInfoKHR presentInfo = {};
     presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
@@ -1346,17 +1336,16 @@ void VulkanRenderer::recordRayTracingCommands(VkCommandBuffer commandBuffer, VkE
     LOG_DEBUG("Recording ray tracing commands");
     if (!commandBuffer || !outputImage || !outputImageView || !tlas || !rtPipeline_ || !rtPipelineLayout_) {
         LOG_ERROR("Invalid parameters: cmd={:p}, outputImage={:p}, outputView={:p}, tlas={:p}, pipeline={:p}, layout={:p}",
-                                            static_cast<void*>(commandBuffer), static_cast<void*>(outputImage),
-                                            static_cast<void*>(outputImageView), static_cast<void*>(tlas),
-                                            static_cast<void*>(rtPipeline_), static_cast<void*>(rtPipelineLayout_));
+                  static_cast<void*>(commandBuffer), static_cast<void*>(outputImage),
+                  static_cast<void*>(outputImageView), static_cast<void*>(tlas),
+                  static_cast<void*>(rtPipeline_), static_cast<void*>(rtPipelineLayout_));
         throw std::runtime_error("Invalid ray tracing parameters");
     }
 
-    // Barrier for outputImage (already in GENERAL from constructor or previous pass)
     VkImageMemoryBarrier outputBarrier = {
         .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
         .pNext = nullptr,
-        .srcAccessMask = VK_ACCESS_NONE, // No prior access after fence wait
+        .srcAccessMask = VK_ACCESS_NONE,
         .dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
         .oldLayout = VK_IMAGE_LAYOUT_GENERAL,
         .newLayout = VK_IMAGE_LAYOUT_GENERAL,
@@ -1366,7 +1355,7 @@ void VulkanRenderer::recordRayTracingCommands(VkCommandBuffer commandBuffer, VkE
         .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}
     };
     LOG_DEBUG("Barrier for outputImage {:p}: oldLayout=GENERAL, newLayout=GENERAL",
-                                        static_cast<void*>(outputImage));
+              static_cast<void*>(outputImage));
     vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
                          0, 0, nullptr, 0, nullptr, 1, &outputBarrier);
 
@@ -1376,13 +1365,13 @@ void VulkanRenderer::recordRayTracingCommands(VkCommandBuffer commandBuffer, VkE
         throw std::runtime_error("Invalid shader binding table");
     }
     LOG_DEBUG("Using shader binding table: raygen={:x}, miss={:x}, hit={:x}, callable={:x}",
-                                        sbt.raygen.deviceAddress, sbt.miss.deviceAddress,
-                                        sbt.hit.deviceAddress, sbt.callable.deviceAddress);
+              sbt.raygen.deviceAddress, sbt.miss.deviceAddress,
+              sbt.hit.deviceAddress, sbt.callable.deviceAddress);
 
     vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, rtPipeline_);
     LOG_DEBUG("Bound pipeline {:p} and descriptor set {:p} for ray tracing",
-                                        static_cast<void*>(rtPipeline_),
-                                        static_cast<void*>(frames_[currentFrame_].rayTracingDescriptorSet));
+              static_cast<void*>(rtPipeline_),
+              static_cast<void*>(frames_[currentFrame_].rayTracingDescriptorSet));
     vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
                             rtPipelineLayout_, 0, 1, &frames_[currentFrame_].rayTracingDescriptorSet, 0, nullptr);
     vkCmdPushConstants(commandBuffer, rtPipelineLayout_, VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR,
@@ -1405,14 +1394,12 @@ void VulkanRenderer::denoiseImage(VkCommandBuffer commandBuffer, VkImage inputIm
     LOG_DEBUG("Recording denoise image commands");
     if (!commandBuffer || !inputImage || !inputImageView || !outputImage || !outputImageView) {
         LOG_ERROR("Invalid parameters: cmd={:p}, inputImage={:p}, inputView={:p}, outputImage={:p}, outputView={:p}",
-                                            static_cast<void*>(commandBuffer), static_cast<void*>(inputImage),
-                                            static_cast<void*>(inputImageView), static_cast<void*>(outputImage),
-                                            static_cast<void*>(outputImageView));
+                  static_cast<void*>(commandBuffer), static_cast<void*>(inputImage),
+                  static_cast<void*>(inputImageView), static_cast<void*>(outputImage),
+                  static_cast<void*>(outputImageView));
         throw std::runtime_error("Invalid denoise parameters");
     }
 
-    // FIX: Separate barriers for input/output to avoid access/stage mismatches
-    // Input: RT write -> Compute read
     VkImageMemoryBarrier inputBarrier = {
         .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
         .pNext = nullptr,
@@ -1429,11 +1416,10 @@ void VulkanRenderer::denoiseImage(VkCommandBuffer commandBuffer, VkImage inputIm
                          VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &inputBarrier);
     LOG_DEBUG("Input barrier: storageImage RT write -> Compute read");
 
-    // Output: No prior intra-frame access -> Compute write (fence ensures previous frame complete)
     VkImageMemoryBarrier outputBarrier = {
         .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
         .pNext = nullptr,
-        .srcAccessMask = 0,  // Overwrite; no dependency needed
+        .srcAccessMask = 0,
         .dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
         .oldLayout = VK_IMAGE_LAYOUT_GENERAL,
         .newLayout = VK_IMAGE_LAYOUT_GENERAL,
@@ -1450,35 +1436,31 @@ void VulkanRenderer::denoiseImage(VkCommandBuffer commandBuffer, VkImage inputIm
     VkPipelineLayout computePipelineLayout = pipelineManager_->getComputePipelineLayout();
     if (!computePipeline || !computePipelineLayout || !frames_[currentFrame_].computeDescriptorSet) {
         LOG_ERROR("Invalid compute pipeline state: pipeline={:p}, layout={:p}, descriptorSet={:p}",
-                                            static_cast<void*>(computePipeline), static_cast<void*>(computePipelineLayout),
-                                            static_cast<void*>(frames_[currentFrame_].computeDescriptorSet));
+                  static_cast<void*>(computePipeline), static_cast<void*>(computePipelineLayout),
+                  static_cast<void*>(frames_[currentFrame_].computeDescriptorSet));
         throw std::runtime_error("Invalid compute pipeline state");
     }
 
-    // FIX: Remove redundant descriptor update - already set in updateComputeDescriptorSet
-    // If dynamic views needed, call updateComputeDescriptorSet(currentFrame_) here instead
-
     vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline);
     LOG_DEBUG("Using compute pipeline: {:p}, layout: {:p}, descriptorSet: {:p}",
-                                        static_cast<void*>(computePipeline), static_cast<void*>(computePipelineLayout),
-                                        static_cast<void*>(frames_[currentFrame_].computeDescriptorSet));
+              static_cast<void*>(computePipeline), static_cast<void*>(computePipelineLayout),
+              static_cast<void*>(frames_[currentFrame_].computeDescriptorSet));
     vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, computePipelineLayout,
                             0, 1, &frames_[currentFrame_].computeDescriptorSet, 0, nullptr);
 
     MaterialData::PushConstants pushConstants = {
         .clearColor = glm::vec4(0.0f, 0.0f, 0.0f, 1.0f),
         .cameraPosition = glm::vec3(0.0f, 0.0f, 0.0f),
-        .lightDirection = glm::normalize(glm::vec3(1.0f, -1.0f, -1.0f)),
-        .lightIntensity = 1.0f,
+        .lightDirection = glm::vec3(2.0f, 2.0f, 2.0f),
+        .lightIntensity = 5.0f,
         .samplesPerPixel = 1u,
         .maxDepth = 5u,
         .maxBounces = 3u,
-        .russianRoulette = 0.0f
+        .russianRoulette = 0.8f
     };
     vkCmdPushConstants(commandBuffer, computePipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT,
                        0, sizeof(MaterialData::PushConstants), &pushConstants);
 
-    // FIX: Use context_.swapchainExtent instead of undeclared extent
     uint32_t groupCountX = (context_.swapchainExtent.width + 15) / 16;
     uint32_t groupCountY = (context_.swapchainExtent.height + 15) / 16;
     vkCmdDispatch(commandBuffer, groupCountX, groupCountY, 1);
@@ -1505,7 +1487,7 @@ void VulkanRenderer::createFramebuffers() {
         framebufferInfo.layers = 1;
         if (!framebufferInfo.renderPass || !attachments[0]) {
             LOG_ERROR("Invalid framebuffer parameters: renderPass={:p}, attachment={:p}",
-                                                static_cast<void*>(framebufferInfo.renderPass), static_cast<void*>(attachments[0]));
+                      static_cast<void*>(framebufferInfo.renderPass), static_cast<void*>(attachments[0]));
             throw std::runtime_error("Invalid framebuffer parameters");
         }
         if (vkCreateFramebuffer(context_.device, &framebufferInfo, nullptr, &context_.framebuffers[i]) != VK_SUCCESS) {
@@ -1567,7 +1549,7 @@ void VulkanRenderer::createCommandBuffers() {
     for (size_t i = 0; i < frames_.size(); ++i) {
         frames_[i].commandBuffer = context_.commandBuffers[i % context_.commandBuffers.size()];
         LOG_DEBUG("Assigned command buffer[{}] to frame {}: {:p}", i % context_.commandBuffers.size(), i,
-                                            static_cast<void*>(frames_[i].commandBuffer));
+                  static_cast<void*>(frames_[i].commandBuffer));
     }
     LOG_INFO("Allocated {} command buffers", context_.commandBuffers.size());
 }
@@ -1595,9 +1577,9 @@ void VulkanRenderer::createSyncObjects() {
         frames_[i].renderFinishedSemaphore = context_.renderFinishedSemaphores[i];
         frames_[i].fence = context_.inFlightFences[i];
         LOG_DEBUG("Created sync objects for frame {}: fence={:p}, imageSemaphore={:p}, renderSemaphore={:p}",
-                                            i, static_cast<void*>(context_.inFlightFences[i]),
-                                            static_cast<void*>(context_.imageAvailableSemaphores[i]),
-                                            static_cast<void*>(context_.renderFinishedSemaphores[i]));
+                  i, static_cast<void*>(context_.inFlightFences[i]),
+                  static_cast<void*>(context_.imageAvailableSemaphores[i]),
+                  static_cast<void*>(context_.renderFinishedSemaphores[i]));
     }
     LOG_INFO("Created sync objects for {} frames", MAX_FRAMES_IN_FLIGHT);
 }
@@ -1619,8 +1601,8 @@ void VulkanRenderer::handleResize(int width, int height) {
     context_.swapchainImages = swapchainManager_->getSwapchainImages();
     context_.swapchainImageViews = swapchainManager_->getSwapchainImageViews();
     LOG_DEBUG("Swapchain resized: extent={}x{}, imageCount={}, viewCount={}",
-                                        context_.swapchainExtent.width, context_.swapchainExtent.height,
-                                        context_.swapchainImages.size(), context_.swapchainImageViews.size());
+              context_.swapchainExtent.width, context_.swapchainExtent.height,
+              context_.swapchainImages.size(), context_.swapchainImageViews.size());
     if (context_.swapchainImageViews.empty()) {
         LOG_ERROR("Swapchain image views are empty after resize");
         throw std::runtime_error("Failed to create swapchain image views after resize");
@@ -1662,13 +1644,13 @@ void VulkanRenderer::handleResize(int width, int height) {
                                          context_.resourceManager);
     if (!context_.storageImage || !context_.storageImageMemory || !context_.storageImageView) {
         LOG_ERROR("Failed to recreate storage image: image={:p}, memory={:p}, view={:p}",
-                                            static_cast<void*>(context_.storageImage), static_cast<void*>(context_.storageImageMemory),
-                                            static_cast<void*>(context_.storageImageView));
+                  static_cast<void*>(context_.storageImage), static_cast<void*>(context_.storageImageMemory),
+                  static_cast<void*>(context_.storageImageView));
         throw std::runtime_error("Failed to recreate storage image");
     }
     LOG_DEBUG("Recreated storage image: image={:p}, memory={:p}, view={:p}",
-                                        static_cast<void*>(context_.storageImage), static_cast<void*>(context_.storageImageMemory),
-                                        static_cast<void*>(context_.storageImageView));
+              static_cast<void*>(context_.storageImage), static_cast<void*>(context_.storageImageMemory),
+              static_cast<void*>(context_.storageImageView));
 
     if (denoiseImage_) {
         context_.resourceManager.removeImage(denoiseImage_);
@@ -1698,13 +1680,13 @@ void VulkanRenderer::handleResize(int width, int height) {
                                          context_.resourceManager);
     if (!denoiseImage_ || !denoiseImageMemory_ || !denoiseImageView_) {
         LOG_ERROR("Failed to recreate denoise image: image={:p}, memory={:p}, view={:p}",
-                                            static_cast<void*>(denoiseImage_), static_cast<void*>(denoiseImageMemory_),
-                                            static_cast<void*>(denoiseImageView_));
+                  static_cast<void*>(denoiseImage_), static_cast<void*>(denoiseImageMemory_),
+                  static_cast<void*>(denoiseImageView_));
         throw std::runtime_error("Failed to recreate denoise image");
     }
     LOG_DEBUG("Recreated denoise image: image={:p}, memory={:p}, view={:p}",
-                                        static_cast<void*>(denoiseImage_), static_cast<void*>(denoiseImageMemory_),
-                                        static_cast<void*>(denoiseImageView_));
+              static_cast<void*>(denoiseImage_), static_cast<void*>(denoiseImageMemory_),
+              static_cast<void*>(denoiseImageView_));
 
     VkSamplerCreateInfo denoiseSamplerInfo = {};
     denoiseSamplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
@@ -1789,21 +1771,13 @@ void VulkanRenderer::handleResize(int width, int height) {
     VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProps = {};
     rtProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR;
     rtProps.pNext = nullptr;
-    rtProps.shaderGroupHandleSize = 0;
-    rtProps.maxRayRecursionDepth = 0;
-    rtProps.maxShaderGroupStride = 0;
-    rtProps.shaderGroupBaseAlignment = 0;
-    rtProps.shaderGroupHandleCaptureReplaySize = 0;
-    rtProps.maxRayDispatchInvocationCount = 0;
-    rtProps.shaderGroupHandleAlignment = 0;
-    rtProps.maxRayHitAttributeSize = 0;
     props2.pNext = &rtProps;
     vkGetPhysicalDeviceProperties2(context_.physicalDevice, &props2);
     VkDeviceSize minStorageBufferOffsetAlignment = props2.properties.limits.minStorageBufferOffsetAlignment;
     materialBufferSize = (materialBufferSize + minStorageBufferOffsetAlignment - 1) & ~(minStorageBufferOffsetAlignment - 1);
     dimensionBufferSize = (dimensionBufferSize + minStorageBufferOffsetAlignment - 1) & ~(minStorageBufferOffsetAlignment - 1);
     LOG_DEBUG("Buffer sizes for resize: materialBufferSize={} ({} materials), dimensionBufferSize={}, alignment={}",
-                                        materialBufferSize, MATERIAL_COUNT, dimensionBufferSize, minStorageBufferOffsetAlignment);
+              materialBufferSize, MATERIAL_COUNT, dimensionBufferSize, minStorageBufferOffsetAlignment);
 
     materialBuffers_.resize(MAX_FRAMES_IN_FLIGHT);
     materialBufferMemory_.resize(MAX_FRAMES_IN_FLIGHT);
@@ -1821,9 +1795,6 @@ void VulkanRenderer::handleResize(int width, int height) {
     allocFlagsInfo.pNext = nullptr;
     allocFlagsInfo.flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT;
 
-    VkDeviceSize uniformBufferSize = sizeof(UE::UniformBufferObject);
-    uniformBufferSize = (uniformBufferSize + minStorageBufferOffsetAlignment - 1) & ~(minStorageBufferOffsetAlignment - 1);
-
     for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
         VulkanInitializer::createBuffer(context_.device, context_.physicalDevice, materialBufferSize,
                                        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
@@ -1831,11 +1802,11 @@ void VulkanRenderer::handleResize(int width, int height) {
                                        materialBuffers_[i], materialBufferMemory_[i], &allocFlagsInfo, context_.resourceManager);
         if (!materialBuffers_[i] || !materialBufferMemory_[i]) {
             LOG_ERROR("Failed to recreate material buffer[{}]: buffer={:p}, memory={:p}",
-                                                i, static_cast<void*>(materialBuffers_[i]), static_cast<void*>(materialBufferMemory_[i]));
+                      i, static_cast<void*>(materialBuffers_[i]), static_cast<void*>(materialBufferMemory_[i]));
             throw std::runtime_error("Failed to recreate material buffer");
         }
         LOG_DEBUG("Recreated material buffer[{}]: buffer={:p}, memory={:p}",
-                                            i, static_cast<void*>(materialBuffers_[i]), static_cast<void*>(materialBufferMemory_[i]));
+                  i, static_cast<void*>(materialBuffers_[i]), static_cast<void*>(materialBufferMemory_[i]));
 
         VulkanInitializer::createBuffer(context_.device, context_.physicalDevice, dimensionBufferSize,
                                        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
@@ -1843,11 +1814,11 @@ void VulkanRenderer::handleResize(int width, int height) {
                                        dimensionBuffers_[i], dimensionBufferMemory_[i], &allocFlagsInfo, context_.resourceManager);
         if (!dimensionBuffers_[i] || !dimensionBufferMemory_[i]) {
             LOG_ERROR("Failed to recreate dimension buffer[{}]: buffer={:p}, memory={:p}",
-                                                i, static_cast<void*>(dimensionBuffers_[i]), static_cast<void*>(dimensionBufferMemory_[i]));
+                      i, static_cast<void*>(dimensionBuffers_[i]), static_cast<void*>(dimensionBufferMemory_[i]));
             throw std::runtime_error("Failed to recreate dimension buffer");
         }
         LOG_DEBUG("Recreated dimension buffer[{}]: buffer={:p}, memory={:p}",
-                                            i, static_cast<void*>(dimensionBuffers_[i]), static_cast<void*>(dimensionBufferMemory_[i]));
+                  i, static_cast<void*>(dimensionBuffers_[i]), static_cast<void*>(dimensionBufferMemory_[i]));
 
         initializeBufferData(i, materialBufferSize, dimensionBufferSize);
         LOG_DEBUG("Initialized buffer data for frame {}", i);
@@ -1948,7 +1919,7 @@ void VulkanRenderer::handleResize(int width, int height) {
             updateComputeDescriptorSet(i);
         }
         LOG_DEBUG("Reallocated descriptor sets for frame {}: rayTracing={:p}, graphics={:p}, compute={:p}",
-                                            i, static_cast<void*>(rayTracingSets[i]), static_cast<void*>(graphicsSets[i]), static_cast<void*>(computeSets[i]));
+                  i, static_cast<void*>(rayTracingSets[i]), static_cast<void*>(graphicsSets[i]), static_cast<void*>(computeSets[i]));
     }
 
     Dispose::freeCommandBuffers(context_.device, context_.commandPool, context_.commandBuffers);
@@ -1996,12 +1967,20 @@ void VulkanRenderer::createAccelerationStructures() {
 }
 
 std::vector<glm::vec3> VulkanRenderer::getVertices() const {
-    LOG_DEBUG("Retrieving vertices");
-    // FIX: Return glm::vec3 vertices for full-screen triangle in NDC
+    LOG_DEBUG("Retrieving vertices (position only)");
     return {
         glm::vec3(-1.0f, -1.0f, 0.0f), // Bottom-left
-        glm::vec3( 3.0f, -1.0f, 0.0f), // Bottom-right (extends for coverage)
+        glm::vec3( 3.0f, -1.0f, 0.0f), // Bottom-right
         glm::vec3(-1.0f,  3.0f, 0.0f)  // Top-left
+    };
+}
+
+std::vector<Vertex> VulkanRenderer::getFullVertices() const {
+    LOG_DEBUG("Retrieving full vertices with UVs");
+    return {
+        Vertex{glm::vec3(-1.0f, -1.0f, 0.0f), glm::vec2(0.0f, 1.0f)}, // Bottom-left
+        Vertex{glm::vec3( 3.0f, -1.0f, 0.0f), glm::vec2(2.0f, 1.0f)}, // Bottom-right
+        Vertex{glm::vec3(-1.0f,  3.0f, 0.0f), glm::vec2(0.0f, -1.0f)} // Top-left
     };
 }
 
