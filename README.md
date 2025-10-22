@@ -2,7 +2,11 @@ AMOURANTH RTX © 2025 by Zachary Geurts gzac5314@gmail.com is licensed under [CC
 [AMOURANTH RTX Video](https://x.com/i/status/1980885384893722784)  
 
 This is a good lunch break program other than the license restricting commercial work.  
-Have a look. I promise to get libraries in the future.    
+Have a look. I promise to get libraries in the future.  
+```
+chmod +x linux.sh
+./linux.sh clean
+```
 
 **NURBS**  
 Results are used with Non-uniform rational basis splines, a mathematical model that is representing curves and surfaces.  
