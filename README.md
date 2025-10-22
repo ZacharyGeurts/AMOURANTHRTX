@@ -15,7 +15,7 @@ We have months of experience of driving Grok through traffic cones and expect to
 if you want to sell something it will not be over 3% sales and not over transfer fees.  
 - **Why AMOURANTH?** They said they were hiring so I figured I would try to bring in a customer.  
 I would be taking a 1% to their 2% as far as distribution ratio.  
-If they do not like my stealing their brand, they can come to Michigan and stream firing me.
+If they do not like my stealing their brand, they can come to Michigan and stream the firing.  
 https://www.twitch.tv/AMOURANTH
 ```
 git clone https://github.com/ZacharyGeurts/AMOURANTHRTX
