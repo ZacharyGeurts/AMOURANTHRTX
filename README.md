@@ -43,11 +43,7 @@ Commercial distribution is percentage based accountable upon release.
 ![gif](https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/media/gif.gif)  
 
 ## Overview
-The **Dimensional Navigator** is a computational visualization tool built in **C++** using **SDL3**, **Vulkan**, and **GLM**. It visual displays the outputs of the **UniversalEquation** class, which models dimensional interactions across dimensions. The visualization displays symmetric positive and negative energy fluctuations influenced by matter and energy, featuring real-time interactivity.  
-
-The **UniversalEquation** class models a universe with multiple dimensions, each affecting the system’s total energy. Parameters such as **influence**, **weak force**, **collapse**, and the strengths of **NURB matter** and **NURB energy** can be configured. The class tracks the current dimension and allows cycling through dimensions. For each dimension, it calculates energetic contributions from observable effects, potential, NURB matter, and NURB energy, considering interactions between nearby dimensions, influenced by distance, permeation, and densities of NURB matter and NURB energy.  
-
-The **compute()** method aggregates influences, NURB matter, NURB energy, and a collapse effect tied to the current dimension, providing a breakdown of observable energy, potential energy, NURB matter, and NURB energy. Parameters can be adjusted to explore alternative physical or metaphysical scenarios. Debugging output is available for detailed computation tracing.  
+The **Dimensional Navigator** is a computational visualization tool built in **C++** using **SDL3**, **Vulkan**, and **GLM**.
 
 This class transforms the philosophical idea that “as big as God is small—infinite” into a mathematical playground for exploring the interplay of scales and forces.  
 
