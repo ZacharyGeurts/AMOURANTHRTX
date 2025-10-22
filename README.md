@@ -7,8 +7,7 @@ Non-uniform rational basis spline is a mathematical model that is representing c
 
 # Universal Equation  🇺🇸  VS  🇷🇺  VS  🇸🇬  VS  🇨🇳  VS 🇬🇧  VS  🇫🇷  VS  🇲🇽 VS 🇰🇷  VS  🇫🇮  VS  🇯🇵  VS  🇨🇦  VS  🏴󠁧󠁢󠁳󠁣󠁴󠁿  VS  🇦🇺  ...  
 **Never condone violence, incorrectness, nor the new Oxford comma.**  
-https://x.com/i/grok?conversation=1970860339336999387  
-https://x.com/i/status/1970892773109776716  
+
 Welcome friends. God Bless.  
 My take? There there is no bottom, side or top to existence.  
 Climb inside the blanket and have a look around.  
