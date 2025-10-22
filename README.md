@@ -10,6 +10,7 @@ This is a good lunch break program other than the license restricting commercial
 Have a look. I promise to get libraries in the future.  
 ```
 git clone https://github.com/ZacharyGeurts/AMOURANTHRTX
+cd AMOURANTHRTX
 chmod +x linux.sh
 ./linux.sh clean
 ```
