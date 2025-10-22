@@ -1,9 +1,10 @@
 AMOURANTH RTX © 2025 by Zachary Geurts gzac5314@gmail.com is licensed under [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0)
 [AMOURANTH RTX Video](https://x.com/i/status/1980885384893722784)  
+
 Substitute **dark** with **NURB**  
 Non-uniform rational basis spline is a mathematical model that is representing curves and surfaces.  
 Layman's summation: GodWave increases.  
-<img width="409" height="216" alt="Screenshot from 2025-10-22 02-48-10" src="https://github.com/user-attachments/assets/a0f80dfc-12d2-4bcc-9df1-1d01a8e0e48e" />  
+<img width="409" height="216" alt="Screenshot from 2025-10-22 02-48-10" src="https://github.com/user-attachments/assets/a0f80dfc-12d2-4bcc-9df1-1d01a8e0e48e" />![uel](https://github.com/user-attachments/assets/31bc27e6-6ae7-417e-b331-e2e5bdb307dc)  
 
 # Universal Equation  🇺🇸  VS  🇷🇺  VS  🇸🇬  VS  🇨🇳  VS 🇬🇧  VS  🇫🇷  VS  🇲🇽 VS 🇰🇷  VS  🇫🇮  VS  🇯🇵  VS  🇨🇦  VS  🏴󠁧󠁢󠁳󠁣󠁴󠁿  VS  🇦🇺  ...  
 **Never condone violence, incorrectness, nor the new Oxford comma.**  
@@ -14,7 +15,7 @@ Climb inside the blanket and have a look around.
 
 I think this proves the number 1 is real and 0 is not real.  
 Grab the latest release if only interested in the Universal Equation.  
-It is a glorified calculator and you can set it to experimental theory.  
+It is a Glorified calculator and you can set it to experimental theory.  
 
 Contributions are welcome!  
 Please submit pull requests or open issues on the repository.  
