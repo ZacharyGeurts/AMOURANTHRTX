@@ -1,5 +1,6 @@
 AMOURANTH RTX © 2025 by Zachary Geurts gzac5314@gmail.com is licensed under [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0)  
 Unreal developers may consider some of this parody.  
+Windows toolchain currently under development.  
 
 [AMOURANTH RTX Video](https://x.com/i/status/1980885384893722784)  
 
