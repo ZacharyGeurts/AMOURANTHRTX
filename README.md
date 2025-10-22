@@ -5,7 +5,7 @@ Non-uniform rational basis spline is a mathematical model that is representing c
 
 <img width="4096" height="2160" alt="Screenshot from 2025-10-22 02-48-10" src="https://github.com/user-attachments/assets/a0f80dfc-12d2-4bcc-9df1-1d01a8e0e48e" />  
 
-# Dimensional Navigator  🇺🇸  VS  🇷🇺  VS  🇸🇬  VS  🇨🇳  VS 🇬🇧  VS  🇫🇷  VS  🇲🇽 VS 🇰🇷  VS  🇫🇮  VS  🇯🇵  VS  🇨🇦  VS  🏴󠁧󠁢󠁳󠁣󠁴󠁿  VS  🇦🇺  ...  
+# Universal Equation  🇺🇸  VS  🇷🇺  VS  🇸🇬  VS  🇨🇳  VS 🇬🇧  VS  🇫🇷  VS  🇲🇽 VS 🇰🇷  VS  🇫🇮  VS  🇯🇵  VS  🇨🇦  VS  🏴󠁧󠁢󠁳󠁣󠁴󠁿  VS  🇦🇺  ...  
 **Never condone violence, incorrectness, nor the new Oxford comma.**  
 https://x.com/i/grok?conversation=1970860339336999387  
 https://x.com/i/status/1970892773109776716  
