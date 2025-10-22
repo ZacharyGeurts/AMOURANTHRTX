@@ -13,6 +13,10 @@
 #include <iomanip>
 #include <span>
 #include <chrono>
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
+#define TINYOBJLOADER_IMPLEMENTATION
+#include "tiny_obj_loader.h"
 
 namespace VulkanRTX {
 
@@ -412,8 +416,8 @@ void VulkanRenderer::cleanup() noexcept {
 
         rtPipeline_ = VK_NULL_HANDLE;
         rtPipelineLayout_ = VK_NULL_HANDLE;
-    } catch (...) {
-        // noexcept, so swallow exceptions
+    } catch (const std::exception& e) {
+        LOG_ERROR("Exception in cleanup: {}", e.what());
     }
 }
 
@@ -441,11 +445,22 @@ void VulkanRenderer::createSwapchain(int width, int height) {
 
 void VulkanRenderer::createEnvironmentMap() {
     LOG_DEBUG("Creating high-res environment map (4096x2048, 12 mips)");
+    int width, height, channels;
+    stbi_set_flip_vertically_on_load(true);
+    float* pixels = stbi_loadf("assets/textures/envmap.hdr", &width, &height, &channels, 4);
+    if (!pixels || width != 4096 || height != 2048) {
+        LOG_ERROR("Failed to load environment map: width={}, height={}, channels={}", width, height, channels);
+        throw std::runtime_error("Failed to load environment map");
+    }
+    std::vector<float> envMapData(pixels, pixels + (width * height * 4));
+    stbi_image_free(pixels);
+    LOG_DEBUG("Loaded HDR environment map: {}x{}", width, height);
+
     VkImageCreateInfo imageInfo = {};
     imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     imageInfo.pNext = nullptr;
     imageInfo.imageType = VK_IMAGE_TYPE_2D;
-    imageInfo.format = VK_FORMAT_R8G8B8A8_SRGB;
+    imageInfo.format = VK_FORMAT_R32G32B32A32_SFLOAT; // HDR format
     imageInfo.extent = {4096, 2048, 1};
     imageInfo.mipLevels = 12;
     imageInfo.arrayLayers = 1;
@@ -485,7 +500,7 @@ void VulkanRenderer::createEnvironmentMap() {
     viewInfo.pNext = nullptr;
     viewInfo.image = envMapImage_;
     viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    viewInfo.format = VK_FORMAT_R8G8B8A8_SRGB;
+    viewInfo.format = VK_FORMAT_R32G32B32A32_SFLOAT;
     viewInfo.components = {VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY};
     viewInfo.subresourceRange = {
         .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
@@ -524,10 +539,10 @@ void VulkanRenderer::createEnvironmentMap() {
     }
     LOG_DEBUG("Created environment map sampler: {:p}, anisotropyEnable=true", static_cast<void*>(envMapSampler_));
 
-    std::vector<uint8_t> envMapData(4096 * 2048 * 4, 255);
     VkBuffer stagingBuffer = VK_NULL_HANDLE;
     VkDeviceMemory stagingMemory = VK_NULL_HANDLE;
-    VulkanInitializer::createBuffer(context_.device, context_.physicalDevice, envMapData.size(),
+    VkDeviceSize bufferSize = envMapData.size() * sizeof(float);
+    VulkanInitializer::createBuffer(context_.device, context_.physicalDevice, bufferSize,
                                    VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
                                    stagingBuffer, stagingMemory, nullptr, context_.resourceManager);
     if (!stagingBuffer || !stagingMemory) {
@@ -539,11 +554,11 @@ void VulkanRenderer::createEnvironmentMap() {
               static_cast<void*>(stagingBuffer), static_cast<void*>(stagingMemory));
 
     void* data;
-    if (vkMapMemory(context_.device, stagingMemory, 0, envMapData.size(), 0, &data) != VK_SUCCESS) {
+    if (vkMapMemory(context_.device, stagingMemory, 0, bufferSize, 0, &data) != VK_SUCCESS) {
         LOG_ERROR("Failed to map staging buffer memory for environment map");
         throw std::runtime_error("Failed to map staging buffer memory");
     }
-    memcpy(data, envMapData.data(), envMapData.size());
+    memcpy(data, envMapData.data(), bufferSize);
     vkUnmapMemory(context_.device, stagingMemory);
     LOG_DEBUG("Mapped and copied environment map data to staging buffer");
 
@@ -657,6 +672,16 @@ void VulkanRenderer::initializeAllBufferData(uint32_t maxFrames, VkDeviceSize ma
         LOG_ERROR("Mismatch in maxFrames: {} (expected: {})", maxFrames, MAX_FRAMES_IN_FLIGHT);
         throw std::runtime_error("Invalid maxFrames value");
     }
+    VkPhysicalDeviceProperties2 props2 = {};
+    props2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+    props2.pNext = nullptr;
+    vkGetPhysicalDeviceProperties2(context_.physicalDevice, &props2);
+    VkDeviceSize minAlignment = props2.properties.limits.minStorageBufferOffsetAlignment;
+    materialBufferSize = (materialBufferSize + minAlignment - 1) & ~(minAlignment - 1);
+    dimensionBufferSize = (dimensionBufferSize + minAlignment - 1) & ~(minAlignment - 1);
+    LOG_DEBUG("Aligned buffer sizes: materialBufferSize={}, dimensionBufferSize={}, alignment={}",
+              materialBufferSize, dimensionBufferSize, minAlignment);
+
     materialBuffers_.resize(maxFrames);
     materialBufferMemory_.resize(maxFrames);
     dimensionBuffers_.resize(maxFrames);
@@ -1009,7 +1034,7 @@ void VulkanRenderer::updateComputeDescriptorSet(uint32_t frameIndex) {
         LOG_ERROR("Invalid frame index for compute update: {}", frameIndex);
         return;
     }
-    VkDescriptorSet descSet = frames_[frameIndex].computeDescriptorSet;
+    VkDescriptorSet descSet = frames_[currentFrame_].computeDescriptorSet;
     if (descSet == VK_NULL_HANDLE) {
         LOG_ERROR("Null compute descriptor set for frame {}", frameIndex);
         return;
@@ -1203,24 +1228,6 @@ void VulkanRenderer::renderFrame(const Camera& camera) {
               context_.swapchainExtent.width, context_.swapchainExtent.height);
     vkCmdBeginRenderPass(frames_[currentFrame_].commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
 
-    VkViewport viewport = {};
-    viewport.x = 0.0f;
-    viewport.y = 0.0f;
-    viewport.width = static_cast<float>(context_.swapchainExtent.width);
-    viewport.height = static_cast<float>(context_.swapchainExtent.height);
-    viewport.minDepth = 0.0f;
-    viewport.maxDepth = 1.0f;
-    LOG_DEBUG("Viewport: x={}, y={}, width={}, height={}, minDepth={}, maxDepth={}",
-              viewport.x, viewport.y, viewport.width, viewport.height, viewport.minDepth, viewport.maxDepth);
-    vkCmdSetViewport(frames_[currentFrame_].commandBuffer, 0, 1, &viewport);
-
-    VkRect2D scissor = {};
-    scissor.offset = {0, 0};
-    scissor.extent = context_.swapchainExtent;
-    LOG_DEBUG("Scissor: offset=({},{}), extent={}x{}",
-              scissor.offset.x, scissor.offset.y, scissor.extent.width, scissor.extent.height);
-    vkCmdSetScissor(frames_[currentFrame_].commandBuffer, 0, 1, &scissor);
-
     VkPipeline graphicsPipeline = pipelineManager_->getGraphicsPipeline();
     VkPipelineLayout graphicsPipelineLayout = pipelineManager_->getGraphicsPipelineLayout();
     if (!graphicsPipeline || !graphicsPipelineLayout) {
@@ -1249,8 +1256,11 @@ void VulkanRenderer::renderFrame(const Camera& camera) {
     VkDeviceSize offsets[] = {0};
     LOG_DEBUG("Binding vertex buffer: {:p}", static_cast<void*>(vertexBuffer));
     vkCmdBindVertexBuffers(frames_[currentFrame_].commandBuffer, 0, 1, &vertexBuffer, offsets);
-    vkCmdDraw(frames_[currentFrame_].commandBuffer, 3, 1, 0, 0);
-    LOG_DEBUG("Issued draw command for 3 vertices");
+    VkBuffer indexBuffer = bufferManager_->getIndexBuffer();
+    vkCmdBindIndexBuffer(frames_[currentFrame_].commandBuffer, indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+    uint32_t indexCount = static_cast<uint32_t>(getIndices().size());
+    vkCmdDrawIndexed(frames_[currentFrame_].commandBuffer, indexCount, 1, 0, 0, 0);
+    LOG_DEBUG("Issued indexed draw command for {} indices", indexCount);
     vkCmdEndRenderPass(frames_[currentFrame_].commandBuffer);
 
     VkImageMemoryBarrier postGraphicsBarrier = {};
@@ -1318,7 +1328,7 @@ void VulkanRenderer::renderFrame(const Camera& camera) {
         framesSinceLastLog_++;
         auto now = std::chrono::steady_clock::now();
         auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - lastLogTime_).count();
-        if (elapsed >= 10) {
+        if (elapsed >= 1) { // Reduced to 1-second interval for smoother monitoring
             double fps = static_cast<double>(framesSinceLastLog_) / static_cast<double>(elapsed);
             LOG_WARNING_CAT("FPS", "Total frame count: {}, Average FPS over {} seconds: {:.2f}", frameCount_, elapsed, fps);
             lastLogTime_ = now;
@@ -1361,7 +1371,8 @@ void VulkanRenderer::recordRayTracingCommands(VkCommandBuffer commandBuffer, VkE
 
     const ShaderBindingTable& sbt = pipelineManager_->getShaderBindingTable();
     if (sbt.raygen.deviceAddress == 0 || sbt.miss.deviceAddress == 0 || sbt.hit.deviceAddress == 0) {
-        LOG_ERROR("Invalid shader binding table: raygen, miss, or hit addresses are zero");
+        LOG_ERROR("Invalid shader binding table: raygen={:x}, miss={:x}, hit={:x}",
+                  sbt.raygen.deviceAddress, sbt.miss.deviceAddress, sbt.hit.deviceAddress);
         throw std::runtime_error("Invalid shader binding table");
     }
     LOG_DEBUG("Using shader binding table: raygen={:x}, miss={:x}, hit={:x}, callable={:x}",
@@ -1374,13 +1385,15 @@ void VulkanRenderer::recordRayTracingCommands(VkCommandBuffer commandBuffer, VkE
               static_cast<void*>(frames_[currentFrame_].rayTracingDescriptorSet));
     vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
                             rtPipelineLayout_, 0, 1, &frames_[currentFrame_].rayTracingDescriptorSet, 0, nullptr);
-    vkCmdPushConstants(commandBuffer, rtPipelineLayout_, VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR,
+    vkCmdPushConstants(commandBuffer, rtPipelineLayout_, 
+                       VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR,
                        0, sizeof(MaterialData::PushConstants), &pushConstants);
 
+    // Fix for vkCmdTraceRaysKHR: Use vkGetDeviceProcAddr instead of vkGetInstanceProcAddr
     auto vkCmdTraceRaysKHR = reinterpret_cast<PFN_vkCmdTraceRaysKHR>(
-        vkGetInstanceProcAddr(context_.instance, "vkCmdTraceRaysKHR"));
+        vkGetDeviceProcAddr(context_.device, "vkCmdTraceRaysKHR"));
     if (!vkCmdTraceRaysKHR) {
-        LOG_ERROR("vkCmdTraceRaysKHR function pointer is null");
+        LOG_ERROR("Failed to load vkCmdTraceRaysKHR function pointer");
         throw std::runtime_error("vkCmdTraceRaysKHR not loaded");
     }
 
@@ -1461,8 +1474,23 @@ void VulkanRenderer::denoiseImage(VkCommandBuffer commandBuffer, VkImage inputIm
     vkCmdPushConstants(commandBuffer, computePipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT,
                        0, sizeof(MaterialData::PushConstants), &pushConstants);
 
-    uint32_t groupCountX = (context_.swapchainExtent.width + 15) / 16;
-    uint32_t groupCountY = (context_.swapchainExtent.height + 15) / 16;
+    // Optimize compute dispatch based on GPU workgroup size
+    VkPhysicalDeviceProperties2 props2 = {};
+    props2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+    vkGetPhysicalDeviceProperties2(context_.physicalDevice, &props2);
+    uint32_t maxWorkgroupSize = props2.properties.limits.maxComputeWorkGroupInvocations;
+    uint32_t groupSizeX = 16; // Align with xorshift.comp
+    uint32_t groupSizeY = 16;
+    uint32_t groupCountX = (context_.swapchainExtent.width + groupSizeX - 1) / groupSizeX;
+    uint32_t groupCountY = (context_.swapchainExtent.height + groupSizeY - 1) / groupSizeY;
+    if (groupSizeX * groupSizeY > maxWorkgroupSize) {
+        groupSizeX = std::max(8u, static_cast<uint32_t>(std::sqrt(maxWorkgroupSize)));
+        groupSizeY = groupSizeX;
+        groupCountX = (context_.swapchainExtent.width + groupSizeX - 1) / groupSizeX;
+        groupCountY = (context_.swapchainExtent.height + groupSizeY - 1) / groupSizeY;
+        LOG_DEBUG("Adjusted compute workgroup sizes: groupSize={}x{}, groupCount={}x{}", 
+                  groupSizeX, groupSizeY, groupCountX, groupCountY);
+    }
     vkCmdDispatch(commandBuffer, groupCountX, groupCountY, 1);
     LOG_INFO("Dispatched denoising compute pass: groupCount={}x{}", groupCountX, groupCountY);
 }
@@ -1967,26 +1995,92 @@ void VulkanRenderer::createAccelerationStructures() {
 }
 
 std::vector<glm::vec3> VulkanRenderer::getVertices() const {
-    LOG_DEBUG("Retrieving vertices (position only)");
-    return {
-        glm::vec3(-1.0f, -1.0f, 0.0f), // Bottom-left
-        glm::vec3( 3.0f, -1.0f, 0.0f), // Bottom-right
-        glm::vec3(-1.0f,  3.0f, 0.0f)  // Top-left
-    };
+    LOG_DEBUG("Loading vertices from OBJ file");
+    tinyobj::attrib_t attrib;
+    std::vector<tinyobj::shape_t> shapes;
+    std::vector<tinyobj::material_t> materials;
+    std::string warn, err;
+
+    if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, "assets/models/scene.obj")) {
+        LOG_ERROR("Failed to load OBJ file: warn={}, err={}", warn, err);
+        throw std::runtime_error("Failed to load OBJ file");
+    }
+    if (!warn.empty()) {
+        LOG_WARNING("OBJ loading warning: {}", warn);
+    }
+
+    std::vector<glm::vec3> vertices;
+    for (const auto& shape : shapes) {
+        for (const auto& index : shape.mesh.indices) {
+            glm::vec3 vertex;
+            vertex.x = attrib.vertices[3 * index.vertex_index + 0];
+            vertex.y = attrib.vertices[3 * index.vertex_index + 1];
+            vertex.z = attrib.vertices[3 * index.vertex_index + 2];
+            vertices.push_back(vertex);
+        }
+    }
+    LOG_DEBUG("Loaded {} vertices from OBJ", vertices.size());
+    return vertices;
 }
 
 std::vector<Vertex> VulkanRenderer::getFullVertices() const {
-    LOG_DEBUG("Retrieving full vertices with UVs");
-    return {
-        Vertex{glm::vec3(-1.0f, -1.0f, 0.0f), glm::vec2(0.0f, 1.0f)}, // Bottom-left
-        Vertex{glm::vec3( 3.0f, -1.0f, 0.0f), glm::vec2(2.0f, 1.0f)}, // Bottom-right
-        Vertex{glm::vec3(-1.0f,  3.0f, 0.0f), glm::vec2(0.0f, -1.0f)} // Top-left
-    };
+    LOG_DEBUG("Loading full vertices with UVs from OBJ file");
+    tinyobj::attrib_t attrib;
+    std::vector<tinyobj::shape_t> shapes;
+    std::vector<tinyobj::material_t> materials;
+    std::string warn, err;
+
+    if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, "assets/models/scene.obj")) {
+        LOG_ERROR("Failed to load OBJ file: warn={}, err={}", warn, err);
+        throw std::runtime_error("Failed to load OBJ file");
+    }
+    if (!warn.empty()) {
+        LOG_WARNING("OBJ loading warning: {}", warn);
+    }
+
+    std::vector<Vertex> vertices;
+    for (const auto& shape : shapes) {
+        for (const auto& index : shape.mesh.indices) {
+            Vertex vertex;
+            vertex.pos.x = attrib.vertices[3 * index.vertex_index + 0];
+            vertex.pos.y = attrib.vertices[3 * index.vertex_index + 1];
+            vertex.pos.z = attrib.vertices[3 * index.vertex_index + 2];
+            if (index.texcoord_index >= 0) {
+                vertex.uv.x = attrib.texcoords[2 * index.texcoord_index + 0];
+                vertex.uv.y = attrib.texcoords[2 * index.texcoord_index + 1];
+            } else {
+                vertex.uv = glm::vec2(0.0f, 0.0f);
+            }
+            vertices.push_back(vertex);
+        }
+    }
+    LOG_DEBUG("Loaded {} full vertices with UVs from OBJ", vertices.size());
+    return vertices;
 }
 
 std::vector<uint32_t> VulkanRenderer::getIndices() const {
-    LOG_DEBUG("Retrieving indices");
-    return {0, 1, 2};
+    LOG_DEBUG("Loading indices from OBJ file");
+    tinyobj::attrib_t attrib;
+    std::vector<tinyobj::shape_t> shapes;
+    std::vector<tinyobj::material_t> materials;
+    std::string warn, err;
+
+    if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, "assets/models/scene.obj")) {
+        LOG_ERROR("Failed to load OBJ file: warn={}, err={}", warn, err);
+        throw std::runtime_error("Failed to load OBJ file");
+    }
+    if (!warn.empty()) {
+        LOG_WARNING("OBJ loading warning: {}", warn);
+    }
+
+    std::vector<uint32_t> indices;
+    for (const auto& shape : shapes) {
+        for (size_t i = 0; i < shape.mesh.indices.size(); ++i) {
+            indices.push_back(shape.mesh.indices[i].vertex_index);
+        }
+    }
+    LOG_DEBUG("Loaded {} indices from OBJ", indices.size());
+    return indices;
 }
 
 } // namespace VulkanRTX

@@ -410,11 +410,10 @@ endif()
 # Copy assets
 set(ASSET_TYPES
     "FONT:*.ttf,*.otf:${ASSET_DIR}/fonts:${CMAKE_BINARY_DIR}/bin/Linux/assets/fonts:${CMAKE_BINARY_DIR}/bin/Windows/assets/fonts"
-    "TEXTURE:*.png,*.jpg,*.ktx,*.dds:${ASSET_DIR}/textures:${CMAKE_BINARY_DIR}/bin/Linux/assets/textures:${CMAKE_BINARY_DIR}/bin/Windows/assets/textures"
+    "TEXTURE:*.png,*.jpg,*.ktx,*.dds,*.hdr,*.exr:${ASSET_DIR}/textures:${CMAKE_BINARY_DIR}/bin/Linux/assets/textures:${CMAKE_BINARY_DIR}/bin/Windows/assets/textures"
     "MODEL:*.obj,*.fbx,*.gltf,*.glb:${ASSET_DIR}/models:${CMAKE_BINARY_DIR}/bin/Linux/assets/models:${CMAKE_BINARY_DIR}/bin/Windows/assets/models"
     "MATERIAL:*.json,*.mat:${ASSET_DIR}/materials:${CMAKE_BINARY_DIR}/bin/Linux/assets/materials:${CMAKE_BINARY_DIR}/bin/Windows/assets/materials"
-    "SCENE:*.json,*.scene:${ASSET_DIR}/scen
-es:${CMAKE_BINARY_DIR}/bin/Linux/assets/scenes:${CMAKE_BINARY_DIR}/bin/Windows/assets/scenes"
+    "SCENE:*.json,*.scene:${ASSET_DIR}/scenes:${CMAKE_BINARY_DIR}/bin/Linux/assets/scenes:${CMAKE_BINARY_DIR}/bin/Windows/assets/scenes"
     "AUDIO:*.wav,*.ogg,*.mp3:${ASSET_DIR}/audio:${CMAKE_BINARY_DIR}/bin/Linux/assets/audio:${CMAKE_BINARY_DIR}/bin/Windows/assets/audio"
     "SCRIPT:*.lua,*.py:${ASSET_DIR}/scripts:${CMAKE_BINARY_DIR}/bin/Linux/assets/scripts:${CMAKE_BINARY_DIR}/bin/Windows/assets/scripts"
 )
