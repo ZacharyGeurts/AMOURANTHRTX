@@ -16,7 +16,7 @@ chmod +x linux.sh
 ./linux.sh clean
 ```
 
-Why choose AMARANTH RTX? You want full access to a small RTX loop. Made with Grok sized files for AI updates.    
+Why choose AMOURANTH RTX? You want full access to a small RTX loop. Made with Grok sized files for AI updates.    
 <img width="1297" height="1800" alt="JustBetter" src="https://github.com/user-attachments/assets/0e273bbc-333b-4110-bc8d-acf0796f20c3" />  
 We have months of experience of driving Grok through traffic cones and expect to hit fewer.  
 <img width="1282" height="1645" alt="buffer" src="https://github.com/user-attachments/assets/28950e5a-2caf-49f9-b961-8a2510780a82" />  
