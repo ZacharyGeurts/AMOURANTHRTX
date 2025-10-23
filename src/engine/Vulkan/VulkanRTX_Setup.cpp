@@ -357,7 +357,7 @@ void VulkanRTX::createDescriptorSetLayout() {
         {
             .binding = static_cast<uint32_t>(DescriptorBindings::MaterialSSBO),
             .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-            .descriptorCount = 1,  // FIX: Single descriptor for array buffer
+            .descriptorCount = 26,  // Fixed: Support array of 26 materials as individual descriptors
             .stageFlags = allRTStages,
             .pImmutableSamplers = nullptr
         },
