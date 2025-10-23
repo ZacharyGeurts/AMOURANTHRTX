@@ -32,6 +32,7 @@ Let AI do the heavy lifting with modular files where implementations are at your
 I would be taking a 1/3rd to their 2/3rd as far as distribution ratio.  
 If they do not like my stealing their brand, they can come to Michigan and stream the firing.  
 https://www.twitch.tv/AMOURANTH
+If you need help with your project, it's Grok, not me.  
 
 **Other work**  
 Results are used with Non-uniform rational basis splines, a mathematical model that is representing curves and surfaces.  
