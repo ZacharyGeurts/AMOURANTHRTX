@@ -36,8 +36,8 @@ https://www.twitch.tv/AMOURANTH
 **Other work**  
 Results are used with Non-uniform rational basis splines, a mathematical model that is representing curves and surfaces.  
 Layman's summation: GodWave increases.  
-<img width="409" height="216" alt="Screenshot from 2025-10-22 02-48-10" src="https://github.com/user-attachments/assets/a0f80dfc-12d2-4bcc-9df1-1d01a8e0e48e" />   
-![uel](https://github.com/user-attachments/assets/31bc27e6-6ae7-417e-b331-e2e5bdb307dc)   
+https://github.com/user-attachments/assets/a0f80dfc-12d2-4bcc-9df1-1d01a8e0e48e  
+https://github.com/user-attachments/assets/31bc27e6-6ae7-417e-b331-e2e5bdb307dc  
 
 # Universal Equation  🇺🇸  VS  🇷🇺  VS  🇸🇬  VS  🇨🇳  VS 🇬🇧  VS  🇫🇷  VS  🇲🇽 VS 🇰🇷  VS  🇫🇮  VS  🇯🇵  VS  🇨🇦  VS  🏴󠁧󠁢󠁳󠁣󠁴󠁿  VS  🇦🇺  ...  
 **Never condone violence, incorrectness, nor the new Oxford comma.**  
