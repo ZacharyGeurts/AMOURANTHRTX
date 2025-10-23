@@ -22,7 +22,9 @@ We have months of experience of driving Grok through traffic cones and expect to
 <img width="1282" height="1645" alt="buffer" src="https://github.com/user-attachments/assets/28950e5a-2caf-49f9-b961-8a2510780a82" />  
 Image lies. I aien't test shit.  
 <img width="1493" height="2160" alt="Screenshot from 2025-10-22 11-14-23" src="https://github.com/user-attachments/assets/a828b25d-b7f6-47f5-b972-334745a1b546" />
-<img width="1564" height="2160" alt="Screenshot from 2025-10-22 11-14-40" src="https://github.com/user-attachments/assets/1d558846-c910-4104-9212-8a024f069dc8" />
+<img width="1564" height="2160" alt="Screenshot from 2025-10-22 11-14-40" src="https://github.com/user-attachments/assets/1d558846-c910-4104-9212-8a024f069dc8" />  
+Let AI do the heavy lifting with modular files where implementations are at your controls.
+<img width="1493" height="1826" alt="ai" src="https://github.com/user-attachments/assets/4bab9d7f-cd6d-4602-abd2-c000b8340e06" />  
 
 - **Distribution**: gzac5314@gmail.com for AMOURANTH RTX engine license  
 - **Why AMOURANTH?** They said they were hiring so I figured I would try to bring in a customer.  
