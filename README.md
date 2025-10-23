@@ -25,6 +25,7 @@ Image lies. I aien't test shit.
 <img width="1564" height="2160" alt="Screenshot from 2025-10-22 11-14-40" src="https://github.com/user-attachments/assets/1d558846-c910-4104-9212-8a024f069dc8" />  
 Let AI do the heavy lifting with modular files where implementations are at your controls.
 <img width="1493" height="1826" alt="ai" src="https://github.com/user-attachments/assets/4bab9d7f-cd6d-4602-abd2-c000b8340e06" />  
+<img width="1487" height="1822" alt="Screenshot from 2025-10-23 12-59-56" src="https://github.com/user-attachments/assets/b144d71a-9312-4e32-95a5-ab5a0715e6f9" />  
 
 - **Distribution**: gzac5314@gmail.com for AMOURANTH RTX engine license  
 - **Why AMOURANTH?** They said they were hiring so I figured I would try to bring in a customer.  
