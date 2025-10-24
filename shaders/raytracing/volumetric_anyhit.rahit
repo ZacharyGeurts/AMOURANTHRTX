@@ -1,16 +1,20 @@
 #version 460
 #extension GL_EXT_ray_tracing : require
-#extension GL_EXT_nonuniform_qualifier : enable
 
-layout(location = 0) rayPayloadInEXT vec3 hitValue;
-layout(binding = 7, set = 0) uniform sampler3D densityVolume;
+layout(set = 0, binding = 7) uniform sampler3D densityVolume;
+
+struct RayPayload {
+    vec4 color;
+};
+
+layout(location = 0) rayPayloadInEXT RayPayload payload;
 
 void main() {
-    vec3 pos = gl_WorldRayOriginEXT + gl_WorldRayDirectionEXT * gl_HitTEXT;
-    float density = texture(densityVolume, pos * 0.1).r; // Scale position for volume
-    if (density < 0.1) {
-        ignoreIntersectionEXT;
-    } else {
-        hitValue *= vec3(0.9, 0.9, 1.0); // Blue tint for volumetric fog
-    }
+    const vec3 pos = gl_WorldRayOriginEXT + gl_HitTEXT * gl_WorldRayDirectionEXT;
+    const vec3 volCoord = (pos * 0.5) + 0.5;
+    const float density = texture(densityVolume, volCoord).r;
+
+    const float step = gl_HitTEXT * 0.1;
+    const float atten = exp(-density * step);
+    payload.color.a *= atten;
 }

@@ -1,18 +1,12 @@
 #version 460
 #extension GL_EXT_ray_tracing : require
-#extension GL_EXT_nonuniform_qualifier : enable
 
-layout(location = 1) rayPayloadInEXT float shadowAttenuation;
-hitAttributeEXT vec2 attribs; // UV coordinates from vertex data (no layout qualifier)
-layout(binding = 5, set = 0) uniform sampler2D alphaTex;
+struct ShadowPayload {
+    float visibility;
+};
+
+layout(location = 1) rayPayloadInEXT ShadowPayload shadowPayload;
 
 void main() {
-    vec2 uv = attribs; // UVs from vertex attributes
-    float alpha = texture(alphaTex, uv).r;
-    if (alpha < 0.5) {
-        ignoreIntersectionEXT;
-    } else {
-        shadowAttenuation = 0.0;
-        terminateRayEXT;
-    }
+    shadowPayload.visibility = 0.0;
 }

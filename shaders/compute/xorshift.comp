@@ -1,19 +1,14 @@
-// assets/shaders/compute/xorshift.comp
 #version 460
-#extension GL_EXT_scalar_block_layout : require
 
-layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 
-layout(set = 0, binding = 4, scalar) buffer Dimensions { uint seeds[1]; uint rngState; } rng;
-
-uint xorshift(inout uint state) {
-    state ^= state << 13;
-    state ^= state >> 17;
-    state ^= state << 5;
-    return state;
-}
+layout(set = 0, binding = 1, rgba8) readonly uniform image2D inputImage;
+layout(set = 0, binding = 1, rgba8) uniform image2D outputImage;  // Overwrite for passthru
 
 void main() {
-    uint idx = gl_GlobalInvocationID.x + gl_GlobalInvocationID.y * gl_WorkGroupSize.x * gl_NumWorkGroups.x;
-    rng.rngState = xorshift(rng.rngState);
+    const ivec2 pos = ivec2(gl_GlobalInvocationID.xy);
+    if (all(greaterThanEqual(pos, ivec2(0))) && all(lessThan(pos, imageSize(inputImage)))) {
+        vec4 color = imageLoad(inputImage, pos);
+        imageStore(outputImage, pos, color);  // Direct copy
+    }
 }

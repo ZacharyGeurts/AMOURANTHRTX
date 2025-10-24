@@ -1,12 +1,17 @@
 #version 460
 #extension GL_EXT_ray_tracing : require
-#extension GL_EXT_nonuniform_qualifier : enable
 
-layout(binding = 6, set = 0) uniform sampler2D envMap;
-layout(location = 0) rayPayloadInEXT vec3 hitValue;
+layout(set = 0, binding = 6) uniform sampler2D envMap;
+
+struct RayPayload {
+    vec4 color;
+};
+
+layout(location = 0) rayPayloadInEXT RayPayload payload;
 
 void main() {
-    vec3 direction = gl_WorldRayDirectionEXT;
-    vec2 uv = vec2(atan(direction.z, direction.x) / (2.0 * 3.14159), acos(direction.y) / 3.14159);
-    hitValue = texture(envMap, uv).rgb;
+    const vec3 dir = gl_WorldRayDirectionEXT;
+    const float PI = 3.141592653589793;
+    const vec2 sph = vec2(atan(dir.z, dir.x) / (2.0 * PI), acos(dir.y) / PI);
+    payload.color = vec4(texture(envMap, sph).rgb, 1.0);
 }

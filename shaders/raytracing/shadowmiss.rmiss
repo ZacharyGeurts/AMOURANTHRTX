@@ -1,7 +1,12 @@
 #version 460
 #extension GL_EXT_ray_tracing : require
-layout(location = 1) rayPayloadInEXT float shadowAttenuation;
+
+struct ShadowPayload {
+    float visibility;
+};
+
+layout(location = 1) rayPayloadInEXT ShadowPayload shadowPayload;
 
 void main() {
-    shadowAttenuation = 1.0;
+    shadowPayload.visibility = 1.0;
 }

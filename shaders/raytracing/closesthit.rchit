@@ -1,33 +1,54 @@
 #version 460
 #extension GL_EXT_ray_tracing : require
-#extension GL_EXT_nonuniform_qualifier : enable
+#extension GL_EXT_scalar_block_layout : enable
 
-layout(binding = 0, set = 0) uniform accelerationStructureEXT topLevelAS;
-layout(binding = 3, set = 0) buffer MaterialSSBO {
-    vec4 albedo;
-    float roughness;
+layout(set = 0, binding = 0) uniform accelerationStructureEXT TopLevelAS;
+
+struct Material {
+    vec3 albedo;
     float metallic;
-    float emission;
-    uint textureIndex;
-} materials[26];
-layout(binding = 6, set = 0) uniform sampler2D envMap;
-layout(location = 0) rayPayloadInEXT vec3 hitValue;
-layout(location = 1) rayPayloadEXT float shadowAttenuation;
+    float roughness;
+    float alpha;
+    vec3 padding;
+};
+
+layout(set = 0, binding = 3, std430) readonly buffer MaterialsData {
+    Material materials[];
+} materialsData;
+
+layout(set = 0, binding = 6) uniform sampler2D envMap;
+
+struct RayPayload {
+    vec4 color;
+};
+
+layout(location = 0) rayPayloadInEXT RayPayload payload;
+
+struct ShadowPayload {
+    float visibility;
+};
+
+layout(location = 1) rayPayloadEXT ShadowPayload shadowPayload;
+
+hitAttributeEXT vec2 hitTexCoord;
 
 void main() {
-    uint materialIndex = gl_PrimitiveID % 26;
-    vec3 albedo = materials[materialIndex].albedo.rgb;
-    float roughness = materials[materialIndex].roughness;
-    vec3 normal = normalize(gl_ObjectToWorldEXT * vec4(0.0, 0.0, 1.0, 0.0)).xyz; // Transform normal
+    const int primID = gl_PrimitiveID;
+    const int matID = gl_InstanceCustomIndexEXT;
+    const Material mat = materialsData.materials[matID % 26];
 
-    // Simple diffuse lighting
-    vec3 lightDir = normalize(vec3(1.0, 1.0, 1.0));
-    float NdotL = max(dot(normal, lightDir), 0.0);
+    const vec3 bary = vec3(1.0 - hitTexCoord.x - hitTexCoord.y, hitTexCoord);
+    const vec3 worldPos = gl_WorldRayOriginEXT + gl_HitTEXT * gl_WorldRayDirectionEXT;
+    const vec3 normal = normalize(mat3(gl_ObjectToWorldEXT) * vec3(0.0, 1.0, 0.0));
 
-    // Shadow ray
-    shadowAttenuation = 1.0;
-    vec3 shadowOrigin = gl_WorldRayOriginEXT + gl_WorldRayDirectionEXT * gl_HitTEXT;
-    traceRayEXT(topLevelAS, gl_RayFlagsOpaqueEXT, 0xFF, 1, 0, 1, shadowOrigin, 0.001, lightDir, 10000.0, 1);
+    const vec3 lightDir = normalize(vec3(1.0, 1.0, 1.0));
+    const float NdotL = max(dot(normal, lightDir), 0.0);
+    vec3 color = mat.albedo * (NdotL * 0.8 + 0.2);
 
-    hitValue = albedo * NdotL * shadowAttenuation;
+    shadowPayload.visibility = 1.0;
+    traceRayEXT(TopLevelAS, gl_RayFlagsOpaqueEXT | gl_RayFlagsSkipClosestHitShaderEXT,
+                0xFF, 1, 1, 3,
+                worldPos + normal * 0.001, 0.001, lightDir, 100.0, 1);
+
+    payload.color = vec4(color * shadowPayload.visibility, 1.0);
 }

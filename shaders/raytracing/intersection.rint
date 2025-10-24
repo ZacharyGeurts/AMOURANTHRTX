@@ -1,22 +1,27 @@
 #version 460
 #extension GL_EXT_ray_tracing : require
 
+hitAttributeEXT vec2 hitTexCoord;
+
+bool intersectVolumeBox(in vec3 ro, in vec3 rd, out float tnear, out float tfar) {
+    const vec3 boxmin = vec3(-1.0);
+    const vec3 boxmax = vec3(1.0);
+    vec3 invR = 1.0 / rd;
+    vec3 tbot = invR * (boxmin - ro);
+    vec3 ttop = invR * (boxmax - ro);
+    vec3 tmin = min(ttop, tbot);
+    vec3 tmax = max(ttop, tbot);
+    tnear = max(max(tmin.x, tmin.y), tmin.z);
+    tfar = min(min(tmax.x, tmax.y), tmax.z);
+    return (tnear < tfar) && (tfar > 0.0);
+}
+
 void main() {
-    // Example: Sphere intersection
-    vec3 center = vec3(0.0, 0.0, 0.0);
-    float radius = 1.0;
-
-    vec3 oc = gl_WorldRayOriginEXT - center;
-    float a = dot(gl_WorldRayDirectionEXT, gl_WorldRayDirectionEXT);
-    float b = 2.0 * dot(oc, gl_WorldRayDirectionEXT);
-    float c = dot(oc, oc) - radius * radius;
-    float discriminant = b * b - 4.0 * a * c;
-
-    if (discriminant > 0.0) {
-        float t = (-b - sqrt(discriminant)) / (2.0 * a);
-        if (t > 0.0) {
-            vec2 attribs = vec2(0.0); // Dummy attributes
-            reportIntersectionEXT(t, 0);
-        }
+    const vec3 ro = gl_WorldRayOriginEXT;
+    const vec3 rd = gl_WorldRayDirectionEXT;
+    float tnear, tfar;
+    if (intersectVolumeBox(ro, rd, tnear, tfar)) {
+        hitTexCoord = vec2((tnear / (tfar - tnear)), 0.0);
+        reportIntersectionEXT(tnear, 0u);
     }
 }

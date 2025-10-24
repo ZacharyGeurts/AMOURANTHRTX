@@ -1,20 +1,14 @@
-// Filename: denoiser_post.comp
 #version 460
-#extension GL_EXT_scalar_block_layout : require
 
-layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 
-layout(set = 0, binding = 1, rgba32f) readonly uniform image2D noisyImage;
-layout(set = 0, binding = 9, rgba32f) readonly uniform image2D history;
-layout(set = 0, binding = 1, rgba32f) writeonly uniform image2D denoised;
+layout(set = 0, binding = 1, rgba8) readonly uniform image2D noisyImage;
+layout(set = 0, binding = 5, rgba8) uniform image2D denoisedImage;  // Passthru to denoise binding
 
 void main() {
-    ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
-    if (coord.x >= imageSize(noisyImage).x || coord.y >= imageSize(noisyImage).y) return;
-
-    vec3 noisy = imageLoad(noisyImage, coord).rgb;
-    vec3 prev = imageLoad(history, coord).rgb;
-
-    vec3 blend = mix(prev, noisy, 0.1);
-    imageStore(denoised, coord, vec4(blend, 1.0));
+    const ivec2 pos = ivec2(gl_GlobalInvocationID.xy);
+    if (all(greaterThanEqual(pos, ivec2(0))) && all(lessThan(pos, imageSize(noisyImage)))) {
+        vec4 color = imageLoad(noisyImage, pos);
+        imageStore(denoisedImage, pos, color);  // Direct copy, no denoising
+    }
 }
