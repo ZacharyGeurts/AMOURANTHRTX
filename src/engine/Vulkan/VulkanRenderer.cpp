@@ -724,7 +724,8 @@ void VulkanRenderer::initializeAllBufferData(uint32_t maxFrames, VkDeviceSize ma
     }
     VkPhysicalDeviceProperties2 props2{
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
-        .pNext = nullptr
+        .pNext = nullptr,
+        .properties = {}
     };
     vkGetPhysicalDeviceProperties2(context_.physicalDevice, &props2);
     VkDeviceSize minAlignment = props2.properties.limits.minStorageBufferOffsetAlignment;
@@ -741,7 +742,8 @@ void VulkanRenderer::initializeAllBufferData(uint32_t maxFrames, VkDeviceSize ma
     VkMemoryAllocateFlagsInfo allocFlagsInfo{
         .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO,
         .pNext = nullptr,
-        .flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT
+        .flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT,
+        .deviceMask = 0
     };
 
     for (uint32_t i = 0; i < maxFrames; ++i) {
@@ -1246,7 +1248,8 @@ void VulkanRenderer::renderFrame(const Camera& camera) {
         .samplesPerPixel = 1u,
         .maxDepth = 5u,
         .maxBounces = 3u,
-        .russianRoulette = 0.8f
+        .russianRoulette = 0.8f,
+        .resolution = {context_.swapchainExtent.width, context_.swapchainExtent.height}
     };
 
     if (isMode1) {
@@ -1521,14 +1524,16 @@ void VulkanRenderer::denoiseImage(VkCommandBuffer commandBuffer, VkImage inputIm
         .samplesPerPixel = 1u,
         .maxDepth = 5u,
         .maxBounces = 3u,
-        .russianRoulette = 0.8f
+        .russianRoulette = 0.8f,
+        .resolution = {context_.swapchainExtent.width, context_.swapchainExtent.height}
     };
     vkCmdPushConstants(commandBuffer, computePipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT,
                        0, sizeof(MaterialData::PushConstants), &pushConstants);
 
     VkPhysicalDeviceProperties2 props2{
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
-        .pNext = nullptr
+        .pNext = nullptr,
+        .properties = {}
     };
     vkGetPhysicalDeviceProperties2(context_.physicalDevice, &props2);
     uint32_t maxWorkgroupSize = props2.properties.limits.maxComputeWorkGroupInvocations;
@@ -1857,11 +1862,20 @@ void VulkanRenderer::handleResize(int width, int height) {
     VkDeviceSize dimensionBufferSize = sizeof(UE::DimensionData) * DIMENSION_COUNT;
     VkPhysicalDeviceProperties2 props2{
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
-        .pNext = nullptr
+        .pNext = nullptr,
+        .properties = {}
     };
     VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProps{
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR,
-        .pNext = nullptr
+        .pNext = nullptr,
+        .shaderGroupHandleSize = 0,
+        .maxRayRecursionDepth = 0,
+        .maxShaderGroupStride = 0,
+        .shaderGroupBaseAlignment = 0,
+        .shaderGroupHandleCaptureReplaySize = 0,
+        .maxRayDispatchInvocationCount = 0,
+        .shaderGroupHandleAlignment = 0,
+        .maxRayHitAttributeSize = 0
     };
     props2.pNext = &rtProps;
     vkGetPhysicalDeviceProperties2(context_.physicalDevice, &props2);
@@ -1885,7 +1899,8 @@ void VulkanRenderer::handleResize(int width, int height) {
     VkMemoryAllocateFlagsInfo allocFlagsInfo{
         .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO,
         .pNext = nullptr,
-        .flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT
+        .flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT,
+        .deviceMask = 0
     };
 
     for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {

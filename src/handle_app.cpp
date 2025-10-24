@@ -362,6 +362,7 @@ void HandleInput::defaultKeyboardHandler(const SDL_KeyboardEvent& key) {
 }
 
 void HandleInput::defaultMouseButtonHandler(const SDL_MouseButtonEvent& mb) {
+    (void)mb;
 }
 
 void HandleInput::defaultMouseMotionHandler(const SDL_MouseMotionEvent& mm) {
@@ -377,9 +378,11 @@ void HandleInput::defaultMouseWheelHandler(const SDL_MouseWheelEvent& mw) {
 }
 
 void HandleInput::defaultTextInputHandler(const SDL_TextInputEvent& ti) {
+    (void)ti;
 }
 
 void HandleInput::defaultTouchHandler(const SDL_TouchFingerEvent& tf) {
+    (void)tf;
 }
 
 void HandleInput::defaultGamepadButtonHandler(const SDL_GamepadButtonEvent& gb) {
@@ -414,6 +417,7 @@ void HandleInput::defaultGamepadAxisHandler(const SDL_GamepadAxisEvent& ga) {
 }
 
 void HandleInput::defaultGamepadConnectHandler(bool connected, SDL_JoystickID id, SDL_Gamepad* pad) {
+    (void)id;
     if (!connected && pad) {
         SDL_CloseGamepad(pad);
     }

@@ -561,7 +561,7 @@ void VulkanBufferManager::configureUniformBuffers(uint32_t count, VkDeviceSize s
     }
 }
 
-void VulkanBufferManager::enableMeshShaders(bool enable, const MeshletConfig& config) {
+void VulkanBufferManager::enableMeshShaders(bool enable, [[maybe_unused]] const MeshletConfig& config) {
     impl_->useMeshShaders = enable && isMeshShaderSupported(context_.physicalDevice);
     if (impl_->useMeshShaders) {
         impl_->meshletOffset = impl_->indexOffset + (sizeof(uint32_t) * indexCount_ * INDEX_BUFFER_SCALE_FACTOR);
