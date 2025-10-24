@@ -1,7 +1,7 @@
 // AMOURANTH RTX Engine, October 2025 - Enhanced thread-safe, asynchronous logging.
 // Thread-safe, asynchronous logging with ANSI-colored output and delta time.
 // Supports C++20 std::format, std::jthread, OpenMP, and lock-free queue with std::atomic.
-// No mutexes for queue; designed for high-performance Vulkan applications on Windows and Linux.
+// No mutexes; designed for high-performance Vulkan applications on Windows and Linux.
 // Delta time format: microseconds (<10ms), milliseconds (10ms-1s), seconds (1s-1min), minutes (1min-1hr), hours (>1hr).
 // Usage: LOG_INFO("Message: {}", value); or Logger::get().log(LogLevel::Info, "Vulkan", "Message: {}", value);
 // Features: Singleton, log rotation, environment variable config, automatic flush, extended colors, overloads.
@@ -24,7 +24,6 @@
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
-#include <mutex>
 #include <set>
 #include <map>
 #include <span>
@@ -35,11 +34,11 @@
 #include "engine/camera.hpp" // For Camera base class
 
 // Log level toggle flags (enable/disable specific log levels)
-constexpr bool ENABLE_DEBUG = true;   // Debug logs disabled by default
-constexpr bool ENABLE_INFO = true;     // Info logs enabled by default
-constexpr bool ENABLE_WARNING = true; // Warning logs disabled by default
-constexpr bool ENABLE_ERROR = true;    // Error logs enabled by default
-constexpr bool FPS_COUNTER = true;     // FPS counter logging enabled by default
+constexpr bool ENABLE_DEBUG = true;   // Debug logs enabled by default
+constexpr bool ENABLE_INFO = true;    // Info logs enabled by default
+constexpr bool ENABLE_WARNING = true; // Warning logs enabled by default
+constexpr bool ENABLE_ERROR = true;   // Error logs enabled by default
+constexpr bool FPS_COUNTER = true;    // FPS counter logging enabled by default
 constexpr bool SIMULATION_LOGGING = true; // Simulation logging enabled by default
 
 #define LOG_DEBUG(...) do { if (ENABLE_DEBUG) Logging::Logger::get().log(Logging::LogLevel::Debug, "General", __VA_ARGS__); } while (0)
@@ -303,7 +302,7 @@ public:
     }
 
     bool setLogFile(const std::string& filename, size_t maxSizeBytes = 10 * 1024 * 1024) {
-        std::lock_guard<std::mutex> lock(fileMutex_);
+        // No mutex; assume single-threaded access or called during initialization
         if (logFile_.is_open()) {
             logFile_.close();
         }
@@ -323,7 +322,7 @@ public:
     }
 
     void setCategoryFilter(std::string_view category, bool enable) {
-        std::lock_guard<std::mutex> lock(categoryMutex_);
+        // No mutex; assume single-threaded access or called during initialization
         if (enable) {
             enabledCategories_.insert(std::string(category));
         } else {
@@ -390,11 +389,11 @@ private:
             case LogLevel::Error:   if (!ENABLE_ERROR) return false; break;
         }
 
-        // Then check dynamic log level and category filters
+        // Check dynamic log level and category filters
+        // No mutex; assume single-threaded access or read-only after initialization
         if (static_cast<int>(level) < static_cast<int>(level_.load(std::memory_order_relaxed))) {
             return false;
         }
-        std::lock_guard<std::mutex> lock(categoryMutex_);
         return enabledCategories_.empty() || enabledCategories_.contains(std::string(category));
     }
 
@@ -424,7 +423,6 @@ private:
 
     void enqueueMessage(LogLevel level, std::string_view message, std::string_view category,
                         std::string formatted, const std::source_location& location) const {
-        std::lock_guard<std::mutex> lock(queueMutex_); // Added mutex for thread-safe enqueue
         size_t currentHead = head_.load(std::memory_order_relaxed);
         size_t currentTail = tail_.load(std::memory_order_acquire);
         size_t nextHead = (currentHead + 1) % QueueSize;
@@ -447,6 +445,7 @@ private:
             currentSize -= dropCount;
         }
 
+        // Atomic enqueue
         auto now = std::chrono::steady_clock::now();
         logQueue_[currentHead] = LogMessage(level, message, category, location, now);
         logQueue_[currentHead].formattedMessage = std::move(formatted);
@@ -464,7 +463,6 @@ private:
 
             std::vector<LogMessage> batch;
             {
-                std::lock_guard<std::mutex> lock(queueMutex_); // Added mutex for thread-safe dequeue
                 size_t currentTail = tail_.load(std::memory_order_relaxed);
                 size_t currentHead = head_.load(std::memory_order_acquire);
                 size_t batchSize = (currentHead >= currentTail) ? (currentHead - currentTail) : (QueueSize - currentTail + currentHead);
@@ -478,8 +476,8 @@ private:
                 tail_.store(currentTail, std::memory_order_release);
             }
 
+            // No mutex for file access; assume single-threaded file I/O by worker thread
             if (logFile_.is_open()) {
-                std::lock_guard<std::mutex> lock(fileMutex_);
                 if (std::filesystem::file_size(logFilePath_) > maxLogFileSize_) {
                     logFile_.close();
                     rotateLogFile();
@@ -523,7 +521,6 @@ private:
 
                 std::osyncstream(std::cout) << output << std::endl;
                 if (logFile_.is_open()) {
-                    std::lock_guard<std::mutex> lock(fileMutex_);
                     std::osyncstream(logFile_) << output << std::endl;
                 }
             }
@@ -557,7 +554,6 @@ private:
     void flushQueue() {
         std::vector<LogMessage> batch;
         {
-            std::lock_guard<std::mutex> lock(queueMutex_);
             size_t currentTail = tail_.load(std::memory_order_relaxed);
             size_t currentHead = head_.load(std::memory_order_acquire);
             size_t batchSize = (currentHead >= currentTail) ? (currentHead - currentTail) : (QueueSize - currentTail + currentHead);
@@ -606,7 +602,6 @@ private:
 
             std::osyncstream(std::cout) << output << std::endl;
             if (logFile_.is_open()) {
-                std::lock_guard<std::mutex> lock(fileMutex_);
                 std::osyncstream(logFile_) << output << std::endl;
             }
         }
@@ -620,9 +615,6 @@ private:
     mutable std::ofstream logFile_;
     std::filesystem::path logFilePath_;
     size_t maxLogFileSize_;
-    mutable std::mutex fileMutex_;
-    mutable std::mutex categoryMutex_;
-    mutable std::mutex queueMutex_; // Added for thread-safe queue access
     std::set<std::string> enabledCategories_;
     std::unique_ptr<std::jthread> worker_;
     mutable std::optional<std::chrono::steady_clock::time_point> firstLogTime_;

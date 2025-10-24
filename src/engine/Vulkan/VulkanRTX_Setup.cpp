@@ -25,11 +25,6 @@
 
 namespace VulkanRTX {
 
-std::atomic<bool> VulkanRTX::functionPtrInitialized_{false};
-std::atomic<bool> VulkanRTX::shaderModuleInitialized_{false};
-std::mutex VulkanRTX::functionPtrMutex_;
-std::mutex VulkanRTX::shaderModuleMutex_;
-
 VulkanRTX::ShaderBindingTable::ShaderBindingTable(VkDevice device, VkBuffer buffer, VkDeviceMemory memory,
                                                  PFN_vkDestroyBuffer destroyBuffer, PFN_vkFreeMemory freeMemory)
     : buffer(device, buffer, destroyBuffer),

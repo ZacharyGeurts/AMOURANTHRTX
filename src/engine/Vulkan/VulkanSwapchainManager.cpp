@@ -117,12 +117,25 @@ void VulkanSwapchainManager::initializeSwapchain(int width, int height) {
     }
     swapchainImageFormat_ = surfaceFormat.format;
 
-    // Choose present mode
-    VkPresentModeKHR presentMode = VK_PRESENT_MODE_FIFO_KHR;
+    // Choose present mode - Prioritize IMMEDIATE for max FPS (may tear), fallback to MAILBOX, then FIFO
+    VkPresentModeKHR presentMode = VK_PRESENT_MODE_IMMEDIATE_KHR;
+    bool immediateSupported = false;
     for (const auto& availablePresentMode : presentModes) {
-        if (availablePresentMode == VK_PRESENT_MODE_MAILBOX_KHR) {
-            presentMode = availablePresentMode;
+        if (availablePresentMode == VK_PRESENT_MODE_IMMEDIATE_KHR) {
+            immediateSupported = true;
             break;
+        }
+    }
+    if (!immediateSupported) {
+        presentMode = VK_PRESENT_MODE_MAILBOX_KHR;
+        for (const auto& availablePresentMode : presentModes) {
+            if (availablePresentMode == VK_PRESENT_MODE_MAILBOX_KHR) {
+                presentMode = availablePresentMode;
+                break;
+            }
+        }
+        if (presentMode != VK_PRESENT_MODE_MAILBOX_KHR) {
+            presentMode = VK_PRESENT_MODE_FIFO_KHR;
         }
     }
 

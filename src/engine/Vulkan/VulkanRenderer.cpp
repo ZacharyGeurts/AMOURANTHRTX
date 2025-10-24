@@ -1,3 +1,4 @@
+// In src/engine/Vulkan/VulkanRenderer.cpp
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts gzac5314@gmail.com is licensed under CC BY-NC 4.0
 #include "engine/Vulkan/VulkanRenderer.hpp"
 #include "engine/Vulkan/VulkanBufferManager.hpp"
@@ -29,6 +30,7 @@ VulkanRenderer::VulkanRenderer(int width, int height, void* window, const std::v
       frameCount_(0),
       lastLogTime_(std::chrono::steady_clock::now()),
       framesSinceLastLog_(0),
+      indexCount_(0),
       rtPipeline_(VK_NULL_HANDLE),
       rtPipelineLayout_(VK_NULL_HANDLE),
       denoiseImage_(VK_NULL_HANDLE),
@@ -130,6 +132,9 @@ VulkanRenderer::VulkanRenderer(int width, int height, void* window, const std::v
         std::span<const uint32_t>(getIndices())
     );
     LOG_DEBUG_CAT("Renderer", "Created VulkanBufferManager");
+
+    // Cache index count once after loading indices
+    indexCount_ = static_cast<uint32_t>(getIndices().size());
 
     bufferManager_->createUniformBuffers(MAX_FRAMES_IN_FLIGHT);
     context_.uniformBuffers.resize(MAX_FRAMES_IN_FLIGHT);
@@ -467,16 +472,23 @@ void VulkanRenderer::createSwapchain(int width, int height) {
 
 void VulkanRenderer::createEnvironmentMap() {
     LOG_DEBUG_CAT("Renderer", "Creating high-res environment map (4096x2048, 12 mips)");
+    static std::vector<float> cachedEnvMapData;
+    static bool envLoaded = false;
     int width, height, channels;
+    std::vector<float> envMapData;
     stbi_set_flip_vertically_on_load(true);
-    float* pixels = stbi_loadf("assets/textures/envmap.hdr", &width, &height, &channels, 4);
-    if (!pixels || width != 4096 || height != 2048) {
-        LOG_ERROR_CAT("Renderer", "Failed to load environment map: width={}, height={}, channels={}", width, height, channels);
-        throw std::runtime_error("Failed to load environment map");
+    if (!envLoaded) {
+        float* pixels = stbi_loadf("assets/textures/envmap.hdr", &width, &height, &channels, 4);
+        if (!pixels || width != 4096 || height != 2048) {
+            LOG_ERROR_CAT("Renderer", "Failed to load environment map: width={}, height={}, channels={}", width, height, channels);
+            throw std::runtime_error("Failed to load environment map");
+        }
+        cachedEnvMapData.assign(pixels, pixels + (width * height * 4));
+        stbi_image_free(pixels);
+        envLoaded = true;
+        LOG_DEBUG_CAT("Renderer", "Loaded and cached HDR environment map: {}x{}", width, height);
     }
-    std::vector<float> envMapData(pixels, pixels + (width * height * 4));
-    stbi_image_free(pixels);
-    LOG_DEBUG_CAT("Renderer", "Loaded HDR environment map: {}x{}", width, height);
+    envMapData = cachedEnvMapData;
 
     VkImageCreateInfo imageInfo{
         .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
@@ -1321,8 +1333,8 @@ void VulkanRenderer::renderFrame(const Camera& camera) {
         vkCmdBindVertexBuffers(frames_[currentFrame_].commandBuffer, 0, 1, &vertexBuffer, offsets);
         VkBuffer indexBuffer = bufferManager_->getIndexBuffer();
         vkCmdBindIndexBuffer(frames_[currentFrame_].commandBuffer, indexBuffer, 0, VK_INDEX_TYPE_UINT32);
-        uint32_t indexCount = static_cast<uint32_t>(getIndices().size());
-        vkCmdDrawIndexed(frames_[currentFrame_].commandBuffer, indexCount, 1, 0, 0, 0);
+        // Use cached indexCount_ instead of calling getIndices().size() every frame
+        vkCmdDrawIndexed(frames_[currentFrame_].commandBuffer, indexCount_, 1, 0, 0, 0);
         vkCmdEndRenderPass(frames_[currentFrame_].commandBuffer);
 
         VkImageMemoryBarrier postGraphicsBarrier{
@@ -1905,6 +1917,9 @@ void VulkanRenderer::handleResize(int width, int height) {
         LOG_DEBUG_CAT("Renderer", "Initialized buffer data for frame {}", i);
     }
 
+    // Recache index count after potential model reload or resize
+    // indexCount_ = static_cast<uint32_t>(getIndices().size());  // Removed: already cached statically
+
     if (context_.descriptorPool) {
         context_.resourceManager.removeDescriptorPool(context_.descriptorPool);
         vkDestroyDescriptorPool(context_.device, context_.descriptorPool, nullptr);
@@ -2054,6 +2069,10 @@ void VulkanRenderer::createAccelerationStructures() {
 }
 
 std::vector<glm::vec3> VulkanRenderer::getVertices() const {
+    static std::vector<glm::vec3> cachedVertices;
+    if (!cachedVertices.empty()) {
+        return cachedVertices;
+    }
     LOG_DEBUG_CAT("Renderer", "Loading vertices from OBJ file");
     tinyobj::attrib_t attrib;
     std::vector<tinyobj::shape_t> shapes;
@@ -2079,47 +2098,16 @@ std::vector<glm::vec3> VulkanRenderer::getVertices() const {
             vertices.push_back(vertex);
         }
     }
-    LOG_DEBUG_CAT("Renderer", "Loaded {} vertices from OBJ", vertices.size());
-    return vertices;
-}
-
-std::vector<Vertex> VulkanRenderer::getFullVertices() const {
-    LOG_DEBUG_CAT("Renderer", "Loading full vertices with UVs from OBJ file");
-    tinyobj::attrib_t attrib;
-    std::vector<tinyobj::shape_t> shapes;
-    std::vector<tinyobj::material_t> materials;
-    std::string warn, err;
-
-    if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, "assets/models/scene.obj")) {
-        LOG_ERROR_CAT("Renderer", "Failed to load OBJ file: warn={}, err={}", warn, err);
-        throw std::runtime_error("Failed to load OBJ file");
-    }
-    if (!warn.empty()) {
-        LOG_WARNING_CAT("Renderer", "OBJ loading warning: {}", warn);
-    }
-
-    std::vector<Vertex> vertices;
-    for (const auto& shape : shapes) {
-        for (const auto& index : shape.mesh.indices) {
-            Vertex vertex{
-                .pos = {
-                    attrib.vertices[3 * index.vertex_index + 0],
-                    attrib.vertices[3 * index.vertex_index + 1],
-                    attrib.vertices[3 * index.vertex_index + 2]
-                },
-                .uv = index.texcoord_index >= 0 ? glm::vec2(
-                    attrib.texcoords[2 * index.texcoord_index + 0],
-                    attrib.texcoords[2 * index.texcoord_index + 1]
-                ) : glm::vec2(0.0f, 0.0f)
-            };
-            vertices.push_back(vertex);
-        }
-    }
-    LOG_DEBUG_CAT("Renderer", "Loaded {} full vertices with UVs from OBJ", vertices.size());
+    cachedVertices = vertices;
+    LOG_DEBUG_CAT("Renderer", "Loaded and cached {} vertices from OBJ", vertices.size());
     return vertices;
 }
 
 std::vector<uint32_t> VulkanRenderer::getIndices() const {
+    static std::vector<uint32_t> cachedIndices;
+    if (!cachedIndices.empty()) {
+        return cachedIndices;
+    }
     LOG_DEBUG_CAT("Renderer", "Loading indices from OBJ file");
     tinyobj::attrib_t attrib;
     std::vector<tinyobj::shape_t> shapes;
@@ -2137,10 +2125,11 @@ std::vector<uint32_t> VulkanRenderer::getIndices() const {
     std::vector<uint32_t> indices;
     for (const auto& shape : shapes) {
         for (size_t i = 0; i < shape.mesh.indices.size(); ++i) {
-            indices.push_back(shape.mesh.indices[i].vertex_index);
+            indices.push_back(static_cast<uint32_t>(shape.mesh.indices[i].vertex_index));
         }
     }
-    LOG_DEBUG_CAT("Renderer", "Loaded {} indices from OBJ", indices.size());
+    cachedIndices = indices;
+    LOG_DEBUG_CAT("Renderer", "Loaded and cached {} indices from OBJ", indices.size());
     return indices;
 }
 

@@ -12,10 +12,9 @@
 #include <glm/gtc/type_ptr.hpp>
 #include <vector>
 #include <string>
-#include <atomic>
-#include <mutex>
 #include <stdexcept>
 #include <tuple>
+#include <atomic>
 #include "ue_init.hpp"
 #include "engine/logging.hpp"
 #include "VulkanCore.hpp"
@@ -296,12 +295,6 @@ private:
     bool hasShaderFeature(ShaderFeatures feature) const { 
         return (static_cast<unsigned int>(shaderFeatures_) & static_cast<unsigned int>(feature)) != 0; 
     }
-
-    // Static members
-    static std::atomic<bool> functionPtrInitialized_;
-    static std::atomic<bool> shaderModuleInitialized_;
-    static std::mutex functionPtrMutex_;
-    static std::mutex shaderModuleMutex_;
 
     // Device and other members
     VkDevice device_;

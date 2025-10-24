@@ -12,7 +12,6 @@
 #include "engine/logging.hpp"
 #include <vulkan/vulkan.h>
 #include <vector>
-#include <mutex>
 
 namespace VulkanRTX {
 

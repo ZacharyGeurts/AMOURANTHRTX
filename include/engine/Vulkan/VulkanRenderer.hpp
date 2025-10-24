@@ -83,6 +83,7 @@ private:
     uint32_t frameCount_;
     std::chrono::steady_clock::time_point lastLogTime_;
     uint32_t framesSinceLastLog_;
+    uint32_t indexCount_; // Cached index count for performance
     VkPipeline rtPipeline_;
     VkPipelineLayout rtPipelineLayout_;
     VkImage denoiseImage_;
