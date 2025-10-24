@@ -109,6 +109,16 @@ VulkanRenderer::VulkanRenderer(int width, int height, void* window, const std::v
         throw std::runtime_error("Failed to create swapchain image views");
     }
 
+    for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
+        frames_[i].imageAvailableSemaphore = swapchainManager_->getImageAvailableSemaphore(i);
+        frames_[i].renderFinishedSemaphore = swapchainManager_->getRenderFinishedSemaphore(i);
+        frames_[i].fence = swapchainManager_->getInFlightFence(i);
+        LOG_DEBUG_CAT("Renderer", "Assigned sync objects for frame {}: imageSem={:p}, renderSem={:p}, fence={:p}",
+                      i, static_cast<void*>(frames_[i].imageAvailableSemaphore),
+                      static_cast<void*>(frames_[i].renderFinishedSemaphore),
+                      static_cast<void*>(frames_[i].fence));
+    }
+
     pipelineManager_ = std::make_unique<VulkanPipelineManager>(context_, width_, height_);
     pipelineManager_->createRayTracingPipeline();
     pipelineManager_->createGraphicsPipeline(width_, height_);
@@ -155,8 +165,7 @@ VulkanRenderer::VulkanRenderer(int width, int height, void* window, const std::v
 
     createFramebuffers();
     createCommandBuffers();
-    createSyncObjects();
-    LOG_DEBUG_CAT("Renderer", "Created framebuffers, command buffers, and sync objects");
+    LOG_DEBUG_CAT("Renderer", "Created framebuffers and command buffers");
 
     VulkanInitializer::createStorageImage(context_.device, context_.physicalDevice, context_.storageImage,
                                          context_.storageImageMemory, context_.storageImageView, width_, height_,
@@ -354,18 +363,6 @@ void VulkanRenderer::cleanup() noexcept {
             auto& frame = frames_[i];
             if (frame.commandBuffer != VK_NULL_HANDLE) {
                 frame.commandBuffer = VK_NULL_HANDLE;
-            }
-            if (frame.fence != VK_NULL_HANDLE) {
-                vkDestroyFence(context_.device, frame.fence, nullptr);
-                frame.fence = VK_NULL_HANDLE;
-            }
-            if (frame.renderFinishedSemaphore != VK_NULL_HANDLE) {
-                vkDestroySemaphore(context_.device, frame.renderFinishedSemaphore, nullptr);
-                frame.renderFinishedSemaphore = VK_NULL_HANDLE;
-            }
-            if (frame.imageAvailableSemaphore != VK_NULL_HANDLE) {
-                vkDestroySemaphore(context_.device, frame.imageAvailableSemaphore, nullptr);
-                frame.imageAvailableSemaphore = VK_NULL_HANDLE;
             }
         }
         frames_.clear();
@@ -1621,39 +1618,6 @@ void VulkanRenderer::createCommandBuffers() {
     LOG_INFO_CAT("Renderer", "Allocated {} command buffers", context_.commandBuffers.size());
 }
 
-void VulkanRenderer::createSyncObjects() {
-    LOG_DEBUG_CAT("Renderer", "Creating sync objects");
-    context_.imageAvailableSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
-    context_.renderFinishedSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
-    context_.inFlightFences.resize(MAX_FRAMES_IN_FLIGHT);
-    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
-        VkSemaphoreCreateInfo semaphoreInfo{
-            .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
-            .pNext = nullptr,
-            .flags = 0
-        };
-        VkFenceCreateInfo fenceInfo{
-            .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
-            .pNext = nullptr,
-            .flags = VK_FENCE_CREATE_SIGNALED_BIT
-        };
-        if (vkCreateSemaphore(context_.device, &semaphoreInfo, nullptr, &context_.imageAvailableSemaphores[i]) != VK_SUCCESS ||
-            vkCreateSemaphore(context_.device, &semaphoreInfo, nullptr, &context_.renderFinishedSemaphores[i]) != VK_SUCCESS ||
-            vkCreateFence(context_.device, &fenceInfo, nullptr, &context_.inFlightFences[i]) != VK_SUCCESS) {
-            LOG_ERROR_CAT("Renderer", "Failed to create sync objects for frame {}", i);
-            throw std::runtime_error("Failed to create sync objects");
-        }
-        frames_[i].imageAvailableSemaphore = context_.imageAvailableSemaphores[i];
-        frames_[i].renderFinishedSemaphore = context_.renderFinishedSemaphores[i];
-        frames_[i].fence = context_.inFlightFences[i];
-        LOG_DEBUG_CAT("Renderer", "Created sync objects for frame {}: fence={:p}, imageSemaphore={:p}, renderSemaphore={:p}",
-                      i, static_cast<void*>(context_.inFlightFences[i]),
-                      static_cast<void*>(context_.imageAvailableSemaphores[i]),
-                      static_cast<void*>(context_.renderFinishedSemaphores[i]));
-    }
-    LOG_INFO_CAT("Renderer", "Created sync objects for {} frames", MAX_FRAMES_IN_FLIGHT);
-}
-
 void VulkanRenderer::handleResize(int width, int height) {
     LOG_DEBUG_CAT("Renderer", "Handling resize to {}x{}", width, height);
     if (width <= 0 || height <= 0) {
@@ -2023,26 +1987,18 @@ void VulkanRenderer::handleResize(int width, int height) {
 
     Dispose::freeCommandBuffers(context_.device, context_.commandPool, context_.commandBuffers);
     LOG_DEBUG_CAT("Renderer", "Freed existing command buffers");
-    for (size_t i = 0; i < context_.imageAvailableSemaphores.size(); ++i) {
-        if (context_.imageAvailableSemaphores[i]) {
-            vkDestroySemaphore(context_.device, context_.imageAvailableSemaphores[i], nullptr);
-            context_.imageAvailableSemaphores[i] = VK_NULL_HANDLE;
-            LOG_DEBUG_CAT("Renderer", "Destroyed image available semaphore[{}]", i);
-        }
-        if (context_.renderFinishedSemaphores[i]) {
-            vkDestroySemaphore(context_.device, context_.renderFinishedSemaphores[i], nullptr);
-            context_.renderFinishedSemaphores[i] = VK_NULL_HANDLE;
-            LOG_DEBUG_CAT("Renderer", "Destroyed render finished semaphore[{}]", i);
-        }
-        if (context_.inFlightFences[i]) {
-            vkDestroyFence(context_.device, context_.inFlightFences[i], nullptr);
-            context_.inFlightFences[i] = VK_NULL_HANDLE;
-            LOG_DEBUG_CAT("Renderer", "Destroyed in-flight fence[{}]", i);
-        }
-    }
     createCommandBuffers();
-    createSyncObjects();
-    LOG_DEBUG_CAT("Renderer", "Recreated command buffers and sync objects");
+    LOG_DEBUG_CAT("Renderer", "Recreated command buffers");
+
+    for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
+        frames_[i].imageAvailableSemaphore = swapchainManager_->getImageAvailableSemaphore(i);
+        frames_[i].renderFinishedSemaphore = swapchainManager_->getRenderFinishedSemaphore(i);
+        frames_[i].fence = swapchainManager_->getInFlightFence(i);
+        LOG_DEBUG_CAT("Renderer", "Reassigned sync objects for frame {}: imageSem={:p}, renderSem={:p}, fence={:p}",
+                      i, static_cast<void*>(frames_[i].imageAvailableSemaphore),
+                      static_cast<void*>(frames_[i].renderFinishedSemaphore),
+                      static_cast<void*>(frames_[i].fence));
+    }
 
     width_ = width;
     height_ = height;

@@ -31,24 +31,46 @@ VulkanSwapchainManager::VulkanSwapchainManager(Vulkan::Context& context, VkSurfa
     }
     context_.surface = surface;
 
-    // Pre-allocate per-frame semaphores
+    // Pre-allocate per-frame synchronization primitives
+    imageAvailableSemaphores_.resize(MAX_FRAMES_IN_FLIGHT);
     renderFinishedSemaphores_.resize(MAX_FRAMES_IN_FLIGHT);
+    inFlightFences_.resize(MAX_FRAMES_IN_FLIGHT);
+
+    VkSemaphoreCreateInfo semaphoreInfo{
+        .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
+        .pNext = nullptr,
+        .flags = 0  // Binary semaphore
+    };
+
+    VkFenceCreateInfo fenceInfo{
+        .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+        .pNext = nullptr,
+        .flags = VK_FENCE_CREATE_SIGNALED_BIT
+    };
+
     for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
-        VkSemaphoreCreateInfo semaphoreInfo{
-            .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
-            .pNext = nullptr,
-            .flags = 0  // Binary semaphore
-        };
-        VkResult result = vkCreateSemaphore(context_.device, &semaphoreInfo, nullptr, &renderFinishedSemaphores_[i]);
+        VkResult result = vkCreateSemaphore(context_.device, &semaphoreInfo, nullptr, &imageAvailableSemaphores_[i]);
+        if (result != VK_SUCCESS) {
+            throw std::runtime_error("Failed to create image available semaphore");
+        }
+
+        result = vkCreateSemaphore(context_.device, &semaphoreInfo, nullptr, &renderFinishedSemaphores_[i]);
         if (result != VK_SUCCESS) {
             throw std::runtime_error("Failed to create render finished semaphore");
+        }
+
+        result = vkCreateFence(context_.device, &fenceInfo, nullptr, &inFlightFences_[i]);
+        if (result != VK_SUCCESS) {
+            throw std::runtime_error("Failed to create in-flight fence");
         }
     }
 }
 
 VulkanSwapchainManager::~VulkanSwapchainManager() {
     cleanupSwapchain();
+    Dispose::destroySemaphores(context_.device, imageAvailableSemaphores_);
     Dispose::destroySemaphores(context_.device, renderFinishedSemaphores_);
+    Dispose::destroyFences(context_.device, inFlightFences_);
 }
 
 void VulkanSwapchainManager::initializeSwapchain(int width, int height) {
@@ -117,24 +139,24 @@ void VulkanSwapchainManager::initializeSwapchain(int width, int height) {
     }
     swapchainImageFormat_ = surfaceFormat.format;
 
-    // Choose present mode - Prioritize IMMEDIATE for max FPS (may tear), fallback to MAILBOX, then FIFO
-    VkPresentModeKHR presentMode = VK_PRESENT_MODE_IMMEDIATE_KHR;
-    bool immediateSupported = false;
+    // Choose present mode - Prioritize MAILBOX for low latency without tearing, fallback to IMMEDIATE, then FIFO
+    VkPresentModeKHR presentMode = VK_PRESENT_MODE_MAILBOX_KHR;
+    bool mailboxSupported = false;
     for (const auto& availablePresentMode : presentModes) {
-        if (availablePresentMode == VK_PRESENT_MODE_IMMEDIATE_KHR) {
-            immediateSupported = true;
+        if (availablePresentMode == VK_PRESENT_MODE_MAILBOX_KHR) {
+            mailboxSupported = true;
             break;
         }
     }
-    if (!immediateSupported) {
-        presentMode = VK_PRESENT_MODE_MAILBOX_KHR;
+    if (!mailboxSupported) {
+        presentMode = VK_PRESENT_MODE_IMMEDIATE_KHR;
         for (const auto& availablePresentMode : presentModes) {
-            if (availablePresentMode == VK_PRESENT_MODE_MAILBOX_KHR) {
+            if (availablePresentMode == VK_PRESENT_MODE_IMMEDIATE_KHR) {
                 presentMode = availablePresentMode;
                 break;
             }
         }
-        if (presentMode != VK_PRESENT_MODE_MAILBOX_KHR) {
+        if (presentMode != VK_PRESENT_MODE_IMMEDIATE_KHR) {
             presentMode = VK_PRESENT_MODE_FIFO_KHR;
         }
     }
@@ -149,7 +171,7 @@ void VulkanSwapchainManager::initializeSwapchain(int width, int height) {
         throw std::runtime_error("Invalid swapchain extent (window not ready?)");
     }
 
-    // Choose image count
+    // Choose image count - Request one more than min for better performance
     imageCount_ = capabilities.minImageCount + 1;
     if (capabilities.maxImageCount > 0 && imageCount_ > capabilities.maxImageCount) {
         imageCount_ = capabilities.maxImageCount;
@@ -231,7 +253,7 @@ void VulkanSwapchainManager::initializeSwapchain(int width, int height) {
         throw std::runtime_error("Empty swapchain image views after creation");
     }
 
-    // Set max frames
+    // Set max frames - Clamp to available synchronization primitives
     maxFramesInFlight_ = std::min(MAX_FRAMES_IN_FLIGHT, imageCount_);
 
     // Update context
@@ -273,11 +295,25 @@ void VulkanSwapchainManager::cleanupSwapchain() {
     swapchainExtent_ = {0, 0};
 }
 
+VkSemaphore VulkanSwapchainManager::getImageAvailableSemaphore(uint32_t currentFrame) const {
+    if (currentFrame >= imageAvailableSemaphores_.size()) {
+        throw std::out_of_range("Invalid current frame for image available semaphore: " + std::to_string(currentFrame));
+    }
+    return imageAvailableSemaphores_[currentFrame];
+}
+
 VkSemaphore VulkanSwapchainManager::getRenderFinishedSemaphore(uint32_t currentFrame) const {
     if (currentFrame >= renderFinishedSemaphores_.size()) {
         throw std::out_of_range("Invalid current frame for render finished semaphore: " + std::to_string(currentFrame));
     }
     return renderFinishedSemaphores_[currentFrame];
+}
+
+VkFence VulkanSwapchainManager::getInFlightFence(uint32_t currentFrame) const {
+    if (currentFrame >= inFlightFences_.size()) {
+        throw std::out_of_range("Invalid current frame for in-flight fence: " + std::to_string(currentFrame));
+    }
+    return inFlightFences_[currentFrame];
 }
 
 } // namespace VulkanRTX

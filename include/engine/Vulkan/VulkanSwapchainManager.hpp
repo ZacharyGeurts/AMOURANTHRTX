@@ -29,7 +29,10 @@ public:
     VkExtent2D getSwapchainExtent() const { return swapchainExtent_; }
     const std::vector<VkImage>& getSwapchainImages() const { return swapchainImages_; }
     const std::vector<VkImageView>& getSwapchainImageViews() const { return swapchainImageViews_; }
+    VkSemaphore getImageAvailableSemaphore(uint32_t currentFrame) const;
     VkSemaphore getRenderFinishedSemaphore(uint32_t currentFrame) const;
+    VkFence getInFlightFence(uint32_t currentFrame) const;
+    uint32_t getMaxFramesInFlight() const { return maxFramesInFlight_; }
 
 private:
     Vulkan::Context& context_;
@@ -39,10 +42,12 @@ private:
     uint32_t imageCount_;
     std::vector<VkImage> swapchainImages_;
     std::vector<VkImageView> swapchainImageViews_;
-    std::vector<VkSemaphore> renderFinishedSemaphores_;  // Per-frame, not per-image
+    std::vector<VkSemaphore> imageAvailableSemaphores_;  // Per-frame
+    std::vector<VkSemaphore> renderFinishedSemaphores_;  // Per-frame
+    std::vector<VkFence> inFlightFences_;  // Per-frame
     uint32_t graphicsQueueFamilyIndex_;
     uint32_t presentQueueFamilyIndex_;
-    uint32_t maxFramesInFlight_ = 3;  // Local fallback; set from swapchain
+    uint32_t maxFramesInFlight_ = 0;  // Determined during initialization
 };
 
 } // namespace VulkanRTX

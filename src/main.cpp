@@ -41,7 +41,7 @@ int main() {
         // Instantiate the Application class, passing title and resolution.
         // This triggers SDL3 window creation, Vulkan initialization, and engine setup.
         // Application constructor handles OpenMP configuration, simulator/renderer creation, and Vulkan resources.
-        Application app("Dimensional Navigator", width, height);
+        Application app("AMOURANTH RTX", width, height);
 
         // Start the main event loop: Handles rendering, input, resize, and quitting.
         // Runs until user closes window (e.g., Alt+F4, SDL_QUIT event).
