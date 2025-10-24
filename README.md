@@ -57,10 +57,10 @@ It is a Glorified calculator and you can set it to experimental theory.
 Contributions are welcome!  
 Please submit pull requests or open issues on the repository.  
 Ensure code follows C++20 standards and includes proper error handling.  
-I am now a stickler for OMP parallelization and memory safety with C++20 and the advent of AI coding.  
+I am now a stickler for OMP parallelization and memory safety with C++20 due to advent of AI coding.  
 
 ## Built on AMOURANTH RTX.  
-A ground up SDL3 and Vulkan with RTX engine.  
+A ground up SDL3 and Vulkan with RTX engine using GLM for fast vectors and math.  
 RTX 3060 Ti and higher, RX 6800 and up.  
 
 **Platform**: Currently Linux-only with toolchain work being implemented SDK style.  
