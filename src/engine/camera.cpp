@@ -1,3 +1,4 @@
+// engine/camera.cpp
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts gzac5314@gmail.com is licensed under CC BY-NC 4.0
 // Camera implementation for 3D rendering
 // Dependencies: GLM, C++20 standard library
@@ -7,8 +8,6 @@
 #include "engine/camera.hpp"
 #include <glm/gtc/matrix_transform.hpp>
 #include <algorithm>
-
-// Note: No namespace here, as PerspectiveCamera is in the global namespace in camera.hpp
 
 PerspectiveCamera::PerspectiveCamera(float fov, float aspectRatio, float nearPlane, float farPlane)
     : position_(0.0f, 0.0f, 3.0f),
@@ -22,7 +21,8 @@ PerspectiveCamera::PerspectiveCamera(float fov, float aspectRatio, float nearPla
       farPlane_(farPlane),
       mode_(0),
       movementSpeed_(2.5f),
-      mouseSensitivity_(0.1f) {
+      mouseSensitivity_(0.1f),
+      isPaused_(false) {
     updateCameraVectors();
 }
 
@@ -54,7 +54,9 @@ void PerspectiveCamera::setOrientation(float yaw, float pitch) {
 }
 
 void PerspectiveCamera::update([[maybe_unused]] float deltaTime) {
-    // No-op; can be extended for dynamic behavior
+    if (!isPaused_) {
+        // Placeholder for dynamic behavior
+    }
 }
 
 void PerspectiveCamera::moveForward(float speed) {
@@ -99,6 +101,20 @@ void PerspectiveCamera::moveCamera(float x, float y, float z, [[maybe_unused]] s
 
 void PerspectiveCamera::setAspectRatio(float aspectRatio) {
     aspectRatio_ = aspectRatio;
+}
+
+void PerspectiveCamera::moveUserCam(float dx, float dy, float dz) {
+    glm::vec3 right = glm::normalize(glm::cross(front_, up_));
+    position_ += dx * right + dy * up_ + dz * front_;
+}
+
+void PerspectiveCamera::togglePause() {
+    isPaused_ = !isPaused_;
+}
+
+void PerspectiveCamera::updateZoom(bool zoomIn) {
+    fov_ = zoomIn ? fov_ * 0.9f : fov_ * 1.1f;
+    fov_ = std::clamp(fov_, 10.0f, 120.0f);
 }
 
 void PerspectiveCamera::updateCameraVectors() {

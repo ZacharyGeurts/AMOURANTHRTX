@@ -1,4 +1,3 @@
-// In src/engine/Vulkan/VulkanRenderer.cpp
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts gzac5314@gmail.com is licensed under CC BY-NC 4.0
 #include "engine/Vulkan/VulkanRenderer.hpp"
 #include "engine/Vulkan/VulkanBufferManager.hpp"
@@ -1192,10 +1191,6 @@ void VulkanRenderer::renderFrame(const Camera& camera) {
         throw std::runtime_error("Invalid render state");
     }
 
-    // Check if the camera is an AMOURANTH instance for mode-specific rendering
-    const UE::AMOURANTH* amouranth = dynamic_cast<const UE::AMOURANTH*>(&camera);
-    bool isMode1 = amouranth && amouranth->getMode() == 1;
-
     vkWaitForFences(context_.device, 1, &frames_[currentFrame_].fence, VK_TRUE, UINT64_MAX);
     vkResetFences(context_.device, 1, &frames_[currentFrame_].fence);
 
@@ -1224,7 +1219,7 @@ void VulkanRenderer::renderFrame(const Camera& camera) {
         .model = glm::mat4(1.0f), // Default identity matrix
         .view = camera.getViewMatrix(),
         .proj = camera.getProjectionMatrix(),
-        .mode = amouranth ? amouranth->getMode() : 0
+        .mode = 0 // Default mode, as AMOURANTH is removed
     };
     VkDeviceMemory uniformBufferMemory = bufferManager_->getUniformBufferMemory(currentFrame_);
     if (!uniformBufferMemory) {
@@ -1252,113 +1247,100 @@ void VulkanRenderer::renderFrame(const Camera& camera) {
         .resolution = {context_.swapchainExtent.width, context_.swapchainExtent.height}
     };
 
-    if (isMode1) {
-        // Mode 1 rendering using renderMode1
-        float zoomLevel = 1.0f; // Default zoom level, adjustable via AMOURANTH if needed
-        float wavePhase = 0.0f; // Default wave phase, adjustable if needed
-        float deltaTime = 0.016f; // Assume 60 FPS for default delta time
-        renderMode1(amouranth, imageIndex, bufferManager_->getVertexBuffer(), frames_[currentFrame_].commandBuffer,
-                    bufferManager_->getIndexBuffer(), zoomLevel, width_, height_, wavePhase, amouranth->getCache(),
-                    pipelineManager_->getGraphicsPipelineLayout(), frames_[currentFrame_].graphicsDescriptorSet,
-                    context_.device, bufferManager_->getVertexBufferMemory(), pipelineManager_->getGraphicsPipeline(),
-                    deltaTime, pipelineManager_->getRenderPass(), context_.framebuffers[imageIndex]);
-    } else {
-        // Default rendering path (ray-tracing + graphics)
-        VkCommandBufferBeginInfo beginInfo{
-            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-            .pNext = nullptr,
-            .flags = 0,
-            .pInheritanceInfo = nullptr
-        };
-        if (vkBeginCommandBuffer(frames_[currentFrame_].commandBuffer, &beginInfo) != VK_SUCCESS) {
-            LOG_ERROR_CAT("Renderer", "Failed to begin command buffer");
-            throw std::runtime_error("Failed to begin command buffer");
-        }
+    // Default rendering path (ray-tracing + graphics)
+    VkCommandBufferBeginInfo beginInfo{
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .pNext = nullptr,
+        .flags = 0,
+        .pInheritanceInfo = nullptr
+    };
+    if (vkBeginCommandBuffer(frames_[currentFrame_].commandBuffer, &beginInfo) != VK_SUCCESS) {
+        LOG_ERROR_CAT("Renderer", "Failed to begin command buffer");
+        throw std::runtime_error("Failed to begin command buffer");
+    }
 
-        recordRayTracingCommands(frames_[currentFrame_].commandBuffer, context_.swapchainExtent, context_.storageImage,
-                                context_.storageImageView, pushConstants, context_.topLevelAS);
-        denoiseImage(frames_[currentFrame_].commandBuffer, context_.storageImage, context_.storageImageView,
-                     denoiseImage_, denoiseImageView_);
+    recordRayTracingCommands(frames_[currentFrame_].commandBuffer, context_.swapchainExtent, context_.storageImage,
+                            context_.storageImageView, pushConstants, context_.topLevelAS);
+    denoiseImage(frames_[currentFrame_].commandBuffer, context_.storageImage, context_.storageImageView,
+                 denoiseImage_, denoiseImageView_);
 
-        VkImageMemoryBarrier graphicsBarrier{
-            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-            .pNext = nullptr,
-            .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
-            .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
-            .oldLayout = VK_IMAGE_LAYOUT_GENERAL,
-            .newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .image = denoiseImage_,
-            .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}
-        };
-        vkCmdPipelineBarrier(frames_[currentFrame_].commandBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-                             0, 0, nullptr, 0, nullptr, 1, &graphicsBarrier);
+    VkImageMemoryBarrier graphicsBarrier{
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .pNext = nullptr,
+        .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
+        .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
+        .oldLayout = VK_IMAGE_LAYOUT_GENERAL,
+        .newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .image = denoiseImage_,
+        .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}
+    };
+    vkCmdPipelineBarrier(frames_[currentFrame_].commandBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                         0, 0, nullptr, 0, nullptr, 1, &graphicsBarrier);
 
-        VkClearValue clearValue = {{{0.2f, 0.2f, 0.3f, 1.0f}}};
-        VkRenderPassBeginInfo renderPassInfo{
-            .sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
-            .pNext = nullptr,
-            .renderPass = pipelineManager_->getRenderPass(),
-            .framebuffer = context_.framebuffers[imageIndex],
-            .renderArea = {{0, 0}, context_.swapchainExtent},
-            .clearValueCount = 1,
-            .pClearValues = &clearValue
-        };
-        if (!renderPassInfo.renderPass || !renderPassInfo.framebuffer) {
-            LOG_ERROR_CAT("Renderer", "Invalid render pass or framebuffer: renderPass={:p}, framebuffer={:p}",
-                          static_cast<void*>(renderPassInfo.renderPass), static_cast<void*>(renderPassInfo.framebuffer));
-            throw std::runtime_error("Invalid render pass or framebuffer");
-        }
-        vkCmdBeginRenderPass(frames_[currentFrame_].commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
+    VkClearValue clearValue = {{{0.2f, 0.2f, 0.3f, 1.0f}}};
+    VkRenderPassBeginInfo renderPassInfo{
+        .sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
+        .pNext = nullptr,
+        .renderPass = pipelineManager_->getRenderPass(),
+        .framebuffer = context_.framebuffers[imageIndex],
+        .renderArea = {{0, 0}, context_.swapchainExtent},
+        .clearValueCount = 1,
+        .pClearValues = &clearValue
+    };
+    if (!renderPassInfo.renderPass || !renderPassInfo.framebuffer) {
+        LOG_ERROR_CAT("Renderer", "Invalid render pass or framebuffer: renderPass={:p}, framebuffer={:p}",
+                      static_cast<void*>(renderPassInfo.renderPass), static_cast<void*>(renderPassInfo.framebuffer));
+        throw std::runtime_error("Invalid render pass or framebuffer");
+    }
+    vkCmdBeginRenderPass(frames_[currentFrame_].commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
 
-        VkPipeline graphicsPipeline = pipelineManager_->getGraphicsPipeline();
-        VkPipelineLayout graphicsPipelineLayout = pipelineManager_->getGraphicsPipelineLayout();
-        if (!graphicsPipeline || !graphicsPipelineLayout) {
-            LOG_ERROR_CAT("Renderer", "Invalid graphics pipeline state: pipeline={:p}, layout={:p}",
-                          static_cast<void*>(graphicsPipeline), static_cast<void*>(graphicsPipelineLayout));
-            throw std::runtime_error("Invalid graphics pipeline state");
-        }
-        vkCmdBindPipeline(frames_[currentFrame_].commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
-        if (frames_[currentFrame_].graphicsDescriptorSet == VK_NULL_HANDLE) {
-            LOG_ERROR_CAT("Renderer", "Null graphics descriptor set for frame {}", currentFrame_);
-            throw std::runtime_error("Null graphics descriptor set");
-        }
-        vkCmdBindDescriptorSets(frames_[currentFrame_].commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                                graphicsPipelineLayout, 0, 1, &frames_[currentFrame_].graphicsDescriptorSet, 0, nullptr);
+    VkPipeline graphicsPipeline = pipelineManager_->getGraphicsPipeline();
+    VkPipelineLayout graphicsPipelineLayout = pipelineManager_->getGraphicsPipelineLayout();
+    if (!graphicsPipeline || !graphicsPipelineLayout) {
+        LOG_ERROR_CAT("Renderer", "Invalid graphics pipeline state: pipeline={:p}, layout={:p}",
+                      static_cast<void*>(graphicsPipeline), static_cast<void*>(graphicsPipelineLayout));
+        throw std::runtime_error("Invalid graphics pipeline state");
+    }
+    vkCmdBindPipeline(frames_[currentFrame_].commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
+    if (frames_[currentFrame_].graphicsDescriptorSet == VK_NULL_HANDLE) {
+        LOG_ERROR_CAT("Renderer", "Null graphics descriptor set for frame {}", currentFrame_);
+        throw std::runtime_error("Null graphics descriptor set");
+    }
+    vkCmdBindDescriptorSets(frames_[currentFrame_].commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                            graphicsPipelineLayout, 0, 1, &frames_[currentFrame_].graphicsDescriptorSet, 0, nullptr);
 
-        vkCmdPushConstants(frames_[currentFrame_].commandBuffer, graphicsPipelineLayout,
-                           VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-                           0, sizeof(MaterialData::PushConstants), &pushConstants);
+    vkCmdPushConstants(frames_[currentFrame_].commandBuffer, graphicsPipelineLayout,
+                       VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                       0, sizeof(MaterialData::PushConstants), &pushConstants);
 
-        VkBuffer vertexBuffer = bufferManager_->getVertexBuffer();
-        VkDeviceSize offsets[] = {0};
-        vkCmdBindVertexBuffers(frames_[currentFrame_].commandBuffer, 0, 1, &vertexBuffer, offsets);
-        VkBuffer indexBuffer = bufferManager_->getIndexBuffer();
-        vkCmdBindIndexBuffer(frames_[currentFrame_].commandBuffer, indexBuffer, 0, VK_INDEX_TYPE_UINT32);
-        // Use cached indexCount_ instead of calling getIndices().size() every frame
-        vkCmdDrawIndexed(frames_[currentFrame_].commandBuffer, indexCount_, 1, 0, 0, 0);
-        vkCmdEndRenderPass(frames_[currentFrame_].commandBuffer);
+    VkBuffer vertexBuffer = bufferManager_->getVertexBuffer();
+    VkDeviceSize offsets[] = {0};
+    vkCmdBindVertexBuffers(frames_[currentFrame_].commandBuffer, 0, 1, &vertexBuffer, offsets);
+    VkBuffer indexBuffer = bufferManager_->getIndexBuffer();
+    vkCmdBindIndexBuffer(frames_[currentFrame_].commandBuffer, indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+    vkCmdDrawIndexed(frames_[currentFrame_].commandBuffer, indexCount_, 1, 0, 0, 0);
+    vkCmdEndRenderPass(frames_[currentFrame_].commandBuffer);
 
-        VkImageMemoryBarrier postGraphicsBarrier{
-            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-            .pNext = nullptr,
-            .srcAccessMask = VK_ACCESS_SHADER_READ_BIT,
-            .dstAccessMask = VK_ACCESS_NONE,
-            .oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-            .newLayout = VK_IMAGE_LAYOUT_GENERAL,
-            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .image = denoiseImage_,
-            .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}
-        };
-        vkCmdPipelineBarrier(frames_[currentFrame_].commandBuffer, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                             0, 0, nullptr, 0, nullptr, 1, &postGraphicsBarrier);
+    VkImageMemoryBarrier postGraphicsBarrier{
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .pNext = nullptr,
+        .srcAccessMask = VK_ACCESS_SHADER_READ_BIT,
+        .dstAccessMask = VK_ACCESS_NONE,
+        .oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        .newLayout = VK_IMAGE_LAYOUT_GENERAL,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .image = denoiseImage_,
+        .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}
+    };
+    vkCmdPipelineBarrier(frames_[currentFrame_].commandBuffer, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                         0, 0, nullptr, 0, nullptr, 1, &postGraphicsBarrier);
 
-        if (vkEndCommandBuffer(frames_[currentFrame_].commandBuffer) != VK_SUCCESS) {
-            LOG_ERROR_CAT("Renderer", "Failed to end command buffer");
-            throw std::runtime_error("Failed to end command buffer");
-        }
+    if (vkEndCommandBuffer(frames_[currentFrame_].commandBuffer) != VK_SUCCESS) {
+        LOG_ERROR_CAT("Renderer", "Failed to end command buffer");
+        throw std::runtime_error("Failed to end command buffer");
     }
 
     VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;

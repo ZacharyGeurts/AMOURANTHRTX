@@ -1,6 +1,6 @@
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts gzac5314@gmail.com is licensed under CC BY-NC 4.0
 // Application handling implementation for SDL3 + Vulkan integration.
-// Dependencies: SDL3, GLM, VulkanRTX_Setup.hpp, logging.hpp, Dispose.hpp, ue_init.hpp
+// Dependencies: SDL3, GLM, VulkanRTX_Setup.hpp, logging.hpp, Dispose.hpp, camera.hpp
 // Supported platforms: Linux, Windows.
 // Zachary Geurts 2025
 
@@ -8,19 +8,29 @@
 #include "engine/SDL3/SDL3_audio.hpp"
 #include <SDL3/SDL.h>
 #include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 #include <vector>
 #include <fstream>
 #include <string>
 #include <sstream>
 #include <fmt/format.h>
-#include <source_location>
+#include <chrono>
 #include "engine/logging.hpp"
-#include "ue_init.hpp"  // For AMOURANTH, UniversalEquation, DimensionalNavigator
-#include "engine/Vulkan/VulkanRenderer.hpp"  // VulkanRenderer
+#include "engine/Vulkan/VulkanRenderer.hpp"
 #include "engine/SDL3/SDL3_init.hpp"
 
-// Simple OBJ loader for demonstration
 void loadMesh(const std::string& filename, std::vector<glm::vec3>& vertices, std::vector<uint32_t>& indices) {
+    static std::vector<glm::vec3> cachedVertices;
+    static std::vector<uint32_t> cachedIndices;
+    static bool isLoaded = false;
+
+    if (isLoaded) {
+        LOG_DEBUG_CAT("MeshLoader", "Using cached mesh data for {}", filename);
+        vertices = cachedVertices;
+        indices = cachedIndices;
+        return;
+    }
+
     LOG_DEBUG_CAT("MeshLoader", "Loading mesh from {}", filename);
     vertices.clear();
     indices.clear();
@@ -34,54 +44,53 @@ void loadMesh(const std::string& filename, std::vector<glm::vec3>& vertices, std
             {-0.5f, 0.5f, 0.0f}  // Top-left
         };
         indices = {0, 1, 2};
-        return;
-    }
-
-    std::vector<glm::vec3> tempVertices;
-    std::string line;
-    while (std::getline(file, line)) {
-        std::istringstream iss(line);
-        std::string type;
-        iss >> type;
-        if (type == "v") {
-            glm::vec3 vertex;
-            iss >> vertex.x >> vertex.y >> vertex.z;
-            tempVertices.push_back(vertex);
-        } else if (type == "f") {
-            uint32_t v1, v2, v3;
-            iss >> v1 >> v2 >> v3;
-            indices.push_back(v1 - 1); // OBJ indices are 1-based
-            indices.push_back(v2 - 1);
-            indices.push_back(v3 - 1);
+    } else {
+        std::vector<glm::vec3> tempVertices;
+        std::string line;
+        while (std::getline(file, line)) {
+            std::istringstream iss(line);
+            std::string type;
+            iss >> type;
+            if (type == "v") {
+                glm::vec3 vertex;
+                iss >> vertex.x >> vertex.y >> vertex.z;
+                tempVertices.push_back(vertex);
+            } else if (type == "f") {
+                uint32_t v1, v2, v3;
+                iss >> v1 >> v2 >> v3;
+                indices.push_back(v1 - 1); // OBJ indices are 1-based
+                indices.push_back(v2 - 1);
+                indices.push_back(v3 - 1);
+            }
+        }
+        file.close();
+        vertices = tempVertices;
+        if (vertices.size() < 3 || indices.size() < 3 || indices.size() % 3 != 0) {
+            LOG_WARNING_CAT("MeshLoader", "Invalid mesh data in {}, using fallback triangle", filename);
+            vertices = {
+                {0.0f, -0.5f, 0.0f}, // Bottom
+                {0.5f, 0.5f, 0.0f},  // Top-right
+                {-0.5f, 0.5f, 0.0f}  // Top-left
+            };
+            indices = {0, 1, 2};
         }
     }
-    file.close();
 
-    vertices = tempVertices;
-    if (vertices.size() < 3 || indices.size() < 3 || indices.size() % 3 != 0) {
-        LOG_WARNING_CAT("MeshLoader", "Invalid mesh data in {}, using fallback triangle", filename);
-        vertices = {
-            {0.0f, -0.5f, 0.0f}, // Bottom
-            {0.5f, 0.5f, 0.0f},  // Top-right
-            {-0.5f, 0.5f, 0.0f}  // Top-left
-        };
-        indices = {0, 1, 2};
-    }
-    LOG_DEBUG_CAT("MeshLoader", "Loaded mesh: {} vertices, {} indices", vertices.size(), indices.size());
+    cachedVertices = vertices;
+    cachedIndices = indices;
+    isLoaded = true;
+    LOG_DEBUG_CAT("MeshLoader", "Loaded and cached mesh: {} vertices, {} indices", vertices.size(), indices.size());
 }
 
 Application::Application(const char* title, int width, int height)
     : title_(title), width_(width), height_(height), mode_(1),
       sdl_(std::make_unique<SDL3Initializer::SDL3Initializer>(title, width, height)),
-      renderer_(nullptr), navigator_(nullptr), amouranth_(std::nullopt),
+      renderer_(nullptr), camera_(std::make_unique<PerspectiveCamera>(60.0f, static_cast<float>(width) / height)),
       inputHandler_(nullptr), audioDevice_(0), audioStream_(nullptr),
       lastFrameTime_(std::chrono::steady_clock::now()) {
     LOG_INFO_CAT("Application", "Initializing Application: {} ({}x{})", title_, width_, height_);
     try {
-        // Load mesh from assets folder with fallback
         loadMesh("assets/models/scene.obj", vertices_, indices_);
-
-        // Get Vulkan instance extensions from SDL
         uint32_t extensionCount = 0;
         const char* const* extensionNames = SDL_Vulkan_GetInstanceExtensions(&extensionCount);
         if (!extensionNames) {
@@ -89,24 +98,13 @@ Application::Application(const char* title, int width, int height)
             throw std::runtime_error("Failed to get Vulkan extension count");
         }
         std::vector<std::string> instanceExtensions(extensionNames, extensionNames + extensionCount);
-        // Manually concatenate extensions for logging
         std::string extensionsStr;
         for (size_t i = 0; i < instanceExtensions.size(); ++i) {
             extensionsStr += instanceExtensions[i];
             if (i < instanceExtensions.size() - 1) extensionsStr += ", ";
         }
         LOG_DEBUG_CAT("Application", "Vulkan instance extensions: {}", extensionsStr);
-
-        // Initialize VulkanRenderer with SDL window and extensions
         renderer_ = std::make_unique<VulkanRTX::VulkanRenderer>(width_, height_, sdl_->getWindow(), instanceExtensions);
-        navigator_ = std::make_unique<UE::DimensionalNavigator>("Navigator", width_, height_, *renderer_);
-        navigator_->initialize(9, 1024);
-
-        // Initialize AMOURANTH with Vulkan resources
-        amouranth_.emplace(navigator_.get(), renderer_->getDevice(), VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE);
-        amouranth_->setMode(1); // Removed std::source_location argument
-        amouranth_->getUniversalEquation().setNavigator(navigator_.get());
-        amouranth_->getUniversalEquation().initializeCalculator(&amouranth_.value());
         initializeInput();
         initializeAudio();
         LOG_INFO_CAT("Application", "Application initialized successfully");
@@ -117,10 +115,8 @@ Application::Application(const char* title, int width, int height)
 }
 
 Application::~Application() {
-    amouranth_.reset();
-    LOG_DEBUG_CAT("Application", "AMOURANTH instance destroyed");
+    camera_.reset();
     inputHandler_.reset();
-    navigator_.reset();
     renderer_.reset();
     if (audioStream_) {
         SDL_DestroyAudioStream(audioStream_);
@@ -138,35 +134,27 @@ Application::~Application() {
 }
 
 void Application::initializeInput() {
-    if (amouranth_.has_value()) {
-        inputHandler_ = std::make_unique<HandleInput>(amouranth_->getUniversalEquation(), navigator_.get(), amouranth_.value());
-        inputHandler_->setCallbacks(
-            [this](const SDL_KeyboardEvent& key) { inputHandler_->defaultKeyboardHandler(key); },
-            [this](const SDL_MouseButtonEvent& mb) { inputHandler_->defaultMouseButtonHandler(mb); },
-            [this](const SDL_MouseMotionEvent& mm) { inputHandler_->defaultMouseMotionHandler(mm); },
-            [this](const SDL_MouseWheelEvent& mw) { inputHandler_->defaultMouseWheelHandler(mw); },
-            [this](const SDL_TextInputEvent& ti) { inputHandler_->defaultTextInputHandler(ti); },
-            [this](const SDL_TouchFingerEvent& tf) { inputHandler_->defaultTouchHandler(tf); },
-            [this](const SDL_GamepadButtonEvent& gb) { inputHandler_->defaultGamepadButtonHandler(gb); },
-            [this](const SDL_GamepadAxisEvent& ga) { inputHandler_->defaultGamepadAxisHandler(ga); },
-            [this](bool connected, SDL_JoystickID id, SDL_Gamepad* pad) { inputHandler_->defaultGamepadConnectHandler(connected, id, pad); }
-        );
-        LOG_DEBUG_CAT("Application", "Input handler initialized");
-    } else {
-        LOG_ERROR_CAT("Application", "Cannot initialize input: AMOURANTH not initialized");
-        throw std::runtime_error("AMOURANTH not initialized");
-    }
+    inputHandler_ = std::make_unique<HandleInput>(*camera_);
+    inputHandler_->setCallbacks(
+        [this](const SDL_KeyboardEvent& key) { inputHandler_->defaultKeyboardHandler(key); },
+        [this](const SDL_MouseButtonEvent& mb) { inputHandler_->defaultMouseButtonHandler(mb); },
+        [this](const SDL_MouseMotionEvent& mm) { inputHandler_->defaultMouseMotionHandler(mm); },
+        [this](const SDL_MouseWheelEvent& mw) { inputHandler_->defaultMouseWheelHandler(mw); },
+        [this](const SDL_TextInputEvent& ti) { inputHandler_->defaultTextInputHandler(ti); },
+        [this](const SDL_TouchFingerEvent& tf) { inputHandler_->defaultTouchHandler(tf); },
+        [this](const SDL_GamepadButtonEvent& gb) { inputHandler_->defaultGamepadButtonHandler(gb); },
+        [this](const SDL_GamepadAxisEvent& ga) { inputHandler_->defaultGamepadAxisHandler(ga); },
+        [this](bool connected, SDL_JoystickID id, SDL_Gamepad* pad) { inputHandler_->defaultGamepadConnectHandler(connected, id, pad); }
+    );
+    LOG_DEBUG_CAT("Application", "Input handler initialized");
 }
 
 void Application::initializeAudio() {
     try {
         SDL3Audio::AudioConfig config;
-        config.frequency = 44100;  // Standard sample rate for 8-channel audio
-        config.format = SDL_AUDIO_S16LE;  // Signed 16-bit format for multi-channel audio
-        config.channels = 8;  // 8-channel surround audio
-        // Optional: Set callback if needed for custom audio processing
-        // config.callback = [](Uint8* buffer, int length) { /* Custom audio generation */ };
-
+        config.frequency = 44100;
+        config.format = SDL_AUDIO_S16LE;
+        config.channels = 8;
         SDL3Audio::initAudio(config, audioDevice_, audioStream_);
         LOG_INFO_CAT("Application", "8-channel audio initialized successfully with device ID: {}", audioDevice_);
     } catch (const std::exception& e) {
@@ -186,18 +174,15 @@ void Application::run() {
 }
 
 void Application::render() {
-    if (!amouranth_.has_value() || !renderer_) {
-        LOG_ERROR_CAT("Application", "Cannot render: AMOURANTH or renderer not initialized");
+    if (!renderer_ || !camera_) {
+        LOG_ERROR_CAT("Application", "Cannot render: renderer or camera not initialized");
         return;
     }
     auto currentTime = std::chrono::steady_clock::now();
     float deltaTime = std::chrono::duration<float>(currentTime - lastFrameTime_).count();
     lastFrameTime_ = currentTime;
-
-    amouranth_->update(deltaTime);
-    // Assuming navigator_ provides a concrete Camera instance
-    renderer_->renderFrame(navigator_->getCamera()); // Ensure getCamera() returns a concrete Camera
-    amouranth_->getUniversalEquation().advanceCycle();
+    camera_->update(deltaTime);
+    renderer_->renderFrame(*camera_);
 }
 
 void Application::handleResize(int width, int height) {
@@ -208,16 +193,11 @@ void Application::handleResize(int width, int height) {
     width_ = width;
     height_ = height;
     renderer_->handleResize(width, height);
-    if (amouranth_.has_value()) {
-        navigator_->setWidth(width);
-        navigator_->setHeight(height);
-        amouranth_->setCurrentDimension(amouranth_->getCurrentDimension(), std::source_location::current());
-    }
+    camera_->setAspectRatio(static_cast<float>(width) / height);
     LOG_INFO_CAT("Application", "Resized to {}x{}", width, height);
 }
 
-HandleInput::HandleInput(UE::UniversalEquation& universalEquation, UE::DimensionalNavigator* navigator, UE::AMOURANTH& amouranth)
-    : universalEquation_(universalEquation), navigator_(navigator), amouranth_(amouranth) {
+HandleInput::HandleInput(Camera& camera) : camera_(camera) {
     LOG_DEBUG_CAT("Input", "HandleInput initialized");
 }
 
@@ -308,53 +288,38 @@ void HandleInput::defaultKeyboardHandler(const SDL_KeyboardEvent& key) {
         case SDL_SCANCODE_7:
         case SDL_SCANCODE_8:
         case SDL_SCANCODE_9:
-            {
-                int mode = key.scancode - SDL_SCANCODE_1 + 1;
-                universalEquation_.setMode(mode);
-                navigator_->setMode(mode);
-                amouranth_.setMode(mode); // Removed std::source_location argument
-            }
-            break;
-        case SDL_SCANCODE_KP_PLUS:
-        case SDL_SCANCODE_EQUALS:
-            amouranth_.adjustInfluence(0.1f, std::source_location::current());
-            break;
-        case SDL_SCANCODE_KP_MINUS:
-        case SDL_SCANCODE_MINUS:
-            amouranth_.adjustInfluence(-0.1f, std::source_location::current());
+            camera_.setMode(key.scancode - SDL_SCANCODE_1 + 1);
             break;
         case SDL_SCANCODE_P:
-            amouranth_.togglePause(std::source_location::current());
+            camera_.togglePause();
             break;
         case SDL_SCANCODE_W:
-            amouranth_.moveUserCam(0.0f, 0.0f, 0.1f, std::source_location::current());
+            camera_.moveForward(0.1f);
             break;
         case SDL_SCANCODE_S:
-            amouranth_.moveUserCam(0.0f, 0.0f, -0.1f, std::source_location::current());
+            camera_.moveForward(-0.1f);
             break;
         case SDL_SCANCODE_A:
-            amouranth_.moveUserCam(-0.1f, 0.0f, 0.0f, std::source_location::current());
+            camera_.moveRight(-0.1f);
             break;
         case SDL_SCANCODE_D:
-            amouranth_.moveUserCam(0.1f, 0.0f, 0.0f, std::source_location::current());
+            camera_.moveRight(0.1f);
             break;
         case SDL_SCANCODE_Q:
-            amouranth_.moveUserCam(0.0f, 0.1f, 0.0f, std::source_location::current());
+            camera_.moveUp(0.1f);
             break;
         case SDL_SCANCODE_E:
-            amouranth_.moveUserCam(0.0f, -0.1f, 0.0f, std::source_location::current());
+            camera_.moveUp(-0.1f);
             break;
         case SDL_SCANCODE_Z:
-            amouranth_.updateZoom(true, std::source_location::current());
+            camera_.updateZoom(true);
             break;
         case SDL_SCANCODE_X:
-            amouranth_.updateZoom(false, std::source_location::current());
+            camera_.updateZoom(false);
             break;
         case SDL_SCANCODE_UP:
-            amouranth_.setCurrentDimension(amouranth_.getCurrentDimension() + 1, std::source_location::current());
-            break;
         case SDL_SCANCODE_DOWN:
-            amouranth_.setCurrentDimension(amouranth_.getCurrentDimension() - 1, std::source_location::current());
+            // No-op for now; can add mode or other logic if needed
             break;
         default:
             break;
@@ -366,14 +331,14 @@ void HandleInput::defaultMouseButtonHandler(const SDL_MouseButtonEvent& mb) {
 }
 
 void HandleInput::defaultMouseMotionHandler(const SDL_MouseMotionEvent& mm) {
-    amouranth_.rotateCamera(mm.xrel * 0.005f, mm.yrel * 0.005f, std::source_location::current());
+    camera_.rotate(mm.xrel * 0.005f, mm.yrel * 0.005f);
 }
 
 void HandleInput::defaultMouseWheelHandler(const SDL_MouseWheelEvent& mw) {
     if (mw.y > 0) {
-        amouranth_.updateZoom(true, std::source_location::current());
+        camera_.updateZoom(true);
     } else if (mw.y < 0) {
-        amouranth_.updateZoom(false, std::source_location::current());
+        camera_.updateZoom(false);
     }
 }
 
@@ -389,13 +354,13 @@ void HandleInput::defaultGamepadButtonHandler(const SDL_GamepadButtonEvent& gb) 
     if (gb.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) {
         switch (gb.button) {
             case SDL_GAMEPAD_BUTTON_SOUTH: // A button
-                amouranth_.updateZoom(true, std::source_location::current());
+                camera_.updateZoom(true);
                 break;
             case SDL_GAMEPAD_BUTTON_EAST: // B button
-                amouranth_.updateZoom(false, std::source_location::current());
+                camera_.updateZoom(false);
                 break;
             case SDL_GAMEPAD_BUTTON_NORTH: // Y button
-                amouranth_.togglePause(std::source_location::current());
+                camera_.togglePause();
                 break;
             default:
                 break;
@@ -406,13 +371,13 @@ void HandleInput::defaultGamepadButtonHandler(const SDL_GamepadButtonEvent& gb) 
 void HandleInput::defaultGamepadAxisHandler(const SDL_GamepadAxisEvent& ga) {
     float axisValue = ga.value / 32767.0f; // Normalize to [-1, 1]
     if (ga.axis == SDL_GAMEPAD_AXIS_LEFTX) {
-        amouranth_.moveUserCam(axisValue * 0.1f, 0.0f, 0.0f, std::source_location::current());
+        camera_.moveUserCam(axisValue * 0.1f, 0.0f, 0.0f);
     } else if (ga.axis == SDL_GAMEPAD_AXIS_LEFTY) {
-        amouranth_.moveUserCam(0.0f, -axisValue * 0.1f, 0.0f, std::source_location::current());
+        camera_.moveUserCam(0.0f, -axisValue * 0.1f, 0.0f);
     } else if (ga.axis == SDL_GAMEPAD_AXIS_RIGHTX) {
-        amouranth_.rotateCamera(axisValue * 0.05f, 0.0f, std::source_location::current());
+        camera_.rotate(axisValue * 0.05f, 0.0f);
     } else if (ga.axis == SDL_GAMEPAD_AXIS_RIGHTY) {
-        amouranth_.rotateCamera(0.0f, -axisValue * 0.05f, std::source_location::current());
+        camera_.rotate(0.0f, -axisValue * 0.05f);
     }
 }
 

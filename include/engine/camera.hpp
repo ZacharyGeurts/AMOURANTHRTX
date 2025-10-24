@@ -1,5 +1,6 @@
+// engine/camera.hpp
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts gzac5314@gmail.com is licensed under CC BY-NC 4.0
-// Camera interface and implementation for 3D rendering
+// Camera interface for 3D rendering
 // Dependencies: GLM, C++20 standard library
 // Supported platforms: Linux, Windows
 // Zachary Geurts 2025
@@ -16,7 +17,6 @@
 class Camera {
 public:
     virtual ~Camera() = default;
-    
     virtual glm::mat4 getViewMatrix() const = 0;
     virtual glm::mat4 getProjectionMatrix() const = 0;
     virtual int getMode() const = 0;
@@ -31,6 +31,12 @@ public:
     virtual void setFOV(float fov) = 0;
     virtual float getFOV() const = 0;
     virtual void setMode(int mode) = 0;
+    virtual void setAspectRatio(float aspectRatio) = 0;
+    virtual void moveCamera(float x, float y, float z, std::source_location loc = std::source_location::current()) = 0;
+    virtual void rotateCamera(float yaw, float pitch, std::source_location loc = std::source_location::current()) = 0;
+    virtual void moveUserCam(float dx, float dy, float dz) = 0; // Added
+    virtual void togglePause() = 0; // Added
+    virtual void updateZoom(bool zoomIn) = 0; // Added
 };
 
 class PerspectiveCamera : public Camera {
@@ -51,9 +57,12 @@ public:
     void setFOV(float fov) override;
     float getFOV() const override;
     void setMode(int mode) override;
-    void rotateCamera(float yaw, float pitch, std::source_location loc = std::source_location::current());
-    void moveCamera(float x, float y, float z, std::source_location loc = std::source_location::current());
-    void setAspectRatio(float aspectRatio);
+    void rotateCamera(float yaw, float pitch, std::source_location loc = std::source_location::current()) override;
+    void moveCamera(float x, float y, float z, std::source_location loc = std::source_location::current()) override;
+    void setAspectRatio(float aspectRatio) override;
+    void moveUserCam(float dx, float dy, float dz) override;
+    void togglePause() override;
+    void updateZoom(bool zoomIn) override;
 
 private:
     void updateCameraVectors();
@@ -70,6 +79,7 @@ private:
     int mode_;
     float movementSpeed_;
     float mouseSensitivity_;
+    bool isPaused_; // Added for togglePause
 };
 
 #endif // CAMERA_HPP

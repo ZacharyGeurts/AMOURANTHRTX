@@ -3,6 +3,7 @@
 // Copyright Zachary Geurts 2025
 
 #include "engine/core.hpp"
+#include "ue_init.hpp"
 #include <vulkan/vulkan.h>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
