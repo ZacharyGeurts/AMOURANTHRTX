@@ -9,6 +9,7 @@ Hearer and Console are not part of the RTX program.
 **C++20** using **SDL3**, **Vulkan**, and **GLM**.  
 **Custom RTX pipelines.**  
 This is a good lunch break program other than the license restricting commercial work.  
+There is a dual license that can permit commercial work but expect 3%+ of sales negotiable.  
 Have a look. I promise to get libraries in the future.  
 ```
 git clone https://github.com/ZacharyGeurts/AMOURANTHRTX
