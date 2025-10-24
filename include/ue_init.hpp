@@ -20,13 +20,14 @@
 #include <format>
 #include <algorithm>
 #include <iomanip>
+#include <numeric> // Added for std::accumulate
 #include "engine/camera.hpp"
 #include "engine/logging.hpp"
 
 // Forward declarations
 namespace VulkanRTX {
 class VulkanRenderer;
-class VulkanRTX_Setup; // Add forward declaration
+class VulkanRTX_Setup;
 }
 
 namespace UE {
@@ -259,7 +260,7 @@ public:
     void validateVertexIndex(int vertexIndex, std::source_location loc = std::source_location::current()) const;
     void validateProjectedVertices() const;
 
-    // Beautiful logging methods for important Universal Equation data
+    // Logging methods for important Universal Equation data
     void logDimensionData(int dimIndex) const;
     void logEnergyResult(const EnergyResult& result) const;
     void logInteraction(const DimensionInteraction& inter) const;
@@ -317,45 +318,56 @@ private:
 
 inline void UniversalEquation::logDimensionData(int dimIndex) const {
     if (dimIndex < 0 || dimIndex >= static_cast<int>(dimensionData_.size())) {
-        LOG_WARNING("Invalid dimension index: {}", dimIndex);
+        LOG_WARNING_CAT("UE", "Invalid dimension index: {}", dimIndex);
         return;
     }
     const auto& data = dimensionData_[dimIndex];
-    LOG_SIMULATION("Dimension {} initialized: scale={:.6Lf}, value={:.3f}, position={}", dimIndex, data.scale, data.value, data.position);
-    LOG_SIMULATION("Energies - NurbEnergy={:.6Lf}, NurbMatter={:.6Lf}, Potential={:.6Lf}, Observable={:.6Lf}", 
-                   data.nurbEnergy, data.nurbMatter, data.potential, data.observable);
-    LOG_SIMULATION("Dynamic Energies - Spin={:.6Lf}, Momentum={:.6Lf}, Field={:.6Lf}, GodWave={:.6Lf}", 
-                   data.spinEnergy, data.momentumEnergy, data.fieldEnergy, data.GodWaveEnergy);
+    LOG_INFO_CAT("UE", "Dimension {} initialized: scale={:.6Lf}, value={:.3f}, position={}", 
+                 dimIndex, data.scale, data.value, data.position);
+    LOG_INFO_CAT("UE", "Energies - NurbEnergy={:.6Lf}, NurbMatter={:.6Lf}, Potential={:.6Lf}, Observable={:.6Lf}", 
+                 data.nurbEnergy, data.nurbMatter, data.potential, data.observable);
+    LOG_INFO_CAT("UE", "Dynamic Energies - Spin={:.6Lf}, Momentum={:.6Lf}, Field={:.6Lf}, GodWave={:.6Lf}", 
+                 data.spinEnergy, data.momentumEnergy, data.fieldEnergy, data.GodWaveEnergy);
 }
 
 inline void UniversalEquation::logEnergyResult(const EnergyResult& result) const {
-    LOG_SIMULATION("Energy Result: Observable={:.6Lf}, Potential={:.6Lf}, NurbMatter={:.6Lf}, NurbEnergy={:.6Lf}", 
-                   result.observable, result.potential, result.nurbMatter, result.nurbEnergy);
-    LOG_SIMULATION("Advanced Energies: Spin={:.6Lf}, Momentum={:.6Lf}, Field={:.6Lf}, GodWave={:.6Lf}", 
-                   result.spinEnergy, result.momentumEnergy, result.fieldEnergy, result.GodWaveEnergy);
+    LOG_INFO_CAT("UE", "Energy Result: Observable={:.6Lf}, Potential={:.6Lf}, NurbMatter={:.6Lf}, NurbEnergy={:.6Lf}", 
+                 result.observable, result.potential, result.nurbMatter, result.nurbEnergy);
+    LOG_INFO_CAT("UE", "Advanced Energies: Spin={:.6Lf}, Momentum={:.6Lf}, Field={:.6Lf}, GodWave={:.6Lf}", 
+                 result.spinEnergy, result.momentumEnergy, result.fieldEnergy, result.GodWaveEnergy);
 }
 
 inline void UniversalEquation::logInteraction(const DimensionInteraction& inter) const {
-    LOG_SIMULATION("Interaction Index {}: Distance={:.6Lf}, Strength={:.6Lf}, GodWaveAmp={:.6Lf}", 
-                   inter.index, inter.distance, inter.strength, inter.godWaveAmplitude);
+    LOG_INFO_CAT("UE", "Interaction Index {}: Distance={:.6Lf}, Strength={:.6Lf}, GodWaveAmp={:.6Lf}", 
+                 inter.index, inter.distance, inter.strength, inter.godWaveAmplitude);
     if (inter.vectorPotential.size() >= 3) {
-        LOG_SIMULATION("Vector Potential: ({:.6Lf}, {:.6Lf}, {:.6Lf})", 
-                       inter.vectorPotential[0], inter.vectorPotential[1], inter.vectorPotential[2]);
+        LOG_INFO_CAT("UE", "Vector Potential: ({:.6Lf}, {:.6Lf}, {:.6Lf})", 
+                     inter.vectorPotential[0], inter.vectorPotential[1], inter.vectorPotential[2]);
     }
 }
 
 inline void UniversalEquation::logInteractions() const {
-    LOG_SIMULATION("Logging {} interactions", interactions_.size());
-    for (const auto& inter : interactions_) {
-        logInteraction(inter);
+    if (debug_) {
+        LOG_INFO_CAT("UE", "Summary: {} interactions computed", interactions_.size());
+        // Logging individual interactions is avoided to prevent overhead in loops
+        // Instead, compute and log summary statistics
+        long double avgDistance = 0.0L;
+        long double avgStrength = 0.0L;
+        if (!interactions_.empty()) {
+            avgDistance = std::accumulate(interactions_.begin(), interactions_.end(), 0.0L,
+                                          [](long double sum, const auto& i) { return sum + i.distance; }) / interactions_.size();
+            avgStrength = std::accumulate(interactions_.begin(), interactions_.end(), 0.0L,
+                                          [](long double sum, const auto& i) { return sum + i.strength; }) / interactions_.size();
+        }
+        LOG_INFO_CAT("UE", "Interaction Stats - Avg Distance: {:.6Lf}, Avg Strength: {:.6Lf}", avgDistance, avgStrength);
     }
 }
 
 inline void UniversalEquation::logStatus() const {
-    LOG_SIMULATION("UniversalEquation Status - Dimension: {}, Mode: {}, Influence: {:.4Lf}, Weak: {:.4Lf}, GodWaveFreq: {:.4Lf}",
-                   currentDimension_, mode_, influence_, weak_, godWaveFreq_);
+    LOG_INFO_CAT("UE", "UniversalEquation Status - Dimension: {}, Mode: {}, Influence: {:.4Lf}, Weak: {:.4Lf}, GodWaveFreq: {:.4Lf}",
+                 currentDimension_, mode_, influence_, weak_, godWaveFreq_);
     if (!dimensionData_.empty()) {
-        logDimensionData(0);  // Log first dimension as example
+        logDimensionData(0); // Log first dimension as example
     }
     logInteractions();
 }

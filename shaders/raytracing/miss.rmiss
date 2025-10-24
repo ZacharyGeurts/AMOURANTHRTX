@@ -1,11 +1,12 @@
-// shaders/raytracing/miss.rmiss
-// AMOURANTH RTX Engine © 2025 by Zachary Geurts gzac5314@gmail.com
-// Licensed under CC BY-NC 4.0
 #version 460
 #extension GL_EXT_ray_tracing : require
+#extension GL_EXT_nonuniform_qualifier : enable
 
-layout(location = 0) rayPayloadInEXT vec3 rayColor;
+layout(binding = 6, set = 0) uniform sampler2D envMap;
+layout(location = 0) rayPayloadInEXT vec3 hitValue;
 
 void main() {
-    rayColor = vec3(0.0, 0.0, 1.0); // Blue for miss
+    vec3 direction = gl_WorldRayDirectionEXT;
+    vec2 uv = vec2(atan(direction.z, direction.x) / (2.0 * 3.14159), acos(direction.y) / 3.14159);
+    hitValue = texture(envMap, uv).rgb;
 }

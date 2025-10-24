@@ -1,12 +1,18 @@
-// shaders/raytracing/shadow_anyhit.rahit
-// AMOURANTH RTX Engine © 2025 by Zachary Geurts gzac5314@gmail.com
-// Licensed under CC BY-NC 4.0
 #version 460
 #extension GL_EXT_ray_tracing : require
+#extension GL_EXT_nonuniform_qualifier : enable
 
-layout(location = 0) rayPayloadInEXT vec3 rayColor;
-hitAttributeEXT vec2 hitAttribs;
+layout(location = 1) rayPayloadInEXT float shadowAttenuation;
+hitAttributeEXT vec2 attribs; // UV coordinates from vertex data (no layout qualifier)
+layout(binding = 5, set = 0) uniform sampler2D alphaTex;
 
 void main() {
-    // Accept hit for shadow rays
+    vec2 uv = attribs; // UVs from vertex attributes
+    float alpha = texture(alphaTex, uv).r;
+    if (alpha < 0.5) {
+        ignoreIntersectionEXT;
+    } else {
+        shadowAttenuation = 0.0;
+        terminateRayEXT;
+    }
 }

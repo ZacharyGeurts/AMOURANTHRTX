@@ -15,7 +15,7 @@ namespace UE {
 
 long double UniversalEquation::safe_div(long double a, long double b) const {
     if (std::abs(b) < 1e-10L) {
-        if (debug_) LOG_WARNING("Simulation", "Division by near-zero ({}) avoided", b);
+        if (debug_) LOG_WARNING_CAT("UE", "Division by near-zero ({}) avoided", b);
         return 0.0L;
     }
     return a / b;
@@ -23,7 +23,7 @@ long double UniversalEquation::safe_div(long double a, long double b) const {
 
 void UniversalEquation::validateVertexIndex(int idx, std::source_location loc) const {
     if (idx < 0 || static_cast<uint64_t>(idx) >= currentVertices_ || currentVertices_ == 0) {
-        LOG_SIMULATION("Invalid vertex index {} (currentVertices_={}) at {}", idx, currentVertices_, loc.file_name());
+        LOG_ERROR_CAT("UE", "Invalid vertex index {} (currentVertices_={}) at {}", idx, currentVertices_, loc.file_name());
         throw std::out_of_range(std::format("Invalid vertex index {} (max: {}) at {}", idx, currentVertices_ - 1, loc.file_name()));
     }
 }
@@ -52,13 +52,12 @@ UniversalEquation::UniversalEquation(int maxDim, int mode, long double infl, lon
       invMaxDim_(1.0L / maxDimensions_), nurbMatterControlPoints_{1.0L, 0.8L, 0.5L, 0.3L, 0.1L},
       nurbEnergyControlPoints_{0.1L, 0.5L, 1.0L, 1.5L, 2.0L}, nurbKnots_{0.0L, 0.0L, 0.0L, 0.0L, 0.5L, 1.0L, 1.0L, 1.0L, 1.0L},
       nurbWeights_{1.0L, 1.0L, 1.0L, 1.0L, 1.0L}, dimensionData_(std::max(1, maxDimensions_), DimensionData{}) {
-    LOG_SIMULATION("UniversalEquation: maxVerts={}, maxDims={}, mode={}", maxVertices_, maxDimensions_, mode_);
-    if (maxVertices_ > 1'000'000) LOG_WARNING("Simulation", "High vertex count: {}", maxVertices_);
+    if (maxVertices_ > 1'000'000) LOG_WARNING_CAT("UE", "High vertex count: {}", maxVertices_);
     if (mode <= 0 || maxDim <= 0) throw std::invalid_argument(std::format("Invalid maxDim={} or mode={}", maxDim, mode));
     initializeWithRetry();
 }
 
-UniversalEquation::~UniversalEquation() { if (debug_) LOG_SIMULATION("UniversalEquation destroyed"); }
+UniversalEquation::~UniversalEquation() { if (debug_) LOG_INFO_CAT("UE", "UniversalEquation destroyed"); }
 
 #define GETTER(type, name, var) type UniversalEquation::get##name() const { return var##_; }
 GETTER(int, CurrentDimension, currentDimension)
@@ -146,8 +145,7 @@ SETTER(long double, GodWaveFreq, godWaveFreq, 0.1L, 10.0L)
 void UniversalEquation::setDebug(bool val) { debug_ = val; }
 void UniversalEquation::setCurrentVertices(uint64_t val) { 
     currentVertices_ = std::clamp(val, static_cast<uint64_t>(1), maxVertices_);
-    needsUpdate_ = true;
-    LOG_SIMULATION("Set currentVertices_ to {}", currentVertices_);
+    needsUpdate_ = true; 
 }
 void UniversalEquation::setNavigator(DimensionalNavigator* nav) { navigator_ = nav; }
 void UniversalEquation::setNCubeVertex(int idx, const std::vector<long double>& v) { 
@@ -178,7 +176,6 @@ void UniversalEquation::setNCubeVertices(const std::vector<std::vector<long doub
     nCubeVertices_ = v; 
     currentVertices_ = std::clamp(static_cast<uint64_t>(v.size()), static_cast<uint64_t>(1), maxVertices_);
     needsUpdate_ = true;
-    LOG_SIMULATION("Set nCubeVertices_ with size {}, currentVertices_={}", v.size(), currentVertices_);
 }
 void UniversalEquation::setVertexMomenta(const std::vector<std::vector<long double>>& m) { 
     vertexMomenta_ = m; 
@@ -195,14 +192,11 @@ void UniversalEquation::setVertexWaveAmplitudes(const std::vector<long double>& 
 void UniversalEquation::setProjectedVertices(const std::vector<glm::vec3>& v) { 
     projectedVerts_ = v; 
     validateProjectedVertices();
-    LOG_SIMULATION("Set projectedVerts_ with size {}", v.size());
 }
 void UniversalEquation::setTotalCharge(long double v) { totalCharge_ = v; }
 void UniversalEquation::setMaterialDensity(long double d) { materialDensity_ = d; }
 
 void UniversalEquation::initializeNCube() {
-    LOG_SIMULATION("Entering initializeNCube with maxVertices_={}", maxVertices_);
-    std::latch latch(1);
     nCubeVertices_.clear();
     vertexMomenta_.clear();
     vertexSpins_.clear();
@@ -221,7 +215,6 @@ void UniversalEquation::initializeNCube() {
 
     // Ensure at least one vertex to avoid zero-vertex issues
     uint64_t numVerts = std::max<uint64_t>(1, std::min(maxVertices_, static_cast<uint64_t>(1ULL << 20)));
-    LOG_SIMULATION("Initializing {} vertices for dimension {}", numVerts, currentDimension_);
     
     try {
         for (uint64_t i = 0; i < numVerts; ++i) {
@@ -239,34 +232,27 @@ void UniversalEquation::initializeNCube() {
             totalCharge_ += 1.0L / maxVertices_;
         }
         currentVertices_ = nCubeVertices_.size();
-        LOG_SIMULATION("Initialized {} vertices, currentVertices_={}", nCubeVertices_.size(), currentVertices_);
     } catch (const std::bad_alloc& e) {
-        LOG_ERROR("Simulation", "Memory allocation failed in initializeNCube: {}", e.what());
+        LOG_ERROR_CAT("UE", "Memory allocation failed in initializeNCube: {}", e.what());
         currentVertices_ = 0;
         throw;
     }
 
     if (currentVertices_ == 0) {
-        LOG_SIMULATION("No vertices initialized in initializeNCube");
         throw std::runtime_error("Failed to initialize any vertices");
     }
 
     if (!projectedVerts_.empty() && reinterpret_cast<std::uintptr_t>(projectedVerts_.data()) % alignof(glm::vec3)) {
-        LOG_SIMULATION("Misaligned projectedVerts_");
         throw std::runtime_error("Misaligned projectedVerts_");
     }
-    latch.count_down();
-    LOG_SIMULATION("initializeNCube completed");
 }
 
 void UniversalEquation::validateProjectedVertices() const {
-    LOG_SIMULATION("Validating projectedVerts_ with size {}, nCubeVertices_ size {}", projectedVerts_.size(), nCubeVertices_.size());
     if (projectedVerts_.size() != nCubeVertices_.size()) {
-        LOG_ERROR("Simulation", "projectedVerts_ size={} != nCubeVertices_ size={}", projectedVerts_.size(), nCubeVertices_.size());
+        LOG_ERROR_CAT("UE", "projectedVerts_ size={} != nCubeVertices_ size={}", projectedVerts_.size(), nCubeVertices_.size());
         throw std::runtime_error(std::format("projectedVerts_ size={} != nCubeVertices_ size={}", projectedVerts_.size(), nCubeVertices_.size()));
     }
     if (!projectedVerts_.empty() && reinterpret_cast<std::uintptr_t>(projectedVerts_.data()) % alignof(glm::vec3)) {
-        LOG_SIMULATION("Misaligned projectedVerts_");
         throw std::runtime_error("Misaligned projectedVerts_");
     }
 }
@@ -308,8 +294,8 @@ std::vector<long double> UniversalEquation::basisFuncs(long double u, int span, 
 long double UniversalEquation::evaluateNURBS(long double u, const std::vector<long double>& cp, const std::vector<long double>& knots,
                                             const std::vector<long double>& weights, int deg) const {
     if (cp.size() != weights.size() || cp.size() + deg + 1 != knots.size()) {
-        LOG_SIMULATION("NURBS parameter mismatch: cp.size={}, weights.size={}, knots.size={}, deg={}", 
-                  cp.size(), weights.size(), knots.size(), deg);
+        LOG_ERROR_CAT("UE", "NURBS parameter mismatch: cp.size={}, weights.size={}, knots.size={}, deg={}", 
+                      cp.size(), weights.size(), knots.size(), deg);
         throw std::invalid_argument("NURBS parameter mismatch");
     }
     int span = findSpan(u, deg, knots);
@@ -326,9 +312,8 @@ long double UniversalEquation::evaluateNURBS(long double u, const std::vector<lo
 }
 
 void UniversalEquation::updateInteractions() {
-    LOG_SIMULATION("Entering updateInteractions with currentVertices_={}", currentVertices_);
     if (currentVertices_ == 0) {
-        LOG_ERROR("Simulation", "Cannot update interactions with zero vertices");
+        LOG_ERROR_CAT("UE", "Cannot update interactions with zero vertices");
         throw std::runtime_error("No vertices available for interaction update");
     }
 
@@ -336,7 +321,7 @@ void UniversalEquation::updateInteractions() {
     projectedVerts_.clear();
     size_t d = currentDimension_, numVerts = std::min(nCubeVertices_.size(), static_cast<size_t>(maxVertices_));
     if (numVerts == 0) {
-        LOG_ERROR("Simulation", "No vertices available after clamping, nCubeVertices_.size={}", nCubeVertices_.size());
+        LOG_ERROR_CAT("UE", "No vertices available after clamping, nCubeVertices_.size={}", nCubeVertices_.size());
         throw std::runtime_error("No vertices available for interaction update");
     }
     
@@ -348,7 +333,7 @@ void UniversalEquation::updateInteractions() {
     std::vector<long double> ref(d, 0.0L);
     for (size_t i = 0; i < numVerts; ++i) {
         if (i >= nCubeVertices_.size()) {
-            LOG_WARNING("Simulation", "Skipping vertex {} due to size mismatch", i);
+            LOG_WARNING_CAT("UE", "Skipping vertex {} due to size mismatch", i);
             continue;
         }
         for (size_t j = 0; j < d; ++j) {
@@ -368,7 +353,7 @@ void UniversalEquation::updateInteractions() {
         #pragma omp for schedule(dynamic)
         for (uint64_t i = 0; i < numVerts; ++i) {
             if (i >= nCubeVertices_.size()) {
-                LOG_WARNING("Simulation", "Thread {} skipping vertex {} due to size mismatch", tid, i);
+                LOG_WARNING_CAT("UE", "Thread {} skipping vertex {} due to size mismatch", tid, i);
                 continue;
             }
             try {
@@ -390,7 +375,7 @@ void UniversalEquation::updateInteractions() {
                 localInt[tid].emplace_back(i, dist, computeInteraction(i, dist), vecPot, computeGodWaveAmplitude(i, simulationTime_));
                 localProj[tid].push_back(proj);
             } catch (const std::exception& e) {
-                LOG_ERROR("Simulation", "Thread {} failed processing vertex {}: {}", tid, i, e.what());
+                LOG_ERROR_CAT("UE", "Thread {} failed processing vertex {}: {}", tid, i, e.what());
             }
         }
         latch.count_down();
@@ -405,29 +390,27 @@ void UniversalEquation::updateInteractions() {
     for (const auto& li : localInt) interactions_.insert(interactions_.end(), li.begin(), li.end());
     for (const auto& lp : localProj) projectedVerts_.insert(projectedVerts_.end(), lp.begin(), lp.end());
     if (totalInt != totalProj || totalInt != numVerts) {
-        LOG_ERROR("Simulation", "Mismatch in merged vector sizes: interactions_={}, projectedVerts_={}, expected={}", totalInt, totalProj, numVerts);
+        LOG_ERROR_CAT("UE", "Mismatch in merged vector sizes: interactions_={}, projectedVerts_={}, expected={}", totalInt, totalProj, numVerts);
         throw std::runtime_error("Mismatch in merged vector sizes");
     }
     validateProjectedVertices();
     currentVertices_ = projectedVerts_.size();
-    LOG_SIMULATION("updateInteractions completed with {} interactions and {} projected vertices", interactions_.size(), projectedVerts_.size());
 }
 
 EnergyResult UniversalEquation::compute() {
-    LOG_SIMULATION("Entering compute with currentVertices_={}", currentVertices_);
     if (needsUpdate_) {
         updateInteractions();
         needsUpdate_ = false;
     }
     if (currentVertices_ == 0) {
-        LOG_ERROR("Simulation", "Cannot compute with zero vertices");
+        LOG_ERROR_CAT("UE", "Cannot compute with zero vertices");
         throw std::runtime_error("No vertices available for computation");
     }
 
     EnergyResult res{};
     uint64_t numVerts = std::min(nCubeVertices_.size(), static_cast<size_t>(maxVertices_));
     if (numVerts == 0) {
-        LOG_ERROR("Simulation", "No vertices available for computation after clamping");
+        LOG_ERROR_CAT("UE", "No vertices available for computation after clamping");
         throw std::runtime_error("No vertices available for computation");
     }
     
@@ -440,7 +423,7 @@ EnergyResult UniversalEquation::compute() {
         #pragma omp for schedule(dynamic)
         for (uint64_t i = 0; i < numVerts; ++i) {
             if (i >= nCubeVertices_.size()) {
-                LOG_WARNING("Simulation", "Thread {} skipping vertex {} due to size mismatch", tid, i);
+                LOG_WARNING_CAT("UE", "Thread {} skipping vertex {} due to size mismatch", tid, i);
                 continue;
             }
             try {
@@ -451,7 +434,7 @@ EnergyResult UniversalEquation::compute() {
                     try {
                         pot += computeGravitationalPotential(i, j);
                     } catch (const std::exception& e) {
-                        LOG_WARNING("Simulation", "Thread {} failed computing potential for vertex {}->{}: {}", tid, i, j, e.what());
+                        LOG_WARNING_CAT("UE", "Thread {} failed computing potential for vertex {}->{}: {}", tid, i, j, e.what());
                     }
                 }
                 pot *= numVerts / 100;
@@ -463,7 +446,7 @@ EnergyResult UniversalEquation::compute() {
                 fieldE[i] = computeEMField(i);
                 gwE[i] = computeGodWave(i);
             } catch (const std::exception& e) {
-                LOG_ERROR("Simulation", "Thread {} failed processing vertex {}: {}", tid, i, e.what());
+                LOG_ERROR_CAT("UE", "Thread {} failed processing vertex {}: {}", tid, i, e.what());
             }
         }
         latch.count_down();
@@ -481,12 +464,10 @@ EnergyResult UniversalEquation::compute() {
         res.GodWaveEnergy += gwE[i];
     }
     res.observable = safe_div(res.observable, static_cast<long double>(numVerts));
-    LOG_SIMULATION("compute completed with observable={}", res.observable);
     return res;
 }
 
 void UniversalEquation::initializeWithRetry() {
-    LOG_SIMULATION("Entering initializeWithRetry with maxVertices_={}", maxVertices_);
     std::latch latch(1);
     int attempts = 0;
     uint64_t currVerts = maxVertices_;
@@ -499,11 +480,10 @@ void UniversalEquation::initializeWithRetry() {
                 vertexWaveAmplitudes_.resize(currVerts);
                 interactions_.resize(currVerts, {0, 0.0L, 0.0L, std::vector<long double>(std::min(3, currentDimension_), 0.0L), 0.0L});
                 projectedVerts_.resize(currVerts);
-                LOG_SIMULATION("Resized vectors to currVerts={}", currVerts);
             }
             initializeNCube();
             if (currentVertices_ == 0) {
-                LOG_ERROR("Simulation", "initializeNCube failed to set vertices");
+                LOG_ERROR_CAT("UE", "initializeNCube failed to set vertices");
                 throw std::runtime_error("No vertices initialized");
             }
             cachedCos_.resize(maxDimensions_ + 1);
@@ -513,36 +493,32 @@ void UniversalEquation::initializeWithRetry() {
             updateInteractions();
             validateProjectedVertices();
             latch.count_down();
-            LOG_SIMULATION("initializeWithRetry succeeded with {} vertices", currentVertices_);
             return;
         } catch (const std::bad_alloc& e) {
-            LOG_WARNING("Simulation", "Memory allocation failed, reducing dimension to {} and vertices to {}: {}", currentDimension_ - 1, currVerts / 2, e.what());
+            LOG_WARNING_CAT("UE", "Memory allocation failed, reducing dimension to {} and vertices to {}: {}", currentDimension_ - 1, currVerts / 2, e.what());
             setCurrentDimension(currentDimension_ - 1);
             currVerts = std::max<uint64_t>(1, currVerts / 2);
             needsUpdate_ = true;
         } catch (const std::exception& e) {
-            LOG_ERROR("Simulation", "Initialization failed: {}", e.what());
+            LOG_ERROR_CAT("UE", "Initialization failed: {}", e.what());
             throw;
         }
     }
-    LOG_ERROR("Simulation", "Max retry attempts reached");
+    LOG_ERROR_CAT("UE", "Max retry attempts reached");
     throw std::runtime_error("Max retry attempts reached");
 }
 
 void UniversalEquation::initializeCalculator(Camera* cam) {
-    LOG_SIMULATION("Entering initializeCalculator");
     if (navigator_ && cam) {
         navigator_->initialize(currentDimension_, maxVertices_);
-        LOG_SIMULATION("Navigator initialized with dimension={} and maxVertices_={}", currentDimension_, maxVertices_);
     }
     try {
         initializeWithRetry();
         validateProjectedVertices();
     } catch (const std::exception& e) {
-        LOG_ERROR("Simulation", "Failed to initialize calculator: {}", e.what());
+        LOG_ERROR_CAT("UE", "Failed to initialize calculator: {}", e.what());
         throw;
     }
-    LOG_SIMULATION("initializeCalculator completed");
 }
 
 long double UniversalEquation::computeNurbMatter(int idx) const {
@@ -618,7 +594,7 @@ std::vector<long double> UniversalEquation::computeGravitationalAcceleration(int
                 acc[j] += force * (v2[j] - v1[j]) / dist;
             }
         } catch (const std::exception& e) {
-            LOG_WARNING("Simulation", "Failed computing acceleration for vertex {}->{}: {}", idx, i, e.what());
+            LOG_WARNING_CAT("UE", "Failed computing acceleration for vertex {}->{}: {}", idx, i, e.what());
         }
     }
     return acc;
@@ -634,7 +610,6 @@ long double UniversalEquation::safeExp(long double x) const {
 }
 
 std::vector<DimensionData> UniversalEquation::computeBatch(int start, int end) {
-    LOG_SIMULATION("Computing batch from dimension {} to {}", start, end);
     std::vector<DimensionData> batch;
     for (int d = start; d <= end; ++d) {
         setCurrentDimension(d);
@@ -643,14 +618,13 @@ std::vector<DimensionData> UniversalEquation::computeBatch(int start, int end) {
                             .observable = data.nurbEnergy + data.nurbMatter };
         batch.push_back(data);
     }
-    LOG_SIMULATION("Batch computed with {} entries", batch.size());
     return batch;
 }
 
 void UniversalEquation::exportToCSV(const std::string& fn, const std::vector<DimensionData>& data) const {
     std::ofstream f(fn);
     if (!f.is_open()) {
-        LOG_ERROR("Simulation", "Failed to open CSV file: {}", fn);
+        LOG_ERROR_CAT("UE", "Failed to open CSV file: {}", fn);
         return;
     }
     f << "Dimension,Scale,PositionX,PositionY,PositionZ,Value,NurbEnergy,NurbMatter,Potential,Observable,SpinEnergy,MomentumEnergy,FieldEnergy,GodWaveEnergy\n";
@@ -659,25 +633,22 @@ void UniversalEquation::exportToCSV(const std::string& fn, const std::vector<Dim
           << d.value << "," << d.nurbEnergy << "," << d.nurbMatter << "," << d.potential << "," << d.observable << ","
           << d.spinEnergy << "," << d.momentumEnergy << "," << d.fieldEnergy << "," << d.GodWaveEnergy << "\n";
     }
-    if (debug_) LOG_SIMULATION("Exported {} dims to {}", data.size(), fn);
 }
 
 DimensionData UniversalEquation::updateCache() {
-    LOG_SIMULATION("Updating cache with currentVertices_={}", currentVertices_);
     DimensionData data{ .dimension = currentDimension_, .scale = currentDimension_ * invMaxDim_, .value = static_cast<float>(influence_) };
     cachedCos_.resize(currentVertices_);
     for (uint64_t i = 0; i < currentVertices_; ++i) {
         try {
             cachedCos_[i] = std::cos(omega_ * i);
         } catch (const std::exception& e) {
-            LOG_WARNING("Simulation", "Failed updating cache for index {}: {}", i, e.what());
+            LOG_WARNING_CAT("UE", "Failed updating cache for index {}: {}", i, e.what());
         }
     }
     return data;
 }
 
 void UniversalEquation::evolveTimeStep(long double dt) {
-    LOG_SIMULATION("Evolving time step with dt={}", dt);
     for (auto& mom : vertexMomenta_) {
         for (auto& m : mom) {
             m += dt * safe_div(vacuumEnergy_, static_cast<long double>(maxDimensions_));
@@ -687,7 +658,6 @@ void UniversalEquation::evolveTimeStep(long double dt) {
 }
 
 void UniversalEquation::advanceCycle() {
-    LOG_SIMULATION("Advancing cycle");
     evolveTimeStep(0.1L);
     updateInteractions();
     if (navigator_) {
@@ -717,7 +687,6 @@ void DimensionalNavigator::setMode(int m) { mode_ = std::clamp(m, 1, 19); }
 void DimensionalNavigator::initialize(int dim, uint64_t verts) {
     dimension_ = std::clamp(dim, 1, 19);
     numVertices_ = std::max<uint64_t>(9, std::min<uint64_t>(verts, static_cast<uint64_t>(1ULL << 20)));
-    LOG_SIMULATION("DimensionalNavigator initialized with dimension={} and numVertices_={}", dimension_, numVertices_);
 }
 int DimensionalNavigator::getWidth() const { return width_; }
 int DimensionalNavigator::getHeight() const { return height_; }
@@ -733,7 +702,6 @@ AMOURANTH::AMOURANTH(DimensionalNavigator* nav, VkDevice dev, VkDeviceMemory vMe
       position_(0.0f), target_(0.0f, 0.0f, -1.0f), up_(0.0f, 1.0f, 0.0f), fov_(45.0f), aspectRatio_(1.0f), nearPlane_(0.1f), farPlane_(100.0f),
       isPaused_(false) {
     universalEquation_->setNavigator(nav);
-    LOG_SIMULATION("AMOURANTH initialized with {} vertices", universalEquation_->getCurrentVertices());
 }
 
 AMOURANTH::~AMOURANTH() {}
@@ -752,7 +720,7 @@ void AMOURANTH::update(float dt) {
             universalEquation_->evolveTimeStep(dt); // Use dt for time step
             universalEquation_->advanceCycle();
         } catch (const std::exception& e) {
-            LOG_ERROR("Simulation", "Failed to advance cycle in AMOURANTH::update: {}", e.what());
+            LOG_ERROR_CAT("UE", "Failed to advance cycle in AMOURANTH::update: {}", e.what());
             isPaused_ = true; // Pause to prevent further errors
         }
     }
@@ -799,17 +767,15 @@ void AMOURANTH::moveCamera(float dx, float dy, float dz, std::source_location) {
 UE::UE() : universalEquation_(std::make_unique<UniversalEquation>(9, 1, 1.0L, 0.5L, true, 9)) {}
 UE::~UE() {}
 void UE::initializeDimensionData(VkDevice device, VkPhysicalDevice physicalDevice) { 
-    LOG_SIMULATION("Initializing dimension data");
     dimensions_.resize(9, DimensionData{});
     if (device == VK_NULL_HANDLE || physicalDevice == VK_NULL_HANDLE) {
-        LOG_ERROR("Simulation", "Invalid Vulkan device or physical device for dimension data initialization");
+        LOG_ERROR_CAT("UE", "Invalid Vulkan device or physical device for dimension data initialization");
         throw std::invalid_argument("Invalid Vulkan device or physical device");
     }
 }
 void UE::updateUBO(uint32_t frame, const glm::mat4& view, const glm::mat4& proj, uint32_t mode) {
     if (ubos_.size() <= frame) {
         ubos_.resize(frame + 1);
-        LOG_SIMULATION("Resized UBOs to {}", ubos_.size());
     }
     ubos_[frame] = {glm::mat4(1.0f), view, proj, static_cast<int>(mode)};
 }
@@ -817,7 +783,6 @@ void UE::cleanup([[maybe_unused]] VkDevice device) {
     dimensionBuffer_ = VK_NULL_HANDLE; 
     dimensionBufferMemory_ = VK_NULL_HANDLE; 
     descriptorSet_ = VK_NULL_HANDLE; 
-    LOG_SIMULATION("Cleaned up UE resources");
 }
 
 } // namespace UE

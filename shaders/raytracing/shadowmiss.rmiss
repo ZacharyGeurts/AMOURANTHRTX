@@ -1,11 +1,7 @@
-// shaders/raytracing/shadowmiss.rmiss
-// AMOURANTH RTX Engine © 2025 by Zachary Geurts gzac5314@gmail.com
-// Licensed under CC BY-NC 4.0
 #version 460
 #extension GL_EXT_ray_tracing : require
-
-layout(location = 0) rayPayloadInEXT vec3 rayColor;
+layout(location = 1) rayPayloadInEXT float shadowAttenuation;
 
 void main() {
-    rayColor = vec3(1.0); // White for shadow miss
+    shadowAttenuation = 1.0;
 }

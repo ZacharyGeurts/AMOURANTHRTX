@@ -1,9 +1,7 @@
-// shaders/raytracing/callable.rcall
-// AMOURANTH RTX Engine © 2025 by Zachary Geurts gzac5314@gmail.com
-// Licensed under CC BY-NC 4.0
 #version 460
 #extension GL_EXT_ray_tracing : require
+layout(location = 2) callableDataInEXT float callableData;
 
 void main() {
-    // Stub for callable shader
+    callableData = 0.5; // Example: Return a constant value
 }

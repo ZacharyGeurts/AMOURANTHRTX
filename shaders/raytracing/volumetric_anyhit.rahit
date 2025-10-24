@@ -1,12 +1,16 @@
-// shaders/raytracing/volumetric_anyhit.rahit
-// AMOURANTH RTX Engine © 2025 by Zachary Geurts gzac5314@gmail.com
-// Licensed under CC BY-NC 4.0
 #version 460
 #extension GL_EXT_ray_tracing : require
+#extension GL_EXT_nonuniform_qualifier : enable
 
-layout(location = 0) rayPayloadInEXT vec3 rayColor;
-hitAttributeEXT vec2 hitAttribs;
+layout(location = 0) rayPayloadInEXT vec3 hitValue;
+layout(binding = 7, set = 0) uniform sampler3D densityVolume;
 
 void main() {
-    // Accept hit for volumetric
+    vec3 pos = gl_WorldRayOriginEXT + gl_WorldRayDirectionEXT * gl_HitTEXT;
+    float density = texture(densityVolume, pos * 0.1).r; // Scale position for volume
+    if (density < 0.1) {
+        ignoreIntersectionEXT;
+    } else {
+        hitValue *= vec3(0.9, 0.9, 1.0); // Blue tint for volumetric fog
+    }
 }
