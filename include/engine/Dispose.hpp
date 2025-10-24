@@ -11,17 +11,14 @@
 #include <vulkan/vulkan.h>
 #include <SDL3/SDL.h>
 #include <vector>
-#include <mutex>
 #include <format>
 #include <typeinfo>
-#include <chrono>
 #include "engine/logging.hpp"
 
 namespace Dispose {
 
 template <typename HandleType, void (*DestroyFunc)(VkDevice, HandleType, const VkAllocationCallbacks*)>
 inline void destroyHandles(VkDevice device, std::vector<HandleType>& handles) noexcept {
-    std::lock_guard<std::mutex> lock(Vulkan::cleanupMutex);
     if (device != VK_NULL_HANDLE) {
         size_t index = 0;
         for (auto& handle : handles) {
@@ -45,7 +42,6 @@ inline void destroyHandles(VkDevice device, std::vector<HandleType>& handles) no
 
 template <typename HandleType, void (*DestroyFunc)(VkDevice, HandleType, const VkAllocationCallbacks*)>
 inline void destroySingle(VkDevice device, HandleType& handle) noexcept {
-    std::lock_guard<std::mutex> lock(Vulkan::cleanupMutex);
     if (device != VK_NULL_HANDLE && handle != VK_NULL_HANDLE) {
         try {
             DestroyFunc(device, handle, nullptr);
@@ -59,7 +55,6 @@ inline void destroySingle(VkDevice device, HandleType& handle) noexcept {
 }
 
 inline void destroyWindow(SDL_Window* window) noexcept {
-    std::lock_guard<std::mutex> lock(Vulkan::cleanupMutex);
     if (window) {
         try {
             SDL_DestroyWindow(window);
@@ -75,7 +70,6 @@ inline void destroyWindow(SDL_Window* window) noexcept {
 }
 
 inline void quitSDL() noexcept {
-    std::lock_guard<std::mutex> lock(Vulkan::cleanupMutex);
     try {
         SDL_Quit();
         if (const char* error = SDL_GetError(); error && *error) {
@@ -101,7 +95,6 @@ inline void destroyFences(VkDevice device, std::vector<VkFence>& fences) noexcep
 }
 
 inline void freeCommandBuffers(VkDevice device, VkCommandPool commandPool, std::vector<VkCommandBuffer>& commandBuffers) noexcept {
-    std::lock_guard<std::mutex> lock(Vulkan::cleanupMutex);
     if (!commandBuffers.empty() && commandPool != VK_NULL_HANDLE && device != VK_NULL_HANDLE) {
         try {
             vkFreeCommandBuffers(device, commandPool, static_cast<uint32_t>(commandBuffers.size()), commandBuffers.data());
@@ -147,7 +140,6 @@ inline void destroySingleSampler(VkDevice device, VkSampler& sampler) noexcept {
 }
 
 inline void freeSingleDescriptorSet(VkDevice device, VkDescriptorPool descriptorPool, VkDescriptorSet& descriptorSet) noexcept {
-    std::lock_guard<std::mutex> lock(Vulkan::cleanupMutex);
     if (descriptorSet != VK_NULL_HANDLE && descriptorPool != VK_NULL_HANDLE && device != VK_NULL_HANDLE) {
         try {
             vkFreeDescriptorSets(device, descriptorPool, 1, &descriptorSet);
@@ -181,7 +173,6 @@ inline void destroySingleRenderPass(VkDevice device, VkRenderPass& renderPass) n
 }
 
 inline void destroySingleSwapchain(VkDevice device, VkSwapchainKHR& swapchain) noexcept {
-    std::lock_guard<std::mutex> lock(Vulkan::cleanupMutex);
     if (device != VK_NULL_HANDLE && swapchain != VK_NULL_HANDLE) {
         try {
             vkDestroySwapchainKHR(device, swapchain, nullptr);
@@ -207,7 +198,6 @@ inline void destroySingleShaderModule(VkDevice device, VkShaderModule& shaderMod
 }
 
 inline void destroySingleAccelerationStructure(VkDevice device, VkAccelerationStructureKHR& as) noexcept {
-    std::lock_guard<std::mutex> lock(Vulkan::cleanupMutex);
     if (device != VK_NULL_HANDLE && as != VK_NULL_HANDLE) {
         try {
             auto func = (PFN_vkDestroyAccelerationStructureKHR)vkGetDeviceProcAddr(device, "vkDestroyAccelerationStructureKHR");
@@ -226,7 +216,6 @@ inline void destroySingleAccelerationStructure(VkDevice device, VkAccelerationSt
 }
 
 inline void destroyDevice(VkDevice device) noexcept {
-    std::lock_guard<std::mutex> lock(Vulkan::cleanupMutex);
     if (device != VK_NULL_HANDLE) {
         try {
             vkDestroyDevice(device, nullptr);
@@ -238,7 +227,6 @@ inline void destroyDevice(VkDevice device) noexcept {
 }
 
 inline void destroyDebugUtilsMessengerEXT(VkInstance instance, VkDebugUtilsMessengerEXT messenger) noexcept {
-    std::lock_guard<std::mutex> lock(Vulkan::cleanupMutex);
     if (messenger != VK_NULL_HANDLE && instance != VK_NULL_HANDLE) {
         try {
             auto func = (PFN_vkDestroyDebugUtilsMessengerEXT)vkGetInstanceProcAddr(instance, "vkDestroyDebugUtilsMessengerEXT");
@@ -255,7 +243,6 @@ inline void destroyDebugUtilsMessengerEXT(VkInstance instance, VkDebugUtilsMesse
 }
 
 inline void destroySurfaceKHR(VkInstance instance, VkSurfaceKHR surface) noexcept {
-    std::lock_guard<std::mutex> lock(Vulkan::cleanupMutex);
     if (instance != VK_NULL_HANDLE && surface != VK_NULL_HANDLE) {
         try {
             vkDestroySurfaceKHR(instance, surface, nullptr);
@@ -269,7 +256,6 @@ inline void destroySurfaceKHR(VkInstance instance, VkSurfaceKHR surface) noexcep
 }
 
 inline void destroyInstance(VkInstance instance) noexcept {
-    std::lock_guard<std::mutex> lock(Vulkan::cleanupMutex);
     if (instance != VK_NULL_HANDLE) {
         try {
             vkDestroyInstance(instance, nullptr);

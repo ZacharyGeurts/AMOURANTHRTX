@@ -11,16 +11,11 @@
 #include <vector>
 #include <string>
 #include <span>
-#include <mutex>
 #include <cstdint>
 #include <format>
 #include <glm/glm.hpp>
 #include "engine/logging.hpp"
 #include <unordered_map>
-
-namespace Vulkan {
-    inline std::mutex cleanupMutex; // Mutex for thread-safe resource destruction
-}
 
 class VulkanResourceManager {
     std::vector<VkBuffer> buffers_;
@@ -41,77 +36,66 @@ class VulkanResourceManager {
 public:
     void addBuffer(VkBuffer buffer) {
         if (buffer != VK_NULL_HANDLE) {
-            std::lock_guard<std::mutex> lock(Vulkan::cleanupMutex);
             buffers_.push_back(buffer);
             LOG_DEBUG(std::format("Added buffer: {:p}", static_cast<void*>(buffer)));
         }
     }
     void addMemory(VkDeviceMemory memory) {
         if (memory != VK_NULL_HANDLE) {
-            std::lock_guard<std::mutex> lock(Vulkan::cleanupMutex);
             memories_.push_back(memory);
             LOG_DEBUG(std::format("Added memory: {:p}", static_cast<void*>(memory)));
         }
     }
     void addImageView(VkImageView view) {
         if (view != VK_NULL_HANDLE) {
-            std::lock_guard<std::mutex> lock(Vulkan::cleanupMutex);
             imageViews_.push_back(view);
             LOG_DEBUG(std::format("Added image view: {:p}", static_cast<void*>(view)));
         }
     }
     void addImage(VkImage image) {
         if (image != VK_NULL_HANDLE) {
-            std::lock_guard<std::mutex> lock(Vulkan::cleanupMutex);
             images_.push_back(image);
             LOG_DEBUG(std::format("Added image: {:p}", static_cast<void*>(image)));
         }
     }
     void addAccelerationStructure(VkAccelerationStructureKHR as) {
         if (as != VK_NULL_HANDLE) {
-            std::lock_guard<std::mutex> lock(Vulkan::cleanupMutex);
             accelerationStructures_.push_back(as);
             LOG_DEBUG(std::format("Added acceleration structure: {:p}", static_cast<void*>(as)));
         }
     }
     void addDescriptorPool(VkDescriptorPool descriptorPool) {
         if (descriptorPool != VK_NULL_HANDLE) {
-            std::lock_guard<std::mutex> lock(Vulkan::cleanupMutex);
             descriptorPools_.push_back(descriptorPool);
             LOG_DEBUG(std::format("Added descriptor pool: {:p}", static_cast<void*>(descriptorPool)));
         }
     }
     void addCommandPool(VkCommandPool commandPool) {
         if (commandPool != VK_NULL_HANDLE) {
-            std::lock_guard<std::mutex> lock(Vulkan::cleanupMutex);
             commandPools_.push_back(commandPool);
             LOG_DEBUG(std::format("Added command pool: {:p}", static_cast<void*>(commandPool)));
         }
     }
     void addRenderPass(VkRenderPass renderPass) {
         if (renderPass != VK_NULL_HANDLE) {
-            std::lock_guard<std::mutex> lock(Vulkan::cleanupMutex);
             renderPasses_.push_back(renderPass);
             LOG_DEBUG(std::format("Added render pass: {:p}", static_cast<void*>(renderPass)));
         }
     }
     void addDescriptorSetLayout(VkDescriptorSetLayout layout) {
         if (layout != VK_NULL_HANDLE) {
-            std::lock_guard<std::mutex> lock(Vulkan::cleanupMutex);
             descriptorSetLayouts_.push_back(layout);
             LOG_DEBUG(std::format("Added descriptor set layout: {:p}", static_cast<void*>(layout)));
         }
     }
     void addPipelineLayout(VkPipelineLayout layout) {
         if (layout != VK_NULL_HANDLE) {
-            std::lock_guard<std::mutex> lock(Vulkan::cleanupMutex);
             pipelineLayouts_.push_back(layout);
             LOG_DEBUG(std::format("Added pipeline layout: {:p}", static_cast<void*>(layout)));
         }
     }
     void addPipeline(VkPipeline pipeline, const std::string& name = "") {
         if (pipeline != VK_NULL_HANDLE) {
-            std::lock_guard<std::mutex> lock(Vulkan::cleanupMutex);
             pipelines_.push_back(pipeline);
             if (!name.empty()) {
                 pipelineMap_[name] = pipeline;
@@ -121,14 +105,12 @@ public:
     }
     void addShaderModule(VkShaderModule module) {
         if (module != VK_NULL_HANDLE) {
-            std::lock_guard<std::mutex> lock(Vulkan::cleanupMutex);
             shaderModules_.push_back(module);
             LOG_DEBUG(std::format("Added shader module: {:p}", static_cast<void*>(module)));
         }
     }
     void removeBuffer(VkBuffer buffer) {
         if (buffer != VK_NULL_HANDLE) {
-            std::lock_guard<std::mutex> lock(Vulkan::cleanupMutex);
             auto it = std::find(buffers_.begin(), buffers_.end(), buffer);
             if (it != buffers_.end()) {
                 buffers_.erase(it);
@@ -140,7 +122,6 @@ public:
     }
     void removeMemory(VkDeviceMemory memory) {
         if (memory != VK_NULL_HANDLE) {
-            std::lock_guard<std::mutex> lock(Vulkan::cleanupMutex);
             auto it = std::find(memories_.begin(), memories_.end(), memory);
             if (it != memories_.end()) {
                 memories_.erase(it);
@@ -152,7 +133,6 @@ public:
     }
     void removeImageView(VkImageView view) {
         if (view != VK_NULL_HANDLE) {
-            std::lock_guard<std::mutex> lock(Vulkan::cleanupMutex);
             auto it = std::find(imageViews_.begin(), imageViews_.end(), view);
             if (it != imageViews_.end()) {
                 imageViews_.erase(it);
@@ -164,7 +144,6 @@ public:
     }
     void removeImage(VkImage image) {
         if (image != VK_NULL_HANDLE) {
-            std::lock_guard<std::mutex> lock(Vulkan::cleanupMutex);
             auto it = std::find(images_.begin(), images_.end(), image);
             if (it != images_.end()) {
                 images_.erase(it);
@@ -176,7 +155,6 @@ public:
     }
     void removeAccelerationStructure(VkAccelerationStructureKHR as) {
         if (as != VK_NULL_HANDLE) {
-            std::lock_guard<std::mutex> lock(Vulkan::cleanupMutex);
             auto it = std::find(accelerationStructures_.begin(), accelerationStructures_.end(), as);
             if (it != accelerationStructures_.end()) {
                 accelerationStructures_.erase(it);
@@ -188,7 +166,6 @@ public:
     }
     void removeDescriptorPool(VkDescriptorPool descriptorPool) {
         if (descriptorPool != VK_NULL_HANDLE) {
-            std::lock_guard<std::mutex> lock(Vulkan::cleanupMutex);
             auto it = std::find(descriptorPools_.begin(), descriptorPools_.end(), descriptorPool);
             if (it != descriptorPools_.end()) {
                 descriptorPools_.erase(it);
@@ -200,7 +177,6 @@ public:
     }
     void removeCommandPool(VkCommandPool commandPool) {
         if (commandPool != VK_NULL_HANDLE) {
-            std::lock_guard<std::mutex> lock(Vulkan::cleanupMutex);
             auto it = std::find(commandPools_.begin(), commandPools_.end(), commandPool);
             if (it != commandPools_.end()) {
                 commandPools_.erase(it);
@@ -212,7 +188,6 @@ public:
     }
     void removeRenderPass(VkRenderPass renderPass) {
         if (renderPass != VK_NULL_HANDLE) {
-            std::lock_guard<std::mutex> lock(Vulkan::cleanupMutex);
             auto it = std::find(renderPasses_.begin(), renderPasses_.end(), renderPass);
             if (it != renderPasses_.end()) {
                 renderPasses_.erase(it);
@@ -224,7 +199,6 @@ public:
     }
     void removeDescriptorSetLayout(VkDescriptorSetLayout layout) {
         if (layout != VK_NULL_HANDLE) {
-            std::lock_guard<std::mutex> lock(Vulkan::cleanupMutex);
             auto it = std::find(descriptorSetLayouts_.begin(), descriptorSetLayouts_.end(), layout);
             if (it != descriptorSetLayouts_.end()) {
                 descriptorSetLayouts_.erase(it);
@@ -236,7 +210,6 @@ public:
     }
     void removePipelineLayout(VkPipelineLayout layout) {
         if (layout != VK_NULL_HANDLE) {
-            std::lock_guard<std::mutex> lock(Vulkan::cleanupMutex);
             auto it = std::find(pipelineLayouts_.begin(), pipelineLayouts_.end(), layout);
             if (it != pipelineLayouts_.end()) {
                 pipelineLayouts_.erase(it);
@@ -248,7 +221,6 @@ public:
     }
     void removePipeline(VkPipeline pipeline) {
         if (pipeline != VK_NULL_HANDLE) {
-            std::lock_guard<std::mutex> lock(Vulkan::cleanupMutex);
             auto it = std::find(pipelines_.begin(), pipelines_.end(), pipeline);
             if (it != pipelines_.end()) {
                 pipelines_.erase(it);
@@ -266,7 +238,6 @@ public:
     }
     void removeShaderModule(VkShaderModule module) {
         if (module != VK_NULL_HANDLE) {
-            std::lock_guard<std::mutex> lock(Vulkan::cleanupMutex);
             auto it = std::find(shaderModules_.begin(), shaderModules_.end(), module);
             if (it != shaderModules_.end()) {
                 shaderModules_.erase(it);

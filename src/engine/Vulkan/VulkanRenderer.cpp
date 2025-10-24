@@ -58,6 +58,7 @@ VulkanRenderer::VulkanRenderer(int width, int height, void* window, const std::v
     VulkanInitializer::initSurface(context_, window_, nullptr);
     context_.physicalDevice = VulkanInitializer::findPhysicalDevice(context_.instance, context_.surface, true);
     VulkanInitializer::initDevice(context_);
+    context_.resourceManager.setDevice(context_.device);
     LOG_DEBUG_CAT("Renderer", "Initialized Vulkan instance, surface, physical device, and device");
 
     VkCommandPoolCreateInfo poolInfo{
@@ -1660,7 +1661,6 @@ void VulkanRenderer::handleResize(int width, int height) {
         LOG_WARNING_CAT("Renderer", "Invalid resize dimensions: {}x{}", width, height);
         return;
     }
-    std::lock_guard<std::mutex> lock(Vulkan::cleanupMutex);
     vkDeviceWaitIdle(context_.device);
     LOG_DEBUG_CAT("Renderer", "Device idle for resize");
 
