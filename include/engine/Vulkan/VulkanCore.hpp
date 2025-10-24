@@ -16,6 +16,7 @@
 #include <format>
 #include <glm/glm.hpp>
 #include "engine/logging.hpp"
+#include <unordered_map>
 
 namespace Vulkan {
     inline std::mutex cleanupMutex; // Mutex for thread-safe resource destruction
@@ -34,6 +35,7 @@ class VulkanResourceManager {
     std::vector<VkPipelineLayout> pipelineLayouts_;
     std::vector<VkPipeline> pipelines_;
     std::vector<VkShaderModule> shaderModules_;
+    std::unordered_map<std::string, VkPipeline> pipelineMap_; // Added for pipeline lookup
     VkDevice device_ = VK_NULL_HANDLE;
 
 public:
@@ -107,11 +109,14 @@ public:
             LOG_DEBUG(std::format("Added pipeline layout: {:p}", static_cast<void*>(layout)));
         }
     }
-    void addPipeline(VkPipeline pipeline) {
+    void addPipeline(VkPipeline pipeline, const std::string& name = "") {
         if (pipeline != VK_NULL_HANDLE) {
             std::lock_guard<std::mutex> lock(Vulkan::cleanupMutex);
             pipelines_.push_back(pipeline);
-            LOG_DEBUG(std::format("Added pipeline: {:p}", static_cast<void*>(pipeline)));
+            if (!name.empty()) {
+                pipelineMap_[name] = pipeline;
+            }
+            LOG_DEBUG(std::format("Added pipeline: {:p} with name: {}", static_cast<void*>(pipeline), name));
         }
     }
     void addShaderModule(VkShaderModule module) {
@@ -247,6 +252,12 @@ public:
             auto it = std::find(pipelines_.begin(), pipelines_.end(), pipeline);
             if (it != pipelines_.end()) {
                 pipelines_.erase(it);
+                for (auto mapIt = pipelineMap_.begin(); mapIt != pipelineMap_.end(); ++mapIt) {
+                    if (mapIt->second == pipeline) {
+                        pipelineMap_.erase(mapIt);
+                        break;
+                    }
+                }
                 LOG_DEBUG(std::format("Removed pipeline: {:p}", static_cast<void*>(pipeline)));
             } else {
                 LOG_WARNING(std::format("Attempted to remove non-existent pipeline: {:p}", static_cast<void*>(pipeline)));
@@ -286,6 +297,14 @@ public:
         LOG_INFO(std::format("Resource manager device set: {:p}", static_cast<void*>(device_)));
     }
     VkDevice getDevice() const { return device_; }
+    VkPipeline getPipeline(const std::string& name) const {
+        auto it = pipelineMap_.find(name);
+        if (it != pipelineMap_.end()) {
+            return it->second;
+        }
+        LOG_WARNING(std::format("Pipeline {} not found", name));
+        return VK_NULL_HANDLE;
+    }
     void cleanup(VkDevice device) {
         VkDevice effectiveDevice = (device == VK_NULL_HANDLE) ? device_ : device;
         if (effectiveDevice == VK_NULL_HANDLE) {
@@ -312,6 +331,7 @@ public:
             }
         }
         pipelines_.clear();
+        pipelineMap_.clear();
 
         // Destroy pipeline layouts
         for (auto layout : pipelineLayouts_) {
@@ -464,6 +484,52 @@ public:
     }
 };
 
+namespace VulkanRTX {
+    enum class DescriptorBindings {
+        TLAS = 0,
+        StorageImage = 1,
+        CameraUBO = 2,
+        MaterialSSBO = 3,
+        DimensionDataSSBO = 4,
+        AlphaTex = 5,
+        DenoiseImage = 6,
+        EnvMap = 7,
+        DensityVolume = 8,
+        GDepth = 9,
+        GNormal = 10
+    };
+
+    struct alignas(16) UniformBufferObject {
+        glm::mat4 model;
+        glm::mat4 view;
+        glm::mat4 proj;
+        int mode;
+    };
+
+    struct alignas(16) MaterialData {
+        alignas(16) glm::vec4 diffuse;   // RGBA color, 16 bytes
+        alignas(4) float specular;       // Specular intensity, 4 bytes
+        alignas(4) float roughness;      // Surface roughness, 4 bytes
+        alignas(4) float metallic;       // Metallic property, 4 bytes
+        alignas(16) glm::vec4 emission;  // Emission color/intensity, 16 bytes
+        // Total size: 44 bytes, padded to 48 bytes for std140 alignment
+
+        struct PushConstants {
+            alignas(16) glm::vec4 clearColor;      // 16 bytes
+            alignas(16) glm::vec3 cameraPosition;  // 12 bytes + 4 bytes padding
+            alignas(16) glm::vec3 lightDirection;  // 12 bytes + 4 bytes padding
+            alignas(4) float lightIntensity;       // 4 bytes
+            alignas(4) uint32_t samplesPerPixel;   // 4 bytes
+            alignas(4) uint32_t maxDepth;          // 4 bytes
+            alignas(4) uint32_t maxBounces;        // 4 bytes
+            alignas(4) float russianRoulette;      // 4 bytes
+            alignas(8) glm::vec2 resolution;       // 8 bytes
+            // Total size: 68 bytes, padded to 80 bytes for alignof=16
+        };
+        // static_assert(sizeof(PushConstants) == 80 && alignof(PushConstants) == 16, "PushConstants alignment mismatch");
+    };
+}
+
 namespace Vulkan {
     struct Context {
         VkInstance instance = VK_NULL_HANDLE;
@@ -557,9 +623,9 @@ namespace VulkanInitializer {
                      const VkMemoryAllocateFlagsInfo* allocFlagsInfo, VulkanResourceManager& resourceManager);
     void initializeVulkan(Vulkan::Context& context);
     VkDeviceAddress getBufferDeviceAddress(VkDevice device, VkBuffer buffer);
-    VkPhysicalDevice findPhysicalDevice(VkInstance instance, bool preferNvidia);
+    VkPhysicalDevice findPhysicalDevice(VkInstance instance, VkSurfaceKHR surface, bool preferNvidia);
     void initInstance(const std::vector<std::string>& instanceExtensions, Vulkan::Context& context);
-    void initSurface(Vulkan::Context& context, void* window);
+    void initSurface(Vulkan::Context& context, void* window, VkSurfaceKHR* rawsurface);
     void initDevice(Vulkan::Context& context);
     void createDescriptorSetLayout(VkDevice device, VkPhysicalDevice physicalDevice,
                                   VkDescriptorSetLayout& rayTracingLayout, VkDescriptorSetLayout& graphicsLayout);
@@ -568,7 +634,8 @@ namespace VulkanInitializer {
                                    VkSampler& sampler, VkBuffer uniformBuffer, VkImageView storageImageView,
                                    VkAccelerationStructureKHR topLevelAS, bool forRayTracing,
                                    std::vector<VkBuffer> materialBuffers, std::vector<VkBuffer> dimensionBuffers,
-                                   VkImageView denoiseImageView);
+                                   VkImageView denoiseImageView, VkImageView envMapView, VkImageView densityVolumeView,
+                                   VkImageView gDepthView, VkImageView gNormalView);
 }
 
 #endif // VULKAN_CORE_HPP

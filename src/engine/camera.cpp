@@ -8,6 +8,8 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <algorithm>
 
+// Note: No namespace here, as PerspectiveCamera is in the global namespace in camera.hpp
+
 PerspectiveCamera::PerspectiveCamera(float fov, float aspectRatio, float nearPlane, float farPlane)
     : position_(0.0f, 0.0f, 3.0f),
       front_(0.0f, 0.0f, -1.0f),

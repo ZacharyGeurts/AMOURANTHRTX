@@ -1,0 +1,32 @@
+// Filename: raster_prepass.comp
+#version 460
+#extension GL_EXT_scalar_block_layout : require
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+layout(set = 0, binding = 8, r32f) writeonly uniform image2D gDepth;
+layout(set = 0, binding = 9, rgb10_a2) writeonly uniform image2D gNormal;
+layout(set = 1, binding = 0, scalar) readonly buffer Vertices {
+    vec4 pos[10000];
+    vec3 norm[10000];
+} verts;
+layout(set = 1, binding = 1, scalar) readonly buffer Indices {
+    uint idx[30000];
+} indices;
+
+layout(push_constant) uniform RasterPC {
+    mat4 mvp;
+} rpc;
+
+void main() {
+    uvec2 pixel = gl_GlobalInvocationID.xy;
+    if (pixel.x >= imageSize(gDepth).x || pixel.y >= imageSize(gDepth).y) return;
+
+    vec2 uv = (vec2(pixel) + 0.5) / vec2(imageSize(gDepth));
+    vec4 ndc = vec4(uv * 2.0 - 1.0, 0.0, 1.0);
+    vec4 world = inverse(rpc.mvp) * ndc;
+    float depth = world.z / world.w;
+
+    imageStore(gDepth, ivec2(pixel), vec4(depth, 0.0, 0.0, 1.0));
+    imageStore(gNormal, ivec2(pixel), vec4(normalize(vec3(0.0, 1.0, 0.0)), 1.0));
+}

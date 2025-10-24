@@ -1,64 +1,24 @@
-// assets/shaders/raytracing/raygen.rgen
+// shaders/raytracing/raygen.rgen
+// AMOURANTH RTX Engine © 2025 by Zachary Geurts gzac5314@gmail.com
+// Licensed under CC BY-NC 4.0
 #version 460
 #extension GL_EXT_ray_tracing : require
-#extension GL_EXT_nonuniform_qualifier : enable
 #extension GL_EXT_scalar_block_layout : enable
+#extension GL_EXT_nonuniform_qualifier : enable
 
-layout(location = 0) rayPayloadEXT vec3 hitValue;
-layout(location = 1) rayPayloadEXT float visibility;
-
-layout(binding = 0) uniform accelerationStructureEXT topLevelAS;
-layout(binding = 1, rgba32f) uniform writeonly image2D storageImage;
-layout(binding = 2) uniform CameraUBO {
-    vec3 position;
-    vec3 forward;
-    vec3 up;
-    vec3 right;
-    float fov;
-    float aspect;
-} camera;
+layout(set = 0, binding = 0) uniform accelerationStructureEXT u_tlas;
+layout(set = 0, binding = 1, rgba8) writeonly uniform image2D u_outputImage;
 
 layout(push_constant) uniform PushConstants {
-    vec4 clearColor;
-    vec3 cameraPosition;
-    vec3 lightDirection;
-    float lightIntensity;
-    uint samplesPerPixel;
-    uint maxDepth;
-    uint maxBounces;
-    float russianRoulette;
-} push;
+    vec2 resolution;
+    float frameTime;
+    int frameIndex;
+} pushConstants;
+
+layout(location = 0) rayPayloadEXT vec3 rayColor;
 
 void main() {
-    // Get pixel coordinates
-    const vec2 pixelCenter = vec2(gl_LaunchIDEXT.xy) + vec2(0.5);
-    const vec2 inUV = pixelCenter / vec2(gl_LaunchSizeEXT.xy);
-    vec2 d = inUV * 2.0 - 1.0;
-    d.x *= camera.aspect;
-
-    // Compute ray direction
-    float tanFov = tan(camera.fov * 0.5);
-    vec3 rayDir = normalize(camera.forward + tanFov * d.x * camera.right - tanFov * d.y * camera.up);
-
-    // Initialize payload
-    hitValue = vec3(0.0);
-    visibility = 1.0;
-
-    // Trace ray
-    traceRayEXT(
-        topLevelAS,           // Acceleration structure
-        gl_RayFlagsOpaqueEXT, // Ray flags
-        0xFF,                 // Cull mask
-        0,                    // SBT offset (primary hit group)
-        0,                    // SBT stride
-        0,                    // Miss index (primary miss shader)
-        camera.position,      // Ray origin
-        0.001,                // Tmin
-        rayDir,               // Ray direction
-        1000.0,               // Tmax
-        0                     // Payload location (hitValue)
-    );
-
-    // Store result in storage image
-    imageStore(storageImage, ivec2(gl_LaunchIDEXT.xy), vec4(hitValue, 1.0));
+    ivec2 pixelCoord = ivec2(gl_LaunchIDEXT.xy);
+    rayColor = vec3(0.0);
+    imageStore(u_outputImage, pixelCoord, vec4(1.0, 0.0, 0.0, 1.0)); // Red for testing
 }

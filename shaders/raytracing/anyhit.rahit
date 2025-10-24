@@ -1,4 +1,4 @@
-// shaders/raytracing/closesthit.rchit
+// shaders/raytracing/anyhit.rahit
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts gzac5314@gmail.com
 // Licensed under CC BY-NC 4.0
 #version 460
@@ -9,5 +9,5 @@ layout(location = 0) rayPayloadInEXT vec3 rayColor;
 hitAttributeEXT vec2 hitAttribs;
 
 void main() {
-    rayColor = vec3(0.0, 1.0, 0.0); // Green for closest hit
+    // Accept hit without modification
 }

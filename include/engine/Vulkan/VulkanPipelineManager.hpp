@@ -127,8 +127,8 @@ public:
     void createComputePipeline();
     void createShaderBindingTable();
     void recordGraphicsCommands(VkCommandBuffer commandBuffer, VkFramebuffer framebuffer, VkDescriptorSet descriptorSet, uint32_t width, uint32_t height, VkImage denoiseImage);
-    void recordComputeCommands(VkCommandBuffer commandBuffer, VkImage outputImage, VkDescriptorSet descriptorSet, uint32_t width, uint32_t height);
-    void recordRayTracingCommands(VkCommandBuffer commandBuffer, VkImage outputImage, VkDescriptorSet descriptorSet, uint32_t width, uint32_t height); // Added
+    void recordComputeCommands(VkCommandBuffer commandBuffer, VkImage outputImage, VkDescriptorSet descriptorSet, uint32_t width, uint32_t height, VkImage gDepth, VkImage gNormal, VkImage historyImage);
+    void recordRayTracingCommands(VkCommandBuffer commandBuffer, VkImage outputImage, VkDescriptorSet descriptorSet, uint32_t width, uint32_t height, VkImage gDepth, VkImage gNormal);
 
     VkPipeline getGraphicsPipeline() const { return graphicsPipeline_ ? graphicsPipeline_->get() : VK_NULL_HANDLE; }
     VkPipelineLayout getGraphicsPipelineLayout() const { return graphicsPipelineLayout_ ? graphicsPipelineLayout_->get() : VK_NULL_HANDLE; }
@@ -159,6 +159,8 @@ private:
     std::unique_ptr<VulkanResource<VkPipelineLayout, PFN_vkDestroyPipelineLayout>> graphicsPipelineLayout_;
     VkRenderPass renderPass_;
     VkPipelineCache pipelineCache_;
+    VkPipeline rasterPrepassPipeline_ = VK_NULL_HANDLE;
+    VkPipeline denoiserPostPipeline_ = VK_NULL_HANDLE;
     std::unordered_map<std::string, std::string> shaderPaths_;
     ShaderBindingTable sbt_;
     PlatformConfig platformConfig_;

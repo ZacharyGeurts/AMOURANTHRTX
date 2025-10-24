@@ -1,29 +1,17 @@
-#version 450
-#extension GL_ARB_separate_shader_objects : enable
+// assets/shaders/rasterization/vertex.glsl (Fallback raster)
+#version 460
 
-// Input vertex attributes
 layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec3 inNormal;
 layout(location = 2) in vec2 inTexCoord;
 
-// Output to fragment shader
 layout(location = 0) out vec3 fragNormal;
 layout(location = 1) out vec2 fragTexCoord;
-layout(location = 2) out vec3 fragPos;
 
-// Uniforms (Push constants or UBO for MVP matrices)
-layout(push_constant) uniform PushConstants {
-    mat4 model;
-    mat4 view;
-    mat4 projection;
-} pc;
+layout(set = 0, binding = 1) uniform UBO { mat4 model; mat4 view; mat4 proj; } ubo;
 
 void main() {
-    // Transform vertex position to clip space
-    gl_Position = pc.projection * pc.view * pc.model * vec4(inPosition, 1.0);
-    
-    // Pass data to fragment shader
-    fragNormal = mat3(pc.model) * inNormal; // Transform normal to world space
+    gl_Position = ubo.proj * ubo.view * ubo.model * vec4(inPosition, 1.0);
+    fragNormal = inNormal;
     fragTexCoord = inTexCoord;
-    fragPos = vec3(pc.model * vec4(inPosition, 1.0)); // World-space position
 }

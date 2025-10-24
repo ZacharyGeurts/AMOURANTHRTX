@@ -30,26 +30,88 @@ namespace VulkanRTX {
 VkShaderModule VulkanPipelineManager::loadShader(VkDevice device, const std::string& shaderType) {
     auto it = shaderPaths_.find(shaderType);
     if (it == shaderPaths_.end()) {
-        LOG_ERROR_CAT("PipelineManager", "Shader type {} not found in registry", shaderType);
+        LOG_ERROR_CAT("PipelineManager", "Shader type '{}' not found in registry", shaderType);
         throw std::runtime_error("Shader type not found: " + shaderType);
     }
     const std::string& filename = it->second;
     LOG_DEBUG_CAT("PipelineManager", "Loading shader: {} ({})", shaderType, filename);
-    std::ifstream file(filename, std::ios::ate | std::ios::binary);
+
+    // Log current working directory for path resolution debugging
+    std::filesystem::path cwd = std::filesystem::current_path();
+    LOG_DEBUG_CAT("PipelineManager", "Current working directory: {}", cwd.string());
+
+    // Convert relative path to absolute path for better diagnostics
+    std::filesystem::path shaderPath = std::filesystem::absolute(filename);
+    LOG_DEBUG_CAT("PipelineManager", "Resolved absolute shader path: {}", shaderPath.string());
+
+    // Check if file exists
+    if (!std::filesystem::exists(shaderPath)) {
+        LOG_ERROR_CAT("PipelineManager", "Shader file does not exist: {}", shaderPath.string());
+        throw std::runtime_error("Shader file does not exist: " + shaderPath.string());
+    }
+
+    // Check if path points to a regular file
+    if (!std::filesystem::is_regular_file(shaderPath)) {
+        LOG_ERROR_CAT("PipelineManager", "Shader path '{}' is not a regular file (e.g., is a directory)", shaderPath.string());
+        throw std::runtime_error("Shader path is not a regular file: " + shaderPath.string());
+    }
+
+    // Check file permissions
+    std::filesystem::file_status status = std::filesystem::status(shaderPath);
+    auto perms = status.permissions();
+    if ((perms & std::filesystem::perms::owner_read) == std::filesystem::perms::none) {
+        LOG_ERROR_CAT("PipelineManager", "Shader file '{}' lacks read permissions", shaderPath.string());
+        throw std::runtime_error("Shader file lacks read permissions: " + shaderPath.string());
+    }
+
+    // Attempt to open the file
+    std::ifstream file(shaderPath, std::ios::ate | std::ios::binary);
     if (!file.is_open()) {
-        LOG_ERROR_CAT("PipelineManager", "Failed to open shader file: {}", filename);
-        throw std::runtime_error("Failed to open shader file: " + filename);
+        std::string errorMsg = std::strerror(errno);
+        LOG_ERROR_CAT("PipelineManager", "Failed to open shader file '{}': {}", shaderPath.string(), errorMsg);
+        throw std::runtime_error("Failed to open shader file: " + shaderPath.string() + ", reason: " + errorMsg);
     }
+
+    // Get file size
     size_t fileSize = static_cast<size_t>(file.tellg());
-    if (fileSize % 4 != 0) {
-        LOG_ERROR_CAT("PipelineManager", "Invalid SPIR-V file size (not multiple of 4): {}", filename);
-        throw std::runtime_error("Invalid SPIR-V file size: " + filename);
+    LOG_DEBUG_CAT("PipelineManager", "Shader file size: {} bytes", fileSize);
+
+    // Check if file is empty
+    if (fileSize == 0) {
+        file.close();
+        LOG_ERROR_CAT("PipelineManager", "Shader file '{}' is empty", shaderPath.string());
+        throw std::runtime_error("Shader file is empty: " + shaderPath.string());
     }
+
+    // Check if file size is a multiple of 4 (SPIR-V requirement)
+    if (fileSize % 4 != 0) {
+        file.close();
+        LOG_ERROR_CAT("PipelineManager", "Invalid SPIR-V file size (not multiple of 4): {} bytes for '{}'", fileSize, shaderPath.string());
+        throw std::runtime_error("Invalid SPIR-V file size: " + shaderPath.string());
+    }
+
+    // Basic SPIR-V validation: Check magic number
     std::vector<char> buffer(fileSize);
     file.seekg(0);
     file.read(buffer.data(), fileSize);
+    if (file.fail()) {
+        std::string errorMsg = std::strerror(errno);
+        file.close();
+        LOG_ERROR_CAT("PipelineManager", "Failed to read shader file '{}': {}", shaderPath.string(), errorMsg);
+        throw std::runtime_error("Failed to read shader file: " + shaderPath.string() + ", reason: " + errorMsg);
+    }
     file.close();
 
+    // Check SPIR-V magic number (0x07230203)
+    if (fileSize >= 4) {
+        uint32_t magic = *reinterpret_cast<const uint32_t*>(buffer.data());
+        if (magic != 0x07230203) {
+            LOG_ERROR_CAT("PipelineManager", "Invalid SPIR-V magic number (expected 0x07230203, got 0x{:08x}) for '{}'", magic, shaderPath.string());
+            throw std::runtime_error("Invalid SPIR-V magic number for: " + shaderPath.string());
+        }
+    }
+
+    // Create shader module
     VkShaderModuleCreateInfo createInfo = {
         .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
         .pNext = nullptr,
@@ -61,10 +123,11 @@ VkShaderModule VulkanPipelineManager::loadShader(VkDevice device, const std::str
     VkShaderModule shaderModule = VK_NULL_HANDLE;
     VkResult result = vkCreateShaderModule(device, &createInfo, nullptr, &shaderModule);
     if (result != VK_SUCCESS) {
-        LOG_ERROR_CAT("PipelineManager", "Failed to create shader module for {}: VkResult={}", filename, static_cast<int>(result));
-        throw std::runtime_error("Failed to create shader module: " + filename);
+        LOG_ERROR_CAT("PipelineManager", "Failed to create shader module for '{}': VkResult={}", shaderPath.string(), static_cast<int>(result));
+        throw std::runtime_error("Failed to create shader module for: " + shaderPath.string() + ", VkResult=" + std::to_string(static_cast<int>(result)));
     }
-    LOG_DEBUG_CAT("PipelineManager", "Loaded shader module: {:p} from {}", static_cast<void*>(shaderModule), filename);
+
+    LOG_DEBUG_CAT("PipelineManager", "Successfully loaded shader module: {:p} from '{}'", static_cast<void*>(shaderModule), shaderPath.string());
     return shaderModule;
 }
 
@@ -80,6 +143,8 @@ VulkanPipelineManager::VulkanPipelineManager(Vulkan::Context& context, int width
       graphicsPipelineLayout_(nullptr),
       renderPass_(VK_NULL_HANDLE),
       pipelineCache_(VK_NULL_HANDLE),
+      rasterPrepassPipeline_(VK_NULL_HANDLE),
+      denoiserPostPipeline_(VK_NULL_HANDLE),
       shaderPaths_({
           {"vertex", "assets/shaders/rasterization/vertex.spv"},
           {"fragment", "assets/shaders/rasterization/fragment.spv"},
@@ -87,7 +152,15 @@ VulkanPipelineManager::VulkanPipelineManager(Vulkan::Context& context, int width
           {"miss", "assets/shaders/raytracing/miss.spv"},
           {"closesthit", "assets/shaders/raytracing/closesthit.spv"},
           {"shadowmiss", "assets/shaders/raytracing/shadowmiss.spv"},
-          {"compute", "assets/shaders/compute/xorshift.spv"}
+          {"anyhit", "assets/shaders/raytracing/anyhit.spv"},
+          {"intersection", "assets/shaders/raytracing/intersection.spv"},
+          {"callable", "assets/shaders/raytracing/callable.spv"},
+          {"shadow_anyhit", "assets/shaders/raytracing/shadow_anyhit.spv"},
+          {"mid_anyhit", "assets/shaders/raytracing/mid_anyhit.spv"},
+          {"volumetric_anyhit", "assets/shaders/raytracing/volumetric_anyhit.spv"},
+          {"compute", "assets/shaders/compute/xorshift.spv"},
+          {"raster_prepass", "assets/shaders/compute/raster_prepass.spv"},
+          {"denoiser_post", "assets/shaders/compute/denoiser_post.spv"}
       }),
       sbt_(),
       platformConfig_({.graphicsQueueFamily = context.graphicsQueueFamilyIndex,
@@ -187,7 +260,8 @@ VulkanPipelineManager::VulkanPipelineManager(Vulkan::Context& context, int width
     context_.resourceManager.addRenderPass(renderPass_);
     LOG_INFO_CAT("PipelineManager", "Created render pass: {:p}", static_cast<void*>(renderPass_));
 
-    createGraphicsPipeline(width, height);
+    // Skipped createGraphicsPipeline as we are using ray tracing and do not require rasterization fallback
+    // createGraphicsPipeline(width, height);
     createRayTracingPipeline();
     createComputePipeline();
     createShaderBindingTable();
@@ -265,12 +339,12 @@ void VulkanPipelineManager::createPipelineCache() {
 
 void VulkanPipelineManager::createRayTracingDescriptorSetLayout() {
     LOG_DEBUG_CAT("PipelineManager", "Creating ray-tracing descriptor set layout");
-    std::array<VkDescriptorSetLayoutBinding, 7> bindings = {};
+    std::array<VkDescriptorSetLayoutBinding, 10> bindings = {};
 
     bindings[0].binding = static_cast<uint32_t>(DescriptorBindings::TLAS);
     bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
     bindings[0].descriptorCount = 1;
-    bindings[0].stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR;
+    bindings[0].stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR | VK_SHADER_STAGE_INTERSECTION_BIT_KHR;
     bindings[0].pImmutableSamplers = nullptr;
 
     bindings[1].binding = static_cast<uint32_t>(DescriptorBindings::StorageImage);
@@ -287,8 +361,8 @@ void VulkanPipelineManager::createRayTracingDescriptorSetLayout() {
 
     bindings[3].binding = static_cast<uint32_t>(DescriptorBindings::MaterialSSBO);
     bindings[3].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    bindings[3].descriptorCount = 1;
-    bindings[3].stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
+    bindings[3].descriptorCount = 26;
+    bindings[3].stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR;
     bindings[3].pImmutableSamplers = nullptr;
 
     bindings[4].binding = static_cast<uint32_t>(DescriptorBindings::DimensionDataSSBO);
@@ -297,17 +371,35 @@ void VulkanPipelineManager::createRayTracingDescriptorSetLayout() {
     bindings[4].stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
     bindings[4].pImmutableSamplers = nullptr;
 
-    bindings[5].binding = static_cast<uint32_t>(DescriptorBindings::DenoiseImage);
-    bindings[5].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    bindings[5].binding = static_cast<uint32_t>(DescriptorBindings::AlphaTex);
+    bindings[5].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     bindings[5].descriptorCount = 1;
-    bindings[5].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    bindings[5].stageFlags = VK_SHADER_STAGE_ANY_HIT_BIT_KHR;
     bindings[5].pImmutableSamplers = nullptr;
 
     bindings[6].binding = static_cast<uint32_t>(DescriptorBindings::EnvMap);
     bindings[6].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     bindings[6].descriptorCount = 1;
-    bindings[6].stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR;
+    bindings[6].stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_CALLABLE_BIT_KHR;
     bindings[6].pImmutableSamplers = nullptr;
+
+    bindings[7].binding = static_cast<uint32_t>(DescriptorBindings::DensityVolume);
+    bindings[7].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    bindings[7].descriptorCount = 1;
+    bindings[7].stageFlags = VK_SHADER_STAGE_ANY_HIT_BIT_KHR;
+    bindings[7].pImmutableSamplers = nullptr;
+
+    bindings[8].binding = static_cast<uint32_t>(DescriptorBindings::GDepth);
+    bindings[8].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    bindings[8].descriptorCount = 1;
+    bindings[8].stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_COMPUTE_BIT;
+    bindings[8].pImmutableSamplers = nullptr;
+
+    bindings[9].binding = static_cast<uint32_t>(DescriptorBindings::GNormal);
+    bindings[9].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    bindings[9].descriptorCount = 1;
+    bindings[9].stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_COMPUTE_BIT;
+    bindings[9].pImmutableSamplers = nullptr;
 
     VkDescriptorSetLayoutCreateInfo layoutInfo = {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
@@ -328,7 +420,7 @@ void VulkanPipelineManager::createRayTracingDescriptorSetLayout() {
 
 void VulkanPipelineManager::createGraphicsDescriptorSetLayout() {
     LOG_DEBUG_CAT("PipelineManager", "Creating graphics descriptor set layout");
-    std::array<VkDescriptorSetLayoutBinding, 2> bindings = {};
+    std::array<VkDescriptorSetLayoutBinding, 3> bindings = {};
 
     bindings[0].binding = 0;
     bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
@@ -341,6 +433,12 @@ void VulkanPipelineManager::createGraphicsDescriptorSetLayout() {
     bindings[1].descriptorCount = 1;
     bindings[1].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
     bindings[1].pImmutableSamplers = nullptr;
+
+    bindings[2].binding = 2;
+    bindings[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    bindings[2].descriptorCount = 1;
+    bindings[2].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    bindings[2].pImmutableSamplers = nullptr; // For denoiser output
 
     VkDescriptorSetLayoutCreateInfo layoutInfo = {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
@@ -546,14 +644,14 @@ void VulkanPipelineManager::createGraphicsPipeline(int width, int height) {
 
 void VulkanPipelineManager::createRayTracingPipeline() {
     LOG_DEBUG_CAT("PipelineManager", "Creating ray-tracing pipeline");
-    std::vector<std::string> shaderTypes = {"raygen", "miss", "closesthit", "shadowmiss"};
+    std::vector<std::string> shaderTypes = {"raygen", "miss", "closesthit", "shadowmiss", "anyhit", "intersection", "callable", "shadow_anyhit", "mid_anyhit", "volumetric_anyhit", "compute"};
     std::vector<VkShaderModule> shaderModules;
     for (const auto& type : shaderTypes) {
         shaderModules.push_back(loadShader(context_.device, type));
     }
 
-    std::array<VkPipelineShaderStageCreateInfo, 4> shaderStages = {
-        VkPipelineShaderStageCreateInfo{
+    std::vector<VkPipelineShaderStageCreateInfo> shaderStages = {
+        {
             .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
             .pNext = nullptr,
             .flags = 0,
@@ -562,7 +660,7 @@ void VulkanPipelineManager::createRayTracingPipeline() {
             .pName = "main",
             .pSpecializationInfo = nullptr
         },
-        VkPipelineShaderStageCreateInfo{
+        {
             .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
             .pNext = nullptr,
             .flags = 0,
@@ -571,7 +669,7 @@ void VulkanPipelineManager::createRayTracingPipeline() {
             .pName = "main",
             .pSpecializationInfo = nullptr
         },
-        VkPipelineShaderStageCreateInfo{
+        {
             .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
             .pNext = nullptr,
             .flags = 0,
@@ -580,7 +678,7 @@ void VulkanPipelineManager::createRayTracingPipeline() {
             .pName = "main",
             .pSpecializationInfo = nullptr
         },
-        VkPipelineShaderStageCreateInfo{
+        {
             .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
             .pNext = nullptr,
             .flags = 0,
@@ -588,11 +686,66 @@ void VulkanPipelineManager::createRayTracingPipeline() {
             .module = shaderModules[3],
             .pName = "main",
             .pSpecializationInfo = nullptr
+        },
+        {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+            .pNext = nullptr,
+            .flags = 0,
+            .stage = VK_SHADER_STAGE_ANY_HIT_BIT_KHR,
+            .module = shaderModules[4],
+            .pName = "main",
+            .pSpecializationInfo = nullptr
+        },
+        {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+            .pNext = nullptr,
+            .flags = 0,
+            .stage = VK_SHADER_STAGE_INTERSECTION_BIT_KHR,
+            .module = shaderModules[5],
+            .pName = "main",
+            .pSpecializationInfo = nullptr
+        },
+        {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+            .pNext = nullptr,
+            .flags = 0,
+            .stage = VK_SHADER_STAGE_CALLABLE_BIT_KHR,
+            .module = shaderModules[6],
+            .pName = "main",
+            .pSpecializationInfo = nullptr
+        },
+        {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+            .pNext = nullptr,
+            .flags = 0,
+            .stage = VK_SHADER_STAGE_ANY_HIT_BIT_KHR,
+            .module = shaderModules[7],
+            .pName = "main",
+            .pSpecializationInfo = nullptr
+        },
+        {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+            .pNext = nullptr,
+            .flags = 0,
+            .stage = VK_SHADER_STAGE_ANY_HIT_BIT_KHR,
+            .module = shaderModules[8],
+            .pName = "main",
+            .pSpecializationInfo = nullptr
+        },
+        {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+            .pNext = nullptr,
+            .flags = 0,
+            .stage = VK_SHADER_STAGE_ANY_HIT_BIT_KHR,
+            .module = shaderModules[9],
+            .pName = "main",
+            .pSpecializationInfo = nullptr
         }
     };
 
-    std::array<VkRayTracingShaderGroupCreateInfoKHR, 4> shaderGroups = {
-        VkRayTracingShaderGroupCreateInfoKHR{
+    std::vector<VkRayTracingShaderGroupCreateInfoKHR> shaderGroups = {
+        // Raygen (group 0)
+        {
             .sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
             .pNext = nullptr,
             .type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR,
@@ -602,7 +755,8 @@ void VulkanPipelineManager::createRayTracingPipeline() {
             .intersectionShader = VK_SHADER_UNUSED_KHR,
             .pShaderGroupCaptureReplayHandle = nullptr
         },
-        VkRayTracingShaderGroupCreateInfoKHR{
+        // Primary miss (group 1)
+        {
             .sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
             .pNext = nullptr,
             .type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR,
@@ -612,17 +766,19 @@ void VulkanPipelineManager::createRayTracingPipeline() {
             .intersectionShader = VK_SHADER_UNUSED_KHR,
             .pShaderGroupCaptureReplayHandle = nullptr
         },
-        VkRayTracingShaderGroupCreateInfoKHR{
+        // Primary hit: triangles (group 2)
+        {
             .sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
             .pNext = nullptr,
             .type = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR,
             .generalShader = VK_SHADER_UNUSED_KHR,
             .closestHitShader = 2,
-            .anyHitShader = VK_SHADER_UNUSED_KHR,
+            .anyHitShader = 4,
             .intersectionShader = VK_SHADER_UNUSED_KHR,
             .pShaderGroupCaptureReplayHandle = nullptr
         },
-        VkRayTracingShaderGroupCreateInfoKHR{
+        // Shadow miss (group 3)
+        {
             .sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
             .pNext = nullptr,
             .type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR,
@@ -631,11 +787,57 @@ void VulkanPipelineManager::createRayTracingPipeline() {
             .anyHitShader = VK_SHADER_UNUSED_KHR,
             .intersectionShader = VK_SHADER_UNUSED_KHR,
             .pShaderGroupCaptureReplayHandle = nullptr
+        },
+        // Shadow hit: triangles (group 4)
+        {
+            .sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
+            .pNext = nullptr,
+            .type = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR,
+            .generalShader = VK_SHADER_UNUSED_KHR,
+            .closestHitShader = VK_SHADER_UNUSED_KHR,
+            .anyHitShader = 7,
+            .intersectionShader = VK_SHADER_UNUSED_KHR,
+            .pShaderGroupCaptureReplayHandle = nullptr
+        },
+        // Mid-layer hit: triangles (group 5)
+        {
+            .sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
+            .pNext = nullptr,
+            .type = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR,
+            .generalShader = VK_SHADER_UNUSED_KHR,
+            .closestHitShader = 2,
+            .anyHitShader = 8,
+            .intersectionShader = VK_SHADER_UNUSED_KHR,
+            .pShaderGroupCaptureReplayHandle = nullptr
+        },
+        // Volumetric hit: procedural (group 6)
+        {
+            .sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
+            .pNext = nullptr,
+            .type = VK_RAY_TRACING_SHADER_GROUP_TYPE_PROCEDURAL_HIT_GROUP_KHR,
+            .generalShader = VK_SHADER_UNUSED_KHR,
+            .closestHitShader = 2,
+            .anyHitShader = 9,
+            .intersectionShader = 5,
+            .pShaderGroupCaptureReplayHandle = nullptr
+        },
+        // Callable (group 7)
+        {
+            .sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
+            .pNext = nullptr,
+            .type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR,
+            .generalShader = 6,
+            .closestHitShader = VK_SHADER_UNUSED_KHR,
+            .anyHitShader = VK_SHADER_UNUSED_KHR,
+            .intersectionShader = VK_SHADER_UNUSED_KHR,
+            .pShaderGroupCaptureReplayHandle = nullptr
         }
     };
 
     VkPushConstantRange pushConstantRange = {
-        .stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR,
+        .stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | 
+                      VK_SHADER_STAGE_MISS_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR | 
+                      VK_SHADER_STAGE_INTERSECTION_BIT_KHR | VK_SHADER_STAGE_CALLABLE_BIT_KHR,
         .offset = 0,
         .size = sizeof(MaterialData::PushConstants)
     };
@@ -665,13 +867,12 @@ void VulkanPipelineManager::createRayTracingPipeline() {
 
     VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProperties = {};
     rtProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR;
-    rtProperties.pNext = nullptr;
     VkPhysicalDeviceProperties2 properties2 = {};
     properties2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
     properties2.pNext = &rtProperties;
     vkGetPhysicalDeviceProperties2(context_.physicalDevice, &properties2);
 
-    uint32_t recursionDepth = (rtProperties.maxRayRecursionDepth > 0) ? std::min(2u, rtProperties.maxRayRecursionDepth) : 1;
+    uint32_t recursionDepth = (rtProperties.maxRayRecursionDepth > 0) ? std::min(4u, rtProperties.maxRayRecursionDepth) : 1;
 
     VkRayTracingPipelineCreateInfoKHR pipelineInfo = {
         .sType = VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR,
@@ -724,7 +925,8 @@ void VulkanPipelineManager::createRayTracingPipeline() {
 
 void VulkanPipelineManager::createComputePipeline() {
     LOG_DEBUG_CAT("PipelineManager", "Creating compute pipeline");
-    auto computeShaderModule = loadShader(context_.device, "compute");
+    std::vector<std::string> computeShaders = {"compute", "raster_prepass", "denoiser_post"};
+    std::vector<VkPipeline> computePipelines;
 
     VkPushConstantRange pushConstantRange = {
         .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
@@ -745,7 +947,6 @@ void VulkanPipelineManager::createComputePipeline() {
     VkPipelineLayout pipelineLayout;
     if (vkCreatePipelineLayout(context_.device, &pipelineLayoutInfo, nullptr, &pipelineLayout) != VK_SUCCESS) {
         LOG_ERROR_CAT("PipelineManager", "Failed to create compute pipeline layout");
-        vkDestroyShaderModule(context_.device, computeShaderModule, nullptr);
         throw std::runtime_error("Failed to create compute pipeline layout");
     }
     computePipelineLayout_ = std::make_unique<VulkanResource<VkPipelineLayout, PFN_vkDestroyPipelineLayout>>(
@@ -753,39 +954,48 @@ void VulkanPipelineManager::createComputePipeline() {
     context_.resourceManager.addPipelineLayout(pipelineLayout);
     LOG_INFO_CAT("PipelineManager", "Created compute pipeline layout: {:p}", static_cast<void*>(pipelineLayout));
 
-    VkPipelineShaderStageCreateInfo shaderStage = {
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-        .pNext = nullptr,
-        .flags = 0,
-        .stage = VK_SHADER_STAGE_COMPUTE_BIT,
-        .module = computeShaderModule,
-        .pName = "main",
-        .pSpecializationInfo = nullptr
-    };
+    for (const auto& shaderType : computeShaders) {
+        auto computeShaderModule = loadShader(context_.device, shaderType);
+        VkPipelineShaderStageCreateInfo shaderStage = {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+            .pNext = nullptr,
+            .flags = 0,
+            .stage = VK_SHADER_STAGE_COMPUTE_BIT,
+            .module = computeShaderModule,
+            .pName = "main",
+            .pSpecializationInfo = nullptr
+        };
 
-    VkComputePipelineCreateInfo pipelineInfo = {
-        .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
-        .pNext = nullptr,
-        .flags = 0,
-        .stage = shaderStage,
-        .layout = pipelineLayout,
-        .basePipelineHandle = VK_NULL_HANDLE,
-        .basePipelineIndex = -1
-    };
+        VkComputePipelineCreateInfo pipelineInfo = {
+            .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
+            .pNext = nullptr,
+            .flags = 0,
+            .stage = shaderStage,
+            .layout = pipelineLayout,
+            .basePipelineHandle = VK_NULL_HANDLE,
+            .basePipelineIndex = -1
+        };
 
-    VkPipeline pipeline;
-    if (vkCreateComputePipelines(context_.device, pipelineCache_, 1, &pipelineInfo, nullptr, &pipeline) != VK_SUCCESS) {
-        LOG_ERROR_CAT("PipelineManager", "Failed to create compute pipeline");
+        VkPipeline pipeline;
+        if (vkCreateComputePipelines(context_.device, pipelineCache_, 1, &pipelineInfo, nullptr, &pipeline) != VK_SUCCESS) {
+            LOG_ERROR_CAT("PipelineManager", "Failed to create compute pipeline for {}", shaderType);
+            vkDestroyShaderModule(context_.device, computeShaderModule, nullptr);
+            vkDestroyPipelineLayout(context_.device, pipelineLayout, nullptr);
+            throw std::runtime_error("Failed to create compute pipeline for " + shaderType);
+        }
+        computePipelines.push_back(pipeline);
+        context_.resourceManager.addPipeline(pipeline);
+        if (shaderType == "raster_prepass") {
+            rasterPrepassPipeline_ = pipeline;
+        } else if (shaderType == "denoiser_post") {
+            denoiserPostPipeline_ = pipeline;
+        }
+        LOG_INFO_CAT("PipelineManager", "Created compute pipeline for {}: {:p}", shaderType, static_cast<void*>(pipeline));
         vkDestroyShaderModule(context_.device, computeShaderModule, nullptr);
-        vkDestroyPipelineLayout(context_.device, pipelineLayout, nullptr);
-        throw std::runtime_error("Failed to create compute pipeline");
     }
-    computePipeline_ = std::make_unique<VulkanResource<VkPipeline, PFN_vkDestroyPipeline>>(
-        context_.device, pipeline, vkDestroyPipeline);
-    context_.resourceManager.addPipeline(pipeline);
-    LOG_INFO_CAT("PipelineManager", "Created compute pipeline: {:p}", static_cast<void*>(pipeline));
 
-    vkDestroyShaderModule(context_.device, computeShaderModule, nullptr);
+    computePipeline_ = std::make_unique<VulkanResource<VkPipeline, PFN_vkDestroyPipeline>>(
+        context_.device, computePipelines[0], vkDestroyPipeline); // Primary compute pipeline (xorshift)
 }
 
 void VulkanPipelineManager::createShaderBindingTable() {
@@ -797,296 +1007,264 @@ void VulkanPipelineManager::createShaderBindingTable() {
 
     VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProperties = {};
     rtProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR;
-    rtProperties.pNext = nullptr;
     VkPhysicalDeviceProperties2 properties = {};
     properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
     properties.pNext = &rtProperties;
     vkGetPhysicalDeviceProperties2(context_.physicalDevice, &properties);
 
+    const uint32_t groupCount = 8; // From createRayTracingPipeline: raygen, miss, closesthit, shadowmiss, shadow_anyhit, mid_anyhit, volumetric_anyhit, callable
     const uint32_t handleSize = rtProperties.shaderGroupHandleSize;
     const uint32_t handleAlignment = rtProperties.shaderGroupHandleAlignment;
-    const uint32_t raygenGroupCount = 1;
-    const uint32_t missGroupCount = 2; // Primary and shadow miss
-    const uint32_t hitGroupCount = 1;
-    const uint32_t callableGroupCount = 0;
-    const uint32_t handleSizeAligned = (handleSize + handleAlignment - 1) & ~(handleAlignment - 1);
-    const VkDeviceSize sbtSize = (raygenGroupCount + missGroupCount + hitGroupCount + callableGroupCount) * static_cast<VkDeviceSize>(handleSizeAligned);
+    const uint32_t alignedHandleSize = (handleSize + handleAlignment - 1) & ~(handleAlignment - 1);
+    const uint32_t sbtSize = groupCount * alignedHandleSize;
 
-    // Create device-local SBT buffer
-    VkBufferCreateInfo bufferInfo = {
-        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-        .pNext = nullptr,
-        .flags = 0,
-        .size = sbtSize,
-        .usage = VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
-        .queueFamilyIndexCount = 0,
-        .pQueueFamilyIndices = nullptr
-    };
-
-    VkBuffer sbtBuffer = VK_NULL_HANDLE;
-    if (vkCreateBuffer(context_.device, &bufferInfo, nullptr, &sbtBuffer) != VK_SUCCESS) {
-        LOG_ERROR_CAT("PipelineManager", "Failed to create SBT buffer");
-        throw std::runtime_error("Failed to create SBT buffer");
-    }
-    LOG_DEBUG_CAT("PipelineManager", "Created SBT buffer: {:p}, size: {}", static_cast<void*>(sbtBuffer), sbtSize);
-
-    VkMemoryRequirements memRequirements;
-    vkGetBufferMemoryRequirements(context_.device, sbtBuffer, &memRequirements);
-
-    VkMemoryAllocateFlagsInfo allocFlagsInfo = {
-        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO,
-        .pNext = nullptr,
-        .flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT,
-        .deviceMask = 0
-    };
-    VkMemoryAllocateInfo allocInfo = {
-        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-        .pNext = &allocFlagsInfo,
-        .allocationSize = memRequirements.size,
-        .memoryTypeIndex = VulkanInitializer::findMemoryType(context_.physicalDevice, memRequirements.memoryTypeBits,
-                                                            platformConfig_.preferDeviceLocalMemory ? VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT :
-                                                                                                      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)
-    };
-
-    VkDeviceMemory sbtMemory = VK_NULL_HANDLE;
-    if (vkAllocateMemory(context_.device, &allocInfo, nullptr, &sbtMemory) != VK_SUCCESS) {
-        LOG_ERROR_CAT("PipelineManager", "Failed to allocate SBT memory");
-        vkDestroyBuffer(context_.device, sbtBuffer, nullptr);
-        throw std::runtime_error("Failed to allocate SBT memory");
-    }
-    if (vkBindBufferMemory(context_.device, sbtBuffer, sbtMemory, 0) != VK_SUCCESS) {
-        LOG_ERROR_CAT("PipelineManager", "Failed to bind SBT memory");
-        vkDestroyBuffer(context_.device, sbtBuffer, nullptr);
-        vkFreeMemory(context_.device, sbtMemory, nullptr);
-        throw std::runtime_error("Failed to bind SBT memory");
-    }
-    context_.resourceManager.addBuffer(sbtBuffer);
-    context_.resourceManager.addMemory(sbtMemory);
-    LOG_DEBUG_CAT("PipelineManager", "Allocated and bound SBT memory: {:p}", static_cast<void*>(sbtMemory));
-
-    // Create staging buffer for SBT data
-    VkBuffer stagingBuffer = VK_NULL_HANDLE;
-    VkDeviceMemory stagingMemory = VK_NULL_HANDLE;
-    if (platformConfig_.preferDeviceLocalMemory) {
-        VkBufferCreateInfo stagingInfo = {
-            .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-            .pNext = nullptr,
-            .flags = 0,
-            .size = sbtSize,
-            .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-            .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
-            .queueFamilyIndexCount = 0,
-            .pQueueFamilyIndices = nullptr
-        };
-        if (vkCreateBuffer(context_.device, &stagingInfo, nullptr, &stagingBuffer) != VK_SUCCESS) {
-            LOG_ERROR_CAT("PipelineManager", "Failed to create SBT staging buffer");
-            vkDestroyBuffer(context_.device, sbtBuffer, nullptr);
-            vkFreeMemory(context_.device, sbtMemory, nullptr);
-            throw std::runtime_error("Failed to create SBT staging buffer");
-        }
-
-        VkMemoryRequirements stagingMemReq;
-        vkGetBufferMemoryRequirements(context_.device, stagingBuffer, &stagingMemReq);
-        VkMemoryAllocateInfo stagingAllocInfo = {
-            .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-            .pNext = nullptr,
-            .allocationSize = stagingMemReq.size,
-            .memoryTypeIndex = VulkanInitializer::findMemoryType(context_.physicalDevice, stagingMemReq.memoryTypeBits,
-                                                                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)
-        };
-        if (vkAllocateMemory(context_.device, &stagingAllocInfo, nullptr, &stagingMemory) != VK_SUCCESS) {
-            LOG_ERROR_CAT("PipelineManager", "Failed to allocate SBT staging memory");
-            vkDestroyBuffer(context_.device, sbtBuffer, nullptr);
-            vkFreeMemory(context_.device, sbtMemory, nullptr);
-            vkDestroyBuffer(context_.device, stagingBuffer, nullptr);
-            throw std::runtime_error("Failed to allocate SBT staging memory");
-        }
-        if (vkBindBufferMemory(context_.device, stagingBuffer, stagingMemory, 0) != VK_SUCCESS) {
-            LOG_ERROR_CAT("PipelineManager", "Failed to bind SBT staging memory");
-            vkDestroyBuffer(context_.device, sbtBuffer, nullptr);
-            vkFreeMemory(context_.device, sbtMemory, nullptr);
-            vkDestroyBuffer(context_.device, stagingBuffer, nullptr);
-            vkFreeMemory(context_.device, stagingMemory, nullptr);
-            throw std::runtime_error("Failed to bind SBT staging memory");
-        }
-    }
-
+    std::vector<uint8_t> shaderGroupHandles(sbtSize);
     auto vkGetRayTracingShaderGroupHandlesKHR = reinterpret_cast<PFN_vkGetRayTracingShaderGroupHandlesKHR>(
         vkGetDeviceProcAddr(context_.device, "vkGetRayTracingShaderGroupHandlesKHR"));
     if (!vkGetRayTracingShaderGroupHandlesKHR) {
         LOG_ERROR_CAT("PipelineManager", "Failed to get vkGetRayTracingShaderGroupHandlesKHR function pointer");
-        Dispose::destroySingleBuffer(context_.device, sbtBuffer);
-        Dispose::freeSingleDeviceMemory(context_.device, sbtMemory);
-        Dispose::destroySingleBuffer(context_.device, stagingBuffer);
-        Dispose::freeSingleDeviceMemory(context_.device, stagingMemory);
         throw std::runtime_error("Failed to get vkGetRayTracingShaderGroupHandlesKHR function pointer");
     }
 
-    sbt_ = ShaderBindingTable(context_.device, sbtBuffer, sbtMemory, vkDestroyBuffer, vkFreeMemory);
-
-    std::vector<uint8_t> shaderGroupHandles((raygenGroupCount + missGroupCount + hitGroupCount + callableGroupCount) * handleSize);
-    if (vkGetRayTracingShaderGroupHandlesKHR(context_.device, rayTracingPipeline_->get(), 0, raygenGroupCount + missGroupCount + hitGroupCount + callableGroupCount, shaderGroupHandles.size(), shaderGroupHandles.data()) != VK_SUCCESS) {
-        LOG_ERROR_CAT("PipelineManager", "Failed to get shader group handles");
-        Dispose::destroySingleBuffer(context_.device, sbtBuffer);
-        Dispose::freeSingleDeviceMemory(context_.device, sbtMemory);
-        Dispose::destroySingleBuffer(context_.device, stagingBuffer);
-        Dispose::freeSingleDeviceMemory(context_.device, stagingMemory);
+    VkResult result = vkGetRayTracingShaderGroupHandlesKHR(context_.device, rayTracingPipeline_->get(), 0, groupCount, sbtSize, shaderGroupHandles.data());
+    if (result != VK_SUCCESS) {
+        LOG_ERROR_CAT("PipelineManager", "Failed to get shader group handles: VkResult={}", static_cast<int>(result));
         throw std::runtime_error("Failed to get shader group handles");
     }
 
-    void* mappedData = nullptr;
-    VkDeviceMemory targetMemory = platformConfig_.preferDeviceLocalMemory ? stagingMemory : sbtMemory;
-    if (vkMapMemory(context_.device, targetMemory, 0, sbtSize, 0, &mappedData) != VK_SUCCESS || !mappedData) {
-        LOG_ERROR_CAT("PipelineManager", "Failed to map SBT memory or mapped memory is null");
-        Dispose::destroySingleBuffer(context_.device, sbtBuffer);
-        Dispose::freeSingleDeviceMemory(context_.device, sbtMemory);
-        Dispose::destroySingleBuffer(context_.device, stagingBuffer);
-        Dispose::freeSingleDeviceMemory(context_.device, stagingMemory);
-        throw std::runtime_error("Failed to map SBT memory or mapped memory is null");
-    }
+    VkBufferUsageFlags sbtUsage = VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    VkMemoryPropertyFlags sbtMemoryProps = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
 
-    uint64_t currentOffset = 0;
-    memcpy(static_cast<uint8_t*>(mappedData) + currentOffset, shaderGroupHandles.data() + 0 * handleSize, handleSize);
-    currentOffset += handleSizeAligned;
-    memcpy(static_cast<uint8_t*>(mappedData) + currentOffset, shaderGroupHandles.data() + 1 * handleSize, handleSize);
-    currentOffset += handleSizeAligned;
-    memcpy(static_cast<uint8_t*>(mappedData) + currentOffset, shaderGroupHandles.data() + 3 * handleSize, handleSize);
-    currentOffset += handleSizeAligned;
-    memcpy(static_cast<uint8_t*>(mappedData) + currentOffset, shaderGroupHandles.data() + 2 * handleSize, handleSize);
-    currentOffset += handleSizeAligned;
-    vkUnmapMemory(context_.device, targetMemory);
+    VkBuffer sbtBuffer = VK_NULL_HANDLE;
+    VkDeviceMemory sbtMemory = VK_NULL_HANDLE;
+    VulkanInitializer::createBuffer(context_.device, context_.physicalDevice, sbtSize, sbtUsage, sbtMemoryProps, sbtBuffer, sbtMemory, nullptr, context_.resourceManager);
 
-    if (platformConfig_.preferDeviceLocalMemory) {
-        if (context_.commandBuffers.empty()) {
-            LOG_ERROR_CAT("PipelineManager", "No command buffers available for SBT transfer");
-            Dispose::destroySingleBuffer(context_.device, sbtBuffer);
-            Dispose::freeSingleDeviceMemory(context_.device, sbtMemory);
-            Dispose::destroySingleBuffer(context_.device, stagingBuffer);
-            Dispose::freeSingleDeviceMemory(context_.device, stagingMemory);
-            throw std::runtime_error("No command buffers available for SBT transfer");
-        }
-
-        VkCommandBuffer commandBuffer = context_.commandBuffers[0];
-        VkCommandBufferBeginInfo beginInfo = {
-            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-            .pNext = nullptr,
-            .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
-            .pInheritanceInfo = nullptr
-        };
-        if (vkBeginCommandBuffer(commandBuffer, &beginInfo) != VK_SUCCESS) {
-            LOG_ERROR_CAT("PipelineManager", "Failed to begin SBT transfer command buffer");
-            Dispose::destroySingleBuffer(context_.device, sbtBuffer);
-            Dispose::freeSingleDeviceMemory(context_.device, sbtMemory);
-            Dispose::destroySingleBuffer(context_.device, stagingBuffer);
-            Dispose::freeSingleDeviceMemory(context_.device, stagingMemory);
-            throw std::runtime_error("Failed to begin SBT transfer command buffer");
-        }
-
-        VkBufferCopy copyRegion = {
-            .srcOffset = 0,
-            .dstOffset = 0,
-            .size = sbtSize
-        };
-        vkCmdCopyBuffer(commandBuffer, stagingBuffer, sbtBuffer, 1, &copyRegion);
-        if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS) {
-            LOG_ERROR_CAT("PipelineManager", "Failed to end SBT transfer command buffer");
-            Dispose::destroySingleBuffer(context_.device, sbtBuffer);
-            Dispose::freeSingleDeviceMemory(context_.device, sbtMemory);
-            Dispose::destroySingleBuffer(context_.device, stagingBuffer);
-            Dispose::freeSingleDeviceMemory(context_.device, stagingMemory);
-            throw std::runtime_error("Failed to end SBT transfer command buffer");
-        }
-
-        VkSubmitInfo submitInfo = {
-            .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-            .pNext = nullptr,
-            .waitSemaphoreCount = 0,
-            .pWaitSemaphores = nullptr,
-            .pWaitDstStageMask = nullptr,
-            .commandBufferCount = 1,
-            .pCommandBuffers = &commandBuffer,
-            .signalSemaphoreCount = 0,
-            .pSignalSemaphores = nullptr
-        };
-        if (vkQueueSubmit(context_.graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE) != VK_SUCCESS) {
-            LOG_ERROR_CAT("PipelineManager", "Failed to submit SBT transfer command buffer");
-            Dispose::destroySingleBuffer(context_.device, sbtBuffer);
-            Dispose::freeSingleDeviceMemory(context_.device, sbtMemory);
-            Dispose::destroySingleBuffer(context_.device, stagingBuffer);
-            Dispose::freeSingleDeviceMemory(context_.device, stagingMemory);
-            throw std::runtime_error("Failed to submit SBT transfer command buffer");
-        }
-        vkQueueWaitIdle(context_.graphicsQueue);
-        Dispose::destroySingleBuffer(context_.device, stagingBuffer);
-        Dispose::freeSingleDeviceMemory(context_.device, stagingMemory);
-    }
-
-    VkBufferDeviceAddressInfo bufferAddressInfo = {
-        .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
+    // Create staging buffer for SBT initialization
+    VkBufferCreateInfo stagingCreateInfo = {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
         .pNext = nullptr,
-        .buffer = sbtBuffer
+        .flags = 0,
+        .size = sbtSize,
+        .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+        .queueFamilyIndexCount = 0,
+        .pQueueFamilyIndices = nullptr
     };
-    auto vkGetBufferDeviceAddress = reinterpret_cast<PFN_vkGetBufferDeviceAddress>(
-        vkGetDeviceProcAddr(context_.device, "vkGetBufferDeviceAddress"));
-    if (!vkGetBufferDeviceAddress) {
-        LOG_ERROR_CAT("PipelineManager", "Failed to get vkGetBufferDeviceAddress function pointer");
+    VkBuffer stagingBuffer = VK_NULL_HANDLE;
+    if (vkCreateBuffer(context_.device, &stagingCreateInfo, nullptr, &stagingBuffer) != VK_SUCCESS) {
+        LOG_ERROR_CAT("PipelineManager", "Failed to create staging buffer for SBT");
         Dispose::destroySingleBuffer(context_.device, sbtBuffer);
         Dispose::freeSingleDeviceMemory(context_.device, sbtMemory);
-        throw std::runtime_error("Failed to get vkGetBufferDeviceAddress function pointer");
+        context_.resourceManager.removeBuffer(sbtBuffer);
+        context_.resourceManager.removeMemory(sbtMemory);
+        throw std::runtime_error("Failed to create staging buffer for SBT");
     }
-    VkDeviceAddress sbtAddress = vkGetBufferDeviceAddress(context_.device, &bufferAddressInfo);
+    context_.resourceManager.addBuffer(stagingBuffer);  // Add to resource manager for cleanup
 
-    sbt_.raygen = {sbtAddress, handleSizeAligned, handleSizeAligned};
-    sbt_.miss = {sbtAddress + 1ULL * handleSizeAligned, 2ULL * handleSizeAligned, handleSizeAligned};
-    sbt_.hit = {sbtAddress + 3ULL * handleSizeAligned, handleSizeAligned, handleSizeAligned};
-    sbt_.callable = {0, 0, 0};
+    VkMemoryRequirements stagingMemReq{};
+    vkGetBufferMemoryRequirements(context_.device, stagingBuffer, &stagingMemReq);
+    uint32_t stagingMemType = VulkanInitializer::findMemoryType(context_.physicalDevice, stagingMemReq.memoryTypeBits,
+                                                               VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    VkMemoryAllocateInfo stagingAllocInfo = {
+        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+        .pNext = nullptr,
+        .allocationSize = stagingMemReq.size,
+        .memoryTypeIndex = stagingMemType
+    };
+    VkDeviceMemory stagingMemory = VK_NULL_HANDLE;
+    if (vkAllocateMemory(context_.device, &stagingAllocInfo, nullptr, &stagingMemory) != VK_SUCCESS) {
+        LOG_ERROR_CAT("PipelineManager", "Failed to allocate staging memory for SBT");
+        Dispose::destroySingleBuffer(context_.device, stagingBuffer);
+        Dispose::destroySingleBuffer(context_.device, sbtBuffer);
+        Dispose::freeSingleDeviceMemory(context_.device, sbtMemory);
+        context_.resourceManager.removeBuffer(stagingBuffer);
+        context_.resourceManager.removeBuffer(sbtBuffer);
+        context_.resourceManager.removeMemory(sbtMemory);
+        throw std::runtime_error("Failed to allocate staging memory for SBT");
+    }
+    context_.resourceManager.addMemory(stagingMemory);  // Add to resource manager for cleanup
+    if (vkBindBufferMemory(context_.device, stagingBuffer, stagingMemory, 0) != VK_SUCCESS) {
+        LOG_ERROR_CAT("PipelineManager", "Failed to bind staging memory for SBT");
+        // Cleanup
+        Dispose::destroySingleBuffer(context_.device, stagingBuffer);
+        vkFreeMemory(context_.device, stagingMemory, nullptr);
+        Dispose::destroySingleBuffer(context_.device, sbtBuffer);
+        Dispose::freeSingleDeviceMemory(context_.device, sbtMemory);
+        context_.resourceManager.removeBuffer(stagingBuffer);
+        context_.resourceManager.removeMemory(stagingMemory);
+        context_.resourceManager.removeBuffer(sbtBuffer);
+        context_.resourceManager.removeMemory(sbtMemory);
+        throw std::runtime_error("Failed to bind staging memory for SBT");
+    }
 
-    LOG_INFO_CAT("PipelineManager", "Created shader binding table with size: {}, raygen={:x}, miss={:x} (size {}), hit={:x}, callable={:x}",
-                 sbtSize, sbt_.raygen.deviceAddress, sbt_.miss.deviceAddress, sbt_.miss.size, sbt_.hit.deviceAddress, sbt_.callable.deviceAddress);
-}
+    // Map staging and copy data with proper alignment
+    void* mappedData = nullptr;
+    if (vkMapMemory(context_.device, stagingMemory, 0, sbtSize, 0, &mappedData) != VK_SUCCESS) {
+        LOG_ERROR_CAT("PipelineManager", "Failed to map staging memory for SBT");
+        // Cleanup
+        Dispose::destroySingleBuffer(context_.device, stagingBuffer);
+        vkFreeMemory(context_.device, stagingMemory, nullptr);
+        Dispose::destroySingleBuffer(context_.device, sbtBuffer);
+        Dispose::freeSingleDeviceMemory(context_.device, sbtMemory);
+        context_.resourceManager.removeBuffer(stagingBuffer);
+        context_.resourceManager.removeMemory(stagingMemory);
+        context_.resourceManager.removeBuffer(sbtBuffer);
+        context_.resourceManager.removeMemory(sbtMemory);
+        throw std::runtime_error("Failed to map staging memory for SBT");
+    }
+    uint8_t* data = static_cast<uint8_t*>(mappedData);
+    memset(data, 0, sbtSize);
 
-void VulkanPipelineManager::recordGraphicsCommands(VkCommandBuffer commandBuffer, VkFramebuffer framebuffer, VkDescriptorSet descriptorSet, uint32_t width, uint32_t height, VkImage denoiseImage) {
-    if (commandBuffer == VK_NULL_HANDLE || framebuffer == VK_NULL_HANDLE || descriptorSet == VK_NULL_HANDLE || denoiseImage == VK_NULL_HANDLE) {
-        LOG_ERROR_CAT("PipelineManager", "Invalid handle in recordGraphicsCommands: commandBuffer={:p}, framebuffer={:p}, descriptorSet={:p}, denoiseImage={:p}",
-                      static_cast<void*>(commandBuffer), static_cast<void*>(framebuffer), static_cast<void*>(descriptorSet), static_cast<void*>(denoiseImage));
-        throw std::runtime_error("Invalid handle in recordGraphicsCommands");
+    // Raygen (group 0) at offset 0
+    memcpy(data + 0 * alignedHandleSize, shaderGroupHandles.data() + 0 * handleSize, handleSize);
+
+    // Miss: primary (group 1) at 1a, shadow (group 3) at 2a
+    memcpy(data + 1 * alignedHandleSize, shaderGroupHandles.data() + 1 * handleSize, handleSize);
+    memcpy(data + 2 * alignedHandleSize, shaderGroupHandles.data() + 3 * handleSize, handleSize);
+
+    // Hit: primary (group 2) at 3a + 0a, shadow (group 4) at 3a + 1a, mid (group 5) at 3a + 2a, vol (group 6) at 3a + 3a
+    memcpy(data + 3 * alignedHandleSize + 0 * alignedHandleSize, shaderGroupHandles.data() + 2 * handleSize, handleSize);
+    memcpy(data + 3 * alignedHandleSize + 1 * alignedHandleSize, shaderGroupHandles.data() + 4 * handleSize, handleSize);
+    memcpy(data + 3 * alignedHandleSize + 2 * alignedHandleSize, shaderGroupHandles.data() + 5 * handleSize, handleSize);
+    memcpy(data + 3 * alignedHandleSize + 3 * alignedHandleSize, shaderGroupHandles.data() + 6 * handleSize, handleSize);
+
+    // Callable (group 7) at 7a
+    memcpy(data + 7 * alignedHandleSize, shaderGroupHandles.data() + 7 * handleSize, handleSize);
+
+    vkUnmapMemory(context_.device, stagingMemory);
+
+    // Copy from staging to SBT buffer using command buffer
+    VkCommandBufferAllocateInfo allocInfo = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .pNext = nullptr,
+        .commandPool = context_.commandPool,
+        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+        .commandBufferCount = 1
+    };
+    VkCommandBuffer cmd = VK_NULL_HANDLE;
+    if (vkAllocateCommandBuffers(context_.device, &allocInfo, &cmd) != VK_SUCCESS) {
+        LOG_ERROR_CAT("PipelineManager", "Failed to allocate command buffer for SBT copy");
+        // Cleanup
+        vkUnmapMemory(context_.device, stagingMemory);  // Already unmapped
+        Dispose::destroySingleBuffer(context_.device, stagingBuffer);
+        vkFreeMemory(context_.device, stagingMemory, nullptr);
+        Dispose::destroySingleBuffer(context_.device, sbtBuffer);
+        Dispose::freeSingleDeviceMemory(context_.device, sbtMemory);
+        context_.resourceManager.removeBuffer(stagingBuffer);
+        context_.resourceManager.removeMemory(stagingMemory);
+        context_.resourceManager.removeBuffer(sbtBuffer);
+        context_.resourceManager.removeMemory(sbtMemory);
+        throw std::runtime_error("Failed to allocate command buffer for SBT copy");
     }
 
     VkCommandBufferBeginInfo beginInfo = {
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
         .pNext = nullptr,
-        .flags = 0,
+        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
         .pInheritanceInfo = nullptr
     };
-
-    if (vkBeginCommandBuffer(commandBuffer, &beginInfo) != VK_SUCCESS) {
-        LOG_ERROR_CAT("PipelineManager", "Failed to begin command buffer recording");
-        throw std::runtime_error("Failed to begin command buffer recording");
+    if (vkBeginCommandBuffer(cmd, &beginInfo) != VK_SUCCESS) {
+        LOG_ERROR_CAT("PipelineManager", "Failed to begin command buffer for SBT copy");
+        vkFreeCommandBuffers(context_.device, context_.commandPool, 1, &cmd);
+        // Cleanup staging and sbt...
+        Dispose::destroySingleBuffer(context_.device, stagingBuffer);
+        vkFreeMemory(context_.device, stagingMemory, nullptr);
+        Dispose::destroySingleBuffer(context_.device, sbtBuffer);
+        Dispose::freeSingleDeviceMemory(context_.device, sbtMemory);
+        context_.resourceManager.removeBuffer(stagingBuffer);
+        context_.resourceManager.removeMemory(stagingMemory);
+        context_.resourceManager.removeBuffer(sbtBuffer);
+        context_.resourceManager.removeMemory(sbtMemory);
+        throw std::runtime_error("Failed to begin command buffer for SBT copy");
     }
 
-    VkImageMemoryBarrier samplerBarrier = {
-        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-        .pNext = nullptr,
-        .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
-        .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
-        .oldLayout = VK_IMAGE_LAYOUT_GENERAL,
-        .newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-        .srcQueueFamilyIndex = platformConfig_.computeQueueFamily,
-        .dstQueueFamilyIndex = platformConfig_.graphicsQueueFamily,
-        .image = denoiseImage,
-        .subresourceRange = {
-            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-            .baseMipLevel = 0,
-            .levelCount = 1,
-            .baseArrayLayer = 0,
-            .layerCount = 1
-        }
+    VkBufferCopy copyRegion = {
+        .srcOffset = 0,
+        .dstOffset = 0,
+        .size = sbtSize
     };
-    LOG_DEBUG_CAT("PipelineManager", "Barrier for denoiseImage {:p}: oldLayout=GENERAL, newLayout=SHADER_READ_ONLY_OPTIMAL",
-                  static_cast<void*>(denoiseImage));
-    vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
-                         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &samplerBarrier);
+    vkCmdCopyBuffer(cmd, stagingBuffer, sbtBuffer, 1, &copyRegion);
+
+    if (vkEndCommandBuffer(cmd) != VK_SUCCESS) {
+        LOG_ERROR_CAT("PipelineManager", "Failed to end command buffer for SBT copy");
+        vkFreeCommandBuffers(context_.device, context_.commandPool, 1, &cmd);
+        // Cleanup...
+        throw std::runtime_error("Failed to end command buffer for SBT copy");
+    }
+
+    // Submit
+    VkSubmitInfo submitInfo = {
+        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .pNext = nullptr,
+        .commandBufferCount = 1,
+        .pCommandBuffers = &cmd
+    };
+    VkFenceCreateInfo fenceInfo = {
+        .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+        .pNext = nullptr,
+        .flags = 0
+    };
+    VkFence fence = VK_NULL_HANDLE;
+    if (vkCreateFence(context_.device, &fenceInfo, nullptr, &fence) != VK_SUCCESS) {
+        LOG_ERROR_CAT("PipelineManager", "Failed to create fence for SBT copy");
+        vkFreeCommandBuffers(context_.device, context_.commandPool, 1, &cmd);
+        // Cleanup...
+        throw std::runtime_error("Failed to create fence for SBT copy");
+    }
+
+    if (vkQueueSubmit(context_.graphicsQueue, 1, &submitInfo, fence) != VK_SUCCESS) {
+        LOG_ERROR_CAT("PipelineManager", "Failed to submit command buffer for SBT copy");
+        vkDestroyFence(context_.device, fence, nullptr);
+        vkFreeCommandBuffers(context_.device, context_.commandPool, 1, &cmd);
+        // Cleanup...
+        throw std::runtime_error("Failed to submit command buffer for SBT copy");
+    }
+
+    if (vkWaitForFences(context_.device, 1, &fence, VK_TRUE, UINT64_MAX) != VK_SUCCESS) {
+        LOG_ERROR_CAT("PipelineManager", "Failed to wait for fence in SBT copy");
+        vkDestroyFence(context_.device, fence, nullptr);
+        vkFreeCommandBuffers(context_.device, context_.commandPool, 1, &cmd);
+        // Cleanup...
+        throw std::runtime_error("Failed to wait for fence in SBT copy");
+    }
+
+    vkDestroyFence(context_.device, fence, nullptr);
+    vkFreeCommandBuffers(context_.device, context_.commandPool, 1, &cmd);
+
+    // Cleanup staging
+    context_.resourceManager.removeBuffer(stagingBuffer);
+    context_.resourceManager.removeMemory(stagingMemory);
+    Dispose::destroySingleBuffer(context_.device, stagingBuffer);
+    Dispose::freeSingleDeviceMemory(context_.device, stagingMemory);
+
+    VkDeviceAddress sbtAddress = VulkanInitializer::getBufferDeviceAddress(context_.device, sbtBuffer);
+
+    sbt_ = ShaderBindingTable(context_.device, sbtBuffer, sbtMemory, vkDestroyBuffer, vkFreeMemory);
+    sbt_.raygen = {sbtAddress + 0 * alignedHandleSize, alignedHandleSize, alignedHandleSize};
+    sbt_.miss = {sbtAddress + 1 * alignedHandleSize, alignedHandleSize, alignedHandleSize};
+    sbt_.hit = {sbtAddress + 3 * alignedHandleSize, alignedHandleSize, alignedHandleSize};
+    sbt_.callable = {sbtAddress + 7 * alignedHandleSize, alignedHandleSize, alignedHandleSize};
+
+    LOG_INFO_CAT("PipelineManager", "Created shader binding table: buffer={:p}, memory={:p}, size={}", 
+                 static_cast<void*>(sbtBuffer), static_cast<void*>(sbtMemory), sbtSize);
+}
+
+void VulkanPipelineManager::recordGraphicsCommands(VkCommandBuffer commandBuffer, VkFramebuffer framebuffer, 
+                                                  VkDescriptorSet descriptorSet, uint32_t width, uint32_t height, 
+                                                  VkImage denoiseImage) {
+    (void)denoiseImage;
+    LOG_DEBUG_CAT("PipelineManager", "Recording graphics commands for framebuffer {:p}", static_cast<void*>(framebuffer));
+
+    VkCommandBufferBeginInfo beginInfo = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .pNext = nullptr,
+        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+        .pInheritanceInfo = nullptr
+    };
+    if (vkBeginCommandBuffer(commandBuffer, &beginInfo) != VK_SUCCESS) {
+        LOG_ERROR_CAT("PipelineManager", "Failed to begin command buffer {:p}", static_cast<void*>(commandBuffer));
+        throw std::runtime_error("Failed to begin command buffer");
+    }
 
     VkClearValue clearColor = {{{0.0f, 0.0f, 0.0f, 1.0f}}};
     VkRenderPassBeginInfo renderPassInfo = {
@@ -1094,147 +1272,145 @@ void VulkanPipelineManager::recordGraphicsCommands(VkCommandBuffer commandBuffer
         .pNext = nullptr,
         .renderPass = renderPass_,
         .framebuffer = framebuffer,
-        .renderArea = {
-            .offset = {0, 0},
-            .extent = {width, height}
-        },
+        .renderArea = {{0, 0}, {width, height}},
         .clearValueCount = 1,
         .pClearValues = &clearColor
     };
 
-    struct GraphicsPushConstants {
-        glm::vec4 clearColor = glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
-        float lightIntensity = 1.0f;
-        float padding[3] = {0.0f, 0.0f, 0.0f};
-    } pushConstants;
-
     vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
-    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline_->get());
-    LOG_DEBUG_CAT("PipelineManager", "Binding graphics pipeline: {:p}, descriptorSet: {:p}",
-                  static_cast<void*>(graphicsPipeline_->get()), static_cast<void*>(descriptorSet));
-    vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipelineLayout_->get(), 0, 1, &descriptorSet, 0, nullptr);
-    vkCmdPushConstants(commandBuffer, graphicsPipelineLayout_->get(),
-                       VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-                       0, sizeof(GraphicsPushConstants), &pushConstants);
-    vkCmdDraw(commandBuffer, 3, 1, 0, 0); // Draw full-screen triangle
+    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, getGraphicsPipeline());
+    vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, getGraphicsPipelineLayout(), 
+                            0, 1, &descriptorSet, 0, nullptr);
+
+    VkViewport viewport = {
+        .x = 0.0f,
+        .y = 0.0f,
+        .width = static_cast<float>(width),
+        .height = static_cast<float>(height),
+        .minDepth = 0.0f,
+        .maxDepth = 1.0f
+    };
+    vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
+
+    VkRect2D scissor = {
+        .offset = {0, 0},
+        .extent = {width, height}
+    };
+    vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
+
+    MaterialData::PushConstants pushConstants{};
+    pushConstants.resolution = glm::vec2(static_cast<float>(width), static_cast<float>(height));
+    vkCmdPushConstants(commandBuffer, getGraphicsPipelineLayout(), 
+                       VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 
+                       0, sizeof(MaterialData::PushConstants), &pushConstants);
+
+    vkCmdDraw(commandBuffer, 3, 1, 0, 0); // Full-screen triangle
     vkCmdEndRenderPass(commandBuffer);
 
     if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS) {
-        LOG_ERROR_CAT("PipelineManager", "Failed to end command buffer recording");
-        throw std::runtime_error("Failed to end command buffer recording");
+        LOG_ERROR_CAT("PipelineManager", "Failed to end command buffer {:p}", static_cast<void*>(commandBuffer));
+        throw std::runtime_error("Failed to end command buffer");
     }
-    LOG_INFO_CAT("PipelineManager", "Recorded graphics commands for framebuffer {:p}", static_cast<void*>(framebuffer));
+    LOG_DEBUG_CAT("PipelineManager", "Graphics commands recorded for command buffer {:p}", static_cast<void*>(commandBuffer));
 }
 
-void VulkanPipelineManager::recordComputeCommands(VkCommandBuffer commandBuffer, VkImage outputImage, VkDescriptorSet descriptorSet, uint32_t width, uint32_t height) {
-    if (commandBuffer == VK_NULL_HANDLE || outputImage == VK_NULL_HANDLE || descriptorSet == VK_NULL_HANDLE) {
-        LOG_ERROR_CAT("PipelineManager", "Invalid handle in recordComputeCommands: commandBuffer={:p}, outputImage={:p}, descriptorSet={:p}",
-                      static_cast<void*>(commandBuffer), static_cast<void*>(outputImage), static_cast<void*>(descriptorSet));
-        throw std::runtime_error("Invalid handle in recordComputeCommands");
-    }
+void VulkanPipelineManager::recordComputeCommands(VkCommandBuffer commandBuffer, VkImage outputImage, 
+                                                 VkDescriptorSet descriptorSet, uint32_t width, uint32_t height, 
+                                                 VkImage gDepth, VkImage gNormal, VkImage historyImage) {
+    (void)historyImage;
+    LOG_DEBUG_CAT("PipelineManager", "Recording compute commands");
 
     VkCommandBufferBeginInfo beginInfo = {
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
         .pNext = nullptr,
-        .flags = 0,
+        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
         .pInheritanceInfo = nullptr
     };
-
     if (vkBeginCommandBuffer(commandBuffer, &beginInfo) != VK_SUCCESS) {
-        LOG_ERROR_CAT("PipelineManager", "Failed to begin compute command buffer");
+        LOG_ERROR_CAT("PipelineManager", "Failed to begin compute command buffer {:p}", static_cast<void*>(commandBuffer));
         throw std::runtime_error("Failed to begin compute command buffer");
     }
 
-    VkImageMemoryBarrier imageBarrier = {
+    VkImageMemoryBarrier imageBarriers[3] = {
+        {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+            .pNext = nullptr,
+            .srcAccessMask = 0,
+            .dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
+            .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+            .newLayout = VK_IMAGE_LAYOUT_GENERAL,
+            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .image = outputImage,
+            .subresourceRange = {
+                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                .baseMipLevel = 0,
+                .levelCount = 1,
+                .baseArrayLayer = 0,
+                .layerCount = 1
+            }
+        },
+        {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+            .pNext = nullptr,
+            .srcAccessMask = 0,
+            .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
+            .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+            .newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .image = gDepth,
+            .subresourceRange = {
+                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                .baseMipLevel = 0,
+                .levelCount = 1,
+                .baseArrayLayer = 0,
+                .layerCount = 1
+            }
+        },
+        {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+            .pNext = nullptr,
+            .srcAccessMask = 0,
+            .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
+            .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+            .newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .image = gNormal,
+            .subresourceRange = {
+                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                .baseMipLevel = 0,
+                .levelCount = 1,
+                .baseArrayLayer = 0,
+                .layerCount = 1
+            }
+        }
+    };
+
+    vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 
+                         0, 0, nullptr, 0, nullptr, 3, imageBarriers);
+
+    if (rasterPrepassPipeline_ == VK_NULL_HANDLE) {
+        LOG_ERROR_CAT("PipelineManager", "Raster prepass pipeline not found");
+        throw std::runtime_error("Raster prepass pipeline not found");
+    }
+
+    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, rasterPrepassPipeline_);
+    vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, getComputePipelineLayout(), 
+                            0, 1, &descriptorSet, 0, nullptr);
+
+    uint32_t groupCountX = (width + 15) / 16;
+    uint32_t groupCountY = (height + 15) / 16;
+    vkCmdDispatch(commandBuffer, groupCountX, groupCountY, 1);
+
+    VkImageMemoryBarrier postDispatchBarrier = {
         .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
         .pNext = nullptr,
         .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
-        .dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
+        .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
         .oldLayout = VK_IMAGE_LAYOUT_GENERAL,
-        .newLayout = VK_IMAGE_LAYOUT_GENERAL,
-        .srcQueueFamilyIndex = platformConfig_.graphicsQueueFamily,
-        .dstQueueFamilyIndex = platformConfig_.computeQueueFamily,
-        .image = outputImage,
-        .subresourceRange = {
-            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-            .baseMipLevel = 0,
-            .levelCount = 1,
-            .baseArrayLayer = 0,
-            .layerCount = 1
-        }
-    };
-    LOG_DEBUG_CAT("PipelineManager", "Barrier for outputImage {:p}: oldLayout=GENERAL, newLayout=GENERAL",
-                  static_cast<void*>(outputImage));
-    vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                         0, 0, nullptr, 0, nullptr, 1, &imageBarrier);
-
-    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline_->get());
-    LOG_DEBUG_CAT("PipelineManager", "Binding compute pipeline: {:p}, descriptorSet={:p}",
-                  static_cast<void*>(computePipeline_->get()), static_cast<void*>(descriptorSet));
-    vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, computePipelineLayout_->get(), 0, 1, &descriptorSet, 0, nullptr);
-
-    MaterialData::PushConstants pushConstants = {
-        .clearColor = glm::vec4(0.0f, 0.0f, 0.0f, 1.0f),
-        .cameraPosition = glm::vec3(0.0f, 0.0f, 0.0f),
-        .lightDirection = glm::vec3(0.0f, 0.0f, -1.0f),
-        .lightIntensity = 1.0f,
-        .samplesPerPixel = 1u,
-        .maxDepth = 2u,
-        .maxBounces = 2u,
-        .russianRoulette = 0.8f
-    };
-    vkCmdPushConstants(commandBuffer, computePipelineLayout_->get(),
-                       VK_SHADER_STAGE_COMPUTE_BIT,
-                       0, sizeof(MaterialData::PushConstants), &pushConstants);
-
-    vkCmdDispatch(commandBuffer, (width + 15) / 16, (height + 15) / 16, 1);
-
-    imageBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-    imageBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-    imageBarrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
-    imageBarrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    imageBarrier.srcQueueFamilyIndex = platformConfig_.computeQueueFamily;
-    imageBarrier.dstQueueFamilyIndex = platformConfig_.graphicsQueueFamily;
-    LOG_DEBUG_CAT("PipelineManager", "Barrier for outputImage {:p}: oldLayout=GENERAL, newLayout=SHADER_READ_ONLY_OPTIMAL",
-                  static_cast<void*>(outputImage));
-    vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-                         0, 0, nullptr, 0, nullptr, 1, &imageBarrier);
-
-    if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS) {
-        LOG_ERROR_CAT("PipelineManager", "Failed to end compute command buffer");
-        throw std::runtime_error("Failed to end compute command buffer");
-    }
-    LOG_INFO_CAT("PipelineManager", "Recorded compute commands for outputImage {:p}", static_cast<void*>(outputImage));
-}
-
-void VulkanPipelineManager::recordRayTracingCommands(VkCommandBuffer commandBuffer, VkImage outputImage,
-                                                    VkDescriptorSet descriptorSet, uint32_t width, uint32_t height) {
-    if (commandBuffer == VK_NULL_HANDLE || outputImage == VK_NULL_HANDLE || descriptorSet == VK_NULL_HANDLE) {
-        LOG_ERROR_CAT("PipelineManager", "Invalid handle in recordRayTracingCommands: commandBuffer={:p}, outputImage={:p}, descriptorSet={:p}",
-                      static_cast<void*>(commandBuffer), static_cast<void*>(outputImage), static_cast<void*>(descriptorSet));
-        throw std::runtime_error("Invalid handle in recordRayTracingCommands");
-    }
-
-    VkCommandBufferBeginInfo beginInfo = {
-        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-        .pNext = nullptr,
-        .flags = 0,
-        .pInheritanceInfo = nullptr
-    };
-
-    if (vkBeginCommandBuffer(commandBuffer, &beginInfo) != VK_SUCCESS) {
-        LOG_ERROR_CAT("PipelineManager", "Failed to begin ray-tracing command buffer");
-        throw std::runtime_error("Failed to begin ray-tracing command buffer");
-    }
-
-    // Transition output image to GENERAL layout
-    VkImageMemoryBarrier imageBarrier = {
-        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-        .pNext = nullptr,
-        .srcAccessMask = 0,
-        .dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
-        .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-        .newLayout = VK_IMAGE_LAYOUT_GENERAL,
+        .newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
         .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
         .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
         .image = outputImage,
@@ -1246,35 +1422,144 @@ void VulkanPipelineManager::recordRayTracingCommands(VkCommandBuffer commandBuff
             .layerCount = 1
         }
     };
-    vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
-                         0, 0, nullptr, 0, nullptr, 1, &imageBarrier);
 
-    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, rayTracingPipeline_->get());
-    LOG_DEBUG_CAT("PipelineManager", "Binding ray-tracing pipeline: {:p}, descriptorSet={:p}",
-                  static_cast<void*>(rayTracingPipeline_->get()), static_cast<void*>(descriptorSet));
-    vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, rayTracingPipelineLayout_->get(),
+    vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 
+                         0, 0, nullptr, 0, nullptr, 1, &postDispatchBarrier);
+
+    if (denoiserPostPipeline_ == VK_NULL_HANDLE) {
+        LOG_ERROR_CAT("PipelineManager", "Denoiser post pipeline not found");
+        throw std::runtime_error("Denoiser post pipeline not found");
+    }
+
+    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, denoiserPostPipeline_);
+    vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, getComputePipelineLayout(), 
+                            0, 1, &descriptorSet, 0, nullptr);
+    vkCmdDispatch(commandBuffer, groupCountX, groupCountY, 1);
+
+    VkImageMemoryBarrier finalBarrier = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .pNext = nullptr,
+        .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
+        .dstAccessMask = VK_ACCESS_MEMORY_READ_BIT,
+        .oldLayout = VK_IMAGE_LAYOUT_GENERAL,
+        .newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .image = outputImage,
+        .subresourceRange = {
+            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .baseMipLevel = 0,
+            .levelCount = 1,
+            .baseArrayLayer = 0,
+            .layerCount = 1
+        }
+    };
+
+    vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 
+                         0, 0, nullptr, 0, nullptr, 1, &finalBarrier);
+
+    if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS) {
+        LOG_ERROR_CAT("PipelineManager", "Failed to end compute command buffer {:p}", static_cast<void*>(commandBuffer));
+        throw std::runtime_error("Failed to end compute command buffer");
+    }
+    LOG_DEBUG_CAT("PipelineManager", "Compute commands recorded for command buffer {:p}", static_cast<void*>(commandBuffer));
+}
+
+void VulkanPipelineManager::recordRayTracingCommands(VkCommandBuffer commandBuffer, VkImage outputImage, 
+                                                    VkDescriptorSet descriptorSet, uint32_t width, uint32_t height, 
+                                                    VkImage gDepth, VkImage gNormal) {
+    LOG_DEBUG_CAT("PipelineManager", "Recording ray-tracing commands");
+
+    VkCommandBufferBeginInfo beginInfo = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .pNext = nullptr,
+        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+        .pInheritanceInfo = nullptr
+    };
+    if (vkBeginCommandBuffer(commandBuffer, &beginInfo) != VK_SUCCESS) {
+        LOG_ERROR_CAT("PipelineManager", "Failed to begin ray-tracing command buffer {:p}", static_cast<void*>(commandBuffer));
+        throw std::runtime_error("Failed to begin ray-tracing command buffer");
+    }
+
+    VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProperties = {};
+    rtProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR;
+    VkPhysicalDeviceProperties2 properties = {};
+    properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+    properties.pNext = &rtProperties;
+    vkGetPhysicalDeviceProperties2(context_.physicalDevice, &properties);
+
+    VkImageMemoryBarrier imageBarriers[3] = {
+        {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+            .pNext = nullptr,
+            .srcAccessMask = 0,
+            .dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
+            .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+            .newLayout = VK_IMAGE_LAYOUT_GENERAL,
+            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .image = outputImage,
+            .subresourceRange = {
+                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                .baseMipLevel = 0,
+                .levelCount = 1,
+                .baseArrayLayer = 0,
+                .layerCount = 1
+            }
+        },
+        {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+            .pNext = nullptr,
+            .srcAccessMask = 0,
+            .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
+            .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+            .newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .image = gDepth,
+            .subresourceRange = {
+                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                .baseMipLevel = 0,
+                .levelCount = 1,
+                .baseArrayLayer = 0,
+                .layerCount = 1
+            }
+        },
+        {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+            .pNext = nullptr,
+            .srcAccessMask = 0,
+            .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
+            .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+            .newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .image = gNormal,
+            .subresourceRange = {
+                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                .baseMipLevel = 0,
+                .levelCount = 1,
+                .baseArrayLayer = 0,
+                .layerCount = 1
+            }
+        }
+    };
+
+    vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, 
+                         0, 0, nullptr, 0, nullptr, 3, imageBarriers);
+
+    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, getRayTracingPipeline());
+    vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, getRayTracingPipelineLayout(), 
                             0, 1, &descriptorSet, 0, nullptr);
 
-    MaterialData::PushConstants pushConstants = {
-        .clearColor = glm::vec4(0.0f, 0.0f, 0.0f, 1.0f),
-        .cameraPosition = glm::vec3(0.0f, 0.0f, 5.0f),
-        .lightDirection = glm::vec3(0.0f, -1.0f, -1.0f),
-        .lightIntensity = 1.0f,
-        .samplesPerPixel = 1u,
-        .maxDepth = 2u,
-        .maxBounces = 2u,
-        .russianRoulette = 0.8f
-    };
-    vkCmdPushConstants(commandBuffer, rayTracingPipelineLayout_->get(),
-                       VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR,
+    MaterialData::PushConstants pushConstants{};
+    pushConstants.resolution = glm::vec2(static_cast<float>(width), static_cast<float>(height));
+    vkCmdPushConstants(commandBuffer, getRayTracingPipelineLayout(), 
+                       VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | 
+                       VK_SHADER_STAGE_MISS_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR | 
+                       VK_SHADER_STAGE_INTERSECTION_BIT_KHR | VK_SHADER_STAGE_CALLABLE_BIT_KHR, 
                        0, sizeof(MaterialData::PushConstants), &pushConstants);
 
-    VkStridedDeviceAddressRegionKHR raygenSbt = sbt_.raygen;
-    VkStridedDeviceAddressRegionKHR missSbt = sbt_.miss;
-    VkStridedDeviceAddressRegionKHR hitSbt = sbt_.hit;
-    VkStridedDeviceAddressRegionKHR callableSbt = sbt_.callable;
-
-    // Resolve vkCmdTraceRaysKHR function pointer
     auto vkCmdTraceRaysKHR = reinterpret_cast<PFN_vkCmdTraceRaysKHR>(
         vkGetDeviceProcAddr(context_.device, "vkCmdTraceRaysKHR"));
     if (!vkCmdTraceRaysKHR) {
@@ -1282,23 +1567,40 @@ void VulkanPipelineManager::recordRayTracingCommands(VkCommandBuffer commandBuff
         throw std::runtime_error("Failed to get vkCmdTraceRaysKHR function pointer");
     }
 
+    VkStridedDeviceAddressRegionKHR raygenSbt = sbt_.raygen;
+    VkStridedDeviceAddressRegionKHR missSbt = sbt_.miss;
+    VkStridedDeviceAddressRegionKHR hitSbt = sbt_.hit;
+    VkStridedDeviceAddressRegionKHR callableSbt = sbt_.callable;
+
     vkCmdTraceRaysKHR(commandBuffer, &raygenSbt, &missSbt, &hitSbt, &callableSbt, width, height, 1);
 
-    // Transition output image for graphics pipeline
-    imageBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-    imageBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-    imageBarrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
-    imageBarrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    imageBarrier.srcQueueFamilyIndex = platformConfig_.graphicsQueueFamily;
-    imageBarrier.dstQueueFamilyIndex = platformConfig_.graphicsQueueFamily;
-    vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-                         0, 0, nullptr, 0, nullptr, 1, &imageBarrier);
+    VkImageMemoryBarrier finalBarrier = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .pNext = nullptr,
+        .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
+        .dstAccessMask = VK_ACCESS_MEMORY_READ_BIT,
+        .oldLayout = VK_IMAGE_LAYOUT_GENERAL,
+        .newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .image = outputImage,
+        .subresourceRange = {
+            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .baseMipLevel = 0,
+            .levelCount = 1,
+            .baseArrayLayer = 0,
+            .layerCount = 1
+        }
+    };
+
+    vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 
+                         0, 0, nullptr, 0, nullptr, 1, &finalBarrier);
 
     if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS) {
-        LOG_ERROR_CAT("PipelineManager", "Failed to end ray-tracing command buffer");
+        LOG_ERROR_CAT("PipelineManager", "Failed to end ray-tracing command buffer {:p}", static_cast<void*>(commandBuffer));
         throw std::runtime_error("Failed to end ray-tracing command buffer");
     }
-    LOG_INFO_CAT("PipelineManager", "Recorded ray-tracing commands for outputImage {:p}", static_cast<void*>(outputImage));
+    LOG_DEBUG_CAT("PipelineManager", "Ray-tracing commands recorded for command buffer {:p}", static_cast<void*>(commandBuffer));
 }
 
 } // namespace VulkanRTX

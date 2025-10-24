@@ -1,44 +1,19 @@
+// assets/shaders/compute/xorshift.comp
 #version 460
-#extension GL_EXT_nonuniform_qualifier : enable
-#extension GL_EXT_scalar_block_layout : enable
+#extension GL_EXT_scalar_block_layout : require
 
-layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
-layout(binding = 1, rgba32f) uniform image2D storageImage; // Removed writeonly
-layout(binding = 5, rgba32f) uniform writeonly image2D denoiseImage;
+layout(set = 0, binding = 4, scalar) buffer Dimensions { uint seeds[1]; uint rngState; } rng;
 
-layout(push_constant) uniform PushConstants {
-    vec4 clearColor;
-    vec3 cameraPosition;
-    vec3 lightDirection;
-    float lightIntensity;
-    uint samplesPerPixel;
-    uint maxDepth;
-    uint maxBounces;
-    float russianRoulette;
-} push;
+uint xorshift(inout uint state) {
+    state ^= state << 13;
+    state ^= state >> 17;
+    state ^= state << 5;
+    return state;
+}
 
 void main() {
-    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
-    ivec2 size = imageSize(storageImage);
-
-    if (pixel.x >= size.x || pixel.y >= size.y) {
-        return;
-    }
-
-    // Simple 3x3 box filter for denoising
-    vec4 color = vec4(0.0);
-    int count = 0;
-    for (int dy = -1; dy <= 1; dy++) {
-        for (int dx = -1; dx <= 1; dx++) {
-            ivec2 neighbor = pixel + ivec2(dx, dy);
-            if (neighbor.x >= 0 && neighbor.x < size.x && neighbor.y >= 0 && neighbor.y < size.y) {
-                color += imageLoad(storageImage, neighbor);
-                count++;
-            }
-        }
-    }
-    color /= float(count);
-
-    imageStore(denoiseImage, pixel, color);
+    uint idx = gl_GlobalInvocationID.x + gl_GlobalInvocationID.y * gl_WorkGroupSize.x * gl_NumWorkGroups.x;
+    rng.rngState = xorshift(rng.rngState);
 }

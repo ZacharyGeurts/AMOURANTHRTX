@@ -99,11 +99,29 @@ endif()
 message(STATUS "Vulkan include dirs: ${Vulkan_INCLUDE_DIRS}")
 message(STATUS "Vulkan libraries: ${Vulkan_LIBRARIES}")
 
+# Verify glslc version for ray-tracing support
 find_program(GLSLC glslc REQUIRED HINTS /usr/bin $ENV{VULKAN_SDK}/bin /usr/local/bin)
 if(NOT GLSLC)
     message(FATAL_ERROR "glslc not found. Install Vulkan SDK (vulkan-tools).")
 endif()
 message(STATUS "Found glslc: ${GLSLC}")
+execute_process(
+    COMMAND ${GLSLC} --version
+    OUTPUT_VARIABLE GLSLC_VERSION_OUTPUT
+    RESULT_VARIABLE GLSLC_VERSION_RESULT
+)
+if(NOT GLSLC_VERSION_RESULT EQUAL 0)
+    message(FATAL_ERROR "Failed to check glslc version. Ensure Vulkan SDK is installed correctly.")
+endif()
+message(STATUS "glslc version output: ${GLSLC_VERSION_OUTPUT}")
+
+# Verify spirv-val for SPIR-V validation
+find_program(SPIRV_VAL spirv-val HINTS /usr/bin $ENV{VULKAN_SDK}/bin /usr/local/bin)
+if(NOT SPIRV_VAL)
+    message(WARNING "spirv-val not found. SPIR-V validation will be skipped.")
+else()
+    message(STATUS "Found spirv-val: ${SPIRV_VAL}")
+endif()
 
 # TBB
 find_package(TBB REQUIRED)
@@ -221,9 +239,20 @@ set(LINUX_BIN_DIR ${CMAKE_BINARY_DIR}/bin/Linux)
 set(WINDOWS_BIN_DIR ${CMAKE_BINARY_DIR}/bin/Windows)
 
 # Source files
-file(GLOB_RECURSE SOURCES "${SRC_DIR}/*.cpp")
+set(SOURCES "")
+file(GLOB TOP_SOURCES "${SRC_DIR}/*.cpp")
+list(APPEND SOURCES ${TOP_SOURCES})
+file(GLOB SDL3_SOURCES "${SDL3_SRC_DIR}/*.cpp")
+list(APPEND SOURCES ${SDL3_SOURCES})
+file(GLOB VULKAN_SOURCES "${VULKAN_SRC_DIR}/*.cpp")
+list(APPEND SOURCES ${VULKAN_SOURCES})
+file(GLOB ENGINE_SOURCES "${ENGINE_SRC_DIR}/*.cpp")
+list(APPEND SOURCES ${ENGINE_SOURCES})
+file(GLOB MODES_SOURCES "${MODES_SRC_DIR}/*.cpp")
+list(APPEND SOURCES ${MODES_SOURCES})
+list(REMOVE_DUPLICATES SOURCES)
 if(NOT SOURCES)
-    message(FATAL_ERROR "No source files found in ${SRC_DIR}. Ensure source files exist.")
+    message(FATAL_ERROR "No source files found in ${SRC_DIR}. Ensure main.cpp and other source files exist.")
 endif()
 message(STATUS "Found source files: ${SOURCES}")
 
@@ -309,10 +338,72 @@ endif()
 target_compile_options(amouranth_engine PRIVATE -fPIC)
 
 # Shader compilation
-set(SHADER_EXTS "*.vert" "*.frag" "*.rahit" "*.rchit" "*.rmiss" "*.rgen" "*.rint" "*.rcall" "*.comp")
+set(RAYTRACING_SHADERS
+    "raygen.rgen:rgen"
+    "miss.rmiss:rmiss"
+    "shadowmiss.rmiss:rmiss"
+    "closesthit.rchit:rchit"
+    "anyhit.rahit:rahit"
+    "intersection.rint:rint"
+    "callable.rcall:rcall"
+    "shadow_anyhit.rahit:rahit"
+    "mid_anyhit.rahit:rahit"
+    "volumetric_anyhit.rahit:rahit"
+)
+set(REQUIRED_RAYTRACING_SHADERS "raygen.rgen" "miss.rmiss" "closesthit.rchit")
+set(SHADER_EXTS "*.vert" "*.frag" "*.comp")
 set(SHADER_OUTPUTS "")
+
+# Check for required ray-tracing shaders
+foreach(SHADER ${REQUIRED_RAYTRACING_SHADERS})
+    if(NOT EXISTS "${SHADER_DIR}/raytracing/${SHADER}")
+        message(FATAL_ERROR "Required ray-tracing shader ${SHADER} is missing in ${SHADER_DIR}/raytracing/")
+    endif()
+endforeach()
+
+# Explicit ray-tracing shader compilation
+foreach(SHADER_INFO ${RAYTRACING_SHADERS})
+    string(REPLACE ":" ";" SHADER_PAIR ${SHADER_INFO})
+    list(GET SHADER_PAIR 0 SHADER_SRC)
+    list(GET SHADER_PAIR 1 SHADER_STAGE)
+    get_filename_component(SHADER_BASE ${SHADER_SRC} NAME_WE)
+    set(SHADER "${SHADER_DIR}/raytracing/${SHADER_SRC}")
+    if(NOT EXISTS "${SHADER}")
+        message(WARNING "Ray-tracing shader file ${SHADER} does not exist. Skipping compilation.")
+        continue()
+    endif()
+    file(READ "${SHADER}" SHADER_CONTENT)
+    if("${SHADER_CONTENT}" STREQUAL "")
+        message(WARNING "Ray-tracing shader file ${SHADER} is empty. Skipping compilation.")
+        continue()
+    endif()
+    if(IS_LINUX)
+        set(SHADER_OUTPUT "${LINUX_BIN_DIR}/assets/shaders/raytracing/${SHADER_BASE}.spv")
+        add_custom_command(
+            OUTPUT ${SHADER_OUTPUT}
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${LINUX_BIN_DIR}/assets/shaders/raytracing"
+            COMMAND ${GLSLC} -fshader-stage=${SHADER_STAGE} ${SHADER} -o ${SHADER_OUTPUT} --target-env=vulkan1.3 --target-spv=spv1.5
+            COMMAND ${SPIRV_VAL} ${SHADER_OUTPUT} || echo "SPIR-V validation failed for ${SHADER_OUTPUT}"
+            DEPENDS ${SHADER}
+            COMMENT "Compiling ray-tracing shader ${SHADER_BASE} for Linux (stage: ${SHADER_STAGE})"
+        )
+    else()
+        set(SHADER_OUTPUT "${WINDOWS_BIN_DIR}/assets/shaders/raytracing/${SHADER_BASE}.spv")
+        add_custom_command(
+            OUTPUT ${SHADER_OUTPUT}
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${WINDOWS_BIN_DIR}/assets/shaders/raytracing"
+            COMMAND ${GLSLC} -fshader-stage=${SHADER_STAGE} ${SHADER} -o ${SHADER_OUTPUT} --target-env=vulkan1.3 --target-spv=spv1.5
+            COMMAND ${SPIRV_VAL} ${SHADER_OUTPUT} || echo "SPIR-V validation failed for ${SHADER_OUTPUT}"
+            DEPENDS ${SHADER}
+            COMMENT "Compiling ray-tracing shader ${SHADER_BASE} for Windows (stage: ${SHADER_STAGE})"
+        )
+    endif()
+    list(APPEND SHADER_OUTPUTS ${SHADER_OUTPUT})
+endforeach()
+
+# Other shaders (vertex, fragment, compute)
 foreach(EXT ${SHADER_EXTS})
-    file(GLOB RASTER_SHADERS CONFIGURE_DEPENDS "${SHADER_DIR}/rasterization/${EXT}")
+    file(GLOB RASTER_SHADERS "${SHADER_DIR}/rasterization/${EXT}")
     foreach(SHADER ${RASTER_SHADERS})
         get_filename_component(SHADER_BASE ${SHADER} NAME_WE)
         if(IS_LINUX)
@@ -320,59 +411,52 @@ foreach(EXT ${SHADER_EXTS})
         else()
             set(SHADER_OUTPUT "${WINDOWS_BIN_DIR}/assets/shaders/rasterization/${SHADER_BASE}.spv")
         endif()
-        # Validate shader file before compilation
-        if(EXISTS "${SHADER}")
-            file(READ "${SHADER}" SHADER_CONTENT)
-            if("${SHADER_CONTENT}" STREQUAL "")
-                message(WARNING "Shader file ${SHADER} is empty. Skipping compilation.")
-                continue()
-            endif()
-        else()
-            message(WARNING "Shader file ${SHADER} does not exist. Skipping compilation.")
+        if(NOT EXISTS "${SHADER}")
+            message(WARNING "Rasterization shader file ${SHADER} does not exist. Skipping compilation.")
             continue()
         endif()
-        add_custom_command(
-            OUTPUT ${SHADER_OUTPUT}
-            COMMAND ${CMAKE_COMMAND} -E make_directory "${LINUX_BIN_DIR}/assets/shaders/rasterization"
-            COMMAND ${CMAKE_COMMAND} -E make_directory "${WINDOWS_BIN_DIR}/assets/shaders/rasterization"
-            COMMAND ${GLSLC} ${SHADER} -o ${SHADER_OUTPUT} --target-env=vulkan1.3
-            DEPENDS ${SHADER}
-            COMMENT "Compiling rasterization shader ${SHADER_BASE}"
-        )
-        list(APPEND SHADER_OUTPUTS ${SHADER_OUTPUT})
-    endforeach()
-
-    file(GLOB RAYTRACE_SHADERS CONFIGURE_DEPENDS "${SHADER_DIR}/raytracing/${EXT}")
-    foreach(SHADER ${RAYTRACE_SHADERS})
-        get_filename_component(SHADER_BASE ${SHADER} NAME_WE)
-        if(IS_LINUX)
-            set(SHADER_OUTPUT "${LINUX_BIN_DIR}/assets/shaders/raytracing/${SHADER_BASE}.spv")
-        else()
-            set(SHADER_OUTPUT "${WINDOWS_BIN_DIR}/assets/shaders/raytracing/${SHADER_BASE}.spv")
-        endif()
-        # Validate shader file before compilation
-        if(EXISTS "${SHADER}")
-            file(READ "${SHADER}" SHADER_CONTENT)
-            if("${SHADER_CONTENT}" STREQUAL "")
-                message(WARNING "Shader file ${SHADER} is empty. Skipping compilation.")
-                continue()
-            endif()
-        else()
-            message(WARNING "Shader file ${SHADER} does not exist. Skipping compilation.")
+        file(READ "${SHADER}" SHADER_CONTENT)
+        if("${SHADER_CONTENT}" STREQUAL "")
+            message(WARNING "Rasterization shader file ${SHADER} is empty. Skipping compilation.")
             continue()
         endif()
-        add_custom_command(
-            OUTPUT ${SHADER_OUTPUT}
-            COMMAND ${CMAKE_COMMAND} -E make_directory "${LINUX_BIN_DIR}/assets/shaders/raytracing"
-            COMMAND ${CMAKE_COMMAND} -E make_directory "${WINDOWS_BIN_DIR}/assets/shaders/raytracing"
-            COMMAND ${GLSLC} ${SHADER} -o ${SHADER_OUTPUT} --target-env=vulkan1.3
-            DEPENDS ${SHADER}
-            COMMENT "Compiling raytracing shader ${SHADER_BASE}"
-        )
-        list(APPEND SHADER_OUTPUTS ${SHADER_OUTPUT})
+        string(FIND "${EXT}" ".vert" IS_VERT)
+        string(FIND "${EXT}" ".frag" IS_FRAG)
+        string(FIND "${EXT}" ".comp" IS_COMP)
+        if(IS_VERT GREATER -1)
+            set(SHADER_STAGE "vert")
+        elseif(IS_FRAG GREATER -1)
+            set(SHADER_STAGE "frag")
+        elseif(IS_COMP GREATER -1)
+            set(SHADER_STAGE "comp")
+        else()
+            set(SHADER_STAGE "")
+        endif()
+        if(SHADER_STAGE)
+            if(IS_LINUX)
+                add_custom_command(
+                    OUTPUT ${SHADER_OUTPUT}
+                    COMMAND ${CMAKE_COMMAND} -E make_directory "${LINUX_BIN_DIR}/assets/shaders/rasterization"
+                    COMMAND ${GLSLC} -fshader-stage=${SHADER_STAGE} ${SHADER} -o ${SHADER_OUTPUT} --target-env=vulkan1.3 --target-spv=spv1.3
+                    COMMAND ${SPIRV_VAL} ${SHADER_OUTPUT} || echo "SPIR-V validation failed for ${SHADER_OUTPUT}"
+                    DEPENDS ${SHADER}
+                    COMMENT "Compiling rasterization shader ${SHADER_BASE} for Linux (stage: ${SHADER_STAGE})"
+                )
+            else()
+                add_custom_command(
+                    OUTPUT ${SHADER_OUTPUT}
+                    COMMAND ${CMAKE_COMMAND} -E make_directory "${WINDOWS_BIN_DIR}/assets/shaders/rasterization"
+                    COMMAND ${GLSLC} -fshader-stage=${SHADER_STAGE} ${SHADER} -o ${SHADER_OUTPUT} --target-env=vulkan1.3 --target-spv=spv1.3
+                    COMMAND ${SPIRV_VAL} ${SHADER_OUTPUT} || echo "SPIR-V validation failed for ${SHADER_OUTPUT}"
+                    DEPENDS ${SHADER}
+                    COMMENT "Compiling rasterization shader ${SHADER_BASE} for Windows (stage: ${SHADER_STAGE})"
+                )
+            endif()
+            list(APPEND SHADER_OUTPUTS ${SHADER_OUTPUT})
+        endif()
     endforeach()
 
-    file(GLOB COMPUTE_SHADERS CONFIGURE_DEPENDS "${SHADER_DIR}/compute/${EXT}")
+    file(GLOB COMPUTE_SHADERS "${SHADER_DIR}/compute/${EXT}")
     foreach(SHADER ${COMPUTE_SHADERS})
         get_filename_component(SHADER_BASE ${SHADER} NAME_WE)
         if(IS_LINUX)
@@ -380,31 +464,43 @@ foreach(EXT ${SHADER_EXTS})
         else()
             set(SHADER_OUTPUT "${WINDOWS_BIN_DIR}/assets/shaders/compute/${SHADER_BASE}.spv")
         endif()
-        # Validate shader file before compilation
-        if(EXISTS "${SHADER}")
-            file(READ "${SHADER}" SHADER_CONTENT)
-            if("${SHADER_CONTENT}" STREQUAL "")
-                message(WARNING "Shader file ${SHADER} is empty. Skipping compilation.")
-                continue()
-            endif()
-        else()
-            message(WARNING "Shader file ${SHADER} does not exist. Skipping compilation.")
+        if(NOT EXISTS "${SHADER}")
+            message(WARNING "Compute shader file ${SHADER} does not exist. Skipping compilation.")
             continue()
         endif()
-        add_custom_command(
-            OUTPUT ${SHADER_OUTPUT}
-            COMMAND ${CMAKE_COMMAND} -E make_directory "${LINUX_BIN_DIR}/assets/shaders/compute"
-            COMMAND ${CMAKE_COMMAND} -E make_directory "${WINDOWS_BIN_DIR}/assets/shaders/compute"
-            COMMAND ${GLSLC} ${SHADER} -o ${SHADER_OUTPUT} --target-env=vulkan1.3
-            DEPENDS ${SHADER}
-            COMMENT "Compiling compute shader ${SHADER_BASE}"
-        )
+        file(READ "${SHADER}" SHADER_CONTENT)
+        if("${SHADER_CONTENT}" STREQUAL "")
+            message(WARNING "Compute shader file ${SHADER} is empty. Skipping compilation.")
+            continue()
+        endif()
+        if(IS_LINUX)
+            add_custom_command(
+                OUTPUT ${SHADER_OUTPUT}
+                COMMAND ${CMAKE_COMMAND} -E make_directory "${LINUX_BIN_DIR}/assets/shaders/compute"
+                COMMAND ${GLSLC} -fshader-stage=comp ${SHADER} -o ${SHADER_OUTPUT} --target-env=vulkan1.3 --target-spv=spv1.3
+                COMMAND ${SPIRV_VAL} ${SHADER_OUTPUT} || echo "SPIR-V validation failed for ${SHADER_OUTPUT}"
+                DEPENDS ${SHADER}
+                COMMENT "Compiling compute shader ${SHADER_BASE} for Linux"
+            )
+        else()
+            add_custom_command(
+                OUTPUT ${SHADER_OUTPUT}
+                COMMAND ${CMAKE_COMMAND} -E make_directory "${WINDOWS_BIN_DIR}/assets/shaders/compute"
+                COMMAND ${GLSLC} -fshader-stage=comp ${SHADER} -o ${SHADER_OUTPUT} --target-env=vulkan1.3 --target-spv=spv1.3
+                COMMAND ${SPIRV_VAL} ${SHADER_OUTPUT} || echo "SPIR-V validation failed for ${SHADER_OUTPUT}"
+                DEPENDS ${SHADER}
+                COMMENT "Compiling compute shader ${SHADER_BASE} for Windows"
+            )
+        endif()
         list(APPEND SHADER_OUTPUTS ${SHADER_OUTPUT})
     endforeach()
 endforeach()
+
 if(SHADER_OUTPUTS)
     add_custom_target(shaders DEPENDS ${SHADER_OUTPUTS})
     add_dependencies(amouranth_engine shaders)
+else()
+    message(WARNING "No shader outputs generated. Ensure shader files exist and are valid.")
 endif()
 
 # Copy assets
@@ -415,7 +511,7 @@ set(ASSET_TYPES
     "MATERIAL:*.json,*.mat:${ASSET_DIR}/materials:${CMAKE_BINARY_DIR}/bin/Linux/assets/materials:${CMAKE_BINARY_DIR}/bin/Windows/assets/materials"
     "SCENE:*.json,*.scene:${ASSET_DIR}/scenes:${CMAKE_BINARY_DIR}/bin/Linux/assets/scenes:${CMAKE_BINARY_DIR}/bin/Windows/assets/scenes"
     "AUDIO:*.wav,*.ogg,*.mp3:${ASSET_DIR}/audio:${CMAKE_BINARY_DIR}/bin/Linux/assets/audio:${CMAKE_BINARY_DIR}/bin/Windows/assets/audio"
-    "SCRIPT:*.lua,*.py:${ASSET_DIR}/scripts:${CMAKE_BINARY_DIR}/bin/Linux/assets/scripts:${CMAKE_BINARY_DIR}/bin/Windows/assets/scripts"
+    "SCRIPT:*.lua:${ASSET_DIR}/scripts:${CMAKE_BINARY_DIR}/bin/Linux/assets/scripts:${CMAKE_BINARY_DIR}/bin/Windows/assets/scripts"
 )
 foreach(ASSET_TYPE ${ASSET_TYPES})
     string(REPLACE ":" ";" ASSET_INFO ${ASSET_TYPE})
@@ -428,7 +524,7 @@ foreach(ASSET_TYPE ${ASSET_TYPES})
 
     set(ASSET_FILES "")
     foreach(EXT ${EXTENSION_LIST})
-        file(GLOB TEMP_FILES CONFIGURE_DEPENDS "${ASSET_SRC_DIR}/${EXT}")
+        file(GLOB TEMP_FILES "${ASSET_SRC_DIR}/${EXT}")
         list(APPEND ASSET_FILES ${TEMP_FILES})
     endforeach()
     list(REMOVE_DUPLICATES ASSET_FILES)

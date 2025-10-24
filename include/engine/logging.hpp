@@ -61,7 +61,7 @@ enum class LogLevel { Debug, Info, Warning, Error };
 inline constexpr std::string_view RESET = "\033[0m";
 inline constexpr std::string_view CYAN = "\033[1;36m";
 inline constexpr std::string_view GREEN = "\033[1;32m";
-inline constexpr std::string_view YELLOW = "\033[1;33m";
+inline constexpr std::string_view YELLOW = "\033[38;5;208m";
 inline constexpr std::string_view MAGENTA = "\033[1;35m";
 inline constexpr std::string_view BLUE = "\033[1;34m";
 inline constexpr std::string_view RED = "\033[1;31m";

@@ -15,12 +15,68 @@
 #include <atomic>
 #include <mutex>
 #include <stdexcept>
+#include <tuple>
 #include "ue_init.hpp"
 #include "engine/logging.hpp"
+#include "VulkanCore.hpp"
 
 // Forward declarations for Vulkan function pointer types
 using PFN_vkCmdBuildAccelerationStructuresKHR = void (*)(VkCommandBuffer, uint32_t, const VkAccelerationStructureBuildGeometryInfoKHR*, const VkAccelerationStructureBuildRangeInfoKHR* const*);
 using PFN_vkCreateRayTracingPipelinesKHR = VkResult (*)(VkDevice, VkDeferredOperationKHR, VkPipelineCache, uint32_t, const VkRayTracingPipelineCreateInfoKHR*, const VkAllocationCallbacks*, VkPipeline*);
+using PFN_vkGetBufferDeviceAddress = VkDeviceAddress (*)(VkDevice, const VkBufferDeviceAddressInfo*);
+using PFN_vkCmdTraceRaysKHR = void (*)(VkCommandBuffer, const VkStridedDeviceAddressRegionKHR*, const VkStridedDeviceAddressRegionKHR*, const VkStridedDeviceAddressRegionKHR*, const VkStridedDeviceAddressRegionKHR*, uint32_t, uint32_t, uint32_t);
+using PFN_vkCreateAccelerationStructureKHR = VkResult (*)(VkDevice, const VkAccelerationStructureCreateInfoKHR*, const VkAllocationCallbacks*, VkAccelerationStructureKHR*);
+using PFN_vkDestroyAccelerationStructureKHR = void (*)(VkDevice, VkAccelerationStructureKHR, const VkAllocationCallbacks*);
+using PFN_vkGetAccelerationStructureBuildSizesKHR = void (*)(VkDevice, VkAccelerationStructureBuildTypeKHR, const VkAccelerationStructureBuildGeometryInfoKHR*, const uint32_t*, VkAccelerationStructureBuildSizesInfoKHR*);
+using PFN_vkGetRayTracingShaderGroupHandlesKHR = VkResult (*)(VkDevice, VkPipeline, uint32_t, uint32_t, size_t, void*);
+using PFN_vkGetAccelerationStructureDeviceAddressKHR = VkDeviceAddress (*)(VkDevice, const VkAccelerationStructureDeviceAddressInfoKHR*);
+using PFN_vkCmdCopyAccelerationStructureKHR = void (*)(VkCommandBuffer, const VkCopyAccelerationStructureInfoKHR*);
+using PFN_vkCreateDescriptorSetLayout = VkResult (*)(VkDevice, const VkDescriptorSetLayoutCreateInfo*, const VkAllocationCallbacks*, VkDescriptorSetLayout*);
+using PFN_vkAllocateDescriptorSets = VkResult (*)(VkDevice, const VkDescriptorSetAllocateInfo*, VkDescriptorSet*);
+using PFN_vkCreateDescriptorPool = VkResult (*)(VkDevice, const VkDescriptorPoolCreateInfo*, const VkAllocationCallbacks*, VkDescriptorPool*);
+using PFN_vkGetPhysicalDeviceProperties2 = void (*)(VkPhysicalDevice, VkPhysicalDeviceProperties2*);
+using PFN_vkCreateShaderModule = VkResult (*)(VkDevice, const VkShaderModuleCreateInfo*, const VkAllocationCallbacks*, VkShaderModule*);
+using PFN_vkDestroyDescriptorSetLayout = void (*)(VkDevice, VkDescriptorSetLayout, const VkAllocationCallbacks*);
+using PFN_vkDestroyDescriptorPool = void (*)(VkDevice, VkDescriptorPool, const VkAllocationCallbacks*);
+using PFN_vkFreeDescriptorSets = VkResult (*)(VkDevice, VkDescriptorPool, uint32_t, const VkDescriptorSet*);
+using PFN_vkDestroyPipelineLayout = void (*)(VkDevice, VkPipelineLayout, const VkAllocationCallbacks*);
+using PFN_vkDestroyPipeline = void (*)(VkDevice, VkPipeline, const VkAllocationCallbacks*);
+using PFN_vkDestroyBuffer = void (*)(VkDevice, VkBuffer, const VkAllocationCallbacks*);
+using PFN_vkFreeMemory = void (*)(VkDevice, VkDeviceMemory, const VkAllocationCallbacks*);
+using PFN_vkCreateQueryPool = VkResult (*)(VkDevice, const VkQueryPoolCreateInfo*, const VkAllocationCallbacks*, VkQueryPool*);
+using PFN_vkDestroyQueryPool = void (*)(VkDevice, VkQueryPool, const VkAllocationCallbacks*);
+using PFN_vkGetQueryPoolResults = VkResult (*)(VkDevice, VkQueryPool, uint32_t, uint32_t, size_t, void*, VkDeviceSize, VkQueryResultFlags);
+using PFN_vkCmdWriteAccelerationStructuresPropertiesKHR = void (*)(VkCommandBuffer, uint32_t, const VkAccelerationStructureKHR*, VkQueryType, VkQueryPool, uint32_t);
+using PFN_vkCreateBuffer = VkResult (*)(VkDevice, const VkBufferCreateInfo*, const VkAllocationCallbacks*, VkBuffer*);
+using PFN_vkAllocateMemory = VkResult (*)(VkDevice, const VkMemoryAllocateInfo*, const VkAllocationCallbacks*, VkDeviceMemory*);
+using PFN_vkBindBufferMemory = VkResult (*)(VkDevice, VkBuffer, VkDeviceMemory, VkDeviceSize);
+using PFN_vkGetPhysicalDeviceMemoryProperties = void (*)(VkPhysicalDevice, VkPhysicalDeviceMemoryProperties*);
+using PFN_vkBeginCommandBuffer = VkResult (*)(VkCommandBuffer, const VkCommandBufferBeginInfo*);
+using PFN_vkEndCommandBuffer = VkResult (*)(VkCommandBuffer);
+using PFN_vkAllocateCommandBuffers = VkResult (*)(VkDevice, const VkCommandBufferAllocateInfo*, VkCommandBuffer*);
+using PFN_vkQueueSubmit = VkResult (*)(VkQueue, uint32_t, const VkSubmitInfo*, VkFence);
+using PFN_vkQueueWaitIdle = VkResult (*)(VkQueue);
+using PFN_vkFreeCommandBuffers = void (*)(VkDevice, VkCommandPool, uint32_t, const VkCommandBuffer*);
+using PFN_vkCmdResetQueryPool = void (*)(VkCommandBuffer, VkQueryPool, uint32_t, uint32_t);
+using PFN_vkGetBufferMemoryRequirements = void (*)(VkDevice, VkBuffer, VkMemoryRequirements*);
+using PFN_vkMapMemory = VkResult (*)(VkDevice, VkDeviceMemory, VkDeviceSize, VkDeviceSize, VkMemoryMapFlags, void**);
+using PFN_vkUnmapMemory = void (*)(VkDevice, VkDeviceMemory);
+using PFN_vkCreateImage = VkResult (*)(VkDevice, const VkImageCreateInfo*, const VkAllocationCallbacks*, VkImage*);
+using PFN_vkDestroyImage = void (*)(VkDevice, VkImage, const VkAllocationCallbacks*);
+using PFN_vkGetImageMemoryRequirements = void (*)(VkDevice, VkImage, VkMemoryRequirements*);
+using PFN_vkBindImageMemory = VkResult (*)(VkDevice, VkImage, VkDeviceMemory, VkDeviceSize);
+using PFN_vkCreateImageView = VkResult (*)(VkDevice, const VkImageViewCreateInfo*, const VkAllocationCallbacks*, VkImageView*);
+using PFN_vkDestroyImageView = void (*)(VkDevice, VkImageView, const VkAllocationCallbacks*);
+using PFN_vkUpdateDescriptorSets = void (*)(VkDevice, uint32_t, const VkWriteDescriptorSet*, uint32_t, const VkCopyDescriptorSet*);
+using PFN_vkCmdPipelineBarrier = void (*)(VkCommandBuffer, VkPipelineStageFlags, VkPipelineStageFlags, VkDependencyFlags, uint32_t, const VkMemoryBarrier*, uint32_t, const VkBufferMemoryBarrier*, uint32_t, const VkImageMemoryBarrier*);
+using PFN_vkCmdBindPipeline = void (*)(VkCommandBuffer, VkPipelineBindPoint, VkPipeline);
+using PFN_vkCmdBindDescriptorSets = void (*)(VkCommandBuffer, VkPipelineBindPoint, VkPipelineLayout, uint32_t, uint32_t, const VkDescriptorSet*, uint32_t, const uint32_t*);
+using PFN_vkCmdPushConstants = void (*)(VkCommandBuffer, VkPipelineLayout, VkShaderStageFlags, uint32_t, uint32_t, const void*);
+using PFN_vkCmdCopyBuffer = void (*)(VkCommandBuffer, VkBuffer, VkBuffer, uint32_t, const VkBufferCopy*);
+using PFN_vkCreatePipelineLayout = VkResult (*)(VkDevice, const VkPipelineLayoutCreateInfo*, const VkAllocationCallbacks*, VkPipelineLayout*);
+using PFN_vkCreateComputePipelines = VkResult (*)(VkDevice, VkPipelineCache, uint32_t, const VkComputePipelineCreateInfo*, const VkAllocationCallbacks*, VkPipeline*);
+using PFN_vkCmdDispatch = void (*)(VkCommandBuffer, uint32_t, uint32_t, uint32_t);
+using PFN_vkDestroyShaderModule = void (*)(VkDevice, VkShaderModule, const VkAllocationCallbacks*);
 
 namespace VulkanRTX {
 
@@ -31,17 +87,13 @@ public:
 
 enum class ShaderFeatures : unsigned int {
     None = 0,
-    AnyHit = 1 << 0,
-    Callable = 1 << 1
+    Raygen = 1 << 0,
+    Miss = 1 << 1,
+    ClosestHit = 1 << 2,
+    AnyHit = 1 << 3,
+    Intersection = 1 << 4,
+    Callable = 1 << 5
 };
-
-constexpr ShaderFeatures operator&(ShaderFeatures lhs, ShaderFeatures rhs) {
-    return static_cast<ShaderFeatures>(static_cast<unsigned int>(lhs) & static_cast<unsigned int>(rhs));
-}
-
-constexpr bool operator==(ShaderFeatures lhs, ShaderFeatures rhs) {
-    return static_cast<unsigned int>(lhs) == static_cast<unsigned int>(rhs);
-}
 
 constexpr ShaderFeatures operator|(ShaderFeatures lhs, ShaderFeatures rhs) {
     return static_cast<ShaderFeatures>(static_cast<unsigned int>(lhs) | static_cast<unsigned int>(rhs));
@@ -51,45 +103,6 @@ inline ShaderFeatures& operator|=(ShaderFeatures& lhs, ShaderFeatures rhs) {
     lhs = lhs | rhs;
     return lhs;
 }
-
-enum class DescriptorBindings {
-    TLAS = 0,
-    StorageImage = 1,
-    CameraUBO = 2,
-    MaterialSSBO = 3,
-    DimensionDataSSBO = 4,
-    DenoiseImage = 5,
-    EnvMap = 6
-};
-
-struct alignas(16) UniformBufferObject {
-    glm::mat4 model;
-    glm::mat4 view;
-    glm::mat4 proj;
-    int mode;
-};
-
-struct alignas(16) MaterialData {
-    alignas(16) glm::vec4 diffuse;   // RGBA color, 16 bytes
-    alignas(4) float specular;       // Specular intensity, 4 bytes
-    alignas(4) float roughness;      // Surface roughness, 4 bytes
-    alignas(4) float metallic;       // Metallic property, 4 bytes
-    alignas(16) glm::vec4 emission;  // Emission color/intensity, 16 bytes
-    // Total size: 44 bytes, padded to 48 bytes for std140 alignment
-
-    struct PushConstants {
-        alignas(16) glm::vec4 clearColor;      // 16 bytes
-        alignas(16) glm::vec3 cameraPosition;  // 12 bytes + 4 bytes padding
-        alignas(16) glm::vec3 lightDirection;  // 12 bytes + 4 bytes padding
-        alignas(4) float lightIntensity;       // 4 bytes
-        alignas(4) uint32_t samplesPerPixel;   // 4 bytes
-        alignas(4) uint32_t maxDepth;          // 4 bytes
-        alignas(4) uint32_t maxBounces;        // 4 bytes
-        alignas(4) float russianRoulette;      // 4 bytes
-        // Total size: 60 bytes, padded to 64 bytes for alignof=16
-    };
-    // static_assert(sizeof(PushConstants) == 64 && alignof(PushConstants) == 16, "PushConstants alignment mismatch");
-};
 
 template<typename T, typename DestroyFuncType>
 class VulkanResource {
@@ -191,7 +204,7 @@ public:
 
         ShaderBindingTable() noexcept = default;
         ShaderBindingTable(VkDevice device, VkBuffer buffer, VkDeviceMemory memory, 
-                           PFN_vkDestroyBuffer destroyBuffer, PFN_vkFreeMemory freeMemory);
+                          PFN_vkDestroyBuffer destroyBuffer, PFN_vkFreeMemory freeMemory);
         ~ShaderBindingTable() = default;
         ShaderBindingTable(const ShaderBindingTable&) = delete;
         ShaderBindingTable& operator=(const ShaderBindingTable&) = delete;
@@ -224,9 +237,10 @@ public:
                            VulkanResource<VkImageView, PFN_vkDestroyImageView>& imageView,
                            VulkanResource<VkDeviceMemory, PFN_vkFreeMemory>& memory);
     void updateDescriptors(VkBuffer cameraBuffer, VkBuffer materialBuffer, VkBuffer dimensionBuffer,
-                           VkImageView storageImageView, VkImageView denoiseImageView, VkImageView envMapView, VkSampler envMapSampler);
+                          VkImageView storageImageView, VkImageView denoiseImageView, VkImageView envMapView, VkSampler envMapSampler,
+                          VkImageView densityVolumeView, VkImageView gDepthView, VkImageView gNormalView);
     void recordRayTracingCommands(VkCommandBuffer cmdBuffer, VkExtent2D extent, VkImage outputImage,
-                                  VkImageView outputImageView, const MaterialData::PushConstants& pc);
+                                 VkImageView outputImageView, const MaterialData::PushConstants& pc);
     void updateDescriptorSetForTLAS(VkAccelerationStructureKHR tlas);
     void compactAccelerationStructures(VkPhysicalDevice physicalDevice, VkCommandPool commandPool, VkQueue queue);
 
@@ -241,8 +255,7 @@ private:
     VkShaderModule createShaderModule(const std::string& filename);
     bool shaderFileExists(const std::string& filename) const;
     void loadShadersAsync(std::vector<VkShaderModule>& modules, const std::vector<std::string>& paths);
-    void buildShaderGroups(std::vector<VkRayTracingShaderGroupCreateInfoKHR>& groups,
-                           const std::vector<VkPipelineShaderStageCreateInfo>& stages);
+    void buildShaderGroups(std::vector<VkRayTracingShaderGroupCreateInfoKHR>& groups);
     VkCommandBuffer allocateTransientCommandBuffer(VkCommandPool commandPool);
     void submitAndWaitTransient(VkCommandBuffer cmdBuffer, VkQueue queue, VkCommandPool commandPool);
     void createBuffer(VkPhysicalDevice physicalDevice, VkDeviceSize size, VkBufferUsageFlags usage,
@@ -281,7 +294,7 @@ private:
         previousDimensionCache_ = cache; 
     }
     bool hasShaderFeature(ShaderFeatures feature) const { 
-        return (shaderFeatures_ & feature) == feature; 
+        return (static_cast<unsigned int>(shaderFeatures_) & static_cast<unsigned int>(feature)) != 0; 
     }
 
     // Static members

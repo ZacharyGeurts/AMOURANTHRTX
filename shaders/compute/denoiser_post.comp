@@ -1,0 +1,20 @@
+// Filename: denoiser_post.comp
+#version 460
+#extension GL_EXT_scalar_block_layout : require
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(set = 0, binding = 1, rgba32f) readonly uniform image2D noisyImage;
+layout(set = 0, binding = 9, rgba32f) readonly uniform image2D history;
+layout(set = 0, binding = 1, rgba32f) writeonly uniform image2D denoised;
+
+void main() {
+    ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
+    if (coord.x >= imageSize(noisyImage).x || coord.y >= imageSize(noisyImage).y) return;
+
+    vec3 noisy = imageLoad(noisyImage, coord).rgb;
+    vec3 prev = imageLoad(history, coord).rgb;
+
+    vec3 blend = mix(prev, noisy, 0.1);
+    imageStore(denoised, coord, vec4(blend, 1.0));
+}

@@ -19,11 +19,16 @@
 #include "engine/logging.hpp"
 
 #define VK_CHECK(result, msg) if ((result) != VK_SUCCESS) { \
-    LOG_ERROR("Vulkan error: {} (VkResult: {})", (msg), static_cast<int>(result), std::source_location::current()); \
+    LOG_ERROR_CAT("VulkanRTX", "Vulkan error: {} (VkResult: {})", (msg), static_cast<int>(result), std::source_location::current()); \
     throw VulkanRTXException((msg)); \
 }
 
 namespace VulkanRTX {
+
+std::atomic<bool> VulkanRTX::functionPtrInitialized_{false};
+std::atomic<bool> VulkanRTX::shaderModuleInitialized_{false};
+std::mutex VulkanRTX::functionPtrMutex_;
+std::mutex VulkanRTX::shaderModuleMutex_;
 
 VulkanRTX::ShaderBindingTable::ShaderBindingTable(VkDevice device, VkBuffer buffer, VkDeviceMemory memory,
                                                  PFN_vkDestroyBuffer destroyBuffer, PFN_vkFreeMemory freeMemory)
@@ -58,12 +63,16 @@ VulkanRTX::VulkanRTX(VkDevice device, VkPhysicalDevice physicalDevice, const std
       numShaderGroups_(0),
       sbt_(),
       scratchAlignment_(0) {
-    LOG_INFO("Initializing VulkanRTX with {} shader paths", shaderPaths.size());
+    LOG_INFO_CAT("VulkanRTX", "Initializing VulkanRTX with {} shader paths", shaderPaths.size());
 
     if (!device || !physicalDevice) {
-        LOG_ERROR("Invalid device or physical device", std::source_location::current());
+        LOG_ERROR_CAT("VulkanRTX", "Invalid device or physical device", std::source_location::current());
         throw VulkanRTXException("Invalid device or physical device");
     }
+
+    // Log current working directory for path resolution debugging
+    std::filesystem::path cwd = std::filesystem::current_path();
+    LOG_DEBUG_CAT("VulkanRTX", "Current working directory: {}", cwd.string());
 
     vkGetDeviceProcAddrFunc = vkGetDeviceProcAddr;
     vkGetBufferDeviceAddress = reinterpret_cast<PFN_vkGetBufferDeviceAddress>(
@@ -180,21 +189,42 @@ VulkanRTX::VulkanRTX(VkDevice device, VkPhysicalDevice physicalDevice, const std
         vkGetDeviceProcAddrFunc(device_, "vkCmdBuildAccelerationStructuresKHR"));
 
     for (const auto& path : shaderPaths_) {
-        if (!shaderFileExists(path)) {
-            LOG_ERROR("Shader file does not exist: {}", path, std::source_location::current());
-            throw VulkanRTXException("Shader file does not exist: " + path);
+        // Convert relative path to absolute path for better diagnostics
+        std::filesystem::path shaderPath = std::filesystem::absolute(path);
+        LOG_DEBUG_CAT("VulkanRTX", "Resolved absolute shader path: {}", shaderPath.string());
+
+        // Check if file exists
+        if (!std::filesystem::exists(shaderPath)) {
+            LOG_ERROR_CAT("VulkanRTX", "Shader file does not exist: {}", shaderPath.string(), std::source_location::current());
+            throw VulkanRTXException("Shader file does not exist: " + shaderPath.string());
         }
+
+        // Check if path points to a regular file
+        if (!std::filesystem::is_regular_file(shaderPath)) {
+            LOG_ERROR_CAT("VulkanRTX", "Shader path '{}' is not a regular file (e.g., is a directory)", shaderPath.string(), std::source_location::current());
+            throw VulkanRTXException("Shader path is not a regular file: " + shaderPath.string());
+        }
+
+        // Check file permissions
+        std::filesystem::file_status status = std::filesystem::status(shaderPath);
+        auto perms = status.permissions();
+        if ((perms & std::filesystem::perms::owner_read) == std::filesystem::perms::none) {
+            LOG_ERROR_CAT("VulkanRTX", "Shader file '{}' lacks read permissions", shaderPath.string(), std::source_location::current());
+            throw VulkanRTXException("Shader file lacks read permissions: " + shaderPath.string());
+        }
+
+        LOG_DEBUG_CAT("VulkanRTX", "Validated shader file: {}", path);
     }
 
     shaderFeatures_ = ShaderFeatures::None;
     for (const auto& path : shaderPaths_) {
         std::string ext = std::filesystem::path(path).extension().string();
-        if (ext == ".ahit") {
-            shaderFeatures_ |= ShaderFeatures::AnyHit;
-        }
-        if (ext == ".call") {
-            shaderFeatures_ |= ShaderFeatures::Callable;
-        }
+        if (ext == ".rgen") shaderFeatures_ |= ShaderFeatures::Raygen;
+        if (ext == ".rmiss") shaderFeatures_ |= ShaderFeatures::Miss;
+        if (ext == ".rchit") shaderFeatures_ |= ShaderFeatures::ClosestHit;
+        if (ext == ".rahit") shaderFeatures_ |= ShaderFeatures::AnyHit;
+        if (ext == ".rint") shaderFeatures_ |= ShaderFeatures::Intersection;
+        if (ext == ".rcall") shaderFeatures_ |= ShaderFeatures::Callable;
     }
 
     VkPhysicalDeviceAccelerationStructurePropertiesKHR asProperties = {
@@ -217,6 +247,7 @@ VulkanRTX::VulkanRTX(VkDevice device, VkPhysicalDevice physicalDevice, const std
     vkGetPhysicalDeviceProperties2(physicalDevice_, &properties2);
     setSupportsCompaction(asProperties.maxGeometryCount > 0);
     scratchAlignment_ = asProperties.minAccelerationStructureScratchOffsetAlignment;
+    LOG_DEBUG_CAT("VulkanRTX", "Acceleration structure properties: maxGeometryCount={}, scratchAlignment={}", asProperties.maxGeometryCount, scratchAlignment_);
 }
 
 VulkanRTX::~VulkanRTX() {
@@ -228,16 +259,80 @@ bool VulkanRTX::shaderFileExists(const std::string& filename) const {
 }
 
 VkShaderModule VulkanRTX::createShaderModule(const std::string& filename) {
-    std::ifstream file(filename, std::ios::ate | std::ios::binary);
-    if (!file.is_open()) {
-        LOG_ERROR("Failed to open shader file: {}", filename, std::source_location::current());
-        throw VulkanRTXException("Failed to open shader file: " + filename);
+    // Log current working directory for path resolution debugging
+    std::filesystem::path cwd = std::filesystem::current_path();
+    LOG_DEBUG_CAT("VulkanRTX", "Current working directory: {}", cwd.string());
+
+    // Convert relative path to absolute path for better diagnostics
+    std::filesystem::path shaderPath = std::filesystem::absolute(filename);
+    LOG_DEBUG_CAT("VulkanRTX", "Resolved absolute shader path: {}", shaderPath.string());
+
+    // Check if file exists
+    if (!std::filesystem::exists(shaderPath)) {
+        LOG_ERROR_CAT("VulkanRTX", "Shader file does not exist: {}", shaderPath.string(), std::source_location::current());
+        throw VulkanRTXException("Shader file does not exist: " + shaderPath.string());
     }
+
+    // Check if path points to a regular file
+    if (!std::filesystem::is_regular_file(shaderPath)) {
+        LOG_ERROR_CAT("VulkanRTX", "Shader path '{}' is not a regular file (e.g., is a directory)", shaderPath.string(), std::source_location::current());
+        throw VulkanRTXException("Shader path is not a regular file: " + shaderPath.string());
+    }
+
+    // Check file permissions
+    std::filesystem::file_status status = std::filesystem::status(shaderPath);
+    auto perms = status.permissions();
+    if ((perms & std::filesystem::perms::owner_read) == std::filesystem::perms::none) {
+        LOG_ERROR_CAT("VulkanRTX", "Shader file '{}' lacks read permissions", shaderPath.string(), std::source_location::current());
+        throw VulkanRTXException("Shader file lacks read permissions: " + shaderPath.string());
+    }
+
+    // Attempt to open the file
+    std::ifstream file(shaderPath, std::ios::ate | std::ios::binary);
+    if (!file.is_open()) {
+        std::string errorMsg = std::strerror(errno);
+        LOG_ERROR_CAT("VulkanRTX", "Failed to open shader file '{}': {}", shaderPath.string(), errorMsg, std::source_location::current());
+        throw VulkanRTXException("Failed to open shader file: " + shaderPath.string() + ", reason: " + errorMsg);
+    }
+
+    // Get file size
     size_t fileSize = static_cast<size_t>(file.tellg());
+    LOG_DEBUG_CAT("VulkanRTX", "Shader file size: {} bytes", fileSize);
+
+    // Check if file is empty
+    if (fileSize == 0) {
+        file.close();
+        LOG_ERROR_CAT("VulkanRTX", "Shader file '{}' is empty", shaderPath.string(), std::source_location::current());
+        throw VulkanRTXException("Shader file is empty: " + shaderPath.string());
+    }
+
+    // Check if file size is a multiple of 4 (SPIR-V requirement)
+    if (fileSize % 4 != 0) {
+        file.close();
+        LOG_ERROR_CAT("VulkanRTX", "Invalid SPIR-V file size (not multiple of 4): {} bytes for '{}'", fileSize, shaderPath.string(), std::source_location::current());
+        throw VulkanRTXException("Invalid SPIR-V file size: " + shaderPath.string());
+    }
+
+    // Basic SPIR-V validation: Check magic number
     std::vector<char> buffer(fileSize);
     file.seekg(0);
     file.read(buffer.data(), fileSize);
+    if (file.fail()) {
+        std::string errorMsg = std::strerror(errno);
+        file.close();
+        LOG_ERROR_CAT("VulkanRTX", "Failed to read shader file '{}': {}", shaderPath.string(), errorMsg, std::source_location::current());
+        throw VulkanRTXException("Failed to read shader file: " + shaderPath.string() + ", reason: " + errorMsg);
+    }
     file.close();
+
+    // Check SPIR-V magic number (0x07230203)
+    if (fileSize >= 4) {
+        uint32_t magic = *reinterpret_cast<const uint32_t*>(buffer.data());
+        if (magic != 0x07230203) {
+            LOG_ERROR_CAT("VulkanRTX", "Invalid SPIR-V magic number (expected 0x07230203, got 0x{:08x}) for '{}'", magic, shaderPath.string(), std::source_location::current());
+            throw VulkanRTXException("Invalid SPIR-V magic number for: " + shaderPath.string());
+        }
+    }
 
     VkShaderModuleCreateInfo createInfo = {
         .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
@@ -247,8 +342,14 @@ VkShaderModule VulkanRTX::createShaderModule(const std::string& filename) {
         .pCode = reinterpret_cast<const uint32_t*>(buffer.data())
     };
 
-    VkShaderModule shaderModule;
-    VK_CHECK(vkCreateShaderModule(device_, &createInfo, nullptr, &shaderModule), "Failed to create shader module");
+    VkShaderModule shaderModule = VK_NULL_HANDLE;
+    VkResult result = vkCreateShaderModule(device_, &createInfo, nullptr, &shaderModule);
+    if (result != VK_SUCCESS) {
+        LOG_ERROR_CAT("VulkanRTX", "Failed to create shader module for '{}': VkResult={}", shaderPath.string(), static_cast<int>(result), std::source_location::current());
+        throw VulkanRTXException("Failed to create shader module for: " + shaderPath.string() + ", VkResult=" + std::to_string(static_cast<int>(result)));
+    }
+
+    LOG_DEBUG_CAT("VulkanRTX", "Successfully loaded shader module: {:p} from '{}'", static_cast<void*>(shaderModule), shaderPath.string());
     return shaderModule;
 }
 
@@ -263,13 +364,16 @@ void VulkanRTX::loadShadersAsync(std::vector<VkShaderModule>& modules, const std
     for (auto& thread : threads) {
         thread.join();
     }
+    LOG_DEBUG_CAT("VulkanRTX", "Loaded {} shader modules asynchronously", paths.size());
 }
 
-void VulkanRTX::buildShaderGroups(std::vector<VkRayTracingShaderGroupCreateInfoKHR>& groups,
-                                  const std::vector<VkPipelineShaderStageCreateInfo>& stages) {
+void VulkanRTX::buildShaderGroups(std::vector<VkRayTracingShaderGroupCreateInfoKHR>& groups) {
     groups.clear();
     numShaderGroups_ = 0;
 
+    LOG_DEBUG_CAT("VulkanRTX", "Building {} shader groups", static_cast<int>(shaderFeatures_));
+
+    // Raygen group
     VkRayTracingShaderGroupCreateInfoKHR raygenGroup = {
         .sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
         .pNext = nullptr,
@@ -283,6 +387,7 @@ void VulkanRTX::buildShaderGroups(std::vector<VkRayTracingShaderGroupCreateInfoK
     groups.push_back(raygenGroup);
     numShaderGroups_++;
 
+    // Miss groups (primary and shadow)
     VkRayTracingShaderGroupCreateInfoKHR missGroup = {
         .sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
         .pNext = nullptr,
@@ -296,25 +401,56 @@ void VulkanRTX::buildShaderGroups(std::vector<VkRayTracingShaderGroupCreateInfoK
     groups.push_back(missGroup);
     numShaderGroups_++;
 
+    VkRayTracingShaderGroupCreateInfoKHR shadowMissGroup = {
+        .sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
+        .pNext = nullptr,
+        .type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR,
+        .generalShader = 2,
+        .closestHitShader = VK_SHADER_UNUSED_KHR,
+        .anyHitShader = VK_SHADER_UNUSED_KHR,
+        .intersectionShader = VK_SHADER_UNUSED_KHR,
+        .pShaderGroupCaptureReplayHandle = nullptr
+    };
+    groups.push_back(shadowMissGroup);
+    numShaderGroups_++;
+
+    // Triangle hit group
     VkRayTracingShaderGroupCreateInfoKHR hitGroup = {
         .sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
         .pNext = nullptr,
         .type = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR,
         .generalShader = VK_SHADER_UNUSED_KHR,
-        .closestHitShader = 2,
-        .anyHitShader = hasShaderFeature(ShaderFeatures::AnyHit) ? 3 : VK_SHADER_UNUSED_KHR,
+        .closestHitShader = 3,
+        .anyHitShader = hasShaderFeature(ShaderFeatures::AnyHit) ? 4 : VK_SHADER_UNUSED_KHR,
         .intersectionShader = VK_SHADER_UNUSED_KHR,
         .pShaderGroupCaptureReplayHandle = nullptr
     };
     groups.push_back(hitGroup);
     numShaderGroups_++;
 
-    if (hasShaderFeature(ShaderFeatures::Callable) && stages.size() > 3) {
+    // Procedural hit group
+    VkRayTracingShaderGroupCreateInfoKHR proceduralHitGroup = {
+        .sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
+        .pNext = nullptr,
+        .type = VK_RAY_TRACING_SHADER_GROUP_TYPE_PROCEDURAL_HIT_GROUP_KHR,
+        .generalShader = VK_SHADER_UNUSED_KHR,
+        .closestHitShader = 3, // Reuse closest hit shader
+        .anyHitShader = hasShaderFeature(ShaderFeatures::AnyHit) ? 4 : VK_SHADER_UNUSED_KHR,
+        .intersectionShader = hasShaderFeature(ShaderFeatures::Intersection) ? 5 : VK_SHADER_UNUSED_KHR,
+        .pShaderGroupCaptureReplayHandle = nullptr
+    };
+    if (hasShaderFeature(ShaderFeatures::Intersection)) {
+        groups.push_back(proceduralHitGroup);
+        numShaderGroups_++;
+    }
+
+    // Callable group
+    if (hasShaderFeature(ShaderFeatures::Callable)) {
         VkRayTracingShaderGroupCreateInfoKHR callableGroup = {
             .sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
             .pNext = nullptr,
             .type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR,
-            .generalShader = static_cast<uint32_t>(stages.size() - 1),
+            .generalShader = static_cast<uint32_t>(hasShaderFeature(ShaderFeatures::AnyHit) ? (hasShaderFeature(ShaderFeatures::Intersection) ? 6 : 5) : 4),
             .closestHitShader = VK_SHADER_UNUSED_KHR,
             .anyHitShader = VK_SHADER_UNUSED_KHR,
             .intersectionShader = VK_SHADER_UNUSED_KHR,
@@ -323,12 +459,16 @@ void VulkanRTX::buildShaderGroups(std::vector<VkRayTracingShaderGroupCreateInfoK
         groups.push_back(callableGroup);
         numShaderGroups_++;
     }
+
+    LOG_DEBUG_CAT("VulkanRTX", "Built {} shader groups", groups.size());
 }
 
 void VulkanRTX::createDescriptorSetLayout() {
+    LOG_DEBUG_CAT("VulkanRTX", "Creating descriptor set layout");
     const VkShaderStageFlags allRTStages = VK_SHADER_STAGE_RAYGEN_BIT_KHR |
                                            VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR |
                                            VK_SHADER_STAGE_ANY_HIT_BIT_KHR |
+                                           VK_SHADER_STAGE_INTERSECTION_BIT_KHR |
                                            VK_SHADER_STAGE_MISS_BIT_KHR |
                                            VK_SHADER_STAGE_CALLABLE_BIT_KHR;
 
@@ -351,13 +491,13 @@ void VulkanRTX::createDescriptorSetLayout() {
             .binding = static_cast<uint32_t>(DescriptorBindings::CameraUBO),
             .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
             .descriptorCount = 1,
-            .stageFlags = allRTStages,  // Keep for raygen/miss stages (shader no longer uses in closest-hit)
+            .stageFlags = allRTStages,
             .pImmutableSamplers = nullptr
         },
         {
             .binding = static_cast<uint32_t>(DescriptorBindings::MaterialSSBO),
             .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-            .descriptorCount = 26,  // Fixed: Support array of 26 materials as individual descriptors
+            .descriptorCount = 26,
             .stageFlags = allRTStages,
             .pImmutableSamplers = nullptr
         },
@@ -379,7 +519,28 @@ void VulkanRTX::createDescriptorSetLayout() {
             .binding = static_cast<uint32_t>(DescriptorBindings::EnvMap),
             .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
             .descriptorCount = 1,
-            .stageFlags = allRTStages,  // Keep for raygen/miss stages (shader no longer uses in closest-hit)
+            .stageFlags = allRTStages,
+            .pImmutableSamplers = nullptr
+        },
+        {
+            .binding = static_cast<uint32_t>(DescriptorBindings::DensityVolume),
+            .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            .descriptorCount = 1,
+            .stageFlags = allRTStages,
+            .pImmutableSamplers = nullptr
+        },
+        {
+            .binding = static_cast<uint32_t>(DescriptorBindings::GDepth),
+            .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+            .descriptorCount = 1,
+            .stageFlags = allRTStages,
+            .pImmutableSamplers = nullptr
+        },
+        {
+            .binding = static_cast<uint32_t>(DescriptorBindings::GNormal),
+            .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+            .descriptorCount = 1,
+            .stageFlags = allRTStages,
             .pImmutableSamplers = nullptr
         }
     };
@@ -395,16 +556,17 @@ void VulkanRTX::createDescriptorSetLayout() {
     VkDescriptorSetLayout layout;
     VK_CHECK(vkCreateDescriptorSetLayout(device_, &layoutInfo, nullptr, &layout), "Failed to create descriptor set layout");
     setDescriptorSetLayout(layout);
-    LOG_INFO("Created descriptor set layout: {:p}", static_cast<void*>(layout));
+    LOG_INFO_CAT("VulkanRTX", "Created descriptor set layout with {} bindings: {:p}", bindings.size(), static_cast<void*>(layout));
 }
 
 void VulkanRTX::createDescriptorPoolAndSet() {
+    LOG_DEBUG_CAT("VulkanRTX", "Creating descriptor pool and set");
     std::vector<VkDescriptorPoolSize> poolSizes = {
         { VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1 },
-        { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 2 },
+        { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 3 }, // StorageImage, DenoiseImage, GDepth, GNormal
         { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 },
         { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 26 + 1 },
-        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1 }
+        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 2 } // EnvMap, DensityVolume
     };
 
     VkDescriptorPoolCreateInfo poolInfo = {
@@ -431,22 +593,25 @@ void VulkanRTX::createDescriptorPoolAndSet() {
     VkDescriptorSet descriptorSet;
     VK_CHECK(vkAllocateDescriptorSets(device_, &allocInfo, &descriptorSet), "Failed to allocate descriptor set");
     setDescriptorSet(descriptorSet);
-    LOG_INFO("Created descriptor pool: {:p} and set: {:p}", static_cast<void*>(pool), static_cast<void*>(descriptorSet));
+    LOG_INFO_CAT("VulkanRTX", "Created descriptor pool: {:p} and set: {:p}", static_cast<void*>(pool), static_cast<void*>(descriptorSet));
 }
 
 void VulkanRTX::createRayTracingPipeline(uint32_t maxRayRecursionDepth) {
+    LOG_DEBUG_CAT("VulkanRTX", "Creating ray-tracing pipeline with max recursion depth: {}", maxRayRecursionDepth);
     std::vector<VkPipelineShaderStageCreateInfo> stages;
     std::vector<VkShaderModule> modules;
     loadShadersAsync(modules, shaderPaths_);
 
-    for (uint32_t i = 0; i < modules.size(); ++i) {
+    uint32_t shaderIndex = 0;
+    for (const auto& path : shaderPaths_) {
         VkShaderStageFlagBits stage;
-        if (i == 0) stage = VK_SHADER_STAGE_RAYGEN_BIT_KHR;
-        else if (i == 1) stage = VK_SHADER_STAGE_MISS_BIT_KHR;
-        else if (i == 2) stage = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
-        else if (i == 3 && hasShaderFeature(ShaderFeatures::AnyHit)) stage = VK_SHADER_STAGE_ANY_HIT_BIT_KHR;
-        else if ((i == 3 && !hasShaderFeature(ShaderFeatures::AnyHit) && hasShaderFeature(ShaderFeatures::Callable)) ||
-                 (i == 4 && hasShaderFeature(ShaderFeatures::AnyHit) && hasShaderFeature(ShaderFeatures::Callable))) stage = VK_SHADER_STAGE_CALLABLE_BIT_KHR;
+        std::string ext = std::filesystem::path(path).extension().string();
+        if (ext == ".rgen") stage = VK_SHADER_STAGE_RAYGEN_BIT_KHR;
+        else if (ext == ".rmiss") stage = VK_SHADER_STAGE_MISS_BIT_KHR;
+        else if (ext == ".rchit") stage = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
+        else if (ext == ".rahit") stage = VK_SHADER_STAGE_ANY_HIT_BIT_KHR;
+        else if (ext == ".rint") stage = VK_SHADER_STAGE_INTERSECTION_BIT_KHR;
+        else if (ext == ".rcall") stage = VK_SHADER_STAGE_CALLABLE_BIT_KHR;
         else continue;
 
         stages.push_back({
@@ -454,17 +619,19 @@ void VulkanRTX::createRayTracingPipeline(uint32_t maxRayRecursionDepth) {
             .pNext = nullptr,
             .flags = 0,
             .stage = stage,
-            .module = modules[i],
+            .module = modules[shaderIndex++],
             .pName = "main",
             .pSpecializationInfo = nullptr
         });
     }
 
     std::vector<VkRayTracingShaderGroupCreateInfoKHR> shaderGroups;
-    buildShaderGroups(shaderGroups, stages);
+    buildShaderGroups(shaderGroups);
 
     VkPushConstantRange pushConstantRange = {
-        .stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR,
+        .stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR |
+                      VK_SHADER_STAGE_ANY_HIT_BIT_KHR | VK_SHADER_STAGE_INTERSECTION_BIT_KHR |
+                      VK_SHADER_STAGE_MISS_BIT_KHR | VK_SHADER_STAGE_CALLABLE_BIT_KHR,
         .offset = 0,
         .size = sizeof(MaterialData::PushConstants)
     };
@@ -482,6 +649,7 @@ void VulkanRTX::createRayTracingPipeline(uint32_t maxRayRecursionDepth) {
     VkPipelineLayout pipelineLayout;
     VK_CHECK(vkCreatePipelineLayout(device_, &pipelineLayoutInfo, nullptr, &pipelineLayout), "Failed to create pipeline layout");
     setPipelineLayout(pipelineLayout);
+    LOG_INFO_CAT("VulkanRTX", "Created ray-tracing pipeline layout: {:p}", static_cast<void*>(pipelineLayout));
 
     VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProperties = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR,
@@ -525,11 +693,13 @@ void VulkanRTX::createRayTracingPipeline(uint32_t maxRayRecursionDepth) {
 
     for (auto module : modules) {
         vkDestroyShaderModule(device_, module, nullptr);
+        LOG_DEBUG_CAT("VulkanRTX", "Destroyed shader module: {:p}", static_cast<void*>(module));
     }
-    LOG_INFO("Created ray tracing pipeline: {:p}", static_cast<void*>(pipeline));
+    LOG_INFO_CAT("VulkanRTX", "Created ray tracing pipeline: {:p}", static_cast<void*>(pipeline));
 }
 
 void VulkanRTX::createShaderBindingTable(VkPhysicalDevice physicalDevice) {
+    LOG_DEBUG_CAT("VulkanRTX", "Creating shader binding table");
     VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProperties = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR,
         .pNext = nullptr,
@@ -555,8 +725,10 @@ void VulkanRTX::createShaderBindingTable(VkPhysicalDevice physicalDevice) {
     const uint32_t groupCount = numShaderGroups_;
     const VkDeviceSize sbtSize = handleSizeAligned * groupCount;
 
+    LOG_DEBUG_CAT("VulkanRTX", "SBT parameters: handleSize={}, handleAlignment={}, groupCount={}, sbtSize={}", handleSize, handleAlignment, groupCount, sbtSize);
+
     if (groupCount == 0) {
-        LOG_ERROR("No shader groups defined for SBT", std::source_location::current());
+        LOG_ERROR_CAT("VulkanRTX", "No shader groups defined for SBT", std::source_location::current());
         throw VulkanRTXException("No shader groups defined for SBT");
     }
 
@@ -572,8 +744,10 @@ void VulkanRTX::createShaderBindingTable(VkPhysicalDevice physicalDevice) {
 
     void* mappedData;
     VK_CHECK(vkMapMemory(device_, sbtMemory.get(), 0, sbtSize, 0, &mappedData), "Failed to map SBT memory");
+    uint64_t currentOffset = 0;
     for (uint32_t i = 0; i < groupCount; ++i) {
-        memcpy(static_cast<uint8_t*>(mappedData) + (i * handleSizeAligned), shaderGroupHandles.data() + (i * handleSize), handleSize);
+        memcpy(static_cast<uint8_t*>(mappedData) + currentOffset, shaderGroupHandles.data() + (i * handleSize), handleSize);
+        currentOffset += handleSizeAligned;
     }
     vkUnmapMemory(device_, sbtMemory.get());
 
@@ -587,19 +761,23 @@ void VulkanRTX::createShaderBindingTable(VkPhysicalDevice physicalDevice) {
     sbt_.buffer = std::move(sbtBuffer);
     sbt_.memory = std::move(sbtMemory);
     sbt_.raygen = { sbtAddress, handleSizeAligned, handleSizeAligned };
-    sbt_.miss = { sbtAddress + handleSizeAligned, handleSizeAligned, handleSizeAligned };
-    sbt_.hit = { sbtAddress + 2 * handleSizeAligned, handleSizeAligned, handleSizeAligned };
-    if (groupCount >= 4) {
-        sbt_.callable = { sbtAddress + 3 * handleSizeAligned, handleSizeAligned, handleSizeAligned };
-    } else {
-        sbt_.callable = { 0, 0, 0 };
-    }
+    sbt_.miss = { sbtAddress + handleSizeAligned, 2 * handleSizeAligned, handleSizeAligned }; // Two miss shaders
+    sbt_.hit = { sbtAddress + 3 * handleSizeAligned, (hasShaderFeature(ShaderFeatures::Intersection) ? 2 : 1) * handleSizeAligned, handleSizeAligned };
+    sbt_.callable = { hasShaderFeature(ShaderFeatures::Callable) ? sbtAddress + (hasShaderFeature(ShaderFeatures::Intersection) ? 5 : 4) * handleSizeAligned : 0, handleSizeAligned, handleSizeAligned };
 
-    LOG_INFO("Created shader binding table with size: {}", sbtSize);
+    LOG_INFO_CAT("VulkanRTX", "Created shader binding table with size: {}, raygen={:x}, miss={:x} (size {}), hit={:x} (size {}), callable={:x}",
+             sbtSize, sbt_.raygen.deviceAddress, sbt_.miss.deviceAddress, sbt_.miss.size, sbt_.hit.deviceAddress, sbt_.hit.size, sbt_.callable.deviceAddress);
 }
 
 void VulkanRTX::createBottomLevelAS(VkPhysicalDevice physicalDevice, VkCommandPool commandPool, VkQueue queue,
                                     const std::vector<std::tuple<VkBuffer, VkBuffer, uint32_t, uint32_t, uint64_t>>& geometries) {
+    LOG_DEBUG_CAT("VulkanRTX", "Creating bottom-level AS with {} geometries", geometries.size());
+    struct Vertex {
+        glm::vec3 pos;    // VK_FORMAT_R32G32B32_SFLOAT
+        glm::vec3 normal; // VK_FORMAT_R32G32B32_SFLOAT
+        glm::vec2 uv;     // VK_FORMAT_R32G32_SFLOAT
+    };
+
     std::vector<VkAccelerationStructureGeometryKHR> asGeometries;
     std::vector<VkAccelerationStructureBuildRangeInfoKHR> buildRanges;
     for (const auto& [vertexBuffer, indexBuffer, vertexCount, indexCount, instanceCustomIndex] : geometries) {
@@ -611,9 +789,9 @@ void VulkanRTX::createBottomLevelAS(VkPhysicalDevice physicalDevice, VkCommandPo
                 .triangles = {
                     .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR,
                     .pNext = nullptr,
-                    .vertexFormat = VK_FORMAT_R32G32B32_SFLOAT,
+                    .vertexFormat = VK_FORMAT_R32G32B32_SFLOAT, // Position
                     .vertexData = { .deviceAddress = getBufferDeviceAddress(vertexBuffer) },
-                    .vertexStride = sizeof(glm::vec3),
+                    .vertexStride = sizeof(Vertex),
                     .maxVertex = vertexCount - 1,
                     .indexType = VK_INDEX_TYPE_UINT32,
                     .indexData = { .deviceAddress = getBufferDeviceAddress(indexBuffer) },
@@ -636,7 +814,7 @@ void VulkanRTX::createBottomLevelAS(VkPhysicalDevice physicalDevice, VkCommandPo
         .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR,
         .pNext = nullptr,
         .type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR,
-        .flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR,
+        .flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR | VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR,
         .mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR,
         .srcAccelerationStructure = VK_NULL_HANDLE,
         .dstAccelerationStructure = VK_NULL_HANDLE,
@@ -658,6 +836,8 @@ void VulkanRTX::createBottomLevelAS(VkPhysicalDevice physicalDevice, VkCommandPo
         primitiveCounts.push_back(range.primitiveCount);
     }
     vkGetAccelerationStructureBuildSizesKHR(device_, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &buildInfo, primitiveCounts.data(), &sizeInfo);
+
+    LOG_DEBUG_CAT("VulkanRTX", "BLAS size info: asSize={}, buildScratchSize={}", sizeInfo.accelerationStructureSize, sizeInfo.buildScratchSize);
 
     VulkanResource<VkBuffer, PFN_vkDestroyBuffer> blasBufferTemp(device_, VK_NULL_HANDLE, vkDestroyBuffer);
     VulkanResource<VkDeviceMemory, PFN_vkFreeMemory> blasMemoryTemp(device_, VK_NULL_HANDLE, vkFreeMemory);
@@ -707,11 +887,12 @@ void VulkanRTX::createBottomLevelAS(VkPhysicalDevice physicalDevice, VkCommandPo
 
     blasBuffer_ = std::move(blasBufferTemp);
     blasMemory_ = std::move(blasMemoryTemp);
-    LOG_INFO("Created bottom-level acceleration structure: {:p}", static_cast<void*>(blas_.get()));
+    LOG_INFO_CAT("VulkanRTX", "Created bottom-level acceleration structure: {:p}", static_cast<void*>(blas_.get()));
 }
 
 void VulkanRTX::createTopLevelAS(VkPhysicalDevice physicalDevice, VkCommandPool commandPool, VkQueue queue,
                                  const std::vector<std::tuple<VkAccelerationStructureKHR, glm::mat4>>& instances) {
+    LOG_DEBUG_CAT("VulkanRTX", "Creating top-level AS with {} instances", instances.size());
     std::vector<VkAccelerationStructureInstanceKHR> asInstances;
     for (const auto& [as, transform] : instances) {
         VkTransformMatrixKHR vkTransform;
@@ -832,13 +1013,14 @@ void VulkanRTX::createTopLevelAS(VkPhysicalDevice physicalDevice, VkCommandPool 
 
     tlasBuffer_ = std::move(tlasBufferTemp);
     tlasMemory_ = std::move(tlasMemoryTemp);
-    LOG_INFO("Created top-level acceleration structure: {:p}", static_cast<void*>(tlas_.get()));
+    LOG_INFO_CAT("VulkanRTX", "Created top-level acceleration structure: {:p}", static_cast<void*>(tlas_.get()));
 }
 
 void VulkanRTX::createStorageImage(VkPhysicalDevice physicalDevice, VkExtent2D extent, VkFormat format,
                                    VulkanResource<VkImage, PFN_vkDestroyImage>& image,
                                    VulkanResource<VkImageView, PFN_vkDestroyImageView>& imageView,
                                    VulkanResource<VkDeviceMemory, PFN_vkFreeMemory>& memory) {
+    LOG_DEBUG_CAT("VulkanRTX", "Creating storage image with extent {}x{}, format {}", extent.width, extent.height, static_cast<int>(format));
     VkImageCreateInfo imageInfo = {
         .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
         .pNext = nullptr,
@@ -903,15 +1085,15 @@ void VulkanRTX::createStorageImage(VkPhysicalDevice physicalDevice, VkExtent2D e
     VK_CHECK(vkCreateImageView(device_, &viewInfo, nullptr, &tempImageView), "Failed to create image view");
     imageView = VulkanResource<VkImageView, PFN_vkDestroyImageView>(device_, tempImageView, vkDestroyImageView);
 
-    LOG_INFO("Created storage image: {:p}, memory: {:p}, view: {:p} with extent {}x{}",
+    LOG_INFO_CAT("VulkanRTX", "Created storage image: {:p}, memory: {:p}, view: {:p} with extent {}x{}", 
              static_cast<void*>(image.get()), static_cast<void*>(memory.get()), static_cast<void*>(imageView.get()),
              extent.width, extent.height);
 }
 
 void VulkanRTX::updateDescriptors(VkBuffer cameraBuffer, VkBuffer materialBuffer, VkBuffer dimensionBuffer,
-                                 VkImageView storageImageView, VkImageView denoiseImageView,
-                                 VkImageView envMapView, VkSampler envMapSampler) {
-    LOG_INFO("Updating descriptors");
+                                 VkImageView storageImageView, VkImageView denoiseImageView, VkImageView envMapView, VkSampler envMapSampler,
+                                 VkImageView densityVolumeView, VkImageView gDepthView, VkImageView gNormalView) {
+    LOG_INFO_CAT("VulkanRTX", "Updating descriptors");
 
     constexpr uint32_t EXPECTED_MATERIAL_COUNT = 26;
     VkDescriptorBufferInfo cameraBufferInfo = {
@@ -938,18 +1120,36 @@ void VulkanRTX::updateDescriptors(VkBuffer cameraBuffer, VkBuffer materialBuffer
     VkDescriptorImageInfo storageImageInfo = {
         .sampler = VK_NULL_HANDLE,
         .imageView = storageImageView,
-        .imageLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL // Match expected layout
+        .imageLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
     };
 
     VkDescriptorImageInfo denoiseImageInfo = {
         .sampler = VK_NULL_HANDLE,
         .imageView = denoiseImageView,
-        .imageLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL // Match expected layout
+        .imageLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
     };
 
     VkDescriptorImageInfo envMapImageInfo = {
         .sampler = envMapSampler,
         .imageView = envMapView,
+        .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+    };
+
+    VkDescriptorImageInfo densityVolumeInfo = {
+        .sampler = envMapSampler, // Reuse sampler
+        .imageView = densityVolumeView,
+        .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+    };
+
+    VkDescriptorImageInfo gDepthImageInfo = {
+        .sampler = VK_NULL_HANDLE,
+        .imageView = gDepthView,
+        .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+    };
+
+    VkDescriptorImageInfo gNormalImageInfo = {
+        .sampler = VK_NULL_HANDLE,
+        .imageView = gNormalView,
         .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
     };
 
@@ -1044,18 +1244,53 @@ void VulkanRTX::updateDescriptors(VkBuffer cameraBuffer, VkBuffer materialBuffer
             .pImageInfo = &envMapImageInfo,
             .pBufferInfo = nullptr,
             .pTexelBufferView = nullptr
+        },
+        {
+            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .pNext = nullptr,
+            .dstSet = ds_.get(),
+            .dstBinding = static_cast<uint32_t>(DescriptorBindings::DensityVolume),
+            .dstArrayElement = 0,
+            .descriptorCount = 1,
+            .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            .pImageInfo = &densityVolumeInfo,
+            .pBufferInfo = nullptr,
+            .pTexelBufferView = nullptr
+        },
+        {
+            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .pNext = nullptr,
+            .dstSet = ds_.get(),
+            .dstBinding = static_cast<uint32_t>(DescriptorBindings::GDepth),
+            .dstArrayElement = 0,
+            .descriptorCount = 1,
+            .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+            .pImageInfo = &gDepthImageInfo,
+            .pBufferInfo = nullptr,
+            .pTexelBufferView = nullptr
+        },
+        {
+            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .pNext = nullptr,
+            .dstSet = ds_.get(),
+            .dstBinding = static_cast<uint32_t>(DescriptorBindings::GNormal),
+            .dstArrayElement = 0,
+            .descriptorCount = 1,
+            .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+            .pImageInfo = &gNormalImageInfo,
+            .pBufferInfo = nullptr,
+            .pTexelBufferView = nullptr
         }
     };
 
     vkUpdateDescriptorSets(device_, static_cast<uint32_t>(descriptorWrites.size()), descriptorWrites.data(), 0, nullptr);
-    LOG_INFO("Updated descriptor set: {:p} with {} material descriptors",
-             static_cast<void*>(ds_.get()), EXPECTED_MATERIAL_COUNT);
+    LOG_INFO_CAT("VulkanRTX", "Updated descriptor set: {:p} with {} material descriptors", static_cast<void*>(ds_.get()), EXPECTED_MATERIAL_COUNT);
 }
 
 void VulkanRTX::initializeRTX(VkPhysicalDevice physicalDevice, VkCommandPool commandPool, VkQueue graphicsQueue,
                               const std::vector<std::tuple<VkBuffer, VkBuffer, uint32_t, uint32_t, uint64_t>>& geometries,
                               uint32_t maxRayRecursionDepth, const std::vector<UE::DimensionData>& dimensionCache) {
-    LOG_INFO("Initializing RTX with {} geometries", geometries.size(), std::source_location::current());
+    LOG_INFO_CAT("VulkanRTX", "Initializing RTX with {} geometries", geometries.size(), std::source_location::current());
 
     createDescriptorSetLayout();
     createDescriptorPoolAndSet();
@@ -1064,25 +1299,25 @@ void VulkanRTX::initializeRTX(VkPhysicalDevice physicalDevice, VkCommandPool com
     createBottomLevelAS(physicalDevice, commandPool, graphicsQueue, geometries);
     createTopLevelAS(physicalDevice, commandPool, graphicsQueue, {{blas_.get(), glm::mat4(1.0f)}});
     setPreviousDimensionCache(dimensionCache);
-    LOG_INFO("Initialized RTX");
+    LOG_INFO_CAT("VulkanRTX", "Initialized RTX");
 }
 
 void VulkanRTX::updateRTX(VkPhysicalDevice physicalDevice, VkCommandPool commandPool, VkQueue graphicsQueue,
                           const std::vector<std::tuple<VkBuffer, VkBuffer, uint32_t, uint32_t, uint64_t>>& geometries,
                           const std::vector<UE::DimensionData>& dimensionCache) {
-    LOG_INFO("Updating RTX with {} geometries", geometries.size(), std::source_location::current());
+    LOG_INFO_CAT("VulkanRTX", "Updating RTX with {} geometries", geometries.size(), std::source_location::current());
 
     if (dimensionCache != previousDimensionCache_) {
         createBottomLevelAS(physicalDevice, commandPool, graphicsQueue, geometries);
         createTopLevelAS(physicalDevice, commandPool, graphicsQueue, {{blas_.get(), glm::mat4(1.0f)}});
         setPreviousDimensionCache(dimensionCache);
     }
-    LOG_INFO("Updated RTX");
+    LOG_INFO_CAT("VulkanRTX", "Updated RTX");
 }
 
 void VulkanRTX::recordRayTracingCommands(VkCommandBuffer cmdBuffer, VkExtent2D extent, VkImage outputImage,
                                         VkImageView /*outputImageView*/, const MaterialData::PushConstants& pc) {
-    LOG_INFO("Recording ray tracing commands for extent {}x{}", extent.width, extent.height, std::source_location::current());
+    LOG_INFO_CAT("VulkanRTX", "Recording ray tracing commands for extent {}x{}", extent.width, extent.height, std::source_location::current());
 
     VkCommandBufferBeginInfo beginInfo = {
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
@@ -1098,14 +1333,14 @@ void VulkanRTX::recordRayTracingCommands(VkCommandBuffer cmdBuffer, VkExtent2D e
         .srcAccessMask = 0,
         .dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
         .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-        .newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, // Match expected layout
+        .newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
         .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
         .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
         .image = outputImage,
         .subresourceRange = {
             .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
             .baseMipLevel = 0,
-            .levelCount = VK_REMAINING_MIP_LEVELS, // Handle all mip levels
+            .levelCount = VK_REMAINING_MIP_LEVELS,
             .baseArrayLayer = 0,
             .layerCount = 1
         }
@@ -1130,11 +1365,11 @@ void VulkanRTX::recordRayTracingCommands(VkCommandBuffer cmdBuffer, VkExtent2D e
                         0, 0, nullptr, 0, nullptr, 1, &barrier);
 
     VK_CHECK(vkEndCommandBuffer(cmdBuffer), "Failed to end command buffer");
-    LOG_INFO("Recorded ray tracing commands");
+    LOG_INFO_CAT("VulkanRTX", "Recorded ray tracing commands");
 }
 
 void VulkanRTX::updateDescriptorSetForTLAS(VkAccelerationStructureKHR tlas) {
-    LOG_INFO("Updating descriptor set for TLAS: {:p}", static_cast<void*>(tlas));
+    LOG_INFO_CAT("VulkanRTX", "Updating descriptor set for TLAS: {:p}", static_cast<void*>(tlas));
 
     VkWriteDescriptorSetAccelerationStructureKHR asInfo = {
         .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR,
@@ -1157,16 +1392,16 @@ void VulkanRTX::updateDescriptorSetForTLAS(VkAccelerationStructureKHR tlas) {
     };
 
     vkUpdateDescriptorSets(device_, 1, &descriptorWrite, 0, nullptr);
-    LOG_INFO("Updated descriptor set for TLAS");
+    LOG_INFO_CAT("VulkanRTX", "Updated descriptor set for TLAS");
 }
 
 void VulkanRTX::compactAccelerationStructures(VkPhysicalDevice physicalDevice, VkCommandPool commandPool, VkQueue queue) {
     if (!supportsCompaction_) {
-        LOG_INFO("Acceleration structure compaction not supported", std::source_location::current());
+        LOG_INFO_CAT("VulkanRTX", "Acceleration structure compaction not supported", std::source_location::current());
         return;
     }
 
-    LOG_INFO("Compacting acceleration structures");
+    LOG_INFO_CAT("VulkanRTX", "Compacting acceleration structures");
 
     VkQueryPoolCreateInfo queryPoolInfo = {
         .sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,
@@ -1254,7 +1489,7 @@ void VulkanRTX::compactAccelerationStructures(VkPhysicalDevice physicalDevice, V
         }
     }
 
-    LOG_INFO("Compacted acceleration structures");
+    LOG_INFO_CAT("VulkanRTX", "Compacted acceleration structures");
 }
 
 VkCommandBuffer VulkanRTX::allocateTransientCommandBuffer(VkCommandPool commandPool) {
@@ -1268,6 +1503,7 @@ VkCommandBuffer VulkanRTX::allocateTransientCommandBuffer(VkCommandPool commandP
 
     VkCommandBuffer cmdBuffer;
     VK_CHECK(vkAllocateCommandBuffers(device_, &allocInfo, &cmdBuffer), "Failed to allocate command buffer");
+    LOG_DEBUG_CAT("VulkanRTX", "Allocated transient command buffer: {:p}", static_cast<void*>(cmdBuffer));
     return cmdBuffer;
 }
 
@@ -1287,11 +1523,13 @@ void VulkanRTX::submitAndWaitTransient(VkCommandBuffer cmdBuffer, VkQueue queue,
     VK_CHECK(vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE), "Failed to submit command buffer");
     VK_CHECK(vkQueueWaitIdle(queue), "Failed to wait for queue idle");
     vkFreeCommandBuffers(device_, commandPool, 1, &cmdBuffer);
+    LOG_DEBUG_CAT("VulkanRTX", "Submitted and waited for transient command buffer: {:p}", static_cast<void*>(cmdBuffer));
 }
 
 void VulkanRTX::createBuffer(VkPhysicalDevice physicalDevice, VkDeviceSize size, VkBufferUsageFlags usage,
                              VkMemoryPropertyFlags properties, VulkanResource<VkBuffer, PFN_vkDestroyBuffer>& buffer,
                              VulkanResource<VkDeviceMemory, PFN_vkFreeMemory>& memory) {
+    LOG_DEBUG_CAT("VulkanRTX", "Creating buffer with size {}, usage 0x{:x}, properties 0x{:x}", size, static_cast<uint32_t>(usage), static_cast<uint32_t>(properties));
     VkBufferCreateInfo bufferInfo = {
         .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
         .pNext = nullptr,
@@ -1328,6 +1566,7 @@ void VulkanRTX::createBuffer(VkPhysicalDevice physicalDevice, VkDeviceSize size,
 
     buffer = VulkanResource<VkBuffer, PFN_vkDestroyBuffer>(device_, tempBuffer, vkDestroyBuffer);
     memory = VulkanResource<VkDeviceMemory, PFN_vkFreeMemory>(device_, tempMemory, vkFreeMemory);
+    LOG_DEBUG_CAT("VulkanRTX", "Created buffer: {:p}, memory: {:p}", static_cast<void*>(buffer.get()), static_cast<void*>(memory.get()));
 }
 
 uint32_t VulkanRTX::findMemoryType(VkPhysicalDevice physicalDevice, uint32_t typeFilter, VkMemoryPropertyFlags properties) {
@@ -1340,7 +1579,7 @@ uint32_t VulkanRTX::findMemoryType(VkPhysicalDevice physicalDevice, uint32_t typ
         }
     }
 
-    LOG_ERROR("Failed to find suitable memory type", std::source_location::current());
+    LOG_ERROR_CAT("VulkanRTX", "Failed to find suitable memory type", std::source_location::current());
     throw VulkanRTXException("Failed to find suitable memory type");
 }
 
@@ -1352,7 +1591,7 @@ VkDeviceAddress VulkanRTX::getBufferDeviceAddress(VkBuffer buffer) {
     };
     VkDeviceAddress address = vkGetBufferDeviceAddress(device_, &addressInfo);
     if (address == 0) {
-        LOG_ERROR("Failed to get valid buffer device address", std::source_location::current());
+        LOG_ERROR_CAT("VulkanRTX", "Failed to get valid buffer device address", std::source_location::current());
         throw VulkanRTXException("Failed to get valid buffer device address");
     }
     return address;
@@ -1366,7 +1605,7 @@ VkDeviceAddress VulkanRTX::getAccelerationStructureDeviceAddress(VkAccelerationS
     };
     VkDeviceAddress address = vkGetAccelerationStructureDeviceAddressKHR(device_, &addressInfo);
     if (address == 0) {
-        LOG_ERROR("Failed to get valid acceleration structure device address", std::source_location::current());
+        LOG_ERROR_CAT("VulkanRTX", "Failed to get valid acceleration structure device address", std::source_location::current());
         throw VulkanRTXException("Failed to get valid acceleration structure device address");
     }
     return address;

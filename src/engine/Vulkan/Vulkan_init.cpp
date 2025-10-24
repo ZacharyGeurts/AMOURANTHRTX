@@ -19,7 +19,6 @@
 #include <set>
 #include <algorithm>
 #include <fstream>
-#include <source_location>
 #include <glm/glm.hpp>
 #include <format>
 
@@ -40,7 +39,7 @@ std::string join(const Container& items, const std::string& delimiter) {
 }
 
 void initInstance(const std::vector<std::string>& instanceExtensions, Vulkan::Context& context) {
-    LOG_DEBUG("VulkanInitializer: Initializing Vulkan instance with {} extensions", instanceExtensions.size());
+    LOG_DEBUG_CAT("VulkanInitializer", "Initializing Vulkan instance with {} extensions", instanceExtensions.size());
 
     VkApplicationInfo appInfo = {
         .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
@@ -75,39 +74,39 @@ void initInstance(const std::vector<std::string>& instanceExtensions, Vulkan::Co
 #endif
 
     if (vkCreateInstance(&createInfo, nullptr, &context.instance) != VK_SUCCESS) {
-        LOG_ERROR("VulkanInitializer: Failed to create Vulkan instance");
+        LOG_ERROR_CAT("VulkanInitializer", "Failed to create Vulkan instance");
         throw std::runtime_error("Failed to create Vulkan instance");
     }
-    LOG_INFO("VulkanInitializer: Created Vulkan instance: {:p}", static_cast<void*>(context.instance));
+    LOG_INFO_CAT("VulkanInitializer", "Created Vulkan instance: {:p}", static_cast<void*>(context.instance));
 }
 
 void initSurface(Vulkan::Context& context, void* window, VkSurfaceKHR* rawsurface) {
-    LOG_DEBUG("VulkanInitializer: Initializing Vulkan surface");
+    LOG_DEBUG_CAT("VulkanInitializer", "Initializing Vulkan surface");
     if (rawsurface && *rawsurface != VK_NULL_HANDLE) {
         context.surface = *rawsurface;
-        LOG_INFO("VulkanInitializer: Using provided raw surface: {:p}", static_cast<void*>(context.surface));
+        LOG_INFO_CAT("VulkanInitializer", "Using provided raw surface: {:p}", static_cast<void*>(context.surface));
         return;
     }
 
     if (!window) {
-        LOG_ERROR("VulkanInitializer: Window pointer is null and no raw surface provided");
+        LOG_ERROR_CAT("VulkanInitializer", "Window pointer is null and no raw surface provided");
         throw std::runtime_error("Window pointer is null and no raw surface provided");
     }
 
     SDL_Window* sdlWindow = static_cast<SDL_Window*>(window);
     VkSurfaceKHR surface;
     if (!SDL_Vulkan_CreateSurface(sdlWindow, context.instance, nullptr, &surface)) {
-        LOG_ERROR("VulkanInitializer: Failed to create Vulkan surface: {}", SDL_GetError());
+        LOG_ERROR_CAT("VulkanInitializer", "Failed to create Vulkan surface: {}", SDL_GetError());
         throw std::runtime_error("Failed to create Vulkan surface");
     }
     context.surface = surface;
-    LOG_INFO("VulkanInitializer: Created Vulkan surface: {:p}", static_cast<void*>(surface));
+    LOG_INFO_CAT("VulkanInitializer", "Created Vulkan surface: {:p}", static_cast<void*>(surface));
 }
 
 void initDevice(Vulkan::Context& context) {
-    LOG_DEBUG("VulkanInitializer: Initializing Vulkan device");
+    LOG_DEBUG_CAT("VulkanInitializer", "Initializing Vulkan device");
     if (context.physicalDevice == VK_NULL_HANDLE) {
-        LOG_ERROR("VulkanInitializer: Physical device not set");
+        LOG_ERROR_CAT("VulkanInitializer", "Physical device not set");
         throw std::runtime_error("Physical device not set");
     }
 
@@ -140,7 +139,7 @@ void initDevice(Vulkan::Context& context) {
     if (context.graphicsQueueFamilyIndex == UINT32_MAX ||
         context.computeQueueFamilyIndex == UINT32_MAX ||
         context.presentQueueFamilyIndex == UINT32_MAX) {
-        LOG_ERROR("VulkanInitializer: Failed to find suitable queue families: graphics={}, compute={}, present={}",
+        LOG_ERROR_CAT("VulkanInitializer", "Failed to find suitable queue families: graphics={}, compute={}, present={}",
                   context.graphicsQueueFamilyIndex, context.computeQueueFamilyIndex, context.presentQueueFamilyIndex);
         throw std::runtime_error("Failed to find suitable queue families");
     }
@@ -344,22 +343,22 @@ void initDevice(Vulkan::Context& context) {
     };
 
     if (vkCreateDevice(context.physicalDevice, &deviceCreateInfo, nullptr, &context.device) != VK_SUCCESS) {
-        LOG_ERROR("VulkanInitializer: Failed to create Vulkan device");
+        LOG_ERROR_CAT("VulkanInitializer", "Failed to create Vulkan device");
         throw std::runtime_error("Failed to create Vulkan device");
     }
     context.resourceManager.setDevice(context.device);
-    LOG_INFO("VulkanInitializer: Created Vulkan device: {:p}", static_cast<void*>(context.device));
+    LOG_INFO_CAT("VulkanInitializer", "Created Vulkan device: {:p}", static_cast<void*>(context.device));
 
     vkGetDeviceQueue(context.device, context.graphicsQueueFamilyIndex, 0, &context.graphicsQueue);
     vkGetDeviceQueue(context.device, context.computeQueueFamilyIndex, 0, &context.computeQueue);
     vkGetDeviceQueue(context.device, context.presentQueueFamilyIndex, 0, &context.presentQueue);
-    LOG_DEBUG("VulkanInitializer: Retrieved graphics, compute, and present queues");
+    LOG_DEBUG_CAT("VulkanInitializer", "Retrieved graphics, compute, and present queues");
 }
 
 VkPhysicalDevice findPhysicalDevice(VkInstance instance, VkSurfaceKHR surface, bool preferNvidia) {
     uint32_t deviceCount = 0;
     if (vkEnumeratePhysicalDevices(instance, &deviceCount, nullptr) != VK_SUCCESS || deviceCount == 0) {
-        LOG_ERROR("VulkanInitializer: No Vulkan physical devices found");
+        LOG_ERROR_CAT("VulkanInitializer", "No Vulkan physical devices found");
         throw std::runtime_error("No Vulkan physical devices found");
     }
     std::vector<VkPhysicalDevice> devices(deviceCount);
@@ -421,10 +420,10 @@ VkPhysicalDevice findPhysicalDevice(VkInstance instance, VkSurfaceKHR surface, b
     }
 
     if (selectedDevice == VK_NULL_HANDLE) {
-        LOG_ERROR("VulkanInitializer: No suitable Vulkan physical device found");
+        LOG_ERROR_CAT("VulkanInitializer", "No suitable Vulkan physical device found");
         throw std::runtime_error("No suitable Vulkan physical device found");
     }
-    LOG_INFO("VulkanInitializer: Selected physical device: {}", selectedDeviceName);
+    LOG_INFO_CAT("VulkanInitializer", "Selected physical device: {}", selectedDeviceName);
     return selectedDevice;
 }
 
@@ -432,12 +431,12 @@ void createBuffer(VkDevice device, VkPhysicalDevice physicalDevice, VkDeviceSize
                   VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& bufferMemory,
                   const VkMemoryAllocateFlagsInfo* allocFlagsInfo, VulkanResourceManager& resourceManager) {
     if (device == VK_NULL_HANDLE || physicalDevice == VK_NULL_HANDLE) {
-        LOG_ERROR("VulkanInitializer: Invalid device or physical device: device={:p}, physicalDevice={:p}",
+        LOG_ERROR_CAT("VulkanInitializer", "Invalid device or physical device: device={:p}, physicalDevice={:p}",
                   static_cast<void*>(device), static_cast<void*>(physicalDevice));
         throw std::runtime_error("Invalid device or physical device");
     }
     if (size == 0) {
-        LOG_ERROR("VulkanInitializer: Buffer size cannot be zero");
+        LOG_ERROR_CAT("VulkanInitializer", "Buffer size cannot be zero");
         throw std::invalid_argument("Buffer size cannot be zero");
     }
 
@@ -453,11 +452,11 @@ void createBuffer(VkDevice device, VkPhysicalDevice physicalDevice, VkDeviceSize
     };
 
     if (vkCreateBuffer(device, &bufferInfo, nullptr, &buffer) != VK_SUCCESS) {
-        LOG_ERROR("VulkanInitializer: Failed to create buffer with size={}, usage={:x}", size, static_cast<uint32_t>(usage));
+        LOG_ERROR_CAT("VulkanInitializer", "Failed to create buffer with size={}, usage={:x}", size, static_cast<uint32_t>(usage));
         throw std::runtime_error("Failed to create buffer");
     }
     resourceManager.addBuffer(buffer);
-    LOG_INFO("VulkanInitializer: Created buffer: {:p}", static_cast<void*>(buffer));
+    LOG_INFO_CAT("VulkanInitializer", "Created buffer: {:p}", static_cast<void*>(buffer));
 
     VkMemoryRequirements memRequirements;
     vkGetBufferMemoryRequirements(device, buffer, &memRequirements);
@@ -475,7 +474,7 @@ void createBuffer(VkDevice device, VkPhysicalDevice physicalDevice, VkDeviceSize
     };
 
     if (vkAllocateMemory(device, &allocInfo, nullptr, &bufferMemory) != VK_SUCCESS) {
-        LOG_ERROR("VulkanInitializer: Failed to allocate buffer memory for buffer={:p}, size={}",
+        LOG_ERROR_CAT("VulkanInitializer", "Failed to allocate buffer memory for buffer={:p}, size={}",
                   static_cast<void*>(buffer), alignedSize);
         Dispose::destroySingleBuffer(device, buffer);
         throw std::runtime_error("Failed to allocate buffer memory");
@@ -483,19 +482,19 @@ void createBuffer(VkDevice device, VkPhysicalDevice physicalDevice, VkDeviceSize
     resourceManager.addMemory(bufferMemory);
 
     if (vkBindBufferMemory(device, buffer, bufferMemory, 0) != VK_SUCCESS) {
-        LOG_ERROR("VulkanInitializer: Failed to bind buffer memory for buffer={:p}, memory={:p}",
+        LOG_ERROR_CAT("VulkanInitializer", "Failed to bind buffer memory for buffer={:p}, memory={:p}",
                   static_cast<void*>(buffer), static_cast<void*>(bufferMemory));
         Dispose::destroySingleBuffer(device, buffer);
         Dispose::freeSingleDeviceMemory(device, bufferMemory);
         throw std::runtime_error("Failed to bind buffer memory");
     }
-    LOG_INFO("VulkanInitializer: Allocated and bound buffer memory: {:p} for buffer: {:p}, alignedSize={}",
+    LOG_INFO_CAT("VulkanInitializer", "Allocated and bound buffer memory: {:p} for buffer: {:p}, alignedSize={}",
              static_cast<void*>(bufferMemory), static_cast<void*>(buffer), alignedSize);
 }
 
 VkDeviceAddress getBufferDeviceAddress(VkDevice device, VkBuffer buffer) {
     if (device == VK_NULL_HANDLE || buffer == VK_NULL_HANDLE) {
-        LOG_ERROR("VulkanInitializer: Invalid device or buffer for getBufferDeviceAddress: device={:p}, buffer={:p}",
+        LOG_ERROR_CAT("VulkanInitializer", "Invalid device or buffer for getBufferDeviceAddress: device={:p}, buffer={:p}",
                   static_cast<void*>(device), static_cast<void*>(buffer));
         throw std::runtime_error("Invalid device or buffer for getBufferDeviceAddress");
     }
@@ -503,7 +502,7 @@ VkDeviceAddress getBufferDeviceAddress(VkDevice device, VkBuffer buffer) {
     auto vkGetBufferDeviceAddressKHR = reinterpret_cast<PFN_vkGetBufferDeviceAddressKHR>(
         vkGetDeviceProcAddr(device, "vkGetBufferDeviceAddressKHR"));
     if (!vkGetBufferDeviceAddressKHR) {
-        LOG_ERROR("VulkanInitializer: VK_KHR_buffer_device_address extension not supported");
+        LOG_ERROR_CAT("VulkanInitializer", "VK_KHR_buffer_device_address extension not supported");
         throw std::runtime_error("VK_KHR_buffer_device_address extension not supported");
     }
 
@@ -514,10 +513,10 @@ VkDeviceAddress getBufferDeviceAddress(VkDevice device, VkBuffer buffer) {
     };
     VkDeviceAddress address = vkGetBufferDeviceAddressKHR(device, &addressInfo);
     if (address == 0) {
-        LOG_ERROR("VulkanInitializer: Failed to get buffer device address: buffer={:p}", static_cast<void*>(buffer));
+        LOG_ERROR_CAT("VulkanInitializer", "Failed to get buffer device address: buffer={:p}", static_cast<void*>(buffer));
         throw std::runtime_error("Failed to get buffer device address");
     }
-    LOG_DEBUG("VulkanInitializer: Retrieved device address 0x{:x} for buffer {:p}", address, static_cast<void*>(buffer));
+    LOG_DEBUG_CAT("VulkanInitializer", "Retrieved device address 0x{:x} for buffer {:p}", address, static_cast<void*>(buffer));
     return address;
 }
 
@@ -526,11 +525,11 @@ uint32_t findMemoryType(VkPhysicalDevice physicalDevice, uint32_t typeFilter, Vk
     vkGetPhysicalDeviceMemoryProperties(physicalDevice, &memProperties);
     for (uint32_t i = 0; i < memProperties.memoryTypeCount; i++) {
         if ((typeFilter & (1 << i)) && (memProperties.memoryTypes[i].propertyFlags & properties) == properties) {
-            LOG_INFO("VulkanInitializer: Selected memory type index: {} for properties: {}", i, properties);
+            LOG_INFO_CAT("VulkanInitializer", "Selected memory type index: {} for properties: {}", i, properties);
             return i;
         }
     }
-    LOG_ERROR("VulkanInitializer: Failed to find suitable memory type for typeFilter={:x}, properties={}",
+    LOG_ERROR_CAT("VulkanInitializer", "Failed to find suitable memory type for typeFilter={:x}, properties={}",
               typeFilter, properties);
     throw std::runtime_error("Failed to find suitable memory type");
 }
@@ -541,7 +540,7 @@ void createDescriptorSetLayout(VkDevice device, VkPhysicalDevice physicalDevice,
     vkGetPhysicalDeviceProperties(physicalDevice, &deviceProperties);
     uint32_t maxDescriptorCount = deviceProperties.limits.maxPerStageDescriptorStorageBuffers;
     uint32_t descriptorCount = std::min(4096u, maxDescriptorCount);
-    LOG_INFO("VulkanInitializer: Selected descriptor count: {} (max allowed: {}) for storage buffer bindings",
+    LOG_INFO_CAT("VulkanInitializer", "Selected descriptor count: {} (max allowed: {}) for storage buffer bindings",
              descriptorCount, maxDescriptorCount);
 
     // Ray-tracing descriptor set layout
@@ -606,10 +605,10 @@ void createDescriptorSetLayout(VkDevice device, VkPhysicalDevice physicalDevice,
     };
 
     if (vkCreateDescriptorSetLayout(device, &rayTracingLayoutInfo, nullptr, &rayTracingLayout) != VK_SUCCESS) {
-        LOG_ERROR("VulkanInitializer: Failed to create ray-tracing descriptor set layout");
+        LOG_ERROR_CAT("VulkanInitializer", "Failed to create ray-tracing descriptor set layout");
         throw std::runtime_error("Failed to create ray-tracing descriptor set layout");
     }
-    LOG_INFO("VulkanInitializer: Created ray-tracing descriptor set layout with {} bindings: {:p}",
+    LOG_INFO_CAT("VulkanInitializer", "Created ray-tracing descriptor set layout with {} bindings: {:p}",
              rayTracingBindings.size(), static_cast<void*>(rayTracingLayout));
 
     // Graphics descriptor set layout
@@ -639,17 +638,17 @@ void createDescriptorSetLayout(VkDevice device, VkPhysicalDevice physicalDevice,
     };
 
     if (vkCreateDescriptorSetLayout(device, &graphicsLayoutInfo, nullptr, &graphicsLayout) != VK_SUCCESS) {
-        LOG_ERROR("VulkanInitializer: Failed to create graphics descriptor set layout");
+        LOG_ERROR_CAT("VulkanInitializer", "Failed to create graphics descriptor set layout");
         vkDestroyDescriptorSetLayout(device, rayTracingLayout, nullptr);
         throw std::runtime_error("Failed to create graphics descriptor set layout");
     }
-    LOG_INFO("VulkanInitializer: Created graphics descriptor set layout with {} bindings: {:p}",
+    LOG_INFO_CAT("VulkanInitializer", "Created graphics descriptor set layout with {} bindings: {:p}",
              graphicsBindings.size(), static_cast<void*>(graphicsLayout));
 }
 
 void initializeVulkan(Vulkan::Context& context) {
     if (context.instance == VK_NULL_HANDLE || context.surface == VK_NULL_HANDLE) {
-        LOG_ERROR("VulkanInitializer: Invalid instance or surface: instance={:p}, surface={:p}",
+        LOG_ERROR_CAT("VulkanInitializer", "Invalid instance or surface: instance={:p}, surface={:p}",
                   static_cast<void*>(context.instance), static_cast<void*>(context.surface));
         throw std::runtime_error("Invalid Vulkan instance or surface");
     }
@@ -665,13 +664,13 @@ void initializeVulkan(Vulkan::Context& context) {
         .queueFamilyIndex = context.graphicsQueueFamilyIndex
     };
     if (vkCreateCommandPool(context.device, &commandPoolInfo, nullptr, &context.commandPool) != VK_SUCCESS) {
-        LOG_ERROR("VulkanInitializer: Failed to create command pool for queue family {}",
+        LOG_ERROR_CAT("VulkanInitializer", "Failed to create command pool for queue family {}",
                   context.graphicsQueueFamilyIndex);
         Dispose::destroyDevice(context.device);
         throw std::runtime_error("Failed to create command pool");
     }
     context.resourceManager.addCommandPool(context.commandPool);
-    LOG_INFO("VulkanInitializer: Created command pool: {:p}", static_cast<void*>(context.commandPool));
+    LOG_INFO_CAT("VulkanInitializer", "Created command pool: {:p}", static_cast<void*>(context.commandPool));
 
     // Create descriptor pool
     VkPhysicalDeviceProperties deviceProperties;
@@ -700,13 +699,13 @@ void initializeVulkan(Vulkan::Context& context) {
         .pPoolSizes = poolSizes.data()
     };
     if (vkCreateDescriptorPool(context.device, &poolInfo, nullptr, &context.descriptorPool) != VK_SUCCESS) {
-        LOG_ERROR("VulkanInitializer: Failed to create descriptor pool");
+        LOG_ERROR_CAT("VulkanInitializer", "Failed to create descriptor pool");
         Dispose::destroySingleCommandPool(context.device, context.commandPool);
         Dispose::destroyDevice(context.device);
         throw std::runtime_error("Failed to create descriptor pool");
     }
     context.resourceManager.addDescriptorPool(context.descriptorPool);
-    LOG_INFO("VulkanInitializer: Created descriptor pool: {:p} with maxSets={}", static_cast<void*>(context.descriptorPool), maxSets);
+    LOG_INFO_CAT("VulkanInitializer", "Created descriptor pool: {:p} with maxSets={}", static_cast<void*>(context.descriptorPool), maxSets);
 
     createDescriptorSetLayout(context.device, context.physicalDevice, context.rayTracingDescriptorSetLayout, context.graphicsDescriptorSetLayout);
     vkGetPhysicalDeviceMemoryProperties(context.physicalDevice, &context.memoryProperties);
@@ -734,7 +733,7 @@ void createStorageImage(VkDevice device, VkPhysicalDevice physicalDevice, VkImag
     };
 
     if (vkCreateImage(device, &imageInfo, nullptr, &storageImage) != VK_SUCCESS) {
-        LOG_ERROR("VulkanInitializer: Failed to create storage image");
+        LOG_ERROR_CAT("VulkanInitializer", "Failed to create storage image");
         throw std::runtime_error("Failed to create storage image");
     }
     resourceManager.addImage(storageImage);
@@ -755,14 +754,14 @@ void createStorageImage(VkDevice device, VkPhysicalDevice physicalDevice, VkImag
     };
 
     if (vkAllocateMemory(device, &allocInfo, nullptr, &storageImageMemory) != VK_SUCCESS) {
-        LOG_ERROR("VulkanInitializer: Failed to allocate storage image memory");
+        LOG_ERROR_CAT("VulkanInitializer", "Failed to allocate storage image memory");
         Dispose::destroySingleImage(device, storageImage);
         throw std::runtime_error("Failed to allocate storage image memory");
     }
     resourceManager.addMemory(storageImageMemory);
 
     if (vkBindImageMemory(device, storageImage, storageImageMemory, 0) != VK_SUCCESS) {
-        LOG_ERROR("VulkanInitializer: Failed to bind storage image memory");
+        LOG_ERROR_CAT("VulkanInitializer", "Failed to bind storage image memory");
         Dispose::destroySingleImage(device, storageImage);
         Dispose::freeSingleDeviceMemory(device, storageImageMemory);
         throw std::runtime_error("Failed to bind storage image memory");
@@ -791,23 +790,23 @@ void createStorageImage(VkDevice device, VkPhysicalDevice physicalDevice, VkImag
     };
 
     if (vkCreateImageView(device, &viewInfo, nullptr, &storageImageView) != VK_SUCCESS) {
-        LOG_ERROR("VulkanInitializer: Failed to create storage image view");
+        LOG_ERROR_CAT("VulkanInitializer", "Failed to create storage image view");
         Dispose::destroySingleImage(device, storageImage);
         Dispose::freeSingleDeviceMemory(device, storageImageMemory);
         throw std::runtime_error("Failed to create storage image view");
     }
     resourceManager.addImageView(storageImageView);
-    LOG_INFO("VulkanInitializer: Created storage image {:p}, memory {:p}, view {:p}",
+    LOG_INFO_CAT("VulkanInitializer", "Created storage image {:p}, memory {:p}, view {:p}",
              static_cast<void*>(storageImage), static_cast<void*>(storageImageMemory), static_cast<void*>(storageImageView));
 }
 
 void createShaderBindingTable(Vulkan::Context& context) {
     if (!context.enableRayTracing) {
-        LOG_INFO("VulkanInitializer: Ray tracing disabled, skipping SBT creation");
+        LOG_INFO_CAT("VulkanInitializer", "Ray tracing disabled, skipping SBT creation");
         return;
     }
     if (context.rayTracingPipeline == VK_NULL_HANDLE) {
-        LOG_ERROR("VulkanInitializer: Ray tracing pipeline is null");
+        LOG_ERROR_CAT("VulkanInitializer", "Ray tracing pipeline is null");
         throw std::runtime_error("Ray tracing pipeline is null");
     }
 
@@ -862,14 +861,14 @@ void createShaderBindingTable(Vulkan::Context& context) {
     auto vkGetRayTracingShaderGroupHandlesKHR = reinterpret_cast<PFN_vkGetRayTracingShaderGroupHandlesKHR>(
         vkGetDeviceProcAddr(context.device, "vkGetRayTracingShaderGroupHandlesKHR"));
     if (!vkGetRayTracingShaderGroupHandlesKHR) {
-        LOG_ERROR("VulkanInitializer: Failed to get vkGetRayTracingShaderGroupHandlesKHR");
+        LOG_ERROR_CAT("VulkanInitializer", "Failed to get vkGetRayTracingShaderGroupHandlesKHR");
         context.resourceManager.cleanup(context.device);
         throw std::runtime_error("Failed to get vkGetRayTracingShaderGroupHandlesKHR");
     }
 
     if (vkGetRayTracingShaderGroupHandlesKHR(context.device, context.rayTracingPipeline, 0, groupCount,
                                              groupCount * sbtRecordSize, shaderHandles.data()) != VK_SUCCESS) {
-        LOG_ERROR("VulkanInitializer: Failed to get shader group handles for pipeline {:p}",
+        LOG_ERROR_CAT("VulkanInitializer", "Failed to get shader group handles for pipeline {:p}",
                   static_cast<void*>(context.rayTracingPipeline));
         context.resourceManager.cleanup(context.device);
         throw std::runtime_error("Failed to get shader group handles");
@@ -877,7 +876,7 @@ void createShaderBindingTable(Vulkan::Context& context) {
 
     void* data;
     if (vkMapMemory(context.device, raygenMemory, 0, alignedSize, 0, &data) != VK_SUCCESS) {
-        LOG_ERROR("VulkanInitializer: Failed to map raygen SBT memory");
+        LOG_ERROR_CAT("VulkanInitializer", "Failed to map raygen SBT memory");
         context.resourceManager.cleanup(context.device);
         throw std::runtime_error("Failed to map raygen SBT memory");
     }
@@ -885,7 +884,7 @@ void createShaderBindingTable(Vulkan::Context& context) {
     vkUnmapMemory(context.device, raygenMemory);
 
     if (vkMapMemory(context.device, missMemory, 0, alignedSize, 0, &data) != VK_SUCCESS) {
-        LOG_ERROR("VulkanInitializer: Failed to map miss SBT memory");
+        LOG_ERROR_CAT("VulkanInitializer", "Failed to map miss SBT memory");
         context.resourceManager.cleanup(context.device);
         throw std::runtime_error("Failed to map miss SBT memory");
     }
@@ -893,7 +892,7 @@ void createShaderBindingTable(Vulkan::Context& context) {
     vkUnmapMemory(context.device, missMemory);
 
     if (vkMapMemory(context.device, hitMemory, 0, alignedSize, 0, &data) != VK_SUCCESS) {
-        LOG_ERROR("VulkanInitializer: Failed to map hit SBT memory");
+        LOG_ERROR_CAT("VulkanInitializer", "Failed to map hit SBT memory");
         context.resourceManager.cleanup(context.device);
         throw std::runtime_error("Failed to map hit SBT memory");
     }
@@ -909,22 +908,22 @@ void createShaderBindingTable(Vulkan::Context& context) {
     context.raygenSbtAddress = getBufferDeviceAddress(context.device, raygenBuffer);
     context.missSbtAddress = getBufferDeviceAddress(context.device, missBuffer);
     context.hitSbtAddress = getBufferDeviceAddress(context.device, hitBuffer);
-    LOG_INFO("VulkanInitializer: Created shader binding table with raygen: {:p}, miss: {:p}, hit: {:p}",
+    LOG_INFO_CAT("VulkanInitializer", "Created shader binding table with raygen: {:p}, miss: {:p}, hit: {:p}",
              static_cast<void*>(raygenBuffer), static_cast<void*>(missBuffer), static_cast<void*>(hitBuffer));
 }
 
 void createAccelerationStructures(Vulkan::Context& context, VulkanBufferManager& bufferManager,
                                  std::span<const glm::vec3> vertices, std::span<const uint32_t> indices) {
     if (!context.enableRayTracing) {
-        LOG_INFO("VulkanInitializer: Ray tracing disabled, skipping acceleration structure creation");
+        LOG_INFO_CAT("VulkanInitializer", "Ray tracing disabled, skipping acceleration structure creation");
         return;
     }
     if (context.device == VK_NULL_HANDLE) {
-        LOG_ERROR("VulkanInitializer: Invalid Vulkan device");
+        LOG_ERROR_CAT("VulkanInitializer", "Invalid Vulkan device");
         throw std::runtime_error("Invalid Vulkan device");
     }
     if (vertices.empty() || indices.empty()) {
-        LOG_ERROR("VulkanInitializer: Empty vertex or index data provided");
+        LOG_ERROR_CAT("VulkanInitializer", "Empty vertex or index data provided");
         throw std::runtime_error("Vertex or index data cannot be empty");
     }
 
@@ -933,7 +932,7 @@ void createAccelerationStructures(Vulkan::Context& context, VulkanBufferManager&
     VkBuffer vertexBuffer = bufferManager.getVertexBuffer();
     VkBuffer indexBuffer = bufferManager.getIndexBuffer();
     if (vertexBuffer == VK_NULL_HANDLE || indexBuffer == VK_NULL_HANDLE) {
-        LOG_ERROR("VulkanInitializer: Invalid vertex or index buffer: vertexBuffer={:p}, indexBuffer={:p}",
+        LOG_ERROR_CAT("VulkanInitializer", "Invalid vertex or index buffer: vertexBuffer={:p}, indexBuffer={:p}",
                   static_cast<void*>(vertexBuffer), static_cast<void*>(indexBuffer));
         throw std::runtime_error("Invalid vertex or index buffer");
     }
@@ -941,7 +940,7 @@ void createAccelerationStructures(Vulkan::Context& context, VulkanBufferManager&
     VkDeviceAddress vertexAddress = bufferManager.getVertexBufferAddress();
     VkDeviceAddress indexAddress = bufferManager.getIndexBufferAddress();
     if (vertexAddress == 0 || indexAddress == 0) {
-        LOG_ERROR("VulkanInitializer: Invalid vertex or index buffer address: vertexAddress=0x{:x}, indexAddress=0x{:x}",
+        LOG_ERROR_CAT("VulkanInitializer", "Invalid vertex or index buffer address: vertexAddress=0x{:x}, indexAddress=0x{:x}",
                   vertexAddress, indexAddress);
         throw std::runtime_error("Invalid vertex or index buffer address");
     }
@@ -956,7 +955,7 @@ void createAccelerationStructures(Vulkan::Context& context, VulkanBufferManager&
         vkGetDeviceProcAddr(context.device, "vkGetAccelerationStructureDeviceAddressKHR"));
     if (!vkCreateAccelerationStructureKHR || !vkGetAccelerationStructureBuildSizesKHR ||
         !vkCmdBuildAccelerationStructuresKHR || !vkGetAccelerationStructureDeviceAddressKHR) {
-        LOG_ERROR("VulkanInitializer: Failed to load acceleration structure function pointers");
+        LOG_ERROR_CAT("VulkanInitializer", "Failed to load acceleration structure function pointers");
         throw std::runtime_error("Failed to load acceleration structure function pointers");
     }
 
@@ -1043,14 +1042,14 @@ void createAccelerationStructures(Vulkan::Context& context, VulkanBufferManager&
         .deviceAddress = 0
     };
     if (vkCreateAccelerationStructureKHR(context.device, &blasCreateInfo, nullptr, &context.bottomLevelAS) != VK_SUCCESS) {
-        LOG_ERROR("VulkanInitializer: Failed to create BLAS");
+        LOG_ERROR_CAT("VulkanInitializer", "Failed to create BLAS");
         context.resourceManager.cleanup(context.device);
         throw std::runtime_error("Failed to create BLAS");
     }
     context.resourceManager.addAccelerationStructure(context.bottomLevelAS);
     context.bottomLevelASBuffer = blasBuffer;
     context.bottomLevelASMemory = blasMemory;
-    LOG_INFO("VulkanInitializer: Created BLAS: {:p}, buffer: {:p}, memory: {:p}",
+    LOG_INFO_CAT("VulkanInitializer", "Created BLAS: {:p}, buffer: {:p}, memory: {:p}",
              static_cast<void*>(context.bottomLevelAS), static_cast<void*>(blasBuffer), static_cast<void*>(blasMemory));
 
     // Create scratch buffer for BLAS
@@ -1100,7 +1099,7 @@ void createAccelerationStructures(Vulkan::Context& context, VulkanBufferManager&
     };
     instanceData.accelerationStructureReference = vkGetAccelerationStructureDeviceAddressKHR(context.device, &addressInfo);
     if (instanceData.accelerationStructureReference == 0) {
-        LOG_ERROR("VulkanInitializer: Failed to get BLAS device address");
+        LOG_ERROR_CAT("VulkanInitializer", "Failed to get BLAS device address");
         context.resourceManager.cleanup(context.device);
         throw std::runtime_error("Failed to get BLAS device address");
     }
@@ -1114,7 +1113,7 @@ void createAccelerationStructures(Vulkan::Context& context, VulkanBufferManager&
                  instanceBuffer, instanceMemory, nullptr, context.resourceManager);
     void* instanceDataPtr;
     if (vkMapMemory(context.device, instanceMemory, 0, sizeof(VkAccelerationStructureInstanceKHR), 0, &instanceDataPtr) != VK_SUCCESS) {
-        LOG_ERROR("VulkanInitializer: Failed to map instance buffer memory");
+        LOG_ERROR_CAT("VulkanInitializer", "Failed to map instance buffer memory");
         context.resourceManager.cleanup(context.device);
         throw std::runtime_error("Failed to map instance buffer memory");
     }
@@ -1180,14 +1179,14 @@ void createAccelerationStructures(Vulkan::Context& context, VulkanBufferManager&
         .deviceAddress = 0
     };
     if (vkCreateAccelerationStructureKHR(context.device, &tlasCreateInfo, nullptr, &context.topLevelAS) != VK_SUCCESS) {
-        LOG_ERROR("VulkanInitializer: Failed to create TLAS");
+        LOG_ERROR_CAT("VulkanInitializer", "Failed to create TLAS");
         context.resourceManager.cleanup(context.device);
         throw std::runtime_error("Failed to create TLAS");
     }
     context.resourceManager.addAccelerationStructure(context.topLevelAS);
     context.topLevelASBuffer = tlasBuffer;
     context.topLevelASMemory = tlasMemory;
-    LOG_INFO("VulkanInitializer: Created TLAS: {:p}, buffer: {:p}, memory: {:p}",
+    LOG_INFO_CAT("VulkanInitializer", "Created TLAS: {:p}, buffer: {:p}, memory: {:p}",
              static_cast<void*>(context.topLevelAS), static_cast<void*>(tlasBuffer), static_cast<void*>(tlasMemory));
 
     // Create scratch buffer for TLAS
@@ -1219,7 +1218,7 @@ void createAccelerationStructures(Vulkan::Context& context, VulkanBufferManager&
     context.resourceManager.removeMemory(instanceMemory);
     Dispose::destroySingleBuffer(context.device, instanceBuffer);
     Dispose::freeSingleDeviceMemory(context.device, instanceMemory);
-    LOG_INFO("VulkanInitializer: Acceleration structures created successfully");
+    LOG_INFO_CAT("VulkanInitializer", "Acceleration structures created successfully");
 }
 
 void createDescriptorPoolAndSet(VkDevice device, VkPhysicalDevice physicalDevice, VkDescriptorSetLayout descriptorSetLayout,
@@ -1229,7 +1228,7 @@ void createDescriptorPoolAndSet(VkDevice device, VkPhysicalDevice physicalDevice
                                std::vector<VkBuffer> materialBuffers, std::vector<VkBuffer> dimensionBuffers,
                                VkImageView denoiseImageView) {
     if (device == VK_NULL_HANDLE || descriptorSetLayout == VK_NULL_HANDLE) {
-        LOG_ERROR("VulkanInitializer: Invalid device or descriptor set layout: device={:p}, layout={:p}",
+        LOG_ERROR_CAT("VulkanInitializer", "Invalid device or descriptor set layout: device={:p}, layout={:p}",
                   static_cast<void*>(device), static_cast<void*>(descriptorSetLayout));
         throw std::runtime_error("Invalid device or descriptor set layout");
     }
@@ -1261,10 +1260,10 @@ void createDescriptorPoolAndSet(VkDevice device, VkPhysicalDevice physicalDevice
         .pPoolSizes = poolSizes.data()
     };
     if (vkCreateDescriptorPool(device, &poolInfo, nullptr, &descriptorPool) != VK_SUCCESS) {
-        LOG_ERROR("VulkanInitializer: Failed to create descriptor pool");
+        LOG_ERROR_CAT("VulkanInitializer", "Failed to create descriptor pool");
         throw std::runtime_error("Failed to create descriptor pool");
     }
-    LOG_INFO("VulkanInitializer: Created descriptor pool: {:p}", static_cast<void*>(descriptorPool));
+    LOG_INFO_CAT("VulkanInitializer", "Created descriptor pool: {:p}", static_cast<void*>(descriptorPool));
 
     descriptorSets.resize(MAX_FRAMES_IN_FLIGHT);
     std::vector<VkDescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, descriptorSetLayout);
@@ -1276,7 +1275,7 @@ void createDescriptorPoolAndSet(VkDevice device, VkPhysicalDevice physicalDevice
         .pSetLayouts = layouts.data()
     };
     if (vkAllocateDescriptorSets(device, &allocInfo, descriptorSets.data()) != VK_SUCCESS) {
-        LOG_ERROR("VulkanInitializer: Failed to allocate descriptor sets");
+        LOG_ERROR_CAT("VulkanInitializer", "Failed to allocate descriptor sets");
         vkDestroyDescriptorPool(device, descriptorPool, nullptr);
         throw std::runtime_error("Failed to allocate descriptor sets");
     }
@@ -1302,11 +1301,11 @@ void createDescriptorPoolAndSet(VkDevice device, VkPhysicalDevice physicalDevice
         .unnormalizedCoordinates = VK_FALSE
     };
     if (vkCreateSampler(device, &samplerInfo, nullptr, &sampler) != VK_SUCCESS) {
-        LOG_ERROR("VulkanInitializer: Failed to create sampler");
+        LOG_ERROR_CAT("VulkanInitializer", "Failed to create sampler");
         vkDestroyDescriptorPool(device, descriptorPool, nullptr);
         throw std::runtime_error("Failed to create sampler");
     }
-    LOG_INFO("VulkanInitializer: Created sampler: {:p}", static_cast<void*>(sampler));
+    LOG_INFO_CAT("VulkanInitializer", "Created sampler: {:p}", static_cast<void*>(sampler));
 
     for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
         std::vector<VkWriteDescriptorSet> descriptorWrites;
@@ -1477,7 +1476,7 @@ void createDescriptorPoolAndSet(VkDevice device, VkPhysicalDevice physicalDevice
         }
         vkUpdateDescriptorSets(device, static_cast<uint32_t>(descriptorWrites.size()), descriptorWrites.data(), 0, nullptr);
     }
-    LOG_INFO("VulkanInitializer: Created {} descriptor sets for {}", descriptorSets.size(), forRayTracing ? "ray tracing" : "graphics");
+    LOG_INFO_CAT("VulkanInitializer", "Created {} descriptor sets for {}", descriptorSets.size(), forRayTracing ? "ray tracing" : "graphics");
 }
 
 VkCommandBuffer beginSingleTimeCommands(Vulkan::Context& context) {
@@ -1490,7 +1489,7 @@ VkCommandBuffer beginSingleTimeCommands(Vulkan::Context& context) {
     };
     VkCommandBuffer commandBuffer;
     if (vkAllocateCommandBuffers(context.device, &allocInfo, &commandBuffer) != VK_SUCCESS) {
-        LOG_ERROR("VulkanInitializer: Failed to allocate single-time command buffer");
+        LOG_ERROR_CAT("VulkanInitializer", "Failed to allocate single-time command buffer");
         throw std::runtime_error("Failed to allocate single-time command buffer");
     }
     VkCommandBufferBeginInfo beginInfo = {
@@ -1500,21 +1499,21 @@ VkCommandBuffer beginSingleTimeCommands(Vulkan::Context& context) {
         .pInheritanceInfo = nullptr
     };
     if (vkBeginCommandBuffer(commandBuffer, &beginInfo) != VK_SUCCESS) {
-        LOG_ERROR("VulkanInitializer: Failed to begin single-time command buffer");
+        LOG_ERROR_CAT("VulkanInitializer", "Failed to begin single-time command buffer");
         vkFreeCommandBuffers(context.device, context.commandPool, 1, &commandBuffer);
         throw std::runtime_error("Failed to begin single-time command buffer");
     }
-    LOG_DEBUG("VulkanInitializer: Allocated and began single-time command buffer: {:p}", static_cast<void*>(commandBuffer));
+    LOG_DEBUG_CAT("VulkanInitializer", "Allocated and began single-time command buffer: {:p}", static_cast<void*>(commandBuffer));
     return commandBuffer;
 }
 
 void endSingleTimeCommands(Vulkan::Context& context, VkCommandBuffer commandBuffer) {
     if (commandBuffer == VK_NULL_HANDLE) {
-        LOG_ERROR("VulkanInitializer: Invalid command buffer for endSingleTimeCommands");
+        LOG_ERROR_CAT("VulkanInitializer", "Invalid command buffer for endSingleTimeCommands");
         throw std::runtime_error("Invalid command buffer");
     }
     if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS) {
-        LOG_ERROR("VulkanInitializer: Failed to end single-time command buffer: {:p}", static_cast<void*>(commandBuffer));
+        LOG_ERROR_CAT("VulkanInitializer", "Failed to end single-time command buffer: {:p}", static_cast<void*>(commandBuffer));
         vkFreeCommandBuffers(context.device, context.commandPool, 1, &commandBuffer);
         throw std::runtime_error("Failed to end single-time command buffer");
     }
@@ -1538,20 +1537,20 @@ void endSingleTimeCommands(Vulkan::Context& context, VkCommandBuffer commandBuff
     };
     VkFence fence;
     if (vkCreateFence(context.device, &fenceInfo, nullptr, &fence) != VK_SUCCESS) {
-        LOG_ERROR("VulkanInitializer: Failed to create fence for single-time command submission");
+        LOG_ERROR_CAT("VulkanInitializer", "Failed to create fence for single-time command submission");
         vkFreeCommandBuffers(context.device, context.commandPool, 1, &commandBuffer);
         throw std::runtime_error("Failed to create fence");
     }
 
     if (vkQueueSubmit(context.graphicsQueue, 1, &submitInfo, fence) != VK_SUCCESS) {
-        LOG_ERROR("VulkanInitializer: Failed to submit single-time command buffer to queue");
+        LOG_ERROR_CAT("VulkanInitializer", "Failed to submit single-time command buffer to queue");
         vkFreeCommandBuffers(context.device, context.commandPool, 1, &commandBuffer);
         vkDestroyFence(context.device, fence, nullptr);
         throw std::runtime_error("Failed to submit single-time command buffer");
     }
 
     if (vkWaitForFences(context.device, 1, &fence, VK_TRUE, UINT64_MAX) != VK_SUCCESS) {
-        LOG_ERROR("VulkanInitializer: Failed to wait for fence for single-time command buffer");
+        LOG_ERROR_CAT("VulkanInitializer", "Failed to wait for fence for single-time command buffer");
         vkFreeCommandBuffers(context.device, context.commandPool, 1, &commandBuffer);
         vkDestroyFence(context.device, fence, nullptr);
         throw std::runtime_error("Failed to wait for fence");
@@ -1559,13 +1558,13 @@ void endSingleTimeCommands(Vulkan::Context& context, VkCommandBuffer commandBuff
 
     vkFreeCommandBuffers(context.device, context.commandPool, 1, &commandBuffer);
     vkDestroyFence(context.device, fence, nullptr);
-    LOG_DEBUG("VulkanInitializer: Submitted and freed single-time command buffer: {:p}", static_cast<void*>(commandBuffer));
+    LOG_DEBUG_CAT("VulkanInitializer", "Submitted and freed single-time command buffer: {:p}", static_cast<void*>(commandBuffer));
 }
 
 void copyBuffer(VkDevice device, VkCommandPool commandPool, VkQueue queue, VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size) {
     if (device == VK_NULL_HANDLE || commandPool == VK_NULL_HANDLE || queue == VK_NULL_HANDLE ||
         srcBuffer == VK_NULL_HANDLE || dstBuffer == VK_NULL_HANDLE || size == 0) {
-        LOG_ERROR("VulkanInitializer: Invalid parameters for copyBuffer");
+        LOG_ERROR_CAT("VulkanInitializer", "Invalid parameters for copyBuffer");
         throw std::invalid_argument("Invalid parameters for copyBuffer");
     }
 
@@ -1578,7 +1577,7 @@ void copyBuffer(VkDevice device, VkCommandPool commandPool, VkQueue queue, VkBuf
     };
     VkCommandBuffer commandBuffer;
     if (vkAllocateCommandBuffers(device, &allocInfo, &commandBuffer) != VK_SUCCESS) {
-        LOG_ERROR("VulkanInitializer: Failed to allocate command buffer for copyBuffer");
+        LOG_ERROR_CAT("VulkanInitializer", "Failed to allocate command buffer for copyBuffer");
         throw std::runtime_error("Failed to allocate command buffer for copyBuffer");
     }
 
@@ -1589,7 +1588,7 @@ void copyBuffer(VkDevice device, VkCommandPool commandPool, VkQueue queue, VkBuf
         .pInheritanceInfo = nullptr
     };
     if (vkBeginCommandBuffer(commandBuffer, &beginInfo) != VK_SUCCESS) {
-        LOG_ERROR("VulkanInitializer: Failed to begin command buffer for copyBuffer");
+        LOG_ERROR_CAT("VulkanInitializer", "Failed to begin command buffer for copyBuffer");
         vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer);
         throw std::runtime_error("Failed to begin command buffer for copyBuffer");
     }
@@ -1602,7 +1601,7 @@ void copyBuffer(VkDevice device, VkCommandPool commandPool, VkQueue queue, VkBuf
     vkCmdCopyBuffer(commandBuffer, srcBuffer, dstBuffer, 1, &copyRegion);
 
     if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS) {
-        LOG_ERROR("VulkanInitializer: Failed to end command buffer for copyBuffer");
+        LOG_ERROR_CAT("VulkanInitializer", "Failed to end command buffer for copyBuffer");
         vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer);
         throw std::runtime_error("Failed to end command buffer for copyBuffer");
     }
@@ -1626,20 +1625,20 @@ void copyBuffer(VkDevice device, VkCommandPool commandPool, VkQueue queue, VkBuf
     };
     VkFence fence;
     if (vkCreateFence(device, &fenceInfo, nullptr, &fence) != VK_SUCCESS) {
-        LOG_ERROR("VulkanInitializer: Failed to create fence for copyBuffer");
+        LOG_ERROR_CAT("VulkanInitializer", "Failed to create fence for copyBuffer");
         vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer);
         throw std::runtime_error("Failed to create fence for copyBuffer");
     }
 
     if (vkQueueSubmit(queue, 1, &submitInfo, fence) != VK_SUCCESS) {
-        LOG_ERROR("VulkanInitializer: Failed to submit command buffer for copyBuffer");
+        LOG_ERROR_CAT("VulkanInitializer", "Failed to submit command buffer for copyBuffer");
         vkDestroyFence(device, fence, nullptr);
         vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer);
         throw std::runtime_error("Failed to submit command buffer for copyBuffer");
     }
 
     if (vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX) != VK_SUCCESS) {
-        LOG_ERROR("VulkanInitializer: Failed to wait for fence in copyBuffer");
+        LOG_ERROR_CAT("VulkanInitializer", "Failed to wait for fence in copyBuffer");
         vkDestroyFence(device, fence, nullptr);
         vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer);
         throw std::runtime_error("Failed to wait for fence in copyBuffer");
@@ -1647,7 +1646,7 @@ void copyBuffer(VkDevice device, VkCommandPool commandPool, VkQueue queue, VkBuf
 
     vkDestroyFence(device, fence, nullptr);
     vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer);
-    LOG_DEBUG("VulkanInitializer: Buffer copy completed: src={:p}, dst={:p}, size={}", static_cast<void*>(srcBuffer), static_cast<void*>(dstBuffer), size);
+    LOG_DEBUG_CAT("VulkanInitializer", "Buffer copy completed: src={:p}, dst={:p}, size={}", static_cast<void*>(srcBuffer), static_cast<void*>(dstBuffer), size);
 }
 
 } // namespace VulkanInitializer
