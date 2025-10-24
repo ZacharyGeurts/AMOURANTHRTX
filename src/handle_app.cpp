@@ -160,8 +160,6 @@ void Application::initializeInput() {
 
 void Application::initializeAudio() {
     try {
-        #include "engine/SDL3/SDL3_audio.hpp"  // Ensure this include is added at the top of handle_app.cpp if not already present
-        
         SDL3Audio::AudioConfig config;
         config.frequency = 44100;  // Standard sample rate for 8-channel audio
         config.format = SDL_AUDIO_S16LE;  // Signed 16-bit format for multi-channel audio
@@ -200,7 +198,6 @@ void Application::render() {
     // Assuming navigator_ provides a concrete Camera instance
     renderer_->renderFrame(navigator_->getCamera()); // Ensure getCamera() returns a concrete Camera
     amouranth_->getUniversalEquation().advanceCycle();
-    LOG_DEBUG_CAT("Application", "Rendered frame with deltaTime={:.4f}s", deltaTime);
 }
 
 void Application::handleResize(int width, int height) {
@@ -230,7 +227,6 @@ void HandleInput::handleInput(Application& app) {
         switch (event.type) {
             case SDL_EVENT_QUIT:
                 app.setRenderMode(0);
-                LOG_DEBUG_CAT("Input", "Quit event received");
                 break;
             case SDL_EVENT_WINDOW_RESIZED:
                 app.handleResize(event.window.data1, event.window.data2);
@@ -302,7 +298,6 @@ void HandleInput::setCallbacks(
 
 void HandleInput::defaultKeyboardHandler(const SDL_KeyboardEvent& key) {
     if (key.type != SDL_EVENT_KEY_DOWN) return;
-    LOG_DEBUG_CAT("Input", "Key event: scancode={}", static_cast<int>(key.scancode));
     switch (key.scancode) {
         case SDL_SCANCODE_1:
         case SDL_SCANCODE_2:
@@ -315,7 +310,6 @@ void HandleInput::defaultKeyboardHandler(const SDL_KeyboardEvent& key) {
         case SDL_SCANCODE_9:
             {
                 int mode = key.scancode - SDL_SCANCODE_1 + 1;
-                LOG_DEBUG_CAT("Input", "Setting mode to {}", mode);
                 universalEquation_.setMode(mode);
                 navigator_->setMode(mode);
                 amouranth_.setMode(mode); // Removed std::source_location argument
@@ -323,56 +317,43 @@ void HandleInput::defaultKeyboardHandler(const SDL_KeyboardEvent& key) {
             break;
         case SDL_SCANCODE_KP_PLUS:
         case SDL_SCANCODE_EQUALS:
-            LOG_DEBUG_CAT("Input", "Increasing influence");
             amouranth_.adjustInfluence(0.1f, std::source_location::current());
             break;
         case SDL_SCANCODE_KP_MINUS:
         case SDL_SCANCODE_MINUS:
-            LOG_DEBUG_CAT("Input", "Decreasing influence");
             amouranth_.adjustInfluence(-0.1f, std::source_location::current());
             break;
         case SDL_SCANCODE_P:
-            LOG_DEBUG_CAT("Input", "Toggling pause");
             amouranth_.togglePause(std::source_location::current());
             break;
         case SDL_SCANCODE_W:
-            LOG_DEBUG_CAT("Input", "Moving camera forward");
             amouranth_.moveUserCam(0.0f, 0.0f, 0.1f, std::source_location::current());
             break;
         case SDL_SCANCODE_S:
-            LOG_DEBUG_CAT("Input", "Moving camera backward");
             amouranth_.moveUserCam(0.0f, 0.0f, -0.1f, std::source_location::current());
             break;
         case SDL_SCANCODE_A:
-            LOG_DEBUG_CAT("Input", "Moving camera left");
             amouranth_.moveUserCam(-0.1f, 0.0f, 0.0f, std::source_location::current());
             break;
         case SDL_SCANCODE_D:
-            LOG_DEBUG_CAT("Input", "Moving camera right");
             amouranth_.moveUserCam(0.1f, 0.0f, 0.0f, std::source_location::current());
             break;
         case SDL_SCANCODE_Q:
-            LOG_DEBUG_CAT("Input", "Moving camera up");
             amouranth_.moveUserCam(0.0f, 0.1f, 0.0f, std::source_location::current());
             break;
         case SDL_SCANCODE_E:
-            LOG_DEBUG_CAT("Input", "Moving camera down");
             amouranth_.moveUserCam(0.0f, -0.1f, 0.0f, std::source_location::current());
             break;
         case SDL_SCANCODE_Z:
-            LOG_DEBUG_CAT("Input", "Zooming in");
             amouranth_.updateZoom(true, std::source_location::current());
             break;
         case SDL_SCANCODE_X:
-            LOG_DEBUG_CAT("Input", "Zooming out");
             amouranth_.updateZoom(false, std::source_location::current());
             break;
         case SDL_SCANCODE_UP:
-            LOG_DEBUG_CAT("Input", "Increasing dimension");
             amouranth_.setCurrentDimension(amouranth_.getCurrentDimension() + 1, std::source_location::current());
             break;
         case SDL_SCANCODE_DOWN:
-            LOG_DEBUG_CAT("Input", "Decreasing dimension");
             amouranth_.setCurrentDimension(amouranth_.getCurrentDimension() - 1, std::source_location::current());
             break;
         default:
@@ -381,17 +362,13 @@ void HandleInput::defaultKeyboardHandler(const SDL_KeyboardEvent& key) {
 }
 
 void HandleInput::defaultMouseButtonHandler(const SDL_MouseButtonEvent& mb) {
-    const char* state = mb.type == SDL_EVENT_MOUSE_BUTTON_DOWN ? "pressed" : "released";
-    LOG_DEBUG_CAT("Input", "Mouse button event: button={}, state={}", mb.button, state);
 }
 
 void HandleInput::defaultMouseMotionHandler(const SDL_MouseMotionEvent& mm) {
-    LOG_DEBUG_CAT("Input", "Mouse motion: xrel={}, yrel={}", mm.xrel, mm.yrel);
     amouranth_.rotateCamera(mm.xrel * 0.005f, mm.yrel * 0.005f, std::source_location::current());
 }
 
 void HandleInput::defaultMouseWheelHandler(const SDL_MouseWheelEvent& mw) {
-    LOG_DEBUG_CAT("Input", "Mouse wheel: x={}, y={}", mw.x, mw.y);
     if (mw.y > 0) {
         amouranth_.updateZoom(true, std::source_location::current());
     } else if (mw.y < 0) {
@@ -400,16 +377,12 @@ void HandleInput::defaultMouseWheelHandler(const SDL_MouseWheelEvent& mw) {
 }
 
 void HandleInput::defaultTextInputHandler(const SDL_TextInputEvent& ti) {
-    LOG_DEBUG_CAT("Input", "Text input: text={}", ti.text);
 }
 
 void HandleInput::defaultTouchHandler(const SDL_TouchFingerEvent& tf) {
-    LOG_DEBUG_CAT("Input", "Touch event: fingerID={}, x={}, y={}", tf.fingerID, tf.x, tf.y);
 }
 
 void HandleInput::defaultGamepadButtonHandler(const SDL_GamepadButtonEvent& gb) {
-    const char* state = gb.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN ? "pressed" : "released";
-    LOG_DEBUG_CAT("Input", "Gamepad button: button={}, state={}", gb.button, state);
     if (gb.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) {
         switch (gb.button) {
             case SDL_GAMEPAD_BUTTON_SOUTH: // A button
@@ -428,7 +401,6 @@ void HandleInput::defaultGamepadButtonHandler(const SDL_GamepadButtonEvent& gb) 
 }
 
 void HandleInput::defaultGamepadAxisHandler(const SDL_GamepadAxisEvent& ga) {
-    LOG_DEBUG_CAT("Input", "Gamepad axis event: axis={}, value={}", ga.axis, ga.value);
     float axisValue = ga.value / 32767.0f; // Normalize to [-1, 1]
     if (ga.axis == SDL_GAMEPAD_AXIS_LEFTX) {
         amouranth_.moveUserCam(axisValue * 0.1f, 0.0f, 0.0f, std::source_location::current());
@@ -442,7 +414,6 @@ void HandleInput::defaultGamepadAxisHandler(const SDL_GamepadAxisEvent& ga) {
 }
 
 void HandleInput::defaultGamepadConnectHandler(bool connected, SDL_JoystickID id, SDL_Gamepad* pad) {
-    LOG_DEBUG_CAT("Input", "Gamepad {}: id={}", connected ? "connected" : "disconnected", id);
     if (!connected && pad) {
         SDL_CloseGamepad(pad);
     }

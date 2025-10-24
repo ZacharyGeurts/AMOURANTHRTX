@@ -1,24 +1,23 @@
 // AMOURANTH RTX Engine, October 2025 - Vulkan buffer management.
-// Dependencies: Vulkan 1.3+, GLM, VulkanCore.hpp, Vulkan_init.hpp, ue_init.hpp, logging.hpp, Dispose.hpp.
+// Dependencies: Vulkan 1.3+, GLM, VulkanCore.hpp, Vulkan_init.hpp, ue_init.hpp, Dispose.hpp.
 // Supported platforms: Linux, Windows.
 // Optimized for high-end GPUs with 8 GB VRAM (e.g., NVIDIA RTX 3070, AMD RX 6800).
 // Zachary Geurts 2025
 
 #include "engine/Vulkan/VulkanBufferManager.hpp"
 #include "engine/Vulkan/Vulkan_init.hpp"
-#include "engine/logging.hpp"
 #include "engine/Dispose.hpp"
 #include "ue_init.hpp"
 #include <vulkan/vulkan.h>
 #include <glm/glm.hpp>
 #include <vector>
 #include <cstring>
-#include <format>
 #include <stdexcept>
 #include <string_view>
 #include <algorithm>
 #include <unordered_map>
 #include <functional>
+#include <thread>
 
 namespace {
 // Scaling factors optimized for 8 GB VRAM
@@ -33,15 +32,6 @@ constexpr uint32_t COMMAND_BUFFER_POOL_SIZE = 32;
 constexpr uint32_t SCRATCH_BUFFER_POOL_COUNT = 4;
 // Timeout for fence waiting (5 seconds)
 constexpr uint64_t FENCE_TIMEOUT = 5'000'000'000ULL;
-
-std::string formatSize(VkDeviceSize size) {
-    if (size == 0) return "0 B";
-    if (size < 1024) return std::format("{} B", size);
-    size_t kb = size / 1024;
-    if (kb < 1024) return std::format("{} KB", kb);
-    size_t mb = kb / 1024;
-    return std::format("{} MB", mb);
-}
 
 bool isMeshShaderSupported(VkPhysicalDevice physicalDevice) {
     uint32_t extensionCount = 0;
@@ -116,9 +106,7 @@ struct VulkanBufferManager::Impl {
 
 VulkanBufferManager::VulkanBufferManager(Vulkan::Context& context, std::span<const glm::vec3> vertices, std::span<const uint32_t> indices)
     : context_(context), vertexCount_(0), indexCount_(0), vertexBufferAddress_(0), indexBufferAddress_(0), scratchBufferAddress_(0), impl_(std::make_unique<Impl>()) {
-    LOG_DEBUG_CAT("BufferManager", "Entering VulkanBufferManager constructor with vertices.size()={}, indices.size()={}", vertices.size(), indices.size());
     if (context_.device == VK_NULL_HANDLE || context_.physicalDevice == VK_NULL_HANDLE) {
-        LOG_ERROR_CAT("BufferManager", "Invalid Vulkan device or physical device");
         throw std::runtime_error("Invalid Vulkan device or physical device");
     }
 
@@ -128,23 +116,18 @@ VulkanBufferManager::VulkanBufferManager(Vulkan::Context& context, std::span<con
     for (uint32_t i = 0; i < memProperties.memoryHeapCount; ++i) {
         if (memProperties.memoryHeaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) {
             totalDeviceLocalMemory += memProperties.memoryHeaps[i].size;
-            LOG_INFO_CAT("BufferManager", "Device local heap[{}] size: {} MB", i, memProperties.memoryHeaps[i].size / (1024 * 1024));
         }
     }
     if (totalDeviceLocalMemory < 8ULL * 1024 * 1024 * 1024) {
-        LOG_WARNING_CAT("BufferManager", "Total device local memory ({} MB) < 8192 MB", totalDeviceLocalMemory / (1024 * 1024));
     }
-    LOG_INFO_CAT("BufferManager", "Total device local memory: {} MB", totalDeviceLocalMemory / (1024 * 1024));
 
     // Validate input
     if (vertices.empty() || indices.empty()) {
-        LOG_ERROR_CAT("BufferManager", "Empty vertex or index data: vertices.size()={}, indices.size()={}", vertices.size(), indices.size());
         throw std::invalid_argument("Vertex or index data cannot be empty");
     }
     vertexCount_ = static_cast<uint32_t>(vertices.size());
     indexCount_ = static_cast<uint32_t>(indices.size());
     if (indexCount_ < 3 || indexCount_ % 3 != 0) {
-        LOG_ERROR_CAT("BufferManager", "Invalid geometry: indexCount_={} must be >= 3 and divisible by 3", indexCount_);
         throw std::invalid_argument("Invalid geometry for triangle-based rendering");
     }
 
@@ -170,7 +153,6 @@ VulkanBufferManager::VulkanBufferManager(Vulkan::Context& context, std::span<con
     vkGetPhysicalDeviceProperties2(context_.physicalDevice, &props2);
     impl_->useMeshShaders = isMeshShaderSupported(context_.physicalDevice);
     impl_->useDescriptorIndexing = isDescriptorIndexingSupported(context_.physicalDevice);
-    LOG_DEBUG_CAT("BufferManager", "Mesh shaders: {}, Descriptor indexing: {}", impl_->useMeshShaders ? "enabled" : "disabled", impl_->useDescriptorIndexing ? "enabled" : "disabled");
 
     // Initialize command buffer mega-pool
     initializeCommandPool();
@@ -181,7 +163,6 @@ VulkanBufferManager::VulkanBufferManager(Vulkan::Context& context, std::span<con
     VkDeviceSize totalBufferSize = vertexBufferSize + indexBufferSize;
     VkDeviceSize arenaSize = std::max(ARENA_DEFAULT_SIZE, totalBufferSize * 2);
     if (arenaSize > totalDeviceLocalMemory / 2) {
-        LOG_ERROR_CAT("BufferManager", "Arena size {} MB exceeds 50% of VRAM {} MB", arenaSize / (1024 * 1024), totalDeviceLocalMemory / (1024 * 1024));
         throw std::runtime_error("Arena size exceeds VRAM capacity");
     }
     reserveArena(arenaSize, BufferType::GEOMETRY);
@@ -196,14 +177,10 @@ VulkanBufferManager::VulkanBufferManager(Vulkan::Context& context, std::span<con
     // Initialize scratch buffer pool
     VkDeviceSize scratchSize = getScratchSize(vertexCount_, indexCount_) * SCRATCH_BUFFER_SCALE_FACTOR;
     if (scratchSize > totalDeviceLocalMemory / 4) {
-        LOG_ERROR_CAT("BufferManager", "Scratch buffer size {} MB exceeds 25% of VRAM {} MB", scratchSize / (1024 * 1024), totalDeviceLocalMemory / (1024 * 1024));
         throw std::runtime_error("Scratch buffer size exceeds VRAM capacity");
     }
     reserveScratchPool(scratchSize, SCRATCH_BUFFER_POOL_COUNT);
     scratchBufferAddress_ = impl_->scratchBufferAddresses[0];
-
-    LOG_INFO_CAT("BufferManager", "Initialized VulkanBufferManager with {} vertices, {} indices, vertex buffer: {}, index buffer: {}, scratch buffer: {}",
-                 vertexCount_, indexCount_, formatSize(vertexBufferSize), formatSize(indexBufferSize), formatSize(scratchSize));
 }
 
 void VulkanBufferManager::initializeCommandPool() {
@@ -227,7 +204,6 @@ void VulkanBufferManager::initializeCommandPool() {
         }
     }
     if (impl_->transferQueueFamily == UINT32_MAX) {
-        LOG_ERROR_CAT("BufferManager", "No suitable queue family for transfer");
         throw std::runtime_error("No suitable queue family for transfer");
     }
 
@@ -238,10 +214,8 @@ void VulkanBufferManager::initializeCommandPool() {
         .queueFamilyIndex = impl_->transferQueueFamily
     };
     if (vkCreateCommandPool(context_.device, &poolInfo, nullptr, &impl_->commandPool) != VK_SUCCESS) {
-        LOG_ERROR_CAT("BufferManager", "Failed to create command pool");
         throw std::runtime_error("Failed to create command pool");
     }
-    LOG_INFO_CAT("BufferManager", "Created command pool: {:p}", static_cast<void*>(impl_->commandPool));
 
     impl_->commandBuffers.resize(COMMAND_BUFFER_POOL_SIZE);
     VkCommandBufferAllocateInfo allocInfo{
@@ -252,11 +226,9 @@ void VulkanBufferManager::initializeCommandPool() {
         .commandBufferCount = COMMAND_BUFFER_POOL_SIZE
     };
     if (vkAllocateCommandBuffers(context_.device, &allocInfo, impl_->commandBuffers.data()) != VK_SUCCESS) {
-        LOG_ERROR_CAT("BufferManager", "Failed to allocate command buffers");
         vkDestroyCommandPool(context_.device, impl_->commandPool, nullptr);
         throw std::runtime_error("Failed to allocate command buffers");
     }
-    LOG_INFO_CAT("BufferManager", "Allocated {} command buffers", COMMAND_BUFFER_POOL_SIZE);
 
     vkGetDeviceQueue(context_.device, impl_->transferQueueFamily, 0, &impl_->transferQueue);
     VkSemaphoreCreateInfo semaphoreInfo{
@@ -265,14 +237,12 @@ void VulkanBufferManager::initializeCommandPool() {
         .flags = 0
     };
     if (vkCreateSemaphore(context_.device, &semaphoreInfo, nullptr, &impl_->timelineSemaphore) != VK_SUCCESS) {
-        LOG_ERROR_CAT("BufferManager", "Failed to create timeline semaphore");
         vkDestroyCommandPool(context_.device, impl_->commandPool, nullptr);
         throw std::runtime_error("Failed to create timeline semaphore");
     }
 }
 
 void VulkanBufferManager::reserveArena(VkDeviceSize size, BufferType type) {
-    LOG_DEBUG_CAT("BufferManager", "Reserving arena of size {}", formatSize(size));
     if (impl_->arenaBuffer != VK_NULL_HANDLE) {
         context_.resourceManager.removeBuffer(impl_->arenaBuffer);
         Dispose::destroySingleBuffer(context_.device, impl_->arenaBuffer);
@@ -325,20 +295,16 @@ void VulkanBufferManager::reserveArena(VkDeviceSize size, BufferType type) {
         impl_->arenaBuffer, impl_->arenaMemory, &allocFlagsInfo, context_.resourceManager
     );
     if (impl_->arenaBuffer == VK_NULL_HANDLE || impl_->arenaMemory == VK_NULL_HANDLE) {
-        LOG_ERROR_CAT("BufferManager", "Failed to create arena buffer: buffer={:p}, memory={:p}", static_cast<void*>(impl_->arenaBuffer), static_cast<void*>(impl_->arenaMemory));
         throw std::runtime_error("Failed to create arena buffer");
     }
     impl_->arenaSize = size;
-    LOG_INFO_CAT("BufferManager", "Created arena buffer: {:p}, size: {}", static_cast<void*>(impl_->arenaBuffer), formatSize(size));
 }
 
 VkDeviceAddress VulkanBufferManager::asyncUpdateBuffers(std::span<const glm::vec3> vertices, std::span<const uint32_t> indices, std::function<void(uint64_t)> callback) {
-    LOG_DEBUG_CAT("BufferManager", "Async updating buffers: vertices.size()={}, indices.size()={}", vertices.size(), indices.size());
     VkDeviceSize vertexSize = sizeof(glm::vec3) * vertices.size() * VERTEX_BUFFER_SCALE_FACTOR;
     VkDeviceSize indexSize = sizeof(uint32_t) * indices.size() * INDEX_BUFFER_SCALE_FACTOR;
     VkDeviceSize totalSize = vertexSize + indexSize;
     if (totalSize > impl_->arenaSize) {
-        LOG_ERROR_CAT("BufferManager", "Update size {} MB exceeds arena size {} MB", totalSize / (1024 * 1024), impl_->arenaSize / (1024 * 1024));
         throw std::runtime_error("Update size exceeds arena capacity");
     }
 
@@ -359,7 +325,6 @@ VkDeviceAddress VulkanBufferManager::asyncUpdateBuffers(std::span<const glm::vec
         .pQueueFamilyIndices = nullptr
     };
     if (vkCreateBuffer(context_.device, &stagingInfo, nullptr, &stagingBuffer) != VK_SUCCESS) {
-        LOG_ERROR_CAT("BufferManager", "Failed to create staging buffer");
         throw std::runtime_error("Failed to create staging buffer");
     }
 
@@ -470,7 +435,6 @@ VkDeviceAddress VulkanBufferManager::asyncUpdateBuffers(std::span<const glm::vec
     // Wait for fence
     VkResult result = vkWaitForFences(context_.device, 1, &fence, VK_TRUE, FENCE_TIMEOUT);
     if (result != VK_SUCCESS) {
-        LOG_ERROR_CAT("BufferManager", "Failed to wait for fence for command buffer: VkResult={}", static_cast<int>(result));
         cleanupResources(context_.device, impl_->commandPool, stagingBuffer, stagingMemory, cmd, fence);
         throw std::runtime_error("Failed to wait for fence for command buffer");
     }
@@ -500,9 +464,7 @@ VkDeviceAddress VulkanBufferManager::asyncUpdateBuffers(std::span<const glm::vec
 }
 
 void VulkanBufferManager::createUniformBuffers(uint32_t count) {
-    LOG_DEBUG_CAT("BufferManager", "Creating {} uniform buffers", count);
     if (count == 0) {
-        LOG_WARNING_CAT("BufferManager", "Requested zero uniform buffers; keeping existing buffers");
         return;
     }
 
@@ -531,7 +493,6 @@ void VulkanBufferManager::createUniformBuffers(uint32_t count) {
         }
     }
     if (totalSize > totalDeviceLocalMemory / 8) {
-        LOG_ERROR_CAT("BufferManager", "Uniform buffer size {} MB exceeds 12.5% of VRAM {} MB", totalSize / (1024 * 1024), totalDeviceLocalMemory / (1024 * 1024));
         throw std::runtime_error("Uniform buffer size exceeds VRAM capacity");
     }
 
@@ -546,7 +507,6 @@ void VulkanBufferManager::createUniformBuffers(uint32_t count) {
             context_.uniformBuffers[i], context_.uniformBufferMemories[i], nullptr, context_.resourceManager
         );
         if (context_.uniformBuffers[i] == VK_NULL_HANDLE || context_.uniformBufferMemories[i] == VK_NULL_HANDLE) {
-            LOG_ERROR_CAT("BufferManager", "Failed to create uniform buffer[{}]", i);
             for (uint32_t j = 0; j < i; ++j) {
                 context_.resourceManager.removeBuffer(context_.uniformBuffers[j]);
                 context_.resourceManager.removeMemory(context_.uniformBufferMemories[j]);
@@ -554,14 +514,11 @@ void VulkanBufferManager::createUniformBuffers(uint32_t count) {
             throw std::runtime_error("Failed to create uniform buffer");
         }
         impl_->uniformBufferOffsets[i] = 0; // Individual buffers, no offsets needed
-        LOG_INFO_CAT("BufferManager", "Created uniform buffer[{}]: {:p}, size: {}", i, static_cast<void*>(context_.uniformBuffers[i]), formatSize(bufferSize));
     }
 }
 
 void VulkanBufferManager::configureUniformBuffers(uint32_t count, VkDeviceSize size_per_buffer) {
-    LOG_DEBUG_CAT("BufferManager", "Configuring {} uniform buffers, size per buffer: {}", count, formatSize(size_per_buffer));
     if (count == 0) {
-        LOG_WARNING_CAT("BufferManager", "Requested zero uniform buffers; keeping existing buffers");
         return;
     }
 
@@ -590,7 +547,6 @@ void VulkanBufferManager::configureUniformBuffers(uint32_t count, VkDeviceSize s
         }
     }
     if (totalSize > totalDeviceLocalMemory / 8) {
-        LOG_ERROR_CAT("BufferManager", "Uniform buffer size {} MB exceeds 12.5% of VRAM {} MB", totalSize / (1024 * 1024), totalDeviceLocalMemory / (1024 * 1024));
         throw std::runtime_error("Uniform buffer size exceeds VRAM capacity");
     }
 
@@ -602,23 +558,18 @@ void VulkanBufferManager::configureUniformBuffers(uint32_t count, VkDeviceSize s
         context_.uniformBuffers[i] = impl_->arenaBuffer;
         context_.uniformBufferMemories[i] = impl_->arenaMemory;
         impl_->uniformBufferOffsets[i] = i * size_per_buffer;
-        LOG_INFO_CAT("BufferManager", "Configured uniform buffer[{}]: offset={}, size={}", i, impl_->uniformBufferOffsets[i], formatSize(size_per_buffer));
     }
 }
 
 void VulkanBufferManager::enableMeshShaders(bool enable, const MeshletConfig& config) {
     impl_->useMeshShaders = enable && isMeshShaderSupported(context_.physicalDevice);
     if (impl_->useMeshShaders) {
-        LOG_INFO_CAT("BufferManager", "Enabling mesh shaders with max triangles per meshlet: {}", config.maxTriangles);
         impl_->meshletOffset = impl_->indexOffset + (sizeof(uint32_t) * indexCount_ * INDEX_BUFFER_SCALE_FACTOR);
-    } else {
-        LOG_INFO_CAT("BufferManager", "Mesh shaders disabled; using vertex pipeline");
     }
 }
 
 void VulkanBufferManager::addMeshletBatch(std::span<const MeshletData> meshlets) {
     if (!impl_->useMeshShaders) {
-        LOG_ERROR_CAT("BufferManager", "Mesh shaders not enabled");
         throw std::runtime_error("Mesh shaders not enabled");
     }
     VkDeviceSize totalSize = 0;
@@ -626,7 +577,6 @@ void VulkanBufferManager::addMeshletBatch(std::span<const MeshletData> meshlets)
         totalSize += meshlet.size;
     }
     if (impl_->meshletOffset + totalSize > impl_->arenaSize) {
-        LOG_ERROR_CAT("BufferManager", "Meshlet data size {} MB exceeds arena capacity", totalSize / (1024 * 1024));
         throw std::runtime_error("Meshlet data exceeds arena capacity");
     }
 
@@ -733,7 +683,6 @@ void VulkanBufferManager::addMeshletBatch(std::span<const MeshletData> meshlets)
 
     VkResult result = vkWaitForFences(context_.device, 1, &fence, VK_TRUE, FENCE_TIMEOUT);
     if (result != VK_SUCCESS) {
-        LOG_ERROR_CAT("BufferManager", "Failed to wait for fence for meshlet command buffer: VkResult={}", static_cast<int>(result));
         cleanupResources(context_.device, impl_->commandPool, stagingBuffer, stagingMemory, cmd, fence);
         throw std::runtime_error("Failed to wait for fence for meshlet command buffer");
     }
@@ -750,13 +699,11 @@ VkCommandBuffer VulkanBufferManager::getCommandBuffer(BufferOperation /*op*/) {
 }
 
 void VulkanBufferManager::batchTransferAsync(std::span<const BufferCopy> copies, std::function<void(uint64_t)> callback) {
-    LOG_DEBUG_CAT("BufferManager", "Batch updating {} descriptors", copies.size());
     VkDeviceSize totalSize = 0;
     for (const auto& copy : copies) {
         totalSize += copy.size;
     }
     if (totalSize > impl_->arenaSize) {
-        LOG_ERROR_CAT("BufferManager", "Batch transfer size {} MB exceeds arena size {} MB", totalSize / (1024 * 1024), impl_->arenaSize / (1024 * 1024));
         throw std::runtime_error("Batch transfer size exceeds arena capacity");
     }
 
@@ -885,7 +832,6 @@ void VulkanBufferManager::batchTransferAsync(std::span<const BufferCopy> copies,
 
     VkResult result = vkWaitForFences(context_.device, 1, &fence, VK_TRUE, FENCE_TIMEOUT);
     if (result != VK_SUCCESS) {
-        LOG_ERROR_CAT("BufferManager", "Failed to wait for fence for batch transfer command buffer: VkResult={}", static_cast<int>(result));
         cleanupResources(context_.device, impl_->commandPool, stagingBuffer, stagingMemory, cmd, fence);
         throw std::runtime_error("Failed to wait for fence for batch transfer command buffer");
     }
@@ -906,7 +852,6 @@ void VulkanBufferManager::batchTransferAsync(std::span<const BufferCopy> copies,
 }
 
 void VulkanBufferManager::reserveScratchPool(VkDeviceSize size_per_buffer, uint32_t count) {
-    LOG_DEBUG_CAT("BufferManager", "Reserving scratch pool with {} buffers of size {}", count, formatSize(size_per_buffer));
     for (auto buffer : impl_->scratchBuffers) {
         context_.resourceManager.removeBuffer(buffer);
         Dispose::destroySingleBuffer(context_.device, buffer);
@@ -956,7 +901,6 @@ void VulkanBufferManager::reserveScratchPool(VkDeviceSize size_per_buffer, uint3
             VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, impl_->scratchBuffers[i], impl_->scratchBufferMemories[i], &allocFlagsInfo, context_.resourceManager
         );
         if (impl_->scratchBuffers[i] == VK_NULL_HANDLE || impl_->scratchBufferMemories[i] == VK_NULL_HANDLE) {
-            LOG_ERROR_CAT("BufferManager", "Failed to create scratch buffer[{}]", i);
             for (uint32_t j = 0; j < i; ++j) {
                 context_.resourceManager.removeBuffer(impl_->scratchBuffers[j]);
                 context_.resourceManager.removeMemory(impl_->scratchBufferMemories[j]);
@@ -964,7 +908,6 @@ void VulkanBufferManager::reserveScratchPool(VkDeviceSize size_per_buffer, uint3
             throw std::runtime_error("Failed to create scratch buffer");
         }
         impl_->scratchBufferAddresses[i] = VulkanInitializer::getBufferDeviceAddress(context_.device, impl_->scratchBuffers[i]);
-        LOG_INFO_CAT("BufferManager", "Created scratch buffer[{}]: {:p}, size: {}", i, static_cast<void*>(impl_->scratchBuffers[i]), formatSize(size_per_buffer));
     }
     context_.scratchBuffer = impl_->scratchBuffers[0];
     context_.scratchBufferMemory = impl_->scratchBufferMemories[0];
@@ -975,23 +918,19 @@ VkDeviceSize VulkanBufferManager::getScratchSize(uint32_t vertexCount, uint32_t 
     uint64_t key = (static_cast<uint64_t>(vertexCount) << 32) | indexCount;
     auto it = impl_->scratchSizeCache.find(key);
     if (it != impl_->scratchSizeCache.end()) {
-        LOG_DEBUG_CAT("BufferManager", "Using cached scratch size: {} for vertexCount={}, indexCount={}", formatSize(it->second), vertexCount, indexCount);
         return it->second;
     }
 
     if (indexCount < 3 || indexCount % 3 != 0) {
-        LOG_ERROR_CAT("BufferManager", "Invalid geometry: indexCount={} must be >= 3 and divisible by 3", indexCount);
         throw std::invalid_argument("Invalid geometry for acceleration structure");
     }
     if (vertexCount == 0) {
-        LOG_ERROR_CAT("BufferManager", "vertexCount == 0");
         throw std::invalid_argument("No vertices for acceleration structure");
     }
 
     auto vkGetAccelerationStructureBuildSizesKHR = reinterpret_cast<PFN_vkGetAccelerationStructureBuildSizesKHR>(
         vkGetDeviceProcAddr(context_.device, "vkGetAccelerationStructureBuildSizesKHR"));
     if (!vkGetAccelerationStructureBuildSizesKHR) {
-        LOG_ERROR_CAT("BufferManager", "Failed to load vkGetAccelerationStructureBuildSizesKHR");
         throw std::runtime_error("Failed to load vkGetAccelerationStructureBuildSizesKHR");
     }
 
@@ -1036,7 +975,6 @@ VkDeviceSize VulkanBufferManager::getScratchSize(uint32_t vertexCount, uint32_t 
     };
     vkGetAccelerationStructureBuildSizesKHR(context_.device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &buildInfo, &primitiveCount, &sizesInfo);
     impl_->scratchSizeCache[key] = sizesInfo.buildScratchSize;
-    LOG_INFO_CAT("BufferManager", "Cached scratch size: {} for vertexCount={}, indexCount={}", formatSize(sizesInfo.buildScratchSize), vertexCount, indexCount);
     return sizesInfo.buildScratchSize;
 }
 
@@ -1045,9 +983,7 @@ void VulkanBufferManager::createScratchBuffer(VkDeviceSize size) {
 }
 
 void VulkanBufferManager::batchDescriptorUpdate(std::span<const DescriptorUpdate> updates, uint32_t maxBindings) {
-    LOG_DEBUG_CAT("BufferManager", "Batch updating {} descriptors, maxBindings={}", updates.size(), maxBindings);
     if (!impl_->useDescriptorIndexing && maxBindings > 32) {
-        LOG_WARNING_CAT("BufferManager", "Descriptor indexing not supported; limiting to 32 bindings");
         maxBindings = std::min(maxBindings, 32u);
     }
 
@@ -1057,7 +993,6 @@ void VulkanBufferManager::batchDescriptorUpdate(std::span<const DescriptorUpdate
     for (size_t i = 0; i < updates.size(); ++i) {
         if (updates[i].type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER) {
             if (updates[i].bufferIndex >= context_.uniformBuffers.size()) {
-                LOG_ERROR_CAT("BufferManager", "Invalid uniform buffer index: {}", updates[i].bufferIndex);
                 throw std::runtime_error("Invalid uniform buffer index");
             }
             bufferInfos[i].buffer = context_.uniformBuffers[updates[i].bufferIndex];
@@ -1079,13 +1014,10 @@ void VulkanBufferManager::batchDescriptorUpdate(std::span<const DescriptorUpdate
         writes.push_back(write);
     }
     vkUpdateDescriptorSets(context_.device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
-    LOG_INFO_CAT("BufferManager", "Batch updated {} descriptors", updates.size());
 }
 
 void VulkanBufferManager::updateDescriptorSet(VkDescriptorSet descriptorSet, uint32_t binding, uint32_t descriptorCount, VkDescriptorType descriptorType) const {
-    LOG_DEBUG_CAT("BufferManager", "Updating descriptor set {:p} with {} descriptors at binding {}, type={}", static_cast<void*>(descriptorSet), descriptorCount, binding, static_cast<uint32_t>(descriptorType));
     if (descriptorSet == VK_NULL_HANDLE) {
-        LOG_ERROR_CAT("BufferManager", "Invalid descriptor set");
         throw std::invalid_argument("Descriptor set cannot be null");
     }
 
@@ -1109,13 +1041,10 @@ void VulkanBufferManager::updateDescriptorSet(VkDescriptorSet descriptorSet, uin
         writes.push_back(write);
     }
     vkUpdateDescriptorSets(context_.device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
-    LOG_INFO_CAT("BufferManager", "Updated descriptor set {:p} with {} buffers", static_cast<void*>(descriptorSet), descriptorCount);
 }
 
 void VulkanBufferManager::prepareDescriptorBufferInfo(std::vector<VkDescriptorBufferInfo>& bufferInfos, uint32_t count) const {
-    LOG_DEBUG_CAT("BufferManager", "Preparing {} descriptor buffer infos", count);
     if (count > context_.uniformBuffers.size()) {
-        LOG_ERROR_CAT("BufferManager", "Requested {} descriptor buffer infos, but only {} uniform buffers available", count, context_.uniformBuffers.size());
         throw std::runtime_error("Insufficient uniform buffers");
     }
 
@@ -1126,13 +1055,11 @@ void VulkanBufferManager::prepareDescriptorBufferInfo(std::vector<VkDescriptorBu
 
     for (uint32_t i = 0; i < count; ++i) {
         if (context_.uniformBuffers[i] == VK_NULL_HANDLE) {
-            LOG_ERROR_CAT("BufferManager", "Uniform buffer[{}] is null", i);
             throw std::runtime_error("Invalid uniform buffer handle");
         }
         bufferInfos[i].buffer = context_.uniformBuffers[i];
         bufferInfos[i].offset = impl_->uniformBufferOffsets[i];
         bufferInfos[i].range = bufferSize;
-        LOG_INFO_CAT("BufferManager", "Prepared descriptor buffer info[{}]: buffer={:p}, offset={}, range={}", i, static_cast<void*>(bufferInfos[i].buffer), bufferInfos[i].offset, formatSize(bufferInfos[i].range));
     }
 }
 
@@ -1170,7 +1097,6 @@ VkBuffer VulkanBufferManager::getUniformBuffer(uint32_t index) const {
 uint32_t VulkanBufferManager::getUniformBufferCount() const { return static_cast<uint32_t>(context_.uniformBuffers.size()); }
 void VulkanBufferManager::validateUniformBufferIndex(uint32_t index) const {
     if (index >= context_.uniformBuffers.size()) {
-        LOG_ERROR_CAT("BufferManager", "Invalid uniform buffer index: {} (size: {})", index, context_.uniformBuffers.size());
         throw std::out_of_range("Uniform buffer index out of range");
     }
 }
