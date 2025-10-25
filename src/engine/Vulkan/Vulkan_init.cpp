@@ -885,14 +885,12 @@ void createShaderBindingTable(Vulkan::Context& context) {
         throw std::runtime_error("Ray tracing pipeline is null");
     }
 
-    VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProperties = {
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR,
-        .pNext = nullptr
-    };
-    VkPhysicalDeviceProperties2 properties = {
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
-        .pNext = &rtProperties
-    };
+    VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProperties{};
+    rtProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR;
+    rtProperties.pNext = nullptr;
+    VkPhysicalDeviceProperties2 properties{};
+    properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+    properties.pNext = &rtProperties;
     vkGetPhysicalDeviceProperties2(context.physicalDevice, &properties);
 
     const uint32_t groupCount = 3; // Raygen, Miss, Hit
@@ -1003,14 +1001,12 @@ void createAccelerationStructures(Vulkan::Context& context, VulkanBufferManager&
         throw std::runtime_error("Invalid vertex or index buffer address");
     }
 
-    VkPhysicalDeviceAccelerationStructurePropertiesKHR accelProps = {
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_PROPERTIES_KHR,
-        .pNext = nullptr
-    };
-    VkPhysicalDeviceProperties2 properties2 = {
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
-        .pNext = &accelProps
-    };
+    VkPhysicalDeviceAccelerationStructurePropertiesKHR accelProps{};
+    accelProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_PROPERTIES_KHR;
+    accelProps.pNext = nullptr;
+    VkPhysicalDeviceProperties2 properties2{};
+    properties2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+    properties2.pNext = &accelProps;
     vkGetPhysicalDeviceProperties2(context.physicalDevice, &properties2);
 
     // BLAS Geometry
@@ -1048,10 +1044,9 @@ void createAccelerationStructures(Vulkan::Context& context, VulkanBufferManager&
         .scratchData = { .deviceAddress = 0 }
     };
 
-    VkAccelerationStructureBuildSizesInfoKHR buildSizesInfo = {
-        .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR,
-        .pNext = nullptr
-    };
+    VkAccelerationStructureBuildSizesInfoKHR buildSizesInfo{};
+    buildSizesInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
+    buildSizesInfo.pNext = nullptr;
     const uint32_t primitiveCount = static_cast<uint32_t>(indices.size() / 3);
     vkGetAccelerationStructureBuildSizesKHR(context.device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
                                             &buildGeometryInfo, &primitiveCount, &buildSizesInfo);
@@ -1182,10 +1177,9 @@ void createAccelerationStructures(Vulkan::Context& context, VulkanBufferManager&
         .scratchData = { .deviceAddress = 0 }
     };
 
-    VkAccelerationStructureBuildSizesInfoKHR tlasBuildSizes = {
-        .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR,
-        .pNext = nullptr
-    };
+    VkAccelerationStructureBuildSizesInfoKHR tlasBuildSizes{};
+    tlasBuildSizes.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
+    tlasBuildSizes.pNext = nullptr;
     const uint32_t instanceCount = 1;
     vkGetAccelerationStructureBuildSizesKHR(context.device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
                                             &tlasBuildInfo, &instanceCount, &tlasBuildSizes);
