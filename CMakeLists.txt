@@ -7,7 +7,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 # Global options
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
-add_compile_options(-Wall -Wextra -Wpedantic -O3 -g)
+add_compile_options(-Wall -Wextra -Wpedantic -Wno-missing-field-initializers -O3 -g)
 if(CMAKE_BUILD_TYPE MATCHES Debug)
     add_compile_options(-fsanitize=address)
     add_link_options(-fsanitize=address)
