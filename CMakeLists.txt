@@ -96,6 +96,10 @@ find_package(Vulkan REQUIRED)
 if(NOT Vulkan_FOUND)
     message(FATAL_ERROR "Vulkan not found. Install libvulkan-dev and vulkan-tools.")
 endif()
+# Ensure Vulkan SDK supports ray tracing
+if(Vulkan_VERSION VERSION_LESS "1.2.170")
+    message(FATAL_ERROR "Vulkan SDK version ${Vulkan_VERSION} is too old. Ray tracing requires Vulkan SDK 1.2.170 or later.")
+endif()
 message(STATUS "Vulkan include dirs: ${Vulkan_INCLUDE_DIRS}")
 message(STATUS "Vulkan libraries: ${Vulkan_LIBRARIES}")
 
@@ -124,12 +128,22 @@ else()
 endif()
 
 # TBB
-find_package(TBB REQUIRED)
-if(NOT TBB_FOUND)
-    message(FATAL_ERROR "TBB not found. Install libtbb-dev.")
+find_library(TBB_LIBRARY NAMES tbb REQUIRED HINTS /usr/lib /usr/lib/x86_64-linux-gnu /usr/local/lib)
+find_path(TBB_INCLUDE_DIR tbb/tbb.h REQUIRED HINTS /usr/include /usr/local/include)
+if(NOT TBB_LIBRARY OR NOT TBB_INCLUDE_DIR)
+    message(FATAL_ERROR "TBB not found. Install libtbb-dev with: sudo apt install libtbb-dev")
 endif()
-message(STATUS "TBB include dirs: ${TBB_INCLUDE_DIRS}")
-message(STATUS "TBB libraries: ${TBB_LIBRARIES}")
+message(STATUS "TBB include dir: ${TBB_INCLUDE_DIR}")
+message(STATUS "TBB library: ${TBB_LIBRARY}")
+
+# Create imported target TBB::tbb
+if(NOT TARGET TBB::tbb)
+    add_library(TBB::tbb UNKNOWN IMPORTED)
+    set_target_properties(TBB::tbb PROPERTIES
+        IMPORTED_LOCATION "${TBB_LIBRARY}"
+        INTERFACE_INCLUDE_DIRECTORIES "${TBB_INCLUDE_DIR}"
+    )
+endif()
 
 # OpenMP
 find_package(OpenMP REQUIRED)
@@ -270,6 +284,15 @@ else()
         SUFFIX ".exe"
     )
 endif()
+
+# Define ray tracing extensions after target creation
+target_compile_definitions(amouranth_engine PRIVATE
+    VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME
+    VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME
+    VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME
+    VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME
+    VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME
+)
 
 # Common includes
 target_include_directories(amouranth_engine PRIVATE

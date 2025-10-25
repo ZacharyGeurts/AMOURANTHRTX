@@ -9,12 +9,23 @@
 
 #include "VulkanCore.hpp"
 #include <vulkan/vulkan.h>
+#include <vulkan/vulkan_beta.h> // Add for ray tracing and buffer device address extensions
 #include <span>
 #include <glm/glm.hpp>
 #include <vector>
 #include <string>
 
 namespace VulkanInitializer {
+    // Ray tracing and buffer device address function pointers
+    extern PFN_vkCmdTraceRaysKHR vkCmdTraceRaysKHR;
+    extern PFN_vkCreateRayTracingPipelinesKHR vkCreateRayTracingPipelinesKHR;
+    extern PFN_vkGetRayTracingShaderGroupHandlesKHR vkGetRayTracingShaderGroupHandlesKHR;
+    extern PFN_vkCreateAccelerationStructureKHR vkCreateAccelerationStructureKHR;
+    extern PFN_vkGetAccelerationStructureBuildSizesKHR vkGetAccelerationStructureBuildSizesKHR;
+    extern PFN_vkCmdBuildAccelerationStructuresKHR vkCmdBuildAccelerationStructuresKHR;
+    extern PFN_vkGetAccelerationStructureDeviceAddressKHR vkGetAccelerationStructureDeviceAddressKHR;
+    extern PFN_vkGetBufferDeviceAddressKHR vkGetBufferDeviceAddressKHR;
+
     void createBuffer(
         VkDevice device, VkPhysicalDevice physicalDevice, VkDeviceSize size,
         VkBufferUsageFlags usage, VkMemoryPropertyFlags properties,
