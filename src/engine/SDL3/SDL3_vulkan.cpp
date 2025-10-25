@@ -9,6 +9,7 @@
 #include "engine/logging.hpp"
 #include "engine/Vulkan/Vulkan_init.hpp"
 #include <SDL3/SDL_vulkan.h>
+#include <SDL3/SDL_video.h>
 #include <vulkan/vulkan.h>
 #include <vector>
 #include <stdexcept>
@@ -17,6 +18,7 @@
 #include <string>
 #include <set>
 #include <format>
+#include <algorithm>
 
 namespace SDL3Initializer {
 
@@ -71,6 +73,41 @@ QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device, VkSurfaceKHR surfa
     }
 
     return indices;
+}
+
+void getSwapchainExtent(
+    SDL_Window* window,
+    VkPhysicalDevice physicalDevice,
+    VkSurfaceKHR surface,
+    VkExtent2D& extent,
+    std::source_location loc = std::source_location::current()) {
+    if (!window) {
+        LOG_ERROR("Vulkan", "Invalid SDL window pointer for extent query", loc);
+        throw std::runtime_error("Invalid SDL window pointer");
+    }
+
+    VkSurfaceCapabilitiesKHR capabilities;
+    VkResult result = vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice, surface, &capabilities);
+    if (result != VK_SUCCESS) {
+        LOG_ERROR("Vulkan", "Failed to query surface capabilities: VkResult={}", result, loc);
+        throw std::runtime_error("Failed to query surface capabilities");
+    }
+
+    int drawableWidth, drawableHeight;
+    if (!SDL_GetWindowSizeInPixels(window, &drawableWidth, &drawableHeight)) {
+        LOG_ERROR("Vulkan", "Failed to get window size in pixels: {}", SDL_GetError(), loc);
+        throw std::runtime_error("Failed to get window size in pixels");
+    }
+
+    extent.width = std::clamp(static_cast<uint32_t>(drawableWidth), capabilities.minImageExtent.width, capabilities.maxImageExtent.width);
+    extent.height = std::clamp(static_cast<uint32_t>(drawableHeight), capabilities.minImageExtent.height, capabilities.maxImageExtent.height);
+
+    // Fallback to current extent if drawable size is invalid (e.g., minimized window)
+    if (extent.width == 0 || extent.height == 0) {
+        extent = capabilities.currentExtent;
+    }
+
+    LOG_DEBUG("Vulkan", "Updated swapchain extent to {}x{} (drawable: {}x{})", extent.width, extent.height, drawableWidth, drawableHeight, loc);
 }
 
 void initVulkan(

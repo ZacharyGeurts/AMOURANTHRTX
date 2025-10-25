@@ -110,10 +110,10 @@ SDL_Window* getWindow(const SDLWindowPtr& window) {
 }
 
 bool pollEventsForResize(const SDLWindowPtr& window, int& newWidth, int& newHeight, bool& shouldQuit, bool& toggleFullscreenKey) {
-    (void)window; // Suppress unused parameter warning
+    SDL_Window* win = window.get();
     LOG_DEBUG("Window", "Polling SDL events for resize", std::source_location::current());
     SDL_Event event;
-    bool resized = false;
+    bool resizeDetected = false;
     shouldQuit = false;
     toggleFullscreenKey = false;
 
@@ -132,10 +132,8 @@ bool pollEventsForResize(const SDLWindowPtr& window, int& newWidth, int& newHeig
                 }
                 break;
             case SDL_EVENT_WINDOW_RESIZED:
-                newWidth = event.window.data1;
-                newHeight = event.window.data2;
-                resized = true;
-                LOG_DEBUG("Window", "Window resized to {}x{}", newWidth, newHeight, std::source_location::current());
+                resizeDetected = true;
+                LOG_DEBUG("Window", "Window resize event detected", std::source_location::current());
                 break;
             case SDL_EVENT_WINDOW_MOVED:
             case SDL_EVENT_WINDOW_MOUSE_ENTER:
@@ -153,7 +151,18 @@ bool pollEventsForResize(const SDLWindowPtr& window, int& newWidth, int& newHeig
         }
     }
 
-    return resized;
+    if (resizeDetected) {
+        if (!SDL_GetWindowSizeInPixels(win, &newWidth, &newHeight)) {
+            LOG_ERROR("Window", "Failed to get window size in pixels after resize: {}", SDL_GetError(), std::source_location::current());
+            newWidth = 0;
+            newHeight = 0;
+        } else {
+            LOG_DEBUG("Window", "Window size in pixels after resize: {}x{}", newWidth, newHeight, std::source_location::current());
+        }
+        return true;
+    }
+
+    return false;
 }
 
 void toggleFullscreen(SDLWindowPtr& window, VulkanRTX::VulkanRenderer& renderer) {
@@ -175,11 +184,14 @@ void toggleFullscreen(SDLWindowPtr& window, VulkanRTX::VulkanRenderer& renderer)
         return;
     }
 
-    // Get new size and resize renderer
+    // Get new drawable size and resize renderer
     int newW, newH;
-    SDL_GetWindowSize(win, &newW, &newH);
+    if (!SDL_GetWindowSizeInPixels(win, &newW, &newH)) {
+        LOG_ERROR("Window", "Failed to get window size in pixels after fullscreen toggle: {}", SDL_GetError(), std::source_location::current());
+        return;
+    }
     renderer.handleResize(newW, newH);
-    LOG_INFO("Window", "Fullscreen toggled to {}x{}", newW, newH, std::source_location::current());
+    LOG_INFO("Window", "Fullscreen toggled to size {}x{}", newW, newH, std::source_location::current());
 }
 
 } // namespace SDL3Initializer
