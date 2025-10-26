@@ -6,16 +6,16 @@
 #include "ue_init.hpp"
 #include <vulkan/vulkan.h>
 #include <SDL3/SDL.h>
+#include <SDL3/SDL_vulkan.h>
 #include <vector>
 #include <format>
-#include <ranges> // C++20 for std::ranges::find
+#include <ranges>
 #include <functional>
 #include <unordered_map>
 #include "engine/logging.hpp"
 
 namespace Dispose {
 
-// Enum for resource types (extensible for new resources)
 enum class ResourceType {
     StorageImageView, StorageImage, StorageImageMemory,
     RenderPass, GraphicsPipeline, ComputePipeline,
@@ -34,18 +34,17 @@ enum class ResourceType {
     VertexBuffer, VertexBufferMemory,
     IndexBuffer, IndexBufferMemory,
     ScratchBuffer, ScratchBufferMemory,
-    RayTracingPipeline
+    RayTracingPipeline,
+    Surface
 };
 
-// Struct for disposable resources
 struct Disposable {
     ResourceType type;
-    void* handle; // Using void* to handle different Vulkan handle types
+    void* handle;
     bool managedByResourceManager = false;
-    std::string name; // For logging (e.g., "Storage Image View")
+    std::string name;
 };
 
-// Lookup for type-specific cleanup (destroy/free + manager removal if flagged)
 using CleanupFn = std::function<void(Vulkan::Context&, void*, bool)>;
 static const std::unordered_map<ResourceType, CleanupFn> cleanupLookup = {
     {ResourceType::StorageImageView, [](Vulkan::Context& ctx, void* h, bool managed) {
@@ -90,12 +89,10 @@ static const std::unordered_map<ResourceType, CleanupFn> cleanupLookup = {
         if (managed && ctx.device != VK_NULL_HANDLE) {
             auto& pipelines = ctx.resourceManager.getPipelines();
             if (std::ranges::find(pipelines, handle) != pipelines.end()) {
-                LOG_DEBUG(std::format("Skipping destruction of graphics pipeline {:p} as it is managed by VulkanResourceManager", static_cast<void*>(handle)));
+                LOG_DEBUG(std::format("Removing graphics pipeline {:p} from resource manager", static_cast<void*>(handle)));
                 ctx.resourceManager.removePipeline(handle);
-                return;
             }
         }
-        LOG_DEBUG(std::format("Destroying graphics pipeline {:p}", static_cast<void*>(handle)));
         destroySinglePipeline(ctx.device, handle);
     }},
     {ResourceType::ComputePipeline, [](Vulkan::Context& ctx, void* h, bool managed) {
@@ -103,12 +100,10 @@ static const std::unordered_map<ResourceType, CleanupFn> cleanupLookup = {
         if (managed && ctx.device != VK_NULL_HANDLE) {
             auto& pipelines = ctx.resourceManager.getPipelines();
             if (std::ranges::find(pipelines, handle) != pipelines.end()) {
-                LOG_DEBUG(std::format("Skipping destruction of compute pipeline {:p} as it is managed by VulkanResourceManager", static_cast<void*>(handle)));
+                LOG_DEBUG(std::format("Removing compute pipeline {:p} from resource manager", static_cast<void*>(handle)));
                 ctx.resourceManager.removePipeline(handle);
-                return;
             }
         }
-        LOG_DEBUG(std::format("Destroying compute pipeline {:p}", static_cast<void*>(handle)));
         destroySinglePipeline(ctx.device, handle);
     }},
     {ResourceType::RayTracingPipeline, [](Vulkan::Context& ctx, void* h, bool managed) {
@@ -116,12 +111,10 @@ static const std::unordered_map<ResourceType, CleanupFn> cleanupLookup = {
         if (managed && ctx.device != VK_NULL_HANDLE) {
             auto& pipelines = ctx.resourceManager.getPipelines();
             if (std::ranges::find(pipelines, handle) != pipelines.end()) {
-                LOG_DEBUG(std::format("Skipping destruction of ray-tracing pipeline {:p} as it is managed by VulkanResourceManager", static_cast<void*>(handle)));
+                LOG_DEBUG(std::format("Removing ray-tracing pipeline {:p} from resource manager", static_cast<void*>(handle)));
                 ctx.resourceManager.removePipeline(handle);
-                return;
             }
         }
-        LOG_DEBUG(std::format("Destroying ray-tracing pipeline {:p}", static_cast<void*>(handle)));
         destroySinglePipeline(ctx.device, handle);
     }},
     {ResourceType::GraphicsPipelineLayout, [](Vulkan::Context& ctx, void* h, bool managed) {
@@ -129,12 +122,10 @@ static const std::unordered_map<ResourceType, CleanupFn> cleanupLookup = {
         if (managed && ctx.device != VK_NULL_HANDLE) {
             auto& layouts = ctx.resourceManager.getPipelineLayouts();
             if (std::ranges::find(layouts, handle) != layouts.end()) {
-                LOG_DEBUG(std::format("Skipping destruction of graphics pipeline layout {:p} as it is managed by VulkanResourceManager", static_cast<void*>(handle)));
+                LOG_DEBUG(std::format("Removing graphics pipeline layout {:p} from resource manager", static_cast<void*>(handle)));
                 ctx.resourceManager.removePipelineLayout(handle);
-                return;
             }
         }
-        LOG_DEBUG(std::format("Destroying graphics pipeline layout {:p}", static_cast<void*>(handle)));
         destroySinglePipelineLayout(ctx.device, handle);
     }},
     {ResourceType::RayTracingPipelineLayout, [](Vulkan::Context& ctx, void* h, bool managed) {
@@ -142,12 +133,10 @@ static const std::unordered_map<ResourceType, CleanupFn> cleanupLookup = {
         if (managed && ctx.device != VK_NULL_HANDLE) {
             auto& layouts = ctx.resourceManager.getPipelineLayouts();
             if (std::ranges::find(layouts, handle) != layouts.end()) {
-                LOG_DEBUG(std::format("Skipping destruction of ray-tracing pipeline layout {:p} as it is managed by VulkanResourceManager", static_cast<void*>(handle)));
+                LOG_DEBUG(std::format("Removing ray-tracing pipeline layout {:p} from resource manager", static_cast<void*>(handle)));
                 ctx.resourceManager.removePipelineLayout(handle);
-                return;
             }
         }
-        LOG_DEBUG(std::format("Destroying ray-tracing pipeline layout {:p}", static_cast<void*>(handle)));
         destroySinglePipelineLayout(ctx.device, handle);
     }},
     {ResourceType::ComputePipelineLayout, [](Vulkan::Context& ctx, void* h, bool managed) {
@@ -155,12 +144,10 @@ static const std::unordered_map<ResourceType, CleanupFn> cleanupLookup = {
         if (managed && ctx.device != VK_NULL_HANDLE) {
             auto& layouts = ctx.resourceManager.getPipelineLayouts();
             if (std::ranges::find(layouts, handle) != layouts.end()) {
-                LOG_DEBUG(std::format("Skipping destruction of compute pipeline layout {:p} as it is managed by VulkanResourceManager", static_cast<void*>(handle)));
+                LOG_DEBUG(std::format("Removing compute pipeline layout {:p} from resource manager", static_cast<void*>(handle)));
                 ctx.resourceManager.removePipelineLayout(handle);
-                return;
             }
         }
-        LOG_DEBUG(std::format("Destroying compute pipeline layout {:p}", static_cast<void*>(handle)));
         destroySinglePipelineLayout(ctx.device, handle);
     }},
     {ResourceType::GraphicsDescriptorSet, [](Vulkan::Context& ctx, void* h, bool) {
@@ -202,12 +189,10 @@ static const std::unordered_map<ResourceType, CleanupFn> cleanupLookup = {
         if (managed && ctx.device != VK_NULL_HANDLE) {
             auto& layouts = ctx.resourceManager.getDescriptorSetLayouts();
             if (std::ranges::find(layouts, handle) != layouts.end()) {
-                LOG_DEBUG(std::format("Skipping destruction of graphics descriptor set layout {:p} as it is managed by VulkanResourceManager", static_cast<void*>(handle)));
+                LOG_DEBUG(std::format("Removing graphics descriptor set layout {:p} from resource manager", static_cast<void*>(handle)));
                 ctx.resourceManager.removeDescriptorSetLayout(handle);
-                return;
             }
         }
-        LOG_DEBUG(std::format("Destroying graphics descriptor set layout {:p}", static_cast<void*>(handle)));
         destroySingleDescriptorSetLayout(ctx.device, handle);
     }},
     {ResourceType::RayTracingDescriptorSetLayout, [](Vulkan::Context& ctx, void* h, bool managed) {
@@ -215,12 +200,10 @@ static const std::unordered_map<ResourceType, CleanupFn> cleanupLookup = {
         if (managed && ctx.device != VK_NULL_HANDLE) {
             auto& layouts = ctx.resourceManager.getDescriptorSetLayouts();
             if (std::ranges::find(layouts, handle) != layouts.end()) {
-                LOG_DEBUG(std::format("Skipping destruction of ray-tracing descriptor set layout {:p} as it is managed by VulkanResourceManager", static_cast<void*>(handle)));
+                LOG_DEBUG(std::format("Removing ray-tracing descriptor set layout {:p} from resource manager", static_cast<void*>(handle)));
                 ctx.resourceManager.removeDescriptorSetLayout(handle);
-                return;
             }
         }
-        LOG_DEBUG(std::format("Destroying ray-tracing descriptor set layout {:p}", static_cast<void*>(handle)));
         destroySingleDescriptorSetLayout(ctx.device, handle);
     }},
     {ResourceType::Sampler, [](Vulkan::Context& ctx, void* h, bool) {
@@ -440,7 +423,7 @@ static const std::unordered_map<ResourceType, CleanupFn> cleanupLookup = {
         }
         destroySingleCommandPool(ctx.device, handle);
     }},
-    {ResourceType::Device, []([[maybe_unused]] Vulkan::Context& ctx, void* h, bool) {
+    {ResourceType::Device, [](Vulkan::Context&, void* h, bool) {
         VkDevice handle = static_cast<VkDevice>(h);
         destroyDevice(handle);
     }},
@@ -448,9 +431,13 @@ static const std::unordered_map<ResourceType, CleanupFn> cleanupLookup = {
         VkDebugUtilsMessengerEXT handle = static_cast<VkDebugUtilsMessengerEXT>(h);
         destroyDebugUtilsMessengerEXT(ctx.instance, handle);
     }},
-    {ResourceType::Instance, []([[maybe_unused]] Vulkan::Context& ctx, void* h, bool) {
+    {ResourceType::Instance, [](Vulkan::Context&, void* h, bool) {
         VkInstance handle = static_cast<VkInstance>(h);
         destroyInstance(handle);
+    }},
+    {ResourceType::Surface, [](Vulkan::Context& ctx, void* h, bool) {
+        VkSurfaceKHR handle = static_cast<VkSurfaceKHR>(h);
+        destroySurfaceKHR(ctx.instance, handle);
     }}
 };
 
@@ -602,10 +589,9 @@ void cleanupVulkanContext(Vulkan::Context& context) noexcept {
             }
         }
 
-        // Step 2: Resource Manager Cleanup (moved before device destruction)
+        // Step 2: Resource Manager Cleanup
         LOG_DEBUG("Step 2: Checking VulkanResourceManager state before cleanup");
         try {
-            // Check if resource manager has any remaining resources
             bool hasResources = false;
             if (!context.resourceManager.getBuffers().empty() ||
                 !context.resourceManager.getMemories().empty() ||
@@ -787,7 +773,18 @@ void cleanupVulkanContext(Vulkan::Context& context) noexcept {
             context.uniformBufferMemories.clear();
         }
 
-        // Build ordered registry of single-handle disposables (Vulkan destruction order)
+        // Step 12: Surface
+        LOG_DEBUG("Step 12: Cleaning up Vulkan surface");
+        if (context.surface != VK_NULL_HANDLE && context.instance != VK_NULL_HANDLE) {
+            LOG_DEBUG(std::format("Destroying surface {:p}", static_cast<void*>(context.surface)));
+            destroySurfaceKHR(context.instance, context.surface);
+            context.surface = VK_NULL_HANDLE;
+            LOG_DEBUG("Surface cleanup completed");
+        } else if (context.surface != VK_NULL_HANDLE) {
+            LOG_WARNING("Cannot destroy surface: instance is null");
+        }
+
+        // Step 13-50: Iterate disposables with lookup-based cleanup
         std::vector<Disposable> disposables = {
             {ResourceType::StorageImageView, context.storageImageView, true, "Storage Image View"},
             {ResourceType::StorageImage, context.storageImage, true, "Storage Image"},
@@ -828,10 +825,11 @@ void cleanupVulkanContext(Vulkan::Context& context) noexcept {
             {ResourceType::CommandPool, context.commandPool, true, "Command Pool"},
             {ResourceType::Device, context.device, false, "Device"},
             {ResourceType::DebugMessenger, context.debugMessenger, false, "Debug Messenger"},
-            {ResourceType::Instance, context.instance, false, "Instance"}
+            {ResourceType::Instance, context.instance, false, "Instance"},
+            {ResourceType::Surface, context.surface, false, "Surface"}
         };
 
-        // Step 12-49: Iterate disposables with lookup-based cleanup
+        // Iterate disposables with lookup-based cleanup
         for (size_t i = 0; i < disposables.size(); ++i) {
             const auto& disp = disposables[i];
             if (disp.handle == VK_NULL_HANDLE) continue;
@@ -843,7 +841,7 @@ void cleanupVulkanContext(Vulkan::Context& context) noexcept {
             }
 
             try {
-                LOG_DEBUG(std::format("Step {}: Cleaning up {}", i + 12, disp.name));
+                LOG_DEBUG(std::format("Step {}: Cleaning up {}", i + 13, disp.name));
                 it->second(context, disp.handle, disp.managedByResourceManager);
                 LOG_DEBUG(std::format("{} cleanup completed", disp.name));
 
@@ -889,6 +887,7 @@ void cleanupVulkanContext(Vulkan::Context& context) noexcept {
                     case ResourceType::Device: context.device = VK_NULL_HANDLE; break;
                     case ResourceType::DebugMessenger: context.debugMessenger = VK_NULL_HANDLE; break;
                     case ResourceType::Instance: context.instance = VK_NULL_HANDLE; break;
+                    case ResourceType::Surface: context.surface = VK_NULL_HANDLE; break;
                 }
             } catch (const std::exception& e) {
                 cleanupErrors.push_back(std::format("Error in {} cleanup: {}", disp.name, e.what()));
@@ -935,12 +934,13 @@ void cleanupVulkanContext(Vulkan::Context& context) noexcept {
                     case ResourceType::Device: context.device = VK_NULL_HANDLE; break;
                     case ResourceType::DebugMessenger: context.debugMessenger = VK_NULL_HANDLE; break;
                     case ResourceType::Instance: context.instance = VK_NULL_HANDLE; break;
+                    case ResourceType::Surface: context.surface = VK_NULL_HANDLE; break;
                 }
             }
         }
 
-        // Step 50: Nullify remaining fields
-        LOG_DEBUG("Step 50: Nullifying remaining context fields");
+        // Step 51: Nullify remaining fields
+        LOG_DEBUG("Step 51: Nullifying remaining context fields");
         context.physicalDevice = VK_NULL_HANDLE;
         context.graphicsQueue = VK_NULL_HANDLE;
         context.presentQueue = VK_NULL_HANDLE;
@@ -951,8 +951,8 @@ void cleanupVulkanContext(Vulkan::Context& context) noexcept {
         context.enableRayTracing = false;
         LOG_INFO("Remaining context fields nullified");
 
-        // Step 51: Final nullification and logging
-        LOG_DEBUG("Step 51: Final context cleanup");
+        // Step 52: Final nullification and logging
+        LOG_DEBUG("Step 52: Final context cleanup");
         if (!cleanupErrors.empty()) {
             LOG_ERROR("Cleanup completed with errors:");
             for (const auto& error : cleanupErrors) {
@@ -966,6 +966,8 @@ void cleanupVulkanContext(Vulkan::Context& context) noexcept {
         // Minimal cleanup to ensure safe exit
         context.device = VK_NULL_HANDLE;
         context.instance = VK_NULL_HANDLE;
+        context.surface = VK_NULL_HANDLE;
+        context.swapchain = VK_NULL_HANDLE;
         context.uniformBuffers.clear();
         context.uniformBufferMemories.clear();
         context.shaderModules.clear();

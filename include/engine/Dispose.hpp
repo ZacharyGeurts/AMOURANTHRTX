@@ -1,7 +1,7 @@
 // AMOURANTH RTX Engine, October 2025 - Centralized resource disposal for SDL3 and Vulkan.
 // One-liner functions where possible, assuming nullptr allocator for Vulkan.
 // Usage: Call Dispose::destroy* functions in destructors or cleanup methods.
-// Thread-safe using Vulkan::cleanupMutex. All functions log errors and ensure passthrough to prevent freezes.
+// Thread safety handled externally. All functions log errors and ensure passthrough to prevent freezes.
 // Zachary Geurts 2025
 
 #ifndef DISPOSE_HPP
@@ -173,16 +173,7 @@ inline void destroySingleRenderPass(VkDevice device, VkRenderPass& renderPass) n
 }
 
 inline void destroySingleSwapchain(VkDevice device, VkSwapchainKHR& swapchain) noexcept {
-    if (device != VK_NULL_HANDLE && swapchain != VK_NULL_HANDLE) {
-        try {
-            vkDestroySwapchainKHR(device, swapchain, nullptr);
-            swapchain = VK_NULL_HANDLE;
-            LOG_INFO("Destroyed single swapchain");
-        } catch (const std::exception& e) {
-            LOG_ERROR(std::format("Failed to destroy single swapchain: {}", e.what()));
-            swapchain = VK_NULL_HANDLE;
-        }
-    }
+    destroySingle<VkSwapchainKHR, vkDestroySwapchainKHR>(device, swapchain);
 }
 
 inline void destroySingleCommandPool(VkDevice device, VkCommandPool& commandPool) noexcept {
@@ -267,7 +258,6 @@ inline void destroyInstance(VkInstance instance) noexcept {
 }
 
 void updateDescriptorSets(Vulkan::Context& context) noexcept;
-
 void cleanupVulkanContext(Vulkan::Context& context) noexcept;
 
 } // namespace Dispose

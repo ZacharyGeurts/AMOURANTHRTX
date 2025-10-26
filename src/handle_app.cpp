@@ -108,18 +108,8 @@ Application::~Application() {
     camera_.reset();
     inputHandler_.reset();
     renderer_.reset();
-    if (audioStream_) {
-        SDL_DestroyAudioStream(audioStream_);
-        audioStream_ = nullptr;
-        LOG_DEBUG_CAT("Application", "Destroyed audio stream");
-    }
-    if (audioDevice_) {
-        SDL_CloseAudioDevice(audioDevice_);
-        audioDevice_ = 0;
-        LOG_DEBUG_CAT("Application", "Closed audio device");
-    }
     Dispose::quitSDL();
-    sdl_.reset();
+    //sdl_.reset();
     LOG_INFO_CAT("Application", "Application destroyed");
 }
 
