@@ -9,6 +9,7 @@
 #include <vulkan/vulkan_beta.h>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+#include <cmath> // For std::sin and std::cos
 
 struct PushConstants {
     alignas(16) glm::vec4 clearColor;      // Background color for miss shader
@@ -63,12 +64,12 @@ void renderMode1(const UE::AMOURANTH* /*amouranth*/, uint32_t /*imageIndex*/,
             .clearColor = glm::vec4(0.02f, 0.02f, 0.05f, 1.0f),  // Misty dark background
             .cameraPosition = glm::vec3(0.0f, 0.0f, 5.0f + zoomLevel),
             .lightPosition = glm::vec3(
-                sin(deltaTime * 0.8f) * 3.0f,                     // Gentle horizontal float
-                cos(deltaTime * 0.5f) * 2.0f + sin(deltaTime * 1.2f) * 1.5f,  // Bobbing vertical motion
-                5.0f + cos(deltaTime * 0.7f) * 1.0f              // Slight depth variation
+                static_cast<float>(std::sin(deltaTime * 0.8f)) * 3.0f,                    // Gentle horizontal float
+                static_cast<float>(std::cos(deltaTime * 0.5f)) * 2.0f + static_cast<float>(std::sin(deltaTime * 1.2f)) * 1.5f,  // Bobbing vertical motion
+                5.0f + static_cast<float>(std::cos(deltaTime * 0.7f)) * 1.0f              // Slight depth variation
             ),
             .lightColor = glm::vec3(0.4f, 0.7f, 1.0f),            // Ethereal blue glow
-            .lightIntensity = 8.0f + sin(deltaTime * 2.0f) * 2.0f,  // Pulsing intensity for flickering effect
+            .lightIntensity = 8.0f + static_cast<float>(std::sin(deltaTime * 2.0f)) * 2.0f,  // Pulsing intensity for flickering effect
             .samplesPerPixel = 4,
             .maxDepth = 5,
             .maxBounces = 3,
