@@ -1,4 +1,3 @@
-// handle_app.hpp
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts gzac5314@gmail.com is licensed under CC BY-NC 4.0
 // Application handling for SDL3 + Vulkan integration.
 // Dependencies: SDL3, GLM, VulkanRTX_Setup.hpp, logging.hpp, Dispose.hpp, camera.hpp
@@ -31,7 +30,7 @@ public:
     void run();
     void setRenderMode(int mode) { mode_ = mode; }
     bool shouldQuit() const { return mode_ == 0; }
-    void handleResize(int width, int height); // Moved to public
+    void handleResize(int width, int height);
 
 private:
     void initializeInput();

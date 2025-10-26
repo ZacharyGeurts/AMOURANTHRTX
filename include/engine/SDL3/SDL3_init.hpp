@@ -1,10 +1,6 @@
-// include/engine/SDL3/SDL3_init.hpp
 // AMOURANTH RTX Engine, October 2025 - SDL3 and Vulkan initialization.
-// Creates Vulkan instance and surface via SDL3; handles window creation.
-// Thread-safe, no mutexes; designed for Windows/Linux (X11/Wayland).
-// Dependencies: SDL3, Vulkan 1.3+, C++20 standard library.
-// Usage: Create SDL3Initializer, call getInstance() and getSurface() for VulkanRenderer.
-// Zachary Geurts 2025
+// Creates SDL3 window and Vulkan instance/surface for rendering.
+// Dependencies: SDL3, Vulkan 1.3, C++20 standard library.
 
 #ifndef SDL3_INIT_HPP
 #define SDL3_INIT_HPP
@@ -18,18 +14,16 @@
 
 namespace SDL3Initializer {
 
-// Custom deleters for Vulkan resources (declarations only; definitions in .cpp)
 struct VulkanInstanceDeleter {
     void operator()(VkInstance instance) const;
 };
 
 struct VulkanSurfaceDeleter {
-    VkInstance m_instance;  // Note: Assumed member from cpp usage; adjust if needed
+    VkInstance m_instance;
     explicit VulkanSurfaceDeleter(VkInstance inst = VK_NULL_HANDLE) : m_instance(inst) {}
     void operator()(VkSurfaceKHR surface) const;
 };
 
-// Smart pointer aliases
 using VulkanInstancePtr = std::unique_ptr<VkInstance_T, VulkanInstanceDeleter>;
 using VulkanSurfacePtr = std::unique_ptr<VkSurfaceKHR_T, VulkanSurfaceDeleter>;
 
@@ -50,7 +44,6 @@ private:
     VulkanSurfacePtr surface_;
 };
 
-// Helper function to format std::set<std::string> for logging
 inline std::string formatSet(const std::set<std::string>& set) {
     std::string result = "{";
     for (auto it = set.begin(); it != set.end(); ++it) {

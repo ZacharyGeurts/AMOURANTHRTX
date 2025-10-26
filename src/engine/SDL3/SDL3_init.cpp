@@ -1,9 +1,5 @@
-// src/engine/SDL3/SDL3_init.cpp
-// AMOURANTH RTX Engine, October 2025 - SDL3 and Vulkan initialization implementation.
-// Initializes SDL3 window and Vulkan instance/surface for rendering.
+// AMOURANTH RTX Engine, October 2025 - Initializes SDL3 window and Vulkan instance/surface.
 // Dependencies: SDL3, Vulkan 1.3, C++20 standard library, Vulkan_init.hpp.
-// Supported platforms: Windows, Linux.
-// Zachary Geurts 2025
 
 #include "engine/SDL3/SDL3_init.hpp"
 #include "engine/Vulkan/Vulkan_init.hpp"
@@ -17,19 +13,12 @@
 namespace SDL3Initializer {
 
 SDL3Initializer::SDL3Initializer(const std::string& title, int width, int height) {
-    // Force NVIDIA GPU for Vulkan (hybrid GPU fix on Linux)
-    putenv(const_cast<char*>("VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/nvidia_icd.json"));
-    // Enable PRIME offload for hybrid GPU setups (uncomment for laptops)
-    // putenv(const_cast<char*>("__NV_PRIME_RENDER_OFFLOAD=1"));
-    // putenv(const_cast<char*>("__GLX_VENDOR_LIBRARY_NAME=nvidia"));
-
-    // Prefer Wayland for better NVIDIA Vulkan support
-    SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "wayland,x11");
-
+    // Initialize SDL3 for video, events, and audio
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_AUDIO) == 0) {
         throw std::runtime_error(std::string("SDL_Init failed: ") + SDL_GetError());
     }
 
+    // Create resizable Vulkan window
     window_ = SDL_CreateWindow(title.c_str(), width, height, 
                                SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE);
     if (!window_) {
@@ -37,6 +26,7 @@ SDL3Initializer::SDL3Initializer(const std::string& title, int width, int height
         throw std::runtime_error(std::string("SDL_CreateWindow failed: ") + SDL_GetError());
     }
 
+    // Get Vulkan instance extensions from SDL3
     uint32_t extensionCount = 0;
     const char* const* sdlExtensions = SDL_Vulkan_GetInstanceExtensions(&extensionCount);
     if (sdlExtensions == nullptr || extensionCount == 0) {
@@ -46,10 +36,11 @@ SDL3Initializer::SDL3Initializer(const std::string& title, int width, int height
     }
     std::vector<const char*> extensions(sdlExtensions, sdlExtensions + extensionCount);
 
-    // Add ray tracing and debug extensions
+    // Add Vulkan extensions
     extensions.push_back(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
     extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
 
+    // Check for validation layer support
     std::vector<const char*> validationLayers;
     const char* validationLayerName = "VK_LAYER_KHRONOS_validation";
     uint32_t availableLayerCount = 0;
@@ -67,6 +58,7 @@ SDL3Initializer::SDL3Initializer(const std::string& title, int width, int height
         validationLayers.push_back(validationLayerName);
     }
 
+    // Create Vulkan instance
     VkApplicationInfo appInfo = {
         .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
         .pNext = nullptr,
@@ -97,6 +89,7 @@ SDL3Initializer::SDL3Initializer(const std::string& title, int width, int height
     }
     instance_ = VulkanInstancePtr(rawInstance, VulkanInstanceDeleter());
 
+    // Create Vulkan surface
     VkSurfaceKHR rawSurface = VK_NULL_HANDLE;
     bool surfaceResult = SDL_Vulkan_CreateSurface(window_, rawInstance, nullptr, &rawSurface);
     if (!surfaceResult || rawSurface == VK_NULL_HANDLE) {
@@ -106,6 +99,7 @@ SDL3Initializer::SDL3Initializer(const std::string& title, int width, int height
     }
     surface_ = VulkanSurfacePtr(rawSurface, VulkanSurfaceDeleter(rawInstance));
 
+    // Find physical device
     VkPhysicalDevice physicalDevice = VulkanInitializer::findPhysicalDevice(rawInstance, rawSurface, true);
     if (physicalDevice == VK_NULL_HANDLE) {
         SDL_DestroyWindow(window_);
@@ -113,6 +107,7 @@ SDL3Initializer::SDL3Initializer(const std::string& title, int width, int height
         throw std::runtime_error("No suitable physical device found");
     }
 
+    // Verify queue family support
     uint32_t queueFamilyCount = 0;
     vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &queueFamilyCount, nullptr);
     if (queueFamilyCount == 0) {
@@ -127,10 +122,7 @@ SDL3Initializer::SDL3Initializer(const std::string& title, int width, int height
     for (uint32_t i = 0; i < queueFamilyCount; ++i) {
         VkBool32 presentSupport = VK_FALSE;
         VkResult queueResult = vkGetPhysicalDeviceSurfaceSupportKHR(physicalDevice, i, rawSurface, &presentSupport);
-        if (queueResult != VK_SUCCESS) {
-            continue;
-        }
-        if (presentSupport) {
+        if (queueResult == VK_SUCCESS && presentSupport) {
             surfaceSupported = true;
             break;
         }
@@ -141,7 +133,7 @@ SDL3Initializer::SDL3Initializer(const std::string& title, int width, int height
         throw std::runtime_error("Vulkan surface not supported by any queue family");
     }
 
-    // RTX Extension Validation
+    // Verify RTX extensions
     std::vector<const char*> requiredRTXExtensions = {
         VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME,
         VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
@@ -166,7 +158,7 @@ SDL3Initializer::SDL3Initializer(const std::string& title, int width, int height
         throw std::runtime_error("Mandatory RTX extension(s) not supported");
     }
 
-    // RTX Capability Check
+    // Check RTX capabilities
     VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProps{};
     rtProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR;
     VkPhysicalDeviceProperties2 props2{};

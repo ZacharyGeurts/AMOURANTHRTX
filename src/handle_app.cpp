@@ -1,8 +1,6 @@
-// AMOURANTH RTX Engine © 2025 by Zachary Geurts gzac5314@gmail.com is licensed under CC BY-NC 4.0
-// Application handling implementation for SDL3 + Vulkan integration.
-// Dependencies: SDL3, GLM, VulkanRTX_Setup.hpp, logging.hpp, Dispose.hpp, camera.hpp
-// Supported platforms: Linux, Windows.
-// Zachary Geurts 2025
+// AMOURANTH RTX Engine, October 2025 - Application handling for SDL3 and Vulkan integration.
+// Loads meshes, initializes renderer, input, and audio; manages main loop.
+// Dependencies: SDL3, GLM, VulkanRTX_Setup.hpp, logging.hpp, Dispose.hpp, camera.hpp.
 
 #include "handle_app.hpp"
 #include "engine/SDL3/SDL3_audio.hpp"
@@ -38,11 +36,7 @@ void loadMesh(const std::string& filename, std::vector<glm::vec3>& vertices, std
     std::ifstream file(filename);
     if (!file.is_open()) {
         LOG_WARNING_CAT("MeshLoader", "Failed to open mesh file: {}, using fallback triangle", filename);
-        vertices = {
-            {0.0f, -0.5f, 0.0f}, // Bottom
-            {0.5f, 0.5f, 0.0f},  // Top-right
-            {-0.5f, 0.5f, 0.0f}  // Top-left
-        };
+        vertices = {{0.0f, -0.5f, 0.0f}, {0.5f, 0.5f, 0.0f}, {-0.5f, 0.5f, 0.0f}};
         indices = {0, 1, 2};
     } else {
         std::vector<glm::vec3> tempVertices;
@@ -58,7 +52,7 @@ void loadMesh(const std::string& filename, std::vector<glm::vec3>& vertices, std
             } else if (type == "f") {
                 uint32_t v1, v2, v3;
                 iss >> v1 >> v2 >> v3;
-                indices.push_back(v1 - 1); // OBJ indices are 1-based
+                indices.push_back(v1 - 1);
                 indices.push_back(v2 - 1);
                 indices.push_back(v3 - 1);
             }
@@ -67,11 +61,7 @@ void loadMesh(const std::string& filename, std::vector<glm::vec3>& vertices, std
         vertices = tempVertices;
         if (vertices.size() < 3 || indices.size() < 3 || indices.size() % 3 != 0) {
             LOG_WARNING_CAT("MeshLoader", "Invalid mesh data in {}, using fallback triangle", filename);
-            vertices = {
-                {0.0f, -0.5f, 0.0f}, // Bottom
-                {0.5f, 0.5f, 0.0f},  // Top-right
-                {-0.5f, 0.5f, 0.0f}  // Top-left
-            };
+            vertices = {{0.0f, -0.5f, 0.0f}, {0.5f, 0.5f, 0.0f}, {-0.5f, 0.5f, 0.0f}};
             indices = {0, 1, 2};
         }
     }
@@ -150,17 +140,30 @@ void Application::initializeInput() {
 }
 
 void Application::initializeAudio() {
+    SDL3Audio::logAudioDevices(); // Log available devices
+    SDL3Audio::AudioConfig config;
+    config.frequency = 44100;
+    config.format = SDL_AUDIO_S16LE;
+    config.channels = 8;
+    SDL3Audio::initAudio(config, audioDevice_, audioStream_);
+    if (audioDevice_ == 0 && audioStream_ == nullptr) {
+        LOG_WARNING_CAT("Application", "Audio initialization failed, continuing without audio");
+        return;
+    }
     try {
-        SDL3Audio::AudioConfig config;
-        config.frequency = 44100;
-        config.format = SDL_AUDIO_S16LE;
-        config.channels = 8;
-        SDL3Audio::initAudio(config, audioDevice_, audioStream_);
+        SDL3Audio::AudioManager audioManager(config);
+        audioManager.playAmmoSound();
         LOG_INFO_CAT("Application", "8-channel audio initialized successfully with device ID: {}", audioDevice_);
     } catch (const std::exception& e) {
-        LOG_ERROR_CAT("Application", "Failed to initialize 8-channel audio: {}", e.what());
-        audioDevice_ = 0;
-        audioStream_ = nullptr;
+        LOG_WARNING_CAT("Application", "Failed to initialize AudioManager: {}, continuing without audio", e.what());
+        if (audioStream_) {
+            SDL_DestroyAudioStream(audioStream_);
+            audioStream_ = nullptr;
+        }
+        if (audioDevice_) {
+            SDL_CloseAudioDevice(audioDevice_);
+            audioDevice_ = 0;
+        }
     }
 }
 
@@ -319,7 +322,6 @@ void HandleInput::defaultKeyboardHandler(const SDL_KeyboardEvent& key) {
             break;
         case SDL_SCANCODE_UP:
         case SDL_SCANCODE_DOWN:
-            // No-op for now; can add mode or other logic if needed
             break;
         default:
             break;
@@ -353,13 +355,13 @@ void HandleInput::defaultTouchHandler(const SDL_TouchFingerEvent& tf) {
 void HandleInput::defaultGamepadButtonHandler(const SDL_GamepadButtonEvent& gb) {
     if (gb.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) {
         switch (gb.button) {
-            case SDL_GAMEPAD_BUTTON_SOUTH: // A button
+            case SDL_GAMEPAD_BUTTON_SOUTH:
                 camera_.updateZoom(true);
                 break;
-            case SDL_GAMEPAD_BUTTON_EAST: // B button
+            case SDL_GAMEPAD_BUTTON_EAST:
                 camera_.updateZoom(false);
                 break;
-            case SDL_GAMEPAD_BUTTON_NORTH: // Y button
+            case SDL_GAMEPAD_BUTTON_NORTH:
                 camera_.togglePause();
                 break;
             default:
@@ -369,7 +371,7 @@ void HandleInput::defaultGamepadButtonHandler(const SDL_GamepadButtonEvent& gb) 
 }
 
 void HandleInput::defaultGamepadAxisHandler(const SDL_GamepadAxisEvent& ga) {
-    float axisValue = ga.value / 32767.0f; // Normalize to [-1, 1]
+    float axisValue = ga.value / 32767.0f;
     if (ga.axis == SDL_GAMEPAD_AXIS_LEFTX) {
         camera_.moveUserCam(axisValue * 0.1f, 0.0f, 0.0f);
     } else if (ga.axis == SDL_GAMEPAD_AXIS_LEFTY) {
