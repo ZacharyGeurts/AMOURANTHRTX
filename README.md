@@ -4,7 +4,7 @@ I welcome those whose minds seek education.
 Windows toolchain currently under development.  
 Hearer and Console are not part of the RTX program.  
 
-[AMOURANTH RTX Video](https://x.com/i/status/1981758301319873007)  
+[AMOURANTH RTX Video](https://x.com/i/status/1982362110912086159)  
 
 **C++20** using **SDL3**, **Vulkan**, and **GLM**.  
 **Custom RTX pipelines.**  
