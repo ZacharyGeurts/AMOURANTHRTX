@@ -428,7 +428,7 @@ void VulkanPipelineManager::createGraphicsDescriptorSetLayout() {
     context_.resourceManager.addDescriptorSetLayout(context_.graphicsDescriptorSetLayout);
 }
 
-void VulkanPipelineManager::createGraphicsPipeline(int width, int height) {
+void VulkanPipelineManager::createGraphicsPipeline([[maybe_unused]] int width, [[maybe_unused]] int height) {
     auto vertShaderModule = loadShader(context_.device, "vertex");
     auto fragShaderModule = loadShader(context_.device, "fragment");
 
