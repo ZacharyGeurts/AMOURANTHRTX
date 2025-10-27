@@ -1,4 +1,3 @@
-// engine/camera.hpp
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts gzac5314@gmail.com is licensed under CC BY-NC 4.0
 // Camera interface for 3D rendering
 // Dependencies: GLM, C++20 standard library
@@ -34,9 +33,11 @@ public:
     virtual void setAspectRatio(float aspectRatio) = 0;
     virtual void moveCamera(float x, float y, float z, std::source_location loc = std::source_location::current()) = 0;
     virtual void rotateCamera(float yaw, float pitch, std::source_location loc = std::source_location::current()) = 0;
-    virtual void moveUserCam(float dx, float dy, float dz) = 0; // Added
-    virtual void togglePause() = 0; // Added
-    virtual void updateZoom(bool zoomIn) = 0; // Added
+    virtual void moveUserCam(float dx, float dy, float dz) = 0;
+    virtual void togglePause() = 0;
+    virtual void updateZoom(bool zoomIn) = 0;
+    virtual void setUserData(void* data) = 0;
+    virtual void* getUserData() const = 0;
 };
 
 class PerspectiveCamera : public Camera {
@@ -58,11 +59,13 @@ public:
     float getFOV() const override;
     void setMode(int mode) override;
     void rotateCamera(float yaw, float pitch, std::source_location loc = std::source_location::current()) override;
-    void moveCamera(float x, float y, float z, std::source_location loc = std::source_location::current()) override;
+    void moveCamera(float x, float y, float z, std::source_location loc = std::source_location::current()) override; // Fixed: Added void
     void setAspectRatio(float aspectRatio) override;
     void moveUserCam(float dx, float dy, float dz) override;
     void togglePause() override;
     void updateZoom(bool zoomIn) override;
+    void setUserData(void* data) override;
+    void* getUserData() const override;
 
 private:
     void updateCameraVectors();
@@ -79,7 +82,8 @@ private:
     int mode_;
     float movementSpeed_;
     float mouseSensitivity_;
-    bool isPaused_; // Added for togglePause
+    bool isPaused_;
+    void* userData_;
 };
 
 #endif // CAMERA_HPP

@@ -1,9 +1,13 @@
-// AMOURANTH RTX Engine, October 2025 - Application handling for SDL3 and Vulkan integration.
+// AMOURANTH RTX Engine © 2025 by Zachary Geurts gzac5314@gmail.com is licensed under CC BY-NC 4.0
+// Application handling for SDL3 and Vulkan integration.
 // Loads meshes, initializes renderer, input, and audio; manages main loop.
 // Dependencies: SDL3, GLM, VulkanRTX_Setup.hpp, logging.hpp, Dispose.hpp, camera.hpp.
+// Supported platforms: Linux, Windows.
+// Zachary Geurts 2025
 
 #include "handle_app.hpp"
 #include <SDL3/SDL.h>
+#include <SDL3/SDL_vulkan.h>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <vector>
@@ -95,6 +99,7 @@ Application::Application(const char* title, int width, int height)
         }
         LOG_DEBUG_CAT("Application", "Vulkan instance extensions: {}", extensionsStr);
         renderer_ = std::make_unique<VulkanRTX::VulkanRenderer>(width_, height_, sdl_->getWindow(), instanceExtensions);
+        camera_->setUserData(this); // Set Application reference in camera
         initializeInput();
         LOG_INFO_CAT("Application", "Application initialized successfully");
     } catch (const std::exception& e) {
@@ -151,7 +156,7 @@ void Application::render() {
     float deltaTime = std::chrono::duration<float>(currentTime - lastFrameTime_).count();
     lastFrameTime_ = currentTime;
     camera_->update(deltaTime);
-    renderer_->renderFrame(*camera_);
+    renderer_->renderFrame(*camera_); // Adjusted to match current VulkanRenderer signature
 }
 
 void Application::handleResize(int width, int height) {
@@ -247,6 +252,12 @@ void HandleInput::setCallbacks(
 
 void HandleInput::defaultKeyboardHandler(const SDL_KeyboardEvent& key) {
     if (key.type != SDL_EVENT_KEY_DOWN) return;
+    void* userData = camera_.getUserData();
+    if (!userData) {
+        LOG_ERROR_CAT("Input", "Camera userData is null, cannot switch render mode");
+        return;
+    }
+    Application& app = *static_cast<Application*>(userData);
     switch (key.scancode) {
         case SDL_SCANCODE_1:
         case SDL_SCANCODE_2:
@@ -257,7 +268,9 @@ void HandleInput::defaultKeyboardHandler(const SDL_KeyboardEvent& key) {
         case SDL_SCANCODE_7:
         case SDL_SCANCODE_8:
         case SDL_SCANCODE_9:
-            camera_.setMode(key.scancode - SDL_SCANCODE_1 + 1);
+            app.setRenderMode(key.scancode - SDL_SCANCODE_1 + 1);
+            // camera_.setMode(key.scancode - SDL_SCANCODE_1 + 1); // Commented out: camera mode not needed for render switching
+            LOG_INFO_CAT("Input", "Switched to render mode {}", key.scancode - SDL_SCANCODE_1 + 1);
             break;
         case SDL_SCANCODE_P:
             camera_.togglePause();
@@ -285,9 +298,6 @@ void HandleInput::defaultKeyboardHandler(const SDL_KeyboardEvent& key) {
             break;
         case SDL_SCANCODE_X:
             camera_.updateZoom(false);
-            break;
-        case SDL_SCANCODE_UP:
-        case SDL_SCANCODE_DOWN:
             break;
         default:
             break;

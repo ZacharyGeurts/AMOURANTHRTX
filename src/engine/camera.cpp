@@ -1,4 +1,3 @@
-// engine/camera.cpp
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts gzac5314@gmail.com is licensed under CC BY-NC 4.0
 // Camera implementation for 3D rendering
 // Dependencies: GLM, C++20 standard library
@@ -22,7 +21,8 @@ PerspectiveCamera::PerspectiveCamera(float fov, float aspectRatio, float nearPla
       mode_(0),
       movementSpeed_(2.5f),
       mouseSensitivity_(0.1f),
-      isPaused_(false) {
+      isPaused_(false),
+      userData_(nullptr) { // Initialize userData_
     updateCameraVectors();
 }
 
@@ -115,6 +115,14 @@ void PerspectiveCamera::togglePause() {
 void PerspectiveCamera::updateZoom(bool zoomIn) {
     fov_ = zoomIn ? fov_ * 0.9f : fov_ * 1.1f;
     fov_ = std::clamp(fov_, 10.0f, 120.0f);
+}
+
+void PerspectiveCamera::setUserData(void* data) {
+    userData_ = data;
+}
+
+void* PerspectiveCamera::getUserData() const {
+    return userData_;
 }
 
 void PerspectiveCamera::updateCameraVectors() {

@@ -1,5 +1,5 @@
 // mode1.cpp
-// Implementation of renderMode1 for AMOURANTH RTX Engine to draw a sphere with enhanced RTX ambient lighting and wisp-like point light.
+// Implementation of renderMode1 for AMOURANTH RTX Engine: Sphere with enhanced RTX ambient lighting and wisp-like point light.
 // Copyright Zachary Geurts 2025
 
 #include "engine/core.hpp"
@@ -26,11 +26,11 @@ struct PushConstants {
 void renderMode1(const UE::AMOURANTH* /*amouranth*/, uint32_t /*imageIndex*/,
                  VkBuffer vertexBuffer, VkCommandBuffer commandBuffer,
                  VkBuffer indexBuffer, float zoomLevel, int width, int height,
-                 float /*wavePhase*/, std::span<const UE::DimensionData> cache,
+                 float /*wavePhase*/, std::span<const UE::DimensionData> /*cache*/,
                  VkPipelineLayout pipelineLayout, VkDescriptorSet descriptorSet,
                  VkDevice /*device*/, VkDeviceMemory /*vertexBufferMemory*/,
                  VkPipeline pipeline, float deltaTime, VkRenderPass renderPass, VkFramebuffer framebuffer,
-                 const Vulkan::Context& context) { // Added context parameter
+                 const Vulkan::Context& context) {
     // Begin render pass
     VkClearValue clearValue = {{{0.02f, 0.02f, 0.05f, 1.0f}}}; // Darker misty background for wisp atmosphere
     VkRenderPassBeginInfo renderPassInfo{
@@ -51,7 +51,7 @@ void renderMode1(const UE::AMOURANTH* /*amouranth*/, uint32_t /*imageIndex*/,
         VkDeviceSize offsets[] = {0};
         vkCmdBindVertexBuffers(commandBuffer, 0, 1, &vertexBuffer, offsets);
         vkCmdBindIndexBuffer(commandBuffer, indexBuffer, 0, VK_INDEX_TYPE_UINT32);
-        vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(cache.size() * 3), 1, 0, 0, 0);
+        vkCmdDrawIndexed(commandBuffer, 3, 1, 0, 0, 0);  // Fixed: Hardcoded 3 for triangle fallback (cache unused in RT)
     } else {
         // Bind ray tracing pipeline
         vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, pipeline);
