@@ -22,7 +22,7 @@ Why choose AMOURANTH RTX? You want full access to a small RTX loop. Made with Gr
 <img width="1297" height="1800" alt="JustBetter" src="https://github.com/user-attachments/assets/0e273bbc-333b-4110-bc8d-acf0796f20c3" />  
 We have months of experience of driving Grok through traffic cones and expect to hit fewer.  
 <img width="1282" height="1645" alt="buffer" src="https://github.com/user-attachments/assets/28950e5a-2caf-49f9-b961-8a2510780a82" />  
-Image lies. I aien't test shit. You build your own with it.  
+Image lies. No, it is a half truth. You can adjust your own with AI.  
 <img width="1493" height="2160" alt="Screenshot from 2025-10-22 11-14-23" src="https://github.com/user-attachments/assets/a828b25d-b7f6-47f5-b972-334745a1b546" />
 <img width="1564" height="2160" alt="Screenshot from 2025-10-22 11-14-40" src="https://github.com/user-attachments/assets/1d558846-c910-4104-9212-8a024f069dc8" />  
 Let AI do the heavy lifting with modular files where implementations are at your controls.
