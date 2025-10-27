@@ -130,7 +130,7 @@ VulkanPipelineManager::VulkanPipelineManager(Vulkan::Context& context, int width
           {"shadow_anyhit", "assets/shaders/raytracing/shadow_anyhit.spv"},
           {"mid_anyhit", "assets/shaders/raytracing/mid_anyhit.spv"},
           {"volumetric_anyhit", "assets/shaders/raytracing/volumetric_anyhit.spv"},
-          {"compute", "assets/shaders/compute/xorshift.spv"},
+          {"compute", "assets/shaders/compute/compute.spv"},
           {"raster_prepass", "assets/shaders/compute/raster_prepass.spv"},
           {"denoiser_post", "assets/shaders/compute/denoiser_post.spv"}
       }),
