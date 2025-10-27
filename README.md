@@ -1,5 +1,6 @@
 
-<img width="840" src="https://github.com/user-attachments/assets/cd99bff9-777d-4ffb-9a4b-6ac3a696e05c" />  
+<img width="640" src="https://github.com/user-attachments/assets/cd99bff9-777d-4ffb-9a4b-6ac3a696e05c" />  
+
 AMOURANTH RTX © 2025 by Zachary Geurts gzac5314@gmail.com is licensed under [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0)  
 Unreal developers may consider some of this parody.  
 I welcome those whose minds seek education.  
