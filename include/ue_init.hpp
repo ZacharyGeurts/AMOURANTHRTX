@@ -22,6 +22,7 @@
 #include <iomanip>
 #include <numeric> // Added for std::accumulate
 #include "engine/camera.hpp"
+#include "engine/core.hpp"
 #include "engine/logging.hpp"
 
 // Forward declarations
