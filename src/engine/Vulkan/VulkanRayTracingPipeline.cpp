@@ -375,10 +375,10 @@ void VulkanPipelineManager::createShaderBindingTable() {
     memcpy(data + 0 * alignedHandleSize, shaderGroupHandles.data() + 0 * handleSize, handleSize); // Raygen
     memcpy(data + 1 * alignedHandleSize, shaderGroupHandles.data() + 1 * handleSize, handleSize); // Primary miss
     memcpy(data + 2 * alignedHandleSize, shaderGroupHandles.data() + 3 * handleSize, handleSize); // Shadow miss
-    memcpy(data + 3 * alignedHandleSize + 0 * alignedHandleSize, shaderGroupHandles.data() + 2 * handleSize, handleSize); // Primary hit
-    memcpy(data + 3 * alignedHandleSize + 1 * alignedHandleSize, shaderGroupHandles.data() + 4 * handleSize, handleSize); // Shadow hit
-    memcpy(data + 3 * alignedHandleSize + 2 * alignedHandleSize, shaderGroupHandles.data() + 5 * handleSize, handleSize); // Mid hit
-    memcpy(data + 3 * alignedHandleSize + 3 * alignedHandleSize, shaderGroupHandles.data() + 6 * handleSize, handleSize); // Volumetric hit
+    memcpy(data + 3 * alignedHandleSize, shaderGroupHandles.data() + 2 * handleSize, handleSize); // Primary hit
+    memcpy(data + 4 * alignedHandleSize, shaderGroupHandles.data() + 4 * handleSize, handleSize); // Shadow hit
+    memcpy(data + 5 * alignedHandleSize, shaderGroupHandles.data() + 5 * handleSize, handleSize); // Mid hit
+    memcpy(data + 6 * alignedHandleSize, shaderGroupHandles.data() + 6 * handleSize, handleSize); // Volumetric hit
     memcpy(data + 7 * alignedHandleSize, shaderGroupHandles.data() + 7 * handleSize, handleSize); // Callable
 
     vkUnmapMemory(context_.device, stagingMemory);
@@ -493,6 +493,10 @@ void VulkanPipelineManager::createShaderBindingTable() {
     context_.resourceManager.removeMemory(stagingMemory);
     Dispose::destroySingleBuffer(context_.device, stagingBuffer);
     Dispose::freeSingleDeviceMemory(context_.device, stagingMemory);
+
+    // Remove SBT from resource manager since owned by sbt_
+    context_.resourceManager.removeBuffer(sbtBuffer);
+    context_.resourceManager.removeMemory(sbtMemory);
 
     VkDeviceAddress sbtAddress = VulkanInitializer::getBufferDeviceAddress(context_.device, sbtBuffer);
 

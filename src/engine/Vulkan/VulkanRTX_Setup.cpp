@@ -17,6 +17,7 @@
 #include <source_location>
 #include <dlfcn.h>
 #include "engine/logging.hpp"
+#include <map>
 
 #define VK_CHECK(result, msg) if ((result) != VK_SUCCESS) { \
     LOG_ERROR_CAT("VulkanRTX", "Vulkan error: {} (VkResult: {})", (msg), static_cast<int>(result), std::source_location::current()); \
@@ -56,6 +57,7 @@ VulkanRTX::VulkanRTX(VkDevice device, VkPhysicalDevice physicalDevice, const std
       supportsCompaction_(false),
       shaderFeatures_(ShaderFeatures::None),
       numShaderGroups_(0),
+      counts_(),
       sbt_(),
       scratchAlignment_(0) {
     if (!device || !physicalDevice) {
@@ -85,15 +87,52 @@ VulkanRTX::VulkanRTX(VkDevice device, VkPhysicalDevice physicalDevice, const std
     }
 
     shaderFeatures_ = ShaderFeatures::None;
+    counts_ = {};
     for (const auto& path : shaderPaths_) {
         std::string ext = std::filesystem::path(path).extension().string();
-        if (ext == ".rgen") shaderFeatures_ |= ShaderFeatures::Raygen;
-        if (ext == ".rmiss") shaderFeatures_ |= ShaderFeatures::Miss;
-        if (ext == ".rchit") shaderFeatures_ |= ShaderFeatures::ClosestHit;
-        if (ext == ".rahit") shaderFeatures_ |= ShaderFeatures::AnyHit;
-        if (ext == ".rint") shaderFeatures_ |= ShaderFeatures::Intersection;
-        if (ext == ".rcall") shaderFeatures_ |= ShaderFeatures::Callable;
+        if (ext == ".rgen") {
+            shaderFeatures_ |= ShaderFeatures::Raygen;
+            counts_.raygen++;
+        }
+        if (ext == ".rmiss") {
+            shaderFeatures_ |= ShaderFeatures::Miss;
+            counts_.miss++;
+        }
+        if (ext == ".rchit") {
+            shaderFeatures_ |= ShaderFeatures::ClosestHit;
+            counts_.chit++;
+        }
+        if (ext == ".rahit") {
+            shaderFeatures_ |= ShaderFeatures::AnyHit;
+            counts_.ahit++;
+        }
+        if (ext == ".rint") {
+            shaderFeatures_ |= ShaderFeatures::Intersection;
+            counts_.intersection++;
+        }
+        if (ext == ".rcall") {
+            shaderFeatures_ |= ShaderFeatures::Callable;
+            counts_.callable++;
+        }
     }
+
+    // Sort shaderPaths by extension priority for consistent stage indexing
+    std::map<std::string, uint32_t> extPriority = {
+        {".rgen", 0},
+        {".rmiss", 1},
+        {".rcall", 2},
+        {".rchit", 3},
+        {".rahit", 4},
+        {".rint", 5}
+    };
+    std::sort(shaderPaths_.begin(), shaderPaths_.end(), [&](const std::string& a, const std::string& b) {
+        std::string ea = std::filesystem::path(a).extension().string();
+        std::string eb = std::filesystem::path(b).extension().string();
+        uint32_t pa = extPriority.count(ea) ? extPriority[ea] : 6;
+        uint32_t pb = extPriority.count(eb) ? extPriority[eb] : 6;
+        if (pa != pb) return pa < pb;
+        return a < b;
+    });
 
     VkPhysicalDeviceAccelerationStructurePropertiesKHR asProperties = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_PROPERTIES_KHR,
@@ -220,84 +259,96 @@ void VulkanRTX::buildShaderGroups(std::vector<VkRayTracingShaderGroupCreateInfoK
     groups.clear();
     numShaderGroups_ = 0;
 
-    // Raygen group
-    VkRayTracingShaderGroupCreateInfoKHR raygenGroup = {
-        .sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
-        .pNext = nullptr,
-        .type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR,
-        .generalShader = 0,
-        .closestHitShader = VK_SHADER_UNUSED_KHR,
-        .anyHitShader = VK_SHADER_UNUSED_KHR,
-        .intersectionShader = VK_SHADER_UNUSED_KHR,
-        .pShaderGroupCaptureReplayHandle = nullptr
-    };
-    groups.push_back(raygenGroup);
-    numShaderGroups_++;
+    uint32_t raygenShaderStart = 0;
+    uint32_t missShaderStart = counts_.raygen;
+    uint32_t callableShaderStart = counts_.raygen + counts_.miss;
+    uint32_t chitShaderStart = counts_.raygen + counts_.miss + counts_.callable;
+    uint32_t ahitShaderStart = chitShaderStart + counts_.chit;
+    uint32_t intersectionShaderStart = ahitShaderStart + counts_.ahit;
 
-    // Miss groups (primary and shadow)
-    VkRayTracingShaderGroupCreateInfoKHR missGroup = {
-        .sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
-        .pNext = nullptr,
-        .type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR,
-        .generalShader = 1,
-        .closestHitShader = VK_SHADER_UNUSED_KHR,
-        .anyHitShader = VK_SHADER_UNUSED_KHR,
-        .intersectionShader = VK_SHADER_UNUSED_KHR,
-        .pShaderGroupCaptureReplayHandle = nullptr
-    };
-    groups.push_back(missGroup);
-    numShaderGroups_++;
-
-    VkRayTracingShaderGroupCreateInfoKHR shadowMissGroup = {
-        .sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
-        .pNext = nullptr,
-        .type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR,
-        .generalShader = 2,
-        .closestHitShader = VK_SHADER_UNUSED_KHR,
-        .anyHitShader = VK_SHADER_UNUSED_KHR,
-        .intersectionShader = VK_SHADER_UNUSED_KHR,
-        .pShaderGroupCaptureReplayHandle = nullptr
-    };
-    groups.push_back(shadowMissGroup);
-    numShaderGroups_++;
-
-    // Triangle hit group
-    VkRayTracingShaderGroupCreateInfoKHR hitGroup = {
-        .sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
-        .pNext = nullptr,
-        .type = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR,
-        .generalShader = VK_SHADER_UNUSED_KHR,
-        .closestHitShader = 3,
-        .anyHitShader = hasShaderFeature(ShaderFeatures::AnyHit) ? 4 : VK_SHADER_UNUSED_KHR,
-        .intersectionShader = VK_SHADER_UNUSED_KHR,
-        .pShaderGroupCaptureReplayHandle = nullptr
-    };
-    groups.push_back(hitGroup);
-    numShaderGroups_++;
-
-    // Procedural hit group
-    VkRayTracingShaderGroupCreateInfoKHR proceduralHitGroup = {
-        .sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
-        .pNext = nullptr,
-        .type = VK_RAY_TRACING_SHADER_GROUP_TYPE_PROCEDURAL_HIT_GROUP_KHR,
-        .generalShader = VK_SHADER_UNUSED_KHR,
-        .closestHitShader = 3, // Reuse closest hit shader
-        .anyHitShader = hasShaderFeature(ShaderFeatures::AnyHit) ? 4 : VK_SHADER_UNUSED_KHR,
-        .intersectionShader = hasShaderFeature(ShaderFeatures::Intersection) ? 5 : VK_SHADER_UNUSED_KHR,
-        .pShaderGroupCaptureReplayHandle = nullptr
-    };
-    if (hasShaderFeature(ShaderFeatures::Intersection)) {
-        groups.push_back(proceduralHitGroup);
+    // Raygen groups
+    for (uint32_t i = 0; i < counts_.raygen; ++i) {
+        VkRayTracingShaderGroupCreateInfoKHR raygenGroup = {
+            .sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
+            .pNext = nullptr,
+            .type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR,
+            .generalShader = raygenShaderStart + i,
+            .closestHitShader = VK_SHADER_UNUSED_KHR,
+            .anyHitShader = VK_SHADER_UNUSED_KHR,
+            .intersectionShader = VK_SHADER_UNUSED_KHR,
+            .pShaderGroupCaptureReplayHandle = nullptr
+        };
+        groups.push_back(raygenGroup);
         numShaderGroups_++;
     }
 
-    // Callable group
-    if (hasShaderFeature(ShaderFeatures::Callable)) {
+    // Miss groups
+    for (uint32_t i = 0; i < counts_.miss; ++i) {
+        VkRayTracingShaderGroupCreateInfoKHR missGroup = {
+            .sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
+            .pNext = nullptr,
+            .type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR,
+            .generalShader = missShaderStart + i,
+            .closestHitShader = VK_SHADER_UNUSED_KHR,
+            .anyHitShader = VK_SHADER_UNUSED_KHR,
+            .intersectionShader = VK_SHADER_UNUSED_KHR,
+            .pShaderGroupCaptureReplayHandle = nullptr
+        };
+        groups.push_back(missGroup);
+        numShaderGroups_++;
+    }
+
+    // Hit groups: triangles first, then procedural
+    uint32_t triGroupCount = counts_.chit;
+    uint32_t procGroupCount = (counts_.intersection > 0) ? counts_.chit : 0;
+    [[maybe_unused]] uint32_t hitGroupCount = triGroupCount + procGroupCount;
+
+    // Triangle hit groups
+    for (uint32_t i = 0; i < triGroupCount; ++i) {
+        uint32_t chitIdx = chitShaderStart + i;
+        uint32_t ahitIdx = (counts_.ahit > 0) ? (ahitShaderStart + (i % counts_.ahit)) : VK_SHADER_UNUSED_KHR;
+        VkRayTracingShaderGroupCreateInfoKHR hitGroup = {
+            .sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
+            .pNext = nullptr,
+            .type = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR,
+            .generalShader = VK_SHADER_UNUSED_KHR,
+            .closestHitShader = chitIdx,
+            .anyHitShader = ahitIdx,
+            .intersectionShader = VK_SHADER_UNUSED_KHR,
+            .pShaderGroupCaptureReplayHandle = nullptr
+        };
+        groups.push_back(hitGroup);
+        numShaderGroups_++;
+    }
+
+    // Procedural hit groups
+    if (counts_.intersection > 0) {
+        for (uint32_t i = 0; i < procGroupCount; ++i) {
+            uint32_t chitIdx = chitShaderStart + i;
+            uint32_t ahitIdx = (counts_.ahit > 0) ? (ahitShaderStart + (i % counts_.ahit)) : VK_SHADER_UNUSED_KHR;
+            uint32_t intIdx = intersectionShaderStart + (i % counts_.intersection);
+            VkRayTracingShaderGroupCreateInfoKHR proceduralHitGroup = {
+                .sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
+                .pNext = nullptr,
+                .type = VK_RAY_TRACING_SHADER_GROUP_TYPE_PROCEDURAL_HIT_GROUP_KHR,
+                .generalShader = VK_SHADER_UNUSED_KHR,
+                .closestHitShader = chitIdx,
+                .anyHitShader = ahitIdx,
+                .intersectionShader = intIdx,
+                .pShaderGroupCaptureReplayHandle = nullptr
+            };
+            groups.push_back(proceduralHitGroup);
+            numShaderGroups_++;
+        }
+    }
+
+    // Callable groups
+    for (uint32_t i = 0; i < counts_.callable; ++i) {
         VkRayTracingShaderGroupCreateInfoKHR callableGroup = {
             .sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
             .pNext = nullptr,
             .type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR,
-            .generalShader = static_cast<uint32_t>(hasShaderFeature(ShaderFeatures::AnyHit) ? (hasShaderFeature(ShaderFeatures::Intersection) ? 6 : 5) : 4),
+            .generalShader = callableShaderStart + i,
             .closestHitShader = VK_SHADER_UNUSED_KHR,
             .anyHitShader = VK_SHADER_UNUSED_KHR,
             .intersectionShader = VK_SHADER_UNUSED_KHR,
@@ -559,7 +610,7 @@ void VulkanRTX::createShaderBindingTable(VkPhysicalDevice physicalDevice) {
     const uint32_t handleAlignment = rtProperties.shaderGroupHandleAlignment;
     const uint32_t handleSizeAligned = (handleSize + handleAlignment - 1) & ~(handleAlignment - 1);
     const uint32_t groupCount = numShaderGroups_;
-    const VkDeviceSize sbtSize = handleSizeAligned * groupCount;
+    const VkDeviceSize sbtSize = static_cast<VkDeviceSize>(handleSizeAligned) * groupCount;
 
     if (groupCount == 0) {
         LOG_ERROR_CAT("VulkanRTX", "No shader groups defined for SBT", std::source_location::current());
@@ -592,12 +643,49 @@ void VulkanRTX::createShaderBindingTable(VkPhysicalDevice physicalDevice) {
     };
     VkDeviceAddress sbtAddress = vkGetBufferDeviceAddress(device_, &addressInfo);
 
+    // Compute region parameters
+    uint32_t rg_count = counts_.raygen;
+    uint32_t ms_count = counts_.miss;
+    uint32_t tri_count = counts_.chit;
+    uint32_t proc_count = (counts_.intersection > 0) ? counts_.chit : 0;
+    uint32_t ht_count = tri_count + proc_count;
+    uint32_t cl_count = counts_.callable;
+
+    uint64_t aligned_size = static_cast<uint64_t>(handleSizeAligned);
+
+    // Raygen region
+    if (rg_count == 0) {
+        sbt_.raygen = {0, 0, 0};
+    } else {
+        sbt_.raygen = {sbtAddress, static_cast<uint64_t>(rg_count) * aligned_size, aligned_size};
+    }
+
+    // Miss region
+    if (ms_count == 0) {
+        sbt_.miss = {0, 0, 0};
+    } else {
+        uint64_t miss_start = static_cast<uint64_t>(rg_count) * aligned_size;
+        sbt_.miss = {sbtAddress + miss_start, static_cast<uint64_t>(ms_count) * aligned_size, aligned_size};
+    }
+
+    // Hit region
+    if (ht_count == 0) {
+        sbt_.hit = {0, 0, 0};
+    } else {
+        uint64_t hit_start = static_cast<uint64_t>(rg_count + ms_count) * aligned_size;
+        sbt_.hit = {sbtAddress + hit_start, static_cast<uint64_t>(ht_count) * aligned_size, aligned_size};
+    }
+
+    // Callable region
+    if (cl_count == 0) {
+        sbt_.callable = {0, 0, 0};
+    } else {
+        uint64_t call_start = static_cast<uint64_t>(rg_count + ms_count + ht_count) * aligned_size;
+        sbt_.callable = {sbtAddress + call_start, static_cast<uint64_t>(cl_count) * aligned_size, aligned_size};
+    }
+
     sbt_.buffer = std::move(sbtBuffer);
     sbt_.memory = std::move(sbtMemory);
-    sbt_.raygen = { sbtAddress, handleSizeAligned, handleSizeAligned };
-    sbt_.miss = { sbtAddress + handleSizeAligned, 2 * handleSizeAligned, handleSizeAligned }; // Two miss shaders
-    sbt_.hit = { sbtAddress + 3 * handleSizeAligned, (hasShaderFeature(ShaderFeatures::Intersection) ? 2 : 1) * handleSizeAligned, handleSizeAligned };
-    sbt_.callable = { hasShaderFeature(ShaderFeatures::Callable) ? sbtAddress + (hasShaderFeature(ShaderFeatures::Intersection) ? 5 : 4) * handleSizeAligned : 0, handleSizeAligned, handleSizeAligned };
 }
 
 void VulkanRTX::createBottomLevelAS(VkPhysicalDevice physicalDevice, VkCommandPool commandPool, VkQueue queue,

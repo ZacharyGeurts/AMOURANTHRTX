@@ -1,9 +1,3 @@
-// AMOURANTH RTX Engine © 2025 by Zachary Geurts gzac5314@gmail.com is licensed under CC BY-NC 4.0
-// Vulkan ray-tracing setup and management.
-// Dependencies: Vulkan 1.3+, VK_KHR_acceleration_structure, VK_KHR_ray_tracing_pipeline, GLM, C++20 standard library, logging.hpp.
-// Supported platforms: Linux, Windows (AMD, NVIDIA, Intel GPUs only).
-// Zachary Geurts 2025
-
 #ifndef VULKAN_RTX_SETUP_HPP
 #define VULKAN_RTX_SETUP_HPP
 
@@ -102,6 +96,15 @@ inline ShaderFeatures& operator|=(ShaderFeatures& lhs, ShaderFeatures rhs) {
     lhs = lhs | rhs;
     return lhs;
 }
+
+struct ShaderCounts {
+    uint32_t raygen = 0;
+    uint32_t miss = 0;
+    uint32_t chit = 0;
+    uint32_t ahit = 0;
+    uint32_t intersection = 0;
+    uint32_t callable = 0;
+};
 
 template<typename T, typename DestroyFuncType>
 class VulkanResource {
@@ -318,6 +321,7 @@ private:
     bool supportsCompaction_;
     ShaderFeatures shaderFeatures_;
     uint32_t numShaderGroups_;
+    ShaderCounts counts_;
     ShaderBindingTable sbt_;
     VkDeviceSize scratchAlignment_;
     // Core Vulkan functions

@@ -25,7 +25,7 @@ struct PushConstants {
 namespace VulkanRTX {
 
 void renderMode1(
-    uint32_t imageIndex,
+    [[maybe_unused]] uint32_t imageIndex,
     VkBuffer vertexBuffer,
     VkCommandBuffer commandBuffer,
     VkBuffer indexBuffer,
@@ -35,8 +35,8 @@ void renderMode1(
     float wavePhase,
     VkPipelineLayout pipelineLayout,
     VkDescriptorSet descriptorSet,
-    VkDevice device,
-    VkDeviceMemory vertexBufferMemory,
+    [[maybe_unused]] VkDevice device,
+    [[maybe_unused]] VkDeviceMemory vertexBufferMemory,
     VkPipeline pipeline,
     float deltaTime,
     VkRenderPass renderPass,
