@@ -15,8 +15,6 @@
 #include <vulkan/vulkan.h>
 #include <stdexcept>
 #include <array>
-#include <fstream>
-#include <filesystem>
 #include <vector>
 #include <glm/glm.hpp>
 #include <unordered_map>
@@ -26,32 +24,6 @@
 #endif
 
 namespace VulkanRTX {
-
-VkShaderModule loadShader(VkDevice device, const std::string& type) {
-    namespace fs = std::filesystem;
-    fs::path shaderPath = fs::current_path() / "shaders" / (type + ".spv");
-    if (!fs::exists(shaderPath)) {
-        throw std::runtime_error("Shader file not found: " + shaderPath.string());
-    }
-    std::ifstream file(shaderPath.string(), std::ios::binary | std::ios::ate);
-    if (!file) {
-        throw std::runtime_error("Failed to open shader file: " + shaderPath.string());
-    }
-    auto size = static_cast<size_t>(file.tellg());
-    file.seekg(0);
-    std::vector<char> buffer(size);
-    file.read(buffer.data(), size);
-    VkShaderModuleCreateInfo createInfo = {
-        .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
-        .codeSize = size,
-        .pCode = reinterpret_cast<const uint32_t*>(buffer.data())
-    };
-    VkShaderModule shaderModule;
-    if (vkCreateShaderModule(device, &createInfo, nullptr, &shaderModule) != VK_SUCCESS) {
-        throw std::runtime_error("Failed to create shader module for " + type);
-    }
-    return shaderModule;
-}
 
 void VulkanPipelineManager::createComputePipeline() {
     std::vector<std::string> computeShaders = {"compute", "raster_prepass", "denoiser_post"};

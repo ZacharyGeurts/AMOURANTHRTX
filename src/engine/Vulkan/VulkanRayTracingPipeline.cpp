@@ -15,8 +15,6 @@
 #include <vulkan/vulkan.h>
 #include <stdexcept>
 #include <array>
-#include <fstream>
-#include <filesystem>
 #include <vector>
 #include <glm/glm.hpp>
 #include <unordered_map>
@@ -27,45 +25,19 @@
 
 namespace VulkanRTX {
 
-VkShaderModule loadShader(VkDevice device, const char* type) {
-    namespace fs = std::filesystem;
-    fs::path shaderPath = fs::current_path() / "shaders" / (std::string(type) + ".spv");
-    if (!fs::exists(shaderPath)) {
-        throw std::runtime_error("Shader file not found: " + shaderPath.string());
-    }
-    std::ifstream file(shaderPath.string(), std::ios::binary | std::ios::ate);
-    if (!file) {
-        throw std::runtime_error("Failed to open shader file: " + shaderPath.string());
-    }
-    auto size = static_cast<size_t>(file.tellg());
-    file.seekg(0);
-    std::vector<char> buffer(size);
-    file.read(buffer.data(), size);
-    VkShaderModuleCreateInfo createInfo = {
-        .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
-        .codeSize = size,
-        .pCode = reinterpret_cast<const uint32_t*>(buffer.data())
-    };
-    VkShaderModule shaderModule;
-    if (vkCreateShaderModule(device, &createInfo, nullptr, &shaderModule) != VK_SUCCESS) {
-        throw std::runtime_error("Failed to create shader module for " + std::string(type));
-    }
-    return shaderModule;
-}
-
 void VulkanPipelineManager::createRayTracingPipeline() {
     // Define shader types and load modules efficiently
-    constexpr std::array<const char*, 11> shaderTypes = {
-        "raygen", "miss", "closesthit", "shadowmiss", "anyhit", "intersection", "callable", "shadow_anyhit", "mid_anyhit", "volumetric_anyhit", "compute"
+    constexpr std::array<const char*, 10> shaderTypes = {
+        "raygen", "miss", "closesthit", "shadowmiss", "anyhit", "intersection", "callable", "shadow_anyhit", "mid_anyhit", "volumetric_anyhit"
     };
     std::vector<VkShaderModule> shaderModules;
     shaderModules.reserve(shaderTypes.size());
-    for (const auto& type : shaderTypes) {
+    for (const auto* type : shaderTypes) {
         shaderModules.emplace_back(loadShader(context_.device, type));
     }
 
     // Predefine shader stages for clarity and performance
-    constexpr uint32_t stageCount = 10; // Excluding compute if not used in pipeline
+    constexpr uint32_t stageCount = 10;
     std::array<VkPipelineShaderStageCreateInfo, stageCount> shaderStages = {{
         {
             .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
@@ -136,44 +108,61 @@ void VulkanPipelineManager::createRayTracingPipeline() {
         {
             .sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
             .type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR,
-            .generalShader = 0
+            .generalShader = 0,
+            .closestHitShader = VK_SHADER_UNUSED_KHR,
+            .anyHitShader = VK_SHADER_UNUSED_KHR,
+            .intersectionShader = VK_SHADER_UNUSED_KHR
         },
         // Primary miss (group 1)
         {
             .sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
             .type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR,
-            .generalShader = 1
+            .generalShader = 1,
+            .closestHitShader = VK_SHADER_UNUSED_KHR,
+            .anyHitShader = VK_SHADER_UNUSED_KHR,
+            .intersectionShader = VK_SHADER_UNUSED_KHR
         },
         // Primary hit: triangles (group 2)
         {
             .sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
             .type = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR,
+            .generalShader = VK_SHADER_UNUSED_KHR,
             .closestHitShader = 2,
-            .anyHitShader = 4
+            .anyHitShader = 4,
+            .intersectionShader = VK_SHADER_UNUSED_KHR
         },
         // Shadow miss (group 3)
         {
             .sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
             .type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR,
-            .generalShader = 3
+            .generalShader = 3,
+            .closestHitShader = VK_SHADER_UNUSED_KHR,
+            .anyHitShader = VK_SHADER_UNUSED_KHR,
+            .intersectionShader = VK_SHADER_UNUSED_KHR
         },
         // Shadow hit: triangles (group 4)
         {
             .sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
             .type = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR,
-            .anyHitShader = 7
+            .generalShader = VK_SHADER_UNUSED_KHR,
+            .closestHitShader = VK_SHADER_UNUSED_KHR,
+            .anyHitShader = 7,
+            .intersectionShader = VK_SHADER_UNUSED_KHR
         },
         // Mid-layer hit: triangles (group 5)
         {
             .sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
             .type = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR,
+            .generalShader = VK_SHADER_UNUSED_KHR,
             .closestHitShader = 2,
-            .anyHitShader = 8
+            .anyHitShader = 8,
+            .intersectionShader = VK_SHADER_UNUSED_KHR
         },
         // Volumetric hit: procedural (group 6)
         {
             .sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
             .type = VK_RAY_TRACING_SHADER_GROUP_TYPE_PROCEDURAL_HIT_GROUP_KHR,
+            .generalShader = VK_SHADER_UNUSED_KHR,
             .closestHitShader = 2,
             .anyHitShader = 9,
             .intersectionShader = 5
@@ -182,7 +171,10 @@ void VulkanPipelineManager::createRayTracingPipeline() {
         {
             .sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
             .type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR,
-            .generalShader = 6
+            .generalShader = 6,
+            .closestHitShader = VK_SHADER_UNUSED_KHR,
+            .anyHitShader = VK_SHADER_UNUSED_KHR,
+            .intersectionShader = VK_SHADER_UNUSED_KHR
         }
     }};
 

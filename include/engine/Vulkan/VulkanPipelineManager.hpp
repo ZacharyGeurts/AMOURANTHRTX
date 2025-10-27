@@ -1,10 +1,3 @@
-// AMOURANTH RTX Engine © 2025 by Zachary Geurts gzac5314@gmail.com is licensed under CC BY-NC 4.0
-// Vulkan pipeline management header.
-// Dependencies: Vulkan 1.3+, GLM, VulkanCore.hpp, Vulkan_init.hpp, VulkanRTX_Setup.hpp, logging.hpp, Dispose.hpp.
-// Supported platforms: Linux, Windows, Consoles (PS5, Xbox Series X).
-// Optimized for high-end GPUs with 8 GB VRAM (e.g., NVIDIA RTX 3070, AMD RX 6800).
-// Zachary Geurts 2025
-
 #ifndef VULKANPIPELINEMANAGER_HPP
 #define VULKANPIPELINEMANAGER_HPP
 
