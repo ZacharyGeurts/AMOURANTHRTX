@@ -3,7 +3,6 @@
 // Dependencies: SDL3, GLM, VulkanRTX_Setup.hpp, logging.hpp, Dispose.hpp, camera.hpp.
 
 #include "handle_app.hpp"
-#include "engine/SDL3/SDL3_audio.hpp"
 #include <SDL3/SDL.h>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -16,6 +15,7 @@
 #include "engine/logging.hpp"
 #include "engine/Vulkan/VulkanRenderer.hpp"
 #include "engine/SDL3/SDL3_init.hpp"
+#include "engine/Dispose.hpp"
 
 void loadMesh(const std::string& filename, std::vector<glm::vec3>& vertices, std::vector<uint32_t>& indices) {
     static std::vector<glm::vec3> cachedVertices;
@@ -76,7 +76,7 @@ Application::Application(const char* title, int width, int height)
     : title_(title), width_(width), height_(height), mode_(1),
       sdl_(std::make_unique<SDL3Initializer::SDL3Initializer>(title, width, height)),
       renderer_(nullptr), camera_(std::make_unique<PerspectiveCamera>(60.0f, static_cast<float>(width) / height)),
-      inputHandler_(nullptr), audioDevice_(0), audioStream_(nullptr),
+      inputHandler_(nullptr),
       lastFrameTime_(std::chrono::steady_clock::now()) {
     LOG_INFO_CAT("Application", "Initializing Application: {} ({}x{})", title_, width_, height_);
     try {
@@ -96,7 +96,6 @@ Application::Application(const char* title, int width, int height)
         LOG_DEBUG_CAT("Application", "Vulkan instance extensions: {}", extensionsStr);
         renderer_ = std::make_unique<VulkanRTX::VulkanRenderer>(width_, height_, sdl_->getWindow(), instanceExtensions);
         initializeInput();
-        initializeAudio();
         LOG_INFO_CAT("Application", "Application initialized successfully");
     } catch (const std::exception& e) {
         LOG_ERROR_CAT("Application", "Initialization failed: {}", e.what());
@@ -105,11 +104,16 @@ Application::Application(const char* title, int width, int height)
 }
 
 Application::~Application() {
-    camera_.reset();
+    LOG_DEBUG_CAT("Application", "Starting destructor cleanup");
+    // Reset input and camera
     inputHandler_.reset();
+    camera_.reset();
+    // Destroy Vulkan renderer (includes surface and swapchain destruction)
     renderer_.reset();
+    // Now safe to destroy SDL window
+    sdl_.reset();
+    // Finally quit SDL subsystems
     Dispose::quitSDL();
-    //sdl_.reset();
     LOG_INFO_CAT("Application", "Application destroyed");
 }
 
@@ -127,34 +131,6 @@ void Application::initializeInput() {
         [this](bool connected, SDL_JoystickID id, SDL_Gamepad* pad) { inputHandler_->defaultGamepadConnectHandler(connected, id, pad); }
     );
     LOG_DEBUG_CAT("Application", "Input handler initialized");
-}
-
-void Application::initializeAudio() {
-    SDL3Audio::logAudioDevices(); // Log available devices
-    SDL3Audio::AudioConfig config;
-    config.frequency = 44100;
-    config.format = SDL_AUDIO_S16LE;
-    config.channels = 8;
-    SDL3Audio::initAudio(config, audioDevice_, audioStream_);
-    if (audioDevice_ == 0 && audioStream_ == nullptr) {
-        LOG_WARNING_CAT("Application", "Audio initialization failed, continuing without audio");
-        return;
-    }
-    try {
-        SDL3Audio::AudioManager audioManager(config);
-        audioManager.playAmmoSound();
-        LOG_INFO_CAT("Application", "8-channel audio initialized successfully with device ID: {}", audioDevice_);
-    } catch (const std::exception& e) {
-        LOG_WARNING_CAT("Application", "Failed to initialize AudioManager: {}, continuing without audio", e.what());
-        if (audioStream_) {
-            SDL_DestroyAudioStream(audioStream_);
-            audioStream_ = nullptr;
-        }
-        if (audioDevice_) {
-            SDL_CloseAudioDevice(audioDevice_);
-            audioDevice_ = 0;
-        }
-    }
 }
 
 void Application::run() {
@@ -238,7 +214,7 @@ void HandleInput::handleInput(Application& app) {
                     bool connected = event.type == SDL_EVENT_GAMEPAD_ADDED;
                     SDL_Gamepad* pad = connected ? SDL_OpenGamepad(event.gdevice.which) : nullptr;
                     gamepadConnectCallback_(connected, event.gdevice.which, pad);
-                    if (!connected && pad) {
+                    if (pad && !connected) {
                         SDL_CloseGamepad(pad);
                     }
                 }
@@ -375,7 +351,7 @@ void HandleInput::defaultGamepadAxisHandler(const SDL_GamepadAxisEvent& ga) {
 
 void HandleInput::defaultGamepadConnectHandler(bool connected, SDL_JoystickID id, SDL_Gamepad* pad) {
     (void)id;
-    if (!connected && pad) {
+    if (pad && !connected) {
         SDL_CloseGamepad(pad);
     }
 }

@@ -410,7 +410,9 @@ static const std::unordered_map<ResourceType, CleanupFn> cleanupLookup = {
     }},
     {ResourceType::Swapchain, [](Vulkan::Context& ctx, void* h, bool) {
         VkSwapchainKHR handle = static_cast<VkSwapchainKHR>(h);
-        destroySingleSwapchain(ctx.device, handle);
+        if (handle != VK_NULL_HANDLE && ctx.device != VK_NULL_HANDLE) {
+            destroySingleSwapchain(ctx.device, handle);
+        }
     }},
     {ResourceType::CommandPool, [](Vulkan::Context& ctx, void* h, bool managed) {
         VkCommandPool handle = static_cast<VkCommandPool>(h);
@@ -773,60 +775,49 @@ void cleanupVulkanContext(Vulkan::Context& context) noexcept {
             context.uniformBufferMemories.clear();
         }
 
-        // Step 12: Surface
-        LOG_DEBUG("Step 12: Cleaning up Vulkan surface");
-        if (context.surface != VK_NULL_HANDLE && context.instance != VK_NULL_HANDLE) {
-            LOG_DEBUG(std::format("Destroying surface {:p}", static_cast<void*>(context.surface)));
-            destroySurfaceKHR(context.instance, context.surface);
-            context.surface = VK_NULL_HANDLE;
-            LOG_DEBUG("Surface cleanup completed");
-        } else if (context.surface != VK_NULL_HANDLE) {
-            LOG_WARNING("Cannot destroy surface: instance is null");
-        }
-
         // Step 13-50: Iterate disposables with lookup-based cleanup
         std::vector<Disposable> disposables = {
-            {ResourceType::StorageImageView, context.storageImageView, true, "Storage Image View"},
-            {ResourceType::StorageImage, context.storageImage, true, "Storage Image"},
-            {ResourceType::StorageImageMemory, context.storageImageMemory, true, "Storage Image Memory"},
-            {ResourceType::RenderPass, context.renderPass, false, "Render Pass"},
-            {ResourceType::GraphicsPipeline, context.graphicsPipeline, true, "Graphics Pipeline"},
-            {ResourceType::ComputePipeline, context.computePipeline, true, "Compute Pipeline"},
-            {ResourceType::RayTracingPipeline, context.rayTracingPipeline, true, "Ray Tracing Pipeline"},
-            {ResourceType::GraphicsPipelineLayout, context.graphicsPipelineLayout, true, "Graphics Pipeline Layout"},
-            {ResourceType::RayTracingPipelineLayout, context.rayTracingPipelineLayout, true, "Ray Tracing Pipeline Layout"},
-            {ResourceType::ComputePipelineLayout, context.computePipelineLayout, true, "Compute Pipeline Layout"},
-            {ResourceType::GraphicsDescriptorSet, context.graphicsDescriptorSet, false, "Graphics Descriptor Set"},
-            {ResourceType::DescriptorSet, context.descriptorSet, false, "Descriptor Set"},
-            {ResourceType::GraphicsDescriptorPool, context.graphicsDescriptorPool, true, "Graphics Descriptor Pool"},
-            {ResourceType::DescriptorPool, context.descriptorPool, true, "Descriptor Pool"},
-            {ResourceType::GraphicsDescriptorSetLayout, context.graphicsDescriptorSetLayout, true, "Graphics Descriptor Set Layout"},
-            {ResourceType::RayTracingDescriptorSetLayout, context.rayTracingDescriptorSetLayout, true, "Ray Tracing Descriptor Set Layout"},
-            {ResourceType::Sampler, context.sampler, false, "Sampler"},
-            {ResourceType::TopLevelAS, context.topLevelAS, true, "Top-Level Acceleration Structure"},
-            {ResourceType::BottomLevelAS, context.bottomLevelAS, true, "Bottom-Level Acceleration Structure"},
-            {ResourceType::BottomLevelASBuffer, context.bottomLevelASBuffer, true, "Bottom-Level AS Buffer"},
-            {ResourceType::BottomLevelASMemory, context.bottomLevelASMemory, true, "Bottom-Level AS Memory"},
-            {ResourceType::TopLevelASBuffer, context.topLevelASBuffer, true, "Top-Level AS Buffer"},
-            {ResourceType::TopLevelASMemory, context.topLevelASMemory, true, "Top-Level AS Memory"},
-            {ResourceType::RaygenSbtBuffer, context.raygenSbtBuffer, true, "Raygen SBT Buffer"},
-            {ResourceType::RaygenSbtMemory, context.raygenSbtMemory, true, "Raygen SBT Memory"},
-            {ResourceType::MissSbtBuffer, context.missSbtBuffer, true, "Miss SBT Buffer"},
-            {ResourceType::MissSbtMemory, context.missSbtMemory, true, "Miss SBT Memory"},
-            {ResourceType::HitSbtBuffer, context.hitSbtBuffer, true, "Hit SBT Buffer"},
-            {ResourceType::HitSbtMemory, context.hitSbtMemory, true, "Hit SBT Memory"},
-            {ResourceType::VertexBuffer, context.vertexBuffer, true, "Vertex Buffer"},
-            {ResourceType::VertexBufferMemory, context.vertexBufferMemory, true, "Vertex Buffer Memory"},
-            {ResourceType::IndexBuffer, context.indexBuffer, true, "Index Buffer"},
-            {ResourceType::IndexBufferMemory, context.indexBufferMemory, true, "Index Buffer Memory"},
-            {ResourceType::ScratchBuffer, context.scratchBuffer, true, "Scratch Buffer"},
-            {ResourceType::ScratchBufferMemory, context.scratchBufferMemory, true, "Scratch Buffer Memory"},
-            {ResourceType::Swapchain, context.swapchain, false, "Swapchain"},
-            {ResourceType::CommandPool, context.commandPool, true, "Command Pool"},
-            {ResourceType::Device, context.device, false, "Device"},
-            {ResourceType::DebugMessenger, context.debugMessenger, false, "Debug Messenger"},
-            {ResourceType::Instance, context.instance, false, "Instance"},
-            {ResourceType::Surface, context.surface, false, "Surface"}
+            {ResourceType::StorageImageView, reinterpret_cast<void*>(context.storageImageView), true, "Storage Image View"},
+            {ResourceType::StorageImage, reinterpret_cast<void*>(context.storageImage), true, "Storage Image"},
+            {ResourceType::StorageImageMemory, reinterpret_cast<void*>(context.storageImageMemory), true, "Storage Image Memory"},
+            {ResourceType::RenderPass, reinterpret_cast<void*>(context.renderPass), false, "Render Pass"},
+            {ResourceType::GraphicsPipeline, reinterpret_cast<void*>(context.graphicsPipeline), true, "Graphics Pipeline"},
+            {ResourceType::ComputePipeline, reinterpret_cast<void*>(context.computePipeline), true, "Compute Pipeline"},
+            {ResourceType::RayTracingPipeline, reinterpret_cast<void*>(context.rayTracingPipeline), true, "Ray Tracing Pipeline"},
+            {ResourceType::GraphicsPipelineLayout, reinterpret_cast<void*>(context.graphicsPipelineLayout), true, "Graphics Pipeline Layout"},
+            {ResourceType::RayTracingPipelineLayout, reinterpret_cast<void*>(context.rayTracingPipelineLayout), true, "Ray Tracing Pipeline Layout"},
+            {ResourceType::ComputePipelineLayout, reinterpret_cast<void*>(context.computePipelineLayout), true, "Compute Pipeline Layout"},
+            {ResourceType::GraphicsDescriptorSet, reinterpret_cast<void*>(context.graphicsDescriptorSet), false, "Graphics Descriptor Set"},
+            {ResourceType::DescriptorSet, reinterpret_cast<void*>(context.descriptorSet), false, "Descriptor Set"},
+            {ResourceType::GraphicsDescriptorPool, reinterpret_cast<void*>(context.graphicsDescriptorPool), true, "Graphics Descriptor Pool"},
+            {ResourceType::DescriptorPool, reinterpret_cast<void*>(context.descriptorPool), true, "Descriptor Pool"},
+            {ResourceType::GraphicsDescriptorSetLayout, reinterpret_cast<void*>(context.graphicsDescriptorSetLayout), true, "Graphics Descriptor Set Layout"},
+            {ResourceType::RayTracingDescriptorSetLayout, reinterpret_cast<void*>(context.rayTracingDescriptorSetLayout), true, "Ray Tracing Descriptor Set Layout"},
+            {ResourceType::Sampler, reinterpret_cast<void*>(context.sampler), false, "Sampler"},
+            {ResourceType::TopLevelAS, reinterpret_cast<void*>(context.topLevelAS), true, "Top-Level Acceleration Structure"},
+            {ResourceType::BottomLevelAS, reinterpret_cast<void*>(context.bottomLevelAS), true, "Bottom-Level Acceleration Structure"},
+            {ResourceType::BottomLevelASBuffer, reinterpret_cast<void*>(context.bottomLevelASBuffer), true, "Bottom-Level AS Buffer"},
+            {ResourceType::BottomLevelASMemory, reinterpret_cast<void*>(context.bottomLevelASMemory), true, "Bottom-Level AS Memory"},
+            {ResourceType::TopLevelASBuffer, reinterpret_cast<void*>(context.topLevelASBuffer), true, "Top-Level AS Buffer"},
+            {ResourceType::TopLevelASMemory, reinterpret_cast<void*>(context.topLevelASMemory), true, "Top-Level AS Memory"},
+            {ResourceType::RaygenSbtBuffer, reinterpret_cast<void*>(context.raygenSbtBuffer), true, "Raygen SBT Buffer"},
+            {ResourceType::RaygenSbtMemory, reinterpret_cast<void*>(context.raygenSbtMemory), true, "Raygen SBT Memory"},
+            {ResourceType::MissSbtBuffer, reinterpret_cast<void*>(context.missSbtBuffer), true, "Miss SBT Buffer"},
+            {ResourceType::MissSbtMemory, reinterpret_cast<void*>(context.missSbtMemory), true, "Miss SBT Memory"},
+            {ResourceType::HitSbtBuffer, reinterpret_cast<void*>(context.hitSbtBuffer), true, "Hit SBT Buffer"},
+            {ResourceType::HitSbtMemory, reinterpret_cast<void*>(context.hitSbtMemory), true, "Hit SBT Memory"},
+            {ResourceType::VertexBuffer, reinterpret_cast<void*>(context.vertexBuffer), true, "Vertex Buffer"},
+            {ResourceType::VertexBufferMemory, reinterpret_cast<void*>(context.vertexBufferMemory), true, "Vertex Buffer Memory"},
+            {ResourceType::IndexBuffer, reinterpret_cast<void*>(context.indexBuffer), true, "Index Buffer"},
+            {ResourceType::IndexBufferMemory, reinterpret_cast<void*>(context.indexBufferMemory), true, "Index Buffer Memory"},
+            {ResourceType::ScratchBuffer, reinterpret_cast<void*>(context.scratchBuffer), true, "Scratch Buffer"},
+            {ResourceType::ScratchBufferMemory, reinterpret_cast<void*>(context.scratchBufferMemory), true, "Scratch Buffer Memory"},
+            {ResourceType::Swapchain, reinterpret_cast<void*>(context.swapchain), false, "Swapchain"},
+            {ResourceType::CommandPool, reinterpret_cast<void*>(context.commandPool), true, "Command Pool"},
+            {ResourceType::Device, reinterpret_cast<void*>(context.device), false, "Device"},
+            {ResourceType::Surface, reinterpret_cast<void*>(context.surface), false, "Surface"},
+            {ResourceType::DebugMessenger, reinterpret_cast<void*>(context.debugMessenger), false, "Debug Messenger"},
+            {ResourceType::Instance, reinterpret_cast<void*>(context.instance), false, "Instance"}
         };
 
         // Iterate disposables with lookup-based cleanup

@@ -34,7 +34,6 @@ public:
 
 private:
     void initializeInput();
-    void initializeAudio();
     void render();
 
     std::string title_;
@@ -45,8 +44,6 @@ private:
     std::unique_ptr<VulkanRTX::VulkanRenderer> renderer_;
     std::unique_ptr<Camera> camera_;
     std::unique_ptr<HandleInput> inputHandler_;
-    SDL_AudioDeviceID audioDevice_;
-    SDL_AudioStream* audioStream_;
     std::vector<glm::vec3> vertices_;
     std::vector<uint32_t> indices_;
     std::chrono::steady_clock::time_point lastFrameTime_;
