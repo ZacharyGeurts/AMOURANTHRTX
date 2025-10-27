@@ -1,28 +1,13 @@
 #version 460
 #extension GL_EXT_ray_tracing : require
-#extension GL_EXT_scalar_block_layout : enable
 
-struct Material {
-    vec3 albedo;
-    float alpha;
-    vec3 padding;
-};
-
-layout(set = 0, binding = 3, std430) readonly buffer MaterialsData {
-    Material materials[];
-} materialsData;
-
-struct RayPayload {
-    vec4 color;
-};
-
-layout(location = 0) rayPayloadInEXT RayPayload payload;
+layout(location = 0) rayPayloadInEXT vec3 hitValue;
+hitAttributeEXT vec3 attribs;
 
 void main() {
-    const int matID = gl_InstanceCustomIndexEXT;
-    const Material mat = materialsData.materials[matID % 26];
-
-    if (mat.alpha < 0.99) {
+    // Example: ignore hits with low alpha (for transparency)
+    float alpha = 1.0; // Replace with texture lookup if needed
+    if (alpha < 0.1) {
         ignoreIntersectionEXT;
     }
 }

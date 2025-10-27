@@ -1,0 +1,18 @@
+#version 460
+#extension GL_EXT_nonuniform_qualifier : enable
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+layout(binding = 1, set = 0, rgba8) uniform image2D outputImage;
+layout(push_constant) uniform PushConstants {
+    vec2 resolution;
+} pc;
+
+void main() {
+    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    if (pixel.x >= pc.resolution.x || pixel.y >= pc.resolution.y) return;
+
+    // Example: simple post-processing (e.g., tone mapping)
+    vec4 color = imageLoad(outputImage, pixel);
+    color.rgb = color.rgb / (color.rgb + vec3(1.0)); // Reinhard tone mapping
+    imageStore(outputImage, pixel, color);
+}

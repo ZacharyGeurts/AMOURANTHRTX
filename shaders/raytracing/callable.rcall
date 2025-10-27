@@ -1,12 +1,8 @@
 #version 460
 #extension GL_EXT_ray_tracing : require
 
-struct CallableResult {
-    vec4 result;
-};
-
-layout(location = 0) callableDataInEXT CallableResult evalResult;
+layout(location = 2) callableDataInEXT float value;
 
 void main() {
-    evalResult.result = vec4(1.0);
+    value = 1.0; // Example: return a constant for material property
 }

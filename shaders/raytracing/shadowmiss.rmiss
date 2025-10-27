@@ -1,12 +1,8 @@
 #version 460
 #extension GL_EXT_ray_tracing : require
 
-struct ShadowPayload {
-    float visibility;
-};
-
-layout(location = 1) rayPayloadInEXT ShadowPayload shadowPayload;
+layout(location = 1) rayPayloadInEXT vec3 shadowPayload;
 
 void main() {
-    shadowPayload.visibility = 1.0;
+    shadowPayload = vec3(1.0); // Light is visible
 }
