@@ -285,12 +285,10 @@ public:
         vkDeviceWaitIdle(effectiveDevice); // Ensure device is idle before cleanup
         LOG_DEBUG("Starting VulkanResourceManager cleanup");
 
-        // Log remaining resources for debugging
         LOG_DEBUG(std::format("Resources before cleanup: buffers={}, memories={}, images={}, imageViews={}, descriptorPools={}, commandPools={}, renderPasses={}, descriptorSetLayouts={}, pipelineLayouts={}, pipelines={}, shaderModules={}",
             buffers_.size(), memories_.size(), images_.size(), imageViews_.size(), descriptorPools_.size(), commandPools_.size(),
             renderPasses_.size(), descriptorSetLayouts_.size(), pipelineLayouts_.size(), pipelines_.size(), shaderModules_.size()));
 
-        // Destroy pipelines
         for (auto pipeline : pipelines_) {
             if (pipeline != VK_NULL_HANDLE) {
                 auto it = std::find(pipelines_.begin(), pipelines_.end(), pipeline);
@@ -304,7 +302,6 @@ public:
         pipelines_.clear();
         pipelineMap_.clear();
 
-        // Destroy pipeline layouts
         for (auto layout : pipelineLayouts_) {
             if (layout != VK_NULL_HANDLE) {
                 auto it = std::find(pipelineLayouts_.begin(), pipelineLayouts_.end(), layout);
@@ -317,7 +314,6 @@ public:
         }
         pipelineLayouts_.clear();
 
-        // Destroy descriptor set layouts
         for (auto layout : descriptorSetLayouts_) {
             if (layout != VK_NULL_HANDLE) {
                 auto it = std::find(descriptorSetLayouts_.begin(), descriptorSetLayouts_.end(), layout);
@@ -330,7 +326,6 @@ public:
         }
         descriptorSetLayouts_.clear();
 
-        // Destroy render passes
         for (auto renderPass : renderPasses_) {
             if (renderPass != VK_NULL_HANDLE) {
                 auto it = std::find(renderPasses_.begin(), renderPasses_.end(), renderPass);
@@ -343,7 +338,6 @@ public:
         }
         renderPasses_.clear();
 
-        // Destroy shader modules
         for (auto module : shaderModules_) {
             if (module != VK_NULL_HANDLE) {
                 auto it = std::find(shaderModules_.begin(), shaderModules_.end(), module);
@@ -356,7 +350,6 @@ public:
         }
         shaderModules_.clear();
 
-        // Destroy acceleration structures
         for (auto as : accelerationStructures_) {
             if (as != VK_NULL_HANDLE) {
                 auto it = std::find(accelerationStructures_.begin(), accelerationStructures_.end(), as);
@@ -373,7 +366,6 @@ public:
         }
         accelerationStructures_.clear();
 
-        // Destroy image views
         for (auto view : imageViews_) {
             if (view != VK_NULL_HANDLE) {
                 auto it = std::find(imageViews_.begin(), imageViews_.end(), view);
@@ -386,7 +378,6 @@ public:
         }
         imageViews_.clear();
 
-        // Destroy images
         for (auto image : images_) {
             if (image != VK_NULL_HANDLE) {
                 auto it = std::find(images_.begin(), images_.end(), image);
@@ -399,7 +390,6 @@ public:
         }
         images_.clear();
 
-        // Destroy buffers
         for (auto buffer : buffers_) {
             if (buffer != VK_NULL_HANDLE) {
                 auto it = std::find(buffers_.begin(), buffers_.end(), buffer);
@@ -412,7 +402,6 @@ public:
         }
         buffers_.clear();
 
-        // Free device memory
         for (auto memory : memories_) {
             if (memory != VK_NULL_HANDLE) {
                 auto it = std::find(memories_.begin(), memories_.end(), memory);
@@ -425,7 +414,6 @@ public:
         }
         memories_.clear();
 
-        // Destroy descriptor pools
         for (auto descriptorPool : descriptorPools_) {
             if (descriptorPool != VK_NULL_HANDLE) {
                 auto it = std::find(descriptorPools_.begin(), descriptorPools_.end(), descriptorPool);
@@ -438,7 +426,6 @@ public:
         }
         descriptorPools_.clear();
 
-        // Destroy command pools
         for (auto commandPool : commandPools_) {
             if (commandPool != VK_NULL_HANDLE) {
                 auto it = std::find(commandPools_.begin(), commandPools_.end(), commandPool);
@@ -456,13 +443,6 @@ public:
 };
 
 namespace VulkanRTX {
-    struct alignas(16) UniformBufferObject {
-        glm::mat4 model;
-        glm::mat4 view;
-        glm::mat4 proj;
-        int mode;
-    };
-
     struct alignas(16) MaterialData {
         alignas(16) glm::vec4 diffuse;   // RGBA color, 16 bytes
         alignas(4) float specular;       // Specular intensity, 4 bytes

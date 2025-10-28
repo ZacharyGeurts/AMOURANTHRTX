@@ -33,7 +33,6 @@ VulkanRTX::VulkanRTX(VkDevice device, VkPhysicalDevice physicalDevice, const std
       dsLayout_(),
       dsPool_(),
       ds_(),
-      rtPipelineLayout_(),
       rtPipeline_(),
       blasBuffer_(),
       blasMemory_(),
@@ -1012,7 +1011,7 @@ void VulkanRTX::updateDescriptors(VkBuffer cameraBuffer, VkBuffer materialBuffer
     VkDescriptorBufferInfo dimensionBufferInfo = {
         .buffer = dimensionBuffer,
         .offset = 0,
-        .range = sizeof(UE::DimensionData)
+        .range = sizeof(DimensionState)
     };
 
     VkDescriptorImageInfo storageImageInfo = {
@@ -1034,7 +1033,7 @@ void VulkanRTX::updateDescriptors(VkBuffer cameraBuffer, VkBuffer materialBuffer
     };
 
     VkDescriptorImageInfo densityVolumeInfo = {
-        .sampler = envMapSampler, // Reuse sampler
+        .sampler = envMapSampler,
         .imageView = densityVolumeView,
         .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
     };
@@ -1186,7 +1185,7 @@ void VulkanRTX::updateDescriptors(VkBuffer cameraBuffer, VkBuffer materialBuffer
 
 void VulkanRTX::initializeRTX(VkPhysicalDevice physicalDevice, VkCommandPool commandPool, VkQueue graphicsQueue,
                               const std::vector<std::tuple<VkBuffer, VkBuffer, uint32_t, uint32_t, uint64_t>>& geometries,
-                              uint32_t maxRayRecursionDepth, const std::vector<UE::DimensionData>& dimensionCache) {
+                              uint32_t maxRayRecursionDepth, const std::vector<DimensionState>& dimensionCache) {
 
     createDescriptorSetLayout();
     createDescriptorPoolAndSet();
@@ -1199,7 +1198,7 @@ void VulkanRTX::initializeRTX(VkPhysicalDevice physicalDevice, VkCommandPool com
 
 void VulkanRTX::updateRTX(VkPhysicalDevice physicalDevice, VkCommandPool commandPool, VkQueue graphicsQueue,
                           const std::vector<std::tuple<VkBuffer, VkBuffer, uint32_t, uint32_t, uint64_t>>& geometries,
-                          const std::vector<UE::DimensionData>& dimensionCache) {
+                          const std::vector<DimensionState>& dimensionCache) {
 
     if (dimensionCache != previousDimensionCache_) {
         createBottomLevelAS(physicalDevice, commandPool, graphicsQueue, geometries);

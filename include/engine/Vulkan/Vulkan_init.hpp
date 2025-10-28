@@ -9,7 +9,7 @@
 
 #include "VulkanCore.hpp"
 #include <vulkan/vulkan.h>
-#include <vulkan/vulkan_beta.h> // Add for ray tracing and buffer device address extensions
+#include <vulkan/vulkan_beta.h>
 #include <span>
 #include <glm/glm.hpp>
 #include <vector>
@@ -46,8 +46,6 @@ namespace VulkanInitializer {
                            VkDeviceMemory& memory, VkImageView& view, uint32_t width, uint32_t height,
                            VulkanResourceManager& resourceManager);
     void createShaderBindingTable(Vulkan::Context& context);
-    void createAccelerationStructures(Vulkan::Context& context, VulkanBufferManager& bufferManager,
-                                     std::span<const glm::vec3> vertices, std::span<const uint32_t> indices);
     void copyBuffer(VkDevice device, VkCommandPool commandPool, VkQueue queue,
                     VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size);
     void createDescriptorPoolAndSet(VkDevice device, VkPhysicalDevice physicalDevice, VkDescriptorSetLayout descriptorSetLayout,

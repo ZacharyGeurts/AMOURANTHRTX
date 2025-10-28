@@ -2,11 +2,12 @@
 // Dependencies: Vulkan 1.3+, GLM, VulkanCore.hpp, Vulkan_init.hpp, ue_init.hpp, Dispose.hpp.
 // Supported platforms: Linux, Windows.
 // Optimized for high-end GPUs with 8 GB VRAM (e.g., NVIDIA RTX 3070, AMD RX 6800).
+// Fixes: Zero-initialize scaled padding in staging/arena to prevent UB/device loss in RT/AS reads.
 
 #include "engine/Vulkan/VulkanBufferManager.hpp"
 #include "engine/Vulkan/Vulkan_init.hpp"
+#include "engine/Vulkan/types.hpp"
 #include "engine/Dispose.hpp"
-#include "ue_init.hpp"
 #include <vulkan/vulkan.h>
 #include <glm/glm.hpp>
 #include <vector>
@@ -318,6 +319,16 @@ void VulkanBufferManager::reserveArena(VkDeviceSize size, BufferType type) {
     if (!impl_->arenaBuffer || !impl_->arenaMemory)
         throw std::runtime_error("Failed to create arena buffer");
     impl_->arenaSize = size;
+
+    // FIX: Zero-initialize arena to prevent garbage in padding
+    VkCommandBuffer zeroCmd = getCommandBuffer(BufferOperation::TRANSFER);
+    VkCommandBufferBeginInfo beginZero{.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT};
+    vkBeginCommandBuffer(zeroCmd, &beginZero);
+    vkCmdFillBuffer(zeroCmd, impl_->arenaBuffer, 0, size, 0);  // Fill with 0
+    vkEndCommandBuffer(zeroCmd);
+    VkSubmitInfo submitZero{.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO, .commandBufferCount = 1, .pCommandBuffers = &zeroCmd};
+    vkQueueSubmit(impl_->transferQueue, 1, &submitZero, VK_NULL_HANDLE);
+    vkQueueWaitIdle(impl_->transferQueue);  // Sync zeroing
 }
 
 VkDeviceAddress VulkanBufferManager::asyncUpdateBuffers(
@@ -325,8 +336,10 @@ VkDeviceAddress VulkanBufferManager::asyncUpdateBuffers(
     std::span<const uint32_t> indices,
     std::function<void(uint64_t)> callback)
 {
-    VkDeviceSize vSize = sizeof(glm::vec3) * vertices.size() * VERTEX_BUFFER_SCALE_FACTOR;
-    VkDeviceSize iSize = sizeof(uint32_t)  * indices.size()  * INDEX_BUFFER_SCALE_FACTOR;
+    VkDeviceSize unscaledVSize = sizeof(glm::vec3) * vertices.size();
+    VkDeviceSize unscaledISize = sizeof(uint32_t)  * indices.size();
+    VkDeviceSize vSize = unscaledVSize * VERTEX_BUFFER_SCALE_FACTOR;
+    VkDeviceSize iSize = unscaledISize * INDEX_BUFFER_SCALE_FACTOR;
     VkDeviceSize total = vSize + iSize;
     if (total > impl_->arenaSize) reserveArena(total, BufferType::GEOMETRY);
 
@@ -354,9 +367,14 @@ VkDeviceAddress VulkanBufferManager::asyncUpdateBuffers(
 
     void* map;
     vkMapMemory(context_.device, stagingMem, 0, total, 0, &map);
-    memcpy(map, vertices.data(), vSize / VERTEX_BUFFER_SCALE_FACTOR);
-    memcpy(static_cast<char*>(map) + vSize / VERTEX_BUFFER_SCALE_FACTOR,
-           indices.data(), iSize / INDEX_BUFFER_SCALE_FACTOR);
+    
+    // FIX: Zero full scaled staging to prevent garbage padding
+    memset(map, 0, total);
+    
+    // Copy original data to start (padding remains zero)
+    memcpy(map, vertices.data(), unscaledVSize);
+    memcpy(static_cast<char*>(map) + unscaledVSize, indices.data(), unscaledISize);
+    
     vkUnmapMemory(context_.device, stagingMem);
 
     VkFenceCreateInfo fci{.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
@@ -367,11 +385,10 @@ VkDeviceAddress VulkanBufferManager::asyncUpdateBuffers(
         .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
     };
     vkBeginCommandBuffer(cmd, &cbi);
-    VkBufferCopy vcopy{.srcOffset = 0, .dstOffset = impl_->vertexOffset,
-                       .size = vSize / VERTEX_BUFFER_SCALE_FACTOR};
-    VkBufferCopy icopy{.srcOffset = vSize / VERTEX_BUFFER_SCALE_FACTOR,
-                       .dstOffset = impl_->indexOffset,
-                       .size = iSize / INDEX_BUFFER_SCALE_FACTOR};
+    
+    // FIX: Copy FULL scaled sizes (matches alloc, with zeroed padding)
+    VkBufferCopy vcopy{.srcOffset = 0, .dstOffset = impl_->vertexOffset, .size = vSize};
+    VkBufferCopy icopy{.srcOffset = vSize, .dstOffset = impl_->indexOffset, .size = iSize};
     vkCmdCopyBuffer(cmd, staging, impl_->arenaBuffer, 1, &vcopy);
     vkCmdCopyBuffer(cmd, staging, impl_->arenaBuffer, 1, &icopy);
 
@@ -419,11 +436,13 @@ VkDeviceAddress VulkanBufferManager::asyncUpdateBuffers(
 
     cleanupResources(context_.device, impl_->commandPool, staging, stagingMem, cmd, fence);
 
-    impl_->vertexOffset = 0;
-    impl_->indexOffset  = vSize;
+    // FIX: Update offsets to full scaled for next use
+    impl_->vertexOffset += vSize;
+    impl_->indexOffset  += iSize;
+
     vertexCount_ = static_cast<uint32_t>(vertices.size());
     indexCount_  = static_cast<uint32_t>(indices.size());
-    return VulkanInitializer::getBufferDeviceAddress(context_.device, impl_->arenaBuffer) + impl_->vertexOffset;
+    return VulkanInitializer::getBufferDeviceAddress(context_.device, impl_->arenaBuffer) + impl_->vertexOffset - vSize;  // Return start of vertices
 }
 
 void VulkanBufferManager::createUniformBuffers(uint32_t count) {
@@ -442,7 +461,7 @@ void VulkanBufferManager::createUniformBuffers(uint32_t count) {
 
     VkPhysicalDeviceProperties props{};
     vkGetPhysicalDeviceProperties(context_.physicalDevice, &props);
-    VkDeviceSize bufSize = (sizeof(UE::UniformBufferObject) + sizeof(int) +
+    VkDeviceSize bufSize = (sizeof(UniformBufferObject) + sizeof(int) +
                             UNIFORM_BUFFER_DEFAULT_SIZE +
                             props.limits.minUniformBufferOffsetAlignment - 1) &
                            ~(props.limits.minUniformBufferOffsetAlignment - 1);
@@ -537,6 +556,11 @@ void VulkanBufferManager::addMeshletBatch(std::span<const MeshletData> meshlets)
     vkBindBufferMemory(context_.device, staging, stagingMem, 0);
 
     void* map; vkMapMemory(context_.device, stagingMem, 0, total, 0, &map);
+    
+    // FIX: Zero full staging
+    memset(map, 0, total);
+    
+    // Copy data
     VkDeviceSize off = 0;
     for (const auto& m : meshlets) {
         memcpy(static_cast<char*>(map) + off, m.data, m.size);
@@ -611,6 +635,10 @@ void VulkanBufferManager::batchTransferAsync(
     vkBindBufferMemory(context_.device, staging, stagingMem, 0);
 
     void* map; vkMapMemory(context_.device, stagingMem, 0, total, 0, &map);
+    
+    // FIX: Zero full staging
+    memset(map, 0, total);
+    
     VkDeviceSize off = 0;
     for (const auto& c : copies) {
         memcpy(static_cast<char*>(map) + off, c.data, c.size);
@@ -826,7 +854,7 @@ void VulkanBufferManager::updateDescriptorSet(VkDescriptorSet ds, uint32_t bindi
     std::vector<VkDescriptorBufferInfo> infos(count);
     VkPhysicalDeviceProperties props{};
     vkGetPhysicalDeviceProperties(context_.physicalDevice, &props);
-    VkDeviceSize bufSize = (sizeof(UE::UniformBufferObject) + sizeof(int) +
+    VkDeviceSize bufSize = (sizeof(UniformBufferObject) + sizeof(int) +
                             UNIFORM_BUFFER_DEFAULT_SIZE +
                             props.limits.minUniformBufferOffsetAlignment - 1) &
                            ~(props.limits.minUniformBufferOffsetAlignment - 1);
@@ -858,7 +886,7 @@ void VulkanBufferManager::prepareDescriptorBufferInfo(std::vector<VkDescriptorBu
     out.resize(count);
     VkPhysicalDeviceProperties props{};
     vkGetPhysicalDeviceProperties(context_.physicalDevice, &props);
-    VkDeviceSize bufSize = (sizeof(UE::UniformBufferObject) + sizeof(int) +
+    VkDeviceSize bufSize = (sizeof(UniformBufferObject) + sizeof(int) +
                             UNIFORM_BUFFER_DEFAULT_SIZE +
                             props.limits.minUniformBufferOffsetAlignment - 1) &
                            ~(props.limits.minUniformBufferOffsetAlignment - 1);

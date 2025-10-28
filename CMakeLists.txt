@@ -44,9 +44,7 @@ set(SOURCE_DIRS
     "${CMAKE_CURRENT_SOURCE_DIR}/shaders/compute"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/engine/SDL3"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/engine/Vulkan"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/modes"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/engine"
-    "${CMAKE_CURRENT_SOURCE_DIR}/include/modes"
 )
 foreach(DIR ${SOURCE_DIRS})
     if(NOT EXISTS "${DIR}")
@@ -245,7 +243,6 @@ set(SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src)
 set(ENGINE_SRC_DIR ${SRC_DIR}/engine)
 set(SDL3_SRC_DIR ${ENGINE_SRC_DIR}/SDL3)
 set(VULKAN_SRC_DIR ${ENGINE_SRC_DIR}/Vulkan)
-set(MODES_SRC_DIR ${SRC_DIR}/modes)
 set(INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/include)
 set(SHADER_DIR ${CMAKE_CURRENT_SOURCE_DIR}/shaders)
 set(ASSET_DIR ${CMAKE_CURRENT_SOURCE_DIR}/assets)
@@ -262,8 +259,6 @@ file(GLOB VULKAN_SOURCES "${VULKAN_SRC_DIR}/*.cpp")
 list(APPEND SOURCES ${VULKAN_SOURCES})
 file(GLOB ENGINE_SOURCES "${ENGINE_SRC_DIR}/*.cpp")
 list(APPEND SOURCES ${ENGINE_SOURCES})
-file(GLOB MODES_SOURCES "${MODES_SRC_DIR}/*.cpp")
-list(APPEND SOURCES ${MODES_SOURCES})
 list(REMOVE_DUPLICATES SOURCES)
 if(NOT SOURCES)
     message(FATAL_ERROR "No source files found in ${SRC_DIR}. Ensure main.cpp and other source files exist.")
