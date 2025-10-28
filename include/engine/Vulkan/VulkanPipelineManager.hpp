@@ -119,6 +119,8 @@ public:
     void createRayTracingPipeline();
     void createComputePipeline();
     void createShaderBindingTable();
+    void createAccelerationStructures(VkBuffer vertexBuffer, VkBuffer indexBuffer);
+    void updateRayTracingDescriptorSet(VkDescriptorSet descriptorSet, VkAccelerationStructureKHR tlasHandle);
     void recordGraphicsCommands(VkCommandBuffer commandBuffer, VkFramebuffer framebuffer, VkDescriptorSet descriptorSet, uint32_t width, uint32_t height, VkImage denoiseImage);
     void recordComputeCommands(VkCommandBuffer commandBuffer, VkImage outputImage, VkDescriptorSet descriptorSet, uint32_t width, uint32_t height, VkImage gDepth, VkImage gNormal, VkImage historyImage);
     void recordRayTracingCommands(VkCommandBuffer commandBuffer, VkImage outputImage, VkDescriptorSet descriptorSet, uint32_t width, uint32_t height, VkImage gDepth, VkImage gNormal);
@@ -131,9 +133,10 @@ public:
     VkPipelineLayout getComputePipelineLayout() const { return computePipelineLayout_ ? computePipelineLayout_->get() : VK_NULL_HANDLE; }
     VkRenderPass getRenderPass() const { return renderPass_; }
     const ShaderBindingTable& getShaderBindingTable() const { return sbt_; }
+    VkAccelerationStructureKHR getTlasHandle() const { return tlasHandle_; }
 
 private:
-	void createRayTracingPipelineLayout();
+    void createRayTracingPipelineLayout();
     void createPipelineCache();
     void createRayTracingDescriptorSetLayout();
     void createGraphicsDescriptorSetLayout();
@@ -158,6 +161,10 @@ private:
     std::unordered_map<std::string, std::string> shaderPaths_;
     ShaderBindingTable sbt_;
     PlatformConfig platformConfig_;
+    VkAccelerationStructureKHR blasHandle_ = VK_NULL_HANDLE;
+    VkAccelerationStructureKHR tlasHandle_ = VK_NULL_HANDLE;
+    PFN_vkCreateAccelerationStructureKHR createAsFunc_ = nullptr;
+    PFN_vkDestroyAccelerationStructureKHR destroyAsFunc_ = nullptr;
 #ifdef ENABLE_VULKAN_DEBUG
     VkDebugUtilsMessengerEXT debugMessenger_;
 #endif

@@ -121,7 +121,9 @@ VulkanPipelineManager::VulkanPipelineManager(Vulkan::Context& context, int width
       sbt_(),
       platformConfig_({.graphicsQueueFamily = context.graphicsQueueFamilyIndex,
                       .computeQueueFamily  = context.computeQueueFamilyIndex,
-                      .preferDeviceLocalMemory = true})
+                      .preferDeviceLocalMemory = true}),
+      createAsFunc_(nullptr),
+      destroyAsFunc_(nullptr)
 {
 #ifdef ENABLE_VULKAN_DEBUG
     debugMessenger_ = VK_NULL_HANDLE;
@@ -130,6 +132,16 @@ VulkanPipelineManager::VulkanPipelineManager(Vulkan::Context& context, int width
 
     if (!context_.device || !context_.physicalDevice || !context_.graphicsQueue)
         throw std::runtime_error("Invalid Vulkan context");
+
+    // Load RT extension functions
+    createAsFunc_ = reinterpret_cast<PFN_vkCreateAccelerationStructureKHR>(vkGetDeviceProcAddr(context_.device, "vkCreateAccelerationStructureKHR"));
+    if (!createAsFunc_) {
+        throw std::runtime_error("Failed to load vkCreateAccelerationStructureKHR");
+    }
+    destroyAsFunc_ = reinterpret_cast<PFN_vkDestroyAccelerationStructureKHR>(vkGetDeviceProcAddr(context_.device, "vkDestroyAccelerationStructureKHR"));
+    if (!destroyAsFunc_) {
+        throw std::runtime_error("Failed to load vkDestroyAccelerationStructureKHR");
+    }
 
     // allocate a fallback command buffer if none exist
     if (context_.commandBuffers.empty() && context_.commandPool != VK_NULL_HANDLE) {
@@ -196,6 +208,15 @@ VulkanPipelineManager::VulkanPipelineManager(Vulkan::Context& context, int width
 // -----------------------------------------------------------------------------
 VulkanPipelineManager::~VulkanPipelineManager()
 {
+    if (blasHandle_ != VK_NULL_HANDLE && destroyAsFunc_) {
+        destroyAsFunc_(context_.device, blasHandle_, nullptr);
+        blasHandle_ = VK_NULL_HANDLE;
+    }
+    if (tlasHandle_ != VK_NULL_HANDLE && destroyAsFunc_) {
+        destroyAsFunc_(context_.device, tlasHandle_, nullptr);
+        tlasHandle_ = VK_NULL_HANDLE;
+    }
+
     if (graphicsPipeline_)       context_.resourceManager.removePipeline(graphicsPipeline_->get());
     if (graphicsPipelineLayout_) context_.resourceManager.removePipelineLayout(graphicsPipelineLayout_->get());
     if (rayTracingPipeline_)     context_.resourceManager.removePipeline(rayTracingPipeline_->get());
@@ -512,6 +533,329 @@ void VulkanPipelineManager::recordGraphicsCommands(VkCommandBuffer cmd,
     vkCmdDraw(cmd, 3, 1, 0, 0);
     vkCmdEndRenderPass(cmd);
     vkEndCommandBuffer(cmd);
+}
+
+// -----------------------------------------------------------------------------
+//  NEW: Create Acceleration Structures for Ray Tracing (Fix for Blue Screen)
+//  Call this after creating vertex/index buffers in your init code.
+//  Assumes vertex buffer contains 3 vec3 positions (stride 12 bytes), index buffer 3 uint32 indices.
+// -----------------------------------------------------------------------------
+void VulkanPipelineManager::createAccelerationStructures(VkBuffer vertexBuffer, VkBuffer indexBuffer) {
+    VkDeviceAddress vertexAddr = VulkanInitializer::getBufferDeviceAddress(context_.device, vertexBuffer);
+    VkDeviceAddress indexAddr = VulkanInitializer::getBufferDeviceAddress(context_.device, indexBuffer);
+
+    // Query AS properties
+    VkPhysicalDeviceAccelerationStructurePropertiesKHR asProps{};
+    asProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_PROPERTIES_KHR;
+    VkPhysicalDeviceProperties2 props2{};
+    props2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+    props2.pNext = &asProps;
+    vkGetPhysicalDeviceProperties2(context_.physicalDevice, &props2);
+
+    // BLAS Geometry Setup
+    VkAccelerationStructureGeometryTrianglesDataKHR triangles{};
+    triangles.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
+    triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
+    triangles.vertexData.deviceAddress = vertexAddr;
+    triangles.vertexStride = sizeof(glm::vec3);
+    triangles.maxVertex = 2;  // 3 vertices: 0,1,2
+    triangles.indexType = VK_INDEX_TYPE_UINT32;
+    triangles.indexData.deviceAddress = indexAddr;
+
+    VkAccelerationStructureGeometryKHR geometry{};
+    geometry.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
+    geometry.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
+    geometry.geometry.triangles = triangles;
+    geometry.flags = VK_GEOMETRY_OPAQUE_BIT_KHR | VK_GEOMETRY_NO_DUPLICATE_ANY_HIT_INVOCATION_BIT_KHR;
+
+    VkAccelerationStructureBuildRangeInfoKHR buildRangeInfo{};
+    buildRangeInfo.primitiveCount = 1;  // One triangle
+
+    // Get Build Sizes
+    auto vkGetAccelerationStructureBuildSizesKHR = reinterpret_cast<PFN_vkGetAccelerationStructureBuildSizesKHR>(
+        vkGetDeviceProcAddr(context_.device, "vkGetAccelerationStructureBuildSizesKHR"));
+    if (!vkGetAccelerationStructureBuildSizesKHR) {
+        throw std::runtime_error("Failed to get vkGetAccelerationStructureBuildSizesKHR");
+    }
+
+    VkAccelerationStructureBuildGeometryInfoKHR buildInfo{};
+    buildInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
+    buildInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+    buildInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+    buildInfo.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
+    buildInfo.geometryCount = 1;
+    buildInfo.pGeometries = &geometry;
+
+    std::vector<uint32_t> maxPrimCounts = {1};
+    VkAccelerationStructureBuildSizesInfoKHR sizeInfo{};
+    sizeInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
+    vkGetAccelerationStructureBuildSizesKHR(context_.device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
+                                            &buildInfo, maxPrimCounts.data(), &sizeInfo);
+
+    // Create AS buffer for BLAS
+    VkBuffer blasBuffer;
+    VkDeviceMemory blasMemory;
+    VulkanInitializer::createBuffer(context_.device, context_.physicalDevice, sizeInfo.accelerationStructureSize,
+                                    VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                                    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, blasBuffer, blasMemory, nullptr, context_.resourceManager);
+
+    // Create BLAS
+    VkAccelerationStructureCreateInfoKHR asCreateInfo{};
+    asCreateInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
+    asCreateInfo.buffer = blasBuffer;
+    asCreateInfo.offset = 0;
+    asCreateInfo.size = sizeInfo.accelerationStructureSize;
+    asCreateInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+
+    VkAccelerationStructureKHR blasHandleLocal = VK_NULL_HANDLE;
+    if (createAsFunc_(context_.device, &asCreateInfo, nullptr, &blasHandleLocal) != VK_SUCCESS) {
+        Dispose::destroySingleBuffer(context_.device, blasBuffer);
+        Dispose::freeSingleDeviceMemory(context_.device, blasMemory);
+        context_.resourceManager.removeBuffer(blasBuffer);
+        context_.resourceManager.removeMemory(blasMemory);
+        throw std::runtime_error("Failed to create BLAS");
+    }
+    blasHandle_ = blasHandleLocal;
+
+    // Create scratch buffer
+    VkDeviceSize scratchSizeAligned = (sizeInfo.buildScratchSize + asProps.minAccelerationStructureScratchOffsetAlignment - 1) &
+                                      ~(asProps.minAccelerationStructureScratchOffsetAlignment - 1);
+    VkBuffer scratchBuffer;
+    VkDeviceMemory scratchMemory;
+    VulkanInitializer::createBuffer(context_.device, context_.physicalDevice, scratchSizeAligned,
+                                    VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                                    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, scratchBuffer, scratchMemory, nullptr, context_.resourceManager);
+
+    // Temp command buffer for build
+    VkCommandBufferAllocateInfo cmdAlloc{};
+    cmdAlloc.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    cmdAlloc.commandPool = context_.commandPool;
+    cmdAlloc.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    cmdAlloc.commandBufferCount = 1;
+    VkCommandBuffer cmd;
+    vkAllocateCommandBuffers(context_.device, &cmdAlloc, &cmd);
+
+    VkCommandBufferBeginInfo beginInfo{};
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    vkBeginCommandBuffer(cmd, &beginInfo);
+
+    // Build BLAS
+    buildInfo.dstAccelerationStructure = blasHandle_;
+    buildInfo.scratchData.deviceAddress = VulkanInitializer::getBufferDeviceAddress(context_.device, scratchBuffer);
+    VkAccelerationStructureBuildRangeInfoKHR* pRangeInfo = &buildRangeInfo;
+    auto vkCmdBuildAccelerationStructuresKHR = reinterpret_cast<PFN_vkCmdBuildAccelerationStructuresKHR>(
+        vkGetDeviceProcAddr(context_.device, "vkCmdBuildAccelerationStructuresKHR"));
+    if (!vkCmdBuildAccelerationStructuresKHR) {
+        vkFreeCommandBuffers(context_.device, context_.commandPool, 1, &cmd);
+        throw std::runtime_error("Failed to get vkCmdBuildAccelerationStructuresKHR");
+    }
+    vkCmdBuildAccelerationStructuresKHR(cmd, 1, &buildInfo, &pRangeInfo);
+
+    vkEndCommandBuffer(cmd);
+
+    // Submit
+    VkSubmitInfo submit{};
+    submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit.commandBufferCount = 1;
+    submit.pCommandBuffers = &cmd;
+    VkFenceCreateInfo fenceInfo{};
+    fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    VkFence fence;
+    vkCreateFence(context_.device, &fenceInfo, nullptr, &fence);
+    if (vkQueueSubmit(context_.graphicsQueue, 1, &submit, fence) != VK_SUCCESS) {
+        vkDestroyFence(context_.device, fence, nullptr);
+        vkFreeCommandBuffers(context_.device, context_.commandPool, 1, &cmd);
+        throw std::runtime_error("Failed to submit BLAS build");
+    }
+    if (vkWaitForFences(context_.device, 1, &fence, VK_TRUE, UINT64_MAX) != VK_SUCCESS) {
+        vkDestroyFence(context_.device, fence, nullptr);
+        vkFreeCommandBuffers(context_.device, context_.commandPool, 1, &cmd);
+        throw std::runtime_error("Failed to wait for BLAS build");
+    }
+    vkDestroyFence(context_.device, fence, nullptr);
+    vkFreeCommandBuffers(context_.device, context_.commandPool, 1, &cmd);
+
+    // Clean scratch
+    Dispose::destroySingleBuffer(context_.device, scratchBuffer);
+    Dispose::freeSingleDeviceMemory(context_.device, scratchMemory);
+    context_.resourceManager.removeBuffer(scratchBuffer);
+    context_.resourceManager.removeMemory(scratchMemory);
+
+    // Get BLAS device address
+    auto vkGetAccelerationStructureDeviceAddressKHR = reinterpret_cast<PFN_vkGetAccelerationStructureDeviceAddressKHR>(
+        vkGetDeviceProcAddr(context_.device, "vkGetAccelerationStructureDeviceAddressKHR"));
+    if (!vkGetAccelerationStructureDeviceAddressKHR) {
+        throw std::runtime_error("Failed to get vkGetAccelerationStructureDeviceAddressKHR");
+    }
+    VkAccelerationStructureDeviceAddressInfoKHR addrInfo{};
+    addrInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR;
+    addrInfo.accelerationStructure = blasHandle_;
+    VkDeviceAddress blasAddr = vkGetAccelerationStructureDeviceAddressKHR(context_.device, &addrInfo);
+
+    // Instance buffer for TLAS (one instance)
+    VkBuffer instanceBuffer;
+    VkDeviceMemory instanceMemory;
+    VkDeviceSize instanceSize = sizeof(VkAccelerationStructureInstanceKHR);
+    VulkanInitializer::createBuffer(context_.device, context_.physicalDevice, instanceSize,
+                                    VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                                    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, instanceBuffer, instanceMemory, nullptr, context_.resourceManager);
+
+    // Staging for instance
+    VkBuffer stagingBuffer;
+    VkDeviceMemory stagingMemory;
+    VulkanInitializer::createBuffer(context_.device, context_.physicalDevice, instanceSize,
+                                    VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                                    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                                    stagingBuffer, stagingMemory, nullptr, context_.resourceManager);
+
+    // Fill instance
+    VkAccelerationStructureInstanceKHR instance{};
+    // Identity transform (row-major 3x4)
+    float identity[12] = {1,0,0,0, 0,1,0,0, 0,0,1,0};
+    memcpy(&instance.transform, identity, sizeof(VkTransformMatrixKHR));
+    instance.instanceCustomIndex = 0;
+    instance.mask = 0xFF;
+    instance.instanceShaderBindingTableRecordOffset = 0;
+    instance.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
+    instance.accelerationStructureReference = blasAddr;
+
+    void* data;
+    vkMapMemory(context_.device, stagingMemory, 0, instanceSize, 0, &data);
+    memcpy(data, &instance, instanceSize);
+    vkUnmapMemory(context_.device, stagingMemory);
+
+    // Copy to device
+    VkCommandBuffer cmdCopy;
+    vkAllocateCommandBuffers(context_.device, &cmdAlloc, &cmdCopy);
+    vkBeginCommandBuffer(cmdCopy, &beginInfo);
+    VkBufferCopy copy{};
+    copy.size = instanceSize;
+    vkCmdCopyBuffer(cmdCopy, stagingBuffer, instanceBuffer, 1, &copy);
+    vkEndCommandBuffer(cmdCopy);
+    vkQueueSubmit(context_.graphicsQueue, 1, &submit, VK_NULL_HANDLE);
+    vkQueueWaitIdle(context_.graphicsQueue);
+    vkFreeCommandBuffers(context_.device, context_.commandPool, 1, &cmdCopy);
+
+    // Clean staging
+    Dispose::destroySingleBuffer(context_.device, stagingBuffer);
+    Dispose::freeSingleDeviceMemory(context_.device, stagingMemory);
+    context_.resourceManager.removeBuffer(stagingBuffer);
+    context_.resourceManager.removeMemory(stagingMemory);
+
+    // TLAS Geometry
+    VkAccelerationStructureGeometryInstancesDataKHR instancesData{};
+    instancesData.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR;
+    instancesData.data.deviceAddress = VulkanInitializer::getBufferDeviceAddress(context_.device, instanceBuffer);
+
+    VkAccelerationStructureGeometryKHR tlasGeometry{};
+    tlasGeometry.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
+    tlasGeometry.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
+    tlasGeometry.geometry.instances = instancesData;
+    tlasGeometry.flags = VK_GEOMETRY_OPAQUE_BIT_KHR | VK_GEOMETRY_NO_DUPLICATE_ANY_HIT_INVOCATION_BIT_KHR;
+
+    VkAccelerationStructureBuildRangeInfoKHR tlasRange{};
+    tlasRange.primitiveCount = 1;  // One instance
+
+    // Reuse buildInfo for TLAS
+    buildInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
+    buildInfo.geometryCount = 1;
+    buildInfo.pGeometries = &tlasGeometry;
+
+    std::vector<uint32_t> tlasMaxPrimCounts = {1};
+    VkAccelerationStructureBuildSizesInfoKHR tlasSizeInfo{};
+    tlasSizeInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
+    vkGetAccelerationStructureBuildSizesKHR(context_.device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
+                                            &buildInfo, tlasMaxPrimCounts.data(), &tlasSizeInfo);
+
+    // Create AS buffer for TLAS
+    VkBuffer tlasBuffer;
+    VkDeviceMemory tlasMemory;
+    VulkanInitializer::createBuffer(context_.device, context_.physicalDevice, tlasSizeInfo.accelerationStructureSize,
+                                    VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                                    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, tlasBuffer, tlasMemory, nullptr, context_.resourceManager);
+
+    VkAccelerationStructureCreateInfoKHR tlasCreateInfo{};
+    tlasCreateInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
+    tlasCreateInfo.buffer = tlasBuffer;
+    tlasCreateInfo.offset = 0;
+    tlasCreateInfo.size = tlasSizeInfo.accelerationStructureSize;
+    tlasCreateInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
+
+    VkAccelerationStructureKHR tlasHandleLocal = VK_NULL_HANDLE;
+    if (createAsFunc_(context_.device, &tlasCreateInfo, nullptr, &tlasHandleLocal) != VK_SUCCESS) {
+        Dispose::destroySingleBuffer(context_.device, tlasBuffer);
+        Dispose::freeSingleDeviceMemory(context_.device, tlasMemory);
+        context_.resourceManager.removeBuffer(tlasBuffer);
+        context_.resourceManager.removeMemory(tlasMemory);
+        throw std::runtime_error("Failed to create TLAS");
+    }
+    tlasHandle_ = tlasHandleLocal;
+
+    // Scratch for TLAS
+    VkDeviceSize tlasScratchSizeAligned = (tlasSizeInfo.buildScratchSize + asProps.minAccelerationStructureScratchOffsetAlignment - 1) &
+                                          ~(asProps.minAccelerationStructureScratchOffsetAlignment - 1);
+    VkBuffer tlasScratchBuffer;
+    VkDeviceMemory tlasScratchMemory;
+    VulkanInitializer::createBuffer(context_.device, context_.physicalDevice, tlasScratchSizeAligned,
+                                    VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                                    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, tlasScratchBuffer, tlasScratchMemory, nullptr, context_.resourceManager);
+
+    // Build TLAS
+    vkAllocateCommandBuffers(context_.device, &cmdAlloc, &cmd);
+    vkBeginCommandBuffer(cmd, &beginInfo);
+
+    buildInfo.dstAccelerationStructure = tlasHandle_;
+    buildInfo.scratchData.deviceAddress = VulkanInitializer::getBufferDeviceAddress(context_.device, tlasScratchBuffer);
+    pRangeInfo = &tlasRange;
+    vkCmdBuildAccelerationStructuresKHR(cmd, 1, &buildInfo, &pRangeInfo);
+
+    vkEndCommandBuffer(cmd);
+
+    // Submit TLAS
+    VkFence tlasFence;
+    vkCreateFence(context_.device, &fenceInfo, nullptr, &tlasFence);
+    if (vkQueueSubmit(context_.graphicsQueue, 1, &submit, tlasFence) != VK_SUCCESS) {
+        vkDestroyFence(context_.device, tlasFence, nullptr);
+        vkFreeCommandBuffers(context_.device, context_.commandPool, 1, &cmd);
+        throw std::runtime_error("Failed to submit TLAS build");
+    }
+    if (vkWaitForFences(context_.device, 1, &tlasFence, VK_TRUE, UINT64_MAX) != VK_SUCCESS) {
+        vkDestroyFence(context_.device, tlasFence, nullptr);
+        vkFreeCommandBuffers(context_.device, context_.commandPool, 1, &cmd);
+        throw std::runtime_error("Failed to wait for TLAS build");
+    }
+    vkDestroyFence(context_.device, tlasFence, nullptr);
+    vkFreeCommandBuffers(context_.device, context_.commandPool, 1, &cmd);
+
+    // Clean TLAS scratch
+    Dispose::destroySingleBuffer(context_.device, tlasScratchBuffer);
+    Dispose::freeSingleDeviceMemory(context_.device, tlasScratchMemory);
+    context_.resourceManager.removeBuffer(tlasScratchBuffer);
+    context_.resourceManager.removeMemory(tlasScratchMemory);
+
+    LOG_INFO("Acceleration structures built successfully. BLAS: {}, TLAS: {}", (void*)blasHandle_, (void*)tlasHandle_);
+}
+
+// -----------------------------------------------------------------------------
+//  NEW: Update Descriptor Set with TLAS (Call per-frame if dynamic)
+//  Pass the TLAS handle from createAccelerationStructures (store it!).
+// -----------------------------------------------------------------------------
+void VulkanPipelineManager::updateRayTracingDescriptorSet(VkDescriptorSet descriptorSet, VkAccelerationStructureKHR tlasHandle) {
+    VkWriteDescriptorSetAccelerationStructureKHR accelWrite{};
+    accelWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR;
+    accelWrite.accelerationStructureCount = 1;
+    accelWrite.pAccelerationStructures = &tlasHandle;
+
+    VkWriteDescriptorSet write{};
+    write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    write.dstSet = descriptorSet;
+    write.dstBinding = static_cast<uint32_t>(DescriptorBindings::TLAS);  // 0
+    write.descriptorCount = 1;
+    write.descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+    write.pNext = &accelWrite;
+
+    vkUpdateDescriptorSets(context_.device, 1, &write, 0, nullptr);
 }
 
 } // namespace VulkanRTX

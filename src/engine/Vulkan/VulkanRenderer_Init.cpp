@@ -27,8 +27,8 @@ VulkanRenderer::VulkanRenderer(int width, int height, void* window, const std::v
       window_(window),
       currentFrame_(0),
       frameCount_(0),
-      lastLogTime_(std::chrono::steady_clock::now()),
-      framesSinceLastLog_(0),
+      framesSinceLastLog_(0),  // First: Matches declaration order (line 87)
+      lastLogTime_(std::chrono::steady_clock::now()),  // Then: Matches line 88
       indexCount_(0),
       rtPipeline_(VK_NULL_HANDLE),
       rtPipelineLayout_(VK_NULL_HANDLE),
