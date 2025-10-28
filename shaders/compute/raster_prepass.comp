@@ -1,15 +1,125 @@
-#version 460
+#version 450
+
+// Assuming descriptor bindings similar to ray tracing layout for consistency:
+// - Binding 0: UBO for camera (view-projection matrix)
+// - Binding 1: Vertex buffer (positions as vec3)
+// - Binding 2: Index buffer (uint, but for single triangle: 0,1,2)
+// - Binding 3: Storage image for G-Depth (R32_SFLOAT)
+// - Binding 4: Storage image for G-Normal (RGB32_SFLOAT or similar, storing view-space normal)
 
 layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 
-layout(set = 0, binding = 8, r32f) uniform image2D gDepth;
-layout(set = 0, binding = 9, rgb10_a2) uniform image2D gNormal;
+layout(set = 0, binding = 0) uniform CameraUBO {
+    mat4 viewProj;
+    mat4 invView;
+} camera;
+
+layout(set = 0, binding = 1, std430) readonly buffer VertexBuffer {
+    vec3 vertices[];
+};
+
+layout(set = 0, binding = 2, std430) readonly buffer IndexBuffer {
+    uint indices[];
+};
+
+layout(set = 0, binding = 3, rgba32f) uniform image2D gDepth;
+layout(set = 0, binding = 4, rgba32f) uniform image2D gNormal;
+
+// Push constants for resolution and other params
+layout(push_constant) uniform PushConstants {
+    vec2 resolution;
+    float nearPlane;
+    float farPlane;
+} pc;
+
+// Simple struct for screen-space triangle vertices
+struct ScreenVertex {
+    vec2 pos;  // Screen-space xy (0 to resolution)
+    float depth;  // Linear depth or NDC z
+    vec3 normal; // View-space normal (interpolated)
+};
+
+bool isInsideTriangle(vec2 p, vec2 a, vec2 b, vec2 c) {
+    // Barycentric coordinates using edge functions
+    float area = ((b.y - c.y) * (a.x - c.x) + (c.x - b.x) * (a.y - c.y)) * 0.5;
+    if (area <= 0.0) return false; // Degenerate
+
+    float w1 = ((b.y - c.y) * (p.x - c.x) + (c.x - b.x) * (p.y - c.y)) * 0.5 / area;
+    float w2 = ((c.y - a.y) * (p.x - c.x) + (a.x - c.x) * (p.y - c.y)) * 0.5 / area;
+    float w3 = 1.0 - w1 - w2;
+
+    return (w1 >= 0.0 && w2 >= 0.0 && w3 >= 0.0);
+}
+
+vec3 interpolateAttribute(vec3 v0, vec3 v1, vec3 v2, float w0, float w1, float w2) {
+    return v0 * w0 + v1 * w1 + v2 * w2;
+}
 
 void main() {
-    const ivec2 pos = ivec2(gl_GlobalInvocationID.xy);
-    // Passthru: Fill with constant "default" values (e.g., depth=1.0, normal=Y-up)
-    if (all(greaterThanEqual(pos, ivec2(0)))) {
-        imageStore(gDepth, pos, vec4(1.0));  // Far plane depth
-        imageStore(gNormal, pos, vec4(0.0, 1.0, 0.0, 1.0));  // Up normal
+    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    if (pixel.x >= int(pc.resolution.x) || pixel.y >= int(pc.resolution.y)) {
+        return;
     }
+
+    // Assume single triangle: indices 0,1,2
+    uint idx0 = indices[0];
+    uint idx1 = indices[1];
+    uint idx2 = indices[2];
+
+    vec3 v0 = vertices[idx0];
+    vec3 v1 = vertices[idx1];
+    vec3 v2 = vertices[idx2];
+
+    // Transform to clip space
+    vec4 p0 = camera.viewProj * vec4(v0, 1.0);
+    vec4 p1 = camera.viewProj * vec4(v1, 1.0);
+    vec4 p2 = camera.viewProj * vec4(v2, 1.0);
+
+    // Perspective divide
+    vec3 pos0 = p0.xyz / p0.w;
+    vec3 pos1 = p1.xyz / p1.w;
+    vec3 pos2 = p2.xyz / p2.w;
+
+    // Screen space positions (assuming viewport is 0..width, 0..height, flipped y for Vulkan)
+    vec2 ss0 = (pos0.xy * 0.5 + 0.5) * pc.resolution;
+    ss0.y = pc.resolution.y - ss0.y;  // Flip y
+    vec2 ss1 = (pos1.xy * 0.5 + 0.5) * pc.resolution;
+    ss1.y = pc.resolution.y - ss1.y;
+    vec2 ss2 = (pos2.xy * 0.5 + 0.5) * pc.resolution;
+    ss2.y = pc.resolution.y - ss2.y;
+
+    vec2 pixelPos = vec2(pixel) + vec2(0.5);  // Pixel center
+
+    if (!isInsideTriangle(pixelPos, ss0, ss1, ss2)) {
+        // Write max depth (far plane) for background
+        float farDepth = pc.farPlane;
+        imageStore(gDepth, pixel, vec4(farDepth, 0.0, 0.0, 0.0));
+        imageStore(gNormal, pixel, vec4(0.0, 0.0, 1.0, 0.0));  // Default forward normal
+        return;
+    }
+
+    // Compute barycentric weights
+    float area = ((ss1.y - ss2.y) * (ss0.x - ss2.x) + (ss2.x - ss1.x) * (ss0.y - ss2.y)) * 0.5;
+    if (abs(area) < 1e-6) return;
+
+    float w0 = ((ss1.y - ss2.y) * (pixelPos.x - ss2.x) + (ss2.x - ss1.x) * (pixelPos.y - ss2.y)) / (2.0 * area);
+    float w1 = ((ss2.y - ss0.y) * (pixelPos.x - ss2.x) + (ss0.x - ss2.x) * (pixelPos.y - ss2.y)) / (2.0 * area);
+    float w2 = 1.0 - w0 - w1;
+
+    // Interpolate depth (use linear depth in view space for accuracy)
+    vec3 viewPos0 = (camera.invView * vec4(v0, 1.0)).xyz;
+    vec3 viewPos1 = (camera.invView * vec4(v1, 1.0)).xyz;
+    vec3 viewPos2 = (camera.invView * vec4(v2, 1.0)).xyz;
+    vec3 interpViewPos = interpolateAttribute(viewPos0, viewPos1, viewPos2, w0, w1, w2);
+    float depth = -interpViewPos.z;  // Assuming right-handed, positive forward
+
+    // Compute normal (flat for triangle)
+    vec3 edge1 = v1 - v0;
+    vec3 edge2 = v2 - v0;
+    vec3 normal = normalize(cross(edge1, edge2));
+    // Transform to view space if needed
+    normal = normalize((camera.invView * vec4(normal, 0.0)).xyz);
+
+    imageStore(gDepth, pixel, vec4(depth, 0.0, 0.0, 1.0));
+    imageStore(gNormal, pixel, vec4(normal, 0.0));
 }

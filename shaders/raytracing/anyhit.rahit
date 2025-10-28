@@ -1,13 +1,25 @@
 #version 460
 #extension GL_EXT_ray_tracing : require
+#extension GL_EXT_nonuniform_qualifier : enable
 
-layout(location = 0) rayPayloadInEXT vec3 hitValue;
-hitAttributeEXT vec3 attribs;
+layout(set = 0, binding = 10) uniform sampler2D alphaTex;
+
+// NO layout(location)
+hitAttributeEXT vec2 hitAttribs;
+
+layout(push_constant) uniform PushConstants {
+    vec2 resolution;
+    uint enableAlphaMask;
+} pc;
 
 void main() {
-    // Example: ignore hits with low alpha (for transparency)
-    float alpha = 1.0; // Replace with texture lookup if needed
-    if (alpha < 0.1) {
+    if (pc.enableAlphaMask == 0) return;
+
+    vec3 bary = vec3(1.0 - hitAttribs.x - hitAttribs.y, hitAttribs.x, hitAttribs.y);
+    vec2 uv = bary.x * vec2(0.0, 0.0) + bary.y * vec2(1.0, 0.0) + bary.z * vec2(0.5, 1.0);
+
+    float alpha = texture(alphaTex, uv).r;
+    if (alpha < 0.5) {
         ignoreIntersectionEXT;
     }
 }

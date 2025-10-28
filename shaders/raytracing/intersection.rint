@@ -1,24 +1,28 @@
 #version 460
 #extension GL_EXT_ray_tracing : require
 
-hitAttributeEXT vec3 attribs;
+// NO layout(location) — NOT ALLOWED
+hitAttributeEXT vec3 hitAttribs;
+
+bool intersectAABB(vec3 origin, vec3 dir, out float tmin, out float tmax) {
+    vec3 invDir = 1.0 / dir;
+    vec3 t0 = (-0.5 - origin) * invDir;
+    vec3 t1 = ( 0.5 - origin) * invDir;
+    vec3 tmin3 = min(t0, t1);
+    vec3 tmax3 = max(t0, t1);
+    tmin = max(max(tmin3.x, tmin3.y), tmin3.z);
+    tmax = min(min(tmax3.x, tmax3.y), tmax3.z);
+    return tmin <= tmax && tmax >= 0.0;
+}
 
 void main() {
-    // Example: sphere intersection at origin with radius 0.5
-    vec3 center = vec3(0.0);
-    float radius = 0.5;
+    vec3 origin = gl_ObjectRayOriginEXT;
+    vec3 dir    = gl_ObjectRayDirectionEXT;
 
-    vec3 oc = gl_WorldRayOriginEXT - center;
-    float a = dot(gl_WorldRayDirectionEXT, gl_WorldRayDirectionEXT);
-    float b = 2.0 * dot(oc, gl_WorldRayDirectionEXT);
-    float c = dot(oc, oc) - radius * radius;
-    float discriminant = b * b - 4.0 * a * c;
-
-    if (discriminant > 0.0) {
-        float t = (-b - sqrt(discriminant)) / (2.0 * a);
-        if (t > 0.0) {
-            attribs = vec3(0.0); // No specific attributes needed
-            reportIntersectionEXT(t, 0);
-        }
+    float tmin, tmax;
+    if (intersectAABB(origin, dir, tmin, tmax)) {
+        hitAttribs = vec3(0.0);
+        if (tmin > 0.0) reportIntersectionEXT(tmin, 0);
+        else if (tmax > 0.0) reportIntersectionEXT(tmax, 0);
     }
 }

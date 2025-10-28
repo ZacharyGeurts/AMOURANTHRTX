@@ -2,26 +2,152 @@
 #extension GL_EXT_ray_tracing : require
 #extension GL_EXT_nonuniform_qualifier : enable
 #extension GL_EXT_scalar_block_layout : enable
+#extension GL_EXT_buffer_reference : require
+#extension GL_EXT_buffer_reference2 : require
 
-layout(location = 0) rayPayloadEXT vec3 hitValue;
-layout(binding = 0, set = 0) uniform accelerationStructureEXT topLevelAS;
-layout(binding = 1, set = 0, rgba8) uniform image2D outputImage;
+// ---------------------------------------------------------------------
+//  STRUCTS (Must be defined before use)
+// ---------------------------------------------------------------------
+struct MaterialData {
+    vec3 albedo;
+    float metallic;
+    vec3 emissive;
+    float roughness;
+    uint textureIndex;
+    uint normalIndex;
+    uint alphaIndex;
+    uint pad;
+};
+
+struct UE_DimensionData {
+    mat4 transform;
+    uint materialIndex;
+    uint pad0, pad1, pad2;
+};
+
+// ---------------------------------------------------------------------
+//  Layout & Bindings – Matches VulkanRTX::DescriptorBindings
+// ---------------------------------------------------------------------
+layout(set = 0, binding = 0) uniform accelerationStructureEXT topLevelAS;
+layout(set = 0, binding = 1, rgba8) uniform image2D storageImage;
+
+layout(set = 0, binding = 2, scalar) uniform CameraUBO {
+    mat4 viewInverse;
+    mat4 projInverse;
+    vec3 camPos;
+    float fov;
+    float nearPlane;
+    float farPlane;
+    uint frameIndex;
+    uint pad;
+} cam;
+
+layout(set = 0, binding = 3, scalar) readonly buffer MaterialSSBO {
+    uint materialCount;
+    uint pad0, pad1, pad2;
+    MaterialData materials[];
+} matSSBO;
+
+layout(set = 0, binding = 4, scalar) readonly buffer DimensionSSBO {
+    uint dimensionCount;
+    uint pad0, pad1, pad2;
+    UE_DimensionData dimensions[];
+} dimSSBO;
+
+layout(set = 0, binding = 5, rgba8) uniform image2D denoiseImage;
+layout(set = 0, binding = 6) uniform sampler2D envMap;
+layout(set = 0, binding = 7) uniform sampler3D densityVolume;
+layout(set = 0, binding = 8) uniform sampler2D gDepth;
+layout(set = 0, binding = 9) uniform sampler2D gNormal;
+layout(set = 0, binding = 10) uniform sampler2D alphaTex;
+
+// ---------------------------------------------------------------------
+//  Push Constants
+// ---------------------------------------------------------------------
 layout(push_constant) uniform PushConstants {
     vec2 resolution;
+    uint frameIndex;
+    uint maxBounces;
+    float time;
+    float exposure;
+    uint enableDenoise;
+    uint enableVolumetrics;
+    uint enableEnvMap;
+    uint enableGBuffer;
+    uint enableAlphaMask;
 } pc;
 
+// ---------------------------------------------------------------------
+//  Ray Payload
+// ---------------------------------------------------------------------
+struct HitPayload {
+    vec3 radiance;
+    vec3 attenuation;
+    vec3 origin;
+    vec3 direction;
+    uint depth;
+    uint seed;
+    bool isShadowRay;
+};
+
+layout(location = 0) rayPayloadEXT HitPayload prd;
+
+// ---------------------------------------------------------------------
+//  PCG Random
+// ---------------------------------------------------------------------
+uint pcg(inout uint state) {
+    uint prev = state;
+    state = state * 747796405u + 2891336453u;
+    uint word = ((prev >> ((prev >> 28u) + 4u)) ^ prev) * 277803737u;
+    return (word >> 22u) ^ word;
+}
+
+float rand(inout uint seed) {
+    return float(pcg(seed)) / 4294967295.0;
+}
+
+// ---------------------------------------------------------------------
+//  Generate Camera Ray
+// ---------------------------------------------------------------------
+void generateCameraRay(out vec3 origin, out vec3 direction) {
+    vec2 pixelCenter = vec2(gl_LaunchIDEXT.xy) + vec2(0.5);
+    vec2 uv = pixelCenter / pc.resolution;
+
+    vec4 clipPos = vec4(uv * 2.0 - 1.0, 0.0, 1.0);
+    vec4 viewPosH = cam.projInverse * clipPos;
+    vec4 worldPosH = cam.viewInverse * vec4(viewPosH.xyz / viewPosH.w, 1.0);
+
+    origin = cam.camPos;
+    direction = normalize(worldPosH.xyz - origin);
+}
+
+// ---------------------------------------------------------------------
+//  Main
+// ---------------------------------------------------------------------
 void main() {
-    const vec2 pixelCenter = vec2(gl_LaunchIDEXT.xy) + vec2(0.5);
-    const vec2 uv = pixelCenter / pc.resolution;
-    const vec2 d = uv * 2.0 - 1.0;
+    vec3 rayOrigin, rayDirection;
+    generateCameraRay(rayOrigin, rayDirection);
 
-    // Simple camera: origin at (0,0,1), looking at -Z, FOV ~90 degrees
-    vec3 origin = vec3(0.0, 0.0, 1.0);
-    vec3 direction = normalize(vec3(d.x, -d.y, -1.0));
+    prd.radiance = vec3(0.0);
+    prd.attenuation = vec3(1.0);
+    prd.origin = rayOrigin;
+    prd.direction = rayDirection;
+    prd.depth = 0;
+    prd.seed = uint(pc.frameIndex * 73856093u + gl_LaunchIDEXT.x * 19349663u + gl_LaunchIDEXT.y * 83492791u);
+    prd.isShadowRay = false;
 
-    hitValue = vec3(0.0);
+    traceRayEXT(
+        topLevelAS,
+        gl_RayFlagsOpaqueEXT,
+        0xFF,
+        0, 0, 0,
+        rayOrigin, 0.001, rayDirection, 1000.0,
+        0
+    );
 
-    traceRayEXT(topLevelAS, gl_RayFlagsOpaqueEXT, 0xFF, 0, 0, 0, origin, 0.001, direction, 1000.0, 0);
+    imageStore(storageImage, ivec2(gl_LaunchIDEXT.xy), vec4(prd.radiance, 1.0));
 
-    imageStore(outputImage, ivec2(gl_LaunchIDEXT.xy), vec4(hitValue, 1.0));
+    if (pc.enableDenoise != 0) {
+        imageStore(denoiseImage, ivec2(gl_LaunchIDEXT.xy), vec4(prd.radiance, 1.0));
+    }
 }
