@@ -79,22 +79,28 @@ private:
     int width_;
     int height_;
     void* window_;
-    uint32_t currentFrame_;
-    uint32_t frameCount_;
+    uint32_t currentFrame_ = 0;
+    uint32_t frameCount_ = 0;                     // Total frames rendered
+    uint32_t framesThisSecond_ = 0;               // Frames in current second
+    std::chrono::steady_clock::time_point lastFPSTime_; // Start of current second
+
+    uint32_t framesSinceLastLog_ = 0;
     std::chrono::steady_clock::time_point lastLogTime_;
-    uint32_t framesSinceLastLog_;
-    uint32_t indexCount_; // Cached index count for performance
-    VkPipeline rtPipeline_;
-    VkPipelineLayout rtPipelineLayout_;
-    VkImage denoiseImage_;
-    VkDeviceMemory denoiseImageMemory_;
-    VkImageView denoiseImageView_;
-    VkSampler denoiseSampler_;
-    VkImage envMapImage_;
-    VkDeviceMemory envMapImageMemory_;
-    VkImageView envMapImageView_;
-    VkSampler envMapSampler_;
-    VkDescriptorSetLayout computeDescriptorSetLayout_;
+
+    uint32_t indexCount_ = 0; // Cached index count for performance
+
+    VkPipeline rtPipeline_ = VK_NULL_HANDLE;
+    VkPipelineLayout rtPipelineLayout_ = VK_NULL_HANDLE;
+    VkImage denoiseImage_ = VK_NULL_HANDLE;
+    VkDeviceMemory denoiseImageMemory_ = VK_NULL_HANDLE;
+    VkImageView denoiseImageView_ = VK_NULL_HANDLE;
+    VkSampler denoiseSampler_ = VK_NULL_HANDLE;
+    VkImage envMapImage_ = VK_NULL_HANDLE;
+    VkDeviceMemory envMapImageMemory_ = VK_NULL_HANDLE;
+    VkImageView envMapImageView_ = VK_NULL_HANDLE;
+    VkSampler envMapSampler_ = VK_NULL_HANDLE;
+    VkDescriptorSetLayout computeDescriptorSetLayout_ = VK_NULL_HANDLE;
+
     Vulkan::Context context_;
     std::unique_ptr<VulkanRTX> rtx_;
     std::unique_ptr<VulkanSwapchainManager> swapchainManager_;
@@ -107,7 +113,8 @@ private:
     std::vector<VkDeviceMemory> dimensionBufferMemory_;
 };
 
-const uint32_t MAX_FRAMES_IN_FLIGHT = 3;
+constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 3;
+constexpr bool FPS_COUNTER = true; // Enable per-second FPS logging
 
 } // namespace VulkanRTX
 
