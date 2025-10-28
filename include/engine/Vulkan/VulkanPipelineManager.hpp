@@ -133,6 +133,7 @@ public:
     const ShaderBindingTable& getShaderBindingTable() const { return sbt_; }
 
 private:
+	void createRayTracingPipelineLayout();
     void createPipelineCache();
     void createRayTracingDescriptorSetLayout();
     void createGraphicsDescriptorSetLayout();
