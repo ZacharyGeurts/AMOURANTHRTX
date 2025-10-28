@@ -26,15 +26,6 @@
 
 namespace VulkanRTX {
 
-VulkanRTX::ShaderBindingTable::ShaderBindingTable(VkDevice device, VkBuffer buffer, VkDeviceMemory memory,
-                                                 PFN_vkDestroyBuffer destroyBuffer, PFN_vkFreeMemory freeMemory)
-    : buffer(device, buffer, destroyBuffer),
-      memory(device, memory, freeMemory),
-      raygen{0, 0, 0},
-      miss{0, 0, 0},
-      hit{0, 0, 0},
-      callable{0, 0, 0} {}
-
 VulkanRTX::VulkanRTX(VkDevice device, VkPhysicalDevice physicalDevice, const std::vector<std::string>& shaderPaths)
     : device_(device),
       physicalDevice_(physicalDevice),

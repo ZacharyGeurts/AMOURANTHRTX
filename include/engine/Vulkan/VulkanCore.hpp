@@ -456,20 +456,6 @@ public:
 };
 
 namespace VulkanRTX {
-    enum class DescriptorBindings {
-        TLAS = 0,
-        StorageImage = 1,
-        CameraUBO = 2,
-        MaterialSSBO = 3,
-        DimensionDataSSBO = 4,
-        AlphaTex = 5,
-        DenoiseImage = 6,
-        EnvMap = 7,
-        DensityVolume = 8,
-        GDepth = 9,
-        GNormal = 10
-    };
-
     struct alignas(16) UniformBufferObject {
         glm::mat4 model;
         glm::mat4 view;

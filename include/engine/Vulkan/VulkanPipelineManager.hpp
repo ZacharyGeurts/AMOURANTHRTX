@@ -1,16 +1,16 @@
-#ifndef VULKANPIPELINEMANAGER_HPP
-#define VULKANPIPELINEMANAGER_HPP
+// include/engine/Vulkan/VulkanPipelineManager.hpp
+// AMOURANTH RTX Engine © 2025 by Zachary Geurts gzac5314@gmail.com is licensed under CC BY-NC 4.0
 
-#include <vulkan/vulkan.h>
-#include <glm/glm.hpp>
-#include <memory>
-#include <string>
-#include <vector>
-#include <unordered_map>
+#pragma once
+
 #include "engine/Vulkan/VulkanCore.hpp"
-#include "engine/Vulkan/VulkanRTX_Setup.hpp"
+#include "engine/Vulkan/VulkanRTX_Setup.hpp"  // <-- MUST include for ShaderBindingTable
 #include "engine/Dispose.hpp"
-#include "engine/logging.hpp"
+#include "engine/MaterialData.hpp"
+#include <vulkan/vulkan.h>
+#include <memory>
+#include <unordered_map>
+#include <string>
 
 #ifdef ENABLE_VULKAN_DEBUG
 #include <vulkan/vulkan_ext_debug_utils.h>
@@ -18,158 +18,98 @@
 
 namespace VulkanRTX {
 
-struct PlatformConfig {
-    uint32_t graphicsQueueFamily = 0;
-    uint32_t computeQueueFamily = 0;
-    bool preferDeviceLocalMemory = true; // Consoles prefer device-local memory
-};
-
-struct ShaderBindingTable {
-    VkStridedDeviceAddressRegionKHR raygen{0, 0, 0};
-    VkStridedDeviceAddressRegionKHR miss{0, 0, 0};
-    VkStridedDeviceAddressRegionKHR hit{0, 0, 0};
-    VkStridedDeviceAddressRegionKHR callable{0, 0, 0};
-
-    VkBuffer buffer{VK_NULL_HANDLE};
-    VkDeviceMemory memory{VK_NULL_HANDLE};
-    VkDevice device{VK_NULL_HANDLE};
-    PFN_vkDestroyBuffer destroyBufferFunc{nullptr};
-    PFN_vkFreeMemory freeMemoryFunc{nullptr};
-
-    ShaderBindingTable() = default;
-
-    ShaderBindingTable(VkDevice dev, VkBuffer buf, VkDeviceMemory mem, PFN_vkDestroyBuffer db, PFN_vkFreeMemory fm)
-        : buffer(buf), memory(mem), device(dev), destroyBufferFunc(db), freeMemoryFunc(fm) {}
-
-    ~ShaderBindingTable() {
-        if (buffer != VK_NULL_HANDLE && destroyBufferFunc != nullptr) {
-            destroyBufferFunc(device, buffer, nullptr);
-            buffer = VK_NULL_HANDLE;
-            LOG_DEBUG_CAT("PipelineManager", "Destroyed SBT buffer: {:p}", static_cast<void*>(buffer));
-        }
-        if (memory != VK_NULL_HANDLE && freeMemoryFunc != nullptr) {
-            freeMemoryFunc(device, memory, nullptr);
-            memory = VK_NULL_HANDLE;
-            LOG_DEBUG_CAT("PipelineManager", "Freed SBT memory: {:p}", static_cast<void*>(memory));
-        }
-    }
-
-    ShaderBindingTable(const ShaderBindingTable&) = delete;
-    ShaderBindingTable& operator=(const ShaderBindingTable&) = delete;
-
-    ShaderBindingTable(ShaderBindingTable&& other) noexcept
-        : raygen(other.raygen), miss(other.miss), hit(other.hit), callable(other.callable),
-          buffer(other.buffer), memory(other.memory), device(other.device),
-          destroyBufferFunc(other.destroyBufferFunc), freeMemoryFunc(other.freeMemoryFunc) {
-        other.raygen = {0, 0, 0};
-        other.miss = {0, 0, 0};
-        other.hit = {0, 0, 0};
-        other.callable = {0, 0, 0};
-        other.buffer = VK_NULL_HANDLE;
-        other.memory = VK_NULL_HANDLE;
-        other.device = VK_NULL_HANDLE;
-        other.destroyBufferFunc = nullptr;
-        other.freeMemoryFunc = nullptr;
-    }
-
-    ShaderBindingTable& operator=(ShaderBindingTable&& other) noexcept {
-        if (this != &other) {
-            if (buffer != VK_NULL_HANDLE && destroyBufferFunc != nullptr) {
-                destroyBufferFunc(device, buffer, nullptr);
-                LOG_DEBUG_CAT("PipelineManager", "Destroyed SBT buffer: {:p}", static_cast<void*>(buffer));
-            }
-            if (memory != VK_NULL_HANDLE && freeMemoryFunc != nullptr) {
-                freeMemoryFunc(device, memory, nullptr);
-                LOG_DEBUG_CAT("PipelineManager", "Freed SBT memory: {:p}", static_cast<void*>(memory));
-            }
-
-            raygen = other.raygen;
-            miss = other.miss;
-            hit = other.hit;
-            callable = other.callable;
-            buffer = other.buffer;
-            memory = other.memory;
-            device = other.device;
-            destroyBufferFunc = other.destroyBufferFunc;
-            freeMemoryFunc = other.freeMemoryFunc;
-
-            other.raygen = {0, 0, 0};
-            other.miss = {0, 0, 0};
-            other.hit = {0, 0, 0};
-            other.callable = {0, 0, 0};
-            other.buffer = VK_NULL_HANDLE;
-            other.memory = VK_NULL_HANDLE;
-            other.device = VK_NULL_HANDLE;
-            other.destroyBufferFunc = nullptr;
-            other.freeMemoryFunc = nullptr;
-        }
-        return *this;
-    }
-};
-
+// ---------------------------------------------------------------------
+//  VulkanPipelineManager
+// ---------------------------------------------------------------------
 class VulkanPipelineManager {
 public:
     VulkanPipelineManager(Vulkan::Context& context, int width, int height);
     ~VulkanPipelineManager();
 
-    VulkanPipelineManager(const VulkanPipelineManager&) = delete;
-    VulkanPipelineManager& operator=(const VulkanPipelineManager&) = delete;
-
-    void createGraphicsPipeline(int width, int height);
+    // Pipeline creation
     void createRayTracingPipeline();
     void createComputePipeline();
+    void createGraphicsPipeline(int width, int height);
     void createShaderBindingTable();
+
+    // Acceleration structures
     void createAccelerationStructures(VkBuffer vertexBuffer, VkBuffer indexBuffer);
     void updateRayTracingDescriptorSet(VkDescriptorSet descriptorSet, VkAccelerationStructureKHR tlasHandle);
-    void recordGraphicsCommands(VkCommandBuffer commandBuffer, VkFramebuffer framebuffer, VkDescriptorSet descriptorSet, uint32_t width, uint32_t height, VkImage denoiseImage);
-    void recordComputeCommands(VkCommandBuffer commandBuffer, VkImage outputImage, VkDescriptorSet descriptorSet, uint32_t width, uint32_t height, VkImage gDepth, VkImage gNormal, VkImage historyImage);
-    void recordRayTracingCommands(VkCommandBuffer commandBuffer, VkImage outputImage, VkDescriptorSet descriptorSet, uint32_t width, uint32_t height, VkImage gDepth, VkImage gNormal);
 
-    VkPipeline getGraphicsPipeline() const { return graphicsPipeline_ ? graphicsPipeline_->get() : VK_NULL_HANDLE; }
-    VkPipelineLayout getGraphicsPipelineLayout() const { return graphicsPipelineLayout_ ? graphicsPipelineLayout_->get() : VK_NULL_HANDLE; }
-    VkPipeline getRayTracingPipeline() const { return rayTracingPipeline_ ? rayTracingPipeline_->get() : VK_NULL_HANDLE; }
-    VkPipelineLayout getRayTracingPipelineLayout() const { return rayTracingPipelineLayout_ ? rayTracingPipelineLayout_->get() : VK_NULL_HANDLE; }
-    VkPipeline getComputePipeline() const { return computePipeline_ ? computePipeline_->get() : VK_NULL_HANDLE; }
-    VkPipelineLayout getComputePipelineLayout() const { return computePipelineLayout_ ? computePipelineLayout_->get() : VK_NULL_HANDLE; }
-    VkRenderPass getRenderPass() const { return renderPass_; }
+    // Command recording
+    void recordGraphicsCommands(VkCommandBuffer cmd, VkFramebuffer fb, VkDescriptorSet ds,
+                                uint32_t w, uint32_t h, VkImage denoiseImage = VK_NULL_HANDLE);
+    void recordRayTracingCommands(VkCommandBuffer cmd, VkImage outputImage,
+                                  VkDescriptorSet descSet, uint32_t width, uint32_t height,
+                                  VkImage gDepth, VkImage gNormal);
+    void recordComputeCommands(VkCommandBuffer cmd, VkImage outputImage,
+                               VkDescriptorSet ds, uint32_t w, uint32_t h,
+                               VkImage gDepth, VkImage gNormal, VkImage denoiseImage);
+
+    // --------------------- PUBLIC GETTERS ---------------------
+    VkPipeline               getGraphicsPipeline() const { return graphicsPipeline_ ? graphicsPipeline_->get() : VK_NULL_HANDLE; }
+    VkPipelineLayout         getGraphicsPipelineLayout() const { return graphicsPipelineLayout_ ? graphicsPipelineLayout_->get() : VK_NULL_HANDLE; }
+    VkPipeline               getRayTracingPipeline() const { return rayTracingPipeline_ ? rayTracingPipeline_->get() : VK_NULL_HANDLE; }
+    VkPipelineLayout         getRayTracingPipelineLayout() const { return rayTracingPipelineLayout_ ? rayTracingPipelineLayout_->get() : VK_NULL_HANDLE; }
+    VkPipeline               getComputePipeline() const { return computePipeline_ ? computePipeline_->get() : VK_NULL_HANDLE; }
+    VkPipelineLayout         getComputePipelineLayout() const { return computePipelineLayout_ ? computePipelineLayout_->get() : VK_NULL_HANDLE; }
+    VkRenderPass             getRenderPass() const { return renderPass_; }
+    VkAccelerationStructureKHR getTLASHandle() const { return tlasHandle_; }
     const ShaderBindingTable& getShaderBindingTable() const { return sbt_; }
-    VkAccelerationStructureKHR getTlasHandle() const { return tlasHandle_; }
 
 private:
-    void createRayTracingPipelineLayout();
-    void createPipelineCache();
+    VkShaderModule loadShader(VkDevice device, const std::string& shaderType);
     void createRayTracingDescriptorSetLayout();
     void createGraphicsDescriptorSetLayout();
-    VkShaderModule loadShader(VkDevice device, const std::string& shaderType);
+    void createPipelineCache();
+
 #ifdef ENABLE_VULKAN_DEBUG
     void setupDebugCallback();
+    VkDebugUtilsMessengerEXT debugMessenger_ = VK_NULL_HANDLE;
 #endif
 
+    // Context
     Vulkan::Context& context_;
-    int width_;
-    int height_;
+    int width_, height_;
+
+    // Pipelines
     std::unique_ptr<VulkanResource<VkPipeline, PFN_vkDestroyPipeline>> rayTracingPipeline_;
     std::unique_ptr<VulkanResource<VkPipelineLayout, PFN_vkDestroyPipelineLayout>> rayTracingPipelineLayout_;
     std::unique_ptr<VulkanResource<VkPipeline, PFN_vkDestroyPipeline>> computePipeline_;
     std::unique_ptr<VulkanResource<VkPipelineLayout, PFN_vkDestroyPipelineLayout>> computePipelineLayout_;
     std::unique_ptr<VulkanResource<VkPipeline, PFN_vkDestroyPipeline>> graphicsPipeline_;
     std::unique_ptr<VulkanResource<VkPipelineLayout, PFN_vkDestroyPipelineLayout>> graphicsPipelineLayout_;
-    VkRenderPass renderPass_;
-    VkPipelineCache pipelineCache_;
+
+    // Render pass
+    VkRenderPass renderPass_ = VK_NULL_HANDLE;
+
+    // Pipeline cache
+    VkPipelineCache pipelineCache_ = VK_NULL_HANDLE;
+
+    // Extra compute pipelines
     VkPipeline rasterPrepassPipeline_ = VK_NULL_HANDLE;
     VkPipeline denoiserPostPipeline_ = VK_NULL_HANDLE;
-    std::unordered_map<std::string, std::string> shaderPaths_;
-    ShaderBindingTable sbt_;
-    PlatformConfig platformConfig_;
-    VkAccelerationStructureKHR blasHandle_ = VK_NULL_HANDLE;
+
+    // Acceleration structures (order fixed for init warning)
     VkAccelerationStructureKHR tlasHandle_ = VK_NULL_HANDLE;
-    PFN_vkCreateAccelerationStructureKHR createAsFunc_ = nullptr;
+    VkAccelerationStructureKHR blasHandle_ = VK_NULL_HANDLE;
+
+    // Shader paths
+    std::unordered_map<std::string, std::string> shaderPaths_;
+
+    // SBT
+    ShaderBindingTable sbt_;
+
+    // Platform config
+    struct PlatformConfig {
+        uint32_t graphicsQueueFamily;
+        uint32_t computeQueueFamily;
+        bool preferDeviceLocalMemory;
+    } platformConfig_;
+
+    // AS function pointers
+    PFN_vkCreateAccelerationStructureKHR  createAsFunc_ = nullptr;
     PFN_vkDestroyAccelerationStructureKHR destroyAsFunc_ = nullptr;
-#ifdef ENABLE_VULKAN_DEBUG
-    VkDebugUtilsMessengerEXT debugMessenger_;
-#endif
 };
 
 } // namespace VulkanRTX
-
-#endif // VULKANPIPELINEMANAGER_HPP
