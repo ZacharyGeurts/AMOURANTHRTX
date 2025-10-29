@@ -1,8 +1,6 @@
-// AMOURANTH RTX Engine, October 2025 - Vulkan buffer management.
-// Dependencies: Vulkan 1.3+, GLM, VulkanCore.hpp, Vulkan_init.hpp, ue_init.hpp, Dispose.hpp.
-// Supported platforms: Linux, Windows.
-// Optimized for high-end GPUs with 8 GB VRAM (e.g., NVIDIA RTX 3070, AMD RX 6800).
-// Fixes: Zero-initialize scaled padding in staging/arena to prevent UB/device loss in RT/AS reads.
+// src/engine/Vulkan/VulkanBufferManager.cpp
+// AMOURANTH RTX Engine © 2025 by Zachary Geurts gzac5314@gmail.com is licensed under CC BY-NC 4.0
+// C++20 std::format — NO external fmt library
 
 #include "engine/Vulkan/VulkanBufferManager.hpp"
 #include "engine/Vulkan/Vulkan_init.hpp"
@@ -177,7 +175,7 @@ VulkanBufferManager::VulkanBufferManager(Vulkan::Context& context,
     initializeCommandPool();
 
     VkDeviceSize vSize = sizeof(glm::vec3) * vertices.size() * VERTEX_BUFFER_SCALE_FACTOR;
-    VkDeviceSize iSize = sizeof(uint32_t)  * indices.size()  * INDEX_BUFFER_SCALE_FACTOR;
+    VkDeviceSize iSize = sizeof(uint32_t) * indices.size() * INDEX_BUFFER_SCALE_FACTOR;
     VkDeviceSize total = vSize + iSize;
     VkDeviceSize arenaSize = std::max(ARENA_DEFAULT_SIZE, total * 2);
     if (arenaSize > devLocal / 2)
@@ -442,7 +440,7 @@ VkDeviceAddress VulkanBufferManager::asyncUpdateBuffers(
 
     vertexCount_ = static_cast<uint32_t>(vertices.size());
     indexCount_  = static_cast<uint32_t>(indices.size());
-    return VulkanInitializer::getBufferDeviceAddress(context_.device, impl_->arenaBuffer) + impl_->vertexOffset - vSize;  // Return start of vertices
+    return VulkanInitializer::getBufferDeviceAddress(context_, impl_->arenaBuffer) + impl_->vertexOffset - vSize;  // Return start of vertices
 }
 
 void VulkanBufferManager::createUniformBuffers(uint32_t count) {
@@ -745,7 +743,7 @@ void VulkanBufferManager::reserveScratchPool(VkDeviceSize size_per_buffer, uint3
             &flagsInfo, context_.resourceManager
         );
         impl_->scratchBufferAddresses[i] =
-            VulkanInitializer::getBufferDeviceAddress(context_.device, impl_->scratchBuffers[i]);
+            VulkanInitializer::getBufferDeviceAddress(context_, impl_->scratchBuffers[i]);
     }
     context_.scratchBuffer = impl_->scratchBuffers[0];
     context_.scratchBufferMemory = impl_->scratchBufferMemories[0];

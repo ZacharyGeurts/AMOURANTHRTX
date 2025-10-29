@@ -2,7 +2,7 @@
 // Core rendering dispatcher – picks the correct mode at runtime.
 // Copyright Zachary Geurts 2025
 
-#include "engine/core.hpp"               // <-- your new header
+#include "engine/core.hpp"
 #include "engine/logging.hpp"
 
 namespace VulkanRTX {
@@ -29,11 +29,6 @@ void renderMode1(
     VkFramebuffer framebuffer,
     Vulkan::Context& context
 ) {
-    // -----------------------------------------------------------------
-    //  Paste the **original** renderMode1 implementation here.
-    //  (Copy the whole function body from the file you previously had
-    //   as renderMode1.cpp – keep the exact same code.)
-    // -----------------------------------------------------------------
     LOG_DEBUG_CAT("RenderMode1", "Rendering mode 1 with zoomLevel: {}, wavePhase: {}", zoomLevel, wavePhase);
 
     VkClearValue clearValue = {{{0.02f, 0.02f, 0.05f, 1.0f}}};
@@ -108,13 +103,13 @@ void renderMode1(
         };
         VkStridedDeviceAddressRegionKHR callableEntry{};
 
-        if (!VulkanInitializer::vkCmdTraceRaysKHR) {
-            LOG_ERROR_CAT("RenderMode1", "vkCmdTraceRaysKHR is null");
+        if (!context.vkCmdTraceRaysKHR) {
+            LOG_ERROR_CAT("RenderMode1", "context.vkCmdTraceRaysKHR is null");
             throw std::runtime_error("Ray tracing extension not loaded");
         }
-        VulkanInitializer::vkCmdTraceRaysKHR(commandBuffer,
-                                             &raygenEntry, &missEntry, &hitEntry, &callableEntry,
-                                             width, height, 1);
+        context.vkCmdTraceRaysKHR(commandBuffer,
+                                  &raygenEntry, &missEntry, &hitEntry, &callableEntry,
+                                  width, height, 1);
     }
 
     vkCmdEndRenderPass(commandBuffer);
@@ -179,7 +174,7 @@ void renderMode2(
             alignas(4)  uint32_t  maxDepth;
             alignas(4)  uint32_t  maxBounces;
             alignas(4)  float     russianRoulette;
-            alignas(4)  float     density;  // Additional for volumetric
+            alignas(4)  float     density;
         } push{
             .clearColor      = glm::vec4(0.05f, 0.01f, 0.08f, 1.0f),
             .cameraPosition  = glm::vec3(0.0f, 0.0f, 5.0f + zoomLevel),
@@ -220,13 +215,13 @@ void renderMode2(
         };
         VkStridedDeviceAddressRegionKHR callableEntry{};
 
-        if (!VulkanInitializer::vkCmdTraceRaysKHR) {
-            LOG_ERROR_CAT("RenderMode2", "vkCmdTraceRaysKHR is null");
+        if (!context.vkCmdTraceRaysKHR) {
+            LOG_ERROR_CAT("RenderMode2", "context.vkCmdTraceRaysKHR is null");
             throw std::runtime_error("Ray tracing extension not loaded");
         }
-        VulkanInitializer::vkCmdTraceRaysKHR(commandBuffer,
-                                             &raygenEntry, &missEntry, &hitEntry, &callableEntry,
-                                             width, height, 1);
+        context.vkCmdTraceRaysKHR(commandBuffer,
+                                  &raygenEntry, &missEntry, &hitEntry, &callableEntry,
+                                  width, height, 1);
     }
 
     vkCmdEndRenderPass(commandBuffer);
@@ -331,13 +326,13 @@ void renderMode3(
         };
         VkStridedDeviceAddressRegionKHR callableEntry{};
 
-        if (!VulkanInitializer::vkCmdTraceRaysKHR) {
-            LOG_ERROR_CAT("RenderMode3", "vkCmdTraceRaysKHR is null");
+        if (!context.vkCmdTraceRaysKHR) {
+            LOG_ERROR_CAT("RenderMode3", "context.vkCmdTraceRaysKHR is null");
             throw std::runtime_error("Ray tracing extension not loaded");
         }
-        VulkanInitializer::vkCmdTraceRaysKHR(commandBuffer,
-                                             &raygenEntry, &missEntry, &hitEntry, &callableEntry,
-                                             width, height, 1);
+        context.vkCmdTraceRaysKHR(commandBuffer,
+                                  &raygenEntry, &missEntry, &hitEntry, &callableEntry,
+                                  width, height, 1);
     }
 
     vkCmdEndRenderPass(commandBuffer);
@@ -442,13 +437,13 @@ void renderMode4(
         };
         VkStridedDeviceAddressRegionKHR callableEntry{};
 
-        if (!VulkanInitializer::vkCmdTraceRaysKHR) {
-            LOG_ERROR_CAT("RenderMode4", "vkCmdTraceRaysKHR is null");
+        if (!context.vkCmdTraceRaysKHR) {
+            LOG_ERROR_CAT("RenderMode4", "context.vkCmdTraceRaysKHR is null");
             throw std::runtime_error("Ray tracing extension not loaded");
         }
-        VulkanInitializer::vkCmdTraceRaysKHR(commandBuffer,
-                                             &raygenEntry, &missEntry, &hitEntry, &callableEntry,
-                                             width, height, 1);
+        context.vkCmdTraceRaysKHR(commandBuffer,
+                                  &raygenEntry, &missEntry, &hitEntry, &callableEntry,
+                                  width, height, 1);
     }
 
     vkCmdEndRenderPass(commandBuffer);
@@ -554,13 +549,13 @@ void renderMode5(
         };
         VkStridedDeviceAddressRegionKHR callableEntry{};
 
-        if (!VulkanInitializer::vkCmdTraceRaysKHR) {
-            LOG_ERROR_CAT("RenderMode5", "vkCmdTraceRaysKHR is null");
+        if (!context.vkCmdTraceRaysKHR) {
+            LOG_ERROR_CAT("RenderMode5", "context.vkCmdTraceRaysKHR is null");
             throw std::runtime_error("Ray tracing extension not loaded");
         }
-        VulkanInitializer::vkCmdTraceRaysKHR(commandBuffer,
-                                             &raygenEntry, &missEntry, &hitEntry, &callableEntry,
-                                             width, height, 1);
+        context.vkCmdTraceRaysKHR(commandBuffer,
+                                  &raygenEntry, &missEntry, &hitEntry, &callableEntry,
+                                  width, height, 1);
     }
 
     vkCmdEndRenderPass(commandBuffer);
@@ -666,13 +661,13 @@ void renderMode6(
         };
         VkStridedDeviceAddressRegionKHR callableEntry{};
 
-        if (!VulkanInitializer::vkCmdTraceRaysKHR) {
-            LOG_ERROR_CAT("RenderMode6", "vkCmdTraceRaysKHR is null");
+        if (!context.vkCmdTraceRaysKHR) {
+            LOG_ERROR_CAT("RenderMode6", "context.vkCmdTraceRaysKHR is null");
             throw std::runtime_error("Ray tracing extension not loaded");
         }
-        VulkanInitializer::vkCmdTraceRaysKHR(commandBuffer,
-                                             &raygenEntry, &missEntry, &hitEntry, &callableEntry,
-                                             width, height, 1);
+        context.vkCmdTraceRaysKHR(commandBuffer,
+                                  &raygenEntry, &missEntry, &hitEntry, &callableEntry,
+                                  width, height, 1);
     }
 
     vkCmdEndRenderPass(commandBuffer);
@@ -777,13 +772,13 @@ void renderMode7(
         };
         VkStridedDeviceAddressRegionKHR callableEntry{};
 
-        if (!VulkanInitializer::vkCmdTraceRaysKHR) {
-            LOG_ERROR_CAT("RenderMode7", "vkCmdTraceRaysKHR is null");
+        if (!context.vkCmdTraceRaysKHR) {
+            LOG_ERROR_CAT("RenderMode7", "context.vkCmdTraceRaysKHR is null");
             throw std::runtime_error("Ray tracing extension not loaded");
         }
-        VulkanInitializer::vkCmdTraceRaysKHR(commandBuffer,
-                                             &raygenEntry, &missEntry, &hitEntry, &callableEntry,
-                                             width, height, 1);
+        context.vkCmdTraceRaysKHR(commandBuffer,
+                                  &raygenEntry, &missEntry, &hitEntry, &callableEntry,
+                                  width, height, 1);
     }
 
     vkCmdEndRenderPass(commandBuffer);
@@ -859,7 +854,7 @@ void renderMode8(
             ),
             .lightColor      = glm::vec3(0.5f, 0.6f, 1.0f),
             .lightIntensity  = 6.0f + std::sin(deltaTime * 2.2f) * 1.8f,
-            .samplesPerPixel = 1,  // Low samples to showcase denoising
+            .samplesPerPixel = 1,
             .maxDepth        = 4,
             .maxBounces      = 2,
             .russianRoulette = 0.9f,
@@ -888,13 +883,13 @@ void renderMode8(
         };
         VkStridedDeviceAddressRegionKHR callableEntry{};
 
-        if (!VulkanInitializer::vkCmdTraceRaysKHR) {
-            LOG_ERROR_CAT("RenderMode8", "vkCmdTraceRaysKHR is null");
+        if (!context.vkCmdTraceRaysKHR) {
+            LOG_ERROR_CAT("RenderMode8", "context.vkCmdTraceRaysKHR is null");
             throw std::runtime_error("Ray tracing extension not loaded");
         }
-        VulkanInitializer::vkCmdTraceRaysKHR(commandBuffer,
-                                             &raygenEntry, &missEntry, &hitEntry, &callableEntry,
-                                             width, height, 1);
+        context.vkCmdTraceRaysKHR(commandBuffer,
+                                  &raygenEntry, &missEntry, &hitEntry, &callableEntry,
+                                  width, height, 1);
     }
 
     vkCmdEndRenderPass(commandBuffer);
@@ -937,7 +932,7 @@ void renderMode9(
     };
     vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
 
-    // Hybrid: Always use raster for base, RT for effects
+    // Hybrid: Always use raster for base
     vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
     VkDeviceSize offsets[] = {0};
     vkCmdBindVertexBuffers(commandBuffer, 0, 1, &vertexBuffer, offsets);
@@ -945,7 +940,6 @@ void renderMode9(
     vkCmdDrawIndexed(commandBuffer, 3, 1, 0, 0, 0);
 
     if (context.enableRayTracing) {
-        // Add RT effects on top
         vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, pipeline);
         vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
                                 pipelineLayout, 0, 1, &descriptorSet, 0, nullptr);
@@ -1000,13 +994,13 @@ void renderMode9(
         };
         VkStridedDeviceAddressRegionKHR callableEntry{};
 
-        if (!VulkanInitializer::vkCmdTraceRaysKHR) {
-            LOG_ERROR_CAT("RenderMode9", "vkCmdTraceRaysKHR is null");
+        if (!context.vkCmdTraceRaysKHR) {
+            LOG_ERROR_CAT("RenderMode9", "context.vkCmdTraceRaysKHR is null");
             throw std::runtime_error("Ray tracing extension not loaded");
         }
-        VulkanInitializer::vkCmdTraceRaysKHR(commandBuffer,
-                                             &raygenEntry, &missEntry, &hitEntry, &callableEntry,
-                                             width, height, 1);
+        context.vkCmdTraceRaysKHR(commandBuffer,
+                                  &raygenEntry, &missEntry, &hitEntry, &callableEntry,
+                                  width, height, 1);
     }
 
     vkCmdEndRenderPass(commandBuffer);
@@ -1036,7 +1030,6 @@ void dispatchRenderMode(
     Vulkan::Context& context,
     int renderMode
 ) {
-    // Clamp to a safe range – prevents crashes if an invalid mode is passed
     constexpr int MIN_MODE = 1;
     constexpr int MAX_MODE = 9;
     int mode = (renderMode >= MIN_MODE && renderMode <= MAX_MODE) ? renderMode : 1;
@@ -1081,7 +1074,6 @@ void dispatchRenderMode(
                             pipelineLayout, descriptorSet, device, vertexBufferMemory,
                             pipeline, deltaTime, renderPass, framebuffer, context); break;
         default:
-            // Fallback – should never hit because of the clamp above
             renderMode1(imageIndex, vertexBuffer, commandBuffer, indexBuffer,
                         zoomLevel, width, height, wavePhase,
                         pipelineLayout, descriptorSet, device, vertexBufferMemory,

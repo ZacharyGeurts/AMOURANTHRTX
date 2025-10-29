@@ -556,7 +556,7 @@ void VulkanPipelineManager::createShaderBindingTable() {
     context_.resourceManager.removeBuffer(sbtBuffer);
     context_.resourceManager.removeMemory(sbtMemory);
 
-    VkDeviceAddress sbtAddress = VulkanInitializer::getBufferDeviceAddress(context_.device, sbtBuffer);
+    VkDeviceAddress sbtAddress = VulkanInitializer::getBufferDeviceAddress(context_, sbtBuffer);
     LOG_INFO("SBT device address obtained: 0x%" PRIx64, static_cast<uint64_t>(sbtAddress));
 
     sbt_ = ShaderBindingTable(context_.device, sbtBuffer, sbtMemory, vkDestroyBuffer, vkFreeMemory);

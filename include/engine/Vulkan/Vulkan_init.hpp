@@ -16,16 +16,6 @@
 #include <string>
 
 namespace VulkanInitializer {
-    // Ray tracing and buffer device address function pointers
-    extern PFN_vkCmdTraceRaysKHR vkCmdTraceRaysKHR;
-    extern PFN_vkCreateRayTracingPipelinesKHR vkCreateRayTracingPipelinesKHR;
-    extern PFN_vkGetRayTracingShaderGroupHandlesKHR vkGetRayTracingShaderGroupHandlesKHR;
-    extern PFN_vkCreateAccelerationStructureKHR vkCreateAccelerationStructureKHR;
-    extern PFN_vkGetAccelerationStructureBuildSizesKHR vkGetAccelerationStructureBuildSizesKHR;
-    extern PFN_vkCmdBuildAccelerationStructuresKHR vkCmdBuildAccelerationStructuresKHR;
-    extern PFN_vkGetAccelerationStructureDeviceAddressKHR vkGetAccelerationStructureDeviceAddressKHR;
-    extern PFN_vkGetBufferDeviceAddressKHR vkGetBufferDeviceAddressKHR;
-
     void createBuffer(
         VkDevice device, VkPhysicalDevice physicalDevice, VkDeviceSize size,
         VkBufferUsageFlags usage, VkMemoryPropertyFlags properties,
@@ -33,7 +23,9 @@ namespace VulkanInitializer {
         const VkMemoryAllocateFlagsInfo* allocFlagsInfo,
         VulkanResourceManager& resourceManager
     );
-    VkDeviceAddress getBufferDeviceAddress(VkDevice device, VkBuffer buffer);
+
+    VkDeviceAddress getBufferDeviceAddress(const Vulkan::Context& context, VkBuffer buffer);
+
     uint32_t findMemoryType(VkPhysicalDevice physicalDevice, uint32_t typeFilter, VkMemoryPropertyFlags properties);
     VkPhysicalDevice findPhysicalDevice(VkInstance instance, VkSurfaceKHR surface, bool preferNvidia);
     void initInstance(const std::vector<std::string>& instanceExtensions, Vulkan::Context& context);
@@ -45,7 +37,6 @@ namespace VulkanInitializer {
     void createStorageImage(VkDevice device, VkPhysicalDevice physicalDevice, VkImage& image,
                            VkDeviceMemory& memory, VkImageView& view, uint32_t width, uint32_t height,
                            VulkanResourceManager& resourceManager);
-    void createShaderBindingTable(Vulkan::Context& context);
     void copyBuffer(VkDevice device, VkCommandPool commandPool, VkQueue queue,
                     VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size);
     void createDescriptorPoolAndSet(VkDevice device, VkPhysicalDevice physicalDevice, VkDescriptorSetLayout descriptorSetLayout,
@@ -53,7 +44,8 @@ namespace VulkanInitializer {
                                    VkSampler& sampler, VkBuffer uniformBuffer, VkImageView storageImageView,
                                    VkAccelerationStructureKHR topLevelAS, bool forRayTracing,
                                    std::vector<VkBuffer> materialBuffers, std::vector<VkBuffer> dimensionBuffers,
-                                   VkImageView denoiseImageView);
+                                   VkImageView alphaTexView, VkImageView envMapView, VkImageView densityVolumeView,
+                                   VkImageView gDepthView, VkImageView gNormalView);
 }
 
 #endif // VULKAN_INIT_HPP

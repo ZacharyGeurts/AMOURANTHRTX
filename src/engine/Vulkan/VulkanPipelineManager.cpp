@@ -1,6 +1,8 @@
+// src/engine/Vulkan/VulkanPipelineManager.cpp
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts gzac5314@gmail.com is licensed under CC BY-NC 4.0
+
 #include "engine/Vulkan/VulkanPipelineManager.hpp"
-#include "engine/Vulkan/VulkanRenderer.hpp"   // for Vertex
+#include "engine/Vulkan/VulkanRenderer.hpp"
 #include "engine/Vulkan/Vulkan_init.hpp"
 #include "engine/Vulkan/VulkanRTX_Setup.hpp"
 #include "engine/Dispose.hpp"
@@ -21,16 +23,6 @@
 #include <vulkan/vulkan_ext_debug_utils.h>
 #endif
 
-// ====================================================================
-// GLOBAL AS FUNCTION POINTERS (unique names to avoid conflict)
-// ====================================================================
-PFN_vkGetAccelerationStructureBuildSizesKHR    g_vkGetAccelerationStructureBuildSizesKHR    = nullptr;
-PFN_vkCmdBuildAccelerationStructuresKHR       g_vkCmdBuildAccelerationStructuresKHR       = nullptr;
-PFN_vkGetAccelerationStructureDeviceAddressKHR g_vkGetAccelerationStructureDeviceAddressKHR = nullptr;
-PFN_vkGetBufferDeviceAddressKHR               g_vkGetBufferDeviceAddressKHR               = nullptr;
-PFN_vkCreateAccelerationStructureKHR          g_vkCreateAccelerationStructureKHR          = nullptr;
-PFN_vkDestroyAccelerationStructureKHR         g_vkDestroyAccelerationStructureKHR         = nullptr;
-
 namespace VulkanRTX {
 
 #define VK_CHECK(x) do { VkResult r = (x); if (r != VK_SUCCESS) { LOG_ERROR_CAT("Pipeline", #x " failed: %d", r); throw std::runtime_error(#x " failed"); } } while(0)
@@ -50,15 +42,13 @@ static VkPipelineShaderStageCreateInfo makeShaderStage(VkShaderModule mod, VkSha
 /* --------------------------------------------------------------------- */
 /*  Shader loading                                                       */
 /* --------------------------------------------------------------------- */
-VkShaderModule VulkanPipelineManager::loadShader(VkDevice device,
-                                                 const std::string& shaderType)
-{
+VkShaderModule VulkanPipelineManager::loadShader(VkDevice device, const std::string& shaderType) {
     auto it = shaderPaths_.find(shaderType);
     if (it == shaderPaths_.end())
         throw std::runtime_error("Shader type not found: " + shaderType);
     const std::string& filename = it->second;
 
-    LOG_DEBUG_CAT("Pipeline", "Loading shader: %s to %s", shaderType.c_str(), filename.c_str());
+    LOG_DEBUG_CAT("Pipeline", "Loading shader: %s -> %s", shaderType.c_str(), filename.c_str());
 
     std::filesystem::path shaderPath = std::filesystem::absolute(filename);
     if (!std::filesystem::exists(shaderPath))
@@ -92,10 +82,9 @@ VkShaderModule VulkanPipelineManager::loadShader(VkDevice device,
 }
 
 /* --------------------------------------------------------------------- */
-/*  Constructor – NO AS BUILDING HERE                                     */
+/*  Constructor                                                          */
 /* --------------------------------------------------------------------- */
-VulkanPipelineManager::VulkanPipelineManager(Vulkan::Context& context,
-                                             int width, int height)
+VulkanPipelineManager::VulkanPipelineManager(Vulkan::Context& context, int width, int height)
     : context_(context),
       width_(width),
       height_(height),
@@ -129,9 +118,11 @@ VulkanPipelineManager::VulkanPipelineManager(Vulkan::Context& context,
           {"denoiser_post",     "assets/shaders/compute/denoiser_post.spv"}
       }),
       sbt_(),
-      platformConfig_({.graphicsQueueFamily = context.graphicsQueueFamilyIndex,
-                      .computeQueueFamily  = context.computeQueueFamilyIndex,
-                      .preferDeviceLocalMemory = true}),
+      platformConfig_({
+          .graphicsQueueFamily = context.graphicsQueueFamilyIndex,
+          .computeQueueFamily  = context.computeQueueFamilyIndex,
+          .preferDeviceLocalMemory = true
+      }),
       createAsFunc_(nullptr),
       destroyAsFunc_(nullptr)
 {
@@ -143,8 +134,7 @@ VulkanPipelineManager::VulkanPipelineManager(Vulkan::Context& context,
     if (!context_.device || !context_.physicalDevice || !context_.graphicsQueue)
         throw std::runtime_error("Invalid Vulkan context");
 
-    // AS functions loaded in VulkanRenderer_Init.cpp — do NOT load here
-    LOG_DEBUG_CAT("Pipeline", "AS extension functions will be loaded in VulkanRenderer");
+    LOG_DEBUG_CAT("Pipeline", "AS extension functions loaded via context.vk*");
 
     if (context_.commandBuffers.empty() && context_.commandPool != VK_NULL_HANDLE) {
         VkCommandBufferAllocateInfo ai{
@@ -162,7 +152,6 @@ VulkanPipelineManager::VulkanPipelineManager(Vulkan::Context& context,
     createRayTracingDescriptorSetLayout();
     createGraphicsDescriptorSetLayout();
 
-    // render pass
     VkAttachmentDescription colorAtt{
         .format         = context_.swapchainImageFormat,
         .samples        = VK_SAMPLE_COUNT_1_BIT,
@@ -203,10 +192,9 @@ VulkanPipelineManager::VulkanPipelineManager(Vulkan::Context& context,
 }
 
 /* --------------------------------------------------------------------- */
-/*  Destructor – NO AS cleanup (done in VulkanRenderer)                  */
+/*  Destructor                                                           */
 /* --------------------------------------------------------------------- */
-VulkanPipelineManager::~VulkanPipelineManager()
-{
+VulkanPipelineManager::~VulkanPipelineManager() {
     if (graphicsPipeline_)       context_.resourceManager.removePipeline(graphicsPipeline_->get());
     if (graphicsPipelineLayout_) context_.resourceManager.removePipelineLayout(graphicsPipelineLayout_->get());
     if (rayTracingPipeline_)     context_.resourceManager.removePipeline(rayTracingPipeline_->get());
@@ -233,8 +221,7 @@ VulkanPipelineManager::~VulkanPipelineManager()
 /*  Debug callback                                                       */
 /* --------------------------------------------------------------------- */
 #ifdef ENABLE_VULKAN_DEBUG
-void VulkanPipelineManager::setupDebugCallback()
-{
+void VulkanPipelineManager::setupDebugCallback() {
     VkDebugUtilsMessengerCreateInfoEXT ci{
         .sType           = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
         .messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
@@ -259,8 +246,7 @@ void VulkanPipelineManager::setupDebugCallback()
 /* --------------------------------------------------------------------- */
 /*  Pipeline cache                                                       */
 /* --------------------------------------------------------------------- */
-void VulkanPipelineManager::createPipelineCache()
-{
+void VulkanPipelineManager::createPipelineCache() {
     VkPipelineCacheCreateInfo ci{.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO};
     VK_CHECK(vkCreatePipelineCache(context_.device, &ci, nullptr, &pipelineCache_));
 }
@@ -268,8 +254,7 @@ void VulkanPipelineManager::createPipelineCache()
 /* --------------------------------------------------------------------- */
 /*  Descriptor set layouts                                               */
 /* --------------------------------------------------------------------- */
-void VulkanPipelineManager::createRayTracingDescriptorSetLayout()
-{
+void VulkanPipelineManager::createRayTracingDescriptorSetLayout() {
     std::array<VkDescriptorSetLayoutBinding, 10> bindings = {};
 
     bindings[0] = { static_cast<uint32_t>(DescriptorBindings::TLAS), VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1,
@@ -300,13 +285,11 @@ void VulkanPipelineManager::createRayTracingDescriptorSetLayout()
         .bindingCount = static_cast<uint32_t>(bindings.size()),
         .pBindings    = bindings.data()
     };
-    VK_CHECK(vkCreateDescriptorSetLayout(context_.device, &ci, nullptr,
-                                          &context_.rayTracingDescriptorSetLayout));
+    VK_CHECK(vkCreateDescriptorSetLayout(context_.device, &ci, nullptr, &context_.rayTracingDescriptorSetLayout));
     context_.resourceManager.addDescriptorSetLayout(context_.rayTracingDescriptorSetLayout);
 }
 
-void VulkanPipelineManager::createGraphicsDescriptorSetLayout()
-{
+void VulkanPipelineManager::createGraphicsDescriptorSetLayout() {
     std::array<VkDescriptorSetLayoutBinding, 3> bindings = {{
         {0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT},
         {1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,        1, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT},
@@ -318,16 +301,14 @@ void VulkanPipelineManager::createGraphicsDescriptorSetLayout()
         .bindingCount = static_cast<uint32_t>(bindings.size()),
         .pBindings    = bindings.data()
     };
-    VK_CHECK(vkCreateDescriptorSetLayout(context_.device, &ci, nullptr,
-                                          &context_.graphicsDescriptorSetLayout));
+    VK_CHECK(vkCreateDescriptorSetLayout(context_.device, &ci, nullptr, &context_.graphicsDescriptorSetLayout));
     context_.resourceManager.addDescriptorSetLayout(context_.graphicsDescriptorSetLayout);
 }
 
 /* --------------------------------------------------------------------- */
 /*  Graphics pipeline                                                    */
 /* --------------------------------------------------------------------- */
-void VulkanPipelineManager::createGraphicsPipeline(int /*width*/, int /*height*/)
-{
+void VulkanPipelineManager::createGraphicsPipeline(int /*width*/, int /*height*/) {
     auto vert = loadShader(context_.device, "vertex");
     auto frag = loadShader(context_.device, "fragment");
     auto cleanup = finally([&]{ vkDestroyShaderModule(context_.device, vert, nullptr);
@@ -438,8 +419,7 @@ void VulkanPipelineManager::recordGraphicsCommands(VkCommandBuffer cmd,
                                                    VkFramebuffer fb,
                                                    VkDescriptorSet ds,
                                                    uint32_t w, uint32_t h,
-                                                   VkImage /*denoiseImage*/)
-{
+                                                   VkImage /*denoiseImage*/) {
     VkCommandBufferBeginInfo bi{
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
         .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
@@ -482,8 +462,7 @@ void VulkanPipelineManager::recordGraphicsCommands(VkCommandBuffer cmd,
 /*  Update TLAS descriptor                                               */
 /* --------------------------------------------------------------------- */
 void VulkanPipelineManager::updateRayTracingDescriptorSet(VkDescriptorSet descriptorSet,
-                                                          VkAccelerationStructureKHR tlasHandle)
-{
+                                                          VkAccelerationStructureKHR tlasHandle) {
     VkWriteDescriptorSetAccelerationStructureKHR accelWrite{};
     accelWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR;
     accelWrite.accelerationStructureCount = 1;
@@ -498,6 +477,246 @@ void VulkanPipelineManager::updateRayTracingDescriptorSet(VkDescriptorSet descri
     write.pNext = &accelWrite;
 
     vkUpdateDescriptorSets(context_.device, 1, &write, 0, nullptr);
+}
+
+/* --------------------------------------------------------------------- */
+/*  Create Acceleration Structures                                       */
+/* --------------------------------------------------------------------- */
+void VulkanPipelineManager::createAccelerationStructures(VkBuffer vertexBuffer, VkBuffer indexBuffer) {
+    LOG_INFO_CAT("PipelineManager", "=== BUILDING ACCELERATION STRUCTURES ===");
+
+    VkBufferDeviceAddressInfo vertexAddrInfo{};
+    vertexAddrInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+    vertexAddrInfo.buffer = vertexBuffer;
+    VkDeviceAddress vertexAddr = context_.vkGetBufferDeviceAddressKHR(context_.device, &vertexAddrInfo);
+
+    VkBufferDeviceAddressInfo indexAddrInfo{};
+    indexAddrInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+    indexAddrInfo.buffer = indexBuffer;
+    VkDeviceAddress indexAddr = context_.vkGetBufferDeviceAddressKHR(context_.device, &indexAddrInfo);
+
+    uint32_t vertexCount = 3;
+    uint32_t indexCount = 3;
+    VkIndexType indexType = VK_INDEX_TYPE_UINT32;
+    VkFormat vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
+    VkDeviceSize vertexStride = sizeof(glm::vec3);
+
+    VkAccelerationStructureGeometryTrianglesDataKHR triangles{};
+    triangles.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
+    triangles.vertexFormat = vertexFormat;
+    triangles.vertexData.deviceAddress = vertexAddr;
+    triangles.vertexStride = vertexStride;
+    triangles.maxVertex = vertexCount - 1;
+    triangles.indexType = indexType;
+    triangles.indexData.deviceAddress = indexAddr;
+    triangles.transformData.deviceAddress = 0;
+
+    VkAccelerationStructureGeometryKHR geometry{};
+    geometry.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
+    geometry.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
+    geometry.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
+    geometry.geometry.triangles = triangles;
+
+    VkAccelerationStructureBuildGeometryInfoKHR buildInfo{};
+    buildInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
+    buildInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+    buildInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR | VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR;
+    buildInfo.geometryCount = 1;
+    buildInfo.pGeometries = &geometry;
+
+    uint32_t primitiveCount = indexCount / 3;
+    VkAccelerationStructureBuildSizesInfoKHR sizeInfo{};
+    sizeInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
+
+    if (!context_.vkGetAccelerationStructureBuildSizesKHR) {
+        throw std::runtime_error("vkGetAccelerationStructureBuildSizesKHR is null");
+    }
+    context_.vkGetAccelerationStructureBuildSizesKHR(context_.device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &buildInfo, &primitiveCount, &sizeInfo);
+
+    VkBuffer blasBuffer = VK_NULL_HANDLE;
+    VkDeviceMemory blasMemory = VK_NULL_HANDLE;
+    VkMemoryAllocateFlagsInfo blasAllocFlags{};
+    blasAllocFlags.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO;
+    blasAllocFlags.flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT;
+    VulkanInitializer::createBuffer(context_.device, context_.physicalDevice, sizeInfo.accelerationStructureSize,
+                                    VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                                    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, blasBuffer, blasMemory, &blasAllocFlags, context_.resourceManager);
+
+    VkAccelerationStructureKHR blas = VK_NULL_HANDLE;
+    VkAccelerationStructureCreateInfoKHR blasCreateInfo{};
+    blasCreateInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
+    blasCreateInfo.buffer = blasBuffer;
+    blasCreateInfo.size = sizeInfo.accelerationStructureSize;
+    blasCreateInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+
+    if (!context_.vkCreateAccelerationStructureKHR) {
+        throw std::runtime_error("vkCreateAccelerationStructureKHR is null");
+    }
+    VK_CHECK(context_.vkCreateAccelerationStructureKHR(context_.device, &blasCreateInfo, nullptr, &blas));
+
+    VkBuffer blasScratchBuffer = VK_NULL_HANDLE;
+    VkDeviceMemory blasScratchMemory = VK_NULL_HANDLE;
+    VkMemoryAllocateFlagsInfo scratchAllocFlags{};
+    scratchAllocFlags.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO;
+    scratchAllocFlags.flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT;
+    VulkanInitializer::createBuffer(context_.device, context_.physicalDevice, sizeInfo.buildScratchSize,
+                                    VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                                    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, blasScratchBuffer, blasScratchMemory, &scratchAllocFlags, context_.resourceManager);
+
+    buildInfo.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
+    buildInfo.dstAccelerationStructure = blas;
+
+    VkBufferDeviceAddressInfo scratchAddrInfo{};
+    scratchAddrInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+    scratchAddrInfo.buffer = blasScratchBuffer;
+    buildInfo.scratchData.deviceAddress = context_.vkGetBufferDeviceAddressKHR(context_.device, &scratchAddrInfo);
+
+    VkCommandBuffer cmdBuffer = VulkanInitializer::beginSingleTimeCommands(context_);
+    VkAccelerationStructureBuildRangeInfoKHR buildRange{};
+    buildRange.primitiveCount = primitiveCount;
+    buildRange.firstVertex = 0;
+    buildRange.primitiveOffset = 0;
+    VkAccelerationStructureBuildRangeInfoKHR* pBuildRange = &buildRange;
+
+    if (!context_.vkCmdBuildAccelerationStructuresKHR) {
+        throw std::runtime_error("vkCmdBuildAccelerationStructuresKHR is null");
+    }
+    context_.vkCmdBuildAccelerationStructuresKHR(cmdBuffer, 1, &buildInfo, &pBuildRange);
+    VulkanInitializer::endSingleTimeCommands(context_, cmdBuffer);
+
+    blasHandle_ = blas;
+    context_.resourceManager.addBuffer(blasBuffer);
+    context_.resourceManager.addMemory(blasMemory);
+    context_.resourceManager.addBuffer(blasScratchBuffer);
+    context_.resourceManager.addMemory(blasScratchMemory);
+
+    LOG_DEBUG_CAT("PipelineManager", "BLAS size: {} bytes, scratch: {} bytes", sizeInfo.accelerationStructureSize, sizeInfo.buildScratchSize);
+
+    // TLAS
+    VkBuffer instanceBuffer = VK_NULL_HANDLE;
+    VkDeviceMemory instanceMemory = VK_NULL_HANDLE;
+    VkDeviceSize instanceSize = sizeof(VkAccelerationStructureInstanceKHR);
+    VkMemoryAllocateFlagsInfo instanceAllocFlags{};
+    instanceAllocFlags.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO;
+    instanceAllocFlags.flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT;
+    VulkanInitializer::createBuffer(context_.device, context_.physicalDevice, instanceSize,
+                                    VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR,
+                                    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, instanceBuffer, instanceMemory, &instanceAllocFlags, context_.resourceManager);
+
+    VkAccelerationStructureInstanceKHR instance{};
+    instance.transform = {{{1.0f, 0.0f, 0.0f, 0.0f},
+                           {0.0f, 1.0f, 0.0f, 0.0f},
+                           {0.0f, 0.0f, 1.0f, 0.0f}}};
+    instance.instanceCustomIndex = 0;
+    instance.mask = 0xFF;
+    instance.instanceShaderBindingTableRecordOffset = 0;
+    instance.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
+
+    VkAccelerationStructureDeviceAddressInfoKHR addrInfo{};
+    addrInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR;
+    addrInfo.accelerationStructure = blas;
+    instance.accelerationStructureReference = context_.vkGetAccelerationStructureDeviceAddressKHR(context_.device, &addrInfo);
+
+    VkBuffer stagingBuffer = VK_NULL_HANDLE;
+    VkDeviceMemory stagingMemory = VK_NULL_HANDLE;
+    VulkanInitializer::createBuffer(context_.device, context_.physicalDevice, instanceSize,
+                                    VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                                    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                                    stagingBuffer, stagingMemory, nullptr, context_.resourceManager);
+
+    void* mappedData;
+    vkMapMemory(context_.device, stagingMemory, 0, instanceSize, 0, &mappedData);
+    memcpy(mappedData, &instance, instanceSize);
+    vkUnmapMemory(context_.device, stagingMemory);
+
+    cmdBuffer = VulkanInitializer::beginSingleTimeCommands(context_);
+    VkBufferCopy copyRegion{};
+    copyRegion.size = instanceSize;
+    vkCmdCopyBuffer(cmdBuffer, stagingBuffer, instanceBuffer, 1, &copyRegion);
+    VulkanInitializer::endSingleTimeCommands(context_, cmdBuffer);
+
+    context_.resourceManager.addBuffer(stagingBuffer);
+    context_.resourceManager.addMemory(stagingMemory);
+
+    VkAccelerationStructureGeometryInstancesDataKHR instances{};
+    instances.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR;
+    instances.arrayOfPointers = VK_FALSE;
+
+    VkBufferDeviceAddressInfo instAddrInfo{};
+    instAddrInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+    instAddrInfo.buffer = instanceBuffer;
+    instances.data.deviceAddress = context_.vkGetBufferDeviceAddressKHR(context_.device, &instAddrInfo);
+
+    VkAccelerationStructureGeometryKHR tlasGeometry{};
+    tlasGeometry.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
+    tlasGeometry.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
+    tlasGeometry.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
+    tlasGeometry.geometry.instances = instances;
+
+    VkAccelerationStructureBuildGeometryInfoKHR tlasBuildInfo{};
+    tlasBuildInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
+    tlasBuildInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
+    tlasBuildInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR | VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR;
+    tlasBuildInfo.geometryCount = 1;
+    tlasBuildInfo.pGeometries = &tlasGeometry;
+
+    uint32_t instanceCount = 1;
+    VkAccelerationStructureBuildSizesInfoKHR tlasSizeInfo{};
+    tlasSizeInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
+    context_.vkGetAccelerationStructureBuildSizesKHR(context_.device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &tlasBuildInfo, &instanceCount, &tlasSizeInfo);
+
+    VkBuffer tlasBuffer = VK_NULL_HANDLE;
+    VkDeviceMemory tlasMemory = VK_NULL_HANDLE;
+    VkMemoryAllocateFlagsInfo tlasAllocFlags{};
+    tlasAllocFlags.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO;
+    tlasAllocFlags.flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT;
+    VulkanInitializer::createBuffer(context_.device, context_.physicalDevice, tlasSizeInfo.accelerationStructureSize,
+                                    VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                                    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, tlasBuffer, tlasMemory, &tlasAllocFlags, context_.resourceManager);
+
+    VkAccelerationStructureKHR tlas = VK_NULL_HANDLE;
+    VkAccelerationStructureCreateInfoKHR tlasCreateInfo{};
+    tlasCreateInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
+    tlasCreateInfo.buffer = tlasBuffer;
+    tlasCreateInfo.size = tlasSizeInfo.accelerationStructureSize;
+    tlasCreateInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
+    VK_CHECK(context_.vkCreateAccelerationStructureKHR(context_.device, &tlasCreateInfo, nullptr, &tlas));
+
+    VkBuffer tlasScratchBuffer = VK_NULL_HANDLE;
+    VkDeviceMemory tlasScratchMemory = VK_NULL_HANDLE;
+    VkMemoryAllocateFlagsInfo tlasScratchAllocFlags{};
+    tlasScratchAllocFlags.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO;
+    tlasScratchAllocFlags.flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT;
+    VulkanInitializer::createBuffer(context_.device, context_.physicalDevice, tlasSizeInfo.buildScratchSize,
+                                    VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                                    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, tlasScratchBuffer, tlasScratchMemory, &tlasScratchAllocFlags, context_.resourceManager);
+
+    tlasBuildInfo.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
+    tlasBuildInfo.dstAccelerationStructure = tlas;
+
+    VkBufferDeviceAddressInfo tlasScratchAddrInfo{};
+    tlasScratchAddrInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+    tlasScratchAddrInfo.buffer = tlasScratchBuffer;
+    tlasBuildInfo.scratchData.deviceAddress = context_.vkGetBufferDeviceAddressKHR(context_.device, &tlasScratchAddrInfo);
+
+    cmdBuffer = VulkanInitializer::beginSingleTimeCommands(context_);
+    VkAccelerationStructureBuildRangeInfoKHR tlasRange{};
+    tlasRange.primitiveCount = instanceCount;
+    VkAccelerationStructureBuildRangeInfoKHR* pTlasRange = &tlasRange;
+    context_.vkCmdBuildAccelerationStructuresKHR(cmdBuffer, 1, &tlasBuildInfo, &pTlasRange);
+    VulkanInitializer::endSingleTimeCommands(context_, cmdBuffer);
+
+    tlasHandle_ = tlas;
+    context_.resourceManager.addBuffer(tlasBuffer);
+    context_.resourceManager.addMemory(tlasMemory);
+    context_.resourceManager.addBuffer(tlasScratchBuffer);
+    context_.resourceManager.addMemory(tlasScratchMemory);
+    context_.resourceManager.addBuffer(instanceBuffer);
+    context_.resourceManager.addMemory(instanceMemory);
+
+    LOG_INFO_CAT("PipelineManager", "TLAS size: {} bytes, scratch: {} bytes", tlasSizeInfo.accelerationStructureSize, tlasSizeInfo.buildScratchSize);
+    LOG_INFO_CAT("PipelineManager", "=== ACCELERATION STRUCTURES BUILT ===");
+    LOG_DEBUG_CAT("PipelineManager", "BLAS: %p   TLAS: %p", (void*)blasHandle_, (void*)tlasHandle_);
 }
 
 } // namespace VulkanRTX

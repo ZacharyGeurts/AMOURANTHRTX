@@ -49,11 +49,53 @@ void VulkanRenderer::createDescriptorPool() {
 }
 
 // -----------------------------------------------------------------------------
-// 2. CREATE ALL DESCRIPTOR SETS
+// 2. CREATE ALL DESCRIPTOR SETS (INLINE BUFFER CREATION FOR COMPATIBILITY)
 // -----------------------------------------------------------------------------
 void VulkanRenderer::createDescriptorSets() {
     if (context_.descriptorPool == VK_NULL_HANDLE) {
         createDescriptorPool();
+    }
+
+    // Inline creation of material/dimension buffers if not yet created
+    if (materialBuffers_.empty()) {
+        VkDeviceSize materialSize = sizeof(MaterialData) * 128;
+        VkDeviceSize dimensionSize = sizeof(DimensionData) * 1;
+        VkPhysicalDeviceProperties2 props2{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
+        VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProps{
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR
+        };
+        props2.pNext = &rtProps;
+        vkGetPhysicalDeviceProperties2(context_.physicalDevice, &props2);
+        VkDeviceSize alignment = props2.properties.limits.minStorageBufferOffsetAlignment;
+        materialSize = (materialSize + alignment - 1) & ~(alignment - 1);
+        dimensionSize = (dimensionSize + alignment - 1) & ~(alignment - 1);
+
+        materialBuffers_.resize(MAX_FRAMES_IN_FLIGHT);
+        materialBufferMemory_.resize(MAX_FRAMES_IN_FLIGHT);
+        dimensionBuffers_.resize(MAX_FRAMES_IN_FLIGHT);
+        dimensionBufferMemory_.resize(MAX_FRAMES_IN_FLIGHT);
+
+        VkMemoryAllocateFlagsInfo flags{
+            .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO,
+            .flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT
+        };
+        for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
+            VulkanInitializer::createBuffer(
+                context_.device, context_.physicalDevice, materialSize,
+                VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                materialBuffers_[i], materialBufferMemory_[i], &flags, context_.resourceManager
+            );
+            VulkanInitializer::createBuffer(
+                context_.device, context_.physicalDevice, dimensionSize,
+                VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                dimensionBuffers_[i], dimensionBufferMemory_[i], &flags, context_.resourceManager
+            );
+            initializeBufferData(i, materialSize, dimensionSize);
+        }
+
+        LOG_DEBUG_CAT("Renderer", "Created material and dimension buffers for %u frames", MAX_FRAMES_IN_FLIGHT);
     }
 
     std::vector<VkDescriptorSetLayout> rtLayouts(MAX_FRAMES_IN_FLIGHT, context_.rayTracingDescriptorSetLayout);
@@ -103,7 +145,7 @@ void VulkanRenderer::createDescriptorSets() {
 }
 
 // -----------------------------------------------------------------------------
-// 3. UPDATE PER-FRAME RAY-TRACING DESCRIPTOR SET
+// 3. UPDATE PER-FRAME RAY-TRACING DESCRIPTOR SET (FIXED WITH ENV MAP NULL CHECK)
 // -----------------------------------------------------------------------------
 void VulkanRenderer::updateDescriptorSetForFrame(uint32_t frameIndex, VkAccelerationStructureKHR tlas) {
     LOG_DEBUG_CAT("Renderer", "Updating descriptor set for frame {}", frameIndex);
@@ -128,11 +170,17 @@ void VulkanRenderer::updateDescriptorSetForFrame(uint32_t frameIndex, VkAccelera
         .imageView = context_.storageImageView,
         .imageLayout = VK_IMAGE_LAYOUT_GENERAL
     };
-    VkDescriptorImageInfo envMapInfo = {
-        .sampler = envMapSampler_,
-        .imageView = envMapImageView_,
-        .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-    };
+    VkDescriptorImageInfo envMapInfo = {};  // Zero-init
+    bool hasEnvMap = (envMapSampler_ != VK_NULL_HANDLE && envMapImageView_ != VK_NULL_HANDLE);
+    if (hasEnvMap) {
+        envMapInfo = {
+            .sampler = envMapSampler_,
+            .imageView = envMapImageView_,
+            .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+        };
+    } else {
+        LOG_WARNING_CAT("Renderer", "Envmap not initialized for frame {}; skipping binding", frameIndex);
+    }
     VkDescriptorBufferInfo uniformBufferInfo = {
         .buffer = context_.uniformBuffers[frameIndex],
         .offset = 0,
@@ -150,7 +198,7 @@ void VulkanRenderer::updateDescriptorSetForFrame(uint32_t frameIndex, VkAccelera
     };
 
     std::vector<VkWriteDescriptorSet> descriptorWrites;
-    descriptorWrites.reserve(6);
+    descriptorWrites.reserve(hasEnvMap ? 6 : 5);
 
     if (tlas) {
         descriptorWrites.push_back({
@@ -195,16 +243,20 @@ void VulkanRenderer::updateDescriptorSetForFrame(uint32_t frameIndex, VkAccelera
             .descriptorCount = 1,
             .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
             .pBufferInfo = &dimensionBufferInfo
-        },
-        {
+        }
+    });
+
+    // Conditionally add envmap if available
+    if (hasEnvMap) {
+        descriptorWrites.push_back({
             .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
             .dstSet = descriptorSet,
             .dstBinding = static_cast<uint32_t>(DescriptorBindings::EnvMap),
             .descriptorCount = 1,
             .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
             .pImageInfo = &envMapInfo
-        }
-    });
+        });
+    }
 
     vkUpdateDescriptorSets(context_.device, static_cast<uint32_t>(descriptorWrites.size()), descriptorWrites.data(), 0, nullptr);
 }
@@ -338,10 +390,16 @@ void VulkanRenderer::createAccelerationStructures() {
 
     bufferManager_->asyncUpdateBuffers(vertices, indices, nullptr);
 
+    // Wait for async update to complete (simple sync for init; consider fence for prod)
+    vkDeviceWaitIdle(context_.device);
+
     VkBuffer vertexBuffer = bufferManager_->getVertexBuffer();
-    VkBuffer indexBuffer  = bufferManager_->getIndexBuffer();
+    VkBuffer indexBuffer = bufferManager_->getIndexBuffer();
 
     indexCount_ = static_cast<uint32_t>(indices.size());
+
+    // Pass buffers to pipeline manager
+    pipelineManager_->createAccelerationStructures(vertexBuffer, indexBuffer);
 
     LOG_INFO_CAT("Renderer", "Acceleration structures created. TLAS: %p", (void*)pipelineManager_->getTLAS());
 }
@@ -433,7 +491,7 @@ void VulkanRenderer::denoiseImage(VkCommandBuffer commandBuffer, VkImage inputIm
 }
 
 // -----------------------------------------------------------------------------
-// 10. RENDER FRAME – FULLY INTEGRATED WITH CAMERA
+// 10. RENDER FRAME – FULLY INTEGRATED WITH CAMERA (REMOVED REDUNDANT TLAS UPDATE)
 // -----------------------------------------------------------------------------
 void VulkanRenderer::renderFrame(const Camera& camera) {
     vkWaitForFences(context_.device, 1, &frames_[currentFrame_].fence, VK_TRUE, UINT64_MAX);
@@ -463,7 +521,7 @@ void VulkanRenderer::renderFrame(const Camera& camera) {
     std::memcpy(data, &ubo, sizeof(ubo));
     vkUnmapMemory(context_.device, bufferManager_->getUniformBufferMemory(currentFrame_));
 
-    updateDescriptorSetForFrame(currentFrame_, pipelineManager_->getTLAS());
+    // TLAS update removed here (already done in createDescriptorSets); only update if dynamic
 
     VkCommandBuffer cmd = frames_[currentFrame_].commandBuffer;
     vkResetCommandBuffer(cmd, 0);
@@ -565,7 +623,7 @@ void VulkanRenderer::renderFrame(const Camera& camera) {
 }
 
 // -----------------------------------------------------------------------------
-// 11. HANDLE RESIZE
+// 11. HANDLE RESIZE (INLINE BUFFER RECREATION FOR COMPATIBILITY)
 // -----------------------------------------------------------------------------
 void VulkanRenderer::handleResize(int width, int height) {
     vkDeviceWaitIdle(context_.device);
@@ -599,10 +657,14 @@ void VulkanRenderer::handleResize(int width, int height) {
         .addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
         .addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE
     };
+    if (denoiseSampler_ != VK_NULL_HANDLE) {
+        vkDestroySampler(context_.device, denoiseSampler_, nullptr);
+    }
     vkCreateSampler(context_.device, &samplerInfo, nullptr, &denoiseSampler_);
 
     createEnvironmentMap();
 
+    // Inline recreation of material/dimension buffers on resize
     VkDeviceSize materialSize = sizeof(MaterialData) * 128;
     VkDeviceSize dimensionSize = sizeof(DimensionData) * 1;
     VkPhysicalDeviceProperties2 props2{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
@@ -614,6 +676,18 @@ void VulkanRenderer::handleResize(int width, int height) {
     VkDeviceSize alignment = props2.properties.limits.minStorageBufferOffsetAlignment;
     materialSize = (materialSize + alignment - 1) & ~(alignment - 1);
     dimensionSize = (dimensionSize + alignment - 1) & ~(alignment - 1);
+
+    // Clean up old buffers if exist
+    for (uint32_t i = 0; i < materialBuffers_.size(); ++i) {
+        if (materialBuffers_[i] != VK_NULL_HANDLE) {
+            vkDestroyBuffer(context_.device, materialBuffers_[i], nullptr);
+            vkFreeMemory(context_.device, materialBufferMemory_[i], nullptr);
+        }
+        if (dimensionBuffers_[i] != VK_NULL_HANDLE) {
+            vkDestroyBuffer(context_.device, dimensionBuffers_[i], nullptr);
+            vkFreeMemory(context_.device, dimensionBufferMemory_[i], nullptr);
+        }
+    }
 
     materialBuffers_.resize(MAX_FRAMES_IN_FLIGHT);
     materialBufferMemory_.resize(MAX_FRAMES_IN_FLIGHT);
@@ -639,6 +713,8 @@ void VulkanRenderer::handleResize(int width, int height) {
         );
         initializeBufferData(i, materialSize, dimensionSize);
     }
+
+    LOG_DEBUG_CAT("Renderer", "Recreated material and dimension buffers for %u frames on resize", MAX_FRAMES_IN_FLIGHT);
 
     if (context_.descriptorPool) {
         context_.resourceManager.removeDescriptorPool(context_.descriptorPool);
