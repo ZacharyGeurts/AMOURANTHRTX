@@ -1070,7 +1070,7 @@ void copyBuffer(VkDevice device, VkCommandPool commandPool, VkQueue queue,
 
     VkResult endResult = vkEndCommandBuffer(commandBuffer);
     if (endResult != VK_SUCCESS) {
-        LOG_ERROR_CAT("VVulkanInitializer", "vkEndCommandBuffer in copyBuffer failed: {} (0x{:x})", 
+        LOG_ERROR_CAT("VulkanInitializer", "vkEndCommandBuffer in copyBuffer failed: {} (0x{:x})", 
                   endResult, static_cast<uint32_t>(endResult));
         vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer);
         throw std::runtime_error(std::format("Failed to end command buffer for copyBuffer: {}", endResult));
