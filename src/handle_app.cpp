@@ -1,9 +1,5 @@
+// handle_app.cpp
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts gzac5314@gmail.com is licensed under CC BY-NC 4.0
-// Application handling for SDL3 and Vulkan integration.
-// Loads meshes, initializes renderer, input, and audio; manages main loop.
-// Dependencies: SDL3, GLM, VulkanRTX_Setup.hpp, logging.hpp, Dispose.hpp, camera.hpp.
-// Supported platforms: Linux, Windows.
-// Zachary Geurts 2025
 
 #include "handle_app.hpp"
 #include <SDL3/SDL.h>
@@ -14,114 +10,161 @@
 #include <fstream>
 #include <string>
 #include <sstream>
-#include <fmt/format.h>
 #include <chrono>
 #include "engine/logging.hpp"
 #include "engine/Vulkan/VulkanRenderer.hpp"
 #include "engine/SDL3/SDL3_init.hpp"
 #include "engine/Dispose.hpp"
 
+// ---------------------------------------------------------------------------
+//  Utility: Pointer to Hex
+// ---------------------------------------------------------------------------
+inline std::string ptr_to_hex(const void* p) { return std::format("{:p}", p); }
+
+// ---------------------------------------------------------------------------
+//  Utility: Join vector<T> with separator
+// ---------------------------------------------------------------------------
+template<typename T>
+std::string join(const std::vector<T>& vec, const std::string& sep) {
+    if (vec.empty()) return "";
+    std::string result = std::format("{}", vec[0]);
+    for (size_t i = 1; i < vec.size(); ++i) {
+        result += sep + std::format("{}", vec[i]);
+    }
+    return result;
+}
+
+// ---------------------------------------------------------------------------
+//  Mesh Loader – EXPLOSIVE EDITION
+// ---------------------------------------------------------------------------
 void loadMesh(const std::string& filename, std::vector<glm::vec3>& vertices, std::vector<uint32_t>& indices) {
     static std::vector<glm::vec3> cachedVertices;
     static std::vector<uint32_t> cachedIndices;
     static bool isLoaded = false;
 
     if (isLoaded) {
-        LOG_DEBUG_CAT("MeshLoader", "Using cached mesh data for {}", filename);
+        LOG_DEBUG_CAT("MeshLoader", "CACHE HIT: '{}' → {} verts, {} tris", filename, cachedVertices.size(), cachedIndices.size() / 3);
         vertices = cachedVertices;
         indices = cachedIndices;
         return;
     }
 
-    LOG_DEBUG_CAT("MeshLoader", "Loading mesh from {}", filename);
+    LOG_INFO_CAT("MeshLoader", "LOADING MESH FROM: {}", filename);
     vertices.clear();
     indices.clear();
 
     std::ifstream file(filename);
     if (!file.is_open()) {
-        LOG_WARNING_CAT("MeshLoader", "Failed to open mesh file: {}, using fallback triangle", filename);
+        LOG_WARNING_CAT("MeshLoader", "FILE NOT FOUND: '{}' → FALLBACK TRIANGLE", filename);
         vertices = {{0.0f, -0.5f, 0.0f}, {0.5f, 0.5f, 0.0f}, {-0.5f, 0.5f, 0.0f}};
         indices = {0, 1, 2};
     } else {
         std::vector<glm::vec3> tempVertices;
         std::string line;
+        uint32_t lineNum = 0;
+
         while (std::getline(file, line)) {
+            ++lineNum;
             std::istringstream iss(line);
             std::string type;
-            iss >> type;
+            if (!(iss >> type)) continue;
+
             if (type == "v") {
-                glm::vec3 vertex;
-                iss >> vertex.x >> vertex.y >> vertex.z;
-                tempVertices.push_back(vertex);
+                glm::vec3 v;
+                if (iss >> v.x >> v.y >> v.z) {
+                    tempVertices.push_back(v);
+                } else {
+                    LOG_WARNING_CAT("MeshLoader", "Malformed vertex at line {}: '{}'", lineNum, line);
+                }
             } else if (type == "f") {
-                uint32_t v1, v2, v3;
-                iss >> v1 >> v2 >> v3;
-                indices.push_back(v1 - 1);
-                indices.push_back(v2 - 1);
-                indices.push_back(v3 - 1);
+                uint32_t a, b, c;
+                if (iss >> a >> b >> c) {
+                    indices.insert(indices.end(), {a-1, b-1, c-1});
+                } else {
+                    LOG_WARNING_CAT("MeshLoader", "Malformed face at line {}: '{}'", lineNum, line);
+                }
             }
         }
         file.close();
-        vertices = tempVertices;
-        if (vertices.size() < 3 || indices.size() < 3 || indices.size() % 3 != 0) {
-            LOG_WARNING_CAT("MeshLoader", "Invalid mesh data in {}, using fallback triangle", filename);
+
+        if (tempVertices.size() < 3 || indices.size() < 3 || indices.size() % 3 != 0) {
+            LOG_WARNING_CAT("MeshLoader", "INVALID MESH: {} verts, {} indices → FALLBACK", tempVertices.size(), indices.size());
             vertices = {{0.0f, -0.5f, 0.0f}, {0.5f, 0.5f, 0.0f}, {-0.5f, 0.5f, 0.0f}};
             indices = {0, 1, 2};
+        } else {
+            vertices = std::move(tempVertices);
+            LOG_DEBUG_CAT("MeshLoader", "Parsed {} vertices, {} triangles", vertices.size(), indices.size() / 3);
         }
     }
 
     cachedVertices = vertices;
     cachedIndices = indices;
     isLoaded = true;
-    LOG_DEBUG_CAT("MeshLoader", "Loaded and cached mesh: {} vertices, {} indices", vertices.size(), indices.size());
+    LOG_INFO_CAT("MeshLoader", "MESH LOADED & CACHED: {} verts, {} tris @ {}", vertices.size(), indices.size() / 3, ptr_to_hex(&vertices));
 }
 
+// ---------------------------------------------------------------------------
+//  Application Constructor
+// ---------------------------------------------------------------------------
 Application::Application(const char* title, int width, int height)
     : title_(title), width_(width), height_(height), mode_(1),
       sdl_(std::make_unique<SDL3Initializer::SDL3Initializer>(title, width, height)),
       renderer_(nullptr), camera_(std::make_unique<PerspectiveCamera>(60.0f, static_cast<float>(width) / height)),
       inputHandler_(nullptr),
-      lastFrameTime_(std::chrono::steady_clock::now()) {
-    LOG_INFO_CAT("Application", "Initializing Application: {} ({}x{})", title_, width_, height_);
+      lastFrameTime_(std::chrono::steady_clock::now())
+{
+    LOG_INFO_CAT("Application", "INITIALIZING: '{}' ({}x{}) @ {}", title_, width_, height_, ptr_to_hex(this));
     try {
         loadMesh("assets/models/scene.obj", vertices_, indices_);
+
         uint32_t extensionCount = 0;
         const char* const* extensionNames = SDL_Vulkan_GetInstanceExtensions(&extensionCount);
         if (!extensionNames) {
-            LOG_ERROR_CAT("Application", "Failed to get Vulkan extension count from SDL");
-            throw std::runtime_error("Failed to get Vulkan extension count");
+            LOG_ERROR_CAT("Application", "SDL FAILED: SDL_Vulkan_GetInstanceExtensions returned null");
+            throw std::runtime_error("Failed to get Vulkan instance extensions from SDL");
         }
+
         std::vector<std::string> instanceExtensions(extensionNames, extensionNames + extensionCount);
-        std::string extensionsStr;
-        for (size_t i = 0; i < instanceExtensions.size(); ++i) {
-            extensionsStr += instanceExtensions[i];
-            if (i < instanceExtensions.size() - 1) extensionsStr += ", ";
-        }
-        LOG_DEBUG_CAT("Application", "Vulkan instance extensions: {}", extensionsStr);
+        LOG_DEBUG_CAT("Application", "Vulkan instance extensions [{}]: {}", extensionCount, join(instanceExtensions, ", "));
+
         renderer_ = std::make_unique<VulkanRTX::VulkanRenderer>(width_, height_, sdl_->getWindow(), instanceExtensions);
-        camera_->setUserData(this); // Set Application reference in camera
+        camera_->setUserData(this);
         initializeInput();
-        LOG_INFO_CAT("Application", "Application initialized successfully");
+
+        LOG_INFO_CAT("Application", "APPLICATION FULLY INITIALIZED @ {}", ptr_to_hex(this));
     } catch (const std::exception& e) {
-        LOG_ERROR_CAT("Application", "Initialization failed: {}", e.what());
+        LOG_ERROR_CAT("Application", "INIT FAILED: {}", e.what());
         throw;
     }
 }
 
+// ---------------------------------------------------------------------------
+//  Destructor – EXPLOSIVE CLEANUP
+// ---------------------------------------------------------------------------
 Application::~Application() {
-    LOG_DEBUG_CAT("Application", "Starting destructor cleanup");
-    // Reset input and camera
+    LOG_INFO_CAT("Application", "DESTRUCTOR STARTED @ {}", ptr_to_hex(this));
+
     inputHandler_.reset();
+    LOG_DEBUG_CAT("Application", "Input handler destroyed");
+
     camera_.reset();
-    // Destroy Vulkan renderer (includes surface and swapchain destruction)
+    LOG_DEBUG_CAT("Application", "Camera destroyed");
+
     renderer_.reset();
-    // Now safe to destroy SDL window
+    LOG_DEBUG_CAT("Application", "Vulkan renderer destroyed");
+
     sdl_.reset();
-    // Finally quit SDL subsystems
+    LOG_DEBUG_CAT("Application", "SDL window destroyed");
+
     Dispose::quitSDL();
-    LOG_INFO_CAT("Application", "Application destroyed");
+    LOG_INFO_CAT("Application", "SDL subsystems terminated");
+
+    LOG_INFO_CAT("Application", "APPLICATION DESTROYED @ {}", ptr_to_hex(this));
 }
 
+// ---------------------------------------------------------------------------
+//  Input Initialization
+// ---------------------------------------------------------------------------
 void Application::initializeInput() {
     inputHandler_ = std::make_unique<HandleInput>(*camera_);
     inputHandler_->setCallbacks(
@@ -133,111 +176,135 @@ void Application::initializeInput() {
         [this](const SDL_TouchFingerEvent& tf) { inputHandler_->defaultTouchHandler(tf); },
         [this](const SDL_GamepadButtonEvent& gb) { inputHandler_->defaultGamepadButtonHandler(gb); },
         [this](const SDL_GamepadAxisEvent& ga) { inputHandler_->defaultGamepadAxisHandler(ga); },
-        [this](bool connected, SDL_JoystickID id, SDL_Gamepad* pad) { inputHandler_->defaultGamepadConnectHandler(connected, id, pad); }
+        [this](bool connected, SDL_JoystickID id, SDL_Gamepad* pad) { 
+            inputHandler_->defaultGamepadConnectHandler(connected, id, pad); 
+        }
     );
-    LOG_DEBUG_CAT("Application", "Input handler initialized");
+    LOG_DEBUG_CAT("Application", "Input handler initialized with all callbacks");
 }
 
+// ---------------------------------------------------------------------------
+//  Main Loop
+// ---------------------------------------------------------------------------
 void Application::run() {
-    LOG_INFO_CAT("Application", "Starting application main loop");
+    LOG_INFO_CAT("Application", "MAIN LOOP STARTED");
     while (!shouldQuit()) {
         inputHandler_->handleInput(*this);
         render();
     }
-    LOG_INFO_CAT("Application", "Application main loop ended");
+    LOG_INFO_CAT("Application", "MAIN LOOP ENDED");
 }
 
+// ---------------------------------------------------------------------------
+//  Render Frame
+// ---------------------------------------------------------------------------
 void Application::render() {
     if (!renderer_ || !camera_) {
-        LOG_ERROR_CAT("Application", "Cannot render: renderer or camera not initialized");
+        LOG_ERROR_CAT("Application", "RENDER ABORTED: renderer or camera missing");
         return;
     }
+
     auto currentTime = std::chrono::steady_clock::now();
     float deltaTime = std::chrono::duration<float>(currentTime - lastFrameTime_).count();
     lastFrameTime_ = currentTime;
+
     camera_->update(deltaTime);
-    renderer_->renderFrame(*camera_); // Adjusted to match current VulkanRenderer signature
+    renderer_->renderFrame(*camera_);
+
+    LOG_DEBUG_CAT("Application", "Frame rendered (Δt={:.3f}ms)", deltaTime * 1000.0f);
 }
 
+// ---------------------------------------------------------------------------
+//  Resize Handler
+// ---------------------------------------------------------------------------
 void Application::handleResize(int width, int height) {
     if (width <= 0 || height <= 0) {
-        LOG_WARNING_CAT("Application", "Invalid resize dimensions: {}x{}", width, height);
+        LOG_WARNING_CAT("Application", "INVALID RESIZE: {}x{}", width, height);
         return;
     }
+
     width_ = width;
     height_ = height;
     renderer_->handleResize(width, height);
     camera_->setAspectRatio(static_cast<float>(width) / height);
-    LOG_INFO_CAT("Application", "Resized to {}x{}", width, height);
+
+    LOG_INFO_CAT("Application", "WINDOW RESIZED: {}x{}", width, height);
 }
 
+// ---------------------------------------------------------------------------
+//  Input Handler Constructor
+// ---------------------------------------------------------------------------
 HandleInput::HandleInput(Camera& camera) : camera_(camera) {
-    LOG_DEBUG_CAT("Input", "HandleInput initialized");
+    LOG_DEBUG_CAT("Input", "HandleInput constructed @ {}", ptr_to_hex(this));
 }
 
+// ---------------------------------------------------------------------------
+//  Event Polling
+// ---------------------------------------------------------------------------
 void HandleInput::handleInput(Application& app) {
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
         switch (event.type) {
             case SDL_EVENT_QUIT:
+                LOG_INFO_CAT("Input", "QUIT EVENT → setRenderMode(0)");
                 app.setRenderMode(0);
                 break;
+
             case SDL_EVENT_WINDOW_RESIZED:
+                LOG_DEBUG_CAT("Input", "RESIZE EVENT: {}x{}", event.window.data1, event.window.data2);
                 app.handleResize(event.window.data1, event.window.data2);
                 break;
+
             case SDL_EVENT_KEY_DOWN:
+                LOG_DEBUG_CAT("Input", "KEY DOWN: scancode={}", event.key.scancode);
                 if (keyboardCallback_) keyboardCallback_(event.key);
                 break;
+
             case SDL_EVENT_MOUSE_BUTTON_DOWN:
             case SDL_EVENT_MOUSE_BUTTON_UP:
+                LOG_DEBUG_CAT("Input", "MOUSE BUTTON: {} {}", 
+                              event.type == SDL_EVENT_MOUSE_BUTTON_DOWN ? "DOWN" : "UP", event.button.button);
                 if (mouseButtonCallback_) mouseButtonCallback_(event.button);
                 break;
+
             case SDL_EVENT_MOUSE_MOTION:
                 if (mouseMotionCallback_) mouseMotionCallback_(event.motion);
                 break;
+
             case SDL_EVENT_MOUSE_WHEEL:
+                LOG_DEBUG_CAT("Input", "MOUSE WHEEL: y={}", event.wheel.y);
                 if (mouseWheelCallback_) mouseWheelCallback_(event.wheel);
                 break;
-            case SDL_EVENT_TEXT_INPUT:
-                if (textInputCallback_) textInputCallback_(event.text);
-                break;
-            case SDL_EVENT_FINGER_DOWN:
-            case SDL_EVENT_FINGER_UP:
-            case SDL_EVENT_FINGER_MOTION:
-                if (touchCallback_) touchCallback_(event.tfinger);
-                break;
-            case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
-            case SDL_EVENT_GAMEPAD_BUTTON_UP:
-                if (gamepadButtonCallback_) gamepadButtonCallback_(event.gbutton);
-                break;
-            case SDL_EVENT_GAMEPAD_AXIS_MOTION:
-                if (gamepadAxisCallback_) gamepadAxisCallback_(event.gaxis);
-                break;
+
             case SDL_EVENT_GAMEPAD_ADDED:
-            case SDL_EVENT_GAMEPAD_REMOVED:
+                LOG_INFO_CAT("Input", "GAMEPAD ADDED: id={}", event.gdevice.which);
                 if (gamepadConnectCallback_) {
-                    bool connected = event.type == SDL_EVENT_GAMEPAD_ADDED;
-                    SDL_Gamepad* pad = connected ? SDL_OpenGamepad(event.gdevice.which) : nullptr;
-                    gamepadConnectCallback_(connected, event.gdevice.which, pad);
-                    if (pad && !connected) {
-                        SDL_CloseGamepad(pad);
-                    }
+                    SDL_Gamepad* pad = SDL_OpenGamepad(event.gdevice.which);
+                    gamepadConnectCallback_(true, event.gdevice.which, pad);
                 }
+                break;
+
+            case SDL_EVENT_GAMEPAD_REMOVED:
+                LOG_INFO_CAT("Input", "GAMEPAD REMOVED: id={}", event.gdevice.which);
+                if (gamepadConnectCallback_) {
+                    gamepadConnectCallback_(false, event.gdevice.which, nullptr);
+                }
+                break;
+
+            default:
                 break;
         }
     }
 }
 
+// ---------------------------------------------------------------------------
+//  Set Callbacks
+// ---------------------------------------------------------------------------
 void HandleInput::setCallbacks(
-    KeyboardCallback kb,
-    MouseButtonCallback mb,
-    MouseMotionCallback mm,
-    MouseWheelCallback mw,
-    TextInputCallback ti,
-    TouchCallback tc,
-    GamepadButtonCallback gb,
-    GamepadAxisCallback ga,
-    GamepadConnectCallback gc) {
+    KeyboardCallback kb, MouseButtonCallback mb, MouseMotionCallback mm,
+    MouseWheelCallback mw, TextInputCallback ti, TouchCallback tc,
+    GamepadButtonCallback gb, GamepadAxisCallback ga, GamepadConnectCallback gc)
+{
     keyboardCallback_ = kb;
     mouseButtonCallback_ = mb;
     mouseMotionCallback_ = mm;
@@ -247,121 +314,75 @@ void HandleInput::setCallbacks(
     gamepadButtonCallback_ = gb;
     gamepadAxisCallback_ = ga;
     gamepadConnectCallback_ = gc;
-    LOG_DEBUG_CAT("Input", "Input callbacks set");
+    LOG_DEBUG_CAT("Input", "All input callbacks registered");
 }
 
+// ---------------------------------------------------------------------------
+//  Keyboard Handler
+// ---------------------------------------------------------------------------
 void HandleInput::defaultKeyboardHandler(const SDL_KeyboardEvent& key) {
     if (key.type != SDL_EVENT_KEY_DOWN) return;
+
     void* userData = camera_.getUserData();
     if (!userData) {
-        LOG_ERROR_CAT("Input", "Camera userData is null, cannot switch render mode");
+        LOG_ERROR_CAT("Input", "USERDATA NULL → Cannot switch render mode");
         return;
     }
+
     Application& app = *static_cast<Application*>(userData);
-    switch (key.scancode) {
-        case SDL_SCANCODE_1:
-        case SDL_SCANCODE_2:
-        case SDL_SCANCODE_3:
-        case SDL_SCANCODE_4:
-        case SDL_SCANCODE_5:
-        case SDL_SCANCODE_6:
-        case SDL_SCANCODE_7:
-        case SDL_SCANCODE_8:
-        case SDL_SCANCODE_9:
-            app.setRenderMode(key.scancode - SDL_SCANCODE_1 + 1);
-            // camera_.setMode(key.scancode - SDL_SCANCODE_1 + 1); // Commented out: camera mode not needed for render switching
-            LOG_INFO_CAT("Input", "Switched to render mode {}", key.scancode - SDL_SCANCODE_1 + 1);
-            break;
-        case SDL_SCANCODE_P:
-            camera_.togglePause();
-            break;
-        case SDL_SCANCODE_W:
-            camera_.moveForward(0.1f);
-            break;
-        case SDL_SCANCODE_S:
-            camera_.moveForward(-0.1f);
-            break;
-        case SDL_SCANCODE_A:
-            camera_.moveRight(-0.1f);
-            break;
-        case SDL_SCANCODE_D:
-            camera_.moveRight(0.1f);
-            break;
-        case SDL_SCANCODE_Q:
-            camera_.moveUp(0.1f);
-            break;
-        case SDL_SCANCODE_E:
-            camera_.moveUp(-0.1f);
-            break;
-        case SDL_SCANCODE_Z:
-            camera_.updateZoom(true);
-            break;
-        case SDL_SCANCODE_X:
-            camera_.updateZoom(false);
-            break;
-        default:
-            break;
+    const auto sc = key.scancode;
+
+    if (sc >= SDL_SCANCODE_1 && sc <= SDL_SCANCODE_9) {
+        const int mode = sc - SDL_SCANCODE_1 + 1;
+        app.setRenderMode(mode);
+        LOG_INFO_CAT("Input", "RENDER MODE SWITCHED → {}", mode);
+        return;
+    }
+
+    switch (sc) {
+        case SDL_SCANCODE_P:  camera_.togglePause(); LOG_INFO_CAT("Input", "PAUSE TOGGLED"); break;
+        case SDL_SCANCODE_W:  camera_.moveForward(0.1f); LOG_DEBUG_CAT("Input", "MOVE FORWARD"); break;
+        case SDL_SCANCODE_S:  camera_.moveForward(-0.1f); LOG_DEBUG_CAT("Input", "MOVE BACK"); break;
+        case SDL_SCANCODE_A:  camera_.moveRight(-0.1f); LOG_DEBUG_CAT("Input", "MOVE LEFT"); break;
+        case SDL_SCANCODE_D:  camera_.moveRight(0.1f); LOG_DEBUG_CAT("Input", "MOVE RIGHT"); break;
+        case SDL_SCANCODE_Q:  camera_.moveUp(0.1f); LOG_DEBUG_CAT("Input", "MOVE UP"); break;
+        case SDL_SCANCODE_E:  camera_.moveUp(-0.1f); LOG_DEBUG_CAT("Input", "MOVE DOWN"); break;
+        case SDL_SCANCODE_Z:  camera_.updateZoom(true); LOG_DEBUG_CAT("Input", "ZOOM IN"); break;
+        case SDL_SCANCODE_X:  camera_.updateZoom(false); LOG_DEBUG_CAT("Input", "ZOOM OUT"); break;
+        default: break;
     }
 }
 
-void HandleInput::defaultMouseButtonHandler(const SDL_MouseButtonEvent& mb) {
-    (void)mb;
-}
-
+// ---------------------------------------------------------------------------
+//  Mouse & Gamepad Handlers
+// ---------------------------------------------------------------------------
 void HandleInput::defaultMouseMotionHandler(const SDL_MouseMotionEvent& mm) {
     camera_.rotate(mm.xrel * 0.005f, mm.yrel * 0.005f);
 }
 
 void HandleInput::defaultMouseWheelHandler(const SDL_MouseWheelEvent& mw) {
-    if (mw.y > 0) {
-        camera_.updateZoom(true);
-    } else if (mw.y < 0) {
-        camera_.updateZoom(false);
-    }
-}
-
-void HandleInput::defaultTextInputHandler(const SDL_TextInputEvent& ti) {
-    (void)ti;
-}
-
-void HandleInput::defaultTouchHandler(const SDL_TouchFingerEvent& tf) {
-    (void)tf;
+    if (mw.y > 0) camera_.updateZoom(true);
+    else if (mw.y < 0) camera_.updateZoom(false);
 }
 
 void HandleInput::defaultGamepadButtonHandler(const SDL_GamepadButtonEvent& gb) {
-    if (gb.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) {
-        switch (gb.button) {
-            case SDL_GAMEPAD_BUTTON_SOUTH:
-                camera_.updateZoom(true);
-                break;
-            case SDL_GAMEPAD_BUTTON_EAST:
-                camera_.updateZoom(false);
-                break;
-            case SDL_GAMEPAD_BUTTON_NORTH:
-                camera_.togglePause();
-                break;
-            default:
-                break;
-        }
+    if (gb.type != SDL_EVENT_GAMEPAD_BUTTON_DOWN) return;
+    switch (gb.button) {
+        case SDL_GAMEPAD_BUTTON_SOUTH: camera_.updateZoom(true); LOG_DEBUG_CAT("Input", "GAMEPAD ZOOM IN"); break;
+        case SDL_GAMEPAD_BUTTON_EAST:  camera_.updateZoom(false); LOG_DEBUG_CAT("Input", "GAMEPAD ZOOM OUT"); break;
+        case SDL_GAMEPAD_BUTTON_NORTH: camera_.togglePause(); LOG_DEBUG_CAT("Input", "GAMEPAD PAUSE"); break;
     }
 }
 
 void HandleInput::defaultGamepadAxisHandler(const SDL_GamepadAxisEvent& ga) {
-    float axisValue = ga.value / 32767.0f;
-    if (ga.axis == SDL_GAMEPAD_AXIS_LEFTX) {
-        camera_.moveUserCam(axisValue * 0.1f, 0.0f, 0.0f);
-    } else if (ga.axis == SDL_GAMEPAD_AXIS_LEFTY) {
-        camera_.moveUserCam(0.0f, -axisValue * 0.1f, 0.0f);
-    } else if (ga.axis == SDL_GAMEPAD_AXIS_RIGHTX) {
-        camera_.rotate(axisValue * 0.05f, 0.0f);
-    } else if (ga.axis == SDL_GAMEPAD_AXIS_RIGHTY) {
-        camera_.rotate(0.0f, -axisValue * 0.05f);
-    }
+    const float v = ga.value / 32767.0f;
+    if (ga.axis == SDL_GAMEPAD_AXIS_LEFTX)  camera_.moveUserCam(v * 0.1f, 0, 0);
+    if (ga.axis == SDL_GAMEPAD_AXIS_LEFTY)  camera_.moveUserCam(0, -v * 0.1f, 0);
+    if (ga.axis == SDL_GAMEPAD_AXIS_RIGHTX) camera_.rotate(v * 0.05f, 0);
+    if (ga.axis == SDL_GAMEPAD_AXIS_RIGHTY) camera_.rotate(0, -v * 0.05f);
 }
 
 void HandleInput::defaultGamepadConnectHandler(bool connected, SDL_JoystickID id, SDL_Gamepad* pad) {
-    (void)id;
-    if (pad && !connected) {
-        SDL_CloseGamepad(pad);
-    }
+    LOG_INFO_CAT("Input", "GAMEPAD {}: id={}", connected ? "CONNECTED" : "DISCONNECTED", id);
+    if (pad && !connected) SDL_CloseGamepad(pad);
 }
