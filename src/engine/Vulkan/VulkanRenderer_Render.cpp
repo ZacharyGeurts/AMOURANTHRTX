@@ -28,11 +28,24 @@ namespace VulkanRTX {
 // 3. CREATE ENVIRONMENT MAP (USING CONTEXT-BASED HELPERS)
 // -----------------------------------------------------------------------------
 void VulkanRenderer::createEnvironmentMap() {
-    int width, height, channels;
+    int width = 512, height = 256, channels = 4;
     stbi_uc* pixels = stbi_load("assets/textures/envmap.hdr", &width, &height, &channels, STBI_rgb_alpha);
+    bool useFallback = false;
     if (!pixels) {
-        LOG_WARNING_CAT("Renderer", "Failed to load envmap.hdr, using black fallback");
-        return;
+        LOG_WARNING_CAT("Renderer", "Failed to load envmap.hdr, creating procedural blue fallback");
+        useFallback = true;
+        // Procedural bright blue gradient (visible sky)
+        pixels = new stbi_uc[width * height * 4];
+        for (int y = 0; y < height; ++y) {
+            for (int x = 0; x < width; ++x) {
+                int idx = (y * width + x) * 4;
+                float normY = static_cast<float>(y) / height;
+                pixels[idx + 0] = static_cast<stbi_uc>(0.2f + normY * 0.3f) * 255;  // R: dark to light blue
+                pixels[idx + 1] = static_cast<stbi_uc>(0.4f + normY * 0.2f) * 255;  // G
+                pixels[idx + 2] = static_cast<stbi_uc>(0.8f + normY * 0.2f) * 255;  // B: bright
+                pixels[idx + 3] = 255;  // A
+            }
+        }
     }
 
     VkDeviceSize imageSize = static_cast<VkDeviceSize>(width) * height * 4;
@@ -50,7 +63,11 @@ void VulkanRenderer::createEnvironmentMap() {
     VK_CHECK(vkMapMemory(context_.device, stagingMemory, 0, imageSize, 0, &data));
     std::memcpy(data, pixels, static_cast<size_t>(imageSize));
     vkUnmapMemory(context_.device, stagingMemory);
-    stbi_image_free(pixels);
+    if (useFallback) {
+        delete[] pixels;
+    } else {
+        stbi_image_free(pixels);
+    }
 
     // Create image
     VkImageCreateInfo imageInfo{

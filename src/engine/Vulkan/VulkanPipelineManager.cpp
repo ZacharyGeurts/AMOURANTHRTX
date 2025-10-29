@@ -50,7 +50,7 @@ VkShaderModule VulkanPipelineManager::loadShader(VkDevice device, const std::str
 
     LOG_DEBUG_CAT("Pipeline", "Loading shader: {} -> {}", shaderType, filename);
 
-    std::filesystem::path shaderPath = std::filesystem::absolute(filename);
+    std::filesystem::path shaderPath = filename;  // Relative path – no absolute
     if (!std::filesystem::exists(shaderPath))
         throw std::runtime_error("Shader file does not exist: " + shaderPath.string());
 
@@ -319,37 +319,31 @@ void VulkanPipelineManager::createGraphicsPipeline(int /*width*/, int /*height*/
         makeShaderStage(frag, VK_SHADER_STAGE_FRAGMENT_BIT)
     };
 
-    VkVertexInputBindingDescription bindingDesc{
-        .binding = 0,
-        .stride = sizeof(Vertex),
-        .inputRate = VK_VERTEX_INPUT_RATE_VERTEX
-    };
-    std::array<VkVertexInputAttributeDescription, 2> attrDesc = {{
-        {0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, pos)},
-        {1, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(Vertex, uv)}
-    }};
+    // No vertex input – full-screen triangle generated in vertex shader
     VkPipelineVertexInputStateCreateInfo vertexInput{
         .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-        .vertexBindingDescriptionCount = 1,
-        .pVertexBindingDescriptions = &bindingDesc,
-        .vertexAttributeDescriptionCount = static_cast<uint32_t>(attrDesc.size()),
-        .pVertexAttributeDescriptions = attrDesc.data()
+        .vertexBindingDescriptionCount = 0,
+        .vertexAttributeDescriptionCount = 0
     };
+
     VkPipelineInputAssemblyStateCreateInfo inputAssembly{
         .sType    = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
         .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST
     };
+
     VkDynamicState dynStates[] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
     VkPipelineDynamicStateCreateInfo dyn{
         .sType             = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
         .dynamicStateCount = 2,
         .pDynamicStates    = dynStates
     };
+
     VkPipelineViewportStateCreateInfo viewport{
         .sType         = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
         .viewportCount = 1,
         .scissorCount  = 1
     };
+
     VkPipelineRasterizationStateCreateInfo raster{
         .sType       = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
         .polygonMode = VK_POLYGON_MODE_FILL,
@@ -357,10 +351,12 @@ void VulkanPipelineManager::createGraphicsPipeline(int /*width*/, int /*height*/
         .frontFace   = VK_FRONT_FACE_COUNTER_CLOCKWISE,
         .lineWidth   = 1.0f
     };
+
     VkPipelineMultisampleStateCreateInfo ms{
         .sType                = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
         .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT
     };
+
     VkPipelineColorBlendAttachmentState blend{
         .colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
                           VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT
@@ -370,10 +366,12 @@ void VulkanPipelineManager::createGraphicsPipeline(int /*width*/, int /*height*/
         .attachmentCount = 1,
         .pAttachments    = &blend
     };
+
     VkPushConstantRange pc{
         .stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
         .size       = sizeof(MaterialData::PushConstants)
     };
+
     VkPipelineLayoutCreateInfo layoutCI{
         .sType                  = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
         .setLayoutCount         = 1,
@@ -452,8 +450,8 @@ void VulkanPipelineManager::recordGraphicsCommands(VkCommandBuffer cmd,
                        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                        0, sizeof(pc), &pc);
 
-    uint32_t indexCount = 3;
-    vkCmdDrawIndexed(cmd, indexCount, 1, 0, 0, 0);
+    // No index buffer – full-screen triangle from vertex shader
+    vkCmdDraw(cmd, 3, 1, 0, 0);
     vkCmdEndRenderPass(cmd);
     VK_CHECK(vkEndCommandBuffer(cmd));
 }
