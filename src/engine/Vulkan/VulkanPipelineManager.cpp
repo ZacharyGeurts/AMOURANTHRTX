@@ -7,7 +7,6 @@
 #include "engine/Vulkan/VulkanRTX_Setup.hpp"
 #include "engine/Dispose.hpp"
 #include "engine/logging.hpp"
-#include "engine/MaterialData.hpp"
 
 #include <vulkan/vulkan.h>
 #include <stdexcept>

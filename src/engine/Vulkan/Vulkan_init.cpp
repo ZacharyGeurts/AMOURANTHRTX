@@ -906,6 +906,9 @@ void createDescriptorPoolAndSet(VkDevice device, VkPhysicalDevice physicalDevice
     LOG_INFO_CAT("VulkanInitializer", "Updated {} descriptor sets for {}", descriptorSets.size(), forRayTracing ? "ray tracing" : "graphics");
 }
 
+// ---------------------------------------------------------------------
+//  Single-time command helpers (using Vulkan::Context)
+// ---------------------------------------------------------------------
 VkCommandBuffer beginSingleTimeCommands(Vulkan::Context& context) {
     VkCommandBufferAllocateInfo allocInfo = {
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
@@ -1067,7 +1070,7 @@ void copyBuffer(VkDevice device, VkCommandPool commandPool, VkQueue queue,
 
     VkResult endResult = vkEndCommandBuffer(commandBuffer);
     if (endResult != VK_SUCCESS) {
-        LOG_ERROR_CAT("VulkanInitializer", "vkEndCommandBuffer in copyBuffer failed: {} (0x{:x})", 
+        LOG_ERROR_CAT("VVulkanInitializer", "vkEndCommandBuffer in copyBuffer failed: {} (0x{:x})", 
                   endResult, static_cast<uint32_t>(endResult));
         vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer);
         throw std::runtime_error(std::format("Failed to end command buffer for copyBuffer: {}", endResult));
@@ -1139,7 +1142,6 @@ void copyBuffer(VkDevice device, VkCommandPool commandPool, VkQueue queue,
 
 // ---------------------------------------------------------------------
 //  Helper: Get buffer device address (ray tracing extension)
-//  Requires Vulkan::Context with loaded function pointers
 // ---------------------------------------------------------------------
 VkDeviceAddress getBufferDeviceAddress(const Vulkan::Context& context, VkBuffer buffer) {
     if (!context.device || buffer == VK_NULL_HANDLE || !context.vkGetBufferDeviceAddressKHR) {
@@ -1162,4 +1164,110 @@ VkDeviceAddress getBufferDeviceAddress(const Vulkan::Context& context, VkBuffer 
     return address;
 }
 
+// ---------------------------------------------------------------------
+//  Image layout transition using Vulkan::Context
+// ---------------------------------------------------------------------
+void transitionImageLayout(Vulkan::Context& context, VkImage image, VkFormat format,
+                           VkImageLayout oldLayout, VkImageLayout newLayout) {
+    VkCommandBuffer commandBuffer = beginSingleTimeCommands(context);
+
+    VkImageMemoryBarrier barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    barrier.oldLayout = oldLayout;
+    barrier.newLayout = newLayout;
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.image = image;
+    barrier.subresourceRange.baseMipLevel = 0;
+    barrier.subresourceRange.levelCount = 1;
+    barrier.subresourceRange.baseArrayLayer = 0;
+    barrier.subresourceRange.layerCount = 1;
+
+    if (newLayout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL) {
+        barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+        if (hasStencilComponent(format)) {
+            barrier.subresourceRange.aspectMask |= VK_IMAGE_ASPECT_STENCIL_BIT;
+        }
+    } else if (oldLayout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL ||
+               newLayout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL) {
+        barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+        if (hasStencilComponent(format)) {
+            barrier.subresourceRange.aspectMask |= VK_IMAGE_ASPECT_STENCIL_BIT;
+        }
+    } else {
+        barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    }
+
+    VkPipelineStageFlags sourceStage;
+    VkPipelineStageFlags destinationStage;
+
+    if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED && newLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
+        barrier.srcAccessMask = 0;
+        barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        sourceStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+        destinationStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+    } else if (oldLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL && newLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
+        barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        sourceStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+        destinationStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    } else if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED && newLayout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL) {
+        barrier.srcAccessMask = 0;
+        barrier.dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+        sourceStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+        destinationStage = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+    } else {
+        vkEndCommandBuffer(commandBuffer);
+        vkFreeCommandBuffers(context.device, context.commandPool, 1, &commandBuffer);
+        throw std::invalid_argument("Unsupported layout transition!");
+    }
+
+    vkCmdPipelineBarrier(
+        commandBuffer,
+        sourceStage, destinationStage,
+        0,
+        0, nullptr,
+        0, nullptr,
+        1, &barrier
+    );
+
+    endSingleTimeCommands(context, commandBuffer);
+}
+
+// ---------------------------------------------------------------------
+//  Copy buffer to image using Vulkan::Context
+// ---------------------------------------------------------------------
+void copyBufferToImage(Vulkan::Context& context, VkBuffer srcBuffer, VkImage dstImage,
+                       uint32_t width, uint32_t height) {
+    VkCommandBuffer commandBuffer = beginSingleTimeCommands(context);
+
+    VkBufferImageCopy region{};
+    region.bufferOffset = 0;
+    region.bufferRowLength = 0;
+    region.bufferImageHeight = 0;
+    region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    region.imageSubresource.mipLevel = 0;
+    region.imageSubresource.baseArrayLayer = 0;
+    region.imageSubresource.layerCount = 1;
+    region.imageOffset = {0, 0, 0};
+    region.imageExtent = {width, height, 1};
+
+    vkCmdCopyBufferToImage(
+        commandBuffer,
+        srcBuffer, dstImage,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        1, &region
+    );
+
+    endSingleTimeCommands(context, commandBuffer);
+}
+
+// ---------------------------------------------------------------------
+//  Utility: Check if format has stencil component
+// ---------------------------------------------------------------------
+bool hasStencilComponent(VkFormat format) {
+    return format == VK_FORMAT_D32_SFLOAT_S8_UINT ||
+           format == VK_FORMAT_D24_UNORM_S8_UINT ||
+           format == VK_FORMAT_D16_UNORM_S8_UINT;
+}
 } // namespace VulkanInitializer

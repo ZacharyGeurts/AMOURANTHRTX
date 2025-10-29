@@ -3,20 +3,13 @@
 #ifndef VULKAN_RENDERER_HPP
 #define VULKAN_RENDERER_HPP
 
-// ---------------------------------------------------------------
-// 1. Core engine types (DimensionData, UniformBufferObject, AMOURANTH)
-// ---------------------------------------------------------------
-#include "engine/Vulkan/types.hpp"          // <-- ONLY THIS
-
-// ---------------------------------------------------------------
-// 2. Vulkan core & helper components
-// ---------------------------------------------------------------
+#include "engine/Vulkan/types.hpp"
 #include "engine/Vulkan/VulkanCore.hpp"
 #include "engine/Vulkan/VulkanRTX_Setup.hpp"
 #include "engine/Vulkan/VulkanPipelineManager.hpp"
 #include "engine/Vulkan/VulkanBufferManager.hpp"
 #include "engine/Vulkan/VulkanSwapchainManager.hpp"
-#include "engine/camera.hpp"                // PerspectiveCamera, Camera base
+#include "engine/camera.hpp"
 
 #include <vulkan/vulkan.h>
 #include <vector>
@@ -28,25 +21,16 @@
 
 namespace VulkanRTX {
 
-// -----------------------------------------------------------------
-// Typedefs for readability
-// -----------------------------------------------------------------
 using VkBuffer_T        = VkBuffer;
 using VkImage_T         = VkImage;
 using VkCommandBuffer_T = VkCommandBuffer;
 using VkDescriptorSet_T = VkDescriptorSet;
 
-// -----------------------------------------------------------------
-// Vertex layout (used by graphics pipeline)
-// -----------------------------------------------------------------
 struct Vertex {
     alignas(16) glm::vec3 pos;
     alignas(8)  glm::vec2 uv;
 };
 
-// -----------------------------------------------------------------
-// Per-frame synchronization & descriptor sets
-// -----------------------------------------------------------------
 struct Frame {
     VkCommandBuffer commandBuffer               = VK_NULL_HANDLE;
     VkDescriptorSet rayTracingDescriptorSet     = VK_NULL_HANDLE;
@@ -57,44 +41,29 @@ struct Frame {
     VkFence         fence                       = VK_NULL_HANDLE;
 };
 
-// -----------------------------------------------------------------
-// Main renderer class
-// -----------------------------------------------------------------
 class VulkanRenderer {
 public:
     VulkanRenderer(int width, int height, void* window,
                    const std::vector<std::string>& instanceExtensions);
     ~VulkanRenderer();
 
-    // -----------------------------------------------------------------
-    // Buffer initialisation
-    // -----------------------------------------------------------------
     void initializeAllBufferData(uint32_t maxFrames,
-                                 VkDeviceSize uniformBufferSize,
-                                 VkDeviceSize dimensionBufferSize);
+                                 VkDeviceSize materialSize,
+                                 VkDeviceSize dimensionSize);
     void initializeBufferData(uint32_t frameIndex,
                               VkDeviceSize materialSize,
                               VkDeviceSize dimensionSize);
 
-    // -----------------------------------------------------------------
-    // Descriptor set updates
-    // -----------------------------------------------------------------
     void updateDescriptorSetForFrame(uint32_t frameIndex,
                                      VkAccelerationStructureKHR tlas);
     void updateDescriptorSetForTLAS(VkAccelerationStructureKHR tlas);
     void updateGraphicsDescriptorSet(uint32_t frameIndex);
     void updateComputeDescriptorSet(uint32_t frameIndex);
 
-    // -----------------------------------------------------------------
-    // Rendering
-    // -----------------------------------------------------------------
     void renderFrame(const Camera& camera);
     void handleResize(int width, int height);
     void cleanup() noexcept;
 
-    // -----------------------------------------------------------------
-    // Simple getters
-    // -----------------------------------------------------------------
     VkDevice          getDevice() const { return context_.device; }
     const VulkanRTX&  getVulkanRTX() const { return *rtx_; }
 
@@ -103,16 +72,12 @@ public:
     std::vector<uint32_t>  getIndices() const;
 
 private:
-    // -----------------------------------------------------------------
-    // Internal creation helpers
-    // -----------------------------------------------------------------
     void createSwapchain(int width, int height);
     void createCommandBuffers();
     void createSyncObjects();
     void createEnvironmentMap();
     void createFramebuffers();
     void createAccelerationStructures();
-
     void createDescriptorPool();
     void createDescriptorSets();
 
@@ -125,10 +90,8 @@ private:
     void denoiseImage(VkCommandBuffer cmdBuffer,
                       VkImage inputImage, VkImageView inputImageView,
                       VkImage outputImage, VkImageView outputImageView);
+    void waitIdle();
 
-    // -----------------------------------------------------------------
-    // Member variables
-    // -----------------------------------------------------------------
     int  width_;
     int  height_;
     void* window_;
@@ -143,7 +106,6 @@ private:
 
     uint32_t indexCount_ = 0;
 
-    // Pipelines / images
     VkPipeline          rtPipeline_               = VK_NULL_HANDLE;
     VkPipelineLayout    rtPipelineLayout_         = VK_NULL_HANDLE;
     VkImage             denoiseImage_             = VK_NULL_HANDLE;
@@ -156,26 +118,32 @@ private:
     VkSampler           envMapSampler_            = VK_NULL_HANDLE;
     VkDescriptorSetLayout computeDescriptorSetLayout_ = VK_NULL_HANDLE;
 
-    // *** ACCELERATION STRUCTURES ***
     VkAccelerationStructureKHR blasHandle_ = VK_NULL_HANDLE;
     VkAccelerationStructureKHR tlasHandle_ = VK_NULL_HANDLE;
 
-    // Core Vulkan components
     Vulkan::Context                         context_;
     std::unique_ptr<VulkanRTX>              rtx_;
     std::unique_ptr<VulkanSwapchainManager> swapchainManager_;
     std::unique_ptr<VulkanPipelineManager> pipelineManager_;
     std::unique_ptr<VulkanBufferManager>    bufferManager_;
 
-    // Per-frame data
     std::vector<Frame>          frames_;
+    std::vector<VkFramebuffer>  framebuffers_;
+    std::vector<VkCommandBuffer> commandBuffers_;
+    std::vector<VkDescriptorSet> descriptorSets_;
+    VkDescriptorPool            descriptorPool_ = VK_NULL_HANDLE;
+
     std::vector<VkBuffer>       materialBuffers_;
     std::vector<VkDeviceMemory> materialBufferMemory_;
     std::vector<VkBuffer>       dimensionBuffers_;
     std::vector<VkDeviceMemory> dimensionBufferMemory_;
 
-    // Camera (owned by renderer – we use PerspectiveCamera internally)
     std::unique_ptr<PerspectiveCamera> camera_;
+
+    bool descriptorsUpdated_ = false;
+    bool recreateSwapchain   = false;
+
+    friend class VulkanRTX;
 };
 
 constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 3;

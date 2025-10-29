@@ -1,4 +1,3 @@
-// include/engine/Vulkan/VulkanRTX_Setup.hpp
 // AMOURANTH RTX Engine Demo © 2025 by Zachary Geurts gzac5314@gmail.com is licensed under CC BY-NC 4.0
 
 #ifndef VULKAN_RTX_SETUP_HPP
@@ -13,7 +12,8 @@
 #include <tuple>
 #include <atomic>
 
-#include "engine/Vulkan/types.hpp" 
+#include "engine/Vulkan/types.hpp"
+using DimensionState = ::DimensionState;
 #include "engine/logging.hpp"
 #include "engine/Vulkan/VulkanCore.hpp"
 
@@ -352,6 +352,9 @@ public:
     void updateDescriptorSetForTLAS(VkAccelerationStructureKHR tlas);
     void compactAccelerationStructures(VkPhysicalDevice physicalDevice, VkCommandPool commandPool, VkQueue queue);
 
+    // **NEW: Create 1x1 black fallback texture**
+    void createBlackFallbackTexture();
+
     bool getSupportsCompaction() const { return supportsCompaction_; }
     VkDescriptorSet getDescriptorSet() const { return ds_.get(); }
     VkPipeline getPipeline() const { return rtPipeline_.get(); }
@@ -372,6 +375,9 @@ private:
     uint32_t findMemoryType(VkPhysicalDevice physicalDevice, uint32_t typeFilter, VkMemoryPropertyFlags properties);
     VkDeviceAddress getBufferDeviceAddress(VkBuffer buffer);
     VkDeviceAddress getAccelerationStructureDeviceAddress(VkAccelerationStructureKHR as);
+
+    // **NEW: Upload black pixel to 1x1 image**
+    void uploadBlackPixelToImage(VkImage image);
 
     void setDescriptorSetLayout(VkDescriptorSetLayout layout) {
         dsLayout_ = VulkanResource<VkDescriptorSetLayout, PFN_vkDestroyDescriptorSetLayout>(
@@ -442,6 +448,11 @@ private:
     ShaderBindingTable sbt_;
     VkDeviceSize scratchAlignment_ = 0;
 
+    // **NEW: Fallback 1x1 black texture**
+    VulkanResource<VkImage, PFN_vkDestroyImage> blackFallbackImage_;
+    VulkanResource<VkDeviceMemory, PFN_vkFreeMemory> blackFallbackMemory_;
+    VulkanResource<VkImageView, PFN_vkDestroyImageView> blackFallbackView_;
+
     // Core Vulkan function pointers
     PFN_vkGetDeviceProcAddr vkGetDeviceProcAddrFunc = nullptr;
     PFN_vkGetBufferDeviceAddress vkGetBufferDeviceAddress = nullptr;
@@ -500,6 +511,11 @@ private:
     PFN_vkCmdDispatch vkCmdDispatch = nullptr;
     PFN_vkDestroyShaderModule vkDestroyShaderModule = nullptr;
     PFN_vkCmdBuildAccelerationStructuresKHR vkCmdBuildAccelerationStructuresKHR = nullptr;
+
+    // ==================================================================
+    //  FRIEND DECLARATION — ALLOWS VulkanRenderer TO ACCESS private members
+    // ==================================================================
+    friend class VulkanRenderer;
 };
 
 } // namespace VulkanRTX

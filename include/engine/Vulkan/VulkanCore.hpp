@@ -400,32 +400,6 @@ public:
 };
 
 // ====================================================================
-// Material Data (aligned for std140)
-// ====================================================================
-namespace VulkanRTX {
-    struct alignas(16) MaterialData {
-        alignas(16) glm::vec4 diffuse;
-        alignas(4)  float specular;
-        alignas(4)  float roughness;
-        alignas(4)  float metallic;
-        alignas(16) glm::vec4 emission;
-
-        struct PushConstants {
-            alignas(16) glm::vec4 clearColor;
-            alignas(16) glm::vec3 cameraPosition;
-            alignas(4)  float _pad0;
-            alignas(16) glm::vec3 lightDirection;
-            alignas(4)  float lightIntensity;
-            alignas(4)  uint32_t samplesPerPixel;
-            alignas(4)  uint32_t maxDepth;
-            alignas(4)  uint32_t maxBounces;
-            alignas(4)  float russianRoulette;
-            alignas(8)  glm::vec2 resolution;
-        };
-    };
-}
-
-// ====================================================================
 // Vulkan Context with Ray Tracing Function Pointers
 // ====================================================================
 namespace Vulkan {

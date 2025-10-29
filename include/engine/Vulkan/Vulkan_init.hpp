@@ -37,15 +37,36 @@ namespace VulkanInitializer {
     void createStorageImage(VkDevice device, VkPhysicalDevice physicalDevice, VkImage& image,
                            VkDeviceMemory& memory, VkImageView& view, uint32_t width, uint32_t height,
                            VulkanResourceManager& resourceManager);
-    void copyBuffer(VkDevice device, VkCommandPool commandPool, VkQueue queue,
-                    VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size);
-    void createDescriptorPoolAndSet(VkDevice device, VkPhysicalDevice physicalDevice, VkDescriptorSetLayout descriptorSetLayout,
-                                   VkDescriptorPool& descriptorPool, std::vector<VkDescriptorSet>& descriptorSets,
-                                   VkSampler& sampler, VkBuffer uniformBuffer, VkImageView storageImageView,
-                                   VkAccelerationStructureKHR topLevelAS, bool forRayTracing,
-                                   std::vector<VkBuffer> materialBuffers, std::vector<VkBuffer> dimensionBuffers,
-                                   VkImageView alphaTexView, VkImageView envMapView, VkImageView densityVolumeView,
-                                   VkImageView gDepthView, VkImageView gNormalView);
+
+    // ADDED: Required helper functions used in VulkanRenderer_Render.cpp
+    void transitionImageLayout(
+        Vulkan::Context& context,
+        VkImage image, VkFormat format,
+        VkImageLayout oldLayout, VkImageLayout newLayout
+    );
+
+    void copyBufferToImage(
+        Vulkan::Context& context,
+        VkBuffer srcBuffer, VkImage dstImage, uint32_t width, uint32_t height
+    );
+
+    void copyBuffer(
+        VkDevice device, VkCommandPool commandPool, VkQueue queue,
+        VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size
+    );
+
+    void createDescriptorPoolAndSet(
+        VkDevice device, VkPhysicalDevice physicalDevice, VkDescriptorSetLayout descriptorSetLayout,
+        VkDescriptorPool& descriptorPool, std::vector<VkDescriptorSet>& descriptorSets,
+        VkSampler& sampler, VkBuffer uniformBuffer, VkImageView storageImageView,
+        VkAccelerationStructureKHR topLevelAS, bool forRayTracing,
+        std::vector<VkBuffer> materialBuffers, std::vector<VkBuffer> dimensionBuffers,
+        VkImageView alphaTexView, VkImageView envMapView, VkImageView densityVolumeView,
+        VkImageView gDepthView, VkImageView gNormalView
+    );
+
+    // ADDED: Utility function for depth-stencil formats
+    bool hasStencilComponent(VkFormat format);
 }
 
 #endif // VULKAN_INIT_HPP

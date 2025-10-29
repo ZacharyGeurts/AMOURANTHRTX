@@ -6,7 +6,7 @@
 #include "engine/Vulkan/VulkanCore.hpp"
 #include "engine/Vulkan/VulkanRTX_Setup.hpp"
 #include "engine/Dispose.hpp"
-#include "engine/MaterialData.hpp"
+#include "engine/Vulkan/types.hpp"
 #include <vulkan/vulkan.h>
 #include <memory>
 #include <unordered_map>
