@@ -1,5 +1,5 @@
 
-<img width="640" src="https://pbs.twimg.com/media/GzgacATW4AAj_9X?format=jpg&name=4096x4096" />  
+<img width="640" src="https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/assets/textures/ammo.png" />  
 
 AMOURANTH RTX © 2025 by Zachary Geurts gzac5314@gmail.com is licensed under [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0)  
 Unreal developers may consider some of this parody.  
