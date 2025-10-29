@@ -18,6 +18,7 @@
 #include <string>
 #include <array>
 #include <chrono>
+#include <cstdint>
 
 namespace VulkanRTX {
 
@@ -92,10 +93,12 @@ private:
                       VkImage outputImage, VkImageView outputImageView);
     void waitIdle();
 
+    // --- Basic window/state ---
     int  width_;
     int  height_;
     void* window_;
 
+    // --- Frame tracking (must come before lastFPSTime_) ---
     uint32_t currentFrame_      = 0;
     uint32_t frameCount_        = 0;
     uint32_t framesThisSecond_  = 0;
@@ -106,6 +109,7 @@ private:
 
     uint32_t indexCount_ = 0;
 
+    // --- Vulkan core objects ---
     VkPipeline          rtPipeline_               = VK_NULL_HANDLE;
     VkPipelineLayout    rtPipelineLayout_         = VK_NULL_HANDLE;
     VkImage             denoiseImage_             = VK_NULL_HANDLE;
@@ -121,25 +125,30 @@ private:
     VkAccelerationStructureKHR blasHandle_ = VK_NULL_HANDLE;
     VkAccelerationStructureKHR tlasHandle_ = VK_NULL_HANDLE;
 
+    // --- Core systems ---
     Vulkan::Context                         context_;
     std::unique_ptr<VulkanRTX>              rtx_;
     std::unique_ptr<VulkanSwapchainManager> swapchainManager_;
     std::unique_ptr<VulkanPipelineManager> pipelineManager_;
     std::unique_ptr<VulkanBufferManager>    bufferManager_;
 
+    // --- Per-frame resources ---
     std::vector<Frame>          frames_;
     std::vector<VkFramebuffer>  framebuffers_;
     std::vector<VkCommandBuffer> commandBuffers_;
     std::vector<VkDescriptorSet> descriptorSets_;
     VkDescriptorPool            descriptorPool_ = VK_NULL_HANDLE;
 
+    // --- Buffer vectors ---
     std::vector<VkBuffer>       materialBuffers_;
     std::vector<VkDeviceMemory> materialBufferMemory_;
     std::vector<VkBuffer>       dimensionBuffers_;
     std::vector<VkDeviceMemory> dimensionBufferMemory_;
 
+    // --- Camera ---
     std::unique_ptr<PerspectiveCamera> camera_;
 
+    // --- Flags (should come after things they depend on) ---
     bool descriptorsUpdated_ = false;
     bool recreateSwapchain   = false;
 

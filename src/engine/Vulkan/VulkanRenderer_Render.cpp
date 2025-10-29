@@ -22,6 +22,8 @@
 
 namespace VulkanRTX {
 
+#define VK_CHECK(x) do { VkResult r = (x); if (r != VK_SUCCESS) { LOG_ERROR_CAT("Renderer", "{} failed: {}", #x, static_cast<int>(r)); throw std::runtime_error(std::format("{} failed", #x)); } } while(0)
+
 // -----------------------------------------------------------------------------
 // 3. CREATE ENVIRONMENT MAP (USING CONTEXT-BASED HELPERS)
 // -----------------------------------------------------------------------------
@@ -33,7 +35,7 @@ void VulkanRenderer::createEnvironmentMap() {
         return;
     }
 
-    VkDeviceSize imageSize = width * height * 4;
+    VkDeviceSize imageSize = static_cast<VkDeviceSize>(width) * height * 4;
 
     VkBuffer stagingBuffer = VK_NULL_HANDLE;
     VkDeviceMemory stagingMemory = VK_NULL_HANDLE;
@@ -45,7 +47,7 @@ void VulkanRenderer::createEnvironmentMap() {
     );
 
     void* data;
-    vkMapMemory(context_.device, stagingMemory, 0, imageSize, 0, &data);
+    VK_CHECK(vkMapMemory(context_.device, stagingMemory, 0, imageSize, 0, &data));
     std::memcpy(data, pixels, static_cast<size_t>(imageSize));
     vkUnmapMemory(context_.device, stagingMemory);
     stbi_image_free(pixels);
@@ -64,9 +66,7 @@ void VulkanRenderer::createEnvironmentMap() {
         .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
         .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
     };
-    if (vkCreateImage(context_.device, &imageInfo, nullptr, &envMapImage_) != VK_SUCCESS) {
-        throw std::runtime_error("Failed to create envmap image");
-    }
+    VK_CHECK(vkCreateImage(context_.device, &imageInfo, nullptr, &envMapImage_));
     context_.resourceManager.addImage(envMapImage_);
 
     VkMemoryRequirements memReqs;
@@ -76,11 +76,9 @@ void VulkanRenderer::createEnvironmentMap() {
         .allocationSize = memReqs.size,
         .memoryTypeIndex = VulkanInitializer::findMemoryType(context_.physicalDevice, memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)
     };
-    if (vkAllocateMemory(context_.device, &allocInfo, nullptr, &envMapImageMemory_) != VK_SUCCESS) {
-        throw std::runtime_error("Failed to allocate envmap image memory");
-    }
+    VK_CHECK(vkAllocateMemory(context_.device, &allocInfo, nullptr, &envMapImageMemory_));
     context_.resourceManager.addMemory(envMapImageMemory_);
-    vkBindImageMemory(context_.device, envMapImage_, envMapImageMemory_, 0);
+    VK_CHECK(vkBindImageMemory(context_.device, envMapImage_, envMapImageMemory_, 0));
 
     // Transition to transfer dst
     VulkanInitializer::transitionImageLayout(
@@ -113,9 +111,7 @@ void VulkanRenderer::createEnvironmentMap() {
         .format = VK_FORMAT_R8G8B8A8_UNORM,
         .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
     };
-    if (vkCreateImageView(context_.device, &viewInfo, nullptr, &envMapImageView_) != VK_SUCCESS) {
-        throw std::runtime_error("Failed to create envmap image view");
-    }
+    VK_CHECK(vkCreateImageView(context_.device, &viewInfo, nullptr, &envMapImageView_));
     context_.resourceManager.addImageView(envMapImageView_);
 
     // Create sampler
@@ -136,9 +132,7 @@ void VulkanRenderer::createEnvironmentMap() {
         .borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK,
         .unnormalizedCoordinates = VK_FALSE
     };
-    if (vkCreateSampler(context_.device, &samplerInfo, nullptr, &envMapSampler_) != VK_SUCCESS) {
-        throw std::runtime_error("Failed to create envmap sampler");
-    }
+    VK_CHECK(vkCreateSampler(context_.device, &samplerInfo, nullptr, &envMapSampler_));
 
     LOG_INFO_CAT("Renderer", "Loaded environment map: {}x{}", width, height);
 }
@@ -190,7 +184,7 @@ void VulkanRenderer::initializeBufferData(uint32_t frameIndex, VkDeviceSize mate
     );
 
     void* data;
-    vkMapMemory(context_.device, stagingMemory, 0, materialSize, 0, &data);
+    VK_CHECK(vkMapMemory(context_.device, stagingMemory, 0, materialSize, 0, &data));
     std::memcpy(data, materials.data(), materialSize);
     vkUnmapMemory(context_.device, stagingMemory);
 
@@ -218,7 +212,7 @@ void VulkanRenderer::initializeBufferData(uint32_t frameIndex, VkDeviceSize mate
         stagingBuffer, stagingMemory, nullptr, context_.resourceManager
     );
 
-    vkMapMemory(context_.device, stagingMemory, 0, dimensionSize, 0, &data);
+    VK_CHECK(vkMapMemory(context_.device, stagingMemory, 0, dimensionSize, 0, &data));
     std::memcpy(data, &dim, dimensionSize);
     vkUnmapMemory(context_.device, stagingMemory);
 

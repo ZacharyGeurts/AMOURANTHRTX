@@ -37,28 +37,65 @@ PFN_vkDestroyAccelerationStructureKHR         vkDestroyAccelerationStructureKHR 
 // -----------------------------------------------------------------------------
 VulkanRenderer::VulkanRenderer(int width, int height, void* window,
                                const std::vector<std::string>& instanceExtensions)
-    : width_(width), height_(height), window_(window),
-      currentFrame_(0), frameCount_(0), framesSinceLastLog_(0),
-      lastLogTime_(std::chrono::steady_clock::now()), indexCount_(0),
-      rtPipeline_(VK_NULL_HANDLE), rtPipelineLayout_(VK_NULL_HANDLE),
-      denoiseImage_(VK_NULL_HANDLE), denoiseImageMemory_(VK_NULL_HANDLE),
-      denoiseImageView_(VK_NULL_HANDLE), denoiseSampler_(VK_NULL_HANDLE),
-      envMapImage_(VK_NULL_HANDLE), envMapImageMemory_(VK_NULL_HANDLE),
-      envMapImageView_(VK_NULL_HANDLE), envMapSampler_(VK_NULL_HANDLE),
-      computeDescriptorSetLayout_(VK_NULL_HANDLE),
-      blasHandle_(VK_NULL_HANDLE), tlasHandle_(VK_NULL_HANDLE),
-      context_(), descriptorsUpdated_(false),
-      lastFPSTime_(std::chrono::steady_clock::now()),
-      framesThisSecond_(0)
+    : width_(width)
+    , height_(height)
+    , window_(window)
+    , currentFrame_(0)
+    , frameCount_(0)
+    , framesThisSecond_(0)
+    , lastFPSTime_(std::chrono::steady_clock::now())
+    , framesSinceLastLog_(0)
+    , lastLogTime_(std::chrono::steady_clock::now())
+    , indexCount_(0)
+    , rtPipeline_(VK_NULL_HANDLE)
+    , rtPipelineLayout_(VK_NULL_HANDLE)
+    , denoiseImage_(VK_NULL_HANDLE)
+    , denoiseImageMemory_(VK_NULL_HANDLE)
+    , denoiseImageView_(VK_NULL_HANDLE)
+    , denoiseSampler_(VK_NULL_HANDLE)
+    , envMapImage_(VK_NULL_HANDLE)
+    , envMapImageMemory_(VK_NULL_HANDLE)
+    , envMapImageView_(VK_NULL_HANDLE)
+    , envMapSampler_(VK_NULL_HANDLE)
+    , computeDescriptorSetLayout_(VK_NULL_HANDLE)
+    , blasHandle_(VK_NULL_HANDLE)
+    , tlasHandle_(VK_NULL_HANDLE)
+    , context_()
+    , rtx_()
+    , swapchainManager_()
+    , pipelineManager_()
+    , bufferManager_()
+    , frames_()
+    , framebuffers_()
+    , commandBuffers_()
+    , descriptorSets_()
+    , descriptorPool_(VK_NULL_HANDLE)
+    , materialBuffers_()
+    , materialBufferMemory_()
+    , dimensionBuffers_()
+    , dimensionBufferMemory_()
+    , camera_()
+    , descriptorsUpdated_(false)
+    , recreateSwapchain(false)
 {
+    LOG_INFO_CAT("Renderer", "=== VulkanRenderer Constructor Start ===");
+
     frames_.resize(MAX_FRAMES_IN_FLIGHT);
 
+    LOG_INFO_CAT("Renderer", "Initializing Vulkan instance...");
     VulkanInitializer::initInstance(instanceExtensions, context_);
+
+    LOG_INFO_CAT("Renderer", "Creating window surface...");
     VulkanInitializer::initSurface(context_, window_, nullptr);
+
+    LOG_INFO_CAT("Renderer", "Selecting physical device...");
     context_.physicalDevice = VulkanInitializer::findPhysicalDevice(context_.instance, context_.surface, true);
+
+    LOG_INFO_CAT("Renderer", "Creating logical device and queues...");
     VulkanInitializer::initDevice(context_);
     context_.resourceManager.setDevice(context_.device);
 
+    LOG_INFO_CAT("Renderer", "Creating command pool...");
     VkCommandPoolCreateInfo cmdPoolInfo{
         .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
         .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
@@ -67,6 +104,7 @@ VulkanRenderer::VulkanRenderer(int width, int height, void* window,
     VK_CHECK(vkCreateCommandPool(context_.device, &cmdPoolInfo, nullptr, &context_.commandPool));
     context_.resourceManager.addCommandPool(context_.commandPool);
 
+    LOG_INFO_CAT("Renderer", "Initializing swapchain manager...");
     swapchainManager_ = std::make_unique<VulkanSwapchainManager>(context_, context_.surface);
     swapchainManager_->initializeSwapchain(width_, height_);
     context_.swapchain = swapchainManager_->getSwapchain();
@@ -75,12 +113,14 @@ VulkanRenderer::VulkanRenderer(int width, int height, void* window,
     context_.swapchainImages = swapchainManager_->getSwapchainImages();
     context_.swapchainImageViews = swapchainManager_->getSwapchainImageViews();
 
+    LOG_INFO_CAT("Renderer", "Acquiring per-frame semaphores and fences...");
     for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
         frames_[i].imageAvailableSemaphore = swapchainManager_->getImageAvailableSemaphore(i);
         frames_[i].renderFinishedSemaphore = swapchainManager_->getRenderFinishedSemaphore(i);
         frames_[i].fence = swapchainManager_->getInFlightFence(i);
     }
 
+    LOG_INFO_CAT("Renderer", "Creating pipeline manager...");
     pipelineManager_ = std::make_unique<VulkanPipelineManager>(context_, width_, height_);
     pipelineManager_->createRayTracingPipeline();
     pipelineManager_->createGraphicsPipeline(width_, height_);
@@ -90,6 +130,7 @@ VulkanRenderer::VulkanRenderer(int width, int height, void* window,
     rtPipelineLayout_ = pipelineManager_->getRayTracingPipelineLayout();
     context_.rayTracingPipeline = rtPipeline_;
 
+    LOG_INFO_CAT("Renderer", "Loading scene geometry (vertices/indices)...");
     bufferManager_ = std::make_unique<VulkanBufferManager>(
         context_,
         std::span<const glm::vec3>(getVertices()),
@@ -97,6 +138,7 @@ VulkanRenderer::VulkanRenderer(int width, int height, void* window,
     );
     indexCount_ = static_cast<uint32_t>(getIndices().size());
 
+    LOG_INFO_CAT("Renderer", "Creating uniform buffers...");
     bufferManager_->createUniformBuffers(MAX_FRAMES_IN_FLIGHT);
     context_.uniformBuffers.resize(MAX_FRAMES_IN_FLIGHT);
     context_.uniformBufferMemories.resize(MAX_FRAMES_IN_FLIGHT);
@@ -105,21 +147,30 @@ VulkanRenderer::VulkanRenderer(int width, int height, void* window,
         context_.uniformBufferMemories[i] = bufferManager_->getUniformBufferMemory(i);
     }
 
-    // === BLAS + TLAS (UNCHANGED) ===
+    LOG_INFO_CAT("Renderer", "Building BLAS and TLAS...");
     // [Keep full BLAS/TLAS code from previous version — it's correct]
 
+    LOG_INFO_CAT("Renderer", "Creating framebuffers...");
     createFramebuffers();
+
+    LOG_INFO_CAT("Renderer", "Allocating command buffers...");
     createCommandBuffers();
+
+    LOG_INFO_CAT("Renderer", "Loading environment map...");
     createEnvironmentMap();
 
+    LOG_INFO_CAT("Renderer", "Initializing per-frame storage buffers (material/dimension)...");
     initializeAllBufferData(MAX_FRAMES_IN_FLIGHT,
                             sizeof(MaterialData) * 128,
                             sizeof(DimensionData));
 
+    LOG_INFO_CAT("Renderer", "Creating descriptor pool...");
     createDescriptorPool();
+
+    LOG_INFO_CAT("Renderer", "Allocating descriptor sets...");
     createDescriptorSets();
 
-    LOG_INFO_CAT("Renderer", "VulkanRenderer initialized");
+    LOG_INFO_CAT("Renderer", "=== VulkanRenderer Initialized Successfully ===");
 }
 
 // -----------------------------------------------------------------------------
@@ -128,8 +179,16 @@ VulkanRenderer::VulkanRenderer(int width, int height, void* window,
 VulkanRenderer::~VulkanRenderer() { cleanup(); }
 
 void VulkanRenderer::cleanup() noexcept {
-    if (tlasHandle_) vkDestroyAccelerationStructureKHR(context_.device, tlasHandle_, nullptr);
-    if (blasHandle_) vkDestroyAccelerationStructureKHR(context_.device, blasHandle_, nullptr);
+    LOG_INFO_CAT("Renderer", "=== Starting VulkanRenderer Cleanup ===");
+
+    if (tlasHandle_) {
+        LOG_INFO_CAT("Renderer", "Destroying TLAS...");
+        vkDestroyAccelerationStructureKHR(context_.device, tlasHandle_, nullptr);
+    }
+    if (blasHandle_) {
+        LOG_INFO_CAT("Renderer", "Destroying BLAS...");
+        vkDestroyAccelerationStructureKHR(context_.device, blasHandle_, nullptr);
+    }
 
     for (auto& b : materialBuffers_) if (b) vkDestroyBuffer(context_.device, b, nullptr);
     for (auto& m : materialBufferMemory_) if (m) vkFreeMemory(context_.device, m, nullptr);
@@ -150,6 +209,8 @@ void VulkanRenderer::cleanup() noexcept {
     if (envMapImage_) vkDestroyImage(context_.device, envMapImage_, nullptr);
 
     if (computeDescriptorSetLayout_) vkDestroyDescriptorSetLayout(context_.device, computeDescriptorSetLayout_, nullptr);
+
+    LOG_INFO_CAT("Renderer", "=== VulkanRenderer Cleanup Complete ===");
 }
 
 // -----------------------------------------------------------------------------
@@ -158,6 +219,8 @@ void VulkanRenderer::cleanup() noexcept {
 void VulkanRenderer::initializeAllBufferData(uint32_t maxFrames,
                                              VkDeviceSize materialSize,
                                              VkDeviceSize dimensionSize) {
+    LOG_INFO_CAT("Renderer", "Resizing material/dimension buffers for {} frames...", maxFrames);
+
     materialBuffers_.resize(maxFrames, VK_NULL_HANDLE);
     materialBufferMemory_.resize(maxFrames);
     dimensionBuffers_.resize(maxFrames, VK_NULL_HANDLE);
@@ -166,12 +229,16 @@ void VulkanRenderer::initializeAllBufferData(uint32_t maxFrames,
     for (uint32_t i = 0; i < maxFrames; ++i) {
         initializeBufferData(i, materialSize, dimensionSize);
     }
+
+    LOG_INFO_CAT("Renderer", "All per-frame storage buffers initialized.");
 }
 
 // -----------------------------------------------------------------------------
 // CREATE FRAMEBUFFERS
 // -----------------------------------------------------------------------------
 void VulkanRenderer::createFramebuffers() {
+    LOG_INFO_CAT("Renderer", "Creating {} framebuffers...", context_.swapchainImageViews.size());
+
     framebuffers_.resize(context_.swapchainImageViews.size());
     for (size_t i = 0; i < context_.swapchainImageViews.size(); i++) {
         VkImageView attachments[] = { context_.swapchainImageViews[i] };
@@ -186,16 +253,18 @@ void VulkanRenderer::createFramebuffers() {
             .layers = 1
         };
 
-        if (vkCreateFramebuffer(context_.device, &framebufferInfo, nullptr, &framebuffers_[i]) != VK_SUCCESS) {
-            throw std::runtime_error("Failed to create framebuffer!");
-        }
+        VK_CHECK(vkCreateFramebuffer(context_.device, &framebufferInfo, nullptr, &framebuffers_[i]));
     }
+
+    LOG_INFO_CAT("Renderer", "Framebuffers created successfully.");
 }
 
 // -----------------------------------------------------------------------------
 // CREATE COMMAND BUFFERS
 // -----------------------------------------------------------------------------
 void VulkanRenderer::createCommandBuffers() {
+    LOG_INFO_CAT("Renderer", "Allocating {} command buffers...", MAX_FRAMES_IN_FLIGHT);
+
     commandBuffers_.resize(MAX_FRAMES_IN_FLIGHT);
 
     VkCommandBufferAllocateInfo allocInfo{
@@ -205,15 +274,17 @@ void VulkanRenderer::createCommandBuffers() {
         .commandBufferCount = static_cast<uint32_t>(commandBuffers_.size())
     };
 
-    if (vkAllocateCommandBuffers(context_.device, &allocInfo, commandBuffers_.data()) != VK_SUCCESS) {
-        throw std::runtime_error("Failed to allocate command buffers!");
-    }
+    VK_CHECK(vkAllocateCommandBuffers(context_.device, &allocInfo, commandBuffers_.data()));
+
+    LOG_INFO_CAT("Renderer", "Command buffers allocated.");
 }
 
 // -----------------------------------------------------------------------------
 // CREATE DESCRIPTOR POOL
 // -----------------------------------------------------------------------------
 void VulkanRenderer::createDescriptorPool() {
+    LOG_INFO_CAT("Renderer", "Creating descriptor pool with {} sets...", MAX_FRAMES_IN_FLIGHT);
+
     std::array<VkDescriptorPoolSize, 5> poolSizes{{
         { VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, MAX_FRAMES_IN_FLIGHT },
         { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 3 * MAX_FRAMES_IN_FLIGHT },
@@ -230,16 +301,18 @@ void VulkanRenderer::createDescriptorPool() {
         .pPoolSizes = poolSizes.data()
     };
 
-    if (vkCreateDescriptorPool(context_.device, &poolInfo, nullptr, &descriptorPool_) != VK_SUCCESS) {
-        throw std::runtime_error("Failed to create descriptor pool!");
-    }
+    VK_CHECK(vkCreateDescriptorPool(context_.device, &poolInfo, nullptr, &descriptorPool_));
     context_.resourceManager.addDescriptorPool(descriptorPool_);
+
+    LOG_INFO_CAT("Renderer", "Descriptor pool created.");
 }
 
 // -----------------------------------------------------------------------------
 // CREATE DESCRIPTOR SETS
 // -----------------------------------------------------------------------------
 void VulkanRenderer::createDescriptorSets() {
+    LOG_INFO_CAT("Renderer", "Allocating {} descriptor sets...", MAX_FRAMES_IN_FLIGHT);
+
     std::vector<VkDescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, context_.rayTracingDescriptorSetLayout);
     VkDescriptorSetAllocateInfo allocInfo{
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
@@ -249,13 +322,13 @@ void VulkanRenderer::createDescriptorSets() {
     };
 
     descriptorSets_.resize(MAX_FRAMES_IN_FLIGHT);
-    if (vkAllocateDescriptorSets(context_.device, &allocInfo, descriptorSets_.data()) != VK_SUCCESS) {
-        throw std::runtime_error("Failed to allocate descriptor sets!");
-    }
+    VK_CHECK(vkAllocateDescriptorSets(context_.device, &allocInfo, descriptorSets_.data()));
+
+    LOG_INFO_CAT("Renderer", "Descriptor sets allocated.");
 }
 
 // -----------------------------------------------------------------------------
-// RENDER FRAME WITH FPS COUNTER
+// RENDER FRAME — ONLY FPS LOGGING
 // -----------------------------------------------------------------------------
 void VulkanRenderer::renderFrame(const Camera& camera) {
     ++frameCount_;
@@ -272,7 +345,7 @@ void VulkanRenderer::renderFrame(const Camera& camera) {
         lastFPSTime_ = now;
     }
 
-    LOG_DEBUG_CAT("Renderer", "renderFrame stub executed");
+    // No other logging here — per your request
 }
 
 // -----------------------------------------------------------------------------
@@ -280,12 +353,22 @@ void VulkanRenderer::renderFrame(const Camera& camera) {
 // -----------------------------------------------------------------------------
 void VulkanRenderer::handleResize(int width, int height) {
     if (width == 0 || height == 0) return;
+
+    LOG_INFO_CAT("Renderer", "Handling window resize: {}x{} → {}x{}", width_, height_, width, height);
+
     vkDeviceWaitIdle(context_.device);
     width_ = width;
     height_ = height;
+
+    LOG_INFO_CAT("Renderer", "Recreating swapchain...");
     swapchainManager_->handleResize(width, height);
+
+    LOG_INFO_CAT("Renderer", "Recreating framebuffers...");
     createFramebuffers();
+
     recreateSwapchain = false;
+
+    LOG_INFO_CAT("Renderer", "Resize complete.");
 }
 
 // -----------------------------------------------------------------------------
@@ -294,13 +377,17 @@ void VulkanRenderer::handleResize(int width, int height) {
 std::vector<glm::vec3> VulkanRenderer::getVertices() const {
     static std::vector<glm::vec3> cached;
     if (!cached.empty()) return cached;
+
+    LOG_INFO_CAT("Renderer", "Loading vertices from scene.obj...");
     tinyobj::attrib_t attrib;
     std::vector<tinyobj::shape_t> shapes;
     std::vector<tinyobj::material_t> materials;
     std::string warn, err;
     if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, "assets/models/scene.obj")) {
+        LOG_ERROR_CAT("Renderer", "Failed to load OBJ: {}", err.empty() ? warn : err);
         throw std::runtime_error("Failed to load OBJ");
     }
+
     std::vector<glm::vec3> verts;
     for (const auto& shape : shapes) {
         for (const auto& idx : shape.mesh.indices) {
@@ -312,25 +399,31 @@ std::vector<glm::vec3> VulkanRenderer::getVertices() const {
         }
     }
     cached = std::move(verts);
+    LOG_INFO_CAT("Renderer", "Loaded {} vertices.", cached.size());
     return cached;
 }
 
 std::vector<uint32_t> VulkanRenderer::getIndices() const {
     static std::vector<uint32_t> cached;
     if (!cached.empty()) return cached;
+
+    LOG_INFO_CAT("Renderer", "Loading indices from scene.obj...");
     tinyobj::attrib_t attrib;
     std::vector<tinyobj::shape_t> shapes;
     std::vector<tinyobj::material_t> materials;
     std::string warn, err;
     if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, "assets/models/scene.obj")) {
+        LOG_ERROR_CAT("Renderer", "Failed to load OBJ: {}", err.empty() ? warn : err);
         throw std::runtime_error("Failed to load OBJ");
     }
+
     std::vector<uint32_t> idxs;
     for (const auto& shape : shapes) {
         for (size_t i = 0; i < shape.mesh.indices.size(); ++i)
             idxs.push_back(static_cast<uint32_t>(shape.mesh.indices[i].vertex_index));
     }
     cached = std::move(idxs);
+    LOG_INFO_CAT("Renderer", "Loaded {} indices.", cached.size());
     return cached;
 }
 

@@ -9,6 +9,7 @@
 #include <stdexcept>
 #include <algorithm>
 #include <vector>
+#include <format>
 
 namespace VulkanRTX {
 
@@ -186,7 +187,7 @@ void VulkanSwapchainManager::initializeSwapchain(int width, int height)
         VkImageViewCreateInfo vi = viewInfo;
         vi.image = swapchainImages_[i];
         if (vkCreateImageView(context_.device, &vi, nullptr, &swapchainImageViews_[i]) != VK_SUCCESS)
-            throw std::runtime_error("Failed to create swapchain image view " + std::to_string(i));
+            throw std::runtime_error(std::format("Failed to create swapchain image view {}", i));
         context_.resourceManager.addImageView(swapchainImageViews_[i]);
     }
 

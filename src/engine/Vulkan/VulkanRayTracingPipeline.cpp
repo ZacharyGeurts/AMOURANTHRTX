@@ -21,6 +21,7 @@
 #include <glm/glm.hpp>
 #include <unordered_map>
 #include <cinttypes>
+#include <format>
 
 #ifdef ENABLE_VULKAN_DEBUG
 #include <vulkan/vulkan_ext_debug_utils.h>
@@ -39,12 +40,12 @@ void VulkanPipelineManager::createRayTracingPipeline() {
     shaderModules.reserve(shaderTypes.size());
     for (size_t i = 0; i < shaderTypes.size(); ++i) {
         const auto* type = shaderTypes[i];
-        LOG_INFO("Loading shader module for type: %s", type);
+        LOG_INFO(std::format("Loading shader module for type: {}", type));
         try {
             shaderModules.emplace_back(loadShader(context_.device, type));
-            LOG_INFO("Successfully loaded shader module %zu for %s", i, type);
+            LOG_INFO(std::format("Successfully loaded shader module {} for {}", i, type));
         } catch (const std::exception& e) {
-            LOG_ERROR("Failed to load shader module for %s: %s", type, e.what());
+            LOG_ERROR(std::format("Failed to load shader module for {}: {}", type, e.what()));
             for (auto module : shaderModules) {
                 vkDestroyShaderModule(context_.device, module, nullptr);
             }
@@ -84,11 +85,11 @@ void VulkanPipelineManager::createRayTracingPipeline() {
                 stage.stage = VK_SHADER_STAGE_CALLABLE_BIT_KHR;
                 break;
             default:
-                LOG_ERROR("Invalid shader stage index: %u", i);
+                LOG_ERROR(std::format("Invalid shader stage index: {}", i));
                 throw std::runtime_error("Invalid shader stage index");
         }
     }
-    LOG_INFO("Shader stages prepared for %u stages", stageCount);
+    LOG_INFO(std::format("Shader stages prepared for {} stages", stageCount));
 
     // Predefine shader groups for efficiency
     constexpr uint32_t groupCount = 8;
@@ -166,7 +167,7 @@ void VulkanPipelineManager::createRayTracingPipeline() {
             .intersectionShader = VK_SHADER_UNUSED_KHR
         }
     }};
-    LOG_INFO("Shader groups prepared for %u groups", groupCount);
+    LOG_INFO(std::format("Shader groups prepared for {} groups", groupCount));
 
     // Define push constant range
     VkPushConstantRange pushConstantRange = {
@@ -189,7 +190,7 @@ void VulkanPipelineManager::createRayTracingPipeline() {
     VkPipelineLayout pipelineLayout;
     VkResult layoutResult = vkCreatePipelineLayout(context_.device, &pipelineLayoutInfo, nullptr, &pipelineLayout);
     if (layoutResult != VK_SUCCESS) {
-        LOG_ERROR("Pipeline layout creation failed with result: %d", static_cast<int>(layoutResult));
+        LOG_ERROR(std::format("Pipeline layout creation failed with result: {}", static_cast<int>(layoutResult)));
         for (auto module : shaderModules) {
             vkDestroyShaderModule(context_.device, module, nullptr);
         }
@@ -210,7 +211,7 @@ void VulkanPipelineManager::createRayTracingPipeline() {
         .pNext = &rtProperties
     };
     vkGetPhysicalDeviceProperties2(context_.physicalDevice, &properties2);
-    LOG_INFO("Ray tracing properties queried - max recursion depth: %u", rtProperties.maxRayRecursionDepth);
+    LOG_INFO(std::format("Ray tracing properties queried - max recursion depth: {}", rtProperties.maxRayRecursionDepth));
 
     uint32_t recursionDepth = (rtProperties.maxRayRecursionDepth > 0) ? std::min(4u, rtProperties.maxRayRecursionDepth) : 1;
 
@@ -239,7 +240,7 @@ void VulkanPipelineManager::createRayTracingPipeline() {
     VkPipeline pipeline;
     VkResult pipelineResult = vkCreateRayTracingPipelinesKHR(context_.device, VK_NULL_HANDLE, pipelineCache_, 1, &pipelineInfo, nullptr, &pipeline);
     if (pipelineResult != VK_SUCCESS) {
-        LOG_ERROR("Ray-tracing pipeline creation failed with result: %d", static_cast<int>(pipelineResult));
+        LOG_ERROR(std::format("Ray-tracing pipeline creation failed with result: {}", static_cast<int>(pipelineResult)));
         for (auto module : shaderModules) {
             vkDestroyShaderModule(context_.device, module, nullptr);
         }
@@ -275,14 +276,14 @@ void VulkanPipelineManager::createShaderBindingTable() {
         .pNext = &rtProperties
     };
     vkGetPhysicalDeviceProperties2(context_.physicalDevice, &properties);
-    LOG_INFO("SBT properties queried - handle size: %u, alignment: %u", rtProperties.shaderGroupHandleSize, rtProperties.shaderGroupHandleAlignment);
+    LOG_INFO(std::format("SBT properties queried - handle size: {}, alignment: {}", rtProperties.shaderGroupHandleSize, rtProperties.shaderGroupHandleAlignment));
 
     constexpr uint32_t groupCount = 8;
     const uint32_t handleSize = rtProperties.shaderGroupHandleSize;
     const uint32_t handleAlignment = rtProperties.shaderGroupHandleAlignment;
     const uint32_t alignedHandleSize = (handleSize + handleAlignment - 1) & ~(handleAlignment - 1);
     const uint32_t sbtSize = groupCount * alignedHandleSize;
-    LOG_INFO("SBT calculated - aligned handle size: %u, total size: %u", alignedHandleSize, sbtSize);
+    LOG_INFO(std::format("SBT calculated - aligned handle size: {}, total size: {}", alignedHandleSize, sbtSize));
 
     std::vector<uint8_t> shaderGroupHandles(sbtSize);
     auto vkGetRayTracingShaderGroupHandlesKHR = reinterpret_cast<PFN_vkGetRayTracingShaderGroupHandlesKHR>(
@@ -295,7 +296,7 @@ void VulkanPipelineManager::createShaderBindingTable() {
 
     VkResult handlesResult = vkGetRayTracingShaderGroupHandlesKHR(context_.device, rayTracingPipeline_->get(), 0, groupCount, sbtSize, shaderGroupHandles.data());
     if (handlesResult != VK_SUCCESS) {
-        LOG_ERROR("Getting shader group handles failed with result: %d", static_cast<int>(handlesResult));
+        LOG_ERROR(std::format("Getting shader group handles failed with result: {}", static_cast<int>(handlesResult)));
         throw std::runtime_error("Failed to get shader group handles");
     }
     LOG_INFO("Shader group handles retrieved successfully");
@@ -310,7 +311,7 @@ void VulkanPipelineManager::createShaderBindingTable() {
         VulkanInitializer::createBuffer(context_.device, context_.physicalDevice, sbtSize, sbtUsage, sbtMemoryProps, sbtBuffer, sbtMemory, nullptr, context_.resourceManager);
         LOG_INFO("SBT device buffer created successfully");
     } catch (const std::exception& e) {
-        LOG_ERROR("Failed to create SBT device buffer: %s", e.what());
+        LOG_ERROR(std::format("Failed to create SBT device buffer: {}", e.what()));
         throw;
     }
 
@@ -324,7 +325,7 @@ void VulkanPipelineManager::createShaderBindingTable() {
     VkBuffer stagingBuffer;
     VkResult stagingCreateResult = vkCreateBuffer(context_.device, &stagingCreateInfo, nullptr, &stagingBuffer);
     if (stagingCreateResult != VK_SUCCESS) {
-        LOG_ERROR("Staging buffer creation failed with result: %d", static_cast<int>(stagingCreateResult));
+        LOG_ERROR(std::format("Staging buffer creation failed with result: {}", static_cast<int>(stagingCreateResult)));
         LOG_ERROR("Failed to create staging buffer - cleaning up SBT buffer");
         Dispose::destroySingleBuffer(context_.device, sbtBuffer);
         Dispose::freeSingleDeviceMemory(context_.device, sbtMemory);
@@ -350,7 +351,7 @@ void VulkanPipelineManager::createShaderBindingTable() {
         context_.resourceManager.removeMemory(sbtMemory);
         throw std::runtime_error("No suitable memory type for staging buffer");
     }
-    LOG_INFO("Suitable staging memory type found: %u", stagingMemType);
+    LOG_INFO(std::format("Suitable staging memory type found: {}", stagingMemType));
 
     VkMemoryAllocateInfo stagingAllocInfo = {
         .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
@@ -360,7 +361,7 @@ void VulkanPipelineManager::createShaderBindingTable() {
     VkDeviceMemory stagingMemory;
     VkResult stagingAllocResult = vkAllocateMemory(context_.device, &stagingAllocInfo, nullptr, &stagingMemory);
     if (stagingAllocResult != VK_SUCCESS) {
-        LOG_ERROR("Staging memory allocation failed with result: %d", static_cast<int>(stagingAllocResult));
+        LOG_ERROR(std::format("Staging memory allocation failed with result: {}", static_cast<int>(stagingAllocResult)));
         Dispose::destroySingleBuffer(context_.device, stagingBuffer);
         Dispose::destroySingleBuffer(context_.device, sbtBuffer);
         Dispose::freeSingleDeviceMemory(context_.device, sbtMemory);
@@ -374,7 +375,7 @@ void VulkanPipelineManager::createShaderBindingTable() {
 
     VkResult bindResult = vkBindBufferMemory(context_.device, stagingBuffer, stagingMemory, 0);
     if (bindResult != VK_SUCCESS) {
-        LOG_ERROR("Staging buffer memory binding failed with result: %d", static_cast<int>(bindResult));
+        LOG_ERROR(std::format("Staging buffer memory binding failed with result: {}", static_cast<int>(bindResult)));
         Dispose::destroySingleBuffer(context_.device, stagingBuffer);
         Dispose::freeSingleDeviceMemory(context_.device, stagingMemory);
         Dispose::destroySingleBuffer(context_.device, sbtBuffer);
@@ -391,7 +392,7 @@ void VulkanPipelineManager::createShaderBindingTable() {
     void* mappedData;
     VkResult mapResult = vkMapMemory(context_.device, stagingMemory, 0, sbtSize, 0, &mappedData);
     if (mapResult != VK_SUCCESS) {
-        LOG_ERROR("Staging memory mapping failed with result: %d", static_cast<int>(mapResult));
+        LOG_ERROR(std::format("Staging memory mapping failed with result: {}", static_cast<int>(mapResult)));
         Dispose::destroySingleBuffer(context_.device, stagingBuffer);
         Dispose::freeSingleDeviceMemory(context_.device, stagingMemory);
         Dispose::destroySingleBuffer(context_.device, sbtBuffer);
@@ -417,7 +418,7 @@ void VulkanPipelineManager::createShaderBindingTable() {
         uint8_t* dest = data + groupIdx * alignedHandleSize;
         const uint8_t* src = handlesSrc + groupIdx * handleSize;
         memcpy(dest, src, handleSize);
-        LOG_INFO("Copied handle for %s (group %u) to offset %u", copy.second, groupIdx, groupIdx * alignedHandleSize);
+        LOG_INFO(std::format("Copied handle for {} (group {}) to offset {}", copy.second, groupIdx, groupIdx * alignedHandleSize));
     }
 
     vkUnmapMemory(context_.device, stagingMemory);
@@ -433,7 +434,7 @@ void VulkanPipelineManager::createShaderBindingTable() {
     VkCommandBuffer cmd;
     VkResult allocCmdResult = vkAllocateCommandBuffers(context_.device, &allocInfo, &cmd);
     if (allocCmdResult != VK_SUCCESS) {
-        LOG_ERROR("Command buffer allocation for SBT copy failed with result: %d", static_cast<int>(allocCmdResult));
+        LOG_ERROR(std::format("Command buffer allocation for SBT copy failed with result: {}", static_cast<int>(allocCmdResult)));
         Dispose::destroySingleBuffer(context_.device, stagingBuffer);
         Dispose::freeSingleDeviceMemory(context_.device, stagingMemory);
         Dispose::destroySingleBuffer(context_.device, sbtBuffer);
@@ -452,7 +453,7 @@ void VulkanPipelineManager::createShaderBindingTable() {
     };
     VkResult beginResult = vkBeginCommandBuffer(cmd, &beginInfo);
     if (beginResult != VK_SUCCESS) {
-        LOG_ERROR("Command buffer begin for SBT copy failed with result: %d", static_cast<int>(beginResult));
+        LOG_ERROR(std::format("Command buffer begin for SBT copy failed with result: {}", static_cast<int>(beginResult)));
         vkFreeCommandBuffers(context_.device, context_.commandPool, 1, &cmd);
         Dispose::destroySingleBuffer(context_.device, stagingBuffer);
         Dispose::freeSingleDeviceMemory(context_.device, stagingMemory);
@@ -471,7 +472,7 @@ void VulkanPipelineManager::createShaderBindingTable() {
 
     VkResult endResult = vkEndCommandBuffer(cmd);
     if (endResult != VK_SUCCESS) {
-        LOG_ERROR("Command buffer end for SBT copy failed with result: %d", static_cast<int>(endResult));
+        LOG_ERROR(std::format("Command buffer end for SBT copy failed with result: {}", static_cast<int>(endResult)));
         vkFreeCommandBuffers(context_.device, context_.commandPool, 1, &cmd);
         Dispose::destroySingleBuffer(context_.device, stagingBuffer);
         Dispose::freeSingleDeviceMemory(context_.device, stagingMemory);
@@ -495,7 +496,7 @@ void VulkanPipelineManager::createShaderBindingTable() {
     VkFence fence;
     VkResult fenceCreateResult = vkCreateFence(context_.device, &fenceInfo, nullptr, &fence);
     if (fenceCreateResult != VK_SUCCESS) {
-        LOG_ERROR("Fence creation for SBT copy failed with result: %d", static_cast<int>(fenceCreateResult));
+        LOG_ERROR(std::format("Fence creation for SBT copy failed with result: {}", static_cast<int>(fenceCreateResult)));
         vkFreeCommandBuffers(context_.device, context_.commandPool, 1, &cmd);
         Dispose::destroySingleBuffer(context_.device, stagingBuffer);
         Dispose::freeSingleDeviceMemory(context_.device, stagingMemory);
@@ -510,7 +511,7 @@ void VulkanPipelineManager::createShaderBindingTable() {
 
     VkResult submitResult = vkQueueSubmit(context_.graphicsQueue, 1, &submitInfo, fence);
     if (submitResult != VK_SUCCESS) {
-        LOG_ERROR("Queue submit for SBT copy failed with result: %d", static_cast<int>(submitResult));
+        LOG_ERROR(std::format("Queue submit for SBT copy failed with result: {}", static_cast<int>(submitResult)));
         vkDestroyFence(context_.device, fence, nullptr);
         vkFreeCommandBuffers(context_.device, context_.commandPool, 1, &cmd);
         Dispose::destroySingleBuffer(context_.device, stagingBuffer);
@@ -527,7 +528,7 @@ void VulkanPipelineManager::createShaderBindingTable() {
 
     VkResult waitResult = vkWaitForFences(context_.device, 1, &fence, VK_TRUE, UINT64_MAX);
     if (waitResult != VK_SUCCESS) {
-        LOG_ERROR("Fence wait for SBT copy failed with result: %d", static_cast<int>(waitResult));
+        LOG_ERROR(std::format("Fence wait for SBT copy failed with result: {}", static_cast<int>(waitResult)));
         vkDestroyFence(context_.device, fence, nullptr);
         vkFreeCommandBuffers(context_.device, context_.commandPool, 1, &cmd);
         Dispose::destroySingleBuffer(context_.device, stagingBuffer);
@@ -557,7 +558,7 @@ void VulkanPipelineManager::createShaderBindingTable() {
     context_.resourceManager.removeMemory(sbtMemory);
 
     VkDeviceAddress sbtAddress = VulkanInitializer::getBufferDeviceAddress(context_, sbtBuffer);
-    LOG_INFO("SBT device address obtained: 0x%" PRIx64, static_cast<uint64_t>(sbtAddress));
+    LOG_INFO(std::format("SBT device address obtained: 0x{:x}", static_cast<uint64_t>(sbtAddress)));
 
     sbt_ = ShaderBindingTable(context_.device, sbtBuffer, sbtMemory, vkDestroyBuffer, vkFreeMemory);
     sbt_.raygen = {sbtAddress + 0 * alignedHandleSize, alignedHandleSize, alignedHandleSize};
@@ -570,7 +571,7 @@ void VulkanPipelineManager::createShaderBindingTable() {
 void VulkanPipelineManager::recordRayTracingCommands(VkCommandBuffer commandBuffer, VkImage outputImage, 
                                                     VkDescriptorSet descriptorSet, uint32_t width, uint32_t height, 
                                                     VkImage gDepth, VkImage gNormal) {
-    LOG_INFO("Starting ray-tracing command recording - resolution: %ux%u", width, height);
+    LOG_INFO(std::format("Starting ray-tracing command recording - resolution: {}x{}", width, height));
 
     VkCommandBufferBeginInfo beginInfo = {
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
@@ -578,7 +579,7 @@ void VulkanPipelineManager::recordRayTracingCommands(VkCommandBuffer commandBuff
     };
     VkResult beginCmdResult = vkBeginCommandBuffer(commandBuffer, &beginInfo);
     if (beginCmdResult != VK_SUCCESS) {
-        LOG_ERROR("Command buffer begin for ray tracing failed with result: %d", static_cast<int>(beginCmdResult));
+        LOG_ERROR(std::format("Command buffer begin for ray tracing failed with result: {}", static_cast<int>(beginCmdResult)));
         throw std::runtime_error("Failed to begin command buffer for ray tracing");
     }
 
@@ -674,7 +675,7 @@ void VulkanPipelineManager::recordRayTracingCommands(VkCommandBuffer commandBuff
 
     VkResult endCmdResult = vkEndCommandBuffer(commandBuffer);
     if (endCmdResult != VK_SUCCESS) {
-        LOG_ERROR("Command buffer end for ray tracing failed with result: %d", static_cast<int>(endCmdResult));
+        LOG_ERROR(std::format("Command buffer end for ray tracing failed with result: {}", static_cast<int>(endCmdResult)));
         throw std::runtime_error("Failed to end command buffer for ray tracing");
     }
     LOG_INFO("Ray-tracing command recording complete");

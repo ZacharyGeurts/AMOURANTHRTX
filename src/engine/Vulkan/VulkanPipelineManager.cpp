@@ -17,6 +17,7 @@
 #include <glm/glm.hpp>
 #include <unordered_map>
 #include <cstring>
+#include <format>
 
 #ifdef ENABLE_VULKAN_DEBUG
 #include <vulkan/vulkan_ext_debug_utils.h>
@@ -24,7 +25,7 @@
 
 namespace VulkanRTX {
 
-#define VK_CHECK(x) do { VkResult r = (x); if (r != VK_SUCCESS) { LOG_ERROR_CAT("Pipeline", #x " failed: %d", r); throw std::runtime_error(#x " failed"); } } while(0)
+#define VK_CHECK(x) do { VkResult r = (x); if (r != VK_SUCCESS) { LOG_ERROR_CAT("Pipeline", #x " failed: {}", r); throw std::runtime_error(std::format(#x " failed")); } } while(0)
 
 template<class F> struct ScopeGuard { F f; ~ScopeGuard() { f(); } };
 template<class F> ScopeGuard<F> finally(F&& f) { return {std::forward<F>(f)}; }
@@ -47,7 +48,7 @@ VkShaderModule VulkanPipelineManager::loadShader(VkDevice device, const std::str
         throw std::runtime_error("Shader type not found: " + shaderType);
     const std::string& filename = it->second;
 
-    LOG_DEBUG_CAT("Pipeline", "Loading shader: %s -> %s", shaderType.c_str(), filename.c_str());
+    LOG_DEBUG_CAT("Pipeline", "Loading shader: {} -> {}", shaderType, filename);
 
     std::filesystem::path shaderPath = std::filesystem::absolute(filename);
     if (!std::filesystem::exists(shaderPath))
@@ -76,7 +77,7 @@ VkShaderModule VulkanPipelineManager::loadShader(VkDevice device, const std::str
     };
     VkShaderModule mod = VK_NULL_HANDLE;
     VK_CHECK(vkCreateShaderModule(device, &ci, nullptr, &mod));
-    LOG_DEBUG_CAT("Pipeline", "Shader module created: %p", mod);
+    LOG_DEBUG_CAT("Pipeline", "Shader module created: 0x{:x}", reinterpret_cast<uintptr_t>(mod));
     return mod;
 }
 
@@ -715,7 +716,7 @@ void VulkanPipelineManager::createAccelerationStructures(VkBuffer vertexBuffer, 
 
     LOG_INFO_CAT("PipelineManager", "TLAS size: {} bytes, scratch: {} bytes", tlasSizeInfo.accelerationStructureSize, tlasSizeInfo.buildScratchSize);
     LOG_INFO_CAT("PipelineManager", "=== ACCELERATION STRUCTURES BUILT ===");
-    LOG_DEBUG_CAT("PipelineManager", "BLAS: %p   TLAS: %p", (void*)blasHandle_, (void*)tlasHandle_);
+    LOG_DEBUG_CAT("PipelineManager", "BLAS: 0x{:x}   TLAS: 0x{:x}", reinterpret_cast<uintptr_t>(blasHandle_), reinterpret_cast<uintptr_t>(tlasHandle_));
 }
 
 } // namespace VulkanRTX
