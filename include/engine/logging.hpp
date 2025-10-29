@@ -1,10 +1,11 @@
 // include/engine/logging.hpp
 // AMOURANTH RTX Engine, October 2025 - Enhanced thread-safe, asynchronous logging.
+// TRACE = NEON LIME | INFO = GRAY | GREEN RESTORED | HIGH VISIBILITY ON BLACK
 // Thread-safe, asynchronous logging with ANSI-colored output and delta time.
 // Supports C++20 std::format, std::jthread, OpenMP, and lock-free queue with std::atomic.
 // No mutexes; designed for high-performance Vulkan applications on Windows and Linux.
 // Delta time format: microseconds (<10ms), milliseconds (10ms-1s), seconds (1s-1min), minutes (1min-1hr), hours (>1hr).
-// Usage: LOG_INFO("Message: {}", value); or Logger::get().log(LogLevel::Info, "Vulkan", "Message: {}", value);
+// Usage: LOG_TRACE("Message: {}", value); or Logger::get().log(LogLevel::Trace, "Vulkan", "Message: {}", value);
 // Features: Singleton, log rotation, environment variable config, automatic flush, extended colors, overloads.
 // Extended features: Additional Vulkan/SDL types, GLM arrays, category filtering, high-frequency logging.
 // Zachary Geurts 2025
@@ -37,48 +38,54 @@
 // ---------------------------------------------------------------------------
 //  Log level toggle flags
 // ---------------------------------------------------------------------------
-constexpr bool ENABLE_DEBUG = true;
-constexpr bool ENABLE_INFO = true;
+constexpr bool ENABLE_TRACE   = true;
+constexpr bool ENABLE_DEBUG   = true;
+constexpr bool ENABLE_INFO    = true;
 constexpr bool ENABLE_WARNING = true;
-constexpr bool ENABLE_ERROR = true;
-constexpr bool FPS_COUNTER = true;
+constexpr bool ENABLE_ERROR   = true;
+constexpr bool FPS_COUNTER    = true;
 constexpr bool SIMULATION_LOGGING = true;
 
 // ---------------------------------------------------------------------------
-//  Logging Macros
+//  Logging Macros (TRACE + GRAY INFO)
 // ---------------------------------------------------------------------------
-#define LOG_DEBUG(...) do { if (ENABLE_DEBUG) Logging::Logger::get().log(Logging::LogLevel::Debug, "General", __VA_ARGS__); } while (0)
-#define LOG_INFO(...) do { if (ENABLE_INFO) Logging::Logger::get().log(Logging::LogLevel::Info, "General", __VA_ARGS__); } while (0)
-#define LOG_FPS_COUNTER(...) do { if (FPS_COUNTER) Logging::Logger::get().log(Logging::LogLevel::Info, "FPS", __VA_ARGS__); } while (0)
-#define LOG_SIMULATION(...) do { if (SIMULATION_LOGGING) Logging::Logger::get().log(Logging::LogLevel::Info, "SIMULATION", __VA_ARGS__); } while (0)
-#define LOG_WARNING(...) do { if (ENABLE_WARNING) Logging::Logger::get().log(Logging::LogLevel::Warning, "General", __VA_ARGS__); } while (0)
-#define LOG_ERROR(...) do { if (ENABLE_ERROR) Logging::Logger::get().log(Logging::LogLevel::Error, "General", __VA_ARGS__); } while (0)
-#define LOG_DEBUG_CAT(category, ...) do { if (ENABLE_DEBUG) Logging::Logger::get().log(Logging::LogLevel::Debug, category, __VA_ARGS__); } while (0)
-#define LOG_INFO_CAT(category, ...) do { if (ENABLE_INFO) Logging::Logger::get().log(Logging::LogLevel::Info, category, __VA_ARGS__); } while (0)
-#define LOG_WARNING_CAT(category, ...) do { if (ENABLE_WARNING) Logging::Logger::get().log(Logging::LogLevel::Warning, category, __VA_ARGS__); } while (0)
-#define LOG_ERROR_CAT(category, ...) do { if (ENABLE_ERROR) Logging::Logger::get().log(Logging::LogLevel::Error, category, __VA_ARGS__); } while (0)
+#define LOG_TRACE(...)          do { if (ENABLE_TRACE)   Logging::Logger::get().log(Logging::LogLevel::Trace,   "General", __VA_ARGS__); } while (0)
+#define LOG_DEBUG(...)          do { if (ENABLE_DEBUG)   Logging::Logger::get().log(Logging::LogLevel::Debug,   "General", __VA_ARGS__); } while (0)
+#define LOG_INFO(...)           do { if (ENABLE_INFO)    Logging::Logger::get().log(Logging::LogLevel::Info,    "General", __VA_ARGS__); } while (0)
+#define LOG_FPS_COUNTER(...)    do { if (FPS_COUNTER)    Logging::Logger::get().log(Logging::LogLevel::Info,    "FPS",     __VA_ARGS__); } while (0)
+#define LOG_SIMULATION(...)     do { if (SIMULATION_LOGGING) Logging::Logger::get().log(Logging::LogLevel::Info, "SIMULATION", __VA_ARGS__); } while (0)
+#define LOG_WARNING(...)        do { if (ENABLE_WARNING) Logging::Logger::get().log(Logging::LogLevel::Warning, "General", __VA_ARGS__); } while (0)
+#define LOG_ERROR(...)          do { if (ENABLE_ERROR)   Logging::Logger::get().log(Logging::LogLevel::Error,   "General", __VA_ARGS__); } while (0)
+
+#define LOG_TRACE_CAT(cat, ...)   do { if (ENABLE_TRACE)   Logging::Logger::get().log(Logging::LogLevel::Trace,   cat, __VA_ARGS__); } while (0)
+#define LOG_DEBUG_CAT(cat, ...)   do { if (ENABLE_DEBUG)   Logging::Logger::get().log(Logging::LogLevel::Debug,   cat, __VA_ARGS__); } while (0)
+#define LOG_INFO_CAT(cat, ...)    do { if (ENABLE_INFO)    Logging::Logger::get().log(Logging::LogLevel::Info,    cat, __VA_ARGS__); } while (0)
+#define LOG_WARNING_CAT(cat, ...) do { if (ENABLE_WARNING) Logging::Logger::get().log(Logging::LogLevel::Warning, cat, __VA_ARGS__); } while (0)
+#define LOG_ERROR_CAT(cat, ...)   do { if (ENABLE_ERROR)   Logging::Logger::get().log(Logging::LogLevel::Error,   cat, __VA_ARGS__); } while (0)
 
 namespace Logging {
 
-enum class LogLevel { Debug, Info, Warning, Error };
+enum class LogLevel { Trace, Debug, Info, Warning, Error };
 
 // ---------------------------------------------------------------------------
-//  ANSI color codes
+//  ANSI color codes – INFO = GRAY | TRACE = NEON LIME | GREEN RESTORED
 // ---------------------------------------------------------------------------
-inline constexpr std::string_view RESET = "\033[0m";
-inline constexpr std::string_view CYAN = "\033[1;36m";
-inline constexpr std::string_view GREEN = "\033[1;32m";
-inline constexpr std::string_view YELLOW = "\033[38;5;208m";
-inline constexpr std::string_view MAGENTA = "\033[1;35m";
-inline constexpr std::string_view BLUE = "\033[1;34m";
-inline constexpr std::string_view RED = "\033[1;31m";
-inline constexpr std::string_view WHITE = "\033[1;37m";
-inline constexpr std::string_view PURPLE = "\033[1;35m";
-inline constexpr std::string_view ORANGE = "\033[38;5;208m";
-inline constexpr std::string_view TEAL = "\033[38;5;51m";
-inline constexpr std::string_view YELLOW_GREEN = "\033[38;5;154m";
-inline constexpr std::string_view BRIGHT_MAGENTA = "\033[38;5;201m";
-inline constexpr std::string_view GOLDEN_BROWN = "\033[38;5;138m";
+inline constexpr std::string_view RESET           = "\033[0m";
+inline constexpr std::string_view NEON_LIME       = "\033[38;5;118m";  // TRACE: Bright lime
+inline constexpr std::string_view GRAY            = "\033[38;5;245m";  // INFO: Clean gray
+inline constexpr std::string_view GREEN           = "\033[1;32m";     // RESTORED for "Engine"
+inline constexpr std::string_view CYAN            = "\033[1;36m";     // DEBUG
+inline constexpr std::string_view YELLOW          = "\033[38;5;208m";  // WARNING
+inline constexpr std::string_view MAGENTA         = "\033[1;35m";     // ERROR
+inline constexpr std::string_view BLUE            = "\033[1;34m";
+inline constexpr std::string_view RED             = "\033[1;31m";
+inline constexpr std::string_view WHITE           = "\033[1;37m";
+inline constexpr std::string_view PURPLE          = "\033[1;35m";
+inline constexpr std::string_view ORANGE          = "\033[38;5;208m";
+inline constexpr std::string_view TEAL            = "\033[38;5;51m";
+inline constexpr std::string_view YELLOW_GREEN    = "\033[38;5;154m";
+inline constexpr std::string_view BRIGHT_MAGENTA  = "\033[38;5;201m";
+inline constexpr std::string_view GOLDEN_BROWN    = "\033[38;5;138m";
 
 struct LogMessage {
     LogLevel level;
@@ -328,6 +335,7 @@ private:
     static LogLevel getDefaultLogLevel() {
         if (const char* levelStr = std::getenv("AMOURANTH_LOG_LEVEL")) {
             std::string level(levelStr);
+            if (level == "Trace") return LogLevel::Trace;
             if (level == "Debug") return LogLevel::Debug;
             if (level == "Info") return LogLevel::Info;
             if (level == "Warning") return LogLevel::Warning;
@@ -343,10 +351,17 @@ private:
 
     static std::string_view getCategoryColor(std::string_view category) {
         static const std::map<std::string_view, std::string_view, std::less<>> categoryColors = {
-            {"General", WHITE}, {"Vulkan", BLUE}, {"SIMULATION", GOLDEN_BROWN},
-            {"Renderer", ORANGE}, {"Engine", GREEN}, {"Audio", TEAL},
-            {"Image", YELLOW_GREEN}, {"Input", BRIGHT_MAGENTA}, {"FPS", BRIGHT_MAGENTA},
-            {"BufferMgr", TEAL}, {"MeshLoader", YELLOW_GREEN}
+            {"General", WHITE},
+            {"Vulkan", BLUE},
+            {"SIMULATION", GOLDEN_BROWN},
+            {"Renderer", ORANGE},
+            {"Engine", GREEN},
+            {"Audio", TEAL},
+            {"Image", YELLOW_GREEN},
+            {"Input", BRIGHT_MAGENTA},
+            {"FPS", BRIGHT_MAGENTA},
+            {"BufferMgr", TEAL},
+            {"MeshLoader", YELLOW_GREEN}
         };
         auto it = categoryColors.find(category);
         return it != categoryColors.end() ? it->second : WHITE;
@@ -354,6 +369,7 @@ private:
 
     bool shouldLog(LogLevel level, std::string_view category) const {
         switch (level) {
+            case LogLevel::Trace:   if (!ENABLE_TRACE) return false; break;
             case LogLevel::Debug:   if (!ENABLE_DEBUG) return false; break;
             case LogLevel::Info:    if (!ENABLE_INFO) return false; break;
             case LogLevel::Warning: if (!ENABLE_WARNING) return false; break;
@@ -434,8 +450,9 @@ private:
                 std::string_view categoryColor = getCategoryColor(msg.category);
                 std::string_view levelStr, levelColor;
                 switch (msg.level) {
+                    case LogLevel::Trace:   levelStr = "[TRACE]"; levelColor = NEON_LIME; break;
                     case LogLevel::Debug:   levelStr = "[DEBUG]"; levelColor = CYAN; break;
-                    case LogLevel::Info:    levelStr = "[INFO]";  levelColor = GREEN; break;
+                    case LogLevel::Info:    levelStr = "[INFO]";  levelColor = GRAY; break;
                     case LogLevel::Warning: levelStr = "[WARN]";  levelColor = YELLOW; break;
                     case LogLevel::Error:   levelStr = "[ERROR]"; levelColor = MAGENTA; break;
                 }
@@ -503,8 +520,9 @@ private:
             std::string_view categoryColor = getCategoryColor(msg.category);
             std::string_view levelStr, levelColor;
             switch (msg.level) {
+                case LogLevel::Trace:   levelStr = "[TRACE]"; levelColor = NEON_LIME; break;
                 case LogLevel::Debug:   levelStr = "[DEBUG]"; levelColor = CYAN; break;
-                case LogLevel::Info:    levelStr = "[INFO]";  levelColor = GREEN; break;
+                case LogLevel::Info:    levelStr = "[INFO]";  levelColor = GRAY; break;
                 case LogLevel::Warning: levelStr = "[WARN]";  levelColor = YELLOW; break;
                 case LogLevel::Error:   levelStr = "[ERROR]"; levelColor = MAGENTA; break;
             }
