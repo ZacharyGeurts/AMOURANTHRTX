@@ -1,5 +1,4 @@
-// include/engine/Vulkan/VulkanRTX_Setup.hpp
-// AMOURANTH RTX Engine © 2025 by Zachary Geurts gzac5314@gmail.com is licensed under CC BY-NC 4.0
+// AMOURANTH RTX Engine Demo © 2025 by Zachary Geurts gzac5314@gmail.com is licensed under CC BY-NC 4.0
 
 #ifndef VULKAN_RTX_SETUP_HPP
 #define VULKAN_RTX_SETUP_HPP
@@ -13,7 +12,8 @@
 #include <tuple>
 #include <atomic>
 
-#include "ue_init.hpp"
+#include "engine/Vulkan/types.hpp"
+using DimensionState = ::DimensionState;
 #include "engine/logging.hpp"
 #include "engine/Vulkan/VulkanCore.hpp"
 
@@ -33,7 +33,7 @@ enum class DescriptorBindings : uint32_t {
     DensityVolume      = 7,
     GDepth             = 8,
     GNormal            = 9,
-    AlphaTex           = 10   // Used by VulkanPipelineManager
+    AlphaTex           = 10
 };
 
 // ---------------------------------------------------------------------
@@ -305,16 +305,13 @@ struct ShaderBindingTable {
 
     ShaderBindingTable() noexcept = default;
 
-    // Constructor used by createShaderBindingTable()
     ShaderBindingTable(VkDevice device,
                        VkBuffer buf,
                        VkDeviceMemory mem,
                        PFN_vkDestroyBuffer destroyBuffer,
                        PFN_vkFreeMemory freeMemory)
         : buffer(device, buf, destroyBuffer),
-          memory(device, mem, freeMemory) {
-        // Regions are zero-initialized by default
-    }
+          memory(device, mem, freeMemory) {}
 };
 
 // ---------------------------------------------------------------------
@@ -329,13 +326,12 @@ public:
     VulkanRTX(const VulkanRTX&) = delete;
     VulkanRTX& operator=(const VulkanRTX&) = delete;
 
-    // Public API
     void initializeRTX(VkPhysicalDevice physicalDevice, VkCommandPool commandPool, VkQueue graphicsQueue,
                        const std::vector<std::tuple<VkBuffer, VkBuffer, uint32_t, uint32_t, uint64_t>>& geometries,
-                       uint32_t maxRayRecursionDepth, const std::vector<UE::DimensionData>& dimensionCache);
+                       uint32_t maxRayRecursionDepth, const std::vector<DimensionState>& dimensionCache);
     void updateRTX(VkPhysicalDevice physicalDevice, VkCommandPool commandPool, VkQueue graphicsQueue,
                    const std::vector<std::tuple<VkBuffer, VkBuffer, uint32_t, uint32_t, uint64_t>>& geometries,
-                   const std::vector<UE::DimensionData>& dimensionCache);
+                   const std::vector<DimensionState>& dimensionCache);
     void createDescriptorSetLayout();
     void createDescriptorPoolAndSet();
     void createRayTracingPipeline(uint32_t maxRayRecursionDepth);
@@ -356,6 +352,9 @@ public:
     void updateDescriptorSetForTLAS(VkAccelerationStructureKHR tlas);
     void compactAccelerationStructures(VkPhysicalDevice physicalDevice, VkCommandPool commandPool, VkQueue queue);
 
+    // **NEW: Create 1x1 black fallback texture**
+    void createBlackFallbackTexture();
+
     bool getSupportsCompaction() const { return supportsCompaction_; }
     VkDescriptorSet getDescriptorSet() const { return ds_.get(); }
     VkPipeline getPipeline() const { return rtPipeline_.get(); }
@@ -364,7 +363,6 @@ public:
     PFN_vkFreeMemory getVkFreeMemory() const { return vkFreeMemory; }
 
 private:
-    // Helpers
     VkShaderModule createShaderModule(const std::string& filename);
     bool shaderFileExists(const std::string& filename) const;
     void loadShadersAsync(std::vector<VkShaderModule>& modules, const std::vector<std::string>& paths);
@@ -378,7 +376,9 @@ private:
     VkDeviceAddress getBufferDeviceAddress(VkBuffer buffer);
     VkDeviceAddress getAccelerationStructureDeviceAddress(VkAccelerationStructureKHR as);
 
-    // Setters
+    // **NEW: Upload black pixel to 1x1 image**
+    void uploadBlackPixelToImage(VkImage image);
+
     void setDescriptorSetLayout(VkDescriptorSetLayout layout) {
         dsLayout_ = VulkanResource<VkDescriptorSetLayout, PFN_vkDestroyDescriptorSetLayout>(
             device_, layout, vkDestroyDescriptorSetLayout);
@@ -411,7 +411,7 @@ private:
         primitiveCounts_.clear();
         for (const auto& r : ranges) primitiveCounts_.push_back(r.primitiveCount);
     }
-    void setPreviousDimensionCache(const std::vector<UE::DimensionData>& cache) {
+    void setPreviousDimensionCache(const std::vector<DimensionState>& cache) {
         previousDimensionCache_ = cache;
     }
     bool hasShaderFeature(ShaderFeatures feature) const {
@@ -419,7 +419,6 @@ private:
                 static_cast<unsigned int>(feature)) != 0;
     }
 
-    // Members
     VkDevice device_;
     VkPhysicalDevice physicalDevice_;
     std::vector<std::string> shaderPaths_;
@@ -440,7 +439,7 @@ private:
     VkExtent2D extent_;
     std::vector<uint32_t> primitiveCounts_;
     std::vector<uint32_t> previousPrimitiveCounts_;
-    std::vector<UE::DimensionData> previousDimensionCache_;
+    std::vector<DimensionState> previousDimensionCache_;
 
     bool supportsCompaction_ = false;
     ShaderFeatures shaderFeatures_ = ShaderFeatures::None;
@@ -448,6 +447,11 @@ private:
     ShaderCounts counts_;
     ShaderBindingTable sbt_;
     VkDeviceSize scratchAlignment_ = 0;
+
+    // **NEW: Fallback 1x1 black texture**
+    VulkanResource<VkImage, PFN_vkDestroyImage> blackFallbackImage_;
+    VulkanResource<VkDeviceMemory, PFN_vkFreeMemory> blackFallbackMemory_;
+    VulkanResource<VkImageView, PFN_vkDestroyImageView> blackFallbackView_;
 
     // Core Vulkan function pointers
     PFN_vkGetDeviceProcAddr vkGetDeviceProcAddrFunc = nullptr;
@@ -507,6 +511,11 @@ private:
     PFN_vkCmdDispatch vkCmdDispatch = nullptr;
     PFN_vkDestroyShaderModule vkDestroyShaderModule = nullptr;
     PFN_vkCmdBuildAccelerationStructuresKHR vkCmdBuildAccelerationStructuresKHR = nullptr;
+
+    // ==================================================================
+    //  FRIEND DECLARATION — ALLOWS VulkanRenderer TO ACCESS private members
+    // ==================================================================
+    friend class VulkanRenderer;
 };
 
 } // namespace VulkanRTX

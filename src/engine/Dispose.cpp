@@ -3,7 +3,7 @@
 
 #include "engine/Dispose.hpp"
 #include "engine/Vulkan/VulkanCore.hpp"
-#include "ue_init.hpp"
+#include "engine/Vulkan/types.hpp"
 #include <vulkan/vulkan.h>
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
@@ -485,7 +485,7 @@ void updateDescriptorSets(Vulkan::Context& context) noexcept {
                 bufferInfos[i] = VkDescriptorBufferInfo{
                     .buffer = context.uniformBuffers[i],
                     .offset = 0,
-                    .range = sizeof(UE::UniformBufferObject) + sizeof(int) + 2048
+                    .range = sizeof(UniformBufferObject) + sizeof(int) + 2048
                 };
                 LOG_DEBUG(std::format("Prepared descriptor buffer info[{}]: buffer={:p}", i, static_cast<void*>(bufferInfos[i].buffer)));
                 successfulBuffers++;

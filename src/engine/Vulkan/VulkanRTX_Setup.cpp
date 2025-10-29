@@ -33,7 +33,6 @@ VulkanRTX::VulkanRTX(VkDevice device, VkPhysicalDevice physicalDevice, const std
       dsLayout_(),
       dsPool_(),
       ds_(),
-      rtPipelineLayout_(),
       rtPipeline_(),
       blasBuffer_(),
       blasMemory_(),
@@ -50,7 +49,10 @@ VulkanRTX::VulkanRTX(VkDevice device, VkPhysicalDevice physicalDevice, const std
       numShaderGroups_(0),
       counts_(),
       sbt_(),
-      scratchAlignment_(0) {
+      scratchAlignment_(0),
+      blackFallbackImage_(),
+      blackFallbackMemory_(),
+      blackFallbackView_() {
     if (!device || !physicalDevice) {
         LOG_ERROR_CAT("VulkanRTX", "Invalid device or physical device", std::source_location::current());
         throw VulkanRTXException("Invalid device or physical device");
@@ -145,10 +147,133 @@ VulkanRTX::VulkanRTX(VkDevice device, VkPhysicalDevice physicalDevice, const std
     vkGetPhysicalDeviceProperties2(physicalDevice_, &properties2);
     setSupportsCompaction(asProperties.maxGeometryCount > 0);
     scratchAlignment_ = asProperties.minAccelerationStructureScratchOffsetAlignment;
+
+    // **CREATE 1x1 BLACK FALLBACK TEXTURE**
+    createBlackFallbackTexture();
 }
 
 VulkanRTX::~VulkanRTX() {
     // Resources are automatically cleaned up by VulkanResource destructors
+}
+
+// **NEW: Upload 1x1 black pixel to image**
+void VulkanRTX::uploadBlackPixelToImage(VkImage image) {
+    // Create staging buffer
+    VulkanResource<VkBuffer, PFN_vkDestroyBuffer> stagingBuffer(device_, VK_NULL_HANDLE, vkDestroyBuffer);
+    VulkanResource<VkDeviceMemory, PFN_vkFreeMemory> stagingMemory(device_, VK_NULL_HANDLE, vkFreeMemory);
+    createBuffer(physicalDevice_, 4,
+                 VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                 stagingBuffer, stagingMemory);
+
+    // Map and write black pixel (0,0,0,255)
+    void* data;
+    VK_CHECK(vkMapMemory(device_, stagingMemory.get(), 0, 4, 0, &data), "Failed to map staging memory");
+    uint32_t black = 0xFF000000; // RGBA8: black with full alpha
+    memcpy(data, &black, 4);
+    vkUnmapMemory(device_, stagingMemory.get());
+
+    // Record copy command
+    VkCommandBuffer cmd = allocateTransientCommandBuffer(VK_NULL_HANDLE); // Will be freed later
+    VkCommandBufferBeginInfo beginInfo = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
+    };
+    VK_CHECK(vkBeginCommandBuffer(cmd, &beginInfo), "Failed to begin command buffer");
+
+    // Transition image to transfer dst
+    VkImageMemoryBarrier barrier = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .srcAccessMask = 0,
+        .dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+        .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+        .newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .image = image,
+        .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
+    };
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+
+    // Copy
+    VkBufferImageCopy region = {
+        .bufferOffset = 0,
+        .bufferRowLength = 0,
+        .bufferImageHeight = 0,
+        .imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
+        .imageOffset = { 0, 0, 0 },
+        .imageExtent = { 1, 1, 1 }
+    };
+    vkCmdCopyBufferToImage(cmd, stagingBuffer.get(), image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+
+    // Transition to shader read
+    barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+
+    VK_CHECK(vkEndCommandBuffer(cmd), "Failed to end command buffer");
+
+    // Submit and wait
+    VkSubmitInfo submit = {
+        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .commandBufferCount = 1,
+        .pCommandBuffers = &cmd
+    };
+    VK_CHECK(vkQueueSubmit(VK_NULL_HANDLE, 1, &submit, VK_NULL_HANDLE), "Failed to submit copy");
+    VK_CHECK(vkQueueWaitIdle(VK_NULL_HANDLE), "Failed to wait idle");
+    vkFreeCommandBuffers(device_, VK_NULL_HANDLE, 1, &cmd); // Assuming transient pool
+}
+
+// **NEW: Create 1x1 black fallback texture**
+void VulkanRTX::createBlackFallbackTexture() {
+    VkImageCreateInfo imageInfo = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .imageType = VK_IMAGE_TYPE_2D,
+        .format = VK_FORMAT_R8G8B8A8_UNORM,
+        .extent = {1, 1, 1},
+        .mipLevels = 1,
+        .arrayLayers = 1,
+        .samples = VK_SAMPLE_COUNT_1_BIT,
+        .tiling = VK_IMAGE_TILING_OPTIMAL,
+        .usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
+    };
+
+    VkImage image;
+    VK_CHECK(vkCreateImage(device_, &imageInfo, nullptr, &image), "Failed to create black fallback image");
+
+    VkMemoryRequirements memReqs;
+    vkGetImageMemoryRequirements(device_, image, &memReqs);
+
+    VkMemoryAllocateInfo allocInfo = {
+        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+        .allocationSize = memReqs.size,
+        .memoryTypeIndex = findMemoryType(physicalDevice_, memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)
+    };
+
+    VkDeviceMemory memory;
+    VK_CHECK(vkAllocateMemory(device_, &allocInfo, nullptr, &memory), "Failed to allocate black fallback memory");
+    VK_CHECK(vkBindImageMemory(device_, image, memory, 0), "Failed to bind black fallback memory");
+
+    // Upload black pixel
+    uploadBlackPixelToImage(image);
+
+    VkImageViewCreateInfo viewInfo = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+        .image = image,
+        .viewType = VK_IMAGE_VIEW_TYPE_2D,
+        .format = VK_FORMAT_R8G8B8A8_UNORM,
+        .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
+    };
+
+    VkImageView view;
+    VK_CHECK(vkCreateImageView(device_, &viewInfo, nullptr, &view), "Failed to create black fallback view");
+
+    blackFallbackImage_ = VulkanResource<VkImage, PFN_vkDestroyImage>(device_, image, vkDestroyImage);
+    blackFallbackMemory_ = VulkanResource<VkDeviceMemory, PFN_vkFreeMemory>(device_, memory, vkFreeMemory);
+    blackFallbackView_ = VulkanResource<VkImageView, PFN_vkDestroyImageView>(device_, view, vkDestroyImageView);
 }
 
 bool VulkanRTX::shaderFileExists(const std::string& filename) const {
@@ -990,7 +1115,7 @@ void VulkanRTX::createStorageImage(VkPhysicalDevice physicalDevice, VkExtent2D e
 }
 
 void VulkanRTX::updateDescriptors(VkBuffer cameraBuffer, VkBuffer materialBuffer, VkBuffer dimensionBuffer,
-                                 VkImageView storageImageView, VkImageView denoiseImageView, VkImageView envMapView, VkSampler envMapSampler,
+                                ::VkImageView storageImageView, VkImageView denoiseImageView, VkImageView envMapView, VkSampler envMapSampler,
                                  VkImageView densityVolumeView, VkImageView gDepthView, VkImageView gNormalView) {
 
     constexpr uint32_t EXPECTED_MATERIAL_COUNT = 26;
@@ -1012,29 +1137,31 @@ void VulkanRTX::updateDescriptors(VkBuffer cameraBuffer, VkBuffer materialBuffer
     VkDescriptorBufferInfo dimensionBufferInfo = {
         .buffer = dimensionBuffer,
         .offset = 0,
-        .range = sizeof(UE::DimensionData)
+        .range = sizeof(DimensionState)
     };
 
     VkDescriptorImageInfo storageImageInfo = {
         .sampler = VK_NULL_HANDLE,
         .imageView = storageImageView,
-        .imageLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+        .imageLayout = VK_IMAGE_LAYOUT_GENERAL
     };
 
     VkDescriptorImageInfo denoiseImageInfo = {
         .sampler = VK_NULL_HANDLE,
         .imageView = denoiseImageView,
-        .imageLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+        .imageLayout = VK_IMAGE_LAYOUT_GENERAL
     };
 
+    // **SAFE: Use fallback if envMapView is null**
+    VkImageView safeEnvMapView = (envMapView != VK_NULL_HANDLE) ? envMapView : blackFallbackView_.get();
     VkDescriptorImageInfo envMapImageInfo = {
         .sampler = envMapSampler,
-        .imageView = envMapView,
+        .imageView = safeEnvMapView,
         .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
     };
 
     VkDescriptorImageInfo densityVolumeInfo = {
-        .sampler = envMapSampler, // Reuse sampler
+        .sampler = envMapSampler,
         .imageView = densityVolumeView,
         .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
     };
@@ -1042,13 +1169,13 @@ void VulkanRTX::updateDescriptors(VkBuffer cameraBuffer, VkBuffer materialBuffer
     VkDescriptorImageInfo gDepthImageInfo = {
         .sampler = VK_NULL_HANDLE,
         .imageView = gDepthView,
-        .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+        .imageLayout = VK_IMAGE_LAYOUT_GENERAL
     };
 
     VkDescriptorImageInfo gNormalImageInfo = {
         .sampler = VK_NULL_HANDLE,
         .imageView = gNormalView,
-        .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+        .imageLayout = VK_IMAGE_LAYOUT_GENERAL
     };
 
     VkWriteDescriptorSetAccelerationStructureKHR asInfo = {
@@ -1106,7 +1233,7 @@ void VulkanRTX::updateDescriptors(VkBuffer cameraBuffer, VkBuffer materialBuffer
             .pImageInfo = nullptr,
             .pBufferInfo = materialBufferInfos.data(),
             .pTexelBufferView = nullptr
-        },
+               },
         {
             .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
             .pNext = nullptr,
@@ -1186,7 +1313,7 @@ void VulkanRTX::updateDescriptors(VkBuffer cameraBuffer, VkBuffer materialBuffer
 
 void VulkanRTX::initializeRTX(VkPhysicalDevice physicalDevice, VkCommandPool commandPool, VkQueue graphicsQueue,
                               const std::vector<std::tuple<VkBuffer, VkBuffer, uint32_t, uint32_t, uint64_t>>& geometries,
-                              uint32_t maxRayRecursionDepth, const std::vector<UE::DimensionData>& dimensionCache) {
+                              uint32_t maxRayRecursionDepth, const std::vector<DimensionState>& dimensionCache) {
 
     createDescriptorSetLayout();
     createDescriptorPoolAndSet();
@@ -1199,7 +1326,7 @@ void VulkanRTX::initializeRTX(VkPhysicalDevice physicalDevice, VkCommandPool com
 
 void VulkanRTX::updateRTX(VkPhysicalDevice physicalDevice, VkCommandPool commandPool, VkQueue graphicsQueue,
                           const std::vector<std::tuple<VkBuffer, VkBuffer, uint32_t, uint32_t, uint64_t>>& geometries,
-                          const std::vector<UE::DimensionData>& dimensionCache) {
+                          const std::vector<DimensionState>& dimensionCache) {
 
     if (dimensionCache != previousDimensionCache_) {
         createBottomLevelAS(physicalDevice, commandPool, graphicsQueue, geometries);
@@ -1225,7 +1352,7 @@ void VulkanRTX::recordRayTracingCommands(VkCommandBuffer cmdBuffer, VkExtent2D e
         .srcAccessMask = 0,
         .dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
         .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-        .newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        .newLayout = VK_IMAGE_LAYOUT_GENERAL,
         .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
         .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
         .image = outputImage,
@@ -1251,7 +1378,7 @@ void VulkanRTX::recordRayTracingCommands(VkCommandBuffer cmdBuffer, VkExtent2D e
 
     barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
     barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-    barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
     barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
     vkCmdPipelineBarrier(cmdBuffer, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, VK_PIPELINE_STAGE_TRANSFER_BIT,
                         0, 0, nullptr, 0, nullptr, 1, &barrier);
@@ -1446,7 +1573,7 @@ void VulkanRTX::createBuffer(VkPhysicalDevice physicalDevice, VkDeviceSize size,
     VK_CHECK(vkBindBufferMemory(device_, tempBuffer, tempMemory, 0), "Failed to bind buffer memory");
 
     buffer = VulkanResource<VkBuffer, PFN_vkDestroyBuffer>(device_, tempBuffer, vkDestroyBuffer);
-    memory = VulkanResource<VkDeviceMemory, PFN_vkFreeMemory>(device_, tempMemory, vkFreeMemory);
+    memory = VulkanResource<VkDeviceMemory, PFN_vkFreeMemory>(device_, tempMemory, vkFreeMemory    );
 }
 
 uint32_t VulkanRTX::findMemoryType(VkPhysicalDevice physicalDevice, uint32_t typeFilter, VkMemoryPropertyFlags properties) {

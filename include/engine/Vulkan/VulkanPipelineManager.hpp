@@ -4,9 +4,9 @@
 #pragma once
 
 #include "engine/Vulkan/VulkanCore.hpp"
-#include "engine/Vulkan/VulkanRTX_Setup.hpp"  // <-- MUST include for ShaderBindingTable
+#include "engine/Vulkan/VulkanRTX_Setup.hpp"
 #include "engine/Dispose.hpp"
-#include "engine/MaterialData.hpp"
+#include "engine/Vulkan/types.hpp"
 #include <vulkan/vulkan.h>
 #include <memory>
 #include <unordered_map>
@@ -27,6 +27,7 @@ public:
     ~VulkanPipelineManager();
 
     // Pipeline creation
+	VkAccelerationStructureKHR getTLAS() const { return tlasHandle_; }
     void createRayTracingPipeline();
     void createComputePipeline();
     void createGraphicsPipeline(int width, int height);
