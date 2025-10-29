@@ -47,7 +47,6 @@ https://github.com/user-attachments/assets/31bc27e6-6ae7-417e-b331-e2e5bdb307dc
 
 # Universal Equation  🇺🇸  VS  🇷🇺  VS  🇸🇬  VS  🇨🇳  VS 🇬🇧  VS  🇫🇷  VS  🇲🇽 VS 🇰🇷  VS  🇫🇮  VS  🇯🇵  VS  🇨🇦  VS  🏴󠁧󠁢󠁳󠁣󠁴󠁿  VS  🇦🇺  ...  
 **Never condone violence, incorrectness, nor the new Oxford comma.**  
-I would like to condone my fuckwad of a neighbor however, who deserves worse than violence.  
 
 Welcome friends. God Bless.  
 My take? There there is no bottom, side or top to existence.  
