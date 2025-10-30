@@ -5,6 +5,8 @@ layout(location = 0) rayPayloadEXT vec3 payload;
 
 layout(set = 0, binding = 0) uniform accelerationStructureEXT tlas;
 layout(set = 0, binding = 1, rgba32f) uniform image2D outputImage;
+
+// FIXED: No "..." allowed!
 layout(set = 0, binding = 2) uniform UniformBuffer {
     mat4 viewInverse;
     mat4 projInverse;
@@ -13,21 +15,27 @@ layout(set = 0, binding = 2) uniform UniformBuffer {
     uint frame;
 } ubo;
 
+layout(set = 0, binding = 6) uniform sampler2D envMap;
+
+layout(push_constant) uniform PushConstants {
+    uint renderMode;
+    uint showEnvMapOnly;
+    // add more if needed
+} pc;
+
 void main() {
-    const vec2 pixelCenter = vec2(gl_LaunchIDEXT.xy) + vec2(0.5);
-    const vec2 inUV = pixelCenter / vec2(gl_LaunchSizeEXT.xy);
-    vec2 d = inUV * 2.0 - 1.0;
+    if (pc.showEnvMapOnly == 1) {
+        vec2 uv = gl_LaunchIDEXT.xy / vec2(gl_LaunchSizeEXT.xy);
+        vec3 envColor = texture(envMap, uv).rgb;
+        payload = envColor;
+    } else {
+        vec3 rayOrigin = ubo.camPos.xyz;
+        vec2 ndc = gl_LaunchIDEXT.xy / gl_LaunchSizeEXT.xy * 2.0 - 1.0;
+        vec4 target = ubo.projInverse * vec4(ndc, 1.0, 1.0);
+        target /= target.w;
+        vec3 rayDir = normalize((ubo.viewInverse * vec4(target.xyz, 0.0)).xyz);
 
-    vec4 origin = ubo.viewInverse * vec4(0, 0, 0, 1);
-    vec4 target = ubo.projInverse * vec4(d.x, d.y, 1.0, 1.0);
-    vec4 direction = ubo.viewInverse * vec4(normalize(target.xyz), 0);
-
-    payload = vec3(0.0);
-    uint rayFlags = gl_RayFlagsOpaqueEXT;
-    float tmin = 0.001;
-    float tmax = 10000.0;
-
-    traceRayEXT(tlas, rayFlags, 0xFF, 0, 0, 0, origin.xyz, tmin, direction.xyz, tmax, 0);
-
+        traceRayEXT(tlas, gl_RayFlagsOpaqueEXT, 0xFF, 0, 0, 0, rayOrigin, 0.0, rayDir, 1000.0, 0);
+    }
     imageStore(outputImage, ivec2(gl_LaunchIDEXT.xy), vec4(payload, 1.0));
 }

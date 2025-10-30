@@ -28,21 +28,23 @@ struct alignas(16) MaterialData {
     alignas(16) glm::vec4 emission  = glm::vec4(0.0f);
 
     struct PushConstants {
-        alignas(16) glm::vec4 clearColor      = glm::vec4(0.0f);
-        alignas(16) glm::vec3 cameraPosition = glm::vec3(0.0f);
-        alignas(4)  float     _pad0          = 0.0f;
-        alignas(16) glm::vec3 lightDirection = glm::vec3(0.0f, -1.0f, 0.0f);
-        alignas(4)  float     lightIntensity = 1.0f;
-        alignas(4)  uint32_t  samplesPerPixel = 1;
-        alignas(4)  uint32_t  maxDepth        = 5;
-        alignas(4)  uint32_t  maxBounces      = 3;
-        alignas(4)  float     russianRoulette = 0.8f;
-        alignas(8)  glm::vec2 resolution     = glm::vec2(1920, 1080);
+        alignas(16) glm::vec4 clearColor      = glm::vec4(0.0f);        // 16 → 0-16
+        alignas(16) glm::vec3 cameraPosition = glm::vec3(0.0f);        // 12 → 16-28
+        alignas(4)  float     _pad0          = 0.0f;                    // 4  → 28-32
+        alignas(16) glm::vec3 lightDirection = glm::vec3(0.0f, -1.0f, 0.0f); // 12 → 32-44
+        alignas(4)  float     lightIntensity = 1.0f;                    // 4  → 44-48
+        alignas(4)  uint32_t  samplesPerPixel = 1;                      // 4  → 48-52
+        alignas(4)  uint32_t  maxDepth        = 5;                      // 4  → 52-56
+        alignas(4)  uint32_t  maxBounces      = 3;                      // 4  → 56-60
+        alignas(4)  float     russianRoulette = 0.8f;                   // 4  → 60-64
+        alignas(8)  glm::vec2 resolution     = glm::vec2(1920, 1080);  // 8  → 64-72
+        alignas(4)  uint32_t  showEnvMapOnly = 0;                       // 4  → 72-76
     };
 };
 
 static_assert(sizeof(MaterialData) == 48, "MaterialData must be 48 bytes");
-static_assert(sizeof(MaterialData::PushConstants) == 80, "PushConstants must be 80 bytes");
+
+static_assert(sizeof(MaterialData::PushConstants) == 80, "PushConstants must be 96 bytes");
 
 // ================================================================
 // 2. DimensionData – SSBO (screen size)

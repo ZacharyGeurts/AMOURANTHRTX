@@ -1,4 +1,4 @@
-// AMOURANTH RTX Engine © 2025 Zachary Geurts gzac5314@gmail.com | CC BY-NC 4.0
+// AMOURANTH RTX Engine (C) 2025 Zachary Geurts gzac5314@gmail.com | CC BY-NC 4.0
 // Vulkan RTX: SBT, AS, pipelines, descriptors, black fallback.
 // Vulkan 1.3+ | KHR_ray_tracing_pipeline | AMD/NVIDIA/Intel | Linux/Windows
 
@@ -385,6 +385,7 @@ void VulkanRTX::createRayTracingPipeline(uint32_t maxRayRecursionDepth) {
 
     VkRayTracingPipelineCreateInfoKHR pipelineInfo = {
         .sType = VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR,
+        .pNext = &rtProps,
         .stageCount = static_cast<uint32_t>(stages.size()),
         .pStages = stages.data(),
         .groupCount = static_cast<uint32_t>(groups.size()),
@@ -403,39 +404,75 @@ void VulkanRTX::createShaderBindingTable(VkPhysicalDevice physicalDevice) {
 
     auto handleSize = rtProps.shaderGroupHandleSize;
     auto handleAlign = rtProps.shaderGroupHandleAlignment;
+    auto baseAlign = rtProps.shaderGroupBaseAlignment;
     auto alignedSize = (handleSize + handleAlign - 1) & ~(handleAlign - 1);
-    auto sbtSize = static_cast<VkDeviceSize>(alignedSize) * numShaderGroups_;
+
+    // === Align each region to baseAlignment ===
+    VkDeviceSize offset = 0;
+    auto align = [&](VkDeviceSize size) {
+        offset = (offset + baseAlign - 1) & ~(baseAlign - 1);
+        auto start = offset;
+        offset += size;
+        return start;
+    };
+
+    const VkDeviceSize raygenSize = counts_.raygen * alignedSize;
+    const VkDeviceSize missSize   = counts_.miss   * alignedSize;
+    const VkDeviceSize hitSize    = (counts_.chit + (counts_.intersection ? counts_.chit : 0)) * alignedSize;
+    const VkDeviceSize callableSize = counts_.callable * alignedSize;
+
+    offset = 0;
+    const VkDeviceSize raygenOffset = align(raygenSize);
+    const VkDeviceSize missOffset   = align(missSize);
+    const VkDeviceSize hitOffset    = align(hitSize);
+    const VkDeviceSize callableOffset = align(callableSize);
+
+    const VkDeviceSize totalSize = offset;
+    const VkDeviceSize bufferSize = (totalSize + baseAlign - 1) & ~(baseAlign - 1);
 
     VulkanResource<VkBuffer, PFN_vkDestroyBuffer> buffer(device_, VK_NULL_HANDLE, vkDestroyBuffer);
     VulkanResource<VkDeviceMemory, PFN_vkFreeMemory> memory(device_, VK_NULL_HANDLE, vkFreeMemory);
-    createBuffer(physicalDevice, sbtSize,
+    createBuffer(physicalDevice, bufferSize,
                  VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
                  VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, buffer, memory);
 
-    std::vector<uint8_t> handles(sbtSize);
-    VK_CHECK(vkGetRayTracingShaderGroupHandlesKHR(device_, rtPipeline_.get(), 0, numShaderGroups_, sbtSize, handles.data()), "Get SBT handles");
+    std::vector<uint8_t> handles(numShaderGroups_ * handleSize);
+    VK_CHECK(vkGetRayTracingShaderGroupHandlesKHR(device_, rtPipeline_.get(), 0, numShaderGroups_, handles.size(), handles.data()), "Get SBT handles");
 
-    void* data; VK_CHECK(vkMapMemory(device_, memory.get(), 0, sbtSize, 0, &data), "Map SBT");
-    for (uint32_t i = 0; i < numShaderGroups_; ++i)
-        memcpy(static_cast<uint8_t*>(data) + i * alignedSize, handles.data() + i * handleSize, handleSize);
+    void* data; VK_CHECK(vkMapMemory(device_, memory.get(), 0, bufferSize, 0, &data), "Map SBT");
+    uint8_t* pData = static_cast<uint8_t*>(data);
+
+    auto copyGroup = [&](uint32_t groupIdx, VkDeviceSize dstOffset) {
+        std::memcpy(pData + dstOffset, handles.data() + groupIdx * handleSize, handleSize);
+    };
+
+    uint32_t groupIdx = 0;
+    for (uint32_t i = 0; i < counts_.raygen; ++i) copyGroup(groupIdx++, raygenOffset + i * alignedSize);
+    for (uint32_t i = 0; i < counts_.miss; ++i)   copyGroup(groupIdx++, missOffset   + i * alignedSize);
+    for (uint32_t i = 0; i < counts_.callable; ++i) copyGroup(groupIdx++, callableOffset + i * alignedSize);
+    for (uint32_t i = 0; i < counts_.chit; ++i)   copyGroup(groupIdx++, hitOffset    + i * alignedSize);
+    if (counts_.intersection) {
+        for (uint32_t i = 0; i < counts_.chit; ++i) copyGroup(groupIdx++, hitOffset + (counts_.chit + i) * alignedSize);
+    }
+
     vkUnmapMemory(device_, memory.get());
 
     VkBufferDeviceAddressInfo addrInfo = {.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO, .buffer = buffer.get()};
-    auto addr = vkGetBufferDeviceAddress(device_, &addrInfo);
+    auto baseAddr = vkGetBufferDeviceAddress(device_, &addrInfo);
 
-    auto region = [&](uint32_t count, uint64_t offset) {
-        return count ? VkStridedDeviceAddressRegionKHR{addr + offset, static_cast<VkDeviceSize>(count) * alignedSize, alignedSize} : VkStridedDeviceAddressRegionKHR{};
-    };
+    sbt_.raygen = { baseAddr + raygenOffset, alignedSize, raygenSize };
+    sbt_.miss   = { baseAddr + missOffset,   alignedSize, missSize   };
+    sbt_.hit    = { baseAddr + hitOffset,    alignedSize, hitSize    };
+    sbt_.callable = { baseAddr + callableOffset, alignedSize, callableSize };
 
-    uint64_t offset = 0;
-    sbt_.raygen = region(counts_.raygen, offset); offset += counts_.raygen * alignedSize;
-    sbt_.miss = region(counts_.miss, offset); offset += counts_.miss * alignedSize;
-    sbt_.hit = region(counts_.chit + (counts_.intersection ? counts_.chit : 0), offset); offset += (counts_.chit + (counts_.intersection ? counts_.chit : 0)) * alignedSize;
-    sbt_.callable = region(counts_.callable, offset);
-
-    // FIXED: Extract raw handles with .get() instead of moving the wrappers
     sbt_.buffer = buffer.get();
     sbt_.memory = memory.get();
+
+    LOG_INFO_CAT("VulkanRTX", "SBT Created (Aligned):");
+    LOG_INFO_CAT("VulkanRTX", "  Raygen: addr=0x{:x}, stride={}, size={}", sbt_.raygen.deviceAddress, sbt_.raygen.stride, sbt_.raygen.size);
+    LOG_INFO_CAT("VulkanRTX", "  Miss:   addr=0x{:x}, stride={}, size={}", sbt_.miss.deviceAddress,   sbt_.miss.stride,   sbt_.miss.size);
+    LOG_INFO_CAT("VulkanRTX", "  Hit:    addr=0x{:x}, stride={}, size={}", sbt_.hit.deviceAddress,    sbt_.hit.stride,    sbt_.hit.size);
+    LOG_INFO_CAT("VulkanRTX", "  Callable: addr=0x{:x}, stride={}, size={}", sbt_.callable.deviceAddress, sbt_.callable.stride, sbt_.callable.size);
 }
 
 void VulkanRTX::createBottomLevelAS(VkPhysicalDevice physicalDevice, VkCommandPool commandPool, VkQueue queue,
@@ -451,7 +488,7 @@ void VulkanRTX::createBottomLevelAS(VkPhysicalDevice physicalDevice, VkCommandPo
                     .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR,
                     .vertexFormat = VK_FORMAT_R32G32B32_SFLOAT,
                     .vertexData = { .deviceAddress = getBufferDeviceAddress(vertexBuffer) },
-                    .vertexStride = sizeof(glm::vec3) * 3 + sizeof(glm::vec2),
+                    .vertexStride = sizeof(glm::vec3),
                     .maxVertex = vertexCount - 1,
                     .indexType = VK_INDEX_TYPE_UINT32,
                     .indexData = { .deviceAddress = getBufferDeviceAddress(indexBuffer) }

@@ -56,25 +56,25 @@ void renderMode1(
         vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
                                 pipelineLayout, 0, 1, &descriptorSet, 0, nullptr);
 
-        // Use MaterialData::PushConstants (matches raygen.rgen)
-        MaterialData::PushConstants push{
-            .clearColor      = glm::vec4(0.02f, 0.02f, 0.05f, 1.0f),
-            .cameraPosition  = glm::vec3(0.0f, 0.0f, 5.0f + zoomLevel),
-            ._pad0           = 0.0f,
-            .lightDirection  = glm::vec3(0.0f, -1.0f, 0.0f),
-            .lightIntensity  = 8.0f + std::sin(deltaTime * 2.0f) * 2.0f,
-            .samplesPerPixel = 4,
-            .maxDepth        = 5,
-            .maxBounces      = 3,
-            .russianRoulette = 0.8f,
-            .resolution      = glm::vec2(width, height)
-        };
+MaterialData::PushConstants push{
+    .clearColor      = glm::vec4(0.02f, 0.02f, 0.05f, 1.0f),
+    .cameraPosition  = glm::vec3(0.0f, 0.0f, 5.0f + zoomLevel),
+    ._pad0           = 0.0f,
+    .lightDirection  = glm::vec3(0.0f, -1.0f, 0.0f),
+    .lightIntensity  = 8.0f + std::sin(deltaTime * 2.0f) * 2.0f,
+    .samplesPerPixel = 4,
+    .maxDepth        = 5,
+    .maxBounces      = 3,
+    .russianRoulette = 0.8f,
+    .resolution      = glm::vec2(width, height),
+    .showEnvMapOnly  = 1   // SHOW ENV MAP
+};
 
         vkCmdPushConstants(commandBuffer, pipelineLayout,
                            VK_SHADER_STAGE_RAYGEN_BIT_KHR |
                            VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR |
                            VK_SHADER_STAGE_MISS_BIT_KHR,
-                           0, sizeof(push), &push);
+                           0, sizeof(MaterialData::PushConstants), &push);
 
         VkStridedDeviceAddressRegionKHR raygenEntry{
             .deviceAddress = context.raygenSbtAddress,
