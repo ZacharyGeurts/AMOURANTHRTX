@@ -98,6 +98,7 @@ void VulkanSwapchainManager::initializeSwapchain(int width, int height)
     std::vector<VkPresentModeKHR> presentModes(presentModeCount);
     VK_CHECK(vkGetPhysicalDeviceSurfacePresentModesKHR(context_.physicalDevice, context_.surface, &presentModeCount, presentModes.data()));
 
+    // PICK THE BEST FORMAT
     VkSurfaceFormatKHR chosenFormat = formats[0];
     for (const auto& f : formats) {
         if (f.format == VK_FORMAT_B8G8R8A8_SRGB && f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
@@ -107,12 +108,14 @@ void VulkanSwapchainManager::initializeSwapchain(int width, int height)
     }
     swapchainImageFormat_ = chosenFormat.format;
 
+    // PICK THE BEST PRESENT MODE
     VkPresentModeKHR chosenPresent = VK_PRESENT_MODE_FIFO_KHR;
     if (std::find(presentModes.begin(), presentModes.end(), VK_PRESENT_MODE_MAILBOX_KHR) != presentModes.end())
         chosenPresent = VK_PRESENT_MODE_MAILBOX_KHR;
     else if (std::find(presentModes.begin(), presentModes.end(), VK_PRESENT_MODE_IMMEDIATE_KHR) != presentModes.end())
         chosenPresent = VK_PRESENT_MODE_IMMEDIATE_KHR;
 
+    // DETERMINE EXTENT
     swapchainExtent_ = caps.currentExtent;
     if (swapchainExtent_.width == 0 || swapchainExtent_.height == 0) {
         swapchainExtent_.width  = std::clamp(static_cast<uint32_t>(width),  caps.minImageExtent.width,  caps.maxImageExtent.width);
@@ -121,10 +124,12 @@ void VulkanSwapchainManager::initializeSwapchain(int width, int height)
     if (swapchainExtent_.width == 0 || swapchainExtent_.height == 0)
         throw std::runtime_error("Invalid swapchain extent");
 
+    // IMAGE COUNT
     imageCount_ = caps.minImageCount + 1;
     if (caps.maxImageCount > 0 && imageCount_ > caps.maxImageCount)
         imageCount_ = caps.maxImageCount;
 
+    // QUEUE SHARING
     std::vector<uint32_t> queueFamilies;
     VkSharingMode sharingMode = VK_SHARING_MODE_EXCLUSIVE;
     if (graphicsQueueFamilyIndex_ != presentQueueFamilyIndex_) {
@@ -132,6 +137,7 @@ void VulkanSwapchainManager::initializeSwapchain(int width, int height)
         sharingMode   = VK_SHARING_MODE_CONCURRENT;
     }
 
+    // STORAGE BIT IF SUPPORTED
     VkImageUsageFlags storageUsage = ((caps.supportedUsageFlags & VK_IMAGE_USAGE_STORAGE_BIT) != 0)
         ? VK_IMAGE_USAGE_STORAGE_BIT
         : static_cast<VkImageUsageFlags>(0);
@@ -192,13 +198,19 @@ void VulkanSwapchainManager::initializeSwapchain(int width, int height)
     context_.swapchainImages    = swapchainImages_;
     context_.swapchainImageViews = swapchainImageViews_;
 
-    LOG_INFO_CAT("Swapchain", "Created {}x{} swapchain with {} images", 
-                 swapchainExtent_.width, swapchainExtent_.height, imageCount_);
+    LOG_INFO_CAT("Swapchain", "SWAPCHAIN CREATED: {}x{} | {} images | Format: {} | Present: {}",
+                 swapchainExtent_.width, swapchainExtent_.height, imageCount_,
+                 static_cast<int>(swapchainImageFormat_), static_cast<int>(chosenPresent));
 }
 
 void VulkanSwapchainManager::handleResize(int width, int height)
 {
-    LOG_INFO_CAT("Swapchain", "Resizing swapchain: {}x{} → {}x{}", 
+    if (width <= 0 || height <= 0) {
+        LOG_WARNING_CAT("Swapchain", "Resize requested with invalid dimensions: {}x{}", width, height);
+        return;
+    }
+
+    LOG_INFO_CAT("Swapchain", "RESIZING SWAPCHAIN: {}x{} → {}x{}", 
                  swapchainExtent_.width, swapchainExtent_.height, width, height);
     vkDeviceWaitIdle(context_.device);
     cleanupSwapchain();
