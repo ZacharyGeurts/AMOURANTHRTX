@@ -23,8 +23,7 @@ chmod +x linux.sh
 
 Why choose AMOURANTH RTX? You want full access to a small RTX loop. Made with Grok sized files for AI updates.    
 <img width="1297" height="1800" alt="JustBetter" src="https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/media/Screenshot%20from%202025-10-30%2010-11-52.png" />  
-<img width="1282" height="1645" alt="buffer" src="https://github.com/user-attachments/assets/28950e5a-2caf-49f9-b961-8a2510780a82" />  
-Image lies about testing. No, it is a half truth. You can adjust your own with AI.  
+<img width="1282" height="1645" alt="buffer" src="https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/media/Screenshot%20from%202025-10-30%2010-12-49.png" />  
 <img width="1493" height="2160" alt="Screenshot from 2025-10-22 11-14-23" src="https://github.com/user-attachments/assets/a828b25d-b7f6-47f5-b972-334745a1b546" />
 <img width="1564" height="2160" alt="Screenshot from 2025-10-22 11-14-40" src="https://github.com/user-attachments/assets/1d558846-c910-4104-9212-8a024f069dc8" />  
 Let AI do the heavy lifting with modular files where implementations are at your controls.
