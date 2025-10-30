@@ -188,7 +188,7 @@ public:
         }
     }
     void removeRenderPass(VkRenderPass renderPass) {
-        if (renderPass == VK_NULL_HANDLE) return;
+        if (renderPass != VK_NULL_HANDLE) return;
         auto it = std::find(renderPasses_.begin(), renderPasses_.end(), renderPass);
         if (it != renderPasses_.end()) {
             renderPasses_.erase(it);
@@ -506,23 +506,29 @@ struct Context {
     // -----------------------------------------------------------------
     // NEW FIELDS REQUIRED BY VulkanPipelineManager
     // -----------------------------------------------------------------
-    uint32_t               indexCount = 0;                     // <-- NEW
+    uint32_t               indexCount = 0;
 
     // BLAS
-    VkBuffer               blasBuffer   = VK_NULL_HANDLE;      // <-- NEW
-    VkDeviceMemory         blasMemory   = VK_NULL_HANDLE;      // <-- NEW
+    VkBuffer               blasBuffer   = VK_NULL_HANDLE;
+    VkDeviceMemory         blasMemory   = VK_NULL_HANDLE;
 
     // TLAS instance buffer
-    VkBuffer               instanceBuffer = VK_NULL_HANDLE;    // <-- NEW
-    VkDeviceMemory         instanceMemory = VK_NULL_HANDLE;    // <-- NEW
+    VkBuffer               instanceBuffer = VK_NULL_HANDLE;
+    VkDeviceMemory         instanceMemory = VK_NULL_HANDLE;
 
     // TLAS
-    VkBuffer               tlasBuffer   = VK_NULL_HANDLE;      // <-- NEW
-    VkDeviceMemory         tlasMemory   = VK_NULL_HANDLE;      // <-- NEW
+    VkBuffer               tlasBuffer   = VK_NULL_HANDLE;
+    VkDeviceMemory         tlasMemory   = VK_NULL_HANDLE;
 
     // Ray-tracing output image
-    VkImage                rtOutputImage      = VK_NULL_HANDLE; // <-- NEW
-    VkImageView            rtOutputImageView  = VK_NULL_HANDLE; // <-- NEW
+    VkImage                rtOutputImage      = VK_NULL_HANDLE;
+    VkImageView            rtOutputImageView  = VK_NULL_HANDLE;
+
+    // Environment map (REQUIRED for raygen.rgen)
+    VkImage                envMapImage        = VK_NULL_HANDLE;
+    VkDeviceMemory         envMapImageMemory  = VK_NULL_HANDLE;
+    VkImageView            envMapImageView    = VK_NULL_HANDLE;
+    VkSampler              envMapSampler      = VK_NULL_HANDLE;
 
     // RAY TRACING PROPERTIES
     VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProperties{
@@ -577,7 +583,7 @@ namespace VulkanInitializer {
     void initializeVulkan(Vulkan::Context& context);
 
     VkDeviceAddress getBufferDeviceAddress(VkDevice device, VkBuffer buffer);
-    VkDeviceAddress getAccelerationStructureDeviceAddress(VkDevice device, VkAccelerationStructureKHR as); // NEW
+    VkDeviceAddress getAccelerationStructureDeviceAddress(VkDevice device, VkAccelerationStructureKHR as);
 
     VkPhysicalDevice findPhysicalDevice(VkInstance instance, VkSurfaceKHR surface, bool preferNvidia);
 

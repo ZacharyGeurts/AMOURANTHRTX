@@ -56,25 +56,26 @@ VkShaderModule VulkanRenderer::createShaderModule(const std::string& filepath) {
 // -----------------------------------------------------------------------------
 VulkanRenderer::VulkanRenderer(int width, int height, void* window,
                                const std::vector<std::string>& instanceExtensions)
-    : width_(width), height_(height), window_(window), currentFrame_(0), frameCount_(0),
-      framesThisSecond_(0), lastFPSTime_(std::chrono::steady_clock::now()),
+    : width_(width), height_(height), window_(window),
+      currentFrame_(0), frameCount_(0), framesThisSecond_(0),
+      lastFPSTime_(std::chrono::steady_clock::now()),
       framesSinceLastLog_(0), lastLogTime_(std::chrono::steady_clock::now()),
-      indexCount_(0), rtPipeline_(VK_NULL_HANDLE), rtPipelineLayout_(VK_NULL_HANDLE),
+      indexCount_(0),
       denoiseImage_(VK_NULL_HANDLE), denoiseImageMemory_(VK_NULL_HANDLE),
       denoiseImageView_(VK_NULL_HANDLE), denoiseSampler_(VK_NULL_HANDLE),
       envMapImage_(VK_NULL_HANDLE), envMapImageMemory_(VK_NULL_HANDLE),
       envMapImageView_(VK_NULL_HANDLE), envMapSampler_(VK_NULL_HANDLE),
+      computeDescriptorSetLayout_(VK_NULL_HANDLE),
       blasHandle_(VK_NULL_HANDLE), blasBuffer_(VK_NULL_HANDLE), blasBufferMemory_(VK_NULL_HANDLE),
       tlasHandle_(VK_NULL_HANDLE), tlasBuffer_(VK_NULL_HANDLE), tlasBufferMemory_(VK_NULL_HANDLE),
       instanceBuffer_(VK_NULL_HANDLE), instanceBufferMemory_(VK_NULL_HANDLE),
-      sbtBuffer_(VK_NULL_HANDLE), sbtMemory_(VK_NULL_HANDLE),
-      rtOutputImage_(context_.device, VK_NULL_HANDLE, vkDestroyImage),
-      rtOutputImageMemory_(context_.device, VK_NULL_HANDLE, vkFreeMemory),
-      rtOutputImageView_(context_.device, VK_NULL_HANDLE, vkDestroyImageView),
+      tlasDeviceAddress_(0),
+      vkCmdTraceRaysKHR_(nullptr),
       context_(), rtx_(), swapchainManager_(), pipelineManager_(), bufferManager_(),
       frames_(), framebuffers_(), commandBuffers_(), descriptorSets_(), computeDescriptorSets_(),
-      descriptorPool_(VK_NULL_HANDLE), materialBuffers_(), materialBufferMemory_(),
-      dimensionBuffers_(), dimensionBufferMemory_(), camera_(),
+      descriptorPool_(VK_NULL_HANDLE),
+      materialBuffers_(), materialBufferMemory_(), dimensionBuffers_(), dimensionBufferMemory_(),
+      camera_(std::make_unique<PerspectiveCamera>()),
       descriptorsUpdated_(false), recreateSwapchain(false)
 {
     LOG_INFO_CAT("Renderer", "=== VulkanRenderer Constructor Start ===");
@@ -130,6 +131,7 @@ VulkanRenderer::VulkanRenderer(int width, int height, void* window,
     width_ = static_cast<int>(context_.swapchainExtent.width);
     height_ = static_cast<int>(context_.swapchainExtent.height);
     LOG_INFO_CAT("Renderer", "Swapchain extent synced: {}x{}", width_, height_);
+    LOG_INFO_CAT("Renderer", "Swapchain format: {} | RT output format: VK_FORMAT_R32G32B32A32_SFLOAT", static_cast<int>(context_.swapchainImageFormat));
 
     for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
         frames_[i].imageAvailableSemaphore = swapchainManager_->getImageAvailableSemaphore(i);
@@ -357,6 +359,7 @@ void VulkanRenderer::buildAccelerationStructures() {
     blasAddrInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR;
     blasAddrInfo.accelerationStructure = blasHandle_;
     VkDeviceAddress blasAddr = context_.vkGetAccelerationStructureDeviceAddressKHR(context_.device, &blasAddrInfo);
+    LOG_INFO_CAT("Renderer", "BLAS device address: 0x{:x}", blasAddr);
 
     VkAccelerationStructureInstanceKHR instance = {};
     instance.instanceCustomIndex = 0; instance.mask = 0xFF;
@@ -391,6 +394,7 @@ void VulkanRenderer::buildAccelerationStructures() {
 
     VkBufferDeviceAddressInfo instAddrInfo{}; instAddrInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO; instAddrInfo.buffer = instanceBuffer_;
     VkDeviceAddress instAddr = context_.vkGetBufferDeviceAddressKHR(context_.device, &instAddrInfo);
+    LOG_INFO_CAT("Renderer", "Instance buffer address: 0x{:x}", instAddr);
 
     VkAccelerationStructureGeometryInstancesDataKHR instData{};
     instData.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR;
@@ -433,6 +437,12 @@ void VulkanRenderer::buildAccelerationStructures() {
     context_.vkCmdBuildAccelerationStructuresKHR(cmdTLAS, 1, &buildInfo, &pTlasRange);
     VK_CHECK(vkEndCommandBuffer(cmdTLAS));
     submitAndWait(cmdTLAS, "TLAS build");
+
+    VkAccelerationStructureDeviceAddressInfoKHR tlasAddrInfo{};
+    tlasAddrInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR;
+    tlasAddrInfo.accelerationStructure = tlasHandle_;
+    tlasDeviceAddress_ = context_.vkGetAccelerationStructureDeviceAddressKHR(context_.device, &tlasAddrInfo);
+    LOG_INFO_CAT("Renderer", "TLAS device address: 0x{:x}", tlasDeviceAddress_);
 
     LOG_INFO_CAT("Renderer", "Acceleration structures built successfully.");
 }
@@ -650,6 +660,7 @@ void VulkanRenderer::updateRTDescriptors() {
     }
 
     vkUpdateDescriptorSets(context_.device, totalWrites, writes.data(), 0, nullptr);
+    LOG_INFO_CAT("Renderer", "Updated descriptors with TLAS addr 0x{:x}", tlasDeviceAddress_);
 
     descriptorsUpdated_ = true;
     LOG_INFO_CAT("Renderer", "RT descriptors updated ({} writes).", totalWrites);
@@ -955,9 +966,12 @@ void VulkanRenderer::renderFrame(const Camera& camera) {
     VkResult result = vkAcquireNextImageKHR(context_.device, context_.swapchain, UINT64_MAX,
                                             frames_[currentFrame_].imageAvailableSemaphore, VK_NULL_HANDLE, &imageIndex);
     if (result == VK_ERROR_OUT_OF_DATE_KHR) {
+        LOG_WARNING_CAT("Renderer", "Swapchain out of date on frame {}", frameCount_);
         recreateSwapchain = true;
         return;
-    } else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
+    } else if (result == VK_SUBOPTIMAL_KHR) {
+        LOG_WARNING_CAT("Renderer", "Swapchain suboptimal on frame {}", frameCount_);
+    } else if (result != VK_SUCCESS) {
         throw std::runtime_error("Failed to acquire swapchain image");
     }
 
@@ -998,9 +1012,15 @@ void VulkanRenderer::renderFrame(const Camera& camera) {
 
     // Validate SBT addresses
     if (sbt.raygen.deviceAddress == 0 || sbt.miss.deviceAddress == 0 || sbt.hit.deviceAddress == 0) {
-        LOG_ERROR_CAT("Renderer", "Invalid SBT addresses! Raygen=0x{:x}, Miss=0x{:x}, Hit=0x{:x}",
-                      sbt.raygen.deviceAddress, sbt.miss.deviceAddress, sbt.hit.deviceAddress);
+        LOG_ERROR_CAT("Renderer", "Invalid SBT addresses on frame {}! Raygen=0x{:x}, Miss=0x{:x}, Hit=0x{:x}",
+                      frameCount_, sbt.raygen.deviceAddress, sbt.miss.deviceAddress, sbt.hit.deviceAddress);
         throw std::runtime_error("Invalid SBT");
+    }
+    if (frameCount_ % 60 == 0) {  // Log SBT details every ~1s at 60fps
+        LOG_INFO_CAT("Renderer", "SBT on frame {}: Raygen(0x{:x}, size={}, stride={}), Miss(0x{:x}, size={}, stride={}), Hit(0x{:x}, size={}, stride={})",
+                     frameCount_, sbt.raygen.deviceAddress, sbt.raygen.size, sbt.raygen.stride,
+                     sbt.miss.deviceAddress, sbt.miss.size, sbt.miss.stride,
+                     sbt.hit.deviceAddress, sbt.hit.size, sbt.hit.stride);
     }
 
     // Set up SBT regions
@@ -1020,6 +1040,10 @@ void VulkanRenderer::renderFrame(const Camera& camera) {
     hitRegion.size             = sbt.hit.size;
 
     VkStridedDeviceAddressRegionKHR callableRegion{};
+
+    if (frameCount_ % 60 == 0) {
+        LOG_INFO_CAT("Renderer", "Dispatching {}x{} rays on frame {}", renderWidth, renderHeight, frameCount_);
+    }
 
     // Dispatch ray tracing
     context_.vkCmdTraceRaysKHR(cmd,
@@ -1103,6 +1127,7 @@ void VulkanRenderer::renderFrame(const Camera& camera) {
 
     result = vkQueuePresentKHR(context_.graphicsQueue, &presentInfo);
     if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
+        LOG_WARNING_CAT("Renderer", "Present out of date/suboptimal on frame {}", frameCount_);
         recreateSwapchain = true;
     } else {
         VK_CHECK(result);
@@ -1113,11 +1138,17 @@ void VulkanRenderer::renderFrame(const Camera& camera) {
     ++frameCount_;
     ++framesThisSecond_;
 
-    // FPS logging
+    // FPS logging with enhanced debug info every 1 second
     auto now = std::chrono::steady_clock::now();
     auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastFPSTime_).count();
     if (elapsed >= 1000) {
-        LOG_INFO_CAT("Renderer", "FPS: {:.2f}", static_cast<float>(framesThisSecond_) * 1000.0f / elapsed);
+        float fps = static_cast<float>(framesThisSecond_) * 1000.0f / elapsed;
+        auto frameTimeMs = std::chrono::duration_cast<std::chrono::microseconds>(now - frameStart).count() / 1000.0f;
+        LOG_INFO_CAT("Renderer", "=== FPS: {:.2f} | Frame: {} | Avg Frame Time: {:.2f}ms | TLAS: 0x{:x} | Dispatch: {}x{} | Descriptors Updated: {} ===",
+                     fps, frameCount_, frameTimeMs, tlasDeviceAddress_, renderWidth, renderHeight, descriptorsUpdated_);
+        if (fps < 30.0f) {
+            LOG_WARNING_CAT("Renderer", "Low FPS ({:.2f}) detected - potential issues: shader bindings, TLAS invalid, or geometry out of view.", fps);
+        }
         framesThisSecond_ = 0;
         lastFPSTime_ = now;
     }
@@ -1133,6 +1164,10 @@ void VulkanRenderer::updateUniformBuffer(uint32_t frameIndex, const Camera& came
     ubo.camPos = glm::vec4(camera.getPosition(), 1.0f);
     ubo.time = 0.0f;
     ubo.frame = frameCount_;
+
+    if (frameCount_ % 60 == 0) {  // Log camera pos every ~1s
+        LOG_INFO_CAT("Renderer", "Uniform update frame {}: Camera pos ({:.2f}, {:.2f}, {:.2f})", frameCount_, ubo.camPos.x, ubo.camPos.y, ubo.camPos.z);
+    }
 
     void* data;
     VK_CHECK(vkMapMemory(context_.device, context_.uniformBufferMemories[frameIndex], 0, sizeof(ubo), 0, &data));
@@ -1173,8 +1208,12 @@ void VulkanRenderer::handleResize(int width, int height) {
 // -----------------------------------------------------------------------------
 std::vector<glm::vec3> VulkanRenderer::getVertices() const {
     static std::vector<glm::vec3> cached;
-    if (!cached.empty()) return cached;
+    if (!cached.empty()) {
+        LOG_DEBUG_CAT("Renderer", "Using cached vertices (size: {})", cached.size());
+        return cached;
+    }
 
+    LOG_INFO_CAT("Renderer", "Loading vertices from assets/models/scene.obj");
     tinyobj::attrib_t attrib;
     std::vector<tinyobj::shape_t> shapes;
     std::vector<tinyobj::material_t> materials;
@@ -1183,6 +1222,7 @@ std::vector<glm::vec3> VulkanRenderer::getVertices() const {
         LOG_ERROR_CAT("Renderer", "Failed to load OBJ: {}", err.empty() ? warn : err);
         throw std::runtime_error("Failed to load OBJ");
     }
+    if (!warn.empty()) LOG_WARNING_CAT("Renderer", "OBJ warnings: {}", warn);
 
     std::vector<glm::vec3> verts;
     verts.reserve(attrib.vertices.size() / 3);
@@ -1190,14 +1230,18 @@ std::vector<glm::vec3> VulkanRenderer::getVertices() const {
         verts.emplace_back(attrib.vertices[i], attrib.vertices[i + 1], attrib.vertices[i + 2]);
     }
     cached = std::move(verts);
-    LOG_INFO_CAT("Renderer", "Loaded {} unique vertices.", cached.size());
+    LOG_INFO_CAT("Renderer", "Loaded {} unique vertices from OBJ.", cached.size());
     return cached;
 }
 
 std::vector<uint32_t> VulkanRenderer::getIndices() const {
     static std::vector<uint32_t> cached;
-    if (!cached.empty()) return cached;
+    if (!cached.empty()) {
+        LOG_DEBUG_CAT("Renderer", "Using cached indices (size: {})", cached.size());
+        return cached;
+    }
 
+    LOG_INFO_CAT("Renderer", "Loading indices from assets/models/scene.obj");
     tinyobj::attrib_t attrib;
     std::vector<tinyobj::shape_t> shapes;
     std::vector<tinyobj::material_t> materials;
@@ -1206,6 +1250,7 @@ std::vector<uint32_t> VulkanRenderer::getIndices() const {
         LOG_ERROR_CAT("Renderer", "Failed to load OBJ: {}", err.empty() ? warn : err);
         throw std::runtime_error("Failed to load OBJ");
     }
+    if (!warn.empty()) LOG_WARNING_CAT("Renderer", "OBJ warnings: {}", warn);
 
     std::vector<uint32_t> idxs;
     for (const auto& shape : shapes) {
@@ -1214,7 +1259,7 @@ std::vector<uint32_t> VulkanRenderer::getIndices() const {
         }
     }
     cached = std::move(idxs);
-    LOG_INFO_CAT("Renderer", "Loaded {} indices.", cached.size());
+    LOG_INFO_CAT("Renderer", "Loaded {} indices from OBJ ({} triangles).", cached.size(), cached.size() / 3);
     return cached;
 }
 

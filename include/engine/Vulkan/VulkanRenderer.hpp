@@ -40,7 +40,7 @@ struct StridedDeviceAddressRegionKHR {
 struct Frame {
     VkCommandBuffer commandBuffer               = VK_NULL_HANDLE;
     VkDescriptorSet rayTracingDescriptorSet     = VK_NULL_HANDLE;
-    VkDescriptorSet graphicsDescriptorSet      = VK_NULL_HANDLE;
+    VkDescriptorSet graphicsDescriptorSet       = VK_NULL_HANDLE;
     VkDescriptorSet computeDescriptorSet        = VK_NULL_HANDLE;
     VkSemaphore     imageAvailableSemaphore     = VK_NULL_HANDLE;
     VkSemaphore     renderFinishedSemaphore     = VK_NULL_HANDLE;
@@ -76,16 +76,15 @@ public:
     std::vector<glm::vec3> getVertices() const;
     std::vector<uint32_t>  getIndices() const;
 
-    // --- NEW: SBT BUFFER ACCESSORS (for cleanup) ---
-    VkBuffer       getSBTBuffer() const { return sbtBuffer_; }
-    VkDeviceMemory getSBTMemory() const { return sbtMemory_; }
+    // --- SBT BUFFER ACCESSORS (FORWARD TO PIPELINE MANAGER) ---
+    VkBuffer       getSBTBuffer() const { return pipelineManager_->getSBTBuffer(); }
+    VkDeviceMemory getSBTMemory() const { return pipelineManager_->getSBTMemory(); }
 
 private:
     // Private helper functions
     VkSampler createLinearSampler();
     void createRTOutputImage();
     void recreateRTOutputImage();
-    void createShaderBindingTable();
     void updateRTDescriptors();
     void updateComputeDescriptors(uint32_t imageIndex);
     void createComputeDescriptorSets();
@@ -129,8 +128,6 @@ private:
     uint32_t indexCount_ = 0;
 
     // --- Vulkan core objects ---
-    VkPipeline          rtPipeline_               = VK_NULL_HANDLE;
-    VkPipelineLayout    rtPipelineLayout_         = VK_NULL_HANDLE;
     VkImage             denoiseImage_             = VK_NULL_HANDLE;
     VkDeviceMemory      denoiseImageMemory_       = VK_NULL_HANDLE;
     VkImageView         denoiseImageView_         = VK_NULL_HANDLE;
@@ -152,19 +149,14 @@ private:
     VkDeviceMemory              tlasBufferMemory_ = VK_NULL_HANDLE;
     VkBuffer                    instanceBuffer_ = VK_NULL_HANDLE;
     VkDeviceMemory              instanceBufferMemory_ = VK_NULL_HANDLE;
+    VkDeviceAddress             tlasDeviceAddress_ = 0;
 
     // RT output (RAII wrappers)
     Dispose::VulkanHandle<VkImage>             rtOutputImage_;
     Dispose::VulkanHandle<VkDeviceMemory>      rtOutputImageMemory_;
     Dispose::VulkanHandle<VkImageView>         rtOutputImageView_;
 
-    // SBT regions
-    ShaderBindingTable sbt_{};
-    VkBuffer                       sbtBuffer_ = VK_NULL_HANDLE;
-    VkDeviceMemory                 sbtMemory_ = VK_NULL_HANDLE;
-    std::vector<uint8_t>           shaderHandles_;
-
-    // Compute descriptor sets
+    // Compute descriptor sets (must be declared **before** descriptorSets_)
     std::vector<VkDescriptorSet> computeDescriptorSets_;
 
     // Ray tracing extension function pointer
@@ -196,6 +188,15 @@ private:
     // --- Flags ---
     bool descriptorsUpdated_ = false;
     bool recreateSwapchain   = false;
+
+    // -------------------------------------------------------------------------
+    //  SBT / RT PIPELINE – owned by VulkanPipelineManager, cached locally
+    // -------------------------------------------------------------------------
+    VkPipeline       rtPipeline_       = VK_NULL_HANDLE;
+    VkPipelineLayout rtPipelineLayout_ = VK_NULL_HANDLE;
+    VkBuffer         sbtBuffer_        = VK_NULL_HANDLE;
+    VkDeviceMemory   sbtMemory_        = VK_NULL_HANDLE;
+    ShaderBindingTable sbt_{};
 
     friend class VulkanRTX;
 };

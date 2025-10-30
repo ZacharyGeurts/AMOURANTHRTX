@@ -418,4 +418,70 @@ void initializeVulkan(Vulkan::Context& context) {
     LOG_INFO_CAT("Vulkan", "Command pool created");
 }
 
+// ====================================================================
+// GET ACCELERATION-STRUCTURE DEVICE ADDRESS
+// ====================================================================
+VkDeviceAddress getAccelerationStructureDeviceAddress(VkDevice device,
+                                                      VkAccelerationStructureKHR as)
+{
+    VkAccelerationStructureDeviceAddressInfoKHR info{};
+    info.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR;
+    info.accelerationStructure = as;
+
+    PFN_vkGetAccelerationStructureDeviceAddressKHR fn =
+        reinterpret_cast<PFN_vkGetAccelerationStructureDeviceAddressKHR>(
+            vkGetDeviceProcAddr(device, "vkGetAccelerationStructureDeviceAddressKHR"));
+
+    if (!fn) {
+        LOG_ERROR_CAT("VulkanInit", "vkGetAccelerationStructureDeviceAddressKHR not loaded!");
+        throw std::runtime_error("Missing ray-tracing extension function");
+    }
+
+    return fn(device, &info);
+}
+
+// ====================================================================
+// COPY BUFFER (single-time command)
+// ====================================================================
+void copyBuffer(VkDevice device,
+                VkCommandPool commandPool,
+                VkQueue queue,
+                VkBuffer srcBuffer,
+                VkBuffer dstBuffer,
+                VkDeviceSize size)
+{
+    VkCommandBufferAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    allocInfo.commandPool = commandPool;
+    allocInfo.commandBufferCount = 1;
+
+    VkCommandBuffer cmd;
+    VK_CHECK(vkAllocateCommandBuffers(device, &allocInfo, &cmd));
+
+    VkCommandBufferBeginInfo beginInfo{};
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+    VK_CHECK(vkBeginCommandBuffer(cmd, &beginInfo));
+
+    VkBufferCopy copyRegion{};
+    copyRegion.srcOffset = 0;
+    copyRegion.dstOffset = 0;
+    copyRegion.size = size;
+    vkCmdCopyBuffer(cmd, srcBuffer, dstBuffer, 1, &copyRegion);
+
+    VK_CHECK(vkEndCommandBuffer(cmd));
+
+    VkSubmitInfo submitInfo{};
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &cmd;
+
+    VK_CHECK(vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE));
+    VK_CHECK(vkQueueWaitIdle(queue));
+
+    vkFreeCommandBuffers(device, commandPool, 1, &cmd);
+}
+
 } // namespace VulkanInitializer

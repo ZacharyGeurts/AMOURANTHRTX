@@ -55,6 +55,10 @@ public:
 
     VkDescriptorSetLayout createRayTracingDescriptorSetLayout();
 
+    // --- NEW: SBT BUFFER ACCESSORS ---
+    VkBuffer       getSBTBuffer() const { return sbtBuffer_; }
+    VkDeviceMemory getSBTMemory() const { return sbtMemory_; }
+
     // --- FRAME TIME LOGGING ---
     void logFrameTimeIfSlow(std::chrono::steady_clock::time_point start);
 
@@ -109,14 +113,14 @@ private:
         bool preferDeviceLocalMemory;
     } platformConfig_;
 
+    // --- INIT ORDER FIXED: resourceManager_ first ---
+    VulkanResourceManager resourceManager_;                     // <-- BEFORE function pointers
+
     PFN_vkCreateAccelerationStructureKHR  createAsFunc_ = nullptr;
     PFN_vkDestroyAccelerationStructureKHR destroyAsFunc_ = nullptr;
     PFN_vkGetRayTracingShaderGroupHandlesKHR getRayTracingShaderGroupHandlesFunc_ = nullptr;
 
-    // -----------------------------------------------------------------
-    // NEW MEMBERS
-    // -----------------------------------------------------------------
-    VulkanResourceManager resourceManager_;                     // <-- NEW
+    // --- DEFERRED COMPILATION ---
     PFN_vkCreateDeferredOperationKHR      vkCreateDeferredOperationKHR_   = nullptr;
     PFN_vkDeferredOperationJoinKHR        vkDeferredOperationJoinKHR_     = nullptr;
     PFN_vkGetDeferredOperationResultKHR   vkGetDeferredOperationResultKHR_= nullptr;
