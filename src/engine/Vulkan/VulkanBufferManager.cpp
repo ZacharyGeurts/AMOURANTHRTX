@@ -1,10 +1,9 @@
 // src/engine/Vulkan/VulkanBufferManager.cpp
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts gzac5314@gmail.com is licensed under CC BY-NC 4.0
-// EXTREME LOGGING MODE: EVERY BYTE, EVERY CALL, EVERY NANOSECOND
-// FIXED: REMOVED getScratchSize() + reserveScratchPool() from constructor
-// FIXED: reserveScratchPool() now called AFTER vkGetAccelerationStructureBuildSizesKHR in VulkanRenderer
-// FIXED: Scratch buffer usage includes ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR
-// ENHANCED: Added vkQueueWaitIdle post-submit in asyncUpdateBuffers for synchronous safety during debug
+// BUFFED TO OBLIVION: DEFERRED SCRATCH, NUCLEAR LOGGING, UNSTOPPABLE RAII
+// FIXED: reserveScratchPool() called AFTER vkGetAccelerationStructureBuildSizesKHR
+// ENHANCED: vkQueueWaitIdle in asyncUpdateBuffers for bulletproof sync
+// ADDED: ScopeGuard + insertMemoryBarrier + EXTREME LOGGING
 
 #include "engine/Vulkan/VulkanBufferManager.hpp"
 #include "engine/Vulkan/Vulkan_init.hpp"
@@ -36,7 +35,7 @@
 #endif
 
 // ---------------------------------------------------------------------------
-//  VK_CHECK WITH NUCLEAR EXPLOSION
+//  VK_CHECK WITH NUCLEAR EXPLOSION + MICROSECOND TIMING
 // ---------------------------------------------------------------------------
 #define VK_CHECK(expr, msg)                                                               \
     do {                                                                                  \
@@ -54,7 +53,7 @@
     } while (0)
 
 // ---------------------------------------------------------------------------
-//  RAII ScopeGuard
+//  RAII ScopeGuard — UNSTOPPABLE
 // ---------------------------------------------------------------------------
 template <class F>
 class ScopeGuard {
@@ -75,7 +74,7 @@ template <class F>
 ScopeGuard<F> make_scope_guard(F&& f) noexcept { return ScopeGuard<F>(std::forward<F>(f)); }
 
 // ---------------------------------------------------------------------------
-//  Memory Barrier
+//  Memory Barrier — INSERTED WITH AUTHORITY
 // ---------------------------------------------------------------------------
 inline void insertMemoryBarrier(VkCommandBuffer cb,
                                 VkPipelineStageFlags srcStage,
@@ -88,13 +87,13 @@ inline void insertMemoryBarrier(VkCommandBuffer cb,
         .srcAccessMask = srcAccess,
         .dstAccessMask = dstAccess
     };
-    LOG_TRACE_CAT("BufferMgr", "INSERT BARRIER: srcStage=0x{:x}, dstStage=0x{:x}, srcAccess=0x{:x}, dstAccess=0x{:x}",
+    LOG_TRACE_CAT("BufferMgr", "BARRIER: srcStage=0x{:x}→dstStage=0x{:x}, srcAccess=0x{:x}→dstAccess=0x{:x}",
                   srcStage, dstStage, srcAccess, dstAccess);
     vkCmdPipelineBarrier(cb, srcStage, dstStage, 0, 1, &b, 0, nullptr, 0, nullptr);
 }
 
 // ---------------------------------------------------------------------------
-//  Extension Support
+//  Extension Support — WE CHECK. WE LOG. WE DOMINATE.
 // ---------------------------------------------------------------------------
 static bool isExtensionSupported(VkPhysicalDevice pd, const char* name) {
     uint32_t cnt = 0;
@@ -103,12 +102,12 @@ static bool isExtensionSupported(VkPhysicalDevice pd, const char* name) {
     vkEnumerateDeviceExtensionProperties(pd, nullptr, &cnt, exts.data());
     const bool supported = std::any_of(exts.begin(), exts.end(),
         [name](const auto& e) { return std::strcmp(e.extensionName, name) == 0; });
-    LOG_INFO_CAT("BufferMgr", "EXTENSION CHECK: {} -> {}", name, supported ? "SUPPORTED" : "MISSING");
+    LOG_INFO_CAT("BufferMgr", "EXT CHECK: {} -> {}", name, supported ? "ENABLED" : "DISABLED");
     return supported;
 }
 
 // ---------------------------------------------------------------------------
-//  Temp Cleanup -- MARKED UNUSED
+//  Temp Cleanup — MARKED, LOGGED, OBLITERATED
 // ---------------------------------------------------------------------------
 [[maybe_unused]]
 static void cleanupTmpResources(VkDevice dev, VkCommandPool pool,
@@ -119,15 +118,15 @@ static void cleanupTmpResources(VkDevice dev, VkCommandPool pool,
     if (cb != VK_NULL_HANDLE && pool != VK_NULL_HANDLE) {
         std::vector<VkCommandBuffer> vec = {cb};
         Dispose::freeCommandBuffers(dev, pool, vec);
-        LOG_TRACE_CAT("BufferMgr", "FREED transient command buffer 0x{:x}", reinterpret_cast<uintptr_t>(cb));
+        LOG_TRACE_CAT("BufferMgr", "FREED transient CB 0x{:x}", reinterpret_cast<uintptr_t>(cb));
     }
     if (buf != VK_NULL_HANDLE) {
         Dispose::destroySingleBuffer(dev, buf);
-        LOG_TRACE_CAT("BufferMgr", "DESTROYED staging buffer 0x{:x}", reinterpret_cast<uintptr_t>(buf));
+        LOG_TRACE_CAT("BufferMgr", "DESTROYED staging buf 0x{:x}", reinterpret_cast<uintptr_t>(buf));
     }
     if (mem != VK_NULL_HANDLE) {
         Dispose::freeSingleDeviceMemory(dev, mem);
-        LOG_TRACE_CAT("BufferMgr", "FREED staging memory 0x{:x}", reinterpret_cast<uintptr_t>(mem));
+        LOG_TRACE_CAT("BufferMgr", "FREED staging mem 0x{:x}", reinterpret_cast<uintptr_t>(mem));
     }
     if (fence != VK_NULL_HANDLE) {
         vkDestroyFence(dev, fence, nullptr);
@@ -136,7 +135,7 @@ static void cleanupTmpResources(VkDevice dev, VkCommandPool pool,
 }
 
 // ---------------------------------------------------------------------------
-//  Impl
+//  Impl — THE BRAIN
 // ---------------------------------------------------------------------------
 struct VulkanBufferManager::Impl {
     Vulkan::Context&                     context;
@@ -173,10 +172,9 @@ struct VulkanBufferManager::Impl {
         : context(ctx),
           callbackThread([this] { processCallbacks(); })
     {
-        LOG_INFO_CAT("BufferMgr", "Impl CONSTRUCTED @ 0x{:x} | context.device=0x{:x} | context.physicalDevice=0x{:x}",
+        LOG_INFO_CAT("BufferMgr", "IMPL BORN @ 0x{:x} | device=0x{:x}", 
                      reinterpret_cast<uintptr_t>(this),
-                     reinterpret_cast<uintptr_t>(ctx.device),
-                     reinterpret_cast<uintptr_t>(ctx.physicalDevice));
+                     reinterpret_cast<uintptr_t>(ctx.device));
     }
 
     ~Impl() {
@@ -189,11 +187,11 @@ struct VulkanBufferManager::Impl {
             LOG_TRACE_CAT("BufferMgr", "JOINING callback thread [tid={}]", std::this_thread::get_id());
             callbackThread.join();
         }
-        LOG_INFO_CAT("BufferMgr", "Impl DESTROYED @ 0x{:x}", reinterpret_cast<uintptr_t>(this));
+        LOG_INFO_CAT("BufferMgr", "IMPL OBLITERATED @ 0x{:x}", reinterpret_cast<uintptr_t>(this));
     }
 
     void processCallbacks() {
-        LOG_INFO_CAT("BufferMgr", "CALLBACK THREAD STARTED [tid={}]", std::this_thread::get_id());
+        LOG_INFO_CAT("BufferMgr", "CALLBACK THREAD AWAKENS [tid={}]", std::this_thread::get_id());
         while (true) {
             std::unique_lock<std::mutex> lk(mutex);
             cv.wait(lk, [this] { return !callbackQueue.empty() || shutdown; });
@@ -212,12 +210,12 @@ struct VulkanBufferManager::Impl {
             LOG_DEBUG_CAT("BufferMgr", "EXECUTING user callback for updateId={}", id);
             cb(id);
         }
-        LOG_INFO_CAT("BufferMgr", "CALLBACK THREAD TERMINATED");
+        LOG_INFO_CAT("BufferMgr", "CALLBACK THREAD VANISHES");
     }
 };
 
 // ---------------------------------------------------------------------------
-//  Public API
+//  Public API — BUFFED TO THE MAX
 // ---------------------------------------------------------------------------
 VulkanBufferManager::VulkanBufferManager(Vulkan::Context& ctx,
                                          std::span<const glm::vec3> vertices,
@@ -230,13 +228,12 @@ VulkanBufferManager::VulkanBufferManager(Vulkan::Context& ctx,
       scratchBufferAddress_(0),
       impl_(std::make_unique<Impl>(ctx))
 {
-    LOG_INFO_CAT("BufferMgr", "CREATING VulkanBufferManager @ 0x{:x} | vertices={} | indices={}",
+    LOG_INFO_CAT("BufferMgr", "SPAWNING BufferManager @ 0x{:x} | verts={} | idx={}",
                  reinterpret_cast<uintptr_t>(this), vertices.size(), indices.size());
 
     if (ctx.device == VK_NULL_HANDLE || ctx.physicalDevice == VK_NULL_HANDLE)
         throw std::runtime_error("Invalid Vulkan context");
 
-    // VRAM Check
     VkPhysicalDeviceMemoryProperties memProps{};
     vkGetPhysicalDeviceMemoryProperties(ctx.physicalDevice, &memProps);
     VkDeviceSize devLocal = 0;
@@ -244,7 +241,7 @@ VulkanBufferManager::VulkanBufferManager(Vulkan::Context& ctx,
         if (memProps.memoryHeaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT)
             devLocal += memProps.memoryHeaps[i].size;
 
-    LOG_INFO_CAT("BufferMgr", "DEVICE LOCAL MEMORY: {} GiB ({} B)", devLocal / (1024*1024*1024), devLocal);
+    LOG_INFO_CAT("BufferMgr", "VRAM DETECTED: {} GiB ({} B)", devLocal / (1024*1024*1024), devLocal);
     if (devLocal < 8ULL * 1024 * 1024 * 1024)
         throw std::runtime_error("Device has <8 GiB local memory");
 
@@ -256,10 +253,9 @@ VulkanBufferManager::VulkanBufferManager(Vulkan::Context& ctx,
     if (indexCount_ < 3 || indexCount_ % 3 != 0)
         throw std::invalid_argument("Invalid triangle list");
 
-    LOG_INFO_CAT("BufferMgr", "GEOMETRY: {} vertices, {} indices ({} triangles)",
+    LOG_INFO_CAT("BufferMgr", "GEOMETRY: {} verts, {} idx ({} tris)",
                  vertexCount_, indexCount_, indexCount_ / 3);
 
-    // Extensions
     impl_->useMeshShaders        = isExtensionSupported(ctx.physicalDevice, VK_EXT_MESH_SHADER_EXTENSION_NAME);
     impl_->useDescriptorIndexing = isExtensionSupported(ctx.physicalDevice, VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME);
 
@@ -270,7 +266,7 @@ VulkanBufferManager::VulkanBufferManager(Vulkan::Context& ctx,
     const VkDeviceSize total = vSize + iSize;
     const VkDeviceSize arenaSize = std::max<VkDeviceSize>(16ULL * 1024 * 1024, total * 2);
 
-    LOG_INFO_CAT("BufferMgr", "GEOMETRY SIZE: V={} B | I={} B | TOTAL={} B | ARENA={} B",
+    LOG_INFO_CAT("BufferMgr", "SIZES: V={} B | I={} B | TOTAL={} B | ARENA={} B",
                  vSize, iSize, total, arenaSize);
     if (arenaSize > devLocal / 2)
         throw std::runtime_error("Arena exceeds half of device memory");
@@ -280,84 +276,70 @@ VulkanBufferManager::VulkanBufferManager(Vulkan::Context& ctx,
     vertexBufferAddress_ = asyncUpdateBuffers(vertices, indices, nullptr);
     indexBufferAddress_  = vertexBufferAddress_ + vSize;
 
-    LOG_INFO_CAT("BufferMgr", "VERTEX BUFFER @ 0x{:x} | INDEX BUFFER @ 0x{:x}",
+    LOG_INFO_CAT("BufferMgr", "VERTEX @ 0x{:x} | INDEX @ 0x{:x}",
                  vertexBufferAddress_, indexBufferAddress_);
 
-    // SCRATCH POOL RESERVED LATER IN VulkanRenderer::buildAccelerationStructures()
-    // AFTER vkGetAccelerationStructureBuildSizesKHR()
-
-    LOG_INFO_CAT("BufferMgr", "VulkanBufferManager FULLY INITIALIZED @ 0x{:x}", reinterpret_cast<uintptr_t>(this));
+    LOG_INFO_CAT("BufferMgr", "BUFFER MANAGER FULLY BUFFED @ 0x{:x}", reinterpret_cast<uintptr_t>(this));
 }
 
 VulkanBufferManager::~VulkanBufferManager() {
-    LOG_INFO_CAT("BufferMgr", "DESTROYING VulkanBufferManager @ 0x{:x}", reinterpret_cast<uintptr_t>(this));
+    LOG_INFO_CAT("BufferMgr", "DESTROYING BufferManager @ 0x{:x}", reinterpret_cast<uintptr_t>(this));
 
     for (size_t i = 0; i < impl_->uniformBuffers.size(); ++i) {
-        VkBuffer buf = impl_->uniformBuffers[i];
-        if (buf != VK_NULL_HANDLE) {
-            try { context_.resourceManager.removeBuffer(buf); }
-            catch (const std::exception& e) { LOG_WARNING_CAT("BufferMgr", "Failed to remove uniform buffer #{}: {}", i, e.what()); }
-            vkDestroyBuffer(context_.device, buf, nullptr);
-            LOG_INFO_CAT("BufferMgr", "DESTROYED uniform buffer #{} @ 0x{:x}", i, reinterpret_cast<uintptr_t>(buf));
+        if (impl_->uniformBuffers[i] != VK_NULL_HANDLE) {
+            context_.resourceManager.removeBuffer(impl_->uniformBuffers[i]);
+            vkDestroyBuffer(context_.device, impl_->uniformBuffers[i], nullptr);
+            LOG_INFO_CAT("BufferMgr", "UNIFORM #{} OBLITERATED", i);
         }
-        VkDeviceMemory mem = impl_->uniformBufferMemories[i];
-        if (mem != VK_NULL_HANDLE) {
-            try { context_.resourceManager.removeMemory(mem); }
-            catch (const std::exception& e) { LOG_WARNING_CAT("BufferMgr", "Failed to remove uniform mem #{}: {}", i, e.what()); }
-            vkFreeMemory(context_.device, mem, nullptr);
+        if (impl_->uniformBufferMemories[i] != VK_NULL_HANDLE) {
+            context_.resourceManager.removeMemory(impl_->uniformBufferMemories[i]);
+            vkFreeMemory(context_.device, impl_->uniformBufferMemories[i], nullptr);
         }
     }
 
     for (size_t i = 0; i < impl_->scratchBuffers.size(); ++i) {
-        VkBuffer buf = impl_->scratchBuffers[i];
-        if (buf != VK_NULL_HANDLE) {
-            try { context_.resourceManager.removeBuffer(buf); }
-            catch (const std::exception& e) { LOG_WARNING_CAT("BufferMgr", "Failed to remove scratch buffer #{}: {}", i, e.what()); }
-            vkDestroyBuffer(context_.device, buf, nullptr);
-            LOG_INFO_CAT("BufferMgr", "DESTROYED scratch buffer #{} @ 0x{:x}", i, reinterpret_cast<uintptr_t>(buf));
+        if (impl_->scratchBuffers[i] != VK_NULL_HANDLE) {
+            context_.resourceManager.removeBuffer(impl_->scratchBuffers[i]);
+            vkDestroyBuffer(context_.device, impl_->scratchBuffers[i], nullptr);
+            LOG_INFO_CAT("BufferMgr", "SCRATCH #{} ERASED", i);
         }
-        VkDeviceMemory mem = impl_->scratchBufferMemories[i];
-        if (mem != VK_NULL_HANDLE) {
-            try { context_.resourceManager.removeMemory(mem); }
-            catch (const std::exception& e) { LOG_WARNING_CAT("BufferMgr", "Failed to remove scratch mem #{}: {}", i, e.what()); }
-            vkFreeMemory(context_.device, mem, nullptr);
+        if (impl_->scratchBufferMemories[i] != VK_NULL_HANDLE) {
+            context_.resourceManager.removeMemory(impl_->scratchBufferMemories[i]);
+            vkFreeMemory(context_.device, impl_->scratchBufferMemories[i], nullptr);
         }
     }
 
     if (impl_->arenaBuffer != VK_NULL_HANDLE) {
-        try { context_.resourceManager.removeBuffer(impl_->arenaBuffer); }
-        catch (const std::exception& e) { LOG_WARNING_CAT("BufferMgr", "Failed to remove arena buffer: {}", e.what()); }
+        context_.resourceManager.removeBuffer(impl_->arenaBuffer);
         vkDestroyBuffer(context_.device, impl_->arenaBuffer, nullptr);
-        LOG_INFO_CAT("BufferMgr", "DESTROYED arena buffer 0x{:x}", reinterpret_cast<uintptr_t>(impl_->arenaBuffer));
+        LOG_INFO_CAT("BufferMgr", "ARENA BUFFER ANNIHILATED");
     }
     if (impl_->arenaMemory != VK_NULL_HANDLE) {
-        try { context_.resourceManager.removeMemory(impl_->arenaMemory); }
-        catch (const std::exception& e) { LOG_WARNING_CAT("BufferMgr", "Failed to remove arena memory: {}", e.what()); }
+        context_.resourceManager.removeMemory(impl_->arenaMemory);
         vkFreeMemory(context_.device, impl_->arenaMemory, nullptr);
-        LOG_INFO_CAT("BufferMgr", "FREED arena memory 0x{:x}", reinterpret_cast<uintptr_t>(impl_->arenaMemory));
+        LOG_INFO_CAT("BufferMgr", "ARENA MEMORY FREED");
     }
 
     if (impl_->commandPool != VK_NULL_HANDLE) {
-        try { Dispose::freeCommandBuffers(context_.device, impl_->commandPool, impl_->commandBuffers); }
-        catch (const std::exception& e) { LOG_WARNING_CAT("BufferMgr", "Failed to free command buffers: {}", e.what()); }
+        Dispose::freeCommandBuffers(context_.device, impl_->commandPool, impl_->commandBuffers);
         vkDestroyCommandPool(context_.device, impl_->commandPool, nullptr);
-        LOG_INFO_CAT("BufferMgr", "DESTROYED command pool 0x{:x}", reinterpret_cast<uintptr_t>(impl_->commandPool));
+        LOG_INFO_CAT("BufferMgr", "COMMAND POOL COLLAPSED");
     }
 
     if (impl_->timelineSemaphore != VK_NULL_HANDLE) {
         vkDestroySemaphore(context_.device, impl_->timelineSemaphore, nullptr);
-        LOG_INFO_CAT("BufferMgr", "DESTROYED timeline semaphore 0x{:x}", reinterpret_cast<uintptr_t>(impl_->timelineSemaphore));
+        LOG_INFO_CAT("BufferMgr", "TIMELINE SEMAPHORE VANISHED");
     }
 
-    LOG_INFO_CAT("BufferMgr", "VulkanBufferManager FULLY DESTROYED");
+    LOG_INFO_CAT("BufferMgr", "BUFFER MANAGER FULLY DELETED");
 }
 
 // ---------------------------------------------------------------------------
-//  IMPLEMENTATION OF MISSING METHODS -- RAW VULKAN, NO WRAPPER
+//  IMPLEMENTATION — RAW POWER
 // ---------------------------------------------------------------------------
 
 void VulkanBufferManager::initializeCommandPool() {
-    LOG_INFO_CAT("BufferMgr", "INITIALIZING command pool for transfer queue");
+    LOG_INFO_CAT("BufferMgr", "SPAWNING transfer command pool");
 
     uint32_t queueFamilyCount = 0;
     vkGetPhysicalDeviceQueueFamilyProperties(context_.physicalDevice, &queueFamilyCount, nullptr);
@@ -368,7 +350,7 @@ void VulkanBufferManager::initializeCommandPool() {
     for (uint32_t i = 0; i < queueFamilyCount; ++i) {
         if (queueFamilies[i].queueFlags & VK_QUEUE_TRANSFER_BIT) {
             transferFamily = i;
-            LOG_TRACE_CAT("BufferMgr", "FOUND transfer queue family: {} (flags=0x{:x})", i, queueFamilies[i].queueFlags);
+            LOG_TRACE_CAT("BufferMgr", "TRANSFER QUEUE FAMILY {} DETECTED (flags=0x{:x})", i, queueFamilies[i].queueFlags);
             break;
         }
     }
@@ -389,7 +371,7 @@ void VulkanBufferManager::initializeCommandPool() {
     impl_->transferQueueFamily = transferFamily;
     vkGetDeviceQueue(context_.device, impl_->transferQueueFamily, 0, &impl_->transferQueue);
 
-    LOG_INFO_CAT("BufferMgr", "COMMAND POOL CREATED: 0x{:x} | queue family {} | queue 0x{:x}",
+    LOG_INFO_CAT("BufferMgr", "COMMAND POOL READY: 0x{:x} | family {} | queue 0x{:x}",
                  reinterpret_cast<uintptr_t>(impl_->commandPool),
                  transferFamily,
                  reinterpret_cast<uintptr_t>(impl_->transferQueue));
@@ -399,11 +381,11 @@ uint32_t findMemoryType(VkPhysicalDevice physicalDevice, uint32_t typeFilter, Vk
     VkPhysicalDeviceMemoryProperties memProperties;
     vkGetPhysicalDeviceMemoryProperties(physicalDevice, &memProperties);
 
-    LOG_TRACE_CAT("BufferMgr", "FINDING memory type: filter=0x{:x}, properties=0x{:x}", typeFilter, properties);
+    LOG_TRACE_CAT("BufferMgr", "MEMORY TYPE SEARCH: filter=0x{:x}, props=0x{:x}", typeFilter, properties);
 
     for (uint32_t i = 0; i < memProperties.memoryTypeCount; i++) {
         if ((typeFilter & (1 << i)) && (memProperties.memoryTypes[i].propertyFlags & properties) == properties) {
-            LOG_TRACE_CAT("BufferMgr", "MATCHED memory type {} (flags=0x{:x})", i, memProperties.memoryTypes[i].propertyFlags);
+            LOG_TRACE_CAT("BufferMgr", "MEMORY TYPE {} SELECTED (flags=0x{:x})", i, memProperties.memoryTypes[i].propertyFlags);
             return i;
         }
     }
@@ -431,7 +413,7 @@ void VulkanBufferManager::reserveArena(VkDeviceSize size, BufferType type) {
     VkMemoryRequirements memReqs;
     vkGetBufferMemoryRequirements(context_.device, impl_->arenaBuffer, &memReqs);
 
-    LOG_TRACE_CAT("BufferMgr", "ARENA BUFFER REQS: size={} B, alignment={} B, typeBits=0x{:x}",
+    LOG_TRACE_CAT("BufferMgr", "ARENA REQS: size={} B, align={} B, typeBits=0x{:x}",
                   memReqs.size, memReqs.alignment, memReqs.memoryTypeBits);
 
     VkMemoryAllocateFlagsInfo flagsInfo = {
@@ -456,7 +438,7 @@ void VulkanBufferManager::reserveArena(VkDeviceSize size, BufferType type) {
     impl_->vertexOffset = 0;
     impl_->indexOffset = sizeof(glm::vec3) * vertexCount_ * 4;
 
-    LOG_INFO_CAT("BufferMgr", "ARENA RESERVED: {} MiB | buffer=0x{:x} | memory=0x{:x} | vertexOffset={} | indexOffset={}",
+    LOG_INFO_CAT("BufferMgr", "ARENA LOCKED: {} MiB | buf=0x{:x} | mem=0x{:x} | vOffset={} | iOffset={}",
                  size / (1024*1024),
                  reinterpret_cast<uintptr_t>(impl_->arenaBuffer),
                  reinterpret_cast<uintptr_t>(impl_->arenaMemory),
@@ -471,7 +453,7 @@ VkDeviceAddress VulkanBufferManager::asyncUpdateBuffers(
     const VkDeviceSize vSize = sizeof(glm::vec3) * vertices.size() * 4;
     const VkDeviceSize iSize = sizeof(uint32_t) * indices.size() * 4;
 
-    LOG_INFO_CAT("BufferMgr", "ASYNC UPDATE: vSize={} B | iSize={} B | updateId={}",
+    LOG_INFO_CAT("BufferMgr", "ASYNC UPDATE START: v={} B | i={} B | id={}",
                  vSize, iSize, impl_->nextUpdateId);
 
     VkBuffer stagingV = VK_NULL_HANDLE, stagingI = VK_NULL_HANDLE;
@@ -507,7 +489,7 @@ VkDeviceAddress VulkanBufferManager::asyncUpdateBuffers(
     VK_CHECK(vkMapMemory(context_.device, stagingMemV, 0, vSize, 0, &dataV), "Map staging vertex");
     std::memcpy(dataV, vertices.data(), vSize);
     vkUnmapMemory(context_.device, stagingMemV);
-    LOG_TRACE_CAT("BufferMgr", "COPIED {} B vertex data to staging buffer 0x{:x}", vSize, reinterpret_cast<uintptr_t>(stagingV));
+    LOG_TRACE_CAT("BufferMgr", "VERTEX DATA UPLOADED: {} B → 0x{:x}", vSize, reinterpret_cast<uintptr_t>(stagingV));
 
     // Staging index buffer
     stagingInfo.size = iSize;
@@ -527,9 +509,9 @@ VkDeviceAddress VulkanBufferManager::asyncUpdateBuffers(
     VK_CHECK(vkMapMemory(context_.device, stagingMemI, 0, iSize, 0, &dataI), "Map staging index");
     std::memcpy(dataI, indices.data(), iSize);
     vkUnmapMemory(context_.device, stagingMemI);
-    LOG_TRACE_CAT("BufferMgr", "COPIED {} B index data to staging buffer 0x{:x}", iSize, reinterpret_cast<uintptr_t>(stagingI));
+    LOG_TRACE_CAT("BufferMgr", "INDEX DATA UPLOADED: {} B → 0x{:x}", iSize, reinterpret_cast<uintptr_t>(stagingI));
 
-    // Allocate command buffer
+    // Command buffer
     VkCommandBufferAllocateInfo allocInfo = {
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
         .commandPool = impl_->commandPool,
@@ -546,15 +528,15 @@ VkDeviceAddress VulkanBufferManager::asyncUpdateBuffers(
 
     VkBufferCopy vcopy = { .size = vSize };
     vkCmdCopyBuffer(cb, stagingV, impl_->arenaBuffer, 1, &vcopy);
-    LOG_TRACE_CAT("BufferMgr", "COPY: stagingV -> arena (size={} B)", vSize);
+    LOG_TRACE_CAT("BufferMgr", "COPY VERTEX: staging → arena ({} B)", vSize);
 
     VkBufferCopy icopy = { .srcOffset = 0, .dstOffset = impl_->indexOffset, .size = iSize };
     vkCmdCopyBuffer(cb, stagingI, impl_->arenaBuffer, 1, &icopy);
-    LOG_TRACE_CAT("BufferMgr", "COPY: stagingI -> arena+{} (size={} B)", impl_->indexOffset, iSize);
+    LOG_TRACE_CAT("BufferMgr", "COPY INDEX: staging → arena+{} ({} B)", impl_->indexOffset, iSize);
 
     VK_CHECK(vkEndCommandBuffer(cb), "End cmd buffer");
 
-    // Submit
+    // Submit + SYNC
     VkSubmitInfo submit = {
         .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
         .commandBufferCount = 1,
@@ -563,7 +545,7 @@ VkDeviceAddress VulkanBufferManager::asyncUpdateBuffers(
     VK_CHECK(vkQueueSubmit(impl_->transferQueue, 1, &submit, VK_NULL_HANDLE), "Queue submit");
 
     vkQueueWaitIdle(impl_->transferQueue);
-    LOG_INFO_CAT("BufferMgr", "Transfer queue idle post-submit - data synced");
+    LOG_INFO_CAT("BufferMgr", "TRANSFER QUEUE IDLE — DATA 100% SYNCED");
 
     uint64_t updateId = impl_->nextUpdateId++;
 
@@ -571,7 +553,7 @@ VkDeviceAddress VulkanBufferManager::asyncUpdateBuffers(
         std::lock_guard<std::mutex> lk(impl_->mutex);
         impl_->callbackQueue.emplace(updateId, std::move(callback));
         impl_->cv.notify_one();
-        LOG_TRACE_CAT("BufferMgr", "ENQUEUED callback for updateId={}", updateId);
+        LOG_TRACE_CAT("BufferMgr", "CALLBACK ENQUEUED: updateId={}", updateId);
     }
 
     cleanup.release();
@@ -581,12 +563,12 @@ VkDeviceAddress VulkanBufferManager::asyncUpdateBuffers(
         .buffer = impl_->arenaBuffer
     };
     VkDeviceAddress addr = vkGetBufferDeviceAddress(context_.device, &addrInfo);
-    LOG_INFO_CAT("BufferMgr", "UPDATE COMPLETE: updateId={} | new arena address=0x{:x}", updateId, addr);
+    LOG_INFO_CAT("BufferMgr", "UPDATE COMPLETE: id={} | arena addr=0x{:x}", updateId, addr);
     return addr;
 }
 
 void VulkanBufferManager::createUniformBuffers(uint32_t count) {
-    LOG_INFO_CAT("BufferMgr", "CREATING {} uniform buffers (1024 B each)", count);
+    LOG_INFO_CAT("BufferMgr", "CREATING {} UBOs ({} B each)", count, sizeof(UniformBufferObject));
     impl_->uniformBuffers.resize(count);
     impl_->uniformBufferMemories.resize(count);
     impl_->uniformBufferOffsets.resize(count);
@@ -614,7 +596,7 @@ void VulkanBufferManager::createUniformBuffers(uint32_t count) {
                  "Bind uniform");
 
         impl_->uniformBufferOffsets[i] = 0;
-        LOG_INFO_CAT("BufferMgr", "UNIFORM BUFFER #{}: buffer=0x{:x} | memory=0x{:x} | size={} B",
+        LOG_INFO_CAT("BufferMgr", "UBO #{}: buf=0x{:x} | mem=0x{:x} | size={} B",
                      i,
                      reinterpret_cast<uintptr_t>(impl_->uniformBuffers[i]),
                      reinterpret_cast<uintptr_t>(impl_->uniformBufferMemories[i]),
@@ -626,7 +608,7 @@ VkBuffer VulkanBufferManager::getUniformBuffer(uint32_t index) const {
     if (index >= impl_->uniformBuffers.size()) {
         throw std::out_of_range("Uniform buffer index out of range");
     }
-    LOG_TRACE_CAT("BufferMgr", "GET uniform buffer #{}", index);
+    LOG_TRACE_CAT("BufferMgr", "GET UBO #{} → 0x{:x}", index, reinterpret_cast<uintptr_t>(impl_->uniformBuffers[index]));
     return impl_->uniformBuffers[index];
 }
 
@@ -634,13 +616,13 @@ VkDeviceMemory VulkanBufferManager::getUniformBufferMemory(uint32_t index) const
     if (index >= impl_->uniformBufferMemories.size()) {
         throw std::out_of_range("Uniform buffer memory index out of range");
     }
-    LOG_TRACE_CAT("BufferMgr", "GET uniform memory #{}", index);
+    LOG_TRACE_CAT("BufferMgr", "GET UBO mem #{} → 0x{:x}", index, reinterpret_cast<uintptr_t>(impl_->uniformBufferMemories[index]));
     return impl_->uniformBufferMemories[index];
 }
 
 void VulkanBufferManager::createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties,
                                        VkBuffer& buffer, VkDeviceMemory& memory) {
-    LOG_INFO_CAT("BufferMgr", "Creating buffer: size={} B, usage=0x{:x}, properties=0x{:x}", size, usage, properties);
+    LOG_INFO_CAT("BufferMgr", "CREATE BUFFER: {} B | usage=0x{:x} | props=0x{:x}", size, usage, properties);
 
     VkBufferCreateInfo bufferInfo{};
     bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
@@ -662,11 +644,12 @@ void VulkanBufferManager::createBuffer(VkDeviceSize size, VkBufferUsageFlags usa
 
     VK_CHECK(vkBindBufferMemory(context_.device, buffer, memory, 0), "Failed to bind buffer memory");
 
-    LOG_INFO_CAT("BufferMgr", "Buffer created successfully: buffer=0x{:x}, memory=0x{:x}", reinterpret_cast<uintptr_t>(buffer), reinterpret_cast<uintptr_t>(memory));
+    LOG_INFO_CAT("BufferMgr", "BUFFER CREATED: buf=0x{:x} | mem=0x{:x}", 
+                 reinterpret_cast<uintptr_t>(buffer), reinterpret_cast<uintptr_t>(memory));
 }
 
 void VulkanBufferManager::reserveScratchPool(VkDeviceSize size, uint32_t count) {
-    LOG_INFO_CAT("BufferMgr", "RESERVING scratch pool: {} buffers x {} B ({} MiB total)", count, size, count*size/(1024*1024));
+    LOG_INFO_CAT("BufferMgr", "RESERVING SCRATCH POOL: {} x {} B ({} MiB)", count, size, count*size/(1024*1024));
     impl_->scratchBuffers.resize(count);
     impl_->scratchBufferMemories.resize(count);
     impl_->scratchBufferAddresses.resize(count);
@@ -708,7 +691,7 @@ void VulkanBufferManager::reserveScratchPool(VkDeviceSize size, uint32_t count) 
         };
         impl_->scratchBufferAddresses[i] = vkGetBufferDeviceAddress(context_.device, &addrInfo);
 
-        LOG_INFO_CAT("BufferMgr", "SCRATCH BUFFER #{}: buffer=0x{:x} | memory=0x{:x} | address=0x{:x} | size={} B",
+        LOG_INFO_CAT("BufferMgr", "SCRATCH #{}: buf=0x{:x} | mem=0x{:x} | addr=0x{:x} | size={} B",
                      i,
                      reinterpret_cast<uintptr_t>(impl_->scratchBuffers[i]),
                      reinterpret_cast<uintptr_t>(impl_->scratchBufferMemories[i]),
@@ -725,12 +708,11 @@ VkBuffer VulkanBufferManager::getIndexBuffer() const {
     return impl_->arenaBuffer;
 }
 
-// === NEW: SCRATCH BUFFER ACCESSORS ===
 VkBuffer VulkanBufferManager::getScratchBuffer(uint32_t index) const {
     if (index >= impl_->scratchBuffers.size()) {
         throw std::out_of_range(std::format("Scratch buffer index {} out of range (count: {})", index, impl_->scratchBuffers.size()));
     }
-    LOG_TRACE_CAT("BufferMgr", "GET scratch buffer #{} -> 0x{:x}", index, reinterpret_cast<uintptr_t>(impl_->scratchBuffers[index]));
+    LOG_TRACE_CAT("BufferMgr", "GET SCRATCH #{} → 0x{:x}", index, reinterpret_cast<uintptr_t>(impl_->scratchBuffers[index]));
     return impl_->scratchBuffers[index];
 }
 
@@ -738,7 +720,7 @@ VkDeviceAddress VulkanBufferManager::getScratchBufferAddress(uint32_t index) con
     if (index >= impl_->scratchBufferAddresses.size()) {
         throw std::out_of_range(std::format("Scratch buffer address index {} out of range", index));
     }
-    LOG_TRACE_CAT("BufferMgr", "GET scratch address #{} -> 0x{:x}", index, impl_->scratchBufferAddresses[index]);
+    LOG_TRACE_CAT("BufferMgr", "GET SCRATCH ADDR #{} → 0x{:x}", index, impl_->scratchBufferAddresses[index]);
     return impl_->scratchBufferAddresses[index];
 }
 
