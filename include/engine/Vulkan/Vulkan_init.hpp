@@ -65,6 +65,8 @@ namespace VulkanInitializer {
         VkImageView gDepthView, VkImageView gNormalView
     );
 
+    VkDeviceAddress getAccelerationStructureDeviceAddress(const Vulkan::Context& context, VkAccelerationStructureKHR as);
+
     // ADDED: Utility function for depth-stencil formats
     bool hasStencilComponent(VkFormat format);
 }

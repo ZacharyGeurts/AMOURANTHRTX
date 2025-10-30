@@ -579,11 +579,11 @@ void VulkanPipelineManager::createAccelerationStructures(VkBuffer vertexBuffer, 
     VkAccelerationStructureGeometryTrianglesDataKHR triangles{};
     triangles.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
     triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
-    triangles.vertexData.deviceAddress = VulkanInitializer::getBufferDeviceAddress(context_.device, vertexBuffer);
+    triangles.vertexData.deviceAddress = VulkanInitializer::getBufferDeviceAddress(context_, vertexBuffer);
     triangles.vertexStride = sizeof(glm::vec3);
     triangles.maxVertex = 0;
     triangles.indexType = VK_INDEX_TYPE_UINT32;
-    triangles.indexData.deviceAddress = VulkanInitializer::getBufferDeviceAddress(context_.device, indexBuffer);
+    triangles.indexData.deviceAddress = VulkanInitializer::getBufferDeviceAddress(context_, indexBuffer);
 
     VkAccelerationStructureGeometryKHR geometry{};
     geometry.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
@@ -651,7 +651,7 @@ void VulkanPipelineManager::createAccelerationStructures(VkBuffer vertexBuffer, 
     instance.mask = 0xFF;
     instance.instanceShaderBindingTableRecordOffset = 0;
     instance.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
-    instance.accelerationStructureReference = VulkanInitializer::getAccelerationStructureDeviceAddress(context_.device, blasHandle_);
+    instance.accelerationStructureReference = VulkanInitializer::getAccelerationStructureDeviceAddress(context_, blasHandle_);
 
     // Staging buffer
     VkBuffer stagingBuffer = VK_NULL_HANDLE;
@@ -686,7 +686,7 @@ void VulkanPipelineManager::createAccelerationStructures(VkBuffer vertexBuffer, 
     // TLAS geometry
     VkAccelerationStructureGeometryInstancesDataKHR instancesData{};
     instancesData.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR;
-    instancesData.data.deviceAddress = VulkanInitializer::getBufferDeviceAddress(context_.device, context_.instanceBuffer);
+    instancesData.data.deviceAddress = VulkanInitializer::getBufferDeviceAddress(context_, context_.instanceBuffer);
 
     VkAccelerationStructureGeometryKHR tlasGeometry{};
     tlasGeometry.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
