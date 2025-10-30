@@ -203,7 +203,6 @@ void VulkanPipelineManager::createComputeDescriptorSetLayout() {
 // CREATE GRAPHICS DESCRIPTOR SET LAYOUT (STUBBED FOR RAY TRACING FOCUS)
 // -----------------------------------------------------------------------------
 void VulkanPipelineManager::createGraphicsDescriptorSetLayout() {
-    // Stubbed out for ray tracing only - no rasterization needed
     LOG_INFO_CAT("Pipeline", "Graphics descriptor set layout skipped (ray tracing mode).");
     context_.graphicsDescriptorSetLayout = VK_NULL_HANDLE;
 }
@@ -253,7 +252,7 @@ void VulkanPipelineManager::createRayTracingPipeline() {
 }
 
 // -----------------------------------------------------------------------------
-// CREATE SHADER BINDING TABLE
+// CREATE SHADER BINDING TABLE – FULLY ALIGNED & VALID
 // -----------------------------------------------------------------------------
 void VulkanPipelineManager::createShaderBindingTable() {
     if (!rayTracingPipeline_) {
@@ -261,7 +260,7 @@ void VulkanPipelineManager::createShaderBindingTable() {
         throw std::runtime_error("Ray tracing pipeline missing");
     }
 
-    LOG_INFO_CAT("Pipeline", "Creating Shader Binding Table...");
+    LOG_INFO_CAT("Pipeline", "Creating Shader Binding Table (aligned)...");
 
     const uint32_t handleSize = context_.rtProperties.shaderGroupHandleSize;
     const uint32_t handleAlignment = context_.rtProperties.shaderGroupHandleAlignment;
@@ -269,26 +268,39 @@ void VulkanPipelineManager::createShaderBindingTable() {
 
     const uint32_t alignedHandleSize = (handleSize + handleAlignment - 1) & ~(handleAlignment - 1);
 
-    const uint32_t raygenCount = 1;
-    const uint32_t missCount   = 1;
-    const uint32_t hitCount    = 1;
-    const uint32_t totalGroups = raygenCount + missCount + hitCount;
-
-    shaderHandles_.resize(totalGroups * handleSize);
+    const uint32_t groupCount = 3; // raygen + miss + hit
+    shaderHandles_.resize(groupCount * handleSize);
 
     VK_CHECK(context_.vkGetRayTracingShaderGroupHandlesKHR(
-        context_.device, rayTracingPipeline_->get(), 0, totalGroups,
+        context_.device, rayTracingPipeline_->get(), 0, groupCount,
         shaderHandles_.size(), shaderHandles_.data()));
 
-    const VkDeviceSize raygenSize = alignedHandleSize * raygenCount;
-    const VkDeviceSize missSize   = alignedHandleSize * missCount;
-    const VkDeviceSize hitSize    = alignedHandleSize * hitCount;
-    const VkDeviceSize totalSize  = raygenSize + missSize + hitSize;
-    const VkDeviceSize alignedTotalSize = (totalSize + baseAlignment - 1) & ~(baseAlignment - 1);
+    // === Calculate aligned region sizes ===
+    const VkDeviceSize raygenSize = alignedHandleSize;
+    const VkDeviceSize missSize   = alignedHandleSize;
+    const VkDeviceSize hitSize    = alignedHandleSize;
 
+    // === Align each region start to baseAlignment ===
+    VkDeviceSize offset = 0;
+
+    const VkDeviceSize raygenOffset = offset;
+    offset += raygenSize;
+    offset = (offset + baseAlignment - 1) & ~(baseAlignment - 1);  // Align next
+
+    const VkDeviceSize missOffset = offset;
+    offset += missSize;
+    offset = (offset + baseAlignment - 1) & ~(baseAlignment - 1);
+
+    const VkDeviceSize hitOffset = offset;
+    offset += hitSize;
+
+    const VkDeviceSize totalSize = offset;
+    const VkDeviceSize bufferSize = (totalSize + baseAlignment - 1) & ~(baseAlignment - 1);
+
+    // === Create SBT Buffer ===
     VkBufferCreateInfo bufferInfo{};
     bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufferInfo.size = alignedTotalSize;
+    bufferInfo.size = bufferSize;
     bufferInfo.usage = VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
     bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
@@ -312,34 +324,51 @@ void VulkanPipelineManager::createShaderBindingTable() {
     VK_CHECK(vkAllocateMemory(context_.device, &allocInfo, nullptr, &sbtMemory_));
     VK_CHECK(vkBindBufferMemory(context_.device, sbtBuffer_, sbtMemory_, 0));
 
+    // === Map & Copy Handles ===
     void* data;
-    VK_CHECK(vkMapMemory(context_.device, sbtMemory_, 0, alignedTotalSize, 0, &data));
-    std::memset(data, 0, alignedTotalSize);
+    VK_CHECK(vkMapMemory(context_.device, sbtMemory_, 0, bufferSize, 0, &data));
     uint8_t* pData = static_cast<uint8_t*>(data);
-    VkDeviceSize offset = 0;
 
-    std::memcpy(pData + offset, shaderHandles_.data() + 0 * handleSize, handleSize);
-    offset += alignedHandleSize;
-    std::memcpy(pData + offset, shaderHandles_.data() + 1 * handleSize, handleSize);
-    offset += alignedHandleSize;
-    std::memcpy(pData + offset, shaderHandles_.data() + 2 * handleSize, handleSize);
+    std::memcpy(pData + raygenOffset, shaderHandles_.data() + 0 * handleSize, handleSize);
+    std::memcpy(pData + missOffset,   shaderHandles_.data() + 1 * handleSize, handleSize);
+    std::memcpy(pData + hitOffset,    shaderHandles_.data() + 2 * handleSize, handleSize);
 
     vkUnmapMemory(context_.device, sbtMemory_);
 
+    // === Get Base Address ===
     VkBufferDeviceAddressInfo addrInfo{};
     addrInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
     addrInfo.buffer = sbtBuffer_;
-    VkDeviceAddress sbtAddress = context_.vkGetBufferDeviceAddressKHR(context_.device, &addrInfo);
+    VkDeviceAddress baseAddr = context_.vkGetBufferDeviceAddressKHR(context_.device, &addrInfo);
 
-    sbt_.raygen = { sbtAddress,                 alignedHandleSize, raygenSize };
-    sbt_.miss   = { sbtAddress + raygenSize,    alignedHandleSize, missSize   };
-    sbt_.hit    = { sbtAddress + raygenSize + missSize, alignedHandleSize, hitSize };
-    sbt_.callable = { 0, 0, 0 };
+    // === Final SBT Regions (fully aligned) ===
+    sbt_.raygen = {
+        baseAddr + raygenOffset,
+        alignedHandleSize,
+        raygenSize
+    };
+    sbt_.miss = {
+        baseAddr + missOffset,
+        alignedHandleSize,
+        missSize
+    };
+    sbt_.hit = {
+        baseAddr + hitOffset,
+        alignedHandleSize,
+        hitSize
+    };
+    sbt_.callable = {0, 0, 0};
 
-    LOG_INFO_CAT("Pipeline", "SBT created successfully:");
-    LOG_INFO_CAT("Pipeline", "  Raygen: addr=0x{:x}, size={}, stride={}", sbt_.raygen.deviceAddress, sbt_.raygen.size, sbt_.raygen.stride);
-    LOG_INFO_CAT("Pipeline", "  Miss:   addr=0x{:x}, size={}, stride={}", sbt_.miss.deviceAddress,   sbt_.miss.size,   sbt_.miss.stride);
-    LOG_INFO_CAT("Pipeline", "  Hit:    addr=0x{:x}, size={}, stride={}", sbt_.hit.deviceAddress,    sbt_.hit.size,    sbt_.hit.stride);
+    // === Pass to context for renderer ===
+    context_.raygenSbtAddress = sbt_.raygen.deviceAddress;
+    context_.missSbtAddress   = sbt_.miss.deviceAddress;
+    context_.hitSbtAddress    = sbt_.hit.deviceAddress;
+    context_.sbtRecordSize    = alignedHandleSize;
+
+    LOG_INFO_CAT("Pipeline", "SBT Created (Aligned):");
+    LOG_INFO_CAT("Pipeline", "  Raygen: addr=0x{:x}, stride={}, size={}", sbt_.raygen.deviceAddress, sbt_.raygen.stride, sbt_.raygen.size);
+    LOG_INFO_CAT("Pipeline", "  Miss:   addr=0x{:x}, stride={}, size={}", sbt_.miss.deviceAddress,   sbt_.miss.stride,   sbt_.miss.size);
+    LOG_INFO_CAT("Pipeline", "  Hit:    addr=0x{:x}, stride={}, size={}", sbt_.hit.deviceAddress,    sbt_.hit.stride,    sbt_.hit.size);
 }
 
 // -----------------------------------------------------------------------------
@@ -369,7 +398,7 @@ void VulkanPipelineManager::createComputePipeline() {
     VkPushConstantRange pushRange{};
     pushRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
     pushRange.offset = 0;
-    pushRange.size = sizeof(DenoisePushConstants);  // Now valid: defined in types.hpp
+    pushRange.size = sizeof(DenoisePushConstants);
 
     VkPipelineLayoutCreateInfo layoutInfo{};
     layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
@@ -402,7 +431,6 @@ void VulkanPipelineManager::createComputePipeline() {
 // CREATE GRAPHICS PIPELINE (STUBBED FOR RAY TRACING FOCUS)
 // -----------------------------------------------------------------------------
 void VulkanPipelineManager::createGraphicsPipeline(int width, int height) {
-    // Stubbed out for ray tracing only - no vertex/fragment rasterization needed
     LOG_INFO_CAT("Pipeline", "Graphics pipeline skipped (ray tracing mode).");
 }
 
@@ -411,23 +439,23 @@ void VulkanPipelineManager::createGraphicsPipeline(int width, int height) {
 // -----------------------------------------------------------------------------
 void VulkanPipelineManager::recordGraphicsCommands(VkCommandBuffer cmd, VkFramebuffer fb, VkDescriptorSet ds,
                                                    uint32_t w, uint32_t h, VkImage denoiseImage) {
-    // Stubbed for ray tracing focus
+    // Stubbed
 }
 void VulkanPipelineManager::recordRayTracingCommands(VkCommandBuffer cmd, VkImage outputImage,
                                                     VkDescriptorSet descSet, uint32_t width, uint32_t height,
                                                     VkImage gDepth, VkImage gNormal) {
-    // Implement RT command recording here if needed
+    // Implement later
 }
 void VulkanPipelineManager::recordComputeCommands(VkCommandBuffer cmd, VkImage outputImage,
                                                   VkDescriptorSet ds, uint32_t w, uint32_t h,
                                                   VkImage gDepth, VkImage gNormal, VkImage denoiseImage) {
-    // Implement denoise dispatch here if needed
+    // Implement later
 }
 void VulkanPipelineManager::createAccelerationStructures(VkBuffer vertexBuffer, VkBuffer indexBuffer) {
-    // Implement AS build if needed
+    // Implement later
 }
 void VulkanPipelineManager::updateRayTracingDescriptorSet(VkDescriptorSet descriptorSet, VkAccelerationStructureKHR tlasHandle) {
-    // Implement descriptor updates if needed
+    // Implement later
 }
 
 } // namespace VulkanRTX

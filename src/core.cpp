@@ -4,11 +4,12 @@
 
 #include "engine/core.hpp"
 #include "engine/logging.hpp"
+#include "engine/Vulkan/types.hpp"  // <-- Added for DenoisePushConstants & MaterialData
 
 namespace VulkanRTX {
 
 /* --------------------------------------------------------------------- *
- *  renderMode1 – the original “sphere + wisp” mode
+ *  renderMode1 – the original “sphere + wisp” mode (UPDATED FOR RTX SHADERS)
  * --------------------------------------------------------------------- */
 void renderMode1(
     uint32_t imageIndex,
@@ -55,31 +56,20 @@ void renderMode1(
         vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
                                 pipelineLayout, 0, 1, &descriptorSet, 0, nullptr);
 
-        struct PushConstants {
-            alignas(16) glm::vec4 clearColor;
-            alignas(16) glm::vec3 cameraPosition;
-            alignas(16) glm::vec3 lightPosition;
-            alignas(16) glm::vec3 lightColor;
-            alignas(4)  float     lightIntensity;
-            alignas(4)  uint32_t  samplesPerPixel;
-            alignas(4)  uint32_t  maxDepth;
-            alignas(4)  uint32_t  maxBounces;
-            alignas(4)  float     russianRoulette;
-        } push{
+        // Use MaterialData::PushConstants (matches raygen.rgen)
+        MaterialData::PushConstants push{
             .clearColor      = glm::vec4(0.02f, 0.02f, 0.05f, 1.0f),
             .cameraPosition  = glm::vec3(0.0f, 0.0f, 5.0f + zoomLevel),
-            .lightPosition   = glm::vec3(
-                std::sin(deltaTime * 0.8f) * 3.0f,
-                std::cos(deltaTime * 0.5f) * 2.0f + std::sin(deltaTime * 1.2f) * 1.5f,
-                5.0f + std::cos(deltaTime * 0.7f) * 1.0f
-            ),
-            .lightColor      = glm::vec3(0.4f, 0.7f, 1.0f),
+            ._pad0           = 0.0f,
+            .lightDirection  = glm::vec3(0.0f, -1.0f, 0.0f),
             .lightIntensity  = 8.0f + std::sin(deltaTime * 2.0f) * 2.0f,
             .samplesPerPixel = 4,
             .maxDepth        = 5,
             .maxBounces      = 3,
-            .russianRoulette = 0.8f
+            .russianRoulette = 0.8f,
+            .resolution      = glm::vec2(width, height)
         };
+
         vkCmdPushConstants(commandBuffer, pipelineLayout,
                            VK_SHADER_STAGE_RAYGEN_BIT_KHR |
                            VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR |
