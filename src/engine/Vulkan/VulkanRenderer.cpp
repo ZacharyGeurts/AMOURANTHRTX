@@ -404,20 +404,19 @@ void VulkanRenderer::buildAccelerationStructures() {
     tlasGeom.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
     tlasGeom.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
     tlasGeom.geometry.instances = instData;
-    tlasGeom.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
 
-    buildInfo = VkAccelerationStructureBuildGeometryInfoKHR{};
-    buildInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
-    buildInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
-    buildInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
-    buildInfo.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
-    buildInfo.geometryCount = 1;
-    buildInfo.pGeometries = &tlasGeom;
+    VkAccelerationStructureBuildGeometryInfoKHR tlasBuildInfo{};
+    tlasBuildInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
+    tlasBuildInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
+    tlasBuildInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+    tlasBuildInfo.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
+    tlasBuildInfo.geometryCount = 1;
+    tlasBuildInfo.pGeometries = &tlasGeom;
 
     uint32_t tlasMaxPrim = 1;
     VkAccelerationStructureBuildSizesInfoKHR tlasSize{};
     tlasSize.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
-    context_.vkGetAccelerationStructureBuildSizesKHR(context_.device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &buildInfo, &tlasMaxPrim, &tlasSize);
+    context_.vkGetAccelerationStructureBuildSizesKHR(context_.device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &tlasBuildInfo, &tlasMaxPrim, &tlasSize);
 
     bufferManager_->createBuffer(tlasSize.accelerationStructureSize, VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, tlasBuffer_, tlasBufferMemory_);
 
@@ -428,13 +427,13 @@ void VulkanRenderer::buildAccelerationStructures() {
     tlasCreateInfo.size = tlasSize.accelerationStructureSize;
     VK_CHECK(context_.vkCreateAccelerationStructureKHR(context_.device, &tlasCreateInfo, nullptr, &tlasHandle_));
 
-    buildInfo.dstAccelerationStructure = tlasHandle_;
-    buildInfo.scratchData.deviceAddress = scratchAddr;
+    tlasBuildInfo.dstAccelerationStructure = tlasHandle_;
+    tlasBuildInfo.scratchData.deviceAddress = scratchAddr;
 
     VkCommandBuffer cmdTLAS = allocateCmd();
     VkAccelerationStructureBuildRangeInfoKHR tlasRange{}; tlasRange.primitiveCount = 1;
     const VkAccelerationStructureBuildRangeInfoKHR* pTlasRange = &tlasRange;
-    context_.vkCmdBuildAccelerationStructuresKHR(cmdTLAS, 1, &buildInfo, &pTlasRange);
+    context_.vkCmdBuildAccelerationStructuresKHR(cmdTLAS, 1, &tlasBuildInfo, &pTlasRange);
     VK_CHECK(vkEndCommandBuffer(cmdTLAS));
     submitAndWait(cmdTLAS, "TLAS build");
 

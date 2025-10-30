@@ -171,12 +171,18 @@ VkDescriptorSetLayout VulkanPipelineManager::createRayTracingDescriptorSetLayout
     // 0: TLAS (accelerationStructureEXT)
     // 1: outputImage (storage image)
     // 2: UBO
-    // 6: envMap
+    // 3: materials (single SSBO, not array of 26)
+    // 4: dimensionBuffer
+    // 5: envMap
+    // 6: (optional) extra sampler
     std::vector<VkDescriptorSetLayoutBinding> bindings(7);
     bindings[0] = {0, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1, VK_SHADER_STAGE_RAYGEN_BIT_KHR};
     bindings[1] = {1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_RAYGEN_BIT_KHR};
     bindings[2] = {2, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR};
-    bindings[3] = {3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 26, VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR};
+    
+    // FIXED: Single material buffer (not 26 separate buffers)
+    bindings[3] = {3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR};
+    
     bindings[4] = {4, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_RAYGEN_BIT_KHR};
     bindings[5] = {5, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR};  // envMap
     bindings[6] = {6, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR};  // (optional)
