@@ -278,14 +278,14 @@ void VulkanPipelineManager::createShaderBindingTable() {
     // === Calculate aligned region sizes ===
     const VkDeviceSize raygenSize = alignedHandleSize;
     const VkDeviceSize missSize   = alignedHandleSize;
-    const VkDeviceSize hitSize    = alignedHandleSize;
+    const VkDeviceSize hitSize    = alignedHandleSize; // Only one hit group
 
     // === Align each region start to baseAlignment ===
     VkDeviceSize offset = 0;
 
     const VkDeviceSize raygenOffset = offset;
     offset += raygenSize;
-    offset = (offset + baseAlignment - 1) & ~(baseAlignment - 1);  // Align next
+    offset = (offset + baseAlignment - 1) & ~(baseAlignment - 1);
 
     const VkDeviceSize missOffset = offset;
     offset += missSize;
