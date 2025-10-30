@@ -13,9 +13,74 @@
 #include <vector>
 #include <format>
 #include <typeinfo>
+#include <utility>  // For std::move
 #include "engine/logging.hpp"
 
 namespace Dispose {
+
+// RAII wrapper for Vulkan handles (e.g., VkImage, VkDeviceMemory)
+// Supports ctor(VkDevice, Handle, DestroyFunc), reset(Handle), get(), auto-destructor
+template <typename HandleT>
+class VulkanHandle {
+public:
+    using DestroyFunc = void(*)(VkDevice, HandleT, const VkAllocationCallbacks*);
+
+    VkDevice device_;
+    HandleT handle_;
+    DestroyFunc destroy_;
+
+    // Default ctor (for member default-init before body assignment)
+    VulkanHandle() : device_(VK_NULL_HANDLE), handle_(VK_NULL_HANDLE), destroy_(nullptr) {}
+
+    // Primary ctor: (device, initial_handle, destroy_func)
+    VulkanHandle(VkDevice device, HandleT handle, DestroyFunc destroy)
+        : device_(device), handle_(handle), destroy_(destroy) {}
+
+    // Destructor: auto-cleanup
+    ~VulkanHandle() {
+        reset();
+    }
+
+    // Reset: destroy old handle, set new one (default: VK_NULL_HANDLE)
+    void reset(HandleT new_handle = VK_NULL_HANDLE) {
+        if (handle_ != VK_NULL_HANDLE && destroy_ != nullptr) {
+            try {
+                destroy_(device_, handle_, nullptr);
+                LOG_DEBUG(std::format("RAII destroyed handle (type: {}): {:p}", typeid(HandleT).name(), static_cast<void*>(handle_)));
+            } catch (const std::exception& e) {
+                LOG_ERROR(std::format("RAII failed to destroy handle (type: {}): {}", typeid(HandleT).name(), e.what()));
+            }
+        }
+        handle_ = new_handle;
+    }
+
+    // Get raw handle
+    HandleT get() const { return handle_; }
+
+    // Movable (no copy)
+    VulkanHandle(VulkanHandle&& other) noexcept
+        : device_(other.device_), handle_(other.handle_), destroy_(other.destroy_) {
+        other.device_ = VK_NULL_HANDLE;
+        other.handle_ = VK_NULL_HANDLE;
+        other.destroy_ = nullptr;
+    }
+
+    VulkanHandle& operator=(VulkanHandle&& other) noexcept {
+        if (this != &other) {
+            reset();  // Destroy current
+            device_ = other.device_;
+            handle_ = other.handle_;
+            destroy_ = other.destroy_;
+            other.device_ = VK_NULL_HANDLE;
+            other.handle_ = VK_NULL_HANDLE;
+            other.destroy_ = nullptr;
+        }
+        return *this;
+    }
+
+    VulkanHandle(const VulkanHandle&) = delete;
+    VulkanHandle& operator=(const VulkanHandle&) = delete;
+};
 
 template <typename HandleType, void (*DestroyFunc)(VkDevice, HandleType, const VkAllocationCallbacks*)>
 inline void destroyHandles(VkDevice device, std::vector<HandleType>& handles) noexcept {

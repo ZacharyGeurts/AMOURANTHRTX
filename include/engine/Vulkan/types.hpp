@@ -1,6 +1,4 @@
-// include/engine/Vulkan/types.hpp
-// AMOURANTH RTX Engine – Core Vulkan data structures
-// © 2025 Zachary Geurts – CC BY-NC 4.0
+// AMOURANTH RTX Engine (C) 2025 by Zachary Geurts gzac5314@gmail.com is licensed under CC BY-NC 4.0
 #pragma once
 #ifndef VULKAN_TYPES_HPP
 #define VULKAN_TYPES_HPP
@@ -23,15 +21,12 @@ namespace VulkanRTX { class VulkanRenderer; }
 // 1. MaterialData – SSBO (matches raygen.rgen)
 // ================================================================
 struct alignas(16) MaterialData {
-    alignas(16) glm::vec4 diffuse   = glm::vec4(0.8f, 0.8f, 0.8f, 1.0f); // offset 0
-    alignas(4)  float     specular  = 0.0f;                               // offset 16
-    alignas(4)  float     roughness = 0.5f;                               // offset 20
-    alignas(4)  float     metallic  = 0.0f;                               // offset 24
-    alignas(16) glm::vec4 emission  = glm::vec4(0.0f);                    // offset 32
+    alignas(16) glm::vec4 diffuse   = glm::vec4(0.8f, 0.8f, 0.8f, 1.0f);
+    alignas(4)  float     specular  = 0.0f;
+    alignas(4)  float     roughness = 0.5f;
+    alignas(4)  float     metallic  = 0.0f;
+    alignas(16) glm::vec4 emission  = glm::vec4(0.0f);
 
-    // -------------------------------------------------------------
-    // 1.1 PushConstants – nested, shared across pipelines
-    // -------------------------------------------------------------
     struct PushConstants {
         alignas(16) glm::vec4 clearColor      = glm::vec4(0.0f);
         alignas(16) glm::vec3 cameraPosition = glm::vec3(0.0f);
@@ -63,16 +58,13 @@ static_assert(sizeof(DimensionData) == 16, "DimensionData must be 16 bytes");
 // ================================================================
 // 3. UniformBufferObject – UBO (MUST BE 256 BYTES)
 // ================================================================
-// ================================================================
-// 3. UniformBufferObject – UBO (MUST BE 256 BYTES)
-// ================================================================
 struct alignas(16) UniformBufferObject {
-    alignas(16) glm::mat4 model;
-    alignas(16) glm::mat4 view;
-    alignas(16) glm::mat4 proj;
+    alignas(16) glm::mat4 viewInverse;
+    alignas(16) glm::mat4 projInverse;
     alignas(16) glm::vec4 camPos;
     alignas(4)  float     time;
-    alignas(4)  float     _pad[11];  // 11 × 4 = 44 → 208 + 4 + 44 = 256
+    alignas(4)  uint32_t  frame;
+    alignas(4)  float     _pad[26];
 };
 static_assert(sizeof(UniformBufferObject) == 256, "UBO must be 256 bytes");
 
@@ -95,7 +87,27 @@ struct DimensionState {
 };
 
 // ================================================================
-// 5. AMOURANTH – camera + demo controller (OUTSIDE namespace)
+// 5. Shader Binding Table (SBT) - Fixed to match VulkanRenderer usage
+// ================================================================
+struct ShaderBindingTable {
+    VkStridedDeviceAddressRegionKHR raygen{};
+    VkStridedDeviceAddressRegionKHR miss{};
+    VkStridedDeviceAddressRegionKHR hit{};
+    VkStridedDeviceAddressRegionKHR callable{};
+};
+
+// ================================================================
+// 6. Denoiser Push Constants (for compute shader)
+// ================================================================
+struct alignas(16) DenoisePushConstants {
+    alignas(8)  glm::ivec2 imageSize     = glm::ivec2(0);     // 8 bytes
+    alignas(4)  float      kernelRadius  = 1.0f;              // 4 bytes
+    alignas(4)  uint32_t   _pad0         = 0;                 // 4 bytes → total 16
+};
+static_assert(sizeof(DenoisePushConstants) == 16, "DenoisePushConstants must be 16 bytes");
+
+// ================================================================
+// 7. AMOURANTH – camera + demo controller
 // ================================================================
 class AMOURANTH : public Camera {
 public:

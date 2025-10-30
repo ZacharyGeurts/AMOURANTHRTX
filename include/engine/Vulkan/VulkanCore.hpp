@@ -17,11 +17,11 @@
 #include "engine/logging.hpp"
 #include <unordered_map>
 
-// Forward declaration to avoid circular dependency
+// Forward declarations
 class VulkanBufferManager;
 
 // ====================================================================
-// Vulkan Resource Manager – FULL IMPLEMENTATION (fixes all undefined refs)
+// Vulkan Resource Manager – FULL IMPLEMENTATION
 // ====================================================================
 class VulkanResourceManager {
     std::vector<VkBuffer> buffers_;
@@ -38,6 +38,7 @@ class VulkanResourceManager {
     std::vector<VkShaderModule> shaderModules_;
     std::unordered_map<std::string, VkPipeline> pipelineMap_;
     VkDevice device_ = VK_NULL_HANDLE;
+    VkPhysicalDevice physicalDevice_ = VK_NULL_HANDLE;
 
 public:
     // --------------------- ADDERS ---------------------
@@ -115,7 +116,7 @@ public:
         }
     }
 
-    // --------------------- REMOVERS (IMPLEMENTED) ---------------------
+    // --------------------- REMOVERS ---------------------
     void removeBuffer(VkBuffer buffer) {
         if (buffer == VK_NULL_HANDLE) return;
         auto it = std::find(buffers_.begin(), buffers_.end(), buffer);
@@ -256,15 +257,17 @@ public:
     const std::vector<VkShaderModule>& getShaderModules() const { return shaderModules_; }
 
     // --------------------- DEVICE & LOOKUP ---------------------
-    void setDevice(VkDevice newDevice) {
+    void setDevice(VkDevice newDevice, VkPhysicalDevice physicalDevice) {
         if (newDevice == VK_NULL_HANDLE) {
             LOG_ERROR("Cannot set null device to resource manager");
             throw std::invalid_argument("Cannot set null device");
         }
         device_ = newDevice;
+        physicalDevice_ = physicalDevice;
         LOG_INFO(std::format("Resource manager device set: {:p}", static_cast<void*>(device_)));
     }
     VkDevice getDevice() const { return device_; }
+    VkPhysicalDevice getPhysicalDevice() const { return physicalDevice_; }
 
     VkPipeline getPipeline(const std::string& name) const {
         auto it = pipelineMap_.find(name);
@@ -283,7 +286,6 @@ public:
         vkDeviceWaitIdle(effectiveDevice);
         LOG_DEBUG("Starting VulkanResourceManager cleanup");
 
-        // Pipelines
         for (auto p : pipelines_) {
             if (p != VK_NULL_HANDLE) {
                 vkDestroyPipeline(effectiveDevice, p, nullptr);
@@ -292,7 +294,6 @@ public:
         }
         pipelines_.clear(); pipelineMap_.clear();
 
-        // Pipeline layouts
         for (auto l : pipelineLayouts_) {
             if (l != VK_NULL_HANDLE) {
                 vkDestroyPipelineLayout(effectiveDevice, l, nullptr);
@@ -301,7 +302,6 @@ public:
         }
         pipelineLayouts_.clear();
 
-        // Descriptor set layouts
         for (auto l : descriptorSetLayouts_) {
             if (l != VK_NULL_HANDLE) {
                 vkDestroyDescriptorSetLayout(effectiveDevice, l, nullptr);
@@ -310,7 +310,6 @@ public:
         }
         descriptorSetLayouts_.clear();
 
-        // Render passes
         for (auto rp : renderPasses_) {
             if (rp != VK_NULL_HANDLE) {
                 vkDestroyRenderPass(effectiveDevice, rp, nullptr);
@@ -319,7 +318,6 @@ public:
         }
         renderPasses_.clear();
 
-        // Shader modules
         for (auto m : shaderModules_) {
             if (m != VK_NULL_HANDLE) {
                 vkDestroyShaderModule(effectiveDevice, m, nullptr);
@@ -328,7 +326,6 @@ public:
         }
         shaderModules_.clear();
 
-        // Acceleration structures (use extension function)
         for (auto as : accelerationStructures_) {
             if (as != VK_NULL_HANDLE) {
                 auto destroyFn = reinterpret_cast<PFN_vkDestroyAccelerationStructureKHR>(
@@ -341,7 +338,6 @@ public:
         }
         accelerationStructures_.clear();
 
-        // Image views
         for (auto iv : imageViews_) {
             if (iv != VK_NULL_HANDLE) {
                 vkDestroyImageView(effectiveDevice, iv, nullptr);
@@ -350,7 +346,6 @@ public:
         }
         imageViews_.clear();
 
-        // Images
         for (auto img : images_) {
             if (img != VK_NULL_HANDLE) {
                 vkDestroyImage(effectiveDevice, img, nullptr);
@@ -359,7 +354,6 @@ public:
         }
         images_.clear();
 
-        // Buffers
         for (auto b : buffers_) {
             if (b != VK_NULL_HANDLE) {
                 vkDestroyBuffer(effectiveDevice, b, nullptr);
@@ -368,7 +362,6 @@ public:
         }
         buffers_.clear();
 
-        // Device memory
         for (auto mem : memories_) {
             if (mem != VK_NULL_HANDLE) {
                 vkFreeMemory(effectiveDevice, mem, nullptr);
@@ -377,7 +370,6 @@ public:
         }
         memories_.clear();
 
-        // Descriptor pools
         for (auto dp : descriptorPools_) {
             if (dp != VK_NULL_HANDLE) {
                 vkDestroyDescriptorPool(effectiveDevice, dp, nullptr);
@@ -386,7 +378,6 @@ public:
         }
         descriptorPools_.clear();
 
-        // Command pools
         for (auto cp : commandPools_) {
             if (cp != VK_NULL_HANDLE) {
                 vkDestroyCommandPool(effectiveDevice, cp, nullptr);
@@ -397,10 +388,28 @@ public:
 
         LOG_INFO("VulkanResourceManager cleanup completed");
     }
+
+    // --------------------- MEMORY TYPE FINDER ---------------------
+    uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) const {
+        if (physicalDevice_ == VK_NULL_HANDLE) {
+            LOG_ERROR("Physical device not set in resource manager!");
+            throw std::runtime_error("Physical device not set");
+        }
+        VkPhysicalDeviceMemoryProperties memProps{};
+        vkGetPhysicalDeviceMemoryProperties(physicalDevice_, &memProps);
+        for (uint32_t i = 0; i < memProps.memoryTypeCount; ++i) {
+            if ((typeFilter & (1 << i)) &&
+                (memProps.memoryTypes[i].propertyFlags & properties) == properties) {
+                return i;
+            }
+        }
+        LOG_ERROR("Failed to find suitable memory type!");
+        throw std::runtime_error("Failed to find suitable memory type!");
+    }
 };
 
 // ====================================================================
-// Vulkan Context with Ray Tracing Function Pointers
+// Vulkan Context
 // ====================================================================
 namespace Vulkan {
 
@@ -494,9 +503,12 @@ struct Context {
     VkBuffer scratchBuffer = VK_NULL_HANDLE;
     VkDeviceMemory scratchBufferMemory = VK_NULL_HANDLE;
 
-    // ================================================================
-    // RAY TRACING & BUFFER DEVICE ADDRESS EXTENSION FUNCTION POINTERS
-    // ================================================================
+    // RAY TRACING PROPERTIES
+    VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProperties{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR
+    };
+
+    // EXTENSION FUNCTION POINTERS
     PFN_vkCmdTraceRaysKHR                       vkCmdTraceRaysKHR                       = nullptr;
     PFN_vkCreateRayTracingPipelinesKHR          vkCreateRayTracingPipelinesKHR          = nullptr;
     PFN_vkGetRayTracingShaderGroupHandlesKHR    vkGetRayTracingShaderGroupHandlesKHR    = nullptr;
@@ -506,6 +518,11 @@ struct Context {
     PFN_vkGetAccelerationStructureDeviceAddressKHR vkGetAccelerationStructureDeviceAddressKHR = nullptr;
     PFN_vkGetBufferDeviceAddressKHR             vkGetBufferDeviceAddressKHR             = nullptr;
     PFN_vkDestroyAccelerationStructureKHR       vkDestroyAccelerationStructureKHR       = nullptr;
+
+    // DEFERRED COMPILATION (NV extension)
+    PFN_vkDeferredOperationJoinKHR              vkDeferredOperationJoinKHR             = nullptr;
+    PFN_vkGetDeferredOperationResultKHR         vkGetDeferredOperationResultKHR        = nullptr;
+    PFN_vkDestroyDeferredOperationKHR           vkDestroyDeferredOperationKHR          = nullptr;
 };
 
 } // namespace Vulkan
@@ -514,7 +531,6 @@ struct Context {
 // Vulkan Initializer Functions
 // ====================================================================
 namespace VulkanInitializer {
-
     void copyBuffer(VkDevice device, VkCommandPool commandPool, VkQueue queue,
                     VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size);
 
@@ -558,6 +574,13 @@ namespace VulkanInitializer {
                                    std::vector<VkBuffer> materialBuffers, std::vector<VkBuffer> dimensionBuffers,
                                    VkImageView denoiseImageView, VkImageView envMapView, VkImageView densityVolumeView,
                                    VkImageView gDepthView, VkImageView gNormalView);
+
+    // ADDED: transitionImageLayout
+    void transitionImageLayout(Vulkan::Context& context, VkImage image, VkFormat format,
+                               VkImageLayout oldLayout, VkImageLayout newLayout);
+
+    // ADDED: getBufferDeviceAddress wrapper
+    VkDeviceAddress getBufferDeviceAddress(VkDevice device, VkBuffer buffer);
 }
 
 #endif // VULKAN_CORE_HPP

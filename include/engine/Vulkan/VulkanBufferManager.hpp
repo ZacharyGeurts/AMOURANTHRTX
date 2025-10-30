@@ -124,6 +124,20 @@ public:
     VkBuffer getUniformBuffer(uint32_t index) const;
     uint32_t getUniformBufferCount() const;
 
+    // Creates a buffer with specified size, usage, and properties.
+    void createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties,
+                      VkBuffer& buffer, VkDeviceMemory& memory);
+
+    // === NEW: EXPOSE ARENA + OFFSETS ===
+    VkBuffer getArenaBuffer() const { return arenaBuffer_; }
+    VkDeviceSize getVertexOffset() const { return vertexOffset_; }
+    VkDeviceSize getIndexOffset() const { return indexOffset_; }
+
+    // === NEW: SCRATCH BUFFER POOL ACCESS ===
+    VkBuffer getScratchBuffer(uint32_t index = 0) const;
+    VkDeviceAddress getScratchBufferAddress(uint32_t index = 0) const;
+    uint32_t getScratchBufferCount() const;
+
 private:
     // Initializes the command buffer mega-pool and transfer queue.
     void initializeCommandPool();
@@ -140,6 +154,13 @@ private:
     VkDeviceAddress vertexBufferAddress_;  // Device address of vertex buffer in arena
     VkDeviceAddress indexBufferAddress_;   // Device address of index buffer in arena
     VkDeviceAddress scratchBufferAddress_; // Device address of primary scratch buffer
+
+    // === ARENA STATE ===
+    VkBuffer arenaBuffer_ = VK_NULL_HANDLE;
+    VkDeviceMemory arenaMemory_ = VK_NULL_HANDLE;
+    VkDeviceSize vertexOffset_ = 0;
+    VkDeviceSize indexOffset_ = 0;
+
     struct Impl;
     std::unique_ptr<Impl> impl_; // Pimpl idiom for internal state
 };

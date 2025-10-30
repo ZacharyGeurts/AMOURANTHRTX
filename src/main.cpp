@@ -57,7 +57,7 @@ int main() {
         // Scope for splash screen and audio to ensure disposal before main loop
         {
             // Create temporary window for splash screen (no VULKAN flag needed for software rendering)
-            splashWindow = SDL_CreateWindow("AMOURANTH RTX Splash", width, height, SDL_WINDOW_HIDDEN);
+            splashWindow = SDL_CreateWindow("AMOURANTH RTX", width, height, SDL_WINDOW_HIDDEN);
             if (!splashWindow) {
                 throw std::runtime_error(std::string("SDL_CreateWindow failed for splash: ") + SDL_GetError());
             }

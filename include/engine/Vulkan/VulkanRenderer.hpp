@@ -1,4 +1,4 @@
-// AMOURANTH RTX Engine © 2025 by Zachary Geurts gzac5314@gmail.com is licensed under CC BY-NC 4.0
+// AMOURANTH RTX Engine (C) 2025 by Zachary Geurts gzac5314@gmail.com is licensed under CC BY-NC 4.0
 #pragma once
 #ifndef VULKAN_RENDERER_HPP
 #define VULKAN_RENDERER_HPP
@@ -9,7 +9,9 @@
 #include "engine/Vulkan/VulkanPipelineManager.hpp"
 #include "engine/Vulkan/VulkanBufferManager.hpp"
 #include "engine/Vulkan/VulkanSwapchainManager.hpp"
+#include "engine/Dispose.hpp"
 #include "engine/camera.hpp"
+#include "engine/logging.hpp"
 
 #include <vulkan/vulkan.h>
 #include <vector>
@@ -27,11 +29,14 @@ using VkImage_T         = VkImage;
 using VkCommandBuffer_T = VkCommandBuffer;
 using VkDescriptorSet_T = VkDescriptorSet;
 
-struct Vertex {
-    alignas(16) glm::vec3 pos;
-    alignas(8)  glm::vec2 uv;
+// SBT Region
+struct StridedDeviceAddressRegionKHR {
+    VkDeviceAddress deviceAddress = 0;
+    VkDeviceSize    stride        = 0;
+    VkDeviceSize    size          = 0;
 };
 
+// Per-frame resources
 struct Frame {
     VkCommandBuffer commandBuffer               = VK_NULL_HANDLE;
     VkDescriptorSet rayTracingDescriptorSet     = VK_NULL_HANDLE;
@@ -60,7 +65,7 @@ public:
     void updateDescriptorSetForTLAS(VkAccelerationStructureKHR tlas);
     void updateGraphicsDescriptorSet(uint32_t frameIndex);
     void updateComputeDescriptorSet(uint32_t frameIndex);
-
+    void updateUniformBuffer(uint32_t frameIndex, const Camera& camera);
     void renderFrame(const Camera& camera);
     void handleResize(int width, int height);
     void cleanup() noexcept;
@@ -69,16 +74,27 @@ public:
     const VulkanRTX&  getVulkanRTX() const { return *rtx_; }
 
     std::vector<glm::vec3> getVertices() const;
-    std::vector<Vertex>    getFullVertices() const;
     std::vector<uint32_t>  getIndices() const;
 
+    // --- NEW: SBT BUFFER ACCESSORS (for cleanup) ---
+    VkBuffer       getSBTBuffer() const { return sbtBuffer_; }
+    VkDeviceMemory getSBTMemory() const { return sbtMemory_; }
+
 private:
+    // Private helper functions
+    VkSampler createLinearSampler();
+    void createRTOutputImage();
+    void createShaderBindingTable();
+    void updateRTDescriptors();
+    void updateComputeDescriptors(uint32_t imageIndex);
+    void createComputeDescriptorSets();
+    void buildAccelerationStructures();
+
     void createSwapchain(int width, int height);
     void createCommandBuffers();
     void createSyncObjects();
     void createEnvironmentMap();
     void createFramebuffers();
-    void createAccelerationStructures();
     void createDescriptorPool();
     void createDescriptorSets();
 
@@ -93,19 +109,21 @@ private:
                       VkImage outputImage, VkImageView outputImageView);
     void waitIdle();
 
-    // --- Basic window/state ---
-    int  width_;
-    int  height_;
-    void* window_;
+    VkShaderModule createShaderModule(const std::string& filepath);
 
-    // --- Frame tracking (must come before lastFPSTime_) ---
+    // --- Basic window/state ---
+    int  width_  = 0;
+    int  height_ = 0;
+    void* window_ = nullptr;
+
+    // --- Frame tracking ---
     uint32_t currentFrame_      = 0;
     uint32_t frameCount_        = 0;
     uint32_t framesThisSecond_  = 0;
-    std::chrono::steady_clock::time_point lastFPSTime_;
+    std::chrono::steady_clock::time_point lastFPSTime_ = std::chrono::steady_clock::now();
 
     uint32_t framesSinceLastLog_ = 0;
-    std::chrono::steady_clock::time_point lastLogTime_;
+    std::chrono::steady_clock::time_point lastLogTime_ = std::chrono::steady_clock::now();
 
     uint32_t indexCount_ = 0;
 
@@ -120,10 +138,36 @@ private:
     VkDeviceMemory      envMapImageMemory_        = VK_NULL_HANDLE;
     VkImageView         envMapImageView_          = VK_NULL_HANDLE;
     VkSampler           envMapSampler_            = VK_NULL_HANDLE;
+
+    // === DESCRIPTOR SET LAYOUTS ===
     VkDescriptorSetLayout computeDescriptorSetLayout_ = VK_NULL_HANDLE;
 
+    // === ACCELERATION STRUCTURES ===
     VkAccelerationStructureKHR blasHandle_ = VK_NULL_HANDLE;
+    VkBuffer                    blasBuffer_ = VK_NULL_HANDLE;
+    VkDeviceMemory              blasBufferMemory_ = VK_NULL_HANDLE;
     VkAccelerationStructureKHR tlasHandle_ = VK_NULL_HANDLE;
+    VkBuffer                    tlasBuffer_ = VK_NULL_HANDLE;
+    VkDeviceMemory              tlasBufferMemory_ = VK_NULL_HANDLE;
+    VkBuffer                    instanceBuffer_ = VK_NULL_HANDLE;
+    VkDeviceMemory              instanceBufferMemory_ = VK_NULL_HANDLE;
+
+    // RT output (RAII wrappers)
+    Dispose::VulkanHandle<VkImage>             rtOutputImage_;
+    Dispose::VulkanHandle<VkDeviceMemory>      rtOutputImageMemory_;
+    Dispose::VulkanHandle<VkImageView>         rtOutputImageView_;
+
+    // SBT regions
+    ShaderBindingTable sbt_{};
+    VkBuffer                       sbtBuffer_ = VK_NULL_HANDLE;
+    VkDeviceMemory                 sbtMemory_ = VK_NULL_HANDLE;
+    std::vector<uint8_t>           shaderHandles_;
+
+    // Compute descriptor sets
+    std::vector<VkDescriptorSet> computeDescriptorSets_;
+
+    // Ray tracing extension function pointer
+    PFN_vkCmdTraceRaysKHR vkCmdTraceRaysKHR_ = nullptr;
 
     // --- Core systems ---
     Vulkan::Context                         context_;
@@ -148,13 +192,14 @@ private:
     // --- Camera ---
     std::unique_ptr<PerspectiveCamera> camera_;
 
-    // --- Flags (should come after things they depend on) ---
+    // --- Flags ---
     bool descriptorsUpdated_ = false;
     bool recreateSwapchain   = false;
 
     friend class VulkanRTX;
 };
 
+// Constants
 constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 3;
 constexpr bool     FPS_COUNTER          = true;
 

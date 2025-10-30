@@ -1,6 +1,10 @@
 // src/engine/Vulkan/VulkanBufferManager.cpp
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts gzac5314@gmail.com is licensed under CC BY-NC 4.0
 // EXTREME LOGGING MODE: EVERY BYTE, EVERY CALL, EVERY NANOSECOND
+// FIXED: REMOVED getScratchSize() + reserveScratchPool() from constructor
+// FIXED: reserveScratchPool() now called AFTER vkGetAccelerationStructureBuildSizesKHR in VulkanRenderer
+// FIXED: Scratch buffer usage includes ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR
+// ENHANCED: Added vkQueueWaitIdle post-submit in asyncUpdateBuffers for synchronous safety during debug
 
 #include "engine/Vulkan/VulkanBufferManager.hpp"
 #include "engine/Vulkan/Vulkan_init.hpp"
@@ -142,9 +146,9 @@ struct VulkanBufferManager::Impl {
     VkDeviceSize                         vertexOffset         = 0;
     VkDeviceSize                         indexOffset          = 0;
     VkDeviceSize                         meshletOffset        = 0;
+    std::vector<VkBuffer>                uniformBuffers;
+    std::vector<VkDeviceMemory>          uniformBufferMemories;
     std::vector<VkDeviceSize>            uniformBufferOffsets;
-    std::unordered_map<uint64_t, VkDeviceSize> scratchSizeCache;
-    std::list<uint64_t>                  scratchCacheOrder;
     std::vector<VkBuffer>                scratchBuffers;
     std::vector<VkDeviceMemory>          scratchBufferMemories;
     std::vector<VkDeviceAddress>         scratchBufferAddresses;
@@ -209,15 +213,6 @@ struct VulkanBufferManager::Impl {
             cb(id);
         }
         LOG_INFO_CAT("BufferMgr", "CALLBACK THREAD TERMINATED");
-    }
-
-    void evictScratchCache() {
-        while (scratchCacheOrder.size() > 128) {
-            uint64_t key = scratchCacheOrder.front();
-            scratchCacheOrder.pop_front();
-            scratchSizeCache.erase(key);
-            LOG_TRACE_CAT("BufferMgr", "EVICTED scratch cache entry 0x{:x}", key);
-        }
     }
 };
 
@@ -288,15 +283,8 @@ VulkanBufferManager::VulkanBufferManager(Vulkan::Context& ctx,
     LOG_INFO_CAT("BufferMgr", "VERTEX BUFFER @ 0x{:x} | INDEX BUFFER @ 0x{:x}",
                  vertexBufferAddress_, indexBufferAddress_);
 
-    createUniformBuffers(3);
-
-    const VkDeviceSize scratch = getScratchSize(vertexCount_, indexCount_) * 4;
-    LOG_INFO_CAT("BufferMgr", "SCRATCH POOL: {} B ({} MiB)", scratch, scratch / (1024*1024));
-    if (scratch > devLocal / 4)
-        throw std::runtime_error("Scratch pool exceeds 1/4 of device memory");
-
-    reserveScratchPool(scratch, 4);
-    scratchBufferAddress_ = impl_->scratchBufferAddresses[0];
+    // SCRATCH POOL RESERVED LATER IN VulkanRenderer::buildAccelerationStructures()
+    // AFTER vkGetAccelerationStructureBuildSizesKHR()
 
     LOG_INFO_CAT("BufferMgr", "VulkanBufferManager FULLY INITIALIZED @ 0x{:x}", reinterpret_cast<uintptr_t>(this));
 }
@@ -304,27 +292,54 @@ VulkanBufferManager::VulkanBufferManager(Vulkan::Context& ctx,
 VulkanBufferManager::~VulkanBufferManager() {
     LOG_INFO_CAT("BufferMgr", "DESTROYING VulkanBufferManager @ 0x{:x}", reinterpret_cast<uintptr_t>(this));
 
+    for (size_t i = 0; i < impl_->uniformBuffers.size(); ++i) {
+        VkBuffer buf = impl_->uniformBuffers[i];
+        if (buf != VK_NULL_HANDLE) {
+            try { context_.resourceManager.removeBuffer(buf); }
+            catch (const std::exception& e) { LOG_WARNING_CAT("BufferMgr", "Failed to remove uniform buffer #{}: {}", i, e.what()); }
+            vkDestroyBuffer(context_.device, buf, nullptr);
+            LOG_INFO_CAT("BufferMgr", "DESTROYED uniform buffer #{} @ 0x{:x}", i, reinterpret_cast<uintptr_t>(buf));
+        }
+        VkDeviceMemory mem = impl_->uniformBufferMemories[i];
+        if (mem != VK_NULL_HANDLE) {
+            try { context_.resourceManager.removeMemory(mem); }
+            catch (const std::exception& e) { LOG_WARNING_CAT("BufferMgr", "Failed to remove uniform mem #{}: {}", i, e.what()); }
+            vkFreeMemory(context_.device, mem, nullptr);
+        }
+    }
+
     for (size_t i = 0; i < impl_->scratchBuffers.size(); ++i) {
-        context_.resourceManager.removeBuffer(impl_->scratchBuffers[i]);
-        Dispose::destroySingleBuffer(context_.device, impl_->scratchBuffers[i]);
-        context_.resourceManager.removeMemory(impl_->scratchBufferMemories[i]);
-        Dispose::freeSingleDeviceMemory(context_.device, impl_->scratchBufferMemories[i]);
-        LOG_INFO_CAT("BufferMgr", "DESTROYED scratch buffer #{} @ 0x{:x}", i, reinterpret_cast<uintptr_t>(impl_->scratchBuffers[i]));
+        VkBuffer buf = impl_->scratchBuffers[i];
+        if (buf != VK_NULL_HANDLE) {
+            try { context_.resourceManager.removeBuffer(buf); }
+            catch (const std::exception& e) { LOG_WARNING_CAT("BufferMgr", "Failed to remove scratch buffer #{}: {}", i, e.what()); }
+            vkDestroyBuffer(context_.device, buf, nullptr);
+            LOG_INFO_CAT("BufferMgr", "DESTROYED scratch buffer #{} @ 0x{:x}", i, reinterpret_cast<uintptr_t>(buf));
+        }
+        VkDeviceMemory mem = impl_->scratchBufferMemories[i];
+        if (mem != VK_NULL_HANDLE) {
+            try { context_.resourceManager.removeMemory(mem); }
+            catch (const std::exception& e) { LOG_WARNING_CAT("BufferMgr", "Failed to remove scratch mem #{}: {}", i, e.what()); }
+            vkFreeMemory(context_.device, mem, nullptr);
+        }
     }
 
     if (impl_->arenaBuffer != VK_NULL_HANDLE) {
-        context_.resourceManager.removeBuffer(impl_->arenaBuffer);
-        Dispose::destroySingleBuffer(context_.device, impl_->arenaBuffer);
+        try { context_.resourceManager.removeBuffer(impl_->arenaBuffer); }
+        catch (const std::exception& e) { LOG_WARNING_CAT("BufferMgr", "Failed to remove arena buffer: {}", e.what()); }
+        vkDestroyBuffer(context_.device, impl_->arenaBuffer, nullptr);
         LOG_INFO_CAT("BufferMgr", "DESTROYED arena buffer 0x{:x}", reinterpret_cast<uintptr_t>(impl_->arenaBuffer));
     }
     if (impl_->arenaMemory != VK_NULL_HANDLE) {
-        context_.resourceManager.removeMemory(impl_->arenaMemory);
-        Dispose::freeSingleDeviceMemory(context_.device, impl_->arenaMemory);
+        try { context_.resourceManager.removeMemory(impl_->arenaMemory); }
+        catch (const std::exception& e) { LOG_WARNING_CAT("BufferMgr", "Failed to remove arena memory: {}", e.what()); }
+        vkFreeMemory(context_.device, impl_->arenaMemory, nullptr);
         LOG_INFO_CAT("BufferMgr", "FREED arena memory 0x{:x}", reinterpret_cast<uintptr_t>(impl_->arenaMemory));
     }
 
     if (impl_->commandPool != VK_NULL_HANDLE) {
-        Dispose::freeCommandBuffers(context_.device, impl_->commandPool, impl_->commandBuffers);
+        try { Dispose::freeCommandBuffers(context_.device, impl_->commandPool, impl_->commandBuffers); }
+        catch (const std::exception& e) { LOG_WARNING_CAT("BufferMgr", "Failed to free command buffers: {}", e.what()); }
         vkDestroyCommandPool(context_.device, impl_->commandPool, nullptr);
         LOG_INFO_CAT("BufferMgr", "DESTROYED command pool 0x{:x}", reinterpret_cast<uintptr_t>(impl_->commandPool));
     }
@@ -405,6 +420,7 @@ void VulkanBufferManager::reserveArena(VkDeviceSize size, BufferType type) {
         .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT |
                  VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
                  VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                 VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
                  VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR,
         .sharingMode = VK_SHARING_MODE_EXCLUSIVE
     };
@@ -546,6 +562,9 @@ VkDeviceAddress VulkanBufferManager::asyncUpdateBuffers(
     };
     VK_CHECK(vkQueueSubmit(impl_->transferQueue, 1, &submit, VK_NULL_HANDLE), "Queue submit");
 
+    vkQueueWaitIdle(impl_->transferQueue);
+    LOG_INFO_CAT("BufferMgr", "Transfer queue idle post-submit - data synced");
+
     uint64_t updateId = impl_->nextUpdateId++;
 
     if (callback) {
@@ -568,42 +587,82 @@ VkDeviceAddress VulkanBufferManager::asyncUpdateBuffers(
 
 void VulkanBufferManager::createUniformBuffers(uint32_t count) {
     LOG_INFO_CAT("BufferMgr", "CREATING {} uniform buffers (1024 B each)", count);
+    impl_->uniformBuffers.resize(count);
+    impl_->uniformBufferMemories.resize(count);
     impl_->uniformBufferOffsets.resize(count);
     for (uint32_t i = 0; i < count; ++i) {
         VkBufferCreateInfo info = {
             .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-            .size = 1024,
-            .usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+            .size = sizeof(UniformBufferObject),
+            .usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
             .sharingMode = VK_SHARING_MODE_EXCLUSIVE
         };
-        VkBuffer buf;
-        VK_CHECK(vkCreateBuffer(context_.device, &info, nullptr, &buf), "Create uniform buffer");
+        VK_CHECK(vkCreateBuffer(context_.device, &info, nullptr, &impl_->uniformBuffers[i]),
+                 "Create uniform buffer");
 
         VkMemoryRequirements reqs;
-        vkGetBufferMemoryRequirements(context_.device, buf, &reqs);
+        vkGetBufferMemoryRequirements(context_.device, impl_->uniformBuffers[i], &reqs);
         VkMemoryAllocateInfo alloc = {
             .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
             .allocationSize = reqs.size,
             .memoryTypeIndex = findMemoryType(context_.physicalDevice, reqs.memoryTypeBits,
                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)
         };
-        VkDeviceMemory mem;
-        VK_CHECK(vkAllocateMemory(context_.device, &alloc, nullptr, &mem), "Alloc uniform memory");
-        VK_CHECK(vkBindBufferMemory(context_.device, buf, mem, 0), "Bind uniform");
+        VK_CHECK(vkAllocateMemory(context_.device, &alloc, nullptr, &impl_->uniformBufferMemories[i]),
+                 "Alloc uniform memory");
+        VK_CHECK(vkBindBufferMemory(context_.device, impl_->uniformBuffers[i], impl_->uniformBufferMemories[i], 0),
+                 "Bind uniform");
 
         impl_->uniformBufferOffsets[i] = 0;
         LOG_INFO_CAT("BufferMgr", "UNIFORM BUFFER #{}: buffer=0x{:x} | memory=0x{:x} | size={} B",
                      i,
-                     reinterpret_cast<uintptr_t>(buf),
-                     reinterpret_cast<uintptr_t>(mem),
+                     reinterpret_cast<uintptr_t>(impl_->uniformBuffers[i]),
+                     reinterpret_cast<uintptr_t>(impl_->uniformBufferMemories[i]),
                      reqs.size);
     }
 }
 
-VkDeviceSize VulkanBufferManager::getScratchSize(uint32_t vertexCount, uint32_t indexCount) {
-    VkDeviceSize size = static_cast<VkDeviceSize>(vertexCount) * 64 + static_cast<VkDeviceSize>(indexCount) * 16;
-    LOG_TRACE_CAT("BufferMgr", "CALCULATED scratch size: {} B (v={}*64 + i={}*16)", size, vertexCount, indexCount);
-    return size;
+VkBuffer VulkanBufferManager::getUniformBuffer(uint32_t index) const {
+    if (index >= impl_->uniformBuffers.size()) {
+        throw std::out_of_range("Uniform buffer index out of range");
+    }
+    LOG_TRACE_CAT("BufferMgr", "GET uniform buffer #{}", index);
+    return impl_->uniformBuffers[index];
+}
+
+VkDeviceMemory VulkanBufferManager::getUniformBufferMemory(uint32_t index) const {
+    if (index >= impl_->uniformBufferMemories.size()) {
+        throw std::out_of_range("Uniform buffer memory index out of range");
+    }
+    LOG_TRACE_CAT("BufferMgr", "GET uniform memory #{}", index);
+    return impl_->uniformBufferMemories[index];
+}
+
+void VulkanBufferManager::createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties,
+                                       VkBuffer& buffer, VkDeviceMemory& memory) {
+    LOG_INFO_CAT("BufferMgr", "Creating buffer: size={} B, usage=0x{:x}, properties=0x{:x}", size, usage, properties);
+
+    VkBufferCreateInfo bufferInfo{};
+    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    bufferInfo.size = size;
+    bufferInfo.usage = usage;
+    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    VK_CHECK(vkCreateBuffer(context_.device, &bufferInfo, nullptr, &buffer), "Failed to create buffer");
+
+    VkMemoryRequirements memRequirements;
+    vkGetBufferMemoryRequirements(context_.device, buffer, &memRequirements);
+
+    VkMemoryAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    allocInfo.allocationSize = memRequirements.size;
+    allocInfo.memoryTypeIndex = findMemoryType(context_.physicalDevice, memRequirements.memoryTypeBits, properties);
+
+    VK_CHECK(vkAllocateMemory(context_.device, &allocInfo, nullptr, &memory), "Failed to allocate buffer memory");
+
+    VK_CHECK(vkBindBufferMemory(context_.device, buffer, memory, 0), "Failed to bind buffer memory");
+
+    LOG_INFO_CAT("BufferMgr", "Buffer created successfully: buffer=0x{:x}, memory=0x{:x}", reinterpret_cast<uintptr_t>(buffer), reinterpret_cast<uintptr_t>(memory));
 }
 
 void VulkanBufferManager::reserveScratchPool(VkDeviceSize size, uint32_t count) {
@@ -616,7 +675,9 @@ void VulkanBufferManager::reserveScratchPool(VkDeviceSize size, uint32_t count) 
         VkBufferCreateInfo info = {
             .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
             .size = size,
-            .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+            .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                     VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                     VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR,
             .sharingMode = VK_SHARING_MODE_EXCLUSIVE
         };
         VK_CHECK(vkCreateBuffer(context_.device, &info, nullptr, &impl_->scratchBuffers[i]),
@@ -624,6 +685,7 @@ void VulkanBufferManager::reserveScratchPool(VkDeviceSize size, uint32_t count) 
 
         VkMemoryRequirements reqs;
         vkGetBufferMemoryRequirements(context_.device, impl_->scratchBuffers[i], &reqs);
+
         VkMemoryAllocateFlagsInfo flags = {
             .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO,
             .flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT
@@ -655,12 +717,31 @@ void VulkanBufferManager::reserveScratchPool(VkDeviceSize size, uint32_t count) 
     }
 }
 
-VkBuffer VulkanBufferManager::getUniformBuffer(uint32_t index) const {
-    LOG_TRACE_CAT("BufferMgr", "GET uniform buffer #{}", index);
-    return VK_NULL_HANDLE;
+VkBuffer VulkanBufferManager::getVertexBuffer() const {
+    return impl_->arenaBuffer;
 }
 
-VkDeviceMemory VulkanBufferManager::getUniformBufferMemory(uint32_t index) const {
-    LOG_TRACE_CAT("BufferMgr", "GET uniform memory #{}", index);
-    return VK_NULL_HANDLE;
+VkBuffer VulkanBufferManager::getIndexBuffer() const {
+    return impl_->arenaBuffer;
+}
+
+// === NEW: SCRATCH BUFFER ACCESSORS ===
+VkBuffer VulkanBufferManager::getScratchBuffer(uint32_t index) const {
+    if (index >= impl_->scratchBuffers.size()) {
+        throw std::out_of_range(std::format("Scratch buffer index {} out of range (count: {})", index, impl_->scratchBuffers.size()));
+    }
+    LOG_TRACE_CAT("BufferMgr", "GET scratch buffer #{} -> 0x{:x}", index, reinterpret_cast<uintptr_t>(impl_->scratchBuffers[index]));
+    return impl_->scratchBuffers[index];
+}
+
+VkDeviceAddress VulkanBufferManager::getScratchBufferAddress(uint32_t index) const {
+    if (index >= impl_->scratchBufferAddresses.size()) {
+        throw std::out_of_range(std::format("Scratch buffer address index {} out of range", index));
+    }
+    LOG_TRACE_CAT("BufferMgr", "GET scratch address #{} -> 0x{:x}", index, impl_->scratchBufferAddresses[index]);
+    return impl_->scratchBufferAddresses[index];
+}
+
+uint32_t VulkanBufferManager::getScratchBufferCount() const {
+    return static_cast<uint32_t>(impl_->scratchBuffers.size());
 }

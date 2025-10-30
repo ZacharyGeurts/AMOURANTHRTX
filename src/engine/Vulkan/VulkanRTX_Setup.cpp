@@ -106,8 +106,18 @@ VulkanRTX::VulkanRTX(VkDevice device, VkPhysicalDevice physicalDevice, const std
     createBlackFallbackTexture();
 }
 
-// DESTRUCTOR — **NOW DEFINED HERE**
+// DESTRUCTOR — **UPDATED WITH SBT CLEANUP**
 VulkanRTX::~VulkanRTX() {
+    // SBT Cleanup
+    if (sbt_.buffer != VK_NULL_HANDLE) {
+        vkDestroyBuffer(device_, sbt_.buffer, nullptr);
+        sbt_.buffer = VK_NULL_HANDLE;
+    }
+    if (sbt_.memory != VK_NULL_HANDLE) {
+        vkFreeMemory(device_, sbt_.memory, nullptr);
+        sbt_.memory = VK_NULL_HANDLE;
+    }
+
     if (rtPipeline_.get() != VK_NULL_HANDLE) vkDestroyPipeline(device_, rtPipeline_.get(), nullptr);
     if (rtPipelineLayout_.get() != VK_NULL_HANDLE) vkDestroyPipelineLayout(device_, rtPipelineLayout_.get(), nullptr);
     if (dsPool_.get() != VK_NULL_HANDLE) vkDestroyDescriptorPool(device_, dsPool_.get(), nullptr);
@@ -423,8 +433,9 @@ void VulkanRTX::createShaderBindingTable(VkPhysicalDevice physicalDevice) {
     sbt_.hit = region(counts_.chit + (counts_.intersection ? counts_.chit : 0), offset); offset += (counts_.chit + (counts_.intersection ? counts_.chit : 0)) * alignedSize;
     sbt_.callable = region(counts_.callable, offset);
 
-    sbt_.buffer = std::move(buffer);
-    sbt_.memory = std::move(memory);
+    // FIXED: Extract raw handles with .get() instead of moving the wrappers
+    sbt_.buffer = buffer.get();
+    sbt_.memory = memory.get();
 }
 
 void VulkanRTX::createBottomLevelAS(VkPhysicalDevice physicalDevice, VkCommandPool commandPool, VkQueue queue,

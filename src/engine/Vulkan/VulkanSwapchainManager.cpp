@@ -1,17 +1,22 @@
 // src/engine/Vulkan/VulkanSwapchainManager.cpp
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts gzac5314@gmail.com is licensed under CC BY-NC 4.0
-// Vulkan swapchain management implementation.
-// Dependencies: Vulkan 1.3+, VulkanCore.hpp, Vulkan_init.hpp, Dispose.hpp.
-// Supported platforms: Linux, Windows.
-
 #include "engine/Vulkan/VulkanSwapchainManager.hpp"
 #include "engine/Dispose.hpp"
+#include "engine/logging.hpp"
 #include <stdexcept>
 #include <algorithm>
 #include <vector>
 #include <format>
 
 namespace VulkanRTX {
+
+#define VK_CHECK(x) do { \
+    VkResult result = (x); \
+    if (result != VK_SUCCESS) { \
+        LOG_ERROR_CAT("Swapchain", #x " failed: {}", static_cast<int>(result)); \
+        throw std::runtime_error(#x " failed"); \
+    } \
+} while(0)
 
 constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 3;
 
@@ -50,11 +55,9 @@ VulkanSwapchainManager::VulkanSwapchainManager(Vulkan::Context& context, VkSurfa
     };
 
     for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
-        if (vkCreateSemaphore(context_.device, &semaphoreInfo, nullptr, &imageAvailableSemaphores_[i]) != VK_SUCCESS ||
-            vkCreateSemaphore(context_.device, &semaphoreInfo, nullptr, &renderFinishedSemaphores_[i]) != VK_SUCCESS ||
-            vkCreateFence(context_.device, &fenceInfo, nullptr, &inFlightFences_[i]) != VK_SUCCESS) {
-            throw std::runtime_error("Failed to create synchronization primitives");
-        }
+        VK_CHECK(vkCreateSemaphore(context_.device, &semaphoreInfo, nullptr, &imageAvailableSemaphores_[i]));
+        VK_CHECK(vkCreateSemaphore(context_.device, &semaphoreInfo, nullptr, &renderFinishedSemaphores_[i]));
+        VK_CHECK(vkCreateFence(context_.device, &fenceInfo, nullptr, &inFlightFences_[i]));
     }
 }
 
@@ -76,8 +79,7 @@ void VulkanSwapchainManager::initializeSwapchain(int width, int height)
     vkDeviceWaitIdle(context_.device);
 
     VkSurfaceCapabilitiesKHR caps{};
-    if (vkGetPhysicalDeviceSurfaceCapabilitiesKHR(context_.physicalDevice, context_.surface, &caps) != VK_SUCCESS)
-        throw std::runtime_error("Failed to query surface capabilities");
+    VK_CHECK(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(context_.physicalDevice, context_.surface, &caps));
 
     if (caps.minImageCount == 0 ||
         caps.minImageExtent.width == 0 || caps.minImageExtent.height == 0 ||
@@ -85,16 +87,16 @@ void VulkanSwapchainManager::initializeSwapchain(int width, int height)
         throw std::runtime_error("Invalid surface capabilities");
 
     uint32_t formatCount = 0;
-    if (vkGetPhysicalDeviceSurfaceFormatsKHR(context_.physicalDevice, context_.surface, &formatCount, nullptr) != VK_SUCCESS || formatCount == 0)
-        throw std::runtime_error("No surface formats available");
+    VK_CHECK(vkGetPhysicalDeviceSurfaceFormatsKHR(context_.physicalDevice, context_.surface, &formatCount, nullptr));
+    if (formatCount == 0) throw std::runtime_error("No surface formats available");
     std::vector<VkSurfaceFormatKHR> formats(formatCount);
-    vkGetPhysicalDeviceSurfaceFormatsKHR(context_.physicalDevice, context_.surface, &formatCount, formats.data());
+    VK_CHECK(vkGetPhysicalDeviceSurfaceFormatsKHR(context_.physicalDevice, context_.surface, &formatCount, formats.data()));
 
     uint32_t presentModeCount = 0;
-    if (vkGetPhysicalDeviceSurfacePresentModesKHR(context_.physicalDevice, context_.surface, &presentModeCount, nullptr) != VK_SUCCESS || presentModeCount == 0)
-        throw std::runtime_error("No present modes available");
+    VK_CHECK(vkGetPhysicalDeviceSurfacePresentModesKHR(context_.physicalDevice, context_.surface, &presentModeCount, nullptr));
+    if (presentModeCount == 0) throw std::runtime_error("No present modes available");
     std::vector<VkPresentModeKHR> presentModes(presentModeCount);
-    vkGetPhysicalDeviceSurfacePresentModesKHR(context_.physicalDevice, context_.surface, &presentModeCount, presentModes.data());
+    VK_CHECK(vkGetPhysicalDeviceSurfacePresentModesKHR(context_.physicalDevice, context_.surface, &presentModeCount, presentModes.data()));
 
     VkSurfaceFormatKHR chosenFormat = formats[0];
     for (const auto& f : formats) {
@@ -157,18 +159,11 @@ void VulkanSwapchainManager::initializeSwapchain(int width, int height)
         .oldSwapchain          = VK_NULL_HANDLE
     };
 
-    if (vkCreateSwapchainKHR(context_.device, &sci, nullptr, &swapchain_) != VK_SUCCESS)
-        throw std::runtime_error("Failed to create swapchain");
+    VK_CHECK(vkCreateSwapchainKHR(context_.device, &sci, nullptr, &swapchain_));
 
-    if (vkGetSwapchainImagesKHR(context_.device, swapchain_, &imageCount_, nullptr) != VK_SUCCESS || imageCount_ == 0)
-        throw std::runtime_error("Failed to query swapchain image count");
-
+    VK_CHECK(vkGetSwapchainImagesKHR(context_.device, swapchain_, &imageCount_, nullptr));
     swapchainImages_.resize(imageCount_);
-    if (vkGetSwapchainImagesKHR(context_.device, swapchain_, &imageCount_, swapchainImages_.data()) != VK_SUCCESS)
-        throw std::runtime_error("Failed to retrieve swapchain images");
-
-    for (auto img : swapchainImages_)
-        context_.resourceManager.addImage(img);
+    VK_CHECK(vkGetSwapchainImagesKHR(context_.device, swapchain_, &imageCount_, swapchainImages_.data()));
 
     swapchainImageViews_.resize(imageCount_);
     const VkImageViewCreateInfo viewInfo{
@@ -186,9 +181,7 @@ void VulkanSwapchainManager::initializeSwapchain(int width, int height)
     for (uint32_t i = 0; i < imageCount_; ++i) {
         VkImageViewCreateInfo vi = viewInfo;
         vi.image = swapchainImages_[i];
-        if (vkCreateImageView(context_.device, &vi, nullptr, &swapchainImageViews_[i]) != VK_SUCCESS)
-            throw std::runtime_error(std::format("Failed to create swapchain image view {}", i));
-        context_.resourceManager.addImageView(swapchainImageViews_[i]);
+        VK_CHECK(vkCreateImageView(context_.device, &vi, nullptr, &swapchainImageViews_[i]));
     }
 
     maxFramesInFlight_ = std::min(MAX_FRAMES_IN_FLIGHT, imageCount_);
@@ -198,10 +191,15 @@ void VulkanSwapchainManager::initializeSwapchain(int width, int height)
     context_.swapchainExtent    = swapchainExtent_;
     context_.swapchainImages    = swapchainImages_;
     context_.swapchainImageViews = swapchainImageViews_;
+
+    LOG_INFO_CAT("Swapchain", "Created {}x{} swapchain with {} images", 
+                 swapchainExtent_.width, swapchainExtent_.height, imageCount_);
 }
 
 void VulkanSwapchainManager::handleResize(int width, int height)
 {
+    LOG_INFO_CAT("Swapchain", "Resizing swapchain: {}x{} → {}x{}", 
+                 swapchainExtent_.width, swapchainExtent_.height, width, height);
     vkDeviceWaitIdle(context_.device);
     cleanupSwapchain();
     initializeSwapchain(width, height);
@@ -209,18 +207,19 @@ void VulkanSwapchainManager::handleResize(int width, int height)
 
 void VulkanSwapchainManager::cleanupSwapchain()
 {
+    if (context_.device == VK_NULL_HANDLE) return;
+
     vkDeviceWaitIdle(context_.device);
 
     Dispose::destroyImageViews(context_.device, swapchainImageViews_);
     context_.swapchainImageViews.clear();
-
-    for (auto img : swapchainImages_)
-        context_.resourceManager.removeImage(img);
     swapchainImages_.clear();
     context_.swapchainImages.clear();
 
-    Dispose::destroySingleSwapchain(context_.device, swapchain_);
-    context_.swapchain = VK_NULL_HANDLE;
+    if (swapchain_ != VK_NULL_HANDLE) {
+        vkDestroySwapchainKHR(context_.device, swapchain_, nullptr);
+        swapchain_ = VK_NULL_HANDLE;
+    }
 
     maxFramesInFlight_ = 0;
     imageCount_        = 0;

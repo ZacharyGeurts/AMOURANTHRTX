@@ -1,8 +1,8 @@
 #version 460
 #extension GL_EXT_ray_tracing : require
 
-layout(location = 1) rayPayloadInEXT bool inShadow;
+layout(location = 1) rayPayloadInEXT bool shadowed;
 
 void main() {
-    inShadow = false;
+    shadowed = false;
 }

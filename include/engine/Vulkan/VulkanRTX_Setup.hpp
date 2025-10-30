@@ -291,27 +291,14 @@ private:
     PFN_vkFreeDescriptorSets vkFreeDescriptorSets_;
 };
 
-// ---------------------------------------------------------------------
-//  ShaderBindingTable – RAII + default zeroed regions
-// ---------------------------------------------------------------------
 struct ShaderBindingTable {
-    VulkanResource<VkBuffer, PFN_vkDestroyBuffer> buffer;
-    VulkanResource<VkDeviceMemory, PFN_vkFreeMemory> memory;
+    VkStridedDeviceAddressRegionKHR raygen = {};
+    VkStridedDeviceAddressRegionKHR miss = {};
+    VkStridedDeviceAddressRegionKHR hit = {};
+    VkStridedDeviceAddressRegionKHR callable = {};
 
-    VkStridedDeviceAddressRegionKHR raygen{};
-    VkStridedDeviceAddressRegionKHR miss{};
-    VkStridedDeviceAddressRegionKHR hit{};
-    VkStridedDeviceAddressRegionKHR callable{};
-
-    ShaderBindingTable() noexcept = default;
-
-    ShaderBindingTable(VkDevice device,
-                       VkBuffer buf,
-                       VkDeviceMemory mem,
-                       PFN_vkDestroyBuffer destroyBuffer,
-                       PFN_vkFreeMemory freeMemory)
-        : buffer(device, buf, destroyBuffer),
-          memory(device, mem, freeMemory) {}
+    VkBuffer buffer = VK_NULL_HANDLE;
+    VkDeviceMemory memory = VK_NULL_HANDLE;
 };
 
 // ---------------------------------------------------------------------
@@ -351,8 +338,6 @@ public:
                                  VkImageView outputImageView, const MaterialData::PushConstants& pc);
     void updateDescriptorSetForTLAS(VkAccelerationStructureKHR tlas);
     void compactAccelerationStructures(VkPhysicalDevice physicalDevice, VkCommandPool commandPool, VkQueue queue);
-
-    // **NEW: Create 1x1 black fallback texture**
     void createBlackFallbackTexture();
 
     bool getSupportsCompaction() const { return supportsCompaction_; }
@@ -375,8 +360,6 @@ private:
     uint32_t findMemoryType(VkPhysicalDevice physicalDevice, uint32_t typeFilter, VkMemoryPropertyFlags properties);
     VkDeviceAddress getBufferDeviceAddress(VkBuffer buffer);
     VkDeviceAddress getAccelerationStructureDeviceAddress(VkAccelerationStructureKHR as);
-
-    // **NEW: Upload black pixel to 1x1 image**
     void uploadBlackPixelToImage(VkImage image);
 
     void setDescriptorSetLayout(VkDescriptorSetLayout layout) {
@@ -448,12 +431,12 @@ private:
     ShaderBindingTable sbt_;
     VkDeviceSize scratchAlignment_ = 0;
 
-    // **NEW: Fallback 1x1 black texture**
     VulkanResource<VkImage, PFN_vkDestroyImage> blackFallbackImage_;
     VulkanResource<VkDeviceMemory, PFN_vkFreeMemory> blackFallbackMemory_;
     VulkanResource<VkImageView, PFN_vkDestroyImageView> blackFallbackView_;
 
-    // Core Vulkan function pointers
+    VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProperties_;
+
     PFN_vkGetDeviceProcAddr vkGetDeviceProcAddrFunc = nullptr;
     PFN_vkGetBufferDeviceAddress vkGetBufferDeviceAddress = nullptr;
     PFN_vkCmdTraceRaysKHR vkCmdTraceRaysKHR = nullptr;
@@ -512,9 +495,6 @@ private:
     PFN_vkDestroyShaderModule vkDestroyShaderModule = nullptr;
     PFN_vkCmdBuildAccelerationStructuresKHR vkCmdBuildAccelerationStructuresKHR = nullptr;
 
-    // ==================================================================
-    //  FRIEND DECLARATION — ALLOWS VulkanRenderer TO ACCESS private members
-    // ==================================================================
     friend class VulkanRenderer;
 };
 

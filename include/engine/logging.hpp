@@ -1,4 +1,3 @@
-// include/engine/logging.hpp
 // AMOURANTH RTX Engine, October 2025 - Enhanced thread-safe, asynchronous logging.
 // TRACE = NEON LIME | INFO = GRAY | GREEN RESTORED | HIGH VISIBILITY ON BLACK
 // Thread-safe, asynchronous logging with ANSI-colored output and delta time.
@@ -68,24 +67,30 @@ namespace Logging {
 enum class LogLevel { Trace, Debug, Info, Warning, Error };
 
 // ---------------------------------------------------------------------------
-//  ANSI color codes – INFO = GRAY | TRACE = NEON LIME | GREEN RESTORED
+//  ANSI color codes – FULL SPECTRUM | NEON LIME TRACE | GRAY INFO | GREEN ENGINE
 // ---------------------------------------------------------------------------
-inline constexpr std::string_view RESET           = "\033[0m";
-inline constexpr std::string_view NEON_LIME       = "\033[38;5;118m";  // TRACE: Bright lime
-inline constexpr std::string_view GRAY            = "\033[38;5;245m";  // INFO: Clean gray
-inline constexpr std::string_view GREEN           = "\033[1;32m";     // RESTORED for "Engine"
-inline constexpr std::string_view CYAN            = "\033[1;36m";     // DEBUG
-inline constexpr std::string_view YELLOW          = "\033[38;5;208m";  // WARNING
-inline constexpr std::string_view MAGENTA         = "\033[1;35m";     // ERROR
-inline constexpr std::string_view BLUE            = "\033[1;34m";
-inline constexpr std::string_view RED             = "\033[1;31m";
-inline constexpr std::string_view WHITE           = "\033[1;37m";
-inline constexpr std::string_view PURPLE          = "\033[1;35m";
-inline constexpr std::string_view ORANGE          = "\033[38;5;208m";
-inline constexpr std::string_view TEAL            = "\033[38;5;51m";
-inline constexpr std::string_view YELLOW_GREEN    = "\033[38;5;154m";
-inline constexpr std::string_view BRIGHT_MAGENTA  = "\033[38;5;201m";
-inline constexpr std::string_view GOLDEN_BROWN    = "\033[38;5;138m";
+namespace Color {
+    inline constexpr std::string_view RESET           = "\033[0m";
+    inline constexpr std::string_view NEON_LIME       = "\033[38;5;118m";  // TRACE: Electric path trace
+    inline constexpr std::string_view GRAY            = "\033[38;5;245m";  // INFO: Clean, readable
+    inline constexpr std::string_view GREEN           = "\033[1;32m";     // SUCCESS / ENGINE
+    inline constexpr std::string_view CYAN            = "\033[38;5;51m";  // DEBUG: Cool & calm
+    inline constexpr std::string_view YELLOW          = "\033[38;5;208m"; // WARNING: Amber alert
+    inline constexpr std::string_view MAGENTA         = "\033[1;35m";     // ERROR: Critical
+    inline constexpr std::string_view BLUE            = "\033[1;34m";     // RENDER / PIPELINE
+    inline constexpr std::string_view RED             = "\033[1;31m";     // FATAL / VULKAN
+    inline constexpr std::string_view WHITE           = "\033[1;37m";     // HEADER
+    inline constexpr std::string_view PURPLE          = "\033[38;5;141m"; // SHADER
+    inline constexpr std::string_view ORANGE          = "\033[38;5;208m"; // PERFORMANCE
+    inline constexpr std::string_view TEAL            = "\033[38;5;45m";  // SWAPCHAIN
+    inline constexpr std::string_view YELLOW_GREEN    = "\033[38;5;154m"; // ACCELERATION
+    inline constexpr std::string_view BRIGHT_MAGENTA  = "\033[38;5;201m"; // DESCRIPTOR
+    inline constexpr std::string_view GOLDEN_BROWN    = "\033[38;5;130m"; // BUFFER
+    inline constexpr std::string_view ELECTRIC_BLUE   = "\033[38;5;39m";  // RAY TRACING
+    inline constexpr std::string_view HOT_PINK        = "\033[38;5;198m"; // SBT
+    inline constexpr std::string_view LAVENDER        = "\033[38;5;183m"; // CAMERA
+    inline constexpr std::string_view MINT            = "\033[38;5;122m"; // INPUT
+}
 
 struct LogMessage {
     LogLevel level;
@@ -349,22 +354,36 @@ private:
         return "";
     }
 
+    // -----------------------------------------------------------------------
+    //  CATEGORY → COLOR MAPPING (FULLY EXPANDED)
+    // -----------------------------------------------------------------------
     static std::string_view getCategoryColor(std::string_view category) {
         static const std::map<std::string_view, std::string_view, std::less<>> categoryColors = {
-            {"General", WHITE},
-            {"Vulkan", BLUE},
-            {"SIMULATION", GOLDEN_BROWN},
-            {"Renderer", ORANGE},
-            {"Engine", GREEN},
-            {"Audio", TEAL},
-            {"Image", YELLOW_GREEN},
-            {"Input", BRIGHT_MAGENTA},
-            {"FPS", BRIGHT_MAGENTA},
-            {"BufferMgr", TEAL},
-            {"MeshLoader", YELLOW_GREEN}
+            {"General",       Color::WHITE},
+            {"Vulkan",        Color::BLUE},
+            {"Swapchain",     Color::TEAL},
+            {"Pipeline",      Color::GREEN},
+            {"SIMULATION",    Color::GOLDEN_BROWN},
+            {"Renderer",      Color::ORANGE},
+            {"Engine",        Color::GREEN},
+            {"Audio",         Color::TEAL},
+            {"Image",         Color::YELLOW_GREEN},
+            {"Input",         Color::MINT},
+            {"FPS",           Color::BRIGHT_MAGENTA},
+            {"BufferMgr",     Color::PURPLE},
+            {"MeshLoader",    Color::YELLOW_GREEN},
+            {"RayTrace",      Color::ELECTRIC_BLUE},
+            {"SBT",           Color::HOT_PINK},
+            {"Accel",         Color::YELLOW_GREEN},
+            {"Buffer",        Color::GOLDEN_BROWN},
+            {"Descriptor",    Color::BRIGHT_MAGENTA},
+            {"Camera",        Color::LAVENDER},
+            {"Render",        Color::ORANGE},
+            {"Perf",          Color::YELLOW},
+            {"Logger",        Color::GRAY}
         };
         auto it = categoryColors.find(category);
-        return it != categoryColors.end() ? it->second : WHITE;
+        return it != categoryColors.end() ? it->second : Color::WHITE;
     }
 
     bool shouldLog(LogLevel level, std::string_view category) const {
@@ -410,7 +429,7 @@ private:
             size_t newTail = (currentTail + dropCount) % QueueSize;
             tail_.store(newTail, std::memory_order_release);
             if (ENABLE_ERROR) {
-                std::osyncstream(std::cerr) << RED << "[ERROR] [0.000us] [Logger] Log queue overwhelmed, dropping " << dropCount << " messages" << RESET << std::endl;
+                std::osyncstream(std::cerr) << Color::RED << "[ERROR] [0.000us] [Logger] Log queue overwhelmed, dropping " << dropCount << " messages" << Color::RESET << std::endl;
             }
             currentTail = newTail;
         }
@@ -450,11 +469,11 @@ private:
                 std::string_view categoryColor = getCategoryColor(msg.category);
                 std::string_view levelStr, levelColor;
                 switch (msg.level) {
-                    case LogLevel::Trace:   levelStr = "[TRACE]"; levelColor = NEON_LIME; break;
-                    case LogLevel::Debug:   levelStr = "[DEBUG]"; levelColor = CYAN; break;
-                    case LogLevel::Info:    levelStr = "[INFO]";  levelColor = GRAY; break;
-                    case LogLevel::Warning: levelStr = "[WARN]";  levelColor = YELLOW; break;
-                    case LogLevel::Error:   levelStr = "[ERROR]"; levelColor = MAGENTA; break;
+                    case LogLevel::Trace:   levelStr = "[TRACE]"; levelColor = Color::NEON_LIME; break;
+                    case LogLevel::Debug:   levelStr = "[DEBUG]"; levelColor = Color::CYAN; break;
+                    case LogLevel::Info:    levelStr = "[INFO]";  levelColor = Color::GRAY; break;
+                    case LogLevel::Warning: levelStr = "[WARN]";  levelColor = Color::YELLOW; break;
+                    case LogLevel::Error:   levelStr = "[ERROR]"; levelColor = Color::MAGENTA; break;
                 }
 
                 auto delta = std::chrono::duration_cast<std::chrono::microseconds>(msg.timestamp - *firstLogTime_).count();
@@ -468,8 +487,8 @@ private:
                 std::string output;
                 try {
                     output = std::format("{}{} [{}] {}[{}]{} {}{}",
-                                         levelColor, levelStr, timeStr, categoryColor, msg.category, RESET,
-                                         msg.formattedMessage.empty() ? "[Empty message]" : msg.formattedMessage, RESET);
+                                         levelColor, levelStr, timeStr, categoryColor, msg.category, Color::RESET,
+                                         msg.formattedMessage.empty() ? "[Empty message]" : msg.formattedMessage, Color::RESET);
                 } catch (const std::format_error& e) {
                     output = std::format("[ERROR] [{}] [Logger] Format error: {}", timeStr, e.what());
                 }
@@ -520,11 +539,11 @@ private:
             std::string_view categoryColor = getCategoryColor(msg.category);
             std::string_view levelStr, levelColor;
             switch (msg.level) {
-                case LogLevel::Trace:   levelStr = "[TRACE]"; levelColor = NEON_LIME; break;
-                case LogLevel::Debug:   levelStr = "[DEBUG]"; levelColor = CYAN; break;
-                case LogLevel::Info:    levelStr = "[INFO]";  levelColor = GRAY; break;
-                case LogLevel::Warning: levelStr = "[WARN]";  levelColor = YELLOW; break;
-                case LogLevel::Error:   levelStr = "[ERROR]"; levelColor = MAGENTA; break;
+                case LogLevel::Trace:   levelStr = "[TRACE]"; levelColor = Color::NEON_LIME; break;
+                case LogLevel::Debug:   levelStr = "[DEBUG]"; levelColor = Color::CYAN; break;
+                case LogLevel::Info:    levelStr = "[INFO]";  levelColor = Color::GRAY; break;
+                case LogLevel::Warning: levelStr = "[WARN]";  levelColor = Color::YELLOW; break;
+                case LogLevel::Error:   levelStr = "[ERROR]"; levelColor = Color::MAGENTA; break;
             }
             auto delta = std::chrono::duration_cast<std::chrono::microseconds>(msg.timestamp - *firstLogTime_).count();
             std::string timeStr;
@@ -536,8 +555,8 @@ private:
             std::string output;
             try {
                 output = std::format("{}{} [{}] {}[{}]{} {}{}",
-                                     levelColor, levelStr, timeStr, categoryColor, msg.category, RESET,
-                                     msg.formattedMessage.empty() ? "[Empty message]" : msg.formattedMessage, RESET);
+                                     levelColor, levelStr, timeStr, categoryColor, msg.category, Color::RESET,
+                                     msg.formattedMessage.empty() ? "[Empty message]" : msg.formattedMessage, Color::RESET);
             } catch (const std::format_error& e) {
                 output = std::format("[ERROR] [{}] [Logger] Format error: {}", timeStr, e.what());
             }
