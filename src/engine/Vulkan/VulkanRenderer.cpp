@@ -126,6 +126,11 @@ VulkanRenderer::VulkanRenderer(int width, int height, void* window,
     context_.swapchainImages = swapchainManager_->getSwapchainImages();
     context_.swapchainImageViews = swapchainManager_->getSwapchainImageViews();
 
+    // Sync width_/height_ to actual swapchain extent
+    width_ = static_cast<int>(context_.swapchainExtent.width);
+    height_ = static_cast<int>(context_.swapchainExtent.height);
+    LOG_INFO_CAT("Renderer", "Swapchain extent synced: {}x{}", width_, height_);
+
     for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
         frames_[i].imageAvailableSemaphore = swapchainManager_->getImageAvailableSemaphore(i);
         frames_[i].renderFinishedSemaphore = swapchainManager_->getRenderFinishedSemaphore(i);
@@ -437,11 +442,15 @@ void VulkanRenderer::buildAccelerationStructures() {
 // -----------------------------------------------------------------------------
 void VulkanRenderer::createRTOutputImage()
 {
+    // Use actual swapchain extent for consistency
+    VkExtent2D extent = context_.swapchainExtent;
+    LOG_INFO_CAT("Renderer", "Creating RT output image at extent {}x{}", extent.width, extent.height);
+
     VkImageCreateInfo imageInfo = {};
     imageInfo.sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     imageInfo.imageType     = VK_IMAGE_TYPE_2D;
     imageInfo.format        = VK_FORMAT_R32G32B32A32_SFLOAT;
-    imageInfo.extent        = { static_cast<uint32_t>(width_), static_cast<uint32_t>(height_), 1 };
+    imageInfo.extent        = { extent.width, extent.height, 1 };
     imageInfo.mipLevels     = 1;
     imageInfo.arrayLayers   = 1;
     imageInfo.samples       = VK_SAMPLE_COUNT_1_BIT;
@@ -486,6 +495,20 @@ void VulkanRenderer::createRTOutputImage()
     rtOutputImage_.reset(img);
     rtOutputImageMemory_.reset(mem);
     rtOutputImageView_.reset(view);
+}
+
+// -----------------------------------------------------------------------------
+// RECREATE RT OUTPUT IMAGE (For Resize)
+// -----------------------------------------------------------------------------
+void VulkanRenderer::recreateRTOutputImage() {
+    // Cleanup old
+    rtOutputImage_.reset();
+    rtOutputImageMemory_.reset();
+    rtOutputImageView_.reset();
+
+    // Recreate
+    createRTOutputImage();
+    LOG_INFO_CAT("Renderer", "RT output image recreated post-resize.");
 }
 
 // -----------------------------------------------------------------------------
@@ -950,16 +973,20 @@ void VulkanRenderer::renderFrame(const Camera& camera) {
     beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     VK_CHECK(vkBeginCommandBuffer(cmd, &beginInfo));
 
-    // Transition RT output image to GENERAL
-    VkImageMemoryBarrier barrier{};
-    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    barrier.srcAccessMask = 0;
-    barrier.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-    barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
-    barrier.image = rtOutputImage_.get();
-    barrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+    // Use swapchain extent for dispatch/copy consistency
+    uint32_t renderWidth = context_.swapchainExtent.width;
+    uint32_t renderHeight = context_.swapchainExtent.height;
+
+    // Proper barrier before RT: from previous TRANSFER_READ to SHADER_WRITE (layout stays GENERAL)
+    VkImageMemoryBarrier preTraceBarrier{};
+    preTraceBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    preTraceBarrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    preTraceBarrier.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    preTraceBarrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+    preTraceBarrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+    preTraceBarrier.image = rtOutputImage_.get();
+    preTraceBarrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, 0, 0, nullptr, 0, nullptr, 1, &preTraceBarrier);
 
     // Bind ray tracing pipeline & descriptors
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, rtPipeline_);
@@ -1000,16 +1027,20 @@ void VulkanRenderer::renderFrame(const Camera& camera) {
         &missRegion,
         &hitRegion,
         &callableRegion,
-        static_cast<uint32_t>(width_),
-        static_cast<uint32_t>(height_),
+        renderWidth,
+        renderHeight,
         1);
 
-    // Transition RT output to TRANSFER_SRC
-    barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-    barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-    barrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
-    barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+    // Transition RT output to TRANSFER_SRC for copy
+    VkImageMemoryBarrier postTraceBarrier{};
+    postTraceBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    postTraceBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    postTraceBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    postTraceBarrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+    postTraceBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    postTraceBarrier.image = rtOutputImage_.get();
+    postTraceBarrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &postTraceBarrier);
 
     // Transition swapchain image to TRANSFER_DST
     VkImageMemoryBarrier swapBarrier{};
@@ -1026,7 +1057,7 @@ void VulkanRenderer::renderFrame(const Camera& camera) {
     VkImageCopy copyRegion{};
     copyRegion.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
     copyRegion.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
-    copyRegion.extent = { static_cast<uint32_t>(width_), static_cast<uint32_t>(height_), 1 };
+    copyRegion.extent = { renderWidth, renderHeight, 1 };
     vkCmdCopyImage(cmd, rtOutputImage_.get(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                    context_.swapchainImages[imageIndex], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyRegion);
 
@@ -1036,6 +1067,13 @@ void VulkanRenderer::renderFrame(const Camera& camera) {
     swapBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
     swapBarrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
     vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr, 1, &swapBarrier);
+
+    // *** FIX: Transition RT output back to GENERAL for next frame ***
+    postTraceBarrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    postTraceBarrier.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    postTraceBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    postTraceBarrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, 0, 0, nullptr, 0, nullptr, 1, &postTraceBarrier);
 
     // End command buffer
     VK_CHECK(vkEndCommandBuffer(cmd));
@@ -1111,9 +1149,23 @@ void VulkanRenderer::handleResize(int width, int height) {
     vkDeviceWaitIdle(context_.device);
     width_ = width; height_ = height;
     swapchainManager_->handleResize(width, height);
+    context_.swapchainExtent = swapchainManager_->getSwapchainExtent();  // Refresh
+
+    // Sync width_/height_ to new extent
+    width_ = static_cast<int>(context_.swapchainExtent.width);
+    height_ = static_cast<int>(context_.swapchainExtent.height);
+    LOG_INFO_CAT("Renderer", "Post-resize extent: {}x{}", width_, height_);
+
+    // Recreate RT output to match new extent
+    recreateRTOutputImage();
+
+    // Refresh descriptors (image view changed)
+    descriptorsUpdated_ = false;
+    updateRTDescriptors();
+
     createFramebuffers();
     recreateSwapchain = false;
-    LOG_INFO_CAT("Renderer", "Resize complete.");
+    LOG_INFO_CAT("Renderer", "Resize complete: all resources synced.");
 }
 
 // -----------------------------------------------------------------------------

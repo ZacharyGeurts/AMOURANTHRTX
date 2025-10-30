@@ -84,6 +84,7 @@ private:
     // Private helper functions
     VkSampler createLinearSampler();
     void createRTOutputImage();
+    void recreateRTOutputImage();
     void createShaderBindingTable();
     void updateRTDescriptors();
     void updateComputeDescriptors(uint32_t imageIndex);
