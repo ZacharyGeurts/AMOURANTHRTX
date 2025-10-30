@@ -42,6 +42,7 @@ set(SOURCE_DIRS
     "${CMAKE_CURRENT_SOURCE_DIR}/shaders/raytracing"
     "${CMAKE_CURRENT_SOURCE_DIR}/shaders/rasterization"
     "${CMAKE_CURRENT_SOURCE_DIR}/shaders/compute"
+    "${CMAKE_CURRENT_SOURCE_DIR}/shaders/graphics"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/engine/SDL3"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/engine/Vulkan"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/engine"
@@ -61,6 +62,7 @@ set(OUTPUT_DIRS
     "${CMAKE_BINARY_DIR}/bin/Linux/assets/shaders/rasterization"
     "${CMAKE_BINARY_DIR}/bin/Linux/assets/shaders/raytracing"
     "${CMAKE_BINARY_DIR}/bin/Linux/assets/shaders/compute"
+    "${CMAKE_BINARY_DIR}/bin/Linux/assets/shaders/graphics"
     "${CMAKE_BINARY_DIR}/bin/Linux/assets/fonts"
     "${CMAKE_BINARY_DIR}/bin/Linux/assets/textures"
     "${CMAKE_BINARY_DIR}/bin/Linux/assets/models"
@@ -73,6 +75,7 @@ set(OUTPUT_DIRS
     "${CMAKE_BINARY_DIR}/bin/Windows/assets/shaders"
     "${CMAKE_BINARY_DIR}/bin/Windows/assets/shaders/raytracing"
     "${CMAKE_BINARY_DIR}/bin/Windows/assets/shaders/compute"
+    "${CMAKE_BINARY_DIR}/bin/Windows/assets/shaders/graphics"
     "${CMAKE_BINARY_DIR}/bin/Windows/assets/fonts"
     "${CMAKE_BINARY_DIR}/bin/Windows/assets/textures"
     "${CMAKE_BINARY_DIR}/bin/Windows/assets/models"
@@ -94,30 +97,25 @@ find_package(Vulkan REQUIRED)
 if(NOT Vulkan_FOUND)
     message(FATAL_ERROR "Vulkan not found. Install libvulkan-dev and vulkan-tools.")
 endif()
-# Ensure Vulkan SDK supports ray tracing
 if(Vulkan_VERSION VERSION_LESS "1.2.170")
     message(FATAL_ERROR "Vulkan SDK version ${Vulkan_VERSION} is too old. Ray tracing requires Vulkan SDK 1.2.170 or later.")
 endif()
 message(STATUS "Vulkan include dirs: ${Vulkan_INCLUDE_DIRS}")
 message(STATUS "Vulkan libraries: ${Vulkan_LIBRARIES}")
 
-# Verify glslc version for ray-tracing support
+# glslc
 find_program(GLSLC glslc REQUIRED HINTS /usr/bin $ENV{VULKAN_SDK}/bin /usr/local/bin)
 if(NOT GLSLC)
     message(FATAL_ERROR "glslc not found. Install Vulkan SDK (vulkan-tools).")
 endif()
 message(STATUS "Found glslc: ${GLSLC}")
-execute_process(
-    COMMAND ${GLSLC} --version
-    OUTPUT_VARIABLE GLSLC_VERSION_OUTPUT
-    RESULT_VARIABLE GLSLC_VERSION_RESULT
-)
+execute_process(COMMAND ${GLSLC} --version OUTPUT_VARIABLE GLSLC_VERSION_OUTPUT RESULT_VARIABLE GLSLC_VERSION_RESULT)
 if(NOT GLSLC_VERSION_RESULT EQUAL 0)
-    message(FATAL_ERROR "Failed to check glslc version. Ensure Vulkan SDK is installed correctly.")
+    message(FATAL_ERROR "Failed to check glslc version.")
 endif()
 message(STATUS "glslc version output: ${GLSLC_VERSION_OUTPUT}")
 
-# Verify spirv-val for SPIR-V validation
+# spirv-val
 find_program(SPIRV_VAL spirv-val HINTS /usr/bin $ENV{VULKAN_SDK}/bin /usr/local/bin)
 if(NOT SPIRV_VAL)
     message(WARNING "spirv-val not found. SPIR-V validation will be skipped.")
@@ -133,8 +131,6 @@ if(NOT TBB_LIBRARY OR NOT TBB_INCLUDE_DIR)
 endif()
 message(STATUS "TBB include dir: ${TBB_INCLUDE_DIR}")
 message(STATUS "TBB library: ${TBB_LIBRARY}")
-
-# Create imported target TBB::tbb
 if(NOT TARGET TBB::tbb)
     add_library(TBB::tbb UNKNOWN IMPORTED)
     set_target_properties(TBB::tbb PROPERTIES
@@ -165,7 +161,7 @@ if(NOT glm_FOUND)
 endif()
 message(STATUS "glm include dirs: ${glm_INCLUDE_DIRS}")
 
-# HarfBuzz (using pkg-config)
+# HarfBuzz (Linux only)
 if(IS_LINUX)
     pkg_check_modules(HarfBuzz REQUIRED harfbuzz)
     if(NOT HarfBuzz_FOUND)
@@ -174,31 +170,30 @@ if(IS_LINUX)
     message(STATUS "HarfBuzz include dirs: ${HarfBuzz_INCLUDE_DIRS}")
     message(STATUS "HarfBuzz libraries: ${HarfBuzz_LIBRARIES}")
 
-    # SDL3 and extensions
     pkg_check_modules(SDL3 sdl3)
     if(NOT SDL3_FOUND)
-        message(FATAL_ERROR "SDL3 not found. Install libsdl3-dev or build from source (https://github.com/libsdl-org/SDL).")
+        message(FATAL_ERROR "SDL3 not found. Install libsdl3-dev.")
     endif()
     message(STATUS "SDL3 include dirs: ${SDL3_INCLUDE_DIRS}")
     message(STATUS "SDL3 libraries: ${SDL3_LIBRARIES}")
 
     pkg_check_modules(SDL3_ttf sdl3-ttf)
     if(NOT SDL3_ttf_FOUND)
-        message(FATAL_ERROR "SDL3_ttf not found. Install sdl3-ttf or build from source (https://github.com/libsdl-org/SDL_ttf).")
+        message(FATAL_ERROR "SDL3_ttf not found. Install sdl3-ttf.")
     endif()
     message(STATUS "SDL3_ttf include dirs: ${SDL3_ttf_INCLUDE_DIRS}")
     message(STATUS "SDL3_ttf libraries: ${SDL3_ttf_LIBRARIES}")
 
     pkg_check_modules(SDL3_image sdl3-image)
     if(NOT SDL3_image_FOUND)
-        message(FATAL_ERROR "SDL3_image not found. Install sdl3-image or build from source (https://github.com/libsdl-org/SDL_image).")
+        message(FATAL_ERROR "SDL3_image not found. Install sdl3-image.")
     endif()
     message(STATUS "SDL3_image include dirs: ${SDL3_image_INCLUDE_DIRS}")
     message(STATUS "SDL3_image libraries: ${SDL3_image_LIBRARIES}")
 
     pkg_check_modules(SDL3_mixer sdl3-mixer)
     if(NOT SDL3_mixer_FOUND)
-        message(FATAL_ERROR "SDL3_mixer not found. Install sdl3-mixer or build from source (https://github.com/libsdl-org/SDL_mixer).")
+        message(FATAL_ERROR "SDL3_mixer not found. Install sdl3-mixer.")
     endif()
     message(STATUS "SDL3_mixer include dirs: ${SDL3_mixer_INCLUDE_DIRS}")
     message(STATUS "SDL3_mixer libraries: ${SDL3_mixer_LIBRARIES}")
@@ -212,7 +207,7 @@ if(IS_LINUX)
     pkg_check_modules(XCB REQUIRED xcb)
 endif()
 
-# Windows cross-compilation dependencies
+# Windows cross-compilation
 if(IS_WINDOWS)
     find_library(SDL3_LIBRARY NAMES SDL3 REQUIRED HINTS /usr/x86_64-w64-mingw32/lib)
     find_library(SDL3_TTF_LIBRARY NAMES SDL3_ttf REQUIRED HINTS /usr/x86_64-w64-mingw32/lib)
@@ -228,12 +223,12 @@ if(IS_WINDOWS)
     endforeach()
 endif()
 
-# Find libatomic for 128-bit atomic operations
+# libatomic
 find_library(ATOMIC_LIBRARY NAMES atomic libatomic atomic.so.1 libatomic.so.1 HINTS /usr/lib /usr/lib/x86_64-linux-gnu)
 if(NOT ATOMIC_LIBRARY)
     set(ATOMIC_LIBRARY /usr/lib/x86_64-linux-gnu/libatomic.so.1)
     if(NOT EXISTS "${ATOMIC_LIBRARY}")
-        message(FATAL_ERROR "libatomic not found at /usr/lib/x86_64-linux-gnu/libatomic.so.1. Install libatomic1 and libatomic-dev.")
+        message(FATAL_ERROR "libatomic not found. Install libatomic1 and libatomic-dev.")
     endif()
 endif()
 message(STATUS "libatomic library: ${ATOMIC_LIBRARY}")
@@ -261,11 +256,11 @@ file(GLOB ENGINE_SOURCES "${ENGINE_SRC_DIR}/*.cpp")
 list(APPEND SOURCES ${ENGINE_SOURCES})
 list(REMOVE_DUPLICATES SOURCES)
 if(NOT SOURCES)
-    message(FATAL_ERROR "No source files found in ${SRC_DIR}. Ensure main.cpp and other source files exist.")
+    message(FATAL_ERROR "No source files found in ${SRC_DIR}.")
 endif()
 message(STATUS "Found source files: ${SOURCES}")
 
-# Create executable
+# Executable
 add_executable(amouranth_engine ${SOURCES})
 if(IS_LINUX)
     set_target_properties(amouranth_engine PROPERTIES
@@ -280,7 +275,7 @@ else()
     )
 endif()
 
-# Define ray tracing extensions after target creation
+# Ray tracing extensions
 target_compile_definitions(amouranth_engine PRIVATE
     VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME
     VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME
@@ -289,7 +284,7 @@ target_compile_definitions(amouranth_engine PRIVATE
     VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME
 )
 
-# Common includes
+# Includes
 target_include_directories(amouranth_engine PRIVATE
     ${INCLUDE_DIR}
     ${Vulkan_INCLUDE_DIRS}
@@ -298,7 +293,6 @@ target_include_directories(amouranth_engine PRIVATE
     ${glm_INCLUDE_DIRS}
 )
 
-# Platform-specific includes
 if(IS_LINUX)
     target_include_directories(amouranth_engine PRIVATE
         ${SDL3_INCLUDE_DIRS}
@@ -315,7 +309,7 @@ if(IS_LINUX)
     )
 endif()
 
-# Common libraries
+# Link libraries
 target_link_libraries(amouranth_engine PRIVATE
     Vulkan::Vulkan
     TBB::tbb
@@ -325,7 +319,6 @@ target_link_libraries(amouranth_engine PRIVATE
     ${ATOMIC_LIBRARY}
 )
 
-# Platform-specific libraries
 if(IS_LINUX)
     target_link_libraries(amouranth_engine PRIVATE
         ${SDL3_LIBRARIES}
@@ -372,14 +365,13 @@ set(REQUIRED_RAYTRACING_SHADERS "raygen.rgen" "miss.rmiss" "closesthit.rchit")
 set(SHADER_EXTS "*.vert" "*.frag" "*.comp")
 set(SHADER_OUTPUTS "")
 
-# Check for required ray-tracing shaders
 foreach(SHADER ${REQUIRED_RAYTRACING_SHADERS})
     if(NOT EXISTS "${SHADER_DIR}/raytracing/${SHADER}")
-        message(FATAL_ERROR "Required ray-tracing shader ${SHADER} is missing in ${SHADER_DIR}/raytracing/")
+        message(FATAL_ERROR "Required ray-tracing shader ${SHADER} is missing.")
     endif()
 endforeach()
 
-# Explicit ray-tracing shader compilation
+# Ray-tracing shaders
 foreach(SHADER_INFO ${RAYTRACING_SHADERS})
     string(REPLACE ":" ";" SHADER_PAIR ${SHADER_INFO})
     list(GET SHADER_PAIR 0 SHADER_SRC)
@@ -387,12 +379,12 @@ foreach(SHADER_INFO ${RAYTRACING_SHADERS})
     get_filename_component(SHADER_BASE ${SHADER_SRC} NAME_WE)
     set(SHADER "${SHADER_DIR}/raytracing/${SHADER_SRC}")
     if(NOT EXISTS "${SHADER}")
-        message(WARNING "Ray-tracing shader file ${SHADER} does not exist. Skipping compilation.")
+        message(WARNING "Ray-tracing shader ${SHADER} not found. Skipping.")
         continue()
     endif()
     file(READ "${SHADER}" SHADER_CONTENT)
     if("${SHADER_CONTENT}" STREQUAL "")
-        message(WARNING "Ray-tracing shader file ${SHADER} is empty. Skipping compilation.")
+        message(WARNING "Ray-tracing shader ${SHADER} is empty. Skipping.")
         continue()
     endif()
     if(IS_LINUX)
@@ -401,9 +393,9 @@ foreach(SHADER_INFO ${RAYTRACING_SHADERS})
             OUTPUT ${SHADER_OUTPUT}
             COMMAND ${CMAKE_COMMAND} -E make_directory "${LINUX_BIN_DIR}/assets/shaders/raytracing"
             COMMAND ${GLSLC} -fshader-stage=${SHADER_STAGE} ${SHADER} -o ${SHADER_OUTPUT} --target-env=vulkan1.3 --target-spv=spv1.5
-            COMMAND ${SPIRV_VAL} ${SHADER_OUTPUT} || echo "SPIR-V validation failed for ${SHADER_OUTPUT}"
+            COMMAND ${SPIRV_VAL} ${SHADER_OUTPUT} || echo "SPIR-V validation failed"
             DEPENDS ${SHADER}
-            COMMENT "Compiling ray-tracing shader ${SHADER_BASE} for Linux (stage: ${SHADER_STAGE})"
+            COMMENT "Compiling ray-tracing shader ${SHADER_BASE} (Linux)"
         )
     else()
         set(SHADER_OUTPUT "${WINDOWS_BIN_DIR}/assets/shaders/raytracing/${SHADER_BASE}.spv")
@@ -411,15 +403,66 @@ foreach(SHADER_INFO ${RAYTRACING_SHADERS})
             OUTPUT ${SHADER_OUTPUT}
             COMMAND ${CMAKE_COMMAND} -E make_directory "${WINDOWS_BIN_DIR}/assets/shaders/raytracing"
             COMMAND ${GLSLC} -fshader-stage=${SHADER_STAGE} ${SHADER} -o ${SHADER_OUTPUT} --target-env=vulkan1.3 --target-spv=spv1.5
-            COMMAND ${SPIRV_VAL} ${SHADER_OUTPUT} || echo "SPIR-V validation failed for ${SHADER_OUTPUT}"
+            COMMAND ${SPIRV_VAL} ${SHADER_OUTPUT} || echo "SPIR-V validation failed"
             DEPENDS ${SHADER}
-            COMMENT "Compiling ray-tracing shader ${SHADER_BASE} for Windows (stage: ${SHADER_STAGE})"
+            COMMENT "Compiling ray-tracing shader ${SHADER_BASE} (Windows)"
         )
     endif()
     list(APPEND SHADER_OUTPUTS ${SHADER_OUTPUT})
 endforeach()
 
-# Other shaders (vertex, fragment, compute)
+# Tonemap shaders (graphics)
+if(EXISTS "${SHADER_DIR}/graphics/tonemap_vert.glsl")
+    if(IS_LINUX)
+        set(TONEMAP_VERT_OUT "${LINUX_BIN_DIR}/assets/shaders/graphics/tonemap_vert.spv")
+        add_custom_command(
+            OUTPUT ${TONEMAP_VERT_OUT}
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${LINUX_BIN_DIR}/assets/shaders/graphics"
+            COMMAND ${GLSLC} -fshader-stage=vert "${SHADER_DIR}/graphics/tonemap_vert.glsl" -o ${TONEMAP_VERT_OUT} --target-env=vulkan1.3 --target-spv=spv1.3
+            COMMAND ${SPIRV_VAL} ${TONEMAP_VERT_OUT} || echo "SPIR-V validation failed"
+            DEPENDS "${SHADER_DIR}/graphics/tonemap_vert.glsl"
+            COMMENT "Compiling tonemap vertex shader (Linux)"
+        )
+    else()
+        set(TONEMAP_VERT_OUT "${WINDOWS_BIN_DIR}/assets/shaders/graphics/tonemap_vert.spv")
+        add_custom_command(
+            OUTPUT ${TONEMAP_VERT_OUT}
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${WINDOWS_BIN_DIR}/assets/shaders/graphics"
+            COMMAND ${GLSLC} -fshader-stage=vert "${SHADER_DIR}/graphics/tonemap_vert.glsl" -o ${TONEMAP_VERT_OUT} --target-env=vulkan1.3 --target-spv=spv1.3
+            COMMAND ${SPIRV_VAL} ${TONEMAP_VERT_OUT} || echo "SPIR-V validation failed"
+            DEPENDS "${SHADER_DIR}/graphics/tonemap_vert.glsl"
+            COMMENT "Compiling tonemap vertex shader (Windows)"
+        )
+    endif()
+    list(APPEND SHADER_OUTPUTS ${TONEMAP_VERT_OUT})
+endif()
+
+if(EXISTS "${SHADER_DIR}/graphics/tonemap_frag.glsl")
+    if(IS_LINUX)
+        set(TONEMAP_FRAG_OUT "${LINUX_BIN_DIR}/assets/shaders/graphics/tonemap_frag.spv")
+        add_custom_command(
+            OUTPUT ${TONEMAP_FRAG_OUT}
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${LINUX_BIN_DIR}/assets/shaders/graphics"
+            COMMAND ${GLSLC} -fshader-stage=frag "${SHADER_DIR}/graphics/tonemap_frag.glsl" -o ${TONEMAP_FRAG_OUT} --target-env=vulkan1.3 --target-spv=spv1.3
+            COMMAND ${SPIRV_VAL} ${TONEMAP_FRAG_OUT} || echo "SPIR-V validation failed"
+            DEPENDS "${SHADER_DIR}/graphics/tonemap_frag.glsl"
+            COMMENT "Compiling tonemap fragment shader (Linux)"
+        )
+    else()
+        set(TONEMAP_FRAG_OUT "${WINDOWS_BIN_DIR}/assets/shaders/graphics/tonemap_frag.spv")
+        add_custom_command(
+            OUTPUT ${TONEMAP_FRAG_OUT}
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${WINDOWS_BIN_DIR}/assets/shaders/graphics"
+            COMMAND ${GLSLC} -fshader-stage=frag "${SHADER_DIR}/graphics/tonemap_frag.glsl" -o ${TONEMAP_FRAG_OUT} --target-env=vulkan1.3 --target-spv=spv1.3
+            COMMAND ${SPIRV_VAL} ${TONEMAP_FRAG_OUT} || echo "SPIR-V validation failed"
+            DEPENDS "${SHADER_DIR}/graphics/tonemap_frag.glsl"
+            COMMENT "Compiling tonemap fragment shader (Windows)"
+        )
+    endif()
+    list(APPEND SHADER_OUTPUTS ${TONEMAP_FRAG_OUT})
+endif()
+
+# Rasterization & Compute shaders
 foreach(EXT ${SHADER_EXTS})
     file(GLOB RASTER_SHADERS "${SHADER_DIR}/rasterization/${EXT}")
     foreach(SHADER ${RASTER_SHADERS})
@@ -430,12 +473,10 @@ foreach(EXT ${SHADER_EXTS})
             set(SHADER_OUTPUT "${WINDOWS_BIN_DIR}/assets/shaders/rasterization/${SHADER_BASE}.spv")
         endif()
         if(NOT EXISTS "${SHADER}")
-            message(WARNING "Rasterization shader file ${SHADER} does not exist. Skipping compilation.")
             continue()
         endif()
         file(READ "${SHADER}" SHADER_CONTENT)
         if("${SHADER_CONTENT}" STREQUAL "")
-            message(WARNING "Rasterization shader file ${SHADER} is empty. Skipping compilation.")
             continue()
         endif()
         string(FIND "${EXT}" ".vert" IS_VERT)
@@ -448,30 +489,28 @@ foreach(EXT ${SHADER_EXTS})
         elseif(IS_COMP GREATER -1)
             set(SHADER_STAGE "comp")
         else()
-            set(SHADER_STAGE "")
+            continue()
         endif()
-        if(SHADER_STAGE)
-            if(IS_LINUX)
-                add_custom_command(
-                    OUTPUT ${SHADER_OUTPUT}
-                    COMMAND ${CMAKE_COMMAND} -E make_directory "${LINUX_BIN_DIR}/assets/shaders/rasterization"
-                    COMMAND ${GLSLC} -fshader-stage=${SHADER_STAGE} ${SHADER} -o ${SHADER_OUTPUT} --target-env=vulkan1.3 --target-spv=spv1.3
-                    COMMAND ${SPIRV_VAL} ${SHADER_OUTPUT} || echo "SPIR-V validation failed for ${SHADER_OUTPUT}"
-                    DEPENDS ${SHADER}
-                    COMMENT "Compiling rasterization shader ${SHADER_BASE} for Linux (stage: ${SHADER_STAGE})"
-                )
-            else()
-                add_custom_command(
-                    OUTPUT ${SHADER_OUTPUT}
-                    COMMAND ${CMAKE_COMMAND} -E make_directory "${WINDOWS_BIN_DIR}/assets/shaders/rasterization"
-                    COMMAND ${GLSLC} -fshader-stage=${SHADER_STAGE} ${SHADER} -o ${SHADER_OUTPUT} --target-env=vulkan1.3 --target-spv=spv1.3
-                    COMMAND ${SPIRV_VAL} ${SHADER_OUTPUT} || echo "SPIR-V validation failed for ${SHADER_OUTPUT}"
-                    DEPENDS ${SHADER}
-                    COMMENT "Compiling rasterization shader ${SHADER_BASE} for Windows (stage: ${SHADER_STAGE})"
-                )
-            endif()
-            list(APPEND SHADER_OUTPUTS ${SHADER_OUTPUT})
+        if(IS_LINUX)
+            add_custom_command(
+                OUTPUT ${SHADER_OUTPUT}
+                COMMAND ${CMAKE_COMMAND} -E make_directory "${LINUX_BIN_DIR}/assets/shaders/rasterization"
+                COMMAND ${GLSLC} -fshader-stage=${SHADER_STAGE} ${SHADER} -o ${SHADER_OUTPUT} --target-env=vulkan1.3 --target-spv=spv1.3
+                COMMAND ${SPIRV_VAL} ${SHADER_OUTPUT} || echo "SPIR-V validation failed"
+                DEPENDS ${SHADER}
+                COMMENT "Compiling rasterization shader ${SHADER_BASE} (Linux)"
+            )
+        else()
+            add_custom_command(
+                OUTPUT ${SHADER_OUTPUT}
+                COMMAND ${CMAKE_COMMAND} -E make_directory "${WINDOWS_BIN_DIR}/assets/shaders/rasterization"
+                COMMAND ${GLSLC} -fshader-stage=${SHADER_STAGE} ${SHADER} -o ${SHADER_OUTPUT} --target-env=vulkan1.3 --target-spv=spv1.3
+                COMMAND ${SPIRV_VAL} ${SHADER_OUTPUT} || echo "SPIR-V validation failed"
+                DEPENDS ${SHADER}
+                COMMENT "Compiling rasterization shader ${SHADER_BASE} (Windows)"
+            )
         endif()
+        list(APPEND SHADER_OUTPUTS ${SHADER_OUTPUT})
     endforeach()
 
     file(GLOB COMPUTE_SHADERS "${SHADER_DIR}/compute/${EXT}")
@@ -483,12 +522,10 @@ foreach(EXT ${SHADER_EXTS})
             set(SHADER_OUTPUT "${WINDOWS_BIN_DIR}/assets/shaders/compute/${SHADER_BASE}.spv")
         endif()
         if(NOT EXISTS "${SHADER}")
-            message(WARNING "Compute shader file ${SHADER} does not exist. Skipping compilation.")
             continue()
         endif()
         file(READ "${SHADER}" SHADER_CONTENT)
         if("${SHADER_CONTENT}" STREQUAL "")
-            message(WARNING "Compute shader file ${SHADER} is empty. Skipping compilation.")
             continue()
         endif()
         if(IS_LINUX)
@@ -496,18 +533,18 @@ foreach(EXT ${SHADER_EXTS})
                 OUTPUT ${SHADER_OUTPUT}
                 COMMAND ${CMAKE_COMMAND} -E make_directory "${LINUX_BIN_DIR}/assets/shaders/compute"
                 COMMAND ${GLSLC} -fshader-stage=comp ${SHADER} -o ${SHADER_OUTPUT} --target-env=vulkan1.3 --target-spv=spv1.3
-                COMMAND ${SPIRV_VAL} ${SHADER_OUTPUT} || echo "SPIR-V validation failed for ${SHADER_OUTPUT}"
+                COMMAND ${SPIRV_VAL} ${SHADER_OUTPUT} || echo "SPIR-V validation failed"
                 DEPENDS ${SHADER}
-                COMMENT "Compiling compute shader ${SHADER_BASE} for Linux"
+                COMMENT "Compiling compute shader ${SHADER_BASE} (Linux)"
             )
         else()
             add_custom_command(
                 OUTPUT ${SHADER_OUTPUT}
                 COMMAND ${CMAKE_COMMAND} -E make_directory "${WINDOWS_BIN_DIR}/assets/shaders/compute"
                 COMMAND ${GLSLC} -fshader-stage=comp ${SHADER} -o ${SHADER_OUTPUT} --target-env=vulkan1.3 --target-spv=spv1.3
-                COMMAND ${SPIRV_VAL} ${SHADER_OUTPUT} || echo "SPIR-V validation failed for ${SHADER_OUTPUT}"
+                COMMAND ${SPIRV_VAL} ${SHADER_OUTPUT} || echo "SPIR-V validation failed"
                 DEPENDS ${SHADER}
-                COMMENT "Compiling compute shader ${SHADER_BASE} for Windows"
+                COMMENT "Compiling compute shader ${SHADER_BASE} (Windows)"
             )
         endif()
         list(APPEND SHADER_OUTPUTS ${SHADER_OUTPUT})
@@ -518,47 +555,46 @@ if(SHADER_OUTPUTS)
     add_custom_target(shaders DEPENDS ${SHADER_OUTPUTS})
     add_dependencies(amouranth_engine shaders)
 else()
-    message(WARNING "No shader outputs generated. Ensure shader files exist and are valid.")
+    message(WARNING "No shader outputs generated.")
 endif()
 
 # Copy assets
 set(ASSET_TYPES
-    "FONT:*.ttf,*.otf:${ASSET_DIR}/fonts:${CMAKE_BINARY_DIR}/bin/Linux/assets/fonts:${CMAKE_BINARY_DIR}/bin/Windows/assets/fonts"
-    "TEXTURE:*.png,*.jpg,*.ktx,*.dds,*.hdr,*.exr:${ASSET_DIR}/textures:${CMAKE_BINARY_DIR}/bin/Linux/assets/textures:${CMAKE_BINARY_DIR}/bin/Windows/assets/textures"
-    "MODEL:*.obj,*.fbx,*.gltf,*.glb:${ASSET_DIR}/models:${CMAKE_BINARY_DIR}/bin/Linux/assets/models:${CMAKE_BINARY_DIR}/bin/Windows/assets/models"
-    "MATERIAL:*.json,*.mat:${ASSET_DIR}/materials:${CMAKE_BINARY_DIR}/bin/Linux/assets/materials:${CMAKE_BINARY_DIR}/bin/Windows/assets/materials"
-    "SCENE:*.json,*.scene:${ASSET_DIR}/scenes:${CMAKE_BINARY_DIR}/bin/Linux/assets/scenes:${CMAKE_BINARY_DIR}/bin/Windows/assets/scenes"
-    "AUDIO:*.wav,*.ogg,*.mp3:${ASSET_DIR}/audio:${CMAKE_BINARY_DIR}/bin/Linux/assets/audio:${CMAKE_BINARY_DIR}/bin/Windows/assets/audio"
-    "SCRIPT:*.lua:${ASSET_DIR}/scripts:${CMAKE_BINARY_DIR}/bin/Linux/assets/scripts:${CMAKE_BINARY_DIR}/bin/Windows/assets/scripts"
+    "FONT:*.ttf,*.otf:${ASSET_DIR}/fonts:${LINUX_BIN_DIR}/assets/fonts:${WINDOWS_BIN_DIR}/assets/fonts"
+    "TEXTURE:*.png,*.jpg,*.ktx,*.dds,*.hdr,*.exr:${ASSET_DIR}/textures:${LINUX_BIN_DIR}/assets/textures:${WINDOWS_BIN_DIR}/assets/textures"
+    "MODEL:*.obj,*.fbx,*.gltf,*.glb:${ASSET_DIR}/models:${LINUX_BIN_DIR}/assets/models:${WINDOWS_BIN_DIR}/assets/models"
+    "MATERIAL:*.json,*.mat:${ASSET_DIR}/materials:${LINUX_BIN_DIR}/assets/materials:${WINDOWS_BIN_DIR}/assets/materials"
+    "SCENE:*.json,*.scene:${ASSET_DIR}/scenes:${LINUX_BIN_DIR}/assets/scenes:${WINDOWS_BIN_DIR}/assets/scenes"
+    "AUDIO:*.wav,*.ogg,*.mp3:${ASSET_DIR}/audio:${LINUX_BIN_DIR}/assets/audio:${WINDOWS_BIN_DIR}/assets/audio"
+    "SCRIPT:*.lua:${ASSET_DIR}/scripts:${LINUX_BIN_DIR}/assets/scripts:${WINDOWS_BIN_DIR}/assets/scripts"
 )
 foreach(ASSET_TYPE ${ASSET_TYPES})
-    string(REPLACE ":" ";" ASSET_INFO ${ASSET_TYPE})
-    list(GET ASSET_INFO 0 TYPE_NAME)
-    list(GET ASSET_INFO 1 EXTENSIONS)
-    list(GET ASSET_INFO 2 ASSET_SRC_DIR)
-    list(GET ASSET_INFO 3 LINUX_OUT_DIR)
-    list(GET ASSET_INFO 4 WINDOWS_OUT_DIR)
-    string(REPLACE "," ";" EXTENSION_LIST ${EXTENSIONS})
-
-    set(ASSET_FILES "")
-    foreach(EXT ${EXTENSION_LIST})
-        file(GLOB TEMP_FILES "${ASSET_SRC_DIR}/${EXT}")
-        list(APPEND ASSET_FILES ${TEMP_FILES})
+    string(REPLACE ":" ";" INFO ${ASSET_TYPE})
+    list(GET INFO 0 TYPE_NAME)
+    list(GET INFO 1 EXTS)
+    list(GET INFO 2 SRC_DIR)
+    list(GET INFO 3 LINUX_OUT)
+    list(GET INFO 4 WINDOWS_OUT)
+    string(REPLACE "," ";" EXT_LIST ${EXTS})
+    set(FILES "")
+    foreach(EXT ${EXT_LIST})
+        file(GLOB TEMP "${SRC_DIR}/${EXT}")
+        list(APPEND FILES ${TEMP})
     endforeach()
-    list(REMOVE_DUPLICATES ASSET_FILES)
-    list(LENGTH ASSET_FILES NUM_ASSETS)
-    if(NUM_ASSETS GREATER 0)
-        message(STATUS "Found ${NUM_ASSETS} ${TYPE_NAME} assets in ${ASSET_SRC_DIR}")
+    list(REMOVE_DUPLICATES FILES)
+    list(LENGTH FILES COUNT)
+    if(COUNT GREATER 0)
+        message(STATUS "Found ${COUNT} ${TYPE_NAME} assets in ${SRC_DIR}")
         if(IS_LINUX)
             add_custom_command(TARGET amouranth_engine POST_BUILD
-                COMMAND ${CMAKE_COMMAND} -E copy_if_different ${ASSET_FILES} "${LINUX_OUT_DIR}/"
-                COMMENT "Copying ${NUM_ASSETS} ${TYPE_NAME} files to ${LINUX_OUT_DIR}"
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different ${FILES} "${LINUX_OUT}/"
+                COMMENT "Copying ${COUNT} ${TYPE_NAME} files (Linux)"
             )
         endif()
         if(IS_WINDOWS)
             add_custom_command(TARGET amouranth_engine POST_BUILD
-                COMMAND ${CMAKE_COMMAND} -E copy_if_different ${ASSET_FILES} "${WINDOWS_OUT_DIR}/"
-                COMMENT "Copying ${NUM_ASSETS} ${TYPE_NAME} files to ${WINDOWS_OUT_DIR}"
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different ${FILES} "${WINDOWS_OUT}/"
+                COMMENT "Copying ${COUNT} ${TYPE_NAME} files (Windows)"
             )
         endif()
     endif()

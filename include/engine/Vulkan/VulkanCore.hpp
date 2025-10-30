@@ -503,6 +503,27 @@ struct Context {
     VkBuffer scratchBuffer = VK_NULL_HANDLE;
     VkDeviceMemory scratchBufferMemory = VK_NULL_HANDLE;
 
+    // -----------------------------------------------------------------
+    // NEW FIELDS REQUIRED BY VulkanPipelineManager
+    // -----------------------------------------------------------------
+    uint32_t               indexCount = 0;                     // <-- NEW
+
+    // BLAS
+    VkBuffer               blasBuffer   = VK_NULL_HANDLE;      // <-- NEW
+    VkDeviceMemory         blasMemory   = VK_NULL_HANDLE;      // <-- NEW
+
+    // TLAS instance buffer
+    VkBuffer               instanceBuffer = VK_NULL_HANDLE;    // <-- NEW
+    VkDeviceMemory         instanceMemory = VK_NULL_HANDLE;    // <-- NEW
+
+    // TLAS
+    VkBuffer               tlasBuffer   = VK_NULL_HANDLE;      // <-- NEW
+    VkDeviceMemory         tlasMemory   = VK_NULL_HANDLE;      // <-- NEW
+
+    // Ray-tracing output image
+    VkImage                rtOutputImage      = VK_NULL_HANDLE; // <-- NEW
+    VkImageView            rtOutputImageView  = VK_NULL_HANDLE; // <-- NEW
+
     // RAY TRACING PROPERTIES
     VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProperties{
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR
@@ -556,6 +577,7 @@ namespace VulkanInitializer {
     void initializeVulkan(Vulkan::Context& context);
 
     VkDeviceAddress getBufferDeviceAddress(VkDevice device, VkBuffer buffer);
+    VkDeviceAddress getAccelerationStructureDeviceAddress(VkDevice device, VkAccelerationStructureKHR as); // NEW
 
     VkPhysicalDevice findPhysicalDevice(VkInstance instance, VkSurfaceKHR surface, bool preferNvidia);
 
@@ -575,12 +597,8 @@ namespace VulkanInitializer {
                                    VkImageView denoiseImageView, VkImageView envMapView, VkImageView densityVolumeView,
                                    VkImageView gDepthView, VkImageView gNormalView);
 
-    // ADDED: transitionImageLayout
     void transitionImageLayout(Vulkan::Context& context, VkImage image, VkFormat format,
                                VkImageLayout oldLayout, VkImageLayout newLayout);
-
-    // ADDED: getBufferDeviceAddress wrapper
-    VkDeviceAddress getBufferDeviceAddress(VkDevice device, VkBuffer buffer);
 }
 
 #endif // VULKAN_CORE_HPP

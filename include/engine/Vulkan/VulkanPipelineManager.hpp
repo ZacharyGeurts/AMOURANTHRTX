@@ -63,6 +63,7 @@ private:
     void createGraphicsDescriptorSetLayout();
     void createComputeDescriptorSetLayout();
     void createPipelineCache();
+    void createRenderPass();
     void compileDeferredRayTracingPipeline(
         const std::vector<VkPipelineShaderStageCreateInfo>& stages,
         const std::vector<VkRayTracingShaderGroupCreateInfoKHR>& groups
@@ -95,6 +96,7 @@ private:
 
     VkDescriptorSetLayout computeDescriptorSetLayout_ = VK_NULL_HANDLE;
     VkDescriptorSetLayout rayTracingDescriptorSetLayout_ = VK_NULL_HANDLE;
+    VkDescriptorSetLayout graphicsDescriptorSetLayout_ = VK_NULL_HANDLE;
 
     ShaderBindingTable sbt_;
     std::vector<uint8_t> shaderHandles_;
@@ -110,10 +112,15 @@ private:
     PFN_vkCreateAccelerationStructureKHR  createAsFunc_ = nullptr;
     PFN_vkDestroyAccelerationStructureKHR destroyAsFunc_ = nullptr;
     PFN_vkGetRayTracingShaderGroupHandlesKHR getRayTracingShaderGroupHandlesFunc_ = nullptr;
-    PFN_vkCreateDeferredOperationKHR         vkCreateDeferredOperationKHR_ = nullptr;
-    PFN_vkDeferredOperationJoinKHR           vkDeferredOperationJoinKHR_ = nullptr;
-    PFN_vkGetDeferredOperationResultKHR      vkGetDeferredOperationResultKHR_ = nullptr;
-    PFN_vkDestroyDeferredOperationKHR        vkDestroyDeferredOperationKHR_ = nullptr;
+
+    // -----------------------------------------------------------------
+    // NEW MEMBERS
+    // -----------------------------------------------------------------
+    VulkanResourceManager resourceManager_;                     // <-- NEW
+    PFN_vkCreateDeferredOperationKHR      vkCreateDeferredOperationKHR_   = nullptr;
+    PFN_vkDeferredOperationJoinKHR        vkDeferredOperationJoinKHR_     = nullptr;
+    PFN_vkGetDeferredOperationResultKHR   vkGetDeferredOperationResultKHR_= nullptr;
+    PFN_vkDestroyDeferredOperationKHR     vkDestroyDeferredOperationKHR_  = nullptr;
 };
 
 } // namespace VulkanRTX
