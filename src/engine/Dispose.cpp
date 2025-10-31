@@ -86,9 +86,7 @@ static const std::unordered_map<ResourceType, CleanupFn> cleanupLookup = {
                 LOG_DEBUG(std::format("Storage image view {:p} not found in resource manager (possibly externally managed or already removed)", static_cast<void*>(handle)));
             }
         }
-        if (ctx.device != VK_NULL_HANDLE) {
-            vkDestroyImageView(ctx.device, handle, nullptr);
-        }
+        destroySingleImageView(ctx.device, handle);
         LOG_DEBUG(std::format("Destroyed storage image view {:p} (managed: {})", static_cast<void*>(handle), wasManaged));
     }},
     {ResourceType::StorageImage, [](Vulkan::Context& ctx, void* h, bool managed) {
@@ -109,9 +107,7 @@ static const std::unordered_map<ResourceType, CleanupFn> cleanupLookup = {
                 LOG_DEBUG(std::format("Storage image {:p} not found in resource manager", static_cast<void*>(handle)));
             }
         }
-        if (ctx.device != VK_NULL_HANDLE) {
-            vkDestroyImage(ctx.device, handle, nullptr);
-        }
+        destroySingleImage(ctx.device, handle);
         LOG_DEBUG(std::format("Destroyed storage image {:p} (managed: {})", static_cast<void*>(handle), wasManaged));
     }},
     {ResourceType::StorageImageMemory, [](Vulkan::Context& ctx, void* h, bool managed) {
@@ -132,9 +128,7 @@ static const std::unordered_map<ResourceType, CleanupFn> cleanupLookup = {
                 LOG_DEBUG(std::format("Storage image memory {:p} not found in resource manager", static_cast<void*>(handle)));
             }
         }
-        if (ctx.device != VK_NULL_HANDLE) {
-            vkFreeMemory(ctx.device, handle, nullptr);
-        }
+        freeSingleDeviceMemory(ctx.device, handle);
         LOG_DEBUG(std::format("Freed storage image memory {:p} (managed: {})", static_cast<void*>(handle), wasManaged));
     }},
     {ResourceType::RenderPass, [](Vulkan::Context& ctx, void* h, bool) {
@@ -164,9 +158,7 @@ static const std::unordered_map<ResourceType, CleanupFn> cleanupLookup = {
                 LOG_DEBUG(std::format("Graphics pipeline {:p} not found in resource manager", static_cast<void*>(handle)));
             }
         }
-        if (ctx.device != VK_NULL_HANDLE) {
-            vkDestroyPipeline(ctx.device, handle, nullptr);
-        }
+        destroySinglePipeline(ctx.device, handle);
         LOG_INFO(std::format("Destroyed graphics pipeline {:p} (managed: {})", static_cast<void*>(handle), wasManaged));
     }},
     {ResourceType::ComputePipeline, [](Vulkan::Context& ctx, void* h, bool managed) {
@@ -187,9 +179,7 @@ static const std::unordered_map<ResourceType, CleanupFn> cleanupLookup = {
                 LOG_DEBUG(std::format("Compute pipeline {:p} not found in resource manager", static_cast<void*>(handle)));
             }
         }
-        if (ctx.device != VK_NULL_HANDLE) {
-            vkDestroyPipeline(ctx.device, handle, nullptr);
-        }
+        destroySinglePipeline(ctx.device, handle);
         LOG_INFO(std::format("Destroyed compute pipeline {:p} (managed: {})", static_cast<void*>(handle), wasManaged));
     }},
     {ResourceType::RayTracingPipeline, [](Vulkan::Context& ctx, void* h, bool managed) {
@@ -210,9 +200,7 @@ static const std::unordered_map<ResourceType, CleanupFn> cleanupLookup = {
                 LOG_DEBUG(std::format("Ray-tracing pipeline {:p} not found in resource manager", static_cast<void*>(handle)));
             }
         }
-        if (ctx.device != VK_NULL_HANDLE) {
-            vkDestroyPipeline(ctx.device, handle, nullptr);
-        }
+        destroySinglePipeline(ctx.device, handle);
         LOG_INFO(std::format("Destroyed ray-tracing pipeline {:p} (managed: {})", static_cast<void*>(handle), wasManaged));
     }},
     {ResourceType::GraphicsPipelineLayout, [](Vulkan::Context& ctx, void* h, bool managed) {
@@ -233,9 +221,7 @@ static const std::unordered_map<ResourceType, CleanupFn> cleanupLookup = {
                 LOG_DEBUG(std::format("Graphics pipeline layout {:p} not found in resource manager", static_cast<void*>(handle)));
             }
         }
-        if (ctx.device != VK_NULL_HANDLE) {
-            vkDestroyPipelineLayout(ctx.device, handle, nullptr);
-        }
+        destroySinglePipelineLayout(ctx.device, handle);
         LOG_DEBUG(std::format("Destroyed graphics pipeline layout {:p} (managed: {})", static_cast<void*>(handle), wasManaged));
     }},
     {ResourceType::RayTracingPipelineLayout, [](Vulkan::Context& ctx, void* h, bool managed) {
@@ -256,9 +242,7 @@ static const std::unordered_map<ResourceType, CleanupFn> cleanupLookup = {
                 LOG_DEBUG(std::format("Ray-tracing pipeline layout {:p} not found in resource manager", static_cast<void*>(handle)));
             }
         }
-        if (ctx.device != VK_NULL_HANDLE) {
-            vkDestroyPipelineLayout(ctx.device, handle, nullptr);
-        }
+        destroySinglePipelineLayout(ctx.device, handle);
         LOG_DEBUG(std::format("Destroyed ray-tracing pipeline layout {:p} (managed: {})", static_cast<void*>(handle), wasManaged));
     }},
     {ResourceType::ComputePipelineLayout, [](Vulkan::Context& ctx, void* h, bool managed) {
@@ -279,9 +263,7 @@ static const std::unordered_map<ResourceType, CleanupFn> cleanupLookup = {
                 LOG_DEBUG(std::format("Compute pipeline layout {:p} not found in resource manager", static_cast<void*>(handle)));
             }
         }
-        if (ctx.device != VK_NULL_HANDLE) {
-            vkDestroyPipelineLayout(ctx.device, handle, nullptr);
-        }
+        destroySinglePipelineLayout(ctx.device, handle);
         LOG_DEBUG(std::format("Destroyed compute pipeline layout {:p} (managed: {})", static_cast<void*>(handle), wasManaged));
     }},
     {ResourceType::GraphicsDescriptorSet, [](Vulkan::Context& ctx, void* h, bool) {
@@ -370,9 +352,7 @@ static const std::unordered_map<ResourceType, CleanupFn> cleanupLookup = {
                 LOG_DEBUG(std::format("Graphics descriptor set layout {:p} not found in resource manager", static_cast<void*>(handle)));
             }
         }
-        if (ctx.device != VK_NULL_HANDLE) {
-            vkDestroyDescriptorSetLayout(ctx.device, handle, nullptr);
-        }
+        destroySingleDescriptorSetLayout(ctx.device, handle);
         LOG_DEBUG(std::format("Destroyed graphics descriptor set layout {:p} (managed: {})", static_cast<void*>(handle), wasManaged));
     }},
     {ResourceType::RayTracingDescriptorSetLayout, [](Vulkan::Context& ctx, void* h, bool managed) {
@@ -393,9 +373,7 @@ static const std::unordered_map<ResourceType, CleanupFn> cleanupLookup = {
                 LOG_DEBUG(std::format("Ray-tracing descriptor set layout {:p} not found in resource manager", static_cast<void*>(handle)));
             }
         }
-        if (ctx.device != VK_NULL_HANDLE) {
-            vkDestroyDescriptorSetLayout(ctx.device, handle, nullptr);
-        }
+        destroySingleDescriptorSetLayout(ctx.device, handle);
         LOG_DEBUG(std::format("Destroyed ray-tracing descriptor set layout {:p} (managed: {})", static_cast<void*>(handle), wasManaged));
     }},
     {ResourceType::Sampler, [](Vulkan::Context& ctx, void* h, bool) {
@@ -404,9 +382,7 @@ static const std::unordered_map<ResourceType, CleanupFn> cleanupLookup = {
             LOG_DEBUG("Skipping null sampler cleanup");
             return;
         }
-        if (ctx.device != VK_NULL_HANDLE) {
-            vkDestroySampler(ctx.device, handle, nullptr);
-        }
+        destroySingleSampler(ctx.device, handle);
         LOG_DEBUG(std::format("Destroyed sampler {:p}", static_cast<void*>(handle)));
     }},
     {ResourceType::TopLevelAS, [](Vulkan::Context& ctx, void* h, bool managed) {
@@ -427,9 +403,7 @@ static const std::unordered_map<ResourceType, CleanupFn> cleanupLookup = {
                 LOG_DEBUG(std::format("Top-level AS {:p} not found in resource manager", static_cast<void*>(handle)));
             }
         }
-        if (ctx.device != VK_NULL_HANDLE) {
-            vkDestroyAccelerationStructureKHR(ctx.device, handle, nullptr);
-        }
+        destroySingleAccelerationStructure(ctx.device, handle);
         LOG_INFO(std::format("Destroyed top-level AS {:p} (managed: {})", static_cast<void*>(handle), wasManaged));
     }},
     {ResourceType::BottomLevelAS, [](Vulkan::Context& ctx, void* h, bool managed) {
@@ -450,9 +424,7 @@ static const std::unordered_map<ResourceType, CleanupFn> cleanupLookup = {
                 LOG_DEBUG(std::format("Bottom-level AS {:p} not found in resource manager", static_cast<void*>(handle)));
             }
         }
-        if (ctx.device != VK_NULL_HANDLE) {
-            vkDestroyAccelerationStructureKHR(ctx.device, handle, nullptr);
-        }
+        destroySingleAccelerationStructure(ctx.device, handle);
         LOG_INFO(std::format("Destroyed bottom-level AS {:p} (managed: {})", static_cast<void*>(handle), wasManaged));
     }},
     {ResourceType::BottomLevelASBuffer, [](Vulkan::Context& ctx, void* h, bool managed) {
@@ -473,9 +445,7 @@ static const std::unordered_map<ResourceType, CleanupFn> cleanupLookup = {
                 LOG_DEBUG(std::format("Bottom-level AS buffer {:p} not found in resource manager (possibly managed by BufferMgr)", static_cast<void*>(handle)));
             }
         }
-        if (ctx.device != VK_NULL_HANDLE) {
-            vkDestroyBuffer(ctx.device, handle, nullptr);
-        }
+        destroySingleBuffer(ctx.device, handle);
         LOG_DEBUG(std::format("Destroyed bottom-level AS buffer {:p} (managed: {})", static_cast<void*>(handle), wasManaged));
     }},
     {ResourceType::BottomLevelASMemory, [](Vulkan::Context& ctx, void* h, bool managed) {
@@ -496,9 +466,7 @@ static const std::unordered_map<ResourceType, CleanupFn> cleanupLookup = {
                 LOG_DEBUG(std::format("Bottom-level AS memory {:p} not found in resource manager", static_cast<void*>(handle)));
             }
         }
-        if (ctx.device != VK_NULL_HANDLE) {
-            vkFreeMemory(ctx.device, handle, nullptr);
-        }
+        freeSingleDeviceMemory(ctx.device, handle);
         LOG_DEBUG(std::format("Freed bottom-level AS memory {:p} (managed: {})", static_cast<void*>(handle), wasManaged));
     }},
     {ResourceType::TopLevelASBuffer, [](Vulkan::Context& ctx, void* h, bool managed) {
@@ -519,9 +487,7 @@ static const std::unordered_map<ResourceType, CleanupFn> cleanupLookup = {
                 LOG_DEBUG(std::format("Top-level AS buffer {:p} not found in resource manager", static_cast<void*>(handle)));
             }
         }
-        if (ctx.device != VK_NULL_HANDLE) {
-            vkDestroyBuffer(ctx.device, handle, nullptr);
-        }
+        destroySingleBuffer(ctx.device, handle);
         LOG_DEBUG(std::format("Destroyed top-level AS buffer {:p} (managed: {})", static_cast<void*>(handle), wasManaged));
     }},
     {ResourceType::TopLevelASMemory, [](Vulkan::Context& ctx, void* h, bool managed) {
@@ -542,9 +508,7 @@ static const std::unordered_map<ResourceType, CleanupFn> cleanupLookup = {
                 LOG_DEBUG(std::format("Top-level AS memory {:p} not found in resource manager", static_cast<void*>(handle)));
             }
         }
-        if (ctx.device != VK_NULL_HANDLE) {
-            vkFreeMemory(ctx.device, handle, nullptr);
-        }
+        freeSingleDeviceMemory(ctx.device, handle);
         LOG_DEBUG(std::format("Freed top-level AS memory {:p} (managed: {})", static_cast<void*>(handle), wasManaged));
     }},
     {ResourceType::RaygenSbtBuffer, [](Vulkan::Context& ctx, void* h, bool managed) {
@@ -565,9 +529,7 @@ static const std::unordered_map<ResourceType, CleanupFn> cleanupLookup = {
                 LOG_DEBUG(std::format("Raygen SBT buffer {:p} not found in resource manager", static_cast<void*>(handle)));
             }
         }
-        if (ctx.device != VK_NULL_HANDLE) {
-            vkDestroyBuffer(ctx.device, handle, nullptr);
-        }
+        destroySingleBuffer(ctx.device, handle);
         LOG_DEBUG(std::format("Destroyed raygen SBT buffer {:p} (managed: {})", static_cast<void*>(handle), wasManaged));
     }},
     {ResourceType::RaygenSbtMemory, [](Vulkan::Context& ctx, void* h, bool managed) {
@@ -588,9 +550,7 @@ static const std::unordered_map<ResourceType, CleanupFn> cleanupLookup = {
                 LOG_DEBUG(std::format("Raygen SBT memory {:p} not found in resource manager", static_cast<void*>(handle)));
             }
         }
-        if (ctx.device != VK_NULL_HANDLE) {
-            vkFreeMemory(ctx.device, handle, nullptr);
-        }
+        freeSingleDeviceMemory(ctx.device, handle);
         LOG_DEBUG(std::format("Freed raygen SBT memory {:p} (managed: {})", static_cast<void*>(handle), wasManaged));
     }},
     {ResourceType::MissSbtBuffer, [](Vulkan::Context& ctx, void* h, bool managed) {
@@ -611,9 +571,7 @@ static const std::unordered_map<ResourceType, CleanupFn> cleanupLookup = {
                 LOG_DEBUG(std::format("Miss SBT buffer {:p} not found in resource manager", static_cast<void*>(handle)));
             }
         }
-        if (ctx.device != VK_NULL_HANDLE) {
-            vkDestroyBuffer(ctx.device, handle, nullptr);
-        }
+        destroySingleBuffer(ctx.device, handle);
         LOG_DEBUG(std::format("Destroyed miss SBT buffer {:p} (managed: {})", static_cast<void*>(handle), wasManaged));
     }},
     {ResourceType::MissSbtMemory, [](Vulkan::Context& ctx, void* h, bool managed) {
@@ -634,9 +592,7 @@ static const std::unordered_map<ResourceType, CleanupFn> cleanupLookup = {
                 LOG_DEBUG(std::format("Miss SBT memory {:p} not found in resource manager", static_cast<void*>(handle)));
             }
         }
-        if (ctx.device != VK_NULL_HANDLE) {
-            vkFreeMemory(ctx.device, handle, nullptr);
-        }
+        freeSingleDeviceMemory(ctx.device, handle);
         LOG_DEBUG(std::format("Freed miss SBT memory {:p} (managed: {})", static_cast<void*>(handle), wasManaged));
     }},
     {ResourceType::HitSbtBuffer, [](Vulkan::Context& ctx, void* h, bool managed) {
@@ -657,9 +613,7 @@ static const std::unordered_map<ResourceType, CleanupFn> cleanupLookup = {
                 LOG_DEBUG(std::format("Hit SBT buffer {:p} not found in resource manager", static_cast<void*>(handle)));
             }
         }
-        if (ctx.device != VK_NULL_HANDLE) {
-            vkDestroyBuffer(ctx.device, handle, nullptr);
-        }
+        destroySingleBuffer(ctx.device, handle);
         LOG_DEBUG(std::format("Destroyed hit SBT buffer {:p} (managed: {})", static_cast<void*>(handle), wasManaged));
     }},
     {ResourceType::HitSbtMemory, [](Vulkan::Context& ctx, void* h, bool managed) {
@@ -680,9 +634,7 @@ static const std::unordered_map<ResourceType, CleanupFn> cleanupLookup = {
                 LOG_DEBUG(std::format("Hit SBT memory {:p} not found in resource manager", static_cast<void*>(handle)));
             }
         }
-        if (ctx.device != VK_NULL_HANDLE) {
-            vkFreeMemory(ctx.device, handle, nullptr);
-        }
+        freeSingleDeviceMemory(ctx.device, handle);
         LOG_DEBUG(std::format("Freed hit SBT memory {:p} (managed: {})", static_cast<void*>(handle), wasManaged));
     }},
     {ResourceType::VertexBuffer, [](Vulkan::Context& ctx, void* h, bool managed) {
@@ -703,9 +655,7 @@ static const std::unordered_map<ResourceType, CleanupFn> cleanupLookup = {
                 LOG_DEBUG(std::format("Vertex buffer {:p} not found in resource manager (possibly managed by BufferMgr)", static_cast<void*>(handle)));
             }
         }
-        if (ctx.device != VK_NULL_HANDLE) {
-            vkDestroyBuffer(ctx.device, handle, nullptr);
-        }
+        destroySingleBuffer(ctx.device, handle);
         LOG_INFO(std::format("Destroyed vertex buffer {:p} (managed: {})", static_cast<void*>(handle), wasManaged));
     }},
     {ResourceType::VertexBufferMemory, [](Vulkan::Context& ctx, void* h, bool managed) {
@@ -726,9 +676,7 @@ static const std::unordered_map<ResourceType, CleanupFn> cleanupLookup = {
                 LOG_DEBUG(std::format("Vertex buffer memory {:p} not found in resource manager", static_cast<void*>(handle)));
             }
         }
-        if (ctx.device != VK_NULL_HANDLE) {
-            vkFreeMemory(ctx.device, handle, nullptr);
-        }
+        freeSingleDeviceMemory(ctx.device, handle);
         LOG_DEBUG(std::format("Freed vertex buffer memory {:p} (managed: {})", static_cast<void*>(handle), wasManaged));
     }},
     {ResourceType::IndexBuffer, [](Vulkan::Context& ctx, void* h, bool managed) {
@@ -749,9 +697,7 @@ static const std::unordered_map<ResourceType, CleanupFn> cleanupLookup = {
                 LOG_DEBUG(std::format("Index buffer {:p} not found in resource manager (possibly managed by BufferMgr)", static_cast<void*>(handle)));
             }
         }
-        if (ctx.device != VK_NULL_HANDLE) {
-            vkDestroyBuffer(ctx.device, handle, nullptr);
-        }
+        destroySingleBuffer(ctx.device, handle);
         LOG_INFO(std::format("Destroyed index buffer {:p} (managed: {})", static_cast<void*>(handle), wasManaged));
     }},
     {ResourceType::IndexBufferMemory, [](Vulkan::Context& ctx, void* h, bool managed) {
@@ -772,9 +718,7 @@ static const std::unordered_map<ResourceType, CleanupFn> cleanupLookup = {
                 LOG_DEBUG(std::format("Index buffer memory {:p} not found in resource manager", static_cast<void*>(handle)));
             }
         }
-        if (ctx.device != VK_NULL_HANDLE) {
-            vkFreeMemory(ctx.device, handle, nullptr);
-        }
+        freeSingleDeviceMemory(ctx.device, handle);
         LOG_DEBUG(std::format("Freed index buffer memory {:p} (managed: {})", static_cast<void*>(handle), wasManaged));
     }},
     {ResourceType::ScratchBuffer, [](Vulkan::Context& ctx, void* h, bool managed) {
@@ -795,9 +739,7 @@ static const std::unordered_map<ResourceType, CleanupFn> cleanupLookup = {
                 LOG_DEBUG(std::format("Scratch buffer {:p} not found in resource manager (likely managed by VulkanBufferManager)", static_cast<void*>(handle)));
             }
         }
-        if (ctx.device != VK_NULL_HANDLE) {
-            vkDestroyBuffer(ctx.device, handle, nullptr);
-        }
+        destroySingleBuffer(ctx.device, handle);
         LOG_INFO(std::format("Destroyed scratch buffer {:p} (managed: {})", static_cast<void*>(handle), wasManaged));
     }},
     {ResourceType::ScratchBufferMemory, [](Vulkan::Context& ctx, void* h, bool managed) {
@@ -818,9 +760,7 @@ static const std::unordered_map<ResourceType, CleanupFn> cleanupLookup = {
                 LOG_DEBUG(std::format("Scratch buffer memory {:p} not found in resource manager (likely managed by VulkanBufferManager)", static_cast<void*>(handle)));
             }
         }
-        if (ctx.device != VK_NULL_HANDLE) {
-            vkFreeMemory(ctx.device, handle, nullptr);
-        }
+        freeSingleDeviceMemory(ctx.device, handle);
         LOG_DEBUG(std::format("Freed scratch buffer memory {:p} (managed: {})", static_cast<void*>(handle), wasManaged));
     }},
     {ResourceType::Swapchain, [](Vulkan::Context& ctx, void* h, bool) {
@@ -854,9 +794,7 @@ static const std::unordered_map<ResourceType, CleanupFn> cleanupLookup = {
                 LOG_DEBUG(std::format("Command pool {:p} not found in resource manager", static_cast<void*>(handle)));
             }
         }
-        if (ctx.device != VK_NULL_HANDLE) {
-            vkDestroyCommandPool(ctx.device, handle, nullptr);
-        }
+        destroySingleCommandPool(ctx.device, handle);
         LOG_INFO(std::format("Destroyed command pool {:p} (managed: {})", static_cast<void*>(handle), wasManaged));
     }},
     {ResourceType::Device, [](Vulkan::Context&, void* h, bool) {
@@ -1050,6 +988,48 @@ void cleanupVulkanContext(Vulkan::Context& context) noexcept {
             LOG_INFO(std::format("--- Stage {}: {} completed ---", stageCount, "IdleWait"));
         }
 
+        // Stage: ResourceManager (Step 2: Resource manager cleanup)
+        {
+            LOG_INFO(std::format("--- Stage {}: {} ---", ++stageCount, "ResourceManager"));
+            LOG_DEBUG("Checking VulkanResourceManager state before cleanup");
+            try {
+                bool hasResources = false;
+                size_t bufferCount = context.resourceManager.getBuffers().size();
+                size_t memoryCount = context.resourceManager.getMemories().size();
+                size_t imageCount = context.resourceManager.getImages().size();
+                size_t imageViewCount = context.resourceManager.getImageViews().size();
+                size_t pipelineCount = context.resourceManager.getPipelines().size();
+                size_t pipelineLayoutCount = context.resourceManager.getPipelineLayouts().size();
+                size_t descriptorSetLayoutCount = context.resourceManager.getDescriptorSetLayouts().size();
+                size_t descriptorPoolCount = context.resourceManager.getDescriptorPools().size();
+                size_t accelerationStructureCount = context.resourceManager.getAccelerationStructures().size();
+                size_t commandPoolCount = context.resourceManager.getCommandPools().size();
+
+                if (bufferCount > 0 || memoryCount > 0 || imageCount > 0 || imageViewCount > 0 ||
+                    pipelineCount > 0 || pipelineLayoutCount > 0 || descriptorSetLayoutCount > 0 ||
+                    descriptorPoolCount > 0 || accelerationStructureCount > 0 || commandPoolCount > 0) {
+                    hasResources = true;
+                    LOG_INFO(std::format("Resource manager contains resources: buffers={}, memories={}, images={}, imageViews={}, pipelines={}, pipelineLayouts={}, descriptorSetLayouts={}, descriptorPools={}, accelerationStructures={}, commandPools={}",
+                        bufferCount, memoryCount, imageCount, imageViewCount, pipelineCount, pipelineLayoutCount,
+                        descriptorSetLayoutCount, descriptorPoolCount, accelerationStructureCount, commandPoolCount));
+                } else {
+                    LOG_DEBUG("Resource manager is empty, skipping cleanup");
+                }
+
+                if (hasResources && context.device != VK_NULL_HANDLE) {
+                    LOG_DEBUG("Executing VulkanResourceManager cleanup");
+                    context.resourceManager.cleanup(context.device);
+                    LOG_INFO("VulkanResourceManager cleanup completed");
+                } else {
+                    LOG_INFO("VulkanResourceManager cleanup skipped (no resources or null device)");
+                }
+            } catch (const std::exception& e) {
+                cleanupErrors.push_back(std::format("Error in resource manager cleanup: {}", e.what()));
+                LOG_ERROR(std::format("Error in resource manager cleanup: {}", e.what()));
+            }
+            LOG_INFO(std::format("--- Stage {}: {} completed ---", stageCount, "ResourceManager"));
+        }
+
         // Stage: Framebuffers (Step 3)
         {
             LOG_INFO(std::format("--- Stage {}: {} ---", ++stageCount, "Framebuffers"));
@@ -1203,108 +1183,6 @@ void cleanupVulkanContext(Vulkan::Context& context) noexcept {
             LOG_INFO(std::format("--- Stage {}: {} completed ---", stageCount, "Fences"));
         }
 
-        // Stage: GraphicsResources (Storage, RenderPass, Graphics Pipeline/Layout/DS/Layout/Pool)
-        {
-            LOG_INFO(std::format("--- Stage {}: {} ---", ++stageCount, "GraphicsResources"));
-            std::vector<Disposable> graphicsDisposables = {
-                {ResourceType::GraphicsPipeline, reinterpret_cast<void*>(context.graphicsPipeline.get()), true, "Graphics Pipeline", DisposeStage::GraphicsResources},
-                {ResourceType::GraphicsDescriptorSet, reinterpret_cast<void*>(context.graphicsDescriptorSet), false, "Graphics Descriptor Set", DisposeStage::GraphicsResources},
-                {ResourceType::StorageImageView, reinterpret_cast<void*>(context.storageImageView.get()), true, "Storage Image View", DisposeStage::GraphicsResources},
-                {ResourceType::StorageImage, reinterpret_cast<void*>(context.storageImage.get()), true, "Storage Image", DisposeStage::GraphicsResources},
-                {ResourceType::StorageImageMemory, reinterpret_cast<void*>(context.storageImageMemory.get()), true, "Storage Image Memory", DisposeStage::GraphicsResources},
-                {ResourceType::RenderPass, reinterpret_cast<void*>(context.renderPass), false, "Render Pass", DisposeStage::GraphicsResources},
-                {ResourceType::GraphicsDescriptorPool, reinterpret_cast<void*>(context.graphicsDescriptorPool), true, "Graphics Descriptor Pool", DisposeStage::GraphicsResources},
-                {ResourceType::GraphicsDescriptorSetLayout, reinterpret_cast<void*>(context.graphicsDescriptorSetLayout.get()), true, "Graphics Descriptor Set Layout", DisposeStage::GraphicsResources},
-                {ResourceType::GraphicsPipelineLayout, reinterpret_cast<void*>(context.graphicsPipelineLayout.get()), true, "Graphics Pipeline Layout", DisposeStage::GraphicsResources}
-            };
-            for (const auto& disp : graphicsDisposables) {
-                if (disp.handle == VK_NULL_HANDLE) {
-                    LOG_DEBUG(std::format("Skipping null {} in GraphicsResources stage", disp.name));
-                    continue;
-                }
-                auto it = cleanupLookup.find(disp.type);
-                if (it == cleanupLookup.end()) {
-                    LOG_WARNING(std::format("Unknown resource type: {}, skipping in GraphicsResources stage", static_cast<int>(disp.type)));
-                    continue;
-                }
-                try {
-                    LOG_DEBUG(std::format("Cleaning up {} ({:p})", disp.name, disp.handle));
-                    it->second(context, disp.handle, disp.managedByResourceManager);
-                    // Nullify context fields (using switch as before, but only for graphics types)
-                    switch (disp.type) {
-                        case ResourceType::StorageImageView: context.storageImageView = VK_NULL_HANDLE; break;
-                        case ResourceType::StorageImage: context.storageImage = VK_NULL_HANDLE; break;
-                        case ResourceType::StorageImageMemory: context.storageImageMemory = VK_NULL_HANDLE; break;
-                        case ResourceType::RenderPass: context.renderPass = VK_NULL_HANDLE; break;
-                        case ResourceType::GraphicsPipeline: context.graphicsPipeline = VK_NULL_HANDLE; break;
-                        case ResourceType::GraphicsPipelineLayout: context.graphicsPipelineLayout = VK_NULL_HANDLE; break;
-                        case ResourceType::GraphicsDescriptorSet: context.graphicsDescriptorSet = VK_NULL_HANDLE; break;
-                        case ResourceType::GraphicsDescriptorPool: context.graphicsDescriptorPool = VK_NULL_HANDLE; break;
-                        case ResourceType::GraphicsDescriptorSetLayout: context.graphicsDescriptorSetLayout = VK_NULL_HANDLE; break;
-                        default: break; // Safety
-                    }
-                } catch (const std::exception& e) {
-                    cleanupErrors.push_back(std::format("Error in {} cleanup: {}", disp.name, e.what()));
-                    LOG_ERROR(std::format("Error in {} cleanup: {}", disp.name, e.what()));
-                    // Nullify on error (same switch)
-                    switch (disp.type) {
-                        case ResourceType::StorageImageView: context.storageImageView = VK_NULL_HANDLE; break;
-                        case ResourceType::StorageImage: context.storageImage = VK_NULL_HANDLE; break;
-                        case ResourceType::StorageImageMemory: context.storageImageMemory = VK_NULL_HANDLE; break;
-                        case ResourceType::RenderPass: context.renderPass = VK_NULL_HANDLE; break;
-                        case ResourceType::GraphicsPipeline: context.graphicsPipeline = VK_NULL_HANDLE; break;
-                        case ResourceType::GraphicsPipelineLayout: context.graphicsPipelineLayout = VK_NULL_HANDLE; break;
-                        case ResourceType::GraphicsDescriptorSet: context.graphicsDescriptorSet = VK_NULL_HANDLE; break;
-                        case ResourceType::GraphicsDescriptorPool: context.graphicsDescriptorPool = VK_NULL_HANDLE; break;
-                        case ResourceType::GraphicsDescriptorSetLayout: context.graphicsDescriptorSetLayout = VK_NULL_HANDLE; break;
-                        default: break;
-                    }
-                }
-            }
-            LOG_INFO(std::format("--- Stage {}: {} completed ---", stageCount, "GraphicsResources"));
-        }
-
-        // Stage: ComputeResources (Compute Pipeline/Layout/DS/Pool)
-        {
-            LOG_INFO(std::format("--- Stage {}: {} ---", ++stageCount, "ComputeResources"));
-            std::vector<Disposable> computeDisposables = {
-                {ResourceType::ComputePipeline, reinterpret_cast<void*>(context.computePipeline.get()), true, "Compute Pipeline", DisposeStage::ComputeResources},
-                {ResourceType::DescriptorSet, reinterpret_cast<void*>(context.descriptorSet), false, "Descriptor Set", DisposeStage::ComputeResources},
-                {ResourceType::DescriptorPool, reinterpret_cast<void*>(context.descriptorPool), true, "Descriptor Pool", DisposeStage::ComputeResources},
-                {ResourceType::ComputePipelineLayout, reinterpret_cast<void*>(context.computePipelineLayout.get()), true, "Compute Pipeline Layout", DisposeStage::ComputeResources}
-            };
-            for (const auto& disp : computeDisposables) {
-                if (disp.handle == VK_NULL_HANDLE) continue;
-                auto it = cleanupLookup.find(disp.type);
-                if (it == cleanupLookup.end()) {
-                    LOG_WARNING(std::format("Unknown resource type: {}, skipping in ComputeResources stage", static_cast<int>(disp.type)));
-                    continue;
-                }
-                try {
-                    LOG_DEBUG(std::format("Cleaning up {} ({:p})", disp.name, disp.handle));
-                    it->second(context, disp.handle, disp.managedByResourceManager);
-                    switch (disp.type) {
-                        case ResourceType::ComputePipeline: context.computePipeline = VK_NULL_HANDLE; break;
-                        case ResourceType::ComputePipelineLayout: context.computePipelineLayout = VK_NULL_HANDLE; break;
-                        case ResourceType::DescriptorSet: context.descriptorSet = VK_NULL_HANDLE; break;
-                        case ResourceType::DescriptorPool: context.descriptorPool = VK_NULL_HANDLE; break;
-                        default: break;
-                    }
-                } catch (const std::exception& e) {
-                    cleanupErrors.push_back(std::format("Error in {} cleanup: {}", disp.name, e.what()));
-                    LOG_ERROR(std::format("Error in {} cleanup: {}", disp.name, e.what()));
-                    switch (disp.type) {
-                        case ResourceType::ComputePipeline: context.computePipeline = VK_NULL_HANDLE; break;
-                        case ResourceType::ComputePipelineLayout: context.computePipelineLayout = VK_NULL_HANDLE; break;
-                        case ResourceType::DescriptorSet: context.descriptorSet = VK_NULL_HANDLE; break;
-                        case ResourceType::DescriptorPool: context.descriptorPool = VK_NULL_HANDLE; break;
-                        default: break;
-                    }
-                }
-            }
-            LOG_INFO(std::format("--- Stage {}: {} completed ---", stageCount, "ComputeResources"));
-        }
-
         // Stage: UniformBuffers (Step 10)
         {
             LOG_INFO(std::format("--- Stage {}: {} ---", ++stageCount, "UniformBuffers"));
@@ -1379,25 +1257,127 @@ void cleanupVulkanContext(Vulkan::Context& context) noexcept {
             LOG_INFO(std::format("--- Stage {}: {} completed ---", stageCount, "UniformMemories"));
         }
 
+        // Stage: GraphicsResources (Storage, RenderPass, Graphics Pipeline/Layout/DS/Layout/Pool)
+        {
+            LOG_INFO(std::format("--- Stage {}: {} ---", ++stageCount, "GraphicsResources"));
+            std::vector<Disposable> graphicsDisposables = {
+                {ResourceType::StorageImageView, reinterpret_cast<void*>(context.storageImageView), true, "Storage Image View", DisposeStage::GraphicsResources},
+                {ResourceType::StorageImage, reinterpret_cast<void*>(context.storageImage), true, "Storage Image", DisposeStage::GraphicsResources},
+                {ResourceType::StorageImageMemory, reinterpret_cast<void*>(context.storageImageMemory), true, "Storage Image Memory", DisposeStage::GraphicsResources},
+                {ResourceType::RenderPass, reinterpret_cast<void*>(context.renderPass), false, "Render Pass", DisposeStage::GraphicsResources},
+                {ResourceType::GraphicsPipeline, reinterpret_cast<void*>(context.graphicsPipeline), true, "Graphics Pipeline", DisposeStage::GraphicsResources},
+                {ResourceType::GraphicsPipelineLayout, reinterpret_cast<void*>(context.graphicsPipelineLayout), true, "Graphics Pipeline Layout", DisposeStage::GraphicsResources},
+                {ResourceType::GraphicsDescriptorSet, reinterpret_cast<void*>(context.graphicsDescriptorSet), false, "Graphics Descriptor Set", DisposeStage::GraphicsResources},
+                {ResourceType::GraphicsDescriptorPool, reinterpret_cast<void*>(context.graphicsDescriptorPool), true, "Graphics Descriptor Pool", DisposeStage::GraphicsResources},
+                {ResourceType::GraphicsDescriptorSetLayout, reinterpret_cast<void*>(context.graphicsDescriptorSetLayout), true, "Graphics Descriptor Set Layout", DisposeStage::GraphicsResources}
+            };
+            for (const auto& disp : graphicsDisposables) {
+                if (disp.handle == VK_NULL_HANDLE) {
+                    LOG_DEBUG(std::format("Skipping null {} in GraphicsResources stage", disp.name));
+                    continue;
+                }
+                auto it = cleanupLookup.find(disp.type);
+                if (it == cleanupLookup.end()) {
+                    LOG_WARNING(std::format("Unknown resource type: {}, skipping in GraphicsResources stage", static_cast<int>(disp.type)));
+                    continue;
+                }
+                try {
+                    LOG_DEBUG(std::format("Cleaning up {} ({:p})", disp.name, disp.handle));
+                    it->second(context, disp.handle, disp.managedByResourceManager);
+                    // Nullify context fields (using switch as before, but only for graphics types)
+                    switch (disp.type) {
+                        case ResourceType::StorageImageView: context.storageImageView = VK_NULL_HANDLE; break;
+                        case ResourceType::StorageImage: context.storageImage = VK_NULL_HANDLE; break;
+                        case ResourceType::StorageImageMemory: context.storageImageMemory = VK_NULL_HANDLE; break;
+                        case ResourceType::RenderPass: context.renderPass = VK_NULL_HANDLE; break;
+                        case ResourceType::GraphicsPipeline: context.graphicsPipeline = VK_NULL_HANDLE; break;
+                        case ResourceType::GraphicsPipelineLayout: context.graphicsPipelineLayout = VK_NULL_HANDLE; break;
+                        case ResourceType::GraphicsDescriptorSet: context.graphicsDescriptorSet = VK_NULL_HANDLE; break;
+                        case ResourceType::GraphicsDescriptorPool: context.graphicsDescriptorPool = VK_NULL_HANDLE; break;
+                        case ResourceType::GraphicsDescriptorSetLayout: context.graphicsDescriptorSetLayout = VK_NULL_HANDLE; break;
+                        default: break; // Safety
+                    }
+                } catch (const std::exception& e) {
+                    cleanupErrors.push_back(std::format("Error in {} cleanup: {}", disp.name, e.what()));
+                    LOG_ERROR(std::format("Error in {} cleanup: {}", disp.name, e.what()));
+                    // Nullify on error (same switch)
+                    switch (disp.type) {
+                        case ResourceType::StorageImageView: context.storageImageView = VK_NULL_HANDLE; break;
+                        case ResourceType::StorageImage: context.storageImage = VK_NULL_HANDLE; break;
+                        case ResourceType::StorageImageMemory: context.storageImageMemory = VK_NULL_HANDLE; break;
+                        case ResourceType::RenderPass: context.renderPass = VK_NULL_HANDLE; break;
+                        case ResourceType::GraphicsPipeline: context.graphicsPipeline = VK_NULL_HANDLE; break;
+                        case ResourceType::GraphicsPipelineLayout: context.graphicsPipelineLayout = VK_NULL_HANDLE; break;
+                        case ResourceType::GraphicsDescriptorSet: context.graphicsDescriptorSet = VK_NULL_HANDLE; break;
+                        case ResourceType::GraphicsDescriptorPool: context.graphicsDescriptorPool = VK_NULL_HANDLE; break;
+                        case ResourceType::GraphicsDescriptorSetLayout: context.graphicsDescriptorSetLayout = VK_NULL_HANDLE; break;
+                        default: break;
+                    }
+                }
+            }
+            LOG_INFO(std::format("--- Stage {}: {} completed ---", stageCount, "GraphicsResources"));
+        }
+
+        // Stage: ComputeResources (Compute Pipeline/Layout/DS/Pool)
+        {
+            LOG_INFO(std::format("--- Stage {}: {} ---", ++stageCount, "ComputeResources"));
+            std::vector<Disposable> computeDisposables = {
+                {ResourceType::ComputePipeline, reinterpret_cast<void*>(context.computePipeline), true, "Compute Pipeline", DisposeStage::ComputeResources},
+                {ResourceType::ComputePipelineLayout, reinterpret_cast<void*>(context.computePipelineLayout), true, "Compute Pipeline Layout", DisposeStage::ComputeResources},
+                {ResourceType::DescriptorSet, reinterpret_cast<void*>(context.descriptorSet), false, "Descriptor Set", DisposeStage::ComputeResources},
+                {ResourceType::DescriptorPool, reinterpret_cast<void*>(context.descriptorPool), true, "Descriptor Pool", DisposeStage::ComputeResources}
+            };
+            for (const auto& disp : computeDisposables) {
+                if (disp.handle == VK_NULL_HANDLE) continue;
+                auto it = cleanupLookup.find(disp.type);
+                if (it == cleanupLookup.end()) {
+                    LOG_WARNING(std::format("Unknown resource type: {}, skipping in ComputeResources stage", static_cast<int>(disp.type)));
+                    continue;
+                }
+                try {
+                    LOG_DEBUG(std::format("Cleaning up {} ({:p})", disp.name, disp.handle));
+                    it->second(context, disp.handle, disp.managedByResourceManager);
+                    switch (disp.type) {
+                        case ResourceType::ComputePipeline: context.computePipeline = VK_NULL_HANDLE; break;
+                        case ResourceType::ComputePipelineLayout: context.computePipelineLayout = VK_NULL_HANDLE; break;
+                        case ResourceType::DescriptorSet: context.descriptorSet = VK_NULL_HANDLE; break;
+                        case ResourceType::DescriptorPool: context.descriptorPool = VK_NULL_HANDLE; break;
+                        default: break;
+                    }
+                } catch (const std::exception& e) {
+                    cleanupErrors.push_back(std::format("Error in {} cleanup: {}", disp.name, e.what()));
+                    LOG_ERROR(std::format("Error in {} cleanup: {}", disp.name, e.what()));
+                    switch (disp.type) {
+                        case ResourceType::ComputePipeline: context.computePipeline = VK_NULL_HANDLE; break;
+                        case ResourceType::ComputePipelineLayout: context.computePipelineLayout = VK_NULL_HANDLE; break;
+                        case ResourceType::DescriptorSet: context.descriptorSet = VK_NULL_HANDLE; break;
+                        case ResourceType::DescriptorPool: context.descriptorPool = VK_NULL_HANDLE; break;
+                        default: break;
+                    }
+                }
+            }
+            LOG_INFO(std::format("--- Stage {}: {} completed ---", stageCount, "ComputeResources"));
+        }
+
         // Stage: RayTracingResources (RT Pipeline/Layout/DS/Layout, AS, SBTs)
         {
             LOG_INFO(std::format("--- Stage {}: {} ---", ++stageCount, "RayTracingResources"));
             std::vector<Disposable> rtDisposables = {
-                {ResourceType::RayTracingPipeline, reinterpret_cast<void*>(context.rayTracingPipeline.get()), true, "Ray Tracing Pipeline", DisposeStage::RayTracingResources},
-                {ResourceType::RayTracingPipelineLayout, reinterpret_cast<void*>(context.rayTracingPipelineLayout.get()), true, "Ray Tracing Pipeline Layout", DisposeStage::RayTracingResources},
-                {ResourceType::RayTracingDescriptorSetLayout, reinterpret_cast<void*>(context.rayTracingDescriptorSetLayout.get()), true, "Ray Tracing Descriptor Set Layout", DisposeStage::RayTracingResources},
-                {ResourceType::TopLevelAS, reinterpret_cast<void*>(context.topLevelAS.get()), true, "Top-Level Acceleration Structure", DisposeStage::RayTracingResources},
-                {ResourceType::BottomLevelAS, reinterpret_cast<void*>(context.bottomLevelAS.get()), true, "Bottom-Level Acceleration Structure", DisposeStage::RayTracingResources},
-                {ResourceType::BottomLevelASBuffer, reinterpret_cast<void*>(context.bottomLevelASBuffer.get()), true, "Bottom-Level AS Buffer", DisposeStage::RayTracingResources},
-                {ResourceType::BottomLevelASMemory, reinterpret_cast<void*>(context.bottomLevelASMemory.get()), true, "Bottom-Level AS Memory", DisposeStage::RayTracingResources},
-                {ResourceType::TopLevelASBuffer, reinterpret_cast<void*>(context.topLevelASBuffer.get()), true, "Top-Level AS Buffer", DisposeStage::RayTracingResources},
-                {ResourceType::TopLevelASMemory, reinterpret_cast<void*>(context.topLevelASMemory.get()), true, "Top-Level AS Memory", DisposeStage::RayTracingResources},
-                {ResourceType::RaygenSbtBuffer, reinterpret_cast<void*>(context.raygenSbtBuffer.get()), true, "Raygen SBT Buffer", DisposeStage::RayTracingResources},
-                {ResourceType::RaygenSbtMemory, reinterpret_cast<void*>(context.raygenSbtMemory.get()), true, "Raygen SBT Memory", DisposeStage::RayTracingResources},
-                {ResourceType::MissSbtBuffer, reinterpret_cast<void*>(context.missSbtBuffer.get()), true, "Miss SBT Buffer", DisposeStage::RayTracingResources},
-                {ResourceType::MissSbtMemory, reinterpret_cast<void*>(context.missSbtMemory.get()), true, "Miss SBT Memory", DisposeStage::RayTracingResources},
-                {ResourceType::HitSbtBuffer, reinterpret_cast<void*>(context.hitSbtBuffer.get()), true, "Hit SBT Buffer", DisposeStage::RayTracingResources},
-                {ResourceType::HitSbtMemory, reinterpret_cast<void*>(context.hitSbtMemory.get()), true, "Hit SBT Memory", DisposeStage::RayTracingResources}
+                {ResourceType::RayTracingPipeline, reinterpret_cast<void*>(context.rayTracingPipeline), true, "Ray Tracing Pipeline", DisposeStage::RayTracingResources},
+                {ResourceType::RayTracingPipelineLayout, reinterpret_cast<void*>(context.rayTracingPipelineLayout), true, "Ray Tracing Pipeline Layout", DisposeStage::RayTracingResources},
+                {ResourceType::RayTracingDescriptorSetLayout, reinterpret_cast<void*>(context.rayTracingDescriptorSetLayout), true, "Ray Tracing Descriptor Set Layout", DisposeStage::RayTracingResources},
+                {ResourceType::TopLevelAS, reinterpret_cast<void*>(context.topLevelAS), true, "Top-Level Acceleration Structure", DisposeStage::RayTracingResources},
+                {ResourceType::BottomLevelAS, reinterpret_cast<void*>(context.bottomLevelAS), true, "Bottom-Level Acceleration Structure", DisposeStage::RayTracingResources},
+                {ResourceType::BottomLevelASBuffer, reinterpret_cast<void*>(context.bottomLevelASBuffer), true, "Bottom-Level AS Buffer", DisposeStage::RayTracingResources},
+                {ResourceType::BottomLevelASMemory, reinterpret_cast<void*>(context.bottomLevelASMemory), true, "Bottom-Level AS Memory", DisposeStage::RayTracingResources},
+                {ResourceType::TopLevelASBuffer, reinterpret_cast<void*>(context.topLevelASBuffer), true, "Top-Level AS Buffer", DisposeStage::RayTracingResources},
+                {ResourceType::TopLevelASMemory, reinterpret_cast<void*>(context.topLevelASMemory), true, "Top-Level AS Memory", DisposeStage::RayTracingResources},
+                {ResourceType::RaygenSbtBuffer, reinterpret_cast<void*>(context.raygenSbtBuffer), true, "Raygen SBT Buffer", DisposeStage::RayTracingResources},
+                {ResourceType::RaygenSbtMemory, reinterpret_cast<void*>(context.raygenSbtMemory), true, "Raygen SBT Memory", DisposeStage::RayTracingResources},
+                {ResourceType::MissSbtBuffer, reinterpret_cast<void*>(context.missSbtBuffer), true, "Miss SBT Buffer", DisposeStage::RayTracingResources},
+                {ResourceType::MissSbtMemory, reinterpret_cast<void*>(context.missSbtMemory), true, "Miss SBT Memory", DisposeStage::RayTracingResources},
+                {ResourceType::HitSbtBuffer, reinterpret_cast<void*>(context.hitSbtBuffer), true, "Hit SBT Buffer", DisposeStage::RayTracingResources},
+                {ResourceType::HitSbtMemory, reinterpret_cast<void*>(context.hitSbtMemory), true, "Hit SBT Memory", DisposeStage::RayTracingResources}
             };
             for (const auto& disp : rtDisposables) {
                 if (disp.handle == VK_NULL_HANDLE) continue;
@@ -1458,9 +1438,9 @@ void cleanupVulkanContext(Vulkan::Context& context) noexcept {
         {
             LOG_INFO(std::format("--- Stage {}: {} ---", ++stageCount, "BufferResources"));
             std::vector<Disposable> bufferDisposables = {
-                {ResourceType::VertexBuffer, reinterpret_cast<void*>(context.vertexBuffer.get()), true, "Vertex Buffer", DisposeStage::BufferResources},
-                {ResourceType::IndexBuffer, reinterpret_cast<void*>(context.indexBuffer.get()), true, "Index Buffer", DisposeStage::BufferResources},
-                {ResourceType::ScratchBuffer, reinterpret_cast<void*>(context.scratchBuffer.get()), true, "Scratch Buffer", DisposeStage::BufferResources}
+                {ResourceType::VertexBuffer, reinterpret_cast<void*>(context.vertexBuffer), true, "Vertex Buffer", DisposeStage::BufferResources},
+                {ResourceType::IndexBuffer, reinterpret_cast<void*>(context.indexBuffer), true, "Index Buffer", DisposeStage::BufferResources},
+                {ResourceType::ScratchBuffer, reinterpret_cast<void*>(context.scratchBuffer), true, "Scratch Buffer", DisposeStage::BufferResources}
             };
             for (const auto& disp : bufferDisposables) {
                 if (disp.handle == VK_NULL_HANDLE) continue;
@@ -1496,9 +1476,9 @@ void cleanupVulkanContext(Vulkan::Context& context) noexcept {
         {
             LOG_INFO(std::format("--- Stage {}: {} ---", ++stageCount, "MemoryResources"));
             std::vector<Disposable> memoryDisposables = {
-                {ResourceType::VertexBufferMemory, reinterpret_cast<void*>(context.vertexBufferMemory.get()), true, "Vertex Buffer Memory", DisposeStage::MemoryResources},
-                {ResourceType::IndexBufferMemory, reinterpret_cast<void*>(context.indexBufferMemory.get()), true, "Index Buffer Memory", DisposeStage::MemoryResources},
-                {ResourceType::ScratchBufferMemory, reinterpret_cast<void*>(context.scratchBufferMemory.get()), true, "Scratch Buffer Memory", DisposeStage::MemoryResources}
+                {ResourceType::VertexBufferMemory, reinterpret_cast<void*>(context.vertexBufferMemory), true, "Vertex Buffer Memory", DisposeStage::MemoryResources},
+                {ResourceType::IndexBufferMemory, reinterpret_cast<void*>(context.indexBufferMemory), true, "Index Buffer Memory", DisposeStage::MemoryResources},
+                {ResourceType::ScratchBufferMemory, reinterpret_cast<void*>(context.scratchBufferMemory), true, "Scratch Buffer Memory", DisposeStage::MemoryResources}
             };
             for (const auto& disp : memoryDisposables) {
                 if (disp.handle == VK_NULL_HANDLE) continue;
@@ -1530,53 +1510,11 @@ void cleanupVulkanContext(Vulkan::Context& context) noexcept {
             LOG_INFO(std::format("--- Stage {}: {} completed ---", stageCount, "MemoryResources"));
         }
 
-        // Stage: ResourceManager (Step 2: Resource manager cleanup)
-        {
-            LOG_INFO(std::format("--- Stage {}: {} ---", ++stageCount, "ResourceManager"));
-            LOG_DEBUG("Checking VulkanResourceManager state before cleanup");
-            try {
-                bool hasResources = false;
-                size_t bufferCount = context.resourceManager.getBuffers().size();
-                size_t memoryCount = context.resourceManager.getMemories().size();
-                size_t imageCount = context.resourceManager.getImages().size();
-                size_t imageViewCount = context.resourceManager.getImageViews().size();
-                size_t pipelineCount = context.resourceManager.getPipelines().size();
-                size_t pipelineLayoutCount = context.resourceManager.getPipelineLayouts().size();
-                size_t descriptorSetLayoutCount = context.resourceManager.getDescriptorSetLayouts().size();
-                size_t descriptorPoolCount = context.resourceManager.getDescriptorPools().size();
-                size_t accelerationStructureCount = context.resourceManager.getAccelerationStructures().size();
-                size_t commandPoolCount = context.resourceManager.getCommandPools().size();
-
-                if (bufferCount > 0 || memoryCount > 0 || imageCount > 0 || imageViewCount > 0 ||
-                    pipelineCount > 0 || pipelineLayoutCount > 0 || descriptorSetLayoutCount > 0 ||
-                    descriptorPoolCount > 0 || accelerationStructureCount > 0 || commandPoolCount > 0) {
-                    hasResources = true;
-                    LOG_INFO(std::format("Resource manager contains resources: buffers={}, memories={}, images={}, imageViews={}, pipelines={}, pipelineLayouts={}, descriptorSetLayouts={}, descriptorPools={}, accelerationStructures={}, commandPools={}",
-                        bufferCount, memoryCount, imageCount, imageViewCount, pipelineCount, pipelineLayoutCount,
-                        descriptorSetLayoutCount, descriptorPoolCount, accelerationStructureCount, commandPoolCount));
-                } else {
-                    LOG_DEBUG("Resource manager is empty, skipping cleanup");
-                }
-
-                if (hasResources && context.device != VK_NULL_HANDLE) {
-                    LOG_DEBUG("Executing VulkanResourceManager cleanup");
-                    context.resourceManager.cleanup(context.device);
-                    LOG_INFO("VulkanResourceManager cleanup completed");
-                } else {
-                    LOG_INFO("VulkanResourceManager cleanup skipped (no resources or null device)");
-                }
-            } catch (const std::exception& e) {
-                cleanupErrors.push_back(std::format("Error in resource manager cleanup: {}", e.what()));
-                LOG_ERROR(std::format("Error in resource manager cleanup: {}", e.what()));
-            }
-            LOG_INFO(std::format("--- Stage {}: {} completed ---", stageCount, "ResourceManager"));
-        }
-
         // Stage: Sampler (Single)
         {
             LOG_INFO(std::format("--- Stage {}: {} ---", ++stageCount, "Sampler"));
             std::vector<Disposable> samplerDisposables = {
-                {ResourceType::Sampler, reinterpret_cast<void*>(context.sampler.get()), false, "Sampler", DisposeStage::CoreVulkan}
+                {ResourceType::Sampler, reinterpret_cast<void*>(context.sampler), false, "Sampler", DisposeStage::CoreVulkan}
             };
             for (const auto& disp : samplerDisposables) {
                 if (disp.handle == VK_NULL_HANDLE) continue;
@@ -1601,7 +1539,7 @@ void cleanupVulkanContext(Vulkan::Context& context) noexcept {
             LOG_INFO(std::format("--- Stage {}: {} ---", ++stageCount, "CoreVulkan"));
             std::vector<Disposable> coreDisposables = {
                 {ResourceType::Swapchain, reinterpret_cast<void*>(context.swapchain), false, "Swapchain", DisposeStage::CoreVulkan},
-                {ResourceType::CommandPool, reinterpret_cast<void*>(context.commandPool.get()), true, "Command Pool", DisposeStage::CoreVulkan},
+                {ResourceType::CommandPool, reinterpret_cast<void*>(context.commandPool), true, "Command Pool", DisposeStage::CoreVulkan},
                 {ResourceType::Device, reinterpret_cast<void*>(context.device), false, "Device", DisposeStage::CoreVulkan},
                 {ResourceType::Surface, reinterpret_cast<void*>(context.surface), false, "Surface", DisposeStage::CoreVulkan},
                 {ResourceType::DebugMessenger, reinterpret_cast<void*>(context.debugMessenger), false, "Debug Messenger", DisposeStage::CoreVulkan},
