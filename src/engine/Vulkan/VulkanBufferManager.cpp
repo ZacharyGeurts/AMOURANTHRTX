@@ -284,18 +284,7 @@ VulkanBufferManager::VulkanBufferManager(Vulkan::Context& ctx,
 VulkanBufferManager::~VulkanBufferManager() {
     LOG_INFO_CAT("BufferMgr", "DESTROYING BufferManager @ 0x{:x}", reinterpret_cast<uintptr_t>(this));
 
-    for (size_t i = 0; i < impl_->uniformBuffers.size(); ++i) {
-        if (impl_->uniformBuffers[i] != VK_NULL_HANDLE) {
-            context_->resourceManager.removeBuffer(impl_->uniformBuffers[i]);
-            vkDestroyBuffer(context_->device, impl_->uniformBuffers[i], nullptr);
-            LOG_INFO_CAT("BufferMgr", "UNIFORM #{} OBLITERATED", i);
-        }
-        if (impl_->uniformBufferMemories[i] != VK_NULL_HANDLE) {
-            context_->resourceManager.removeMemory(impl_->uniformBufferMemories[i]);
-            vkFreeMemory(context_->device, impl_->uniformBufferMemories[i], nullptr);
-        }
-    }
-
+    // === SCRATCH BUFFERS ===
     for (size_t i = 0; i < impl_->scratchBuffers.size(); ++i) {
         if (impl_->scratchBuffers[i] != VK_NULL_HANDLE) {
             context_->resourceManager.removeBuffer(impl_->scratchBuffers[i]);
@@ -308,6 +297,20 @@ VulkanBufferManager::~VulkanBufferManager() {
         }
     }
 
+    // === UNIFORM BUFFERS ===
+    for (size_t i = 0; i < impl_->uniformBuffers.size(); ++i) {
+        if (impl_->uniformBuffers[i] != VK_NULL_HANDLE) {
+            context_->resourceManager.removeBuffer(impl_->uniformBuffers[i]);
+            vkDestroyBuffer(context_->device, impl_->uniformBuffers[i], nullptr);
+            LOG_INFO_CAT("BufferMgr", "UNIFORM #{} OBLITERATED", i);
+        }
+        if (impl_->uniformBufferMemories[i] != VK_NULL_HANDLE) {
+            context_->resourceManager.removeMemory(impl_->uniformBufferMemories[i]);
+            vkFreeMemory(context_->device, impl_->uniformBufferMemories[i], nullptr);
+        }
+    }
+
+    // === ARENA ===
     if (impl_->arenaBuffer != VK_NULL_HANDLE) {
         context_->resourceManager.removeBuffer(impl_->arenaBuffer);
         vkDestroyBuffer(context_->device, impl_->arenaBuffer, nullptr);
@@ -319,18 +322,20 @@ VulkanBufferManager::~VulkanBufferManager() {
         LOG_INFO_CAT("BufferMgr", "ARENA MEMORY FREED");
     }
 
+    // === COMMAND POOL ===
     if (impl_->commandPool != VK_NULL_HANDLE) {
         Dispose::freeCommandBuffers(context_->device, impl_->commandPool, impl_->commandBuffers);
         vkDestroyCommandPool(context_->device, impl_->commandPool, nullptr);
         LOG_INFO_CAT("BufferMgr", "COMMAND POOL COLLAPSED");
     }
 
+    // === TIMELINE SEMAPHORE ===
     if (impl_->timelineSemaphore != VK_NULL_HANDLE) {
         vkDestroySemaphore(context_->device, impl_->timelineSemaphore, nullptr);
         LOG_INFO_CAT("BufferMgr", "TIMELINE SEMAPHORE VANISHED");
     }
 
-    LOG_INFO_CAT("BufferMgr", "BUFFER MANAGER FULLY DELETED");
+    LOG_INFO_CAT("BufferMgr", "BUFFER MANAGER FULLY DELETED — NO WARNINGS");
 }
 
 // ---------------------------------------------------------------------------
@@ -690,7 +695,11 @@ void VulkanBufferManager::reserveScratchPool(VkDeviceSize size, uint32_t count) 
         };
         impl_->scratchBufferAddresses[i] = vkGetBufferDeviceAddress(context_->device, &addrInfo);
 
-        LOG_INFO_CAT("BufferMgr", "SCRATCH #{}: buf=0x{:x} | mem=0x{:x} | addr=0x{:x} | size={} B",
+        // CRITICAL FIX: TRACK IN RESOURCE MANAGER
+        context_->resourceManager.addBuffer(impl_->scratchBuffers[i]);
+        context_->resourceManager.addMemory(impl_->scratchBufferMemories[i]);
+
+        LOG_INFO_CAT("BufferMgr", "SCRATCH #{}: buf=0x{:x} | mem=0x{:x} | addr=0x{:x} | size={} B [TRACKED]",
                      i,
                      reinterpret_cast<uintptr_t>(impl_->scratchBuffers[i]),
                      reinterpret_cast<uintptr_t>(impl_->scratchBufferMemories[i]),

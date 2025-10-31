@@ -1,4 +1,6 @@
-// AMOURANTH RTX Engine (C) 2025 by Zachary Geurts gzac5314@gmail.com is licensed under CC BY-NC 4.0
+// src/engine/Vulkan/VulkanRenderer.cpp
+// AMOURANTH RTX Engine © 2025 by Zachary Geurts gzac5314@gmail.com is licensed under CC BY-NC 4.0
+
 #include "engine/Vulkan/VulkanRenderer.hpp"
 #include "engine/Vulkan/VulkanBufferManager.hpp"
 #include "engine/Vulkan/VulkanSwapchainManager.hpp"
@@ -52,13 +54,7 @@ VkShaderModule VulkanRenderer::createShaderModule(const std::string& filepath) {
 }
 
 // -----------------------------------------------------------------------------
-// CONSTRUCTOR — FIXED INITIALIZATION ORDER
-// -----------------------------------------------------------------------------
-// -----------------------------------------------------------------------------
-// CONSTRUCTOR — FIXED INITIALIZATION ORDER
-// -----------------------------------------------------------------------------
-// -----------------------------------------------------------------------------
-// CONSTRUCTOR — FIXED INITIALIZATION ORDER
+// CONSTRUCTOR — FULLY INITIALIZED
 // -----------------------------------------------------------------------------
 VulkanRenderer::VulkanRenderer(int width, int height, void* window,
                                const std::vector<std::string>& instanceExtensions)
@@ -75,8 +71,7 @@ VulkanRenderer::VulkanRenderer(int width, int height, void* window,
       tlasHandle_(VK_NULL_HANDLE), tlasBuffer_(VK_NULL_HANDLE), tlasBufferMemory_(VK_NULL_HANDLE),
       instanceBuffer_(VK_NULL_HANDLE), instanceBufferMemory_(VK_NULL_HANDLE),
       tlasDeviceAddress_(0),
-      context_(),                     // OBJECT — NO new
-      rtx_(), swapchainManager_(), pipelineManager_(), bufferManager_(),
+      context_(), swapchainManager_(), pipelineManager_(), bufferManager_(),
       frames_(), framebuffers_(), commandBuffers_(),
       descriptorSets_(), computeDescriptorSets_(),
       descriptorPool_(VK_NULL_HANDLE),
@@ -141,7 +136,6 @@ VulkanRenderer::VulkanRenderer(int width, int height, void* window,
     width_ = static_cast<int>(context_.swapchainExtent.width);
     height_ = static_cast<int>(context_.swapchainExtent.height);
     LOG_INFO_CAT("Renderer", "Swapchain extent synced: {}x{}", width_, height_);
-    LOG_INFO_CAT("Renderer", "Swapchain format: {} | RT output format: VK_FORMAT_R32G32B32A32_SFLOAT", static_cast<int>(context_.swapchainImageFormat));
 
     for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
         frames_[i].imageAvailableSemaphore = swapchainManager_->getImageAvailableSemaphore(i);
@@ -149,24 +143,24 @@ VulkanRenderer::VulkanRenderer(int width, int height, void* window,
         frames_[i].fence = swapchainManager_->getInFlightFence(i);
     }
 
-    // 5. PIPELINE MANAGER — EMPTY BUFFER MANAGER (SBT ONLY)
+    // 5. PIPELINE MANAGER
     pipelineManager_ = std::make_unique<VulkanPipelineManager>(context_, width_, height_);
 
-    // === CREATE ALL PIPELINES FIRST ===
+    // Create pipelines
     pipelineManager_->createRayTracingPipeline();
     pipelineManager_->createComputePipeline();
     pipelineManager_->createGraphicsPipeline(width_, height_);
 
-    // === GET LAYOUTS AND PIPELINE AFTER CREATION ===
+    // Get layouts and pipeline
     context_.rayTracingDescriptorSetLayout = pipelineManager_->createRayTracingDescriptorSetLayout();
     rtPipelineLayout_ = pipelineManager_->getRayTracingPipelineLayout();
     rtPipeline_ = pipelineManager_->getRayTracingPipeline();
 
-    // === CREATE SBT AFTER PIPELINE ===
+    // Create SBT
     pipelineManager_->createShaderBindingTable();
     sbt_ = pipelineManager_->getShaderBindingTable();
 
-    // 6. LOAD MESH DATA FIRST
+    // 6. LOAD MESH DATA
     const auto& vertices = getVertices();
     const auto& indices = getIndices();
 
@@ -175,7 +169,7 @@ VulkanRenderer::VulkanRenderer(int width, int height, void* window,
         throw std::runtime_error("Vertex / index data cannot be empty");
     }
 
-    // 7. BUFFER MANAGER — PASS REAL MESH DATA
+    // 7. BUFFER MANAGER
     bufferManager_ = std::make_unique<VulkanBufferManager>(
         context_,
         std::span<const glm::vec3>(vertices),
@@ -183,7 +177,7 @@ VulkanRenderer::VulkanRenderer(int width, int height, void* window,
     );
     indexCount_ = static_cast<uint32_t>(indices.size());
 
-    // 8. GEOMETRY & ACCELERATION STRUCTURES
+    // 8. ACCELERATION STRUCTURES
     buildAccelerationStructures();
 
     // 9. RT OUTPUT IMAGE
@@ -211,7 +205,7 @@ VulkanRenderer::VulkanRenderer(int width, int height, void* window,
 }
 
 // -----------------------------------------------------------------------------
-// BUILD ACCELERATION STRUCTURES
+// BUILD ACCELERATION STRUCTURES — FULLY TRACKED
 // -----------------------------------------------------------------------------
 void VulkanRenderer::buildAccelerationStructures() {
     const auto& verts = getVertices();
@@ -222,20 +216,16 @@ void VulkanRenderer::buildAccelerationStructures() {
     }
     LOG_INFO_CAT("Renderer", "Building BLAS with {} primitives", primitiveCount);
 
+    // === VALIDATE GEOMETRY ===
     for (size_t i = 0; i < idxs.size(); i += 3) {
         uint32_t a = idxs[i], b = idxs[i+1], c = idxs[i+2];
         if (a >= verts.size() || b >= verts.size() || c >= verts.size() || a == b || b == c || c == a) {
             LOG_ERROR_CAT("Renderer", "Invalid/degenerate triangle {}: indices [{}, {}, {}]", i/3, a, b, c);
             throw std::runtime_error("Degenerate geometry");
         }
-        glm::vec3 va = verts[a], vb = verts[b], vc = verts[c];
-        float area = 0.5f * glm::length(glm::cross(vb - va, vc - va));
-        if (area < 1e-5f) LOG_WARNING_CAT("Renderer", "Near-zero area triangle {}", i/3);
     }
-    LOG_INFO_CAT("Renderer", "Geometry integrity: {} valid tris", primitiveCount);
 
     auto submitAndWait = [&](VkCommandBuffer cmd, const std::string& step) {
-        LOG_INFO_CAT("Renderer", "Submitting {} to graphics queue {}", step, context_.graphicsQueueFamilyIndex);
         VkFenceCreateInfo fenceInfo = { .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
         VkFence fence;
         VK_CHECK(vkCreateFence(context_.device, &fenceInfo, nullptr, &fence));
@@ -267,8 +257,10 @@ void VulkanRenderer::buildAccelerationStructures() {
     VkDeviceSize vertexSize = verts.size() * sizeof(glm::vec3);
     VkDeviceSize indexSize = idxs.size() * sizeof(uint32_t);
 
-    VkBuffer stagingVertexBuffer, stagingIndexBuffer;
-    VkDeviceMemory stagingVertexMemory, stagingIndexMemory;
+    // === STAGING BUFFERS (HOST) ===
+    VkBuffer stagingVertexBuffer = VK_NULL_HANDLE, stagingIndexBuffer = VK_NULL_HANDLE;
+    VkDeviceMemory stagingVertexMemory = VK_NULL_HANDLE, stagingIndexMemory = VK_NULL_HANDLE;
+
     bufferManager_->createBuffer(vertexSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
                                  VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
                                  stagingVertexBuffer, stagingVertexMemory);
@@ -276,11 +268,14 @@ void VulkanRenderer::buildAccelerationStructures() {
                                  VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
                                  stagingIndexBuffer, stagingIndexMemory);
 
+    // Map & copy
     { void* data; VK_CHECK(vkMapMemory(context_.device, stagingVertexMemory, 0, vertexSize, 0, &data)); std::memcpy(data, verts.data(), vertexSize); vkUnmapMemory(context_.device, stagingVertexMemory); }
     { void* data; VK_CHECK(vkMapMemory(context_.device, stagingIndexMemory, 0, indexSize, 0, &data)); std::memcpy(data, idxs.data(), indexSize); vkUnmapMemory(context_.device, stagingIndexMemory); }
 
-    VkBuffer vertexBuffer, indexBuffer;
-    VkDeviceMemory vertexMemory, indexMemory;
+    // === DEVICE-LOCAL BUFFERS (GEOMETRY) ===
+    VkBuffer vertexBuffer = VK_NULL_HANDLE, indexBuffer = VK_NULL_HANDLE;
+    VkDeviceMemory vertexMemory = VK_NULL_HANDLE, indexMemory = VK_NULL_HANDLE;
+
     bufferManager_->createBuffer(vertexSize,
                                  VK_BUFFER_USAGE_TRANSFER_DST_BIT |
                                  VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
@@ -294,15 +289,26 @@ void VulkanRenderer::buildAccelerationStructures() {
                                  VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
                                  indexBuffer, indexMemory);
 
+    // TRACK IN RESOURCE MANAGER
+    context_.resourceManager.addBuffer(vertexBuffer);
+    context_.resourceManager.addMemory(vertexMemory);
+    context_.resourceManager.addBuffer(indexBuffer);
+    context_.resourceManager.addMemory(indexMemory);
+
+    // === COPY TO DEVICE ===
     VkCommandBuffer cmdCopy = allocateCmd();
-    { VkBufferCopy regionV{}; regionV.size = vertexSize; vkCmdCopyBuffer(cmdCopy, stagingVertexBuffer, vertexBuffer, 1, &regionV); }
-    { VkBufferCopy regionI{}; regionI.size = indexSize; vkCmdCopyBuffer(cmdCopy, stagingIndexBuffer, indexBuffer, 1, &regionI); }
+    { VkBufferCopy region{}; region.size = vertexSize; vkCmdCopyBuffer(cmdCopy, stagingVertexBuffer, vertexBuffer, 1, &region); }
+    { VkBufferCopy region{}; region.size = indexSize; vkCmdCopyBuffer(cmdCopy, stagingIndexBuffer, indexBuffer, 1, &region); }
     VK_CHECK(vkEndCommandBuffer(cmdCopy));
     submitAndWait(cmdCopy, "geometry copy");
 
-    vkDestroyBuffer(context_.device, stagingVertexBuffer, nullptr); vkFreeMemory(context_.device, stagingVertexMemory, nullptr);
-    vkDestroyBuffer(context_.device, stagingIndexBuffer, nullptr); vkFreeMemory(context_.device, stagingIndexMemory, nullptr);
+    // === CLEANUP STAGING ===
+    vkDestroyBuffer(context_.device, stagingVertexBuffer, nullptr);
+    vkFreeMemory(context_.device, stagingVertexMemory, nullptr);
+    vkDestroyBuffer(context_.device, stagingIndexBuffer, nullptr);
+    vkFreeMemory(context_.device, stagingIndexMemory, nullptr);
 
+    // === ADDRESSES ===
     VkBufferDeviceAddressInfo vAddrInfo{}; vAddrInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO; vAddrInfo.buffer = vertexBuffer;
     VkDeviceAddress vertexDeviceAddress = context_.vkGetBufferDeviceAddressKHR(context_.device, &vAddrInfo);
 
@@ -311,6 +317,7 @@ void VulkanRenderer::buildAccelerationStructures() {
 
     LOG_INFO_CAT("Renderer", "Vertex addr=0x{:x}, Index addr=0x{:x}", vertexDeviceAddress, indexDeviceAddress);
 
+    // === BLAS ===
     VkAccelerationStructureGeometryTrianglesDataKHR triangles{};
     triangles.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
     triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
@@ -341,6 +348,7 @@ void VulkanRenderer::buildAccelerationStructures() {
 
     LOG_INFO_CAT("Renderer", "BLAS sizes: storage={}B, scratch={}B", sizeInfo.accelerationStructureSize, sizeInfo.buildScratchSize);
 
+    // === RESERVE SCRATCH ===
     if (bufferManager_->getScratchBufferCount() == 0) {
         bufferManager_->reserveScratchPool(sizeInfo.buildScratchSize, 1);
         LOG_INFO_CAT("Renderer", "RESERVED scratch buffer: {} B", sizeInfo.buildScratchSize);
@@ -349,15 +357,22 @@ void VulkanRenderer::buildAccelerationStructures() {
     VkDeviceAddress scratchAddr = bufferManager_->getScratchBufferAddress(0);
     if (scratchAddr == 0) throw std::runtime_error("Scratch buffer address is 0");
 
+    // === BLAS STORAGE BUFFER (TRACKED) ===
+    VkBuffer blasBuffer = VK_NULL_HANDLE;
+    VkDeviceMemory blasMemory = VK_NULL_HANDLE;
     bufferManager_->createBuffer(sizeInfo.accelerationStructureSize,
                                  VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
                                  VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-                                 blasBuffer_, blasBufferMemory_);
+                                 blasBuffer, blasMemory);
+
+    // TRACK IT!
+    context_.resourceManager.addBuffer(blasBuffer);
+    context_.resourceManager.addMemory(blasMemory);
 
     VkAccelerationStructureCreateInfoKHR blasCreateInfo{};
     blasCreateInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
     blasCreateInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
-    blasCreateInfo.buffer = blasBuffer_;
+    blasCreateInfo.buffer = blasBuffer;
     blasCreateInfo.size = sizeInfo.accelerationStructureSize;
     VK_CHECK(context_.vkCreateAccelerationStructureKHR(context_.device, &blasCreateInfo, nullptr, &blasHandle_));
 
@@ -371,14 +386,22 @@ void VulkanRenderer::buildAccelerationStructures() {
     VK_CHECK(vkEndCommandBuffer(cmdBLAS));
     submitAndWait(cmdBLAS, "BLAS build");
 
-    vkDestroyBuffer(context_.device, vertexBuffer, nullptr); vkFreeMemory(context_.device, vertexMemory, nullptr);
-    vkDestroyBuffer(context_.device, indexBuffer, nullptr); vkFreeMemory(context_.device, indexMemory, nullptr);
+    // === CLEANUP GEOMETRY BUFFERS ===
+    context_.resourceManager.removeBuffer(vertexBuffer);
+    context_.resourceManager.removeMemory(vertexMemory);
+    vkDestroyBuffer(context_.device, vertexBuffer, nullptr);
+    vkFreeMemory(context_.device, vertexMemory, nullptr);
 
+    context_.resourceManager.removeBuffer(indexBuffer);
+    context_.resourceManager.removeMemory(indexMemory);
+    vkDestroyBuffer(context_.device, indexBuffer, nullptr);
+    vkFreeMemory(context_.device, indexMemory, nullptr);
+
+    // === TLAS ===
     VkAccelerationStructureDeviceAddressInfoKHR blasAddrInfo{};
     blasAddrInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR;
     blasAddrInfo.accelerationStructure = blasHandle_;
     VkDeviceAddress blasAddr = context_.vkGetAccelerationStructureDeviceAddressKHR(context_.device, &blasAddrInfo);
-    LOG_INFO_CAT("Renderer", "BLAS device address: 0x{:x}", blasAddr);
 
     VkAccelerationStructureInstanceKHR instance = {};
     instance.instanceCustomIndex = 0; instance.mask = 0xFF;
@@ -387,33 +410,26 @@ void VulkanRenderer::buildAccelerationStructures() {
     instance.transform.matrix[0][0] = 1.0f; instance.transform.matrix[1][1] = 1.0f; instance.transform.matrix[2][2] = 1.0f;
 
     VkDeviceSize instSize = sizeof(instance);
-    VkBuffer staging; VkDeviceMemory stagingMem;
-    bufferManager_->createBuffer(instSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, staging, stagingMem);
-    void* map; VK_CHECK(vkMapMemory(context_.device, stagingMem, 0, instSize, 0, &map)); memcpy(map, &instance, instSize); vkUnmapMemory(context_.device, stagingMem);
+    VkBuffer stagingInst = VK_NULL_HANDLE; VkDeviceMemory stagingInstMem = VK_NULL_HANDLE;
+    bufferManager_->createBuffer(instSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingInst, stagingInstMem);
+    void* map; VK_CHECK(vkMapMemory(context_.device, stagingInstMem, 0, instSize, 0, &map)); memcpy(map, &instance, instSize); vkUnmapMemory(context_.device, stagingInstMem);
 
-    bufferManager_->createBuffer(instSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, instanceBuffer_, instanceBufferMemory_);
+    VkBuffer instanceBuffer = VK_NULL_HANDLE; VkDeviceMemory instanceMemory = VK_NULL_HANDLE;
+    bufferManager_->createBuffer(instSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, instanceBuffer, instanceMemory);
+
+    // TRACK INSTANCE BUFFER
+    context_.resourceManager.addBuffer(instanceBuffer);
+    context_.resourceManager.addMemory(instanceMemory);
 
     VkCommandBuffer cmdInstCopy = allocateCmd();
     VkBufferCopy copyRegion{}; copyRegion.size = instSize;
-    vkCmdCopyBuffer(cmdInstCopy, staging, instanceBuffer_, 1, &copyRegion);
+    vkCmdCopyBuffer(cmdInstCopy, stagingInst, instanceBuffer, 1, &copyRegion);
     VK_CHECK(vkEndCommandBuffer(cmdInstCopy));
     submitAndWait(cmdInstCopy, "instance copy");
-    vkDestroyBuffer(context_.device, staging, nullptr); vkFreeMemory(context_.device, stagingMem, nullptr);
+    vkDestroyBuffer(context_.device, stagingInst, nullptr); vkFreeMemory(context_.device, stagingInstMem, nullptr);
 
-    VkBufferMemoryBarrier barrier{};
-    barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
-    barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-    barrier.dstAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR;
-    barrier.buffer = instanceBuffer_;
-    barrier.size = instSize;
-    VkCommandBuffer cmdBarrier = allocateCmd();
-    vkCmdPipelineBarrier(cmdBarrier, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR, 0, 0, nullptr, 1, &barrier, 0, nullptr);
-    VK_CHECK(vkEndCommandBuffer(cmdBarrier));
-    submitAndWait(cmdBarrier, "instance barrier");
-
-    VkBufferDeviceAddressInfo instAddrInfo{}; instAddrInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO; instAddrInfo.buffer = instanceBuffer_;
+    VkBufferDeviceAddressInfo instAddrInfo{}; instAddrInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO; instAddrInfo.buffer = instanceBuffer;
     VkDeviceAddress instAddr = context_.vkGetBufferDeviceAddressKHR(context_.device, &instAddrInfo);
-    LOG_INFO_CAT("Renderer", "Instance buffer address: 0x{:x}", instAddr);
 
     VkAccelerationStructureGeometryInstancesDataKHR instData{};
     instData.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR;
@@ -437,12 +453,19 @@ void VulkanRenderer::buildAccelerationStructures() {
     tlasSize.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
     context_.vkGetAccelerationStructureBuildSizesKHR(context_.device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &tlasBuildInfo, &tlasMaxPrim, &tlasSize);
 
-    bufferManager_->createBuffer(tlasSize.accelerationStructureSize, VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, tlasBuffer_, tlasBufferMemory_);
+    // === TLAS STORAGE BUFFER (TRACKED) ===
+    VkBuffer tlasBuffer = VK_NULL_HANDLE;
+    VkDeviceMemory tlasMemory = VK_NULL_HANDLE;
+    bufferManager_->createBuffer(tlasSize.accelerationStructureSize, VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, tlasBuffer, tlasMemory);
+
+    // TRACK IT!
+    context_.resourceManager.addBuffer(tlasBuffer);
+    context_.resourceManager.addMemory(tlasMemory);
 
     VkAccelerationStructureCreateInfoKHR tlasCreateInfo{};
     tlasCreateInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
     tlasCreateInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
-    tlasCreateInfo.buffer = tlasBuffer_;
+    tlasCreateInfo.buffer = tlasBuffer;
     tlasCreateInfo.size = tlasSize.accelerationStructureSize;
     VK_CHECK(context_.vkCreateAccelerationStructureKHR(context_.device, &tlasCreateInfo, nullptr, &tlasHandle_));
 
@@ -466,11 +489,10 @@ void VulkanRenderer::buildAccelerationStructures() {
 }
 
 // -----------------------------------------------------------------------------
-// CREATE RT OUTPUT IMAGE — FIXED RAII
+// CREATE RT OUTPUT IMAGE
 // -----------------------------------------------------------------------------
 void VulkanRenderer::createRTOutputImage()
 {
-    // Use actual swapchain extent for consistency
     VkExtent2D extent = context_.swapchainExtent;
     LOG_INFO_CAT("Renderer", "Creating RT output image at extent {}x{}", extent.width, extent.height);
 
@@ -526,15 +548,12 @@ void VulkanRenderer::createRTOutputImage()
 }
 
 // -----------------------------------------------------------------------------
-// RECREATE RT OUTPUT IMAGE (For Resize)
+// RECREATE RT OUTPUT IMAGE (Resize)
 // -----------------------------------------------------------------------------
 void VulkanRenderer::recreateRTOutputImage() {
-    // Cleanup old
     rtOutputImage_.reset();
     rtOutputImageMemory_.reset();
     rtOutputImageView_.reset();
-
-    // Recreate
     createRTOutputImage();
     LOG_INFO_CAT("Renderer", "RT output image recreated post-resize.");
 }
@@ -678,14 +697,12 @@ void VulkanRenderer::updateRTDescriptors() {
     }
 
     vkUpdateDescriptorSets(context_.device, totalWrites, writes.data(), 0, nullptr);
-    LOG_INFO_CAT("Renderer", "Updated descriptors with TLAS addr 0x{:x}", tlasDeviceAddress_);
-
     descriptorsUpdated_ = true;
     LOG_INFO_CAT("Renderer", "RT descriptors updated ({} writes).", totalWrites);
 }
 
 // -----------------------------------------------------------------------------
-// CLEANUP — SAFE DESTRUCTION
+// CLEANUP
 // -----------------------------------------------------------------------------
 VulkanRenderer::~VulkanRenderer() { cleanup(); }
 
@@ -852,7 +869,7 @@ void VulkanRenderer::createEnvironmentMap() {
 }
 
 // -----------------------------------------------------------------------------
-// INITIALIZE ALL BUFFER DATA
+// INITIALIZE BUFFER DATA
 // -----------------------------------------------------------------------------
 void VulkanRenderer::initializeAllBufferData(uint32_t maxFrames, VkDeviceSize materialSize, VkDeviceSize dimensionSize) {
     materialBuffers_.resize(maxFrames, VK_NULL_HANDLE);
@@ -970,7 +987,7 @@ void VulkanRenderer::createDescriptorSets() {
 }
 
 // -----------------------------------------------------------------------------
-// RENDER FRAME — FULLY FIXED (SBT from PipelineManager, Valid Regions)
+// RENDER FRAME
 // -----------------------------------------------------------------------------
 void VulkanRenderer::renderFrame(const Camera& camera) {
     auto frameStart = std::chrono::steady_clock::now();
@@ -995,12 +1012,12 @@ void VulkanRenderer::renderFrame(const Camera& camera) {
     VkCommandBufferBeginInfo beginInfo = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
     vkBeginCommandBuffer(cmd, &beginInfo);
 
-    // Clear to orange (debug miss)
+    // Clear RT output
     VkClearColorValue orange = { {1.0f, 0.5f, 0.0f, 1.0f} };
     VkImageSubresourceRange range = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
     vkCmdClearColorImage(cmd, rtOutputImage_.get(), VK_IMAGE_LAYOUT_GENERAL, &orange, 1, &range);
 
-    // RT write barrier
+    // RT barrier
     VkImageMemoryBarrier barrier = {
         .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
         .srcAccessMask = 0,
@@ -1098,7 +1115,6 @@ void VulkanRenderer::renderFrame(const Camera& camera) {
     ++frameCount_;
     ++framesThisSecond_;
 
-    // ONLY ONE LINE — EVERY SECOND — FPS + DEBUG
     auto now = std::chrono::steady_clock::now();
     auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastFPSTime_).count();
     if (elapsed >= 1000) {
@@ -1126,7 +1142,7 @@ void VulkanRenderer::updateUniformBuffer(uint32_t frameIndex, const Camera& came
 }
 
 // -----------------------------------------------------------------------------
-// HANDLE RESIZE
+// HANDLE RESIZE — FULLY INTEGRATED
 // -----------------------------------------------------------------------------
 void VulkanRenderer::handleResize(int width, int height) {
     if (width == 0 || height == 0) return;
@@ -1134,34 +1150,26 @@ void VulkanRenderer::handleResize(int width, int height) {
     vkDeviceWaitIdle(context_.device);
     width_ = width; height_ = height;
     swapchainManager_->handleResize(width, height);
-    context_.swapchainExtent = swapchainManager_->getSwapchainExtent();  // Refresh
+    context_.swapchainExtent = swapchainManager_->getSwapchainExtent();
 
-    // Sync width_/height_ to new extent
     width_ = static_cast<int>(context_.swapchainExtent.width);
     height_ = static_cast<int>(context_.swapchainExtent.height);
     LOG_INFO_CAT("Renderer", "Post-resize extent: {}x{}", width_, height_);
 
-    // Recreate RT output to match new extent
     recreateRTOutputImage();
-
-    // Refresh descriptors (image view changed)
     descriptorsUpdated_ = false;
     updateRTDescriptors();
-
     createFramebuffers();
     recreateSwapchain = false;
     LOG_INFO_CAT("Renderer", "Resize complete: all resources synced.");
 }
 
 // -----------------------------------------------------------------------------
-// GET VERTICES / INDICES
+// MESH LOADING
 // -----------------------------------------------------------------------------
 std::vector<glm::vec3> VulkanRenderer::getVertices() const {
     static std::vector<glm::vec3> cached;
-    if (!cached.empty()) {
-        LOG_DEBUG_CAT("Renderer", "Using cached vertices (size: {})", cached.size());
-        return cached;
-    }
+    if (!cached.empty()) return cached;
 
     LOG_INFO_CAT("Renderer", "Loading vertices from assets/models/scene.obj");
     tinyobj::attrib_t attrib;
@@ -1186,10 +1194,7 @@ std::vector<glm::vec3> VulkanRenderer::getVertices() const {
 
 std::vector<uint32_t> VulkanRenderer::getIndices() const {
     static std::vector<uint32_t> cached;
-    if (!cached.empty()) {
-        LOG_DEBUG_CAT("Renderer", "Using cached indices (size: {})", cached.size());
-        return cached;
-    }
+    if (!cached.empty()) return cached;
 
     LOG_INFO_CAT("Renderer", "Loading indices from assets/models/scene.obj");
     tinyobj::attrib_t attrib;
