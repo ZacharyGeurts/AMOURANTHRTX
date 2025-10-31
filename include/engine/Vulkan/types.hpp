@@ -99,13 +99,12 @@ struct ShaderBindingTable {
 };
 
 // ================================================================
-// 6. Denoiser Push Constants (for compute shader) - FIXED: Added width/height fields
+// 6. Denoiser Push Constants (for compute shader)
 // ================================================================
 struct alignas(16) DenoisePushConstants {
-    uint32_t width = 0;
-    uint32_t height = 0;
-    float kernelRadius = 1.0f;
-    uint32_t _pad0 = 0;  // Padding to 16 bytes
+    alignas(8)  glm::ivec2 imageSize     = glm::ivec2(0);     // 8 bytes
+    alignas(4)  float      kernelRadius  = 1.0f;              // 4 bytes
+    alignas(4)  uint32_t   _pad0         = 0;                 // 4 bytes → total 16
 };
 static_assert(sizeof(DenoisePushConstants) == 16, "DenoisePushConstants must be 16 bytes");
 

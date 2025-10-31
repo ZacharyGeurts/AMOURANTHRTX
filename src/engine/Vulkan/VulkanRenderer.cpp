@@ -1,6 +1,4 @@
-// src/engine/Vulkan/VulkanRenderer.cpp
-// AMOURANTH RTX Engine © 2025 by Zachary Geurts gzac5314@gmail.com is licensed under CC BY-NC 4.0
-
+// AMOURANTH RTX Engine (C) 2025 by Zachary Geurts gzac5314@gmail.com is licensed under CC BY-NC 4.0
 #include "engine/Vulkan/VulkanRenderer.hpp"
 #include "engine/Vulkan/VulkanBufferManager.hpp"
 #include "engine/Vulkan/VulkanSwapchainManager.hpp"
@@ -54,34 +52,30 @@ VkShaderModule VulkanRenderer::createShaderModule(const std::string& filepath) {
 }
 
 // -----------------------------------------------------------------------------
-// CONSTRUCTOR — FULLY INITIALIZED
+// CONSTRUCTOR — FIXED INITIALIZATION ORDER
 // -----------------------------------------------------------------------------
 VulkanRenderer::VulkanRenderer(int width, int height, void* window,
                                const std::vector<std::string>& instanceExtensions)
-    : width_(width), height_(height), window_(window),
-      currentFrame_(0), frameCount_(0), framesThisSecond_(0),
-      lastFPSTime_(std::chrono::steady_clock::now()),
-      indexCount_(0),
+    : width_(width), height_(height), window_(window), currentFrame_(0), frameCount_(0),
+      framesThisSecond_(0), lastFPSTime_(std::chrono::steady_clock::now()),
+      framesSinceLastLog_(0), lastLogTime_(std::chrono::steady_clock::now()),
+      indexCount_(0), rtPipeline_(VK_NULL_HANDLE), rtPipelineLayout_(VK_NULL_HANDLE),
       denoiseImage_(VK_NULL_HANDLE), denoiseImageMemory_(VK_NULL_HANDLE),
       denoiseImageView_(VK_NULL_HANDLE), denoiseSampler_(VK_NULL_HANDLE),
       envMapImage_(VK_NULL_HANDLE), envMapImageMemory_(VK_NULL_HANDLE),
       envMapImageView_(VK_NULL_HANDLE), envMapSampler_(VK_NULL_HANDLE),
-      computeDescriptorSetLayout_(VK_NULL_HANDLE),
       blasHandle_(VK_NULL_HANDLE), blasBuffer_(VK_NULL_HANDLE), blasBufferMemory_(VK_NULL_HANDLE),
       tlasHandle_(VK_NULL_HANDLE), tlasBuffer_(VK_NULL_HANDLE), tlasBufferMemory_(VK_NULL_HANDLE),
       instanceBuffer_(VK_NULL_HANDLE), instanceBufferMemory_(VK_NULL_HANDLE),
-      tlasDeviceAddress_(0),
-      context_(), swapchainManager_(), pipelineManager_(), bufferManager_(),
-      frames_(), framebuffers_(), commandBuffers_(),
-      descriptorSets_(), computeDescriptorSets_(),
-      descriptorPool_(VK_NULL_HANDLE),
-      materialBuffers_(), materialBufferMemory_(),
-      dimensionBuffers_(), dimensionBufferMemory_(),
-      camera_(std::make_unique<PerspectiveCamera>()),
-      descriptorsUpdated_(false), recreateSwapchain(false),
-      vkCmdTraceRaysKHR_(nullptr),
-      rtPipeline_(VK_NULL_HANDLE), rtPipelineLayout_(VK_NULL_HANDLE),
-      sbtBuffer_(VK_NULL_HANDLE), sbtMemory_(VK_NULL_HANDLE), sbt_{}
+      sbtBuffer_(VK_NULL_HANDLE), sbtMemory_(VK_NULL_HANDLE),
+      rtOutputImage_(context_.device, VK_NULL_HANDLE, vkDestroyImage),
+      rtOutputImageMemory_(context_.device, VK_NULL_HANDLE, vkFreeMemory),
+      rtOutputImageView_(context_.device, VK_NULL_HANDLE, vkDestroyImageView),
+      context_(), rtx_(), swapchainManager_(), pipelineManager_(), bufferManager_(),
+      frames_(), framebuffers_(), commandBuffers_(), descriptorSets_(), computeDescriptorSets_(),
+      descriptorPool_(VK_NULL_HANDLE), materialBuffers_(), materialBufferMemory_(),
+      dimensionBuffers_(), dimensionBufferMemory_(), camera_(),
+      descriptorsUpdated_(false), recreateSwapchain(false)
 {
     LOG_INFO_CAT("Renderer", "=== VulkanRenderer Constructor Start ===");
     frames_.resize(MAX_FRAMES_IN_FLIGHT);
@@ -146,66 +140,57 @@ VulkanRenderer::VulkanRenderer(int width, int height, void* window,
     // 5. PIPELINE MANAGER
     pipelineManager_ = std::make_unique<VulkanPipelineManager>(context_, width_, height_);
 
-    // Create pipelines
+    // === CREATE ALL PIPELINES FIRST ===
     pipelineManager_->createRayTracingPipeline();
     pipelineManager_->createComputePipeline();
     pipelineManager_->createGraphicsPipeline(width_, height_);
 
-    // Get layouts and pipeline
+    // === GET LAYOUTS AND PIPELINE AFTER CREATION ===
     context_.rayTracingDescriptorSetLayout = pipelineManager_->createRayTracingDescriptorSetLayout();
     rtPipelineLayout_ = pipelineManager_->getRayTracingPipelineLayout();
     rtPipeline_ = pipelineManager_->getRayTracingPipeline();
 
-    // Create SBT
+    // === CREATE SBT AFTER PIPELINE ===
     pipelineManager_->createShaderBindingTable();
     sbt_ = pipelineManager_->getShaderBindingTable();
 
-    // 6. LOAD MESH DATA
-    const auto& vertices = getVertices();
-    const auto& indices = getIndices();
-
-    if (vertices.empty() || indices.empty()) {
-        LOG_ERROR_CAT("Renderer", "Vertex / index data cannot be empty");
-        throw std::runtime_error("Vertex / index data cannot be empty");
-    }
-
-    // 7. BUFFER MANAGER
+    // 6. BUFFER MANAGER
     bufferManager_ = std::make_unique<VulkanBufferManager>(
         context_,
-        std::span<const glm::vec3>(vertices),
-        std::span<const uint32_t>(indices)
+        std::span<const glm::vec3>(getVertices()),
+        std::span<const uint32_t>(getIndices())
     );
-    indexCount_ = static_cast<uint32_t>(indices.size());
+    indexCount_ = static_cast<uint32_t>(getIndices().size());
 
-    // 8. ACCELERATION STRUCTURES
+    // 7. GEOMETRY & ACCELERATION STRUCTURES
     buildAccelerationStructures();
 
-    // 9. RT OUTPUT IMAGE
+    // 8. RT OUTPUT IMAGE
     createRTOutputImage();
 
-    // 10. FRAMEBUFFERS & COMMAND BUFFERS
+    // 9. FRAMEBUFFERS & COMMAND BUFFERS
     createFramebuffers();
     createCommandBuffers();
 
-    // 11. ENVIRONMENT MAP
+    // 10. ENVIRONMENT MAP
     createEnvironmentMap();
 
-    // 12. PER-FRAME BUFFERS
+    // 11. PER-FRAME BUFFERS
     initializeAllBufferData(MAX_FRAMES_IN_FLIGHT, sizeof(MaterialData) * 128, sizeof(DimensionData));
 
-    // 13. DESCRIPTOR SYSTEM
+    // 12. DESCRIPTOR SYSTEM
     createDescriptorPool();
     createDescriptorSets();
     createComputeDescriptorSets();
 
-    // 14. UPDATE DESCRIPTORS
+    // 13. UPDATE DESCRIPTORS
     updateRTDescriptors();
 
     LOG_INFO_CAT("Renderer", "=== VulkanRenderer Initialized Successfully ===");
 }
 
 // -----------------------------------------------------------------------------
-// BUILD ACCELERATION STRUCTURES — FULLY TRACKED
+// BUILD ACCELERATION STRUCTURES
 // -----------------------------------------------------------------------------
 void VulkanRenderer::buildAccelerationStructures() {
     const auto& verts = getVertices();
@@ -216,16 +201,20 @@ void VulkanRenderer::buildAccelerationStructures() {
     }
     LOG_INFO_CAT("Renderer", "Building BLAS with {} primitives", primitiveCount);
 
-    // === VALIDATE GEOMETRY ===
     for (size_t i = 0; i < idxs.size(); i += 3) {
         uint32_t a = idxs[i], b = idxs[i+1], c = idxs[i+2];
         if (a >= verts.size() || b >= verts.size() || c >= verts.size() || a == b || b == c || c == a) {
             LOG_ERROR_CAT("Renderer", "Invalid/degenerate triangle {}: indices [{}, {}, {}]", i/3, a, b, c);
             throw std::runtime_error("Degenerate geometry");
         }
+        glm::vec3 va = verts[a], vb = verts[b], vc = verts[c];
+        float area = 0.5f * glm::length(glm::cross(vb - va, vc - va));
+        if (area < 1e-5f) LOG_WARNING_CAT("Renderer", "Near-zero area triangle {}", i/3);
     }
+    LOG_INFO_CAT("Renderer", "Geometry integrity: {} valid tris", primitiveCount);
 
     auto submitAndWait = [&](VkCommandBuffer cmd, const std::string& step) {
+        LOG_INFO_CAT("Renderer", "Submitting {} to graphics queue {}", step, context_.graphicsQueueFamilyIndex);
         VkFenceCreateInfo fenceInfo = { .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
         VkFence fence;
         VK_CHECK(vkCreateFence(context_.device, &fenceInfo, nullptr, &fence));
@@ -257,10 +246,8 @@ void VulkanRenderer::buildAccelerationStructures() {
     VkDeviceSize vertexSize = verts.size() * sizeof(glm::vec3);
     VkDeviceSize indexSize = idxs.size() * sizeof(uint32_t);
 
-    // === STAGING BUFFERS (HOST) ===
-    VkBuffer stagingVertexBuffer = VK_NULL_HANDLE, stagingIndexBuffer = VK_NULL_HANDLE;
-    VkDeviceMemory stagingVertexMemory = VK_NULL_HANDLE, stagingIndexMemory = VK_NULL_HANDLE;
-
+    VkBuffer stagingVertexBuffer, stagingIndexBuffer;
+    VkDeviceMemory stagingVertexMemory, stagingIndexMemory;
     bufferManager_->createBuffer(vertexSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
                                  VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
                                  stagingVertexBuffer, stagingVertexMemory);
@@ -268,14 +255,11 @@ void VulkanRenderer::buildAccelerationStructures() {
                                  VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
                                  stagingIndexBuffer, stagingIndexMemory);
 
-    // Map & copy
     { void* data; VK_CHECK(vkMapMemory(context_.device, stagingVertexMemory, 0, vertexSize, 0, &data)); std::memcpy(data, verts.data(), vertexSize); vkUnmapMemory(context_.device, stagingVertexMemory); }
     { void* data; VK_CHECK(vkMapMemory(context_.device, stagingIndexMemory, 0, indexSize, 0, &data)); std::memcpy(data, idxs.data(), indexSize); vkUnmapMemory(context_.device, stagingIndexMemory); }
 
-    // === DEVICE-LOCAL BUFFERS (GEOMETRY) ===
-    VkBuffer vertexBuffer = VK_NULL_HANDLE, indexBuffer = VK_NULL_HANDLE;
-    VkDeviceMemory vertexMemory = VK_NULL_HANDLE, indexMemory = VK_NULL_HANDLE;
-
+    VkBuffer vertexBuffer, indexBuffer;
+    VkDeviceMemory vertexMemory, indexMemory;
     bufferManager_->createBuffer(vertexSize,
                                  VK_BUFFER_USAGE_TRANSFER_DST_BIT |
                                  VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
@@ -289,26 +273,15 @@ void VulkanRenderer::buildAccelerationStructures() {
                                  VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
                                  indexBuffer, indexMemory);
 
-    // TRACK IN RESOURCE MANAGER
-    context_.resourceManager.addBuffer(vertexBuffer);
-    context_.resourceManager.addMemory(vertexMemory);
-    context_.resourceManager.addBuffer(indexBuffer);
-    context_.resourceManager.addMemory(indexMemory);
-
-    // === COPY TO DEVICE ===
     VkCommandBuffer cmdCopy = allocateCmd();
-    { VkBufferCopy region{}; region.size = vertexSize; vkCmdCopyBuffer(cmdCopy, stagingVertexBuffer, vertexBuffer, 1, &region); }
-    { VkBufferCopy region{}; region.size = indexSize; vkCmdCopyBuffer(cmdCopy, stagingIndexBuffer, indexBuffer, 1, &region); }
+    { VkBufferCopy regionV{}; regionV.size = vertexSize; vkCmdCopyBuffer(cmdCopy, stagingVertexBuffer, vertexBuffer, 1, &regionV); }
+    { VkBufferCopy regionI{}; regionI.size = indexSize; vkCmdCopyBuffer(cmdCopy, stagingIndexBuffer, indexBuffer, 1, &regionI); }
     VK_CHECK(vkEndCommandBuffer(cmdCopy));
     submitAndWait(cmdCopy, "geometry copy");
 
-    // === CLEANUP STAGING ===
-    vkDestroyBuffer(context_.device, stagingVertexBuffer, nullptr);
-    vkFreeMemory(context_.device, stagingVertexMemory, nullptr);
-    vkDestroyBuffer(context_.device, stagingIndexBuffer, nullptr);
-    vkFreeMemory(context_.device, stagingIndexMemory, nullptr);
+    vkDestroyBuffer(context_.device, stagingVertexBuffer, nullptr); vkFreeMemory(context_.device, stagingVertexMemory, nullptr);
+    vkDestroyBuffer(context_.device, stagingIndexBuffer, nullptr); vkFreeMemory(context_.device, stagingIndexMemory, nullptr);
 
-    // === ADDRESSES ===
     VkBufferDeviceAddressInfo vAddrInfo{}; vAddrInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO; vAddrInfo.buffer = vertexBuffer;
     VkDeviceAddress vertexDeviceAddress = context_.vkGetBufferDeviceAddressKHR(context_.device, &vAddrInfo);
 
@@ -317,7 +290,6 @@ void VulkanRenderer::buildAccelerationStructures() {
 
     LOG_INFO_CAT("Renderer", "Vertex addr=0x{:x}, Index addr=0x{:x}", vertexDeviceAddress, indexDeviceAddress);
 
-    // === BLAS ===
     VkAccelerationStructureGeometryTrianglesDataKHR triangles{};
     triangles.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
     triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
@@ -348,7 +320,6 @@ void VulkanRenderer::buildAccelerationStructures() {
 
     LOG_INFO_CAT("Renderer", "BLAS sizes: storage={}B, scratch={}B", sizeInfo.accelerationStructureSize, sizeInfo.buildScratchSize);
 
-    // === RESERVE SCRATCH ===
     if (bufferManager_->getScratchBufferCount() == 0) {
         bufferManager_->reserveScratchPool(sizeInfo.buildScratchSize, 1);
         LOG_INFO_CAT("Renderer", "RESERVED scratch buffer: {} B", sizeInfo.buildScratchSize);
@@ -357,22 +328,15 @@ void VulkanRenderer::buildAccelerationStructures() {
     VkDeviceAddress scratchAddr = bufferManager_->getScratchBufferAddress(0);
     if (scratchAddr == 0) throw std::runtime_error("Scratch buffer address is 0");
 
-    // === BLAS STORAGE BUFFER (TRACKED) ===
-    VkBuffer blasBuffer = VK_NULL_HANDLE;
-    VkDeviceMemory blasMemory = VK_NULL_HANDLE;
     bufferManager_->createBuffer(sizeInfo.accelerationStructureSize,
                                  VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
                                  VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-                                 blasBuffer, blasMemory);
-
-    // TRACK IT!
-    context_.resourceManager.addBuffer(blasBuffer);
-    context_.resourceManager.addMemory(blasMemory);
+                                 blasBuffer_, blasBufferMemory_);
 
     VkAccelerationStructureCreateInfoKHR blasCreateInfo{};
     blasCreateInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
     blasCreateInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
-    blasCreateInfo.buffer = blasBuffer;
+    blasCreateInfo.buffer = blasBuffer_;
     blasCreateInfo.size = sizeInfo.accelerationStructureSize;
     VK_CHECK(context_.vkCreateAccelerationStructureKHR(context_.device, &blasCreateInfo, nullptr, &blasHandle_));
 
@@ -386,18 +350,9 @@ void VulkanRenderer::buildAccelerationStructures() {
     VK_CHECK(vkEndCommandBuffer(cmdBLAS));
     submitAndWait(cmdBLAS, "BLAS build");
 
-    // === CLEANUP GEOMETRY BUFFERS ===
-    context_.resourceManager.removeBuffer(vertexBuffer);
-    context_.resourceManager.removeMemory(vertexMemory);
-    vkDestroyBuffer(context_.device, vertexBuffer, nullptr);
-    vkFreeMemory(context_.device, vertexMemory, nullptr);
+    vkDestroyBuffer(context_.device, vertexBuffer, nullptr); vkFreeMemory(context_.device, vertexMemory, nullptr);
+    vkDestroyBuffer(context_.device, indexBuffer, nullptr); vkFreeMemory(context_.device, indexMemory, nullptr);
 
-    context_.resourceManager.removeBuffer(indexBuffer);
-    context_.resourceManager.removeMemory(indexMemory);
-    vkDestroyBuffer(context_.device, indexBuffer, nullptr);
-    vkFreeMemory(context_.device, indexMemory, nullptr);
-
-    // === TLAS ===
     VkAccelerationStructureDeviceAddressInfoKHR blasAddrInfo{};
     blasAddrInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR;
     blasAddrInfo.accelerationStructure = blasHandle_;
@@ -410,25 +365,31 @@ void VulkanRenderer::buildAccelerationStructures() {
     instance.transform.matrix[0][0] = 1.0f; instance.transform.matrix[1][1] = 1.0f; instance.transform.matrix[2][2] = 1.0f;
 
     VkDeviceSize instSize = sizeof(instance);
-    VkBuffer stagingInst = VK_NULL_HANDLE; VkDeviceMemory stagingInstMem = VK_NULL_HANDLE;
-    bufferManager_->createBuffer(instSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingInst, stagingInstMem);
-    void* map; VK_CHECK(vkMapMemory(context_.device, stagingInstMem, 0, instSize, 0, &map)); memcpy(map, &instance, instSize); vkUnmapMemory(context_.device, stagingInstMem);
+    VkBuffer staging; VkDeviceMemory stagingMem;
+    bufferManager_->createBuffer(instSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, staging, stagingMem);
+    void* map; VK_CHECK(vkMapMemory(context_.device, stagingMem, 0, instSize, 0, &map)); memcpy(map, &instance, instSize); vkUnmapMemory(context_.device, stagingMem);
 
-    VkBuffer instanceBuffer = VK_NULL_HANDLE; VkDeviceMemory instanceMemory = VK_NULL_HANDLE;
-    bufferManager_->createBuffer(instSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, instanceBuffer, instanceMemory);
-
-    // TRACK INSTANCE BUFFER
-    context_.resourceManager.addBuffer(instanceBuffer);
-    context_.resourceManager.addMemory(instanceMemory);
+    bufferManager_->createBuffer(instSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, instanceBuffer_, instanceBufferMemory_);
 
     VkCommandBuffer cmdInstCopy = allocateCmd();
     VkBufferCopy copyRegion{}; copyRegion.size = instSize;
-    vkCmdCopyBuffer(cmdInstCopy, stagingInst, instanceBuffer, 1, &copyRegion);
+    vkCmdCopyBuffer(cmdInstCopy, staging, instanceBuffer_, 1, &copyRegion);
     VK_CHECK(vkEndCommandBuffer(cmdInstCopy));
     submitAndWait(cmdInstCopy, "instance copy");
-    vkDestroyBuffer(context_.device, stagingInst, nullptr); vkFreeMemory(context_.device, stagingInstMem, nullptr);
+    vkDestroyBuffer(context_.device, staging, nullptr); vkFreeMemory(context_.device, stagingMem, nullptr);
 
-    VkBufferDeviceAddressInfo instAddrInfo{}; instAddrInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO; instAddrInfo.buffer = instanceBuffer;
+    VkBufferMemoryBarrier barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+    barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    barrier.dstAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR;
+    barrier.buffer = instanceBuffer_;
+    barrier.size = instSize;
+    VkCommandBuffer cmdBarrier = allocateCmd();
+    vkCmdPipelineBarrier(cmdBarrier, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR, 0, 0, nullptr, 1, &barrier, 0, nullptr);
+    VK_CHECK(vkEndCommandBuffer(cmdBarrier));
+    submitAndWait(cmdBarrier, "instance barrier");
+
+    VkBufferDeviceAddressInfo instAddrInfo{}; instAddrInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO; instAddrInfo.buffer = instanceBuffer_;
     VkDeviceAddress instAddr = context_.vkGetBufferDeviceAddressKHR(context_.device, &instAddrInfo);
 
     VkAccelerationStructureGeometryInstancesDataKHR instData{};
@@ -439,60 +400,49 @@ void VulkanRenderer::buildAccelerationStructures() {
     tlasGeom.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
     tlasGeom.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
     tlasGeom.geometry.instances = instData;
+    tlasGeom.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
 
-    VkAccelerationStructureBuildGeometryInfoKHR tlasBuildInfo{};
-    tlasBuildInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
-    tlasBuildInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
-    tlasBuildInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
-    tlasBuildInfo.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
-    tlasBuildInfo.geometryCount = 1;
-    tlasBuildInfo.pGeometries = &tlasGeom;
+    buildInfo = VkAccelerationStructureBuildGeometryInfoKHR{};
+    buildInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
+    buildInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
+    buildInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+    buildInfo.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
+    buildInfo.geometryCount = 1;
+    buildInfo.pGeometries = &tlasGeom;
 
     uint32_t tlasMaxPrim = 1;
     VkAccelerationStructureBuildSizesInfoKHR tlasSize{};
     tlasSize.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
-    context_.vkGetAccelerationStructureBuildSizesKHR(context_.device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &tlasBuildInfo, &tlasMaxPrim, &tlasSize);
+    context_.vkGetAccelerationStructureBuildSizesKHR(context_.device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &buildInfo, &tlasMaxPrim, &tlasSize);
 
-    // === TLAS STORAGE BUFFER (TRACKED) ===
-    VkBuffer tlasBuffer = VK_NULL_HANDLE;
-    VkDeviceMemory tlasMemory = VK_NULL_HANDLE;
-    bufferManager_->createBuffer(tlasSize.accelerationStructureSize, VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, tlasBuffer, tlasMemory);
-
-    // TRACK IT!
-    context_.resourceManager.addBuffer(tlasBuffer);
-    context_.resourceManager.addMemory(tlasMemory);
+    bufferManager_->createBuffer(tlasSize.accelerationStructureSize, VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, tlasBuffer_, tlasBufferMemory_);
 
     VkAccelerationStructureCreateInfoKHR tlasCreateInfo{};
     tlasCreateInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
     tlasCreateInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
-    tlasCreateInfo.buffer = tlasBuffer;
+    tlasCreateInfo.buffer = tlasBuffer_;
     tlasCreateInfo.size = tlasSize.accelerationStructureSize;
     VK_CHECK(context_.vkCreateAccelerationStructureKHR(context_.device, &tlasCreateInfo, nullptr, &tlasHandle_));
 
-    tlasBuildInfo.dstAccelerationStructure = tlasHandle_;
-    tlasBuildInfo.scratchData.deviceAddress = scratchAddr;
+    buildInfo.dstAccelerationStructure = tlasHandle_;
+    buildInfo.scratchData.deviceAddress = scratchAddr;
 
     VkCommandBuffer cmdTLAS = allocateCmd();
     VkAccelerationStructureBuildRangeInfoKHR tlasRange{}; tlasRange.primitiveCount = 1;
     const VkAccelerationStructureBuildRangeInfoKHR* pTlasRange = &tlasRange;
-    context_.vkCmdBuildAccelerationStructuresKHR(cmdTLAS, 1, &tlasBuildInfo, &pTlasRange);
+    context_.vkCmdBuildAccelerationStructuresKHR(cmdTLAS, 1, &buildInfo, &pTlasRange);
     VK_CHECK(vkEndCommandBuffer(cmdTLAS));
     submitAndWait(cmdTLAS, "TLAS build");
-
-    VkAccelerationStructureDeviceAddressInfoKHR tlasAddrInfo{};
-    tlasAddrInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR;
-    tlasAddrInfo.accelerationStructure = tlasHandle_;
-    tlasDeviceAddress_ = context_.vkGetAccelerationStructureDeviceAddressKHR(context_.device, &tlasAddrInfo);
-    LOG_INFO_CAT("Renderer", "TLAS device address: 0x{:x}", tlasDeviceAddress_);
 
     LOG_INFO_CAT("Renderer", "Acceleration structures built successfully.");
 }
 
 // -----------------------------------------------------------------------------
-// CREATE RT OUTPUT IMAGE
+// CREATE RT OUTPUT IMAGE — FIXED RAII
 // -----------------------------------------------------------------------------
 void VulkanRenderer::createRTOutputImage()
 {
+    // Use actual swapchain extent for consistency
     VkExtent2D extent = context_.swapchainExtent;
     LOG_INFO_CAT("Renderer", "Creating RT output image at extent {}x{}", extent.width, extent.height);
 
@@ -548,12 +498,15 @@ void VulkanRenderer::createRTOutputImage()
 }
 
 // -----------------------------------------------------------------------------
-// RECREATE RT OUTPUT IMAGE (Resize)
+// RECREATE RT OUTPUT IMAGE (For Resize)
 // -----------------------------------------------------------------------------
 void VulkanRenderer::recreateRTOutputImage() {
+    // Cleanup old
     rtOutputImage_.reset();
     rtOutputImageMemory_.reset();
     rtOutputImageView_.reset();
+
+    // Recreate
     createRTOutputImage();
     LOG_INFO_CAT("Renderer", "RT output image recreated post-resize.");
 }
@@ -697,12 +650,13 @@ void VulkanRenderer::updateRTDescriptors() {
     }
 
     vkUpdateDescriptorSets(context_.device, totalWrites, writes.data(), 0, nullptr);
+
     descriptorsUpdated_ = true;
     LOG_INFO_CAT("Renderer", "RT descriptors updated ({} writes).", totalWrites);
 }
 
 // -----------------------------------------------------------------------------
-// CLEANUP
+// CLEANUP — SAFE DESTRUCTION
 // -----------------------------------------------------------------------------
 VulkanRenderer::~VulkanRenderer() { cleanup(); }
 
@@ -869,7 +823,7 @@ void VulkanRenderer::createEnvironmentMap() {
 }
 
 // -----------------------------------------------------------------------------
-// INITIALIZE BUFFER DATA
+// INITIALIZE ALL BUFFER DATA
 // -----------------------------------------------------------------------------
 void VulkanRenderer::initializeAllBufferData(uint32_t maxFrames, VkDeviceSize materialSize, VkDeviceSize dimensionSize) {
     materialBuffers_.resize(maxFrames, VK_NULL_HANDLE);
@@ -987,144 +941,189 @@ void VulkanRenderer::createDescriptorSets() {
 }
 
 // -----------------------------------------------------------------------------
-// RENDER FRAME
+// RENDER FRAME — FULLY FIXED (SBT from PipelineManager, Valid Regions)
 // -----------------------------------------------------------------------------
 void VulkanRenderer::renderFrame(const Camera& camera) {
     auto frameStart = std::chrono::steady_clock::now();
 
+    // Wait for previous frame to finish
     vkWaitForFences(context_.device, 1, &frames_[currentFrame_].fence, VK_TRUE, UINT64_MAX);
     vkResetFences(context_.device, 1, &frames_[currentFrame_].fence);
 
+    // Acquire swapchain image
     uint32_t imageIndex;
     VkResult result = vkAcquireNextImageKHR(context_.device, context_.swapchain, UINT64_MAX,
                                             frames_[currentFrame_].imageAvailableSemaphore, VK_NULL_HANDLE, &imageIndex);
-    if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
+    if (result == VK_ERROR_OUT_OF_DATE_KHR) {
         recreateSwapchain = true;
         return;
-    } else if (result != VK_SUCCESS) {
+    } else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
         throw std::runtime_error("Failed to acquire swapchain image");
     }
 
+    // Update camera matrices
     updateUniformBuffer(currentFrame_, camera);
 
+    // Begin command buffer
     VkCommandBuffer cmd = commandBuffers_[currentFrame_];
-    vkResetCommandBuffer(cmd, 0);
-    VkCommandBufferBeginInfo beginInfo = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
-    vkBeginCommandBuffer(cmd, &beginInfo);
+    VK_CHECK(vkResetCommandBuffer(cmd, 0));
 
-    // Clear RT output
-    VkClearColorValue orange = { {1.0f, 0.5f, 0.0f, 1.0f} };
-    VkImageSubresourceRange range = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-    vkCmdClearColorImage(cmd, rtOutputImage_.get(), VK_IMAGE_LAYOUT_GENERAL, &orange, 1, &range);
+    VkCommandBufferBeginInfo beginInfo{};
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    VK_CHECK(vkBeginCommandBuffer(cmd, &beginInfo));
 
-    // RT barrier
-    VkImageMemoryBarrier barrier = {
-        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-        .srcAccessMask = 0,
-        .dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
-        .oldLayout = VK_IMAGE_LAYOUT_GENERAL,
-        .newLayout = VK_IMAGE_LAYOUT_GENERAL,
-        .image = rtOutputImage_.get(),
-        .subresourceRange = range
-    };
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+    // Use swapchain extent for dispatch/copy consistency
+    uint32_t renderWidth = context_.swapchainExtent.width;
+    uint32_t renderHeight = context_.swapchainExtent.height;
 
+    // Proper barrier before RT: from previous TRANSFER_READ to SHADER_WRITE (layout stays GENERAL)
+    VkImageMemoryBarrier preTraceBarrier{};
+    preTraceBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    preTraceBarrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    preTraceBarrier.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    preTraceBarrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+    preTraceBarrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+    preTraceBarrier.image = rtOutputImage_.get();
+    preTraceBarrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, 0, 0, nullptr, 0, nullptr, 1, &preTraceBarrier);
+
+    // Bind ray tracing pipeline & descriptors
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, rtPipeline_);
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, rtPipelineLayout_, 0, 1, &descriptorSets_[currentFrame_], 0, nullptr);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
+                            rtPipelineLayout_, 0, 1, &descriptorSets_[currentFrame_], 0, nullptr);
 
+    // FIXED: Use CORRECT SBT from PipelineManager (not stale sbt_)
     const auto& sbt = pipelineManager_->getShaderBindingTable();
-    VkStridedDeviceAddressRegionKHR raygen = { sbt.raygen.deviceAddress, sbt.raygen.stride, sbt.raygen.size };
-    VkStridedDeviceAddressRegionKHR miss   = { sbt.miss.deviceAddress,   sbt.miss.stride,   sbt.miss.size   };
-    VkStridedDeviceAddressRegionKHR hit    = { sbt.hit.deviceAddress,    sbt.hit.stride,    sbt.hit.size    };
-    VkStridedDeviceAddressRegionKHR callable{};
 
-    context_.vkCmdTraceRaysKHR(cmd, &raygen, &miss, &hit, &callable,
-                               context_.swapchainExtent.width, context_.swapchainExtent.height, 1);
+    // Validate SBT addresses
+    if (sbt.raygen.deviceAddress == 0 || sbt.miss.deviceAddress == 0 || sbt.hit.deviceAddress == 0) {
+        LOG_ERROR_CAT("Renderer", "Invalid SBT addresses! Raygen=0x{:x}, Miss=0x{:x}, Hit=0x{:x}",
+                      sbt.raygen.deviceAddress, sbt.miss.deviceAddress, sbt.hit.deviceAddress);
+        throw std::runtime_error("Invalid SBT");
+    }
 
-    // RT to transfer
-    barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-    barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-    barrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
-    barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+    // Set up SBT regions
+    VkStridedDeviceAddressRegionKHR raygenRegion{};
+    raygenRegion.deviceAddress = sbt.raygen.deviceAddress;
+    raygenRegion.stride        = sbt.raygen.stride;
+    raygenRegion.size          = sbt.raygen.size;
 
-    // Swapchain to transfer dst
-    VkImageMemoryBarrier swapBarrier = {
-        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-        .srcAccessMask = 0,
-        .dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
-        .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-        .newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-        .image = context_.swapchainImages[imageIndex],
-        .subresourceRange = range
-    };
+    VkStridedDeviceAddressRegionKHR missRegion{};
+    missRegion.deviceAddress   = sbt.miss.deviceAddress;
+    missRegion.stride          = sbt.miss.stride;
+    missRegion.size            = sbt.miss.size;
+
+    VkStridedDeviceAddressRegionKHR hitRegion{};
+    hitRegion.deviceAddress    = sbt.hit.deviceAddress;
+    hitRegion.stride           = sbt.hit.stride;
+    hitRegion.size             = sbt.hit.size;
+
+    VkStridedDeviceAddressRegionKHR callableRegion{};
+
+    // Dispatch ray tracing
+    context_.vkCmdTraceRaysKHR(cmd,
+        &raygenRegion,
+        &missRegion,
+        &hitRegion,
+        &callableRegion,
+        renderWidth,
+        renderHeight,
+        1);
+
+    // Transition RT output to TRANSFER_SRC for copy
+    VkImageMemoryBarrier postTraceBarrier{};
+    postTraceBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    postTraceBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    postTraceBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    postTraceBarrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+    postTraceBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    postTraceBarrier.image = rtOutputImage_.get();
+    postTraceBarrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &postTraceBarrier);
+
+    // Transition swapchain image to TRANSFER_DST
+    VkImageMemoryBarrier swapBarrier{};
+    swapBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    swapBarrier.srcAccessMask = 0;
+    swapBarrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    swapBarrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    swapBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    swapBarrier.image = context_.swapchainImages[imageIndex];
+    swapBarrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
     vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &swapBarrier);
 
-    // Copy
-    VkImageCopy copy = {
-        .srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
-        .dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
-        .extent = { context_.swapchainExtent.width, context_.swapchainExtent.height, 1 }
-    };
+    // Copy RT output to swapchain
+    VkImageCopy copyRegion{};
+    copyRegion.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+    copyRegion.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+    copyRegion.extent = { renderWidth, renderHeight, 1 };
     vkCmdCopyImage(cmd, rtOutputImage_.get(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                   context_.swapchainImages[imageIndex], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+                   context_.swapchainImages[imageIndex], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyRegion);
 
-    // Swapchain to present
+    // Transition swapchain to PRESENT
     swapBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
     swapBarrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
     swapBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
     swapBarrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
     vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr, 1, &swapBarrier);
 
-    // RT back to general
-    barrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-    barrier.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-    barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-    barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+    // *** FIX: Transition RT output back to GENERAL for next frame ***
+    postTraceBarrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    postTraceBarrier.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    postTraceBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    postTraceBarrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, 0, 0, nullptr, 0, nullptr, 1, &postTraceBarrier);
 
-    vkEndCommandBuffer(cmd);
+    // End command buffer
+    VK_CHECK(vkEndCommandBuffer(cmd));
 
+    // Submit to graphics queue
     VkPipelineStageFlags waitStages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
-    VkSubmitInfo submitInfo = {
-        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-        .waitSemaphoreCount = 1,
-        .pWaitSemaphores = &frames_[currentFrame_].imageAvailableSemaphore,
-        .pWaitDstStageMask = waitStages,
-        .commandBufferCount = 1,
-        .pCommandBuffers = &cmd,
-        .signalSemaphoreCount = 1,
-        .pSignalSemaphores = &frames_[currentFrame_].renderFinishedSemaphore
-    };
-    vkQueueSubmit(context_.graphicsQueue, 1, &submitInfo, frames_[currentFrame_].fence);
+    VkSubmitInfo submitInfo{};
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitInfo.waitSemaphoreCount = 1;
+    submitInfo.pWaitSemaphores = &frames_[currentFrame_].imageAvailableSemaphore;
+    submitInfo.pWaitDstStageMask = waitStages;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &cmd;
+    submitInfo.signalSemaphoreCount = 1;
+    submitInfo.pSignalSemaphores = &frames_[currentFrame_].renderFinishedSemaphore;
 
-    VkPresentInfoKHR presentInfo = {
-        .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
-        .waitSemaphoreCount = 1,
-        .pWaitSemaphores = &frames_[currentFrame_].renderFinishedSemaphore,
-        .swapchainCount = 1,
-        .pSwapchains = &context_.swapchain,
-        .pImageIndices = &imageIndex
-    };
+    VK_CHECK(vkQueueSubmit(context_.graphicsQueue, 1, &submitInfo, frames_[currentFrame_].fence));
+
+    // Present
+    VkPresentInfoKHR presentInfo{};
+    presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+    presentInfo.waitSemaphoreCount = 1;
+    presentInfo.pWaitSemaphores = &frames_[currentFrame_].renderFinishedSemaphore;
+    presentInfo.swapchainCount = 1;
+    presentInfo.pSwapchains = &context_.swapchain;
+    presentInfo.pImageIndices = &imageIndex;
+
     result = vkQueuePresentKHR(context_.graphicsQueue, &presentInfo);
     if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
         recreateSwapchain = true;
+    } else {
+        VK_CHECK(result);
     }
 
+    // Frame bookkeeping
     currentFrame_ = (currentFrame_ + 1) % MAX_FRAMES_IN_FLIGHT;
     ++frameCount_;
     ++framesThisSecond_;
 
+    // FPS logging
     auto now = std::chrono::steady_clock::now();
     auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastFPSTime_).count();
     if (elapsed >= 1000) {
-        double fps = framesThisSecond_ * 1000.0 / elapsed;
-        double frameTimeMs = std::chrono::duration_cast<std::chrono::microseconds>(now - frameStart).count() / 1000.0;
-        LOG_INFO_CAT("Renderer", "FPS: {:.0f} | Frame: {} | Time: {:.2f}ms | TLAS: 0x{:x} | Size: {}x{}", 
-                     fps, frameCount_, frameTimeMs, tlasDeviceAddress_, context_.swapchainExtent.width, context_.swapchainExtent.height);
+        LOG_INFO_CAT("Renderer", "FPS: {:.2f}", static_cast<float>(framesThisSecond_) * 1000.0f / elapsed);
         framesThisSecond_ = 0;
         lastFPSTime_ = now;
     }
+
+    // Log slow frames
+    pipelineManager_->logFrameTimeIfSlow(frameStart);
 }
 
 void VulkanRenderer::updateUniformBuffer(uint32_t frameIndex, const Camera& camera) {
@@ -1142,7 +1141,7 @@ void VulkanRenderer::updateUniformBuffer(uint32_t frameIndex, const Camera& came
 }
 
 // -----------------------------------------------------------------------------
-// HANDLE RESIZE — FULLY INTEGRATED
+// HANDLE RESIZE
 // -----------------------------------------------------------------------------
 void VulkanRenderer::handleResize(int width, int height) {
     if (width == 0 || height == 0) return;
@@ -1150,28 +1149,32 @@ void VulkanRenderer::handleResize(int width, int height) {
     vkDeviceWaitIdle(context_.device);
     width_ = width; height_ = height;
     swapchainManager_->handleResize(width, height);
-    context_.swapchainExtent = swapchainManager_->getSwapchainExtent();
+    context_.swapchainExtent = swapchainManager_->getSwapchainExtent();  // Refresh
 
+    // Sync width_/height_ to new extent
     width_ = static_cast<int>(context_.swapchainExtent.width);
     height_ = static_cast<int>(context_.swapchainExtent.height);
     LOG_INFO_CAT("Renderer", "Post-resize extent: {}x{}", width_, height_);
 
+    // Recreate RT output to match new extent
     recreateRTOutputImage();
+
+    // Refresh descriptors (image view changed)
     descriptorsUpdated_ = false;
     updateRTDescriptors();
+
     createFramebuffers();
     recreateSwapchain = false;
     LOG_INFO_CAT("Renderer", "Resize complete: all resources synced.");
 }
 
 // -----------------------------------------------------------------------------
-// MESH LOADING
+// GET VERTICES / INDICES
 // -----------------------------------------------------------------------------
 std::vector<glm::vec3> VulkanRenderer::getVertices() const {
     static std::vector<glm::vec3> cached;
     if (!cached.empty()) return cached;
 
-    LOG_INFO_CAT("Renderer", "Loading vertices from assets/models/scene.obj");
     tinyobj::attrib_t attrib;
     std::vector<tinyobj::shape_t> shapes;
     std::vector<tinyobj::material_t> materials;
@@ -1180,7 +1183,6 @@ std::vector<glm::vec3> VulkanRenderer::getVertices() const {
         LOG_ERROR_CAT("Renderer", "Failed to load OBJ: {}", err.empty() ? warn : err);
         throw std::runtime_error("Failed to load OBJ");
     }
-    if (!warn.empty()) LOG_WARNING_CAT("Renderer", "OBJ warnings: {}", warn);
 
     std::vector<glm::vec3> verts;
     verts.reserve(attrib.vertices.size() / 3);
@@ -1188,7 +1190,7 @@ std::vector<glm::vec3> VulkanRenderer::getVertices() const {
         verts.emplace_back(attrib.vertices[i], attrib.vertices[i + 1], attrib.vertices[i + 2]);
     }
     cached = std::move(verts);
-    LOG_INFO_CAT("Renderer", "Loaded {} unique vertices from OBJ.", cached.size());
+    LOG_INFO_CAT("Renderer", "Loaded {} unique vertices.", cached.size());
     return cached;
 }
 
@@ -1196,7 +1198,6 @@ std::vector<uint32_t> VulkanRenderer::getIndices() const {
     static std::vector<uint32_t> cached;
     if (!cached.empty()) return cached;
 
-    LOG_INFO_CAT("Renderer", "Loading indices from assets/models/scene.obj");
     tinyobj::attrib_t attrib;
     std::vector<tinyobj::shape_t> shapes;
     std::vector<tinyobj::material_t> materials;
@@ -1205,7 +1206,6 @@ std::vector<uint32_t> VulkanRenderer::getIndices() const {
         LOG_ERROR_CAT("Renderer", "Failed to load OBJ: {}", err.empty() ? warn : err);
         throw std::runtime_error("Failed to load OBJ");
     }
-    if (!warn.empty()) LOG_WARNING_CAT("Renderer", "OBJ warnings: {}", warn);
 
     std::vector<uint32_t> idxs;
     for (const auto& shape : shapes) {
@@ -1214,7 +1214,7 @@ std::vector<uint32_t> VulkanRenderer::getIndices() const {
         }
     }
     cached = std::move(idxs);
-    LOG_INFO_CAT("Renderer", "Loaded {} indices from OBJ ({} triangles).", cached.size(), cached.size() / 3);
+    LOG_INFO_CAT("Renderer", "Loaded {} indices.", cached.size());
     return cached;
 }
 
