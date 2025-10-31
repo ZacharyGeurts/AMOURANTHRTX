@@ -1,8 +1,5 @@
+// handle_app.hpp
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts gzac5314@gmail.com is licensed under CC BY-NC 4.0
-// Application handling for SDL3 + Vulkan integration.
-// Dependencies: SDL3, GLM, VulkanRTX_Setup.hpp, logging.hpp, Dispose.hpp, camera.hpp
-// Supported platforms: Linux, Windows.
-// Zachary Geurts 2025
 
 #pragma once
 #ifndef HANDLE_APP_HPP
@@ -32,6 +29,15 @@ public:
     bool shouldQuit() const { return mode_ == 0; }
     void handleResize(int width, int height);
 
+    // === FULLSCREEN & MAXIMIZE ===
+    void toggleFullscreen();
+    void toggleMaximize();
+
+    // === ACCESSORS FOR INPUT HANDLER ===
+    SDL_Window* getWindow() const { return sdl_->getWindow(); }
+    bool& isMaximizedRef() { return isMaximized_; }
+    bool& isFullscreenRef() { return isFullscreen_; }
+
 private:
     void initializeInput();
     void render();
@@ -40,6 +46,8 @@ private:
     int width_;
     int height_;
     int mode_;
+    bool isFullscreen_;
+    bool isMaximized_;
     std::unique_ptr<SDL3Initializer::SDL3Initializer> sdl_;
     std::unique_ptr<VulkanRTX::VulkanRenderer> renderer_;
     std::unique_ptr<Camera> camera_;

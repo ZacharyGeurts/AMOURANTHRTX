@@ -110,7 +110,7 @@ Application::Application(const char* title, int width, int height)
     : title_(title), width_(width), height_(height), mode_(1),
       sdl_(std::make_unique<SDL3Initializer::SDL3Initializer>(title, width, height)),
       renderer_(nullptr), camera_(std::make_unique<PerspectiveCamera>(60.0f, static_cast<float>(width) / height)),
-      inputHandler_(nullptr),
+      inputHandler_(nullptr), isFullscreen_(false), isMaximized_(false),
       lastFrameTime_(std::chrono::steady_clock::now())
 {
     LOG_INFO_CAT("Application", "INITIALIZING: '{}' ({}x{}) @ {}", title_, width_, height_, ptr_to_hex(this));
@@ -184,6 +184,96 @@ void Application::initializeInput() {
 }
 
 // ---------------------------------------------------------------------------
+//  Toggle Fullscreen
+// ---------------------------------------------------------------------------
+void Application::toggleFullscreen() {
+    isFullscreenRef() = !isFullscreenRef();
+    isMaximizedRef() = false;
+
+    SDL_Window* win = sdl_->getWindow();
+    if (isFullscreenRef()) {
+        SDL_SetWindowFullscreen(win, true);
+        SDL_DisplayID display = SDL_GetDisplayForWindow(win);
+        const SDL_DisplayMode* dm = SDL_GetCurrentDisplayMode(display);
+        if (dm && dm->w > 0 && dm->h > 0) {
+            width_ = dm->w;
+            height_ = dm->h;
+        } else {
+            width_ = 1920;
+            height_ = 1080;
+        }
+        LOG_INFO_CAT("Application", "ENTERED FULLSCREEN: {}x{}", width_, height_);
+    } else {
+        SDL_SetWindowFullscreen(win, false);
+        int w, h;
+        SDL_GetWindowSize(win, &w, &h);
+        if (w > 0 && h > 0) {
+            width_ = w;
+            height_ = h;
+        }
+        LOG_INFO_CAT("Application", "EXITED FULLSCREEN: {}x{}", width_, height_);
+    }
+
+    if (width_ > 0 && height_ > 0) {
+        renderer_->handleResize(width_, height_);
+        camera_->setAspectRatio(static_cast<float>(width_) / height_);
+    }
+}
+
+// ---------------------------------------------------------------------------
+//  Toggle Maximize
+// ---------------------------------------------------------------------------
+void Application::toggleMaximize() {
+    if (isFullscreenRef()) return;
+
+    isMaximizedRef() = !isMaximizedRef();
+    if (isMaximizedRef()) {
+        SDL_MaximizeWindow(sdl_->getWindow());
+        LOG_INFO_CAT("Application", "WINDOW MAXIMIZED (resize will follow)");
+    } else {
+        SDL_RestoreWindow(sdl_->getWindow());
+        int w, h;
+        SDL_GetWindowSize(sdl_->getWindow(), &w, &h);
+        if (w > 0 && h > 0) {
+            width_ = w;
+            height_ = h;
+            renderer_->handleResize(width_, height_);
+            camera_->setAspectRatio(static_cast<float>(width_) / height_);
+        }
+        LOG_INFO_CAT("Application", "WINDOW RESTORED: {}x{}", width_, height_);
+    }
+}
+
+// ---------------------------------------------------------------------------
+//  Resize Handler
+// ---------------------------------------------------------------------------
+void Application::handleResize(int width, int height) {
+    if (width <= 0 || height <= 0) {
+        LOG_WARNING_CAT("Application", "INVALID RESIZE IGNORED: {}x{}", width, height);
+        return;
+    }
+
+    if (width == width_ && height == height_) {
+        LOG_DEBUG_CAT("Application", "RESIZE NO-OP: {}x{}", width, height);
+        return;
+    }
+
+    // Skip if minimized
+    Uint32 flags = SDL_GetWindowFlags(sdl_->getWindow());
+    if (flags & SDL_WINDOW_MINIMIZED) {
+        LOG_DEBUG_CAT("Application", "RESIZE SKIPPED: Window minimized");
+        return;
+    }
+
+    width_ = width;
+    height_ = height;
+
+    LOG_INFO_CAT("Application", "RESIZE → {}x{}", width_, height_);
+    renderer_->handleResize(width_, height_);
+    camera_->setAspectRatio(static_cast<float>(width_) / height_);
+}
+
+// ---------------------------------------------------------------------------
 //  Main Loop
 // ---------------------------------------------------------------------------
 void Application::run() {
@@ -204,6 +294,12 @@ void Application::render() {
         return;
     }
 
+    // Skip rendering if minimized
+    if (SDL_GetWindowFlags(sdl_->getWindow()) & SDL_WINDOW_MINIMIZED) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        return;
+    }
+
     auto currentTime = std::chrono::steady_clock::now();
     float deltaTime = std::chrono::duration<float>(currentTime - lastFrameTime_).count();
     lastFrameTime_ = currentTime;
@@ -212,23 +308,6 @@ void Application::render() {
     renderer_->renderFrame(*camera_);
 
     LOG_DEBUG_CAT("Application", "Frame rendered (Δt={:.3f}ms)", deltaTime * 1000.0f);
-}
-
-// ---------------------------------------------------------------------------
-//  Resize Handler
-// ---------------------------------------------------------------------------
-void Application::handleResize(int width, int height) {
-    if (width <= 0 || height <= 0) {
-        LOG_WARNING_CAT("Application", "INVALID RESIZE: {}x{}", width, height);
-        return;
-    }
-
-    width_ = width;
-    height_ = height;
-    renderer_->handleResize(width, height);
-    camera_->setAspectRatio(static_cast<float>(width) / height);
-
-    LOG_INFO_CAT("Application", "WINDOW RESIZED: {}x{}", width, height);
 }
 
 // ---------------------------------------------------------------------------
@@ -253,6 +332,27 @@ void HandleInput::handleInput(Application& app) {
             case SDL_EVENT_WINDOW_RESIZED:
                 LOG_DEBUG_CAT("Input", "RESIZE EVENT: {}x{}", event.window.data1, event.window.data2);
                 app.handleResize(event.window.data1, event.window.data2);
+                break;
+
+            case SDL_EVENT_WINDOW_MAXIMIZED:
+                LOG_INFO_CAT("Input", "WINDOW MAXIMIZED");
+                app.isMaximizedRef() = true;
+                break;
+
+            case SDL_EVENT_WINDOW_RESTORED:
+                if (app.isMaximizedRef()) {
+                    LOG_INFO_CAT("Input", "WINDOW RESTORED FROM MAXIMIZED");
+                    app.isMaximizedRef() = false;
+                    int w, h;
+                    SDL_GetWindowSize(app.getWindow(), &w, &h);
+                    if (w > 0 && h > 0) {
+                        app.handleResize(w, h);
+                    }
+                }
+                break;
+
+            case SDL_EVENT_WINDOW_MINIMIZED:
+                LOG_INFO_CAT("Input", "WINDOW MINIMIZED");
                 break;
 
             case SDL_EVENT_KEY_DOWN:
@@ -321,7 +421,7 @@ void HandleInput::setCallbacks(
 //  Keyboard Handler
 // ---------------------------------------------------------------------------
 void HandleInput::defaultKeyboardHandler(const SDL_KeyboardEvent& key) {
-    if (key.type != SDL_EVENT_KEY_DOWN) return;
+    if (key.type != SDL_EVENT_KEY_DOWN || key.repeat != 0) return;
 
     void* userData = camera_.getUserData();
     if (!userData) {
@@ -332,6 +432,23 @@ void HandleInput::defaultKeyboardHandler(const SDL_KeyboardEvent& key) {
     Application& app = *static_cast<Application*>(userData);
     const auto sc = key.scancode;
 
+    // === FULLSCREEN TOGGLE ===
+    if (sc == SDL_SCANCODE_F11) {
+        app.toggleFullscreen();
+        return;
+    }
+    if (sc == SDL_SCANCODE_RETURN && (key.mod & SDL_KMOD_ALT)) {
+        app.toggleFullscreen();
+        return;
+    }
+
+    // === MAXIMIZE TOGGLE ===
+    if (sc == SDL_SCANCODE_F10) {
+        app.toggleMaximize();
+        return;
+    }
+
+    // === RENDER MODE 1-9 ===
     if (sc >= SDL_SCANCODE_1 && sc <= SDL_SCANCODE_9) {
         const int mode = sc - SDL_SCANCODE_1 + 1;
         app.setRenderMode(mode);
@@ -339,8 +456,9 @@ void HandleInput::defaultKeyboardHandler(const SDL_KeyboardEvent& key) {
         return;
     }
 
+    // === CAMERA CONTROLS ===
     switch (sc) {
-        case SDL_SCANCODE_P:  camera_.togglePause(); LOG_INFO_CAT("Input", "PAUSE TOGGLED"); break;
+        case SDL_SCANCODE_P:  camera_.togglePause(); LOG_INFO_CAT("Input", "PAUSE TOGGED"); break;
         case SDL_SCANCODE_W:  camera_.moveForward(0.1f); LOG_DEBUG_CAT("Input", "MOVE FORWARD"); break;
         case SDL_SCANCODE_S:  camera_.moveForward(-0.1f); LOG_DEBUG_CAT("Input", "MOVE BACK"); break;
         case SDL_SCANCODE_A:  camera_.moveRight(-0.1f); LOG_DEBUG_CAT("Input", "MOVE LEFT"); break;
