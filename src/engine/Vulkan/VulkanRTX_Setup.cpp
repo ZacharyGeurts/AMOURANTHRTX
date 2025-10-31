@@ -108,6 +108,7 @@ VulkanRTX::VulkanRTX(VkDevice device, VkPhysicalDevice physicalDevice, const std
 
 // DESTRUCTOR — **UPDATED WITH SBT CLEANUP**
 VulkanRTX::~VulkanRTX() {
+    // SBT Cleanup
     if (sbt_.buffer != VK_NULL_HANDLE) {
         vkDestroyBuffer(device_, sbt_.buffer, nullptr);
         sbt_.buffer = VK_NULL_HANDLE;
@@ -133,7 +134,7 @@ void VulkanRTX::uploadBlackPixelToImage(VkImage image) {
                  stagingBuffer, stagingMemory);
 
     void* data; VK_CHECK(vkMapMemory(device_, stagingMemory.get(), 0, 4, 0, &data), "Map staging");
-    *static_cast<uint32_t*>(data) = 0xFF000000; // black
+    *static_cast<uint32_t*>(data) = 0xFF000000;
     vkUnmapMemory(device_, stagingMemory.get());
 
     auto cmd = allocateTransientCommandBuffer(VK_NULL_HANDLE);
@@ -232,10 +233,8 @@ VkShaderModule VulkanRTX::createShaderModule(const std::string& filename) {
 void VulkanRTX::loadShadersAsync(std::vector<VkShaderModule>& modules, const std::vector<std::string>& paths) {
     modules.resize(paths.size());
     std::vector<std::jthread> threads;
-    threads.reserve(paths.size());
     for (size_t i = 0; i < paths.size(); ++i)
         threads.emplace_back([this, &modules, i, &paths] { modules[i] = createShaderModule(paths[i]); });
-    // jthread joins automatically on destruction
 }
 
 void VulkanRTX::buildShaderGroups(std::vector<VkRayTracingShaderGroupCreateInfoKHR>& groups) {
@@ -386,7 +385,7 @@ void VulkanRTX::createRayTracingPipeline(uint32_t maxRayRecursionDepth) {
 
     VkRayTracingPipelineCreateInfoKHR pipelineInfo = {
         .sType = VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR,
-        // .pNext = &rtProps  // REMOVED: dangling pointer
+        .pNext = &rtProps,
         .stageCount = static_cast<uint32_t>(stages.size()),
         .pStages = stages.data(),
         .groupCount = static_cast<uint32_t>(groups.size()),
@@ -408,6 +407,7 @@ void VulkanRTX::createShaderBindingTable(VkPhysicalDevice physicalDevice) {
     auto baseAlign = rtProps.shaderGroupBaseAlignment;
     auto alignedSize = (handleSize + handleAlign - 1) & ~(handleAlign - 1);
 
+    // === Align each region to baseAlignment ===
     VkDeviceSize offset = 0;
     auto align = [&](VkDeviceSize size) {
         offset = (offset + baseAlign - 1) & ~(baseAlign - 1);
@@ -436,15 +436,14 @@ void VulkanRTX::createShaderBindingTable(VkPhysicalDevice physicalDevice) {
                  VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
                  VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, buffer, memory);
 
-    // Allocate with padding to satisfy handle alignment
-    std::vector<uint8_t> handles(numShaderGroups_ * alignedSize, 0);
+    std::vector<uint8_t> handles(numShaderGroups_ * handleSize);
     VK_CHECK(vkGetRayTracingShaderGroupHandlesKHR(device_, rtPipeline_.get(), 0, numShaderGroups_, handles.size(), handles.data()), "Get SBT handles");
 
     void* data; VK_CHECK(vkMapMemory(device_, memory.get(), 0, bufferSize, 0, &data), "Map SBT");
     uint8_t* pData = static_cast<uint8_t*>(data);
 
     auto copyGroup = [&](uint32_t groupIdx, VkDeviceSize dstOffset) {
-        std::memcpy(pData + dstOffset, handles.data() + groupIdx * alignedSize, handleSize);
+        std::memcpy(pData + dstOffset, handles.data() + groupIdx * handleSize, handleSize);
     };
 
     uint32_t groupIdx = 0;
@@ -534,6 +533,7 @@ void VulkanRTX::createBottomLevelAS(VkPhysicalDevice physicalDevice, VkCommandPo
         .type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR
     };
     VkAccelerationStructureKHR tempAS; VK_CHECK(vkCreateAccelerationStructureKHR(device_, &asCreateInfo, nullptr, &tempAS), "Create BLAS");
+    setBLAS(tempAS);
 
     VulkanResource<VkBuffer, PFN_vkDestroyBuffer> scratchBuffer(device_, VK_NULL_HANDLE, vkDestroyBuffer);
     VulkanResource<VkDeviceMemory, PFN_vkFreeMemory> scratchMemory(device_, VK_NULL_HANDLE, vkFreeMemory);
@@ -542,7 +542,7 @@ void VulkanRTX::createBottomLevelAS(VkPhysicalDevice physicalDevice, VkCommandPo
                  VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
                  VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, scratchBuffer, scratchMemory);
 
-    buildInfo.dstAccelerationStructure = tempAS;
+    buildInfo.dstAccelerationStructure = blas_.get();
     buildInfo.scratchData.deviceAddress = getBufferDeviceAddress(scratchBuffer.get());
 
     auto cmdBuffer = allocateTransientCommandBuffer(commandPool);
@@ -553,8 +553,6 @@ void VulkanRTX::createBottomLevelAS(VkPhysicalDevice physicalDevice, VkCommandPo
     VK_CHECK(vkEndCommandBuffer(cmdBuffer), "End BLAS cmd");
     submitAndWaitTransient(cmdBuffer, queue, commandPool);
 
-    // Store only after build is complete
-    blas_ = {device_, tempAS, vkDestroyAccelerationStructureKHR};
     blasBuffer_ = std::move(blasBufferTemp);
     blasMemory_ = std::move(blasMemoryTemp);
 }
@@ -627,6 +625,7 @@ void VulkanRTX::createTopLevelAS(VkPhysicalDevice physicalDevice, VkCommandPool 
         .type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR
     };
     VkAccelerationStructureKHR tempAS; VK_CHECK(vkCreateAccelerationStructureKHR(device_, &asCreateInfo, nullptr, &tempAS), "Create TLAS");
+    setTLAS(tempAS);
 
     VulkanResource<VkBuffer, PFN_vkDestroyBuffer> scratchBuffer(device_, VK_NULL_HANDLE, vkDestroyBuffer);
     VulkanResource<VkDeviceMemory, PFN_vkFreeMemory> scratchMemory(device_, VK_NULL_HANDLE, vkFreeMemory);
@@ -635,7 +634,7 @@ void VulkanRTX::createTopLevelAS(VkPhysicalDevice physicalDevice, VkCommandPool 
                  VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
                  VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, scratchBuffer, scratchMemory);
 
-    buildInfo.dstAccelerationStructure = tempAS;
+    buildInfo.dstAccelerationStructure = tlas_.get();
     buildInfo.scratchData.deviceAddress = getBufferDeviceAddress(scratchBuffer.get());
 
     auto cmdBuffer = allocateTransientCommandBuffer(commandPool);
@@ -646,7 +645,6 @@ void VulkanRTX::createTopLevelAS(VkPhysicalDevice physicalDevice, VkCommandPool 
     VK_CHECK(vkEndCommandBuffer(cmdBuffer), "End TLAS cmd");
     submitAndWaitTransient(cmdBuffer, queue, commandPool);
 
-    tlas_ = {device_, tempAS, vkDestroyAccelerationStructureKHR};
     tlasBuffer_ = std::move(tlasBufferTemp);
     tlasMemory_ = std::move(tlasMemoryTemp);
 }
@@ -754,9 +752,7 @@ void VulkanRTX::updateRTX(VkPhysicalDevice physicalDevice, VkCommandPool command
 }
 
 void VulkanRTX::recordRayTracingCommands(VkCommandBuffer cmdBuffer, VkExtent2D extent, VkImage outputImage,
-                                        VkImageView outputImageView, const MaterialData::PushConstants& pc) {
-    extent_ = extent; // store for trace size
-
+                                        VkImageView, const MaterialData::PushConstants& pc) {
     VkCommandBufferBeginInfo beginInfo = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT};
     VK_CHECK(vkBeginCommandBuffer(cmdBuffer, &beginInfo), "Begin RT cmd");
 
@@ -864,16 +860,8 @@ void VulkanRTX::createBuffer(VkPhysicalDevice physicalDevice, VkDeviceSize size,
     VkBuffer buf; VK_CHECK(vkCreateBuffer(device_, &info, nullptr, &buf), "Create buffer");
 
     VkMemoryRequirements reqs; vkGetBufferMemoryRequirements(device_, buf, &reqs);
-    VkMemoryAllocateFlagsInfo flags{};
-    if (usage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) {
-        flags = {.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO, .flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT};
-    }
-    VkMemoryAllocateInfo alloc = {
-        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-        .pNext = (usage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) ? &flags : nullptr,
-        .allocationSize = reqs.size,
-        .memoryTypeIndex = findMemoryType(physicalDevice, reqs.memoryTypeBits, properties)
-    };
+    VkMemoryAllocateFlagsInfo flags = {.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO, .flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT};
+    VkMemoryAllocateInfo alloc = {.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, .pNext = &flags, .allocationSize = reqs.size, .memoryTypeIndex = findMemoryType(physicalDevice, reqs.memoryTypeBits, properties)};
     VkDeviceMemory mem; VK_CHECK(vkAllocateMemory(device_, &alloc, nullptr, &mem), "Alloc buffer mem");
     VK_CHECK(vkBindBufferMemory(device_, buf, mem, 0), "Bind buffer");
 
