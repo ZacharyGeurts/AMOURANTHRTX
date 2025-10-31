@@ -190,7 +190,7 @@ VulkanRenderer::VulkanRenderer(int width, int height, void* window,
 }
 
 // -----------------------------------------------------------------------------
-// BUILD ACCELERATION STRUCTURES
+// BUILD ACCELERATION STRUCTURES — RAII + Scratch Reuse
 // -----------------------------------------------------------------------------
 void VulkanRenderer::buildAccelerationStructures() {
     const auto& verts = getVertices();
@@ -201,17 +201,14 @@ void VulkanRenderer::buildAccelerationStructures() {
     }
     LOG_INFO_CAT("Renderer", "Building BLAS with {} primitives", primitiveCount);
 
+    // Validate geometry
     for (size_t i = 0; i < idxs.size(); i += 3) {
         uint32_t a = idxs[i], b = idxs[i+1], c = idxs[i+2];
         if (a >= verts.size() || b >= verts.size() || c >= verts.size() || a == b || b == c || c == a) {
             LOG_ERROR_CAT("Renderer", "Invalid/degenerate triangle {}: indices [{}, {}, {}]", i/3, a, b, c);
             throw std::runtime_error("Degenerate geometry");
         }
-        glm::vec3 va = verts[a], vb = verts[b], vc = verts[c];
-        float area = 0.5f * glm::length(glm::cross(vb - va, vc - va));
-        if (area < 1e-5f) LOG_WARNING_CAT("Renderer", "Near-zero area triangle {}", i/3);
     }
-    LOG_INFO_CAT("Renderer", "Geometry integrity: {} valid tris", primitiveCount);
 
     auto submitAndWait = [&](VkCommandBuffer cmd, const std::string& step) {
         LOG_INFO_CAT("Renderer", "Submitting {} to graphics queue {}", step, context_.graphicsQueueFamilyIndex);
@@ -246,6 +243,7 @@ void VulkanRenderer::buildAccelerationStructures() {
     VkDeviceSize vertexSize = verts.size() * sizeof(glm::vec3);
     VkDeviceSize indexSize = idxs.size() * sizeof(uint32_t);
 
+    // Staging → Device Local
     VkBuffer stagingVertexBuffer, stagingIndexBuffer;
     VkDeviceMemory stagingVertexMemory, stagingIndexMemory;
     bufferManager_->createBuffer(vertexSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
@@ -282,22 +280,18 @@ void VulkanRenderer::buildAccelerationStructures() {
     vkDestroyBuffer(context_.device, stagingVertexBuffer, nullptr); vkFreeMemory(context_.device, stagingVertexMemory, nullptr);
     vkDestroyBuffer(context_.device, stagingIndexBuffer, nullptr); vkFreeMemory(context_.device, stagingIndexMemory, nullptr);
 
-    VkBufferDeviceAddressInfo vAddrInfo{}; vAddrInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO; vAddrInfo.buffer = vertexBuffer;
-    VkDeviceAddress vertexDeviceAddress = context_.vkGetBufferDeviceAddressKHR(context_.device, &vAddrInfo);
+    VkDeviceAddress vertexAddr = context_.vkGetBufferDeviceAddressKHR(context_.device, &(VkBufferDeviceAddressInfo{.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO, .buffer = vertexBuffer}));
+    VkDeviceAddress indexAddr  = context_.vkGetBufferDeviceAddressKHR(context_.device, &(VkBufferDeviceAddressInfo{.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO, .buffer = indexBuffer}));
 
-    VkBufferDeviceAddressInfo iAddrInfo{}; iAddrInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO; iAddrInfo.buffer = indexBuffer;
-    VkDeviceAddress indexDeviceAddress = context_.vkGetBufferDeviceAddressKHR(context_.device, &iAddrInfo);
-
-    LOG_INFO_CAT("Renderer", "Vertex addr=0x{:x}, Index addr=0x{:x}", vertexDeviceAddress, indexDeviceAddress);
-
+    // BLAS
     VkAccelerationStructureGeometryTrianglesDataKHR triangles{};
     triangles.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
     triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
-    triangles.vertexData.deviceAddress = vertexDeviceAddress;
+    triangles.vertexData.deviceAddress = vertexAddr;
     triangles.vertexStride = sizeof(glm::vec3);
     triangles.maxVertex = static_cast<uint32_t>(verts.size()) - 1;
     triangles.indexType = VK_INDEX_TYPE_UINT32;
-    triangles.indexData.deviceAddress = indexDeviceAddress;
+    triangles.indexData.deviceAddress = indexAddr;
 
     VkAccelerationStructureGeometryKHR geometry{};
     geometry.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
@@ -313,18 +307,13 @@ void VulkanRenderer::buildAccelerationStructures() {
     buildInfo.geometryCount = 1;
     buildInfo.pGeometries = &geometry;
 
-    uint32_t maxPrimCount = primitiveCount;
     VkAccelerationStructureBuildSizesInfoKHR sizeInfo{};
     sizeInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
-    context_.vkGetAccelerationStructureBuildSizesKHR(context_.device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &buildInfo, &maxPrimCount, &sizeInfo);
-
-    LOG_INFO_CAT("Renderer", "BLAS sizes: storage={}B, scratch={}B", sizeInfo.accelerationStructureSize, sizeInfo.buildScratchSize);
+    context_.vkGetAccelerationStructureBuildSizesKHR(context_.device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &buildInfo, &primitiveCount, &sizeInfo);
 
     if (bufferManager_->getScratchBufferCount() == 0) {
         bufferManager_->reserveScratchPool(sizeInfo.buildScratchSize, 1);
-        LOG_INFO_CAT("Renderer", "RESERVED scratch buffer: {} B", sizeInfo.buildScratchSize);
     }
-
     VkDeviceAddress scratchAddr = bufferManager_->getScratchBufferAddress(0);
     if (scratchAddr == 0) throw std::runtime_error("Scratch buffer address is 0");
 
@@ -350,33 +339,33 @@ void VulkanRenderer::buildAccelerationStructures() {
     VK_CHECK(vkEndCommandBuffer(cmdBLAS));
     submitAndWait(cmdBLAS, "BLAS build");
 
+    // Cleanup geometry buffers
     vkDestroyBuffer(context_.device, vertexBuffer, nullptr); vkFreeMemory(context_.device, vertexMemory, nullptr);
     vkDestroyBuffer(context_.device, indexBuffer, nullptr); vkFreeMemory(context_.device, indexMemory, nullptr);
 
-    VkAccelerationStructureDeviceAddressInfoKHR blasAddrInfo{};
-    blasAddrInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR;
-    blasAddrInfo.accelerationStructure = blasHandle_;
-    VkDeviceAddress blasAddr = context_.vkGetAccelerationStructureDeviceAddressKHR(context_.device, &blasAddrInfo);
+    VkDeviceAddress blasAddr = context_.vkGetAccelerationStructureDeviceAddressKHR(context_.device, &(VkAccelerationStructureDeviceAddressInfoKHR{.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR, .accelerationStructure = blasHandle_}));
 
-    VkAccelerationStructureInstanceKHR instance = {};
-    instance.instanceCustomIndex = 0; instance.mask = 0xFF;
+    // TLAS Instance
+    VkAccelerationStructureInstanceKHR instance{};
+    instance.instanceCustomIndex = 0;
+    instance.mask = 0xFF;
     instance.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
     instance.accelerationStructureReference = blasAddr;
-    instance.transform.matrix[0][0] = 1.0f; instance.transform.matrix[1][1] = 1.0f; instance.transform.matrix[2][2] = 1.0f;
+    instance.transform.matrix[0][0] = instance.transform.matrix[1][1] = instance.transform.matrix[2][2] = 1.0f;
 
     VkDeviceSize instSize = sizeof(instance);
-    VkBuffer staging; VkDeviceMemory stagingMem;
-    bufferManager_->createBuffer(instSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, staging, stagingMem);
-    void* map; VK_CHECK(vkMapMemory(context_.device, stagingMem, 0, instSize, 0, &map)); memcpy(map, &instance, instSize); vkUnmapMemory(context_.device, stagingMem);
+    VkBuffer stagingInst; VkDeviceMemory stagingInstMem;
+    bufferManager_->createBuffer(instSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingInst, stagingInstMem);
+    void* map; VK_CHECK(vkMapMemory(context_.device, stagingInstMem, 0, instSize, 0, &map)); memcpy(map, &instance, instSize); vkUnmapMemory(context_.device, stagingInstMem);
 
     bufferManager_->createBuffer(instSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, instanceBuffer_, instanceBufferMemory_);
 
     VkCommandBuffer cmdInstCopy = allocateCmd();
     VkBufferCopy copyRegion{}; copyRegion.size = instSize;
-    vkCmdCopyBuffer(cmdInstCopy, staging, instanceBuffer_, 1, &copyRegion);
+    vkCmdCopyBuffer(cmdInstCopy, stagingInst, instanceBuffer_, 1, &copyRegion);
     VK_CHECK(vkEndCommandBuffer(cmdInstCopy));
     submitAndWait(cmdInstCopy, "instance copy");
-    vkDestroyBuffer(context_.device, staging, nullptr); vkFreeMemory(context_.device, stagingMem, nullptr);
+    vkDestroyBuffer(context_.device, stagingInst, nullptr); vkFreeMemory(context_.device, stagingInstMem, nullptr);
 
     VkBufferMemoryBarrier barrier{};
     barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
@@ -389,9 +378,9 @@ void VulkanRenderer::buildAccelerationStructures() {
     VK_CHECK(vkEndCommandBuffer(cmdBarrier));
     submitAndWait(cmdBarrier, "instance barrier");
 
-    VkBufferDeviceAddressInfo instAddrInfo{}; instAddrInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO; instAddrInfo.buffer = instanceBuffer_;
-    VkDeviceAddress instAddr = context_.vkGetBufferDeviceAddressKHR(context_.device, &instAddrInfo);
+    VkDeviceAddress instAddr = context_.vkGetBufferDeviceAddressKHR(context_.device, &(VkBufferDeviceAddressInfo{.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO, .buffer = instanceBuffer_}));
 
+    // TLAS
     VkAccelerationStructureGeometryInstancesDataKHR instData{};
     instData.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR;
     instData.data.deviceAddress = instAddr;
@@ -438,59 +427,45 @@ void VulkanRenderer::buildAccelerationStructures() {
 }
 
 // -----------------------------------------------------------------------------
-// CREATE RT OUTPUT IMAGE — FIXED RAII
+// CREATE RT OUTPUT IMAGE — RAII
 // -----------------------------------------------------------------------------
-void VulkanRenderer::createRTOutputImage()
-{
-    // Use actual swapchain extent for consistency
+void VulkanRenderer::createRTOutputImage() {
     VkExtent2D extent = context_.swapchainExtent;
     LOG_INFO_CAT("Renderer", "Creating RT output image at extent {}x{}", extent.width, extent.height);
 
-    VkImageCreateInfo imageInfo = {};
-    imageInfo.sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    imageInfo.imageType     = VK_IMAGE_TYPE_2D;
-    imageInfo.format        = VK_FORMAT_R32G32B32A32_SFLOAT;
-    imageInfo.extent        = { extent.width, extent.height, 1 };
-    imageInfo.mipLevels     = 1;
-    imageInfo.arrayLayers   = 1;
-    imageInfo.samples       = VK_SAMPLE_COUNT_1_BIT;
-    imageInfo.tiling        = VK_IMAGE_TILING_OPTIMAL;
-    imageInfo.usage         = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    VkImageCreateInfo imageInfo = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .imageType = VK_IMAGE_TYPE_2D,
+        .format = VK_FORMAT_R32G32B32A32_SFLOAT,
+        .extent = { extent.width, extent.height, 1 },
+        .mipLevels = 1,
+        .arrayLayers = 1,
+        .samples = VK_SAMPLE_COUNT_1_BIT,
+        .tiling = VK_IMAGE_TILING_OPTIMAL,
+        .usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
+    };
+    VkImage img; VK_CHECK(vkCreateImage(context_.device, &imageInfo, nullptr, &img));
 
-    VkImage img = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateImage(context_.device, &imageInfo, nullptr, &img));
-
-    VkMemoryRequirements memReqs{};
-    vkGetImageMemoryRequirements(context_.device, img, &memReqs);
-
-    VkMemoryAllocateInfo allocInfo = {};
-    allocInfo.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    allocInfo.allocationSize  = memReqs.size;
-    allocInfo.memoryTypeIndex = VulkanInitializer::findMemoryType(
-        context_.physicalDevice, memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-
-    VkDeviceMemory mem = VK_NULL_HANDLE;
-    VK_CHECK(vkAllocateMemory(context_.device, &allocInfo, nullptr, &mem));
+    VkMemoryRequirements memReqs; vkGetImageMemoryRequirements(context_.device, img, &memReqs);
+    VkMemoryAllocateInfo allocInfo = {
+        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+        .allocationSize = memReqs.size,
+        .memoryTypeIndex = VulkanInitializer::findMemoryType(context_.physicalDevice, memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)
+    };
+    VkDeviceMemory mem; VK_CHECK(vkAllocateMemory(context_.device, &allocInfo, nullptr, &mem));
     VK_CHECK(vkBindImageMemory(context_.device, img, mem, 0));
 
-    VkImageViewCreateInfo viewInfo = {};
-    viewInfo.sType            = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    viewInfo.image            = img;
-    viewInfo.viewType         = VK_IMAGE_VIEW_TYPE_2D;
-    viewInfo.format           = VK_FORMAT_R32G32B32A32_SFLOAT;
-    viewInfo.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+    VkImageViewCreateInfo viewInfo = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+        .image = img,
+        .viewType = VK_IMAGE_VIEW_TYPE_2D,
+        .format = VK_FORMAT_R32G32B32A32_SFLOAT,
+        .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
+    };
+    VkImageView view; VK_CHECK(vkCreateImageView(context_.device, &viewInfo, nullptr, &view));
 
-    VkImageView view = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateImageView(context_.device, &viewInfo, nullptr, &view));
-
-    VulkanInitializer::transitionImageLayout(
-        context_,
-        img,
-        VK_FORMAT_R32G32B32A32_SFLOAT,
-        VK_IMAGE_LAYOUT_UNDEFINED,
-        VK_IMAGE_LAYOUT_GENERAL
-    );
+    VulkanInitializer::transitionImageLayout(context_, img, VK_FORMAT_R32G32B32A32_SFLOAT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
 
     rtOutputImage_.reset(img);
     rtOutputImageMemory_.reset(mem);
@@ -498,16 +473,14 @@ void VulkanRenderer::createRTOutputImage()
 }
 
 // -----------------------------------------------------------------------------
-// RECREATE RT OUTPUT IMAGE (For Resize)
+// RECREATE RT OUTPUT IMAGE (Resize)
 // -----------------------------------------------------------------------------
 void VulkanRenderer::recreateRTOutputImage() {
-    // Cleanup old
     rtOutputImage_.reset();
     rtOutputImageMemory_.reset();
     rtOutputImageView_.reset();
-
-    // Recreate
     createRTOutputImage();
+    descriptorsUpdated_ = false;
     LOG_INFO_CAT("Renderer", "RT output image recreated post-resize.");
 }
 
@@ -516,147 +489,67 @@ void VulkanRenderer::recreateRTOutputImage() {
 // -----------------------------------------------------------------------------
 void VulkanRenderer::createComputeDescriptorSets() {
     std::vector<VkDescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, pipelineManager_->getComputeDescriptorSetLayout());
-    VkDescriptorSetAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    allocInfo.descriptorPool = descriptorPool_;
-    allocInfo.descriptorSetCount = MAX_FRAMES_IN_FLIGHT;
-    allocInfo.pSetLayouts = layouts.data();
-
+    VkDescriptorSetAllocateInfo allocInfo{
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+        .descriptorPool = descriptorPool_,
+        .descriptorSetCount = MAX_FRAMES_IN_FLIGHT,
+        .pSetLayouts = layouts.data()
+    };
     computeDescriptorSets_.resize(MAX_FRAMES_IN_FLIGHT);
     VK_CHECK(vkAllocateDescriptorSets(context_.device, &allocInfo, computeDescriptorSets_.data()));
-
     LOG_INFO_CAT("Renderer", "Compute descriptor sets allocated.");
 }
 
 // -----------------------------------------------------------------------------
-// UPDATE RT DESCRIPTORS
+// UPDATE RT DESCRIPTORS — Fixed Binding Count
 // -----------------------------------------------------------------------------
 void VulkanRenderer::updateRTDescriptors() {
     if (tlasHandle_ == VK_NULL_HANDLE) {
         LOG_ERROR_CAT("Renderer", "TLAS handle is null! Cannot update descriptors.");
         throw std::runtime_error("TLAS not built");
     }
-
-    if (descriptorsUpdated_) {
-        return;
-    }
+    if (descriptorsUpdated_) return;
 
     const uint32_t frameCount = MAX_FRAMES_IN_FLIGHT;
-    const uint32_t totalWrites = frameCount * 10;
-
     std::vector<VkWriteDescriptorSetAccelerationStructureKHR> asWrites(frameCount);
-    std::vector<VkDescriptorImageInfo> outputImageInfos(frameCount);
+    std::vector<VkDescriptorImageInfo> outputInfos(frameCount);
     std::vector<VkDescriptorBufferInfo> uniformInfos(frameCount);
     std::vector<VkDescriptorBufferInfo> materialInfos(frameCount);
     std::vector<VkDescriptorBufferInfo> dimensionInfos(frameCount);
-    std::vector<VkDescriptorImageInfo> envMapInfos(frameCount);
+    std::vector<VkDescriptorImageInfo> envInfos(frameCount);
 
-    std::vector<VkWriteDescriptorSet> writes(totalWrites);
+    std::vector<VkWriteDescriptorSet> writes;
+    writes.reserve(frameCount * 6);  // 6 bindings per frame
 
     for (uint32_t i = 0; i < frameCount; ++i) {
-        const uint32_t base = i * 10;
+        const uint32_t base = writes.size();
 
-        asWrites[i] = {};
-        asWrites[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR;
-        asWrites[i].accelerationStructureCount = 1;
-        asWrites[i].pAccelerationStructures = &tlasHandle_;
+        asWrites[i] = { .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR, .accelerationStructureCount = 1, .pAccelerationStructures = &tlasHandle_ };
+        writes.push_back({ .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .pNext = &asWrites[i], .dstSet = descriptorSets_[i], .dstBinding = 0, .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR });
 
-        writes[base + 0] = {};
-        writes[base + 0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writes[base + 0].pNext = &asWrites[i];
-        writes[base + 0].dstSet = descriptorSets_[i];
-        writes[base + 0].dstBinding = 0;
-        writes[base + 0].descriptorCount = 1;
-        writes[base + 0].descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+        outputInfos[i] = { .imageView = rtOutputImageView_.get(), .imageLayout = VK_IMAGE_LAYOUT_GENERAL };
+        writes.push_back({ .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = descriptorSets_[i], .dstBinding = 1, .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, .pImageInfo = &outputInfos[i] });
 
-        outputImageInfos[i] = {};
-        outputImageInfos[i].imageView = rtOutputImageView_.get();
-        outputImageInfos[i].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+        uniformInfos[i] = { .buffer = context_.uniformBuffers[i], .range = VK_WHOLE_SIZE };
+        writes.push_back({ .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = descriptorSets_[i], .dstBinding = 2, .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, .pBufferInfo = &uniformInfos[i] });
 
-        writes[base + 1] = {};
-        writes[base + 1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writes[base + 1].dstSet = descriptorSets_[i];
-        writes[base + 1].dstBinding = 1;
-        writes[base + 1].descriptorCount = 1;
-        writes[base + 1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-        writes[base + 1].pImageInfo = &outputImageInfos[i];
+        materialInfos[i] = { .buffer = materialBuffers_[i], .range = VK_WHOLE_SIZE };
+        writes.push_back({ .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = descriptorSets_[i], .dstBinding = 3, .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, .pBufferInfo = &materialInfos[i] });
 
-        uniformInfos[i] = {};
-        uniformInfos[i].buffer = context_.uniformBuffers[i];
-        uniformInfos[i].range = VK_WHOLE_SIZE;
+        dimensionInfos[i] = { .buffer = dimensionBuffers_[i], .range = VK_WHOLE_SIZE };
+        writes.push_back({ .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = descriptorSets_[i], .dstBinding = 4, .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, .pBufferInfo = &dimensionInfos[i] });
 
-        writes[base + 2] = {};
-        writes[base + 2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writes[base + 2].dstSet = descriptorSets_[i];
-        writes[base + 2].dstBinding = 2;
-        writes[base + 2].descriptorCount = 1;
-        writes[base + 2].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        writes[base + 2].pBufferInfo = &uniformInfos[i];
-
-        materialInfos[i] = {};
-        materialInfos[i].buffer = materialBuffers_[i];
-        materialInfos[i].range = VK_WHOLE_SIZE;
-
-        writes[base + 3] = {};
-        writes[base + 3].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writes[base + 3].dstSet = descriptorSets_[i];
-        writes[base + 3].dstBinding = 3;
-        writes[base + 3].descriptorCount = 1;
-        writes[base + 3].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        writes[base + 3].pBufferInfo = &materialInfos[i];
-
-        dimensionInfos[i] = {};
-        dimensionInfos[i].buffer = dimensionBuffers_[i];
-        dimensionInfos[i].range = VK_WHOLE_SIZE;
-
-        writes[base + 4] = {};
-        writes[base + 4].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writes[base + 4].dstSet = descriptorSets_[i];
-        writes[base + 4].dstBinding = 4;
-        writes[base + 4].descriptorCount = 1;
-        writes[base + 4].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        writes[base + 4].pBufferInfo = &dimensionInfos[i];
-
-        envMapInfos[i] = {};
-        envMapInfos[i].sampler = envMapSampler_;
-        envMapInfos[i].imageView = envMapImageView_;
-        envMapInfos[i].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-
-        for (int b = 5; b <= 7; ++b) {
-            writes[base + b] = {};
-            writes[base + b].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            writes[base + b].dstSet = descriptorSets_[i];
-            writes[base + b].dstBinding = static_cast<uint32_t>(b);
-            writes[base + b].descriptorCount = 1;
-            writes[base + b].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-            writes[base + b].pImageInfo = &envMapInfos[i];
-        }
-
-        writes[base + 8] = {};
-        writes[base + 8].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writes[base + 8].dstSet = descriptorSets_[i];
-        writes[base + 8].dstBinding = 8;
-        writes[base + 8].descriptorCount = 1;
-        writes[base + 8].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-        writes[base + 8].pImageInfo = &outputImageInfos[i];
-
-        writes[base + 9] = {};
-        writes[base + 9].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writes[base + 9].dstSet = descriptorSets_[i];
-        writes[base + 9].dstBinding = 9;
-        writes[base + 9].descriptorCount = 1;
-        writes[base + 9].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-        writes[base + 9].pImageInfo = &outputImageInfos[i];
+        envInfos[i] = { .sampler = envMapSampler_, .imageView = envMapImageView_, .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
+        writes.push_back({ .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = descriptorSets_[i], .dstBinding = 5, .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .pImageInfo = &envInfos[i] });
     }
 
-    vkUpdateDescriptorSets(context_.device, totalWrites, writes.data(), 0, nullptr);
-
+    vkUpdateDescriptorSets(context_.device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
     descriptorsUpdated_ = true;
-    LOG_INFO_CAT("Renderer", "RT descriptors updated ({} writes).", totalWrites);
+    LOG_INFO_CAT("Renderer", "RT descriptors updated ({} writes).", writes.size());
 }
 
 // -----------------------------------------------------------------------------
-// CLEANUP — SAFE DESTRUCTION
+// CLEANUP — RAII + Safe Destruction
 // -----------------------------------------------------------------------------
 VulkanRenderer::~VulkanRenderer() { cleanup(); }
 
@@ -666,13 +559,11 @@ void VulkanRenderer::cleanup() noexcept {
     if (sbtBuffer_ != VK_NULL_HANDLE) vkDestroyBuffer(context_.device, sbtBuffer_, nullptr);
     if (sbtMemory_ != VK_NULL_HANDLE) vkFreeMemory(context_.device, sbtMemory_, nullptr);
 
-    if (tlasHandle_ != VK_NULL_HANDLE && context_.vkDestroyAccelerationStructureKHR)
-        context_.vkDestroyAccelerationStructureKHR(context_.device, tlasHandle_, nullptr);
+    if (tlasHandle_ != VK_NULL_HANDLE && context_.vkDestroyAccelerationStructureKHR) context_.vkDestroyAccelerationStructureKHR(context_.device, tlasHandle_, nullptr);
     if (tlasBuffer_ != VK_NULL_HANDLE) vkDestroyBuffer(context_.device, tlasBuffer_, nullptr);
     if (tlasBufferMemory_ != VK_NULL_HANDLE) vkFreeMemory(context_.device, tlasBufferMemory_, nullptr);
 
-    if (blasHandle_ != VK_NULL_HANDLE && context_.vkDestroyAccelerationStructureKHR)
-        context_.vkDestroyAccelerationStructureKHR(context_.device, blasHandle_, nullptr);
+    if (blasHandle_ != VK_NULL_HANDLE && context_.vkDestroyAccelerationStructureKHR) context_.vkDestroyAccelerationStructureKHR(context_.device, blasHandle_, nullptr);
     if (blasBuffer_ != VK_NULL_HANDLE) vkDestroyBuffer(context_.device, blasBuffer_, nullptr);
     if (blasBufferMemory_ != VK_NULL_HANDLE) vkFreeMemory(context_.device, blasBufferMemory_, nullptr);
 
@@ -707,132 +598,89 @@ void VulkanRenderer::cleanup() noexcept {
 }
 
 // -----------------------------------------------------------------------------
-// CREATE ENVIRONMENT MAP
+// CREATE ENVIRONMENT MAP — RAII + Layout Transition
 // -----------------------------------------------------------------------------
 void VulkanRenderer::createEnvironmentMap() {
     LOG_INFO_CAT("Renderer", "Loading environment map from assets/textures/envmap.hdr...");
-    int texWidth, texHeight, texChannels;
+    int w, h, c;
     stbi_set_flip_vertically_on_load(false);
-    float* pixels = stbi_loadf("assets/textures/envmap.hdr", &texWidth, &texHeight, &texChannels, 4);
+    float* pixels = stbi_loadf("assets/textures/envmap.hdr", &w, &h, &c, 4);
     if (!pixels) throw std::runtime_error("Failed to load envmap");
 
-    VkFormat imageFormat = VK_FORMAT_R32G32B32A32_SFLOAT;
-    VkExtent3D imageExtent = { static_cast<uint32_t>(texWidth), static_cast<uint32_t>(texHeight), 1 };
-    VkDeviceSize imageSize = static_cast<uint64_t>(texWidth) * texHeight * 4 * sizeof(float);
+    VkDeviceSize size = static_cast<VkDeviceSize>(w) * h * 4 * sizeof(float);
+    VkExtent3D extent = { static_cast<uint32_t>(w), static_cast<uint32_t>(h), 1 };
 
-    VkImageCreateInfo imageInfo{};
-    imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    imageInfo.imageType = VK_IMAGE_TYPE_2D;
-    imageInfo.format = imageFormat;
-    imageInfo.extent = imageExtent;
-    imageInfo.mipLevels = 1;
-    imageInfo.arrayLayers = 1;
-    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-    imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-    imageInfo.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    VK_CHECK(vkCreateImage(context_.device, &imageInfo, nullptr, &envMapImage_));
+    VkImageCreateInfo imgInfo = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .imageType = VK_IMAGE_TYPE_2D,
+        .format = VK_FORMAT_R32G32B32A32_SFLOAT,
+        .extent = extent,
+        .mipLevels = 1,
+        .arrayLayers = 1,
+        .samples = VK_SAMPLE_COUNT_1_BIT,
+        .tiling = VK_IMAGE_TILING_OPTIMAL,
+        .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
+    };
+    VK_CHECK(vkCreateImage(context_.device, &imgInfo, nullptr, &envMapImage_));
 
-    VkMemoryRequirements memReqs;
-    vkGetImageMemoryRequirements(context_.device, envMapImage_, &memReqs);
-    VkMemoryAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    allocInfo.allocationSize = memReqs.size;
-    allocInfo.memoryTypeIndex = VulkanInitializer::findMemoryType(context_.physicalDevice, memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-    VK_CHECK(vkAllocateMemory(context_.device, &allocInfo, nullptr, &envMapImageMemory_));
+    VkMemoryRequirements reqs; vkGetImageMemoryRequirements(context_.device, envMapImage_, &reqs);
+    VkMemoryAllocateInfo alloc = {
+        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+        .allocationSize = reqs.size,
+        .memoryTypeIndex = VulkanInitializer::findMemoryType(context_.physicalDevice, reqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)
+    };
+    VK_CHECK(vkAllocateMemory(context_.device, &alloc, nullptr, &envMapImageMemory_));
     VK_CHECK(vkBindImageMemory(context_.device, envMapImage_, envMapImageMemory_, 0));
 
-    VkImageViewCreateInfo viewInfo{};
-    viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    viewInfo.image = envMapImage_;
-    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    viewInfo.format = imageFormat;
-    viewInfo.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+    VkImageViewCreateInfo viewInfo = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+        .image = envMapImage_,
+        .viewType = VK_IMAGE_VIEW_TYPE_2D,
+        .format = VK_FORMAT_R32G32B32A32_SFLOAT,
+        .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
+    };
     VK_CHECK(vkCreateImageView(context_.device, &viewInfo, nullptr, &envMapImageView_));
 
-    VkSamplerCreateInfo samplerInfo{};
-    samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-    samplerInfo.magFilter = VK_FILTER_LINEAR;
-    samplerInfo.minFilter = VK_FILTER_LINEAR;
-    samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
-    samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.maxAnisotropy = 1.0f;
+    VkSamplerCreateInfo samplerInfo = {
+        .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+        .magFilter = VK_FILTER_LINEAR,
+        .minFilter = VK_FILTER_LINEAR,
+        .mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR,
+        .addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+        .addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+        .addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+        .maxAnisotropy = 1.0f
+    };
     VK_CHECK(vkCreateSampler(context_.device, &samplerInfo, nullptr, &envMapSampler_));
 
-    VkBuffer stagingBuffer;
-    VkDeviceMemory stagingMemory;
-    bufferManager_->createBuffer(imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                                 stagingBuffer, stagingMemory);
-    void* data;
-    VK_CHECK(vkMapMemory(context_.device, stagingMemory, 0, imageSize, 0, &data));
-    memcpy(data, pixels, static_cast<size_t>(imageSize));
-    vkUnmapMemory(context_.device, stagingMemory);
+    // Upload
+    VkBuffer staging; VkDeviceMemory stagingMem;
+    bufferManager_->createBuffer(size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, staging, stagingMem);
+    void* data; VK_CHECK(vkMapMemory(context_.device, stagingMem, 0, size, 0, &data)); memcpy(data, pixels, size); vkUnmapMemory(context_.device, stagingMem);
 
-    VkCommandBuffer cmd;
-    VkCommandBufferAllocateInfo cmdAlloc{};
-    cmdAlloc.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    cmdAlloc.commandPool = context_.commandPool;
-    cmdAlloc.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    cmdAlloc.commandBufferCount = 1;
-    VK_CHECK(vkAllocateCommandBuffers(context_.device, &cmdAlloc, &cmd));
+    VkCommandBuffer cmd = allocateTransientCmd();
+    VulkanInitializer::transitionImageLayout(context_, envMapImage_, VK_FORMAT_R32G32B32A32_SFLOAT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, cmd);
 
-    VkCommandBufferBeginInfo beginInfo{};
-    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    VK_CHECK(vkBeginCommandBuffer(cmd, &beginInfo));
+    VkBufferImageCopy region = { .imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 }, .imageExtent = extent };
+    vkCmdCopyBufferToImage(cmd, staging, envMapImage_, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
 
-    VkImageMemoryBarrier barrier{};
-    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    barrier.srcAccessMask = 0;
-    barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-    barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-    barrier.image = envMapImage_;
-    barrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+    VulkanInitializer::transitionImageLayout(context_, envMapImage_, VK_FORMAT_R32G32B32A32_SFLOAT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, cmd);
 
-    VkBufferImageCopy region{};
-    region.imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
-    region.imageExtent = imageExtent;
-    vkCmdCopyBufferToImage(cmd, stagingBuffer, envMapImage_, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
-
-    barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-    barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-    barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
-
-    VK_CHECK(vkEndCommandBuffer(cmd));
-
-    VkSubmitInfo submitInfo{};
-    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &cmd;
-    VK_CHECK(vkQueueSubmit(context_.graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE));
-    vkQueueWaitIdle(context_.graphicsQueue);
-    vkFreeCommandBuffers(context_.device, context_.commandPool, 1, &cmd);
-
-    vkDestroyBuffer(context_.device, stagingBuffer, nullptr);
-    vkFreeMemory(context_.device, stagingMemory, nullptr);
+    submitAndWaitTransient(cmd);
+    vkDestroyBuffer(context_.device, staging, nullptr); vkFreeMemory(context_.device, stagingMem, nullptr);
     stbi_image_free(pixels);
 
-    LOG_INFO_CAT("Renderer", "Environment map loaded: {}x{}", texWidth, texHeight);
+    LOG_INFO_CAT("Renderer", "Environment map loaded: {}x{}", w, h);
 }
 
 // -----------------------------------------------------------------------------
 // INITIALIZE ALL BUFFER DATA
 // -----------------------------------------------------------------------------
 void VulkanRenderer::initializeAllBufferData(uint32_t maxFrames, VkDeviceSize materialSize, VkDeviceSize dimensionSize) {
-    materialBuffers_.resize(maxFrames, VK_NULL_HANDLE);
-    materialBufferMemory_.resize(maxFrames);
-    dimensionBuffers_.resize(maxFrames, VK_NULL_HANDLE);
-    dimensionBufferMemory_.resize(maxFrames);
-
-    context_.uniformBuffers.resize(maxFrames, VK_NULL_HANDLE);
-    context_.uniformBufferMemories.resize(maxFrames);
+    materialBuffers_.resize(maxFrames); materialBufferMemory_.resize(maxFrames);
+    dimensionBuffers_.resize(maxFrames); dimensionBufferMemory_.resize(maxFrames);
+    context_.uniformBuffers.resize(maxFrames); context_.uniformBufferMemories.resize(maxFrames);
 
     for (uint32_t i = 0; i < maxFrames; ++i) {
         initializeBufferData(i, materialSize, dimensionSize);
@@ -853,23 +701,22 @@ void VulkanRenderer::initializeBufferData(uint32_t frameIndex, VkDeviceSize mate
                                  VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
                                  dimensionBuffers_[frameIndex], dimensionBufferMemory_[frameIndex]);
 
-    VkBuffer uboBuffer = VK_NULL_HANDLE;
-    VkDeviceMemory uboMemory = VK_NULL_HANDLE;
+    VkBuffer ubo; VkDeviceMemory uboMem;
     bufferManager_->createBuffer(sizeof(UniformBufferObject),
                                  VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
                                  VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                                 uboBuffer, uboMemory);
+                                 ubo, uboMem);
 
-    context_.uniformBuffers[frameIndex] = uboBuffer;
-    context_.uniformBufferMemories[frameIndex] = uboMemory;
+    context_.uniformBuffers[frameIndex] = ubo;
+    context_.uniformBufferMemories[frameIndex] = uboMem;
 }
 
 // -----------------------------------------------------------------------------
-// CREATE FRAMEBUFFERS
+// CREATE FRAMEBUFFERS / COMMAND BUFFERS / DESCRIPTOR POOL
 // -----------------------------------------------------------------------------
 void VulkanRenderer::createFramebuffers() {
     framebuffers_.resize(context_.swapchainImageViews.size());
-    for (size_t i = 0; i < context_.swapchainImageViews.size(); ++i) {
+    for (size_t i = 0; i < framebuffers_.size(); ++i) {
         VkImageView attachments[] = { context_.swapchainImageViews[i] };
         VkFramebufferCreateInfo info{
             .sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
@@ -882,12 +729,9 @@ void VulkanRenderer::createFramebuffers() {
         };
         VK_CHECK(vkCreateFramebuffer(context_.device, &info, nullptr, &framebuffers_[i]));
     }
-    LOG_INFO_CAT("Renderer", "Framebuffers created successfully.");
+    LOG_INFO_CAT("Renderer", "Framebuffers created.");
 }
 
-// -----------------------------------------------------------------------------
-// CREATE COMMAND BUFFERS
-// -----------------------------------------------------------------------------
 void VulkanRenderer::createCommandBuffers() {
     commandBuffers_.resize(MAX_FRAMES_IN_FLIGHT);
     VkCommandBufferAllocateInfo info{
@@ -900,9 +744,6 @@ void VulkanRenderer::createCommandBuffers() {
     LOG_INFO_CAT("Renderer", "Command buffers allocated.");
 }
 
-// -----------------------------------------------------------------------------
-// CREATE DESCRIPTOR POOL
-// -----------------------------------------------------------------------------
 void VulkanRenderer::createDescriptorPool() {
     std::array<VkDescriptorPoolSize, 5> poolSizes{{
         { VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, MAX_FRAMES_IN_FLIGHT },
@@ -924,9 +765,6 @@ void VulkanRenderer::createDescriptorPool() {
     LOG_INFO_CAT("Renderer", "Descriptor pool created.");
 }
 
-// -----------------------------------------------------------------------------
-// CREATE DESCRIPTOR SETS
-// -----------------------------------------------------------------------------
 void VulkanRenderer::createDescriptorSets() {
     std::vector<VkDescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, context_.rayTracingDescriptorSetLayout);
     VkDescriptorSetAllocateInfo info{
@@ -941,191 +779,112 @@ void VulkanRenderer::createDescriptorSets() {
 }
 
 // -----------------------------------------------------------------------------
-// RENDER FRAME — FULLY FIXED (SBT from PipelineManager, Valid Regions)
+// RENDER FRAME — FULLY FIXED
 // -----------------------------------------------------------------------------
 void VulkanRenderer::renderFrame(const Camera& camera) {
     auto frameStart = std::chrono::steady_clock::now();
 
-    // Wait for previous frame to finish
     vkWaitForFences(context_.device, 1, &frames_[currentFrame_].fence, VK_TRUE, UINT64_MAX);
     vkResetFences(context_.device, 1, &frames_[currentFrame_].fence);
 
-    // Acquire swapchain image
     uint32_t imageIndex;
     VkResult result = vkAcquireNextImageKHR(context_.device, context_.swapchain, UINT64_MAX,
                                             frames_[currentFrame_].imageAvailableSemaphore, VK_NULL_HANDLE, &imageIndex);
-    if (result == VK_ERROR_OUT_OF_DATE_KHR) {
-        recreateSwapchain = true;
-        return;
-    } else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
-        throw std::runtime_error("Failed to acquire swapchain image");
-    }
+    if (result == VK_ERROR_OUT_OF_DATE_KHR) { recreateSwapchain = true; return; }
+    if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) throw std::runtime_error("Failed to acquire swapchain image");
 
-    // Update camera matrices
     updateUniformBuffer(currentFrame_, camera);
 
-    // Begin command buffer
     VkCommandBuffer cmd = commandBuffers_[currentFrame_];
     VK_CHECK(vkResetCommandBuffer(cmd, 0));
-
-    VkCommandBufferBeginInfo beginInfo{};
-    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    VkCommandBufferBeginInfo beginInfo{ .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT };
     VK_CHECK(vkBeginCommandBuffer(cmd, &beginInfo));
 
-    // Use swapchain extent for dispatch/copy consistency
-    uint32_t renderWidth = context_.swapchainExtent.width;
-    uint32_t renderHeight = context_.swapchainExtent.height;
+    uint32_t w = context_.swapchainExtent.width, h = context_.swapchainExtent.height;
 
-    // Proper barrier before RT: from previous TRANSFER_READ to SHADER_WRITE (layout stays GENERAL)
-    VkImageMemoryBarrier preTraceBarrier{};
-    preTraceBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    preTraceBarrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-    preTraceBarrier.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-    preTraceBarrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
-    preTraceBarrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
-    preTraceBarrier.image = rtOutputImage_.get();
-    preTraceBarrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, 0, 0, nullptr, 0, nullptr, 1, &preTraceBarrier);
+    // Pre-trace: GENERAL → SHADER_WRITE
+    VkImageMemoryBarrier preTrace{ .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT, .dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
+        .oldLayout = VK_IMAGE_LAYOUT_GENERAL, .newLayout = VK_IMAGE_LAYOUT_GENERAL,
+        .image = rtOutputImage_.get(), .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 } };
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, 0, 0, nullptr, 0, nullptr, 1, &preTrace);
 
-    // Bind ray tracing pipeline & descriptors
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, rtPipeline_);
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
-                            rtPipelineLayout_, 0, 1, &descriptorSets_[currentFrame_], 0, nullptr);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, rtPipelineLayout_, 0, 1, &descriptorSets_[currentFrame_], 0, nullptr);
 
-    // FIXED: Use CORRECT SBT from PipelineManager (not stale sbt_)
     const auto& sbt = pipelineManager_->getShaderBindingTable();
-
-    // Validate SBT addresses
     if (sbt.raygen.deviceAddress == 0 || sbt.miss.deviceAddress == 0 || sbt.hit.deviceAddress == 0) {
-        LOG_ERROR_CAT("Renderer", "Invalid SBT addresses! Raygen=0x{:x}, Miss=0x{:x}, Hit=0x{:x}",
-                      sbt.raygen.deviceAddress, sbt.miss.deviceAddress, sbt.hit.deviceAddress);
-        throw std::runtime_error("Invalid SBT");
+        throw std::runtime_error("Invalid SBT addresses");
     }
 
-    // Set up SBT regions
-    VkStridedDeviceAddressRegionKHR raygenRegion{};
-    raygenRegion.deviceAddress = sbt.raygen.deviceAddress;
-    raygenRegion.stride        = sbt.raygen.stride;
-    raygenRegion.size          = sbt.raygen.size;
+    VkStridedDeviceAddressRegionKHR regions[4] = {
+        { sbt.raygen.deviceAddress, sbt.raygen.stride, sbt.raygen.size },
+        { sbt.miss.deviceAddress,   sbt.miss.stride,   sbt.miss.size   },
+        { sbt.hit.deviceAddress,    sbt.hit.stride,    sbt.hit.size    },
+        {}
+    };
 
-    VkStridedDeviceAddressRegionKHR missRegion{};
-    missRegion.deviceAddress   = sbt.miss.deviceAddress;
-    missRegion.stride          = sbt.miss.stride;
-    missRegion.size            = sbt.miss.size;
+    context_.vkCmdTraceRaysKHR(cmd, &regions[0], &regions[1], &regions[2], &regions[3], w, h, 1);
 
-    VkStridedDeviceAddressRegionKHR hitRegion{};
-    hitRegion.deviceAddress    = sbt.hit.deviceAddress;
-    hitRegion.stride           = sbt.hit.stride;
-    hitRegion.size             = sbt.hit.size;
+    // Post-trace: GENERAL → TRANSFER_SRC
+    VkImageMemoryBarrier postTrace{ .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT, .dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
+        .oldLayout = VK_IMAGE_LAYOUT_GENERAL, .newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        .image = rtOutputImage_.get(), .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 } };
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &postTrace);
 
-    VkStridedDeviceAddressRegionKHR callableRegion{};
-
-    // Dispatch ray tracing
-    context_.vkCmdTraceRaysKHR(cmd,
-        &raygenRegion,
-        &missRegion,
-        &hitRegion,
-        &callableRegion,
-        renderWidth,
-        renderHeight,
-        1);
-
-    // Transition RT output to TRANSFER_SRC for copy
-    VkImageMemoryBarrier postTraceBarrier{};
-    postTraceBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    postTraceBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-    postTraceBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-    postTraceBarrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
-    postTraceBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-    postTraceBarrier.image = rtOutputImage_.get();
-    postTraceBarrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &postTraceBarrier);
-
-    // Transition swapchain image to TRANSFER_DST
-    VkImageMemoryBarrier swapBarrier{};
-    swapBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    swapBarrier.srcAccessMask = 0;
-    swapBarrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-    swapBarrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    swapBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-    swapBarrier.image = context_.swapchainImages[imageIndex];
-    swapBarrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+    // Swapchain: UNDEFINED → TRANSFER_DST
+    VkImageMemoryBarrier swapBarrier{ .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .srcAccessMask = 0, .dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+        .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED, .newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        .image = context_.swapchainImages[imageIndex], .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 } };
     vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &swapBarrier);
 
-    // Copy RT output to swapchain
-    VkImageCopy copyRegion{};
-    copyRegion.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
-    copyRegion.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
-    copyRegion.extent = { renderWidth, renderHeight, 1 };
-    vkCmdCopyImage(cmd, rtOutputImage_.get(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                   context_.swapchainImages[imageIndex], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyRegion);
+    VkImageCopy copy{ .srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 }, .dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 }, .extent = { w, h, 1 } };
+    vkCmdCopyImage(cmd, rtOutputImage_.get(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, context_.swapchainImages[imageIndex], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
 
-    // Transition swapchain to PRESENT
-    swapBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-    swapBarrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
-    swapBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-    swapBarrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    // Swapchain: TRANSFER_DST → PRESENT
+    swapBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT; swapBarrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
+    swapBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL; swapBarrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
     vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr, 1, &swapBarrier);
 
-    // *** FIX: Transition RT output back to GENERAL for next frame ***
-    postTraceBarrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-    postTraceBarrier.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-    postTraceBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-    postTraceBarrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, 0, 0, nullptr, 0, nullptr, 1, &postTraceBarrier);
+    // RT Output: TRANSFER_SRC → GENERAL (next frame)
+    postTrace.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT; postTrace.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    postTrace.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL; postTrace.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, 0, 0, nullptr, 0, nullptr, 1, &postTrace);
 
-    // End command buffer
     VK_CHECK(vkEndCommandBuffer(cmd));
 
-    // Submit to graphics queue
     VkPipelineStageFlags waitStages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
-    VkSubmitInfo submitInfo{};
-    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submitInfo.waitSemaphoreCount = 1;
-    submitInfo.pWaitSemaphores = &frames_[currentFrame_].imageAvailableSemaphore;
-    submitInfo.pWaitDstStageMask = waitStages;
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &cmd;
-    submitInfo.signalSemaphoreCount = 1;
-    submitInfo.pSignalSemaphores = &frames_[currentFrame_].renderFinishedSemaphore;
-
+    VkSubmitInfo submitInfo{ .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .waitSemaphoreCount = 1, .pWaitSemaphores = &frames_[currentFrame_].imageAvailableSemaphore,
+        .pWaitDstStageMask = waitStages, .commandBufferCount = 1, .pCommandBuffers = &cmd,
+        .signalSemaphoreCount = 1, .pSignalSemaphores = &frames_[currentFrame_].renderFinishedSemaphore };
     VK_CHECK(vkQueueSubmit(context_.graphicsQueue, 1, &submitInfo, frames_[currentFrame_].fence));
 
-    // Present
-    VkPresentInfoKHR presentInfo{};
-    presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
-    presentInfo.waitSemaphoreCount = 1;
-    presentInfo.pWaitSemaphores = &frames_[currentFrame_].renderFinishedSemaphore;
-    presentInfo.swapchainCount = 1;
-    presentInfo.pSwapchains = &context_.swapchain;
-    presentInfo.pImageIndices = &imageIndex;
-
+    VkPresentInfoKHR presentInfo{ .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+        .waitSemaphoreCount = 1, .pWaitSemaphores = &frames_[currentFrame_].renderFinishedSemaphore,
+        .swapchainCount = 1, .pSwapchains = &context_.swapchain, .pImageIndices = &imageIndex };
     result = vkQueuePresentKHR(context_.graphicsQueue, &presentInfo);
-    if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
-        recreateSwapchain = true;
-    } else {
-        VK_CHECK(result);
-    }
+    if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) recreateSwapchain = true;
+    else VK_CHECK(result);
 
-    // Frame bookkeeping
     currentFrame_ = (currentFrame_ + 1) % MAX_FRAMES_IN_FLIGHT;
-    ++frameCount_;
-    ++framesThisSecond_;
+    ++frameCount_; ++framesThisSecond_;
 
-    // FPS logging
     auto now = std::chrono::steady_clock::now();
     auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastFPSTime_).count();
     if (elapsed >= 1000) {
         LOG_INFO_CAT("Renderer", "FPS: {:.2f}", static_cast<float>(framesThisSecond_) * 1000.0f / elapsed);
-        framesThisSecond_ = 0;
-        lastFPSTime_ = now;
+        framesThisSecond_ = 0; lastFPSTime_ = now;
     }
 
-    // Log slow frames
     pipelineManager_->logFrameTimeIfSlow(frameStart);
 }
 
+// -----------------------------------------------------------------------------
+// UPDATE UNIFORM BUFFER
+// -----------------------------------------------------------------------------
 void VulkanRenderer::updateUniformBuffer(uint32_t frameIndex, const Camera& camera) {
     UniformBufferObject ubo{};
     ubo.viewInverse = glm::inverse(camera.getViewMatrix());
@@ -1149,27 +908,18 @@ void VulkanRenderer::handleResize(int width, int height) {
     vkDeviceWaitIdle(context_.device);
     width_ = width; height_ = height;
     swapchainManager_->handleResize(width, height);
-    context_.swapchainExtent = swapchainManager_->getSwapchainExtent();  // Refresh
-
-    // Sync width_/height_ to new extent
+    context_.swapchainExtent = swapchainManager_->getSwapchainExtent();
     width_ = static_cast<int>(context_.swapchainExtent.width);
     height_ = static_cast<int>(context_.swapchainExtent.height);
-    LOG_INFO_CAT("Renderer", "Post-resize extent: {}x{}", width_, height_);
-
-    // Recreate RT output to match new extent
     recreateRTOutputImage();
-
-    // Refresh descriptors (image view changed)
-    descriptorsUpdated_ = false;
     updateRTDescriptors();
-
     createFramebuffers();
     recreateSwapchain = false;
-    LOG_INFO_CAT("Renderer", "Resize complete: all resources synced.");
+    LOG_INFO_CAT("Renderer", "Resize complete.");
 }
 
 // -----------------------------------------------------------------------------
-// GET VERTICES / INDICES
+// GET VERTICES / INDICES — Cached
 // -----------------------------------------------------------------------------
 std::vector<glm::vec3> VulkanRenderer::getVertices() const {
     static std::vector<glm::vec3> cached;
@@ -1180,16 +930,13 @@ std::vector<glm::vec3> VulkanRenderer::getVertices() const {
     std::vector<tinyobj::material_t> materials;
     std::string warn, err;
     if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, "assets/models/scene.obj")) {
-        LOG_ERROR_CAT("Renderer", "Failed to load OBJ: {}", err.empty() ? warn : err);
-        throw std::runtime_error("Failed to load OBJ");
+        throw std::runtime_error("Failed to load OBJ: " + (err.empty() ? warn : err));
     }
 
-    std::vector<glm::vec3> verts;
-    verts.reserve(attrib.vertices.size() / 3);
+    cached.reserve(attrib.vertices.size() / 3);
     for (size_t i = 0; i < attrib.vertices.size(); i += 3) {
-        verts.emplace_back(attrib.vertices[i], attrib.vertices[i + 1], attrib.vertices[i + 2]);
+        cached.emplace_back(attrib.vertices[i], attrib.vertices[i + 1], attrib.vertices[i + 2]);
     }
-    cached = std::move(verts);
     LOG_INFO_CAT("Renderer", "Loaded {} unique vertices.", cached.size());
     return cached;
 }
@@ -1203,17 +950,14 @@ std::vector<uint32_t> VulkanRenderer::getIndices() const {
     std::vector<tinyobj::material_t> materials;
     std::string warn, err;
     if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, "assets/models/scene.obj")) {
-        LOG_ERROR_CAT("Renderer", "Failed to load OBJ: {}", err.empty() ? warn : err);
-        throw std::runtime_error("Failed to load OBJ");
+        throw std::runtime_error("Failed to load OBJ: " + (err.empty() ? warn : err));
     }
 
-    std::vector<uint32_t> idxs;
     for (const auto& shape : shapes) {
         for (const auto& index : shape.mesh.indices) {
-            idxs.push_back(static_cast<uint32_t>(index.vertex_index));
+            cached.push_back(static_cast<uint32_t>(index.vertex_index));
         }
     }
-    cached = std::move(idxs);
     LOG_INFO_CAT("Renderer", "Loaded {} indices.", cached.size());
     return cached;
 }
