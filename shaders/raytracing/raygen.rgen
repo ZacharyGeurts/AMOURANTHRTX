@@ -5,8 +5,6 @@ layout(location = 0) rayPayloadEXT vec3 payload;
 
 layout(set = 0, binding = 0) uniform accelerationStructureEXT tlas;
 layout(set = 0, binding = 1, rgba32f) uniform image2D outputImage;
-
-// No scalar layout — use std140 (default) to match C++ side
 layout(set = 0, binding = 2) uniform UniformBuffer {
     mat4 viewInverse;
     mat4 projInverse;
@@ -14,7 +12,6 @@ layout(set = 0, binding = 2) uniform UniformBuffer {
     float time;
     uint frame;
 } ubo;
-
 layout(set = 0, binding = 5) uniform sampler2D envMap;
 
 layout(push_constant) uniform PushConstants {
@@ -22,47 +19,38 @@ layout(push_constant) uniform PushConstants {
     uint showEnvMapOnly;
 } pc;
 
-// ---------------------------------------------------------------
-// Hash / jitter helpers
 vec2 hash2(vec2 p) {
     return fract(sin(vec2(dot(p, vec2(127.1, 311.7)),
                          dot(p, vec2(269.5, 183.3)))) * 43758.5453);
 }
-vec3 hash3(vec3 p) {
-    p = vec3(dot(p.xy, vec2(127.1, 311.7)),
-             dot(p.xy, vec2(269.5, 183.3)),
-             dot(p.xy, vec2(269.5, 183.3)));
-    return fract(sin(p) * 43758.5453);
-}
 
-// ---------------------------------------------------------------
 void main()
 {
     vec2 uv = (vec2(gl_LaunchIDEXT.xy) + 0.5) / vec2(gl_LaunchSizeEXT.xy);
-    uv.y = 1.0 - uv.y;  // Vulkan Y-flip
+    uv.y = 1.0 - uv.y;
 
     const uint spp = 4;
     vec3 accum = vec3(0.0);
-    float jitterSeed = float(ubo.frame) * 0.01;
 
     for (uint i = 0; i < spp; ++i)
     {
-        vec2 jUV = uv + (hash2(uv + jitterSeed + float(i)) - 0.5) /
+        vec2 jUV = uv + (hash2(uv + float(ubo.frame) + float(i)) - 0.5) /
                        vec2(gl_LaunchSizeEXT.xy);
 
         vec3 origin = ubo.camPos.xyz;
         vec2 ndc = jUV * 2.0 - 1.0;
         vec4 target = ubo.projInverse * vec4(ndc, -1.0, 1.0);
         target /= target.w;
-        vec3 dir = normalize((ubo.viewInverse *
-                             vec4(target.xyz - ubo.camPos.xyz, 0.0)).xyz);
+        vec3 dir = normalize((ubo.viewInverse * vec4(target.xyz - ubo.camPos.xyz, 0.0)).xyz);
 
-        dir += (hash3(vec3(jUV, float(i))) - 0.5) * 0.001;
-        dir = normalize(dir);
+        payload = vec3(0.0);  // ← CRITICAL: INITIALIZE
 
-        uint flags = gl_RayFlagsOpaqueEXT | gl_RayFlagsTerminateOnFirstHitEXT;
-        traceRayEXT(tlas, flags, 0xFF, 0, 0, 0,
-                    origin, 0.001, dir, 1000.0, 0);
+        traceRayEXT(
+            tlas,
+            gl_RayFlagsOpaqueEXT | gl_RayFlagsTerminateOnFirstHitEXT,
+            0xFF, 0, 1, 0,  // ← FIXED: sbtRecordStride = 1, missIndex = 0
+            origin, 0.001, dir, 1000.0, 0
+        );
 
         accum += payload;
     }
@@ -71,12 +59,10 @@ void main()
 
     if (pc.showEnvMapOnly == 1)
     {
-        vec3 dir = normalize((ubo.viewInverse *
-                             vec4(uv * 2.0 - 1.0, -1.0, 1.0)).xyz);
+        vec3 dir = normalize((ubo.viewInverse * vec4(uv * 2.0 - 1.0, -1.0, 1.0)).xyz);
         float theta = atan(dir.z, dir.x);
         float phi   = acos(dir.y);
-        vec2 envUV  = vec2(theta / (2.0 * 3.14159265) + 0.5,
-                           phi   /  3.14159265);
+        vec2 envUV  = vec2(theta / (2.0 * 3.14159265) + 0.5, phi / 3.14159265);
         accum = texture(envMap, envUV).rgb;
     }
 

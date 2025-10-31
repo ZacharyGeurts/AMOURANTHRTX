@@ -53,7 +53,15 @@ public:
     VkRenderPass getRenderPass() const { return renderPass_.get(); }
     VkAccelerationStructureKHR getTLASHandle() const { return tlasHandle_.get(); }
     const ShaderBindingTable& getShaderBindingTable() const { return sbt_; }
-    VkDescriptorSetLayout getComputeDescriptorSetLayout() const { return computeDescriptorSetLayout_.get(); }
+
+    // FIXED: NOW RETURNS VALID LAYOUT AFTER createComputePipeline()
+    VkDescriptorSetLayout getComputeDescriptorSetLayout() const {
+        if (!computeDescriptorSetLayout_) {
+            LOG_ERROR_CAT("Vulkan", "computeDescriptorSetLayout_ is null! Was createComputePipeline() called?");
+            return VK_NULL_HANDLE;
+        }
+        return computeDescriptorSetLayout_.get();
+    }
 
     VkDescriptorSetLayout createRayTracingDescriptorSetLayout();
 
@@ -106,6 +114,7 @@ private:
 
     std::unordered_map<std::string, std::string> shaderPaths_;
 
+    // FIXED: NOW CREATED IN CONSTRUCTOR → createComputeDescriptorSetLayout()
     Dispose::VulkanHandle<VkDescriptorSetLayout> computeDescriptorSetLayout_;
     Dispose::VulkanHandle<VkDescriptorSetLayout> rayTracingDescriptorSetLayout_;
     Dispose::VulkanHandle<VkDescriptorSetLayout> graphicsDescriptorSetLayout_;

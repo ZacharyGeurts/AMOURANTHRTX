@@ -20,6 +20,9 @@
 
 namespace VulkanRTX {
 
+// ====================================================================
+// 1. CONSTRUCTOR & DESTRUCTOR
+// ====================================================================
 VulkanPipelineManager::VulkanPipelineManager(Vulkan::Context& context, int width, int height)
     : context_(context), width_(width), height_(height)
 {
@@ -34,7 +37,7 @@ VulkanPipelineManager::VulkanPipelineManager(Vulkan::Context& context, int width
 
     createPipelineCache();
     createGraphicsDescriptorSetLayout();
-    createComputeDescriptorSetLayout();
+    createComputeDescriptorSetLayout();  // ← LAYOUT CREATED
     createRenderPass();
 
 #ifdef ENABLE_VULKAN_DEBUG
@@ -55,7 +58,7 @@ VulkanPipelineManager::~VulkanPipelineManager() {
 }
 
 // ====================================================================
-// SHADER LOADING
+// 2. SHADER LOADING
 // ====================================================================
 VkShaderModule VulkanPipelineManager::loadShader(VkDevice device, const std::string& shaderType) {
     const auto& pathIt = shaderPaths_.find(shaderType);
@@ -89,7 +92,7 @@ VkShaderModule VulkanPipelineManager::loadShader(VkDevice device, const std::str
 }
 
 // ====================================================================
-// PIPELINE CACHE
+// 3. PIPELINE CACHE
 // ====================================================================
 void VulkanPipelineManager::createPipelineCache() {
     VkPipelineCacheCreateInfo cacheInfo = {
@@ -101,7 +104,7 @@ void VulkanPipelineManager::createPipelineCache() {
 }
 
 // ====================================================================
-// RENDER PASS
+// 4. RENDER PASS
 // ====================================================================
 void VulkanPipelineManager::createRenderPass() {
     VkAttachmentDescription colorAttachment = {
@@ -149,7 +152,7 @@ void VulkanPipelineManager::createRenderPass() {
 }
 
 // ====================================================================
-// DESCRIPTOR SET LAYOUTS
+// 5. DESCRIPTOR SET LAYOUTS
 // ====================================================================
 void VulkanPipelineManager::createGraphicsDescriptorSetLayout() {
     VkDescriptorSetLayoutBinding uboBinding = {
@@ -264,10 +267,11 @@ void VulkanPipelineManager::createComputeDescriptorSetLayout() {
     VkDescriptorSetLayout layout;
     VK_CHECK(vkCreateDescriptorSetLayout(context_.device, &layoutInfo, nullptr, &layout));
     computeDescriptorSetLayout_.reset(layout);
+    LOG_INFO_CAT("Vulkan", "Compute descriptor set layout created: 0x{:x}", (uint64_t)layout);
 }
 
 // ====================================================================
-// RAY TRACING DESCRIPTOR SET LAYOUT
+// 6. RAY TRACING DESCRIPTOR SET LAYOUT
 // ====================================================================
 VkDescriptorSetLayout VulkanPipelineManager::createRayTracingDescriptorSetLayout() {
     VkDescriptorSetLayoutBinding accel = {
@@ -362,54 +366,45 @@ VkDescriptorSetLayout VulkanPipelineManager::createRayTracingDescriptorSetLayout
     rayTracingDescriptorSetLayout_.reset(layout);
     return layout;
 }
+
 // ====================================================================
-// CREATE SHADER BINDING TABLE — FULLY SAFE, LOGGED, NO CRASH
+// 7. CREATE SHADER BINDING TABLE — FULLY SAFE, LOGGED, NO CRASH
 // ====================================================================
 void VulkanPipelineManager::createShaderBindingTable() {
     LOG_INFO_CAT("Vulkan", "=== createShaderBindingTable() START ===");
 
     if (!rayTracingPipeline_.get()) {
-        LOG_ERROR_CAT("Vulkan", "Ray tracing pipeline is NULL! Cannot create SBT.");
+        LOG_ERROR_CAT("Vulkan", "Ray tracing pipeline is NULL!");
         throw std::runtime_error("Ray tracing pipeline missing");
     }
-    LOG_INFO_CAT("Vulkan", "Ray tracing pipeline valid: 0x{:x}", (uint64_t)rayTracingPipeline_.get());
-
-    // === STEP 1: GET RT PROPERTIES ===
-    LOG_INFO_CAT("Vulkan", "Fetching RT properties...");
-    if (context_.rtProperties.shaderGroupHandleSize == 0) {
-        LOG_ERROR_CAT("Vulkan", "rtProperties not initialized! shaderGroupHandleSize = 0");
-        throw std::runtime_error("RT properties not initialized");
-    }
-    LOG_INFO_CAT("Vulkan", "RT Props → handleSize: {}, handleAlignment: {}",
-                  context_.rtProperties.shaderGroupHandleSize,
-                  context_.rtProperties.shaderGroupHandleAlignment);
 
     const uint32_t handleSize = context_.rtProperties.shaderGroupHandleSize;
     const uint32_t handleAlignment = context_.rtProperties.shaderGroupHandleAlignment;
+    const uint32_t baseAlignment = context_.rtProperties.shaderGroupBaseAlignment;
     const uint32_t alignedHandleSize = (handleSize + handleAlignment - 1) & ~(handleAlignment - 1);
 
-    LOG_INFO_CAT("Vulkan", "Aligned handle size: {} → {}", handleSize, alignedHandleSize);
-
-    const uint32_t groupCount = 3;
+    const uint32_t groupCount = 3;  // raygen, miss, hit
     const uint32_t sbtSize = groupCount * alignedHandleSize;
 
-    LOG_INFO_CAT("Vulkan", "SBT → groups: {}, total size: {} bytes", groupCount, sbtSize);
+    LOG_INFO_CAT("Vulkan", "RT Props → handleSize: {}, alignment: {}, base: {}", 
+                  handleSize, handleAlignment, baseAlignment);
+    LOG_INFO_CAT("Vulkan", "SBT → groups: {}, alignedSize: {}, total: {} bytes", groupCount, alignedHandleSize, sbtSize);
 
-    // === STEP 2: GET SHADER HANDLES ===
-    std::vector<uint8_t> shaderHandleStorage(sbtSize);
-    LOG_INFO_CAT("Vulkan", "Calling vkGetRayTracingShaderGroupHandlesKHR...");
+    // === STEP 1: GET HANDLES — USE handleSize * groupCount ===
+    std::vector<uint8_t> shaderHandleStorage(groupCount * handleSize);  // ← EXACT SIZE
+    LOG_INFO_CAT("Vulkan", "Calling vkGetRayTracingShaderGroupHandlesKHR (dataSize = {} bytes)...", shaderHandleStorage.size());
+
     VkResult r = context_.vkGetRayTracingShaderGroupHandlesKHR(
         context_.device, rayTracingPipeline_.get(), 0, groupCount,
-        sbtSize, shaderHandleStorage.data());
+        shaderHandleStorage.size(), shaderHandleStorage.data());
 
     if (r != VK_SUCCESS) {
         LOG_ERROR_CAT("Vulkan", "vkGetRayTracingShaderGroupHandlesKHR failed: {}", static_cast<int>(r));
         throw std::runtime_error("Failed to get shader group handles");
     }
-    LOG_INFO_CAT("Vulkan", "Successfully retrieved {} shader group handles", groupCount);
+    LOG_INFO_CAT("Vulkan", "Retrieved {} handles", groupCount);
 
-    // === STEP 3: CREATE SBT BUFFER ===
-    LOG_INFO_CAT("Vulkan", "Creating SBT buffer (size: {} bytes)...", sbtSize);
+    // === STEP 2: CREATE SBT BUFFER ===
     VkBufferCreateInfo bufferInfo = {
         .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
         .size = sbtSize,
@@ -418,64 +413,60 @@ void VulkanPipelineManager::createShaderBindingTable() {
     };
     VkBuffer sbtBuffer = VK_NULL_HANDLE;
     VK_CHECK(vkCreateBuffer(context_.device, &bufferInfo, nullptr, &sbtBuffer));
-    LOG_INFO_CAT("Vulkan", "SBT buffer created: 0x{:x}", (uint64_t)sbtBuffer);
 
     VkMemoryRequirements memReqs;
     vkGetBufferMemoryRequirements(context_.device, sbtBuffer, &memReqs);
-    LOG_INFO_CAT("Vulkan", "Memory requirements → size: {}, alignment: {}, typeBits: 0x{:x}",
-                  memReqs.size, memReqs.alignment, memReqs.memoryTypeBits);
 
-    uint32_t memoryTypeIndex = VulkanInitializer::findMemoryType(
+    uint32_t memType = VulkanInitializer::findMemoryType(
         context_.physicalDevice, memReqs.memoryTypeBits,
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-    LOG_INFO_CAT("Vulkan", "Selected memory type: {}", memoryTypeIndex);
 
     VkMemoryAllocateInfo allocInfo = {
         .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
         .allocationSize = memReqs.size,
-        .memoryTypeIndex = memoryTypeIndex
+        .memoryTypeIndex = memType
     };
     VkDeviceMemory sbtMemory = VK_NULL_HANDLE;
     VK_CHECK(vkAllocateMemory(context_.device, &allocInfo, nullptr, &sbtMemory));
     VK_CHECK(vkBindBufferMemory(context_.device, sbtBuffer, sbtMemory, 0));
-    LOG_INFO_CAT("Vulkan", "SBT memory allocated and bound: 0x{:x}", (uint64_t)sbtMemory);
 
     sbtBuffer_.reset(sbtBuffer);
     sbtMemory_.reset(sbtMemory);
 
-    // === STEP 4: COPY HANDLES ===
-    LOG_INFO_CAT("Vulkan", "Mapping and copying shader handles...");
+    // === STEP 3: COPY HANDLES WITH ALIGNMENT ===
     void* data = nullptr;
     VK_CHECK(vkMapMemory(context_.device, sbtMemory_.get(), 0, sbtSize, 0, &data));
-    memcpy(data, shaderHandleStorage.data(), sbtSize);
-    vkUnmapMemory(context_.device, sbtMemory_.get());
-    LOG_INFO_CAT("Vulkan", "Shader handles copied to SBT buffer");
 
-    // === STEP 5: GET DEVICE ADDRESS ===
-    LOG_INFO_CAT("Vulkan", "Getting SBT device address...");
+    for (uint32_t i = 0; i < groupCount; ++i) {
+        uint8_t* dst = (uint8_t*)data + i * alignedHandleSize;
+        memcpy(dst, shaderHandleStorage.data() + i * handleSize, handleSize);
+    }
+    vkUnmapMemory(context_.device, sbtMemory_.get());
+    LOG_INFO_CAT("Vulkan", "Handles copied with alignment");
+
+    // === STEP 4: DEVICE ADDRESS ===
     VkBufferDeviceAddressInfo addrInfo = {
         .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
         .buffer = sbtBuffer_.get()
     };
     VkDeviceAddress sbtAddress = context_.vkGetBufferDeviceAddressKHR(context_.device, &addrInfo);
-    LOG_INFO_CAT("Vulkan", "SBT device address: 0x{:x}", sbtAddress);
 
-    // === STEP 6: FILL SBT REGIONS ===
+    // === STEP 5: FILL SBT REGIONS ===
     sbt_.raygen = { sbtAddress + 0 * alignedHandleSize, alignedHandleSize, alignedHandleSize };
     sbt_.miss   = { sbtAddress + 1 * alignedHandleSize, alignedHandleSize, alignedHandleSize };
     sbt_.hit    = { sbtAddress + 2 * alignedHandleSize, alignedHandleSize, alignedHandleSize };
     sbt_.callable = {};
 
-    LOG_INFO_CAT("Vulkan", "SBT regions assigned:");
-    LOG_INFO_CAT("Vulkan", "  raygen: addr=0x{:x}, stride={}, size={}", sbt_.raygen.deviceAddress, sbt_.raygen.stride, sbt_.raygen.size);
-    LOG_INFO_CAT("Vulkan", "  miss:   addr=0x{:x}, stride={}, size={}", sbt_.miss.deviceAddress,   sbt_.miss.stride,   sbt_.miss.size);
-    LOG_INFO_CAT("Vulkan", "  hit:    addr=0x{:x}, stride={}, size={}", sbt_.hit.deviceAddress,    sbt_.hit.stride,    sbt_.hit.size);
+    LOG_INFO_CAT("Vulkan", "SBT Ready:");
+    LOG_INFO_CAT("Vulkan", "  raygen: 0x{:x} (stride={}, size={})", sbt_.raygen.deviceAddress, sbt_.raygen.stride, sbt_.raygen.size);
+    LOG_INFO_CAT("Vulkan", "  miss:   0x{:x}", sbt_.miss.deviceAddress);
+    LOG_INFO_CAT("Vulkan", "  hit:    0x{:x}", sbt_.hit.deviceAddress);
 
     LOG_INFO_CAT("Vulkan", "=== createShaderBindingTable() SUCCESS ===");
 }
 
 // ====================================================================
-// CREATE RAY TRACING PIPELINE — FULL IMPLEMENTATION
+// 8. CREATE RAY TRACING PIPELINE — FULL IMPLEMENTATION
 // ====================================================================
 void VulkanPipelineManager::createRayTracingPipeline() {
     // Load shaders
@@ -564,7 +555,7 @@ void VulkanPipelineManager::createRayTracingPipeline() {
 }
 
 // ====================================================================
-// CREATE COMPUTE PIPELINE — DENOISER
+// 9. CREATE COMPUTE PIPELINE — DENOISER
 // ====================================================================
 void VulkanPipelineManager::createComputePipeline() {
     VkShaderModule computeModule = loadShader(context_.device, "compute_denoise");
@@ -576,8 +567,12 @@ void VulkanPipelineManager::createComputePipeline() {
         .pName = "main"
     };
 
-    // FIX: Create layout BEFORE pipeline
+    // Use pre-created layout
     VkDescriptorSetLayout dsLayout = computeDescriptorSetLayout_.get();
+    if (dsLayout == VK_NULL_HANDLE) {
+        LOG_ERROR_CAT("Vulkan", "Compute descriptor set layout is NULL!");
+        throw std::runtime_error("Compute layout missing");
+    }
 
     VkPipelineLayoutCreateInfo layoutInfo = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
@@ -603,7 +598,7 @@ void VulkanPipelineManager::createComputePipeline() {
 }
 
 // ====================================================================
-// CREATE GRAPHICS PIPELINE — TONEMAP + POST
+// 10. CREATE GRAPHICS PIPELINE — TONEMAP + POST
 // ====================================================================
 void VulkanPipelineManager::createGraphicsPipeline(int width, int height) {
     VkShaderModule vertModule = loadShader(context_.device, "tonemap_vert");
@@ -696,7 +691,6 @@ void VulkanPipelineManager::createGraphicsPipeline(int width, int height) {
         .pAttachments = &colorBlendAttachment
     };
 
-    // FIX: Use raw handle, not .get()
     VkDescriptorSetLayout dsLayout = graphicsDescriptorSetLayout_.get();
 
     VkPipelineLayoutCreateInfo layoutInfo = {
@@ -734,10 +728,9 @@ void VulkanPipelineManager::createGraphicsPipeline(int width, int height) {
 }
 
 // ====================================================================
-// CREATE ACCELERATION STRUCTURES — BLAS + TLAS
+// 11. CREATE ACCELERATION STRUCTURES — BLAS + TLAS
 // ====================================================================
 void VulkanPipelineManager::createAccelerationStructures(VkBuffer vertexBuffer, VkBuffer indexBuffer) {
-    // FIX: Avoid compound literals — use structs
     VkBufferDeviceAddressInfo vertexAddrInfo = {
         .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
         .buffer = vertexBuffer
@@ -879,9 +872,8 @@ void VulkanPipelineManager::createAccelerationStructures(VkBuffer vertexBuffer, 
     LOG_INFO_CAT("Vulkan", "BLAS + TLAS built successfully");
 }
 
-
 // ====================================================================
-// UPDATE RAY TRACING DESCRIPTOR SET
+// 12. UPDATE RAY TRACING DESCRIPTOR SET
 // ====================================================================
 void VulkanPipelineManager::updateRayTracingDescriptorSet(VkDescriptorSet descriptorSet, VkAccelerationStructureKHR tlasHandle) {
     VkWriteDescriptorSetAccelerationStructureKHR asWrite = {
@@ -904,7 +896,7 @@ void VulkanPipelineManager::updateRayTracingDescriptorSet(VkDescriptorSet descri
 }
 
 // ====================================================================
-// RECORD GRAPHICS COMMANDS — TONEMAP PASS
+// 13. RECORD GRAPHICS COMMANDS — TONEMAP PASS
 // ====================================================================
 void VulkanPipelineManager::recordGraphicsCommands(VkCommandBuffer cmd, VkFramebuffer fb, VkDescriptorSet ds,
                                                    uint32_t w, uint32_t h, VkImage denoiseImage) {
@@ -929,12 +921,11 @@ void VulkanPipelineManager::recordGraphicsCommands(VkCommandBuffer cmd, VkFrameb
 }
 
 // ====================================================================
-// RECORD RAY TRACING COMMANDS
+// 14. RECORD RAY TRACING COMMANDS
 // ====================================================================
 void VulkanPipelineManager::recordRayTracingCommands(VkCommandBuffer cmd, VkImage outputImage,
                                                      VkDescriptorSet descSet, uint32_t width, uint32_t height,
                                                      VkImage gDepth, VkImage gNormal) {
-    // Transition output image
     VulkanInitializer::transitionImageLayout(context_, outputImage, VK_FORMAT_R32G32B32A32_SFLOAT,
                                              VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
 
@@ -950,7 +941,7 @@ void VulkanPipelineManager::recordRayTracingCommands(VkCommandBuffer cmd, VkImag
 }
 
 // ====================================================================
-// RECORD COMPUTE COMMANDS — DENOISER
+// 15. RECORD COMPUTE COMMANDS — DENOISER
 // ====================================================================
 void VulkanPipelineManager::recordComputeCommands(VkCommandBuffer cmd, VkImage outputImage,
                                                   VkDescriptorSet ds, uint32_t w, uint32_t h,
@@ -965,6 +956,9 @@ void VulkanPipelineManager::recordComputeCommands(VkCommandBuffer cmd, VkImage o
     LOG_INFO_CAT("Vulkan", "Recorded denoise dispatch: {}x{}", w, h);
 }
 
+// ====================================================================
+// 16. FRAME TIME LOGGING
+// ====================================================================
 void VulkanPipelineManager::logFrameTimeIfSlow(std::chrono::steady_clock::time_point start) {
     auto end = std::chrono::steady_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
@@ -973,6 +967,9 @@ void VulkanPipelineManager::logFrameTimeIfSlow(std::chrono::steady_clock::time_p
     }
 }
 
+// ====================================================================
+// 17. DEBUG CALLBACK (ENABLED ONLY IN DEBUG)
+// ====================================================================
 #ifdef ENABLE_VULKAN_DEBUG
 void VulkanPipelineManager::setupDebugCallback() {
     VkDebugUtilsMessengerCreateInfoEXT createInfo = {

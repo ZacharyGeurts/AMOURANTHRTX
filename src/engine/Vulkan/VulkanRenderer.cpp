@@ -9,6 +9,7 @@
 #include "engine/core.hpp"
 #include "engine/Dispose.hpp"
 #include "engine/logging.hpp"
+
 #include <stdexcept>
 #include <algorithm>
 #include <cstring>
@@ -20,6 +21,9 @@
 #include <glm/gtc/matrix_inverse.hpp>
 #include <chrono>
 #include <bit>
+#include <thread>
+#include <mutex>
+#include <atomic>
 #include "stb/stb_image.h"
 #define TINYOBJLOADER_IMPLEMENTATION
 #include "tinyobjloader/tiny_obj_loader.h"
@@ -27,34 +31,45 @@
 
 namespace VulkanRTX {
 
-#define VK_CHECK(x) do { VkResult r = (x); if (r != VK_SUCCESS) { LOG_ERROR_CAT("Renderer", #x " failed: {}", static_cast<int>(r)); throw std::runtime_error(#x " failed"); } } while(0)
+#define VK_CHECK(x) do { \
+    VkResult r = (x); \
+    if (r != VK_SUCCESS) { \
+        LOG_ERROR_CAT("Renderer", #x " failed: {}", static_cast<int>(r)); \
+        throw std::runtime_error(#x " failed"); \
+    } \
+} while(0)
 
 // -----------------------------------------------------------------------------
 // PRIVATE: CREATE SHADER MODULE
 // -----------------------------------------------------------------------------
 VkShaderModule VulkanRenderer::createShaderModule(const std::string& filepath) {
+    LOG_INFO_CAT("Renderer", "Loading shader: {}", filepath);
     std::ifstream file(filepath, std::ios::ate | std::ios::binary);
     if (!file.is_open()) {
+        LOG_ERROR_CAT("Renderer", "Failed to open shader file: {}", filepath);
         throw std::runtime_error("Failed to open shader file: " + filepath);
     }
+
     size_t fileSize = static_cast<size_t>(file.tellg());
     std::vector<char> code(fileSize);
     file.seekg(0);
     file.read(code.data(), fileSize);
     file.close();
 
-    VkShaderModuleCreateInfo createInfo{};
-    createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-    createInfo.codeSize = fileSize;
-    createInfo.pCode = reinterpret_cast<const uint32_t*>(code.data());
+    VkShaderModuleCreateInfo createInfo = {
+        .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+        .codeSize = fileSize,
+        .pCode = reinterpret_cast<const uint32_t*>(code.data())
+    };
 
     VkShaderModule shaderModule;
     VK_CHECK(vkCreateShaderModule(context_.device, &createInfo, nullptr, &shaderModule));
+    LOG_INFO_CAT("Renderer", "Shader module created: {} bytes", fileSize);
     return shaderModule;
 }
 
 // -----------------------------------------------------------------------------
-// CONSTRUCTOR — FULLY INITIALIZED
+// CONSTRUCTOR
 // -----------------------------------------------------------------------------
 VulkanRenderer::VulkanRenderer(int width, int height, void* window,
                                const std::vector<std::string>& instanceExtensions)
@@ -66,7 +81,6 @@ VulkanRenderer::VulkanRenderer(int width, int height, void* window,
       denoiseImageView_(VK_NULL_HANDLE), denoiseSampler_(VK_NULL_HANDLE),
       envMapImage_(VK_NULL_HANDLE), envMapImageMemory_(VK_NULL_HANDLE),
       envMapImageView_(VK_NULL_HANDLE), envMapSampler_(VK_NULL_HANDLE),
-      computeDescriptorSetLayout_(VK_NULL_HANDLE),
       blasHandle_(VK_NULL_HANDLE), blasBuffer_(VK_NULL_HANDLE), blasBufferMemory_(VK_NULL_HANDLE),
       tlasHandle_(VK_NULL_HANDLE), tlasBuffer_(VK_NULL_HANDLE), tlasBufferMemory_(VK_NULL_HANDLE),
       instanceBuffer_(VK_NULL_HANDLE), instanceBufferMemory_(VK_NULL_HANDLE),
@@ -78,25 +92,37 @@ VulkanRenderer::VulkanRenderer(int width, int height, void* window,
       materialBuffers_(), materialBufferMemory_(),
       dimensionBuffers_(), dimensionBufferMemory_(),
       camera_(std::make_unique<PerspectiveCamera>()),
-      descriptorsUpdated_(false), recreateSwapchain(false),
+      descriptorsUpdated_(false),
       vkCmdTraceRaysKHR_(nullptr),
       rtPipeline_(VK_NULL_HANDLE), rtPipelineLayout_(VK_NULL_HANDLE),
-      sbtBuffer_(VK_NULL_HANDLE), sbtMemory_(VK_NULL_HANDLE), sbt_{}
+      sbtBuffer_(VK_NULL_HANDLE), sbtMemory_(VK_NULL_HANDLE), sbt_{},
+      currentRTIndex_(0), currentAccumIndex_(0), resetAccumulation_(true),
+      resizePending_(false), pendingWidth_(0), pendingHeight_(0),
+      swapchainRecreating_(false),
+      computeDescriptorSetLayout_(VK_NULL_HANDLE)  // ← ADDED
 {
     LOG_INFO_CAT("Renderer", "=== VulkanRenderer Constructor Start ===");
     frames_.resize(MAX_FRAMES_IN_FLIGHT);
 
     // 1. INIT VULKAN CORE
+    LOG_INFO_CAT("Renderer", "Initializing Vulkan instance...");
     VulkanInitializer::initInstance(instanceExtensions, context_);
+    LOG_INFO_CAT("Renderer", "Initializing surface...");
     VulkanInitializer::initSurface(context_, window_, nullptr);
+    LOG_INFO_CAT("Renderer", "Finding physical device...");
     context_.physicalDevice = VulkanInitializer::findPhysicalDevice(context_.instance, context_.surface, true);
+    LOG_INFO_CAT("Renderer", "Initializing logical device...");
     VulkanInitializer::initDevice(context_);
     context_.resourceManager.setDevice(context_.device, context_.physicalDevice);
 
     // 2. LOAD RT EXTENSION FUNCTIONS
+    LOG_INFO_CAT("Renderer", "Loading ray tracing extension functions...");
     #define LOAD_FUNC(name) \
         context_.name = reinterpret_cast<PFN_##name>(vkGetDeviceProcAddr(context_.device, #name)); \
-        if (!context_.name) throw std::runtime_error("Failed to load " #name);
+        if (!context_.name) { \
+            LOG_ERROR_CAT("Renderer", "Failed to load extension function: {}", #name); \
+            throw std::runtime_error("Failed to load " #name); \
+        }
     LOAD_FUNC(vkGetAccelerationStructureBuildSizesKHR);
     LOAD_FUNC(vkCmdBuildAccelerationStructuresKHR);
     LOAD_FUNC(vkGetAccelerationStructureDeviceAddressKHR);
@@ -107,15 +133,9 @@ VulkanRenderer::VulkanRenderer(int width, int height, void* window,
     LOAD_FUNC(vkCmdTraceRaysKHR);
     #undef LOAD_FUNC
 
-    context_.vkDeferredOperationJoinKHR = reinterpret_cast<PFN_vkDeferredOperationJoinKHR>(
-        vkGetDeviceProcAddr(context_.device, "vkDeferredOperationJoinKHR"));
-    context_.vkGetDeferredOperationResultKHR = reinterpret_cast<PFN_vkGetDeferredOperationResultKHR>(
-        vkGetDeviceProcAddr(context_.device, "vkGetDeferredOperationResultKHR"));
-    context_.vkDestroyDeferredOperationKHR = reinterpret_cast<PFN_vkDestroyDeferredOperationKHR>(
-        vkGetDeviceProcAddr(context_.device, "vkDestroyDeferredOperationKHR"));
-
     // 3. COMMAND POOL
-    VkCommandPoolCreateInfo cmdPoolInfo{
+    LOG_INFO_CAT("Renderer", "Creating command pool...");
+    VkCommandPoolCreateInfo cmdPoolInfo = {
         .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
         .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
         .queueFamilyIndex = context_.graphicsQueueFamilyIndex
@@ -124,6 +144,7 @@ VulkanRenderer::VulkanRenderer(int width, int height, void* window,
     context_.resourceManager.addCommandPool(context_.commandPool);
 
     // 4. SWAPCHAIN & FRAME SYNC
+    LOG_INFO_CAT("Renderer", "Initializing swapchain...");
     swapchainManager_ = std::make_unique<VulkanSwapchainManager>(context_, context_.surface);
     swapchainManager_->initializeSwapchain(width_, height_);
     context_.swapchain = swapchainManager_->getSwapchain();
@@ -132,10 +153,9 @@ VulkanRenderer::VulkanRenderer(int width, int height, void* window,
     context_.swapchainImages = swapchainManager_->getSwapchainImages();
     context_.swapchainImageViews = swapchainManager_->getSwapchainImageViews();
 
-    // Sync width_/height_ to actual swapchain extent
     width_ = static_cast<int>(context_.swapchainExtent.width);
     height_ = static_cast<int>(context_.swapchainExtent.height);
-    LOG_INFO_CAT("Renderer", "Swapchain extent synced: {}x{}", width_, height_);
+    LOG_INFO_CAT("Renderer", "Swapchain initialized: {}x{}", width_, height_);
 
     for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
         frames_[i].imageAvailableSemaphore = swapchainManager_->getImageAvailableSemaphore(i);
@@ -143,436 +163,222 @@ VulkanRenderer::VulkanRenderer(int width, int height, void* window,
         frames_[i].fence = swapchainManager_->getInFlightFence(i);
     }
 
-    // 5. PIPELINE MANAGER
+    // 5. PIPELINE MANAGER — FIXED ORDER
+    LOG_INFO_CAT("Renderer", "Creating pipelines...");
     pipelineManager_ = std::make_unique<VulkanPipelineManager>(context_, width_, height_);
-
-    // Create pipelines
     pipelineManager_->createRayTracingPipeline();
-    pipelineManager_->createComputePipeline();
-    pipelineManager_->createGraphicsPipeline(width_, height_);
+    pipelineManager_->createComputePipeline();   // ← Creates layout internally
 
-    // Get layouts and pipeline
+    // --- CRITICAL: STORE COMPUTE LAYOUT ---
+    computeDescriptorSetLayout_ = pipelineManager_->getComputeDescriptorSetLayout();
+    if (computeDescriptorSetLayout_ == VK_NULL_HANDLE) {
+        LOG_ERROR_CAT("Renderer", "Failed to retrieve compute descriptor set layout");
+        throw std::runtime_error("Compute descriptor set layout not created");
+    }
+    LOG_INFO_CAT("Renderer", "Compute descriptor set layout acquired: 0x{:x}", 
+                 reinterpret_cast<uint64_t>(computeDescriptorSetLayout_));
+
+    pipelineManager_->createGraphicsPipeline(width_, height_);
     context_.rayTracingDescriptorSetLayout = pipelineManager_->createRayTracingDescriptorSetLayout();
     rtPipelineLayout_ = pipelineManager_->getRayTracingPipelineLayout();
     rtPipeline_ = pipelineManager_->getRayTracingPipeline();
-
-    // Create SBT
     pipelineManager_->createShaderBindingTable();
     sbt_ = pipelineManager_->getShaderBindingTable();
 
-    // 6. LOAD MESH DATA
+    // 6. MESH DATA
+    LOG_INFO_CAT("Renderer", "Loading mesh data...");
     const auto& vertices = getVertices();
     const auto& indices = getIndices();
-
     if (vertices.empty() || indices.empty()) {
-        LOG_ERROR_CAT("Renderer", "Vertex / index data cannot be empty");
+        LOG_ERROR_CAT("Renderer", "Vertex or index data is empty");
         throw std::runtime_error("Vertex / index data cannot be empty");
     }
 
-    // 7. BUFFER MANAGER
-    bufferManager_ = std::make_unique<VulkanBufferManager>(
-        context_,
-        std::span<const glm::vec3>(vertices),
-        std::span<const uint32_t>(indices)
-    );
+    // 7. BUFFER MANAGER — NOW SAFE
+    LOG_INFO_CAT("Renderer", "Creating vertex/index buffers...");
+    bufferManager_ = std::make_unique<VulkanBufferManager>(context_, std::span(vertices), std::span(indices));
     indexCount_ = static_cast<uint32_t>(indices.size());
 
-    // 8. ACCELERATION STRUCTURES
+    // 8. ACCELERATION STRUCTURES — NOW SAFE
+    LOG_INFO_CAT("Renderer", "Building acceleration structures...");
     buildAccelerationStructures();
 
-    // 9. RT OUTPUT IMAGE
-    createRTOutputImage();
+    // 9. RT OUTPUT (Double-buffered)
+    LOG_INFO_CAT("Renderer", "Creating double-buffered RT output images...");
+    rtOutputImages_.fill(VK_NULL_HANDLE);
+    rtOutputMemories_.fill(VK_NULL_HANDLE);
+    rtOutputViews_.fill(VK_NULL_HANDLE);
+    createRTOutputImage(); rtOutputImages_[0] = rtOutputImage_.get(); rtOutputMemories_[0] = rtOutputImageMemory_.get(); rtOutputViews_[0] = rtOutputImageView_.get();
+    createRTOutputImage(); rtOutputImages_[1] = rtOutputImage_.get(); rtOutputMemories_[1] = rtOutputImageMemory_.get(); rtOutputViews_[1] = rtOutputImageView_.get();
+    currentRTIndex_ = 0;
 
-    // 10. FRAMEBUFFERS & COMMAND BUFFERS
+    // 10. ACCUMULATION (Double-buffered)
+    LOG_INFO_CAT("Renderer", "Creating double-buffered accumulation images...");
+    accumImages_.fill(VK_NULL_HANDLE);
+    accumMemories_.fill(VK_NULL_HANDLE);
+    accumViews_.fill(VK_NULL_HANDLE);
+    createAccumulationImage(); accumImages_[0] = accumImage_.get(); accumMemories_[0] = accumImageMemory_.get(); accumViews_[0] = accumImageView_.get();
+    createAccumulationImage(); accumImages_[1] = accumImage_.get(); accumMemories_[1] = accumImageMemory_.get(); accumViews_[1] = accumImageView_.get();
+    currentAccumIndex_ = 0;
+
+    // 11. FRAMEBUFFERS & COMMAND BUFFERS
+    LOG_INFO_CAT("Renderer", "Creating framebuffers...");
     createFramebuffers();
+    LOG_INFO_CAT("Renderer", "Allocating command buffers...");
     createCommandBuffers();
 
-    // 11. ENVIRONMENT MAP
+    // 12. ENVIRONMENT MAP
+    LOG_INFO_CAT("Renderer", "Loading environment map...");
     createEnvironmentMap();
 
-    // 12. PER-FRAME BUFFERS
+    // 13. PER-FRAME BUFFERS
+    LOG_INFO_CAT("Renderer", "Initializing per-frame storage buffers...");
     initializeAllBufferData(MAX_FRAMES_IN_FLIGHT, sizeof(MaterialData) * 128, sizeof(DimensionData));
 
-    // 13. DESCRIPTOR SYSTEM
+    // 14. DESCRIPTOR SYSTEM
+    LOG_INFO_CAT("Renderer", "Creating descriptor pool...");
     createDescriptorPool();
+    LOG_INFO_CAT("Renderer", "Allocating descriptor sets...");
     createDescriptorSets();
+    LOG_INFO_CAT("Renderer", "Allocating compute descriptor sets...");
     createComputeDescriptorSets();
 
-    // 14. UPDATE DESCRIPTORS
+    // 15. UPDATE DESCRIPTORS
+    LOG_INFO_CAT("Renderer", "Updating RT descriptors...");
     updateRTDescriptors();
+
+    // 16. GPU TIMING
+    LOG_INFO_CAT("Renderer", "Creating query pools for GPU timing...");
+    for (auto& pool : queryPools_) {
+        VkQueryPoolCreateInfo info = {
+            .sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,
+            .queryType = VK_QUERY_TYPE_TIMESTAMP,
+            .queryCount = 8
+        };
+        VK_CHECK(vkCreateQueryPool(context_.device, &info, nullptr, &pool));
+    }
 
     LOG_INFO_CAT("Renderer", "=== VulkanRenderer Initialized Successfully ===");
 }
 
 // -----------------------------------------------------------------------------
-// BUILD ACCELERATION STRUCTURES — FULLY TRACKED
-// -----------------------------------------------------------------------------
-void VulkanRenderer::buildAccelerationStructures() {
-    const auto& verts = getVertices();
-    const auto& idxs = getIndices();
-    uint32_t primitiveCount = static_cast<uint32_t>(idxs.size() / 3);
-    if (primitiveCount == 0) {
-        throw std::runtime_error("No primitives in model; cannot build BLAS");
-    }
-    LOG_INFO_CAT("Renderer", "Building BLAS with {} primitives", primitiveCount);
-
-    // === VALIDATE GEOMETRY ===
-    for (size_t i = 0; i < idxs.size(); i += 3) {
-        uint32_t a = idxs[i], b = idxs[i+1], c = idxs[i+2];
-        if (a >= verts.size() || b >= verts.size() || c >= verts.size() || a == b || b == c || c == a) {
-            LOG_ERROR_CAT("Renderer", "Invalid/degenerate triangle {}: indices [{}, {}, {}]", i/3, a, b, c);
-            throw std::runtime_error("Degenerate geometry");
-        }
-    }
-
-    auto submitAndWait = [&](VkCommandBuffer cmd, const std::string& step) {
-        VkFenceCreateInfo fenceInfo = { .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
-        VkFence fence;
-        VK_CHECK(vkCreateFence(context_.device, &fenceInfo, nullptr, &fence));
-        VkSubmitInfo submitInfo = {};
-        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-        submitInfo.commandBufferCount = 1;
-        submitInfo.pCommandBuffers = &cmd;
-        VK_CHECK(vkQueueSubmit(context_.graphicsQueue, 1, &submitInfo, fence));
-        VK_CHECK(vkWaitForFences(context_.device, 1, &fence, VK_TRUE, UINT64_MAX));
-        vkDestroyFence(context_.device, fence, nullptr);
-        vkFreeCommandBuffers(context_.device, context_.commandPool, 1, &cmd);
-    };
-
-    auto allocateCmd = [&]() -> VkCommandBuffer {
-        VkCommandBuffer cmd;
-        VkCommandBufferAllocateInfo allocInfo = {};
-        allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-        allocInfo.commandPool = context_.commandPool;
-        allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-        allocInfo.commandBufferCount = 1;
-        VK_CHECK(vkAllocateCommandBuffers(context_.device, &allocInfo, &cmd));
-        VkCommandBufferBeginInfo beginInfo = {};
-        beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-        beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-        VK_CHECK(vkBeginCommandBuffer(cmd, &beginInfo));
-        return cmd;
-    };
-
-    VkDeviceSize vertexSize = verts.size() * sizeof(glm::vec3);
-    VkDeviceSize indexSize = idxs.size() * sizeof(uint32_t);
-
-    // === STAGING BUFFERS (HOST) ===
-    VkBuffer stagingVertexBuffer = VK_NULL_HANDLE, stagingIndexBuffer = VK_NULL_HANDLE;
-    VkDeviceMemory stagingVertexMemory = VK_NULL_HANDLE, stagingIndexMemory = VK_NULL_HANDLE;
-
-    bufferManager_->createBuffer(vertexSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                                 stagingVertexBuffer, stagingVertexMemory);
-    bufferManager_->createBuffer(indexSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                                 stagingIndexBuffer, stagingIndexMemory);
-
-    // Map & copy
-    { void* data; VK_CHECK(vkMapMemory(context_.device, stagingVertexMemory, 0, vertexSize, 0, &data)); std::memcpy(data, verts.data(), vertexSize); vkUnmapMemory(context_.device, stagingVertexMemory); }
-    { void* data; VK_CHECK(vkMapMemory(context_.device, stagingIndexMemory, 0, indexSize, 0, &data)); std::memcpy(data, idxs.data(), indexSize); vkUnmapMemory(context_.device, stagingIndexMemory); }
-
-    // === DEVICE-LOCAL BUFFERS (GEOMETRY) ===
-    VkBuffer vertexBuffer = VK_NULL_HANDLE, indexBuffer = VK_NULL_HANDLE;
-    VkDeviceMemory vertexMemory = VK_NULL_HANDLE, indexMemory = VK_NULL_HANDLE;
-
-    bufferManager_->createBuffer(vertexSize,
-                                 VK_BUFFER_USAGE_TRANSFER_DST_BIT |
-                                 VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
-                                 VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-                                 VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-                                 vertexBuffer, vertexMemory);
-    bufferManager_->createBuffer(indexSize,
-                                 VK_BUFFER_USAGE_TRANSFER_DST_BIT |
-                                 VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
-                                 VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-                                 VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-                                 indexBuffer, indexMemory);
-
-    // TRACK IN RESOURCE MANAGER
-    context_.resourceManager.addBuffer(vertexBuffer);
-    context_.resourceManager.addMemory(vertexMemory);
-    context_.resourceManager.addBuffer(indexBuffer);
-    context_.resourceManager.addMemory(indexMemory);
-
-    // === COPY TO DEVICE ===
-    VkCommandBuffer cmdCopy = allocateCmd();
-    { VkBufferCopy region{}; region.size = vertexSize; vkCmdCopyBuffer(cmdCopy, stagingVertexBuffer, vertexBuffer, 1, &region); }
-    { VkBufferCopy region{}; region.size = indexSize; vkCmdCopyBuffer(cmdCopy, stagingIndexBuffer, indexBuffer, 1, &region); }
-    VK_CHECK(vkEndCommandBuffer(cmdCopy));
-    submitAndWait(cmdCopy, "geometry copy");
-
-    // === CLEANUP STAGING ===
-    vkDestroyBuffer(context_.device, stagingVertexBuffer, nullptr);
-    vkFreeMemory(context_.device, stagingVertexMemory, nullptr);
-    vkDestroyBuffer(context_.device, stagingIndexBuffer, nullptr);
-    vkFreeMemory(context_.device, stagingIndexMemory, nullptr);
-
-    // === ADDRESSES ===
-    VkBufferDeviceAddressInfo vAddrInfo{}; vAddrInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO; vAddrInfo.buffer = vertexBuffer;
-    VkDeviceAddress vertexDeviceAddress = context_.vkGetBufferDeviceAddressKHR(context_.device, &vAddrInfo);
-
-    VkBufferDeviceAddressInfo iAddrInfo{}; iAddrInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO; iAddrInfo.buffer = indexBuffer;
-    VkDeviceAddress indexDeviceAddress = context_.vkGetBufferDeviceAddressKHR(context_.device, &iAddrInfo);
-
-    LOG_INFO_CAT("Renderer", "Vertex addr=0x{:x}, Index addr=0x{:x}", vertexDeviceAddress, indexDeviceAddress);
-
-    // === BLAS ===
-    VkAccelerationStructureGeometryTrianglesDataKHR triangles{};
-    triangles.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
-    triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
-    triangles.vertexData.deviceAddress = vertexDeviceAddress;
-    triangles.vertexStride = sizeof(glm::vec3);
-    triangles.maxVertex = static_cast<uint32_t>(verts.size()) - 1;
-    triangles.indexType = VK_INDEX_TYPE_UINT32;
-    triangles.indexData.deviceAddress = indexDeviceAddress;
-
-    VkAccelerationStructureGeometryKHR geometry{};
-    geometry.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
-    geometry.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
-    geometry.geometry.triangles = triangles;
-    geometry.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
-
-    VkAccelerationStructureBuildGeometryInfoKHR buildInfo{};
-    buildInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
-    buildInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
-    buildInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
-    buildInfo.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
-    buildInfo.geometryCount = 1;
-    buildInfo.pGeometries = &geometry;
-
-    uint32_t maxPrimCount = primitiveCount;
-    VkAccelerationStructureBuildSizesInfoKHR sizeInfo{};
-    sizeInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
-    context_.vkGetAccelerationStructureBuildSizesKHR(context_.device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &buildInfo, &maxPrimCount, &sizeInfo);
-
-    LOG_INFO_CAT("Renderer", "BLAS sizes: storage={}B, scratch={}B", sizeInfo.accelerationStructureSize, sizeInfo.buildScratchSize);
-
-    // === RESERVE SCRATCH ===
-    if (bufferManager_->getScratchBufferCount() == 0) {
-        bufferManager_->reserveScratchPool(sizeInfo.buildScratchSize, 1);
-        LOG_INFO_CAT("Renderer", "RESERVED scratch buffer: {} B", sizeInfo.buildScratchSize);
-    }
-
-    VkDeviceAddress scratchAddr = bufferManager_->getScratchBufferAddress(0);
-    if (scratchAddr == 0) throw std::runtime_error("Scratch buffer address is 0");
-
-    // === BLAS STORAGE BUFFER (TRACKED) ===
-    VkBuffer blasBuffer = VK_NULL_HANDLE;
-    VkDeviceMemory blasMemory = VK_NULL_HANDLE;
-    bufferManager_->createBuffer(sizeInfo.accelerationStructureSize,
-                                 VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-                                 VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-                                 blasBuffer, blasMemory);
-
-    // TRACK IT!
-    context_.resourceManager.addBuffer(blasBuffer);
-    context_.resourceManager.addMemory(blasMemory);
-
-    VkAccelerationStructureCreateInfoKHR blasCreateInfo{};
-    blasCreateInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
-    blasCreateInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
-    blasCreateInfo.buffer = blasBuffer;
-    blasCreateInfo.size = sizeInfo.accelerationStructureSize;
-    VK_CHECK(context_.vkCreateAccelerationStructureKHR(context_.device, &blasCreateInfo, nullptr, &blasHandle_));
-
-    buildInfo.dstAccelerationStructure = blasHandle_;
-    buildInfo.scratchData.deviceAddress = scratchAddr;
-
-    VkCommandBuffer cmdBLAS = allocateCmd();
-    VkAccelerationStructureBuildRangeInfoKHR range{}; range.primitiveCount = primitiveCount;
-    const VkAccelerationStructureBuildRangeInfoKHR* pRange = &range;
-    context_.vkCmdBuildAccelerationStructuresKHR(cmdBLAS, 1, &buildInfo, &pRange);
-    VK_CHECK(vkEndCommandBuffer(cmdBLAS));
-    submitAndWait(cmdBLAS, "BLAS build");
-
-    // === CLEANUP GEOMETRY BUFFERS ===
-    context_.resourceManager.removeBuffer(vertexBuffer);
-    context_.resourceManager.removeMemory(vertexMemory);
-    vkDestroyBuffer(context_.device, vertexBuffer, nullptr);
-    vkFreeMemory(context_.device, vertexMemory, nullptr);
-
-    context_.resourceManager.removeBuffer(indexBuffer);
-    context_.resourceManager.removeMemory(indexMemory);
-    vkDestroyBuffer(context_.device, indexBuffer, nullptr);
-    vkFreeMemory(context_.device, indexMemory, nullptr);
-
-    // === TLAS ===
-    VkAccelerationStructureDeviceAddressInfoKHR blasAddrInfo{};
-    blasAddrInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR;
-    blasAddrInfo.accelerationStructure = blasHandle_;
-    VkDeviceAddress blasAddr = context_.vkGetAccelerationStructureDeviceAddressKHR(context_.device, &blasAddrInfo);
-
-    VkAccelerationStructureInstanceKHR instance = {};
-    instance.instanceCustomIndex = 0; instance.mask = 0xFF;
-    instance.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
-    instance.accelerationStructureReference = blasAddr;
-    instance.transform.matrix[0][0] = 1.0f; instance.transform.matrix[1][1] = 1.0f; instance.transform.matrix[2][2] = 1.0f;
-
-    VkDeviceSize instSize = sizeof(instance);
-    VkBuffer stagingInst = VK_NULL_HANDLE; VkDeviceMemory stagingInstMem = VK_NULL_HANDLE;
-    bufferManager_->createBuffer(instSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingInst, stagingInstMem);
-    void* map; VK_CHECK(vkMapMemory(context_.device, stagingInstMem, 0, instSize, 0, &map)); memcpy(map, &instance, instSize); vkUnmapMemory(context_.device, stagingInstMem);
-
-    VkBuffer instanceBuffer = VK_NULL_HANDLE; VkDeviceMemory instanceMemory = VK_NULL_HANDLE;
-    bufferManager_->createBuffer(instSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, instanceBuffer, instanceMemory);
-
-    // TRACK INSTANCE BUFFER
-    context_.resourceManager.addBuffer(instanceBuffer);
-    context_.resourceManager.addMemory(instanceMemory);
-
-    VkCommandBuffer cmdInstCopy = allocateCmd();
-    VkBufferCopy copyRegion{}; copyRegion.size = instSize;
-    vkCmdCopyBuffer(cmdInstCopy, stagingInst, instanceBuffer, 1, &copyRegion);
-    VK_CHECK(vkEndCommandBuffer(cmdInstCopy));
-    submitAndWait(cmdInstCopy, "instance copy");
-    vkDestroyBuffer(context_.device, stagingInst, nullptr); vkFreeMemory(context_.device, stagingInstMem, nullptr);
-
-    VkBufferDeviceAddressInfo instAddrInfo{}; instAddrInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO; instAddrInfo.buffer = instanceBuffer;
-    VkDeviceAddress instAddr = context_.vkGetBufferDeviceAddressKHR(context_.device, &instAddrInfo);
-
-    VkAccelerationStructureGeometryInstancesDataKHR instData{};
-    instData.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR;
-    instData.data.deviceAddress = instAddr;
-
-    VkAccelerationStructureGeometryKHR tlasGeom{};
-    tlasGeom.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
-    tlasGeom.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
-    tlasGeom.geometry.instances = instData;
-
-    VkAccelerationStructureBuildGeometryInfoKHR tlasBuildInfo{};
-    tlasBuildInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
-    tlasBuildInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
-    tlasBuildInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
-    tlasBuildInfo.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
-    tlasBuildInfo.geometryCount = 1;
-    tlasBuildInfo.pGeometries = &tlasGeom;
-
-    uint32_t tlasMaxPrim = 1;
-    VkAccelerationStructureBuildSizesInfoKHR tlasSize{};
-    tlasSize.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
-    context_.vkGetAccelerationStructureBuildSizesKHR(context_.device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &tlasBuildInfo, &tlasMaxPrim, &tlasSize);
-
-    // === TLAS STORAGE BUFFER (TRACKED) ===
-    VkBuffer tlasBuffer = VK_NULL_HANDLE;
-    VkDeviceMemory tlasMemory = VK_NULL_HANDLE;
-    bufferManager_->createBuffer(tlasSize.accelerationStructureSize, VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, tlasBuffer, tlasMemory);
-
-    // TRACK IT!
-    context_.resourceManager.addBuffer(tlasBuffer);
-    context_.resourceManager.addMemory(tlasMemory);
-
-    VkAccelerationStructureCreateInfoKHR tlasCreateInfo{};
-    tlasCreateInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
-    tlasCreateInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
-    tlasCreateInfo.buffer = tlasBuffer;
-    tlasCreateInfo.size = tlasSize.accelerationStructureSize;
-    VK_CHECK(context_.vkCreateAccelerationStructureKHR(context_.device, &tlasCreateInfo, nullptr, &tlasHandle_));
-
-    tlasBuildInfo.dstAccelerationStructure = tlasHandle_;
-    tlasBuildInfo.scratchData.deviceAddress = scratchAddr;
-
-    VkCommandBuffer cmdTLAS = allocateCmd();
-    VkAccelerationStructureBuildRangeInfoKHR tlasRange{}; tlasRange.primitiveCount = 1;
-    const VkAccelerationStructureBuildRangeInfoKHR* pTlasRange = &tlasRange;
-    context_.vkCmdBuildAccelerationStructuresKHR(cmdTLAS, 1, &tlasBuildInfo, &pTlasRange);
-    VK_CHECK(vkEndCommandBuffer(cmdTLAS));
-    submitAndWait(cmdTLAS, "TLAS build");
-
-    VkAccelerationStructureDeviceAddressInfoKHR tlasAddrInfo{};
-    tlasAddrInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR;
-    tlasAddrInfo.accelerationStructure = tlasHandle_;
-    tlasDeviceAddress_ = context_.vkGetAccelerationStructureDeviceAddressKHR(context_.device, &tlasAddrInfo);
-    LOG_INFO_CAT("Renderer", "TLAS device address: 0x{:x}", tlasDeviceAddress_);
-
-    LOG_INFO_CAT("Renderer", "Acceleration structures built successfully.");
-}
-
-// -----------------------------------------------------------------------------
 // CREATE RT OUTPUT IMAGE
 // -----------------------------------------------------------------------------
-void VulkanRenderer::createRTOutputImage()
-{
+void VulkanRenderer::createRTOutputImage() {
     VkExtent2D extent = context_.swapchainExtent;
-    LOG_INFO_CAT("Renderer", "Creating RT output image at extent {}x{}", extent.width, extent.height);
+    LOG_INFO_CAT("Renderer", "Creating RT output image: {}x{}", extent.width, extent.height);
 
-    VkImageCreateInfo imageInfo = {};
-    imageInfo.sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    imageInfo.imageType     = VK_IMAGE_TYPE_2D;
-    imageInfo.format        = VK_FORMAT_R32G32B32A32_SFLOAT;
-    imageInfo.extent        = { extent.width, extent.height, 1 };
-    imageInfo.mipLevels     = 1;
-    imageInfo.arrayLayers   = 1;
-    imageInfo.samples       = VK_SAMPLE_COUNT_1_BIT;
-    imageInfo.tiling        = VK_IMAGE_TILING_OPTIMAL;
-    imageInfo.usage         = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    VkImageCreateInfo imageInfo = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .imageType = VK_IMAGE_TYPE_2D,
+        .format = VK_FORMAT_R32G32B32A32_SFLOAT,
+        .extent = { extent.width, extent.height, 1 },
+        .mipLevels = 1, .arrayLayers = 1, .samples = VK_SAMPLE_COUNT_1_BIT,
+        .tiling = VK_IMAGE_TILING_OPTIMAL,
+        .usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
+    };
 
-    VkImage img = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateImage(context_.device, &imageInfo, nullptr, &img));
-
-    VkMemoryRequirements memReqs{};
-    vkGetImageMemoryRequirements(context_.device, img, &memReqs);
-
-    VkMemoryAllocateInfo allocInfo = {};
-    allocInfo.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    allocInfo.allocationSize  = memReqs.size;
-    allocInfo.memoryTypeIndex = VulkanInitializer::findMemoryType(
-        context_.physicalDevice, memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-
-    VkDeviceMemory mem = VK_NULL_HANDLE;
-    VK_CHECK(vkAllocateMemory(context_.device, &allocInfo, nullptr, &mem));
+    VkImage img; VK_CHECK(vkCreateImage(context_.device, &imageInfo, nullptr, &img));
+    VkMemoryRequirements memReqs; vkGetImageMemoryRequirements(context_.device, img, &memReqs);
+    VkMemoryAllocateInfo allocInfo = {
+        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+        .allocationSize = memReqs.size,
+        .memoryTypeIndex = VulkanInitializer::findMemoryType(context_.physicalDevice, memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)
+    };
+    VkDeviceMemory mem; VK_CHECK(vkAllocateMemory(context_.device, &allocInfo, nullptr, &mem));
     VK_CHECK(vkBindImageMemory(context_.device, img, mem, 0));
 
-    VkImageViewCreateInfo viewInfo = {};
-    viewInfo.sType            = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    viewInfo.image            = img;
-    viewInfo.viewType         = VK_IMAGE_VIEW_TYPE_2D;
-    viewInfo.format           = VK_FORMAT_R32G32B32A32_SFLOAT;
-    viewInfo.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+    VkImageViewCreateInfo viewInfo = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+        .image = img,
+        .viewType = VK_IMAGE_VIEW_TYPE_2D,
+        .format = VK_FORMAT_R32G32B32A32_SFLOAT,
+        .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
+    };
+    VkImageView view; VK_CHECK(vkCreateImageView(context_.device, &viewInfo, nullptr, &view));
 
-    VkImageView view = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateImageView(context_.device, &viewInfo, nullptr, &view));
-
-    VulkanInitializer::transitionImageLayout(
-        context_,
-        img,
-        VK_FORMAT_R32G32B32A32_SFLOAT,
-        VK_IMAGE_LAYOUT_UNDEFINED,
-        VK_IMAGE_LAYOUT_GENERAL
-    );
+    VulkanInitializer::transitionImageLayout(context_, img, VK_FORMAT_R32G32B32A32_SFLOAT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
 
     rtOutputImage_.reset(img);
     rtOutputImageMemory_.reset(mem);
     rtOutputImageView_.reset(view);
+    LOG_INFO_CAT("Renderer", "RT output image created successfully.");
 }
 
 // -----------------------------------------------------------------------------
-// RECREATE RT OUTPUT IMAGE (Resize)
+// CREATE ACCUMULATION IMAGE
+// -----------------------------------------------------------------------------
+void VulkanRenderer::createAccumulationImage() {
+    VkExtent2D extent = context_.swapchainExtent;
+    LOG_INFO_CAT("Renderer", "Creating accumulation image: {}x{}", extent.width, extent.height);
+
+    VkImageCreateInfo imageInfo = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .imageType = VK_IMAGE_TYPE_2D,
+        .format = VK_FORMAT_R32G32B32A32_SFLOAT,
+        .extent = { extent.width, extent.height, 1 },
+        .mipLevels = 1, .arrayLayers = 1, .samples = VK_SAMPLE_COUNT_1_BIT,
+        .tiling = VK_IMAGE_TILING_OPTIMAL,
+        .usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
+    };
+
+    VkImage img; VK_CHECK(vkCreateImage(context_.device, &imageInfo, nullptr, &img));
+    VkMemoryRequirements memReqs; vkGetImageMemoryRequirements(context_.device, img, &memReqs);
+    VkMemoryAllocateInfo allocInfo = {
+        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+        .allocationSize = memReqs.size,
+        .memoryTypeIndex = VulkanInitializer::findMemoryType(context_.physicalDevice, memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)
+    };
+    VkDeviceMemory mem; VK_CHECK(vkAllocateMemory(context_.device, &allocInfo, nullptr, &mem));
+    VK_CHECK(vkBindImageMemory(context_.device, img, mem, 0));
+
+    VkImageViewCreateInfo viewInfo = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+        .image = img,
+        .viewType = VK_IMAGE_VIEW_TYPE_2D,
+        .format = VK_FORMAT_R32G32B32A32_SFLOAT,
+        .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
+    };
+    VkImageView view; VK_CHECK(vkCreateImageView(context_.device, &viewInfo, nullptr, &view));
+
+    VulkanInitializer::transitionImageLayout(context_, img, VK_FORMAT_R32G32B32A32_SFLOAT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
+
+    accumImage_.reset(img);
+    accumImageMemory_.reset(mem);
+    accumImageView_.reset(view);
+    LOG_INFO_CAT("Renderer", "Accumulation image created successfully.");
+}
+
+// -----------------------------------------------------------------------------
+// RECREATE RT OUTPUT IMAGE
 // -----------------------------------------------------------------------------
 void VulkanRenderer::recreateRTOutputImage() {
-    rtOutputImage_.reset();
-    rtOutputImageMemory_.reset();
-    rtOutputImageView_.reset();
+    LOG_INFO_CAT("Renderer", "Recreating RT output image (double-buffered flip)...");
+    rtOutputImage_.reset(); rtOutputImageMemory_.reset(); rtOutputImageView_.reset();
     createRTOutputImage();
-    LOG_INFO_CAT("Renderer", "RT output image recreated post-resize.");
+    uint32_t next = (currentRTIndex_ + 1) % 2;
+    rtOutputImages_[next] = rtOutputImage_.get();
+    rtOutputMemories_[next] = rtOutputImageMemory_.get();
+    rtOutputViews_[next] = rtOutputImageView_.get();
+    currentRTIndex_ = next;
+    LOG_INFO_CAT("Renderer", "RT output image recreated. New index: {}", currentRTIndex_);
 }
 
 // -----------------------------------------------------------------------------
-// CREATE COMPUTE DESCRIPTOR SETS
+// RECREATE ACCUMULATION IMAGE
 // -----------------------------------------------------------------------------
-void VulkanRenderer::createComputeDescriptorSets() {
-    std::vector<VkDescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, pipelineManager_->getComputeDescriptorSetLayout());
-    VkDescriptorSetAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    allocInfo.descriptorPool = descriptorPool_;
-    allocInfo.descriptorSetCount = MAX_FRAMES_IN_FLIGHT;
-    allocInfo.pSetLayouts = layouts.data();
-
-    computeDescriptorSets_.resize(MAX_FRAMES_IN_FLIGHT);
-    VK_CHECK(vkAllocateDescriptorSets(context_.device, &allocInfo, computeDescriptorSets_.data()));
-
-    LOG_INFO_CAT("Renderer", "Compute descriptor sets allocated.");
+void VulkanRenderer::recreateAccumulationImage() {
+    LOG_INFO_CAT("Renderer", "Recreating accumulation image (double-buffered flip)...");
+    accumImage_.reset(); accumImageMemory_.reset(); accumImageView_.reset();
+    createAccumulationImage();
+    uint32_t next = (currentAccumIndex_ + 1) % 2;
+    accumImages_[next] = accumImage_.get();
+    accumMemories_[next] = accumImageMemory_.get();
+    accumViews_[next] = accumImageView_.get();
+    currentAccumIndex_ = next;
+    LOG_INFO_CAT("Renderer", "Accumulation image recreated. New index: {}", currentAccumIndex_);
 }
 
 // -----------------------------------------------------------------------------
@@ -580,125 +386,300 @@ void VulkanRenderer::createComputeDescriptorSets() {
 // -----------------------------------------------------------------------------
 void VulkanRenderer::updateRTDescriptors() {
     if (tlasHandle_ == VK_NULL_HANDLE) {
-        LOG_ERROR_CAT("Renderer", "TLAS handle is null! Cannot update descriptors.");
+        LOG_ERROR_CAT("Renderer", "TLAS not built — cannot update descriptors");
         throw std::runtime_error("TLAS not built");
     }
-
     if (descriptorsUpdated_) {
+        LOG_DEBUG_CAT("Renderer", "Descriptors already updated — skipping");
         return;
     }
 
-    const uint32_t frameCount = MAX_FRAMES_IN_FLIGHT;
-    const uint32_t totalWrites = frameCount * 10;
+    LOG_INFO_CAT("Renderer", "Updating RT descriptors for {} frames...", MAX_FRAMES_IN_FLIGHT);
+    const uint32_t totalWrites = MAX_FRAMES_IN_FLIGHT * 12;
 
-    std::vector<VkWriteDescriptorSetAccelerationStructureKHR> asWrites(frameCount);
-    std::vector<VkDescriptorImageInfo> outputImageInfos(frameCount);
-    std::vector<VkDescriptorBufferInfo> uniformInfos(frameCount);
-    std::vector<VkDescriptorBufferInfo> materialInfos(frameCount);
-    std::vector<VkDescriptorBufferInfo> dimensionInfos(frameCount);
-    std::vector<VkDescriptorImageInfo> envMapInfos(frameCount);
-
+    std::vector<VkWriteDescriptorSetAccelerationStructureKHR> asWrites(MAX_FRAMES_IN_FLIGHT);
+    std::vector<VkDescriptorImageInfo> outputInfos(MAX_FRAMES_IN_FLIGHT), accumInfos(MAX_FRAMES_IN_FLIGHT), envMapInfos(MAX_FRAMES_IN_FLIGHT);
+    std::vector<VkDescriptorBufferInfo> uniformInfos(MAX_FRAMES_IN_FLIGHT), materialInfos(MAX_FRAMES_IN_FLIGHT), dimensionInfos(MAX_FRAMES_IN_FLIGHT);
     std::vector<VkWriteDescriptorSet> writes(totalWrites);
 
-    for (uint32_t i = 0; i < frameCount; ++i) {
-        const uint32_t base = i * 10;
+    for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
+        uint32_t base = i * 12;
 
-        asWrites[i] = {};
-        asWrites[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR;
-        asWrites[i].accelerationStructureCount = 1;
-        asWrites[i].pAccelerationStructures = &tlasHandle_;
+        asWrites[i] = { .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR, .accelerationStructureCount = 1, .pAccelerationStructures = &tlasHandle_ };
+        writes[base + 0] = { .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .pNext = &asWrites[i], .dstSet = descriptorSets_[i], .dstBinding = 0, .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR };
 
-        writes[base + 0] = {};
-        writes[base + 0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writes[base + 0].pNext = &asWrites[i];
-        writes[base + 0].dstSet = descriptorSets_[i];
-        writes[base + 0].dstBinding = 0;
-        writes[base + 0].descriptorCount = 1;
-        writes[base + 0].descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+        outputInfos[i] = { .imageView = rtOutputViews_[currentRTIndex_], .imageLayout = VK_IMAGE_LAYOUT_GENERAL };
+        writes[base + 1] = { .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = descriptorSets_[i], .dstBinding = 1, .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, .pImageInfo = &outputInfos[i] };
 
-        outputImageInfos[i] = {};
-        outputImageInfos[i].imageView = rtOutputImageView_.get();
-        outputImageInfos[i].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+        uniformInfos[i] = { .buffer = context_.uniformBuffers[i], .range = VK_WHOLE_SIZE };
+        writes[base + 2] = { .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = descriptorSets_[i], .dstBinding = 2, .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, .pBufferInfo = &uniformInfos[i] };
 
-        writes[base + 1] = {};
-        writes[base + 1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writes[base + 1].dstSet = descriptorSets_[i];
-        writes[base + 1].dstBinding = 1;
-        writes[base + 1].descriptorCount = 1;
-        writes[base + 1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-        writes[base + 1].pImageInfo = &outputImageInfos[i];
+        materialInfos[i] = { .buffer = materialBuffers_[i], .range = VK_WHOLE_SIZE };
+        writes[base + 3] = { .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = descriptorSets_[i], .dstBinding = 3, .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, .pBufferInfo = &materialInfos[i] };
 
-        uniformInfos[i] = {};
-        uniformInfos[i].buffer = context_.uniformBuffers[i];
-        uniformInfos[i].range = VK_WHOLE_SIZE;
+        dimensionInfos[i] = { .buffer = dimensionBuffers_[i], .range = VK_WHOLE_SIZE };
+        writes[base + 4] = { .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = descriptorSets_[i], .dstBinding = 4, .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, .pBufferInfo = &dimensionInfos[i] };
 
-        writes[base + 2] = {};
-        writes[base + 2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writes[base + 2].dstSet = descriptorSets_[i];
-        writes[base + 2].dstBinding = 2;
-        writes[base + 2].descriptorCount = 1;
-        writes[base + 2].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        writes[base + 2].pBufferInfo = &uniformInfos[i];
-
-        materialInfos[i] = {};
-        materialInfos[i].buffer = materialBuffers_[i];
-        materialInfos[i].range = VK_WHOLE_SIZE;
-
-        writes[base + 3] = {};
-        writes[base + 3].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writes[base + 3].dstSet = descriptorSets_[i];
-        writes[base + 3].dstBinding = 3;
-        writes[base + 3].descriptorCount = 1;
-        writes[base + 3].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        writes[base + 3].pBufferInfo = &materialInfos[i];
-
-        dimensionInfos[i] = {};
-        dimensionInfos[i].buffer = dimensionBuffers_[i];
-        dimensionInfos[i].range = VK_WHOLE_SIZE;
-
-        writes[base + 4] = {};
-        writes[base + 4].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writes[base + 4].dstSet = descriptorSets_[i];
-        writes[base + 4].dstBinding = 4;
-        writes[base + 4].descriptorCount = 1;
-        writes[base + 4].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        writes[base + 4].pBufferInfo = &dimensionInfos[i];
-
-        envMapInfos[i] = {};
-        envMapInfos[i].sampler = envMapSampler_;
-        envMapInfos[i].imageView = envMapImageView_;
-        envMapInfos[i].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-
+        envMapInfos[i] = { .sampler = envMapSampler_, .imageView = envMapImageView_, .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
         for (int b = 5; b <= 7; ++b) {
-            writes[base + b] = {};
-            writes[base + b].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            writes[base + b].dstSet = descriptorSets_[i];
-            writes[base + b].dstBinding = static_cast<uint32_t>(b);
-            writes[base + b].descriptorCount = 1;
-            writes[base + b].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-            writes[base + b].pImageInfo = &envMapInfos[i];
+            writes[base + b] = { .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = descriptorSets_[i], .dstBinding = static_cast<uint32_t>(b), .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .pImageInfo = &envMapInfos[i] };
         }
 
-        writes[base + 8] = {};
-        writes[base + 8].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writes[base + 8].dstSet = descriptorSets_[i];
-        writes[base + 8].dstBinding = 8;
-        writes[base + 8].descriptorCount = 1;
-        writes[base + 8].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-        writes[base + 8].pImageInfo = &outputImageInfos[i];
+        writes[base + 8] = { .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = descriptorSets_[i], .dstBinding = 8, .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, .pImageInfo = &outputInfos[i] };
+        writes[base + 9] = { .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = descriptorSets_[i], .dstBinding = 9, .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, .pImageInfo = &outputInfos[i] };
 
-        writes[base + 9] = {};
-        writes[base + 9].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writes[base + 9].dstSet = descriptorSets_[i];
-        writes[base + 9].dstBinding = 9;
-        writes[base + 9].descriptorCount = 1;
-        writes[base + 9].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-        writes[base + 9].pImageInfo = &outputImageInfos[i];
+        accumInfos[i] = { .imageView = accumViews_[currentAccumIndex_], .imageLayout = VK_IMAGE_LAYOUT_GENERAL };
+        writes[base + 10] = { .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = descriptorSets_[i], .dstBinding = 10, .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, .pImageInfo = &accumInfos[i] };
+        writes[base + 11] = { .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = descriptorSets_[i], .dstBinding = 11, .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, .pImageInfo = &accumInfos[i] };
     }
 
     vkUpdateDescriptorSets(context_.device, totalWrites, writes.data(), 0, nullptr);
     descriptorsUpdated_ = true;
-    LOG_INFO_CAT("Renderer", "RT descriptors updated ({} writes).", totalWrites);
+    LOG_INFO_CAT("Renderer", "RT descriptors updated: {} writes", totalWrites);
+}
+
+// -----------------------------------------------------------------------------
+// HANDLE RESIZE (DEFERRED)
+// -----------------------------------------------------------------------------
+void VulkanRenderer::handleResize(int width, int height) {
+    if (width == 0 || height == 0) {
+        LOG_DEBUG_CAT("Renderer", "Resize to 0x0 — skipping (window minimized)");
+        return;
+    }
+    if (width == width_ && height == height_) {
+        LOG_DEBUG_CAT("Renderer", "Resize to same size — skipping");
+        return;
+    }
+
+    LOG_INFO_CAT("Renderer", "Resize queued: {}x{} → {}x{}", width_, height_, width, height);
+    std::lock_guard<std::mutex> lock(resizeMutex_);
+    pendingWidth_ = width;
+    pendingHeight_ = height;
+    resizePending_ = true;
+}
+
+// -----------------------------------------------------------------------------
+// APPLY RESIZE
+// -----------------------------------------------------------------------------
+void VulkanRenderer::applyResize() {
+    LOG_INFO_CAT("Renderer", "Applying resize: {}x{}...", pendingWidth_, pendingHeight_);
+
+    for (auto& f : frames_) {
+        VK_CHECK(vkWaitForFences(context_.device, 1, &f.fence, VK_TRUE, UINT64_MAX));
+        VK_CHECK(vkResetFences(context_.device, 1, &f.fence));
+    }
+
+    width_ = pendingWidth_;
+    height_ = pendingHeight_;
+
+    swapchainManager_->handleResize(width_, height_);
+    context_.swapchainExtent = swapchainManager_->getSwapchainExtent();
+    width_ = static_cast<int>(context_.swapchainExtent.width);
+    height_ = static_cast<int>(context_.swapchainExtent.height);
+
+    recreateRTOutputImage();
+    recreateAccumulationImage();
+    createFramebuffers();
+    descriptorsUpdated_ = false;
+    updateRTDescriptors();
+
+    resetAccumulation_ = true;
+    resizePending_ = false;
+    LOG_INFO_CAT("Renderer", "Resize applied: {}x{}", width_, height_);
+}
+
+// -----------------------------------------------------------------------------
+// RENDER FRAME – FULLY FIXED: BARRIERS + DOUBLE BUFFERING
+// -----------------------------------------------------------------------------
+void VulkanRenderer::renderFrame(const Camera& camera) {
+    auto frameStart = std::chrono::steady_clock::now();
+
+    if (resizePending_ && !swapchainRecreating_.load()) {
+        applyResize();
+    }
+
+    if (swapchainRecreating_.load()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        return;
+    }
+
+    uint32_t imageIndex;
+    VkResult result = vkAcquireNextImageKHR(context_.device, context_.swapchain, 1'000'000,
+                                            frames_[currentFrame_].imageAvailableSemaphore, VK_NULL_HANDLE, &imageIndex);
+
+    if (result == VK_ERROR_OUT_OF_DATE_KHR) {
+        LOG_INFO_CAT("Renderer", "Swapchain out-of-date during acquire → recreating");
+        handleResize(width_, height_);
+        return;
+    } else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
+        LOG_ERROR_CAT("Renderer", "Failed to acquire swapchain image: {}", static_cast<int>(result));
+        throw std::runtime_error("Failed to acquire swapchain image");
+    }
+
+    updateUniformBuffer(currentFrame_, camera);
+
+    VkCommandBuffer cmd = commandBuffers_[currentFrame_];
+    vkResetCommandBuffer(cmd, 0);
+    VkCommandBufferBeginInfo beginInfo = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+    VK_CHECK(vkBeginCommandBuffer(cmd, &beginInfo));
+
+    vkCmdResetQueryPool(cmd, queryPools_[currentFrame_], 0, 8);
+    vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, queryPools_[currentFrame_], 0);
+
+    VkImage rtImg = rtOutputImages_[currentRTIndex_];
+    VkImage accumImg = accumImages_[currentAccumIndex_];
+    VkImageSubresourceRange range = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+
+    if (resetAccumulation_) {
+        VkClearColorValue clear = {0, 0, 0, 0};
+        vkCmdClearColorImage(cmd, accumImg, VK_IMAGE_LAYOUT_GENERAL, &clear, 1, &range);
+        resetAccumulation_ = false;
+    }
+
+    // --- BARRIER: RT OUTPUT → SHADER WRITE ---
+    VkImageMemoryBarrier rtWriteBarrier = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .srcAccessMask = 0,
+        .dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
+        .oldLayout = VK_IMAGE_LAYOUT_GENERAL,
+        .newLayout = VK_IMAGE_LAYOUT_GENERAL,
+        .image = rtImg,
+        .subresourceRange = range
+    };
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, 0, 0, nullptr, 0, nullptr, 1, &rtWriteBarrier);
+
+    // --- BIND & TRACE RAYS ---
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, rtPipeline_);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, rtPipelineLayout_, 0, 1, &descriptorSets_[currentFrame_], 0, nullptr);
+
+    const auto& sbt = pipelineManager_->getShaderBindingTable();
+    VkStridedDeviceAddressRegionKHR raygen = { sbt.raygen.deviceAddress, sbt.raygen.stride, sbt.raygen.size };
+    VkStridedDeviceAddressRegionKHR miss   = { sbt.miss.deviceAddress,   sbt.miss.stride,   sbt.miss.size   };
+    VkStridedDeviceAddressRegionKHR hit    = { sbt.hit.deviceAddress,    sbt.hit.stride,    sbt.hit.size    };
+    VkStridedDeviceAddressRegionKHR callable{};
+
+    context_.vkCmdTraceRaysKHR(cmd, &raygen, &miss, &hit, &callable,
+                               context_.swapchainExtent.width, context_.swapchainExtent.height, 1);
+
+    vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, queryPools_[currentFrame_], 1);
+
+    // --- BARRIER: RT OUTPUT → TRANSFER READ ---
+    VkImageMemoryBarrier rtToTransferBarrier = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
+        .dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
+        .oldLayout = VK_IMAGE_LAYOUT_GENERAL,
+        .newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        .image = rtImg,
+        .subresourceRange = range
+    };
+
+    // --- BARRIER: SWAPCHAIN → TRANSFER WRITE ---
+    VkImageMemoryBarrier swapchainToTransferBarrier = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .srcAccessMask = 0,
+        .dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+        .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+        .newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        .image = context_.swapchainImages[imageIndex],
+        .subresourceRange = range
+    };
+
+    VkImageMemoryBarrier barriers[2] = { rtToTransferBarrier, swapchainToTransferBarrier };
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 2, barriers);
+
+    // --- COPY TO SWAPCHAIN ---
+    VkImageCopy copyRegion = {
+        .srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
+        .dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
+        .extent = { context_.swapchainExtent.width, context_.swapchainExtent.height, 1 }
+    };
+    vkCmdCopyImage(cmd, rtImg, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                   context_.swapchainImages[imageIndex], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyRegion);
+
+    // --- BARRIER: SWAPCHAIN → PRESENT ---
+    VkImageMemoryBarrier swapchainToPresentBarrier = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+        .dstAccessMask = VK_ACCESS_MEMORY_READ_BIT,
+        .oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        .newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+        .image = context_.swapchainImages[imageIndex],
+        .subresourceRange = range
+    };
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr, 1, &swapchainToPresentBarrier);
+
+    // --- BARRIER: RT OUTPUT → GENERAL (for next frame) ---
+    VkImageMemoryBarrier rtBackToGeneral = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
+        .dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
+        .oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        .newLayout = VK_IMAGE_LAYOUT_GENERAL,
+        .image = rtImg,
+        .subresourceRange = range
+    };
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, 0, 0, nullptr, 0, nullptr, 1, &rtBackToGeneral);
+
+    VK_CHECK(vkEndCommandBuffer(cmd));
+
+    VkPipelineStageFlags waitStages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
+    VkSubmitInfo submitInfo = {
+        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .waitSemaphoreCount = 1,
+        .pWaitSemaphores = &frames_[currentFrame_].imageAvailableSemaphore,
+        .pWaitDstStageMask = waitStages,
+        .commandBufferCount = 1,
+        .pCommandBuffers = &cmd,
+        .signalSemaphoreCount = 1,
+        .pSignalSemaphores = &frames_[currentFrame_].renderFinishedSemaphore
+    };
+    VK_CHECK(vkQueueSubmit(context_.graphicsQueue, 1, &submitInfo, frames_[currentFrame_].fence));
+
+    VkPresentInfoKHR presentInfo = {
+        .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+        .waitSemaphoreCount = 1,
+        .pWaitSemaphores = &frames_[currentFrame_].renderFinishedSemaphore,
+        .swapchainCount = 1,
+        .pSwapchains = &context_.swapchain,
+        .pImageIndices = &imageIndex
+    };
+    result = vkQueuePresentKHR(context_.graphicsQueue, &presentInfo);
+
+    if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
+        LOG_INFO_CAT("Renderer", "Swapchain out-of-date on present → recreating");
+        handleResize(width_, height_);
+    } else if (result != VK_SUCCESS) {
+        LOG_ERROR_CAT("Renderer", "Failed to present: {}", static_cast<int>(result));
+        throw std::runtime_error("Failed to present");
+    }
+
+    // GPU TIMING
+    uint64_t timestamps[8];
+    VkResult queryResult = vkGetQueryPoolResults(context_.device, queryPools_[currentFrame_], 0, 8, sizeof(timestamps), timestamps, sizeof(uint64_t), VK_QUERY_RESULT_64_BIT);
+    if (queryResult == VK_SUCCESS) {
+        VkPhysicalDeviceProperties props;
+        vkGetPhysicalDeviceProperties(context_.physicalDevice, &props);
+        double period = props.limits.timestampPeriod;
+        double rtTimeMs = (timestamps[1] - timestamps[0]) * period * 1e-6;
+        LOG_INFO_CAT("GPU", "RayTrace: {:.3f}ms", rtTimeMs);
+    } else if (queryResult != VK_NOT_READY) {
+        LOG_WARNING_CAT("GPU", "Query failed: {}", static_cast<int>(queryResult));
+    }
+
+    currentFrame_ = (currentFrame_ + 1) % MAX_FRAMES_IN_FLIGHT;
+    ++frameCount_; ++framesThisSecond_;
+
+    auto now = std::chrono::steady_clock::now();
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastFPSTime_).count();
+    if (elapsed >= 1000) {
+        double fps = framesThisSecond_ * 1000.0 / elapsed;
+        double frameTimeMs = std::chrono::duration_cast<std::chrono::microseconds>(now - frameStart).count() / 1000.0;
+        LOG_INFO_CAT("Renderer", "FPS: {:.1f} | Frame: {} | Time: {:.2f}ms | Size: {}x{}", 
+                     fps, frameCount_, frameTimeMs, context_.swapchainExtent.width, context_.swapchainExtent.height);
+        framesThisSecond_ = 0;
+        lastFPSTime_ = now;
+    }
 }
 
 // -----------------------------------------------------------------------------
@@ -708,46 +689,20 @@ VulkanRenderer::~VulkanRenderer() { cleanup(); }
 
 void VulkanRenderer::cleanup() noexcept {
     LOG_INFO_CAT("Renderer", "=== Starting VulkanRenderer Cleanup ===");
+    vkDeviceWaitIdle(context_.device);
 
-    if (sbtBuffer_ != VK_NULL_HANDLE) vkDestroyBuffer(context_.device, sbtBuffer_, nullptr);
-    if (sbtMemory_ != VK_NULL_HANDLE) vkFreeMemory(context_.device, sbtMemory_, nullptr);
+    for (auto& pool : queryPools_) {
+        if (pool) vkDestroyQueryPool(context_.device, pool, nullptr);
+    }
 
-    if (tlasHandle_ != VK_NULL_HANDLE && context_.vkDestroyAccelerationStructureKHR)
-        context_.vkDestroyAccelerationStructureKHR(context_.device, tlasHandle_, nullptr);
-    if (tlasBuffer_ != VK_NULL_HANDLE) vkDestroyBuffer(context_.device, tlasBuffer_, nullptr);
-    if (tlasBufferMemory_ != VK_NULL_HANDLE) vkFreeMemory(context_.device, tlasBufferMemory_, nullptr);
-
-    if (blasHandle_ != VK_NULL_HANDLE && context_.vkDestroyAccelerationStructureKHR)
-        context_.vkDestroyAccelerationStructureKHR(context_.device, blasHandle_, nullptr);
-    if (blasBuffer_ != VK_NULL_HANDLE) vkDestroyBuffer(context_.device, blasBuffer_, nullptr);
-    if (blasBufferMemory_ != VK_NULL_HANDLE) vkFreeMemory(context_.device, blasBufferMemory_, nullptr);
-
-    if (instanceBuffer_ != VK_NULL_HANDLE) vkDestroyBuffer(context_.device, instanceBuffer_, nullptr);
-    if (instanceBufferMemory_ != VK_NULL_HANDLE) vkFreeMemory(context_.device, instanceBufferMemory_, nullptr);
-
-    if (rtPipeline_ != VK_NULL_HANDLE) vkDestroyPipeline(context_.device, rtPipeline_, nullptr);
-
-    rtOutputImage_.reset();
-    rtOutputImageMemory_.reset();
-    rtOutputImageView_.reset();
-
-    for (auto& b : materialBuffers_) if (b != VK_NULL_HANDLE) vkDestroyBuffer(context_.device, b, nullptr);
-    for (auto& m : materialBufferMemory_) if (m != VK_NULL_HANDLE) vkFreeMemory(context_.device, m, nullptr);
-    materialBuffers_.clear(); materialBufferMemory_.clear();
-
-    for (auto& b : dimensionBuffers_) if (b != VK_NULL_HANDLE) vkDestroyBuffer(context_.device, b, nullptr);
-    for (auto& m : dimensionBufferMemory_) if (m != VK_NULL_HANDLE) vkFreeMemory(context_.device, m, nullptr);
-    dimensionBuffers_.clear(); dimensionBufferMemory_.clear();
-
-    if (denoiseSampler_ != VK_NULL_HANDLE) vkDestroySampler(context_.device, denoiseSampler_, nullptr);
-    if (denoiseImageView_ != VK_NULL_HANDLE) vkDestroyImageView(context_.device, denoiseImageView_, nullptr);
-    if (denoiseImageMemory_ != VK_NULL_HANDLE) vkFreeMemory(context_.device, denoiseImageMemory_, nullptr);
-    if (denoiseImage_ != VK_NULL_HANDLE) vkDestroyImage(context_.device, denoiseImage_, nullptr);
-
-    if (envMapSampler_ != VK_NULL_HANDLE) vkDestroySampler(context_.device, envMapSampler_, nullptr);
-    if (envMapImageView_ != VK_NULL_HANDLE) vkDestroyImageView(context_.device, envMapImageView_, nullptr);
-    if (envMapImageMemory_ != VK_NULL_HANDLE) vkFreeMemory(context_.device, envMapImageMemory_, nullptr);
-    if (envMapImage_ != VK_NULL_HANDLE) vkDestroyImage(context_.device, envMapImage_, nullptr);
+    for (int i = 0; i < 2; ++i) {
+        if (rtOutputImages_[i]) vkDestroyImage(context_.device, rtOutputImages_[i], nullptr);
+        if (rtOutputMemories_[i]) vkFreeMemory(context_.device, rtOutputMemories_[i], nullptr);
+        if (rtOutputViews_[i]) vkDestroyImageView(context_.device, rtOutputViews_[i], nullptr);
+        if (accumImages_[i]) vkDestroyImage(context_.device, accumImages_[i], nullptr);
+        if (accumMemories_[i]) vkFreeMemory(context_.device, accumMemories_[i], nullptr);
+        if (accumViews_[i]) vkDestroyImageView(context_.device, accumViews_[i], nullptr);
+    }
 
     LOG_INFO_CAT("Renderer", "=== VulkanRenderer Cleanup Complete ===");
 }
@@ -986,163 +941,6 @@ void VulkanRenderer::createDescriptorSets() {
     LOG_INFO_CAT("Renderer", "Descriptor sets allocated.");
 }
 
-// -----------------------------------------------------------------------------
-// RENDER FRAME
-// -----------------------------------------------------------------------------
-void VulkanRenderer::renderFrame(const Camera& camera) {
-    auto frameStart = std::chrono::steady_clock::now();
-
-    vkWaitForFences(context_.device, 1, &frames_[currentFrame_].fence, VK_TRUE, UINT64_MAX);
-    vkResetFences(context_.device, 1, &frames_[currentFrame_].fence);
-
-    uint32_t imageIndex;
-    VkResult result = vkAcquireNextImageKHR(context_.device, context_.swapchain, UINT64_MAX,
-                                            frames_[currentFrame_].imageAvailableSemaphore, VK_NULL_HANDLE, &imageIndex);
-
-    if (result == VK_ERROR_OUT_OF_DATE_KHR) {
-        LOG_INFO_CAT("Renderer", "Swapchain out-of-date during acquire → recreating");
-        handleResize(width_, height_);
-        // Re-acquire with the new swapchain
-        result = vkAcquireNextImageKHR(context_.device, context_.swapchain, UINT64_MAX,
-                                       frames_[currentFrame_].imageAvailableSemaphore, VK_NULL_HANDLE, &imageIndex);
-        if (result != VK_SUCCESS) {
-            throw std::runtime_error("Failed to acquire image after swapchain recreation");
-        }
-    } else if (result == VK_SUBOPTIMAL_KHR) {
-        LOG_DEBUG_CAT("Renderer", "Swapchain sub-optimal after acquire");
-    } else if (result != VK_SUCCESS) {
-        throw std::runtime_error("Failed to acquire swapchain image");
-    }
-
-    updateUniformBuffer(currentFrame_, camera);
-
-    VkCommandBuffer cmd = commandBuffers_[currentFrame_];
-    vkResetCommandBuffer(cmd, 0);
-    VkCommandBufferBeginInfo beginInfo = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
-    vkBeginCommandBuffer(cmd, &beginInfo);
-
-    // Clear RT output
-    VkClearColorValue orange = { {1.0f, 0.5f, 0.0f, 1.0f} };
-    VkImageSubresourceRange range = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-    vkCmdClearColorImage(cmd, rtOutputImage_.get(), VK_IMAGE_LAYOUT_GENERAL, &orange, 1, &range);
-
-    // RT barrier
-    VkImageMemoryBarrier barrier = {
-        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-        .srcAccessMask = 0,
-        .dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
-        .oldLayout = VK_IMAGE_LAYOUT_GENERAL,
-        .newLayout = VK_IMAGE_LAYOUT_GENERAL,
-        .image = rtOutputImage_.get(),
-        .subresourceRange = range
-    };
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, 0, 0, nullptr, 0, nullptr, 1, &barrier);
-
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, rtPipeline_);
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, rtPipelineLayout_, 0, 1, &descriptorSets_[currentFrame_], 0, nullptr);
-
-    const auto& sbt = pipelineManager_->getShaderBindingTable();
-    VkStridedDeviceAddressRegionKHR raygen = { sbt.raygen.deviceAddress, sbt.raygen.stride, sbt.raygen.size };
-    VkStridedDeviceAddressRegionKHR miss   = { sbt.miss.deviceAddress,   sbt.miss.stride,   sbt.miss.size   };
-    VkStridedDeviceAddressRegionKHR hit    = { sbt.hit.deviceAddress,    sbt.hit.stride,    sbt.hit.size    };
-    VkStridedDeviceAddressRegionKHR callable{};
-
-    context_.vkCmdTraceRaysKHR(cmd, &raygen, &miss, &hit, &callable,
-                               context_.swapchainExtent.width, context_.swapchainExtent.height, 1);
-
-    // RT to transfer
-    barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-    barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-    barrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
-    barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
-
-    // Swapchain to transfer dst
-    VkImageMemoryBarrier swapBarrier = {
-        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-        .srcAccessMask = 0,
-        .dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
-        .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-        .newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-        .image = context_.swapchainImages[imageIndex],
-        .subresourceRange = range
-    };
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &swapBarrier);
-
-    // Copy
-    VkImageCopy copy = {
-        .srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
-        .dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
-        .extent = { context_.swapchainExtent.width, context_.swapchainExtent.height, 1 }
-    };
-    vkCmdCopyImage(cmd, rtOutputImage_.get(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                   context_.swapchainImages[imageIndex], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
-
-    // Swapchain to present
-    swapBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-    swapBarrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
-    swapBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-    swapBarrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr, 1, &swapBarrier);
-
-    // RT back to general
-    barrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-    barrier.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-    barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-    barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, 0, 0, nullptr, 0, nullptr, 1, &barrier);
-
-    vkEndCommandBuffer(cmd);
-
-    VkPipelineStageFlags waitStages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
-    VkSubmitInfo submitInfo = {
-        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-        .waitSemaphoreCount = 1,
-        .pWaitSemaphores = &frames_[currentFrame_].imageAvailableSemaphore,
-        .pWaitDstStageMask = waitStages,
-        .commandBufferCount = 1,
-        .pCommandBuffers = &cmd,
-        .signalSemaphoreCount = 1,
-        .pSignalSemaphores = &frames_[currentFrame_].renderFinishedSemaphore
-    };
-    vkQueueSubmit(context_.graphicsQueue, 1, &submitInfo, frames_[currentFrame_].fence);
-
-    VkPresentInfoKHR presentInfo = {
-        .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
-        .waitSemaphoreCount = 1,
-        .pWaitSemaphores = &frames_[currentFrame_].renderFinishedSemaphore,
-        .swapchainCount = 1,
-        .pSwapchains = &context_.swapchain,
-        .pImageIndices = &imageIndex
-    };
-    result = vkQueuePresentKHR(context_.graphicsQueue, &presentInfo);
-
-    if (result == VK_ERROR_OUT_OF_DATE_KHR) {
-        LOG_INFO_CAT("Renderer", "Swapchain out-of-date on present → recreating");
-        handleResize(width_, height_);
-        // Skip rest of frame — next renderFrame() will use new swapchain
-    } else if (result == VK_SUBOPTIMAL_KHR) {
-        LOG_DEBUG_CAT("Renderer", "Swapchain sub-optimal on present");
-    } else if (result != VK_SUCCESS) {
-        throw std::runtime_error("Failed to present");
-    }
-
-    currentFrame_ = (currentFrame_ + 1) % MAX_FRAMES_IN_FLIGHT;
-    ++frameCount_;
-    ++framesThisSecond_;
-
-    auto now = std::chrono::steady_clock::now();
-    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastFPSTime_).count();
-    if (elapsed >= 1000) {
-        double fps = framesThisSecond_ * 1000.0 / elapsed;
-        double frameTimeMs = std::chrono::duration_cast<std::chrono::microseconds>(now - frameStart).count() / 1000.0;
-        LOG_INFO_CAT("Renderer", "FPS: {:.0f} | Frame: {} | Time: {:.2f}ms | TLAS: 0x{:x} | Size: {}x{}", 
-                     fps, frameCount_, frameTimeMs, tlasDeviceAddress_, context_.swapchainExtent.width, context_.swapchainExtent.height);
-        framesThisSecond_ = 0;
-        lastFPSTime_ = now;
-    }
-}
-
 void VulkanRenderer::updateUniformBuffer(uint32_t frameIndex, const Camera& camera) {
     UniformBufferObject ubo{};
     ubo.viewInverse = glm::inverse(camera.getViewMatrix());
@@ -1158,39 +956,274 @@ void VulkanRenderer::updateUniformBuffer(uint32_t frameIndex, const Camera& came
 }
 
 // -----------------------------------------------------------------------------
-// HANDLE RESIZE — FULLY INTEGRATED
+// BUILD ACCELERATION STRUCTURES – FIXED SEGFAULT
 // -----------------------------------------------------------------------------
-void VulkanRenderer::handleResize(int width, int height) {
-    if (width == 0 || height == 0) {
-        LOG_DEBUG_CAT("Renderer", "Resize to 0x0 → skipping (minimized)");
-        return;
+void VulkanRenderer::buildAccelerationStructures() {
+    LOG_INFO_CAT("Renderer", "Building acceleration structures...");
+
+    const auto& vertices = getVertices();
+    const auto& indices = getIndices();
+
+    if (vertices.empty() || indices.empty()) {
+        LOG_ERROR_CAT("Renderer", "Cannot build AS: vertex or index buffer empty");
+        throw std::runtime_error("Empty geometry for AS build");
     }
 
-    LOG_INFO_CAT("Renderer", "Handling window resize: {}x{} → {}x{}", width_, height_, width, height);
-    vkDeviceWaitIdle(context_.device);
+    VkDeviceAddress vertexAddress = bufferManager_->getVertexBufferAddress();
+    VkDeviceAddress indexAddress  = bufferManager_->getIndexBufferAddress();
 
-    width_ = width;
-    height_ = height;
+    LOG_INFO_CAT("Renderer", "Vertex buffer address: 0x{:x}", vertexAddress);
+    LOG_INFO_CAT("Renderer", "Index buffer address:  0x{:x}", indexAddress);
 
-    // 1. Re-create swapchain
-    swapchainManager_->handleResize(width, height);
-    context_.swapchainExtent = swapchainManager_->getSwapchainExtent();
+    VkAccelerationStructureGeometryTrianglesDataKHR triangles = {
+        .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR,
+        .vertexFormat = VK_FORMAT_R32G32B32_SFLOAT,
+        .vertexData = { .deviceAddress = vertexAddress },
+        .vertexStride = sizeof(glm::vec3),
+        .maxVertex = static_cast<uint32_t>(vertices.size()),
+        .indexType = VK_INDEX_TYPE_UINT32,
+        .indexData = { .deviceAddress = indexAddress },
+        .transformData = { .deviceAddress = 0 }
+    };
 
-    // Sync internal size
-    width_  = static_cast<int>(context_.swapchainExtent.width);
-    height_ = static_cast<int>(context_.swapchainExtent.height);
+    VkAccelerationStructureGeometryKHR geometry = {
+        .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR,
+        .geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR,
+        .geometry = { .triangles = triangles },
+        .flags = VK_GEOMETRY_OPAQUE_BIT_KHR
+    };
 
-    // 2. Re-create RT output image
-    recreateRTOutputImage();
+    VkAccelerationStructureBuildGeometryInfoKHR buildInfo = {
+        .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR,
+        .type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR,
+        .flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR,
+        .mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR,
+        .geometryCount = 1,
+        .pGeometries = &geometry
+    };
 
-    // 3. Re-create framebuffers
-    createFramebuffers();
+    const uint32_t primitiveCount = static_cast<uint32_t>(indices.size() / 3);
 
-    // 4. Update descriptors (RT output image changed)
-    descriptorsUpdated_ = false;
-    updateRTDescriptors();
+    VkAccelerationStructureBuildSizesInfoKHR sizeInfo = {
+        .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR
+    };
+    context_.vkGetAccelerationStructureBuildSizesKHR(
+        context_.device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
+        &buildInfo, &primitiveCount, &sizeInfo
+    );
 
-    LOG_INFO_CAT("Renderer", "Resize complete: {}x{}", width_, height_);
+    LOG_INFO_CAT("Renderer", "BLAS size: {} bytes (accel: {} bytes, scratch: {} bytes)",
+                 sizeInfo.accelerationStructureSize,
+                 sizeInfo.accelerationStructureSize,
+                 sizeInfo.buildScratchSize);
+
+    bufferManager_->createBuffer(
+        sizeInfo.accelerationStructureSize,
+        VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        blasBuffer_, blasBufferMemory_
+    );
+
+    VkAccelerationStructureCreateInfoKHR createInfo = {
+        .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR,
+        .buffer = blasBuffer_,
+        .size = sizeInfo.accelerationStructureSize,
+        .type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR
+    };
+    VK_CHECK(context_.vkCreateAccelerationStructureKHR(context_.device, &createInfo, nullptr, &blasHandle_));
+
+    VkBuffer scratchBuffer = VK_NULL_HANDLE;
+    VkDeviceMemory scratchMemory = VK_NULL_HANDLE;
+    bufferManager_->createBuffer(
+        sizeInfo.buildScratchSize,
+        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        scratchBuffer, scratchMemory
+    );
+    VkDeviceAddress scratchAddress = bufferManager_->getDeviceAddress(scratchBuffer);
+
+    buildInfo.dstAccelerationStructure = blasHandle_;
+    buildInfo.scratchData = { .deviceAddress = scratchAddress };
+
+    VkCommandBuffer cmd = VK_NULL_HANDLE;
+    VkCommandBufferAllocateInfo allocInfo = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .commandPool = context_.commandPool,
+        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+        .commandBufferCount = 1
+    };
+    VK_CHECK(vkAllocateCommandBuffers(context_.device, &allocInfo, &cmd));
+
+    VkCommandBufferBeginInfo beginInfo = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
+    };
+    VK_CHECK(vkBeginCommandBuffer(cmd, &beginInfo));
+
+    const VkAccelerationStructureBuildRangeInfoKHR rangeInfo = {
+        .primitiveCount = primitiveCount,
+        .primitiveOffset = 0,
+        .firstVertex = 0,
+        .transformOffset = 0
+    };
+    const VkAccelerationStructureBuildRangeInfoKHR* pRangeInfo = &rangeInfo;
+
+    context_.vkCmdBuildAccelerationStructuresKHR(cmd, 1, &buildInfo, &pRangeInfo);
+    VK_CHECK(vkEndCommandBuffer(cmd));
+
+    VkSubmitInfo submitInfo = {
+        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .commandBufferCount = 1,
+        .pCommandBuffers = &cmd
+    };
+    VK_CHECK(vkQueueSubmit(context_.graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE));
+    vkQueueWaitIdle(context_.graphicsQueue);
+
+    vkFreeCommandBuffers(context_.device, context_.commandPool, 1, &cmd);
+    vkDestroyBuffer(context_.device, scratchBuffer, nullptr);
+    vkFreeMemory(context_.device, scratchMemory, nullptr);
+
+    VkAccelerationStructureDeviceAddressInfoKHR addressInfo = {
+        .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR,
+        .accelerationStructure = blasHandle_
+    };
+    VkDeviceAddress blasAddress = context_.vkGetAccelerationStructureDeviceAddressKHR(context_.device, &addressInfo);
+
+    LOG_INFO_CAT("Renderer", "BLAS built: handle=0x{:x}, address=0x{:x}", reinterpret_cast<uint64_t>(blasHandle_), blasAddress);
+
+    VkAccelerationStructureInstanceKHR instance = {
+        .transform = {1.0f, 0.0f, 0.0f, 0.0f,
+                      0.0f, 1.0f, 0.0f, 0.0f,
+                      0.0f, 0.0f, 1.0f, 0.0f},
+        .instanceCustomIndex = 0,
+        .mask = 0xFF,
+        .instanceShaderBindingTableRecordOffset = 0,
+        .flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR,
+        .accelerationStructureReference = blasAddress
+    };
+
+    bufferManager_->createBuffer(
+        sizeof(VkAccelerationStructureInstanceKHR),
+        VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+        instanceBuffer_, instanceBufferMemory_
+    );
+
+    void* data = nullptr;
+    VK_CHECK(vkMapMemory(context_.device, instanceBufferMemory_, 0, sizeof(instance), 0, &data));
+    memcpy(data, &instance, sizeof(instance));
+    vkUnmapMemory(context_.device, instanceBufferMemory_);
+
+    VkDeviceAddress instanceAddress = bufferManager_->getDeviceAddress(instanceBuffer_);
+
+    VkAccelerationStructureGeometryInstancesDataKHR instancesData = {
+        .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR,
+        .data = { .deviceAddress = instanceAddress }
+    };
+
+    VkAccelerationStructureGeometryKHR tlasGeometry = {
+        .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR,
+        .geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR,
+        .geometry = { .instances = instancesData }
+    };
+
+    VkAccelerationStructureBuildGeometryInfoKHR tlasBuildInfo = {
+        .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR,
+        .type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR,
+        .flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR,
+        .mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR,
+        .geometryCount = 1,
+        .pGeometries = &tlasGeometry
+    };
+
+    const uint32_t instanceCount = 1;
+    VkAccelerationStructureBuildSizesInfoKHR tlasSizeInfo = {
+        .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR
+    };
+    context_.vkGetAccelerationStructureBuildSizesKHR(
+        context_.device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
+        &tlasBuildInfo, &instanceCount, &tlasSizeInfo
+    );
+
+    LOG_INFO_CAT("Renderer", "TLAS size: {} bytes", tlasSizeInfo.accelerationStructureSize);
+
+    bufferManager_->createBuffer(
+        tlasSizeInfo.accelerationStructureSize,
+        VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        tlasBuffer_, tlasBufferMemory_
+    );
+
+    VkAccelerationStructureCreateInfoKHR tlasCreateInfo = {
+        .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR,
+        .buffer = tlasBuffer_,
+        .size = tlasSizeInfo.accelerationStructureSize,
+        .type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR
+    };
+    VK_CHECK(context_.vkCreateAccelerationStructureKHR(context_.device, &tlasCreateInfo, nullptr, &tlasHandle_));
+
+    bufferManager_->createBuffer(
+        tlasSizeInfo.buildScratchSize,
+        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        scratchBuffer, scratchMemory
+    );
+    scratchAddress = bufferManager_->getDeviceAddress(scratchBuffer);
+
+    tlasBuildInfo.dstAccelerationStructure = tlasHandle_;
+    tlasBuildInfo.scratchData = { .deviceAddress = scratchAddress };
+
+    VK_CHECK(vkAllocateCommandBuffers(context_.device, &allocInfo, &cmd));
+    VK_CHECK(vkBeginCommandBuffer(cmd, &beginInfo));
+
+    const VkAccelerationStructureBuildRangeInfoKHR tlasRangeInfo = {
+        .primitiveCount = instanceCount,
+        .primitiveOffset = 0,
+        .firstVertex = 0,
+        .transformOffset = 0
+    };
+    const VkAccelerationStructureBuildRangeInfoKHR* pTlasRangeInfo = &tlasRangeInfo;
+
+    context_.vkCmdBuildAccelerationStructuresKHR(cmd, 1, &tlasBuildInfo, &pTlasRangeInfo);
+    VK_CHECK(vkEndCommandBuffer(cmd));
+
+    VK_CHECK(vkQueueSubmit(context_.graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE));
+    vkQueueWaitIdle(context_.graphicsQueue);
+
+    vkFreeCommandBuffers(context_.device, context_.commandPool, 1, &cmd);
+    vkDestroyBuffer(context_.device, scratchBuffer, nullptr);
+    vkFreeMemory(context_.device, scratchMemory, nullptr);
+
+    addressInfo.accelerationStructure = tlasHandle_;
+    tlasDeviceAddress_ = context_.vkGetAccelerationStructureDeviceAddressKHR(context_.device, &addressInfo);
+
+    LOG_INFO_CAT("Renderer", "TLAS built: handle=0x{:x}, address=0x{:x}", reinterpret_cast<uint64_t>(tlasHandle_), tlasDeviceAddress_);
+    LOG_INFO_CAT("Renderer", "Acceleration structures built successfully.");
+}
+
+// -----------------------------------------------------------------------------
+// CREATE COMPUTE DESCRIPTOR SETS
+// -----------------------------------------------------------------------------
+void VulkanRenderer::createComputeDescriptorSets() {
+    LOG_INFO_CAT("Renderer", "Creating compute descriptor sets...");
+
+    if (computeDescriptorSetLayout_ == VK_NULL_HANDLE) {
+        LOG_ERROR_CAT("Renderer", "Compute descriptor set layout not created");
+        throw std::runtime_error("Compute descriptor set layout missing");
+    }
+
+    std::vector<VkDescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, computeDescriptorSetLayout_);
+    VkDescriptorSetAllocateInfo allocInfo = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+        .descriptorPool = descriptorPool_,
+        .descriptorSetCount = MAX_FRAMES_IN_FLIGHT,
+        .pSetLayouts = layouts.data()
+    };
+
+    computeDescriptorSets_.resize(MAX_FRAMES_IN_FLIGHT);
+    VK_CHECK(vkAllocateDescriptorSets(context_.device, &allocInfo, computeDescriptorSets_.data()));
+
+    LOG_INFO_CAT("Renderer", "Compute descriptor sets allocated: {}", MAX_FRAMES_IN_FLIGHT);
 }
 
 // -----------------------------------------------------------------------------

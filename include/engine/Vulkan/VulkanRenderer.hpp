@@ -1,10 +1,11 @@
-// AMOURANTH RTX Engine (C) 2025 by Zachary Geurts gzac5314@gmail.com is licensed under CC BY-NC 4.0
+// src/engine/Vulkan/VulkanRenderer.hpp
+// AMOURANTH RTX Engine © 2025 by Zachary Geurts gzac5314@gmail.com is licensed under CC BY-NC 4.0
 #pragma once
 #ifndef VULKAN_RENDERER_HPP
 #define VULKAN_RENDERER_HPP
 
 #include "engine/Vulkan/types.hpp"
-#include "engine/Vulkan/VulkanCore.hpp"       // FULL INCLUDE
+#include "engine/Vulkan/VulkanCore.hpp"
 #include "engine/Vulkan/VulkanRTX_Setup.hpp"
 #include "engine/Vulkan/VulkanPipelineManager.hpp"
 #include "engine/Vulkan/VulkanBufferManager.hpp"
@@ -21,8 +22,12 @@
 #include <array>
 #include <chrono>
 #include <cstdint>
+#include <mutex>
+#include <atomic>
 
 namespace VulkanRTX {
+
+constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 3;
 
 using VkBuffer_T        = VkBuffer;
 using VkImage_T         = VkImage;
@@ -70,25 +75,34 @@ public:
     VkDeviceMemory getSBTMemory() const { return pipelineManager_->getSBTMemory(); }
 
 private:
-    VkSampler createLinearSampler();
+    // --- Shader & Resource Creation ---
+    VkShaderModule createShaderModule(const std::string& filepath);
+
+    // --- Image Management ---
     void createRTOutputImage();
+    void createAccumulationImage();
     void recreateRTOutputImage();
+    void recreateAccumulationImage();
+
+    // --- Descriptor Management ---
     void updateRTDescriptors();
     void updateComputeDescriptors(uint32_t imageIndex);
     void createComputeDescriptorSets();
-    void buildAccelerationStructures();
-    void createSwapchain(int width, int height);
-    void createCommandBuffers();
-    void createSyncObjects();
-    void createEnvironmentMap();
-    void createFramebuffers();
     void createDescriptorPool();
     void createDescriptorSets();
-    void recordRayTracingCommands(VkCommandBuffer cmdBuffer, VkExtent2D extent, VkImage outputImage, VkImageView outputImageView, const MaterialData::PushConstants& pc, VkAccelerationStructureKHR tlas);
-    void denoiseImage(VkCommandBuffer cmdBuffer, VkImage inputImage, VkImageView inputImageView, VkImage outputImage, VkImageView outputImageView);
-    void waitIdle();
-    VkShaderModule createShaderModule(const std::string& filepath);
 
+    // --- Acceleration Structures ---
+    void buildAccelerationStructures();
+
+    // --- Render Setup ---
+    void createCommandBuffers();
+    void createEnvironmentMap();
+    void createFramebuffers();
+
+    // --- Resize ---
+    void applyResize();
+
+    // --- Member Variables (ORDER MATCHES CONSTRUCTOR) ---
     int  width_  = 0;
     int  height_ = 0;
     void* window_ = nullptr;
@@ -99,6 +113,7 @@ private:
     std::chrono::steady_clock::time_point lastFPSTime_ = std::chrono::steady_clock::now();
     uint32_t indexCount_ = 0;
 
+    // --- Images ---
     VkImage             denoiseImage_             = VK_NULL_HANDLE;
     VkDeviceMemory      denoiseImageMemory_       = VK_NULL_HANDLE;
     VkImageView         denoiseImageView_         = VK_NULL_HANDLE;
@@ -108,8 +123,20 @@ private:
     VkImageView         envMapImageView_          = VK_NULL_HANDLE;
     VkSampler           envMapSampler_            = VK_NULL_HANDLE;
 
-    VkDescriptorSetLayout computeDescriptorSetLayout_ = VK_NULL_HANDLE;
+    // DOUBLE-BUFFERED RT OUTPUT
+    std::array<VkImage,        2> rtOutputImages_   = {};
+    std::array<VkDeviceMemory, 2> rtOutputMemories_ = {};
+    std::array<VkImageView,    2> rtOutputViews_    = {};
+    uint32_t currentRTIndex_ = 0;
 
+    // DOUBLE-BUFFERED ACCUMULATION
+    std::array<VkImage,        2> accumImages_   = {};
+    std::array<VkDeviceMemory, 2> accumMemories_ = {};
+    std::array<VkImageView,    2> accumViews_    = {};
+    uint32_t currentAccumIndex_ = 0;
+    bool resetAccumulation_ = true;
+
+    // ACCELERATION STRUCTURES
     VkAccelerationStructureKHR blasHandle_ = VK_NULL_HANDLE;
     VkBuffer                    blasBuffer_ = VK_NULL_HANDLE;
     VkDeviceMemory              blasBufferMemory_ = VK_NULL_HANDLE;
@@ -120,16 +147,20 @@ private:
     VkDeviceMemory              instanceBufferMemory_ = VK_NULL_HANDLE;
     VkDeviceAddress             tlasDeviceAddress_ = 0;
 
+    // TEMP SINGLE IMAGE (creation helper)
     Dispose::VulkanHandle<VkImage>        rtOutputImage_;
     Dispose::VulkanHandle<VkDeviceMemory> rtOutputImageMemory_;
     Dispose::VulkanHandle<VkImageView>    rtOutputImageView_;
+    Dispose::VulkanHandle<VkImage>        accumImage_;
+    Dispose::VulkanHandle<VkDeviceMemory> accumImageMemory_;
+    Dispose::VulkanHandle<VkImageView>    accumImageView_;
 
-    // CORE SYSTEMS — context_ IS FULL OBJECT
-    Vulkan::Context                         context_;
+    // CORE SYSTEMS — MUST BE FIRST
+    Vulkan::Context                         context_;  // ← FIRST
     std::unique_ptr<VulkanRTX>              rtx_;
     std::unique_ptr<VulkanSwapchainManager> swapchainManager_;
     std::unique_ptr<VulkanPipelineManager> pipelineManager_;
-    std::unique_ptr<VulkanBufferManager>    bufferManager_;
+    std::unique_ptr<VulkanBufferManager>    bufferManager_;  // ← USES context_
 
     std::vector<Frame>          frames_;
     std::vector<VkFramebuffer>  framebuffers_;
@@ -145,7 +176,6 @@ private:
 
     std::unique_ptr<PerspectiveCamera> camera_;
     bool descriptorsUpdated_ = false;
-    bool recreateSwapchain   = false;
 
     PFN_vkCmdTraceRaysKHR vkCmdTraceRaysKHR_ = nullptr;
 
@@ -155,11 +185,24 @@ private:
     VkDeviceMemory   sbtMemory_        = VK_NULL_HANDLE;
     ShaderBindingTable sbt_{};
 
+    // RESIZE STATE
+    std::mutex resizeMutex_;
+    std::atomic<bool> swapchainRecreating_{false};
+    bool resizePending_ = false;
+    int pendingWidth_ = 0;
+    int pendingHeight_ = 0;
+
+    // GPU TIMING
+    std::array<VkQueryPool, MAX_FRAMES_IN_FLIGHT> queryPools_ = {};
+    std::array<double, 8> stageTimes_ = {};
+
+    // COMPUTE DESCRIPTOR LAYOUT — NOW SET AFTER PIPELINE MANAGER
+    VkDescriptorSetLayout computeDescriptorSetLayout_ = VK_NULL_HANDLE;
+
     friend class VulkanRTX;
 };
 
-constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 3;
-constexpr bool     FPS_COUNTER          = true;
+constexpr bool FPS_COUNTER = true;
 
 } // namespace VulkanRTX
 
