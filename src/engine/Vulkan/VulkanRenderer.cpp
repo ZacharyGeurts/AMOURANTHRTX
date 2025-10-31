@@ -59,7 +59,6 @@ VulkanRenderer::VulkanRenderer(int width, int height, void* window,
     : width_(width), height_(height), window_(window),
       currentFrame_(0), frameCount_(0), framesThisSecond_(0),
       lastFPSTime_(std::chrono::steady_clock::now()),
-      framesSinceLastLog_(0), lastLogTime_(std::chrono::steady_clock::now()),
       indexCount_(0),
       denoiseImage_(VK_NULL_HANDLE), denoiseImageMemory_(VK_NULL_HANDLE),
       denoiseImageView_(VK_NULL_HANDLE), denoiseSampler_(VK_NULL_HANDLE),
@@ -70,13 +69,18 @@ VulkanRenderer::VulkanRenderer(int width, int height, void* window,
       tlasHandle_(VK_NULL_HANDLE), tlasBuffer_(VK_NULL_HANDLE), tlasBufferMemory_(VK_NULL_HANDLE),
       instanceBuffer_(VK_NULL_HANDLE), instanceBufferMemory_(VK_NULL_HANDLE),
       tlasDeviceAddress_(0),
-      vkCmdTraceRaysKHR_(nullptr),
-      context_(), rtx_(), swapchainManager_(), pipelineManager_(), bufferManager_(),
-      frames_(), framebuffers_(), commandBuffers_(), descriptorSets_(), computeDescriptorSets_(),
+      context_(),                     // OBJECT — NO new
+      rtx_(), swapchainManager_(), pipelineManager_(), bufferManager_(),
+      frames_(), framebuffers_(), commandBuffers_(),
+      descriptorSets_(), computeDescriptorSets_(),
       descriptorPool_(VK_NULL_HANDLE),
-      materialBuffers_(), materialBufferMemory_(), dimensionBuffers_(), dimensionBufferMemory_(),
+      materialBuffers_(), materialBufferMemory_(),
+      dimensionBuffers_(), dimensionBufferMemory_(),
       camera_(std::make_unique<PerspectiveCamera>()),
-      descriptorsUpdated_(false), recreateSwapchain(false)
+      descriptorsUpdated_(false), recreateSwapchain(false),
+      vkCmdTraceRaysKHR_(nullptr),
+      rtPipeline_(VK_NULL_HANDLE), rtPipelineLayout_(VK_NULL_HANDLE),
+      sbtBuffer_(VK_NULL_HANDLE), sbtMemory_(VK_NULL_HANDLE), sbt_{}
 {
     LOG_INFO_CAT("Renderer", "=== VulkanRenderer Constructor Start ===");
     frames_.resize(MAX_FRAMES_IN_FLIGHT);
@@ -956,204 +960,140 @@ void VulkanRenderer::createDescriptorSets() {
 void VulkanRenderer::renderFrame(const Camera& camera) {
     auto frameStart = std::chrono::steady_clock::now();
 
-    // Wait for previous frame to finish
     vkWaitForFences(context_.device, 1, &frames_[currentFrame_].fence, VK_TRUE, UINT64_MAX);
     vkResetFences(context_.device, 1, &frames_[currentFrame_].fence);
 
-    // Acquire swapchain image
     uint32_t imageIndex;
     VkResult result = vkAcquireNextImageKHR(context_.device, context_.swapchain, UINT64_MAX,
                                             frames_[currentFrame_].imageAvailableSemaphore, VK_NULL_HANDLE, &imageIndex);
-    if (result == VK_ERROR_OUT_OF_DATE_KHR) {
-        LOG_WARNING_CAT("Renderer", "Swapchain out of date on frame {}", frameCount_);
+    if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
         recreateSwapchain = true;
         return;
-    } else if (result == VK_SUBOPTIMAL_KHR) {
-        LOG_WARNING_CAT("Renderer", "Swapchain suboptimal on frame {}", frameCount_);
     } else if (result != VK_SUCCESS) {
         throw std::runtime_error("Failed to acquire swapchain image");
     }
 
-    // Update camera matrices
     updateUniformBuffer(currentFrame_, camera);
 
-    // Begin command buffer
     VkCommandBuffer cmd = commandBuffers_[currentFrame_];
-    VK_CHECK(vkResetCommandBuffer(cmd, 0));
+    vkResetCommandBuffer(cmd, 0);
+    VkCommandBufferBeginInfo beginInfo = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+    vkBeginCommandBuffer(cmd, &beginInfo);
 
-    VkCommandBufferBeginInfo beginInfo{};
-    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    VK_CHECK(vkBeginCommandBuffer(cmd, &beginInfo));
+    // Clear to orange (debug miss)
+    VkClearColorValue orange = { {1.0f, 0.5f, 0.0f, 1.0f} };
+    VkImageSubresourceRange range = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+    vkCmdClearColorImage(cmd, rtOutputImage_.get(), VK_IMAGE_LAYOUT_GENERAL, &orange, 1, &range);
 
-    // Use swapchain extent for dispatch/copy consistency
-    uint32_t renderWidth = context_.swapchainExtent.width;
-    uint32_t renderHeight = context_.swapchainExtent.height;
+    // RT write barrier
+    VkImageMemoryBarrier barrier = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .srcAccessMask = 0,
+        .dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
+        .oldLayout = VK_IMAGE_LAYOUT_GENERAL,
+        .newLayout = VK_IMAGE_LAYOUT_GENERAL,
+        .image = rtOutputImage_.get(),
+        .subresourceRange = range
+    };
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, 0, 0, nullptr, 0, nullptr, 1, &barrier);
 
-    // Proper barrier before RT: from previous TRANSFER_READ to SHADER_WRITE (layout stays GENERAL)
-    VkImageMemoryBarrier preTraceBarrier{};
-    preTraceBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    preTraceBarrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-    preTraceBarrier.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-    preTraceBarrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
-    preTraceBarrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
-    preTraceBarrier.image = rtOutputImage_.get();
-    preTraceBarrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, 0, 0, nullptr, 0, nullptr, 1, &preTraceBarrier);
-
-    // Bind ray tracing pipeline & descriptors
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, rtPipeline_);
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
-                            rtPipelineLayout_, 0, 1, &descriptorSets_[currentFrame_], 0, nullptr);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, rtPipelineLayout_, 0, 1, &descriptorSets_[currentFrame_], 0, nullptr);
 
-    // FIXED: Use CORRECT SBT from PipelineManager (not stale sbt_)
     const auto& sbt = pipelineManager_->getShaderBindingTable();
+    VkStridedDeviceAddressRegionKHR raygen = { sbt.raygen.deviceAddress, sbt.raygen.stride, sbt.raygen.size };
+    VkStridedDeviceAddressRegionKHR miss   = { sbt.miss.deviceAddress,   sbt.miss.stride,   sbt.miss.size   };
+    VkStridedDeviceAddressRegionKHR hit    = { sbt.hit.deviceAddress,    sbt.hit.stride,    sbt.hit.size    };
+    VkStridedDeviceAddressRegionKHR callable{};
 
-    // Validate SBT addresses
-    if (sbt.raygen.deviceAddress == 0 || sbt.miss.deviceAddress == 0 || sbt.hit.deviceAddress == 0) {
-        LOG_ERROR_CAT("Renderer", "Invalid SBT addresses on frame {}! Raygen=0x{:x}, Miss=0x{:x}, Hit=0x{:x}",
-                      frameCount_, sbt.raygen.deviceAddress, sbt.miss.deviceAddress, sbt.hit.deviceAddress);
-        throw std::runtime_error("Invalid SBT");
-    }
-    if (frameCount_ % 60 == 0) {  // Log SBT details every ~1s at 60fps
-        LOG_INFO_CAT("Renderer", "SBT on frame {}: Raygen(0x{:x}, size={}, stride={}), Miss(0x{:x}, size={}, stride={}), Hit(0x{:x}, size={}, stride={})",
-                     frameCount_, sbt.raygen.deviceAddress, sbt.raygen.size, sbt.raygen.stride,
-                     sbt.miss.deviceAddress, sbt.miss.size, sbt.miss.stride,
-                     sbt.hit.deviceAddress, sbt.hit.size, sbt.hit.stride);
-    }
+    context_.vkCmdTraceRaysKHR(cmd, &raygen, &miss, &hit, &callable,
+                               context_.swapchainExtent.width, context_.swapchainExtent.height, 1);
 
-    // Set up SBT regions
-    VkStridedDeviceAddressRegionKHR raygenRegion{};
-    raygenRegion.deviceAddress = sbt.raygen.deviceAddress;
-    raygenRegion.stride        = sbt.raygen.stride;
-    raygenRegion.size          = sbt.raygen.size;
+    // RT to transfer
+    barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    barrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+    barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
 
-    VkStridedDeviceAddressRegionKHR missRegion{};
-    missRegion.deviceAddress   = sbt.miss.deviceAddress;
-    missRegion.stride          = sbt.miss.stride;
-    missRegion.size            = sbt.miss.size;
-
-    VkStridedDeviceAddressRegionKHR hitRegion{};
-    hitRegion.deviceAddress    = sbt.hit.deviceAddress;
-    hitRegion.stride           = sbt.hit.stride;
-    hitRegion.size             = sbt.hit.size;
-
-    VkStridedDeviceAddressRegionKHR callableRegion{};
-
-    if (frameCount_ % 60 == 0) {
-        LOG_INFO_CAT("Renderer", "Dispatching {}x{} rays on frame {}", renderWidth, renderHeight, frameCount_);
-    }
-
-    // Dispatch ray tracing
-    context_.vkCmdTraceRaysKHR(cmd,
-        &raygenRegion,
-        &missRegion,
-        &hitRegion,
-        &callableRegion,
-        renderWidth,
-        renderHeight,
-        1);
-
-    // Transition RT output to TRANSFER_SRC for copy
-    VkImageMemoryBarrier postTraceBarrier{};
-    postTraceBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    postTraceBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-    postTraceBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-    postTraceBarrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
-    postTraceBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-    postTraceBarrier.image = rtOutputImage_.get();
-    postTraceBarrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &postTraceBarrier);
-
-    // Transition swapchain image to TRANSFER_DST
-    VkImageMemoryBarrier swapBarrier{};
-    swapBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    swapBarrier.srcAccessMask = 0;
-    swapBarrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-    swapBarrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    swapBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-    swapBarrier.image = context_.swapchainImages[imageIndex];
-    swapBarrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+    // Swapchain to transfer dst
+    VkImageMemoryBarrier swapBarrier = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .srcAccessMask = 0,
+        .dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+        .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+        .newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        .image = context_.swapchainImages[imageIndex],
+        .subresourceRange = range
+    };
     vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &swapBarrier);
 
-    // Copy RT output to swapchain
-    VkImageCopy copyRegion{};
-    copyRegion.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
-    copyRegion.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
-    copyRegion.extent = { renderWidth, renderHeight, 1 };
+    // Copy
+    VkImageCopy copy = {
+        .srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
+        .dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
+        .extent = { context_.swapchainExtent.width, context_.swapchainExtent.height, 1 }
+    };
     vkCmdCopyImage(cmd, rtOutputImage_.get(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                   context_.swapchainImages[imageIndex], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyRegion);
+                   context_.swapchainImages[imageIndex], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
 
-    // Transition swapchain to PRESENT
+    // Swapchain to present
     swapBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
     swapBarrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
     swapBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
     swapBarrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
     vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr, 1, &swapBarrier);
 
-    // *** FIX: Transition RT output back to GENERAL for next frame ***
-    postTraceBarrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-    postTraceBarrier.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-    postTraceBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-    postTraceBarrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, 0, 0, nullptr, 0, nullptr, 1, &postTraceBarrier);
+    // RT back to general
+    barrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    barrier.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, 0, 0, nullptr, 0, nullptr, 1, &barrier);
 
-    // End command buffer
-    VK_CHECK(vkEndCommandBuffer(cmd));
+    vkEndCommandBuffer(cmd);
 
-    // Submit to graphics queue
     VkPipelineStageFlags waitStages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
-    VkSubmitInfo submitInfo{};
-    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submitInfo.waitSemaphoreCount = 1;
-    submitInfo.pWaitSemaphores = &frames_[currentFrame_].imageAvailableSemaphore;
-    submitInfo.pWaitDstStageMask = waitStages;
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &cmd;
-    submitInfo.signalSemaphoreCount = 1;
-    submitInfo.pSignalSemaphores = &frames_[currentFrame_].renderFinishedSemaphore;
+    VkSubmitInfo submitInfo = {
+        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .waitSemaphoreCount = 1,
+        .pWaitSemaphores = &frames_[currentFrame_].imageAvailableSemaphore,
+        .pWaitDstStageMask = waitStages,
+        .commandBufferCount = 1,
+        .pCommandBuffers = &cmd,
+        .signalSemaphoreCount = 1,
+        .pSignalSemaphores = &frames_[currentFrame_].renderFinishedSemaphore
+    };
+    vkQueueSubmit(context_.graphicsQueue, 1, &submitInfo, frames_[currentFrame_].fence);
 
-    VK_CHECK(vkQueueSubmit(context_.graphicsQueue, 1, &submitInfo, frames_[currentFrame_].fence));
-
-    // Present
-    VkPresentInfoKHR presentInfo{};
-    presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
-    presentInfo.waitSemaphoreCount = 1;
-    presentInfo.pWaitSemaphores = &frames_[currentFrame_].renderFinishedSemaphore;
-    presentInfo.swapchainCount = 1;
-    presentInfo.pSwapchains = &context_.swapchain;
-    presentInfo.pImageIndices = &imageIndex;
-
+    VkPresentInfoKHR presentInfo = {
+        .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+        .waitSemaphoreCount = 1,
+        .pWaitSemaphores = &frames_[currentFrame_].renderFinishedSemaphore,
+        .swapchainCount = 1,
+        .pSwapchains = &context_.swapchain,
+        .pImageIndices = &imageIndex
+    };
     result = vkQueuePresentKHR(context_.graphicsQueue, &presentInfo);
     if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
-        LOG_WARNING_CAT("Renderer", "Present out of date/suboptimal on frame {}", frameCount_);
         recreateSwapchain = true;
-    } else {
-        VK_CHECK(result);
     }
 
-    // Frame bookkeeping
     currentFrame_ = (currentFrame_ + 1) % MAX_FRAMES_IN_FLIGHT;
     ++frameCount_;
     ++framesThisSecond_;
 
-    // FPS logging with enhanced debug info every 1 second
+    // ONLY ONE LINE — EVERY SECOND — FPS + DEBUG
     auto now = std::chrono::steady_clock::now();
     auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastFPSTime_).count();
     if (elapsed >= 1000) {
-        float fps = static_cast<float>(framesThisSecond_) * 1000.0f / elapsed;
-        auto frameTimeMs = std::chrono::duration_cast<std::chrono::microseconds>(now - frameStart).count() / 1000.0f;
-        LOG_INFO_CAT("Renderer", "=== FPS: {:.2f} | Frame: {} | Avg Frame Time: {:.2f}ms | TLAS: 0x{:x} | Dispatch: {}x{} | Descriptors Updated: {} ===",
-                     fps, frameCount_, frameTimeMs, tlasDeviceAddress_, renderWidth, renderHeight, descriptorsUpdated_);
-        if (fps < 30.0f) {
-            LOG_WARNING_CAT("Renderer", "Low FPS ({:.2f}) detected - potential issues: shader bindings, TLAS invalid, or geometry out of view.", fps);
-        }
+        double fps = framesThisSecond_ * 1000.0 / elapsed;
+        double frameTimeMs = std::chrono::duration_cast<std::chrono::microseconds>(now - frameStart).count() / 1000.0;
+        LOG_INFO_CAT("Renderer", "FPS: {:.0f} | Frame: {} | Time: {:.2f}ms | TLAS: 0x{:x} | Size: {}x{}", 
+                     fps, frameCount_, frameTimeMs, tlasDeviceAddress_, context_.swapchainExtent.width, context_.swapchainExtent.height);
         framesThisSecond_ = 0;
         lastFPSTime_ = now;
     }
-
-    // Log slow frames
-    pipelineManager_->logFrameTimeIfSlow(frameStart);
 }
 
 void VulkanRenderer::updateUniformBuffer(uint32_t frameIndex, const Camera& camera) {
@@ -1163,10 +1103,6 @@ void VulkanRenderer::updateUniformBuffer(uint32_t frameIndex, const Camera& came
     ubo.camPos = glm::vec4(camera.getPosition(), 1.0f);
     ubo.time = 0.0f;
     ubo.frame = frameCount_;
-
-    if (frameCount_ % 60 == 0) {  // Log camera pos every ~1s
-        LOG_INFO_CAT("Renderer", "Uniform update frame {}: Camera pos ({:.2f}, {:.2f}, {:.2f})", frameCount_, ubo.camPos.x, ubo.camPos.y, ubo.camPos.z);
-    }
 
     void* data;
     VK_CHECK(vkMapMemory(context_.device, context_.uniformBufferMemories[frameIndex], 0, sizeof(ubo), 0, &data));

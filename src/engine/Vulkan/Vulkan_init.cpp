@@ -1,6 +1,6 @@
 // src/engine/Vulkan/Vulkan_init.cpp
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts gzac5314@gmail.com is licensed under CC BY-NC 4.0
-// FULLY POLISHED. ZERO WARNINGS. ZERO NARROWING. 100% COMPILABLE.
+// FULLY POLISHED. ZERO WARNINGS. 100% COMPILABLE.
 
 #include "engine/Vulkan/VulkanCore.hpp"
 #include "engine/Vulkan/Vulkan_init.hpp"
@@ -20,7 +20,7 @@
 namespace VulkanInitializer {
 
 // ====================================================================
-// UTILITY: MEMORY TYPE
+// UTILITY: MEMORY TYPE — MOVED TO TOP
 // ====================================================================
 uint32_t findMemoryType(VkPhysicalDevice physicalDevice, uint32_t typeFilter, VkMemoryPropertyFlags properties) {
     VkPhysicalDeviceMemoryProperties memProps;
@@ -30,12 +30,12 @@ uint32_t findMemoryType(VkPhysicalDevice physicalDevice, uint32_t typeFilter, Vk
             return i;
         }
     }
-    LOG_ERROR_CAT("Vulkan", "Failed to find suitable memory type!");
+    LOG_ERROR_CAT("Vulkan", "Failed to find suitable memory type! typeFilter=0x{:x}, props=0x{:x}", typeFilter, properties);
     throw std::runtime_error("Failed to find memory type");
 }
 
 // ====================================================================
-// INSTANCE CREATION
+// INSTANCE CREATION — NO XCB/XLIB/WAYLAND
 // ====================================================================
 void initInstance(const std::vector<std::string>& extensions, Vulkan::Context& context) {
     VkApplicationInfo appInfo = {
@@ -48,12 +48,9 @@ void initInstance(const std::vector<std::string>& extensions, Vulkan::Context& c
     };
 
     std::vector<const char*> ext;
-    ext.reserve(extensions.size() + 3);
+    ext.reserve(extensions.size() + 2);
     for (const auto& e : extensions) ext.push_back(e.c_str());
     ext.push_back(VK_KHR_SURFACE_EXTENSION_NAME);
-#ifdef _WIN32
-    ext.push_back(VK_KHR_WIN32_SURFACE_EXTENSION_NAME);
-#endif
     ext.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
 
     VkInstanceCreateInfo createInfo = {
@@ -175,7 +172,6 @@ void initDevice(Vulkan::Context& context) {
 
     LOG_INFO_CAT("Vulkan", "Queue families → G: {} | P: {} | C: {}", graphics, present, compute);
 
-    // === FIXED: NO NARROWING WARNINGS ===
     std::set<uint32_t> unique = {
         static_cast<uint32_t>(graphics),
         static_cast<uint32_t>(present),
@@ -205,7 +201,6 @@ void initDevice(Vulkan::Context& context) {
     VkPhysicalDeviceFeatures features{};
     features.samplerAnisotropy = VK_TRUE;
 
-    // === FEATURE CHAIN: Must be in correct order ===
     VkPhysicalDeviceBufferDeviceAddressFeatures bufferAddr = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES,
         .bufferDeviceAddress = VK_TRUE
@@ -250,7 +245,6 @@ void initDevice(Vulkan::Context& context) {
 
     context.resourceManager.setDevice(context.device, context.physicalDevice);
 
-    // === LOAD ALL KHR FUNCTION POINTERS VIA CONTEXT ===
     #define LOAD_KHR(name) \
         context.name = reinterpret_cast<PFN_##name>(vkGetDeviceProcAddr(context.device, #name)); \
         if (!context.name) { \
@@ -673,7 +667,6 @@ void createDescriptorPoolAndSet(
     VkImageView alphaTexView, VkImageView envMapView, VkImageView densityVolumeView,
     VkImageView gDepthView, VkImageView gNormalView
 ) {
-    // Create pool
     std::vector<VkDescriptorPoolSize> poolSizes;
     if (forRayTracing) {
         poolSizes.push_back({VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1});
@@ -682,11 +675,11 @@ void createDescriptorPoolAndSet(
     poolSizes.push_back({VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1});
     poolSizes.push_back({VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, static_cast<uint32_t>(materialBuffers.size())});
     poolSizes.push_back({VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, static_cast<uint32_t>(dimensionBuffers.size())});
-    poolSizes.push_back({VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1}); // alpha
-    poolSizes.push_back({VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1}); // env
-    poolSizes.push_back({VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1}); // density
-    poolSizes.push_back({VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1}); // gdepth
-    poolSizes.push_back({VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1}); // gnormal
+    poolSizes.push_back({VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1});
+    poolSizes.push_back({VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1});
+    poolSizes.push_back({VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1});
+    poolSizes.push_back({VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1});
+    poolSizes.push_back({VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1});
     poolSizes.push_back({VK_DESCRIPTOR_TYPE_SAMPLER, 1});
 
     VkDescriptorPoolCreateInfo poolInfo = {};
@@ -697,7 +690,6 @@ void createDescriptorPoolAndSet(
 
     VK_CHECK(vkCreateDescriptorPool(device, &poolInfo, nullptr, &descriptorPool));
 
-    // Allocate set
     VkDescriptorSetAllocateInfo allocInfo = {};
     allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
     allocInfo.descriptorPool = descriptorPool;
@@ -708,9 +700,7 @@ void createDescriptorPoolAndSet(
     VK_CHECK(vkAllocateDescriptorSets(device, &allocInfo, &ds));
     descriptorSets.push_back(ds);
 
-    // Update descriptors
     std::vector<VkWriteDescriptorSet> writes;
-
     uint32_t bindingOffset = 0;
     if (forRayTracing) {
         VkWriteDescriptorSetAccelerationStructureKHR accelInfo = {};

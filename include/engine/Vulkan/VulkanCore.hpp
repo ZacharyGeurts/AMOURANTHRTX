@@ -1,4 +1,3 @@
-// include/engine/Vulkan/VulkanCore.hpp
 // AMOURANTH RTX Engine, October 2025 - Core Vulkan structures and utilities.
 // Dependencies: Vulkan 1.3+, GLM, logging.hpp.
 // Supported platforms: Linux, Windows.
@@ -8,7 +7,13 @@
 #ifndef VULKAN_CORE_HPP
 #define VULKAN_CORE_HPP
 
+// ====================================================================
+// ENABLE BETA EXTENSIONS FOR KHR DEFERRED COMPILATION & RAY TRACING
+// ====================================================================
+#define VK_ENABLE_BETA_EXTENSIONS
 #include <vulkan/vulkan.h>
+#include <vulkan/vulkan_beta.h>
+
 #include <vector>
 #include <string>
 #include <span>
@@ -24,7 +29,7 @@
 class VulkanBufferManager;
 
 // ====================================================================
-// Vulkan Resource Manager – DEFAULT CONSTRUCTIBLE
+// Vulkan Resource Manager – SINGLETON + DEFAULT CONSTRUCTIBLE
 // ====================================================================
 class VulkanResourceManager {
     std::vector<VkBuffer> buffers_;
@@ -46,6 +51,14 @@ class VulkanResourceManager {
     VulkanBufferManager* bufferManager_ = nullptr;
 
 public:
+    // -------------------------------------------------------------------------
+    // SINGLETON ACCESS
+    // -------------------------------------------------------------------------
+    static VulkanResourceManager& instance() {
+        static VulkanResourceManager inst;
+        return inst;
+    }
+
     VulkanResourceManager() = default;
     VulkanResourceManager(const VulkanResourceManager&) = delete;
     VulkanResourceManager& operator=(const VulkanResourceManager&) = delete;
@@ -301,7 +314,7 @@ public:
 };
 
 // ====================================================================
-// Vulkan Context – FULL RTX SUPPORT
+// Vulkan Context – FULL RTX + KHR DEFERRED COMPILATION SUPPORT
 // ====================================================================
 namespace Vulkan {
 
@@ -427,7 +440,7 @@ struct Context {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR
     };
 
-    // EXTENSION FUNCTION POINTERS – FULL RTX SUPPORT
+    // EXTENSION FUNCTION POINTERS – FULL RTX + KHR DEFERRED SUPPORT
     PFN_vkCmdTraceRaysKHR                       vkCmdTraceRaysKHR                       = nullptr;
     PFN_vkCreateRayTracingPipelinesKHR          vkCreateRayTracingPipelinesKHR          = nullptr;
     PFN_vkGetRayTracingShaderGroupHandlesKHR    vkGetRayTracingShaderGroupHandlesKHR    = nullptr;
@@ -438,11 +451,11 @@ struct Context {
     PFN_vkGetBufferDeviceAddressKHR             vkGetBufferDeviceAddressKHR             = nullptr;
     PFN_vkDestroyAccelerationStructureKHR       vkDestroyAccelerationStructureKHR       = nullptr;
 
-    // DEFERRED COMPILATION (NV extension)
+    // DEFERRED COMPILATION (VK_KHR_deferred_host_operations)
     PFN_vkCreateDeferredOperationKHR            vkCreateDeferredOperationKHR            = nullptr;
     PFN_vkDeferredOperationJoinKHR              vkDeferredOperationJoinKHR             = nullptr;
-    PFN_vkGetDeferredOperationResultKHR         vkGetDeferredOperationResultKHR        = nullptr;
-    PFN_vkDestroyDeferredOperationKHR           vkDestroyDeferredOperationKHR          = nullptr;
+    PFN_vkGetDeferredOperationResultKHR         vkGetDeferredOperationResultKHR         = nullptr;
+    PFN_vkDestroyDeferredOperationKHR           vkDestroyDeferredOperationKHR           = nullptr;
 
     // --- Direct access to BufferManager ---
     VulkanBufferManager* getBufferManager() { return resourceManager.getBufferManager(); }
@@ -457,7 +470,7 @@ struct Context {
 #include "engine/Vulkan/VulkanBufferManager.hpp"
 
 // ====================================================================
-// Vulkan Initializer Functions
+// Vulkan Initializer Functions – NO DEFAULT ARGS HERE
 // ====================================================================
 namespace VulkanInitializer {
     void copyBuffer(VkDevice device, VkCommandPool commandPool, VkQueue queue,
@@ -480,7 +493,8 @@ namespace VulkanInitializer {
     void createBuffer(VkDevice device, VkPhysicalDevice physicalDevice, VkDeviceSize size,
                      VkBufferUsageFlags usage, VkMemoryPropertyFlags properties,
                      VkBuffer& buffer, VkDeviceMemory& bufferMemory,
-                     const VkMemoryAllocateFlagsInfo* allocFlagsInfo, VulkanResourceManager& resourceManager);
+                     const VkMemoryAllocateFlagsInfo* allocFlagsInfo,
+                     VulkanResourceManager& resourceManager);
 
     void initializeVulkan(Vulkan::Context& context);
 
