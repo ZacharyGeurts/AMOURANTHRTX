@@ -54,6 +54,12 @@ VkShaderModule VulkanRenderer::createShaderModule(const std::string& filepath) {
 // -----------------------------------------------------------------------------
 // CONSTRUCTOR — FIXED INITIALIZATION ORDER
 // -----------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
+// CONSTRUCTOR — FIXED INITIALIZATION ORDER
+// -----------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
+// CONSTRUCTOR — FIXED INITIALIZATION ORDER
+// -----------------------------------------------------------------------------
 VulkanRenderer::VulkanRenderer(int width, int height, void* window,
                                const std::vector<std::string>& instanceExtensions)
     : width_(width), height_(height), window_(window),
@@ -143,7 +149,7 @@ VulkanRenderer::VulkanRenderer(int width, int height, void* window,
         frames_[i].fence = swapchainManager_->getInFlightFence(i);
     }
 
-    // 5. PIPELINE MANAGER
+    // 5. PIPELINE MANAGER — EMPTY BUFFER MANAGER (SBT ONLY)
     pipelineManager_ = std::make_unique<VulkanPipelineManager>(context_, width_, height_);
 
     // === CREATE ALL PIPELINES FIRST ===
@@ -160,36 +166,45 @@ VulkanRenderer::VulkanRenderer(int width, int height, void* window,
     pipelineManager_->createShaderBindingTable();
     sbt_ = pipelineManager_->getShaderBindingTable();
 
-    // 6. BUFFER MANAGER
+    // 6. LOAD MESH DATA FIRST
+    const auto& vertices = getVertices();
+    const auto& indices = getIndices();
+
+    if (vertices.empty() || indices.empty()) {
+        LOG_ERROR_CAT("Renderer", "Vertex / index data cannot be empty");
+        throw std::runtime_error("Vertex / index data cannot be empty");
+    }
+
+    // 7. BUFFER MANAGER — PASS REAL MESH DATA
     bufferManager_ = std::make_unique<VulkanBufferManager>(
         context_,
-        std::span<const glm::vec3>(getVertices()),
-        std::span<const uint32_t>(getIndices())
+        std::span<const glm::vec3>(vertices),
+        std::span<const uint32_t>(indices)
     );
-    indexCount_ = static_cast<uint32_t>(getIndices().size());
+    indexCount_ = static_cast<uint32_t>(indices.size());
 
-    // 7. GEOMETRY & ACCELERATION STRUCTURES
+    // 8. GEOMETRY & ACCELERATION STRUCTURES
     buildAccelerationStructures();
 
-    // 8. RT OUTPUT IMAGE
+    // 9. RT OUTPUT IMAGE
     createRTOutputImage();
 
-    // 9. FRAMEBUFFERS & COMMAND BUFFERS
+    // 10. FRAMEBUFFERS & COMMAND BUFFERS
     createFramebuffers();
     createCommandBuffers();
 
-    // 10. ENVIRONMENT MAP
+    // 11. ENVIRONMENT MAP
     createEnvironmentMap();
 
-    // 11. PER-FRAME BUFFERS
+    // 12. PER-FRAME BUFFERS
     initializeAllBufferData(MAX_FRAMES_IN_FLIGHT, sizeof(MaterialData) * 128, sizeof(DimensionData));
 
-    // 12. DESCRIPTOR SYSTEM
+    // 13. DESCRIPTOR SYSTEM
     createDescriptorPool();
     createDescriptorSets();
     createComputeDescriptorSets();
 
-    // 13. UPDATE DESCRIPTORS
+    // 14. UPDATE DESCRIPTORS
     updateRTDescriptors();
 
     LOG_INFO_CAT("Renderer", "=== VulkanRenderer Initialized Successfully ===");

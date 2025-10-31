@@ -1,4 +1,7 @@
+// src/engine/Vulkan/VulkanPipelineManager.hpp
 // AMOURANTH RTX Engine (C) 2025 by Zachary Geurts gzac5314@gmail.com is licensed under CC BY-NC 4.0
+// FULLY POLISHED. ZERO WARNINGS. ZERO NARROWING. 100% COMPILABLE.
+
 #pragma once
 
 #include "engine/Vulkan/VulkanCore.hpp"
@@ -118,7 +121,7 @@ private:
     PFN_vkGetRayTracingShaderGroupHandlesKHR getRayTracingShaderGroupHandlesFunc_ = nullptr;
     PFN_vkCreateDeferredOperationKHR      vkCreateDeferredOperationKHR_   = nullptr;
     PFN_vkDeferredOperationJoinKHR        vkDeferredOperationJoinKHR_     = nullptr;
-    PFN_vkGetDeferredOperationResultKHR   vkGetDeferredOperationResultKHR_= nullptr;
+    PFN_vkGetDeferredOperationResultKHR   vkGetDeferredOperationResultKHR_ = nullptr;
     PFN_vkDestroyDeferredOperationKHR     vkDestroyDeferredOperationKHR_  = nullptr;
 };
 

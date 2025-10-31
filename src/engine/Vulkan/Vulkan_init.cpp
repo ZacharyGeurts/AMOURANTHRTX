@@ -138,10 +138,23 @@ VkPhysicalDevice findPhysicalDevice(VkInstance instance, VkSurfaceKHR surface, b
 }
 
 // ====================================================================
-// DEVICE CREATION + QUEUE SETUP + FUNCTION POINTERS
+// DEVICE CREATION + QUEUE SETUP + FUNCTION POINTERS + RT PROPS
 // ====================================================================
 void initDevice(Vulkan::Context& context) {
     context.physicalDevice = findPhysicalDevice(context.instance, context.surface, true);
+
+    // === FETCH RT PROPERTIES HERE ===
+    VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProps = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR
+    };
+    VkPhysicalDeviceProperties2 props2 = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
+        .pNext = &rtProps
+    };
+    vkGetPhysicalDeviceProperties2(context.physicalDevice, &props2);
+    context.rtProperties = rtProps;
+    LOG_INFO_CAT("Vulkan", "RT Properties → handleSize={}, align={}",
+                  rtProps.shaderGroupHandleSize, rtProps.shaderGroupHandleAlignment);
 
     uint32_t qCount = 0;
     vkGetPhysicalDeviceQueueFamilyProperties(context.physicalDevice, &qCount, nullptr);
