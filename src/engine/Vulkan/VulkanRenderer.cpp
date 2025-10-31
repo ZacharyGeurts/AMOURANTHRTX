@@ -998,9 +998,18 @@ void VulkanRenderer::renderFrame(const Camera& camera) {
     uint32_t imageIndex;
     VkResult result = vkAcquireNextImageKHR(context_.device, context_.swapchain, UINT64_MAX,
                                             frames_[currentFrame_].imageAvailableSemaphore, VK_NULL_HANDLE, &imageIndex);
-    if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
-        recreateSwapchain = true;
-        return;
+
+    if (result == VK_ERROR_OUT_OF_DATE_KHR) {
+        LOG_INFO_CAT("Renderer", "Swapchain out-of-date during acquire → recreating");
+        handleResize(width_, height_);
+        // Re-acquire with the new swapchain
+        result = vkAcquireNextImageKHR(context_.device, context_.swapchain, UINT64_MAX,
+                                       frames_[currentFrame_].imageAvailableSemaphore, VK_NULL_HANDLE, &imageIndex);
+        if (result != VK_SUCCESS) {
+            throw std::runtime_error("Failed to acquire image after swapchain recreation");
+        }
+    } else if (result == VK_SUBOPTIMAL_KHR) {
+        LOG_DEBUG_CAT("Renderer", "Swapchain sub-optimal after acquire");
     } else if (result != VK_SUCCESS) {
         throw std::runtime_error("Failed to acquire swapchain image");
     }
@@ -1107,8 +1116,15 @@ void VulkanRenderer::renderFrame(const Camera& camera) {
         .pImageIndices = &imageIndex
     };
     result = vkQueuePresentKHR(context_.graphicsQueue, &presentInfo);
-    if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
-        recreateSwapchain = true;
+
+    if (result == VK_ERROR_OUT_OF_DATE_KHR) {
+        LOG_INFO_CAT("Renderer", "Swapchain out-of-date on present → recreating");
+        handleResize(width_, height_);
+        // Skip rest of frame — next renderFrame() will use new swapchain
+    } else if (result == VK_SUBOPTIMAL_KHR) {
+        LOG_DEBUG_CAT("Renderer", "Swapchain sub-optimal on present");
+    } else if (result != VK_SUCCESS) {
+        throw std::runtime_error("Failed to present");
     }
 
     currentFrame_ = (currentFrame_ + 1) % MAX_FRAMES_IN_FLIGHT;
@@ -1156,23 +1172,23 @@ void VulkanRenderer::handleResize(int width, int height) {
     width_ = width;
     height_ = height;
 
+    // 1. Re-create swapchain
     swapchainManager_->handleResize(width, height);
     context_.swapchainExtent = swapchainManager_->getSwapchainExtent();
 
-    // Clamp to valid size
-    if (context_.swapchainExtent.width == 0 || context_.swapchainExtent.height == 0) {
-        LOG_WARNING_CAT("Renderer", "Swapchain extent 0x0 after resize, clamping to 1x1");
-        context_.swapchainExtent.width = 1;
-        context_.swapchainExtent.height = 1;
-    }
-
-    width_ = static_cast<int>(context_.swapchainExtent.width);
+    // Sync internal size
+    width_  = static_cast<int>(context_.swapchainExtent.width);
     height_ = static_cast<int>(context_.swapchainExtent.height);
 
+    // 2. Re-create RT output image
     recreateRTOutputImage();
+
+    // 3. Re-create framebuffers
+    createFramebuffers();
+
+    // 4. Update descriptors (RT output image changed)
     descriptorsUpdated_ = false;
     updateRTDescriptors();
-    createFramebuffers();
 
     LOG_INFO_CAT("Renderer", "Resize complete: {}x{}", width_, height_);
 }
