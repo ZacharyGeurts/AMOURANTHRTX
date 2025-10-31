@@ -192,9 +192,10 @@ private:
     int pendingWidth_ = 0;
     int pendingHeight_ = 0;
 
-    // GPU TIMING
+    // GPU TIMING — DEFERRED READ
     std::array<VkQueryPool, MAX_FRAMES_IN_FLIGHT> queryPools_ = {};
-    std::array<double, 8> stageTimes_ = {};
+    std::array<bool, MAX_FRAMES_IN_FLIGHT>       queryReady_{false};  // ← ADDED
+    std::array<double, MAX_FRAMES_IN_FLIGHT>     lastRTTimeMs_{0.0};  // ← ADDED
 
     // COMPUTE DESCRIPTOR LAYOUT — NOW SET AFTER PIPELINE MANAGER
     VkDescriptorSetLayout computeDescriptorSetLayout_ = VK_NULL_HANDLE;
