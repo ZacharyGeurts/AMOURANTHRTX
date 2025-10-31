@@ -1,10 +1,5 @@
-// src/engine/Vulkan/VulkanBufferManager.cpp
-// AMOURANTH RTX Engine © 2025 by Zachary Geurts gzac5314@gmail.com is licensed under CC BY-NC 4.0
-// BUFFED TO OBLIVION: DEFERRED SCRATCH, NUCLEAR LOGGING, UNSTOPPABLE RAII
-// FIXED: reserveScratchPool() called AFTER vkGetAccelerationStructureBuildSizesKHR
-// ENHANCED: vkQueueWaitIdle in asyncUpdateBuffers for bulletproof sync
-// ADDED: ScopeGuard + insertMemoryBarrier + EXTREME LOGGING
-
+// AMOURANTH RTX Engine (C) 2025 by Zachary Geurts gzac5314@gmail.com is licensed under CC BY-NC 4.0
+// FINAL FORM - NUCLEAR RAII + ASYNC + SCRATCH POOL + DLSS-READY - NO SURVIVORS
 #include "engine/Vulkan/VulkanBufferManager.hpp"
 #include "engine/Vulkan/Vulkan_init.hpp"
 #include "engine/Vulkan/types.hpp"
@@ -34,6 +29,8 @@
 #include <vulkan/vulkan_ext_debug_utils.h>
 #endif
 
+namespace VulkanRTX {
+
 // ---------------------------------------------------------------------------
 //  VK_CHECK WITH NUCLEAR EXPLOSION + MICROSECOND TIMING
 // ---------------------------------------------------------------------------
@@ -50,7 +47,7 @@
         } else {                                                                          \
             LOG_TRACE_CAT("BufferMgr", "VK_CALL: {} -> OK [{} us]", #expr, dur.count());   \
         }                                                                                 \
-    } while (0)
+    } while(0)
 
 // ---------------------------------------------------------------------------
 //  RAII ScopeGuard — UNSTOPPABLE
@@ -727,3 +724,5 @@ VkDeviceAddress VulkanBufferManager::getScratchBufferAddress(uint32_t index) con
 uint32_t VulkanBufferManager::getScratchBufferCount() const {
     return static_cast<uint32_t>(impl_->scratchBuffers.size());
 }
+
+} // namespace VulkanRTX

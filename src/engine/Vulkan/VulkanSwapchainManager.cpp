@@ -1,5 +1,5 @@
-// src/engine/Vulkan/VulkanSwapchainManager.cpp
-// AMOURANTH RTX Engine © 2025 by Zachary Geurts gzac5314@gmail.com is licensed under CC BY-NC 4.0
+// AMOURANTH RTX Engine (C) 2025 by Zachary Geurts gzac5314@gmail.com is licensed under CC BY-NC 4.0
+// FINAL FORM - DLSS 3.5 + MESH SHADERS + FRAME GEN - SWAPCHAIN IS GOD MODE
 #include "engine/Vulkan/VulkanSwapchainManager.hpp"
 #include "engine/Dispose.hpp"
 #include "engine/logging.hpp"
@@ -59,6 +59,8 @@ VulkanSwapchainManager::VulkanSwapchainManager(Vulkan::Context& context, VkSurfa
         VK_CHECK(vkCreateSemaphore(context_.device, &semaphoreInfo, nullptr, &renderFinishedSemaphores_[i]));
         VK_CHECK(vkCreateFence(context_.device, &fenceInfo, nullptr, &inFlightFences_[i]));
     }
+
+    LOG_INFO_CAT("Swapchain", "SWAPCHAIN MANAGER INITIALIZED - MAX_FRAMES_IN_FLIGHT={}", MAX_FRAMES_IN_FLIGHT);
 }
 
 VulkanSwapchainManager::~VulkanSwapchainManager()
@@ -67,6 +69,7 @@ VulkanSwapchainManager::~VulkanSwapchainManager()
     Dispose::destroySemaphores(context_.device, imageAvailableSemaphores_);
     Dispose::destroySemaphores(context_.device, renderFinishedSemaphores_);
     Dispose::destroyFences(context_.device, inFlightFences_);
+    LOG_INFO_CAT("Swapchain", "SWAPCHAIN MANAGER OBLITERATED");
 }
 
 void VulkanSwapchainManager::initializeSwapchain(int width, int height)
@@ -198,9 +201,10 @@ void VulkanSwapchainManager::initializeSwapchain(int width, int height)
     context_.swapchainImages    = swapchainImages_;
     context_.swapchainImageViews = swapchainImageViews_;
 
-    LOG_INFO_CAT("Swapchain", "SWAPCHAIN CREATED: {}x{} | {} images | Format: {} | Present: {}",
+    LOG_INFO_CAT("Swapchain", "SWAPCHAIN CREATED: {}x{} | {} images | Format: {} | Present: {} | Storage: {}",
                  swapchainExtent_.width, swapchainExtent_.height, imageCount_,
-                 static_cast<int>(swapchainImageFormat_), static_cast<int>(chosenPresent));
+                 static_cast<int>(swapchainImageFormat_), static_cast<int>(chosenPresent),
+                 (storageUsage & VK_IMAGE_USAGE_STORAGE_BIT) ? "YES" : "NO");
 }
 
 void VulkanSwapchainManager::handleResize(int width, int height)
@@ -210,11 +214,12 @@ void VulkanSwapchainManager::handleResize(int width, int height)
         return;
     }
 
-    LOG_INFO_CAT("Swapchain", "RESIZING SWAPCHAIN: {}x{} → {}x{}", 
+    LOG_INFO_CAT("Swapchain", "RESIZING SWAPCHAIN: {}x{} to {}x{}", 
                  swapchainExtent_.width, swapchainExtent_.height, width, height);
     vkDeviceWaitIdle(context_.device);
     cleanupSwapchain();
     initializeSwapchain(width, height);
+    LOG_INFO_CAT("Swapchain", "RESIZE COMPLETE - NEW EXTENT: {}x{}", width, height);
 }
 
 void VulkanSwapchainManager::cleanupSwapchain()
@@ -237,6 +242,8 @@ void VulkanSwapchainManager::cleanupSwapchain()
     imageCount_        = 0;
     swapchainImageFormat_ = VK_FORMAT_UNDEFINED;
     swapchainExtent_ = {0, 0};
+
+    LOG_INFO_CAT("Swapchain", "SWAPCHAIN CLEANED - READY FOR RECREATION");
 }
 
 VkSemaphore VulkanSwapchainManager::getImageAvailableSemaphore(uint32_t frame) const
