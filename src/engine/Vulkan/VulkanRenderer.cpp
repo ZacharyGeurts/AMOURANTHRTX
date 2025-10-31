@@ -1145,23 +1145,36 @@ void VulkanRenderer::updateUniformBuffer(uint32_t frameIndex, const Camera& came
 // HANDLE RESIZE — FULLY INTEGRATED
 // -----------------------------------------------------------------------------
 void VulkanRenderer::handleResize(int width, int height) {
-    if (width == 0 || height == 0) return;
-    LOG_INFO_CAT("Renderer", "Handling window resize: {}x{} to {}x{}", width_, height_, width, height);
+    if (width == 0 || height == 0) {
+        LOG_DEBUG_CAT("Renderer", "Resize to 0x0 → skipping (minimized)");
+        return;
+    }
+
+    LOG_INFO_CAT("Renderer", "Handling window resize: {}x{} → {}x{}", width_, height_, width, height);
     vkDeviceWaitIdle(context_.device);
-    width_ = width; height_ = height;
+
+    width_ = width;
+    height_ = height;
+
     swapchainManager_->handleResize(width, height);
     context_.swapchainExtent = swapchainManager_->getSwapchainExtent();
 
+    // Clamp to valid size
+    if (context_.swapchainExtent.width == 0 || context_.swapchainExtent.height == 0) {
+        LOG_WARNING_CAT("Renderer", "Swapchain extent 0x0 after resize, clamping to 1x1");
+        context_.swapchainExtent.width = 1;
+        context_.swapchainExtent.height = 1;
+    }
+
     width_ = static_cast<int>(context_.swapchainExtent.width);
     height_ = static_cast<int>(context_.swapchainExtent.height);
-    LOG_INFO_CAT("Renderer", "Post-resize extent: {}x{}", width_, height_);
 
     recreateRTOutputImage();
     descriptorsUpdated_ = false;
     updateRTDescriptors();
     createFramebuffers();
-    recreateSwapchain = false;
-    LOG_INFO_CAT("Renderer", "Resize complete: all resources synced.");
+
+    LOG_INFO_CAT("Renderer", "Resize complete: {}x{}", width_, height_);
 }
 
 // -----------------------------------------------------------------------------
