@@ -1,4 +1,4 @@
-// src/engine/Vulkan/VulkanRenderer.hpp
+// include/engine/Vulkan/VulkanRenderer.hpp
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts gzac5314@gmail.com is licensed under CC BY-NC 4.0
 #pragma once
 #ifndef VULKAN_RENDERER_HPP
@@ -22,17 +22,11 @@
 #include <array>
 #include <chrono>
 #include <cstdint>
-#include <mutex>
 #include <atomic>
 
 namespace VulkanRTX {
 
 constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 3;
-
-using VkBuffer_T        = VkBuffer;
-using VkImage_T         = VkImage;
-using VkCommandBuffer_T = VkCommandBuffer;
-using VkDescriptorSet_T = VkDescriptorSet;
 
 struct StridedDeviceAddressRegionKHR {
     VkDeviceAddress deviceAddress = 0;
@@ -64,7 +58,7 @@ public:
     void updateComputeDescriptorSet(uint32_t frameIndex);
     void updateUniformBuffer(uint32_t frameIndex, const Camera& camera);
     void renderFrame(const Camera& camera);
-    void handleResize(int width, int height);
+    void handleResize(int width, int height);   // immediate resize
     void cleanup() noexcept;
 
     VkDevice          getDevice() const { return context_.device; }
@@ -100,9 +94,9 @@ private:
     void createFramebuffers();
 
     // --- Resize ---
-    void applyResize();
+    void applyResize(int newWidth, int newHeight);   // takes width/height
 
-    // --- Member Variables (ORDER MATCHES CONSTRUCTOR) ---
+    // --- Member Variables ---
     int  width_  = 0;
     int  height_ = 0;
     void* window_ = nullptr;
@@ -123,13 +117,11 @@ private:
     VkImageView         envMapImageView_          = VK_NULL_HANDLE;
     VkSampler           envMapSampler_            = VK_NULL_HANDLE;
 
-    // FIXED-SIZE DOUBLE-BUFFERED RT OUTPUT (max resolution)
     std::array<VkImage,        2> rtOutputImages_   = {};
     std::array<VkDeviceMemory, 2> rtOutputMemories_ = {};
     std::array<VkImageView,    2> rtOutputViews_    = {};
     uint32_t currentRTIndex_ = 0;
 
-    // FIXED-SIZE DOUBLE-BUFFERED ACCUMULATION (max resolution)
     std::array<VkImage,        2> accumImages_   = {};
     std::array<VkDeviceMemory, 2> accumMemories_ = {};
     std::array<VkImageView,    2> accumViews_    = {};
@@ -147,7 +139,6 @@ private:
     VkDeviceMemory              instanceBufferMemory_ = VK_NULL_HANDLE;
     VkDeviceAddress             tlasDeviceAddress_ = 0;
 
-    // TEMP SINGLE IMAGE (creation helper)
     Dispose::VulkanHandle<VkImage>        rtOutputImage_;
     Dispose::VulkanHandle<VkDeviceMemory> rtOutputImageMemory_;
     Dispose::VulkanHandle<VkImageView>    rtOutputImageView_;
@@ -155,12 +146,12 @@ private:
     Dispose::VulkanHandle<VkDeviceMemory> accumImageMemory_;
     Dispose::VulkanHandle<VkImageView>    accumImageView_;
 
-    // CORE SYSTEMS — MUST BE FIRST
-    Vulkan::Context                         context_;  // ← FIRST
+    // CORE SYSTEMS
+    Vulkan::Context                         context_;
     std::unique_ptr<VulkanRTX>              rtx_;
     std::unique_ptr<VulkanSwapchainManager> swapchainManager_;
     std::unique_ptr<VulkanPipelineManager> pipelineManager_;
-    std::unique_ptr<VulkanBufferManager>    bufferManager_;  // ← USES context_
+    std::unique_ptr<VulkanBufferManager>    bufferManager_;
 
     std::vector<Frame>          frames_;
     std::vector<VkFramebuffer>  framebuffers_;
@@ -186,18 +177,13 @@ private:
     ShaderBindingTable sbt_{};
 
     // RESIZE STATE
-    std::mutex resizeMutex_;
     std::atomic<bool> swapchainRecreating_{false};
-    bool resizePending_ = false;
-    int pendingWidth_ = 0;
-    int pendingHeight_ = 0;
 
-    // GPU TIMING — DEFERRED READ
+    // GPU TIMING
     std::array<VkQueryPool, MAX_FRAMES_IN_FLIGHT> queryPools_ = {};
-    std::array<bool, MAX_FRAMES_IN_FLIGHT>       queryReady_{false};  // ← ADDED
-    std::array<double, MAX_FRAMES_IN_FLIGHT>     lastRTTimeMs_{0.0};  // ← ADDED
+    std::array<bool, MAX_FRAMES_IN_FLIGHT>       queryReady_{false};
+    std::array<double, MAX_FRAMES_IN_FLIGHT>     lastRTTimeMs_{0.0};
 
-    // COMPUTE DESCRIPTOR LAYOUT — NOW SET AFTER PIPELINE MANAGER
     VkDescriptorSetLayout computeDescriptorSetLayout_ = VK_NULL_HANDLE;
 
     friend class VulkanRTX;

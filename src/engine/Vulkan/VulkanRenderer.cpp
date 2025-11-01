@@ -22,7 +22,6 @@
 #include <chrono>
 #include <bit>
 #include <thread>
-#include <mutex>
 #include <atomic>
 #include "stb/stb_image.h"
 #define TINYOBJLOADER_IMPLEMENTATION
@@ -97,7 +96,6 @@ VulkanRenderer::VulkanRenderer(int width, int height, void* window,
       rtPipeline_(VK_NULL_HANDLE), rtPipelineLayout_(VK_NULL_HANDLE),
       sbtBuffer_(VK_NULL_HANDLE), sbtMemory_(VK_NULL_HANDLE), sbt_{},
       currentRTIndex_(0), currentAccumIndex_(0), resetAccumulation_(true),
-      resizePending_(false), pendingWidth_(0), pendingHeight_(0),
       swapchainRecreating_(false),
       computeDescriptorSetLayout_(VK_NULL_HANDLE),
       queryReady_{}, lastRTTimeMs_{}
@@ -235,47 +233,52 @@ void VulkanRenderer::cleanup() noexcept {
 }
 
 // -----------------------------------------------------------------------------
-// PUBLIC: HANDLE RESIZE
+// PUBLIC: HANDLE RESIZE (immediate)
 // -----------------------------------------------------------------------------
 void VulkanRenderer::handleResize(int width, int height) {
-    if (width == 0 || height == 0) return;
+    if (width <= 0 || height <= 0) return;
     if (width == width_ && height == height_) return;
-    LOG_INFO_CAT("Renderer", "Resize queued: {}x{} → {}x{}", width_, height_, width, height);
-    std::lock_guard<std::mutex> lock(resizeMutex_);
-    pendingWidth_ = width;
-    pendingHeight_ = height;
-    resizePending_ = true;
+
+    LOG_INFO_CAT("Renderer", "Resize requested: {}x{} → {}x{}", width_, height_, width, height);
+    applyResize(width, height);
 }
 
 // -----------------------------------------------------------------------------
 // PRIVATE: APPLY RESIZE
 // -----------------------------------------------------------------------------
-void VulkanRenderer::applyResize() {
-    LOG_INFO_CAT("Renderer", "Applying resize: {}x{}...", pendingWidth_, pendingHeight_);
+void VulkanRenderer::applyResize(int newWidth, int newHeight) {
+    LOG_INFO_CAT("Renderer", "Applying resize {}x{}...", newWidth, newHeight);
 
     for (auto& f : frames_) {
         VK_CHECK(vkWaitForFences(context_.device, 1, &f.fence, VK_TRUE, UINT64_MAX));
         VK_CHECK(vkResetFences(context_.device, 1, &f.fence));
     }
 
-    width_ = pendingWidth_;
-    height_ = pendingHeight_;
+    width_ = newWidth;
+    height_ = newHeight;
 
     swapchainRecreating_.store(true);
     swapchainManager_->handleResize(width_, height_);
-    context_.swapchainExtent = swapchainManager_->getSwapchainExtent();
-    width_ = static_cast<int>(context_.swapchainExtent.width);
-    height_ = static_cast<int>(context_.swapchainExtent.height);
     swapchainRecreating_.store(false);
+
+    context_.swapchain           = swapchainManager_->getSwapchain();
+    context_.swapchainImageFormat = swapchainManager_->getSwapchainImageFormat();
+    context_.swapchainExtent     = swapchainManager_->getSwapchainExtent();
+    context_.swapchainImages     = swapchainManager_->getSwapchainImages();
+    context_.swapchainImageViews = swapchainManager_->getSwapchainImageViews();
+
+    width_  = static_cast<int>(context_.swapchainExtent.width);
+    height_ = static_cast<int>(context_.swapchainExtent.height);
 
     recreateRTOutputImage();
     recreateAccumulationImage();
     createFramebuffers();
+
     descriptorsUpdated_ = false;
     updateRTDescriptors();
 
     resetAccumulation_ = true;
-    resizePending_ = false;
+
     LOG_INFO_CAT("Renderer", "Resize applied: {}x{}", width_, height_);
 }
 
@@ -285,10 +288,7 @@ void VulkanRenderer::applyResize() {
 void VulkanRenderer::renderFrame(const Camera& camera) {
     auto frameStart = std::chrono::steady_clock::now();
 
-    if (resizePending_ && !swapchainRecreating_.load()) {
-        applyResize();
-    }
-
+    // No queued resize — everything is up-to-date
     if (swapchainRecreating_.load()) {
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
         return;

@@ -11,6 +11,8 @@
 #include <string>
 #include <sstream>
 #include <chrono>
+#include <thread>
+#include <format>
 #include "engine/logging.hpp"
 #include "engine/Vulkan/VulkanRenderer.hpp"
 #include "engine/SDL3/SDL3_init.hpp"
@@ -191,32 +193,12 @@ void Application::toggleFullscreen() {
     isMaximizedRef() = false;
 
     SDL_Window* win = sdl_->getWindow();
-    if (isFullscreenRef()) {
-        SDL_SetWindowFullscreen(win, true);
-        SDL_DisplayID display = SDL_GetDisplayForWindow(win);
-        const SDL_DisplayMode* dm = SDL_GetCurrentDisplayMode(display);
-        if (dm && dm->w > 0 && dm->h > 0) {
-            width_ = dm->w;
-            height_ = dm->h;
-        } else {
-            width_ = 1920;
-            height_ = 1080;
-        }
-        LOG_INFO_CAT("Application", "ENTERED FULLSCREEN: {}x{}", width_, height_);
-    } else {
-        SDL_SetWindowFullscreen(win, false);
-        int w, h;
-        SDL_GetWindowSize(win, &w, &h);
-        if (w > 0 && h > 0) {
-            width_ = w;
-            height_ = h;
-        }
-        LOG_INFO_CAT("Application", "EXITED FULLSCREEN: {}x{}", width_, height_);
-    }
+    SDL_SetWindowFullscreen(win, isFullscreenRef() ? true : false);
 
-    if (width_ > 0 && height_ > 0) {
-        renderer_->handleResize(width_, height_);
-        camera_->setAspectRatio(static_cast<float>(width_) / height_);
+    if (isFullscreenRef()) {
+        LOG_INFO_CAT("Application", "ENTERED FULLSCREEN (resize event pending)");
+    } else {
+        LOG_INFO_CAT("Application", "EXITED FULLSCREEN (resize event pending)");
     }
 }
 
@@ -227,20 +209,13 @@ void Application::toggleMaximize() {
     if (isFullscreenRef()) return;
 
     isMaximizedRef() = !isMaximizedRef();
+    SDL_Window* win = sdl_->getWindow();
     if (isMaximizedRef()) {
-        SDL_MaximizeWindow(sdl_->getWindow());
-        LOG_INFO_CAT("Application", "WINDOW MAXIMIZED (resize will follow)");
+        SDL_MaximizeWindow(win);
+        LOG_INFO_CAT("Application", "WINDOW MAXIMIZED (resize event pending)");
     } else {
-        SDL_RestoreWindow(sdl_->getWindow());
-        int w, h;
-        SDL_GetWindowSize(sdl_->getWindow(), &w, &h);
-        if (w > 0 && h > 0) {
-            width_ = w;
-            height_ = h;
-            renderer_->handleResize(width_, height_);
-            camera_->setAspectRatio(static_cast<float>(width_) / height_);
-        }
-        LOG_INFO_CAT("Application", "WINDOW RESTORED: {}x{}", width_, height_);
+        SDL_RestoreWindow(win);
+        LOG_INFO_CAT("Application", "WINDOW RESTORED (resize event pending)");
     }
 }
 
