@@ -214,12 +214,22 @@ void VulkanRenderer::cleanup() noexcept {
     queryReady_.fill(false);
     for (auto& pool : queryPools_) if (pool) vkDestroyQueryPool(context_.device, pool, nullptr);
     for (int i = 0; i < 2; ++i) {
-        if (rtOutputImages_[i]) vkDestroyImage(context_.device, rtOutputImages_[i], nullptr);
-        if (rtOutputMemories_[i]) vkFreeMemory(context_.device, rtOutputMemories_[i], nullptr);
-        if (rtOutputViews_[i]) vkDestroyImageView(context_.device, rtOutputViews_[i], nullptr);
-        if (accumImages_[i]) vkDestroyImage(context_.device, accumImages_[i], nullptr);
-        if (accumMemories_[i]) vkFreeMemory(context_.device, accumMemories_[i], nullptr);
-        if (accumViews_[i]) vkDestroyImageView(context_.device, accumViews_[i], nullptr);
+        if (rtOutputImages_[i]) {
+            vkDestroyImageView(context_.device, rtOutputViews_[i], nullptr);
+            vkFreeMemory(context_.device, rtOutputMemories_[i], nullptr);
+            vkDestroyImage(context_.device, rtOutputImages_[i], nullptr);
+            rtOutputImages_[i] = VK_NULL_HANDLE;
+            rtOutputMemories_[i] = VK_NULL_HANDLE;
+            rtOutputViews_[i] = VK_NULL_HANDLE;
+        }
+        if (accumImages_[i]) {
+            vkDestroyImageView(context_.device, accumViews_[i], nullptr);
+            vkFreeMemory(context_.device, accumMemories_[i], nullptr);
+            vkDestroyImage(context_.device, accumImages_[i], nullptr);
+            accumImages_[i] = VK_NULL_HANDLE;
+            accumMemories_[i] = VK_NULL_HANDLE;
+            accumViews_[i] = VK_NULL_HANDLE;
+        }
     }
     LOG_INFO_CAT("Renderer", "=== Cleanup Done ===");
 }
@@ -251,10 +261,12 @@ void VulkanRenderer::applyResize() {
     width_ = pendingWidth_;
     height_ = pendingHeight_;
 
+    swapchainRecreating_.store(true);
     swapchainManager_->handleResize(width_, height_);
     context_.swapchainExtent = swapchainManager_->getSwapchainExtent();
     width_ = static_cast<int>(context_.swapchainExtent.width);
     height_ = static_cast<int>(context_.swapchainExtent.height);
+    swapchainRecreating_.store(false);
 
     recreateRTOutputImage();
     recreateAccumulationImage();
@@ -582,9 +594,23 @@ void VulkanRenderer::createAccumulationImage() {
 // -----------------------------------------------------------------------------
 void VulkanRenderer::recreateRTOutputImage() {
     LOG_INFO_CAT("Renderer", "Recreating RT output image (double-buffered flip)...");
-    rtOutputImage_.reset(); rtOutputImageMemory_.reset(); rtOutputImageView_.reset();
-    createRTOutputImage();
     uint32_t next = (currentRTIndex_ + 1) % 2;
+
+    // Destroy resources in target slot to avoid use-after-free
+    if (rtOutputImages_[next] != VK_NULL_HANDLE) {
+        vkDestroyImageView(context_.device, rtOutputViews_[next], nullptr);
+        vkFreeMemory(context_.device, rtOutputMemories_[next], nullptr);
+        vkDestroyImage(context_.device, rtOutputImages_[next], nullptr);
+        rtOutputImages_[next] = VK_NULL_HANDLE;
+        rtOutputMemories_[next] = VK_NULL_HANDLE;
+        rtOutputViews_[next] = VK_NULL_HANDLE;
+        LOG_DEBUG_CAT("Renderer", "Destroyed old RT resources in slot {}", next);
+    }
+
+    // Now safe to reset temp unique_ptr
+    rtOutputImage_.reset(); rtOutputImageMemory_.reset(); rtOutputImageView_.reset();
+
+    createRTOutputImage();
     rtOutputImages_[next] = rtOutputImage_.get();
     rtOutputMemories_[next] = rtOutputImageMemory_.get();
     rtOutputViews_[next] = rtOutputImageView_.get();
@@ -597,9 +623,22 @@ void VulkanRenderer::recreateRTOutputImage() {
 // -----------------------------------------------------------------------------
 void VulkanRenderer::recreateAccumulationImage() {
     LOG_INFO_CAT("Renderer", "Recreating accumulation image (double-buffered flip)...");
-    accumImage_.reset(); accumImageMemory_.reset(); accumImageView_.reset();
-    createAccumulationImage();
     uint32_t next = (currentAccumIndex_ + 1) % 2;
+
+    // Destroy resources in target slot
+    if (accumImages_[next] != VK_NULL_HANDLE) {
+        vkDestroyImageView(context_.device, accumViews_[next], nullptr);
+        vkFreeMemory(context_.device, accumMemories_[next], nullptr);
+        vkDestroyImage(context_.device, accumImages_[next], nullptr);
+        accumImages_[next] = VK_NULL_HANDLE;
+        accumMemories_[next] = VK_NULL_HANDLE;
+        accumViews_[next] = VK_NULL_HANDLE;
+        LOG_DEBUG_CAT("Renderer", "Destroyed old accum resources in slot {}", next);
+    }
+
+    accumImage_.reset(); accumImageMemory_.reset(); accumImageView_.reset();
+
+    createAccumulationImage();
     accumImages_[next] = accumImage_.get();
     accumMemories_[next] = accumImageMemory_.get();
     accumViews_[next] = accumImageView_.get();

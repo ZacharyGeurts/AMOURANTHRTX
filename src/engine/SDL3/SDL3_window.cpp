@@ -205,27 +205,23 @@ void toggleFullscreen(SDLWindowPtr& window, VulkanRTX::VulkanRenderer& renderer)
         return;
     }
 
-    bool isFullscreen = (SDL_GetWindowFlags(win) & SDL_WINDOW_FULLSCREEN) != 0;
+    Uint32 currentFlags = SDL_GetWindowFlags(win);
+    bool isFullscreen = (currentFlags & SDL_WINDOW_FULLSCREEN) != 0;
     LOG_INFO("Window", "Toggling fullscreen: current={}", isFullscreen ? "yes" : "no", std::source_location::current());
 
-    // Ensure Vulkan device is idle
-    VkDevice device = renderer.getDevice();
-    if (device != VK_NULL_HANDLE) {
-        LOG_DEBUG("Window", "Calling vkDeviceWaitIdle before fullscreen toggle", std::source_location::current());
-        vkDeviceWaitIdle(device);
-    }
-
-    // Toggle fullscreen (borderless windowed fullscreen)
-    bool success = SDL_SetWindowFullscreen(win, !isFullscreen) == 0;
+    // Toggle between windowed (0) and borderless fullscreen (SDL_WINDOW_FULLSCREEN_DESKTOP)
+    // Avoid exclusive fullscreen to prevent freezes on Windows
+    Uint32 targetMode = isFullscreen ? 0 : SDL_WINDOW_FULLSCREEN;
+    bool success = SDL_SetWindowFullscreen(win, targetMode) == 0;
     if (!success) {
         LOG_ERROR("Window", "SDL_SetWindowFullscreen failed: {}", SDL_GetError(), std::source_location::current());
         return;
     }
 
-    // Wait for the change to take effect
-    SDL_Delay(100); // Small delay to allow OS to update state
+    // Sync to ensure changes take effect (minimal block)
+    SDL_SyncWindow(win);
 
-    // Get new drawable size
+    // Query new size immediately (resize event will also fire asynchronously)
     int newW = 0, newH = 0;
     if (!SDL_GetWindowSizeInPixels(win, &newW, &newH)) {
         LOG_ERROR("Window", "Failed to get window size in pixels after fullscreen toggle: {}", SDL_GetError(), std::source_location::current());
@@ -239,8 +235,9 @@ void toggleFullscreen(SDLWindowPtr& window, VulkanRTX::VulkanRenderer& renderer)
         newH = 1;
     }
 
+    // Queue resize for next render frame (non-blocking)
     renderer.handleResize(newW, newH);
-    LOG_INFO("Window", "Fullscreen toggled to size {}x{}", newW, newH, std::source_location::current());
+    LOG_INFO("Window", "Fullscreen toggled (borderless), queued resize to {}x{}", newW, newH, std::source_location::current());
 }
 
 } // namespace SDL3Initializer

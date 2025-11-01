@@ -123,13 +123,13 @@ private:
     VkImageView         envMapImageView_          = VK_NULL_HANDLE;
     VkSampler           envMapSampler_            = VK_NULL_HANDLE;
 
-    // DOUBLE-BUFFERED RT OUTPUT
+    // FIXED-SIZE DOUBLE-BUFFERED RT OUTPUT (max resolution)
     std::array<VkImage,        2> rtOutputImages_   = {};
     std::array<VkDeviceMemory, 2> rtOutputMemories_ = {};
     std::array<VkImageView,    2> rtOutputViews_    = {};
     uint32_t currentRTIndex_ = 0;
 
-    // DOUBLE-BUFFERED ACCUMULATION
+    // FIXED-SIZE DOUBLE-BUFFERED ACCUMULATION (max resolution)
     std::array<VkImage,        2> accumImages_   = {};
     std::array<VkDeviceMemory, 2> accumMemories_ = {};
     std::array<VkImageView,    2> accumViews_    = {};

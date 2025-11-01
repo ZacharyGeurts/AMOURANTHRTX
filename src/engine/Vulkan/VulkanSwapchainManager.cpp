@@ -9,6 +9,7 @@
 #include <vector>
 #include <format>
 #include <limits>
+#include <array>
 
 namespace VulkanRTX {
 
@@ -86,6 +87,23 @@ VulkanSwapchainManager::~VulkanSwapchainManager()
 }
 
 // ---------------------------------------------------------------------------
+//  Wait for In-Flight Frames (Non-Blocking Alternative to vkDeviceWaitIdle)
+// ---------------------------------------------------------------------------
+void VulkanSwapchainManager::waitForInFlightFrames() const {
+    std::array<VkFence, MAX_FRAMES_IN_FLIGHT> fences;
+    uint32_t fenceCount = 0;
+    for (uint32_t i = 0; i < maxFramesInFlight_; ++i) {
+        fences[fenceCount++] = inFlightFences_[i];
+    }
+    if (fenceCount > 0) {
+        VK_CHECK(vkWaitForFences(context_.device, fenceCount, fences.data(), VK_TRUE, UINT64_MAX));
+        for (uint32_t i = 0; i < fenceCount; ++i) {
+            VK_CHECK(vkResetFences(context_.device, 1, &inFlightFences_[i]));
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 //  Initialize Swapchain
 // ---------------------------------------------------------------------------
 void VulkanSwapchainManager::initializeSwapchain(int width, int height)
@@ -95,7 +113,8 @@ void VulkanSwapchainManager::initializeSwapchain(int width, int height)
     if (context_.surface == VK_NULL_HANDLE)  throw std::runtime_error("Null surface");
     if (width <= 0 || height <= 0)          throw std::runtime_error("Invalid window dimensions");
 
-    vkDeviceWaitIdle(context_.device);
+    // Wait only for in-flight frames, not full idle (faster for init)
+    waitForInFlightFrames();
 
     VkSurfaceCapabilitiesKHR caps{};
     VK_CHECK(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(context_.physicalDevice, context_.surface, &caps));
@@ -247,7 +266,9 @@ void VulkanSwapchainManager::handleResize(int width, int height)
     LOG_INFO_CAT("Swapchain", "RESIZING SWAPCHAIN: {}x{} → {}x{}", 
                  swapchainExtent_.width, swapchainExtent_.height, width, height);
 
-    vkDeviceWaitIdle(context_.device);
+    // Wait only for in-flight frames (non-blocking, faster than full idle)
+    waitForInFlightFrames();
+
     cleanupSwapchain();
     initializeSwapchain(width, height);
 }
@@ -259,7 +280,8 @@ void VulkanSwapchainManager::cleanupSwapchain()
 {
     if (context_.device == VK_NULL_HANDLE) return;
 
-    vkDeviceWaitIdle(context_.device);
+    // Wait only for in-flight frames (non-blocking)
+    waitForInFlightFrames();
 
     // Destroy image views
     Dispose::destroyImageViews(context_.device, swapchainImageViews_);

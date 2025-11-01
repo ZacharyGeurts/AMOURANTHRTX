@@ -35,6 +35,8 @@ public:
     uint32_t getMaxFramesInFlight() const { return maxFramesInFlight_; }
 
 private:
+    void waitForInFlightFrames() const;
+
     Vulkan::Context& context_;
     VkSwapchainKHR swapchain_;
     VkFormat swapchainImageFormat_;
