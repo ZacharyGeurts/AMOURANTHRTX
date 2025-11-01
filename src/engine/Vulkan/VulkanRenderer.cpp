@@ -239,7 +239,7 @@ void VulkanRenderer::handleResize(int width, int height) {
     if (width <= 0 || height <= 0) return;
     if (width == width_ && height == height_) return;
 
-    LOG_INFO_CAT("Renderer", "Resize requested: {}x{} → {}x{}", width_, height_, width, height);
+    LOG_INFO_CAT("Renderer", "Resize requested: {}x{} to {}x{}", width_, height_, width, height);
     applyResize(width, height);
 }
 
@@ -288,7 +288,6 @@ void VulkanRenderer::applyResize(int newWidth, int newHeight) {
 void VulkanRenderer::renderFrame(const Camera& camera) {
     auto frameStart = std::chrono::steady_clock::now();
 
-    // No queued resize — everything is up-to-date
     if (swapchainRecreating_.load()) {
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
         return;
@@ -299,7 +298,7 @@ void VulkanRenderer::renderFrame(const Camera& camera) {
                                             frames_[currentFrame_].imageAvailableSemaphore, VK_NULL_HANDLE, &imageIndex);
 
     if (result == VK_ERROR_OUT_OF_DATE_KHR) {
-        LOG_INFO_CAT("Renderer", "Swapchain out-of-date during acquire → recreating");
+        LOG_INFO_CAT("Renderer", "Swapchain out-of-date during acquire to recreating");
         handleResize(width_, height_);
         return;
     } else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
@@ -331,8 +330,11 @@ void VulkanRenderer::renderFrame(const Camera& camera) {
     };
     vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, 0, 0, nullptr, 0, nullptr, 1, &rtWriteBarrier);
 
+    // FIXED: Use pipeline manager layout — guaranteed valid
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, rtPipeline_);
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, rtPipelineLayout_, 0, 1, &descriptorSets_[currentFrame_], 0, nullptr);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
+                            pipelineManager_->getRayTracingPipelineLayout(),
+                            0, 1, &descriptorSets_[currentFrame_], 0, nullptr);
 
     const auto& sbt = pipelineManager_->getShaderBindingTable();
     context_.vkCmdTraceRaysKHR(cmd,
@@ -420,7 +422,7 @@ void VulkanRenderer::renderFrame(const Camera& camera) {
     result = vkQueuePresentKHR(context_.graphicsQueue, &presentInfo);
 
     if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
-        LOG_INFO_CAT("Renderer", "Swapchain out-of-date on present → recreating");
+        LOG_INFO_CAT("Renderer", "Swapchain out-of-date on present to recreating");
         handleResize(width_, height_);
     } else if (result != VK_SUCCESS) {
         LOG_ERROR_CAT("Renderer", "Failed to present: {}", static_cast<int>(result));
@@ -596,7 +598,6 @@ void VulkanRenderer::recreateRTOutputImage() {
     LOG_INFO_CAT("Renderer", "Recreating RT output image (double-buffered flip)...");
     uint32_t next = (currentRTIndex_ + 1) % 2;
 
-    // Destroy resources in target slot to avoid use-after-free
     if (rtOutputImages_[next] != VK_NULL_HANDLE) {
         vkDestroyImageView(context_.device, rtOutputViews_[next], nullptr);
         vkFreeMemory(context_.device, rtOutputMemories_[next], nullptr);
@@ -607,7 +608,6 @@ void VulkanRenderer::recreateRTOutputImage() {
         LOG_DEBUG_CAT("Renderer", "Destroyed old RT resources in slot {}", next);
     }
 
-    // Now safe to reset temp unique_ptr
     rtOutputImage_.reset(); rtOutputImageMemory_.reset(); rtOutputImageView_.reset();
 
     createRTOutputImage();
@@ -625,7 +625,6 @@ void VulkanRenderer::recreateAccumulationImage() {
     LOG_INFO_CAT("Renderer", "Recreating accumulation image (double-buffered flip)...");
     uint32_t next = (currentAccumIndex_ + 1) % 2;
 
-    // Destroy resources in target slot
     if (accumImages_[next] != VK_NULL_HANDLE) {
         vkDestroyImageView(context_.device, accumViews_[next], nullptr);
         vkFreeMemory(context_.device, accumMemories_[next], nullptr);
@@ -682,16 +681,14 @@ void VulkanRenderer::createCommandBuffers() {
     LOG_INFO_CAT("Renderer", "Command buffers allocated.");
 }
 
-// -----------------------------------------------------------------------------
-// CREATE DESCRIPTOR POOL
-// -----------------------------------------------------------------------------
 void VulkanRenderer::createDescriptorPool() {
-    std::array<VkDescriptorPoolSize, 5> poolSizes{{
+    std::array<VkDescriptorPoolSize, 6> poolSizes{{
         { VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, MAX_FRAMES_IN_FLIGHT },
-        { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 6 * MAX_FRAMES_IN_FLIGHT },
-        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, MAX_FRAMES_IN_FLIGHT },
-        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 54 * MAX_FRAMES_IN_FLIGHT },
-        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 6 * MAX_FRAMES_IN_FLIGHT }
+        { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,               2 * MAX_FRAMES_IN_FLIGHT },  // output + accum
+        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,              MAX_FRAMES_IN_FLIGHT },
+        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,             54 * MAX_FRAMES_IN_FLIGHT },
+        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,      6 * MAX_FRAMES_IN_FLIGHT },
+        { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,               2 * MAX_FRAMES_IN_FLIGHT }   // dummy for bindings 8 & 9
     }};
 
     VkDescriptorPoolCreateInfo info{
@@ -765,7 +762,7 @@ void VulkanRenderer::updateUniformBuffer(uint32_t frameIndex, const Camera& came
 }
 
 // -----------------------------------------------------------------------------
-// UPDATE RT DESCRIPTORS
+// UPDATE RT DESCRIPTORS – FINAL: FULL 0–10 WITH SAFE DUMMY FOR 8/9
 // -----------------------------------------------------------------------------
 void VulkanRenderer::updateRTDescriptors() {
     if (tlasHandle_ == VK_NULL_HANDLE) {
@@ -778,7 +775,7 @@ void VulkanRenderer::updateRTDescriptors() {
     }
 
     LOG_INFO_CAT("Renderer", "Updating RT descriptors for {} frames...", MAX_FRAMES_IN_FLIGHT);
-    const uint32_t totalWrites = MAX_FRAMES_IN_FLIGHT * 12;
+    const uint32_t totalWrites = MAX_FRAMES_IN_FLIGHT * 11;  // 11 bindings: 0–10
 
     std::vector<VkWriteDescriptorSetAccelerationStructureKHR> asWrites(MAX_FRAMES_IN_FLIGHT);
     std::vector<VkDescriptorImageInfo> outputInfos(MAX_FRAMES_IN_FLIGHT), accumInfos(MAX_FRAMES_IN_FLIGHT), envMapInfos(MAX_FRAMES_IN_FLIGHT);
@@ -786,39 +783,46 @@ void VulkanRenderer::updateRTDescriptors() {
     std::vector<VkWriteDescriptorSet> writes(totalWrites);
 
     for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
-        uint32_t base = i * 12;
+        uint32_t base = i * 11;
 
+        // Binding 0: TLAS
         asWrites[i] = { .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR, .accelerationStructureCount = 1, .pAccelerationStructures = &tlasHandle_ };
         writes[base + 0] = { .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .pNext = &asWrites[i], .dstSet = descriptorSets_[i], .dstBinding = 0, .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR };
 
+        // Binding 1: RT output
         outputInfos[i] = { .imageView = rtOutputViews_[currentRTIndex_], .imageLayout = VK_IMAGE_LAYOUT_GENERAL };
         writes[base + 1] = { .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = descriptorSets_[i], .dstBinding = 1, .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, .pImageInfo = &outputInfos[i] };
 
+        // Binding 2: Uniform
         uniformInfos[i] = { .buffer = context_.uniformBuffers[i], .range = VK_WHOLE_SIZE };
         writes[base + 2] = { .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = descriptorSets_[i], .dstBinding = 2, .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, .pBufferInfo = &uniformInfos[i] };
 
+        // Binding 3: Materials
         materialInfos[i] = { .buffer = materialBuffers_[i], .range = VK_WHOLE_SIZE };
         writes[base + 3] = { .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = descriptorSets_[i], .dstBinding = 3, .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, .pBufferInfo = &materialInfos[i] };
 
+        // Binding 4: Dimensions
         dimensionInfos[i] = { .buffer = dimensionBuffers_[i], .range = VK_WHOLE_SIZE };
         writes[base + 4] = { .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = descriptorSets_[i], .dstBinding = 4, .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, .pBufferInfo = &dimensionInfos[i] };
 
+        // Bindings 5–7: Textures (alpha, env, density)
         envMapInfos[i] = { .sampler = envMapSampler_, .imageView = envMapImageView_, .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
         for (int b = 5; b <= 7; ++b) {
             writes[base + b] = { .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = descriptorSets_[i], .dstBinding = static_cast<uint32_t>(b), .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .pImageInfo = &envMapInfos[i] };
         }
 
-        writes[base + 8] = { .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = descriptorSets_[i], .dstBinding = 8, .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, .pImageInfo = &outputInfos[i] };
-        writes[base + 9] = { .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = descriptorSets_[i], .dstBinding = 9, .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, .pImageInfo = &outputInfos[i] };
+        // Bindings 8–9: G-Depth & G-Normal (unused → dummy with envMap)
+        writes[base + 8] = { .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = descriptorSets_[i], .dstBinding = 8, .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, .pImageInfo = &envMapInfos[i] };
+        writes[base + 9] = { .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = descriptorSets_[i], .dstBinding = 9, .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, .pImageInfo = &envMapInfos[i] };
 
+        // Binding 10: Accumulation
         accumInfos[i] = { .imageView = accumViews_[currentAccumIndex_], .imageLayout = VK_IMAGE_LAYOUT_GENERAL };
         writes[base + 10] = { .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = descriptorSets_[i], .dstBinding = 10, .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, .pImageInfo = &accumInfos[i] };
-        writes[base + 11] = { .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = descriptorSets_[i], .dstBinding = 11, .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, .pImageInfo = &accumInfos[i] };
     }
 
     vkUpdateDescriptorSets(context_.device, totalWrites, writes.data(), 0, nullptr);
     descriptorsUpdated_ = true;
-    LOG_INFO_CAT("Renderer", "RT descriptors updated: {} writes", totalWrites);
+    LOG_INFO_CAT("Renderer", "RT descriptors updated: {} writes (11 bindings × {} frames)", totalWrites, MAX_FRAMES_IN_FLIGHT);
 }
 
 // -----------------------------------------------------------------------------
