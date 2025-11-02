@@ -1,21 +1,23 @@
 // include/engine/Vulkan/VulkanCore.hpp
-// AMOURANTH RTX Engine, October 2025 - Core Vulkan structures and utilities.
+// AMOURANTH RTX Engine, November 2025 - Core Vulkan structures and utilities.
 // Dependencies: Vulkan 1.3+, GLM, logging.hpp.
 // Supported platforms: Linux, Windows.
 // Zachary Geurts 2025
 // FINAL: Context owns VulkanResourceManager → SINGLE LIFETIME → NO DOUBLE-FREE
-//        ADDED: width, height, swapchainManager (namespace VulkanRTX)
+//        ADDED: hasX() for RAII safety
+//        ADDED: contextDevicePtr_ for safe cleanup
 //        FIXED: Member order → NO -Wreorder
-//        BETA: All ray-tracing extensions come from <vulkan/vulkan_beta.h>
-//        FIXED: ~Context() adds vkDeviceWaitIdle before resourceManager.cleanup (prevents segfault)
+//        BETA: All ray-tracing extensions from <vulkan/vulkan_beta.h>
+//        FIXED: ~Context() → vkDeviceWaitIdle + resourceManager.cleanup
+//        ADDED: MUTABLE getX() accessors for cleanupAll()
 
 #pragma once
 #ifndef VULKAN_CORE_HPP
 #define VULKAN_CORE_HPP
 
-#define VK_ENABLE_BETA_EXTENSIONS          // <-- BETA extensions enabled
+#define VK_ENABLE_BETA_EXTENSIONS
 #include <vulkan/vulkan.h>
-#include <vulkan/vulkan_beta.h>            // <-- contains KHR_ray_tracing_pipeline, etc.
+#include <vulkan/vulkan_beta.h>
 
 #include <vector>
 #include <string>
@@ -26,12 +28,10 @@
 #include "engine/logging.hpp"
 #include <unordered_map>
 #include <memory>
+#include <algorithm>
 
-// ===================================================================
-// SDL3 ONLY: Force correct headers + safety guard
-// ===================================================================
-#include <SDL3/SDL.h>               // Main SDL3 header
-#include <SDL3/SDL_vulkan.h>        // Vulkan integration (returns int, not SDL_bool)
+#include <SDL3/SDL.h>
+#include <SDL3/SDL_vulkan.h>
 
 // ===================================================================
 // Forward declarations
@@ -58,69 +58,32 @@ class VulkanResourceManager {
     std::vector<VkPipelineLayout> pipelineLayouts_;
     std::vector<VkPipeline> pipelines_;
     std::vector<VkShaderModule> shaderModules_;
+    std::vector<VkDescriptorSet> descriptorSets_;
     std::unordered_map<std::string, VkPipeline> pipelineMap_;
+
     VkDevice device_ = VK_NULL_HANDLE;
     VkPhysicalDevice physicalDevice_ = VK_NULL_HANDLE;
     VulkanBufferManager* bufferManager_ = nullptr;
+    const VkDevice* contextDevicePtr_ = nullptr;
+
+    // NEW: KHR function pointer for cleanup
+    PFN_vkDestroyAccelerationStructureKHR vkDestroyAccelerationStructureKHR_ = nullptr;
 
 public:
     VulkanResourceManager() = default;
     VulkanResourceManager(const VulkanResourceManager&) = delete;
     VulkanResourceManager& operator=(const VulkanResourceManager&) = delete;
 
-    VulkanResourceManager(VulkanResourceManager&& other) noexcept
-        : buffers_(std::move(other.buffers_))
-        , memories_(std::move(other.memories_))
-        , imageViews_(std::move(other.imageViews_))
-        , images_(std::move(other.images_))
-        , accelerationStructures_(std::move(other.accelerationStructures_))
-        , descriptorPools_(std::move(other.descriptorPools_))
-        , commandPools_(std::move(other.commandPools_))
-        , renderPasses_(std::move(other.renderPasses_))
-        , descriptorSetLayouts_(std::move(other.descriptorSetLayouts_))
-        , pipelineLayouts_(std::move(other.pipelineLayouts_))
-        , pipelines_(std::move(other.pipelines_))
-        , shaderModules_(std::move(other.shaderModules_))
-        , pipelineMap_(std::move(other.pipelineMap_))
-        , device_(other.device_)
-        , physicalDevice_(other.physicalDevice_)
-        , bufferManager_(other.bufferManager_)
-    {
-        other.device_ = VK_NULL_HANDLE;
-        other.physicalDevice_ = VK_NULL_HANDLE;
-        other.bufferManager_ = nullptr;
-    }
-
-    VulkanResourceManager& operator=(VulkanResourceManager&& other) noexcept {
-        if (this != &other) {
-            cleanup(device_);
-            buffers_ = std::move(other.buffers_);
-            memories_ = std::move(other.memories_);
-            imageViews_ = std::move(other.imageViews_);
-            images_ = std::move(other.images_);
-            accelerationStructures_ = std::move(other.accelerationStructures_);
-            descriptorPools_ = std::move(other.descriptorPools_);
-            commandPools_ = std::move(other.commandPools_);
-            renderPasses_ = std::move(other.renderPasses_);
-            descriptorSetLayouts_ = std::move(other.descriptorSetLayouts_);
-            pipelineLayouts_ = std::move(other.pipelineLayouts_);
-            pipelines_ = std::move(other.pipelines_);
-            shaderModules_ = std::move(other.shaderModules_);
-            pipelineMap_ = std::move(other.pipelineMap_);
-            device_ = other.device_;
-            physicalDevice_ = other.physicalDevice_;
-            bufferManager_ = other.bufferManager_;
-
-            other.device_ = VK_NULL_HANDLE;
-            other.physicalDevice_ = VK_NULL_HANDLE;
-            other.bufferManager_ = nullptr;
-        }
-        return *this;
-    }
-
+    VulkanResourceManager(VulkanResourceManager&& other) noexcept;
+    VulkanResourceManager& operator=(VulkanResourceManager&& other) noexcept;
     ~VulkanResourceManager();
 
-    // === Add / Remove ===
+    // NEW: Set KHR function
+    void setAccelerationStructureDestroyFunc(PFN_vkDestroyAccelerationStructureKHR func) {
+        vkDestroyAccelerationStructureKHR_ = func;
+    }
+
+    // === Add ===
     void addBuffer(VkBuffer buffer) {
         if (buffer != VK_NULL_HANDLE) {
             buffers_.push_back(buffer);
@@ -155,6 +118,12 @@ public:
         if (descriptorPool != VK_NULL_HANDLE) {
             descriptorPools_.push_back(descriptorPool);
             LOG_DEBUG(std::format("Added descriptor pool: {:p}", static_cast<void*>(descriptorPool)));
+        }
+    }
+    void addDescriptorSet(VkDescriptorSet set) {
+        if (set != VK_NULL_HANDLE) {
+            descriptorSets_.push_back(set);
+            LOG_DEBUG(std::format("Added descriptor set: {:p}", static_cast<void*>(set)));
         }
     }
     void addCommandPool(VkCommandPool commandPool) {
@@ -202,8 +171,6 @@ public:
         if (it != buffers_.end()) {
             buffers_.erase(it);
             LOG_DEBUG(std::format("Removed buffer: {:p}", static_cast<void*>(buffer)));
-        } else {
-            LOG_WARNING(std::format("Attempted to remove non-existent buffer: {:p}", static_cast<void*>(buffer)));
         }
     }
     void removeMemory(VkDeviceMemory memory) {
@@ -212,8 +179,6 @@ public:
         if (it != memories_.end()) {
             memories_.erase(it);
             LOG_DEBUG(std::format("Removed memory: {:p}", static_cast<void*>(memory)));
-        } else {
-            LOG_WARNING(std::format("Attempted to remove non-existent memory: {:p}", static_cast<void*>(memory)));
         }
     }
     void removeImageView(VkImageView view) {
@@ -222,8 +187,6 @@ public:
         if (it != imageViews_.end()) {
             imageViews_.erase(it);
             LOG_DEBUG(std::format("Removed image view: {:p}", static_cast<void*>(view)));
-        } else {
-            LOG_WARNING(std::format("Attempted to remove non-existent image view: {:p}", static_cast<void*>(view)));
         }
     }
     void removeImage(VkImage image) {
@@ -232,110 +195,108 @@ public:
         if (it != images_.end()) {
             images_.erase(it);
             LOG_DEBUG(std::format("Removed image: {:p}", static_cast<void*>(image)));
-        } else {
-            LOG_WARNING(std::format("Attempted to remove non-existent image: {:p}", static_cast<void*>(image)));
         }
     }
     void removeAccelerationStructure(VkAccelerationStructureKHR as) {
-        if (as != VK_NULL_HANDLE) {
-            auto it = std::find(accelerationStructures_.begin(), accelerationStructures_.end(), as);
-            if (it != accelerationStructures_.end()) {
-                accelerationStructures_.erase(it);
-                LOG_DEBUG(std::format("Removed acceleration structure: {:p}", static_cast<void*>(as)));
-            } else {
-                LOG_WARNING(std::format("Attempted to remove non-existent acceleration structure: {:p}", static_cast<void*>(as)));
-            }
+        if (as == VK_NULL_HANDLE) return;
+        auto it = std::find(accelerationStructures_.begin(), accelerationStructures_.end(), as);
+        if (it != accelerationStructures_.end()) {
+            accelerationStructures_.erase(it);
+            LOG_DEBUG(std::format("Removed acceleration structure: {:p}", static_cast<void*>(as)));
         }
     }
     void removeDescriptorPool(VkDescriptorPool descriptorPool) {
-        if (descriptorPool != VK_NULL_HANDLE) {
-            auto it = std::find(descriptorPools_.begin(), descriptorPools_.end(), descriptorPool);
-            if (it != descriptorPools_.end()) {
-                descriptorPools_.erase(it);
-                LOG_DEBUG(std::format("Removed descriptor pool: {:p}", static_cast<void*>(descriptorPool)));
-            } else {
-                LOG_WARNING(std::format("Attempted to remove non-existent descriptor pool: {:p}", static_cast<void*>(descriptorPool)));
-            }
+        if (descriptorPool == VK_NULL_HANDLE) return;
+        auto it = std::find(descriptorPools_.begin(), descriptorPools_.end(), descriptorPool);
+        if (it != descriptorPools_.end()) {
+            descriptorPools_.erase(it);
+            LOG_DEBUG(std::format("Removed descriptor pool: {:p}", static_cast<void*>(descriptorPool)));
+        }
+    }
+    void removeDescriptorSet(VkDescriptorSet set) {
+        if (set == VK_NULL_HANDLE) return;
+        auto it = std::find(descriptorSets_.begin(), descriptorSets_.end(), set);
+        if (it != descriptorSets_.end()) {
+            descriptorSets_.erase(it);
+            LOG_DEBUG(std::format("Removed descriptor set: {:p}", static_cast<void*>(set)));
         }
     }
     void removeCommandPool(VkCommandPool commandPool) {
-        if (commandPool != VK_NULL_HANDLE) {
-            auto it = std::find(commandPools_.begin(), commandPools_.end(), commandPool);
-            if (it != commandPools_.end()) {
-                commandPools_.erase(it);
-                LOG_DEBUG(std::format("Removed command pool: {:p}", static_cast<void*>(commandPool)));
-            } else {
-                LOG_WARNING(std::format("Attempted to remove non-existent command pool: {:p}", static_cast<void*>(commandPool)));
-            }
+        if (commandPool == VK_NULL_HANDLE) return;
+        auto it = std::find(commandPools_.begin(), commandPools_.end(), commandPool);
+        if (it != commandPools_.end()) {
+            commandPools_.erase(it);
+            LOG_DEBUG(std::format("Removed command pool: {:p}", static_cast<void*>(commandPool)));
         }
     }
     void removeRenderPass(VkRenderPass renderPass) {
-        if (renderPass != VK_NULL_HANDLE) {
-            auto it = std::find(renderPasses_.begin(), renderPasses_.end(), renderPass);
-            if (it != renderPasses_.end()) {
-                renderPasses_.erase(it);
-                LOG_DEBUG(std::format("Removed render pass: {:p}", static_cast<void*>(renderPass)));
-            } else {
-                LOG_WARNING(std::format("Attempted to remove non-existent render pass: {:p}", static_cast<void*>(renderPass)));
-            }
+        if (renderPass == VK_NULL_HANDLE) return;
+        auto it = std::find(renderPasses_.begin(), renderPasses_.end(), renderPass);
+        if (it != renderPasses_.end()) {
+            renderPasses_.erase(it);
+            LOG_DEBUG(std::format("Removed render pass: {:p}", static_cast<void*>(renderPass)));
         }
     }
     void removeDescriptorSetLayout(VkDescriptorSetLayout layout) {
-        if (layout != VK_NULL_HANDLE) {
-            auto it = std::find(descriptorSetLayouts_.begin(), descriptorSetLayouts_.end(), layout);
-            if (it != descriptorSetLayouts_.end()) {
-                descriptorSetLayouts_.erase(it);
-                LOG_DEBUG(std::format("Removed descriptor set layout: {:p}", static_cast<void*>(layout)));
-            } else {
-                LOG_WARNING(std::format("Attempted to remove non-existent descriptor set layout: {:p}", static_cast<void*>(layout)));
-            }
+        if (layout == VK_NULL_HANDLE) return;
+        auto it = std::find(descriptorSetLayouts_.begin(), descriptorSetLayouts_.end(), layout);
+        if (it != descriptorSetLayouts_.end()) {
+            descriptorSetLayouts_.erase(it);
+            LOG_DEBUG(std::format("Removed descriptor set layout: {:p}", static_cast<void*>(layout)));
         }
     }
     void removePipelineLayout(VkPipelineLayout layout) {
-        if (layout != VK_NULL_HANDLE) {
-            auto it = std::find(pipelineLayouts_.begin(), pipelineLayouts_.end(), layout);
-            if (it != pipelineLayouts_.end()) {
-                pipelineLayouts_.erase(it);
-                LOG_DEBUG(std::format("Removed pipeline layout: {:p}", static_cast<void*>(layout)));
-            } else {
-                LOG_WARNING(std::format("Attempted to remove non-existent pipeline layout: {:p}", static_cast<void*>(layout)));
-            }
+        if (layout == VK_NULL_HANDLE) return;
+        auto it = std::find(pipelineLayouts_.begin(), pipelineLayouts_.end(), layout);
+        if (it != pipelineLayouts_.end()) {
+            pipelineLayouts_.erase(it);
+            LOG_DEBUG(std::format("Removed pipeline layout: {:p}", static_cast<void*>(layout)));
         }
     }
     void removePipeline(VkPipeline pipeline) {
-        if (pipeline != VK_NULL_HANDLE) {
-            auto it = std::find(pipelines_.begin(), pipelines_.end(), pipeline);
-            if (it != pipelines_.end()) {
-                pipelines_.erase(it);
-                for (auto mapIt = pipelineMap_.begin(); mapIt != pipelineMap_.end(); ) {
-                    if (mapIt->second == pipeline) mapIt = pipelineMap_.erase(mapIt);
-                    else ++mapIt;
-                }
-                LOG_DEBUG(std::format("Removed pipeline: {:p}", static_cast<void*>(pipeline)));
-            } else {
-                LOG_WARNING(std::format("Attempted to remove non-existent pipeline: {:p}", static_cast<void*>(pipeline)));
+        if (pipeline == VK_NULL_HANDLE) return;
+        auto it = std::find(pipelines_.begin(), pipelines_.end(), pipeline);
+        if (it != pipelines_.end()) {
+            pipelines_.erase(it);
+            for (auto mapIt = pipelineMap_.begin(); mapIt != pipelineMap_.end(); ) {
+                if (mapIt->second == pipeline) mapIt = pipelineMap_.erase(mapIt);
+                else ++mapIt;
             }
+            LOG_DEBUG(std::format("Removed pipeline: {:p}", static_cast<void*>(pipeline)));
         }
     }
     void removeShaderModule(VkShaderModule module) {
-        if (module != VK_NULL_HANDLE) {
-            auto it = std::find(shaderModules_.begin(), shaderModules_.end(), module);
-            if (it != shaderModules_.end()) {
-                shaderModules_.erase(it);
-                LOG_DEBUG(std::format("Removed shader module: {:p}", static_cast<void*>(module)));
-            } else {
-                LOG_WARNING(std::format("Attempted to remove non-existent shader module: {:p}", static_cast<void*>(module)));
-            }
+        if (module == VK_NULL_HANDLE) return;
+        auto it = std::find(shaderModules_.begin(), shaderModules_.end(), module);
+        if (it != shaderModules_.end()) {
+            shaderModules_.erase(it);
+            LOG_DEBUG(std::format("Removed shader module: {:p}", static_cast<void*>(module)));
         }
     }
 
-    // === Getters ===
+    // === Has ===
+    bool hasBuffer(VkBuffer buffer) const { return std::find(buffers_.begin(), buffers_.end(), buffer) != buffers_.end(); }
+    bool hasMemory(VkDeviceMemory memory) const { return std::find(memories_.begin(), memories_.end(), memory) != memories_.end(); }
+    bool hasImageView(VkImageView view) const { return std::find(imageViews_.begin(), imageViews_.end(), view) != imageViews_.end(); }
+    bool hasImage(VkImage image) const { return std::find(images_.begin(), images_.end(), image) != images_.end(); }
+    bool hasAccelerationStructure(VkAccelerationStructureKHR as) const { return std::find(accelerationStructures_.begin(), accelerationStructures_.end(), as) != accelerationStructures_.end(); }
+    bool hasDescriptorPool(VkDescriptorPool pool) const { return std::find(descriptorPools_.begin(), descriptorPools_.end(), pool) != descriptorPools_.end(); }
+    bool hasDescriptorSet(VkDescriptorSet set) const { return std::find(descriptorSets_.begin(), descriptorSets_.end(), set) != descriptorSets_.end(); }
+    bool hasCommandPool(VkCommandPool pool) const { return std::find(commandPools_.begin(), commandPools_.end(), pool) != commandPools_.end(); }
+    bool hasRenderPass(VkRenderPass rp) const { return std::find(renderPasses_.begin(), renderPasses_.end(), rp) != renderPasses_.end(); }
+    bool hasDescriptorSetLayout(VkDescriptorSetLayout layout) const { return std::find(descriptorSetLayouts_.begin(), descriptorSetLayouts_.end(), layout) != descriptorSetLayouts_.end(); }
+    bool hasPipelineLayout(VkPipelineLayout layout) const { return std::find(pipelineLayouts_.begin(), pipelineLayouts_.end(), layout) != pipelineLayouts_.end(); }
+    bool hasPipeline(VkPipeline pipeline) const { return std::find(pipelines_.begin(), pipelines_.end(), pipeline) != pipelines_.end(); }
+    bool hasShaderModule(VkShaderModule module) const { return std::find(shaderModules_.begin(), shaderModules_.end(), module) != shaderModules_.end(); }
+
+    // === Getters (CONST) ===
     const std::vector<VkBuffer>& getBuffers() const { return buffers_; }
     const std::vector<VkDeviceMemory>& getMemories() const { return memories_; }
     const std::vector<VkImageView>& getImageViews() const { return imageViews_; }
     const std::vector<VkImage>& getImages() const { return images_; }
     const std::vector<VkAccelerationStructureKHR>& getAccelerationStructures() const { return accelerationStructures_; }
     const std::vector<VkDescriptorPool>& getDescriptorPools() const { return descriptorPools_; }
+    const std::vector<VkDescriptorSet>& getDescriptorSets() const { return descriptorSets_; }
     const std::vector<VkCommandPool>& getCommandPools() const { return commandPools_; }
     const std::vector<VkRenderPass>& getRenderPasses() const { return renderPasses_; }
     const std::vector<VkDescriptorSetLayout>& getDescriptorSetLayouts() const { return descriptorSetLayouts_; }
@@ -343,16 +304,32 @@ public:
     const std::vector<VkPipeline>& getPipelines() const { return pipelines_; }
     const std::vector<VkShaderModule>& getShaderModules() const { return shaderModules_; }
 
-    void setDevice(VkDevice newDevice, VkPhysicalDevice physicalDevice) {
+    // === MUTABLE GETTERS (FOR cleanupAll()) ===
+    std::vector<VkBuffer>& getBuffersMutable() { return buffers_; }
+    std::vector<VkDeviceMemory>& getMemoriesMutable() { return memories_; }
+    std::vector<VkImageView>& getImageViewsMutable() { return imageViews_; }
+    std::vector<VkImage>& getImagesMutable() { return images_; }
+    std::vector<VkAccelerationStructureKHR>& getAccelerationStructuresMutable() { return accelerationStructures_; }
+    std::vector<VkDescriptorPool>& getDescriptorPoolsMutable() { return descriptorPools_; }
+    std::vector<VkDescriptorSet>& getDescriptorSetsMutable() { return descriptorSets_; }
+    std::vector<VkCommandPool>& getCommandPoolsMutable() { return commandPools_; }
+    std::vector<VkRenderPass>& getRenderPassesMutable() { return renderPasses_; }
+    std::vector<VkDescriptorSetLayout>& getDescriptorSetLayoutsMutable() { return descriptorSetLayouts_; }
+    std::vector<VkPipelineLayout>& getPipelineLayoutsMutable() { return pipelineLayouts_; }
+    std::vector<VkPipeline>& getPipelinesMutable() { return pipelines_; }
+    std::vector<VkShaderModule>& getShaderModulesMutable() { return shaderModules_; }
+
+    void setDevice(VkDevice newDevice, VkPhysicalDevice physicalDevice, const VkDevice* contextDevicePtr = nullptr) {
         if (newDevice == VK_NULL_HANDLE) {
             LOG_ERROR("Cannot set null device to resource manager");
             throw std::invalid_argument("Cannot set null device");
         }
         device_ = newDevice;
         physicalDevice_ = physicalDevice;
+        contextDevicePtr_ = contextDevicePtr;
         LOG_INFO(std::format("Resource manager device set: {:p}", static_cast<void*>(device_)));
     }
-    VkDevice getDevice() const { return device_; }
+    VkDevice getDevice() const { return contextDevicePtr_ ? *contextDevicePtr_ : device_; }
     VkPhysicalDevice getPhysicalDevice() const { return physicalDevice_; }
 
     VkPipeline getPipeline(const std::string& name) const {
@@ -367,7 +344,6 @@ public:
     const VulkanBufferManager* getBufferManager() const { return bufferManager_; }
 
     void cleanup(VkDevice device = VK_NULL_HANDLE);
-
     uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) const;
 };
 
@@ -491,7 +467,6 @@ struct Context {
     VkImageView envMapImageView    = VK_NULL_HANDLE;
     VkSampler envMapSampler      = VK_NULL_HANDLE;
 
-    // Ray-tracing properties (filled by vkGetPhysicalDeviceProperties2)
     VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProperties{
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR
     };
@@ -499,9 +474,6 @@ struct Context {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_PROPERTIES_KHR
     };
 
-    // -----------------------------------------------------------------
-    // Ray-tracing function pointers (beta extensions)
-    // -----------------------------------------------------------------
     PFN_vkCmdTraceRaysKHR                       vkCmdTraceRaysKHR                       = nullptr;
     PFN_vkCreateRayTracingPipelinesKHR          vkCreateRayTracingPipelinesKHR          = nullptr;
     PFN_vkGetRayTracingShaderGroupHandlesKHR    vkGetRayTracingShaderGroupHandlesKHR    = nullptr;
@@ -516,7 +488,6 @@ struct Context {
     PFN_vkGetDeferredOperationResultKHR         vkGetDeferredOperationResultKHR         = nullptr;
     PFN_vkDestroyDeferredOperationKHR           vkDestroyDeferredOperationKHR           = nullptr;
 
-    // Constructor: width/height BEFORE swapchainExtent → NO -Wreorder
     Context(SDL_Window* win, int w, int h)
         : window(win),
           width(w),
@@ -534,7 +505,6 @@ struct Context {
     Context(Context&&) = delete;
     Context& operator=(Context&&) = delete;
 
-    // FIXED: Add vkDeviceWaitIdle before cleanup to ensure no pending ops (prevents segfault)
     ~Context() {
         if (device) {
             vkDeviceWaitIdle(device);
@@ -548,9 +518,6 @@ struct Context {
 
 } // namespace Vulkan
 
-// ===================================================================
-// Include dependent headers
-// ===================================================================
 #include "engine/Vulkan/VulkanBufferManager.hpp"
 #include "engine/Vulkan/VulkanSwapchainManager.hpp"
 
@@ -604,9 +571,6 @@ namespace VulkanInitializer {
     void transitionImageLayout(Vulkan::Context& context, VkImage image, VkFormat format,
                                VkImageLayout oldLayout, VkImageLayout newLayout);
 
-    // -----------------------------------------------------------------
-    // Load all ray-tracing function pointers (beta extensions)
-    // -----------------------------------------------------------------
     void loadRayTracingExtensions(Vulkan::Context& context);
 }
 

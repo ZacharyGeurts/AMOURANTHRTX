@@ -1,13 +1,14 @@
 // include/engine/Vulkan/VulkanSwapchainManager.hpp
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts gzac5314@gmail.com is licensed under CC BY-NC 4.0
+// FINAL: cleanup() added, inline accessors, owned by Context, full RAII
 
 #pragma once
 #ifndef VULKANSWAPCHAINMANAGER_HPP
 #define VULKANSWAPCHAINMANAGER_HPP
 
 #include "engine/Vulkan/VulkanCore.hpp"
-#include "engine/logging.hpp"                     // SEXY OCEAN-TEAL logs
-#include "engine/Vulkan/VulkanRTX_Setup.hpp"      // For VK_CHECK
+#include "engine/logging.hpp"
+#include "engine/Vulkan/VulkanRTX_Setup.hpp"
 #include <vulkan/vulkan.h>
 #include <vector>
 #include <memory>
@@ -25,7 +26,7 @@ public:
 
     void initializeSwapchain(int width, int height);
     void handleResize(int width, int height);
-    void cleanupSwapchain();
+    void cleanup();  // ← NEW: RAII cleanup
 
     // --- Accessors: NON-CONST + CONST (RETURN BY REFERENCE) ---
     VkSwapchainKHR&         getSwapchain()                     { return swapchain_; }
@@ -64,6 +65,7 @@ public:
 private:
     void        waitForInFlightFrames() const;
     VkSurfaceKHR createSurface(SDL_Window* window);
+    void        cleanupSwapchain();  // ← internal
 
     // SEXY SWAPCHAIN LOGGING – ONE LINE, ONE OCEAN-TEAL BLAST
     void logSwapchainInfo(const char* prefix) const;
@@ -76,7 +78,6 @@ private:
     VkSwapchainKHR                   swapchain_ = VK_NULL_HANDLE;
     VkFormat                         swapchainImageFormat_ = VK_FORMAT_UNDEFINED;
     VkExtent2D                       swapchainExtent_ = {0, 0};
-    uint32_t                         imageCount_ = 0;
     std::vector<VkImage>             swapchainImages_;
     std::vector<VkImageView>         swapchainImageViews_;
 

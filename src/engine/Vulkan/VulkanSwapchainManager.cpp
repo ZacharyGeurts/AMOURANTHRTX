@@ -1,8 +1,6 @@
 // src/engine/Vulkan/VulkanSwapchainManager.cpp
 // AMOURANTH RTX Engine (C) 2025 by Zachary Geurts
-// POLISHED: Hyper-vivid OCEAN TEAL swapchain logging
-// FIXED: get*() now return references (VkSemaphore&, VkFence&) – **NO REDEFINITION**
-// SEXY: logSwapchainInfo() prints swapchain, extent, format, images, views
+// FINAL: cleanup() added, RAII safe, matches main.cpp call
 // LOVE: Every lifecycle event logged in neon teal glory
 
 #include "engine/Vulkan/VulkanSwapchainManager.hpp"
@@ -27,7 +25,7 @@ void VulkanSwapchainManager::logSwapchainInfo(const char* prefix) const
     LOG_INFO_CAT("Swapchain",
         "{} | swapchain: {} | extent: {}x{} | format: {} | images: {} | views: {}",
         prefix,
-        swapchain_,
+        ptr_to_hex(swapchain_),
         swapchainExtent_.width, swapchainExtent_.height,
         swapchainImageFormat_,
         swapchainImages_.size(),
@@ -79,16 +77,30 @@ VulkanSwapchainManager::VulkanSwapchainManager(std::shared_ptr<Vulkan::Context> 
 // ---------------------------------------------------------------------
 VulkanSwapchainManager::~VulkanSwapchainManager()
 {
+    cleanup();  // ← RAII: full cleanup
+}
+
+// ---------------------------------------------------------------------
+//  PUBLIC: FULL CLEANUP (called from main.cpp)
+// ---------------------------------------------------------------------
+void VulkanSwapchainManager::cleanup()
+{
+    LOG_INFO_CAT("Swapchain", "Manager cleanup initiated");
+
     cleanupSwapchain();
 
     for (uint32_t i = 0; i < maxFramesInFlight_; ++i) {
-        vkDestroySemaphore(context_->device, renderFinishedSemaphores_[i], nullptr);
-        vkDestroySemaphore(context_->device, imageAvailableSemaphores_[i], nullptr);
-        vkDestroyFence(context_->device, inFlightFences_[i], nullptr);
+        if (renderFinishedSemaphores_[i]) vkDestroySemaphore(context_->device, renderFinishedSemaphores_[i], nullptr);
+        if (imageAvailableSemaphores_[i]) vkDestroySemaphore(context_->device, imageAvailableSemaphores_[i], nullptr);
+        if (inFlightFences_[i]) vkDestroyFence(context_->device, inFlightFences_[i], nullptr);
     }
+    imageAvailableSemaphores_.clear();
+    renderFinishedSemaphores_.clear();
+    inFlightFences_.clear();
 
     if (surface_ != VK_NULL_HANDLE) {
         vkDestroySurfaceKHR(context_->instance, surface_, nullptr);
+        surface_ = VK_NULL_HANDLE;
     }
 
     LOG_INFO_CAT("Swapchain", "Manager destroyed – surface + sync objects released");
@@ -243,7 +255,7 @@ void VulkanSwapchainManager::handleResize(int width, int height)
 }
 
 // ---------------------------------------------------------------------
-//  CLEANUP – FULL DESTRUCTION + LOGGING
+//  INTERNAL: CLEANUP SWAPCHAIN ONLY
 // ---------------------------------------------------------------------
 void VulkanSwapchainManager::cleanupSwapchain()
 {
@@ -273,21 +285,18 @@ VkSurfaceKHR VulkanSwapchainManager::createSurface(SDL_Window* window)
         throw std::runtime_error(
             std::string("SDL_Vulkan_CreateSurface failed: ") + SDL_GetError());
     }
-    LOG_INFO_CAT("Swapchain", "Surface created: {}", surf);
+    LOG_INFO_CAT("Swapchain", "Surface created: {}", ptr_to_hex(surf));
     return surf;
 }
 
 // ---------------------------------------------------------------------
-//  SYNC HELPERS – NOW **INLINE** IN HEADER, SO NO DEFINITIONS HERE
+//  WAIT FOR IN-FLIGHT FRAMES
 // ---------------------------------------------------------------------
 void VulkanSwapchainManager::waitForInFlightFrames() const
 {
-    LOG_DEBUG_CAT("Swapchain", "waitForInFlightFrames() -> fence {}", inFlightFences_[0]);
+    LOG_DEBUG_CAT("Swapchain", "waitForInFlightFrames() -> fence {}", ptr_to_hex(inFlightFences_[0]));
     VK_CHECK(vkWaitForFences(context_->device, 1, &inFlightFences_[0], VK_TRUE, UINT64_MAX),
              "wait in-flight fence");
 }
-
-// **NOTE**: getImageAvailableSemaphore, getRenderFinishedSemaphore, getInFlightFence
-// are **inline** in the header → **NO DEFINITIONS HERE** to avoid redefinition
 
 } // namespace VulkanRTX

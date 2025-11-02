@@ -1,198 +1,167 @@
 // src/engine/Vulkan/VulkanResourceManager.cpp
-// AMOURANTH RTX Engine © 2025 by Zachary Geurts gzac5314@gmail.com is licensed under CC BY-NC 4.0
-// FINAL: Full destructor + cleanup() + findMemoryType() — NO DOUBLE-FREE, NO UNDEFINED
-//        FIXED: Dedup handles with unordered_set before destroy (prevents NVIDIA driver crash on duplicates/stale)
-
-#include "engine/Vulkan/VulkanResourceManager.hpp"
+#include "engine/Vulkan/VulkanCore.hpp"
 #include "engine/logging.hpp"
-#include <format>
-#include <stdexcept>
-#include <unordered_set>
+#include <algorithm>
+
+using namespace Logging::Color;
 
 // ---------------------------------------------------------------------------
-//  DESTRUCTOR – AUTO-CLEANUP
+//  MOVE CONSTRUCTOR
+// ---------------------------------------------------------------------------
+VulkanResourceManager::VulkanResourceManager(VulkanResourceManager&& other) noexcept
+    : buffers_(std::move(other.buffers_))
+    , memories_(std::move(other.memories_))
+    , imageViews_(std::move(other.imageViews_))
+    , images_(std::move(other.images_))
+    , accelerationStructures_(std::move(other.accelerationStructures_))
+    , descriptorPools_(std::move(other.descriptorPools_))
+    , commandPools_(std::move(other.commandPools_))
+    , renderPasses_(std::move(other.renderPasses_))
+    , descriptorSetLayouts_(std::move(other.descriptorSetLayouts_))
+    , pipelineLayouts_(std::move(other.pipelineLayouts_))
+    , pipelines_(std::move(other.pipelines_))
+    , shaderModules_(std::move(other.shaderModules_))
+    , descriptorSets_(std::move(other.descriptorSets_))
+    , pipelineMap_(std::move(other.pipelineMap_))
+    , device_(other.device_)
+    , physicalDevice_(other.physicalDevice_)
+    , bufferManager_(other.bufferManager_)
+    , contextDevicePtr_(other.contextDevicePtr_)
+    , vkDestroyAccelerationStructureKHR_(other.vkDestroyAccelerationStructureKHR_)
+{
+    other.device_ = VK_NULL_HANDLE;
+    other.physicalDevice_ = VK_NULL_HANDLE;
+    other.bufferManager_ = nullptr;
+    other.contextDevicePtr_ = nullptr;
+    other.vkDestroyAccelerationStructureKHR_ = nullptr;
+}
+
+// ---------------------------------------------------------------------------
+//  MOVE ASSIGNMENT
+// ---------------------------------------------------------------------------
+VulkanResourceManager& VulkanResourceManager::operator=(VulkanResourceManager&& other) noexcept {
+    if (this != &other) {
+        cleanup(device_);
+        buffers_ = std::move(other.buffers_);
+        memories_ = std::move(other.memories_);
+        imageViews_ = std::move(other.imageViews_);
+        images_ = std::move(other.images_);
+        accelerationStructures_ = std::move(other.accelerationStructures_);
+        descriptorPools_ = std::move(other.descriptorPools_);
+        commandPools_ = std::move(other.commandPools_);
+        renderPasses_ = std::move(other.renderPasses_);
+        descriptorSetLayouts_ = std::move(other.descriptorSetLayouts_);
+        pipelineLayouts_ = std::move(other.pipelineLayouts_);
+        pipelines_ = std::move(other.pipelines_);
+        shaderModules_ = std::move(other.shaderModules_);
+        descriptorSets_ = std::move(other.descriptorSets_);
+        pipelineMap_ = std::move(other.pipelineMap_);
+        device_ = other.device_;
+        physicalDevice_ = other.physicalDevice_;
+        bufferManager_ = other.bufferManager_;
+        contextDevicePtr_ = other.contextDevicePtr_;
+        vkDestroyAccelerationStructureKHR_ = other.vkDestroyAccelerationStructureKHR_;
+
+        other.device_ = VK_NULL_HANDLE;
+        other.physicalDevice_ = VK_NULL_HANDLE;
+        other.bufferManager_ = nullptr;
+        other.contextDevicePtr_ = nullptr;
+        other.vkDestroyAccelerationStructureKHR_ = nullptr;
+    }
+    return *this;
+}
+
+// ---------------------------------------------------------------------------
+//  DESTRUCTOR
 // ---------------------------------------------------------------------------
 VulkanResourceManager::~VulkanResourceManager() {
-    if (device_ != VK_NULL_HANDLE) {
+    if (contextDevicePtr_ && *contextDevicePtr_ != VK_NULL_HANDLE) {
+        cleanup(*contextDevicePtr_);
+    } else if (device_ != VK_NULL_HANDLE) {
         cleanup(device_);
     }
 }
 
 // ---------------------------------------------------------------------------
-//  CLEANUP – FULL RESOURCE DESTRUCTION (ORDER: DEPENDENCIES LAST)
+//  CLEANUP — DESTROYS ALL TRACKED RESOURCES (NO DOUBLE FREE)
 // ---------------------------------------------------------------------------
 void VulkanResourceManager::cleanup(VkDevice device) {
-    VkDevice effectiveDevice = (device == VK_NULL_HANDLE) ? device_ : device;
+    VkDevice effectiveDevice = (device == VK_NULL_HANDLE)
+        ? (contextDevicePtr_ ? *contextDevicePtr_ : device_)
+        : device;
+
     if (effectiveDevice == VK_NULL_HANDLE) {
-        LOG_WARNING_CAT("ResourceMgr", "Device is null, skipping cleanup");
+        LOG_WARNING_CAT("ResourceMgr", "{}Device null, skipping cleanup{}", AMBER_YELLOW, RESET);
         return;
     }
 
-    LOG_DEBUG_CAT("ResourceMgr", "Starting VulkanResourceManager cleanup");
+    LOG_INFO_CAT("ResourceMgr", "{}Starting RAII cleanup...{}", OCEAN_TEAL, RESET);
 
-    // Wait for GPU to finish
-    vkDeviceWaitIdle(effectiveDevice);
+    // --- SAFE DESTROY MACRO ---
+    #define SAFE_DESTROY(container, func, type) \
+        do { \
+            for (auto it = container.rbegin(); it != container.rend(); ++it) { \
+                if (*it != VK_NULL_HANDLE) { \
+                    try { \
+                        LOG_DEBUG_CAT("ResourceMgr", "Destroying {}: {:p}", #type, static_cast<void*>(*it)); \
+                        func(effectiveDevice, *it, nullptr); \
+                        *it = VK_NULL_HANDLE; \
+                    } catch (...) { \
+                        LOG_ERROR_CAT("ResourceMgr", "Exception destroying {} {:p}", #type, static_cast<void*>(*it)); \
+                    } \
+                } \
+            } \
+            container.clear(); \
+        } while(0)
 
-    // === PIPELINES ===
-    {
-        std::unordered_set<VkPipeline> uniquePipelines(pipelines_.begin(), pipelines_.end());
-        for (auto p : uniquePipelines) {
-            if (p != VK_NULL_HANDLE) {
-                vkDestroyPipeline(effectiveDevice, p, nullptr);
-                LOG_INFO_CAT("ResourceMgr", "Destroyed pipeline: {:p}", static_cast<void*>(p));
-            }
-        }
-        pipelines_.clear();
-    }
-    pipelineMap_.clear();
+    // --- DESTROY IN REVERSE ORDER ---
+    SAFE_DESTROY(pipelines_,           vkDestroyPipeline,           Pipeline);
+    SAFE_DESTROY(pipelineLayouts_,     vkDestroyPipelineLayout,     PipelineLayout);
+    SAFE_DESTROY(descriptorSetLayouts_,vkDestroyDescriptorSetLayout,DescriptorSetLayout);
+    SAFE_DESTROY(renderPasses_,        vkDestroyRenderPass,         RenderPass);
+    SAFE_DESTROY(shaderModules_,       vkDestroyShaderModule,       ShaderModule);
 
-    // === PIPELINE LAYOUTS ===
-    {
-        std::unordered_set<VkPipelineLayout> uniqueLayouts(pipelineLayouts_.begin(), pipelineLayouts_.end());
-        for (auto l : uniqueLayouts) {
-            if (l != VK_NULL_HANDLE) {
-                vkDestroyPipelineLayout(effectiveDevice, l, nullptr);
-                LOG_INFO_CAT("ResourceMgr", "Destroyed pipeline layout: {:p}", static_cast<void*>(l));
-            }
-        }
-        pipelineLayouts_.clear();
-    }
-
-    // === DESCRIPTOR SET LAYOUTS ===
-    {
-        std::unordered_set<VkDescriptorSetLayout> uniqueLayouts(descriptorSetLayouts_.begin(), descriptorSetLayouts_.end());
-        for (auto l : uniqueLayouts) {
-            if (l != VK_NULL_HANDLE) {
-                vkDestroyDescriptorSetLayout(effectiveDevice, l, nullptr);
-                LOG_INFO_CAT("ResourceMgr", "Destroyed descriptor set layout: {:p}", static_cast<void*>(l));
-            }
-        }
-        descriptorSetLayouts_.clear();
-    }
-
-    // === RENDER PASSES ===
-    {
-        std::unordered_set<VkRenderPass> uniqueRenderPasses(renderPasses_.begin(), renderPasses_.end());
-        for (auto rp : uniqueRenderPasses) {
-            if (rp != VK_NULL_HANDLE) {
-                vkDestroyRenderPass(effectiveDevice, rp, nullptr);
-                LOG_INFO_CAT("ResourceMgr", "Destroyed render pass: {:p}", static_cast<void*>(rp));
-            }
-        }
-        renderPasses_.clear();
-    }
-
-    // === SHADER MODULES ===
-    {
-        std::unordered_set<VkShaderModule> uniqueModules(shaderModules_.begin(), shaderModules_.end());
-        for (auto m : uniqueModules) {
-            if (m != VK_NULL_HANDLE) {
-                vkDestroyShaderModule(effectiveDevice, m, nullptr);
-                LOG_INFO_CAT("ResourceMgr", "Destroyed shader module: {:p}", static_cast<void*>(m));
-            }
-        }
-        shaderModules_.clear();
-    }
-
-    // === ACCELERATION STRUCTURES (KHR) ===
-    {
-        std::unordered_set<VkAccelerationStructureKHR> uniqueAS(accelerationStructures_.begin(), accelerationStructures_.end());
-        for (auto as : uniqueAS) {
-            if (as != VK_NULL_HANDLE) {
-                auto destroyFn = reinterpret_cast<PFN_vkDestroyAccelerationStructureKHR>(
-                    vkGetDeviceProcAddr(effectiveDevice, "vkDestroyAccelerationStructureKHR"));
-                if (destroyFn) {
-                    destroyFn(effectiveDevice, as, nullptr);
-                    LOG_INFO_CAT("ResourceMgr", "Destroyed acceleration structure: {:p}", static_cast<void*>(as));
-                } else {
-                    LOG_WARNING_CAT("ResourceMgr", "vkDestroyAccelerationStructureKHR not loaded");
-                }
-            }
-        }
+    // Acceleration Structures — use stored function pointer
+    if (vkDestroyAccelerationStructureKHR_) {
+        SAFE_DESTROY(accelerationStructures_, vkDestroyAccelerationStructureKHR_, AccelerationStructureKHR);
+    } else {
+        LOG_WARN_CAT("ResourceMgr", "vkDestroyAccelerationStructureKHR not set — skipping AS cleanup");
         accelerationStructures_.clear();
     }
 
-    // === IMAGE VIEWS ===
-    {
-        std::unordered_set<VkImageView> uniqueViews(imageViews_.begin(), imageViews_.end());
-        for (auto iv : uniqueViews) {
-            if (iv != VK_NULL_HANDLE) {
-                vkDestroyImageView(effectiveDevice, iv, nullptr);
-                LOG_INFO_CAT("ResourceMgr", "Destroyed image view: {:p}", static_cast<void*>(iv));
+    SAFE_DESTROY(imageViews_,          vkDestroyImageView,          ImageView);
+    SAFE_DESTROY(images_,              vkDestroyImage,              Image);
+    SAFE_DESTROY(buffers_,             vkDestroyBuffer,             Buffer);
+    SAFE_DESTROY(memories_,            vkFreeMemory,                DeviceMemory);
+    SAFE_DESTROY(descriptorPools_,     vkDestroyDescriptorPool,     DescriptorPool);
+
+    // Command pools — reset first
+    for (auto it = commandPools_.rbegin(); it != commandPools_.rend(); ++it) {
+        if (*it != VK_NULL_HANDLE) {
+            try {
+                vkResetCommandPool(effectiveDevice, *it, VK_COMMAND_POOL_RESET_RELEASE_RESOURCES_BIT);
+                vkDestroyCommandPool(effectiveDevice, *it, nullptr);
+                *it = VK_NULL_HANDLE;
+            } catch (...) {
+                LOG_ERROR_CAT("ResourceMgr", "Exception destroying CommandPool {:p}", static_cast<void*>(*it));
             }
         }
-        imageViews_.clear();
     }
+    commandPools_.clear();
 
-    // === IMAGES ===
-    {
-        std::unordered_set<VkImage> uniqueImages(images_.begin(), images_.end());
-        for (auto img : uniqueImages) {
-            if (img != VK_NULL_HANDLE) {
-                vkDestroyImage(effectiveDevice, img, nullptr);
-                LOG_INFO_CAT("ResourceMgr", "Destroyed image: {:p}", static_cast<void*>(img));
-            }
-        }
-        images_.clear();
-    }
+    pipelineMap_.clear();
 
-    // === BUFFERS ===
-    {
-        std::unordered_set<VkBuffer> uniqueBuffers(buffers_.begin(), buffers_.end());
-        for (auto b : uniqueBuffers) {
-            if (b != VK_NULL_HANDLE) {
-                vkDestroyBuffer(effectiveDevice, b, nullptr);
-                LOG_INFO_CAT("ResourceMgr", "Destroyed buffer: {:p}", static_cast<void*>(b));
-            }
-        }
-        buffers_.clear();
-    }
+    LOG_INFO_CAT("ResourceMgr", "{}RAII cleanup complete.{}", EMERALD_GREEN, RESET);
 
-    // === MEMORY ===
-    {
-        std::unordered_set<VkDeviceMemory> uniqueMemories(memories_.begin(), memories_.end());
-        for (auto mem : uniqueMemories) {
-            if (mem != VK_NULL_HANDLE) {
-                vkFreeMemory(effectiveDevice, mem, nullptr);
-                LOG_INFO_CAT("ResourceMgr", "Freed memory: {:p}", static_cast<void*>(mem));
-            }
-        }
-        memories_.clear();
-    }
-
-    // === DESCRIPTOR POOLS ===
-    {
-        std::unordered_set<VkDescriptorPool> uniquePools(descriptorPools_.begin(), descriptorPools_.end());
-        for (auto dp : uniquePools) {
-            if (dp != VK_NULL_HANDLE) {
-                vkDestroyDescriptorPool(effectiveDevice, dp, nullptr);
-                LOG_INFO_CAT("ResourceMgr", "Destroyed descriptor pool: {:p}", static_cast<void*>(dp));
-            }
-        }
-        descriptorPools_.clear();
-    }
-
-    // === COMMAND POOLS ===
-    {
-        std::unordered_set<VkCommandPool> uniqueCommandPools(commandPools_.begin(), commandPools_.end());
-        for (auto cp : uniqueCommandPools) {
-            if (cp != VK_NULL_HANDLE) {
-                vkDestroyCommandPool(effectiveDevice, cp, nullptr);
-                LOG_INFO_CAT("ResourceMgr", "Destroyed command pool: {:p}", static_cast<void*>(cp));
-            }
-        }
-        commandPools_.clear();
-    }
-
-    LOG_INFO_CAT("ResourceMgr", "VulkanResourceManager cleanup completed");
+    #undef SAFE_DESTROY
 }
 
 // ---------------------------------------------------------------------------
-//  FIND MEMORY TYPE – ROBUST & LOGGED
+//  MEMORY TYPE FINDER
 // ---------------------------------------------------------------------------
 uint32_t VulkanResourceManager::findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) const {
     if (physicalDevice_ == VK_NULL_HANDLE) {
-        LOG_ERROR_CAT("ResourceMgr", "Physical device not set in resource manager!");
+        LOG_ERROR_CAT("ResourceMgr", "{}Physical device not set!{}", CRIMSON_MAGENTA, RESET);
         throw std::runtime_error("Physical device not set");
     }
 
@@ -202,11 +171,10 @@ uint32_t VulkanResourceManager::findMemoryType(uint32_t typeFilter, VkMemoryProp
     for (uint32_t i = 0; i < memProps.memoryTypeCount; ++i) {
         if ((typeFilter & (1u << i)) &&
             (memProps.memoryTypes[i].propertyFlags & properties) == properties) {
-            LOG_DEBUG_CAT("ResourceMgr", "Found memory type: {} (filter: 0x{:x}, props: 0x{:x})", i, typeFilter, properties);
             return i;
         }
     }
 
-    LOG_ERROR_CAT("ResourceMgr", "Failed to find suitable memory type! filter=0x{:x}, props=0x{:x}", typeFilter, properties);
-    throw std::runtime_error("Failed to find suitable memory type!");
+    LOG_ERROR_CAT("ResourceMgr", "{}No memory type found! filter=0x{:x}, props=0x{:x}{}", CRIMSON_MAGENTA, typeFilter, properties, RESET);
+    throw std::runtime_error("Failed to find memory type");
 }

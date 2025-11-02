@@ -8,6 +8,7 @@
 // FIXED: Typo VK_SHADER_STAGEbfont_CLOSEST_HIT_BIT_KHR -> VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR
 // FIXED: Added vkGetPhysicalDeviceMemoryProperties to populate context.memoryProperties
 // FIXED: createDescriptorPoolAndSet param: Vulkan::Context& context
+// FIXED: context.resourceManager.setDevice(context.device, context.physicalDevice, &context.device)
 
 #include "engine/Vulkan/Vulkan_init.hpp"
 #include "engine/Vulkan/VulkanRTX_Setup.hpp"
@@ -274,7 +275,8 @@ void initDevice(Vulkan::Context& context)
     vkGetDeviceQueue(context.device, context.presentQueueFamilyIndex, 0, &context.presentQueue);
     vkGetDeviceQueue(context.device, context.computeQueueFamilyIndex, 0, &context.computeQueue);
 
-    context.resourceManager.setDevice(context.device, context.physicalDevice);
+    // CRITICAL FIX: Pass &context.device to avoid dangling copy
+    context.resourceManager.setDevice(context.device, context.physicalDevice, &context.device);
 
 #define LOAD_KHR(name) \
     context.name = reinterpret_cast<PFN_##name>(vkGetDeviceProcAddr(context.device, #name)); \

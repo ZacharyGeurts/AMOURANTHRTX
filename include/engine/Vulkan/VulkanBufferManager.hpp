@@ -20,12 +20,10 @@ enum class BufferType { GEOMETRY, UNIFORM };
 
 class VulkanBufferManager {
 public:
-    // REMOVED: VulkanBufferManager() = default;  // ← Reference member init error
-
-    // NEW: Context-only constructor (deferred mesh upload)
+    // Context-only constructor (deferred mesh upload)
     explicit VulkanBufferManager(Vulkan::Context& context);
 
-    // Existing: Full constructor with mesh data
+    // Full constructor with mesh data
     VulkanBufferManager(Vulkan::Context& context,
                         const glm::vec3* vertices,
                         size_t vertexCount,

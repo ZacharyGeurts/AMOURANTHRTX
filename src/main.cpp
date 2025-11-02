@@ -1,6 +1,7 @@
 // src/main.cpp
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts gzac5314@gmail.com
 // Licensed under CC BY-NC 4.0
+// FINAL: Uses Dispose::cleanupAll(), no manual vkDestroy*, no invalid device
 
 #include "main.hpp"
 #include "engine/SDL3/SDL3_audio.hpp"
@@ -12,6 +13,7 @@
 #include "engine/logging.hpp"
 #include "engine/utils.hpp"
 #include "engine/Vulkan/VulkanRTX_Setup.hpp"
+#include "engine/Dispose.hpp"  // ← NEW: RAII cleanup
 
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
@@ -73,7 +75,7 @@ int main() {
             throw std::runtime_error("Invalid resolution");
         }
 
-        // ───── SDL3 + VULKAN LOADER ─────
+        // ───── SDL3 + VULKAN LOADER ───── use ==0 for SDL3
         bulkhead(" SDL3 SUBSYSTEMS — VIDEO + AUDIO + VULKAN ");
         if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) == 0) {
             LOG_ERROR_CAT("SDL_INIT", "{}SDL_Init failed: {}{}", CRIMSON_MAGENTA, SDL_GetError(), RESET);
@@ -125,12 +127,12 @@ int main() {
         bulkhead(" APPLICATION LOOP — FPS UNLOCKED ");
         {
             LOG_INFO_CAT("APP", "{}Creating main window: AMOURANTH RTX @ {}×{}{}", ARCTIC_CYAN, W, H, RESET);
-            Application app("AMOURANTH RTX", W, H);  // ← 3-arg ctor
+            Application app("AMOURANTH RTX", W, H);
 
             core = std::make_shared<Vulkan::Context>(app.getWindow(), W, H);
             LOG_INFO_CAT("VULKAN", "{}Creating shared Vulkan::Context @ {}{}", ARCTIC_CYAN, ptr_to_hex(core.get()), RESET);
 
-            // ---- 1. SDL Vulkan instance extensions (SDL3 single-call) ----
+            // ---- 1. SDL Vulkan instance extensions ----
             uint32_t extCount = 0;
             const char* const* sdlExtPtr = SDL_Vulkan_GetInstanceExtensions(&extCount);
             if (sdlExtPtr == nullptr) {
@@ -190,17 +192,21 @@ int main() {
 
             app.setRenderer(std::move(renderer));
             app.run();
+
+            // ───── CLEAN SHUTDOWN — ONE LINE — Dispose::cleanupAll() ─────
+            LOG_INFO_CAT("SHUTDOWN", "{}Initiating clean Vulkan shutdown via Dispose::cleanupAll()...{}", ARCTIC_CYAN, RESET);
+            Dispose::cleanupAll(*core);  // ← ONE CALL. ALL DONE.
+            LOG_INFO_CAT("SHUTDOWN", "{}Dispose::cleanupAll() complete. RAII heaven.{}", EMERALD_GREEN, RESET);
         }
 
     } catch (const std::exception& e) {
         bulkhead(" FATAL ERROR — SYSTEM HALT ");
         LOG_ERROR_CAT("EX", "{}Exception: {}{}", CRIMSON_MAGENTA, e.what(), RESET);
 
+        // Emergency cleanup
         if (core) {
-            if (core->commandPool) vkDestroyCommandPool(core->device, core->commandPool, nullptr);
-            if (core->surface)     vkDestroySurfaceKHR(core->instance, core->surface, nullptr);
-            if (core->device)      vkDestroyDevice(core->device, nullptr);
-            if (core->instance)    vkDestroyInstance(core->instance, nullptr);
+            try { Dispose::cleanupAll(*core); }
+            catch (...) { /* best effort */ }
         }
 
         purgeSDL(splashWin, splashRen, splashTex);

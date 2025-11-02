@@ -29,7 +29,7 @@
 
 namespace VulkanRTX {
 
-using namespace Logging::Color;  // ← BRING IN COLOR PALETTE
+using namespace Logging::Color;
 
 // ---------------------------------------------------------------------------
 //  TIMING HELPER (C++11 safe)
@@ -41,7 +41,7 @@ static double getMicroseconds() {
 }
 
 // ---------------------------------------------------------------------------
-//  SAFE VK_CHECK_NO_THROW FOR DESTRUCTORS
+//  SAFE VK_CHECK_NO_THROW FOR FUNCTIONS RETURNING VkResult
 // ---------------------------------------------------------------------------
 #define VK_CHECK_NO_THROW(expr, msg)                                                      \
     do {                                                                                  \
@@ -62,10 +62,24 @@ static double getMicroseconds() {
     } while (0)
 
 // ---------------------------------------------------------------------------
-//  MEMORY TYPE FINDER (from VulkanInitializer)
+//  LOG_VOID_CLEANUP — for void-returning functions
+// ---------------------------------------------------------------------------
+#define LOG_VOID_CLEANUP(expr, msg)                                                       \
+    do {                                                                                  \
+        double _start = getMicroseconds();                                                \
+        (expr);                                                                           \
+        double _end = getMicroseconds();                                                  \
+        double _dur = _end - _start;                                                      \
+        char _buf[256];                                                                   \
+        std::snprintf(_buf, sizeof(_buf), "VK_CLEANUP: %s -> OK [%.1f us]", msg, _dur);   \
+        LOG_TRACE_CAT("BufferMgr", "%s", _buf);                                           \
+    } while (0)
+
+// ---------------------------------------------------------------------------
+//  MEMORY TYPE FINDER
 // ---------------------------------------------------------------------------
 static uint32_t findMemoryType(VkPhysicalDevice pd, uint32_t filter, VkMemoryPropertyFlags props) {
-    return VulkanInitializer::findMemoryType(pd, filter, props);  // ← FIXED
+    return VulkanInitializer::findMemoryType(pd, filter, props);
 }
 
 // ---------------------------------------------------------------------------
@@ -137,90 +151,31 @@ VulkanBufferManager::VulkanBufferManager(Vulkan::Context& ctx,
 }
 
 // ---------------------------------------------------------------------------
-//  DEFERRED MESH UPLOAD
-// ---------------------------------------------------------------------------
-void VulkanBufferManager::uploadMesh(const glm::vec3* vertices,
-                                     size_t vertexCount,
-                                     const uint32_t* indices,
-                                     size_t indexCount)
-{
-    vertexCount_ = static_cast<uint32_t>(vertexCount);
-    indexCount_  = static_cast<uint32_t>(indexCount);
-
-    const VkDeviceSize vSize = vertexCount * sizeof(glm::vec3);
-    const VkDeviceSize iSize = indexCount * sizeof(uint32_t);
-    const VkDeviceSize total = vSize + iSize;
-
-    if (total > impl_->arenaSize) {
-        LOG_INFO_CAT("BufferMgr", "{}Resizing arena: {} → {} bytes{}", 
-                      OCEAN_TEAL, impl_->arenaSize, total * 2, RESET);
-        vkDestroyBuffer(context_.device, impl_->arenaBuffer, nullptr);
-        vkFreeMemory(context_.device, impl_->arenaMemory, nullptr);
-        reserveArena(std::max<VkDeviceSize>(64ULL * 1024 * 1024, total * 2), BufferType::GEOMETRY);
-    }
-
-    VkBuffer stagingV = VK_NULL_HANDLE, stagingI = VK_NULL_HANDLE;
-    VkDeviceMemory memV = VK_NULL_HANDLE, memI = VK_NULL_HANDLE;
-
-    createStagingBuffer(vSize, stagingV, memV);
-    mapCopyUnmap(memV, vSize, vertices);
-    createStagingBuffer(iSize, stagingI, memI);
-    mapCopyUnmap(memI, iSize, indices);
-
-    copyToArena(stagingV, 0, vSize);
-    copyToArena(stagingI, impl_->indexOffset, iSize);
-
-    vkDestroyBuffer(context_.device, stagingV, nullptr);
-    vkFreeMemory(context_.device, memV, nullptr);
-    vkDestroyBuffer(context_.device, stagingI, nullptr);
-    vkFreeMemory(context_.device, memI, nullptr);
-
-    vertexBufferAddress_ = VulkanInitializer::getBufferDeviceAddress(context_, impl_->arenaBuffer);
-    indexBufferAddress_  = vertexBufferAddress_ + impl_->indexOffset;
-
-    LOG_INFO_CAT("BufferMgr", "{}Mesh uploaded: {}v {}i @ {}{}", 
-                  EMERALD_GREEN, vertexCount, indexCount, ptr_to_hex((void*)vertexBufferAddress_), RESET);
-}
-
-// ---------------------------------------------------------------------------
-//  DESTRUCTOR
+//  DESTRUCTOR — CENTRAL DISPOSE, NO DOUBLE DESTROY, void-safe
 // ---------------------------------------------------------------------------
 VulkanBufferManager::~VulkanBufferManager() noexcept {
-    vkDeviceWaitIdle(context_.device);
+    LOG_INFO_CAT("BufferMgr", "{}~VulkanBufferManager() — RAII{}", CRIMSON_MAGENTA, RESET);
 
-    for (size_t i = 0; i < impl_->scratchBuffers.size(); ++i) {
-        context_.resourceManager.removeBuffer(impl_->scratchBuffers[i]);
-        vkDestroyBuffer(context_.device, impl_->scratchBuffers[i], nullptr);
-        context_.resourceManager.removeMemory(impl_->scratchBufferMemories[i]);
-        vkFreeMemory(context_.device, impl_->scratchBufferMemories[i], nullptr);
-    }
+    // DO NOT CALL removeBuffer() — ResourceManager::cleanup() already destroyed
+    impl_->arenaBuffer = VK_NULL_HANDLE;
+    impl_->arenaMemory = VK_NULL_HANDLE;
 
-    for (size_t i = 0; i < impl_->uniformBuffers.size(); ++i) {
-        context_.resourceManager.removeBuffer(impl_->uniformBuffers[i]);
-        vkDestroyBuffer(context_.device, impl_->uniformBuffers[i], nullptr);
-        context_.resourceManager.removeMemory(impl_->uniformBufferMemories[i]);
-        vkFreeMemory(context_.device, impl_->uniformBufferMemories[i], nullptr);
-    }
+    for (auto& b : impl_->scratchBuffers) b = VK_NULL_HANDLE;
+    for (auto& m : impl_->scratchBufferMemories) m = VK_NULL_HANDLE;
+    for (auto& b : impl_->uniformBuffers) b = VK_NULL_HANDLE;
+    for (auto& m : impl_->uniformBufferMemories) m = VK_NULL_HANDLE;
 
-    if (impl_->arenaBuffer) {
-        context_.resourceManager.removeBuffer(impl_->arenaBuffer);
-        vkDestroyBuffer(context_.device, impl_->arenaBuffer, nullptr);
+    if (impl_->commandPool != VK_NULL_HANDLE) {
+        LOG_VOID_CLEANUP(vkDestroyCommandPool(context_.device, impl_->commandPool, nullptr), "CommandPool");
+        impl_->commandPool = VK_NULL_HANDLE;
     }
-    if (impl_->arenaMemory) {
-        context_.resourceManager.removeMemory(impl_->arenaMemory);
-        vkFreeMemory(context_.device, impl_->arenaMemory, nullptr);
-    }
-
-    if (impl_->commandPool) {
-        VK_CHECK_NO_THROW(vkResetCommandPool(context_.device, impl_->commandPool, 0), "Reset command pool");
-        vkDestroyCommandPool(context_.device, impl_->commandPool, nullptr);
-    }
-
-    if (impl_->timelineSemaphore) {
-        vkDestroySemaphore(context_.device, impl_->timelineSemaphore, nullptr);
+    if (impl_->timelineSemaphore != VK_NULL_HANDLE) {
+        LOG_VOID_CLEANUP(vkDestroySemaphore(context_.device, impl_->timelineSemaphore, nullptr), "TimelineSemaphore");
+        impl_->timelineSemaphore = VK_NULL_HANDLE;
     }
 
     delete impl_;
+    LOG_INFO_CAT("BufferMgr", "{}~VulkanBufferManager() — DONE{}", EMERALD_GREEN, RESET);
 }
 
 // ---------------------------------------------------------------------------
@@ -450,7 +405,7 @@ uint32_t VulkanBufferManager::getScratchBufferCount() const {
 }
 
 // ---------------------------------------------------------------------------
-//  STATIC CREATE BUFFER (forwards to VulkanInitializer)
+//  STATIC CREATE BUFFER
 // ---------------------------------------------------------------------------
 void VulkanBufferManager::createBuffer(VkDevice device,
                                        VkPhysicalDevice physicalDevice,
@@ -486,7 +441,63 @@ VkDeviceAddress VulkanBufferManager::getAccelerationStructureDeviceAddress(
 }
 
 // ---------------------------------------------------------------------------
-//  MOVED FROM HEADER (now safe)
+//  DEFERRED MESH UPLOAD — FULLY IMPLEMENTED
+// ---------------------------------------------------------------------------
+void VulkanBufferManager::uploadMesh(const glm::vec3* vertices,
+                                     size_t vertexCount,
+                                     const uint32_t* indices,
+                                     size_t indexCount)
+{
+    vertexCount_ = static_cast<uint32_t>(vertexCount);
+    indexCount_  = static_cast<uint32_t>(indexCount);
+
+    const VkDeviceSize vSize = vertexCount * sizeof(glm::vec3);
+    const VkDeviceSize iSize = indexCount * sizeof(uint32_t);
+    const VkDeviceSize total = vSize + iSize;
+
+    if (total > impl_->arenaSize) {
+        LOG_INFO_CAT("BufferMgr", "{}Resizing arena: {} → {} bytes{}", 
+                      OCEAN_TEAL, impl_->arenaSize, total * 2, RESET);
+
+        // Destroy old arena via central Dispose
+        if (impl_->arenaBuffer != VK_NULL_HANDLE) {
+            context_.resourceManager.removeBuffer(impl_->arenaBuffer);
+            impl_->arenaBuffer = VK_NULL_HANDLE;
+        }
+        if (impl_->arenaMemory != VK_NULL_HANDLE) {
+            context_.resourceManager.removeMemory(impl_->arenaMemory);
+            impl_->arenaMemory = VK_NULL_HANDLE;
+        }
+
+        reserveArena(std::max<VkDeviceSize>(64ULL * 1024 * 1024, total * 2), BufferType::GEOMETRY);
+    }
+
+    VkBuffer stagingV = VK_NULL_HANDLE, stagingI = VK_NULL_HANDLE;
+    VkDeviceMemory memV = VK_NULL_HANDLE, memI = VK_NULL_HANDLE;
+
+    createStagingBuffer(vSize, stagingV, memV);
+    mapCopyUnmap(memV, vSize, vertices);
+    createStagingBuffer(iSize, stagingI, memI);
+    mapCopyUnmap(memI, iSize, indices);
+
+    copyToArena(stagingV, 0, vSize);
+    copyToArena(stagingI, impl_->indexOffset, iSize);
+
+    // Destroy staging buffers manually (not tracked)
+    vkDestroyBuffer(context_.device, stagingV, nullptr);
+    vkFreeMemory(context_.device, memV, nullptr);
+    vkDestroyBuffer(context_.device, stagingI, nullptr);
+    vkFreeMemory(context_.device, memI, nullptr);
+
+    vertexBufferAddress_ = VulkanInitializer::getBufferDeviceAddress(context_, impl_->arenaBuffer);
+    indexBufferAddress_  = vertexBufferAddress_ + impl_->indexOffset;
+
+    LOG_INFO_CAT("BufferMgr", "{}Mesh uploaded: {}v {}i @ {}{}", 
+                  EMERALD_GREEN, vertexCount, indexCount, ptr_to_hex((void*)vertexBufferAddress_), RESET);
+}
+
+// ---------------------------------------------------------------------------
+//  MOVED FROM HEADER
 // ---------------------------------------------------------------------------
 VkBuffer VulkanBufferManager::getArenaBuffer() const { return impl_->arenaBuffer; }
 VkDeviceSize VulkanBufferManager::getVertexOffset() const { return impl_->vertexOffset; }
