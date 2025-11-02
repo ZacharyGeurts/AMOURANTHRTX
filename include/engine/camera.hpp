@@ -94,6 +94,10 @@ public:
     void setUserData(void* data) override;
     void* getUserData() const override;
 
+    // --- PUBLIC FOR renderFrame() MOVEMENT DETECTION ---
+    float yaw_;
+    float pitch_;
+
 private:
     void updateCameraVectors();
 
@@ -101,8 +105,6 @@ private:
     glm::vec3 front_;
     glm::vec3 up_;
 
-    float yaw_;
-    float pitch_;
     float fov_;
     float aspectRatio_;
     float nearPlane_;

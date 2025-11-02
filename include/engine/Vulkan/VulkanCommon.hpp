@@ -35,10 +35,15 @@ struct StridedDeviceAddressRegionKHR {
 // 2. Shader Binding Table
 // ========================================================================
 struct ShaderBindingTable {
-    StridedDeviceAddressRegionKHR raygen;
-    StridedDeviceAddressRegionKHR miss;
-    StridedDeviceAddressRegionKHR hit;
-    StridedDeviceAddressRegionKHR callable;
+    struct Region {
+        VkDeviceAddress deviceAddress = 0;  // MATCHES VulkanRTX.hpp
+        VkDeviceSize    size          = 0;
+        VkDeviceSize    stride        = 0;
+    };
+    Region raygen;
+    Region miss;
+    Region hit;
+    Region callable;
 };
 
 // ========================================================================

@@ -1,13 +1,19 @@
 // src/engine/Vulkan/VulkanRTX_Setup.cpp
-// AMOURANTH RTX Engine (C) 2025 by Zachary Geurts
-// 100% COMPILE + LINK – ONLY IMPLEMENTATION
-// FIXED: Call createDescriptorSetLayout() in ctor to populate dsLayout_ for renderer
+// AMOURANTH RTX Engine (C) 2025 by Zachary Geurts gzac5314@gmail.com
+// FULL: VulkanRTX implementation with RAII, OCEAN TEAL logging, FPS unlocked
+// FIXED: All undefined references resolved
+//        recordRayTracingCommands() implemented
+//        SBT address caching
+//        Black fallback image
+//        Full VulkanRTX class body
+//        rtPipeline_ / rtPipelineLayout_ → RAW Vk handles (non-owning)
 
 #include "engine/Vulkan/VulkanRTX_Setup.hpp"
 #include "engine/Vulkan/VulkanPipelineManager.hpp"
-#include "engine/logging.hpp"
 #include "engine/Vulkan/Vulkan_init.hpp"
 #include "engine/Vulkan/VulkanCore.hpp"
+#include "engine/Dispose.hpp"
+#include "engine/logging.hpp"
 
 #include <vulkan/vulkan.h>
 #include <glm/glm.hpp>
@@ -20,81 +26,14 @@
 #include <cstdint>
 
 using namespace Logging::Color;
+using namespace Dispose;
 
 namespace VulkanRTX {
 
 /* -----------------------------------------------------------------
-   VulkanResource – template implementation
-   ----------------------------------------------------------------- */
-template<typename T, typename DestroyFuncType>
-VulkanResource<T, DestroyFuncType>::VulkanResource(VkDevice device, T resource, DestroyFuncType destroyFunc)
-    : device_(device), resource_(resource), destroyFunc_(destroyFunc)
-{
-    if (!device || !resource || !destroyFunc)
-        throw VulkanRTXException("VulkanResource initialized with null");
-}
-template<typename T, typename DestroyFuncType>
-VulkanResource<T, DestroyFuncType>::~VulkanResource()
-{
-    if (resource_ != VK_NULL_HANDLE && destroyFunc_)
-        destroyFunc_(device_, resource_, nullptr);
-}
-template<typename T, typename DestroyFuncType>
-VulkanResource<T, DestroyFuncType>::VulkanResource(VulkanResource&& o) noexcept
-    : device_(o.device_), resource_(o.resource_), destroyFunc_(o.destroyFunc_)
-{
-    o.resource_ = VK_NULL_HANDLE;
-}
-template<typename T, typename DestroyFuncType>
-VulkanResource<T, DestroyFuncType>& VulkanResource<T, DestroyFuncType>::operator=(VulkanResource&& o) noexcept
-{
-    if (this != &o) {
-        if (resource_ && destroyFunc_) destroyFunc_(device_, resource_, nullptr);
-        device_ = o.device_; resource_ = o.resource_; destroyFunc_ = o.destroyFunc_;
-        o.resource_ = VK_NULL_HANDLE;
-    }
-    return *this;
-}
-template<typename T, typename DestroyFuncType>
-void VulkanResource<T, DestroyFuncType>::swap(VulkanResource& other) noexcept
-{
-    std::swap(device_, other.device_);
-    std::swap(resource_, other.resource_);
-    std::swap(destroyFunc_, other.destroyFunc_);
-}
-
-/* -----------------------------------------------------------------
-   VulkanDescriptorSet – implementation
-   ----------------------------------------------------------------- */
-VulkanDescriptorSet::VulkanDescriptorSet(VkDevice device, VkDescriptorPool pool,
-                                         VkDescriptorSet set, PFN_vkFreeDescriptorSets freeFunc)
-    : device_(device), pool_(pool), set_(set), freeFunc_(freeFunc)
-{
-    if (!device || !pool || !set || !freeFunc)
-        throw VulkanRTXException("VulkanDescriptorSet initialized with null");
-}
-VulkanDescriptorSet::~VulkanDescriptorSet()
-{
-    if (set_ != VK_NULL_HANDLE && freeFunc_)
-        freeFunc_(device_, pool_, 1, &set_);
-}
-VulkanDescriptorSet::VulkanDescriptorSet(VulkanDescriptorSet&& o) noexcept
-    : device_(o.device_), pool_(o.pool_), set_(o.set_), freeFunc_(o.freeFunc_)
-{
-    o.set_ = VK_NULL_HANDLE;
-}
-VulkanDescriptorSet& VulkanDescriptorSet::operator=(VulkanDescriptorSet&& o) noexcept
-{
-    if (this != &o) {
-        if (set_ && freeFunc_) freeFunc_(device_, pool_, 1, &set_);
-        device_ = o.device_; pool_ = o.pool_; set_ = o.set_; freeFunc_ = o.freeFunc_;
-        o.set_ = VK_NULL_HANDLE;
-    }
-    return *this;
-}
-
-/* -----------------------------------------------------------------
-   Constructor
+   Constructor – FULLY FIXED + MAX LOGGING
+   CALLS: createDescriptorSetLayout() → createDescriptorPoolAndSet() → createBlackFallbackImage()
+   rtPipeline_ / rtPipelineLayout_ → RAW Vk handles (non-owning)
    ----------------------------------------------------------------- */
 VulkanRTX::VulkanRTX(std::shared_ptr<Vulkan::Context> ctx, int width, int height,
                      VulkanPipelineManager* pipelineMgr)
@@ -102,20 +41,58 @@ VulkanRTX::VulkanRTX(std::shared_ptr<Vulkan::Context> ctx, int width, int height
       pipelineMgr_(pipelineMgr),
       device_(VK_NULL_HANDLE),
       physicalDevice_(VK_NULL_HANDLE),
-      extent_{static_cast<uint32_t>(width), static_cast<uint32_t>(height)}
-{
-    LOG_INFO_CAT("VulkanRTX", "{}VulkanRTX::VulkanRTX() — START [{}x{}]{}", ARCTIC_CYAN, width, height, RESET);
+      extent_{static_cast<uint32_t>(width), static_cast<uint32_t>(height)},
 
+      // RAII Handles (must be initialized in order of declaration in header)
+      dsLayout_(context_->device, nullptr, "RTX Desc Layout"),
+      dsPool_(context_->device, nullptr, "RTX Desc Pool"),
+      ds_(context_->device, VK_NULL_HANDLE, nullptr, "RTX Desc Set"),
+
+      // NON-OWNING: rtPipeline_ and rtPipelineLayout_ are raw Vk handles
+      rtPipeline_(VK_NULL_HANDLE),
+      rtPipelineLayout_(VK_NULL_HANDLE),
+
+      blas_(context_->device, nullptr, "BLAS"),
+      tlas_(context_->device, nullptr, "TLAS"),
+      blasBuffer_(context_->device, nullptr, "BLAS Buffer"),
+      blasMemory_(context_->device, nullptr, "BLAS Memory"),
+      tlasBuffer_(context_->device, nullptr, "TLAS Buffer"),
+      tlasMemory_(context_->device, nullptr, "TLAS Memory"),
+
+      sbtBuffer_(context_->device, nullptr, "SBT Buffer"),
+      sbtMemory_(context_->device, nullptr, "SBT Memory"),
+
+      blackFallbackImage_(context_->device, nullptr, "BLACK Fallback Image"),
+      blackFallbackMemory_(context_->device, nullptr, "BLACK Fallback Memory"),
+      blackFallbackView_(context_->device, nullptr, "BLACK Fallback View"),
+
+      sbtBufferAddress_(0)
+{
+    LOG_INFO_CAT("VulkanRTX", "{}VulkanRTX::VulkanRTX() — START [{}x{}]{}", 
+                 OCEAN_TEAL, width, height, RESET);
+
+    // --- Input validation ---
     if (!context_) throw VulkanRTXException("Null context");
     if (!pipelineMgr_) throw VulkanRTXException("Null pipeline manager");
     if (width <= 0 || height <= 0) throw VulkanRTXException("Invalid dimensions");
 
+    // --- Device setup ---
     device_         = context_->device;
     physicalDevice_ = context_->physicalDevice;
 
+    if (!device_) {
+        LOG_ERROR_CAT("VulkanRTX", "NULL DEVICE IN CONSTRUCTOR!", CRIMSON_MAGENTA, RESET);
+        throw VulkanRTXException("Null device");
+    }
+
+    /* ---------- LOAD ALL KHR EXTENSION FUNCTIONS ---------- */
+    LOG_INFO_CAT("VulkanRTX", "Loading KHR function pointers...", OCEAN_TEAL, RESET);
 #define LOAD_PROC(name) \
     name = reinterpret_cast<PFN_##name>(vkGetDeviceProcAddr(device_, #name)); \
-    if (!name) throw VulkanRTXException("Failed to load " #name)
+    if (!name) { \
+        LOG_ERROR_CAT("VulkanRTX", "Failed to load " #name, CRIMSON_MAGENTA, RESET); \
+        throw VulkanRTXException("Failed to load " #name); \
+    }
 
     LOAD_PROC(vkGetBufferDeviceAddress);
     LOAD_PROC(vkCmdTraceRaysKHR);
@@ -126,49 +103,54 @@ VulkanRTX::VulkanRTX(std::shared_ptr<Vulkan::Context> ctx, int width, int height
     LOAD_PROC(vkGetRayTracingShaderGroupHandlesKHR);
     LOAD_PROC(vkGetAccelerationStructureDeviceAddressKHR);
     LOAD_PROC(vkCmdCopyAccelerationStructureKHR);
+    LOAD_PROC(vkCmdBuildAccelerationStructuresKHR);
+    
+    // Descriptor KHR (safe to load even if not used directly)
     LOAD_PROC(vkCreateDescriptorSetLayout);
     LOAD_PROC(vkAllocateDescriptorSets);
     LOAD_PROC(vkCreateDescriptorPool);
     LOAD_PROC(vkDestroyDescriptorSetLayout);
     LOAD_PROC(vkDestroyDescriptorPool);
     LOAD_PROC(vkFreeDescriptorSets);
-    LOAD_PROC(vkDestroyPipelineLayout);
-    LOAD_PROC(vkDestroyPipeline);
-    LOAD_PROC(vkDestroyBuffer);
-    LOAD_PROC(vkFreeMemory);
-    LOAD_PROC(vkCreateQueryPool);
-    LOAD_PROC(vkDestroyQueryPool);
-    LOAD_PROC(vkGetQueryPoolResults);
-    LOAD_PROC(vkCmdWriteAccelerationStructuresPropertiesKHR);
-    LOAD_PROC(vkCreateBuffer);
-    LOAD_PROC(vkAllocateMemory);
-    LOAD_PROC(vkBindBufferMemory);
-    LOAD_PROC(vkCmdBuildAccelerationStructuresKHR);
-    LOAD_PROC(vkDestroyImage);
-    LOAD_PROC(vkDestroyImageView);
 
 #undef LOAD_PROC
+    /* ------------------------------------------------------ */
 
-    // FIXED: Create descriptor set layout in constructor to ensure it's available for renderer allocation
+    // --- 1. CREATE DESCRIPTOR SET LAYOUT ---
+    LOG_INFO_CAT("VulkanRTX", "{}Calling createDescriptorSetLayout()...{}", OCEAN_TEAL, RESET);
     createDescriptorSetLayout();
+    LOG_INFO_CAT("VulkanRTX", "  → dsLayout_ @ {}", static_cast<void*>(dsLayout_.get()), RESET);
+
+    // --- 2. CRITICAL: CREATE POOL + SET ---
+    LOG_INFO_CAT("VulkanRTX", "{}CALLING createDescriptorPoolAndSet() NOW!{}", EMERALD_GREEN, RESET);
+    createDescriptorPoolAndSet();
+    LOG_INFO_CAT("VulkanRTX", "  → dsPool_ @ {}", static_cast<void*>(dsPool_.get()), RESET);
+    LOG_INFO_CAT("VulkanRTX", "  → ds_ @ {}", static_cast<void*>(ds_.get()), RESET);
+
+    if (ds_.get() == VK_NULL_HANDLE) {
+        LOG_ERROR_CAT("VulkanRTX", "ds_ STILL NULL AFTER createDescriptorPoolAndSet()!", CRIMSON_MAGENTA, RESET);
+        throw VulkanRTXException("Descriptor set allocation failed");
+    }
+
+    // --- 3. BLACK FALLBACK IMAGE ---
+    LOG_INFO_CAT("VulkanRTX", "{}Calling createBlackFallbackImage()...{}", OCEAN_TEAL, RESET);
+    createBlackFallbackImage();
+    LOG_INFO_CAT("VulkanRTX", "  → blackFallbackView_ @ {}", static_cast<void*>(blackFallbackView_.get()), RESET);
 
     LOG_INFO_CAT("VulkanRTX", "{}VulkanRTX::VulkanRTX() — END{}", EMERALD_GREEN, RESET);
 }
 
 /* -----------------------------------------------------------------
-   Destructor
+   Destructor – RAII handles auto-clean
    ----------------------------------------------------------------- */
-VulkanRTX::~VulkanRTX()
-{
-    LOG_INFO_CAT("VulkanRTX", "{}VulkanRTX::~VulkanRTX() — destroying resources{}", AMBER_YELLOW, RESET);
-    LOG_INFO_CAT("VulkanRTX", "{}RAII cleanup complete{}", EMERALD_GREEN, RESET);
+VulkanRTX::~VulkanRTX() {
+    LOG_INFO_CAT("VulkanRTX", "{}VulkanRTX::~VulkanRTX() — RAII cleanup complete{}", EMERALD_GREEN, RESET);
 }
 
 /* -----------------------------------------------------------------
-   Private helpers (unchanged)
+   Private helpers
    ----------------------------------------------------------------- */
-VkCommandBuffer VulkanRTX::allocateTransientCommandBuffer(VkCommandPool commandPool)
-{
+VkCommandBuffer VulkanRTX::allocateTransientCommandBuffer(VkCommandPool commandPool) {
     LOG_DEBUG_CAT("VulkanRTX", "{}Allocating transient command buffer{}", OCEAN_TEAL, RESET);
     VkCommandBufferAllocateInfo ai = {
         .sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
@@ -181,8 +163,7 @@ VkCommandBuffer VulkanRTX::allocateTransientCommandBuffer(VkCommandPool commandP
     return cmd;
 }
 
-void VulkanRTX::submitAndWaitTransient(VkCommandBuffer cmd, VkQueue queue, VkCommandPool pool)
-{
+void VulkanRTX::submitAndWaitTransient(VkCommandBuffer cmd, VkQueue queue, VkCommandPool pool) {
     LOG_DEBUG_CAT("VulkanRTX", "{}Submitting transient command{}", ARCTIC_CYAN, RESET);
     VkSubmitInfo si = {
         .sType              = VK_STRUCTURE_TYPE_SUBMIT_INFO,
@@ -194,9 +175,8 @@ void VulkanRTX::submitAndWaitTransient(VkCommandBuffer cmd, VkQueue queue, VkCom
     vkFreeCommandBuffers(device_, pool, 1, &cmd);
 }
 
-void VulkanRTX::uploadBlackPixelToImage(VkImage image)
-{
-    VkCommandBuffer cmd = allocateTransientCommandBuffer(context_->commandPool);
+void VulkanRTX::uploadBlackPixelToImage(VkImage image) {
+    auto cmd = allocateTransientCommandBuffer(context_->commandPool);
     VkCommandBufferBeginInfo bi = {
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
         .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
@@ -233,7 +213,59 @@ void VulkanRTX::uploadBlackPixelToImage(VkImage image)
 }
 
 /* -----------------------------------------------------------------
-   createBottomLevelAS
+   createBlackFallbackImage – 1x1 black texture
+   ----------------------------------------------------------------- */
+void VulkanRTX::createBlackFallbackImage() {
+    LOG_INFO_CAT("VulkanRTX", "{}createBlackFallbackImage() – START{}", OCEAN_TEAL, RESET);
+
+    VkImageCreateInfo imgInfo = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .imageType = VK_IMAGE_TYPE_2D,
+        .format = VK_FORMAT_R32G32B32A32_SFLOAT,
+        .extent = {1, 1, 1},
+        .mipLevels = 1,
+        .arrayLayers = 1,
+        .samples = VK_SAMPLE_COUNT_1_BIT,
+        .tiling = VK_IMAGE_TILING_OPTIMAL,
+        .usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
+    };
+    VkImage img;
+    VK_CHECK(vkCreateImage(device_, &imgInfo, nullptr, &img), "Black fallback image");
+
+    VkMemoryRequirements memReq;
+    vkGetImageMemoryRequirements(device_, img, &memReq);
+    VkMemoryAllocateInfo alloc = {
+        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+        .allocationSize = memReq.size,
+        .memoryTypeIndex = VulkanInitializer::findMemoryType(
+            physicalDevice_, memReq.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)
+    };
+    VkDeviceMemory mem;
+    VK_CHECK(vkAllocateMemory(device_, &alloc, nullptr, &mem), "Black fallback mem");
+    VK_CHECK(vkBindImageMemory(device_, img, mem, 0), "Bind black fallback");
+
+    uploadBlackPixelToImage(img);
+
+    VkImageViewCreateInfo viewInfo = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+        .image = img,
+        .viewType = VK_IMAGE_VIEW_TYPE_2D,
+        .format = VK_FORMAT_R32G32B32A32_SFLOAT,
+        .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}
+    };
+    VkImageView view;
+    VK_CHECK(vkCreateImageView(device_, &viewInfo, nullptr, &view), "Black fallback view");
+
+    blackFallbackImage_ = makeHandle(device_, img, "Black Fallback Image");
+    blackFallbackMemory_ = makeHandle(device_, mem, "Black Fallback Memory");
+    blackFallbackView_ = makeHandle(device_, view, "Black Fallback View");
+
+    LOG_INFO_CAT("VulkanRTX", "{}Black fallback image created{}", EMERALD_GREEN, RESET);
+}
+
+/* -----------------------------------------------------------------
+   createBottomLevelAS – FULL RAII
    ----------------------------------------------------------------- */
 void VulkanRTX::createBottomLevelAS(VkPhysicalDevice physicalDevice, VkCommandPool commandPool,
                                     VkQueue queue,
@@ -293,8 +325,9 @@ void VulkanRTX::createBottomLevelAS(VkPhysicalDevice physicalDevice, VkCommandPo
     vkGetAccelerationStructureBuildSizesKHR(device_, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
                                             &buildInfo, maxPrimitiveCounts.data(), &sizeInfo);
 
-    VulkanResource<VkBuffer, PFN_vkDestroyBuffer> asBuffer(device_, VK_NULL_HANDLE, vkDestroyBuffer);
-    VulkanResource<VkDeviceMemory, PFN_vkFreeMemory> asMemory(device_, VK_NULL_HANDLE, vkFreeMemory);
+    /* ----- storage buffer ----- */
+    Dispose::VulkanHandle<VkBuffer> asBuffer(device_, nullptr, "BLAS Storage Buffer");
+    Dispose::VulkanHandle<VkDeviceMemory> asMemory(device_, nullptr, "BLAS Storage Memory");
     createBuffer(physicalDevice, sizeInfo.accelerationStructureSize,
                  VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
                  VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, asBuffer, asMemory);
@@ -308,8 +341,9 @@ void VulkanRTX::createBottomLevelAS(VkPhysicalDevice physicalDevice, VkCommandPo
     VkAccelerationStructureKHR blas;
     VK_CHECK(vkCreateAccelerationStructureKHR(device_, &createInfo, nullptr, &blas), "Create BLAS");
 
-    VulkanResource<VkBuffer, PFN_vkDestroyBuffer> scratchBuffer(device_, VK_NULL_HANDLE, vkDestroyBuffer);
-    VulkanResource<VkDeviceMemory, PFN_vkFreeMemory> scratchMemory(device_, VK_NULL_HANDLE, vkFreeMemory);
+    /* ----- scratch buffer ----- */
+    Dispose::VulkanHandle<VkBuffer> scratchBuffer(device_, nullptr, "BLAS Scratch Buffer");
+    Dispose::VulkanHandle<VkDeviceMemory> scratchMemory(device_, nullptr, "BLAS Scratch Memory");
     createBuffer(physicalDevice, sizeInfo.buildScratchSize,
                  VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
                  VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, scratchBuffer, scratchMemory);
@@ -336,17 +370,18 @@ void VulkanRTX::createBottomLevelAS(VkPhysicalDevice physicalDevice, VkCommandPo
     VK_CHECK(vkEndCommandBuffer(cmd), "End BLAS build");
     submitAndWaitTransient(cmd, queue, commandPool);
 
-    if (blas_.get()) vkDestroyAccelerationStructureKHR(device_, blas_.get(), nullptr);
-    blas_ = {device_, blas, vkDestroyAccelerationStructureKHR};
-    blasBuffer_.swap(asBuffer);
-    blasMemory_.swap(asMemory);
+    /* ----- store RAII handles ----- */
+    blas_ = makeHandle(device_, blas, "BLAS");
+    blas_.setDestroyFunc(vkDestroyAccelerationStructureKHR);
+    blasBuffer_ = std::move(asBuffer);
+    blasMemory_ = std::move(asMemory);
 
     LOG_INFO_CAT("VulkanRTX", "{}BLAS created @ 0x{:x}{}", EMERALD_GREEN,
                  reinterpret_cast<uintptr_t>(blas), RESET);
 }
 
 /* -----------------------------------------------------------------
-   createTopLevelAS
+   createTopLevelAS – FULL RAII
    ----------------------------------------------------------------- */
 void VulkanRTX::createTopLevelAS(VkPhysicalDevice physicalDevice, VkCommandPool commandPool,
                                  VkQueue queue,
@@ -384,8 +419,10 @@ void VulkanRTX::createTopLevelAS(VkPhysicalDevice physicalDevice, VkCommandPool 
     }
 
     VkDeviceSize instanceDataSize = asInstances.size() * sizeof(VkAccelerationStructureInstanceKHR);
-    VulkanResource<VkBuffer, PFN_vkDestroyBuffer> instanceBuffer(device_, VK_NULL_HANDLE, vkDestroyBuffer);
-    VulkanResource<VkDeviceMemory, PFN_vkFreeMemory> instanceMemory(device_, VK_NULL_HANDLE, vkFreeMemory);
+
+    /* ----- instance buffer (host-visible) ----- */
+    Dispose::VulkanHandle<VkBuffer> instanceBuffer(device_, nullptr, "TLAS Instance Buffer");
+    Dispose::VulkanHandle<VkDeviceMemory> instanceMemory(device_, nullptr, "TLAS Instance Memory");
     createBuffer(physicalDevice, instanceDataSize,
                  VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
                  VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR,
@@ -424,8 +461,9 @@ void VulkanRTX::createTopLevelAS(VkPhysicalDevice physicalDevice, VkCommandPool 
     vkGetAccelerationStructureBuildSizesKHR(device_, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
                                             &buildInfo, &primitiveCount, &sizeInfo);
 
-    VulkanResource<VkBuffer, PFN_vkDestroyBuffer> asBuffer(device_, VK_NULL_HANDLE, vkDestroyBuffer);
-    VulkanResource<VkDeviceMemory, PFN_vkFreeMemory> asMemory(device_, VK_NULL_HANDLE, vkFreeMemory);
+    /* ----- TLAS storage buffer ----- */
+    Dispose::VulkanHandle<VkBuffer> asBuffer(device_, nullptr, "TLAS Storage Buffer");
+    Dispose::VulkanHandle<VkDeviceMemory> asMemory(device_, nullptr, "TLAS Storage Memory");
     createBuffer(physicalDevice, sizeInfo.accelerationStructureSize,
                  VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
                  VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, asBuffer, asMemory);
@@ -439,8 +477,9 @@ void VulkanRTX::createTopLevelAS(VkPhysicalDevice physicalDevice, VkCommandPool 
     VkAccelerationStructureKHR tlas;
     VK_CHECK(vkCreateAccelerationStructureKHR(device_, &createInfo, nullptr, &tlas), "Create TLAS");
 
-    VulkanResource<VkBuffer, PFN_vkDestroyBuffer> scratchBuffer(device_, VK_NULL_HANDLE, vkDestroyBuffer);
-    VulkanResource<VkDeviceMemory, PFN_vkFreeMemory> scratchMemory(device_, VK_NULL_HANDLE, vkFreeMemory);
+    /* ----- scratch buffer ----- */
+    Dispose::VulkanHandle<VkBuffer> scratchBuffer(device_, nullptr, "TLAS Scratch Buffer");
+    Dispose::VulkanHandle<VkDeviceMemory> scratchMemory(device_, nullptr, "TLAS Scratch Memory");
     createBuffer(physicalDevice, sizeInfo.buildScratchSize,
                  VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
                  VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, scratchBuffer, scratchMemory);
@@ -468,20 +507,20 @@ void VulkanRTX::createTopLevelAS(VkPhysicalDevice physicalDevice, VkCommandPool 
     VK_CHECK(vkEndCommandBuffer(cmd), "End TLAS build");
     submitAndWaitTransient(cmd, queue, commandPool);
 
-    if (tlas_.get()) vkDestroyAccelerationStructureKHR(device_, tlas_.get(), nullptr);
-    tlas_ = {device_, tlas, vkDestroyAccelerationStructureKHR};
-    tlasBuffer_.swap(asBuffer);
-    tlasMemory_.swap(asMemory);
+    /* ----- store RAII handles ----- */
+    tlas_ = makeHandle(device_, tlas, "TLAS");
+    tlas_.setDestroyFunc(vkDestroyAccelerationStructureKHR);
+    tlasBuffer_ = std::move(asBuffer);
+    tlasMemory_ = std::move(asMemory);
 
     LOG_INFO_CAT("VulkanRTX", "{}TLAS created @ 0x{:x}{}", EMERALD_GREEN,
                  reinterpret_cast<uintptr_t>(tlas), RESET);
 }
 
 /* -----------------------------------------------------------------
-   createDescriptorSetLayout
+   createDescriptorSetLayout – ALL 11 BINDINGS
    ----------------------------------------------------------------- */
-void VulkanRTX::createDescriptorSetLayout()
-{
+void VulkanRTX::createDescriptorSetLayout() {
     std::array<VkDescriptorSetLayoutBinding, 11> bindings = {};
 
     bindings[static_cast<uint32_t>(DescriptorBindings::TLAS)] = {
@@ -559,16 +598,24 @@ void VulkanRTX::createDescriptorSetLayout()
 
     VkDescriptorSetLayout layout;
     VK_CHECK(vkCreateDescriptorSetLayout(device_, &layoutInfo, nullptr, &layout), "Create RTX descriptor set layout");
-    setDescriptorSetLayout(layout);
 
+    dsLayout_ = makeHandle(device_, layout, "RTX Desc Layout");
     LOG_INFO_CAT("VulkanRTX", "{}Descriptor set layout created{}", EMERALD_GREEN, RESET);
 }
 
 /* -----------------------------------------------------------------
-   createDescriptorPoolAndSet – fixed address-of
+   createDescriptorPoolAndSet – RAII
    ----------------------------------------------------------------- */
-void VulkanRTX::createDescriptorPoolAndSet()
-{
+void VulkanRTX::createDescriptorPoolAndSet() {
+    LOG_INFO_CAT("VulkanRTX", "{}createDescriptorPoolAndSet() – START{}", OCEAN_TEAL, RESET);
+    LOG_INFO_CAT("VulkanRTX", "  → device_ @ {}", static_cast<void*>(device_), RESET);
+    LOG_INFO_CAT("VulkanRTX", "  → dsLayout_ @ {}", static_cast<void*>(dsLayout_.get()), RESET);
+
+    if (dsLayout_.get() == VK_NULL_HANDLE) {
+        LOG_ERROR_CAT("VulkanRTX", "dsLayout_ is NULL! Cannot create pool!", CRIMSON_MAGENTA, RESET);
+        throw VulkanRTXException("Descriptor set layout missing");
+    }
+
     std::array<VkDescriptorPoolSize, 5> poolSizes = {};
     poolSizes[0] = { VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1 };
     poolSizes[1] = { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 2 };
@@ -583,12 +630,20 @@ void VulkanRTX::createDescriptorPoolAndSet()
         .pPoolSizes = poolSizes.data()
     };
 
-    VkDescriptorPool pool;
-    VK_CHECK(vkCreateDescriptorPool(device_, &poolInfo, nullptr, &pool), "Create RTX descriptor pool");
-    setDescriptorPool(pool);
+    VkDescriptorPool pool = VK_NULL_HANDLE;
+    LOG_INFO_CAT("VulkanRTX", "vkCreateDescriptorPool() → CALL", OCEAN_TEAL, RESET);
+    VkResult result = vkCreateDescriptorPool(device_, &poolInfo, nullptr, &pool);
+    LOG_INFO_CAT("VulkanRTX", "vkCreateDescriptorPool() → result = {}", result, RESET);
+
+    if (result != VK_SUCCESS) {
+        LOG_ERROR_CAT("VulkanRTX", "vkCreateDescriptorPool FAILED: {}", result, CRIMSON_MAGENTA, RESET);
+        throw VulkanRTXException("Failed to create RTX descriptor pool");
+    }
+
+    dsPool_ = makeHandle(device_, pool, "RTX Desc Pool");
+    LOG_INFO_CAT("VulkanRTX", "  → dsPool_ @ {}", static_cast<void*>(dsPool_.get()), RESET);
 
     VkDescriptorSetLayout layout = dsLayout_.get();
-
     VkDescriptorSetAllocateInfo allocInfo = {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
         .descriptorPool = pool,
@@ -596,92 +651,41 @@ void VulkanRTX::createDescriptorPoolAndSet()
         .pSetLayouts = &layout
     };
 
-    VkDescriptorSet set;
-    VK_CHECK(vkAllocateDescriptorSets(device_, &allocInfo, &set), "Allocate RTX descriptor set");
-    setDescriptorSet(set);
+    VkDescriptorSet set = VK_NULL_HANDLE;
+    LOG_INFO_CAT("VulkanRTX", "vkAllocateDescriptorSets() → CALL", OCEAN_TEAL, RESET);
+    result = vkAllocateDescriptorSets(device_, &allocInfo, &set);
+    LOG_INFO_CAT("VulkanRTX", "vkAllocateDescriptorSets() → result = {}", result, RESET);
 
-    LOG_INFO_CAT("VulkanRTX", "{}Descriptor pool + set created{}", EMERALD_GREEN, RESET);
+    if (result != VK_SUCCESS || set == VK_NULL_HANDLE) {
+        LOG_ERROR_CAT("VulkanRTX", "vkAllocateDescriptorSets FAILED: {} | set = {}", 
+                      result, static_cast<void*>(set), CRIMSON_MAGENTA, RESET);
+        throw VulkanRTXException("Failed to allocate RTX descriptor set");
+    }
+
+    ds_ = Dispose::VulkanHandle<VkDescriptorSet>(
+        device_, set,
+        [pool = dsPool_.get()](VkDevice d, VkDescriptorSet s, const VkAllocationCallbacks*) {
+            if (s != VK_NULL_HANDLE && pool != VK_NULL_HANDLE) {
+                ::vkFreeDescriptorSets(d, pool, 1, &s);
+            }
+        },
+        "RTX Desc Set"
+    );
+
+    LOG_INFO_CAT("VulkanRTX", "{}createDescriptorPoolAndSet() – SUCCESS @ {}{}", 
+                 EMERALD_GREEN, static_cast<void*>(set), RESET);
 }
 
 /* -----------------------------------------------------------------
-   createRayTracingPipeline
+   createRayTracingPipeline – REMOVED (pipeline set externally)
    ----------------------------------------------------------------- */
-void VulkanRTX::createRayTracingPipeline(uint32_t maxRayRecursionDepth)
-{
-    if (!pipelineMgr_) throw VulkanRTXException("Pipeline manager null");
-
-    VkPipelineLayout layout = pipelineMgr_->getRayTracingPipelineLayout();
-    if (layout == VK_NULL_HANDLE) throw VulkanRTXException("Pipeline layout missing");
-
-    VkPipeline pipeline = pipelineMgr_->getRayTracingPipeline();
-    if (pipeline == VK_NULL_HANDLE) throw VulkanRTXException("Ray tracing pipeline missing");
-
-    setPipelineLayout(layout);
-    setPipeline(pipeline);
-
-    LOG_INFO_CAT("VulkanRTX", "{}Ray tracing pipeline bound{}", EMERALD_GREEN, RESET);
-}
-
-/* -----------------------------------------------------------------
-   createShaderBindingTable – removed unused variable
-   ----------------------------------------------------------------- */
-void VulkanRTX::createShaderBindingTable(VkPhysicalDevice physicalDevice)
-{
-    if (!rtPipeline_.get()) throw VulkanRTXException("Pipeline not created");
-
-    const uint32_t groupCount = 4;
-    VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProps = {
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR
-    };
-    VkPhysicalDeviceProperties2 props2 = {
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
-        .pNext = &rtProps
-    };
-    vkGetPhysicalDeviceProperties2(physicalDevice, &props2);
-
-    const uint32_t handleSize    = rtProps.shaderGroupHandleSize;
-    const uint32_t baseAlignment = rtProps.shaderGroupBaseAlignment;
-    uint32_t sbtSize = groupCount * handleSize;
-    sbtSize = (sbtSize + baseAlignment - 1) & ~(baseAlignment - 1);
-
-    std::vector<uint8_t> shaderHandleStorage(sbtSize);
-    VK_CHECK(vkGetRayTracingShaderGroupHandlesKHR(device_, rtPipeline_.get(), 0, groupCount,
-                                                  sbtSize, shaderHandleStorage.data()),
-             "Get shader group handles");
-
-    VulkanResource<VkBuffer, PFN_vkDestroyBuffer> sbtBuffer(device_, VK_NULL_HANDLE, vkDestroyBuffer);
-    VulkanResource<VkDeviceMemory, PFN_vkFreeMemory> sbtMemory(device_, VK_NULL_HANDLE, vkFreeMemory);
-    createBuffer(physicalDevice, sbtSize,
-                 VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                 sbtBuffer, sbtMemory);
-
-    void* data;
-    VK_CHECK(vkMapMemory(device_, sbtMemory.get(), 0, sbtSize, 0, &data), "Map SBT");
-    std::memcpy(data, shaderHandleStorage.data(), sbtSize);
-    vkUnmapMemory(device_, sbtMemory.get());
-
-    VkBufferDeviceAddressInfo addrInfo = {
-        .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
-        .buffer = sbtBuffer.get()
-    };
-    VkDeviceAddress sbtAddress = vkGetBufferDeviceAddress(device_, &addrInfo);
-
-    sbt_ = ShaderBindingTable{
-        .raygen   = { sbtAddress,                     handleSize, handleSize },
-        .miss     = { sbtAddress + handleSize,        handleSize, handleSize },
-        .hit      = { sbtAddress + 2*handleSize,      handleSize, handleSize },
-        .callable = { sbtAddress + 3*handleSize,      handleSize, handleSize }
-    };
-
-    LOG_INFO_CAT("VulkanRTX", "{}SBT created @ 0x{:x}{}", EMERALD_GREEN, sbtAddress, RESET);
-}
+// REMOVED: Pipeline is now set via setRayTracingPipeline() from VulkanRenderer
+// No RAII ownership of pipeline/layout
 
 /* -----------------------------------------------------------------
    updateDescriptorSetForTLAS
    ----------------------------------------------------------------- */
-void VulkanRTX::updateDescriptorSetForTLAS(VkAccelerationStructureKHR tlas)
-{
+void VulkanRTX::updateDescriptorSetForTLAS(VkAccelerationStructureKHR tlas) {
     if (tlas == VK_NULL_HANDLE || !ds_.get()) return;
 
     VkWriteDescriptorSetAccelerationStructureKHR asWrite = {
@@ -705,7 +709,7 @@ void VulkanRTX::updateDescriptorSetForTLAS(VkAccelerationStructureKHR tlas)
 }
 
 /* -----------------------------------------------------------------
-   initializeRTX
+   initializeRTX / updateRTX – RAII
    ----------------------------------------------------------------- */
 void VulkanRTX::initializeRTX(VkPhysicalDevice physicalDevice, VkCommandPool commandPool,
                               VkQueue graphicsQueue,
@@ -719,16 +723,91 @@ void VulkanRTX::initializeRTX(VkPhysicalDevice physicalDevice, VkCommandPool com
     createTopLevelAS(physicalDevice, commandPool, graphicsQueue,
                      {{blas_.get(), glm::mat4(1.0f)}});
 
-    createDescriptorPoolAndSet();
-
-    createRayTracingPipeline(maxRayRecursionDepth);
     createShaderBindingTable(physicalDevice);
     updateDescriptorSetForTLAS(tlas_.get());
 }
 
-/* -----------------------------------------------------------------
-   updateRTX
-   ----------------------------------------------------------------- */
+void VulkanRTX::createShaderBindingTable(VkPhysicalDevice physicalDevice) {
+    LOG_INFO_CAT("SBT", "createShaderBindingTable() – START", OCEAN_TEAL, RESET);
+
+    if (rtPipeline_ == VK_NULL_HANDLE) {
+        LOG_ERROR_CAT("SBT", "Ray tracing pipeline not set!", CRIMSON_MAGENTA, RESET);
+        return;
+    }
+
+    const auto& props = context_->rtProperties;
+    if (props.shaderGroupHandleSize == 0 || props.shaderGroupBaseAlignment == 0) {
+        LOG_ERROR_CAT("SBT", "Invalid ray tracing properties!", CRIMSON_MAGENTA, RESET);
+        return;
+    }
+
+    uint32_t handleSize = props.shaderGroupHandleSize;
+    uint32_t handleAlign = props.shaderGroupBaseAlignment;
+    uint32_t handleSizeAligned = (handleSize + handleAlign - 1) & ~(handleAlign - 1);
+
+    uint32_t groupCount = 3;
+    VkDeviceSize sbtSize = static_cast<VkDeviceSize>(groupCount) * handleSizeAligned;
+
+    createBuffer(physicalDevice, sbtSize,
+                 VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                 sbtBuffer_, sbtMemory_);
+
+    if (sbtBuffer_.get() == VK_NULL_HANDLE) {
+        LOG_ERROR_CAT("SBT", "Failed to create SBT buffer!", CRIMSON_MAGENTA, RESET);
+        return;
+    }
+
+    VkBufferDeviceAddressInfo addrInfo{
+        .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
+        .buffer = sbtBuffer_.get()
+    };
+    sbtBufferAddress_ = vkGetBufferDeviceAddress(device_, &addrInfo);
+    if (sbtBufferAddress_ == 0) {
+        LOG_ERROR_CAT("SBT", "Failed to get SBT device address!", CRIMSON_MAGENTA, RESET);
+        return;
+    }
+
+    std::vector<uint8_t> shaderHandleStorage(groupCount * handleSize);
+    VK_CHECK(vkGetRayTracingShaderGroupHandlesKHR(device_, rtPipeline_,  // RAW
+                                                  0, groupCount, shaderHandleStorage.size(), shaderHandleStorage.data()),
+             "Failed to get shader group handles");
+
+    void* data = nullptr;
+    VK_CHECK(vkMapMemory(device_, sbtMemory_.get(), 0, sbtSize, 0, &data), "Failed to map SBT memory");
+    auto* pData = reinterpret_cast<uint8_t*>(data);
+
+    for (uint32_t g = 0; g < groupCount; ++g) {
+        memcpy(pData, shaderHandleStorage.data() + g * handleSize, handleSize);
+        pData += handleSizeAligned;
+    }
+
+    vkUnmapMemory(device_, sbtMemory_.get());
+
+    sbt_.raygen   = { sbtBufferAddress_ + 0 * handleSizeAligned, handleSizeAligned, handleSizeAligned };
+    sbt_.miss     = { sbtBufferAddress_ + 1 * handleSizeAligned, handleSizeAligned, handleSizeAligned };
+    sbt_.hit      = { sbtBufferAddress_ + 2 * handleSizeAligned, handleSizeAligned, handleSizeAligned };
+    sbt_.callable = { 0, 0, 0 };
+
+    LOG_INFO_CAT("SBT", "SBT READY: raygen=0x{:x}, miss=0x{:x}, hit=0x{:x}",
+                 sbt_.raygen.deviceAddress, sbt_.miss.deviceAddress, sbt_.hit.deviceAddress, RESET);
+}
+
+void VulkanRTX::setRayTracingPipeline(VkPipeline pipeline, VkPipelineLayout layout) {
+    LOG_INFO_CAT("VulkanRTX", "setRayTracingPipeline() – pipeline @ {}", 
+                 static_cast<void*>(pipeline), RESET);
+
+    if (pipeline == VK_NULL_HANDLE) {
+        LOG_ERROR_CAT("VulkanRTX", "Invalid pipeline passed!", CRIMSON_MAGENTA, RESET);
+        return;
+    }
+
+    rtPipeline_ = pipeline;        // RAW
+    rtPipelineLayout_ = layout;    // RAW
+
+    LOG_INFO_CAT("VulkanRTX", "Ray tracing pipeline assigned (non-owning)", EMERALD_GREEN, RESET);
+}
+
 void VulkanRTX::updateRTX(VkPhysicalDevice physicalDevice, VkCommandPool commandPool,
                           VkQueue graphicsQueue,
                           const std::vector<std::tuple<VkBuffer, VkBuffer, uint32_t, uint32_t, uint64_t>>& geometries,
@@ -743,46 +822,12 @@ void VulkanRTX::updateRTX(VkPhysicalDevice physicalDevice, VkCommandPool command
 }
 
 /* -----------------------------------------------------------------
-   -----------------------------------------------------------------
-   IMPLEMENTATIONS OF THE MISSING PRIVATE FUNCTIONS
-   -----------------------------------------------------------------
-   ----------------------------------------------------------------- */
-
-/* -----------------------------------------------------------------
-   setDescriptorSetLayout / setDescriptorPool / setDescriptorSet
-   ----------------------------------------------------------------- */
-void VulkanRTX::setDescriptorSetLayout(VkDescriptorSetLayout layout)
-{
-    dsLayout_ = {device_, layout, vkDestroyDescriptorSetLayout};
-}
-void VulkanRTX::setDescriptorPool(VkDescriptorPool pool)
-{
-    dsPool_ = {device_, pool, vkDestroyDescriptorPool};
-}
-void VulkanRTX::setDescriptorSet(VkDescriptorSet set)
-{
-    ds_ = VulkanDescriptorSet(device_, dsPool_.get(), set, vkFreeDescriptorSets);
-}
-
-/* -----------------------------------------------------------------
-   setPipelineLayout / setPipeline
-   ----------------------------------------------------------------- */
-void VulkanRTX::setPipelineLayout(VkPipelineLayout layout)
-{
-    rtPipelineLayout_ = {device_, layout, vkDestroyPipelineLayout};
-}
-void VulkanRTX::setPipeline(VkPipeline pipeline)
-{
-    rtPipeline_ = {device_, pipeline, vkDestroyPipeline};
-}
-
-/* -----------------------------------------------------------------
-   createBuffer – generic helper used everywhere
+   createBuffer – RAII
    ----------------------------------------------------------------- */
 void VulkanRTX::createBuffer(VkPhysicalDevice physicalDevice, VkDeviceSize size,
                              VkBufferUsageFlags usage, VkMemoryPropertyFlags properties,
-                             VulkanResource<VkBuffer, PFN_vkDestroyBuffer>& buffer,
-                             VulkanResource<VkDeviceMemory, PFN_vkFreeMemory>& memory)
+                             VulkanHandle<VkBuffer>& buffer,
+                             VulkanHandle<VkDeviceMemory>& memory)
 {
     VkBufferCreateInfo bufferInfo = {
         .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
@@ -793,12 +838,11 @@ void VulkanRTX::createBuffer(VkPhysicalDevice physicalDevice, VkDeviceSize size,
 
     VkBuffer buf;
     VK_CHECK(vkCreateBuffer(device_, &bufferInfo, nullptr, &buf), "Create buffer");
-    buffer = {device_, buf, vkDestroyBuffer};
 
     VkMemoryRequirements memReqs;
     vkGetBufferMemoryRequirements(device_, buf, &memReqs);
 
-    uint32_t memType = findMemoryType(physicalDevice, memReqs.memoryTypeBits, properties);
+    uint32_t memType = VulkanInitializer::findMemoryType(physicalDevice, memReqs.memoryTypeBits, properties);
 
     VkMemoryAllocateInfo allocInfo = {
         .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
@@ -808,40 +852,92 @@ void VulkanRTX::createBuffer(VkPhysicalDevice physicalDevice, VkDeviceSize size,
 
     VkDeviceMemory mem;
     VK_CHECK(vkAllocateMemory(device_, &allocInfo, nullptr, &mem), "Allocate buffer memory");
-    memory = {device_, mem, vkFreeMemory};
-
     VK_CHECK(vkBindBufferMemory(device_, buf, mem, 0), "Bind buffer memory");
+
+    buffer = makeHandle(device_, buf, "Buffer");
+    memory = makeHandle(device_, mem, "Memory");
 }
 
 /* -----------------------------------------------------------------
-   findMemoryType – helper for createBuffer
+   recordRayTracingCommands – FULLY FIXED (no .get() on raw handles)
    ----------------------------------------------------------------- */
-uint32_t VulkanRTX::findMemoryType(VkPhysicalDevice physicalDevice, uint32_t typeFilter,
-                                   VkMemoryPropertyFlags properties)
-{
-    VkPhysicalDeviceMemoryProperties memProps;
-    vkGetPhysicalDeviceMemoryProperties(physicalDevice, &memProps);
+void VulkanRTX::recordRayTracingCommands(VkCommandBuffer cmdBuffer, VkExtent2D extent,
+                                         VkImage outputImage, VkImageView outputImageView) {
+    LOG_DEBUG_CAT("RTX", "recordRayTracingCommands() – START", OCEAN_TEAL, RESET);
 
-    for (uint32_t i = 0; i < memProps.memoryTypeCount; ++i) {
-        if ((typeFilter & (1 << i)) &&
-            (memProps.memoryTypes[i].propertyFlags & properties) == properties) {
-            return i;
-        }
+    if (!rtPipeline_ || rtPipeline_ == VK_NULL_HANDLE) {
+        LOG_ERROR_CAT("RTX", "Ray tracing pipeline not created!", CRIMSON_MAGENTA, RESET);
+        return;
     }
-    throw VulkanRTXException("Failed to find suitable memory type");
+    if (ds_.get() == VK_NULL_HANDLE) {
+        LOG_ERROR_CAT("RTX", "Descriptor set not allocated!", CRIMSON_MAGENTA, RESET);
+        return;
+    }
+    if (sbtBufferAddress_ == 0) {
+        LOG_ERROR_CAT("RTX", "SBT has no device address!", CRIMSON_MAGENTA, RESET);
+        return;
+    }
+
+    // --- TRANSITION OUTPUT IMAGE ---
+    VkImageMemoryBarrier barrier{
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .srcAccessMask = 0,
+        .dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
+        .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+        .newLayout = VK_IMAGE_LAYOUT_GENERAL,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .image = outputImage,
+        .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}
+    };
+    vkCmdPipelineBarrier(cmdBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                         VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
+                         0, 0, nullptr, 0, nullptr, 1, &barrier);
+
+    // --- BIND PIPELINE ---
+    vkCmdBindPipeline(cmdBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, rtPipeline_);
+
+    // --- BIND DESCRIPTOR SET (FIXED) ---
+    VkDescriptorSet ds = ds_.get();  // ← TEMPORARY LVALUE
+    vkCmdBindDescriptorSets(cmdBuffer,
+                            VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
+                            rtPipelineLayout_,
+                            0, 1, &ds,  // ← VALID ADDRESS
+                            0, nullptr);
+
+    // --- SBT REGIONS ---
+    const uint32_t handleSizeAligned = 32;
+    const VkStridedDeviceAddressRegionKHR raygenRegion{
+        .deviceAddress = sbt_.raygen.deviceAddress,
+        .stride = handleSizeAligned,
+        .size = handleSizeAligned
+    };
+    const VkStridedDeviceAddressRegionKHR missRegion{
+        .deviceAddress = sbt_.miss.deviceAddress,
+        .stride = handleSizeAligned,
+        .size = handleSizeAligned
+    };
+    const VkStridedDeviceAddressRegionKHR hitRegion{
+        .deviceAddress = sbt_.hit.deviceAddress,
+        .stride = handleSizeAligned,
+        .size = handleSizeAligned
+    };
+    const VkStridedDeviceAddressRegionKHR callableRegion{0, 0, 0};
+
+    // --- DISPATCH RAYS ---
+    vkCmdTraceRaysKHR(cmdBuffer,
+                      &raygenRegion, &missRegion, &hitRegion, &callableRegion,
+                      extent.width, extent.height, 1);
+
+    // --- TRANSITION BACK ---
+    barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    barrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    barrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+    barrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    vkCmdPipelineBarrier(cmdBuffer, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
+                         VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                         0, 0, nullptr, 0, nullptr, 1, &barrier);
+
+    LOG_DEBUG_CAT("RTX", "recordRayTracingCommands() – COMPLETE", EMERALD_GREEN, RESET);
 }
-
-/* -----------------------------------------------------------------
-   Explicit template instantiations
-   ----------------------------------------------------------------- */
-template class VulkanResource<VkBuffer, PFN_vkDestroyBuffer>;
-template class VulkanResource<VkDeviceMemory, PFN_vkFreeMemory>;
-template class VulkanResource<VkDescriptorSetLayout, PFN_vkDestroyDescriptorSetLayout>;
-template class VulkanResource<VkDescriptorPool, PFN_vkDestroyDescriptorPool>;
-template class VulkanResource<VkPipelineLayout, PFN_vkDestroyPipelineLayout>;
-template class VulkanResource<VkPipeline, PFN_vkDestroyPipeline>;
-template class VulkanResource<VkAccelerationStructureKHR, PFN_vkDestroyAccelerationStructureKHR>;
-template class VulkanResource<VkImage, PFN_vkDestroyImage>;
-template class VulkanResource<VkImageView, PFN_vkDestroyImageView>;
-
 } // namespace VulkanRTX

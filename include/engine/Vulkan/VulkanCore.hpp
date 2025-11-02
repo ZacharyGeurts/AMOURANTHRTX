@@ -7,6 +7,7 @@
 //        ADDED: width, height, swapchainManager (namespace VulkanRTX)
 //        FIXED: Member order → NO -Wreorder
 //        BETA: All ray-tracing extensions come from <vulkan/vulkan_beta.h>
+//        FIXED: ~Context() adds vkDeviceWaitIdle before resourceManager.cleanup (prevents segfault)
 
 #pragma once
 #ifndef VULKAN_CORE_HPP
@@ -533,8 +534,10 @@ struct Context {
     Context(Context&&) = delete;
     Context& operator=(Context&&) = delete;
 
+    // FIXED: Add vkDeviceWaitIdle before cleanup to ensure no pending ops (prevents segfault)
     ~Context() {
         if (device) {
+            vkDeviceWaitIdle(device);
             resourceManager.cleanup(device);
         }
     }

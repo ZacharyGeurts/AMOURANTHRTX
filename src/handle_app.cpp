@@ -98,11 +98,14 @@ void Application::setRenderer(std::unique_ptr<VulkanRTX::VulkanRenderer> rendere
 }
 
 Application::~Application() {
+    LOG_INFO_CAT("Application", "{}SHUTTING DOWN APPLICATION...{}", Logging::Color::CRIMSON_MAGENTA, Logging::Color::RESET);
+
     inputHandler_.reset();
     camera_.reset();
     renderer_.reset();
     sdl_.reset();
-    Dispose::quitSDL();
+
+    Dispose::quitSDL();  // Now valid
 }
 
 void Application::initializeInput() {

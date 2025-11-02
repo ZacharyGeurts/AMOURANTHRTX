@@ -1,6 +1,6 @@
 // include/engine/Vulkan/VulkanRenderer.hpp
 // AMOURANTH RTX Engine (C) 2025 by Zachary Geurts gzac5314@gmail.com
-// FINAL: NO REORDER WARNINGS, NO UNINITIALIZED DATA
+// FINAL: RAII via Dispose::VulkanHandle<T>, ZERO LEAKS, NO REORDER WARNINGS
 //        UBOs, Material, Dimension buffers owned by VulkanRenderer
 //        Swapchain data owned directly by VulkanRenderer (no manager for simplicity)
 //        FPS UNLOCKED BY DEFAULT: VK_PRESENT_MODE_IMMEDIATE_KHR
@@ -42,12 +42,11 @@ namespace VulkanRTX {
     // -----------------------------------------------------------------------------
     class VulkanRenderer {
     public:
-        // FIXED: Takes RAW POINTERS (non-owning)
         VulkanRenderer(int width, int height, SDL_Window* window,
                        const std::vector<std::string>& shaderPaths,
                        std::shared_ptr<Vulkan::Context> context,
-                       VulkanPipelineManager* pipelineManager,     // RAW
-                       VulkanBufferManager* bufferManager);        // RAW
+                       VulkanPipelineManager* pipelineManager,
+                       VulkanBufferManager* bufferManager);
 
         ~VulkanRenderer();
 
@@ -56,8 +55,8 @@ namespace VulkanRTX {
         void updateDescriptorSetForFrame(uint32_t frameIndex, VkAccelerationStructureKHR tlas);
         void updateDescriptorSetForTLAS(VkAccelerationStructureKHR tlas);
         void updateGraphicsDescriptorSet(uint32_t frameIndex);
-        void updateComputeDescriptorSet(uint32_t frameIndex);
-        void updateUniformBuffer(uint32_t frameIndex, const Camera& camera);
+        void updateComputeDescriptorSet(uint32_t frameIdx);
+        void updateUniformBuffer(uint32_t frameIdx, const Camera& camera);
         void renderFrame(const Camera& camera);
         void handleResize(int width, int height);
         void cleanup() noexcept;
@@ -65,19 +64,18 @@ namespace VulkanRTX {
         VkDevice getDevice() const { return context_->device; }
         const VulkanRTX& getVulkanRTX() const { return *rtx_; }
 
-        std::vector<glm::vec3> getVertices() const;
-        std::vector<uint32_t>  getIndices() const;
+        const std::vector<glm::vec3>& getVertices() const;
+        const std::vector<uint32_t>&  getIndices() const;
 
-        VkBuffer       getSBTBuffer() const { return sbtBuffer_; }
-        VkDeviceMemory getSBTMemory() const { return sbtMemory_; }
+        // FIXED: Access via VulkanRTX
+        VkBuffer       getSBTBuffer() const { return rtx_->getSBTBuffer(); }
+        VkDeviceMemory getSBTMemory() const { return rtx_->getSBTMemory(); }
 
         void setCurrentMode(int mode) { currentMode_ = mode; }
         int  getCurrentMode() const   { return currentMode_; }
 
     private:
-        // -----------------------------------------------------------------------------
         // PRIVATE METHODS
-        // -----------------------------------------------------------------------------
         VkShaderModule createShaderModule(const std::string& filepath);
         void createRTOutputImages();
         void createAccumulationImages();
@@ -93,16 +91,13 @@ namespace VulkanRTX {
         void createEnvironmentMap();
         void createFramebuffers();
         void applyResize(int newWidth, int newHeight);
-        void createShaderBindingTable();
 
-        // ──────────────────────── SWAPCHAIN (DIRECT OWNERSHIP, FPS UNLOCKED) ────────────────────────
+        // SWAPCHAIN
         void createSwapchain();
         void recreateSwapchain(int width, int height);
         void cleanupSwapchain();
 
-        // -----------------------------------------------------------------------------
         // DISPATCH RENDER MODE
-        // -----------------------------------------------------------------------------
         void dispatchRenderMode(
             uint32_t imageIndex,
             VkBuffer vertexBuffer,
@@ -123,13 +118,10 @@ namespace VulkanRTX {
             const Vulkan::Context& context,
             int mode);
 
-        // -----------------------------------------------------------------------------
         // CORE STATE
-        // -----------------------------------------------------------------------------
         SDL_Window*                         window_ = nullptr;
         std::shared_ptr<Vulkan::Context>    context_;
 
-        // NON-OWNING RAW POINTERS
         VulkanPipelineManager*              pipelineManager_ = nullptr;
         VulkanBufferManager*                bufferManager_   = nullptr;
 
@@ -146,31 +138,31 @@ namespace VulkanRTX {
         int                                 currentRTIndex_   = 0;
         int                                 currentAccumIndex_ = 0;
 
-        // ──────────────────────── SWAPCHAIN DATA (DIRECT) ────────────────────────
+        // SWAPCHAIN DATA
         VkSwapchainKHR                      swapchain_ = VK_NULL_HANDLE;
         std::vector<VkImage>                swapchainImages_;
         VkFormat                            swapchainImageFormat_;
         VkExtent2D                          swapchainExtent_;
         std::vector<VkImageView>            swapchainImageViews_;
 
-        // FRAME SYNCHRONIZATION (OWNED BY RENDERER)
+        // SYNCHRONIZATION
         std::array<VkFence, MAX_FRAMES_IN_FLIGHT>     inFlightFences_ = {};
         std::array<VkSemaphore, MAX_FRAMES_IN_FLIGHT> imageAvailableSemaphores_ = {};
         std::array<VkSemaphore, MAX_FRAMES_IN_FLIGHT> renderFinishedSemaphores_ = {};
 
         // IMAGES
-        VkImage             envMapImage_        = VK_NULL_HANDLE;
-        VkDeviceMemory      envMapImageMemory_  = VK_NULL_HANDLE;
-        VkImageView         envMapImageView_    = VK_NULL_HANDLE;
-        VkSampler           envMapSampler_      = VK_NULL_HANDLE;
+        Dispose::VulkanHandle<VkImage>        envMapImage_;
+        Dispose::VulkanHandle<VkDeviceMemory> envMapImageMemory_;
+        Dispose::VulkanHandle<VkImageView>    envMapImageView_;
+        Dispose::VulkanHandle<VkSampler>      envMapSampler_;
 
-        std::array<VkImage,        2> rtOutputImages_   = { VK_NULL_HANDLE, VK_NULL_HANDLE };
-        std::array<VkDeviceMemory, 2> rtOutputMemories_ = { VK_NULL_HANDLE, VK_NULL_HANDLE };
-        std::array<VkImageView,    2> rtOutputViews_    = { VK_NULL_HANDLE, VK_NULL_HANDLE };
+        std::array<Dispose::VulkanHandle<VkImage>,        2> rtOutputImages_;
+        std::array<Dispose::VulkanHandle<VkDeviceMemory>, 2> rtOutputMemories_;
+        std::array<Dispose::VulkanHandle<VkImageView>,    2> rtOutputViews_;
 
-        std::array<VkImage,        2> accumImages_   = { VK_NULL_HANDLE, VK_NULL_HANDLE };
-        std::array<VkDeviceMemory, 2> accumMemories_ = { VK_NULL_HANDLE, VK_NULL_HANDLE };
-        std::array<VkImageView,    2> accumViews_    = { VK_NULL_HANDLE, VK_NULL_HANDLE };
+        std::array<Dispose::VulkanHandle<VkImage>,        2> accumImages_;
+        std::array<Dispose::VulkanHandle<VkDeviceMemory>, 2> accumMemories_;
+        std::array<Dispose::VulkanHandle<VkImageView>,    2> accumViews_;
         bool resetAccumulation_ = true;
 
         // ACCELERATION STRUCTURES
@@ -184,38 +176,40 @@ namespace VulkanRTX {
         std::vector<VkCommandBuffer> commandBuffers_;
 
         // DESCRIPTOR SETS
-        VkDescriptorPool            descriptorPool_ = VK_NULL_HANDLE;
-        VkDescriptorSet             rtxDescriptorSet_ = VK_NULL_HANDLE;
-        VkDescriptorSetLayout       computeDescriptorSetLayout_ = VK_NULL_HANDLE;
+        Dispose::VulkanHandle<VkDescriptorPool> descriptorPool_;
+        VkDescriptorSet                         rtxDescriptorSet_ = VK_NULL_HANDLE;
+        VkDescriptorSetLayout                   computeDescriptorSetLayout_ = VK_NULL_HANDLE;
         std::array<VkDescriptorSet, MAX_FRAMES_IN_FLIGHT> computeDescriptorSets_{};
 
-        // UNIFORM BUFFERS (OWNED BY RENDERER)
-        std::array<VkBuffer,       MAX_FRAMES_IN_FLIGHT> uniformBuffers_{};
-        std::array<VkDeviceMemory, MAX_FRAMES_IN_FLIGHT> uniformBufferMemories_{};
+        // BUFFERS
+        std::array<Dispose::VulkanHandle<VkBuffer>,       MAX_FRAMES_IN_FLIGHT> uniformBuffers_;
+        std::array<Dispose::VulkanHandle<VkDeviceMemory>, MAX_FRAMES_IN_FLIGHT> uniformBufferMemories_;
 
-        // MATERIAL & DIMENSION BUFFERS (OWNED BY RENDERER)
-        std::array<VkBuffer,       MAX_FRAMES_IN_FLIGHT> materialBuffers_{};
-        std::array<VkDeviceMemory, MAX_FRAMES_IN_FLIGHT> materialBufferMemory_{};
-        std::array<VkBuffer,       MAX_FRAMES_IN_FLIGHT> dimensionBuffers_{};
-        std::array<VkDeviceMemory, MAX_FRAMES_IN_FLIGHT> dimensionBufferMemory_{};
+        std::array<Dispose::VulkanHandle<VkBuffer>,       MAX_FRAMES_IN_FLIGHT> materialBuffers_;
+        std::array<Dispose::VulkanHandle<VkDeviceMemory>, MAX_FRAMES_IN_FLIGHT> materialBufferMemory_;
+        std::array<Dispose::VulkanHandle<VkBuffer>,       MAX_FRAMES_IN_FLIGHT> dimensionBuffers_;
+        std::array<Dispose::VulkanHandle<VkDeviceMemory>, MAX_FRAMES_IN_FLIGHT> dimensionBufferMemory_;
 
         // RAY TRACING STATE
         VkPipeline       rtPipeline_       = VK_NULL_HANDLE;
         VkPipelineLayout rtPipelineLayout_ = VK_NULL_HANDLE;
-        VkBuffer         sbtBuffer_        = VK_NULL_HANDLE;
-        VkDeviceMemory   sbtMemory_        = VK_NULL_HANDLE;
-        ShaderBindingTable sbt_{};  // From VulkanCommon.hpp
+
+        // SBT NOW OWNED BY VulkanRTX → NO LOCAL COPIES
 
         // PERFORMANCE
         std::atomic<bool> swapchainRecreating_{false};
 
-        // QUERY POOLS (TIMESTAMP) — vector, initialized in constructor
+        // QUERY POOLS
         std::vector<VkQueryPool> queryPools_;
         std::array<bool, MAX_FRAMES_IN_FLIGHT> queryReady_ = {false};
         std::array<double, MAX_FRAMES_IN_FLIGHT> lastRTTimeMs_ = {0.0};
 
         // STATE FLAGS
         bool descriptorsUpdated_ = false;
+
+        // GEOMETRY DATA
+        std::vector<glm::vec3> vertices_;
+        std::vector<uint32_t>  indices_;
 
         // FRIENDS
         friend class VulkanRTX;

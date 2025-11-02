@@ -17,9 +17,9 @@
 #include <cstring>
 #include <iostream>
 
-// REMOVED: #define VK_CHECK — NOW USING VulkanRTX::VK_CHECK (UNIQUE WITH MESSAGE)
-
 namespace VulkanRTX {
+
+using namespace Logging::Color;  // <-- ADD THIS LINE
 
 // ---------------------------------------------------------------------------
 //  Debug Callback (for ENABLE_VULKAN_DEBUG)
@@ -124,9 +124,7 @@ VulkanPipelineManager::VulkanPipelineManager(Vulkan::Context& context, int width
         throw std::runtime_error("Vulkan device not initialized");
     }
 
-    // CRITICAL: CREATE PIPELINE CACHE FIRST — NO MORE SEGFAULT
     createPipelineCache();
-
     createGraphicsDescriptorSetLayout();
     createComputeDescriptorSetLayout();
     createRenderPass();
@@ -167,7 +165,7 @@ void VulkanPipelineManager::setupDebugCallback()
     createInfo.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
     createInfo.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
     createInfo.pfnUserCallback = debugCallback;
-    createInfo.pUserData = this;  // Optional: pass 'this' for user data if needed
+    createInfo.pUserData = this;
 
     auto CreateDebugUtilsMessengerEXT = reinterpret_cast<PFN_vkCreateDebugUtilsMessengerEXT>(
         vkGetInstanceProcAddr(context_.instance, "vkCreateDebugUtilsMessengerEXT"));
@@ -254,38 +252,22 @@ VkShaderModule VulkanPipelineManager::loadShader(VkDevice device, const std::str
 // ---------------------------------------------------------------------------
 //  3. PIPELINE CACHE – BLAST LOGGED + CRASH FIXED
 // ---------------------------------------------------------------------------
-void VulkanPipelineManager::createPipelineCache()
-{
-    LOG_INFO_CAT("Vulkan", ">>> CREATING PIPELINE CACHE");
-
-    if (context_.device == VK_NULL_HANDLE) {
-        LOG_ERROR_CAT("Vulkan", "    FATAL: vkCreatePipelineCache called with NULL device!");
-        throw std::runtime_error("Device not initialized");
-    }
+void VulkanPipelineManager::createPipelineCache() {
+    LOG_INFO_CAT("PipelineMgr", "{}Creating pipeline cache...{}", OCEAN_TEAL, RESET);
 
     VkPipelineCacheCreateInfo cacheInfo = {
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO,
-        .pNext = nullptr,
-        .flags = 0,
-        .initialDataSize = 0,
-        .pInitialData = nullptr
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO
     };
 
-    VkPipelineCache cache = VK_NULL_HANDLE;
-    VK_CHECK(vkCreatePipelineCache(context_.device, &cacheInfo, nullptr, &cache),
+    VkPipelineCache rawCache = VK_NULL_HANDLE;
+    VK_CHECK(vkCreatePipelineCache(context_.device, &cacheInfo, nullptr, &rawCache),
              "Create pipeline cache");
 
-    // USE Dispose::VulkanHandle — FULL RAII, NO LAMBDA, NO DOUBLE-FREE
-    pipelineCache_ = Dispose::VulkanHandle<VkPipelineCache>(
-        context_.device,
-        cache,
-        Dispose::getDestroyFunc<VkPipelineCache>(context_.device)
-    );
-
-    char cachePtr[32];
-    std::snprintf(cachePtr, sizeof(cachePtr), "%p", static_cast<void*>(cache));
-    LOG_INFO_CAT("Vulkan", "    CACHE CREATED @ {}", cachePtr);
-    LOG_INFO_CAT("Vulkan", "<<< PIPELINE CACHE READY");
+    pipelineCache_ = Dispose::makeHandle(context_.device, rawCache, "Global Pipeline Cache");
+    LOG_INFO_CAT("PipelineMgr", "{}Pipeline cache created: {}{}",
+                 OCEAN_TEAL,
+                 static_cast<void*>(pipelineCache_.get()),
+                 RESET);
 }
 
 // ---------------------------------------------------------------------------
@@ -333,23 +315,19 @@ void VulkanPipelineManager::createRenderPass()
         .pDependencies = &dependency
     };
 
-    VkRenderPass renderPass = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateRenderPass(context_.device, &renderPassInfo, nullptr, &renderPass), "Create render pass");
+    VkRenderPass rawPass = VK_NULL_HANDLE;
+    VK_CHECK(vkCreateRenderPass(context_.device, &renderPassInfo, nullptr, &rawPass), "Create render pass");
 
-    renderPass_ = Dispose::VulkanHandle<VkRenderPass>(
-        context_.device,
-        renderPass,
-        Dispose::getDestroyFunc<VkRenderPass>(context_.device)
-    );
+    renderPass_ = Dispose::makeHandle(context_.device, rawPass, "RenderPass");
 
     char rpPtr[32];
-    std::snprintf(rpPtr, sizeof(rpPtr), "%p", static_cast<void*>(renderPass));
+    std::snprintf(rpPtr, sizeof(rpPtr), "%p", static_cast<void*>(rawPass));
     LOG_INFO_CAT("Vulkan", "    RENDER PASS CREATED @ {}", rpPtr);
     LOG_INFO_CAT("Vulkan", "<<< RENDER PASS INITIALIZED");
 }
 
 // ---------------------------------------------------------------------------
-//  5. DESCRIPTOR SET LAYOUTS (GRAPHICS) – FIXED UNUSED
+//  5. DESCRIPTOR SET LAYOUTS (GRAPHICS)
 // ---------------------------------------------------------------------------
 void VulkanPipelineManager::createGraphicsDescriptorSetLayout()
 {
@@ -376,11 +354,7 @@ void VulkanPipelineManager::createGraphicsDescriptorSetLayout()
     VkDescriptorSetLayout layout = VK_NULL_HANDLE;
     VK_CHECK(vkCreateDescriptorSetLayout(context_.device, &layoutInfo, nullptr, &layout), "Create graphics DS layout");
 
-    graphicsDescriptorSetLayout_ = Dispose::VulkanHandle<VkDescriptorSetLayout>(
-        context_.device,
-        layout,
-        Dispose::getDestroyFunc<VkDescriptorSetLayout>(context_.device)
-    );
+    graphicsDescriptorSetLayout_ = Dispose::makeHandle(context_.device, layout, "Graphics DS Layout");
 
     char layoutPtr[32];
     std::snprintf(layoutPtr, sizeof(layoutPtr), "%p", static_cast<void*>(layout));
@@ -389,7 +363,7 @@ void VulkanPipelineManager::createGraphicsDescriptorSetLayout()
 }
 
 // ---------------------------------------------------------------------------
-//  6. DESCRIPTOR SET LAYOUTS (COMPUTE) – BLAST LOGGED
+//  6. DESCRIPTOR SET LAYOUTS (COMPUTE)
 // ---------------------------------------------------------------------------
 void VulkanPipelineManager::createComputeDescriptorSetLayout()
 {
@@ -410,11 +384,7 @@ void VulkanPipelineManager::createComputeDescriptorSetLayout()
     VkDescriptorSetLayout layout = VK_NULL_HANDLE;
     VK_CHECK(vkCreateDescriptorSetLayout(context_.device, &layoutInfo, nullptr, &layout), "Create compute DS layout");
 
-    computeDescriptorSetLayout_ = Dispose::VulkanHandle<VkDescriptorSetLayout>(
-        context_.device,
-        layout,
-        Dispose::getDestroyFunc<VkDescriptorSetLayout>(context_.device)
-    );
+    computeDescriptorSetLayout_ = Dispose::makeHandle(context_.device, layout, "Compute DS Layout");
 
     char layoutPtr[32];
     std::snprintf(layoutPtr, sizeof(layoutPtr), "%p", static_cast<void*>(layout));
@@ -423,7 +393,7 @@ void VulkanPipelineManager::createComputeDescriptorSetLayout()
 }
 
 // ---------------------------------------------------------------------------
-//  7. RAY TRACING DESCRIPTOR SET LAYOUT – BLAST LOGGED
+//  7. RAY TRACING DESCRIPTOR SET LAYOUT
 // ---------------------------------------------------------------------------
 VkDescriptorSetLayout VulkanPipelineManager::createRayTracingDescriptorSetLayout()
 {
@@ -455,11 +425,7 @@ VkDescriptorSetLayout VulkanPipelineManager::createRayTracingDescriptorSetLayout
     VkDescriptorSetLayout layout = VK_NULL_HANDLE;
     VK_CHECK(vkCreateDescriptorSetLayout(context_.device, &layoutInfo, nullptr, &layout), "Create RT DS layout");
 
-    rayTracingDescriptorSetLayout_ = Dispose::VulkanHandle<VkDescriptorSetLayout>(
-        context_.device,
-        layout,
-        Dispose::getDestroyFunc<VkDescriptorSetLayout>(context_.device)
-    );
+    rayTracingDescriptorSetLayout_ = Dispose::makeHandle(context_.device, layout, "RT DS Layout");
 
     char layoutPtr[32];
     std::snprintf(layoutPtr, sizeof(layoutPtr), "%p", static_cast<void*>(layout));
@@ -469,7 +435,7 @@ VkDescriptorSetLayout VulkanPipelineManager::createRayTracingDescriptorSetLayout
 }
 
 // ---------------------------------------------------------------------------
-//  8. SHADER BINDING TABLE – BLAST LOGGED
+//  8. SHADER BINDING TABLE – FIXED: Uses .deviceAddress from VulkanCommon.hpp
 // ---------------------------------------------------------------------------
 void VulkanPipelineManager::createShaderBindingTable()
 {
@@ -528,16 +494,8 @@ void VulkanPipelineManager::createShaderBindingTable()
     VK_CHECK(vkAllocateMemory(context_.device, &allocInfo, nullptr, &sbtMemory), "Alloc SBT memory");
     VK_CHECK(vkBindBufferMemory(context_.device, sbtBuffer, sbtMemory, 0), "Bind SBT memory");
 
-    sbtBuffer_ = Dispose::VulkanHandle<VkBuffer>(
-        context_.device,
-        sbtBuffer,
-        Dispose::getDestroyFunc<VkBuffer>(context_.device)
-    );
-    sbtMemory_ = Dispose::VulkanHandle<VkDeviceMemory>(
-        context_.device,
-        sbtMemory,
-        Dispose::getDestroyFunc<VkDeviceMemory>(context_.device)
-    );
+    sbtBuffer_ = Dispose::makeHandle(context_.device, sbtBuffer, "SBT Buffer");
+    sbtMemory_ = Dispose::makeHandle(context_.device, sbtMemory, "SBT Memory");
 
     void* mapped = nullptr;
     VK_CHECK(vkMapMemory(context_.device, sbtMemory_.get(), 0, sbtSize, 0, &mapped), "Map SBT");
@@ -552,21 +510,25 @@ void VulkanPipelineManager::createShaderBindingTable()
 
     const VkDeviceAddress baseAddr = VulkanInitializer::getBufferDeviceAddress(context_, sbtBuffer_.get());
 
+    // FIXED: Use .deviceAddress to match VulkanCommon.hpp
     sbt_.raygen   = { baseAddr + 0 * alignedHandle, alignedHandle, alignedHandle };
     sbt_.miss     = { baseAddr + 1 * alignedHandle, alignedHandle, alignedHandle };
     sbt_.hit      = { baseAddr + 2 * alignedHandle, alignedHandle, alignedHandle };
     sbt_.callable = {};
 
-    LOG_INFO_CAT("Vulkan", "    S BT READY:");
-    LOG_INFO_CAT("Vulkan", "      raygen : 0x{:x} (stride={}, size={})", sbt_.raygen.deviceAddress, sbt_.raygen.stride, sbt_.raygen.size);
-    LOG_INFO_CAT("Vulkan", "      miss   : 0x{:x}", sbt_.miss.deviceAddress);
-    LOG_INFO_CAT("Vulkan", "      hit    : 0x{:x}", sbt_.hit.deviceAddress);
+    LOG_INFO_CAT("Vulkan", "    SBT READY:");
+    LOG_INFO_CAT("Vulkan", "      raygen : 0x{:x} (stride={}, size={})", 
+                 sbt_.raygen.deviceAddress, sbt_.raygen.stride, sbt_.raygen.size);
+    LOG_INFO_CAT("Vulkan", "      miss   : 0x{:x} (stride={}, size={})", 
+                 sbt_.miss.deviceAddress, sbt_.miss.stride, sbt_.miss.size);
+    LOG_INFO_CAT("Vulkan", "      hit    : 0x{:x} (stride={}, size={})", 
+                 sbt_.hit.deviceAddress, sbt_.hit.stride, sbt_.hit.size);
 
     LOG_INFO_CAT("Vulkan", "<<< SBT BUILD COMPLETE");
 }
 
 // ---------------------------------------------------------------------------
-//  9. CREATE RAY TRACING PIPELINE – C++11 SAFE + FULLY LOGGED
+//  9. CREATE RAY TRACING PIPELINE
 // ---------------------------------------------------------------------------
 void VulkanPipelineManager::createRayTracingPipeline()
 {
@@ -627,11 +589,7 @@ void VulkanPipelineManager::createRayTracingPipeline()
     VkPipelineLayout layout = VK_NULL_HANDLE;
     VK_CHECK(vkCreatePipelineLayout(context_.device, &layoutInfo, nullptr, &layout), "Create RT pipeline layout");
 
-    rayTracingPipelineLayout_ = Dispose::VulkanHandle<VkPipelineLayout>(
-        context_.device,
-        layout,
-        Dispose::getDestroyFunc<VkPipelineLayout>(context_.device)
-    );
+    rayTracingPipelineLayout_ = Dispose::makeHandle(context_.device, layout, "RT Pipeline Layout");
 
     VkRayTracingPipelineCreateInfoKHR pipelineInfo = {
         .sType                       = VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR,
@@ -648,11 +606,7 @@ void VulkanPipelineManager::createRayTracingPipeline()
         context_.device, VK_NULL_HANDLE, pipelineCache_.get(),
         1, &pipelineInfo, nullptr, &pipeline), "Create RT pipeline");
 
-    rayTracingPipeline_ = Dispose::VulkanHandle<VkPipeline>(
-        context_.device,
-        pipeline,
-        Dispose::getDestroyFunc<VkPipeline>(context_.device)
-    );
+    rayTracingPipeline_ = Dispose::makeHandle(context_.device, pipeline, "RT Pipeline");
 
     vkDestroyShaderModule(context_.device, raygenMod, nullptr);
     vkDestroyShaderModule(context_.device, missMod, nullptr);
@@ -665,7 +619,7 @@ void VulkanPipelineManager::createRayTracingPipeline()
 }
 
 // ---------------------------------------------------------------------------
-//  10. CREATE COMPUTE PIPELINE – BLAST LOGGED
+//  10. CREATE COMPUTE PIPELINE
 // ---------------------------------------------------------------------------
 void VulkanPipelineManager::createComputePipeline()
 {
@@ -694,11 +648,7 @@ void VulkanPipelineManager::createComputePipeline()
     VkPipelineLayout layout = VK_NULL_HANDLE;
     VK_CHECK(vkCreatePipelineLayout(context_.device, &layoutInfo, nullptr, &layout), "Create compute pipeline layout");
 
-    computePipelineLayout_ = Dispose::VulkanHandle<VkPipelineLayout>(
-        context_.device,
-        layout,
-        Dispose::getDestroyFunc<VkPipelineLayout>(context_.device)
-    );
+    computePipelineLayout_ = Dispose::makeHandle(context_.device, layout, "Compute Pipeline Layout");
 
     VkComputePipelineCreateInfo pipeInfo = {
         .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
@@ -709,11 +659,7 @@ void VulkanPipelineManager::createComputePipeline()
     VkPipeline pipeline = VK_NULL_HANDLE;
     VK_CHECK(vkCreateComputePipelines(context_.device, pipelineCache_.get(), 1, &pipeInfo, nullptr, &pipeline), "Create compute pipeline");
 
-    computePipeline_ = Dispose::VulkanHandle<VkPipeline>(
-        context_.device,
-        pipeline,
-        Dispose::getDestroyFunc<VkPipeline>(context_.device)
-    );
+    computePipeline_ = Dispose::makeHandle(context_.device, pipeline, "Compute Pipeline");
 
     vkDestroyShaderModule(context_.device, compMod, nullptr);
 
@@ -724,7 +670,7 @@ void VulkanPipelineManager::createComputePipeline()
 }
 
 // ---------------------------------------------------------------------------
-//  11. CREATE GRAPHICS PIPELINE – BLAST LOGGED + FIXED ENUM
+//  11. CREATE GRAPHICS PIPELINE
 // ---------------------------------------------------------------------------
 void VulkanPipelineManager::createGraphicsPipeline(int width, int height)
 {
@@ -800,11 +746,7 @@ void VulkanPipelineManager::createGraphicsPipeline(int width, int height)
     VkPipelineLayout layout = VK_NULL_HANDLE;
     VK_CHECK(vkCreatePipelineLayout(context_.device, &layoutInfo, nullptr, &layout), "Create graphics pipeline layout");
 
-    graphicsPipelineLayout_ = Dispose::VulkanHandle<VkPipelineLayout>(
-        context_.device,
-        layout,
-        Dispose::getDestroyFunc<VkPipelineLayout>(context_.device)
-    );
+    graphicsPipelineLayout_ = Dispose::makeHandle(context_.device, layout, "Graphics Pipeline Layout");
 
     VkGraphicsPipelineCreateInfo pipeInfo = {
         .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
@@ -823,11 +765,7 @@ void VulkanPipelineManager::createGraphicsPipeline(int width, int height)
     VkPipeline pipeline = VK_NULL_HANDLE;
     VK_CHECK(vkCreateGraphicsPipelines(context_.device, pipelineCache_.get(), 1, &pipeInfo, nullptr, &pipeline), "Create graphics pipeline");
 
-    graphicsPipeline_ = Dispose::VulkanHandle<VkPipeline>(
-        context_.device,
-        pipeline,
-        Dispose::getDestroyFunc<VkPipeline>(context_.device)
-    );
+    graphicsPipeline_ = Dispose::makeHandle(context_.device, pipeline, "Graphics Pipeline");
 
     vkDestroyShaderModule(context_.device, vertMod, nullptr);
     vkDestroyShaderModule(context_.device, fragMod, nullptr);
@@ -839,7 +777,7 @@ void VulkanPipelineManager::createGraphicsPipeline(int width, int height)
 }
 
 // ---------------------------------------------------------------------------
-//  12. ACCELERATION STRUCTURES – FULLY IMPLEMENTED + BLAST LOGGED
+//  12. ACCELERATION STRUCTURES
 // ---------------------------------------------------------------------------
 void VulkanPipelineManager::createAccelerationStructures(VkBuffer vertexBuffer, VkBuffer indexBuffer)
 {
@@ -868,9 +806,7 @@ void VulkanPipelineManager::createAccelerationStructures(VkBuffer vertexBuffer, 
 
     LOG_INFO_CAT("Vulkan", "    Geometry → {} vertices, {} indices ({} triangles)", vertexCount, indexCount, triangleCount);
 
-    // ---------------------------------------------------------------------
-    //  BLAS: Bottom-Level Acceleration Structure (Triangles)
-    // ---------------------------------------------------------------------
+    // BLAS
     VkAccelerationStructureGeometryTrianglesDataKHR triangles = {
         .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR,
         .vertexFormat = VK_FORMAT_R32G32B32_SFLOAT,
@@ -953,36 +889,20 @@ void VulkanPipelineManager::createAccelerationStructures(VkBuffer vertexBuffer, 
     context_.vkCmdBuildAccelerationStructuresKHR(cmd, 1, &buildInfo, &pRangeInfo);
     VulkanInitializer::endSingleTimeCommands(context_, cmd);
 
-    // Clean up temporary scratch
     vkDestroyBuffer(context_.device, scratchBuffer, nullptr);
     vkFreeMemory(context_.device, scratchMemory, nullptr);
 
     LOG_INFO_CAT("Vulkan", "    BLAS built in single-time command");
 
-    // RAII for BLAS AS, buffer, and memory
-    if (!context_.vkDestroyAccelerationStructureKHR) {
-        LOG_ERROR_CAT("Vulkan", "    FATAL: vkDestroyAccelerationStructureKHR not loaded!");
-        throw std::runtime_error("RT extension destroy not available");
-    }
     blas_ = Dispose::VulkanHandle<VkAccelerationStructureKHR>(
         context_.device,
         blasAS,
         context_.vkDestroyAccelerationStructureKHR
     );
-    blasBuffer_ = Dispose::VulkanHandle<VkBuffer>(
-        context_.device,
-        blasBuffer,
-        Dispose::getDestroyFunc<VkBuffer>(context_.device)
-    );
-    blasMemory_ = Dispose::VulkanHandle<VkDeviceMemory>(
-        context_.device,
-        blasMemory,
-        Dispose::getDestroyFunc<VkDeviceMemory>(context_.device)
-    );
+    blasBuffer_ = Dispose::makeHandle(context_.device, blasBuffer, "BLAS Buffer");
+    blasMemory_ = Dispose::makeHandle(context_.device, blasMemory, "BLAS Memory");
 
-    // ---------------------------------------------------------------------
-    //  TLAS: Top-Level Acceleration Structure (Instance)
-    // ---------------------------------------------------------------------
+    // TLAS
     VkTransformMatrixKHR transform = {
         .matrix = {
             {1.0f, 0.0f, 0.0f, 0.0f},
@@ -1097,32 +1017,21 @@ void VulkanPipelineManager::createAccelerationStructures(VkBuffer vertexBuffer, 
     context_.vkCmdBuildAccelerationStructuresKHR(tlasCmd, 1, &tlasBuildInfo, &pTlasRange);
     VulkanInitializer::endSingleTimeCommands(context_, tlasCmd);
 
-    // Clean up temporary TLAS scratch
     vkDestroyBuffer(context_.device, tlasScratch, nullptr);
     vkFreeMemory(context_.device, tlasScratchMem, nullptr);
 
-    // Clean up temporary instance buffer
     vkDestroyBuffer(context_.device, instanceBuffer, nullptr);
     vkFreeMemory(context_.device, instanceMemory, nullptr);
 
     LOG_INFO_CAT("Vulkan", "    TLAS built in single-time command");
 
-    // RAII for TLAS AS, buffer, and memory
     tlas_ = Dispose::VulkanHandle<VkAccelerationStructureKHR>(
         context_.device,
         tlasAS,
         context_.vkDestroyAccelerationStructureKHR
     );
-    tlasBuffer_ = Dispose::VulkanHandle<VkBuffer>(
-        context_.device,
-        tlasBuffer,
-        Dispose::getDestroyFunc<VkBuffer>(context_.device)
-    );
-    tlasMemory_ = Dispose::VulkanHandle<VkDeviceMemory>(
-        context_.device,
-        tlasMemory,
-        Dispose::getDestroyFunc<VkDeviceMemory>(context_.device)
-    );
+    tlasBuffer_ = Dispose::makeHandle(context_.device, tlasBuffer, "TLAS Buffer");
+    tlasMemory_ = Dispose::makeHandle(context_.device, tlasMemory, "TLAS Memory");
 
     LOG_INFO_CAT("Vulkan", "    BLAS + TLAS BUILT SUCCESSFULLY");
     LOG_INFO_CAT("Vulkan", "    BLAS @ {} | TLAS @ {}", blasPtr, tlasPtr);
@@ -1130,7 +1039,7 @@ void VulkanPipelineManager::createAccelerationStructures(VkBuffer vertexBuffer, 
 }
 
 // ---------------------------------------------------------------------------
-//  13. UPDATE RAY TRACING DESCRIPTOR SET – SAFE + BLAST LOGGED
+//  13. UPDATE RAY TRACING DESCRIPTOR SET
 // ---------------------------------------------------------------------------
 void VulkanPipelineManager::updateRayTracingDescriptorSet(VkDescriptorSet descriptorSet,
                                                           VkAccelerationStructureKHR /*tlasHandle*/)
@@ -1174,5 +1083,4 @@ void VulkanPipelineManager::updateRayTracingDescriptorSet(VkDescriptorSet descri
     LOG_INFO_CAT("Vulkan", "    TLAS BOUND @ {} to Descriptor Set {}", tlasPtr, dsPtr);
     LOG_INFO_CAT("Vulkan", "<<< DESCRIPTOR SET UPDATED");
 }
-
 } // namespace VulkanRTX

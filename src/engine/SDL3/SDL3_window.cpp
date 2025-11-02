@@ -1,5 +1,5 @@
 // src/engine/SDL3/SDL3_window.cpp
-// AMOURANTH RTX Engine © 2025 by Zachary Geurts gzac5314@gmail.com is licensed under CC BY-NC 4.0
+// AMOURANTH RTX Engine (C) 2025 by Zachary Geurts
 #include "engine/SDL3/SDL3_window.hpp"
 #include "engine/Vulkan/VulkanRenderer.hpp"
 #include "engine/Dispose.hpp"
@@ -12,24 +12,16 @@
 #include <stdexcept>
 #include <vector>
 #include <string>
-#include <format>
 
-using namespace std::literals;          // enables "…"s literals
+using namespace std::literals;
 
 namespace SDL3Initializer {
 
 // ---------------------------------------------------------------------------
-//  Deleter – also frees the stored Vulkan extensions vector
+//  Deleter – uses Dispose::destroyWindow
 // ---------------------------------------------------------------------------
 void SDLWindowDeleter::operator()(SDL_Window* w) const {
-    if (w) {
-        SDL_PropertiesID props = SDL_GetWindowProperties(w);
-        if (props != 0) {
-            void* data = SDL_GetPointerProperty(props, "vulkan_extensions", nullptr);
-            delete static_cast<std::vector<std::string>*>(data);
-        }
-        Dispose::destroyWindow(w);
-    }
+    Dispose::destroyWindow(w);
 }
 
 // ---------------------------------------------------------------------------
@@ -39,11 +31,9 @@ SDLWindowPtr createWindow(const char* title, int w, int h, Uint32 flags) {
     LOG_INFO_CAT("Window", "Creating SDL window: {} ({}x{}) flags=0x{:x}", title, w, h, flags);
 
     flags |= SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE;
-
-    // Prefer Wayland on Linux, fall back to X11
     SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "wayland,x11");
 
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) != 0) {
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) == 0) {
         LOG_ERROR_CAT("Window", "SDL_Init failed: {}", SDL_GetError());
         throw std::runtime_error("SDL_Init failed: "s + SDL_GetError());
     }
@@ -55,7 +45,6 @@ SDLWindowPtr createWindow(const char* title, int w, int h, Uint32 flags) {
         throw std::runtime_error("SDL_CreateWindow failed: "s + SDL_GetError());
     }
 
-    // ----- Vulkan instance extensions required by SDL -----
     uint32_t extCount = 0;
     const char* const* sdlExts = SDL_Vulkan_GetInstanceExtensions(&extCount);
     if (!sdlExts || extCount == 0) {
@@ -69,13 +58,11 @@ SDLWindowPtr createWindow(const char* title, int w, int h, Uint32 flags) {
     for (uint32_t i = 0; i < extCount; ++i)
         extensions.emplace_back(sdlExts[i]);
 
-    // RTX + debug extensions we always want
     extensions.emplace_back(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
     extensions.emplace_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
 
     LOG_DEBUG_CAT("Window", "SDL reports {} Vulkan instance extensions", extCount);
 
-    // Store inside window properties for later retrieval
     SDL_PropertiesID props = SDL_GetWindowProperties(window.get());
     if (props == 0) {
         LOG_ERROR_CAT("Window", "SDL_GetWindowProperties returned 0");
@@ -86,10 +73,8 @@ SDLWindowPtr createWindow(const char* title, int w, int h, Uint32 flags) {
                            new std::vector<std::string>(std::move(extensions)));
 
     const char* driver = SDL_GetCurrentVideoDriver();
-    LOG_INFO_CAT("Window",
-                 "Window created – driver: {} – flags: 0x{:x}",
-                 driver ? driver : "none",
-                 SDL_GetWindowFlags(window.get()));
+    LOG_INFO_CAT("Window", "Window created – driver: {} – flags: 0x{:x}",
+                 driver ? driver : "none", SDL_GetWindowFlags(window.get()));
 
     return window;
 }
@@ -128,9 +113,6 @@ SDL_Window* getWindow(const SDLWindowPtr& window) {
 // ---------------------------------------------------------------------------
 //  pollEventsForResize
 // ---------------------------------------------------------------------------
-//  Returns true when a size change (resize / restore / minimize) was detected.
-//  Caller must immediately call renderer.handleResize(newWidth, newHeight).
-// ---------------------------------------------------------------------------
 bool pollEventsForResize(const SDLWindowPtr& window,
                          int& newWidth, int& newHeight,
                          bool& shouldQuit, bool& toggleFullscreenKey)
@@ -157,7 +139,6 @@ bool pollEventsForResize(const SDLWindowPtr& window,
                 return false;
 
             case SDL_EVENT_KEY_DOWN:
-                // SDL-3: ev.key.key contains the virtual key code
                 if (ev.key.key == SDLK_F11 && !ev.key.repeat) {
                     toggleFullscreenKey = true;
                     LOG_INFO_CAT("Window", "F11 → toggle fullscreen");
@@ -185,9 +166,6 @@ bool pollEventsForResize(const SDLWindowPtr& window,
         }
     }
 
-    // --------------------------------------------------------------
-    //  Determine final drawable size
-    // --------------------------------------------------------------
     if (resizeDetected || restoreDetected || minimizeDetected) {
         if (!SDL_GetWindowSizeInPixels(win, &newWidth, &newHeight)) {
             LOG_ERROR_CAT("Window", "SDL_GetWindowSizeInPixels failed: {}", SDL_GetError());
@@ -195,18 +173,16 @@ bool pollEventsForResize(const SDLWindowPtr& window,
             return false;
         }
 
-        // Report 0×0 when minimized – swap-chain will pause
         if (SDL_GetWindowFlags(win) & SDL_WINDOW_MINIMIZED) {
             newWidth = newHeight = 0;
             LOG_DEBUG_CAT("Window", "Minimized → reporting 0×0");
         } else if (newWidth <= 0 || newHeight <= 0) {
-            // Guard against drivers that return 0 after a restore
             newWidth = newHeight = 1;
             LOG_WARNING_CAT("Window", "Drawable size 0×0 → clamped to 1×1");
         }
 
         LOG_DEBUG_CAT("Window", "Final size after event handling: {}×{}", newWidth, newHeight);
-        return true;               // caller must call renderer.handleResize()
+        return true;
     }
 
     return false;
@@ -227,14 +203,13 @@ void toggleFullscreen(SDLWindowPtr& window, VulkanRTX::VulkanRenderer& renderer)
     bool currentlyFS = (flags & SDL_WINDOW_FULLSCREEN) != 0;
     LOG_INFO_CAT("Window", "Toggle fullscreen (current={})", currentlyFS ? "yes" : "no");
 
-    // Borderless fullscreen – avoids exclusive-mode bugs on Windows
     bool success = SDL_SetWindowFullscreen(win, currentlyFS ? false : true) == 0;
     if (!success) {
         LOG_ERROR_CAT("Window", "SDL_SetWindowFullscreen failed: {}", SDL_GetError());
         return;
     }
 
-    SDL_SyncWindow(win);   // make the change immediate
+    SDL_SyncWindow(win);
 
     int w = 0, h = 0;
     if (!SDL_GetWindowSizeInPixels(win, &w, &h)) {
@@ -247,7 +222,6 @@ void toggleFullscreen(SDLWindowPtr& window, VulkanRTX::VulkanRenderer& renderer)
         w = h = 1;
     }
 
-    // Immediate resize – no queuing
     renderer.handleResize(w, h);
     LOG_INFO_CAT("Window", "Fullscreen toggled → immediate resize {}×{}", w, h);
 }
