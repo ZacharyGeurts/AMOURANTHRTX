@@ -27,10 +27,13 @@ Why choose AMOURANTH RTX? You want full access to a small RTX loop. Made with Gr
 
 - **Distribution**: gzac5314@gmail.com for AMOURANTH RTX engine license  
 - **Why AMOURANTH?** They said they were hiring so I figured I would try to bring in a customer.  
-I would be taking a 1/3rd to their 2/3rd as far as distribution ratio.  
-If they do not like my stealing their brand, they can come to Michigan and stream the firing.  
-https://www.twitch.tv/AMOURANTH
+I would be taking a 1 to their 2 parts as far as distribution ratio.  
+The software is unrestricted and if you go commercial then set something up then.  
+If you make money it will probably be around 3 cents on the dollar or 3%. Not above.  
+If they do not like my using their brand, they can come to Michigan and stream the firing.  
+https://www.twitch.tv/AMOURANTH  
 If you need help with your project, it's Grok, not me.  
+There should be a wiki coming soonish.  
 
 **Other work**  
 Results are used with Non-uniform rational basis splines, a mathematical model that is representing curves and surfaces.  
