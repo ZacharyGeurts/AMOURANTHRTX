@@ -177,6 +177,14 @@ if(IS_LINUX)
     message(STATUS "SDL3 include dirs: ${SDL3_INCLUDE_DIRS}")
     message(STATUS "SDL3 libraries: ${SDL3_LIBRARIES}")
 
+    # === CRITICAL FIX: Force SDL3 include path BEFORE system paths ===
+    list(GET SDL3_INCLUDE_DIRS 0 SDL3_MAIN_INCLUDE_DIR)
+    include_directories(BEFORE SYSTEM
+        /usr/local/include/SDL3
+        ${SDL3_MAIN_INCLUDE_DIR}
+    )
+    # ===============================================================
+
     pkg_check_modules(SDL3_ttf sdl3-ttf)
     if(NOT SDL3_ttf_FOUND)
         message(FATAL_ERROR "SDL3_ttf not found. Install sdl3-ttf.")

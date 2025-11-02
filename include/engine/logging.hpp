@@ -1,11 +1,12 @@
-// AMOURANTH RTX Engine, October 2025 - Enhanced thread-safe, asynchronous logging.
-// TRACE = NEON LIME | INFO = GRAY | GREEN RESTORED | HIGH VISIBILITY ON BLACK
-// Thread-safe, asynchronous logging with ANSI-colored output and delta time.
+// engine/logging.hpp
+// AMOURANTH RTX Engine, November 2025 - Hyper-Vivid, Thread-Safe Async Logging.
+// ULTRA-NEON TRACE | PLATINUM GRAY INFO | EMERALD GREEN ENGINE | RAINBOW SPECTRUM CATEGORIES
+// Thread-safe, asynchronous logging with HYPER-VIVID ANSI-colored output and delta time.
 // Supports C++20 std::format, std::jthread, OpenMP, and lock-free queue with std::atomic.
 // No mutexes; designed for high-performance Vulkan applications on Windows and Linux.
 // Delta time format: microseconds (<10ms), milliseconds (10ms-1s), seconds (1s-1min), minutes (1min-1hr), hours (>1hr).
 // Usage: LOG_TRACE("Message: {}", value); or Logger::get().log(LogLevel::Trace, "Vulkan", "Message: {}", value);
-// Features: Singleton, log rotation, environment variable config, automatic flush, extended colors, overloads.
+// Features: Singleton, log rotation, environment variable config, automatic flush, HYPER-EXTENDED colors, overloads.
 // Extended features: Additional Vulkan/SDL types, GLM arrays, category filtering, high-frequency logging.
 // Zachary Geurts 2025
 
@@ -34,9 +35,10 @@
 #include <SDL3/SDL.h>
 #include "engine/camera.hpp"
 
-// ---------------------------------------------------------------------------
-//  Log level toggle flags
-// ---------------------------------------------------------------------------
+// ========================================================================
+// 0. Configuration & Macros
+// ========================================================================
+// 0.1 Log level toggle flags
 constexpr bool ENABLE_TRACE   = true;
 constexpr bool ENABLE_DEBUG   = true;
 constexpr bool ENABLE_INFO    = true;
@@ -45,53 +47,57 @@ constexpr bool ENABLE_ERROR   = true;
 constexpr bool FPS_COUNTER    = true;
 constexpr bool SIMULATION_LOGGING = true;
 
-// ---------------------------------------------------------------------------
-//  Logging Macros (TRACE + GRAY INFO)
-// ---------------------------------------------------------------------------
+// 0.2 Logging Macros (TRACE + HYPER-VIVID GRAY INFO)
+// LOG_WARN is now IDENTICAL to LOG_WARNING
 #define LOG_TRACE(...)          do { if (ENABLE_TRACE)   Logging::Logger::get().log(Logging::LogLevel::Trace,   "General", __VA_ARGS__); } while (0)
 #define LOG_DEBUG(...)          do { if (ENABLE_DEBUG)   Logging::Logger::get().log(Logging::LogLevel::Debug,   "General", __VA_ARGS__); } while (0)
 #define LOG_INFO(...)           do { if (ENABLE_INFO)    Logging::Logger::get().log(Logging::LogLevel::Info,    "General", __VA_ARGS__); } while (0)
 #define LOG_FPS_COUNTER(...)    do { if (FPS_COUNTER)    Logging::Logger::get().log(Logging::LogLevel::Info,    "FPS",     __VA_ARGS__); } while (0)
 #define LOG_SIMULATION(...)     do { if (SIMULATION_LOGGING) Logging::Logger::get().log(Logging::LogLevel::Info, "SIMULATION", __VA_ARGS__); } while (0)
 #define LOG_WARNING(...)        do { if (ENABLE_WARNING) Logging::Logger::get().log(Logging::LogLevel::Warning, "General", __VA_ARGS__); } while (0)
+#define LOG_WARN(...)           LOG_WARNING(__VA_ARGS__)  // IDENTICAL TO LOG_WARNING
 #define LOG_ERROR(...)          do { if (ENABLE_ERROR)   Logging::Logger::get().log(Logging::LogLevel::Error,   "General", __VA_ARGS__); } while (0)
 
 #define LOG_TRACE_CAT(cat, ...)   do { if (ENABLE_TRACE)   Logging::Logger::get().log(Logging::LogLevel::Trace,   cat, __VA_ARGS__); } while (0)
 #define LOG_DEBUG_CAT(cat, ...)   do { if (ENABLE_DEBUG)   Logging::Logger::get().log(Logging::LogLevel::Debug,   cat, __VA_ARGS__); } while (0)
 #define LOG_INFO_CAT(cat, ...)    do { if (ENABLE_INFO)    Logging::Logger::get().log(Logging::LogLevel::Info,    cat, __VA_ARGS__); } while (0)
 #define LOG_WARNING_CAT(cat, ...) do { if (ENABLE_WARNING) Logging::Logger::get().log(Logging::LogLevel::Warning, cat, __VA_ARGS__); } while (0)
+#define LOG_WARN_CAT(cat, ...)    LOG_WARNING_CAT(cat, __VA_ARGS__)  // IDENTICAL TO LOG_WARNING_CAT
 #define LOG_ERROR_CAT(cat, ...)   do { if (ENABLE_ERROR)   Logging::Logger::get().log(Logging::LogLevel::Error,   cat, __VA_ARGS__); } while (0)
 
 namespace Logging {
 
 enum class LogLevel { Trace, Debug, Info, Warning, Error };
 
-// ---------------------------------------------------------------------------
-//  ANSI color codes – FULL SPECTRUM | NEON LIME TRACE | GRAY INFO | GREEN ENGINE
-// ---------------------------------------------------------------------------
+// ========================================================================
+// 1. ANSI Color System – HYPER-VIVID SPECTRUM
+// ========================================================================
 namespace Color {
     inline constexpr std::string_view RESET           = "\033[0m";
-    inline constexpr std::string_view NEON_LIME       = "\033[38;5;118m";  // TRACE: Electric path trace
-    inline constexpr std::string_view GRAY            = "\033[38;5;245m";  // INFO: Clean, readable
-    inline constexpr std::string_view GREEN           = "\033[1;32m";     // SUCCESS / ENGINE
-    inline constexpr std::string_view CYAN            = "\033[38;5;51m";  // DEBUG: Cool & calm
-    inline constexpr std::string_view YELLOW          = "\033[38;5;208m"; // WARNING: Amber alert
-    inline constexpr std::string_view MAGENTA         = "\033[1;35m";     // ERROR: Critical
-    inline constexpr std::string_view BLUE            = "\033[1;34m";     // RENDER / PIPELINE
-    inline constexpr std::string_view RED             = "\033[1;31m";     // FATAL / VULKAN
-    inline constexpr std::string_view WHITE           = "\033[1;37m";     // HEADER
-    inline constexpr std::string_view PURPLE          = "\033[38;5;141m"; // SHADER
-    inline constexpr std::string_view ORANGE          = "\033[38;5;208m"; // PERFORMANCE
-    inline constexpr std::string_view TEAL            = "\033[38;5;45m";  // SWAPCHAIN
-    inline constexpr std::string_view YELLOW_GREEN    = "\033[38;5;154m"; // ACCELERATION
-    inline constexpr std::string_view BRIGHT_MAGENTA  = "\033[38;5;201m"; // DESCRIPTOR
-    inline constexpr std::string_view GOLDEN_BROWN    = "\033[38;5;130m"; // BUFFER
-    inline constexpr std::string_view ELECTRIC_BLUE   = "\033[38;5;39m";  // RAY TRACING
-    inline constexpr std::string_view HOT_PINK        = "\033[38;5;198m"; // SBT
-    inline constexpr std::string_view LAVENDER        = "\033[38;5;183m"; // CAMERA
-    inline constexpr std::string_view MINT            = "\033[38;5;122m"; // INPUT
+    inline constexpr std::string_view ULTRA_NEON_LIME = "\033[38;5;82m";   // TRACE: Pulsing electric lime glow
+    inline constexpr std::string_view PLATINUM_GRAY   = "\033[38;5;255m";  // INFO: Ultra-crisp platinum sheen
+    inline constexpr std::string_view EMERALD_GREEN   = "\033[38;5;35m";   // SUCCESS / ENGINE: Deep emerald vibrance
+    inline constexpr std::string_view ARCTIC_CYAN     = "\033[38;5;45m";   // DEBUG: Icy arctic cyan pulse
+    inline constexpr std::string_view AMBER_YELLOW    = "\033[38;5;220m";  // WARNING: Fiery amber blaze
+    inline constexpr std::string_view CRIMSON_MAGENTA = "\033[38;5;197m";  // ERROR: Blood-red crimson fury
+    inline constexpr std::string_view SAPPHIRE_BLUE   = "\033[38;5;33m";   // RENDER / PIPELINE: Deep sapphire depth
+    inline constexpr std::string_view SCARLET_RED     = "\033[38;5;196m";  // FATAL / VULKAN: Scarlet inferno
+    inline constexpr std::string_view DIAMOND_WHITE   = "\033[38;5;231m";  // HEADER: Pristine diamond sparkle
+    inline constexpr std::string_view VIOLET_PURPLE   = "\033[38;5;99m";   // SHADER: Mystical violet aura
+    inline constexpr std::string_view FIERY_ORANGE    = "\033[38;5;202m";  // PERFORMANCE: Blazing fiery orange
+    inline constexpr std::string_view OCEAN_TEAL      = "\033[38;5;37m";   // SWAPCHAIN: Oceanic teal wave
+    inline constexpr std::string_view LIME_YELLOW     = "\033[38;5;82m";   // ACCELERATION: Zesty lime burst
+    inline constexpr std::string_view FUCHSIA_MAGENTA = "\033[38;5;205m";  // DESCRIPTOR: Electric fuchsia flash
+    inline constexpr std::string_view BRONZE_BROWN    = "\033[38;5;94m";   // BUFFER: Warm bronze gleam
+    inline constexpr std::string_view TURQUOISE_BLUE  = "\033[38;5;44m";   // RAY TRACING: Radiant turquoise ray
+    inline constexpr std::string_view RASPBERRY_PINK  = "\033[38;5;200m";  // SBT: Juicy raspberry glow
+    inline constexpr std::string_view LILAC_LAVENDER  = "\033[38;5;147m";  // CAMERA: Soft lilac haze
+    inline constexpr std::string_view SPEARMINT_MINT  = "\033[38;5;150m";  // INPUT: Fresh spearmint cool
 }
 
+// ========================================================================
+// 2. Core Data Structures
+// ========================================================================
 struct LogMessage {
     LogLevel level;
     std::string message;
@@ -105,8 +111,12 @@ struct LogMessage {
         : level(lvl), message(msg), category(cat), location(loc), timestamp(ts) {}
 };
 
+// ========================================================================
+// 3. Logger Class – Main Engine
+// ========================================================================
 class Logger {
 public:
+    // 3.1 Constructor & Singleton
     Logger(LogLevel level = getDefaultLogLevel(), const std::string& logFile = getDefaultLogFile())
         : head_(0), tail_(0), running_(true), level_(level), maxLogFileSize_(10 * 1024 * 1024) {
         loadCategoryFilters();
@@ -124,9 +134,11 @@ public:
         return instance;
     }
 
-    // -----------------------------------------------------------------------
-    //  Generic log with format string
-    // -----------------------------------------------------------------------
+    // ====================================================================
+    // 4. Public Logging Interfaces
+    // ====================================================================
+
+    // 4.1 Generic log with format string
     template<typename... Args>
     void log(LogLevel level, std::string_view category, std::string_view message, const Args&... args) const {
         if (!shouldLog(level, category)) return;
@@ -145,18 +157,14 @@ public:
         enqueueMessage(level, message, category, std::move(formatted), std::source_location::current());
     }
 
-    // -----------------------------------------------------------------------
-    //  Log without args
-    // -----------------------------------------------------------------------
+    // 4.2 Log without args
     void log(LogLevel level, std::string_view category, std::string_view message) const {
         if (!shouldLog(level, category)) return;
         std::string formatted = message.empty() ? "Empty log message" : std::string(message);
         enqueueMessage(level, message, category, std::move(formatted), std::source_location::current());
     }
 
-    // -----------------------------------------------------------------------
-    //  Vulkan handles
-    // -----------------------------------------------------------------------
+    // 4.3 Vulkan handles
     template<typename T>
     requires (
         std::same_as<T, VkBuffer> || std::same_as<T, VkCommandBuffer> ||
@@ -187,9 +195,7 @@ public:
         enqueueMessage(level, handleName, category, std::move(formatted), std::source_location::current());
     }
 
-    // -----------------------------------------------------------------------
-    //  Span of Vulkan handles
-    // -----------------------------------------------------------------------
+    // 4.4 Span of Vulkan handles
     template<typename T>
     requires (
         std::same_as<T, VkBuffer> || std::same_as<T, VkCommandBuffer> ||
@@ -221,9 +227,7 @@ public:
         enqueueMessage(level, handleName, category, std::move(formatted), std::source_location::current());
     }
 
-    // -----------------------------------------------------------------------
-    //  GLM types
-    // -----------------------------------------------------------------------
+    // 4.5 GLM types
     void log(LogLevel level, std::string_view category, const glm::vec3& vec, std::string_view message = "") const {
         if (!shouldLog(level, category)) return;
         std::string formatted;
@@ -276,10 +280,8 @@ public:
         enqueueMessage(level, message, category, std::move(formatted), std::source_location::current());
     }
 
-    // -----------------------------------------------------------------------
-    //  Camera
-    // -----------------------------------------------------------------------
-    void log(LogLevel level, std::string_view category, const Camera& camera, std::string_view message = "") const {
+    // 4.6 Camera (qualified with VulkanRTX::Camera)
+    void log(LogLevel level, std::string_view category, const VulkanRTX::Camera& camera, std::string_view message = "") const {
         if (!shouldLog(level, category)) return;
         std::string formatted;
         try {
@@ -295,9 +297,9 @@ public:
         enqueueMessage(level, message, category, std::move(formatted), std::source_location::current());
     }
 
-    // -----------------------------------------------------------------------
-    //  Configuration
-    // -----------------------------------------------------------------------
+    // ====================================================================
+    // 5. Configuration & Control
+    // ====================================================================
     void setLogLevel(LogLevel level) {
         level_.store(level, std::memory_order_relaxed);
         if (ENABLE_INFO) {
@@ -332,6 +334,9 @@ public:
         }
     }
 
+    // ====================================================================
+    // 6. Internal Utilities
+    // ====================================================================
 private:
     static constexpr size_t QueueSize = 1024;
     static constexpr size_t MaxFiles = 5;
@@ -354,36 +359,34 @@ private:
         return "";
     }
 
-    // -----------------------------------------------------------------------
-    //  CATEGORY → COLOR MAPPING (FULLY EXPANDED)
-    // -----------------------------------------------------------------------
+    // 6.1 Category → Color Mapping
     static std::string_view getCategoryColor(std::string_view category) {
         static const std::map<std::string_view, std::string_view, std::less<>> categoryColors = {
-            {"General",       Color::WHITE},
-            {"Vulkan",        Color::BLUE},
-            {"Swapchain",     Color::TEAL},
-            {"Pipeline",      Color::GREEN},
-            {"SIMULATION",    Color::GOLDEN_BROWN},
-            {"Renderer",      Color::ORANGE},
-            {"Engine",        Color::GREEN},
-            {"Audio",         Color::TEAL},
-            {"Image",         Color::YELLOW_GREEN},
-            {"Input",         Color::MINT},
-            {"FPS",           Color::BRIGHT_MAGENTA},
-            {"BufferMgr",     Color::PURPLE},
-            {"MeshLoader",    Color::YELLOW_GREEN},
-            {"RayTrace",      Color::ELECTRIC_BLUE},
-            {"SBT",           Color::HOT_PINK},
-            {"Accel",         Color::YELLOW_GREEN},
-            {"Buffer",        Color::GOLDEN_BROWN},
-            {"Descriptor",    Color::BRIGHT_MAGENTA},
-            {"Camera",        Color::LAVENDER},
-            {"Render",        Color::ORANGE},
-            {"Perf",          Color::YELLOW},
-            {"Logger",        Color::GRAY}
+            {"General",       Color::DIAMOND_WHITE},
+            {"Vulkan",        Color::SAPPHIRE_BLUE},
+            {"Swapchain",     Color::OCEAN_TEAL},
+            {"Pipeline",      Color::EMERALD_GREEN},
+            {"SIMULATION",    Color::BRONZE_BROWN},
+            {"Renderer",      Color::FIERY_ORANGE},
+            {"Engine",        Color::EMERALD_GREEN},
+            {"Audio",         Color::OCEAN_TEAL},
+            {"Image",         Color::LIME_YELLOW},
+            {"Input",         Color::SPEARMINT_MINT},
+            {"FPS",           Color::FUCHSIA_MAGENTA},
+            {"BufferMgr",     Color::VIOLET_PURPLE},
+            {"MeshLoader",    Color::LIME_YELLOW},
+            {"RayTrace",      Color::TURQUOISE_BLUE},
+            {"SBT",           Color::RASPBERRY_PINK},
+            {"Accel",         Color::LIME_YELLOW},
+            {"Buffer",        Color::BRONZE_BROWN},
+            {"Descriptor",    Color::FUCHSIA_MAGENTA},
+            {"Camera",        Color::LILAC_LAVENDER},
+            {"Render",        Color::FIERY_ORANGE},
+            {"Perf",          Color::AMBER_YELLOW},
+            {"Logger",        Color::PLATINUM_GRAY}
         };
         auto it = categoryColors.find(category);
-        return it != categoryColors.end() ? it->second : Color::WHITE;
+        return it != categoryColors.end() ? it->second : Color::DIAMOND_WHITE;
     }
 
     bool shouldLog(LogLevel level, std::string_view category) const {
@@ -417,6 +420,7 @@ private:
         }
     }
 
+    // 6.2 Queue Management
     void enqueueMessage(LogLevel level, std::string_view message, std::string_view category,
                         std::string formatted, const std::source_location& location) const {
         size_t currentHead = head_.load(std::memory_order_relaxed);
@@ -429,7 +433,7 @@ private:
             size_t newTail = (currentTail + dropCount) % QueueSize;
             tail_.store(newTail, std::memory_order_release);
             if (ENABLE_ERROR) {
-                std::osyncstream(std::cerr) << Color::RED << "[ERROR] [0.000us] [Logger] Log queue overwhelmed, dropping " << dropCount << " messages" << Color::RESET << std::endl;
+                std::osyncstream(std::cerr) << Color::SCARLET_RED << "[ERROR] [0.000us] [Logger] Log queue overwhelmed, dropping " << dropCount << " messages" << Color::RESET << std::endl;
             }
             currentTail = newTail;
         }
@@ -441,6 +445,7 @@ private:
         head_.store(nextHead, std::memory_order_release);
     }
 
+    // 6.3 Worker Thread
     void processLogQueue(std::stop_token stoken) {
         while (running_.load(std::memory_order_relaxed) || head_.load(std::memory_order_acquire) != tail_.load(std::memory_order_acquire)) {
             if (stoken.stop_requested() && head_.load(std::memory_order_acquire) == tail_.load(std::memory_order_acquire)) break;
@@ -469,11 +474,11 @@ private:
                 std::string_view categoryColor = getCategoryColor(msg.category);
                 std::string_view levelStr, levelColor;
                 switch (msg.level) {
-                    case LogLevel::Trace:   levelStr = "[TRACE]"; levelColor = Color::NEON_LIME; break;
-                    case LogLevel::Debug:   levelStr = "[DEBUG]"; levelColor = Color::CYAN; break;
-                    case LogLevel::Info:    levelStr = "[INFO]";  levelColor = Color::GRAY; break;
-                    case LogLevel::Warning: levelStr = "[WARN]";  levelColor = Color::YELLOW; break;
-                    case LogLevel::Error:   levelStr = "[ERROR]"; levelColor = Color::MAGENTA; break;
+                    case LogLevel::Trace:   levelStr = "[TRACE]"; levelColor = Color::ULTRA_NEON_LIME; break;
+                    case LogLevel::Debug:   levelStr = "[DEBUG]"; levelColor = Color::ARCTIC_CYAN; break;
+                    case LogLevel::Info:    levelStr = "[INFO]";  levelColor = Color::PLATINUM_GRAY; break;
+                    case LogLevel::Warning: levelStr = "[WARN]";  levelColor = Color::AMBER_YELLOW; break;
+                    case LogLevel::Error:   levelStr = "[ERROR]"; levelColor = Color::CRIMSON_MAGENTA; break;
                 }
 
                 auto delta = std::chrono::duration_cast<std::chrono::microseconds>(msg.timestamp - *firstLogTime_).count();
@@ -499,6 +504,7 @@ private:
         }
     }
 
+    // 6.4 File Rotation
     void rotateLogFile() {
         std::time_t now = std::time(nullptr);
         char timestamp[20];
@@ -522,6 +528,7 @@ private:
         }
     }
 
+    // 6.5 Final Flush
     void flushQueue() {
         std::vector<LogMessage> batch;
         {
@@ -539,11 +546,11 @@ private:
             std::string_view categoryColor = getCategoryColor(msg.category);
             std::string_view levelStr, levelColor;
             switch (msg.level) {
-                case LogLevel::Trace:   levelStr = "[TRACE]"; levelColor = Color::NEON_LIME; break;
-                case LogLevel::Debug:   levelStr = "[DEBUG]"; levelColor = Color::CYAN; break;
-                case LogLevel::Info:    levelStr = "[INFO]";  levelColor = Color::GRAY; break;
-                case LogLevel::Warning: levelStr = "[WARN]";  levelColor = Color::YELLOW; break;
-                case LogLevel::Error:   levelStr = "[ERROR]"; levelColor = Color::MAGENTA; break;
+                case LogLevel::Trace:   levelStr = "[TRACE]"; levelColor = Color::ULTRA_NEON_LIME; break;
+                case LogLevel::Debug:   levelStr = "[DEBUG]"; levelColor = Color::ARCTIC_CYAN; break;
+                case LogLevel::Info:    levelStr = "[INFO]";  levelColor = Color::PLATINUM_GRAY; break;
+                case LogLevel::Warning: levelStr = "[WARN]";  levelColor = Color::AMBER_YELLOW; break;
+                case LogLevel::Error:   levelStr = "[ERROR]"; levelColor = Color::CRIMSON_MAGENTA; break;
             }
             auto delta = std::chrono::duration_cast<std::chrono::microseconds>(msg.timestamp - *firstLogTime_).count();
             std::string timeStr;
@@ -565,6 +572,9 @@ private:
         }
     }
 
+    // ====================================================================
+    // 7. Member Variables
+    // ====================================================================
     mutable std::array<LogMessage, QueueSize> logQueue_;
     mutable std::atomic<size_t> head_;
     mutable std::atomic<size_t> tail_;
@@ -580,9 +590,9 @@ private:
 
 } // namespace Logging
 
-// ---------------------------------------------------------------------------
-//  std::formatters
-// ---------------------------------------------------------------------------
+// ========================================================================
+// 8. std::format Specializations
+// ========================================================================
 namespace std {
 
 template<>

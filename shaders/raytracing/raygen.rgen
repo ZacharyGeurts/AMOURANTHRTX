@@ -15,8 +15,17 @@ layout(set = 0, binding = 2) uniform UniformBuffer {
 layout(set = 0, binding = 5) uniform sampler2D envMap;
 
 layout(push_constant) uniform PushConstants {
-    uint renderMode;
-    uint showEnvMapOnly;
+    vec4  clearColor;
+    vec3  cameraPosition;
+    float _pad0;
+    vec3  lightDirection;
+    float lightIntensity;
+    uint  samplesPerPixel;
+    uint  maxDepth;
+    uint  maxBounces;
+    float russianRoulette;
+    vec2  resolution;
+    uint  showEnvMapOnly;
 } pc;
 
 vec2 hash2(vec2 p) {
@@ -29,7 +38,7 @@ void main()
     vec2 uv = (vec2(gl_LaunchIDEXT.xy) + 0.5) / vec2(gl_LaunchSizeEXT.xy);
     uv.y = 1.0 - uv.y;
 
-    const uint spp = 4;
+    const uint spp = pc.samplesPerPixel;
     vec3 accum = vec3(0.0);
 
     for (uint i = 0; i < spp; ++i)
@@ -37,19 +46,23 @@ void main()
         vec2 jUV = uv + (hash2(uv + float(ubo.frame) + float(i)) - 0.5) /
                        vec2(gl_LaunchSizeEXT.xy);
 
-        vec3 origin = ubo.camPos.xyz;
+        vec3 origin = pc.cameraPosition;
         vec2 ndc = jUV * 2.0 - 1.0;
         vec4 target = ubo.projInverse * vec4(ndc, -1.0, 1.0);
         target /= target.w;
-        vec3 dir = normalize((ubo.viewInverse * vec4(target.xyz - ubo.camPos.xyz, 0.0)).xyz);
+        vec3 dir = normalize((ubo.viewInverse * vec4(target.xyz - pc.cameraPosition, 0.0)).xyz);
 
-        payload = vec3(0.0);  // ← CRITICAL: INITIALIZE
+        payload = vec3(0.0);
 
         traceRayEXT(
             tlas,
-            gl_RayFlagsOpaqueEXT | gl_RayFlagsTerminateOnFirstHitEXT,
-            0xFF, 0, 1, 0,  // ← FIXED: sbtRecordStride = 1, missIndex = 0
-            origin, 0.001, dir, 1000.0, 0
+            gl_RayFlagsOpaqueEXT,
+            0xFF,
+            0,  // raygen
+            1,  // sbtRecordStride
+            1,  // missIndex
+            origin, 0.001, dir, 1000.0,
+            0   // payload location
         );
 
         accum += payload;
@@ -57,11 +70,12 @@ void main()
 
     accum /= float(spp);
 
+    // === MODE 1: SHOW ENV MAP ONLY ===
     if (pc.showEnvMapOnly == 1)
     {
         vec3 dir = normalize((ubo.viewInverse * vec4(uv * 2.0 - 1.0, -1.0, 1.0)).xyz);
         float theta = atan(dir.z, dir.x);
-        float phi   = acos(dir.y);
+        float phi   = acos(clamp(dir.y, -1.0, 1.0));
         vec2 envUV  = vec2(theta / (2.0 * 3.14159265) + 0.5, phi / 3.14159265);
         accum = texture(envMap, envUV).rgb;
     }

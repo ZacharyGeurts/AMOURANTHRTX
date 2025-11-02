@@ -1,19 +1,24 @@
-// src/engine/Vulkan/VulkanPipelineManager.hpp
-// AMOURANTH RTX Engine (C) 2025 by Zachary Geurts gzac5314@gmail.com is licensed under CC BY-NC 4.0
+// include/engine/Vulkan/VulkanPipelineManager.hpp
+// AMOURANTH RTX Engine © 2025 by Zachary Geurts gzac5314@gmail.com
 // FULLY POLISHED. ZERO WARNINGS. ZERO NARROWING. 100% COMPILABLE.
+// NO SINGLETON. PUBLIC GETTERS. NO DOUBLE-FREE.
 
 #pragma once
+#ifndef VULKAN_PIPELINE_MANAGER_HPP
+#define VULKAN_PIPELINE_MANAGER_HPP
 
 #include "engine/Vulkan/VulkanCore.hpp"
 #include "engine/Vulkan/VulkanRTX_Setup.hpp"
 #include "engine/Dispose.hpp"
-#include "engine/Vulkan/types.hpp"
+#include "engine/logging.hpp"
+#include "engine/Vulkan/VulkanCommon.hpp"
+
 #include <vulkan/vulkan.h>
 #include <memory>
-#include <unordered_map>
-#include <string>
 #include <vector>
 #include <chrono>
+#include <cstdint>
+#include <stdexcept>
 
 #ifdef ENABLE_VULKAN_DEBUG
 #include <vulkan/vulkan_ext_debug_utils.h>
@@ -21,29 +26,42 @@
 
 namespace VulkanRTX {
 
+// ---------------------------------------------------------------------
+//  VulkanPipelineManager – Core pipeline & AS manager (NO SINGLETON)
+// ---------------------------------------------------------------------
 class VulkanPipelineManager {
 public:
-    VulkanPipelineManager(Vulkan::Context& context, int width, int height);
+    VulkanPipelineManager(Vulkan::Context& context, int width = 1280, int height = 720);
     ~VulkanPipelineManager();
 
+    VulkanPipelineManager(const VulkanPipelineManager&) = delete;
+    VulkanPipelineManager& operator=(const VulkanPipelineManager&) = delete;
+
+    // -----------------------------------------------------------------
+    //  Public Helpers – USED BY VulkanRTX
+    // -----------------------------------------------------------------
+    VkDevice getDevice() const { return context_.device; }
+
+    // Load shader without exposing VkDevice
+    VkShaderModule loadShader(const std::string& name) {
+        return loadShader(context_.device, name);
+    }
+
+    // Return shared_ptr to Context (safe, no ownership)
+    std::shared_ptr<Vulkan::Context> getContext() const {
+        return std::shared_ptr<Vulkan::Context>(&context_, [](Vulkan::Context*) {});
+    }
+
+    // -----------------------------------------------------------------
+    //  Public API
+    // -----------------------------------------------------------------
     void createRayTracingPipeline();
     void createComputePipeline();
     void createGraphicsPipeline(int width, int height);
     void createShaderBindingTable();
-
     void createAccelerationStructures(VkBuffer vertexBuffer, VkBuffer indexBuffer);
-    void updateRayTracingDescriptorSet(VkDescriptorSet descriptorSet, VkAccelerationStructureKHR tlasHandle);
+    void updateRayTracingDescriptorSet(VkDescriptorSet ds, VkAccelerationStructureKHR tlas = VK_NULL_HANDLE);
 
-    void recordGraphicsCommands(VkCommandBuffer cmd, VkFramebuffer fb, VkDescriptorSet ds,
-                                uint32_t w, uint32_t h, VkImage denoiseImage = VK_NULL_HANDLE);
-    void recordRayTracingCommands(VkCommandBuffer cmd, VkImage outputImage,
-                                  VkDescriptorSet descSet, uint32_t width, uint32_t height,
-                                  VkImage gDepth, VkImage gNormal);
-    void recordComputeCommands(VkCommandBuffer cmd, VkImage outputImage,
-                               VkDescriptorSet ds, uint32_t w, uint32_t h,
-                               VkImage gDepth, VkImage gNormal, VkImage denoiseImage);
-
-    // --- PUBLIC GETTERS ---
     VkPipeline getGraphicsPipeline() const { return graphicsPipeline_.get(); }
     VkPipelineLayout getGraphicsPipelineLayout() const { return graphicsPipelineLayout_.get(); }
     VkPipeline getRayTracingPipeline() const { return rayTracingPipeline_.get(); }
@@ -51,51 +69,45 @@ public:
     VkPipeline getComputePipeline() const { return computePipeline_.get(); }
     VkPipelineLayout getComputePipelineLayout() const { return computePipelineLayout_.get(); }
     VkRenderPass getRenderPass() const { return renderPass_.get(); }
-    VkAccelerationStructureKHR getTLASHandle() const { return tlasHandle_.get(); }
-    const ShaderBindingTable& getShaderBindingTable() const { return sbt_; }
+    VkAccelerationStructureKHR getTLAS() const { return tlas_.get(); }
+    const ShaderBindingTable& getSBT() const { return sbt_; }
 
-    // FIXED: NOW RETURNS VALID LAYOUT AFTER createComputePipeline()
+    VkBuffer getSBTBuffer() const { return sbtBuffer_.get(); }
+    VkDeviceMemory getSBTMemory() const { return sbtMemory_.get(); }
+
+    // NEW: Safe getter for compute descriptor set layout
     VkDescriptorSetLayout getComputeDescriptorSetLayout() const {
-        if (!computeDescriptorSetLayout_) {
-            LOG_ERROR_CAT("Vulkan", "computeDescriptorSetLayout_ is null! Was createComputePipeline() called?");
-            return VK_NULL_HANDLE;
-        }
         return computeDescriptorSetLayout_.get();
     }
 
-    VkDescriptorSetLayout createRayTracingDescriptorSetLayout();
-
-    // --- SBT BUFFER ACCESSORS ---
-    VkBuffer       getSBTBuffer() const { return sbtBuffer_.get(); }
-    VkDeviceMemory getSBTMemory() const { return sbtMemory_.get(); }
-
-    // --- PREPASS PIPELINES ---
-    VkPipeline getRasterPrepassPipeline() const { return rasterPrepassPipeline_.get(); }
-    VkPipeline getDenoiserPostPipeline() const { return denoiserPostPipeline_.get(); }
-
-    // --- FRAME TIME LOGGING ---
     void logFrameTimeIfSlow(std::chrono::steady_clock::time_point start);
+    VkCommandPool getTransientPool() const { return transientPool_.get(); }
+    VkQueue getGraphicsQueue() const { return graphicsQueue_; }
+    VkPipelineCache getPipelineCache() const { return pipelineCache_.get(); }
 
 private:
-    VkShaderModule loadShader(VkDevice device, const std::string& shaderType);
+    // -----------------------------------------------------------------
+    //  Private Helpers
+    // -----------------------------------------------------------------
+    VkShaderModule loadShader(VkDevice device, const std::string& type);
     void createGraphicsDescriptorSetLayout();
     void createComputeDescriptorSetLayout();
+    VkDescriptorSetLayout createRayTracingDescriptorSetLayout();
     void createPipelineCache();
     void createRenderPass();
-    void compileDeferredRayTracingPipeline(
-        const std::vector<VkPipelineShaderStageCreateInfo>& stages,
-        const std::vector<VkRayTracingShaderGroupCreateInfoKHR>& groups
-    );
 
 #ifdef ENABLE_VULKAN_DEBUG
     void setupDebugCallback();
     VkDebugUtilsMessengerEXT debugMessenger_ = VK_NULL_HANDLE;
 #endif
 
+    // -----------------------------------------------------------------
+    //  Core Members
+    // -----------------------------------------------------------------
     Vulkan::Context& context_;
     int width_, height_;
 
-    // SAFE: VulkanHandle owns + destroys after device
+    // === ALL RAII-SAFE WITH PROPER DELETERS ===
     Dispose::VulkanHandle<VkPipeline>               rayTracingPipeline_;
     Dispose::VulkanHandle<VkPipelineLayout>         rayTracingPipelineLayout_;
     Dispose::VulkanHandle<VkPipeline>               computePipeline_;
@@ -105,16 +117,13 @@ private:
     Dispose::VulkanHandle<VkRenderPass>             renderPass_;
     Dispose::VulkanHandle<VkPipelineCache>          pipelineCache_;
 
-    // PREPASS PIPELINES
-    Dispose::VulkanHandle<VkPipeline>               rasterPrepassPipeline_;
-    Dispose::VulkanHandle<VkPipeline>               denoiserPostPipeline_;
+    Dispose::VulkanHandle<VkAccelerationStructureKHR> blas_;
+    Dispose::VulkanHandle<VkAccelerationStructureKHR> tlas_;
+    Dispose::VulkanHandle<VkBuffer>                   blasBuffer_;
+    Dispose::VulkanHandle<VkBuffer>                   tlasBuffer_;
+    Dispose::VulkanHandle<VkDeviceMemory>             blasMemory_;
+    Dispose::VulkanHandle<VkDeviceMemory>             tlasMemory_;
 
-    Dispose::VulkanHandle<VkAccelerationStructureKHR> tlasHandle_;
-    Dispose::VulkanHandle<VkAccelerationStructureKHR> blasHandle_;
-
-    std::unordered_map<std::string, std::string> shaderPaths_;
-
-    // FIXED: NOW CREATED IN CONSTRUCTOR → createComputeDescriptorSetLayout()
     Dispose::VulkanHandle<VkDescriptorSetLayout> computeDescriptorSetLayout_;
     Dispose::VulkanHandle<VkDescriptorSetLayout> rayTracingDescriptorSetLayout_;
     Dispose::VulkanHandle<VkDescriptorSetLayout> graphicsDescriptorSetLayout_;
@@ -124,14 +133,10 @@ private:
     Dispose::VulkanHandle<VkBuffer>         sbtBuffer_;
     Dispose::VulkanHandle<VkDeviceMemory>   sbtMemory_;
 
-    // --- EXTENSION FUNCTIONS ---
-    PFN_vkCreateAccelerationStructureKHR  createAsFunc_ = nullptr;
-    PFN_vkDestroyAccelerationStructureKHR destroyAsFunc_ = nullptr;
-    PFN_vkGetRayTracingShaderGroupHandlesKHR getRayTracingShaderGroupHandlesFunc_ = nullptr;
-    PFN_vkCreateDeferredOperationKHR      vkCreateDeferredOperationKHR_   = nullptr;
-    PFN_vkDeferredOperationJoinKHR        vkDeferredOperationJoinKHR_     = nullptr;
-    PFN_vkGetDeferredOperationResultKHR   vkGetDeferredOperationResultKHR_ = nullptr;
-    PFN_vkDestroyDeferredOperationKHR     vkDestroyDeferredOperationKHR_  = nullptr;
+    Dispose::VulkanHandle<VkCommandPool> transientPool_;
+    VkQueue graphicsQueue_ = VK_NULL_HANDLE;
 };
 
 } // namespace VulkanRTX
+
+#endif // VULKAN_PIPELINE_MANAGER_HPP

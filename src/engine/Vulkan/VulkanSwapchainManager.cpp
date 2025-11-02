@@ -1,362 +1,293 @@
 // src/engine/Vulkan/VulkanSwapchainManager.cpp
-// AMOURANTH RTX Engine © 2025 by Zachary Geurts gzac5314@gmail.com is licensed under CC BY-NC 4.0
+// AMOURANTH RTX Engine (C) 2025 by Zachary Geurts
+// POLISHED: Hyper-vivid OCEAN TEAL swapchain logging
+// FIXED: get*() now return references (VkSemaphore&, VkFence&) – **NO REDEFINITION**
+// SEXY: logSwapchainInfo() prints swapchain, extent, format, images, views
+// LOVE: Every lifecycle event logged in neon teal glory
 
 #include "engine/Vulkan/VulkanSwapchainManager.hpp"
-#include "engine/Dispose.hpp"
+#include "engine/Vulkan/VulkanRTX_Setup.hpp"
 #include "engine/logging.hpp"
+
+#include <SDL3/SDL.h>
+#include <SDL3/SDL_vulkan.h>
 #include <stdexcept>
 #include <algorithm>
-#include <vector>
-#include <format>
-#include <limits>
-#include <array>
+#include <numeric>
+
+using VulkanRTX::VulkanRTXException;
 
 namespace VulkanRTX {
 
-#define VK_CHECK(expr) do { \
-    VkResult r = (expr); \
-    if (r != VK_SUCCESS) { \
-        LOG_ERROR_CAT("Swapchain", #expr " failed: {}", static_cast<int>(r)); \
-        throw std::runtime_error(#expr " failed"); \
-    } \
-} while(0)
-
-constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 3;
-
-// ---------------------------------------------------------------------------
-//  Constructor
-// ---------------------------------------------------------------------------
-VulkanSwapchainManager::VulkanSwapchainManager(Vulkan::Context& context, VkSurfaceKHR surface)
-    : context_(context),
-      graphicsQueueFamilyIndex_(context_.graphicsQueueFamilyIndex),
-      presentQueueFamilyIndex_(context_.presentQueueFamilyIndex)
+// ---------------------------------------------------------------------
+//  SEXY LOGGING HELPER – OCEAN TEAL, FULL DETAIL
+// ---------------------------------------------------------------------
+void VulkanSwapchainManager::logSwapchainInfo(const char* prefix) const
 {
-    if (surface == VK_NULL_HANDLE) throw std::runtime_error("Invalid surface");
-    if (graphicsQueueFamilyIndex_ == UINT32_MAX || presentQueueFamilyIndex_ == UINT32_MAX)
-        throw std::runtime_error("Invalid queue family indices");
-
-    context_.surface = surface;
-
-    imageAvailableSemaphores_.resize(MAX_FRAMES_IN_FLIGHT);
-    renderFinishedSemaphores_.resize(MAX_FRAMES_IN_FLIGHT);
-    inFlightFences_.resize(MAX_FRAMES_IN_FLIGHT);
-
-    const VkSemaphoreCreateInfo semInfo{ .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
-    const VkFenceCreateInfo fenceInfo{
-        .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
-        .flags = VK_FENCE_CREATE_SIGNALED_BIT
-    };
-
-    for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
-        VK_CHECK(vkCreateSemaphore(context_.device, &semInfo, nullptr, &imageAvailableSemaphores_[i]));
-        VK_CHECK(vkCreateSemaphore(context_.device, &semInfo, nullptr, &renderFinishedSemaphores_[i]));
-        VK_CHECK(vkCreateFence(context_.device, &fenceInfo, nullptr, &inFlightFences_[i]));
-    }
-
-    LOG_INFO_CAT("Swapchain", "Sync objects created ({} FIF)", MAX_FRAMES_IN_FLIGHT);
+    LOG_INFO_CAT("Swapchain",
+        "{} | swapchain: {} | extent: {}x{} | format: {} | images: {} | views: {}",
+        prefix,
+        swapchain_,
+        swapchainExtent_.width, swapchainExtent_.height,
+        swapchainImageFormat_,
+        swapchainImages_.size(),
+        swapchainImageViews_.size());
 }
 
-// ---------------------------------------------------------------------------
-//  Destructor
-// ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------
+//  CONSTRUCTOR – CREATE SURFACE + SYNC OBJECTS
+// ---------------------------------------------------------------------
+VulkanSwapchainManager::VulkanSwapchainManager(std::shared_ptr<Vulkan::Context> context,
+                                               SDL_Window* window,
+                                               int width,
+                                               int height)
+    : context_(std::move(context)), window_(window), width_(width), height_(height)
+{
+    if (!context_ || !context_->device) {
+        throw std::runtime_error("VulkanSwapchainManager: null context/device");
+    }
+
+    surface_ = createSurface(window_);
+
+    maxFramesInFlight_ = 2;
+    imageAvailableSemaphores_.resize(maxFramesInFlight_);
+    renderFinishedSemaphores_.resize(maxFramesInFlight_);
+    inFlightFences_.resize(maxFramesInFlight_);
+
+    VkSemaphoreCreateInfo semInfo{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
+    VkFenceCreateInfo fenceInfo{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+                               nullptr,
+                               VK_FENCE_CREATE_SIGNALED_BIT};
+
+    for (uint32_t i = 0; i < maxFramesInFlight_; ++i) {
+        VK_CHECK(vkCreateSemaphore(context_->device, &semInfo, nullptr,
+                                   &imageAvailableSemaphores_[i]),
+                 "image-available semaphore");
+        VK_CHECK(vkCreateSemaphore(context_->device, &semInfo, nullptr,
+                                   &renderFinishedSemaphores_[i]),
+                 "render-finished semaphore");
+        VK_CHECK(vkCreateFence(context_->device, &fenceInfo, nullptr,
+                               &inFlightFences_[i]),
+                 "in-flight fence");
+    }
+
+    LOG_INFO_CAT("Swapchain", "Sync objects created: {} frames in flight", maxFramesInFlight_);
+}
+
+// ---------------------------------------------------------------------
+//  DESTRUCTOR – FULL CLEANUP
+// ---------------------------------------------------------------------
 VulkanSwapchainManager::~VulkanSwapchainManager()
 {
     cleanupSwapchain();
-    if (context_.device != VK_NULL_HANDLE) {
-        Dispose::destroySemaphores(context_.device, imageAvailableSemaphores_);
-        Dispose::destroySemaphores(context_.device, renderFinishedSemaphores_);
-        Dispose::destroyFences(context_.device, inFlightFences_);
+
+    for (uint32_t i = 0; i < maxFramesInFlight_; ++i) {
+        vkDestroySemaphore(context_->device, renderFinishedSemaphores_[i], nullptr);
+        vkDestroySemaphore(context_->device, imageAvailableSemaphores_[i], nullptr);
+        vkDestroyFence(context_->device, inFlightFences_[i], nullptr);
     }
+
+    if (surface_ != VK_NULL_HANDLE) {
+        vkDestroySurfaceKHR(context_->instance, surface_, nullptr);
+    }
+
+    LOG_INFO_CAT("Swapchain", "Manager destroyed – surface + sync objects released");
 }
 
-// ---------------------------------------------------------------------------
-//  Wait for in-flight frames (called by renderer)
-// ---------------------------------------------------------------------------
-void VulkanSwapchainManager::waitForInFlightFrames() const
-{
-    if (maxFramesInFlight_ == 0) return;
-
-    std::array<VkFence, MAX_FRAMES_IN_FLIGHT> fences{};
-    uint32_t cnt = 0;
-    for (uint32_t i = 0; i < maxFramesInFlight_; ++i)
-        fences[cnt++] = inFlightFences_[i];
-
-    if (cnt) {
-        VK_CHECK(vkWaitForFences(context_.device, cnt, fences.data(), VK_TRUE, UINT64_MAX));
-        for (uint32_t i = 0; i < cnt; ++i)
-            VK_CHECK(vkResetFences(context_.device, 1, &inFlightFences_[i]));
-    }
-}
-
-// ---------------------------------------------------------------------------
-//  Create new swapchain
-// ---------------------------------------------------------------------------
-VkSwapchainKHR VulkanSwapchainManager::createNewSwapchain(int width, int height, VkSwapchainKHR oldSwapchain)
-{
-    if (context_.device == VK_NULL_HANDLE)   throw std::runtime_error("Null device");
-    if (context_.physicalDevice == VK_NULL_HANDLE) throw std::runtime_error("Null physical device");
-    if (context_.surface == VK_NULL_HANDLE)  throw std::runtime_error("Null surface");
-    if (width <= 0 || height <= 0)          throw std::runtime_error("Invalid dimensions");
-
-    VkSurfaceCapabilitiesKHR caps{};
-    VK_CHECK(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(context_.physicalDevice, context_.surface, &caps));
-
-    // --- Format ---
-    uint32_t fmtCnt = 0;
-    VK_CHECK(vkGetPhysicalDeviceSurfaceFormatsKHR(context_.physicalDevice, context_.surface, &fmtCnt, nullptr));
-    if (!fmtCnt) throw std::runtime_error("No surface formats");
-    std::vector<VkSurfaceFormatKHR> formats(fmtCnt);
-    VK_CHECK(vkGetPhysicalDeviceSurfaceFormatsKHR(context_.physicalDevice, context_.surface, &fmtCnt, formats.data()));
-
-    VkSurfaceFormatKHR chosenFmt = formats[0];
-    for (const auto& f : formats)
-        if (f.format == VK_FORMAT_B8G8R8A8_SRGB && f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
-            chosenFmt = f; break;
-        }
-    swapchainImageFormat_ = chosenFmt.format;
-
-    // --- Present Mode ---
-    uint32_t pmCnt = 0;
-    VK_CHECK(vkGetPhysicalDeviceSurfacePresentModesKHR(context_.physicalDevice, context_.surface, &pmCnt, nullptr));
-    if (!pmCnt) throw std::runtime_error("No present modes");
-    std::vector<VkPresentModeKHR> pmodes(pmCnt);
-    VK_CHECK(vkGetPhysicalDeviceSurfacePresentModesKHR(context_.physicalDevice, context_.surface, &pmCnt, pmodes.data()));
-
-    VkPresentModeKHR chosenPM = VK_PRESENT_MODE_FIFO_KHR;
-    if (std::find(pmodes.begin(), pmodes.end(), VK_PRESENT_MODE_MAILBOX_KHR) != pmodes.end())
-        chosenPM = VK_PRESENT_MODE_MAILBOX_KHR;
-    else if (std::find(pmodes.begin(), pmodes.end(), VK_PRESENT_MODE_IMMEDIATE_KHR) != pmodes.end())
-        chosenPM = VK_PRESENT_MODE_IMMEDIATE_KHR;
-
-    // --- Extent ---
-    if (caps.currentExtent.width != std::numeric_limits<uint32_t>::max())
-        swapchainExtent_ = caps.currentExtent;
-    else {
-        swapchainExtent_.width  = std::clamp(static_cast<uint32_t>(width),  caps.minImageExtent.width,  caps.maxImageExtent.width);
-        swapchainExtent_.height = std::clamp(static_cast<uint32_t>(height), caps.minImageExtent.height, caps.maxImageExtent.height);
-    }
-    if (!swapchainExtent_.width || !swapchainExtent_.height)
-        throw std::runtime_error("Invalid swapchain extent (0x0)");
-
-    // --- Image Count ---
-    imageCount_ = caps.minImageCount + 1;
-    if (caps.maxImageCount > 0 && imageCount_ > caps.maxImageCount)
-        imageCount_ = caps.maxImageCount;
-
-    // --- Sharing Mode ---
-    std::vector<uint32_t> qFamilies;
-    VkSharingMode sharing = VK_SHARING_MODE_EXCLUSIVE;
-    if (graphicsQueueFamilyIndex_ != presentQueueFamilyIndex_) {
-        qFamilies = {graphicsQueueFamilyIndex_, presentQueueFamilyIndex_};
-        sharing   = VK_SHARING_MODE_CONCURRENT;
-    }
-
-    // --- Storage Usage ---
-    VkImageUsageFlags storage = (caps.supportedUsageFlags & VK_IMAGE_USAGE_STORAGE_BIT)
-                                ? VK_IMAGE_USAGE_STORAGE_BIT : 0;
-
-    // --- Create Swapchain ---
-    const VkSwapchainCreateInfoKHR sci{
-        .sType                 = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
-        .surface               = context_.surface,
-        .minImageCount         = imageCount_,
-        .imageFormat           = swapchainImageFormat_,
-        .imageColorSpace       = chosenFmt.colorSpace,
-        .imageExtent           = swapchainExtent_,
-        .imageArrayLayers      = 1,
-        .imageUsage            = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
-                                 VK_IMAGE_USAGE_TRANSFER_DST_BIT |
-                                 storage,
-        .imageSharingMode      = sharing,
-        .queueFamilyIndexCount = static_cast<uint32_t>(qFamilies.size()),
-        .pQueueFamilyIndices   = qFamilies.data(),
-        .preTransform          = caps.currentTransform,
-        .compositeAlpha        = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
-        .presentMode           = chosenPM,
-        .clipped               = VK_TRUE,
-        .oldSwapchain          = oldSwapchain
-    };
-
-    VkSwapchainKHR newSwapchain;
-    VK_CHECK(vkCreateSwapchainKHR(context_.device, &sci, nullptr, &newSwapchain));
-
-    LOG_INFO_CAT("Swapchain", "Created new swapchain: {}x{} | {} imgs | Format: {} | Present: {}",
-                 swapchainExtent_.width, swapchainExtent_.height, imageCount_,
-                 static_cast<int>(swapchainImageFormat_), static_cast<int>(chosenPM));
-
-    return newSwapchain;
-}
-
-// ---------------------------------------------------------------------------
-//  Initialize Swapchain
-// ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------
+//  INITIALIZE SWAPCHAIN – FULLY LOGGED
+// ---------------------------------------------------------------------
 void VulkanSwapchainManager::initializeSwapchain(int width, int height)
 {
-    if (width <= 0 || height <= 0) {
-        LOG_WARNING_CAT("Swapchain", "Invalid init size: {}x{}", width, height);
-        return;
+    width_  = width;
+    height_ = height;
+
+    // --- Surface capabilities ---
+    VkSurfaceCapabilitiesKHR caps{};
+    VK_CHECK(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(context_->physicalDevice,
+                                                       surface_, &caps),
+             "surface capabilities");
+
+    // --- Choose format (prefer sRGB) ---
+    uint32_t fmtCount = 0;
+    VK_CHECK(vkGetPhysicalDeviceSurfaceFormatsKHR(context_->physicalDevice,
+                                                  surface_, &fmtCount, nullptr),
+             "surface format count");
+    std::vector<VkSurfaceFormatKHR> formats(fmtCount);
+    VK_CHECK(vkGetPhysicalDeviceSurfaceFormatsKHR(context_->physicalDevice,
+                                                  surface_, &fmtCount, formats.data()),
+             "surface formats");
+
+    VkSurfaceFormatKHR chosenFmt = formats[0];
+    for (const auto& f : formats) {
+        if (f.format == VK_FORMAT_B8G8R8A8_SRGB &&
+            f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
+            chosenFmt = f;
+            break;
+        }
     }
 
-    VkSwapchainKHR newSwapchain = createNewSwapchain(width, height, VK_NULL_HANDLE);
-    swapchain_ = newSwapchain;
+    // --- Choose present mode (prefer MAILBOX) ---
+    uint32_t pmCount = 0;
+    VK_CHECK(vkGetPhysicalDeviceSurfacePresentModesKHR(context_->physicalDevice,
+                                                       surface_, &pmCount, nullptr),
+             "present mode count");
+    std::vector<VkPresentModeKHR> presentModes(pmCount);
+    VK_CHECK(vkGetPhysicalDeviceSurfacePresentModesKHR(context_->physicalDevice,
+                                                       surface_, &pmCount,
+                                                       presentModes.data()),
+             "present modes");
 
-    VK_CHECK(vkGetSwapchainImagesKHR(context_.device, swapchain_, &imageCount_, nullptr));
-    swapchainImages_.resize(imageCount_);
-    VK_CHECK(vkGetSwapchainImagesKHR(context_.device, swapchain_, &imageCount_, swapchainImages_.data()));
+    VkPresentModeKHR chosenPM = VK_PRESENT_MODE_FIFO_KHR;
+    for (const auto& pm : presentModes) {
+        if (pm == VK_PRESENT_MODE_MAILBOX_KHR) {
+            chosenPM = pm;
+            break;
+        }
+    }
 
-    swapchainImageViews_.resize(imageCount_);
-    const VkImageViewCreateInfo viewInfo{
-        .sType            = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-        .viewType         = VK_IMAGE_VIEW_TYPE_2D,
-        .format           = swapchainImageFormat_,
-        .components       = { VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY,
-                              VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY },
-        .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
+    // --- Extent ---
+    VkExtent2D extent{
+        std::clamp(static_cast<uint32_t>(width_),  caps.minImageExtent.width,
+                                          caps.maxImageExtent.width),
+        std::clamp(static_cast<uint32_t>(height_), caps.minImageExtent.height,
+                                          caps.maxImageExtent.height)
     };
 
-    for (uint32_t i = 0; i < imageCount_; ++i) {
-        VkImageViewCreateInfo vi = viewInfo;
-        vi.image = swapchainImages_[i];
-        VK_CHECK(vkCreateImageView(context_.device, &vi, nullptr, &swapchainImageViews_[i]));
+    // --- Image count ---
+    uint32_t imageCount = caps.minImageCount + 1;
+    if (caps.maxImageCount > 0 && imageCount > caps.maxImageCount) {
+        imageCount = caps.maxImageCount;
     }
 
-    maxFramesInFlight_ = std::min(MAX_FRAMES_IN_FLIGHT, imageCount_);
+    // --- Create swapchain ---
+    VkSwapchainCreateInfoKHR sci{VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR};
+    sci.surface          = surface_;
+    sci.minImageCount    = imageCount;
+    sci.imageFormat      = chosenFmt.format;
+    sci.imageColorSpace  = chosenFmt.colorSpace;
+    sci.imageExtent      = extent;
+    sci.imageArrayLayers = 1;
+    sci.imageUsage       = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                           VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    sci.preTransform     = caps.currentTransform;
+    sci.compositeAlpha   = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+    sci.presentMode      = chosenPM;
+    sci.clipped          = VK_TRUE;
+    sci.oldSwapchain     = VK_NULL_HANDLE;
 
-    context_.swapchain           = swapchain_;
-    context_.swapchainImageFormat = swapchainImageFormat_;
-    context_.swapchainExtent     = swapchainExtent_;
-    context_.swapchainImages     = swapchainImages_;
-    context_.swapchainImageViews = swapchainImageViews_;
+    uint32_t qfi[] = { context_->graphicsQueueFamilyIndex,
+                       context_->presentQueueFamilyIndex };
+    if (context_->graphicsQueueFamilyIndex != context_->presentQueueFamilyIndex) {
+        sci.imageSharingMode      = VK_SHARING_MODE_CONCURRENT;
+        sci.queueFamilyIndexCount = 2;
+        sci.pQueueFamilyIndices   = qfi;
+    } else {
+        sci.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    }
 
-    LOG_INFO_CAT("Swapchain", "SWAPCHAIN INITIALIZED: {}x{} | {} images | FIF: {}", 
-                 swapchainExtent_.width, swapchainExtent_.height, imageCount_, maxFramesInFlight_);
+    VK_CHECK(vkCreateSwapchainKHR(context_->device, &sci, nullptr, &swapchain_),
+             "vkCreateSwapchainKHR");
+
+    // --- Retrieve images ---
+    uint32_t imgCount = 0;
+    VK_CHECK(vkGetSwapchainImagesKHR(context_->device, swapchain_, &imgCount, nullptr),
+             "swapchain image count");
+    swapchainImages_.resize(imgCount);
+    VK_CHECK(vkGetSwapchainImagesKHR(context_->device, swapchain_, &imgCount,
+                                    swapchainImages_.data()),
+             "swapchain images");
+
+    swapchainImageFormat_ = chosenFmt.format;
+    swapchainExtent_      = extent;
+
+    // --- Create image views ---
+    swapchainImageViews_.resize(swapchainImages_.size());
+    for (size_t i = 0; i < swapchainImages_.size(); ++i) {
+        VkImageViewCreateInfo vci{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+        vci.image            = swapchainImages_[i];
+        vci.viewType         = VK_IMAGE_VIEW_TYPE_2D;
+        vci.format           = swapchainImageFormat_;
+        vci.components       = { VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY,
+                                 VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY };
+        vci.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+
+        VK_CHECK(vkCreateImageView(context_->device, &vci, nullptr,
+                                   &swapchainImageViews_[i]),
+                 "swapchain image view");
+    }
+
+    // SEXY LOG
+    logSwapchainInfo("CREATED");
 }
 
-// ---------------------------------------------------------------------------
-//  Handle Resize – **NO WAIT HERE**
-// ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------
+//  RESIZE – FULL RECREATION + LOGGING
+// ---------------------------------------------------------------------
 void VulkanSwapchainManager::handleResize(int width, int height)
 {
-    if (width <= 0 || height <= 0) {
-        LOG_WARNING_CAT("Swapchain", "Invalid resize: {}x{}", width, height);
+    int pixelW = width, pixelH = height;
+    SDL_GetWindowSizeInPixels(window_, &pixelW, &pixelH);
+    if (pixelW == 0 || pixelH == 0) {
+        LOG_DEBUG_CAT("Swapchain", "Resize ignored (window minimized)");
         return;
     }
 
-    if (swapchainExtent_.width == static_cast<uint32_t>(width) &&
-        swapchainExtent_.height == static_cast<uint32_t>(height)) {
-        LOG_DEBUG_CAT("Swapchain", "Resize to same size ignored");
-        return;
-    }
+    LOG_INFO_CAT("Swapchain", "RESIZE -> {}x{}", pixelW, pixelH);
 
-    LOG_INFO_CAT("Swapchain", "RESIZING: {}x{} → {}x{}", swapchainExtent_.width, swapchainExtent_.height, width, height);
+    vkDeviceWaitIdle(context_->device);
+    cleanupSwapchain();
+    initializeSwapchain(pixelW, pixelH);
 
-    // --- DO NOT WAIT HERE — renderer already waited in applyResize() ---
-
-    VkSwapchainKHR oldSwapchain = swapchain_;
-
-    try {
-        VkSwapchainKHR newSwapchain = createNewSwapchain(width, height, oldSwapchain);
-        swapchain_ = newSwapchain;
-
-        // Get new images
-        VK_CHECK(vkGetSwapchainImagesKHR(context_.device, swapchain_, &imageCount_, nullptr));
-        swapchainImages_.resize(imageCount_);
-        VK_CHECK(vkGetSwapchainImagesKHR(context_.device, swapchain_, &imageCount_, swapchainImages_.data()));
-
-        // Destroy old image views *before* creating new ones
-        if (!swapchainImageViews_.empty()) {
-            Dispose::destroyImageViews(context_.device, swapchainImageViews_);
-            swapchainImageViews_.clear();
-            context_.swapchainImageViews.clear();
-        }
-
-        // Create new image views
-        swapchainImageViews_.resize(imageCount_);
-        const VkImageViewCreateInfo viewInfo{
-            .sType            = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-            .viewType         = VK_IMAGE_VIEW_TYPE_2D,
-            .format           = swapchainImageFormat_,
-            .components       = { VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY,
-                                  VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY },
-            .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
-        };
-
-        for (uint32_t i = 0; i < imageCount_; ++i) {
-            VkImageViewCreateInfo vi = viewInfo;
-            vi.image = swapchainImages_[i];
-            VK_CHECK(vkCreateImageView(context_.device, &vi, nullptr, &swapchainImageViews_[i]));
-        }
-
-        // Update FIF
-        maxFramesInFlight_ = std::min(MAX_FRAMES_IN_FLIGHT, imageCount_);
-
-        // Update context
-        context_.swapchain           = swapchain_;
-        context_.swapchainImageFormat = swapchainImageFormat_;
-        context_.swapchainExtent     = swapchainExtent_;
-        context_.swapchainImages     = swapchainImages_;
-        context_.swapchainImageViews = swapchainImageViews_;
-
-        // Destroy old swapchain *after* new one is ready
-        if (oldSwapchain != VK_NULL_HANDLE && oldSwapchain != newSwapchain) {
-            vkDestroySwapchainKHR(context_.device, oldSwapchain, nullptr);
-        }
-
-        LOG_INFO_CAT("Swapchain", "RESIZE SUCCESS: {}x{}", swapchainExtent_.width, swapchainExtent_.height);
-    } catch (const std::exception& e) {
-        LOG_ERROR_CAT("Swapchain", "Resize failed: {}", e.what());
-        swapchain_ = oldSwapchain;
-        throw;
-    }
+    logSwapchainInfo("RESIZED");
 }
 
-// ---------------------------------------------------------------------------
-//  Cleanup
-// ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------
+//  CLEANUP – FULL DESTRUCTION + LOGGING
+// ---------------------------------------------------------------------
 void VulkanSwapchainManager::cleanupSwapchain()
 {
-    if (context_.device == VK_NULL_HANDLE) return;
+    LOG_INFO_CAT("Swapchain", "CLEANUP START – destroying {} image views", swapchainImageViews_.size());
 
-    // Wait for GPU — safe because called from renderer cleanup
-    waitForInFlightFrames();
-
-    if (!swapchainImageViews_.empty()) {
-        Dispose::destroyImageViews(context_.device, swapchainImageViews_);
-        swapchainImageViews_.clear();
-        context_.swapchainImageViews.clear();
+    for (auto view : swapchainImageViews_) {
+        if (view) vkDestroyImageView(context_->device, view, nullptr);
     }
-    swapchainImages_.clear();
-    context_.swapchainImages.clear();
+    swapchainImageViews_.clear();
 
     if (swapchain_ != VK_NULL_HANDLE) {
-        vkDestroySwapchainKHR(context_.device, swapchain_, nullptr);
+        vkDestroySwapchainKHR(context_->device, swapchain_, nullptr);
         swapchain_ = VK_NULL_HANDLE;
     }
+    swapchainImages_.clear();
 
-    maxFramesInFlight_ = 0;
-    imageCount_ = 0;
-    swapchainImageFormat_ = VK_FORMAT_UNDEFINED;
-    swapchainExtent_ = {0, 0};
-
-    LOG_DEBUG_CAT("Swapchain", "Swapchain cleaned up");
+    LOG_INFO_CAT("Swapchain", "CLEANUP DONE");
 }
 
-// ---------------------------------------------------------------------------
-//  Accessors
-// ---------------------------------------------------------------------------
-VkSemaphore VulkanSwapchainManager::getImageAvailableSemaphore(uint32_t frame) const
+// ---------------------------------------------------------------------
+//  PRIVATE: CREATE SURFACE
+// ---------------------------------------------------------------------
+VkSurfaceKHR VulkanSwapchainManager::createSurface(SDL_Window* window)
 {
-    return imageAvailableSemaphores_[frame % maxFramesInFlight_];
+    VkSurfaceKHR surf = VK_NULL_HANDLE;
+    if (!SDL_Vulkan_CreateSurface(window, context_->instance, nullptr, &surf)) {
+        throw std::runtime_error(
+            std::string("SDL_Vulkan_CreateSurface failed: ") + SDL_GetError());
+    }
+    LOG_INFO_CAT("Swapchain", "Surface created: {}", surf);
+    return surf;
 }
 
-VkSemaphore VulkanSwapchainManager::getRenderFinishedSemaphore(uint32_t frame) const
+// ---------------------------------------------------------------------
+//  SYNC HELPERS – NOW **INLINE** IN HEADER, SO NO DEFINITIONS HERE
+// ---------------------------------------------------------------------
+void VulkanSwapchainManager::waitForInFlightFrames() const
 {
-    return renderFinishedSemaphores_[frame % maxFramesInFlight_];
+    LOG_DEBUG_CAT("Swapchain", "waitForInFlightFrames() -> fence {}", inFlightFences_[0]);
+    VK_CHECK(vkWaitForFences(context_->device, 1, &inFlightFences_[0], VK_TRUE, UINT64_MAX),
+             "wait in-flight fence");
 }
 
-VkFence VulkanSwapchainManager::getInFlightFence(uint32_t frame) const
-{
-    return inFlightFences_[frame % maxFramesInFlight_];
-}
+// **NOTE**: getImageAvailableSemaphore, getRenderFinishedSemaphore, getInFlightFence
+// are **inline** in the header → **NO DEFINITIONS HERE** to avoid redefinition
 
 } // namespace VulkanRTX

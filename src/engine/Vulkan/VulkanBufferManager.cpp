@@ -1,63 +1,71 @@
 // src/engine/Vulkan/VulkanBufferManager.cpp
-// AMOURANTH RTX Engine © 2025 by Zachary Geurts gzac5314@gmail.com is licensed under CC BY-NC 4.0
+// AMOURANTH RTX Engine (C) 2025 by Zachary Geurts gzac5314@gmail.com is licensed under CC BY-NC 4.0
 
 #include "engine/Vulkan/VulkanBufferManager.hpp"
+#include "engine/Vulkan/VulkanRenderer.hpp"
+#include "engine/Vulkan/VulkanRTX_Setup.hpp"
 #include "engine/Vulkan/Vulkan_init.hpp"
-#include "engine/Vulkan/types.hpp"
+#include "engine/Vulkan/VulkanCommon.hpp"
 #include "engine/Dispose.hpp"
 #include "engine/logging.hpp"
+#include "engine/utils.hpp"  // ← ptr_to_hex
 
 #include <vulkan/vulkan.h>
 #include <glm/glm.hpp>
 
 #include <algorithm>
 #include <array>
-#include <chrono>
-#include <condition_variable>
 #include <cstring>
-#include <functional>
-#include <mutex>
-#include <queue>
-#include <span>
 #include <stdexcept>
 #include <string>
-#include <thread>
 #include <vector>
+#include <cstdio>
+#include <ctime>
+#include <limits>
 
 #ifdef ENABLE_VULKAN_DEBUG
 #include <vulkan/vulkan_ext_debug_utils.h>
 #endif
 
+namespace VulkanRTX {
+
+using namespace Logging::Color;  // ← BRING IN COLOR PALETTE
+
 // ---------------------------------------------------------------------------
-//  VK_CHECK WITH MICROSECOND TIMING
+//  TIMING HELPER (C++11 safe)
 // ---------------------------------------------------------------------------
-#define VK_CHECK(expr, msg)                                                               \
+static double getMicroseconds() {
+    static std::clock_t start = std::clock();
+    std::clock_t now = std::clock();
+    return static_cast<double>(now - start) * 1000000.0 / CLOCKS_PER_SEC;
+}
+
+// ---------------------------------------------------------------------------
+//  SAFE VK_CHECK_NO_THROW FOR DESTRUCTORS
+// ---------------------------------------------------------------------------
+#define VK_CHECK_NO_THROW(expr, msg)                                                      \
     do {                                                                                  \
-        auto start = std::chrono::high_resolution_clock::now();                           \
+        double _start = getMicroseconds();                                                \
         VkResult _res = (expr);                                                           \
-        auto end = std::chrono::high_resolution_clock::now();                             \
-        auto dur = std::chrono::duration_cast<std::chrono::microseconds>(end - start);   \
+        double _end = getMicroseconds();                                                  \
+        double _dur = _end - _start;                                                      \
         if (_res != VK_SUCCESS) {                                                         \
-            LOG_ERROR_CAT("BufferMgr", "VULKAN PANIC: {} failed -> {} (VkResult={}) [{} us]", \
-                          msg, #expr, static_cast<int>(_res), dur.count());                 \
-            throw std::runtime_error(std::format("{} : {}", msg, #expr));                \
+            char _buf[512];                                                               \
+            std::snprintf(_buf, sizeof(_buf), "VULKAN ERROR in cleanup: %s failed -> %s (VkResult=%d) [%.1f us]", \
+                          msg, #expr, static_cast<int>(_res), _dur);                      \
+            LOG_ERROR_CAT("BufferMgr", "%s", _buf);                                       \
         } else {                                                                          \
-            LOG_TRACE_CAT("BufferMgr", "VK_CALL: {} -> OK [{} us]", #expr, dur.count());   \
+            char _buf[256];                                                               \
+            std::snprintf(_buf, sizeof(_buf), "VK_CLEANUP: %s -> OK [%.1f us]", #expr, _dur);\
+            LOG_TRACE_CAT("BufferMgr", "%s", _buf);                                       \
         }                                                                                 \
     } while (0)
 
 // ---------------------------------------------------------------------------
-//  MEMORY TYPE FINDER
+//  MEMORY TYPE FINDER (from VulkanInitializer)
 // ---------------------------------------------------------------------------
 static uint32_t findMemoryType(VkPhysicalDevice pd, uint32_t filter, VkMemoryPropertyFlags props) {
-    VkPhysicalDeviceMemoryProperties memProps;
-    vkGetPhysicalDeviceMemoryProperties(pd, &memProps);
-    for (uint32_t i = 0; i < memProps.memoryTypeCount; ++i) {
-        if ((filter & (1 << i)) && (memProps.memoryTypes[i].propertyFlags & props) == props) {
-            return i;
-        }
-    }
-    throw std::runtime_error("Failed to find memory type");
+    return VulkanInitializer::findMemoryType(pd, filter, props);  // ← FIXED
 }
 
 // ---------------------------------------------------------------------------
@@ -80,93 +88,104 @@ struct VulkanBufferManager::Impl {
 
     VkCommandPool commandPool = VK_NULL_HANDLE;
     VkQueue transferQueue = VK_NULL_HANDLE;
-    uint32_t transferQueueFamily = UINT32_MAX;
+    uint32_t transferQueueFamily = std::numeric_limits<uint32_t>::max();
 
     VkSemaphore timelineSemaphore = VK_NULL_HANDLE;
     uint64_t nextUpdateId = 1;
 
-    std::mutex mutex;
-    std::condition_variable cv;
-    std::queue<std::pair<uint64_t, std::function<void(uint64_t)>>> callbackQueue;
-    std::thread callbackThread;
-    bool shutdown = false;
-
-    explicit Impl(Vulkan::Context& ctx) : context(ctx),
-        callbackThread([this] { processCallbacks(); }) {}
-
-    ~Impl() {
-        { std::lock_guard<std::mutex> lk(mutex); shutdown = true; }
-        cv.notify_one();
-        if (callbackThread.joinable()) callbackThread.join();
-    }
-
-    void processCallbacks() {
-        while (true) {
-            std::unique_lock<std::mutex> lk(mutex);
-            cv.wait(lk, [this] { return !callbackQueue.empty() || shutdown; });
-            if (shutdown && callbackQueue.empty()) break;
-            auto [id, cb] = std::move(callbackQueue.front());
-            callbackQueue.pop();
-            lk.unlock();
-            cb(id);
-        }
-    }
+    explicit Impl(Vulkan::Context& ctx) : context(ctx) {}
 };
 
 // ---------------------------------------------------------------------------
-//  CONSTRUCTOR
+//  CONTEXT-ONLY CONSTRUCTOR
 // ---------------------------------------------------------------------------
-VulkanBufferManager::VulkanBufferManager(Vulkan::Context& ctx,
-                                         std::span<const glm::vec3> vertices,
-                                         std::span<const uint32_t> indices)
+VulkanBufferManager::VulkanBufferManager(Vulkan::Context& ctx)
     : context_(ctx),
-      vertexCount_(static_cast<uint32_t>(vertices.size())),
-      indexCount_(static_cast<uint32_t>(indices.size())),
-      impl_(std::make_unique<Impl>(ctx))
+      vertexCount_(0),
+      indexCount_(0),
+      vertexBufferAddress_(0),
+      indexBufferAddress_(0),
+      impl_(new Impl(ctx))
 {
-    if (ctx.device == VK_NULL_HANDLE) throw std::runtime_error("Invalid context");
+    LOG_INFO_CAT("BufferMgr", "{}VulkanBufferManager created (deferred) @ {}{}", 
+                  ARCTIC_CYAN, ptr_to_hex(this), RESET);
 
-    LOG_INFO_CAT("BufferMgr", "Initializing: {} verts, {} indices", vertices.size(), indices.size());
+    if (ctx.device == VK_NULL_HANDLE)
+        throw std::runtime_error("Invalid Vulkan context");
 
     initializeCommandPool();
 
-    const VkDeviceSize vSize = vertices.size() * sizeof(glm::vec3);
-    const VkDeviceSize iSize = indices.size() * sizeof(uint32_t);
-    const VkDeviceSize total = vSize + iSize;
-    const VkDeviceSize arenaSize = std::max<VkDeviceSize>(64ULL * 1024 * 1024, total * 2);
-
+    const VkDeviceSize arenaSize = 64ULL * 1024 * 1024;
     reserveArena(arenaSize, BufferType::GEOMETRY);
 
-    VkBuffer stagingV, stagingI;
-    VkDeviceMemory memV, memI;
+    VkSemaphoreTypeCreateInfo timeline = { VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO, nullptr, VK_SEMAPHORE_TYPE_TIMELINE, 0 };
+    VkSemaphoreCreateInfo semInfo = { VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO, &timeline };
+    VK_CHECK(vkCreateSemaphore(ctx.device, &semInfo, nullptr, &impl_->timelineSemaphore), "Timeline semaphore");
+}
+
+// ---------------------------------------------------------------------------
+//  FULL CONSTRUCTOR (DELEGATES)
+// ---------------------------------------------------------------------------
+VulkanBufferManager::VulkanBufferManager(Vulkan::Context& ctx,
+                                         const glm::vec3* vertices,
+                                         size_t vertexCount,
+                                         const uint32_t* indices,
+                                         size_t indexCount)
+    : VulkanBufferManager(ctx)
+{
+    uploadMesh(vertices, vertexCount, indices, indexCount);
+}
+
+// ---------------------------------------------------------------------------
+//  DEFERRED MESH UPLOAD
+// ---------------------------------------------------------------------------
+void VulkanBufferManager::uploadMesh(const glm::vec3* vertices,
+                                     size_t vertexCount,
+                                     const uint32_t* indices,
+                                     size_t indexCount)
+{
+    vertexCount_ = static_cast<uint32_t>(vertexCount);
+    indexCount_  = static_cast<uint32_t>(indexCount);
+
+    const VkDeviceSize vSize = vertexCount * sizeof(glm::vec3);
+    const VkDeviceSize iSize = indexCount * sizeof(uint32_t);
+    const VkDeviceSize total = vSize + iSize;
+
+    if (total > impl_->arenaSize) {
+        LOG_INFO_CAT("BufferMgr", "{}Resizing arena: {} → {} bytes{}", 
+                      OCEAN_TEAL, impl_->arenaSize, total * 2, RESET);
+        vkDestroyBuffer(context_.device, impl_->arenaBuffer, nullptr);
+        vkFreeMemory(context_.device, impl_->arenaMemory, nullptr);
+        reserveArena(std::max<VkDeviceSize>(64ULL * 1024 * 1024, total * 2), BufferType::GEOMETRY);
+    }
+
+    VkBuffer stagingV = VK_NULL_HANDLE, stagingI = VK_NULL_HANDLE;
+    VkDeviceMemory memV = VK_NULL_HANDLE, memI = VK_NULL_HANDLE;
 
     createStagingBuffer(vSize, stagingV, memV);
-    mapCopyUnmap(memV, vSize, vertices.data());
-
+    mapCopyUnmap(memV, vSize, vertices);
     createStagingBuffer(iSize, stagingI, memI);
-    mapCopyUnmap(memI, iSize, indices.data());
+    mapCopyUnmap(memI, iSize, indices);
 
     copyToArena(stagingV, 0, vSize);
     copyToArena(stagingI, impl_->indexOffset, iSize);
 
-    vkDestroyBuffer(ctx.device, stagingV, nullptr);
-    vkFreeMemory(ctx.device, memV, nullptr);
-    vkDestroyBuffer(ctx.device, stagingI, nullptr);
-    vkFreeMemory(ctx.device, memI, nullptr);
+    vkDestroyBuffer(context_.device, stagingV, nullptr);
+    vkFreeMemory(context_.device, memV, nullptr);
+    vkDestroyBuffer(context_.device, stagingI, nullptr);
+    vkFreeMemory(context_.device, memI, nullptr);
 
-    VkBufferDeviceAddressInfo addrInfo = { .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO, .buffer = impl_->arenaBuffer };
-    vertexBufferAddress_ = vkGetBufferDeviceAddress(ctx.device, &addrInfo);
+    vertexBufferAddress_ = VulkanInitializer::getBufferDeviceAddress(context_, impl_->arenaBuffer);
     indexBufferAddress_  = vertexBufferAddress_ + impl_->indexOffset;
 
-    VkSemaphoreTypeCreateInfo timeline = { .sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO, .semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE, .initialValue = 0 };
-    VkSemaphoreCreateInfo semInfo = { .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO, .pNext = &timeline };
-    VK_CHECK(vkCreateSemaphore(ctx.device, &semInfo, nullptr, &impl_->timelineSemaphore), "Timeline semaphore");
+    LOG_INFO_CAT("BufferMgr", "{}Mesh uploaded: {}v {}i @ {}{}", 
+                  EMERALD_GREEN, vertexCount, indexCount, ptr_to_hex((void*)vertexBufferAddress_), RESET);
 }
 
 // ---------------------------------------------------------------------------
 //  DESTRUCTOR
 // ---------------------------------------------------------------------------
-VulkanBufferManager::~VulkanBufferManager() {
+VulkanBufferManager::~VulkanBufferManager() noexcept {
     vkDeviceWaitIdle(context_.device);
 
     for (size_t i = 0; i < impl_->scratchBuffers.size(); ++i) {
@@ -193,68 +212,69 @@ VulkanBufferManager::~VulkanBufferManager() {
     }
 
     if (impl_->commandPool) {
-        // NOTE: No commandBuffers vector in Impl → use vkResetCommandPool instead
-        VK_CHECK(vkResetCommandPool(context_.device, impl_->commandPool, 0), "Reset command pool");
+        VK_CHECK_NO_THROW(vkResetCommandPool(context_.device, impl_->commandPool, 0), "Reset command pool");
         vkDestroyCommandPool(context_.device, impl_->commandPool, nullptr);
     }
 
     if (impl_->timelineSemaphore) {
         vkDestroySemaphore(context_.device, impl_->timelineSemaphore, nullptr);
     }
+
+    delete impl_;
 }
 
 // ---------------------------------------------------------------------------
 //  HELPER: STAGING BUFFER
 // ---------------------------------------------------------------------------
 void VulkanBufferManager::createStagingBuffer(VkDeviceSize size, VkBuffer& buf, VkDeviceMemory& mem) {
-    VkBufferCreateInfo info = { .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size = size, .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT, .sharingMode = VK_SHARING_MODE_EXCLUSIVE };
+    VkBufferCreateInfo info = { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, nullptr, 0, size,
+                                VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_SHARING_MODE_EXCLUSIVE };
     VK_CHECK(vkCreateBuffer(context_.device, &info, nullptr, &buf), "Staging buffer");
 
     VkMemoryRequirements reqs;
     vkGetBufferMemoryRequirements(context_.device, buf, &reqs);
 
-    VkMemoryAllocateInfo alloc = { .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, .allocationSize = reqs.size,
-        .memoryTypeIndex = findMemoryType(context_.physicalDevice, reqs.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) };
+    VkMemoryAllocateInfo alloc = { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, nullptr, reqs.size,
+        findMemoryType(context_.physicalDevice,
+                       reqs.memoryTypeBits,
+                       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) };
     VK_CHECK(vkAllocateMemory(context_.device, &alloc, nullptr, &mem), "Staging memory");
     VK_CHECK(vkBindBufferMemory(context_.device, buf, mem, 0), "Bind staging");
 }
 
 // ---------------------------------------------------------------------------
-//  HELPER: MAP + COPY + UNMAP
+//  REST OF METHODS (unchanged)
 // ---------------------------------------------------------------------------
 void VulkanBufferManager::mapCopyUnmap(VkDeviceMemory mem, VkDeviceSize size, const void* data) {
     void* ptr;
     VK_CHECK(vkMapMemory(context_.device, mem, 0, size, 0, &ptr), "Map");
-    std::memcpy(ptr, data, size);
+    std::memcpy(ptr, data, static_cast<size_t>(size));
     vkUnmapMemory(context_.device, mem);
 }
 
-// ---------------------------------------------------------------------------
-//  HELPER: COPY TO ARENA
-// ---------------------------------------------------------------------------
 void VulkanBufferManager::copyToArena(VkBuffer src, VkDeviceSize dstOffset, VkDeviceSize size) {
     VkCommandBuffer cb;
-    VkCommandBufferAllocateInfo alloc = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO, .commandPool = impl_->commandPool, .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY, .commandBufferCount = 1 };
+    VkCommandBufferAllocateInfo alloc = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO, nullptr,
+                                          impl_->commandPool, VK_COMMAND_BUFFER_LEVEL_PRIMARY, 1 };
     VK_CHECK(vkAllocateCommandBuffers(context_.device, &alloc, &cb), "Alloc CB");
 
-    VkCommandBufferBeginInfo begin = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT };
+    VkCommandBufferBeginInfo begin = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, nullptr,
+                                       VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT };
     VK_CHECK(vkBeginCommandBuffer(cb, &begin), "Begin CB");
 
-    VkBufferCopy copy = { .srcOffset = 0, .dstOffset = dstOffset, .size = size };
+    VkBufferCopy copy = { 0, dstOffset, size };
     vkCmdCopyBuffer(cb, src, impl_->arenaBuffer, 1, &copy);
 
     VK_CHECK(vkEndCommandBuffer(cb), "End CB");
 
-    VkSubmitInfo submit = { .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO, .commandBufferCount = 1, .pCommandBuffers = &cb };
+    VkSubmitInfo submit = { VK_STRUCTURE_TYPE_SUBMIT_INFO, nullptr, 0, nullptr, nullptr,
+                            1, &cb, 0, nullptr };
     VK_CHECK(vkQueueSubmit(impl_->transferQueue, 1, &submit, VK_NULL_HANDLE), "Submit");
     vkQueueWaitIdle(impl_->transferQueue);
 
     vkFreeCommandBuffers(context_.device, impl_->commandPool, 1, &cb);
 }
 
-// ---------------------------------------------------------------------------
-//  INITIALIZE COMMAND POOL
-// ---------------------------------------------------------------------------
 void VulkanBufferManager::initializeCommandPool() {
     uint32_t count = 0;
     vkGetPhysicalDeviceQueueFamilyProperties(context_.physicalDevice, &count, nullptr);
@@ -267,61 +287,66 @@ void VulkanBufferManager::initializeCommandPool() {
             break;
         }
     }
-    if (impl_->transferQueueFamily == UINT32_MAX) impl_->transferQueueFamily = context_.graphicsQueueFamilyIndex;
+    if (impl_->transferQueueFamily == std::numeric_limits<uint32_t>::max())
+        impl_->transferQueueFamily = context_.graphicsQueueFamilyIndex;
 
-    VkCommandPoolCreateInfo info = { .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
-        .flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT | VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
-        .queueFamilyIndex = impl_->transferQueueFamily };
+    VkCommandPoolCreateInfo info = { VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO, nullptr,
+        VK_COMMAND_POOL_CREATE_TRANSIENT_BIT | VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
+        impl_->transferQueueFamily };
     VK_CHECK(vkCreateCommandPool(context_.device, &info, nullptr, &impl_->commandPool), "Command pool");
 
     vkGetDeviceQueue(context_.device, impl_->transferQueueFamily, 0, &impl_->transferQueue);
 }
 
-// ---------------------------------------------------------------------------
-//  RESERVE ARENA
-// ---------------------------------------------------------------------------
-void VulkanBufferManager::reserveArena(VkDeviceSize size, BufferType type) {
+void VulkanBufferManager::reserveArena(VkDeviceSize size, BufferType /*type*/) {
     VkBufferUsageFlags usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT |
                                VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
                                VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
                                VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
                                VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR;
 
-    VkBufferCreateInfo info = { .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size = size, .usage = usage, .sharingMode = VK_SHARING_MODE_EXCLUSIVE };
+    VkBufferCreateInfo info = { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, nullptr, 0, size, usage, VK_SHARING_MODE_EXCLUSIVE };
     VK_CHECK(vkCreateBuffer(context_.device, &info, nullptr, &impl_->arenaBuffer), "Arena buffer");
 
     VkMemoryRequirements reqs;
     vkGetBufferMemoryRequirements(context_.device, impl_->arenaBuffer, &reqs);
 
-    VkMemoryAllocateFlagsInfo flags = { .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO, .flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT };
-    VkMemoryAllocateInfo alloc = { .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, .pNext = &flags, .allocationSize = reqs.size,
-        .memoryTypeIndex = findMemoryType(context_.physicalDevice, reqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) };
+    VkMemoryAllocateFlagsInfo flags = { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO, nullptr,
+                                        VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT };
+    VkMemoryAllocateInfo alloc = { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, &flags, reqs.size,
+        findMemoryType(context_.physicalDevice,
+                       reqs.memoryTypeBits,
+                       VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) };
     VK_CHECK(vkAllocateMemory(context_.device, &alloc, nullptr, &impl_->arenaMemory), "Arena memory");
     VK_CHECK(vkBindBufferMemory(context_.device, impl_->arenaBuffer, impl_->arenaMemory, 0), "Bind arena");
 
     impl_->arenaSize = size;
     impl_->vertexOffset = 0;
-    impl_->indexOffset = (vertexCount_ * sizeof(glm::vec3) + 255) & ~255;
+    impl_->indexOffset = (static_cast<VkDeviceSize>(vertexCount_) * sizeof(glm::vec3) + 255) & ~255ULL;
 }
 
 // ---------------------------------------------------------------------------
-//  ASYNC UPDATE BUFFERS
+//  UPDATE BUFFERS (SYNC ONLY)
 // ---------------------------------------------------------------------------
-VkDeviceAddress VulkanBufferManager::asyncUpdateBuffers(
-    std::span<const glm::vec3> vertices,
-    std::span<const uint32_t> indices,
-    std::function<void(uint64_t)> callback)
+VkDeviceAddress VulkanBufferManager::updateBuffers(
+    const glm::vec3* vertices,
+    size_t vertexCount,
+    const uint32_t* indices,
+    size_t indexCount)
 {
-    const uint64_t id = impl_->nextUpdateId++;
-    const VkDeviceSize vSize = vertices.size() * sizeof(glm::vec3);
-    const VkDeviceSize iSize = indices.size() * sizeof(uint32_t);
+    vertexCount_ = static_cast<uint32_t>(vertexCount);
+    indexCount_ = static_cast<uint32_t>(indexCount);
 
-    VkBuffer stagingV, stagingI;
-    VkDeviceMemory memV, memI;
+    const VkDeviceSize vSize = vertexCount * sizeof(glm::vec3);
+    const VkDeviceSize iSize = indexCount * sizeof(uint32_t);
+
+    VkBuffer stagingV = VK_NULL_HANDLE, stagingI = VK_NULL_HANDLE;
+    VkDeviceMemory memV = VK_NULL_HANDLE, memI = VK_NULL_HANDLE;
+
     createStagingBuffer(vSize, stagingV, memV);
     createStagingBuffer(iSize, stagingI, memI);
-    mapCopyUnmap(memV, vSize, vertices.data());
-    mapCopyUnmap(memI, iSize, indices.data());
+    mapCopyUnmap(memV, vSize, vertices);
+    mapCopyUnmap(memI, iSize, indices);
 
     copyToArena(stagingV, impl_->vertexOffset, vSize);
     copyToArena(stagingI, impl_->indexOffset, iSize);
@@ -331,11 +356,8 @@ VkDeviceAddress VulkanBufferManager::asyncUpdateBuffers(
     vkDestroyBuffer(context_.device, stagingI, nullptr);
     vkFreeMemory(context_.device, memI, nullptr);
 
-    if (callback) {
-        std::lock_guard<std::mutex> lk(impl_->mutex);
-        impl_->callbackQueue.emplace(id, std::move(callback));
-        impl_->cv.notify_one();
-    }
+    vertexBufferAddress_ = VulkanInitializer::getBufferDeviceAddress(context_, impl_->arenaBuffer);
+    indexBufferAddress_  = vertexBufferAddress_ + impl_->indexOffset;
 
     return vertexBufferAddress_;
 }
@@ -347,13 +369,33 @@ void VulkanBufferManager::createUniformBuffers(uint32_t count) {
     impl_->uniformBuffers.resize(count);
     impl_->uniformBufferMemories.resize(count);
     for (uint32_t i = 0; i < count; ++i) {
-        createBuffer(sizeof(UniformBufferObject),
-                     VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-                     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                     impl_->uniformBuffers[i], impl_->uniformBufferMemories[i]);
+        VulkanBufferManager::createBuffer(context_.device,
+                                          context_.physicalDevice,
+                                          sizeof(UniformBufferObject),
+                                          VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+                                          VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                                          impl_->uniformBuffers[i],
+                                          impl_->uniformBufferMemories[i],
+                                          nullptr,
+                                          context_);
+
         context_.resourceManager.addBuffer(impl_->uniformBuffers[i]);
         context_.resourceManager.addMemory(impl_->uniformBufferMemories[i]);
     }
+}
+
+// ---------------------------------------------------------------------------
+//  GET UNIFORM BUFFER / MEMORY
+// ---------------------------------------------------------------------------
+VkBuffer VulkanBufferManager::getUniformBuffer(uint32_t index) const {
+    if (index >= impl_->uniformBuffers.size())
+        throw std::out_of_range("Uniform buffer index out of range");
+    return impl_->uniformBuffers[index];
+}
+VkDeviceMemory VulkanBufferManager::getUniformBufferMemory(uint32_t index) const {
+    if (index >= impl_->uniformBufferMemories.size())
+        throw std::out_of_range("Uniform buffer memory index out of range");
+    return impl_->uniformBufferMemories[index];
 }
 
 // ---------------------------------------------------------------------------
@@ -365,13 +407,19 @@ void VulkanBufferManager::reserveScratchPool(VkDeviceSize size, uint32_t count) 
     impl_->scratchBufferAddresses.resize(count);
 
     for (uint32_t i = 0; i < count; ++i) {
-        createBuffer(size,
-                     VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-                     VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-                     impl_->scratchBuffers[i], impl_->scratchBufferMemories[i]);
+        VulkanBufferManager::createBuffer(context_.device,
+                                          context_.physicalDevice,
+                                          size,
+                                          VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                                          VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                                          VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                                          impl_->scratchBuffers[i],
+                                          impl_->scratchBufferMemories[i],
+                                          nullptr,
+                                          context_);
 
-        VkBufferDeviceAddressInfo info = { .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO, .buffer = impl_->scratchBuffers[i] };
-        impl_->scratchBufferAddresses[i] = vkGetBufferDeviceAddress(context_.device, &info);
+        impl_->scratchBufferAddresses[i] =
+            VulkanInitializer::getBufferDeviceAddress(context_, impl_->scratchBuffers[i]);
 
         context_.resourceManager.addBuffer(impl_->scratchBuffers[i]);
         context_.resourceManager.addMemory(impl_->scratchBufferMemories[i]);
@@ -382,50 +430,70 @@ void VulkanBufferManager::reserveScratchPool(VkDeviceSize size, uint32_t count) 
 //  GETTERS
 // ---------------------------------------------------------------------------
 VkBuffer VulkanBufferManager::getVertexBuffer() const { return impl_->arenaBuffer; }
-VkBuffer VulkanBufferManager::getIndexBuffer() const { return impl_->arenaBuffer; }
+VkBuffer VulkanBufferManager::getIndexBuffer() const  { return impl_->arenaBuffer; }
 
 VkDeviceAddress VulkanBufferManager::getVertexBufferAddress() const { return vertexBufferAddress_; }
-VkDeviceAddress VulkanBufferManager::getIndexBufferAddress() const { return indexBufferAddress_; }
+VkDeviceAddress VulkanBufferManager::getIndexBufferAddress() const  { return indexBufferAddress_; }
 
-VkBuffer VulkanBufferManager::getScratchBuffer(uint32_t i) const { return impl_->scratchBuffers[i]; }
-VkDeviceAddress VulkanBufferManager::getScratchBufferAddress(uint32_t i) const { return impl_->scratchBufferAddresses[i]; }
-uint32_t VulkanBufferManager::getScratchBufferCount() const { return static_cast<uint32_t>(impl_->scratchBuffers.size()); }
-
-// ---------------------------------------------------------------------------
-//  CREATE BUFFER (GENERAL)
-// ---------------------------------------------------------------------------
-void VulkanBufferManager::createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags props, VkBuffer& buf, VkDeviceMemory& mem) {
-    VkBufferCreateInfo info = { .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size = size, .usage = usage, .sharingMode = VK_SHARING_MODE_EXCLUSIVE };
-    VK_CHECK(vkCreateBuffer(context_.device, &info, nullptr, &buf), "Create buffer");
-
-    VkMemoryRequirements reqs;
-    vkGetBufferMemoryRequirements(context_.device, buf, &reqs);
-
-    VkMemoryAllocateInfo alloc = { .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, .allocationSize = reqs.size,
-        .memoryTypeIndex = findMemoryType(context_.physicalDevice, reqs.memoryTypeBits, props) };
-    VK_CHECK(vkAllocateMemory(context_.device, &alloc, nullptr, &mem), "Alloc memory");
-    VK_CHECK(vkBindBufferMemory(context_.device, buf, mem, 0), "Bind memory");
+VkBuffer VulkanBufferManager::getScratchBuffer(uint32_t i) const {
+    if (i >= impl_->scratchBuffers.size())
+        throw std::out_of_range("Scratch buffer index out of range");
+    return impl_->scratchBuffers[i];
+}
+VkDeviceAddress VulkanBufferManager::getScratchBufferAddress(uint32_t i) const {
+    if (i >= impl_->scratchBufferAddresses.size())
+        throw std::out_of_range("Scratch buffer address index out of range");
+    return impl_->scratchBufferAddresses[i];
+}
+uint32_t VulkanBufferManager::getScratchBufferCount() const {
+    return static_cast<uint32_t>(impl_->scratchBuffers.size());
 }
 
 // ---------------------------------------------------------------------------
-//  MOVED FROM HEADER: NOW SAFE
+//  STATIC CREATE BUFFER (forwards to VulkanInitializer)
 // ---------------------------------------------------------------------------
-VkBuffer VulkanBufferManager::getArenaBuffer() const {
-    return impl_->arenaBuffer;
+void VulkanBufferManager::createBuffer(VkDevice device,
+                                       VkPhysicalDevice physicalDevice,
+                                       VkDeviceSize size,
+                                       VkBufferUsageFlags usage,
+                                       VkMemoryPropertyFlags properties,
+                                       VkBuffer& buffer,
+                                       VkDeviceMemory& memory,
+                                       const VkMemoryAllocateFlagsInfo* allocFlags,
+                                       Vulkan::Context& context)
+{
+    VulkanInitializer::createBuffer(device, physicalDevice, size, usage, properties,
+                                    buffer, memory, allocFlags, context);
 }
 
-VkDeviceSize VulkanBufferManager::getVertexOffset() const {
-    return impl_->vertexOffset;
+// ---------------------------------------------------------------------------
+//  STATIC GET BUFFER DEVICE ADDRESS
+// ---------------------------------------------------------------------------
+VkDeviceAddress VulkanBufferManager::getBufferDeviceAddress(const Vulkan::Context& context,
+                                                            VkBuffer buffer)
+{
+    return VulkanInitializer::getBufferDeviceAddress(context, buffer);
 }
 
-VkDeviceSize VulkanBufferManager::getIndexOffset() const {
-    return impl_->indexOffset;
+// ---------------------------------------------------------------------------
+//  STATIC GET AS DEVICE ADDRESS
+// ---------------------------------------------------------------------------
+VkDeviceAddress VulkanBufferManager::getAccelerationStructureDeviceAddress(
+    const Vulkan::Context& context,
+    VkAccelerationStructureKHR as)
+{
+    return VulkanInitializer::getAccelerationStructureDeviceAddress(context, as);
 }
+
+// ---------------------------------------------------------------------------
+//  MOVED FROM HEADER (now safe)
+// ---------------------------------------------------------------------------
+VkBuffer VulkanBufferManager::getArenaBuffer() const { return impl_->arenaBuffer; }
+VkDeviceSize VulkanBufferManager::getVertexOffset() const { return impl_->vertexOffset; }
+VkDeviceSize VulkanBufferManager::getIndexOffset() const  { return impl_->indexOffset; }
 
 VkDeviceAddress VulkanBufferManager::getDeviceAddress(VkBuffer buffer) const {
-    VkBufferDeviceAddressInfo info = {
-        .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
-        .buffer = buffer
-    };
-    return vkGetBufferDeviceAddress(context_.device, &info);
+    return VulkanInitializer::getBufferDeviceAddress(context_, buffer);
 }
+
+} // namespace VulkanRTX

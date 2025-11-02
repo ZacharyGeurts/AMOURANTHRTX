@@ -1,13 +1,14 @@
-// AMOURANTH RTX Engine, October 2025 - SDL3 and Vulkan initialization.
-// Creates SDL3 window and Vulkan instance/surface for rendering.
-// Dependencies: SDL3, Vulkan 1.3, C++20 standard library.
+// include/engine/SDL3/SDL3_init.hpp
+// AMOURANTH RTX Engine – SDL3 + Vulkan bootstrap (October 2025)
 
+#pragma once
 #ifndef SDL3_INIT_HPP
 #define SDL3_INIT_HPP
 
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
 #include <vulkan/vulkan.h>
+
 #include <memory>
 #include <string>
 #include <set>
@@ -19,41 +20,43 @@ struct VulkanInstanceDeleter {
 };
 
 struct VulkanSurfaceDeleter {
-    VkInstance m_instance;
+    VkInstance m_instance = VK_NULL_HANDLE;
     explicit VulkanSurfaceDeleter(VkInstance inst = VK_NULL_HANDLE) : m_instance(inst) {}
     void operator()(VkSurfaceKHR surface) const;
 };
 
 using VulkanInstancePtr = std::unique_ptr<VkInstance_T, VulkanInstanceDeleter>;
-using VulkanSurfacePtr = std::unique_ptr<VkSurfaceKHR_T, VulkanSurfaceDeleter>;
+using VulkanSurfacePtr  = std::unique_ptr<VkSurfaceKHR_T, VulkanSurfaceDeleter>;
 
 class SDL3Initializer {
 public:
+    // 3-arg: default Vulkan-ready window
     SDL3Initializer(const std::string& title, int width, int height);
+    // 4-arg: explicit flags
+    SDL3Initializer(const std::string& title, int width, int height, Uint32 flags);
     ~SDL3Initializer() = default;
 
-    VkInstance getInstance() const { return instance_.get(); }
-    VkSurfaceKHR getSurface() const { return surface_.get(); }
-    SDL_Window* getWindow() const { return window_; }
+    [[nodiscard]] VkInstance   getInstance() const { return instance_.get(); }
+    [[nodiscard]] VkSurfaceKHR getSurface()  const { return surface_.get(); }
+    [[nodiscard]] SDL_Window*  getWindow()   const { return window_; }
+
     bool shouldQuit() const;
     void pollEvents();
 
 private:
-    SDL_Window* window_ = nullptr;
+    SDL_Window*       window_ = nullptr;
     VulkanInstancePtr instance_;
-    VulkanSurfacePtr surface_;
+    VulkanSurfacePtr  surface_;
 };
 
-inline std::string formatSet(const std::set<std::string>& set) {
-    std::string result = "{";
-    for (auto it = set.begin(); it != set.end(); ++it) {
-        result += *it;
-        if (std::next(it) != set.end()) {
-            result += ", ";
-        }
+inline std::string formatSet(const std::set<std::string>& s) {
+    std::string r = "{";
+    for (auto it = s.begin(); it != s.end(); ++it) {
+        r += *it;
+        if (std::next(it) != s.end()) r += ", ";
     }
-    result += "}";
-    return result;
+    r += "}";
+    return r;
 }
 
 } // namespace SDL3Initializer
