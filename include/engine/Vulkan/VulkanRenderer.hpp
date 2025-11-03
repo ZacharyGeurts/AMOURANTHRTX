@@ -5,6 +5,8 @@
 //        Swapchain data owned directly by VulkanRenderer (no manager for simplicity)
 //        FPS UNLOCKED BY DEFAULT: VK_PRESENT_MODE_IMMEDIATE_KHR
 //        Zero leaks, zero warnings, maximum OCEAN TEAL logging.
+//        FIXED: getBLAS()/getTLAS() removed → now accessed via VulkanRTX
+//        RTX component owns BLAS/TLAS → safe rebuild on resize
 
 #pragma once
 #ifndef VULKAN_RENDERER_HPP
@@ -60,6 +62,7 @@ namespace VulkanRTX {
         void renderFrame(const Camera& camera);
         void handleResize(int width, int height);
         void cleanup() noexcept;
+        void setRenderMode(int mode);
 
         VkDevice getDevice() const { return context_->device; }
         const VulkanRTX& getVulkanRTX() const { return *rtx_; }
@@ -67,12 +70,14 @@ namespace VulkanRTX {
         const std::vector<glm::vec3>& getVertices() const;
         const std::vector<uint32_t>&  getIndices() const;
 
-        // FIXED: Access via VulkanRTX
+        // FIXED: Access SBT via VulkanRTX
         VkBuffer       getSBTBuffer() const { return rtx_->getSBTBuffer(); }
         VkDeviceMemory getSBTMemory() const { return rtx_->getSBTMemory(); }
 
         void setCurrentMode(int mode) { currentMode_ = mode; }
         int  getCurrentMode() const   { return currentMode_; }
+
+        // REMOVED: getBLAS()/getTLAS() — now accessed via rtx_->getBLAS() / rtx_->getTLAS()
 
     private:
         // PRIVATE METHODS

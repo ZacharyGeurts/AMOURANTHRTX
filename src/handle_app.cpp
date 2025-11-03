@@ -82,6 +82,7 @@ Application::Application(const char* title, int width, int height)
     LOG_INFO_CAT("Application", "{}APPLICATION INITIALIZATION{}", Logging::Color::DIAMOND_WHITE, Logging::Color::RESET);
     LOG_INFO_CAT("Application", "Title      : {}", title_);
     LOG_INFO_CAT("Application", "Resolution : {}x{}", width_, height_);
+    LOG_INFO_CAT("Application", "Starting Render Mode: {}", mode_);
 
     loadMesh("assets/models/scene.obj", vertices_, indices_);
     globalVertices_ = vertices_;
@@ -149,6 +150,7 @@ void Application::run() {
         inputHandler_->handleInput(*this);
         render();
     }
+    LOG_INFO_CAT("Application", "Main loop exited");
 }
 
 void Application::render() {
@@ -188,7 +190,11 @@ void HandleInput::defaultKeyboardHandler(const SDL_KeyboardEvent& key) {
 
     if (sc == SDL_SCANCODE_F11 || (sc == SDL_SCANCODE_RETURN && (key.mod & SDL_KMOD_ALT))) { app.toggleFullscreen(); return; }
     if (sc == SDL_SCANCODE_F10) { app.toggleMaximize(); return; }
-    if (sc >= SDL_SCANCODE_1 && sc <= SDL_SCANCODE_9) { app.setRenderMode(sc - SDL_SCANCODE_1 + 1); return; }
+    if (sc >= SDL_SCANCODE_1 && sc <= SDL_SCANCODE_9) { 
+        int newMode = sc - SDL_SCANCODE_1 + 1;
+        app.setRenderMode(newMode); 
+        return; 
+    }
 
     switch (sc) {
         case SDL_SCANCODE_P: camera_.togglePause(); break;

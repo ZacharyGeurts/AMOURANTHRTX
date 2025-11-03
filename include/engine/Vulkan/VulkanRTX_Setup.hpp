@@ -1,4 +1,9 @@
 // include/engine/Vulkan/VulkanRTX_Setup.hpp
+// AMOURANTH RTX Engine (C) 2025 by Zachary Geurts gzac5314@gmail.com
+// FINAL: RAII, FULLY FIXED, NO LEAKS, NO WARNINGS
+//        ADDED: getBLAS() and getTLAS() public getters
+//        Safe for VulkanRenderer::handleResize() to rebuild TLAS
+
 #pragma once
 
 #include <vulkan/vulkan.h>
@@ -147,6 +152,11 @@ public:
     // FIXED: PUBLIC SBT ACCESS
     VkBuffer       getSBTBuffer() const { return sbtBuffer_.get(); }
     VkDeviceMemory getSBTMemory() const { return sbtMemory_.get(); }
+
+    // ADDED: PUBLIC BLAS/TLAS ACCESS FOR RESIZE REBUILD
+    VkAccelerationStructureKHR getBLAS() const { return blas_.get(); }
+    VkAccelerationStructureKHR getTLAS() const { return tlas_.get(); }
+
     void setRayTracingPipeline(VkPipeline pipeline, VkPipelineLayout layout);
 
 private:

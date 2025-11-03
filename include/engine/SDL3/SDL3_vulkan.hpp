@@ -1,6 +1,7 @@
-// AMOURANTH RTX Engine, October 2025 - Vulkan instance and surface initialization with SDL3.
-// Dependencies: SDL3, Vulkan 1.3+, C++20 standard library.
-// Zachary Geurts 2025
+// include/engine/SDL3/SDL3_vulkan.hpp
+// AMOURANTH RTX Engine, October 2025
+// RAII for Vulkan instance + surface via SDL3
+// NO manual vkDestroy* — handled by Dispose
 
 #ifndef SDL3_VULKAN_HPP
 #define SDL3_VULKAN_HPP
@@ -14,33 +15,32 @@
 namespace SDL3Initializer {
 
 struct VulkanInstanceDeleter {
-    void operator()(VkInstance instance);
+    void operator()(VkInstance instance) const;
 };
 
 struct VulkanSurfaceDeleter {
     VulkanSurfaceDeleter() = default;
     explicit VulkanSurfaceDeleter(VkInstance instance) : m_instance(instance) {}
-    void operator()(VkSurfaceKHR surface);
-    VkInstance m_instance = nullptr;
+    void operator()(VkSurfaceKHR surface) const;
+    VkInstance m_instance = VK_NULL_HANDLE;
 };
 
 using VulkanInstancePtr = std::unique_ptr<std::remove_pointer_t<VkInstance>, VulkanInstanceDeleter>;
 using VulkanSurfacePtr = std::unique_ptr<std::remove_pointer_t<VkSurfaceKHR>, VulkanSurfaceDeleter>;
 
 void initVulkan(
-    SDL_Window* window, 
+    SDL_Window* window,
     VulkanInstancePtr& instance,
     VulkanSurfacePtr& surface,
-    bool enableValidation, 
-    bool preferNvidia, 
-    bool rt, 
+    bool enableValidation,
+    bool preferNvidia,
+    bool rt,
     std::string_view title,
-    VkPhysicalDevice& physicalDevice);
+    VkPhysicalDevice& physicalDevice
+);
 
 VkInstance getVkInstance(const VulkanInstancePtr& instance);
-
 VkSurfaceKHR getVkSurface(const VulkanSurfacePtr& surface);
-
 std::vector<std::string> getVulkanExtensions();
 
 } // namespace SDL3Initializer

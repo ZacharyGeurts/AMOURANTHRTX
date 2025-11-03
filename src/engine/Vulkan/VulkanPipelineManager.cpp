@@ -19,7 +19,7 @@
 
 namespace VulkanRTX {
 
-using namespace Logging::Color;  // <-- ADD THIS LINE
+using namespace Logging::Color;
 
 // ---------------------------------------------------------------------------
 //  Debug Callback (for ENABLE_VULKAN_DEBUG)
@@ -510,7 +510,6 @@ void VulkanPipelineManager::createShaderBindingTable()
 
     const VkDeviceAddress baseAddr = VulkanInitializer::getBufferDeviceAddress(context_, sbtBuffer_.get());
 
-    // FIXED: Use .deviceAddress to match VulkanCommon.hpp
     sbt_.raygen   = { baseAddr + 0 * alignedHandle, alignedHandle, alignedHandle };
     sbt_.miss     = { baseAddr + 1 * alignedHandle, alignedHandle, alignedHandle };
     sbt_.hit      = { baseAddr + 2 * alignedHandle, alignedHandle, alignedHandle };
@@ -1083,4 +1082,17 @@ void VulkanPipelineManager::updateRayTracingDescriptorSet(VkDescriptorSet descri
     LOG_INFO_CAT("Vulkan", "    TLAS BOUND @ {} to Descriptor Set {}", tlasPtr, dsPtr);
     LOG_INFO_CAT("Vulkan", "<<< DESCRIPTOR SET UPDATED");
 }
+
+// ---------------------------------------------------------------------------
+//  14. FRAME TIME LOGGING (PERFORMANCE)
+// ---------------------------------------------------------------------------
+void VulkanPipelineManager::logFrameTimeIfSlow(std::chrono::steady_clock::time_point start)
+{
+    auto end = std::chrono::steady_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+    if (duration > 16666) {  // >60 FPS
+        LOG_WARN_CAT("Perf", "Frame took {} microseconds ({} FPS)", duration, 1000000.0 / duration);
+    }
+}
+
 } // namespace VulkanRTX

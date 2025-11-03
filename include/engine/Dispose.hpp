@@ -1,24 +1,98 @@
 // include/engine/Dispose.hpp
 // AMOURANTH RTX Engine, November 2025
-// RAII + cleanup utilities. Supports lambda destroyers.
-// cleanupAll() in Dispose.cpp.
-// Dependencies: VulkanCore.hpp (Context), logging.hpp, SDL3
+// C++20 ONLY: No mutex, No fmt, No UB
+// DOUBLE-FREE: Lock-free hash map
+// printf-style logging (NOT fmt)
 
 #pragma once
 #ifndef DISPOSE_HPP
 #define DISPOSE_HPP
 
 #include "engine/logging.hpp"
-#include "engine/Vulkan/VulkanCore.hpp"  // For Vulkan::Context
+#include "engine/Vulkan/VulkanCore.hpp"
 #include <vulkan/vulkan.h>
 #include <string>
 #include <vector>
 #include <functional>
 #include <SDL3/SDL.h>
+#include <atomic>
+#include <sstream>
 
 namespace Dispose {
 
 using namespace Logging::Color;
+
+// EXTERN: thread_local counter
+extern thread_local uint64_t g_destructionCounter;
+
+// Lock-free destroyed handle tracker
+struct DestroyTracker {
+    static constexpr size_t CHUNK_BITS = 64;
+    static constexpr size_t HASH_BITS = 32;
+    static constexpr uint64_t HASH_MASK = (1ULL << HASH_BITS) - 1;
+
+    static std::atomic<uint64_t>* s_bitset;
+    static std::atomic<size_t>    s_capacity;
+
+    static uint64_t hash(void* ptr) {
+        return std::hash<void*>{}(ptr) & HASH_MASK;
+    }
+
+    static void ensureCapacity(uint64_t hash) {
+        size_t word = hash / CHUNK_BITS;
+        size_t needed = word + 1;
+
+        size_t current = s_capacity.load(std::memory_order_acquire);
+        if (current >= needed) return;
+
+        size_t newCap = current ? current * 2 : 64;
+        if (newCap < needed) newCap = needed;
+
+        auto* newArray = new std::atomic<uint64_t>[newCap]();
+        for (size_t i = 0; i < current; ++i) {
+            newArray[i].store(s_bitset[i].load(std::memory_order_relaxed), std::memory_order_relaxed);
+        }
+
+        auto* old = s_bitset;
+        s_bitset = newArray;
+        s_capacity.store(newCap, std::memory_order_release);
+
+        if (old) delete[] old;
+    }
+
+    static void markDestroyed(void* ptr) {
+        uint64_t h = hash(ptr);
+        ensureCapacity(h);
+        size_t word = h / CHUNK_BITS;
+        uint64_t bit = 1ULL << (h % CHUNK_BITS);
+        s_bitset[word].fetch_or(bit, std::memory_order_release);
+    }
+
+    static bool isDestroyed(void* ptr) {
+        uint64_t h = hash(ptr);
+        size_t current = s_capacity.load(std::memory_order_acquire);
+        size_t word = h / CHUNK_BITS;
+        if (word >= current) return false;
+        uint64_t bit = 1ULL << (h % CHUNK_BITS);
+        return (s_bitset[word].load(std::memory_order_acquire) & bit) != 0;
+    }
+};
+
+// Helper: Log and detect double-free
+inline void logAndTrackDestruction(const std::string& type, void* handle, const std::string& name = "") {
+    if (!handle || handle == VK_NULL_HANDLE) return;
+
+    if (DestroyTracker::isDestroyed(handle)) {
+        LOG_ERROR_CAT("Dispose", "%sDOUBLE FREE DETECTED! %s %p (name: '%s') already destroyed — skipping!%s", 
+                      CRIMSON_MAGENTA, type.c_str(), handle, name.empty() ? "unnamed" : name.c_str(), RESET);
+        return;
+    }
+
+    DestroyTracker::markDestroyed(handle);
+    LOG_DEBUG_CAT("Dispose", "%s[%llu] Destroying %s: %p (%s)%s", 
+                  AMBER_YELLOW, ++g_destructionCounter, type.c_str(), handle, 
+                  name.empty() ? "unnamed" : name.c_str(), RESET);
+}
 
 // Generic Vulkan RAII handle
 template<typename T>
@@ -53,14 +127,21 @@ public:
 
     void reset() {
         if (handle_ != VK_NULL_HANDLE && destroy_) {
-            LOG_DEBUG_CAT("Dispose", "{}Destroying {}: {:p}{}", AMBER_YELLOW, name_.empty() ? "resource" : name_, static_cast<void*>(handle_), RESET);
-            destroy_(device_, handle_, nullptr);
+            logAndTrackDestruction(getTypeName(), static_cast<void*>(handle_), name_);
+            try {
+                destroy_(device_, handle_, nullptr);
+            } catch (const std::exception& e) {
+                LOG_ERROR_CAT("Dispose", "Exception in destroy lambda for %s %p: %s", 
+                              getTypeName().c_str(), static_cast<void*>(handle_), e.what());
+            } catch (...) {
+                LOG_ERROR_CAT("Dispose", "Unknown exception in destroy lambda for %s %p", 
+                              getTypeName().c_str(), static_cast<void*>(handle_));
+            }
         }
         handle_ = VK_NULL_HANDLE;
         destroy_ = nullptr;
     }
 
-    // Compile-time destroy for core Vulkan objects
     static DestroyFunc getDestroyFunc(VkDevice) {
         if constexpr (std::is_same_v<T, VkBuffer>)               return [](VkDevice d, VkBuffer h, const VkAllocationCallbacks* p) { vkDestroyBuffer(d, h, p); };
         else if constexpr (std::is_same_v<T, VkDeviceMemory>)    return [](VkDevice d, VkDeviceMemory h, const VkAllocationCallbacks* p) { vkFreeMemory(d, h, p); };
@@ -77,19 +158,34 @@ public:
     }
 
 private:
+    std::string getTypeName() const {
+        if constexpr (std::is_same_v<T, VkBuffer>) return "Buffer";
+        else if constexpr (std::is_same_v<T, VkDeviceMemory>) return "DeviceMemory";
+        else if constexpr (std::is_same_v<T, VkDescriptorSetLayout>) return "DescriptorSetLayout";
+        else if constexpr (std::is_same_v<T, VkDescriptorPool>) return "DescriptorPool";
+        else if constexpr (std::is_same_v<T, VkPipelineLayout>) return "PipelineLayout";
+        else if constexpr (std::is_same_v<T, VkPipeline>) return "Pipeline";
+        else if constexpr (std::is_same_v<T, VkRenderPass>) return "RenderPass";
+        else if constexpr (std::is_same_v<T, VkImage>) return "Image";
+        else if constexpr (std::is_same_v<T, VkImageView>) return "ImageView";
+        else if constexpr (std::is_same_v<T, VkCommandPool>) return "CommandPool";
+        else if constexpr (std::is_same_v<T, VkShaderModule>) return "ShaderModule";
+        else if constexpr (std::is_same_v<T, VkAccelerationStructureKHR>) return "AccelerationStructureKHR";
+        else return "Unknown";
+    }
+
     VkDevice device_ = VK_NULL_HANDLE;
     T handle_ = VK_NULL_HANDLE;
     DestroyFunc destroy_;
     std::string name_;
 };
 
-// Factory for core Vulkan objects
+// Factory
 template<typename T>
 [[nodiscard]] inline VulkanHandle<T> makeHandle(VkDevice device, T handle, const std::string& name = "") {
     return VulkanHandle<T>(device, handle, VulkanHandle<T>::getDestroyFunc(device), name);
 }
 
-// Factory for KHR extension objects (uses loaded function pointer)
 template<typename T>
 [[nodiscard]] inline VulkanHandle<T> makeHandleWithKHR(VkDevice device, T handle, auto destroyFunc, const std::string& name = "") {
     return VulkanHandle<T>(
@@ -101,7 +197,7 @@ template<typename T>
     );
 }
 
-// SDL cleanup
+// SDL
 inline void quitSDL() noexcept { SDL_Quit(); }
 inline void destroyWindow(SDL_Window* w) { if (w) SDL_DestroyWindow(w); }
 struct SDLWindowDeleter { void operator()(SDL_Window* w) const { destroyWindow(w); } };
