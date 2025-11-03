@@ -72,7 +72,7 @@ void loadMesh(const std::string& filename, std::vector<glm::vec3>& vertices, std
 }
 
 Application::Application(const char* title, int width, int height)
-    : title_(title), width_(width), height_(height), mode_(1),
+    : title_(title), width_(width), height_(height), mode_(1),  // ← DEFAULT MODE 1
       sdl_(std::make_unique<SDL3Initializer::SDL3Initializer>(title_, width_, height_)),
       renderer_(nullptr),
       camera_(std::make_unique<VulkanRTX::PerspectiveCamera>(60.0f, static_cast<float>(width) / height)),
@@ -82,7 +82,7 @@ Application::Application(const char* title, int width, int height)
     LOG_INFO_CAT("Application", "{}APPLICATION INITIALIZATION{}", Logging::Color::DIAMOND_WHITE, Logging::Color::RESET);
     LOG_INFO_CAT("Application", "Title      : {}", title_);
     LOG_INFO_CAT("Application", "Resolution : {}x{}", width_, height_);
-    LOG_INFO_CAT("Application", "Starting Render Mode: {}", mode_);
+    LOG_INFO_CAT("Application", "Starting Render Mode: {} (Env Map Only)", mode_);
 
     loadMesh("assets/models/scene.obj", vertices_, indices_);
     globalVertices_ = vertices_;
@@ -106,7 +106,7 @@ Application::~Application() {
     renderer_.reset();
     sdl_.reset();
 
-    Dispose::quitSDL();  // Now valid
+    Dispose::quitSDL();
 }
 
 void Application::initializeInput() {
@@ -190,9 +190,24 @@ void HandleInput::defaultKeyboardHandler(const SDL_KeyboardEvent& key) {
 
     if (sc == SDL_SCANCODE_F11 || (sc == SDL_SCANCODE_RETURN && (key.mod & SDL_KMOD_ALT))) { app.toggleFullscreen(); return; }
     if (sc == SDL_SCANCODE_F10) { app.toggleMaximize(); return; }
+
+    // ── RENDER MODE SWITCH: 1–9 ─────────────────────────────────────
     if (sc >= SDL_SCANCODE_1 && sc <= SDL_SCANCODE_9) { 
         int newMode = sc - SDL_SCANCODE_1 + 1;
-        app.setRenderMode(newMode); 
+        app.setRenderMode(newMode);
+        const char* modeName = "Unknown";
+        switch (newMode) {
+            case 1: modeName = "Env Map Only"; break;
+            case 2: modeName = "Volumetric Mist"; break;
+            case 3: modeName = "Animated Plasma"; break;
+            case 4: modeName = "Caustic Reflections"; break;
+            case 5: modeName = "Subsurface Scattering"; break;
+            case 6: modeName = "Path-Traced Fireflies"; break;
+            case 7: modeName = "Global Illumination"; break;
+            case 8: modeName = "Denoiser Showcase"; break;
+            case 9: modeName = "Hybrid Raster/RT"; break;
+        }
+        LOG_INFO_CAT("RenderMode", "Switched to Mode {} [{}] via key '{}'", newMode, modeName, SDL_GetScancodeName(sc));
         return; 
     }
 

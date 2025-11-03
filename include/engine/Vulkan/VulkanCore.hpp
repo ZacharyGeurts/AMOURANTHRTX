@@ -7,6 +7,7 @@
 //        ADDED: get/setBufferManager(), getResourceManager()
 //        ADDED: hasX() for RAII safety
 //        ADDED: contextDevicePtr_ for safe cleanup
+//        ADDED: samplers_ + add/remove/has/getSamplers() for texture samplers
 //        FIXED: Member order → NO -Wreorder
 //        BETA: All ray-tracing extensions from <vulkan/vulkan_beta.h>
 //        FIXED: ~Context() → vkDeviceWaitIdle + resourceManager.cleanup
@@ -52,6 +53,7 @@ class VulkanResourceManager {
     std::vector<VkDeviceMemory> memories_;
     std::vector<VkImageView> imageViews_;
     std::vector<VkImage> images_;
+    std::vector<VkSampler> samplers_;  // NEW: Track samplers (destroy after ImageViews)
     std::vector<VkAccelerationStructureKHR> accelerationStructures_;
     std::vector<VkDescriptorPool> descriptorPools_;
     std::vector<VkCommandPool> commandPools_;
@@ -109,6 +111,12 @@ public:
         if (image != VK_NULL_HANDLE) {
             images_.push_back(image);
             LOG_DEBUG("Added image: 0x{:x}", reinterpret_cast<uintptr_t>(image));
+        }
+    }
+    void addSampler(VkSampler sampler) {  // NEW: Add sampler
+        if (sampler != VK_NULL_HANDLE) {
+            samplers_.push_back(sampler);
+            LOG_DEBUG("Added sampler: 0x{:x}", reinterpret_cast<uintptr_t>(sampler));
         }
     }
     void addAccelerationStructure(VkAccelerationStructureKHR as) {
@@ -208,6 +216,14 @@ public:
             LOG_DEBUG("Removed image: 0x{:x}", reinterpret_cast<uintptr_t>(image));
         }
     }
+    void removeSampler(VkSampler sampler) {  // NEW: Remove sampler
+        if (sampler == VK_NULL_HANDLE) return;
+        auto it = std::find(samplers_.begin(), samplers_.end(), sampler);
+        if (it != samplers_.end()) {
+            samplers_.erase(it);
+            LOG_DEBUG("Removed sampler: 0x{:x}", reinterpret_cast<uintptr_t>(sampler));
+        }
+    }
     void removeAccelerationStructure(VkAccelerationStructureKHR as) {
         if (as == VK_NULL_HANDLE) return;
         auto it = std::find(accelerationStructures_.begin(), accelerationStructures_.end(), as);
@@ -300,6 +316,7 @@ public:
     bool hasMemory(VkDeviceMemory memory) const { return std::find(memories_.begin(), memories_.end(), memory) != memories_.end(); }
     bool hasImageView(VkImageView view) const { return std::find(imageViews_.begin(), imageViews_.end(), view) != imageViews_.end(); }
     bool hasImage(VkImage image) const { return std::find(images_.begin(), images_.end(), image) != images_.end(); }
+    bool hasSampler(VkSampler sampler) const { return std::find(samplers_.begin(), samplers_.end(), sampler) != samplers_.end(); }  // NEW
     bool hasAccelerationStructure(VkAccelerationStructureKHR as) const { return std::find(accelerationStructures_.begin(), accelerationStructures_.end(), as) != accelerationStructures_.end(); }
     bool hasDescriptorPool(VkDescriptorPool pool) const { return std::find(descriptorPools_.begin(), descriptorPools_.end(), pool) != descriptorPools_.end(); }
     bool hasDescriptorSet(VkDescriptorSet set) const { return std::find(descriptorSets_.begin(), descriptorSets_.end(), set) != descriptorSets_.end(); }
@@ -316,6 +333,7 @@ public:
     const std::vector<VkDeviceMemory>& getMemories() const { return memories_; }
     const std::vector<VkImageView>& getImageViews() const { return imageViews_; }
     const std::vector<VkImage>& getImages() const { return images_; }
+    const std::vector<VkSampler>& getSamplers() const { return samplers_; }  // NEW
     const std::vector<VkAccelerationStructureKHR>& getAccelerationStructures() const { return accelerationStructures_; }
     const std::vector<VkDescriptorPool>& getDescriptorPools() const { return descriptorPools_; }
     const std::vector<VkDescriptorSet>& getDescriptorSets() const { return descriptorSets_; }
@@ -332,6 +350,7 @@ public:
     std::vector<VkDeviceMemory>& getMemoriesMutable() { return memories_; }
     std::vector<VkImageView>& getImageViewsMutable() { return imageViews_; }
     std::vector<VkImage>& getImagesMutable() { return images_; }
+    std::vector<VkSampler>& getSamplersMutable() { return samplers_; }  // NEW
     std::vector<VkAccelerationStructureKHR>& getAccelerationStructuresMutable() { return accelerationStructures_; }
     std::vector<VkDescriptorPool>& getDescriptorPoolsMutable() { return descriptorPools_; }
     std::vector<VkDescriptorSet>& getDescriptorSetsMutable() { return descriptorSets_; }

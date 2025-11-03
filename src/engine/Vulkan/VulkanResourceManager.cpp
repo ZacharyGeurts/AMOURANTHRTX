@@ -1,6 +1,7 @@
 // src/engine/Vulkan/VulkanResourceManager.cpp
 // AMOURANTH RTX Engine (C) 2025 by Zachary Geurts gzac5314@gmail.com
 // FINAL: addFence() in header only, LOG_VOID_CLEANUP → LOG_DEBUG_CAT
+// FIXED: Added samplers_ vector + move ops + SAFE_DESTROY in cleanup (after ImageViews)
 
 #include "engine/Vulkan/VulkanCore.hpp"
 #include "engine/logging.hpp"
@@ -16,6 +17,7 @@ VulkanResourceManager::VulkanResourceManager(VulkanResourceManager&& other) noex
     , memories_(std::move(other.memories_))
     , imageViews_(std::move(other.imageViews_))
     , images_(std::move(other.images_))
+    , samplers_(std::move(other.samplers_))  // MOVE SAMPLERS
     , accelerationStructures_(std::move(other.accelerationStructures_))
     , descriptorPools_(std::move(other.descriptorPools_))
     , commandPools_(std::move(other.commandPools_))
@@ -50,6 +52,7 @@ VulkanResourceManager& VulkanResourceManager::operator=(VulkanResourceManager&& 
         memories_ = std::move(other.memories_);
         imageViews_ = std::move(other.imageViews_);
         images_ = std::move(other.images_);
+        samplers_ = std::move(other.samplers_);  // MOVE SAMPLERS
         accelerationStructures_ = std::move(other.accelerationStructures_);
         descriptorPools_ = std::move(other.descriptorPools_);
         commandPools_ = std::move(other.commandPools_);
@@ -150,6 +153,7 @@ void VulkanResourceManager::cleanup(VkDevice device) {
     }
 
     SAFE_DESTROY(imageViews_,          vkDestroyImageView,          ImageView);
+    SAFE_DESTROY(samplers_,            vkDestroySampler,            Sampler);  // After ImageViews
     SAFE_DESTROY(images_,              vkDestroyImage,              Image);
     SAFE_DESTROY(buffers_,             vkDestroyBuffer,             Buffer);
     SAFE_DESTROY(memories_,            vkFreeMemory,                DeviceMemory);

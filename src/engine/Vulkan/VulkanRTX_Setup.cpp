@@ -155,9 +155,6 @@ VulkanRTX::~VulkanRTX() {
     if (blasBuffer_) { vkDestroyBuffer(device_, blasBuffer_, nullptr); blasBuffer_ = VK_NULL_HANDLE; }
     if (blasMemory_) { vkFreeMemory(device_, blasMemory_, nullptr); blasMemory_ = VK_NULL_HANDLE; }
 
-    if (rtPipeline_) { vkDestroyPipeline(device_, rtPipeline_, nullptr); rtPipeline_ = VK_NULL_HANDLE; }
-    if (rtPipelineLayout_) { vkDestroyPipelineLayout(device_, rtPipelineLayout_, nullptr); rtPipelineLayout_ = VK_NULL_HANDLE; }
-
     if (ds_) { vkFreeDescriptorSets(device_, dsPool_, 1, &ds_); ds_ = VK_NULL_HANDLE; }
     if (dsPool_) { vkDestroyDescriptorPool(device_, dsPool_, nullptr); dsPool_ = VK_NULL_HANDLE; }
     if (dsLayout_) { vkDestroyDescriptorSetLayout(device_, dsLayout_, nullptr); dsLayout_ = VK_NULL_HANDLE; }

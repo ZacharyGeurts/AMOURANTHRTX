@@ -1,6 +1,8 @@
 // src/engine/Vulkan/VulkanBufferManager.cpp
 // AMOURANTH RTX Engine (C) 2025 by Zachary Geurts gzac5314@gmail.com is licensed under CC BY-NC 4.0
 // FINAL: C++20, std::format, std::string_view, robust, clean logging
+// FIXED: All Vulkan buffers/images/views/samplers/memories added to resourceManager for Dispose handling
+//        Destructor: Null/unmap only — no local destroys (Dispose owns destruction)
 
 #include "engine/Vulkan/VulkanCommon.hpp"
 #include "engine/Vulkan/VulkanBufferManager.hpp"
@@ -183,47 +185,55 @@ VulkanBufferManager::VulkanBufferManager(Vulkan::Context& ctx,
 }
 
 // ---------------------------------------------------------------------------
-//  DESTRUCTOR - Cleanup staging pool
+//  DESTRUCTOR - Null/unmap only; Dispose handles all Vulkan destroys
 // ---------------------------------------------------------------------------
 VulkanBufferManager::~VulkanBufferManager() noexcept
 {
 #ifndef NDEBUG
-    LOG_INFO_CAT("BufferMgr", "~VulkanBufferManager() — RAII cleanup start", CRIMSON_MAGENTA);
+    LOG_INFO_CAT("BufferMgr", "~VulkanBufferManager() — RAII cleanup start (Dispose owns destroys)", CRIMSON_MAGENTA);
 #endif
 
-    impl_->arenaBuffer = VK_NULL_HANDLE;
-    impl_->arenaMemory = VK_NULL_HANDLE;
-
-    if (impl_->persistentMappedPtr) {
+    // Unmap persistent staging (safe, no destroy)
+    if (impl_->persistentMappedPtr && impl_->stagingPoolMem.size() > 0 && impl_->stagingPoolMem[0] != VK_NULL_HANDLE) {
         vkUnmapMemory(context_.device, impl_->stagingPoolMem[0]);
         impl_->persistentMappedPtr = nullptr;
     }
-    for (size_t i = 0; i < impl_->stagingPool.size(); ++i) {
-        if (impl_->stagingPool[i]) vkDestroyBuffer(context_.device, impl_->stagingPool[i], nullptr);
-        if (impl_->stagingPoolMem[i]) vkFreeMemory(context_.device, impl_->stagingPoolMem[i], nullptr);
-    }
 
+    // Null all buffers/memories (prevent misuse; Dispose destroys)
+    impl_->arenaBuffer = VK_NULL_HANDLE;
+    impl_->arenaMemory = VK_NULL_HANDLE;
+    for (auto& buf : impl_->uniformBuffers) buf = VK_NULL_HANDLE;
+    for (auto& mem : impl_->uniformBufferMemories) mem = VK_NULL_HANDLE;
+    for (auto& buf : impl_->scratchBuffers) buf = VK_NULL_HANDLE;
+    for (auto& mem : impl_->scratchBufferMemories) mem = VK_NULL_HANDLE;
+    for (auto& buf : impl_->stagingPool) buf = VK_NULL_HANDLE;
+    for (auto& mem : impl_->stagingPoolMem) mem = VK_NULL_HANDLE;
+
+    // Null textures (Dispose destroys)
+    textureSampler_ = VK_NULL_HANDLE;
+    textureImageView_ = VK_NULL_HANDLE;
+    textureImage_ = VK_NULL_HANDLE;
+    textureImageMemory_ = VK_NULL_HANDLE;
+
+    // Local non-manager destroys (commandPool, semaphore — add to manager if needed)
     if (impl_->commandPool) {
         vkDestroyCommandPool(context_.device, impl_->commandPool, nullptr);
 #ifndef NDEBUG
         LOG_INFO_CAT("BufferMgr", "Destroyed CommandPool", OCEAN_TEAL);
 #endif
+        impl_->commandPool = VK_NULL_HANDLE;
     }
     if (impl_->timelineSemaphore) {
         vkDestroySemaphore(context_.device, impl_->timelineSemaphore, nullptr);
 #ifndef NDEBUG
         LOG_INFO_CAT("BufferMgr", "Destroyed TimelineSemaphore", OCEAN_TEAL);
 #endif
+        impl_->timelineSemaphore = VK_NULL_HANDLE;
     }
-
-    if (textureSampler_) vkDestroySampler(context_.device, textureSampler_, nullptr);
-    if (textureImageView_) vkDestroyImageView(context_.device, textureImageView_, nullptr);
-    if (textureImage_) vkDestroyImage(context_.device, textureImage_, nullptr);
-    if (textureImageMemory_) vkFreeMemory(context_.device, textureImageMemory_, nullptr);
 
     delete impl_;
 #ifndef NDEBUG
-    LOG_INFO_CAT("BufferMgr", "~VulkanBufferManager() — DONE", EMERALD_GREEN);
+    LOG_INFO_CAT("BufferMgr", "~VulkanBufferManager() — DONE (Dispose owns buffers)", EMERALD_GREEN);
 #endif
 }
 
@@ -279,11 +289,15 @@ void VulkanBufferManager::initializeStagingPool()
 
     createStagingBuffer(impl_->maxStagingSize, impl_->stagingPool[0], impl_->stagingPoolMem[0]);
 
+    // Add to resourceManager for Dispose handling
+    context_.resourceManager.addBuffer(impl_->stagingPool[0]);
+    context_.resourceManager.addMemory(impl_->stagingPoolMem[0]);
+
     // Persistent map the single large buffer
     VK_CHECK(vkMapMemory(context_.device, impl_->stagingPoolMem[0], 0, impl_->maxStagingSize, 0, &impl_->persistentMappedPtr),
              "Map persistent staging memory");
 #ifndef NDEBUG
-    LOG_DEBUG_CAT("BufferMgr", "Staging pool initialized: 1 slot × {} bytes", OCEAN_TEAL, impl_->maxStagingSize);
+    LOG_DEBUG_CAT("BufferMgr", "Staging pool initialized: 1 slot × {} bytes (added to manager)", OCEAN_TEAL, impl_->maxStagingSize);
 #endif
 }
 
@@ -518,7 +532,7 @@ void VulkanBufferManager::reserveArena(VkDeviceSize size, BufferType /*type*/)
     context_.resourceManager.addMemory(impl_->arenaMemory);
 
 #ifndef NDEBUG
-    LOG_INFO_CAT("BufferMgr", "Arena reserved: {} bytes @ buffer=0x{:x} mem=0x{:x}", EMERALD_GREEN,
+    LOG_INFO_CAT("BufferMgr", "Arena reserved: {} bytes @ buffer=0x{:x} mem=0x{:x} (added to manager)", EMERALD_GREEN,
                  size, reinterpret_cast<uintptr_t>(impl_->arenaBuffer), reinterpret_cast<uintptr_t>(impl_->arenaMemory));
 #endif
 }
@@ -657,6 +671,10 @@ void VulkanBufferManager::createTextureImage(const unsigned char* pixels, int w,
     VK_CHECK(vkAllocateMemory(context_.device, &alloc, nullptr, &textureImageMemory_), "Allocate texture memory");
     VK_CHECK(vkBindImageMemory(context_.device, textureImage_, textureImageMemory_, 0), "Bind texture memory");
 
+    // Add to resourceManager for Dispose handling
+    context_.resourceManager.addImage(textureImage_);
+    context_.resourceManager.addMemory(textureImageMemory_);
+
     VkCommandBuffer cmd = allocateTransientCommandBuffer(impl_->commandPool, context_.device);
     VkCommandBufferBeginInfo begin{ .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT };
     VK_CHECK(vkBeginCommandBuffer(cmd, &begin), "Begin texture copy");
@@ -688,7 +706,7 @@ void VulkanBufferManager::createTextureImage(const unsigned char* pixels, int w,
     submitAndWaitTransient(cmd, impl_->transferQueue, impl_->commandPool, context_.device);
 
 #ifndef NDEBUG
-    LOG_INFO_CAT("BufferMgr", "Texture image created: {}x{} @ 0x{:x}", EMERALD_GREEN,
+    LOG_INFO_CAT("BufferMgr", "Texture image created: {}x{} @ 0x{:x} (added to manager)", EMERALD_GREEN,
                  w, h, reinterpret_cast<uintptr_t>(textureImage_));
 #endif
 }
@@ -703,6 +721,9 @@ void VulkanBufferManager::createTextureImageView(VkFormat format)
         .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
     };
     VK_CHECK(vkCreateImageView(context_.device, &viewInfo, nullptr, &textureImageView_), "Create texture image view");
+
+    // Add to resourceManager for Dispose handling
+    context_.resourceManager.addImageView(textureImageView_);
 }
 
 void VulkanBufferManager::createTextureSampler()
@@ -720,6 +741,9 @@ void VulkanBufferManager::createTextureSampler()
         .borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK
     };
     VK_CHECK(vkCreateSampler(context_.device, &samplerInfo, nullptr, &textureSampler_), "Create texture sampler");
+
+    // Add to resourceManager for Dispose handling
+    context_.resourceManager.addSampler(textureSampler_);
 }
 
 VkImage VulkanBufferManager::getTextureImage() const { return textureImage_; }
