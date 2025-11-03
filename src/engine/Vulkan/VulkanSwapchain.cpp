@@ -1,22 +1,21 @@
 // src/engine/Vulkan/VulkanSwapchain.cpp
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts
-// Swapchain creation/destruction – owned by Vulkan::Context
-// UNREAL-KILLER EDITION: Triple-buffer + MAILBOX + immediate fallback + full logging + zero-overhead + RAII-safe
+// UNREAL-KILLER: Triple-buffer + MAILBOX + immediate fallback + full logging + zero-overhead + RAII-safe
+// DEVELOPER CONFIG: SwapchainConfig::DESIRED_PRESENT_MODE, FORCE_VSYNC, FORCE_TRIPLE_BUFFER
 
 #include "engine/Vulkan/VulkanCore.hpp"
 #include "engine/logging.hpp"
-
+#include "engine/Vulkan/VulkanSwapchainManager.hpp"  // for MAX_FRAMES_IN_FLIGHT
 #include <SDL3/SDL_vulkan.h>
 #include <stdexcept>
 #include <algorithm>
-#include <string>
+#include <format>
+#include <bit>
 
 using namespace VulkanRTX;
 
-namespace Vulkan {
-
 // ---------------------------------------------------------------------
-//  Helper: Choose swapchain format – prefer sRGB (correct gamma)
+//  Helper: sRGB preferred format
 // ---------------------------------------------------------------------
 static VkSurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& available)
 {
@@ -29,16 +28,16 @@ static VkSurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<VkSurfaceFor
 }
 
 // ---------------------------------------------------------------------
-//  CREATE SWAPCHAIN – TRIPLE BUFFER + BEST PRESENT MODE (MAILBOX → IMMEDIATE → FIFO)
+//  CREATE SWAPCHAIN – DEVELOPER-CONFIGURABLE TRIPLE BUFFER + PRESENT MODE
 // ---------------------------------------------------------------------
-void Context::createSwapchain()
+void Vulkan::Context::createSwapchain()
 {
-    LOG_INFO_CAT("Swapchain", "createSwapchain() START – requesting TRIPLE BUFFER + optimal present mode");
+    LOG_INFO_CAT("Swapchain", "createSwapchain() START – developer-configurable swapchain");
 
-    // ────────────────────── Query Surface Capabilities ──────────────────────
+    // ────────────────────── Surface Capabilities ──────────────────────
     VkSurfaceCapabilitiesKHR caps{};
     VK_CHECK(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice, surface, &caps),
-             "surface capabilities");
+             "vkGetPhysicalDeviceSurfaceCapabilitiesKHR");
 
     // ────────────────────── Surface Formats ──────────────────────
     uint32_t formatCount = 0;
@@ -52,7 +51,7 @@ void Context::createSwapchain()
     LOG_INFO_CAT("Swapchain", "Selected format: {} | colorSpace: {}",
                  static_cast<int>(surfaceFormat.format), static_cast<int>(surfaceFormat.colorSpace));
 
-    // ────────────────────── Present Modes (Best → Worst) ──────────────────────
+    // ────────────────────── Present Modes ──────────────────────
     uint32_t presentModeCount = 0;
     VK_CHECK(vkGetPhysicalDeviceSurfacePresentModesKHR(physicalDevice, surface, &presentModeCount, nullptr),
              "present mode count");
@@ -60,35 +59,53 @@ void Context::createSwapchain()
     VK_CHECK(vkGetPhysicalDeviceSurfacePresentModesKHR(physicalDevice, surface, &presentModeCount, presentModes.data()),
              "present modes");
 
-    VkPresentModeKHR chosenMode = VK_PRESENT_MODE_FIFO_KHR;   // guaranteed fallback
     bool mailboxAvailable = false;
     bool immediateAvailable = false;
-
     for (const auto& mode : presentModes) {
-        if (mode == VK_PRESENT_MODE_MAILBOX_KHR) {
-            chosenMode = mode;
-            mailboxAvailable = true;
-            break;                                   // MAILBOX = triple-buffer + tear-free + uncapped
-        } else if (mode == VK_PRESENT_MODE_IMMEDIATE_KHR && !mailboxAvailable) {
-            chosenMode = mode;
-            immediateAvailable = true;
+        if (mode == VK_PRESENT_MODE_MAILBOX_KHR)   mailboxAvailable = true;
+        if (mode == VK_PRESENT_MODE_IMMEDIATE_KHR) immediateAvailable = true;
+    }
+
+    // ── APPLY DEVELOPER CONFIG FROM main.cpp ─────────────────────────────
+    using namespace SwapchainConfig;
+
+    VkPresentModeKHR chosenMode = VK_PRESENT_MODE_FIFO_KHR;
+    std::string modeStr = "UNKNOWN";
+
+    if (FORCE_VSYNC) {
+        chosenMode = VK_PRESENT_MODE_FIFO_KHR;
+        modeStr = "FIFO (VSync, 60 FPS cap)";
+        LOG_INFO_CAT("Swapchain", "FORCE_VSYNC = true → using FIFO (60 FPS cap)");
+    } else if (DESIRED_PRESENT_MODE == VK_PRESENT_MODE_MAILBOX_KHR && mailboxAvailable) {
+        chosenMode = VK_PRESENT_MODE_MAILBOX_KHR;
+        modeStr = "MAILBOX (triple-buffer, tear-free, uncapped)";
+        LOG_INFO_CAT("Swapchain", "DESIRED_PRESENT_MODE = MAILBOX → using MAILBOX");
+    } else if (DESIRED_PRESENT_MODE == VK_PRESENT_MODE_IMMEDIATE_KHR && immediateAvailable) {
+        chosenMode = VK_PRESENT_MODE_IMMEDIATE_KHR;
+        modeStr = "IMMEDIATE (uncapped, may tear)";
+        LOG_INFO_CAT("Swapchain", "DESIRED_PRESENT_MODE = IMMEDIATE → using IMMEDIATE");
+    } else if (DESIRED_PRESENT_MODE == VK_PRESENT_MODE_FIFO_KHR) {
+        chosenMode = VK_PRESENT_MODE_FIFO_KHR;
+        modeStr = "FIFO (VSync, 60 FPS)";
+        LOG_INFO_CAT("Swapchain", "DESIRED_PRESENT_MODE = FIFO → using FIFO");
+    } else {
+        // Fallback
+        if (mailboxAvailable) {
+            chosenMode = VK_PRESENT_MODE_MAILBOX_KHR;
+            modeStr = "MAILBOX (fallback)";
+            LOG_INFO_CAT("Swapchain", "Fallback → MAILBOX available → using MAILBOX");
+        } else if (immediateAvailable) {
+            chosenMode = VK_PRESENT_MODE_IMMEDIATE_KHR;
+            modeStr = "IMMEDIATE (fallback)";
+            LOG_INFO_CAT("Swapchain", "Fallback → IMMEDIATE available → using IMMEDIATE");
+        } else {
+            chosenMode = VK_PRESENT_MODE_FIFO_KHR;
+            modeStr = "FIFO (fallback)";
+            LOG_INFO_CAT("Swapchain", "Fallback → using FIFO (VSync)");
         }
     }
 
-    std::string modeStr;
-    if (chosenMode == VK_PRESENT_MODE_MAILBOX_KHR) {
-        modeStr = "MAILBOX (triple-buffer, tear-free, uncapped)";
-    } else if (chosenMode == VK_PRESENT_MODE_IMMEDIATE_KHR) {
-        modeStr = "IMMEDIATE (uncapped, may tear)";
-    } else {
-        modeStr = "FIFO (VSync, capped)";
-    }
-
-    LOG_INFO_CAT("Swapchain", "Available present modes: {}", presentModes.size());
-    LOG_INFO_CAT("Swapchain", "Selected present mode: {} | MAILBOX: {} | IMMEDIATE: {}",
-                 modeStr, mailboxAvailable, immediateAvailable);
-
-    // ────────────────────── Extent (HiDPI aware) ──────────────────────
+    // ────────────────────── Extent (HiDPI) ──────────────────────
     if (caps.currentExtent.width != UINT32_MAX) {
         swapchainExtent = caps.currentExtent;
     } else {
@@ -99,45 +116,51 @@ void Context::createSwapchain()
     }
     LOG_INFO_CAT("Swapchain", "Swapchain extent: {}x{}", swapchainExtent.width, swapchainExtent.height);
 
-    // ────────────────────── Image Count: Force ≥3 (triple buffer) ──────────────────────
-    uint32_t imageCount = std::max(caps.minImageCount, 3u);   // request at least 3
+    // ────────────────────── Image Count: Force Triple Buffer ──────────────────────
+    uint32_t imageCount = std::max(caps.minImageCount, 3u);
+    if (FORCE_TRIPLE_BUFFER && imageCount < 3) {
+        imageCount = 3;
+        LOG_INFO_CAT("Swapchain", "FORCE_TRIPLE_BUFFER = true → requesting {} images", imageCount);
+    }
     if (caps.maxImageCount > 0 && imageCount > caps.maxImageCount) {
         imageCount = caps.maxImageCount;
+        LOG_INFO_CAT("Swapchain", "Clamped image count to max: {}", imageCount);
     }
-    LOG_INFO_CAT("Swapchain", "Image count: {} (requested >=3, min: {}, max: {})",
-                 imageCount, caps.minImageCount, caps.maxImageCount);
+    LOG_INFO_CAT("Swapchain", "Image count: {} (min: {}, max: {})", imageCount, caps.minImageCount, caps.maxImageCount);
 
     // ────────────────────── Create Swapchain ──────────────────────
-    VkSwapchainCreateInfoKHR createInfo{VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR};
-    createInfo.surface          = surface;
-    createInfo.minImageCount    = imageCount;
-    createInfo.imageFormat      = surfaceFormat.format;
-    createInfo.imageColorSpace  = surfaceFormat.colorSpace;
-    createInfo.imageExtent      = swapchainExtent;
-    createInfo.imageArrayLayers = 1;
-    createInfo.imageUsage       = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-    createInfo.preTransform     = caps.currentTransform;
-    createInfo.compositeAlpha   = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
-    createInfo.presentMode      = chosenMode;
-    createInfo.clipped          = VK_TRUE;
-    createInfo.oldSwapchain     = VK_NULL_HANDLE;
+    VkSwapchainCreateInfoKHR createInfo = {
+        .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
+        .surface = surface,
+        .minImageCount = imageCount,
+        .imageFormat = surfaceFormat.format,
+        .imageColorSpace = surfaceFormat.colorSpace,
+        .imageExtent = swapchainExtent,
+        .imageArrayLayers = 1,
+        .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+        .preTransform = caps.currentTransform,
+        .compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
+        .presentMode = chosenMode,
+        .clipped = VK_TRUE,
+        .oldSwapchain = VK_NULL_HANDLE
+    };
 
     uint32_t queueFamilyIndices[] = { graphicsQueueFamilyIndex, presentQueueFamilyIndex };
     if (graphicsQueueFamilyIndex != presentQueueFamilyIndex) {
-        createInfo.imageSharingMode      = VK_SHARING_MODE_CONCURRENT;
+        createInfo.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
         createInfo.queueFamilyIndexCount = 2;
-        createInfo.pQueueFamilyIndices   = queueFamilyIndices;
-        LOG_INFO_CAT("Swapchain", "Sharing mode: CONCURRENT (graphics QFI: {}, present QFI: {})",
+        createInfo.pQueueFamilyIndices = queueFamilyIndices;
+        LOG_INFO_CAT("Swapchain", "Sharing: CONCURRENT (graphics: {}, present: {})",
                      graphicsQueueFamilyIndex, presentQueueFamilyIndex);
     } else {
         createInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
-        LOG_INFO_CAT("Swapchain", "Sharing mode: EXCLUSIVE (QFI: {})", graphicsQueueFamilyIndex);
+        LOG_INFO_CAT("Swapchain", "Sharing: EXCLUSIVE (QFI: {})", graphicsQueueFamilyIndex);
     }
 
     VK_CHECK(vkCreateSwapchainKHR(device, &createInfo, nullptr, &swapchain),
              "vkCreateSwapchainKHR");
 
-    LOG_INFO_CAT("Swapchain", "Swapchain created: {}", ptr_to_hex(swapchain));
+    LOG_INFO_CAT("Swapchain", "Swapchain created: 0x{:016x}", std::bit_cast<uint64_t>(swapchain));
 
     // ────────────────────── Retrieve Images ──────────────────────
     uint32_t imgCount = 0;
@@ -150,45 +173,57 @@ void Context::createSwapchain()
     swapchainImageFormat = surfaceFormat.format;
     LOG_INFO_CAT("Swapchain", "Retrieved {} swapchain images", swapchainImages.size());
 
-    // ────────────────────── Create Image Views (manual error reporting) ──────────────────────
+    // ────────────────────── Create Image Views ──────────────────────
     swapchainImageViews.resize(swapchainImages.size());
     for (size_t i = 0; i < swapchainImages.size(); ++i) {
-        VkImageViewCreateInfo viewInfo{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
-        viewInfo.image    = swapchainImages[i];
-        viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-        viewInfo.format   = swapchainImageFormat;
-        viewInfo.components = {
-            VK_COMPONENT_SWIZZLE_IDENTITY,
-            VK_COMPONENT_SWIZZLE_IDENTITY,
-            VK_COMPONENT_SWIZZLE_IDENTITY,
-            VK_COMPONENT_SWIZZLE_IDENTITY
+        VkImageViewCreateInfo viewInfo = {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+            .image = swapchainImages[i],
+            .viewType = VK_IMAGE_VIEW_TYPE_2D,
+            .format = swapchainImageFormat,
+            .components = {
+                VK_COMPONENT_SWIZZLE_IDENTITY,
+                VK_COMPONENT_SWIZZLE_IDENTITY,
+                VK_COMPONENT_SWIZZLE_IDENTITY,
+                VK_COMPONENT_SWIZZLE_IDENTITY
+            },
+            .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
         };
-        viewInfo.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
 
-        VkResult res = vkCreateImageView(device, &viewInfo, nullptr, &swapchainImageViews[i]);
-        if (res != VK_SUCCESS) {
-            LOG_ERROR_CAT("Swapchain",
-                          "Failed to create swapchain image view #{} (VkResult: {})", i, static_cast<int>(res));
-            throw std::runtime_error("vkCreateImageView failed");
-        }
+        VK_CHECK(vkCreateImageView(device, &viewInfo, nullptr, &swapchainImageViews[i]),
+                 std::format("vkCreateImageView #{}", i));
     }
 
     LOG_INFO_CAT("Swapchain", "Created {} image views", swapchainImageViews.size());
 
-    // ────────────────────── Final Summary – UNREAL HAS NO CHANCE ──────────────────────
-    LOG_INFO_CAT("Swapchain", "createSwapchain() COMPLETE – UNREAL-KILLER CONFIG:");
-    LOG_INFO_CAT("Swapchain", "  • Images: {} (triple buffer: {})",
-                 swapchainImages.size(), (swapchainImages.size() >= 3 ? "YES" : "NO"));
-    LOG_INFO_CAT("Swapchain", "  • Extent: {}x{}", swapchainExtent.width, swapchainExtent.height);
-    LOG_INFO_CAT("Swapchain", "  • Format: {} (sRGB)", static_cast<int>(swapchainImageFormat));
-    LOG_INFO_CAT("Swapchain", "  • Present Mode: {}", modeStr);
-    LOG_INFO_CAT("Swapchain", "  • FPS: UNLIMITED – NO VSYNC – NO TEARING – NO BLOAT");
+    // ────────────────────── FINAL CONFIG SUMMARY (DEVELOPER-FACING) ──────────────────────
+    if (SwapchainConfig::LOG_FINAL_CONFIG) {
+        LOG_INFO_CAT("Swapchain", "createSwapchain() COMPLETE – DEVELOPER CONFIG:");
+        LOG_INFO_CAT("Swapchain", "  • Desired Mode : {}", 
+                     [DESIRED_PRESENT_MODE = SwapchainConfig::DESIRED_PRESENT_MODE]() -> std::string {
+                         switch (DESIRED_PRESENT_MODE) {
+                             case VK_PRESENT_MODE_MAILBOX_KHR:   return "MAILBOX";
+                             case VK_PRESENT_MODE_IMMEDIATE_KHR:return "IMMEDIATE";
+                             case VK_PRESENT_MODE_FIFO_KHR:     return "FIFO";
+                             default:                           return "UNKNOWN";
+                         }
+                     }());
+        LOG_INFO_CAT("Swapchain", "  • Force VSync  : {}", SwapchainConfig::FORCE_VSYNC ? "YES" : "NO");
+        LOG_INFO_CAT("Swapchain", "  • Force Triple : {}", SwapchainConfig::FORCE_TRIPLE_BUFFER ? "YES" : "NO");
+        LOG_INFO_CAT("Swapchain", "  • Final Mode   : {}", modeStr);
+        LOG_INFO_CAT("Swapchain", "  • Images       : {} {}", swapchainImages.size(),
+                     (swapchainImages.size() >= 3 ? "(TRIPLE BUFFER)" : "(DOUBLE BUFFER)"));
+        LOG_INFO_CAT("Swapchain", "  • Extent       : {}x{}", swapchainExtent.width, swapchainExtent.height);
+        LOG_INFO_CAT("Swapchain", "  • Format       : {} (sRGB)", static_cast<int>(swapchainImageFormat));
+        LOG_INFO_CAT("Swapchain", "  • FPS          : {}", 
+                     (chosenMode == VK_PRESENT_MODE_FIFO_KHR ? "60 (VSync)" : "UNLIMITED"));
+    }
 }
 
 // ---------------------------------------------------------------------
-//  DESTROY SWAPCHAIN – RAII-SAFE, FULL CLEANUP
+//  DESTROY SWAPCHAIN – FULL RAII
 // ---------------------------------------------------------------------
-void Context::destroySwapchain()
+void Vulkan::Context::destroySwapchain()
 {
     if (!device) return;
 
@@ -207,5 +242,3 @@ void Context::destroySwapchain()
 
     LOG_INFO_CAT("Swapchain", "DESTROYED – resources released");
 }
-
-} // namespace Vulkan

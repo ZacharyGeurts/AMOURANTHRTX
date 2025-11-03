@@ -1,6 +1,6 @@
 // include/engine/Vulkan/VulkanSwapchainManager.hpp
-// AMOURANTH RTX Engine © 2025 by Zachary Geurts gzac5314@gmail.com is licensed under CC BY-NC 4.0
-// FINAL: cleanup() added, inline accessors, owned by Context, full RAII
+// AMOURANTH RTX Engine © 2025 by Zachary Geurts gzac5314@gmail.com
+// FINAL: Triple buffer, RAII, mutable config, cleanup() noexcept
 
 #pragma once
 #ifndef VULKANSWAPCHAINMANAGER_HPP
@@ -16,8 +16,18 @@
 
 namespace VulkanRTX {
 
+// ── MUTABLE DEVELOPER CONFIG (CLI OVERRIDE) ───────────────────────────────
+namespace SwapchainConfig {
+    inline VkPresentModeKHR DESIRED_PRESENT_MODE = VK_PRESENT_MODE_MAILBOX_KHR;
+    inline bool FORCE_VSYNC = false;
+    inline bool FORCE_TRIPLE_BUFFER = true;
+    inline bool LOG_FINAL_CONFIG = true;
+}
+
 class VulkanSwapchainManager {
 public:
+    static constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 3;
+
     VulkanSwapchainManager(std::shared_ptr<Vulkan::Context> context,
                            SDL_Window* window,
                            int width,
@@ -26,9 +36,9 @@ public:
 
     void initializeSwapchain(int width, int height);
     void handleResize(int width, int height);
-    void cleanup();  // ← NEW: RAII cleanup
+    void cleanup() noexcept;  // RAII
 
-    // --- Accessors: NON-CONST + CONST (RETURN BY REFERENCE) ---
+    // Accessors
     VkSwapchainKHR&         getSwapchain()                     { return swapchain_; }
     const VkSwapchainKHR&   getSwapchain() const               { return swapchain_; }
 
@@ -38,36 +48,34 @@ public:
     const std::vector<VkImage>&     getSwapchainImages() const     { return swapchainImages_; }
     const std::vector<VkImageView>& getSwapchainImageViews() const { return swapchainImageViews_; }
 
-    // Sync objects — non-const + const overloads
     VkSemaphore& getImageAvailableSemaphore(uint32_t currentFrame) {
-        return imageAvailableSemaphores_[currentFrame % maxFramesInFlight_];
+        return imageAvailableSemaphores_[currentFrame % MAX_FRAMES_IN_FLIGHT];
     }
     const VkSemaphore& getImageAvailableSemaphore(uint32_t currentFrame) const {
-        return imageAvailableSemaphores_[currentFrame % maxFramesInFlight_];
+        return imageAvailableSemaphores_[currentFrame % MAX_FRAMES_IN_FLIGHT];
     }
 
     VkSemaphore& getRenderFinishedSemaphore(uint32_t currentFrame) {
-        return renderFinishedSemaphores_[currentFrame % maxFramesInFlight_];
+        return renderFinishedSemaphores_[currentFrame % MAX_FRAMES_IN_FLIGHT];
     }
     const VkSemaphore& getRenderFinishedSemaphore(uint32_t currentFrame) const {
-        return renderFinishedSemaphores_[currentFrame % maxFramesInFlight_];
+        return renderFinishedSemaphores_[currentFrame % MAX_FRAMES_IN_FLIGHT];
     }
 
     VkFence& getInFlightFence(uint32_t currentFrame) {
-        return inFlightFences_[currentFrame % maxFramesInFlight_];
+        return inFlightFences_[currentFrame % MAX_FRAMES_IN_FLIGHT];
     }
     const VkFence& getInFlightFence(uint32_t currentFrame) const {
-        return inFlightFences_[currentFrame % maxFramesInFlight_];
+        return inFlightFences_[currentFrame % MAX_FRAMES_IN_FLIGHT];
     }
 
-    uint32_t getMaxFramesInFlight() const { return maxFramesInFlight_; }
+    uint32_t getMaxFramesInFlight() const { return MAX_FRAMES_IN_FLIGHT; }
 
 private:
     void        waitForInFlightFrames() const;
     VkSurfaceKHR createSurface(SDL_Window* window);
-    void        cleanupSwapchain();  // ← internal
+    void        cleanupSwapchain() noexcept;  // internal
 
-    // SEXY SWAPCHAIN LOGGING – ONE LINE, ONE OCEAN-TEAL BLAST
     void logSwapchainInfo(const char* prefix) const;
 
     std::shared_ptr<Vulkan::Context> context_;
@@ -84,8 +92,6 @@ private:
     std::vector<VkSemaphore> imageAvailableSemaphores_;
     std::vector<VkSemaphore> renderFinishedSemaphores_;
     std::vector<VkFence>     inFlightFences_;
-
-    uint32_t maxFramesInFlight_ = 0;
 };
 
 } // namespace VulkanRTX

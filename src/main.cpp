@@ -32,9 +32,46 @@
 #include <memory>
 #include <format>
 #include <cstdio>
+#include <unordered_map>
 
 using namespace Logging::Color;
 using VulkanRTX::VulkanRTXException;
+
+static void applyVideoModeToggles() {
+    // ── OPTION 1: Present Mode (choose one) ─────────────────────────────
+    //   MAILBOX   → Uncapped FPS, tear-free, uses triple buffer (BEST)
+    //   IMMEDIATE → Uncapped FPS, may tear (lightweight)
+    //   VSYNC     → 60 FPS cap, always tear-free (stable)
+    static bool useMailbox   = true;   // default: best quality
+    static bool useImmediate = false;
+    static bool useVSync     = false;
+
+    // ── OPTION 2: Force VSync (overrides present mode) ──────────────────
+    //   ON  → Forces 60 FPS cap regardless of present mode
+    //   OFF → Allows uncapped FPS if MAILBOX or IMMEDIATE is selected
+    static bool forceVSync   = false;
+
+    // ── OPTION 3: Force Triple Buffer (≥3 swapchain images) ─────────────
+    //   ON  → Smoother, lower latency, more VRAM (recommended)
+    //   OFF → Double buffer only (saves VRAM, may stutter)
+    static bool forceTriple  = true;
+
+    // ── OPTION 4: Log Swapchain Config (debug) ──────────────────────────
+    //   ON  → Prints final swapchain settings to console
+    //   OFF → Silent (clean output)
+    static bool logConfig    = true;
+
+    // ── APPLY SETTINGS TO ENGINE ───────────────────────────────────────
+    VulkanRTX::SwapchainConfig::DESIRED_PRESENT_MODE =
+          useVSync     ? VK_PRESENT_MODE_FIFO_KHR
+        : useMailbox   ? VK_PRESENT_MODE_MAILBOX_KHR
+        : useImmediate ? VK_PRESENT_MODE_IMMEDIATE_KHR
+        :                VK_PRESENT_MODE_FIFO_KHR;
+
+    VulkanRTX::SwapchainConfig::FORCE_VSYNC        = forceVSync;
+    VulkanRTX::SwapchainConfig::FORCE_TRIPLE_BUFFER = forceTriple;
+    VulkanRTX::SwapchainConfig::LOG_FINAL_CONFIG   = logConfig;
+}
 
 // =============================================================================
 //  CUSTOM EXCEPTION WITH FILE, LINE, FUNCTION
@@ -105,7 +142,8 @@ static const uint32_t cubeIndices[] = {
 // =============================================================================
 //  MAIN
 // =============================================================================
-int main() {
+int main(int argc, char* argv[]) {
+	applyVideoModeToggles();
     bulkhead(" AMOURANTH RTX ENGINE — INITIALIZATION ");
 
     LOG_INFO_CAT("MAIN",
@@ -120,6 +158,19 @@ int main() {
     SDL_Texture*  splashTex = nullptr;
     bool          sdl_ok    = false;
     std::shared_ptr<Vulkan::Context> core;
+
+    // ── CLI OVERRIDE FOR SWAPCHAIN CONFIG (MUTABLE) ────────────────────────
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+        if (arg.starts_with("--swapchain=")) {
+            std::string mode = arg.substr(12);
+            if (mode == "mailbox")   VulkanRTX::SwapchainConfig::DESIRED_PRESENT_MODE = VK_PRESENT_MODE_MAILBOX_KHR;
+            if (mode == "immediate") VulkanRTX::SwapchainConfig::DESIRED_PRESENT_MODE = VK_PRESENT_MODE_IMMEDIATE_KHR;
+            if (mode == "vsync")     VulkanRTX::SwapchainConfig::DESIRED_PRESENT_MODE = VK_PRESENT_MODE_FIFO_KHR;
+        }
+        if (arg == "--vsync")        VulkanRTX::SwapchainConfig::FORCE_VSYNC = true;
+        if (arg == "--no-triple")    VulkanRTX::SwapchainConfig::FORCE_TRIPLE_BUFFER = false;
+    }
 
     try {
         constexpr int W = 1280, H = 720;
@@ -221,8 +272,6 @@ int main() {
                 renderer->getBufferManager()->getVertexBuffer(),
                 renderer->getBufferManager()->getIndexBuffer(),
                 *renderer->getBufferManager());
-
-            // Pipeline and SBT creation moved to VulkanRenderer init to avoid duplication
 
             app->setRenderer(std::move(renderer));
             LOG_INFO_CAT("MAIN", "{}Starting main loop — FPS UNLOCKED{}", EMERALD_GREEN, RESET);
