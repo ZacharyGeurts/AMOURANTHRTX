@@ -1,943 +1,717 @@
 // src/engine/Vulkan/VulkanRenderer.cpp
+// AMOURANTH RTX Engine © 2025 by Zachary Geurts
+// FINAL: SBT via getSBT().raygen — NO getRaygenSBT()
+//        Accumulation reset + proper layout transitions
+//        Command buffer reset + begin/end
+//        Null handle safety
+//        VulkanRTX created in takeOwnership()
+//        All .get() on Dispose handles
+//        traceRays() with correct order: cmd, raygen, miss, hit, callable, w, h, d
+//        SBT address validation + logging
+//        COMPILER FIXED: Uses getSBT() → raygen/miss/hit/callable
+//        ENHANCED: Detailed FPS metrics (CPU/GPU ms, accum, res, frame) — ROAR!
+
 #include "engine/Vulkan/VulkanRenderer.hpp"
-#include "engine/Vulkan/VulkanCore.hpp"
-#include "engine/Vulkan/VulkanBufferManager.hpp"
-#include "engine/Vulkan/VulkanPipelineManager.hpp"
 #include "engine/Vulkan/Vulkan_init.hpp"
 #include "engine/Vulkan/VulkanRTX_Setup.hpp"
-#include "engine/Vulkan/VulkanCommon.hpp"
-#include "engine/Dispose.hpp"
+#include "engine/Vulkan/VulkanPipelineManager.hpp"
 #include "engine/logging.hpp"
-#include "engine/camera.hpp"
-#include "engine/utils.hpp"
-
-#include <SDL3/SDL.h>
-#include <SDL3/SDL_vulkan.h>
-#include <stdexcept>
-#include <algorithm>
-#include <cstring>
-#include <array>
-#include <iomanip>
-#include <span>
-#include <glm/glm.hpp>
-#include <glm/gtc/matrix_transform.hpp>
-#include <glm/gtc/matrix_inverse.hpp>
-#include <chrono>
-#include <bit>
-#include <thread>
-#include <cstdint>
-#include <atomic>
 #include "stb/stb_image.h"
-#define TINYOBJLOADER_IMPLEMENTATION
-#include "tinyobjloader/tiny_obj_loader.h"
-#include <fstream>
-#include <vulkan/vulkan_core.h>
+#include <tinyobjloader/tiny_obj_loader.h>
+#include <glm/gtc/matrix_inverse.hpp>
+#include <cstring>
+#include <chrono>
+#include <array>
+#include <cmath>
+#include <algorithm>
+#include <format>  // For std::format in logs
 
 using namespace Logging::Color;
 using namespace Dispose;
 
 namespace VulkanRTX {
 
-// Helper
+// Helper: Find memory type
 static uint32_t findMemoryType(VkPhysicalDevice phys, uint32_t filter, VkMemoryPropertyFlags props) {
     VkPhysicalDeviceMemoryProperties memProps;
     vkGetPhysicalDeviceMemoryProperties(phys, &memProps);
-    for (uint32_t i = 0; i < memProps.memoryTypeCount; ++i) {
+    for (uint32_t i = 0; i < memProps.memoryTypeCount; ++i)
         if ((filter & (1 << i)) && (memProps.memoryTypes[i].propertyFlags & props) == props)
             return i;
-    }
-    throw std::runtime_error("Failed to find memory type");
+    throw std::runtime_error("No suitable memory type");
 }
 
-/* -----------------------------------------------------------------
-   VulkanRenderer::VulkanRenderer – FULL FINAL VERSION
-   FIXED: Descriptor set not allocated!
-   ORDER: RTX → POOL+SET (internal) → PIPELINE → SBT → COMMAND BUFFERS
-   ----------------------------------------------------------------- */
+// =============================================================================
+// CONSTRUCTOR — NO RAW POINTERS, NO VulkanRTX
+// =============================================================================
 VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window,
                                const std::vector<std::string>& shaderPaths,
-                               std::shared_ptr<Vulkan::Context> context,
-                               VulkanPipelineManager* pipelineManager,
-                               VulkanBufferManager* bufferManager)
+                               std::shared_ptr<Vulkan::Context> context)
     : window_(window),
       context_(std::move(context)),
-      pipelineManager_(pipelineManager),
-      bufferManager_(bufferManager),
       width_(width),
       height_(height),
       lastFPSTime_(std::chrono::steady_clock::now()),
-      currentRTIndex_(0),
       currentFrame_(0),
-      frameCount_(0),
-      framesThisSecond_(0),
-      currentMode_(1),
-      frameNumber_(0),
+      currentRTIndex_(0),
       currentAccumIndex_(0),
-      envMapImage_(context_->device, VK_NULL_HANDLE, "EnvMap Image"),
-      envMapImageMemory_(context_->device, VK_NULL_HANDLE, "EnvMap Memory"),
-      envMapImageView_(context_->device, VK_NULL_HANDLE, "EnvMap View"),
-      envMapSampler_(context_->device, VK_NULL_HANDLE, "EnvMap Sampler"),
-      rtOutputImages_{
-          Dispose::VulkanHandle<VkImage>(context_->device, VK_NULL_HANDLE, "RT Output 0"),
-          Dispose::VulkanHandle<VkImage>(context_->device, VK_NULL_HANDLE, "RT Output 1")
-      },
-      rtOutputMemories_{
-          Dispose::VulkanHandle<VkDeviceMemory>(context_->device, VK_NULL_HANDLE, "RT Mem 0"),
-          Dispose::VulkanHandle<VkDeviceMemory>(context_->device, VK_NULL_HANDLE, "RT Mem 1")
-      },
-      rtOutputViews_{
-          Dispose::VulkanHandle<VkImageView>(context_->device, VK_NULL_HANDLE, "RT View 0"),
-          Dispose::VulkanHandle<VkImageView>(context_->device, VK_NULL_HANDLE, "RT View 1")
-      },
-      accumImages_{
-          Dispose::VulkanHandle<VkImage>(context_->device, VK_NULL_HANDLE, "Accum Image 0"),
-          Dispose::VulkanHandle<VkImage>(context_->device, VK_NULL_HANDLE, "Accum Image 1")
-      },
-      accumMemories_{
-          Dispose::VulkanHandle<VkDeviceMemory>(context_->device, VK_NULL_HANDLE, "Accum Mem 0"),
-          Dispose::VulkanHandle<VkDeviceMemory>(context_->device, VK_NULL_HANDLE, "Accum Mem 1")
-      },
-      accumViews_{
-          Dispose::VulkanHandle<VkImageView>(context_->device, VK_NULL_HANDLE, "Accum View 0"),
-          Dispose::VulkanHandle<VkImageView>(context_->device, VK_NULL_HANDLE, "Accum View 1")
-      },
-      commandBuffers_(MAX_FRAMES_IN_FLIGHT),
-      descriptorPool_(context_->device, VK_NULL_HANDLE, "Renderer Desc Pool"),
-      rtxDescriptorSet_(VK_NULL_HANDLE),
-      computeDescriptorSets_{},
-      uniformBuffers_{
-          Dispose::VulkanHandle<VkBuffer>(context_->device, VK_NULL_HANDLE, "UBO 0"),
-          Dispose::VulkanHandle<VkBuffer>(context_->device, VK_NULL_HANDLE, "UBO 1"),
-          Dispose::VulkanHandle<VkBuffer>(context_->device, VK_NULL_HANDLE, "UBO 2")
-      },
-      uniformBufferMemories_{
-          Dispose::VulkanHandle<VkDeviceMemory>(context_->device, VK_NULL_HANDLE, "UBO Mem 0"),
-          Dispose::VulkanHandle<VkDeviceMemory>(context_->device, VK_NULL_HANDLE, "UBO Mem 1"),
-          Dispose::VulkanHandle<VkDeviceMemory>(context_->device, VK_NULL_HANDLE, "UBO Mem 2")
-      },
-      materialBuffers_{
-          Dispose::VulkanHandle<VkBuffer>(context_->device, VK_NULL_HANDLE, "Mat Buf 0"),
-          Dispose::VulkanHandle<VkBuffer>(context_->device, VK_NULL_HANDLE, "Mat Buf 1"),
-          Dispose::VulkanHandle<VkBuffer>(context_->device, VK_NULL_HANDLE, "Mat Buf 2")
-      },
-      materialBufferMemory_{
-          Dispose::VulkanHandle<VkDeviceMemory>(context_->device, VK_NULL_HANDLE, "Mat Mem 0"),
-          Dispose::VulkanHandle<VkDeviceMemory>(context_->device, VK_NULL_HANDLE, "Mat Mem 1"),
-          Dispose::VulkanHandle<VkDeviceMemory>(context_->device, VK_NULL_HANDLE, "Mat Mem 2")
-      },
-      dimensionBuffers_{
-          Dispose::VulkanHandle<VkBuffer>(context_->device, VK_NULL_HANDLE, "Dim Buf 0"),
-          Dispose::VulkanHandle<VkBuffer>(context_->device, VK_NULL_HANDLE, "Dim Buf 1"),
-          Dispose::VulkanHandle<VkBuffer>(context_->device, VK_NULL_HANDLE, "Dim Buf 2")
-      },
-      dimensionBufferMemory_{
-          Dispose::VulkanHandle<VkDeviceMemory>(context_->device, VK_NULL_HANDLE, "Dim Mem 0"),
-          Dispose::VulkanHandle<VkDeviceMemory>(context_->device, VK_NULL_HANDLE, "Dim Mem 1"),
-          Dispose::VulkanHandle<VkDeviceMemory>(context_->device, VK_NULL_HANDLE, "Dim Mem 2")
-      },
-      tlasHandle_(VK_NULL_HANDLE),
-      rtPipeline_(VK_NULL_HANDLE),
-      rtPipelineLayout_(VK_NULL_HANDLE),
-      swapchainRecreating_(false),
-      queryReady_{false},
-      framebuffers_(),
-      queryPools_(MAX_FRAMES_IN_FLIGHT, VK_NULL_HANDLE),
-      descriptorsUpdated_(false)
+      frameNumber_(0),
+      resetAccumulation_(true),
+      prevViewProj_(glm::mat4(1.0f)),
+      currentMode_(1),
+      framesThisSecond_(0),
+      timestampPeriod_(0.0),
+      avgFrameTimeMs_(0.0f),
+      minFrameTimeMs_(std::numeric_limits<float>::max()),
+      maxFrameTimeMs_(0.0f),
+      avgGpuTimeMs_(0.0f),
+      minGpuTimeMs_(std::numeric_limits<float>::max()),
+      maxGpuTimeMs_(0.0f)
 {
-    LOG_INFO_CAT("RENDERER", "{}VulkanRenderer::VulkanRenderer() — START [{}x{}]{}", 
-                 OCEAN_TEAL, width, height, RESET);
+    LOG_INFO_CAT("RENDERER", "{}Init [{}x{}]{}", OCEAN_TEAL, width, height, RESET);
 
-    LOG_INFO_CAT("RENDERER", "  → context_ @ {}", static_cast<void*>(context_.get()), RESET);
-    LOG_INFO_CAT("RENDERER", "  → device @ {}", static_cast<void*>(context_->device), RESET);
-    LOG_INFO_CAT("RENDERER", "  → pipelineManager_ @ {}", static_cast<void*>(pipelineManager_), RESET);
-    LOG_INFO_CAT("RENDERER", "  → bufferManager_ @ {}", static_cast<void*>(bufferManager_), RESET);
+    // Query timestamp period for GPU timing
+    VkPhysicalDeviceProperties props{};
+    vkGetPhysicalDeviceProperties(context_->physicalDevice, &props);
+    timestampPeriod_ = props.limits.timestampPeriod;  // ns per tick
 
-    if (!context_)               throw std::runtime_error("Null context");
-    if (!context_->device)       throw std::runtime_error("Context has null VkDevice");
-    if (!pipelineManager_)       throw std::runtime_error("Null pipeline manager");
-    if (!bufferManager_)         throw std::runtime_error("Null buffer manager");
-
-    // ───── LOAD DEFAULT CUBE MESH ─────
-    LOG_INFO_CAT("RENDERER", "Loading default cube mesh...", OCEAN_TEAL, RESET);
+    // Default cube
     vertices_ = {
-        {-1.0f, -1.0f, -1.0f}, { 1.0f, -1.0f, -1.0f}, { 1.0f,  1.0f, -1.0f}, {-1.0f,  1.0f, -1.0f},
-        {-1.0f, -1.0f,  1.0f}, { 1.0f, -1.0f,  1.0f}, { 1.0f,  1.0f,  1.0f}, {-1.0f,  1.0f,  1.0f}
+        {-1,-1,-1}, {1,-1,-1}, {1,1,-1}, {-1,1,-1},
+        {-1,-1,1}, {1,-1,1}, {1,1,1}, {-1,1,1}
     };
-
     indices_ = {
-        0,1,3, 3,1,2,  1,5,2,  2,5,6,  5,4,6,  6,4,7,
-        4,0,7,  7,0,3,  3,2,7,  7,2,6,  4,5,0,  0,5,1
+        0,1,3, 3,1,2, 1,5,2, 2,5,6, 5,4,6, 6,4,7,
+        4,0,7, 7,0,3, 3,2,7, 7,2,6, 4,5,0, 0,5,1
     };
 
-    LOG_INFO_CAT("RENDERER", "Default cube mesh loaded: {} verts, {} indices", OCEAN_TEAL,
-                 vertices_.size(), indices_.size(), RESET);
-
-    // ───── CREATE SYNCHRONIZATION PRIMITIVES ─────
-    LOG_INFO_CAT("RENDERER", "Creating semaphores and fences...", OCEAN_TEAL, RESET);
-    VkSemaphoreCreateInfo semaphoreInfo{.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
+    // Sync objects
+    VkSemaphoreCreateInfo semInfo{.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
     VkFenceCreateInfo fenceInfo{.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, .flags = VK_FENCE_CREATE_SIGNALED_BIT};
-
     for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
-        VK_CHECK(vkCreateSemaphore(context_->device, &semaphoreInfo, nullptr, &imageAvailableSemaphores_[i]), "Image avail sem");
-        VK_CHECK(vkCreateSemaphore(context_->device, &semaphoreInfo, nullptr, &renderFinishedSemaphores_[i]), "Render fin sem");
-        VK_CHECK(vkCreateFence(context_->device, &fenceInfo, nullptr, &inFlightFences_[i]), "In-flight fence");
+        VK_CHECK(vkCreateSemaphore(context_->device, &semInfo, nullptr, &imageAvailableSemaphores_[i]), "Sem");
+        VK_CHECK(vkCreateSemaphore(context_->device, &semInfo, nullptr, &renderFinishedSemaphores_[i]), "Sem");
+        VK_CHECK(vkCreateFence(context_->device, &fenceInfo, nullptr, &inFlightFences_[i]), "Fence");
     }
 
-    // ───── CREATE SWAPCHAIN (FPS UNLOCKED) ─────
-    LOG_INFO_CAT("RENDERER", "Creating swapchain...", OCEAN_TEAL, RESET);
-    createSwapchain();
-    LOG_INFO_CAT("RENDERER", "Swapchain created: {}x{}, {} images", 
-                 swapchainExtent_.width, swapchainExtent_.height, swapchainImages_.size(), RESET);
+    // === SWAPCHAIN IS OWNED BY CONTEXT — COPY STATE ===
+    swapchain_           = context_->swapchain;
+    swapchainImages_     = context_->swapchainImages;
+    swapchainImageViews_ = context_->swapchainImageViews;
+    swapchainExtent_     = context_->swapchainExtent;
+    swapchainImageFormat_= context_->swapchainImageFormat;
 
-    // ───── QUERY POOLS ─────
-    LOG_INFO_CAT("RENDERER", "Creating timestamp query pools...", OCEAN_TEAL, RESET);
+    if (swapchainImages_.empty()) {
+        LOG_ERROR_CAT("RENDERER", "Swapchain has no images – ensure context->createSwapchain() was called before renderer");
+        throw std::runtime_error("Empty swapchain images");
+    }
+    LOG_INFO_CAT("RENDERER", "Swapchain ready: {} images, {}x{}", swapchainImages_.size(), swapchainExtent_.width, swapchainExtent_.height);
+
+    // Query pools for GPU timestamps
     for (auto& pool : queryPools_) {
-        VkQueryPoolCreateInfo qi{
-            .sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,
-            .queryType = VK_QUERY_TYPE_TIMESTAMP,
-            .queryCount = 2
-        };
-        VK_CHECK(vkCreateQueryPool(context_->device, &qi, nullptr, &pool), "Create query pool");
-    }
-    queryReady_.fill(false);
-
-    // ───── COMPUTE DESCRIPTOR SET LAYOUT ─────
-    LOG_INFO_CAT("RENDERER", "Fetching compute descriptor set layout...", OCEAN_TEAL, RESET);
-    computeDescriptorSetLayout_ = pipelineManager_->getComputeDescriptorSetLayout();
-    if (computeDescriptorSetLayout_ == VK_NULL_HANDLE)
-        throw std::runtime_error("Compute descriptor set layout missing");
-    LOG_INFO_CAT("RENDERER", "  → computeDescriptorSetLayout_ @ {}", 
-                 static_cast<void*>(computeDescriptorSetLayout_), RESET);
-
-    // ───── DESCRIPTOR POOL (FOR COMPUTE & UBOs) ─────
-    LOG_INFO_CAT("RENDERER", "Creating renderer descriptor pool...", OCEAN_TEAL, RESET);
-    std::array<VkDescriptorPoolSize, 3> poolSizes{};
-    poolSizes[0] = { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, MAX_FRAMES_IN_FLIGHT };
-    poolSizes[1] = { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, MAX_FRAMES_IN_FLIGHT * 2 };
-    poolSizes[2] = { VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1 };
-
-    VkDescriptorPoolCreateInfo poolInfo{
-        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-        .maxSets = MAX_FRAMES_IN_FLIGHT + 1,
-        .poolSizeCount = static_cast<uint32_t>(poolSizes.size()),
-        .pPoolSizes = poolSizes.data()
-    };
-    VkDescriptorPool rawPool = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateDescriptorPool(context_->device, &poolInfo, nullptr, &rawPool),
-             "Failed to create descriptor pool");
-    descriptorPool_ = makeHandle(context_->device, rawPool, "Renderer Desc Pool");
-    LOG_INFO_CAT("RENDERER", "  → descriptorPool_ @ {}", static_cast<void*>(descriptorPool_.get()), RESET);
-
-    // ───── RTX COMPONENT (OWNS ITS OWN POOL + SET) ─────
-    LOG_INFO_CAT("RENDERER", "{}CREATING VulkanRTX COMPONENT...{}", EMERALD_GREEN, RESET);
-    rtx_ = std::make_unique<VulkanRTX>(context_, swapchainExtent_.width, swapchainExtent_.height, pipelineManager_);
-    LOG_INFO_CAT("RENDERER", "  → rtx_ @ {}", static_cast<void*>(rtx_.get()), RESET);
-
-    // ← GET DESCRIPTOR SET FROM VulkanRTX (ALREADY ALLOCATED)
-    LOG_INFO_CAT("RENDERER", "Fetching RTX descriptor set...", OCEAN_TEAL, RESET);
-    rtxDescriptorSet_ = rtx_->getDescriptorSet();
-    LOG_INFO_CAT("RENDERER", "  → rtxDescriptorSet_ @ {}", static_cast<void*>(rtxDescriptorSet_), RESET);
-
-    if (rtxDescriptorSet_ == VK_NULL_HANDLE) {
-        LOG_ERROR_CAT("RENDERER", "{}RTX FAILED TO ALLOCATE DESCRIPTOR SET!{}", CRIMSON_MAGENTA, RESET);
-        throw std::runtime_error("RTX descriptor set missing");
+        VkQueryPoolCreateInfo qi{.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,
+                                 .queryType = VK_QUERY_TYPE_TIMESTAMP, .queryCount = 2};
+        VK_CHECK(vkCreateQueryPool(context_->device, &qi, nullptr, &pool), "Query pool");
     }
 
-    LOG_INFO_CAT("RENDERER", "RTX descriptor set valid @ {}", static_cast<void*>(rtxDescriptorSet_), RESET);
+    // Descriptor pool
+    std::array<VkDescriptorPoolSize, 4> poolSizes = {{
+        {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, MAX_FRAMES_IN_FLIGHT},
+        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, MAX_FRAMES_IN_FLIGHT * 2},
+        {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, MAX_FRAMES_IN_FLIGHT * 4},
+        {VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1}
+    }};
+    VkDescriptorPoolCreateInfo poolInfo{.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+                                        .maxSets = MAX_FRAMES_IN_FLIGHT + 2,
+                                        .poolSizeCount = static_cast<uint32_t>(poolSizes.size()),
+                                        .pPoolSizes = poolSizes.data()};
+    VkDescriptorPool rawPool;
+    VK_CHECK(vkCreateDescriptorPool(context_->device, &poolInfo, nullptr, &rawPool), "Desc pool");
+    descriptorPool_ = makeHandle(context_->device, rawPool, "Renderer Pool");
 
-    createComputeDescriptorSets();
-    createRTOutputImages();
-    createAccumulationImages();
-    createFramebuffers();
-    createEnvironmentMap();
-
-    // ───── BUILD ACCELERATION STRUCTURES (CRITICAL) ─────
-    LOG_INFO_CAT("RENDERER", "Building acceleration structures...", OCEAN_TEAL, RESET);
-    buildAccelerationStructures();  // ← Uses default cube, builds TLAS
-
-    // ───── PER-FRAME BUFFERS ─────
-    LOG_INFO_CAT("RENDERER", "Initializing per-frame buffers...", OCEAN_TEAL, RESET);
-    constexpr size_t kMaxMaterials = 256;
-    constexpr VkDeviceSize kMaterialSize = kMaxMaterials * sizeof(MaterialData);
-    constexpr VkDeviceSize kDimensionSize = 1024 * sizeof(float);
-    initializeAllBufferData(MAX_FRAMES_IN_FLIGHT, kMaterialSize, kDimensionSize);
-
-    // ───── RAY TRACING PIPELINE – MUST BE BEFORE SBT ─────
-    LOG_INFO_CAT("RENDERER", "{}Creating ray tracing pipeline...{}", OCEAN_TEAL, RESET);
-    pipelineManager_->createRayTracingPipeline();  // ← 1. CREATE PIPELINE FIRST
-
-    rtPipeline_       = pipelineManager_->getRayTracingPipeline();
-    rtPipelineLayout_ = pipelineManager_->getRayTracingPipelineLayout();
-
-    if (rtPipeline_ == VK_NULL_HANDLE) {
-        LOG_ERROR_CAT("RENDERER", "Ray tracing pipeline creation failed!", CRIMSON_MAGENTA, RESET);
-        throw std::runtime_error("Ray tracing pipeline missing");
-    }
-
-    LOG_INFO_CAT("RENDERER", "Ray tracing pipeline created @ {}", 
-                 static_cast<void*>(rtPipeline_), RESET);
-
-    // ───── PASS PIPELINE TO VulkanRTX – CRITICAL FIX ─────
-    LOG_INFO_CAT("RENDERER", "Passing pipeline to VulkanRTX...", OCEAN_TEAL, RESET);
-    rtx_->setRayTracingPipeline(rtPipeline_, rtPipelineLayout_);
-
-    // ───── SHADER BINDING TABLE (SBT) – NOW SAFE ─────
-    LOG_INFO_CAT("RENDERER", "{}Creating Shader Binding Table...{}", OCEAN_TEAL, RESET);
-    rtx_->createShaderBindingTable(context_->physicalDevice);  // ← 2. THEN SBT
-    LOG_INFO_CAT("RENDERER", "SBT created successfully", EMERALD_GREEN, RESET);
-
-    createCommandBuffers();
-
-    // ───── UPDATE DESCRIPTORS (TLAS now valid) ─────
-    LOG_INFO_CAT("RENDERER", "Updating descriptors...", OCEAN_TEAL, RESET);
-    updateRTDescriptors();
-    updateComputeDescriptors(0);
-
-    LOG_INFO_CAT("RENDERER", "{}VulkanRenderer initialized successfully{}", EMERALD_GREEN, RESET);
+    LOG_INFO_CAT("RENDERER", "{}VulkanRenderer initialized — awaiting takeOwnership()...{}", OCEAN_TEAL, RESET);
 }
 
-/* -----------------------------------------------------------------
-   Destructor – RAII cleans everything
-   ----------------------------------------------------------------- */
+// =============================================================================
+// DESTRUCTOR
+// =============================================================================
 VulkanRenderer::~VulkanRenderer() {
-    LOG_INFO_CAT("RENDERER", "{}VulkanRenderer::~dtor RAII cleanup{}", EMERALD_GREEN, RESET);
-    // All Dispose::VulkanHandle objects auto-destruct
+    cleanup();
 }
 
-/* -----------------------------------------------------------------
-   createSwapchain
-   ----------------------------------------------------------------- */
-void VulkanRenderer::createSwapchain() {
-    LOG_INFO_CAT("SWAPCHAIN", "{}createSwapchain() – START{}", OCEAN_TEAL, RESET);
+// =============================================================================
+// TAKE OWNERSHIP — CREATE VulkanRTX HERE
+// =============================================================================
+void VulkanRenderer::takeOwnership(std::unique_ptr<VulkanPipelineManager> pm,
+                                   std::unique_ptr<VulkanBufferManager> bm)
+{
+    LOG_INFO_CAT("RENDERER", "{}takeOwnership() — acquiring PipelineManager & BufferManager{}", ARCTIC_CYAN, RESET);
+    pipelineManager_ = std::move(pm);
+    bufferManager_   = std::move(bm);
 
-    // --- Query surface capabilities ---
-    VkSurfaceCapabilitiesKHR caps;
-    VK_CHECK(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(context_->physicalDevice, context_->surface, &caps),
-             "vkGetPhysicalDeviceSurfaceCapabilitiesKHR");
+    // NOW SAFE: create VulkanRTX
+    rtx_ = std::make_unique<VulkanRTX>(context_, width_, height_, pipelineManager_.get());
+    rtxDescriptorSet_ = rtx_->getDescriptorSet();
+    if (!rtxDescriptorSet_) throw std::runtime_error("RTX descriptor set missing");
 
-    // --- Query formats ---
-    uint32_t formatCount;
-    VK_CHECK(vkGetPhysicalDeviceSurfaceFormatsKHR(context_->physicalDevice, context_->surface, &formatCount, nullptr),
-             "vkGetPhysicalDeviceSurfaceFormatsKHR count");
-    std::vector<VkSurfaceFormatKHR> formats(formatCount);
-    VK_CHECK(vkGetPhysicalDeviceSurfaceFormatsKHR(context_->physicalDevice, context_->surface, &formatCount, formats.data()),
-             "vkGetPhysicalDeviceSurfaceFormatsKHR");
-
-    // --- Query present modes ---
-    uint32_t presentModeCount;
-    VK_CHECK(vkGetPhysicalDeviceSurfacePresentModesKHR(context_->physicalDevice, context_->surface, &presentModeCount, nullptr),
-             "vkGetPhysicalDeviceSurfacePresentModesKHR count");
-    std::vector<VkPresentModeKHR> presentModes(presentModeCount);
-    VK_CHECK(vkGetPhysicalDeviceSurfacePresentModesKHR(context_->physicalDevice, context_->surface, &presentModeCount, presentModes.data()),
-             "vkGetPhysicalDeviceSurfacePresentModesKHR");
-
-    if (formatCount == 0 || presentModeCount == 0) {
-        throw std::runtime_error("No surface formats or present modes");
-    }
-
-    // --- Choose format ---
-    VkSurfaceFormatKHR surfaceFormat = formats[0];
-    for (const auto& f : formats) {
-        if (f.format == VK_FORMAT_B8G8R8A8_SRGB && f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
-            surfaceFormat = f;
-            break;
-        }
-    }
-
-    // --- Choose present mode (FPS UNLOCKED) ---
-    VkPresentModeKHR presentMode = VK_PRESENT_MODE_IMMEDIATE_KHR;
-    for (const auto& m : presentModes) {
-        if (m == VK_PRESENT_MODE_MAILBOX_KHR) {
-            presentMode = m;
-            break;
-        }
-    }
-
-    // --- Extent ---
-    VkExtent2D extent = caps.currentExtent;
-    if (extent.width == UINT32_MAX) {
-        extent.width = std::clamp(static_cast<uint32_t>(width_), caps.minImageExtent.width, caps.maxImageExtent.width);
-        extent.height = std::clamp(static_cast<uint32_t>(height_), caps.minImageExtent.height, caps.maxImageExtent.height);
-    }
-
-    // --- Image count ---
-    uint32_t imageCount = caps.minImageCount + 1;
-    if (caps.maxImageCount > 0 && imageCount > caps.maxImageCount)
-        imageCount = caps.maxImageCount;
-
-    // --- Create swapchain ---
-    VkSwapchainCreateInfoKHR createInfo{
-        .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
-        .surface = context_->surface,
-        .minImageCount = imageCount,
-        .imageFormat = surfaceFormat.format,
-        .imageColorSpace = surfaceFormat.colorSpace,
-        .imageExtent = extent,
-        .imageArrayLayers = 1,
-        .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
-        .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
-        .preTransform = caps.currentTransform,
-        .compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
-        .presentMode = presentMode,
-        .clipped = VK_TRUE,
-        .oldSwapchain = swapchain_
-    };
-
-    VkSwapchainKHR newSwapchain;
-    VK_CHECK(vkCreateSwapchainKHR(context_->device, &createInfo, nullptr, &newSwapchain),
-             "vkCreateSwapchainKHR");
-
-    if (swapchain_ != VK_NULL_HANDLE) {
-        vkDestroySwapchainKHR(context_->device, swapchain_, nullptr);
-    }
-    swapchain_ = newSwapchain;
-    swapchainImageFormat_ = surfaceFormat.format;
-    swapchainExtent_ = extent;
-
-    // --- Get images ---
-    uint32_t imgCount;
-    VK_CHECK(vkGetSwapchainImagesKHR(context_->device, swapchain_, &imgCount, nullptr), "Get image count");
-    swapchainImages_.resize(imgCount);
-    VK_CHECK(vkGetSwapchainImagesKHR(context_->device, swapchain_, &imgCount, swapchainImages_.data()), "Get images");
-
-    // --- Create image views ---
-    swapchainImageViews_.clear();
-    swapchainImageViews_.reserve(imgCount);
-    for (VkImage img : swapchainImages_) {
-        VkImageViewCreateInfo viewInfo{
-            .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-            .image = img,
-            .viewType = VK_IMAGE_VIEW_TYPE_2D,
-            .format = surfaceFormat.format,
-            .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}
-        };
-        VkImageView view;
-        VK_CHECK(vkCreateImageView(context_->device, &viewInfo, nullptr, &view), "Create image view");
-        swapchainImageViews_.push_back(view);
-    }
-
-    LOG_INFO_CAT("SWAPCHAIN", "{}Swapchain created: {}x{}, {} images, {} mode{}", EMERALD_GREEN,
-                 extent.width, extent.height, imgCount,
-                 presentMode == VK_PRESENT_MODE_IMMEDIATE_KHR ? "IMMEDIATE" : "MAILBOX", RESET);
-}
-
-/* -----------------------------------------------------------------
-   cleanupSwapchain
-   ----------------------------------------------------------------- */
-void VulkanRenderer::cleanupSwapchain() {
-    LOG_DEBUG_CAT("SWAPCHAIN", "{}Cleaning swapchain...{}", OCEAN_TEAL, RESET);
-    for (auto fb : framebuffers_) {
-        if (fb != VK_NULL_HANDLE) vkDestroyFramebuffer(context_->device, fb, nullptr);
-    }
-    framebuffers_.clear();
-
-    for (auto view : swapchainImageViews_) {
-        if (view != VK_NULL_HANDLE) vkDestroyImageView(context_->device, view, nullptr);
-    }
-    swapchainImageViews_.clear();
-
-    if (swapchain_ != VK_NULL_HANDLE) {
-        vkDestroySwapchainKHR(context_->device, swapchain_, nullptr);
-        swapchain_ = VK_NULL_HANDLE;
-    }
-}
-
-/* -----------------------------------------------------------------
-   recreateSwapchain
-   ----------------------------------------------------------------- */
-void VulkanRenderer::recreateSwapchain(int width, int height) {
-    width_ = width; height_ = height;
-    vkDeviceWaitIdle(context_->device);
-    cleanupSwapchain();
-    createSwapchain();
-    createFramebuffers();
-    createCommandBuffers();
-}
-
-/* -----------------------------------------------------------------
-   handleResize – FINAL FIXED VERSION (COMPILATION & RUNTIME SAFE)
-   - Uses rtx_->getBLAS() / rtx_->getTLAS()
-   - Passes vector<tuple<...>> correctly
-   - Rebuilds AS, pipeline, SBT, descriptors
-   ----------------------------------------------------------------- */
-void VulkanRenderer::handleResize(int width, int height) {
-    if (width <= 0 || height <= 0 || (width == width_ && height == height_)) {
-        LOG_DEBUG_CAT("RESIZE", "Resize ignored: invalid or same size {}x{}", width, height);
-        return;
-    }
-
-    LOG_INFO_CAT("RESIZE", "{}Resize: {}x{} to {}x{}{}", AMBER_YELLOW, width_, height_, width, height, RESET);
-
-    vkDeviceWaitIdle(context_->device);
-
-    // --- 1. Store new size ---
-    width_ = width;
-    height_ = height;
-
-    // --- 2. Cleanup swapchain ---
-    cleanupSwapchain();
-
-    // --- 3. Recreate swapchain + framebuffers ---
-    LOG_INFO_CAT("RESIZE", "Recreating swapchain and framebuffers...");
-    createSwapchain();
-    createFramebuffers();
-
-    // --- 4. Recreate RT output & accumulation images ---
-    LOG_INFO_CAT("RESIZE", "Recreating RT output and accumulation images...");
     createRTOutputImages();
     createAccumulationImages();
+    createEnvironmentMap();
+    createComputeDescriptorSets();
+    createFramebuffers();
 
-    // --- 5. Destroy old VulkanRTX ---
-    rtx_.reset();
+    // Upload mesh AFTER buffer manager is owned
+    bufferManager_->uploadMesh(vertices_.data(), vertices_.size(), indices_.data(), indices_.size());
 
-    // --- 6. Recreate VulkanRTX with new size ---
-    LOG_INFO_CAT("RESIZE", "Recreating VulkanRTX component...");
-    rtx_ = std::make_unique<VulkanRTX>(context_, width_, height_, pipelineManager_);
+    // CRITICAL: Build initial AS after mesh upload
+    rtx_->updateRTX(context_->physicalDevice, context_->commandPool, context_->graphicsQueue,
+                    bufferManager_->getGeometries(), bufferManager_->getDimensionStates());
 
-    // --- 7. Re-upload mesh to buffer manager ---
-    LOG_INFO_CAT("RESIZE", "Re-uploading mesh to buffer manager...");
-    bufferManager_->uploadMesh(
-        vertices_.data(), static_cast<uint32_t>(vertices_.size()),
-        indices_.data(),  static_cast<uint32_t>(indices_.size())
-    );
+    constexpr VkDeviceSize kMatSize = 256 * sizeof(MaterialData);
+    constexpr VkDeviceSize kDimSize = 1024 * sizeof(float);
+    initializeAllBufferData(MAX_FRAMES_IN_FLIGHT, kMatSize, kDimSize);
 
-    VkBuffer vertexBuffer = bufferManager_->getVertexBuffer();
-    VkBuffer indexBuffer  = bufferManager_->getIndexBuffer();
-
-    if (vertexBuffer == VK_NULL_HANDLE || indexBuffer == VK_NULL_HANDLE) {
-        LOG_ERROR_CAT("RESIZE", "FATAL: Invalid geometry buffers after upload!");
-        throw std::runtime_error("Failed to get valid geometry buffers after resize");
-    }
-
-    // --- 8. Rebuild BLAS ---
-    LOG_INFO_CAT("RESIZE", "Rebuilding BLAS...");
-    rtx_->createBottomLevelAS(
-        context_->physicalDevice,
-        context_->commandPool,
-        context_->graphicsQueue,
-        {{vertexBuffer, indexBuffer,
-          static_cast<uint32_t>(vertices_.size()),
-          static_cast<uint32_t>(indices_.size()),
-          sizeof(glm::vec3)}}
-    );
-
-    // --- 9. Rebuild TLAS using new BLAS ---
-    LOG_INFO_CAT("RESIZE", "Rebuilding TLAS...");
-    rtx_->createTopLevelAS(
-        context_->physicalDevice,
-        context_->commandPool,
-        context_->graphicsQueue,
-        std::vector<std::tuple<VkAccelerationStructureKHR, glm::mat4>>{
-            {rtx_->getBLAS(), glm::mat4(1.0f)}  // CORRECT: vector<tuple<...>>
-        }
-    );
-
-    // --- 10. Rebuild ray tracing pipeline ---
-    LOG_INFO_CAT("RESIZE", "Rebuilding ray tracing pipeline...");
     pipelineManager_->createRayTracingPipeline();
     rtPipeline_ = pipelineManager_->getRayTracingPipeline();
     rtPipelineLayout_ = pipelineManager_->getRayTracingPipelineLayout();
+    if (!rtPipeline_) throw std::runtime_error("RT pipeline missing");
 
-    if (rtPipeline_ == VK_NULL_HANDLE) {
-        LOG_ERROR_CAT("RESIZE", "FATAL: Ray tracing pipeline creation failed!");
-        throw std::runtime_error("Failed to create ray tracing pipeline");
-    }
-
-    // --- 11. Pass pipeline to VulkanRTX ---
     rtx_->setRayTracingPipeline(rtPipeline_, rtPipelineLayout_);
-
-    // --- 12. Rebuild SBT ---
-    LOG_INFO_CAT("RESIZE", "Rebuilding Shader Binding Table...");
     rtx_->createShaderBindingTable(context_->physicalDevice);
 
-    // --- 13. Get descriptor set ---
-    rtxDescriptorSet_ = rtx_->getDescriptorSet();
-    if (rtxDescriptorSet_ == VK_NULL_HANDLE) {
-        LOG_ERROR_CAT("RESIZE", "FATAL: RTX descriptor set missing!");
-        throw std::runtime_error("RTX descriptor set missing after resize");
-    }
-
-    // --- 14. Update TLAS in descriptor set ---
-    LOG_INFO_CAT("RESIZE", "Updating TLAS descriptor...");
-    rtx_->updateDescriptorSetForTLAS(rtx_->getTLAS());
-
-    // --- 15. Update compute descriptors ---
-    LOG_INFO_CAT("RESIZE", "Updating compute descriptors...");
-    for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
-        updateComputeDescriptors(i);
-    }
-
-    // --- 16. Re-allocate command buffers ---
-    LOG_INFO_CAT("RESIZE", "Re-allocating command buffers...");
     createCommandBuffers();
+    updateRTDescriptors();
 
-    // --- 17. Reset accumulation ---
-    resetAccumulation_ = true;
-    currentRTIndex_ = 0;
-    currentAccumIndex_ = 0;
-    descriptorsUpdated_ = true;
-
-    LOG_INFO_CAT("RESIZE", "{}Resize complete: {}x{} – RTX fully rebuilt{}", EMERALD_GREEN, width_, height_, RESET);
+    LOG_INFO_CAT("RENDERER", "{}takeOwnership() complete. VulkanRTX READY.{}", EMERALD_GREEN, RESET);
 }
 
-/* -----------------------------------------------------------------
-   renderFrame – main render loop entry point
-   ----------------------------------------------------------------- */
+// =============================================================================
+// RENDER FRAME — FIXED: SBT via getSBT(), no dangling ptrs
+// =============================================================================
 void VulkanRenderer::renderFrame(const Camera& camera) {
-    LOG_DEBUG_CAT("FRAME", "{}renderFrame() – START (frame: {}){}", OCEAN_TEAL, frameNumber_, RESET);
+    auto frameStart = std::chrono::high_resolution_clock::now();  // CPU start
+
+    auto now = std::chrono::steady_clock::now();
+    bool updateMetrics = (std::chrono::duration_cast<std::chrono::seconds>(now - lastFPSTime_).count() >= 1);
 
     vkWaitForFences(context_->device, 1, &inFlightFences_[currentFrame_], VK_TRUE, UINT64_MAX);
 
     uint32_t imageIndex;
-    VkResult result = vkAcquireNextImageKHR(context_->device, swapchain_, UINT64_MAX,
-                                            imageAvailableSemaphores_[currentFrame_], VK_NULL_HANDLE, &imageIndex);
-
-    if (result == VK_ERROR_OUT_OF_DATE_KHR) {
-        LOG_INFO_CAT("SWAPCHAIN", "{}Out of date – recreating{}", AMBER_YELLOW, RESET);
-        recreateSwapchain(width_, height_);
+    auto res = vkAcquireNextImageKHR(context_->device, swapchain_, UINT64_MAX,
+                                     imageAvailableSemaphores_[currentFrame_], VK_NULL_HANDLE, &imageIndex);
+    if (res == VK_ERROR_OUT_OF_DATE_KHR || res == VK_SUBOPTIMAL_KHR) {
+        handleResize(width_, height_);
         return;
-    } else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
-        throw std::runtime_error("Failed to acquire swapchain image");
+    } else if (res != VK_SUCCESS) {
+        LOG_ERROR_CAT("RENDERER", "Failed to acquire swapchain image: {}", res);
+        return;
     }
-
+    if (imageIndex >= static_cast<uint32_t>(commandBuffers_.size())) {
+        LOG_ERROR_CAT("RENDERER", "Invalid imageIndex {} (max {})", imageIndex, commandBuffers_.size() - 1);
+        return;
+    }
     vkResetFences(context_->device, 1, &inFlightFences_[currentFrame_]);
 
-    // --- Update per-frame data ---
+    // Accumulation reset logic
+    glm::mat4 currVP = camera.getProjectionMatrix() * camera.getViewMatrix();
+    float diff = 0.0f;
+    for (int i = 0; i < 16; ++i)
+        diff = std::max(diff, std::abs(currVP[i/4][i%4] - prevViewProj_[i/4][i%4]));
+    if (diff > 1e-4f || resetAccumulation_) {
+        resetAccumulation_ = true;
+        frameNumber_ = 0;
+    } else {
+        resetAccumulation_ = false;
+        frameNumber_++;
+    }
+    prevViewProj_ = currVP;
+
     updateUniformBuffer(currentFrame_, camera);
-    updateRTDescriptors();
-    updateComputeDescriptors(currentFrame_);
 
-    // --- Record command buffer ---
-    VkCommandBuffer cmd = commandBuffers_[currentFrame_];
+    VkCommandBuffer cmd = commandBuffers_[imageIndex];
+    if (cmd == VK_NULL_HANDLE) {
+        LOG_ERROR_CAT("RENDERER", "Null command buffer for imageIndex {}", imageIndex);
+        return;
+    }
+
+    // Reset and begin command buffer
     vkResetCommandBuffer(cmd, 0);
-
     VkCommandBufferBeginInfo beginInfo{
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
         .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
     };
-    VK_CHECK(vkBeginCommandBuffer(cmd, &beginInfo), "vkBeginCommandBuffer");
+    VK_CHECK(vkBeginCommandBuffer(cmd, &beginInfo), "Begin cmd");
 
-    // --- RAY TRACING PASS ---
-    {
-        VkImageMemoryBarrier barrier{
-            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-            .srcAccessMask = 0,
-            .dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
-            .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-            .newLayout = VK_IMAGE_LAYOUT_GENERAL,
-            .image = rtOutputImages_[currentRTIndex_].get(),
-            .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}
-        };
-        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                             VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
-                             0, 0, nullptr, 0, nullptr, 1, &barrier);
+    // GPU timestamp start
+    vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, queryPools_[currentFrame_], 0);
 
-        rtx_->recordRayTracingCommands(cmd, swapchainExtent_,
-                                       rtOutputImages_[currentRTIndex_].get(),
-                                       rtOutputViews_[currentRTIndex_].get());
+    // Transition RT output image
+    transitionImageLayout(cmd, rtOutputImages_[currentRTIndex_].get(),
+        VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
+        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
+        0, VK_ACCESS_SHADER_WRITE_BIT);
 
-        barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-        barrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-        barrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
-        barrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
-                             VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-                             0, 0, nullptr, 0, nullptr, 1, &barrier);
+    // Transition accumulation image — only UNDEFINED on first frame
+    VkImageLayout accumOldLayout = resetAccumulation_ ? VK_IMAGE_LAYOUT_UNDEFINED : VK_IMAGE_LAYOUT_GENERAL;
+    transitionImageLayout(cmd, accumImages_[currentAccumIndex_].get(),
+        accumOldLayout, VK_IMAGE_LAYOUT_GENERAL,
+        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
+        0, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
+
+    updateRTDescriptors();
+
+    // Bind pipeline and descriptor set
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, rtPipeline_);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
+                            rtPipelineLayout_, 0, 1, &rtxDescriptorSet_, 0, nullptr);
+
+    // FIX: Use getSBT() → direct access to raygen/miss/hit/callable
+    const auto& sbt = rtx_->getSBT();
+    const VkStridedDeviceAddressRegionKHR* rgen = &sbt.raygen;
+    const VkStridedDeviceAddressRegionKHR* miss = &sbt.miss;
+    const VkStridedDeviceAddressRegionKHR* hit  = &sbt.hit;
+    const VkStridedDeviceAddressRegionKHR* call = &sbt.callable;
+
+    // Validate SBT
+    if (rgen->deviceAddress == 0 || miss->deviceAddress == 0 || hit->deviceAddress == 0) {
+        LOG_ERROR_CAT("RENDERER", "SBT region invalid (deviceAddress=0) — cannot trace rays");
+        vkEndCommandBuffer(cmd);
+        return;
     }
 
-    // --- COMPUTE DENOISE (mode 2) ---
-    if (currentMode_ == 2) {
-        VkImageMemoryBarrier rtToCompute{
-            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-            .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
-            .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
-            .oldLayout = VK_IMAGE_LAYOUT_GENERAL,
-            .newLayout = VK_IMAGE_LAYOUT_GENERAL,
-            .image = rtOutputImages_[currentRTIndex_].get(),
-            .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}
-        };
-        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
-                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                             0, 0, nullptr, 0, nullptr, 1, &rtToCompute);
-
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
-                          pipelineManager_->getComputePipeline());
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
-                                pipelineManager_->getComputePipelineLayout(),
-                                0, 1, &computeDescriptorSets_[currentFrame_], 0, nullptr);
-
-        vkCmdDispatch(cmd,
-                      (swapchainExtent_.width + 15) / 16,
-                      (swapchainExtent_.height + 15) / 16,
-                      1);
+    // DEBUG LOG SBT (once)
+    static bool logged_sbt = false;
+    if (!logged_sbt) {
+        LOG_INFO_CAT("RENDERER", "SBT Addresses: raygen={} miss={} hit={} call={}",
+                     ptr_to_hex((void*)rgen->deviceAddress),
+                     ptr_to_hex((void*)miss->deviceAddress),
+                     ptr_to_hex((void*)hit->deviceAddress),
+                     ptr_to_hex((void*)call->deviceAddress));
+        logged_sbt = true;
     }
 
-    VK_CHECK(vkEndCommandBuffer(cmd), "vkEndCommandBuffer");
+    // Trace rays
+    rtx_->traceRays(cmd, rgen, miss, hit, call,
+                    static_cast<uint32_t>(swapchainExtent_.width),
+                    static_cast<uint32_t>(swapchainExtent_.height), 1);
 
-    // --- Submit ---
-    const VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    VkSubmitInfo submitInfo{
+    // Blit result to swapchain
+    blitRTOutputToSwapchain(cmd, imageIndex);
+
+    // GPU timestamp end
+    vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, queryPools_[currentFrame_], 1);
+
+    VK_CHECK(vkEndCommandBuffer(cmd), "End cmd");
+
+    // Submit command buffer
+    VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR;
+    VkSubmitInfo submit{
         .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-        .waitSemaphoreCount = 1,
-        .pWaitSemaphores = &imageAvailableSemaphores_[currentFrame_],
+        .waitSemaphoreCount = 1, .pWaitSemaphores = &imageAvailableSemaphores_[currentFrame_],
         .pWaitDstStageMask = &waitStage,
-        .commandBufferCount = 1,
-        .pCommandBuffers = &cmd,
-        .signalSemaphoreCount = 1,
-        .pSignalSemaphores = &renderFinishedSemaphores_[currentFrame_]
+        .commandBufferCount = 1, .pCommandBuffers = &cmd,
+        .signalSemaphoreCount = 1, .pSignalSemaphores = &renderFinishedSemaphores_[currentFrame_]
     };
+    VK_CHECK(vkQueueSubmit(context_->graphicsQueue, 1, &submit, inFlightFences_[currentFrame_]), "Submit");
 
-    VK_CHECK(vkQueueSubmit(context_->graphicsQueue, 1, &submitInfo, inFlightFences_[currentFrame_]),
-             "vkQueueSubmit");
-
-    // --- Present ---
-    VkPresentInfoKHR presentInfo{
+    // Present
+    VkPresentInfoKHR present{
         .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
-        .waitSemaphoreCount = 1,
-        .pWaitSemaphores = &renderFinishedSemaphores_[currentFrame_],
-        .swapchainCount = 1,
-        .pSwapchains = &swapchain_,
-        .pImageIndices = &imageIndex
+        .waitSemaphoreCount = 1, .pWaitSemaphores = &renderFinishedSemaphores_[currentFrame_],
+        .swapchainCount = 1, .pSwapchains = &swapchain_, .pImageIndices = &imageIndex
     };
+    res = vkQueuePresentKHR(context_->presentQueue, &present);
+    if (res == VK_ERROR_OUT_OF_DATE_KHR || res == VK_SUBOPTIMAL_KHR)
+        handleResize(width_, height_);
+    else if (res != VK_SUCCESS)
+        LOG_ERROR_CAT("RENDERER", "Failed to present: {}", res);
 
-    result = vkQueuePresentKHR(context_->graphicsQueue, &presentInfo);
-    if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
-        recreateSwapchain(width_, height_);
-    } else if (result != VK_SUCCESS) {
-        throw std::runtime_error("Failed to present swapchain image");
+    // Retrieve GPU timestamp
+    uint64_t timestamps[2] = {0};
+    auto gpuRes = vkGetQueryPoolResults(context_->device, queryPools_[currentFrame_], 0, 2, sizeof(timestamps),
+                                        timestamps, sizeof(uint64_t), VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
+    double gpuTimeNs = 0.0;
+    if (gpuRes == VK_SUCCESS) {
+        gpuTimeNs = static_cast<double>(timestamps[1] - timestamps[0]) * timestampPeriod_;
     }
+    double gpuTimeMs = gpuTimeNs / 1e6;
 
-    // --- Frame bookkeeping ---
-    currentFrame_ = (currentFrame_ + 1) % MAX_FRAMES_IN_FLIGHT;
-    frameCount_++;
-    frameNumber_++;
+    auto frameEnd = std::chrono::high_resolution_clock::now();  // CPU end
+    auto cpuTimeMs = std::chrono::duration<double, std::chrono::milliseconds::period>(frameEnd - frameStart).count();
 
-    currentRTIndex_ = (currentRTIndex_ + 1) % 2;
-    currentAccumIndex_ = (currentAccumIndex_ + 1) % 2;
+    // Update running averages/min/max for CPU and GPU
+    avgFrameTimeMs_ = (avgFrameTimeMs_ * 0.9f) + (cpuTimeMs * 0.1f);
+    minFrameTimeMs_ = std::min(minFrameTimeMs_, static_cast<float>(cpuTimeMs));
+    maxFrameTimeMs_ = std::max(maxFrameTimeMs_, static_cast<float>(cpuTimeMs));
 
-    // --- CAMERA MOVEMENT DETECTION (NO getRotation()) ---
-    static glm::vec3 lastCamPos = glm::vec3(0.0f);
-    static float lastYaw = -90.0f;
-    static float lastPitch = 0.0f;
+    avgGpuTimeMs_ = (avgGpuTimeMs_ * 0.9f) + (static_cast<float>(gpuTimeMs) * 0.1f);
+    minGpuTimeMs_ = std::min(minGpuTimeMs_, static_cast<float>(gpuTimeMs));
+    maxGpuTimeMs_ = std::max(maxGpuTimeMs_, static_cast<float>(gpuTimeMs));
 
-    // Cast to PerspectiveCamera to access yaw_ and pitch_
-    const PerspectiveCamera* persCam = dynamic_cast<const PerspectiveCamera*>(&camera);
-    if (!persCam) {
-        LOG_ERROR_CAT("CAM", "{}Camera is not PerspectiveCamera – cannot detect movement{}", CRIMSON_MAGENTA, RESET);
-    } else {
-        glm::vec3 currPos = persCam->getPosition();
-        float currYaw = persCam->yaw_;
-        float currPitch = persCam->pitch_;
+    framesThisSecond_++;
 
-        bool posMoved = glm::length(currPos - lastCamPos) > 0.001f;
-        bool rotMoved = std::abs(currYaw - lastYaw) > 0.1f || std::abs(currPitch - lastPitch) > 0.1f;
-
-        if (posMoved || rotMoved) {
-            resetAccumulation_ = true;
-            LOG_INFO_CAT("RTX", "{}Camera moved (pos: {:.3f}, yaw: {:.1f}, pitch: {:.1f}) – accumulation reset{}",
-                         OCEAN_TEAL, glm::length(currPos - lastCamPos), currYaw - lastYaw, currPitch - lastPitch, RESET);
-
-            lastCamPos = currPos;
-            lastYaw = currYaw;
-            lastPitch = currPitch;
-        }
-    }
-
-    // --- FPS counter ---
-    auto now = std::chrono::steady_clock::now();
-    auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - lastFPSTime_).count();
-    if (elapsed >= 1) {
-        LOG_INFO_CAT("FPS", "{}FPS: {} | Frame: {} | Mode: {}{}",
-                     OCEAN_TEAL, framesThisSecond_, frameNumber_, currentMode_, RESET);
+    if (updateMetrics) {
+        int fps = framesThisSecond_;
+        std::string accumStr = resetAccumulation_ ? "RESET" : std::to_string(frameNumber_);
+        LOG_INFO_CAT("FPS", "{}FPS: {}/CPU:{:.1f}ms[{}~{:.1f}] / GPU:{:.1f}ms[{}~{:.1f}] / ACCUM:{} / RES:{}x{} / FRAME:{} {}", OCEAN_TEAL,
+                     fps,
+                     cpuTimeMs, avgFrameTimeMs_, minFrameTimeMs_, maxFrameTimeMs_,  // CPU: current/avg[min~max]
+                     gpuTimeMs, avgGpuTimeMs_, minGpuTimeMs_, maxGpuTimeMs_,      // GPU: current/avg[min~max]
+                     accumStr,
+                     swapchainExtent_.width, swapchainExtent_.height,
+                     currentFrame_,
+                     RESET);
         framesThisSecond_ = 0;
         lastFPSTime_ = now;
-    } else {
-        ++framesThisSecond_;
+
+        // Reset min/max every second for fresh stats
+        minFrameTimeMs_ = std::numeric_limits<float>::max();
+        maxFrameTimeMs_ = 0.0f;
+        minGpuTimeMs_ = std::numeric_limits<float>::max();
+        maxGpuTimeMs_ = 0.0f;
     }
 
-    LOG_DEBUG_CAT("FRAME", "{}renderFrame() – END{}", EMERALD_GREEN, RESET);
+    currentFrame_ = (currentFrame_ + 1) % MAX_FRAMES_IN_FLIGHT;
+    currentRTIndex_ = (currentRTIndex_ + 1) % 2;
+    currentAccumIndex_ = (currentAccumIndex_ + 1) % 2;
 }
 
-void VulkanRenderer::createFramebuffers() {
-    LOG_INFO_CAT("FB", "{}createFramebuffers() – START ({} images){}", OCEAN_TEAL, swapchainImageViews_.size(), RESET);
+// =============================================================================
+// HANDLE RESIZE
+// =============================================================================
+void VulkanRenderer::handleResize(int newWidth, int newHeight) {
+    if (newWidth == 0 || newHeight == 0) return;
 
-    framebuffers_.resize(swapchainImageViews_.size());
-    for (size_t i = 0; i < swapchainImageViews_.size(); ++i) {
-        VkImageView attachments[] = { swapchainImageViews_[i] };
+    vkDeviceWaitIdle(context_->device);
 
-        VkFramebufferCreateInfo fbInfo{
-            .sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
-            .renderPass = pipelineManager_->getRenderPass(),
-            .attachmentCount = 1,
-            .pAttachments = attachments,
-            .width = swapchainExtent_.width,
-            .height = swapchainExtent_.height,
-            .layers = 1
-        };
+    context_->destroySwapchain();
+    context_->createSwapchain();
 
-        VK_CHECK(vkCreateFramebuffer(context_->device, &fbInfo, nullptr, &framebuffers_[i]),
-                 "vkCreateFramebuffer");
+    width_ = newWidth;
+    height_ = newHeight;
+
+    swapchain_           = context_->swapchain;
+    swapchainImages_     = context_->swapchainImages;
+    swapchainImageViews_ = context_->swapchainImageViews;
+    swapchainExtent_     = context_->swapchainExtent;
+    swapchainImageFormat_= context_->swapchainImageFormat;
+
+    createRTOutputImages();
+    createAccumulationImages();
+    createFramebuffers();
+    createCommandBuffers();
+
+    rtx_->updateRTX(context_->physicalDevice, context_->commandPool, context_->graphicsQueue,
+                    bufferManager_->getGeometries(), bufferManager_->getDimensionStates());
+
+    updateRTDescriptors();
+    resetAccumulation_ = true;
+    frameNumber_ = 0;
+}
+
+// =============================================================================
+// CREATE ENVIRONMENT MAP (1x1 black texture fallback)
+// =============================================================================
+void VulkanRenderer::createEnvironmentMap() {
+    const std::vector<uint8_t> blackPixel = {0, 0, 0, 255};
+    auto cmd = VulkanInitializer::beginSingleTimeCommands(*context_);
+
+    VkImageCreateInfo ici{
+        .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .imageType = VK_IMAGE_TYPE_2D,
+        .format = VK_FORMAT_R8G8B8A8_UNORM,
+        .extent = {1, 1, 1},
+        .mipLevels = 1, .arrayLayers = 1, .samples = VK_SAMPLE_COUNT_1_BIT,
+        .tiling = VK_IMAGE_TILING_OPTIMAL,
+        .usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
+    };
+    VkImage img;
+    VK_CHECK(vkCreateImage(context_->device, &ici, nullptr, &img), "Env image");
+
+    VkMemoryRequirements req;
+    vkGetImageMemoryRequirements(context_->device, img, &req);
+    VkMemoryAllocateInfo mai{
+        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+        .allocationSize = req.size,
+        .memoryTypeIndex = findMemoryType(context_->physicalDevice, req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)
+    };
+    VkDeviceMemory mem;
+    VK_CHECK(vkAllocateMemory(context_->device, &mai, nullptr, &mem), "Env mem");
+    VK_CHECK(vkBindImageMemory(context_->device, img, mem, 0), "Bind");
+
+    transitionImageLayout(cmd, img, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                          VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, VK_ACCESS_TRANSFER_WRITE_BIT);
+
+    VkBuffer staging;
+    VkDeviceMemory stagingMem;
+    bufferManager_->createBuffer(context_->device, context_->physicalDevice, 4,
+                                 VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                                 staging, stagingMem, nullptr, *context_);
+
+    void* data;
+    vkMapMemory(context_->device, stagingMem, 0, 4, 0, &data);
+    memcpy(data, blackPixel.data(), 4);
+    vkUnmapMemory(context_->device, stagingMem);
+
+    VkBufferImageCopy copy{
+        .bufferOffset = 0,
+        .imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+        .imageExtent = {1, 1, 1}
+    };
+    vkCmdCopyBufferToImage(cmd, staging, img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+
+    transitionImageLayout(cmd, img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                          VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                          VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT);
+
+    VulkanInitializer::endSingleTimeCommands(*context_, cmd);
+
+    VkImageViewCreateInfo vci{
+        .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+        .image = img,
+        .viewType = VK_IMAGE_VIEW_TYPE_2D,
+        .format = VK_FORMAT_R8G8B8A8_UNORM,
+        .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}
+    };
+    VkImageView view;
+    VK_CHECK(vkCreateImageView(context_->device, &vci, nullptr, &view), "Env view");
+
+    VkSamplerCreateInfo sci{
+        .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+        .magFilter = VK_FILTER_LINEAR,
+        .minFilter = VK_FILTER_LINEAR,
+        .mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR,
+        .addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+        .addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+        .addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT
+    };
+    VkSampler sampler;
+    VK_CHECK(vkCreateSampler(context_->device, &sci, nullptr, &sampler), "Env sampler");
+
+    envMapImage_ = makeHandle(context_->device, img, "EnvMap");
+    envMapImageMemory_ = makeHandle(context_->device, mem, "EnvMem");
+    envMapImageView_ = makeHandle(context_->device, view, "EnvView");
+    envMapSampler_ = makeHandle(context_->device, sampler, "EnvSampler");
+
+    vkDestroyBuffer(context_->device, staging, nullptr);
+    vkFreeMemory(context_->device, stagingMem, nullptr);
+}
+
+// =============================================================================
+// STUBS
+// =============================================================================
+void VulkanRenderer::createComputeDescriptorSets() { }
+void VulkanRenderer::createFramebuffers() { }
+
+// =============================================================================
+// INITIALIZE ALL BUFFER DATA
+// =============================================================================
+void VulkanRenderer::initializeAllBufferData(uint32_t frameCount, VkDeviceSize matSize, VkDeviceSize dimSize) {
+    for (uint32_t i = 0; i < frameCount; ++i) {
+        VkBuffer rawUniform;
+        VkDeviceMemory rawUniformMem;
+        bufferManager_->createBuffer(context_->device, context_->physicalDevice,
+                                     sizeof(UniformBufferObject), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+                                     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                                     rawUniform, rawUniformMem, nullptr, *context_);
+        uniformBuffers_[i] = makeHandle(context_->device, rawUniform, "Uniform Buffer");
+        uniformBufferMemories_[i] = makeHandle(context_->device, rawUniformMem, "Uniform Memory");
     }
 
-    LOG_INFO_CAT("FB", "{}Created {} framebuffers{}", EMERALD_GREEN, framebuffers_.size(), RESET);
+    for (uint32_t i = 0; i < frameCount; ++i) {
+        VkBuffer rawMat;
+        VkDeviceMemory rawMatMem;
+        bufferManager_->createBuffer(context_->device, context_->physicalDevice,
+                                     matSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                                     VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                                     rawMat, rawMatMem, nullptr, *context_);
+        materialBuffers_[i] = makeHandle(context_->device, rawMat, "Material Buffer");
+        materialBufferMemory_[i] = makeHandle(context_->device, rawMatMem, "Material Memory");
+    }
+
+    for (uint32_t i = 0; i < frameCount; ++i) {
+        VkBuffer rawDim;
+        VkDeviceMemory rawDimMem;
+        bufferManager_->createBuffer(context_->device, context_->physicalDevice,
+                                     dimSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                                     VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                                     rawDim, rawDimMem, nullptr, *context_);
+        dimensionBuffers_[i] = makeHandle(context_->device, rawDim, "Dimension Buffer");
+        dimensionBufferMemory_[i] = makeHandle(context_->device, rawDimMem, "Dimension Memory");
+    }
 }
 
+// =============================================================================
+// CREATE COMMAND BUFFERS
+// =============================================================================
+void VulkanRenderer::createCommandBuffers() {
+    commandBuffers_.resize(swapchainImages_.size(), VK_NULL_HANDLE);
+    if (swapchainImages_.empty()) {
+        LOG_WARN_CAT("RENDERER", "No swapchain images – skipping command buffer allocation");
+        return;
+    }
+    VkCommandBufferAllocateInfo allocInfo{
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .commandPool = context_->commandPool,
+        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+        .commandBufferCount = static_cast<uint32_t>(swapchainImages_.size())
+    };
+    VK_CHECK(vkAllocateCommandBuffers(context_->device, &allocInfo, commandBuffers_.data()), "Cmd buffers");
+    LOG_INFO_CAT("RENDERER", "Command buffers allocated: {} (extent: {}x{})", swapchainImages_.size(), swapchainExtent_.width, swapchainExtent_.height);
+}
+
+// =============================================================================
+// UPDATE UNIFORM BUFFER
+// =============================================================================
+void VulkanRenderer::updateUniformBuffer(uint32_t currentImage, const Camera& camera) {
+    static auto startTime = std::chrono::high_resolution_clock::now();
+    auto currentTime = std::chrono::high_resolution_clock::now();
+    float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
+
+    UniformBufferObject ubo{};
+
+    glm::mat4 view = camera.getViewMatrix();
+    glm::mat4 proj = camera.getProjectionMatrix();
+    ubo.viewInverse = glm::inverse(view);
+    ubo.projInverse = glm::inverse(proj);
+    ubo.camPos = glm::vec4(camera.getPosition(), 1.0f);
+    ubo.time = time;
+    ubo.frame = static_cast<uint32_t>(frameNumber_);
+
+    void* data;
+    vkMapMemory(context_->device, uniformBufferMemories_[currentImage].get(), 0, sizeof(ubo), 0, &data);
+    memcpy(data, &ubo, sizeof(ubo));
+    vkUnmapMemory(context_->device, uniformBufferMemories_[currentImage].get());
+}
+
+// =============================================================================
+// CREATE RT OUTPUT IMAGES (ping-pong)
+// =============================================================================
 void VulkanRenderer::createRTOutputImages() {
-    LOG_INFO_CAT("RTX", "{}createRTOutputImages() – START{}", OCEAN_TEAL, RESET);
-
     for (int i = 0; i < 2; ++i) {
-        VkImage img = VK_NULL_HANDLE;
-        VkDeviceMemory mem = VK_NULL_HANDLE;
-        VkImageView view = VK_NULL_HANDLE;
-
-        VkImageCreateInfo imgInfo{
+        VkImageCreateInfo ici{
             .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
             .imageType = VK_IMAGE_TYPE_2D,
             .format = VK_FORMAT_R32G32B32A32_SFLOAT,
-            .extent = {swapchainExtent_.width, swapchainExtent_.height, 1},
-            .mipLevels = 1,
-            .arrayLayers = 1,
-            .samples = VK_SAMPLE_COUNT_1_BIT,
+            .extent = {static_cast<uint32_t>(width_), static_cast<uint32_t>(height_), 1},
+            .mipLevels = 1, .arrayLayers = 1, .samples = VK_SAMPLE_COUNT_1_BIT,
             .tiling = VK_IMAGE_TILING_OPTIMAL,
-            .usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+            .usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
             .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
         };
-        VK_CHECK(vkCreateImage(context_->device, &imgInfo, nullptr, &img), "RT output image");
+        VkImage img;
+        VK_CHECK(vkCreateImage(context_->device, &ici, nullptr, &img), "RT image");
 
-        VkMemoryRequirements memReq;
-        vkGetImageMemoryRequirements(context_->device, img, &memReq);
-        VkMemoryAllocateInfo alloc{
+        VkMemoryRequirements req;
+        vkGetImageMemoryRequirements(context_->device, img, &req);
+        VkMemoryAllocateInfo mai{
             .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-            .allocationSize = memReq.size,
-            .memoryTypeIndex = VulkanInitializer::findMemoryType(
-                context_->physicalDevice, memReq.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)
+            .allocationSize = req.size,
+            .memoryTypeIndex = findMemoryType(context_->physicalDevice, req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)
         };
-        VK_CHECK(vkAllocateMemory(context_->device, &alloc, nullptr, &mem), "RT mem");
-        VK_CHECK(vkBindImageMemory(context_->device, img, mem, 0), "Bind RT");
+        VkDeviceMemory mem;
+        VK_CHECK(vkAllocateMemory(context_->device, &mai, nullptr, &mem), "RT memory");
+        VK_CHECK(vkBindImageMemory(context_->device, img, mem, 0), "Bind image");
 
-        VkImageViewCreateInfo viewInfo{
+        VkImageViewCreateInfo vci{
             .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
             .image = img,
             .viewType = VK_IMAGE_VIEW_TYPE_2D,
             .format = VK_FORMAT_R32G32B32A32_SFLOAT,
             .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}
         };
-        VK_CHECK(vkCreateImageView(context_->device, &viewInfo, nullptr, &view), "RT view");
+        VkImageView view;
+        VK_CHECK(vkCreateImageView(context_->device, &vci, nullptr, &view), "RT view");
 
-        rtOutputImages_[i]   = Dispose::makeHandle(context_->device, img,   "RT Output Image");
-        rtOutputMemories_[i] = Dispose::makeHandle(context_->device, mem,  "RT Output Memory");
-        rtOutputViews_[i]    = Dispose::makeHandle(context_->device, view, "RT Output View");
+        rtOutputImages_[i] = makeHandle(context_->device, img, "RT Output");
+        rtOutputMemories_[i] = makeHandle(context_->device, mem, "RT Mem");
+        rtOutputViews_[i] = makeHandle(context_->device, view, "RT View");
 
-        VulkanInitializer::transitionImageLayout(*context_, img,
-            VK_FORMAT_R32G32B32A32_SFLOAT,
-            VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
+        auto cmd = VulkanInitializer::beginSingleTimeCommands(*context_);
+        transitionImageLayout(cmd, img,
+            VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
+            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
+            0, VK_ACCESS_SHADER_WRITE_BIT);
+        VulkanInitializer::endSingleTimeCommands(*context_, cmd);
     }
-
-    LOG_INFO_CAT("RTX", "{}RT output images created{}", EMERALD_GREEN, RESET);
 }
 
+// =============================================================================
+// CREATE ACCUMULATION IMAGES (ping-pong)
+// =============================================================================
 void VulkanRenderer::createAccumulationImages() {
-    LOG_INFO_CAT("RTX", "{}createAccumulationImages() – START{}", OCEAN_TEAL, RESET);
-
     for (int i = 0; i < 2; ++i) {
-        VkImage img = VK_NULL_HANDLE;
-        VkDeviceMemory mem = VK_NULL_HANDLE;
-        VkImageView view = VK_NULL_HANDLE;
-
-        VkImageCreateInfo imgInfo{
+        VkImageCreateInfo ici{
             .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
             .imageType = VK_IMAGE_TYPE_2D,
             .format = VK_FORMAT_R32G32B32A32_SFLOAT,
-            .extent = {swapchainExtent_.width, swapchainExtent_.height, 1},
-            .mipLevels = 1,
-            .arrayLayers = 1,
-            .samples = VK_SAMPLE_COUNT_1_BIT,
+            .extent = {static_cast<uint32_t>(width_), static_cast<uint32_t>(height_), 1},
+            .mipLevels = 1, .arrayLayers = 1, .samples = VK_SAMPLE_COUNT_1_BIT,
             .tiling = VK_IMAGE_TILING_OPTIMAL,
             .usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
             .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
         };
-        VK_CHECK(vkCreateImage(context_->device, &imgInfo, nullptr, &img), "Accum image");
+        VkImage img;
+        VK_CHECK(vkCreateImage(context_->device, &ici, nullptr, &img), "Accum image");
 
-        VkMemoryRequirements memReq;
-        vkGetImageMemoryRequirements(context_->device, img, &memReq);
-        VkMemoryAllocateInfo alloc{
+        VkMemoryRequirements req;
+        vkGetImageMemoryRequirements(context_->device, img, &req);
+        VkMemoryAllocateInfo mai{
             .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-            .allocationSize = memReq.size,
-            .memoryTypeIndex = VulkanInitializer::findMemoryType(
-                context_->physicalDevice, memReq.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)
+            .allocationSize = req.size,
+            .memoryTypeIndex = findMemoryType(context_->physicalDevice, req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)
         };
-        VK_CHECK(vkAllocateMemory(context_->device, &alloc, nullptr, &mem), "Accum mem");
-        VK_CHECK(vkBindImageMemory(context_->device, img, mem, 0), "Bind accum");
+        VkDeviceMemory mem;
+        VK_CHECK(vkAllocateMemory(context_->device, &mai, nullptr, &mem), "Accum memory");
+        VK_CHECK(vkBindImageMemory(context_->device, img, mem, 0), "Bind image");
 
-        VkImageViewCreateInfo viewInfo{
+        VkImageViewCreateInfo vci{
             .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
             .image = img,
             .viewType = VK_IMAGE_VIEW_TYPE_2D,
             .format = VK_FORMAT_R32G32B32A32_SFLOAT,
             .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}
         };
-        VK_CHECK(vkCreateImageView(context_->device, &viewInfo, nullptr, &view), "Accum view");
+        VkImageView view;
+        VK_CHECK(vkCreateImageView(context_->device, &vci, nullptr, &view), "Accum view");
 
-        accumImages_[i] = Dispose::makeHandle(context_->device, img, "Accum Image");
-        accumMemories_[i] = Dispose::makeHandle(context_->device, mem, "Accum Memory");
-        accumViews_[i] = Dispose::makeHandle(context_->device, view, "Accum View");
+        accumImages_[i] = makeHandle(context_->device, img, "Accum Image");
+        accumMemories_[i] = makeHandle(context_->device, mem, "Accum Mem");
+        accumViews_[i] = makeHandle(context_->device, view, "Accum View");
 
-        VulkanInitializer::transitionImageLayout(*context_, img,
-            VK_FORMAT_R32G32B32A32_SFLOAT,
-            VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
+        auto cmd = VulkanInitializer::beginSingleTimeCommands(*context_);
+        transitionImageLayout(cmd, img,
+            VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
+            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
+            0, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
+        VulkanInitializer::endSingleTimeCommands(*context_, cmd);
     }
-
-    LOG_INFO_CAT("RTX", "{}Accumulation images created{}", EMERALD_GREEN, RESET);
 }
 
-void VulkanRenderer::createComputeDescriptorSets() {
-    LOG_INFO_CAT("DESC", "{}createComputeDescriptorSets() – START{}", OCEAN_TEAL, RESET);
-
-    std::vector<VkDescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, computeDescriptorSetLayout_);
-    VkDescriptorSetAllocateInfo alloc{
-        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
-        .descriptorPool = descriptorPool_.get(),
-        .descriptorSetCount = MAX_FRAMES_IN_FLIGHT,
-        .pSetLayouts = layouts.data()
-    };
-
-    std::array<VkDescriptorSet, MAX_FRAMES_IN_FLIGHT> rawSets{};
-    VK_CHECK(vkAllocateDescriptorSets(context_->device, &alloc, rawSets.data()),
-             "Allocate compute descriptor sets");
-
-    for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
-        computeDescriptorSets_[i] = rawSets[i];
-    }
-
-    LOG_INFO_CAT("DESC", "{}Compute descriptor sets allocated{}", EMERALD_GREEN, RESET);
-}
-
+// =============================================================================
+// UPDATE RT DESCRIPTORS
+// =============================================================================
 void VulkanRenderer::updateRTDescriptors() {
-    if (tlasHandle_ == VK_NULL_HANDLE || rtxDescriptorSet_ == VK_NULL_HANDLE) {
-        LOG_WARN_CAT("DESC", "{}updateRTDescriptors() – TLAS or set missing{}", AMBER_YELLOW, RESET);
-        return;
-    }
-
+    VkAccelerationStructureKHR tlas = rtx_->getTLAS();
     VkWriteDescriptorSetAccelerationStructureKHR asWrite{
         .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR,
         .accelerationStructureCount = 1,
-        .pAccelerationStructures = &tlasHandle_
+        .pAccelerationStructures = &tlas
     };
 
     VkDescriptorImageInfo outInfo{
         .imageView = rtOutputViews_[currentRTIndex_].get(),
         .imageLayout = VK_IMAGE_LAYOUT_GENERAL
     };
+    VkDescriptorImageInfo accumInfo{
+        .imageView = accumViews_[currentAccumIndex_].get(),
+        .imageLayout = VK_IMAGE_LAYOUT_GENERAL
+    };
     VkDescriptorBufferInfo uboInfo{
         .buffer = uniformBuffers_[currentFrame_].get(),
-        .range = VK_WHOLE_SIZE
-    };
-    VkDescriptorBufferInfo matInfo{
-        .buffer = materialBuffers_[currentFrame_].get(),
-        .range = VK_WHOLE_SIZE
-    };
-    VkDescriptorBufferInfo dimInfo{
-        .buffer = dimensionBuffers_[currentFrame_].get(),
+        .offset = 0,
         .range = VK_WHOLE_SIZE
     };
     VkDescriptorImageInfo envInfo{
@@ -945,606 +719,126 @@ void VulkanRenderer::updateRTDescriptors() {
         .imageView = envMapImageView_.get(),
         .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
     };
-    VkDescriptorImageInfo accumInfo{
-        .imageView = accumViews_[currentAccumIndex_].get(),
-        .imageLayout = VK_IMAGE_LAYOUT_GENERAL
-    };
 
-    std::array<VkWriteDescriptorSet, 7> writes{{
-        {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .pNext = &asWrite,
-         .dstSet = rtxDescriptorSet_, .dstBinding = 0, .descriptorCount = 1,
-         .descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR},
-        {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-         .dstSet = rtxDescriptorSet_, .dstBinding = 1, .descriptorCount = 1,
-         .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, .pImageInfo = &outInfo},
-        {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-         .dstSet = rtxDescriptorSet_, .dstBinding = 2, .descriptorCount = 1,
-         .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, .pBufferInfo = &uboInfo},
-        {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-         .dstSet = rtxDescriptorSet_, .dstBinding = 3, .descriptorCount = 1,
-         .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, .pBufferInfo = &matInfo},
-        {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-         .dstSet = rtxDescriptorSet_, .dstBinding = 4, .descriptorCount = 1,
-         .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, .pBufferInfo = &dimInfo},
-        {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-         .dstSet = rtxDescriptorSet_, .dstBinding = 5, .descriptorCount = 1,
-         .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .pImageInfo = &envInfo},
-        {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-         .dstSet = rtxDescriptorSet_, .dstBinding = 6, .descriptorCount = 1,
-         .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, .pImageInfo = &accumInfo}
+    std::array<VkWriteDescriptorSet, 5> writes = {{
+        {
+            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .pNext = &asWrite,
+            .dstSet = rtxDescriptorSet_,
+            .dstBinding = 0,
+            .dstArrayElement = 0,
+            .descriptorCount = 1,
+            .descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR
+        },
+        {
+            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .dstSet = rtxDescriptorSet_,
+            .dstBinding = 1,
+            .dstArrayElement = 0,
+            .descriptorCount = 1,
+            .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+            .pImageInfo = &outInfo
+        },
+        {
+            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .dstSet = rtxDescriptorSet_,
+            .dstBinding = 2,
+            .dstArrayElement = 0,
+            .descriptorCount = 1,
+            .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+            .pBufferInfo = &uboInfo
+        },
+        {
+            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .dstSet = rtxDescriptorSet_,
+            .dstBinding = 5,
+            .dstArrayElement = 0,
+            .descriptorCount = 1,
+            .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            .pImageInfo = &envInfo
+        },
+        {
+            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .dstSet = rtxDescriptorSet_,
+            .dstBinding = 6,
+            .dstArrayElement = 0,
+            .descriptorCount = 1,
+            .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+            .pImageInfo = &accumInfo
+        }
     }};
 
     vkUpdateDescriptorSets(context_->device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
-    descriptorsUpdated_ = true;
-
-    LOG_DEBUG_CAT("DESC", "{}RT descriptors updated{}", EMERALD_GREEN, RESET);
 }
 
-void VulkanRenderer::updateComputeDescriptors(uint32_t frameIdx) {
-    VkDescriptorImageInfo rtInfo{
-        .imageView = rtOutputViews_[currentRTIndex_].get(),
-        .imageLayout = VK_IMAGE_LAYOUT_GENERAL
-    };
-    VkDescriptorImageInfo accumInfo{
-        .imageView = accumViews_[currentAccumIndex_].get(),
-        .imageLayout = VK_IMAGE_LAYOUT_GENERAL
-    };
-    VkDescriptorBufferInfo uboInfo{
-        .buffer = uniformBuffers_[frameIdx].get(),
-        .range = VK_WHOLE_SIZE
-    };
+// =============================================================================
+// TRANSITION & BLIT
+// =============================================================================
+void VulkanRenderer::transitionImageLayout(VkCommandBuffer cmd, VkImage image,
+                                           VkImageLayout oldLayout, VkImageLayout newLayout,
+                                           VkPipelineStageFlags srcStage, VkPipelineStageFlags dstStage,
+                                           VkAccessFlags srcAccess, VkAccessFlags dstAccess,
+                                           VkImageAspectFlags aspect) {
+    VkImageMemoryBarrier barrier = {};
+    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    barrier.oldLayout = oldLayout;
+    barrier.newLayout = newLayout;
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.image = image;
+    barrier.subresourceRange.aspectMask = aspect;
+    barrier.subresourceRange.baseMipLevel = 0;
+    barrier.subresourceRange.levelCount = 1;
+    barrier.subresourceRange.baseArrayLayer = 0;
+    barrier.subresourceRange.layerCount = 1;
+    barrier.srcAccessMask = srcAccess;
+    barrier.dstAccessMask = dstAccess;
 
-    std::array<VkWriteDescriptorSet, 3> writes{{
-        {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-         .dstSet = computeDescriptorSets_[frameIdx],
-         .dstBinding = 0, .descriptorCount = 1,
-         .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, .pImageInfo = &rtInfo},
-        {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-         .dstSet = computeDescriptorSets_[frameIdx],
-         .dstBinding = 1, .descriptorCount = 1,
-         .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, .pImageInfo = &accumInfo},
-        {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-         .dstSet = computeDescriptorSets_[frameIdx],
-         .dstBinding = 2, .descriptorCount = 1,
-         .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, .pBufferInfo = &uboInfo}
-    }};
-
-    vkUpdateDescriptorSets(context_->device, 3, writes.data(), 0, nullptr);
+    vkCmdPipelineBarrier(cmd, srcStage, dstStage, 0, 0, nullptr, 0, nullptr, 1, &barrier);
 }
 
-void VulkanRenderer::updateComputeDescriptorSet(uint32_t frameIdx) {
-    updateComputeDescriptors(frameIdx);
+void VulkanRenderer::blitRTOutputToSwapchain(VkCommandBuffer cmd, uint32_t imageIndex) {
+    VkImage swapImg = swapchainImages_[imageIndex];
+
+    transitionImageLayout(cmd, rtOutputImages_[currentRTIndex_].get(),
+        VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, VK_PIPELINE_STAGE_TRANSFER_BIT,
+        VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT);
+
+    transitionImageLayout(cmd, swapImg,
+        VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+        0, VK_ACCESS_TRANSFER_WRITE_BIT);
+
+    VkImageBlit blit = {};
+    blit.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+    blit.srcOffsets[1] = {static_cast<int32_t>(width_), static_cast<int32_t>(height_), 1};
+    blit.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+    blit.dstOffsets[1] = {static_cast<int32_t>(width_), static_cast<int32_t>(height_), 1};
+
+    vkCmdBlitImage(cmd,
+        rtOutputImages_[currentRTIndex_].get(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        swapImg, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        1, &blit, VK_FILTER_NEAREST);
+
+    transitionImageLayout(cmd, swapImg,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+        VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+        VK_ACCESS_TRANSFER_WRITE_BIT, 0);
 }
 
-/* -----------------------------------------------------------------
-   initializeAllBufferData – per-frame UBOs, Material, Dimension
-   ----------------------------------------------------------------- */
-void VulkanRenderer::initializeAllBufferData(uint32_t maxFrames,
-                                             VkDeviceSize materialSize,
-                                             VkDeviceSize dimensionSize)
-{
-    LOG_INFO_CAT("BUFFERS", "{}initializeAllBufferData() – START ({} frames){}", OCEAN_TEAL, maxFrames, RESET);
-
-    for (uint32_t i = 0; i < maxFrames; ++i) {
-        // --- UBO ---
-        VkBuffer uboBuffer = VK_NULL_HANDLE;
-        VkDeviceMemory uboMemory = VK_NULL_HANDLE;
-        VulkanBufferManager::createBuffer(context_->device, context_->physicalDevice,
-            sizeof(UniformBufferObject),
-            VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-            uboBuffer, uboMemory, nullptr, *context_);
-
-        uniformBuffers_[i] = makeHandle(context_->device, uboBuffer, "UBO");
-        uniformBufferMemories_[i] = makeHandle(context_->device, uboMemory, "UBO Memory");
-
-        // --- Material SSBO ---
-        VkBuffer matBuffer = VK_NULL_HANDLE;
-        VkDeviceMemory matMemory = VK_NULL_HANDLE;
-        VulkanBufferManager::createBuffer(context_->device, context_->physicalDevice,
-            materialSize,
-            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-            matBuffer, matMemory, nullptr, *context_);
-
-        materialBuffers_[i] = makeHandle(context_->device, matBuffer, "Material SSBO");
-        materialBufferMemory_[i] = makeHandle(context_->device, matMemory, "Material Memory");
-
-        // --- Dimension SSBO ---
-        VkBuffer dimBuffer = VK_NULL_HANDLE;
-        VkDeviceMemory dimMemory = VK_NULL_HANDLE;
-        VulkanBufferManager::createBuffer(context_->device, context_->physicalDevice,
-            dimensionSize,
-            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-            dimBuffer, dimMemory, nullptr, *context_);
-
-        dimensionBuffers_[i] = makeHandle(context_->device, dimBuffer, "Dimension SSBO");
-        dimensionBufferMemory_[i] = makeHandle(context_->device, dimMemory, "Dimension Memory");
-    }
-
-    LOG_INFO_CAT("BUFFERS", "{}All per-frame buffers initialized{}", EMERALD_GREEN, RESET);
-}
-
-void VulkanRenderer::createEnvironmentMap() {
-    LOG_INFO_CAT("ENV", "{}createEnvironmentMap() – START{}", OCEAN_TEAL, RESET);
-
-    int w, h, c;
-    stbi_set_flip_vertically_on_load(false);
-    float* pixels = stbi_loadf("assets/textures/envmap.hdr", &w, &h, &c, 4);
-    if (!pixels) {
-        LOG_ERROR_CAT("ENV", "{}Failed to load envmap.hdr{}", CRIMSON_MAGENTA, RESET);
-        throw std::runtime_error("Failed to load environment map");
-    }
-
-    VkDeviceSize imageSize = static_cast<VkDeviceSize>(w) * h * 4 * sizeof(float);
-
-    // Create staging buffer
-    VkBuffer stagingBuffer = VK_NULL_HANDLE;
-    VkDeviceMemory stagingMemory = VK_NULL_HANDLE;
-    VulkanBufferManager::createBuffer(
-        context_->device, context_->physicalDevice,
-        imageSize,
-        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-        stagingBuffer, stagingMemory, nullptr, *context_);
-
-    // Upload pixel data
-    void* data;
-    VK_CHECK(vkMapMemory(context_->device, stagingMemory, 0, imageSize, 0, &data), "Map staging");
-    memcpy(data, pixels, static_cast<size_t>(imageSize));
-    vkUnmapMemory(context_->device, stagingMemory);
-    stbi_image_free(pixels);
-
-    // Create image
-    VkImage envImage = VK_NULL_HANDLE;
-    VkDeviceMemory envMemory = VK_NULL_HANDLE;
-    VkImageView envView = VK_NULL_HANDLE;
-    VkSampler envSampler = VK_NULL_HANDLE;
-
-    VkImageCreateInfo imgInfo{
-        .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-        .imageType = VK_IMAGE_TYPE_2D,
-        .format = VK_FORMAT_R32G32B32A32_SFLOAT,
-        .extent = {static_cast<uint32_t>(w), static_cast<uint32_t>(h), 1},
-        .mipLevels = 1,
-        .arrayLayers = 1,
-        .samples = VK_SAMPLE_COUNT_1_BIT,
-        .tiling = VK_IMAGE_TILING_OPTIMAL,
-        .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
-    };
-    VK_CHECK(vkCreateImage(context_->device, &imgInfo, nullptr, &envImage), "Env image");
-
-    VkMemoryRequirements memReq;
-    vkGetImageMemoryRequirements(context_->device, envImage, &memReq);
-    VkMemoryAllocateInfo alloc{
-        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-        .allocationSize = memReq.size,
-        .memoryTypeIndex = VulkanInitializer::findMemoryType(
-            context_->physicalDevice, memReq.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)
-    };
-    VK_CHECK(vkAllocateMemory(context_->device, &alloc, nullptr, &envMemory), "Env mem");
-    VK_CHECK(vkBindImageMemory(context_->device, envImage, envMemory, 0), "Bind env");
-
-    // Transition to TRANSFER_DST
-    VulkanInitializer::transitionImageLayout(*context_, envImage,
-        VK_FORMAT_R32G32B32A32_SFLOAT,
-        VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-
-    // Copy buffer to image
-    VkCommandBuffer cmd;
-    VkCommandBufferAllocateInfo cmdAlloc{
-        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-        .commandPool = context_->commandPool,
-        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-        .commandBufferCount = 1
-    };
-    VK_CHECK(vkAllocateCommandBuffers(context_->device, &cmdAlloc, &cmd), "Alloc env cmd");
-
-    VkCommandBufferBeginInfo begin{.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-                                   .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT};
-    VK_CHECK(vkBeginCommandBuffer(cmd, &begin), "Begin env cmd");
-
-    VkBufferImageCopy region{
-        .imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
-        .imageExtent = {static_cast<uint32_t>(w), static_cast<uint32_t>(h), 1}
-    };
-    vkCmdCopyBufferToImage(cmd, stagingBuffer, envImage,
-                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
-
-    // Transition to SHADER_READ
-    VulkanInitializer::transitionImageLayout(*context_, envImage,
-        VK_FORMAT_R32G32B32A32_SFLOAT,
-        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-
-    VK_CHECK(vkEndCommandBuffer(cmd), "End env cmd");
-
-    VkSubmitInfo submit{
-        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-        .commandBufferCount = 1,
-        .pCommandBuffers = &cmd
-    };
-    VK_CHECK(vkQueueSubmit(context_->graphicsQueue, 1, &submit, VK_NULL_HANDLE), "Submit env");
-    vkQueueWaitIdle(context_->graphicsQueue);
-
-    // Cleanup staging
-    vkFreeCommandBuffers(context_->device, context_->commandPool, 1, &cmd);
-    vkDestroyBuffer(context_->device, stagingBuffer, nullptr);
-    vkFreeMemory(context_->device, stagingMemory, nullptr);
-
-    // Create view
-    VkImageViewCreateInfo viewInfo{
-        .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-        .image = envImage,
-        .viewType = VK_IMAGE_VIEW_TYPE_2D,
-        .format = VK_FORMAT_R32G32B32A32_SFLOAT,
-        .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}
-    };
-    VK_CHECK(vkCreateImageView(context_->device, &viewInfo, nullptr, &envView), "Env view");
-
-    // Create sampler
-    VkSamplerCreateInfo samplerInfo{
-        .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
-        .magFilter = VK_FILTER_LINEAR,
-        .minFilter = VK_FILTER_LINEAR,
-        .mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR,
-        .addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
-        .addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
-        .addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
-        .maxAnisotropy = 1.0f
-    };
-    VK_CHECK(vkCreateSampler(context_->device, &samplerInfo, nullptr, &envSampler), "Env sampler");
-
-    // Assign RAII handles
-    envMapImage_ = Dispose::makeHandle(context_->device, envImage, "EnvMap Image");
-    envMapImageMemory_ = Dispose::makeHandle(context_->device, envMemory, "EnvMap Memory");
-    envMapImageView_ = Dispose::makeHandle(context_->device, envView, "EnvMap View");
-    envMapSampler_ = Dispose::makeHandle(context_->device, envSampler, "EnvMap Sampler");
-
-    LOG_INFO_CAT("ENV", "{}Environment map loaded: {}x{}{}", EMERALD_GREEN, w, h, RESET);
-}
-
-void VulkanRenderer::buildAccelerationStructures() {
-    LOG_INFO_CAT("AS", "buildAccelerationStructures() – START", OCEAN_TEAL, RESET);
-
-    if (vertices_.empty() || indices_.empty()) {
-        LOG_ERROR_CAT("AS", "No mesh data! Using fallback cube.", CRIMSON_MAGENTA, RESET);
-        // Still upload fallback cube if somehow empty
-        vertices_ = {/* same as above */};
-        indices_  = {/* same as above */};
-    }
-
-    LOG_INFO_CAT("AS", "Uploading mesh: {} verts, {} indices", OCEAN_TEAL,
-                 vertices_.size(), indices_.size(), RESET);
-
-    bufferManager_->uploadMesh(
-        vertices_.data(), static_cast<uint32_t>(vertices_.size()),
-        indices_.data(),  static_cast<uint32_t>(indices_.size())
-    );
-
-    VkBuffer vb = bufferManager_->getVertexBuffer();
-    VkBuffer ib = bufferManager_->getIndexBuffer();
-
-    if (vb == VK_NULL_HANDLE || ib == VK_NULL_HANDLE) {
-        LOG_ERROR_CAT("AS", "Failed to get buffers!", CRIMSON_MAGENTA, RESET);
-        return;
-    }
-
-    LOG_INFO_CAT("AS", "Building BLAS + TLAS via PipelineManager...", OCEAN_TEAL, RESET);
-    pipelineManager_->createAccelerationStructures(vb, ib);
-
-    tlasHandle_ = pipelineManager_->getTLAS();
-    if (tlasHandle_ == VK_NULL_HANDLE) {
-        LOG_ERROR_CAT("AS", "TLAS build failed!", CRIMSON_MAGENTA, RESET);
-        return;
-    }
-
-    LOG_INFO_CAT("AS", "TLAS built: 0x{:x}", EMERALD_GREEN,
-                 reinterpret_cast<uintptr_t>(tlasHandle_), RESET);
-
-    // FORCE UPDATE DESCRIPTORS AFTER TLAS
-    updateRTDescriptors();
-    descriptorsUpdated_ = true;
-
-    LOG_INFO_CAT("AS", "buildAccelerationStructures() – COMPLETE", OCEAN_TEAL, RESET);
-}
-
-/* -----------------------------------------------------------------
-   updateDescriptorSetForTLAS
-   ----------------------------------------------------------------- */
-void VulkanRenderer::updateDescriptorSetForTLAS(VkAccelerationStructureKHR tlas) {
-    if (tlas == VK_NULL_HANDLE || rtxDescriptorSet_ == VK_NULL_HANDLE) {
-        LOG_WARN_CAT("DESC", "{}updateDescriptorSetForTLAS() – null handle{}", AMBER_YELLOW, RESET);
-        return;
-    }
-
-    VkWriteDescriptorSetAccelerationStructureKHR asWrite{
-        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR,
-        .accelerationStructureCount = 1,
-        .pAccelerationStructures = &tlas
-    };
-
-    VkWriteDescriptorSet write{
-        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        .pNext = &asWrite,
-        .dstSet = rtxDescriptorSet_,
-        .dstBinding = static_cast<uint32_t>(DescriptorBindings::TLAS),
-        .descriptorCount = 1,
-        .descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR
-    };
-
-    vkUpdateDescriptorSets(context_->device, 1, &write, 0, nullptr);
-    tlasHandle_ = tlas;
-
-    LOG_INFO_CAT("DESC", "{}TLAS descriptor updated: 0x{:x}{}", EMERALD_GREEN, reinterpret_cast<uintptr_t>(tlas), RESET);
-}
-
-/* -----------------------------------------------------------------
-   updateGraphicsDescriptorSet
-   ----------------------------------------------------------------- */
-void VulkanRenderer::updateGraphicsDescriptorSet(uint32_t frameIndex) {
-    // Placeholder – used for future raster passes
-    LOG_DEBUG_CAT("DESC", "{}updateGraphicsDescriptorSet({}) – stub{}", OCEAN_TEAL, frameIndex, RESET);
-}
-
-/* -----------------------------------------------------------------
-   createCommandBuffers
-   ----------------------------------------------------------------- */
-void VulkanRenderer::createCommandBuffers() {
-    commandBuffers_.resize(swapchainImageViews_.size());
-
-    VkCommandBufferAllocateInfo allocInfo{
-        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-        .commandPool = context_->commandPool,
-        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-        .commandBufferCount = static_cast<uint32_t>(commandBuffers_.size())
-    };
-
-    VK_CHECK(vkAllocateCommandBuffers(context_->device, &allocInfo, commandBuffers_.data()),
-             "Allocate command buffers");
-
-    LOG_INFO_CAT("CMDBUF", "{}Allocated {} command buffers{}", EMERALD_GREEN, commandBuffers_.size(), RESET);
-}
-
-/* -----------------------------------------------------------------
-   cleanup – manual cleanup for non-RAII resources
-   ----------------------------------------------------------------- */
+// =============================================================================
+// CLEANUP
+// =============================================================================
 void VulkanRenderer::cleanup() noexcept {
-    LOG_INFO_CAT("CLEANUP", "{}VulkanRenderer::cleanup() – manual cleanup{}", CRIMSON_MAGENTA, RESET);
-
     vkDeviceWaitIdle(context_->device);
-
-    // Query pools
-    for (auto pool : queryPools_) {
-        if (pool != VK_NULL_HANDLE) {
-            vkDestroyQueryPool(context_->device, pool, nullptr);
-        }
-    }
-    queryPools_.clear();
-
-    // Semaphores & Fences
+    for (auto p : queryPools_) if (p) vkDestroyQueryPool(context_->device, p, nullptr);
     for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
         if (imageAvailableSemaphores_[i]) vkDestroySemaphore(context_->device, imageAvailableSemaphores_[i], nullptr);
         if (renderFinishedSemaphores_[i]) vkDestroySemaphore(context_->device, renderFinishedSemaphores_[i], nullptr);
         if (inFlightFences_[i]) vkDestroyFence(context_->device, inFlightFences_[i], nullptr);
     }
-
-    // Framebuffers (raw handles)
-    for (auto fb : framebuffers_) {
-        if (fb != VK_NULL_HANDLE) vkDestroyFramebuffer(context_->device, fb, nullptr);
-    }
-    framebuffers_.clear();
-
-    // Swapchain image views (raw handles)
-    for (auto view : swapchainImageViews_) {
-        if (view != VK_NULL_HANDLE) vkDestroyImageView(context_->device, view, nullptr);
-    }
-    swapchainImageViews_.clear();
-
-    // Swapchain
-    if (swapchain_ != VK_NULL_HANDLE) {
-        vkDestroySwapchainKHR(context_->device, swapchain_, nullptr);
-        swapchain_ = VK_NULL_HANDLE;
-    }
-
-    // RTX component
     rtx_.reset();
-
-    LOG_INFO_CAT("CLEANUP", "{}Manual cleanup complete{}", EMERALD_GREEN, RESET);
 }
 
-/* -----------------------------------------------------------------
-   applyResize – internal resize helper
-   ----------------------------------------------------------------- */
-void VulkanRenderer::applyResize(int newWidth, int newHeight) {
-    if (newWidth <= 0 || newHeight <= 0) return;
-
-    width_ = newWidth;
-    height_ = newHeight;
-
-    recreateSwapchain(newWidth, newHeight);
-    createRTOutputImages();
-    createAccumulationImages();
-    createFramebuffers();
-
-    resetAccumulation_ = true;
-    descriptorsUpdated_ = false;
-
-    LOG_INFO_CAT("RESIZE", "{}Applied resize: {}x{}{}", OCEAN_TEAL, newWidth, newHeight, RESET);
-}
-
-void VulkanRenderer::updateUniformBuffer(uint32_t frameIdx, const Camera& cam) {
-    UniformBufferObject ubo{};
-    ubo.viewInverse = glm::inverse(cam.getViewMatrix());
-    ubo.projInverse = glm::inverse(cam.getProjectionMatrix());
-    ubo.camPos = glm::vec4(cam.getPosition(), 1.0f);
-    ubo.time = 0.0f;
-    ubo.frame = frameCount_;
-
-    void* data;
-    VK_CHECK(vkMapMemory(context_->device,
-                         uniformBufferMemories_[frameIdx].get(),
-                         0, sizeof(ubo), 0, &data), "Map UBO");
-    memcpy(data, &ubo, sizeof(ubo));
-    vkUnmapMemory(context_->device, uniformBufferMemories_[frameIdx].get());
-}
-
-/* -----------------------------------------------------------------
-   dispatchRenderMode – stub (for future hybrid modes)
-   ----------------------------------------------------------------- */
-void VulkanRenderer::dispatchRenderMode(
-    uint32_t imageIndex,
-    VkBuffer vertexBuffer,
-    VkCommandBuffer cmd,
-    VkBuffer indexBuffer,
-    float time,
-    int width,
-    int height,
-    float fov,
-    VkPipelineLayout pipelineLayout,
-    VkDescriptorSet descriptorSet,
-    VkDevice device,
-    VkPipelineCache pipelineCache,
-    VkPipeline pipeline,
-    float deltaTime,
-    VkRenderPass renderPass,
-    VkFramebuffer framebuffer,
-    const Vulkan::Context& context,
-    int mode)
-{
-    LOG_WARN_CAT("RENDER", "{}dispatchRenderMode({}) – not implemented{}", AMBER_YELLOW, mode, RESET);
-    // Future: raster, compute, hybrid
-}
-
-/* -----------------------------------------------------------------
-   setRenderMode – Update render mode (fixes FPS log update issue)
-   ----------------------------------------------------------------- */
-void VulkanRenderer::setRenderMode(int mode) {
-    if (mode < 1 || mode > 9) {
-        LOG_WARNING_CAT("RENDERER", "Invalid render mode {} ignored (must be 1-9)", mode);
-        return;
-    }
-    if (currentMode_ != mode) {
-        currentMode_ = mode;
-        LOG_INFO_CAT("RENDERER", "Render mode switched to {}", currentMode_);
-        // Reset accumulation on mode change to avoid artifacts
-        resetAccumulation_ = true;
-        // Update descriptors or other mode-specific state if needed
-        updateRTDescriptors();
-    }
-}
-
-/* -----------------------------------------------------------------
-   recreateRTOutputImage / recreateAccumulationImage
-   ----------------------------------------------------------------- */
-void VulkanRenderer::recreateRTOutputImage() {
-    rtOutputImages_[currentRTIndex_].reset();
-    rtOutputMemories_[currentRTIndex_].reset();
-    rtOutputViews_[currentRTIndex_].reset();
-
-    VkImage img = VK_NULL_HANDLE;
-    VkDeviceMemory mem = VK_NULL_HANDLE;
-    VkImageView view = VK_NULL_HANDLE;
-
-    VkImageCreateInfo imgInfo{
-        .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-        .imageType = VK_IMAGE_TYPE_2D,
-        .format = VK_FORMAT_R32G32B32A32_SFLOAT,
-        .extent = {swapchainExtent_.width, swapchainExtent_.height, 1},
-        .mipLevels = 1,
-        .arrayLayers = 1,
-        .samples = VK_SAMPLE_COUNT_1_BIT,
-        .tiling = VK_IMAGE_TILING_OPTIMAL,
-        .usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
-        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
-    };
-    VK_CHECK(vkCreateImage(context_->device, &imgInfo, nullptr, &img), "Recreate RT output");
-
-    VkMemoryRequirements memReq;
-    vkGetImageMemoryRequirements(context_->device, img, &memReq);
-    VkMemoryAllocateInfo alloc{
-        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-        .allocationSize = memReq.size,
-        .memoryTypeIndex = findMemoryType(context_->physicalDevice, memReq.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)
-    };
-    VK_CHECK(vkAllocateMemory(context_->device, &alloc, nullptr, &mem), "Recreate RT mem");
-    VK_CHECK(vkBindImageMemory(context_->device, img, mem, 0), "Bind RT");
-
-    VkImageViewCreateInfo viewInfo{
-        .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-        .image = img,
-        .viewType = VK_IMAGE_VIEW_TYPE_2D,
-        .format = VK_FORMAT_R32G32B32A32_SFLOAT,
-        .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}
-    };
-    VK_CHECK(vkCreateImageView(context_->device, &viewInfo, nullptr, &view), "Recreate RT view");
-
-    rtOutputImages_[currentRTIndex_]   = makeHandle(context_->device, img,   "RT Output Recreated");
-    rtOutputMemories_[currentRTIndex_] = makeHandle(context_->device, mem,  "RT Mem Recreated");
-    rtOutputViews_[currentRTIndex_]    = makeHandle(context_->device, view, "RT View Recreated");
-
-    VulkanInitializer::transitionImageLayout(*context_, img,
-        VK_FORMAT_R32G32B32A32_SFLOAT,
-        VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
-}
-
-void VulkanRenderer::recreateAccumulationImage() {
-    accumImages_[currentAccumIndex_].reset();
-    accumMemories_[currentAccumIndex_].reset();
-    accumViews_[currentAccumIndex_].reset();
-
-    VkImage img = VK_NULL_HANDLE;
-    VkDeviceMemory mem = VK_NULL_HANDLE;
-    VkImageView view = VK_NULL_HANDLE;
-
-    VkImageCreateInfo imgInfo{
-        .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-        .imageType = VK_IMAGE_TYPE_2D,
-        .format = VK_FORMAT_R32G32B32A32_SFLOAT,
-        .extent = {swapchainExtent_.width, swapchainExtent_.height, 1},
-        .mipLevels = 1,
-        .arrayLayers = 1,
-        .samples = VK_SAMPLE_COUNT_1_BIT,
-        .tiling = VK_IMAGE_TILING_OPTIMAL,
-        .usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
-    };
-    VK_CHECK(vkCreateImage(context_->device, &imgInfo, nullptr, &img), "Recreate accum");
-
-    VkMemoryRequirements memReq;
-    vkGetImageMemoryRequirements(context_->device, img, &memReq);
-    VkMemoryAllocateInfo alloc{
-        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-        .allocationSize = memReq.size,
-        .memoryTypeIndex = findMemoryType(context_->physicalDevice, memReq.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)
-    };
-    VK_CHECK(vkAllocateMemory(context_->device, &alloc, nullptr, &mem), "Recreate accum mem");
-    VK_CHECK(vkBindImageMemory(context_->device, img, mem, 0), "Bind accum");
-
-    VkImageViewCreateInfo viewInfo{
-        .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-        .image = img,
-        .viewType = VK_IMAGE_VIEW_TYPE_2D,
-        .format = VK_FORMAT_R32G32B32A32_SFLOAT,
-        .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}
-    };
-    VK_CHECK(vkCreateImageView(context_->device, &viewInfo, nullptr, &view), "Recreate accum view");
-
-    accumImages_[currentAccumIndex_] = makeHandle(context_->device, img, "Accum Recreated");
-    accumMemories_[currentAccumIndex_] = makeHandle(context_->device, mem, "Accum Mem Recreated");
-    accumViews_[currentAccumIndex_] = makeHandle(context_->device, view, "Accum View Recreated");
-
-    VulkanInitializer::transitionImageLayout(*context_, img,
-        VK_FORMAT_R32G32B32A32_SFLOAT,
-        VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
-}
-
-const std::vector<glm::vec3>& VulkanRenderer::getVertices() const {
-    return vertices_;
-}
-
-const std::vector<uint32_t>& VulkanRenderer::getIndices() const {
-    return indices_;
-}
 } // namespace VulkanRTX

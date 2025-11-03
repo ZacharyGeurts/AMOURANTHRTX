@@ -2,6 +2,9 @@
 // AMOURANTH RTX Engine (C) 2025 by Zachary Geurts
 // FINAL: cleanup() added, RAII safe, matches main.cpp call
 // LOVE: Every lifecycle event logged in neon teal glory
+// UPDATE: Uncapped FPS - Prefer IMMEDIATE present mode, fallback MAILBOX/FIFO
+//         Detailed logging for every step in initializeSwapchain
+//         Enhanced error logging with file/line via VK_CHECK
 
 #include "engine/Vulkan/VulkanSwapchainManager.hpp"
 #include "engine/Vulkan/VulkanRTX_Setup.hpp"
@@ -111,14 +114,25 @@ void VulkanSwapchainManager::cleanup()
 // ---------------------------------------------------------------------
 void VulkanSwapchainManager::initializeSwapchain(int width, int height)
 {
+    LOG_INFO_CAT("Swapchain", "initializeSwapchain START: {}x{}", width, height);
+
     width_  = width;
     height_ = height;
+
+    LOG_INFO_CAT("Swapchain", "STEP 1: Querying surface capabilities");
 
     // --- Surface capabilities ---
     VkSurfaceCapabilitiesKHR caps{};
     VK_CHECK(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(context_->physicalDevice,
                                                        surface_, &caps),
              "surface capabilities");
+
+    LOG_INFO_CAT("Swapchain", "Capabilities: minExtent={}x{}, maxExtent={}x{}, currentTransform={}",
+                 caps.minImageExtent.width, caps.minImageExtent.height,
+                 caps.maxImageExtent.width, caps.maxImageExtent.height,
+                 static_cast<uint32_t>(caps.currentTransform));
+
+    LOG_INFO_CAT("Swapchain", "STEP 2: Querying surface formats");
 
     // --- Choose format (prefer sRGB) ---
     uint32_t fmtCount = 0;
@@ -130,6 +144,8 @@ void VulkanSwapchainManager::initializeSwapchain(int width, int height)
                                                   surface_, &fmtCount, formats.data()),
              "surface formats");
 
+    LOG_INFO_CAT("Swapchain", "Available formats: {}", formats.size());
+
     VkSurfaceFormatKHR chosenFmt = formats[0];
     for (const auto& f : formats) {
         if (f.format == VK_FORMAT_B8G8R8A8_SRGB &&
@@ -139,7 +155,12 @@ void VulkanSwapchainManager::initializeSwapchain(int width, int height)
         }
     }
 
-    // --- Choose present mode (prefer MAILBOX) ---
+    LOG_INFO_CAT("Swapchain", "Selected format: {} (colorSpace: {})", 
+                 static_cast<uint32_t>(chosenFmt.format), static_cast<uint32_t>(chosenFmt.colorSpace));
+
+    LOG_INFO_CAT("Swapchain", "STEP 3: Querying present modes for uncapped FPS");
+
+    // --- Choose present mode (prefer IMMEDIATE for uncapped, fallback MAILBOX/FIFO) ---
     uint32_t pmCount = 0;
     VK_CHECK(vkGetPhysicalDeviceSurfacePresentModesKHR(context_->physicalDevice,
                                                        surface_, &pmCount, nullptr),
@@ -150,13 +171,36 @@ void VulkanSwapchainManager::initializeSwapchain(int width, int height)
                                                        presentModes.data()),
              "present modes");
 
-    VkPresentModeKHR chosenPM = VK_PRESENT_MODE_FIFO_KHR;
+    LOG_INFO_CAT("Swapchain", "Available present modes: {}", presentModes.size());
+
+    VkPresentModeKHR chosenPM = VK_PRESENT_MODE_FIFO_KHR;  // Safe fallback
+    bool immediateAvailable = false;
+    bool mailboxAvailable = false;
+
     for (const auto& pm : presentModes) {
-        if (pm == VK_PRESENT_MODE_MAILBOX_KHR) {
-            chosenPM = pm;
-            break;
+        LOG_DEBUG_CAT("Swapchain", "  Mode available: {}", static_cast<uint32_t>(pm));
+        if (pm == VK_PRESENT_MODE_IMMEDIATE_KHR) {
+            immediateAvailable = true;
+            chosenPM = pm;  // Prefer IMMEDIATE: uncapped FPS, allows tearing
+        } else if (pm == VK_PRESENT_MODE_MAILBOX_KHR && chosenPM == VK_PRESENT_MODE_FIFO_KHR) {
+            mailboxAvailable = true;
+            chosenPM = pm;  // Fallback to MAILBOX: uncapped, tear-free triple-buffer
         }
     }
+
+    std::string pmDesc;
+    if (chosenPM == VK_PRESENT_MODE_IMMEDIATE_KHR) {
+        pmDesc = "IMMEDIATE (uncapped FPS, may tear)";
+    } else if (chosenPM == VK_PRESENT_MODE_MAILBOX_KHR) {
+        pmDesc = "MAILBOX (uncapped FPS, smooth triple-buffer)";
+    } else {
+        pmDesc = "FIFO (VSync capped at display Hz)";
+    }
+
+    LOG_INFO_CAT("Swapchain", "Selected present mode: {} | IMMEDIATE avail: {} | MAILBOX avail: {}", 
+                 pmDesc, immediateAvailable, mailboxAvailable);
+
+    LOG_INFO_CAT("Swapchain", "STEP 4: Computing extent");
 
     // --- Extent ---
     VkExtent2D extent{
@@ -166,11 +210,19 @@ void VulkanSwapchainManager::initializeSwapchain(int width, int height)
                                           caps.maxImageExtent.height)
     };
 
+    LOG_INFO_CAT("Swapchain", "Computed extent: {}x{}", extent.width, extent.height);
+
+    LOG_INFO_CAT("Swapchain", "STEP 5: Computing image count");
+
     // --- Image count ---
     uint32_t imageCount = caps.minImageCount + 1;
     if (caps.maxImageCount > 0 && imageCount > caps.maxImageCount) {
         imageCount = caps.maxImageCount;
     }
+
+    LOG_INFO_CAT("Swapchain", "Image count: {} (min: {}, max: {})", imageCount, caps.minImageCount, caps.maxImageCount);
+
+    LOG_INFO_CAT("Swapchain", "STEP 6: Creating swapchain");
 
     // --- Create swapchain ---
     VkSwapchainCreateInfoKHR sci{VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR};
@@ -194,12 +246,19 @@ void VulkanSwapchainManager::initializeSwapchain(int width, int height)
         sci.imageSharingMode      = VK_SHARING_MODE_CONCURRENT;
         sci.queueFamilyIndexCount = 2;
         sci.pQueueFamilyIndices   = qfi;
+        LOG_INFO_CAT("Swapchain", "Queue sharing: CONCURRENT (graphics QFI: {}, present QFI: {})",
+                     context_->graphicsQueueFamilyIndex, context_->presentQueueFamilyIndex);
     } else {
         sci.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        LOG_INFO_CAT("Swapchain", "Queue sharing: EXCLUSIVE (same QFI: {})", context_->graphicsQueueFamilyIndex);
     }
 
     VK_CHECK(vkCreateSwapchainKHR(context_->device, &sci, nullptr, &swapchain_),
              "vkCreateSwapchainKHR");
+
+    LOG_INFO_CAT("Swapchain", "Swapchain created successfully: {}", ptr_to_hex(swapchain_));
+
+    LOG_INFO_CAT("Swapchain", "STEP 7: Retrieving swapchain images");
 
     // --- Retrieve images ---
     uint32_t imgCount = 0;
@@ -212,6 +271,10 @@ void VulkanSwapchainManager::initializeSwapchain(int width, int height)
 
     swapchainImageFormat_ = chosenFmt.format;
     swapchainExtent_      = extent;
+
+    LOG_INFO_CAT("Swapchain", "Retrieved {} images", swapchainImages_.size());
+
+    LOG_INFO_CAT("Swapchain", "STEP 8: Creating image views");
 
     // --- Create image views ---
     swapchainImageViews_.resize(swapchainImages_.size());
@@ -229,8 +292,12 @@ void VulkanSwapchainManager::initializeSwapchain(int width, int height)
                  "swapchain image view");
     }
 
+    LOG_INFO_CAT("Swapchain", "Created {} image views", swapchainImageViews_.size());
+
     // SEXY LOG
     logSwapchainInfo("CREATED");
+
+    LOG_INFO_CAT("Swapchain", "initializeSwapchain COMPLETE: Uncapped FPS enabled via {}", pmDesc);
 }
 
 // ---------------------------------------------------------------------

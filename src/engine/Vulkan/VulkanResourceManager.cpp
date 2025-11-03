@@ -1,4 +1,7 @@
 // src/engine/Vulkan/VulkanResourceManager.cpp
+// AMOURANTH RTX Engine (C) 2025 by Zachary Geurts gzac5314@gmail.com
+// FINAL: addFence() in header only, LOG_VOID_CLEANUP → LOG_DEBUG_CAT
+
 #include "engine/Vulkan/VulkanCore.hpp"
 #include "engine/logging.hpp"
 #include <algorithm>
@@ -22,6 +25,7 @@ VulkanResourceManager::VulkanResourceManager(VulkanResourceManager&& other) noex
     , pipelines_(std::move(other.pipelines_))
     , shaderModules_(std::move(other.shaderModules_))
     , descriptorSets_(std::move(other.descriptorSets_))
+    , fences_(std::move(other.fences_))  // MOVE FENCES
     , pipelineMap_(std::move(other.pipelineMap_))
     , device_(other.device_)
     , physicalDevice_(other.physicalDevice_)
@@ -55,6 +59,7 @@ VulkanResourceManager& VulkanResourceManager::operator=(VulkanResourceManager&& 
         pipelines_ = std::move(other.pipelines_);
         shaderModules_ = std::move(other.shaderModules_);
         descriptorSets_ = std::move(other.descriptorSets_);
+        fences_ = std::move(other.fences_);  // MOVE FENCES
         pipelineMap_ = std::move(other.pipelineMap_);
         device_ = other.device_;
         physicalDevice_ = other.physicalDevice_;
@@ -113,6 +118,21 @@ void VulkanResourceManager::cleanup(VkDevice device) {
             } \
             container.clear(); \
         } while(0)
+
+    // --- DESTROY FENCES FIRST ---
+    LOG_INFO_CAT("ResourceMgr", "{}Phase 13: Fences{}", OCEAN_TEAL, RESET);
+    for (auto it = fences_.rbegin(); it != fences_.rend(); ++it) {
+        if (*it != VK_NULL_HANDLE) {
+            try {
+                LOG_DEBUG_CAT("ResourceMgr", "Destroying Fence: {:p}", static_cast<void*>(*it));
+                vkDestroyFence(effectiveDevice, *it, nullptr);
+                *it = VK_NULL_HANDLE;
+            } catch (...) {
+                LOG_ERROR_CAT("ResourceMgr", "Exception destroying Fence {:p}", static_cast<void*>(*it));
+            }
+        }
+    }
+    fences_.clear();
 
     // --- DESTROY IN REVERSE ORDER ---
     SAFE_DESTROY(pipelines_,           vkDestroyPipeline,           Pipeline);

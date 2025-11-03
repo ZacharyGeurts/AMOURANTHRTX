@@ -2,7 +2,9 @@
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts gzac5314@gmail.com is licensed under CC BY-NC 4.0
 // FULLY POLISHED. ZERO WARNINGS. ZERO NARROWING. 100% COMPILABLE.
 // NO SINGLETON. NO STATIC instance_. RAII SAFE.
+// OPTIMIZED: Guarded logging, fixed unused vars/barriers, timed AS builds.
 
+#include "engine/Vulkan/VulkanCommon.hpp"
 #include "engine/Vulkan/VulkanPipelineManager.hpp"
 #include "engine/Vulkan/Vulkan_init.hpp"
 #include "engine/Vulkan/VulkanRTX_Setup.hpp"
@@ -11,11 +13,10 @@
 #include <fstream>
 #include <sstream>
 #include <algorithm>
-#include <filesystem>
 #include <cstdio>
-#include <unordered_map>
 #include <cstring>
 #include <iostream>
+#include <chrono>  // For perf timing
 
 namespace VulkanRTX {
 
@@ -31,79 +32,17 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
     const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
     void* pUserData) {
 
+#ifndef NDEBUG
     if (messageSeverity >= VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT) {
         LOG_WARN_CAT("Vulkan", "Validation layer: {}", pCallbackData->pMessage);
     } else if (messageSeverity >= VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT) {
         LOG_DEBUG_CAT("Vulkan", "Validation layer: {}", pCallbackData->pMessage);
     }
+#endif
 
     return VK_FALSE;
 }
 #endif
-
-// ---------------------------------------------------------------------------
-//  Helper: resolve a logical shader name to a real file on disk
-// ---------------------------------------------------------------------------
-static std::string findShaderPath(const std::string& logicalName)
-{
-    LOG_DEBUG_CAT("Vulkan", ">>> RESOLVING SHADER '{}'", logicalName);
-
-    const std::filesystem::path binBase = std::filesystem::current_path() / "assets" / "shaders";
-
-    std::filesystem::path binPath;
-    if (logicalName == "raygen") {
-        binPath = binBase / "raytracing" / "raygen.spv";
-    } else if (logicalName == "miss") {
-        binPath = binBase / "raytracing" / "miss.spv";
-    } else if (logicalName == "closesthit") {
-        binPath = binBase / "raytracing" / "closesthit.spv";
-    } else if (logicalName == "compute_denoise") {
-        binPath = binBase / "compute" / "denoise.spv";
-    } else if (logicalName == "tonemap_vert") {
-        binPath = binBase / "graphics" / "tonemap_vert.spv";
-    } else if (logicalName == "tonemap_frag") {
-        binPath = binBase / "graphics" / "tonemap_frag.spv";
-    } else {
-        LOG_ERROR_CAT("Vulkan", "  --> UNKNOWN SHADER NAME '{}'", logicalName);
-        throw std::runtime_error("Unknown shader name: " + logicalName);
-    }
-
-    if (std::filesystem::exists(binPath)) {
-        LOG_DEBUG_CAT("Vulkan", "  --> FOUND IN BIN: {}", binPath.string());
-        return binPath.string();
-    }
-
-    static const std::unordered_map<std::string, std::string> srcTree = {
-        {"raygen",       "assets/shaders/raytracing/raygen.rgen"},
-        {"miss",         "assets/shaders/raytracing/miss.rmiss"},
-        {"closesthit",   "assets/shaders/raytracing/closesthit.rchit"},
-        {"compute_denoise", "assets/shaders/compute/denoise.glsl"},
-        {"tonemap_vert", "assets/shaders/graphics/tonemap_vert.glsl"},
-        {"tonemap_frag", "assets/shaders/graphics/tonemap_frag.glsl"}
-    };
-
-    const auto it = srcTree.find(logicalName);
-    if (it == srcTree.end()) {
-        LOG_ERROR_CAT("Vulkan", "  --> NO SOURCE-TREE ENTRY FOR '{}'", logicalName);
-        throw std::runtime_error("Unknown shader name: " + logicalName);
-    }
-
-    const std::filesystem::path projectRoot = std::filesystem::current_path()
-        .parent_path().parent_path().parent_path();
-    const std::filesystem::path srcPath = projectRoot / it->second;
-
-    if (std::filesystem::exists(srcPath)) {
-        LOG_DEBUG_CAT("Vulkan", "  --> FOUND IN SRC: {}", srcPath.string());
-        return srcPath.string();
-    }
-
-    LOG_ERROR_CAT("Vulkan",
-                  "  --> SHADER NOT FOUND!\n"
-                  "      BIN: {}\n"
-                  "      SRC: {}", binPath.string(), srcPath.string());
-
-    throw std::runtime_error("Shader file missing: " + logicalName);
-}
 
 // ---------------------------------------------------------------------------
 //  1. CONSTRUCTOR & DESTRUCTOR
@@ -111,6 +50,7 @@ static std::string findShaderPath(const std::string& logicalName)
 VulkanPipelineManager::VulkanPipelineManager(Vulkan::Context& context, int width, int height)
     : context_(context), width_(width), height_(height)
 {
+#ifndef NDEBUG
     LOG_INFO_CAT("Vulkan", ">>> INITIALIZING VULKAN PIPELINE MANAGER [{}x{}]", width, height);
 
     char devPtr[32], instPtr[32];
@@ -118,6 +58,7 @@ VulkanPipelineManager::VulkanPipelineManager(Vulkan::Context& context, int width
     std::snprintf(instPtr, sizeof(instPtr), "%p", static_cast<void*>(context_.instance));
     LOG_INFO_CAT("Vulkan", "    Device: {}", devPtr);
     LOG_INFO_CAT("Vulkan", "    Instance: {}", instPtr);
+#endif
 
     if (context_.device == VK_NULL_HANDLE) {
         LOG_ERROR_CAT("Vulkan", "    FATAL: Device is NULL at PipelineManager construction!");
@@ -133,12 +74,16 @@ VulkanPipelineManager::VulkanPipelineManager(Vulkan::Context& context, int width
     setupDebugCallback();
 #endif
 
+#ifndef NDEBUG
     LOG_INFO_CAT("Vulkan", "<<< PIPELINE MANAGER INITIALIZED");
+#endif
 }
 
 VulkanPipelineManager::~VulkanPipelineManager()
 {
+#ifndef NDEBUG
     LOG_INFO_CAT("Vulkan", ">>> DESTROYING VULKAN PIPELINE MANAGER");
+#endif
 
 #ifdef ENABLE_VULKAN_DEBUG
     if (debugMessenger_ != VK_NULL_HANDLE) {
@@ -158,7 +103,9 @@ VulkanPipelineManager::~VulkanPipelineManager()
 #ifdef ENABLE_VULKAN_DEBUG
 void VulkanPipelineManager::setupDebugCallback()
 {
+#ifndef NDEBUG
     LOG_INFO_CAT("Vulkan", ">>> SETTING UP DEBUG CALLBACK");
+#endif
 
     VkDebugUtilsMessengerCreateInfoEXT createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
@@ -176,10 +123,12 @@ void VulkanPipelineManager::setupDebugCallback()
 
     VK_CHECK(CreateDebugUtilsMessengerEXT(context_.instance, &createInfo, nullptr, &debugMessenger_), "Create debug messenger");
 
+#ifndef NDEBUG
     char msgPtr[32];
     std::snprintf(msgPtr, sizeof(msgPtr), "%p", static_cast<void*>(debugMessenger_));
     LOG_INFO_CAT("Vulkan", "    DEBUG MESSENGER CREATED @ {}", msgPtr);
     LOG_INFO_CAT("Vulkan", "<<< DEBUG CALLBACK READY");
+#endif
 }
 #endif
 
@@ -188,7 +137,9 @@ void VulkanPipelineManager::setupDebugCallback()
 // ---------------------------------------------------------------------------
 VkShaderModule VulkanPipelineManager::loadShader(VkDevice device, const std::string& shaderType)
 {
+#ifndef NDEBUG
     LOG_INFO_CAT("Vulkan", ">>> LOADING SHADER '{}'", shaderType);
+#endif
 
     const std::string filepath = findShaderPath(shaderType);
 
@@ -203,7 +154,9 @@ VkShaderModule VulkanPipelineManager::loadShader(VkDevice device, const std::str
         throw std::runtime_error("Extension name used as shader");
     }
 
+#ifndef NDEBUG
     LOG_INFO_CAT("Vulkan", "    Opening file: {}", filepath);
+#endif
 
     std::ifstream file(filepath, std::ios::ate | std::ios::binary);
     if (!file.is_open()) {
@@ -212,7 +165,9 @@ VkShaderModule VulkanPipelineManager::loadShader(VkDevice device, const std::str
     }
 
     const size_t fileSize = static_cast<size_t>(file.tellg());
+#ifndef NDEBUG
     LOG_INFO_CAT("Vulkan", "    File size: {} bytes", fileSize);
+#endif
 
     if (fileSize == 0) {
         LOG_ERROR_CAT("Vulkan", "    EMPTY SHADER FILE");
@@ -242,10 +197,12 @@ VkShaderModule VulkanPipelineManager::loadShader(VkDevice device, const std::str
     VkShaderModule module;
     VK_CHECK(vkCreateShaderModule(device, &createInfo, nullptr, &module), "Create shader module");
 
+#ifndef NDEBUG
     char modPtr[32];
     std::snprintf(modPtr, sizeof(modPtr), "%p", static_cast<void*>(module));
     LOG_INFO_CAT("Vulkan", "    SHADER MODULE CREATED: {} bytes @ {}", fileSize, modPtr);
     LOG_INFO_CAT("Vulkan", "<<< SHADER '{}' LOADED", shaderType);
+#endif
     return module;
 }
 
@@ -253,7 +210,9 @@ VkShaderModule VulkanPipelineManager::loadShader(VkDevice device, const std::str
 //  3. PIPELINE CACHE – BLAST LOGGED + CRASH FIXED
 // ---------------------------------------------------------------------------
 void VulkanPipelineManager::createPipelineCache() {
+#ifndef NDEBUG
     LOG_INFO_CAT("PipelineMgr", "{}Creating pipeline cache...{}", OCEAN_TEAL, RESET);
+#endif
 
     VkPipelineCacheCreateInfo cacheInfo = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO
@@ -264,10 +223,12 @@ void VulkanPipelineManager::createPipelineCache() {
              "Create pipeline cache");
 
     pipelineCache_ = Dispose::makeHandle(context_.device, rawCache, "Global Pipeline Cache");
+#ifndef NDEBUG
     LOG_INFO_CAT("PipelineMgr", "{}Pipeline cache created: {}{}",
                  OCEAN_TEAL,
                  static_cast<void*>(pipelineCache_.get()),
                  RESET);
+#endif
 }
 
 // ---------------------------------------------------------------------------
@@ -275,7 +236,9 @@ void VulkanPipelineManager::createPipelineCache() {
 // ---------------------------------------------------------------------------
 void VulkanPipelineManager::createRenderPass()
 {
+#ifndef NDEBUG
     LOG_INFO_CAT("Vulkan", ">>> CREATING RENDER PASS");
+#endif
 
     VkAttachmentDescription colorAttachment = {
         .format = VK_FORMAT_B8G8R8A8_UNORM,
@@ -320,10 +283,12 @@ void VulkanPipelineManager::createRenderPass()
 
     renderPass_ = Dispose::makeHandle(context_.device, rawPass, "RenderPass");
 
+#ifndef NDEBUG
     char rpPtr[32];
     std::snprintf(rpPtr, sizeof(rpPtr), "%p", static_cast<void*>(rawPass));
     LOG_INFO_CAT("Vulkan", "    RENDER PASS CREATED @ {}", rpPtr);
     LOG_INFO_CAT("Vulkan", "<<< RENDER PASS INITIALIZED");
+#endif
 }
 
 // ---------------------------------------------------------------------------
@@ -331,7 +296,9 @@ void VulkanPipelineManager::createRenderPass()
 // ---------------------------------------------------------------------------
 void VulkanPipelineManager::createGraphicsDescriptorSetLayout()
 {
+#ifndef NDEBUG
     LOG_INFO_CAT("Vulkan", ">>> CREATING GRAPHICS DESCRIPTOR SET LAYOUT");
+#endif
 
     const std::vector<VkDescriptorSetLayoutBinding> bindings = {
         {.binding = 0, .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,        .descriptorCount = 1, .stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT},
@@ -356,10 +323,12 @@ void VulkanPipelineManager::createGraphicsDescriptorSetLayout()
 
     graphicsDescriptorSetLayout_ = Dispose::makeHandle(context_.device, layout, "Graphics DS Layout");
 
+#ifndef NDEBUG
     char layoutPtr[32];
     std::snprintf(layoutPtr, sizeof(layoutPtr), "%p", static_cast<void*>(layout));
     LOG_INFO_CAT("Vulkan", "    LAYOUT CREATED @ {}", layoutPtr);
     LOG_INFO_CAT("Vulkan", "<<< GRAPHICS DESCRIPTOR LAYOUT READY");
+#endif
 }
 
 // ---------------------------------------------------------------------------
@@ -367,7 +336,9 @@ void VulkanPipelineManager::createGraphicsDescriptorSetLayout()
 // ---------------------------------------------------------------------------
 void VulkanPipelineManager::createComputeDescriptorSetLayout()
 {
+#ifndef NDEBUG
     LOG_INFO_CAT("Vulkan", ">>> CREATING COMPUTE DESCRIPTOR SET LAYOUT");
+#endif
 
     const std::vector<VkDescriptorSetLayoutBinding> bindings = {
         {.binding = 0, .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, .descriptorCount = 1, .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT},
@@ -386,10 +357,12 @@ void VulkanPipelineManager::createComputeDescriptorSetLayout()
 
     computeDescriptorSetLayout_ = Dispose::makeHandle(context_.device, layout, "Compute DS Layout");
 
+#ifndef NDEBUG
     char layoutPtr[32];
     std::snprintf(layoutPtr, sizeof(layoutPtr), "%p", static_cast<void*>(layout));
     LOG_INFO_CAT("Vulkan", "    LAYOUT CREATED @ {}", layoutPtr);
     LOG_INFO_CAT("Vulkan", "<<< COMPUTE DESCRIPTOR LAYOUT READY");
+#endif
 }
 
 // ---------------------------------------------------------------------------
@@ -397,7 +370,9 @@ void VulkanPipelineManager::createComputeDescriptorSetLayout()
 // ---------------------------------------------------------------------------
 VkDescriptorSetLayout VulkanPipelineManager::createRayTracingDescriptorSetLayout()
 {
+#ifndef NDEBUG
     LOG_INFO_CAT("Vulkan", ">>> CREATING RAY TRACING DESCRIPTOR SET LAYOUT");
+#endif
 
     const std::vector<VkDescriptorSetLayoutBinding> bindings = {
         {.binding = 0, .descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, .descriptorCount = 1,
@@ -427,10 +402,12 @@ VkDescriptorSetLayout VulkanPipelineManager::createRayTracingDescriptorSetLayout
 
     rayTracingDescriptorSetLayout_ = Dispose::makeHandle(context_.device, layout, "RT DS Layout");
 
+#ifndef NDEBUG
     char layoutPtr[32];
     std::snprintf(layoutPtr, sizeof(layoutPtr), "%p", static_cast<void*>(layout));
     LOG_INFO_CAT("Vulkan", "    LAYOUT CREATED @ {}", layoutPtr);
     LOG_INFO_CAT("Vulkan", "<<< RAY TRACING DESCRIPTOR LAYOUT READY");
+#endif
     return layout;
 }
 
@@ -439,7 +416,9 @@ VkDescriptorSetLayout VulkanPipelineManager::createRayTracingDescriptorSetLayout
 // ---------------------------------------------------------------------------
 void VulkanPipelineManager::createShaderBindingTable()
 {
+#ifndef NDEBUG
     LOG_INFO_CAT("Vulkan", ">>> BUILDING SHADER BINDING TABLE (SBT)");
+#endif
 
     if (!rayTracingPipeline_) {
         LOG_ERROR_CAT("Vulkan", "    PIPELINE IS NULL — CANNOT BUILD SBT");
@@ -452,11 +431,15 @@ void VulkanPipelineManager::createShaderBindingTable()
     const uint32_t groupCount      = 3;
     const uint32_t sbtSize         = groupCount * alignedHandle;
 
+#ifndef NDEBUG
     LOG_INFO_CAT("Vulkan", "    RT Props → handleSize:{}, align:{}, aligned:{}", handleSize, handleAlignment, alignedHandle);
     LOG_INFO_CAT("Vulkan", "    SBT → groups:{}, alignedSize:{}, total:{} bytes", groupCount, alignedHandle, sbtSize);
+#endif
 
     std::vector<uint8_t> rawHandles(groupCount * handleSize);
+#ifndef NDEBUG
     LOG_INFO_CAT("Vulkan", "    Fetching {} shader group handles...", groupCount);
+#endif
 
     VkResult r = context_.vkGetRayTracingShaderGroupHandlesKHR(
         context_.device, rayTracingPipeline_.get(), 0, groupCount,
@@ -467,7 +450,9 @@ void VulkanPipelineManager::createShaderBindingTable()
         throw std::runtime_error("Failed to get shader group handles");
     }
 
+#ifndef NDEBUG
     LOG_INFO_CAT("Vulkan", "    Handles retrieved");
+#endif
 
     VkBufferCreateInfo bufInfo = {
         .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
@@ -506,7 +491,9 @@ void VulkanPipelineManager::createShaderBindingTable()
     }
     vkUnmapMemory(context_.device, sbtMemory_.get());
 
+#ifndef NDEBUG
     LOG_INFO_CAT("Vulkan", "    Handles copied with alignment");
+#endif
 
     const VkDeviceAddress baseAddr = VulkanInitializer::getBufferDeviceAddress(context_, sbtBuffer_.get());
 
@@ -515,6 +502,7 @@ void VulkanPipelineManager::createShaderBindingTable()
     sbt_.hit      = { baseAddr + 2 * alignedHandle, alignedHandle, alignedHandle };
     sbt_.callable = {};
 
+#ifndef NDEBUG
     LOG_INFO_CAT("Vulkan", "    SBT READY:");
     LOG_INFO_CAT("Vulkan", "      raygen : 0x{:x} (stride={}, size={})", 
                  sbt_.raygen.deviceAddress, sbt_.raygen.stride, sbt_.raygen.size);
@@ -522,8 +510,8 @@ void VulkanPipelineManager::createShaderBindingTable()
                  sbt_.miss.deviceAddress, sbt_.miss.stride, sbt_.miss.size);
     LOG_INFO_CAT("Vulkan", "      hit    : 0x{:x} (stride={}, size={})", 
                  sbt_.hit.deviceAddress, sbt_.hit.stride, sbt_.hit.size);
-
     LOG_INFO_CAT("Vulkan", "<<< SBT BUILD COMPLETE");
+#endif
 }
 
 // ---------------------------------------------------------------------------
@@ -531,7 +519,9 @@ void VulkanPipelineManager::createShaderBindingTable()
 // ---------------------------------------------------------------------------
 void VulkanPipelineManager::createRayTracingPipeline()
 {
+#ifndef NDEBUG
     LOG_INFO_CAT("Vulkan", ">>> COMPILING RAY TRACING PIPELINE");
+#endif
 
     VkShaderModule raygenMod   = loadShader(context_.device, "raygen");
     VkShaderModule missMod     = loadShader(context_.device, "miss");
@@ -611,10 +601,12 @@ void VulkanPipelineManager::createRayTracingPipeline()
     vkDestroyShaderModule(context_.device, missMod, nullptr);
     vkDestroyShaderModule(context_.device, hitMod, nullptr);
 
+#ifndef NDEBUG
     char pipePtr[32];
     std::snprintf(pipePtr, sizeof(pipePtr), "%p", static_cast<void*>(pipeline));
     LOG_INFO_CAT("Vulkan", "    PIPELINE COMPILED @ {}", pipePtr);
     LOG_INFO_CAT("Vulkan", "<<< RAY TRACING PIPELINE LIVE");
+#endif
 }
 
 // ---------------------------------------------------------------------------
@@ -622,7 +614,9 @@ void VulkanPipelineManager::createRayTracingPipeline()
 // ---------------------------------------------------------------------------
 void VulkanPipelineManager::createComputePipeline()
 {
+#ifndef NDEBUG
     LOG_INFO_CAT("Vulkan", ">>> COMPILING COMPUTE (DENOISER) PIPELINE");
+#endif
 
     VkShaderModule compMod = loadShader(context_.device, "compute_denoise");
 
@@ -662,10 +656,12 @@ void VulkanPipelineManager::createComputePipeline()
 
     vkDestroyShaderModule(context_.device, compMod, nullptr);
 
+#ifndef NDEBUG
     char pipePtr[32];
     std::snprintf(pipePtr, sizeof(pipePtr), "%p", static_cast<void*>(pipeline));
     LOG_INFO_CAT("Vulkan", "    PIPELINE COMPILED @ {}", pipePtr);
     LOG_INFO_CAT("Vulkan", "<<< COMPUTE PIPELINE LIVE");
+#endif
 }
 
 // ---------------------------------------------------------------------------
@@ -673,7 +669,9 @@ void VulkanPipelineManager::createComputePipeline()
 // ---------------------------------------------------------------------------
 void VulkanPipelineManager::createGraphicsPipeline(int width, int height)
 {
+#ifndef NDEBUG
     LOG_INFO_CAT("Vulkan", ">>> COMPILING GRAPHICS (TONEMAP) PIPELINE [{}x{}]", width, height);
+#endif
 
     VkShaderModule vertMod = loadShader(context_.device, "tonemap_vert");
     VkShaderModule fragMod = loadShader(context_.device, "tonemap_frag");
@@ -769,41 +767,61 @@ void VulkanPipelineManager::createGraphicsPipeline(int width, int height)
     vkDestroyShaderModule(context_.device, vertMod, nullptr);
     vkDestroyShaderModule(context_.device, fragMod, nullptr);
 
+#ifndef NDEBUG
     char pipePtr[32];
     std::snprintf(pipePtr, sizeof(pipePtr), "%p", static_cast<void*>(pipeline));
     LOG_INFO_CAT("Vulkan", "    PIPELINE COMPILED @ {}", pipePtr);
     LOG_INFO_CAT("Vulkan", "<<< GRAPHICS PIPELINE LIVE");
+#endif
 }
 
 // ---------------------------------------------------------------------------
-//  12. ACCELERATION STRUCTURES
+//  12. ACCELERATION STRUCTURES – FIXED: Full ownership transfer + cleanup
 // ---------------------------------------------------------------------------
-void VulkanPipelineManager::createAccelerationStructures(VkBuffer vertexBuffer, VkBuffer indexBuffer)
+void VulkanPipelineManager::createAccelerationStructures(VkBuffer vertexBuffer, VkBuffer indexBuffer, VulkanBufferManager& bufferMgr)
 {
+#ifndef NDEBUG
+    auto asStart = std::chrono::high_resolution_clock::now();
     LOG_INFO_CAT("Vulkan", ">>> BUILDING ACCELERATION STRUCTURES (BLAS + TLAS)");
+#endif
 
     if (vertexBuffer == VK_NULL_HANDLE || indexBuffer == VK_NULL_HANDLE) {
         LOG_ERROR_CAT("Vulkan", "    FATAL: vertexBuffer or indexBuffer is NULL!");
         throw std::runtime_error("Invalid geometry buffers");
     }
 
+#ifndef NDEBUG
     char vbufPtr[32], ibufPtr[32];
     std::snprintf(vbufPtr, sizeof(vbufPtr), "%p", static_cast<void*>(vertexBuffer));
     std::snprintf(ibufPtr, sizeof(ibufPtr), "%p", static_cast<void*>(indexBuffer));
     LOG_INFO_CAT("Vulkan", "    Vertex Buffer: {}", vbufPtr);
     LOG_INFO_CAT("Vulkan", "    Index Buffer:  {}", ibufPtr);
+#endif
 
     VkDeviceAddress vertexAddress = VulkanInitializer::getBufferDeviceAddress(context_, vertexBuffer);
     VkDeviceAddress indexAddress  = VulkanInitializer::getBufferDeviceAddress(context_, indexBuffer);
 
+#ifndef NDEBUG
     LOG_INFO_CAT("Vulkan", "    Vertex Device Address: 0x{:x}", vertexAddress);
     LOG_INFO_CAT("Vulkan", "    Index Device Address:  0x{:x}", indexAddress);
+#endif
 
-    const uint32_t vertexCount = 8;
-    const uint32_t indexCount  = 36;
+    const uint32_t vertexCount = bufferMgr.getVertexCount();
+    const uint32_t indexCount  = bufferMgr.getIndexCount();
     const uint32_t triangleCount = indexCount / 3;
 
+#ifndef NDEBUG
     LOG_INFO_CAT("Vulkan", "    Geometry → {} vertices, {} indices ({} triangles)", vertexCount, indexCount, triangleCount);
+#endif
+
+    // Fetch real transfer family
+    uint32_t transferQueueFamily = bufferMgr.getTransferQueueFamily();
+    if (transferQueueFamily == VK_QUEUE_FAMILY_IGNORED) {
+        transferQueueFamily = context_.graphicsQueueFamilyIndex;
+    }
+#ifndef NDEBUG
+    LOG_DEBUG_CAT("PipelineMgr", "Using transfer queue family: {} (graphics: {})", transferQueueFamily, context_.graphicsQueueFamilyIndex);
+#endif
 
     // BLAS
     VkAccelerationStructureGeometryTrianglesDataKHR triangles = {
@@ -839,8 +857,10 @@ void VulkanPipelineManager::createAccelerationStructures(VkBuffer vertexBuffer, 
         context_.device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
         &buildInfo, &triangleCount, &sizeInfo);
 
+#ifndef NDEBUG
     LOG_INFO_CAT("Vulkan", "    BLAS Size → as:{} bytes, scratch:{} bytes",
                   sizeInfo.accelerationStructureSize, sizeInfo.buildScratchSize);
+#endif
 
     VkBuffer blasBuffer = VK_NULL_HANDLE;
     VkDeviceMemory blasMemory = VK_NULL_HANDLE;
@@ -860,9 +880,11 @@ void VulkanPipelineManager::createAccelerationStructures(VkBuffer vertexBuffer, 
     VkAccelerationStructureKHR blasAS = VK_NULL_HANDLE;
     VK_CHECK(context_.vkCreateAccelerationStructureKHR(context_.device, &blasCreateInfo, nullptr, &blasAS), "Create BLAS");
 
+#ifndef NDEBUG
     char blasPtr[32];
     std::snprintf(blasPtr, sizeof(blasPtr), "%p", static_cast<void*>(blasAS));
     LOG_INFO_CAT("Vulkan", "    BLAS created @ {}", blasPtr);
+#endif
 
     VkBuffer scratchBuffer = VK_NULL_HANDLE;
     VkDeviceMemory scratchMemory = VK_NULL_HANDLE;
@@ -885,13 +907,90 @@ void VulkanPipelineManager::createAccelerationStructures(VkBuffer vertexBuffer, 
     const VkAccelerationStructureBuildRangeInfoKHR* pRangeInfo = &rangeInfo;
 
     VkCommandBuffer cmd = VulkanInitializer::beginSingleTimeCommands(context_);
+
+    // Ownership transfer: Transfer → Graphics (if different)
+    if (transferQueueFamily != VK_QUEUE_FAMILY_IGNORED && transferQueueFamily != context_.graphicsQueueFamilyIndex) {
+#ifndef NDEBUG
+        LOG_INFO_CAT("Vulkan", "Inserting ownership transfer barriers (transfer {} → graphics {})",
+                     transferQueueFamily, context_.graphicsQueueFamilyIndex);
+#endif
+
+        VkBufferMemoryBarrier vertexBarrier = {
+            .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+            .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+            .dstAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR | VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR,
+            .srcQueueFamilyIndex = transferQueueFamily,
+            .dstQueueFamilyIndex = context_.graphicsQueueFamilyIndex,
+            .buffer = vertexBuffer,
+            .offset = 0,
+            .size = VK_WHOLE_SIZE
+        };
+
+        VkBufferMemoryBarrier indexBarrier = {
+            .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+            .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+            .dstAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR | VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR,
+            .srcQueueFamilyIndex = transferQueueFamily,
+            .dstQueueFamilyIndex = context_.graphicsQueueFamilyIndex,
+            .buffer = indexBuffer,
+            .offset = 0,
+            .size = VK_WHOLE_SIZE
+        };
+
+        std::array<VkBufferMemoryBarrier, 2> barriers = {vertexBarrier, indexBarrier};
+        vkCmdPipelineBarrier(cmd,
+                             VK_PIPELINE_STAGE_TRANSFER_BIT,
+                             VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+                             0, 0, nullptr, 2, barriers.data(), 0, nullptr);
+    }
+
     context_.vkCmdBuildAccelerationStructuresKHR(cmd, 1, &buildInfo, &pRangeInfo);
+
+    // Ownership transfer back: Graphics → Transfer (optional but complete)
+    if (transferQueueFamily != VK_QUEUE_FAMILY_IGNORED && transferQueueFamily != context_.graphicsQueueFamilyIndex) {
+#ifndef NDEBUG
+        LOG_INFO_CAT("Vulkan", "Inserting ownership release barriers (graphics {} → transfer {})",
+                     context_.graphicsQueueFamilyIndex, transferQueueFamily);
+#endif
+
+        VkBufferMemoryBarrier vertexRev = {
+            .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+            .srcAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR,
+            .dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+            .srcQueueFamilyIndex = context_.graphicsQueueFamilyIndex,
+            .dstQueueFamilyIndex = transferQueueFamily,
+            .buffer = vertexBuffer,
+            .offset = 0,
+            .size = VK_WHOLE_SIZE
+        };
+
+        VkBufferMemoryBarrier indexRev = {
+            .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+            .srcAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR,
+            .dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+            .srcQueueFamilyIndex = context_.graphicsQueueFamilyIndex,
+            .dstQueueFamilyIndex = transferQueueFamily,
+            .buffer = indexBuffer,
+            .offset = 0,
+            .size = VK_WHOLE_SIZE
+        };
+
+        std::array<VkBufferMemoryBarrier, 2> revBarriers = {vertexRev, indexRev};
+        vkCmdPipelineBarrier(cmd,
+                             VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+                             VK_PIPELINE_STAGE_TRANSFER_BIT,
+                             0, 0, nullptr, 2, revBarriers.data(), 0, nullptr);
+    }
+
     VulkanInitializer::endSingleTimeCommands(context_, cmd);
 
+    // Cleanup scratch
     vkDestroyBuffer(context_.device, scratchBuffer, nullptr);
     vkFreeMemory(context_.device, scratchMemory, nullptr);
 
+#ifndef NDEBUG
     LOG_INFO_CAT("Vulkan", "    BLAS built in single-time command");
+#endif
 
     blas_ = Dispose::VulkanHandle<VkAccelerationStructureKHR>(
         context_.device,
@@ -919,7 +1018,9 @@ void VulkanPipelineManager::createAccelerationStructures(VkBuffer vertexBuffer, 
         .accelerationStructureReference = VulkanInitializer::getAccelerationStructureDeviceAddress(context_, blasAS)
     };
 
+#ifndef NDEBUG
     LOG_INFO_CAT("Vulkan", "    Creating instance buffer (1 instance)");
+#endif
     VkBuffer instanceBuffer = VK_NULL_HANDLE;
     VkDeviceMemory instanceMemory = VK_NULL_HANDLE;
     VulkanInitializer::createBuffer(
@@ -935,7 +1036,9 @@ void VulkanPipelineManager::createAccelerationStructures(VkBuffer vertexBuffer, 
     vkUnmapMemory(context_.device, instanceMemory);
 
     VkDeviceAddress instanceAddress = VulkanInitializer::getBufferDeviceAddress(context_, instanceBuffer);
+#ifndef NDEBUG
     LOG_INFO_CAT("Vulkan", "    Instance Device Address: 0x{:x}", instanceAddress);
+#endif
 
     VkAccelerationStructureGeometryInstancesDataKHR instancesData = {
         .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR,
@@ -967,8 +1070,10 @@ void VulkanPipelineManager::createAccelerationStructures(VkBuffer vertexBuffer, 
         context_.device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
         &tlasBuildInfo, &instanceCount, &tlasSizeInfo);
 
+#ifndef NDEBUG
     LOG_INFO_CAT("Vulkan", "    TLAS Size → as:{} bytes, scratch:{} bytes",
                   tlasSizeInfo.accelerationStructureSize, tlasSizeInfo.buildScratchSize);
+#endif
 
     VkBuffer tlasBuffer = VK_NULL_HANDLE;
     VkDeviceMemory tlasMemory = VK_NULL_HANDLE;
@@ -988,9 +1093,11 @@ void VulkanPipelineManager::createAccelerationStructures(VkBuffer vertexBuffer, 
     VkAccelerationStructureKHR tlasAS = VK_NULL_HANDLE;
     VK_CHECK(context_.vkCreateAccelerationStructureKHR(context_.device, &tlasCreateInfo, nullptr, &tlasAS), "Create TLAS");
 
+#ifndef NDEBUG
     char tlasPtr[32];
     std::snprintf(tlasPtr, sizeof(tlasPtr), "%p", static_cast<void*>(tlasAS));
     LOG_INFO_CAT("Vulkan", "    TLAS created @ {}", tlasPtr);
+#endif
 
     VkBuffer tlasScratch = VK_NULL_HANDLE;
     VkDeviceMemory tlasScratchMem = VK_NULL_HANDLE;
@@ -1016,13 +1123,15 @@ void VulkanPipelineManager::createAccelerationStructures(VkBuffer vertexBuffer, 
     context_.vkCmdBuildAccelerationStructuresKHR(tlasCmd, 1, &tlasBuildInfo, &pTlasRange);
     VulkanInitializer::endSingleTimeCommands(context_, tlasCmd);
 
+    // Cleanup TLAS scratch + instance buffer
     vkDestroyBuffer(context_.device, tlasScratch, nullptr);
     vkFreeMemory(context_.device, tlasScratchMem, nullptr);
-
     vkDestroyBuffer(context_.device, instanceBuffer, nullptr);
     vkFreeMemory(context_.device, instanceMemory, nullptr);
 
+#ifndef NDEBUG
     LOG_INFO_CAT("Vulkan", "    TLAS built in single-time command");
+#endif
 
     tlas_ = Dispose::VulkanHandle<VkAccelerationStructureKHR>(
         context_.device,
@@ -1032,9 +1141,14 @@ void VulkanPipelineManager::createAccelerationStructures(VkBuffer vertexBuffer, 
     tlasBuffer_ = Dispose::makeHandle(context_.device, tlasBuffer, "TLAS Buffer");
     tlasMemory_ = Dispose::makeHandle(context_.device, tlasMemory, "TLAS Memory");
 
+#ifndef NDEBUG
     LOG_INFO_CAT("Vulkan", "    BLAS + TLAS BUILT SUCCESSFULLY");
     LOG_INFO_CAT("Vulkan", "    BLAS @ {} | TLAS @ {}", blasPtr, tlasPtr);
+    auto asEnd = std::chrono::high_resolution_clock::now();
+    auto asDuration = std::chrono::duration_cast<std::chrono::milliseconds>(asEnd - asStart).count();
+    LOG_INFO_CAT("Vulkan", "    AS BUILD TIME: {} ms", asDuration);
     LOG_INFO_CAT("Vulkan", "<<< ACCELERATION STRUCTURES READY");
+#endif
 }
 
 // ---------------------------------------------------------------------------
@@ -1043,7 +1157,9 @@ void VulkanPipelineManager::createAccelerationStructures(VkBuffer vertexBuffer, 
 void VulkanPipelineManager::updateRayTracingDescriptorSet(VkDescriptorSet descriptorSet,
                                                           VkAccelerationStructureKHR /*tlasHandle*/)
 {
+#ifndef NDEBUG
     LOG_INFO_CAT("Vulkan", ">>> UPDATING RAY TRACING DESCRIPTOR SET");
+#endif
 
     if (descriptorSet == VK_NULL_HANDLE) {
         LOG_ERROR_CAT("Vulkan", "    FATAL: descriptorSet is NULL!");
@@ -1056,11 +1172,13 @@ void VulkanPipelineManager::updateRayTracingDescriptorSet(VkDescriptorSet descri
 
     VkAccelerationStructureKHR tlasHandle = tlas_.get();
 
+#ifndef NDEBUG
     char dsPtr[32], tlasPtr[32];
     std::snprintf(dsPtr, sizeof(dsPtr), "%p", static_cast<void*>(descriptorSet));
     std::snprintf(tlasPtr, sizeof(tlasPtr), "%p", static_cast<void*>(tlasHandle));
     LOG_INFO_CAT("Vulkan", "    Descriptor Set: {}", dsPtr);
     LOG_INFO_CAT("Vulkan", "    TLAS Handle:    {}", tlasPtr);
+#endif
 
     VkWriteDescriptorSetAccelerationStructureKHR asWrite = {
         .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR,
@@ -1079,8 +1197,10 @@ void VulkanPipelineManager::updateRayTracingDescriptorSet(VkDescriptorSet descri
 
     vkUpdateDescriptorSets(context_.device, 1, &write, 0, nullptr);
 
+#ifndef NDEBUG
     LOG_INFO_CAT("Vulkan", "    TLAS BOUND @ {} to Descriptor Set {}", tlasPtr, dsPtr);
     LOG_INFO_CAT("Vulkan", "<<< DESCRIPTOR SET UPDATED");
+#endif
 }
 
 // ---------------------------------------------------------------------------
@@ -1088,11 +1208,13 @@ void VulkanPipelineManager::updateRayTracingDescriptorSet(VkDescriptorSet descri
 // ---------------------------------------------------------------------------
 void VulkanPipelineManager::logFrameTimeIfSlow(std::chrono::steady_clock::time_point start)
 {
+#ifndef NDEBUG
     auto end = std::chrono::steady_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
     if (duration > 16666) {  // >60 FPS
         LOG_WARN_CAT("Perf", "Frame took {} microseconds ({} FPS)", duration, 1000000.0 / duration);
     }
+#endif
 }
 
 } // namespace VulkanRTX

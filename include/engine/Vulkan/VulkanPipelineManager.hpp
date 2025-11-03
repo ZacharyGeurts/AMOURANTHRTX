@@ -7,11 +7,12 @@
 #ifndef VULKAN_PIPELINE_MANAGER_HPP
 #define VULKAN_PIPELINE_MANAGER_HPP
 
+#include "engine/Vulkan/VulkanCommon.hpp"
 #include "engine/Vulkan/VulkanCore.hpp"
 #include "engine/Vulkan/VulkanRTX_Setup.hpp"
+#include "engine/Vulkan/VulkanBufferManager.hpp"  // <-- Added for bufferMgr param
 #include "engine/Dispose.hpp"
-#include "engine/logging.hpp"
-#include "engine/Vulkan/VulkanCommon.hpp"
+#include "engine/logging.hpp"  // ← for LOG_*, Color::CRIMSON_MAGENTA, etc.
 
 #include <vulkan/vulkan.h>
 #include <memory>
@@ -59,7 +60,7 @@ public:
     void createComputePipeline();
     void createGraphicsPipeline(int width, int height);
     void createShaderBindingTable();
-    void createAccelerationStructures(VkBuffer vertexBuffer, VkBuffer indexBuffer);
+    void createAccelerationStructures(VkBuffer vertexBuffer, VkBuffer indexBuffer, VulkanBufferManager& bufferMgr);  // <-- Updated signature
     void updateRayTracingDescriptorSet(VkDescriptorSet ds, VkAccelerationStructureKHR tlas = VK_NULL_HANDLE);
 
     VkPipeline getGraphicsPipeline() const { return graphicsPipeline_.get(); }

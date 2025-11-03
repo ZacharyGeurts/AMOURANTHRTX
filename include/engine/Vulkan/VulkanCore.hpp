@@ -4,12 +4,15 @@
 // Supported platforms: Linux, Windows.
 // Zachary Geurts 2025
 // FINAL: Context owns VulkanResourceManager → SINGLE LIFETIME → NO DOUBLE-FREE
+//        ADDED: get/setBufferManager(), getResourceManager()
 //        ADDED: hasX() for RAII safety
 //        ADDED: contextDevicePtr_ for safe cleanup
 //        FIXED: Member order → NO -Wreorder
 //        BETA: All ray-tracing extensions from <vulkan/vulkan_beta.h>
 //        FIXED: ~Context() → vkDeviceWaitIdle + resourceManager.cleanup
 //        ADDED: MUTABLE getX() accessors for cleanupAll()
+//        NEW: Context owns swapchain creation/destruction
+//        FIXED: addFence() + fences_ for transient submits
 
 #pragma once
 #ifndef VULKAN_CORE_HPP
@@ -19,11 +22,10 @@
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_beta.h>
 
+#include "engine/Vulkan/VulkanCommon.hpp"
 #include <vector>
 #include <string>
-#include <span>
 #include <cstdint>
-#include <format>
 #include <glm/glm.hpp>
 #include "engine/logging.hpp"
 #include <unordered_map>
@@ -59,6 +61,7 @@ class VulkanResourceManager {
     std::vector<VkPipeline> pipelines_;
     std::vector<VkShaderModule> shaderModules_;
     std::vector<VkDescriptorSet> descriptorSets_;
+    std::vector<VkFence> fences_;  // ← ADDED: Track transient fences
     std::unordered_map<std::string, VkPipeline> pipelineMap_;
 
     VkDevice device_ = VK_NULL_HANDLE;
@@ -87,80 +90,88 @@ public:
     void addBuffer(VkBuffer buffer) {
         if (buffer != VK_NULL_HANDLE) {
             buffers_.push_back(buffer);
-            LOG_DEBUG(std::format("Added buffer: {:p}", static_cast<void*>(buffer)));
+            LOG_DEBUG("Added buffer: 0x{:x}", reinterpret_cast<uintptr_t>(buffer));
         }
     }
     void addMemory(VkDeviceMemory memory) {
         if (memory != VK_NULL_HANDLE) {
             memories_.push_back(memory);
-            LOG_DEBUG(std::format("Added memory: {:p}", static_cast<void*>(memory)));
+            LOG_DEBUG("Added memory: 0x{:x}", reinterpret_cast<uintptr_t>(memory));
         }
     }
     void addImageView(VkImageView view) {
         if (view != VK_NULL_HANDLE) {
             imageViews_.push_back(view);
-            LOG_DEBUG(std::format("Added image view: {:p}", static_cast<void*>(view)));
+            LOG_DEBUG("Added image view: 0x{:x}", reinterpret_cast<uintptr_t>(view));
         }
     }
     void addImage(VkImage image) {
         if (image != VK_NULL_HANDLE) {
             images_.push_back(image);
-            LOG_DEBUG(std::format("Added image: {:p}", static_cast<void*>(image)));
+            LOG_DEBUG("Added image: 0x{:x}", reinterpret_cast<uintptr_t>(image));
         }
     }
     void addAccelerationStructure(VkAccelerationStructureKHR as) {
         if (as != VK_NULL_HANDLE) {
             accelerationStructures_.push_back(as);
-            LOG_DEBUG(std::format("Added acceleration structure: {:p}", static_cast<void*>(as)));
+            LOG_DEBUG("Added acceleration structure: 0x{:x}", reinterpret_cast<uintptr_t>(as));
         }
     }
     void addDescriptorPool(VkDescriptorPool descriptorPool) {
         if (descriptorPool != VK_NULL_HANDLE) {
             descriptorPools_.push_back(descriptorPool);
-            LOG_DEBUG(std::format("Added descriptor pool: {:p}", static_cast<void*>(descriptorPool)));
+            LOG_DEBUG("Added descriptor pool: 0x{:x}", reinterpret_cast<uintptr_t>(descriptorPool));
         }
     }
     void addDescriptorSet(VkDescriptorSet set) {
         if (set != VK_NULL_HANDLE) {
             descriptorSets_.push_back(set);
-            LOG_DEBUG(std::format("Added descriptor set: {:p}", static_cast<void*>(set)));
+            LOG_DEBUG("Added descriptor set: 0x{:x}", reinterpret_cast<uintptr_t>(set));
         }
     }
     void addCommandPool(VkCommandPool commandPool) {
         if (commandPool != VK_NULL_HANDLE) {
             commandPools_.push_back(commandPool);
-            LOG_DEBUG(std::format("Added command pool: {:p}", static_cast<void*>(commandPool)));
+            LOG_DEBUG("Added command pool: 0x{:x}", reinterpret_cast<uintptr_t>(commandPool));
         }
     }
     void addRenderPass(VkRenderPass renderPass) {
         if (renderPass != VK_NULL_HANDLE) {
             renderPasses_.push_back(renderPass);
-            LOG_DEBUG(std::format("Added render pass: {:p}", static_cast<void*>(renderPass)));
+            LOG_DEBUG("Added render pass: 0x{:x}", reinterpret_cast<uintptr_t>(renderPass));
         }
     }
     void addDescriptorSetLayout(VkDescriptorSetLayout layout) {
         if (layout != VK_NULL_HANDLE) {
             descriptorSetLayouts_.push_back(layout);
-            LOG_DEBUG(std::format("Added descriptor set layout: {:p}", static_cast<void*>(layout)));
+            LOG_DEBUG("Added descriptor set layout: 0x{:x}", reinterpret_cast<uintptr_t>(layout));
         }
     }
     void addPipelineLayout(VkPipelineLayout layout) {
         if (layout != VK_NULL_HANDLE) {
             pipelineLayouts_.push_back(layout);
-            LOG_DEBUG(std::format("Added pipeline layout: {:p}", static_cast<void*>(layout)));
+            LOG_DEBUG("Added pipeline layout: 0x{:x}", reinterpret_cast<uintptr_t>(layout));
         }
     }
     void addPipeline(VkPipeline pipeline, const std::string& name = "") {
         if (pipeline != VK_NULL_HANDLE) {
             pipelines_.push_back(pipeline);
             if (!name.empty()) pipelineMap_[name] = pipeline;
-            LOG_DEBUG(std::format("Added pipeline: {:p} ({})", static_cast<void*>(pipeline), name));
+            LOG_DEBUG("Added pipeline: 0x{:x} ({})", reinterpret_cast<uintptr_t>(pipeline), name);
         }
     }
     void addShaderModule(VkShaderModule module) {
         if (module != VK_NULL_HANDLE) {
             shaderModules_.push_back(module);
-            LOG_DEBUG(std::format("Added shader module: {:p}", static_cast<void*>(module)));
+            LOG_DEBUG("Added shader module: 0x{:x}", reinterpret_cast<uintptr_t>(module));
+        }
+    }
+
+    // ← NEW: addFence
+    void addFence(VkFence fence) {
+        if (fence != VK_NULL_HANDLE) {
+            fences_.push_back(fence);
+            LOG_DEBUG("Added fence: 0x{:x}", reinterpret_cast<uintptr_t>(fence));
         }
     }
 
@@ -170,7 +181,7 @@ public:
         auto it = std::find(buffers_.begin(), buffers_.end(), buffer);
         if (it != buffers_.end()) {
             buffers_.erase(it);
-            LOG_DEBUG(std::format("Removed buffer: {:p}", static_cast<void*>(buffer)));
+            LOG_DEBUG("Removed buffer: 0x{:x}", reinterpret_cast<uintptr_t>(buffer));
         }
     }
     void removeMemory(VkDeviceMemory memory) {
@@ -178,7 +189,7 @@ public:
         auto it = std::find(memories_.begin(), memories_.end(), memory);
         if (it != memories_.end()) {
             memories_.erase(it);
-            LOG_DEBUG(std::format("Removed memory: {:p}", static_cast<void*>(memory)));
+            LOG_DEBUG("Removed memory: 0x{:x}", reinterpret_cast<uintptr_t>(memory));
         }
     }
     void removeImageView(VkImageView view) {
@@ -186,7 +197,7 @@ public:
         auto it = std::find(imageViews_.begin(), imageViews_.end(), view);
         if (it != imageViews_.end()) {
             imageViews_.erase(it);
-            LOG_DEBUG(std::format("Removed image view: {:p}", static_cast<void*>(view)));
+            LOG_DEBUG("Removed image view: 0x{:x}", reinterpret_cast<uintptr_t>(view));
         }
     }
     void removeImage(VkImage image) {
@@ -194,7 +205,7 @@ public:
         auto it = std::find(images_.begin(), images_.end(), image);
         if (it != images_.end()) {
             images_.erase(it);
-            LOG_DEBUG(std::format("Removed image: {:p}", static_cast<void*>(image)));
+            LOG_DEBUG("Removed image: 0x{:x}", reinterpret_cast<uintptr_t>(image));
         }
     }
     void removeAccelerationStructure(VkAccelerationStructureKHR as) {
@@ -202,7 +213,7 @@ public:
         auto it = std::find(accelerationStructures_.begin(), accelerationStructures_.end(), as);
         if (it != accelerationStructures_.end()) {
             accelerationStructures_.erase(it);
-            LOG_DEBUG(std::format("Removed acceleration structure: {:p}", static_cast<void*>(as)));
+            LOG_DEBUG("Removed acceleration structure: 0x{:x}", reinterpret_cast<uintptr_t>(as));
         }
     }
     void removeDescriptorPool(VkDescriptorPool descriptorPool) {
@@ -210,7 +221,7 @@ public:
         auto it = std::find(descriptorPools_.begin(), descriptorPools_.end(), descriptorPool);
         if (it != descriptorPools_.end()) {
             descriptorPools_.erase(it);
-            LOG_DEBUG(std::format("Removed descriptor pool: {:p}", static_cast<void*>(descriptorPool)));
+            LOG_DEBUG("Removed descriptor pool: 0x{:x}", reinterpret_cast<uintptr_t>(descriptorPool));
         }
     }
     void removeDescriptorSet(VkDescriptorSet set) {
@@ -218,7 +229,7 @@ public:
         auto it = std::find(descriptorSets_.begin(), descriptorSets_.end(), set);
         if (it != descriptorSets_.end()) {
             descriptorSets_.erase(it);
-            LOG_DEBUG(std::format("Removed descriptor set: {:p}", static_cast<void*>(set)));
+            LOG_DEBUG("Removed descriptor set: 0x{:x}", reinterpret_cast<uintptr_t>(set));
         }
     }
     void removeCommandPool(VkCommandPool commandPool) {
@@ -226,7 +237,7 @@ public:
         auto it = std::find(commandPools_.begin(), commandPools_.end(), commandPool);
         if (it != commandPools_.end()) {
             commandPools_.erase(it);
-            LOG_DEBUG(std::format("Removed command pool: {:p}", static_cast<void*>(commandPool)));
+            LOG_DEBUG("Removed command pool: 0x{:x}", reinterpret_cast<uintptr_t>(commandPool));
         }
     }
     void removeRenderPass(VkRenderPass renderPass) {
@@ -234,7 +245,7 @@ public:
         auto it = std::find(renderPasses_.begin(), renderPasses_.end(), renderPass);
         if (it != renderPasses_.end()) {
             renderPasses_.erase(it);
-            LOG_DEBUG(std::format("Removed render pass: {:p}", static_cast<void*>(renderPass)));
+            LOG_DEBUG("Removed render pass: 0x{:x}", reinterpret_cast<uintptr_t>(renderPass));
         }
     }
     void removeDescriptorSetLayout(VkDescriptorSetLayout layout) {
@@ -242,7 +253,7 @@ public:
         auto it = std::find(descriptorSetLayouts_.begin(), descriptorSetLayouts_.end(), layout);
         if (it != descriptorSetLayouts_.end()) {
             descriptorSetLayouts_.erase(it);
-            LOG_DEBUG(std::format("Removed descriptor set layout: {:p}", static_cast<void*>(layout)));
+            LOG_DEBUG("Removed descriptor set layout: 0x{:x}", reinterpret_cast<uintptr_t>(layout));
         }
     }
     void removePipelineLayout(VkPipelineLayout layout) {
@@ -250,7 +261,7 @@ public:
         auto it = std::find(pipelineLayouts_.begin(), pipelineLayouts_.end(), layout);
         if (it != pipelineLayouts_.end()) {
             pipelineLayouts_.erase(it);
-            LOG_DEBUG(std::format("Removed pipeline layout: {:p}", static_cast<void*>(layout)));
+            LOG_DEBUG("Removed pipeline layout: 0x{:x}", reinterpret_cast<uintptr_t>(layout));
         }
     }
     void removePipeline(VkPipeline pipeline) {
@@ -262,7 +273,7 @@ public:
                 if (mapIt->second == pipeline) mapIt = pipelineMap_.erase(mapIt);
                 else ++mapIt;
             }
-            LOG_DEBUG(std::format("Removed pipeline: {:p}", static_cast<void*>(pipeline)));
+            LOG_DEBUG("Removed pipeline: 0x{:x}", reinterpret_cast<uintptr_t>(pipeline));
         }
     }
     void removeShaderModule(VkShaderModule module) {
@@ -270,7 +281,17 @@ public:
         auto it = std::find(shaderModules_.begin(), shaderModules_.end(), module);
         if (it != shaderModules_.end()) {
             shaderModules_.erase(it);
-            LOG_DEBUG(std::format("Removed shader module: {:p}", static_cast<void*>(module)));
+            LOG_DEBUG("Removed shader module: 0x{:x}", reinterpret_cast<uintptr_t>(module));
+        }
+    }
+
+    // ← NEW: removeFence
+    void removeFence(VkFence fence) {
+        if (fence == VK_NULL_HANDLE) return;
+        auto it = std::find(fences_.begin(), fences_.end(), fence);
+        if (it != fences_.end()) {
+            fences_.erase(it);
+            LOG_DEBUG("Removed fence: 0x{:x}", reinterpret_cast<uintptr_t>(fence));
         }
     }
 
@@ -288,6 +309,7 @@ public:
     bool hasPipelineLayout(VkPipelineLayout layout) const { return std::find(pipelineLayouts_.begin(), pipelineLayouts_.end(), layout) != pipelineLayouts_.end(); }
     bool hasPipeline(VkPipeline pipeline) const { return std::find(pipelines_.begin(), pipelines_.end(), pipeline) != pipelines_.end(); }
     bool hasShaderModule(VkShaderModule module) const { return std::find(shaderModules_.begin(), shaderModules_.end(), module) != shaderModules_.end(); }
+    bool hasFence(VkFence fence) const { return std::find(fences_.begin(), fences_.end(), fence) != fences_.end(); }
 
     // === Getters (CONST) ===
     const std::vector<VkBuffer>& getBuffers() const { return buffers_; }
@@ -303,6 +325,7 @@ public:
     const std::vector<VkPipelineLayout>& getPipelineLayouts() const { return pipelineLayouts_; }
     const std::vector<VkPipeline>& getPipelines() const { return pipelines_; }
     const std::vector<VkShaderModule>& getShaderModules() const { return shaderModules_; }
+    const std::vector<VkFence>& getFences() const { return fences_; }
 
     // === MUTABLE GETTERS (FOR cleanupAll()) ===
     std::vector<VkBuffer>& getBuffersMutable() { return buffers_; }
@@ -318,6 +341,7 @@ public:
     std::vector<VkPipelineLayout>& getPipelineLayoutsMutable() { return pipelineLayouts_; }
     std::vector<VkPipeline>& getPipelinesMutable() { return pipelines_; }
     std::vector<VkShaderModule>& getShaderModulesMutable() { return shaderModules_; }
+    std::vector<VkFence>& getFencesMutable() { return fences_; }
 
     void setDevice(VkDevice newDevice, VkPhysicalDevice physicalDevice, const VkDevice* contextDevicePtr = nullptr) {
         if (newDevice == VK_NULL_HANDLE) {
@@ -327,7 +351,7 @@ public:
         device_ = newDevice;
         physicalDevice_ = physicalDevice;
         contextDevicePtr_ = contextDevicePtr;
-        LOG_INFO(std::format("Resource manager device set: {:p}", static_cast<void*>(device_)));
+        LOG_INFO("Resource manager device set: 0x{:x}", reinterpret_cast<uintptr_t>(device_));
     }
     VkDevice getDevice() const { return contextDevicePtr_ ? *contextDevicePtr_ : device_; }
     VkPhysicalDevice getPhysicalDevice() const { return physicalDevice_; }
@@ -335,7 +359,7 @@ public:
     VkPipeline getPipeline(const std::string& name) const {
         auto it = pipelineMap_.find(name);
         if (it != pipelineMap_.end()) return it->second;
-        LOG_WARNING(std::format("Pipeline '{}' not found", name));
+        LOG_WARNING("Pipeline '{}' not found", name);
         return VK_NULL_HANDLE;
     }
 
@@ -378,16 +402,15 @@ struct Context {
 
     VkPhysicalDeviceMemoryProperties memoryProperties;
 
+    // --- SWAPCHAIN OWNED BY CONTEXT ---
     VkSwapchainKHR swapchain = VK_NULL_HANDLE;
     VkFormat swapchainImageFormat = VK_FORMAT_UNDEFINED;
     std::vector<VkImage> swapchainImages;
     std::vector<VkImageView> swapchainImageViews;
-
-    std::unique_ptr<VulkanRTX::VulkanSwapchainManager> swapchainManager;
+    VkExtent2D swapchainExtent = {0, 0};
 
     int width = 0;
     int height = 0;
-    VkExtent2D swapchainExtent = {0, 0};
 
     VkDescriptorSetLayout rayTracingDescriptorSetLayout = VK_NULL_HANDLE;
     VkDescriptorSetLayout graphicsDescriptorSetLayout = VK_NULL_HANDLE;
@@ -495,7 +518,7 @@ struct Context {
           swapchainExtent{static_cast<uint32_t>(w), static_cast<uint32_t>(h)}
     {
         LOG_INFO_CAT("Vulkan::Context",
-                     "{}Created with window @ {}x{}{}",
+                     "Created with window @ {}x{}{}",
                      Logging::Color::ARCTIC_CYAN, w, h, Logging::Color::RESET);
     }
 
@@ -508,25 +531,36 @@ struct Context {
     ~Context() {
         if (device) {
             vkDeviceWaitIdle(device);
+            destroySwapchain();
             resourceManager.cleanup(device);
         }
     }
 
+    // --- SWAPCHAIN LIFECYCLE ---
+    void createSwapchain();
+    void destroySwapchain();
+
+    // --- BUFFER MANAGER ACCESS ---
     VulkanBufferManager* getBufferManager() { return resourceManager.getBufferManager(); }
     const VulkanBufferManager* getBufferManager() const { return resourceManager.getBufferManager(); }
+    void setBufferManager(VulkanBufferManager* mgr) { resourceManager.setBufferManager(mgr); }
+
+    // --- RESOURCE MANAGER ACCESS ---
+    VulkanResourceManager& getResourceManager() { return resourceManager; }
+    const VulkanResourceManager& getResourceManager() const { return resourceManager; }
 };
 
 } // namespace Vulkan
 
 #include "engine/Vulkan/VulkanBufferManager.hpp"
-#include "engine/Vulkan/VulkanSwapchainManager.hpp"
 
 namespace VulkanInitializer {
     void copyBuffer(VkDevice device, VkCommandPool commandPool, VkQueue queue,
                     VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size);
 
     void createAccelerationStructures(Vulkan::Context& context, VulkanBufferManager& bufferManager,
-                                     std::span<const glm::vec3> vertices, std::span<const uint32_t> indices);
+                                     const glm::vec3* vertices, size_t vertexCount,
+                                     const uint32_t* indices, size_t indexCount);
 
     void createStorageImage(VkDevice device, VkPhysicalDevice physicalDevice, VkImage& image,
                            VkDeviceMemory& memory, VkImageView& view, uint32_t width, uint32_t height,

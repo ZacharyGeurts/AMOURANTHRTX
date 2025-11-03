@@ -38,44 +38,9 @@ struct DestroyTracker {
         return std::hash<void*>{}(ptr) & HASH_MASK;
     }
 
-    static void ensureCapacity(uint64_t hash) {
-        size_t word = hash / CHUNK_BITS;
-        size_t needed = word + 1;
-
-        size_t current = s_capacity.load(std::memory_order_acquire);
-        if (current >= needed) return;
-
-        size_t newCap = current ? current * 2 : 64;
-        if (newCap < needed) newCap = needed;
-
-        auto* newArray = new std::atomic<uint64_t>[newCap]();
-        for (size_t i = 0; i < current; ++i) {
-            newArray[i].store(s_bitset[i].load(std::memory_order_relaxed), std::memory_order_relaxed);
-        }
-
-        auto* old = s_bitset;
-        s_bitset = newArray;
-        s_capacity.store(newCap, std::memory_order_release);
-
-        if (old) delete[] old;
-    }
-
-    static void markDestroyed(void* ptr) {
-        uint64_t h = hash(ptr);
-        ensureCapacity(h);
-        size_t word = h / CHUNK_BITS;
-        uint64_t bit = 1ULL << (h % CHUNK_BITS);
-        s_bitset[word].fetch_or(bit, std::memory_order_release);
-    }
-
-    static bool isDestroyed(void* ptr) {
-        uint64_t h = hash(ptr);
-        size_t current = s_capacity.load(std::memory_order_acquire);
-        size_t word = h / CHUNK_BITS;
-        if (word >= current) return false;
-        uint64_t bit = 1ULL << (h % CHUNK_BITS);
-        return (s_bitset[word].load(std::memory_order_acquire) & bit) != 0;
-    }
+    static void ensureCapacity(uint64_t hash);
+    static void markDestroyed(void* ptr);
+    static bool isDestroyed(void* ptr);
 };
 
 // Helper: Log and detect double-free
@@ -202,7 +167,7 @@ inline void quitSDL() noexcept { SDL_Quit(); }
 inline void destroyWindow(SDL_Window* w) { if (w) SDL_DestroyWindow(w); }
 struct SDLWindowDeleter { void operator()(SDL_Window* w) const { destroyWindow(w); } };
 
-// Global cleanup
+// Global cleanup – **only one overload**
 void cleanupAll(Vulkan::Context& ctx) noexcept;
 
 } // namespace Dispose

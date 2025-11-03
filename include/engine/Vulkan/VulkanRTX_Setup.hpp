@@ -1,11 +1,14 @@
 // include/engine/Vulkan/VulkanRTX_Setup.hpp
 // AMOURANTH RTX Engine (C) 2025 by Zachary Geurts gzac5314@gmail.com
-// FINAL: RAII, FULLY FIXED, NO LEAKS, NO WARNINGS
-//        ADDED: getBLAS() and getTLAS() public getters
-//        Safe for VulkanRenderer::handleResize() to rebuild TLAS
+// FINAL: NO Dispose::VulkanHandle → RAW HANDLES + ResourceManager
+//        Fence-based transient submits → NO vkQueueWaitIdle() → NO SEGFAULT
+//        ShaderBindingTable → VkStridedDeviceAddressRegionKHR (Vulkan spec compliant)
+//        ALL FUNCTION POINTERS LOADED — NO SEGFAULT
+//        FIXED: VK_CHECK(2 args), VulkanRTXException(1-arg + 4-arg), THROW_VKRTX
 
 #pragma once
 
+#include "engine/Vulkan/VulkanCommon.hpp"
 #include <vulkan/vulkan.h>
 #include <glm/glm.hpp>
 #include <memory>
@@ -15,13 +18,14 @@
 #include <cstdint>
 #include <sstream>
 
-#include "engine/Dispose.hpp"
-#include "engine/Vulkan/VulkanCommon.hpp"
 #include "engine/logging.hpp"
 
 namespace Vulkan { struct Context; }
-namespace VulkanRTX { class VulkanPipelineManager; }
 
+// ---------------------------------------------------------------------
+// VK_CHECK – 2 arguments: (result, "message")
+// Throws VulkanRTXException(msg) on error
+// ---------------------------------------------------------------------
 #define VK_CHECK(result, msg) \
     do { \
         VkResult __r = (result); \
@@ -32,6 +36,16 @@ namespace VulkanRTX { class VulkanPipelineManager; }
             throw VulkanRTXException(__oss.str()); \
         } \
     } while (0)
+
+// ---------------------------------------------------------------------
+// Helper macro for throwing with file/line/function (use in .cpp)
+// ---------------------------------------------------------------------
+#define THROW_VKRTX(msg) \
+    throw VulkanRTXException(msg, __FILE__, __LINE__, __func__)
+
+inline constexpr uint32_t alignUp(uint32_t value, uint32_t alignment) {
+    return (value + alignment - 1) & ~(alignment - 1);
+}
 
 /* -------------------------------------------------------------
    Function-pointer typedefs (KHR extensions)
@@ -59,7 +73,7 @@ using PFN_vkGetAccelerationStructureBuildSizesKHR = void (*)(VkDevice, VkAcceler
     const VkAccelerationStructureBuildGeometryInfoKHR*, const uint32_t*, VkAccelerationStructureBuildSizesInfoKHR*);
 
 /* -------------------------------------------------------------
-   Descriptor-related KHR function pointers
+   Descriptor-related function pointers (CORE VULKAN — MUST BE LOADED)
    ------------------------------------------------------------- */
 using PFN_vkCreateDescriptorSetLayout   = VkResult (*)(VkDevice, const VkDescriptorSetLayoutCreateInfo*, const VkAllocationCallbacks*, VkDescriptorSetLayout*);
 using PFN_vkAllocateDescriptorSets      = VkResult (*)(VkDevice, const VkDescriptorSetAllocateInfo*, VkDescriptorSet*);
@@ -84,27 +98,46 @@ enum class DescriptorBindings : uint32_t {
     AlphaTex           = 10
 };
 
-class VulkanRTXException : public std::runtime_error {
-public:
-    explicit VulkanRTXException(const std::string& msg)
-        : std::runtime_error(msg) {}
+struct DimensionState {
+    uint32_t width;
+    uint32_t height;
 };
 
-/* -------------------------------------------------------------
-   ShaderBindingTable – UNIFIED & FINAL
-   Uses .deviceAddress to match VulkanCommon.hpp and VulkanPipelineManager
-   NO CONVERSION OPERATOR → ELIMINATES -Wclass-conversion
-   ------------------------------------------------------------- */
+// -------------------------------------------------------------
+// VulkanRTXException – supports both 1-arg and 4-arg
+// -------------------------------------------------------------
+class VulkanRTXException : public std::runtime_error {
+public:
+    // 1-argument: used by VK_CHECK and legacy code
+    explicit VulkanRTXException(const std::string& msg)
+        : std::runtime_error(msg), m_line(0) {}
+
+    // 4-argument: used by THROW_VKRTX for full debug info
+    VulkanRTXException(const std::string& msg, const char* file, int line, const char* func)
+        : std::runtime_error(msg)
+        , m_file(file)
+        , m_line(line)
+        , m_function(func)
+    {}
+
+    const char* file()     const noexcept { return m_file.c_str(); }
+    int         line()     const noexcept { return m_line; }
+    const char* function() const noexcept { return m_function.c_str(); }
+
+private:
+    std::string m_file;
+    int         m_line = 0;
+    std::string m_function;
+};
+
+// Forward declaration
+class VulkanPipelineManager;
+
 struct ShaderBindingTable {
-    struct Region {
-        VkDeviceAddress deviceAddress = 0;
-        VkDeviceSize    size          = 0;
-        VkDeviceSize    stride        = 0;
-    };
-    Region raygen;
-    Region miss;
-    Region hit;
-    Region callable;
+    VkStridedDeviceAddressRegionKHR raygen;
+    VkStridedDeviceAddressRegionKHR miss;
+    VkStridedDeviceAddressRegionKHR hit;
+    VkStridedDeviceAddressRegionKHR callable;
 };
 
 class VulkanRTX {
@@ -121,7 +154,12 @@ public:
     void updateRTX(VkPhysicalDevice physicalDevice, VkCommandPool commandPool,
                    VkQueue graphicsQueue,
                    const std::vector<std::tuple<VkBuffer, VkBuffer, uint32_t, uint32_t, uint64_t>>& geometries,
-                   const std::vector<DimensionState>& dimensionCache);
+                   const std::vector<DimensionState>& dimensionCache); 
+    void updateRTX(VkPhysicalDevice physicalDevice, VkCommandPool commandPool,
+                   VkQueue graphicsQueue,
+                   const std::vector<std::tuple<VkBuffer, VkBuffer, uint32_t, uint32_t, uint64_t>>& geometries,
+                   const std::vector<DimensionState>& dimensionCache,
+                   uint32_t transferQueueFamily);
 
     void createDescriptorSetLayout();
     void createDescriptorPoolAndSet();
@@ -129,7 +167,8 @@ public:
     void createShaderBindingTable(VkPhysicalDevice physicalDevice);
     void createBottomLevelAS(VkPhysicalDevice physicalDevice, VkCommandPool commandPool,
                              VkQueue queue,
-                             const std::vector<std::tuple<VkBuffer, VkBuffer, uint32_t, uint32_t, uint64_t>>& geometries);
+                             const std::vector<std::tuple<VkBuffer, VkBuffer, uint32_t, uint32_t, uint64_t>>& geometries,
+                             uint32_t transferQueueFamily = VK_QUEUE_FAMILY_IGNORED);
     void createTopLevelAS(VkPhysicalDevice physicalDevice, VkCommandPool commandPool,
                           VkQueue queue,
                           const std::vector<std::tuple<VkAccelerationStructureKHR, glm::mat4>>& instances);
@@ -144,18 +183,26 @@ public:
     void createBlackFallbackImage();
 
     // PUBLIC GETTERS
-    VkDescriptorSet getDescriptorSet() const { return ds_.get(); }
-    VkPipeline getPipeline() const { return rtPipeline_; }  // ← NON-OWNING
+    VkDescriptorSet getDescriptorSet() const { return ds_; }
+    VkPipeline getPipeline() const { return rtPipeline_; }
     const ShaderBindingTable& getSBT() const { return sbt_; }
-    VkDescriptorSetLayout getDescriptorSetLayout() const { return dsLayout_.get(); }
+    VkDescriptorSetLayout getDescriptorSetLayout() const { return dsLayout_; }
 
-    // FIXED: PUBLIC SBT ACCESS
-    VkBuffer       getSBTBuffer() const { return sbtBuffer_.get(); }
-    VkDeviceMemory getSBTMemory() const { return sbtMemory_.get(); }
+    VkBuffer       getSBTBuffer() const { return sbtBuffer_; }
+    VkDeviceMemory getSBTMemory() const { return sbtMemory_; }
 
-    // ADDED: PUBLIC BLAS/TLAS ACCESS FOR RESIZE REBUILD
-    VkAccelerationStructureKHR getBLAS() const { return blas_.get(); }
-    VkAccelerationStructureKHR getTLAS() const { return tlas_.get(); }
+    VkAccelerationStructureKHR getBLAS() const { return blas_; }
+    VkAccelerationStructureKHR getTLAS() const { return tlas_; }
+
+    void traceRays(VkCommandBuffer cmd, const VkStridedDeviceAddressRegionKHR* raygen,
+                   const VkStridedDeviceAddressRegionKHR* miss, const VkStridedDeviceAddressRegionKHR* hit,
+                   const VkStridedDeviceAddressRegionKHR* callable, uint32_t width, uint32_t height, uint32_t depth) const {
+        if (vkCmdTraceRaysKHR) {
+            vkCmdTraceRaysKHR(cmd, raygen, miss, hit, callable, width, height, depth);
+        } else {
+            throw std::runtime_error("vkCmdTraceRaysKHR not loaded");
+        }
+    }
 
     void setRayTracingPipeline(VkPipeline pipeline, VkPipelineLayout layout);
 
@@ -165,15 +212,15 @@ private:
     void uploadBlackPixelToImage(VkImage image);
     void createBuffer(VkPhysicalDevice physicalDevice, VkDeviceSize size,
                       VkBufferUsageFlags usage, VkMemoryPropertyFlags properties,
-                      Dispose::VulkanHandle<VkBuffer>& buffer,
-                      Dispose::VulkanHandle<VkDeviceMemory>& memory);
+                      VkBuffer& buffer, VkDeviceMemory& memory);
     uint32_t findMemoryType(VkPhysicalDevice physicalDevice, uint32_t typeFilter,
                             VkMemoryPropertyFlags properties);
     void compactAccelerationStructures(VkPhysicalDevice physicalDevice, VkCommandPool commandPool, VkQueue queue);
     void createStorageImage(VkPhysicalDevice physicalDevice, VkExtent2D extent,
-                            Dispose::VulkanHandle<VkImage>& image,
-                            Dispose::VulkanHandle<VkImageView>& imageView,
-                            Dispose::VulkanHandle<VkDeviceMemory>& memory);
+                            VkImage& image, VkImageView& imageView, VkDeviceMemory& memory);
+
+    void cleanupBLASResources(VkBuffer asBuffer, VkDeviceMemory asMemory,
+                              VkBuffer scratchBuffer, VkDeviceMemory scratchMemory);
 
     std::shared_ptr<Vulkan::Context> context_;
     VulkanPipelineManager* pipelineMgr_ = nullptr;
@@ -181,25 +228,23 @@ private:
     VkPhysicalDevice physicalDevice_ = VK_NULL_HANDLE;
     VkExtent2D extent_{};
 
-    // RAII Handles
-    Dispose::VulkanHandle<VkDescriptorSetLayout> dsLayout_;
-    Dispose::VulkanHandle<VkDescriptorPool> dsPool_;
-    Dispose::VulkanHandle<VkDescriptorSet> ds_;
+    // RAW HANDLES – NO Dispose::VulkanHandle
+    VkDescriptorSetLayout dsLayout_ = VK_NULL_HANDLE;
+    VkDescriptorPool dsPool_ = VK_NULL_HANDLE;
+    VkDescriptorSet ds_ = VK_NULL_HANDLE;
 
-    // REMOVED: rtPipelineLayout_ & rtPipeline_ from RAII
-    // NOW: NON-OWNING RAW POINTERS
     VkPipeline rtPipeline_ = VK_NULL_HANDLE;
     VkPipelineLayout rtPipelineLayout_ = VK_NULL_HANDLE;
 
-    Dispose::VulkanHandle<VkBuffer> blasBuffer_;
-    Dispose::VulkanHandle<VkDeviceMemory> blasMemory_;
-    Dispose::VulkanHandle<VkBuffer> tlasBuffer_;
-    Dispose::VulkanHandle<VkDeviceMemory> tlasMemory_;
-    Dispose::VulkanHandle<VkAccelerationStructureKHR> blas_;
-    Dispose::VulkanHandle<VkAccelerationStructureKHR> tlas_;
+    VkBuffer blasBuffer_ = VK_NULL_HANDLE;
+    VkDeviceMemory blasMemory_ = VK_NULL_HANDLE;
+    VkBuffer tlasBuffer_ = VK_NULL_HANDLE;
+    VkDeviceMemory tlasMemory_ = VK_NULL_HANDLE;
+    VkAccelerationStructureKHR blas_ = VK_NULL_HANDLE;
+    VkAccelerationStructureKHR tlas_ = VK_NULL_HANDLE;
 
-    Dispose::VulkanHandle<VkBuffer> sbtBuffer_;
-    Dispose::VulkanHandle<VkDeviceMemory> sbtMemory_;
+    VkBuffer sbtBuffer_ = VK_NULL_HANDLE;
+    VkDeviceMemory sbtMemory_ = VK_NULL_HANDLE;
 
     std::vector<uint32_t> primitiveCounts_;
     std::vector<uint32_t> previousPrimitiveCounts_;
@@ -209,9 +254,9 @@ private:
     ShaderBindingTable sbt_;
     VkDeviceAddress sbtBufferAddress_ = 0;
 
-    Dispose::VulkanHandle<VkImage> blackFallbackImage_;
-    Dispose::VulkanHandle<VkDeviceMemory> blackFallbackMemory_;
-    Dispose::VulkanHandle<VkImageView> blackFallbackView_;
+    VkImage blackFallbackImage_ = VK_NULL_HANDLE;
+    VkDeviceMemory blackFallbackMemory_ = VK_NULL_HANDLE;
+    VkImageView blackFallbackView_ = VK_NULL_HANDLE;
 
     // KHR function pointers
     PFN_vkGetBufferDeviceAddress vkGetBufferDeviceAddress = nullptr;
@@ -225,12 +270,17 @@ private:
     PFN_vkCmdCopyAccelerationStructureKHR vkCmdCopyAccelerationStructureKHR = nullptr;
     PFN_vkCmdBuildAccelerationStructuresKHR vkCmdBuildAccelerationStructuresKHR = nullptr;
 
+    // CORE DESCRIPTOR FUNCTION POINTERS
     PFN_vkCreateDescriptorSetLayout   vkCreateDescriptorSetLayout   = nullptr;
     PFN_vkAllocateDescriptorSets      vkAllocateDescriptorSets      = nullptr;
     PFN_vkCreateDescriptorPool        vkCreateDescriptorPool        = nullptr;
     PFN_vkDestroyDescriptorSetLayout  vkDestroyDescriptorSetLayout  = nullptr;
     PFN_vkDestroyDescriptorPool       vkDestroyDescriptorPool       = nullptr;
     PFN_vkFreeDescriptorSets          vkFreeDescriptorSets          = nullptr;
+
+    // Transient fence
+    VkFence transientFence_ = VK_NULL_HANDLE;
+    bool deviceLost_ = false;
 };
 
 } // namespace VulkanRTX

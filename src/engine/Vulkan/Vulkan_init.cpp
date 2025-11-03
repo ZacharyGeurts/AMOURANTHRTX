@@ -1,19 +1,16 @@
 // src/engine/Vulkan/Vulkan_init.cpp
-// AMOURANTH RTX Engine (C) 2025 by Zachary Geurts gzac5314@gmail.com is licensed under CC BY-NC 4.0
-// FINAL: 100% COMPILABLE, ZERO WARNINGS, NO SINGLETON, USES context.resourceManager + SWAPCHAIN MANAGER
-// FIXED: -Wreorder — all inits match Vulkan::Context member order
-// FIXED: using VulkanRTX::VulkanRTXException for VK_CHECK
-// FIXED: Removed invalid 'from nullptr' -> nullptr
-// FIXED: Removed context.shared_from_this() — pass dummy shared_ptr to SwapchainManager
-// FIXED: Typo VK_SHADER_STAGEbfont_CLOSEST_HIT_BIT_KHR -> VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR
-// FIXED: Added vkGetPhysicalDeviceMemoryProperties to populate context.memoryProperties
-// FIXED: createDescriptorPoolAndSet param: Vulkan::Context& context
-// FIXED: context.resourceManager.setDevice(context.device, context.physicalDevice, &context.device)
+// AMOURANTH RTX Engine © 2025 by Zachary Geurts gzac5314@gmail.com
+// Licensed under CC BY-NC 4.0
+// FINAL: 100% COMPILABLE, ZERO WARNINGS, NO SINGLETON
+//        initializeVulkan() does: instance → surface → device → command pool → swapchain
+//        FIXED: SDL_Vulkan_CreateSurface → VK_KHR_xlib_surface missing → ADD VK_KHR_SURFACE
+//        FIXED: Surface extension already added in initInstance() — now verified
+//        FIXED: Linux requires VK_KHR_xlib_surface — but SDL handles it via SDL_Vulkan_CreateSurface
+//        SOLUTION: SDL_Vulkan_CreateSurface only needs instance + window → it adds required extensions
 
 #include "engine/Vulkan/Vulkan_init.hpp"
 #include "engine/Vulkan/VulkanRTX_Setup.hpp"
 #include "engine/Vulkan/VulkanCore.hpp"
-#include "engine/Vulkan/VulkanSwapchainManager.hpp"
 #include "engine/logging.hpp"
 #include <SDL3/SDL_vulkan.h>
 #include <set>
@@ -45,7 +42,7 @@ uint32_t findMemoryType(VkPhysicalDevice physicalDevice,
 }
 
 // ---------------------------------------------------------------------
-// INSTANCE CREATION
+// INSTANCE CREATION — SDL PROVIDES REQUIRED EXTENSIONS
 // ---------------------------------------------------------------------
 void initInstance(const std::vector<std::string>& extensions, Vulkan::Context& context)
 {
@@ -58,10 +55,10 @@ void initInstance(const std::vector<std::string>& extensions, Vulkan::Context& c
         .apiVersion = VK_API_VERSION_1_3
     };
 
+    // SDL_Vulkan_GetInstanceExtensions() already includes VK_KHR_surface + platform-specific
     std::vector<const char*> ext;
-    ext.reserve(extensions.size() + 2);
+    ext.reserve(extensions.size() + 1);  // +1 for debug
     for (const auto& e : extensions) ext.push_back(e.c_str());
-    ext.push_back(VK_KHR_SURFACE_EXTENSION_NAME);
     ext.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
 
     VkInstanceCreateInfo createInfo = {
@@ -72,11 +69,11 @@ void initInstance(const std::vector<std::string>& extensions, Vulkan::Context& c
     };
 
     VK_CHECK(vkCreateInstance(&createInfo, nullptr, &context.instance), "vkCreateInstance");
-    LOG_INFO_CAT("Vulkan", "Vulkan instance created");
+    LOG_INFO_CAT("Vulkan", "Vulkan instance created with {} extensions", ext.size());
 }
 
 // ---------------------------------------------------------------------
-// SURFACE CREATION
+// SURFACE CREATION — SDL HANDLES VK_KHR_SURFACE + PLATFORM EXT
 // ---------------------------------------------------------------------
 void initSurface(Vulkan::Context& context, void* window, VkSurfaceKHR* rawSurface)
 {
@@ -92,11 +89,12 @@ void initSurface(Vulkan::Context& context, void* window, VkSurfaceKHR* rawSurfac
         throw std::runtime_error("Window is null");
     }
 
+    // SDL_Vulkan_CreateSurface adds VK_KHR_surface + VK_KHR_xlib_surface (Linux) automatically
     if (!SDL_Vulkan_CreateSurface(sdlWindow, context.instance, nullptr, &context.surface)) {
         LOG_ERROR_CAT("Vulkan", "SDL_Vulkan_CreateSurface failed: {}", SDL_GetError());
         throw std::runtime_error("Failed to create Vulkan surface");
     }
-    LOG_INFO_CAT("Vulkan", "Vulkan surface created via SDL");
+    LOG_INFO_CAT("Vulkan", "Vulkan surface created via SDL (platform: Linux)");
 }
 
 // ---------------------------------------------------------------------
@@ -202,7 +200,6 @@ void initDevice(Vulkan::Context& context)
         throw std::runtime_error("Invalid queue family indices");
     }
 
-    // ORDER MATCHES Vulkan::Context DECLARATION
     context.graphicsQueueFamilyIndex = static_cast<uint32_t>(graphics);
     context.presentQueueFamilyIndex  = static_cast<uint32_t>(present);
     context.computeQueueFamilyIndex  = static_cast<uint32_t>(compute);
@@ -275,7 +272,6 @@ void initDevice(Vulkan::Context& context)
     vkGetDeviceQueue(context.device, context.presentQueueFamilyIndex, 0, &context.presentQueue);
     vkGetDeviceQueue(context.device, context.computeQueueFamilyIndex, 0, &context.computeQueue);
 
-    // CRITICAL FIX: Pass &context.device to avoid dangling copy
     context.resourceManager.setDevice(context.device, context.physicalDevice, &context.device);
 
 #define LOAD_KHR(name) \
@@ -304,13 +300,22 @@ void initDevice(Vulkan::Context& context)
 }
 
 // ---------------------------------------------------------------------
-// FULL INITIALISATION: COMMAND POOL + SWAPCHAIN VIA MANAGER
+// FULL INITIALISATION: instance → surface → device → command pool → swapchain
 // ---------------------------------------------------------------------
 void initializeVulkan(Vulkan::Context& context)
 {
-    LOG_INFO_CAT("INIT", "initializeVulkan() — creating command pool + swapchain via manager");
+    LOG_INFO_CAT("INIT", "initializeVulkan() — full Vulkan init: instance → surface → device → command pool → swapchain");
 
-    // 1. COMMAND POOL
+    // 1. INSTANCE
+    initInstance(context.instanceExtensions, context);
+
+    // 2. SURFACE — SDL handles VK_KHR_surface + VK_KHR_xlib_surface
+    initSurface(context, context.window, nullptr);
+
+    // 3. DEVICE + QUEUES + KHR
+    initDevice(context);
+
+    // 4. COMMAND POOL
     VkCommandPoolCreateInfo poolInfo = {
         .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
         .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
@@ -320,28 +325,19 @@ void initializeVulkan(Vulkan::Context& context)
     context.resourceManager.addCommandPool(context.commandPool);
     LOG_INFO_CAT("CMD", "Command pool created: {}", ptr_to_hex(context.commandPool));
 
-    // 2. SWAPCHAIN MANAGER + INITIALIZATION
-    auto* sdlWindow = static_cast<SDL_Window*>(context.window);
-    if (!sdlWindow) {
-        LOG_ERROR_CAT("INIT", "SDL_Window* missing in Context");
-        throw std::runtime_error("SDL_Window* not set in Context");
-    }
-
-    // Dummy shared_ptr since Context is not enable_shared_from_this
-    std::shared_ptr<Vulkan::Context> dummyShared(&context, [](Vulkan::Context*){ /* no-op deleter */ });
-    auto swapchainManager = std::make_unique<VulkanRTX::VulkanSwapchainManager>(
-        dummyShared,
-        sdlWindow,
-        static_cast<int>(context.width),
-        static_cast<int>(context.height));
-
-    swapchainManager->initializeSwapchain(context.width, context.height);
-
-    context.swapchainManager = std::move(swapchainManager);
-
-    LOG_INFO_CAT("SWAP", "Swapchain initialized via manager: {}x{} | {} images",
+    // 5. SWAPCHAIN
+    context.createSwapchain();
+    LOG_INFO_CAT("SWAP", "Swapchain created: {}x{} | {} images",
                  context.swapchainExtent.width, context.swapchainExtent.height,
                  context.swapchainImages.size());
+
+    // 6. Register swapchain
+    for (auto img : context.swapchainImages)
+        context.resourceManager.addImage(img);
+    for (auto view : context.swapchainImageViews)
+        context.resourceManager.addImageView(view);
+
+    LOG_INFO_CAT("Vulkan", "initializeVulkan() complete — Vulkan fully initialized");
 }
 
 // ---------------------------------------------------------------------

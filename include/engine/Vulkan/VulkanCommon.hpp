@@ -10,6 +10,8 @@
 #include <format>
 #include <span>
 #include <compare>
+#include <filesystem>
+#include <unordered_map>
 #include "engine/camera.hpp"
 #include "engine/logging.hpp"
 
@@ -23,7 +25,7 @@ namespace VulkanRTX {
 constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 3;
 
 // ========================================================================
-// 1. Strided Device Address Region (exact Vulkan spec order)
+// 1. Strided Device Address Region – EXACT Vulkan spec order
 // ========================================================================
 struct StridedDeviceAddressRegionKHR {
     VkDeviceAddress deviceAddress = 0;
@@ -32,18 +34,23 @@ struct StridedDeviceAddressRegionKHR {
 };
 
 // ========================================================================
-// 2. Shader Binding Table
+// 2. Shader Binding Table – DIRECT USE OF Vulkan type
 // ========================================================================
 struct ShaderBindingTable {
-    struct Region {
-        VkDeviceAddress deviceAddress = 0;  // MATCHES VulkanRTX.hpp
-        VkDeviceSize    size          = 0;
-        VkDeviceSize    stride        = 0;
-    };
-    Region raygen;
-    Region miss;
-    Region hit;
-    Region callable;
+    VkStridedDeviceAddressRegionKHR raygen;
+    VkStridedDeviceAddressRegionKHR miss;
+    VkStridedDeviceAddressRegionKHR hit;
+    VkStridedDeviceAddressRegionKHR callable;
+
+    // Helper: Create empty region (order: deviceAddress, stride, size)
+    static VkStridedDeviceAddressRegionKHR emptyRegion() {
+        return { .deviceAddress = 0, .stride = 0, .size = 0 };
+    }
+
+    // Helper: Create region (order: deviceAddress, stride, size)
+    static VkStridedDeviceAddressRegionKHR makeRegion(VkDeviceAddress base, VkDeviceSize size, VkDeviceSize stride) {
+        return { .deviceAddress = base, .stride = stride, .size = size };
+    }
 };
 
 // ========================================================================
@@ -70,17 +77,17 @@ struct alignas(16) MaterialData {
     alignas(16) glm::vec4 emission  = glm::vec4(0.0f);
 
     struct PushConstants {
-        alignas(16) glm::vec4 clearColor      = glm::vec4(0.0f);        // 16 → 0-16
-        alignas(16) glm::vec3 cameraPosition = glm::vec3(0.0f);        // 12 → 16-28
-        alignas(4)  float     _pad0          = 0.0f;                    // 4  → 28-32
-        alignas(16) glm::vec3 lightDirection = glm::vec3(0.0f, -1.0f, 0.0f); // 12 → 32-44
-        alignas(4)  float     lightIntensity = 1.0f;                    // 4  → 44-48
-        alignas(4)  uint32_t  samplesPerPixel = 1;                      // 4  → 48-52
-        alignas(4)  uint32_t  maxDepth        = 5;                      // 4  → 52-56
-        alignas(4)  uint32_t  maxBounces      = 3;                      // 4  → 56-60
-        alignas(4)  float     russianRoulette = 0.8f;                   // 4  → 60-64
-        alignas(8)  glm::vec2 resolution     = glm::vec2(1920, 1080);  // 8  → 64-72
-        alignas(4)  uint32_t  showEnvMapOnly = 0;                       // 4  → 72-76
+        alignas(16) glm::vec4 clearColor      = glm::vec4(0.0f);
+        alignas(16) glm::vec3 cameraPosition = glm::vec3(0.0f);
+        alignas(4)  float     _pad0          = 0.0f;
+        alignas(16) glm::vec3 lightDirection = glm::vec3(0.0f, -1.0f, 0.0f);
+        alignas(4)  float     lightIntensity = 1.0f;
+        alignas(4)  uint32_t  samplesPerPixel = 1;
+        alignas(4)  uint32_t  maxDepth        = 5;
+        alignas(4)  uint32_t  maxBounces      = 3;
+        alignas(4)  float     russianRoulette = 0.8f;
+        alignas(8)  glm::vec2 resolution     = glm::vec2(1920, 1080);
+        alignas(4)  uint32_t  showEnvMapOnly = 0;
     };
 };
 
@@ -141,7 +148,87 @@ struct alignas(16) DenoisePushConstants {
 static_assert(sizeof(DenoisePushConstants) == 16, "DenoisePushConstants must be 16 bytes");
 
 // ========================================================================
-// 9. AMOURANTH – camera + demo controller
+// 9. Centralized Shader Paths
+// ========================================================================
+namespace VulkanRTX {
+    inline std::unordered_map<std::string, std::string> getShaderBinPaths() {
+        return {
+            {"raygen", "assets/shaders/raytracing/raygen.spv"},
+            {"miss", "assets/shaders/raytracing/miss.spv"},
+            {"closesthit", "assets/shaders/raytracing/closesthit.spv"},
+            {"compute_denoise", "assets/shaders/compute/denoise.spv"},
+            {"tonemap_vert", "assets/shaders/graphics/tonemap_vert.spv"},
+            {"tonemap_frag", "assets/shaders/graphics/tonemap_frag.spv"}
+        };
+    }
+
+    inline std::unordered_map<std::string, std::string> getShaderSrcPaths() {
+        return {
+            {"raygen", "assets/shaders/raytracing/raygen.rgen"},
+            {"miss", "assets/shaders/raytracing/miss.rmiss"},
+            {"closesthit", "assets/shaders/raytracing/closesthit.rchit"},
+            {"compute_denoise", "assets/shaders/compute/denoise.glsl"},
+            {"tonemap_vert", "assets/shaders/graphics/tonemap_vert.glsl"},
+            {"tonemap_frag", "assets/shaders/graphics/tonemap_frag.glsl"}
+        };
+    }
+
+    inline std::vector<std::string> getRayTracingBinPaths() {
+        auto binPaths = getShaderBinPaths();
+        return {
+            binPaths.at("raygen"),
+            binPaths.at("closesthit"),
+            binPaths.at("miss")
+        };
+    }
+}
+
+// ========================================================================
+// 10. Helper: resolve a logical shader name to a real file on disk
+// ========================================================================
+namespace VulkanRTX {
+    inline std::string findShaderPath(const std::string& logicalName) {
+        using namespace Logging::Color;
+        LOG_DEBUG_CAT("Vulkan", ">>> RESOLVING SHADER '{}'", logicalName);
+
+        auto binPaths = getShaderBinPaths();
+        auto binIt = binPaths.find(logicalName);
+        if (binIt == binPaths.end()) {
+            LOG_ERROR_CAT("Vulkan", "  --> UNKNOWN SHADER NAME '{}'", logicalName);
+            throw std::runtime_error("Unknown shader name: " + logicalName);
+        }
+        std::filesystem::path binPath = std::filesystem::current_path() / binIt->second;
+        if (std::filesystem::exists(binPath)) {
+            LOG_DEBUG_CAT("Vulkan", "  --> FOUND IN BIN: {}", binPath.string());
+            return binPath.string();
+        }
+
+        auto srcPaths = getShaderSrcPaths();
+        auto srcIt = srcPaths.find(logicalName);
+        if (srcIt == srcPaths.end()) {
+            LOG_ERROR_CAT("Vulkan", "  --> NO SOURCE-TREE ENTRY FOR '{}'", logicalName);
+            throw std::runtime_error("Unknown shader name: " + logicalName);
+        }
+        const auto projectRoot = std::filesystem::current_path()
+            .parent_path().parent_path().parent_path();
+        const std::filesystem::path srcPath = projectRoot / srcIt->second;
+
+        if (std::filesystem::exists(srcPath)) {
+            LOG_DEBUG_CAT("Vulkan", "  --> FOUND IN SRC: {}", srcPath.string());
+            return srcPath.string();
+        }
+
+        LOG_ERROR_CAT("Vulkan",
+                      "  --> SHADER NOT FOUND!\n"
+                      "      BIN: {}\n"
+                      "      SRC: {}", binPath.string(), srcPath.string());
+
+        throw std::runtime_error("Shader file missing: " + logicalName);
+    }
+}
+
+// ========================================================================
+// 11. AMOURANTH – camera + demo controller
 // ========================================================================
 class AMOURANTH : public VulkanRTX::Camera {
 public:
@@ -185,10 +272,10 @@ public:
     const std::vector<DimensionState>& getDimensions() const { return dimensions_; }
 
     PFN_vkCmdTraceRaysKHR getVkCmdTraceRaysKHR() const { return vkCmdTraceRaysKHR_; }
-    VkStridedDeviceAddressRegionKHR getRaygenSBT() const   { return raygenSBT_; }
-    VkStridedDeviceAddressRegionKHR getMissSBT() const     { return missSBT_; }
-    VkStridedDeviceAddressRegionKHR getHitSBT() const      { return hitSBT_; }
-    VkStridedDeviceAddressRegionKHR getCallableSBT() const { return callableSBT_; }
+    const VkStridedDeviceAddressRegionKHR& getRaygenSBT() const   { return raygenSBT_; }
+    const VkStridedDeviceAddressRegionKHR& getMissSBT() const     { return missSBT_; }
+    const VkStridedDeviceAddressRegionKHR& getHitSBT() const      { return hitSBT_; }
+    const VkStridedDeviceAddressRegionKHR& getCallableSBT() const { return callableSBT_; }
 
 private:
     VulkanRTX::VulkanRenderer* renderer_;
@@ -225,7 +312,7 @@ private:
 };
 
 // ========================================================================
-// 10. std::formatter for AMOURANTH (pretty logging)
+// 12. std::formatter for AMOURANTH (pretty logging)
 // ========================================================================
 namespace std {
 template<>

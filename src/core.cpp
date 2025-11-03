@@ -2,9 +2,9 @@
 // Copyright Zachary Geurts 2025
 // FINAL: C++11, NO std::span, NO std::format, NO threading, FULL LOGGING
 
+#include "engine/Vulkan/VulkanCommon.hpp"
 #include "engine/core.hpp"
 #include "engine/logging.hpp"
-#include "engine/Vulkan/VulkanCommon.hpp"
 #include <vulkan/vulkan.h>
 #include <glm/glm.hpp>
 #include <glm/gtc/constants.hpp>

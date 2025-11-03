@@ -69,6 +69,21 @@ namespace Logging {
 
 enum class LogLevel { Trace, Debug, Info, Warning, Error };
 
+// Concept for Vulkan handles
+template <typename T>
+concept IsVulkanHandle = std::same_as<T, VkBuffer> || std::same_as<T, VkCommandBuffer> ||
+                         std::same_as<T, VkPipelineLayout> || std::same_as<T, VkDescriptorSet> ||
+                         std::same_as<T, VkRenderPass> || std::same_as<T, VkFramebuffer> ||
+                         std::same_as<T, VkImage> || std::same_as<T, VkDeviceMemory> ||
+                         std::same_as<T, VkDevice> || std::same_as<T, VkQueue> ||
+                         std::same_as<T, VkCommandPool> || std::same_as<T, VkPipeline> ||
+                         std::same_as<T, VkSwapchainKHR> || std::same_as<T, VkShaderModule> ||
+                         std::same_as<T, VkSemaphore> || std::same_as<T, VkFence> ||
+                         std::same_as<T, VkSurfaceKHR> || std::same_as<T, VkImageView> ||
+                         std::same_as<T, VkDescriptorSetLayout> || std::same_as<T, VkInstance> ||
+                         std::same_as<T, VkSampler> || std::same_as<T, VkDescriptorPool> ||
+                         std::same_as<T, VkAccelerationStructureKHR> || std::same_as<T, VkPhysicalDevice>;
+
 // ========================================================================
 // 1. ANSI Color System – HYPER-VIVID SPECTRUM
 // ========================================================================
@@ -93,6 +108,7 @@ namespace Color {
     inline constexpr std::string_view RASPBERRY_PINK  = "\033[38;5;200m";  // SBT: Juicy raspberry glow
     inline constexpr std::string_view LILAC_LAVENDER  = "\033[38;5;147m";  // CAMERA: Soft lilac haze
     inline constexpr std::string_view SPEARMINT_MINT  = "\033[38;5;150m";  // INPUT: Fresh spearmint cool
+    inline constexpr std::string_view BOLD_BRIGHT_ORANGE = "\033[1;38;5;208m"; // MAIN: Bold bright orange (208 = vivid orange)
 }
 
 // ========================================================================
@@ -100,16 +116,31 @@ namespace Color {
 // ========================================================================
 struct LogMessage {
     LogLevel level;
-    std::string message;
     std::string category;
     std::source_location location;
     std::string formattedMessage;
     std::chrono::steady_clock::time_point timestamp;
 
     LogMessage() = default;
-    LogMessage(LogLevel lvl, std::string_view msg, std::string_view cat, const std::source_location& loc, std::chrono::steady_clock::time_point ts)
-        : level(lvl), message(msg), category(cat), location(loc), timestamp(ts) {}
+    LogMessage(LogLevel lvl, std::string_view cat, const std::source_location& loc, std::chrono::steady_clock::time_point ts)
+        : level(lvl), category(cat), location(loc), timestamp(ts) {}
 };
+
+// Level Info for reducing duplication
+struct LevelInfo {
+    std::string_view str;
+    std::string_view color;
+};
+
+constexpr std::array<LevelInfo, 5> LEVEL_INFOS = {{
+    {"[TRACE]", Color::ULTRA_NEON_LIME},
+    {"[DEBUG]", Color::ARCTIC_CYAN},
+    {"[INFO]", Color::PLATINUM_GRAY},
+    {"[WARN]", Color::AMBER_YELLOW},
+    {"[ERROR]", Color::CRIMSON_MAGENTA}
+}};
+
+constexpr std::array<bool, 5> ENABLE_LEVELS = {ENABLE_TRACE, ENABLE_DEBUG, ENABLE_INFO, ENABLE_WARNING, ENABLE_ERROR};
 
 // ========================================================================
 // 3. Logger Class – Main Engine
@@ -154,33 +185,18 @@ public:
             formatted = "Empty log message";
         }
 
-        enqueueMessage(level, message, category, std::move(formatted), std::source_location::current());
+        enqueueMessage(level, category, std::move(formatted), std::source_location::current());
     }
 
     // 4.2 Log without args
     void log(LogLevel level, std::string_view category, std::string_view message) const {
         if (!shouldLog(level, category)) return;
         std::string formatted = message.empty() ? "Empty log message" : std::string(message);
-        enqueueMessage(level, message, category, std::move(formatted), std::source_location::current());
+        enqueueMessage(level, category, std::move(formatted), std::source_location::current());
     }
 
     // 4.3 Vulkan handles
-    template<typename T>
-    requires (
-        std::same_as<T, VkBuffer> || std::same_as<T, VkCommandBuffer> ||
-        std::same_as<T, VkPipelineLayout> || std::same_as<T, VkDescriptorSet> ||
-        std::same_as<T, VkRenderPass> || std::same_as<T, VkFramebuffer> ||
-        std::same_as<T, VkImage> || std::same_as<T, VkDeviceMemory> ||
-        std::same_as<T, VkDevice> || std::same_as<T, VkQueue> ||
-        std::same_as<T, VkCommandPool> || std::same_as<T, VkPipeline> ||
-        std::same_as<T, VkSwapchainKHR> || std::same_as<T, VkShaderModule> ||
-        std::same_as<T, VkSemaphore> || std::same_as<T, VkFence> ||
-        std::same_as<T, VkSurfaceKHR> || std::same_as<T, VkImageView> ||
-        std::same_as<T, VkDescriptorSetLayout> || std::same_as<T, VkInstance> ||
-        std::same_as<T, VkSampler> || std::same_as<T, VkDescriptorPool> ||
-        std::same_as<T, VkAccelerationStructureKHR> || std::same_as<T, VkPhysicalDevice> ||
-        std::same_as<T, VkExtent2D> || std::same_as<T, VkViewport> || std::same_as<T, VkRect2D>
-    )
+    template<typename T> requires IsVulkanHandle<T>
     void log(LogLevel level, std::string_view category, T handle, std::string_view handleName = "") const {
         if (!shouldLog(level, category)) return;
         std::string formatted;
@@ -192,25 +208,11 @@ public:
         } catch (const std::format_error& e) {
             formatted = std::string(handleName) + " [Format error: " + e.what() + "]";
         }
-        enqueueMessage(level, handleName, category, std::move(formatted), std::source_location::current());
+        enqueueMessage(level, category, std::move(formatted), std::source_location::current());
     }
 
     // 4.4 Span of Vulkan handles
-    template<typename T>
-    requires (
-        std::same_as<T, VkBuffer> || std::same_as<T, VkCommandBuffer> ||
-        std::same_as<T, VkPipelineLayout> || std::same_as<T, VkDescriptorSet> ||
-        std::same_as<T, VkRenderPass> || std::same_as<T, VkFramebuffer> ||
-        std::same_as<T, VkImage> || std::same_as<T, VkDeviceMemory> ||
-        std::same_as<T, VkDevice> || std::same_as<T, VkQueue> ||
-        std::same_as<T, VkCommandPool> || std::same_as<T, VkPipeline> ||
-        std::same_as<T, VkSwapchainKHR> || std::same_as<T, VkShaderModule> ||
-        std::same_as<T, VkSemaphore> || std::same_as<T, VkFence> ||
-        std::same_as<T, VkSurfaceKHR> || std::same_as<T, VkImageView> ||
-        std::same_as<T, VkDescriptorSetLayout> || std::same_as<T, VkInstance> ||
-        std::same_as<T, VkSampler> || std::same_as<T, VkDescriptorPool> ||
-        std::same_as<T, VkAccelerationStructureKHR> || std::same_as<T, VkPhysicalDevice>
-    )
+    template<typename T> requires IsVulkanHandle<T>
     void log(LogLevel level, std::string_view category, std::span<const T> handles, std::string_view handleName = "") const {
         if (!shouldLog(level, category)) return;
         std::string formatted;
@@ -224,11 +226,12 @@ public:
         } catch (const std::format_error& e) {
             formatted = std::string(handleName) + " [Format error: " + e.what() + "]";
         }
-        enqueueMessage(level, handleName, category, std::move(formatted), std::source_location::current());
+        enqueueMessage(level, category, std::move(formatted), std::source_location::current());
     }
 
-    // 4.5 GLM types
-    void log(LogLevel level, std::string_view category, const glm::vec3& vec, std::string_view message = "") const {
+    // 4.5 GLM types (generalized)
+    template<glm::length_t L, typename T, glm::qualifier Q>
+    void log(LogLevel level, std::string_view category, const glm::vec<L, T, Q>& vec, std::string_view message = "") const {
         if (!shouldLog(level, category)) return;
         std::string formatted;
         try {
@@ -237,22 +240,11 @@ public:
         } catch (const std::format_error& e) {
             formatted = std::string(message) + " [Format error: " + e.what() + "]";
         }
-        enqueueMessage(level, message, category, std::move(formatted), std::source_location::current());
+        enqueueMessage(level, category, std::move(formatted), std::source_location::current());
     }
 
-    void log(LogLevel level, std::string_view category, const glm::vec2& vec, std::string_view message = "") const {
-        if (!shouldLog(level, category)) return;
-        std::string formatted;
-        try {
-            formatted = glm::to_string(vec);
-            if (!message.empty()) formatted = std::format("{}: {}", message, formatted);
-        } catch (const std::format_error& e) {
-            formatted = std::string(message) + " [Format error: " + e.what() + "]";
-        }
-        enqueueMessage(level, message, category, std::move(formatted), std::source_location::current());
-    }
-
-    void log(LogLevel level, std::string_view category, const glm::mat4& mat, std::string_view message = "") const {
+    template<glm::length_t C, glm::length_t R, typename T, glm::qualifier Q>
+    void log(LogLevel level, std::string_view category, const glm::mat<C, R, T, Q>& mat, std::string_view message = "") const {
         if (!shouldLog(level, category)) return;
         std::string formatted;
         try {
@@ -261,10 +253,11 @@ public:
         } catch (const std::format_error& e) {
             formatted = std::string(message) + " [Format error: " + e.what() + "]";
         }
-        enqueueMessage(level, message, category, std::move(formatted), std::source_location::current());
+        enqueueMessage(level, category, std::move(formatted), std::source_location::current());
     }
 
-    void log(LogLevel level, std::string_view category, std::span<const glm::vec3> vecs, std::string_view message = "") const {
+    template<glm::length_t L, typename T, glm::qualifier Q>
+    void log(LogLevel level, std::string_view category, std::span<const glm::vec<L, T, Q>> vecs, std::string_view message = "") const {
         if (!shouldLog(level, category)) return;
         std::string formatted;
         try {
@@ -277,7 +270,7 @@ public:
         } catch (const std::format_error& e) {
             formatted = std::string(message) + " [Format error: " + e.what() + "]";
         }
-        enqueueMessage(level, message, category, std::move(formatted), std::source_location::current());
+        enqueueMessage(level, category, std::move(formatted), std::source_location::current());
     }
 
     // 4.6 Camera (qualified with VulkanRTX::Camera)
@@ -294,7 +287,7 @@ public:
         } catch (const std::format_error& e) {
             formatted = std::string(message) + " [Format error: " + e.what() + "]";
         }
-        enqueueMessage(level, message, category, std::move(formatted), std::source_location::current());
+        enqueueMessage(level, category, std::move(formatted), std::source_location::current());
     }
 
     // ====================================================================
@@ -383,20 +376,16 @@ private:
             {"Camera",        Color::LILAC_LAVENDER},
             {"Render",        Color::FIERY_ORANGE},
             {"Perf",          Color::AMBER_YELLOW},
-            {"Logger",        Color::PLATINUM_GRAY}
+            {"Logger",        Color::PLATINUM_GRAY},
+            {"MAIN",          Color::BOLD_BRIGHT_ORANGE}  // MAIN: Bold bright orange
         };
         auto it = categoryColors.find(category);
         return it != categoryColors.end() ? it->second : Color::DIAMOND_WHITE;
     }
 
     bool shouldLog(LogLevel level, std::string_view category) const {
-        switch (level) {
-            case LogLevel::Trace:   if (!ENABLE_TRACE) return false; break;
-            case LogLevel::Debug:   if (!ENABLE_DEBUG) return false; break;
-            case LogLevel::Info:    if (!ENABLE_INFO) return false; break;
-            case LogLevel::Warning: if (!ENABLE_WARNING) return false; break;
-            case LogLevel::Error:   if (!ENABLE_ERROR) return false; break;
-        }
+        size_t idx = static_cast<size_t>(level);
+        if (!ENABLE_LEVELS[idx]) return false;
         if (static_cast<int>(level) < static_cast<int>(level_.load(std::memory_order_relaxed))) return false;
         return enabledCategories_.empty() || enabledCategories_.contains(std::string(category));
     }
@@ -421,8 +410,7 @@ private:
     }
 
     // 6.2 Queue Management
-    void enqueueMessage(LogLevel level, std::string_view message, std::string_view category,
-                        std::string formatted, const std::source_location& location) const {
+    void enqueueMessage(LogLevel level, std::string_view category, std::string formatted, const std::source_location& location) const {
         size_t currentHead = head_.load(std::memory_order_relaxed);
         size_t currentTail = tail_.load(std::memory_order_acquire);
         size_t nextHead = (currentHead + 1) % QueueSize;
@@ -439,10 +427,42 @@ private:
         }
 
         auto now = std::chrono::steady_clock::now();
-        logQueue_[currentHead] = LogMessage(level, message, category, location, now);
+        logQueue_[currentHead] = LogMessage(level, category, location, now);
         logQueue_[currentHead].formattedMessage = std::move(formatted);
         if (!firstLogTime_.has_value()) firstLogTime_ = now;
         head_.store(nextHead, std::memory_order_release);
+    }
+
+    // Extracted delta time formatting
+    std::string formatDelta(int64_t delta) const {
+        if (delta < 10000) return std::format("{:>6}us", delta);
+        else if (delta < 1000000) return std::format("{:>6.3f}ms", delta / 1000.0);
+        else if (delta < 60000000) return std::format("{:>6.3f}s", delta / 1000000.0);
+        else if (delta < 3600000000LL) return std::format("{:>6.3f}m", delta / 60000000.0);
+        else return std::format("{:>6.3f}h", delta / 3600000000.0);
+    }
+
+    // Extracted message output
+    void outputMessage(const LogMessage& msg) const {
+        std::string_view categoryColor = getCategoryColor(msg.category);
+        size_t levelIdx = static_cast<size_t>(msg.level);
+        std::string_view levelStr = LEVEL_INFOS[levelIdx].str;
+        std::string_view levelColor = LEVEL_INFOS[levelIdx].color;
+
+        auto delta = std::chrono::duration_cast<std::chrono::microseconds>(msg.timestamp - *firstLogTime_).count();
+        std::string timeStr = formatDelta(delta);
+
+        std::string output;
+        try {
+            output = std::format("{}{} [{}] {}[{}]{} {}{}",
+                                 levelColor, levelStr, timeStr, categoryColor, msg.category, Color::RESET,
+                                 msg.formattedMessage.empty() ? "[Empty message]" : msg.formattedMessage, Color::RESET);
+        } catch (const std::format_error& e) {
+            output = std::format("[ERROR] [{}] [Logger] Format error: {}", timeStr, e.what());
+        }
+
+        std::osyncstream(std::cout) << output << std::endl;
+        if (logFile_.is_open()) std::osyncstream(logFile_) << output << std::endl;
     }
 
     // 6.3 Worker Thread
@@ -471,35 +491,7 @@ private:
             }
 
             for (const auto& msg : batch) {
-                std::string_view categoryColor = getCategoryColor(msg.category);
-                std::string_view levelStr, levelColor;
-                switch (msg.level) {
-                    case LogLevel::Trace:   levelStr = "[TRACE]"; levelColor = Color::ULTRA_NEON_LIME; break;
-                    case LogLevel::Debug:   levelStr = "[DEBUG]"; levelColor = Color::ARCTIC_CYAN; break;
-                    case LogLevel::Info:    levelStr = "[INFO]";  levelColor = Color::PLATINUM_GRAY; break;
-                    case LogLevel::Warning: levelStr = "[WARN]";  levelColor = Color::AMBER_YELLOW; break;
-                    case LogLevel::Error:   levelStr = "[ERROR]"; levelColor = Color::CRIMSON_MAGENTA; break;
-                }
-
-                auto delta = std::chrono::duration_cast<std::chrono::microseconds>(msg.timestamp - *firstLogTime_).count();
-                std::string timeStr;
-                if (delta < 10000) timeStr = std::format("{:>6}us", delta);
-                else if (delta < 1000000) timeStr = std::format("{:>6.3f}ms", delta / 1000.0);
-                else if (delta < 60000000) timeStr = std::format("{:>6.3f}s", delta / 1000000.0);
-                else if (delta < 3600000000LL) timeStr = std::format("{:>6.3f}m", delta / 60000000.0);
-                else timeStr = std::format("{:>6.3f}h", delta / 3600000000.0);
-
-                std::string output;
-                try {
-                    output = std::format("{}{} [{}] {}[{}]{} {}{}",
-                                         levelColor, levelStr, timeStr, categoryColor, msg.category, Color::RESET,
-                                         msg.formattedMessage.empty() ? "[Empty message]" : msg.formattedMessage, Color::RESET);
-                } catch (const std::format_error& e) {
-                    output = std::format("[ERROR] [{}] [Logger] Format error: {}", timeStr, e.what());
-                }
-
-                std::osyncstream(std::cout) << output << std::endl;
-                if (logFile_.is_open()) std::osyncstream(logFile_) << output << std::endl;
+                outputMessage(msg);
             }
         }
     }
@@ -543,32 +535,7 @@ private:
             tail_.store(currentTail, std::memory_order_release);
         }
         for (const auto& msg : batch) {
-            std::string_view categoryColor = getCategoryColor(msg.category);
-            std::string_view levelStr, levelColor;
-            switch (msg.level) {
-                case LogLevel::Trace:   levelStr = "[TRACE]"; levelColor = Color::ULTRA_NEON_LIME; break;
-                case LogLevel::Debug:   levelStr = "[DEBUG]"; levelColor = Color::ARCTIC_CYAN; break;
-                case LogLevel::Info:    levelStr = "[INFO]";  levelColor = Color::PLATINUM_GRAY; break;
-                case LogLevel::Warning: levelStr = "[WARN]";  levelColor = Color::AMBER_YELLOW; break;
-                case LogLevel::Error:   levelStr = "[ERROR]"; levelColor = Color::CRIMSON_MAGENTA; break;
-            }
-            auto delta = std::chrono::duration_cast<std::chrono::microseconds>(msg.timestamp - *firstLogTime_).count();
-            std::string timeStr;
-            if (delta < 10000) timeStr = std::format("{:>6}us", delta);
-            else if (delta < 1000000) timeStr = std::format("{:>6.3f}ms", delta / 1000.0);
-            else if (delta < 60000000) timeStr = std::format("{:>6.3f}s", delta / 1000000.0);
-            else if (delta < 3600000000LL) timeStr = std::format("{:>6.3f}m", delta / 60000000.0);
-            else timeStr = std::format("{:>6.3f}h", delta / 3600000000.0);
-            std::string output;
-            try {
-                output = std::format("{}{} [{}] {}[{}]{} {}{}",
-                                     levelColor, levelStr, timeStr, categoryColor, msg.category, Color::RESET,
-                                     msg.formattedMessage.empty() ? "[Empty message]" : msg.formattedMessage, Color::RESET);
-            } catch (const std::format_error& e) {
-                output = std::format("[ERROR] [{}] [Logger] Format error: {}", timeStr, e.what());
-            }
-            std::osyncstream(std::cout) << output << std::endl;
-            if (logFile_.is_open()) std::osyncstream(logFile_) << output << std::endl;
+            outputMessage(msg);
         }
     }
 
@@ -622,21 +589,7 @@ struct formatter<glm::mat<C, R, T, Q>, char> {
     }
 };
 
-template<typename T>
-requires (
-    std::same_as<T, VkBuffer> || std::same_as<T, VkCommandBuffer> ||
-    std::same_as<T, VkPipelineLayout> || std::same_as<T, VkDescriptorSet> ||
-    std::same_as<T, VkRenderPass> || std::same_as<T, VkFramebuffer> ||
-    std::same_as<T, VkImage> || std::same_as<T, VkDeviceMemory> ||
-    std::same_as<T, VkDevice> || std::same_as<T, VkQueue> ||
-    std::same_as<T, VkCommandPool> || std::same_as<T, VkPipeline> ||
-    std::same_as<T, VkSwapchainKHR> || std::same_as<T, VkShaderModule> ||
-    std::same_as<T, VkSemaphore> || std::same_as<T, VkFence> ||
-    std::same_as<T, VkSurfaceKHR> || std::same_as<T, VkImageView> ||
-    std::same_as<T, VkDescriptorSetLayout> || std::same_as<T, VkInstance> ||
-    std::same_as<T, VkSampler> || std::same_as<T, VkDescriptorPool> ||
-    std::same_as<T, VkAccelerationStructureKHR> || std::same_as<T, VkPhysicalDevice>
-)
+template<typename T> requires Logging::IsVulkanHandle<T>
 struct formatter<T, char> {
     constexpr auto parse(format_parse_context& ctx) { return ctx.begin(); }
     template<typename FormatContext>
