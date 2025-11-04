@@ -22,7 +22,7 @@ chmod +x linux.sh
 ```
 
 Made with Grok sized files for AI updates.  
-<img width="1300" alt="https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/media/Screenshot%20from%202025-11-04%2008-26-37.png" />
+<img width="1300" alt="https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/media/Screenshot%20from%202025-11-04%2008-26-37.png" />  
 <img width="1300" alt="JustBetter" src="https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/media/Screenshot%20from%202025-10-30%2010-11-52.png" />  
 <img width="1300" alt="buffer" src="https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/media/Screenshot%20from%202025-10-30%2010-12-49.png" />  
 
