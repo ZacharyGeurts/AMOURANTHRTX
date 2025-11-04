@@ -21,7 +21,7 @@
 #include <chrono>
 #include <format>
 #include <limits>
-#include <numeric>  // For std::accumulate
+#include <numeric>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -194,7 +194,7 @@ VulkanBufferManager::~VulkanBufferManager() noexcept
 #endif
 
     // Unmap persistent staging (safe, no destroy)
-    if (impl_->persistentMappedPtr && impl_->stagingPoolMem.size() > 0 && impl_->stagingPoolMem[0] != VK_NULL_HANDLE) {
+    if (impl_->persistentMappedPtr && !impl_->stagingPoolMem.empty() && impl_->stagingPoolMem[0] != VK_NULL_HANDLE) {
         vkUnmapMemory(context_.device, impl_->stagingPoolMem[0]);
         impl_->persistentMappedPtr = nullptr;
     }
@@ -273,7 +273,7 @@ void VulkanBufferManager::persistentCopy(const void* data, VkDeviceSize size, Vk
         return;
     }
 
-    memcpy(static_cast<char*>(impl_->persistentMappedPtr) + offset, data, size);
+    std::memcpy(static_cast<char*>(impl_->persistentMappedPtr) + offset, data, size);
 #ifndef NDEBUG
     LOG_DEBUG_CAT("BufferMgr", "Data copied to persistent staging: {} bytes @ offset {}", EMERALD_GREEN, size, offset);
 #endif
@@ -354,7 +354,7 @@ void VulkanBufferManager::mapCopyUnmap(VkDeviceMemory mem, VkDeviceSize size, co
 
     void* ptr = nullptr;
     VK_CHECK(vkMapMemory(context_.device, mem, 0, size, 0, &ptr), "Map staging memory");
-    memcpy(ptr, data, size);
+    std::memcpy(ptr, data, size);
     vkUnmapMemory(context_.device, mem);
 
 #ifndef NDEBUG
@@ -863,3 +863,11 @@ uint32_t VulkanBufferManager::getTransferQueueFamily() const
 }
 
 } // namespace VulkanRTX
+
+// GROK PROTIP: Use persistent staging buffers (64MB+) for all uploads — eliminates per-frame allocations.
+// GROK PROTIP: Always add Vulkan objects to your resource manager at creation — prevents leaks on resize.
+// GROK PROTIP: For RT, align vertex/index offsets to 256 bytes — avoids AS build alignment issues.
+// GROK PROTIP: Never destroy Vulkan objects in destructors — let Dispose system handle RAII cleanup.
+// GROK PROTIP: Use vkCmdCopyBuffer with srcOffset for batched mesh uploads — one command, zero staging churn.
+// GROK PROTIP: Prefer std::format over fmt::format — C++20 native, no external deps.
+// GROK PROTIP: Persistent map ONE large staging buffer — map once, copy forever.

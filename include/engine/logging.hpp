@@ -8,6 +8,8 @@
 // Usage: LOG_TRACE("Message: {}", value); or Logger::get().log(LogLevel::Trace, "Vulkan", "Message: {}", value);
 // Features: Singleton, log rotation, environment variable config, automatic flush, HYPER-EXTENDED colors, overloads.
 // Extended features: Additional Vulkan/SDL types, GLM arrays, category filtering, high-frequency logging.
+// TONEMAP: PEACH (255,218,185) to 38;5;223m | RENDERER: BRIGHT PINKISH PURPLE (255,105,180) to 38;5;205m
+// LOG_VOID: Fire-and-forget empty log entry (useful for timing, markers, or debug breakpoints)
 // Zachary Geurts 2025
 
 #ifndef ENGINE_LOGGING_HPP
@@ -65,6 +67,12 @@ constexpr bool SIMULATION_LOGGING = true;
 #define LOG_WARN_CAT(cat, ...)    LOG_WARNING_CAT(cat, __VA_ARGS__)  // IDENTICAL TO LOG_WARNING_CAT
 #define LOG_ERROR_CAT(cat, ...)   do { if (ENABLE_ERROR)   Logging::Logger::get().log(Logging::LogLevel::Error,   cat, __VA_ARGS__); } while (0)
 
+// === NEW: LOG_VOID MACROS ===
+#define LOG_VOID()              do { if (ENABLE_DEBUG)   Logging::Logger::get().logVoid(Logging::LogLevel::Debug,   "General"); } while (0)
+#define LOG_VOID_CAT(cat)       do { if (ENABLE_DEBUG)   Logging::Logger::get().logVoid(Logging::LogLevel::Debug,   cat); } while (0)
+#define LOG_VOID_TRACE()        do { if (ENABLE_TRACE)   Logging::Logger::get().logVoid(Logging::LogLevel::Trace,   "General"); } while (0)
+#define LOG_VOID_TRACE_CAT(cat) do { if (ENABLE_TRACE)   Logging::Logger::get().logVoid(Logging::LogLevel::Trace,   cat); } while (0)
+
 namespace Logging {
 
 enum class LogLevel { Trace, Debug, Info, Warning, Error };
@@ -88,27 +96,31 @@ concept IsVulkanHandle = std::same_as<T, VkBuffer> || std::same_as<T, VkCommandB
 // 1. ANSI Color System – HYPER-VIVID SPECTRUM
 // ========================================================================
 namespace Color {
-    inline constexpr std::string_view RESET           = "\033[0m";
-    inline constexpr std::string_view ULTRA_NEON_LIME = "\033[38;5;82m";   // TRACE: Pulsing electric lime glow
-    inline constexpr std::string_view PLATINUM_GRAY   = "\033[38;5;255m";  // INFO: Ultra-crisp platinum sheen
-    inline constexpr std::string_view EMERALD_GREEN   = "\033[38;5;35m";   // SUCCESS / ENGINE: Deep emerald vibrance
-    inline constexpr std::string_view ARCTIC_CYAN     = "\033[38;5;45m";   // DEBUG: Icy arctic cyan pulse
-    inline constexpr std::string_view AMBER_YELLOW    = "\033[38;5;220m";  // WARNING: Fiery amber blaze
-    inline constexpr std::string_view CRIMSON_MAGENTA = "\033[38;5;197m";  // ERROR: Blood-red crimson fury
-    inline constexpr std::string_view SAPPHIRE_BLUE   = "\033[38;5;33m";   // RENDER / PIPELINE: Deep sapphire depth
-    inline constexpr std::string_view SCARLET_RED     = "\033[38;5;196m";  // FATAL / VULKAN: Scarlet inferno
-    inline constexpr std::string_view DIAMOND_WHITE   = "\033[38;5;231m";  // HEADER: Pristine diamond sparkle
-    inline constexpr std::string_view VIOLET_PURPLE   = "\033[38;5;99m";   // SHADER: Mystical violet aura
-    inline constexpr std::string_view FIERY_ORANGE    = "\033[38;5;202m";  // PERFORMANCE: Blazing fiery orange
-    inline constexpr std::string_view OCEAN_TEAL      = "\033[38;5;37m";   // SWAPCHAIN: Oceanic teal wave
-    inline constexpr std::string_view LIME_YELLOW     = "\033[38;5;82m";   // ACCELERATION: Zesty lime burst
-    inline constexpr std::string_view FUCHSIA_MAGENTA = "\033[38;5;205m";  // DESCRIPTOR: Electric fuchsia flash
-    inline constexpr std::string_view BRONZE_BROWN    = "\033[38;5;94m";   // BUFFER: Warm bronze gleam
-    inline constexpr std::string_view TURQUOISE_BLUE  = "\033[38;5;44m";   // RAY TRACING: Radiant turquoise ray
-    inline constexpr std::string_view RASPBERRY_PINK  = "\033[38;5;200m";  // SBT: Juicy raspberry glow
-    inline constexpr std::string_view LILAC_LAVENDER  = "\033[38;5;147m";  // CAMERA: Soft lilac haze
-    inline constexpr std::string_view SPEARMINT_MINT  = "\033[38;5;150m";  // INPUT: Fresh spearmint cool
-    inline constexpr std::string_view BOLD_BRIGHT_ORANGE = "\033[1;38;5;208m"; // MAIN: Bold bright orange (208 = vivid orange)
+    inline constexpr std::string_view RESET                   = "\033[0m";
+    inline constexpr std::string_view ULTRA_NEON_LIME         = "\033[38;5;82m";   // TRACE: Pulsing electric lime glow
+    inline constexpr std::string_view PLATINUM_GRAY           = "\033[38;5;255m";  // INFO: Ultra-crisp platinum sheen
+    inline constexpr std::string_view EMERALD_GREEN           = "\033[38;5;35m";   // SUCCESS / ENGINE: Deep emerald vibrance
+    inline constexpr std::string_view ARCTIC_CYAN             = "\033[38;5;45m";   // DEBUG: Icy arctic cyan pulse
+    inline constexpr std::string_view AMBER_YELLOW            = "\033[38;5;220m";  // WARNING: Fiery amber blaze
+    inline constexpr std::string_view CRIMSON_MAGENTA         = "\033[38;5;197m";  // ERROR: Blood-red crimson fury
+    inline constexpr std::string_view SAPPHIRE_BLUE           = "\033[38;5;33m";   // RENDER / PIPELINE: Deep sapphire depth
+    inline constexpr std::string_view SCARLET_RED             = "\033[38;5;196m";  // FATAL / VULKAN: Scarlet inferno
+    inline constexpr std::string_view DIAMOND_WHITE           = "\033[38;5;231m";  // HEADER: Pristine diamond sparkle
+    inline constexpr std::string_view VIOLET_PURPLE           = "\033[38;5;99m";   // SHADER: Mystical violet aura
+    inline constexpr std::string_view FIERY_ORANGE            = "\033[38;5;202m";  // PERFORMANCE: Blazing fiery orange
+    inline constexpr std::string_view OCEAN_TEAL              = "\033[38;5;37m";   // SWAPCHAIN: Oceanic teal wave
+    inline constexpr std::string_view LIME_YELLOW             = "\033[38;5;82m";   // ACCELERATION: Zesty lime burst
+    inline constexpr std::string_view FUCHSIA_MAGENTA         = "\033[38;5;205m";  // DESCRIPTOR: Electric fuchsia flash
+    inline constexpr std::string_view BRONZE_BROWN            = "\033[38;5;94m";   // BUFFER: Warm bronze gleam
+    inline constexpr std::string_view TURQUOISE_BLUE          = "\033[38;5;44m";   // RAY TRACING: Radiant turquoise ray
+    inline constexpr std::string_view RASPBERRY_PINK          = "\033[38;5;200m";  // SBT: Juicy raspberry glow
+    inline constexpr std::string_view LILAC_LAVENDER          = "\033[38;5;147m";  // CAMERA: Soft lilac haze
+    inline constexpr std::string_view SPEARMINT_MINT          = "\033[38;5;150m";  // INPUT: Fresh spearmint cool
+    inline constexpr std::string_view BOLD_BRIGHT_ORANGE      = "\033[1;38;5;208m"; // MAIN: Bold bright orange (208 = vivid orange)
+
+    // === USER-REQUESTED COLORS ===
+    inline constexpr std::string_view PEACHES_AND_CREAM       = "\033[38;5;223m";  // TONEMAP: Soft peach (255,218,185)
+    inline constexpr std::string_view BRIGHT_PINKISH_PURPLE   = "\033[38;5;205m";  // RENDERER: Bright pinkish purple (255,105,180)
 }
 
 // ========================================================================
@@ -193,6 +205,12 @@ public:
         if (!shouldLog(level, category)) return;
         std::string formatted = message.empty() ? "Empty log message" : std::string(message);
         enqueueMessage(level, category, std::move(formatted), std::source_location::current());
+    }
+
+    // === NEW: LOG_VOID ===
+    void logVoid(LogLevel level, std::string_view category) const {
+        if (!shouldLog(level, category)) return;
+        enqueueMessage(level, category, "[VOID]", std::source_location::current());
     }
 
     // 4.3 Vulkan handles
@@ -352,7 +370,7 @@ private:
         return "";
     }
 
-    // 6.1 Category → Color Mapping
+    // 6.1 Category to Color Mapping
     static std::string_view getCategoryColor(std::string_view category) {
         static const std::map<std::string_view, std::string_view, std::less<>> categoryColors = {
             {"General",       Color::DIAMOND_WHITE},
@@ -360,7 +378,7 @@ private:
             {"Swapchain",     Color::OCEAN_TEAL},
             {"Pipeline",      Color::EMERALD_GREEN},
             {"SIMULATION",    Color::BRONZE_BROWN},
-            {"Renderer",      Color::FIERY_ORANGE},
+            {"Renderer",      Color::BRIGHT_PINKISH_PURPLE},
             {"Engine",        Color::EMERALD_GREEN},
             {"Audio",         Color::OCEAN_TEAL},
             {"Image",         Color::LIME_YELLOW},
@@ -377,7 +395,8 @@ private:
             {"Render",        Color::FIERY_ORANGE},
             {"Perf",          Color::AMBER_YELLOW},
             {"Logger",        Color::PLATINUM_GRAY},
-            {"MAIN",          Color::BOLD_BRIGHT_ORANGE}  // MAIN: Bold bright orange
+            {"MAIN",          Color::BOLD_BRIGHT_ORANGE},
+            {"TONEMAP",       Color::PEACHES_AND_CREAM}
         };
         auto it = categoryColors.find(category);
         return it != categoryColors.end() ? it->second : Color::DIAMOND_WHITE;

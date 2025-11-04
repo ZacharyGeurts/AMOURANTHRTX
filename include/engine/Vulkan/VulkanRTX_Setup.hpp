@@ -1,16 +1,30 @@
 // include/engine/Vulkan/VulkanRTX_Setup.hpp
 // AMOURANTH RTX Engine (C) 2025 by Zachary Geurts gzac5314@gmail.com
-// FINAL: NO Dispose::VulkanHandle → RAW HANDLES + ResourceManager
-//        Fence-based transient submits → NO vkQueueWaitIdle() → NO SEGFAULT
-//        ShaderBindingTable → VkStridedDeviceAddressRegionKHR (Vulkan spec compliant)
-//        ALL FUNCTION POINTERS LOADED — NO SEGFAULT
-//        FIXED: VK_CHECK(2 args), VulkanRTXException(1-arg + 4-arg), THROW_VKRTX
-//        FIXED: frameNumber_ and time_ for dispatchRenderMode
-//        FIXED: std::runtime582_error → std::runtime_error
+// FINAL: RAW HANDLES ONLY – NO Dispose::VulkanHandle
+//        Fence-based transient submits – NO vkQueueWaitIdle()
+//        ShaderBindingTable – VkStridedDeviceAddressRegionKHR (spec compliant)
+//        ALL FUNCTION POINTERS LOADED – NO SEGFAULT
+//        TLAS DESCRIPTOR UPDATE MOVED TO VulkanRenderer
 
 #pragma once
 
-#include "engine/Vulkan/VulkanCommon.hpp"
+// ---------------------------------------------------------------------
+// 1. Core headers (must come first)
+// ---------------------------------------------------------------------
+#include "engine/Vulkan/VulkanCore.hpp"
+#include "engine/Vulkan/VulkanCommon.hpp"        // ShaderBindingTable, DimensionState
+#include "engine/Vulkan/Vulkan_init.hpp"         // ::Vulkan::Context
+
+// ---------------------------------------------------------------------
+// 2. FULL DEFINITIONS – ORDER MATTERS!
+// ---------------------------------------------------------------------
+// VulkanRenderer uses VulkanRTX → must be included BEFORE VulkanRTX
+#include "engine/Vulkan/VulkanRenderer.hpp"
+// VulkanPipelineManager is used in VulkanRTX
+#include "engine/Vulkan/VulkanPipelineManager.hpp"
+
+#include "engine/logging.hpp"
+
 #include <vulkan/vulkan.h>
 #include <glm/glm.hpp>
 #include <glm/gtc/type_ptr.hpp>
@@ -20,15 +34,10 @@
 #include <stdexcept>
 #include <cstdint>
 #include <sstream>
-#include <format>  // C++20 std::format
-
-#include "engine/logging.hpp"
-
-namespace Vulkan { struct Context; }
+#include <format>
 
 // ---------------------------------------------------------------------
-// VK_CHECK – 2 arguments: (result, "message")
-// Throws VulkanRTXException(msg) on error
+// 3. Helper macros
 // ---------------------------------------------------------------------
 #define VK_CHECK(result, msg) \
     do { \
@@ -41,18 +50,21 @@ namespace Vulkan { struct Context; }
         } \
     } while (0)
 
-// ---------------------------------------------------------------------
-// Helper macro for throwing with file/line/function (use in .cpp)
-// ---------------------------------------------------------------------
 #define THROW_VKRTX(msg) \
     throw VulkanRTXException(msg, __FILE__, __LINE__, __func__)
 
+// ---------------------------------------------------------------------
+// 4. Align helpers
+// ---------------------------------------------------------------------
 inline constexpr uint32_t alignUp(uint32_t value, uint32_t alignment) {
+    return (value + alignment - 1) & ~(alignment - 1);
+}
+inline constexpr VkDeviceSize alignUp(VkDeviceSize value, VkDeviceSize alignment) {
     return (value + alignment - 1) & ~(alignment - 1);
 }
 
 /* -------------------------------------------------------------
-   Function-pointer typedefs (KHR extensions)
+   KHR extension function-pointer typedefs
    ------------------------------------------------------------- */
 using PFN_vkCmdBuildAccelerationStructuresKHR = void (*)(VkCommandBuffer, uint32_t,
     const VkAccelerationStructureBuildGeometryInfoKHR*, const VkAccelerationStructureBuildRangeInfoKHR* const*);
@@ -77,7 +89,7 @@ using PFN_vkGetAccelerationStructureBuildSizesKHR = void (*)(VkDevice, VkAcceler
     const VkAccelerationStructureBuildGeometryInfoKHR*, const uint32_t*, VkAccelerationStructureBuildSizesInfoKHR*);
 
 /* -------------------------------------------------------------
-   Descriptor-related function pointers (CORE VULKAN — MUST BE LOADED)
+   Core descriptor function-pointer typedefs
    ------------------------------------------------------------- */
 using PFN_vkCreateDescriptorSetLayout   = VkResult (*)(VkDevice, const VkDescriptorSetLayoutCreateInfo*, const VkAllocationCallbacks*, VkDescriptorSetLayout*);
 using PFN_vkAllocateDescriptorSets      = VkResult (*)(VkDevice, const VkDescriptorSetAllocateInfo*, VkDescriptorSet*);
@@ -85,8 +97,6 @@ using PFN_vkCreateDescriptorPool        = VkResult (*)(VkDevice, const VkDescrip
 using PFN_vkDestroyDescriptorSetLayout  = void (*)(VkDevice, VkDescriptorSetLayout, const VkAllocationCallbacks*);
 using PFN_vkDestroyDescriptorPool       = void (*)(VkDevice, VkDescriptorPool, const VkAllocationCallbacks*);
 using PFN_vkFreeDescriptorSets          = VkResult (*)(VkDevice, VkDescriptorPool, uint32_t, const VkDescriptorSet*);
-
-namespace VulkanRTX {
 
 enum class DescriptorBindings : uint32_t {
     TLAS               = 0,
@@ -102,27 +112,16 @@ enum class DescriptorBindings : uint32_t {
     AlphaTex           = 10
 };
 
-struct DimensionState {
-    uint32_t width;
-    uint32_t height;
-};
-
-// -------------------------------------------------------------
-// VulkanRTXException – supports both 1-arg and 4-arg
-// -------------------------------------------------------------
+// ---------------------------------------------------------------------
+// VulkanRTXException – 1-arg + 4-arg overloads
+// ---------------------------------------------------------------------
 class VulkanRTXException : public std::runtime_error {
 public:
-    // 1-argument: used by VK_CHECK and legacy code
     explicit VulkanRTXException(const std::string& msg)
         : std::runtime_error(msg), m_line(0) {}
 
-    // 4-argument: used by THROW_VKRTX for full debug info
     VulkanRTXException(const std::string& msg, const char* file, int line, const char* func)
-        : std::runtime_error(msg)
-        , m_file(file)
-        , m_line(line)
-        , m_function(func)
-    {}
+        : std::runtime_error(msg), m_file(file), m_line(line), m_function(func) {}
 
     const char* file()     const noexcept { return m_file.c_str(); }
     int         line()     const noexcept { return m_line; }
@@ -134,19 +133,14 @@ private:
     std::string m_function;
 };
 
-// Forward declaration
-class VulkanPipelineManager;
+namespace VulkanRTX {
 
-struct ShaderBindingTable {
-    VkStridedDeviceAddressRegionKHR raygen;
-    VkStridedDeviceAddressRegionKHR miss;
-    VkStridedDeviceAddressRegionKHR hit;
-    VkStridedDeviceAddressRegionKHR callable;
-};
-
+// ---------------------------------------------------------------------
+// VulkanRTX – main class (RAW HANDLES ONLY)
+// ---------------------------------------------------------------------
 class VulkanRTX {
 public:
-    VulkanRTX(std::shared_ptr<Vulkan::Context> ctx, int width, int height,
+    VulkanRTX(std::shared_ptr<::Vulkan::Context> ctx, int width, int height,
               VulkanPipelineManager* pipelineMgr);
     ~VulkanRTX();
 
@@ -155,15 +149,21 @@ public:
                        const std::vector<std::tuple<VkBuffer, VkBuffer, uint32_t, uint32_t, uint64_t>>& geometries,
                        uint32_t maxRayRecursionDepth,
                        const std::vector<DimensionState>& dimensionCache);
+
     void updateRTX(VkPhysicalDevice physicalDevice, VkCommandPool commandPool,
                    VkQueue graphicsQueue,
                    const std::vector<std::tuple<VkBuffer, VkBuffer, uint32_t, uint32_t, uint64_t>>& geometries,
-                   const std::vector<DimensionState>& dimensionCache); 
+                   const std::vector<DimensionState>& dimensionCache);
     void updateRTX(VkPhysicalDevice physicalDevice, VkCommandPool commandPool,
                    VkQueue graphicsQueue,
                    const std::vector<std::tuple<VkBuffer, VkBuffer, uint32_t, uint32_t, uint64_t>>& geometries,
                    const std::vector<DimensionState>& dimensionCache,
                    uint32_t transferQueueFamily);
+    void updateRTX(VkPhysicalDevice physicalDevice, VkCommandPool commandPool,
+                   VkQueue graphicsQueue,
+                   const std::vector<std::tuple<VkBuffer, VkBuffer, uint32_t, uint32_t, uint64_t>>& geometries,
+                   const std::vector<DimensionState>& dimensionCache,
+                   VulkanRenderer* renderer);
 
     void createDescriptorSetLayout();
     void createDescriptorPoolAndSet();
@@ -183,24 +183,28 @@ public:
                            VkImageView gNormalView);
     void recordRayTracingCommands(VkCommandBuffer cmdBuffer, VkExtent2D extent,
                                   VkImage outputImage, VkImageView outputImageView);
-    void updateDescriptorSetForTLAS(VkAccelerationStructureKHR tlas);
     void createBlackFallbackImage();
 
-    // PUBLIC GETTERS
-    VkDescriptorSet getDescriptorSet() const { return ds_; }
-    VkPipeline getPipeline() const { return rtPipeline_; }
-    const ShaderBindingTable& getSBT() const { return sbt_; }
-    VkDescriptorSetLayout getDescriptorSetLayout() const { return dsLayout_; }
+    void notifyTLASReady(VkAccelerationStructureKHR tlas, VulkanRenderer* renderer);
 
-    VkBuffer       getSBTBuffer() const { return sbtBuffer_; }
-    VkDeviceMemory getSBTMemory() const { return sbtMemory_; }
+    // ----- getters -------------------------------------------------
+    VkDescriptorSet               getDescriptorSet() const { return ds_; }
+    VkPipeline                    getPipeline() const { return rtPipeline_; }
+    const ShaderBindingTable&     getSBT() const { return sbt_; }
+    VkDescriptorSetLayout         getDescriptorSetLayout() const { return dsLayout_; }
 
-    VkAccelerationStructureKHR getBLAS() const { return blas_; }
-    VkAccelerationStructureKHR getTLAS() const { return tlas_; }
+    VkBuffer                      getSBTBuffer() const { return sbtBuffer_; }
+    VkDeviceMemory                getSBTMemory() const { return sbtMemory_; }
 
-    void traceRays(VkCommandBuffer cmd, const VkStridedDeviceAddressRegionKHR* raygen,
-                   const VkStridedDeviceAddressRegionKHR* miss, const VkStridedDeviceAddressRegionKHR* hit,
-                   const VkStridedDeviceAddressRegionKHR* callable, uint32_t width, uint32_t height, uint32_t depth) const {
+    VkAccelerationStructureKHR    getBLAS() const { return blas_; }
+    VkAccelerationStructureKHR    getTLAS() const { return tlas_; }
+
+    void traceRays(VkCommandBuffer cmd,
+                   const VkStridedDeviceAddressRegionKHR* raygen,
+                   const VkStridedDeviceAddressRegionKHR* miss,
+                   const VkStridedDeviceAddressRegionKHR* hit,
+                   const VkStridedDeviceAddressRegionKHR* callable,
+                   uint32_t width, uint32_t height, uint32_t depth) const {
         if (vkCmdTraceRaysKHR) {
             vkCmdTraceRaysKHR(cmd, raygen, miss, hit, callable, width, height, depth);
         } else {
@@ -210,29 +214,25 @@ public:
 
     void setRayTracingPipeline(VkPipeline pipeline, VkPipelineLayout layout);
 
-    // dispatchRenderMode IS NOW INSIDE THE CLASS
-    void dispatchRenderMode(
-        uint32_t imageIndex,
-        VkBuffer vertexBuffer,
-        VkCommandBuffer cmd,
-        VkBuffer indexBuffer,
-        float zoom,
-        int width,
-        int height,
-        float wavePhase,
-        VkPipelineLayout layout,
-        VkDescriptorSet ds,
-        VkDevice device,
-        VkDeviceMemory uniformMem,
-        VkPipeline pipeline,
-        float deltaTime,
-        VkRenderPass renderPass,
-        VkFramebuffer fb,
-        const Vulkan::Context& ctx,
-        int mode
-    );
+    void dispatchRenderMode(uint32_t imageIndex,
+                            VkBuffer vertexBuffer,
+                            VkCommandBuffer cmd,
+                            VkBuffer indexBuffer,
+                            float zoom,
+                            int width,
+                            int height,
+                            float wavePhase,
+                            VkPipelineLayout layout,
+                            VkDescriptorSet ds,
+                            VkDevice device,
+                            VkDeviceMemory uniformMem,
+                            VkPipeline pipeline,
+                            float deltaTime,
+                            ::Vulkan::Context& context,
+                            int mode);
 
 private:
+    // ----- helper utilities ----------------------------------------
     VkCommandBuffer allocateTransientCommandBuffer(VkCommandPool commandPool);
     void submitAndWaitTransient(VkCommandBuffer cmd, VkQueue queue, VkCommandPool pool);
     void uploadBlackPixelToImage(VkImage image);
@@ -244,24 +244,26 @@ private:
     void compactAccelerationStructures(VkPhysicalDevice physicalDevice, VkCommandPool commandPool, VkQueue queue);
     void createStorageImage(VkPhysicalDevice physicalDevice, VkExtent2D extent,
                             VkImage& image, VkImageView& imageView, VkDeviceMemory& memory);
-
     void cleanupBLASResources(VkBuffer asBuffer, VkDeviceMemory asMemory,
                               VkBuffer scratchBuffer, VkDeviceMemory scratchMemory);
 
-    std::shared_ptr<Vulkan::Context> context_;
+    // ----- members -------------------------------------------------
+    std::shared_ptr<::Vulkan::Context> context_;
     VulkanPipelineManager* pipelineMgr_ = nullptr;
     VkDevice device_ = VK_NULL_HANDLE;
     VkPhysicalDevice physicalDevice_ = VK_NULL_HANDLE;
     VkExtent2D extent_{};
 
-    // RAW HANDLES – NO Dispose::VulkanHandle
+    // Descriptor objects
     VkDescriptorSetLayout dsLayout_ = VK_NULL_HANDLE;
     VkDescriptorPool dsPool_ = VK_NULL_HANDLE;
     VkDescriptorSet ds_ = VK_NULL_HANDLE;
 
+    // Ray-tracing pipeline
     VkPipeline rtPipeline_ = VK_NULL_HANDLE;
     VkPipelineLayout rtPipelineLayout_ = VK_NULL_HANDLE;
 
+    // Acceleration structures (raw handles)
     VkBuffer blasBuffer_ = VK_NULL_HANDLE;
     VkDeviceMemory blasMemory_ = VK_NULL_HANDLE;
     VkBuffer tlasBuffer_ = VK_NULL_HANDLE;
@@ -269,9 +271,11 @@ private:
     VkAccelerationStructureKHR blas_ = VK_NULL_HANDLE;
     VkAccelerationStructureKHR tlas_ = VK_NULL_HANDLE;
 
+    // Shader Binding Table
     VkBuffer sbtBuffer_ = VK_NULL_HANDLE;
     VkDeviceMemory sbtMemory_ = VK_NULL_HANDLE;
 
+    // Misc
     std::vector<uint32_t> primitiveCounts_;
     std::vector<uint32_t> previousPrimitiveCounts_;
     std::vector<DimensionState> previousDimensionCache_;
@@ -284,7 +288,7 @@ private:
     VkDeviceMemory blackFallbackMemory_ = VK_NULL_HANDLE;
     VkImageView blackFallbackView_ = VK_NULL_HANDLE;
 
-    // KHR function pointers
+    // ----- KHR function pointers ------------------------------------
     PFN_vkGetBufferDeviceAddress vkGetBufferDeviceAddress = nullptr;
     PFN_vkCmdTraceRaysKHR vkCmdTraceRaysKHR = nullptr;
     PFN_vkCreateAccelerationStructureKHR vkCreateAccelerationStructureKHR = nullptr;
@@ -296,7 +300,7 @@ private:
     PFN_vkCmdCopyAccelerationStructureKHR vkCmdCopyAccelerationStructureKHR = nullptr;
     PFN_vkCmdBuildAccelerationStructuresKHR vkCmdBuildAccelerationStructuresKHR = nullptr;
 
-    // CORE DESCRIPTOR FUNCTION POINTERS
+    // ----- core descriptor function pointers ------------------------
     PFN_vkCreateDescriptorSetLayout   vkCreateDescriptorSetLayout   = nullptr;
     PFN_vkAllocateDescriptorSets      vkAllocateDescriptorSets      = nullptr;
     PFN_vkCreateDescriptorPool        vkCreateDescriptorPool        = nullptr;
@@ -304,13 +308,132 @@ private:
     PFN_vkDestroyDescriptorPool       vkDestroyDescriptorPool       = nullptr;
     PFN_vkFreeDescriptorSets          vkFreeDescriptorSets          = nullptr;
 
-    // Transient fence
     VkFence transientFence_ = VK_NULL_HANDLE;
     bool deviceLost_ = false;
 
-    // === NEW: Frame and time tracking for ray tracing ===
     uint32_t frameNumber_ = 0;
     float time_ = 0.0f;
 };
+
+/* -----------------------------------------------------------------
+   IMPLEMENTATIONS (in-header)
+   ----------------------------------------------------------------- */
+
+inline VulkanRTX::VulkanRTX(std::shared_ptr<::Vulkan::Context> ctx, int width, int height,
+                            VulkanPipelineManager* pipelineMgr)
+    : context_(std::move(ctx)), pipelineMgr_(pipelineMgr),
+      extent_{static_cast<uint32_t>(width), static_cast<uint32_t>(height)}
+{
+    using namespace Logging::Color;
+
+    LOG_INFO_CAT("VulkanRTX", "{}VulkanRTX ctor – {}x{}{}", OCEAN_TEAL, width, height, RESET);
+    if (!context_)               THROW_VKRTX("Null context");
+    if (!pipelineMgr_)           THROW_VKRTX("Null pipeline manager");
+    if (width <= 0 || height <= 0) THROW_VKRTX("Invalid dimensions");
+
+    device_         = context_->device;
+    physicalDevice_ = context_->physicalDevice;
+    if (!device_) THROW_VKRTX("Null device");
+
+    // ---- load KHR extensions ------------------------------------
+#define LOAD_PROC(name) \
+    name = reinterpret_cast<PFN_##name>(vkGetDeviceProcAddr(device_, #name)); \
+    if (!name) THROW_VKRTX(std::format("Failed to load {}", #name));
+    LOAD_PROC(vkGetBufferDeviceAddress);
+    LOAD_PROC(vkCmdTraceRaysKHR);
+    LOAD_PROC(vkCreateAccelerationStructureKHR);
+    LOAD_PROC(vkDestroyAccelerationStructureKHR);
+    LOAD_PROC(vkGetAccelerationStructureBuildSizesKHR);
+    LOAD_PROC(vkCreateRayTracingPipelinesKHR);
+    LOAD_PROC(vkGetRayTracingShaderGroupHandlesKHR);
+    LOAD_PROC(vkGetAccelerationStructureDeviceAddressKHR);
+    LOAD_PROC(vkCmdBuildAccelerationStructuresKHR);
+#undef LOAD_PROC
+
+    // ---- load core descriptor functions -------------------------
+#define LOAD_DESC_PROC(name) \
+    name = reinterpret_cast<PFN_##name>(vkGetDeviceProcAddr(device_, #name)); \
+    if (!name) THROW_VKRTX(std::format("Failed to load {}", #name));
+    LOAD_DESC_PROC(vkCreateDescriptorSetLayout);
+    LOAD_DESC_PROC(vkAllocateDescriptorSets);
+    LOAD_DESC_PROC(vkCreateDescriptorPool);
+    LOAD_DESC_PROC(vkDestroyDescriptorSetLayout);
+    LOAD_DESC_PROC(vkDestroyDescriptorPool);
+    LOAD_DESC_PROC(vkFreeDescriptorSets);
+#undef LOAD_DESC_PROC
+
+    VkFenceCreateInfo fci{.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+                          .flags = VK_FENCE_CREATE_SIGNALED_BIT};
+    VK_CHECK(vkCreateFence(device_, &fci, nullptr, &transientFence_), "transient fence");
+
+    pipelineMgr_->createRayTracingPipeline();
+    dsLayout_          = pipelineMgr_->getRayTracingDescriptorSetLayout();
+    rtPipeline_        = pipelineMgr_->getRayTracingPipeline();
+    rtPipelineLayout_  = pipelineMgr_->getRayTracingPipelineLayout();
+
+    createDescriptorPoolAndSet();
+    createBlackFallbackImage();
+}
+
+/* -----------------------------------------------------------------
+   notifyTLASReady – forward TLAS to the renderer
+   ----------------------------------------------------------------- */
+inline void VulkanRTX::notifyTLASReady(VkAccelerationStructureKHR tlas, VulkanRenderer* renderer)
+{
+    using namespace Logging::Color;
+
+    LOG_INFO_CAT("VulkanRTX", "{}notifyTLASReady – TLAS = {:#x}{}",
+                 ARCTIC_CYAN, reinterpret_cast<uint64_t>(tlas), RESET);
+
+    if (!renderer) {
+        LOG_WARN_CAT("VulkanRTX", "Renderer pointer is nullptr – skipping TLAS bind");
+        return;
+    }
+
+    renderer->updateAccelerationStructureDescriptor(tlas);
+}
+
+/* -----------------------------------------------------------------
+   updateRTX – rebuild AS + notify renderer (overload with renderer)
+   ----------------------------------------------------------------- */
+inline void VulkanRTX::updateRTX(VkPhysicalDevice physicalDevice, VkCommandPool commandPool,
+                                 VkQueue graphicsQueue,
+                                 const std::vector<std::tuple<VkBuffer, VkBuffer, uint32_t, uint32_t, uint64_t>>& geometries,
+                                 const std::vector<DimensionState>& dimensionCache,
+                                 VulkanRenderer* renderer)
+{
+    using namespace Logging::Color;
+
+    LOG_INFO_CAT("VulkanRTX", "{}updateRTX() — rebuilding AS{}", AMBER_YELLOW, RESET);
+    createBottomLevelAS(physicalDevice, commandPool, graphicsQueue, geometries, VK_QUEUE_FAMILY_IGNORED);
+    createTopLevelAS(physicalDevice, commandPool, graphicsQueue, {{blas_, glm::mat4(1.0f)}});
+
+    notifyTLASReady(tlas_, renderer);
+}
+
+/* -----------------------------------------------------------------
+   backward-compatible overloads (no renderer)
+   ----------------------------------------------------------------- */
+inline void VulkanRTX::updateRTX(VkPhysicalDevice physicalDevice, VkCommandPool commandPool,
+                                 VkQueue graphicsQueue,
+                                 const std::vector<std::tuple<VkBuffer, VkBuffer, uint32_t, uint32_t, uint64_t>>& geometries,
+                                 const std::vector<DimensionState>& dimensionCache)
+{
+    updateRTX(physicalDevice, commandPool, graphicsQueue, geometries, dimensionCache, nullptr);
+}
+
+inline void VulkanRTX::updateRTX(VkPhysicalDevice physicalDevice, VkCommandPool commandPool,
+                                 VkQueue graphicsQueue,
+                                 const std::vector<std::tuple<VkBuffer, VkBuffer, uint32_t, uint32_t, uint64_t>>& geometries,
+                                 const std::vector<DimensionState>& dimensionCache,
+                                 uint32_t transferQueueFamily)
+{
+    using namespace Logging::Color;
+    LOG_INFO_CAT("VulkanRTX",
+        "{}updateRTX(transferQueueFamily={}) — rebuilding AS{}", AMBER_YELLOW,
+        transferQueueFamily, RESET);
+    createBottomLevelAS(physicalDevice, commandPool, graphicsQueue, geometries, transferQueueFamily);
+    createTopLevelAS(physicalDevice, commandPool, graphicsQueue, {{blas_, glm::mat4(1.0f)}});
+}
 
 } // namespace VulkanRTX

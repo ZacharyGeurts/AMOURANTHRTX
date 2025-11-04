@@ -13,20 +13,15 @@
 #include <chrono>
 #include <functional>
 #include <string>
-#include <cstdio>
 
 #include "engine/SDL3/SDL3_init.hpp"
 #include "engine/camera.hpp"
 #include "engine/Vulkan/VulkanRenderer.hpp"
 #include "engine/logging.hpp"
-#include "HandleInput.hpp"  // FIXED: Include for HandleInput definition
+#include "HandleInput.hpp"
 
-// Forward declaration for HandleInput::handleInput(Application& app)
 class Application;
 
-// ---------------------------------------------------------------------------
-//  Main Application
-// ---------------------------------------------------------------------------
 class Application {
 public:
     Application(const char* title, int width, int height);
@@ -45,11 +40,10 @@ public:
 
     void setRenderer(std::unique_ptr<VulkanRTX::VulkanRenderer> renderer);
 
-    // === USER CONTROLS ===
-    void toggleTonemap();      // T key
-    void toggleOverlay();      // O key
+    // USER CONTROLS
+    void toggleTonemap();      // T / t
+    void toggleOverlay();      // O / o
 
-    // FIXED: Public setter for quit_ (SDL3 event handling)
     void setQuit(bool q) { quit_ = q; }
 
 private:
@@ -60,18 +54,20 @@ private:
     std::string title_;
     int width_;
     int height_;
-    int mode_{1};  // 1-9 via core dispatch
-    bool quit_{false};  // SDL3: Quit flag for event-driven exit
+    int mode_{1};               // 1-9
+    bool quit_{false};
 
     std::unique_ptr<SDL3Initializer::SDL3Initializer> sdl_;
     std::unique_ptr<VulkanRTX::VulkanRenderer> renderer_;
-
     std::unique_ptr<VulkanRTX::Camera> camera_;
-    std::unique_ptr<HandleInput> inputHandler_;  // FIXED: Now resolves with include
+    std::unique_ptr<HandleInput> inputHandler_;
 
     bool isFullscreen_{false};
     bool isMaximized_{false};
     bool showOverlay_{true};
+
+    // NEW – independent tonemap flag
+    bool tonemapEnabled_{false};
 
     std::vector<glm::vec3> vertices_;
     std::vector<uint32_t> indices_;
