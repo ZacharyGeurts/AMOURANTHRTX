@@ -153,7 +153,7 @@ void PerspectiveCamera::togglePause() {
 void PerspectiveCamera::updateZoom(bool zoomIn) {
     const float factor = zoomIn ? 0.9f : 1.1f;
     fov_ = std::clamp(fov_ * factor, 10.0f, 120.0f);
-    LOG_INFO_CAT("CAMERA", "{}Zoom {} → FOV={:.1f}°{}", ARCTIC_CYAN,
+    LOG_INFO_CAT("CAMERA", "{}Zoom {} to FOV={:.1f}°{}", ARCTIC_CYAN,
                  zoomIn ? "IN" : "OUT", fov_, RESET);
 }
 
@@ -162,7 +162,7 @@ void PerspectiveCamera::updateZoom(bool zoomIn) {
 // ---------------------------------------------------------------------
 void PerspectiveCamera::zoom(float factor) {
     fov_ = std::clamp(fov_ * factor, 10.0f, 120.0f);
-    LOG_INFO_CAT("CAMERA", "{}Zoom factor={:.2f} → FOV={:.1f}°{}", ARCTIC_CYAN,
+    LOG_INFO_CAT("CAMERA", "{}Zoom factor={:.2f} to FOV={:.1f}°{}", ARCTIC_CYAN,
                  factor, fov_, RESET);
 }
 

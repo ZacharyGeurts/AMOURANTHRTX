@@ -1,10 +1,12 @@
 // src/modes/RenderMode1.cpp
 // AMOURANTH RTX — MODE 1: ENVIRONMENT MAP ONLY
 // FULLY MODULAR. FULLY SCALABLE. FULLY GLOWING.
+// Keyboard key: 1
 
 #include "modes/RenderMode1.hpp"
-#include "engine/Vulkan/VulkanCore.hpp"  // ADDED: Full Vulkan::Context definition
+#include "engine/Vulkan/VulkanCore.hpp"
 #include "engine/RTConstants.hpp"
+#include "engine/camera.hpp"          // ← REQUIRED
 #include "engine/logging.hpp"
 
 #include <glm/gtc/constants.hpp>
@@ -16,24 +18,30 @@ namespace VulkanRTX {
 #define LOG_MODE1(...) LOG_DEBUG_CAT("RenderMode1", __VA_ARGS__)
 
 void renderMode1(
-    [[maybe_unused]] uint32_t imageIndex,
-    [[maybe_unused]] VkBuffer vertexBuffer,
+    uint32_t imageIndex,
     VkCommandBuffer commandBuffer,
-    [[maybe_unused]] VkBuffer indexBuffer,
-    float zoomLevel,
-    int width,
-    int height,
-    [[maybe_unused]] float wavePhase,
     VkPipelineLayout pipelineLayout,
     VkDescriptorSet descriptorSet,
-    VkDevice device,
-    [[maybe_unused]] VkDeviceMemory vertexBufferMemory,
     VkPipeline pipeline,
-    [[maybe_unused]] float deltaTime,
-    Vulkan::Context& context  // FULL TYPE VIA INCLUDE
+    float deltaTime,
+    ::Vulkan::Context& context
 ) {
-    LOG_MODE1("{}ENV MAP ONLY | {}x{} | zoom: {:.2f}{}", 
-              Logging::Color::ARCTIC_CYAN, width, height, zoomLevel, Logging::Color::RESET);
+    // === Extract from context ===
+    int width  = context.swapchainExtent.width;
+    int height = context.swapchainExtent.height;
+
+    // ← FIXED: Use `context.camera`, NOT `::Vulkan::Context::camera`
+    if (!context.camera) {
+        LOG_ERROR_CAT("RenderMode1", "context.camera is null!");
+        return;
+    }
+
+    glm::vec3 camPos = context.camera->getPosition();
+    float fov = context.camera->getFOV();
+    float zoomLevel = 60.0f / fov;  // e.g. FOV 60 = 1.0x, FOV 30 = 2.0x
+
+    LOG_MODE1("{}ENV MAP ONLY | {}x{} | zoom: {:.2f}x | FOV: {:.1f}°{}", 
+              Logging::Color::ARCTIC_CYAN, width, height, zoomLevel, fov, Logging::Color::RESET);
 
     if (!context.enableRayTracing || !context.vkCmdTraceRaysKHR) {
         LOG_ERROR_CAT("RenderMode1", "Ray tracing not enabled or vkCmdTraceRaysKHR missing");
@@ -44,10 +52,9 @@ void renderMode1(
     vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
                             pipelineLayout, 0, 1, &descriptorSet, 0, nullptr);
 
-    // === PUSH CONSTANTS ===
     RTConstants push{};
     push.clearColor      = glm::vec4(0.02f, 0.02f, 0.05f, 1.0f);
-    push.cameraPosition  = glm::vec3(0.0f, 0.0f, 5.0f + zoomLevel);
+    push.cameraPosition  = camPos + glm::vec3(0.0f, 0.0f, 5.0f * (zoomLevel - 1.0f));
     push._pad0           = 0.0f;
     push.lightDirection  = glm::vec3(0.0f, -1.0f, 0.0f);
     push.lightIntensity  = 8.0f;
@@ -56,13 +63,12 @@ void renderMode1(
     push.maxBounces      = 0;
     push.russianRoulette = 0.0f;
     push.resolution      = glm::vec2(width, height);
-    push.showEnvMapOnly  = 1;  // CRITICAL FLAG
+    push.showEnvMapOnly  = 1;
 
     vkCmdPushConstants(commandBuffer, pipelineLayout,
         VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR,
         0, sizeof(RTConstants), &push);
 
-    // === SBT REGIONS (minimal) ===
     VkStridedDeviceAddressRegionKHR raygen = {
         .deviceAddress = context.raygenSbtAddress,
         .stride        = context.sbtRecordSize,
@@ -71,12 +77,11 @@ void renderMode1(
     VkStridedDeviceAddressRegionKHR miss = {
         .deviceAddress = context.missSbtAddress,
         .stride        = context.sbtRecordSize,
-        .size          = context.sbtRecordSize * 1  // only env miss
+        .size          = context.sbtRecordSize
     };
     VkStridedDeviceAddressRegionKHR hit = {};
     VkStridedDeviceAddressRegionKHR callable = {};
 
-    // === DISPATCH ===
     context.vkCmdTraceRaysKHR(
         commandBuffer,
         &raygen,

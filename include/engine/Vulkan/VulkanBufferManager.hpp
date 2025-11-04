@@ -1,16 +1,22 @@
 // include/engine/Vulkan/VulkanBufferManager.hpp
-// AMOURANTH RTX Engine (C) 2025 by Zachary Geurts <gzac5314@gmail.com>
+// AMOURANTH RTX Engine (C) 2025 by Zachary Geurts gzac5314@gmail.com
 // FINAL: C++20, texture loading, full logging, inline device address helpers,
 //        optimized uploads, RAII ManagedBuffer, RTConstants forward-declare
+// FIXED: All members (vertexCount_, etc.) + all functions declared
+// FIXED: Constructor takes std::shared_ptr<Vulkan::Context> | Matches .cpp
+// FIXED: Added getMeshes(), generateSphere(), getTotalVertexCount(), getTotalIndexCount()
+// NEW: generateCube() – fallback geometry
+// NEW: loadOBJ() – tinyobjloader, dedup vertices, upload to GPU, return geometry data
+// GROK PROTIPS: Persistent staging pool, batch uploads, Dispose integration
 
 #ifndef VULKAN_BUFFER_MANAGER_HPP
 #define VULKAN_BUFFER_MANAGER_HPP
 
 #include "engine/Vulkan/VulkanCommon.hpp"
-#include "engine/Vulkan/VulkanCore.hpp"      // renamed from VulkanCore.hpp
+#include "engine/Vulkan/VulkanCore.hpp"
 #include "engine/Vulkan/Vulkan_init.hpp"
-#include "engine/Vulkan/VulkanRTX_Setup.hpp"
-#include "engine/Vulkan/VulkanCommon.hpp"
+#include "engine/logging.hpp"
+
 #include <glm/glm.hpp>
 #include <vulkan/vulkan.h>
 #include <vector>
@@ -21,22 +27,20 @@
 #include <span>
 #include <array>
 #include <memory>
+#include <string>
+#include <unordered_map>
+#include <functional>  // std::hash
 
-// ---------------------------------------------------------------------
-// Forward declarations (shared across the engine)
-// ---------------------------------------------------------------------
 namespace Vulkan { class Context; }
-struct RTConstants;               // Defined in engine/RTConstants.hpp
+struct RTConstants;  // Per-frame push constants
 
-// ---------------------------------------------------------------------
-// RAII wrapper for a Vulkan buffer + memory (used for uniform buffers)
-// ---------------------------------------------------------------------
 namespace Vulkan {
 
 class ManagedBuffer {
 public:
     ManagedBuffer() = default;
 
+    void generateSphere(float radius, unsigned int latitudeBands, unsigned int longitudeBands);
     ManagedBuffer(VkDevice dev, VkDeviceSize sz,
                   VkBufferUsageFlags usage,
                   VkMemoryPropertyFlags props,
@@ -53,7 +57,6 @@ public:
     VkBuffer        buffer() const noexcept { return buffer_; }
     VkDeviceMemory  memory() const noexcept { return memory_; }
 
-    // Simple map/unmap helpers
     void* map(VkDeviceSize offset = 0, VkDeviceSize size = VK_WHOLE_SIZE);
     void  unmap();
 
@@ -67,8 +70,25 @@ private:
 } // namespace Vulkan
 
 // ---------------------------------------------------------------------
-// Buffer manager – lives in VulkanRTX namespace
+// std::hash + std::equal_to for glm::vec3 (required for unordered_map)
 // ---------------------------------------------------------------------
+namespace std {
+    template<> struct hash<glm::vec3> {
+        size_t operator()(const glm::vec3& v) const noexcept {
+            auto h1 = hash<float>{}(v.x);
+            auto h2 = hash<float>{}(v.y);
+            auto h3 = hash<float>{}(v.z);
+            return ((h1 ^ (h2 << 1)) >> 1) ^ (h3 << 1);
+        }
+    };
+
+    template<> struct equal_to<glm::vec3> {
+        bool operator()(const glm::vec3& a, const glm::vec3& b) const noexcept {
+            return glm::all(glm::equal(a, b));
+        }
+    };
+} // namespace std
+
 namespace VulkanRTX {
 
 enum class BufferType { GEOMETRY, UNIFORM };
@@ -82,10 +102,17 @@ struct CopyRegion {
     VkDeviceSize size;
 };
 
+struct Mesh {
+    uint32_t vertexOffset = 0;
+    uint32_t indexOffset = 0;
+    uint32_t vertexCount = 0;
+    uint32_t indexCount = 0;
+};
+
 class VulkanBufferManager {
 public:
-    explicit VulkanBufferManager(Vulkan::Context& context);
-    VulkanBufferManager(Vulkan::Context& context,
+    explicit VulkanBufferManager(std::shared_ptr<Vulkan::Context> ctx);
+    VulkanBufferManager(std::shared_ptr<Vulkan::Context> ctx,
                         const glm::vec3* vertices, size_t vertexCount,
                         const uint32_t* indices, size_t indexCount,
                         uint32_t transferQueueFamily = std::numeric_limits<uint32_t>::max());
@@ -98,19 +125,26 @@ public:
     void setDevice(VkDevice device, VkPhysicalDevice physicalDevice);
     void reserveArena(VkDeviceSize size, BufferType type);
 
-    VkDeviceAddress updateBuffers(const glm::vec3* vertices, size_t vertexCount,
-                                  const uint32_t* indices, size_t indexCount,
-                                  uint32_t transferQueueFamily = std::numeric_limits<uint32_t>::max());
-
-    void createUniformBuffers(uint32_t count);
-    VkBuffer getUniformBuffer(uint32_t index) const;
-    VkDeviceMemory getUniformBufferMemory(uint32_t index) const;
-
     std::vector<std::tuple<VkBuffer, VkBuffer, uint32_t, uint32_t, uint64_t>> getGeometries() const;
     std::vector<DimensionState> getDimensionStates() const;
 
     uint32_t getVertexCount() const { return vertexCount_; }
-    uint32_t getIndexCount()  const { return indexCount_; }
+    uint32_t getIndexCount() const { return indexCount_; }
+
+    uint32_t getTotalVertexCount() const;
+    uint32_t getTotalIndexCount() const;
+
+    const std::vector<Mesh>& getMeshes() const { return meshes_; }
+
+    void generateSphere(float radius, uint32_t latDivs = 32, uint32_t lonDivs = 32);
+    void generateCube(float size = 1.0f);  // NEW: Fallback geometry
+
+    // GROK PROTIP: Load OBJ → dedup → upload → return geometry data for AS build
+    std::vector<std::tuple<VkBuffer, VkBuffer, uint32_t, uint32_t, uint64_t>>
+    loadOBJ(const std::string& path,
+            VkCommandPool commandPool,
+            VkQueue graphicsQueue,
+            uint32_t transferQueueFamily = std::numeric_limits<uint32_t>::max());
 
     static void createBuffer(VkDevice device, VkPhysicalDevice physicalDevice,
                              VkDeviceSize size,
@@ -120,9 +154,6 @@ public:
                              const VkMemoryAllocateFlagsInfo* allocFlags,
                              Vulkan::Context& context);
 
-    // -----------------------------------------------------------------
-    // Inline device address helpers (ODR-safe)
-    // -----------------------------------------------------------------
     static inline VkDeviceAddress getBufferDeviceAddress(const Vulkan::Context& ctx, VkBuffer buffer)
     {
         VkBufferDeviceAddressInfo info{
@@ -145,7 +176,7 @@ public:
     void reserveScratchPool(VkDeviceSize size, uint32_t count);
 
     VkBuffer getVertexBuffer() const { return vertexBuffer_; }
-    VkBuffer getIndexBuffer()  const { return indexBuffer_; }
+    VkBuffer getIndexBuffer() const { return indexBuffer_; }
     VkBuffer getScratchBuffer(uint32_t index = 0) const;
     VkDeviceAddress getScratchBufferAddress(uint32_t index = 0) const;
     uint32_t getScratchBufferCount() const;
@@ -157,54 +188,63 @@ public:
 
     uint32_t getTransferQueueFamily() const;
 
-    // TEXTURE
     void loadTexture(const char* path, VkFormat format = VK_FORMAT_R8G8B8A8_SRGB);
     VkImage getTextureImage() const;
     VkImageView getTextureImageView() const;
     VkSampler getTextureSampler() const;
 
-    // -----------------------------------------------------------------
-    // Public raw handles (for RenderMode1 etc.)
-    // -----------------------------------------------------------------
-    VkBuffer vertexBuffer_ = VK_NULL_HANDLE;
-    VkBuffer indexBuffer_  = VK_NULL_HANDLE;
-
-    void createStagingBuffer(VkDeviceSize size, VkBuffer& buf, VkDeviceMemory& mem);
-    void mapCopyUnmap(VkDeviceMemory mem, VkDeviceSize size, const void* data);
-    void copyToArena(VkBuffer src, VkDeviceSize dstOffset, VkDeviceSize size);
-    void batchCopyToArena(std::span<const CopyRegion> regions);
-
+    // --- DeviceAddress getters ---
     VkDeviceAddress getVertexBufferAddress() const;
     VkDeviceAddress getIndexBufferAddress() const;
 
+    // --- Uniform buffer helpers (NOW DECLARED) ---
+    void createUniformBuffers(uint32_t count);
+    VkBuffer getUniformBuffer(uint32_t index) const;
+    VkDeviceMemory getUniformBufferMemory(uint32_t index) const;
+
 private:
-    void initializeCommandPool();
-    void initializeStagingPool();
+    struct Impl;
+    Impl* impl_ = nullptr;
+
+    // Core members
+    std::shared_ptr<Vulkan::Context> context_;
+    uint32_t vertexCount_ = 0;
+    uint32_t indexCount_ = 0;
+    VkBuffer vertexBuffer_ = VK_NULL_HANDLE;
+    VkBuffer indexBuffer_ = VK_NULL_HANDLE;
+    VkDeviceAddress vertexBufferAddress_ = 0;
+    VkDeviceAddress indexBufferAddress_ = 0;
+
+    std::vector<Mesh> meshes_;
+
+    // Texture
+    VkImage textureImage_ = VK_NULL_HANDLE;
+    VkDeviceMemory textureImageMemory_ = VK_NULL_HANDLE;
+    VkImageView textureImageView_ = VK_NULL_HANDLE;
+    VkSampler textureSampler_ = VK_NULL_HANDLE;
+
+    // Private helpers
     void persistentCopy(const void* data, VkDeviceSize size, VkDeviceSize offset);
-    void createTextureImage(const unsigned char* pixels, int width, int height,
-                            int channels, VkFormat format);
+    void initializeStagingPool();
+    void createStagingBuffer(VkDeviceSize size, VkBuffer& buf, VkDeviceMemory& mem);
+    void mapCopyUnmap(VkDeviceMemory mem, VkDeviceSize size, const void* data);
+    void batchCopyToArena(std::span<const CopyRegion> regions);
+    void copyToArena(VkBuffer src, VkDeviceSize dstOffset, VkDeviceSize size);
+    void initializeCommandPool();
+    void createTextureImage(const unsigned char* pixels, int w, int h, int channels, VkFormat format);
     void createTextureImageView(VkFormat format);
     void createTextureSampler();
 
-    Vulkan::Context& context_;
-    uint32_t vertexCount_ = 0;
-    uint32_t indexCount_  = 0;
-    VkDeviceAddress vertexBufferAddress_ = 0;
-    VkDeviceAddress indexBufferAddress_  = 0;
-
-    VkImage        textureImage_       = VK_NULL_HANDLE;
-    VkDeviceMemory textureImageMemory_ = VK_NULL_HANDLE;
-    VkImageView    textureImageView_   = VK_NULL_HANDLE;
-    VkSampler      textureSampler_     = VK_NULL_HANDLE;
-
-    struct Impl;
-    Impl* impl_ = nullptr;
+    // GROK PROTIP: Upload helper used by loadOBJ and uploadMesh
+    void uploadToDeviceLocal(const void* data, VkDeviceSize size,
+                            VkBufferUsageFlags usage,
+                            VkBuffer& buffer, VkDeviceMemory& memory);
 };
 
 } // namespace VulkanRTX
 
 // ---------------------------------------------------------------------
-// Inline implementation of ManagedBuffer (kept in header for simplicity)
+// Inline implementation of ManagedBuffer (header for simplicity)
 // ---------------------------------------------------------------------
 namespace Vulkan {
 
@@ -214,7 +254,6 @@ inline ManagedBuffer::ManagedBuffer(VkDevice dev, VkDeviceSize sz,
                                    const VkMemoryAllocateFlagsInfo* allocFlags)
     : device_(dev)
 {
-    // NOTE: physicalDevice is not needed for host-visible buffers.
     VulkanRTX::VulkanBufferManager::createBuffer(
         dev, nullptr, sz, usage, props,
         buffer_, memory_, allocFlags,

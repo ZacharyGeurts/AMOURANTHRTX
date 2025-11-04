@@ -16,6 +16,18 @@
 #include "engine/camera.hpp"
 #include "engine/logging.hpp"
 
+
+#define VK_CHECK(result, msg) \
+    do { \
+        VkResult __r = (result); \
+        if (__r != VK_SUCCESS) { \
+            std::ostringstream __oss; \
+            __oss << "Vulkan error (" << static_cast<int>(__r) << "): " << (msg); \
+            LOG_ERROR_CAT("Vulkan", "{}", __oss.str()); \
+            throw VulkanRTXException(__oss.str()); \
+        } \
+    } while (0)
+
 namespace VulkanRTX {
 
 class VulkanRenderer;

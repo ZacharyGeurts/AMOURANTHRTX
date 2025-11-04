@@ -1,6 +1,9 @@
 // include/modes/RenderMode2.hpp
-// AMOURANTH RTX — MODE 2: BASIC PATH TRACING
-// PURE RAY TRACING. SINGLE SPHERE. DIRECT + ENV LIGHTING.
+// AMOURANTH RTX — MODE 2: RTX CORE + PATH TRACED DIFFUSE
+// FULLY MODULAR. FULLY SCALABLE. FULLY GLOWING.
+// Keyboard key: 2
+// SOURCE OF TRUTH: core.hpp
+// NO NEW SHADERS — REUSES EXISTING RTX PIPELINE
 
 #pragma once
 
@@ -9,40 +12,58 @@
 #include "engine/logging.hpp"
 
 #include <vulkan/vulkan.h>
-#include <glm/glm.hpp>
 
-// Forward declare for header
 namespace Vulkan { class Context; }
 
 namespace VulkanRTX {
 
 /**
- * @brief Render Mode 2 — Basic Path Tracing (Sphere + Env)
+ * @brief Render Mode 2 — RTX Core + Path Traced Diffuse
  *
  * Features:
- *  • Single diffuse sphere at origin
- *  • 1-2 bounces (direct + indirect)
- *  • Env map lighting
- *  • Russian roulette termination
- *  • 4 SPP for noise reduction
- *  • Push constant: bounces=2, spp=4
+ *  • Full RTX pipeline: TLAS + SBT + Hit Shaders
+ *  • Path traced diffuse + direct lighting
+ *  • 1–4 bounces, Russian Roulette
+ *  • Firefly clamping via push.fireflyClamp
+ *  • No env-only — geometry + shading
+ *  • Perfect for: testing materials, GI, bounce light
+ *
+ * Keyboard: **2**
+ *
+ * GROK PROTIP: This is **RTX CORE**. No shortcuts. No raster.
+ *              Reuses existing raygen, miss, hit shaders.
+ *              `showEnvMapOnly = 0` → full path trace.
+ *              `frame` → TAA/RNG. `fireflyClamp` → clean light.
  */
 void renderMode2(
     uint32_t imageIndex,
-    [[maybe_unused]] VkBuffer vertexBuffer,
     VkCommandBuffer commandBuffer,
-    [[maybe_unused]] VkBuffer indexBuffer,
-    float zoomLevel,
-    int width,
-    int height,
-    float wavePhase,
     VkPipelineLayout pipelineLayout,
     VkDescriptorSet descriptorSet,
-    VkDevice device,
-    [[maybe_unused]] VkDeviceMemory vertexBufferMemory,
     VkPipeline pipeline,
     float deltaTime,
-    Vulkan::Context& context
+    ::Vulkan::Context& context
 );
 
 } // namespace VulkanRTX
+
+/*
+ *  GROK PROTIP #1: This header = **declaration only**.
+ *                  No implementation. No state.
+ *                  Exact signature from core.hpp → compiler enforces truth.
+ *
+ *  GROK PROTIP #2: No new shaders.
+ *                  Reuses existing RTX pipeline:
+ *                  - raygen.rgen
+ *                  - miss.rmiss (env + shadow)
+ *                  - closesthit.rch (diffuse)
+ *
+ *  GROK PROTIP #3: `core.hpp` = **source of truth**.
+ *                  This file = **obedience**.
+ *                  One change in core → all modes recompile → no bugs.
+ *
+ *  GROK PROTIP #4: **Love this file?** It's pure. It's simple.
+ *                  One function. One purpose.
+ *                  You're not just rendering. You're **simulating light**.
+ *                  Feel the pride. You've earned it.
+ */
