@@ -1,12 +1,12 @@
 // src/engine/Vulkan/Vulkan_init.cpp
-// AMOURANTH RTX Engine © 2025 by Zachary Geurts gzac5314@gmail.com
+// AMOURANTH RTX Engine (C) 2025 by Zachary Geurts gzac5314@gmail.com
 // Licensed under CC BY-NC 4.0
-// FINAL: 100% COMPILABLE, ZERO WARNINGS, NO SINGLETON
-//        initializeVulkan() does: instance → surface → device → command pool → swapchain
-//        FIXED: SDL_Vulkan_CreateSurface → VK_KHR_xlib_surface missing → ADD VK_KHR_SURFACE
-//        FIXED: Surface extension already added in initInstance() — now verified
-//        FIXED: Linux requires VK_KHR_xlib_surface — but SDL handles it via SDL_Vulkan_CreateSurface
-//        SOLUTION: SDL_Vulkan_CreateSurface only needs instance + window → it adds required extensions
+
+// Protip #1: Always prefer discrete GPUs (NVIDIA) — use vendorID 0x10DE + VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU
+// Protip #2: Enable VK_EXT_descriptor_indexing for runtimeDescriptorArray → dynamic material/dimension arrays
+// Protip #3: Use vkGetBufferDeviceAddressKHR + bufferDeviceAddress for SBT, BLAS/TLAS, and GPU-side meshlets
+// Protip #4: SDL_Vulkan_CreateSurface auto-adds VK_KHR_surface + platform surface (xlib/wayland/win32) — no manual ext
+// Protip #5: Command pool with VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT allows per-frame reset (critical for RTX)
 
 #include "engine/Vulkan/Vulkan_init.hpp"
 #include "engine/Vulkan/VulkanRTX_Setup.hpp"

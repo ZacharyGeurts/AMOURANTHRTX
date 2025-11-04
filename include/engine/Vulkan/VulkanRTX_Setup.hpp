@@ -5,18 +5,22 @@
 //        ShaderBindingTable → VkStridedDeviceAddressRegionKHR (Vulkan spec compliant)
 //        ALL FUNCTION POINTERS LOADED — NO SEGFAULT
 //        FIXED: VK_CHECK(2 args), VulkanRTXException(1-arg + 4-arg), THROW_VKRTX
+//        FIXED: frameNumber_ and time_ for dispatchRenderMode
+//        FIXED: std::runtime582_error → std::runtime_error
 
 #pragma once
 
 #include "engine/Vulkan/VulkanCommon.hpp"
 #include <vulkan/vulkan.h>
 #include <glm/glm.hpp>
+#include <glm/gtc/type_ptr.hpp>
 #include <memory>
 #include <vector>
 #include <array>
 #include <stdexcept>
 #include <cstdint>
 #include <sstream>
+#include <format>  // C++20 std::format
 
 #include "engine/logging.hpp"
 
@@ -206,6 +210,28 @@ public:
 
     void setRayTracingPipeline(VkPipeline pipeline, VkPipelineLayout layout);
 
+    // dispatchRenderMode IS NOW INSIDE THE CLASS
+    void dispatchRenderMode(
+        uint32_t imageIndex,
+        VkBuffer vertexBuffer,
+        VkCommandBuffer cmd,
+        VkBuffer indexBuffer,
+        float zoom,
+        int width,
+        int height,
+        float wavePhase,
+        VkPipelineLayout layout,
+        VkDescriptorSet ds,
+        VkDevice device,
+        VkDeviceMemory uniformMem,
+        VkPipeline pipeline,
+        float deltaTime,
+        VkRenderPass renderPass,
+        VkFramebuffer fb,
+        const Vulkan::Context& ctx,
+        int mode
+    );
+
 private:
     VkCommandBuffer allocateTransientCommandBuffer(VkCommandPool commandPool);
     void submitAndWaitTransient(VkCommandBuffer cmd, VkQueue queue, VkCommandPool pool);
@@ -281,6 +307,10 @@ private:
     // Transient fence
     VkFence transientFence_ = VK_NULL_HANDLE;
     bool deviceLost_ = false;
+
+    // === NEW: Frame and time tracking for ray tracing ===
+    uint32_t frameNumber_ = 0;
+    float time_ = 0.0f;
 };
 
 } // namespace VulkanRTX

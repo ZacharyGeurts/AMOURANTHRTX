@@ -1,8 +1,6 @@
-// AMOURANTH RTX Engine © 2025 by Zachary Geurts gzac5314@gmail.com is licensed under CC BY-NC 4.0
-// Camera interface for 3D rendering
-// Dependencies: GLM, C++20 standard library
-// Supported platforms: Linux, Windows
-// Zachary Geurts 2025
+// include/engine/camera.hpp
+// AMOURANTH RTX Engine (C) 2025 by Zachary Geurts gzac5314@gmail.com
+// Licensed under CC BY-NC 4.0
 
 #pragma once
 #ifndef CAMERA_HPP
@@ -52,6 +50,9 @@ public:
 
     virtual void setUserData(void* data) = 0;
     virtual void* getUserData() const = 0;
+
+    // ADD: Smooth zoom via FOV
+    virtual void zoom(float factor) = 0;
 };
 
 class PerspectiveCamera : public Camera {
@@ -93,6 +94,9 @@ public:
 
     void setUserData(void* data) override;
     void* getUserData() const override;
+
+    // IMPLEMENTED: Smooth FOV zoom
+    void zoom(float factor) override;
 
     // --- PUBLIC FOR renderFrame() MOVEMENT DETECTION ---
     float yaw_;

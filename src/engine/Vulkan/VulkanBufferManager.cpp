@@ -273,7 +273,7 @@ void VulkanBufferManager::persistentCopy(const void* data, VkDeviceSize size, Vk
         return;
     }
 
-    std::memcpy(static_cast<char*>(impl_->persistentMappedPtr) + offset, data, size);
+    memcpy(static_cast<char*>(impl_->persistentMappedPtr) + offset, data, size);
 #ifndef NDEBUG
     LOG_DEBUG_CAT("BufferMgr", "Data copied to persistent staging: {} bytes @ offset {}", EMERALD_GREEN, size, offset);
 #endif
@@ -354,7 +354,7 @@ void VulkanBufferManager::mapCopyUnmap(VkDeviceMemory mem, VkDeviceSize size, co
 
     void* ptr = nullptr;
     VK_CHECK(vkMapMemory(context_.device, mem, 0, size, 0, &ptr), "Map staging memory");
-    std::memcpy(ptr, data, size);
+    memcpy(ptr, data, size);
     vkUnmapMemory(context_.device, mem);
 
 #ifndef NDEBUG

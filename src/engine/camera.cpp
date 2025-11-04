@@ -1,14 +1,14 @@
-// AMOURANTH RTX Engine © 2025 by Zachary Geurts gzac5314@gmail.com is licensed under CC BY-NC 4.0
-// Camera implementation for 3D rendering
-// Dependencies: GLM, C++20 standard library
-// Supported platforms: Linux, Windows
-// Zachary Geurts 2025
+// src/engine/camera.cpp
+// AMOURANTH RTX Engine (C) 2025 by Zachary Geurts gzac5314@gmail.com
+// Licensed under CC BY-NC 4.0
 
 #include "engine/camera.hpp"
 #include <glm/gtc/matrix_transform.hpp>
 #include <algorithm>
+#include "engine/logging.hpp"
 
-using namespace VulkanRTX;   // <-- THIS IS THE ONLY REQUIRED CHANGE
+using namespace VulkanRTX;
+using namespace Logging::Color;
 
 // ---------------------------------------------------------------------
 // Constructor
@@ -33,6 +33,8 @@ PerspectiveCamera::PerspectiveCamera(float fov,
       userData_(nullptr)
 {
     updateCameraVectors();
+    LOG_INFO_CAT("CAMERA", "{}PerspectiveCamera initialized: FOV={:.1f}° aspect={:.3f}{}",
+                 EMERALD_GREEN, fov, aspectRatio, RESET);
 }
 
 // ---------------------------------------------------------------------
@@ -47,15 +49,10 @@ glm::mat4 PerspectiveCamera::getProjectionMatrix() const {
 }
 
 // ---------------------------------------------------------------------
-// Simple getters / setters
+// Getters / Setters
 // ---------------------------------------------------------------------
-int PerspectiveCamera::getMode() const {
-    return mode_;
-}
-
-glm::vec3 PerspectiveCamera::getPosition() const {
-    return position_;
-}
+int PerspectiveCamera::getMode() const { return mode_; }
+glm::vec3 PerspectiveCamera::getPosition() const { return position_; }
 
 void PerspectiveCamera::setPosition(const glm::vec3& position) {
     position_ = position;
@@ -63,17 +60,17 @@ void PerspectiveCamera::setPosition(const glm::vec3& position) {
 }
 
 void PerspectiveCamera::setOrientation(float yaw, float pitch) {
-    yaw_   = yaw;
-    pitch_ = pitch;
+    yaw_ = yaw;
+    pitch_ = std::clamp(pitch, -89.0f, 89.0f);
     updateCameraVectors();
 }
 
 // ---------------------------------------------------------------------
-// Update (called each frame)
+// Update
 // ---------------------------------------------------------------------
 void PerspectiveCamera::update(float /*deltaTime*/) {
     if (!isPaused_) {
-        // Placeholder for any per-frame logic
+        // Future: smooth movement, physics, etc.
     }
 }
 
@@ -96,8 +93,8 @@ void PerspectiveCamera::moveUp(float speed) {
 // Rotation
 // ---------------------------------------------------------------------
 void PerspectiveCamera::rotate(float yawDelta, float pitchDelta) {
-    yaw_   += yawDelta * mouseSensitivity_;
-    pitch_  = std::clamp(pitch_ + pitchDelta * mouseSensitivity_, -89.0f, 89.0f);
+    yaw_ += yawDelta * mouseSensitivity_;
+    pitch_ = std::clamp(pitch_ + pitchDelta * mouseSensitivity_, -89.0f, 89.0f);
     updateCameraVectors();
 }
 
@@ -108,23 +105,22 @@ void PerspectiveCamera::setFOV(float fov) {
     fov_ = std::clamp(fov, 10.0f, 120.0f);
 }
 
-float PerspectiveCamera::getFOV() const {
-    return fov_;
-}
+float PerspectiveCamera::getFOV() const { return fov_; }
 
 // ---------------------------------------------------------------------
-// Mode
+// Mode & Aspect
 // ---------------------------------------------------------------------
-void PerspectiveCamera::setMode(int mode) {
-    mode_ = mode;
-}
+void PerspectiveCamera::setMode(int mode) { mode_ = mode; }
+void PerspectiveCamera::setAspectRatio(float aspectRatio) { aspectRatio_ = aspectRatio; }
 
 // ---------------------------------------------------------------------
-// Convenience wrappers
+// Convenience Wrappers
 // ---------------------------------------------------------------------
 void PerspectiveCamera::rotateCamera(float yaw, float pitch,
                                      [[maybe_unused]] std::source_location /*loc*/) {
-    rotate(yaw, pitch);
+    yaw_ = yaw;
+    pitch_ = std::clamp(pitch, -89.0f, 89.0f);
+    updateCameraVectors();
 }
 
 void PerspectiveCamera::moveCamera(float x, float y, float z,
@@ -135,14 +131,7 @@ void PerspectiveCamera::moveCamera(float x, float y, float z,
 }
 
 // ---------------------------------------------------------------------
-// Aspect ratio
-// ---------------------------------------------------------------------
-void PerspectiveCamera::setAspectRatio(float aspectRatio) {
-    aspectRatio_ = aspectRatio;
-}
-
-// ---------------------------------------------------------------------
-// User-cam movement (relative to current orientation)
+// User-Cam (relative to orientation)
 // ---------------------------------------------------------------------
 void PerspectiveCamera::moveUserCam(float dx, float dy, float dz) {
     glm::vec3 right = glm::normalize(glm::cross(front_, up_));
@@ -154,39 +143,45 @@ void PerspectiveCamera::moveUserCam(float dx, float dy, float dz) {
 // ---------------------------------------------------------------------
 void PerspectiveCamera::togglePause() {
     isPaused_ = !isPaused_;
+    LOG_INFO_CAT("CAMERA", "{}Camera {} {}", OCEAN_TEAL,
+                 isPaused_ ? "PAUSED" : "RESUMED", RESET);
 }
 
 // ---------------------------------------------------------------------
-// Zoom (mouse wheel)
+// Zoom (mouse wheel) – bool version
 // ---------------------------------------------------------------------
 void PerspectiveCamera::updateZoom(bool zoomIn) {
-    fov_ = zoomIn ? fov_ * 0.9f : fov_ * 1.1f;
-    fov_ = std::clamp(fov_, 10.0f, 120.0f);
+    const float factor = zoomIn ? 0.9f : 1.1f;
+    fov_ = std::clamp(fov_ * factor, 10.0f, 120.0f);
+    LOG_INFO_CAT("CAMERA", "{}Zoom {} → FOV={:.1f}°{}", ARCTIC_CYAN,
+                 zoomIn ? "IN" : "OUT", fov_, RESET);
 }
 
 // ---------------------------------------------------------------------
-// User data pointer
+// Zoom (float factor) – for HandleInput
 // ---------------------------------------------------------------------
-void PerspectiveCamera::setUserData(void* data) {
-    userData_ = data;
-}
-
-void* PerspectiveCamera::getUserData() const {
-    return userData_;
+void PerspectiveCamera::zoom(float factor) {
+    fov_ = std::clamp(fov_ * factor, 10.0f, 120.0f);
+    LOG_INFO_CAT("CAMERA", "{}Zoom factor={:.2f} → FOV={:.1f}°{}", ARCTIC_CYAN,
+                 factor, fov_, RESET);
 }
 
 // ---------------------------------------------------------------------
-// Private helper – recompute front/right/up vectors
+// User Data
+// ---------------------------------------------------------------------
+void PerspectiveCamera::setUserData(void* data) { userData_ = data; }
+void* PerspectiveCamera::getUserData() const { return userData_; }
+
+// ---------------------------------------------------------------------
+// Private: Recompute vectors
 // ---------------------------------------------------------------------
 void PerspectiveCamera::updateCameraVectors() {
     glm::vec3 direction;
     direction.x = cos(glm::radians(yaw_)) * cos(glm::radians(pitch_));
     direction.y = sin(glm::radians(pitch_));
     direction.z = sin(glm::radians(yaw_)) * cos(glm::radians(pitch_));
-
     front_ = glm::normalize(direction);
 
-    // Re-compute right and up vectors
     glm::vec3 worldUp(0.0f, 1.0f, 0.0f);
     glm::vec3 right = glm::normalize(glm::cross(front_, worldUp));
     up_ = glm::normalize(glm::cross(right, front_));

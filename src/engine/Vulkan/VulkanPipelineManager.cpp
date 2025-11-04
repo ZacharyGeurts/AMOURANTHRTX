@@ -1,5 +1,5 @@
 // src/engine/Vulkan/VulkanPipelineManager.cpp
-// AMOURANTH RTX Engine © 2025 by Zachary Geurts gzac5314@gmail.com is licensed under CC BY-NC 4.0
+// AMOURANTH RTX Engine (C) 2025 by Zachary Geurts gzac5314@gmail.com is licensed under CC BY-NC 4.0
 // FULLY POLISHED. ZERO WARNINGS. ZERO NARROWING. 100% COMPILABLE.
 // NO SINGLETON. NO STATIC instance_. RAII SAFE.
 // OPTIMIZED: Guarded logging, fixed unused vars/barriers, timed AS builds.
@@ -25,6 +25,7 @@ using namespace Logging::Color;
 // ---------------------------------------------------------------------------
 //  Debug Callback (for ENABLE_VULKAN_DEBUG)
 // ---------------------------------------------------------------------------
+// PROTIP: Validation layers catch API misuse early; filter severities to reduce noise in production.
 #ifdef ENABLE_VULKAN_DEBUG
 static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
     VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
@@ -47,6 +48,7 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
 // ---------------------------------------------------------------------------
 //  1. CONSTRUCTOR & DESTRUCTOR
 // ---------------------------------------------------------------------------
+// PROTIP: Initialize core layouts and passes in ctor for immediate use; defer pipeline compiles to runtime.
 VulkanPipelineManager::VulkanPipelineManager(Vulkan::Context& context, int width, int height)
     : context_(context), width_(width), height_(height)
 {
@@ -100,6 +102,7 @@ VulkanPipelineManager::~VulkanPipelineManager()
 // ---------------------------------------------------------------------------
 //  Debug Setup (for ENABLE_VULKAN_DEBUG)
 // ---------------------------------------------------------------------------
+// PROTIP: Enable performance warnings for optimization; verbose for deep debugging.
 #ifdef ENABLE_VULKAN_DEBUG
 void VulkanPipelineManager::setupDebugCallback()
 {
@@ -135,6 +138,7 @@ void VulkanPipelineManager::setupDebugCallback()
 // ---------------------------------------------------------------------------
 //  2. SHADER LOADING – BLAST LOGGED
 // ---------------------------------------------------------------------------
+// PROTIP: Validate SPIR-V magic and alignment early; use binary mode for exact byte reads.
 VkShaderModule VulkanPipelineManager::loadShader(VkDevice device, const std::string& shaderType)
 {
 #ifndef NDEBUG
@@ -209,6 +213,7 @@ VkShaderModule VulkanPipelineManager::loadShader(VkDevice device, const std::str
 // ---------------------------------------------------------------------------
 //  3. PIPELINE CACHE – BLAST LOGGED + CRASH FIXED
 // ---------------------------------------------------------------------------
+// PROTIP: Pipeline cache persists compiles across runs; invalidate on shader changes for dev.
 void VulkanPipelineManager::createPipelineCache() {
 #ifndef NDEBUG
     LOG_INFO_CAT("PipelineMgr", "{}Creating pipeline cache...{}", OCEAN_TEAL, RESET);
@@ -234,6 +239,7 @@ void VulkanPipelineManager::createPipelineCache() {
 // ---------------------------------------------------------------------------
 //  4. RENDER PASS – BLAST LOGGED
 // ---------------------------------------------------------------------------
+// PROTIP: Use CLEAR loadOp for swapchain; PRESENT_SRC finalLayout for direct present.
 void VulkanPipelineManager::createRenderPass()
 {
 #ifndef NDEBUG
@@ -294,6 +300,7 @@ void VulkanPipelineManager::createRenderPass()
 // ---------------------------------------------------------------------------
 //  5. DESCRIPTOR SET LAYOUTS (GRAPHICS)
 // ---------------------------------------------------------------------------
+// PROTIP: Bind storage buffers with high counts for dynamic materials; sampled images for textures.
 void VulkanPipelineManager::createGraphicsDescriptorSetLayout()
 {
 #ifndef NDEBUG
@@ -332,8 +339,9 @@ void VulkanPipelineManager::createGraphicsDescriptorSetLayout()
 }
 
 // ---------------------------------------------------------------------------
-//  6. DESCRIPTOR SET LAYOUTS (COMPUTE)
+//  6. DESCRIPTOR SET LAYOUTS (COMPUTE) – FIXED: 2x STORAGE_IMAGE
 // ---------------------------------------------------------------------------
+// PROTIP: Use STORAGE_IMAGE for RW textures in compute; bind input/output separately for tonemapping.
 void VulkanPipelineManager::createComputeDescriptorSetLayout()
 {
 #ifndef NDEBUG
@@ -341,9 +349,8 @@ void VulkanPipelineManager::createComputeDescriptorSetLayout()
 #endif
 
     const std::vector<VkDescriptorSetLayoutBinding> bindings = {
-        {.binding = 0, .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, .descriptorCount = 1, .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT},
-        {.binding = 1, .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, .descriptorCount = 1, .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT},
-        {.binding = 2, .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, .descriptorCount = 1, .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT}
+        {.binding = 0, .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, .descriptorCount = 1, .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT}, // HDR input
+        {.binding = 1, .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, .descriptorCount = 1, .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT}  // LDR output
     };
 
     VkDescriptorSetLayoutCreateInfo layoutInfo = {
@@ -358,9 +365,7 @@ void VulkanPipelineManager::createComputeDescriptorSetLayout()
     computeDescriptorSetLayout_ = Dispose::makeHandle(context_.device, layout, "Compute DS Layout");
 
 #ifndef NDEBUG
-    char layoutPtr[32];
-    std::snprintf(layoutPtr, sizeof(layoutPtr), "%p", static_cast<void*>(layout));
-    LOG_INFO_CAT("Vulkan", "    LAYOUT CREATED @ {}", layoutPtr);
+    LOG_INFO_CAT("Vulkan", "    LAYOUT CREATED WITH 2 STORAGE IMAGES (binding 0: HDR, 1: LDR)");
     LOG_INFO_CAT("Vulkan", "<<< COMPUTE DESCRIPTOR LAYOUT READY");
 #endif
 }
@@ -368,6 +373,7 @@ void VulkanPipelineManager::createComputeDescriptorSetLayout()
 // ---------------------------------------------------------------------------
 //  7. RAY TRACING DESCRIPTOR SET LAYOUT
 // ---------------------------------------------------------------------------
+// PROTIP: Inline acceleration structures in binding 0; use opaque flags for fast traces.
 VkDescriptorSetLayout VulkanPipelineManager::createRayTracingDescriptorSetLayout()
 {
 #ifndef NDEBUG
@@ -414,6 +420,7 @@ VkDescriptorSetLayout VulkanPipelineManager::createRayTracingDescriptorSetLayout
 // ---------------------------------------------------------------------------
 //  8. SHADER BINDING TABLE – FIXED: Uses .deviceAddress from VulkanCommon.hpp
 // ---------------------------------------------------------------------------
+// PROTIP: Align SBT entries to hardware requirements; use PREFER_FAST_TRACE for build flags.
 void VulkanPipelineManager::createShaderBindingTable()
 {
 #ifndef NDEBUG
@@ -517,6 +524,7 @@ void VulkanPipelineManager::createShaderBindingTable()
 // ---------------------------------------------------------------------------
 //  9. CREATE RAY TRACING PIPELINE
 // ---------------------------------------------------------------------------
+// PROTIP: Set recursion depth low (1) for primary rays; group shaders explicitly for SBT control.
 void VulkanPipelineManager::createRayTracingPipeline()
 {
 #ifndef NDEBUG
@@ -610,15 +618,16 @@ void VulkanPipelineManager::createRayTracingPipeline()
 }
 
 // ---------------------------------------------------------------------------
-//  10. CREATE COMPUTE PIPELINE
+//  10. CREATE COMPUTE PIPELINE – FIXED: tonemap_compute
 // ---------------------------------------------------------------------------
+// PROTIP: Compute pipelines excel for post-process like tonemapping; dispatch in workgroups of 16x16 for GPU efficiency.
 void VulkanPipelineManager::createComputePipeline()
 {
 #ifndef NDEBUG
-    LOG_INFO_CAT("Vulkan", ">>> COMPILING COMPUTE (DENOISER) PIPELINE");
+    LOG_INFO_CAT("Vulkan", ">>> COMPILING COMPUTE (TONEMAP) PIPELINE");
 #endif
 
-    VkShaderModule compMod = loadShader(context_.device, "compute_denoise");
+    VkShaderModule compMod = loadShader(context_.device, "tonemap_compute");  // FIXED
 
     VkPipelineShaderStageCreateInfo stage = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
@@ -657,16 +666,14 @@ void VulkanPipelineManager::createComputePipeline()
     vkDestroyShaderModule(context_.device, compMod, nullptr);
 
 #ifndef NDEBUG
-    char pipePtr[32];
-    std::snprintf(pipePtr, sizeof(pipePtr), "%p", static_cast<void*>(pipeline));
-    LOG_INFO_CAT("Vulkan", "    PIPELINE COMPILED @ {}", pipePtr);
-    LOG_INFO_CAT("Vulkan", "<<< COMPUTE PIPELINE LIVE");
+    LOG_INFO_CAT("Vulkan", "    TONEMAP COMPUTE PIPELINE LIVE");
 #endif
 }
 
 // ---------------------------------------------------------------------------
 //  11. CREATE GRAPHICS PIPELINE
 // ---------------------------------------------------------------------------
+// PROTIP: Fullscreen quad for graphics tonemap as fallback; prefer compute for parallel pixel ops.
 void VulkanPipelineManager::createGraphicsPipeline(int width, int height)
 {
 #ifndef NDEBUG
@@ -768,16 +775,14 @@ void VulkanPipelineManager::createGraphicsPipeline(int width, int height)
     vkDestroyShaderModule(context_.device, fragMod, nullptr);
 
 #ifndef NDEBUG
-    char pipePtr[32];
-    std::snprintf(pipePtr, sizeof(pipePtr), "%p", static_cast<void*>(pipeline));
-    LOG_INFO_CAT("Vulkan", "    PIPELINE COMPILED @ {}", pipePtr);
-    LOG_INFO_CAT("Vulkan", "<<< GRAPHICS PIPELINE LIVE");
+    LOG_INFO_CAT("Vulkan", "    GRAPHICS PIPELINE LIVE");
 #endif
 }
 
 // ---------------------------------------------------------------------------
 //  12. ACCELERATION STRUCTURES – FIXED: Full ownership transfer + cleanup
 // ---------------------------------------------------------------------------
+// PROTIP: Use PREFER_FAST_TRACE build flag; time AS builds to profile geometry complexity.
 void VulkanPipelineManager::createAccelerationStructures(VkBuffer vertexBuffer, VkBuffer indexBuffer, VulkanBufferManager& bufferMgr)
 {
 #ifndef NDEBUG
@@ -1154,6 +1159,7 @@ void VulkanPipelineManager::createAccelerationStructures(VkBuffer vertexBuffer, 
 // ---------------------------------------------------------------------------
 //  13. UPDATE RAY TRACING DESCRIPTOR SET
 // ---------------------------------------------------------------------------
+// PROTIP: Bind AS via pNext chain; update only on geometry changes to avoid stalls.
 void VulkanPipelineManager::updateRayTracingDescriptorSet(VkDescriptorSet descriptorSet,
                                                           VkAccelerationStructureKHR /*tlasHandle*/)
 {
@@ -1206,6 +1212,7 @@ void VulkanPipelineManager::updateRayTracingDescriptorSet(VkDescriptorSet descri
 // ---------------------------------------------------------------------------
 //  14. FRAME TIME LOGGING (PERFORMANCE)
 // ---------------------------------------------------------------------------
+// PROTIP: Log slow frames (>16ms) for real-time perf; use chrono for precise cross-platform timing.
 void VulkanPipelineManager::logFrameTimeIfSlow(std::chrono::steady_clock::time_point start)
 {
 #ifndef NDEBUG

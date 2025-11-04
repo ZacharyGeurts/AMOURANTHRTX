@@ -137,39 +137,39 @@ struct DimensionState {
 };
 
 // ========================================================================
-// 8. Denoiser Push Constants (for compute shader)
+// 8. Tonemap Push Constants (for compute shader)
 // ========================================================================
-struct alignas(16) DenoisePushConstants {
-    uint32_t width = 0;
+struct alignas(16) TonemapPushConstants {
+    uint32_t width  = 0;
     uint32_t height = 0;
-    float kernelRadius = 1.0f;
-    uint32_t _pad0 = 0;  // Padding to 16 bytes
+    uint32_t _pad0  = 0;
+    uint32_t _pad1  = 0;
 };
-static_assert(sizeof(DenoisePushConstants) == 16, "DenoisePushConstants must be 16 bytes");
+static_assert(sizeof(TonemapPushConstants) == 16, "TonemapPushConstants must be 16 bytes");
 
 // ========================================================================
-// 9. Centralized Shader Paths
+// 9. Centralized Shader Paths (UPDATED)
 // ========================================================================
 namespace VulkanRTX {
     inline std::unordered_map<std::string, std::string> getShaderBinPaths() {
         return {
-            {"raygen", "assets/shaders/raytracing/raygen.spv"},
-            {"miss", "assets/shaders/raytracing/miss.spv"},
-            {"closesthit", "assets/shaders/raytracing/closesthit.spv"},
-            {"compute_denoise", "assets/shaders/compute/denoise.spv"},
-            {"tonemap_vert", "assets/shaders/graphics/tonemap_vert.spv"},
-            {"tonemap_frag", "assets/shaders/graphics/tonemap_frag.spv"}
+            {"raygen",          "assets/shaders/raytracing/raygen.spv"},
+            {"miss",            "assets/shaders/raytracing/miss.spv"},
+            {"closesthit",      "assets/shaders/raytracing/closesthit.spv"},
+            {"tonemap_compute", "assets/shaders/compute/tonemap.spv"},   // NEW
+            {"tonemap_vert",    "assets/shaders/graphics/tonemap_vert.spv"},
+            {"tonemap_frag",    "assets/shaders/graphics/tonemap_frag.spv"}
         };
     }
 
     inline std::unordered_map<std::string, std::string> getShaderSrcPaths() {
         return {
-            {"raygen", "assets/shaders/raytracing/raygen.rgen"},
-            {"miss", "assets/shaders/raytracing/miss.rmiss"},
-            {"closesthit", "assets/shaders/raytracing/closesthit.rchit"},
-            {"compute_denoise", "assets/shaders/compute/denoise.glsl"},
-            {"tonemap_vert", "assets/shaders/graphics/tonemap_vert.glsl"},
-            {"tonemap_frag", "assets/shaders/graphics/tonemap_frag.glsl"}
+            {"raygen",          "assets/shaders/raytracing/raygen.rgen"},
+            {"miss",            "assets/shaders/raytracing/miss.rmiss"},
+            {"closesthit",      "assets/shaders/raytracing/closesthit.rchit"},
+            {"tonemap_compute", "assets/shaders/compute/tonemap.comp"},   // NEW
+            {"tonemap_vert",    "assets/shaders/graphics/tonemap_vert.glsl"},
+            {"tonemap_frag",    "assets/shaders/graphics/tonemap_frag.glsl"}
         };
     }
 

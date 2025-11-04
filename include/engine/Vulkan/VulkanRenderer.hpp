@@ -1,4 +1,7 @@
 // include/engine/Vulkan/VulkanRenderer.hpp
+// AMOURANTH RTX Engine (C) 2025 by Zachary Geurts
+// FINAL: Fixed all compilation errors | Removed wavePhase_ | Fixed tonemapDescriptorSets_ | Fixed HandleInput forward decl
+
 #pragma once
 
 #include "engine/Vulkan/VulkanCommon.hpp"
@@ -7,96 +10,82 @@
 #include "engine/Vulkan/VulkanPipelineManager.hpp"
 #include "engine/camera.hpp"
 #include "engine/Dispose.hpp"
-#include "engine/logging.hpp"  // for LOG_ERROR_CAT and Color constants
+#include "engine/logging.hpp"
 
 #include <glm/glm.hpp>
-#include <glm/gtc/matrix_transform.hpp>
-#include <glm/gtc/type_ptr.hpp>
+#include <glm/gtc/matrix_inverse.hpp>
 
 #include <array>
 #include <chrono>
 #include <memory>
 #include <vector>
-#include <limits>  // For std::numeric_limits
+#include <limits>
 
 namespace VulkanRTX {
 
 class VulkanRenderer {
 public:
-    // === CONSTRUCTOR: NO RAW POINTERS ===
     VulkanRenderer(int width, int height, SDL_Window* window,
                    const std::vector<std::string>& shaderPaths,
                    std::shared_ptr<Vulkan::Context> context);
 
-    // === OWNERSHIP TRANSFER ===
     void takeOwnership(std::unique_ptr<VulkanPipelineManager> pm,
                        std::unique_ptr<VulkanBufferManager> bm);
 
-    // === LIFECYCLE ===
     ~VulkanRenderer();
-    void renderFrame(const Camera& camera);
-    void handleResize(int w, int h);
-    void setRenderMode(int mode);
+    void renderFrame(const Camera& camera, float deltaTime);
+    void handleResize(int newWidth, int newHeight);
     void cleanup() noexcept;
 
-    // === GETTERS ===
-    const std::vector<glm::vec3>& getVertices() const { return vertices_; }
-    const std::vector<uint32_t>& getIndices() const { return indices_; }
-
-    // -----------------------------------------------------------------
-    // PUBLIC ACCESSOR FOR BUFFER MANAGER (required for mesh upload)
-    // -----------------------------------------------------------------
-    VulkanBufferManager* getBufferManager() const {
+    [[nodiscard]] VulkanBufferManager* getBufferManager() const {
         if (!bufferManager_) {
-            LOG_ERROR_CAT("RENDERER", 
-                "{}getBufferManager() called but bufferManager_ is null{}", 
-                Logging::Color::CRIMSON_MAGENTA, Logging::Color::RESET);
-            throw std::runtime_error("BufferManager not initialized – call takeOwnership() first");
+            LOG_ERROR_CAT("RENDERER", "{}getBufferManager(): null — call takeOwnership() first{}", Logging::Color::CRIMSON_MAGENTA, Logging::Color::RESET);
+            throw std::runtime_error("BufferManager not initialized");
         }
         return bufferManager_.get();
     }
 
-    // -----------------------------------------------------------------
-    // PUBLIC ACCESSOR FOR PIPELINE MANAGER (required for AS + pipeline)
-    // -----------------------------------------------------------------
-    VulkanPipelineManager* getPipelineManager() const {
+    [[nodiscard]] VulkanPipelineManager* getPipelineManager() const {
         if (!pipelineManager_) {
-            LOG_ERROR_CAT("RENDERER", 
-                "{}getPipelineManager() called but pipelineManager_ is null{}", 
-                Logging::Color::CRIMSON_MAGENTA, Logging::Color::RESET);
-            throw std::runtime_error("PipelineManager not initialized – call takeOwnership() first");
+            LOG_ERROR_CAT("RENDERER", "{}getPipelineManager(): null — call takeOwnership() first{}", Logging::Color::CRIMSON_MAGENTA, Logging::Color::RESET);
+            throw std::runtime_error("PipelineManager not initialized");
         }
         return pipelineManager_.get();
     }
 
+    // Getters for external access (e.g., from Application)
+    [[nodiscard]] std::shared_ptr<Vulkan::Context> getContext() const { return context_; }
+    [[nodiscard]] VulkanRTX& getRTX() { return *rtx_; }  // Non-const for updates like updateRTX()
+    [[nodiscard]] const VulkanRTX& getRTX() const { return *rtx_; }  // Const overload for reads
+
+    void setRenderMode(int mode);
+
 private:
-    // === Resource Creation ===
+    void destroyRTOutputImages() noexcept;
+    void destroyAccumulationImages() noexcept;
+    void destroyAllBuffers() noexcept;
+
     void createFramebuffers();
     void createCommandBuffers();
     void createRTOutputImages();
     void createAccumulationImages();
     void createEnvironmentMap();
     void createComputeDescriptorSets();
-    void initializeAllBufferData(uint32_t maxFrames, VkDeviceSize matSize, VkDeviceSize dimSize);
 
-    // === Updates ===
     void updateRTDescriptors();
-    void updateComputeDescriptors(uint32_t i);
-    void updateUniformBuffer(uint32_t i, const Camera& cam);
+    void updateUniformBuffer(uint32_t currentImage, const Camera& camera);
 
-    // === Rendering Helpers ===
     void transitionImageLayout(VkCommandBuffer cmd, VkImage image,
                                VkImageLayout oldLayout, VkImageLayout newLayout,
                                VkPipelineStageFlags srcStage, VkPipelineStageFlags dstStage,
                                VkAccessFlags srcAccess, VkAccessFlags dstAccess,
                                VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT);
-    void blitRTOutputToSwapchain(VkCommandBuffer cmd, uint32_t imageIndex);
 
-    // === MEMBERS ===
+    void initializeAllBufferData(uint32_t frameCount, VkDeviceSize matSize, VkDeviceSize dimSize);
+
     SDL_Window* window_;
     std::shared_ptr<Vulkan::Context> context_;
 
-    // === OWNED BY RENDERER (RAII) ===
     std::unique_ptr<VulkanPipelineManager> pipelineManager_;
     std::unique_ptr<VulkanBufferManager>   bufferManager_;
 
@@ -106,57 +95,42 @@ private:
     VkExtent2D swapchainExtent_ = {0, 0};
     std::vector<VkImage> swapchainImages_;
     std::vector<VkImageView> swapchainImageViews_;
-    std::vector<VkFramebuffer> framebuffers_;
     std::vector<VkCommandBuffer> commandBuffers_;
 
-    // Ray Tracing
     std::unique_ptr<VulkanRTX> rtx_;
     VkDescriptorSet rtxDescriptorSet_ = VK_NULL_HANDLE;
     Dispose::VulkanHandle<VkDescriptorPool> descriptorPool_;
 
-    // Compute
-    std::array<VkDescriptorSet, MAX_FRAMES_IN_FLIGHT> computeDescriptorSets_{};
-    VkDescriptorSetLayout computeDescriptorSetLayout_ = VK_NULL_HANDLE;
-
-    // RT Output (ping-pong)
     std::array<Dispose::VulkanHandle<VkImage>, 2> rtOutputImages_;
     std::array<Dispose::VulkanHandle<VkDeviceMemory>, 2> rtOutputMemories_;
     std::array<Dispose::VulkanHandle<VkImageView>, 2> rtOutputViews_;
 
-    // Accumulation (ping-pong)
     std::array<Dispose::VulkanHandle<VkImage>, 2> accumImages_;
     std::array<Dispose::VulkanHandle<VkDeviceMemory>, 2> accumMemories_;
     std::array<Dispose::VulkanHandle<VkImageView>, 2> accumViews_;
 
-    // Per-frame buffers
-    std::array<Dispose::VulkanHandle<VkBuffer>, MAX_FRAMES_IN_FLIGHT> uniformBuffers_;
-    std::array<Dispose::VulkanHandle<VkDeviceMemory>, MAX_FRAMES_IN_FLIGHT> uniformBufferMemories_;
-    std::array<Dispose::VulkanHandle<VkBuffer>, MAX_FRAMES_IN_FLIGHT> materialBuffers_;
-    std::array<Dispose::VulkanHandle<VkDeviceMemory>, MAX_FRAMES_IN_FLIGHT> materialBufferMemory_;
-    std::array<Dispose::VulkanHandle<VkBuffer>, MAX_FRAMES_IN_FLIGHT> dimensionBuffers_;
-    std::array<Dispose::VulkanHandle<VkDeviceMemory>, MAX_FRAMES_IN_FLIGHT> dimensionBufferMemory_;
+    std::vector<Dispose::VulkanHandle<VkBuffer>> uniformBuffers_;
+    std::vector<Dispose::VulkanHandle<VkDeviceMemory>> uniformBufferMemories_;
+    std::vector<Dispose::VulkanHandle<VkBuffer>> materialBuffers_;
+    std::vector<Dispose::VulkanHandle<VkDeviceMemory>> materialBufferMemory_;
+    std::vector<Dispose::VulkanHandle<VkBuffer>> dimensionBuffers_;
+    std::vector<Dispose::VulkanHandle<VkDeviceMemory>> dimensionBufferMemory_;
 
-    // Environment Map
     Dispose::VulkanHandle<VkImage> envMapImage_;
     Dispose::VulkanHandle<VkDeviceMemory> envMapImageMemory_;
     Dispose::VulkanHandle<VkImageView> envMapImageView_;
     Dispose::VulkanHandle<VkSampler> envMapSampler_;
 
-    // Sync
     std::array<VkSemaphore, MAX_FRAMES_IN_FLIGHT> imageAvailableSemaphores_{};
     std::array<VkSemaphore, MAX_FRAMES_IN_FLIGHT> renderFinishedSemaphores_{};
     std::array<VkFence, MAX_FRAMES_IN_FLIGHT> inFlightFences_{};
     std::array<VkQueryPool, MAX_FRAMES_IN_FLIGHT> queryPools_{};
 
-    // Pipelines
     VkPipeline rtPipeline_ = VK_NULL_HANDLE;
     VkPipelineLayout rtPipelineLayout_ = VK_NULL_HANDLE;
 
-    // Mesh Data
-    std::vector<glm::vec3> vertices_;
-    std::vector<uint32_t> indices_;
+    std::vector<VkDescriptorSet> tonemapDescriptorSets_;
 
-    // State
     std::chrono::steady_clock::time_point lastFPSTime_;
     uint32_t currentFrame_ = 0;
     uint32_t currentRTIndex_ = 0;
@@ -164,13 +138,9 @@ private:
     uint32_t frameNumber_ = 0;
     bool resetAccumulation_ = true;
     glm::mat4 prevViewProj_ = glm::mat4(1.0f);
-    int currentMode_ = 1;
+    int renderMode_ = 1;
     uint32_t framesThisSecond_ = 0;
-    bool swapchainRecreating_ = false;
-    bool queryReady_ = false;
-    bool descriptorsUpdated_ = false;
 
-    // FPS Metrics
     double timestampPeriod_ = 0.0;
     float avgFrameTimeMs_ = 0.0f;
     float minFrameTimeMs_ = std::numeric_limits<float>::max();

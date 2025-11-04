@@ -1,5 +1,6 @@
 // src/handle_app.cpp
-// AMOURANTH RTX Engine (C) 2025 by Zachary Geurts gzac5314@gmail.com is licensed under CC BY-NC 4.0
+// AMOURANTH RTX Engine (C) 2025 by Zachary Geurts gzac5314@gmail.com
+// FINAL: T = toggle tonemap | O = toggle overlay | 1-9 = render modes | core.cpp stays
 
 #include "handle_app.hpp"
 #include <SDL3/SDL.h>
@@ -11,108 +12,112 @@
 #include <sstream>
 #include <chrono>
 #include <thread>
-#include <cstdio>
 #include "engine/logging.hpp"
 #include "engine/Vulkan/VulkanRenderer.hpp"
 #include "engine/SDL3/SDL3_init.hpp"
 #include "engine/Dispose.hpp"
 #include "engine/utils.hpp"
-
-template<typename T>
-std::string join(const std::vector<T>& vec, const std::string& sep) {
-    if (vec.empty()) return "";
-    std::ostringstream oss;
-    oss << vec[0];
-    for (size_t i = 1; i < vec.size(); ++i) oss << sep << vec[i];
-    return oss.str();
-}
+#include "engine/core.hpp"
 
 void loadMesh(const std::string& filename, std::vector<glm::vec3>& vertices, std::vector<uint32_t>& indices) {
-    static std::vector<glm::vec3> cachedVertices;
-    static std::vector<uint32_t> cachedIndices;
-    static bool isLoaded = false;
-
-    if (isLoaded) {
-        vertices = cachedVertices;
-        indices = cachedIndices;
+    std::ifstream file(filename);
+    if (!file.is_open()) {
+        LOG_ERROR_CAT("Mesh", "Failed to open %s using fallback triangle", filename.c_str());
+        vertices = {{0.0f, -0.5f, 0.0f}, {0.5f, 0.5f, 0.0f}, {-0.5f, 0.5f, 0.0f}};
+        indices = {0, 1, 2};
         return;
     }
 
-    std::ifstream file(filename);
-    if (!file.is_open()) {
+    std::vector<glm::vec3> tempVertices;
+    std::string line;
+    while (std::getline(file, line)) {
+        std::istringstream iss(line);
+        std::string type;
+        if (!(iss >> type)) continue;
+        if (type == "v") {
+            glm::vec3 v;
+            if (iss >> v.x >> v.y >> v.z) tempVertices.push_back(v);
+        } else if (type == "f") {
+            uint32_t a, b, c;
+            if (iss >> a >> b >> c) indices.insert(indices.end(), {a-1, b-1, c-1});
+        }
+    }
+    file.close();
+
+    if (tempVertices.size() < 3 || indices.size() < 3 || indices.size() % 3 != 0) {
+        LOG_WARN_CAT("Mesh", "Invalid .obj fallback triangle");
         vertices = {{0.0f, -0.5f, 0.0f}, {0.5f, 0.5f, 0.0f}, {-0.5f, 0.5f, 0.0f}};
         indices = {0, 1, 2};
     } else {
-        std::vector<glm::vec3> tempVertices;
-        std::string line;
-        while (std::getline(file, line)) {
-            std::istringstream iss(line);
-            std::string type;
-            if (!(iss >> type)) continue;
-            if (type == "v") {
-                glm::vec3 v;
-                if (iss >> v.x >> v.y >> v.z) tempVertices.push_back(v);
-            } else if (type == "f") {
-                uint32_t a, b, c;
-                if (iss >> a >> b >> c) indices.insert(indices.end(), {a-1, b-1, c-1});
-            }
-        }
-        file.close();
-        if (tempVertices.size() < 3 || indices.size() < 3 || indices.size() % 3 != 0) {
-            vertices = {{0.0f, -0.5f, 0.0f}, {0.5f, 0.5f, 0.0f}, {-0.5f, 0.5f, 0.0f}};
-            indices = {0, 1, 2};
-        } else {
-            vertices = std::move(tempVertices);
-        }
+        vertices = std::move(tempVertices);
+        LOG_INFO_CAT("Mesh", "Loaded %s: %zu verts, %zu tris", filename.c_str(), vertices.size(), indices.size() / 3);
     }
-
-    cachedVertices = vertices;
-    cachedIndices = indices;
-    isLoaded = true;
 }
 
 Application::Application(const char* title, int width, int height)
-    : title_(title), width_(width), height_(height), mode_(1),  // ← DEFAULT MODE 1
+    : title_(title), width_(width), height_(height), mode_(1), quit_(false),
       sdl_(std::make_unique<SDL3Initializer::SDL3Initializer>(title_, width_, height_)),
       renderer_(nullptr),
       camera_(std::make_unique<VulkanRTX::PerspectiveCamera>(60.0f, static_cast<float>(width) / height)),
       inputHandler_(nullptr), isFullscreen_(false), isMaximized_(false),
-      lastFrameTime_(std::chrono::steady_clock::now())
+      lastFrameTime_(std::chrono::steady_clock::now()),
+      showOverlay_(true)
 {
-    LOG_INFO_CAT("Application", "{}APPLICATION INITIALIZATION{}", Logging::Color::DIAMOND_WHITE, Logging::Color::RESET);
-    LOG_INFO_CAT("Application", "Title      : {}", title_);
-    LOG_INFO_CAT("Application", "Resolution : {}x{}", width_, height_);
-    LOG_INFO_CAT("Application", "Starting Render Mode: {} (Env Map Only)", mode_);
-
-    loadMesh("assets/models/scene.obj", vertices_, indices_);
-    globalVertices_ = vertices_;
-    globalIndices_ = indices_;
-
+    LOG_INFO_CAT("Application", "{}INIT [{}x{}]{}", Logging::Color::OCEAN_TEAL, width, height, Logging::Color::RESET);
     camera_->setUserData(this);
     initializeInput();
-
-    LOG_INFO_CAT("Application", "{}APPLICATION INITIALIZED SUCCESSFULLY{}", Logging::Color::EMERALD_GREEN, Logging::Color::RESET);
 }
 
 void Application::setRenderer(std::unique_ptr<VulkanRTX::VulkanRenderer> renderer) {
     renderer_ = std::move(renderer);
+
+    loadMesh("assets/models/scene.obj", vertices_, indices_);
+    renderer_->getBufferManager()->uploadMesh(vertices_.data(), vertices_.size(), indices_.data(), indices_.size());
+
+    auto ctx = renderer_->getContext();  // Assumes getter added
+    renderer_->getRTX().updateRTX(  // Assumes getter added
+        ctx->physicalDevice,
+        ctx->commandPool,
+        ctx->graphicsQueue,
+        renderer_->getBufferManager()->getGeometries(),
+        renderer_->getBufferManager()->getDimensionStates()
+    );
+
+    renderer_->setRenderMode(mode_);
+    updateWindowTitle();
+
+    LOG_INFO_CAT("Application", "{}REAL MESH LOADED & AS BUILT | 1-9=mode | T=tonemap | O=overlay{}", 
+                 Logging::Color::EMERALD_GREEN, Logging::Color::RESET);
 }
 
 Application::~Application() {
-    LOG_INFO_CAT("Application", "{}SHUTTING DOWN APPLICATION...{}", Logging::Color::CRIMSON_MAGENTA, Logging::Color::RESET);
-
-    inputHandler_.reset();
-    camera_.reset();
-    renderer_.reset();
-    sdl_.reset();
-
+    LOG_INFO_CAT("Application", "{}SHUTDOWN{}", Logging::Color::CRIMSON_MAGENTA, Logging::Color::RESET);
     Dispose::quitSDL();
 }
 
 void Application::initializeInput() {
     inputHandler_ = std::make_unique<HandleInput>(*camera_);
     inputHandler_->setCallbacks(
-        [this](const SDL_KeyboardEvent& key) { inputHandler_->defaultKeyboardHandler(key); },
+        [this](const SDL_KeyboardEvent& key) {
+            if (key.type == SDL_EVENT_KEY_DOWN) {
+                switch (key.key) {  // SDL3: Use key.key instead of key.keysym.sym
+                    case SDLK_1: setRenderMode(1); break;
+                    case SDLK_2: setRenderMode(2); break;
+                    case SDLK_3: setRenderMode(3); break;
+                    case SDLK_4: setRenderMode(4); break;
+                    case SDLK_5: setRenderMode(5); break;
+                    case SDLK_6: setRenderMode(6); break;
+                    case SDLK_7: setRenderMode(7); break;
+                    case SDLK_8: setRenderMode(8); break;
+                    case SDLK_9: setRenderMode(9); break;
+                    case SDLK_T: toggleTonemap(); break;  // SDL3: Uppercase
+                    case SDLK_O: toggleOverlay(); break;  // SDL3: Uppercase
+                    default: inputHandler_->defaultKeyboardHandler(key); break;
+                }
+            } else {
+                inputHandler_->defaultKeyboardHandler(key);
+            }
+        },
         [this](const SDL_MouseButtonEvent& mb) { inputHandler_->defaultMouseButtonHandler(mb); },
         [this](const SDL_MouseMotionEvent& mm) { inputHandler_->defaultMouseMotionHandler(mm); },
         [this](const SDL_MouseWheelEvent& mw) { inputHandler_->defaultMouseWheelHandler(mw); },
@@ -124,16 +129,50 @@ void Application::initializeInput() {
     );
 }
 
+void Application::toggleTonemap() {
+    mode_ = (mode_ == 1) ? 2 : 1;
+    if (renderer_) {
+        renderer_->setRenderMode(mode_);
+        LOG_INFO_CAT("Application", "{}TONEMAP {} | MODE {}{}", 
+                     Logging::Color::ARCTIC_CYAN,
+                     (mode_ == 2 ? "ENABLED" : "DISABLED"),
+                     mode_, Logging::Color::RESET);
+    }
+    updateWindowTitle();
+}
+
+void Application::toggleOverlay() {
+    showOverlay_ = !showOverlay_;
+    LOG_INFO_CAT("Application", "Overlay %s", showOverlay_ ? "ON" : "OFF");
+    updateWindowTitle();
+}
+
+void Application::updateWindowTitle() {
+    if (!showOverlay_) {
+        SDL_SetWindowTitle(sdl_->getWindow(), title_.c_str());
+        return;
+    }
+    char buf[256];
+    std::snprintf(buf, sizeof(buf), "%s | Mode %d | 1-9=mode | T=tonemap | O=hide", title_.c_str(), mode_);
+    SDL_SetWindowTitle(sdl_->getWindow(), buf);
+}
+
+void Application::setRenderMode(int mode) {
+    mode_ = mode;
+    if (renderer_) renderer_->setRenderMode(mode_);
+    updateWindowTitle();
+}
+
 void Application::toggleFullscreen() {
-    isFullscreenRef() = !isFullscreenRef();
-    isMaximizedRef() = false;
-    SDL_SetWindowFullscreen(sdl_->getWindow(), isFullscreenRef());
+    isFullscreen_ = !isFullscreen_;
+    isMaximized_ = false;
+    SDL_SetWindowFullscreen(sdl_->getWindow(), isFullscreen_);
 }
 
 void Application::toggleMaximize() {
-    if (isFullscreenRef()) return;
-    isMaximizedRef() = !isMaximizedRef();
-    if (isMaximizedRef()) SDL_MaximizeWindow(sdl_->getWindow());
+    if (isFullscreen_) return;
+    isMaximized_ = !isMaximized_;
+    if (isMaximized_) SDL_MaximizeWindow(sdl_->getWindow());
     else SDL_RestoreWindow(sdl_->getWindow());
 }
 
@@ -147,10 +186,20 @@ void Application::handleResize(int width, int height) {
 
 void Application::run() {
     while (!shouldQuit()) {
+        // SDL3: Poll events explicitly and check for quit
+        SDL_Event event;
+        while (SDL_PollEvent(&event)) {
+            if (event.type == SDL_EVENT_QUIT) {
+                quit_ = true;
+                break;
+            }
+            // Forward other events to input handler if needed; assuming handleInput processes them
+        }
+        if (quit_) break;
+
         inputHandler_->handleInput(*this);
         render();
     }
-    LOG_INFO_CAT("Application", "Main loop exited");
 }
 
 void Application::render() {
@@ -163,102 +212,10 @@ void Application::render() {
     float deltaTime = std::chrono::duration<float>(currentTime - lastFrameTime_).count();
     lastFrameTime_ = currentTime;
     camera_->update(deltaTime);
-    renderer_->renderFrame(*camera_);
+    renderer_->renderFrame(*camera_, deltaTime);
+    updateWindowTitle();
 }
 
-HandleInput::HandleInput(VulkanRTX::Camera& camera) : camera_(camera) {}
-
-void HandleInput::handleInput(Application& app) {
-    SDL_Event event;
-    while (SDL_PollEvent(&event)) {
-        switch (event.type) {
-            case SDL_EVENT_QUIT: app.setRenderMode(0); break;
-            case SDL_EVENT_WINDOW_RESIZED: app.handleResize(event.window.data1, event.window.data2); break;
-            case SDL_EVENT_KEY_DOWN: if (keyboardCallback_) keyboardCallback_(event.key); break;
-            case SDL_EVENT_MOUSE_MOTION: if (mouseMotionCallback_) mouseMotionCallback_(event.motion); break;
-            case SDL_EVENT_MOUSE_WHEEL: if (mouseWheelCallback_) mouseWheelCallback_(event.wheel); break;
-        }
-    }
-}
-
-void HandleInput::defaultKeyboardHandler(const SDL_KeyboardEvent& key) {
-    if (key.type != SDL_EVENT_KEY_DOWN || key.repeat != 0) return;
-    void* userData = camera_.getUserData();
-    if (!userData) return;
-    Application& app = *static_cast<Application*>(userData);
-    const auto sc = key.scancode;
-
-    if (sc == SDL_SCANCODE_F11 || (sc == SDL_SCANCODE_RETURN && (key.mod & SDL_KMOD_ALT))) { app.toggleFullscreen(); return; }
-    if (sc == SDL_SCANCODE_F10) { app.toggleMaximize(); return; }
-
-    // ── RENDER MODE SWITCH: 1–9 ─────────────────────────────────────
-    if (sc >= SDL_SCANCODE_1 && sc <= SDL_SCANCODE_9) { 
-        int newMode = sc - SDL_SCANCODE_1 + 1;
-        app.setRenderMode(newMode);
-        const char* modeName = "Unknown";
-        switch (newMode) {
-            case 1: modeName = "Env Map Only"; break;
-            case 2: modeName = "Volumetric Mist"; break;
-            case 3: modeName = "Animated Plasma"; break;
-            case 4: modeName = "Caustic Reflections"; break;
-            case 5: modeName = "Subsurface Scattering"; break;
-            case 6: modeName = "Path-Traced Fireflies"; break;
-            case 7: modeName = "Global Illumination"; break;
-            case 8: modeName = "Denoiser Showcase"; break;
-            case 9: modeName = "Hybrid Raster/RT"; break;
-        }
-        LOG_INFO_CAT("RenderMode", "Switched to Mode {} [{}] via key '{}'", newMode, modeName, SDL_GetScancodeName(sc));
-        return; 
-    }
-
-    switch (sc) {
-        case SDL_SCANCODE_P: camera_.togglePause(); break;
-        case SDL_SCANCODE_W: camera_.moveForward(0.1f); break;
-        case SDL_SCANCODE_S: camera_.moveForward(-0.1f); break;
-        case SDL_SCANCODE_A: camera_.moveRight(-0.1f); break;
-        case SDL_SCANCODE_D: camera_.moveRight(0.1f); break;
-        case SDL_SCANCODE_Q: camera_.moveUp(0.1f); break;
-        case SDL_SCANCODE_E: camera_.moveUp(-0.1f); break;
-        case SDL_SCANCODE_Z: camera_.updateZoom(true); break;
-        case SDL_SCANCODE_X: camera_.updateZoom(false); break;
-        default: break;
-    }
-}
-
-void HandleInput::defaultMouseMotionHandler(const SDL_MouseMotionEvent& mm) {
-    camera_.rotate(mm.xrel * 0.005f, mm.yrel * 0.005f);
-}
-
-void HandleInput::defaultMouseWheelHandler(const SDL_MouseWheelEvent& mw) {
-    if (mw.y > 0) camera_.updateZoom(true);
-    else if (mw.y < 0) camera_.updateZoom(false);
-}
-
-void HandleInput::defaultGamepadConnectHandler(bool connected, SDL_JoystickID id, SDL_Gamepad* pad) {
-    if (pad && !connected) SDL_CloseGamepad(pad);
-}
-
-void HandleInput::setCallbacks(KeyboardCallback kb, MouseButtonCallback mb, MouseMotionCallback mm,
-                               MouseWheelCallback mw, TextInputCallback ti, TouchCallback tc,
-                               GamepadButtonCallback gb, GamepadAxisCallback ga, GamepadConnectCallback gc) {
-    keyboardCallback_ = kb; mouseButtonCallback_ = mb; mouseMotionCallback_ = mm;
-    mouseWheelCallback_ = mw; textInputCallback_ = ti; touchCallback_ = tc;
-    gamepadButtonCallback_ = gb; gamepadAxisCallback_ = ga; gamepadConnectCallback_ = gc;
-}
-
-void HandleInput::defaultGamepadButtonHandler(const SDL_GamepadButtonEvent& gb) {
-    if (gb.type != SDL_EVENT_GAMEPAD_BUTTON_DOWN) return;
-    switch (gb.button) {
-        case SDL_GAMEPAD_BUTTON_SOUTH: camera_.updateZoom(true); break;
-        case SDL_GAMEPAD_BUTTON_EAST:  camera_.updateZoom(false); break;
-        case SDL_GAMEPAD_BUTTON_NORTH: camera_.togglePause(); break;
-    }
-}
-
-void HandleInput::defaultGamepadAxisHandler(const SDL_GamepadAxisEvent& ga) {
-    const float v = ga.value / 32767.0f;
-    if (ga.axis == SDL_GAMEPAD_AXIS_LEFTX)  camera_.moveUserCam(v * 0.1f, 0, 0);
-    if (ga.axis == SDL_GAMEPAD_AXIS_LEFTY)  camera_.moveUserCam(0, -v * 0.1f, 0);
-    if (ga.axis == SDL_GAMEPAD_AXIS_RIGHTX) camera_.rotate(v * 0.05f, 0);
-    if (ga.axis == SDL_GAMEPAD_AXIS_RIGHTY) camera_.rotate(0, -v * 0.05f);
+bool Application::shouldQuit() const {
+    return quit_;  // SDL3: Use flag set by event polling
 }

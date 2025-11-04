@@ -32,6 +32,7 @@
 #include <unordered_map>
 #include <memory>
 #include <algorithm>
+#include <ranges>
 
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
@@ -186,7 +187,7 @@ public:
     // === Remove ===
     void removeBuffer(VkBuffer buffer) {
         if (buffer == VK_NULL_HANDLE) return;
-        auto it = std::find(buffers_.begin(), buffers_.end(), buffer);
+        auto it = std::ranges::find(buffers_, buffer);
         if (it != buffers_.end()) {
             buffers_.erase(it);
             LOG_DEBUG("Removed buffer: 0x{:x}", reinterpret_cast<uintptr_t>(buffer));
@@ -194,7 +195,7 @@ public:
     }
     void removeMemory(VkDeviceMemory memory) {
         if (memory == VK_NULL_HANDLE) return;
-        auto it = std::find(memories_.begin(), memories_.end(), memory);
+        auto it = std::ranges::find(memories_, memory);
         if (it != memories_.end()) {
             memories_.erase(it);
             LOG_DEBUG("Removed memory: 0x{:x}", reinterpret_cast<uintptr_t>(memory));
@@ -202,7 +203,7 @@ public:
     }
     void removeImageView(VkImageView view) {
         if (view == VK_NULL_HANDLE) return;
-        auto it = std::find(imageViews_.begin(), imageViews_.end(), view);
+        auto it = std::ranges::find(imageViews_, view);
         if (it != imageViews_.end()) {
             imageViews_.erase(it);
             LOG_DEBUG("Removed image view: 0x{:x}", reinterpret_cast<uintptr_t>(view));
@@ -210,7 +211,7 @@ public:
     }
     void removeImage(VkImage image) {
         if (image == VK_NULL_HANDLE) return;
-        auto it = std::find(images_.begin(), images_.end(), image);
+        auto it = std::ranges::find(images_, image);
         if (it != images_.end()) {
             images_.erase(it);
             LOG_DEBUG("Removed image: 0x{:x}", reinterpret_cast<uintptr_t>(image));
@@ -218,7 +219,7 @@ public:
     }
     void removeSampler(VkSampler sampler) {  // NEW: Remove sampler
         if (sampler == VK_NULL_HANDLE) return;
-        auto it = std::find(samplers_.begin(), samplers_.end(), sampler);
+        auto it = std::ranges::find(samplers_, sampler);
         if (it != samplers_.end()) {
             samplers_.erase(it);
             LOG_DEBUG("Removed sampler: 0x{:x}", reinterpret_cast<uintptr_t>(sampler));
@@ -226,7 +227,7 @@ public:
     }
     void removeAccelerationStructure(VkAccelerationStructureKHR as) {
         if (as == VK_NULL_HANDLE) return;
-        auto it = std::find(accelerationStructures_.begin(), accelerationStructures_.end(), as);
+        auto it = std::ranges::find(accelerationStructures_, as);
         if (it != accelerationStructures_.end()) {
             accelerationStructures_.erase(it);
             LOG_DEBUG("Removed acceleration structure: 0x{:x}", reinterpret_cast<uintptr_t>(as));
@@ -234,7 +235,7 @@ public:
     }
     void removeDescriptorPool(VkDescriptorPool descriptorPool) {
         if (descriptorPool == VK_NULL_HANDLE) return;
-        auto it = std::find(descriptorPools_.begin(), descriptorPools_.end(), descriptorPool);
+        auto it = std::ranges::find(descriptorPools_, descriptorPool);
         if (it != descriptorPools_.end()) {
             descriptorPools_.erase(it);
             LOG_DEBUG("Removed descriptor pool: 0x{:x}", reinterpret_cast<uintptr_t>(descriptorPool));
@@ -242,7 +243,7 @@ public:
     }
     void removeDescriptorSet(VkDescriptorSet set) {
         if (set == VK_NULL_HANDLE) return;
-        auto it = std::find(descriptorSets_.begin(), descriptorSets_.end(), set);
+        auto it = std::ranges::find(descriptorSets_, set);
         if (it != descriptorSets_.end()) {
             descriptorSets_.erase(it);
             LOG_DEBUG("Removed descriptor set: 0x{:x}", reinterpret_cast<uintptr_t>(set));
@@ -250,7 +251,7 @@ public:
     }
     void removeCommandPool(VkCommandPool commandPool) {
         if (commandPool == VK_NULL_HANDLE) return;
-        auto it = std::find(commandPools_.begin(), commandPools_.end(), commandPool);
+        auto it = std::ranges::find(commandPools_, commandPool);
         if (it != commandPools_.end()) {
             commandPools_.erase(it);
             LOG_DEBUG("Removed command pool: 0x{:x}", reinterpret_cast<uintptr_t>(commandPool));
@@ -258,7 +259,7 @@ public:
     }
     void removeRenderPass(VkRenderPass renderPass) {
         if (renderPass == VK_NULL_HANDLE) return;
-        auto it = std::find(renderPasses_.begin(), renderPasses_.end(), renderPass);
+        auto it = std::ranges::find(renderPasses_, renderPass);
         if (it != renderPasses_.end()) {
             renderPasses_.erase(it);
             LOG_DEBUG("Removed render pass: 0x{:x}", reinterpret_cast<uintptr_t>(renderPass));
@@ -266,7 +267,7 @@ public:
     }
     void removeDescriptorSetLayout(VkDescriptorSetLayout layout) {
         if (layout == VK_NULL_HANDLE) return;
-        auto it = std::find(descriptorSetLayouts_.begin(), descriptorSetLayouts_.end(), layout);
+        auto it = std::ranges::find(descriptorSetLayouts_, layout);
         if (it != descriptorSetLayouts_.end()) {
             descriptorSetLayouts_.erase(it);
             LOG_DEBUG("Removed descriptor set layout: 0x{:x}", reinterpret_cast<uintptr_t>(layout));
@@ -274,7 +275,7 @@ public:
     }
     void removePipelineLayout(VkPipelineLayout layout) {
         if (layout == VK_NULL_HANDLE) return;
-        auto it = std::find(pipelineLayouts_.begin(), pipelineLayouts_.end(), layout);
+        auto it = std::ranges::find(pipelineLayouts_, layout);
         if (it != pipelineLayouts_.end()) {
             pipelineLayouts_.erase(it);
             LOG_DEBUG("Removed pipeline layout: 0x{:x}", reinterpret_cast<uintptr_t>(layout));
@@ -282,19 +283,20 @@ public:
     }
     void removePipeline(VkPipeline pipeline) {
         if (pipeline == VK_NULL_HANDLE) return;
-        auto it = std::find(pipelines_.begin(), pipelines_.end(), pipeline);
+        auto it = std::ranges::find(pipelines_, pipeline);
         if (it != pipelines_.end()) {
             pipelines_.erase(it);
-            for (auto mapIt = pipelineMap_.begin(); mapIt != pipelineMap_.end(); ) {
-                if (mapIt->second == pipeline) mapIt = pipelineMap_.erase(mapIt);
-                else ++mapIt;
+            auto pred = [pipeline](const auto& p) { return p.second == pipeline; };
+            auto map_it = std::ranges::find_if(pipelineMap_, pred);
+            if (map_it != pipelineMap_.end()) {
+                pipelineMap_.erase(map_it);
             }
             LOG_DEBUG("Removed pipeline: 0x{:x}", reinterpret_cast<uintptr_t>(pipeline));
         }
     }
     void removeShaderModule(VkShaderModule module) {
         if (module == VK_NULL_HANDLE) return;
-        auto it = std::find(shaderModules_.begin(), shaderModules_.end(), module);
+        auto it = std::ranges::find(shaderModules_, module);
         if (it != shaderModules_.end()) {
             shaderModules_.erase(it);
             LOG_DEBUG("Removed shader module: 0x{:x}", reinterpret_cast<uintptr_t>(module));
@@ -304,7 +306,7 @@ public:
     // ← NEW: removeFence
     void removeFence(VkFence fence) {
         if (fence == VK_NULL_HANDLE) return;
-        auto it = std::find(fences_.begin(), fences_.end(), fence);
+        auto it = std::ranges::find(fences_, fence);
         if (it != fences_.end()) {
             fences_.erase(it);
             LOG_DEBUG("Removed fence: 0x{:x}", reinterpret_cast<uintptr_t>(fence));
@@ -312,21 +314,21 @@ public:
     }
 
     // === Has ===
-    bool hasBuffer(VkBuffer buffer) const { return std::find(buffers_.begin(), buffers_.end(), buffer) != buffers_.end(); }
-    bool hasMemory(VkDeviceMemory memory) const { return std::find(memories_.begin(), memories_.end(), memory) != memories_.end(); }
-    bool hasImageView(VkImageView view) const { return std::find(imageViews_.begin(), imageViews_.end(), view) != imageViews_.end(); }
-    bool hasImage(VkImage image) const { return std::find(images_.begin(), images_.end(), image) != images_.end(); }
-    bool hasSampler(VkSampler sampler) const { return std::find(samplers_.begin(), samplers_.end(), sampler) != samplers_.end(); }  // NEW
-    bool hasAccelerationStructure(VkAccelerationStructureKHR as) const { return std::find(accelerationStructures_.begin(), accelerationStructures_.end(), as) != accelerationStructures_.end(); }
-    bool hasDescriptorPool(VkDescriptorPool pool) const { return std::find(descriptorPools_.begin(), descriptorPools_.end(), pool) != descriptorPools_.end(); }
-    bool hasDescriptorSet(VkDescriptorSet set) const { return std::find(descriptorSets_.begin(), descriptorSets_.end(), set) != descriptorSets_.end(); }
-    bool hasCommandPool(VkCommandPool pool) const { return std::find(commandPools_.begin(), commandPools_.end(), pool) != commandPools_.end(); }
-    bool hasRenderPass(VkRenderPass rp) const { return std::find(renderPasses_.begin(), renderPasses_.end(), rp) != renderPasses_.end(); }
-    bool hasDescriptorSetLayout(VkDescriptorSetLayout layout) const { return std::find(descriptorSetLayouts_.begin(), descriptorSetLayouts_.end(), layout) != descriptorSetLayouts_.end(); }
-    bool hasPipelineLayout(VkPipelineLayout layout) const { return std::find(pipelineLayouts_.begin(), pipelineLayouts_.end(), layout) != pipelineLayouts_.end(); }
-    bool hasPipeline(VkPipeline pipeline) const { return std::find(pipelines_.begin(), pipelines_.end(), pipeline) != pipelines_.end(); }
-    bool hasShaderModule(VkShaderModule module) const { return std::find(shaderModules_.begin(), shaderModules_.end(), module) != shaderModules_.end(); }
-    bool hasFence(VkFence fence) const { return std::find(fences_.begin(), fences_.end(), fence) != fences_.end(); }
+    bool hasBuffer(VkBuffer buffer) const { return std::ranges::find(buffers_, buffer) != buffers_.end(); }
+    bool hasMemory(VkDeviceMemory memory) const { return std::ranges::find(memories_, memory) != memories_.end(); }
+    bool hasImageView(VkImageView view) const { return std::ranges::find(imageViews_, view) != imageViews_.end(); }
+    bool hasImage(VkImage image) const { return std::ranges::find(images_, image) != images_.end(); }
+    bool hasSampler(VkSampler sampler) const { return std::ranges::find(samplers_, sampler) != samplers_.end(); }  // NEW
+    bool hasAccelerationStructure(VkAccelerationStructureKHR as) const { return std::ranges::find(accelerationStructures_, as) != accelerationStructures_.end(); }
+    bool hasDescriptorPool(VkDescriptorPool pool) const { return std::ranges::find(descriptorPools_, pool) != descriptorPools_.end(); }
+    bool hasDescriptorSet(VkDescriptorSet set) const { return std::ranges::find(descriptorSets_, set) != descriptorSets_.end(); }
+    bool hasCommandPool(VkCommandPool pool) const { return std::ranges::find(commandPools_, pool) != commandPools_.end(); }
+    bool hasRenderPass(VkRenderPass rp) const { return std::ranges::find(renderPasses_, rp) != renderPasses_.end(); }
+    bool hasDescriptorSetLayout(VkDescriptorSetLayout layout) const { return std::ranges::find(descriptorSetLayouts_, layout) != descriptorSetLayouts_.end(); }
+    bool hasPipelineLayout(VkPipelineLayout layout) const { return std::ranges::find(pipelineLayouts_, layout) != pipelineLayouts_.end(); }
+    bool hasPipeline(VkPipeline pipeline) const { return std::ranges::find(pipelines_, pipeline) != pipelines_.end(); }
+    bool hasShaderModule(VkShaderModule module) const { return std::ranges::find(shaderModules_, module) != shaderModules_.end(); }
+    bool hasFence(VkFence fence) const { return std::ranges::find(fences_, fence) != fences_.end(); }
 
     // === Getters (CONST) ===
     const std::vector<VkBuffer>& getBuffers() const { return buffers_; }

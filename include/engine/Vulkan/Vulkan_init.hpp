@@ -1,4 +1,4 @@
-// src/engine/Vulkan/VulkanInitializer.hpp
+// src/engine/Vulkan/Vulkan_init.hpp
 // AMOURANTH RTX Engine (C) 2025 by Zachary Geurts gzac5314@gmail.com is licensed under CC BY-NC 4.0
 
 #pragma once
