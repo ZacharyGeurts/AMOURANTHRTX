@@ -46,6 +46,8 @@ set(SOURCE_DIRS
     "${CMAKE_CURRENT_SOURCE_DIR}/src/engine/SDL3"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/engine/Vulkan"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/engine"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/modes"           # ← MODES SOURCE
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/modes"       # ← MODES HEADER
 )
 foreach(DIR ${SOURCE_DIRS})
     if(NOT EXISTS "${DIR}")
@@ -142,7 +144,7 @@ endif()
 # OpenMP
 find_package(OpenMP REQUIRED)
 if(NOT OpenMP_CXX_FOUND)
-    message(FATAL_ERROR "OpenMP not found. Install libomp-dev.")
+    message(FATAL_ERROR "OpenMP (libomp-dev) not found.")
 endif()
 message(STATUS "OpenMP found: ${OpenMP_CXX_LIBRARIES}")
 
@@ -246,7 +248,9 @@ set(SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src)
 set(ENGINE_SRC_DIR ${SRC_DIR}/engine)
 set(SDL3_SRC_DIR ${ENGINE_SRC_DIR}/SDL3)
 set(VULKAN_SRC_DIR ${ENGINE_SRC_DIR}/Vulkan)
+set(MODES_SRC_DIR ${SRC_DIR}/modes)                 # ← MODES SOURCE
 set(INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/include)
+set(MODES_INCLUDE_DIR ${INCLUDE_DIR}/modes)         # ← MODES HEADER
 set(SHADER_DIR ${CMAKE_CURRENT_SOURCE_DIR}/shaders)
 set(ASSET_DIR ${CMAKE_CURRENT_SOURCE_DIR}/assets)
 set(LINUX_BIN_DIR ${CMAKE_BINARY_DIR}/bin/Linux)
@@ -262,6 +266,11 @@ file(GLOB VULKAN_SOURCES "${VULKAN_SRC_DIR}/*.cpp")
 list(APPEND SOURCES ${VULKAN_SOURCES})
 file(GLOB ENGINE_SOURCES "${ENGINE_SRC_DIR}/*.cpp")
 list(APPEND SOURCES ${ENGINE_SOURCES})
+
+# === MODES SOURCES ===
+file(GLOB MODES_SOURCES "${MODES_SRC_DIR}/*.cpp")
+list(APPEND SOURCES ${MODES_SOURCES})
+
 list(REMOVE_DUPLICATES SOURCES)
 if(NOT SOURCES)
     message(FATAL_ERROR "No source files found in ${SRC_DIR}.")
@@ -295,6 +304,7 @@ target_compile_definitions(amouranth_engine PRIVATE
 # Includes
 target_include_directories(amouranth_engine PRIVATE
     ${INCLUDE_DIR}
+    ${MODES_INCLUDE_DIR}          # ← INCLUDE MODES
     ${Vulkan_INCLUDE_DIRS}
     ${FREETYPE_INCLUDE_DIRS}
     ${HarfBuzz_INCLUDE_DIRS}
@@ -356,214 +366,163 @@ endif()
 
 target_compile_options(amouranth_engine PRIVATE -fPIC)
 
-# Shader compilation
-set(RAYTRACING_SHADERS
-    "raygen.rgen:rgen"
-    "miss.rmiss:rmiss"
-    "shadowmiss.rmiss:rmiss"
-    "closesthit.rchit:rchit"
-    "anyhit.rahit:rahit"
-    "intersection.rint:rint"
-    "callable.rcall:rcall"
-    "shadow_anyhit.rahit:rahit"
-    "mid_anyhit.rahit:rahit"
-    "volumetric_anyhit.rahit:rahit"
-)
-set(REQUIRED_RAYTRACING_SHADERS "raygen.rgen" "miss.rmiss" "closesthit.rchit")
-set(SHADER_EXTS "*.vert" "*.frag" "*.comp")
-set(SHADER_OUTPUTS "")
+# =============================================================================
+# FINAL SHADER SYSTEM: COMPILE .vert/.frag/.comp/.rgen/etc → .spv
+#                    COPY .glsl → output
+#                    graphics/ folder: .vert/.frag → compile, .glsl → copy
+# =============================================================================
 
-foreach(SHADER ${REQUIRED_RAYTRACING_SHADERS})
-    if(NOT EXISTS "${SHADER_DIR}/raytracing/${SHADER}")
-        message(FATAL_ERROR "Required ray-tracing shader ${SHADER} is missing.")
-    endif()
-endforeach()
+set(SHADER_FOLDERS raytracing rasterization compute graphics)
 
-# Ray-tracing shaders
-foreach(SHADER_INFO ${RAYTRACING_SHADERS})
-    string(REPLACE ":" ";" SHADER_PAIR ${SHADER_INFO})
-    list(GET SHADER_PAIR 0 SHADER_SRC)
-    list(GET SHADER_PAIR 1 SHADER_STAGE)
-    get_filename_component(SHADER_BASE ${SHADER_SRC} NAME_WE)
-    set(SHADER "${SHADER_DIR}/raytracing/${SHADER_SRC}")
-    if(NOT EXISTS "${SHADER}")
-        message(WARNING "Ray-tracing shader ${SHADER} not found. Skipping.")
+# Extensions to COMPILE
+set(COMPILE_EXTS .vert .frag .comp .rgen .rmiss .rchit .rahit .rint .rcall)
+
+# Map extension → stage
+set(STAGE_vert  vert)
+set(STAGE_frag  frag)
+set(STAGE_comp  comp)
+set(STAGE_rgen  rgen)
+set(STAGE_rmiss rmiss)
+set(STAGE_rchit rchit)
+set(STAGE_rahit rahit)
+set(STAGE_rint  rint)
+set(STAGE_rcall rcall)
+
+# Required RT shaders
+set(REQUIRED_RAYTRACING raygen.rgen miss.rmiss closesthit.rchit)
+
+# Output lists
+set(SHADER_SPV_OUTPUTS "")
+set(SHADER_COPY_OUTPUTS "")
+
+message(STATUS "Scanning shaders for compilation and copy...")
+
+# === SCAN EVERY FOLDER ===
+foreach(FOLDER ${SHADER_FOLDERS})
+    set(SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/shaders/${FOLDER}")
+    if(NOT EXISTS "${SRC_DIR}")
+        message(WARNING "Shader folder missing: ${SRC_DIR}")
         continue()
     endif()
-    file(READ "${SHADER}" SHADER_CONTENT)
-    if("${SHADER_CONTENT}" STREQUAL "")
-        message(WARNING "Ray-tracing shader ${SHADER} is empty. Skipping.")
-        continue()
-    endif()
-    if(IS_LINUX)
-        set(SHADER_OUTPUT "${LINUX_BIN_DIR}/assets/shaders/raytracing/${SHADER_BASE}.spv")
-        add_custom_command(
-            OUTPUT ${SHADER_OUTPUT}
-            COMMAND ${CMAKE_COMMAND} -E make_directory "${LINUX_BIN_DIR}/assets/shaders/raytracing"
-            COMMAND ${GLSLC} -fshader-stage=${SHADER_STAGE} ${SHADER} -o ${SHADER_OUTPUT} --target-env=vulkan1.3 --target-spv=spv1.5
-            COMMAND ${SPIRV_VAL} ${SHADER_OUTPUT} || echo "SPIR-V validation failed"
-            DEPENDS ${SHADER}
-            COMMENT "Compiling ray-tracing shader ${SHADER_BASE} (Linux)"
-        )
-    else()
-        set(SHADER_OUTPUT "${WINDOWS_BIN_DIR}/assets/shaders/raytracing/${SHADER_BASE}.spv")
-        add_custom_command(
-            OUTPUT ${SHADER_OUTPUT}
-            COMMAND ${CMAKE_COMMAND} -E make_directory "${WINDOWS_BIN_DIR}/assets/shaders/raytracing"
-            COMMAND ${GLSLC} -fshader-stage=${SHADER_STAGE} ${SHADER} -o ${SHADER_OUTPUT} --target-env=vulkan1.3 --target-spv=spv1.5
-            COMMAND ${SPIRV_VAL} ${SHADER_OUTPUT} || echo "SPIR-V validation failed"
-            DEPENDS ${SHADER}
-            COMMENT "Compiling ray-tracing shader ${SHADER_BASE} (Windows)"
-        )
-    endif()
-    list(APPEND SHADER_OUTPUTS ${SHADER_OUTPUT})
-endforeach()
 
-# Tonemap shaders (graphics)
-if(EXISTS "${SHADER_DIR}/graphics/tonemap_vert.glsl")
-    if(IS_LINUX)
-        set(TONEMAP_VERT_OUT "${LINUX_BIN_DIR}/assets/shaders/graphics/tonemap_vert.spv")
-        add_custom_command(
-            OUTPUT ${TONEMAP_VERT_OUT}
-            COMMAND ${CMAKE_COMMAND} -E make_directory "${LINUX_BIN_DIR}/assets/shaders/graphics"
-            COMMAND ${GLSLC} -fshader-stage=vert "${SHADER_DIR}/graphics/tonemap_vert.glsl" -o ${TONEMAP_VERT_OUT} --target-env=vulkan1.3 --target-spv=spv1.3
-            COMMAND ${SPIRV_VAL} ${TONEMAP_VERT_OUT} || echo "SPIR-V validation failed"
-            DEPENDS "${SHADER_DIR}/graphics/tonemap_vert.glsl"
-            COMMENT "Compiling tonemap vertex shader (Linux)"
-        )
-    else()
-        set(TONEMAP_VERT_OUT "${WINDOWS_BIN_DIR}/assets/shaders/graphics/tonemap_vert.spv")
-        add_custom_command(
-            OUTPUT ${TONEMAP_VERT_OUT}
-            COMMAND ${CMAKE_COMMAND} -E make_directory "${WINDOWS_BIN_DIR}/assets/shaders/graphics"
-            COMMAND ${GLSLC} -fshader-stage=vert "${SHADER_DIR}/graphics/tonemap_vert.glsl" -o ${TONEMAP_VERT_OUT} --target-env=vulkan1.3 --target-spv=spv1.3
-            COMMAND ${SPIRV_VAL} ${TONEMAP_VERT_OUT} || echo "SPIR-V validation failed"
-            DEPENDS "${SHADER_DIR}/graphics/tonemap_vert.glsl"
-            COMMENT "Compiling tonemap vertex shader (Windows)"
-        )
-    endif()
-    list(APPEND SHADER_OUTPUTS ${TONEMAP_VERT_OUT})
-endif()
+    set(LINUX_OUT "${LINUX_BIN_DIR}/assets/shaders/${FOLDER}")
+    set(WINDOWS_OUT "${WINDOWS_BIN_DIR}/assets/shaders/${FOLDER}")
 
-if(EXISTS "${SHADER_DIR}/graphics/tonemap_frag.glsl")
-    if(IS_LINUX)
-        set(TONEMAP_FRAG_OUT "${LINUX_BIN_DIR}/assets/shaders/graphics/tonemap_frag.spv")
-        add_custom_command(
-            OUTPUT ${TONEMAP_FRAG_OUT}
-            COMMAND ${CMAKE_COMMAND} -E make_directory "${LINUX_BIN_DIR}/assets/shaders/graphics"
-            COMMAND ${GLSLC} -fshader-stage=frag "${SHADER_DIR}/graphics/tonemap_frag.glsl" -o ${TONEMAP_FRAG_OUT} --target-env=vulkan1.3 --target-spv=spv1.3
-            COMMAND ${SPIRV_VAL} ${TONEMAP_FRAG_OUT} || echo "SPIR-V validation failed"
-            DEPENDS "${SHADER_DIR}/graphics/tonemap_frag.glsl"
-            COMMENT "Compiling tonemap fragment shader (Linux)"
-        )
-    else()
-        set(TONEMAP_FRAG_OUT "${WINDOWS_BIN_DIR}/assets/shaders/graphics/tonemap_frag.spv")
-        add_custom_command(
-            OUTPUT ${TONEMAP_FRAG_OUT}
-            COMMAND ${CMAKE_COMMAND} -E make_directory "${WINDOWS_BIN_DIR}/assets/shaders/graphics"
-            COMMAND ${GLSLC} -fshader-stage=frag "${SHADER_DIR}/graphics/tonemap_frag.glsl" -o ${TONEMAP_FRAG_OUT} --target-env=vulkan1.3 --target-spv=spv1.3
-            COMMAND ${SPIRV_VAL} ${TONEMAP_FRAG_OUT} || echo "SPIR-V validation failed"
-            DEPENDS "${SHADER_DIR}/graphics/tonemap_frag.glsl"
-            COMMENT "Compiling tonemap fragment shader (Windows)"
-        )
-    endif()
-    list(APPEND SHADER_OUTPUTS ${TONEMAP_FRAG_OUT})
-endif()
+    # === 1. COMPILE: .vert, .frag, .comp, .rgen, etc. ===
+    foreach(EXT ${COMPILE_EXTS})
+        file(GLOB SHADERS "${SRC_DIR}/*${EXT}")
+        foreach(SHADER ${SHADERS})
+            get_filename_component(NAME ${SHADER} NAME)
+            get_filename_component(BASE ${SHADER} NAME_WE)
 
-# Rasterization & Compute shaders
-foreach(EXT ${SHADER_EXTS})
-    file(GLOB RASTER_SHADERS "${SHADER_DIR}/rasterization/${EXT}")
-    foreach(SHADER ${RASTER_SHADERS})
-        get_filename_component(SHADER_BASE ${SHADER} NAME_WE)
-        if(IS_LINUX)
-            set(SHADER_OUTPUT "${LINUX_BIN_DIR}/assets/shaders/rasterization/${SHADER_BASE}.spv")
-        else()
-            set(SHADER_OUTPUT "${WINDOWS_BIN_DIR}/assets/shaders/rasterization/${SHADER_BASE}.spv")
-        endif()
-        if(NOT EXISTS "${SHADER}")
-            continue()
-        endif()
-        file(READ "${SHADER}" SHADER_CONTENT)
-        if("${SHADER_CONTENT}" STREQUAL "")
-            continue()
-        endif()
-        string(FIND "${EXT}" ".vert" IS_VERT)
-        string(FIND "${EXT}" ".frag" IS_FRAG)
-        string(FIND "${EXT}" ".comp" IS_COMP)
-        if(IS_VERT GREATER -1)
-            set(SHADER_STAGE "vert")
-        elseif(IS_FRAG GREATER -1)
-            set(SHADER_STAGE "frag")
-        elseif(IS_COMP GREATER -1)
-            set(SHADER_STAGE "comp")
-        else()
-            continue()
-        endif()
-        if(IS_LINUX)
-            add_custom_command(
-                OUTPUT ${SHADER_OUTPUT}
-                COMMAND ${CMAKE_COMMAND} -E make_directory "${LINUX_BIN_DIR}/assets/shaders/rasterization"
-                COMMAND ${GLSLC} -fshader-stage=${SHADER_STAGE} ${SHADER} -o ${SHADER_OUTPUT} --target-env=vulkan1.3 --target-spv=spv1.3
-                COMMAND ${SPIRV_VAL} ${SHADER_OUTPUT} || echo "SPIR-V validation failed"
-                DEPENDS ${SHADER}
-                COMMENT "Compiling rasterization shader ${SHADER_BASE} (Linux)"
-            )
-        else()
-            add_custom_command(
-                OUTPUT ${SHADER_OUTPUT}
-                COMMAND ${CMAKE_COMMAND} -E make_directory "${WINDOWS_BIN_DIR}/assets/shaders/rasterization"
-                COMMAND ${GLSLC} -fshader-stage=${SHADER_STAGE} ${SHADER} -o ${SHADER_OUTPUT} --target-env=vulkan1.3 --target-spv=spv1.3
-                COMMAND ${SPIRV_VAL} ${SHADER_OUTPUT} || echo "SPIR-V validation failed"
-                DEPENDS ${SHADER}
-                COMMENT "Compiling rasterization shader ${SHADER_BASE} (Windows)"
-            )
-        endif()
-        list(APPEND SHADER_OUTPUTS ${SHADER_OUTPUT})
+            # Stage
+            string(SUBSTRING "${EXT}" 1 -1 EXT_NO_DOT)
+            set(STAGE ${STAGE_${EXT_NO_DOT}})
+            if(NOT STAGE)
+                message(FATAL_ERROR "Missing stage for ${EXT}")
+            endif()
+
+            # SPV flags
+            if(FOLDER STREQUAL "raytracing")
+                set(SPV_FLAGS "--target-spv=spv1.5")
+            else()
+                set(SPV_FLAGS "--target-spv=spv1.3")
+            endif()
+
+            # Linux
+            if(IS_LINUX)
+                set(SPV_OUT "${LINUX_OUT}/${BASE}.spv")
+                add_custom_command(
+                    OUTPUT "${SPV_OUT}"
+                    COMMAND ${CMAKE_COMMAND} -E make_directory "${LINUX_OUT}"
+                    COMMAND ${GLSLC} -fshader-stage=${STAGE} "${SHADER}" -o "${SPV_OUT}" ${SPV_FLAGS}
+                    COMMAND ${SPIRV_VAL} "${SPV_OUT}" || echo "SPIR-V validation failed: ${NAME}"
+                    DEPENDS "${SHADER}"
+                    COMMENT "glslc → ${FOLDER}/${NAME} (Linux)"
+                    VERBATIM
+                )
+                list(APPEND SHADER_SPV_OUTPUTS "${SPV_OUT}")
+                message(STATUS "  [COMPILE] ${FOLDER}/${NAME} → stage=${STAGE}")
+            endif()
+
+            # Windows
+            if(IS_WINDOWS)
+                set(SPV_OUT "${WINDOWS_OUT}/${BASE}.spv")
+                add_custom_command(
+                    OUTPUT "${SPV_OUT}"
+                    COMMAND ${CMAKE_COMMAND} -E make_directory "${WINDOWS_OUT}"
+                    COMMAND ${GLSLC} -fshader-stage=${STAGE} "${SHADER}" -o "${SPV_OUT}" ${SPV_FLAGS}
+                    COMMAND ${SPIRV_VAL} "${SPV_OUT}" || echo "SPIR-V validation failed: ${NAME}"
+                    DEPENDS "${SHADER}"
+                    COMMENT "glslc → ${FOLDER}/${NAME} (Windows)"
+                    VERBATIM
+                )
+                list(APPEND SHADER_SPV_OUTPUTS "${SPV_OUT}")
+            endif()
+        endforeach()
     endforeach()
 
-    file(GLOB COMPUTE_SHADERS "${SHADER_DIR}/compute/${EXT}")
-    foreach(SHADER ${COMPUTE_SHADERS})
-        get_filename_component(SHADER_BASE ${SHADER} NAME_WE)
-        if(IS_LINUX)
-            set(SHADER_OUTPUT "${LINUX_BIN_DIR}/assets/shaders/compute/${SHADER_BASE}.spv")
-        else()
-            set(SHADER_OUTPUT "${WINDOWS_BIN_DIR}/assets/shaders/compute/${SHADER_BASE}.spv")
-        endif()
-        if(NOT EXISTS "${SHADER}")
+    # === 2. COPY: only .glsl files (but NOT if already compiled) ===
+    file(GLOB GLSL_FILES "${SRC_DIR}/*.glsl")
+    foreach(GLSL ${GLSL_FILES})
+        get_filename_component(NAME ${GLSL} NAME)
+        get_filename_component(BASE ${GLSL} NAME_WE)
+
+        # Skip if it was already compiled (e.g. tonemap_vert.glsl → tonemap_vert.vert exists)
+        set(SKIP FALSE)
+        foreach(EXT ${COMPILE_EXTS})
+            if(EXISTS "${SRC_DIR}/${BASE}${EXT}")
+                set(SKIP TRUE)
+                break()
+            endif()
+        endforeach()
+        if(SKIP)
             continue()
         endif()
-        file(READ "${SHADER}" SHADER_CONTENT)
-        if("${SHADER_CONTENT}" STREQUAL "")
-            continue()
-        endif()
+
         if(IS_LINUX)
+            set(COPY_OUT "${LINUX_OUT}/${NAME}")
             add_custom_command(
-                OUTPUT ${SHADER_OUTPUT}
-                COMMAND ${CMAKE_COMMAND} -E make_directory "${LINUX_BIN_DIR}/assets/shaders/compute"
-                COMMAND ${GLSLC} -fshader-stage=comp ${SHADER} -o ${SHADER_OUTPUT} --target-env=vulkan1.3 --target-spv=spv1.3
-                COMMAND ${SPIRV_VAL} ${SHADER_OUTPUT} || echo "SPIR-V validation failed"
-                DEPENDS ${SHADER}
-                COMMENT "Compiling compute shader ${SHADER_BASE} (Linux)"
+                OUTPUT "${COPY_OUT}"
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different "${GLSL}" "${COPY_OUT}"
+                DEPENDS "${GLSL}"
+                COMMENT "Copy .glsl: ${FOLDER}/${NAME} (Linux)"
+                VERBATIM
             )
-        else()
-            add_custom_command(
-                OUTPUT ${SHADER_OUTPUT}
-                COMMAND ${CMAKE_COMMAND} -E make_directory "${WINDOWS_BIN_DIR}/assets/shaders/compute"
-                COMMAND ${GLSLC} -fshader-stage=comp ${SHADER} -o ${SHADER_OUTPUT} --target-env=vulkan1.3 --target-spv=spv1.3
-                COMMAND ${SPIRV_VAL} ${SHADER_OUTPUT} || echo "SPIR-V validation failed"
-                DEPENDS ${SHADER}
-                COMMENT "Compiling compute shader ${SHADER_BASE} (Windows)"
-            )
+            list(APPEND SHADER_COPY_OUTPUTS "${COPY_OUT}")
+            message(STATUS "  [COPY] .glsl: ${FOLDER}/${NAME}")
         endif()
-        list(APPEND SHADER_OUTPUTS ${SHADER_OUTPUT})
+
+        if(IS_WINDOWS)
+            set(COPY_OUT "${WINDOWS_OUT}/${NAME}")
+            add_custom_command(
+                OUTPUT "${COPY_OUT}"
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different "${GLSL}" "${COPY_OUT}"
+                DEPENDS "${GLSL}"
+                COMMENT "Copy .glsl: ${FOLDER}/${NAME} (Windows)"
+                VERBATIM
+            )
+            list(APPEND SHADER_COPY_OUTPUTS "${COPY_OUT}")
+        endif()
     endforeach()
 endforeach()
 
-if(SHADER_OUTPUTS)
-    add_custom_target(shaders DEPENDS ${SHADER_OUTPUTS})
+# === REQUIRED RT CHECK ===
+foreach(REQ ${REQUIRED_RAYTRACING})
+    if(NOT EXISTS "${SHADER_DIR}/raytracing/${REQ}")
+        message(FATAL_ERROR "MISSING REQUIRED SHADER: ${REQ}")
+    endif()
+endforeach()
+
+# === FINAL TARGET ===
+list(LENGTH SHADER_SPV_OUTPUTS SPV_COUNT)
+list(LENGTH SHADER_COPY_OUTPUTS COPY_COUNT)
+if(SPV_COUNT GREATER 0 OR COPY_COUNT GREATER 0)
+    add_custom_target(shaders ALL DEPENDS ${SHADER_SPV_OUTPUTS} ${SHADER_COPY_OUTPUTS})
     add_dependencies(amouranth_engine shaders)
+    message(STATUS "Shader target: ${SPV_COUNT} SPV + ${COPY_COUNT} .glsl copies")
 else()
-    message(WARNING "No shader outputs generated.")
+    message(FATAL_ERROR "NO SHADERS FOUND! Check shaders/ folders.")
 endif()
 
 # Copy assets
