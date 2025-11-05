@@ -1,6 +1,7 @@
 // include/engine/camera.hpp
 // AMOURANTH RTX Engine (C) 2025 by Zachary Geurts gzac5314@gmail.com
 // Licensed under CC BY-NC 4.0
+// FINAL: getApp() & getRenderer() declared + forward-declared Application
 
 #pragma once
 #ifndef CAMERA_HPP
@@ -11,6 +12,10 @@
 #include <glm/gtc/matrix_inverse.hpp>
 #include <algorithm>
 #include <source_location>
+
+// Forward declarations — avoid circular includes
+class Application;
+namespace VulkanRTX { class VulkanRenderer; }
 
 namespace VulkanRTX {
 
@@ -51,8 +56,12 @@ public:
     virtual void setUserData(void* data) = 0;
     virtual void* getUserData() const = 0;
 
-    // ADD: Smooth zoom via FOV
+    // Smooth zoom via FOV
     virtual void zoom(float factor) = 0;
+
+    // --- OPTIONAL: Not all cameras need app/renderer access ---
+    virtual Application* getApp() const { return nullptr; }
+    virtual VulkanRenderer* getRenderer() const { return nullptr; }
 };
 
 class PerspectiveCamera : public Camera {
@@ -95,8 +104,11 @@ public:
     void setUserData(void* data) override;
     void* getUserData() const override;
 
-    // IMPLEMENTED: Smooth FOV zoom
     void zoom(float factor) override;
+
+    // --- IMPLEMENTED: SAFE ACCESS TO APP & RENDERER ---
+    Application* getApp() const override;                    // DECLARED
+    VulkanRenderer* getRenderer() const override;           // DECLARED
 
     // --- PUBLIC FOR renderFrame() MOVEMENT DETECTION ---
     float yaw_;

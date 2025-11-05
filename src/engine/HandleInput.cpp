@@ -1,6 +1,7 @@
 // src/HandleInput.cpp
 // AMOURANTH RTX Engine (C) 2025 – Input Handler Implementation
 // SDL3 | Camera control | Full event dispatch | WASD + Mouse + Zoom
+// TRUTH: All key logic in handle_app.cpp → HandleInput only routes
 
 #include "HandleInput.hpp"
 #include "engine/camera.hpp"
@@ -45,12 +46,13 @@ void HandleInput::setCallbacks(
 
 // ----------------------------------------------------------------
 // DEFAULT: WASD + Mouse Look + Scroll Zoom
+// ONLY called if no custom callback is set
 // ----------------------------------------------------------------
 void HandleInput::defaultKeyboardHandler(const SDL_KeyboardEvent& key) {
-    if (!key.down) return;  // SDL3: key.down == true for press
+    if (key.type != SDL_EVENT_KEY_DOWN) return;
 
     const float moveSpeed = 5.0f;
-    switch (key.key) {  // SDL3: key.key instead of key.keysym.sym
+    switch (key.key) {
         case SDLK_W:      camera_.moveForward(moveSpeed);   break;
         case SDLK_S:      camera_.moveForward(-moveSpeed);  break;
         case SDLK_A:      camera_.moveRight(-moveSpeed);    break;
@@ -78,7 +80,7 @@ void HandleInput::defaultMouseMotionHandler(const SDL_MouseMotionEvent& mm) {
 
 void HandleInput::defaultMouseWheelHandler(const SDL_MouseWheelEvent& mw) {
     const float zoomFactor = (mw.y > 0) ? 0.9f : 1.1f;
-    camera_.zoom(zoomFactor);  // Now valid — see camera fix below
+    camera_.zoom(zoomFactor);
 }
 
 void HandleInput::defaultTextInputHandler(const SDL_TextInputEvent&) {}
@@ -95,6 +97,7 @@ void HandleInput::defaultGamepadConnectHandler(bool connected, SDL_JoystickID id
 
 // ----------------------------------------------------------------
 // MAIN EVENT LOOP – SDL3 Compatible
+// TRUTH: Application handles 1-9, T, O, H, F → we only route
 // ----------------------------------------------------------------
 void HandleInput::handleInput(Application& app) {
     SDL_Event event;

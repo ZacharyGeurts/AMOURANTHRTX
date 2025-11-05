@@ -2,6 +2,7 @@
 // AMOURANTH RTX Engine (C) 2025 by Zachary Geurts gzac5314@gmail.com
 // FINAL: T = tonemap | O = overlay | 1-9 = modes | H = HYPERTRACE | F = FPS TARGET
 // PROTIP: Use RAII + state sync to keep UI and engine in perfect harmony.
+// LOGS: Every key press (1-9, T, O, H, F) with color-coded feedback
 
 #include "handle_app.hpp"
 #include <SDL3/SDL.h>
@@ -105,6 +106,11 @@ void Application::setRenderer(std::unique_ptr<VulkanRTX::VulkanRenderer> rendere
     renderer_->setRenderMode(mode_);
     updateWindowTitle();
 
+    // === CRITICAL: Set camera.userData_ AFTER renderer is valid ===
+    camera_->setUserData(this);
+    LOG_INFO_CAT("CAMERA", "{}camera_->setUserData(this) @ {:p}{}", 
+                 Logging::Color::EMERALD_GREEN, static_cast<void*>(this), Logging::Color::RESET);
+
     LOG_INFO_CAT("Application", std::format("{}MESH LOADED | 1-9=mode | H=HYPERTRACE | T=tonemap | O=overlay | F=FPS TARGET{}", 
                  Logging::Color::EMERALD_GREEN, Logging::Color::RESET).c_str());
 }
@@ -121,20 +127,20 @@ void Application::initializeInput() {
         [this](const SDL_KeyboardEvent& key) {
             if (key.type == SDL_EVENT_KEY_DOWN) {
                 switch (key.key) {
-                    case SDLK_1: setRenderMode(1); break;
-                    case SDLK_2: setRenderMode(2); break;
-                    case SDLK_3: setRenderMode(3); break;
-                    case SDLK_4: setRenderMode(4); break;
-                    case SDLK_5: setRenderMode(5); break;
-                    case SDLK_6: setRenderMode(6); break;
-                    case SDLK_7: setRenderMode(7); break;
-                    case SDLK_8: setRenderMode(8); break;
-                    case SDLK_9: setRenderMode(9); break;
+                    case SDLK_1: setRenderMode(1); LOG_INFO_CAT("INPUT", "{}KEY 1 → MODE 1{}", Logging::Color::EMERALD_GREEN, Logging::Color::RESET); break;
+                    case SDLK_2: setRenderMode(2); LOG_INFO_CAT("INPUT", "{}KEY 2 → MODE 2{}", Logging::Color::EMERALD_GREEN, Logging::Color::RESET); break;
+                    case SDLK_3: setRenderMode(3); LOG_INFO_CAT("INPUT", "{}KEY 3 → MODE 3{}", Logging::Color::EMERALD_GREEN, Logging::Color::RESET); break;
+                    case SDLK_4: setRenderMode(4); LOG_INFO_CAT("INPUT", "{}KEY 4 → MODE 4{}", Logging::Color::EMERALD_GREEN, Logging::Color::RESET); break;
+                    case SDLK_5: setRenderMode(5); LOG_INFO_CAT("INPUT", "{}KEY 5 → MODE 5{}", Logging::Color::EMERALD_GREEN, Logging::Color::RESET); break;
+                    case SDLK_6: setRenderMode(6); LOG_INFO_CAT("INPUT", "{}KEY 6 → MODE 6{}", Logging::Color::EMERALD_GREEN, Logging::Color::RESET); break;
+                    case SDLK_7: setRenderMode(7); LOG_INFO_CAT("INPUT", "{}KEY 7 → MODE 7{}", Logging::Color::EMERALD_GREEN, Logging::Color::RESET); break;
+                    case SDLK_8: setRenderMode(8); LOG_INFO_CAT("INPUT", "{}KEY 8 → MODE 8{}", Logging::Color::EMERALD_GREEN, Logging::Color::RESET); break;
+                    case SDLK_9: setRenderMode(9); LOG_INFO_CAT("INPUT", "{}KEY 9 → MODE 9{}", Logging::Color::EMERALD_GREEN, Logging::Color::RESET); break;
 
                     case SDLK_T: toggleTonemap(); break;
                     case SDLK_O: toggleOverlay(); break;
                     case SDLK_H: toggleHypertrace(); break;
-                    case SDLK_F: toggleFpsTarget(); break;  // NEW: FPS TARGET TOGGLE
+                    case SDLK_F: toggleFpsTarget(); break;
 
                     default: inputHandler_->defaultKeyboardHandler(key); break;
                 }
@@ -159,6 +165,10 @@ void Application::initializeInput() {
 void Application::toggleFpsTarget() {
     if (renderer_) {
         renderer_->toggleFpsTarget();
+        LOG_INFO_CAT("INPUT", "{}KEY F → FPS TARGET: {} FPS{}", 
+                     Logging::Color::PEACHES_AND_CREAM,
+                     renderer_->getFpsTarget() == VulkanRTX::VulkanRenderer::FpsTarget::FPS_60 ? 60 : 120,
+                     Logging::Color::RESET);
     }
     updateWindowTitle();
 }
@@ -169,6 +179,10 @@ void Application::toggleFpsTarget() {
 void Application::toggleHypertrace() {
     if (renderer_) {
         renderer_->toggleHypertrace();
+        LOG_INFO_CAT("INPUT", "{}KEY H → HYPERTRACE {}{}", 
+                     Logging::Color::CRIMSON_MAGENTA,
+                     renderer_->getRTX().isHypertraceEnabled() ? "ENABLED" : "DISABLED",
+                     Logging::Color::RESET);
     }
     updateWindowTitle();
 }
@@ -184,12 +198,11 @@ void Application::toggleTonemap() {
         renderer_->setRenderMode(targetMode);
     }
 
-    LOG_INFO_CAT("TONEMAP",
-                 std::format("{}TONEMAP {} | RENDER MODE {}{}",
+    LOG_INFO_CAT("INPUT", "{}KEY T → TONEMAP {} | MODE {}{}",
                  Logging::Color::PEACHES_AND_CREAM,
                  tonemapEnabled_ ? "ENABLED" : "DISABLED",
                  targetMode,
-                 Logging::Color::RESET).c_str());
+                 Logging::Color::RESET);
 
     updateWindowTitle();
 }
@@ -197,7 +210,10 @@ void Application::toggleTonemap() {
 /* --------------------------------------------------------------- */
 void Application::toggleOverlay() {
     showOverlay_ = !showOverlay_;
-    LOG_INFO_CAT("Application", std::format("Overlay {}", showOverlay_ ? "ON" : "OFF").c_str());
+    LOG_INFO_CAT("INPUT", "{}KEY O → OVERLAY {}{}", 
+                 Logging::Color::OCEAN_TEAL,
+                 showOverlay_ ? "ON" : "OFF",
+                 Logging::Color::RESET);
     updateWindowTitle();
 }
 
@@ -267,7 +283,7 @@ void Application::handleResize(int width, int height) {
 void Application::run() {
     while (!shouldQuit()) {
         SDL_Event ev;
-        while (SDL_PollEvent(&ev)) {  // FIXED: was "edits SDL_PollEvent"
+        while (SDL_PollEvent(&ev)) {
             if (ev.type == SDL_EVENT_QUIT) {
                 quit_ = true;
                 break;

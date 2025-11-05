@@ -49,6 +49,8 @@ public:
 
     void setQuit(bool q) { quit_ = q; }
 
+	std::unique_ptr<VulkanRTX::VulkanRenderer> renderer_;
+
 private:
     void initializeInput();
     void render();
@@ -61,7 +63,6 @@ private:
     bool quit_{false};
 
     std::unique_ptr<SDL3Initializer::SDL3Initializer> sdl_;
-    std::unique_ptr<VulkanRTX::VulkanRenderer> renderer_;
     std::unique_ptr<VulkanRTX::Camera> camera_;
     std::unique_ptr<HandleInput> inputHandler_;
 

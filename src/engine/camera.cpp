@@ -1,8 +1,12 @@
 // src/engine/camera.cpp
 // AMOURANTH RTX Engine (C) 2025 by Zachary Geurts gzac5314@gmail.com
 // Licensed under CC BY-NC 4.0
+// FIXED: RenderMode2 "context.camera is null!" → use userData_ safely
+// FIXED: Compile errors → include Application & VulkanRenderer
 
 #include "engine/camera.hpp"
+#include "handle_app.hpp"                    // <-- ADDED: for Application
+#include "engine/Vulkan/VulkanRenderer.hpp"  // <-- ADDED: for VulkanRenderer
 #include <glm/gtc/matrix_transform.hpp>
 #include <algorithm>
 #include "engine/logging.hpp"
@@ -167,10 +171,40 @@ void PerspectiveCamera::zoom(float factor) {
 }
 
 // ---------------------------------------------------------------------
-// User Data
+// User Data – SAFE ACCESS
 // ---------------------------------------------------------------------
-void PerspectiveCamera::setUserData(void* data) { userData_ = data; }
-void* PerspectiveCamera::getUserData() const { return userData_; }
+void PerspectiveCamera::setUserData(void* data) {
+    userData_ = data;
+    LOG_DEBUG_CAT("CAMERA", "userData_ set to {:p}", userData_);
+}
+
+void* PerspectiveCamera::getUserData() const {
+    if (!userData_) {
+        LOG_ERROR_CAT("CAMERA", "getUserData() called but userData_ is null!");
+    }
+    return userData_;
+}
+
+// ---------------------------------------------------------------------
+// SAFE: Get Application* from userData_
+// ---------------------------------------------------------------------
+Application* PerspectiveCamera::getApp() const {
+    Application* app = static_cast<Application*>(userData_);
+    if (!app) {
+        LOG_ERROR_CAT("CAMERA", "getApp(): userData_ is null or not Application*");
+    }
+    return app;
+}
+
+// ---------------------------------------------------------------------
+// SAFE: Get Renderer* from Application
+// ---------------------------------------------------------------------
+VulkanRTX::VulkanRenderer* PerspectiveCamera::getRenderer() const {
+    if (Application* app = getApp()) {
+        return app->renderer_.get();
+    }
+    return nullptr;
+}
 
 // ---------------------------------------------------------------------
 // Private: Recompute vectors
