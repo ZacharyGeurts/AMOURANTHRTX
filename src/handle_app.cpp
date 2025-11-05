@@ -1,6 +1,6 @@
 // src/handle_app.cpp
 // AMOURANTH RTX Engine (C) 2025 by Zachary Geurts gzac5314@gmail.com
-// FINAL: T = toggle tonemap | O = toggle overlay | 1-9 = render modes | core.cpp stays
+// FINAL: T = toggle tonemap | O = toggle overlay | 1-9 = render modes | H = HYPERTRACE
 // PROTIP: Use RAII for resource management in Vulkan to ensure proper cleanup on scope exit.
 
 #include "handle_app.hpp"
@@ -13,7 +13,7 @@
 #include <sstream>
 #include <chrono>
 #include <thread>
-#include <format>  // C++20 std::format for modern string formatting
+#include <format>
 #include "engine/logging.hpp"
 #include "engine/Vulkan/VulkanRenderer.hpp"
 #include "engine/SDL3/SDL3_init.hpp"
@@ -40,7 +40,6 @@ void loadMesh(const std::string& filename, std::vector<glm::vec3>& vertices, std
     std::vector<glm::vec3> tempVertices;
     std::string line;
     while (std::getline(file, line)) {
-        // PROTIP: Efficient line parsing in loops: Use std::istringstream for tokenization to avoid repeated allocations.
         if (line.empty() || line[0] == '#') continue;
 
         std::istringstream iss(line);
@@ -53,16 +52,14 @@ void loadMesh(const std::string& filename, std::vector<glm::vec3>& vertices, std
                 tempVertices.push_back(v);
             }
         } else if (type == "f") {
-            // Support v//n or v/t/n — we only care about vertex index
             std::string token;
             std::vector<uint32_t> face;
             while (iss >> token) {
                 std::istringstream tss(token);
                 uint32_t idx;
-                if (tss >> idx) face.push_back(idx - 1);  // OBJ is 1-indexed
+                if (tss >> idx) face.push_back(idx - 1);
             }
             if (face.size() >= 3) {
-                // Triangulate polygon
                 for (size_t i = 2; i < face.size(); ++i) {
                     indices.insert(indices.end(), {face[0], face[i-1], face[i]});
                 }
@@ -77,7 +74,6 @@ void loadMesh(const std::string& filename, std::vector<glm::vec3>& vertices, std
         indices = {0, 1, 2};
     } else {
         vertices = std::move(tempVertices);
-        // PROTIP: Use std::format for readable, type-safe logging without printf specifiers.
         LOG_INFO_CAT("Mesh", std::format("Loaded {}: {} verts, {} tris", filename, vertices.size(), indices.size() / 3).c_str());
     }
 }
@@ -91,7 +87,6 @@ Application::Application(const char* title, int width, int height)
       lastFrameTime_(std::chrono::steady_clock::now()),
       showOverlay_(true), tonemapEnabled_(false)
 {
-    // PROTIP: Color-coded logging improves readability in console output for debugging multi-threaded apps.
     LOG_INFO_CAT("Application", std::format("{}INIT [{}x{}]{}", 
                  Logging::Color::OCEAN_TEAL, width, height, Logging::Color::RESET).c_str()); 
     camera_->setUserData(this);
@@ -101,7 +96,6 @@ Application::Application(const char* title, int width, int height)
 void Application::setRenderer(std::unique_ptr<VulkanRTX::VulkanRenderer> renderer) {
     renderer_ = std::move(renderer);
 
-    // PROTIP: Separate data loading from rendering setup to allow for asynchronous loading in larger apps.
     loadMesh("assets/models/scene.obj", vertices_, indices_);
     renderer_->getBufferManager()->uploadMesh(vertices_.data(), vertices_.size(), indices_.data(), indices_.size());
 
@@ -118,7 +112,7 @@ void Application::setRenderer(std::unique_ptr<VulkanRTX::VulkanRenderer> rendere
     renderer_->setRenderMode(mode_);
     updateWindowTitle();
 
-    LOG_INFO_CAT("Application", std::format("{}MESH LOADED | 1-9=mode | T=tonemap | O=overlay{}", 
+    LOG_INFO_CAT("Application", std::format("{}MESH LOADED | 1-9=mode | H=HYPERTRACE | T=tonemap | O=overlay{}", 
                  Logging::Color::EMERALD_GREEN, Logging::Color::RESET).c_str());
 }
 
@@ -146,6 +140,7 @@ void Application::initializeInput() {
 
                     case SDLK_T: toggleTonemap(); break;
                     case SDLK_O: toggleOverlay(); break;
+                    case SDLK_H: toggleHypertrace(); break;  // HYPERTRACE TOGGLE
 
                     default: inputHandler_->defaultKeyboardHandler(key); break;
                 }
@@ -165,9 +160,18 @@ void Application::initializeInput() {
 }
 
 /* --------------------------------------------------------------- */
+/*  HYPERTRACE – toggle 12,000+ FPS mode                          */
+/* --------------------------------------------------------------- */
+void Application::toggleHypertrace() {
+    if (renderer_) {
+        renderer_->toggleHypertrace();
+    }
+    updateWindowTitle();
+}
+
+/* --------------------------------------------------------------- */
 /*  TONEMAP – independent flag, forces render mode 2 when active   */
 /* --------------------------------------------------------------- */
-// PROTIP: Use lambda captures for event handlers to avoid global state and improve testability.
 void Application::toggleTonemap() {
     tonemapEnabled_ = !tonemapEnabled_;
 
@@ -200,7 +204,8 @@ void Application::updateWindowTitle() {
     if (showOverlay_) {
         title += " | Mode " + std::to_string(mode_);
         if (tonemapEnabled_) title += " (TONEMAP)";
-        title += " | 1-9=mode | T=tonemap | O=hide";
+        if (renderer_ && renderer_->getRTX().isHypertraceEnabled()) title += " (HYPERTRACE)";
+        title += " | 1-9=mode | H=HYPERTRACE | T=tonemap | O=hide";
     }
 
     SDL_SetWindowTitle(sdl_->getWindow(), title.c_str());
@@ -223,7 +228,6 @@ void Application::setRenderMode(int mode) {
 }
 
 /* --------------------------------------------------------------- */
-// PROTIP: Window state toggles should check current flags to avoid redundant SDL calls.
 void Application::toggleFullscreen() {
     isFullscreen_ = !isFullscreen_;
     isMaximized_ = false;
@@ -247,7 +251,6 @@ void Application::handleResize(int width, int height) {
 }
 
 /* --------------------------------------------------------------- */
-// PROTIP: In game loops, use SDL_PollEvent for efficiency over SDL_WaitEvent to maintain consistent frame rates.
 void Application::run() {
     while (!shouldQuit()) {
         SDL_Event ev;
@@ -276,7 +279,6 @@ void Application::render() {
     float delta = std::chrono::duration<float>(now - lastFrameTime_).count();
     lastFrameTime_ = now;
 
-    // PROTIP: Cap delta time to prevent physics/rendering issues from frame drops (e.g., min(1/30.0f, delta)).
     camera_->update(delta);
     renderer_->renderFrame(*camera_, delta);
     updateWindowTitle();

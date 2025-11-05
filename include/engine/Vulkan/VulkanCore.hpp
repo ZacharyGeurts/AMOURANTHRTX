@@ -16,6 +16,7 @@
 //        NEW: Context owns swapchain creation/destruction
 //        FIXED: addFence() + fences_ for transient submits
 //        ADDED: VulkanRTX::Camera* camera = nullptr;  ← CRITICAL FOR renderModeX()
+//        FIXED: ~Context() → delete camera (leak prevention for raw ptr)
 
 #pragma once
 #ifndef VULKAN_CORE_HPP
@@ -558,6 +559,10 @@ struct Context {
     ~Context() {
         if (device) {
             vkDeviceWaitIdle(device);
+            if (camera) {
+                delete camera;  // FIXED: RAII delete raw ptr (leak prevention)
+                camera = nullptr;
+            }
             destroySwapchain();
             resourceManager.cleanup(device);
         }

@@ -3,6 +3,7 @@
 // FINAL: DECLARATIONS ONLY – NO DUPLICATES, NO PIPELINE LOGIC
 //        VulkanRTX class → owns RT state, uses VulkanPipelineManager
 //        All implementation → VulkanRTX_Setup.cpp
+//        ADDED: isHypertraceEnabled() → for UI title sync
 
 #pragma once
 
@@ -168,6 +169,11 @@ public:
     [[nodiscard]] VkAccelerationStructureKHR    getTLAS() const noexcept { return tlas_; }
 
     // -----------------------------------------------------------------------
+    //  HYPERTRACE RUNTIME STATE
+    // -----------------------------------------------------------------------
+    [[nodiscard]] bool isHypertraceEnabled() const noexcept { return hypertraceEnabled_; }
+
+    // -----------------------------------------------------------------------
     //  PIPELINE SETTER (called from VulkanRenderer after pipeline creation)
     // -----------------------------------------------------------------------
     void setRayTracingPipeline(VkPipeline pipeline, VkPipelineLayout layout) noexcept {
@@ -231,6 +237,9 @@ private:
     VkImage blackFallbackImage_ = VK_NULL_HANDLE;
     VkDeviceMemory blackFallbackMemory_ = VK_NULL_HANDLE;
     VkImageView blackFallbackView_ = VK_NULL_HANDLE;
+
+    // HYPERTRACE RUNTIME STATE
+    bool hypertraceEnabled_ = false;
 
     // -----------------------------------------------------------------------
     //  FUNCTION POINTERS

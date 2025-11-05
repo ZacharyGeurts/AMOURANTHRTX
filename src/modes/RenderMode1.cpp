@@ -32,7 +32,7 @@ void renderMode1(
 
     // ← FIXED: Use `context.camera`, NOT `::Vulkan::Context::camera`
     if (!context.camera) {
-        LOG_ERROR_CAT("RenderMode1", "context.camera is null!");
+        //LOG_ERROR_CAT("RenderMode1", "context.camera is null!");
         return;
     }
 

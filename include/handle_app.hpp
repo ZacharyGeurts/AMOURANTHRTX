@@ -1,6 +1,7 @@
 // handle_app.hpp
 // AMOURANTH RTX Engine (C) 2025 by Zachary Geurts gzac5314@gmail.com is licensed under CC BY-NC 4.0
-// FINAL: T = toggle tonemap | O = toggle overlay | 1-9 = render modes | On-screen title
+// FINAL: T = toggle tonemap | O = toggle overlay | 1-9 = render modes | H = HYPERTRACE
+// On-screen title reflects all active modes
 
 #pragma once
 #ifndef HANDLE_APP_HPP
@@ -43,6 +44,7 @@ public:
     // USER CONTROLS
     void toggleTonemap();      // T / t
     void toggleOverlay();      // O / o
+    void toggleHypertrace();  // H / h — 12,000+ FPS mode
 
     void setQuit(bool q) { quit_ = q; }
 

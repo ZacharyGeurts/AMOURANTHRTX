@@ -53,8 +53,7 @@ public:
     // 3 FRAMES IN FLIGHT — INDUSTRY STANDARD, BABY
     static constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 3;
 
-    // HYPERTRACE CONFIG — UNLEASH THE PHOTONS
-    static constexpr bool    HYPERTRACE_MODE              = true;   // FLIP TO FALSE FOR MORTALS
+    // HYPERTRACE CONFIG — RUNTIME TOGGLE (H key)
     static constexpr uint32_t HYPERTRACE_SKIP_FRAMES       = 16;     // Render every Nth frame
     static constexpr uint32_t HYPERTRACE_MICRO_DISPATCH_X  = 64;     // 64×64 micro-tiles
     static constexpr uint32_t HYPERTRACE_MICRO_DISPATCH_Y  = 64;
@@ -74,6 +73,9 @@ public:
     void renderFrame(const Camera& camera, float deltaTime);
     void handleResize(int newWidth, int newHeight);
     void setRenderMode(int mode);
+
+    /* ----- HYPERTRACE TOGGLE (H key) -------------------------------------- */
+    void toggleHypertrace();
 
     /* ----- getters -------------------------------------------------------- */
     [[nodiscard]] VulkanBufferManager* getBufferManager() const {
@@ -146,8 +148,9 @@ private:
     void updateDynamicRTDescriptor(uint32_t frame);
     void updateTonemapDescriptor(uint32_t imageIndex);
 
-    /* ----- HYPERTRACE STATE ----------------------------------------------- */
-    uint32_t hypertraceCounter_ = 0;  // Frame skip counter
+    /* ----- HYPERTRACE STATE (RUNTIME) ------------------------------------- */
+    bool     hypertraceEnabled_ = false;  // ← RUNTIME TOGGLE
+    uint32_t hypertraceCounter_ = 0;      // Frame skip counter
 
     /* ----- member variables ----------------------------------------------- */
     SDL_Window* window_;
