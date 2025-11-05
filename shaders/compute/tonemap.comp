@@ -1,0 +1,62 @@
+// assets/shaders/compute/tonemap.comp
+// AMOURANTH RTX Engine (C) 2025 by Zachary Geurts gzac5314@gmail.com
+// Licensed under CC BY-NC 4.0
+
+#version 460
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+#extension GL_EXT_buffer_reference2               : require
+#extension GL_EXT_scalar_block_layout             : require
+
+// ------------------------------------------------------------
+// 0. Layout & Bindings (matches VulkanPipelineManager.cpp)
+// ------------------------------------------------------------
+layout(set = 0, binding = 0, rgba32f) uniform image2D hdrImage;   // HDR accumulation buffer
+layout(set = 0, binding = 1, rgba8)   uniform image2D ldrImage;   // Swap-chain image (UNORM)
+
+layout(push_constant) uniform PushConstants {
+    uint   width;
+    uint   height;
+    float  exposure;
+    float  gamma;
+} pc;
+
+// ------------------------------------------------------------
+// 1. Tonemap Helpers
+// ------------------------------------------------------------
+vec3 reinhard(vec3 c) {
+    return c / (c + vec3(1.0));
+}
+
+vec3 aces(vec3 x) {
+    const float a = 2.51f;
+    const float b = 0.03f;
+    const float c = 2.43f;
+    const float d = 0.59f;
+    const float e = 0.14f;
+    return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
+}
+
+// ------------------------------------------------------------
+// 2. Main
+// ------------------------------------------------------------
+void main()
+{
+    const uvec2 pixel = gl_GlobalInvocationID.xy;
+    if (pixel.x >= pc.width || pixel.y >= pc.height) return;
+
+    // Load HDR
+    vec4 hdr = imageLoad(hdrImage, ivec2(pixel));
+
+    // Exposure
+    vec3 color = hdr.rgb * pc.exposure;
+
+    // Tonemap (ACES is default – comment to switch)
+    color = aces(color);
+    // color = reinhard(color);
+
+    // Gamma correction
+    color = pow(color, vec3(1.0 / pc.gamma));
+
+    // Store as UNORM (0-1) → matches VK_FORMAT_R8G8B8A8_UNORM
+    imageStore(ldrImage, ivec2(pixel), vec4(color, 1.0));
+}

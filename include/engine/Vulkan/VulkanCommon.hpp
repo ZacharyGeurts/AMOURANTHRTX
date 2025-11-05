@@ -12,12 +12,25 @@
 #include <compare>
 #include <filesystem>
 #include <unordered_map>
+#include <memory>
 #include "engine/camera.hpp"
 #include "engine/logging.hpp"
 
+
+#define VK_CHECK(result, msg) \
+    do { \
+        VkResult __r = (result); \
+        if (__r != VK_SUCCESS) { \
+            std::ostringstream __oss; \
+            __oss << "Vulkan error (" << static_cast<int>(__r) << "): " << (msg); \
+            LOG_ERROR_CAT("Vulkan", "{}", __oss.str()); \
+            throw VulkanRTXException(__oss.str()); \
+        } \
+    } while (0)
+
 namespace VulkanRTX {
-    class VulkanRenderer;
-}
+
+class VulkanRenderer;
 
 // ========================================================================
 // 0. Global Constants
@@ -25,29 +38,33 @@ namespace VulkanRTX {
 constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 3;
 
 // ========================================================================
-// 1. Strided Device Address Region – EXACT Vulkan spec order
+// 1. Strided Device Address Region
 // ========================================================================
 struct StridedDeviceAddressRegionKHR {
     VkDeviceAddress deviceAddress = 0;
-    VkDeviceSize    stride        = 0;  // 2nd field
-    VkDeviceSize    size          = 0;  // 3rd field
+    VkDeviceSize    stride        = 0;
+    VkDeviceSize    size          = 0;
 };
 
 // ========================================================================
-// 2. Shader Binding Table – DIRECT USE OF Vulkan type
+// 2. Shader Binding Table – FULL SUPPORT
 // ========================================================================
 struct ShaderBindingTable {
     VkStridedDeviceAddressRegionKHR raygen;
     VkStridedDeviceAddressRegionKHR miss;
     VkStridedDeviceAddressRegionKHR hit;
     VkStridedDeviceAddressRegionKHR callable;
+    VkStridedDeviceAddressRegionKHR anyHit;
+    VkStridedDeviceAddressRegionKHR shadowMiss;
+    VkStridedDeviceAddressRegionKHR shadowAnyHit;
+    VkStridedDeviceAddressRegionKHR intersection;
+    VkStridedDeviceAddressRegionKHR volumetricAnyHit;
+    VkStridedDeviceAddressRegionKHR midAnyHit;
 
-    // Helper: Create empty region (order: deviceAddress, stride, size)
     static VkStridedDeviceAddressRegionKHR emptyRegion() {
         return { .deviceAddress = 0, .stride = 0, .size = 0 };
     }
 
-    // Helper: Create region (order: deviceAddress, stride, size)
     static VkStridedDeviceAddressRegionKHR makeRegion(VkDeviceAddress base, VkDeviceSize size, VkDeviceSize stride) {
         return { .deviceAddress = base, .stride = stride, .size = size };
     }
@@ -67,7 +84,7 @@ struct Frame {
 };
 
 // ========================================================================
-// 4. MaterialData – SSBO (matches raygen.rgen)
+// 4. MaterialData
 // ========================================================================
 struct alignas(16) MaterialData {
     alignas(16) glm::vec4 diffuse   = glm::vec4(0.8f, 0.8f, 0.8f, 1.0f);
@@ -92,10 +109,10 @@ struct alignas(16) MaterialData {
 };
 
 static_assert(sizeof(MaterialData) == 48, "MaterialData must be 48 bytes");
-static_assert(sizeof(MaterialData::PushConstants) == 80, "PushConstants must be 80 bytes (96 with padding)");
+static_assert(sizeof(MaterialData::PushConstants) == 80, "PushConstants must be 80 bytes");
 
 // ========================================================================
-// 5. DimensionData – SSBO (screen size)
+// 5. DimensionData
 // ========================================================================
 struct alignas(16) DimensionData {
     uint32_t screenWidth  = 0;
@@ -106,7 +123,7 @@ struct alignas(16) DimensionData {
 static_assert(sizeof(DimensionData) == 16, "DimensionData must be 16 bytes");
 
 // ========================================================================
-// 6. UniformBufferObject – UBO (MUST BE 256 BYTES)
+// 6. UniformBufferObject
 // ========================================================================
 struct alignas(16) UniformBufferObject {
     alignas(16) glm::mat4 viewInverse;
@@ -119,7 +136,7 @@ struct alignas(16) UniformBufferObject {
 static_assert(sizeof(UniformBufferObject) == 256, "UBO must be 256 bytes");
 
 // ========================================================================
-// 7. DimensionState – CPU-side state
+// 7. DimensionState – CPU-side
 // ========================================================================
 struct DimensionState {
     int       dimension = 0;
@@ -137,7 +154,7 @@ struct DimensionState {
 };
 
 // ========================================================================
-// 8. Tonemap Push Constants (for compute shader)
+// 8. Tonemap Push Constants
 // ========================================================================
 struct alignas(16) TonemapPushConstants {
     uint32_t width  = 0;
@@ -148,94 +165,109 @@ struct alignas(16) TonemapPushConstants {
 static_assert(sizeof(TonemapPushConstants) == 16, "TonemapPushConstants must be 16 bytes");
 
 // ========================================================================
-// 9. Centralized Shader Paths (UPDATED)
+// 9. Shader Paths — ALL SHADERS LOADED
 // ========================================================================
-namespace VulkanRTX {
-    inline std::unordered_map<std::string, std::string> getShaderBinPaths() {
-        return {
-            {"raygen",          "assets/shaders/raytracing/raygen.spv"},
-            {"miss",            "assets/shaders/raytracing/miss.spv"},
-            {"closesthit",      "assets/shaders/raytracing/closesthit.spv"},
-            {"tonemap_compute", "assets/shaders/compute/tonemap.spv"},   // NEW
-            {"tonemap_vert",    "assets/shaders/graphics/tonemap_vert.spv"},
-            {"tonemap_frag",    "assets/shaders/graphics/tonemap_frag.spv"}
-        };
-    }
+inline std::unordered_map<std::string, std::string> getShaderBinPaths() {
+    return {
+        {"raygen",              "assets/shaders/raytracing/raygen.spv"},
+        {"miss",                "assets/shaders/raytracing/miss.spv"},
+        {"closesthit",          "assets/shaders/raytracing/closesthit.spv"},
+        {"anyhit",              "assets/shaders/raytracing/anyhit.spv"},
+        {"callable",            "assets/shaders/raytracing/callable.spv"},
+        {"intersection",        "assets/shaders/raytracing/intersection.spv"},
+        {"shadow_anyhit",       "assets/shaders/raytracing/shadow_anyhit.spv"},
+        {"shadowmiss",          "assets/shaders/raytracing/shadowmiss.spv"},
+        {"volumetric_anyhit",   "assets/shaders/raytracing/volumetric_anyhit.spv"},
+        {"mid_anyhit",          "assets/shaders/raytracing/mid_anyhit.spv"},
+        {"tonemap_compute",     "assets/shaders/compute/tonemap.spv"},
+        {"tonemap_vert",        "assets/shaders/graphics/tonemap_vert.spv"},
+        {"tonemap_frag",        "assets/shaders/graphics/tonemap_frag.spv"}
+    };
+}
 
-    inline std::unordered_map<std::string, std::string> getShaderSrcPaths() {
-        return {
-            {"raygen",          "assets/shaders/raytracing/raygen.rgen"},
-            {"miss",            "assets/shaders/raytracing/miss.rmiss"},
-            {"closesthit",      "assets/shaders/raytracing/closesthit.rchit"},
-            {"tonemap_compute", "assets/shaders/compute/tonemap.comp"},   // NEW
-            {"tonemap_vert",    "assets/shaders/graphics/tonemap_vert.glsl"},
-            {"tonemap_frag",    "assets/shaders/graphics/tonemap_frag.glsl"}
-        };
-    }
+inline std::unordered_map<std::string, std::string> getShaderSrcPaths() {
+    return {
+        {"raygen",              "assets/shaders/raytracing/raygen.rgen"},
+        {"miss",                "assets/shaders/raytracing/miss.rmiss"},
+        {"closesthit",          "assets/shaders/raytracing/closesthit.rchit"},
+        {"anyhit",              "assets/shaders/raytracing/anyhit.rahit"},
+        {"callable",            "assets/shaders/raytracing/callable.rcall"},
+        {"intersection",        "assets/shaders/raytracing/intersection.rint"},
+        {"shadow_anyhit",       "assets/shaders/raytracing/shadow_anyhit.rahit"},
+        {"shadowmiss",          "assets/shaders/raytracing/shadowmiss.rmiss"},
+        {"volumetric_anyhit",   "assets/shaders/raytracing/volumetric_anyhit.rahit"},
+        {"mid_anyhit",          "assets/shaders/raytracing/mid_anyhit.rahit"},
+        {"tonemap_compute",     "assets/shaders/compute/tonemap.comp"},
+        {"tonemap_vert",        "assets/shaders/graphics/tonemap_vert.glsl"},
+        {"tonemap_frag",        "assets/shaders/graphics/tonemap_frag.glsl"}
+    };
+}
 
-    inline std::vector<std::string> getRayTracingBinPaths() {
-        auto binPaths = getShaderBinPaths();
-        return {
-            binPaths.at("raygen"),
-            binPaths.at("closesthit"),
-            binPaths.at("miss")
-        };
-    }
+inline std::vector<std::string> getRayTracingBinPaths() {
+    auto binPaths = getShaderBinPaths();
+    return {
+        binPaths.at("raygen"),
+        binPaths.at("miss"),
+        binPaths.at("closesthit"),
+        binPaths.at("anyhit"),
+        binPaths.at("callable"),
+        binPaths.at("intersection"),
+        binPaths.at("shadow_anyhit"),
+        binPaths.at("shadowmiss"),
+        binPaths.at("volumetric_anyhit"),
+        binPaths.at("mid_anyhit")
+    };
 }
 
 // ========================================================================
-// 10. Helper: resolve a logical shader name to a real file on disk
+// 10. findShaderPath
 // ========================================================================
-namespace VulkanRTX {
-    inline std::string findShaderPath(const std::string& logicalName) {
-        using namespace Logging::Color;
-        LOG_DEBUG_CAT("Vulkan", ">>> RESOLVING SHADER '{}'", logicalName);
+inline std::string findShaderPath(const std::string& logicalName) {
+    using namespace Logging::Color;
+    LOG_DEBUG_CAT("Vulkan", ">>> RESOLVING SHADER '{}'", logicalName);
 
-        auto binPaths = getShaderBinPaths();
-        auto binIt = binPaths.find(logicalName);
-        if (binIt == binPaths.end()) {
-            LOG_ERROR_CAT("Vulkan", "  --> UNKNOWN SHADER NAME '{}'", logicalName);
-            throw std::runtime_error("Unknown shader name: " + logicalName);
-        }
-        std::filesystem::path binPath = std::filesystem::current_path() / binIt->second;
-        if (std::filesystem::exists(binPath)) {
-            LOG_DEBUG_CAT("Vulkan", "  --> FOUND IN BIN: {}", binPath.string());
-            return binPath.string();
-        }
-
-        auto srcPaths = getShaderSrcPaths();
-        auto srcIt = srcPaths.find(logicalName);
-        if (srcIt == srcPaths.end()) {
-            LOG_ERROR_CAT("Vulkan", "  --> NO SOURCE-TREE ENTRY FOR '{}'", logicalName);
-            throw std::runtime_error("Unknown shader name: " + logicalName);
-        }
-        const auto projectRoot = std::filesystem::current_path()
-            .parent_path().parent_path().parent_path();
-        const std::filesystem::path srcPath = projectRoot / srcIt->second;
-
-        if (std::filesystem::exists(srcPath)) {
-            LOG_DEBUG_CAT("Vulkan", "  --> FOUND IN SRC: {}", srcPath.string());
-            return srcPath.string();
-        }
-
-        LOG_ERROR_CAT("Vulkan",
-                      "  --> SHADER NOT FOUND!\n"
-                      "      BIN: {}\n"
-                      "      SRC: {}", binPath.string(), srcPath.string());
-
-        throw std::runtime_error("Shader file missing: " + logicalName);
+    auto binPaths = getShaderBinPaths();
+    auto binIt = binPaths.find(logicalName);
+    if (binIt == binPaths.end()) {
+        LOG_ERROR_CAT("Vulkan", "  --> UNKNOWN SHADER NAME '{}'", logicalName);
+        throw std::runtime_error("Unknown shader name: " + logicalName);
     }
+    std::filesystem::path binPath = std::filesystem::current_path() / binIt->second;
+    if (std::filesystem::exists(binPath)) {
+        LOG_DEBUG_CAT("Vulkan", "  --> FOUND IN BIN: {}", binPath.string());
+        return binPath.string();
+    }
+
+    auto srcPaths = getShaderSrcPaths();
+    auto srcIt = srcPaths.find(logicalName);
+    if (srcIt == srcPaths.end()) {
+        LOG_ERROR_CAT("Vulkan", "  --> NO SOURCE-TREE ENTRY FOR '{}'", logicalName);
+        throw std::runtime_error("Unknown shader name: " + logicalName);
+    }
+    const auto projectRoot = std::filesystem::current_path().parent_path().parent_path().parent_path();
+    const std::filesystem::path srcPath = projectRoot / srcIt->second;
+
+    if (std::filesystem::exists(srcPath)) {
+        LOG_DEBUG_CAT("Vulkan", "  --> FOUND IN SRC: {}", srcPath.string());
+        return srcPath.string();
+    }
+
+    LOG_ERROR_CAT("Vulkan",
+                  "  --> SHADER NOT FOUND!\n"
+                  "      BIN: {}\n"
+                  "      SRC: {}", binPath.string(), srcPath.string());
+
+    throw std::runtime_error("Shader file missing: " + logicalName);
 }
 
 // ========================================================================
 // 11. AMOURANTH – camera + demo controller
 // ========================================================================
-class AMOURANTH : public VulkanRTX::Camera {
+class AMOURANTH : public Camera {
 public:
-    explicit AMOURANTH(VulkanRTX::VulkanRenderer* renderer, int width, int height);
+    explicit AMOURANTH(VulkanRenderer* renderer, int width, int height);
     ~AMOURANTH() override;
 
-    // --- Required pure virtual overrides from Camera ---
     glm::mat4 getViewMatrix() const override;
     glm::mat4 getProjectionMatrix() const override;
     int       getMode() const override;
@@ -261,7 +293,6 @@ public:
     void      setUserData(void* data) override;
     void*     getUserData() const override;
 
-    // --- Custom AMOURANTH methods ---
     void setCurrentDimension(int dim);
     void adjustScale(float delta);
     void updateDimensionBuffer(VkDevice device, uint32_t currentFrame);
@@ -276,9 +307,15 @@ public:
     const VkStridedDeviceAddressRegionKHR& getMissSBT() const     { return missSBT_; }
     const VkStridedDeviceAddressRegionKHR& getHitSBT() const      { return hitSBT_; }
     const VkStridedDeviceAddressRegionKHR& getCallableSBT() const { return callableSBT_; }
+    const VkStridedDeviceAddressRegionKHR& getAnyHitSBT() const   { return anyHitSBT_; }
+    const VkStridedDeviceAddressRegionKHR& getShadowMissSBT() const { return shadowMissSBT_; }
+    const VkStridedDeviceAddressRegionKHR& getShadowAnyHitSBT() const { return shadowAnyHitSBT_; }
+    const VkStridedDeviceAddressRegionKHR& getIntersectionSBT() const { return intersectionSBT_; }
+    const VkStridedDeviceAddressRegionKHR& getVolumetricAnyHitSBT() const { return volumetricAnyHitSBT_; }
+    const VkStridedDeviceAddressRegionKHR& getMidAnyHitSBT() const { return midAnyHitSBT_; }
 
 private:
-    VulkanRTX::VulkanRenderer* renderer_;
+    VulkanRenderer* renderer_;
     int width_, height_;
 
     int   mode_ = 0;
@@ -306,25 +343,31 @@ private:
     VkStridedDeviceAddressRegionKHR missSBT_     = {};
     VkStridedDeviceAddressRegionKHR hitSBT_      = {};
     VkStridedDeviceAddressRegionKHR callableSBT_ = {};
+    VkStridedDeviceAddressRegionKHR anyHitSBT_   = {};
+    VkStridedDeviceAddressRegionKHR shadowMissSBT_ = {};
+    VkStridedDeviceAddressRegionKHR shadowAnyHitSBT_ = {};
+    VkStridedDeviceAddressRegionKHR intersectionSBT_ = {};
+    VkStridedDeviceAddressRegionKHR volumetricAnyHitSBT_ = {};
+    VkStridedDeviceAddressRegionKHR midAnyHitSBT_ = {};
 
     void updateCameraVectors();
     void createDimensionBuffer(VkDevice device);
 };
 
+} // namespace VulkanRTX
+
 // ========================================================================
-// 12. std::formatter for AMOURANTH (pretty logging)
+// 12. std::formatter for AMOURANTH — OUTSIDE VulkanRTX
 // ========================================================================
-namespace std {
 template<>
-struct formatter<AMOURANTH, char> {
-    constexpr auto parse(format_parse_context& ctx) { return ctx.begin(); }
+struct std::formatter<VulkanRTX::AMOURANTH, char> {
+    constexpr auto parse(std::format_parse_context& ctx) { return ctx.begin(); }
     template<typename FormatContext>
-    auto format(const AMOURANTH& cam, FormatContext& ctx) const {
-        return format_to(ctx.out(),
-                         "AMOURANTH(dim={}, mode={}, scale={:.2f}, paused={}, pos=({:.2f},{:.2f},{:.2f}))",
-                         cam.getCurrentDimension(), cam.getMode(),
-                         cam.getScale(), cam.isPaused(),
-                         cam.getPosition().x, cam.getPosition().y, cam.getPosition().z);
+    auto format(const VulkanRTX::AMOURANTH& cam, FormatContext& ctx) const {
+        return std::format_to(ctx.out(),
+                              "AMOURANTH(dim={}, mode={}, scale={:.2f}, paused={}, pos=({:.2f},{:.2f},{:.2f}))",
+                              cam.getCurrentDimension(), cam.getMode(),
+                              cam.getScale(), cam.isPaused(),
+                              cam.getPosition().x, cam.getPosition().y, cam.getPosition().z);
     }
 };
-} // VULKAN_COMMON_HPP

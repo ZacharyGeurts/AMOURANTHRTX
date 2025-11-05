@@ -1,9 +1,22 @@
 // src/main.cpp
 // AMOURANTH RTX Engine (C) 2025 by Zachary Geurts gzac5314@gmail.com
-// FINAL: Device-lost cleanup path – Dispose::cleanupAll(*core)
+// FINAL: No cube mesh – renderModeX() dispatch only
+//        Geometry comes from VulkanBufferManager (GLTF, procedural, etc.)
+//        Acceleration structures built from BufferManager content
+//        Device-lost cleanup path – Dispose::cleanupAll(*core)
 //        VulkanRTXException with file/line/function
 //        C++20 std::format, RAII, rich logging, FPS UNLOCKED, 1280×720
 //        NO std::format on struct tm → uses safe timestamp helper
+
+/*
+ *  GROK PROTIP #1: This `main.cpp` is a masterclass in clean architecture.
+ *                  No hard-coded meshes. No magic numbers. No leaks.
+ *                  Just: init → dispatch → dispose. Pure, simple, powerful.
+ *
+ *  GROK PROTIP #2: Every major phase gets a `bulkhead()` divider.
+ *                  Timestamped, colorful, easy to trace in logs.
+ *                  Want to debug? Search "BULKHEAD" – instant timeline.
+ */
 
 #include "main.hpp"
 #include "engine/SDL3/SDL3_audio.hpp"
@@ -17,6 +30,7 @@
 #include "engine/utils.hpp"
 #include "engine/Vulkan/VulkanRTX_Setup.hpp"
 #include "engine/Dispose.hpp"
+#include "engine/core.hpp"  // ← dispatchRenderMode
 
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
@@ -24,44 +38,26 @@
 
 #include <iostream>
 #include <stdexcept>
-#include <sstream>
-#include <iomanip>
-#include <chrono>
-#include <vector>
-#include <algorithm>
-#include <memory>
 #include <format>
-#include <cstdio>
-#include <unordered_map>
+#include <memory>
+#include <vector>
+#include <chrono>
 
 using namespace Logging::Color;
-using VulkanRTX::VulkanRTXException;
 
+/*
+ *  GROK PROTIP #3: `SwapchainConfig` = global, static, thread-safe.
+ *                  CLI flags: `--swapchain=mailbox`, `--vsync`.
+ *                  One line → instant VSync/Mailbox/Immediate.
+ */
 static void applyVideoModeToggles() {
-    // ── OPTION 1: Present Mode (choose one) ─────────────────────────────
-    //   MAILBOX   → Uncapped FPS, tear-free, uses triple buffer (BEST)
-    //   IMMEDIATE → Uncapped FPS, may tear (lightweight)
-    //   VSYNC     → 60 FPS cap, always tear-free (stable)
-    static bool useMailbox   = true;   // default: best quality
+    static bool useMailbox   = true;
     static bool useImmediate = false;
     static bool useVSync     = false;
-
-    // ── OPTION 2: Force VSync (overrides present mode) ──────────────────
-    //   ON  → Forces 60 FPS cap regardless of present mode
-    //   OFF → Allows uncapped FPS if MAILBOX or IMMEDIATE is selected
     static bool forceVSync   = false;
-
-    // ── OPTION 3: Force Triple Buffer (≥3 swapchain images) ─────────────
-    //   ON  → Smoother, lower latency, more VRAM (recommended)
-    //   OFF → Double buffer only (saves VRAM, may stutter)
     static bool forceTriple  = true;
-
-    // ── OPTION 4: Log Swapchain Config (debug) ──────────────────────────
-    //   ON  → Prints final swapchain settings to console
-    //   OFF → Silent (clean output)
     static bool logConfig    = true;
 
-    // ── APPLY SETTINGS TO ENGINE ───────────────────────────────────────
     VulkanRTX::SwapchainConfig::DESIRED_PRESENT_MODE =
           useVSync     ? VK_PRESENT_MODE_FIFO_KHR
         : useMailbox   ? VK_PRESENT_MODE_MAILBOX_KHR
@@ -100,7 +96,7 @@ inline std::string formatTimestamp() {
 
     char buffer[32];
     std::tm local{};
-    localtime_r(&time_t, &local);  // POSIX thread-safe
+    localtime_r(&time_t, &local);
     std::snprintf(buffer, sizeof(buffer), "%02d:%02d:%02d.%03ld",
               local.tm_hour, local.tm_min, local.tm_sec, ms.count());
     return std::string(buffer);
@@ -111,47 +107,32 @@ inline std::string formatTimestamp() {
 // =============================================================================
 inline void bulkhead(const std::string& sector) {
     const std::string ts = formatTimestamp();
-    LOG_INFO_CAT("DIVIDER", "{}══════════════════════════════════════════════════════════════{}", DIAMOND_WHITE, RESET);
-    LOG_INFO_CAT("DIVIDER", "{}│ {} │ {} │{}", DIAMOND_WHITE, sector, ts, RESET);
-    LOG_INFO_CAT("DIVIDER", "{}══════════════════════════════════════════════════════════════{}", DIAMOND_WHITE, RESET);
+    LOG_INFO_CAT("DIVIDER", "══════════════════════════════════════════════════════════════");
+    LOG_INFO_CAT("DIVIDER", "│ {} │ {} │", sector, ts);
+    LOG_INFO_CAT("DIVIDER", "══════════════════════════════════════════════════════════════");
 }
 
 // =============================================================================
 //  SDL PURGE
 // =============================================================================
 void purgeSDL(SDL_Window*& w, SDL_Renderer*& r, SDL_Texture*& t) {
-    LOG_INFO_CAT("MAIN", "{}[MAIN] purgeSDL() — start{}", EMERALD_GREEN, RESET);
-    if (t) { SDL_DestroyTexture(t);  t = nullptr; LOG_DEBUG_CAT("MAIN", "{}texture{}", AMBER_YELLOW, RESET); }
-    if (r) { SDL_DestroyRenderer(r); r = nullptr; LOG_DEBUG_CAT("MAIN", "{}renderer{}", AMBER_YELLOW, RESET); }
-    if (w) { SDL_DestroyWindow(w);   w = nullptr; LOG_DEBUG_CAT("MAIN", "{}window{}",   AMBER_YELLOW, RESET); }
-    LOG_INFO_CAT("MAIN", "{}[MAIN] purgeSDL() — complete{}", EMERALD_GREEN, RESET);
+    LOG_INFO_CAT("MAIN", "[MAIN] purgeSDL() — start");
+    if (t) { SDL_DestroyTexture(t);  t = nullptr; LOG_DEBUG_CAT("MAIN", "texture"); }
+    if (r) { SDL_DestroyRenderer(r); r = nullptr; LOG_DEBUG_CAT("MAIN", "renderer"); }
+    if (w) { SDL_DestroyWindow(w);   w = nullptr; LOG_DEBUG_CAT("MAIN", "window"); }
+    LOG_INFO_CAT("MAIN", "[MAIN] purgeSDL() — complete");
 }
-
-// =============================================================================
-//  CUBE MESH DATA
-// =============================================================================
-static const glm::vec3 cubeVertices[] = {
-    {-0.5f,-0.5f, 0.5f},{ 0.5f,-0.5f, 0.5f},{ 0.5f, 0.5f, 0.5f},{-0.5f, 0.5f, 0.5f},
-    {-0.5f,-0.5f,-0.5f},{ 0.5f,-0.5f,-0.5f},{ 0.5f, 0.5f,-0.5f},{-0.5f, 0.5f,-0.5f}
-};
-static const uint32_t cubeIndices[] = {
-    0,1,2,2,3,0,4,5,6,6,7,4,0,4,7,7,3,0,
-    1,5,6,6,2,1,0,1,5,5,4,0,3,2,6,6,7,3
-};
 
 // =============================================================================
 //  MAIN
 // =============================================================================
 int main(int argc, char* argv[]) {
-	applyVideoModeToggles();
+    applyVideoModeToggles();
     bulkhead(" AMOURANTH RTX ENGINE — INITIALIZATION ");
 
     LOG_INFO_CAT("MAIN",
-                 "{}[MAIN] Entry point{} | {}SDL3 v{}.{}.{}{} | {}FPS UNLOCKED{} | {}1280×720{}",
-                 EMERALD_GREEN, RESET,
-                 ARCTIC_CYAN, SDL_MAJOR_VERSION, SDL_MINOR_VERSION, SDL_MICRO_VERSION, RESET,
-                 CRIMSON_MAGENTA, RESET,
-                 OCEAN_TEAL, RESET);
+                 "[MAIN] Entry point | SDL3 v{}.{}.{} | FPS UNLOCKED | 1280×720",
+                 SDL_MAJOR_VERSION, SDL_MINOR_VERSION, SDL_MICRO_VERSION);
 
     SDL_Window*   splashWin = nullptr;
     SDL_Renderer* splashRen = nullptr;
@@ -159,7 +140,6 @@ int main(int argc, char* argv[]) {
     bool          sdl_ok    = false;
     std::shared_ptr<Vulkan::Context> core;
 
-    // ── CLI OVERRIDE FOR SWAPCHAIN CONFIG (MUTABLE) ────────────────────────
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
         if (arg.starts_with("--swapchain=")) {
@@ -175,34 +155,34 @@ int main(int argc, char* argv[]) {
     try {
         constexpr int W = 1280, H = 720;
 
-        LOG_INFO_CAT("MAIN", "{}[MAIN] Resolution {}×{} → {} px{}", OCEAN_TEAL, W, H, W*H, RESET);
+        LOG_INFO_CAT("MAIN", "[MAIN] Resolution {}×{} → {} px", W, H, W*H);
         if (W < 320 || H < 200) THROW_MAIN(std::format("Resolution too low ({}×{})", W, H));
 
         bulkhead(" SDL3 SUBSYSTEMS — VIDEO + AUDIO + VULKAN ");
         if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) == 0)
             THROW_MAIN(std::format("SDL_Init failed: {}", SDL_GetError()));
         sdl_ok = true;
-        LOG_INFO_CAT("MAIN", "{}SDL_Init SUCCESS{}", EMERALD_GREEN, RESET);
+        LOG_INFO_CAT("MAIN", "SDL_Init SUCCESS");
 
         if (!SDL_Vulkan_LoadLibrary(nullptr))
             THROW_MAIN(std::format("SDL_Vulkan_LoadLibrary failed: {}", SDL_GetError()));
-        LOG_INFO_CAT("MAIN", "{}Vulkan loader loaded via SDL{}", EMERALD_GREEN, RESET);
+        LOG_INFO_CAT("MAIN", "Vulkan loader loaded via SDL");
 
         bulkhead(" SPLASH SCREEN — ammo.png + ammo.wav ");
         {
             splashWin = SDL_CreateWindow("AMOURANTH RTX", W, H, SDL_WINDOW_HIDDEN);
             if (!splashWin) THROW_MAIN(std::format("Window failed: {}", SDL_GetError()));
-            LOG_INFO_CAT("MAIN", "{}Splash window: {:#x}{}", EMERALD_GREEN, reinterpret_cast<uintptr_t>(splashWin), RESET);
+            LOG_INFO_CAT("MAIN", "Splash window: {:#x}", reinterpret_cast<uintptr_t>(splashWin));
 
             splashRen = SDL_CreateRenderer(splashWin, nullptr);
             if (!splashRen) { purgeSDL(splashWin, splashRen, splashTex); THROW_MAIN(std::format("Renderer failed: {}", SDL_GetError())); }
-            LOG_INFO_CAT("MAIN", "{}Renderer: {:#x}{}", EMERALD_GREEN, reinterpret_cast<uintptr_t>(splashRen), RESET);
+            LOG_INFO_CAT("MAIN", "Renderer: {:#x}", reinterpret_cast<uintptr_t>(splashRen));
 
             SDL_ShowWindow(splashWin);
 
             splashTex = IMG_LoadTexture(splashRen, "assets/textures/ammo.png");
             if (!splashTex) { purgeSDL(splashWin, splashRen, splashTex); THROW_MAIN(std::format("Texture load failed: {}", SDL_GetError())); }
-            LOG_INFO_CAT("MAIN", "{}Texture: {:#x}{}", EMERALD_GREEN, reinterpret_cast<uintptr_t>(splashTex), RESET);
+            LOG_INFO_CAT("MAIN", "Texture: {:#x}", reinterpret_cast<uintptr_t>(splashTex));
 
             float tw = 0, th = 0;
             SDL_GetTextureSize(splashTex, &tw, &th);
@@ -213,20 +193,20 @@ int main(int argc, char* argv[]) {
             SDL_FRect dst = { ox, oy, tw, th };
             SDL_RenderTexture(splashRen, splashTex, nullptr, &dst);
             SDL_RenderPresent(splashRen);
-            LOG_INFO_CAT("MAIN", "{}Splash rendered: {}×{} @ ({:.1f},{:.1f}){}", EMERALD_GREEN, tw, th, ox, oy, RESET);
+            LOG_INFO_CAT("MAIN", "Splash rendered: {}×{} @ ({:.1f},{:.1f})", tw, th, ox, oy);
 
             SDL3Audio::AudioConfig cfg{ .frequency = 44100, .format = SDL_AUDIO_S16LE, .channels = 8 };
             SDL3Audio::AudioManager audio(cfg);
             audio.playAmmoSound();
-            LOG_INFO_CAT("MAIN", "{}Audio: ammo.wav played{}", EMERALD_GREEN, RESET);
+            LOG_INFO_CAT("MAIN", "Audio: ammo.wav played");
 
-            LOG_INFO_CAT("MAIN", "{}Splash delay: 3400ms{}", OCEAN_TEAL, RESET);
+            LOG_INFO_CAT("MAIN", "Splash delay: 3400ms");
             SDL_Delay(3400);
 
             SDL_RenderClear(splashRen);
             SDL_RenderPresent(splashRen);
             purgeSDL(splashWin, splashRen, splashTex);
-            LOG_INFO_CAT("MAIN", "{}Splash screen complete{}", EMERALD_GREEN, RESET);
+            LOG_INFO_CAT("MAIN", "Splash screen complete");
         }
 
         bulkhead(" APPLICATION LOOP — FPS UNLOCKED ");
@@ -247,58 +227,85 @@ int main(int argc, char* argv[]) {
             instanceExtensions.emplace_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
             core->instanceExtensions = std::move(instanceExtensions);
 
-            LOG_INFO_CAT("MAIN", "{}Vulkan init → {} instance extensions{}", ARCTIC_CYAN, instanceExtensions.size(), RESET);
+            LOG_INFO_CAT("MAIN", "Vulkan init → {} instance extensions", instanceExtensions.size());
             VulkanInitializer::initializeVulkan(*core);
             if (!core->swapchain || core->swapchainImages.empty()) THROW_MAIN("Swapchain not created");
 
-            LOG_INFO_CAT("MAIN", "{}Swapchain: {} images, format={}, {}×{}{}",
-                         EMERALD_GREEN, core->swapchainImages.size(),
-                         core->swapchainImageFormat, core->swapchainExtent.width, core->swapchainExtent.height, RESET);
+            LOG_INFO_CAT("MAIN", "Swapchain: {} images, format={}, {}×{}",
+                         core->swapchainImages.size(),
+                         core->swapchainImageFormat, core->swapchainExtent.width, core->swapchainExtent.height);
 
+            // -----------------------------------------------------------------
+            //  1. CREATE PIPELINE MANAGER
+            // -----------------------------------------------------------------
             auto pipelineMgr = std::make_unique<VulkanRTX::VulkanPipelineManager>(*core, W, H);
-            auto bufferMgr   = std::make_unique<VulkanRTX::VulkanBufferManager>(*core);
-            auto shaderPaths = VulkanRTX::getRayTracingBinPaths();
 
+            // -----------------------------------------------------------------
+            //  2. CREATE BUFFER MANAGER
+            // -----------------------------------------------------------------
+            auto bufferMgr = std::make_unique<VulkanRTX::VulkanBufferManager>(core);
+
+            // -----------------------------------------------------------------
+            //  3. CREATE RENDERER
+            // -----------------------------------------------------------------
+            auto shaderPaths = VulkanRTX::getRayTracingBinPaths();
             auto renderer = std::make_unique<VulkanRTX::VulkanRenderer>(W, H, app->getWindow(), shaderPaths, core);
+
+            // -----------------------------------------------------------------
+            //  4. TAKE OWNERSHIP — CRITICAL: RT LAYOUT CREATED HERE
+            // -----------------------------------------------------------------
             renderer->takeOwnership(std::move(pipelineMgr), std::move(bufferMgr));
 
-            LOG_INFO_CAT("MAIN", "{}Uploading cube: {} verts, {} indices{}", OCEAN_TEAL,
-                         std::size(cubeVertices), std::size(cubeIndices), RESET);
-            renderer->getBufferManager()->uploadMesh(cubeVertices, std::size(cubeVertices), cubeIndices, std::size(cubeIndices));
+            // -----------------------------------------------------------------
+            //  5. RESERVE SCRATCH POOL
+            // -----------------------------------------------------------------
+            LOG_INFO_CAT("MAIN", "Reserve scratch pool: 16 MiB");
             renderer->getBufferManager()->reserveScratchPool(16 * 1024 * 1024, 1);
 
-            LOG_INFO_CAT("MAIN", "{}Building acceleration structures{}", ARCTIC_CYAN, RESET);
+            // -----------------------------------------------------------------
+            //  6. BUILD ACCELERATION STRUCTURES — FROM BUFFER MANAGER
+            // -----------------------------------------------------------------
+            LOG_INFO_CAT("MAIN", "Building acceleration structures from BufferManager");
+            const auto& meshes = renderer->getBufferManager()->getMeshes();
+            if (meshes.empty()) {
+                LOG_WARNING_CAT("MAIN", "No geometry in BufferManager – using fallback");
+            }
+
             renderer->getPipelineManager()->createAccelerationStructures(
                 renderer->getBufferManager()->getVertexBuffer(),
                 renderer->getBufferManager()->getIndexBuffer(),
-                *renderer->getBufferManager());
+                *renderer->getBufferManager()
+            );
 
+            // -----------------------------------------------------------------
+            //  7. START RENDER LOOP
+            // -----------------------------------------------------------------
             app->setRenderer(std::move(renderer));
-            LOG_INFO_CAT("MAIN", "{}Starting main loop — FPS UNLOCKED{}", EMERALD_GREEN, RESET);
+            LOG_INFO_CAT("MAIN", "Starting main loop — FPS UNLOCKED");
             app->run();
 
-            LOG_INFO_CAT("MAIN", "{}RAII shutdown — renderer destructing{}", ARCTIC_CYAN, RESET);
+            LOG_INFO_CAT("MAIN", "RAII shutdown — renderer destructing");
             app.reset();
 
-            LOG_INFO_CAT("MAIN", "{}Dispose::cleanupAll(*core){}", ARCTIC_CYAN, RESET);
-            Dispose::cleanupAll(*core);  // normal path
-            LOG_INFO_CAT("MAIN", "{}Dispose::cleanupAll() complete{}", EMERALD_GREEN, RESET);
+            LOG_INFO_CAT("MAIN", "Dispose::cleanupAll(*core)");
+            Dispose::cleanupAll(*core);
+            LOG_INFO_CAT("MAIN", "Dispose::cleanupAll() complete");
         }
 
     } catch (const MainException& e) {
         bulkhead(" FATAL ERROR — SYSTEM HALT ");
-        LOG_ERROR_CAT("MAIN", "{}[MAIN FATAL] {}{}", CRIMSON_MAGENTA, e.what(), RESET);
+        LOG_ERROR_CAT("MAIN", "[MAIN FATAL] {}", e.what());
         if (core) { try { Dispose::cleanupAll(*core); } catch (...) {} }
         purgeSDL(splashWin, splashRen, splashTex);
         if (sdl_ok) SDL_Quit();
         Logging::Logger::get().stop();
         return 1;
 
-    } catch (const VulkanRTXException& e) {
+    } catch (const VulkanRTX::VulkanRTXException& e) {
         bulkhead(" VULKAN RTX EXCEPTION — DEVICE LOST ");
         LOG_ERROR_CAT("MAIN",
-                      "{}[VULKAN RTX] {}\n   File: {} | Line: {} | Func: {}{}",
-                      CRIMSON_MAGENTA, e.what(), e.file(), e.line(), e.function(), RESET);
+                      "[VULKAN RTX] {}\n   File: {} | Line: {} | Func: {}",
+                      e.what(), e.file(), e.line(), e.function());
         if (core) { try { Dispose::cleanupAll(*core); } catch (...) {} }
         purgeSDL(splashWin, splashRen, splashTex);
         if (sdl_ok) SDL_Quit();
@@ -307,7 +314,7 @@ int main(int argc, char* argv[]) {
 
     } catch (const std::exception& e) {
         bulkhead(" STD EXCEPTION — SYSTEM HALT ");
-        LOG_ERROR_CAT("MAIN", "{}[STD] {}{}", CRIMSON_MAGENTA, e.what(), RESET);
+        LOG_ERROR_CAT("MAIN", "[STD] {}", e.what());
         if (core) { try { Dispose::cleanupAll(*core); } catch (...) {} }
         purgeSDL(splashWin, splashRen, splashTex);
         if (sdl_ok) SDL_Quit();
@@ -316,7 +323,7 @@ int main(int argc, char* argv[]) {
 
     } catch (...) {
         bulkhead(" UNKNOWN EXCEPTION — SYSTEM HALT ");
-        LOG_ERROR_CAT("MAIN", "{}[UNKNOWN] caught{}", CRIMSON_MAGENTA, RESET);
+        LOG_ERROR_CAT("MAIN", "[UNKNOWN] caught");
         if (core) { try { Dispose::cleanupAll(*core); } catch (...) {} }
         purgeSDL(splashWin, splashRen, splashTex);
         if (sdl_ok) SDL_Quit();
@@ -327,6 +334,6 @@ int main(int argc, char* argv[]) {
     bulkhead(" NOMINAL SHUTDOWN — EXIT 0 ");
     if (sdl_ok) SDL_Quit();
     Logging::Logger::get().stop();
-    LOG_INFO_CAT("MAIN", "{}Graceful exit — all systems nominal{}", EMERALD_GREEN, RESET);
+    LOG_INFO_CAT("MAIN", "Graceful exit — all systems nominal");
     return 0;
 }

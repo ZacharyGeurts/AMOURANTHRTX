@@ -46,8 +46,8 @@ set(SOURCE_DIRS
     "${CMAKE_CURRENT_SOURCE_DIR}/src/engine/SDL3"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/engine/Vulkan"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/engine"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/modes"           # ← MODES SOURCE
-    "${CMAKE_CURRENT_SOURCE_DIR}/include/modes"       # ← MODES HEADER
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/modes"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/modes"
 )
 foreach(DIR ${SOURCE_DIRS})
     if(NOT EXISTS "${DIR}")
@@ -179,13 +179,11 @@ if(IS_LINUX)
     message(STATUS "SDL3 include dirs: ${SDL3_INCLUDE_DIRS}")
     message(STATUS "SDL3 libraries: ${SDL3_LIBRARIES}")
 
-    # === CRITICAL FIX: Force SDL3 include path BEFORE system paths ===
     list(GET SDL3_INCLUDE_DIRS 0 SDL3_MAIN_INCLUDE_DIR)
     include_directories(BEFORE SYSTEM
         /usr/local/include/SDL3
         ${SDL3_MAIN_INCLUDE_DIR}
     )
-    # ===============================================================
 
     pkg_check_modules(SDL3_ttf sdl3-ttf)
     if(NOT SDL3_ttf_FOUND)
@@ -248,15 +246,44 @@ set(SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src)
 set(ENGINE_SRC_DIR ${SRC_DIR}/engine)
 set(SDL3_SRC_DIR ${ENGINE_SRC_DIR}/SDL3)
 set(VULKAN_SRC_DIR ${ENGINE_SRC_DIR}/Vulkan)
-set(MODES_SRC_DIR ${SRC_DIR}/modes)                 # ← MODES SOURCE
+set(MODES_SRC_DIR ${SRC_DIR}/modes)
 set(INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/include)
-set(MODES_INCLUDE_DIR ${INCLUDE_DIR}/modes)         # ← MODES HEADER
+set(MODES_INCLUDE_DIR ${INCLUDE_DIR}/modes)
 set(SHADER_DIR ${CMAKE_CURRENT_SOURCE_DIR}/shaders)
 set(ASSET_DIR ${CMAKE_CURRENT_SOURCE_DIR}/assets)
 set(LINUX_BIN_DIR ${CMAKE_BINARY_DIR}/bin/Linux)
 set(WINDOWS_BIN_DIR ${CMAKE_BINARY_DIR}/bin/Windows)
 
-# Source files
+# === AUTO-CLONE & BUILD tinyobjloader (ALWAYS CURRENT) ===
+set(TINYOBJLOADER_DIR "${CMAKE_CURRENT_BINARY_DIR}/_deps/tinyobjloader")
+set(TINYOBJLOADER_REPO "https://github.com/tinyobjloader/tinyobjloader.git")
+
+include(FetchContent)
+FetchContent_Declare(
+    tinyobjloader
+    GIT_REPOSITORY ${TINYOBJLOADER_REPO}
+    GIT_TAG release
+    SOURCE_DIR ${TINYOBJLOADER_DIR}
+)
+
+if(NOT tinyobjloader_POPULATED)
+    FetchContent_Populate(tinyobjloader)
+    message(STATUS "tinyobjloader populated (cloned/updated)")
+else()
+    message(STATUS "tinyobjloader already populated – skipping clone")
+endif()
+
+FetchContent_GetProperties(tinyobjloader)
+if(NOT TARGET tinyobjloader::tinyobjloader)
+    # tinyobjloader is header-only + .cc file → compile it
+    set(TINYOBJLOADER_SRC "${tinyobjloader_SOURCE_DIR}/tiny_obj_loader.cc")
+    if(NOT EXISTS "${TINYOBJLOADER_SRC}")
+        message(FATAL_ERROR "tinyobjloader failed to download. Check internet or Git.")
+    endif()
+    message(STATUS "tinyobjloader cloned and ready: ${TINYOBJLOADER_SRC}")
+endif()
+
+# === Source files ===
 set(SOURCES "")
 file(GLOB TOP_SOURCES "${SRC_DIR}/*.cpp")
 list(APPEND SOURCES ${TOP_SOURCES})
@@ -266,10 +293,11 @@ file(GLOB VULKAN_SOURCES "${VULKAN_SRC_DIR}/*.cpp")
 list(APPEND SOURCES ${VULKAN_SOURCES})
 file(GLOB ENGINE_SOURCES "${ENGINE_SRC_DIR}/*.cpp")
 list(APPEND SOURCES ${ENGINE_SOURCES})
-
-# === MODES SOURCES ===
 file(GLOB MODES_SOURCES "${MODES_SRC_DIR}/*.cpp")
 list(APPEND SOURCES ${MODES_SOURCES})
+
+# === ADD tinyobjloader .cc file ===
+list(APPEND SOURCES "${tinyobjloader_SOURCE_DIR}/tiny_obj_loader.cc")
 
 list(REMOVE_DUPLICATES SOURCES)
 if(NOT SOURCES)
@@ -277,7 +305,7 @@ if(NOT SOURCES)
 endif()
 message(STATUS "Found source files: ${SOURCES}")
 
-# Executable
+# === Executable ===
 add_executable(amouranth_engine ${SOURCES})
 if(IS_LINUX)
     set_target_properties(amouranth_engine PROPERTIES
@@ -304,11 +332,12 @@ target_compile_definitions(amouranth_engine PRIVATE
 # Includes
 target_include_directories(amouranth_engine PRIVATE
     ${INCLUDE_DIR}
-    ${MODES_INCLUDE_DIR}          # ← INCLUDE MODES
+    ${MODES_INCLUDE_DIR}
     ${Vulkan_INCLUDE_DIRS}
     ${FREETYPE_INCLUDE_DIRS}
     ${HarfBuzz_INCLUDE_DIRS}
     ${glm_INCLUDE_DIRS}
+    ${tinyobjloader_SOURCE_DIR}  # ← tinyobjloader headers
 )
 
 if(IS_LINUX)
@@ -367,17 +396,12 @@ endif()
 target_compile_options(amouranth_engine PRIVATE -fPIC)
 
 # =============================================================================
-# FINAL SHADER SYSTEM: COMPILE .vert/.frag/.comp/.rgen/etc → .spv
-#                    COPY .glsl → output
-#                    graphics/ folder: .vert/.frag → compile, .glsl → copy
+# SHADER SYSTEM (unchanged)
 # =============================================================================
 
 set(SHADER_FOLDERS raytracing rasterization compute graphics)
-
-# Extensions to COMPILE
 set(COMPILE_EXTS .vert .frag .comp .rgen .rmiss .rchit .rahit .rint .rcall)
 
-# Map extension → stage
 set(STAGE_vert  vert)
 set(STAGE_frag  frag)
 set(STAGE_comp  comp)
@@ -388,16 +412,13 @@ set(STAGE_rahit rahit)
 set(STAGE_rint  rint)
 set(STAGE_rcall rcall)
 
-# Required RT shaders
 set(REQUIRED_RAYTRACING raygen.rgen miss.rmiss closesthit.rchit)
 
-# Output lists
 set(SHADER_SPV_OUTPUTS "")
 set(SHADER_COPY_OUTPUTS "")
 
 message(STATUS "Scanning shaders for compilation and copy...")
 
-# === SCAN EVERY FOLDER ===
 foreach(FOLDER ${SHADER_FOLDERS})
     set(SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/shaders/${FOLDER}")
     if(NOT EXISTS "${SRC_DIR}")
@@ -408,28 +429,23 @@ foreach(FOLDER ${SHADER_FOLDERS})
     set(LINUX_OUT "${LINUX_BIN_DIR}/assets/shaders/${FOLDER}")
     set(WINDOWS_OUT "${WINDOWS_BIN_DIR}/assets/shaders/${FOLDER}")
 
-    # === 1. COMPILE: .vert, .frag, .comp, .rgen, etc. ===
     foreach(EXT ${COMPILE_EXTS})
         file(GLOB SHADERS "${SRC_DIR}/*${EXT}")
         foreach(SHADER ${SHADERS})
             get_filename_component(NAME ${SHADER} NAME)
             get_filename_component(BASE ${SHADER} NAME_WE)
-
-            # Stage
             string(SUBSTRING "${EXT}" 1 -1 EXT_NO_DOT)
             set(STAGE ${STAGE_${EXT_NO_DOT}})
             if(NOT STAGE)
                 message(FATAL_ERROR "Missing stage for ${EXT}")
             endif()
 
-            # SPV flags
             if(FOLDER STREQUAL "raytracing")
                 set(SPV_FLAGS "--target-spv=spv1.5")
             else()
                 set(SPV_FLAGS "--target-spv=spv1.3")
             endif()
 
-            # Linux
             if(IS_LINUX)
                 set(SPV_OUT "${LINUX_OUT}/${BASE}.spv")
                 add_custom_command(
@@ -445,7 +461,6 @@ foreach(FOLDER ${SHADER_FOLDERS})
                 message(STATUS "  [COMPILE] ${FOLDER}/${NAME} → stage=${STAGE}")
             endif()
 
-            # Windows
             if(IS_WINDOWS)
                 set(SPV_OUT "${WINDOWS_OUT}/${BASE}.spv")
                 add_custom_command(
@@ -462,13 +477,10 @@ foreach(FOLDER ${SHADER_FOLDERS})
         endforeach()
     endforeach()
 
-    # === 2. COPY: only .glsl files (but NOT if already compiled) ===
     file(GLOB GLSL_FILES "${SRC_DIR}/*.glsl")
     foreach(GLSL ${GLSL_FILES})
         get_filename_component(NAME ${GLSL} NAME)
         get_filename_component(BASE ${GLSL} NAME_WE)
-
-        # Skip if it was already compiled (e.g. tonemap_vert.glsl → tonemap_vert.vert exists)
         set(SKIP FALSE)
         foreach(EXT ${COMPILE_EXTS})
             if(EXISTS "${SRC_DIR}/${BASE}${EXT}")
@@ -507,14 +519,12 @@ foreach(FOLDER ${SHADER_FOLDERS})
     endforeach()
 endforeach()
 
-# === REQUIRED RT CHECK ===
 foreach(REQ ${REQUIRED_RAYTRACING})
     if(NOT EXISTS "${SHADER_DIR}/raytracing/${REQ}")
         message(FATAL_ERROR "MISSING REQUIRED SHADER: ${REQ}")
     endif()
 endforeach()
 
-# === FINAL TARGET ===
 list(LENGTH SHADER_SPV_OUTPUTS SPV_COUNT)
 list(LENGTH SHADER_COPY_OUTPUTS COPY_COUNT)
 if(SPV_COUNT GREATER 0 OR COPY_COUNT GREATER 0)

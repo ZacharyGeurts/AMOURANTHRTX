@@ -3,6 +3,7 @@
 // Dependencies: Vulkan 1.3+, GLM, logging.hpp.
 // Supported platforms: Linux, Windows.
 // Zachary Geurts 2025
+// " The spinal column"
 // FINAL: Context owns VulkanResourceManager → SINGLE LIFETIME → NO DOUBLE-FREE
 //        ADDED: get/setBufferManager(), getResourceManager()
 //        ADDED: hasX() for RAII safety
@@ -14,6 +15,7 @@
 //        ADDED: MUTABLE getX() accessors for cleanupAll()
 //        NEW: Context owns swapchain creation/destruction
 //        FIXED: addFence() + fences_ for transient submits
+//        ADDED: VulkanRTX::Camera* camera = nullptr;  ← CRITICAL FOR renderModeX()
 
 #pragma once
 #ifndef VULKAN_CORE_HPP
@@ -24,6 +26,7 @@
 #include <vulkan/vulkan_beta.h>
 
 #include "engine/Vulkan/VulkanCommon.hpp"
+#include "engine/camera.hpp"          // ← ADDED: Camera integration
 #include <vector>
 #include <string>
 #include <cstdint>
@@ -432,6 +435,9 @@ struct Context {
 
     int width = 0;
     int height = 0;
+
+    // --- CAMERA ---
+    VulkanRTX::Camera* camera = nullptr;  // ← ADDED: Critical for renderModeX()
 
     VkDescriptorSetLayout rayTracingDescriptorSetLayout = VK_NULL_HANDLE;
     VkDescriptorSetLayout graphicsDescriptorSetLayout = VK_NULL_HANDLE;
