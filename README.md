@@ -1,6 +1,4 @@
-You can consider this Alpha or Beta software as the engine is always rewritable.  
-I invite you to have Grok take a swing at the software with your specific requirements.  
-Rewriting the base software does not free from license.  
+
 <img width="820" src="https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/assets/textures/ammo.png" />  
 
 AMOURANTH RTX © 2025 by Zachary Geurts gzac5314@gmail.com is licensed under [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0)  
