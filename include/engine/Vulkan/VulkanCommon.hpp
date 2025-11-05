@@ -1,7 +1,7 @@
 // include/engine/Vulkan/VulkanCommon.hpp
 // AMOURANTH RTX Engine (C) 2025 by Zachary Geurts gzac5314@gmail.com is licensed under CC BY-NC 4.0
 // NEXUS FINAL: GPU-Driven Adaptive RT | 12,000+ FPS | Auto-Toggle
-// FIXED: VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT + prevNexusScore in UBO
+// FIXED: VK_CHECK at top + proper namespace closure
 
 #pragma once
 
@@ -19,7 +19,9 @@
 #include "engine/camera.hpp"
 #include "engine/logging.hpp"
 
-
+// ========================================================================
+// 0. VK_CHECK MACRO — MUST BE FIRST
+// ========================================================================
 #define VK_CHECK(result, msg) \
     do { \
         VkResult __r = (result); \
@@ -33,19 +35,22 @@
 
 namespace VulkanRTX {
 
-class VulkanRenderer;
-
 // ========================================================================
-// 0. Global Constants
+// 1. Global Constants
 // ========================================================================
 constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 3;
-
-// NEXUS CONFIG
 constexpr float NEXUS_SCORE_THRESHOLD = 0.7f;
 constexpr float NEXUS_HYSTERESIS_ALPHA = 0.8f;
 
+enum class FpsTarget : uint32_t {
+    FPS_60 = 60,
+    FPS_120 = 120
+};
+
+inline constexpr std::string_view BOLD_PINK = "\033[1;38;5;197m";
+
 // ========================================================================
-// 1. Strided Device Address Region
+// 2. Strided Device Address Region
 // ========================================================================
 struct StridedDeviceAddressRegionKHR {
     VkDeviceAddress deviceAddress = 0;
@@ -54,7 +59,7 @@ struct StridedDeviceAddressRegionKHR {
 };
 
 // ========================================================================
-// 2. Shader Binding Table – FULL SUPPORT
+// 3. Shader Binding Table
 // ========================================================================
 struct ShaderBindingTable {
     VkStridedDeviceAddressRegionKHR raygen;
@@ -78,7 +83,7 @@ struct ShaderBindingTable {
 };
 
 // ========================================================================
-// 3. Per-Frame Resources
+// 4. Per-Frame Resources
 // ========================================================================
 struct Frame {
     VkCommandBuffer         commandBuffer           = VK_NULL_HANDLE;
@@ -91,7 +96,7 @@ struct Frame {
 };
 
 // ========================================================================
-// 4. MaterialData
+// 5. MaterialData
 // ========================================================================
 struct alignas(16) MaterialData {
     alignas(16) glm::vec4 diffuse   = glm::vec4(0.8f, 0.8f, 0.8f, 1.0f);
@@ -119,7 +124,7 @@ static_assert(sizeof(MaterialData) == 48, "MaterialData must be 48 bytes");
 static_assert(sizeof(MaterialData::PushConstants) == 80, "PushConstants must be 80 bytes");
 
 // ========================================================================
-// 5. DimensionData
+// 6. DimensionData
 // ========================================================================
 struct alignas(16) DimensionData {
     uint32_t screenWidth  = 0;
@@ -130,7 +135,7 @@ struct alignas(16) DimensionData {
 static_assert(sizeof(DimensionData) == 16, "DimensionData must be 16 bytes");
 
 // ========================================================================
-// 6. UniformBufferObject — NOW WITH prevNexusScore
+// 7. UniformBufferObject
 // ========================================================================
 struct alignas(16) UniformBufferObject {
     alignas(16) glm::mat4 viewInverse;
@@ -138,13 +143,13 @@ struct alignas(16) UniformBufferObject {
     alignas(16) glm::vec4 camPos;
     alignas(4)  float     time;
     alignas(4)  uint32_t  frame;
-    alignas(4)  float     prevNexusScore;  // ← NEW: For adaptive dispatch
-    alignas(4)  float     _pad[25];        // 256 - 104 = 152 → 152/4 = 38 → keep 25
+    alignas(4)  float     prevNexusScore;
+    alignas(4)  float     _pad[25];
 };
 static_assert(sizeof(UniformBufferObject) == 256, "UBO must be 256 bytes");
 
 // ========================================================================
-// 7. DimensionState – CPU-side
+// 8. DimensionState
 // ========================================================================
 struct DimensionState {
     int       dimension = 0;
@@ -162,7 +167,7 @@ struct DimensionState {
 };
 
 // ========================================================================
-// 8. Tonemap Push Constants
+// 9. Tonemap Push Constants
 // ========================================================================
 struct alignas(16) TonemapPushConstants {
     uint32_t width  = 0;
@@ -173,7 +178,21 @@ struct alignas(16) TonemapPushConstants {
 static_assert(sizeof(TonemapPushConstants) == 16, "TonemapPushConstants must be 16 bytes");
 
 // ========================================================================
-// 9. Shader Paths — ALL SHADERS LOADED
+// 10. NEXUS PUSH CONSTANTS
+// ========================================================================
+struct alignas(16) NexusPushConstants {
+    alignas(4) float  w_var;
+    alignas(4) float  w_ent;
+    alignas(4) float  w_hit;
+    alignas(4) float  w_grad;
+    alignas(4) float  w_res;
+    alignas(4) uint32_t fpsTarget;
+    alignas(4) float  pad[2];
+};
+static_assert(sizeof(NexusPushConstants) == 32, "NexusPushConstants must be 32 bytes");
+
+// ========================================================================
+// 11. Shader Paths
 // ========================================================================
 inline std::unordered_map<std::string, std::string> getShaderBinPaths() {
     return {
@@ -190,7 +209,7 @@ inline std::unordered_map<std::string, std::string> getShaderBinPaths() {
         {"tonemap_compute",     "assets/shaders/compute/tonemap.spv"},
         {"tonemap_vert",        "assets/shaders/graphics/tonemap_vert.spv"},
         {"tonemap_frag",        "assets/shaders/graphics/tonemap_frag.spv"},
-        {"nexusDecision",       "assets/shaders/compute/nexusDecision.spv"}  // ← NEW
+        {"nexusDecision",       "assets/shaders/compute/nexusDecision.spv"}
     };
 }
 
@@ -209,7 +228,7 @@ inline std::unordered_map<std::string, std::string> getShaderSrcPaths() {
         {"tonemap_compute",     "assets/shaders/compute/tonemap.comp"},
         {"tonemap_vert",        "assets/shaders/graphics/tonemap_vert.glsl"},
         {"tonemap_frag",        "assets/shaders/graphics/tonemap_frag.glsl"},
-        {"nexusDecision",       "assets/shaders/compute/nexusDecision.comp"}  // ← NEW
+        {"nexusDecision",       "assets/shaders/compute/nexusDecision.comp"}
     };
 }
 
@@ -230,7 +249,7 @@ inline std::vector<std::string> getRayTracingBinPaths() {
 }
 
 // ========================================================================
-// 10. findShaderPath
+// 12. findShaderPath
 // ========================================================================
 inline std::string findShaderPath(const std::string& logicalName) {
     using namespace Logging::Color;
@@ -271,113 +290,6 @@ inline std::string findShaderPath(const std::string& logicalName) {
 }
 
 // ========================================================================
-// 11. AMOURANTH – camera + demo controller
+// END OF VulkanRTX namespace
 // ========================================================================
-class AMOURANTH : public Camera {
-public:
-    explicit AMOURANTH(VulkanRenderer* renderer, int width, int height);
-    ~AMOURANTH() override;
-
-    glm::mat4 getViewMatrix() const override;
-    glm::mat4 getProjectionMatrix() const override;
-    int       getMode() const override;
-    glm::vec3 getPosition() const override;
-    void      setPosition(const glm::vec3& pos) override;
-    void      setOrientation(float yaw, float pitch) override;
-    void      update(float deltaTime) override;
-    void      moveForward(float speed) override;
-    void      moveRight(float speed) override;
-    void      moveUp(float speed) override;
-    void      rotate(float yawDelta, float pitchDelta) override;
-    void      setFOV(float fov) override;
-    float     getFOV() const override;
-    void      setMode(int mode) override;
-    void      setAspectRatio(float aspectRatio) override;
-    void      moveCamera(float x, float y, float z,
-                         std::source_location loc = std::source_location::current()) override;
-    void      rotateCamera(float yaw, float pitch,
-                           std::source_location loc = std::source_location::current()) override;
-    void      moveUserCam(float dx, float dy, float dz) override;
-    void      togglePause() override;
-    void      updateZoom(bool zoomIn) override;
-    void      setUserData(void* data) override;
-    void*     getUserData() const override;
-
-    void setCurrentDimension(int dim);
-    void adjustScale(float delta);
-    void updateDimensionBuffer(VkDevice device, uint32_t currentFrame);
-
-    int   getCurrentDimension() const { return currentDimension_; }
-    float getScale() const            { return scale_; }
-    bool  isPaused() const            { return paused_; }
-    const std::vector<DimensionState>& getDimensions() const { return dimensions_; }
-
-    PFN_vkCmdTraceRaysKHR getVkCmdTraceRaysKHR() const { return vkCmdTraceRaysKHR_; }
-    const VkStridedDeviceAddressRegionKHR& getRaygenSBT() const   { return raygenSBT_; }
-    const VkStridedDeviceAddressRegionKHR& getMissSBT() const     { return missSBT_; }
-    const VkStridedDeviceAddressRegionKHR& getHitSBT() const      { return hitSBT_; }
-    const VkStridedDeviceAddressRegionKHR& getCallableSBT() const { return callableSBT_; }
-    const VkStridedDeviceAddressRegionKHR& getAnyHitSBT() const   { return anyHitSBT_; }
-    const VkStridedDeviceAddressRegionKHR& getShadowMissSBT() const { return shadowMissSBT_; }
-    const VkStridedDeviceAddressRegionKHR& getShadowAnyHitSBT() const { return shadowAnyHitSBT_; }
-    const VkStridedDeviceAddressRegionKHR& getIntersectionSBT() const { return intersectionSBT_; }
-    const VkStridedDeviceAddressRegionKHR& getVolumetricAnyHitSBT() const { return volumetricAnyHitSBT_; }
-    const VkStridedDeviceAddressRegionKHR& getMidAnyHitSBT() const { return midAnyHitSBT_; }
-
-private:
-    VulkanRenderer* renderer_;
-    int width_, height_;
-
-    int   mode_ = 0;
-    int   currentDimension_ = 0;
-    float scale_ = 1.0f;
-    bool  paused_ = false;
-
-    glm::vec3 position_ = glm::vec3(0.0f, 0.0f, 5.0f);
-    glm::vec3 front_    = glm::vec3(0.0f, 0.0f, -1.0f);
-    glm::vec3 up_       = glm::vec3(0.0f, 1.0f, 0.0f);
-    float yaw_   = -90.0f;
-    float pitch_ = 0.0f;
-    float fov_   = 45.0f;
-    float sensitivity_ = 0.1f;
-    float speed_ = 2.5f;
-
-    std::vector<DimensionState> dimensions_;
-    std::vector<UniformBufferObject> ubos_;
-
-    VkBuffer       dimensionBuffer_       = VK_NULL_HANDLE;
-    VkDeviceMemory dimensionBufferMemory_ = VK_NULL_HANDLE;
-
-    PFN_vkCmdTraceRaysKHR vkCmdTraceRaysKHR_ = nullptr;
-    VkStridedDeviceAddressRegionKHR raygenSBT_   = {};
-    VkStridedDeviceAddressRegionKHR missSBT_     = {};
-    VkStridedDeviceAddressRegionKHR hitSBT_      = {};
-    VkStridedDeviceAddressRegionKHR callableSBT_ = {};
-    VkStridedDeviceAddressRegionKHR anyHitSBT_   = {};
-    VkStridedDeviceAddressRegionKHR shadowMissSBT_ = {};
-    VkStridedDeviceAddressRegionKHR shadowAnyHitSBT_ = {};
-    VkStridedDeviceAddressRegionKHR intersectionSBT_ = {};
-    VkStridedDeviceAddressRegionKHR volumetricAnyHitSBT_ = {};
-    VkStridedDeviceAddressRegionKHR midAnyHitSBT_ = {};
-
-    void updateCameraVectors();
-    void createDimensionBuffer(VkDevice device);
-};
-
 } // namespace VulkanRTX
-
-// ========================================================================
-// 12. std::formatter for AMOURANTH — OUTSIDE VulkanRTX
-// ========================================================================
-template<>
-struct std::formatter<VulkanRTX::AMOURANTH, char> {
-    constexpr auto parse(std::format_parse_context& ctx) { return ctx.begin(); }
-    template<typename FormatContext>
-    auto format(const VulkanRTX::AMOURANTH& cam, FormatContext& ctx) const {
-        return std::format_to(ctx.out(),
-                              "AMOURANTH(dim={}, mode={}, scale={:.2f}, paused={}, pos=({:.2f},{:.2f},{:.2f}))",
-                              cam.getCurrentDimension(), cam.getMode(),
-                              cam.getScale(), cam.isPaused(),
-                              cam.getPosition().x, cam.getPosition().y, cam.getPosition().z);
-    }
-};
