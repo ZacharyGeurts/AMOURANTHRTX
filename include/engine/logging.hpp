@@ -102,7 +102,7 @@ namespace Color {
     inline constexpr std::string_view EMERALD_GREEN           = "\033[38;5;35m";   // SUCCESS / ENGINE: Deep emerald vibrance
     inline constexpr std::string_view ARCTIC_CYAN             = "\033[38;5;45m";   // DEBUG: Icy arctic cyan pulse
     inline constexpr std::string_view AMBER_YELLOW            = "\033[38;5;220m";  // WARNING: Fiery amber blaze
-    inline constexpr std::string_view CRIMSON_MAGENTA         = "\033[38;5;197m";  // ERROR: Blood-red crimson fury
+    inline constexpr std::string_view CRIMSON_MAGENTA         = "\033[1;38;5;197m";  // ERROR: Blood-red crimson fury
     inline constexpr std::string_view SAPPHIRE_BLUE           = "\033[38;5;33m";   // RENDER / PIPELINE: Deep sapphire depth
     inline constexpr std::string_view SCARLET_RED             = "\033[38;5;196m";  // FATAL / VULKAN: Scarlet inferno
     inline constexpr std::string_view DIAMOND_WHITE           = "\033[38;5;231m";  // HEADER: Pristine diamond sparkle
