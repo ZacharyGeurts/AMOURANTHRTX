@@ -2,7 +2,9 @@
 // AMOURANTH RTX Engine, November 2025
 // C++20 ONLY: No mutex, No fmt, No UB
 // DOUBLE-FREE: Lock-free hash map
-// printf-style logging (NOT fmt)
+// FIXED: reinterpret_cast for opaque handles (incomplete types)
+// FIXED: logAndTrackDestruction non-static, declared before use
+// FIXED: No inline in header — all in .cpp
 
 #pragma once
 #ifndef DISPOSE_HPP
@@ -17,6 +19,8 @@
 #include <SDL3/SDL.h>
 #include <atomic>
 #include <sstream>
+#include <format>
+#include <string_view>
 
 namespace Dispose {
 
@@ -32,7 +36,7 @@ struct DestroyTracker {
     static constexpr uint64_t HASH_MASK = (1ULL << HASH_BITS) - 1;
 
     static std::atomic<uint64_t>* s_bitset;
-    static std::atomic<size_t>    s_capacity;
+    static std::atomic<size_t> s_capacity;
 
     static uint64_t hash(void* ptr) {
         return std::hash<void*>{}(ptr) & HASH_MASK;
@@ -43,21 +47,10 @@ struct DestroyTracker {
     static bool isDestroyed(void* ptr);
 };
 
-// Helper: Log and detect double-free
-inline void logAndTrackDestruction(const std::string& type, void* handle, const std::string& name = "") {
-    if (!handle || handle == VK_NULL_HANDLE) return;
-
-    if (DestroyTracker::isDestroyed(handle)) {
-        LOG_ERROR_CAT("Dispose", "%sDOUBLE FREE DETECTED! %s %p (name: '%s') already destroyed — skipping!%s", 
-                      CRIMSON_MAGENTA, type.c_str(), handle, name.empty() ? "unnamed" : name.c_str(), RESET);
-        return;
-    }
-
-    DestroyTracker::markDestroyed(handle);
-    LOG_DEBUG_CAT("Dispose", "%s[%llu] Destroying %s: %p (%s)%s", 
-                  AMBER_YELLOW, ++g_destructionCounter, type.c_str(), handle, 
-                  name.empty() ? "unnamed" : name.c_str(), RESET);
-}
+// ---------------------------------------------------------------------
+// LOG + TRACK DESTRUCTION — DECLARED HERE, DEFINED IN .cpp
+// ---------------------------------------------------------------------
+void logAndTrackDestruction(std::string_view typeName, void* ptr);
 
 // Generic Vulkan RAII handle
 template<typename T>
@@ -92,22 +85,23 @@ public:
 
     void reset() {
         if (handle_ != VK_NULL_HANDLE && destroy_) {
-            logAndTrackDestruction(getTypeName(), static_cast<void*>(handle_), name_);
+            void* ptr = reinterpret_cast<void*>(handle_);  // FIXED: Direct reinterpret_cast for opaque handle
+            logAndTrackDestruction(getTypeName(), ptr);
             try {
                 destroy_(device_, handle_, nullptr);
             } catch (const std::exception& e) {
-                LOG_ERROR_CAT("Dispose", "Exception in destroy lambda for %s %p: %s", 
-                              getTypeName().c_str(), static_cast<void*>(handle_), e.what());
+                LOG_ERROR_CAT("Dispose", std::format("Exception in destroy lambda for {} {}: {}", 
+                              getTypeName(), ptr, e.what()));
             } catch (...) {
-                LOG_ERROR_CAT("Dispose", "Unknown exception in destroy lambda for %s %p", 
-                              getTypeName().c_str(), static_cast<void*>(handle_));
+                LOG_ERROR_CAT("Dispose", std::format("Unknown exception in destroy lambda for {} {}", 
+                              getTypeName(), ptr));
             }
         }
         handle_ = VK_NULL_HANDLE;
         destroy_ = nullptr;
     }
 
-    static DestroyFunc getDestroyFunc(VkDevice) {
+    static DestroyFunc getDestroyFunc(VkDevice device) {
         if constexpr (std::is_same_v<T, VkBuffer>)               return [](VkDevice d, VkBuffer h, const VkAllocationCallbacks* p) { vkDestroyBuffer(d, h, p); };
         else if constexpr (std::is_same_v<T, VkDeviceMemory>)    return [](VkDevice d, VkDeviceMemory h, const VkAllocationCallbacks* p) { vkFreeMemory(d, h, p); };
         else if constexpr (std::is_same_v<T, VkDescriptorSetLayout>) return [](VkDevice d, VkDescriptorSetLayout h, const VkAllocationCallbacks* p) { vkDestroyDescriptorSetLayout(d, h, p); };
