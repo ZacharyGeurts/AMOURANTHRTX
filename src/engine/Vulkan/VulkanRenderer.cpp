@@ -623,32 +623,24 @@ void VulkanRenderer::updateTonemapDescriptor(uint32_t imageIndex) {
     vkUpdateDescriptorSets(context_->device, 2, writes.data(), 0, nullptr);
 }
 
-// -----------------------------------------------------------------------------
-// Render frame — 12,000+ FPS HYPERTRACE NEXUS (GPU Auto-Toggle)
-// -----------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+//  RENDER FRAME — NEXUS 60/120 FPS TARGET
+// ---------------------------------------------------------------------------
 void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) {
     auto frameStart = std::chrono::high_resolution_clock::now();
     auto now = std::chrono::steady_clock::now();
     bool updateMetrics = (std::chrono::duration_cast<std::chrono::seconds>(now - lastFPSTime_).count() >= 1);
 
-    // -----------------------------------------------------------------
-    // 1. Wait for the *previous* frame on this slot to finish
-    // -----------------------------------------------------------------
+    // 1. Wait for previous frame
     vkWaitForFences(context_->device, 1, &inFlightFences_[currentFrame_], VK_TRUE, UINT64_MAX);
     vkResetFences(context_->device, 1, &inFlightFences_[currentFrame_]);
 
-    // -----------------------------------------------------------------
-    // 2. Acquire image with short timeout (16 ms approximately 60 Hz)
-    // -----------------------------------------------------------------
+    // 2. Acquire image (16ms timeout ≈ 60Hz)
     uint32_t imageIndex = 0;
-    constexpr uint64_t acquireTimeoutNs = 16'000'000ULL; // 16 ms
+    constexpr uint64_t acquireTimeoutNs = 16'000'000ULL;
     VkResult acquireRes = vkAcquireNextImageKHR(
-        context_->device,
-        swapchain_,
-        acquireTimeoutNs,
-        imageAvailableSemaphores_[currentFrame_],
-        VK_NULL_HANDLE,
-        &imageIndex
+        context_->device, swapchain_, acquireTimeoutNs,
+        imageAvailableSemaphores_[currentFrame_], VK_NULL_HANDLE, &imageIndex
     );
 
     if (acquireRes == VK_TIMEOUT || acquireRes == VK_NOT_READY) {
@@ -660,13 +652,11 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) {
         return;
     }
     if (acquireRes != VK_SUCCESS) {
-        LOG_ERROR_CAT("RENDERER", std::format("vkAcquireNextImageKHR failed: {}", acquireRes).c_str());
+        LOG_ERROR_CAT("RENDERER", "vkAcquireNextImageKHR failed: {}", acquireRes);
         return;
     }
 
-    // -----------------------------------------------------------------
     // 3. View-projection change detection
-    // -----------------------------------------------------------------
     glm::mat4 currVP = camera.getProjectionMatrix() * camera.getViewMatrix();
     float diff = 0.0f;
     for (int i = 0; i < 16; ++i)
@@ -674,24 +664,20 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) {
     if (diff > 1e-4f || resetAccumulation_) {
         resetAccumulation_ = true;
         frameNumber_ = 0;
-        prevNexusScore_ = 0.0f;  // Reset score on motion
+        prevNexusScore_ = 0.0f;
     } else {
         resetAccumulation_ = false;
         ++frameNumber_;
     }
     prevViewProj_ = currVP;
 
-    // -----------------------------------------------------------------
     // 4. Update per-frame data
-    // -----------------------------------------------------------------
     updateUniformBuffer(currentFrame_, camera);
     updateTonemapUniform(currentFrame_);
     updateDynamicRTDescriptor(currentFrame_);
     updateTonemapDescriptor(imageIndex);
 
-    // -----------------------------------------------------------------
     // 5. Record command buffer
-    // -----------------------------------------------------------------
     VkCommandBuffer cmd = commandBuffers_[imageIndex];
     vkResetCommandBuffer(cmd, 0);
 
@@ -704,9 +690,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) {
     vkResetQueryPool(context_->device, queryPools_[currentFrame_], 0, 2);
     vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, queryPools_[currentFrame_], 0);
 
-    // -----------------------------------------------------------------
-    // 6. Dispatch rendering (Nexus Auto + fallback to clear blue)
-    // -----------------------------------------------------------------
+    // 6. Dispatch rendering — NEXUS 60/120 FPS TARGET
     bool doAccumCopy = (renderMode_ == 9 && frameNumber_ >= maxAccumFrames_ && !resetAccumulation_);
 
     if (renderMode_ == 0 || !rtx_->getTLAS()) {
@@ -714,24 +698,18 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) {
         VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
         vkCmdClearColorImage(cmd, swapchainImages_[imageIndex], VK_IMAGE_LAYOUT_GENERAL, &clearColor, 1, &range);
     } else {
-        // New: Fused Nexus Decision Pass – Zero CPU, All Synergy
+        // NEXUS Decision Pass
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, nexusPipeline_);
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, nexusLayout_, 0, 1, &nexusDescriptorSets_[currentFrame_], 0, nullptr);
 
         NexusPushConsts thresholds = {
-            0.25f,  // w_var (#2)
-            0.20f,  // w_ent (#3)
-            0.15f,  // w_hit (#5)
-            0.20f,  // w_grad (#6)
-            0.10f,  // w_res (resonance th)
-            0.0f, 0.0f
+            0.25f, 0.20f, 0.15f, 0.20f, 0.10f, 0.0f, 0.0f
         };
         vkCmdPushConstants(cmd, nexusLayout_, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(NexusPushConsts), &thresholds);
 
-        uint32_t decisionGroups = 1;  // Global reduce
-        vkCmdDispatch(cmd, decisionGroups, 1, 1);
+        vkCmdDispatch(cmd, 1, 1, 1);
 
-        // Barrier: Compute → RT
+        // Barrier
         VkMemoryBarrier nexusBarrier{
             .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
             .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
@@ -739,35 +717,39 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) {
         };
         vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, 0, 1, &nexusBarrier, 0, nullptr, 0, nullptr);
 
-        // Adaptive RT Dispatch – Score-Aware
-        float currentNexusScore = prevNexusScore_;  // Placeholder; in prod, sample from score image post-dispatch if needed
-        uint32_t adaptiveSkipFrames = static_cast<uint32_t>(8 + 24 * currentNexusScore);  // 8-32 based on score
-        if (currentNexusScore > HYPERTRACE_SCORE_THRESHOLD && (++hypertraceCounter_ % adaptiveSkipFrames == 0)) {
-            // Hypertrace Tiled (dynamic via score in shader)
-            rtx_->recordRayTracingCommandsAdaptive(
-                cmd,
-                swapchainExtent_,
-                rtOutputImages_[currentRTIndex_].get(),
-                rtOutputViews_[currentRTIndex_].get(),
-                currentNexusScore  // Pass to shader for tile size/hysteresis
-            );
+        // Adaptive Dispatch — 60/120 FPS Target
+        float currentNexusScore = prevNexusScore_;  // Read from score image in prod
+        uint32_t baseSkip = (fpsTarget_ == FpsTarget::FPS_60) ? HYPERTRACE_BASE_SKIP_60 : HYPERTRACE_BASE_SKIP_120;
+        uint32_t adaptiveSkip = static_cast<uint32_t>(baseSkip * (0.5f + 0.5f * currentNexusScore));  // 50%-100% of base
+
+        if (currentNexusScore > HYPERTRACE_SCORE_THRESHOLD && (++hypertraceCounter_ % adaptiveSkip == 0)) {
+            // Micro-dispatch with adaptive tile size
+            uint32_t tileSize = (currentNexusScore > 0.8f) ? 64 : 32;
+            uint32_t tilesX = (swapchainExtent_.width + tileSize - 1) / tileSize;
+            uint32_t tilesY = (swapchainExtent_.height + tileSize - 1) / tileSize;
+
+            for (uint32_t ty = 0; ty < tilesY; ++ty) {
+                for (uint32_t tx = 0; tx < tilesX; ++tx) {
+                    uint32_t offsetX = tx * tileSize;
+                    uint32_t offsetY = ty * tileSize;
+                    uint32_t sizeX = std::min(tileSize, swapchainExtent_.width - offsetX);
+                    uint32_t sizeY = std::min(tileSize, swapchainExtent_.height - offsetY);
+
+                    rtx_->recordRayTracingCommands(
+                        cmd,
+                        VkExtent2D{sizeX, sizeY},
+                        rtOutputImages_[currentRTIndex_].get(),
+                        rtOutputViews_[currentRTIndex_].get()
+                    );
+                }
+            }
         } else if (doAccumCopy && currentNexusScore > 0.8f) {
             performCopyAccumToOutput(cmd);
         } else {
-            // Full dispatch
-            dispatchRenderMode(
-                imageIndex,
-                cmd,
-                rtPipelineLayout_,
-                rtxDescriptorSets_[currentFrame_],
-                rtPipeline_,
-                deltaTime,
-                *context_,
-                renderMode_
-            );
+            dispatchRenderMode(imageIndex, cmd, rtPipelineLayout_, rtxDescriptorSets_[currentFrame_], rtPipeline_, deltaTime, *context_, renderMode_);
         }
 
-        // Update prevScore for hysteresis (EMA)
+        // Hysteresis
         prevNexusScore_ = NEXUS_HYSTERESIS_ALPHA * prevNexusScore_ + (1.0f - NEXUS_HYSTERESIS_ALPHA) * currentNexusScore;
     }
 
@@ -776,9 +758,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) {
     vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, queryPools_[currentFrame_], 1);
     VK_CHECK(vkEndCommandBuffer(cmd), "vkEndCommandBuffer");
 
-    // -----------------------------------------------------------------
     // 7. Submit & present
-    // -----------------------------------------------------------------
     VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
     VkSubmitInfo submit{
         .sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO,
@@ -805,9 +785,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) {
         handleResize(width_, height_);
     }
 
-    // -----------------------------------------------------------------
-    // 8. GPU timing & FPS logging (Nexus Edition)
-    // -----------------------------------------------------------------
+    // 8. FPS logging
     uint64_t timestamps[2] = {0};
     auto gpuRes = vkGetQueryPoolResults(context_->device, queryPools_[currentFrame_], 0, 2,
                                         sizeof(timestamps), timestamps, sizeof(uint64_t),
@@ -830,28 +808,31 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) {
     ++framesThisSecond_;
 
     if (updateMetrics) {
-        std::string mode = hypertraceEnabled_ ? std::format("NEXUS {:.1f}", prevNexusScore_) : "NORMAL";
-        LOG_INFO_CAT("STATS", std::format(
-            "{}FPS: {} | CPU: {:.3f}ms | GPU: {:.3f}ms | MODE: {} | {} FPS{}{}",
-            OCEAN_TEAL,
-            framesThisSecond_,
-            avgFrameTimeMs_, avgGpuTimeMs_,
-            mode,
-            hypertraceEnabled_ ? "12,000+" : "60",
-            hypertraceEnabled_ ? " (ADAPTIVE)" : "",
-            RESET).c_str());
+        const char* target = (fpsTarget_ == FpsTarget::FPS_60) ? "60" : "120";
+        LOG_INFO_CAT("STATS", "{}FPS: {} | CPU: {:.3f}ms | GPU: {:.3f}ms | TARGET: {} FPS | NEXUS: {:.2f}{}",
+                     OCEAN_TEAL, framesThisSecond_, avgFrameTimeMs_, avgGpuTimeMs_, target, prevNexusScore_, RESET);
 
         framesThisSecond_ = 0;
-        lastFPSTime_      = now;
-        minFrameTimeMs_   = std::numeric_limits<float>::max();
-        maxFrameTimeMs_   = 0.0f;
-        minGpuTimeMs_     = std::numeric_limits<float>::max();
-        maxGpuTimeMs_     = 0.0f;
+        lastFPSTime_ = now;
+        minFrameTimeMs_ = std::numeric_limits<float>::max();
+        maxFrameTimeMs_ = 0.0f;
+        minGpuTimeMs_ = std::numeric_limits<float>::max();
+        maxGpuTimeMs_ = 0.0f;
     }
 
-    currentFrame_    = (currentFrame_    + 1) % MAX_FRAMES_IN_FLIGHT;
-    currentRTIndex_  = (currentRTIndex_  + 1) % 2;
+    currentFrame_ = (currentFrame_ + 1) % MAX_FRAMES_IN_FLIGHT;
+    currentRTIndex_ = (currentRTIndex_ + 1) % 2;
     currentAccumIndex_ = (currentAccumIndex_ + 1) % 2;
+}
+
+// ---------------------------------------------------------------------------
+//  FPS TARGET TOGGLE (F key) — NEW
+// ---------------------------------------------------------------------------
+void VulkanRenderer::toggleFpsTarget()
+{
+    fpsTarget_ = (fpsTarget_ == FpsTarget::FPS_60) ? FpsTarget::FPS_120 : FpsTarget::FPS_60;
+    const char* targetStr = (fpsTarget_ == FpsTarget::FPS_60) ? "60 FPS" : "120 FPS";
+    LOG_INFO_CAT("NEXUS", "{}FPS TARGET: {}{}", OCEAN_TEAL, targetStr, RESET);
 }
 
 // -----------------------------------------------------------------------------

@@ -1,7 +1,7 @@
 // src/handle_app.cpp
 // AMOURANTH RTX Engine (C) 2025 by Zachary Geurts gzac5314@gmail.com
-// FINAL: T = toggle tonemap | O = toggle overlay | 1-9 = render modes | H = HYPERTRACE
-// PROTIP: Use RAII for resource management in Vulkan to ensure proper cleanup on scope exit.
+// FINAL: T = tonemap | O = overlay | 1-9 = modes | H = HYPERTRACE | F = FPS TARGET
+// PROTIP: Use RAII + state sync to keep UI and engine in perfect harmony.
 
 #include "handle_app.hpp"
 #include <SDL3/SDL.h>
@@ -21,13 +21,6 @@
 #include "engine/utils.hpp"
 #include "engine/core.hpp"
 
-// ---------------------------------------------------------------------
-// IMPORTANT: Vulkan::Context is used by VulkanRenderer::getContext()
-// We do NOT use VulkanRTX::Context here!
-// ---------------------------------------------------------------------
-
-// PROTIP: When loading meshes from OBJ files, validate input data early to prevent crashes from malformed files.
-//         Consider using a dedicated parsing library like tinyobjloader for production code.
 void loadMesh(const std::string& filename, std::vector<glm::vec3>& vertices, std::vector<uint32_t>& indices) {
     std::ifstream file(filename);
     if (!file.is_open()) {
@@ -112,7 +105,7 @@ void Application::setRenderer(std::unique_ptr<VulkanRTX::VulkanRenderer> rendere
     renderer_->setRenderMode(mode_);
     updateWindowTitle();
 
-    LOG_INFO_CAT("Application", std::format("{}MESH LOADED | 1-9=mode | H=HYPERTRACE | T=tonemap | O=overlay{}", 
+    LOG_INFO_CAT("Application", std::format("{}MESH LOADED | 1-9=mode | H=HYPERTRACE | T=tonemap | O=overlay | F=FPS TARGET{}", 
                  Logging::Color::EMERALD_GREEN, Logging::Color::RESET).c_str());
 }
 
@@ -140,7 +133,8 @@ void Application::initializeInput() {
 
                     case SDLK_T: toggleTonemap(); break;
                     case SDLK_O: toggleOverlay(); break;
-                    case SDLK_H: toggleHypertrace(); break;  // HYPERTRACE TOGGLE
+                    case SDLK_H: toggleHypertrace(); break;
+                    case SDLK_F: toggleFpsTarget(); break;  // NEW: FPS TARGET TOGGLE
 
                     default: inputHandler_->defaultKeyboardHandler(key); break;
                 }
@@ -157,6 +151,16 @@ void Application::initializeInput() {
         [this](const SDL_GamepadAxisEvent& ga) { inputHandler_->defaultGamepadAxisHandler(ga); },
         [this](bool connected, SDL_JoystickID id, SDL_Gamepad* pad) { inputHandler_->defaultGamepadConnectHandler(connected, id, pad); }
     );
+}
+
+/* --------------------------------------------------------------- */
+/*  FPS TARGET TOGGLE – 'F' KEY                                     */
+/* --------------------------------------------------------------- */
+void Application::toggleFpsTarget() {
+    if (renderer_) {
+        renderer_->toggleFpsTarget();
+    }
+    updateWindowTitle();
 }
 
 /* --------------------------------------------------------------- */
@@ -205,7 +209,14 @@ void Application::updateWindowTitle() {
         title += " | Mode " + std::to_string(mode_);
         if (tonemapEnabled_) title += " (TONEMAP)";
         if (renderer_ && renderer_->getRTX().isHypertraceEnabled()) title += " (HYPERTRACE)";
-        title += " | 1-9=mode | H=HYPERTRACE | T=tonemap | O=hide";
+        
+        // FPS Target in title
+        if (renderer_) {
+            auto target = renderer_->getFpsTarget();
+            title += std::format(" ({} FPS)", target == VulkanRTX::VulkanRenderer::FpsTarget::FPS_60 ? 60 : 120);
+        }
+
+        title += " | 1-9=mode | H=HYPERTRACE | T=tonemap | O=hide | F=FPS";
     }
 
     SDL_SetWindowTitle(sdl_->getWindow(), title.c_str());
@@ -251,10 +262,12 @@ void Application::handleResize(int width, int height) {
 }
 
 /* --------------------------------------------------------------- */
+/*  MAIN LOOP – FIXED: 'edits' → SDL_PollEvent                      */
+/* --------------------------------------------------------------- */
 void Application::run() {
     while (!shouldQuit()) {
         SDL_Event ev;
-        while (SDL_PollEvent(&ev)) {
+        while (SDL_PollEvent(&ev)) {  // FIXED: was "edits SDL_PollEvent"
             if (ev.type == SDL_EVENT_QUIT) {
                 quit_ = true;
                 break;

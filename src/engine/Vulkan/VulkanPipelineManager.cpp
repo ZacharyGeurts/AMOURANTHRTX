@@ -1,11 +1,8 @@
 // src/engine/Vulkan/VulkanPipelineManager.cpp
 // AMOURANTH RTX Engine (C) 2025 by Zachary Geurts gzac5314@gmail.com
 // FINAL: ALL SHADERS LOADED FROM assets/shaders/
-// PATHS:
-//   assets/shaders/raytracing/   → raygen.rgen, miss.rmiss, closesthit.rchit → .spv
-//   assets/shaders/compute/      → compute.comp → compute.spv
-//   assets/shaders/rasterization/→ vertex.vert, fragment.frag → .spv
-//   assets/shaders/graphics/     → tonemap_vert.glsl → tonemap.spv
+// FIXED: SIGSEGV in ~VulkanPipelineManager() → null-check ALL handles
+//        No double destroy | RAII-safe | Device valid until end
 
 #include "engine/Vulkan/VulkanPipelineManager.hpp"
 #include "engine/Vulkan/VulkanRTX_Setup.hpp"
@@ -85,35 +82,40 @@ VulkanPipelineManager::~VulkanPipelineManager()
 #endif
 
     VkDevice dev = context_.device;
+    if (dev == VK_NULL_HANDLE) {
+        LOG_WARN_CAT("Vulkan", "Device already destroyed — early exit from ~VulkanPipelineManager()");
+        return;
+    }
 
-    if (sbtBuffer_)         vkDestroyBuffer(dev, sbtBuffer_, nullptr);
-    if (sbtMemory_)         vkFreeMemory(dev, sbtMemory_, nullptr);
-    if (blas_)              context_.vkDestroyAccelerationStructureKHR(dev, blas_, nullptr);
-    if (tlas_)              context_.vkDestroyAccelerationStructureKHR(dev, tlas_, nullptr);
-    if (blasBuffer_)        vkDestroyBuffer(dev, blasBuffer_, nullptr);
-    if (tlasBuffer_)        vkDestroyBuffer(dev, tlasBuffer_, nullptr);
-    if (blasMemory_)        vkFreeMemory(dev, blasMemory_, nullptr);
-    if (tlasMemory_)        vkFreeMemory(dev, tlasMemory_, nullptr);
+    // === SAFE DESTROY: null-check every handle ===
+    if (sbtBuffer_)         { vkDestroyBuffer(dev, sbtBuffer_, nullptr); sbtBuffer_ = VK_NULL_HANDLE; }
+    if (sbtMemory_)         { vkFreeMemory(dev, sbtMemory_, nullptr); sbtMemory_ = VK_NULL_HANDLE; }
+    if (blas_)              { context_.vkDestroyAccelerationStructureKHR(dev, blas_, nullptr); blas_ = VK_NULL_HANDLE; }
+    if (tlas_)              { context_.vkDestroyAccelerationStructureKHR(dev, tlas_, nullptr); tlas_ = VK_NULL_HANDLE; }
+    if (blasBuffer_)        { vkDestroyBuffer(dev, blasBuffer_, nullptr); blasBuffer_ = VK_NULL_HANDLE; }
+    if (tlasBuffer_)        { vkDestroyBuffer(dev, tlasBuffer_, nullptr); tlasBuffer_ = VK_NULL_HANDLE; }
+    if (blasMemory_)        { vkFreeMemory(dev, blasMemory_, nullptr); blasMemory_ = VK_NULL_HANDLE; }
+    if (tlasMemory_)        { vkFreeMemory(dev, tlasMemory_, nullptr); tlasMemory_ = VK_NULL_HANDLE; }
 
-    if (rayTracingPipeline_)        vkDestroyPipeline(dev, rayTracingPipeline_, nullptr);
-    if (computePipeline_)           vkDestroyPipeline(dev, computePipeline_, nullptr);
-    if (graphicsPipeline_)          vkDestroyPipeline(dev, graphicsPipeline_, nullptr);
-    if (rayTracingPipelineLayout_)  vkDestroyPipelineLayout(dev, rayTracingPipelineLayout_, nullptr);
-    if (computePipelineLayout_)     vkDestroyPipelineLayout(dev, computePipelineLayout_, nullptr);
-    if (graphicsPipelineLayout_)    vkDestroyPipelineLayout(dev, graphicsPipelineLayout_, nullptr);
+    if (rayTracingPipeline_)        { vkDestroyPipeline(dev, rayTracingPipeline_, nullptr); rayTracingPipeline_ = VK_NULL_HANDLE; }
+    if (computePipeline_)           { vkDestroyPipeline(dev, computePipeline_, nullptr); computePipeline_ = VK_NULL_HANDLE; }
+    if (graphicsPipeline_)          { vkDestroyPipeline(dev, graphicsPipeline_, nullptr); graphicsPipeline_ = VK_NULL_HANDLE; }
+    if (rayTracingPipelineLayout_)  { vkDestroyPipelineLayout(dev, rayTracingPipelineLayout_, nullptr); rayTracingPipelineLayout_ = VK_NULL_HANDLE; }
+    if (computePipelineLayout_)     { vkDestroyPipelineLayout(dev, computePipelineLayout_, nullptr); computePipelineLayout_ = VK_NULL_HANDLE; }
+    if (graphicsPipelineLayout_)    { vkDestroyPipelineLayout(dev, graphicsPipelineLayout_, nullptr); graphicsPipelineLayout_ = VK_NULL_HANDLE; }
 
-    if (renderPass_)                vkDestroyRenderPass(dev, renderPass_, nullptr);
-    if (pipelineCache_)             vkDestroyPipelineCache(dev, pipelineCache_, nullptr);
+    if (renderPass_)                { vkDestroyRenderPass(dev, renderPass_, nullptr); renderPass_ = VK_NULL_HANDLE; }
+    if (pipelineCache_)             { vkDestroyPipelineCache(dev, pipelineCache_, nullptr); pipelineCache_ = VK_NULL_HANDLE; }
 
-    if (computeDescriptorSetLayout_)     vkDestroyDescriptorSetLayout(dev, computeDescriptorSetLayout_, nullptr);
-    if (rayTracingDescriptorSetLayout_)  vkDestroyDescriptorSetLayout(dev, rayTracingDescriptorSetLayout_, nullptr);
-    if (graphicsDescriptorSetLayout_)    vkDestroyDescriptorSetLayout(dev, graphicsDescriptorSetLayout_, nullptr);
+    if (computeDescriptorSetLayout_)     { vkDestroyDescriptorSetLayout(dev, computeDescriptorSetLayout_, nullptr); computeDescriptorSetLayout_ = VK_NULL_HANDLE; }
+    if (rayTracingDescriptorSetLayout_)  { vkDestroyDescriptorSetLayout(dev, rayTracingDescriptorSetLayout_, nullptr); rayTracingDescriptorSetLayout_ = VK_NULL_HANDLE; }
+    if (graphicsDescriptorSetLayout_)    { vkDestroyDescriptorSetLayout(dev, graphicsDescriptorSetLayout_, nullptr); graphicsDescriptorSetLayout_ = VK_NULL_HANDLE; }
 
-    if (transientPool_)             vkDestroyCommandPool(dev, transientPool_, nullptr);
+    if (transientPool_)             { vkDestroyCommandPool(dev, transientPool_, nullptr); transientPool_ = VK_NULL_HANDLE; }
 
-    if (nexusPipeline_)             vkDestroyPipeline(dev, nexusPipeline_, nullptr);
-    if (nexusPipelineLayout_)       vkDestroyPipelineLayout(dev, nexusPipelineLayout_, nullptr);
-    if (nexusDescriptorSetLayout_)  vkDestroyDescriptorSetLayout(dev, nexusDescriptorSetLayout_, nullptr);
+    if (nexusPipeline_)             { vkDestroyPipeline(dev, nexusPipeline_, nullptr); nexusPipeline_ = VK_NULL_HANDLE; }
+    if (nexusPipelineLayout_)       { vkDestroyPipelineLayout(dev, nexusPipelineLayout_, nullptr); nexusPipelineLayout_ = VK_NULL_HANDLE; }
+    if (nexusDescriptorSetLayout_)  { vkDestroyDescriptorSetLayout(dev, nexusDescriptorSetLayout_, nullptr); nexusDescriptorSetLayout_ = VK_NULL_HANDLE; }
 
 #ifdef ENABLE_VULKAN_DEBUG
     if (debugMessenger_) {
@@ -122,11 +124,12 @@ VulkanPipelineManager::~VulkanPipelineManager()
         if (DestroyDebugUtilsMessengerEXT) {
             DestroyDebugUtilsMessengerEXT(context_.instance, debugMessenger_, nullptr);
         }
+        debugMessenger_ = VK_NULL_HANDLE;
     }
 #endif
 
 #ifndef NDEBUG
-    LOG_INFO_CAT("Vulkan", "<<< PIPELINE MANAGER DESTROYED");
+    LOG_INFO_CAT("Vulkan", "<<< PIPELINE MANAGER DESTROYED — ALL HANDLES CLEARED");
 #endif
 }
 
@@ -443,7 +446,7 @@ void VulkanPipelineManager::createTransientCommandPool()
 }
 
 // ---------------------------------------------------------------------------
-//  9. SHADER BINDING TABLE — FIXED: inline alignUp, shaderHandles_, direct regions
+//  9. SHADER BINDING TABLE
 // ---------------------------------------------------------------------------
 void VulkanPipelineManager::createShaderBindingTable(VkPhysicalDevice physDev)
 {
@@ -514,7 +517,7 @@ void VulkanPipelineManager::createShaderBindingTable(VkPhysicalDevice physDev)
 }
 
 // ---------------------------------------------------------------------------
-//  10. RAY TRACING PIPELINE — FIXED: VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO
+//  10. RAY TRACING PIPELINE
 // ---------------------------------------------------------------------------
 void VulkanPipelineManager::createRayTracingPipeline(uint32_t maxRayRecursionDepth)
 {
@@ -572,7 +575,7 @@ void VulkanPipelineManager::createRayTracingPipeline(uint32_t maxRayRecursionDep
 }
 
 // ---------------------------------------------------------------------------
-//  13. ACCELERATION STRUCTURES — FIXED: VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR
+//  13. ACCELERATION STRUCTURES
 // ---------------------------------------------------------------------------
 void VulkanPipelineManager::createAccelerationStructures(
     VkBuffer vertexBuffer,
@@ -810,8 +813,8 @@ void VulkanPipelineManager::updateRayTracingDescriptorSet(VkDescriptorSet ds,
     LOG_INFO_CAT("Vulkan", ">>> UPDATING RAY TRACING DESCRIPTOR SET");
 #endif
 
-    if (ds == VK_NULL_HANDLE || tlas == VK_NULL_HANDLE) {
-        LOG_ERROR_CAT("Vulkan", "Invalid descriptor set or TLAS");
+        if (ds == VK_NULL_HANDLE || tlas == VK_NULL_HANDLE) {
+		LOG_ERROR_CAT("Vulkan", "Invalid descriptor set or TLAS");
         throw std::runtime_error("Invalid descriptor set or TLAS");
     }
 
@@ -937,10 +940,6 @@ void VulkanPipelineManager::dispatchCompute(uint32_t x, uint32_t y, uint32_t z)
 
 // ---------------------------------------------------------------------------
 //  NEXUS: DESCRIPTOR SET LAYOUT (4 bindings)
-//  0: prevAccum (readonly)
-//  1: currOutput (readonly)
-//  2: stats buffer
-//  3: scoreOut (writeonly 1x1 R32F)
 // ---------------------------------------------------------------------------
 void VulkanPipelineManager::createNexusDescriptorSetLayout()
 {
@@ -949,13 +948,9 @@ void VulkanPipelineManager::createNexusDescriptorSetLayout()
 #endif
 
     std::array<VkDescriptorSetLayoutBinding, 4> bindings = {{
-        // binding 0: previous accumulation image (readonly)
         {0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},
-        // binding 1: current RT output (readonly)
         {1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},
-        // binding 2: stats buffer (hitCount, totalRays, variance, entropy, gradMag)
         {2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},
-        // binding 3: 1x1 score output image (writeonly)
         {3, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr}
     }};
 
@@ -975,9 +970,7 @@ void VulkanPipelineManager::createNexusDescriptorSetLayout()
 }
 
 // ---------------------------------------------------------------------------
-//  NEXUS: COMPUTE PIPELINE — 1x1 dispatch → writes score to 1x1 image
-//  Uses: nexusDecision.comp.spv
-//  Push constants: weights (variance, entropy, hit, grad, resonance)
+//  NEXUS: COMPUTE PIPELINE
 // ---------------------------------------------------------------------------
 void VulkanPipelineManager::createNexusPipeline()
 {
@@ -987,11 +980,10 @@ void VulkanPipelineManager::createNexusPipeline()
 
     createNexusDescriptorSetLayout();
 
-    // Push constants: 5 weights + 3 padding
     VkPushConstantRange pushConst{
         .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
         .offset = 0,
-        .size = sizeof(float) * 8  // w_var, w_ent, w_hit, w_grad, w_res, pad[3]
+        .size = sizeof(float) * 8
     };
 
     VkPipelineLayoutCreateInfo layoutInfo{
@@ -1028,6 +1020,5 @@ void VulkanPipelineManager::createNexusPipeline()
     LOG_INFO_CAT("Nexus", "<<< NEXUS DECISION PIPELINE LIVE");
 #endif
 }
-
 
 } // namespace VulkanRTX

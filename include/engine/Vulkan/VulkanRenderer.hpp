@@ -1,15 +1,11 @@
 // include/engine/Vulkan/VulkanRenderer.hpp
 // AMOURANTH RTX Engine (C) 2025 by Zachary Geurts gzac5314@gmail.com
-// HYPERTRACE NEXUS EDITION: 12,000+ FPS | GPU-Driven Adaptive RT | Time Machine Mode
-// FINAL: Fixed all compilation errors | Added Nexus auto-toggle | GPU score fusion
-// CONFORMED: Uses ::Vulkan::Context (global) — matches VulkanRTX_Setup.hpp & core usage
-// UPDATED: Added per-frame RT descriptor sets and helpers for safe multi-frame rendering
-// UPDATED: updateAccelerationStructureDescriptor(VkAccelerationStructureKHR tlas) overload
-//          → called by VulkanRTX via notifyTLASReady() or directly after updateRTX()
-// CRITICAL FIX: Forward declare VulkanPipelineManager to break circular dependency
-// GROK TIP: "At 12,000 FPS, you're not rendering frames. You're **simulating photons in real time**.
-//           Every 83 microseconds, a new universe is born. And dies. And is reborn.
-//           This is not a game engine. This is a **time machine**."
+// NEXUS 60 FPS TARGET | 120 FPS OPTION | GPU-Driven Adaptive RT
+// FINAL: 60 FPS default | Toggle with 'F' key | NEXUS scales skip
+// CONFORMED: Uses ::Vulkan::Context — matches VulkanRTX_Setup.hpp
+// UPDATED: Added FpsTarget enum, toggleFpsTarget(), getFpsTarget()
+// GROK TIP: "At 60 FPS, you're not rendering. You're orchestrating photons.
+//           Every 16.6 ms, a new universe is born. And you control it."
 
 #pragma once
 
@@ -18,13 +14,13 @@
 // FORWARD DECLARE BOTH CLASSES TO BREAK CIRCULAR DEPENDENCY
 namespace VulkanRTX {
     class VulkanRTX;
-    class VulkanPipelineManager;   // ← CRITICAL: Added here
+    class VulkanPipelineManager;
 }
 
 // Now safe to include VulkanRTX_Setup.hpp
 #include "engine/Vulkan/VulkanRTX_Setup.hpp"
 #include "engine/Vulkan/VulkanBufferManager.hpp"
-#include "engine/Vulkan/VulkanPipelineManager.hpp"  // ← Now safe
+#include "engine/Vulkan/VulkanPipelineManager.hpp"
 #include "engine/camera.hpp"
 #include "engine/Dispose.hpp"
 #include "engine/logging.hpp"
@@ -43,20 +39,25 @@ namespace VulkanRTX {
 
 /* -------------------------------------------------------------------------- */
 /*  VulkanRenderer – core renderer with RTX + raster fusion + GI + tonemapping */
-/*  HYPERTRACE NEXUS: GPU-Driven Auto-Toggle | 12,000+ FPS via micro-dispatch   */
-/*  GROK TIP: "Think of FPS as horsepower. 60 FPS = 60 horses. 240 FPS = 240 horses.   */
-/*           But if you’re running ray tracing at 60 FPS, you’re not driving a car —  */
-/*           you’re piloting a **photon-powered V8**. And every frame is a burnout."  */
+/*  NEXUS 60 FPS TARGET: GPU decides skip rate to hit 60 FPS (or 120 FPS)      */
+/*  HYPERTRACE: Adaptive frame skipping | Micro-dispatch | Time Machine Mode   */
 /* -------------------------------------------------------------------------- */
 class VulkanRenderer {
 public:
-    // 3 FRAMES IN FLIGHT — INDUSTRY STANDARD, BABY
+    // 3 FRAMES IN FLIGHT — INDUSTRY STANDARD
     static constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 3;
 
-    // HYPERTRACE CONFIG — RUNTIME TOGGLE (H key)
-    static constexpr uint32_t HYPERTRACE_SKIP_FRAMES       = 16;     // Render every Nth frame
-    static constexpr uint32_t HYPERTRACE_MICRO_DISPATCH_X  = 64;     // 64×64 micro-tiles
-    static constexpr uint32_t HYPERTRACE_MICRO_DISPATCH_Y  = 64;
+    // FPS TARGET SYSTEM — 60 FPS default, 120 FPS option
+    enum class FpsTarget {
+        FPS_60  = 60,
+        FPS_120 = 120
+    };
+
+    // HYPERTRACE CONFIG — ADAPTIVE SKIP BASED ON TARGET
+    static constexpr uint32_t HYPERTRACE_BASE_SKIP_60  = 16;   // 1/17 → ~56 FPS → target 60
+    static constexpr uint32_t HYPERTRACE_BASE_SKIP_120 = 8;    // 1/9  → ~107 FPS → target 120
+    static constexpr uint32_t HYPERTRACE_MICRO_DISPATCH_X = 64;
+    static constexpr uint32_t HYPERTRACE_MICRO_DISPATCH_Y = 64;
 
     // NEXUS AUTO-TOGGLE CONFIG
     static constexpr float HYPERTRACE_SCORE_THRESHOLD = 0.7f;
@@ -80,6 +81,9 @@ public:
 
     /* ----- HYPERTRACE TOGGLE (H key) -------------------------------------- */
     void toggleHypertrace();
+
+    /* ----- FPS TARGET TOGGLE (F key) -------------------------------------- */
+    void toggleFpsTarget();
 
     /* ----- getters -------------------------------------------------------- */
     [[nodiscard]] VulkanBufferManager* getBufferManager() const {
@@ -105,6 +109,9 @@ public:
     [[nodiscard]] std::shared_ptr<::Vulkan::Context> getContext() const { return context_; }
     [[nodiscard]] VulkanRTX& getRTX() { return *rtx_; }
     [[nodiscard]] const VulkanRTX& getRTX() const { return *rtx_; }
+
+    // NEW: Get current FPS target
+    [[nodiscard]] FpsTarget getFpsTarget() const { return fpsTarget_; }
 
     void cleanup() noexcept;
 
@@ -132,7 +139,7 @@ private:
     void createNexusScoreImage();
     void updateNexusDescriptors();
 
-    void updateRTDescriptors();  // ← old overload (optional, can be removed later)
+    void updateRTDescriptors();
     void updateUniformBuffer(uint32_t currentImage, const Camera& camera);
     void updateTonemapUniform(uint32_t currentImage);
     void performCopyAccumToOutput(VkCommandBuffer cmd);
@@ -152,12 +159,15 @@ private:
     void updateDynamicRTDescriptor(uint32_t frame);
     void updateTonemapDescriptor(uint32_t imageIndex);
 
+    /* ----- FPS TARGET STATE ----------------------------------------------- */
+    FpsTarget fpsTarget_ = FpsTarget::FPS_60;  // Default: 60 FPS
+
     /* ----- HYPERTRACE STATE (RUNTIME) ------------------------------------- */
-    bool     hypertraceEnabled_ = false;  // ← RUNTIME TOGGLE
-    uint32_t hypertraceCounter_ = 0;      // Frame skip counter
+    bool     hypertraceEnabled_ = false;
+    uint32_t hypertraceCounter_ = 0;
 
     /* ----- NEXUS STATE ---------------------------------------------------- */
-    float    prevNexusScore_ = 0.5f;      // EMA-filtered score for hysteresis
+    float    prevNexusScore_ = 0.5f;
 
     /* ----- member variables ----------------------------------------------- */
     SDL_Window* window_;
@@ -176,12 +186,12 @@ private:
 
     std::unique_ptr<VulkanRTX> rtx_;
     VkDescriptorSetLayout rtDescriptorSetLayout_ = VK_NULL_HANDLE;
-    std::vector<VkDescriptorSet> rtxDescriptorSets_;  // per-frame
+    std::vector<VkDescriptorSet> rtxDescriptorSets_;
 
     // NEW: Nexus GPU Decision
     VkPipeline            nexusPipeline_ = VK_NULL_HANDLE;
     VkPipelineLayout      nexusLayout_    = VK_NULL_HANDLE;
-    std::vector<VkDescriptorSet> nexusDescriptorSets_;  // per-frame
+    std::vector<VkDescriptorSet> nexusDescriptorSets_;
 
     // 1x1 R32_SFLOAT score image
     Dispose::VulkanHandle<VkImage>       hypertraceScoreImage_;
@@ -190,17 +200,17 @@ private:
 
     Dispose::VulkanHandle<VkDescriptorPool> descriptorPool_;
 
-    // RT Output (double-buffered — ping-pong between 2)
+    // RT Output (double-buffered)
     std::array<Dispose::VulkanHandle<VkImage>, 2> rtOutputImages_;
     std::array<Dispose::VulkanHandle<VkDeviceMemory>, 2> rtOutputMemories_;
     std::array<Dispose::VulkanHandle<VkImageView>, 2> rtOutputViews_;
 
-    // Accumulation (double-buffered — ping-pong between 2)
+    // Accumulation (double-buffered)
     std::array<Dispose::VulkanHandle<VkImage>, 2> accumImages_;
     std::array<Dispose::VulkanHandle<VkDeviceMemory>, 2> accumMemories_;
     std::array<Dispose::VulkanHandle<VkImageView>, 2> accumViews_;
 
-    // Uniforms — per-frame (MAX_FRAMES_IN_FLIGHT = 3)
+    // Uniforms — per-frame
     std::vector<Dispose::VulkanHandle<VkBuffer>> uniformBuffers_;
     std::vector<Dispose::VulkanHandle<VkDeviceMemory>> uniformBufferMemories_;
 
@@ -230,7 +240,7 @@ private:
     VkPipelineLayout rtPipelineLayout_ = VK_NULL_HANDLE;
 
     // Tonemap
-    std::vector<VkDescriptorSet> tonemapDescriptorSets_;  // per-swapchain image
+    std::vector<VkDescriptorSet> tonemapDescriptorSets_;
 
     // Frame stats
     std::chrono::steady_clock::time_point lastFPSTime_;

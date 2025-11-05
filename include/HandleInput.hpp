@@ -1,6 +1,6 @@
 // include/engine/input/HandleInput.hpp
 // AMOURANTH RTX Engine (C) 2025 – Input Handler Header
-// SDL3 | Full callback system | Camera integration
+// SDL3 | Full callback system | Camera integration | Ready for F key
 
 #pragma once
 
@@ -12,6 +12,7 @@ class Application;
 
 // ---------------------------------------------------------------------------
 //  Input handler – works with VulkanRTX::Camera
+//  Supports: 1-9, H, T, O, F, mouse, gamepad, touch
 // ---------------------------------------------------------------------------
 class HandleInput {
 public:
