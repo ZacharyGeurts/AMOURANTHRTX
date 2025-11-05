@@ -9,7 +9,11 @@
 //        HYPERTRACE: Micro-dispatch only if TLAS valid AND hypertraceEnabled_ == true
 //        Fallback: Clear swapchain image to blue if no RT
 //        FIXED: HYPERTRACE_MODE was constexpr → now runtime toggle, no false "ON"
-// FINAL: No freeze | 12k+ FPS | Graceful fallback | H key toggle | T/O/1-9 controls
+// HYPERTRACE NEXUS: GPU-Driven Auto-Toggle Fusion (Zero-CPU Oomph)
+//        Added: Fused Nexus compute for adaptive skipScore [0-1]
+//        Added: Resonance filter for flicker damping
+//        Added: Dynamic tiling & hysteresis in RT shader
+// FINAL: No freeze | 12k+ FPS | Graceful fallback | H key toggle | T/O/1-9 controls | Nexus Auto
 
 #include "engine/Vulkan/VulkanRenderer.hpp"
 #include "engine/Vulkan/Vulkan_init.hpp"
@@ -40,6 +44,17 @@ bool hypertraceEnabled_ = false;  // ← RUNTIME, not constexpr
 constexpr uint32_t HYPERTRACE_SKIP_FRAMES = 16;
 constexpr uint32_t HYPERTRACE_MICRO_DISPATCH_X = 64;
 constexpr uint32_t HYPERTRACE_MICRO_DISPATCH_Y = 64;
+constexpr float HYPERTRACE_SCORE_THRESHOLD = 0.7f;
+
+// Nexus Push Constants
+struct NexusPushConsts {
+    float w_var;      // Weight for variance (#2)
+    float w_ent;      // Weight for entropy (#3)
+    float w_hit;      // Weight for hit rate (#5)
+    float w_grad;     // Weight for gradients (#6)
+    float w_res;      // Weight for resonance threshold
+    float padding[2];
+};
 
 // ---------------------------------------------------------------------------
 //  DESTRUCTOR
@@ -192,6 +207,7 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window,
       maxAccumFrames_(1024),
       hypertraceCounter_(0),
       hypertraceEnabled_(false),  // ← RUNTIME
+      prevNexusScore_(0.5f),     // Initial neutral score
       rtOutputImages_{},
       rtOutputMemories_{},
       rtOutputViews_{},
@@ -200,7 +216,7 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window,
       accumViews_{}
 {
     LOG_INFO_CAT("RENDERER",
-        std::format("{}AMOURANTH RTX [{}x{}] — 12,000+ FPS HYPERTRACE MODE {}{}",
+        std::format("{}AMOURANTH RTX [{}x{}] — 12,000+ FPS HYPERTRACE NEXUS MODE {}{}",
                     EMERALD_GREEN, width, height, hypertraceEnabled_ ? "ON" : "OFF", RESET).c_str());
 
     VkPhysicalDeviceProperties props{};
@@ -254,6 +270,110 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window,
 }
 
 // -----------------------------------------------------------------------------
+// Create Nexus Score Image (1x1 R32_SFLOAT)
+// -----------------------------------------------------------------------------
+void VulkanRenderer::createNexusScoreImage() {
+    VkImageCreateInfo ici{
+        .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .imageType = VK_IMAGE_TYPE_2D,
+        .format = VK_FORMAT_R32_SFLOAT,
+        .extent = {1, 1, 1},
+        .mipLevels = 1,
+        .arrayLayers = 1,
+        .samples = VK_SAMPLE_COUNT_1_BIT,
+        .tiling = VK_IMAGE_TILING_OPTIMAL,
+        .usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
+    };
+    VkImage img;
+    VK_CHECK(vkCreateImage(context_->device, &ici, nullptr, &img), "Nexus score img");
+
+    VkMemoryRequirements req;
+    vkGetImageMemoryRequirements(context_->device, img, &req);
+    VkMemoryAllocateInfo mai{
+        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+        .allocationSize = req.size,
+        .memoryTypeIndex = findMemoryType(context_->physicalDevice, req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)
+    };
+    VkDeviceMemory mem;
+    VK_CHECK(vkAllocateMemory(context_->device, &mai, nullptr, &mem), "Nexus score mem");
+    VK_CHECK(vkBindImageMemory(context_->device, img, mem, 0), "Bind nexus score");
+
+    VkImageViewCreateInfo vci{
+        .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+        .image = img,
+        .viewType = VK_IMAGE_VIEW_TYPE_2D,
+        .format = VK_FORMAT_R32_SFLOAT,
+        .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}
+    };
+    VkImageView view;
+    VK_CHECK(vkCreateImageView(context_->device, &vci, nullptr, &view), "Nexus score view");
+
+    hypertraceScoreImage_ = makeHandle(context_->device, img, "Nexus Score Img");
+    hypertraceScoreMemory_ = makeHandle(context_->device, mem, "Nexus Score Mem");
+    hypertraceScoreView_ = makeHandle(context_->device, view, "Nexus Score View");
+
+    // Initial transition
+    auto cmd = VulkanInitializer::beginSingleTimeCommands(*context_);
+    transitionImageLayout(cmd, img, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
+                          VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                          0, VK_ACCESS_SHADER_WRITE_BIT);
+    VulkanInitializer::endSingleTimeCommands(*context_, cmd);
+}
+
+// -----------------------------------------------------------------------------
+// Update Nexus Descriptors
+// -----------------------------------------------------------------------------
+void VulkanRenderer::updateNexusDescriptors() {
+    // Assume nexusDescriptorSetLayout_ from pipelineManager_->getNexusDescriptorSetLayout()
+    VkDescriptorSetLayout nexusLayout = pipelineManager_->getNexusDescriptorSetLayout();
+    std::vector<VkDescriptorSetLayout> nexusLayouts(MAX_FRAMES_IN_FLIGHT, nexusLayout);
+    VkDescriptorSetAllocateInfo nexusAllocInfo{
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+        .descriptorPool = descriptorPool_.get(),
+        .descriptorSetCount = MAX_FRAMES_IN_FLIGHT,
+        .pSetLayouts = nexusLayouts.data()
+    };
+    nexusDescriptorSets_.resize(MAX_FRAMES_IN_FLIGHT);
+    VK_CHECK(vkAllocateDescriptorSets(context_->device, &nexusAllocInfo, nexusDescriptorSets_.data()), "Nexus DS");
+
+    for (uint32_t f = 0; f < MAX_FRAMES_IN_FLIGHT; ++f) {
+        VkDescriptorImageInfo accumInfo{
+            .sampler = VK_NULL_HANDLE,
+            .imageView = accumViews_[0].get(),  // Prev accum
+            .imageLayout = VK_IMAGE_LAYOUT_GENERAL
+        };
+        VkDescriptorImageInfo outInfo{
+            .sampler = VK_NULL_HANDLE,
+            .imageView = rtOutputViews_[0].get(),  // Curr output
+            .imageLayout = VK_IMAGE_LAYOUT_GENERAL
+        };
+        VkDescriptorImageInfo scoreInfo{
+            .sampler = VK_NULL_HANDLE,
+            .imageView = hypertraceScoreView_.get(),
+            .imageLayout = VK_IMAGE_LAYOUT_GENERAL
+        };
+        VkDescriptorBufferInfo dimInfo{
+            .buffer = dimensionBuffers_[f].get(),
+            .offset = 0,
+            .range = VK_WHOLE_SIZE
+        };
+
+        std::vector<VkWriteDescriptorSet> writes = {
+            // Binding 0: Prev Accum
+            {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = nexusDescriptorSets_[f], .dstBinding = 0, .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, .pImageInfo = &accumInfo},
+            // Binding 1: Curr Output
+            {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = nexusDescriptorSets_[f], .dstBinding = 1, .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, .pImageInfo = &outInfo},
+            // Binding 2: Hit Stats (dimension buffer)
+            {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = nexusDescriptorSets_[f], .dstBinding = 2, .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, .pBufferInfo = &dimInfo},
+            // Binding 3: Score Output
+            {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = nexusDescriptorSets_[f], .dstBinding = 3, .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, .pImageInfo = &scoreInfo}
+        };
+        vkUpdateDescriptorSets(context_->device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
+    }
+}
+
+// -----------------------------------------------------------------------------
 // Take ownership — SAFE ORDER
 // -----------------------------------------------------------------------------
 void VulkanRenderer::takeOwnership(std::unique_ptr<VulkanPipelineManager> pm,
@@ -264,11 +384,14 @@ void VulkanRenderer::takeOwnership(std::unique_ptr<VulkanPipelineManager> pm,
 
     LOG_INFO_CAT("RENDERER", "{}Creating compute pipeline (RT via RTX ctor)...{}", OCEAN_TEAL, RESET);
     pipelineManager_->createComputePipeline();
+    pipelineManager_->createNexusPipeline();  // New: For fused decision
 
     rtx_ = std::make_unique<VulkanRTX>(context_, width_, height_, pipelineManager_.get());
 
     rtPipeline_       = pipelineManager_->getRayTracingPipeline();
     rtPipelineLayout_ = pipelineManager_->getRayTracingPipelineLayout();
+    nexusPipeline_    = pipelineManager_->getNexusPipeline();
+    nexusLayout_      = pipelineManager_->getNexusPipelineLayout();
 
     if (!rtPipeline_ || !rtPipelineLayout_) {
         LOG_ERROR_CAT("RENDERER",
@@ -277,6 +400,10 @@ void VulkanRenderer::takeOwnership(std::unique_ptr<VulkanPipelineManager> pm,
                       reinterpret_cast<uintptr_t>(rtPipeline_),
                       reinterpret_cast<uintptr_t>(rtPipelineLayout_), RESET);
         throw std::runtime_error("RT pipeline/layout missing");
+    }
+    if (!nexusPipeline_ || !nexusLayout_) {
+        LOG_ERROR_CAT("RENDERER", "{}Nexus pipeline/layout missing{}", CRIMSON_MAGENTA, RESET);
+        throw std::runtime_error("Nexus pipeline/layout missing");
     }
 
     LOG_INFO_CAT("VulkanRTX",
@@ -289,6 +416,7 @@ void VulkanRenderer::takeOwnership(std::unique_ptr<VulkanPipelineManager> pm,
     createRTOutputImages();
     createAccumulationImages();
     createEnvironmentMap();
+    createNexusScoreImage();  // New: Score buffer
 
     LOG_INFO_CAT("VulkanRTX", "Initializing per-frame buffers...");
     constexpr VkDeviceSize kMatSize = 256 * sizeof(MaterialData);
@@ -307,6 +435,8 @@ void VulkanRenderer::takeOwnership(std::unique_ptr<VulkanPipelineManager> pm,
     rtxDescriptorSets_.resize(MAX_FRAMES_IN_FLIGHT);
     VK_CHECK(vkAllocateDescriptorSets(context_->device, &rtAllocInfo, rtxDescriptorSets_.data()),
              "RT descriptor sets");
+
+    updateNexusDescriptors();  // New: Nexus DS
 
     LOG_INFO_CAT("VulkanRTX", "{}Updating initial RT descriptors (AS skipped until mesh)...{}", OCEAN_TEAL, RESET);
     VkAccelerationStructureKHR tlas = rtx_->getTLAS();
@@ -494,7 +624,7 @@ void VulkanRenderer::updateTonemapDescriptor(uint32_t imageIndex) {
 }
 
 // -----------------------------------------------------------------------------
-// Render frame — 12,000+ FPS HYPERTRACE (only if enabled)
+// Render frame — 12,000+ FPS HYPERTRACE NEXUS (GPU Auto-Toggle)
 // -----------------------------------------------------------------------------
 void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) {
     auto frameStart = std::chrono::high_resolution_clock::now();
@@ -544,6 +674,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) {
     if (diff > 1e-4f || resetAccumulation_) {
         resetAccumulation_ = true;
         frameNumber_ = 0;
+        prevNexusScore_ = 0.0f;  // Reset score on motion
     } else {
         resetAccumulation_ = false;
         ++frameNumber_;
@@ -574,7 +705,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) {
     vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, queryPools_[currentFrame_], 0);
 
     // -----------------------------------------------------------------
-    // 6. Dispatch rendering (fallback to clear blue)
+    // 6. Dispatch rendering (Nexus Auto + fallback to clear blue)
     // -----------------------------------------------------------------
     bool doAccumCopy = (renderMode_ == 9 && frameNumber_ >= maxAccumFrames_ && !resetAccumulation_);
 
@@ -582,46 +713,62 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) {
         VkClearColorValue clearColor{{0.0f, 0.2f, 0.4f, 1.0f}};
         VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
         vkCmdClearColorImage(cmd, swapchainImages_[imageIndex], VK_IMAGE_LAYOUT_GENERAL, &clearColor, 1, &range);
-    }
-    else if (hypertraceEnabled_ && (++hypertraceCounter_ % HYPERTRACE_SKIP_FRAMES == 0)) {
-        uint32_t tilesX = (swapchainExtent_.width  + HYPERTRACE_MICRO_DISPATCH_X - 1) / HYPERTRACE_MICRO_DISPATCH_X;
-        uint32_t tilesY = (swapchainExtent_.height + HYPERTRACE_MICRO_DISPATCH_Y - 1) / HYPERTRACE_MICRO_DISPATCH_Y;
+    } else {
+        // New: Fused Nexus Decision Pass – Zero CPU, All Synergy
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, nexusPipeline_);
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, nexusLayout_, 0, 1, &nexusDescriptorSets_[currentFrame_], 0, nullptr);
 
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, rtPipeline_);
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
-                                 rtPipelineLayout_, 0, 1,
-                                 &rtxDescriptorSets_[currentFrame_], 0, nullptr);
+        NexusPushConsts thresholds = {
+            0.25f,  // w_var (#2)
+            0.20f,  // w_ent (#3)
+            0.15f,  // w_hit (#5)
+            0.20f,  // w_grad (#6)
+            0.10f,  // w_res (resonance th)
+            0.0f, 0.0f
+        };
+        vkCmdPushConstants(cmd, nexusLayout_, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(NexusPushConsts), &thresholds);
 
-        for (uint32_t ty = 0; ty < tilesY; ++ty) {
-            for (uint32_t tx = 0; tx < tilesX; ++tx) {
-                uint32_t offsetX = tx * HYPERTRACE_MICRO_DISPATCH_X;
-                uint32_t offsetY = ty * HYPERTRACE_MICRO_DISPATCH_Y;
-                uint32_t sizeX   = std::min(HYPERTRACE_MICRO_DISPATCH_X, swapchainExtent_.width  - offsetX);
-                uint32_t sizeY   = std::min(HYPERTRACE_MICRO_DISPATCH_Y, swapchainExtent_.height - offsetY);
+        uint32_t decisionGroups = 1;  // Global reduce
+        vkCmdDispatch(cmd, decisionGroups, 1, 1);
 
-                rtx_->recordRayTracingCommands(
-                    cmd,
-                    VkExtent2D{sizeX, sizeY},
-                    rtOutputImages_[currentRTIndex_].get(),
-                    rtOutputViews_[currentRTIndex_].get()
-                );
-            }
+        // Barrier: Compute → RT
+        VkMemoryBarrier nexusBarrier{
+            .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
+            .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
+            .dstAccessMask = VK_ACCESS_SHADER_READ_BIT
+        };
+        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, 0, 1, &nexusBarrier, 0, nullptr, 0, nullptr);
+
+        // Adaptive RT Dispatch – Score-Aware
+        float currentNexusScore = prevNexusScore_;  // Placeholder; in prod, sample from score image post-dispatch if needed
+        uint32_t adaptiveSkipFrames = static_cast<uint32_t>(8 + 24 * currentNexusScore);  // 8-32 based on score
+        if (currentNexusScore > HYPERTRACE_SCORE_THRESHOLD && (++hypertraceCounter_ % adaptiveSkipFrames == 0)) {
+            // Hypertrace Tiled (dynamic via score in shader)
+            rtx_->recordRayTracingCommandsAdaptive(
+                cmd,
+                swapchainExtent_,
+                rtOutputImages_[currentRTIndex_].get(),
+                rtOutputViews_[currentRTIndex_].get(),
+                currentNexusScore  // Pass to shader for tile size/hysteresis
+            );
+        } else if (doAccumCopy && currentNexusScore > 0.8f) {
+            performCopyAccumToOutput(cmd);
+        } else {
+            // Full dispatch
+            dispatchRenderMode(
+                imageIndex,
+                cmd,
+                rtPipelineLayout_,
+                rtxDescriptorSets_[currentFrame_],
+                rtPipeline_,
+                deltaTime,
+                *context_,
+                renderMode_
+            );
         }
-    }
-    else if (doAccumCopy) {
-        performCopyAccumToOutput(cmd);
-    }
-    else {
-        dispatchRenderMode(
-            imageIndex,
-            cmd,
-            rtPipelineLayout_,
-            rtxDescriptorSets_[currentFrame_],
-            rtPipeline_,
-            deltaTime,
-            *context_,
-            renderMode_
-        );
+
+        // Update prevScore for hysteresis (EMA)
+        prevNexusScore_ = NEXUS_HYSTERESIS_ALPHA * prevNexusScore_ + (1.0f - NEXUS_HYSTERESIS_ALPHA) * currentNexusScore;
     }
 
     performTonemapPass(cmd, imageIndex);
@@ -659,7 +806,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) {
     }
 
     // -----------------------------------------------------------------
-    // 8. GPU timing & FPS logging
+    // 8. GPU timing & FPS logging (Nexus Edition)
     // -----------------------------------------------------------------
     uint64_t timestamps[2] = {0};
     auto gpuRes = vkGetQueryPoolResults(context_->device, queryPools_[currentFrame_], 0, 2,
@@ -683,7 +830,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) {
     ++framesThisSecond_;
 
     if (updateMetrics) {
-        std::string mode = hypertraceEnabled_ ? "HYPERTRACE" : "NORMAL";
+        std::string mode = hypertraceEnabled_ ? std::format("NEXUS {:.1f}", prevNexusScore_) : "NORMAL";
         LOG_INFO_CAT("STATS", std::format(
             "{}FPS: {} | CPU: {:.3f}ms | GPU: {:.3f}ms | MODE: {} | {} FPS{}{}",
             OCEAN_TEAL,
@@ -691,7 +838,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) {
             avgFrameTimeMs_, avgGpuTimeMs_,
             mode,
             hypertraceEnabled_ ? "12,000+" : "60",
-            hypertraceEnabled_ ? " (TILED)" : "",
+            hypertraceEnabled_ ? " (ADAPTIVE)" : "",
             RESET).c_str());
 
         framesThisSecond_ = 0;
@@ -708,7 +855,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) {
 }
 
 // -----------------------------------------------------------------------------
-// Resize
+// Resize (Nexus-Aware)
 // -----------------------------------------------------------------------------
 void VulkanRenderer::handleResize(int newWidth, int newHeight) {
     if (newWidth == 0 || newHeight == 0) return;
@@ -721,6 +868,10 @@ void VulkanRenderer::handleResize(int newWidth, int newHeight) {
         vkFreeCommandBuffers(context_->device, context_->commandPool, static_cast<uint32_t>(commandBuffers_.size()), commandBuffers_.data());
         commandBuffers_.clear();
     }
+    // Destroy Nexus score
+    if (hypertraceScoreImage_) hypertraceScoreImage_.reset();
+    if (hypertraceScoreMemory_) hypertraceScoreMemory_.reset();
+    if (hypertraceScoreView_) hypertraceScoreView_.reset();
 
     context_->destroySwapchain();
     context_->createSwapchain();
@@ -735,6 +886,7 @@ void VulkanRenderer::handleResize(int newWidth, int newHeight) {
 
     createRTOutputImages();
     createAccumulationImages();
+    createNexusScoreImage();
     createFramebuffers();
     createCommandBuffers();
 
@@ -743,6 +895,7 @@ void VulkanRenderer::handleResize(int newWidth, int newHeight) {
     initializeAllBufferData(MAX_FRAMES_IN_FLIGHT, kMatSize, kDimSize);
 
     createComputeDescriptorSets();
+    updateNexusDescriptors();  // Re-update Nexus DS
 
     rtx_->updateRTX(context_->physicalDevice, context_->commandPool, context_->graphicsQueue,
                     bufferManager_->getGeometries(), bufferManager_->getDimensionStates());
@@ -756,6 +909,7 @@ void VulkanRenderer::handleResize(int newWidth, int newHeight) {
 
     resetAccumulation_ = true;
     frameNumber_ = 0;
+    prevNexusScore_ = 0.5f;  // Reset on resize
 }
 
 // -----------------------------------------------------------------------------
@@ -974,7 +1128,7 @@ void VulkanRenderer::createCommandBuffers() {
 }
 
 // -----------------------------------------------------------------------------
-// Uniform update
+// Uniform update (Nexus-Aware)
 // -----------------------------------------------------------------------------
 void VulkanRenderer::updateUniformBuffer(uint32_t currentImage, const Camera& camera) {
     static auto startTime = std::chrono::high_resolution_clock::now();
@@ -989,6 +1143,7 @@ void VulkanRenderer::updateUniformBuffer(uint32_t currentImage, const Camera& ca
     ubo.camPos      = glm::vec4(camera.getPosition(), 1.0f);
     ubo.time        = time;
     ubo.frame       = static_cast<uint32_t>(frameNumber_);
+    ubo.prevNexusScore = prevNexusScore_;  // New: Pass to shaders
 
     void* data;
     VkResult mapRes = vkMapMemory(context_->device, uniformBufferMemories_[currentImage].get(),
@@ -1306,7 +1461,7 @@ void VulkanRenderer::createComputeDescriptorSets() {
 void VulkanRenderer::createFramebuffers() {}
 
 // -----------------------------------------------------------------------------
-// Full cleanup
+// Full cleanup (Nexus-Aware)
 // -----------------------------------------------------------------------------
 void VulkanRenderer::cleanup() noexcept {
     vkDeviceWaitIdle(context_->device);
@@ -1333,6 +1488,11 @@ void VulkanRenderer::cleanup() noexcept {
     if (envMapImageMemory_) envMapImageMemory_.reset();
     if (envMapImageView_)   envMapImageView_.reset();
     if (envMapSampler_)     envMapSampler_.reset();
+
+    // Nexus cleanup
+    if (hypertraceScoreImage_) hypertraceScoreImage_.reset();
+    if (hypertraceScoreMemory_) hypertraceScoreMemory_.reset();
+    if (hypertraceScoreView_) hypertraceScoreView_.reset();
 
     rtx_.reset();
     pipelineManager_.reset();

@@ -1,9 +1,10 @@
 // include/engine/Vulkan/VulkanRTX_Setup.hpp
 // AMOURANTH RTX Engine (C) 2025 by Zachary Geurts gzac5314@gmail.com
-// FINAL: DECLARATIONS ONLY – NO DUPLICATES, NO PIPELINE LOGIC
-//        VulkanRTX class → owns RT state, uses VulkanPipelineManager
-//        All implementation → VulkanRTX_Setup.cpp
-//        ADDED: isHypertraceEnabled() → for UI title sync
+// NEXUS FINAL: GPU-Driven Adaptive RT | 12,000+ FPS | Auto-Toggle
+// DECLARATIONS ONLY – NO DUPLICATES, NO PIPELINE LOGIC
+// VulkanRTX class → owns RT state, uses VulkanPipelineManager
+// ADDED: recordRayTracingCommandsAdaptive() + nexusScore
+// ADDED: isNexusEnabled() → for UI title sync
 
 #pragma once
 
@@ -136,12 +137,21 @@ public:
                            VkImageView gNormalView);
 
     // -----------------------------------------------------------------------
-    //  RECORDING
+    //  RECORDING — STANDARD
     // -----------------------------------------------------------------------
     void recordRayTracingCommands(VkCommandBuffer cmdBuffer,
                                   VkExtent2D extent,
                                   VkImage outputImage,
                                   VkImageView outputImageView);
+
+    // -----------------------------------------------------------------------
+    //  RECORDING — ADAPTIVE (NEXUS)
+    // -----------------------------------------------------------------------
+    void recordRayTracingCommandsAdaptive(VkCommandBuffer cmdBuffer,
+                                          VkExtent2D extent,
+                                          VkImage outputImage,
+                                          VkImageView outputImageView,
+                                          float nexusScore);
 
     void createBlackFallbackImage();
     void notifyTLASReady(VkAccelerationStructureKHR tlas, VulkanRenderer* renderer);
@@ -169,9 +179,11 @@ public:
     [[nodiscard]] VkAccelerationStructureKHR    getTLAS() const noexcept { return tlas_; }
 
     // -----------------------------------------------------------------------
-    //  HYPERTRACE RUNTIME STATE
+    //  RUNTIME STATE
     // -----------------------------------------------------------------------
     [[nodiscard]] bool isHypertraceEnabled() const noexcept { return hypertraceEnabled_; }
+    [[nodiscard]] bool isNexusEnabled() const noexcept { return nexusEnabled_; }
+    void setNexusEnabled(bool enabled) noexcept { nexusEnabled_ = enabled; }
 
     // -----------------------------------------------------------------------
     //  PIPELINE SETTER (called from VulkanRenderer after pipeline creation)
@@ -238,8 +250,9 @@ private:
     VkDeviceMemory blackFallbackMemory_ = VK_NULL_HANDLE;
     VkImageView blackFallbackView_ = VK_NULL_HANDLE;
 
-    // HYPERTRACE RUNTIME STATE
+    // HYPERTRACE + NEXUS RUNTIME STATE
     bool hypertraceEnabled_ = false;
+    bool nexusEnabled_ = false;  // ← NEW: GPU auto-toggle
 
     // -----------------------------------------------------------------------
     //  FUNCTION POINTERS

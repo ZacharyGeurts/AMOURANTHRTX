@@ -1,0 +1,69 @@
+// shaders/compute/nexusDecision.comp
+#version 460
+#extension GL_EXT_shader_image_load_formatted : require
+#extension GL_KHR_shader_subgroup_basic      : require
+
+// ---------------------------------------------------------------------------
+//  Layout – matches the descriptor set created in VulkanRenderer::updateNexusDescriptors()
+// ---------------------------------------------------------------------------
+layout(set = 0, binding = 0, rgba32f) readonly  uniform image2D  prevAccum;   // previous accumulation
+layout(set = 0, binding = 1, rgba32f) readonly  uniform image2D  currOutput;  // current RT output
+layout(set = 0, binding = 2)          uniform  BufferStats {
+    uint   hitCount;
+    uint   totalRays;
+    float  variance;
+    float  entropy;
+    float  gradMag;
+    float  pad[3];
+} stats;
+layout(set = 0, binding = 3, r32f)    writeonly uniform image2D  scoreOut;   // 1x1 score image
+
+// ---------------------------------------------------------------------------
+//  Push-constant block (weights + thresholds)
+// ---------------------------------------------------------------------------
+layout(push_constant) uniform PushConsts {
+    float w_var;      // variance weight
+    float w_ent;      // entropy weight
+    float w_hit;      // hit-rate weight
+    float w_grad;     // gradient weight
+    float w_res;      // resonance-threshold weight
+    float pad[3];
+} pc;
+
+// ---------------------------------------------------------------------------
+//  Helper: simple reduction over a 16x16 tile
+// ---------------------------------------------------------------------------
+void main()
+{
+    // One invocation per pixel – we only need a single value in the 1x1 score image
+    if (gl_GlobalInvocationID.x != 0 || gl_GlobalInvocationID.y != 0)
+        return;
+
+    // ---------------------------------------------------------------
+    // 1. Hit-rate (0-1)
+    // ---------------------------------------------------------------
+    float hitRate = (stats.totalRays > 0)
+                  ? float(stats.hitCount) / float(stats.totalRays)
+                  : 0.0;
+
+    // ---------------------------------------------------------------
+    // 2. Normalised variance / entropy / gradient (already in [0,1] range)
+    // ---------------------------------------------------------------
+    float var   = stats.variance;
+    float ent   = stats.entropy;
+    float grad  = stats.gradMag;
+
+    // ---------------------------------------------------------------
+    // 3. Combine with weights
+    // ---------------------------------------------------------------
+    float rawScore = pc.w_var  * var
+                   + pc.w_ent  * ent
+                   + pc.w_hit  * hitRate
+                   + pc.w_grad * grad;
+
+    // ---------------------------------------------------------------
+    // 4. Clamp & write to 1x1 score image
+    // ---------------------------------------------------------------
+    float finalScore = clamp(rawScore, 0.0, 1.0);
+    imageStore(scoreOut, ivec2(0,0), vec4(finalScore, 0.0, 0.0, 0.0));
+}

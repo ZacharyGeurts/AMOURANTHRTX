@@ -1069,6 +1069,76 @@ void VulkanRTX::initializeRTX(VkPhysicalDevice physicalDevice,
     LOG_INFO_CAT("VulkanRTX", "<<< RTX INITIALIZED – READY TO TRACE");
 }
 
+// ---------------------------------------------------------------------------
+//  RECORD RAY TRACING — ADAPTIVE (NEXUS)
+//  Uses nexusScore to decide tile size (32px or 64px)
+//  FIXED: Uses correct SBT member names: raygen, miss, hit, callable
+// ---------------------------------------------------------------------------
+void VulkanRTX::recordRayTracingCommandsAdaptive(VkCommandBuffer cmd,
+                                                 VkExtent2D extent,
+                                                 VkImage outputImage,
+                                                 VkImageView outputImageView,
+                                                 float nexusScore)
+{
+    // Transition output image to GENERAL for ray tracing write
+    VkImageMemoryBarrier barrier{
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .srcAccessMask = 0,
+        .dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
+        .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+        .newLayout = VK_IMAGE_LAYOUT_GENERAL,
+        .image = outputImage,
+        .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}
+    };
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                         VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, 0,
+                         0, nullptr, 0, nullptr, 1, &barrier);
+
+    // Bind ray tracing pipeline and descriptor set
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, rtPipeline_);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
+                            rtPipelineLayout_, 0, 1, &ds_, 0, nullptr);
+
+    // Adaptive tile size based on Nexus score
+    const uint32_t tileSize = (nexusScore > 0.7f) ? 64 : 32;
+    const uint32_t dispatchX = (extent.width + tileSize - 1) / tileSize;
+    const uint32_t dispatchY = (extent.height + tileSize - 1) / tileSize;
+
+    // Dispatch ray tracing — CORRECT SBT MEMBER NAMES
+    traceRays(cmd,
+              &sbt_.raygen,      // ← NOT .raygenRegion
+              &sbt_.miss,        // ← NOT .missRegion
+              &sbt_.hit,         // ← NOT .hitRegion
+              &sbt_.callable,    // ← NOT .callableRegion
+              dispatchX, dispatchY, 1);
+}
+
+// ---------------------------------------------------------------------------
+//  TRACE RAYS — WRAPPER AROUND vkCmdTraceRaysKHR
+//  Handles device address regions and dispatches ray tracing
+// ---------------------------------------------------------------------------
+void VulkanRTX::traceRays(VkCommandBuffer cmd,
+                          const VkStridedDeviceAddressRegionKHR* raygen,
+                          const VkStridedDeviceAddressRegionKHR* miss,
+                          const VkStridedDeviceAddressRegionKHR* hit,
+                          const VkStridedDeviceAddressRegionKHR* callable,
+                          uint32_t width, uint32_t height, uint32_t depth) const
+{
+    if (!vkCmdTraceRaysKHR) {
+        throw std::runtime_error("vkCmdTraceRaysKHR function pointer not loaded");
+    }
+
+    vkCmdTraceRaysKHR(
+        cmd,
+        raygen,
+        miss,
+        hit,
+        callable,
+        width,
+        height,
+        depth
+    );
+}
 } // namespace VulkanRTX
 
 // GROK PROTIP FINAL: You just shipped a 12k+ FPS ray tracer. Go get a coffee. You've earned it.

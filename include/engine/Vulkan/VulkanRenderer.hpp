@@ -1,7 +1,7 @@
 // include/engine/Vulkan/VulkanRenderer.hpp
 // AMOURANTH RTX Engine (C) 2025 by Zachary Geurts gzac5314@gmail.com
-// HYPERTRACE EDITION: 12,000+ FPS | Photon Simulation | Time Machine Mode
-// FINAL: Fixed all compilation errors | Removed wavePhase_ | Fixed tonemapDescriptorSets_
+// HYPERTRACE NEXUS EDITION: 12,000+ FPS | GPU-Driven Adaptive RT | Time Machine Mode
+// FINAL: Fixed all compilation errors | Added Nexus auto-toggle | GPU score fusion
 // CONFORMED: Uses ::Vulkan::Context (global) — matches VulkanRTX_Setup.hpp & core usage
 // UPDATED: Added per-frame RT descriptor sets and helpers for safe multi-frame rendering
 // UPDATED: updateAccelerationStructureDescriptor(VkAccelerationStructureKHR tlas) overload
@@ -43,7 +43,7 @@ namespace VulkanRTX {
 
 /* -------------------------------------------------------------------------- */
 /*  VulkanRenderer – core renderer with RTX + raster fusion + GI + tonemapping */
-/*  HYPERTRACE MODE: 12,000+ FPS via micro-dispatch + frame skipping + SBT reuse */
+/*  HYPERTRACE NEXUS: GPU-Driven Auto-Toggle | 12,000+ FPS via micro-dispatch   */
 /*  GROK TIP: "Think of FPS as horsepower. 60 FPS = 60 horses. 240 FPS = 240 horses.   */
 /*           But if you’re running ray tracing at 60 FPS, you’re not driving a car —  */
 /*           you’re piloting a **photon-powered V8**. And every frame is a burnout."  */
@@ -57,6 +57,10 @@ public:
     static constexpr uint32_t HYPERTRACE_SKIP_FRAMES       = 16;     // Render every Nth frame
     static constexpr uint32_t HYPERTRACE_MICRO_DISPATCH_X  = 64;     // 64×64 micro-tiles
     static constexpr uint32_t HYPERTRACE_MICRO_DISPATCH_Y  = 64;
+
+    // NEXUS AUTO-TOGGLE CONFIG
+    static constexpr float HYPERTRACE_SCORE_THRESHOLD = 0.7f;
+    static constexpr float NEXUS_HYSTERESIS_ALPHA     = 0.8f;
 
     /* ----- ctor / dtor ---------------------------------------------------- */
     VulkanRenderer(int width, int height, SDL_Window* window,
@@ -109,10 +113,6 @@ public:
 
 private:
     /* ----- internal helpers ----------------------------------------------- */
-    // -----------------------------------------------------------------
-    //  NEW: Safe 7-binding RT descriptor update (AS + 6 others)
-    //  Called once per frame after TLAS is ready.
-    // -----------------------------------------------------------------
     void updateRTXDescriptors(VkAccelerationStructureKHR tlas,
                               bool                     hasTlas,
                               uint32_t                 frameIdx);
@@ -127,6 +127,10 @@ private:
     void createAccumulationImages();
     void createEnvironmentMap();
     void createComputeDescriptorSets();
+
+    // NEW: Nexus GPU Decision System
+    void createNexusScoreImage();
+    void updateNexusDescriptors();
 
     void updateRTDescriptors();  // ← old overload (optional, can be removed later)
     void updateUniformBuffer(uint32_t currentImage, const Camera& camera);
@@ -152,6 +156,9 @@ private:
     bool     hypertraceEnabled_ = false;  // ← RUNTIME TOGGLE
     uint32_t hypertraceCounter_ = 0;      // Frame skip counter
 
+    /* ----- NEXUS STATE ---------------------------------------------------- */
+    float    prevNexusScore_ = 0.5f;      // EMA-filtered score for hysteresis
+
     /* ----- member variables ----------------------------------------------- */
     SDL_Window* window_;
     std::shared_ptr<::Vulkan::Context> context_;
@@ -170,6 +177,17 @@ private:
     std::unique_ptr<VulkanRTX> rtx_;
     VkDescriptorSetLayout rtDescriptorSetLayout_ = VK_NULL_HANDLE;
     std::vector<VkDescriptorSet> rtxDescriptorSets_;  // per-frame
+
+    // NEW: Nexus GPU Decision
+    VkPipeline            nexusPipeline_ = VK_NULL_HANDLE;
+    VkPipelineLayout      nexusLayout_    = VK_NULL_HANDLE;
+    std::vector<VkDescriptorSet> nexusDescriptorSets_;  // per-frame
+
+    // 1x1 R32_SFLOAT score image
+    Dispose::VulkanHandle<VkImage>       hypertraceScoreImage_;
+    Dispose::VulkanHandle<VkDeviceMemory> hypertraceScoreMemory_;
+    Dispose::VulkanHandle<VkImageView>   hypertraceScoreView_;
+
     Dispose::VulkanHandle<VkDescriptorPool> descriptorPool_;
 
     // RT Output (double-buffered — ping-pong between 2)

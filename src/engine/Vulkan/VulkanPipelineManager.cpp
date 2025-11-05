@@ -111,6 +111,10 @@ VulkanPipelineManager::~VulkanPipelineManager()
 
     if (transientPool_)             vkDestroyCommandPool(dev, transientPool_, nullptr);
 
+    if (nexusPipeline_)             vkDestroyPipeline(dev, nexusPipeline_, nullptr);
+    if (nexusPipelineLayout_)       vkDestroyPipelineLayout(dev, nexusPipelineLayout_, nullptr);
+    if (nexusDescriptorSetLayout_)  vkDestroyDescriptorSetLayout(dev, nexusDescriptorSetLayout_, nullptr);
+
 #ifdef ENABLE_VULKAN_DEBUG
     if (debugMessenger_) {
         auto DestroyDebugUtilsMessengerEXT = (PFN_vkDestroyDebugUtilsMessengerEXT)
@@ -930,5 +934,100 @@ void VulkanPipelineManager::dispatchCompute(uint32_t x, uint32_t y, uint32_t z)
 
     VulkanInitializer::endSingleTimeCommands(context_, cmd);
 }
+
+// ---------------------------------------------------------------------------
+//  NEXUS: DESCRIPTOR SET LAYOUT (4 bindings)
+//  0: prevAccum (readonly)
+//  1: currOutput (readonly)
+//  2: stats buffer
+//  3: scoreOut (writeonly 1x1 R32F)
+// ---------------------------------------------------------------------------
+void VulkanPipelineManager::createNexusDescriptorSetLayout()
+{
+#ifndef NDEBUG
+    LOG_INFO_CAT("Nexus", ">>> CREATING NEXUS DESCRIPTOR SET LAYOUT");
+#endif
+
+    std::array<VkDescriptorSetLayoutBinding, 4> bindings = {{
+        // binding 0: previous accumulation image (readonly)
+        {0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},
+        // binding 1: current RT output (readonly)
+        {1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},
+        // binding 2: stats buffer (hitCount, totalRays, variance, entropy, gradMag)
+        {2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},
+        // binding 3: 1x1 score output image (writeonly)
+        {3, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr}
+    }};
+
+    VkDescriptorSetLayoutCreateInfo layoutInfo{
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+        .bindingCount = static_cast<uint32_t>(bindings.size()),
+        .pBindings = bindings.data()
+    };
+
+    VK_CHECK(vkCreateDescriptorSetLayout(context_.device, &layoutInfo, nullptr, &nexusDescriptorSetLayout_),
+             "Create Nexus descriptor set layout");
+
+#ifndef NDEBUG
+    LOG_INFO_CAT("Nexus", "    LAYOUT @ {:p}", static_cast<void*>(nexusDescriptorSetLayout_));
+    LOG_INFO_CAT("Nexus", "<<< NEXUS DESCRIPTOR LAYOUT READY");
+#endif
+}
+
+// ---------------------------------------------------------------------------
+//  NEXUS: COMPUTE PIPELINE — 1x1 dispatch → writes score to 1x1 image
+//  Uses: nexusDecision.comp.spv
+//  Push constants: weights (variance, entropy, hit, grad, resonance)
+// ---------------------------------------------------------------------------
+void VulkanPipelineManager::createNexusPipeline()
+{
+#ifndef NDEBUG
+    LOG_INFO_CAT("Nexus", ">>> CREATING NEXUS DECISION PIPELINE (nexusDecision.comp)");
+#endif
+
+    createNexusDescriptorSetLayout();
+
+    // Push constants: 5 weights + 3 padding
+    VkPushConstantRange pushConst{
+        .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+        .offset = 0,
+        .size = sizeof(float) * 8  // w_var, w_ent, w_hit, w_grad, w_res, pad[3]
+    };
+
+    VkPipelineLayoutCreateInfo layoutInfo{
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+        .setLayoutCount = 1,
+        .pSetLayouts = &nexusDescriptorSetLayout_,
+        .pushConstantRangeCount = 1,
+        .pPushConstantRanges = &pushConst
+    };
+
+    VK_CHECK(vkCreatePipelineLayout(context_.device, &layoutInfo, nullptr, &nexusPipelineLayout_),
+             "Create Nexus pipeline layout");
+
+    VkShaderModule shader = loadShaderImpl(context_.device, "compute/nexusDecision");
+
+    VkComputePipelineCreateInfo pipelineInfo{
+        .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
+        .stage = {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+            .stage = VK_SHADER_STAGE_COMPUTE_BIT,
+            .module = shader,
+            .pName = "main"
+        },
+        .layout = nexusPipelineLayout_
+    };
+
+    VK_CHECK(vkCreateComputePipelines(context_.device, pipelineCache_, 1, &pipelineInfo, nullptr, &nexusPipeline_),
+             "Create Nexus compute pipeline");
+
+    vkDestroyShaderModule(context_.device, shader, nullptr);
+
+#ifndef NDEBUG
+    LOG_INFO_CAT("Nexus", "    PIPELINE @ {:p}", static_cast<void*>(nexusPipeline_));
+    LOG_INFO_CAT("Nexus", "<<< NEXUS DECISION PIPELINE LIVE");
+#endif
+}
+
 
 } // namespace VulkanRTX

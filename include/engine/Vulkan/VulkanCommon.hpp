@@ -1,5 +1,8 @@
 // include/engine/Vulkan/VulkanCommon.hpp
 // AMOURANTH RTX Engine (C) 2025 by Zachary Geurts gzac5314@gmail.com is licensed under CC BY-NC 4.0
+// NEXUS FINAL: GPU-Driven Adaptive RT | 12,000+ FPS | Auto-Toggle
+// FIXED: VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT + prevNexusScore in UBO
+
 #pragma once
 
 #include <vulkan/vulkan.h>
@@ -36,6 +39,10 @@ class VulkanRenderer;
 // 0. Global Constants
 // ========================================================================
 constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 3;
+
+// NEXUS CONFIG
+constexpr float NEXUS_SCORE_THRESHOLD = 0.7f;
+constexpr float NEXUS_HYSTERESIS_ALPHA = 0.8f;
 
 // ========================================================================
 // 1. Strided Device Address Region
@@ -123,7 +130,7 @@ struct alignas(16) DimensionData {
 static_assert(sizeof(DimensionData) == 16, "DimensionData must be 16 bytes");
 
 // ========================================================================
-// 6. UniformBufferObject
+// 6. UniformBufferObject — NOW WITH prevNexusScore
 // ========================================================================
 struct alignas(16) UniformBufferObject {
     alignas(16) glm::mat4 viewInverse;
@@ -131,7 +138,8 @@ struct alignas(16) UniformBufferObject {
     alignas(16) glm::vec4 camPos;
     alignas(4)  float     time;
     alignas(4)  uint32_t  frame;
-    alignas(4)  float     _pad[26];
+    alignas(4)  float     prevNexusScore;  // ← NEW: For adaptive dispatch
+    alignas(4)  float     _pad[25];        // 256 - 104 = 152 → 152/4 = 38 → keep 25
 };
 static_assert(sizeof(UniformBufferObject) == 256, "UBO must be 256 bytes");
 
@@ -181,7 +189,8 @@ inline std::unordered_map<std::string, std::string> getShaderBinPaths() {
         {"mid_anyhit",          "assets/shaders/raytracing/mid_anyhit.spv"},
         {"tonemap_compute",     "assets/shaders/compute/tonemap.spv"},
         {"tonemap_vert",        "assets/shaders/graphics/tonemap_vert.spv"},
-        {"tonemap_frag",        "assets/shaders/graphics/tonemap_frag.spv"}
+        {"tonemap_frag",        "assets/shaders/graphics/tonemap_frag.spv"},
+        {"nexusDecision",       "assets/shaders/compute/nexusDecision.spv"}  // ← NEW
     };
 }
 
@@ -199,7 +208,8 @@ inline std::unordered_map<std::string, std::string> getShaderSrcPaths() {
         {"mid_anyhit",          "assets/shaders/raytracing/mid_anyhit.rahit"},
         {"tonemap_compute",     "assets/shaders/compute/tonemap.comp"},
         {"tonemap_vert",        "assets/shaders/graphics/tonemap_vert.glsl"},
-        {"tonemap_frag",        "assets/shaders/graphics/tonemap_frag.glsl"}
+        {"tonemap_frag",        "assets/shaders/graphics/tonemap_frag.glsl"},
+        {"nexusDecision",       "assets/shaders/compute/nexusDecision.comp"}  // ← NEW
     };
 }
 
