@@ -1,0 +1,96 @@
+#version 460
+#extension GL_EXT_nonuniform_qualifier : enable
+#extension GL_EXT_scalar_block_layout : enable
+
+// ---------------------------------------------------------------------
+//  Compute Workgroup
+// ---------------------------------------------------------------------
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+// ---------------------------------------------------------------------
+//  Bindings – Matches VulkanRTX::DescriptorBindings
+// ---------------------------------------------------------------------
+layout(set = 0, binding = 1, rgba8) readonly uniform image2D noisyImage;      // RTX output
+layout(set = 0, binding = 5, rgba8) uniform image2D denoisedImage;           // Output
+layout(set = 0, binding = 8, r32f) readonly uniform image2D gDepth;          // Depth
+layout(set = 0, binding = 9, rgba8) readonly uniform image2D gNormal;        // Normal
+
+// ---------------------------------------------------------------------
+//  Push Constants
+// ---------------------------------------------------------------------
+layout(push_constant) uniform PushConstants {
+    vec2 resolution;
+    uint frameIndex;
+    uint enableDenoise;
+    uint enableEdgePreserve;
+    float sigmaColor;
+    float sigmaSpatial;
+    float sigmaNormal;
+} pc;
+
+// ---------------------------------------------------------------------
+//  Helper: Gaussian Weight
+// ---------------------------------------------------------------------
+float gaussian(float x, float sigma) {
+    return exp(-(x * x) / (2.0 * sigma * sigma));
+}
+
+// ---------------------------------------------------------------------
+//  Main – Bilateral Denoise
+// ---------------------------------------------------------------------
+void main() {
+    ivec2 pos = ivec2(gl_GlobalInvocationID.xy);
+    if (pos.x >= int(pc.resolution.x) || pos.y >= int(pc.resolution.y)) return;
+
+    vec3 centerColor = imageLoad(noisyImage, pos).rgb;
+    float centerDepth = imageLoad(gDepth, pos).r;
+    vec3 centerNormal = imageLoad(gNormal, pos).rgb * 2.0 - 1.0;
+    centerNormal = normalize(centerNormal);
+
+    vec3 sum = vec3(0.0);
+    float weightSum = 0.0;
+
+    const int radius = 4;
+    for (int y = -radius; y <= radius; ++y) {
+        for (int x = -radius; x <= radius; ++x) {
+            ivec2 samplePos = pos + ivec2(x, y);
+            if (samplePos.x < 0 || samplePos.y < 0 || 
+                samplePos.x >= int(pc.resolution.x) || samplePos.y >= int(pc.resolution.y)) 
+                continue;
+
+            vec3 sampleColor = imageLoad(noisyImage, samplePos).rgb;
+            float sampleDepth = imageLoad(gDepth, samplePos).r;
+            vec3 sampleNormal = imageLoad(gNormal, samplePos).rgb * 2.0 - 1.0;
+            sampleNormal = normalize(sampleNormal);
+
+            // Spatial weight
+            float dist = length(vec2(x, y));
+            float wSpatial = gaussian(dist, pc.sigmaSpatial);
+
+            // Color weight
+            float colorDiff = length(centerColor - sampleColor);
+            float wColor = gaussian(colorDiff, pc.sigmaColor);
+
+            // Normal weight
+            float normalDiff = max(0.0, dot(centerNormal, sampleNormal));
+            float wNormal = gaussian(1.0 - normalDiff, pc.sigmaNormal);
+
+            // Depth weight
+            float depthDiff = abs(centerDepth - sampleDepth);
+            float wDepth = gaussian(depthDiff, pc.sigmaSpatial * 0.1);
+
+            float weight = wSpatial * wColor * wNormal * wDepth;
+            sum += sampleColor * weight;
+            weightSum += weight;
+        }
+    }
+
+    vec3 denoised = weightSum > 0.0 ? sum / weightSum : centerColor;
+
+    // Optional: passthrough if disabled
+    if (pc.enableDenoise == 0) {
+        denoised = centerColor;
+    }
+
+    imageStore(denoisedImage, pos, vec4(denoised, 1.0));
+}
