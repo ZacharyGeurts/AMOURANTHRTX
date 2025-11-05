@@ -1,5 +1,5 @@
 // src/engine/Vulkan/VulkanRenderer.cpp
-// AMOURANTH RTX Engine (C) 2025 by Zachary Geurts
+// AMOURANTH RTX Engine (C) 2025 by Zachary Geurts gzac5314@gmail.com
 // ULTRA FINAL: 12,000+ FPS MODE — NO COMPROMISE
 // FIXED: Freeze at start → vkAcquireNextImageKHR timeout = 100ms + early return if no image
 //        Added: Non-blocking acquire + frame skip on timeout
@@ -325,7 +325,6 @@ void VulkanRenderer::createNexusScoreImage() {
 // Update Nexus Descriptors
 // -----------------------------------------------------------------------------
 void VulkanRenderer::updateNexusDescriptors() {
-    // Assume nexusDescriptorSetLayout_ from pipelineManager_->getNexusDescriptorSetLayout()
     VkDescriptorSetLayout nexusLayout = pipelineManager_->getNexusDescriptorSetLayout();
     std::vector<VkDescriptorSetLayout> nexusLayouts(MAX_FRAMES_IN_FLIGHT, nexusLayout);
     VkDescriptorSetAllocateInfo nexusAllocInfo{
@@ -340,12 +339,12 @@ void VulkanRenderer::updateNexusDescriptors() {
     for (uint32_t f = 0; f < MAX_FRAMES_IN_FLIGHT; ++f) {
         VkDescriptorImageInfo accumInfo{
             .sampler = VK_NULL_HANDLE,
-            .imageView = accumViews_[0].get(),  // Prev accum
+            .imageView = accumViews_[0].get(),
             .imageLayout = VK_IMAGE_LAYOUT_GENERAL
         };
         VkDescriptorImageInfo outInfo{
             .sampler = VK_NULL_HANDLE,
-            .imageView = rtOutputViews_[0].get(),  // Curr output
+            .imageView = rtOutputViews_[0].get(),
             .imageLayout = VK_IMAGE_LAYOUT_GENERAL
         };
         VkDescriptorImageInfo scoreInfo{
@@ -360,13 +359,9 @@ void VulkanRenderer::updateNexusDescriptors() {
         };
 
         std::vector<VkWriteDescriptorSet> writes = {
-            // Binding 0: Prev Accum
             {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = nexusDescriptorSets_[f], .dstBinding = 0, .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, .pImageInfo = &accumInfo},
-            // Binding 1: Curr Output
             {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = nexusDescriptorSets_[f], .dstBinding = 1, .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, .pImageInfo = &outInfo},
-            // Binding 2: Hit Stats (dimension buffer)
             {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = nexusDescriptorSets_[f], .dstBinding = 2, .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, .pBufferInfo = &dimInfo},
-            // Binding 3: Score Output
             {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = nexusDescriptorSets_[f], .dstBinding = 3, .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, .pImageInfo = &scoreInfo}
         };
         vkUpdateDescriptorSets(context_->device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
@@ -384,7 +379,7 @@ void VulkanRenderer::takeOwnership(std::unique_ptr<VulkanPipelineManager> pm,
 
     LOG_INFO_CAT("RENDERER", "{}Creating compute pipeline (RT via RTX ctor)...{}", OCEAN_TEAL, RESET);
     pipelineManager_->createComputePipeline();
-    pipelineManager_->createNexusPipeline();  // New: For fused decision
+    pipelineManager_->createNexusPipeline();
 
     rtx_ = std::make_unique<VulkanRTX>(context_, width_, height_, pipelineManager_.get());
 
@@ -416,7 +411,7 @@ void VulkanRenderer::takeOwnership(std::unique_ptr<VulkanPipelineManager> pm,
     createRTOutputImages();
     createAccumulationImages();
     createEnvironmentMap();
-    createNexusScoreImage();  // New: Score buffer
+    createNexusScoreImage();
 
     LOG_INFO_CAT("VulkanRTX", "Initializing per-frame buffers...");
     constexpr VkDeviceSize kMatSize = 256 * sizeof(MaterialData);
@@ -436,7 +431,7 @@ void VulkanRenderer::takeOwnership(std::unique_ptr<VulkanPipelineManager> pm,
     VK_CHECK(vkAllocateDescriptorSets(context_->device, &rtAllocInfo, rtxDescriptorSets_.data()),
              "RT descriptor sets");
 
-    updateNexusDescriptors();  // New: Nexus DS
+    updateNexusDescriptors();
 
     LOG_INFO_CAT("VulkanRTX", "{}Updating initial RT descriptors (AS skipped until mesh)...{}", OCEAN_TEAL, RESET);
     VkAccelerationStructureKHR tlas = rtx_->getTLAS();
@@ -723,7 +718,6 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) {
         uint32_t adaptiveSkip = static_cast<uint32_t>(baseSkip * (0.5f + 0.5f * currentNexusScore));  // 50%-100% of base
 
         if (currentNexusScore > HYPERTRACE_SCORE_THRESHOLD && (++hypertraceCounter_ % adaptiveSkip == 0)) {
-            // Micro-dispatch with adaptive tile size
             uint32_t tileSize = (currentNexusScore > 0.8f) ? 64 : 32;
             uint32_t tilesX = (swapchainExtent_.width + tileSize - 1) / tileSize;
             uint32_t tilesY = (swapchainExtent_.height + tileSize - 1) / tileSize;
@@ -749,7 +743,6 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) {
             dispatchRenderMode(imageIndex, cmd, rtPipelineLayout_, rtxDescriptorSets_[currentFrame_], rtPipeline_, deltaTime, *context_, renderMode_);
         }
 
-        // Hysteresis
         prevNexusScore_ = NEXUS_HYSTERESIS_ALPHA * prevNexusScore_ + (1.0f - NEXUS_HYSTERESIS_ALPHA) * currentNexusScore;
     }
 
@@ -849,7 +842,6 @@ void VulkanRenderer::handleResize(int newWidth, int newHeight) {
         vkFreeCommandBuffers(context_->device, context_->commandPool, static_cast<uint32_t>(commandBuffers_.size()), commandBuffers_.data());
         commandBuffers_.clear();
     }
-    // Destroy Nexus score
     if (hypertraceScoreImage_) hypertraceScoreImage_.reset();
     if (hypertraceScoreMemory_) hypertraceScoreMemory_.reset();
     if (hypertraceScoreView_) hypertraceScoreView_.reset();
@@ -876,7 +868,7 @@ void VulkanRenderer::handleResize(int newWidth, int newHeight) {
     initializeAllBufferData(MAX_FRAMES_IN_FLIGHT, kMatSize, kDimSize);
 
     createComputeDescriptorSets();
-    updateNexusDescriptors();  // Re-update Nexus DS
+    updateNexusDescriptors();
 
     rtx_->updateRTX(context_->physicalDevice, context_->commandPool, context_->graphicsQueue,
                     bufferManager_->getGeometries(), bufferManager_->getDimensionStates());
@@ -890,7 +882,7 @@ void VulkanRenderer::handleResize(int newWidth, int newHeight) {
 
     resetAccumulation_ = true;
     frameNumber_ = 0;
-    prevNexusScore_ = 0.5f;  // Reset on resize
+    prevNexusScore_ = 0.5f;
 }
 
 // -----------------------------------------------------------------------------
@@ -1124,7 +1116,7 @@ void VulkanRenderer::updateUniformBuffer(uint32_t currentImage, const Camera& ca
     ubo.camPos      = glm::vec4(camera.getPosition(), 1.0f);
     ubo.time        = time;
     ubo.frame       = static_cast<uint32_t>(frameNumber_);
-    ubo.prevNexusScore = prevNexusScore_;  // New: Pass to shaders
+    ubo.prevNexusScore = prevNexusScore_;
 
     void* data;
     VkResult mapRes = vkMapMemory(context_->device, uniformBufferMemories_[currentImage].get(),
@@ -1470,7 +1462,6 @@ void VulkanRenderer::cleanup() noexcept {
     if (envMapImageView_)   envMapImageView_.reset();
     if (envMapSampler_)     envMapSampler_.reset();
 
-    // Nexus cleanup
     if (hypertraceScoreImage_) hypertraceScoreImage_.reset();
     if (hypertraceScoreMemory_) hypertraceScoreMemory_.reset();
     if (hypertraceScoreView_) hypertraceScoreView_.reset();

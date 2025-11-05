@@ -2,6 +2,7 @@
 // AMOURANTH RTX Engine (C) 2025 by Zachary Geurts gzac5314@gmail.com is licensed under CC BY-NC 4.0
 // NEXUS FINAL: GPU-Driven Adaptive RT | 12,000+ FPS | Auto-Toggle
 // FIXED: VK_CHECK at top + proper namespace closure
+// ADDED: statsAnalyzer shader paths for Nexus metrics computation
 
 #pragma once
 
@@ -16,6 +17,7 @@
 #include <filesystem>
 #include <unordered_map>
 #include <memory>
+#include <sstream>
 #include "engine/camera.hpp"
 #include "engine/logging.hpp"
 
@@ -209,7 +211,8 @@ inline std::unordered_map<std::string, std::string> getShaderBinPaths() {
         {"tonemap_compute",     "assets/shaders/compute/tonemap.spv"},
         {"tonemap_vert",        "assets/shaders/graphics/tonemap_vert.spv"},
         {"tonemap_frag",        "assets/shaders/graphics/tonemap_frag.spv"},
-        {"nexusDecision",       "assets/shaders/compute/nexusDecision.spv"}
+        {"nexusDecision",       "assets/shaders/compute/nexusDecision.spv"},
+        {"statsAnalyzer",       "assets/shaders/compute/statsAnalyzer.spv"}
     };
 }
 
@@ -228,7 +231,8 @@ inline std::unordered_map<std::string, std::string> getShaderSrcPaths() {
         {"tonemap_compute",     "assets/shaders/compute/tonemap.comp"},
         {"tonemap_vert",        "assets/shaders/graphics/tonemap_vert.glsl"},
         {"tonemap_frag",        "assets/shaders/graphics/tonemap_frag.glsl"},
-        {"nexusDecision",       "assets/shaders/compute/nexusDecision.comp"}
+        {"nexusDecision",       "assets/shaders/compute/nexusDecision.comp"},
+        {"statsAnalyzer",       "assets/shaders/compute/statsAnalyzer.comp"}
     };
 }
 

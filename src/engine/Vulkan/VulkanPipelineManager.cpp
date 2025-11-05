@@ -3,6 +3,8 @@
 // FINAL: ALL SHADERS LOADED FROM assets/shaders/
 // FIXED: SIGSEGV in ~VulkanPipelineManager() → null-check ALL handles
 //        No double destroy | RAII-safe | Device valid until end
+// ADDED: Stats Pipeline for Nexus (variance/entropy/grad analysis from prev output)
+//        Destructor now cleans stats handles
 
 #include "engine/Vulkan/VulkanPipelineManager.hpp"
 #include "engine/Vulkan/VulkanRTX_Setup.hpp"
@@ -116,6 +118,11 @@ VulkanPipelineManager::~VulkanPipelineManager()
     if (nexusPipeline_)             { vkDestroyPipeline(dev, nexusPipeline_, nullptr); nexusPipeline_ = VK_NULL_HANDLE; }
     if (nexusPipelineLayout_)       { vkDestroyPipelineLayout(dev, nexusPipelineLayout_, nullptr); nexusPipelineLayout_ = VK_NULL_HANDLE; }
     if (nexusDescriptorSetLayout_)  { vkDestroyDescriptorSetLayout(dev, nexusDescriptorSetLayout_, nullptr); nexusDescriptorSetLayout_ = VK_NULL_HANDLE; }
+
+    // Stats pipeline cleanup
+    if (statsPipeline_)             { vkDestroyPipeline(dev, statsPipeline_, nullptr); statsPipeline_ = VK_NULL_HANDLE; }
+    if (statsPipelineLayout_)       { vkDestroyPipelineLayout(dev, statsPipelineLayout_, nullptr); statsPipelineLayout_ = VK_NULL_HANDLE; }
+    if (statsDescriptorSetLayout_)  { vkDestroyDescriptorSetLayout(dev, statsDescriptorSetLayout_, nullptr); statsDescriptorSetLayout_ = VK_NULL_HANDLE; }
 
 #ifdef ENABLE_VULKAN_DEBUG
     if (debugMessenger_) {
@@ -814,7 +821,7 @@ void VulkanPipelineManager::updateRayTracingDescriptorSet(VkDescriptorSet ds,
 #endif
 
         if (ds == VK_NULL_HANDLE || tlas == VK_NULL_HANDLE) {
-		LOG_ERROR_CAT("Vulkan", "Invalid descriptor set or TLAS");
+        LOG_ERROR_CAT("Vulkan", "Invalid descriptor set or TLAS");
         throw std::runtime_error("Invalid descriptor set or TLAS");
     }
 
@@ -983,7 +990,7 @@ void VulkanPipelineManager::createNexusPipeline()
     VkPushConstantRange pushConst{
         .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
         .offset = 0,
-        .size = sizeof(float) * 8
+        .size = 32  // Exact size for NexusPushConsts (5f + uint + 2f = 32 bytes)
     };
 
     VkPipelineLayoutCreateInfo layoutInfo{
@@ -1018,6 +1025,119 @@ void VulkanPipelineManager::createNexusPipeline()
 #ifndef NDEBUG
     LOG_INFO_CAT("Nexus", "    PIPELINE @ {:p}", static_cast<void*>(nexusPipeline_));
     LOG_INFO_CAT("Nexus", "<<< NEXUS DECISION PIPELINE LIVE");
+#endif
+}
+
+// ===================================================================
+//  STATS ANALYZER PIPELINE — assets/shaders/compute/statsAnalyzer.comp
+//  Analyzes prev output for variance/entropy/grad → writes to BufferStats
+// ===================================================================
+void VulkanPipelineManager::createStatsPipeline()
+{
+#ifndef NDEBUG
+    LOG_INFO_CAT("Stats", ">>> CREATING STATS ANALYZER PIPELINE (statsAnalyzer.comp)");
+#endif
+
+    // Descriptor set layout: binding 0=storage_image (prev output), binding 1=storage_buffer (stats out)
+    std::array<VkDescriptorSetLayoutBinding, 2> statsBindings = {{
+        {0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},  // prevOutput (readonly)
+        {1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr}  // stats buffer (writeonly)
+    }};
+
+    VkDescriptorSetLayoutCreateInfo statsLayoutInfo{
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+        .bindingCount = static_cast<uint32_t>(statsBindings.size()),
+        .pBindings = statsBindings.data()
+    };
+
+    VK_CHECK(vkCreateDescriptorSetLayout(context_.device, &statsLayoutInfo, nullptr, &statsDescriptorSetLayout_),
+             "Create Stats descriptor set layout");
+
+#ifndef NDEBUG
+    LOG_INFO_CAT("Stats", "    STATS LAYOUT @ {:p}", static_cast<void*>(statsDescriptorSetLayout_));
+#endif
+
+    // Pipeline layout (no push constants needed)
+    VkPipelineLayoutCreateInfo statsPipelineLayoutInfo{
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+        .setLayoutCount = 1,
+        .pSetLayouts = &statsDescriptorSetLayout_
+    };
+
+    VK_CHECK(vkCreatePipelineLayout(context_.device, &statsPipelineLayoutInfo, nullptr, &statsPipelineLayout_),
+             "Create Stats pipeline layout");
+
+#ifndef NDEBUG
+    LOG_INFO_CAT("Stats", "    STATS PIPELINE LAYOUT @ {:p}", static_cast<void*>(statsPipelineLayout_));
+#endif
+
+    // Load shader
+    VkShaderModule statsShader = loadShaderImpl(context_.device, "compute/statsAnalyzer");
+
+    // Specialization for local size (16x16 tiles for image analysis)
+    struct StatsSpecData {
+        uint32_t localSizeX = 16;
+        uint32_t localSizeY = 16;
+        uint32_t localSizeZ = 1;
+    } statsSpecData;
+
+    VkSpecializationMapEntry statsEntries[3] = {
+        {0, offsetof(StatsSpecData, localSizeX), sizeof(uint32_t)},
+        {1, offsetof(StatsSpecData, localSizeY), sizeof(uint32_t)},
+        {2, offsetof(StatsSpecData, localSizeZ), sizeof(uint32_t)}
+    };
+
+    VkSpecializationInfo statsSpecInfo{
+        .mapEntryCount = 3,
+        .pMapEntries = statsEntries,
+        .dataSize = sizeof(statsSpecData),
+        .pData = &statsSpecData
+    };
+
+    VkComputePipelineCreateInfo statsPipelineInfo{
+        .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
+        .stage = {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+            .stage = VK_SHADER_STAGE_COMPUTE_BIT,
+            .module = statsShader,
+            .pName = "main",
+            .pSpecializationInfo = &statsSpecInfo
+        },
+        .layout = statsPipelineLayout_
+    };
+
+    VK_CHECK(vkCreateComputePipelines(context_.device, pipelineCache_, 1, &statsPipelineInfo, nullptr, &statsPipeline_),
+             "Create Stats compute pipeline");
+
+    vkDestroyShaderModule(context_.device, statsShader, nullptr);
+
+#ifndef NDEBUG
+    LOG_INFO_CAT("Stats", "    STATS PIPELINE @ {:p}", static_cast<void*>(statsPipeline_));
+    LOG_INFO_CAT("Stats", "<<< STATS ANALYZER PIPELINE LIVE");
+#endif
+}
+
+// ===================================================================
+//  STATS DISPATCH — Call after RT to fill BufferStats
+// ===================================================================
+void VulkanPipelineManager::dispatchStats(VkCommandBuffer cmd, VkDescriptorSet statsSet)
+{
+    if (statsPipeline_ == VK_NULL_HANDLE) {
+#ifndef NDEBUG
+        LOG_WARN_CAT("Stats", "dispatchStats() skipped — pipeline not created");
+#endif
+        return;
+    }
+
+    // Bind and dispatch (full image: groups = (width+15)/16, (height+15)/16, 1)
+    uint32_t gx = (width_ + 15) / 16;
+    uint32_t gy = (height_ + 15) / 16;
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, statsPipeline_);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, statsPipelineLayout_, 0, 1, &statsSet, 0, nullptr);
+    vkCmdDispatch(cmd, gx, gy, 1);
+
+#ifndef NDEBUG
+    LOG_DEBUG_CAT("Stats", "Dispatched stats analyzer: {}x{} groups", gx, gy);
 #endif
 }
 
