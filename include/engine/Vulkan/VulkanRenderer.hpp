@@ -4,6 +4,10 @@
 // FINAL: 60 FPS default | Toggle with 'F' key | NEXUS scales skip
 // CONFORMED: Uses ::Vulkan::Context — matches VulkanRTX_Setup.hpp
 // UPDATED: Added FpsTarget enum, toggleFpsTarget(), getFpsTarget()
+// UPDATED: Added recordRayTracingCommandBuffer() to fix GPU freeze on first frame
+// FIXED: Added public getters for ALL buffers/views/samplers used in main.cpp
+// FIXED: Added rebuildAccelerationStructures() — calls updateRTX(this)
+// FIXED: Added swapchainMgr_ member + set/getSwapchainManager() for integration
 // GROK TIP: "At 60 FPS, you're not rendering. You're orchestrating photons.
 //           Every 16.6 ms, a new universe is born. And you control it."
 
@@ -15,6 +19,7 @@
 namespace VulkanRTX {
     class VulkanRTX;
     class VulkanPipelineManager;
+    class VulkanSwapchainManager;  // FORWARD DECL FOR SWAPCHAIN INTEGRATION
 }
 
 // Now safe to include VulkanRTX_Setup.hpp
@@ -74,10 +79,22 @@ public:
     void takeOwnership(std::unique_ptr<VulkanPipelineManager> pm,
                        std::unique_ptr<VulkanBufferManager> bm);
 
+    /* ----- SWAPCHAIN MANAGER INTEGRATION ---------------------------------- */
+    void setSwapchainManager(std::unique_ptr<VulkanSwapchainManager> mgr);
+    VulkanSwapchainManager& getSwapchainManager();
+
     /* ----- rendering ------------------------------------------------------ */
     void renderFrame(const Camera& camera, float deltaTime);
     void handleResize(int newWidth, int newHeight);
     void setRenderMode(int mode);
+
+    /* ----- INITIAL COMMAND BUFFER RECORDING (CRITICAL FIX) ---------------- */
+    void recordRayTracingCommandBuffer();
+    void notifyTLASReady(VkAccelerationStructureKHR tlas);
+
+    /* ----- REBUILD ACCELERATION STRUCTURES (MESH LOAD / MODE CHANGE) ------ */
+    // GROK TIP: Call this when geometry changes → rebuilds BLAS/TLAS → SBT → descriptor
+    void rebuildAccelerationStructures();
 
     /* ----- HYPERTRACE TOGGLE (H key) -------------------------------------- */
     void toggleHypertrace();
@@ -112,6 +129,35 @@ public:
 
     // NEW: Get current FPS target
     [[nodiscard]] FpsTarget getFpsTarget() const { return fpsTarget_; }
+
+    // FIXED: Public getters for main.cpp descriptor update
+    [[nodiscard]] VkBuffer getUniformBuffer(uint32_t frame) const noexcept {
+        return (frame < uniformBuffers_.size()) ? uniformBuffers_[frame].get() : VK_NULL_HANDLE;
+    }
+
+    [[nodiscard]] VkBuffer getMaterialBuffer(uint32_t frame) const noexcept {
+        return (frame < materialBuffers_.size()) ? materialBuffers_[frame].get() : VK_NULL_HANDLE;
+    }
+
+    [[nodiscard]] VkBuffer getDimensionBuffer(uint32_t frame) const noexcept {
+        return (frame < dimensionBuffers_.size()) ? dimensionBuffers_[frame].get() : VK_NULL_HANDLE;
+    }
+
+    [[nodiscard]] VkImageView getRTOutputImageView(uint32_t index) const noexcept {
+        return (index < rtOutputViews_.size()) ? rtOutputViews_[index].get() : VK_NULL_HANDLE;
+    }
+
+    [[nodiscard]] VkImageView getAccumulationView(uint32_t index) const noexcept {
+        return (index < accumViews_.size()) ? accumViews_[index].get() : VK_NULL_HANDLE;
+    }
+
+    [[nodiscard]] VkImageView getEnvironmentMapView() const noexcept {
+        return envMapImageView_.get();
+    }
+
+    [[nodiscard]] VkSampler getEnvironmentMapSampler() const noexcept {
+        return envMapSampler_.get();
+    }
 
     void cleanup() noexcept;
 
@@ -175,6 +221,9 @@ private:
 
     std::unique_ptr<VulkanPipelineManager> pipelineManager_;
     std::unique_ptr<VulkanBufferManager>   bufferManager_;
+
+    // SWAPCHAIN MANAGER — NEW INTEGRATION
+    std::unique_ptr<VulkanSwapchainManager> swapchainMgr_;
 
     int width_, height_;
     VkSwapchainKHR swapchain_ = VK_NULL_HANDLE;

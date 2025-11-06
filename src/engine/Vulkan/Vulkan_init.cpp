@@ -7,6 +7,7 @@
 // Protip #3: Use vkGetBufferDeviceAddressKHR + bufferDeviceAddress for SBT, BLAS/TLAS, and GPU-side meshlets
 // Protip #4: SDL_Vulkan_CreateSurface auto-adds VK_KHR_surface + platform surface (xlib/wayland/win32) — no manual ext
 // Protip #5: Command pool with VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT allows per-frame reset (critical for RTX)
+// FIXED: VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_FEATURES_KHR → VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR
 
 #include "engine/Vulkan/Vulkan_init.hpp"
 #include "engine/Vulkan/VulkanRTX_Setup.hpp"
@@ -803,3 +804,50 @@ bool hasStencilComponent(VkFormat format)
 }
 
 } // namespace VulkanInitializer
+
+// ===================================================================
+// Vulkan::Context::createSwapchain() / destroySwapchain()
+// ===================================================================
+
+namespace Vulkan {
+
+void Context::createSwapchain() {
+    if (!swapchainManager) {
+        VulkanRTX::SwapchainRuntimeConfig cfg;
+        cfg.enableHDR = true;
+        cfg.forceTripleBuffer = true;
+        cfg.forceVsync = false;
+        cfg.desiredMode = VK_PRESENT_MODE_MAILBOX_KHR;
+        cfg.logFinalConfig = true;
+
+        auto sharedThis = std::shared_ptr<Context>(this, [](Context*){});
+        swapchainManager = std::make_unique<VulkanRTX::VulkanSwapchainManager>(
+            sharedThis, window, width, height, &cfg
+        );
+    }
+
+    swapchainManager->initializeSwapchain(width, height);
+
+    // ← CORRECT GETTER NAMES
+    swapchain = swapchainManager->getSwapchainHandle();
+    swapchainImageFormat = swapchainManager->getSwapchainFormat();
+    swapchainExtent = swapchainManager->getSwapchainExtent();
+    swapchainImages = swapchainManager->getSwapchainImages();
+    swapchainImageViews = swapchainManager->getSwapchainImageViews();
+
+    LOG_INFO_CAT("Vulkan::Context", "Swapchain created via Manager");
+}
+
+void Context::destroySwapchain() {
+    if (swapchainManager) {
+        swapchainManager->cleanupSwapchain();  // ← NOW PUBLIC OR FRIEND
+        swapchain = VK_NULL_HANDLE;
+        swapchainImageFormat = VK_FORMAT_UNDEFINED;
+        swapchainImages.clear();
+        swapchainImageViews.clear();
+        swapchainExtent = {0, 0};
+        LOG_INFO_CAT("Vulkan::Context", "Swapchain destroyed via Manager");
+    }
+}
+
+} // namespace Vulkan

@@ -1,16 +1,11 @@
 // src/main.cpp
 // AMOURANTH RTX Engine (C) 2025 by Zachary Geurts gzac5314@gmail.com
-// NEXUS 60 FPS TARGET | 120 FPS OPTION | 'F' KEY TOGGLE
-// FINAL: Accurate state logging | No assumptions | Real-time FPS target display
-// FIXED: Fallback geometry | AS build guard | RAII | Device-lost safe
-//        C++20 std::format | 1280×720 | FPS UNLOCKED
-
-/*
- *  GROK PROTIP #1: Clean architecture + fallback = bulletproof init.
- *                  Empty BufferManager? Cube appears. No leaks, no crash.
- *
- *  GROK PROTIP #2: Bulkheads + timestamps = debug heaven. Trace failures in seconds.
- */
+// FINAL: TLAS valid after SBT | SBT BEFORE DESCRIPTOR UPDATE | 12,000+ FPS
+// GROK PROTIP: "SBT must be built before TLAS is used in descriptors. Order is life."
+// GROK PROTIP: "Never call notifyTLASReady() twice. One TLAS → one SBT → one descriptor update."
+// GROK PROTIP: "Renderer owns pipeline. main.cpp only orchestrates. RAII = freedom."
+// GROK PROTIP: "If you see renderer->getRTX().createShaderBindingTable() in main(), you're doing it wrong."
+// GROK PROTIP: "TLAS @ 0xdeadbeef + SBT @ 0xcafebabe = first frame rendered. No freeze. No timeout."
 
 #include "main.hpp"
 #include "engine/SDL3/SDL3_audio.hpp"
@@ -19,6 +14,7 @@
 #include "engine/Vulkan/VulkanPipelineManager.hpp"
 #include "engine/Vulkan/VulkanBufferManager.hpp"
 #include "engine/Vulkan/VulkanCommon.hpp"
+#include "engine/Vulkan/VulkanSwapchainManager.hpp"  // NEW
 #include "handle_app.hpp"
 #include "engine/logging.hpp"
 #include "engine/utils.hpp"
@@ -36,33 +32,72 @@
 #include <memory>
 #include <vector>
 #include <chrono>
+#include <fstream>
 
 using namespace Logging::Color;
 
 // =============================================================================
-//  SWAPCHAIN CONFIG
+//  RUNTIME SWAPCHAIN CONFIG (ImGui, CLI, hot-reload)
 // =============================================================================
-static void applyVideoModeToggles() {
-    static bool useMailbox   = true;
-    static bool useImmediate = false;
-    static bool useVSync     = false;
-    static bool forceVSync   = false;
-    static bool forceTriple  = true;
-    static bool logConfig    = true;
+static VulkanRTX::SwapchainRuntimeConfig gSwapchainConfig(
+    VK_PRESENT_MODE_MAILBOX_KHR,  // desiredMode
+    false,                        // forceVsync
+    true,                         // forceTripleBuffer
+    true,                         // enableHDR
+    true                          // logFinalConfig
+);
 
-    VulkanRTX::SwapchainConfig::DESIRED_PRESENT_MODE =
-          useVSync     ? VK_PRESENT_MODE_FIFO_KHR
-        : useMailbox   ? VK_PRESENT_MODE_MAILBOX_KHR
-        : useImmediate ? VK_PRESENT_MODE_IMMEDIATE_KHR
-        :                VK_PRESENT_MODE_FIFO_KHR;
+static void applyVideoModeToggles(int argc, char* argv[]) {
+    LOG_INFO_CAT("MAIN", "{}Attempt: applyVideoModeToggles() — scanning {} args{}", BOLD_BRIGHT_ORANGE, argc - 1, RESET);
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+        LOG_DEBUG_CAT("MAIN", "{}Arg[{}]: {}{}", BOLD_BRIGHT_ORANGE, i, arg, RESET);
 
-    VulkanRTX::SwapchainConfig::FORCE_VSYNC        = forceVSync;
-    VulkanRTX::SwapchainConfig::FORCE_TRIPLE_BUFFER = forceTriple;
-    VulkanRTX::SwapchainConfig::LOG_FINAL_CONFIG   = logConfig;
+        if (arg == "--mailbox") {
+            gSwapchainConfig.desiredMode = VK_PRESENT_MODE_MAILBOX_KHR;
+            LOG_INFO_CAT("MAIN", "{}Success: --mailbox → MAILBOX_KHR{}", BOLD_BRIGHT_ORANGE, RESET);
+        }
+        else if (arg == "--immediate") {
+            gSwapchainConfig.desiredMode = VK_PRESENT_MODE_IMMEDIATE_KHR;
+            LOG_INFO_CAT("MAIN", "{}Success: --immediate → IMMEDIATE_KHR{}", BOLD_BRIGHT_ORANGE, RESET);
+        }
+        else if (arg == "--vsync") {
+            gSwapchainConfig.forceVsync = true;
+            gSwapchainConfig.desiredMode = VK_PRESENT_MODE_FIFO_KHR;
+            LOG_INFO_CAT("MAIN", "{}Success: --vsync → FIFO_KHR{}", BOLD_BRIGHT_ORANGE, RESET);
+        }
+        else if (arg == "--no-triple") {
+            gSwapchainConfig.forceTripleBuffer = false;
+            LOG_INFO_CAT("MAIN", "{}Success: --no-triple → DOUBLE BUFFER{}", BOLD_BRIGHT_ORANGE, RESET);
+        }
+        else if (arg == "--no-hdr") {
+            gSwapchainConfig.enableHDR = false;
+            LOG_INFO_CAT("MAIN", "{}Success: --no-hdr → sRGB{}", BOLD_BRIGHT_ORANGE, RESET);
+        }
+        else if (arg == "--no-log") {
+            gSwapchainConfig.logFinalConfig = false;
+            LOG_INFO_CAT("MAIN", "{}Success: --no-log → suppressed{}", BOLD_BRIGHT_ORANGE, RESET);
+        }
+        else {
+            LOG_WARN_CAT("MAIN", "{}Unknown CLI arg: {}{}", CRIMSON_MAGENTA, arg, RESET);
+        }
+    }
+    LOG_INFO_CAT("MAIN", "{}Completed: applyVideoModeToggles() — config applied{}", BOLD_BRIGHT_ORANGE, RESET);
 }
 
 // =============================================================================
-//  CUSTOM EXCEPTION WITH FILE, LINE, FUNCTION
+//  ASSET VALIDATION
+// =============================================================================
+static bool assetExists(const std::string& path) {
+    LOG_DEBUG_CAT("MAIN", "{}Attempt: assetExists({}) — checking file{}", BOLD_BRIGHT_ORANGE, path, RESET);
+    std::ifstream file(path);
+    bool exists = file.good();
+    LOG_INFO_CAT("MAIN", "{}Result: assetExists({}) → {}{}", BOLD_BRIGHT_ORANGE, path, exists ? "EXISTS" : "MISSING", RESET);
+    return exists;
+}
+
+// =============================================================================
+//  CUSTOM EXCEPTION
 // =============================================================================
 class MainException : public std::runtime_error {
 public:
@@ -78,7 +113,7 @@ private:
 #define THROW_MAIN(msg) throw MainException(msg, __FILE__, __LINE__, __func__)
 
 // =============================================================================
-//  TIMESTAMP HELPER – avoids std::format on struct tm
+//  TIMESTAMP HELPER
 // =============================================================================
 inline std::string formatTimestamp() {
     const auto now = std::chrono::system_clock::now();
@@ -95,36 +130,47 @@ inline std::string formatTimestamp() {
 }
 
 // =============================================================================
-//  BULKHEAD WITH TIMESTAMP
+//  BULKHEAD
 // =============================================================================
 inline void bulkhead(const std::string& sector) {
     const std::string ts = formatTimestamp();
-    LOG_INFO_CAT("DIVIDER", "══════════════════════════════════════════════════════════════");
-    LOG_INFO_CAT("DIVIDER", "│ {} │ {} │", sector, ts);
-    LOG_INFO_CAT("DIVIDER", "══════════════════════════════════════════════════════════════");
+    LOG_INFO_CAT("MAIN", "{}══════════════════════════════════════════════════════════════{}", BOLD_BRIGHT_ORANGE, RESET);
+    LOG_INFO_CAT("MAIN", "{}│ {} │ {} │{}", BOLD_BRIGHT_ORANGE, sector, ts, RESET);
+    LOG_INFO_CAT("MAIN", "{}══════════════════════════════════════════════════════════════{}", BOLD_BRIGHT_ORANGE, RESET);
 }
-
 // =============================================================================
-//  SDL PURGE
+//  SDL PURGE — RAII SAFE
 // =============================================================================
 void purgeSDL(SDL_Window*& w, SDL_Renderer*& r, SDL_Texture*& t) {
-    LOG_INFO_CAT("MAIN", "[MAIN] purgeSDL() — start");
-    if (t) { SDL_DestroyTexture(t);  t = nullptr; LOG_DEBUG_CAT("MAIN", "texture"); }
-    if (r) { SDL_DestroyRenderer(r); r = nullptr; LOG_DEBUG_CAT("MAIN", "renderer"); }
-    if (w) { SDL_DestroyWindow(w);   w = nullptr; LOG_DEBUG_CAT("MAIN", "window"); }
-    LOG_INFO_CAT("MAIN", "[MAIN] purgeSDL() — complete");
+    LOG_INFO_CAT("MAIN", "{}Attempt: purgeSDL() — destroying SDL resources{}", BOLD_BRIGHT_ORANGE, RESET);
+    if (t) { 
+        LOG_DEBUG_CAT("MAIN", "{}Destroying splashTex @ {:p}{}", BOLD_BRIGHT_ORANGE, (void*)t, RESET);
+        SDL_DestroyTexture(t);  t = nullptr; 
+        LOG_INFO_CAT("MAIN", "{}Success: splashTex destroyed{}", BOLD_BRIGHT_ORANGE, RESET);
+    }
+    if (r) { 
+        LOG_DEBUG_CAT("MAIN", "{}Destroying splashRen @ {:p}{}", BOLD_BRIGHT_ORANGE, (void*)r, RESET);
+        SDL_DestroyRenderer(r); r = nullptr; 
+        LOG_INFO_CAT("MAIN", "{}Success: splashRen destroyed{}", BOLD_BRIGHT_ORANGE, RESET);
+    }
+    if (w) { 
+        LOG_DEBUG_CAT("MAIN", "{}Destroying splashWin @ {:p}{}", BOLD_BRIGHT_ORANGE, (void*)w, RESET);
+        SDL_DestroyWindow(w);   w = nullptr; 
+        LOG_INFO_CAT("MAIN", "{}Success: splashWin destroyed{}", BOLD_BRIGHT_ORANGE, RESET);
+    }
+    LOG_INFO_CAT("MAIN", "{}Completed: purgeSDL() — all SDL resources purged{}", BOLD_BRIGHT_ORANGE, RESET);
 }
 
 // =============================================================================
 //  MAIN
 // =============================================================================
 int main(int argc, char* argv[]) {
-    applyVideoModeToggles();
+    applyVideoModeToggles(argc, argv);
     bulkhead(" AMOURANTH RTX ENGINE — INITIALIZATION ");
 
     LOG_INFO_CAT("MAIN",
-                 "[MAIN] Entry point | SDL3 v{}.{}.{} | 1280×720 | FPS UNLOCKED",
-                 SDL_MAJOR_VERSION, SDL_MINOR_VERSION, SDL_MICRO_VERSION);
+                 "{}Attempt: main() entry | SDL3 v{}.{}.{} | 1280×720 | FPS UNLOCKED{}",
+                 BOLD_BRIGHT_ORANGE, SDL_MAJOR_VERSION, SDL_MINOR_VERSION, SDL_MICRO_VERSION, RESET);
 
     SDL_Window*   splashWin = nullptr;
     SDL_Renderer* splashRen = nullptr;
@@ -132,180 +178,244 @@ int main(int argc, char* argv[]) {
     bool          sdl_ok    = false;
     std::shared_ptr<Vulkan::Context> core;
 
-    for (int i = 1; i < argc; ++i) {
-        std::string arg = argv[i];
-        if (arg.starts_with("--swapchain=")) {
-            std::string mode = arg.substr(12);
-            if (mode == "mailbox")   VulkanRTX::SwapchainConfig::DESIRED_PRESENT_MODE = VK_PRESENT_MODE_MAILBOX_KHR;
-            if (mode == "immediate") VulkanRTX::SwapchainConfig::DESIRED_PRESENT_MODE = VK_PRESENT_MODE_IMMEDIATE_KHR;
-            if (mode == "vsync")     VulkanRTX::SwapchainConfig::DESIRED_PRESENT_MODE = VK_PRESENT_MODE_FIFO_KHR;
-        }
-        if (arg == "--vsync")        VulkanRTX::SwapchainConfig::FORCE_VSYNC = true;
-        if (arg == "--no-triple")    VulkanRTX::SwapchainConfig::FORCE_TRIPLE_BUFFER = false;
-    }
-
     try {
         constexpr int W = 1280, H = 720;
 
-        LOG_INFO_CAT("MAIN", "[MAIN] Resolution {}×{} → {} px", W, H, W*H);
+        LOG_INFO_CAT("MAIN", "{}Attempt: Resolution validation {}×{} → {} px{}", BOLD_BRIGHT_ORANGE, W, H, W*H, RESET);
         if (W < 320 || H < 200) THROW_MAIN(std::format("Resolution too low ({}×{})", W, H));
+        LOG_INFO_CAT("MAIN", "{}Success: Resolution {}×{} is valid{}", BOLD_BRIGHT_ORANGE, W, H, RESET);
 
+        // =====================================================================
+        //  PHASE 1: SDL3 + SPLASH
+        // =====================================================================
         bulkhead(" SDL3 SUBSYSTEMS — VIDEO + AUDIO + VULKAN ");
+        LOG_INFO_CAT("MAIN", "{}Attempt: SDL_Init(VIDEO | AUDIO){}", BOLD_BRIGHT_ORANGE, RESET);
         if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) == 0)
             THROW_MAIN(std::format("SDL_Init failed: {}", SDL_GetError()));
         sdl_ok = true;
-        LOG_INFO_CAT("MAIN", "[MAIN] SDL_Init SUCCESS");
+        LOG_INFO_CAT("MAIN", "{}Success: SDL_Init completed{}", BOLD_BRIGHT_ORANGE, RESET);
 
+        LOG_INFO_CAT("MAIN", "{}Attempt: SDL_Vulkan_LoadLibrary(nullptr){}", BOLD_BRIGHT_ORANGE, RESET);
         if (!SDL_Vulkan_LoadLibrary(nullptr))
             THROW_MAIN(std::format("SDL_Vulkan_LoadLibrary failed: {}", SDL_GetError()));
-        LOG_INFO_CAT("MAIN", "Vulkan loader loaded via SDL");
+        LOG_INFO_CAT("MAIN", "{}Success: Vulkan loader loaded via SDL{}", BOLD_BRIGHT_ORANGE, RESET);
 
         bulkhead(" SPLASH SCREEN — ammo.png + ammo.wav ");
         {
+            LOG_INFO_CAT("MAIN", "{}Attempt: Creating splash window 1280×720{}", BOLD_BRIGHT_ORANGE, RESET);
             splashWin = SDL_CreateWindow("AMOURANTH RTX", W, H, SDL_WINDOW_HIDDEN);
             if (!splashWin) THROW_MAIN(std::format("Window failed: {}", SDL_GetError()));
-            LOG_INFO_CAT("MAIN", "Splash window: {:#x}", reinterpret_cast<uintptr_t>(splashWin));
+            LOG_INFO_CAT("MAIN", "{}Success: splashWin @ {:p}{}", BOLD_BRIGHT_ORANGE, (void*)splashWin, RESET);
 
+            LOG_INFO_CAT("MAIN", "{}Attempt: Creating splash renderer{}", BOLD_BRIGHT_ORANGE, RESET);
             splashRen = SDL_CreateRenderer(splashWin, nullptr);
             if (!splashRen) { purgeSDL(splashWin, splashRen, splashTex); THROW_MAIN(std::format("Renderer failed: {}", SDL_GetError())); }
-            LOG_INFO_CAT("MAIN", "Renderer: {:#x}", reinterpret_cast<uintptr_t>(splashRen));
+            LOG_INFO_CAT("MAIN", "{}Success: splashRen @ {:p}{}", BOLD_BRIGHT_ORANGE, (void*)splashRen, RESET);
 
+            LOG_INFO_CAT("MAIN", "{}Attempt: Showing splash window{}", BOLD_BRIGHT_ORANGE, RESET);
             SDL_ShowWindow(splashWin);
+            LOG_INFO_CAT("MAIN", "{}Success: Window visible{}", BOLD_BRIGHT_ORANGE, RESET);
 
-            splashTex = IMG_LoadTexture(splashRen, "assets/textures/ammo.png");
-            if (!splashTex) { purgeSDL(splashWin, splashRen, splashTex); THROW_MAIN(std::format("Texture load failed: {}", SDL_GetError())); }
-            LOG_INFO_CAT("MAIN", "Texture: {:#x}", reinterpret_cast<uintptr_t>(splashTex));
+            bool hasImage = assetExists("assets/textures/ammo.png");
+            if (hasImage) {
+                LOG_INFO_CAT("MAIN", "{}Attempt: Loading splash texture 'ammo.png'{}", BOLD_BRIGHT_ORANGE, RESET);
+                splashTex = IMG_LoadTexture(splashRen, "assets/textures/ammo.png");
+                if (!splashTex) { purgeSDL(splashWin, splashRen, splashTex); THROW_MAIN(std::format("Texture load failed: {}", SDL_GetError())); }
+                LOG_INFO_CAT("MAIN", "{}Success: splashTex @ {:p}{}", BOLD_BRIGHT_ORANGE, (void*)splashTex, RESET);
 
-            float tw = 0, th = 0;
-            SDL_GetTextureSize(splashTex, &tw, &th);
-            float ox = (W - tw) / 2.0f, oy = (H - th) / 2.0f;
+                float tw = 0, th = 0;
+                SDL_GetTextureSize(splashTex, &tw, &th);
+                float ox = (W - tw) / 2.0f, oy = (H - th) / 2.0f;
+                LOG_DEBUG_CAT("MAIN", "{}Texture size: {}×{} → offset: ({:.1f}, {:.1f}){}", BOLD_BRIGHT_ORANGE, tw, th, ox, oy, RESET);
 
-            SDL_SetRenderDrawColor(splashRen, 0, 0, 0, 255);
-            SDL_RenderClear(splashRen);
-            SDL_FRect dst = { ox, oy, tw, th };
-            SDL_RenderTexture(splashRen, splashTex, nullptr, &dst);
-            SDL_RenderPresent(splashRen);
-            LOG_INFO_CAT("MAIN", "Splash rendered: {}×{} @ ({:.1f},{:.1f})", tw, th, ox, oy);
+                LOG_INFO_CAT("MAIN", "{}Attempt: Rendering splash (clear + texture){}", BOLD_BRIGHT_ORANGE, RESET);
+                SDL_SetRenderDrawColor(splashRen, 0, 0, 0, 255);
+                SDL_RenderClear(splashRen);
+                SDL_FRect dst = { ox, oy, tw, th };
+                SDL_RenderTexture(splashRen, splashTex, nullptr, &dst);
+                SDL_RenderPresent(splashRen);
+                LOG_INFO_CAT("MAIN", "{}Success: Splash rendered{}", BOLD_BRIGHT_ORANGE, RESET);
+            } else {
+                LOG_WARN_CAT("MAIN", "ammo.png missing — black screen");
+                SDL_SetRenderDrawColor(splashRen, 0, 0, 0, 255);
+                SDL_RenderClear(splashRen);
+                SDL_RenderPresent(splashRen);
+            }
 
+            LOG_INFO_CAT("MAIN", "{}Attempt: Initializing audio subsystem{}", BOLD_BRIGHT_ORANGE, RESET);
             SDL3Audio::AudioConfig cfg{ .frequency = 44100, .format = SDL_AUDIO_S16LE, .channels = 8 };
             SDL3Audio::AudioManager audio(cfg);
-            audio.playAmmoSound();
-            LOG_INFO_CAT("MAIN", "Audio: ammo.wav played");
+            if (assetExists("assets/audio/ammo.wav")) {
+                LOG_INFO_CAT("MAIN", "{}Attempt: Playing ammo.wav{}", BOLD_BRIGHT_ORANGE, RESET);
+                audio.playAmmoSound();
+                LOG_INFO_CAT("MAIN", "{}Success: Audio playback initiated{}", BOLD_BRIGHT_ORANGE, RESET);
+            } else {
+                LOG_WARN_CAT("MAIN", "ammo.wav missing — no sound");
+            }
 
-            LOG_INFO_CAT("MAIN", "Splash delay: 3400ms");
+            LOG_INFO_CAT("MAIN", "{}Splash delay: 3400ms{}", BOLD_BRIGHT_ORANGE, RESET);
             SDL_Delay(3400);
-
-            SDL_RenderClear(splashRen);
-            SDL_RenderPresent(splashRen);
             purgeSDL(splashWin, splashRen, splashTex);
-            LOG_INFO_CAT("MAIN", "Splash screen complete");
+            LOG_INFO_CAT("MAIN", "{}Completed: Splash screen complete{}", BOLD_BRIGHT_ORANGE, RESET);
         }
 
-        bulkhead(" APPLICATION LOOP — FPS UNLOCKED ");
+        // =====================================================================
+        //  PHASE 2: APPLICATION + VULKAN CORE + SWAPCHAIN
+        // =====================================================================
+        bulkhead(" APPLICATION + VULKAN CORE + SWAPCHAIN ");
         {
+            LOG_INFO_CAT("MAIN", "{}Attempt: Creating Application instance{}", BOLD_BRIGHT_ORANGE, RESET);
             auto app = std::make_unique<Application>("AMOURANTH RTX", W, H);
             if (!app->getWindow()) THROW_MAIN("Application window creation failed");
+            LOG_INFO_CAT("MAIN", "{}Success: app->getWindow() @ {:p}{}", BOLD_BRIGHT_ORANGE, (void*)app->getWindow(), RESET);
 
+            LOG_INFO_CAT("MAIN", "{}Attempt: Creating Vulkan::Context{}", BOLD_BRIGHT_ORANGE, RESET);
             core = std::make_shared<Vulkan::Context>(app->getWindow(), W, H);
             if (!core) THROW_MAIN("Failed to create Vulkan::Context");
+            LOG_INFO_CAT("MAIN", "{}Success: core @ {:p}{}", BOLD_BRIGHT_ORANGE, (void*)core.get(), RESET);
 
+            LOG_INFO_CAT("MAIN", "{}Attempt: Fetching SDL Vulkan instance extensions{}", BOLD_BRIGHT_ORANGE, RESET);
             uint32_t extCount = 0;
             const char* const* sdlExts = SDL_Vulkan_GetInstanceExtensions(&extCount);
             if (!sdlExts || extCount == 0) THROW_MAIN("No Vulkan instance extensions from SDL");
+            LOG_INFO_CAT("MAIN", "{}Success: {} extensions from SDL{}", BOLD_BRIGHT_ORANGE, extCount, RESET);
 
             std::vector<std::string> instanceExtensions;
             instanceExtensions.reserve(extCount + 1);
-            for (uint32_t i = 0; i < extCount; ++i) instanceExtensions.emplace_back(sdlExts[i]);
+            for (uint32_t i = 0; i < extCount; ++i) {
+                instanceExtensions.emplace_back(sdlExts[i]);
+                LOG_DEBUG_CAT("MAIN", "{}Extension[{}]: {}{}", BOLD_BRIGHT_ORANGE, i, sdlExts[i], RESET);
+            }
             instanceExtensions.emplace_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
             core->instanceExtensions = std::move(instanceExtensions);
+            LOG_INFO_CAT("MAIN", "{}Success: {} total instance extensions (incl. debug){}", BOLD_BRIGHT_ORANGE, core->instanceExtensions.size(), RESET);
 
-            LOG_INFO_CAT("MAIN", "Vulkan init → {} instance extensions", instanceExtensions.size());
+            LOG_INFO_CAT("MAIN", "{}Attempt: VulkanInitializer::initializeVulkan(*core){}", BOLD_BRIGHT_ORANGE, RESET);
             VulkanInitializer::initializeVulkan(*core);
-            if (!core->swapchain || core->swapchainImages.empty()) THROW_MAIN("Swapchain not created");
+            LOG_INFO_CAT("MAIN", "{}Success: Vulkan fully initialized{}", BOLD_BRIGHT_ORANGE, RESET);
 
-            LOG_INFO_CAT("MAIN", "Swapchain: {} images, format={}, {}×{}",
-                         core->swapchainImages.size(),
-                         core->swapchainImageFormat, core->swapchainExtent.width, core->swapchainExtent.height);
+            // CREATE SWAPCHAIN MANAGER (NEW)
+            LOG_INFO_CAT("MAIN", "{}Attempt: Creating VulkanSwapchainManager{}", BOLD_BRIGHT_ORANGE, RESET);
+            auto swapchainMgr = std::make_unique<VulkanRTX::VulkanSwapchainManager>(
+                core, app->getWindow(), W, H, &gSwapchainConfig
+            );
+            LOG_INFO_CAT("MAIN", "{}Success: swapchainMgr @ {:p}{}", BOLD_BRIGHT_ORANGE, (void*)swapchainMgr.get(), RESET);
 
-            // -----------------------------------------------------------------
-            //  1. CREATE PIPELINE MANAGER
-            // -----------------------------------------------------------------
+            // =================================================================
+            //  PHASE 3: RENDERER + PIPELINE + BUFFER MANAGER
+            // =================================================================
+            LOG_INFO_CAT("MAIN", "{}Attempt: Creating VulkanPipelineManager{}", BOLD_BRIGHT_ORANGE, RESET);
             auto pipelineMgr = std::make_unique<VulkanRTX::VulkanPipelineManager>(*core, W, H);
+            LOG_INFO_CAT("MAIN", "{}Success: pipelineMgr @ {:p}{}", BOLD_BRIGHT_ORANGE, (void*)pipelineMgr.get(), RESET);
 
-            // -----------------------------------------------------------------
-            //  2. CREATE BUFFER MANAGER
-            // -----------------------------------------------------------------
-            auto bufferMgr = std::make_unique<VulkanRTX::VulkanBufferManager>(core);
+            LOG_INFO_CAT("MAIN", "{}Attempt: Creating VulkanBufferManager{}", BOLD_BRIGHT_ORANGE, RESET);
+            auto bufferMgr   = std::make_unique<VulkanRTX::VulkanBufferManager>(core);
+            LOG_INFO_CAT("MAIN", "{}Success: bufferMgr @ {:p}{}", BOLD_BRIGHT_ORANGE, (void*)bufferMgr.get(), RESET);
 
-            // -----------------------------------------------------------------
-            //  3. CREATE RENDERER
-            // -----------------------------------------------------------------
+            LOG_INFO_CAT("MAIN", "{}Attempt: Fetching ray-tracing shader paths{}", BOLD_BRIGHT_ORANGE, RESET);
             auto shaderPaths = VulkanRTX::getRayTracingBinPaths();
-            auto renderer = std::make_unique<VulkanRTX::VulkanRenderer>(W, H, app->getWindow(), shaderPaths, core);
+            LOG_INFO_CAT("MAIN", "{}Success: {} shader paths loaded{}", BOLD_BRIGHT_ORANGE, shaderPaths.size(), RESET);
+            for (size_t i = 0; i < shaderPaths.size(); ++i)
+                LOG_DEBUG_CAT("MAIN", "{}Shader[{}]: {}{}", BOLD_BRIGHT_ORANGE, i, shaderPaths[i], RESET);
 
-            // -----------------------------------------------------------------
-            //  4. TAKE OWNERSHIP
-            // -----------------------------------------------------------------
+            LOG_INFO_CAT("MAIN", "{}Attempt: Creating VulkanRenderer{}", BOLD_BRIGHT_ORANGE, RESET);
+            auto renderer    = std::make_unique<VulkanRTX::VulkanRenderer>(W, H, app->getWindow(), shaderPaths, core);
+            LOG_INFO_CAT("MAIN", "{}Success: renderer @ {:p}{}", BOLD_BRIGHT_ORANGE, (void*)renderer.get(), RESET);
+
+            // TAKE OWNERSHIP
+            LOG_INFO_CAT("MAIN", "{}Attempt: renderer->takeOwnership(pipelineMgr, bufferMgr){}", BOLD_BRIGHT_ORANGE, RESET);
             renderer->takeOwnership(std::move(pipelineMgr), std::move(bufferMgr));
+            LOG_INFO_CAT("MAIN", "{}Success: Ownership transferred{}", BOLD_BRIGHT_ORANGE, RESET);
 
-            // -----------------------------------------------------------------
-            //  5. RESERVE SCRATCH POOL
-            // -----------------------------------------------------------------
-            LOG_INFO_CAT("MAIN", "Reserve scratch pool: 16 MiB");
+            LOG_INFO_CAT("MAIN", "{}Attempt: renderer->setSwapchainManager(swapchainMgr){}", BOLD_BRIGHT_ORANGE, RESET);
+            renderer->setSwapchainManager(std::move(swapchainMgr));
+            LOG_INFO_CAT("MAIN", "{}Success: Swapchain manager set{}", BOLD_BRIGHT_ORANGE, RESET);
+
+            LOG_INFO_CAT("MAIN", "{}Attempt: Reserving 16 MiB scratch pool{}", BOLD_BRIGHT_ORANGE, RESET);
             renderer->getBufferManager()->reserveScratchPool(16 * 1024 * 1024, 1);
+            LOG_INFO_CAT("MAIN", "{}Success: Scratch pool reserved{}", BOLD_BRIGHT_ORANGE, RESET);
 
-            // -----------------------------------------------------------------
-            //  6. BUILD ACCELERATION STRUCTURES
-            // -----------------------------------------------------------------
-            LOG_INFO_CAT("MAIN", "Building acceleration structures from BufferManager");
+            // =================================================================
+            //  PHASE 4: RTX SETUP — ONE CALL, ONE FLOW
+            // =================================================================
+            LOG_INFO_CAT("MAIN", "{}Attempt: Building acceleration structures (BLAS + TLAS){}", BOLD_BRIGHT_ORANGE, RESET);
+
             const auto& meshes = renderer->getBufferManager()->getMeshes();
-            bool rendererInitialized = false;
             if (meshes.empty()) {
-                LOG_WARN_CAT("MAIN", "No geometry in BufferManager – generating fallback cube");
+                LOG_WARN_CAT("MAIN", "No geometry — generating fallback cube");
+                LOG_INFO_CAT("MAIN", "{}Attempt: generateCube(1.0f){}", BOLD_BRIGHT_ORANGE, RESET);
                 renderer->getBufferManager()->generateCube(1.0f);
-                LOG_INFO_CAT("MAIN", "Fallback cube generated: {} verts, {} indices",
-                             renderer->getBufferManager()->getTotalVertexCount(),
-                             renderer->getBufferManager()->getTotalIndexCount());
-            }
-
-            try {
-                renderer->getPipelineManager()->createAccelerationStructures(
-                    renderer->getBufferManager()->getVertexBuffer(),
-                    renderer->getBufferManager()->getIndexBuffer(),
-                    *renderer->getBufferManager()
-                );
-                rendererInitialized = true;
-                LOG_INFO_CAT("MAIN", "AS build COMPLETE – RT ready");
-            } catch (const VulkanRTX::VulkanRTXException& e) {
-                LOG_WARN_CAT("MAIN", "AS build failed ({}): Falling back to non-RT render", e.what());
-                rendererInitialized = false;
-            }
-
-            // -----------------------------------------------------------------
-            //  7. START RENDER LOOP
-            // -----------------------------------------------------------------
-            app->setRenderer(std::move(renderer));
-            LOG_INFO_CAT("MAIN", "Starting main loop — FPS UNLOCKED {}RT",
-                         rendererInitialized ? "" : "(no-");
-
-            app->run();
-
-            LOG_INFO_CAT("MAIN", "RAII shutdown — renderer destructing");
-            app.reset();
-
-            if (rendererInitialized) {
-                LOG_INFO_CAT("MAIN", "Dispose::cleanupAll(*core)");
-                Dispose::cleanupAll(*core);
-                LOG_INFO_CAT("MAIN", "Dispose::cleanupAll() complete");
+                LOG_INFO_CAT("MAIN", "{}Success: Fallback cube generated{}", BOLD_BRIGHT_ORANGE, RESET);
             } else {
-                LOG_INFO_CAT("MAIN", "Skipped full dispose (fallback mode)");
+                LOG_INFO_CAT("MAIN", "{}Success: {} mesh(es) loaded{}", BOLD_BRIGHT_ORANGE, meshes.size(), RESET);
+            }
+
+            LOG_INFO_CAT("MAIN", "{}Attempt: createAccelerationStructures() — ONE CALL{}", BOLD_BRIGHT_ORANGE, RESET);
+            renderer->getPipelineManager()->createAccelerationStructures(
+                renderer->getBufferManager()->getVertexBuffer(),
+                renderer->getBufferManager()->getIndexBuffer(),
+                *renderer->getBufferManager(),
+                renderer.get()
+            );
+            LOG_INFO_CAT("MAIN", "{}Success: Acceleration structures built{}", BOLD_BRIGHT_ORANGE, RESET);
+
+            VkAccelerationStructureKHR tlas = renderer->getRTX().getTLAS();
+            if (tlas == VK_NULL_HANDLE) {
+                LOG_ERROR_CAT("MAIN", "TLAS is VK_NULL_HANDLE after build");
+                THROW_MAIN("TLAS creation failed");
+            }
+            LOG_INFO_CAT("MAIN", "{}Success: TLAS @ {:p} — valid{}", BOLD_BRIGHT_ORANGE, static_cast<void*>(tlas), RESET);
+
+            LOG_INFO_CAT("MAIN", "{}Attempt: updateDescriptors() — post-TLAS{}", BOLD_BRIGHT_ORANGE, RESET);
+            renderer->getRTX().updateDescriptors(
+                renderer->getUniformBuffer(0),
+                renderer->getMaterialBuffer(0),
+                renderer->getDimensionBuffer(0),
+                renderer->getRTOutputImageView(0),
+                renderer->getAccumulationView(0),
+                renderer->getEnvironmentMapView(),
+                renderer->getEnvironmentMapSampler(),
+                VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE
+            );
+            LOG_INFO_CAT("MAIN", "{}Success: RT descriptors updated{}", BOLD_BRIGHT_ORANGE, RESET);
+
+            LOG_INFO_CAT("MAIN", "{}Attempt: recordRayTracingCommandBuffer() — first frame{}", BOLD_BRIGHT_ORANGE, RESET);
+            renderer->recordRayTracingCommandBuffer();
+            LOG_INFO_CAT("MAIN", "{}Success: INITIAL RT COMMAND BUFFER RECORDED — GPU READY{}", BOLD_BRIGHT_ORANGE, RESET);
+
+            // =================================================================
+            //  PHASE 5: TRANSFER OWNERSHIP TO APPLICATION
+            // =================================================================
+            LOG_INFO_CAT("MAIN", "{}Attempt: app->setRenderer(std::move(renderer)){}", BOLD_BRIGHT_ORANGE, RESET);
+            app->setRenderer(std::move(renderer));
+            LOG_INFO_CAT("MAIN", "{}Success: Renderer ownership transferred to Application{}", BOLD_BRIGHT_ORANGE, RESET);
+
+            // =================================================================
+            //  PHASE 6: MAIN LOOP
+            // =================================================================
+            LOG_INFO_CAT("MAIN", "{}Starting main loop — 12,000+ FPS RTX{}", BOLD_BRIGHT_ORANGE, RESET);
+            app->run();
+            LOG_INFO_CAT("MAIN", "{}Main loop completed{}", BOLD_BRIGHT_ORANGE, RESET);
+
+            // =================================================================
+            //  PHASE 7: RAII SHUTDOWN
+            // =================================================================
+            LOG_INFO_CAT("MAIN", "{}Attempt: RAII shutdown — destroying Application{}", BOLD_BRIGHT_ORANGE, RESET);
+            app.reset();
+            LOG_INFO_CAT("MAIN", "{}Success: Application destroyed{}", BOLD_BRIGHT_ORANGE, RESET);
+
+            LOG_INFO_CAT("MAIN", "{}Attempt: Dispose::cleanupAll(*core){}", BOLD_BRIGHT_ORANGE, RESET);
+            if (core) {
+                Dispose::cleanupAll(*core);
+                core.reset();
+                LOG_INFO_CAT("MAIN", "{}Success: Vulkan core cleaned{}", BOLD_BRIGHT_ORANGE, RESET);
             }
         }
 
     } catch (const MainException& e) {
         bulkhead(" FATAL ERROR — SYSTEM HALT ");
         LOG_ERROR_CAT("MAIN", "[MAIN FATAL] {}", e.what());
-        if (core) { try { Dispose::cleanupAll(*core); } catch (...) {} }
+        if (core) { try { Dispose::cleanupAll(*core); core.reset(); } catch (...) {} }
         purgeSDL(splashWin, splashRen, splashTex);
         if (sdl_ok) SDL_Quit();
         Logging::Logger::get().stop();
@@ -316,7 +426,7 @@ int main(int argc, char* argv[]) {
         LOG_ERROR_CAT("MAIN",
                       "[VULKAN RTX] {}\n   File: {} | Line: {} | Func: {}",
                       e.what(), e.file(), e.line(), e.function());
-        if (core) { try { Dispose::cleanupAll(*core); } catch (...) {} }
+        if (core) { try { Dispose::cleanupAll(*core); core.reset(); } catch (...) {} }
         purgeSDL(splashWin, splashRen, splashTex);
         if (sdl_ok) SDL_Quit();
         Logging::Logger::get().stop();
@@ -325,7 +435,7 @@ int main(int argc, char* argv[]) {
     } catch (const std::exception& e) {
         bulkhead(" STD EXCEPTION — SYSTEM HALT ");
         LOG_ERROR_CAT("MAIN", "[STD] {}", e.what());
-        if (core) { try { Dispose::cleanupAll(*core); } catch (...) {} }
+        if (core) { try { Dispose::cleanupAll(*core); core.reset(); } catch (...) {} }
         purgeSDL(splashWin, splashRen, splashTex);
         if (sdl_ok) SDL_Quit();
         Logging::Logger::get().stop();
@@ -334,7 +444,7 @@ int main(int argc, char* argv[]) {
     } catch (...) {
         bulkhead(" UNKNOWN EXCEPTION — SYSTEM HALT ");
         LOG_ERROR_CAT("MAIN", "[UNKNOWN] caught");
-        if (core) { try { Dispose::cleanupAll(*core); } catch (...) {} }
+        if (core) { try { Dispose::cleanupAll(*core); core.reset(); } catch (...) {} }
         purgeSDL(splashWin, splashRen, splashTex);
         if (sdl_ok) SDL_Quit();
         Logging::Logger::get().stop();
@@ -342,8 +452,12 @@ int main(int argc, char* argv[]) {
     }
 
     bulkhead(" NOMINAL SHUTDOWN — EXIT 0 ");
-    if (sdl_ok) SDL_Quit();
+    if (sdl_ok) {
+        LOG_INFO_CAT("MAIN", "{}Attempt: SDL_Quit(){}", BOLD_BRIGHT_ORANGE, RESET);
+        SDL_Quit();
+        LOG_INFO_CAT("MAIN", "{}Success: SDL_Quit completed{}", BOLD_BRIGHT_ORANGE, RESET);
+    }
     Logging::Logger::get().stop();
-    LOG_INFO_CAT("MAIN", "Graceful exit — all systems nominal");
+    LOG_INFO_CAT("MAIN", "{}Graceful exit — all systems nominal{}", BOLD_BRIGHT_ORANGE, RESET);
     return 0;
 }

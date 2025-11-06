@@ -19,8 +19,6 @@
 //        FIXED: ~Context() → delete camera (leak prevention for raw ptr)
 
 #pragma once
-#ifndef VULKAN_CORE_HPP
-#define VULKAN_CORE_HPP
 
 #define VK_ENABLE_BETA_EXTENSIONS
 #include <vulkan/vulkan.h>
@@ -397,7 +395,7 @@ public:
 };
 
 // ===================================================================
-// Vulkan Context
+// Vulkan Context — GLOBAL NAMESPACE
 // ===================================================================
 namespace Vulkan {
 
@@ -539,6 +537,9 @@ struct Context {
     PFN_vkGetDeferredOperationResultKHR         vkGetDeferredOperationResultKHR         = nullptr;
     PFN_vkDestroyDeferredOperationKHR           vkDestroyDeferredOperationKHR           = nullptr;
 
+    // --- SWAPCHAIN MANAGER (OWNED BY CONTEXT) ---
+    std::unique_ptr<VulkanRTX::VulkanSwapchainManager> swapchainManager;
+
     Context(SDL_Window* win, int w, int h)
         : window(win),
           width(w),
@@ -560,8 +561,7 @@ struct Context {
         if (device) {
             vkDeviceWaitIdle(device);
             if (camera) {
-                delete camera;  // FIXED: RAII delete raw ptr (leak prevention)
-                camera = nullptr;
+                camera = nullptr;  // ← CORRECT: just null it
             }
             destroySwapchain();
             resourceManager.cleanup(device);
@@ -585,59 +585,4 @@ struct Context {
 } // namespace Vulkan
 
 #include "engine/Vulkan/VulkanBufferManager.hpp"
-
-namespace VulkanInitializer {
-    void copyBuffer(VkDevice device, VkCommandPool commandPool, VkQueue queue,
-                    VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size);
-
-    void createAccelerationStructures(Vulkan::Context& context, VulkanBufferManager& bufferManager,
-                                     const glm::vec3* vertices, size_t vertexCount,
-                                     const uint32_t* indices, size_t indexCount);
-
-    void createStorageImage(VkDevice device, VkPhysicalDevice physicalDevice, VkImage& image,
-                           VkDeviceMemory& memory, VkImageView& view, uint32_t width, uint32_t height,
-                           VulkanResourceManager& resourceManager);
-
-    void createShaderBindingTable(Vulkan::Context& context);
-
-    uint32_t findMemoryType(VkPhysicalDevice physicalDevice, uint32_t typeFilter, VkMemoryPropertyFlags properties);
-
-    VkCommandBuffer beginSingleTimeCommands(Vulkan::Context& context);
-    void endSingleTimeCommands(Vulkan::Context& context, VkCommandBuffer commandBuffer);
-
-    void createBuffer(VkDevice device, VkPhysicalDevice physicalDevice, VkDeviceSize size,
-                     VkBufferUsageFlags usage, VkMemoryPropertyFlags properties,
-                     VkBuffer& buffer, VkDeviceMemory& bufferMemory,
-                     const VkMemoryAllocateFlagsInfo* allocFlagsInfo,
-                     VulkanResourceManager& resourceManager);
-
-    void initializeVulkan(Vulkan::Context& context);
-
-    VkDeviceAddress getBufferDeviceAddress(VkDevice device, VkBuffer buffer);
-    VkDeviceAddress getAccelerationStructureDeviceAddress(VkDevice device, VkAccelerationStructureKHR as);
-
-    VkPhysicalDevice findPhysicalDevice(VkInstance instance, VkSurfaceKHR surface, bool preferNvidia);
-
-    void initInstance(const std::vector<std::string>& instanceExtensions, Vulkan::Context& context);
-    void initSurface(Vulkan::Context& context, void* window, VkSurfaceKHR* rawsurface);
-    void initDevice(Vulkan::Context& context);
-
-    void createDescriptorSetLayout(VkDevice device, VkPhysicalDevice physicalDevice,
-                                  VkDescriptorSetLayout& rayTracingLayout, VkDescriptorSetLayout& graphicsLayout);
-
-    void createDescriptorPoolAndSet(VkDevice device, VkPhysicalDevice physicalDevice,
-                                   VkDescriptorSetLayout descriptorSetLayout,
-                                   VkDescriptorPool& descriptorPool, std::vector<VkDescriptorSet>& descriptorSets,
-                                   VkSampler& sampler, VkBuffer uniformBuffer, VkImageView storageImageView,
-                                   VkAccelerationStructureKHR topLevelAS, bool forRayTracing,
-                                   std::vector<VkBuffer> materialBuffers, std::vector<VkBuffer> dimensionBuffers,
-                                   VkImageView denoiseImageView, VkImageView envMapView, VkImageView densityVolumeView,
-                                   VkImageView gDepthView, VkImageView gNormalView);
-
-    void transitionImageLayout(Vulkan::Context& context, VkImage image, VkFormat format,
-                               VkImageLayout oldLayout, VkImageLayout newLayout);
-
-    void loadRayTracingExtensions(Vulkan::Context& context);
-}
-
-#endif // VULKAN_CORE_HPP
+#include "engine/Vulkan/VulkanSwapchainManager.hpp"  // ← MOVED HERE TO AVOID CYCLE

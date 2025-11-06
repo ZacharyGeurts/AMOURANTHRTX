@@ -5,6 +5,7 @@
 // FINAL: dispatchCompute() + computeDescriptorSet_ + NEXUS PIPELINE + STATS ANALYZER + FRIEND VulkanRTX
 // ADDED: StatsPipeline for image metrics (variance/entropy/grad)
 //       dispatchStats() for post-RT analysis
+// UPDATED: createAccelerationStructures() takes VulkanRenderer* for TLAS notifyTLASReady()
 
 #pragma once
 
@@ -22,6 +23,7 @@
 namespace VulkanRTX {
 
 class VulkanRTX;  // FORWARD DECLARATION
+class VulkanRenderer;  // ← ADDED: FOR NOTIFY
 
 class VulkanPipelineManager {
     friend class VulkanRTX;  // ALLOWS VulkanRTX to call private layout creation
@@ -64,10 +66,11 @@ public:
     [[nodiscard]] VkPipelineLayout getGraphicsPipelineLayout() const noexcept { return graphicsPipelineLayout_; }
     [[nodiscard]] VkDescriptorSetLayout getGraphicsDescriptorSetLayout() const noexcept { return graphicsDescriptorSetLayout_; }
 
-    // ACCELERATION STRUCTURES
+    // ACCELERATION STRUCTURES — NOW TAKES RENDERER FOR NOTIFY
     void createAccelerationStructures(VkBuffer vertexBuffer,
                                       VkBuffer indexBuffer,
-                                      VulkanBufferManager& bufferMgr);
+                                      VulkanBufferManager& bufferMgr,
+                                      VulkanRenderer* renderer);  // ← ADDED: renderer
 
     [[nodiscard]] VkAccelerationStructureKHR getBLAS() const noexcept { return blas_; }
     [[nodiscard]] VkAccelerationStructureKHR getTLAS() const noexcept { return tlas_; }
@@ -153,6 +156,9 @@ private:
     PFN_vkGetBufferDeviceAddress vkGetBufferDeviceAddress = nullptr;
     PFN_vkGetRayTracingShaderGroupHandlesKHR vkGetRayTracingShaderGroupHandlesKHR = nullptr;
     PFN_vkCreateRayTracingPipelinesKHR vkCreateRayTracingPipelinesKHR = nullptr;
+
+    // FRIEND ACCESS TO VulkanRTX
+    std::unique_ptr<VulkanRTX> rtx_;  // ← NOW OWNS RTX (optional, or keep in renderer)
 };
 
 } // namespace VulkanRTX

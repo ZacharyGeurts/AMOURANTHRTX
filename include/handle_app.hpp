@@ -1,7 +1,9 @@
-// handle_app.hpp
+// include/handle_app.hpp
 // AMOURANTH RTX Engine (C) 2025 by Zachary Geurts gzac5314@gmail.com is licensed under CC BY-NC 4.0
 // FINAL: T = tonemap | O = overlay | 1-9 = modes | H = HYPERTRACE | F = FPS TARGET
-// On-screen title reflects all active modes in real time
+// PUBLIC: getRenderer() → safe access from camera, input, anywhere
+// OWNERSHIP: Application owns renderer for entire lifetime
+// GROK PROTIP: "Never access private members. Use getRenderer()."
 
 #pragma once
 #ifndef HANDLE_APP_HPP
@@ -21,7 +23,7 @@
 #include "engine/logging.hpp"
 #include "HandleInput.hpp"
 
-class Application;
+namespace VulkanRTX { class VulkanRenderer; }
 
 class Application {
 public:
@@ -39,17 +41,24 @@ public:
     bool& isMaximizedRef()  { return isMaximized_; }
     bool& isFullscreenRef() { return isFullscreen_; }
 
+    // -------------------------------------------------------------------------
+    //  RENDERER OWNERSHIP — Application owns it
+    // -------------------------------------------------------------------------
+    /**
+     * GROK PROTIP: Ownership is destiny.
+     *   - setRenderer() called ONCE at end of main.cpp
+     *   - getRenderer() is public, null-safe, used everywhere
+     */
     void setRenderer(std::unique_ptr<VulkanRTX::VulkanRenderer> renderer);
+    [[nodiscard]] VulkanRTX::VulkanRenderer* getRenderer() const;
 
     // USER CONTROLS
     void toggleTonemap();      // T / t
     void toggleOverlay();      // O / o
-    void toggleHypertrace();   // H / h — 12,000+ FPS mode
-    void toggleFpsTarget();    // F / f — 60 to 120 FPS target
+    void toggleHypertrace();   // H / h — 12,000+ FPS
+    void toggleFpsTarget();    // F / f — 60 to 120 FPS
 
     void setQuit(bool q) { quit_ = q; }
-
-	std::unique_ptr<VulkanRTX::VulkanRenderer> renderer_;
 
 private:
     void initializeInput();
@@ -76,6 +85,9 @@ private:
     std::vector<glm::vec3> vertices_;
     std::vector<uint32_t> indices_;
     std::chrono::steady_clock::time_point lastFrameTime_;
+
+    // RENDERER — OWNED BY APPLICATION
+    std::unique_ptr<VulkanRTX::VulkanRenderer> renderer_;
 };
 
 #endif // HANDLE_APP_HPP

@@ -8,13 +8,12 @@
 // NEW: generateCube() – fallback geometry
 // NEW: loadOBJ() – tinyobjloader, dedup vertices, upload to GPU, return geometry data
 // GROK PROTIPS: Persistent staging pool, batch uploads, Dispose integration
+// FIXED: GLOBAL ::Vulkan for all Context refs; static methods consistent
 
 #ifndef VULKAN_BUFFER_MANAGER_HPP
 #define VULKAN_BUFFER_MANAGER_HPP
 
 #include "engine/Vulkan/VulkanCommon.hpp"
-#include "engine/Vulkan/VulkanCore.hpp"
-#include "engine/Vulkan/Vulkan_init.hpp"
 #include "engine/logging.hpp"
 
 #include <glm/glm.hpp>
@@ -111,8 +110,8 @@ struct Mesh {
 
 class VulkanBufferManager {
 public:
-    explicit VulkanBufferManager(std::shared_ptr<Vulkan::Context> ctx);
-    VulkanBufferManager(std::shared_ptr<Vulkan::Context> ctx,
+    explicit VulkanBufferManager(std::shared_ptr<::Vulkan::Context> ctx);
+    VulkanBufferManager(std::shared_ptr<::Vulkan::Context> ctx,
                         const glm::vec3* vertices, size_t vertexCount,
                         const uint32_t* indices, size_t indexCount,
                         uint32_t transferQueueFamily = std::numeric_limits<uint32_t>::max());
@@ -152,26 +151,14 @@ public:
                              VkMemoryPropertyFlags properties,
                              VkBuffer& buffer, VkDeviceMemory& memory,
                              const VkMemoryAllocateFlagsInfo* allocFlags,
-                             Vulkan::Context& context);
+                             ::Vulkan::Context& context);
 
-    static inline VkDeviceAddress getBufferDeviceAddress(const Vulkan::Context& ctx, VkBuffer buffer)
-    {
-        VkBufferDeviceAddressInfo info{
-            .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
-            .buffer = buffer
-        };
-        return vkGetBufferDeviceAddress(ctx.device, &info);
-    }
-
-    static inline VkDeviceAddress getAccelerationStructureDeviceAddress(
-        const Vulkan::Context& ctx, VkAccelerationStructureKHR as)
-    {
-        VkAccelerationStructureDeviceAddressInfoKHR info{
-            .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR,
-            .accelerationStructure = as
-        };
-        return vkGetAccelerationStructureDeviceAddressKHR(ctx.device, &info);
-    }
+    // -----------------------------------------------------------------
+    // DEVICE ADDRESS HELPERS — DECLARED ONLY (defined in .cpp)
+    // -----------------------------------------------------------------
+    static VkDeviceAddress getBufferDeviceAddress(const ::Vulkan::Context& ctx, VkBuffer buffer);
+    static VkDeviceAddress getAccelerationStructureDeviceAddress(
+        const ::Vulkan::Context& ctx, VkAccelerationStructureKHR as);
 
     void reserveScratchPool(VkDeviceSize size, uint32_t count);
 
@@ -197,7 +184,7 @@ public:
     VkDeviceAddress getVertexBufferAddress() const;
     VkDeviceAddress getIndexBufferAddress() const;
 
-    // --- Uniform buffer helpers (NOW DECLARED) ---
+    // --- Uniform buffer helpers ---
     void createUniformBuffers(uint32_t count);
     VkBuffer getUniformBuffer(uint32_t index) const;
     VkDeviceMemory getUniformBufferMemory(uint32_t index) const;
@@ -207,7 +194,7 @@ private:
     Impl* impl_ = nullptr;
 
     // Core members
-    std::shared_ptr<Vulkan::Context> context_;
+    std::shared_ptr<::Vulkan::Context> context_;
     uint32_t vertexCount_ = 0;
     uint32_t indexCount_ = 0;
     VkBuffer vertexBuffer_ = VK_NULL_HANDLE;
@@ -257,7 +244,7 @@ inline ManagedBuffer::ManagedBuffer(VkDevice dev, VkDeviceSize sz,
     VulkanRTX::VulkanBufferManager::createBuffer(
         dev, nullptr, sz, usage, props,
         buffer_, memory_, allocFlags,
-        *(Vulkan::Context*)nullptr); // context not used here
+        *(::Vulkan::Context*)nullptr); // context not used here
 }
 
 inline ManagedBuffer::ManagedBuffer(ManagedBuffer&& o) noexcept

@@ -1,12 +1,13 @@
 // src/engine/camera.cpp
 // AMOURANTH RTX Engine (C) 2025 by Zachary Geurts gzac5314@gmail.com
 // Licensed under CC BY-NC 4.0
-// FIXED: RenderMode2 "context.camera is null!" → use userData_ safely
-// FIXED: Compile errors → include Application & VulkanRenderer
+// FINAL: Fixed "context.camera is null!" → safe userData_ access
+// FINAL: Fixed compile error → use public getRenderer() from Application
+// FINAL: All camera functions safe, null-checked, RTX-integrated
 
 #include "engine/camera.hpp"
-#include "handle_app.hpp"                    // <-- ADDED: for Application
-#include "engine/Vulkan/VulkanRenderer.hpp"  // <-- ADDED: for VulkanRenderer
+#include "handle_app.hpp"                    // Application
+#include "engine/Vulkan/VulkanRenderer.hpp"  // VulkanRenderer
 #include <glm/gtc/matrix_transform.hpp>
 #include <algorithm>
 #include "engine/logging.hpp"
@@ -52,11 +53,17 @@ glm::mat4 PerspectiveCamera::getProjectionMatrix() const {
     return glm::perspective(glm::radians(fov_), aspectRatio_, nearPlane_, farPlane_);
 }
 
+// ← NEW: Runtime aspect overload
+glm::mat4 PerspectiveCamera::getProjectionMatrix(float aspectRatio) const {
+    return glm::perspective(glm::radians(fov_), aspectRatio, nearPlane_, farPlane_);
+}
+
 // ---------------------------------------------------------------------
 // Getters / Setters
 // ---------------------------------------------------------------------
 int PerspectiveCamera::getMode() const { return mode_; }
 glm::vec3 PerspectiveCamera::getPosition() const { return position_; }
+float PerspectiveCamera::getAspectRatio() const { return aspectRatio_; }
 
 void PerspectiveCamera::setPosition(const glm::vec3& position) {
     position_ = position;
@@ -197,11 +204,11 @@ Application* PerspectiveCamera::getApp() const {
 }
 
 // ---------------------------------------------------------------------
-// SAFE: Get Renderer* from Application
+// SAFE: Get Renderer* from Application → PUBLIC METHOD
 // ---------------------------------------------------------------------
 VulkanRTX::VulkanRenderer* PerspectiveCamera::getRenderer() const {
     if (Application* app = getApp()) {
-        return app->renderer_.get();
+        return app->getRenderer();  // ← Uses public getRenderer()
     }
     return nullptr;
 }

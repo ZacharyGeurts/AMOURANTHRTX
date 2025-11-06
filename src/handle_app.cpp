@@ -1,8 +1,11 @@
 // src/handle_app.cpp
 // AMOURANTH RTX Engine (C) 2025 by Zachary Geurts gzac5314@gmail.com
 // FINAL: T = tonemap | O = overlay | 1-9 = modes | H = HYPERTRACE | F = FPS TARGET
-// PROTIP: Use RAII + state sync to keep UI and engine in perfect harmony.
-// LOGS: Every key press (1-9, T, O, H, F) with color-coded feedback
+// PROTIP: RAII + state sync → UI + engine in perfect harmony
+// LOGS: Every key (1-9, T, O, H, F, F11, M) with neon feedback
+// FIXED: setRenderer() redefined → removed
+// FIXED: camera.cpp → uses getRenderer()
+// FIXED: Resize, Fullscreen, Maximize → RTX sync + zero frame drop
 
 #include "handle_app.hpp"
 #include <SDL3/SDL.h>
@@ -22,10 +25,16 @@
 #include "engine/utils.hpp"
 #include "engine/core.hpp"
 
+using namespace Logging::Color;
+
+// =============================================================================
+//  MESH LOADER — OBJ with fallback triangle
+// =============================================================================
 void loadMesh(const std::string& filename, std::vector<glm::vec3>& vertices, std::vector<uint32_t>& indices) {
     std::ifstream file(filename);
     if (!file.is_open()) {
-        LOG_ERROR_CAT("Mesh", std::format("Failed to open {} — using fallback triangle", filename).c_str());
+        LOG_ERROR_CAT("Mesh", "{}Failed to open {} — using fallback triangle{}", 
+                     CRIMSON_MAGENTA, filename, RESET);
         vertices = {{0.0f, -0.5f, 0.0f}, {0.5f, 0.5f, 0.0f}, {-0.5f, 0.5f, 0.0f}};
         indices = {0, 1, 2};
         return;
@@ -63,38 +72,53 @@ void loadMesh(const std::string& filename, std::vector<glm::vec3>& vertices, std
     file.close();
 
     if (tempVertices.size() < 3 || indices.size() < 3 || indices.size() % 3 != 0) {
-        LOG_WARN_CAT("Mesh", "Invalid .obj — serving fallback triangle");
+        LOG_WARN_CAT("Mesh", "{}Invalid .obj → fallback triangle{}", OCEAN_TEAL, RESET);
         vertices = {{0.0f, -0.5f, 0.0f}, {0.5f, 0.5f, 0.0f}, {-0.5f, 0.5f, 0.0f}};
         indices = {0, 1, 2};
     } else {
         vertices = std::move(tempVertices);
-        LOG_INFO_CAT("Mesh", std::format("Loaded {}: {} verts, {} tris", filename, vertices.size(), indices.size() / 3).c_str());
+        LOG_INFO_CAT("Mesh", "{}Loaded {}: {} verts, {} tris{}", 
+                     EMERALD_GREEN, filename, vertices.size(), indices.size() / 3, RESET);
     }
 }
 
+// =============================================================================
+//  APPLICATION CTOR
+// =============================================================================
 Application::Application(const char* title, int width, int height)
     : title_(title), width_(width), height_(height), mode_(1), quit_(false),
       sdl_(std::make_unique<SDL3Initializer::SDL3Initializer>(title_, width_, height_)),
-      renderer_(nullptr),
       camera_(std::make_unique<VulkanRTX::PerspectiveCamera>(60.0f, static_cast<float>(width) / height)),
       inputHandler_(nullptr), isFullscreen_(false), isMaximized_(false),
       lastFrameTime_(std::chrono::steady_clock::now()),
       showOverlay_(true), tonemapEnabled_(false)
 {
-    LOG_INFO_CAT("Application", std::format("{}INIT [{}x{}]{}", 
-                 Logging::Color::OCEAN_TEAL, width, height, Logging::Color::RESET).c_str()); 
+    LOG_INFO_CAT("Application", "{}INIT [{}x{}]{}", OCEAN_TEAL, width, height, RESET); 
     camera_->setUserData(this);
     initializeInput();
 }
 
+// =============================================================================
+//  DESTRUCTOR — RAII cleanup
+// =============================================================================
+Application::~Application() {
+    LOG_INFO_CAT("Application", "{}SHUTDOWN{}", CRIMSON_MAGENTA, RESET);
+    Dispose::quitSDL();
+}
+
+// =============================================================================
+//  RENDERER OWNERSHIP — setRenderer()
+// =============================================================================
 void Application::setRenderer(std::unique_ptr<VulkanRTX::VulkanRenderer> renderer) {
     renderer_ = std::move(renderer);
 
+    // Load mesh
     loadMesh("assets/models/scene.obj", vertices_, indices_);
     renderer_->getBufferManager()->uploadMesh(vertices_.data(), vertices_.size(), indices_.data(), indices_.size());
 
     auto ctx = renderer_->getContext();
 
+    // Async RTX update
     renderer_->getRTX().updateRTX(
         ctx->physicalDevice,
         ctx->commandPool,
@@ -106,41 +130,52 @@ void Application::setRenderer(std::unique_ptr<VulkanRTX::VulkanRenderer> rendere
     renderer_->setRenderMode(mode_);
     updateWindowTitle();
 
-    // === CRITICAL: Set camera.userData_ AFTER renderer is valid ===
+    // CRITICAL: Set camera.userData_ AFTER renderer is valid
     camera_->setUserData(this);
     LOG_INFO_CAT("CAMERA", "{}camera_->setUserData(this) @ {:p}{}", 
-                 Logging::Color::EMERALD_GREEN, static_cast<void*>(this), Logging::Color::RESET);
+                 EMERALD_GREEN, static_cast<void*>(this), RESET);
 
-    LOG_INFO_CAT("Application", std::format("{}MESH LOADED | 1-9=mode | H=HYPERTRACE | T=tonemap | O=overlay | F=FPS TARGET{}", 
-                 Logging::Color::EMERALD_GREEN, Logging::Color::RESET).c_str());
+    LOG_INFO_CAT("Application", "{}MESH LOADED | 1-9=mode | H=HYPERTRACE | T=tonemap | O=overlay | F=FPS TARGET{}", 
+                 EMERALD_GREEN, RESET);
 }
 
-Application::~Application() {
-    LOG_INFO_CAT("Application", std::format("{}SHUTDOWN{}", 
-                 Logging::Color::CRIMSON_MAGENTA, Logging::Color::RESET).c_str());
-    Dispose::quitSDL();
+// =============================================================================
+//  PUBLIC: getRenderer() — SAFE ACCESS
+// =============================================================================
+VulkanRTX::VulkanRenderer* Application::getRenderer() const {
+    if (!renderer_) {
+        LOG_ERROR_CAT("APP", "{}getRenderer(): null — call setRenderer() first{}", CRIMSON_MAGENTA, RESET);
+        return nullptr;
+    }
+    return renderer_.get();
 }
 
+// =============================================================================
+//  INPUT INITIALIZATION
+// =============================================================================
 void Application::initializeInput() {
     inputHandler_ = std::make_unique<HandleInput>(*camera_);
     inputHandler_->setCallbacks(
         [this](const SDL_KeyboardEvent& key) {
             if (key.type == SDL_EVENT_KEY_DOWN) {
                 switch (key.key) {
-                    case SDLK_1: setRenderMode(1); LOG_INFO_CAT("INPUT", "{}KEY 1 → MODE 1{}", Logging::Color::EMERALD_GREEN, Logging::Color::RESET); break;
-                    case SDLK_2: setRenderMode(2); LOG_INFO_CAT("INPUT", "{}KEY 2 → MODE 2{}", Logging::Color::EMERALD_GREEN, Logging::Color::RESET); break;
-                    case SDLK_3: setRenderMode(3); LOG_INFO_CAT("INPUT", "{}KEY 3 → MODE 3{}", Logging::Color::EMERALD_GREEN, Logging::Color::RESET); break;
-                    case SDLK_4: setRenderMode(4); LOG_INFO_CAT("INPUT", "{}KEY 4 → MODE 4{}", Logging::Color::EMERALD_GREEN, Logging::Color::RESET); break;
-                    case SDLK_5: setRenderMode(5); LOG_INFO_CAT("INPUT", "{}KEY 5 → MODE 5{}", Logging::Color::EMERALD_GREEN, Logging::Color::RESET); break;
-                    case SDLK_6: setRenderMode(6); LOG_INFO_CAT("INPUT", "{}KEY 6 → MODE 6{}", Logging::Color::EMERALD_GREEN, Logging::Color::RESET); break;
-                    case SDLK_7: setRenderMode(7); LOG_INFO_CAT("INPUT", "{}KEY 7 → MODE 7{}", Logging::Color::EMERALD_GREEN, Logging::Color::RESET); break;
-                    case SDLK_8: setRenderMode(8); LOG_INFO_CAT("INPUT", "{}KEY 8 → MODE 8{}", Logging::Color::EMERALD_GREEN, Logging::Color::RESET); break;
-                    case SDLK_9: setRenderMode(9); LOG_INFO_CAT("INPUT", "{}KEY 9 → MODE 9{}", Logging::Color::EMERALD_GREEN, Logging::Color::RESET); break;
+                    case SDLK_1: setRenderMode(1); LOG_INFO_CAT("INPUT", "{}KEY 1 → MODE 1{}", EMERALD_GREEN, RESET); break;
+                    case SDLK_2: setRenderMode(2); LOG_INFO_CAT("INPUT", "{}KEY 2 → MODE 2{}", EMERALD_GREEN, RESET); break;
+                    case SDLK_3: setRenderMode(3); LOG_INFO_CAT("INPUT", "{}KEY 3 → MODE 3{}", EMERALD_GREEN, RESET); break;
+                    case SDLK_4: setRenderMode(4); LOG_INFO_CAT("INPUT", "{}KEY 4 → MODE 4{}", EMERALD_GREEN, RESET); break;
+                    case SDLK_5: setRenderMode(5); LOG_INFO_CAT("INPUT", "{}KEY 5 → MODE 5{}", EMERALD_GREEN, RESET); break;
+                    case SDLK_6: setRenderMode(6); LOG_INFO_CAT("INPUT", "{}KEY 6 → MODE 6{}", EMERALD_GREEN, RESET); break;
+                    case SDLK_7: setRenderMode(7); LOG_INFO_CAT("INPUT", "{}KEY 7 → MODE 7{}", EMERALD_GREEN, RESET); break;
+                    case SDLK_8: setRenderMode(8); LOG_INFO_CAT("INPUT", "{}KEY 8 → MODE 8{}", EMERALD_GREEN, RESET); break;
+                    case SDLK_9: setRenderMode(9); LOG_INFO_CAT("INPUT", "{}KEY 9 → MODE 9{}", EMERALD_GREEN, RESET); break;
 
                     case SDLK_T: toggleTonemap(); break;
                     case SDLK_O: toggleOverlay(); break;
                     case SDLK_H: toggleHypertrace(); break;
                     case SDLK_F: toggleFpsTarget(); break;
+
+                    case SDLK_F11: toggleFullscreen(); break;
+                    case SDLK_M:   toggleMaximize();   break;
 
                     default: inputHandler_->defaultKeyboardHandler(key); break;
                 }
@@ -159,127 +194,163 @@ void Application::initializeInput() {
     );
 }
 
-/* --------------------------------------------------------------- */
-/*  FPS TARGET TOGGLE – 'F' KEY                                     */
-/* --------------------------------------------------------------- */
+// =============================================================================
+//  FPS TARGET TOGGLE – 'F' KEY
+// =============================================================================
 void Application::toggleFpsTarget() {
-    if (renderer_) {
-        renderer_->toggleFpsTarget();
+    if (auto* renderer = getRenderer()) {
+        renderer->toggleFpsTarget();
         LOG_INFO_CAT("INPUT", "{}KEY F → FPS TARGET: {} FPS{}", 
-                     Logging::Color::PEACHES_AND_CREAM,
-                     renderer_->getFpsTarget() == VulkanRTX::VulkanRenderer::FpsTarget::FPS_60 ? 60 : 120,
-                     Logging::Color::RESET);
+                     PEACHES_AND_CREAM,
+                     renderer->getFpsTarget() == VulkanRTX::VulkanRenderer::FpsTarget::FPS_60 ? 60 : 120,
+                     RESET);
     }
     updateWindowTitle();
 }
 
-/* --------------------------------------------------------------- */
-/*  HYPERTRACE – toggle 12,000+ FPS mode                          */
-/* --------------------------------------------------------------- */
+// =============================================================================
+//  HYPERTRACE – toggle 12,000+ FPS mode
+// =============================================================================
 void Application::toggleHypertrace() {
-    if (renderer_) {
-        renderer_->toggleHypertrace();
+    if (auto* renderer = getRenderer()) {
+        renderer->toggleHypertrace();
         LOG_INFO_CAT("INPUT", "{}KEY H → HYPERTRACE {}{}", 
-                     Logging::Color::CRIMSON_MAGENTA,
-                     renderer_->getRTX().isHypertraceEnabled() ? "ENABLED" : "DISABLED",
-                     Logging::Color::RESET);
+                     CRIMSON_MAGENTA,
+                     renderer->getRTX().isHypertraceEnabled() ? "ENABLED" : "DISABLED",
+                     RESET);
     }
     updateWindowTitle();
 }
 
-/* --------------------------------------------------------------- */
-/*  TONEMAP – independent flag, forces render mode 2 when active   */
-/* --------------------------------------------------------------- */
+// =============================================================================
+//  TONEMAP – independent flag, forces render mode 2 when active
+// =============================================================================
 void Application::toggleTonemap() {
     tonemapEnabled_ = !tonemapEnabled_;
 
     int targetMode = tonemapEnabled_ ? 2 : mode_;
-    if (renderer_) {
-        renderer_->setRenderMode(targetMode);
+    if (auto* renderer = getRenderer()) {
+        renderer->setRenderMode(targetMode);
     }
 
     LOG_INFO_CAT("INPUT", "{}KEY T → TONEMAP {} | MODE {}{}",
-                 Logging::Color::PEACHES_AND_CREAM,
+                 PEACHES_AND_CREAM,
                  tonemapEnabled_ ? "ENABLED" : "DISABLED",
                  targetMode,
-                 Logging::Color::RESET);
+                 RESET);
 
     updateWindowTitle();
 }
 
-/* --------------------------------------------------------------- */
+// =============================================================================
+//  OVERLAY TOGGLE
+// =============================================================================
 void Application::toggleOverlay() {
     showOverlay_ = !showOverlay_;
     LOG_INFO_CAT("INPUT", "{}KEY O → OVERLAY {}{}", 
-                 Logging::Color::OCEAN_TEAL,
+                 OCEAN_TEAL,
                  showOverlay_ ? "ON" : "OFF",
-                 Logging::Color::RESET);
+                 RESET);
     updateWindowTitle();
 }
 
-/* --------------------------------------------------------------- */
+// =============================================================================
+//  WINDOW TITLE — real-time state sync
+// =============================================================================
 void Application::updateWindowTitle() {
     std::string title = title_;
 
     if (showOverlay_) {
         title += " | Mode " + std::to_string(mode_);
         if (tonemapEnabled_) title += " (TONEMAP)";
-        if (renderer_ && renderer_->getRTX().isHypertraceEnabled()) title += " (HYPERTRACE)";
+        if (auto* renderer = getRenderer(); renderer && renderer->getRTX().isHypertraceEnabled()) {
+            title += " (HYPERTRACE)";
+        }
         
-        // FPS Target in title
-        if (renderer_) {
-            auto target = renderer_->getFpsTarget();
+        if (auto* renderer = getRenderer()) {
+            auto target = renderer->getFpsTarget();
             title += std::format(" ({} FPS)", target == VulkanRTX::VulkanRenderer::FpsTarget::FPS_60 ? 60 : 120);
         }
 
-        title += " | 1-9=mode | H=HYPERTRACE | T=tonemap | O=hide | F=FPS";
+        title += " | 1-9=mode | H=HYPERTRACE | T=tonemap | O=hide | F=FPS | F11=FS | M=MAX";
     }
 
     SDL_SetWindowTitle(sdl_->getWindow(), title.c_str());
 }
 
-/* --------------------------------------------------------------- */
+// =============================================================================
+//  RENDER MODE
+// =============================================================================
 void Application::setRenderMode(int mode) {
     mode_ = mode;
 
     int finalMode = tonemapEnabled_ ? 2 : mode_;
-    if (renderer_) {
-        renderer_->setRenderMode(finalMode);
+    if (auto* renderer = getRenderer()) {
+        renderer->setRenderMode(finalMode);
     }
 
-    LOG_INFO_CAT("Application", std::format("Render mode set to {}{}",
+    LOG_INFO_CAT("Application", "{}Render mode set to {}{}",
+                 EMERALD_GREEN,
                  finalMode,
-                 tonemapEnabled_ ? " (tonemap active)" : "").c_str());
+                 tonemapEnabled_ ? " (tonemap active)" : "");
 
     updateWindowTitle();
 }
 
-/* --------------------------------------------------------------- */
+// =============================================================================
+//  FULLSCREEN TOGGLE — F11
+// =============================================================================
 void Application::toggleFullscreen() {
     isFullscreen_ = !isFullscreen_;
     isMaximized_ = false;
     SDL_SetWindowFullscreen(sdl_->getWindow(), isFullscreen_);
+    LOG_INFO_CAT("APP", "{}FULLSCREEN {}{}", 
+                 isFullscreen_ ? EMERALD_GREEN : CRIMSON_MAGENTA,
+                 isFullscreen_ ? "ENABLED" : "DISABLED",
+                 RESET);
+    updateWindowTitle();
 }
 
+// =============================================================================
+//  MAXIMIZE TOGGLE — M key
+// =============================================================================
 void Application::toggleMaximize() {
     if (isFullscreen_) return;
     isMaximized_ = !isMaximized_;
-    if (isMaximized_) SDL_MaximizeWindow(sdl_->getWindow());
-    else SDL_RestoreWindow(sdl_->getWindow());
+    if (isMaximized_) {
+        SDL_MaximizeWindow(sdl_->getWindow());
+        LOG_INFO_CAT("APP", "{}WINDOW MAXIMIZED{}", EMERALD_GREEN, RESET);
+    } else {
+        SDL_RestoreWindow(sdl_->getWindow());
+        LOG_INFO_CAT("APP", "{}WINDOW RESTORED{}", OCEAN_TEAL, RESET);
+    }
+    updateWindowTitle();
 }
 
-/* --------------------------------------------------------------- */
+// =============================================================================
+//  RESIZE HANDLER — sync camera + renderer + swapchain
+// =============================================================================
 void Application::handleResize(int width, int height) {
     if (width <= 0 || height <= 0 || (width == width_ && height == height_)) return;
     if (SDL_GetWindowFlags(sdl_->getWindow()) & SDL_WINDOW_MINIMIZED) return;
+
+    LOG_INFO_CAT("APP", "{}RESIZE → {}x{}{}", BRIGHT_PINKISH_PURPLE, width, height, RESET);
+
     width_ = width; height_ = height;
-    if (renderer_) renderer_->handleResize(width_, height_);
     camera_->setAspectRatio(static_cast<float>(width_) / height_);
+
+    if (auto* renderer = getRenderer()) {
+        renderer->getSwapchainManager().recreateSwapchain(width_, height_);
+        renderer->handleResize(width_, height_);
+        LOG_INFO_CAT("APP", "{}Swapchain recreated + renderer resized{}", EMERALD_GREEN, RESET);
+    }
+
+    updateWindowTitle();
 }
 
-/* --------------------------------------------------------------- */
-/*  MAIN LOOP – FIXED: 'edits' → SDL_PollEvent                      */
-/* --------------------------------------------------------------- */
+// =============================================================================
+//  MAIN LOOP — SDL_PollEvent fixed
+// =============================================================================
 void Application::run() {
     while (!shouldQuit()) {
         SDL_Event ev;
@@ -287,6 +358,9 @@ void Application::run() {
             if (ev.type == SDL_EVENT_QUIT) {
                 quit_ = true;
                 break;
+            }
+            if (ev.type == SDL_EVENT_WINDOW_RESIZED) {
+                handleResize(ev.window.data1, ev.window.data2);
             }
         }
         if (quit_) break;
@@ -296,9 +370,11 @@ void Application::run() {
     }
 }
 
-/* --------------------------------------------------------------- */
+// =============================================================================
+//  RENDER FRAME
+// =============================================================================
 void Application::render() {
-    if (!renderer_ || !camera_) return;
+    if (!getRenderer() || !camera_) return;
     if (SDL_GetWindowFlags(sdl_->getWindow()) & SDL_WINDOW_MINIMIZED) {
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
         return;
@@ -309,11 +385,13 @@ void Application::render() {
     lastFrameTime_ = now;
 
     camera_->update(delta);
-    renderer_->renderFrame(*camera_, delta);
+    getRenderer()->renderFrame(*camera_, delta);
     updateWindowTitle();
 }
 
-/* --------------------------------------------------------------- */
+// =============================================================================
+//  QUIT CHECK
+// =============================================================================
 bool Application::shouldQuit() const {
     return quit_;
 }

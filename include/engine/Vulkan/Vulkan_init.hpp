@@ -1,29 +1,48 @@
 // src/engine/Vulkan/Vulkan_init.hpp
-// AMOURANTH RTX Engine (C) 2025 by Zachary Geurts gzac5314@gmail.com is licensed under CC BY-NC 4.0
+// AMOURANTH RTX Engine (C) 2025 by Zachary Geurts gzac5314@gmail.com
+// Licensed under CC BY-NC 4.0
 
 #pragma once
 
 #include "engine/Vulkan/VulkanCore.hpp"
 #include "engine/Vulkan/VulkanSwapchainManager.hpp"
 #include "engine/utils.hpp"
-#include <SDL3/SDL_vulkan.h>  // ← Correct: SDL3-only Vulkan integration
+#include <SDL3/SDL_vulkan.h>
 #include <vector>
 
 namespace VulkanInitializer {
 
-// Core
-uint32_t findMemoryType(VkPhysicalDevice physicalDevice, uint32_t typeFilter, VkMemoryPropertyFlags properties);
-void initInstance(const std::vector<std::string>& extensions, Vulkan::Context& context);
-void initSurface(Vulkan::Context& context, void* window, VkSurfaceKHR* rawSurface);
-VkPhysicalDevice findPhysicalDevice(VkInstance instance, VkSurfaceKHR surface, bool preferNvidia);
-void initDevice(Vulkan::Context& context);
-void initializeVulkan(Vulkan::Context& context);  // ← NOW CREATES SWAPCHAIN VIA MANAGER
+// ===================================================================
+// CORE INITIALIZATION
+// ===================================================================
+uint32_t findMemoryType(VkPhysicalDevice physicalDevice,
+                        uint32_t typeFilter,
+                        VkMemoryPropertyFlags properties);
 
-// Command buffers
+void initInstance(const std::vector<std::string>& extensions,
+                  Vulkan::Context& context);
+
+void initSurface(Vulkan::Context& context,
+                 void* window,
+                 VkSurfaceKHR* rawSurface = nullptr);
+
+VkPhysicalDevice findPhysicalDevice(VkInstance instance,
+                                   VkSurfaceKHR surface,
+                                   bool preferNvidia = true);
+
+void initDevice(Vulkan::Context& context);
+
+void initializeVulkan(Vulkan::Context& context);  // Full init: instance → surface → device → swapchain
+
+// ===================================================================
+// COMMAND BUFFER HELPERS
+// ===================================================================
 VkCommandBuffer beginSingleTimeCommands(Vulkan::Context& context);
 void endSingleTimeCommands(Vulkan::Context& context, VkCommandBuffer cmd);
 
-// Buffer creation
+// ===================================================================
+// BUFFER CREATION
+// ===================================================================
 void createBuffer(VkDevice device,
                   VkPhysicalDevice physicalDevice,
                   VkDeviceSize size,
@@ -34,15 +53,21 @@ void createBuffer(VkDevice device,
                   const VkMemoryAllocateFlagsInfo* allocFlags,
                   Vulkan::Context& context);
 
-// Image helpers
+// ===================================================================
+// IMAGE HELPERS
+// ===================================================================
 void transitionImageLayout(Vulkan::Context& context,
                            VkImage image,
                            VkFormat format,
                            VkImageLayout oldLayout,
                            VkImageLayout newLayout);
 
-void copyBuffer(VkDevice device, VkCommandPool commandPool, VkQueue queue,
-                VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size);
+void copyBuffer(VkDevice device,
+                VkCommandPool commandPool,
+                VkQueue queue,
+                VkBuffer srcBuffer,
+                VkBuffer dstBuffer,
+                VkDeviceSize size);
 
 void copyBufferToImage(Vulkan::Context& context,
                        VkBuffer srcBuffer,
@@ -59,13 +84,17 @@ void createStorageImage(VkDevice device,
                         uint32_t height,
                         Vulkan::Context& context);
 
-// Descriptor layouts
+// ===================================================================
+// DESCRIPTOR LAYOUTS
+// ===================================================================
 void createDescriptorSetLayout(VkDevice device,
                                VkPhysicalDevice physicalDevice,
                                VkDescriptorSetLayout& rayTracingLayout,
                                VkDescriptorSetLayout& graphicsLayout);
 
-// Descriptor pool + set
+// ===================================================================
+// DESCRIPTOR POOL + SET
+// ===================================================================
 void createDescriptorPoolAndSet(
     VkDevice device,
     VkPhysicalDevice physicalDevice,
@@ -86,11 +115,18 @@ void createDescriptorPoolAndSet(
     VkImageView gNormalView,
     Vulkan::Context& context);
 
-// Device address helpers
-VkDeviceAddress getBufferDeviceAddress(const Vulkan::Context& context, VkBuffer buffer);
-VkDeviceAddress getAccelerationStructureDeviceAddress(const Vulkan::Context& context, VkAccelerationStructureKHR as);
+// ===================================================================
+// DEVICE ADDRESS HELPERS
+// ===================================================================
+VkDeviceAddress getBufferDeviceAddress(const Vulkan::Context& context,
+                                       VkBuffer buffer);
 
-// Utility
+VkDeviceAddress getAccelerationStructureDeviceAddress(const Vulkan::Context& context,
+                                                      VkAccelerationStructureKHR as);
+
+// ===================================================================
+// UTILITY
+// ===================================================================
 bool hasStencilComponent(VkFormat format);
 
 } // namespace VulkanInitializer

@@ -2,9 +2,6 @@
 // AMOURANTH RTX Engine (C) 2025 by Zachary Geurts gzac5314@gmail.com
 // NEXUS FINAL: GPU-Driven Adaptive RT | 12,000+ FPS | Auto-Toggle
 // DECLARATIONS ONLY – NO DUPLICATES, NO PIPELINE LOGIC
-// VulkanRTX class → owns RT state, uses VulkanPipelineManager
-// ADDED: recordRayTracingCommandsAdaptive() + nexusScore
-// ADDED: isNexusEnabled() → for UI title sync
 
 #pragma once
 
@@ -20,11 +17,28 @@
 
 namespace VulkanRTX {
 
-// Forward declarations
 class VulkanPipelineManager;
 class VulkanRenderer;
 
-// VulkanRTXException – shared
+/* --------------------------------------------------------------------- */
+/* Async TLAS Build State */
+/* --------------------------------------------------------------------- */
+struct TLASBuildState {
+    VkDeferredOperationKHR op = VK_NULL_HANDLE;
+    VkAccelerationStructureKHR tlas = VK_NULL_HANDLE;
+    VkBuffer tlasBuffer = VK_NULL_HANDLE;
+    VkDeviceMemory tlasMemory = VK_NULL_HANDLE;
+    VkBuffer scratchBuffer = VK_NULL_HANDLE;
+    VkDeviceMemory scratchMemory = VK_NULL_HANDLE;
+    VkBuffer instanceBuffer = VK_NULL_HANDLE;
+    VkDeviceMemory instanceMemory = VK_NULL_HANDLE;
+    VulkanRenderer* renderer = nullptr;
+    bool completed = false;
+};
+
+/* --------------------------------------------------------------------- */
+/* EXCEPTION */
+/* --------------------------------------------------------------------- */
 class VulkanRTXException : public std::runtime_error {
 public:
     explicit VulkanRTXException(const std::string& msg)
@@ -41,7 +55,9 @@ private:
     int m_line = 0;
 };
 
-// DescriptorBindings – shared
+/* --------------------------------------------------------------------- */
+/* DESCRIPTOR BINDINGS */
+/* --------------------------------------------------------------------- */
 enum class DescriptorBindings : uint32_t {
     TLAS               = 0,
     StorageImage       = 1,
@@ -56,21 +72,17 @@ enum class DescriptorBindings : uint32_t {
     AlphaTex           = 10
 };
 
-// VulkanRTX – DECLARATION ONLY
+/* --------------------------------------------------------------------- */
+/* MAIN RTX CLASS */
+/* --------------------------------------------------------------------- */
 class VulkanRTX {
 public:
-    // -----------------------------------------------------------------------
-    //  CTOR: Takes ownership of pipeline manager (moved)
-    // -----------------------------------------------------------------------
     VulkanRTX(std::shared_ptr<::Vulkan::Context> ctx,
-          int width, int height,
-          VulkanPipelineManager* pipelineMgr);
+              int width, int height,
+              VulkanPipelineManager* pipelineMgr);
 
     ~VulkanRTX();
 
-    // -----------------------------------------------------------------------
-    //  INITIALIZATION
-    // -----------------------------------------------------------------------
     void initializeRTX(VkPhysicalDevice physicalDevice,
                        VkCommandPool commandPool,
                        VkQueue graphicsQueue,
@@ -78,9 +90,6 @@ public:
                        uint32_t maxRayRecursionDepth,
                        const std::vector<DimensionState>& dimensionCache);
 
-    // -----------------------------------------------------------------------
-    //  UPDATE (REBUILD AS + SBT)
-    // -----------------------------------------------------------------------
     void updateRTX(VkPhysicalDevice physicalDevice,
                    VkCommandPool commandPool,
                    VkQueue graphicsQueue,
@@ -101,14 +110,7 @@ public:
                    const std::vector<DimensionState>& dimensionCache,
                    VulkanRenderer* renderer);
 
-    // -----------------------------------------------------------------------
-    //  DESCRIPTOR SYSTEM
-    // -----------------------------------------------------------------------
     void createDescriptorPoolAndSet();
-
-    // -----------------------------------------------------------------------
-    //  ACCELERATION STRUCTURES
-    // -----------------------------------------------------------------------
     void createShaderBindingTable(VkPhysicalDevice physicalDevice);
 
     void createBottomLevelAS(VkPhysicalDevice physicalDevice,
@@ -122,9 +124,12 @@ public:
                           VkQueue queue,
                           const std::vector<std::tuple<VkAccelerationStructureKHR, glm::mat4>>& instances);
 
-    // -----------------------------------------------------------------------
-    //  DESCRIPTOR UPDATES
-    // -----------------------------------------------------------------------
+    void setTLAS(VkAccelerationStructureKHR tlas) noexcept {
+        tlas_ = tlas;
+        LOG_INFO_CAT("VulkanRTX", "{}TLAS SET @ {:p}{}",
+                     Logging::Color::BRIGHT_PINKISH_PURPLE, static_cast<void*>(tlas_), Logging::Color::RESET);
+    }
+
     void updateDescriptors(VkBuffer cameraBuffer,
                            VkBuffer materialBuffer,
                            VkBuffer dimensionBuffer,
@@ -132,21 +137,15 @@ public:
                            VkImageView denoiseImageView,
                            VkImageView envMapView,
                            VkSampler envMapSampler,
-                           VkImageView densityVolumeView,
-                           VkImageView gDepthView,
-                           VkImageView gNormalView);
+                           VkImageView densityVolumeView = VK_NULL_HANDLE,
+                           VkImageView gDepthView = VK_NULL_HANDLE,
+                           VkImageView gNormalView = VK_NULL_HANDLE);
 
-    // -----------------------------------------------------------------------
-    //  RECORDING — STANDARD
-    // -----------------------------------------------------------------------
     void recordRayTracingCommands(VkCommandBuffer cmdBuffer,
                                   VkExtent2D extent,
                                   VkImage outputImage,
                                   VkImageView outputImageView);
 
-    // -----------------------------------------------------------------------
-    //  RECORDING — ADAPTIVE (NEXUS)
-    // -----------------------------------------------------------------------
     void recordRayTracingCommandsAdaptive(VkCommandBuffer cmdBuffer,
                                           VkExtent2D extent,
                                           VkImage outputImage,
@@ -154,11 +153,7 @@ public:
                                           float nexusScore);
 
     void createBlackFallbackImage();
-    void notifyTLASReady(VkAccelerationStructureKHR tlas, VulkanRenderer* renderer);
 
-    // -----------------------------------------------------------------------
-    //  RAY TRACING DISPATCH
-    // -----------------------------------------------------------------------
     void traceRays(VkCommandBuffer cmd,
                    const VkStridedDeviceAddressRegionKHR* raygen,
                    const VkStridedDeviceAddressRegionKHR* miss,
@@ -166,9 +161,6 @@ public:
                    const VkStridedDeviceAddressRegionKHR* callable,
                    uint32_t width, uint32_t height, uint32_t depth) const;
 
-    // -----------------------------------------------------------------------
-    //  GETTERS
-    // -----------------------------------------------------------------------
     [[nodiscard]] VkDescriptorSet               getDescriptorSet() const noexcept { return ds_; }
     [[nodiscard]] VkPipeline                    getPipeline() const noexcept { return rtPipeline_; }
     [[nodiscard]] const ShaderBindingTable&     getSBT() const noexcept { return sbt_; }
@@ -178,25 +170,26 @@ public:
     [[nodiscard]] VkAccelerationStructureKHR    getBLAS() const noexcept { return blas_; }
     [[nodiscard]] VkAccelerationStructureKHR    getTLAS() const noexcept { return tlas_; }
 
-    // -----------------------------------------------------------------------
-    //  RUNTIME STATE
-    // -----------------------------------------------------------------------
     [[nodiscard]] bool isHypertraceEnabled() const noexcept { return hypertraceEnabled_; }
     [[nodiscard]] bool isNexusEnabled() const noexcept { return nexusEnabled_; }
     void setNexusEnabled(bool enabled) noexcept { nexusEnabled_ = enabled; }
 
-    // -----------------------------------------------------------------------
-    //  PIPELINE SETTER (called from VulkanRenderer after pipeline creation)
-    // -----------------------------------------------------------------------
     void setRayTracingPipeline(VkPipeline pipeline, VkPipelineLayout layout) noexcept {
         rtPipeline_ = pipeline;
         rtPipelineLayout_ = layout;
     }
 
+    // ── ASYNC TLAS BUILD ───────────────────────────────────────────────────
+    void buildTLASAsync(VkPhysicalDevice physicalDevice,
+                        VkCommandPool commandPool,
+                        VkQueue graphicsQueue,
+                        const std::vector<std::tuple<VkAccelerationStructureKHR, glm::mat4>>& instances,
+                        VulkanRenderer* renderer);
+
+    bool pollTLASBuild();
+    bool isTLASReady() const;
+
 private:
-    // -----------------------------------------------------------------------
-    //  HELPER METHODS
-    // -----------------------------------------------------------------------
     [[nodiscard]] VkCommandBuffer allocateTransientCommandBuffer(VkCommandPool commandPool);
     void submitAndWaitTransient(VkCommandBuffer cmd, VkQueue queue, VkCommandPool pool);
     void uploadBlackPixelToImage(VkImage image);
@@ -209,14 +202,9 @@ private:
     [[nodiscard]] uint32_t findMemoryType(VkPhysicalDevice physicalDevice,
                                           uint32_t typeFilter,
                                           VkMemoryPropertyFlags properties);
-    void cleanupBLASResources(VkBuffer asBuffer, VkDeviceMemory asMemory,
-                              VkBuffer scratchBuffer, VkDeviceMemory scratchMemory);
 
-    // -----------------------------------------------------------------------
-    //  MEMBERS
-    // -----------------------------------------------------------------------
     std::shared_ptr<::Vulkan::Context> context_;
-    std::unique_ptr<VulkanPipelineManager> pipelineMgr_;  // OWNED
+    VulkanPipelineManager* pipelineMgr_ = nullptr;
     VkDevice device_ = VK_NULL_HANDLE;
     VkPhysicalDevice physicalDevice_ = VK_NULL_HANDLE;
     VkExtent2D extent_{};
@@ -238,11 +226,6 @@ private:
     VkBuffer sbtBuffer_ = VK_NULL_HANDLE;
     VkDeviceMemory sbtMemory_ = VK_NULL_HANDLE;
 
-    std::vector<uint32_t> primitiveCounts_;
-    std::vector<uint32_t> previousPrimitiveCounts_;
-    std::vector<DimensionState> previousDimensionCache_;
-
-    bool supportsCompaction_ = false;
     ShaderBindingTable sbt_;
     VkDeviceAddress sbtBufferAddress_ = 0;
 
@@ -250,13 +233,19 @@ private:
     VkDeviceMemory blackFallbackMemory_ = VK_NULL_HANDLE;
     VkImageView blackFallbackView_ = VK_NULL_HANDLE;
 
-    // HYPERTRACE + NEXUS RUNTIME STATE
     bool hypertraceEnabled_ = false;
-    bool nexusEnabled_ = false;  // ← NEW: GPU auto-toggle
+    bool nexusEnabled_ = false;
 
-    // -----------------------------------------------------------------------
-    //  FUNCTION POINTERS
-    // -----------------------------------------------------------------------
+    // ── ASYNC TLAS STATE ───────────────────────────────────────────────────
+    bool tlasReady_ = false;
+    TLASBuildState pendingTLAS_{};
+
+    // ── DEFERRED OPERATION EXTENSIONS ───────────────────────────────────────
+    PFN_vkCreateDeferredOperationKHR vkCreateDeferredOperationKHR = nullptr;
+    PFN_vkDestroyDeferredOperationKHR vkDestroyDeferredOperationKHR = nullptr;
+    PFN_vkGetDeferredOperationResultKHR vkGetDeferredOperationResultKHR = nullptr;
+
+    // ── CORE RT EXTENSIONS ─────────────────────────────────────────────────
     PFN_vkGetBufferDeviceAddress vkGetBufferDeviceAddress = nullptr;
     PFN_vkCmdTraceRaysKHR vkCmdTraceRaysKHR = nullptr;
     PFN_vkCreateAccelerationStructureKHR vkCreateAccelerationStructureKHR = nullptr;
@@ -267,6 +256,7 @@ private:
     PFN_vkGetAccelerationStructureDeviceAddressKHR vkGetAccelerationStructureDeviceAddressKHR = nullptr;
     PFN_vkCmdBuildAccelerationStructuresKHR vkCmdBuildAccelerationStructuresKHR = nullptr;
 
+    // ── DESCRIPTOR EXTENSIONS ───────────────────────────────────────────────
     PFN_vkCreateDescriptorSetLayout vkCreateDescriptorSetLayout = nullptr;
     PFN_vkAllocateDescriptorSets vkAllocateDescriptorSets = nullptr;
     PFN_vkCreateDescriptorPool vkCreateDescriptorPool = nullptr;

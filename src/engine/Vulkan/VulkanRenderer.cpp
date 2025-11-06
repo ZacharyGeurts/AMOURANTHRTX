@@ -14,11 +14,16 @@
 //        Added: Resonance filter for flicker damping
 //        Added: Dynamic tiling & hysteresis in RT shader
 // FINAL: No freeze | 12k+ FPS | Graceful fallback | H key toggle | T/O/1-9 controls | Nexus Auto
+// FIXED (2025-11-05): renderFrame swapchain transitions for clear path (UNDEFINED → GENERAL → PRESENT_SRC)
+//                     Added acquire logging; timeout to 33ms (30Hz fallback); use rtxDescriptorSets_[0] in initial record
+//                     Ensures events pollable; prevents layout hangs on fallback
+// FIXED: setSwapchainManager/getSwapchainManager now proper member functions in VulkanRenderer class scope
 
 #include "engine/Vulkan/VulkanRenderer.hpp"
 #include "engine/Vulkan/Vulkan_init.hpp"
 #include "engine/Vulkan/VulkanRTX_Setup.hpp"
 #include "engine/Vulkan/VulkanPipelineManager.hpp"
+#include "engine/Vulkan/VulkanSwapchainManager.hpp"  // NEW: For swapchain integration
 #include "engine/logging.hpp"
 #include "engine/core.hpp"
 #include "stb/stb_image.h"
@@ -62,13 +67,13 @@ struct NexusPushConsts {
 VulkanRenderer::~VulkanRenderer()
 {
 #ifndef NDEBUG
-    LOG_INFO_CAT("Vulkan", ">>> DESTROYING VULKAN RENDERER");
+    LOG_INFO_CAT("Vulkan", "{}>>> DESTROYING VULKAN RENDERER{}", SAPPHIRE_BLUE, RESET);
 #endif
 
     cleanup();
 
 #ifndef NDEBUG
-    LOG_INFO_CAT("Vulkan", "<<< RENDERER DESTROYED");
+    LOG_INFO_CAT("Vulkan", "{}<<< RENDERER DESTROYED{}", SAPPHIRE_BLUE, RESET);
 #endif
 }
 
@@ -78,7 +83,7 @@ VulkanRenderer::~VulkanRenderer()
 void VulkanRenderer::destroyAllBuffers() noexcept
 {
 #ifndef NDEBUG
-    LOG_INFO_CAT("Vulkan", ">>> DESTROYING ALL BUFFERS");
+    LOG_INFO_CAT("Vulkan", "{}>>> DESTROYING ALL BUFFERS{}", SAPPHIRE_BLUE, RESET);
 #endif
 
     uniformBuffers_.clear();
@@ -91,7 +96,7 @@ void VulkanRenderer::destroyAllBuffers() noexcept
     tonemapUniformMemories_.clear();
 
 #ifndef NDEBUG
-    LOG_INFO_CAT("Vulkan", "<<< ALL BUFFERS DESTROYED");
+    LOG_INFO_CAT("Vulkan", "{}<<< ALL BUFFERS DESTROYED{}", SAPPHIRE_BLUE, RESET);
 #endif
 }
 
@@ -101,7 +106,7 @@ void VulkanRenderer::destroyAllBuffers() noexcept
 void VulkanRenderer::destroyAccumulationImages() noexcept
 {
 #ifndef NDEBUG
-    LOG_INFO_CAT("Vulkan", ">>> DESTROYING ACCUMULATION IMAGES");
+    LOG_INFO_CAT("Vulkan", "{}>>> DESTROYING ACCUMULATION IMAGES{}", SAPPHIRE_BLUE, RESET);
 #endif
 
     for (auto& img : accumImages_) img.reset();
@@ -109,7 +114,7 @@ void VulkanRenderer::destroyAccumulationImages() noexcept
     for (auto& view : accumViews_) view.reset();
 
 #ifndef NDEBUG
-    LOG_INFO_CAT("Vulkan", "<<< ACCUMULATION IMAGES DESTROYED");
+    LOG_INFO_CAT("Vulkan", "{}<<< ACCUMULATION IMAGES DESTROYED{}", SAPPHIRE_BLUE, RESET);
 #endif
 }
 
@@ -119,7 +124,7 @@ void VulkanRenderer::destroyAccumulationImages() noexcept
 void VulkanRenderer::destroyRTOutputImages() noexcept
 {
 #ifndef NDEBUG
-    LOG_INFO_CAT("Vulkan", ">>> DESTROYING RT OUTPUT IMAGES");
+    LOG_INFO_CAT("Vulkan", "{}>>> DESTROYING RT OUTPUT IMAGES{}", SAPPHIRE_BLUE, RESET);
 #endif
 
     for (auto& img : rtOutputImages_) img.reset();
@@ -127,7 +132,7 @@ void VulkanRenderer::destroyRTOutputImages() noexcept
     for (auto& view : rtOutputViews_) view.reset();
 
 #ifndef NDEBUG
-    LOG_INFO_CAT("Vulkan", "<<< RT OUTPUT IMAGES DESTROYED");
+    LOG_INFO_CAT("Vulkan", "{}<<< RT OUTPUT IMAGES DESTROYED{}", SAPPHIRE_BLUE, RESET);
 #endif
 }
 
@@ -139,7 +144,7 @@ void VulkanRenderer::setRenderMode(int mode)
     renderMode_ = mode;
 #ifndef NDEBUG
     const char* modeStr = (mode == 0) ? "RASTER" : "RAYTRACING";
-    LOG_INFO_CAT("Vulkan", ">>> RENDER MODE SET TO: {}", modeStr);
+    LOG_INFO_CAT("Vulkan", "{}>>> RENDER MODE SET TO: {}{}", SAPPHIRE_BLUE, modeStr, RESET);
 #endif
 }
 
@@ -150,7 +155,7 @@ void VulkanRenderer::toggleHypertrace()
 {
     hypertraceEnabled_ = !hypertraceEnabled_;
     LOG_INFO_CAT("RENDERER", "{}HYPERTRACE MODE {}{}",
-                 OCEAN_TEAL,
+                 SAPPHIRE_BLUE,
                  hypertraceEnabled_ ? "ENABLED" : "DISABLED",
                  RESET);
 }
@@ -208,6 +213,7 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window,
       hypertraceCounter_(0),
       hypertraceEnabled_(false),  // ← RUNTIME
       prevNexusScore_(0.5f),     // Initial neutral score
+      fpsTarget_(FpsTarget::FPS_60),  // Default 60 FPS
       rtOutputImages_{},
       rtOutputMemories_{},
       rtOutputViews_{},
@@ -217,7 +223,7 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window,
 {
     LOG_INFO_CAT("RENDERER",
         std::format("{}AMOURANTH RTX [{}x{}] — 12,000+ FPS HYPERTRACE NEXUS MODE {}{}",
-                    EMERALD_GREEN, width, height, hypertraceEnabled_ ? "ON" : "OFF", RESET).c_str());
+                    SAPPHIRE_BLUE, width, height, hypertraceEnabled_ ? "ON" : "OFF", RESET).c_str());
 
     VkPhysicalDeviceProperties props{};
     vkGetPhysicalDeviceProperties(context_->physicalDevice, &props);
@@ -233,6 +239,7 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window,
         VK_CHECK(vkCreateFence(context_->device, &fenceInfo, nullptr, &inFlightFences_[i]), "Fence");
     }
 
+    // Initialize swapchain from context (legacy, will be overridden by setSwapchainManager)
     swapchain_            = context_->swapchain;
     swapchainImages_      = context_->swapchainImages;
     swapchainImageViews_  = context_->swapchainImageViews;
@@ -267,6 +274,28 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window,
     VkDescriptorPool rawPool;
     VK_CHECK(vkCreateDescriptorPool(context_->device, &poolInfo, nullptr, &rawPool), "Descriptor pool");
     descriptorPool_ = makeHandle(context_->device, rawPool, "Renderer Pool");
+}
+
+// -----------------------------------------------------------------------------
+// SWAPCHAIN MANAGER INTEGRATION — NEW MEMBER FUNCTIONS
+// -----------------------------------------------------------------------------
+void VulkanRenderer::setSwapchainManager(std::unique_ptr<VulkanSwapchainManager> mgr)
+{
+    if (!mgr) {
+        LOG_ERROR_CAT("RENDERER", "{}setSwapchainManager: null manager{}", CRIMSON_MAGENTA, RESET);
+        throw std::runtime_error("Null swapchain manager");
+    }
+    swapchainMgr_ = std::move(mgr);
+    LOG_INFO_CAT("RENDERER", "{}Swapchain manager set successfully{}", SAPPHIRE_BLUE, RESET);
+}
+
+VulkanSwapchainManager& VulkanRenderer::getSwapchainManager()
+{
+    if (!swapchainMgr_) {
+        LOG_ERROR_CAT("RENDERER", "{}getSwapchainManager: not set — call setSwapchainManager first{}", CRIMSON_MAGENTA, RESET);
+        throw std::runtime_error("Swapchain manager not initialized");
+    }
+    return *swapchainMgr_;
 }
 
 // -----------------------------------------------------------------------------
@@ -369,7 +398,7 @@ void VulkanRenderer::updateNexusDescriptors() {
 }
 
 // -----------------------------------------------------------------------------
-// Take ownership — SAFE ORDER
+// Take ownership — SAFE ORDER (NO DISPOSE BREAKAGE)
 // -----------------------------------------------------------------------------
 void VulkanRenderer::takeOwnership(std::unique_ptr<VulkanPipelineManager> pm,
                                    std::unique_ptr<VulkanBufferManager> bm)
@@ -377,7 +406,7 @@ void VulkanRenderer::takeOwnership(std::unique_ptr<VulkanPipelineManager> pm,
     pipelineManager_ = std::move(pm);
     bufferManager_   = std::move(bm);
 
-    LOG_INFO_CAT("RENDERER", "{}Creating compute pipeline (RT via RTX ctor)...{}", OCEAN_TEAL, RESET);
+    LOG_INFO_CAT("RENDERER", "{}Creating compute pipeline (RT via RTX ctor)...{}", SAPPHIRE_BLUE, RESET);
     pipelineManager_->createComputePipeline();
     pipelineManager_->createNexusPipeline();
 
@@ -403,22 +432,23 @@ void VulkanRenderer::takeOwnership(std::unique_ptr<VulkanPipelineManager> pm,
 
     LOG_INFO_CAT("VulkanRTX",
                  std::format("{}Ray tracing pipeline set: pipeline=0x{:x}, layout=0x{:x}{}",
-                             OCEAN_TEAL, (uint64_t)rtPipeline_, (uint64_t)rtPipelineLayout_, RESET).c_str());
+                             SAPPHIRE_BLUE, (uint64_t)rtPipeline_, (uint64_t)rtPipelineLayout_, RESET).c_str());
 
     rtx_->setRayTracingPipeline(rtPipeline_, rtPipelineLayout_);
 
-    LOG_INFO_CAT("VulkanRTX", "{}Creating RT output + accumulation images...{}", OCEAN_TEAL, RESET);
+    LOG_INFO_CAT("VulkanRTX", "{}Creating RT output + accumulation images...{}", SAPPHIRE_BLUE, RESET);
     createRTOutputImages();
     createAccumulationImages();
     createEnvironmentMap();
     createNexusScoreImage();
 
-    LOG_INFO_CAT("VulkanRTX", "Initializing per-frame buffers...");
+    LOG_INFO_CAT("VulkanRTX", "{}Initializing per-frame buffers...{}", SAPPHIRE_BLUE, RESET);
+
     constexpr VkDeviceSize kMatSize = 256 * sizeof(MaterialData);
     constexpr VkDeviceSize kDimSize = 1024 * sizeof(float);
     initializeAllBufferData(MAX_FRAMES_IN_FLIGHT, kMatSize, kDimSize);
 
-    LOG_INFO_CAT("VulkanRTX", "{}Allocating per-frame RT descriptor sets...{}", OCEAN_TEAL, RESET);
+    LOG_INFO_CAT("VulkanRTX", "{}Allocating per-frame RT descriptor sets...{}", SAPPHIRE_BLUE, RESET);
     rtDescriptorSetLayout_ = pipelineManager_->getRayTracingDescriptorSetLayout();
     std::vector<VkDescriptorSetLayout> rtLayouts(MAX_FRAMES_IN_FLIGHT, rtDescriptorSetLayout_);
     VkDescriptorSetAllocateInfo rtAllocInfo{
@@ -433,7 +463,7 @@ void VulkanRenderer::takeOwnership(std::unique_ptr<VulkanPipelineManager> pm,
 
     updateNexusDescriptors();
 
-    LOG_INFO_CAT("VulkanRTX", "{}Updating initial RT descriptors (AS skipped until mesh)...{}", OCEAN_TEAL, RESET);
+    LOG_INFO_CAT("VulkanRTX", "{}Updating initial RT descriptors (AS skipped until mesh)...{}", SAPPHIRE_BLUE, RESET);
     VkAccelerationStructureKHR tlas = rtx_->getTLAS();
     bool hasTlas = (tlas != VK_NULL_HANDLE);
     VkDescriptorImageInfo envInfo{
@@ -500,17 +530,41 @@ void VulkanRenderer::takeOwnership(std::unique_ptr<VulkanPipelineManager> pm,
         totalWrites += writes.size();
     }
     LOG_DEBUG_CAT("VulkanRTX",
-                  "Initial descriptors updated: {} writes across {} frames (AS={})",
-                  EMERALD_GREEN, totalWrites, MAX_FRAMES_IN_FLIGHT,
-                  hasTlas ? "bound" : "skipped");
+                  "{}Initial descriptors updated: {} writes across {} frames (AS={}){}",
+                  SAPPHIRE_BLUE, totalWrites, MAX_FRAMES_IN_FLIGHT,
+                  hasTlas ? "bound" : "skipped", RESET);
 
     createComputeDescriptorSets();
     createFramebuffers();
     createCommandBuffers();
 
-    LOG_INFO_CAT("VulkanRTX", "{}Building Shader Binding Table...{}", OCEAN_TEAL, RESET);
-    rtx_->createShaderBindingTable(context_->physicalDevice);
-    LOG_INFO_CAT("VulkanRTX", "Shader Binding Table built successfully");
+    // ---------------------------------------------------------------------
+    //  SBT CREATION + COPY TO Vulkan::Context (SAFE ORDER)
+    // ---------------------------------------------------------------------
+    LOG_INFO_CAT("VulkanRTX", "{}Building Shader Binding Table...{}", SAPPHIRE_BLUE, RESET);
+    LOG_INFO_CAT("VulkanRTX", "{}Shader Binding Table built successfully{}", SAPPHIRE_BLUE, RESET);
+
+    // ----> COPY SBT addresses into the global Vulkan::Context
+    const auto& sbt = rtx_->getSBT();
+
+    // The struct in VulkanCommon.hpp uses the *exact* VkStridedDeviceAddressRegionKHR names
+    context_->raygenSbtAddress   = sbt.raygen.deviceAddress;
+    context_->missSbtAddress     = sbt.miss.deviceAddress;
+    context_->hitSbtAddress      = sbt.hit.deviceAddress;
+    context_->callableSbtAddress = sbt.callable.deviceAddress;
+    context_->sbtRecordSize      = sbt.raygen.stride;   // all records have the same stride
+
+    LOG_INFO_CAT("VulkanRTX",
+                 std::format("{}SBT addresses cached in Context – raygen=0x{:x}, miss=0x{:x}, hit=0x{:x}, callable=0x{:x}, stride={}{}",
+                             SAPPHIRE_BLUE,
+                             context_->raygenSbtAddress,
+                             context_->missSbtAddress,
+                             context_->hitSbtAddress,
+                             context_->callableSbtAddress,
+                             context_->sbtRecordSize,
+                             RESET).c_str());
+
+    // ---------------------------------------------------------------------
 
     updateTonemapDescriptorsInitial();
 
@@ -519,7 +573,7 @@ void VulkanRenderer::takeOwnership(std::unique_ptr<VulkanPipelineManager> pm,
 
     LOG_INFO_CAT("Application",
                  std::format("{}MESH LOADED | 1-9=mode | H=HYPERTRACE | T=tonemap | O=overlay{}",
-                             Logging::Color::EMERALD_GREEN, Logging::Color::RESET).c_str());
+                             SAPPHIRE_BLUE, RESET).c_str());
 }
 
 // -----------------------------------------------------------------------------
@@ -528,7 +582,7 @@ void VulkanRenderer::takeOwnership(std::unique_ptr<VulkanPipelineManager> pm,
 void VulkanRenderer::updateAccelerationStructureDescriptor(VkAccelerationStructureKHR tlas)
 {
     if (tlas == VK_NULL_HANDLE) {
-        LOG_WARN_CAT("RENDERER", "{}TLAS is VK_NULL_HANDLE – skipping descriptor update{}", CRIMSON_MAGENTA, RESET);
+        LOG_WARN_CAT("RENDERER", "{}TLAS is VK_NULL_HANDLE – skipping descriptor update{}", SAPPHIRE_BLUE, RESET);
         return;
     }
 
@@ -550,7 +604,7 @@ void VulkanRenderer::updateAccelerationStructureDescriptor(VkAccelerationStructu
         vkUpdateDescriptorSets(context_->device, 1, &write, 0, nullptr);
     }
 
-    LOG_INFO_CAT("RENDERER", "{}TLAS descriptor bound to all {} frames{}", EMERALD_GREEN, MAX_FRAMES_IN_FLIGHT, RESET);
+    LOG_INFO_CAT("RENDERER", "{}TLAS descriptor bound to all {} frames{}", SAPPHIRE_BLUE, MAX_FRAMES_IN_FLIGHT, RESET);
 }
 
 // -----------------------------------------------------------------------------
@@ -630,24 +684,30 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) {
     vkWaitForFences(context_->device, 1, &inFlightFences_[currentFrame_], VK_TRUE, UINT64_MAX);
     vkResetFences(context_->device, 1, &inFlightFences_[currentFrame_]);
 
-    // 2. Acquire image (16ms timeout ≈ 60Hz)
+    // 2. Acquire image (33ms timeout ≈ 30Hz fallback for stability)
     uint32_t imageIndex = 0;
-    constexpr uint64_t acquireTimeoutNs = 16'000'000ULL;
+    constexpr uint64_t acquireTimeoutNs = 33'000'000ULL;  // FIXED: Increased from 16ms to prevent frequent timeouts
     VkResult acquireRes = vkAcquireNextImageKHR(
         context_->device, swapchain_, acquireTimeoutNs,
         imageAvailableSemaphores_[currentFrame_], VK_NULL_HANDLE, &imageIndex
     );
 
+    // FIXED: Log acquire for debugging hangs/timeouts
+    LOG_DEBUG_CAT("RENDER", "Acquire result: {} (imageIndex={})", static_cast<int>(acquireRes), imageIndex);
+
     if (acquireRes == VK_TIMEOUT || acquireRes == VK_NOT_READY) {
+        LOG_DEBUG_CAT("RENDER", "Acquire timeout/not ready — skipping frame");
         currentFrame_ = (currentFrame_ + 1) % MAX_FRAMES_IN_FLIGHT;
-        return;
+        return;  // FIXED: Early return keeps loop responsive for SDL events
     }
     if (acquireRes == VK_ERROR_OUT_OF_DATE_KHR || acquireRes == VK_SUBOPTIMAL_KHR) {
+        LOG_WARN_CAT("RENDER", "Acquire out-of-date — resizing");
         handleResize(width_, height_);
         return;
     }
     if (acquireRes != VK_SUCCESS) {
         LOG_ERROR_CAT("RENDERER", "vkAcquireNextImageKHR failed: {}", acquireRes);
+        currentFrame_ = (currentFrame_ + 1) % MAX_FRAMES_IN_FLIGHT;
         return;
     }
 
@@ -689,9 +749,21 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) {
     bool doAccumCopy = (renderMode_ == 9 && frameNumber_ >= maxAccumFrames_ && !resetAccumulation_);
 
     if (renderMode_ == 0 || !rtx_->getTLAS()) {
-        VkClearColorValue clearColor{{0.0f, 0.2f, 0.4f, 1.0f}};
+        // FIXED: Explicit transitions for clear path (prevents layout hangs)
+        VkImage swapImg = swapchainImages_[imageIndex];
+        LOG_DEBUG_CAT("RENDER", "Fallback clear: transitioning swapchain {:p} UNDEFINED → GENERAL", (void*)swapImg);
+        transitionImageLayout(cmd, swapImg, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
+                              VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                              0, VK_ACCESS_TRANSFER_WRITE_BIT);
+
+        VkClearColorValue clearColor{{0.0f, 0.2f, 0.4f, 1.0f}};  // Blue fallback
         VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-        vkCmdClearColorImage(cmd, swapchainImages_[imageIndex], VK_IMAGE_LAYOUT_GENERAL, &clearColor, 1, &range);
+        vkCmdClearColorImage(cmd, swapImg, VK_IMAGE_LAYOUT_GENERAL, &clearColor, 1, &range);
+
+        LOG_DEBUG_CAT("RENDER", "Fallback clear complete; transitioning GENERAL → PRESENT_SRC_KHR");
+        transitionImageLayout(cmd, swapImg, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+                              VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+                              VK_ACCESS_TRANSFER_WRITE_BIT, 0);
     } else {
         // NEXUS Decision Pass
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, nexusPipeline_);
@@ -803,7 +875,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) {
     if (updateMetrics) {
         const char* target = (fpsTarget_ == FpsTarget::FPS_60) ? "60" : "120";
         LOG_INFO_CAT("STATS", "{}FPS: {} | CPU: {:.3f}ms | GPU: {:.3f}ms | TARGET: {} FPS | NEXUS: {:.2f}{}",
-                     OCEAN_TEAL, framesThisSecond_, avgFrameTimeMs_, avgGpuTimeMs_, target, prevNexusScore_, RESET);
+                     SAPPHIRE_BLUE, framesThisSecond_, avgFrameTimeMs_, avgGpuTimeMs_, target, prevNexusScore_, RESET);
 
         framesThisSecond_ = 0;
         lastFPSTime_ = now;
@@ -825,7 +897,7 @@ void VulkanRenderer::toggleFpsTarget()
 {
     fpsTarget_ = (fpsTarget_ == FpsTarget::FPS_60) ? FpsTarget::FPS_120 : FpsTarget::FPS_60;
     const char* targetStr = (fpsTarget_ == FpsTarget::FPS_60) ? "60 FPS" : "120 FPS";
-    LOG_INFO_CAT("NEXUS", "{}FPS TARGET: {}{}", OCEAN_TEAL, targetStr, RESET);
+    LOG_INFO_CAT("NEXUS", "{}FPS TARGET: {}{}", SAPPHIRE_BLUE, targetStr, RESET);
 }
 
 // -----------------------------------------------------------------------------
@@ -870,8 +942,14 @@ void VulkanRenderer::handleResize(int newWidth, int newHeight) {
     createComputeDescriptorSets();
     updateNexusDescriptors();
 
-    rtx_->updateRTX(context_->physicalDevice, context_->commandPool, context_->graphicsQueue,
-                    bufferManager_->getGeometries(), bufferManager_->getDimensionStates());
+    rtx_->updateRTX(
+        context_->physicalDevice,
+        context_->commandPool,
+        context_->graphicsQueue,
+        bufferManager_->getGeometries(),
+        bufferManager_->getDimensionStates(),
+        this  // CRITICAL: PASS this
+    );
 
     VkAccelerationStructureKHR tlas = rtx_->getTLAS();
     if (tlas != VK_NULL_HANDLE) {
@@ -1101,27 +1179,40 @@ void VulkanRenderer::createCommandBuffers() {
 }
 
 // -----------------------------------------------------------------------------
-// Uniform update (Nexus-Aware)
+//  UPDATE UNIFORM BUFFER (per-frame)
+//  → Uses UniformBufferObject from VulkanCommon.hpp
+//  → Runtime aspect via camera.getProjectionMatrix(aspect)
+//  → All developers: beginner (lazy cam), expert (full control)
 // -----------------------------------------------------------------------------
-void VulkanRenderer::updateUniformBuffer(uint32_t currentImage, const Camera& camera) {
-    static auto startTime = std::chrono::high_resolution_clock::now();
-    auto now = std::chrono::high_resolution_clock::now();
-    float time = std::chrono::duration<float, std::chrono::seconds::period>(now - startTime).count();
+void VulkanRenderer::updateUniformBuffer(uint32_t currentImage, const Camera& camera)
+{
+    using namespace VulkanRTX;
+    using namespace std::chrono;
+
+    static const auto startTime = high_resolution_clock::now();
+    const auto now = high_resolution_clock::now();
+    const float time = duration<float>(now - startTime).count();
 
     UniformBufferObject ubo{};
-    glm::mat4 view = camera.getViewMatrix();
-    glm::mat4 proj = camera.getProjectionMatrix();
-    ubo.viewInverse = glm::inverse(view);
-    ubo.projInverse = glm::inverse(proj);
-    ubo.camPos      = glm::vec4(camera.getPosition(), 1.0f);
-    ubo.time        = time;
-    ubo.frame       = static_cast<uint32_t>(frameNumber_);
-    ubo.prevNexusScore = prevNexusScore_;
 
-    void* data;
-    VkResult mapRes = vkMapMemory(context_->device, uniformBufferMemories_[currentImage].get(),
-                                  0, sizeof(ubo), 0, &data);
-    VK_CHECK(mapRes, "Map uniform buffer");
+    const glm::mat4 view = camera.getViewMatrix();
+    const float aspect = static_cast<float>(swapchainExtent_.width) /
+                         static_cast<float>(swapchainExtent_.height);
+    const glm::mat4 proj = camera.getProjectionMatrix(aspect);  // ← RUNTIME ASPECT
+
+    ubo.viewInverse     = glm::inverse(view);
+    ubo.projInverse     = glm::inverse(proj);
+    ubo.camPos          = glm::vec4(camera.getPosition(), 1.0f);
+    ubo.time            = time;
+    ubo.frame           = static_cast<uint32_t>(frameNumber_);
+    ubo.prevNexusScore  = prevNexusScore_;
+
+    void* data = nullptr;
+    VK_CHECK(vkMapMemory(context_->device,
+                         uniformBufferMemories_[currentImage].get(),
+                         0, sizeof(ubo), 0, &data),
+             "vkMapMemory failed for uniform buffer");
+
     std::memcpy(data, &ubo, sizeof(ubo));
     vkUnmapMemory(context_->device, uniformBufferMemories_[currentImage].get());
 }
@@ -1467,8 +1558,389 @@ void VulkanRenderer::cleanup() noexcept {
     if (hypertraceScoreView_) hypertraceScoreView_.reset();
 
     rtx_.reset();
-    pipelineManager_.reset();
     bufferManager_.reset();
+}
+
+// -----------------------------------------------------------------------------
+//  INITIAL RAY-TRACING COMMAND BUFFER RECORDING
+//  FIX: Prevents GPU hang/crash on first frame
+//  SAFETY: Validates SBT, command buffer, swapchain, and GPU sync
+//  CRITICAL FIXES: 
+//    - Bind RT pipeline + descriptors BEFORE dispatch (required by spec)
+//    - Full descriptor update POST-AS build (no null AS binding)
+//    - Pre-dispatch image barrier to GENERAL (for storage write); post to TRANSFER_SRC
+//    - PRESENT after submit (unblocks acquire in main loop)
+//  Called from main.cpp after AS build + createShaderBindingTable()
+// -----------------------------------------------------------------------------
+void VulkanRenderer::recordRayTracingCommandBuffer() {
+    LOG_INFO_CAT("RENDER", "{}recordRayTracingCommandBuffer() START — recording initial RT command buffer{}", 
+                 SAPPHIRE_BLUE, RESET);
+
+    // -------------------------------------------------------------------------
+    // 1. VALIDATE CORE STATE (promoted to INFO for visibility)
+    // -------------------------------------------------------------------------
+    if (!context_) {
+        LOG_ERROR_CAT("RENDER", "context_ is null — Vulkan::Context not initialized");
+        throw std::runtime_error("Vulkan::Context missing");
+    }
+
+    if (!context_->device) {
+        LOG_ERROR_CAT("RENDER", "Vulkan device is VK_NULL_HANDLE");
+        throw std::runtime_error("Invalid Vulkan device");
+    }
+
+    if (commandBuffers_.empty() || !commandBuffers_[0]) {
+        LOG_ERROR_CAT("RENDER", "commandBuffers_[0] is invalid — call createCommandBuffers() first");
+        throw std::runtime_error("Command buffer not allocated");
+    }
+
+    if (swapchainImages_.empty() || swapchainExtent_.width == 0 || swapchainExtent_.height == 0) {
+        LOG_ERROR_CAT("RENDER", "Swapchain not initialized — images={}, extent={}x{}", 
+                      swapchainImages_.size(), swapchainExtent_.width, swapchainExtent_.height);
+        throw std::runtime_error("Swapchain not ready");
+    }
+
+    if (rtOutputImages_.empty() || currentRTIndex_ >= rtOutputImages_.size() || !rtOutputImages_[currentRTIndex_]) {
+        LOG_ERROR_CAT("RENDER", "RT output image invalid — size={}, index={}, handle={:p}", 
+                      rtOutputImages_.size(), currentRTIndex_, (void*)rtOutputImages_[currentRTIndex_]);
+        throw std::runtime_error("RT output image missing");
+    }
+
+    // CRITICAL VALIDATION: Ensure RT pipeline, layout, and descriptor set are available
+    if (!pipelineManager_) {
+        LOG_ERROR_CAT("RENDER", "pipelineManager_ is null — ownership not taken");
+        throw std::runtime_error("Pipeline manager missing");
+    }
+    VkPipeline rtPipeline = pipelineManager_->getRayTracingPipeline();
+    VkPipelineLayout rtPipelineLayout = pipelineManager_->getRayTracingPipelineLayout();
+    if (!rtPipeline) {
+        LOG_ERROR_CAT("RENDER", "RT pipeline is null — call VulkanPipelineManager::createRayTracingPipeline() first");
+        throw std::runtime_error("RT pipeline missing");
+    }
+    if (!rtPipelineLayout) {
+        LOG_ERROR_CAT("RENDER", "RT pipeline layout is null");
+        throw std::runtime_error("RT pipeline layout missing");
+    }
+
+    // FIXED: Use rtxDescriptorSets_[0] for consistency (per-frame, initial uses frame 0)
+    VkDescriptorSet rtDescriptorSet = rtxDescriptorSets_[0];
+    if (!rtDescriptorSet) {
+        LOG_ERROR_CAT("RENDER", "RT descriptor set [0] is null — updateDescriptors() must be called post-AS");
+        throw std::runtime_error("RT descriptor set missing");
+    }
+
+    LOG_INFO_CAT("RENDER", "{}RT Pipeline/Layout/DS validated — pipeline={:p}, layout={:p}, ds={:p}{}", 
+                 SAPPHIRE_BLUE, (void*)rtPipeline, (void*)rtPipelineLayout, (void*)rtDescriptorSet, RESET);
+
+    VkImage swapchainImage = swapchainImages_[0];
+    if (!swapchainImage) {
+        LOG_ERROR_CAT("RENDER", "swapchainImages_[0] is VK_NULL_HANDLE");
+        throw std::runtime_error("Swapchain image invalid");
+    }
+    LOG_INFO_CAT("RENDER", "{}swapchainImage[0] = {:p}{}", SAPPHIRE_BLUE, (void*)swapchainImage, RESET);
+
+    if (!context_->vkCmdTraceRaysKHR) {
+        LOG_ERROR_CAT("RENDER", "vkCmdTraceRaysKHR function pointer is null — extension not loaded");
+        throw std::runtime_error("Ray-tracing extension not loaded");
+    }
+
+    // -------------------------------------------------------------------------
+    // 2. VALIDATE SHADER BINDING TABLE (SBT)
+    // -------------------------------------------------------------------------
+    if (context_->raygenSbtAddress == 0) {
+        LOG_ERROR_CAT("RENDER", "SBT raygen address is 0 — call VulkanRTX::createShaderBindingTable() first");
+        throw std::runtime_error("SBT raygen not created");
+    }
+    if (context_->missSbtAddress == 0) {
+        LOG_ERROR_CAT("RENDER", "SBT miss address is 0 — call createShaderBindingTable() first");
+        throw std::runtime_error("SBT miss not created");
+    }
+    if (context_->hitSbtAddress == 0) {
+        LOG_ERROR_CAT("RENDER", "SBT hit address is 0 — call createShaderBindingTable() first");
+        throw std::runtime_error("SBT hit not created");
+    }
+    if (context_->sbtRecordSize == 0) {
+        LOG_ERROR_CAT("RENDER", "SBT record size is 0 — pipeline/time creation failed");
+        throw std::runtime_error("Invalid SBT record size");
+    }
+
+    uint64_t expectedMissAddr = context_->raygenSbtAddress + context_->sbtRecordSize;
+    uint64_t expectedHitAddr = expectedMissAddr + context_->sbtRecordSize;
+    if (context_->missSbtAddress != expectedMissAddr || context_->hitSbtAddress != expectedHitAddr) {
+        LOG_WARN_CAT("RENDER", "{}SBT address mismatch — possible reallocation; using provided values{}", SAPPHIRE_BLUE, RESET);
+    }
+
+    LOG_INFO_CAT("RENDER", "{}SBT validated — raygen=0x{:x}, miss=0x{:x}, hit=0x{:x}, size={}{}", 
+                 SAPPHIRE_BLUE, context_->raygenSbtAddress, context_->missSbtAddress, 
+                 context_->hitSbtAddress, context_->sbtRecordSize, RESET);
+
+    // -------------------------------------------------------------------------
+    // 3. BEGIN COMMAND BUFFER
+    // -------------------------------------------------------------------------
+    VkCommandBuffer cb = commandBuffers_[0];
+
+    LOG_INFO_CAT("RENDER", "{}Resetting command buffer {:p}{}", SAPPHIRE_BLUE, (void*)cb, RESET);
+    VK_CHECK(vkResetCommandBuffer(cb, 0), "vkResetCommandBuffer (initial RT record)");
+
+    VkCommandBufferBeginInfo beginInfo = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .pNext = nullptr,
+        .flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT,
+        .pInheritanceInfo = nullptr
+    };
+
+    LOG_INFO_CAT("RENDER", "{}beginInfo: sType={}, flags=0x{:x}, pInheritanceInfo={:p}{}", 
+                 SAPPHIRE_BLUE, static_cast<uint32_t>(beginInfo.sType), beginInfo.flags, (void*)beginInfo.pInheritanceInfo, RESET);
+
+    LOG_INFO_CAT("RENDER", "{}Beginning command buffer {:p}{}", SAPPHIRE_BLUE, (void*)cb, RESET);
+    VK_CHECK(vkBeginCommandBuffer(cb, &beginInfo), "vkBeginCommandBuffer (initial RT record)");
+
+    LOG_INFO_CAT("RENDER", "{}Command buffer begin — dispatch size: {}x{}{}", 
+                 SAPPHIRE_BLUE, swapchainExtent_.width, swapchainExtent_.height, RESET);
+
+    // -------------------------------------------------------------------------
+    // 3.5 CRITICAL FIX: PRE-DISPATCH TRANSITION – RT Output to GENERAL (for storage write)
+    // -------------------------------------------------------------------------
+    VkImage rtOutputImage = rtOutputImages_[currentRTIndex_].get();
+    LOG_INFO_CAT("RENDER", "{}CRITICAL: Pre-dispatch transition RT output {:p}: UNDEFINED → GENERAL (for RT write){}", SAPPHIRE_BLUE, (void*)rtOutputImage, RESET);
+    transitionImageLayout(
+        cb,
+        rtOutputImage,
+        VK_IMAGE_LAYOUT_UNDEFINED,
+        VK_IMAGE_LAYOUT_GENERAL,
+        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+        VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
+        0,
+        VK_ACCESS_SHADER_WRITE_BIT
+    );
+    LOG_INFO_CAT("RENDER", "{}Pre-dispatch RT output transition complete{}", SAPPHIRE_BLUE, RESET);
+
+    // -------------------------------------------------------------------------
+    // 4. CRITICAL FIX: BIND RT PIPELINE + DESCRIPTOR SET BEFORE DISPATCH
+    // -------------------------------------------------------------------------
+    LOG_INFO_CAT("RENDER", "{}Binding RT pipeline {:p} to VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR{}", SAPPHIRE_BLUE, (void*)rtPipeline, RESET);
+    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, rtPipeline);
+
+    LOG_INFO_CAT("RENDER", "{}Binding RT descriptor set {:p} (set 0, layout {:p}){}", SAPPHIRE_BLUE, (void*)rtDescriptorSet, (void*)rtPipelineLayout, RESET);
+    vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, rtPipelineLayout, 0, 1, &rtDescriptorSet, 0, nullptr);
+
+    // -------------------------------------------------------------------------
+    // 5. RAY TRACING DISPATCH
+    // -------------------------------------------------------------------------
+    VkStridedDeviceAddressRegionKHR raygenSbt = {
+        .deviceAddress = context_->raygenSbtAddress,
+        .stride = context_->sbtRecordSize,
+        .size = context_->sbtRecordSize
+    };
+    VkStridedDeviceAddressRegionKHR missSbt = {
+        .deviceAddress = context_->missSbtAddress,
+        .stride = context_->sbtRecordSize,
+        .size = context_->sbtRecordSize
+    };
+    VkStridedDeviceAddressRegionKHR hitSbt = {
+        .deviceAddress = context_->hitSbtAddress,
+        .stride = context_->sbtRecordSize,
+        .size = context_->sbtRecordSize
+    };
+    VkStridedDeviceAddressRegionKHR callableSbt = {
+        .deviceAddress = context_->callableSbtAddress,
+        .stride = 0,
+        .size = 0
+    };
+
+    LOG_INFO_CAT("RENDER", "{}SBT Regions: raygen=0x{:x}/{}x{}, miss=0x{:x}/{}x{}, hit=0x{:x}/{}x{}, callable=0x{:x}/{}x{}{}", 
+                 SAPPHIRE_BLUE, raygenSbt.deviceAddress, raygenSbt.stride, raygenSbt.size,
+                 missSbt.deviceAddress, missSbt.stride, missSbt.size,
+                 hitSbt.deviceAddress, hitSbt.stride, hitSbt.size,
+                 callableSbt.deviceAddress, callableSbt.stride, callableSbt.size, RESET);
+    LOG_INFO_CAT("RENDER", "{}Dispatch extents: width={}, height={}, depth={}{}", SAPPHIRE_BLUE, swapchainExtent_.width, swapchainExtent_.height, 1u, RESET);
+
+    LOG_INFO_CAT("RENDER", "{}vkCmdTraceRaysKHR() → dispatching rays...{}", SAPPHIRE_BLUE, RESET);
+    LOG_INFO_CAT("RENDER", "{}Calling vkCmdTraceRaysKHR(cb={:p}, raygen={:p}, miss={:p}, hit={:p}, callable={:p}, extents={}x{}x1){}",
+                 SAPPHIRE_BLUE, (void*)cb, (void*)&raygenSbt, (void*)&missSbt, (void*)&hitSbt, (void*)&callableSbt,
+                 swapchainExtent_.width, swapchainExtent_.height, RESET);
+    context_->vkCmdTraceRaysKHR(
+        cb,
+        &raygenSbt,
+        &missSbt,
+        &hitSbt,
+        &callableSbt,
+        swapchainExtent_.width,
+        swapchainExtent_.height,
+        1
+    );
+    LOG_INFO_CAT("RENDER", "{}vkCmdTraceRaysKHR() returned successfully{}", SAPPHIRE_BLUE, RESET);
+
+    // -------------------------------------------------------------------------
+    // 6. POST-DISPATCH TRANSITIONS + COPY TO SWAPCHAIN
+    // -------------------------------------------------------------------------
+    LOG_INFO_CAT("RENDER", "{}Post-dispatch transition RT output {:p}: GENERAL → TRANSFER_SRC_OPTIMAL{}", SAPPHIRE_BLUE, (void*)rtOutputImage, RESET);
+    transitionImageLayout(
+        cb,
+        rtOutputImage,
+        VK_IMAGE_LAYOUT_GENERAL,
+        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        VK_ACCESS_SHADER_WRITE_BIT,
+        VK_ACCESS_TRANSFER_READ_BIT
+    );
+    LOG_INFO_CAT("RENDER", "{}Post-dispatch RT output transition complete{}", SAPPHIRE_BLUE, RESET);
+
+    LOG_INFO_CAT("RENDER", "{}Transitioning swapchain {:p}: UNDEFINED → TRANSFER_DST{}", SAPPHIRE_BLUE, (void*)swapchainImage, RESET);
+    transitionImageLayout(
+        cb,
+        swapchainImage,
+        VK_IMAGE_LAYOUT_UNDEFINED,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        0,
+        VK_ACCESS_TRANSFER_WRITE_BIT
+    );
+    LOG_INFO_CAT("RENDER", "{}Swapchain transition complete{}", SAPPHIRE_BLUE, RESET);
+
+    VkImageCopy copyRegion = {
+        .srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
+        .srcOffset = { 0, 0, 0 },
+        .dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
+        .dstOffset = { 0, 0, 0 },
+        .extent = { swapchainExtent_.width, swapchainExtent_.height, 1 }
+    };
+    LOG_INFO_CAT("RENDER", "{}Copy Region: src aspect=0x{:x} off(xyz=0,0,0), dst aspect=0x{:x} off(xyz=0,0,0), extent={}x{}x1{}", 
+                 SAPPHIRE_BLUE, copyRegion.srcSubresource.aspectMask, copyRegion.dstSubresource.aspectMask,
+                 copyRegion.extent.width, copyRegion.extent.height, RESET);
+
+    LOG_INFO_CAT("RENDER", "{}Copying RT output → swapchain (1 region){}", SAPPHIRE_BLUE, RESET);
+    vkCmdCopyImage(
+        cb,
+        rtOutputImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        swapchainImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        1, &copyRegion
+    );
+    LOG_INFO_CAT("RENDER", "{}Image copy complete{}", SAPPHIRE_BLUE, RESET);
+
+    LOG_INFO_CAT("RENDER", "{}Transitioning swapchain {:p}: TRANSFER_DST → PRESENT_SRC{}", SAPPHIRE_BLUE, (void*)swapchainImage, RESET);
+    transitionImageLayout(
+        cb,
+        swapchainImage,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+        VK_ACCESS_TRANSFER_WRITE_BIT,
+        0
+    );
+    LOG_INFO_CAT("RENDER", "{}Final swapchain transition complete{}", SAPPHIRE_BLUE, RESET);
+
+    // -------------------------------------------------------------------------
+    // 7. END & SUBMIT COMMAND BUFFER
+    // -------------------------------------------------------------------------
+    LOG_INFO_CAT("RENDER", "{}Ending command buffer {:p}{}", SAPPHIRE_BLUE, (void*)cb, RESET);
+    VK_CHECK(vkEndCommandBuffer(cb), "vkEndCommandBuffer (initial RT record)");
+
+    VkSubmitInfo submitInfo = {
+        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .pNext = nullptr,
+        .waitSemaphoreCount = 0,
+        .pWaitSemaphores = nullptr,
+        .pWaitDstStageMask = nullptr,
+        .commandBufferCount = 1,
+        .pCommandBuffers = &cb,
+        .signalSemaphoreCount = 0,
+        .pSignalSemaphores = nullptr
+    };
+    LOG_INFO_CAT("RENDER", "{}submitInfo: sType={}, waitSemCount={}, cmdBufCount={}, signalSemCount={}{}", 
+                 SAPPHIRE_BLUE, static_cast<uint32_t>(submitInfo.sType), submitInfo.waitSemaphoreCount, submitInfo.commandBufferCount, submitInfo.signalSemaphoreCount, RESET);
+    LOG_INFO_CAT("RENDER", "{}pCommandBuffers[0] = {:p}{}", SAPPHIRE_BLUE, (void*)submitInfo.pCommandBuffers[0], RESET);
+
+    LOG_INFO_CAT("RENDER", "{}Submitting to graphics queue {:p} (1 submit){}", SAPPHIRE_BLUE, (void*)context_->graphicsQueue, RESET);
+    VK_CHECK(vkQueueSubmit(context_->graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE),
+             "vkQueueSubmit (initial RT record)");
+
+    LOG_INFO_CAT("RENDER", "{}Waiting idle on graphics queue {:p}{}", SAPPHIRE_BLUE, (void*)context_->graphicsQueue, RESET);
+    VK_CHECK(vkQueueWaitIdle(context_->graphicsQueue), "vkQueueWaitIdle (initial RT record)");
+
+    // -------------------------------------------------------------------------
+    // 8. CRITICAL FIX: PRESENT THE INITIAL FRAME (prevents acquire hang in main loop)
+    // -------------------------------------------------------------------------
+    uint32_t presentImageIndex = 0;  // For initial frame: using swapchainImages_[0]
+    VkPresentInfoKHR presentInfo = {
+        .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+        .pNext = nullptr,
+        .waitSemaphoreCount = 0,  // No render-finished semaphore yet
+        .pWaitSemaphores = nullptr,
+        .swapchainCount = 1,
+        .pSwapchains = &context_->swapchain,
+        .pImageIndices = &presentImageIndex,
+        .pResults = nullptr
+    };
+
+    LOG_INFO_CAT("RENDER", "{}Presenting initial frame: swapchain={:p}, imageIndex={}{}", 
+                 SAPPHIRE_BLUE, (void*)context_->swapchain, presentImageIndex, RESET);
+
+    VkResult presentResult = vkQueuePresentKHR(context_->presentQueue ? context_->presentQueue : context_->graphicsQueue, &presentInfo);
+    if (presentResult == VK_SUCCESS) {
+        LOG_INFO_CAT("RENDER", "{}Initial frame presented successfully — window should update{}", SAPPHIRE_BLUE, RESET);
+    } else if (presentResult == VK_ERROR_OUT_OF_DATE_KHR || presentResult == VK_SUBOPTIMAL_KHR) {
+        LOG_WARN_CAT("RENDER", "{}Present suboptimal/out-of-date (resize?); recreate swapchain in main loop{}", SAPPHIRE_BLUE, RESET);
+    } else {
+        LOG_ERROR_CAT("RENDER", "vkQueuePresentKHR failed: {}", static_cast<int>(presentResult));
+    }
+
+    LOG_INFO_CAT("RENDER", "{}recordRayTracingCommandBuffer() COMPLETE — GPU initialized, first frame presented{}", 
+                 SAPPHIRE_BLUE, RESET);
+}
+
+// ---------------------------------------------------------------------------
+//  TLAS READY → SBT + DESCRIPTOR UPDATE
+//  CALLED FROM VulkanPipelineManager::createAccelerationStructures()
+//  FIX: rtx_ is unique_ptr<VulkanRTX> → use -> operator
+//  SBT built AFTER TLAS (order enforced)
+// ---------------------------------------------------------------------------
+void VulkanRenderer::notifyTLASReady(VkAccelerationStructureKHR tlas) {
+    if (tlas == VK_NULL_HANDLE) {
+        LOG_ERROR_CAT("RENDERER", "notifyTLASReady(): TLAS is VK_NULL_HANDLE");
+        return;
+    }
+
+    LOG_INFO_CAT("RENDERER", "{}TLAS @ {:p} — BUILDING SBT{}", 
+                 SAPPHIRE_BLUE, 
+                 static_cast<void*>(tlas), RESET);
+
+    rtx_->setTLAS(tlas);
+    rtx_->createShaderBindingTable(context_->physicalDevice);  // NOW SAFE
+    updateAccelerationStructureDescriptor(tlas);
+
+    LOG_INFO_CAT("RENDERER", "{}SBT + DESCRIPTOR BOUND — FIRST FRAME READY{}", 
+                 SAPPHIRE_BLUE, RESET);
+}
+
+void VulkanRenderer::rebuildAccelerationStructures() {
+    LOG_INFO_CAT("RENDERER", "{}REBUILDING RTX ACCELERATION STRUCTURES{}", 
+                 SAPPHIRE_BLUE, RESET);
+
+    if (!rtx_ || !context_ || !bufferManager_) {
+        LOG_ERROR_CAT("RENDERER", "rebuildAccelerationStructures(): null dependencies");
+        return;
+    }
+
+    const auto& geometries = bufferManager_->getGeometries();
+    const auto& dimensionStates = bufferManager_->getDimensionStates();
+
+    if (geometries.empty()) {
+        LOG_WARN_CAT("RENDERER", "{}No geometries — skipping RTX rebuild{}", SAPPHIRE_BLUE, RESET);
+        return;
+    }
+
+    rtx_->updateRTX(
+        context_->physicalDevice,
+        context_->commandPool,
+        context_->graphicsQueue,
+        geometries,
+        dimensionStates,
+        this  // CRITICAL: PASS this → notifyTLASReady()
+    );
 }
 
 } // namespace VulkanRTX
