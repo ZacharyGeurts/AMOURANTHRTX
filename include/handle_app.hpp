@@ -64,6 +64,7 @@ private:
     void initializeInput();
     void render();
     void updateWindowTitle();
+    void handleWindowEvent(const SDL_WindowEvent& we);  // FIXED: Declaration added
 
     std::string title_;
     int width_;

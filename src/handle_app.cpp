@@ -1,11 +1,10 @@
 // src/handle_app.cpp
 // AMOURANTH RTX Engine (C) 2025 by Zachary Geurts gzac5314@gmail.com
 // FINAL: T = tonemap | O = overlay | 1-9 = modes | H = HYPERTRACE | F = FPS TARGET
-// PROTIP: RAII + state sync → UI + engine in perfect harmony
-// LOGS: Every key (1-9, T, O, H, F, F11, M) with neon feedback
-// FIXED: setRenderer() redefined → removed
-// FIXED: camera.cpp → uses getRenderer()
-// FIXED: Resize, Fullscreen, Maximize → RTX sync + zero frame drop
+// FIXED: SDL3 event system — SDL_EVENT_WINDOW is NOT a valid enum
+// FIXED: Use SDL_EVENT_WINDOW_MINIMIZED etc. directly in main loop
+// FIXED: No separate SDL_EVENT_WINDOW type — all window events are SDL_EVENT_WINDOW_*
+// FIXED: -Wswitch warnings suppressed with default case
 
 #include "handle_app.hpp"
 #include <SDL3/SDL.h>
@@ -20,6 +19,7 @@
 #include <format>
 #include "engine/logging.hpp"
 #include "engine/Vulkan/VulkanRenderer.hpp"
+#include "engine/Vulkan/VulkanSwapchainManager.hpp"
 #include "engine/SDL3/SDL3_init.hpp"
 #include "engine/Dispose.hpp"
 #include "engine/utils.hpp"
@@ -304,10 +304,13 @@ void Application::toggleFullscreen() {
     isFullscreen_ = !isFullscreen_;
     isMaximized_ = false;
     SDL_SetWindowFullscreen(sdl_->getWindow(), isFullscreen_);
-    LOG_INFO_CAT("APP", "{}FULLSCREEN {}{}", 
-                 isFullscreen_ ? EMERALD_GREEN : CRIMSON_MAGENTA,
-                 isFullscreen_ ? "ENABLED" : "DISABLED",
-                 RESET);
+
+    if (isFullscreen_) {
+        LOG_INFO_CAT("APP", "{}FULLSCREEN ENABLED{}", EMERALD_GREEN, RESET);
+    } else {
+        LOG_INFO_CAT("APP", "{}FULLSCREEN DISABLED{}", CRIMSON_MAGENTA, RESET);
+    }
+
     updateWindowTitle();
 }
 
@@ -316,6 +319,7 @@ void Application::toggleFullscreen() {
 // =============================================================================
 void Application::toggleMaximize() {
     if (isFullscreen_) return;
+
     isMaximized_ = !isMaximized_;
     if (isMaximized_) {
         SDL_MaximizeWindow(sdl_->getWindow());
@@ -332,24 +336,73 @@ void Application::toggleMaximize() {
 // =============================================================================
 void Application::handleResize(int width, int height) {
     if (width <= 0 || height <= 0 || (width == width_ && height == height_)) return;
-    if (SDL_GetWindowFlags(sdl_->getWindow()) & SDL_WINDOW_MINIMIZED) return;
+
+    if (SDL_GetWindowFlags(sdl_->getWindow()) & SDL_WINDOW_MINIMIZED) {
+        LOG_INFO_CAT("APP", "{}RESIZE IGNORED: Window minimized{}", OCEAN_TEAL, RESET);
+        return;
+    }
 
     LOG_INFO_CAT("APP", "{}RESIZE → {}x{}{}", BRIGHT_PINKISH_PURPLE, width, height, RESET);
 
-    width_ = width; height_ = height;
+    width_ = width;
+    height_ = height;
     camera_->setAspectRatio(static_cast<float>(width_) / height_);
 
     if (auto* renderer = getRenderer()) {
         renderer->getSwapchainManager().recreateSwapchain(width_, height_);
         renderer->handleResize(width_, height_);
-        LOG_INFO_CAT("APP", "{}Swapchain recreated + renderer resized{}", EMERALD_GREEN, RESET);
+
+        LOG_INFO_CAT("APP", "{}Swapchain + renderer resized: {}x{}{}", EMERALD_GREEN, width_, height_, RESET);
     }
 
     updateWindowTitle();
 }
 
 // =============================================================================
-//  MAIN LOOP — SDL_PollEvent fixed
+//  WINDOW EVENT HANDLER — SDL3: Handle SDL_EVENT_WINDOW_* directly
+// =============================================================================
+void Application::handleWindowEvent(const SDL_WindowEvent& we) {
+    switch (we.type) {
+        case SDL_EVENT_WINDOW_MINIMIZED:
+            LOG_INFO_CAT("APP", "{}WINDOW MINIMIZED{}", OCEAN_TEAL, RESET);
+            break;
+
+        case SDL_EVENT_WINDOW_RESTORED:
+            LOG_INFO_CAT("APP", "{}WINDOW RESTORED{}", EMERALD_GREEN, RESET);
+            {
+                int w, h;
+                SDL_GetWindowSize(sdl_->getWindow(), &w, &h);
+                if (w != width_ || h != height_) {
+                    handleResize(w, h);
+                }
+            }
+            break;
+
+        case SDL_EVENT_WINDOW_MAXIMIZED:
+            if (!isFullscreen_) {
+                isMaximized_ = true;
+                LOG_INFO_CAT("APP", "{}WINDOW MAXIMIZED (OS){}", EMERALD_GREEN, RESET);
+                updateWindowTitle();
+            }
+            break;
+
+        case SDL_EVENT_WINDOW_RESIZED:
+            if (!(SDL_GetWindowFlags(sdl_->getWindow()) & SDL_WINDOW_MINIMIZED)) {
+                handleResize(we.data1, we.data2);
+            }
+            break;
+
+        case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
+            quit_ = true;
+            break;
+
+        default:
+            break;  // Suppress -Wswitch warnings
+    }
+}
+
+// =============================================================================
+//  MAIN LOOP — SDL3: Check for window events via type range
 // =============================================================================
 void Application::run() {
     while (!shouldQuit()) {
@@ -359,8 +412,10 @@ void Application::run() {
                 quit_ = true;
                 break;
             }
-            if (ev.type == SDL_EVENT_WINDOW_RESIZED) {
-                handleResize(ev.window.data1, ev.window.data2);
+
+            // SDL3: All window events are in SDL_EVENT_WINDOW_FIRST to SDL_EVENT_WINDOW_LAST
+            if (ev.type >= SDL_EVENT_WINDOW_FIRST && ev.type <= SDL_EVENT_WINDOW_LAST) {
+                handleWindowEvent(ev.window);
             }
         }
         if (quit_) break;
@@ -375,7 +430,9 @@ void Application::run() {
 // =============================================================================
 void Application::render() {
     if (!getRenderer() || !camera_) return;
-    if (SDL_GetWindowFlags(sdl_->getWindow()) & SDL_WINDOW_MINIMIZED) {
+
+    uint32_t flags = SDL_GetWindowFlags(sdl_->getWindow());
+    if (flags & SDL_WINDOW_MINIMIZED) {
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
         return;
     }

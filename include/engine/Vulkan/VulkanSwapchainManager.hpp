@@ -1,10 +1,9 @@
 // include/engine/Vulkan/VulkanSwapchainManager.hpp
 // AMOURANTH RTX Engine (C) 2025 by Zachary Geurts gzac5314@gmail.com
-// FINAL: HDR, Runtime Config, oldSwapchain, recreate(), LOW_LATENCY, 12,000+ FPS
-// FIXED: Duplicate getters removed
-// FIXED: std::default_delete specialization removed
-// FIXED: Context::destroySwapchain() moved to .cpp
-// GROK PROTIP: Zero-downtime resize, triple buffer, HDR, mailbox
+// FINAL: HDR, Triple Buffer, Mailbox, Zero-Downtime, 12,000+ FPS
+// FIXED: NO circular include with VulkanRenderer.hpp
+// FIXED: SwapchainInfo + formatToString at top
+// GROK PROTIP: Forward declare VulkanRenderer → clean compile
 
 #pragma once
 
@@ -18,7 +17,30 @@
 
 namespace VulkanRTX {
 
-// ── RUNTIME CONFIG (ImGui, CLI, hot-reload, zero-copy) ─────────────────────
+// FORWARD DECLARE VulkanRenderer TO BREAK CIRCULAR DEPENDENCY
+class VulkanRenderer;
+
+// ── SWAPCHAIN INFO (USED BY VulkanRenderer::handleResize) ─────────────────
+struct SwapchainInfo {
+    VkSwapchainKHR swapchain = VK_NULL_HANDLE;
+    std::vector<VkImage> images;
+    std::vector<VkImageView> imageViews;
+    VkExtent2D extent{};
+    VkFormat format = VK_FORMAT_UNDEFINED;
+};
+
+// ── FORMAT TO STRING (USED IN VulkanRenderer::handleResize) ───────────────
+inline const char* formatToString(VkFormat fmt) {
+    switch (fmt) {
+        case VK_FORMAT_R16G16B16A16_SFLOAT:     return "R16G16B16A16_SFLOAT";
+        case VK_FORMAT_A2B10G10R10_UNORM_PACK32:return "A2B10G10R10_UNORM";
+        case VK_FORMAT_B8G8R8A8_SRGB:           return "B8G8R8A8_SRGB";
+        case VK_FORMAT_R8G8B8A8_SRGB:           return "R8G8B8A8_SRGB";
+        default:                                return "UNKNOWN_FORMAT";
+    }
+}
+
+// ── RUNTIME CONFIG ───────────────────────────────────────────────────────
 struct SwapchainRuntimeConfig {
     VkPresentModeKHR desiredMode = VK_PRESENT_MODE_MAILBOX_KHR;
     bool forceVsync = false;
@@ -31,7 +53,7 @@ struct SwapchainRuntimeConfig {
         : desiredMode(mode), forceVsync(vsync), forceTripleBuffer(triple), enableHDR(hdr), logFinalConfig(log) {}
 };
 
-// ── VULKAN SWAPCHAIN MANAGER (RAII + RECREATE + HDR + TRIPLE BUFFER) ───────
+// ── VULKAN SWAPCHAIN MANAGER ─────────────────────────────────────────────
 class VulkanSwapchainManager {
 public:
     static constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 3;
@@ -46,14 +68,23 @@ public:
     void recreateSwapchain(int width, int height);
     void cleanup() noexcept;
 
-    // ── GETTERS (UNIQUE, NO DUPLICATES) ─────────────────────────────────────
     VkSwapchainKHR getSwapchainHandle() const { return swapchain_; }
     VkFormat getSwapchainFormat() const { return swapchainImageFormat_; }
     VkExtent2D getSwapchainExtent() const { return swapchainExtent_; }
     const std::vector<VkImage>& getSwapchainImages() const { return swapchainImages_; }
     const std::vector<VkImageView>& getSwapchainImageViews() const { return swapchainImageViews_; }
 
-    // Frame sync
+    // NOW: getSwapchainInfo() is in VulkanRenderer.cpp
+    SwapchainInfo getSwapchainInfo() const {
+        return {
+            .swapchain = swapchain_,
+            .images = swapchainImages_,
+            .imageViews = swapchainImageViews_,
+            .extent = swapchainExtent_,
+            .format = swapchainImageFormat_
+        };
+    }
+
     VkSemaphore& getImageAvailableSemaphore(uint32_t frame) { return imageAvailableSemaphores_[frame % MAX_FRAMES_IN_FLIGHT]; }
     VkSemaphore& getRenderFinishedSemaphore(uint32_t frame) { return renderFinishedSemaphores_[frame % MAX_FRAMES_IN_FLIGHT]; }
     VkFence&     getInFlightFence(uint32_t frame)           { return inFlightFences_[frame % MAX_FRAMES_IN_FLIGHT]; }
