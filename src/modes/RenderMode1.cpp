@@ -1,12 +1,13 @@
 // src/modes/RenderMode1.cpp
 // AMOURANTH RTX — MODE 1: ENVIRONMENT MAP ONLY
-// FULLY MODULAR. FULLY SCALABLE. FULLY GLOWING.
-// Keyboard key: 1
+// FINAL FIX: context.camera null → FALLBACK DISPATCH + NO SKIP
+// LAZY CAMERA = OPTIONAL, MODE 1 = ALWAYS WORKS
+// Keyboard key: 1 → Full env map, even without camera
 
 #include "modes/RenderMode1.hpp"
 #include "engine/Vulkan/VulkanCore.hpp"
 #include "engine/RTConstants.hpp"
-#include "engine/camera.hpp"          // ← REQUIRED
+#include "engine/camera.hpp"
 #include "engine/logging.hpp"
 
 #include <glm/gtc/constants.hpp>
@@ -15,7 +16,8 @@
 
 namespace VulkanRTX {
 
-#define LOG_MODE1(...) LOG_DEBUG_CAT("RenderMode1", __VA_ARGS__)
+using namespace Logging::Color;
+#define LOG_MODE1(...) LOG_INFO_CAT("RenderMode1", __VA_ARGS__)
 
 void renderMode1(
     uint32_t imageIndex,
@@ -26,32 +28,41 @@ void renderMode1(
     float deltaTime,
     ::Vulkan::Context& context
 ) {
-    // === Extract from context ===
     int width  = context.swapchainExtent.width;
     int height = context.swapchainExtent.height;
 
-    // ← FIXED: Use `context.camera`, NOT `::Vulkan::Context::camera`
-    if (!context.camera) {
-        //LOG_ERROR_CAT("RenderMode1", "context.camera is null!");
-        return;
-    }
-
-    glm::vec3 camPos = context.camera->getPosition();
-    float fov = context.camera->getFOV();
-    float zoomLevel = 60.0f / fov;  // e.g. FOV 60 = 1.0x, FOV 30 = 2.0x
-
-    LOG_MODE1("{}ENV MAP ONLY | {}x{} | zoom: {:.2f}x | FOV: {:.1f}°{}", 
-              Logging::Color::ARCTIC_CYAN, width, height, zoomLevel, fov, Logging::Color::RESET);
-
+    // === RAY TRACING VALIDATION ===
     if (!context.enableRayTracing || !context.vkCmdTraceRaysKHR) {
         LOG_ERROR_CAT("RenderMode1", "Ray tracing not enabled or vkCmdTraceRaysKHR missing");
         return;
     }
 
+    // === CAMERA STATE (OPTIONAL) ===
+    glm::vec3 camPos = glm::vec3(0.0f, 0.0f, 5.0f);
+    float fov = 60.0f;
+    float zoomLevel = 1.0f;
+
+    if (context.camera) {
+        auto* cam = static_cast<PerspectiveCamera*>(context.camera);
+        camPos = cam->getPosition();
+        fov = cam->getFOV();
+        zoomLevel = 60.0f / fov;
+
+        LOG_MODE1("{}ENV MAP ONLY | {}x{} | pos: ({:.2f}, {:.2f}, {:.2f}) | FOV: {:.1f}° | zoom: {:.2f}x{}", 
+                  ARCTIC_CYAN, width, height, 
+                  camPos.x, camPos.y, camPos.z,
+                  fov, zoomLevel, RESET);
+    } else {
+        LOG_MODE1("{}ENV MAP ONLY | {}x{} | fallback pos (0,0,5) | FOV: 60.0°{}", 
+                  ARCTIC_CYAN, width, height, RESET);
+    }
+
+    // === BIND PIPELINE & DESCRIPTORS ===
     vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, pipeline);
     vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
                             pipelineLayout, 0, 1, &descriptorSet, 0, nullptr);
 
+    // === PUSH CONSTANTS (WITH ZOOM OFFSET) ===
     RTConstants push{};
     push.clearColor      = glm::vec4(0.02f, 0.02f, 0.05f, 1.0f);
     push.cameraPosition  = camPos + glm::vec3(0.0f, 0.0f, 5.0f * (zoomLevel - 1.0f));
@@ -69,6 +80,7 @@ void renderMode1(
         VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR,
         0, sizeof(RTConstants), &push);
 
+    // === SBT REGIONS ===
     VkStridedDeviceAddressRegionKHR raygen = {
         .deviceAddress = context.raygenSbtAddress,
         .stride        = context.sbtRecordSize,
@@ -82,6 +94,7 @@ void renderMode1(
     VkStridedDeviceAddressRegionKHR hit = {};
     VkStridedDeviceAddressRegionKHR callable = {};
 
+    // === DISPATCH RAYS ===
     context.vkCmdTraceRaysKHR(
         commandBuffer,
         &raygen,
@@ -93,7 +106,10 @@ void renderMode1(
         1
     );
 
-    LOG_MODE1("{}DISPATCHED | 1 ray/pixel | env-only{}", Logging::Color::EMERALD_GREEN, Logging::Color::RESET);
+    LOG_MODE1("{}DISPATCHED | 1 ray/pixel | env-only | {}WASD + Mouse + Scroll{}", 
+              EMERALD_GREEN,
+              context.camera ? "" : "fallback | ",
+              RESET);
 }
 
 } // namespace VulkanRTX

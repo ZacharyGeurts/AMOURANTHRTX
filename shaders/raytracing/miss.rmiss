@@ -8,9 +8,9 @@ layout(location = 0) rayPayloadInEXT vec4 payload;  // Incoming payload from ray
 layout(set = 0, binding = 0, rgba8) uniform image2D outputImage;
 
 void main() {
-    // DEBUG: Hardcode RED for all misses (sky/background) — expect full red screen if dispatch works
+    // DEBUG: Hardcode RED for all misses — expect full red screen if dispatch works
     ivec2 coord = ivec2(gl_LaunchIDEXT.xy);
-    imageStore(outputImage, coord, vec4(1.0, 0.0, 0.0, 1.0));  // Red miss color
+    imageStore(outputImage, coord, vec4(1.0, 0.0, 1.0, 1.0));  // **MAGENTA** miss color
 
     // Optional: Use payload if your raygen sets it (e.g., for depth/fade)
     // imageStore(outputImage, coord, payload);  // But start with hardcoded for test
