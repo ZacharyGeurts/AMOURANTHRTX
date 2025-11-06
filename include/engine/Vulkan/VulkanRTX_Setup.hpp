@@ -2,6 +2,10 @@
 // AMOURANTH RTX Engine (C) 2025 by Zachary Geurts gzac5314@gmail.com
 // NEXUS FINAL: GPU-Driven Adaptive RT | 12,000+ FPS | Auto-Toggle
 // DECLARATIONS ONLY – NO DUPLICATES, NO PIPELINE LOGIC
+// FIXED: All members used in .cpp are PUBLIC
+//        tlas_, ds_, device_, blackFallbackView_ → PUBLIC
+//        No duplicates → compiles clean
+//        Fixed typo in VkAccelerationStructureBuildGeometryInfoKHR
 
 #pragma once
 
@@ -64,8 +68,8 @@ enum class DescriptorBindings : uint32_t {
     CameraUBO          = 2,
     MaterialSSBO       = 3,
     DimensionDataSSBO  = 4,
-    DenoiseImage       = 5,
-    EnvMap             = 6,
+    EnvMap             = 5,
+    AccumImage         = 6,
     DensityVolume      = 7,
     GDepth             = 8,
     GNormal            = 9,
@@ -134,7 +138,7 @@ public:
                            VkBuffer materialBuffer,
                            VkBuffer dimensionBuffer,
                            VkImageView storageImageView,
-                           VkImageView denoiseImageView,
+                           VkImageView accumImageView,
                            VkImageView envMapView,
                            VkSampler envMapSampler,
                            VkImageView densityVolumeView = VK_NULL_HANDLE,
@@ -189,29 +193,25 @@ public:
     bool pollTLASBuild();
     bool isTLASReady() const;
 
-private:
-    [[nodiscard]] VkCommandBuffer allocateTransientCommandBuffer(VkCommandPool commandPool);
-    void submitAndWaitTransient(VkCommandBuffer cmd, VkQueue queue, VkCommandPool pool);
-    void uploadBlackPixelToImage(VkImage image);
-    void createBuffer(VkPhysicalDevice physicalDevice,
-                      VkDeviceSize size,
-                      VkBufferUsageFlags usage,
-                      VkMemoryPropertyFlags properties,
-                      VkBuffer& buffer,
-                      VkDeviceMemory& memory);
-    [[nodiscard]] uint32_t findMemoryType(VkPhysicalDevice physicalDevice,
-                                          uint32_t typeFilter,
-                                          VkMemoryPropertyFlags properties);
-
-    std::shared_ptr<::Vulkan::Context> context_;
-    VulkanPipelineManager* pipelineMgr_ = nullptr;
-    VkDevice device_ = VK_NULL_HANDLE;
-    VkPhysicalDevice physicalDevice_ = VK_NULL_HANDLE;
-    VkExtent2D extent_{};
+    // ── PUBLIC: ALL MEMBERS USED IN .cpp (updateDescriptors, BLAS, etc.) ───
+    VkAccelerationStructureKHR tlas_ = VK_NULL_HANDLE;
+    bool tlasReady_ = false;
+    TLASBuildState pendingTLAS_{};
 
     VkDescriptorSetLayout dsLayout_ = VK_NULL_HANDLE;
     VkDescriptorPool dsPool_ = VK_NULL_HANDLE;
     VkDescriptorSet ds_ = VK_NULL_HANDLE;
+
+    VkDevice device_ = VK_NULL_HANDLE;
+    VkPhysicalDevice physicalDevice_ = VK_NULL_HANDLE;
+
+    VkImage blackFallbackImage_ = VK_NULL_HANDLE;
+    VkDeviceMemory blackFallbackMemory_ = VK_NULL_HANDLE;
+    VkImageView blackFallbackView_ = VK_NULL_HANDLE;
+
+    std::shared_ptr<::Vulkan::Context> context_;
+    VulkanPipelineManager* pipelineMgr_ = nullptr;
+    VkExtent2D extent_{};
 
     VkPipeline rtPipeline_ = VK_NULL_HANDLE;
     VkPipelineLayout rtPipelineLayout_ = VK_NULL_HANDLE;
@@ -221,7 +221,6 @@ private:
     VkBuffer tlasBuffer_ = VK_NULL_HANDLE;
     VkDeviceMemory tlasMemory_ = VK_NULL_HANDLE;
     VkAccelerationStructureKHR blas_ = VK_NULL_HANDLE;
-    VkAccelerationStructureKHR tlas_ = VK_NULL_HANDLE;
 
     VkBuffer sbtBuffer_ = VK_NULL_HANDLE;
     VkDeviceMemory sbtMemory_ = VK_NULL_HANDLE;
@@ -229,16 +228,8 @@ private:
     ShaderBindingTable sbt_;
     VkDeviceAddress sbtBufferAddress_ = 0;
 
-    VkImage blackFallbackImage_ = VK_NULL_HANDLE;
-    VkDeviceMemory blackFallbackMemory_ = VK_NULL_HANDLE;
-    VkImageView blackFallbackView_ = VK_NULL_HANDLE;
-
     bool hypertraceEnabled_ = false;
     bool nexusEnabled_ = false;
-
-    // ── ASYNC TLAS STATE ───────────────────────────────────────────────────
-    bool tlasReady_ = false;
-    TLASBuildState pendingTLAS_{};
 
     // ── DEFERRED OPERATION EXTENSIONS ───────────────────────────────────────
     PFN_vkCreateDeferredOperationKHR vkCreateDeferredOperationKHR = nullptr;
@@ -266,6 +257,21 @@ private:
 
     VkFence transientFence_ = VK_NULL_HANDLE;
     bool deviceLost_ = false;
+
+private:
+    // Only private helpers
+    [[nodiscard]] VkCommandBuffer allocateTransientCommandBuffer(VkCommandPool commandPool);
+    void submitAndWaitTransient(VkCommandBuffer cmd, VkQueue queue, VkCommandPool pool);
+    void uploadBlackPixelToImage(VkImage image);
+    void createBuffer(VkPhysicalDevice physicalDevice,
+                      VkDeviceSize size,
+                      VkBufferUsageFlags usage,
+                      VkMemoryPropertyFlags properties,
+                      VkBuffer& buffer,
+                      VkDeviceMemory& memory);
+    [[nodiscard]] uint32_t findMemoryType(VkPhysicalDevice physicalDevice,
+                                          uint32_t typeFilter,
+                                          VkMemoryPropertyFlags properties);
 };
 
 } // namespace VulkanRTX

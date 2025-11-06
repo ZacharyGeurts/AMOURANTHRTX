@@ -1,13 +1,21 @@
 // src/modes/RenderMode5.cpp
 // AMOURANTH RTX — MODE 5: GLOSSY REFLECTIONS + METALNESS
-// Keyboard key: 5
+// CAMERA = ON | ZOOM OFFSET | FALLBACK SAFE | FULL LOGGING
+// Keyboard key: 5 → Mirror-like reflections, metallic surfaces, sharp highlights
 
 #include "modes/RenderMode5.hpp"
 #include "engine/Vulkan/VulkanCore.hpp"
 #include "engine/RTConstants.hpp"
 #include "engine/camera.hpp"
+#include "engine/logging.hpp"
+
+#include <glm/gtc/constants.hpp>
+#include <glm/gtx/transform.hpp>
 
 namespace VulkanRTX {
+
+using namespace Logging::Color;
+#define LOG_MODE5(...) LOG_INFO_CAT("RenderMode5", __VA_ARGS__)
 
 void renderMode5(
     uint32_t imageIndex,
@@ -20,17 +28,43 @@ void renderMode5(
 ) {
     const int w = context.swapchainExtent.width;
     const int h = context.swapchainExtent.height;
-    if (!context.camera || !context.enableRayTracing || !context.vkCmdTraceRaysKHR) return;
 
-    const glm::vec3 camPos = context.camera->getPosition();
+    // === CAMERA: SAFE + ZOOM + FALLBACK ===
+    glm::vec3 camPos = glm::vec3(0.0f, 0.0f, 5.0f);
+    float fov = 60.0f;
+    float zoomLevel = 1.0f;
 
+    if (context.camera) {
+        auto* cam = static_cast<PerspectiveCamera*>(context.camera);
+        camPos = cam->getPosition();
+        fov = cam->getFOV();
+        zoomLevel = 60.0f / fov;
+
+        LOG_MODE5("{}GLOSSY + METAL | {}x{} | pos: ({:.2f}, {:.2f}, {:.2f}) | FOV: {:.1f} degrees | zoom: {:.2f}x{}", 
+                  BRIGHT_PINKISH_PURPLE, w, h, 
+                  camPos.x, camPos.y, camPos.z,
+                  fov, zoomLevel, RESET);
+    } else {
+        LOG_MODE5("{}GLOSSY + METAL | {}x{} | fallback pos (0,0,5) | FOV: 60.0 degrees{}", 
+                  BRIGHT_PINKISH_PURPLE, w, h, RESET);
+    }
+
+    // === RTX VALIDATION ===
+    if (!context.enableRayTracing || !context.vkCmdTraceRaysKHR) {
+        LOG_ERROR_CAT("RenderMode5", "Ray tracing not enabled or vkCmdTraceRaysKHR missing");
+        return;
+    }
+
+    // === BIND ===
     vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, pipeline);
     vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
                             pipelineLayout, 0, 1, &descriptorSet, 0, nullptr);
 
+    // === PUSH CONSTANTS WITH ZOOM OFFSET ===
     RTConstants push{};
     push.clearColor        = glm::vec4(0.0f);
-    push.cameraPosition    = camPos;
+    push.cameraPosition    = camPos + glm::vec3(0.0f, 0.0f, 5.0f * (zoomLevel - 1.0f));
+    push._pad0             = 0.0f;
     push.lightDirection    = glm::normalize(glm::vec3(-0.5f, -1.0f, 0.6f));
     push.lightIntensity    = 14.0f;
     push.samplesPerPixel   = 1;
@@ -46,12 +80,38 @@ void renderMode5(
         VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR,
         0, sizeof(RTConstants), &push);
 
-    const VkStridedDeviceAddressRegionKHR raygen = { context.raygenSbtAddress, context.sbtRecordSize, context.sbtRecordSize };
-    const VkStridedDeviceAddressRegionKHR miss   = { context.missSbtAddress,   context.sbtRecordSize, context.sbtRecordSize * 2 };
-    const VkStridedDeviceAddressRegionKHR hit    = { context.hitSbtAddress,    context.sbtRecordSize, context.sbtRecordSize * 2 };
+    // === SBT REGIONS ===
+    const VkStridedDeviceAddressRegionKHR raygen = {
+        .deviceAddress = context.raygenSbtAddress,
+        .stride        = context.sbtRecordSize,
+        .size          = context.sbtRecordSize
+    };
+    const VkStridedDeviceAddressRegionKHR miss = {
+        .deviceAddress = context.missSbtAddress,
+        .stride        = context.sbtRecordSize,
+        .size          = context.sbtRecordSize * 2
+    };
+    const VkStridedDeviceAddressRegionKHR hit = {
+        .deviceAddress = context.hitSbtAddress,
+        .stride        = context.sbtRecordSize,
+        .size          = context.sbtRecordSize * 2
+    };
     const VkStridedDeviceAddressRegionKHR callable = {};
 
-    context.vkCmdTraceRaysKHR(commandBuffer, &raygen, &miss, &hit, &callable, w, h, 1);
+    // === DISPATCH ===
+    context.vkCmdTraceRaysKHR(
+        commandBuffer,
+        &raygen,
+        &miss,
+        &hit,
+        &callable,
+        static_cast<uint32_t>(w),
+        static_cast<uint32_t>(h),
+        1
+    );
+
+    LOG_MODE5("{}GLOSSY DISPATCHED | 1 SPP | 3 bounces | sharp reflections | WASD + Mouse + Scroll{}", 
+              EMERALD_GREEN, RESET);
 }
 
 } // namespace VulkanRTX

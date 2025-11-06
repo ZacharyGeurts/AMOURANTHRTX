@@ -1,25 +1,46 @@
+// assets/shaders/raytracing/anyhit.rahit
+// AMOURANTH RTX — ANYHIT SHADER
+// FIXED: Screen flicker + rainbow pixels → SAFE ANYHIT
+// Prevents invalid hits, alpha discard, robust for all modes
+
 #version 460
 #extension GL_EXT_ray_tracing : require
-#extension GL_EXT_nonuniform_qualifier : enable
 
-layout(set = 0, binding = 10) uniform sampler2D alphaTex;
+layout(location = 0) rayPayloadInEXT vec3 hitValue;
+hitAttributeEXT vec3 attribs;
 
-// NO layout(location)
-hitAttributeEXT vec2 hitAttribs;
+// === MATERIAL BINDING (match raygen) ===
+struct MaterialData {
+    vec4  diffuse;
+    float specular;
+    float roughness;
+    float metallic;
+    vec4  emission;
+};
 
-layout(push_constant) uniform PushConstants {
-    vec2 resolution;
-    uint enableAlphaMask;
-} pc;
+layout(set = 0, binding = 3) buffer MaterialBuffer { MaterialData materials[]; } materialBuffer;
 
-void main() {
-    if (pc.enableAlphaMask == 0) return;
+// === INSTANCE CUSTOM INDEX → MATERIAL ID ===
+uint getMaterialId() {
+    return gl_InstanceCustomIndexEXT;
+}
 
-    vec3 bary = vec3(1.0 - hitAttribs.x - hitAttribs.y, hitAttribs.x, hitAttribs.y);
-    vec2 uv = bary.x * vec2(0.0, 0.0) + bary.y * vec2(1.0, 0.0) + bary.z * vec2(0.5, 1.0);
-
-    float alpha = texture(alphaTex, uv).r;
-    if (alpha < 0.5) {
+void main()
+{
+    uint matId = getMaterialId();
+    if (matId >= materialBuffer.materials.length()) {
         ignoreIntersectionEXT;
+        return;
     }
+
+    const MaterialData mat = materialBuffer.materials[matId];
+
+    // === ALPHA DISCARD (if alpha < 0.5) ===
+    if (mat.diffuse.a < 0.5f) {
+        ignoreIntersectionEXT;
+        return;
+    }
+
+    // === SAFE: Allow hit to proceed ===
+    // No modification to payload — closest hit will handle
 }

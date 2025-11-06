@@ -5,6 +5,10 @@
 // GROK PROTIP: "SBT built after TLAS → descriptor update → renderer->notifyTLASReady()"
 // GROK PROTIP: "RAII + fence-based transient submits → zero vkQueueWaitIdle"
 // GROK PROTIP: "7 bindings, raw handles, zero leaks, full error checking"
+// FIXED: updateDescriptors() bindings aligned to raygen.rgen (5=envMap combined, 6=accum storage)
+//        Added accumImageView param | denoise rebound if needed for other modes
+// FIXED: All brace inits replaced with field assignments to avoid operator= issues
+// FIXED: Member access direct (no :: needed for public members like tlas_)
 
 #include "engine/Vulkan/VulkanRTX_Setup.hpp"
 #include "engine/Vulkan/VulkanPipelineManager.hpp"
@@ -862,8 +866,8 @@ void VulkanRTX::updateRTX(VkPhysicalDevice physicalDevice,
 /* Descriptor update */
 /* --------------------------------------------------------------------- */
 void VulkanRTX::updateDescriptors(VkBuffer cameraBuffer, VkBuffer materialBuffer, VkBuffer dimensionBuffer,
-                                  VkImageView storageImageView, VkImageView denoiseImageView,
-                                  VkImageView envMapView, VkSampler envMapSampler,
+                                  VkImageView storageImageView, VkImageView accumImageView, VkImageView envMapView,
+                                  VkSampler envMapSampler,
                                   VkImageView densityVolumeView, VkImageView gDepthView,
                                   VkImageView gNormalView) {
     const auto start = std::chrono::high_resolution_clock::now();
@@ -878,93 +882,81 @@ void VulkanRTX::updateDescriptors(VkBuffer cameraBuffer, VkBuffer materialBuffer
     }
 
     std::array<VkWriteDescriptorSet, 7> writes{};
-    std::array<VkDescriptorImageInfo, 3> images{};
+    std::array<VkDescriptorImageInfo, 4> images{};
     std::array<VkDescriptorBufferInfo, 3> buffers{};
 
-    VkWriteDescriptorSetAccelerationStructureKHR accel{
-        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR,
-        .accelerationStructureCount = 1,
-        .pAccelerationStructures = &tlas_
-    };
-    writes[0] = {
-        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        .pNext = &accel,
-        .dstSet = ds_,
-        .dstBinding = 0,
-        .descriptorCount = 1,
-        .descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR
-    };
+    VkWriteDescriptorSetAccelerationStructureKHR accel{};
+    accel.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR;
+    accel.accelerationStructureCount = 1;
+    accel.pAccelerationStructures = &tlas_;
+
+    writes[0] = {};
+    writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[0].pNext = &accel;
+    writes[0].dstSet = ds_;
+    writes[0].dstBinding = 0;
+    writes[0].descriptorCount = 1;
+    writes[0].descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
 
     images[0].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
     images[0].imageView = (storageImageView != VK_NULL_HANDLE) ? storageImageView : blackFallbackView_;
-    writes[1] = {
-        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        .dstSet = ds_,
-        .dstBinding = 1,
-        .descriptorCount = 1,
-        .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-        .pImageInfo = &images[0]
-    };
+    writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[1].dstSet = ds_;
+    writes[1].dstBinding = 1;
+    writes[1].descriptorCount = 1;
+    writes[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    writes[1].pImageInfo = &images[0];
 
     buffers[0].offset = 0;
     buffers[0].range = VK_WHOLE_SIZE;
     buffers[0].buffer = cameraBuffer;
-    writes[2] = {
-        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        .dstSet = ds_,
-        .dstBinding = 2,
-        .descriptorCount = 1,
-        .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-        .pBufferInfo = &buffers[0]
-    };
+    writes[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[2].dstSet = ds_;
+    writes[2].dstBinding = 2;
+    writes[2].descriptorCount = 1;
+    writes[2].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    writes[2].pBufferInfo = &buffers[0];
 
     buffers[1].offset = 0;
     buffers[1].range = VK_WHOLE_SIZE;
     buffers[1].buffer = materialBuffer;
-    writes[3] = {
-        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        .dstSet = ds_,
-        .dstBinding = 3,
-        .descriptorCount = 1,
-        .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-        .pBufferInfo = &buffers[1]
-    };
+    writes[3].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[3].dstSet = ds_;
+    writes[3].dstBinding = 3;
+    writes[3].descriptorCount = 1;
+    writes[3].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    writes[3].pBufferInfo = &buffers[1];
 
     buffers[2].offset = 0;
     buffers[2].range = VK_WHOLE_SIZE;
     buffers[2].buffer = dimensionBuffer;
-    writes[4] = {
-        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        .dstSet = ds_,
-        .dstBinding = 4,
-        .descriptorCount = 1,
-        .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-        .pBufferInfo = &buffers[2]
-    };
+    writes[4].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[4].dstSet = ds_;
+    writes[4].dstBinding = 4;
+    writes[4].descriptorCount = 1;
+    writes[4].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    writes[4].pBufferInfo = &buffers[2];
 
-    images[1].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-    images[1].sampler = VK_NULL_HANDLE;
-    images[1].imageView = (denoiseImageView != VK_NULL_HANDLE) ? denoiseImageView : blackFallbackView_;
-    writes[5] = {
-        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        .dstSet = ds_,
-        .dstBinding = 5,
-        .descriptorCount = 1,
-        .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-        .pImageInfo = &images[1]
-    };
+    // Binding 5: envMap (combined_image_sampler)
+    images[1].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    images[1].sampler = envMapSampler;
+    images[1].imageView = (envMapView != VK_NULL_HANDLE) ? envMapView : blackFallbackView_;
+    writes[5].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[5].dstSet = ds_;
+    writes[5].dstBinding = 5;
+    writes[5].descriptorCount = 1;
+    writes[5].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    writes[5].pImageInfo = &images[1];
 
-    images[2].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    images[2].sampler = envMapSampler;
-    images[2].imageView = (envMapView != VK_NULL_HANDLE) ? envMapView : blackFallbackView_;
-    writes[6] = {
-        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        .dstSet = ds_,
-        .dstBinding = 6,
-        .descriptorCount = 1,
-        .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        .pImageInfo = &images[2]
-    };
+    // Binding 6: accumImage (storage_image)
+    images[2].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+    images[2].imageView = (accumImageView != VK_NULL_HANDLE) ? accumImageView : blackFallbackView_;
+    writes[6].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[6].dstSet = ds_;
+    writes[6].dstBinding = 6;
+    writes[6].descriptorCount = 1;
+    writes[6].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    writes[6].pImageInfo = &images[2];
 
     vkUpdateDescriptorSets(device_, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
 

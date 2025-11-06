@@ -686,19 +686,18 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) {
 
     // 2. Acquire image (33ms timeout ≈ 30Hz fallback for stability)
     uint32_t imageIndex = 0;
-    constexpr uint64_t acquireTimeoutNs = 33'000'000ULL;  // FIXED: Increased from 16ms to prevent frequent timeouts
+    constexpr uint64_t acquireTimeoutNs = 33'000'000ULL;
     VkResult acquireRes = vkAcquireNextImageKHR(
         context_->device, swapchain_, acquireTimeoutNs,
         imageAvailableSemaphores_[currentFrame_], VK_NULL_HANDLE, &imageIndex
     );
 
-    // FIXED: Log acquire for debugging hangs/timeouts
     LOG_DEBUG_CAT("RENDER", "Acquire result: {} (imageIndex={})", static_cast<int>(acquireRes), imageIndex);
 
     if (acquireRes == VK_TIMEOUT || acquireRes == VK_NOT_READY) {
         LOG_DEBUG_CAT("RENDER", "Acquire timeout/not ready — skipping frame");
         currentFrame_ = (currentFrame_ + 1) % MAX_FRAMES_IN_FLIGHT;
-        return;  // FIXED: Early return keeps loop responsive for SDL events
+        return;
     }
     if (acquireRes == VK_ERROR_OUT_OF_DATE_KHR || acquireRes == VK_SUBOPTIMAL_KHR) {
         LOG_WARN_CAT("RENDER", "Acquire out-of-date — resizing");
@@ -749,14 +748,13 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) {
     bool doAccumCopy = (renderMode_ == 9 && frameNumber_ >= maxAccumFrames_ && !resetAccumulation_);
 
     if (renderMode_ == 0 || !rtx_->getTLAS()) {
-        // FIXED: Explicit transitions for clear path (prevents layout hangs)
         VkImage swapImg = swapchainImages_[imageIndex];
         LOG_DEBUG_CAT("RENDER", "Fallback clear: transitioning swapchain {:p} UNDEFINED → GENERAL", (void*)swapImg);
         transitionImageLayout(cmd, swapImg, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
                               VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
                               0, VK_ACCESS_TRANSFER_WRITE_BIT);
 
-        VkClearColorValue clearColor{{0.0f, 0.2f, 0.4f, 1.0f}};  // Blue fallback
+        VkClearColorValue clearColor{{0.0f, 0.2f, 0.4f, 1.0f}};
         VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
         vkCmdClearColorImage(cmd, swapImg, VK_IMAGE_LAYOUT_GENERAL, &clearColor, 1, &range);
 
@@ -776,7 +774,6 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) {
 
         vkCmdDispatch(cmd, 1, 1, 1);
 
-        // Barrier
         VkMemoryBarrier nexusBarrier{
             .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
             .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
@@ -785,11 +782,19 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) {
         vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, 0, 1, &nexusBarrier, 0, nullptr, 0, nullptr);
 
         // Adaptive Dispatch — 60/120 FPS Target
-        float currentNexusScore = prevNexusScore_;  // Read from score image in prod
+        float currentNexusScore = prevNexusScore_;
         uint32_t baseSkip = (fpsTarget_ == FpsTarget::FPS_60) ? HYPERTRACE_BASE_SKIP_60 : HYPERTRACE_BASE_SKIP_120;
-        uint32_t adaptiveSkip = static_cast<uint32_t>(baseSkip * (0.5f + 0.5f * currentNexusScore));  // 50%-100% of base
+        uint32_t adaptiveSkip = static_cast<uint32_t>(baseSkip * (0.5f + 0.5f * currentNexusScore));
 
-        if (currentNexusScore > HYPERTRACE_SCORE_THRESHOLD && (++hypertraceCounter_ % adaptiveSkip == 0)) {
+        // Force full dispatch on reset to avoid black/flicker
+        if (resetAccumulation_) {
+            rtx_->recordRayTracingCommands(
+                cmd,
+                swapchainExtent_,
+                rtOutputImages_[currentRTIndex_].get(),
+                rtOutputViews_[currentRTIndex_].get()
+            );
+        } else if (currentNexusScore > HYPERTRACE_SCORE_THRESHOLD && (++hypertraceCounter_ % adaptiveSkip == 0)) {
             uint32_t tileSize = (currentNexusScore > 0.8f) ? 64 : 32;
             uint32_t tilesX = (swapchainExtent_.width + tileSize - 1) / tileSize;
             uint32_t tilesY = (swapchainExtent_.height + tileSize - 1) / tileSize;
@@ -812,7 +817,12 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) {
         } else if (doAccumCopy && currentNexusScore > 0.8f) {
             performCopyAccumToOutput(cmd);
         } else {
-            dispatchRenderMode(imageIndex, cmd, rtPipelineLayout_, rtxDescriptorSets_[currentFrame_], rtPipeline_, deltaTime, *context_, renderMode_);
+            rtx_->recordRayTracingCommands(
+                cmd,
+                swapchainExtent_,
+                rtOutputImages_[currentRTIndex_].get(),
+                rtOutputViews_[currentRTIndex_].get()
+            );
         }
 
         prevNexusScore_ = NEXUS_HYSTERESIS_ALPHA * prevNexusScore_ + (1.0f - NEXUS_HYSTERESIS_ALPHA) * currentNexusScore;
@@ -1378,6 +1388,12 @@ void VulkanRenderer::createRTOutputImages() {
                               VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
                               VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
                               0, VK_ACCESS_SHADER_WRITE_BIT);
+
+        // Clear to black to prevent rainbow garbage on first use
+        VkClearColorValue clearColor{{0.0f, 0.0f, 0.0f, 1.0f}};
+        VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+        vkCmdClearColorImage(cmd, img, VK_IMAGE_LAYOUT_GENERAL, &clearColor, 1, &range);
+
         VulkanInitializer::endSingleTimeCommands(*context_, cmd);
     }
 }
@@ -1432,6 +1448,12 @@ void VulkanRenderer::createAccumulationImages() {
                               VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
                               VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
                               0, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
+
+        // Clear to transparent black to prevent garbage in accumulation
+        VkClearColorValue clearColor{{0.0f, 0.0f, 0.0f, 0.0f}};
+        VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+        vkCmdClearColorImage(cmd, img, VK_IMAGE_LAYOUT_GENERAL, &clearColor, 1, &range);
+
         VulkanInitializer::endSingleTimeCommands(*context_, cmd);
     }
 }
@@ -1696,7 +1718,6 @@ void VulkanRenderer::recordRayTracingCommandBuffer() {
         throw std::runtime_error("RT output image missing");
     }
 
-    // CRITICAL VALIDATION: Ensure RT pipeline, layout, and descriptor set are available
     if (!pipelineManager_) {
         LOG_ERROR_CAT("RENDER", "pipelineManager_ is null — ownership not taken");
         throw std::runtime_error("Pipeline manager missing");
@@ -1712,7 +1733,6 @@ void VulkanRenderer::recordRayTracingCommandBuffer() {
         throw std::runtime_error("RT pipeline layout missing");
     }
 
-    // FIXED: Use rtxDescriptorSets_[0] for consistency (per-frame, initial uses frame 0)
     VkDescriptorSet rtDescriptorSet = rtxDescriptorSets_[0];
     if (!rtDescriptorSet) {
         LOG_ERROR_CAT("RENDER", "RT descriptor set [0] is null — updateDescriptors() must be called post-AS");
@@ -1789,10 +1809,10 @@ void VulkanRenderer::recordRayTracingCommandBuffer() {
                  SAPPHIRE_BLUE, swapchainExtent_.width, swapchainExtent_.height, RESET);
 
     // -------------------------------------------------------------------------
-    // 3.5 CRITICAL FIX: PRE-DISPATCH TRANSITION – RT Output to GENERAL (for storage write)
+    // 3.5 CRITICAL FIX: PRE-DISPATCH TRANSITION + CLEAR – RT Output to GENERAL + BLACK
     // -------------------------------------------------------------------------
     VkImage rtOutputImage = rtOutputImages_[currentRTIndex_].get();
-    LOG_INFO_CAT("RENDER", "{}CRITICAL: Pre-dispatch transition RT output {:p}: UNDEFINED → GENERAL (for RT write){}", SAPPHIRE_BLUE, (void*)rtOutputImage, RESET);
+    LOG_INFO_CAT("RENDER", "{}CRITICAL: Pre-dispatch transition + clear RT output {:p}: UNDEFINED → GENERAL{}", SAPPHIRE_BLUE, (void*)rtOutputImage, RESET);
     transitionImageLayout(
         cb,
         rtOutputImage,
@@ -1803,7 +1823,12 @@ void VulkanRenderer::recordRayTracingCommandBuffer() {
         0,
         VK_ACCESS_SHADER_WRITE_BIT
     );
-    LOG_INFO_CAT("RENDER", "{}Pre-dispatch RT output transition complete{}", SAPPHIRE_BLUE, RESET);
+
+    VkClearColorValue clearVal{{0.0f, 0.0f, 0.0f, 1.0f}};
+    VkImageSubresourceRange clearRange{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    vkCmdClearColorImage(cb, rtOutputImage, VK_IMAGE_LAYOUT_GENERAL, &clearVal, 1, &clearRange);
+
+    LOG_INFO_CAT("RENDER", "{}Pre-dispatch RT output clear complete{}", SAPPHIRE_BLUE, RESET);
 
     // -------------------------------------------------------------------------
     // 4. CRITICAL FIX: BIND RT PIPELINE + DESCRIPTOR SET BEFORE DISPATCH
@@ -1954,11 +1979,11 @@ void VulkanRenderer::recordRayTracingCommandBuffer() {
     // -------------------------------------------------------------------------
     // 8. CRITICAL FIX: PRESENT THE INITIAL FRAME (prevents acquire hang in main loop)
     // -------------------------------------------------------------------------
-    uint32_t presentImageIndex = 0;  // For initial frame: using swapchainImages_[0]
+    uint32_t presentImageIndex = 0;
     VkPresentInfoKHR presentInfo = {
         .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
         .pNext = nullptr,
-        .waitSemaphoreCount = 0,  // No render-finished semaphore yet
+        .waitSemaphoreCount = 0,
         .pWaitSemaphores = nullptr,
         .swapchainCount = 1,
         .pSwapchains = &context_->swapchain,
