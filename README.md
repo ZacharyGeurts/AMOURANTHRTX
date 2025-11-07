@@ -15,14 +15,15 @@ This is a good lunch break program other than the license restricting commercial
 There is a dual license that can permit commercial work but expect 3% of sales negotiable. 
 
 How do we differ? Pick 60 or 120fps and we lock your goal.  
-
+FPS a thing of the past.  
 Tech will adjust RTX image quality on the fly to ensure best visuals for hardware.  
-
 We make easy decisions for you and we respect quality.  
-
-3 frames in flight and triple buffering? Yep. You can turn off in source code but we respect your hardware and reach for 100% accessibility to developers.  
-
-Every decision expects 3060 TI and newer so that we (Grok) can ignore all of the last generation and become the next generation of horsepower.  
+3 frames in flight and triple buffering.  
+Minimal quality adjusts to maintain desired framerate.  
+Swapchain that finds your display and always maintains best mode for your OS. [Spec](https://docs.vulkan.org/refpages/latest/refpages/source/VkPresentModeKHR.html)  
+Buffer Management at near zero cost.  
+Disposal at zero cost.  
+Robust logging system inspirid by: [Ellie Fier](https://www.twitch.tv/elliefier)  
 
 Have a look. I promise to get libraries in the future.  
 ```
