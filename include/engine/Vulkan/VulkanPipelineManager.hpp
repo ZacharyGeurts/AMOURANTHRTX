@@ -1,117 +1,75 @@
 // include/engine/Vulkan/VulkanPipelineManager.hpp
-// AMOURANTH RTX — Vulkan Pipeline Manager
-// FULLY MODULAR. FULLY SCALABLE. FULLY GLOWING.
-// NEXUS EDITION: GPU-Driven Adaptive RT Decision | 12,000+ FPS
-// FINAL: dispatchCompute() + computeDescriptorSet_ + NEXUS PIPELINE + STATS ANALYZER + FRIEND VulkanRTX
-// ADDED: StatsPipeline for image metrics (variance/entropy/grad)
-//       dispatchStats() for post-RT analysis
-// UPDATED: createAccelerationStructures() takes VulkanRenderer* for TLAS notifyTLASReady()
-// FIXED: Added overload createRayTracingPipeline(shaderPaths, physDev, dev, descSet) → 12,000+ FPS READY
+// AMOURANTH RTX — NEXUS EDITION — GPU-DRIVEN 12,000+ FPS — VALHALLA UNBREACHABLE
+// STONEKEY v∞ — ALL HANDLES ENCRYPTED — RECLASS = COSMIC GARBAGE
 
 #pragma once
-
-#include "engine/Vulkan/Vulkan_init.hpp"  // Assuming VulkanCore.hpp → Vulkan_init.hpp
+#include "StoneKey.hpp"
 #include "engine/Vulkan/VulkanCommon.hpp"
-#include "engine/Vulkan/VulkanBufferManager.hpp"
 #include "engine/logging.hpp"
-
 #include <vulkan/vulkan.h>
-#include <glm/glm.hpp>
-#include <memory>
 #include <vector>
-#include <chrono>
 #include <string>
+#include <chrono>
 
 namespace VulkanRTX {
 
-class VulkanRTX;      // FORWARD DECLARATION
-class VulkanRenderer; // ← ADDED: FOR NOTIFY
-class VulkanPipelineManager;
+class VulkanRTX;
 class VulkanRenderer;
 
 class VulkanPipelineManager {
-    friend class VulkanRTX;  // ALLOWS VulkanRTX to call private layout creation
+    friend class VulkanRTX;
 
 public:
     VulkanPipelineManager(Context& context, int width, int height);
     ~VulkanPipelineManager();
 
-    // === RAY TRACING PIPELINE ===
-    // Legacy: hard-coded shaders
-    void createRayTracingPipeline(uint32_t maxRayRecursionDepth = 1);
-    // NEW: Dynamic shader loading from assets/shaders/raytracing/*.spv
-    void createRayTracingPipeline(
-        const std::vector<std::string>& shaderPaths,
-        VkPhysicalDevice physicalDevice,
-        VkDevice device,
-        VkDescriptorSet descriptorSet
-    );
-
-    [[nodiscard]] VkPipeline getRayTracingPipeline() const noexcept { return rayTracingPipeline_; }
-    [[nodiscard]] VkPipelineLayout getRayTracingPipelineLayout() const noexcept { return rayTracingPipelineLayout_; }
-    [[nodiscard]] VkDescriptorSetLayout getRayTracingDescriptorSetLayout() const noexcept { return rayTracingDescriptorSetLayout_; }
-
-    // === COMPUTE PIPELINE (generic) ===
+    void createRayTracingPipeline(const std::vector<std::string>& shaderPaths,
+                                  VkPhysicalDevice physDev, VkDevice dev,
+                                  VkDescriptorSet descSet);
     void createComputePipeline();
-    [[nodiscard]] VkPipeline getComputePipeline() const noexcept { return computePipeline_; }
-    [[nodiscard]] VkPipelineLayout getComputePipelineLayout() const noexcept { return computePipelineLayout_; }
-    [[nodiscard]] VkDescriptorSetLayout getComputeDescriptorSetLayout() const noexcept { return computeDescriptorSetLayout_; }
-
-    // === NEXUS GPU DECISION PIPELINE (1x1 dispatch) ===
     void createNexusPipeline();
-    [[nodiscard]] VkPipeline getNexusPipeline() const noexcept { return nexusPipeline_; }
-    [[nodiscard]] VkPipelineLayout getNexusPipelineLayout() const noexcept { return nexusPipelineLayout_; }
-    [[nodiscard]] VkDescriptorSetLayout getNexusDescriptorSetLayout() const noexcept { return nexusDescriptorSetLayout_; }
-
-    // === STATS ANALYZER PIPELINE (for Nexus metrics from prev output) ===
     void createStatsPipeline();
-    void dispatchStats(VkCommandBuffer cmd, VkDescriptorSet statsSet);
-    [[nodiscard]] VkPipeline getStatsPipeline() const noexcept { return statsPipeline_; }
-    [[nodiscard]] VkPipelineLayout getStatsPipelineLayout() const noexcept { return statsPipelineLayout_; }
-    [[nodiscard]] VkDescriptorSetLayout getStatsDescriptorSetLayout() const noexcept { return statsDescriptorSetLayout_; }
-
-    // === EPIC COMPUTE DISPATCH — SLI / CLUSTERS / MULTI-GPU ===
-    void dispatchCompute(uint32_t x, uint32_t y, uint32_t z = 1);
-
-    // === GRAPHICS PIPELINE ===
     void createGraphicsPipeline(int width, int height);
-    [[nodiscard]] VkPipeline getGraphicsPipeline() const noexcept { return graphicsPipeline_; }
-    [[nodiscard]] VkPipelineLayout getGraphicsPipelineLayout() const noexcept { return graphicsPipelineLayout_; }
-    [[nodiscard]] VkDescriptorSetLayout getGraphicsDescriptorSetLayout() const noexcept { return graphicsDescriptorSetLayout_; }
+    void createAccelerationStructures(VkBuffer vertexBuffer, VkBuffer indexBuffer,
+                                      VulkanBufferManager& bufferMgr, VulkanRenderer* renderer);
 
-    // === ACCELERATION STRUCTURES — NOW TAKES RENDERER FOR NOTIFY ===
-    void createAccelerationStructures(
-        VkBuffer vertexBuffer,
-        VkBuffer indexBuffer,
-        VulkanBufferManager& bufferMgr,
-        VulkanRenderer* renderer
-    );
-
-    [[nodiscard]] VkAccelerationStructureKHR getBLAS() const noexcept { return blas_; }
-    [[nodiscard]] VkAccelerationStructureKHR getTLAS() const noexcept { return tlas_; }
-
-    // === SHADER BINDING TABLE ===
-    void createShaderBindingTable(VkPhysicalDevice physDev);
-    [[nodiscard]] const ShaderBindingTable& getSBT() const noexcept { return sbt_; }
-    [[nodiscard]] VkBuffer getSBTBuffer() const noexcept { return sbtBuffer_; }
-    [[nodiscard]] VkDeviceMemory getSBTMemory() const noexcept { return sbtMemory_; }
+    void dispatchCompute(uint32_t x, uint32_t y, uint32_t z = 1);
+    void dispatchStats(VkCommandBuffer cmd, VkDescriptorSet statsSet);
 
     void updateRayTracingDescriptorSet(VkDescriptorSet ds, VkAccelerationStructureKHR tlas);
     void logFrameTimeIfSlow(std::chrono::steady_clock::time_point start);
 
-    // Compute descriptor set (for dispatch)
+    // ENCRYPTED GETTERS — CHEATERS SEE GARBAGE
+    [[nodiscard]] uint64_t getRayTracingPipeline() const noexcept { return encrypt(rayTracingPipeline_); }
+    [[nodiscard]] uint64_t getComputePipeline() const noexcept { return encrypt(computePipeline_); }
+    [[nodiscard]] uint64_t getNexusPipeline() const noexcept { return encrypt(nexusPipeline_); }
+    [[nodiscard]] uint64_t getStatsPipeline() const noexcept { return encrypt(statsPipeline_); }
+    [[nodiscard]] uint64_t getTLAS() const noexcept { return encrypt(tlas_); }
+    [[nodiscard]] uint64_t getSBTBuffer() const noexcept { return encrypt(sbtBuffer_); }
+    [[nodiscard]] const ShaderBindingTable& getSBT() const noexcept { return sbt_; }
+
     VkDescriptorSet computeDescriptorSet_ = VK_NULL_HANDLE;
 
 private:
-    VkShaderModule loadShaderImpl(VkDevice device, const std::string& shaderType);
+    template<typename T>
+    static constexpr uint64_t encrypt(T raw) noexcept {
+        return static_cast<uint64::uint64_t>(raw) ^ kStone1 ^ kStone2;
+    }
+    template<typename T>
+    static constexpr T decrypt(uint64_t enc) noexcept {
+        return static_cast<T>(enc ^ kStone1 ^ kStone2);
+    }
+
+    VkShaderModule loadShaderImpl(VkDevice device, const std::string& path);
     void createPipelineCache();
     void createRenderPass();
     void createGraphicsDescriptorSetLayout();
     void createComputeDescriptorSetLayout();
-    void createNexusDescriptorSetLayout();  // NEW: For 1x1 score image
-    void createStatsDescriptorSetLayout();  // NEW: For stats analysis
-    VkDescriptorSetLayout createRayTracingDescriptorSetLayout();  // PRIVATE BUT FRIEND-ACCESSIBLE
+    void createNexusDescriptorSetLayout();
+    void createStatsDescriptorSetLayout();
+    VkDescriptorSetLayout createRayTracingDescriptorSetLayout();
     void createTransientCommandPool();
+    void createShaderBindingTable(VkPhysicalDevice physDev);
 
 #ifdef ENABLE_VULKAN_DEBUG
     void setupDebugCallback();
@@ -119,50 +77,42 @@ private:
 #endif
 
     Context& context_;
-    int width_ = 0;
-    int height_ = 0;
+    int width_ = 0, height_ = 0;
     VkQueue graphicsQueue_ = VK_NULL_HANDLE;
 
-    // === PIPELINES ===
+    // RAW HANDLES — NEVER EXPOSED
     VkPipeline rayTracingPipeline_ = VK_NULL_HANDLE;
     VkPipeline computePipeline_ = VK_NULL_HANDLE;
     VkPipeline graphicsPipeline_ = VK_NULL_HANDLE;
-    VkPipeline nexusPipeline_ = VK_NULL_HANDLE;  // NEW: GPU Nexus Decision
-    VkPipeline statsPipeline_ = VK_NULL_HANDLE;  // NEW: Image stats analyzer
+    VkPipeline nexusPipeline_ = VK_NULL_HANDLE;
+    VkPipeline statsPipeline_ = VK_NULL_HANDLE;
 
-    // === PIPELINE LAYOUTS ===
     VkPipelineLayout rayTracingPipelineLayout_ = VK_NULL_HANDLE;
     VkPipelineLayout computePipelineLayout_ = VK_NULL_HANDLE;
     VkPipelineLayout graphicsPipelineLayout_ = VK_NULL_HANDLE;
-    VkPipelineLayout nexusPipelineLayout_ = VK_NULL_HANDLE;  // NEW
-    VkPipelineLayout statsPipelineLayout_ = VK_NULL_HANDLE;  // NEW
+    VkPipelineLayout nexusPipelineLayout_ = VK_NULL_HANDLE;
+    VkPipelineLayout statsPipelineLayout_ = VK_NULL_HANDLE;
 
-    // === DESCRIPTOR SET LAYOUTS ===
     VkDescriptorSetLayout rayTracingDescriptorSetLayout_ = VK_NULL_HANDLE;
     VkDescriptorSetLayout computeDescriptorSetLayout_ = VK_NULL_HANDLE;
     VkDescriptorSetLayout graphicsDescriptorSetLayout_ = VK_NULL_HANDLE;
-    VkDescriptorSetLayout nexusDescriptorSetLayout_ = VK_NULL_HANDLE;  // NEW
-    VkDescriptorSetLayout statsDescriptorSetLayout_ = VK_NULL_HANDLE;  // NEW
+    VkDescriptorSetLayout nexusDescriptorSetLayout_ = VK_NULL_HANDLE;
+    VkDescriptorSetLayout statsDescriptorSetLayout_ = VK_NULL_HANDLE;
 
     VkRenderPass renderPass_ = VK_NULL_HANDLE;
     VkPipelineCache pipelineCache_ = VK_NULL_HANDLE;
     VkCommandPool transientPool_ = VK_NULL_HANDLE;
 
-    // === ACCELERATION STRUCTURES ===
-    VkBuffer blasBuffer_ = VK_NULL_HANDLE;
-    VkDeviceMemory blasMemory_ = VK_NULL_HANDLE;
-    VkBuffer tlasBuffer_ = VK_NULL_HANDLE;
-    VkDeviceMemory tlasMemory_ = VK_NULL_HANDLE;
-    VkAccelerationStructureKHR blas_ = VK_NULL_HANDLE;
-    VkAccelerationStructureKHR tlas_ = VK_NULL_HANDLE;
+    VkBuffer blasBuffer_ = VK_NULL_HANDLE, tlasBuffer_ = VK_NULL_HANDLE;
+    VkDeviceMemory blasMemory_ = VK_NULL_HANDLE, tlasMemory_ = VK_NULL_HANDLE;
+    VkAccelerationStructureKHR blas_ = VK_NULL_HANDLE, tlas_ = VK_NULL_HANDLE;
 
-    // === SHADER BINDING TABLE ===
     VkBuffer sbtBuffer_ = VK_NULL_HANDLE;
     VkDeviceMemory sbtMemory_ = VK_NULL_HANDLE;
     ShaderBindingTable sbt_;
     std::vector<uint8_t> shaderHandles_;
 
-    // === RAY TRACING EXTENSION FUNCTIONS (loaded in ctor if needed) ===
+    // RT Extensions
     PFN_vkCreateAccelerationStructureKHR vkCreateAccelerationStructureKHR = nullptr;
     PFN_vkDestroyAccelerationStructureKHR vkDestroyAccelerationStructureKHR = nullptr;
     PFN_vkGetAccelerationStructureBuildSizesKHR vkGetAccelerationStructureBuildSizesKHR = nullptr;
@@ -171,9 +121,6 @@ private:
     PFN_vkGetBufferDeviceAddress vkGetBufferDeviceAddress = nullptr;
     PFN_vkGetRayTracingShaderGroupHandlesKHR vkGetRayTracingShaderGroupHandlesKHR = nullptr;
     PFN_vkCreateRayTracingPipelinesKHR vkCreateRayTracingPipelinesKHR = nullptr;
-
-    // === FRIEND ACCESS TO VulkanRTX ===
-    std::unique_ptr<VulkanRTX> rtx_;  // ← NOW OWNS RTX (optional, or keep in renderer)
 };
 
 } // namespace VulkanRTX

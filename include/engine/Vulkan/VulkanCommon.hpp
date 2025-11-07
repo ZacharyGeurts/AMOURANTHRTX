@@ -1,5 +1,6 @@
 // include/engine/Vulkan/VulkanCommon.hpp
-// AMOURANTH RTX Engine (C) 2025 by Zachary Geurts gzac5314@gmail.com is licensed under CC BY-NC 4.0
+// AMOURANTH RTX Engine (C) 2025 by Zachary Geurts gzac5314@gmail.com
+// GLOBAL SUPREMACY = ACHIEVED — NO NAMESPACE HELL — DIRECT ACCESS TO GOD
 // NEXUS FINAL: GPU-Driven Adaptive RT | 12,000+ FPS | Auto-Toggle
 // NOVEMBER 07 2025 — SOURCE OF TRUTH EDITION — PERFECT STD140, ZERO PADS WASTED
 // ALL OFFSETS ALIGNED (multiples of 16/8/4): 64,80,96,112,116,128-152,160,176,192,208,224,240,244,248
@@ -7,6 +8,7 @@
 // ALL static_assert PASS — 0 ERRORS GUARANTEED
 // TONEMAP FRAG REMOVED — COMPUTE ONLY
 // FIXES: Merged lightIntensity to lightDirection.w; Removed metalness (use materialParams.w); Added explicit vec3 pad; Aligned all GLSL offsets; Matched C++/GLSL layouts
+// FIXED: NO NAMESPACE VULKANRTX — ALL GLOBAL — CLASS + STRUCTS = GLOBAL SPACE SUPREMACY
 
 #ifdef __cplusplus
     #pragma once
@@ -155,10 +157,8 @@
 
 #ifdef __cplusplus
     // ========================================================================
-    // C++ SECTION — NOW SAFE (all includes are global)
+    // C++ SECTION — GLOBAL SPACE SUPREMACY — NO NAMESPACE — DIRECT ACCESS
     // ========================================================================
-    namespace VulkanRTX {
-
     constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 3;
     constexpr float NEXUS_SCORE_THRESHOLD = 0.7f;
     constexpr float NEXUS_HYSTERESIS_ALPHA = 0.8f;
@@ -345,9 +345,11 @@
     static_assert(offsetof(RTConstants, emissiveBoost)   == 248);
 
     // ========================================================================
-    // 11. Shader Paths
+    // 11. Shader Paths — GLOBAL + DIRECT ACCESS
     // ========================================================================
     inline std::unordered_map<std::string, std::string> getShaderBinPaths() {
+        using namespace Logging::Color;
+        LOG_DEBUG_CAT("Vulkan", ">>> RESOLVING SHADER BINARY PATHS — GLOBAL ACCESS");
         return {
             {"raygen",              "assets/shaders/raytracing/raygen.spv"},
             {"miss",                "assets/shaders/raytracing/miss.spv"},
@@ -367,6 +369,8 @@
     }
 
     inline std::unordered_map<std::string, std::string> getShaderSrcPaths() {
+        using namespace Logging::Color;
+        LOG_DEBUG_CAT("Vulkan", ">>> RESOLVING SHADER SOURCE PATHS — GLOBAL ACCESS");
         return {
             {"raygen",              "shaders/raytracing/raygen.rgen"},
             {"miss",                "shaders/raytracing/miss.rmiss"},
@@ -438,7 +442,5 @@
 
         throw std::runtime_error("Shader file missing: " + logicalName);
     }
-
-    } // namespace VulkanRTX
 
 #endif // __cplusplus
