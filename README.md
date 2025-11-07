@@ -9,7 +9,7 @@ Hearer and Console are not part of the RTX program.
 
 [AMOURANTH RTX Video](https://x.com/i/status/1982578590593282537)  
 
-**C++20** using **SDL3**, **Vulkan**, and **GLM**.  
+**C++23** using **SDL3**, **Vulkan**, and **GLM**.  
 **Custom RTX pipelines.**  
 This is a good lunch break program other than the license restricting commercial work.  
 There is a dual license that can permit commercial work but expect 3% of sales negotiable. 
