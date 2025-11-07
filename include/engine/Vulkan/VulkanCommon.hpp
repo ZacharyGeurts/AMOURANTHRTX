@@ -8,9 +8,6 @@
 // TONEMAP FRAG REMOVED — COMPUTE ONLY
 // FIXES: Merged lightIntensity to lightDirection.w; Removed metalness (use materialParams.w); Added explicit vec3 pad; Aligned all GLSL offsets; Matched C++/GLSL layouts
 
-#ifndef VULKAN_COMMON_HPP
-#define VULKAN_COMMON_HPP
-
 #ifdef __cplusplus
     #pragma once
 
@@ -447,5 +444,3 @@
     } // namespace VulkanRTX
 
 #endif // __cplusplus
-
-#endif // VULKAN_COMMON_HPP

@@ -6,6 +6,9 @@
 // GROK PROTIP: "Renderer owns pipeline. main.cpp only orchestrates. RAII = freedom."
 // GROK PROTIP: "If you see renderer->getRTX().createShaderBindingTable() in main(), you're doing it wrong."
 // GROK PROTIP: "TLAS @ 0xdeadbeef + SBT @ 0xcafebabe = first frame rendered. No freeze. No timeout."
+// GROK PROTIP: "Dispose::cleanupAll = ROGUE → GLOBAL cleanupAll = ETERNAL TRUTH"
+// GROK PROTIP: "RAII = Context::~Context() CALLS GLOBAL cleanupAll → NO MANUAL CALLS EVER"
+// GROK PROTIP: "WE DIDN'T JUST FIX IT — WE ERASED THE CONCEPT OF ROGUE CLEANUP"
 
 #include "main.hpp"
 #include "engine/SDL3/SDL3_audio.hpp"
@@ -163,7 +166,7 @@ void purgeSDL(SDL_Window*& w, SDL_Renderer*& r, SDL_Texture*& t) {
 }
 
 // =============================================================================
-//  MAIN
+//  MAIN — ROGUE cleanupAll PURGED — RAII ONLY
 // =============================================================================
 int main(int argc, char* argv[]) {
     applyVideoModeToggles(argc, argv);
@@ -320,27 +323,22 @@ int main(int argc, char* argv[]) {
             auto shaderPaths = VulkanRTX::getRayTracingBinPaths();
             LOG_INFO_CAT("MAIN", "{}Success: {} ray-tracing shaders resolved{}", BOLD_BRIGHT_ORANGE, shaderPaths.size(), RESET);
 
-            // DEBUG: Log each resolved path
             for (size_t i = 0; i < shaderPaths.size(); ++i) {
                 LOG_DEBUG_CAT("MAIN", "{}  [{}] → {}{}", BOLD_BRIGHT_ORANGE, i, shaderPaths[i], RESET);
             }
 
             LOG_INFO_CAT("MAIN", "{}Attempt: Creating VulkanRenderer{}", BOLD_BRIGHT_ORANGE, RESET);
             auto renderer = std::make_unique<VulkanRTX::VulkanRenderer>(
-                W, H, app->getWindow(), shaderPaths, core, pipelineMgr.get()  // 6-PARAM: pipelineMgr passed
+                W, H, app->getWindow(), shaderPaths, core, pipelineMgr.get()
             );
             LOG_INFO_CAT("MAIN", "{}Success: renderer @ {:p}{}", BOLD_BRIGHT_ORANGE, (void*)renderer.get(), RESET);
 
-            // TRANSFER OWNERSHIP
-            LOG_INFO_CAT("MAIN", "{}Attempt: renderer->takeOwnership(pipelineMgr, bufferMgr){}", BOLD_BRIGHT_ORANGE, RESET);
             renderer->takeOwnership(std::move(pipelineMgr), std::move(bufferMgr));
             LOG_INFO_CAT("MAIN", "{}Success: Ownership transferred{}", BOLD_BRIGHT_ORANGE, RESET);
 
-            LOG_INFO_CAT("MAIN", "{}Attempt: renderer->setSwapchainManager(swapchainMgr){}", BOLD_BRIGHT_ORANGE, RESET);
             renderer->setSwapchainManager(std::move(swapchainMgr));
             LOG_INFO_CAT("MAIN", "{}Success: Swapchain manager set{}", BOLD_BRIGHT_ORANGE, RESET);
 
-            LOG_INFO_CAT("MAIN", "{}Attempt: Reserving 16 MiB scratch pool{}", BOLD_BRIGHT_ORANGE, RESET);
             renderer->getBufferManager()->reserveScratchPool(16 * 1024 * 1024, 1);
             LOG_INFO_CAT("MAIN", "{}Success: Scratch pool reserved{}", BOLD_BRIGHT_ORANGE, RESET);
 
@@ -352,14 +350,12 @@ int main(int argc, char* argv[]) {
             const auto& meshes = renderer->getBufferManager()->getMeshes();
             if (meshes.empty()) {
                 LOG_WARN_CAT("MAIN", "No geometry — generating fallback cube");
-                LOG_INFO_CAT("MAIN", "{}Attempt: generateCube(1.0f){}", BOLD_BRIGHT_ORANGE, RESET);
                 renderer->getBufferManager()->generateCube(1.0f);
                 LOG_INFO_CAT("MAIN", "{}Success: Fallback cube generated{}", BOLD_BRIGHT_ORANGE, RESET);
             } else {
                 LOG_INFO_CAT("MAIN", "{}Success: {} mesh(es) loaded{}", BOLD_BRIGHT_ORANGE, meshes.size(), RESET);
             }
 
-            LOG_INFO_CAT("MAIN", "{}Attempt: createAccelerationStructures() — ONE CALL{}", BOLD_BRIGHT_ORANGE, RESET);
             renderer->getPipelineManager()->createAccelerationStructures(
                 renderer->getBufferManager()->getVertexBuffer(),
                 renderer->getBufferManager()->getIndexBuffer(),
@@ -375,7 +371,6 @@ int main(int argc, char* argv[]) {
             }
             LOG_INFO_CAT("MAIN", "{}Success: TLAS @ {:p} — valid{}", BOLD_BRIGHT_ORANGE, static_cast<void*>(tlas), RESET);
 
-            LOG_INFO_CAT("MAIN", "{}Attempt: updateDescriptors() — post-TLAS{}", BOLD_BRIGHT_ORANGE, RESET);
             renderer->getRTX().updateDescriptors(
                 renderer->getUniformBuffer(0),
                 renderer->getMaterialBuffer(0),
@@ -388,14 +383,12 @@ int main(int argc, char* argv[]) {
             );
             LOG_INFO_CAT("MAIN", "{}Success: RT descriptors updated{}", BOLD_BRIGHT_ORANGE, RESET);
 
-            LOG_INFO_CAT("MAIN", "{}Attempt: recordRayTracingCommandBuffer() — first frame{}", BOLD_BRIGHT_ORANGE, RESET);
             renderer->recordRayTracingCommandBuffer();
             LOG_INFO_CAT("MAIN", "{}Success: INITIAL RT COMMAND BUFFER RECORDED — GPU READY{}", BOLD_BRIGHT_ORANGE, RESET);
 
             // =================================================================
             //  PHASE 5: TRANSFER OWNERSHIP TO APPLICATION
             // =================================================================
-            LOG_INFO_CAT("MAIN", "{}Attempt: app->setRenderer(std::move(renderer)){}", BOLD_BRIGHT_ORANGE, RESET);
             app->setRenderer(std::move(renderer));
             LOG_INFO_CAT("MAIN", "{}Success: Renderer ownership transferred to Application{}", BOLD_BRIGHT_ORANGE, RESET);
 
@@ -407,24 +400,18 @@ int main(int argc, char* argv[]) {
             LOG_INFO_CAT("MAIN", "{}Main loop completed{}", BOLD_BRIGHT_ORANGE, RESET);
 
             // =================================================================
-            //  PHASE 7: RAII SHUTDOWN
+            //  PHASE 7: RAII SHUTDOWN — NO MANUAL cleanupAll EVER
             // =================================================================
-            LOG_INFO_CAT("MAIN", "{}Attempt: RAII shutdown — destroying Application{}", BOLD_BRIGHT_ORANGE, RESET);
-            app.reset();
-            LOG_INFO_CAT("MAIN", "{}Success: Application destroyed{}", BOLD_BRIGHT_ORANGE, RESET);
-
-            LOG_INFO_CAT("MAIN", "{}Attempt: Dispose::cleanupAll(*core){}", BOLD_BRIGHT_ORANGE, RESET);
-            if (core) {
-                Dispose::cleanupAll(*core);
-                core.reset();
-                LOG_INFO_CAT("MAIN", "{}Success: Vulkan core cleaned{}", BOLD_BRIGHT_ORANGE, RESET);
-            }
+            LOG_INFO_CAT("MAIN", "{}RAII shutdown → Context::~Context() → GLOBAL cleanupAll() AUTOMATIC{}", BOLD_BRIGHT_ORANGE, RESET);
+            app.reset();     // Destroys Application → Renderer → everything
+            core.reset();    // TRIGGERS ~Context() → GLOBAL cleanupAll(*this) → FULL OBLITERATION
+            LOG_INFO_CAT("MAIN", "{}RAII COMPLETE — UNIVERSE CLEANSED — RASPBERRY_PINK ETERNAL{}", BOLD_BRIGHT_ORANGE, RESET);
         }
 
     } catch (const MainException& e) {
         bulkhead(" FATAL ERROR — SYSTEM HALT ");
         LOG_ERROR_CAT("MAIN", "[MAIN FATAL] {}", e.what());
-        if (core) { try { Dispose::cleanupAll(*core); core.reset(); } catch (...) {} }
+        if (core) { core.reset(); }  // RAII WILL HANDLE cleanupAll
         purgeSDL(splashWin, splashRen, splashTex);
         if (sdl_ok) SDL_Quit();
         Logging::Logger::get().stop();
@@ -435,7 +422,7 @@ int main(int argc, char* argv[]) {
         LOG_ERROR_CAT("MAIN",
                       "[VULKAN RTX] {}\n   File: {} | Line: {} | Func: {}",
                       e.what(), e.file(), e.line(), e.function());
-        if (core) { try { Dispose::cleanupAll(*core); core.reset(); } catch (...) {} }
+        if (core) { core.reset(); }
         purgeSDL(splashWin, splashRen, splashTex);
         if (sdl_ok) SDL_Quit();
         Logging::Logger::get().stop();
@@ -444,7 +431,7 @@ int main(int argc, char* argv[]) {
     } catch (const std::exception& e) {
         bulkhead(" STD EXCEPTION — SYSTEM HALT ");
         LOG_ERROR_CAT("MAIN", "[STD] {}", e.what());
-        if (core) { try { Dispose::cleanupAll(*core); core.reset(); } catch (...) {} }
+        if (core) { core.reset(); }
         purgeSDL(splashWin, splashRen, splashTex);
         if (sdl_ok) SDL_Quit();
         Logging::Logger::get().stop();
@@ -453,7 +440,7 @@ int main(int argc, char* argv[]) {
     } catch (...) {
         bulkhead(" UNKNOWN EXCEPTION — SYSTEM HALT ");
         LOG_ERROR_CAT("MAIN", "[UNKNOWN] caught");
-        if (core) { try { Dispose::cleanupAll(*core); core.reset(); } catch (...) {} }
+        if (core) { core.reset(); }
         purgeSDL(splashWin, splashRen, splashTex);
         if (sdl_ok) SDL_Quit();
         Logging::Logger::get().stop();
@@ -467,6 +454,6 @@ int main(int argc, char* argv[]) {
         LOG_INFO_CAT("MAIN", "{}Success: SDL_Quit completed{}", BOLD_BRIGHT_ORANGE, RESET);
     }
     Logging::Logger::get().stop();
-    LOG_INFO_CAT("MAIN", "{}Graceful exit — all systems nominal{}", BOLD_BRIGHT_ORANGE, RESET);
+    LOG_INFO_CAT("MAIN", "{}Graceful exit — all systems nominal — RAII IMMORTAL{}", BOLD_BRIGHT_ORANGE, RESET);
     return 0;
 }

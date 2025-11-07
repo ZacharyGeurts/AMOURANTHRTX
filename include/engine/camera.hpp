@@ -12,8 +12,6 @@
 // ADDED: All required headers
 
 #pragma once
-#ifndef CAMERA_HPP
-#define CAMERA_HPP
 
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -183,5 +181,3 @@ private:
 };
 
 } // namespace VulkanRTX
-
-#endif // CAMERA_HPP
