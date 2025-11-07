@@ -2,7 +2,7 @@
 // AMOURANTH RTX Engine, November 2025 - Hyper-Vivid, Thread-Safe Async Logging.
 // ULTRA-NEON TRACE | PLATINUM GRAY INFO | EMERALD GREEN ENGINE | RAINBOW SPECTRUM CATEGORIES
 // Thread-safe, asynchronous logging with HYPER-VIVID ANSI-colored output and delta time.
-// Supports C++20 std::format, std::jthread, OpenMP, and lock-free queue with std::atomic.
+// Supports C++23 std::print, std::jthread, OpenMP, and lock-free queue with std::atomic.
 // No mutexes; designed for high-performance Vulkan applications on Windows and Linux.
 // Delta time format: microseconds (<10ms), milliseconds (10ms-1s), seconds (1s-1min), minutes (1min-1hr), hours (>1hr).
 // Usage: LOG_TRACE("Message: {}", value); or Logger::get().log(LogLevel::Trace, "Vulkan", "Message: {}", value);
@@ -18,7 +18,7 @@
 #include <string_view>
 #include <source_location>
 #include <format>
-#include <syncstream>
+#include <print>
 #include <iostream>
 #include <fstream>
 #include <array>
@@ -31,6 +31,7 @@
 #include <set>
 #include <map>
 #include <span>
+#include <optional>
 #include <glm/glm.hpp>
 #include <glm/gtx/string_cast.hpp>
 #include <vulkan/vulkan.h>
@@ -440,7 +441,8 @@ private:
             size_t newTail = (currentTail + dropCount) % QueueSize;
             tail_.store(newTail, std::memory_order_release);
             if (ENABLE_ERROR) {
-                std::osyncstream(std::cerr) << Color::SCARLET_RED << "[ERROR] [0.000us] [Logger] Log queue overwhelmed, dropping " << dropCount << " messages" << Color::RESET << std::endl;
+                std::print(std::cerr, "{}[ERROR] [0.000us] [Logger] Log queue overwhelmed, dropping {} messages{}\n",
+                           Color::SCARLET_RED, dropCount, Color::RESET);
             }
             currentTail = newTail;
         }
@@ -471,17 +473,25 @@ private:
         auto delta = std::chrono::duration_cast<std::chrono::microseconds>(msg.timestamp - *firstLogTime_).count();
         std::string timeStr = formatDelta(delta);
 
-        std::string output;
+        auto message = msg.formattedMessage.empty() ? "[Empty message]" : msg.formattedMessage;
+        std::string plain;
         try {
-            output = std::format("{}{} [{}] {}[{}]{} {}{}",
-                                 levelColor, levelStr, timeStr, categoryColor, msg.category, Color::RESET,
-                                 msg.formattedMessage.empty() ? "[Empty message]" : msg.formattedMessage, Color::RESET);
+            plain = std::format("{} [{}] [{}] {}", levelStr, timeStr, msg.category, message);
         } catch (const std::format_error& e) {
-            output = std::format("[ERROR] [{}] [Logger] Format error: {}", timeStr, e.what());
+            plain = std::format("[ERROR] [{}] [Logger] Format error: {}", timeStr, e.what());
         }
 
-        std::osyncstream(std::cout) << output << std::endl;
-        if (logFile_.is_open()) std::osyncstream(logFile_) << output << std::endl;
+        std::string colored;
+        try {
+            colored = std::format("{}{} [{}] {}[{}]{} {}{}",
+                                  levelColor, levelStr, timeStr, categoryColor, msg.category, Color::RESET,
+                                  message, Color::RESET);
+        } catch (const std::format_error& e) {
+            colored = std::format("[ERROR] [{}] [Logger] Format error: {}", timeStr, e.what());
+        }
+
+        std::print(std::cout, "{}\n", colored);
+        if (logFile_.is_open()) std::print(logFile_, "{}\n", plain);
     }
 
     // 6.3 Worker Thread

@@ -4,6 +4,7 @@
 // PUBLIC: getRenderer() → safe access from camera, input, anywhere
 // OWNERSHIP: Application owns renderer for entire lifetime
 // GROK PROTIP: "Never access private members. Use getRenderer()."
+// C++23: Full turbo — <format>, <ranges> (via VulkanCore), std::expected if needed
 
 #pragma once
 #ifndef HANDLE_APP_HPP
