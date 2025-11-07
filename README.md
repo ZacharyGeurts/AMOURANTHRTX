@@ -23,7 +23,7 @@ Minimal quality adjusts to maintain desired framerate.
 Swapchain that finds your display and always maintains best mode for your OS. [Spec](https://docs.vulkan.org/refpages/latest/refpages/source/VkPresentModeKHR.html)  
 Buffer Management at near zero cost.  
 Disposal at zero cost.  
-Robust logging system inspirid by: [Ellie Fier](https://www.twitch.tv/elliefier)  
+Robust logging system inspired by: [Ellie Fier](https://www.twitch.tv/elliefier)  
 
 Have a look. I promise to get libraries in the future.  
 ```
