@@ -27,6 +27,7 @@ Disposal at zero cost.
 Robust logging system inspired by: [Ellie Fier](https://www.twitch.tv/elliefier)  
 
 Have a look. I promise to get libraries in the future.  
+sudo apt update && sudo apt install gcc-14 g++-14
 ```
 git clone https://github.com/ZacharyGeurts/AMOURANTHRTX
 cd AMOURANTHRTX
