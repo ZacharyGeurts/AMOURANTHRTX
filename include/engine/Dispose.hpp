@@ -11,7 +11,7 @@
 #include <latch>
 #include <atomic>
 #include <cstdint>
-#include <string>
+#include <string_view>
 #include "engine/logging.hpp"
 
 using namespace Logging::Color;
@@ -77,86 +77,6 @@ struct DestroyTracker {
         uintptr_t addr = reinterpret_cast<uintptr_t>(ptr);
         size_t index = addr % 1048576;
         return s_bitset->test(index);
-    }
-};
-
-// ===================================================================
-// VulkanDeleter — LOGS EVERY DESTROY — FULL RAII
-// ===================================================================
-template<typename T>
-struct VulkanDeleter {
-    VkDevice device;
-    PFN_vkDestroyAccelerationStructureKHR destroyFunc = nullptr;
-
-    VulkanDeleter(VkDevice d = VK_NULL_HANDLE) : device(d) {}
-    VulkanDeleter(VkDevice d, PFN_vkDestroyAccelerationStructureKHR f) : device(d), destroyFunc(f) {}
-
-    void operator()(T handle) const noexcept {
-        if (!handle || !device) return;
-
-        if constexpr (std::is_same_v<T, VkBuffer>) {
-            vkDestroyBuffer(device, handle, nullptr);
-            LOG_INFO_CAT("Dispose", "{}vkDestroyBuffer @ 0x{:x}{}{}",
-                         OCEAN_TEAL, reinterpret_cast<uintptr_t>(handle), RESET);
-        } else if constexpr (std::is_same_v<T, VkDeviceMemory>) {
-            vkFreeMemory(device, handle, nullptr);
-            LOG_INFO_CAT("Dispose", "{}vkFreeMemory @ 0x{:x}{}{}",
-                         OCEAN_TEAL, reinterpret_cast<uintptr_t>(handle), RESET);
-        } else if constexpr (std::is_same_v<T, VkImage>) {
-            vkDestroyImage(device, handle, nullptr);
-            LOG_INFO_CAT("Dispose", "{}vkDestroyImage @ 0x{:x}{}{}",
-                         OCEAN_TEAL, reinterpret_cast<uintptr_t>(handle), RESET);
-        } else if constexpr (std::is_same_v<T, VkImageView>) {
-            vkDestroyImageView(device, handle, nullptr);
-            LOG_INFO_CAT("Dispose", "{}vkDestroyImageView @ 0x{:x}{}{}",
-                         OCEAN_TEAL, reinterpret_cast<uintptr_t>(handle), RESET);
-        } else if constexpr (std::is_same_v<T, VkSampler>) {
-            vkDestroySampler(device, handle, nullptr);
-            LOG_INFO_CAT("Dispose", "{}vkDestroySampler @ 0x{:x}{}{}",
-                         OCEAN_TEAL, reinterpret_cast<uintptr_t>(handle), RESET);
-        } else if constexpr (std::is_same_v<T, VkDescriptorPool>) {
-            vkDestroyDescriptorPool(device, handle, nullptr);
-            LOG_INFO_CAT("Dispose", "{}vkDestroyDescriptorPool @ 0x{:x}{}{}",
-                         OCEAN_TEAL, reinterpret_cast<uintptr_t>(handle), RESET);
-        } else if constexpr (std::is_same_v<T, VkSemaphore>) {
-            vkDestroySemaphore(device, handle, nullptr);
-            LOG_INFO_CAT("Dispose", "{}vkDestroySemaphore @ 0x{:x}{}{}",
-                         OCEAN_TEAL, reinterpret_cast<uintptr_t>(handle), RESET);
-        } else if constexpr (std::is_same_v<T, VkCommandPool>) {
-            vkDestroyCommandPool(device, handle, nullptr);
-            LOG_INFO_CAT("Dispose", "{}vkDestroyCommandPool @ 0x{:x}{}{}",
-                         OCEAN_TEAL, reinterpret_cast<uintptr_t>(handle), RESET);
-        } else if constexpr (std::is_same_v<T, VkPipeline>) {
-            vkDestroyPipeline(device, handle, nullptr);
-            LOG_INFO_CAT("Dispose", "{}vkDestroyPipeline @ 0x{:x}{}{}",
-                         OCEAN_TEAL, reinterpret_cast<uintptr_t>(handle), RESET);
-        } else if constexpr (std::is_same_v<T, VkPipelineLayout>) {
-            vkDestroyPipelineLayout(device, handle, nullptr);
-            LOG_INFO_CAT("Dispose", "{}vkDestroyPipelineLayout @ 0x{:x}{}{}",
-                         OCEAN_TEAL, reinterpret_cast<uintptr_t>(handle), RESET);
-        } else if constexpr (std::is_same_v<T, VkDescriptorSetLayout>) {
-            vkDestroyDescriptorSetLayout(device, handle, nullptr);
-            LOG_INFO_CAT("Dispose", "{}vkDestroyDescriptorSetLayout @ 0x{:x}{}{}",
-                         OCEAN_TEAL, reinterpret_cast<uintptr_t>(handle), RESET);
-        } else if constexpr (std::is_same_v<T, VkRenderPass>) {
-            vkDestroyRenderPass(device, handle, nullptr);
-            LOG_INFO_CAT("Dispose", "{}vkDestroyRenderPass @ 0x{:x}{}{}",
-                         OCEAN_TEAL, reinterpret_cast<uintptr_t>(handle), RESET);
-        } else if constexpr (std::is_same_v<T, VkShaderModule>) {
-            vkDestroyShaderModule(device, handle, nullptr);
-            LOG_INFO_CAT("Dispose", "{}vkDestroyShaderModule @ 0x{:x}{}{}",
-                         OCEAN_TEAL, reinterpret_cast<uintptr_t>(handle), RESET);
-        } else if constexpr (std::is_same_v<T, VkFence>) {
-            vkDestroyFence(device, handle, nullptr);
-            LOG_INFO_CAT("Dispose", "{}vkDestroyFence @ 0x{:x}{}{}",
-                         OCEAN_TEAL, reinterpret_cast<uintptr_t>(handle), RESET);
-        } else if constexpr (std::is_same_v<T, VkAccelerationStructureKHR>) {
-            if (destroyFunc) {
-                destroyFunc(device, handle, nullptr);
-                LOG_INFO_CAT("Dispose", "{}vkDestroyAccelerationStructureKHR @ 0x{:x}{}{}",
-                             OCEAN_TEAL, reinterpret_cast<uintptr_t>(handle), RESET);
-            }
-        }
     }
 };
 
