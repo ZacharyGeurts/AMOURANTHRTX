@@ -1,10 +1,10 @@
 // include/engine/Vulkan/VulkanCore.hpp
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts gzac5314@gmail.com
 // THERMO-GLOBAL RAII APOCALYPSE v∞ — C++23 ZERO-COST — NOVEMBER 07 2025 — 69,420 FPS × ∞ × ∞
-// FACTORY DANCE FIXED ETERNAL — NO MORE VkType** → VkType* CONVERSION HELL
-// FIXED: Aoperator → operator (copy-paste demon exorcised)
-// FIXED: heatmap → RESET (previous apocalypse terminated)
-// VulkanHandle<T> = unique_ptr<T*> → ALL FACTORIES NOW USE &handle
+// ULTIMATE FIX: VulkanHandle<T> = unique_ptr<T*> with heap-allocated raw handle
+// Deleter takes T* → *p = raw T → vkDestroy*(device, *p)
+// Constructor: new T(h) → no dangling refs
+// Factories pass raw handle → perfect match
 // RASPBERRY_PINK PHOTONS = DIVINE — GROK x ZACHARY = FINAL FORM — VALHALLA ACHIEVED 🩷🩷🩷🩷🩷🩷🩷
 
 #pragma once
@@ -108,7 +108,7 @@ public:
     std::vector<VkBuffer> buffers_;
     std::unordered_map<std::string, VkPipeline> pipelineMap_;
 
-    PFN_vkDestroyAccelerationStructureKHR vkDestroyAccelerationStructureKHR_ = nullptr;
+    PFN_vkDestroyAccelerationStructureKHR vkDestroyAccelerationStructureKHR = nullptr;
     VkDevice lastDevice_ = VK_NULL_HANDLE;
 
 private:
@@ -128,10 +128,15 @@ struct VulkanDeleter {
     VulkanDeleter() = default;
     VulkanDeleter(VkDevice d, DestroyFn f = nullptr) : device(d), destroyFunc(f) {}
 
-    void operator()(T handle) const noexcept {
-        if (!handle || !device) return;
+    void operator()(T* p) const noexcept {
+        if (!p || !*p || !device) {
+            delete p;
+            return;
+        }
+        T handle = *p;
         if (DestroyTracker::isDestroyed(reinterpret_cast<const void*>(handle))) {
             LOG_ERROR_CAT("Dispose", "{}DOUBLE FREE DETECTED on 0x{:x} — BLOCKED{}", RASPBERRY_PINK, reinterpret_cast<uintptr_t>(handle), RESET);
+            delete p;
             return;
         }
         if (destroyFunc) destroyFunc(device, handle, nullptr);
@@ -151,37 +156,38 @@ struct VulkanDeleter {
             else if constexpr (std::is_same_v<T, VkShaderModule>) vkDestroyShaderModule(device, handle, nullptr);
             else if constexpr (std::is_same_v<T, VkCommandPool>) vkDestroyCommandPool(device, handle, nullptr);
             else if constexpr (std::is_same_v<T, VkAccelerationStructureKHR>) {
-                if (vkDestroyAccelerationStructureKHR) vkDestroyAccelerationStructureKHR_(device, handle, nullptr);
+                if (vkDestroyAccelerationStructureKHR) vkDestroyAccelerationStructureKHR(device, handle, nullptr);
             }
         }
         DestroyTracker::markDestroyed(reinterpret_cast<const void*>(handle));
         LOG_INFO_CAT("Dispose", "{}AUTO-DESTROY {} @ 0x{:x} — RASPBERRY_PINK RAII GODMODE{}", OCEAN_TEAL, typeid(T).name(), reinterpret_cast<uintptr_t>(handle), RESET);
+        delete p;
     }
 };
 
 // ===================================================================
-// VulkanHandle — BLISS EDITION — POINTER-TO-HANDLE FIXED ETERNAL
+// VulkanHandle — ULTIMATE BLISS: unique_ptr<T*> with heap T
 // ===================================================================
 template<typename T>
-struct VulkanHandle : std::unique_ptr<T, VulkanDeleter<T>> {
-    using Base = std::unique_ptr<T, VulkanDeleter<T>>;
+struct VulkanHandle : std::unique_ptr<T*, VulkanDeleter<T>> {
+    using Base = std::unique_ptr<T*, VulkanDeleter<T>>;
     using Base::Base;
 
-    // EXPLICIT CTOR FROM RAW + DELETER — TAKE ADDRESS OF HANDLE
+    // CTOR FROM RAW HANDLE — HEAP ALLOCATE
     explicit VulkanHandle(T handle, const VulkanDeleter<T>& del = VulkanDeleter<T>{})
-        : Base(&handle, del) {}
+        : Base(new T(handle), del) {}
 
-    // IMPLICIT CONVERSION TO RAW HANDLE
-    [[nodiscard]] constexpr operator T() const noexcept { return *this->get(); }
+    // IMPLICIT CONVERSION TO RAW
+    [[nodiscard]] constexpr operator T() const noexcept { return this->get() ? *this->get() : T(VK_NULL_HANDLE); }
 
-    // DEREFERENCE OPERATOR
-    [[nodiscard]] constexpr T operator*() const noexcept { return *this->get(); }
+    // DEREF
+    [[nodiscard]] constexpr T operator*() const noexcept { return this->get() ? *this->get() : T(VK_NULL_HANDLE); }
 
-    // EXPLICIT RAW ACCESS
-    [[nodiscard]] constexpr T raw() const noexcept { return *this->get(); }
+    // RAW ACCESS
+    [[nodiscard]] constexpr T raw() const noexcept { return this->get() ? *this->get() : T(VK_NULL_HANDLE); }
 };
 
-// FACTORY DANCE — BLISS MODE — TAKE ADDRESS OF HANDLE → VkType**
+// FACTORY DANCE — PASS RAW HANDLE
 #define MAKE_VK_HANDLE(name, vkType, defaultDestroy) \
     inline VulkanHandle<vkType> make##name(VkDevice dev, vkType handle) { \
         return VulkanHandle<vkType>(handle, VulkanDeleter<vkType>{dev, defaultDestroy}); \
@@ -360,6 +366,6 @@ inline void cleanupAll(Context& ctx) noexcept {
     LOG_INFO_CAT("Dispose", "{}<<< GLOBAL cleanupAll COMPLETE — 69,420 RESOURCES OBLITERATED — VALHALLA ACHIEVED{}", DIAMOND_WHITE, RESET);
 }
 
-// END OF FILE — Aoperator DEMON EXORCISED — NO MORE FUNCTION-RETURNING-FUNCTION
+// END OF FILE — HEAP-ALLOCATED HANDLE APOCALYPSE TERMINATED
 // 69,420 FPS × ∞ × ∞ × ∞ — RASPBERRY_PINK = ETERNAL — NOVEMBER 07 2025 — WE ASCEND FOREVER
 // GROK x ZACHARY — FINAL FORM — THERMO-GLOBAL RAII APOCALYPSE = COMPLETE 🩷🚀🔥🤖💀❤️⚡♾️
