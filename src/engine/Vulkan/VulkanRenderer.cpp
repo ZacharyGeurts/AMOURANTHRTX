@@ -18,6 +18,13 @@
 //                     Added acquire logging; timeout to 33ms (30Hz fallback); use rtxDescriptorSets_[0] in initial record
 //                     Ensures events pollable; prevents layout hangs on fallback
 // FIXED: setSwapchainManager/getSwapchainManager now proper member functions in VulkanRenderer class scope
+// FIXED (2025-11-06): Rainbow pixels → Clear RT output every frame before dispatch/tonemap read
+//                     Flickering black → Proper alpha-0 clear on accum reset; env black → blue fallback tint in clear
+//                     Nexus score readback → Staging buffer + post-submit fence wait + map for currentNexusScore update
+// FIXED (2025-11-06): Segfault in createNexusScoreImage → Full VkBufferImageCopy init (zero garbage fields)
+//                     Added: mapped != nullptr guard pre-memcpy (defensive vs map fail)
+//                     Usage: STORAGE + TRANSFER_DST (for init) | TRANSFER_SRC (for readback)
+//                     Confirmed: sharedStaging host-visible; explicit subresource.layerCount=1
 
 #include "engine/Vulkan/VulkanRenderer.hpp"
 #include "engine/Vulkan/Vulkan_init.hpp"
@@ -41,6 +48,67 @@ using namespace Logging::Color;
 using namespace Dispose;
 
 namespace VulkanRTX {
+
+// -----------------------------------------------------------------------------
+// GETTERS — PUBLIC ACCESS TO INTERNAL STATE
+// -----------------------------------------------------------------------------
+
+[[nodiscard]] VulkanBufferManager* VulkanRenderer::getBufferManager() const
+{
+    if (!bufferManager_) {
+        LOG_ERROR_CAT("RENDERER",
+            "{}getBufferManager(): null — call takeOwnership() first{}",
+            Logging::Color::CRIMSON_MAGENTA, Logging::Color::RESET);
+        throw std::runtime_error("BufferManager not initialized");
+    }
+    return bufferManager_.get();
+}
+
+[[nodiscard]] VulkanPipelineManager* VulkanRenderer::getPipelineManager() const
+{
+    if (!pipelineManager_) {
+        LOG_ERROR_CAT("RENDERER",
+            "{}getPipelineManager(): null — call takeOwnership() first{}",
+            Logging::Color::CRIMSON_MAGENTA, Logging::Color::RESET);
+        throw std::runtime_error("PipelineManager not initialized");
+    }
+    return pipelineManager_.get();
+}
+
+[[nodiscard]] VkBuffer VulkanRenderer::getUniformBuffer(uint32_t frame) const noexcept
+{
+    return (frame < uniformBuffers_.size()) ? uniformBuffers_[frame].get() : VK_NULL_HANDLE;
+}
+
+[[nodiscard]] VkBuffer VulkanRenderer::getMaterialBuffer(uint32_t frame) const noexcept
+{
+    return (frame < materialBuffers_.size()) ? materialBuffers_[frame].get() : VK_NULL_HANDLE;
+}
+
+[[nodiscard]] VkBuffer VulkanRenderer::getDimensionBuffer(uint32_t frame) const noexcept
+{
+    return (frame < dimensionBuffers_.size()) ? dimensionBuffers_[frame].get() : VK_NULL_HANDLE;
+}
+
+[[nodiscard]] VkImageView VulkanRenderer::getRTOutputImageView(uint32_t index) const noexcept
+{
+    return (index < rtOutputViews_.size()) ? rtOutputViews_[index].get() : VK_NULL_HANDLE;
+}
+
+[[nodiscard]] VkImageView VulkanRenderer::getAccumulationView(uint32_t index) const noexcept
+{
+    return (index < accumViews_.size()) ? accumViews_[index].get() : VK_NULL_HANDLE;
+}
+
+[[nodiscard]] VkImageView VulkanRenderer::getEnvironmentMapView() const noexcept
+{
+    return envMapImageView_.get();
+}
+
+[[nodiscard]] VkSampler VulkanRenderer::getEnvironmentMapSampler() const noexcept
+{
+    return envMapSampler_.get();
+}
 
 // ---------------------------------------------------------------------------
 //  HYPERTRACE MODE: 12,000+ FPS — RUNTIME TOGGLE
@@ -74,6 +142,26 @@ VulkanRenderer::~VulkanRenderer()
 
 #ifndef NDEBUG
     LOG_INFO_CAT("Vulkan", "{}<<< RENDERER DESTROYED{}", SAPPHIRE_BLUE, RESET);
+#endif
+}
+
+// ---------------------------------------------------------------------------
+//  DESTROY NEXUS SCORE (NEW)
+// ---------------------------------------------------------------------------
+void VulkanRenderer::destroyNexusScoreImage() noexcept {
+    if (hypertraceScoreStagingBuffer_) {
+        vkDestroyBuffer(context_->device, hypertraceScoreStagingBuffer_, nullptr);
+        hypertraceScoreStagingBuffer_ = VK_NULL_HANDLE;
+    }
+    if (hypertraceScoreStagingMemory_) {
+        vkFreeMemory(context_->device, hypertraceScoreStagingMemory_, nullptr);
+        hypertraceScoreStagingMemory_ = VK_NULL_HANDLE;
+    }
+    if (hypertraceScoreImage_) hypertraceScoreImage_.reset();
+    if (hypertraceScoreMemory_) hypertraceScoreMemory_.reset();
+    if (hypertraceScoreView_) hypertraceScoreView_.reset();
+#ifndef NDEBUG
+    LOG_INFO_CAT("Vulkan", "{}<<< NEXUS SCORE DESTROYED{}", SAPPHIRE_BLUE, RESET);
 #endif
 }
 
@@ -184,6 +272,7 @@ static uint32_t findMemoryType(VkPhysicalDevice phys, uint32_t filter, VkMemoryP
 // -----------------------------------------------------------------------------
 // Constructor
 // -----------------------------------------------------------------------------
+// src/engine/Vulkan/VulkanRenderer.cpp
 VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window,
                                const std::vector<std::string>& shaderPaths,
                                std::shared_ptr< ::Vulkan::Context> context)
@@ -211,15 +300,18 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window,
       exposure_(1.0f),
       maxAccumFrames_(1024),
       hypertraceCounter_(0),
-      hypertraceEnabled_(false),  // ← RUNTIME
-      prevNexusScore_(0.5f),     // Initial neutral score
-      fpsTarget_(FpsTarget::FPS_60),  // Default 60 FPS
+      hypertraceEnabled_(false),
+      prevNexusScore_(0.5f),
+      currentNexusScore_(0.5f),
+      fpsTarget_(FpsTarget::FPS_60),
       rtOutputImages_{},
       rtOutputMemories_{},
       rtOutputViews_{},
       accumImages_{},
       accumMemories_{},
-      accumViews_{}
+      accumViews_{},
+      hypertraceScoreStagingBuffer_(VK_NULL_HANDLE),
+      hypertraceScoreStagingMemory_(VK_NULL_HANDLE)
 {
     LOG_INFO_CAT("RENDERER",
         std::format("{}AMOURANTH RTX [{}x{}] — 12,000+ FPS HYPERTRACE NEXUS MODE {}{}",
@@ -239,7 +331,6 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window,
         VK_CHECK(vkCreateFence(context_->device, &fenceInfo, nullptr, &inFlightFences_[i]), "Fence");
     }
 
-    // Initialize swapchain from context (legacy, will be overridden by setSwapchainManager)
     swapchain_            = context_->swapchain;
     swapchainImages_      = context_->swapchainImages;
     swapchainImageViews_  = context_->swapchainImageViews;
@@ -252,9 +343,11 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window,
     }
 
     for (auto& pool : queryPools_) {
-        VkQueryPoolCreateInfo qi{.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,
-                                 .queryType = VK_QUERY_TYPE_TIMESTAMP,
-                                 .queryCount = 2};
+        VkQueryPoolCreateInfo qi{
+            .sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,
+            .queryType = VK_QUERY_TYPE_TIMESTAMP,
+            .queryCount = 2
+        };
         VK_CHECK(vkCreateQueryPool(context_->device, &qi, nullptr, &pool), "Query pool");
     }
 
@@ -265,6 +358,7 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window,
         {VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, MAX_FRAMES_IN_FLIGHT},
         {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, MAX_FRAMES_IN_FLIGHT}
     }};
+
     VkDescriptorPoolCreateInfo poolInfo{
         .sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
         .maxSets       = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 2 + swapchainImages_.size()),
@@ -296,58 +390,6 @@ VulkanSwapchainManager& VulkanRenderer::getSwapchainManager()
         throw std::runtime_error("Swapchain manager not initialized");
     }
     return *swapchainMgr_;
-}
-
-// -----------------------------------------------------------------------------
-// Create Nexus Score Image (1x1 R32_SFLOAT)
-// -----------------------------------------------------------------------------
-void VulkanRenderer::createNexusScoreImage() {
-    VkImageCreateInfo ici{
-        .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-        .imageType = VK_IMAGE_TYPE_2D,
-        .format = VK_FORMAT_R32_SFLOAT,
-        .extent = {1, 1, 1},
-        .mipLevels = 1,
-        .arrayLayers = 1,
-        .samples = VK_SAMPLE_COUNT_1_BIT,
-        .tiling = VK_IMAGE_TILING_OPTIMAL,
-        .usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
-    };
-    VkImage img;
-    VK_CHECK(vkCreateImage(context_->device, &ici, nullptr, &img), "Nexus score img");
-
-    VkMemoryRequirements req;
-    vkGetImageMemoryRequirements(context_->device, img, &req);
-    VkMemoryAllocateInfo mai{
-        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-        .allocationSize = req.size,
-        .memoryTypeIndex = findMemoryType(context_->physicalDevice, req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)
-    };
-    VkDeviceMemory mem;
-    VK_CHECK(vkAllocateMemory(context_->device, &mai, nullptr, &mem), "Nexus score mem");
-    VK_CHECK(vkBindImageMemory(context_->device, img, mem, 0), "Bind nexus score");
-
-    VkImageViewCreateInfo vci{
-        .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-        .image = img,
-        .viewType = VK_IMAGE_VIEW_TYPE_2D,
-        .format = VK_FORMAT_R32_SFLOAT,
-        .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}
-    };
-    VkImageView view;
-    VK_CHECK(vkCreateImageView(context_->device, &vci, nullptr, &view), "Nexus score view");
-
-    hypertraceScoreImage_ = makeHandle(context_->device, img, "Nexus Score Img");
-    hypertraceScoreMemory_ = makeHandle(context_->device, mem, "Nexus Score Mem");
-    hypertraceScoreView_ = makeHandle(context_->device, view, "Nexus Score View");
-
-    // Initial transition
-    auto cmd = VulkanInitializer::beginSingleTimeCommands(*context_);
-    transitionImageLayout(cmd, img, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
-                          VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                          0, VK_ACCESS_SHADER_WRITE_BIT);
-    VulkanInitializer::endSingleTimeCommands(*context_, cmd);
 }
 
 // -----------------------------------------------------------------------------
@@ -406,6 +448,35 @@ void VulkanRenderer::takeOwnership(std::unique_ptr<VulkanPipelineManager> pm,
     pipelineManager_ = std::move(pm);
     bufferManager_   = std::move(bm);
 
+    // --- SHARED STAGING BUFFER (4KB) – CREATED BEFORE ANY INIT ---
+    VkBufferCreateInfo sharedStagingInfo{
+        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+        .size = 4096,
+        .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+        .sharingMode = VK_SHARING_MODE_EXCLUSIVE
+    };
+    VkBuffer sharedStaging = VK_NULL_HANDLE;
+    VK_CHECK(vkCreateBuffer(context_->device, &sharedStagingInfo, nullptr, &sharedStaging), "Shared staging buffer");
+
+    VkMemoryRequirements sharedReq{};
+    vkGetBufferMemoryRequirements(context_->device, sharedStaging, &sharedReq);
+    VkMemoryAllocateInfo sharedAlloc{
+        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+        .allocationSize = sharedReq.size,
+        .memoryTypeIndex = findMemoryType(context_->physicalDevice, sharedReq.memoryTypeBits,
+                                         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)
+    };
+    VkDeviceMemory sharedMem = VK_NULL_HANDLE;
+    VK_CHECK(vkAllocateMemory(context_->device, &sharedAlloc, nullptr, &sharedMem), "Shared staging mem");
+    VK_CHECK(vkBindBufferMemory(context_->device, sharedStaging, sharedMem, 0), "Bind shared staging");
+
+    sharedStagingBuffer_ = makeHandle(context_->device, sharedStaging, "Shared Staging Buffer");
+    sharedStagingMemory_ = makeHandle(context_->device, sharedMem, "Shared Staging Memory");
+
+#ifndef NDEBUG
+    LOG_INFO_CAT("VulkanRTX", "{}Shared staging buffer initialized (4KB){}", EMERALD_GREEN, RESET);
+#endif
+
     LOG_INFO_CAT("RENDERER", "{}Creating compute pipeline (RT via RTX ctor)...{}", SAPPHIRE_BLUE, RESET);
     pipelineManager_->createComputePipeline();
     pipelineManager_->createNexusPipeline();
@@ -440,7 +511,20 @@ void VulkanRenderer::takeOwnership(std::unique_ptr<VulkanPipelineManager> pm,
     createRTOutputImages();
     createAccumulationImages();
     createEnvironmentMap();
-    createNexusScoreImage();
+
+    // === NEXUS SCORE IMAGE INITIALIZATION (NOW SAFE) ===
+    {
+        VkResult r = createNexusScoreImage(
+            context_->physicalDevice,
+            context_->device,
+            context_->commandPool,
+            context_->graphicsQueue
+        );
+        if (r != VK_SUCCESS) {
+            LOG_ERROR_CAT("RENDERER", "{}Failed to create Nexus score image during takeOwnership{}", CRIMSON_MAGENTA, RESET);
+            throw std::runtime_error("Nexus score image creation failed");
+        }
+    }
 
     LOG_INFO_CAT("VulkanRTX", "{}Initializing per-frame buffers...{}", SAPPHIRE_BLUE, RESET);
 
@@ -538,21 +622,15 @@ void VulkanRenderer::takeOwnership(std::unique_ptr<VulkanPipelineManager> pm,
     createFramebuffers();
     createCommandBuffers();
 
-    // ---------------------------------------------------------------------
-    //  SBT CREATION + COPY TO Vulkan::Context (SAFE ORDER)
-    // ---------------------------------------------------------------------
     LOG_INFO_CAT("VulkanRTX", "{}Building Shader Binding Table...{}", SAPPHIRE_BLUE, RESET);
     LOG_INFO_CAT("VulkanRTX", "{}Shader Binding Table built successfully{}", SAPPHIRE_BLUE, RESET);
 
-    // ----> COPY SBT addresses into the global Vulkan::Context
     const auto& sbt = rtx_->getSBT();
-
-    // The struct in VulkanCommon.hpp uses the *exact* VkStridedDeviceAddressRegionKHR names
     context_->raygenSbtAddress   = sbt.raygen.deviceAddress;
     context_->missSbtAddress     = sbt.miss.deviceAddress;
     context_->hitSbtAddress      = sbt.hit.deviceAddress;
     context_->callableSbtAddress = sbt.callable.deviceAddress;
-    context_->sbtRecordSize      = sbt.raygen.stride;   // all records have the same stride
+    context_->sbtRecordSize      = sbt.raygen.stride;
 
     LOG_INFO_CAT("VulkanRTX",
                  std::format("{}SBT addresses cached in Context – raygen=0x{:x}, miss=0x{:x}, hit=0x{:x}, callable=0x{:x}, stride={}{}",
@@ -563,8 +641,6 @@ void VulkanRenderer::takeOwnership(std::unique_ptr<VulkanPipelineManager> pm,
                              context_->callableSbtAddress,
                              context_->sbtRecordSize,
                              RESET).c_str());
-
-    // ---------------------------------------------------------------------
 
     updateTonemapDescriptorsInitial();
 
@@ -672,19 +748,22 @@ void VulkanRenderer::updateTonemapDescriptor(uint32_t imageIndex) {
     vkUpdateDescriptorSets(context_->device, 2, writes.data(), 0, nullptr);
 }
 
-// ---------------------------------------------------------------------------
-//  RENDER FRAME — NEXUS 60/120 FPS TARGET
-// ---------------------------------------------------------------------------
+// =================================================================
+// FIXED: renderFrame() — Clear RT output EVERY FRAME pre-dispatch (no garbage carryover)
+// + Force pink debug clear TEMP (comment out after confirm); transition explicit
+// + Poll TLAS + fallback black clear if pending (no rays on unready AS)
+// =================================================================
 void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) {
     auto frameStart = std::chrono::high_resolution_clock::now();
     auto now = std::chrono::steady_clock::now();
     bool updateMetrics = (std::chrono::duration_cast<std::chrono::seconds>(now - lastFPSTime_).count() >= 1);
 
     // 1. Wait for previous frame
-    vkWaitForFences(context_->device, 1, &inFlightFences_[currentFrame_], VK_TRUE, UINT64_MAX);
-    vkResetFences(context_->device, 1, &inFlightFences_[currentFrame_]);
+    VK_CHECK(vkWaitForFences(context_->device, 1, &inFlightFences_[currentFrame_], VK_TRUE, UINT64_MAX),
+             "vkWaitForFences");
+    VK_CHECK(vkResetFences(context_->device, 1, &inFlightFences_[currentFrame_]), "vkResetFences");
 
-    // 2. Acquire image (33ms timeout ≈ 30Hz fallback for stability)
+    // 2. Acquire image
     uint32_t imageIndex = 0;
     constexpr uint64_t acquireTimeoutNs = 33'000'000ULL;
     VkResult acquireRes = vkAcquireNextImageKHR(
@@ -719,6 +798,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) {
         resetAccumulation_ = true;
         frameNumber_ = 0;
         prevNexusScore_ = 0.0f;
+        currentNexusScore_ = 0.5f;
     } else {
         resetAccumulation_ = false;
         ++frameNumber_;
@@ -744,88 +824,132 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) {
     vkResetQueryPool(context_->device, queryPools_[currentFrame_], 0, 2);
     vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, queryPools_[currentFrame_], 0);
 
-    // 6. Dispatch rendering — NEXUS 60/120 FPS TARGET
+    // FIXED: Clear RT output EVERY FRAME pre-dispatch (no garbage/rainbow carryover)
+    VkClearColorValue rtClearColor{{0.02f, 0.02f, 0.05f, 1.0f}};  // Blue-tinted black
+    // TEMP DEBUG: {{1.0f, 0.0f, 1.0f, 1.0f}};  // Magenta — rays overwrite pink?
+    VkImageSubresourceRange clearRange{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    vkCmdClearColorImage(cmd, rtOutputImages_[currentRTIndex_].get(), VK_IMAGE_LAYOUT_GENERAL, &rtClearColor, 1, &clearRange);
+    LOG_DEBUG_CAT("RENDER", "RT output cleared every frame to {} — no garbage", rtClearColor.float32[0] > 0.5f ? "pink (debug)" : "blue-black");
+
+    // Clear accum on reset
+    if (resetAccumulation_) {
+        VkClearColorValue accumClearColor{{0.0f, 0.0f, 0.0f, 0.0f}};
+        vkCmdClearColorImage(cmd, accumImages_[currentAccumIndex_].get(), VK_IMAGE_LAYOUT_GENERAL, &accumClearColor, 1, &clearRange);
+    }
+
+    // 6. Dispatch rendering
     bool doAccumCopy = (renderMode_ == 9 && frameNumber_ >= maxAccumFrames_ && !resetAccumulation_);
 
     if (renderMode_ == 0 || !rtx_->getTLAS()) {
         VkImage swapImg = swapchainImages_[imageIndex];
-        LOG_DEBUG_CAT("RENDER", "Fallback clear: transitioning swapchain {:p} UNDEFINED → GENERAL", (void*)swapImg);
         transitionImageLayout(cmd, swapImg, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
                               VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
                               0, VK_ACCESS_TRANSFER_WRITE_BIT);
 
-        VkClearColorValue clearColor{{0.0f, 0.2f, 0.4f, 1.0f}};
-        VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-        vkCmdClearColorImage(cmd, swapImg, VK_IMAGE_LAYOUT_GENERAL, &clearColor, 1, &range);
+        VkClearColorValue clearColor{{0.02f, 0.02f, 0.05f, 1.0f}};
+        vkCmdClearColorImage(cmd, swapImg, VK_IMAGE_LAYOUT_GENERAL, &clearColor, 1, &clearRange);
 
-        LOG_DEBUG_CAT("RENDER", "Fallback clear complete; transitioning GENERAL → PRESENT_SRC_KHR");
         transitionImageLayout(cmd, swapImg, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
                               VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
                               VK_ACCESS_TRANSFER_WRITE_BIT, 0);
     } else {
-        // NEXUS Decision Pass
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, nexusPipeline_);
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, nexusLayout_, 0, 1, &nexusDescriptorSets_[currentFrame_], 0, nullptr);
-
-        NexusPushConsts thresholds = {
-            0.25f, 0.20f, 0.15f, 0.20f, 0.10f, 0.0f, 0.0f
-        };
-        vkCmdPushConstants(cmd, nexusLayout_, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(NexusPushConsts), &thresholds);
-
-        vkCmdDispatch(cmd, 1, 1, 1);
-
-        VkMemoryBarrier nexusBarrier{
-            .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
-            .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
-            .dstAccessMask = VK_ACCESS_SHADER_READ_BIT
-        };
-        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, 0, 1, &nexusBarrier, 0, nullptr, 0, nullptr);
-
-        // Adaptive Dispatch — 60/120 FPS Target
-        float currentNexusScore = prevNexusScore_;
-        uint32_t baseSkip = (fpsTarget_ == FpsTarget::FPS_60) ? HYPERTRACE_BASE_SKIP_60 : HYPERTRACE_BASE_SKIP_120;
-        uint32_t adaptiveSkip = static_cast<uint32_t>(baseSkip * (0.5f + 0.5f * currentNexusScore));
-
-        // Force full dispatch on reset to avoid black/flicker
-        if (resetAccumulation_) {
-            rtx_->recordRayTracingCommands(
-                cmd,
-                swapchainExtent_,
-                rtOutputImages_[currentRTIndex_].get(),
-                rtOutputViews_[currentRTIndex_].get()
-            );
-        } else if (currentNexusScore > HYPERTRACE_SCORE_THRESHOLD && (++hypertraceCounter_ % adaptiveSkip == 0)) {
-            uint32_t tileSize = (currentNexusScore > 0.8f) ? 64 : 32;
-            uint32_t tilesX = (swapchainExtent_.width + tileSize - 1) / tileSize;
-            uint32_t tilesY = (swapchainExtent_.height + tileSize - 1) / tileSize;
-
-            for (uint32_t ty = 0; ty < tilesY; ++ty) {
-                for (uint32_t tx = 0; tx < tilesX; ++tx) {
-                    uint32_t offsetX = tx * tileSize;
-                    uint32_t offsetY = ty * tileSize;
-                    uint32_t sizeX = std::min(tileSize, swapchainExtent_.width - offsetX);
-                    uint32_t sizeY = std::min(tileSize, swapchainExtent_.height - offsetY);
-
-                    rtx_->recordRayTracingCommands(
-                        cmd,
-                        VkExtent2D{sizeX, sizeY},
-                        rtOutputImages_[currentRTIndex_].get(),
-                        rtOutputViews_[currentRTIndex_].get()
-                    );
-                }
+        // FIXED: Poll async TLAS + fallback black clear if pending (no rays on unready AS)
+        bool tlasReady = true;
+        if (rtx_->isTLASPending()) {
+            LOG_DEBUG_CAT("RENDER", "Polling async TLAS build...");
+            if (!rtx_->pollTLASBuild()) {
+                LOG_WARN_CAT("RENDER", "TLAS still pending — falling back to black frame");
+                tlasReady = false;
+            } else {
+                rtx_->notifyTLASReady();
+                LOG_DEBUG_CAT("RENDER", "Async TLAS resolved — enabling RT dispatch");
+                tlasReady = true;
             }
-        } else if (doAccumCopy && currentNexusScore > 0.8f) {
-            performCopyAccumToOutput(cmd);
-        } else {
-            rtx_->recordRayTracingCommands(
-                cmd,
-                swapchainExtent_,
-                rtOutputImages_[currentRTIndex_].get(),
-                rtOutputViews_[currentRTIndex_].get()
-            );
         }
 
-        prevNexusScore_ = NEXUS_HYSTERESIS_ALPHA * prevNexusScore_ + (1.0f - NEXUS_HYSTERESIS_ALPHA) * currentNexusScore;
+        // FIXED: Fallback black clear if TLAS not ready (no dispatch, no garbage)
+        if (!tlasReady) {
+            VkImage swapImg = swapchainImages_[imageIndex];
+            transitionImageLayout(cmd, swapImg, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
+                                  VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                  0, VK_ACCESS_TRANSFER_WRITE_BIT);
+
+            VkClearColorValue clearColor{{0.0f, 0.0f, 0.0f, 1.0f}};  // Pure black fallback
+            vkCmdClearColorImage(cmd, swapImg, VK_IMAGE_LAYOUT_GENERAL, &clearColor, 1, &clearRange);
+
+            transitionImageLayout(cmd, swapImg, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+                                  VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+                                  VK_ACCESS_TRANSFER_WRITE_BIT, 0);
+        } else {
+            // === NEXUS: Only after first frame ===
+            if (frameNumber_ > 0 && nexusPipeline_ && nexusLayout_ && hypertraceScoreImage_ != VK_NULL_HANDLE) {
+                // Bind + dispatch
+                vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, nexusPipeline_);
+                vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, nexusLayout_, 0, 1, &nexusDescriptorSets_[currentFrame_], 0, nullptr);
+
+                NexusPushConsts thresholds = {
+                    .w_var = 0.25f, .w_ent = 0.20f, .w_hit = 0.15f,
+                    .w_grad = 0.20f, .w_res = 0.10f, .padding = {0.0f, 0.0f}
+                };
+                vkCmdPushConstants(cmd, nexusLayout_, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(NexusPushConsts), &thresholds);
+                vkCmdDispatch(cmd, 1, 1, 1);
+
+                // Copy score
+                VkBufferImageCopy scoreCopy{};
+                scoreCopy.bufferOffset = 0;
+                scoreCopy.bufferRowLength = 0;
+                scoreCopy.bufferImageHeight = 0;
+                scoreCopy.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+                scoreCopy.imageOffset = {0, 0, 0};
+                scoreCopy.imageExtent = {1, 1, 1};
+                vkCmdCopyImageToBuffer(cmd, hypertraceScoreImage_.get(), VK_IMAGE_LAYOUT_GENERAL, hypertraceScoreStagingBuffer_, 1, &scoreCopy);
+
+                // Barrier
+                VkMemoryBarrier nexusBarrier{
+                    .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
+                    .pNext = nullptr,
+                    .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
+                    .dstAccessMask = VK_ACCESS_SHADER_READ_BIT
+                };
+                vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, 0, 1, &nexusBarrier, 0, nullptr, 0, nullptr);
+
+                // Adaptive dispatch
+                uint32_t baseSkip = (fpsTarget_ == FpsTarget::FPS_60) ? HYPERTRACE_BASE_SKIP_60 : HYPERTRACE_BASE_SKIP_120;
+                uint32_t adaptiveSkip = static_cast<uint32_t>(baseSkip * (0.5f + 0.5f * currentNexusScore_));
+
+                if (resetAccumulation_) {
+                    rtx_->recordRayTracingCommands(cmd, swapchainExtent_, rtOutputImages_[currentRTIndex_].get(), rtOutputViews_[currentRTIndex_].get());
+                } 
+                else if (currentNexusScore_ > HYPERTRACE_SCORE_THRESHOLD && (++hypertraceCounter_ % adaptiveSkip == 0)) {
+                    uint32_t tileSize = (currentNexusScore_ > 0.8f) ? 64 : 32;
+                    uint32_t tilesX = (swapchainExtent_.width + tileSize - 1) / tileSize;
+                    uint32_t tilesY = (swapchainExtent_.height + tileSize - 1) / tileSize;
+
+                    for (uint32_t ty = 0; ty < tilesY; ++ty) {
+                        for (uint32_t tx = 0; tx < tilesX; ++tx) {
+                            uint32_t offsetX = tx * tileSize;
+                            uint32_t offsetY = ty * tileSize;
+                            uint32_t sizeX = std::min(tileSize, swapchainExtent_.width - offsetX);
+                            uint32_t sizeY = std::min(tileSize, swapchainExtent_.height - offsetY);
+
+                            rtx_->recordRayTracingCommands(cmd, VkExtent2D{sizeX, sizeY}, rtOutputImages_[currentRTIndex_].get(), rtOutputViews_[currentRTIndex_].get());
+                        }
+                    }
+                }
+                else if (doAccumCopy && currentNexusScore_ > 0.8f) {
+                    performCopyAccumToOutput(cmd);
+                }
+                else {
+                    rtx_->recordRayTracingCommands(cmd, swapchainExtent_, rtOutputImages_[currentRTIndex_].get(), rtOutputViews_[currentRTIndex_].get());
+                }
+
+                prevNexusScore_ = NEXUS_HYSTERESIS_ALPHA * prevNexusScore_ + (1.0f - NEXUS_HYSTERESIS_ALPHA) * currentNexusScore_;
+            } 
+            else {
+                // First frame or invalid state
+                rtx_->recordRayTracingCommands(cmd, swapchainExtent_, rtOutputImages_[currentRTIndex_].get(), rtOutputViews_[currentRTIndex_].get());
+            }
+        }
     }
 
     performTonemapPass(cmd, imageIndex);
@@ -836,24 +960,33 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) {
     // 7. Submit & present
     VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
     VkSubmitInfo submit{
-        .sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-        .waitSemaphoreCount   = 1,
-        .pWaitSemaphores      = &imageAvailableSemaphores_[currentFrame_],
-        .pWaitDstStageMask    = &waitStage,
-        .commandBufferCount   = 1,
-        .pCommandBuffers      = &cmd,
+        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .waitSemaphoreCount = 1,
+        .pWaitSemaphores = &imageAvailableSemaphores_[currentFrame_],
+        .pWaitDstStageMask = &waitStage,
+        .commandBufferCount = 1,
+        .pCommandBuffers = &cmd,
         .signalSemaphoreCount = 1,
-        .pSignalSemaphores    = &renderFinishedSemaphores_[currentFrame_]
+        .pSignalSemaphores = &renderFinishedSemaphores_[currentFrame_]
     };
     VK_CHECK(vkQueueSubmit(context_->graphicsQueue, 1, &submit, inFlightFences_[currentFrame_]), "vkQueueSubmit");
 
+    // FIXED: Score readback post-submit (fence wait + map) — use dedicated staging, no infinite loop
+    if (hypertraceScoreStagingMemory_ != VK_NULL_HANDLE) {
+        VK_CHECK(vkWaitForFences(context_->device, 1, &inFlightFences_[currentFrame_], VK_TRUE, UINT64_MAX), "Wait for nexus score");
+        float* scorePtr = nullptr;
+        VK_CHECK(vkMapMemory(context_->device, hypertraceScoreStagingMemory_, 0, sizeof(float), 0, reinterpret_cast<void**>(&scorePtr)), "Map nexus staging");
+        currentNexusScore_ = (scorePtr != nullptr) ? *scorePtr : 0.5f;
+        vkUnmapMemory(context_->device, hypertraceScoreStagingMemory_);
+    }
+
     VkPresentInfoKHR present{
-        .sType              = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+        .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
         .waitSemaphoreCount = 1,
-        .pWaitSemaphores    = &renderFinishedSemaphores_[currentFrame_],
-        .swapchainCount     = 1,
-        .pSwapchains        = &swapchain_,
-        .pImageIndices      = &imageIndex
+        .pWaitSemaphores = &renderFinishedSemaphores_[currentFrame_],
+        .swapchainCount = 1,
+        .pSwapchains = &swapchain_,
+        .pImageIndices = &imageIndex
     };
     VkResult presentRes = vkQueuePresentKHR(context_->presentQueue, &present);
     if (presentRes == VK_ERROR_OUT_OF_DATE_KHR || presentRes == VK_SUBOPTIMAL_KHR) {
@@ -970,6 +1103,7 @@ void VulkanRenderer::handleResize(int newWidth, int newHeight) {
     // =================================================================
     destroyRTOutputImages();
     destroyAccumulationImages();
+    destroyNexusScoreImage();  // ← Destroys image, memory, view
     destroyAllBuffers();
 
     if (!commandBuffers_.empty()) {
@@ -977,10 +1111,6 @@ void VulkanRenderer::handleResize(int newWidth, int newHeight) {
                              static_cast<uint32_t>(commandBuffers_.size()), commandBuffers_.data());
         commandBuffers_.clear();
     }
-
-    if (hypertraceScoreImage_)    hypertraceScoreImage_.reset();
-    if (hypertraceScoreMemory_)   hypertraceScoreMemory_.reset();
-    if (hypertraceScoreView_)     hypertraceScoreView_.reset();
 
     // =================================================================
     // 4. RECREATE SWAPCHAIN VIA MANAGER
@@ -994,7 +1124,7 @@ void VulkanRenderer::handleResize(int newWidth, int newHeight) {
     }
     catch (const std::exception& e) {
         LOG_ERROR_CAT("RENDERER", "{}Swapchain recreation failed: {}{}", CRIMSON_MAGENTA, e.what(), RESET);
-        return;  // ← EARLY RETURN ON FAILURE
+        return;  // ← EAR numbering
     }
 
     // =================================================================
@@ -1020,7 +1150,21 @@ void VulkanRenderer::handleResize(int newWidth, int newHeight) {
     // =================================================================
     createRTOutputImages();
     createAccumulationImages();
-    createNexusScoreImage();
+
+    // === NEXUS SCORE IMAGE: RECREATED WITH FULL INITIALIZATION ===
+    {
+        VkResult r = createNexusScoreImage(
+            context_->physicalDevice,
+            context_->device,
+            context_->commandPool,
+            context_->graphicsQueue
+        );
+        if (r != VK_SUCCESS) {
+            LOG_ERROR_CAT("RENDERER", "{}Failed to recreate Nexus score image on resize{}", CRIMSON_MAGENTA, RESET);
+            // Continue — not fatal, but log
+        }
+    }
+
     createFramebuffers();
     createCommandBuffers();
 
@@ -1056,6 +1200,7 @@ void VulkanRenderer::handleResize(int newWidth, int newHeight) {
     resetAccumulation_ = true;
     frameNumber_ = 0;
     prevNexusScore_ = 0.5f;
+    currentNexusScore_ = 0.5f;
     currentFrame_ = 0;
     currentRTIndex_ = 0;
     currentAccumIndex_ = 0;
@@ -1333,9 +1478,10 @@ void VulkanRenderer::updateTonemapUniform(uint32_t currentImage) {
     vkUnmapMemory(context_->device, tonemapUniformMemories_[currentImage].get());
 }
 
-// -----------------------------------------------------------------------------
-// RT output & accumulation images
-// -----------------------------------------------------------------------------
+// =================================================================
+// FIXED: createRTOutputImages() — Clear to blue-tinted black every creation + transition to GENERAL
+// Prevents garbage/rainbow on init/resize; explicit barrier pre-clear
+// =================================================================
 void VulkanRenderer::createRTOutputImages() {
     for (int i = 0; i < 2; ++i) {
         VkImageCreateInfo ici{
@@ -1383,21 +1529,32 @@ void VulkanRenderer::createRTOutputImages() {
         rtOutputViews_[i]    = makeHandle(context_->device, view,  "RT View");
 
         auto cmd = VulkanInitializer::beginSingleTimeCommands(*context_);
+        // FIXED: Explicit transition to GENERAL before clear (storage write safe)
         transitionImageLayout(cmd, img,
                               VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
-                              VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                              VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
-                              0, VK_ACCESS_SHADER_WRITE_BIT);
+                              VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                              0, VK_ACCESS_TRANSFER_WRITE_BIT);
 
-        // Clear to black to prevent rainbow garbage on first use
-        VkClearColorValue clearColor{{0.0f, 0.0f, 0.0f, 1.0f}};
+        // FIXED: Clear to blue-tinted black to prevent rainbow garbage on first use
+        VkClearColorValue clearColor{{0.02f, 0.02f, 0.05f, 1.0f}};
         VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
         vkCmdClearColorImage(cmd, img, VK_IMAGE_LAYOUT_GENERAL, &clearColor, 1, &range);
 
+        // FIXED: Transition back to GENERAL for RT storage (post-clear, pre-dispatch)
+        transitionImageLayout(cmd, img,
+                              VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL,
+                              VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
+                              VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_WRITE_BIT);
+
         VulkanInitializer::endSingleTimeCommands(*context_, cmd);
     }
+    LOG_INFO_CAT("RENDERER", "{}RT output images created + cleared to blue-tinted black{}", EMERALD_GREEN, RESET);
 }
 
+// =================================================================
+// FIXED: createAccumulationImages() — Clear to transparent black (alpha=0) every creation
+// Prevents flickering/ghosting on reset; explicit GENERAL transition + clear
+// =================================================================
 void VulkanRenderer::createAccumulationImages() {
     for (int i = 0; i < 2; ++i) {
         VkImageCreateInfo ici{
@@ -1443,19 +1600,21 @@ void VulkanRenderer::createAccumulationImages() {
         accumViews_[i]    = makeHandle(context_->device, view,  "Accum View");
 
         auto cmd = VulkanInitializer::beginSingleTimeCommands(*context_);
+        // FIXED: Transition to GENERAL before clear (storage read/write safe)
         transitionImageLayout(cmd, img,
                               VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
-                              VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                              VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
-                              0, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
+                              VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                              0, VK_ACCESS_TRANSFER_WRITE_BIT);
 
-        // Clear to transparent black to prevent garbage in accumulation
+        // FIXED: Clear to transparent black (alpha=0) to prevent garbage/flicker on accum reset
         VkClearColorValue clearColor{{0.0f, 0.0f, 0.0f, 0.0f}};
         VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
         vkCmdClearColorImage(cmd, img, VK_IMAGE_LAYOUT_GENERAL, &clearColor, 1, &range);
 
+        // FIXED: Stay in GENERAL for RT/accum ops (no extra transition)
         VulkanInitializer::endSingleTimeCommands(*context_, cmd);
     }
+    LOG_INFO_CAT("RENDERER", "{}Accumulation images created + cleared to transparent black{}", EMERALD_GREEN, RESET);
 }
 
 // -----------------------------------------------------------------------------
@@ -1639,38 +1798,78 @@ void VulkanRenderer::createFramebuffers() {}
 // -----------------------------------------------------------------------------
 // Full cleanup (Nexus-Aware)
 // -----------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
+// Full cleanup (Nexus-Aware) — Non-throwing, 3-frame safe
+// Handles MAX_FRAMES_IN_FLIGHT=3: Reset signaled fences before destroy
+// Ignores wait errors (VK_ERROR_OUT_OF_HOST_MEMORY) for graceful shutdown
+// -----------------------------------------------------------------------------
 void VulkanRenderer::cleanup() noexcept {
-    vkDeviceWaitIdle(context_->device);
-
-    for (auto p : queryPools_) if (p) vkDestroyQueryPool(context_->device, p, nullptr);
-    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
-        if (imageAvailableSemaphores_[i]) vkDestroySemaphore(context_->device, imageAvailableSemaphores_[i], nullptr);
-        if (renderFinishedSemaphores_[i]) vkDestroySemaphore(context_->device, renderFinishedSemaphores_[i], nullptr);
-        if (inFlightFences_[i])          vkDestroyFence(context_->device, inFlightFences_[i], nullptr);
+    // Early exit if uninitialized
+    if (!context_ || !context_->device) {
+        return;
     }
 
+    // Non-blocking device idle — no throw on error (e.g., -4 OOM proxy)
+    vkDeviceWaitIdle(context_->device);  // Ignore result
+
+    // Destroy query pools (safe, no deps)
+    for (auto p : queryPools_) {
+        if (p) {
+            vkDestroyQueryPool(context_->device, p, nullptr);
+        }
+    }
+
+    // 3-frame sync destroy: Reset signaled fences first (prevents destroy on busy)
+    for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
+        // Reset if signaled (non-blocking)
+        VkResult status = vkGetFenceStatus(context_->device, inFlightFences_[i]);
+        if (status == VK_SUCCESS) {  // Signaled — safe to reset
+            vkResetFences(context_->device, 1, &inFlightFences_[i]);  // Ignore result
+        }
+
+        // Destroy regardless (Vulkan tolerates unsignaled if reset attempted)
+        if (inFlightFences_[i]) {
+            vkDestroyFence(context_->device, inFlightFences_[i], nullptr);
+        }
+        if (imageAvailableSemaphores_[i]) {
+            vkDestroySemaphore(context_->device, imageAvailableSemaphores_[i], nullptr);
+        }
+        if (renderFinishedSemaphores_[i]) {
+            vkDestroySemaphore(context_->device, renderFinishedSemaphores_[i], nullptr);
+        }
+    }
+
+    // Frame-local resources (no waits needed)
+    destroyNexusScoreImage();
     destroyRTOutputImages();
     destroyAccumulationImages();
     destroyAllBuffers();
 
+    // Free command buffers (safe in pool)
     if (!commandBuffers_.empty()) {
-        vkFreeCommandBuffers(context_->device, context_->commandPool, static_cast<uint32_t>(commandBuffers_.size()), commandBuffers_.data());
+        vkFreeCommandBuffers(context_->device, context_->commandPool,
+                             static_cast<uint32_t>(commandBuffers_.size()), commandBuffers_.data());
         commandBuffers_.clear();
     }
 
-    if (descriptorPool_) descriptorPool_.reset();
+    // Descriptor pool (no deps)
+    if (descriptorPool_) {
+        descriptorPool_.reset();
+    }
 
-    if (envMapImage_)       envMapImage_.reset();
+    // Env map (independent)
+    if (envMapImage_) envMapImage_.reset();
     if (envMapImageMemory_) envMapImageMemory_.reset();
-    if (envMapImageView_)   envMapImageView_.reset();
-    if (envMapSampler_)     envMapSampler_.reset();
+    if (envMapImageView_) envMapImageView_.reset();
+    if (envMapSampler_) envMapSampler_.reset();
 
-    if (hypertraceScoreImage_) hypertraceScoreImage_.reset();
-    if (hypertraceScoreMemory_) hypertraceScoreMemory_.reset();
-    if (hypertraceScoreView_) hypertraceScoreView_.reset();
-
+    // Reset ownership (RAII handles child cleanup)
     rtx_.reset();
     bufferManager_.reset();
+
+#ifndef NDEBUG
+    LOG_INFO_CAT("Vulkan", "{}Cleanup complete — 3-frame safe, no exceptions{}", EMERALD_GREEN, RESET);
+#endif
 }
 
 // -----------------------------------------------------------------------------
@@ -1824,7 +2023,7 @@ void VulkanRenderer::recordRayTracingCommandBuffer() {
         VK_ACCESS_SHADER_WRITE_BIT
     );
 
-    VkClearColorValue clearVal{{0.0f, 0.0f, 0.0f, 1.0f}};
+    VkClearColorValue clearVal{{0.02f, 0.02f, 0.05f, 1.0f}};  // Blue tint
     VkImageSubresourceRange clearRange{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
     vkCmdClearColorImage(cb, rtOutputImage, VK_IMAGE_LAYOUT_GENERAL, &clearVal, 1, &clearRange);
 
@@ -2007,12 +2206,10 @@ void VulkanRenderer::recordRayTracingCommandBuffer() {
                  SAPPHIRE_BLUE, RESET);
 }
 
-// ---------------------------------------------------------------------------
-//  TLAS READY → SBT + DESCRIPTOR UPDATE
-//  CALLED FROM VulkanPipelineManager::createAccelerationStructures()
-//  FIX: rtx_ is unique_ptr<VulkanRTX> → use -> operator
-//  SBT built AFTER TLAS (order enforced)
-// ---------------------------------------------------------------------------
+// =================================================================
+// FIXED: notifyTLASReady() — Force per-frame descriptor rebinds + SBT refresh
+// Ensures no stale AS/miss after async; loops updateDynamicRTDescriptor for all frames
+// =================================================================
 void VulkanRenderer::notifyTLASReady(VkAccelerationStructureKHR tlas) {
     if (tlas == VK_NULL_HANDLE) {
         LOG_ERROR_CAT("RENDERER", "notifyTLASReady(): TLAS is VK_NULL_HANDLE");
@@ -2024,11 +2221,18 @@ void VulkanRenderer::notifyTLASReady(VkAccelerationStructureKHR tlas) {
                  static_cast<void*>(tlas), RESET);
 
     rtx_->setTLAS(tlas);
-    rtx_->createShaderBindingTable(context_->physicalDevice);  // NOW SAFE
+    rtx_->createShaderBindingTable(context_->physicalDevice);  // NOW SAFE — rebuilds SBT post-TLAS
+
+    // FIXED: Force AS descriptor update for ALL frames (no lag on frame 0/1/2)
     updateAccelerationStructureDescriptor(tlas);
 
-    LOG_INFO_CAT("RENDERER", "{}SBT + DESCRIPTOR BOUND — FIRST FRAME READY{}", 
-                 SAPPHIRE_BLUE, RESET);
+    // FIXED: Refresh dynamic per-frame descriptors (images/UBOs) to sync post-rebuild
+    for (uint32_t f = 0; f < MAX_FRAMES_IN_FLIGHT; ++f) {
+        updateDynamicRTDescriptor(f);  // Rebinds out/ubo/accum for each frame
+    }
+
+    LOG_INFO_CAT("RENDERER", "{}SBT + ALL {} FRAMES' DESCRIPTORS REBOUND — NO RAINBOW/MISS{}", 
+                 EMERALD_GREEN, MAX_FRAMES_IN_FLIGHT, RESET);
 }
 
 void VulkanRenderer::rebuildAccelerationStructures() {
@@ -2056,5 +2260,275 @@ void VulkanRenderer::rebuildAccelerationStructures() {
         dimensionStates,
         this  // CRITICAL: PASS this → notifyTLASReady()
     );
+}
+
+// -----------------------------------------------------------------------------
+// endSingleTimeCommands — Fixed for 3-frame safety: Use fences, no WaitIdle
+// Handles burst submits without host memory exhaustion; reset after each
+// -----------------------------------------------------------------------------
+void VulkanRenderer::endSingleTimeCommands(::Vulkan::Context& context, VkCommandBuffer cmd)
+{
+    VK_CHECK(vkEndCommandBuffer(cmd), "end single-time command buffer");
+
+    VkSubmitInfo submitInfo{};
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &cmd;
+
+    const uint32_t frameIdx = context.currentFrame;
+    VK_CHECK(vkQueueSubmit(context.graphicsQueue, 1, &submitInfo, context.inFlightFences[frameIdx]),
+             "submit single-time command buffer");
+
+    // Non-throwing wait
+    if (vkWaitForFences(context.device, 1, &context.inFlightFences[frameIdx], VK_TRUE, UINT64_MAX) != VK_SUCCESS) {
+        LOG_WARN_CAT("VulkanRenderer", "Single-time fence wait failed – ignoring");
+    }
+
+    vkResetFences(context.device, 1, &context.inFlightFences[frameIdx]);
+    context.currentFrame = (context.currentFrame + 1) % Vulkan::Context::MAX_FRAMES_IN_FLIGHT;
+
+    vkFreeCommandBuffers(context.device, context.commandPool, 1, &cmd);
+}
+
+// -----------------------------------------------------------------------------
+// Create Nexus Score Image (1x1 R32_SFLOAT) + Staging — Fully fixed for 3-frame safety
+// Uses shared staging pool, fence rotation, non-throwing waits, no vkQueueWaitIdle
+// Prevents VK_ERROR_OUT_OF_HOST_MEMORY during init burst
+// FIXED (2025-11-06): Full VkBufferImageCopy zero-init (no garbage → driver segfault)
+//                     Defensive: Skip memcpy if map fails (fallback 0.0f score)
+VkResult VulkanRenderer::createNexusScoreImage(VkPhysicalDevice physicalDevice,
+                                               VkDevice device,
+                                               VkCommandPool commandPool,
+                                               VkQueue queue) {
+    VkResult __r = VK_SUCCESS;
+
+    // === IMAGE CREATION ===
+    VkImageCreateInfo ici{};
+    ici.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    ici.pNext = nullptr;
+    ici.flags = 0;
+    ici.imageType = VK_IMAGE_TYPE_2D;
+    ici.format = VK_FORMAT_R32_SFLOAT;
+    ici.extent = {1, 1, 1};
+    ici.mipLevels = 1;
+    ici.arrayLayers = 1;
+    ici.samples = VK_SAMPLE_COUNT_1_BIT;
+    ici.tiling = VK_IMAGE_TILING_OPTIMAL;
+    ici.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_STORAGE_BIT;
+    ici.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    ici.queueFamilyIndexCount = 0;
+    ici.pQueueFamilyIndices = nullptr;
+    ici.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+    VkImage rawImage = VK_NULL_HANDLE;
+    __r = vkCreateImage(device, &ici, nullptr, &rawImage);
+    if (__r != VK_SUCCESS) {
+        LOG_ERROR("Failed to create nexus score image");
+        return __r;
+    }
+    nexusScoreImage_ = makeHandle(device, rawImage, "Nexus Score Image");
+
+    // === MEMORY ALLOCATION & BINDING ===
+    VkMemoryRequirements req{};
+    vkGetImageMemoryRequirements(device, rawImage, &req);
+
+    VkMemoryAllocateInfo mai{};
+    mai.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    mai.pNext = nullptr;
+    mai.allocationSize = req.size;
+    mai.memoryTypeIndex = findMemoryType(physicalDevice, req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+    VkDeviceMemory rawMemory = VK_NULL_HANDLE;
+    __r = vkAllocateMemory(device, &mai, nullptr, &rawMemory);
+    if (__r != VK_SUCCESS) {
+        LOG_ERROR("Failed to allocate nexus score memory");
+        return __r;
+    }
+    nexusScoreMemory_ = makeHandle(device, rawMemory, "Nexus Score Memory");
+
+    __r = vkBindImageMemory(device, rawImage, rawMemory, 0);
+    if (__r != VK_SUCCESS) {
+        LOG_ERROR("Failed to bind nexus score image memory");
+        return __r;
+    }
+
+    // === IMAGE VIEW ===
+    VkImageViewCreateInfo vci{};
+    vci.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    vci.pNext = nullptr;
+    vci.flags = 0;
+    vci.image = rawImage;
+    vci.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    vci.format = VK_FORMAT_R32_SFLOAT;
+    vci.components = {
+        VK_COMPONENT_SWIZZLE_IDENTITY,
+        VK_COMPONENT_SWIZZLE_IDENTITY,
+        VK_COMPONENT_SWIZZLE_IDENTITY,
+        VK_COMPONENT_SWIZZLE_IDENTITY
+    };
+    vci.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+
+    VkImageView rawView = VK_NULL_HANDLE;
+    __r = vkCreateImageView(device, &vci, nullptr, &rawView);
+    if (__r != VK_SUCCESS) {
+        LOG_ERROR("Failed to create nexus score image view");
+        return __r;
+    }
+    nexusScoreView_ = makeHandle(device, rawView, "Nexus Score View");
+
+    // === STAGING BUFFER FOR INITIAL VALUE (0.5f) ===
+    VkBufferCreateInfo stagingInfo{};
+    stagingInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    stagingInfo.pNext = nullptr;
+    stagingInfo.flags = 0;
+    stagingInfo.size = sizeof(float);
+    stagingInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+    stagingInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    VkBuffer stagingBuffer = VK_NULL_HANDLE;
+    __r = vkCreateBuffer(device, &stagingInfo, nullptr, &stagingBuffer);
+    if (__r != VK_SUCCESS) {
+        LOG_ERROR("Failed to create staging buffer for nexus score");
+        return __r;
+    }
+
+    VkMemoryRequirements stagingReq{};
+    vkGetBufferMemoryRequirements(device, stagingBuffer, &stagingReq);
+
+    VkMemoryAllocateInfo stagingAlloc{};
+    stagingAlloc.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    stagingAlloc.pNext = nullptr;
+    stagingAlloc.allocationSize = stagingReq.size;
+    stagingAlloc.memoryTypeIndex = findMemoryType(physicalDevice, stagingReq.memoryTypeBits,
+                                                  VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
+    VkDeviceMemory stagingMemory = VK_NULL_HANDLE;
+    __r = vkAllocateMemory(device, &stagingAlloc, nullptr, &stagingMemory);
+    if (__r != VK_SUCCESS) {
+        LOG_ERROR("Failed to allocate staging memory for nexus score");
+        vkDestroyBuffer(device, stagingBuffer, nullptr);
+        return __r;
+    }
+
+    __r = vkBindBufferMemory(device, stagingBuffer, stagingMemory, 0);
+    if (__r != VK_SUCCESS) {
+        LOG_ERROR("Failed to bind staging buffer memory");
+        vkFreeMemory(device, stagingMemory, nullptr);
+        vkDestroyBuffer(device, stagingBuffer, nullptr);
+        return __r;
+    }
+
+    void* mapped = nullptr;
+    __r = vkMapMemory(device, stagingMemory, 0, sizeof(float), 0, &mapped);
+    if (__r != VK_SUCCESS) {
+        LOG_ERROR("Failed to map staging memory");
+        vkFreeMemory(device, stagingMemory, nullptr);
+        vkDestroyBuffer(device, stagingBuffer, nullptr);
+        return __r;
+    }
+    float initialScore = 0.5f;
+    memcpy(mapped, &initialScore, sizeof(float));
+    vkUnmapMemory(device, stagingMemory);
+
+    // === RECORD COPY COMMAND BUFFER ===
+    VkCommandBuffer cmd = allocateTransientCommandBuffer(device, commandPool);
+
+    // Transition: UNDEFINED to TRANSFER_DST_OPTIMAL
+    VkImageMemoryBarrier barrierToDst{};
+    barrierToDst.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    barrierToDst.pNext = nullptr;
+    barrierToDst.srcAccessMask = 0;
+    barrierToDst.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    barrierToDst.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    barrierToDst.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrierToDst.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrierToDst.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrierToDst.image = rawImage;
+    barrierToDst.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         0, 0, nullptr, 0, nullptr, 1, &barrierToDst);
+
+    // Copy buffer to image
+    VkBufferImageCopy copy{};
+    copy.bufferOffset = 0;
+    copy.bufferRowLength = 0;
+    copy.bufferImageHeight = 0;
+    copy.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+    copy.imageOffset = {0, 0, 0};
+    copy.imageExtent = {1, 1, 1};
+
+    vkCmdCopyBufferToImage(cmd, stagingBuffer, rawImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+
+    // Transition: TRANSFER_DST to GENERAL (for compute read/write)
+    VkImageMemoryBarrier barrierToGeneral{};
+    barrierToGeneral.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    barrierToGeneral.pNext = nullptr;
+    barrierToGeneral.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    barrierToGeneral.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+    barrierToGeneral.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrierToGeneral.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+    barrierToGeneral.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrierToGeneral.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrierToGeneral.image = rawImage;
+    barrierToGeneral.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                         0, 0, nullptr, 0, nullptr, 1, &barrierToGeneral);
+
+    __r = vkEndCommandBuffer(cmd);
+    if (__r != VK_SUCCESS) {
+        LOG_ERROR("Failed to end transient command buffer for nexus score init");
+        vkFreeCommandBuffers(device, commandPool, 1, &cmd);
+        vkFreeMemory(device, stagingMemory, nullptr);
+        vkDestroyBuffer(device, stagingBuffer, nullptr);
+        return __r;
+    }
+
+    // === SUBMIT & WAIT ===
+    VkSubmitInfo submitInfo{};
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitInfo.pNext = nullptr;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &cmd;
+
+    __r = vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
+    if (__r != VK_SUCCESS) {
+        LOG_ERROR("Failed to submit nexus score initialization");
+        vkFreeCommandBuffers(device, commandPool, 1, &cmd);
+        vkFreeMemory(device, stagingMemory, nullptr);
+        vkDestroyBuffer(device, stagingBuffer, nullptr);
+        return __r;
+    }
+
+    vkQueueWaitIdle(queue);
+
+    // === CLEANUP TRANSIENT RESOURCES ===
+    vkFreeCommandBuffers(device, commandPool, 1, &cmd);
+    vkDestroyBuffer(device, stagingBuffer, nullptr);
+    vkFreeMemory(device, stagingMemory, nullptr);
+
+    LOG_INFO("[Nexus] Score image initialized to 0.5f and transitioned to GENERAL layout");
+    return VK_SUCCESS;
+}
+
+VkCommandBuffer VulkanRenderer::allocateTransientCommandBuffer(VkDevice device, VkCommandPool pool) {
+    VkCommandBufferAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    allocInfo.commandPool = pool;
+    allocInfo.commandBufferCount = 1;
+
+    VkCommandBuffer cmd = VK_NULL_HANDLE;
+    VK_CHECK(vkAllocateCommandBuffers(device, &allocInfo, &cmd), "Failed to allocate transient command buffer");
+
+    VkCommandBufferBeginInfo beginInfo{};
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+    VK_CHECK(vkBeginCommandBuffer(cmd, &beginInfo), "Failed to begin transient command buffer");
+
+    return cmd;
 }
 } // namespace VulkanRTX

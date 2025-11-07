@@ -41,6 +41,19 @@ struct TLASBuildState {
 };
 
 /* --------------------------------------------------------------------- */
+/* Scene Data */
+/* --------------------------------------------------------------------- */
+struct SceneData {
+    std::vector<std::tuple<VkBuffer, VkBuffer, uint32_t, uint32_t, uint64_t>> geometries;
+    std::vector<std::tuple<VkAccelerationStructureKHR, glm::mat4>> instances;
+    std::vector<DimensionState> dimensionCache;
+    // Additional scene elements (e.g., lights, environment settings)
+    std::vector<glm::vec3> pointLights;
+    glm::vec3 ambientLight = glm::vec3(0.1f, 0.1f, 0.1f);
+    // TODO: Expand with materials, textures, or other scene-specific data as needed
+};
+
+/* --------------------------------------------------------------------- */
 /* EXCEPTION */
 /* --------------------------------------------------------------------- */
 class VulkanRTXException : public std::runtime_error {
@@ -193,6 +206,9 @@ public:
     bool pollTLASBuild();
     bool isTLASReady() const;
 
+    [[nodiscard]] bool isTLASPending() const;
+    void notifyTLASReady();
+
     // ── PUBLIC: ALL MEMBERS USED IN .cpp (updateDescriptors, BLAS, etc.) ───
     VkAccelerationStructureKHR tlas_ = VK_NULL_HANDLE;
     bool tlasReady_ = false;
@@ -230,6 +246,8 @@ public:
 
     bool hypertraceEnabled_ = false;
     bool nexusEnabled_ = false;
+
+    SceneData sceneData_{};
 
     // ── DEFERRED OPERATION EXTENSIONS ───────────────────────────────────────
     PFN_vkCreateDeferredOperationKHR vkCreateDeferredOperationKHR = nullptr;

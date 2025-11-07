@@ -17,6 +17,8 @@
 //        FIXED: addFence() + fences_ for transient submits
 //        ADDED: VulkanRTX::Camera* camera = nullptr;  ← CRITICAL FOR renderModeX()
 //        FIXED: ~Context() → delete camera (leak prevention for raw ptr)
+//        ADDED: VulkanRTX* rtx = nullptr; ← For RenderMode1 integration
+//        ADDED: currentFrame + inFlightFences to Context → 3-frame safe single-time submits
 
 #pragma once
 
@@ -46,6 +48,7 @@ class VulkanBufferManager;
 
 namespace VulkanRTX {
     class VulkanSwapchainManager;
+    class VulkanRTX;
 }
 
 // ===================================================================
@@ -419,9 +422,13 @@ struct Context {
     std::vector<VkCommandBuffer> commandBuffers;
 
     std::vector<VkFramebuffer> framebuffers;
-    std::vector<VkSemaphore> imageAvailableSemaphores;
-    std::vector<VkSemaphore> renderFinishedSemaphores;
-    std::vector<VkFence> inFlightFences;
+
+    // --- 3 FRAMES IN FLIGHT (OWNED BY CONTEXT) ---
+    static constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 3;
+    std::array<VkSemaphore, MAX_FRAMES_IN_FLIGHT> imageAvailableSemaphores{};
+    std::array<VkSemaphore, MAX_FRAMES_IN_FLIGHT> renderFinishedSemaphores{};
+    std::array<VkFence, MAX_FRAMES_IN_FLIGHT> inFlightFences{};
+    uint32_t currentFrame = 0;  // ← CRITICAL: For single-time command safety
 
     VkPhysicalDeviceMemoryProperties memoryProperties;
 
@@ -437,6 +444,9 @@ struct Context {
 
     // --- CAMERA ---
     VulkanRTX::Camera* camera = nullptr;  // ← ADDED: Critical for renderModeX()
+
+    // --- RTX SETUP ---
+    VulkanRTX::VulkanRTX* rtx = nullptr;  // ← ADDED: For RenderMode1 integration
 
     VkDescriptorSetLayout rayTracingDescriptorSetLayout = VK_NULL_HANDLE;
     VkDescriptorSetLayout graphicsDescriptorSetLayout = VK_NULL_HANDLE;
@@ -561,7 +571,12 @@ struct Context {
         if (device) {
             vkDeviceWaitIdle(device);
             if (camera) {
-                camera = nullptr;  // ← CORRECT: just null it
+                delete camera;  // ← FIXED: Actual delete for leak prevention
+                camera = nullptr;
+            }
+            if (rtx) {
+                delete rtx;  // ← ADDED: Cleanup RTX instance
+                rtx = nullptr;
             }
             destroySwapchain();
             resourceManager.cleanup(device);

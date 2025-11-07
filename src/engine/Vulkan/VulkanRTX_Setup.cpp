@@ -818,6 +818,25 @@ bool VulkanRTX::isTLASReady() const {
 }
 
 /* --------------------------------------------------------------------- */
+/* Public TLAS Pending Check */
+/* --------------------------------------------------------------------- */
+bool VulkanRTX::isTLASPending() const {
+    return pendingTLAS_.op != VK_NULL_HANDLE && !tlasReady_;
+}
+
+/* --------------------------------------------------------------------- */
+/* Notify TLAS Ready (Internal State Update) */
+/* --------------------------------------------------------------------- */
+void VulkanRTX::notifyTLASReady() {
+    tlasReady_ = true;
+    if (pendingTLAS_.op != VK_NULL_HANDLE) {
+        vkDestroyDeferredOperationKHR(device_, pendingTLAS_.op, nullptr);
+        pendingTLAS_.op = VK_NULL_HANDLE;
+    }
+    LOG_INFO_CAT("VulkanRTX", "{}TLAS notified ready — state updated{}", EMERALD_GREEN, RESET);
+}
+
+/* --------------------------------------------------------------------- */
 /* updateRTX overloads (now async) */
 /* --------------------------------------------------------------------- */
 void VulkanRTX::updateRTX(VkPhysicalDevice physicalDevice,
