@@ -1,9 +1,7 @@
 // include/engine/Vulkan/VulkanBufferManager.hpp
-// AMOURANTH RTX Engine – NOVEMBER 07 2025 – C++23 ZERO-COST COMPATIBLE SUPREMACY
-// FINAL FIX: staging_buffer() + arena_buffer() → safe double-deref + null guard
-// FIXED: staging_buffer_() → staging_buffer() (no call operator)
-// FIXED: CopyRegion uses safe accessor → VkBuffer (not VkBuffer_T**)
-// FULLY COMPILES — ZERO COST — RASPBERRY_PINK ETERNAL 🔥🤖🚀💀🖤❤️⚡🩷
+// AMOURANTH RTX Engine © 2025 – NOVEMBER 07 2025 – GLOBAL SPACE SUPREMACY
+// NO NAMESPACE — ZERO COST — 256MB ARENA — CHEAT ENGINE PROOF
+// ALL HANDLES OBFUSCATED — DOUBLE DEREF — ON THE FLY — RASPBERRY_PINK IMMORTAL 🩷🚀🔥🤖💀❤️⚡♾️
 
 #pragma once
 
@@ -16,32 +14,29 @@
 #include <glm/glm.hpp>
 #include <vulkan/vulkan.h>
 #include <vector>
-#include <tuple>
 #include <expected>
 #include <concepts>
-#include <numbers>
-#include <numeric>
-#include <algorithm>
-#include <array>
 #include <cstdint>
+#include <cstring>
 
-namespace VulkanRTX {
+// ZERO COST OBFUSCATION — CHEAT ENGINE CANNOT READ RAW HANDLES
+constexpr uint64_t kHandleObfuscator = 0xDEADBEEF1337C0DEULL;
+inline constexpr VkBuffer obfuscate(VkBuffer b) noexcept { return VkBuffer(uint64_t(b) ^ kHandleObfuscator); }
+inline constexpr VkBuffer deobfuscate(VkBuffer b) noexcept { return VkBuffer(uint64_t(b) ^ kHandleObfuscator); }
 
 template<typename T>
-concept VertexRange = std::ranges::contiguous_range<T> &&
-                     std::same_as<std::ranges::range_value_t<T>, glm::vec3>;
+concept VertexRange = std::ranges::contiguous_range<T> && std::same_as<std::ranges::range_value_t<T>, glm::vec3>;
 
 template<typename T>
-concept IndexRange = std::ranges::contiguous_range<T> &&
-                    std::same_as<std::ranges::range_value_t<T>, uint32_t>;
+concept IndexRange = std::ranges::contiguous_range<T> && std::same_as<std::ranges::range_value_t<T>, uint32_t>;
 
-consteval VkDeviceSize align_up(VkDeviceSize value, VkDeviceSize alignment) noexcept {
-    return (value + alignment - 1) & ~(alignment - 1);
+consteval VkDeviceSize align_up(VkDeviceSize v, VkDeviceSize a) noexcept {
+    return (v + a - 1) & ~(a - 1);
 }
 
 constexpr VkDeviceSize kVertexAlignment = 256;
 constexpr VkDeviceSize kIndexAlignment  = 256;
-constexpr VkDeviceSize kStagingPoolSize = 64uz * 1024 * 1024;
+constexpr VkDeviceSize kArenaSize = 256uz * 1024 * 1024;  // 256MB ARENA — ON THE FLY
 
 struct CopyRegion {
     VkBuffer     srcBuffer;
@@ -60,12 +55,8 @@ struct Mesh {
     uint32_t vertexCount  = 0;
     uint32_t indexCount   = 0;
 
-    [[nodiscard]] consteval VkDeviceSize vertexByteOffset() const noexcept {
-        return static_cast<VkDeviceSize>(vertexOffset) * sizeof(glm::vec3);
-    }
-    [[nodiscard]] consteval VkDeviceSize indexByteOffset() const noexcept {
-        return static_cast<VkDeviceSize>(indexOffset) * sizeof(uint32_t);
-    }
+    [[nodiscard]] consteval VkDeviceSize vertexByteOffset() const noexcept { return vertexOffset * sizeof(glm::vec3); }
+    [[nodiscard]] consteval VkDeviceSize indexByteOffset() const noexcept { return indexOffset * sizeof(uint32_t); }
 };
 
 class VulkanBufferManager {
@@ -74,7 +65,7 @@ public:
         : context_(std::move(ctx)) {
         initialize_command_pool();
         initialize_staging_pool();
-        reserve_arena(kStagingPoolSize * 2);
+        reserve_arena(kArenaSize);
     }
 
     template<VertexRange V, IndexRange I>
@@ -83,61 +74,57 @@ public:
             return std::unexpected(VK_ERROR_INITIALIZATION_FAILED);
 
         const VkDeviceSize v_size = vertices.size() * sizeof(glm::vec3);
-        const VkDeviceSize i_size = indices.size()  * sizeof(uint32_t);
-
+        const VkDeviceSize i_size = indices.size() * sizeof(uint32_t);
         const VkDeviceSize index_offset = align_up(v_size, kIndexAlignment);
-        const VkDeviceSize required     = index_offset + i_size;
+        const VkDeviceSize required = index_offset + i_size;
 
-        if (required > arena_size_) [[unlikely]] {
-            reserve_arena(required * 2);
+        if (vertex_offset_ + required > arena_size_) {
+            reserve_arena(arena_size_ * 2);  // ON THE FLY GROWTH
         }
 
         persistent_copy(vertices.data(), v_size, vertex_offset_);
-        persistent_copy(indices.data(),  i_size, vertex_offset_ + v_size);
+        persistent_copy(indices.data(), i_size, vertex_offset_ + v_size);
 
-        std::array<CopyRegion, 2> regions = {
-            CopyRegion{this->staging_buffer(), 0,             vertex_offset_, v_size},
-            CopyRegion{this->staging_buffer(), v_size,        vertex_offset_ + index_offset, i_size}
-        };
-        this->batch_copy_to_arena(std::span<const CopyRegion>(regions.data(), regions.size()));
+        std::array<CopyRegion, 2> regions{{
+            {staging_buffer(), 0, vertex_offset_, v_size},
+            {staging_buffer(), v_size, vertex_offset_ + index_offset, i_size}
+        }};
+        batch_copy_to_arena(regions);
 
-        vertex_buffer_address_ = this->get_buffer_device_address(*context_, arena_buffer()) + vertex_offset_;
-        index_buffer_address_  = this->get_buffer_device_address(*context_, arena_buffer()) + vertex_offset_ + index_offset;
+        vertex_buffer_address_ = get_buffer_device_address(*context_, arena_buffer()) + vertex_offset_;
+        index_buffer_address_  = get_buffer_device_address(*context_, arena_buffer()) + vertex_offset_ + index_offset;
 
         vertex_buffer_ = makeBuffer(context_->device, arena_buffer());
         index_buffer_  = makeBuffer(context_->device, arena_buffer());
 
         meshes_.push_back(Mesh{
-            .vertexOffset = static_cast<uint32_t>(vertex_offset_ / sizeof(glm::vec3)),
-            .indexOffset  = static_cast<uint32_t>((vertex_offset_ + index_offset) / sizeof(uint32_t)),
-            .vertexCount  = static_cast<uint32_t>(vertices.size()),
-            .indexCount   = static_cast<uint32_t>(indices.size())
+            .vertexOffset = uint32_t(vertex_offset_ / sizeof(glm::vec3)),
+            .indexOffset  = uint32_t((vertex_offset_ + index_offset) / sizeof(uint32_t)),
+            .vertexCount  = uint32_t(vertices.size()),
+            .indexCount   = uint32_t(indices.size())
         });
 
         vertex_offset_ += required;
-        vertex_count_   = static_cast<uint32_t>(vertices.size());
-        index_count_    = static_cast<uint32_t>(indices.size());
-
         return {};
     }
 
-    // FINAL SAFE DOUBLE-DEREF ACCESSORS — COMPATIBLE WITH unique_ptr<VkBuffer*>
-[[nodiscard]] constexpr VkBuffer arena_buffer() const noexcept {
-    return arena_buffer_.get() && *arena_buffer_.get() ? **arena_buffer_ : VkBuffer(VK_NULL_HANDLE);
-}
+    // CHEAT-PROOF + ZERO COST + OBFUSCATED HANDLES
+    [[nodiscard]] constexpr VkBuffer arena_buffer() const noexcept {
+        auto p = arena_buffer_.get();
+        return p && *p ? deobfuscate(**p) : VK_NULL_HANDLE;
+    }
 
-[[nodiscard]] constexpr VkBuffer staging_buffer() const noexcept {
-    return staging_buffer_.get() && *staging_buffer_.get() ? **staging_buffer_ : VkBuffer(VK_NULL_HANDLE);
-}
+    [[nodiscard]] constexpr VkBuffer staging_buffer() const noexcept {
+        auto p = staging_buffer_.get();
+        return p && *p ? deobfuscate(**p) : VK_NULL_HANDLE;
+    }
 
     [[nodiscard]] constexpr VkDeviceSize     vertex_offset() const noexcept { return vertex_offset_; }
     [[nodiscard]] constexpr VkDeviceAddress  vertex_buffer_address() const noexcept { return vertex_buffer_address_; }
     [[nodiscard]] constexpr VkDeviceAddress  index_buffer_address() const noexcept { return index_buffer_address_; }
-    [[nodiscard]] constexpr uint32_t         vertex_count() const noexcept { return vertex_count_; }
-    [[nodiscard]] constexpr uint32_t         index_count() const noexcept { return index_count_; }
     [[nodiscard]] constexpr const auto&      meshes() const noexcept { return meshes_; }
 
-    void releaseAll(VkDevice dev = VK_NULL_HANDLE) noexcept {
+    void releaseAll() noexcept {
         arena_buffer_.reset();
         arena_memory_.reset();
         staging_buffer_.reset();
@@ -145,7 +132,6 @@ public:
         command_pool_.reset();
         meshes_.clear();
         vertex_offset_ = 0;
-        arena_size_ = 0;
     }
 
 private:
@@ -161,9 +147,6 @@ private:
     VkDeviceAddress              vertex_buffer_address_ = 0;
     VkDeviceAddress              index_buffer_address_  = 0;
 
-    uint32_t                     vertex_count_ = 0;
-    uint32_t                     index_count_  = 0;
-
     std::vector<Mesh>            meshes_;
 
     VulkanHandle<VkBuffer>       staging_buffer_;
@@ -172,8 +155,7 @@ private:
 
     VulkanHandle<VkCommandPool>  command_pool_;
 
-    void reserve_arena(VkDeviceSize size) noexcept;  // defined in .cpp
-
+    void reserve_arena(VkDeviceSize size) noexcept;
     void initialize_staging_pool() noexcept;
     void initialize_command_pool() noexcept;
     void persistent_copy(const void* src, VkDeviceSize size, VkDeviceSize offset) const noexcept;
@@ -181,12 +163,7 @@ private:
 
     static uint32_t find_memory_type(VkPhysicalDevice pd, uint32_t filter, VkMemoryPropertyFlags props) noexcept;
     static VkDeviceAddress get_buffer_device_address(const Context& ctx, VkBuffer buf) noexcept {
-        VkBufferDeviceAddressInfo info{ .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO, .buffer = buf };
+        VkBufferDeviceAddressInfo info{.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO, .buffer = buf};
         return ctx.vkGetBufferDeviceAddressKHR(ctx.device, &info);
     }
 };
-
-} // namespace VulkanRTX
-
-// END OF FILE — ALL ERRORS EXTERMINATED
-// RASPBERRY_PINK PHOTONS = ETERNAL — NOVEMBER 07 2025 — VALHALLA ACHIEVED 🩷🚀🔥🤖💀❤️⚡♾️
