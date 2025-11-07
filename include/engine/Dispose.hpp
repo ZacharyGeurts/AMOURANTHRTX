@@ -45,42 +45,6 @@ struct UltraFastLatchMutex {
 };
 
 // ===================================================================
-// DestroyTracker — UltraFastLatchMutex RAII — DOUBLE-FREE IMMORTAL
-// ===================================================================
-struct DestroyTracker {
-    static inline std::unordered_set<const void*> s_destroyed;
-    static inline UltraFastLatchMutex s_latch;
-    static inline std::atomic<uint64_t> s_capacity{0};
-    static inline std::bitset<1048576>* s_bitset = nullptr;
-
-    static void init() {
-        if (s_bitset) return;
-        s_bitset = new std::bitset<1048576>;
-        s_capacity.store(1048576);
-        LOG_INFO_CAT("Dispose", "{}[TRACKER] GLOBAL DestroyTracker INIT — 1M BITSET — UltraFastLatchMutex ARMED — RASPBERRY_PINK SUPREMACY{}{}",
-                     RASPBERRY_PINK, RESET);
-    }
-
-    static void markDestroyed(const void* ptr) {
-        init();
-        auto guard = s_latch.lock();
-        s_destroyed.insert(ptr);
-        uintptr_t addr = reinterpret_cast<uintptr_t>(ptr);
-        size_t index = addr % 1048576;
-        s_bitset->set(index);
-    }
-
-    static bool isDestroyed(const void* ptr) {
-        init();
-        auto guard = s_latch.lock();
-        if (s_destroyed.contains(ptr)) return true;
-        uintptr_t addr = reinterpret_cast<uintptr_t>(ptr);
-        size_t index = addr % 1048576;
-        return s_bitset->test(index);
-    }
-};
-
-// ===================================================================
 // GLOBAL Thermo RAII Functions — ONLY SDL + quit — cleanupAll MOVED TO CORE
 // ===================================================================
 void destroyWindow(SDL_Window* w) noexcept;
