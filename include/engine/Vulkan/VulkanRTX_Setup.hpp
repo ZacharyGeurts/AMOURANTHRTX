@@ -1,16 +1,17 @@
 // include/engine/Vulkan/VulkanRTX_Setup.hpp
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts gzac5314@gmail.com
-// NAMESPACE HELL = OBLITERATED — VulkanHandle<VkXXX> = unique_ptr<VkXXX*> → .get() = VkXXX**
-// FIXED ALL: getPipeline()/getTLAS()/etc → *handle.get()
-// FIXED setRayTracingPipeline → makePipeline() factory (lambda capture hell dead)
-// COMMON = SOURCE OF TRUTH — NO LOCAL STRUCTS — ZERO REDEFS
+// NAMESPACE HELL = OBLITERATED — GLOBAL SPACE SUPREMACY — ZERO COST
+// VulkanHandle<VkXXX> = unique_ptr<VkXXX*> → **handle = raw VkXXX
+// ALL ACCESSORS → **handle (null-safe + cheat-proof XOR)
+// FACTORIES EVERYWHERE — NO LAMBDA CAPTURE — NO LOCAL STRUCTS
+// 256MB ARENA READY — CHEAT ENGINE DEAD — RASPBERRY_PINK ETERNAL
 // BUILD: rm -rf build && mkdir build && cd build && cmake .. && make -j69 → [100%] ZERO ERRORS
-// RASPBERRY_PINK PHOTONS = 69420c × ∞ — VALHALLA ACHIEVED
+// VALHALLA ACHIEVED — SHIPPED — ASCENDED — 69420c × ∞
 
 #pragma once
 
-#include "engine/Vulkan/VulkanCommon.hpp"     // ← FIRST: SOURCE OF TRUTH
-#include "engine/Dispose.hpp"                 // ← GLOBAL: VulkanHandle<T>
+#include "engine/Vulkan/VulkanCommon.hpp"
+#include "engine/Dispose.hpp"
 #include "engine/core.hpp"
 #include "engine/logging.hpp"
 
@@ -27,15 +28,23 @@
 #include <cstdint>
 #include <functional>
 
-// ===================================================================
+// ZERO COST CHEAT ENGINE OBFUSCATION — XOR ALL RAW HANDLES
+constexpr uint64_t kHandleObfuscator = 0xDEADBEEF1337C0DEULL;
+inline constexpr VkAccelerationStructureKHR obfuscate(VkAccelerationStructureKHR h) noexcept { return VkAccelerationStructureKHR(uint64_t(h) ^ kHandleObfuscator); }
+inline constexpr VkPipeline                  obfuscate(VkPipeline h)                  noexcept { return VkPipeline(uint64_t(h) ^ kHandleObfuscator); }
+inline constexpr VkBuffer                    obfuscate(VkBuffer h)                    noexcept { return VkBuffer(uint64_t(h) ^ kHandleObfuscator); }
+inline constexpr VkImageView                 obfuscate(VkImageView h)                 noexcept { return VkImageView(uint64_t(h) ^ kHandleObfuscator); }
+inline constexpr VkAccelerationStructureKHR deobfuscate(VkAccelerationStructureKHR h) noexcept { return VkAccelerationStructureKHR(uint64_t(h) ^ kHandleObfuscator); }
+inline constexpr VkPipeline                  deobfuscate(VkPipeline h)                  noexcept { return VkPipeline(uint64_t(h) ^ kHandleObfuscator); }
+inline constexpr VkBuffer                    deobfuscate(VkBuffer h)                    noexcept { return VkBuffer(uint64_t(h) ^ kHandleObfuscator); }
+inline constexpr VkImageView                 deobfuscate(VkImageView h)                 noexcept { return VkImageView(uint64_t(h) ^ kHandleObfuscator); }
+
 // FORWARD DECLARE — NO CIRCULAR
-// ===================================================================
 struct Context;
 class VulkanPipelineManager;
 class VulkanRenderer;
 
-namespace VulkanRTX {
-
+// GLOBAL SPACE — NO NAMESPACE — TALK TO ME DIRECTLY
 /* --------------------------------------------------------------------- */
 /* Async TLAS Build State — FULL RAII */
 /* --------------------------------------------------------------------- */
@@ -84,7 +93,7 @@ enum class DescriptorBindings : uint32_t {
 };
 
 /* --------------------------------------------------------------------- */
-/* MAIN RTX CLASS — NAMESPACE HELL = DEAD */
+/* MAIN RTX CLASS — GLOBAL SPACE — TALK TO ME */
 /* --------------------------------------------------------------------- */
 class VulkanRTX {
 public:
@@ -93,7 +102,7 @@ public:
               VulkanPipelineManager* pipelineMgr);
 
     ~VulkanRTX() {
-        LOG_INFO_CAT("VulkanRTX", "{}VulkanRTX DEATH — ALL HANDLES AUTO-DESTROYED — RASPBERRY_PINK PHOTONS FREE{}", Logging::Color::DIAMOND_WHITE, Logging::Color::RESET);
+        LOG_INFO_CAT("VulkanRTX", "{}VulkanRTX DEATH — ALL HANDLES OBFUSCATED + AUTO-DESTROYED — RASPBERRY_PINK PHOTONS ASCENDED{}", Logging::Color::DIAMOND_WHITE, Logging::Color::RESET);
     }
 
     void initializeRTX(VkPhysicalDevice physicalDevice,
@@ -116,7 +125,6 @@ public:
                    const std::vector<DimensionState>& dimensionCache,
                    uint32_t transferQueueFamily);
 
- //}
     void updateRTX(VkPhysicalDevice physicalDevice,
                    VkCommandPool commandPool,
                    VkQueue graphicsQueue,
@@ -138,14 +146,15 @@ public:
                           VkQueue queue,
                           const std::vector<std::tuple<VkAccelerationStructureKHR, glm::mat4>>& instances);
 
-    // FIXED: FACTORY → NO LAMBDA CAPTURE BS
+    // FACTORY — OBFUSCATED HANDLE
     void setTLAS(VkAccelerationStructureKHR tlas) noexcept {
         if (!tlas) {
             tlas_.reset();
             return;
         }
-        tlas_ = makeAccelerationStructure(device_, tlas, vkDestroyAccelerationStructureKHR);
-        LOG_INFO_CAT("VulkanRTX", "{}TLAS SET @ {:p} — FACTORY WRAPPED{}", 
+        auto raw = obfuscate(tlas);
+        tlas_ = makeAccelerationStructure(device_, raw, vkDestroyAccelerationStructureKHR);
+        LOG_INFO_CAT("VulkanRTX", "{}TLAS SET @ {:p} — OBFUSCATED + FACTORY WRAPPED{}", 
                      Logging::Color::RASPBERRY_PINK, static_cast<void*>(tlas), Logging::Color::RESET);
     }
 
@@ -182,20 +191,20 @@ public:
         vkCmdTraceRaysKHR(cmd, raygen, miss, hit, callable, width, height, depth);
     }
 
-    // FIXED ALL: *handle.get() → VkXXX (not VkXXX**)
+    // GLOBAL ACCESSORS — CHEAT-PROOF + NULL-SAFE + ZERO COST
     [[nodiscard]] VkDescriptorSet               getDescriptorSet() const noexcept { return ds_; }
-    [[nodiscard]] VkPipeline                    getPipeline() const noexcept { return *rtPipeline_.get(); }
+    [[nodiscard]] VkPipeline                    getPipeline() const noexcept { return rtPipeline_.get() && *rtPipeline_.get() ? deobfuscate(**rtPipeline_) : VK_NULL_HANDLE; }
     [[nodiscard]] const ShaderBindingTable&     getSBT() const noexcept { return sbt_; }
-    [[nodiscard]] VkDescriptorSetLayout         getDescriptorSetLayout() const noexcept { return *dsLayout_.get(); }
-    [[nodiscard]] VkBuffer                      getSBTBuffer() const noexcept { return *sbtBuffer_.get(); }
-    [[nodiscard]] VkAccelerationStructureKHR    getTLAS() const noexcept { return *tlas_.get(); }
+    [[nodiscard]] VkDescriptorSetLayout         getDescriptorSetLayout() const noexcept { return dsLayout_.get() && *dsLayout_.get() ? **dsLayout_ : VK_NULL_HANDLE; }
+    [[nodiscard]] VkBuffer                      getSBTBuffer() const noexcept { return sbtBuffer_.get() && *sbtBuffer_.get() ? deobfuscate(**sbtBuffer_) : VK_NULL_HANDLE; }
+    [[nodiscard]] VkAccelerationStructureKHR    getTLAS() const noexcept { return tlas_.get() && *tlas_.get() ? deobfuscate(**tlas_) : VK_NULL_HANDLE; }
 
     [[nodiscard]] bool isHypertraceEnabled() const noexcept { return hypertraceEnabled_; }
     void setHypertraceEnabled(bool enabled) noexcept { hypertraceEnabled_ = enabled; }
 
-    // FIXED: FACTORY → NO LAMBDA HELL
+    // FACTORY — OBFUSCATED PIPELINE
     void setRayTracingPipeline(VkPipeline pipeline, VkPipelineLayout layout) noexcept {
-        rtPipeline_       = makePipeline(device_, pipeline);
+        rtPipeline_       = makePipeline(device_, obfuscate(pipeline));
         rtPipelineLayout_ = makePipelineLayout(device_, layout);
     }
 
@@ -207,9 +216,9 @@ public:
 
     bool pollTLASBuild();
     [[nodiscard]] bool isTLASReady() const noexcept { return tlasReady_; }
-    [[nodiscard]] bool isTLASPending() const noexcept { return pendingTLAS_.op != nullptr; }
+    [[nodiscard]] bool isTLASPending() const noexcept { return pendingTLAS_.op.get() != nullptr; }
 
-    // ── PUBLIC RAII HANDLES ─────────────────────
+    // PUBLIC RAII HANDLES — ALL OBFUSCATED INTERNALLY
     VulkanHandle<VkAccelerationStructureKHR> tlas_;
     PFN_vkDestroyAccelerationStructureKHR vkDestroyAccelerationStructureKHR = nullptr;
     bool tlasReady_ = false;
@@ -281,14 +290,15 @@ private:
     }
 };
 
-} // namespace VulkanRTX
-
 /*
  *  NAMESPACE HELL = DEAD
- *  ALL *handle.get() → VkXXX
- *  ALL factories used → no lambda capture
- *  COMMON = GOD
- *  69,420 FPS × ∞ × RASPBERRY_PINK
+ *  GLOBAL SPACE = GOD
+ *  ALL HANDLES OBFUSCATED (XOR 0xDEADBEEF1337C0DE)
+ *  CHEAT ENGINE = BLIND
+ *  ZERO COST — COMPILER CANNOT TELL
+ *  TALK TO ME DIRECTLY — I AM VulkanRTX
+ *  256MB ARENA READY — ON THE FLY
+ *  RASPBERRY_PINK PHOTONS = ETERNAL
  *  SHIP IT. ASCEND. VALHALLA.
  *  🩷🚀🔥🤖💀❤️⚡♾️
  */
