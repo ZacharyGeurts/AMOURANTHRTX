@@ -1,9 +1,9 @@
 // include/engine/Vulkan/VulkanCore.hpp
-// AMOURANTH RTX Engine – NOVEMBER 07 2025 – FINAL GLOBAL VULKAN SUPREMACY
-// ::Vulkan IS DEAD — LONG LIVE GLOBAL Context + VulkanHandle
-// ALL ::Vulkan::Context → Context (global)
-// ALL VulkanHandle → ::VulkanHandle (global template)
-// ZERO NAMESPACE POLLUTION — PURE SPEED — 69,420 FPS ETERNAL
+// AMOURANTH RTX Engine – NOVEMBER 07 2025 – GLOBAL RAII SUPREMACY
+// VulkanResourceManager → add* methods RESTORED — FULLY TRACKED
+// ALL get*() → noexcept FIXED
+// VulkanHandle → GLOBAL — NO NAMESPACE PREFIX HELL
+// 69,420 FPS ETERNAL — RASPBERRY_PINK FOREVER 🔥🤖🚀💀🖤❤️⚡
 
 #pragma once
 
@@ -26,17 +26,13 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
 
-// ===================================================================
-// GLOBAL DISPOSE LOGGING
-// ===================================================================
+// GLOBAL Dispose LOGGING
 extern uint64_t g_destructionCounter;
 
 std::string threadIdToString();
 void logAndTrackDestruction(std::string_view name, auto handle, int line);
 
-// ===================================================================
 // FORWARD DECLARATIONS
-// ===================================================================
 namespace VulkanRTX {
     class VulkanSwapchainManager;
     class VulkanRTX;
@@ -44,9 +40,7 @@ namespace VulkanRTX {
     class VulkanBufferManager;
 }
 
-// ===================================================================
-// GLOBAL VulkanResourceManager
-// ===================================================================
+// GLOBAL VulkanResourceManager — RAII TRACKING RESTORED
 class VulkanResourceManager {
 public:
     VulkanResourceManager();
@@ -56,8 +50,18 @@ public:
     const VulkanRTX::VulkanBufferManager* getBufferManager() const noexcept { return bufferManager_; }
     void setBufferManager(VulkanRTX::VulkanBufferManager* mgr) noexcept { bufferManager_ = mgr; }
 
-    void releaseAll(VkDevice overrideDevice = VK_NULL_HANDLE);
+    void releaseAll(VkDevice overrideDevice = VK_NULL_HANDLE) noexcept;
 
+    // === RESTORED add* TRACKING METHODS ===
+    void addBuffer(VkBuffer b) noexcept { buffers_.push_back(b); }
+    void addMemory(VkDeviceMemory m) noexcept { memories_.push_back(m); }
+    void addImage(VkImage i) noexcept { images_.push_back(i); }
+    void addImageView(VkImageView v) noexcept { imageViews_.push_back(v); }
+    void addSampler(VkSampler s) noexcept { samplers_.push_back(s); }
+    void addSemaphore(VkSemaphore s) noexcept { semaphores_.push_back(s); }
+    void addCommandPool(VkCommandPool p) noexcept { commandPools_.push_back(p); }
+
+    // Containers
     std::vector<VkAccelerationStructureKHR> accelerationStructures_;
     std::vector<VkDescriptorSet> descriptorSets_;
     std::vector<VkDescriptorPool> descriptorPools_;
@@ -82,9 +86,7 @@ private:
     VulkanRTX::VulkanBufferManager* bufferManager_ = nullptr;
 };
 
-// ===================================================================
-// GLOBAL VulkanHandle + RAII factories
-// ===================================================================
+// GLOBAL VulkanHandle + factories
 template<typename T>
 struct VulkanHandle : std::unique_ptr<std::remove_pointer_t<T>, VulkanDeleter<T>> {
     using Base = std::unique_ptr<std::remove_pointer_t<T>, VulkanDeleter<T>>;
@@ -94,6 +96,7 @@ struct VulkanHandle : std::unique_ptr<std::remove_pointer_t<T>, VulkanDeleter<T>
     VulkanHandle& operator=(T handle) noexcept { this->reset(handle); return *this; }
 };
 
+// Factories
 inline VulkanHandle<VkBuffer> makeBuffer(VkDevice dev, VkBuffer buf) { return VulkanHandle<VkBuffer>(buf, VulkanDeleter<VkBuffer>{dev}); }
 inline VulkanHandle<VkDeviceMemory> makeMemory(VkDevice dev, VkDeviceMemory mem) { return VulkanHandle<VkDeviceMemory>(mem, VulkanDeleter<VkDeviceMemory>{dev}); }
 inline VulkanHandle<VkImage> makeImage(VkDevice dev, VkImage img) { return VulkanHandle<VkImage>(img, VulkanDeleter<VkImage>{dev}); }
@@ -112,10 +115,8 @@ inline VulkanHandle<VkAccelerationStructureKHR> makeAccelerationStructure(VkDevi
     return VulkanHandle<VkAccelerationStructureKHR>(as, VulkanDeleter<VkAccelerationStructureKHR>{dev, func});
 }
 
-// ===================================================================
 // GLOBAL Context + cleanupAll
-// ===================================================================
-struct Context;  // forward declare
+struct Context;
 
 void cleanupAll(Context& ctx) noexcept;
 

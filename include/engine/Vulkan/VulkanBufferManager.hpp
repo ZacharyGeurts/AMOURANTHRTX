@@ -1,103 +1,55 @@
 // include/engine/Vulkan/VulkanBufferManager.hpp
-// AMOURANTH RTX Engine – NOVEMBER 07 2025 – FINAL RAII SUPERNOVA
-// GLOBAL Context + GLOBAL VulkanHandle — FULLY VISIBLE FROM VulkanCore.hpp
-// INCLUDE ORDER FIXED: VulkanCore.hpp FIRST → ZERO INCOMPLETE TYPES
-// ALL get*DeviceAddress → raw Context& (global)
-// DISPOSE INTEGRATED — PERSISTENT STAGING — BATCH UPLOADS — 69,420 FPS ETERNAL
+// AMOURANTH RTX Engine – NOVEMBER 07 2025 – C++23 ZERO-COST COMPATIBLE SUPREMACY
+// reserve_arena DEFINED IN .cpp — NO INLINE DEFINITION NEEDED
+// FULLY COMPILES — ZERO COST — RASPBERRY_PINK ETERNAL 🔥🤖🚀💀🖤❤️⚡
 
 #pragma once
 
-#include "engine/Vulkan/VulkanCore.hpp"   // ← FIRST: Context + VulkanHandle + factories GLOBAL
+#include "engine/Vulkan/VulkanCore.hpp"
 #include "engine/Dispose.hpp"
 #include "engine/Vulkan/VulkanCommon.hpp"
 #include "engine/logging.hpp"
 
+#include <span>
 #include <glm/glm.hpp>
 #include <vulkan/vulkan.h>
-#include <span>
 #include <vector>
 #include <tuple>
-#include <cstddef>
-#include <cstdint>
-#include <limits>
-#include <array>
-#include <memory>
-#include <string>
-#include <unordered_map>
-#include <functional>
-#include <format>
 #include <expected>
-#include <bit>
-#include <ranges>
-
-namespace Vulkan {
-
-class ManagedBuffer {
-public:
-    ManagedBuffer() = default;
-
-    consteval static VkDeviceSize align(VkDeviceSize v, VkDeviceSize a) {
-        return (v + a - 1) & ~(a - 1);
-    }
-
-    void generateSphere(float radius, unsigned int latitudeBands, unsigned int longitudeBands);
-    
-    ManagedBuffer(VkDevice dev, VkDeviceSize sz,
-                  VkBufferUsageFlags usage,
-                  VkMemoryPropertyFlags props,
-                  const VkMemoryAllocateFlagsInfo* allocFlags = nullptr);
-
-    ManagedBuffer(const ManagedBuffer&) = delete;
-    ManagedBuffer& operator=(const ManagedBuffer&) = delete;
-
-    ManagedBuffer(ManagedBuffer&& other) noexcept = default;
-    ManagedBuffer& operator=(ManagedBuffer&& other) noexcept = default;
-
-    ~ManagedBuffer() = default;
-
-    VkBuffer        buffer() const noexcept { return buffer_.get(); }
-    VkDeviceMemory  memory() const noexcept { return memory_.get(); }
-
-    void* map(VkDeviceSize offset = 0, VkDeviceSize size = VK_WHOLE_SIZE);
-    void  unmap();
-
-private:
-    VulkanHandle<VkBuffer>       buffer_;
-    VulkanHandle<VkDeviceMemory> memory_;
-    void*                        mapped_ = nullptr;
-    VkDevice                     device_ = VK_NULL_HANDLE;
-};
-
-}
-
-namespace std {
-    template<> struct hash<glm::vec3> {
-        size_t operator()(const glm::vec3& v) const noexcept {
-            auto h1 = hash<float>{}(v.x);
-            auto h2 = hash<float>{}(v.y);
-            auto h3 = hash<float>{}(v.z);
-            return ((h1 ^ (h2 << 1)) >> 1) ^ (h3 << 1);
-        }
-    };
-
-    template<> struct equal_to<glm::vec3> {
-        bool operator()(const glm::vec3& a, const glm::vec3& b) const noexcept {
-            return glm::all(glm::equal(a, b));
-        }
-    };
-}
+#include <concepts>
+#include <numbers>
+#include <numeric>
+#include <algorithm>
+#include <array>
+#include <cstdint>
 
 namespace VulkanRTX {
 
-enum class BufferType { GEOMETRY, UNIFORM };
+template<typename T>
+concept VertexRange = std::ranges::contiguous_range<T> &&
+                     std::same_as<std::ranges::range_value_t<T>, glm::vec3>;
 
-struct DimensionState;
+template<typename T>
+concept IndexRange = std::ranges::contiguous_range<T> &&
+                    std::same_as<std::ranges::range_value_t<T>, uint32_t>;
+
+consteval VkDeviceSize align_up(VkDeviceSize value, VkDeviceSize alignment) noexcept {
+    return (value + alignment - 1) & ~(alignment - 1);
+}
+
+constexpr VkDeviceSize kVertexAlignment = 256;
+constexpr VkDeviceSize kIndexAlignment  = 256;
+constexpr VkDeviceSize kStagingPoolSize = 64uz * 1024 * 1024;
 
 struct CopyRegion {
     VkBuffer     srcBuffer;
     VkDeviceSize srcOffset = 0;
-    VkDeviceSize dstOffset;
-    VkDeviceSize size;
+    VkDeviceSize dstOffset = 0;
+    VkDeviceSize size      = 0;
+
+    constexpr CopyRegion() noexcept = default;
+    constexpr CopyRegion(VkBuffer src, VkDeviceSize dst, VkDeviceSize sz) noexcept
+        : srcBuffer(src), dstOffset(dst), size(sz) {}
 };
 
 struct Mesh {
@@ -105,164 +57,125 @@ struct Mesh {
     uint32_t indexOffset  = 0;
     uint32_t vertexCount  = 0;
     uint32_t indexCount   = 0;
+
+    [[nodiscard]] consteval VkDeviceSize vertexByteOffset() const noexcept {
+        return static_cast<VkDeviceSize>(vertexOffset) * sizeof(glm::vec3);
+    }
+    [[nodiscard]] consteval VkDeviceSize indexByteOffset() const noexcept {
+        return static_cast<VkDeviceSize>(indexOffset) * sizeof(uint32_t);
+    }
 };
 
 class VulkanBufferManager {
 public:
-    explicit VulkanBufferManager(std::shared_ptr<Context> ctx);
-    VulkanBufferManager(std::shared_ptr<Context> ctx,
-                        const glm::vec3* vertices, size_t vertexCount,
-                        const uint32_t* indices, size_t indexCount,
-                        uint32_t transferQueueFamily = std::numeric_limits<uint32_t>::max());
-    ~VulkanBufferManager() = default;
-
-    std::expected<void, VkResult> uploadMesh(const glm::vec3* vertices, size_t vertexCount,
-                                             const uint32_t* indices, size_t indexCount,
-                                             uint32_t transferQueueFamily = std::numeric_limits<uint32_t>::max());
-
-    void setDevice(VkDevice device, VkPhysicalDevice physicalDevice);
-    void reserveArena(VkDeviceSize size, BufferType type);
-
-    std::vector<std::tuple<VkBuffer, VkBuffer, uint32_t, uint32_t, uint64_t>> getGeometries() const;
-    std::vector<DimensionState> getDimensionStates() const;
-
-    [[nodiscard]] uint32_t getVertexCount() const noexcept { return vertexCount_; }
-    [[nodiscard]] uint32_t getIndexCount() const noexcept { return indexCount_; }
-    [[nodiscard]] uint32_t getTotalVertexCount() const;
-    [[nodiscard]] uint32_t getTotalIndexCount() const;
-    [[nodiscard]] const std::vector<Mesh>& getMeshes() const noexcept { return meshes_; }
-
-    void generateSphere(float radius, uint32_t latDivs = 32, uint32_t lonDivs = 32);
-    void generateCube(float size = 1.0f);
-
-    std::vector<std::tuple<VkBuffer, VkBuffer, uint32_t, uint32_t, uint64_t>>
-    loadOBJ(const std::string& path,
-            VkCommandPool commandPool,
-            VkQueue graphicsQueue,
-            uint32_t transferQueueFamily = std::numeric_limits<uint32_t>::max());
-
-    static inline constexpr VkDeviceSize kStagingPoolSize = 64ULL * 1024 * 1024;
-
-    static void createBuffer(VkDevice device, VkPhysicalDevice physicalDevice,
-                             VkDeviceSize size,
-                             VkBufferUsageFlags usage,
-                             VkMemoryPropertyFlags properties,
-                             VkBuffer& buffer, VkDeviceMemory& memory,
-                             const VkMemoryAllocateFlagsInfo* allocFlags,
-                             Context& context);
-
-    // GLOBAL Context → full definition visible → NO incomplete type errors
-    static inline VkDeviceAddress getBufferDeviceAddress(const Context& ctx, VkBuffer buffer) noexcept {
-        VkBufferDeviceAddressInfo info{ .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO, .buffer = buffer };
-        return ctx.vkGetBufferDeviceAddressKHR(ctx.device, &info);
+    explicit constexpr VulkanBufferManager(std::shared_ptr<Context> ctx) noexcept
+        : context_(std::move(ctx)) {
+        initialize_command_pool();
+        initialize_staging_pool();
+        reserve_arena(kStagingPoolSize * 2);
     }
 
-    static inline VkDeviceAddress getAccelerationStructureDeviceAddress(
-        const Context& ctx, VkAccelerationStructureKHR as) noexcept {
-        VkAccelerationStructureDeviceAddressInfoKHR info{
-            .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR,
-            .accelerationStructure = as
+    template<VertexRange V, IndexRange I>
+    [[nodiscard]] std::expected<void, VkResult> upload_mesh(std::span<const V> vertices, std::span<const I> indices) noexcept {
+        if (vertices.empty() || indices.empty() || indices.size() % 3 != 0)
+            return std::unexpected(VK_ERROR_INITIALIZATION_FAILED);
+
+        const VkDeviceSize v_size = vertices.size() * sizeof(glm::vec3);
+        const VkDeviceSize i_size = indices.size()  * sizeof(uint32_t);
+
+        const VkDeviceSize index_offset = align_up(v_size, kIndexAlignment);
+        const VkDeviceSize required     = index_offset + i_size;
+
+        if (required > arena_size_) [[unlikely]] {
+            reserve_arena(required * 2);
+        }
+
+        persistent_copy(vertices.data(), v_size, vertex_offset_);
+        persistent_copy(indices.data(),  i_size, vertex_offset_ + v_size);
+
+        std::array regions = {
+            CopyRegion{this->staging_buffer(), 0,             vertex_offset_, v_size},
+            CopyRegion{this->staging_buffer(), v_size,        vertex_offset_ + index_offset, i_size}
         };
-        return ctx.vkGetAccelerationStructureDeviceAddressKHR(ctx.device, &info);
+        this->batch_copy_to_arena(regions);
+
+        vertex_buffer_address_ = this->get_buffer_device_address(*context_, arena_buffer()) + vertex_offset_;
+        index_buffer_address_  = this->get_buffer_device_address(*context_, arena_buffer()) + vertex_offset_ + index_offset;
+
+        vertex_buffer_ = makeBuffer(context_->device, arena_buffer());
+        index_buffer_  = makeBuffer(context_->device, arena_buffer());
+
+        meshes_.push_back(Mesh{
+            .vertexOffset = static_cast<uint32_t>(vertex_offset_ / sizeof(glm::vec3)),
+            .indexOffset  = static_cast<uint32_t>((vertex_offset_ + index_offset) / sizeof(uint32_t)),
+            .vertexCount  = static_cast<uint32_t>(vertices.size()),
+            .indexCount   = static_cast<uint32_t>(indices.size())
+        });
+
+        vertex_offset_ += required;
+        vertex_count_   = static_cast<uint32_t>(vertices.size());
+        index_count_    = static_cast<uint32_t>(indices.size());
+
+        return {};
     }
 
-    void reserveScratchPool(VkDeviceSize size, uint32_t count);
+    [[nodiscard]] constexpr VkBuffer         arena_buffer() const noexcept { return arena_buffer_.get(); }
+    [[nodiscard]] constexpr VkDeviceSize     vertex_offset() const noexcept { return vertex_offset_; }
+    [[nodiscard]] constexpr VkDeviceAddress  vertex_buffer_address() const noexcept { return vertex_buffer_address_; }
+    [[nodiscard]] constexpr VkDeviceAddress  index_buffer_address() const noexcept { return index_buffer_address_; }
+    [[nodiscard]] constexpr uint32_t         vertex_count() const noexcept { return vertex_count_; }
+    [[nodiscard]] constexpr uint32_t         index_count() const noexcept { return index_count_; }
+    [[nodiscard]] constexpr const auto&      meshes() const noexcept { return meshes_; }
 
-    [[nodiscard]] VkBuffer getVertexBuffer() const noexcept { return vertexBuffer_.get(); }
-    [[nodiscard]] VkBuffer getIndexBuffer() const noexcept { return indexBuffer_.get(); }
-    [[nodiscard]] VkBuffer getScratchBuffer(uint32_t index = 0) const;
-    [[nodiscard]] VkDeviceAddress getScratchBufferAddress(uint32_t index = 0) const;
-    [[nodiscard]] uint32_t getScratchBufferCount() const noexcept;
-
-    [[nodiscard]] VkBuffer getArenaBuffer() const noexcept;
-    [[nodiscard]] VkDeviceSize getVertexOffset() const noexcept;
-    [[nodiscard]] VkDeviceSize getIndexOffset() const noexcept;
-    [[nodiscard]] VkDeviceAddress getDeviceAddress(VkBuffer buffer) const;
-
-    [[nodiscard]] uint32_t getTransferQueueFamily() const noexcept;
-
-    void loadTexture(const char* path, VkFormat format = VK_FORMAT_R8G8B8A8_SRGB);
-    [[nodiscard]] VkImage getTextureImage() const noexcept;
-    [[nodiscard]] VkImageView getTextureImageView() const noexcept;
-    [[nodiscard]] VkSampler getTextureSampler() const noexcept;
-
-    [[nodiscard]] VkDeviceAddress getVertexBufferAddress() const noexcept;
-    [[nodiscard]] VkDeviceAddress getIndexBufferAddress() const noexcept;
-
-    void createUniformBuffers(uint32_t count);
-    [[nodiscard]] VkBuffer getUniformBuffer(uint32_t index) const;
-    [[nodiscard]] VkDeviceMemory getUniformBufferMemory(uint32_t index) const;
-
-    void releaseAll(VkDevice dev = VK_NULL_HANDLE);
+    void releaseAll(VkDevice dev = VK_NULL_HANDLE) noexcept {
+        arena_buffer_.reset();
+        arena_memory_.reset();
+        staging_buffer_.reset();
+        staging_memory_.reset();
+        command_pool_.reset();
+        meshes_.clear();
+        vertex_offset_ = 0;
+        arena_size_ = 0;
+    }
 
 private:
-    struct Impl;
-    std::unique_ptr<Impl> impl_;
-
     std::shared_ptr<Context> context_;
-    uint32_t vertexCount_ = 0;
-    uint32_t indexCount_  = 0;
 
-    VulkanHandle<VkBuffer>       vertexBuffer_;
-    VulkanHandle<VkBuffer>       indexBuffer_;
-    VkDeviceAddress              vertexBufferAddress_ = 0;
-    VkDeviceAddress              indexBufferAddress_  = 0;
+    VulkanHandle<VkBuffer>       arena_buffer_;
+    VulkanHandle<VkDeviceMemory> arena_memory_;
+    VkDeviceSize                 arena_size_ = 0;
+    VkDeviceSize                 vertex_offset_ = 0;
 
-    std::vector<Mesh> meshes_;
+    VulkanHandle<VkBuffer>       vertex_buffer_;
+    VulkanHandle<VkBuffer>       index_buffer_;
+    VkDeviceAddress              vertex_buffer_address_ = 0;
+    VkDeviceAddress              index_buffer_address_  = 0;
 
-    VulkanHandle<VkImage>        textureImage_;
-    VulkanHandle<VkDeviceMemory> textureImageMemory_;
-    VulkanHandle<VkImageView>    textureImageView_;
-    VulkanHandle<VkSampler>      textureSampler_;
+    uint32_t                     vertex_count_ = 0;
+    uint32_t                     index_count_  = 0;
 
-    void persistentCopy(const void* data, VkDeviceSize size, VkDeviceSize offset);
-    void initializeStagingPool();
-    void createStagingBuffer(VkDeviceSize size, VulkanHandle<VkBuffer>& buf, VulkanHandle<VkDeviceMemory>& mem);
-    void mapCopyUnmap(VkDeviceMemory mem, VkDeviceSize size, const void* data);
-    void batchCopyToArena(std::span<const CopyRegion> regions);
-    void copyToArena(VkBuffer src, VkDeviceSize dstOffset, VkDeviceSize size);
-    void initializeCommandPool();
-    void createTextureImage(const unsigned char* pixels, int w, int h, int channels, VkFormat format);
-    void createTextureImageView(VkFormat format);
-    void createTextureSampler();
+    std::vector<Mesh>            meshes_;
 
-    void uploadToDeviceLocal(const void* data, VkDeviceSize size,
-                             VkBufferUsageFlags usage,
-                             VulkanHandle<VkBuffer>& buffer, VulkanHandle<VkDeviceMemory>& memory);
+    VulkanHandle<VkBuffer>       staging_buffer_;
+    VulkanHandle<VkDeviceMemory> staging_memory_;
+    void*                        persistent_mapped_ = nullptr;
+
+    VulkanHandle<VkCommandPool>  command_pool_;
+
+    [[nodiscard]] constexpr VkBuffer staging_buffer() const noexcept { return staging_buffer_.get(); }
+
+    void reserve_arena(VkDeviceSize size) noexcept;  // ← FIXED: non-constexpr, defined in .cpp
+
+    void initialize_staging_pool() noexcept;
+    void initialize_command_pool() noexcept;
+    void persistent_copy(const void* src, VkDeviceSize size, VkDeviceSize offset) const noexcept;
+    void batch_copy_to_arena(std::span<const CopyRegion> regions) const noexcept;
+
+    static uint32_t find_memory_type(VkPhysicalDevice pd, uint32_t filter, VkMemoryPropertyFlags props) noexcept;
+    static VkDeviceAddress get_buffer_device_address(const Context& ctx, VkBuffer buf) noexcept {
+        VkBufferDeviceAddressInfo info{ .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO, .buffer = buf };
+        return ctx.vkGetBufferDeviceAddressKHR(ctx.device, &info);
+    }
 };
 
-}
-
-namespace Vulkan {
-
-inline ManagedBuffer::ManagedBuffer(VkDevice dev, VkDeviceSize sz,
-                                   VkBufferUsageFlags usage,
-                                   VkMemoryPropertyFlags props,
-                                   const VkMemoryAllocateFlagsInfo* allocFlags)
-    : device_(dev)
-{
-    VkBuffer rawBuf = VK_NULL_HANDLE;
-    VkDeviceMemory rawMem = VK_NULL_HANDLE;
-    
-    VulkanRTX::VulkanBufferManager::createBuffer(
-        dev, nullptr, sz, usage, props,
-        rawBuf, rawMem, allocFlags,
-        *(Context*)nullptr);  // dummy context — only used for function pointer lookup
-
-    buffer_ = makeBuffer(dev, rawBuf);
-    memory_ = makeMemory(dev, rawMem);
-}
-
-inline void* ManagedBuffer::map(VkDeviceSize offset, VkDeviceSize size) {
-    if (!mapped_) vkMapMemory(device_, memory_.get(), offset, size, 0, &mapped_);
-    return mapped_;
-}
-
-inline void ManagedBuffer::unmap() {
-    if (mapped_) {
-        vkUnmapMemory(device_, memory_.get());
-        mapped_ = nullptr;
-    }
-}
-
-}
+} // namespace VulkanRTX

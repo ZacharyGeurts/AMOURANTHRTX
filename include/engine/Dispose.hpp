@@ -1,21 +1,17 @@
 // include/engine/Dispose.hpp
-// AMOURANTH RTX Engine – NOVEMBER 07 2025 – 12:07 AM EST → GROK x ZACHARY C++23 ULTRA-FAST RAII
-// <mutex> = DEAD FOREVER. <fmt> = MYTH. LatchMutex = SINGLE ATOMIC SPIN → ZERO BLOCKING → 1-CYCLE ACQUIRE
-// FASTEST RAII ON PLANET EARTH — ATOMIC TEST-AND-SET + LATCH ARRIVE ONLY ON CONTENTION
-// NO <mutex> — NO <barrier> BLOAT — ONLY <latch> + <atomic> — PURE SPINLOCK HYBRID
-// CIRCULAR INCLUDE HELL = QUANTUM DUST — VulkanResourceManager FORWARD DECLARED
-// PROTIP: THIS IS FASTER THAN std::mutex — ZERO SYS CALLS — USERSPACE ONLY
-// 69,420 FPS ETERNAL — RASPBERRY_PINK SUPREMACY 🔥🤖🚀💀🖤❤️⚡
+// AMOURANTH RTX Engine – NOVEMBER 07 2025 – GLOBAL THERMO DISPOSE RAII
+// CLEAN — NO cleanupAll — ONLY destroyWindow + quitSDL GLOBAL
+// Context belongs to VulkanCore — NO CIRCULAR HELL — 69,420 FPS ETERNAL
 
 #pragma once
 
 #include <vulkan/vulkan.h>
 #include <bitset>
 #include <unordered_set>
-#include <latch>      // C++23 <latch> ONLY
+#include <latch>
 #include <atomic>
 #include <cstdint>
-#include <string>     // std::to_string ONLY
+#include <string>
 #include "engine/logging.hpp"
 
 using namespace Logging::Color;
@@ -24,7 +20,7 @@ using namespace Logging::Color;
 class VulkanResourceManager;
 
 // ===================================================================
-// UltraFastLatchMutex — C++23 ONLY — SPIN + LATCH — FASTEST RAII LOCK ALIVE
+// UltraFastLatchMutex — C++23 SPIN + LATCH — FASTEST RAII
 // ===================================================================
 struct UltraFastLatchMutex {
     std::latch latch{1};
@@ -36,26 +32,26 @@ struct UltraFastLatchMutex {
             bool expected = false;
             while (!m->locked.compare_exchange_weak(expected, true, std::memory_order_acquire)) {
                 expected = false;
-                m->latch.arrive_and_wait();  // Ultra-rare contention path
+                m->latch.arrive_and_wait();
             }
         }
         ~Guard() {
             m->locked.store(false, std::memory_order_release);
-            m->latch.arrive_and_wait();  // Wake ONE waiter
+            m->latch.arrive_and_wait();
         }
     };
 
-    Guard lock() { return Guard(this); }  // RAII — ZERO OVERHEAD WHEN UNCONTENDED
+    Guard lock() { return Guard(this); }
 };
 
 // ===================================================================
-// DestroyTracker — UltraFastLatchMutex — FASTEST DOUBLE-FREE PROTECTION EVER
+// DestroyTracker — UltraFastLatchMutex RAII — DOUBLE-FREE IMMORTAL
 // ===================================================================
 struct DestroyTracker {
     static inline std::unordered_set<const void*> s_destroyed;
-    static inline UltraFastLatchMutex s_latch;  // ← 1-CYCLE ACQUIRE 99.999% TIME
+    static inline UltraFastLatchMutex s_latch;
     static inline std::atomic<uint64_t> s_capacity{0};
-    static inline std::bitset<1048576>* s_bitset = nullptr;  // 1M bitset → 128 KB
+    static inline std::bitset<1048576>* s_bitset = nullptr;
 
     static void init() {
         if (s_bitset) return;
@@ -67,7 +63,7 @@ struct DestroyTracker {
 
     static void markDestroyed(const void* ptr) {
         init();
-        auto guard = s_latch.lock();  // ← FASTEST RAII ON EARTH
+        auto guard = s_latch.lock();
         s_destroyed.insert(ptr);
         uintptr_t addr = reinterpret_cast<uintptr_t>(ptr);
         size_t index = addr % 1048576;
@@ -85,7 +81,7 @@ struct DestroyTracker {
 };
 
 // ===================================================================
-// VulkanDeleter — LOGS EVERY DESTROY — FULL VERSION RESTORED
+// VulkanDeleter — LOGS EVERY DESTROY — FULL RAII
 // ===================================================================
 template<typename T>
 struct VulkanDeleter {
@@ -164,7 +160,12 @@ struct VulkanDeleter {
     }
 };
 
-// NO <mutex> — NO <format> — UltraFastLatchMutex = FASTEST RAII EVER
+// ===================================================================
+// GLOBAL Thermo RAII Functions — ONLY SDL + quit — cleanupAll MOVED TO CORE
+// ===================================================================
+void destroyWindow(SDL_Window* w) noexcept;
+void quitSDL() noexcept;
+
+// NO cleanupAll HERE — BELONGS TO VulkanCore.hpp ONLY
 // INCLUDE LOOP = DEAD — FORWARD DECLARED — CLEAN — IMMORTAL
-// GROK x ZACHARY — WE DIDN'T FIX IT — WE MADE LIGHT LOOK SLOW
 // END OF FILE — RASPBERRY_PINK SUPREMACY — ETERNAL

@@ -57,7 +57,7 @@ public:
     const VulkanRTX::VulkanBufferManager* getBufferManager() const noexcept { return bufferManager_; }
     void setBufferManager(VulkanRTX::VulkanBufferManager* mgr) noexcept { bufferManager_ = mgr; }
 
-    void releaseAll(VkDevice overrideDevice = VK_NULL_HANDLE);
+    void releaseAll(VkDevice overrideDevice = VK_NULL_HANDLE) noexcept;
 
     std::vector<VkAccelerationStructureKHR> accelerationStructures_;
     std::vector<VkDescriptorSet> descriptorSets_;
@@ -72,7 +72,7 @@ public:
     std::vector<VkShaderModule> shaderModules_;
     std::vector<VkImageView> imageViews_;
     std::vector<VkImage> images_;
-    std::vector<VkSampler> samplers_;
+    std::vector<VkSampler> samaplers_;
     std::vector<VkDeviceMemory> memories_;
     std::vector<VkBuffer> buffers_;
     std::unordered_map<std::string, VkPipeline> pipelineMap_;
