@@ -3,7 +3,7 @@
 
 #pragma shader_stage(closesthit)
 
-#include "engine/Vulkan/VulkanCommon.hpp"
+#include "../../engine/Vulkan/VulkanCommon.hpp"
 
 layout(location = 0) rayPayloadInEXT vec3 hitValue;
 hitAttributeEXT vec3 barycentrics;

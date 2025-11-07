@@ -5,7 +5,7 @@
 
 #pragma shader_stage(raygen)
 
-#include <engine/Vulkan/VulkanCommon.hpp>
+#include <../../engine/Vulkan/VulkanCommon.hpp>
 
 layout(location = 0) rayPayloadEXT vec3 payload;
 

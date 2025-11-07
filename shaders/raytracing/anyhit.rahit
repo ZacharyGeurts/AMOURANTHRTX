@@ -5,7 +5,7 @@
 
 #pragma shader_stage(anyhit)
 
-#include <engine/Vulkan/VulkanCommon.hpp>
+#include "../../engine/Vulkan/VulkanCommon.hpp"
 
 hitAttributeEXT vec2 attribs;
 
