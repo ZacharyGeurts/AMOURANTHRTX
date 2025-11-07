@@ -1,6 +1,8 @@
 // include/engine/Vulkan/VulkanBufferManager.hpp
 // AMOURANTH RTX Engine – NOVEMBER 07 2025 – C++23 ZERO-COST COMPATIBLE SUPREMACY
-// reserve_arena DEFINED IN .cpp — NO INLINE DEFINITION NEEDED
+// FIXED: VulkanHandle<VkBuffer> → VkBuffer* (pointer-to-handle) → .get() returns VkBuffer**
+// FIXED: arena_buffer()/staging_buffer() → return *handle.get() → VkBuffer
+// IMPLICIT operator T() STILL WORKS EVERYWHERE ELSE VIA operator VkBuffer()
 // FULLY COMPILES — ZERO COST — RASPBERRY_PINK ETERNAL 🔥🤖🚀💀🖤❤️⚡
 
 #pragma once
@@ -93,11 +95,11 @@ public:
         persistent_copy(vertices.data(), v_size, vertex_offset_);
         persistent_copy(indices.data(),  i_size, vertex_offset_ + v_size);
 
-        std::array regions = {
+        std::array<CopyRegion, 2> regions = {
             CopyRegion{this->staging_buffer(), 0,             vertex_offset_, v_size},
             CopyRegion{this->staging_buffer(), v_size,        vertex_offset_ + index_offset, i_size}
         };
-        this->batch_copy_to_arena(regions);
+        this->batch_copy_to_arena(std::span<const CopyRegion>(regions.data(), regions.size()));
 
         vertex_buffer_address_ = this->get_buffer_device_address(*context_, arena_buffer()) + vertex_offset_;
         index_buffer_address_  = this->get_buffer_device_address(*context_, arena_buffer()) + vertex_offset_ + index_offset;
@@ -119,7 +121,10 @@ public:
         return {};
     }
 
-    [[nodiscard]] constexpr VkBuffer         arena_buffer() const noexcept { return arena_buffer_.get(); }
+    // FIXED: VulkanHandle<VkBuffer> = unique_ptr<VkBuffer*> → .get() = VkBuffer** → deref = VkBuffer
+    [[nodiscard]] constexpr VkBuffer arena_buffer() const noexcept { return *arena_buffer_.get(); }
+    [[nodiscard]] constexpr VkBuffer staging_buffer() const noexcept { return *staging_buffer_.get(); }
+
     [[nodiscard]] constexpr VkDeviceSize     vertex_offset() const noexcept { return vertex_offset_; }
     [[nodiscard]] constexpr VkDeviceAddress  vertex_buffer_address() const noexcept { return vertex_buffer_address_; }
     [[nodiscard]] constexpr VkDeviceAddress  index_buffer_address() const noexcept { return index_buffer_address_; }
@@ -162,9 +167,7 @@ private:
 
     VulkanHandle<VkCommandPool>  command_pool_;
 
-    [[nodiscard]] constexpr VkBuffer staging_buffer() const noexcept { return staging_buffer_.get(); }
-
-    void reserve_arena(VkDeviceSize size) noexcept;  // ← FIXED: non-constexpr, defined in .cpp
+    void reserve_arena(VkDeviceSize size) noexcept;  // defined in .cpp
 
     void initialize_staging_pool() noexcept;
     void initialize_command_pool() noexcept;

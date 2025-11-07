@@ -4,6 +4,9 @@
 // VulkanCore.cpp — Context ctor/dtor + swapchain + cleanupAll IMPLEMENTED
 // GLOBAL FACTORIES — NO LOCAL — BUILD CLEAN ETERNAL — RASPBERRY_PINK IMMORTAL 🩷🩷🩷
 
+// GLOBAL DESTRUCTION COUNTER DEFINITION — MOVED HERE AS REQUESTED
+uint64_t g_destructionCounter = 0;
+
 #include "engine/Vulkan/VulkanCore.hpp"
 #include "engine/Vulkan/VulkanPipelineManager.hpp"
 #include "engine/logging.hpp"
@@ -12,10 +15,8 @@ using namespace Logging::Color;
 using namespace VulkanRTX;
 
 // ===================================================================
-// GLOBAL DESTRUCTION COUNTER + LOGGING
+// LOGGING HELPERS
 // ===================================================================
-uint64_t g_destructionCounter = 0;
-
 std::string threadIdToString() {
     std::stringstream ss;
     ss << std::this_thread::get_id();
@@ -51,8 +52,8 @@ void VulkanResourceManager::releaseAll(VkDevice overrideDevice) noexcept {
                  images_.size() + samplers_.size() + memories_.size() + buffers_.size(), RESET);
 
     for (auto as : accelerationStructures_) {
-        if (as && vkDestroyAccelerationStructureKHR) {
-            vkDestroyAccelerationStructureKHR(dev, as, nullptr);
+        if (as && vkDestroyAccelerationStructureKHR_) {
+            vkDestroyAccelerationStructureKHR_(dev, as, nullptr);
             logAndTrackDestruction("AccelerationStructure", as, __LINE__);
         }
     }
@@ -137,7 +138,7 @@ Context::Context(SDL_Window* win, int w, int h)
     LOAD_PROC(vkDestroyDeferredOperationKHR);
 #undef LOAD_PROC
 
-    resourceManager.vkDestroyAccelerationStructureKHR = vkDestroyAccelerationStructureKHR;
+    resourceManager.vkDestroyAccelerationStructureKHR_ = vkDestroyAccelerationStructureKHR;
     resourceManager.lastDevice_ = device;
 }
 

@@ -2,7 +2,7 @@
 // AMOURANTH RTX Engine – NOVEMBER 07 2025 – 11:59 PM EST → ROCKETSHIP FINAL APOCALYPSE
 // releaseAll → REMOVED (now in VulkanCore.cpp)
 // bufferManager_->releaseAll(dev) → DELEGATED
-// safeDestroyContainer → *it FIXED FOREVER
+// safeDestroyContainer → *it FIXED ETERNAL
 // swapchain wrappers → recreateSwapchain(width,height) + cleanupSwapchain() NO ARGS
 // NO <format> — std::to_string ONLY — ZERO BLOAT
 // FULL VERBOSE LOGGING — QUANTUM POLISHED — 69,420 FPS × ∞
