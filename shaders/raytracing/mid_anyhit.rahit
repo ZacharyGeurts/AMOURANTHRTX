@@ -2,28 +2,24 @@
 #extension GL_EXT_ray_tracing : require
 #extension GL_EXT_nonuniform_qualifier : enable
 
-// Correct shader stage for an **any-hit** shader (not intersection!)
 #pragma shader_stage(anyhit)
+
+#include "engine/Vulkan/VulkanCommon.hpp"
+
+hitAttributeEXT vec2 hitAttribs;
 
 layout(set = 0, binding = 10) uniform sampler2D alphaTex;
 
-// hitAttributeEXT MUST have a location in Vulkan ray tracing pipelines
-layout(location = 0) hitAttributeEXT vec2 hitAttribs;
-
 void main()
 {
-    // Reconstruct barycentric coordinates from the triangle hit attributes
     vec3 bary = vec3(1.0f - hitAttribs.x - hitAttribs.y, hitAttribs.x, hitAttribs.y);
     
-    // Interpolate UVs using the vertex UVs you provided in the BLAS (v0: (0,0), v1: (1,0), v2: (0.5,1))
     vec2 uv = bary.x * vec2(0.0f, 0.0f) +
               bary.y * vec2(1.0f, 0.0f) +
               bary.z * vec2(0.5f, 1.0f);
 
-    // Sample the alpha channel
     float alpha = texture(alphaTex, uv).r;
 
-    // Discard (ignore) the intersection if alpha is below threshold
     if (alpha < 0.7f)
     {
         ignoreIntersectionEXT();

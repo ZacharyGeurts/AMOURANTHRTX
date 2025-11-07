@@ -15,10 +15,11 @@
 //        ADDED: MUTABLE getX() accessors for cleanupAll()
 //        NEW: Context owns swapchain creation/destruction
 //        FIXED: addFence() + fences_ for transient submits
-//        ADDED: VulkanRTX::Camera* camera = nullptr;  ← CRITICAL FOR renderModeX()
-//        FIXED: ~Context() → delete camera (leak prevention for raw ptr)
-//        ADDED: VulkanRTX* rtx = nullptr; ← For RenderMode1 integration
+//        ADDED: std::unique_ptr<VulkanRTX::Camera> camera;  ← CRITICAL FOR renderModeX()
+//        FIXED: ~Context() → unique_ptr auto-cleanup (leak prevention)
+//        ADDED: std::unique_ptr<VulkanRTX::VulkanRTX> rtx; ← For RenderMode1 integration
 //        ADDED: currentFrame + inFlightFences to Context → 3-frame safe single-time submits
+//        UPGRADE: C++23 - unique_ptr for camera/rtx; ranges views where applicable
 
 #pragma once
 
@@ -49,6 +50,7 @@ class VulkanBufferManager;
 namespace VulkanRTX {
     class VulkanSwapchainManager;
     class VulkanRTX;
+    class Camera;
 }
 
 // ===================================================================
@@ -443,10 +445,10 @@ struct Context {
     int height = 0;
 
     // --- CAMERA ---
-    VulkanRTX::Camera* camera = nullptr;  // ← ADDED: Critical for renderModeX()
+    std::unique_ptr<VulkanRTX::Camera> camera;  // ← UPGRADE: unique_ptr for auto-cleanup
 
     // --- RTX SETUP ---
-    VulkanRTX::VulkanRTX* rtx = nullptr;  // ← ADDED: For RenderMode1 integration
+    std::unique_ptr<VulkanRTX::VulkanRTX> rtx;  // ← UPGRADE: unique_ptr for auto-cleanup
 
     VkDescriptorSetLayout rayTracingDescriptorSetLayout = VK_NULL_HANDLE;
     VkDescriptorSetLayout graphicsDescriptorSetLayout = VK_NULL_HANDLE;
@@ -570,14 +572,7 @@ struct Context {
     ~Context() {
         if (device) {
             vkDeviceWaitIdle(device);
-            if (camera) {
-                delete camera;  // ← FIXED: Actual delete for leak prevention
-                camera = nullptr;
-            }
-            if (rtx) {
-                delete rtx;  // ← ADDED: Cleanup RTX instance
-                rtx = nullptr;
-            }
+            // ← UPGRADE: unique_ptr handles cleanup automatically
             destroySwapchain();
             resourceManager.cleanup(device);
         }
@@ -595,6 +590,12 @@ struct Context {
     // --- RESOURCE MANAGER ACCESS ---
     VulkanResourceManager& getResourceManager() { return resourceManager; }
     const VulkanResourceManager& getResourceManager() const { return resourceManager; }
+
+    // ← NEW: C++23-style accessors for unique_ptr
+    auto getCamera() { return camera.get(); }
+    const auto getCamera() const { return camera.get(); }
+    auto getRTX() { return rtx.get(); }
+    const auto getRTX() const { return rtx.get(); }
 };
 
 } // namespace Vulkan

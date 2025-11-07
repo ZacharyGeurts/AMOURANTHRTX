@@ -1,17 +1,17 @@
 // include/modes/RenderMode3.hpp
-// AMOURANTH RTX — MODE 3: VOLUMETRIC LIGHT + DENSITY FIELD
-// FULLY MODULAR. FULLY SCALABLE. FULLY GLOWING.
-// Keyboard key: 3
-// SOURCE OF TRUTH: core.hpp
+// AMOURANTH RTX — MODE 3: GLASS + REFRACTION + FRESNEL
+// C++23: Full Vulkan types, namespace-qualified Context, proper includes
+// FIXED: Missing <cstdint>, <vulkan/vulkan.h>, ::Vulkan::Context forward decl
+// @ZacharyGeurts — 11:05 PM EST, Nov 6 2025
 
 #pragma once
-
-#include "engine/Vulkan/VulkanCommon.hpp"
-#include "engine/RTConstants.hpp"
+#ifndef RENDERMODE3_HPP
+#define RENDERMODE3_HPP
 
 #include <vulkan/vulkan.h>
+#include <cstdint>
 
-namespace Vulkan { class Context; }
+namespace Vulkan { struct Context; }
 
 namespace VulkanRTX {
 
@@ -26,3 +26,5 @@ void renderMode3(
 );
 
 } // namespace VulkanRTX
+
+#endif // RENDERMODE3_HPP

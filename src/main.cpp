@@ -14,7 +14,7 @@
 #include "engine/Vulkan/VulkanPipelineManager.hpp"
 #include "engine/Vulkan/VulkanBufferManager.hpp"
 #include "engine/Vulkan/VulkanCommon.hpp"
-#include "engine/Vulkan/VulkanSwapchainManager.hpp"  // NEW
+#include "engine/Vulkan/VulkanSwapchainManager.hpp"
 #include "handle_app.hpp"
 #include "engine/logging.hpp"
 #include "engine/utils.hpp"
@@ -138,6 +138,7 @@ inline void bulkhead(const std::string& sector) {
     LOG_INFO_CAT("MAIN", "{}│ {} │ {} │{}", BOLD_BRIGHT_ORANGE, sector, ts, RESET);
     LOG_INFO_CAT("MAIN", "{}══════════════════════════════════════════════════════════════{}", BOLD_BRIGHT_ORANGE, RESET);
 }
+
 // =============================================================================
 //  SDL PURGE — RAII SAFE
 // =============================================================================
@@ -294,7 +295,7 @@ int main(int argc, char* argv[]) {
             VulkanInitializer::initializeVulkan(*core);
             LOG_INFO_CAT("MAIN", "{}Success: Vulkan fully initialized{}", BOLD_BRIGHT_ORANGE, RESET);
 
-            // CREATE SWAPCHAIN MANAGER (NEW)
+            // CREATE SWAPCHAIN MANAGER
             LOG_INFO_CAT("MAIN", "{}Attempt: Creating VulkanSwapchainManager{}", BOLD_BRIGHT_ORANGE, RESET);
             auto swapchainMgr = std::make_unique<VulkanRTX::VulkanSwapchainManager>(
                 core, app->getWindow(), W, H, &gSwapchainConfig
@@ -302,27 +303,35 @@ int main(int argc, char* argv[]) {
             LOG_INFO_CAT("MAIN", "{}Success: swapchainMgr @ {:p}{}", BOLD_BRIGHT_ORANGE, (void*)swapchainMgr.get(), RESET);
 
             // =================================================================
-            //  PHASE 3: RENDERER + PIPELINE + BUFFER MANAGER
+            //  PHASE 3: PIPELINE + BUFFER + RENDERER (OWNERSHIP TRANSFER)
             // =================================================================
             LOG_INFO_CAT("MAIN", "{}Attempt: Creating VulkanPipelineManager{}", BOLD_BRIGHT_ORANGE, RESET);
             auto pipelineMgr = std::make_unique<VulkanRTX::VulkanPipelineManager>(*core, W, H);
             LOG_INFO_CAT("MAIN", "{}Success: pipelineMgr @ {:p}{}", BOLD_BRIGHT_ORANGE, (void*)pipelineMgr.get(), RESET);
 
             LOG_INFO_CAT("MAIN", "{}Attempt: Creating VulkanBufferManager{}", BOLD_BRIGHT_ORANGE, RESET);
-            auto bufferMgr   = std::make_unique<VulkanRTX::VulkanBufferManager>(core);
+            auto bufferMgr = std::make_unique<VulkanRTX::VulkanBufferManager>(core);
             LOG_INFO_CAT("MAIN", "{}Success: bufferMgr @ {:p}{}", BOLD_BRIGHT_ORANGE, (void*)bufferMgr.get(), RESET);
 
-            LOG_INFO_CAT("MAIN", "{}Attempt: Fetching ray-tracing shader paths{}", BOLD_BRIGHT_ORANGE, RESET);
+            // =================================================================
+            //  SHADER PATHS — USE CENTRALIZED VulkanRTX::getRayTracingBinPaths()
+            // =================================================================
+            LOG_INFO_CAT("MAIN", "{}Attempt: Resolving ray-tracing shader paths via VulkanRTX::getRayTracingBinPaths(){}", BOLD_BRIGHT_ORANGE, RESET);
             auto shaderPaths = VulkanRTX::getRayTracingBinPaths();
-            LOG_INFO_CAT("MAIN", "{}Success: {} shader paths loaded{}", BOLD_BRIGHT_ORANGE, shaderPaths.size(), RESET);
-            for (size_t i = 0; i < shaderPaths.size(); ++i)
-                LOG_DEBUG_CAT("MAIN", "{}Shader[{}]: {}{}", BOLD_BRIGHT_ORANGE, i, shaderPaths[i], RESET);
+            LOG_INFO_CAT("MAIN", "{}Success: {} ray-tracing shaders resolved{}", BOLD_BRIGHT_ORANGE, shaderPaths.size(), RESET);
+
+            // DEBUG: Log each resolved path
+            for (size_t i = 0; i < shaderPaths.size(); ++i) {
+                LOG_DEBUG_CAT("MAIN", "{}  [{}] → {}{}", BOLD_BRIGHT_ORANGE, i, shaderPaths[i], RESET);
+            }
 
             LOG_INFO_CAT("MAIN", "{}Attempt: Creating VulkanRenderer{}", BOLD_BRIGHT_ORANGE, RESET);
-            auto renderer    = std::make_unique<VulkanRTX::VulkanRenderer>(W, H, app->getWindow(), shaderPaths, core);
+            auto renderer = std::make_unique<VulkanRTX::VulkanRenderer>(
+                W, H, app->getWindow(), shaderPaths, core, pipelineMgr.get()  // 6-PARAM: pipelineMgr passed
+            );
             LOG_INFO_CAT("MAIN", "{}Success: renderer @ {:p}{}", BOLD_BRIGHT_ORANGE, (void*)renderer.get(), RESET);
 
-            // TAKE OWNERSHIP
+            // TRANSFER OWNERSHIP
             LOG_INFO_CAT("MAIN", "{}Attempt: renderer->takeOwnership(pipelineMgr, bufferMgr){}", BOLD_BRIGHT_ORANGE, RESET);
             renderer->takeOwnership(std::move(pipelineMgr), std::move(bufferMgr));
             LOG_INFO_CAT("MAIN", "{}Success: Ownership transferred{}", BOLD_BRIGHT_ORANGE, RESET);

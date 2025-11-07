@@ -193,7 +193,7 @@ VkShaderModule VulkanPipelineManager::loadShaderImpl(VkDevice device, const std:
     LOG_INFO_CAT("Vulkan", "{}>>> LOADING SHADER '{}'{}{}", VIOLET_PURPLE, shaderType, RESET, RESET);
 #endif
 
-    const std::string filepath = "assets/shaders/" + shaderType + ".spv";
+    const std::string filepath = shaderType;
 
     std::ifstream file(filepath, std::ios::ate | std::ios::binary);
     if (!file.is_open()) {
@@ -532,15 +532,25 @@ void VulkanPipelineManager::createShaderBindingTable(VkPhysicalDevice physDev)
 // ---------------------------------------------------------------------------
 //  10. RAY TRACING PIPELINE
 // ---------------------------------------------------------------------------
-void VulkanPipelineManager::createRayTracingPipeline(uint32_t maxRayRecursionDepth)
+void VulkanPipelineManager::createRayTracingPipeline(
+    const std::vector<std::string>& shaderPaths,
+    VkPhysicalDevice physicalDevice,
+    VkDevice device,
+    VkDescriptorSet descriptorSet)
 {
 #ifndef NDEBUG
-    LOG_INFO_CAT("Vulkan", "{}>>> COMPILING RAY TRACING PIPELINE{}", VIOLET_PURPLE, RESET);
+    LOG_INFO_CAT("Vulkan", "{}>>> CREATING RAY TRACING PIPELINE (dynamic shaders){}", VIOLET_PURPLE, RESET);
 #endif
 
-    VkShaderModule raygenMod = loadShaderImpl(context_.device, "raytracing/raygen");
-    VkShaderModule missMod   = loadShaderImpl(context_.device, "raytracing/miss");
-    VkShaderModule hitMod    = loadShaderImpl(context_.device, "raytracing/closesthit");
+    if (shaderPaths.size() < 3) {
+        LOG_ERROR_CAT("Vulkan", "Expected at least 3 shaders (raygen, miss, closesthit)");
+        throw std::runtime_error("Insufficient shader paths");
+    }
+
+    // Load shaders dynamically
+    VkShaderModule raygenMod = loadShaderImpl(device, shaderPaths[0]);
+    VkShaderModule missMod   = loadShaderImpl(device, shaderPaths[1]);
+    VkShaderModule hitMod    = loadShaderImpl(device, shaderPaths[2]);
 
     std::vector<VkPipelineShaderStageCreateInfo> stages = {
         {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_RAYGEN_BIT_KHR, .module = raygenMod, .pName = "main"},
@@ -554,12 +564,17 @@ void VulkanPipelineManager::createRayTracingPipeline(uint32_t maxRayRecursionDep
         {.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR, .type = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR, .closestHitShader = 2}
     };
 
+    // Reuse or create descriptor set layout
+    if (!rayTracingDescriptorSetLayout_) {
+        rayTracingDescriptorSetLayout_ = createRayTracingDescriptorSetLayout();
+    }
+
     VkPipelineLayoutCreateInfo layoutInfo{
         .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
         .setLayoutCount = 1,
         .pSetLayouts = &rayTracingDescriptorSetLayout_
     };
-    VK_CHECK(vkCreatePipelineLayout(context_.device, &layoutInfo, nullptr, &rayTracingPipelineLayout_),
+    VK_CHECK(vkCreatePipelineLayout(device, &layoutInfo, nullptr, &rayTracingPipelineLayout_),
              "Create RT pipeline layout");
 
     VkRayTracingPipelineCreateInfoKHR pipelineInfo{
@@ -568,22 +583,31 @@ void VulkanPipelineManager::createRayTracingPipeline(uint32_t maxRayRecursionDep
         .pStages = stages.data(),
         .groupCount = static_cast<uint32_t>(groups.size()),
         .pGroups = groups.data(),
-        .maxPipelineRayRecursionDepth = maxRayRecursionDepth,
+        .maxPipelineRayRecursionDepth = 1,
         .layout = rayTracingPipelineLayout_
     };
 
     VK_CHECK(context_.vkCreateRayTracingPipelinesKHR(
-                 context_.device, VK_NULL_HANDLE, pipelineCache_,
+                 device, VK_NULL_HANDLE, pipelineCache_,
                  1, &pipelineInfo, nullptr, &rayTracingPipeline_),
              "Create RT pipeline");
 
-    vkDestroyShaderModule(context_.device, raygenMod, nullptr);
-    vkDestroyShaderModule(context_.device, missMod,   nullptr);
-    vkDestroyShaderModule(context_.device, hitMod,    nullptr);
+    // Destroy modules after pipeline creation
+    vkDestroyShaderModule(device, raygenMod, nullptr);
+    vkDestroyShaderModule(device, missMod, nullptr);
+    vkDestroyShaderModule(device, hitMod, nullptr);
+
+    // Build SBT
+    createShaderBindingTable(physicalDevice);
+
+    // Update descriptor set with TLAS
+    if (tlas_ && descriptorSet) {
+        updateRayTracingDescriptorSet(descriptorSet, tlas_);
+    }
 
 #ifndef NDEBUG
-    LOG_INFO_CAT("Vulkan", "{}    PIPELINE COMPILED @ {:p}{}", VIOLET_PURPLE, static_cast<void*>(rayTracingPipeline_), RESET);
-    LOG_INFO_CAT("Vulkan", "{}<<< RAY TRACING PIPELINE LIVE{}", VIOLET_PURPLE, RESET);
+    LOG_INFO_CAT("Vulkan", "{}    RT PIPELINE @ {:p}, SBT READY{}", VIOLET_PURPLE, static_cast<void*>(rayTracingPipeline_), RESET);
+    LOG_INFO_CAT("Vulkan", "{}<<< RAY TRACING PIPELINE CREATED SUCCESSFULLY{}", VIOLET_PURPLE, RESET);
 #endif
 }
 

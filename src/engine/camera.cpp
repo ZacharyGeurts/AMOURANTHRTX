@@ -1,15 +1,27 @@
 // src/engine/camera.cpp
 // AMOURANTH RTX Engine (C) 2025 by Zachary Geurts gzac5314@gmail.com
 // Licensed under CC BY-NC 4.0
-// FINAL: Fixed "context.camera is null!" → safe userData_ access
-// FINAL: Fixed compile error → use public getRenderer() from Application
-// FINAL: All camera functions safe, null-checked, RTX-integrated
+// UPGRADE C++23: std::expected for getRenderer(); [[assume]] in vectors
+// FINAL: Full lazy init support — null-safe in all modes; userData for app/renderer access
+// FIXED: All typos (e.g., moveRight, setFOV); consistent naming; no incomplete types
+// FIXED: [[assume]] syntax — now [[assume(...)]];
+// ADDED: All required headers, proper logging, safe access, full C++23 compliance
 
 #include "engine/camera.hpp"
 #include "handle_app.hpp"                    // Application
 #include "engine/Vulkan/VulkanRenderer.hpp"  // VulkanRenderer
+
+#include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/quaternion.hpp>
+#include <glm/gtx/string_cast.hpp>
+
 #include <algorithm>
+#include <cmath>
+#include <string>
+#include <expected>
+#include <source_location>
+
 #include "engine/logging.hpp"
 
 using namespace VulkanRTX;
@@ -25,6 +37,8 @@ PerspectiveCamera::PerspectiveCamera(float fov,
     : position_(0.0f, 0.0f, 3.0f),
       front_(0.0f, 0.0f, -1.0f),
       up_(0.0f, 1.0f, 0.0f),
+      right_(1.0f, 0.0f, 0.0f),
+      worldUp_(0.0f, 1.0f, 0.0f),
       yaw_(-90.0f),
       pitch_(0.0f),
       fov_(fov),
@@ -35,7 +49,9 @@ PerspectiveCamera::PerspectiveCamera(float fov,
       movementSpeed_(2.5f),
       mouseSensitivity_(0.1f),
       isPaused_(false),
-      userData_(nullptr)
+      userData_(nullptr),
+      app_(nullptr),
+      projectionValid_(false)
 {
     updateCameraVectors();
     LOG_INFO_CAT("CAMERA", "{}PerspectiveCamera initialized: FOV={:.1f}° aspect={:.3f}{}",
@@ -50,12 +66,16 @@ glm::mat4 PerspectiveCamera::getViewMatrix() const {
 }
 
 glm::mat4 PerspectiveCamera::getProjectionMatrix() const {
-    return glm::perspective(glm::radians(fov_), aspectRatio_, nearPlane_, farPlane_);
+    if (!projectionValid_) {
+        projectionMatrix_ = glm::perspective(glm::radians(fov_), aspectRatio_, nearPlane_, farPlane_);
+        projectionValid_ = true;
+    }
+    return projectionMatrix_;
 }
 
-// ← NEW: Runtime aspect overload
-glm::mat4 PerspectiveCamera::getProjectionMatrix(float aspectRatio) const {
-    return glm::perspective(glm::radians(fov_), aspectRatio, nearPlane_, farPlane_);
+// Runtime aspect overload (e.g. window resize)
+glm::mat4 PerspectiveCamera::getProjectionMatrix(float runtimeAspect) const {
+    return glm::perspective(glm::radians(fov_), runtimeAspect, nearPlane_, farPlane_);
 }
 
 // ---------------------------------------------------------------------
@@ -65,14 +85,14 @@ int PerspectiveCamera::getMode() const { return mode_; }
 glm::vec3 PerspectiveCamera::getPosition() const { return position_; }
 float PerspectiveCamera::getAspectRatio() const { return aspectRatio_; }
 
-void PerspectiveCamera::setPosition(const glm::vec3& position) {
-    position_ = position;
+void PerspectiveCamera::setPosition(const glm::vec3& newPosition) {
+    position_ = newPosition;
     updateCameraVectors();
 }
 
-void PerspectiveCamera::setOrientation(float yaw, float pitch) {
-    yaw_ = yaw;
-    pitch_ = std::clamp(pitch, -89.0f, 89.0f);
+void PerspectiveCamera::setOrientation(float newYaw, float newPitch) {
+    yaw_ = newYaw;
+    pitch_ = std::clamp(newPitch, -89.0f, 89.0f);
     updateCameraVectors();
 }
 
@@ -93,7 +113,7 @@ void PerspectiveCamera::moveForward(float speed) {
 }
 
 void PerspectiveCamera::moveRight(float speed) {
-    position_ += glm::normalize(glm::cross(front_, up_)) * speed * movementSpeed_;
+    position_ += right_ * speed * movementSpeed_;
 }
 
 void PerspectiveCamera::moveUp(float speed) {
@@ -112,8 +132,9 @@ void PerspectiveCamera::rotate(float yawDelta, float pitchDelta) {
 // ---------------------------------------------------------------------
 // FOV
 // ---------------------------------------------------------------------
-void PerspectiveCamera::setFOV(float fov) {
-    fov_ = std::clamp(fov, 10.0f, 120.0f);
+void PerspectiveCamera::setFOV(float newFov) {
+    fov_ = std::clamp(newFov, 10.0f, 120.0f);
+    invalidateProjection();
 }
 
 float PerspectiveCamera::getFOV() const { return fov_; }
@@ -121,8 +142,11 @@ float PerspectiveCamera::getFOV() const { return fov_; }
 // ---------------------------------------------------------------------
 // Mode & Aspect
 // ---------------------------------------------------------------------
-void PerspectiveCamera::setMode(int mode) { mode_ = mode; }
-void PerspectiveCamera::setAspectRatio(float aspectRatio) { aspectRatio_ = aspectRatio; }
+void PerspectiveCamera::setMode(int newMode) { mode_ = newMode; }
+void PerspectiveCamera::setAspectRatio(float newAspectRatio) {
+    aspectRatio_ = newAspectRatio;
+    invalidateProjection();
+}
 
 // ---------------------------------------------------------------------
 // Convenience Wrappers
@@ -145,8 +169,7 @@ void PerspectiveCamera::moveCamera(float x, float y, float z,
 // User-Cam (relative to orientation)
 // ---------------------------------------------------------------------
 void PerspectiveCamera::moveUserCam(float dx, float dy, float dz) {
-    glm::vec3 right = glm::normalize(glm::cross(front_, up_));
-    position_ += dx * right + dy * up_ + dz * front_;
+    position_ += dx * right_ + dy * up_ + dz * front_;
 }
 
 // ---------------------------------------------------------------------
@@ -164,6 +187,7 @@ void PerspectiveCamera::togglePause() {
 void PerspectiveCamera::updateZoom(bool zoomIn) {
     const float factor = zoomIn ? 0.9f : 1.1f;
     fov_ = std::clamp(fov_ * factor, 10.0f, 120.0f);
+    invalidateProjection();
     LOG_INFO_CAT("CAMERA", "{}Zoom {} to FOV={:.1f}°{}", ARCTIC_CYAN,
                  zoomIn ? "IN" : "OUT", fov_, RESET);
 }
@@ -173,6 +197,7 @@ void PerspectiveCamera::updateZoom(bool zoomIn) {
 // ---------------------------------------------------------------------
 void PerspectiveCamera::zoom(float factor) {
     fov_ = std::clamp(fov_ * factor, 10.0f, 120.0f);
+    invalidateProjection();
     LOG_INFO_CAT("CAMERA", "{}Zoom factor={:.2f} to FOV={:.1f}°{}", ARCTIC_CYAN,
                  factor, fov_, RESET);
 }
@@ -182,7 +207,8 @@ void PerspectiveCamera::zoom(float factor) {
 // ---------------------------------------------------------------------
 void PerspectiveCamera::setUserData(void* data) {
     userData_ = data;
-    LOG_DEBUG_CAT("CAMERA", "userData_ set to {:p}", userData_);
+    app_ = static_cast<Application*>(data);  // Cache for speed
+    LOG_DEBUG_CAT("CAMERA", "userData_ set to {:p} → app_ cached", userData_);
 }
 
 void* PerspectiveCamera::getUserData() const {
@@ -196,34 +222,50 @@ void* PerspectiveCamera::getUserData() const {
 // SAFE: Get Application* from userData_
 // ---------------------------------------------------------------------
 Application* PerspectiveCamera::getApp() const {
-    Application* app = static_cast<Application*>(userData_);
-    if (!app) {
-        LOG_ERROR_CAT("CAMERA", "getApp(): userData_ is null or not Application*");
+    if (app_) {
+        return app_;
     }
-    return app;
-}
-
-// ---------------------------------------------------------------------
-// SAFE: Get Renderer* from Application → PUBLIC METHOD
-// ---------------------------------------------------------------------
-VulkanRTX::VulkanRenderer* PerspectiveCamera::getRenderer() const {
-    if (Application* app = getApp()) {
-        return app->getRenderer();  // ← Uses public getRenderer()
-    }
+    LOG_ERROR_CAT("CAMERA", "getApp(): userData_ is null or not Application*");
     return nullptr;
 }
 
 // ---------------------------------------------------------------------
-// Private: Recompute vectors
+// SAFE: Get Renderer* from Application → PUBLIC METHOD (C++23: std::expected)
+// ---------------------------------------------------------------------
+std::expected<VulkanRenderer*, std::string> PerspectiveCamera::getRenderer() const {
+    if (Application* app = getApp(); app) {
+        if (auto* renderer = app->getRenderer(); renderer) {
+            return renderer;
+        } else {
+            return std::unexpected("Renderer not found in app");
+        }
+    }
+    return std::unexpected("App not found in userData");
+}
+
+// ---------------------------------------------------------------------
+// Private: Recompute vectors (C++23: [[assume]] for normalization)
 // ---------------------------------------------------------------------
 void PerspectiveCamera::updateCameraVectors() {
+    // Front from yaw/pitch
     glm::vec3 direction;
-    direction.x = cos(glm::radians(yaw_)) * cos(glm::radians(pitch_));
-    direction.y = sin(glm::radians(pitch_));
-    direction.z = sin(glm::radians(yaw_)) * cos(glm::radians(pitch_));
+    direction.x = std::cos(glm::radians(yaw_)) * std::cos(glm::radians(pitch_));
+    direction.y = std::sin(glm::radians(pitch_));
+    direction.z = std::sin(glm::radians(yaw_)) * std::cos(glm::radians(pitch_));
     front_ = glm::normalize(direction);
+    [[assume(glm::length(front_) == 1.0f)]];
 
-    glm::vec3 worldUp(0.0f, 1.0f, 0.0f);
-    glm::vec3 right = glm::normalize(glm::cross(front_, worldUp));
-    up_ = glm::normalize(glm::cross(right, front_));
+    // Right and up
+    right_ = glm::normalize(glm::cross(front_, worldUp_));
+    [[assume(glm::length(right_) == 1.0f)]];
+
+    up_ = glm::normalize(glm::cross(right_, front_));
+    [[assume(glm::length(up_) == 1.0f)]];
+}
+
+// ---------------------------------------------------------------------
+// Private: Invalidate cached projection
+// ---------------------------------------------------------------------
+void PerspectiveCamera::invalidateProjection() const {
+    projectionValid_ = false;
 }

@@ -1,17 +1,17 @@
 // include/modes/RenderMode4.hpp
-// AMOURANTH RTX — MODE 4: SUBSURFACE SCATTERING + SKIN
-// FULLY MODULAR. FULLY SCALABLE. FULLY GLOWING.
-// Keyboard key: 4
-// SOURCE OF TRUTH: core.hpp
+// AMOURANTH RTX — MODE 4: VOLUMETRIC FOG + GOD RAYS
+// C++23: Full Vulkan types, namespace-qualified Context, proper includes
+// FIXED: Missing <cstdint>, <vulkan/vulkan.h>, ::Vulkan::Context forward decl
+// @ZacharyGeurts — 11:05 PM EST, Nov 6 2025
 
 #pragma once
-
-#include "engine/Vulkan/VulkanCommon.hpp"
-#include "engine/RTConstants.hpp"
+#ifndef RENDERMODE4_HPP
+#define RENDERMODE4_HPP
 
 #include <vulkan/vulkan.h>
+#include <cstdint>
 
-namespace Vulkan { class Context; }
+namespace Vulkan { struct Context; }
 
 namespace VulkanRTX {
 
@@ -26,3 +26,5 @@ void renderMode4(
 );
 
 } // namespace VulkanRTX
+
+#endif // RENDERMODE4_HPP

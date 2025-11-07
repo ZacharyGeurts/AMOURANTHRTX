@@ -1,16 +1,11 @@
 // include/modes/RenderMode5.hpp
-// AMOURANTH RTX — MODE 5: GLOSSY REFLECTIONS + METALNESS
-// Keyboard key: 5
-// SOURCE OF TRUTH: core.hpp
+// AMOURANTH RTX — MODE 5: FLOATING FLAME
+// CLEAN HEADER: No namespace conflicts, pure forward decl
 
 #pragma once
 
 #include "engine/Vulkan/VulkanCommon.hpp"
 #include "engine/RTConstants.hpp"
-
-#include <vulkan/vulkan.h>
-
-namespace Vulkan { class Context; }
 
 namespace VulkanRTX {
 

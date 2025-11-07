@@ -1,12 +1,11 @@
 #version 460
 #extension GL_EXT_ray_tracing : require
 
-layout(location = 2) rayPayloadInEXT vec3 radiance;
-layout(set = 0, binding = 5) uniform sampler2D envMap;
+#pragma shader_stage(miss)
+
+layout(location = 0) rayPayloadInEXT vec3 hitValue;
 
 void main()
 {
-    vec3 dir = gl_WorldRayDirectionEXT;
-    vec2 uv = vec2(atan(dir.z, dir.x) * 0.1591 + 0.5, acos(dir.y) * 0.3183);
-    radiance = texture(envMap, uv).rgb;
+    hitValue = vec3(0.05f, 0.1f, 0.2f);  // dark space background
 }

@@ -1,11 +1,10 @@
 // src/engine/Vulkan/VulkanSwapchainManager.cpp
 // AMOURANTH RTX Engine (C) 2025 by Zachary Geurts gzac5314@gmail.com
-// FINAL: Triple buffer, developer config via runtimeConfig_, full RAII, neon logging
-// NO SwapchainConfig | NO vkDeviceWaitIdle | HDR + sRGB | MAILBOX | TRIPLE BUFFER
-// → Replaces old VulkanSwapchain.cpp — DELETE THAT FILE
+// C++23 — RTX BEST MODE — FULL ENUM SUPPORT — NO WARNINGS
+// @ZacharyGeurts — NOV 06 2025 — 10:30 PM EST — LIVE
 
 #include "engine/Vulkan/VulkanSwapchainManager.hpp"
-#include "engine/Vulkan/VulkanCommon.hpp"  // VK_CHECK
+#include "engine/Vulkan/VulkanCommon.hpp"
 #include "engine/logging.hpp"
 #include "engine/Vulkan/VulkanCore.hpp"
 
@@ -16,6 +15,7 @@
 #include <format>
 #include <bit>
 #include <vector>
+#include <ranges>
 
 using namespace VulkanRTX;
 using namespace Logging::Color;
@@ -31,6 +31,21 @@ void VulkanSwapchainManager::logSwapchainInfo(const char* prefix) const
         static_cast<int>(swapchainImageFormat_),
         swapchainImages_.size(),
         swapchainImageViews_.size());
+}
+
+// ── PRESENT MODE TO STRING (C++23) — FULLY SAFE & EXTENSIBLE ───────────────
+static std::string presentModeToString(VkPresentModeKHR mode)
+{
+    switch (mode) {
+        case VK_PRESENT_MODE_IMMEDIATE_KHR:           return "IMMEDIATE";
+        case VK_PRESENT_MODE_MAILBOX_KHR:             return "MAILBOX";
+        case VK_PRESENT_MODE_FIFO_KHR:                return "FIFO";
+        case VK_PRESENT_MODE_FIFO_RELAXED_KHR:        return "FIFO_RELAXED";
+        case VK_PRESENT_MODE_SHARED_DEMAND_REFRESH_KHR:   return "SHARED_DEMAND_REFRESH";
+        case VK_PRESENT_MODE_SHARED_CONTINUOUS_REFRESH_KHR: return "SHARED_CONTINUOUS_REFRESH";
+        case VK_PRESENT_MODE_FIFO_LATEST_READY_KHR:   return "FIFO_LATEST_READY (NVIDIA EXT)";
+        default:                                      return std::format("UNKNOWN ({})", static_cast<int>(mode));
+    }
 }
 
 // ── CONSTRUCTOR ─────────────────────────────────────────────────────────────
@@ -141,7 +156,7 @@ void VulkanSwapchainManager::initializeSwapchain(int width, int height)
         }
     }
 
-    // Step 3: Present Mode (Developer Config via runtimeConfig_)
+    // Step 3: Present Mode — RTX LOGIC: WE ARE THE BEST
     uint32_t pmCount = 0;
     VK_CHECK(vkGetPhysicalDeviceSurfacePresentModesKHR(context_->physicalDevice, surface_, &pmCount, nullptr),
              "Failed to query present mode count");
@@ -149,36 +164,35 @@ void VulkanSwapchainManager::initializeSwapchain(int width, int height)
     VK_CHECK(vkGetPhysicalDeviceSurfacePresentModesKHR(context_->physicalDevice, surface_, &pmCount, presentModes.data()),
              "Failed to query present modes");
 
-    bool mailboxAvailable = false, immediateAvailable = false, relaxedAvailable = false;
+    LOG_INFO_CAT("Swapchain", "{}Supported Present Modes ({} total):{}", BOLD_BRIGHT_ORANGE, pmCount, RESET);
     for (const auto& pm : presentModes) {
-        if (pm == VK_PRESENT_MODE_MAILBOX_KHR)   mailboxAvailable = true;
-        if (pm == VK_PRESENT_MODE_IMMEDIATE_KHR) immediateAvailable = true;
-        if (pm == VK_PRESENT_MODE_FIFO_RELAXED_KHR) relaxedAvailable = true;
+        LOG_INFO_CAT("Swapchain", "  • {} ({})", presentModeToString(pm), static_cast<int>(pm));
     }
+
+    const bool hasMailboxExt = std::ranges::contains(presentModes, VK_PRESENT_MODE_FIFO_LATEST_READY_KHR);
+    const bool hasMailbox    = std::ranges::contains(presentModes, VK_PRESENT_MODE_MAILBOX_KHR);
+    const bool hasImmediate  = std::ranges::contains(presentModes, VK_PRESENT_MODE_IMMEDIATE_KHR);
+    const bool hasRelaxed    = std::ranges::contains(presentModes, VK_PRESENT_MODE_FIFO_RELAXED_KHR);
 
     VkPresentModeKHR chosenPM = VK_PRESENT_MODE_FIFO_KHR;
     std::string pmDesc = "FIFO (fallback)";
 
     if (runtimeConfig_.forceVsync) {
         chosenPM = VK_PRESENT_MODE_FIFO_KHR;
-        pmDesc = "FIFO (VSync, 60 FPS)";
+        pmDesc = "FIFO (VSync locked @60Hz)";
     } else {
-        VkPresentModeKHR desired = runtimeConfig_.desiredMode;
-        if (desired == VK_PRESENT_MODE_MAILBOX_KHR && mailboxAvailable) {
+        if (hasMailboxExt) {
+            chosenPM = VK_PRESENT_MODE_FIFO_LATEST_READY_KHR;
+            pmDesc = "FIFO_LATEST_READY (NVIDIA EXT — BEST)";
+        } else if (hasMailbox) {
             chosenPM = VK_PRESENT_MODE_MAILBOX_KHR;
-            pmDesc = "MAILBOX (uncapped, tear-free)";
-        } else if (desired == VK_PRESENT_MODE_IMMEDIATE_KHR && immediateAvailable) {
+            pmDesc = "MAILBOX (optimal — uncapped, tear-free)";
+        } else if (hasImmediate) {
             chosenPM = VK_PRESENT_MODE_IMMEDIATE_KHR;
-            pmDesc = "IMMEDIATE (uncapped, may tear)";
-        } else if (desired == VK_PRESENT_MODE_FIFO_RELAXED_KHR && relaxedAvailable) {
+            pmDesc = "IMMEDIATE (uncapped — fallback)";
+        } else if (hasRelaxed) {
             chosenPM = VK_PRESENT_MODE_FIFO_RELAXED_KHR;
             pmDesc = "FIFO_RELAXED (low latency)";
-        } else if (mailboxAvailable) {
-            chosenPM = VK_PRESENT_MODE_MAILBOX_KHR;
-            pmDesc = "MAILBOX (fallback)";
-        } else if (immediateAvailable) {
-            chosenPM = VK_PRESENT_MODE_IMMEDIATE_KHR;
-            pmDesc = "IMMEDIATE (fallback)";
         } else {
             chosenPM = VK_PRESENT_MODE_FIFO_KHR;
             pmDesc = "FIFO (fallback)";
@@ -198,10 +212,10 @@ void VulkanSwapchainManager::initializeSwapchain(int width, int height)
         extent.height = std::clamp(static_cast<uint32_t>(h), caps.minImageExtent.height, caps.maxImageExtent.height);
     }
 
-    // Step 5: Image Count
-    uint32_t imageCount = std::max(caps.minImageCount, 3u);
-    if (runtimeConfig_.forceTripleBuffer && imageCount < 3) imageCount = 3;
+    // Step 5: Image Count — RTX TRIPLE BUFFER
+    uint32_t imageCount = 3;
     if (caps.maxImageCount > 0 && imageCount > caps.maxImageCount) imageCount = caps.maxImageCount;
+    if (imageCount < caps.minImageCount) imageCount = caps.minImageCount;
 
     // Step 6: Create Swapchain
     VkSwapchainKHR oldSwapchain = swapchain_;
@@ -272,26 +286,18 @@ void VulkanSwapchainManager::initializeSwapchain(int width, int height)
 
     logSwapchainInfo("CREATED");
 
-    // Step 9: Developer Config Logging
+    // ── DEVELOPER CONFIG LOGGING (RTX STYLE) ─────────────────────────────────
     if (runtimeConfig_.logFinalConfig) {
-        LOG_INFO_CAT("Swapchain", "{}DEVELOPER CONFIG:{}{}", OCEAN_TEAL, RESET);
-        LOG_INFO_CAT("Swapchain", "  • Desired Mode : {}", [mode = runtimeConfig_.desiredMode]() -> std::string {
-            switch (mode) {
-                case VK_PRESENT_MODE_MAILBOX_KHR:   return "MAILBOX";
-                case VK_PRESENT_MODE_IMMEDIATE_KHR:return "IMMEDIATE";
-                case VK_PRESENT_MODE_FIFO_RELAXED_KHR: return "FIFO_RELAXED";
-                case VK_PRESENT_MODE_FIFO_KHR:     return "FIFO";
-                default:                           return "UNKNOWN";
-            }
-        }());
-        LOG_INFO_CAT("Swapchain", "  • Force VSync  : {}", runtimeConfig_.forceVsync ? "YES" : "NO");
+        LOG_INFO_CAT("Swapchain", "{}RTX DEVELOPER CONFIG:{}", OCEAN_TEAL, RESET);
+        LOG_INFO_CAT("Swapchain", "  • Desired Mode : {}", presentModeToString(runtimeConfig_.desiredMode));
+        LOG_INFO_CAT("Swapchain", "  • Force VSync  : {}", runtimeConfig_.forceVsync ? "YES (60Hz LOCKED)" : "NO (UNCAPPED)");
         LOG_INFO_CAT("Swapchain", "  • Force Triple : {}", runtimeConfig_.forceTripleBuffer ? "YES" : "NO");
         LOG_INFO_CAT("Swapchain", "  • Final Mode   : {}", pmDesc);
         LOG_INFO_CAT("Swapchain", "  • Images       : {} {}", swapchainImages_.size(),
                      (swapchainImages_.size() >= 3 ? "(TRIPLE)" : "(DOUBLE)"));
     }
 
-    LOG_INFO_CAT("Swapchain", "{}initializeSwapchain COMPLETE{}", EMERALD_GREEN, RESET);
+    LOG_INFO_CAT("Swapchain", "{}initializeSwapchain COMPLETE — RTX BEST MODE ACTIVE{}", OCEAN_TEAL, RESET);
 }
 
 // ── RESIZE ─────────────────────────────────────────────────────────────────
@@ -306,7 +312,7 @@ void VulkanSwapchainManager::handleResize(int width, int height)
 
     LOG_INFO_CAT("Swapchain", "{}RESIZE → {}x{}{}", BRIGHT_PINKISH_PURPLE, w, h, RESET);
 
-    waitForInFlightFrames();  // Fence-based, non-blocking
+    waitForInFlightFrames();
     cleanupSwapchain();
     initializeSwapchain(w, h);
     logSwapchainInfo("RESIZED");
