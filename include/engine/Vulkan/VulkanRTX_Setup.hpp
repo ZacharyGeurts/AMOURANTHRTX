@@ -83,54 +83,54 @@ enum class DescriptorBindings : uint32_t {
 // MAIN RTX CLASS — GLOBAL SPACE SUPREMACY — NO NAMESPACE HELL
 class VulkanRTX {
 public:
-    VulkanRTX(std::shared_ptr<Context> ctx,
-              int width, int height,
-              VulkanPipelineManager* pipelineMgr)
-        : context_(std::move(ctx))
-        , pipelineMgr_(pipelineMgr)
-        , extent_({static_cast<uint32_t>(width), static_cast<uint32_t>(height)})
-        , device_(pipelineMgr_->context_.device)
-        , physicalDevice_(pipelineMgr_->context_.physicalDevice)
-    {
-        LOG_INFO_CAT("VulkanRTX", "{}VulkanRTX BIRTH — STONEKEY 0x{:X}-0x{:X} — {}x{} — RAII ARMED{}", 
-                     Logging::Color::DIAMOND_WHITE, kStone1, kStone2, width, height, Logging::Color::RESET);
+VulkanRTX(std::shared_ptr<Context> ctx,
+                     int width, int height,
+                     VulkanPipelineManager* pipelineMgr)
+    : context_(std::move(ctx))
+    , pipelineMgr_(pipelineMgr)
+    , extent_({static_cast<uint32_t>(width), static_cast<uint32_t>(height)})
+    , device_(pipelineMgr_->context_.device)
+    , physicalDevice_(pipelineMgr_->context_.physicalDevice)
+{
+    LOG_INFO_CAT("VulkanRTX", "{}VulkanRTX BIRTH — STONEKEY 0x{:X}-0x{:X} — {}x{} — RAII ARMED{}", 
+                 Logging::Color::DIAMOND_WHITE, kStone1, kStone2, width, height, Logging::Color::RESET);
 
-        // FIXED: Load function pointers via vkGetDeviceProcAddr — NO CONTEXT DEPENDENCY
-        vkGetBufferDeviceAddress = reinterpret_cast<PFN_vkGetBufferDeviceAddressKHR>(vkGetDeviceProcAddr(device_, "vkGetBufferDeviceAddressKHR"));
-        vkCmdTraceRaysKHR = reinterpret_cast<PFN_vkCmdTraceRaysKHR>(vkGetDeviceProcAddr(device_, "vkCmdTraceRaysKHR"));
-        vkCreateAccelerationStructureKHR = reinterpret_cast<PFN_vkCreateAccelerationStructureKHR>(vkGetDeviceProcAddr(device_, "vkCreateAccelerationStructureKHR"));
-        vkGetAccelerationStructureBuildSizesKHR = reinterpret_cast<PFN_vkGetAccelerationStructureBuildSizesKHR>(vkGetDeviceProcAddr(device_, "vkGetAccelerationStructureBuildSizesKHR"));
-        vkCmdBuildAccelerationStructuresKHR = reinterpret_cast<PFN_vkCmdBuildAccelerationStructuresKHR>(vkGetDeviceProcAddr(device_, "vkCmdBuildAccelerationStructuresKHR"));
-        vkGetAccelerationStructureDeviceAddressKHR = reinterpret_cast<PFN_vkGetAccelerationStructureDeviceAddressKHR>(vkGetDeviceProcAddr(device_, "vkGetAccelerationStructureDeviceAddressKHR"));
-        vkCmdCopyAccelerationStructureKHR = reinterpret_cast<PFN_vkCmdCopyAccelerationStructureKHR>(vkGetDeviceProcAddr(device_, "vkCmdCopyAccelerationStructureKHR"));
+    // FIXED: Load function pointers via vkGetDeviceProcAddr — NO CONTEXT DEPENDENCY
+    vkGetBufferDeviceAddress = reinterpret_cast<PFN_vkGetBufferDeviceAddressKHR>(vkGetDeviceProcAddr(device_, "vkGetBufferDeviceAddressKHR"));
+    vkCmdTraceRaysKHR = reinterpret_cast<PFN_vkCmdTraceRaysKHR>(vkGetDeviceProcAddr(device_, "vkCmdTraceRaysKHR"));
+    vkCreateAccelerationStructureKHR = reinterpret_cast<PFN_vkCreateAccelerationStructureKHR>(vkGetDeviceProcAddr(device_, "vkCreateAccelerationStructureKHR"));
+    vkGetAccelerationStructureBuildSizesKHR = reinterpret_cast<PFN_vkGetAccelerationStructureBuildSizesKHR>(vkGetDeviceProcAddr(device_, "vkGetAccelerationStructureBuildSizesKHR"));
+    vkCmdBuildAccelerationStructuresKHR = reinterpret_cast<PFN_vkCmdBuildAccelerationStructuresKHR>(vkGetDeviceProcAddr(device_, "vkCmdBuildAccelerationStructuresKHR"));
+    vkGetAccelerationStructureDeviceAddressKHR = reinterpret_cast<PFN_vkGetAccelerationStructureDeviceAddressKHR>(vkGetDeviceProcAddr(device_, "vkGetAccelerationStructureDeviceAddressKHR"));
+    vkCmdCopyAccelerationStructureKHR = reinterpret_cast<PFN_vkCmdCopyAccelerationStructureKHR>(vkGetDeviceProcAddr(device_, "vkCmdCopyAccelerationStructureKHR"));
 
-        // FIXED: Create default sampler for fallback textures (combined image sampler)
-        VkSamplerCreateInfo samplerInfo{};
-        samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-        samplerInfo.magFilter = VK_FILTER_LINEAR;
-        samplerInfo.minFilter = VK_FILTER_LINEAR;
-        samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
-        samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-        samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-        samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-        samplerInfo.mipLodBias = 0.0f;
-        samplerInfo.maxAnisotropy = 1.0f;
-        samplerInfo.minLod = 0.0f;
-        samplerInfo.maxLod = 1.0f;
-        samplerInfo.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
-        VkSampler rawSampler;
-        if (vkCreateSampler(device_, &samplerInfo, nullptr, &rawSampler) == VK_SUCCESS) {
-            defaultSampler_ = makeSampler(device_, rawSampler, vkDestroySampler);
-        }
-
-        // FIXED: Create TLAS fence for async
-        VkFenceCreateInfo fenceInfo{.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, .flags = 0};
-        VkFence rawFence;
-        vkCreateFence(device_, &fenceInfo, nullptr, &rawFence);
-        tlasFence_ = makeFence(device_, rawFence, vkDestroyFence);
-
-        createBlackFallbackSignImage();
+    // FIXED: Create default sampler for fallback textures (combined image sampler)
+    VkSamplerCreateInfo samplerInfo{};
+    samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    samplerInfo.magFilter = VK_FILTER_LINEAR;
+    samplerInfo.minFilter = VK_FILTER_LINEAR;
+    samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+    samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    samplerInfo.mipLodBias = 0.0f;
+    samplerInfo.maxAnisotropy = 1.0f;
+    samplerInfo.minLod = 0.0f;
+    samplerInfo.maxLod = 1.0f;
+    samplerInfo.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
+    VkSampler rawSampler;
+    if (vkCreateSampler(device_, &samplerInfo, nullptr, &rawSampler) == VK_SUCCESS) {
+        defaultSampler_ = makeSampler(device_, rawSampler, vkDestroySampler);
     }
+
+    // FIXED: Create TLAS fence for async
+    VkFenceCreateInfo fenceInfo{.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, .flags = 0};
+    VkFence rawFence;
+    vkCreateFence(device_, &fenceInfo, nullptr, &rawFence);
+    tlasFence_ = makeFence(device_, rawFence, vkDestroyFence);
+
+    createBlackFallbackSignImage();
+}
 
     ~VulkanRTX() {
         LOG_INFO_CAT("VulkanRTX", "{}VulkanRTX DEATH — STONEKEY 0x{:X}-0x{:X} — ALL HANDLES OBFUSCATED + RAII PURGED — VALHALLA ETERNAL{}", 
@@ -629,89 +629,96 @@ public:
         vkCmdPipelineBarrier(cmdBuffer, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
     }
 
-    // recordRayTracingCommandsAdaptive() — FULLY IMPLEMENTED — FIXED: pipelineMgr_ for graphics, frameCounter_ for seed
-    void recordRayTracingCommandsAdaptive(VkCommandBuffer cmdBuffer,
-                                          VkExtent2D extent,
-                                          VkImage outputImage,
-                                          VkImageView outputImageView,
-                                          float nexusScore) {
-        nexusScore = std::clamp(nexusScore, 0.0f, 1.0f);
-        frameCounter_++;  // FIXED: Local frame counter for RNG seed — NO CONTEXT DEP
+// In include/engine/Vulkan/VulkanRTX_Setup.hpp
+// FIXED: Fallback rasterization binds with .raw() on public VulkanPipelineManager handles
+// FIXED: No more implicit conversion errors — explicit .raw() for all Vk* from VulkanHandle
+// FIXED: Hybrid RTX + Raster at runtime — nexusScore = 0 = FULL RTX, 1 = FULL RASTER
 
-        VkImageMemoryBarrier toGeneral{
-            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-            .srcAccessMask = 0,
-            .dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
-            .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-            .newLayout = VK_IMAGE_LAYOUT_GENERAL,
-            .image = outputImage,
-            .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}
-        };
-        vkCmdPipelineBarrier(cmdBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, 0, 0, nullptr, 0, nullptr, 1, &toGeneral);
+void VulkanRTX::recordRayTracingCommandsAdaptive(VkCommandBuffer cmdBuffer,
+                                                 VkExtent2D extent,
+                                                 VkImage outputImage,
+                                                 VkImageView outputImageView,
+                                                 float nexusScore) {
+    nexusScore = std::clamp(nexusScore, 0.0f, 1.0f);
+    frameCounter_++;  // Local frame counter for RNG seed
 
-        if (nexusScore < 1.0f && hypertraceEnabled_) {
-            float rtxWeight = 1.0f - nexusScore;
+    VkImageMemoryBarrier toGeneral{
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .srcAccessMask = 0,
+        .dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
+        .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+        .newLayout = VK_IMAGE_LAYOUT_GENERAL,
+        .image = outputImage,
+        .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}
+    };
+    vkCmdPipelineBarrier(cmdBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, 0, 0, nullptr, 0, nullptr, 1, &toGeneral);
 
-            vkCmdBindPipeline(cmdBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, rtPipeline_.raw());
-            vkCmdBindDescriptorSets(cmdBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, rtPipelineLayout_.raw(), 0, 1, &ds_, 0, nullptr);
+    if (nexusScore < 1.0f && hypertraceEnabled_) {
+        float rtxWeight = 1.0f - nexusScore;
 
-            struct AdaptivePush {
-                float rtxWeight;
-                float nexusScore;
-                uint64_t frameSeed;  // FIXED: uint64_t for large multiply
-                uint32_t padding;
-            } push = {rtxWeight, nexusScore, frameCounter_ * 6364136223846793005ULL, 0};
+        vkCmdBindPipeline(cmdBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, rtPipeline_.raw());
+        vkCmdBindDescriptorSets(cmdBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, rtPipelineLayout_.raw(), 0, 1, &ds_, 0, nullptr);
 
-            vkCmdPushConstants(cmdBuffer, rtPipelineLayout_.raw(),
-                               VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR,
-                               0, sizeof(AdaptivePush), &push);
+        struct AdaptivePush {
+            float rtxWeight;
+            float nexusScore;
+            uint64_t frameSeed;
+            uint32_t padding;
+        } push = {rtxWeight, nexusScore, frameCounter_ * 6364136223846793005ULL, 0};
 
-            uint32_t adaptiveWidth = extent.width;
-            uint32_t adaptiveHeight = extent.height;
-            if (nexusScore > 0.5f) {
-                adaptiveWidth  = (extent.width  + 1) / 2;
-                adaptiveHeight = (extent.height + 1) / 2;
-            }
+        vkCmdPushConstants(cmdBuffer, rtPipelineLayout_.raw(),
+                           VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR,
+                           0, sizeof(AdaptivePush), &push);
 
-            vkCmdTraceRaysKHR(cmdBuffer,
-                              &sbt_.raygen,
-                              &sbt_.miss,
-                              &sbt_.hit,
-                              &sbt_.callable,
-                              adaptiveWidth, adaptiveHeight, 1);
-
-            LOG_INFO_CAT("VulkanRTX", "{}ADAPTIVE RTX — nexusScore {:.2f} — rtxWeight {:.2f} — {}x{} → {}x{}{}",
-                         Logging::Color::RASPBERRY_PINK, nexusScore, rtxWeight,
-                         extent.width, extent.height, adaptiveWidth, adaptiveHeight, Logging::Color::RESET);
+        uint32_t adaptiveWidth = extent.width;
+        uint32_t adaptiveHeight = extent.height;
+        if (nexusScore > 0.5f) {
+            adaptiveWidth = (extent.width + 1) / 2;
+            adaptiveHeight = (extent.height + 1) / 2;
         }
 
-        if (nexusScore > 0.0f) {
-            // FIXED: Use pipelineMgr_ for graphics — NO CONTEXT DEP
-            vkCmdBindPipeline(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineMgr_->graphicsPipeline);
+        vkCmdTraceRaysKHR(cmdBuffer,
+                          &sbt_.raygen,
+                          &sbt_.miss,
+                          &sbt_.hit,
+                          &sbt_.callable,
+                          adaptiveWidth, adaptiveHeight, 1);
 
-            VkDescriptorSet fallbackSets[] = { ds_, pipelineMgr_->graphicsDescriptorSetLayout };
-            vkCmdBindDescriptorSets(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                                    pipelineMgr_->graphicsPipelineLayout, 0, 2, fallbackSets, 0, nullptr);
-
-            LOG_INFO_CAT("VulkanRTX", "{}FALLBACK RASTER — nexusScore {:.2f} — SPEED MODE ENGAGED{}", 
-                         Logging::Color::ARCTIC_CYAN, nexusScore, Logging::Color::RESET);
-        }
-
-        VkImageMemoryBarrier toPresent{
-            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-            .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
-            .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-            .oldLayout = VK_IMAGE_LAYOUT_GENERAL,
-            .newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-            .image = outputImage,
-            .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}
-        };
-        vkCmdPipelineBarrier(cmdBuffer, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-                             VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 0, nullptr, 0, nullptr, 1, &toPresent);
-
-        LOG_SUCCESS_CAT("VulkanRTX", "{}ADAPTIVE TRACE COMPLETE — nexusScore {:.2f} — STONEKEY 0x{:X}-0x{:X} — VALHALLA HYBRID ACHIEVED{}",
-                        Logging::Color::EMERALD_GREEN, nexusScore, kStone1, kStone2, Logging::Color::RESET);
+        LOG_INFO_CAT("VulkanRTX", "{}ADAPTIVE RTX — nexusScore {:.2f} — rtxWeight {:.2f} — {}x{} → {}x{}{}",
+                     Logging::Color::RASPBERRY_PINK, nexusScore, rtxWeight,
+                     extent.width, extent.height, adaptiveWidth, adaptiveHeight, Logging::Color::RESET);
     }
+
+    if (nexusScore > 0.0f) {
+        // FIXED: .raw() on all VulkanHandle from PipelineManager
+        vkCmdBindPipeline(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineMgr_->graphicsPipeline.raw());
+
+        VkDescriptorSet fallbackSets[] = { 
+            ds_, 
+            pipelineMgr_->graphicsDescriptorSetLayout.raw() 
+        };
+        vkCmdBindDescriptorSets(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                pipelineMgr_->graphicsPipelineLayout.raw(), 0, 2, fallbackSets, 0, nullptr);
+
+        LOG_INFO_CAT("VulkanRTX", "{}FALLBACK RASTER — nexusScore {:.2f} — SPEED MODE ENGAGED{}", 
+                     Logging::Color::ARCTIC_CYAN, nexusScore, Logging::Color::RESET);
+    }
+
+    VkImageMemoryBarrier toPresent{
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
+        .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+        .oldLayout = VK_IMAGE_LAYOUT_GENERAL,
+        .newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+        .image = outputImage,
+        .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}
+    };
+    vkCmdPipelineBarrier(cmdBuffer, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                         VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 0, nullptr, 0, nullptr, 1, &toPresent);
+
+    LOG_SUCCESS_CAT("VulkanRTX", "{}ADAPTIVE TRACE COMPLETE — nexusScore {:.2f} — STONEKEY 0x{:X}-0x{:X} — VALHALLA HYBRID ACHIEVED{}",
+                    Logging::Color::EMERALD_GREEN, nexusScore, kStone1, kStone2, Logging::Color::RESET);
+}
 
     // createBlackFallbackSignImage() — FULLY IMPLEMENTED — FIXED: pipelineMgr_ for pool/queue
     void createBlackFallbackSignImage() {
