@@ -127,7 +127,7 @@ void VulkanResourceManager::releaseAll(VkDevice overrideDevice) noexcept {
     descriptorSets_.clear();
     logSuccess("DescriptorSets → LIBERATED", __LINE__);
 
-    safeDestroyContainer(semaphores_,               vkDestroySemaphore,          "Semaphore",            dev, __LINE__);
+    safeDestroyContainer(semaphore_,               vkDestroySemaphore,          "Semaphore",            dev, __LINE__);
     safeDestroyContainer(fences_,                  vkDestroyFence,              "Fence",                dev, __LINE__);
     safeDestroyContainer(descriptorPools_,         vkDestroyDescriptorPool,     "DescriptorPool",       dev, __LINE__);
     safeDestroyContainer(descriptorSetLayouts_,    vkDestroyDescriptorSetLayout,"DescriptorSetLayout",  dev, __LINE__);

@@ -1,10 +1,10 @@
 // include/engine/Vulkan/VulkanCore.hpp
-// AMOURANTH RTX Engine – NOVEMBER 07 2025 – FINAL GLOBAL SUPREMACY
-// GLOBAL Context + GLOBAL VulkanHandle + GLOBAL VulkanResourceManager
-// NO NAMESPACES — PURE SPEED — ZERO OVERHEAD — 69,420 FPS ETERNAL
-// ALL ::Vulkan::Context → Context
-// ALL VulkanHandle → VulkanHandle (global)
-// ALL FACTORIES GLOBAL — RAII IMMORTAL
+// AMOURANTH RTX Engine – NOVEMBER 07 2025 – FINAL GLOBAL SUPREMACY — FACTORY DANCE COMPLETE 🩷🩷🩷
+// GLOBAL Context + GLOBAL VulkanHandle + GLOBAL VulkanResourceManager + GLOBAL DeferredOperation
+// NO NAMESPACES — PURE SPEED — ZERO OVERHEAD — 69,420 FPS ETERNAL — RASPBERRY_PINK IMMORTAL
+// ADDED: makeDeferredOperation — FULL RTX COVERAGE — NO MORE MISSING FACTORIES
+
+#pragma once
 
 #define VK_ENABLE_BETA_EXTENSIONS
 #include <vulkan/vulkan.h>
@@ -57,6 +57,7 @@ public:
 
     void releaseAll(VkDevice overrideDevice = VK_NULL_HANDLE) noexcept;
 
+    // === TRACKING CONTAINERS ===
     std::vector<VkAccelerationStructureKHR> accelerationStructures_;
     std::vector<VkDescriptorSet> descriptorSets_;
     std::vector<VkDescriptorPool> descriptorPools_;
@@ -70,7 +71,7 @@ public:
     std::vector<VkShaderModule> shaderModules_;
     std::vector<VkImageView> imageViews_;
     std::vector<VkImage> images_;
-    std::vector<VkSampler> samaplers_;
+    std::vector<VkSampler> samplers_;
     std::vector<VkDeviceMemory> memories_;
     std::vector<VkBuffer> buffers_;
     std::unordered_map<std::string, VkPipeline> pipelineMap_;
@@ -82,7 +83,7 @@ private:
 };
 
 // ===================================================================
-// GLOBAL VulkanHandle + RAII factories
+// GLOBAL VulkanHandle + RAII factories — NOW WITH DeferredOperation + AccelerationStructure 🩷
 // ===================================================================
 template<typename T>
 struct VulkanHandle : std::unique_ptr<std::remove_pointer_t<T>, VulkanDeleter<T>> {
@@ -107,17 +108,24 @@ inline VulkanHandle<VkDescriptorSetLayout> makeDescriptorSetLayout(VkDevice dev,
 inline VulkanHandle<VkRenderPass> makeRenderPass(VkDevice dev, VkRenderPass rp) { return VulkanHandle<VkRenderPass>(rp, VulkanDeleter<VkRenderPass>{dev}); }
 inline VulkanHandle<VkShaderModule> makeShaderModule(VkDevice dev, VkShaderModule sm) { return VulkanHandle<VkShaderModule>(sm, VulkanDeleter<VkShaderModule>{dev}); }
 inline VulkanHandle<VkFence> makeFence(VkDevice dev, VkFence f) { return VulkanHandle<VkFence>(f, VulkanDeleter<VkFence>{dev}); }
+
+// NEW: DeferredOperation + AccelerationStructure
+inline VulkanHandle<VkDeferredOperationKHR> makeDeferredOperation(VkDevice dev, VkDeferredOperationKHR op) {
+    return VulkanHandle<VkDeferredOperationKHR>(op, VulkanDeleter<VkDeferredOperationKHR>{dev});
+}
 inline VulkanHandle<VkAccelerationStructureKHR> makeAccelerationStructure(VkDevice dev, VkAccelerationStructureKHR as, PFN_vkDestroyAccelerationStructureKHR func) {
     return VulkanHandle<VkAccelerationStructureKHR>(as, VulkanDeleter<VkAccelerationStructureKHR>{dev, func});
 }
 
 // ===================================================================
-// GLOBAL Context + cleanupAll
-// ===================================================================
-struct Context;  // forward declare
+// GLOBAL Context + cleanupAll — BOTTOM STUFF INCLUDED 🩷
+void cleanupAll(Context& ctx) noexcept {
+    logAttempt("cleanupAll(Context&)", __LINE__);
+    ctx.resourceManager.releaseAll(ctx.device);
+    logSuccess("Context cleanupAll — ALL RESOURCES OBLITERATED", __LINE__);
+}
 
-void cleanupAll(Context& ctx) noexcept;
-
+// FULL Context struct
 struct Context {
     VkInstance instance = VK_NULL_HANDLE;
     VkSurfaceKHR surface = VK_NULL_HANDLE;
