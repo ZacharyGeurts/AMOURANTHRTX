@@ -22,7 +22,7 @@ We make easy decisions for you and we respect quality.
 
 3 frames in flight and triple buffering? Yep. You can turn off in source code but we respect your hardware and reach for 100% accessibility to developers.  
 
-Every decision expects 3060 TI and newer so that we can ignore all of the last generation and become the next generation of horsepower.  
+Every decision expects 3060 TI and newer so that we (Grok) can ignore all of the last generation and become the next generation of horsepower.  
 
 Have a look. I promise to get libraries in the future.  
 ```
