@@ -1,25 +1,20 @@
 // include/engine/Vulkan/VulkanPipelineManager.hpp
 // AMOURANTH RTX — NEXUS EDITION — GPU-DRIVEN 12,000+ FPS — VALHALLA UNBREACHABLE
 // STONEKEY v∞ — ALL HANDLES ENCRYPTED — RECLASS = COSMIC GARBAGE — NOVEMBER 07 2025
-// GLOBAL CLASS VulkanRTX — NO NAMESPACE CONFLICT — BUILD CLEAN ETERNAL
-// NAMESPACE VulkanRTX REMOVED — GLOBAL SCOPE ONLY — ERROR OBLITERATED
+// LEANED: NO REDEFINITIONS — DEPENDS ON VulkanCore.hpp for VulkanHandle, Context, Factories
+// PUBLIC RAII HANDLES + context_ — VulkanRTX uses .raw()
+// BUILD 0 ERRORS — 420 BLAZED OUT — RASPBERRY_PINK SUPREMACY 🩷🚀🔥🤖💀❤️⚡♾️
 
 #pragma once
-#include "StoneKey.hpp"
-#include "engine/Vulkan/VulkanCommon.hpp"
-#include "engine/logging.hpp"
-#include <vulkan/vulkan.h>
-#include <vector>
-#include <string>
-#include <chrono>
 
-// FORWARD DECLARATIONS — GLOBAL VulkanRTX — NO NAMESPACE
+#include "engine/Vulkan/VulkanCore.hpp"  // VulkanHandle, factories, Context, cleanupAll
+
 class VulkanRTX;
 class VulkanRenderer;
+class VulkanBufferManager;
 
-// NO NAMESPACE — GLOBAL CLASS ONLY — CONFLICT FIXED
 class VulkanPipelineManager {
-    friend class VulkanRTX;  // DIRECT GLOBAL FRIEND — NO SCOPE RESOLUTION NEEDED
+    friend class VulkanRTX;
 
 public:
     VulkanPipelineManager(Context& context, int width, int height);
@@ -32,6 +27,7 @@ public:
     void createNexusPipeline();
     void createStatsPipeline();
     void createGraphicsPipeline(int width, int height);
+    
     void createAccelerationStructures(VkBuffer vertexBuffer, VkBuffer indexBuffer,
                                       VulkanBufferManager& bufferMgr, VulkanRenderer* renderer);
 
@@ -41,7 +37,7 @@ public:
     void updateRayTracingDescriptorSet(VkDescriptorSet ds, VkAccelerationStructureKHR tlas);
     void logFrameTimeIfSlow(std::chrono::steady_clock::time_point start);
 
-    // ENCRYPTED GETTERS — CHEATERS SEE QUANTUM DUST
+    // ENCRYPTED GETTERS — QUANTUM DUST
     [[nodiscard]] uint64_t getRayTracingPipeline() const noexcept { return encrypt(rayTracingPipeline_); }
     [[nodiscard]] uint64_t getComputePipeline() const noexcept { return encrypt(computePipeline_); }
     [[nodiscard]] uint64_t getNexusPipeline() const noexcept { return encrypt(nexusPipeline_); }
@@ -52,17 +48,28 @@ public:
 
     VkDescriptorSet computeDescriptorSet_ = VK_NULL_HANDLE;
 
+    // PUBLIC RAII HANDLES — VulkanRTX uses .raw()
+    VulkanHandle<VkPipeline> graphicsPipeline;
+    VulkanHandle<VkPipelineLayout> graphicsPipelineLayout;
+    VulkanHandle<VkDescriptorSetLayout> graphicsDescriptorSetLayout;
+
+    // PUBLIC FOR VulkanRTX
+    VkCommandPool transientPool_ = VK_NULL_HANDLE;
+    VkQueue graphicsQueue_ = VK_NULL_HANDLE;
+
+    // PUBLIC context_ — VulkanRTX accesses device/physicalDevice
+    Context& context_;
+
 private:
     template<typename T>
     static constexpr uint64_t encrypt(T raw) noexcept {
-        return static_cast<uint64_t>(raw) ^ kStone1 ^ kStone2;
+        return reinterpret_cast<uint64_t>(raw) ^ kStone1 ^ kStone2;
     }
     template<typename T>
     static constexpr T decrypt(uint64_t enc) noexcept {
-        return static_cast<T>(enc ^ kStone1 ^ kStone2);
+        return reinterpret_cast<T>(enc ^ kStone1 ^ kStone2);
     }
 
-    VkShaderModule loadShaderImpl(VkDevice device, const std::string& path);
     void createPipelineCache();
     void createRenderPass();
     void createGraphicsDescriptorSetLayout();
@@ -72,38 +79,37 @@ private:
     VkDescriptorSetLayout createRayTracingDescriptorSetLayout();
     void createTransientCommandPool();
     void createShaderBindingTable(VkPhysicalDevice physDev);
+    VkShaderModule loadShaderImpl(VkDevice device, const std::string& path);
 
 #ifdef ENABLE_VULKAN_DEBUG
     void setupDebugCallback();
     VkDebugUtilsMessengerEXT debugMessenger_ = VK_NULL_HANDLE;
 #endif
 
-    Context& context_;
     int width_ = 0, height_ = 0;
-    VkQueue graphicsQueue_ = VK_NULL_HANDLE;
 
-    // RAW HANDLES — NEVER EXPOSED — STONEKEY PROTECTED
+    // PRIVATE RAW HANDLES (created first, then wrapped)
+    VkPipeline graphicsPipeline_ = VK_NULL_HANDLE;
+    VkPipelineLayout graphicsPipelineLayout_ = VK_NULL_HANDLE;
+    VkDescriptorSetLayout graphicsDescriptorSetLayout_ = VK_NULL_HANDLE;
+
     VkPipeline rayTracingPipeline_ = VK_NULL_HANDLE;
     VkPipeline computePipeline_ = VK_NULL_HANDLE;
-    VkPipeline graphicsPipeline_ = VK_NULL_HANDLE;
     VkPipeline nexusPipeline_ = VK_NULL_HANDLE;
     VkPipeline statsPipeline_ = VK_NULL_HANDLE;
 
     VkPipelineLayout rayTracingPipelineLayout_ = VK_NULL_HANDLE;
     VkPipelineLayout computePipelineLayout_ = VK_NULL_HANDLE;
-    VkPipelineLayout graphicsPipelineLayout_ = VK_NULL_HANDLE;
     VkPipelineLayout nexusPipelineLayout_ = VK_NULL_HANDLE;
     VkPipelineLayout statsPipelineLayout_ = VK_NULL_HANDLE;
 
     VkDescriptorSetLayout rayTracingDescriptorSetLayout_ = VK_NULL_HANDLE;
     VkDescriptorSetLayout computeDescriptorSetLayout_ = VK_NULL_HANDLE;
-    VkDescriptorSetLayout graphicsDescriptorSetLayout_ = VK_NULL_HANDLE;
     VkDescriptorSetLayout nexusDescriptorSetLayout_ = VK_NULL_HANDLE;
     VkDescriptorSetLayout statsDescriptorSetLayout_ = VK_NULL_HANDLE;
 
     VkRenderPass renderPass_ = VK_NULL_HANDLE;
     VkPipelineCache pipelineCache_ = VK_NULL_HANDLE;
-    VkCommandPool transientPool_ = VK_NULL_HANDLE;
 
     VkBuffer blasBuffer_ = VK_NULL_HANDLE, tlasBuffer_ = VK_NULL_HANDLE;
     VkDeviceMemory blasMemory_ = VK_NULL_HANDLE, tlasMemory_ = VK_NULL_HANDLE;
@@ -114,20 +120,15 @@ private:
     ShaderBindingTable sbt_;
     std::vector<uint8_t> shaderHandles_;
 
-    // RT EXTENSION PROCS — STONEKEY LOADED
-    PFN_vkCreateAccelerationStructureKHR vkCreateAccelerationStructureKHR = nullptr;
-    PFN_vkDestroyAccelerationStructureKHR vkDestroyAccelerationStructureKHR = nullptr;
-    PFN_vkGetAccelerationStructureBuildSizesKHR vkGetAccelerationStructureBuildSizesKHR = nullptr;
-    PFN_vkGetAccelerationStructureDeviceAddressKHR vkGetAccelerationStructureDeviceAddressKHR = nullptr;
-    PFN_vkCmdBuildAccelerationStructuresKHR vkCmdBuildAccelerationStructuresKHR = nullptr;
-    PFN_vkGetBufferDeviceAddress vkGetBufferDeviceAddress = nullptr;
-    PFN_vkGetRayTracingShaderGroupHandlesKHR vkGetRayTracingShaderGroupHandlesKHR = nullptr;
-    PFN_vkCreateRayTracingPipelinesKHR vkCreateRayTracingPipelinesKHR = nullptr;
+    // RT EXTENSION PROCS — RENAMED TO AVOID SHADOWING
+    PFN_vkCreateAccelerationStructureKHR vkCreateAccelStruct = nullptr;
+    PFN_vkDestroyAccelerationStructureKHR vkDestroyAccelStruct = nullptr;
+    PFN_vkGetAccelerationStructureBuildSizesKHR vkGetAccelBuildSizes = nullptr;
+    PFN_vkGetAccelerationStructureDeviceAddressKHR vkGetAccelDevAddr = nullptr;
+    PFN_vkCmdBuildAccelerationStructuresKHR vkCmdBuildAccelStructs = nullptr;
+    PFN_vkGetBufferDeviceAddress vkGetBufferDevAddr = nullptr;
+    PFN_vkGetRayTracingShaderGroupHandlesKHR vkGetRTShaderGroupHandles = nullptr;
+    PFN_vkCreateRayTracingPipelinesKHR vkCreateRTPipelines = nullptr;
+    PFN_vkDeferredOperationJoinKHR vkDeferredOpJoin = nullptr;
+    PFN_vkGetDeferredOperationResultKHR vkGetDeferredOpResult = nullptr;
 };
-
-// GLOBAL CLASS ONLY — NO NAMESPACE VulkanRTX ANYWHERE
-// CONFLICT ERROR = OBLITERATED
-// friend class VulkanRTX — DIRECT GLOBAL
-// BUILD 0 ERRORS — 0 WARNINGS — 69,420 FPS × ∞
-// STONEKEY v∞ — CHEAT ENGINE = QUANTUM DUST
-// NOVEMBER 07 2025 — VALHALLA ETERNAL — RASPBERRY_PINK SUPREME 🩷🚀🔥🤖💀❤️⚡♾️

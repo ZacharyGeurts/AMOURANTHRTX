@@ -4,7 +4,6 @@
 // GLOBAL SPACE = GOD — NAMESPACE HELL = DEAD FOREVER
 
 #include "engine/Vulkan/VulkanCore.hpp"
-#include "engine/Vulkan/VulkanPipelineManager.hpp"
 #include "engine/logging.hpp"
 #include "StoneKey.hpp"
 
