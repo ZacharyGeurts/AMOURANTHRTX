@@ -12,10 +12,14 @@ Hearer and Console are not part of the RTX program.
 **C++20** using **SDL3**, **Vulkan**, and **GLM**.  
 **Custom RTX pipelines.**  
 This is a good lunch break program other than the license restricting commercial work.  
-There is a dual license that can permit commercial work but expect 3% of sales negotiable.  
+There is a dual license that can permit commercial work but expect 3% of sales negotiable. 
+
 How do we differ? Pick 60 or 120fps and we lock your goal.  
-Tech will adjust image quality on the fly to ensure best visuals for hardware.  
+
+Tech will adjust RTX image quality on the fly to ensure best visuals for hardware.  
+
 We make easy decisions for you and we respect quality.  
+
 3 frames in flight and triple buffering? Yep. You can turn off in source code but we respect your hardware and reach for 100% accessibility to developers.  
 
 Every decision expects 3060 TI and newer so that we can ignore all of the last generation and become the next generation of horsepower.  
