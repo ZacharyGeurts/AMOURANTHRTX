@@ -16,8 +16,10 @@ There is a dual license that can permit commercial work but expect 3% of sales n
 How do we differ? Pick 60 or 120fps and we lock your goal.  
 Tech will adjust image quality on the fly to ensure best visuals for hardware.  
 We make easy decisions for you and we respect quality.  
-3 frames in flight and triple buffering? Yep. You can turn off in source code but we respect your hardware can handle it.  
-Every decision expects 3060 TI and newer so that we can ignore all of the last generation and become the next.  
+3 frames in flight and triple buffering? Yep. You can turn off in source code but we respect your hardware and reach for 100% accessibility to developers.  
+
+Every decision expects 3060 TI and newer so that we can ignore all of the last generation and become the next generation of horsepower.  
+
 Have a look. I promise to get libraries in the future.  
 ```
 git clone https://github.com/ZacharyGeurts/AMOURANTHRTX
