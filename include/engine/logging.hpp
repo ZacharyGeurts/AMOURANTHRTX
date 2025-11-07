@@ -100,13 +100,13 @@ namespace Color {
     inline constexpr std::string_view RESET                   = "\033[0m";
     inline constexpr std::string_view ULTRA_NEON_LIME         = "\033[38;5;82m";   // TRACE: Pulsing electric lime glow
     inline constexpr std::string_view PLATINUM_GRAY           = "\033[38;5;255m";  // INFO: Ultra-crisp platinum sheen
-    inline constexpr std::string_view EMERALD_GREEN           = "\033[38;5;35m";   // SUCCESS / ENGINE: Deep emerald vibrance
+    inline constexpr std::string_view EMERALD_GREEN           = "\033[1;38;5;35m";   // SUCCESS / ENGINE: Deep emerald vibrance
     inline constexpr std::string_view ARCTIC_CYAN             = "\033[38;5;45m";   // DEBUG: Icy arctic cyan pulse
     inline constexpr std::string_view AMBER_YELLOW            = "\033[38;5;220m";  // WARNING: Fiery amber blaze
     inline constexpr std::string_view CRIMSON_MAGENTA         = "\033[1;38;5;197m";  // ERROR: Blood-red crimson fury
     inline constexpr std::string_view SAPPHIRE_BLUE           = "\033[38;5;33m";   // RENDER: Deep sapphire depth
     inline constexpr std::string_view SCARLET_RED             = "\033[38;5;196m";  // FATAL / VULKAN: Scarlet inferno
-    inline constexpr std::string_view DIAMOND_WHITE           = "\033[38;5;231m";  // HEADER: Pristine diamond sparkle
+    inline constexpr std::string_view DIAMOND_WHITE           = "\033[1;38;5;231m";  // SETUP: Bold Pristine diamond sparkle
     inline constexpr std::string_view VIOLET_PURPLE           = "\033[38;5;99m";   // SHADER / PIPELINE: Mystical violet aura
     inline constexpr std::string_view FIERY_ORANGE            = "\033[38;5;202m";  // PERFORMANCE: Blazing fiery orange
     inline constexpr std::string_view OCEAN_TEAL              = "\033[38;5;37m";   // SWAPCHAIN: Oceanic teal wave

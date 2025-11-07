@@ -54,7 +54,7 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
 // ---------------------------------------------------------------------------
 //  1. CONSTRUCTOR & DESTRUCTOR
 // ---------------------------------------------------------------------------
-VulkanPipelineManager::VulkanPipelineManager(Vulkan::Context& context, int width, int height)
+VulkanPipelineManager::VulkanPipelineManager(Context& context, int width, int height)
     : context_(context), width_(width), height_(height)
 {
 #ifndef NDEBUG
@@ -651,8 +651,8 @@ void VulkanPipelineManager::createAccelerationStructures(
     LOG_INFO_CAT("Vulkan", "{}    vertexAddress = 0x{:x}, indexAddress = 0x{:x}{}", 
                  VIOLET_PURPLE, vertexAddress, indexAddress, RESET);
 
-    const uint32_t vertexCount   = bufferMgr.getVertexCount();
-    const uint32_t indexCount    = bufferMgr.getIndexCount();
+    const uint32_t vertexCount   = bufferMgr.vertex_count();
+    const uint32_t indexCount    = bufferMgr.index_count();
     const uint32_t triangleCount = indexCount / 3;
 
     LOG_INFO_CAT("Vulkan", "{}    Geometry: {} verts, {} indices ({} triangles){}", 

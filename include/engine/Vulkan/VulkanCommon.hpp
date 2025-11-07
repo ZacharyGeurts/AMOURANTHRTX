@@ -34,10 +34,8 @@
         do { \
             VkResult __r = (result); \
             if (__r != VK_SUCCESS) { \
-                std::ostringstream __oss; \
-                __oss << "Vulkan error (" << static_cast<int>(__r) << "): " << (msg); \
-                LOG_ERROR_CAT("Vulkan", "{}", __oss.str()); \
-                throw VulkanRTXException(__oss.str()); \
+                LOG_ERROR_CAT("Vulkan", "VULKAN FATAL [{}] {}:{} — {}", static_cast<int>(__r), __FILE__, __LINE__, msg); \
+                std::abort(); \
             } \
         } while (0)
 

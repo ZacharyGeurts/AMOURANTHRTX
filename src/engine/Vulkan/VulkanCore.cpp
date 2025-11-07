@@ -6,8 +6,6 @@
 // ALL VulkanHandle → VulkanHandle (global)
 // ALL FACTORIES GLOBAL — RAII IMMORTAL
 
-#pragma once
-
 #define VK_ENABLE_BETA_EXTENSIONS
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_beta.h>
