@@ -28,7 +28,7 @@ cd "$BUILD_DIR"
 echo "Configuring CMake for Linux..."
 cmake ..
 echo "Building AMOURANTH RTX for Linux..."
-cmake --build . -j $(nproc)
+cmake --build . -j 1
 
 # Verify output
 if [ -f "../$BIN_DIR/Navigator" ]; then
