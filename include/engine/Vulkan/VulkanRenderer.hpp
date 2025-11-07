@@ -43,12 +43,6 @@ class VulkanSwapchainManager;
 class Camera;
 
 // ===================================================================
-// GROK TIP #7: VulkanHandle<T> = std::unique_ptr<T, VulkanDeleter<T>> — RAII GOD TIER
-// ===================================================================
-template <typename T>
-using VulkanHandle = std::unique_ptr<std::remove_pointer_t<T>, VulkanDeleter<T>>;
-
-// ===================================================================
 // VulkanRenderer — FULL RAII DISPOSE INFUSION — GLOBAL CLASS — EVERY HANDLE AUTO-FREED
 // GROK TIP #8: No manual vkDestroy EVER — Destructor = 5 lines of pure bliss
 // ===================================================================
