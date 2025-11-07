@@ -2,7 +2,6 @@
 #pragma once
 
 #include "engine/Vulkan/VulkanCommon.hpp"
-#include "engine/RTConstants.hpp"
 #include "engine/logging.hpp"
 
 #include <vulkan/vulkan.h>

@@ -1,18 +1,21 @@
 #version 460
 #extension GL_EXT_ray_tracing : require
 #extension GL_EXT_nonuniform_qualifier : enable
-
 #pragma shader_stage(anyhit)
 
-#include "engine/Vulkan/VulkanCommon.hpp"
+#include <engine/Vulkan/VulkanCommon.hpp>
 
-hitAttributeEXT vec3 hitAttribs;
-
-layout(set = 0, binding = 11) uniform sampler3D volumeTex;
+hitAttributeEXT vec3 attribs;  // barycentric
 
 void main()
 {
-    float density = texture(volumeTex, hitAttribs).r;
-    if (density < 0.01)
-        ignoreIntersectionEXT();
+    vec3 bary = attribs;
+    vec3 pos = gl_WorldRayOriginEXT + gl_HitTEXT * gl_WorldRayDirectionEXT;
+
+    // Sample 3D volume
+    float density = texture(volumeTex, pos * 0.1f).r;  // scale as needed
+
+    if (density < 0.01f) {
+        ignoreIntersectionEXT;
+    }
 }

@@ -1,27 +1,19 @@
 #version 460
 #extension GL_EXT_ray_tracing : require
 #extension GL_EXT_nonuniform_qualifier : enable
-
 #pragma shader_stage(anyhit)
 
-#include "engine/Vulkan/VulkanCommon.hpp"
+#include <engine/Vulkan/VulkanCommon.hpp>
 
-hitAttributeEXT vec2 hitAttribs;
-
-layout(set = 0, binding = 10) uniform sampler2D alphaTex;
+hitAttributeEXT vec2 attribs;
 
 void main()
 {
-    vec3 bary = vec3(1.0f - hitAttribs.x - hitAttribs.y, hitAttribs.x, hitAttribs.y);
-    
-    vec2 uv = bary.x * vec2(0.0f, 0.0f) +
-              bary.y * vec2(1.0f, 0.0f) +
-              bary.z * vec2(0.5f, 1.0f);
+    vec3 bary = vec3(1.0f - attribs.x - attribs.y, attribs.x, attribs.y);
+    vec2 uv = bary.x * vec2(0.0f) + bary.y * vec2(1.0f, 0.0f) + bary.z * vec2(0.5f, 1.0f);
 
     float alpha = texture(alphaTex, uv).r;
-
-    if (alpha < 0.7f)
-    {
-        ignoreIntersectionEXT();
+    if (alpha < 0.7f) {
+        ignoreIntersectionEXT;
     }
 }

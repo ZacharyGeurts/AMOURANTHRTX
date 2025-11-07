@@ -5,7 +5,6 @@
 #pragma once
 
 #include "engine/Vulkan/VulkanCommon.hpp"
-#include "engine/RTConstants.hpp"
 
 namespace VulkanRTX {
 

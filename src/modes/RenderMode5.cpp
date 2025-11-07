@@ -12,7 +12,6 @@
 
 #include "modes/RenderMode5.hpp"
 #include "engine/Vulkan/VulkanCore.hpp"
-#include "engine/RTConstants.hpp"
 #include "engine/camera.hpp"
 #include "engine/logging.hpp"
 #include "engine/Vulkan/VulkanRTX_Setup.hpp"

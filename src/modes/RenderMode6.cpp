@@ -4,7 +4,6 @@
 
 #include "modes/RenderMode6.hpp"
 #include "engine/Vulkan/VulkanCore.hpp"
-#include "engine/RTConstants.hpp"
 #include "engine/camera.hpp"
 #include "engine/logging.hpp"
 
