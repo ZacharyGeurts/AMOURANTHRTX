@@ -13,6 +13,8 @@ Hearer and Console are not part of the RTX program.
 **Custom RTX pipelines.**  
 This is a good lunch break program other than the license restricting commercial work.  
 There is a dual license that can permit commercial work but expect 3% of sales negotiable.  
+How do we differ? Pick 60 or 120fps and we lock your goal.  
+Tech will adjust image quality on the fly to ensure best visuals for hardware.  
 Have a look. I promise to get libraries in the future.  
 ```
 git clone https://github.com/ZacharyGeurts/AMOURANTHRTX
