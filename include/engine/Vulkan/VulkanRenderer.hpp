@@ -76,7 +76,7 @@ public:
     // GROK TIP #11: Context + pipelineMgr passed in — ownership taken later via unique_ptr
     VulkanRenderer(int width, int height, SDL_Window* window,
                    const std::vector<std::string>& shaderPaths,
-                   std::shared_ptr<::Vulkan::Context> context,
+                   std::shared_ptr<Context> context,
                    VulkanPipelineManager* pipelineMgr);
     
     // GROK TIP #12: Destructor = RAII APOCALYPSE — every VulkanHandle dies with love
@@ -101,7 +101,7 @@ public:
 
     [[nodiscard]] VulkanBufferManager*          getBufferManager() const;
     [[nodiscard]] VulkanPipelineManager*        getPipelineManager() const;
-    [[nodiscard]] std::shared_ptr<::Vulkan::Context> getContext() const { return context_; }
+    [[nodiscard]] std::shared_ptr<Context> getContext() const { return context_; }
     [[nodiscard]] FpsTarget                     getFpsTarget() const { return fpsTarget_; }
 
     // GROK TIP #14: noexcept getters = hot path friendly
@@ -170,7 +170,7 @@ private:
     float     currentNexusScore_ = 0.5f;
 
     SDL_Window*                     window_;
-    std::shared_ptr<::Vulkan::Context> context_;
+    std::shared_ptr<Context> context_;
     VulkanPipelineManager*          pipelineMgr_;
 
     // GROK TIP #18: unique_ptr ownership = clear lifetime — RAII cascade on destroy

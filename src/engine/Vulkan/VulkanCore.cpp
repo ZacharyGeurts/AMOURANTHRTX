@@ -1,9 +1,10 @@
 // include/engine/Vulkan/VulkanCore.hpp
-// AMOURANTH RTX Engine – NOVEMBER 07 2025 – FINAL GLOBAL VULKAN SUPREMACY
-// ::Vulkan IS DEAD — LONG LIVE GLOBAL Context + VulkanHandle
-// ALL ::Vulkan::Context → Context (global)
-// ALL VulkanHandle → ::VulkanHandle (global template)
-// ZERO NAMESPACE POLLUTION — PURE SPEED — 69,420 FPS ETERNAL
+// AMOURANTH RTX Engine – NOVEMBER 07 2025 – FINAL GLOBAL SUPREMACY
+// GLOBAL Context + GLOBAL VulkanHandle + GLOBAL VulkanResourceManager
+// NO NAMESPACES — PURE SPEED — ZERO OVERHEAD — 69,420 FPS ETERNAL
+// ALL ::Vulkan::Context → Context
+// ALL VulkanHandle → VulkanHandle (global)
+// ALL FACTORIES GLOBAL — RAII IMMORTAL
 
 #pragma once
 

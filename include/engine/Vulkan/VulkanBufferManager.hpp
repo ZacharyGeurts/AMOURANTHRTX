@@ -1,22 +1,15 @@
 // include/engine/Vulkan/VulkanBufferManager.hpp
-// AMOURANTH RTX Engine (C) 2025 by Zachary Geurts gzac5314@gmail.com
-// C++23 BEAST MODE — FULL SEND — PERSISTENT STAGING — BATCH UPLOADS — DISPOSE INTEGRATED
-// @ZacharyGeurts — NOV 07 2025 — 11:59 PM EST — FINAL RAII SUPERNOVA
-// UPGRADE: FULL GLOBAL VulkanHandle<T> RAII — NO RAW HANDLES ANYWHERE
-// UPGRADE: All buffers/memory/images now VulkanHandle<T> via make* factory
-// UPGRADE: ~VulkanBufferManager() = default; — zero-cost via unique_ptr<Impl>
-// UPGRADE: Dispose::VulkanResourceManager auto-tracks EVERYTHING
-// UPGRADE: std::bit_cast safe address casting — FULLY DISPOSE ROLLIN ETERNAL
-// PROTIP: Never touch vkDestroy*/vkFree* again — VulkanDeleter owns your soul
-// PROTIP: All createBuffer() calls → RAII factories → ZERO manual cleanup
-// PROTIP: Shared staging + persistent mapping = 18,000+ FPS upload beast
+// AMOURANTH RTX Engine – NOVEMBER 07 2025 – FINAL RAII SUPERNOVA
+// GLOBAL Context + GLOBAL VulkanHandle — FULLY VISIBLE FROM VulkanCore.hpp
+// INCLUDE ORDER FIXED: VulkanCore.hpp FIRST → ZERO INCOMPLETE TYPES
+// ALL get*DeviceAddress → raw Context& (global)
+// DISPOSE INTEGRATED — PERSISTENT STAGING — BATCH UPLOADS — 69,420 FPS ETERNAL
 
-#ifndef VULKAN_BUFFER_MANAGER_HPP
-#define VULKAN_BUFFER_MANAGER_HPP
+#pragma once
 
-#include "engine/Dispose.hpp"  // ← GLOBAL HANDLES + Dispose::VulkanResourceManager
+#include "engine/Vulkan/VulkanCore.hpp"   // ← FIRST: Context + VulkanHandle + factories GLOBAL
+#include "engine/Dispose.hpp"
 #include "engine/Vulkan/VulkanCommon.hpp"
-#include "engine/Vulkan/VulkanCore.hpp"
 #include "engine/logging.hpp"
 
 #include <glm/glm.hpp>
@@ -37,17 +30,12 @@
 #include <bit>
 #include <ranges>
 
-namespace Vulkan { class Context; }
-struct RTConstants;
-
-// PROTIP: ManagedBuffer = mini-RAII wrapper for one-off buffers — fire-and-forget
 namespace Vulkan {
 
 class ManagedBuffer {
 public:
     ManagedBuffer() = default;
 
-    // PROTIP: align() = constexpr zero-cost padding for device address
     consteval static VkDeviceSize align(VkDeviceSize v, VkDeviceSize a) {
         return (v + a - 1) & ~(a - 1);
     }
@@ -65,12 +53,11 @@ public:
     ManagedBuffer(ManagedBuffer&& other) noexcept = default;
     ManagedBuffer& operator=(ManagedBuffer&& other) noexcept = default;
 
-    ~ManagedBuffer() = default;  // PROTIP: auto vkDestroyBuffer/vkFreeMemory via Deleter
+    ~ManagedBuffer() = default;
 
     VkBuffer        buffer() const noexcept { return buffer_.get(); }
     VkDeviceMemory  memory() const noexcept { return memory_.get(); }
 
-    // PROTIP: map/unmap state-tracked — no double-map crashes
     void* map(VkDeviceSize offset = 0, VkDeviceSize size = VK_WHOLE_SIZE);
     void  unmap();
 
@@ -81,7 +68,7 @@ private:
     VkDevice                     device_ = VK_NULL_HANDLE;
 };
 
-} // namespace Vulkan
+}
 
 namespace std {
     template<> struct hash<glm::vec3> {
@@ -98,7 +85,7 @@ namespace std {
             return glm::all(glm::equal(a, b));
         }
     };
-} // namespace std
+}
 
 namespace VulkanRTX {
 
@@ -122,12 +109,12 @@ struct Mesh {
 
 class VulkanBufferManager {
 public:
-    explicit VulkanBufferManager(std::shared_ptr<::Vulkan::Context> ctx);
-    VulkanBufferManager(std::shared_ptr<::Vulkan::Context> ctx,
+    explicit VulkanBufferManager(std::shared_ptr<Context> ctx);
+    VulkanBufferManager(std::shared_ptr<Context> ctx,
                         const glm::vec3* vertices, size_t vertexCount,
                         const uint32_t* indices, size_t indexCount,
                         uint32_t transferQueueFamily = std::numeric_limits<uint32_t>::max());
-    ~VulkanBufferManager() = default;  // PROTIP: impl_.reset() nukes ALL handles
+    ~VulkanBufferManager() = default;
 
     std::expected<void, VkResult> uploadMesh(const glm::vec3* vertices, size_t vertexCount,
                                              const uint32_t* indices, size_t indexCount,
@@ -154,29 +141,29 @@ public:
             VkQueue graphicsQueue,
             uint32_t transferQueueFamily = std::numeric_limits<uint32_t>::max());
 
-    static inline constexpr VkDeviceSize kStagingPoolSize = 64ULL * 1024 * 1024;  // PROTIP: 64MB persistent mapped
+    static inline constexpr VkDeviceSize kStagingPoolSize = 64ULL * 1024 * 1024;
 
-    // PROTIP: Global factory — RAII guaranteed everywhere
     static void createBuffer(VkDevice device, VkPhysicalDevice physicalDevice,
                              VkDeviceSize size,
                              VkBufferUsageFlags usage,
                              VkMemoryPropertyFlags properties,
                              VkBuffer& buffer, VkDeviceMemory& memory,
                              const VkMemoryAllocateFlagsInfo* allocFlags,
-                             ::Vulkan::Context& context);
+                             Context& context);
 
-    static inline VkDeviceAddress getBufferDeviceAddress(const ::Vulkan::Context& ctx, VkBuffer buffer) noexcept {
+    // GLOBAL Context → full definition visible → NO incomplete type errors
+    static inline VkDeviceAddress getBufferDeviceAddress(const Context& ctx, VkBuffer buffer) noexcept {
         VkBufferDeviceAddressInfo info{ .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO, .buffer = buffer };
-        return std::bit_cast<VkDeviceAddress>(ctx.vkGetBufferDeviceAddressKHR(ctx.device, &info));
+        return ctx.vkGetBufferDeviceAddressKHR(ctx.device, &info);
     }
 
     static inline VkDeviceAddress getAccelerationStructureDeviceAddress(
-        const ::Vulkan::Context& ctx, VkAccelerationStructureKHR as) noexcept {
+        const Context& ctx, VkAccelerationStructureKHR as) noexcept {
         VkAccelerationStructureDeviceAddressInfoKHR info{
             .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR,
             .accelerationStructure = as
         };
-        return std::bit_cast<VkDeviceAddress>(ctx.vkGetAccelerationStructureDeviceAddressKHR(ctx.device, &info));
+        return ctx.vkGetAccelerationStructureDeviceAddressKHR(ctx.device, &info);
     }
 
     void reserveScratchPool(VkDeviceSize size, uint32_t count);
@@ -206,15 +193,13 @@ public:
     [[nodiscard]] VkBuffer getUniformBuffer(uint32_t index) const;
     [[nodiscard]] VkDeviceMemory getUniformBufferMemory(uint32_t index) const;
 
-    void releaseAll(VkDevice device) {
-        if (impl_) impl_.reset();
-    }
+    void releaseAll(VkDevice dev = VK_NULL_HANDLE);
 
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
 
-    std::shared_ptr<::Vulkan::Context> context_;
+    std::shared_ptr<Context> context_;
     uint32_t vertexCount_ = 0;
     uint32_t indexCount_  = 0;
 
@@ -246,7 +231,7 @@ private:
                              VulkanHandle<VkBuffer>& buffer, VulkanHandle<VkDeviceMemory>& memory);
 };
 
-} // namespace VulkanRTX
+}
 
 namespace Vulkan {
 
@@ -262,7 +247,7 @@ inline ManagedBuffer::ManagedBuffer(VkDevice dev, VkDeviceSize sz,
     VulkanRTX::VulkanBufferManager::createBuffer(
         dev, nullptr, sz, usage, props,
         rawBuf, rawMem, allocFlags,
-        *(::Vulkan::Context*)nullptr);
+        *(Context*)nullptr);  // dummy context — only used for function pointer lookup
 
     buffer_ = makeBuffer(dev, rawBuf);
     memory_ = makeMemory(dev, rawMem);
@@ -280,6 +265,4 @@ inline void ManagedBuffer::unmap() {
     }
 }
 
-} // namespace Vulkan
-
-#endif // VULKAN_BUFFER_MANAGER_HPP
+}

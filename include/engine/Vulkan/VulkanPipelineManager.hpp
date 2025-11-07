@@ -31,7 +31,7 @@ class VulkanPipelineManager {
     friend class VulkanRTX;  // ALLOWS VulkanRTX to call private layout creation
 
 public:
-    VulkanPipelineManager(Vulkan::Context& context, int width, int height);
+    VulkanPipelineManager(Context& context, int width, int height);
     ~VulkanPipelineManager();
 
     // === RAY TRACING PIPELINE ===
@@ -116,7 +116,7 @@ private:
     VkDebugUtilsMessengerEXT debugMessenger_ = VK_NULL_HANDLE;
 #endif
 
-    Vulkan::Context& context_;
+    Context& context_;
     int width_ = 0;
     int height_ = 0;
     VkQueue graphicsQueue_ = VK_NULL_HANDLE;

@@ -20,9 +20,9 @@ uint32_t findMemoryType(VkPhysicalDevice physicalDevice,
                         VkMemoryPropertyFlags properties);
 
 void initInstance(const std::vector<std::string>& extensions,
-                  Vulkan::Context& context);
+                  Context& context);
 
-void initSurface(Vulkan::Context& context,
+void initSurface(Context& context,
                  void* window,
                  VkSurfaceKHR* rawSurface = nullptr);
 
@@ -30,15 +30,15 @@ VkPhysicalDevice findPhysicalDevice(VkInstance instance,
                                    VkSurfaceKHR surface,
                                    bool preferNvidia = true);
 
-void initDevice(Vulkan::Context& context);
+void initDevice(Context& context);
 
-void initializeVulkan(Vulkan::Context& context);  // Full init: instance → surface → device → swapchain
+void initializeVulkan(Context& context);  // Full init: instance → surface → device → swapchain
 
 // ===================================================================
 // COMMAND BUFFER HELPERS
 // ===================================================================
-VkCommandBuffer beginSingleTimeCommands(Vulkan::Context& context);
-void endSingleTimeCommands(Vulkan::Context& context, VkCommandBuffer cmd);
+VkCommandBuffer beginSingleTimeCommands(Context& context);
+void endSingleTimeCommands(Context& context, VkCommandBuffer cmd);
 
 // ===================================================================
 // BUFFER CREATION
@@ -51,12 +51,12 @@ void createBuffer(VkDevice device,
                   VkBuffer& buffer,
                   VkDeviceMemory& memory,
                   const VkMemoryAllocateFlagsInfo* allocFlags,
-                  Vulkan::Context& context);
+                  Context& context);
 
 // ===================================================================
 // IMAGE HELPERS
 // ===================================================================
-void transitionImageLayout(Vulkan::Context& context,
+void transitionImageLayout(Context& context,
                            VkImage image,
                            VkFormat format,
                            VkImageLayout oldLayout,
@@ -69,7 +69,7 @@ void copyBuffer(VkDevice device,
                 VkBuffer dstBuffer,
                 VkDeviceSize size);
 
-void copyBufferToImage(Vulkan::Context& context,
+void copyBufferToImage(Context& context,
                        VkBuffer srcBuffer,
                        VkImage dstImage,
                        uint32_t width,
@@ -82,7 +82,7 @@ void createStorageImage(VkDevice device,
                         VkImageView& view,
                         uint32_t width,
                         uint32_t height,
-                        Vulkan::Context& context);
+                        Context& context);
 
 // ===================================================================
 // DESCRIPTOR LAYOUTS
@@ -113,15 +113,15 @@ void createDescriptorPoolAndSet(
     VkImageView densityVolumeView,
     VkImageView gDepthView,
     VkImageView gNormalView,
-    Vulkan::Context& context);
+    Context& context);
 
 // ===================================================================
 // DEVICE ADDRESS HELPERS
 // ===================================================================
-VkDeviceAddress getBufferDeviceAddress(const Vulkan::Context& context,
+VkDeviceAddress getBufferDeviceAddress(const Context& context,
                                        VkBuffer buffer);
 
-VkDeviceAddress getAccelerationStructureDeviceAddress(const Vulkan::Context& context,
+VkDeviceAddress getAccelerationStructureDeviceAddress(const Context& context,
                                                       VkAccelerationStructureKHR as);
 
 // ===================================================================

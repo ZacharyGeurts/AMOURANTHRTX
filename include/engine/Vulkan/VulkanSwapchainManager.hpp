@@ -58,7 +58,7 @@ class VulkanSwapchainManager {
 public:
     static constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 3;
 
-    VulkanSwapchainManager(std::shared_ptr<::Vulkan::Context> context,
+    VulkanSwapchainManager(std::shared_ptr<Context> context,
                            SDL_Window* window,
                            int width, int height,
                            SwapchainRuntimeConfig* runtimeConfig = nullptr);
@@ -102,7 +102,7 @@ private:
     VkSurfaceKHR createSurface(SDL_Window* window);
     void logSwapchainInfo(const char* prefix) const;
 
-    std::shared_ptr<::Vulkan::Context> context_;
+    std::shared_ptr<Context> context_;
     SDL_Window*                      window_ = nullptr;
     int                              width_ = 0, height_ = 0;
 

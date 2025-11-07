@@ -112,7 +112,7 @@ enum class DescriptorBindings : uint32_t {
 /* --------------------------------------------------------------------- */
 class VulkanRTX {
 public:
-    VulkanRTX(std::shared_ptr<::Vulkan::Context> ctx,
+    VulkanRTX(std::shared_ptr<Context> ctx,
               int width, int height,
               VulkanPipelineManager* pipelineMgr);
 
@@ -241,7 +241,7 @@ public:
     VulkanHandle<VkDeviceMemory> blackFallbackMemory_;
     VulkanHandle<VkImageView> blackFallbackView_;
 
-    std::shared_ptr<::Vulkan::Context> context_;
+    std::shared_ptr<Context> context_;
     VulkanPipelineManager* pipelineMgr_ = nullptr;
     VkExtent2D extent_{};
 

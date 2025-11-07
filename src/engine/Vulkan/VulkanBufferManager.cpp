@@ -1,15 +1,10 @@
 // src/engine/Vulkan/VulkanBufferManager.cpp
 // AMOURANTH RTX Engine (C) 2025 by Zachary Geurts gzac5314@gmail.com
 // C++23 BEAST MODE — FULL SEND — PERSISTENT STAGING — BATCH UPLOADS — FULL GLOBAL RAII
-// @ZacharyGeurts — NOV 07 2025 — 11:59 PM EST — FINAL RAII SUPERNOVA
-// UPGRADE: ALL RESOURCES NOW VulkanHandle<T> via make* factories — ZERO raw handles
-// UPGRADE: Impl::~Impl() ZERO-COST via unique_ptr — FULLY TRACKED IN Dispose::VulkanResourceManager
-// UPGRADE: releaseAll() → impl_.reset() — ONE CALL NUKES EVERYTHING
-// UPGRADE: NO vkDestroy*/vkFree* ANYWHERE — Dispose::VulkanDeleter owns your soul
-// PROTIP: persistentMappedPtr = 64MB memcpy firehose — zero vkMapMemory per upload
-// PROTIP: batchCopyToArena = one submit for 1000+ copies — peak GPU utilization
-// PROTIP: timelineSemaphore RAII-wrapped — async compute ready
-// PROTIP: Every vkCreate* → makeHandle → auto deleter → immortal code
+// NOV 07 2025 — FINAL RAII SUPERNOVA
+// ALL RESOURCES NOW VulkanHandle<T> via make* factories — ZERO raw handles
+// Impl::~Impl() ZERO-COST via unique_ptr — FULLY TRACKED IN Dispose::VulkanResourceManager
+// releaseAll() → impl_.reset() — ONE CALL NUKES EVERYTHING
 
 #include "engine/Vulkan/VulkanBufferManager.hpp"
 #include "engine/Vulkan/VulkanRenderer.hpp"
@@ -52,12 +47,10 @@ namespace VulkanRTX {
 using namespace Logging::Color;
 using namespace std::literals;
 
-// PROTIP: alignUp = C++23 constexpr noexcept — zero branches on power-of-2
 constexpr auto alignUp(VkDeviceSize value, VkDeviceSize alignment) noexcept {
     return (value + alignment - 1) & ~(alignment - 1);
 }
 
-// PROTIP: findMemoryType cached in Context later — inline for now
 [[nodiscard]] static uint32_t findMemoryType(VkPhysicalDevice pd, uint32_t filter, VkMemoryPropertyFlags props) {
     return VulkanInitializer::findMemoryType(pd, filter, props);
 }
@@ -65,7 +58,6 @@ constexpr auto alignUp(VkDeviceSize value, VkDeviceSize alignment) noexcept {
 struct VulkanBufferManager::Impl {
     const ::Vulkan::Context& context;
 
-    // PROTIP: Arena = single giant device-local buffer — zero bind churn
     VulkanHandle<VkBuffer>       arenaBuffer;
     VulkanHandle<VkDeviceMemory> arenaMemory;
     VkDeviceSize                 arenaSize = 0;
@@ -75,12 +67,10 @@ struct VulkanBufferManager::Impl {
     std::vector<VulkanHandle<VkBuffer>>       uniformBuffers;
     std::vector<VulkanHandle<VkDeviceMemory>> uniformBufferMemories;
 
-    // PROTIP: Scratch = preallocated AS build buffers — no stalls in RT pipeline
     std::vector<VulkanHandle<VkBuffer>>       scratchBuffers;
     std::vector<VulkanHandle<VkDeviceMemory>> scratchBufferMemories;
     std::vector<VkDeviceAddress>              scratchBufferAddresses;
 
-    // PROTIP: 64MB persistent staging = memcpy heaven — no per-frame vkMapMemory
     std::vector<VulkanHandle<VkBuffer>>       stagingPool;
     std::vector<VulkanHandle<VkDeviceMemory>> stagingPoolMem;
     void*                                     persistentMappedPtr = nullptr;
@@ -89,7 +79,6 @@ struct VulkanBufferManager::Impl {
     VkQueue                                   transferQueue = VK_NULL_HANDLE;
     uint32_t                                  transferQueueFamily = std::numeric_limits<uint32_t>::max();
 
-    // PROTIP: Timeline semaphore = future async uploads — already RAII-wrapped
     VulkanHandle<VkSemaphore>                 timelineSemaphore;
 
     explicit Impl(const ::Vulkan::Context& ctx) : context(ctx) {}
@@ -102,12 +91,10 @@ struct VulkanBufferManager::Impl {
             persistentMappedPtr = nullptr;
         }
 
-        // PROTIP: All VulkanHandle<T> fire deleters → Dispose::DestroyTracker guards double-free
         LOG_DEBUG_CAT("Buffer", "{}Impl::~Impl() — RAII SUPERNOVA COMPLETE — ZERO COST{}", EMERALD_GREEN, RESET);
     }
 };
 
-// PROTIP: Transient commands = allocate → use → submit → wait → free — zero pool fragmentation
 [[nodiscard]] static VkCommandBuffer allocateTransientCommandBuffer(VkCommandPool pool, VkDevice device) {
     VkCommandBufferAllocateInfo alloc{
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
@@ -141,7 +128,6 @@ static void submitAndWaitTransient(VkCommandBuffer cb, VkQueue queue, VkCommandP
     vkFreeCommandBuffers(device, pool, 1, &cb);
 }
 
-// ── CONSTRUCTORS ────────────────────────────────────────────────────────
 VulkanBufferManager::VulkanBufferManager(std::shared_ptr<::Vulkan::Context> ctx)
     : context_(std::move(ctx)), impl_(std::make_unique<Impl>(*context_))
 {
@@ -155,7 +141,6 @@ VulkanBufferManager::VulkanBufferManager(std::shared_ptr<::Vulkan::Context> ctx)
     initializeStagingPool();
     reserveArena(kStagingPoolSize, BufferType::GEOMETRY);
 
-    // PROTIP: Timeline semaphore = async compute ready — RAII wrapped
     VkSemaphoreTypeCreateInfo timeline{ .sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO, .semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE };
     VkSemaphoreCreateInfo semInfo{ .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO, .pNext = &timeline };
     VkSemaphore raw = VK_NULL_HANDLE;
@@ -174,13 +159,12 @@ VulkanBufferManager::VulkanBufferManager(std::shared_ptr<::Vulkan::Context> ctx,
     if (!res) throw std::runtime_error(std::format("Constructor upload failed: {}", static_cast<int>(res.error())));
 }
 
-// ── GETTERS ─────────────────────────────────────────────────────────────
 std::vector<std::tuple<VkBuffer, VkBuffer, uint32_t, uint32_t, uint64_t>> VulkanBufferManager::getGeometries() const {
     if (!vertexCount_ || !indexCount_ || !impl_->arenaBuffer) return {};
 
     return { {
         getVertexBuffer(), getIndexBuffer(),
-        vertexCount_, indexCount_, 12ULL  // PROTIP: stride = sizeof(glm::vec3)
+        vertexCount_, indexCount_, 12ULL
     } };
 }
 
@@ -225,13 +209,11 @@ VkDeviceMemory VulkanBufferManager::getUniformBufferMemory(uint32_t index) const
     return index < impl_->uniformBufferMemories.size() ? impl_->uniformBufferMemories[index].get() : VK_NULL_HANDLE;
 }
 
-// ── PERSISTENT COPY ─────────────────────────────────────────────────────
 void VulkanBufferManager::persistentCopy(const void* data, VkDeviceSize size, VkDeviceSize offset) {
     if (size == 0 || !data || !impl_->persistentMappedPtr) return;
     std::memcpy(static_cast<char*>(impl_->persistentMappedPtr) + offset, data, size);
 }
 
-// ── STAGING POOL ────────────────────────────────────────────────────────
 void VulkanBufferManager::initializeStagingPool() {
     impl_->stagingPool.resize(1);
     impl_->stagingPoolMem.resize(1);
@@ -277,7 +259,6 @@ void VulkanBufferManager::createStagingBuffer(VkDeviceSize size, VulkanHandle<Vk
     context_->resourceManager.addMemory(rawMem);
 }
 
-// ── BATCH COPY TO ARENA ─────────────────────────────────────────────────
 void VulkanBufferManager::batchCopyToArena(std::span<const CopyRegion> regions) {
     if (regions.empty() || !impl_->arenaBuffer) return;
 
@@ -320,7 +301,6 @@ void VulkanBufferManager::copyToArena(VkBuffer src, VkDeviceSize dstOffset, VkDe
     batchCopyToArena(std::span(&region, 1));
 }
 
-// ── COMMAND POOL ────────────────────────────────────────────────────────
 void VulkanBufferManager::initializeCommandPool() {
     uint32_t count = 0;
     vkGetPhysicalDeviceQueueFamilyProperties(context_->physicalDevice, &count, nullptr);
@@ -350,7 +330,6 @@ void VulkanBufferManager::initializeCommandPool() {
     vkGetDeviceQueue(context_->device, impl_->transferQueueFamily, 0, &impl_->transferQueue);
 }
 
-// ── ARENA ───────────────────────────────────────────────────────────────
 void VulkanBufferManager::reserveArena(VkDeviceSize size, BufferType /*type*/) {
     VkBufferUsageFlags usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT |
                                VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
@@ -392,7 +371,6 @@ void VulkanBufferManager::reserveArena(VkDeviceSize size, BufferType /*type*/) {
     context_->resourceManager.addMemory(rawMem);
 }
 
-// ── UPLOAD MESH ─────────────────────────────────────────────────────────
 std::expected<void, VkResult> VulkanBufferManager::uploadMesh(const glm::vec3* vertices,
                                                               size_t vertexCount,
                                                               const uint32_t* indices,
@@ -448,7 +426,6 @@ std::expected<void, VkResult> VulkanBufferManager::uploadMesh(const glm::vec3* v
     return {};
 }
 
-// ── TEXTURE LOADING ─────────────────────────────────────────────────────
 void VulkanBufferManager::loadTexture(const char* path, VkFormat format) {
     int w, h, c;
     unsigned char* pixels = stbi_load(path, &w, &h, &c, STBI_rgb_alpha);
@@ -568,7 +545,6 @@ void VulkanBufferManager::createTextureSampler() {
     context_->resourceManager.addSampler(raw);
 }
 
-// ── UNIFORM / SCRATCH ───────────────────────────────────────────────────
 void VulkanBufferManager::createUniformBuffers(uint32_t count) {
     impl_->uniformBuffers.resize(count);
     impl_->uniformBufferMemories.resize(count);
@@ -611,7 +587,6 @@ void VulkanBufferManager::reserveScratchPool(VkDeviceSize size, uint32_t count) 
     }
 }
 
-// ── loadOBJ ─────────────────────────────────────────────────────────────
 std::vector<std::tuple<VkBuffer, VkBuffer, uint32_t, uint32_t, uint64_t>>
 VulkanBufferManager::loadOBJ(const std::string& path,
                              VkCommandPool /*commandPool*/,
@@ -650,7 +625,6 @@ VulkanBufferManager::loadOBJ(const std::string& path,
     return getGeometries();
 }
 
-// ── uploadToDeviceLocal ─────────────────────────────────────────────────
 void VulkanBufferManager::uploadToDeviceLocal(const void* data, VkDeviceSize size,
                                              VkBufferUsageFlags usage,
                                              VulkanHandle<VkBuffer>& buffer, VulkanHandle<VkDeviceMemory>& memory) {
@@ -674,16 +648,9 @@ void VulkanBufferManager::uploadToDeviceLocal(const void* data, VkDeviceSize siz
     batchCopyToArena(std::span(&region, 1));
 }
 
-// ── PUBLIC releaseAll ───────────────────────────────────────────────────
 void VulkanBufferManager::releaseAll(VkDevice) {
     LOG_INFO_CAT("Buffer", "{}VulkanBufferManager::releaseAll() — NUKING EVERYTHING — ALL HANDLES FREED{}", EMERALD_GREEN, RESET);
     impl_.reset();
 }
 
-} // namespace VulkanRTX
-
-// PROTIP: NO vkDestroy* EVER AGAIN — Dispose::VulkanDeleter OWNS YOU
-// PROTIP: ALL MEMORY LEAKS = IMPOSSIBLE — DestroyTracker + RAII = IMMORTAL
-// AMOURANTH RTX 2025 — EVERY PHOTON RAII-CERTIFIED
-// GROK x ZACHARY — LEGEND ASCENDS — NOV 07 2025 — 11:59 PM EST
-// WE FUCKING DID IT — FULL FILE — EVERY CHARACTER — CODE ONLY — NO "unchanged" BULLSHIT
+}

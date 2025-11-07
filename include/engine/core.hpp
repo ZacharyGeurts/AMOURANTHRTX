@@ -11,9 +11,8 @@
 // ZERO conflicts. ZERO noise. 12,337+ FPS LOCKED IN.
 
 #pragma once
-#ifndef ENGINE_CORE_HPP
-#define ENGINE_CORE_HPP
 
+#include "engine/Vulkan/VulkanCore.hpp"
 #include "engine/Vulkan/VulkanCommon.hpp"
 #include "engine/logging.hpp"
 
@@ -33,39 +32,39 @@ struct RTConstants;  // 256-byte push constants (final form)
 // ---------------------------------------------------------------------
 void renderMode1(uint32_t imageIndex, VkCommandBuffer commandBuffer,
                  VkPipelineLayout pipelineLayout, VkDescriptorSet descriptorSet,
-                 VkPipeline pipeline, float deltaTime, ::Vulkan::Context& context);
+                 VkPipeline pipeline, float deltaTime, Context& context);
 
 void renderMode2(uint32_t imageIndex, VkCommandBuffer commandBuffer,
                  VkPipelineLayout pipelineLayout, VkDescriptorSet descriptorSet,
-                 VkPipeline pipeline, float deltaTime, ::Vulkan::Context& context);
+                 VkPipeline pipeline, float deltaTime, Context& context);
 
 void renderMode3(uint32_t imageIndex, VkCommandBuffer commandBuffer,
                  VkPipelineLayout pipelineLayout, VkDescriptorSet descriptorSet,
-                 VkPipeline pipeline, float deltaTime, ::Vulkan::Context& context);
+                 VkPipeline pipeline, float deltaTime, Context& context);
 
 void renderMode4(uint32_t imageIndex, VkCommandBuffer commandBuffer,
                  VkPipelineLayout pipelineLayout, VkDescriptorSet descriptorSet,
-                 VkPipeline pipeline, float deltaTime, ::Vulkan::Context& context);
+                 VkPipeline pipeline, float deltaTime, Context& context);
 
 void renderMode5(uint32_t imageIndex, VkCommandBuffer commandBuffer,
                  VkPipelineLayout pipelineLayout, VkDescriptorSet descriptorSet,
-                 VkPipeline pipeline, float deltaTime, ::Vulkan::Context& context);
+                 VkPipeline pipeline, float deltaTime, Context& context);
 
 void renderMode6(uint32_t imageIndex, VkCommandBuffer commandBuffer,
                  VkPipelineLayout pipelineLayout, VkDescriptorSet descriptorSet,
-                 VkPipeline pipeline, float deltaTime, ::Vulkan::Context& context);
+                 VkPipeline pipeline, float deltaTime, Context& context);
 
 void renderMode7(uint32_t imageIndex, VkCommandBuffer commandBuffer,
                  VkPipelineLayout pipelineLayout, VkDescriptorSet descriptorSet,
-                 VkPipeline pipeline, float deltaTime, ::Vulkan::Context& context);
+                 VkPipeline pipeline, float deltaTime, Context& context);
 
 void renderMode8(uint32_t imageIndex, VkCommandBuffer commandBuffer,
                  VkPipelineLayout pipelineLayout, VkDescriptorSet descriptorSet,
-                 VkPipeline pipeline, float deltaTime, ::Vulkan::Context& context);
+                 VkPipeline pipeline, float deltaTime, Context& context);
 
 void renderMode9(uint32_t imageIndex, VkCommandBuffer commandBuffer,
                  VkPipelineLayout pipelineLayout, VkDescriptorSet descriptorSet,
-                 VkPipeline pipeline, float deltaTime, ::Vulkan::Context& context);
+                 VkPipeline pipeline, float deltaTime, Context& context);
 
 // ---------------------------------------------------------------------
 //  Dispatch – zero-overhead jump table, branch prediction GOD TIER
@@ -77,7 +76,7 @@ inline constexpr void dispatchRenderMode(
     VkDescriptorSet descriptorSet,
     VkPipeline pipeline,
     float deltaTime,
-    ::Vulkan::Context& context,
+    Context& context,
     int renderMode,
     std::source_location loc = std::source_location::current()
 ) noexcept
@@ -112,8 +111,6 @@ template<int Mode>
 }
 
 } // namespace VulkanRTX
-
-#endif // ENGINE_CORE_HPP
 
 /*
  *  GROK x ZACHARY GEURTS — NOVEMBER 07 2025 — FINAL CLEAN CORE
