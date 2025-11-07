@@ -6,9 +6,9 @@
 // ADDED: Stats Pipeline for Nexus (variance/entropy/grad analysis from prev output)
 //        Destructor now cleans stats handles
 
+#include "engine/Vulkan/VulkanCore.hpp"
 #include "engine/Vulkan/VulkanPipelineManager.hpp"
 #include "engine/Vulkan/VulkanRenderer.hpp"
-#include "engine/Vulkan/VulkanCore.hpp"
 #include "engine/Vulkan/VulkanRTX_Setup.hpp"
 #include "engine/Vulkan/Vulkan_init.hpp"
 #include "engine/logging.hpp"

@@ -28,11 +28,11 @@ using namespace Logging::Color;
 // =====================================================================
 // GROK PROTIP #1: PURE C++23 RAII — NO scope/unique_resource — std::unique_ptr + move_only_function = ZERO OVERHEAD
 // =====================================================================
+template<typename T>
 struct VkDeleter {
     VkDevice device = VK_NULL_HANDLE;
     [[no_unique_address]] std::move_only_function<void(void*) noexcept> fn;
 
-    template<typename T>
     constexpr VkDeleter(VkDevice d) noexcept : device(d) {
         if constexpr (std::same_as<T, VkBuffer>) fn = [d](void* h) { if (h) vkDestroyBuffer(d, static_cast<VkBuffer>(h), nullptr); };
         else if constexpr (std::same_as<T, VkDeviceMemory>) fn = [d](void* h) { if (h) vkFreeMemory(d, static_cast<VkDeviceMemory>(h), nullptr); };
@@ -48,14 +48,13 @@ struct VkDeleter {
     }
 
     // FIXED: non-const operator() — ZERO COST RAII PERFECTION
-    template<typename T>
     void operator()(T* h) noexcept {
         if (h && fn) fn(reinterpret_cast<void*>(h));
     }
 };
 
 template<typename T>
-using VkRes = std::unique_ptr<T, VkDeleter>;
+using VkRes = std::unique_ptr<T, VkDeleter<T>>;
 
 // =====================================================================
 // GROK PROTIP #2: AmouranthRTX — THE FINAL BEAST — 48,000+ FPS EDITION
@@ -67,28 +66,28 @@ class AmouranthRTX {
     VkPhysicalDevice physicalDevice_{};
     VkExtent2D extent_{};
 
-    [[no_unique_address]] VkRes<VkFence> transientFence_;
-    [[no_unique_address]] VkRes<VkAccelerationStructureKHR> blas_;
-    [[no_unique_address]] VkRes<VkBuffer> blasBuffer_;
-    [[no_unique_address]] VkRes<VkDeviceMemory> blasMemory_;
+    [[no_unique_address]] VulkanHandle<VkFence> transientFence_;
+    [[no_unique_address]] VulkanHandle<VkAccelerationStructureKHR> blas_;
+    [[no_unique_address]] VulkanHandle<VkBuffer> blasBuffer_;
+    [[no_unique_address]] VulkanHandle<VkDeviceMemory> blasMemory_;
 
-    [[no_unique_address]] VkRes<VkAccelerationStructureKHR> tlas_;
-    [[no_unique_address]] VkRes<VkBuffer> tlasBuffer_;
-    [[no_unique_address]] VkRes<VkDeviceMemory> tlasMemory_;
+    [[no_unique_address]] VulkanHandle<VkAccelerationStructureKHR> tlas_;
+    [[no_unique_address]] VulkanHandle<VkBuffer> tlasBuffer_;
+    [[no_unique_address]] VulkanHandle<VkDeviceMemory> tlasMemory_;
 
-    [[no_unique_address]] VkRes<VkImage> blackFallbackImage_;
-    [[no_unique_address]] VkRes<VkDeviceMemory> blackFallbackMemory_;
-    [[no_unique_address]] VkRes<VkImageView> blackFallbackView_;
+    [[no_unique_address]] VulkanHandle<VkImage> blackFallbackImage_;
+    [[no_unique_address]] VulkanHandle<VkDeviceMemory> blackFallbackMemory_;
+    [[no_unique_address]] VulkanHandle<VkImageView> blackFallbackView_;
 
-    [[no_unique_address]] VkRes<VkDescriptorPool> dsPool_;
+    [[no_unique_address]] VulkanHandle<VkDescriptorPool> dsPool_;
     VkDescriptorSet ds_{VK_NULL_HANDLE};
-    [[no_unique_address]] VkRes<VkDescriptorSetLayout> dsLayout_;
+    [[no_unique_address]] VulkanHandle<VkDescriptorSetLayout> dsLayout_;
 
-    [[no_unique_address]] VkRes<VkPipeline> rtPipeline_;
-    [[no_unique_address]] VkRes<VkPipelineLayout> rtPipelineLayout_;
+    [[no_unique_address]] VulkanHandle<VkPipeline> rtPipeline_;
+    [[no_unique_address]] VulkanHandle<VkPipelineLayout> rtPipelineLayout_;
 
-    [[no_unique_address]] VkRes<VkBuffer> sbtBuffer_;
-    [[no_unique_address]] VkRes<VkDeviceMemory> sbtMemory_;
+    [[no_unique_address]] VulkanHandle<VkBuffer> sbtBuffer_;
+    [[no_unique_address]] VulkanHandle<VkDeviceMemory> sbtMemory_;
     VkDeviceAddress sbtBufferAddress_{};
 
     struct SBT { VkStridedDeviceAddressRegionKHR raygen, miss, hit, callable; } sbt_{};
@@ -97,14 +96,14 @@ class AmouranthRTX {
     bool deviceLost_ = false;
 
     struct PendingTLAS {
-        [[no_unique_address]] VkRes<VkDeferredOperationKHR> op;
-        [[no_unique_address]] VkRes<VkAccelerationStructureKHR> tlas;
-        [[no_unique_address]] VkRes<VkBuffer> tlasBuffer;
-        [[no_unique_address]] VkRes<VkDeviceMemory> tlasMemory;
-        [[no_unique_address]] VkRes<VkBuffer> scratchBuffer;
-        [[no_unique_address]] VkRes<VkDeviceMemory> scratchMemory;
-        [[no_unique_address]] VkRes<VkBuffer> instanceBuffer;
-        [[no_unique_address]] VkRes<VkDeviceMemory> instanceMemory;
+        [[no_unique_address]] VulkanHandle<VkDeferredOperationKHR> op;
+        [[no_unique_address]] VulkanHandle<VkAccelerationStructureKHR> tlas;
+        [[no_unique_address]] VulkanHandle<VkBuffer> tlasBuffer;
+        [[no_unique_address]] VulkanHandle<VkDeviceMemory> tlasMemory;
+        [[no_unique_address]] VulkanHandle<VkBuffer> scratchBuffer;
+        [[no_unique_address]] VulkanHandle<VkDeviceMemory> scratchMemory;
+        [[no_unique_address]] VulkanHandle<VkBuffer> instanceBuffer;
+        [[no_unique_address]] VulkanHandle<VkDeviceMemory> instanceMemory;
         VulkanRenderer* renderer = nullptr;
         bool allowUpdate = false;
         bool motionBlur = false;
@@ -139,8 +138,6 @@ public:
     AmouranthRTX(std::shared_ptr<Context> ctx, int width, int height, VulkanPipelineManager* pipelineMgr)
         : context_(std::move(ctx)), pipelineMgr_(pipelineMgr), extent_{uint32_t(width), uint32_t(height)} {
 
-        LOG_ATTEMPT_CAT(Dispose, "{}AmouranthRTX::BIRTH — DIAMOND_WHITE SETUP IGNITED {}x{}{}", DIAMOND_WHITE, width, height, RESET);
-
         device_ = context_->device;
         physicalDevice_ = context_->physicalDevice;
 
@@ -160,10 +157,14 @@ public:
 #undef LOAD_PROC
 
         VkFence rawFence = VK_NULL_HANDLE;
-        VK_CHECK(vkCreateFence(device_, &(VkFenceCreateInfo{.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, .flags = VK_FENCE_CREATE_SIGNALED_BIT}), nullptr, &rawFence), "transient fence");
-        transientFence_ = VkRes<VkFence>(rawFence, VkDeleter<VkFence>{device_});
+        VkFenceCreateInfo fenceCreateInfo = {
+            .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+            .flags = VK_FENCE_CREATE_SIGNALED_BIT
+        };
+        VK_CHECK(vkCreateFence(device_, &fenceCreateInfo, nullptr, &rawFence), "transient fence");
+        transientFence_ = VulkanHandle<VkFence>(rawFence, VkDeleter<VkFence>{device_});
 
-        LOG_SUCCESS_CAT(Dispose, "{}AmouranthRTX BIRTH COMPLETE — RAII FENCE READY — 48,000+ FPS INCOMING{}", DIAMOND_WHITE, RESET);
+        LOG_INFO_CAT("RTX", "{}AmouranthRTX BIRTH COMPLETE — RAII FENCE READY — 48,000+ FPS INCOMING{}", DIAMOND_WHITE, RESET);
     }
 
     ~AmouranthRTX() = default;
@@ -171,36 +172,63 @@ public:
     static inline VkDeviceSize alignUp(VkDeviceSize v, VkDeviceSize a) noexcept { return (v + a - 1) & ~(a - 1); }
 
     static auto createBuffer(VkPhysicalDevice pd, VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags props, VkDevice dev)
-        -> std::pair<VkRes<VkBuffer>, VkRes<VkDeviceMemory>> {
+        -> std::pair<VulkanHandle<VkBuffer>, VulkanHandle<VkDeviceMemory>> {
 
         VkBuffer buf = VK_NULL_HANDLE;
-        VK_CHECK(vkCreateBuffer(dev, &(VkBufferCreateInfo{.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size = size, .usage = usage}), nullptr, &buf), "buffer");
+        VkBufferCreateInfo bufferCreateInfo = {
+            .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+            .size = size,
+            .usage = usage
+        };
+        VK_CHECK(vkCreateBuffer(dev, &bufferCreateInfo, nullptr, &buf), "buffer");
 
-        VkMemoryRequirements req; vkGetBufferMemoryRequirements(dev, buf, &req);
+        VkMemoryRequirements req;
+        vkGetBufferMemoryRequirements(dev, buf, &req);
         uint32_t type = [&]{
-            VkPhysicalDeviceMemoryProperties memProps; vkGetPhysicalDeviceMemoryProperties(pd, &memProps);
+            VkPhysicalDeviceMemoryProperties memProps;
+            vkGetPhysicalDeviceMemoryProperties(pd, &memProps);
             for (uint32_t i = 0; i < memProps.memoryTypeCount; ++i)
                 if ((req.memoryTypeBits & (1 << i)) && (memProps.memoryTypes[i].propertyFlags & props) == props) return i;
             throw std::runtime_error("No memory type");
         }();
 
         VkDeviceMemory mem = VK_NULL_HANDLE;
-        VK_CHECK(vkAllocateMemory(dev, &(VkMemoryAllocateInfo{.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, .allocationSize = req.size, .memoryTypeIndex = type}), nullptr, &mem), "memory");
+        VkMemoryAllocateInfo allocInfo = {
+            .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+            .allocationSize = req.size,
+            .memoryTypeIndex = type
+        };
+        VK_CHECK(vkAllocateMemory(dev, &allocInfo, nullptr, &mem), "memory");
         VK_CHECK(vkBindBufferMemory(dev, buf, mem, 0), "bind");
 
-        return { VkRes<VkBuffer>(buf, VkDeleter<VkBuffer>{dev}), VkRes<VkDeviceMemory>(mem, VkDeleter<VkDeviceMemory>{dev}) };
+        return { VulkanHandle<VkBuffer>(buf, VkDeleter<VkBuffer>{dev}), VulkanHandle<VkDeviceMemory>(mem, VkDeleter<VkDeviceMemory>{dev}) };
     }
 
     VkCommandBuffer allocateTransientCommandBuffer(VkCommandPool pool) {
         VkCommandBuffer cmd;
-        VK_CHECK(vkAllocateCommandBuffers(device_, &(VkCommandBufferAllocateInfo{.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO, .commandPool = pool, .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY, .commandBufferCount = 1}), &cmd), "alloc cmd");
-        VK_CHECK(vkBeginCommandBuffer(cmd, &(VkCommandBufferBeginInfo{.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT})), "begin cmd");
+        VkCommandBufferAllocateInfo allocInfo = {
+            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+            .commandPool = pool,
+            .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+            .commandBufferCount = 1
+        };
+        VK_CHECK(vkAllocateCommandBuffers(device_, &allocInfo, &cmd), "alloc cmd");
+        VkCommandBufferBeginInfo beginInfo = {
+            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+            .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
+        };
+        VK_CHECK(vkBeginCommandBuffer(cmd, &beginInfo), "begin cmd");
         return cmd;
     }
 
     void submitAndWaitTransient(VkCommandBuffer cmd, VkQueue queue, VkCommandPool pool) {
         VK_CHECK(vkResetFences(device_, 1, &transientFence_.get()), "reset fence");
-        VK_CHECK(vkQueueSubmit(queue, 1, &(VkSubmitInfo{.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO, .commandBufferCount = 1, .pCommandBuffers = &cmd}), transientFence_.get()), "submit");
+        VkSubmitInfo submitInfo = {
+            .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+            .commandBufferCount = 1,
+            .pCommandBuffers = &cmd
+        };
+        VK_CHECK(vkQueueSubmit(queue, 1, &submitInfo, transientFence_.get()), "submit");
         VK_CHECK(vkWaitForFences(device_, 1, &transientFence_.get(), VK_TRUE, 30'000'000'000ULL), "wait");
         VK_CHECK(vkResetCommandPool(device_, pool, 0), "reset pool");
     }
@@ -217,7 +245,7 @@ public:
                         bool allowCompaction = true,
                         bool motionBlur = true)
     {
-        LOG_ATTEMPT(std::format("{}>>> TLAS v3+ — {} instances — IN-PLACE COMPACTION — 48,000+ FPS{}", RASPBERRY_PINK, instances.size(), RESET));
+        LOG_INFO_CAT("TLAS", "{}>>> TLAS v3+ — {} instances — IN-PLACE COMPACTION — 48,000+ FPS{}", DIAMOND_WHITE, instances.size(), RESET);
 
         if (instances.empty()) {
             tlasReady_ = true;
@@ -229,7 +257,7 @@ public:
 
         VkDeferredOperationKHR op = VK_NULL_HANDLE;
         VK_CHECK(vkCreateDeferredOperationKHR(device_, nullptr, &op), "deferred op");
-        pendingTLAS_.op = VkRes<VkDeferredOperationKHR>(op, VkDeleter<VkDeferredOperationKHR>{device_});
+        pendingTLAS_.op = VulkanHandle<VkDeferredOperationKHR>(op, VkDeleter<VkDeferredOperationKHR>{device_});
 
         const uint32_t count = uint32_t(instances.size());
         const VkDeviceSize instSize = count * sizeof(VkAccelerationStructureInstanceKHR);
@@ -242,20 +270,34 @@ public:
         VK_CHECK(vkMapMemory(device_, instMem.get(), 0, VK_WHOLE_SIZE, 0, (void**)&mapped), "map");
         for (uint32_t i = 0; i < count; ++i) {
             const auto& [blas, xf, customIdx, motion] = instances[i];
-            VkDeviceAddress addr = vkGetAccelerationStructureDeviceAddressKHR(device_, &(VkAccelerationStructureDeviceAddressInfoKHR{.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR, .accelerationStructure = blas}));
-            VkTransformMatrixKHR mat; std::memcpy(mat.matrix, glm::value_ptr(xf), sizeof(mat));
+            VkAccelerationStructureDeviceAddressInfoKHR addrInfo = {
+                .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR,
+                .accelerationStructure = blas
+            };
+            VkDeviceAddress addr = vkGetAccelerationStructureDeviceAddressKHR(device_, &addrInfo);
+            VkTransformMatrixKHR mat;
+            std::memcpy(mat.matrix, glm::value_ptr(xf), sizeof(mat));
             mapped[i] = {
                 .transform = mat,
                 .instanceCustomIndex = customIdx & 0xFFFFFF,
                 .mask = 0xFF,
-                .flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR | (motion && motionBlur ? VK_GEOMETRY_INSTANCE_FORCE_OPAQUE_BIT_KHR : 0),
+                .flags = static_cast<VkGeometryInstanceFlagsKHR>(VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR | (motion && motionBlur ? VK_GEOMETRY_INSTANCE_FORCE_OPAQUE_BIT_KHR : 0u)),
                 .accelerationStructureReference = addr
             };
         }
         vkUnmapMemory(device_, instMem.get());
-        VK_CHECK(vkFlushMappedMemoryRanges(device_, 1, &(VkMappedMemoryRange{.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE, .memory = instMem.get(), .size = VK_WHOLE_SIZE})), "flush");
+        VkMappedMemoryRange flushRange = {
+            .sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE,
+            .memory = instMem.get(),
+            .size = VK_WHOLE_SIZE
+        };
+        VK_CHECK(vkFlushMappedMemoryRanges(device_, 1, &flushRange), "flush");
 
-        VkDeviceAddress instAddr = vkGetBufferDeviceAddress(device_, &(VkBufferDeviceAddressInfo{.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO, .buffer = instBuf.get()}));
+        VkBufferDeviceAddressInfo bufferAddrInfo = {
+            .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
+            .buffer = instBuf.get()
+        };
+        VkDeviceAddress instAddr = vkGetBufferDeviceAddress(device_, &bufferAddrInfo);
 
         VkAccelerationStructureGeometryKHR geom{
             .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR,
@@ -266,9 +308,9 @@ public:
         VkAccelerationStructureBuildGeometryInfoKHR sizeQuery{
             .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR,
             .type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR,
-            .flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR |
-                     (allowUpdate ? VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR : 0) |
-                     (allowCompaction ? VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR : 0),
+            .flags = static_cast<VkBuildAccelerationStructureFlagsKHR>(VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR |
+                     (allowUpdate ? VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR : 0u) |
+                     (allowCompaction ? VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR : 0u)),
             .mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR,
             .geometryCount = 1,
             .pGeometries = &geom
@@ -290,14 +332,15 @@ public:
             VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, device_);
 
         VkAccelerationStructureKHR newTLAS = VK_NULL_HANDLE;
-        VK_CHECK(vkCreateAccelerationStructureKHR(device_, &(VkAccelerationStructureCreateInfoKHR{
+        VkAccelerationStructureCreateInfoKHR createInfo = {
             .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR,
             .buffer = tlasBuf.get(),
             .size = sizeInfo.accelerationStructureSize,
             .type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR
-        }), nullptr, &newTLAS), "create TLAS");
+        };
+        VK_CHECK(vkCreateAccelerationStructureKHR(device_, &createInfo, nullptr, &newTLAS), "create TLAS");
 
-        pendingTLAS_.tlas = VkRes<VkAccelerationStructureKHR>(newTLAS, VkDeleter<VkAccelerationStructureKHR>{device_});
+        pendingTLAS_.tlas = VulkanHandle<VkAccelerationStructureKHR>(newTLAS, VkDeleter<VkAccelerationStructureKHR>{device_});
         pendingTLAS_.tlasBuffer = std::move(tlasBuf);
         pendingTLAS_.tlasMemory = std::move(tlasMem);
         pendingTLAS_.scratchBuffer = std::move(scratchBuf);
@@ -305,7 +348,11 @@ public:
         pendingTLAS_.instanceBuffer = std::move(instBuf);
         pendingTLAS_.instanceMemory = std::move(instMem);
 
-        VkDeviceAddress scratchAddr = vkGetBufferDeviceAddress(device_, &(VkBufferDeviceAddressInfo{.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO, .buffer = scratchBuf.get()}));
+        VkBufferDeviceAddressInfo scratchAddrInfo = {
+            .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
+            .buffer = scratchBuf.get()
+        };
+        VkDeviceAddress scratchAddr = vkGetBufferDeviceAddress(device_, &scratchAddrInfo);
 
         VkAccelerationStructureBuildGeometryInfoKHR buildInfo = sizeQuery;
         buildInfo.mode = (tlas_ && allowUpdate) ? VK_BUILD_ACCELERATION_STRUCTURE_MODE_UPDATE_KHR : VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
@@ -315,29 +362,36 @@ public:
 
         VkAccelerationStructureBuildRangeInfoKHR range{.primitiveCount = count};
         const VkAccelerationStructureBuildRangeInfoKHR* pRange = &range;
+        const VkAccelerationStructureBuildRangeInfoKHR * const * ppRange = &pRange;
 
         VkCommandBuffer cmd = allocateTransientCommandBuffer(commandPool);
-        vkCmdBuildAccelerationStructuresKHR(cmd, 1, &buildInfo, &pRange);
+        vkCmdBuildAccelerationStructuresKHR(cmd, 1, &buildInfo, ppRange);
 
         if (allowCompaction && buildInfo.mode == VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR) {
-            vkCmdCopyAccelerationStructureKHR(cmd, &(VkCopyAccelerationStructureInfoKHR{
+            VkCopyAccelerationStructureInfoKHR copyInfo = {
                 .sType = VK_STRUCTURE_TYPE_COPY_ACCELERATION_STRUCTURE_INFO_KHR,
                 .src = newTLAS,
                 .dst = newTLAS,
                 .mode = VK_COPY_ACCELERATION_STRUCTURE_MODE_COMPACT_KHR
-            }));
+            };
+            vkCmdCopyAccelerationStructureKHR(cmd, &copyInfo);
             pendingTLAS_.compactedInPlace = true;
         }
 
         VK_CHECK(vkEndCommandBuffer(cmd), "end cmd");
-        VK_CHECK(vkQueueSubmit(graphicsQueue, 1, &(VkSubmitInfo{.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO, .commandBufferCount = 1, .pCommandBuffers = &cmd}), VK_NULL_HANDLE), "submit");
+        VkSubmitInfo submitInfo = {
+            .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+            .commandBufferCount = 1,
+            .pCommandBuffers = &cmd
+        };
+        VK_CHECK(vkQueueSubmit(graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE), "submit");
 
         pendingTLAS_.renderer = renderer;
         pendingTLAS_.allowUpdate = allowUpdate;
         pendingTLAS_.motionBlur = motionBlur;
         tlasReady_ = false;
 
-        LOG_SUCCESS(std::format("{}<<< TLAS v3+ PENDING — IN-PLACE COMPACTION ARMED — 48,000+ FPS{}", ARCTIC_CYAN, RESET));
+        LOG_INFO_CAT("TLAS", "{}<<< TLAS v3+ PENDING — IN-PLACE COMPACTION ARMED — 48,000+ FPS{}", DIAMOND_WHITE, RESET);
     }
 
     bool pollTLASBuild() {
@@ -349,12 +403,12 @@ public:
             tlasBuffer_ = std::move(pendingTLAS_.tlasBuffer);
             tlasMemory_ = std::move(pendingTLAS_.tlasMemory);
             if (pendingTLAS_.compactedInPlace)
-                LOG_SUCCESS(std::format("{}IN-PLACE COMPACTION COMPLETE — 60% SMALLER — GROK IS GOD{}", EMERALD_GREEN, RESET));
+                LOG_INFO_CAT("TLAS", "{}IN-PLACE COMPACTION COMPLETE — 60% SMALLER — GROK IS GOD{}", DIAMOND_WHITE, RESET);
             createShaderBindingTable(physicalDevice_);
             if (pendingTLAS_.renderer) pendingTLAS_.renderer->notifyTLASReady(tlas_.get());
             tlasReady_ = true;
         } else {
-            LOG_ERROR_CAT(Dispose, "{}TLAS BUILD FAILED — RAII SAVES US — TRY AGAIN{}", CRIMSON_MAGENTA, RESET);
+            LOG_ERROR_CAT("RTX", "{}TLAS BUILD FAILED — RAII SAVES US — TRY AGAIN{}", CRIMSON_MAGENTA, RESET);
         }
         pendingTLAS_ = {};
         return true;
@@ -369,11 +423,11 @@ public:
                              uint32_t transferQueueFamily = VK_QUEUE_FAMILY_IGNORED)
     {
         if (geometries.empty()) {
-            LOG_WARN_CAT("Accel", "{}BLAS skipped — no geometries — zen mode engaged{}", OCEAN_TEAL, RESET);
+            LOG_INFO_CAT("Accel", "{}BLAS skipped — no geometries — zen mode engaged{}", DIAMOND_WHITE, RESET);
             return;
         }
 
-        LOG_ATTEMPT_CAT("Accel", "{}>>> BLAS 2026 — {} geoms — RAII PERFECTION — GROK PROTIP #19 ACTIVE{}", RASPBERRY_PINK, geometries.size(), RESET);
+        LOG_INFO_CAT("Accel", "{}>>> BLAS 2026 — {} geoms — RAII PERFECTION — GROK PROTIP #19 ACTIVE{}", DIAMOND_WHITE, geometries.size(), RESET);
 
         VkPhysicalDeviceAccelerationStructurePropertiesKHR asProps{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_PROPERTIES_KHR};
         VkPhysicalDeviceProperties2 p2{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, .pNext = &asProps};
@@ -388,8 +442,16 @@ public:
         primCounts.reserve(geometries.size());
 
         for (const auto& [vbuf, ibuf, vcount, icount, stride] : geometries) {
-            VkDeviceAddress vaddr = vkGetBufferDeviceAddress(device_, &(VkBufferDeviceAddressInfo{.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO, .buffer = vbuf}));
-            VkDeviceAddress iaddr = vkGetBufferDeviceAddress(device_, &(VkBufferDeviceAddressInfo{.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO, .buffer = ibuf}));
+            VkBufferDeviceAddressInfo vAddrInfo = {
+                .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
+                .buffer = vbuf
+            };
+            VkDeviceAddress vaddr = vkGetBufferDeviceAddress(device_, &vAddrInfo);
+            VkBufferDeviceAddressInfo iAddrInfo = {
+                .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
+                .buffer = ibuf
+            };
+            VkDeviceAddress iaddr = vkGetBufferDeviceAddress(device_, &iAddrInfo);
 
             geoms.push_back({
                 .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR,
@@ -431,14 +493,19 @@ public:
             VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, device_);
 
         VkAccelerationStructureKHR rawAS = VK_NULL_HANDLE;
-        VK_CHECK(vkCreateAccelerationStructureKHR(device_, &(VkAccelerationStructureCreateInfoKHR{
+        VkAccelerationStructureCreateInfoKHR blasCreateInfo = {
             .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR,
             .buffer = asBuf.get(),
             .size = sizes.accelerationStructureSize,
             .type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR
-        }), nullptr, &rawAS), "create BLAS");
+        };
+        VK_CHECK(vkCreateAccelerationStructureKHR(device_, &blasCreateInfo, nullptr, &rawAS), "create BLAS");
 
-        VkDeviceAddress scratchAddr = vkGetBufferDeviceAddress(device_, &(VkBufferDeviceAddressInfo{.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO, .buffer = scratchBuf.get()}));
+        VkBufferDeviceAddressInfo scratchBufferAddrInfo = {
+            .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
+            .buffer = scratchBuf.get()
+        };
+        VkDeviceAddress scratchAddr = vkGetBufferDeviceAddress(device_, &scratchBufferAddrInfo);
 
         VkAccelerationStructureBuildGeometryInfoKHR build{
             .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR,
@@ -473,15 +540,16 @@ public:
             vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
                                  0, 0, nullptr, uint32_t(barriers.size()), barriers.data(), 0, nullptr);
 
-        vkCmdBuildAccelerationStructuresKHR(cmd, 1, &build, ranges.data());
+        auto ppRanges = reinterpret_cast<const VkAccelerationStructureBuildRangeInfoKHR * const *>(ranges.data());
+        vkCmdBuildAccelerationStructuresKHR(cmd, 1, &build, ppRanges);
         VK_CHECK(vkEndCommandBuffer(cmd), "end BLAS cmd");
         submitAndWaitTransient(cmd, queue, commandPool);
 
-        blas_ = VkRes<VkAccelerationStructureKHR>(rawAS, VkDeleter<VkAccelerationStructureKHR>{device_});
+        blas_ = VulkanHandle<VkAccelerationStructureKHR>(rawAS, VkDeleter<VkAccelerationStructureKHR>{device_});
         blasBuffer_ = std::move(asBuf);
         blasMemory_ = std::move(asMem);
 
-        LOG_SUCCESS_CAT("Accel", "{}<<< BLAS 2026 COMPLETE @ {:p} — RAII LOVE — 48,000+ FPS{}", EMERALD_GREEN, static_cast<void*>(rawAS), RESET);
+        LOG_INFO_CAT("Accel", "{}<<< BLAS 2026 COMPLETE @ {:p} — RAII LOVE — 48,000+ FPS{}", DIAMOND_WHITE, static_cast<void*>(rawAS), RESET);
     }
 
     // =====================================================================
@@ -489,7 +557,7 @@ public:
     // =====================================================================
     void createShaderBindingTable(VkPhysicalDevice physicalDevice)
     {
-        LOG_ATTEMPT_CAT("SBT", "{}>>> SBT 2026 — ALIGNMENT IS LAW — GROK PROTIP #22 ACTIVE{}", RASPBERRY_PINK, RESET);
+        LOG_INFO_CAT("SBT", "{}>>> SBT 2026 — ALIGNMENT IS LAW — GROK PROTIP #22 ACTIVE{}", DIAMOND_WHITE, RESET);
 
         VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProps{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR};
         VkPhysicalDeviceProperties2 p2{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, .pNext = &rtProps};
@@ -513,7 +581,11 @@ public:
             std::memcpy(static_cast<uint8_t*>(map) + i * halign, handles.data() + i * hsize, hsize);
         vkUnmapMemory(device_, sbtMem.get());
 
-        sbtBufferAddress_ = vkGetBufferDeviceAddress(device_, &(VkBufferDeviceAddressInfo{.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO, .buffer = sbtBuf.get()}));
+        VkBufferDeviceAddressInfo sbtAddrInfo = {
+            .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
+            .buffer = sbtBuf.get()
+        };
+        sbtBufferAddress_ = vkGetBufferDeviceAddress(device_, &sbtAddrInfo);
 
         auto makeRegion = [&](VkDeviceAddress base, VkDeviceSize stride, VkDeviceSize size) {
             return VkStridedDeviceAddressRegionKHR{.deviceAddress = base, .stride = stride, .size = size};
@@ -536,7 +608,7 @@ public:
         sbtBuffer_ = std::move(sbtBuf);
         sbtMemory_ = std::move(sbtMem);
 
-        LOG_SUCCESS_CAT("SBT", "{}<<< SBT 2026 @ 0x{:x} — 48,000+ FPS READY — GROK PROTIP #22 COMPLETE{}", EMERALD_GREEN, sbtBufferAddress_, RESET);
+        LOG_INFO_CAT("SBT", "{}<<< SBT 2026 @ 0x{:x} — 48,000+ FPS READY — GROK PROTIP #22 COMPLETE{}", DIAMOND_WHITE, sbtBufferAddress_, RESET);
     }
 
     // =====================================================================
@@ -546,7 +618,7 @@ public:
     {
         if (!dsLayout_) throw std::runtime_error("GROK PROTIP #23: dsLayout missing — pipeline first!");
 
-        LOG_ATTEMPT_CAT("Descriptor", "{}>>> DESCRIPTOR POOL+SET — DIAMOND_WHITE SETUP{}", DIAMOND_WHITE, RESET);
+        LOG_INFO_CAT("Descriptor", "{}>>> DESCRIPTOR POOL+SET — DIAMOND_WHITE SETUP{}", DIAMOND_WHITE, RESET);
 
         constexpr std::array pools = {
             VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1},
@@ -557,22 +629,26 @@ public:
         };
 
         VkDescriptorPool pool = VK_NULL_HANDLE;
-        VK_CHECK(vkCreateDescriptorPool(device_, &(VkDescriptorPoolCreateInfo{
+        VkDescriptorPoolCreateInfo poolCreateInfo = {
             .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
             .maxSets = 1,
             .poolSizeCount = uint32_t(pools.size()),
             .pPoolSizes = pools.data()
-        }), nullptr, &pool), "descriptor pool");
+        };
+        VK_CHECK(vkCreateDescriptorPool(device_, &poolCreateInfo, nullptr, &pool), "descriptor pool");
 
-        dsPool_ = VkRes<VkDescriptorPool>(pool, VkDeleter<VkDescriptorPool>{device_});
-        VK_CHECK(vkAllocateDescriptorSets(device_, &(VkDescriptorSetAllocateInfo{
+        dsPool_ = VulkanHandle<VkDescriptorPool>(pool, VkDeleter<VkDescriptorPool>{device_});
+        VkDescriptorSetAllocateInfo allocSetInfo = {
             .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
             .descriptorPool = pool,
-            .descriptorSetCount = 1,
-            .pSetLayouts = &dsLayout_.get()
-        }), &ds_), "alloc descriptor set");
+            .descriptorSetCount = 1
+        };
+        VkDescriptorSetLayout layout = dsLayout_.get();
+        const VkDescriptorSetLayout * const * ppLayouts = &layout;
+        allocSetInfo.pSetLayouts = ppLayouts;
+        VK_CHECK(vkAllocateDescriptorSets(device_, &allocSetInfo, &ds_), "alloc descriptor set");
 
-        LOG_SUCCESS_CAT("Descriptor", "{}<<< DESCRIPTOR POOL+SET READY — ZERO ALLOCATION OVERHEAD{}", FUCHSIA_MAGENTA, RESET);
+        LOG_INFO_CAT("Descriptor", "{}<<< DESCRIPTOR POOL+SET READY — ZERO ALLOCATION OVERHEAD{}", DIAMOND_WHITE, RESET);
     }
 
     void updateDescriptors(VkBuffer cam, VkBuffer mat, VkBuffer dim,
@@ -583,14 +659,16 @@ public:
         std::array<VkDescriptorImageInfo, 4> imgs{};
         std::array<VkDescriptorBufferInfo, 3> bufs{};
 
+        VkAccelerationStructureKHR tlasHandle = tlas_.get();
+        const VkAccelerationStructureKHR * const * ppAccel = &tlasHandle;
         VkWriteDescriptorSetAccelerationStructureKHR accel{
             .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR,
             .accelerationStructureCount = 1,
-            .pAccelerationStructures = &tlas_.get()
+            .pAccelerationStructures = ppAccel
         };
 
         writes[0] = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .pNext = &accel, .dstSet = ds_, .dstBinding = 0, .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR};
-        imgs[0] = {.imageLayout = VK_IMAGE_LAYOUT_GENERAL, .imageView = storage ? storage : blackFallbackView_.get()};
+        imgs[0] = {.sampler = VK_NULL_HANDLE, .imageView = storage ? storage : blackFallbackView_.get(), .imageLayout = VK_IMAGE_LAYOUT_GENERAL};
         writes[1] = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = ds_, .dstBinding = 1, .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, .pImageInfo = &imgs[0]};
         bufs[0] = {.buffer = cam, .range = VK_WHOLE_SIZE};
         writes[2] = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = ds_, .dstBinding = 2, .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, .pBufferInfo = &bufs[0]};
@@ -600,7 +678,7 @@ public:
         writes[4] = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = ds_, .dstBinding = 4, .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, .pBufferInfo = &bufs[2]};
         imgs[1] = {.sampler = envSamp, .imageView = env ? env : blackFallbackView_.get(), .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
         writes[5] = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = ds_, .dstBinding = 5, .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .pImageInfo = &imgs[1]};
-        imgs[2] = {.imageLayout = VK_IMAGE_LAYOUT_GENERAL, .imageView = accum ? accum : blackFallbackView_.get()};
+        imgs[2] = {.sampler = VK_NULL_HANDLE, .imageView = accum ? accum : blackFallbackView_.get(), .imageLayout = VK_IMAGE_LAYOUT_GENERAL};
         writes[6] = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = ds_, .dstBinding = 6, .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, .pImageInfo = &imgs[2]};
 
         vkUpdateDescriptorSets(device_, uint32_t(writes.size()), writes.data(), 0, nullptr);
@@ -637,10 +715,10 @@ public:
     // =====================================================================
     void createBlackFallbackImage()
     {
-        LOG_ATTEMPT_CAT("Render", "{}>>> BLACK FALLBACK IMAGE — COSMIC VOID 2026{}", DIAMOND_WHITE, RESET);
+        LOG_INFO_CAT("Render", "{}>>> BLACK FALLBACK IMAGE — COSMIC VOID 2026{}", DIAMOND_WHITE, RESET);
 
         VkImage img = VK_NULL_HANDLE;
-        VK_CHECK(vkCreateImage(device_, &(VkImageCreateInfo{
+        VkImageCreateInfo imageCreateInfo = {
             .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
             .imageType = VK_IMAGE_TYPE_2D,
             .format = VK_FORMAT_R8G8B8A8_UNORM,
@@ -651,19 +729,26 @@ public:
             .tiling = VK_IMAGE_TILING_OPTIMAL,
             .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT,
             .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
-        }), nullptr, &img), "black img");
+        };
+        VK_CHECK(vkCreateImage(device_, &imageCreateInfo, nullptr, &img), "black img");
 
-        VkMemoryRequirements req; vkGetImageMemoryRequirements(device_, img, &req);
+        VkMemoryRequirements req;
+        vkGetImageMemoryRequirements(device_, img, &req);
         uint32_t type = findMemoryType(req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
         VkDeviceMemory mem = VK_NULL_HANDLE;
-        VK_CHECK(vkAllocateMemory(device_, &(VkMemoryAllocateInfo{.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, .allocationSize = req.size, .memoryTypeIndex = type}), nullptr, &mem), "black mem");
+        VkMemoryAllocateInfo memAllocInfo = {
+            .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+            .allocationSize = req.size,
+            .memoryTypeIndex = type
+        };
+        VK_CHECK(vkAllocateMemory(device_, &memAllocInfo, nullptr, &mem), "black mem");
         VK_CHECK(vkBindImageMemory(device_, img, mem, 0), "bind");
 
-        blackFallbackImage_ = VkRes<VkImage>(img, VkDeleter<VkImage>{device_});
-        blackFallbackMemory_ = VkRes<VkDeviceMemory>(mem, VkDeleter<VkDeviceMemory>{device_});
+        blackFallbackImage_ = VulkanHandle<VkImage>(img, VkDeleter<VkImage>{device_});
+        blackFallbackMemory_ = VulkanHandle<VkDeviceMemory>(mem, VkDeleter<VkDeviceMemory>{device_});
 
         // Upload black pixel (transient cmd)
-        VkCommandBuffer cmd = allocateTransientCommandBuffer(context_->transientPool);
+        VkCommandBuffer cmd = allocateTransientCommandBuffer(context_->commandPool);
         VkImageMemoryBarrier toDst{
             .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
             .srcAccessMask = 0,
@@ -682,19 +767,20 @@ public:
         toDst.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 0, nullptr, 1, &toDst);
         VK_CHECK(vkEndCommandBuffer(cmd), "black upload");
-        submitAndWaitTransient(cmd, context_->graphicsQueue, context_->transientPool);
+        submitAndWaitTransient(cmd, context_->graphicsQueue, context_->commandPool);
 
         VkImageView view = VK_NULL_HANDLE;
-        VK_CHECK(vkCreateImageView(device_, &(VkImageViewCreateInfo{
+        VkImageViewCreateInfo viewCreateInfo = {
             .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
             .image = img,
             .viewType = VK_IMAGE_VIEW_TYPE_2D,
             .format = VK_FORMAT_R8G8B8A8_UNORM,
             .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}
-        }), nullptr, &view), "black view");
-        blackFallbackView_ = VkRes<VkImageView>(view, VkDeleter<VkImageView>{device_});
+        };
+        VK_CHECK(vkCreateImageView(device_, &viewCreateInfo, nullptr, &view), "black view");
+        blackFallbackView_ = VulkanHandle<VkImageView>(view, VkDeleter<VkImageView>{device_});
 
-        LOG_SUCCESS_CAT("Render", "{}<<< BLACK FALLBACK READY — COSMIC VOID ACHIEVED{}", EMERALD_GREEN, RESET);
+        LOG_INFO_CAT("Render", "{}<<< BLACK FALLBACK READY — COSMIC VOID ACHIEVED{}", DIAMOND_WHITE, RESET);
     }
 
     // =====================================================================

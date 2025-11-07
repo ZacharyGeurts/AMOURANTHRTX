@@ -438,7 +438,7 @@ message(STATUS "    ██████╔╝   ██║    ╚███╔╝  
 message(STATUS "    ██╔══██╗   ██║    ██╔██╗     ██╔══╝  ██║╚██╗██║██║   ██║██║██║╚██╗██║██╔══╝  ")
 message(STATUS "    ██║  ██║   ██║   ██╔╝ ██╗    ███████╗██║ ╚████║╚██████╔╝██║██║ ╚████║███████╗")
 message(STATUS "    ╚═╝  ╚═╝   ╚═╝   ╚═╝  ╚═╝    ╚══════╝╚═╝  ╚═══╝ ╚═════╝ ╚═╝╚═╝  ╚═══╝╚══════╝")
-message(STATUS "")
+message(STATUS "██████████████████████████████████████████████████████████████████████████████████████")
 message(STATUS "==================================================================")
 message(STATUS " AMOURANTH RTX — BUILD FIXED — NOVEMBER 07 2025")
 message(STATUS " ✓ tinyobjloader: release tag + tiny_obj_loader.cc")

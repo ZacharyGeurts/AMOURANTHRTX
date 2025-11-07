@@ -26,6 +26,8 @@ namespace VulkanRTX {
 
 class VulkanRTX;      // FORWARD DECLARATION
 class VulkanRenderer; // ← ADDED: FOR NOTIFY
+class VulkanPipelineManager;
+class VulkanRenderer;
 
 class VulkanPipelineManager {
     friend class VulkanRTX;  // ALLOWS VulkanRTX to call private layout creation

@@ -12,6 +12,7 @@
 
 #pragma once
 
+#include "engine/Vulkan/VulkanCore.hpp"
 #include "engine/Dispose.hpp"                 // ← GLOBAL: VulkanDeleter<T> + VulkanHandle<T>
 #include "engine/Vulkan/VulkanCommon.hpp"
 #include "engine/core.hpp"
@@ -33,6 +34,9 @@
 // NO REDEFINITION — NO NESTED CLASS — NO SCOPE ERRORS
 // using ::VulkanHandle;  ← NOT NEEDED — Dispose.hpp already injects into global
 // ===================================================================
+
+class VulkanPipelineManager;
+class VulkanRenderer;
 
 namespace VulkanRTX {
 
