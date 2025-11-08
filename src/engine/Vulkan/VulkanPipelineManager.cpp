@@ -6,7 +6,7 @@
 #include "engine/Vulkan/VulkanCommon.hpp"
 #include "engine/Vulkan/VulkanPipelineManager.hpp"
 #include "engine/logging.hpp"
-#include "StoneKey.hpp"
+#include "engine/StoneKey.hpp"
 
 VulkanPipelineManager::VulkanPipelineManager(Context& context, int width, int height)
     : context_(context)

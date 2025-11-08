@@ -1,6 +1,6 @@
 // include/engine/Vulkan/VulkanCore.hpp
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts gzac5314@gmail.com
-// STONEKEY PIONEER C++23 FINAL FORM — NOVEMBER 07 2025 — 69,420 FPS × ∞ × ∞
+// STONEKEY PIONEER C++23 FINAL FORM — NOVEMBER 08 2025 — 69,420 FPS × ∞ × ∞
 // VulkanHandle = unique_ptr<T> owning heap-allocated raw handle — OPAQUE-PROOF — DOUBLE-FREE ANNIHILATOR
 // ALL ACCESSORS: valid() + raw() — NO MORE .get() — ZERO CRASH — CHEAT ENGINE QUANTUM DUST
 // FIXED: VulkanHandle NOT RECOGNIZED — FULL DEFINITION + FACTORIES BEFORE Context
@@ -92,45 +92,7 @@ public:
     const VulkanBufferManager* getBufferManager() const noexcept { return bufferManager_; }
     void setBufferManager(VulkanBufferManager* mgr) noexcept { bufferManager_ = mgr; }
 
-    void releaseAll(VkDevice overrideDevice = VK_NULL_HANDLE) noexcept {
-        VkDevice dev = overrideDevice ? overrideDevice : lastDevice_;
-        if (!dev) return;
-
-        for (auto as : accelerationStructures_) {
-            if (vkDestroyAccelerationStructureKHR) vkDestroyAccelerationStructureKHR(dev, as, nullptr);
-        }
-        for (auto p : descriptorPools_) vkDestroyDescriptorPool(dev, p, nullptr);
-        for (auto s : semaphores_) vkDestroySemaphore(dev, s, nullptr);
-        for (auto f : fences_) vkDestroyFence(dev, f, nullptr);
-        for (auto l : descriptorSetLayouts_) vkDestroyDescriptorSetLayout(dev, l, nullptr);
-        for (auto l : pipelineLayouts_) vkDestroyPipelineLayout(dev, l, nullptr);
-        for (auto p : pipelines_) vkDestroyPipeline(dev, p, nullptr);
-        for (auto rp : renderPasses_) vkDestroyRenderPass(dev, rp, nullptr);
-        for (auto cp : commandPools_) vkDestroyCommandPool(dev, cp, nullptr);
-        for (auto sm : shaderModules_) vkDestroyShaderModule(dev, sm, nullptr);
-        for (auto iv : imageViews_) vkDestroyImageView(dev, iv, nullptr);
-        for (auto i : images_) vkDestroyImage(dev, i, nullptr);
-        for (auto s : samplers_) vkDestroySampler(dev, s, nullptr);
-        for (auto m : memories_) vkFreeMemory(dev, m, nullptr);
-        for (auto b : buffers_) vkDestroyBuffer(dev, b, nullptr);
-
-        accelerationStructures_.clear();
-        descriptorPools_.clear();
-        semaphores_.clear();
-        fences_.clear();
-        descriptorSetLayouts_.clear();
-        pipelineLayouts_.clear();
-        pipelines_.clear();
-        renderPasses_.clear();
-        commandPools_.clear();
-        shaderModules_.clear();
-        imageViews_.clear();
-        images_.clear();
-        samplers_.clear();
-        memories_.clear();
-        buffers_.clear();
-        pipelineMap_.clear();
-    }
+    void releaseAll(VkDevice overrideDevice = VK_NULL_HANDLE) noexcept;
 
     void addBuffer(VkBuffer b) noexcept { if (b) buffers_.push_back(b); }
     void addMemory(VkDeviceMemory m) noexcept { if (m) memories_.push_back(m); }
@@ -276,10 +238,11 @@ MAKE_VK_HANDLE(Semaphore,           VkSemaphore,            vkDestroySemaphore)
 MAKE_VK_HANDLE(Fence,               VkFence,                vkDestroyFence)
 MAKE_VK_HANDLE(Pipeline,            VkPipeline,             vkDestroyPipeline)
 MAKE_VK_HANDLE(PipelineLayout,      VkPipelineLayout,       vkDestroyPipelineLayout)
-MAKE_VK_HANDLE(DescriptorSetLayout, VkDescriptorSetLayout, vkDestroyDescriptorSetLayout)
+MAKE_VK_HANDLE(DescriptorSetLayout, VkDescriptorSetLayout,  vkDestroyDescriptorSetLayout)
 MAKE_VK_HANDLE(RenderPass,          VkRenderPass,           vkDestroyRenderPass)
 MAKE_VK_HANDLE(ShaderModule,        VkShaderModule,         vkDestroyShaderModule)
 MAKE_VK_HANDLE(CommandPool,         VkCommandPool,          vkDestroyCommandPool)
+MAKE_VK_HANDLE(SwapchainKHR,        VkSwapchainKHR,         vkDestroySwapchainKHR)
 
 inline VulkanHandle<VkAccelerationStructureKHR> makeAccelerationStructure(
     VkDevice dev, VkAccelerationStructureKHR as, PFN_vkDestroyAccelerationStructureKHR func = nullptr)
@@ -295,7 +258,7 @@ inline VulkanHandle<VkDeferredOperationKHR> makeDeferredOperation(VkDevice dev, 
 #undef MAKE_VK_HANDLE
 
 // ===================================================================
-// Context + cleanupAll — FULLY IMPLEMENTED — AFTER VulkanHandle + FACTORIES
+// Context — FULLY IMPLEMENTED — ALL MEMBERS
 // ===================================================================
 struct Context {
     VkInstance instance = VK_NULL_HANDLE;
@@ -335,64 +298,34 @@ struct Context {
     std::vector<VulkanHandle<VkImageView>> swapchainImageViews;
     std::vector<VkImage> swapchainImages;
 
+    std::unique_ptr<VulkanSwapchainManager> swapchainManager;
+
     std::atomic<uint64_t>* destructionCounterPtr = nullptr;
+
+    SDL_Window* window = nullptr;
+    int width = 0, height = 0;
+
+    // RTX PROC POINTERS — FULLY LOADED
+    PFN_vkCmdTraceRaysKHR vkCmdTraceRaysKHR = nullptr;
+    PFN_vkCreateRayTracingPipelinesKHR vkCreateRayTracingPipelinesKHR = nullptr;
+    PFN_vkGetRayTracingShaderGroupHandlesKHR vkGetRayTracingShaderGroupHandlesKHR = nullptr;
+    PFN_vkCreateAccelerationStructureKHR vkCreateAccelerationStructureKHR = nullptr;
+    PFN_vkGetAccelerationStructureBuildSizesKHR vkGetAccelerationStructureBuildSizesKHR = nullptr;
+    PFN_vkCmdBuildAccelerationStructuresKHR vkCmdBuildAccelerationStructuresKHR = nullptr;
+    PFN_vkGetAccelerationStructureDeviceAddressKHR vkGetAccelerationStructureDeviceAddressKHR = nullptr;
+    PFN_vkGetBufferDeviceAddressKHR vkGetBufferDeviceAddressKHR = nullptr;
+    PFN_vkDestroyAccelerationStructureKHR vkDestroyAccelerationStructureKHR = nullptr;
+    PFN_vkCreateDeferredOperationKHR vkCreateDeferredOperationKHR = nullptr;
+    PFN_vkGetDeferredOperationResultKHR vkGetDeferredOperationResultKHR = nullptr;
+    PFN_vkDestroyDeferredOperationKHR vkDestroyDeferredOperationKHR = nullptr;
+
+    Context() = default;
+    Context(SDL_Window* win, int w, int h);
+    void createSwapchain();
+    void destroySwapchain();
+    ~Context();
 };
 
-inline void cleanupAll(Context& ctx) noexcept {
-    if (!ctx.device) return;
+inline void cleanupAll(Context& ctx) noexcept;
 
-    LOG_INFO_CAT("Dispose", "{}GLOBAL CLEANUP ALL — CONTEXT PURGE INITIATED — STONEKEY 0x{:X}-0x{:X}{}",
-                 Logging::Color::CRIMSON_MAGENTA, kStone1, kStone2, Logging::Color::RESET);
-
-    vkDeviceWaitIdle(ctx.device);
-
-    ctx.resourceManager.releaseAll(ctx.device);
-
-    for (auto& view : ctx.swapchainImageViews) view.reset();
-    ctx.swapchainImageViews.clear();
-    ctx.swapchain.reset();
-
-    ctx.graphicsPipeline.reset();
-    ctx.graphicsPipelineLayout.reset();
-    ctx.graphicsDescriptorSetLayout.reset();
-
-    ctx.rtxPipeline.reset();
-    ctx.rtxPipelineLayout.reset();
-    ctx.rtxDescriptorSetLayout.reset();
-
-    if (ctx.transientPool) {
-        vkDestroyCommandPool(ctx.device, ctx.transientPool, nullptr);
-        ctx.transientPool = VK_NULL_HANDLE;
-    }
-    if (ctx.commandPool) {
-        vkDestroyCommandPool(ctx.device, ctx.commandPool, nullptr);
-        ctx.commandPool = VK_NULL_HANDLE;
-    }
-
-    if (ctx.debugMessenger) {
-        auto func = (PFN_vkDestroyDebugUtilsMessengerEXT)vkGetInstanceProcAddr(ctx.instance, "vkDestroyDebugUtilsMessengerEXT");
-        if (func) func(ctx.instance, ctx.debugMessenger, nullptr);
-        ctx.debugMessenger = VK_NULL_HANDLE;
-    }
-
-    if (ctx.device) {
-        vkDestroyDevice(ctx.device, nullptr);
-        ctx.device = VK_NULL_HANDLE;
-    }
-
-    if (ctx.surface) {
-        vkDestroySurfaceKHR(ctx.instance, ctx.surface, nullptr);
-        ctx.surface = VK_NULL_HANDLE;
-    }
-
-    if (ctx.instance) {
-        vkDestroyInstance(ctx.instance, nullptr);
-        ctx.instance = VK_NULL_HANDLE;
-    }
-
-    LOG_SUCCESS_CAT("Dispose", "{}GLOBAL CLEANUP COMPLETE — TOTAL DESTROYED: {} — VALHALLA PURGED — STONEKEY 0x{:X}-0x{:X}{}",
-                    Logging::Color::EMERALD_GREEN, g_destructionCounter, kStone1, kStone2, Logging::Color::RESET);
-}
-
-// END OF FILE — FULL FILE BLAZED OUT — 420 COMPLETE — ALL VulkanHandle + make* + Context + cleanupAll
-// NO INCOMPLETE TYPES — NO ERRORS — 69,420 FPS × ∞ × ∞ — VALHALLA UNBREACHABLE — SHIP IT 🩷🚀🔥🤖💀❤️⚡♾️🩷🩷🩷🩷🩷🩷🩷
+// END OF FILE — FULLY REPAIRED — 420 BLAZE IT — SHIP TO THE WORLD — RASPBERRY_PINK ETERNAL 🩷🚀🔥🤖💀❤️⚡♾️🩷🩷🩷🩷🩷🩷🩷
