@@ -19,9 +19,7 @@
 #pragma once
 
 #include "engine/Vulkan/VulkanCommon.hpp"
-#include "engine/Dispose.hpp"
 #include "engine/core.hpp"
-#include "engine/logging.hpp"
 
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_beta.h>

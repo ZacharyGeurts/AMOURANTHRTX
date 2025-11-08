@@ -7,10 +7,8 @@
 // RASPBERRY_PINK PHOTONS = SUPREME — VALHALLA LOCKED 🩷🚀🔥🤖💀❤️⚡♾️
 
 #include "engine/Vulkan/VulkanRTX_Setup.hpp"
-#include "engine/Vulkan/VulkanCore.hpp"
 #include "engine/Vulkan/VulkanPipelineManager.hpp"
 #include "engine/Vulkan/VulkanRenderer.hpp"
-#include "engine/logging.hpp"
 
 using namespace Logging::Color;
 
