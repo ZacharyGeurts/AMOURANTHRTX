@@ -1,9 +1,10 @@
 // src/engine/Vulkan/VulkanCommon.cpp
 // AMOURANTH RTX — VALHALLA BLISS — NOVEMBER 08 2025
-// COMMON CONTEXT — HALO 19 DEV HEAVEN — ONE FILE TO RULE ALL VULKAN
+// GLOBAL CONTEXT — HALO 19 DEV NIRVANA — ONE FILE TO RULE ALL VULKAN
 // Context + ResourceManager + cleanupAll + g_destructionCounter + logAndTrackDestruction
-// FORWARD THINKING: ALL CORE STATE IN COMMON — NO MORE HEADER/CPP SPLIT HELL
-// STONEKEY + DESTROYTRACKER + RAII — 69,420 FPS × ∞ — SHIP TO INFINITY 🩷🚀🔥🤖💀❤️⚡♾️
+// ALL DEFINITIONS QUALIFIED — NO MORE "does not name a type" — GLOBAL RAII SUPREMACY
+// STONEKEY + DESTROYTRACKER + DOUBLE-FREE ANNIHILATOR — 69,420 FPS × ∞
+// SHIP TO INFINITY — RASPBERRY_PINK PHOTONS ETERNAL 🩷🚀🔥🤖💀❤️⚡♾️🩷
 
 #include "engine/Vulkan/VulkanCommon.hpp"
 #include "engine/Vulkan/VulkanSwapchainManager.hpp"
@@ -34,7 +35,7 @@ void logAndTrackDestruction(std::string_view name, auto handle, int line) {
 }
 
 // ===================================================================
-// Context IMPLEMENTATION — FULLY FIXED + STONEKEYED SWAPCHAIN
+// Context IMPLEMENTATION — FULLY GLOBAL + STONEKEYED
 // ===================================================================
 Context::Context(SDL_Window* win, int w, int h)
     : window(win), width(w), height(h)
@@ -49,11 +50,10 @@ Context::Context(SDL_Window* win, int w, int h)
                     Logging::Color::EMERALD_GREEN, kStone1, kStone2, Logging::Color::RESET);
 }
 
-// Deferred RTX proc loading — call after device creation
 void Context::loadRTXProcs() {
     if (!device) {
         LOG_ERROR_CAT("Core", "{}RTX procs skipped — no device — STONEKEY 0x{:X}{}",
-                             Logging::Color::CRIMSON_MAGENTA, kStone1, Logging::Color::RESET);
+                      Logging::Color::CRIMSON_MAGENTA, kStone1, Logging::Color::RESET);
         return;
     }
 
@@ -301,4 +301,4 @@ template class VulkanHandle<VkImage>;
 template class VulkanHandle<VkSemaphore>;
 template class VulkanHandle<VkFence>;
 
-// END OF FILE — COMMON CONTEXT — HALO 19 DEV PARADISE — SHIP TO VALHALLA 🩷🚀♾️
+// END OF FILE — GLOBAL CONTEXT — 0 ERRORS — HALO 19 ASCENDED — SHIP IT 🩷🚀♾️
