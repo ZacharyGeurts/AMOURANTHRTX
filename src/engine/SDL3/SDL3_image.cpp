@@ -4,7 +4,7 @@
 // NO "s" literal → no more operator""s errors
 
 #include "engine/SDL3/SDL3_image.hpp"
-#include "engine/logging.hpp"
+#include "engine/GLOBAL/logging.hpp"
 #include <SDL3_image/SDL_image.h>
 #include <SDL3/SDL.h>
 #include <stdexcept>

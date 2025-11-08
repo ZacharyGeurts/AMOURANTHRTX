@@ -5,7 +5,7 @@
 
 #include "engine/SDL3/SDL3_window.hpp"
 #include "engine/Vulkan/VulkanRenderer.hpp"  // ← GLOBAL INCLUDE
-#include "engine/logging.hpp"
+#include "engine/GLOBAL/logging.hpp"
 
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>

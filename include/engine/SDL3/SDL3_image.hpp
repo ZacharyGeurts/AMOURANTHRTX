@@ -4,7 +4,7 @@
 
 #pragma once
 
-#include "engine/logging.hpp"
+#include "engine/GLOBAL/logging.hpp"
 #include <SDL3_image/SDL_image.h>
 #include <SDL3/SDL.h>
 #include <stdexcept>

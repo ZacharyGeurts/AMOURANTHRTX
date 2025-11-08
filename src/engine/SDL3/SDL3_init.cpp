@@ -4,7 +4,7 @@
 // NO VkResult in format → ZERO compiler errors
 
 #include "engine/SDL3/SDL3_init.hpp"
-#include "engine/logging.hpp"
+#include "engine/GLOBAL/logging.hpp"
 #include "engine/Vulkan/Vulkan_init.hpp"
 #include <stdexcept>
 #include <format>

@@ -4,7 +4,7 @@
 // ALL ERRORS FIXED: source_location, SDL3 fields, compound literals
 
 #include "engine/SDL3/SDL3_input.hpp"
-#include "engine/logging.hpp"
+#include "engine/GLOBAL/logging.hpp"
 #include <stdexcept>
 #include <source_location>
 #include <fstream>
