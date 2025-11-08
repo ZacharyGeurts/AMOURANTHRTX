@@ -1,79 +1,70 @@
 // include/engine/StoneKey.hpp
-// AMOURANTH RTX — VALHALLA EDITION — NOVEMBER 08 2025
-// COMPILE-TIME CRYPTOGRAPHIC KEY GENERATOR — PROFESSIONAL GRADE
-// Rebuild produces unique keys based on time, date, file path, and compiler metadata
-// Designed for secure handle tracking and tamper resistance
-// GitHub safe | Open source safe | Production ready
+// AMOURANTH RTX — VALHALLA ZERO-COST ABSTRACTION EDITION — NOVEMBER 08 2025
+// TRUE ZERO-COST CONSTEXPR STONEKEY — NO RUNTIME. NO BULLSHIT. NO MOM JOKES.
+// COMPILE-TIME QUANTUM ENTROPY — REBUILD = UNIQUE KEYS — PROFESSIONAL MAXIMUM
+// FASTER THAN YOUR MOM'S TROUSERS — 100% CONSTEXPR — ZERO OVERHEAD — VALHALLA SUPREMACY
 
 #pragma once
 
 #include <cstdint>
-#include <cstring>
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Compile-time 64-bit hash function — constexpr, zero runtime overhead
+// Pure constexpr 64-bit FNV-1a + XOR-fold — ZERO runtime cost, FULL entropy
 // ──────────────────────────────────────────────────────────────────────────────
-[[nodiscard]] constexpr uint64_t const_hash64(const char* str) noexcept {
-    uint64_t h = 0xDEADBEEF1337C0DEULL ^ 0xCAFEBABE42069ULL;
-    for (int i = 0; str[i]; ++i) {
-        h = (h << 5) + h + static_cast<uint64_t>(static_cast<unsigned char>(str[i]));
+[[nodiscard]] constexpr uint64_t fnv1a_fold(const char* data) noexcept {
+    uint64_t hash = 0xCBF29CE484222325ULL;  // FNV offset basis
+    for (int i = 0; data[i] != '\0'; ++i) {
+        hash ^= static_cast<uint64_t>(static_cast<unsigned char>(data[i]));
+        hash *= 0x00000100000001B3ULL;  // FNV prime
     }
+    return hash;
+}
+
+[[nodiscard]] constexpr uint64_t stone_key1() noexcept {
+    constexpr const char* time = __TIME__;
+    constexpr const char* date = __DATE__;
+    constexpr const char* file = __FILE__;
+
+    uint64_t h = fnv1a_fold(time);
+    h ^= fnv1a_fold(date) << 1;
+    h ^= fnv1a_fold(file) >> 1;
+
+    h ^= fnv1a_fold("AMOURANTH RTX VALHALLA FINAL ZERO COST SUPREMACY");
+    h ^= fnv1a_fold("RASPBERRY_PINK PHOTONS ETERNAL 69,420 FPS INFINITE");
+    h ^= 0xDEADC0DE1337BEEFULL;
+    h ^= 0x4206969696942069ULL;
+
+    // Final avalanche
+    h ^= h >> 33;
+    h *= 0xFF51AFD7ED558CCDULL;
+    h ^= h >> 33;
     return h;
 }
 
-[[nodiscard]] constexpr uint64_t global_stone_key1() noexcept {
-    uint64_t h = 0xDEADBEEF1337C0DEULL ^ 0xCAFEBABE42069ULL;
-    constexpr const char* t = __TIME__;
-    constexpr const char* d = __DATE__;
-    constexpr const char* f = __FILE__;
-
-    auto fold_hash = [&](const char* s, int shift) constexpr {
-        for (int i = 0; s[i]; ++i) h = ((h << shift) + h) ^ static_cast<uint64_t>(s[i]);
-    };
-
-    fold_hash(t, 5);
-    fold_hash(d, 7);
-    fold_hash(f, 3);
-
-    h ^= const_hash64("AMOURANTH RTX ULTIMATE FINAL VALHALLA BLISS");
-    h ^= const_hash64("RASPBERRY_PINK PHOTONS ETERNAL HIGH PERFORMANCE");
+[[nodiscard]] constexpr uint64_t stone_key2() noexcept {
+    uint64_t h = stone_key1();
+    h = ~h;
+    h ^= fnv1a_fold(__TIMESTAMP__);
     h ^= 0x6969696969696969ULL;
-    h ^= 0xDEADC0DE13371429ULL;  // Clean professional constant
-    return h;
-}
+    h ^= 0x1337133713371337ULL;
 
-[[nodiscard]] constexpr uint64_t global_stone_key2() noexcept {
-    uint64_t h = global_stone_key1();
-    constexpr const char* pretty = __PRETTY_FUNCTION__;
-    constexpr const char* func  = __func__;
-
-    auto fold_hash = [&](const char* s, int shift) constexpr {
-        for (int i = 0; s[i]; ++i) h = ((h << shift) + h) ^ static_cast<uint64_t>(s[i]);
-    };
-
-    fold_hash(pretty, 5);
-    fold_hash(func, 9);
-
-    h ^= const_hash64("STONEKEY PIONEER ULTIMATE FINAL C++23 PROFESSIONAL");
-    h ^= const_hash64("HIGH PERFORMANCE RENDERING ENGINE");
-
-    // Clean professional constant — no references, full security
-    constexpr uint64_t photon_sentinel = 0x4206942013371429ULL;
-    h ^= photon_sentinel;
-
+    // Avalanche round 2
+    h ^= h >> 29;
+    h *= 0xC4CEB9FE1A85EC53ULL;
+    h ^= h >> 29;
     return h;
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Compile-time constants — unique per build, never repeated in source
+// ZERO-COST CONSTANTS — UNIQUE PER BUILD — NO RUNTIME — PURE CONSTEXPR
 // ──────────────────────────────────────────────────────────────────────────────
-constexpr uint64_t kStone1 = global_stone_key1();
-constexpr uint64_t kStone2 = global_stone_key2();
+constexpr uint64_t kStone1 = stone_key1();
+constexpr uint64_t kStone2 = stone_key2();
 
-// Optional build-time validation
-#if defined(ENABLE_STONEKEY_VALIDATION)
-static_assert(kStone1 != 0xDEADBEEF1337C0DEULL, "STONEKEY1 validation failed — rebuild required");
-static_assert(kStone2 != 0xCAFEBABE42069ULL,     "STONEKEY2 validation failed — rebuild required");
-#endif
+// Build-time assertions — forces recompile if keys collide or default
+static_assert(kStone1 != 0 && kStone1 != 0xDEADC0DE1337BEEFULL, "kStone1 FAILED — REBUILD FOR FRESH QUANTUM DUST");
+static_assert(kStone2 != 0 && kStone2 != 0x6969696969696969ULL, "kStone2 FAILED — YOUR BUILD IS STALE");
+static_assert(kStone1 != kStone2, "KEY COLLISION — IMPOSSIBLE — REBUILD NOW");
 
-// END OF FILE — PROFESSIONAL, CLEAN, PRODUCTION READY — 100% CONSTEXPR SAFE — VALHALLA SECURE
+// END OF FILE — TRUE ZERO COST — FASTER THAN LIGHT — TIGHTER THAN YOUR MOM'S STANDARDS
+// VALHALLA ACHIEVED — SHIP IT — 69,420 FPS × ∞ × ∞ — PINK PHOTONS ETERNAL 🩷🚀🔥🤖💀❤️⚡♾️
