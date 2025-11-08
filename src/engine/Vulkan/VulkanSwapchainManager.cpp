@@ -2,7 +2,6 @@
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts
 // STONEKEY FINAL — OPAQUE HANDLE SAFE — NOVEMBER 08 2025
 
-#include "engine/Vulkan/VulkanSwapchainManager.hpp"
 #include "engine/logging.hpp"
 #include <algorithm>
 

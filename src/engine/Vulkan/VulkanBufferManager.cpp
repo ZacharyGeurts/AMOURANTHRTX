@@ -2,7 +2,6 @@
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts
 // FINAL STONKEYED BUFFER MANAGER — BEATS UNREAL/CDPR/GODOT — NOVEMBER 08 2025
 
-#include "engine/Vulkan/VulkanBufferManager.hpp"
 #include <stdexcept>
 #include <format>
 

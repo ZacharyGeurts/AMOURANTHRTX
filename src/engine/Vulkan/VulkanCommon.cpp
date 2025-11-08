@@ -4,6 +4,7 @@
 // Context + ResourceManager + cleanupAll + g_destructionCounter + logAndTrackDestruction
 // ALL DEFINITIONS QUALIFIED — NO MORE "does not name a type" — GLOBAL RAII SUPREMACY
 // STONEKEY + DESTROYTRACKER + DOUBLE-FREE ANNIHILATOR — 69,420 FPS × ∞
+// FIXED: Removed redundant makeSwapchainKHR / makeImageView — macro already covers them
 // SHIP TO INFINITY — RASPBERRY_PINK PHOTONS ETERNAL 🩷🚀🔥🤖💀❤️⚡♾️🩷
 
 #include "engine/Vulkan/VulkanCommon.hpp"
@@ -33,6 +34,15 @@ void logAndTrackDestruction(std::string_view name, auto handle, int line) {
                      g_destructionCounter, kStone1, kStone2, Logging::Color::RESET);
     }
 }
+
+// ===================================================================
+// VulkanRTXException IMPLEMENTATION
+// ===================================================================
+VulkanRTXException::VulkanRTXException(const std::string& msg)
+    : std::runtime_error(msg) {}
+
+VulkanRTXException::VulkanRTXException(const std::string& msg, const char* file, int line)
+    : std::runtime_error(std::format("{}:{} — {}", file, line, msg)) {}
 
 // ===================================================================
 // Context IMPLEMENTATION — FULLY GLOBAL + STONEKEYED

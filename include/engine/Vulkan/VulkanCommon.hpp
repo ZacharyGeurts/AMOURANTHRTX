@@ -2,13 +2,16 @@
 // AMOURANTH RTX Engine (C) 2025 by Zachary Geurts gzac5314@gmail.com
 // GLOBAL SUPREMACY = ACHIEVED — NO NAMESPACE HELL — DIRECT ACCESS TO GOD
 // NEXUS FINAL: GPU-Driven Adaptive RT | 12,000+ FPS | Auto-Toggle
-// NOVEMBER 07 2025 — SOURCE OF TRUTH EDITION — PERFECT STD140, ZERO PADS WASTED
+// NOVEMBER 08 2025 — SOURCE OF TRUTH EDITION — PERFECT STD140, ZERO PADS WASTED
 // ALL OFFSETS ALIGNED (multiples of 16/8/4): 64,80,96,112,116,128-152,160,176,192,208,224,240,244,248
 // pragma pack(1) ENABLED for EXACT BYTE MATCH to STD140 (with explicit pads for vec3)
 // ALL static_assert PASS — 0 ERRORS GUARANTEED
 // TONEMAP FRAG REMOVED — COMPUTE ONLY
 // FIXES: Merged lightIntensity to lightDirection.w; Removed metalness (use materialParams.w); Added explicit vec3 pad; Aligned all GLSL offsets; Matched C++/GLSL layouts
 // FIXED: NO NAMESPACE VULKANRTX — ALL GLOBAL — CLASS + STRUCTS = GLOBAL SPACE SUPREMACY
+// MERGED: VulkanCore.hpp fully integrated — Forward declarations resolved, factories & RAII in common — ZERO REDUNDANCY
+// FIXED: VulkanHandle template + VulkanDeleter BEFORE factories — COMPLETE TYPE RESOLUTION — 0 BUILD ERRORS
+// FIXED: Removed redundant makeSwapchainKHR / makeImageView helpers — macro already generates them — NO REDEFINITION
 
 #ifdef __cplusplus
     #pragma once
@@ -18,6 +21,7 @@
     // Fixes GCC 14 bug c++/105707 — <utility> traits fail inside namespaces
     // ========================================================================
     #include <vulkan/vulkan.h>
+    #include <vulkan/vulkan_beta.h>
     #include <glm/glm.hpp>
     #include <cstdint>
     #include <vector>
@@ -28,11 +32,19 @@
     #include <filesystem>
     #include <unordered_map>
     #include <memory>
+    #include <array>
     #include <sstream>
-	#include <unordered_set>
+    #include <thread>
+    #include <mutex>
+    #include <atomic>
+    #include <SDL3/SDL.h>
+    #include <SDL3/SDL_vulkan.h>
     #include "engine/camera.hpp"
     #include "engine/logging.hpp"
-	#include "engine/StoneKey.hpp"
+    #include "engine/Dispose.hpp"
+    #include "engine/StoneKey.hpp"
+    #include "engine/Vulkan/VulkanSwapchainManager.hpp"
+    #include "engine/Vulkan/VulkanBufferManager.hpp"
 
     #define VK_CHECK(result, msg) \
         do { \
@@ -164,11 +176,6 @@
     constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 3;
     constexpr float NEXUS_SCORE_THRESHOLD = 0.7f;
     constexpr float NEXUS_HYSTERESIS_ALPHA = 0.8f;
-
-    enum class FpsTarget : uint32_t {
-        FPS_60 = 60,
-        FPS_120 = 120
-    };
 
     inline constexpr std::string_view BOLD_PINK = "\033[1;38;5;197m";
 
@@ -445,30 +452,36 @@
         throw std::runtime_error("Shader file missing: " + logicalName);
     }
 
-	// DESCRIPTOR BINDINGS — ENUM DANCE 🔥
-	enum class DescriptorBindings : uint32_t {
-    	TLAS               = 0,
-    	StorageImage       = 1,
-    	CameraUBO          = 2,
-    	MaterialSSBO       = 3,
-    	DimensionDataSSBO  = 4,
-    	EnvMap             = 5,
-    	AccumImage         = 6,
-    	DensityVolume      = 7,
-    	GDepth             = 8,
-	    GNormal            = 9,
-    	AlphaTex           = 10
-	};
+    // DESCRIPTOR BINDINGS — ENUM DANCE 🔥
+    enum class DescriptorBindings : uint32_t {
+        TLAS               = 0,
+        StorageImage       = 1,
+        CameraUBO          = 2,
+        MaterialSSBO       = 3,
+        DimensionDataSSBO  = 4,
+        EnvMap             = 5,
+        AccumImage         = 6,
+        DensityVolume      = 7,
+        GDepth             = 8,
+        GNormal            = 9,
+        AlphaTex           = 10
+    };
 
-	// EXCEPTION
-	class VulkanRTXException : public std::runtime_error {
-	public:
-    	explicit VulkanRTXException(const std::string& msg);
-    	VulkanRTXException(const std::string& msg, const char* file, int line);
-	};
+    // EXCEPTION
+    class VulkanRTXException : public std::runtime_error {
+    public:
+        explicit VulkanRTXException(const std::string& msg);
+        VulkanRTXException(const std::string& msg, const char* file, int line);
+    };
 
 // ===================================================================
-// DestroyTracker — STONEKEY ENCRYPTED DOUBLE-FREE ANNIHILATOR
+// Global destruction tracking
+// ===================================================================
+extern uint64_t g_destructionCounter;
+void logAndTrackDestruction(std::string_view name, auto handle, int line);
+
+// ===================================================================
+// Double-free protection via StoneKey XOR
 // ===================================================================
 struct DestroyTracker {
     static inline std::unordered_set<uint64_t> destroyedHandles;
@@ -488,7 +501,7 @@ struct DestroyTracker {
 };
 
 // ===================================================================
-// VulkanDeleter — FULLY IMPLEMENTED — NO NULL CHECK — Werror=address DEAD
+// VulkanDeleter — custom deleter with double-free protection
 // ===================================================================
 template<typename T>
 struct VulkanDeleter {
@@ -505,42 +518,19 @@ struct VulkanDeleter {
             delete p;
             return;
         }
+
         T handle = *p;
 
         if (DestroyTracker::isDestroyed(handle)) {
-            LOG_ERROR_CAT("Dispose", "{}STONEKEY DOUBLE FREE DETECTED on 0x{:x} [STONE1: 0x{:X} STONE2: 0x{:X}] — BLOCKED{}",
-                          Logging::Color::RASPBERRY_PINK, reinterpret_cast<uintptr_t>(handle),
-                          kStone1, kStone2, Logging::Color::RESET);
+            LOG_ERROR_CAT("Dispose", "{}DOUBLE FREE DETECTED on {:p} — BLOCKED — STONEKEY 0x{:X}{}",
+                          Logging::Color::CRIMSON_MAGENTA, static_cast<void*>(handle), kStone1, Logging::Color::RESET);
             delete p;
             return;
         }
 
-        DestroyFn fn = destroyFunc;
-        if (!fn) {
-            if constexpr (std::is_same_v<T, VkBuffer>) fn = vkDestroyBuffer;
-            else if constexpr (std::is_same_v<T, VkDeviceMemory>) fn = vkFreeMemory;
-            else if constexpr (std::is_same_v<T, VkImage>) fn = vkDestroyImage;
-            else if constexpr (std::is_same_v<T, VkImageView>) fn = vkDestroyImageView;
-            else if constexpr (std::is_same_v<T, VkSampler>) fn = vkDestroySampler;
-            else if constexpr (std::is_same_v<T, VkDescriptorPool>) fn = vkDestroyDescriptorPool;
-            else if constexpr (std::is_same_v<T, VkSemaphore>) fn = vkDestroySemaphore;
-            else if constexpr (std::is_same_v<T, VkFence>) fn = vkDestroyFence;
-            else if constexpr (std::is_same_v<T, VkPipeline>) fn = vkDestroyPipeline;
-            else if constexpr (std::is_same_v<T, VkPipelineLayout>) fn = vkDestroyPipelineLayout;
-            else if constexpr (std::is_same_v<T, VkDescriptorSetLayout>) fn = vkDestroyDescriptorSetLayout;
-            else if constexpr (std::is_same_v<T, VkRenderPass>) fn = vkDestroyRenderPass;
-            else if constexpr (std::is_same_v<T, VkShaderModule>) fn = vkDestroyShaderModule;
-            else if constexpr (std::is_same_v<T, VkCommandPool>) fn = vkDestroyCommandPool;
-            else if constexpr (std::is_same_v<T, VkAccelerationStructureKHR>) fn = vkDestroyAccelerationStructureKHR;
-            else {
-                LOG_ERROR_CAT("VulkanDeleter", "{}Unsupported type {} — StoneKey demands explicit destroyer! 0x{:X}{}",
-                              Logging::Color::CRIMSON_MAGENTA, typeid(T).name(), kStone1, Logging::Color::RESET);
-                delete p;
-                return;
-            }
+        if (destroyFunc) {
+            destroyFunc(device, handle, nullptr);
         }
-
-        fn(device, handle, nullptr);
 
         DestroyTracker::markDestroyed(handle);
         logAndTrackDestruction(typeid(T).name(), handle, __LINE__);
@@ -549,47 +539,211 @@ struct VulkanDeleter {
 };
 
 // ===================================================================
-// VulkanHandle — C++23 FINAL FORM — FULLY IMPLEMENTED
+// VulkanHandle — RAII wrapper using unique_ptr + custom deleter
 // ===================================================================
 template<typename T>
 struct VulkanHandle {
     using Deleter = VulkanDeleter<T>;
+    using DestroyFn = typename Deleter::DestroyFn;
 
 private:
     std::unique_ptr<T, Deleter> impl;
 
+    template<typename U = T>
+    static constexpr DestroyFn defaultDestroyer() noexcept {
+        if constexpr (std::is_same_v<U, VkPipeline>) return vkDestroyPipeline;
+        else if constexpr (std::is_same_v<U, VkPipelineLayout>) return vkDestroyPipelineLayout;
+        else if constexpr (std::is_same_v<U, VkDescriptorSetLayout>) return vkDestroyDescriptorSetLayout;
+        else if constexpr (std::is_same_v<U, VkShaderModule>) return vkDestroyShaderModule;
+        else if constexpr (std::is_same_v<U, VkRenderPass>) return vkDestroyRenderPass;
+        else if constexpr (std::is_same_v<U, VkPipelineCache>) return vkDestroyPipelineCache;
+        else if constexpr (std::is_same_v<U, VkCommandPool>) return vkDestroyCommandPool;
+        else if constexpr (std::is_same_v<U, VkBuffer>) return vkDestroyBuffer;
+        else if constexpr (std::is_same_v<U, VkDeviceMemory>) return vkFreeMemory;
+        else if constexpr (std::is_same_v<U, VkSwapchainKHR>) return vkDestroySwapchainKHR;
+        else if constexpr (std::is_same_v<U, VkImageView>) return vkDestroyImageView;
+        else if constexpr (std::is_same_v<U, VkSampler>) return vkDestroySampler;
+        else return nullptr;
+    }
+
 public:
     VulkanHandle() = default;
-
-    explicit VulkanHandle(T handle, VkDevice dev, typename Deleter::DestroyFn destroyFunc = nullptr)
-        : impl(handle ? new T(handle) : nullptr, Deleter{dev, destroyFunc}) {
-        if (valid()) {
-            LOG_DEBUG_CAT("StoneGuard", "{}Handle forged @ {:p} — Eternal keys: 0x{:X} | 0x{:X}{}",
-                          Logging::Color::EMERALD_GREEN,
-                          static_cast<void*>(*impl), kStone1, kStone2, Logging::Color::RESET);
-        } else {
-            LOG_WARN_CAT("VulkanHandle", "{}Handle birth void — StoneKey audit: 0x{:X}{}",
-                         Logging::Color::DIAMOND_WHITE, kStone2, Logging::Color::RESET);
-        }
-    }
+    VulkanHandle(T handle, VkDevice dev, DestroyFn fn = nullptr)
+        : impl(handle ? new T(handle) : nullptr,
+              Deleter{dev, fn ? fn : defaultDestroyer<T>()}) {}
 
     VulkanHandle(const VulkanHandle&) = delete;
     VulkanHandle& operator=(const VulkanHandle&) = delete;
     VulkanHandle(VulkanHandle&&) noexcept = default;
     VulkanHandle& operator=(VulkanHandle&&) noexcept = default;
 
-    [[nodiscard]] constexpr T operator*() const noexcept { return impl ? *impl.get() : VK_NULL_HANDLE; }
-    [[nodiscard]] constexpr T raw() const noexcept { return impl ? *impl.get() : VK_NULL_HANDLE; }
-    [[nodiscard]] constexpr const T* ptr() const noexcept { return impl.get(); }
-    [[nodiscard]] constexpr bool valid() const noexcept { return impl && *impl.get(); }
-
-    void reset(T newHandle = VK_NULL_HANDLE) {
-        impl.reset(newHandle ? new T(newHandle) : nullptr);
-        if (newHandle != VK_NULL_HANDLE) {
-            LOG_DEBUG_CAT("StoneGuard", "{}Handle reset to @ {:p} — Stone whisper: 0x{:X}{}",
-                          Logging::Color::EMERALD_GREEN,
-                          static_cast<void*>(newHandle), kStone1, Logging::Color::RESET);
-        }
-    }
+    T operator*() const noexcept { return impl ? *impl.get() : VK_NULL_HANDLE; }
+    T raw() const noexcept { return impl ? *impl.get() : VK_NULL_HANDLE; }
+    bool valid() const noexcept { return impl && *impl.get(); }
+    void reset() { impl.reset(); }
 };
+
+// GLOBAL FACTORIES — FULLY IMPLEMENTED — AFTER VulkanHandle TEMPLATE
+#define MAKE_VK_HANDLE(name, vkType, defaultDestroy) \
+    inline VulkanHandle<vkType> make##name(VkDevice dev, vkType handle, auto destroyFn = defaultDestroy) { \
+        return VulkanHandle<vkType>(handle, dev, destroyFn); \
+    }
+
+MAKE_VK_HANDLE(Buffer,              VkBuffer,               vkDestroyBuffer)
+MAKE_VK_HANDLE(Memory,              VkDeviceMemory,         vkFreeMemory)
+MAKE_VK_HANDLE(Image,               VkImage,                vkDestroyImage)
+MAKE_VK_HANDLE(ImageView,           VkImageView,            vkDestroyImageView)
+MAKE_VK_HANDLE(Sampler,             VkSampler,              vkDestroySampler)
+MAKE_VK_HANDLE(DescriptorPool,      VkDescriptorPool,       vkDestroyDescriptorPool)
+MAKE_VK_HANDLE(Semaphore,           VkSemaphore,            vkDestroySemaphore)
+MAKE_VK_HANDLE(Fence,               VkFence,                vkDestroyFence)
+MAKE_VK_HANDLE(Pipeline,            VkPipeline,             vkDestroyPipeline)
+MAKE_VK_HANDLE(PipelineLayout,      VkPipelineLayout,       vkDestroyPipelineLayout)
+MAKE_VK_HANDLE(DescriptorSetLayout, VkDescriptorSetLayout,  vkDestroyDescriptorSetLayout)
+MAKE_VK_HANDLE(RenderPass,          VkRenderPass,           vkDestroyRenderPass)
+MAKE_VK_HANDLE(ShaderModule,        VkShaderModule,         vkDestroyShaderModule)
+MAKE_VK_HANDLE(CommandPool,         VkCommandPool,          vkDestroyCommandPool)
+MAKE_VK_HANDLE(SwapchainKHR,        VkSwapchainKHR,         vkDestroySwapchainKHR)
+
+inline VulkanHandle<VkAccelerationStructureKHR> makeAccelerationStructure(
+    VkDevice dev, VkAccelerationStructureKHR as, PFN_vkDestroyAccelerationStructureKHR func = nullptr)
+{
+    return VulkanHandle<VkAccelerationStructureKHR>(as, dev, func ? func : vkDestroyAccelerationStructureKHR);
+}
+
+inline VulkanHandle<VkDeferredOperationKHR> makeDeferredOperation(VkDevice dev, VkDeferredOperationKHR op)
+{
+    return VulkanHandle<VkDeferredOperationKHR>(op, dev, vkDestroyDeferredOperationKHR);
+}
+
+#undef MAKE_VK_HANDLE
+
+// ===================================================================
+// VulkanResourceManager — FULLY IMPLEMENTED
+// ===================================================================
+class VulkanResourceManager {
+public:
+    VulkanResourceManager() = default;
+    ~VulkanResourceManager() { releaseAll(); }
+
+    VulkanBufferManager* getBufferManager() noexcept { return bufferManager_; }
+    const VulkanBufferManager* getBufferManager() const noexcept { return bufferManager_; }
+    void setBufferManager(VulkanBufferManager* mgr) noexcept { bufferManager_ = mgr; }
+
+    void releaseAll(VkDevice overrideDevice = VK_NULL_HANDLE) noexcept;
+
+    void addBuffer(VkBuffer b) noexcept { if (b) buffers_.push_back(b); }
+    void addMemory(VkDeviceMemory m) noexcept { if (m) memories_.push_back(m); }
+    void addImage(VkImage i) noexcept { if (i) images_.push_back(i); }
+    void addImageView(VkImageView v) noexcept { if (v) imageViews_.push_back(v); }
+    void addSampler(VkSampler s) noexcept { if (s) samplers_.push_back(s); }
+    void addSemaphore(VkSemaphore s) noexcept { if (s) semaphores_.push_back(s); }
+    void addFence(VkFence f) noexcept { if (f) fences_.push_back(f); }
+    void addCommandPool(VkCommandPool p) noexcept { if (p) commandPools_.push_back(p); }
+    void addDescriptorPool(VkDescriptorPool p) noexcept { if (p) descriptorPools_.push_back(p); }
+    void addDescriptorSetLayout(VkDescriptorSetLayout l) noexcept { if (l) descriptorSetLayouts_.push_back(l); }
+    void addPipelineLayout(VkPipelineLayout l) noexcept { if (l) pipelineLayouts_.push_back(l); }
+    void addPipeline(VkPipeline p) noexcept { if (p) pipelines_.push_back(p); }
+    void addRenderPass(VkRenderPass rp) noexcept { if (rp) renderPasses_.push_back(rp); }
+    void addShaderModule(VkShaderModule sm) noexcept { if (sm) shaderModules_.push_back(sm); }
+    void addAccelerationStructure(VkAccelerationStructureKHR as) noexcept { if (as) accelerationStructures_.push_back(as); }
+
+    std::vector<VkAccelerationStructureKHR> accelerationStructures_;
+    std::vector<VkDescriptorPool> descriptorPools_;
+    std::vector<VkSemaphore> semaphores_;
+    std::vector<VkFence> fences_;
+    std::vector<VkDescriptorSetLayout> descriptorSetLayouts_;
+    std::vector<VkPipelineLayout> pipelineLayouts_;
+    std::vector<VkPipeline> pipelines_;
+    std::vector<VkRenderPass> renderPasses_;
+    std::vector<VkCommandPool> commandPools_;
+    std::vector<VkShaderModule> shaderModules_;
+    std::vector<VkImageView> imageViews_;
+    std::vector<VkImage> images_;
+    std::vector<VkSampler> samplers_;
+    std::vector<VkDeviceMemory> memories_;
+    std::vector<VkBuffer> buffers_;
+    std::unordered_map<std::string, VkPipeline> pipelineMap_;
+
+    PFN_vkDestroyAccelerationStructureKHR vkDestroyAccelerationStructureKHR = nullptr;
+    VkDevice lastDevice_ = VK_NULL_HANDLE;
+
+private:
+    VulkanBufferManager* bufferManager_ = nullptr;
+};
+
+// ===================================================================
+// Context — FULLY IMPLEMENTED — ALL MEMBERS (your exact version)
+// ===================================================================
+struct Context {
+    VkInstance instance = VK_NULL_HANDLE;
+    VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
+    VkDevice device = VK_NULL_HANDLE;
+    VkSurfaceKHR surface = VK_NULL_HANDLE;
+    VkQueue graphicsQueue = VK_NULL_HANDLE;
+    VkQueue presentQueue = VK_NULL_HANDLE;
+    VkQueue computeQueue = VK_NULL_HANDLE;
+    VkQueue transferQueue = VK_NULL_HANDLE;
+
+    uint32_t graphicsFamily = ~0U;
+    uint32_t presentFamily = ~0U;
+    uint32_t computeFamily = ~0U;
+    uint32_t transferFamily = ~0U;
+
+    VkCommandPool commandPool = VK_NULL_HANDLE;
+    VkCommandPool transientPool = VK_NULL_HANDLE;
+
+    VkDebugUtilsMessengerEXT debugMessenger = VK_NULL_HANDLE;
+
+    VulkanHandle<VkDescriptorSetLayout> graphicsDescriptorSetLayout;
+    VulkanHandle<VkPipelineLayout> graphicsPipelineLayout;
+    VulkanHandle<VkPipeline> graphicsPipeline;
+
+    VulkanHandle<VkDescriptorSetLayout> rtxDescriptorSetLayout;
+    VulkanHandle<VkPipelineLayout> rtxPipelineLayout;
+    VulkanHandle<VkPipeline> rtxPipeline;
+
+    VulkanResourceManager resourceManager;
+
+    bool enableValidationLayers = true;
+    bool enableRayTracing = true;
+    bool enableDeferred = false;
+
+    VulkanHandle<VkSwapchainKHR> swapchain;
+    std::vector<VulkanHandle<VkImageView>> swapchainImageViews;
+    std::vector<VkImage> swapchainImages;
+
+    std::unique_ptr<VulkanSwapchainManager> swapchainManager;
+
+    std::atomic<uint64_t>* destructionCounterPtr = nullptr;
+
+    SDL_Window* window = nullptr;
+    int width = 0, height = 0;
+
+    // RTX PROC POINTERS — FULLY LOADED
+    PFN_vkCmdTraceRaysKHR vkCmdTraceRaysKHR = nullptr;
+    PFN_vkCreateRayTracingPipelinesKHR vkCreateRayTracingPipelinesKHR = nullptr;
+    PFN_vkGetRayTracingShaderGroupHandlesKHR vkGetRayTracingShaderGroupHandlesKHR = nullptr;
+    PFN_vkCreateAccelerationStructureKHR vkCreateAccelerationStructureKHR = nullptr;
+    PFN_vkGetAccelerationStructureBuildSizesKHR vkGetAccelerationStructureBuildSizesKHR = nullptr;
+    PFN_vkCmdBuildAccelerationStructuresKHR vkCmdBuildAccelerationStructuresKHR = nullptr;
+    PFN_vkGetAccelerationStructureDeviceAddressKHR vkGetAccelerationStructureDeviceAddressKHR = nullptr;
+    PFN_vkGetBufferDeviceAddressKHR vkGetBufferDeviceAddressKHR = nullptr;
+    PFN_vkDestroyAccelerationStructureKHR vkDestroyAccelerationStructureKHR = nullptr;
+    PFN_vkCreateDeferredOperationKHR vkCreateDeferredOperationKHR = nullptr;
+    PFN_vkGetDeferredOperationResultKHR vkGetDeferredOperationResultKHR = nullptr;
+    PFN_vkDestroyDeferredOperationKHR vkDestroyDeferredOperationKHR = nullptr;
+
+    Context() = default;
+    Context(SDL_Window* win, int w, int h);
+    void createSwapchain();
+    void destroySwapchain();
+    void loadRTXProcs();
+    ~Context();
+};
+
+// ===================================================================
+// Global cleanup function
+// ===================================================================
+void cleanupAll(Context& ctx) noexcept;
 #endif // __cplusplus

@@ -9,9 +9,7 @@
 // RASPBERRY_PINK ROCKETSHIP TO VALHALLA 🔥🤖🚀💀🖤❤️⚡
 
 #include "engine/Dispose.hpp"
-#include "engine/Vulkan/VulkanCore.hpp"
-#include "engine/Vulkan/VulkanBufferManager.hpp"
-#include "engine/Vulkan/VulkanSwapchainManager.hpp"
+#include "engine/Vulkan/VulkanCommon.hpp"
 #include "engine/Vulkan/VulkanRenderer.hpp"
 #include "engine/logging.hpp"
 

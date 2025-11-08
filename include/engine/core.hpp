@@ -12,7 +12,6 @@
 
 #pragma once
 
-#include "engine/Vulkan/VulkanCore.hpp"
 #include "engine/Vulkan/VulkanCommon.hpp"
 #include "engine/logging.hpp"
 
