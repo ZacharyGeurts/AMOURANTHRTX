@@ -5,7 +5,6 @@
 
 #pragma once
 
-#include "engine/core.hpp"                 // ← GAL: "Dynamic loader — loads Vulkan fast, like streaming a 4K cut on set."
 #include "engine/Vulkan/VulkanCommon.hpp"  // ← JAY: "Core utilities every renderer needs."
 #include "engine/Vulkan/VulkanRTX_Setup.hpp"
 

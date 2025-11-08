@@ -8,7 +8,6 @@
 // RASPBERRY_PINK PHOTONS SUPREME — SHIP IT BRO 🩷🩷🩷
 
 #include "engine/Vulkan/VulkanRTX_Setup.hpp"
-#include "../GLOBAL/StoneKey.hpp"
 
 using namespace Logging::Color;
 

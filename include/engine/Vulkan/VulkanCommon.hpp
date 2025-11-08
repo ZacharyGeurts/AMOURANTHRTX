@@ -22,8 +22,7 @@
     #include "../GLOBAL/StoneKey.hpp"
     #include "../GLOBAL/SwapchainManager.hpp"
     #include "../GLOBAL/BufferManager.hpp"
-	#include "engine/Vulkan/VulkanRenderer.hpp"  // Global VulkanRenderer
-	#include "engine/Vulkan/VulkanPipelineManager.hpp"  // Global VulkanPipelineManager
+	#include "engine/core.hpp"
 
     // ========================================================================
     // CRITICAL: ALL STANDARD / GLM / VULKAN / LOGGING INCLUDES MUST BE GLOBAL

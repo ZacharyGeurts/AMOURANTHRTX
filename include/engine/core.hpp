@@ -10,10 +10,6 @@
 
 #pragma once
 
-// GLOBAL INCLUDE ORDER = GOD — STONEKEY + LOGGING FIRST — NO MORE UNDECLARED HELL
-#include "GLOBAL/StoneKey.hpp"      // ← UNIQUE EVERY REBUILD — QUANTUM SHIELD
-
-#include "engine/Vulkan/VulkanCommon.hpp"
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_beta.h>
 #include <glm/glm.hpp>
