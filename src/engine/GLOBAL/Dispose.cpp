@@ -8,7 +8,7 @@
 // FULL VERBOSE LOGGING — QUANTUM POLISHED — 69,420 FPS × ∞
 // RASPBERRY_PINK ROCKETSHIP TO VALHALLA 🔥🤖🚀💀🖤❤️⚡
 
-#include "engine/Dispose.hpp"
+#include "engine/GLOBAL/Dispose.hpp"
 #include "engine/Vulkan/VulkanRenderer.hpp"
 
 #include <vulkan/vulkan.h>

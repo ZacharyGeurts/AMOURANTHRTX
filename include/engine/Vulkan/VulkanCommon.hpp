@@ -39,13 +39,12 @@
     #include <atomic>
     #include <SDL3/SDL.h>
     #include <SDL3/SDL_vulkan.h>
-    #include "engine/camera.hpp"
-    #include "engine/logging.hpp"
-    #include "engine/Dispose.hpp"
-    #include "engine/StoneKey.hpp"
-    #include "engine/Vulkan/VulkanSwapchainManager.hpp"
-    #include "engine/Vulkan/VulkanBufferManager.hpp"
-	#include "engine/logging.hpp"
+    #include "../GLOBAL/camera.hpp"
+    #include "../GLOBAL/logging.hpp"
+    #include "../GLOBAL/Dispose.hpp"
+    #include "../GLOBAL/StoneKey.hpp"
+    #include "../GLOBAL/SwapchainManager.hpp"
+    #include "../GLOBAL/BufferManager.hpp"
 
 	class MyPooledBufferMgr : public VulkanBufferManager {
     // custom pooling, stats, etc.

@@ -13,7 +13,6 @@
 #pragma once
 
 #include "engine/Vulkan/VulkanCommon.hpp"
-#include "engine/logging.hpp"
 
 #include <vulkan/vulkan.h>
 #include <cstdint>

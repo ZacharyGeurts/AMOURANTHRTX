@@ -5,12 +5,9 @@
 
 #pragma once
 
-#include "engine/Dispose.hpp"              // ← JAY: "Gal, this Dispose.hpp is pure RAII — no memory leaks, ever." GAL: "Smart. In film, we call that 'no reshoots for forgotten props'!"
 #include "engine/core.hpp"                 // ← GAL: "Dynamic loader — loads Vulkan fast, like streaming a 4K cut on set."
 #include "engine/Vulkan/VulkanCommon.hpp"  // ← JAY: "Core utilities every renderer needs."
 #include "engine/Vulkan/VulkanRTX_Setup.hpp"
-#include "engine/camera.hpp"               // ← JAY: "Camera control — smooth as a dolly shot."
-#include "engine/logging.hpp"              // ← GAL: "Logs every destroy call — great for debugging crashes on set... or in code."
 
 #include <glm/glm.hpp>                     // ← JAY: "GLM for matrices — industry standard."
 #include <glm/gtc/matrix_inverse.hpp>      // ← GAL: "Inverse matrices for view-projection — used in CGI all the time."
