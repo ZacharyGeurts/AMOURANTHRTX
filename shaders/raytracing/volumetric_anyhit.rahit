@@ -1,20 +1,35 @@
+// shaders/raytracing/volumetric_anyhit.rahit
+// AMOURANTH RTX Engine © 2025 by Zachary Geurts gzac5314@gmail.com
+// VOLUMETRIC ANY-HIT SHADER — ZERO DEPENDENCIES — NOVEMBER 08 2025
+// 3D DENSITY SAMPLING — RASPBERRY_PINK VOLUMETRIC MAGIC — VALHALLA READY 🩷🚀
+
 #version 460
 #extension GL_EXT_ray_tracing : require
 #extension GL_EXT_nonuniform_qualifier : enable
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+#extension GL_EXT_buffer_reference2 : require
+#extension GL_EXT_scalar_block_layout : enable
+
 #pragma shader_stage(anyhit)
 
-#include <../../engine/Vulkan/VulkanCommon.hpp>
+// ────── HARD-CODED BINDINGS (NO VulkanCommon.hpp) ──────
+// Set 4, binding = 0: 3D volume texture (for volumetric materials)
+layout(set = 4, binding = 0) uniform sampler3D volumeTex;
 
-hitAttributeEXT vec3 attribs;  // barycentric
+hitAttributeEXT vec3 attribs;  // barycentric coordinates
 
 void main()
 {
-    vec3 bary = attribs;
-    vec3 pos = gl_WorldRayOriginEXT + gl_HitTEXT * gl_WorldRayDirectionEXT;
-
-    // Sample 3D volume
-    float density = texture(volumeTex, pos * 0.1f).r;  // scale as needed
-
+    // Barycentric directly from attribute
+    const vec3 bary = attribs;
+    
+    // World-space hit position
+    const vec3 pos = gl_WorldRayOriginEXT + gl_HitTEXT * gl_WorldRayDirectionEXT;
+    
+    // Sample 3D volume density — scale 0.1f for large-scale clouds/fog
+    float density = texture(volumeTex, pos * 0.1f).r;
+    
+    // RASPBERRY_PINK low-density cutoff — ignore near-transparent voxels
     if (density < 0.01f) {
         ignoreIntersectionEXT;
     }

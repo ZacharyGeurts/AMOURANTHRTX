@@ -261,18 +261,6 @@ struct Context;
 class VulkanPipelineManager;
 class VulkanRenderer;
 
-// TLASBuildState — NUCLEAR VERSION FROM Vulkan_LAS.hpp
-struct TLASBuildState {
-    VulkanRenderer* renderer = nullptr;
-    bool completed = false;
-    VulkanHandle<VkBuffer> instanceBuffer, tlasBuffer, scratchBuffer;
-    VulkanHandle<VkDeviceMemory> instanceMemory, tlasMemory, scratchMemory;
-    VulkanHandle<VkAccelerationStructureKHR> tlas;
-    VulkanHandle<VkDeferredOperationKHR> tlasOp;  // renamed for clarity
-    VulkanHandle<VkFence> buildFence;
-    bool compactedInPlace = false;
-};
-
 // MAIN RTX CLASS — GLOBAL SPACE SUPREMACY — FULL LAS INTEGRATED
 class VulkanRTX {
 public:

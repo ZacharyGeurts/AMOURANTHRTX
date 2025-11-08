@@ -16,13 +16,13 @@
 #ifdef __cplusplus
     #pragma once
 
-	#include "../GLOBAL/Dispose.hpp"
-    #include "../GLOBAL/camera.hpp"
+    #include "../GLOBAL/StoneKey.hpp" // Always top
+    #include "../GLOBAL/Dispose.hpp" // Always top after
     #include "../GLOBAL/logging.hpp"
-    #include "../GLOBAL/StoneKey.hpp"
+    #include "../GLOBAL/camera.hpp"
     #include "../GLOBAL/SwapchainManager.hpp"
     #include "../GLOBAL/BufferManager.hpp"
-	#include "engine/core.hpp"
+    #include "engine/core.hpp"
 
     // ========================================================================
     // CRITICAL: ALL STANDARD / GLM / VULKAN / LOGGING INCLUDES MUST BE GLOBAL
@@ -48,7 +48,7 @@
     #include <SDL3/SDL.h>
     #include <SDL3/SDL_vulkan.h>
 
-	class MyPooledBufferMgr : public VulkanBufferManager {
+    class MyPooledBufferMgr : public VulkanBufferManager {
     // custom pooling, stats, etc.
 };
 
@@ -367,7 +367,7 @@
         LOG_DEBUG_CAT("Vulkan", ">>> RESOLVING SHADER BINARY PATHS — GLOBAL ACCESS");
         return {
             {"raygen",              "assets/shaders/raytracing/raygen.spv"},
-			{"mid_raygen",          "assets/shaders/raytracing/mid_raygen.spv"},
+            {"mid_raygen",          "assets/shaders/raytracing/mid_raygen.spv"},
             {"miss",                "assets/shaders/raytracing/miss.spv"},
             {"closesthit",          "assets/shaders/raytracing/closesthit.spv"},
             {"anyhit",              "assets/shaders/raytracing/anyhit.spv"},
@@ -377,10 +377,12 @@
             {"shadowmiss",          "assets/shaders/raytracing/shadowmiss.spv"},
             {"callable",            "assets/shaders/raytracing/callable.spv"},
             {"intersection",        "assets/shaders/raytracing/intersection.spv"},
+            {"volumetric_raygen",   "assets/shaders/raytracing/volumetric_raygen.spv"},
             {"tonemap_compute",     "assets/shaders/compute/tonemap.spv"},
             {"tonemap_vert",        "assets/shaders/graphics/tonemap_vert.spv"},
             {"nexusDecision",       "assets/shaders/compute/nexusDecision.spv"},
-            {"statsAnalyzer",       "assets/shaders/compute/statsAnalyzer.spv"}
+            {"statsAnalyzer",       "assets/shaders/compute/statsAnalyzer.spv"},
+            {"denoiser_post",       "assets/shaders/compute/denoiser_post.spv"}
         };
     }
 
@@ -389,7 +391,7 @@
         LOG_DEBUG_CAT("Vulkan", ">>> RESOLVING SHADER SOURCE PATHS — GLOBAL ACCESS");
         return {
             {"raygen",              "shaders/raytracing/raygen.rgen"},
-			{"mid_raygen",          "shaders/raytracing/mid_raygen.rgen"},
+            {"mid_raygen",          "shaders/raytracing/mid_raygen.rgen"},
             {"miss",                "shaders/raytracing/miss.rmiss"},
             {"closesthit",          "shaders/raytracing/closesthit.rchit"},
             {"anyhit",              "shaders/raytracing/anyhit.rahit"},
@@ -399,10 +401,12 @@
             {"shadowmiss",          "shaders/raytracing/shadowmiss.rmiss"},
             {"callable",            "shaders/raytracing/callable.rcall"},
             {"intersection",        "shaders/raytracing/intersection.rint"},
+            {"volumetric_raygen",   "shaders/raytracing/volumetric_raygen.rgen"},
             {"tonemap_compute",     "shaders/compute/tonemap.comp"},
             {"tonemap_vert",        "shaders/graphics/tonemap_vert.glsl"},
             {"nexusDecision",       "shaders/compute/nexusDecision.comp"},
-            {"statsAnalyzer",       "shaders/compute/statsAnalyzer.comp"}
+            {"statsAnalyzer",       "shaders/compute/statsAnalyzer.comp"},
+            {"denoiser_post",       "shaders/compute/denoiser_post.comp"}
         };
     }
 
@@ -410,7 +414,7 @@
         auto binPaths = getShaderBinPaths();
         return {
             binPaths.at("raygen"),
-			binPaths.at("mid_raygen"),
+            binPaths.at("mid_raygen"),
             binPaths.at("miss"),
             binPaths.at("closesthit"),
             binPaths.at("anyhit"),
@@ -419,7 +423,8 @@
             binPaths.at("shadow_anyhit"),
             binPaths.at("shadowmiss"),
             binPaths.at("callable"),
-            binPaths.at("intersection")
+            binPaths.at("intersection"),
+            binPaths.at("volumetric_raygen")
         };
     }
 
@@ -479,8 +484,9 @@
     // EXCEPTION
     class VulkanRTXException : public std::runtime_error {
     public:
-        explicit VulkanRTXException(const std::string& msg);
-        VulkanRTXException(const std::string& msg, const char* file, int line);
+        explicit VulkanRTXException(const std::string& msg) : std::runtime_error(msg) {}
+        VulkanRTXException(const std::string& msg, const char* file, int line) 
+            : std::runtime_error(std::format("{}:{}: {}", file, line, msg)) {}
     };
 
 // ===================================================================
@@ -530,9 +536,9 @@ struct VulkanDeleter {
 
         T handle = *p;
 
-        if (DestroyTracker::isDestroyed(handle)) {
+        if (DestroyTracker::isDestroyed(reinterpret_cast<const void*>(handle))) {
             LOG_ERROR_CAT("Dispose", "{}DOUBLE FREE DETECTED on {:p} — BLOCKED — STONEKEY 0x{:X}{}",
-                          Logging::Color::CRIMSON_MAGENTA, static_cast<void*>(handle), kStone1, Logging::Color::RESET);
+                          Logging::Color::CRIMSON_MAGENTA, reinterpret_cast<void*>(handle), kStone1, Logging::Color::RESET);
             delete p;
             return;
         }
@@ -541,8 +547,8 @@ struct VulkanDeleter {
             destroyFunc(device, handle, nullptr);
         }
 
-        DestroyTracker::markDestroyed(handle);
-        logAndTrackDestruction(typeid(T).name(), handle, __LINE__);
+        DestroyTracker::markDestroyed(reinterpret_cast<const void*>(handle));
+        logAndTrackDestruction(typeid(T).name(), reinterpret_cast<void*>(handle), __LINE__);
         delete p;
     }
 };
@@ -577,7 +583,6 @@ private:
 
 public:
     VulkanHandle() = default;
-	VulkanBufferManager* bufferManager_ = nullptr;
     VulkanHandle(T handle, VkDevice dev, DestroyFn fn = nullptr)
         : impl(handle ? new T(handle) : nullptr,
               Deleter{dev, fn ? fn : defaultDestroyer<T>()}) {}
@@ -674,11 +679,11 @@ public:
     PFN_vkDestroyAccelerationStructureKHR vkDestroyAccelerationStructureKHR = nullptr;
     VkDevice lastDevice_ = VK_NULL_HANDLE;
 
-	// ────── GLOBAL BUFFER MANAGER ──────
-	//#include "engine/Vulkan/VulkanBufferManager.hpp"
-	VulkanBufferManager* getBufferManager() noexcept { return bufferManager_; }
-	const VulkanBufferManager* getBufferManager() const noexcept { return bufferManager_; }
-	void setBufferManager(VulkanBufferManager* mgr) noexcept { bufferManager_ = mgr; }
+    // ────── GLOBAL BUFFER MANAGER ──────
+    //#include "engine/Vulkan/VulkanBufferManager.hpp"
+    VulkanBufferManager* getBufferManager() noexcept { return bufferManager_; }
+    const VulkanBufferManager* getBufferManager() const noexcept { return bufferManager_; }
+    void setBufferManager(VulkanBufferManager* mgr) noexcept { bufferManager_ = mgr; }
 
 private:
     VulkanBufferManager* bufferManager_ = nullptr;

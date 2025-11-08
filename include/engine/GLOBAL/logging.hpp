@@ -1,4 +1,4 @@
-// engine/logging.hpp
+// engine/GLOBAL/logging.hpp
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts gzac5314@gmail.com
 // HYPER-VIVID C++23 LOGGING v∞ — NOVEMBER 08 2025 — RASPBERRY_PINK SUPREMACY
 // THREAD-SAFE | LOCK-FREE | ASYNC | DELTA-TIME | CATEGORY COLOR RAINBOW | Ellie Fier inspired
@@ -38,6 +38,60 @@
 // StoneKey protection: Compile-time unique keys for tamper-resistant log rotation
 #include "StoneKey.hpp"
 
+// Formatter specialization for VkResult to enable formatting in logs
+namespace std {
+template <>
+struct formatter<VkResult> {
+    constexpr auto parse(format_parse_context& ctx) -> decltype(ctx.begin()) {
+        return ctx.begin();
+    }
+
+    template <typename FormatContext>
+    auto format(VkResult const& result, FormatContext& ctx) -> decltype(ctx.out()) {
+        const char* str;
+        switch (result) {
+            case VK_SUCCESS: str = "VK_SUCCESS"; break;
+            case VK_NOT_READY: str = "VK_NOT_READY"; break;
+            case VK_TIMEOUT: str = "VK_TIMEOUT"; break;
+            case VK_EVENT_SET: str = "VK_EVENT_SET"; break;
+            case VK_EVENT_RESET: str = "VK_EVENT_RESET"; break;
+            case VK_INCOMPLETE: str = "VK_INCOMPLETE"; break;
+            case VK_ERROR_OUT_OF_HOST_MEMORY: str = "VK_ERROR_OUT_OF_HOST_MEMORY"; break;
+            case VK_ERROR_OUT_OF_DEVICE_MEMORY: str = "VK_ERROR_OUT_OF_DEVICE_MEMORY"; break;
+            case VK_ERROR_INITIALIZATION_FAILED: str = "VK_ERROR_INITIALIZATION_FAILED"; break;
+            case VK_ERROR_DEVICE_LOST: str = "VK_ERROR_DEVICE_LOST"; break;
+            case VK_ERROR_MEMORY_MAP_FAILED: str = "VK_ERROR_MEMORY_MAP_FAILED"; break;
+            case VK_ERROR_LAYER_NOT_PRESENT: str = "VK_ERROR_LAYER_NOT_PRESENT"; break;
+            case VK_ERROR_EXTENSION_NOT_PRESENT: str = "VK_ERROR_EXTENSION_NOT_PRESENT"; break;
+            case VK_ERROR_FEATURE_NOT_PRESENT: str = "VK_ERROR_FEATURE_NOT_PRESENT"; break;
+            case VK_ERROR_INCOMPATIBLE_DRIVER: str = "VK_ERROR_INCOMPATIBLE_DRIVER"; break;
+            case VK_ERROR_TOO_MANY_OBJECTS: str = "VK_ERROR_TOO_MANY_OBJECTS"; break;
+            case VK_ERROR_FORMAT_NOT_SUPPORTED: str = "VK_ERROR_FORMAT_NOT_SUPPORTED"; break;
+            case VK_ERROR_FRAGMENTED_POOL: str = "VK_ERROR_FRAGMENTED_POOL"; break;
+            case VK_ERROR_SURFACE_LOST_KHR: str = "VK_ERROR_SURFACE_LOST_KHR"; break;
+            case VK_ERROR_NATIVE_WINDOW_IN_USE_KHR: str = "VK_ERROR_NATIVE_WINDOW_IN_USE_KHR"; break;
+            case VK_SUBOPTIMAL_KHR: str = "VK_SUBOPTIMAL_KHR"; break;
+            case VK_ERROR_OUT_OF_DATE_KHR: str = "VK_ERROR_OUT_OF_DATE_KHR"; break;
+            case VK_ERROR_INCOMPATIBLE_DISPLAY_KHR: str = "VK_ERROR_INCOMPATIBLE_DISPLAY_KHR"; break;
+            case VK_ERROR_VALIDATION_FAILED_EXT: str = "VK_ERROR_VALIDATION_FAILED_EXT"; break;
+            case VK_ERROR_INVALID_SHADER_NV: str = "VK_ERROR_INVALID_SHADER_NV"; break;
+            case VK_ERROR_INVALID_DRM_FORMAT_MODIFIER_PLANE_LAYOUT_EXT: str = "VK_ERROR_INVALID_DRM_FORMAT_MODIFIER_PLANE_LAYOUT_EXT"; break;
+            case VK_ERROR_FRAGMENTATION_EXT: str = "VK_ERROR_FRAGMENTATION_EXT"; break;
+            case VK_ERROR_NOT_PERMITTED_KHR: str = "VK_ERROR_NOT_PERMITTED_KHR"; break;
+            case VK_ERROR_INVALID_DEVICE_ADDRESS_EXT: str = "VK_ERROR_INVALID_DEVICE_ADDRESS_EXT"; break;
+            case VK_ERROR_FULL_SCREEN_EXCLUSIVE_MODE_LOST_EXT: str = "VK_ERROR_FULL_SCREEN_EXCLUSIVE_MODE_LOST_EXT"; break;
+            case VK_THREAD_IDLE_KHR: str = "VK_THREAD_IDLE_KHR"; break;
+            case VK_THREAD_DONE_KHR: str = "VK_THREAD_DONE_KHR"; break;
+            case VK_OPERATION_DEFERRED_KHR: str = "VK_OPERATION_DEFERRED_KHR"; break;
+            case VK_OPERATION_NOT_DEFERRED_KHR: str = "VK_OPERATION_NOT_DEFERRED_KHR"; break;
+            case VK_PIPELINE_COMPILE_REQUIRED_EXT: str = "VK_PIPELINE_COMPILE_REQUIRED_EXT"; break;
+            default: return format_to(ctx.out(), "VK_UNKNOWN_RESULT({})", static_cast<int>(result));
+        }
+        return format_to(ctx.out(), "{}", str);
+    }
+};
+}  // namespace std
+
 // ========================================================================
 // 0. CONFIGURATION & HYPER-VIVID MACROS
 // ========================================================================
@@ -53,33 +107,33 @@ constexpr bool FPS_COUNTER    = true;
 constexpr bool SIMULATION_LOGGING = true;
 
 // HYPER-VIVID MACROS — RASPBERRY_PINK STYLE
-#define LOG_TRACE(...)          do { if constexpr (ENABLE_TRACE)   Logging::Logger::get().log(Logging::LogLevel::Trace,   "General", __VA_ARGS__); } while (0)
-#define LOG_DEBUG(...)          do { if constexpr (ENABLE_DEBUG)   Logging::Logger::get().log(Logging::LogLevel::Debug,   "General", __VA_ARGS__); } while (0)
-#define LOG_INFO(...)           do { if constexpr (ENABLE_INFO)    Logging::Logger::get().log(Logging::LogLevel::Info,    "General", __VA_ARGS__); } while (0)
-#define LOG_SUCCESS(...)        do { if constexpr (ENABLE_SUCCESS) Logging::Logger::get().log(Logging::LogLevel::Success, "General", __VA_ARGS__); } while (0)
-#define LOG_ATTEMPT(...)        do { if constexpr (ENABLE_ATTEMPT) Logging::Logger::get().log(Logging::LogLevel::Attempt, "General", __VA_ARGS__); } while (0)
-#define LOG_PERF(...)           do { if constexpr (ENABLE_PERF)    Logging::Logger::get().log(Logging::LogLevel::Perf,    "General", __VA_ARGS__); } while (0)
-#define LOG_WARNING(...)        do { if constexpr (ENABLE_WARNING) Logging::Logger::get().log(Logging::LogLevel::Warning, "General", __VA_ARGS__); } while (0)
+#define LOG_TRACE(...)          do { if (ENABLE_TRACE)   Logging::Logger::get().log(Logging::LogLevel::Trace,   "General", __VA_ARGS__); } while (0)
+#define LOG_DEBUG(...)          do { if (ENABLE_DEBUG)   Logging::Logger::get().log(Logging::LogLevel::Debug,   "General", __VA_ARGS__); } while (0)
+#define LOG_INFO(...)           do { if (ENABLE_INFO)    Logging::Logger::get().log(Logging::LogLevel::Info,    "General", __VA_ARGS__); } while (0)
+#define LOG_SUCCESS(...)        do { if (ENABLE_SUCCESS) Logging::Logger::get().log(Logging::LogLevel::Success, "General", __VA_ARGS__); } while (0)
+#define LOG_ATTEMPT(...)        do { if (ENABLE_ATTEMPT) Logging::Logger::get().log(Logging::LogLevel::Attempt, "General", __VA_ARGS__); } while (0)
+#define LOG_PERF(...)           do { if (ENABLE_PERF)    Logging::Logger::get().log(Logging::LogLevel::Perf,    "General", __VA_ARGS__); } while (0)
+#define LOG_WARNING(...)        do { if (ENABLE_WARNING) Logging::Logger::get().log(Logging::LogLevel::Warning, "General", __VA_ARGS__); } while (0)
 #define LOG_WARN(...)           LOG_WARNING(__VA_ARGS__)
-#define LOG_ERROR(...)          do { if constexpr (ENABLE_ERROR)   Logging::Logger::get().log(Logging::LogLevel::Error,   "General", __VA_ARGS__); } while (0)
-#define LOG_FPS_COUNTER(...)    do { if constexpr (FPS_COUNTER)    Logging::Logger::get().log(Logging::LogLevel::Info,    "FPS",     __VA_ARGS__); } while (0)
-#define LOG_SIMULATION(...)     do { if constexpr (SIMULATION_LOGGING) Logging::Logger::get().log(Logging::LogLevel::Info, "SIMULATION", __VA_ARGS__); } while (0)
+#define LOG_ERROR(...)          do { if (ENABLE_ERROR)   Logging::Logger::get().log(Logging::LogLevel::Error,   "General", __VA_ARGS__); } while (0)
+#define LOG_FPS_COUNTER(...)    do { if (FPS_COUNTER)    Logging::Logger::get().log(Logging::LogLevel::Info,    "FPS",     __VA_ARGS__); } while (0)
+#define LOG_SIMULATION(...)     do { if (SIMULATION_LOGGING) Logging::Logger::get().log(Logging::LogLevel::Info, "SIMULATION", __VA_ARGS__); } while (0)
 
-#define LOG_TRACE_CAT(cat, ...)   do { if constexpr (ENABLE_TRACE)   Logging::Logger::get().log(Logging::LogLevel::Trace,   cat, __VA_ARGS__); } while (0)
-#define LOG_DEBUG_CAT(cat, ...)   do { if constexpr (ENABLE_DEBUG)   Logging::Logger::get().log(Logging::LogLevel::Debug,   cat, __VA_ARGS__); } while (0)
-#define LOG_INFO_CAT(cat, ...)    do { if constexpr (ENABLE_INFO)    Logging::Logger::get().log(Logging::LogLevel::Info,    cat, __VA_ARGS__); } while (0)
-#define LOG_SUCCESS_CAT(cat, ...) do { if constexpr (ENABLE_SUCCESS) Logging::Logger::get().log(Logging::LogLevel::Success, cat, __VA_ARGS__); } while (0)
-#define LOG_ATTEMPT_CAT(cat, ...) do { if constexpr (ENABLE_ATTEMPT) Logging::Logger::get().log(Logging::LogLevel::Attempt, cat, __VA_ARGS__); } while (0)
-#define LOG_PERF_CAT(cat, ...)    do { if constexpr (ENABLE_PERF)    Logging::Logger::get().log(Logging::LogLevel::Perf,    cat, __VA_ARGS__); } while (0)
-#define LOG_WARNING_CAT(cat, ...) do { if constexpr (ENABLE_WARNING) Logging::Logger::get().log(Logging::LogLevel::Warning, cat, __VA_ARGS__); } while (0)
-#define LOG_WARN_CAT(cat, ...)    LOG_WARNING_CAT(cat, __VA_ARGS__)
-#define LOG_ERROR_CAT(cat, ...)   do { if constexpr (ENABLE_ERROR)   Logging::Logger::get().log(Logging::LogLevel::Error,   cat, __VA_ARGS__); } while (0)
+#define LOG_TRACE_CAT(cat, ...)   do { if (ENABLE_TRACE)   Logging::Logger::get().log(Logging::LogLevel::Trace,   cat, __VA_ARGS__); } while (0)
+#define LOG_DEBUG_CAT(cat, ...)   do { if (ENABLE_DEBUG)   Logging::Logger::get().log(Logging::LogLevel::Debug,   cat, __VA_ARGS__); } while (0)
+#define LOG_INFO_CAT(cat, ...)    do { if (ENABLE_INFO)    Logging::Logger::get().log(Logging::LogLevel::Info,    cat, __VA_ARGS__); } while (0)
+#define LOG_SUCCESS_CAT(cat, ...) do { if (ENABLE_SUCCESS) Logging::Logger::get().log(Logging::LogLevel::Success, cat, __VA_ARGS__); } while (0)
+#define LOG_ATTEMPT_CAT(cat, ...) do { if (ENABLE_ATTEMPT) Logging::Logger::get().log(Logging::LogLevel::Attempt, cat, __VA_ARGS__); } while (0)
+#define LOG_PERF_CAT(cat, ...)    do { if (ENABLE_PERF)    Logging::Logger::get().log(Logging::LogLevel::Perf,    cat, __VA_ARGS__); } while (0)
+#define LOG_WARNING_CAT(cat, ...) do { if (ENABLE_WARNING) Logging::Logger::get().log(Logging::LogLevel::Warning, cat, __VA_ARGS__); } while (0)
+#define LOG_WARN_CAT(cat, ...)    LOG_WARNING_CAT(cat, __VA_ARGS__)  // Alias to the fixed one
+#define LOG_ERROR_CAT(cat, ...)   do { if (ENABLE_ERROR)   Logging::Logger::get().log(Logging::LogLevel::Error,   cat, __VA_ARGS__); } while (0)
 
 // LOG_VOID — COSMIC MARKERS
-#define LOG_VOID()              do { if constexpr (ENABLE_DEBUG)   Logging::Logger::get().logVoid(Logging::LogLevel::Debug,   "General"); } while (0)
-#define LOG_VOID_CAT(cat)       do { if constexpr (ENABLE_DEBUG)   Logging::Logger::get().logVoid(Logging::LogLevel::Debug,   cat); } while (0)
-#define LOG_VOID_TRACE()        do { if constexpr (ENABLE_TRACE)   Logging::Logger::get().logVoid(Logging::LogLevel::Trace,   "General"); } while (0)
-#define LOG_VOID_TRACE_CAT(cat) do { if constexpr (ENABLE_TRACE)   Logging::Logger::get().logVoid(Logging::LogLevel::Trace,   cat); } while (0)
+#define LOG_VOID()              do { if (ENABLE_DEBUG)   Logging::Logger::get().logVoid(Logging::LogLevel::Debug,   "General"); } while (0)
+#define LOG_VOID_CAT(cat)       do { if (ENABLE_DEBUG)   Logging::Logger::get().logVoid(Logging::LogLevel::Debug,   cat); } while (0)
+#define LOG_VOID_TRACE()        do { if (ENABLE_TRACE)   Logging::Logger::get().logVoid(Logging::LogLevel::Trace,   "General"); } while (0)
+#define LOG_VOID_TRACE_CAT(cat) do { if (ENABLE_TRACE)   Logging::Logger::get().logVoid(Logging::LogLevel::Trace,   cat); } while (0)
 
 namespace Logging {
 

@@ -1,12 +1,29 @@
 // shaders/raytracing/raygen.rgen
+// AMOURANTH RTX Engine © 2025 by Zachary Geurts gzac5314@gmail.com
+// STANDALONE RAYGEN SHADER — ZERO DEPENDENCIES — NOVEMBER 08 2025
+// FULL RTX CAMERA SETUP — RASPBERRY_PINK SUPREMACY — VALHARD READY 🩷🚀
+
 #version 460
 #extension GL_EXT_ray_tracing : require
 #extension GL_EXT_nonuniform_qualifier : enable
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+#extension GL_EXT_buffer_reference2 : require
+#extension GL_EXT_scalar_block_layout : enable
 
 #pragma shader_stage(raygen)
 
-#include <../../engine/Vulkan/VulkanCommon.hpp>
+// ────── HARD-CODED BINDINGS (NO VulkanCommon.hpp) ──────
+// Set 0: Global scene data
+layout(set = 0, binding = 0, scalar) uniform CameraData {
+    mat4 invProjView;
+    vec3 cameraOrigin;
+    float pad0;
+} camera;
 
+// Set 1: TLAS
+layout(set = 1, binding = 0) uniform accelerationStructureEXT tlas;
+
+// ────── PAYLOAD ──────
 layout(location = 0) rayPayloadEXT vec3 payload;
 
 void main()
@@ -15,6 +32,7 @@ void main()
     const vec2 uv = (vec2(pixel) + 0.5f) / vec2(gl_LaunchSizeEXT.xy);
     const vec2 ndc = uv * 2.0f - 1.0f;
 
+    // Reconstruct world position from depth=1.0 (far plane)
     vec4 clipPos = vec4(ndc, 1.0f, 1.0f);
     vec4 worldPos = camera.invProjView * clipPos;
     worldPos /= worldPos.w;
@@ -22,6 +40,19 @@ void main()
     vec3 origin = camera.cameraOrigin;
     vec3 direction = normalize(worldPos.xyz - origin);
 
+    // Clear payload + fire primary visibility ray
     payload = vec3(0.0f);
-    traceRayEXT(tlas, gl_RayFlagsOpaqueEXT, 0xFF, 0, 0, 0, origin, 0.001f, direction, 10000.0f, 0);
+    traceRayEXT(
+        tlas,                     // topLevel
+        gl_RayFlagsOpaqueEXT,     // rayFlags
+        0xFF,                     // cullMask
+        0,                        // sbtRecordOffset
+        0,                        // sbtRecordStride
+        0,                        // missIndex
+        origin,                   // origin
+        0.001f,                   // tmin
+        direction,                // direction
+        10000.0f,                 // tmax
+        0                         // payload location
+    );
 }
