@@ -1,262 +1,217 @@
-// AMOURANTH RTX Engine, October 2025 - Configures and manages audio streams and devices.
-// Supports 8-channel audio with fallback to stereo or mono if unsupported.
-// Dependencies: SDL3, C++20 standard library.
+// src/engine/SDL3/SDL3_audio.cpp
+// AMOURANTH RTX Engine © 2025 by Zachary Geurts
+// FINAL WORKING SDL3 AUDIO — C++23 — NOVEMBER 08 2025
+// OCEAN_TEAL logging | RASPBERRY_PINK FOR DISPOSE ONLY
 
 #include "engine/SDL3/SDL3_audio.hpp"
-#include <SDL3/SDL_audio.h>
+#include "engine/logging.hpp"
 #include <SDL3/SDL.h>
-#include <stdexcept>
-#include <vector>
-#include <memory>
-#include <functional>
-#include <string>
-#include <iostream>
+#include <SDL3/SDL_audio.h>
 #include <fstream>
+#include <span>
+#include <format>
+#include <thread>
+#include <chrono>
+#include <string>
+#include <vector>
 #include <cstring>
 
 namespace SDL3Audio {
 
-void logAudioDevices() {
+void AudioManager::logAudioDevices() {
     int count = 0;
     SDL_AudioDeviceID* devices = SDL_GetAudioPlaybackDevices(&count);
-    if (!devices || count <= 0) {
-        std::cerr << "[AudioDebug] Failed to get playback devices: " << SDL_GetError() << "\n";
-        if (devices) SDL_free(devices);
-        return;
-    }
 
-    std::cerr << "[AudioDebug] Found " << count << " audio playback devices:\n";
+    LOG_INFO_CAT("Audio", "Found {} playback devices:", count);
+
     for (int i = 0; i < count; ++i) {
         const char* name = SDL_GetAudioDeviceName(devices[i]);
-        std::cerr << "[AudioDebug] Device " << i << ": id=" << devices[i] << ", name=" << (name ? name : "unknown");
-        SDL_AudioSpec spec;
-        int sampleCount = 0;
-        if (SDL_GetAudioDeviceFormat(devices[i], &spec, &sampleCount) == 0) {
-            std::cerr << ", channels=" << static_cast<int>(spec.channels)
-                      << ", freq=" << spec.freq
-                      << ", format=" << spec.format
-                      << ", samples=" << sampleCount << "\n";
+        SDL_AudioSpec spec{};
+        int samples = 0;
+        if (SDL_GetAudioDeviceFormat(devices[i], &spec, &samples) == 0) {
+            LOG_INFO_CAT("Audio", "  [{}] {} | {}Hz, {}ch, format=0x{:x}, buf={}",
+                         i, name ? name : "unknown", spec.freq, (int)spec.channels, (int)spec.format, samples);
         } else {
-            std::cerr << ", format query not supported or device unavailable\n";
+            LOG_WARNING_CAT("Audio", "  [{}] {} | format query failed", i, name ? name : "unknown");
         }
     }
-    SDL_free(devices);
+    if (devices) SDL_free(devices);
 }
 
-void initAudio(const AudioConfig& c, SDL_AudioDeviceID& audioDevice, SDL_AudioStream*& audioStream) {
-    audioDevice = 0;
-    audioStream = nullptr;
-    if (SDL_InitSubSystem(SDL_INIT_AUDIO) == 0) {
-        std::cerr << "[AudioDebug] SDL_InitSubSystem(SDL_INIT_AUDIO) failed: " << SDL_GetError() << "\n";
+AudioManager::AudioManager(const AudioConfig& config) {
+    if (SDL_InitSubSystem(SDL_INIT_AUDIO) != 0) {
+        LOG_ERROR_CAT("Audio", "SDL_InitSubSystem(SDL_INIT_AUDIO) failed: {}", SDL_GetError());
         return;
     }
-    SDL_AudioSpec spec = {};
-    spec.freq = c.frequency;
-    spec.format = c.format;
-    spec.channels = c.channels;
-    audioStream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, nullptr, nullptr);
-    if (!audioStream) {
-        std::cerr << "[AudioDebug] SDL_OpenAudioDeviceStream failed: " << SDL_GetError() << "\n";
+
+    SDL_AudioSpec desired{};
+    desired.freq = config.frequency;
+    desired.format = config.format;
+    desired.channels = static_cast<uint8_t>(config.channels);
+
+    std::vector<int> attempts = {8, 6, 5, 4, 2, 1};
+    for (int ch : attempts) {
+        desired.channels = static_cast<uint8_t>(ch);
+        m_stream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &desired,
+                                             config.callback ? streamCallback : nullptr, this);
+        if (m_stream) {
+            LOG_SUCCESS_CAT("Audio", "Stream opened: {}ch, {}Hz, format=0x{:x}", ch, desired.freq, (int)desired.format);
+            break;
+        }
+        LOG_WARNING_CAT("Audio", "Failed {}-channel attempt: {}", ch, SDL_GetError());
+    }
+
+    if (!m_stream) {
+        LOG_ERROR_CAT("Audio", "All channel configs failed — audio disabled");
         SDL_QuitSubSystem(SDL_INIT_AUDIO);
         return;
     }
-    audioDevice = SDL_GetAudioStreamDevice(audioStream);
-    SDL_ResumeAudioStreamDevice(audioStream);
-    std::cerr << "[AudioDebug] Audio initialized: deviceID=" << audioDevice << ", channels=" << c.channels
-              << ", format=" << c.format << ", freq=" << c.frequency << "\n";
-}
 
-SDL_AudioDeviceID getAudioDevice(const SDL_AudioDeviceID& audioDevice) {
-    return audioDevice;
-}
+    m_deviceID = SDL_GetAudioStreamDevice(m_stream);
 
-AudioManager::AudioManager(const AudioConfig& c) : audioDevice(0), audioStream(nullptr) {
-    if (SDL_InitSubSystem(SDL_INIT_AUDIO) == 0) {
-        std::cerr << "[AudioDebug] SDL_InitSubSystem(SDL_INIT_AUDIO) failed: " << SDL_GetError() << "\n";
-        return;
+    if (config.callback) {
+        m_ownedCallback = std::make_unique<std::function<void(std::span<std::byte>, int)>>(config.callback);
     }
-    SDL_AudioSpec spec = {};
-    spec.freq = c.frequency;
-    spec.format = c.format;
-    spec.channels = c.channels;
-    audioStream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, c.callback ? wrappedCallback : nullptr, this);
-    if (!audioStream) {
-        std::cerr << "[AudioDebug] SDL_OpenAudioDeviceStream failed: " << SDL_GetError() << "\n";
-        SDL_QuitSubSystem(SDL_INIT_AUDIO);
-        return;
-    }
-    audioDevice = SDL_GetAudioStreamDevice(audioStream);
-    if (c.callback) {
-        ownedCallback = std::make_unique<std::function<void(Uint8*, int)>>(c.callback);
-    }
-    SDL_ResumeAudioStreamDevice(audioStream);
-    std::cerr << "[AudioDebug] AudioManager initialized: deviceID=" << audioDevice << ", channels=" << c.channels
-              << ", format=" << c.format << ", freq=" << c.frequency << "\n";
+
+    SDL_ResumeAudioStreamDevice(m_stream);
+    LOG_INFO_CAT("Audio", "AudioManager ready | DeviceID={}", m_deviceID);
 }
 
 AudioManager::~AudioManager() {
-    if (audioStream) {
-        SDL_DestroyAudioStream(audioStream);
-        std::cerr << "[AudioDebug] Destroyed audio stream: " << audioStream << "\n";
-        audioStream = nullptr;
+    if (m_stream) {
+        SDL_PauseAudioStreamDevice(m_stream);
+        SDL_ClearAudioStream(m_stream);
+        SDL_DestroyAudioStream(m_stream);
+        LOG_INFO_CAT("Audio", "Audio stream destroyed");
     }
-    if (audioDevice) {
-        SDL_CloseAudioDevice(audioDevice);
-        std::cerr << "[AudioDebug] Closed audio device: " << audioDevice << "\n";
-        audioDevice = 0;
+
+    m_activeBuffers.clear();
+    LOG_INFO_CAT("Audio", "Freed {} audio buffers", m_activeBuffers.size());
+
+    if (m_deviceID) {
+        SDL_CloseAudioDevice(m_deviceID);
+        LOG_INFO_CAT("Audio", "Closed audio device {}", m_deviceID);
     }
-    activeBuffers.clear();
-    std::cerr << "[AudioDebug] Cleared " << activeBuffers.size() << " active audio buffers\n";
+
     SDL_QuitSubSystem(SDL_INIT_AUDIO);
-    std::cerr << "[AudioDebug] Quit SDL audio subsystem\n";
+    LOG_INFO_CAT("Dispose", "SDL audio subsystem quit — RASPBERRY_PINK ETERNAL 🩷");
 }
 
-void AudioManager::playMP3(const std::string& file, int loops) {
-    std::ifstream input(file, std::ios::binary);
-    if (!input) {
-        std::cerr << "[AudioDebug] Failed to open MP3 file: " << file << "\n";
-        return;
-    }
-    input.seekg(0, std::ios::end);
-    size_t size = input.tellg();
-    input.seekg(0, std::ios::beg);
-    auto buffer = std::make_unique<Uint8[]>(size);
-    input.read(reinterpret_cast<char*>(buffer.get()), size);
-    input.close();
-
-    if (audioStream) {
-        if (!SDL_PutAudioStreamData(audioStream, buffer.get(), size)) {
-            std::cerr << "[AudioDebug] SDL_PutAudioStreamData failed for " << file << ": " << SDL_GetError() << "\n";
-            return;
+void AudioManager::streamCallback(void* userdata, SDL_AudioStream* stream, int additional_amount, int /*total_amount*/) {
+    auto* self = static_cast<AudioManager*>(userdata);
+    if (self && self->m_ownedCallback) {
+        std::byte* buf = nullptr;
+        if (SDL_GetAudioStreamData(stream, &buf, additional_amount) > 0) {
+            (*self->m_ownedCallback)(std::span<std::byte>(buf, additional_amount), additional_amount);
         }
-        SDL_FlushAudioStream(audioStream);
-        activeBuffers.push_back(std::move(buffer));
-        std::cerr << "[AudioDebug] Playing MP3: " << file << ", size=" << size << ", buffers=" << activeBuffers.size() << "\n";
-    } else {
-        std::cerr << "[AudioDebug] No audio stream available for " << file << "\n";
-    }
-
-    if (loops != 0) {
-        std::cerr << "[AudioDebug] Looping not fully supported; playing once\n";
     }
 }
 
-void AudioManager::playSound(const std::string& file) {
-    SDL_AudioSpec spec;
-    Uint8* buffer = nullptr;
-    Uint32 length = 0;
-    if (!SDL_LoadWAV(file.c_str(), &spec, &buffer, &length)) {
-        std::cerr << "[AudioDebug] SDL_LoadWAV failed for " << file << ": " << SDL_GetError() << "\n";
+void AudioManager::loadAndQueue(const std::string& file, bool isMP3) {
+    std::ifstream fs(file, std::ios::binary);
+    if (!fs) {
+        LOG_ERROR_CAT("Audio", "Failed to open file: {}", file);
         return;
     }
-    if (audioStream) {
-        auto ownedBuffer = std::make_unique<Uint8[]>(length);
-        std::memcpy(ownedBuffer.get(), buffer, length);
-        if (!SDL_PutAudioStreamData(audioStream, ownedBuffer.get(), length)) {
-            std::cerr << "[AudioDebug] SDL_PutAudioStreamData failed for " << file << ": " << SDL_GetError() << "\n";
-        } else {
-            SDL_FlushAudioStream(audioStream);
-            activeBuffers.push_back(std::move(ownedBuffer));
-            std::cerr << "[AudioDebug] Playing WAV: " << file << ", size=" << length << ", buffers=" << activeBuffers.size() << "\n";
-        }
-    } else {
-        std::cerr << "[AudioDebug] No audio stream available for " << file << "\n";
+
+    fs.seekg(0, std::ios::end);
+    std::streamsize size = fs.tellg();
+    fs.seekg(0, std::ios::beg);
+
+    auto buffer = std::make_unique<std::byte[]>(static_cast<std::size_t>(size));
+    fs.read(reinterpret_cast<char*>(buffer.get()), size);
+    fs.close();
+
+    if (size <= 0) {
+        LOG_WARNING_CAT("Audio", "Empty file: {}", file);
+        return;
     }
-    SDL_free(buffer);
+
+    if (!SDL_PutAudioStreamData(m_stream, buffer.get(), static_cast<int>(size))) {
+        LOG_ERROR_CAT("Audio", "SDL_PutAudioStreamData failed: {}", SDL_GetError());
+        return;
+    }
+
+    m_activeBuffers.push_back({std::move(buffer), static_cast<std::size_t>(size)});
+    LOG_INFO_CAT("Audio", "{} queued: {} bytes | {} active", isMP3 ? "MP3" : "WAV", size, m_activeBuffers.size());
+}
+
+void AudioManager::playMP3(std::string_view file, int loops) {
+    if (!isValid()) return;
+    stopMusic();
+    loadAndQueue(std::string(file), true);
+    if (loops > 1) LOG_WARNING_CAT("Audio", "MP3 looping not implemented");
+}
+
+void AudioManager::playWAV(std::string_view file) {
+    if (!isValid()) return;
+    loadAndQueue(std::string(file), false);
 }
 
 void AudioManager::playAmmoSound() {
-    playSound("assets/audio/ammo.wav");
+    playWAV("assets/audio/ammo.wav");
 }
 
 void AudioManager::stopMusic() {
-    if (audioStream) {
-        SDL_ClearAudioStream(audioStream);
-        activeBuffers.clear();
-        std::cerr << "[AudioDebug] Stopped music and cleared buffers\n";
-    }
+    if (!m_stream) return;
+    SDL_ClearAudioStream(m_stream);
+    m_activeBuffers.clear();
+    LOG_INFO_CAT("Audio", "Music stopped + queue cleared");
 }
 
 void AudioManager::pauseMusic() {
-    if (audioStream) {
-        SDL_PauseAudioStreamDevice(audioStream);
-        std::cerr << "[AudioDebug] Paused audio stream\n";
+    if (m_stream) {
+        SDL_PauseAudioStreamDevice(m_stream);
+        LOG_INFO_CAT("Audio", "Audio paused");
     }
 }
 
 void AudioManager::resumeMusic() {
-    if (audioStream) {
-        SDL_ResumeAudioStreamDevice(audioStream);
-        std::cerr << "[AudioDebug] Resumed audio stream\n";
+    if (m_stream) {
+        SDL_ResumeAudioStreamDevice(m_stream);
+        LOG_INFO_CAT("Audio", "Audio resumed");
     }
 }
 
-void AudioManager::setMusicVolume(float volume) {
-    if (audioStream) {
-        SDL_SetAudioStreamGain(audioStream, volume);
-        std::cerr << "[AudioDebug] Set audio volume to " << volume << "\n";
+void AudioManager::setVolume(float volume) {
+    if (m_stream) {
+        float v = std::clamp(volume, 0.0f, 1.0f);
+        SDL_SetAudioStreamGain(m_stream, v);
+        LOG_INFO_CAT("Audio", "Volume → {:.2f}", v);
     }
 }
 
-void AudioManager::fadeInMusic(const std::string& file, int loops, int ms) {
-    std::ifstream input(file, std::ios::binary);
-    if (!input) {
-        std::cerr << "[AudioDebug] Failed to open MP3 file: " << file << "\n";
-        return;
-    }
-    input.seekg(0, std::ios::end);
-    size_t size = input.tellg();
-    input.seekg(0, std::ios::beg);
-    auto buffer = std::make_unique<Uint8[]>(size);
-    input.read(reinterpret_cast<char*>(buffer.get()), size);
-    input.close();
+void AudioManager::fadeInMusic(std::string_view file, int loops, int ms) {
+    if (!isValid()) return;
+    stopMusic();
+    setVolume(0.0f);
+    loadAndQueue(std::string(file), true);
 
-    if (audioStream) {
-        SDL_SetAudioStreamGain(audioStream, 0.0f);
-        if (!SDL_PutAudioStreamData(audioStream, buffer.get(), size)) {
-            std::cerr << "[AudioDebug] SDL_PutAudioStreamData failed for " << file << ": " << SDL_GetError() << "\n";
-            return;
-        }
-        SDL_FlushAudioStream(audioStream);
-        activeBuffers.push_back(std::move(buffer));
-        std::cerr << "[AudioDebug] Fading in MP3: " << file << ", size=" << size << ", buffers=" << activeBuffers.size() << "\n";
-        float steps = ms / 10.0f;
-        for (float v = 0.0f; v <= 1.0f; v += 1.0f / steps) {
-            SDL_SetAudioStreamGain(audioStream, v);
-            SDL_Delay(10);
-        }
-        SDL_SetAudioStreamGain(audioStream, 1.0f);
-    } else {
-        std::cerr << "[AudioDebug] No audio stream available for " << file << "\n";
+    const int step = 20;
+    const float steps = ms / static_cast<float>(step);
+    const float inc = 1.0f / steps;
+
+    for (float v = 0.0f; v <= 1.0f; v += inc) {
+        setVolume(v);
+        std::this_thread::sleep_for(std::chrono::milliseconds(step));
     }
-    if (loops != 0) {
-        std::cerr << "[AudioDebug] Looping not fully supported; playing once\n";
-    }
+    setVolume(1.0f);
+    LOG_SUCCESS_CAT("Audio", "Fade-in complete: {}", file);
 }
 
 void AudioManager::fadeOutMusic(int ms) {
-    if (audioStream) {
-        std::cerr << "[AudioDebug] Fading out audio over " << ms << "ms\n";
-        float steps = ms / 10.0f;
-        for (float v = 1.0f; v >= 0.0f; v -= 1.0f / steps) {
-            SDL_SetAudioStreamGain(audioStream, v);
-            SDL_Delay(10);
-        }
-        SDL_ClearAudioStream(audioStream);
-        activeBuffers.clear();
-        std::cerr << "[AudioDebug] Faded out and cleared buffers\n";
-    }
-}
+    if (!m_stream) return;
 
-SDL_AudioDeviceID AudioManager::getAudioDevice() const {
-    return audioDevice;
-}
+    const int step = 20;
+    const float steps = ms / static_cast<float>(step);
+    const float dec = 1.0f / steps;
 
-void AudioManager::wrappedCallback(void* ud, SDL_AudioStream* /*stream*/, int additional_amount, int /*total_amount*/) {
-    auto* manager = static_cast<AudioManager*>(ud);
-    if (manager && manager->ownedCallback) {
-        (*manager->ownedCallback)(nullptr, additional_amount);
+    for (float v = 1.0f; v >= 0.0f; v -= dec) {
+        SDL_SetAudioStreamGain(m_stream, v);
+        std::this_thread::sleep_for(std::chrono::milliseconds(step));
     }
+    stopMusic();
+    LOG_SUCCESS_CAT("Audio", "Fade-out complete");
 }
 
 } // namespace SDL3Audio
