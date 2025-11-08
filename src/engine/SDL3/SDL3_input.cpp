@@ -1,19 +1,23 @@
-// AMOURANTH RTX Engine, October 2025 - Input handling implementation for keyboard, mouse, and gamepad.
-// Thread-safe with C++20 features; no mutexes required.
-// Dependencies: SDL3, C++20 standard library, logging.hpp.
-// Supported platforms: Linux, Windows.
-// Zachary Geurts 2025
+// src/engine/SDL3/SDL3_input.cpp
+// AMOURANTH RTX Engine © 2025 by Zachary Geurts
+// FINAL SDL3 Input — C++23 — NOVEMBER 08 2025
+// ALL ERRORS FIXED: source_location, SDL3 fields, compound literals
 
 #include "engine/SDL3/SDL3_input.hpp"
 #include "engine/logging.hpp"
 #include <stdexcept>
 #include <source_location>
 #include <fstream>
+#include <format>
 
 namespace SDL3Initializer {
 
+std::string SDL3Input::locationString(const std::source_location& loc) {
+    return std::format("{}:{}:{}", loc.file_name(), loc.line(), loc.function_name());
+}
+
 SDL3Input::~SDL3Input() {
-    LOG_INFO_CAT("Input", "Destroying SDL3Input, closing all gamepads", std::source_location::current());
+    LOG_INFO_CAT("Dispose", "Destroying SDL3Input — closing {} gamepads — RASPBERRY_PINK ETERNAL 🩷", m_gamepads.size());
     for (auto& [id, gp] : m_gamepads) {
         SDL_CloseGamepad(gp);
     }
@@ -21,21 +25,24 @@ SDL3Input::~SDL3Input() {
 }
 
 void SDL3Input::initialize() {
-    // Verify platform support
-    std::string_view platform = SDL_GetPlatform();
+    const std::string loc = locationString();
+    const std::string_view platform = SDL_GetPlatform();
+
     if (platform != "Linux" && platform != "Windows") {
-        LOG_ERROR_CAT("Input", "Unsupported platform for input: {}", std::source_location::current(), platform);
-        throw std::runtime_error(std::string("Unsupported platform for input: ") + std::string(platform));
+        LOG_ERROR_CAT("Input", "Unsupported platform: {} | {}", platform, loc);
+        throw std::runtime_error(std::format("Unsupported platform: {}", platform));
     }
 
-    LOG_INFO_CAT("Input", "Initializing SDL3Input", std::source_location::current());
+    LOG_SUCCESS_CAT("Input", "Initializing SDL3Input | {}", loc);
 
     SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI, "1");
-    int numJoysticks;
-    SDL_JoystickID* joysticks = SDL_GetJoysticks(&numJoysticks);
+    int num = 0;
+    SDL_JoystickID* joysticks = SDL_GetJoysticks(&num);
+
+    LOG_INFO_CAT("Input", "Found {} joysticks | {}", num, loc);
+
     if (joysticks) {
-        LOG_INFO_CAT("Input", "Found {} joysticks", std::source_location::current(), numJoysticks);
-        for (int i = 0; i < numJoysticks; ++i) {
+        for (int i = 0; i < num; ++i) {
             if (SDL_IsGamepad(joysticks[i])) {
                 if (auto gp = SDL_OpenGamepad(joysticks[i])) {
                     m_gamepads[joysticks[i]] = gp;
@@ -50,56 +57,66 @@ void SDL3Input::initialize() {
 }
 
 bool SDL3Input::pollEvents(SDL_Window* window, SDL_AudioDeviceID audioDevice, bool& consoleOpen, bool exitOnClose) {
-    SDL_Event event;
-    while (SDL_PollEvent(&event)) {
-        switch (event.type) {
+    SDL_Event ev;
+    while (SDL_PollEvent(&ev)) {
+        switch (ev.type) {
             case SDL_EVENT_QUIT:
             case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
-                LOG_INFO_CAT("Input", "Quit or window close event received", std::source_location::current());
+                LOG_INFO_CAT("Input", "Quit requested");
                 return !exitOnClose;
+
             case SDL_EVENT_WINDOW_RESIZED:
-                LOG_INFO_CAT("Input", "Window resized: width={}, height={}", 
-                             std::source_location::current(), event.window.data1, event.window.data2);
-                if (m_resizeCallback) m_resizeCallback(event.window.data1, event.window.data2);
+                LOG_INFO_CAT("Input", "Window resized: {}x{}", ev.window.data1, ev.window.data2);
+                if (m_resizeCallback) m_resizeCallback(ev.window.data1, ev.window.data2);
                 break;
+
             case SDL_EVENT_KEY_DOWN:
-                handleKeyboard(event.key, window, audioDevice, consoleOpen);
-                if (m_keyboardCallback) m_keyboardCallback(event.key);
+                handleKeyboard(ev.key, window, audioDevice, consoleOpen);
+                if (m_keyboardCallback) m_keyboardCallback(ev.key);
                 break;
+
             case SDL_EVENT_KEY_UP:
-                if (m_keyboardCallback) m_keyboardCallback(event.key);
+                if (m_keyboardCallback) m_keyboardCallback(ev.key);
                 break;
+
             case SDL_EVENT_MOUSE_BUTTON_DOWN:
             case SDL_EVENT_MOUSE_BUTTON_UP:
-                handleMouseButton(event.button, window);
-                if (m_mouseButtonCallback) m_mouseButtonCallback(event.button);
+                handleMouseButton(ev.button, window);
+                if (m_mouseButtonCallback) m_mouseButtonCallback(ev.button);
                 break;
+
             case SDL_EVENT_MOUSE_MOTION:
-                if (m_mouseMotionCallback) m_mouseMotionCallback(event.motion);
+                if (m_mouseMotionCallback) m_mouseMotionCallback(ev.motion);
                 break;
+
             case SDL_EVENT_MOUSE_WHEEL:
-                if (m_mouseWheelCallback) m_mouseWheelCallback(event.wheel);
+                if (m_mouseWheelCallback) m_mouseWheelCallback(ev.wheel);
                 break;
+
             case SDL_EVENT_TEXT_INPUT:
-                if (m_textInputCallback) m_textInputCallback(event.text);
+                if (m_textInputCallback) m_textInputCallback(ev.text);
                 break;
+
             case SDL_EVENT_FINGER_DOWN:
             case SDL_EVENT_FINGER_UP:
             case SDL_EVENT_FINGER_MOTION:
-                handleTouch(event.tfinger);
-                if (m_touchCallback) m_touchCallback(event.tfinger);
+                handleTouch(ev.tfinger);
+                if (m_touchCallback) m_touchCallback(ev.tfinger);
                 break;
+
             case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
             case SDL_EVENT_GAMEPAD_BUTTON_UP:
-                handleGamepadButton(event.gbutton, audioDevice);
-                if (m_gamepadButtonCallback) m_gamepadButtonCallback(event.gbutton);
+                handleGamepadButton(ev.gbutton, audioDevice);
+                if (m_gamepadButtonCallback) m_gamepadButtonCallback(ev.gbutton);
                 break;
+
             case SDL_EVENT_GAMEPAD_AXIS_MOTION:
-                if (m_gamepadAxisCallback) m_gamepadAxisCallback(event.gaxis);
+                if (m_gamepadAxisCallback) m_gamepadAxisCallback(ev.gaxis);
                 break;
+
             case SDL_EVENT_GAMEPAD_ADDED:
             case SDL_EVENT_GAMEPAD_REMOVED:
-                handleGamepadConnection(event.gdevice);
+                handleGamepadConnection(ev.gdevice);
                 break;
         }
     }
@@ -108,28 +125,75 @@ bool SDL3Input::pollEvents(SDL_Window* window, SDL_AudioDeviceID audioDevice, bo
 
 void SDL3Input::setCallbacks(KeyboardCallback kb, MouseButtonCallback mb, MouseMotionCallback mm,
                              MouseWheelCallback mw, TextInputCallback ti, TouchCallback tc,
-                             GamepadButtonCallback gb, GamepadAxisCallback ga, GamepadConnectCallback gc,
-                             ResizeCallback onResize) {
-    m_keyboardCallback = kb;
-    m_mouseButtonCallback = mb;
-    m_mouseMotionCallback = mm;
-    m_mouseWheelCallback = mw;
-    m_textInputCallback = ti;
-    m_touchCallback = tc;
-    m_gamepadButtonCallback = gb;
-    m_gamepadAxisCallback = ga;
-    m_gamepadConnectCallback = gc;
-    m_resizeCallback = onResize;
-    LOG_INFO_CAT("Input", "Input callbacks set", std::source_location::current());
+                             GamepadButtonCallback gb, GamepadAxisCallback ga,
+                             GamepadConnectCallback gc, ResizeCallback resize) {
+    m_keyboardCallback = std::move(kb);
+    m_mouseButtonCallback = std::move(mb);
+    m_mouseMotionCallback = std::move(mm);
+    m_mouseWheelCallback = std::move(mw);
+    m_textInputCallback = std::move(ti);
+    m_touchCallback = std::move(tc);
+    m_gamepadButtonCallback = std::move(gb);
+    m_gamepadAxisCallback = std::move(ga);
+    m_gamepadConnectCallback = std::move(gc);
+    m_resizeCallback = std::move(resize);
+
+    LOG_SUCCESS_CAT("Input", "All input callbacks registered");
 }
 
 void SDL3Input::enableTextInput(SDL_Window* window, bool enable) {
     if (enable) {
         SDL_StartTextInput(window);
-        LOG_INFO_CAT("Input", "Text input enabled", std::source_location::current());
+        LOG_INFO_CAT("Input", "Text input ENABLED");
     } else {
         SDL_StopTextInput(window);
-        LOG_INFO_CAT("Input", "Text input disabled", std::source_location::current());
+        LOG_INFO_CAT("Input", "Text input DISABLED");
+    }
+}
+
+void SDL3Input::handleKeyboard(const SDL_KeyboardEvent& k, SDL_Window* window, SDL_AudioDeviceID audioDevice, bool& consoleOpen) {
+    if (!k.down) return;  // ← SDL3: .down is bool
+
+    switch (k.key) {
+        case SDLK_F:
+            {
+                bool fs = (SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN) != 0;
+                SDL_SetWindowFullscreen(window, !fs);
+                LOG_INFO_CAT("Input", "Fullscreen toggle → {}", !fs ? "ON" : "OFF");
+            }
+            break;
+        case SDLK_ESCAPE:
+            {
+                SDL_Event quitEvt = { .type = SDL_EVENT_QUIT };
+                SDL_PushEvent(&quitEvt);
+            }
+            break;
+        case SDLK_SPACE:
+            if (audioDevice) {
+                bool paused = SDL_AudioDevicePaused(audioDevice);
+                paused ? SDL_ResumeAudioDevice(audioDevice) : SDL_PauseAudioDevice(audioDevice);
+                LOG_INFO_CAT("Input", "Audio {} via SPACE", paused ? "RESUMED" : "PAUSED");
+            }
+            break;
+        case SDLK_M:
+            if (audioDevice) {
+                float g = SDL_GetAudioDeviceGain(audioDevice);
+                SDL_SetAudioDeviceGain(audioDevice, g > 0.5f ? 0.0f : 1.0f);
+                LOG_INFO_CAT("Input", "Audio MUTE toggle");
+            }
+            break;
+        case SDLK_GRAVE:
+            consoleOpen = !consoleOpen;
+            LOG_INFO_CAT("Input", "Console toggle → {}", consoleOpen ? "OPEN" : "CLOSED");
+            break;
+    }
+}
+
+void SDL3Input::handleMouseButton(const SDL_MouseButtonEvent& b, SDL_Window* window) {
+    if (b.down && b.button == SDL_BUTTON_RIGHT) {
+        bool rel = SDL_GetWindowRelativeMouseMode(window);
+        SDL_SetWindowRelativeMouseMode(window, !rel);
+        LOG_INFO_CAT("Input", "Relative mouse → {}", !rel ? "ON" : "OFF");
     }
 }
 
@@ -137,72 +201,22 @@ void SDL3Input::handleTouch(const SDL_TouchFingerEvent& t) {
     if (m_touchCallback) m_touchCallback(t);
 }
 
-void SDL3Input::handleKeyboard(const SDL_KeyboardEvent& k, SDL_Window* window, SDL_AudioDeviceID audioDevice, bool& consoleOpen) {
-    if (k.type != SDL_EVENT_KEY_DOWN) return;
-    switch (k.key) {
-        case SDLK_F:
-            {
-                Uint32 flags = SDL_GetWindowFlags(window);
-                bool isFullscreen = flags & SDL_WINDOW_FULLSCREEN;
-                SDL_SetWindowFullscreen(window, isFullscreen ? 0 : SDL_WINDOW_FULLSCREEN);
-                LOG_INFO_CAT("Input", "Toggling fullscreen mode: {}", std::source_location::current(), isFullscreen ? "off" : "on");
-            }
-            break;
-        case SDLK_ESCAPE:
-            {
-                SDL_Event evt{.type = SDL_EVENT_QUIT};
-                SDL_PushEvent(&evt);
-            }
-            break;
-        case SDLK_SPACE:
-            if (audioDevice) {
-                if (SDL_AudioDevicePaused(audioDevice)) {
-                    SDL_ResumeAudioDevice(audioDevice);
-                } else {
-                    SDL_PauseAudioDevice(audioDevice);
-                }
-            }
-            break;
-        case SDLK_M:
-            if (audioDevice) {
-                float gain = SDL_GetAudioDeviceGain(audioDevice);
-                SDL_SetAudioDeviceGain(audioDevice, gain == 0.0f ? 1.0f : 0.0f);
-            }
-            break;
-        case SDLK_GRAVE:
-            consoleOpen = !consoleOpen;
-            break;
-    }
-}
-
-void SDL3Input::handleMouseButton(const SDL_MouseButtonEvent& b, SDL_Window* window) {
-    if (b.type == SDL_EVENT_MOUSE_BUTTON_DOWN && b.button == SDL_BUTTON_RIGHT) {
-        bool relative = SDL_GetWindowRelativeMouseMode(window);
-        SDL_SetWindowRelativeMouseMode(window, !relative);
-    }
-}
-
 void SDL3Input::handleGamepadButton(const SDL_GamepadButtonEvent& g, SDL_AudioDeviceID audioDevice) {
-    if (g.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) {
-        switch (g.button) {
-            case SDL_GAMEPAD_BUTTON_EAST:
-                {
-                    SDL_Event evt{.type = SDL_EVENT_QUIT};
-                    SDL_PushEvent(&evt);
-                }
-                break;
-            case SDL_GAMEPAD_BUTTON_START:
-                if (audioDevice) {
-                    if (SDL_AudioDevicePaused(audioDevice)) {
-                        SDL_ResumeAudioDevice(audioDevice);
-                    } else {
-                        SDL_PauseAudioDevice(audioDevice);
-                    }
-                }
-                break;
-            default:
-                break;
-        }
+    if (!g.down) return;
+
+    switch (g.button) {
+        case SDL_GAMEPAD_BUTTON_EAST:
+            {
+                SDL_Event quitEvt = { .type = SDL_EVENT_QUIT };
+                SDL_PushEvent(&quitEvt);
+            }
+            break;
+        case SDL_GAMEPAD_BUTTON_START:
+            if (audioDevice) {
+                bool p = SDL_AudioDevicePaused(audioDevice);
+                p ? SDL_ResumeAudioDevice(audioDevice) : SDL_PauseAudioDevice(audioDevice);
+            }
+            break;
     }
 }
 
@@ -210,11 +224,13 @@ void SDL3Input::handleGamepadConnection(const SDL_GamepadDeviceEvent& e) {
     if (e.type == SDL_EVENT_GAMEPAD_ADDED) {
         if (auto gp = SDL_OpenGamepad(e.which)) {
             m_gamepads[e.which] = gp;
+            LOG_SUCCESS_CAT("Input", "Gamepad ADDED: {}", e.which);
             if (m_gamepadConnectCallback) m_gamepadConnectCallback(true, e.which, gp);
         }
-    } else if (e.type == SDL_EVENT_GAMEPAD_REMOVED) {
+    } else {
         auto it = m_gamepads.find(e.which);
         if (it != m_gamepads.end()) {
+            LOG_INFO_CAT("Input", "Gamepad REMOVED: {}", e.which);
             if (m_gamepadConnectCallback) m_gamepadConnectCallback(false, e.which, it->second);
             SDL_CloseGamepad(it->second);
             m_gamepads.erase(it);
@@ -222,15 +238,16 @@ void SDL3Input::handleGamepadConnection(const SDL_GamepadDeviceEvent& e) {
     }
 }
 
-void SDL3Input::exportLog(const std::string& filename) const {
-    LOG_INFO_CAT("Input", "Exporting log to {}", std::source_location::current(), filename);
-    std::ofstream outFile(filename, std::ios::app);
-    if (outFile.is_open()) {
-        outFile << "SDL3Input log exported at " << std::time(nullptr) << "\n";
-        outFile.close();
-        LOG_INFO_CAT("Input", "Log exported successfully to {}", std::source_location::current(), filename);
+void SDL3Input::exportLog(std::string_view filename) const {
+    const std::string loc = locationString();
+    LOG_INFO_CAT("Input", "Exporting input log → {} | {}", filename, loc);
+
+    std::ofstream f(filename.data(), std::ios::app);
+    if (f.is_open()) {
+        f << "[INPUT LOG] " << std::time(nullptr) << " | Gamepads: " << m_gamepads.size() << "\n";
+        LOG_SUCCESS_CAT("Input", "Log exported → {}", filename);
     } else {
-        LOG_ERROR_CAT("Input", "Failed to open log file {}", std::source_location::current(), filename);
+        LOG_ERROR_CAT("Input", "Failed to export log → {}", filename);
     }
 }
 

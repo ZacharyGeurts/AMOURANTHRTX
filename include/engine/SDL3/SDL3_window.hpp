@@ -1,5 +1,6 @@
 // include/engine/SDL3/SDL3_window.hpp
-// NOVEMBER 07 2025 — GLOBAL RAII — CLEAN
+// AMOURANTH RTX Engine © 2025 by Zachary Geurts
+// SDL3 Window RAII — GLOBAL VulkanRenderer — NOVEMBER 08 2025
 
 #pragma once
 
@@ -8,9 +9,8 @@
 #include <memory>
 #include <vector>
 
-namespace VulkanRTX {
-    class VulkanRenderer;
-}
+// GLOBAL — NO NAMESPACE — IMMORTAL
+class VulkanRenderer;  // ← GLOBAL FORWARD DECLARE
 
 namespace SDL3Initializer {
 
@@ -20,10 +20,14 @@ struct SDLWindowDeleter {
 
 using SDLWindowPtr = std::unique_ptr<SDL_Window, SDLWindowDeleter>;
 
-SDLWindowPtr createWindow(const char* title, int w, int h, Uint32 flags = SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE);
+SDLWindowPtr createWindow(const char* title, int w, int h, Uint32 flags = 0);
 std::vector<std::string> getWindowExtensions(const SDLWindowPtr& window);
 SDL_Window* getWindow(const SDLWindowPtr& window) noexcept;
-bool pollEventsForResize(const SDLWindowPtr& window, int& newWidth, int& newHeight, bool& shouldQuit, bool& toggleFullscreenKey) noexcept;
-void toggleFullscreen(SDLWindowPtr& window, VulkanRTX::VulkanRenderer& renderer) noexcept;
+
+bool pollEventsForResize(const SDLWindowPtr& window,
+                         int& newWidth, int& newHeight,
+                         bool& shouldQuit, bool& toggleFullscreenKey) noexcept;
+
+void toggleFullscreen(SDLWindowPtr& window, VulkanRenderer& renderer) noexcept;
 
 } // namespace SDL3Initializer
