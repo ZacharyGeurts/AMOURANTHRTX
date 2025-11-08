@@ -16,6 +16,15 @@
 #ifdef __cplusplus
     #pragma once
 
+	#include "../GLOBAL/Dispose.hpp"
+    #include "../GLOBAL/camera.hpp"
+    #include "../GLOBAL/logging.hpp"
+    #include "../GLOBAL/StoneKey.hpp"
+    #include "../GLOBAL/SwapchainManager.hpp"
+    #include "../GLOBAL/BufferManager.hpp"
+	#include "engine/Vulkan/VulkanRenderer.hpp"  // Global VulkanRenderer
+	#include "engine/Vulkan/VulkanPipelineManager.hpp"  // Global VulkanPipelineManager
+
     // ========================================================================
     // CRITICAL: ALL STANDARD / GLM / VULKAN / LOGGING INCLUDES MUST BE GLOBAL
     // Fixes GCC 14 bug c++/105707 — <utility> traits fail inside namespaces
@@ -39,13 +48,6 @@
     #include <atomic>
     #include <SDL3/SDL.h>
     #include <SDL3/SDL_vulkan.h>
-    #include "../GLOBAL/camera.hpp"
-    #include "../GLOBAL/logging.hpp"
-    #include "../GLOBAL/Dispose.hpp"
-    #include "../GLOBAL/StoneKey.hpp"
-    #include "../GLOBAL/SwapchainManager.hpp"
-    #include "../GLOBAL/BufferManager.hpp"
-	#include "engine/Vulkan/VulkanRenderer.hpp"  // Global VulkanRenderer
 
 	class MyPooledBufferMgr : public VulkanBufferManager {
     // custom pooling, stats, etc.

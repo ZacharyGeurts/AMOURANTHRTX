@@ -9,8 +9,6 @@
 //        Stats/Nexus pipelines with dispatch
 //        No double-destroy: RAII + null-checks in dtor
 
-#include "engine/Vulkan/VulkanPipelineManager.hpp"
-#include "engine/Vulkan/VulkanRenderer.hpp"
 #include "engine/Vulkan/VulkanRTX_Setup.hpp"
 #include "engine/Vulkan/Vulkan_init.hpp"
 #include "engine/utils.hpp"
