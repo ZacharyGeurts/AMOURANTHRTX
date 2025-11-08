@@ -13,27 +13,19 @@
 
 #include "../GLOBAL/StoneKey.hpp"  // ← STONEKEY FIRST — kStone1/kStone2 LIVE PER BUILD
 #include "engine/Vulkan/VulkanCommon.hpp"  // ← VulkanHandle<T> + makeXXX + Deleter + StoneKey + logging
-
-using VulkanHandle = ::VulkanHandle;  // explicit global alias (optional but clean)
+#include "engine/Vulkan/Vulkan_LAS.hpp"
 
 // FORWARD DECLARATIONS — GLOBAL SPACE ONLY (VulkanRenderer ALREADY FULL FROM COMMON)
+class VulkanRTX;
 class VulkanPipelineManager;
+
+class Vulkan_LAS;
+struct PendingTLAS;  // forward declare
 
 // FORWARD DECLARATIONS — GLOBAL SPACE ONLY
 struct Context;
 class VulkanPipelineManager;  // FORWARD DECL ONLY
 class VulkanRenderer;
-
-// TLASBuildState — NUCLEAR VERSION — USES VulkanHandle FROM COMMON
-struct TLASBuildState {
-    VulkanRenderer* renderer = nullptr;
-    bool completed = false;
-    VulkanHandle<VkBuffer> instanceBuffer, tlasBuffer, scratchBuffer;
-    VulkanHandle<VkDeviceMemory> instanceMemory, tlasMemory, scratchMemory;
-    VulkanHandle<VkAccelerationStructureKHR> tlas;
-    VulkanHandle<VkDeferredOperationKHR> op;
-    bool compactedInPlace = false;
-};
 
 // MAIN RTX CLASS — GLOBAL SPACE SUPREMACY — LAS INTEGRATED
 class VulkanRTX {
@@ -111,7 +103,7 @@ public:
     VulkanHandle<VkAccelerationStructureKHR> tlas_;
     PFN_vkDestroyAccelerationStructureKHR vkDestroyAccelerationStructureKHR = nullptr;
     bool tlasReady_ = false;
-    TLASBuildState pendingTLAS_{};
+    PendingTLAS pendingTLAS_{};
 
     VulkanHandle<VkDescriptorSetLayout> dsLayout_;
     VulkanHandle<VkDescriptorPool> dsPool_;
@@ -252,9 +244,6 @@ inline VulkanRTX::~VulkanRTX() {
 #pragma once
 
 #include "engine/Vulkan/VulkanCommon.hpp"  // ← VulkanHandle<T> + makeXXX + Deleter + StoneKey + logging + Context
-
-// GLOBAL RESOLVE — EXACT SAME AS COMMON
-using VulkanHandle = ::VulkanHandle;
 
 // FORWARD DECLARATIONS — GLOBAL SPACE ONLY
 struct Context;

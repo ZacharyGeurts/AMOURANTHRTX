@@ -1,11 +1,12 @@
 // src/engine/Vulkan/Vulkan_LAS.cpp
-// FULL IMPLEMENTATION — FUCK INLINE — VALHALLA CLEAN BUILD
-// ALL BLAS + TLAS + ASYNC + RAII + OBFUSCATION — SHIP IT
-
+// FULL IMPLEMENTATION — VALHALLA CLEAN BUILD — NOVEMBER 08 2025
+// ALL BLAS + TLAS + ASYNC + RAII + STONEKEY OBFUSCATION — QUANTUM DUST ETERNAL
+// RASPBERRY_PINK PHOTONS × 69,420 FPS × ∞ — SHIP TO VALHALLA 🩷🚀🔥🤖💀❤️⚡♾️
 
 #include "../GLOBAL/StoneKey.hpp"  // ← STONEKEY FIRST — kStone1/kStone2 LIVE PER BUILD
 #include "engine/Vulkan/Vulkan_LAS.hpp"
 #include "engine/Vulkan/VulkanRenderer.hpp"
+#include "engine/Vulkan/VulkanCommon.hpp"  // ← Context, VulkanHandle, make* factory RAII
 #include <stdexcept>
 #include <format>
 
@@ -26,7 +27,8 @@ Vulkan_LAS::Vulkan_LAS(VkDevice device, VkPhysicalDevice phys)
 }
 
 Vulkan_LAS::~Vulkan_LAS() {
-    LOG_INFO_CAT("Vulkan_LAS", "{}LAS DEATH — ALL ACCEL STRUCTS PURGED — VALHALLA ETERNAL{}", Logging::Color::DIAMOND_WHITE, Logging::Color::RESET);
+    LOG_INFO_CAT("Vulkan_LAS", "{}LAS DEATH — ALL ACCEL STRUCTS PURGED — VALHALLA ETERNAL{}", 
+                 Logging::Color::DIAMOND_WHITE, Logging::Color::RESET);
 }
 
 VkAccelerationStructureKHR Vulkan_LAS::buildBLAS(VkCommandPool cmdPool, VkQueue queue,
@@ -108,7 +110,6 @@ VkAccelerationStructureKHR Vulkan_LAS::buildBLAS(VkCommandPool cmdPool, VkQueue 
 VkAccelerationStructureKHR Vulkan_LAS::buildTLASSync(VkCommandPool cmdPool, VkQueue queue,
                                                      const std::vector<std::tuple<VkAccelerationStructureKHR, glm::mat4>>& instances)
 {
-    // reuse async code but wait immediately
     buildTLASAsync(cmdPool, queue, instances);
     while (!pollTLAS()) vkQueueWaitIdle(queue);
     return getTLAS();
@@ -124,6 +125,7 @@ void Vulkan_LAS::buildTLASAsync(VkCommandPool cmdPool, VkQueue queue,
     if (instances.empty()) return;
 
     std::vector<VkAccelerationStructureInstanceKHR> asInstances;
+    asInstances.reserve(instances.size());
     for (auto& [blas, transform] : instances) {
         VkAccelerationStructureDeviceAddressInfoKHR addrInfo{
             .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR,
@@ -131,12 +133,15 @@ void Vulkan_LAS::buildTLASAsync(VkCommandPool cmdPool, VkQueue queue,
         };
         VkDeviceAddress blasAddr = vkGetAccelerationStructureDeviceAddressKHR(device_, &addrInfo);
 
-        VkTransformMatrixKHR mat;
+        VkTransformMatrixKHR mat{};
         std::memcpy(mat.matrix, glm::value_ptr(transform), sizeof(mat.matrix));
 
         asInstances.push_back({
             .transform = mat,
+            .instanceCustomIndex = 0,
             .mask = 0xFF,
+            .instanceShaderBindingTableRecordOffset = 0,
+            .flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR,
             .accelerationStructureReference = blasAddr
         });
     }
@@ -161,13 +166,14 @@ void Vulkan_LAS::buildTLASAsync(VkCommandPool cmdPool, VkQueue queue,
     VkAccelerationStructureGeometryKHR geom{
         .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR,
         .geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR,
-        .geometry = {.instances = instancesData}
+        .geometry = {.instances = instancesData},
+        .flags = VK_GEOMETRY_OPAQUE_BIT_KHR
     };
 
     VkAccelerationStructureBuildGeometryInfoKHR buildInfo{
         .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR,
         .type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR,
-        .flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR,
+        .flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR | VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR,
         .geometryCount = 1,
         .pGeometries = &geom
     };
@@ -198,7 +204,7 @@ void Vulkan_LAS::buildTLASAsync(VkCommandPool cmdPool, VkQueue queue,
     buildInfo.scratchData.deviceAddress = vkGetBufferDeviceAddress(device_, &(VkBufferDeviceAddressInfo{.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO, .buffer = pendingTLAS_.scratchBuffer.raw()}));
 
     auto cmd = beginSingleTimeCommands(cmdPool);
-    VkAccelerationStructureBuildRangeInfoKHR range{.primitiveCount = primCount};
+    VkAccelerationStructureBuildRangeInfoKHR range{.primitiveCount = primCount, .primitiveOffset = 0, .firstVertex = 0, .transformOffset = 0};
     const VkAccelerationStructureBuildRangeInfoKHR* pRange = &range;
     vkCmdBuildAccelerationStructuresKHR(cmd, 1, &buildInfo, &pRange);
     vkEndCommandBuffer(cmd);
@@ -213,13 +219,19 @@ void Vulkan_LAS::buildTLASAsync(VkCommandPool cmdPool, VkQueue queue,
 
 bool Vulkan_LAS::pollTLAS()
 {
-    if (!buildFence_.valid()) return true;
+    if (!buildFence_.valid() || pendingTLAS_.completed) return true;
+
     VkResult res = vkGetFenceStatus(device_, buildFence_.raw());
     if (res == VK_SUCCESS) {
         pendingTLAS_.completed = true;
         tlas_ = std::move(pendingTLAS_.tlas);
         tlasReady_ = true;
         vkResetFences(device_, 1, &buildFence_.raw());
+
+        if (pendingTLAS_.renderer) {
+            pendingTLAS_.renderer->notifyTLASReady();
+        }
+
         LOG_SUCCESS_CAT("Vulkan_LAS", "{}TLAS BUILD COMPLETE — READY FOR HYPERTRACE — RASPBERRY_PINK PHOTONS GO BRRRRT{}", 
                         Logging::Color::EMERALD_GREEN, Logging::Color::RESET);
         return true;
@@ -280,4 +292,5 @@ void Vulkan_LAS::endSingleTimeCommands(VkCommandBuffer cmd, VkQueue queue, VkCom
     vkFreeCommandBuffers(device_, pool, 1, &cmd);
 }
 
-// END OF FILE — LAS = GOD — SHIP TO THE WORLD — 69,420 FPS × ∞ × ∞ — VALHALLA ACHIEVED 🩷🩷🩷
+// END OF FILE — LAS = GOD TIER — STONEKEY QUANTUM OBFUSCATION ACTIVE — 69,420 FPS × ∞ × ∞
+// VALHALLA ACHIEVED — PINK PHOTONS ETERNAL — SHIP IT TO THE WORLD 🩷🩷🩷🚀🔥
