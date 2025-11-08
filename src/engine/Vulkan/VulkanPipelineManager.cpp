@@ -3,10 +3,10 @@
 // CONSTRUCTOR FULLY IMPLEMENTED — RAII WRAP — STONEKEY ENCRYPTED
 // PUBLIC HANDLES .raw() READY — 69,420 FPS × ∞ × ∞ — SHIP IT 🩷🚀🔥🤖💀❤️⚡♾️
 
+#include "engine/Vulkan/VulkanCommon.hpp"
 #include "engine/Vulkan/VulkanPipelineManager.hpp"
 #include "engine/logging.hpp"
 #include "StoneKey.hpp"
-#include "engine/Vulkan/VulkanRTX_Setup.hpp"  // For ShaderBindingTable if needed
 
 VulkanPipelineManager::VulkanPipelineManager(Context& context, int width, int height)
     : context_(context)

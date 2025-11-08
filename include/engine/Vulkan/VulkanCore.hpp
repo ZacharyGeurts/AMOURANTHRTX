@@ -20,9 +20,6 @@
 #include "engine/Dispose.hpp"
 #include "StoneKey.hpp"
 
-// FULL INCLUSION OF PIPELINE MANAGER — GLOBAL SPACE — NO FORWARD DECL HELL
-#include "engine/Vulkan/VulkanPipelineManager.hpp"
-
 #include <vector>
 #include <string>
 #include <cstdint>

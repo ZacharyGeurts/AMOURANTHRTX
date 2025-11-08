@@ -39,7 +39,7 @@ inline constexpr auto deobfuscate(auto h) noexcept { return decltype(h)(uint64_t
 
 // FORWARD DECLARATIONS — GLOBAL SPACE ONLY
 struct Context;
-class VulkanPipelineManager;
+#include "engine/Vulkan/VulkanPipelineManager.hpp"
 class VulkanRenderer;
 
 // TLAS BUILD STATE — RAII GODMODE — FENCE FOR ASYNC
@@ -634,11 +634,11 @@ VulkanRTX(std::shared_ptr<Context> ctx,
 // FIXED: No more implicit conversion errors — explicit .raw() for all Vk* from VulkanHandle
 // FIXED: Hybrid RTX + Raster at runtime — nexusScore = 0 = FULL RTX, 1 = FULL RASTER
 
-void VulkanRTX::recordRayTracingCommandsAdaptive(VkCommandBuffer cmdBuffer,
-                                                 VkExtent2D extent,
-                                                 VkImage outputImage,
-                                                 VkImageView outputImageView,
-                                                 float nexusScore) {
+void recordRayTracingCommandsAdaptive(VkCommandBuffer cmdBuffer,
+                                      VkExtent2D extent,
+                                      VkImage outputImage,
+                                      VkImageView outputImageView,
+                                      float nexusScore) {
     nexusScore = std::clamp(nexusScore, 0.0f, 1.0f);
     frameCounter_++;  // Local frame counter for RNG seed
 
@@ -693,12 +693,9 @@ void VulkanRTX::recordRayTracingCommandsAdaptive(VkCommandBuffer cmdBuffer,
         // FIXED: .raw() on all VulkanHandle from PipelineManager
         vkCmdBindPipeline(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineMgr_->graphicsPipeline.raw());
 
-        VkDescriptorSet fallbackSets[] = { 
-            ds_, 
-            pipelineMgr_->graphicsDescriptorSetLayout.raw() 
-        };
+        VkDescriptorSet fallbackSets[] = { ds_ };  // Reuse RTX ds_ as set 0 for graphics fallback
         vkCmdBindDescriptorSets(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                                pipelineMgr_->graphicsPipelineLayout.raw(), 0, 2, fallbackSets, 0, nullptr);
+                                pipelineMgr_->graphicsPipelineLayout.raw(), 0, 1, fallbackSets, 0, nullptr);
 
         LOG_INFO_CAT("VulkanRTX", "{}FALLBACK RASTER — nexusScore {:.2f} — SPEED MODE ENGAGED{}", 
                      Logging::Color::ARCTIC_CYAN, nexusScore, Logging::Color::RESET);

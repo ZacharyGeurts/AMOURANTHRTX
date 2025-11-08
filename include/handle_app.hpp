@@ -5,6 +5,7 @@
 // OWNERSHIP: Application owns renderer for entire lifetime
 // GROK PROTIP: "Never access private members. Use getRenderer()."
 // C++23: Full turbo — <format>, <ranges> (via VulkanCore), std::expected if needed
+// FIXED: No namespace — all global (VulkanRTX class, VulkanRenderer, Camera) — resolves redeclaration
 
 #pragma once
 #ifndef HANDLE_APP_HPP
@@ -19,12 +20,13 @@
 #include <string>
 
 #include "engine/SDL3/SDL3_init.hpp"
-#include "engine/camera.hpp"
-#include "engine/Vulkan/VulkanRenderer.hpp"
+#include "engine/camera.hpp"  // Global Camera
+#include "engine/Vulkan/VulkanRenderer.hpp"  // Global VulkanRenderer
 #include "engine/logging.hpp"
-#include "HandleInput.hpp"
+#include "HandleInput.hpp"  // Global HandleInput + Camera
 
-namespace VulkanRTX { class VulkanRenderer; }
+class VulkanRenderer;  // Global forward decl — no namespace
+class VulkanRTX;       // Global forward decl — no namespace
 
 class Application {
 public:
@@ -50,8 +52,8 @@ public:
      *   - setRenderer() called ONCE at end of main.cpp
      *   - getRenderer() is public, null-safe, used everywhere
      */
-    void setRenderer(std::unique_ptr<VulkanRTX::VulkanRenderer> renderer);
-    [[nodiscard]] VulkanRTX::VulkanRenderer* getRenderer() const;
+    void setRenderer(std::unique_ptr<VulkanRenderer> renderer);  // FIXED: Global VulkanRenderer — no VulkanRTX::
+    [[nodiscard]] VulkanRenderer* getRenderer() const;  // FIXED: Global VulkanRenderer*
 
     // USER CONTROLS
     void toggleTonemap();      // T / t
@@ -74,7 +76,7 @@ private:
     bool quit_{false};
 
     std::unique_ptr<SDL3Initializer::SDL3Initializer> sdl_;
-    std::unique_ptr<VulkanRTX::Camera> camera_;
+    std::unique_ptr<Camera> camera_;  // FIXED: Global Camera — no VulkanRTX::
     std::unique_ptr<HandleInput> inputHandler_;
 
     bool isFullscreen_{false};
@@ -89,7 +91,7 @@ private:
     std::chrono::steady_clock::time_point lastFrameTime_;
 
     // RENDERER — OWNED BY APPLICATION
-    std::unique_ptr<VulkanRTX::VulkanRenderer> renderer_;
+    std::unique_ptr<VulkanRenderer> renderer_;  // FIXED: Global VulkanRenderer — no VulkanRTX::
 };
 
 #endif // HANDLE_APP_HPP

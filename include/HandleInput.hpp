@@ -1,17 +1,18 @@
 // include/engine/input/HandleInput.hpp
 // AMOURANTH RTX Engine (C) 2025 – Input Handler Header
 // SDL3 | Full callback system | Camera integration | Ready for F key
+// FIXED: Namespace removed — global Camera forward decl — no conflict with VulkanRTX class
 
 #pragma once
 
 #include <SDL3/SDL.h>
 #include <functional>
 
-namespace VulkanRTX { class Camera; }
+class Camera;  // GLOBAL FORWARD DECL — NO NAMESPACE
 class Application;
 
 // ---------------------------------------------------------------------------
-//  Input handler – works with VulkanRTX::Camera
+//  Input handler – works with global Camera
 //  Supports: 1-9, H, T, O, F, mouse, gamepad, touch
 // ---------------------------------------------------------------------------
 class HandleInput {
@@ -26,7 +27,7 @@ public:
     using GamepadAxisCallback    = std::function<void(const SDL_GamepadAxisEvent&)>;
     using GamepadConnectCallback = std::function<void(bool, SDL_JoystickID, SDL_Gamepad*)>;
 
-    explicit HandleInput(VulkanRTX::Camera& camera);
+    explicit HandleInput(Camera& camera);
 
     void handleInput(Application& app);
 
@@ -54,7 +55,7 @@ public:
     void defaultGamepadConnectHandler(bool connected, SDL_JoystickID id, SDL_Gamepad* pad);
 
 private:
-    VulkanRTX::Camera& camera_;
+    Camera& camera_;  // GLOBAL Camera — NO VulkanRTX:: prefix
 
     KeyboardCallback       keyboardCallback_;
     MouseButtonCallback    mouseButtonCallback_;

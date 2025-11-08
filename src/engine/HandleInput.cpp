@@ -2,9 +2,10 @@
 // AMOURANTH RTX Engine (C) 2025 – Input Handler Implementation
 // SDL3 | Camera control | Full event dispatch | WASD + Mouse + Zoom
 // TRUTH: All key logic in handle_app.cpp → HandleInput only routes
+// FIXED: Global Camera — no VulkanRTX:: prefix — resolves incomplete type
 
 #include "HandleInput.hpp"
-#include "engine/camera.hpp"
+#include "engine/camera.hpp"  // Global Camera def
 #include "handle_app.hpp"
 #include <SDL3/SDL.h>
 #include <cmath>
@@ -13,7 +14,7 @@
 using namespace Logging::Color;
 
 // ---------------------------------------------------------------------
-HandleInput::HandleInput(VulkanRTX::Camera& camera)
+HandleInput::HandleInput(Camera& camera)  // FIXED: Global Camera&
     : camera_(camera)
 {
     LOG_INFO_CAT("INPUT", "{}HandleInput initialized with camera{}", EMERALD_GREEN, RESET);
@@ -71,7 +72,7 @@ void HandleInput::defaultMouseButtonHandler(const SDL_MouseButtonEvent&) {
 void HandleInput::defaultMouseMotionHandler(const SDL_MouseMotionEvent& mm) {
     if (mm.state & SDL_BUTTON_LMASK) {
         const float sensitivity = 0.1f;
-        camera_.rotate(
+        camera_.rotate(  // FIXED: Global Camera method
             -mm.xrel * sensitivity,
             -mm.yrel * sensitivity
         );
@@ -80,7 +81,7 @@ void HandleInput::defaultMouseMotionHandler(const SDL_MouseMotionEvent& mm) {
 
 void HandleInput::defaultMouseWheelHandler(const SDL_MouseWheelEvent& mw) {
     const float zoomFactor = (mw.y > 0) ? 0.9f : 1.1f;
-    camera_.zoom(zoomFactor);
+    camera_.zoom(zoomFactor);  // FIXED: Global Camera method
 }
 
 void HandleInput::defaultTextInputHandler(const SDL_TextInputEvent&) {}

@@ -5,6 +5,7 @@
 // FIXED: C++23 turbo — <format>, <chrono>, lambda captures, std::move everywhere
 // FIXED: char_traits / iterator errors → #include <string> + <iterator> explicitly (GCC 13 bug workaround)
 // GROK PROTIP: "Never raw loop. Use ranges when possible."
+// FIXED: No namespace — all global (VulkanRenderer, VulkanRTX, Camera, PerspectiveCamera)
 
 #include "handle_app.hpp"
 
@@ -23,7 +24,7 @@
 #include <string>        // ← FIX: explicit char_traits
 
 #include "engine/logging.hpp"
-#include "engine/Vulkan/VulkanRenderer.hpp"
+#include "engine/Vulkan/VulkanRenderer.hpp"  // Global VulkanRenderer
 #include "engine/Vulkan/VulkanSwapchainManager.hpp"
 #include "engine/SDL3/SDL3_init.hpp"
 #include "engine/Dispose.hpp"
@@ -96,7 +97,7 @@ void loadMesh(const std::string& filename, std::vector<glm::vec3>& vertices, std
 Application::Application(const char* title, int width, int height)
     : title_(title), width_(width), height_(height), mode_(1), quit_(false),
       sdl_(std::make_unique<SDL3Initializer::SDL3Initializer>(title_, width_, height_)),
-      camera_(std::make_unique<VulkanRTX::PerspectiveCamera>(60.0f, static_cast<float>(width) / height)),
+      camera_(std::make_unique<PerspectiveCamera>(60.0f, static_cast<float>(width) / height)),  // FIXED: Global PerspectiveCamera
       inputHandler_(nullptr), isFullscreen_(false), isMaximized_(false),
       lastFrameTime_(std::chrono::steady_clock::now()),
       showOverlay_(true), tonemapEnabled_(false)
@@ -117,14 +118,14 @@ Application::~Application() {
 // =============================================================================
 //  RENDERER OWNERSHIP
 // =============================================================================
-void Application::setRenderer(std::unique_ptr<VulkanRTX::VulkanRenderer> renderer) {
+void Application::setRenderer(std::unique_ptr<VulkanRenderer> renderer) {  // FIXED: Global VulkanRenderer
     renderer_ = std::move(renderer);
 
     loadMesh("assets/models/scene.obj", vertices_, indices_);
     renderer_->getBufferManager()->uploadMesh(vertices_.data(), vertices_.size(), indices_.data(), indices_.size());
 
     auto ctx = renderer_->getContext();
-    renderer_->getRTX().updateRTX(
+    renderer_->getRTX().updateRTX(  // FIXED: getRTX() returns global VulkanRTX
         ctx->physicalDevice,
         ctx->commandPool,
         ctx->graphicsQueue,
@@ -143,7 +144,7 @@ void Application::setRenderer(std::unique_ptr<VulkanRTX::VulkanRenderer> rendere
                  EMERALD_GREEN, RESET);
 }
 
-VulkanRTX::VulkanRenderer* Application::getRenderer() const {
+VulkanRenderer* Application::getRenderer() const {  // FIXED: Global VulkanRenderer*
     if (!renderer_) {
         LOG_ERROR_CAT("APP", "{}getRenderer(): null — call setRenderer() first{}", CRIMSON_MAGENTA, RESET);
         return nullptr;
@@ -155,7 +156,7 @@ VulkanRTX::VulkanRenderer* Application::getRenderer() const {
 //  INPUT INITIALIZATION (C++23 lambdas with [this, *] capture)
 // =============================================================================
 void Application::initializeInput() {
-    inputHandler_ = std::make_unique<HandleInput>(*camera_);
+    inputHandler_ = std::make_unique<HandleInput>(*camera_);  // FIXED: Global HandleInput + Camera&
     inputHandler_->setCallbacks(
         [this](const SDL_KeyboardEvent& key) {
             if (key.type == SDL_EVENT_KEY_DOWN) {
@@ -203,7 +204,7 @@ void Application::toggleFpsTarget() {
         r->toggleFpsTarget();
         LOG_INFO_CAT("INPUT", "{}FPS TARGET: {} FPS{}", 
                      PEACHES_AND_CREAM,
-                     r->getFpsTarget() == VulkanRTX::VulkanRenderer::FpsTarget::FPS_60 ? 60 : 120,
+                     r->getFpsTarget() == VulkanRenderer::FpsTarget::FPS_60 ? 60 : 120,  // FIXED: Global VulkanRenderer::FpsTarget
                      RESET);
     }
     updateWindowTitle();
@@ -214,7 +215,7 @@ void Application::toggleHypertrace() {
         r->toggleHypertrace();
         LOG_INFO_CAT("INPUT", "{}HYPERTRACE {}{}", 
                      CRIMSON_MAGENTA,
-                     r->getRTX().isHypertraceEnabled() ? "ON" : "OFF",
+                     r->getRTX().isHypertraceEnabled() ? "ON" : "OFF",  // FIXED: getRTX() → global VulkanRTX
                      RESET);
     }
     updateWindowTitle();
@@ -248,10 +249,10 @@ void Application::updateWindowTitle() {
     if (showOverlay_) {
         title += std::format(" | Mode {}", mode_);
         if (tonemapEnabled_) title += " (TONEMAP)";
-        if (auto* r = getRenderer(); r && r->getRTX().isHypertraceEnabled()) title += " (HYPERTRACE)";
+        if (auto* r = getRenderer(); r && r->getRTX().isHypertraceEnabled()) title += " (HYPERTRACE)";  // FIXED: getRTX() → global VulkanRTX
         if (auto* r = getRenderer()) {
             title += std::format(" ({} FPS)", 
-                r->getFpsTarget() == VulkanRTX::VulkanRenderer::FpsTarget::FPS_60 ? 60 : 120);
+                r->getFpsTarget() == VulkanRenderer::FpsTarget::FPS_60 ? 60 : 120);  // FIXED: Global VulkanRenderer::FpsTarget
         }
         title += " | 1-9=mode | H=HYPERTRACE | T=tonemap | O=hide | F=FPS | F11=FS | M=MAX";
     }
@@ -298,7 +299,7 @@ void Application::handleResize(int width, int height) {
 
     LOG_INFO_CAT("APP", "{}RESIZE → {}x{}{}", BRIGHT_PINKISH_PURPLE, width, height, RESET);
     width_ = width; height_ = height;
-    camera_->setAspectRatio(static_cast<float>(width_) / height_);
+    camera_->setAspectRatio(static_cast<float>(width_) / height_);  // FIXED: Global Camera
 
     if (auto* r = getRenderer()) {
         r->getSwapchainManager().recreateSwapchain(width_, height_);
@@ -338,7 +339,7 @@ void Application::run() {
         }
         if (quit_) break;
 
-        inputHandler_->handleInput(*this);
+        inputHandler_->handleInput(*this);  // FIXED: Global HandleInput
         render();
     }
 }
@@ -347,7 +348,7 @@ void Application::run() {
 //  RENDER
 // =============================================================================
 void Application::render() {
-    if (!getRenderer() || !camera_) return;
+    if (!getRenderer() || !camera_) return;  // FIXED: Global getRenderer(), camera_
     if (SDL_GetWindowFlags(sdl_->getWindow()) & SDL_WINDOW_MINIMIZED) {
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
         return;
@@ -357,8 +358,8 @@ void Application::render() {
     float delta = std::chrono::duration<float>(now - lastFrameTime_).count();
     lastFrameTime_ = now;
 
-    camera_->update(delta);
-    getRenderer()->renderFrame(*camera_, delta);
+    camera_->update(delta);  // FIXED: Global Camera
+    getRenderer()->renderFrame(*camera_, delta);  // FIXED: *camera_ → Camera&, renderFrame takes Camera&
     updateWindowTitle();
 }
 

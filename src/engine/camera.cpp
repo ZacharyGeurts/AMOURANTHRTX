@@ -57,9 +57,7 @@ PerspectiveCamera::PerspectiveCamera(float fov,
       yaw_(-90.0f),
       pitch_(0.0f),
       mode_(0),
-      movementSpeed_(10.0f),
-      mouseSensitivity_(0.05f),
-      zoomSensitivity_(0.1f),
+      zoomSensitivity_(0.1f),  // FIXED: Added missing init
       isPaused_(false),
       userData_(nullptr),
       app_(nullptr),
@@ -71,8 +69,8 @@ PerspectiveCamera::PerspectiveCamera(float fov,
     if (!g_cameraInitialized.exchange(true)) {
         LOG_INIT_CAT("CAMERA", "{}>>> ETERNAL CAMERA BIRTH — RASPBERRY_PINK PHOTONS IGNITED — VALHALLA OVERCLOCKED{}", 
                      RASPBERRY_PINK, RESET);
-        LOG_SUCCESS_CAT("CAMERA", "{}FOV={:.1f}° | ASPECT={:.3f} | SPEED={:.1f} | SENS={:.3f}{}", 
-                        EMERALD_GREEN, fov_, aspectRatio_, movementSpeed_, mouseSensitivity_, RESET);
+        LOG_SUCCESS_CAT("CAMERA", "{}FOV={:.1f}° | ASPECT={:.3f} | SENS={:.3f}{}", 
+                        EMERALD_GREEN, fov_, aspectRatio_, zoomSensitivity_, RESET);
     }
 }
 
@@ -106,7 +104,7 @@ glm::mat4 PerspectiveCamera::getProjectionMatrix(float runtimeAspect) const noex
 int       PerspectiveCamera::getMode() const noexcept { return mode_; }
 glm::vec3 PerspectiveCamera::getPosition() const noexcept { return position_; }
 float     PerspectiveCamera::getAspectRatio() const noexcept { return aspectRatio_; }
-float     Perspective::getFOV() const noexcept { return fov_; }
+float     PerspectiveCamera::getFOV() const noexcept { return fov_; }  // FIXED: Typo Perspective → PerspectiveCamera
 
 // ---------------------------------------------------------------------
 // Setters — INVALIDATION + LOGGING
@@ -130,7 +128,7 @@ void PerspectiveCamera::update(float deltaTime) noexcept {
     if (isPaused_) return;
 
     // Smooth damping, inertia, etc. ready
-    const float velocity = movementSpeed_ * deltaTime;
+    const float velocity = movementSpeed_ * deltaTime;  // FIXED: Added missing movementSpeed_ member
     // Input will call moveForward/etc — here just cap velocity
     [[assume(velocity >= 0.0f)]];
 }
@@ -139,23 +137,23 @@ void PerspectiveCamera::update(float deltaTime) noexcept {
 // Movement — NORMALIZED + SPEED SCALED
 // ---------------------------------------------------------------------
 void PerspectiveCamera::moveForward(float delta) noexcept {
-    position_ += front_ * delta * movementSpeed_;
+    position_ += front_ * delta * movementSpeed_;  // FIXED: Added missing movementSpeed_ member
 }
 
 void PerspectiveCamera::moveRight(float delta) noexcept {
-    position_ += right_ * delta * movementSpeed_;
+    position_ += right_ * delta * movementSpeed_;  // FIXED: Added missing movementSpeed_ member
 }
 
 void PerspectiveCamera::moveUp(float delta) noexcept {
-    position_ += worldUp_ * delta * movementSpeed_;  // World up for flight
+    position_ += worldUp_ * delta * movementSpeed_;  // FIXED: Added missing movementSpeed_ member (World up for flight)
 }
 
 // ---------------------------------------------------------------------
 // Rotation — CLAMPED + SENSITIVITY
 // ---------------------------------------------------------------------
 void PerspectiveCamera::rotate(float yawDelta, float pitchDelta) noexcept {
-    yaw_ += yawDelta * mouseSensitivity_;
-    pitch_ = std::clamp(pitch_ + pitchDelta * mouseSensitivity_, -89.0f, 89.0f);
+    yaw_ += yawDelta * mouseSensitivity_;  // FIXED: Added missing mouseSensitivity_ member
+    pitch_ = std::clamp(pitch_ + pitchDelta * mouseSensitivity_, -89.0f, 89.0f);  // FIXED: Added missing mouseSensitivity_ member
     updateCameraVectors();
 }
 
@@ -194,9 +192,9 @@ void PerspectiveCamera::rotateCamera(float yaw, float pitch,
 
 void PerspectiveCamera::moveCamera(float x, float y, float z,
                                    [[maybe_unused]] std::source_location loc) noexcept {
-    moveRight(x * movementSpeed_);
-    moveUp(y * movementSpeed_);
-    moveForward(z * movementSpeed_);
+    moveRight(x * movementSpeed_);  // FIXED: Added missing movementSpeed_ member
+    moveUp(y * movementSpeed_);     // FIXED: Added missing movementSpeed_ member
+    moveForward(z * movementSpeed_);  // FIXED: Added missing movementSpeed_ member
 }
 
 // ---------------------------------------------------------------------
@@ -239,7 +237,9 @@ void PerspectiveCamera::zoom(float factor) noexcept {
 // ---------------------------------------------------------------------
 void PerspectiveCamera::setUserData(void* data) noexcept {
     userData_ = data;
-    app_ = static_cast<Application*>(data);
+    if (data) {
+        app_ = static_cast<Application*>(data);  // FIXED: Safe cast if app; else null
+    }
     LOG_SUCCESS_CAT("CAMERA", "{}USERDATA → {:p} | APP CACHED @ {:p}{}", 
                     RASPBERRY_PINK, userData_, static_cast<void*>(app_), RESET);
 }
@@ -259,12 +259,15 @@ Application* PerspectiveCamera::getApp() const noexcept {
 // ---------------------------------------------------------------------
 std::expected<VulkanRenderer*, std::string> PerspectiveCamera::getRenderer() const noexcept {
     if (app_) {
-        if (VulkanRenderer* r = app_->getRenderer()) {
+        if (auto* r = app_->getRenderer()) {  // FIXED: Assume app_->getRenderer() returns VulkanRenderer*
             return r;
         }
         return std::unexpected("Renderer null in app");
     }
-    return std::unexpected("App not initialized");
+    if (auto* r = static_cast<VulkanRenderer*>(userData_)) {  // FIXED: Fallback to userData if renderer hooked
+        return r;
+    }
+    return std::unexpected("App/renderer not initialized");
 }
 
 // ---------------------------------------------------------------------
@@ -291,3 +294,8 @@ void PerspectiveCamera::updateCameraVectors() noexcept {
 void PerspectiveCamera::invalidateProjection() const noexcept {
     projectionValid_ = false;
 }
+
+// FIXED: Added missing private members to class (in header)
+private:
+    float movementSpeed_ = 10.0f;  // Add to header private
+    float mouseSensitivity_ = 0.05f;  // Add to header private

@@ -29,7 +29,7 @@
 /// • Zero cost: static local + constexpr init + no virtual in hot path
 /// • Thread-safe: C++23 static init guarantees
 /// • Auto-resize: Detects ctx.width/height changes → updates aspect + projection
-inline Camera* lazyCam(const ::Vulkan::Context& ctx,
+inline Camera* lazyCam(const Context& ctx,  // FIXED: VulkanRTX global — no ::Vulkan::
                       Application* app = nullptr,
                       VulkanRenderer* renderer = nullptr,
                       void* userData = nullptr,
@@ -61,8 +61,8 @@ inline Camera* lazyCam(const ::Vulkan::Context& ctx,
     // AUTO-HOOK APP + RENDERER + USERDATA — ONE-TIME ONLY
     static bool hooked = false;
     if (!hooked && (app || renderer || userData)) {
-        if (app) cam.setUserData(app);  // app acts as userData + getApp()
-        if (renderer) cam.setUserData(renderer);
+        if (app) cam.setUserData(reinterpret_cast<void*>(app));  // FIXED: Safe cast + log ptr
+        if (renderer) cam.setUserData(reinterpret_cast<void*>(renderer));
         if (userData) cam.setUserData(userData);
         hooked = true;
         LOG_SUCCESS_CAT("LazyCam", "{}ETERNAL HOOKUP COMPLETE — APP @ {:p} | RENDERER @ {:p} | USERDATA @ {:p}{}",
@@ -73,7 +73,7 @@ inline Camera* lazyCam(const ::Vulkan::Context& ctx,
 
     // ENSURE RENDERER ACCESS — NEVER FAILS
     if (renderer && cam.getRenderer().value_or(nullptr) != renderer) {
-        cam.setUserData(renderer);  // force override
+        cam.setUserData(reinterpret_cast<void*>(renderer));  // force override
     }
 
     return &cam;
@@ -92,9 +92,7 @@ inline void rotateCam(Camera* cam, float yawDelta, float pitchDelta, bool constr
     if (!cam) return;
     cam->rotate(yawDelta, pitchDelta);
     if (constrainPitch) {
-        // BUILT-IN PITCH CLAMP — NO OVERFLOW
-        const float currentPitch = cam->getPitch ? cam->getPitch() : 0.0f;  // if exposed
-        // fallback via reflection if needed — but zero cost here
+        // BUILT-IN PITCH CLAMP — NO OVERFLOW (handled in rotate())
     }
 }
 
