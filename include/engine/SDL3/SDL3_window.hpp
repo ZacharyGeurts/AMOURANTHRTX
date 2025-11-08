@@ -8,6 +8,7 @@
 #include <SDL3/SDL.h>
 #include <memory>
 #include <vector>
+#include <unordered_set>
 
 // GLOBAL — NO NAMESPACE — IMMORTAL
 class VulkanRenderer;  // ← GLOBAL FORWARD DECLARE

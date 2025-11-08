@@ -12,6 +12,7 @@
 #include <string>
 #include <string_view>
 #include <source_location>  // ← FIXED
+#include <unordered_set>
 
 namespace SDL3Initializer {
 

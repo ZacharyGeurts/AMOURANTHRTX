@@ -11,6 +11,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <unordered_set>
 
 namespace SDL3Initializer {
 

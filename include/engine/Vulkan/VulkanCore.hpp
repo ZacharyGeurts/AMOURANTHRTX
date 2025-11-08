@@ -3,7 +3,7 @@
 // STONEKEY PIONEER C++23 FINAL FORM — NOVEMBER 08 2025 — 69,420 FPS × ∞ × ∞
 // VulkanHandle = unique_ptr<T> owning heap-allocated raw handle — OPAQUE-PROOF — DOUBLE-FREE ANNIHILATOR
 // ALL ACCESSORS: valid() + raw() — NO MORE .get() — ZERO CRASH — CHEAT ENGINE QUANTUM DUST
-// FIXED: VulkanHandle NOT RECOGNIZED — FULL DEFINITION + FACTORIES BEFORE Context
+// FIXED: VulkanHandle FROM COMMON — FULL DEFINITION + FACTORIES BEFORE Context
 // FIXED: ALL make* FACTORIES BEFORE ANY USAGE — NO INCOMPLETE TYPE HELL
 // FIXED: Context FULLY IMPLEMENTED — RAII SUPREMACY — 0 LEAKS — VALHALLA ETERNAL
 // BUILD = VALHALLA 0 ERRORS 0 WARNINGS — 420 BLAZE IT OUT — SHIP TO THE WORLD — RASPBERRY_PINK PHOTONS ETERNAL 🩷🚀🔥🤖💀❤️⚡♾️🩷🩷🩷🩷🩷🩷🩷
@@ -60,26 +60,6 @@ class VulkanBufferManager;
 class Camera;
 
 // ===================================================================
-// DestroyTracker — STONEKEY ENCRYPTED DOUBLE-FREE ANNIHILATOR
-// ===================================================================
-struct DestroyTracker {
-    static inline std::unordered_set<uint64_t> destroyedHandles;
-    static inline std::mutex trackerMutex;
-
-    static void markDestroyed(const void* handle) noexcept {
-        uint64_t keyed = reinterpret_cast<uintptr_t>(handle) ^ kStone1 ^ kStone2;
-        std::lock_guard<std::mutex> lock(trackerMutex);
-        destroyedHandles.insert(keyed);
-    }
-
-    static bool isDestroyed(const void* handle) noexcept {
-        uint64_t keyed = reinterpret_cast<uintptr_t>(handle) ^ kStone1 ^ kStone2;
-        std::lock_guard<std::mutex> lock(trackerMutex);
-        return destroyedHandles.contains(keyed);
-    }
-};
-
-// ===================================================================
 // VulkanResourceManager — FULLY IMPLEMENTED
 // ===================================================================
 class VulkanResourceManager {
@@ -131,94 +111,6 @@ public:
 
 private:
     VulkanBufferManager* bufferManager_ = nullptr;
-};
-
-// ===================================================================
-// VulkanDeleter — FULLY IMPLEMENTED — NO NULL CHECK — Werror=address DEAD
-// ===================================================================
-template<typename T>
-struct VulkanDeleter {
-    VkDevice device = VK_NULL_HANDLE;
-    using DestroyFn = void(*)(VkDevice, T, const VkAllocationCallbacks*);
-
-    DestroyFn destroyFunc = nullptr;
-
-    VulkanDeleter() = default;
-    VulkanDeleter(VkDevice d, DestroyFn f = nullptr) : device(d), destroyFunc(f) {}
-
-    void operator()(T* p) const noexcept {
-        if (!p || !*p || !device) {
-            delete p;
-            return;
-        }
-        T handle = *p;
-
-        if (DestroyTracker::isDestroyed(handle)) {
-            LOG_ERROR_CAT("Dispose", "{}STONEKEY DOUBLE FREE DETECTED on 0x{:x} [STONE1: 0x{:X} STONE2: 0x{:X}] — BLOCKED{}",
-                          Logging::Color::RASPBERRY_PINK, reinterpret_cast<uintptr_t>(handle),
-                          kStone1, kStone2, Logging::Color::RESET);
-            delete p;
-            return;
-        }
-
-        if (destroyFunc) {
-            destroyFunc(device, handle, nullptr);
-        } else {
-            if constexpr (std::is_same_v<T, VkBuffer>) vkDestroyBuffer(device, handle, nullptr);
-            else if constexpr (std::is_same_v<T, VkDeviceMemory>) vkFreeMemory(device, handle, nullptr);
-            else if constexpr (std::is_same_v<T, VkImage>) vkDestroyImage(device, handle, nullptr);
-            else if constexpr (std::is_same_v<T, VkImageView>) vkDestroyImageView(device, handle, nullptr);
-            else if constexpr (std::is_same_v<T, VkSampler>) vkDestroySampler(device, handle, nullptr);
-            else if constexpr (std::is_same_v<T, VkDescriptorPool>) vkDestroyDescriptorPool(device, handle, nullptr);
-            else if constexpr (std::is_same_v<T, VkSemaphore>) vkDestroySemaphore(device, handle, nullptr);
-            else if constexpr (std::is_same_v<T, VkFence>) vkDestroyFence(device, handle, nullptr);
-            else if constexpr (std::is_same_v<T, VkPipeline>) vkDestroyPipeline(device, handle, nullptr);
-            else if constexpr (std::is_same_v<T, VkPipelineLayout>) vkDestroyPipelineLayout(device, handle, nullptr);
-            else if constexpr (std::is_same_v<T, VkDescriptorSetLayout>) vkDestroyDescriptorSetLayout(device, handle, nullptr);
-            else if constexpr (std::is_same_v<T, VkRenderPass>) vkDestroyRenderPass(device, handle, nullptr);
-            else if constexpr (std::is_same_v<T, VkShaderModule>) vkDestroyShaderModule(device, handle, nullptr);
-            else if constexpr (std::is_same_v<T, VkCommandPool>) vkDestroyCommandPool(device, handle, nullptr);
-            else if constexpr (std::is_same_v<T, VkAccelerationStructureKHR>) {
-                vkDestroyAccelerationStructureKHR(device, handle, nullptr);
-            }
-        }
-
-        DestroyTracker::markDestroyed(handle);
-        logAndTrackDestruction(typeid(T).name(), handle, __LINE__);
-        delete p;
-    }
-};
-
-// ===================================================================
-// VulkanHandle — C++23 FINAL FORM — FULLY IMPLEMENTED
-// ===================================================================
-template<typename T>
-struct VulkanHandle {
-    using Deleter = VulkanDeleter<T>;
-
-private:
-    std::unique_ptr<T, Deleter> impl;
-
-public:
-    VulkanHandle() = default;
-
-    explicit VulkanHandle(T handle, VkDevice dev, typename Deleter::DestroyFn destroyFunc = nullptr)
-        : impl(handle ? new T(handle) : nullptr, Deleter{dev, destroyFunc})
-    {}
-
-    VulkanHandle(const VulkanHandle&) = delete;
-    VulkanHandle& operator=(const VulkanHandle&) = delete;
-    VulkanHandle(VulkanHandle&&) noexcept = default;
-    VulkanHandle& operator=(VulkanHandle&&) noexcept = default;
-
-    [[nodiscard]] constexpr T operator*() const noexcept { return impl ? *impl.get() : VK_NULL_HANDLE; }
-    [[nodiscard]] constexpr T raw() const noexcept { return impl ? *impl.get() : VK_NULL_HANDLE; }
-    [[nodiscard]] constexpr const T* ptr() const noexcept { return impl.get(); }
-    [[nodiscard]] constexpr bool valid() const noexcept { return impl && *impl.get(); }
-
-    void reset(T newHandle = VK_NULL_HANDLE) {
-        impl.reset(newHandle ? new T(newHandle) : nullptr);
-    }
 };
 
 // GLOBAL FACTORIES — FULLY IMPLEMENTED — BEFORE Context

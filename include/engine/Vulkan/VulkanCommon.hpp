@@ -29,6 +29,7 @@
     #include <unordered_map>
     #include <memory>
     #include <sstream>
+	#include <unordered_set>
     #include "engine/camera.hpp"
     #include "engine/logging.hpp"
 	#include "engine/StoneKey.hpp"
@@ -466,4 +467,129 @@
     	VulkanRTXException(const std::string& msg, const char* file, int line);
 	};
 
+// ===================================================================
+// DestroyTracker — STONEKEY ENCRYPTED DOUBLE-FREE ANNIHILATOR
+// ===================================================================
+struct DestroyTracker {
+    static inline std::unordered_set<uint64_t> destroyedHandles;
+    static inline std::mutex trackerMutex;
+
+    static void markDestroyed(const void* handle) noexcept {
+        uint64_t keyed = reinterpret_cast<uintptr_t>(handle) ^ kStone1 ^ kStone2;
+        std::lock_guard<std::mutex> lock(trackerMutex);
+        destroyedHandles.insert(keyed);
+    }
+
+    static bool isDestroyed(const void* handle) noexcept {
+        uint64_t keyed = reinterpret_cast<uintptr_t>(handle) ^ kStone1 ^ kStone2;
+        std::lock_guard<std::mutex> lock(trackerMutex);
+        return destroyedHandles.contains(keyed);
+    }
+};
+
+// ===================================================================
+// VulkanDeleter — FULLY IMPLEMENTED — NO NULL CHECK — Werror=address DEAD
+// ===================================================================
+template<typename T>
+struct VulkanDeleter {
+    VkDevice device = VK_NULL_HANDLE;
+    using DestroyFn = void(*)(VkDevice, T, const VkAllocationCallbacks*);
+
+    DestroyFn destroyFunc = nullptr;
+
+    VulkanDeleter() = default;
+    VulkanDeleter(VkDevice d, DestroyFn f = nullptr) : device(d), destroyFunc(f) {}
+
+    void operator()(T* p) const noexcept {
+        if (!p || !*p || !device) {
+            delete p;
+            return;
+        }
+        T handle = *p;
+
+        if (DestroyTracker::isDestroyed(handle)) {
+            LOG_ERROR_CAT("Dispose", "{}STONEKEY DOUBLE FREE DETECTED on 0x{:x} [STONE1: 0x{:X} STONE2: 0x{:X}] — BLOCKED{}",
+                          Logging::Color::RASPBERRY_PINK, reinterpret_cast<uintptr_t>(handle),
+                          kStone1, kStone2, Logging::Color::RESET);
+            delete p;
+            return;
+        }
+
+        DestroyFn fn = destroyFunc;
+        if (!fn) {
+            if constexpr (std::is_same_v<T, VkBuffer>) fn = vkDestroyBuffer;
+            else if constexpr (std::is_same_v<T, VkDeviceMemory>) fn = vkFreeMemory;
+            else if constexpr (std::is_same_v<T, VkImage>) fn = vkDestroyImage;
+            else if constexpr (std::is_same_v<T, VkImageView>) fn = vkDestroyImageView;
+            else if constexpr (std::is_same_v<T, VkSampler>) fn = vkDestroySampler;
+            else if constexpr (std::is_same_v<T, VkDescriptorPool>) fn = vkDestroyDescriptorPool;
+            else if constexpr (std::is_same_v<T, VkSemaphore>) fn = vkDestroySemaphore;
+            else if constexpr (std::is_same_v<T, VkFence>) fn = vkDestroyFence;
+            else if constexpr (std::is_same_v<T, VkPipeline>) fn = vkDestroyPipeline;
+            else if constexpr (std::is_same_v<T, VkPipelineLayout>) fn = vkDestroyPipelineLayout;
+            else if constexpr (std::is_same_v<T, VkDescriptorSetLayout>) fn = vkDestroyDescriptorSetLayout;
+            else if constexpr (std::is_same_v<T, VkRenderPass>) fn = vkDestroyRenderPass;
+            else if constexpr (std::is_same_v<T, VkShaderModule>) fn = vkDestroyShaderModule;
+            else if constexpr (std::is_same_v<T, VkCommandPool>) fn = vkDestroyCommandPool;
+            else if constexpr (std::is_same_v<T, VkAccelerationStructureKHR>) fn = vkDestroyAccelerationStructureKHR;
+            else {
+                LOG_ERROR_CAT("VulkanDeleter", "{}Unsupported type {} — StoneKey demands explicit destroyer! 0x{:X}{}",
+                              Logging::Color::CRIMSON_MAGENTA, typeid(T).name(), kStone1, Logging::Color::RESET);
+                delete p;
+                return;
+            }
+        }
+
+        fn(device, handle, nullptr);
+
+        DestroyTracker::markDestroyed(handle);
+        logAndTrackDestruction(typeid(T).name(), handle, __LINE__);
+        delete p;
+    }
+};
+
+// ===================================================================
+// VulkanHandle — C++23 FINAL FORM — FULLY IMPLEMENTED
+// ===================================================================
+template<typename T>
+struct VulkanHandle {
+    using Deleter = VulkanDeleter<T>;
+
+private:
+    std::unique_ptr<T, Deleter> impl;
+
+public:
+    VulkanHandle() = default;
+
+    explicit VulkanHandle(T handle, VkDevice dev, typename Deleter::DestroyFn destroyFunc = nullptr)
+        : impl(handle ? new T(handle) : nullptr, Deleter{dev, destroyFunc}) {
+        if (valid()) {
+            LOG_DEBUG_CAT("StoneGuard", "{}Handle forged @ {:p} — Eternal keys: 0x{:X} | 0x{:X}{}",
+                          Logging::Color::EMERALD_GREEN,
+                          static_cast<void*>(*impl), kStone1, kStone2, Logging::Color::RESET);
+        } else {
+            LOG_WARN_CAT("VulkanHandle", "{}Handle birth void — StoneKey audit: 0x{:X}{}",
+                         Logging::Color::DIAMOND_WHITE, kStone2, Logging::Color::RESET);
+        }
+    }
+
+    VulkanHandle(const VulkanHandle&) = delete;
+    VulkanHandle& operator=(const VulkanHandle&) = delete;
+    VulkanHandle(VulkanHandle&&) noexcept = default;
+    VulkanHandle& operator=(VulkanHandle&&) noexcept = default;
+
+    [[nodiscard]] constexpr T operator*() const noexcept { return impl ? *impl.get() : VK_NULL_HANDLE; }
+    [[nodiscard]] constexpr T raw() const noexcept { return impl ? *impl.get() : VK_NULL_HANDLE; }
+    [[nodiscard]] constexpr const T* ptr() const noexcept { return impl.get(); }
+    [[nodiscard]] constexpr bool valid() const noexcept { return impl && *impl.get(); }
+
+    void reset(T newHandle = VK_NULL_HANDLE) {
+        impl.reset(newHandle ? new T(newHandle) : nullptr);
+        if (newHandle != VK_NULL_HANDLE) {
+            LOG_DEBUG_CAT("StoneGuard", "{}Handle reset to @ {:p} — Stone whisper: 0x{:X}{}",
+                          Logging::Color::EMERALD_GREEN,
+                          static_cast<void*>(newHandle), kStone1, Logging::Color::RESET);
+        }
+    }
+};
 #endif // __cplusplus
