@@ -4,12 +4,11 @@
 // TRUTH: All key logic in handle_app.cpp → HandleInput only routes
 // FIXED: Global Camera — no VulkanRTX:: prefix — resolves incomplete type
 
-#include "HandleInput.hpp"
-#include "engine/camera.hpp"  // Global Camera def
+#include "engine/GLOBAL/HandleInput.hpp"
+#include "engine/GLOBAL/camera.hpp"  // Global Camera def
 #include "handle_app.hpp"
 #include <SDL3/SDL.h>
 #include <cmath>
-#include "engine/logging.hpp"
 
 using namespace Logging::Color;
 

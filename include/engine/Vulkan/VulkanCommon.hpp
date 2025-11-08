@@ -45,6 +45,7 @@
     #include "../GLOBAL/StoneKey.hpp"
     #include "../GLOBAL/SwapchainManager.hpp"
     #include "../GLOBAL/BufferManager.hpp"
+	#include "engine/Vulkan/VulkanRenderer.hpp"  // Global VulkanRenderer
 
 	class MyPooledBufferMgr : public VulkanBufferManager {
     // custom pooling, stats, etc.

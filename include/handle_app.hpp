@@ -19,11 +19,8 @@
 #include <functional>
 #include <string>
 
+#include "engine/VulkanCommon.hpp"
 #include "engine/SDL3/SDL3_init.hpp"
-#include "engine/camera.hpp"  // Global Camera
-#include "engine/Vulkan/VulkanRenderer.hpp"  // Global VulkanRenderer
-#include "engine/logging.hpp"
-#include "HandleInput.hpp"  // Global HandleInput + Camera
 
 class VulkanRenderer;  // Global forward decl — no namespace
 class VulkanRTX;       // Global forward decl — no namespace
