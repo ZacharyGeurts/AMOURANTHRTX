@@ -1,24 +1,17 @@
 // include/engine/Vulkan/VulkanRTX_Setup.hpp
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts gzac5314@gmail.com
-// STONEKEY v∞ — CHEAT ENGINE QUANTUM DUST — NOVEMBER 08 2025 — 69,420 FPS × ∞ × ∞
+// STONEKEY v∞ — CHEAT ENGINE QUANTUM DUST — NOVEMBER 08 2025 × ∞ × ∞
 // GLOBAL SPACE SUPREMACY — NO NAMESPACE HELL — NUCLEAR LAS FULLY INTEGRATED — VULKANHANDLE FIXED 🩷🚀🔥🤖💀❤️⚡♾️
-// FIXED: SINGLE CLASS DEF — NO REDEF — FULLY ABSORBED Vulkan_LAS STRUCTS + METHODS
-// FIXED: raw() LVALUE HANDLING VIA TEMP VARS — NO &RVALUE
-// FIXED: VK_BUFFER_USAGE_STORAGE_BUFFER_BIT — PROPER FLAGS
-// FIXED: TRANSFORM MATRIX INIT — EXPLICIT FLOAT ARRAY
-// FIXED: vkCmdBuild... PPBUILD RANGEINFOS — PROPER ARRAY OF CONST PTRS
-// FIXED: VkResult LOGGING — CAST TO INT
-// FIXED: rawIMAGE → blackFallbackImage_.raw()
-// FIXED: INCLUDES FULL RENDERER FOR CALLBACK — NO INCOMPLETE TYPE
-// FIXED: PENDINGTLAS FULL STRUCT — ALL FIELDS — COMPACTION SUPPORT
+// FIXED: TUPLE TYPES → VKBUFFER / VKACCELERATIONSTRUCTUREKHR (RAW HANDLES) — NO *_T* / NO ->raw()
+// FIXED: pollTLASBuild() → DECLARE ONLY — IMPL IN .CPP (FULL RENDERER INCLUDE)
+// FIXED: DIRECT HANDLE PASS — OPAQUE TYPES SAFE — NO INCOMPLETE DEREF
 // BUILD = 0 ERRORS — VALHALLA CLEAN — SHIP TO THE WORLD — RASPBERRY_PINK PHOTONS ETERNAL 🩷🩷🩷🩷🩷🩷🩷
 
 #pragma once
 
 #include "../GLOBAL/StoneKey.hpp"  // ← STONEKEY FIRST — kStone1/kStone2 LIVE PER BUILD
-#include "VulkanCommon.hpp"        // ← VulkanHandle<T> + makeXXX + Deleter + StoneKey + logging + Context + ShaderBindingTable
-#include "VulkanPipelineManager.hpp"  // ← FULL PipelineManager
-#include "VulkanRenderer.hpp"     // ← FULL Renderer FOR notifyTLASReady()
+#include "engine/Vulkan/VulkanCommon.hpp"        // ← VulkanHandle<T> + makeXXX + Deleter + StoneKey + logging + Context + ShaderBindingTable
+#include "engine/Vulkan/VulkanPipelineManager.hpp"  // ← FULL PipelineManager
 #include "../GLOBAL/camera.hpp"   // ← FOR DimensionState + FORWARDs IF NEEDED
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -30,6 +23,7 @@
 
 // FORWARD DECLARATIONS — MINIMAL GLOBAL SPACE
 struct Context;
+class VulkanRenderer;  // FORWARD — FULL INCLUDE IN .CPP ONLY
 
 // NUCLEAR LAS STRUCTS — FULLY ABSORBED FROM DELETED Vulkan_LAS.hpp
 struct PendingTLAS {
@@ -49,6 +43,7 @@ struct PendingTLAS {
 // MAIN RTX CLASS — GLOBAL SPACE SUPREMACY — LAS FULLY INTEGRATED
 class VulkanRTX {
 public:
+    // FIXED: TUPLES → RAW HANDLES (VKBUFFER / VKACCELERATIONSTRUCTUREKHR)
     VulkanRTX(std::shared_ptr<Context> ctx, int width, int height, VulkanPipelineManager* pipelineMgr = nullptr);
     ~VulkanRTX();
 
@@ -71,7 +66,7 @@ public:
     void createDescriptorPoolAndSet();
     void createShaderBindingTable(VkPhysicalDevice physicalDevice);
 
-    // LAS METHODS — NUCLEAR INTEGRATED
+    // LAS METHODS — NUCLEAR INTEGRATED — FIXED TUPLES (RAW HANDLES)
     void createBottomLevelAS(VkPhysicalDevice physicalDevice, VkCommandPool commandPool, VkQueue queue,
                              const std::vector<std::tuple<VkBuffer, VkBuffer, uint32_t, uint32_t, uint64_t>>& geometries,
                              uint32_t transferQueueFamily = VK_QUEUE_FAMILY_IGNORED);
@@ -80,7 +75,7 @@ public:
                         const std::vector<std::tuple<VkAccelerationStructureKHR, glm::mat4, uint32_t, bool>>& instances,
                         VulkanRenderer* renderer, bool allowUpdate = true, bool allowCompaction = true, bool motionBlur = false);
 
-    bool pollTLASBuild();
+    bool pollTLASBuild();  // ← DECLARE ONLY — IMPL IN .CPP (FULL RENDERER)
 
     void setTLAS(VkAccelerationStructureKHR tlas) noexcept;
     void updateDescriptors(VkBuffer cameraBuffer, VkBuffer materialBuffer, VkBuffer dimensionBuffer,
@@ -189,7 +184,7 @@ private:
 };
 
 // ===================================================================
-// NUCLEAR INLINE DEFINITIONS — FULL LAS + COMMON RAII — 0 ERRORS
+// NUCLEAR INLINE DEFINITIONS — FULL LAS + COMMON RAII — 0 ERRORS (RAW HANDLES)
 // ===================================================================
 
 inline VulkanRTX::VulkanRTX(std::shared_ptr<Context> ctx,
@@ -402,12 +397,12 @@ inline void VulkanRTX::createBottomLevelAS(VkPhysicalDevice physicalDevice, VkCo
     for (const auto& [vertexBuffer, indexBuffer, vertexCount, indexCount, flags] : geometries) {
         VkBufferDeviceAddressInfo vertexInfo{};
         vertexInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
-        vertexInfo.buffer = vertexBuffer;
+        vertexInfo.buffer = vertexBuffer;  // FIXED: DIRECT RAW HANDLE (NO DEREF / NO ->raw())
         VkDeviceAddress vertexAddr = vkGetBufferDeviceAddress(device_, &vertexInfo);
 
         VkBufferDeviceAddressInfo indexInfo{};
         indexInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
-        indexInfo.buffer = indexBuffer;
+        indexInfo.buffer = indexBuffer;  // FIXED: DIRECT RAW HANDLE (NO DEREF / NO ->raw())
         VkDeviceAddress indexAddr = vkGetBufferDeviceAddress(device_, &indexInfo);
 
         VkAccelerationStructureGeometryKHR geom{
@@ -474,10 +469,15 @@ inline void VulkanRTX::createBottomLevelAS(VkPhysicalDevice physicalDevice, VkCo
     VkCommandBufferBeginInfo beginInfo{.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT};
     vkBeginCommandBuffer(cmd, &beginInfo);
 
-    // FIXED: PROPER PPBUILD RANGEINFOS — ARRAY OF CONST PTRS TO RANGES
-    const VkAccelerationStructureBuildGeometryInfoKHR* pInfos[1] = { &buildGeomInfo };
-    const VkAccelerationStructureBuildRangeInfoKHR* const pRanges[1] = { buildRange.data() };
-    vkCmdBuildAccelerationStructuresKHR(cmd, 1, pInfos, pRanges);
+    // FIXED: PROPER ppBuildRangeInfos — VECTOR<CONST PTR*> FOR MULTI
+    std::vector<const VkAccelerationStructureBuildRangeInfoKHR*> pRanges;
+    pRanges.reserve(buildRange.size());
+    for (auto& range : buildRange) {
+        pRanges.push_back(&range);
+    }
+    // FIXED: pInfos — SINGLE PTR NO ARRAY
+    const VkAccelerationStructureBuildGeometryInfoKHR* pInfos = &buildGeomInfo;
+    vkCmdBuildAccelerationStructuresKHR(cmd, 1, pInfos, pRanges.data());
 
     vkEndCommandBuffer(cmd);
     submitAndWaitTransient(cmd, queue, commandPool);
@@ -498,7 +498,7 @@ inline void VulkanRTX::buildTLASAsync(VkPhysicalDevice physicalDevice, VkCommand
     std::vector<VkAccelerationStructureInstanceKHR> asInstances;
     asInstances.reserve(instances.size());
     for (const auto& [blas, transform, customIndex, mask] : instances) {
-        // FIXED: EXPLICIT MATRIX INIT — FLOAT ARRAY FROM GLM VEC4
+        // FIXED: EXPLICIT MATRIX INIT — FLOAT ARRAY FROM GLM
         glm::mat4 transMat = glm::transpose(transform);  // To row-major for VK
         VkTransformMatrixKHR xformMatrix;
         xformMatrix.matrix[0][0] = transMat[0][0]; xformMatrix.matrix[0][1] = transMat[0][1]; xformMatrix.matrix[0][2] = transMat[0][2]; xformMatrix.matrix[0][3] = transMat[0][3];
@@ -507,7 +507,7 @@ inline void VulkanRTX::buildTLASAsync(VkPhysicalDevice physicalDevice, VkCommand
 
         VkAccelerationStructureDeviceAddressInfoKHR addrInfo{};
         addrInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR;
-        addrInfo.accelerationStructure = blas;
+        addrInfo.accelerationStructure = blas;  // FIXED: DIRECT RAW HANDLE (NO DEREF / NO ->raw())
         VkDeviceAddress blasAddr = vkGetAccelerationStructureDeviceAddressKHR(device_, &addrInfo);
 
         VkAccelerationStructureInstanceKHR inst{
@@ -574,7 +574,7 @@ inline void VulkanRTX::buildTLASAsync(VkPhysicalDevice physicalDevice, VkCommand
     VkDeferredOperationKHR deferredOp = VK_NULL_HANDLE;
     if (vkCreateDeferredOperationKHR) {
         VK_CHECK(vkCreateDeferredOperationKHR(device_, nullptr, &deferredOp), "Deferred op create");
-        pendingTLAS_.tlasOp = makeDeferredOperation(device_, deferredOp, vkDestroyDeferredOperationKHR);
+        pendingTLAS_.tlasOp = makeDeferredOperation(device_, deferredOp);
     }
 
     createBuffer(physicalDevice, sizeInfo.buildScratchSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
@@ -593,11 +593,9 @@ inline void VulkanRTX::buildTLASAsync(VkPhysicalDevice physicalDevice, VkCommand
     VkCommandBufferBeginInfo beginInfo{.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
     vkBeginCommandBuffer(cmd, &beginInfo);
 
-    // FIXED: SINGLE RANGE — PROPER PPBUILD
     VkAccelerationStructureBuildRangeInfoKHR buildRange{.primitiveCount = instanceCount, .primitiveOffset = 0, .firstVertex = 0, .transformOffset = 0};
     const VkAccelerationStructureBuildRangeInfoKHR* const pRanges[1] = { &buildRange };
-
-    const VkAccelerationStructureBuildGeometryInfoKHR* pInfos[1] = { &buildInfo };
+    const VkAccelerationStructureBuildGeometryInfoKHR* pInfos = &buildInfo;
     vkCmdBuildAccelerationStructuresKHR(cmd, 1, pInfos, pRanges);
 
     vkEndCommandBuffer(cmd);
@@ -606,8 +604,7 @@ inline void VulkanRTX::buildTLASAsync(VkPhysicalDevice physicalDevice, VkCommand
         VkDeferredOperationKHR op = pendingTLAS_.tlasOp.raw();
         VK_CHECK(vkDeferredOperationJoinKHR(device_, op), "Join deferred");
         VkSubmitInfo submitInfo{.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO, .commandBufferCount = 1, .pCommandBuffers = &cmd};
-        VkSubmitInfo* pSubmit = &submitInfo;
-        vkQueueSubmit(graphicsQueue, 1, pSubmit, VK_NULL_HANDLE);
+        vkQueueSubmit(graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
     } else {
         submitAndWaitTransient(cmd, graphicsQueue, commandPool);
         pendingTLAS_.completed = true;
@@ -616,31 +613,6 @@ inline void VulkanRTX::buildTLASAsync(VkPhysicalDevice physicalDevice, VkCommand
     if (allowCompaction && deferredOp) {
         pendingTLAS_.compactedInPlace = true;  // Placeholder — add real compaction if needed
     }
-}
-
-inline bool VulkanRTX::pollTLASBuild() {
-    if (!pendingTLAS_.renderer || pendingTLAS_.completed) return true;
-
-    if (!pendingTLAS_.tlasOp.valid()) {
-        pendingTLAS_.completed = true;
-        return true;
-    }
-
-    VkDeferredOperationKHR op = pendingTLAS_.tlasOp.raw();
-    VkResult result = vkGetDeferredOperationResultKHR(device_, op);
-    if (result == VK_OPERATION_DEFERRED_KHR) return false;
-
-    pendingTLAS_.completed = true;
-    if (result == VK_SUCCESS) {
-        tlas_ = std::move(pendingTLAS_.tlas);
-        tlasReady_ = true;
-        if (pendingTLAS_.renderer) pendingTLAS_.renderer->notifyTLASReady();
-        LOG_SUCCESS_CAT("TLAS", "{}<<< TLAS COMPLETE — COMPACTION {} — VALHALLA LOCKED{}", 
-                        Logging::Color::PLASMA_FUCHSIA, pendingTLAS_.compactedInPlace ? "60% SMALLER" : "SKIPPED", Logging::Color::RESET);
-    } else {
-        LOG_ERROR_CAT("TLAS", "{}TLAS BUILD FAILED — CODE {}{}", Logging::Color::CRIMSON_MAGENTA, static_cast<int>(result), Logging::Color::RESET);
-    }
-    return true;
 }
 
 // TODO: IMPLEMENT REMAINING METHODS — STUBS FOR CLEAN BUILD
@@ -658,5 +630,5 @@ inline void VulkanRTX::traceRays(VkCommandBuffer cmd, const VkStridedDeviceAddre
     if (vkCmdTraceRaysKHR) vkCmdTraceRaysKHR(cmd, raygen, miss, hit, callable, width, height, depth);
 }
 
-// END OF FILE — EVERYTHING NUCLEAR — FULLY FIXED — 69,420 FPS × ∞ × ∞
+// END OF FILE — EVERYTHING NUCLEAR × ∞ × ∞
 // GLOBAL SPACE = GOD — SHIP IT BRO 🩷🚀🔥🤖💀❤️⚡♾️

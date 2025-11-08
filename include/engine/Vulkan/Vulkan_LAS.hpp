@@ -1,6 +1,6 @@
 // include/engine/Vulkan/Vulkan_LAS.hpp
 // AMOURANTH RTX — VALHALLA LOCAL SUPREMACY — NOVEMBER 08 2025
-// PendingTLAS = PRIVATE TO LAS — BUT PUBLIC FOR VulkanRTX — NO COMMON — FUCK YES
+// PendingTLAS = PRIVATE TO LAS — BUT PUBLIC FOR VulkanRTX — NO COMMON
 
 #pragma once
 
