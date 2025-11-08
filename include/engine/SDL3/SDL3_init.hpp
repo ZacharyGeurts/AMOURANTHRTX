@@ -1,17 +1,16 @@
 // include/engine/SDL3/SDL3_init.hpp
-// AMOURANTH RTX Engine – SDL3 + Vulkan bootstrap (October 2025)
+// AMOURANTH RTX Engine © 2025 by Zachary Geurts
+// SDL3 + Vulkan bootstrap — FULL C++23 — NOVEMBER 08 2025
+// RASPBERRY_PINK FOR DISPOSE ONLY
 
 #pragma once
-#ifndef SDL3_INIT_HPP
-#define SDL3_INIT_HPP
 
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
 #include <vulkan/vulkan.h>
-
 #include <memory>
 #include <string>
-#include <set>
+#include <vector>
 
 namespace SDL3Initializer {
 
@@ -26,39 +25,31 @@ struct VulkanSurfaceDeleter {
 };
 
 using VulkanInstancePtr = std::unique_ptr<VkInstance_T, VulkanInstanceDeleter>;
-using VulkanSurfacePtr  = std::unique_ptr<VkSurfaceKHR_T, VulkanSurfaceDeleter>;
+using VulkanSurfacePtr = std::unique_ptr<VkSurfaceKHR_T, VulkanSurfaceDeleter>;
 
 class SDL3Initializer {
 public:
-    // 3-arg: default Vulkan-ready window
     SDL3Initializer(const std::string& title, int width, int height);
-    // 4-arg: explicit flags
     SDL3Initializer(const std::string& title, int width, int height, Uint32 flags);
     ~SDL3Initializer() = default;
 
-    [[nodiscard]] VkInstance   getInstance() const { return instance_.get(); }
-    [[nodiscard]] VkSurfaceKHR getSurface()  const { return surface_.get(); }
-    [[nodiscard]] SDL_Window*  getWindow()   const { return window_; }
+    SDL3Initializer(const SDL3Initializer&) = delete;
+    SDL3Initializer& operator=(const SDL3Initializer&) = delete;
+
+    [[nodiscard]] VkInstance   getInstance() const noexcept { return instance_.get(); }
+    [[nodiscard]] VkSurfaceKHR getSurface()  const noexcept { return surface_.get(); }
+    [[nodiscard]] SDL_Window*  getWindow()   const noexcept { return window_; }
 
     bool shouldQuit() const;
     void pollEvents();
 
 private:
-    SDL_Window*       window_ = nullptr;
+    SDL_Window* window_ = nullptr;
     VulkanInstancePtr instance_;
-    VulkanSurfacePtr  surface_;
+    VulkanSurfacePtr surface_;
+
+    static std::string vkResultToString(VkResult result);
+    static std::string formatExtensions(const std::vector<const char*>& exts);
 };
 
-inline std::string formatSet(const std::set<std::string>& s) {
-    std::string r = "{";
-    for (auto it = s.begin(); it != s.end(); ++it) {
-        r += *it;
-        if (std::next(it) != s.end()) r += ", ";
-    }
-    r += "}";
-    return r;
-}
-
 } // namespace SDL3Initializer
-
-#endif // SDL3_INIT_HPP
