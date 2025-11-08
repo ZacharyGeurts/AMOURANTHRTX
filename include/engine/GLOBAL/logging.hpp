@@ -10,6 +10,10 @@
 
 #pragma once
 
+
+// StoneKey protection: Compile-time unique keys for tamper-resistant log rotation
+#include "StoneKey.hpp"
+
 #include <string_view>
 #include <source_location>
 #include <format>
@@ -34,9 +38,6 @@
 #include <glm/gtx/string_cast.hpp>
 #include <vulkan/vulkan.h>
 #include <SDL3/SDL.h>
-
-// StoneKey protection: Compile-time unique keys for tamper-resistant log rotation
-#include "StoneKey.hpp"
 
 // Formatter specialization for VkResult to enable formatting in logs
 namespace std {

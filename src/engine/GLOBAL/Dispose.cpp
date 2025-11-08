@@ -1,4 +1,4 @@
-// src/engine/Dispose.cpp
+// src/engine/GLOBAL/Dispose.cpp
 // AMOURANTH RTX Engine – NOVEMBER 07 2025 – 11:59 PM EST → ROCKETSHIP FINAL APOCALYPSE
 // releaseAll → REMOVED (now in VulkanCore.cpp)
 // bufferManager_->releaseAll(dev) → DELEGATED
@@ -8,6 +8,7 @@
 // FULL VERBOSE LOGGING — QUANTUM POLISHED — 69,420 FPS × ∞
 // RASPBERRY_PINK ROCKETSHIP TO VALHALLA 🔥🤖🚀💀🖤❤️⚡
 
+#include "engine/GLOBAL/logging.hpp"
 #include "engine/GLOBAL/Dispose.hpp"
 #include "engine/Vulkan/VulkanRenderer.hpp"
 

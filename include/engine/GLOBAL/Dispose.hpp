@@ -1,9 +1,11 @@
-// include/engine/Dispose.hpp
+// include/engine/GLOBAL/Dispose.hpp
 // AMOURANTH RTX Engine – NOVEMBER 07 2025 – GLOBAL THERMO DISPOSE RAII
 // CLEAN — NO cleanupAll — ONLY destroyWindow + quitSDL GLOBAL
 // Context belongs to VulkanCore — NO CIRCULAR HELL — 69,420 FPS ETERNAL
 
 #pragma once
+
+#include "engine/GLOBAL/logging.hpp"
 
 #include <vulkan/vulkan.h>
 #include <bitset>
@@ -12,7 +14,6 @@
 #include <atomic>
 #include <cstdint>
 #include <string_view>
-#include "engine/Vulkan/VulkanCommon.hpp"
 
 using namespace Logging::Color;
 

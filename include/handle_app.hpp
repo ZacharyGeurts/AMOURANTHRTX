@@ -8,8 +8,6 @@
 // FIXED: No namespace — all global (VulkanRTX class, VulkanRenderer, Camera) — resolves redeclaration
 
 #pragma once
-#ifndef HANDLE_APP_HPP
-#define HANDLE_APP_HPP
 
 #include <SDL3/SDL.h>
 #include <glm/glm.hpp>
@@ -18,8 +16,9 @@
 #include <chrono>
 #include <functional>
 #include <string>
+#include <expected>
 
-#include "engine/VulkanCommon.hpp"
+//#include "engine/Vulkan/VulkanCommon.hpp"
 #include "engine/SDL3/SDL3_init.hpp"
 
 class VulkanRenderer;  // Global forward decl — no namespace
@@ -73,8 +72,6 @@ private:
     bool quit_{false};
 
     std::unique_ptr<SDL3Initializer::SDL3Initializer> sdl_;
-    std::unique_ptr<Camera> camera_;  // FIXED: Global Camera — no VulkanRTX::
-    std::unique_ptr<HandleInput> inputHandler_;
 
     bool isFullscreen_{false};
     bool isMaximized_{false};
@@ -90,5 +87,3 @@ private:
     // RENDERER — OWNED BY APPLICATION
     std::unique_ptr<VulkanRenderer> renderer_;  // FIXED: Global VulkanRenderer — no VulkanRTX::
 };
-
-#endif // HANDLE_APP_HPP

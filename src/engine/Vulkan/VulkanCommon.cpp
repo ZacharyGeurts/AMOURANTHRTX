@@ -8,8 +8,6 @@
 // SHIP TO INFINITY — RASPBERRY_PINK PHOTONS ETERNAL 🩷🚀🔥🤖💀❤️⚡♾️🩷
 
 #include "engine/Vulkan/VulkanCommon.hpp"
-#include "engine/Vulkan/VulkanSwapchainManager.hpp"
-#include "engine/logging.hpp"
 
 #include <sstream>
 #include <thread>

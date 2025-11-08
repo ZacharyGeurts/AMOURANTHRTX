@@ -7,6 +7,9 @@
 // GROK PROTIP: "Never raw loop. Use ranges when possible."
 // FIXED: No namespace — all global (VulkanRenderer, VulkanRTX, Camera, PerspectiveCamera)
 
+#include "StoneKey.hpp"
+#include "engine/GLOBAL/Dispose.hpp"
+#include "engine/GLOBAL/logging.hpp"
 #include "handle_app.hpp"
 
 #include <SDL3/SDL.h>
@@ -23,11 +26,10 @@
 #include <iterator>      // ← FIX: explicit for GCC 13 char_traits
 #include <string>        // ← FIX: explicit char_traits
 
-#include "engine/logging.hpp"
 #include "engine/Vulkan/VulkanRenderer.hpp"  // Global VulkanRenderer
 #include "engine/Vulkan/VulkanSwapchainManager.hpp"
 #include "engine/SDL3/SDL3_init.hpp"
-#include "engine/Dispose.hpp"
+
 #include "engine/utils.hpp"
 #include "engine/core.hpp"
 

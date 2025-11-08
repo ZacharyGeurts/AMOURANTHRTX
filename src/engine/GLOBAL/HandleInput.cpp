@@ -4,8 +4,10 @@
 // TRUTH: All key logic in handle_app.cpp → HandleInput only routes
 // FIXED: Global Camera — no VulkanRTX:: prefix — resolves incomplete type
 
+#include "engine/GLOBAL/StoneKey.hpp"
 #include "engine/GLOBAL/HandleInput.hpp"
 #include "engine/GLOBAL/camera.hpp"  // Global Camera def
+#include "engine/GLOBAL/logging.hpp"  // Global Camera def
 #include "handle_app.hpp"
 #include <SDL3/SDL.h>
 #include <cmath>
