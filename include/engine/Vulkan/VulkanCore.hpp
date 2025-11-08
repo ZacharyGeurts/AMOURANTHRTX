@@ -18,7 +18,7 @@
 #include "engine/camera.hpp"
 #include "engine/logging.hpp"
 #include "engine/Dispose.hpp"
-#include "StoneKey.hpp"
+#include "engine/StoneKey.hpp"
 
 #include <vector>
 #include <string>

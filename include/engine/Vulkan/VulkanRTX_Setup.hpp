@@ -13,7 +13,7 @@
 #include "engine/Dispose.hpp"
 #include "engine/core.hpp"
 #include "engine/logging.hpp"
-#include "StoneKey.hpp"
+#include "engine/StoneKey.hpp"
 
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_beta.h>  // Beta extensions for full RT + deferred (if needed, but using fence for async)

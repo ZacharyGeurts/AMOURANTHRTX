@@ -5,7 +5,7 @@
 
 #include "engine/Vulkan/VulkanCore.hpp"
 #include "engine/logging.hpp"
-#include "StoneKey.hpp"
+#include "engine/StoneKey.hpp"
 
 #include <sstream>
 #include <thread>
