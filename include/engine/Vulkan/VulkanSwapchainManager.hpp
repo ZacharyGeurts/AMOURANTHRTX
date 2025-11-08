@@ -4,7 +4,6 @@
 
 #pragma once
 
-#include "engine/StoneKey.hpp"
 #include "engine/Vulkan/VulkanCommon.hpp"
 #include <vulkan/vulkan.h>
 #include <vector>

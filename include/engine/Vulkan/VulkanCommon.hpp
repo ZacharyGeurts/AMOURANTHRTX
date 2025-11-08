@@ -31,6 +31,7 @@
     #include <sstream>
     #include "engine/camera.hpp"
     #include "engine/logging.hpp"
+	#include "engine/StoneKey.hpp"
 
     #define VK_CHECK(result, msg) \
         do { \
@@ -442,5 +443,27 @@
 
         throw std::runtime_error("Shader file missing: " + logicalName);
     }
+
+	// DESCRIPTOR BINDINGS — ENUM DANCE 🔥
+	enum class DescriptorBindings : uint32_t {
+    	TLAS               = 0,
+    	StorageImage       = 1,
+    	CameraUBO          = 2,
+    	MaterialSSBO       = 3,
+    	DimensionDataSSBO  = 4,
+    	EnvMap             = 5,
+    	AccumImage         = 6,
+    	DensityVolume      = 7,
+    	GDepth             = 8,
+	    GNormal            = 9,
+    	AlphaTex           = 10
+	};
+
+	// EXCEPTION
+	class VulkanRTXException : public std::runtime_error {
+	public:
+    	explicit VulkanRTXException(const std::string& msg);
+    	VulkanRTXException(const std::string& msg, const char* file, int line);
+	};
 
 #endif // __cplusplus

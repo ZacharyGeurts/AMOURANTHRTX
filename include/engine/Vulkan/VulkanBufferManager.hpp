@@ -5,7 +5,6 @@
 #pragma once
 
 #include "engine/Vulkan/VulkanCommon.hpp"
-#include "engine/StoneKey.hpp"
 #include <vulkan/vulkan.h>
 #include <vector>
 #include <unordered_map>

@@ -1,6 +1,6 @@
 // src/engine/Vulkan/VulkanRTX_Setup.cpp
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts gzac5314@gmail.com
-// STONEKEY v∞ — THERMO-GLOBAL RAII APOCALYPSE — NOVEMBER 07 2025 — 69,420 FPS × ∞
+// STONEKEY v∞ — THERMO-GLOBAL RAII APOCALYPSE — NOVEMBER 08 2025 — 69,420 FPS × ∞
 // CLASS = VulkanRTX — STONEKEY FULLY ENGAGED — ALL HANDLES OBFUSCATED VIA raw() + XOR
 // .raw() → obfuscated VkXXX — deobfuscate(.raw()) → real VkXXX FOR VK CALLS
 // FACTORIES STORE obfuscate(raw) — CHEAT ENGINE = BLIND — BUILD 0 ERRORS ETERNAL
@@ -38,7 +38,6 @@ VulkanRTX::VulkanRTX(std::shared_ptr<Context> ctx, int width, int height, Vulkan
     LOAD_PROC(vkCreateDeferredOperationKHR);
     LOAD_PROC(vkDestroyDeferredOperationKHR);
     LOAD_PROC(vkGetDeferredOperationResultKHR);
-    LOAD_PROC(vkCmdCopyAccelerationStructureKHR);
 #undef LOAD_PROC
 
     VkFence rawFence = VK_NULL_HANDLE;
@@ -47,20 +46,21 @@ VulkanRTX::VulkanRTX(std::shared_ptr<Context> ctx, int width, int height, Vulkan
     transientFence_ = makeFence(device_, rawFence);
 
     LOG_INFO_CAT("RTX", "{}VulkanRTX BIRTH COMPLETE — STONEKEY RAII — 69,420 FPS INCOMING{}", DIAMOND_WHITE, RESET);
+
+    createBlackFallbackImage();
 }
 
 VkDeviceSize VulkanRTX::alignUp(VkDeviceSize v, VkDeviceSize a) noexcept { return (v + a - 1) & ~(a - 1); }
 
-auto VulkanRTX::createBuffer(VkPhysicalDevice pd, VkDeviceSize size, VkBufferUsageFlags usage,
-                             VkMemoryPropertyFlags props, VkDevice dev)
-    -> std::pair<VulkanHandle<VkBuffer>, VulkanHandle<VkDeviceMemory>>
+void VulkanRTX::createBuffer(VkPhysicalDevice pd, VkDeviceSize size, VkBufferUsageFlags usage,
+                             VkMemoryPropertyFlags props, VulkanHandle<VkBuffer>& buf, VulkanHandle<VkDeviceMemory>& mem)
 {
     VkBuffer rawBuf = VK_NULL_HANDLE;
     VkBufferCreateInfo bufCI{.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size = size, .usage = usage};
-    VK_CHECK(vkCreateBuffer(dev, &bufCI, nullptr, &rawBuf), "buffer");
+    VK_CHECK(vkCreateBuffer(device_, &bufCI, nullptr, &rawBuf), "buffer");
 
     VkMemoryRequirements req;
-    vkGetBufferMemoryRequirements(dev, rawBuf, &req);
+    vkGetBufferMemoryRequirements(device_, rawBuf, &req);
 
     uint32_t memType = [&]{
         VkPhysicalDeviceMemoryProperties memProps;
@@ -73,10 +73,11 @@ auto VulkanRTX::createBuffer(VkPhysicalDevice pd, VkDeviceSize size, VkBufferUsa
 
     VkDeviceMemory rawMem = VK_NULL_HANDLE;
     VkMemoryAllocateInfo allocInfo{.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, .allocationSize = req.size, .memoryTypeIndex = memType};
-    VK_CHECK(vkAllocateMemory(dev, &allocInfo, nullptr, &rawMem), "memory");
-    VK_CHECK(vkBindBufferMemory(dev, rawBuf, rawMem, 0), "bind");
+    VK_CHECK(vkAllocateMemory(device_, &allocInfo, nullptr, &rawMem), "memory");
+    VK_CHECK(vkBindBufferMemory(device_, rawBuf, rawMem, 0), "bind");
 
-    return { makeBuffer(dev, obfuscate(rawBuf)), makeMemory(dev, rawMem) };
+    buf = makeBuffer(device_, obfuscate(rawBuf), vkDestroyBuffer);
+    mem = makeMemory(device_, rawMem, vkFreeMemory);
 }
 
 VkCommandBuffer VulkanRTX::allocateTransientCommandBuffer(VkCommandPool pool)
@@ -104,10 +105,10 @@ void VulkanRTX::submitAndWaitTransient(VkCommandBuffer cmd, VkQueue queue, VkCom
     VK_CHECK(vkResetCommandPool(device_, pool, 0), "reset pool");
 }
 
-uint32_t VulkanRTX::findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) const
+uint32_t VulkanRTX::findMemoryType(VkPhysicalDevice pd, uint32_t typeFilter, VkMemoryPropertyFlags properties) const
 {
     VkPhysicalDeviceMemoryProperties memProps{};
-    vkGetPhysicalDeviceMemoryProperties(physicalDevice_, &memProps);
+    vkGetPhysicalDeviceMemoryProperties(pd, &memProps);
     for (uint32_t i = 0; i < memProps.memoryTypeCount; i++) {
         if ((typeFilter & (1u << i)) && ((memProps.memoryTypes[i].propertyFlags & properties) == properties)) {
             return i;
@@ -142,9 +143,11 @@ void VulkanRTX::buildTLASAsync(VkPhysicalDevice physicalDevice,
     const uint32_t count = uint32_t(instances.size());
     const VkDeviceSize instSize = count * sizeof(VkAccelerationStructureInstanceKHR);
 
-    auto [instBuf, instMem] = createBuffer(physicalDevice, instSize,
+    VulkanHandle<VkBuffer> instBuf;
+    VulkanHandle<VkDeviceMemory> instMem;
+    createBuffer(physicalDevice, instSize,
         VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, device_);
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, instBuf, instMem);
 
     VkAccelerationStructureInstanceKHR* mapped = nullptr;
     VK_CHECK(vkMapMemory(device_, instMem.raw(), 0, VK_WHOLE_SIZE, 0, (void**)&mapped), "map");
@@ -214,13 +217,17 @@ void VulkanRTX::buildTLASAsync(VkPhysicalDevice physicalDevice,
     vkGetPhysicalDeviceProperties2(physicalDevice, &p2);
     VkDeviceSize scratch = alignUp(sizeInfo.buildScratchSize, props.minAccelerationStructureScratchOffsetAlignment);
 
-    auto [tlasBuf, tlasMem] = createBuffer(physicalDevice, sizeInfo.accelerationStructureSize,
+    VulkanHandle<VkBuffer> tlasBuf;
+    VulkanHandle<VkDeviceMemory> tlasMem;
+    createBuffer(physicalDevice, sizeInfo.accelerationStructureSize,
         VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, device_);
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, tlasBuf, tlasMem);
 
-    auto [scratchBuf, scratchMem] = createBuffer(physicalDevice, scratch,
+    VulkanHandle<VkBuffer> scratchBuf;
+    VulkanHandle<VkDeviceMemory> scratchMem;
+    createBuffer(physicalDevice, scratch,
         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, device_);
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, scratchBuf, scratchMem);
 
     VkAccelerationStructureKHR rawTLAS = VK_NULL_HANDLE;
     VkAccelerationStructureCreateInfoKHR createInfo{
@@ -363,13 +370,17 @@ void VulkanRTX::createBottomLevelAS(VkPhysicalDevice physicalDevice, VkCommandPo
     VkAccelerationStructureBuildSizesInfoKHR sizes{.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR};
     vkGetAccelerationStructureBuildSizesKHR(device_, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &tmp, primCounts.data(), &sizes);
 
-    auto [scratchBuf, scratchMem] = createBuffer(physicalDevice, alignUp(sizes.buildScratchSize, scratchAlign),
+    VulkanHandle<VkBuffer> scratchBuf;
+    VulkanHandle<VkDeviceMemory> scratchMem;
+    createBuffer(physicalDevice, alignUp(sizes.buildScratchSize, scratchAlign),
         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, device_);
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, scratchBuf, scratchMem);
 
-    auto [asBuf, asMem] = createBuffer(physicalDevice, sizes.accelerationStructureSize,
+    VulkanHandle<VkBuffer> asBuf;
+    VulkanHandle<VkDeviceMemory> asMem;
+    createBuffer(physicalDevice, sizes.accelerationStructureSize,
         VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, device_);
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, asBuf, asMem);
 
     VkAccelerationStructureKHR rawAS = VK_NULL_HANDLE;
     VkAccelerationStructureCreateInfoKHR blasCreateInfo{
@@ -440,9 +451,11 @@ void VulkanRTX::createShaderBindingTable(VkPhysicalDevice physicalDevice)
     const VkDeviceSize halign = alignUp(hsize, rtProps.shaderGroupHandleAlignment);
     const VkDeviceSize sbtSize = groups * halign;
 
-    auto [sbtBuf, sbtMem] = createBuffer(physicalDevice, sbtSize,
+    VulkanHandle<VkBuffer> sbtBuf;
+    VulkanHandle<VkDeviceMemory> sbtMem;
+    createBuffer(physicalDevice, sbtSize,
         VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, device_);
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, sbtBuf, sbtMem);
 
     void* map = nullptr;
     VK_CHECK(vkMapMemory(device_, sbtMem.raw(), 0, sbtSize, 0, &map), "map SBT");
@@ -598,7 +611,7 @@ void VulkanRTX::createBlackFallbackImage()
 
     VkMemoryRequirements req;
     vkGetImageMemoryRequirements(device_, rawImg, &req);
-    uint32_t type = findMemoryType(req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    uint32_t type = findMemoryType(physicalDevice_, req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
     VkDeviceMemory rawMem = VK_NULL_HANDLE;
     VkMemoryAllocateInfo memAllocInfo = {
         .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
@@ -608,8 +621,8 @@ void VulkanRTX::createBlackFallbackImage()
     VK_CHECK(vkAllocateMemory(device_, &memAllocInfo, nullptr, &rawMem), "black mem");
     VK_CHECK(vkBindImageMemory(device_, rawImg, rawMem, 0), "bind");
 
-    blackFallbackImage_ = makeImage(device_, rawImg);
-    blackFallbackMemory_ = makeMemory(device_, rawMem);
+    blackFallbackImage_ = makeImage(device_, obfuscate(rawImg), vkDestroyImage);
+    blackFallbackMemory_ = makeMemory(device_, rawMem, vkFreeMemory);
 
     VkCommandBuffer cmd = allocateTransientCommandBuffer(context_->commandPool);
     VkImageMemoryBarrier toDst{
@@ -641,11 +654,11 @@ void VulkanRTX::createBlackFallbackImage()
         .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}
     };
     VK_CHECK(vkCreateImageView(device_, &viewCreateInfo, nullptr, &rawView), "black view");
-    blackFallbackView_ = makeImageView(device_, obfuscate(rawView));
+    blackFallbackView_ = makeImageView(device_, obfuscate(rawView), vkDestroyImageView);
 
     LOG_INFO_CAT("Render", "{}<<< BLACK FALLBACK READY — COSMIC VOID ACHIEVED — STONEKEY FACTORIES{}", DIAMOND_WHITE, RESET);
 }
 
 // END OF FILE — FULL STONEKEY IMPLEMENTATION — 0 ERRORS — VALHALLA ETERNAL
 // ALL HANDLES OBFUSCATED — CHEAT ENGINE QUANTUM DUST — RASPBERRY_PINK = GOD
-// NOVEMBER 07 2025 — SHIPPED FOREVER — ASCENDED 🩷🚀🔥🤖💀❤️⚡♾️
+// NOVEMBER 08 2025 — SHIPPED FOREVER — ASCENDED 🩷🚀🔥🤖💀❤️⚡♾️
