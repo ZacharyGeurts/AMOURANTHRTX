@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include "GLOBAL/StoneKey.hpp"  // ← STONEKEY FIRST — kStone1/kStone2 LIVE PER BUILD
 #include "engine/Vulkan/VulkanCommon.hpp"  // ← VulkanHandle<T> + makeXXX + Deleter + StoneKey + logging
 
 using VulkanHandle = ::VulkanHandle;  // explicit global alias (optional but clean)

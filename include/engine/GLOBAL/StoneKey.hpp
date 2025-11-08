@@ -1,4 +1,4 @@
-// include/engine/StoneKey.hpp
+// include/engine/GLOBAL/StoneKey.hpp
 // AMOURANTH RTX — VALHALLA EDITION — NOVEMBER 08 2025
 // COMPILE-TIME CRYPTOGRAPHIC KEY GENERATOR — PROFESSIONAL GRADE
 // Rebuild produces unique keys based on time, date, file path, and compiler metadata

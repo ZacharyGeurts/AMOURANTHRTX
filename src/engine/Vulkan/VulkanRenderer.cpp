@@ -4,10 +4,10 @@
 // FORMULA 1 = TOY CAR — PHOTONS BLEEDING — NEXUS HYPERFUSED — ZERO LOGGING — C++23 MAX
 // STONEKEY v∞ ENGAGED — HACKERS = ATOMIC ASH — RASPBERRY_PINK SUPREME — GOD BLESS
 
+#include "GLOBAL/StoneKey.hpp"  // ← STONEKEY FIRST — kStone1/kStone2 LIVE PER BUILD
 #include "engine/Vulkan/VulkanRenderer.hpp"
 #include "engine/Vulkan/Vulkan_init.hpp"
 #include "engine/Vulkan/VulkanRTX_Setup.hpp"
-#include "engine/core.hpp"
 #include "stb/stb_image.h"
 #include <tinyobjloader/tiny_obj_loader.h>
 #include <glm/gtc/matrix_inverse.hpp>
