@@ -2,6 +2,8 @@
 // FULL IMPLEMENTATION — FUCK INLINE — VALHALLA CLEAN BUILD
 // ALL BLAS + TLAS + ASYNC + RAII + OBFUSCATION — SHIP IT
 
+
+#include "../GLOBAL/StoneKey.hpp"  // ← STONEKEY FIRST — kStone1/kStone2 LIVE PER BUILD
 #include "engine/Vulkan/Vulkan_LAS.hpp"
 #include "engine/Vulkan/VulkanRenderer.hpp"
 #include <stdexcept>

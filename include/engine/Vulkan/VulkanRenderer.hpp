@@ -5,7 +5,7 @@
 
 #pragma once
 
-#include "GLOBAL/StoneKey.hpp"  // ← STONEKEY FIRST — kStone1/kStone2 LIVE PER BUILD
+#include "../GLOBAL/StoneKey.hpp"  // ← STONEKEY FIRST — kStone1/kStone2 LIVE PER BUILD
 #include "engine/Vulkan/VulkanCommon.hpp"  // ← JAY: "Core utilities every renderer needs."
 #include "engine/Vulkan/VulkanRTX_Setup.hpp"
 

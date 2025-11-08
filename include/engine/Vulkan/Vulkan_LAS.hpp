@@ -6,9 +6,7 @@
 
 #pragma once
 
-#include "GLOBAL/StoneKey.hpp"  // ← STONEKEY FIRST — kStone1/kStone2 LIVE PER BUILD
-#include "engine/Vulkan/VulkanCore.hpp"
-#include "engine/logging.hpp"
+#include "../GLOBAL/StoneKey.hpp"  // ← STONEKEY FIRST — kStone1/kStone2 LIVE PER BUILD
 #include <vulkan/vulkan.h>
 #include <glm/glm.hpp>
 #include <vector>
