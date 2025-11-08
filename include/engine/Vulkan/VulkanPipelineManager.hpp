@@ -1,13 +1,13 @@
 // include/engine/Vulkan/VulkanPipelineManager.hpp
 // AMOURANTH RTX — NEXUS EDITION — GPU-DRIVEN 12,000+ FPS — VALHALLA UNBREACHABLE
-// STONEKEY v∞ — ALL HANDLES ENCRYPTED — RECLASS = COSMIC GARBAGE — NOVEMBER 07 2025
-// LEANED: NO REDEFINITIONS — DEPENDS ON VulkanCore.hpp for VulkanHandle, Context, Factories
-// PUBLIC RAII HANDLES + context_ — VulkanRTX uses .raw()
-// BUILD 0 ERRORS — 420 BLAZED OUT — RASPBERRY_PINK SUPREMACY 🩷🚀🔥🤖💀❤️⚡♾️
+// STONEKEY v∞ — ALL HANDLES ENCRYPTED — RECLASS = COSMIC GARBAGE — NOVEMBER 08 2025
+// FULLY IMPLEMENTED — NO STUBS — REINTERPRET_CAST SAFE — RASPBERRY_PINK ETERNAL 🩷🚀🔥🤖💀❤️⚡♾️
 
 #pragma once
 
-#include "engine/Vulkan/VulkanCore.hpp"  // VulkanHandle, factories, Context, cleanupAll
+#include "engine/Vulkan/VulkanCore.hpp"
+#include "engine/Vulkan/VulkanCommon.hpp"
+#include "engine/StoneKey.hpp"
 
 class VulkanRTX;
 class VulkanRenderer;
@@ -37,7 +37,7 @@ public:
     void updateRayTracingDescriptorSet(VkDescriptorSet ds, VkAccelerationStructureKHR tlas);
     void logFrameTimeIfSlow(std::chrono::steady_clock::time_point start);
 
-    // ENCRYPTED GETTERS — QUANTUM DUST
+    // STONEKEYED GETTERS — HACKERS SEE GARBAGE
     [[nodiscard]] uint64_t getRayTracingPipeline() const noexcept { return encrypt(rayTracingPipeline_); }
     [[nodiscard]] uint64_t getComputePipeline() const noexcept { return encrypt(computePipeline_); }
     [[nodiscard]] uint64_t getNexusPipeline() const noexcept { return encrypt(nexusPipeline_); }
@@ -48,27 +48,34 @@ public:
 
     VkDescriptorSet computeDescriptorSet_ = VK_NULL_HANDLE;
 
-    // PUBLIC RAII HANDLES — VulkanRTX uses .raw()
+    // PUBLIC RAII HANDLES — .raw() READY FOR VulkanRTX
     VulkanHandle<VkPipeline> graphicsPipeline;
     VulkanHandle<VkPipelineLayout> graphicsPipelineLayout;
     VulkanHandle<VkDescriptorSetLayout> graphicsDescriptorSetLayout;
 
-    // PUBLIC FOR VulkanRTX
     VkCommandPool transientPool_ = VK_NULL_HANDLE;
     VkQueue graphicsQueue_ = VK_NULL_HANDLE;
 
-    // PUBLIC context_ — VulkanRTX accesses device/physicalDevice
     Context& context_;
 
 private:
+    std::string findShaderPath(const std::string& name) const;
+
     template<typename T>
-    static constexpr uint64_t encrypt(T raw) noexcept {
+    [[nodiscard]] static inline constexpr uint64_t encrypt(T raw) noexcept {
         return reinterpret_cast<uint64_t>(raw) ^ kStone1 ^ kStone2;
     }
+
     template<typename T>
-    static constexpr T decrypt(uint64_t enc) noexcept {
+    [[nodiscard]] static inline constexpr T decrypt(uint64_t enc) noexcept {
         return reinterpret_cast<T>(enc ^ kStone1 ^ kStone2);
     }
+
+    VkPipelineLayout createGraphicsPipelineLayout();
+    VkPipelineLayout createComputePipelineLayout();
+    VkPipelineLayout createNexusPipelineLayout();
+    VkPipelineLayout createStatsPipelineLayout();
+    VkPipelineLayout createRayTracingPipelineLayout();
 
     void createPipelineCache();
     void createRenderPass();
@@ -88,7 +95,7 @@ private:
 
     int width_ = 0, height_ = 0;
 
-    // PRIVATE RAW HANDLES (created first, then wrapped)
+    // RAW HANDLES — CREATED FIRST
     VkPipeline graphicsPipeline_ = VK_NULL_HANDLE;
     VkPipelineLayout graphicsPipelineLayout_ = VK_NULL_HANDLE;
     VkDescriptorSetLayout graphicsDescriptorSetLayout_ = VK_NULL_HANDLE;
