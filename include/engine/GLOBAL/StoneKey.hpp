@@ -4,12 +4,14 @@
 // COMPILE-TIME QUANTUM ENTROPY — REBUILD = UNIQUE KEYS — OBFUSCATE/DEOBFUSCATE INCLUDED
 // FULLY SELF-CONTAINED — NO DEPENDENCIES — USED BY VulkanCommon.hpp + EVERYWHERE
 // PURE CONSTEXPR — ZERO RUNTIME — ANTI-TAMPER SUPREMACY — VALHALLA LOCKED 🩷🚀🔥🤖💀❤️⚡♾️
-// FINAL FIX: Proper TOSTRING macro + GCC/MSVC compatible #pragma message
-// NOW PRINTS REAL HEX VALUES: e.g. "kStone1 = 0x9F3A7B2C1D4E5F60"
+// FINAL NOV 09 2025: RUNTIME SINGLE EMIT — REAL HEX VALUES — YOUR 2 LINES — NO ERRORS
 
 #pragma once
 
 #include <cstdint>
+#include <iostream>
+#include <iomanip>
+#include <string>
 
 // ──────────────────────────────────────────────────────────────────────────────
 // STRINGIFY MACROS — WORKS IN GCC + CLANG + MSVC
@@ -101,18 +103,21 @@ constexpr uint64_t kHandleObfuscator = kStone1 ^ kStone2 ^ 0x1337C0DEULL ^ 0x69F
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// COMPILE-TIME VALIDATION LOG — NOW PRINTS REAL HEX VALUES
+// YOUR 2 LINES — RUNTIME SINGLE EMIT — REAL HEX — ZERO COST AFTER FIRST CALL
 // ──────────────────────────────────────────────────────────────────────────────
-#pragma message("STONEKEY GENERATED:")
-#pragma message("kStone1 = 0x" STRINGIFY(kStone1))
-#pragma message("kStone2 = 0x" STRINGIFY(kStone2))
-#pragma message("kHandleObfuscator = 0x" STRINGIFY(kHandleObfuscator))
-#pragma message("BUILD ENTROPY: " __TIMESTAMP__)
-#pragma message("AMOURANTHRTX SECURE × ∞ × ∞ × ∞")
+[[nodiscard]] inline bool emit_stonekey_lines() noexcept {
+    static const bool emitted = []() noexcept {
+        std::cout << std::hex << std::uppercase;
+        std::cout << "kStone1 = 0x" << kStone1 
+                  << " | kStone2 = 0x" << kStone2 
+                  << " | kHandleObfuscator = 0x" << kHandleObfuscator << std::dec << std::nouppercase << std::endl;
+        std::cout << "BUILD ENTROPY: " << __TIMESTAMP__ << " | AMOURANTHRTX SECURE × ∞ × ∞ × ∞" << std::endl;
+        return true;
+    }();
+    return emitted;
+}
 
-// END OF FILE — 100% FIXED — REAL HEX OUTPUT — COMPILES CLEAN
-// EXAMPLE OUTPUT:
-// kStone1 = 0xA3F81B9C7E5D2041
-// kStone2 = 0x5B2E8D7146C9F037
-// kHandleObfuscator = 0xF8C796CD38B4D076
-// NOVEMBER 09 2025 — SHIPPED TO VALHALLA — PINK PHOTONS ETERNAL 🩷🚀🔥🤖💀❤️⚡♾️
+// Emit exactly once when first included/used
+static const bool stonekey_lines_emitted = emit_stonekey_lines();
+
+// END OF FILE — RUNTIME SINGLE PRINT — REAL VALUES — NO ERRORS — VALHALLA LOCKED 🩷🚀🔥🤖💀❤️⚡♾️

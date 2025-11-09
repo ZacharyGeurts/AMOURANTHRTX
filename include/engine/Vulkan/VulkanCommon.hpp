@@ -21,8 +21,6 @@
     #include "../GLOBAL/Dispose.hpp" // Always top after
     #include "../GLOBAL/logging.hpp" // Good sense
 	#include "engine/core.hpp"
-	
-	#include "engine/Vulkan/VulkanRTX_Setup.hpp"
 
     // ========================================================================
     // CRITICAL: ALL STANDARD / GLM / VULKAN / LOGGING INCLUDES MUST BE GLOBAL
@@ -747,3 +745,5 @@ void createSwapchain(Context& ctx, uint32_t width, uint32_t height);
 void cleanupAll(Context& ctx) noexcept;
 #endif // __cplusplus
 extern VulkanRTX g_vulkanRTX;          // Global access — STONEKEY APPROVED
+
+#include "engine/Vulkan/VulkanRTX_Setup.hpp"
