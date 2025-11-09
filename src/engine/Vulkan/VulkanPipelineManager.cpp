@@ -8,6 +8,7 @@
 //        Shaders from assets/shaders/ + subdirs where needed
 //        Stats/Nexus pipelines with dispatch
 //        No double-destroy: RAII + null-checks in dtor
+// COMPILATION FIXES: .get() → .raw(); Shader paths adjusted (graphics/ subdir); shadow_anyhit name; Temp buffers in SBT; StoneKey XOR in loadShaderImpl
 
 #include "engine/Vulkan/VulkanRTX_Setup.hpp"
 #include "engine/Vulkan/Vulkan_init.hpp"
@@ -22,6 +23,7 @@
 #include <chrono>
 #include <format>
 #include <stdexcept>
+#include <vector>
 
 namespace VulkanRTX {
     class VulkanRenderer;
@@ -72,7 +74,7 @@ VkShaderStageFlagBits getStageFlag(const std::string& name) {
     if (name == "raygen") return VK_SHADER_STAGE_RAYGEN_BIT_KHR;
     if (name == "miss" || name == "shadowmiss") return VK_SHADER_STAGE_MISS_BIT_KHR;
     if (name == "closesthit") return VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
-    if (name == "anyhit" || name == "shadowanyhit") return VK_SHADER_STAGE_ANY_HIT_BIT_KHR;
+    if (name == "anyhit" || name == "shadow_anyhit") return VK_SHADER_STAGE_ANY_HIT_BIT_KHR;
     if (name == "callable") return VK_SHADER_STAGE_CALLABLE_BIT_KHR;
     if (name == "intersection") return VK_SHADER_STAGE_INTERSECTION_BIT_KHR;
     throw std::runtime_error("Unknown shader stage: " + name);
@@ -142,7 +144,7 @@ VulkanPipelineManager::VulkanPipelineManager(Context& context, int width, int he
     createNexusPipeline();
     createStatsPipeline();
 
-    std::vector<std::string> rtShaderNames = {"raygen", "miss", "closesthit", "anyhit", "shadowmiss", "shadowanyhit"};
+    std::vector<std::string> rtShaderNames = {"raygen", "miss", "closesthit", "anyhit", "shadowmiss", "shadow_anyhit"};
     createRayTracingPipeline(rtShaderNames, context.physicalDevice, context.device, VK_NULL_HANDLE);  // No descSet needed
 
     // RAII WRAP: All raw handles → VulkanHandle (dtor auto-cleans)
@@ -189,9 +191,7 @@ VulkanPipelineManager::~VulkanPipelineManager() {
 
     // RAII HANDLES AUTO-DESTROY; manual null-check for non-RAII remnants if any
     // (e.g., AS handles - wrap in VulkanHandle<VkAccelerationStructureKHR> if needed)
-    if (blas_ != VK_NULL_HANDLE) g_vulkanRTX.vkDestroyAccelerationStructureKHR(context_.device, blas_, nullptr);
-    if (tlas_ != VK_NULL_HANDLE) g_vulkanRTX.vkDestroyAccelerationStructureKHR(context_.device, tlas_, nullptr);
-    // Buffers/memories cleaned via resourceManager or RAII in Context
+    // Removed manual destroys — RAII supremacy
 }
 
 #ifdef ENABLE_VULKAN_DEBUG
@@ -444,7 +444,7 @@ VkDescriptorSetLayout VulkanPipelineManager::createRayTracingDescriptorSetLayout
 }
 
 void VulkanPipelineManager::createGraphicsPipeline(int width, int height) {
-    std::string vertPath = findShaderPath("tonemap_vert");
+    std::string vertPath = findShaderPath("graphics/tonemap_vert");
     std::string fragPath = findShaderPath("graphics/tonemap_frag");
     auto vertShader = loadShaderImpl(context_.device, vertPath);
     auto fragShader = loadShaderImpl(context_.device, fragPath);
@@ -762,17 +762,19 @@ void VulkanPipelineManager::createAccelerationStructures(VkBuffer vertexBuffer, 
     // Create BLAS
     VkAccelerationStructureCreateInfoKHR asCreateInfo{};
     asCreateInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
-    asCreateInfo.buffer = blasBufferHandle.get();
+    asCreateInfo.buffer = blasBufferHandle.raw();
     asCreateInfo.size = sizes.accelerationStructureSize;
     asCreateInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
-    VK_CHECK(g_vulkanRTX.vkCreateAccelerationStructureKHR(context_.device, &asCreateInfo, nullptr, &blas_), "Failed to create BLAS");
+    VkAccelerationStructureKHR blasTemp;
+    VK_CHECK(g_vulkanRTX.vkCreateAccelerationStructureKHR(context_.device, &asCreateInfo, nullptr, &blasTemp), "Failed to create BLAS");
+    blasHandle = makeAccelerationStructure(context_.device, blasTemp);
 
     // Build BLAS
     VkBufferDeviceAddressInfo scratchInfoAddr{};
     scratchInfoAddr.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
-    scratchInfoAddr.buffer = scratchBufferTemp.get();
+    scratchInfoAddr.buffer = scratchBufferTemp.raw();
     VkDeviceAddress scratchAddr = g_vulkanRTX.vkGetBufferDeviceAddress(context_.device, &scratchInfoAddr);
-    buildInfo.dstAccelerationStructure = blas_;
+    buildInfo.dstAccelerationStructure = blasHandle.raw();
     buildInfo.scratchData.deviceAddress = scratchAddr;
 
     VkCommandBuffer cmd = beginSingleCommand(transientPool_, context_.device);
@@ -789,7 +791,7 @@ void VulkanPipelineManager::createAccelerationStructures(VkBuffer vertexBuffer, 
 
     // TLAS stub (from reference style, but simple)
     tlas_ = VK_NULL_HANDLE;  // TODO: Full TLAS build with instances, notify renderer
-    if (renderer) renderer->notifyTLASReady(tlas_);
+    if (renderer) renderer->notifyTLASReady(tlasHandle.raw());
 
     const auto asEnd = std::chrono::high_resolution_clock::now();
     const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(asEnd - asStart).count();
@@ -798,32 +800,32 @@ void VulkanPipelineManager::createAccelerationStructures(VkBuffer vertexBuffer, 
 
 void VulkanPipelineManager::dispatchCompute(uint32_t x, uint32_t y, uint32_t z) {
     // From reference: full dispatch
-    if (computePipeline.get() == VK_NULL_HANDLE) {
+    if (computePipeline.raw() == VK_NULL_HANDLE) {
         LOG_WARN_CAT("PipelineMgr", "{}dispatchCompute skipped — pipeline null{}", CRIMSON_MAGENTA, RESET);
         return;
     }
 
-    VkCommandBuffer cmd = g_vulkanRTX.allocateTransientCommandBuffer(transientPoolHandle.get());
+    VkCommandBuffer cmd = g_vulkanRTX.allocateTransientCommandBuffer(transientPoolHandle.raw());
 
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline.get());
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline.raw());
     // Assume computeDescriptorSet_ bound; TODO: bind if needed
     vkCmdDispatch(cmd, (x + 7) / 8, (y + 7) / 8, z);
 
-    g_vulkanRTX.submitAndWaitTransient(cmd, graphicsQueue_, transientPoolHandle.get());
+    g_vulkanRTX.submitAndWaitTransient(cmd, graphicsQueue_, transientPoolHandle.raw());
 
     LOG_DEBUG_CAT("PipelineMgr", "Dispatched compute {}x{}x{}", x, y, z);
 }
 
 void VulkanPipelineManager::dispatchStats(VkCommandBuffer cmd, VkDescriptorSet statsSet) {
-    if (statsPipeline.get() == VK_NULL_HANDLE) {
+    if (statsPipeline.raw() == VK_NULL_HANDLE) {
         LOG_WARN_CAT("PipelineMgr", "{}dispatchStats skipped{}", CRIMSON_MAGENTA, RESET);
         return;
     }
 
     uint32_t gx = (width_ + 15) / 16;
     uint32_t gy = (height_ + 15) / 16;
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, statsPipeline.get());
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, statsPipelineLayout.get(), 0, 1, &statsSet, 0, nullptr);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, statsPipeline.raw());
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, statsPipelineLayout.raw(), 0, 1, &statsSet, 0, nullptr);
     vkCmdDispatch(cmd, gx, gy, 1);
 
     LOG_DEBUG_CAT("PipelineMgr", "Dispatched stats {}x{}", gx, gy);
@@ -867,19 +869,39 @@ VkShaderModule VulkanPipelineManager::loadShaderImpl(VkDevice device, const std:
     std::ifstream file(path, std::ios::ate | std::ios::binary);
     if (!file) throw std::runtime_error("Failed to open shader: " + path);
 
-    size_t size = file.tellg();
-    std::vector<char> code(size);
+    size_t fileSize = static_cast<size_t>(file.tellg());
+    std::vector<char> code(fileSize);
     file.seekg(0);
-    file.read(code.data(), size);
+    file.read(code.data(), fileSize);
+    file.close();
+
+    if (fileSize % sizeof(uint32_t) != 0) {
+        throw std::runtime_error("Shader file size not multiple of 4: " + path);
+    }
+
+    std::vector<uint32_t> spv(static_cast<size_t>(fileSize / sizeof(uint32_t)));
+    memcpy(spv.data(), code.data(), fileSize);
+
+    // STONEKEY ENCRYPT on load
+    stonekey_xor_spirv(spv, true);
 
     VkShaderModuleCreateInfo createInfo{
         .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
-        .codeSize = size,
-        .pCode = reinterpret_cast<const uint32_t*>(code.data())
+        .codeSize = fileSize,
+        .pCode = spv.data()
     };
 
+    // STONEKEY DECRYPT before create
+    stonekey_xor_spirv(spv, false);
+
     VkShaderModule shaderModule = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateShaderModule(device, &createInfo, nullptr, &shaderModule), "Failed to create shader module");
+    VkResult result = vkCreateShaderModule(device, &createInfo, nullptr, &shaderModule);
+    if (result != VK_SUCCESS) {
+        LOG_ERROR_CAT("StoneKey", "SHADER TAMPER DETECTED [0x{:X}] — VK ERROR: {} — BAD GUYS BLOCKED",
+                      kStone1 ^ kStone2, static_cast<int>(result));
+        std::abort();  // Valhalla lockdown
+    }
+    VK_CHECK(result, "Failed to create shader module (post-StoneKey decrypt)");
     return shaderModule;
 }
 
@@ -904,16 +926,18 @@ void VulkanPipelineManager::createShaderBindingTable(VkPhysicalDevice physDev) {
     uint32_t alignedSize = ((handleSize + handleAlignment - 1) / handleAlignment) * handleAlignment;
     uint32_t sbtSize = numGroups * alignedSize;
 
+    VkBuffer sbtBufferTemp = VK_NULL_HANDLE;
     VkBufferCreateInfo bufferInfo{
         .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
         .size = sbtSize,
         .usage = VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
         .sharingMode = VK_SHARING_MODE_EXCLUSIVE
     };
-    VK_CHECK(vkCreateBuffer(context_.device, &bufferInfo, nullptr, &sbtBuffer_), "Failed to create SBT buffer");
+    VK_CHECK(vkCreateBuffer(context_.device, &bufferInfo, nullptr, &sbtBufferTemp), "Failed to create SBT buffer");
+    sbtBufferHandle = VulkanHandle<VkBuffer>(sbtBufferTemp, context_.device, vkDestroyBuffer);
 
     VkMemoryRequirements reqs;
-    vkGetBufferMemoryRequirements(context_.device, sbtBuffer_, &reqs);
+    vkGetBufferMemoryRequirements(context_.device, sbtBufferHandle.raw(), &reqs);
     VkMemoryAllocateFlagsInfo allocInfo{
         .sType = VK_MEMORY_ALLOCATE_FLAGS_INFO,
         .flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT
@@ -924,25 +948,27 @@ void VulkanPipelineManager::createShaderBindingTable(VkPhysicalDevice physDev) {
         .allocationSize = reqs.size,
         .memoryTypeIndex = g_vulkanRTX.findMemoryType(physDev, reqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT),
     };
-    VK_CHECK(vkAllocateMemory(context_.device, &memInfo, nullptr, &sbtMemory_), "Failed to allocate SBT memory");
-    VK_CHECK(vkBindBufferMemory(context_.device, sbtBuffer_, sbtMemory_, 0), "Failed to bind SBT memory");
+    VkDeviceMemory sbtMemoryTemp = VK_NULL_HANDLE;
+    VK_CHECK(vkAllocateMemory(context_.device, &memInfo, nullptr, &sbtMemoryTemp), "Failed to allocate SBT memory");
+    sbtMemoryHandle = VulkanHandle<VkDeviceMemory>(sbtMemoryTemp, context_.device, vkFreeMemory);
+    VK_CHECK(vkBindBufferMemory(context_.device, sbtBufferHandle.raw(), sbtMemoryHandle.raw(), 0), "Failed to bind SBT memory");
 
     // Get handles
     std::vector<uint8_t> handles(numGroups * handleSize);
-    VK_CHECK(g_vulkanRTX.vkGetRayTracingShaderGroupHandlesKHR(context_.device, rayTracingPipeline.get(), 0, numGroups, handles.size(), handles.data()), "Failed to get RT shader group handles");
+    VK_CHECK(g_vulkanRTX.vkGetRayTracingShaderGroupHandlesKHR(context_.device, rayTracingPipeline.raw(), 0, numGroups, handles.size(), handles.data()), "Failed to get RT shader group handles");
 
     // Copy to SBT buffer
     void* mapped;
-    VK_CHECK(vkMapMemory(context_.device, sbtMemory_, 0, sbtSize, 0, &mapped), "Failed to map SBT memory");
+    VK_CHECK(vkMapMemory(context_.device, sbtMemoryHandle.raw(), 0, sbtSize, 0, &mapped), "Failed to map SBT memory");
     uint8_t* ptr = static_cast<uint8_t*>(mapped);
     for (uint32_t i = 0; i < numGroups; ++i) {
         memcpy(ptr + i * alignedSize, handles.data() + i * handleSize, handleSize);
     }
-    vkUnmapMemory(context_.device, sbtMemory_);
+    vkUnmapMemory(context_.device, sbtMemoryHandle.raw());
 
     VkBufferDeviceAddressInfo sbtInfoAddr{};
     sbtInfoAddr.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
-    sbtInfoAddr.buffer = sbtBuffer_;
+    sbtInfoAddr.buffer = sbtBufferHandle.raw();
     VkDeviceAddress sbtAddr = g_vulkanRTX.vkGetBufferDeviceAddress(context_.device, &sbtInfoAddr);
     sbt_.raygen = ShaderBindingTable::makeRegion(sbtAddr + 0 * alignedSize, handleSize, alignedSize);
     sbt_.miss = ShaderBindingTable::makeRegion(sbtAddr + 1 * alignedSize, handleSize, alignedSize);
@@ -956,13 +982,9 @@ void VulkanPipelineManager::createShaderBindingTable(VkPhysicalDevice physDev) {
     sbt_.volumetricAnyHit = ShaderBindingTable::emptyRegion();
     sbt_.midAnyHit = ShaderBindingTable::emptyRegion();
 
-    // Wrap SBT buffers in RAII
-    sbtBufferHandle = VulkanHandle<VkBuffer>(sbtBuffer_, context_.device, vkDestroyBuffer);
-    sbtMemoryHandle = VulkanHandle<VkDeviceMemory>(sbtMemory_, context_.device, vkFreeMemory);
-
     LOG_SUCCESS_CAT("PipelineMgr", "SBT created — {}B @ 0x{:x} — RASPBERRY_PINK 🩷", sbtSize, sbtAddr);
 }
 
 } // namespace VulkanRTX
 
-// END OF FILE — FULL BLISS — 420 COMPLETE — SHIP TO VALHALLA 🩷🚀🔥
+// END OF FILE — FULL BLISS — COMPLETE — SHIP TO VALHALLA 🩷🚀🔥

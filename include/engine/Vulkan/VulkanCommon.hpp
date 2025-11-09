@@ -12,6 +12,7 @@
 // MERGED: VulkanCore.hpp fully integrated — Forward declarations resolved, factories & RAII in common — ZERO REDUNDANCY
 // FIXED: VulkanHandle template + VulkanDeleter BEFORE factories — COMPLETE TYPE RESOLUTION — 0 BUILD ERRORS
 // FIXED: Removed redundant makeSwapchainKHR / makeImageView helpers — macro already generates them — NO REDEFINITION
+// FIXED: MAKE_VK_HANDLE macro — Removed 'auto' param (deduction fail); Now 2-arg only, uses defaultDestroyer<T>() internally — COMPILATION SUPREMACY
 
 #ifdef __cplusplus
     #pragma once
@@ -579,31 +580,32 @@ public:
 };
 
 // GLOBAL FACTORIES — FULLY IMPLEMENTED — AFTER VulkanHandle TEMPLATE
-#define MAKE_VK_HANDLE(name, vkType, defaultDestroy) \
-    inline VulkanHandle<vkType> make##name(VkDevice dev, vkType handle, auto destroyFn = defaultDestroy) { \
-        return VulkanHandle<vkType>(handle, dev, destroyFn); \
+// FIXED: 2-arg only (dev, handle) — Uses defaultDestroyer<T>() via ctor fn=nullptr — ZERO DEDUCTION FAILS
+#define MAKE_VK_HANDLE(name, vkType) \
+    inline VulkanHandle<vkType> make##name(VkDevice dev, vkType handle) { \
+        return VulkanHandle<vkType>(handle, dev); \
     }
 
-MAKE_VK_HANDLE(Buffer,              VkBuffer,               vkDestroyBuffer)
-MAKE_VK_HANDLE(Memory,              VkDeviceMemory,         vkFreeMemory)
-MAKE_VK_HANDLE(Image,               VkImage,                vkDestroyImage)
-MAKE_VK_HANDLE(ImageView,           VkImageView,            vkDestroyImageView)
-MAKE_VK_HANDLE(Sampler,             VkSampler,              vkDestroySampler)
-MAKE_VK_HANDLE(DescriptorPool,      VkDescriptorPool,       vkDestroyDescriptorPool)
-MAKE_VK_HANDLE(Semaphore,           VkSemaphore,            vkDestroySemaphore)
-MAKE_VK_HANDLE(Fence,               VkFence,                vkDestroyFence)
-MAKE_VK_HANDLE(Pipeline,            VkPipeline,             vkDestroyPipeline)
-MAKE_VK_HANDLE(PipelineLayout,      VkPipelineLayout,       vkDestroyPipelineLayout)
-MAKE_VK_HANDLE(DescriptorSetLayout, VkDescriptorSetLayout,  vkDestroyDescriptorSetLayout)
-MAKE_VK_HANDLE(RenderPass,          VkRenderPass,           vkDestroyRenderPass)
-MAKE_VK_HANDLE(ShaderModule,        VkShaderModule,         vkDestroyShaderModule)
-MAKE_VK_HANDLE(CommandPool,         VkCommandPool,          vkDestroyCommandPool)
-MAKE_VK_HANDLE(SwapchainKHR,        VkSwapchainKHR,         vkDestroySwapchainKHR)
+MAKE_VK_HANDLE(Buffer,              VkBuffer)
+MAKE_VK_HANDLE(Memory,              VkDeviceMemory)
+MAKE_VK_HANDLE(Image,               VkImage)
+MAKE_VK_HANDLE(ImageView,           VkImageView)
+MAKE_VK_HANDLE(Sampler,             VkSampler)
+MAKE_VK_HANDLE(DescriptorPool,      VkDescriptorPool)
+MAKE_VK_HANDLE(Semaphore,           VkSemaphore)
+MAKE_VK_HANDLE(Fence,               VkFence)
+MAKE_VK_HANDLE(Pipeline,            VkPipeline)
+MAKE_VK_HANDLE(PipelineLayout,      VkPipelineLayout)
+MAKE_VK_HANDLE(DescriptorSetLayout, VkDescriptorSetLayout)
+MAKE_VK_HANDLE(RenderPass,          VkRenderPass)
+MAKE_VK_HANDLE(ShaderModule,        VkShaderModule)
+MAKE_VK_HANDLE(CommandPool,         VkCommandPool)
+MAKE_VK_HANDLE(SwapchainKHR,        VkSwapchainKHR)
 
 inline VulkanHandle<VkAccelerationStructureKHR> makeAccelerationStructure(
     VkDevice dev, VkAccelerationStructureKHR as, PFN_vkDestroyAccelerationStructureKHR func = nullptr)
 {
-    return VulkanHandle<VkAccelerationStructureKHR>(as, dev, func ? func : vkDestroyAccelerationStructureKHR);
+    return VulkanHandle<VkAccelerationStructureKHR>(as, dev, reinterpret_cast<VulkanDeleter<VkAccelerationStructureKHR>::DestroyFn>(func ? func : vkDestroyAccelerationStructureKHR));
 }
 
 inline VulkanHandle<VkDeferredOperationKHR> makeDeferredOperation(VkDevice dev, VkDeferredOperationKHR op)

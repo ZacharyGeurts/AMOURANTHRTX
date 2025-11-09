@@ -106,8 +106,8 @@ public:
     void setHypertraceEnabled(bool enabled) noexcept { hypertraceEnabled_ = enabled; }
 
     void setRayTracingPipeline(VkPipeline pipeline, VkPipelineLayout layout) noexcept {
-        rtPipeline_ = makePipeline(device_, pipeline, vkDestroyPipeline);
-        rtPipelineLayout_ = makePipelineLayout(device_, layout, vkDestroyPipelineLayout);
+        rtPipeline_ = makePipeline(device_, pipeline);
+        rtPipelineLayout_ = makePipelineLayout(device_, layout);
     }
 
     [[nodiscard]] bool isTLASReady() const noexcept { return tlasReady_; }
@@ -225,13 +225,13 @@ inline VulkanRTX::VulkanRTX(std::shared_ptr<Context> ctx,
     };
     VkSampler rawSampler = VK_NULL_HANDLE;
     VK_CHECK(vkCreateSampler(device_, &samplerInfo, nullptr, &rawSampler), "Failed to create default sampler");
-    defaultSampler_ = makeSampler(device_, rawSampler, vkDestroySampler);
+    defaultSampler_ = makeSampler(device_, rawSampler);
 
     // Transient fence
     VkFenceCreateInfo fenceInfo{.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
     VkFence rawFence = VK_NULL_HANDLE;
     VK_CHECK(vkCreateFence(device_, &fenceInfo, nullptr, &rawFence), "Failed to create transient fence");
-    transientFence_ = makeFence(device_, rawFence, vkDestroyFence);
+    transientFence_ = makeFence(device_, rawFence);
 
     createBlackFallbackImage();
 }
@@ -256,7 +256,7 @@ inline void VulkanRTX::createBlackFallbackImage() {
     };
     VkImage rawImage = VK_NULL_HANDLE;
     VK_CHECK(vkCreateImage(device_, &imageInfo, nullptr, &rawImage), "Black fallback image");
-    blackFallbackImage_ = makeImage(device_, rawImage, vkDestroyImage);
+    blackFallbackImage_ = makeImage(device_, rawImage);
 
     VkMemoryRequirements memReqs;
     vkGetImageMemoryRequirements(device_, blackFallbackImage_.raw(), &memReqs);
@@ -267,7 +267,7 @@ inline void VulkanRTX::createBlackFallbackImage() {
     };
     VkDeviceMemory rawMem = VK_NULL_HANDLE;
     VK_CHECK(vkAllocateMemory(device_, &allocInfo, nullptr, &rawMem), "Black fallback memory");
-    blackFallbackMemory_ = makeMemory(device_, rawMem, vkFreeMemory);
+    blackFallbackMemory_ = makeMemory(device_, rawMem);
     vkBindImageMemory(device_, rawImage, rawMem, 0);
 
     uploadBlackPixelToImage(rawImage);
@@ -281,7 +281,7 @@ inline void VulkanRTX::createBlackFallbackImage() {
     };
     VkImageView rawView = VK_NULL_HANDLE;
     VK_CHECK(vkCreateImageView(device_, &viewInfo, nullptr, &rawView), "Black fallback view");
-    blackFallbackView_ = makeImageView(device_, rawView, vkDestroyImageView);
+    blackFallbackView_ = makeImageView(device_, rawView);
 }
 
 inline void VulkanRTX::uploadBlackPixelToImage(VkImage image) {
@@ -352,7 +352,7 @@ inline void VulkanRTX::createBuffer(VkPhysicalDevice physicalDevice, VkDeviceSiz
     };
     VkBuffer rawBuf = VK_NULL_HANDLE;
     VK_CHECK(vkCreateBuffer(device_, &bufferInfo, nullptr, &rawBuf), "Buffer create");
-    buffer = makeBuffer(device_, rawBuf, vkDestroyBuffer);
+    buffer = makeBuffer(device_, rawBuf);
 
     VkMemoryRequirements memReqs;
     vkGetBufferMemoryRequirements(device_, rawBuf, &memReqs);
@@ -364,7 +364,7 @@ inline void VulkanRTX::createBuffer(VkPhysicalDevice physicalDevice, VkDeviceSiz
     };
     VkDeviceMemory rawMem = VK_NULL_HANDLE;
     VK_CHECK(vkAllocateMemory(device_, &allocInfo, nullptr, &rawMem), "Buffer memory alloc");
-    memory = makeMemory(device_, rawMem, vkFreeMemory);
+    memory = makeMemory(device_, rawMem);
 
     vkBindBufferMemory(device_, rawBuf, rawMem, 0);
 }

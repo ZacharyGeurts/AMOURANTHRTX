@@ -4,7 +4,7 @@
 
 #pragma once
 
-#include "engine/Vulkan/VulkanCommon.hpp"
+//#include "engine/Vulkan/VulkanCommon.hpp"
 #include <SDL3/SDL.h>
 #include <memory>
 #include <vector>
