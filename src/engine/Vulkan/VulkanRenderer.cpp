@@ -565,6 +565,52 @@ VkCommandBuffer VulkanRenderer::allocateTransientCommandBuffer(VkDevice d, VkCom
     vkBeginCommandBuffer(cb, &bi); return cb;
 }
 
+void VulkanRenderer::shutdown() noexcept {
+    // Ensure all in-flight operations complete
+    vkDeviceWaitIdle(context_->device);
+
+    // Release renderer-owned resources first
+    destroyRTOutputImages();
+    destroyAccumulationImages();
+    destroyNexusScoreImage();
+    destroyAllBuffers();
+
+    // Clear command buffers and descriptor pool
+    if (!commandBuffers_.empty()) {
+        vkFreeCommandBuffers(context_->device, context_->commandPool,
+                             static_cast<uint32_t>(commandBuffers_.size()), commandBuffers_.data());
+        commandBuffers_.clear();
+    }
+    descriptorPool_.reset();
+
+    // Release semaphores and fences
+    for (auto semaphore : imageAvailableSemaphores_) {
+        vkDestroySemaphore(context_->device, semaphore, nullptr);
+    }
+    for (auto semaphore : renderFinishedSemaphores_) {
+        vkDestroySemaphore(context_->device, semaphore, nullptr);
+    }
+    for (auto fence : inFlightFences_) {
+        vkDestroyFence(context_->device, fence, nullptr);
+    }
+    imageAvailableSemaphores_.clear();
+    renderFinishedSemaphores_.clear();
+    inFlightFences_.clear();
+
+    // Release query pools
+    for (auto pool : queryPools_) {
+        vkDestroyQueryPool(context_->device, pool, nullptr);
+    }
+    queryPools_.fill(VK_NULL_HANDLE);
+
+    // Global resource cleanup via Dispose namespace
+    Dispose::releaseAllBuffers(context_->device);
+    Dispose::cleanupSwapchain();
+    Dispose::quitSDL();
+
+    LOG_SUCCESS_CAT("Renderer", "VulkanRenderer shutdown complete – All resources released successfully");
+}
+
 /*
  * JAY LENO ENGINE — STONEKEY Ω — NOVEMBER 07 2025
  * GLOBAL CLASS — C++23 — 23,000+ FPS — NO NAMESPACE — NO LOGGING — RAII PURE

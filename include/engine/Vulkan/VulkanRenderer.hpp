@@ -36,6 +36,8 @@ class VulkanRenderer {
 public:
     static constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 3;  // ← JAY: "Triple buffering — standard for smooth 120+ FPS."
 
+	void shutdown() noexcept;
+
     enum class FpsTarget { FPS_60 = 60, FPS_120 = 120 }; // ← GAL: "Adaptive frame pacing — I cap at 60 on battery, uncap on plug."
 
     /* ---------- COMMAND HELPERS ---------- */

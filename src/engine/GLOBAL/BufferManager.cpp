@@ -1,9 +1,12 @@
 // src/engine/GLOBAL/BufferManager.cpp
-// FASTEST BUFFER MANAGER IN THE MULTIVERSE — NOW CONSTEXPR SAFE
+// AMOURANTH RTX Engine – November 08 2025 – Vulkan Buffer Manager Implementation
+// Professional, high-performance, thread-safe buffer pooling with encrypted handles
 
 #include "engine/GLOBAL/BufferManager.hpp"
+#include "engine/GLOBAL/Dispose.hpp"  // For g_destructionCounter and DestroyTracker
 #include <iomanip>
 #include <algorithm>
+#include <sstream>
 
 #define VK_CHECK(call, msg) do {                     \
     VkResult __res = (call);                         \
@@ -15,7 +18,7 @@
 void VulkanBufferManager::init(VkDevice device, VkPhysicalDevice physDevice) {
     device_ = device;
     physDevice_ = physDevice;
-    std::clog << "[BUFFER MGR] QUANTUM INIT COMPLETE — PINK HYPERSPEED ENGAGED 🩷🚀\n";
+    LOG_SUCCESS_CAT("BufferManager", "Initialization complete");
 }
 
 uint32_t VulkanBufferManager::findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) const {
@@ -26,17 +29,22 @@ uint32_t VulkanBufferManager::findMemoryType(uint32_t typeFilter, VkMemoryProper
             return i;
         }
     }
-    vkThrow("GPU too weak for AMOURANTH RTX — upgrade your toaster");
+    vkThrow("Failed to find suitable memory type");
 }
 
-uint64_t VulkanBufferManager::createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, const std::string& debugName) {
+uint64_t VulkanBufferManager::createBuffer(VkDeviceSize size,
+                                           VkBufferUsageFlags usage,
+                                           VkMemoryPropertyFlags properties,
+                                           const std::string& debugName) {
     std::lock_guard<std::mutex> lock(mutex_);
 
-    VkBufferCreateInfo ci{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
-    ci.size = size; ci.usage = usage; ci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    VkBufferCreateInfo ci = {VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+    ci.size = size;
+    ci.usage = usage;
+    ci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
     VkBuffer rawBuffer = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateBuffer(device_, &ci, nullptr, &rawBuffer), "Buffer create failed");
+    VK_CHECK(vkCreateBuffer(device_, &ci, nullptr, &rawBuffer), "Failed to create buffer");
 
     VkMemoryRequirements reqs;
     vkGetBufferMemoryRequirements(device_, rawBuffer, &reqs);
@@ -58,21 +66,22 @@ uint64_t VulkanBufferManager::createBuffer(VkDeviceSize size, VkBufferUsageFlags
         VkDeviceSize remaining = it->size - alignedSize;
         it->offset += alignedSize;
         it->size = remaining;
-        if (remaining == 0) pool.erase(it);
+        if (remaining == 0) {
+            pool.erase(it);
+        }
     } else {
-        VkMemoryAllocateInfo ai{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+        VkMemoryAllocateInfo ai = {VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
         ai.allocationSize = alignedSize;
         ai.memoryTypeIndex = memType;
-        VK_CHECK(vkAllocateMemory(device_, &ai, nullptr, &rawMemory), "Memory alloc failed");
+        VK_CHECK(vkAllocateMemory(device_, &ai, nullptr, &rawMemory), "Failed to allocate device memory");
     }
 
-    VK_CHECK(vkBindBufferMemory(device_, rawBuffer, rawMemory, offset), "Bind failed");
+    VK_CHECK(vkBindBufferMemory(device_, rawBuffer, rawMemory, offset), "Failed to bind buffer memory");
 
     uint64_t handle = encrypt(reinterpret_cast<uintptr_t>(rawBuffer));
     buffers_[handle] = {rawBuffer, rawMemory, size, reqs.alignment, offset, nullptr, debugName, memType};
 
-    std::clog << "[BUFFER MGR] CREATED 0x" << std::hex << handle << std::dec
-              << " size=" << size << " name=" << debugName << "\n";
+    LOG_INFO_CAT("BufferManager", "Created buffer 0x{:x} | Size: {} | Name: {}", handle, size, debugName.empty() ? "(unnamed)" : debugName);
 
     return handle;
 }
@@ -80,10 +89,14 @@ uint64_t VulkanBufferManager::createBuffer(VkDeviceSize size, VkBufferUsageFlags
 void VulkanBufferManager::destroyBuffer(uint64_t enc_handle) {
     std::lock_guard<std::mutex> lock(mutex_);
     auto it = buffers_.find(enc_handle);
-    if (it == buffers_.end()) return;
+    if (it == buffers_.end()) {
+        return;
+    }
 
     const auto& b = it->second;
-    if (b.mapped) vkUnmapMemory(device_, b.memory);
+    if (b.mapped) {
+        vkUnmapMemory(device_, b.memory);
+    }
 
     auto& pool = freePools_[b.memType];
     pool.push_back({b.memory, b.offset, b.size});
@@ -103,6 +116,9 @@ void VulkanBufferManager::destroyBuffer(uint64_t enc_handle) {
     }
 
     vkDestroyBuffer(device_, b.buffer, nullptr);
+    DestroyTracker::markDestroyed(reinterpret_cast<const void*>(b.buffer));
+    ++g_destructionCounter;
+
     buffers_.erase(it);
 }
 
@@ -137,13 +153,17 @@ bool VulkanBufferManager::isValid(uint64_t enc_handle) const noexcept {
 
 void VulkanBufferManager::setDebugName(uint64_t enc_handle, const std::string& name) {
     auto it = buffers_.find(enc_handle);
-    if (it != buffers_.end()) it->second.debugName = name;
+    if (it != buffers_.end()) {
+        it->second.debugName = name;
+    }
 }
 
 void* VulkanBufferManager::map(uint64_t enc_handle) {
     auto it = buffers_.find(enc_handle);
-    if (it == buffers_.end() || it->second.mapped) return nullptr;
-    void* data;
+    if (it == buffers_.end() || it->second.mapped) {
+        return nullptr;
+    }
+    void* data = nullptr;
     vkMapMemory(device_, it->second.memory, it->second.offset, it->second.size, 0, &data);
     it->second.mapped = data;
     return data;
@@ -159,27 +179,62 @@ void VulkanBufferManager::unmap(uint64_t enc_handle) {
 
 void VulkanBufferManager::printStats() const {
     size_t totalBuffers = buffers_.size();
-    size_t totalPools = 0;
-    for (const auto& p : freePools_) totalPools += p.second.size();
-    std::clog << "[BUFFER MGR STATS] Buffers: " << totalBuffers
-              << " | Free pools: " << totalPools << " — PINK PHOTONS ETERNAL 🩷\n";
+    size_t totalFreeBlocks = 0;
+    for (const auto& p : freePools_) {
+        totalFreeBlocks += p.second.size();
+    }
+    LOG_INFO_CAT("BufferManager", "Active buffers: {} | Free memory blocks: {}", totalBuffers, totalFreeBlocks);
+}
+
+// Global releaseAll – called from Dispose during shutdown
+void VulkanBufferManager::releaseAll(VkDevice device) noexcept {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    std::set<VkDeviceMemory> memoriesToFree;
+
+    for (auto& [handle, info] : buffers_) {
+        if (info.buffer != VK_NULL_HANDLE) {
+            if (info.mapped) {
+                vkUnmapMemory(device, info.memory);
+            }
+            vkDestroyBuffer(device, info.buffer, nullptr);
+            DestroyTracker::markDestroyed(reinterpret_cast<const void*>(info.buffer));
+            ++g_destructionCounter;
+            memoriesToFree.insert(info.memory);
+        }
+    }
+    buffers_.clear();
+
+    for (auto& pool : freePools_) {
+        for (const auto& block : pool.second) {
+            memoriesToFree.insert(block.memory);
+        }
+        pool.second.clear();
+    }
+
+    for (VkDeviceMemory mem : memoriesToFree) {
+        if (mem != VK_NULL_HANDLE) {
+            vkFreeMemory(device, mem, nullptr);
+        }
+    }
+
+    LOG_SUCCESS_CAT("BufferManager", "Global cleanup complete – All buffers and memory released");
 }
 
 void VulkanBufferManager::cleanup() {
-    std::lock_guard<std::mutex> lock(mutex_);
-    std::set<VkDeviceMemory> memories;
-    for (auto& [h, b] : buffers_) {
-        if (b.mapped) vkUnmapMemory(device_, b.memory);
-        vkDestroyBuffer(device_, b.buffer, nullptr);
-        memories.insert(b.memory);
+    if (device_ != VK_NULL_HANDLE) {
+        releaseAll(device_);
     }
-    buffers_.clear();
-    for (auto& p : freePools_) {
-        for (auto& block : p.second) memories.insert(block.memory);
-        p.second.clear();
-    }
-    for (auto m : memories) {
-        if (m != VK_NULL_HANDLE) vkFreeMemory(device_, m, nullptr);
-    }
-    std::clog << "[BUFFER MGR] OBLITERATED — VALHALLA ACHIEVED 🩷💀\n";
+}
+
+[[noreturn]] void VulkanBufferManager::vkError(VkResult res, const std::string& msg, const char* file, int line) {
+    std::ostringstream oss;
+    oss << "Vulkan error " << res << ": " << msg << " [" << file << ":" << line << "]";
+    LOG_ERROR_CAT("BufferManager", "{}", oss.str());
+    throw std::runtime_error(oss.str());
+}
+
+[[noreturn]] void VulkanBufferManager::vkThrow(const std::string& msg) {
+    LOG_ERROR_CAT("BufferManager", "Fatal error: {}", msg);
+    throw std::runtime_error(msg);
 }

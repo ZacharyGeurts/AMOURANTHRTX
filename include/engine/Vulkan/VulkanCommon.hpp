@@ -19,10 +19,10 @@
     #include "../GLOBAL/StoneKey.hpp" // Always top
     #include "../GLOBAL/Dispose.hpp" // Always top after
     #include "../GLOBAL/logging.hpp" // Good sense
+	#include "engine/core.hpp"
     #include "../GLOBAL/camera.hpp" // It sees everywhere
     #include "../GLOBAL/SwapchainManager.hpp" // Happy birthday
     #include "../GLOBAL/BufferManager.hpp" // Happy birthday
-    #include "engine/core.hpp"
 
     // ========================================================================
     // CRITICAL: ALL STANDARD / GLM / VULKAN / LOGGING INCLUDES MUST BE GLOBAL
@@ -49,8 +49,41 @@
     #include <SDL3/SDL_vulkan.h>
 
     class MyPooledBufferMgr : public VulkanBufferManager {
-    // custom pooling, stats, etc.
-};
+    	// custom pooling, stats, etc.
+	};
+
+
+	struct Context;
+	
+	void Context::createSwapchain() {
+    	// USE GLOBAL SINGLETON — NO UNIQUE_PTR, NO CTOR DRAMA
+    	auto& swapchainManager = VulkanSwapchainManager::get();
+
+    	// IF NOT INITED YET (first time)
+    	if (!swapchainManager.getImageCount()) {
+        	swapchainManager.init(instance, physicalDevice, device, surface, width, height);
+    	} else {
+        	swapchainManager.recreate(width, height);
+    	}
+
+    	// NOW USE CORRECT GETTERS
+    	swapchainImages.clear();
+    	swapchainImageViews.clear();
+
+    	uint32_t imageCount = swapchainManager.getImageCount();
+    	swapchainImages.resize(imageCount);
+    	swapchainImageViews.resize(imageCount);
+
+    	for (uint32_t i = 0; i < imageCount; ++i) {
+        	VkImage rawImg = swapchainManager.getSwapchainImage(i);
+        	VkImageView rawView = swapchainManager.getSwapchainImageView(i);
+
+        	swapchainImages[i] = rawImg;
+        	swapchainImageViews[i] = rawView;
+    	}
+
+    	swapchainManager.printStats();
+	}
 
     #define VK_CHECK(result, msg) \
         do { \

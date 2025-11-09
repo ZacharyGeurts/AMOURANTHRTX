@@ -1,56 +1,39 @@
 // include/engine/GLOBAL/Dispose.hpp
-// AMOURANTH RTX Engine – NOVEMBER 07 2025 – GLOBAL THERMO DISPOSE RAII
-// CLEAN — NO cleanupAll — ONLY destroyWindow + quitSDL GLOBAL
-// Context belongs to VulkanCore — NO CIRCULAR HELL — 69,420 FPS ETERNAL
+// AMOURANTH RTX Engine – November 08 2025 – Global Resource Disposal RAII
+// Professional, clean, minimal – SDL termination + destruction tracking only
+// No Vulkan dependencies – zero circular includes – forward declared where needed
 
 #pragma once
 
 #include "engine/GLOBAL/logging.hpp"
-
-#include <vulkan/vulkan.h>
-#include <bitset>
 #include <unordered_set>
-#include <latch>
-#include <atomic>
 #include <cstdint>
 #include <string_view>
 
 using namespace Logging::Color;
 
-// Forward declare — BREAKS INCLUDE LOOP WITH VulkanCore.hpp
-class VulkanResourceManager;
+// Global destruction counter – accessible to core and logging systems
+extern uint64_t g_destructionCounter;
 
-// ===================================================================
-// UltraFastLatchMutex — C++23 SPIN + LATCH — FASTEST RAII
-// ===================================================================
-struct UltraFastLatchMutex {
-    std::latch latch{1};
-    std::atomic<bool> locked{false};
+// Double-free protection tracker
+struct DestroyTracker {
+    static void markDestroyed(const void* ptr) noexcept;
+    static bool isDestroyed(const void* ptr) noexcept;
 
-    struct Guard {
-        UltraFastLatchMutex* m;
-        explicit Guard(UltraFastLatchMutex* mutex) : m(mutex) {
-            bool expected = false;
-            while (!m->locked.compare_exchange_weak(expected, true, std::memory_order_acquire)) {
-                expected = false;
-                m->latch.arrive_and_wait();
-            }
-        }
-        ~Guard() {
-            m->locked.store(false, std::memory_order_release);
-            m->latch.arrive_and_wait();
-        }
-    };
-
-    Guard lock() { return Guard(this); }
+private:
+    static inline std::unordered_set<uintptr_t> destroyed_;
 };
 
-// ===================================================================
-// GLOBAL Thermo RAII Functions — ONLY SDL + quit — cleanupAll MOVED TO CORE
-// ===================================================================
-void destroyWindow(SDL_Window* w) noexcept;
-void quitSDL() noexcept;
+// Global disposal operations – delegated to singletons at runtime
+namespace Dispose {
+    // Swapchain management (global singleton)
+    void cleanupSwapchain() noexcept;
+    void recreateSwapchain(uint32_t width, uint32_t height) noexcept;
 
-// NO cleanupAll HERE — BELONGS TO VulkanCore.hpp ONLY
-// INCLUDE LOOP = DEAD — FORWARD DECLARED — CLEAN — IMMORTAL
-// END OF FILE — RASPBERRY_PINK SUPREMACY — ETERNAL
+    // Buffer management (global singleton, device required)
+    void releaseAllBuffers(VkDevice device) noexcept;
+
+    // SDL lifetime management
+    void destroyWindow(SDL_Window* window) noexcept;
+    void quitSDL() noexcept;
+}

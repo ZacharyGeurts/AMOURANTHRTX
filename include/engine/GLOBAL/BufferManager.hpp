@@ -1,25 +1,23 @@
-// include/engine/Vulkan/VulkanBufferManager.hpp
-// AMOURANTH RTX Engine © 2025 by Zachary "ST4CK" Geurts gzac5314@gmail.com
-// QUANTUM-ENCRYPTED HYPERBUFFER MANAGER — TOASTER-PROOF — NOVEMBER 08 2025
-// NOW 100% CONSTEXPR SAFE | RUNTIME SALT CHAOS | PINK PHOTONS FOREVER 🩷🚀🔥🤖💀❤️⚡♾️
+// include/engine/GLOBAL/BufferManager.hpp
+// AMOURANTH RTX Engine – November 08 2025 – Vulkan Buffer Manager
+// Professional, high-performance, thread-safe buffer pooling with encrypted handles
 
 #pragma once
 
 #include "engine/GLOBAL/StoneKey.hpp"
+#include "engine/GLOBAL/Dispose.hpp"  // For g_destructionCounter and DestroyTracker
 #include <vulkan/vulkan.h>
 #include <unordered_map>
 #include <vector>
 #include <cstdint>
-#include <iostream>
-#include <format>
+#include <string>
 #include <mutex>
-#include <bit>
 #include <random>
 #include <set>
 
 class VulkanBufferManager {
 public:
-    // ────── ULTIMATE VK_CHECK MACRO — MOVED INSIDE CLASS SO .CPP SEES IT ──────
+    // VK_CHECK macro – visible to .cpp
     #define VK_CHECK(call, msg) do {                  \
         VkResult __res = (call);                      \
         if (__res != VK_SUCCESS) {                    \
@@ -27,7 +25,6 @@ public:
         }                                             \
     } while (0)
 
-    // ────── SINGLETON — MEYERS + IMMORTAL ──────
     static VulkanBufferManager& get() {
         static VulkanBufferManager instance;
         return instance;
@@ -39,6 +36,9 @@ public:
 
     void init(VkDevice device, VkPhysicalDevice physDevice);
     virtual void cleanup();
+
+    // Global releaseAll used by Dispose
+    void releaseAll(VkDevice device) noexcept;
 
     uint64_t createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, const std::string& debugName = "");
     virtual void destroyBuffer(uint64_t enc_handle);
@@ -75,7 +75,6 @@ public:
 
 private:
     VulkanBufferManager() {
-        // RUNTIME-ONLY CHAOS SALT — STILL UNIQUE PER PROCESS — CONSTEXPR SAFE
         std::random_device rd;
         std::mt19937_64 gen(rd());
         std::uniform_int_distribution<uint64_t> dis;
@@ -91,8 +90,7 @@ private:
 
     uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) const;
 
-    // ────── CHAOTIC STONEKEY ENCRYPTION V3 — NOW CONSTEXPR SAFE + RUNTIME SALT ──────
-    static inline uint64_t runtimeSalt = 0; // initialized in ctor
+    static inline uint64_t runtimeSalt = 0;
 
     static inline constexpr uint64_t encrypt(uintptr_t raw) noexcept {
         uint64_t x = raw ^ kStone1 ^ kStone2 ^ 0xDEADBEEF1337C0DEull ^ runtimeSalt;
@@ -106,18 +104,11 @@ private:
         return x ^ kStone1 ^ kStone2 ^ 0xDEADBEEF1337C0DEull ^ runtimeSalt;
     }
 
-    [[noreturn]] static void vkError(VkResult res, const std::string& msg, const char* file, int line) {
-        std::cerr << "\n🩷 [VULKAN ERROR] " << static_cast<int>(res) 
-                  << " | " << msg << " | " << file << ":" << line << " 🩷\n";
-        throw std::runtime_error(msg);
-    }
-    [[noreturn]] static void vkThrow(const std::string& msg) {
-        std::cerr << "💀 [VULKAN FATAL] " << msg << " — AMOURANTH RTX DENIES YOUR WEAKNESS\n";
-        throw std::runtime_error(msg);
-    }
+    [[noreturn]] static void vkError(VkResult res, const std::string& msg, const char* file, int line);
+    [[noreturn]] static void vkThrow(const std::string& msg);
 };
 
-#undef VK_CHECK // clean up macro namespace
+#undef VK_CHECK
 
 #define BUFFER_MGR VulkanBufferManager::get()
 #define CREATE_BUFFER(...) BUFFER_MGR.createBuffer(__VA_ARGS__)
