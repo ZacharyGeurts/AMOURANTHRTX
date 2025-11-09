@@ -8,7 +8,10 @@
 //        Shaders from assets/shaders/ + subdirs where needed
 //        Stats/Nexus pipelines with dispatch
 //        No double-destroy: RAII + null-checks in dtor
-// COMPILATION FIXES: .get() → .raw(); Shader paths adjusted (graphics/ subdir); shadow_anyhit name; Temp buffers in SBT; StoneKey XOR in loadShaderImpl
+// COMPILATION FIXES: Ctor uses std::shared_ptr<Context>; context_-> access; dtor properly defined;
+//                   createRayTracingPipeline matches VulkanRTX* sig; createAccelerationStructures drops unused bufferMgr, uses uint32_t& numPrimitives;
+//                   Added #include <memory>; assumed headers for VulkanBufferManager/VulkanRenderer via setup.hpp;
+//                   Fixed brace/misplaced dtor code; all functions defined to match assumed header decls.
 
 #include "engine/Vulkan/VulkanRTX_Setup.hpp"
 #include "engine/Vulkan/Vulkan_init.hpp"
@@ -24,37 +27,7 @@
 #include <format>
 #include <stdexcept>
 #include <vector>
-
-namespace VulkanRTX {
-    class VulkanRenderer;
-    extern VulkanRTX g_vulkanRTX;  // Global VulkanRTX instance for shared utils (e.g., createBuffer, alignUp)
-}
-
-namespace VulkanRTX {
-
-using namespace Logging::Color;
-
-constexpr size_t VERTEX_SIZE = 32;  // pos (12) + normal (12) + uv (8)
-constexpr size_t INDEX_SIZE = 4;    // uint32_t
-
-// Utility functions (non-member, to avoid redef)
-VkCommandBuffer beginSingleCommand(VkCommandPool pool, VkDevice device) {
-    VkCommandBufferAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    allocInfo.commandPool = pool;
-    allocInfo.commandBufferCount = 1;
-
-    VkCommandBuffer cmd;
-    vkAllocateCommandBuffers(device, &allocInfo, &cmd);
-
-    VkCommandBufferBeginInfo beginInfo{};
-    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-
-    vkBeginCommandBuffer(cmd, &beginInfo);
-    return cmd;
-}
+#include <memory>
 
 void endSingleCommand(VkCommandBuffer cmd, VkQueue queue, VkCommandPool pool, VkDevice device) {
     vkEndCommandBuffer(cmd);
@@ -104,20 +77,16 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
 // ---------------------------------------------------------------------------
 //  VulkanPipelineManager Implementation
 // ---------------------------------------------------------------------------
-std::string VulkanPipelineManager::findShaderPath(const std::string& name) const {
-    return "assets/shaders/" + name + ".spv";
-}
-
-VulkanPipelineManager::VulkanPipelineManager(Context& context, int width, int height)
-    : context_(context), width_(width), height_(height)
+VulkanPipelineManager::VulkanPipelineManager(std::shared_ptr<Context> ctx, int width, int height)
+    : context_(ctx), width_(width), height_(height)
 {
-    graphicsQueue_ = context.graphicsQueue;
+    graphicsQueue_ = context_->graphicsQueue;
 
     LOG_INFO_CAT("PipelineMgr", "{}VulkanPipelineManager BIRTH — {}x{} — STONEKEY 0x{:X}-0x{:X} — RAII ARMING{}",
                  DIAMOND_WHITE, width, height, kStone1, kStone2, RESET);
 
     // Load RT extension procs (use global VulkanRTX for consistency)
-    g_vulkanRTX.loadRTExtensions(context.device);
+    g_vulkanRTX.loadRTExtensions(context_->device);
 
 #ifdef ENABLE_VULKAN_DEBUG
     setupDebugCallback();
@@ -144,48 +113,44 @@ VulkanPipelineManager::VulkanPipelineManager(Context& context, int width, int he
     createNexusPipeline();
     createStatsPipeline();
 
-    std::vector<std::string> rtShaderNames = {"raygen", "miss", "closesthit", "anyhit", "shadowmiss", "shadow_anyhit"};
-    createRayTracingPipeline(rtShaderNames, context.physicalDevice, context.device, VK_NULL_HANDLE);  // No descSet needed
+    createRayTracingPipeline(&g_vulkanRTX);
 
     // RAII WRAP: All raw handles → VulkanHandle (dtor auto-cleans)
-    graphicsPipeline = VulkanHandle<VkPipeline>(graphicsPipeline_, context_.device, vkDestroyPipeline);
-    graphicsPipelineLayout = VulkanHandle<VkPipelineLayout>(graphicsPipelineLayout_, context_.device, vkDestroyPipelineLayout);
-    graphicsDescriptorSetLayout = VulkanHandle<VkDescriptorSetLayout>(graphicsDescriptorSetLayout_, context_.device, vkDestroyDescriptorSetLayout);
+    graphicsPipeline = VulkanHandle<VkPipeline>(graphicsPipeline_, context_->device, vkDestroyPipeline);
+    graphicsPipelineLayout = VulkanHandle<VkPipelineLayout>(graphicsPipelineLayout_, context_->device, vkDestroyPipelineLayout);
+    graphicsDescriptorSetLayout = VulkanHandle<VkDescriptorSetLayout>(graphicsDescriptorSetLayout_, context_->device, vkDestroyDescriptorSetLayout);
 
-    computePipeline = VulkanHandle<VkPipeline>(computePipeline_, context_.device, vkDestroyPipeline);
-    computePipelineLayout = VulkanHandle<VkPipelineLayout>(computePipelineLayout_, context_.device, vkDestroyPipelineLayout);
-    computeDescriptorSetLayout = VulkanHandle<VkDescriptorSetLayout>(computeDescriptorSetLayout_, context_.device, vkDestroyDescriptorSetLayout);
+    computePipeline = VulkanHandle<VkPipeline>(computePipeline_, context_->device, vkDestroyPipeline);
+    computePipelineLayout = VulkanHandle<VkPipelineLayout>(computePipelineLayout_, context_->device, vkDestroyPipelineLayout);
+    computeDescriptorSetLayout = VulkanHandle<VkDescriptorSetLayout>(computeDescriptorSetLayout_, context_->device, vkDestroyDescriptorSetLayout);
 
-    nexusPipeline = VulkanHandle<VkPipeline>(nexusPipeline_, context_.device, vkDestroyPipeline);
-    nexusPipelineLayout = VulkanHandle<VkPipelineLayout>(nexusPipelineLayout_, context_.device, vkDestroyPipelineLayout);
-    nexusDescriptorSetLayout = VulkanHandle<VkDescriptorSetLayout>(nexusDescriptorSetLayout_, context_.device, vkDestroyDescriptorSetLayout);
+    nexusPipeline = VulkanHandle<VkPipeline>(nexusPipeline_, context_->device, vkDestroyPipeline);
+    nexusPipelineLayout = VulkanHandle<VkPipelineLayout>(nexusPipelineLayout_, context_->device, vkDestroyPipelineLayout);
+    nexusDescriptorSetLayout = VulkanHandle<VkDescriptorSetLayout>(nexusDescriptorSetLayout_, context_->device, vkDestroyDescriptorSetLayout);
 
-    statsPipeline = VulkanHandle<VkPipeline>(statsPipeline_, context_.device, vkDestroyPipeline);
-    statsPipelineLayout = VulkanHandle<VkPipelineLayout>(statsPipelineLayout_, context_.device, vkDestroyPipelineLayout);
-    statsDescriptorSetLayout = VulkanHandle<VkDescriptorSetLayout>(statsDescriptorSetLayout_, context_.device, vkDestroyDescriptorSetLayout);
+    statsPipeline = VulkanHandle<VkPipeline>(statsPipeline_, context_->device, vkDestroyPipeline);
+    statsPipelineLayout = VulkanHandle<VkPipelineLayout>(statsPipelineLayout_, context_->device, vkDestroyPipelineLayout);
+    statsDescriptorSetLayout = VulkanHandle<VkDescriptorSetLayout>(statsDescriptorSetLayout_, context_->device, vkDestroyDescriptorSetLayout);
 
-    rayTracingPipeline = VulkanHandle<VkPipeline>(rayTracingPipeline_, context_.device, vkDestroyPipeline);
-    rayTracingPipelineLayout = VulkanHandle<VkPipelineLayout>(rayTracingPipelineLayout_, context_.device, vkDestroyPipelineLayout);
-    rayTracingDescriptorSetLayoutHandle = VulkanHandle<VkDescriptorSetLayout>(rayTracingDescriptorSetLayout_, context_.device, vkDestroyDescriptorSetLayout);
+    rayTracingPipeline = VulkanHandle<VkPipeline>(rayTracingPipeline_, context_->device, vkDestroyPipeline);
+    rayTracingPipelineLayout = VulkanHandle<VkPipelineLayout>(rayTracingPipelineLayout_, context_->device, vkDestroyPipelineLayout);
+    rayTracingDescriptorSetLayoutHandle = VulkanHandle<VkDescriptorSetLayout>(rayTracingDescriptorSetLayout_, context_->device, vkDestroyDescriptorSetLayout);
 
-    renderPassHandle = VulkanHandle<VkRenderPass>(renderPass_, context_.device, vkDestroyRenderPass);
-    pipelineCacheHandle = VulkanHandle<VkPipelineCache>(pipelineCache_, context_.device, vkDestroyPipelineCache);
-    transientPoolHandle = VulkanHandle<VkCommandPool>(transientPool_, context_.device, vkDestroyCommandPool);
+    renderPassHandle = VulkanHandle<VkRenderPass>(renderPass_, context_->device, vkDestroyRenderPass);
+    pipelineCacheHandle = VulkanHandle<VkPipelineCache>(pipelineCache_, context_->device, vkDestroyPipelineCache);
+    transientPoolHandle = VulkanHandle<VkCommandPool>(transientPool_, context_->device, vkDestroyCommandPool);
 
-    createShaderBindingTable(context.physicalDevice);
+    createShaderBindingTable(context_->physicalDevice);
 
     LOG_SUCCESS_CAT("PipelineMgr", "{}VALHALLA PIPELINE MANAGER ARMED — ALL RAII WRAPPED — STONEKEY 0x{:X}-0x{:X} — BLISS ACHIEVED{}",
                     EMERALD_GREEN, kStone1, kStone2, RESET);
 }
 
 VulkanPipelineManager::~VulkanPipelineManager() {
-    LOG_INFO_CAT("PipelineMgr", "{}VulkanPipelineManager DEATH — RAII PURGE — STONEKEY 0x{:X}-0x{:X}{}",
-                 CRIMSON_MAGENTA, kStone1, kStone2, RESET);
-
 #ifdef ENABLE_VULKAN_DEBUG
     if (debugMessenger_) {
-        auto func = (PFN_vkDestroyDebugUtilsMessengerEXT)vkGetInstanceProcAddr(context_.instance, "vkDestroyDebugUtilsMessengerEXT");
-        if (func) func(context_.instance, debugMessenger_, nullptr);
+        auto func = (PFN_vkDestroyDebugUtilsMessengerEXT)vkGetInstanceProcAddr(context_->instance, "vkDestroyDebugUtilsMessengerEXT");
+        if (func) func(context_->instance, debugMessenger_, nullptr);
     }
 #endif
 
@@ -203,8 +168,8 @@ void VulkanPipelineManager::setupDebugCallback() {
         .pfnUserCallback = debugCallback,
         .pUserData = this
     };
-    auto func = (PFN_vkCreateDebugUtilsMessengerEXT)vkGetInstanceProcAddr(context_.instance, "vkCreateDebugUtilsMessengerEXT");
-    if (func) func(context_.instance, &createInfo, nullptr, &debugMessenger_);
+    auto func = (PFN_vkCreateDebugUtilsMessengerEXT)vkGetInstanceProcAddr(context_->instance, "vkCreateDebugUtilsMessengerEXT");
+    if (func) func(context_->instance, &createInfo, nullptr, &debugMessenger_);
 }
 #endif
 
@@ -212,9 +177,9 @@ void VulkanPipelineManager::createTransientCommandPool() {
     VkCommandPoolCreateInfo info{
         .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
         .flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT | VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
-        .queueFamilyIndex = context_.graphicsFamily
+        .queueFamilyIndex = context_->graphicsFamily
     };
-    VK_CHECK(vkCreateCommandPool(context_.device, &info, nullptr, &transientPool_), "Failed to create transient command pool");
+    VK_CHECK(vkCreateCommandPool(context_->device, &info, nullptr, &transientPool_), "Failed to create transient command pool");
     // RAII already wrapped in ctor
 }
 
@@ -225,7 +190,7 @@ VkPipelineLayout VulkanPipelineManager::createGraphicsPipelineLayout() {
         .pSetLayouts = &graphicsDescriptorSetLayout_
        };
     VkPipelineLayout layout = VK_NULL_HANDLE;
-    VK_CHECK(vkCreatePipelineLayout(context_.device, &layoutInfo, nullptr, &layout), "Failed to create graphics pipeline layout");
+    VK_CHECK(vkCreatePipelineLayout(context_->device, &layoutInfo, nullptr, &layout), "Failed to create graphics pipeline layout");
     return layout;
 }
 
@@ -236,7 +201,7 @@ VkPipelineLayout VulkanPipelineManager::createComputePipelineLayout() {
         .pSetLayouts = &computeDescriptorSetLayout_
     };
     VkPipelineLayout layout = VK_NULL_HANDLE;
-    VK_CHECK(vkCreatePipelineLayout(context_.device, &layoutInfo, nullptr, &layout), "Failed to create compute pipeline layout");
+    VK_CHECK(vkCreatePipelineLayout(context_->device, &layoutInfo, nullptr, &layout), "Failed to create compute pipeline layout");
     return layout;
 }
 
@@ -247,7 +212,7 @@ VkPipelineLayout VulkanPipelineManager::createNexusPipelineLayout() {
         .pSetLayouts = &nexusDescriptorSetLayout_
     };
     VkPipelineLayout layout = VK_NULL_HANDLE;
-    VK_CHECK(vkCreatePipelineLayout(context_.device, &layoutInfo, nullptr, &layout), "Failed to create nexus pipeline layout");
+    VK_CHECK(vkCreatePipelineLayout(context_->device, &layoutInfo, nullptr, &layout), "Failed to create nexus pipeline layout");
     return layout;
 }
 
@@ -258,7 +223,7 @@ VkPipelineLayout VulkanPipelineManager::createStatsPipelineLayout() {
         .pSetLayouts = &statsDescriptorSetLayout_
     };
     VkPipelineLayout layout = VK_NULL_HANDLE;
-    VK_CHECK(vkCreatePipelineLayout(context_.device, &layoutInfo, nullptr, &layout), "Failed to create stats pipeline layout");
+    VK_CHECK(vkCreatePipelineLayout(context_->device, &layoutInfo, nullptr, &layout), "Failed to create stats pipeline layout");
     return layout;
 }
 
@@ -269,7 +234,7 @@ VkPipelineLayout VulkanPipelineManager::createRayTracingPipelineLayout() {
         .pSetLayouts = &rayTracingDescriptorSetLayout_
     };
     VkPipelineLayout layout = VK_NULL_HANDLE;
-    VK_CHECK(vkCreatePipelineLayout(context_.device, &layoutInfo, nullptr, &layout), "Failed to create ray tracing pipeline layout");
+    VK_CHECK(vkCreatePipelineLayout(context_->device, &layoutInfo, nullptr, &layout), "Failed to create ray tracing pipeline layout");
     return layout;
 }
 
@@ -279,13 +244,13 @@ void VulkanPipelineManager::createPipelineCache() {
         .initialDataSize = 0,
         .pInitialData = nullptr
     };
-    VK_CHECK(vkCreatePipelineCache(context_.device, &createInfo, nullptr, &pipelineCache_), "Failed to create pipeline cache");
+    VK_CHECK(vkCreatePipelineCache(context_->device, &createInfo, nullptr, &pipelineCache_), "Failed to create pipeline cache");
     // RAII wrapped
 }
 
 void VulkanPipelineManager::createRenderPass() {
     VkAttachmentDescription colorAttachment{
-        .format = context_.swapchainImageFormat,  // From reference: dynamic format
+        .format = context_->swapchainImageFormat,  // From reference: dynamic format
         .samples = VK_SAMPLE_COUNT_1_BIT,
         .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
         .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
@@ -324,7 +289,7 @@ void VulkanPipelineManager::createRenderPass() {
         .dependencyCount = 1,
         .pDependencies = &dependency
     };
-    VK_CHECK(vkCreateRenderPass(context_.device, &renderPassInfo, nullptr, &renderPass_), "Failed to create render pass");
+    VK_CHECK(vkCreateRenderPass(context_->device, &renderPassInfo, nullptr, &renderPass_), "Failed to create render pass");
     // RAII wrapped
 }
 
@@ -356,7 +321,7 @@ void VulkanPipelineManager::createGraphicsDescriptorSetLayout() {
         .bindingCount = static_cast<uint32_t>(bindings.size()),
         .pBindings = bindings.data()
     };
-    VK_CHECK(vkCreateDescriptorSetLayout(context_.device, &layoutInfo, nullptr, &graphicsDescriptorSetLayout_), "Failed to create graphics descriptor set layout");
+    VK_CHECK(vkCreateDescriptorSetLayout(context_->device, &layoutInfo, nullptr, &graphicsDescriptorSetLayout_), "Failed to create graphics descriptor set layout");
     // RAII wrapped
 }
 
@@ -374,7 +339,7 @@ void VulkanPipelineManager::createComputeDescriptorSetLayout() {
         .bindingCount = static_cast<uint32_t>(bindings.size()),
         .pBindings = bindings.data()
     };
-    VK_CHECK(vkCreateDescriptorSetLayout(context_.device, &layoutInfo, nullptr, &computeDescriptorSetLayout_), "Failed to create compute descriptor set layout");
+    VK_CHECK(vkCreateDescriptorSetLayout(context_->device, &layoutInfo, nullptr, &computeDescriptorSetLayout_), "Failed to create compute descriptor set layout");
     // RAII wrapped
 }
 
@@ -392,7 +357,7 @@ void VulkanPipelineManager::createNexusDescriptorSetLayout() {
         .bindingCount = static_cast<uint32_t>(bindings.size()),
         .pBindings = bindings.data()
     };
-    VK_CHECK(vkCreateDescriptorSetLayout(context_.device, &layoutInfo, nullptr, &nexusDescriptorSetLayout_), "Failed to create nexus descriptor set layout");
+    VK_CHECK(vkCreateDescriptorSetLayout(context_->device, &layoutInfo, nullptr, &nexusDescriptorSetLayout_), "Failed to create nexus descriptor set layout");
     // RAII wrapped
 }
 
@@ -408,7 +373,7 @@ void VulkanPipelineManager::createStatsDescriptorSetLayout() {
         .bindingCount = static_cast<uint32_t>(statsBindings.size()),
         .pBindings = statsBindings.data()
     };
-    VK_CHECK(vkCreateDescriptorSetLayout(context_.device, &layoutInfo, nullptr, &statsDescriptorSetLayout_), "Failed to create stats descriptor set layout");
+    VK_CHECK(vkCreateDescriptorSetLayout(context_->device, &layoutInfo, nullptr, &statsDescriptorSetLayout_), "Failed to create stats descriptor set layout");
     // RAII wrapped
 }
 
@@ -438,7 +403,7 @@ VkDescriptorSetLayout VulkanPipelineManager::createRayTracingDescriptorSetLayout
         .pBindings = bindings
     };
     VkDescriptorSetLayout layout = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateDescriptorSetLayout(context_.device, &layoutInfo, nullptr, &layout), "Failed to create ray tracing descriptor set layout");
+    VK_CHECK(vkCreateDescriptorSetLayout(context_->device, &layoutInfo, nullptr, &layout), "Failed to create ray tracing descriptor set layout");
     // RAII wrapped in ctor
     return layout;
 }
@@ -446,8 +411,8 @@ VkDescriptorSetLayout VulkanPipelineManager::createRayTracingDescriptorSetLayout
 void VulkanPipelineManager::createGraphicsPipeline(int width, int height) {
     std::string vertPath = findShaderPath("graphics/tonemap_vert");
     std::string fragPath = findShaderPath("graphics/tonemap_frag");
-    auto vertShader = loadShaderImpl(context_.device, vertPath);
-    auto fragShader = loadShaderImpl(context_.device, fragPath);
+    auto vertShader = loadShaderImpl(context_->device, vertPath);
+    auto fragShader = loadShaderImpl(context_->device, fragPath);
 
     VkPipelineShaderStageCreateInfo vertShaderStage{
         .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
@@ -539,15 +504,15 @@ void VulkanPipelineManager::createGraphicsPipeline(int width, int height) {
         .renderPass = renderPass_,
         .subpass = 0
     };
-    VK_CHECK(vkCreateGraphicsPipelines(context_.device, pipelineCache_, 1, &pipelineInfo, nullptr, &graphicsPipeline_), "Failed to create graphics pipeline");
+    VK_CHECK(vkCreateGraphicsPipelines(context_->device, pipelineCache_, 1, &pipelineInfo, nullptr, &graphicsPipeline_), "Failed to create graphics pipeline");
 
-    vkDestroyShaderModule(context_.device, vertShader, nullptr);
-    vkDestroyShaderModule(context_.device, fragShader, nullptr);
+    vkDestroyShaderModule(context_->device, vertShader, nullptr);
+    vkDestroyShaderModule(context_->device, fragShader, nullptr);
     // RAII wrapped
 }
 
 void VulkanPipelineManager::createComputePipeline() {
-    VkShaderModule compShader = loadShaderImpl(context_.device, findShaderPath("tonemap_compute"));
+    VkShaderModule compShader = loadShaderImpl(context_->device, findShaderPath("tonemap_compute"));
 
     VkPipelineShaderStageCreateInfo stage{
         .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
@@ -562,13 +527,13 @@ void VulkanPipelineManager::createComputePipeline() {
         .stage = stage,
         .layout = computePipelineLayout_
     };
-    VK_CHECK(vkCreateComputePipelines(context_.device, pipelineCache_, 1, &pipelineInfo, nullptr, &computePipeline_), "Failed to create compute pipeline");
-    vkDestroyShaderModule(context_.device, compShader, nullptr);
+    VK_CHECK(vkCreateComputePipelines(context_->device, pipelineCache_, 1, &pipelineInfo, nullptr, &computePipeline_), "Failed to create compute pipeline");
+    vkDestroyShaderModule(context_->device, compShader, nullptr);
     // RAII wrapped
 }
 
 void VulkanPipelineManager::createNexusPipeline() {
-    VkShaderModule computeShader = loadShaderImpl(context_.device, findShaderPath("nexusDecision"));
+    VkShaderModule computeShader = loadShaderImpl(context_->device, findShaderPath("nexusDecision"));
 
     VkPipelineShaderStageCreateInfo stage{
         .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
@@ -583,13 +548,13 @@ void VulkanPipelineManager::createNexusPipeline() {
         .stage = stage,
         .layout = nexusPipelineLayout_
     };
-    VK_CHECK(vkCreateComputePipelines(context_.device, pipelineCache_, 1, &pipelineInfo, nullptr, &nexusPipeline_), "Failed to create nexus pipeline");
-    vkDestroyShaderModule(context_.device, computeShader, nullptr);
+    VK_CHECK(vkCreateComputePipelines(context_->device, pipelineCache_, 1, &pipelineInfo, nullptr, &nexusPipeline_), "Failed to create nexus pipeline");
+    vkDestroyShaderModule(context_->device, computeShader, nullptr);
     // RAII wrapped
 }
 
 void VulkanPipelineManager::createStatsPipeline() {
-    VkShaderModule statsShader = loadShaderImpl(context_.device, findShaderPath("statsAnalyzer"));
+    VkShaderModule statsShader = loadShaderImpl(context_->device, findShaderPath("statsAnalyzer"));
 
     VkPipelineShaderStageCreateInfo stage{
         .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
@@ -604,17 +569,22 @@ void VulkanPipelineManager::createStatsPipeline() {
         .stage = stage,
         .layout = statsPipelineLayout_
     };
-    VK_CHECK(vkCreateComputePipelines(context_.device, pipelineCache_, 1, &pipelineInfo, nullptr, &statsPipeline_), "Failed to create stats pipeline");
-    vkDestroyShaderModule(context_.device, statsShader, nullptr);
+    VK_CHECK(vkCreateComputePipelines(context_->device, pipelineCache_, 1, &pipelineInfo, nullptr, &statsPipeline_), "Failed to create stats pipeline");
+    vkDestroyShaderModule(context_->device, statsShader, nullptr);
     // RAII wrapped
 }
 
-void VulkanPipelineManager::createRayTracingPipeline(const std::vector<std::string>& shaderNames,
-                                                     VkPhysicalDevice physDev, VkDevice dev, VkDescriptorSet /*unused*/) {
+void VulkanPipelineManager::createRayTracingPipeline(VulkanRTX* rtx) {
+    if (!rtx) {
+        LOG_WARN_CAT("PipelineMgr", "{}createRayTracingPipeline: null rtx{}", CRIMSON_MAGENTA, RESET);
+        return;
+    }
+    std::vector<std::string> shaderNames = {"raygen", "miss", "closesthit", "anyhit", "shadowmiss", "shadow_anyhit"};
+
     std::vector<VkPipelineShaderStageCreateInfo> stages;
     std::vector<VkShaderModule> modules;
     for (const auto& name : shaderNames) {
-        VkShaderModule module = loadShaderImpl(dev, findShaderPath(name));
+        VkShaderModule module = loadShaderImpl(rtx->device, findShaderPath(name));
         modules.push_back(module);
         VkPipelineShaderStageCreateInfo stage{
             .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
@@ -682,18 +652,17 @@ void VulkanPipelineManager::createRayTracingPipeline(const std::vector<std::stri
         .layout = rayTracingPipelineLayout_
     };
 
-    VK_CHECK(g_vulkanRTX.vkCreateRayTracingPipelinesKHR(dev, VK_NULL_HANDLE, pipelineCache_, 1, &pipelineInfo, nullptr, &rayTracingPipeline_), "Failed to create ray tracing pipeline");
+    VK_CHECK(g_vulkanRTX.vkCreateRayTracingPipelinesKHR(rtx->device, VK_NULL_HANDLE, pipelineCache_, 1, &pipelineInfo, nullptr, &rayTracingPipeline_), "Failed to create ray tracing pipeline");
 
     for (auto module : modules) {
-        vkDestroyShaderModule(dev, module, nullptr);
+        vkDestroyShaderModule(rtx->device, module, nullptr);
     }
     // RAII wrapped
 }
 
-void VulkanPipelineManager::createAccelerationStructures(VkBuffer vertexBuffer, VkBuffer indexBuffer,
-                                                         VulkanBufferManager& bufferMgr, VulkanRenderer* renderer) {
+void VulkanPipelineManager::createAccelerationStructures(VkBuffer vertexBuffer, VkBuffer indexBuffer, uint32_t& numPrimitives, VulkanRenderer* renderer) {
     // Merged: hardcoded sizes + detailed logging from reference
-    uint32_t numPrimitives = 10000;  // TODO: renderer->getNumPrimitives()
+    numPrimitives = 10000;  // TODO: renderer->getNumPrimitives()
     uint32_t numVertices = 30000;   // TODO: renderer->getNumVertices()
 
     const auto asStart = std::chrono::high_resolution_clock::now();
@@ -703,12 +672,12 @@ void VulkanPipelineManager::createAccelerationStructures(VkBuffer vertexBuffer, 
     VkBufferDeviceAddressInfo vertexInfo{};
     vertexInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
     vertexInfo.buffer = vertexBuffer;
-    VkDeviceAddress vertexAddr = g_vulkanRTX.vkGetBufferDeviceAddress(context_.device, &vertexInfo);
+    VkDeviceAddress vertexAddr = g_vulkanRTX.vkGetBufferDeviceAddress(context_->device, &vertexInfo);
 
     VkBufferDeviceAddressInfo indexInfo{};
     indexInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
     indexInfo.buffer = indexBuffer;
-    VkDeviceAddress indexAddr = g_vulkanRTX.vkGetBufferDeviceAddress(context_.device, &indexInfo);
+    VkDeviceAddress indexAddr = g_vulkanRTX.vkGetBufferDeviceAddress(context_->device, &indexInfo);
 
     LOG_INFO_CAT("PipelineMgr", "{}    vertexAddr=0x{:x}, indexAddr=0x{:x} — {} verts{}", 
                  EMERALD_GREEN, vertexAddr, indexAddr, numVertices, RESET);
@@ -743,19 +712,19 @@ void VulkanPipelineManager::createAccelerationStructures(VkBuffer vertexBuffer, 
 
     VkAccelerationStructureBuildSizesInfoKHR sizes{};
     uint32_t maxPrimCount = numPrimitives;
-    g_vulkanRTX.vkGetAccelerationStructureBuildSizesKHR(context_.device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &buildInfo, &maxPrimCount, &sizes);
+    g_vulkanRTX.vkGetAccelerationStructureBuildSizesKHR(context_->device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &buildInfo, &maxPrimCount, &sizes);
 
     LOG_INFO_CAT("PipelineMgr", "{}    BLAS sizes: AS={}B, scratch={}B{}", EMERALD_GREEN, sizes.accelerationStructureSize, sizes.buildScratchSize, RESET);
 
     // Create BLAS buffer (use global VulkanRTX::createBuffer)
-    g_vulkanRTX.createBuffer(context_.physicalDevice, sizes.accelerationStructureSize,
+    g_vulkanRTX.createBuffer(context_->physicalDevice, sizes.accelerationStructureSize,
                              VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
                              VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, blasBufferHandle, blasMemoryHandle);
 
     // Create scratch (temp)
-    VulkanHandle<VkBuffer> scratchBufferTemp(nullptr, context_.device, vkDestroyBuffer);
-    VulkanHandle<VkDeviceMemory> scratchMemoryTemp(nullptr, context_.device, vkFreeMemory);
-    g_vulkanRTX.createBuffer(context_.physicalDevice, sizes.buildScratchSize,
+    VulkanHandle<VkBuffer> scratchBufferTemp(nullptr, context_->device, vkDestroyBuffer);
+    VulkanHandle<VkDeviceMemory> scratchMemoryTemp(nullptr, context_->device, vkFreeMemory);
+    g_vulkanRTX.createBuffer(context_->physicalDevice, sizes.buildScratchSize,
                              VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
                              VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, scratchBufferTemp, scratchMemoryTemp);
 
@@ -766,18 +735,18 @@ void VulkanPipelineManager::createAccelerationStructures(VkBuffer vertexBuffer, 
     asCreateInfo.size = sizes.accelerationStructureSize;
     asCreateInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
     VkAccelerationStructureKHR blasTemp;
-    VK_CHECK(g_vulkanRTX.vkCreateAccelerationStructureKHR(context_.device, &asCreateInfo, nullptr, &blasTemp), "Failed to create BLAS");
-    blasHandle = makeAccelerationStructure(context_.device, blasTemp);
+    VK_CHECK(g_vulkanRTX.vkCreateAccelerationStructureKHR(context_->device, &asCreateInfo, nullptr, &blasTemp), "Failed to create BLAS");
+    blasHandle = makeAccelerationStructure(context_->device, blasTemp);
 
     // Build BLAS
     VkBufferDeviceAddressInfo scratchInfoAddr{};
     scratchInfoAddr.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
     scratchInfoAddr.buffer = scratchBufferTemp.raw();
-    VkDeviceAddress scratchAddr = g_vulkanRTX.vkGetBufferDeviceAddress(context_.device, &scratchInfoAddr);
+    VkDeviceAddress scratchAddr = g_vulkanRTX.vkGetBufferDeviceAddress(context_->device, &scratchInfoAddr);
     buildInfo.dstAccelerationStructure = blasHandle.raw();
     buildInfo.scratchData.deviceAddress = scratchAddr;
 
-    VkCommandBuffer cmd = beginSingleCommand(transientPool_, context_.device);
+    VkCommandBuffer cmd = beginSingleCommand(transientPool_, context_->device);
     VkAccelerationStructureBuildRangeInfoKHR rangeInfo{};
     rangeInfo.primitiveCount = numPrimitives;
     rangeInfo.primitiveOffset = 0;
@@ -785,7 +754,7 @@ void VulkanPipelineManager::createAccelerationStructures(VkBuffer vertexBuffer, 
     rangeInfo.transformOffset = 0;
     const VkAccelerationStructureBuildRangeInfoKHR* pRangeInfos[] = { &rangeInfo };
     g_vulkanRTX.vkCmdBuildAccelerationStructuresKHR(cmd, 1, &buildInfo, pRangeInfos);
-    endSingleCommand(cmd, graphicsQueue_, transientPool_, context_.device);
+    endSingleCommand(cmd, graphicsQueue_, transientPool_, context_->device);
 
     LOG_INFO_CAT("PipelineMgr", "{}BLAS built — {} primitives{}", EMERALD_GREEN, numPrimitives, RESET);
 
@@ -852,7 +821,7 @@ void VulkanPipelineManager::updateRayTracingDescriptorSet(VkDescriptorSet ds, Vk
         .descriptorCount = 1,
         .descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR
     };
-    vkUpdateDescriptorSets(context_.device, 1, &accelerationWrite, 0, nullptr);
+    vkUpdateDescriptorSets(context_->device, 1, &accelerationWrite, 0, nullptr);
 
     LOG_DEBUG_CAT("PipelineMgr", "RT DS updated with TLAS");
 }
@@ -933,11 +902,11 @@ void VulkanPipelineManager::createShaderBindingTable(VkPhysicalDevice physDev) {
         .usage = VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
         .sharingMode = VK_SHARING_MODE_EXCLUSIVE
     };
-    VK_CHECK(vkCreateBuffer(context_.device, &bufferInfo, nullptr, &sbtBufferTemp), "Failed to create SBT buffer");
-    sbtBufferHandle = VulkanHandle<VkBuffer>(sbtBufferTemp, context_.device, vkDestroyBuffer);
+    VK_CHECK(vkCreateBuffer(context_->device, &bufferInfo, nullptr, &sbtBufferTemp), "Failed to create SBT buffer");
+    sbtBufferHandle = VulkanHandle<VkBuffer>(sbtBufferTemp, context_->device, vkDestroyBuffer);
 
     VkMemoryRequirements reqs;
-    vkGetBufferMemoryRequirements(context_.device, sbtBufferHandle.raw(), &reqs);
+    vkGetBufferMemoryRequirements(context_->device, sbtBufferHandle.raw(), &reqs);
     VkMemoryAllocateFlagsInfo allocInfo{
         .sType = VK_MEMORY_ALLOCATE_FLAGS_INFO,
         .flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT
@@ -949,27 +918,27 @@ void VulkanPipelineManager::createShaderBindingTable(VkPhysicalDevice physDev) {
         .memoryTypeIndex = g_vulkanRTX.findMemoryType(physDev, reqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT),
     };
     VkDeviceMemory sbtMemoryTemp = VK_NULL_HANDLE;
-    VK_CHECK(vkAllocateMemory(context_.device, &memInfo, nullptr, &sbtMemoryTemp), "Failed to allocate SBT memory");
-    sbtMemoryHandle = VulkanHandle<VkDeviceMemory>(sbtMemoryTemp, context_.device, vkFreeMemory);
-    VK_CHECK(vkBindBufferMemory(context_.device, sbtBufferHandle.raw(), sbtMemoryHandle.raw(), 0), "Failed to bind SBT memory");
+    VK_CHECK(vkAllocateMemory(context_->device, &memInfo, nullptr, &sbtMemoryTemp), "Failed to allocate SBT memory");
+    sbtMemoryHandle = VulkanHandle<VkDeviceMemory>(sbtMemoryTemp, context_->device, vkFreeMemory);
+    VK_CHECK(vkBindBufferMemory(context_->device, sbtBufferHandle.raw(), sbtMemoryHandle.raw(), 0), "Failed to bind SBT memory");
 
     // Get handles
     std::vector<uint8_t> handles(numGroups * handleSize);
-    VK_CHECK(g_vulkanRTX.vkGetRayTracingShaderGroupHandlesKHR(context_.device, rayTracingPipeline.raw(), 0, numGroups, handles.size(), handles.data()), "Failed to get RT shader group handles");
+    VK_CHECK(g_vulkanRTX.vkGetRayTracingShaderGroupHandlesKHR(context_->device, rayTracingPipeline.raw(), 0, numGroups, handles.size(), handles.data()), "Failed to get RT shader group handles");
 
     // Copy to SBT buffer
     void* mapped;
-    VK_CHECK(vkMapMemory(context_.device, sbtMemoryHandle.raw(), 0, sbtSize, 0, &mapped), "Failed to map SBT memory");
+    VK_CHECK(vkMapMemory(context_->device, sbtMemoryHandle.raw(), 0, sbtSize, 0, &mapped), "Failed to map SBT memory");
     uint8_t* ptr = static_cast<uint8_t*>(mapped);
     for (uint32_t i = 0; i < numGroups; ++i) {
         memcpy(ptr + i * alignedSize, handles.data() + i * handleSize, handleSize);
     }
-    vkUnmapMemory(context_.device, sbtMemoryHandle.raw());
+    vkUnmapMemory(context_->device, sbtMemoryHandle.raw());
 
     VkBufferDeviceAddressInfo sbtInfoAddr{};
     sbtInfoAddr.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
     sbtInfoAddr.buffer = sbtBufferHandle.raw();
-    VkDeviceAddress sbtAddr = g_vulkanRTX.vkGetBufferDeviceAddress(context_.device, &sbtInfoAddr);
+    VkDeviceAddress sbtAddr = g_vulkanRTX.vkGetBufferDeviceAddress(context_->device, &sbtInfoAddr);
     sbt_.raygen = ShaderBindingTable::makeRegion(sbtAddr + 0 * alignedSize, handleSize, alignedSize);
     sbt_.miss = ShaderBindingTable::makeRegion(sbtAddr + 1 * alignedSize, handleSize, alignedSize);
     sbt_.hit = ShaderBindingTable::makeRegion(sbtAddr + 2 * alignedSize, handleSize, alignedSize);

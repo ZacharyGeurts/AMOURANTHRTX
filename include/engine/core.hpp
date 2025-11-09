@@ -24,7 +24,6 @@ extern uint64_t g_destructionCounter;
 struct Context;
 class VulkanRenderer;
 class VulkanPipelineManager;
-class VulkanRTX;
 
 struct RTConstants;
 

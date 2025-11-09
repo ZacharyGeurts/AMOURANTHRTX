@@ -20,10 +20,9 @@
     #include "../GLOBAL/StoneKey.hpp" // Always top
     #include "../GLOBAL/Dispose.hpp" // Always top after
     #include "../GLOBAL/logging.hpp" // Good sense
-    #include "engine/core.hpp"
-    #include "../GLOBAL/camera.hpp" // It sees everywhere
-    #include "../GLOBAL/SwapchainManager.hpp" // Happy birthday — SINGLETON SUPREMACY
-    #include "../GLOBAL/BufferManager.hpp" // Happy birthday
+	#include "engine/core.hpp"
+	
+	#include "engine/Vulkan/VulkanRTX_Setup.hpp"
 
     // ========================================================================
     // CRITICAL: ALL STANDARD / GLM / VULKAN / LOGGING INCLUDES MUST BE GLOBAL
@@ -48,20 +47,10 @@
     #include <atomic>
     #include <SDL3/SDL.h>
     #include <SDL3/SDL_vulkan.h>
-
-    class MyPooledBufferMgr : public BufferManager {
+	
+	class MyPooledBufferMgr : public BufferManager {
         // custom pooling, stats, etc.
     };
-
-
-    #define VK_CHECK(result, msg) \
-        do { \
-            VkResult __r = (result); \
-            if (__r != VK_SUCCESS) { \
-                LOG_ERROR_CAT("Vulkan", "VULKAN FATAL [{}] {}:{} — {}", static_cast<int>(__r), __FILE__, __LINE__, msg); \
-                std::abort(); \
-            } \
-        } while (0)
 
 #else  // GLSL
 
@@ -757,3 +746,4 @@ void createSwapchain(Context& ctx, uint32_t width, uint32_t height);
 // ===================================================================
 void cleanupAll(Context& ctx) noexcept;
 #endif // __cplusplus
+extern VulkanRTX g_vulkanRTX;          // Global access — STONEKEY APPROVED
