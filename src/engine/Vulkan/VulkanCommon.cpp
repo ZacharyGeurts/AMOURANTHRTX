@@ -20,16 +20,6 @@ std::string threadIdToString() {
     ss << std::this_thread::get_id();
     return ss.str();
 }
-
-void logAndTrackDestruction(std::string_view name, auto handle, int line) {
-    if (handle) {
-        g_destructionCounter++;
-        LOG_INFO_CAT("Dispose", "{}[{}] {} destroyed @ line {} — TOTAL: {} — STONE1: 0x{:X} STONE2: 0x{:X}{}",
-                     Logging::Color::DIAMOND_WHITE, threadIdToString(), name, line,
-                     g_destructionCounter.load(), kStone1, kStone2, Logging::Color::RESET);
-    }
-}
-
 // ===================================================================
 // VulkanResourceManager::releaseAll — FULL STONEKEY OBLITERATION
 // ===================================================================
@@ -138,9 +128,6 @@ void cleanupAll(Context& ctx) noexcept {
         vkDestroyInstance(ctx.instance, nullptr);
         logAndTrackDestruction("Instance", ctx.instance, __LINE__);
     }
-
-    LOG_SUCCESS_CAT("Dispose", "{}GLOBAL CLEANUP COMPLETE — {} DESTROYED — VALHALLA ETERNAL 🩷{}",
-                    Logging::Color::EMERALD_GREEN, g_destructionCounter.load(), Logging::Color::RESET);
 }
 
 // ===================================================================
