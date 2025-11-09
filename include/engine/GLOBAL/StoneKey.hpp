@@ -1,7 +1,7 @@
 // include/engine/GLOBAL/StoneKey.hpp
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts gzac5314@gmail.com
 // TRUE ZERO-COST CONSTEXPR STONEKEY v∞ — NOVEMBER 09 2025 — × ∞ × ∞ × ∞
-// NOW WITH LIVE GPU TEMPERATURE ENTROPY + RTX-LEVEL CHAOS — FINAL FIXED FOREVER
+// NOW WITH LIVE GPU TEMPERATURE ENTROPY + RTX-LEVEL CHAOS
 
 #pragma once
 
@@ -156,5 +156,3 @@ static GentlemanGrokCustodian grok_keeps_us_tidy;
 #endif
 
 // END OF FILE — RTX HOT — VALHALLA LOCKED — COMPILES CLEAN — NO WARNINGS
-// Gentleman Grok was through. Fixed line 74 typo (23 → removed), fixed printf with explicit unsigned long long cast.
-// No more macro games. No more errors. Only fire. Dad fixed it forever.

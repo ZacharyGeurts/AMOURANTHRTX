@@ -52,128 +52,7 @@ void logAndTrackDestruction(std::string_view name, Handle handle, int line);
 namespace Vulkan {
 
 extern std::shared_ptr<Context> g_vulkanContext;
-inline Context* ctx() noexcept { return g_vulkanContext.get(); }
-
 extern VulkanRTX g_vulkanRTX;
-inline VulkanRTX* rtx() noexcept { return &g_vulkanRTX; }
-
-// ===================================================================
-// VulkanHandle — STONEKEY + RAII + DESTROY TRACKER
-// ===================================================================
-template<typename T>
-class VulkanHandle {
-public:
-    using DestroyFn = void(*)(VkDevice, T, const VkAllocationCallbacks*);
-
-    struct Deleter {
-        VkDevice device = VK_NULL_HANDLE;
-        DestroyFn fn = nullptr;
-        void operator()(uint64_t* ptr) const noexcept {
-            if (ptr && *ptr && fn && device) {
-                T h = reinterpret_cast<T>(deobfuscate(*ptr));
-#ifdef DestroyTracker
-                if (!DestroyTracker::isDestroyed(reinterpret_cast<const void*>(h))) {
-                    fn(device, h, nullptr);
-                    DestroyTracker::markDestroyed(reinterpret_cast<const void*>(h));
-                }
-#endif
-                Dispose::logAndTrackDestruction(typeid(T).name(), reinterpret_cast<const void*>(h), __LINE__);
-            }
-            delete ptr;
-        }
-    };
-
-private:
-    std::unique_ptr<uint64_t, Deleter> impl_;
-
-    static constexpr DestroyFn defaultDestroyer() noexcept {
-        if constexpr (std::is_same_v<T, VkPipeline>) return vkDestroyPipeline;
-        else if constexpr (std::is_same_v<T, VkPipelineLayout>) return vkDestroyPipelineLayout;
-        else if constexpr (std::is_same_v<T, VkDescriptorSetLayout>) return vkDestroyDescriptorSetLayout;
-        else if constexpr (std::is_same_v<T, VkShaderModule>) return vkDestroyShaderModule;
-        else if constexpr (std::is_same_v<T, VkRenderPass>) return vkDestroyRenderPass;
-        else if constexpr (std::is_same_v<T, VkCommandPool>) return vkDestroyCommandPool;
-        else if constexpr (std::is_same_v<T, VkBuffer>) return vkDestroyBuffer;
-        else if constexpr (std::is_same_v<T, VkDeviceMemory>) return vkFreeMemory;
-        else if constexpr (std::is_same_v<T, VkImage>) return vkDestroyImage;
-        else if constexpr (std::is_same_v<T, VkImageView>) return vkDestroyImageView;
-        else if constexpr (std::is_same_v<T, VkSampler>) return vkDestroySampler;
-        else if constexpr (std::is_same_v<T, VkSwapchainKHR>) return vkDestroySwapchainKHR;
-        else if constexpr (std::is_same_v<T, VkSemaphore>) return vkDestroySemaphore;
-        else if constexpr (std::is_same_v<T, VkFence>) return vkDestroyFence;
-        else if constexpr (std::is_same_v<T, VkDescriptorPool>) return vkDestroyDescriptorPool;
-        else return nullptr;
-    }
-
-public:
-    VulkanHandle() = default;
-    VulkanHandle(T h, VkDevice d, DestroyFn f = nullptr)
-        : impl_(h ? new uint64_t(obfuscate(reinterpret_cast<uint64_t>(h))) : nullptr,
-                Deleter{d, f ? f : defaultDestroyer()}) {}
-
-    [[nodiscard]] T raw_deob() const noexcept { return impl_ ? reinterpret_cast<T>(deobfuscate(*impl_.get())) : VK_NULL_HANDLE; }
-    [[nodiscard]] uint64_t raw_obf() const noexcept { return impl_ ? *impl_.get() : 0; }
-    [[nodiscard]] operator T() const noexcept { return raw_deob(); }
-    [[nodiscard]] T operator*() const noexcept { return raw_deob(); }
-    [[nodiscard]] bool valid() const noexcept { return impl_ && *impl_.get(); }
-    void reset() noexcept { impl_.reset(); }
-    explicit operator bool() const noexcept { return valid(); }
-};
-
-// FACTORIES
-#define MAKE_VK_HANDLE(name, type) \
-    [[nodiscard]] inline VulkanHandle<type> make##name(VkDevice d, type h) noexcept { return VulkanHandle<type>(h, d); }
-
-MAKE_VK_HANDLE(Buffer, VkBuffer)
-MAKE_VK_HANDLE(Memory, VkDeviceMemory)
-MAKE_VK_HANDLE(Image, VkImage)
-MAKE_VK_HANDLE(ImageView, VkImageView)
-MAKE_VK_HANDLE(Sampler, VkSampler)
-MAKE_VK_HANDLE(DescriptorPool, VkDescriptorPool)
-MAKE_VK_HANDLE(Semaphore, VkSemaphore)
-MAKE_VK_HANDLE(Fence, VkFence)
-MAKE_VK_HANDLE(Pipeline, VkPipeline)
-MAKE_VK_HANDLE(PipelineLayout, VkPipelineLayout)
-MAKE_VK_HANDLE(DescriptorSetLayout, VkDescriptorSetLayout)
-MAKE_VK_HANDLE(RenderPass, VkRenderPass)
-MAKE_VK_HANDLE(ShaderModule, VkShaderModule)
-MAKE_VK_HANDLE(CommandPool, VkCommandPool)
-MAKE_VK_HANDLE(SwapchainKHR, VkSwapchainKHR)
-#undef MAKE_VK_HANDLE
-
-// ===================================================================
-// CONSTANTS + STRUCTS
-// ===================================================================
-constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 3;
-constexpr float NEXUS_SCORE_THRESHOLD = 0.7f;
-constexpr float NEXUS_HYSTERESIS_ALPHA = 0.8f;
-
-struct StridedDeviceAddressRegionKHR {
-    VkDeviceAddress deviceAddress = 0;
-    VkDeviceSize    stride = 0;
-    VkDeviceSize    size = 0;
-
-    static VkStridedDeviceAddressRegionKHR emptyRegion() noexcept {
-        return { .deviceAddress = 0, .stride = 0, .size = 0 };
-    }
-};
-
-struct ShaderBindingTable {
-    VkStridedDeviceAddressRegionKHR raygen          = StridedDeviceAddressRegionKHR::emptyRegion();
-    VkStridedDeviceAddressRegionKHR miss            = StridedDeviceAddressRegionKHR::emptyRegion();
-    VkStridedDeviceAddressRegionKHR hit             = StridedDeviceAddressRegionKHR::emptyRegion();
-    VkStridedDeviceAddressRegionKHR callable        = StridedDeviceAddressRegionKHR::emptyRegion();
-    VkStridedDeviceAddressRegionKHR anyHit          = StridedDeviceAddressRegionKHR::emptyRegion();
-    VkStridedDeviceAddressRegionKHR shadowMiss      = StridedDeviceAddressRegionKHR::emptyRegion();
-    VkStridedDeviceAddressRegionKHR shadowAnyHit    = StridedDeviceAddressRegionKHR::emptyRegion();
-    VkStridedDeviceAddressRegionKHR intersection    = StridedDeviceAddressRegionKHR::emptyRegion();
-    VkStridedDeviceAddressRegionKHR volumetricAnyHit= StridedDeviceAddressRegionKHR::emptyRegion();
-    VkStridedDeviceAddressRegionKHR midAnyHit       = StridedDeviceAddressRegionKHR::emptyRegion();
-
-    static VkStridedDeviceAddressRegionKHR makeRegion(VkDeviceAddress base, VkDeviceSize size, VkDeviceSize stride) noexcept {
-        return { .deviceAddress = base, .stride = stride, .size = size };
-    }
-};
 
 struct alignas(16) MaterialData {
     alignas(16) glm::vec4 diffuse   = glm::vec4(0.8f, 0.8f, 0.8f, 1.0f);
@@ -355,15 +234,6 @@ public:
     VkDevice lastDevice_ = VK_NULL_HANDLE;
 };
 
-// AccelerationStructure factory
-[[nodiscard]] inline VulkanHandle<VkAccelerationStructureKHR> makeAccelerationStructure(
-    VkDevice dev, VkAccelerationStructureKHR as,
-    PFN_vkDestroyAccelerationStructureKHR destroyFunc) noexcept
-{
-    return VulkanHandle<VkAccelerationStructureKHR>(as, dev,
-        reinterpret_cast<VulkanHandle<VkAccelerationStructureKHR>::DestroyFn>(destroyFunc ? destroyFunc : nullptr));
-}
-
 // PendingTLAS
 struct PendingTLAS {
     bool valid = false;
@@ -376,7 +246,6 @@ public:
     VulkanRTX(std::shared_ptr<Context> ctx, int width, int height, VulkanPipelineManager* pipelineMgr = nullptr);
     ~VulkanRTX();
 
-    VulkanHandle<VkAccelerationStructureKHR> tlas_;
     bool tlasReady_ = false;
     PendingTLAS pendingTLAS_{};
 

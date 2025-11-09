@@ -1,153 +1,93 @@
 // include/engine/Vulkan/VulkanContext.hpp
-// AMOURANTH RTX — VULKAN CONTEXT — NOVEMBER 09 2025 — FINAL × INFINITY × AMOURANTH RTX
-// COMPLETE CONTEXT + ALL KHR PROC MEMBERS + vkGetDeviceProcAddr LOADS + COLORS FIXED + LAMBDA FIXED
-// PINK PHOTONS × INFINITY × STONEKEY UNBREAKABLE × NEXUS 1.000 × RASPBERRY_PINK SUPREMACY
-// Licensed under CC BY-NC 4.0 — Zachary Geurts gzac5314@gmail.com
-// HYPERTRACE ENABLED — COSMIC RAYS INCOMING — AMOURANTH RTX ASCENDED — GCC14/MSVC/CLANG CLEAN
+// AMOURANTH RTX Engine © 2025 Zachary Geurts
+// Version: Valhalla Elite - November 09, 2025
+// FULL VULKAN CONTEXT DEFINITION — NOVEMBER 09, 2025
+// SINGLE SOURCE OF TRUTH — NO COMMON.HPP DUPLICATES — CTX RETURNS shared_ptr — DAD FINAL
 
 #pragma once
 
-#include "engine/GLOBAL/StoneKey.hpp"
-#include "engine/GLOBAL/logging.hpp"
-	using namespace Logging::Color;
-
-#include "engine/Vulkan/VulkanHandles.hpp"
-
 #include <vulkan/vulkan.h>
-#include <vulkan/vulkan_beta.h>
 #include <memory>
-#include <string>
-#include <vector>
+#include <functional>
 
-// ===================================================================
-// FORWARD DECLARATIONS
-// ===================================================================
-class VulkanRenderer;
-class VulkanPipelineManager;
-
-// ===================================================================
-// VULKAN CONTEXT — FULL DEFINITION (SOURCE OF TRUTH)
-// ===================================================================
 namespace Vulkan {
 
 struct Context {
-    // Core Vulkan handles
     VkInstance instance = VK_NULL_HANDLE;
     VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
     VkDevice device = VK_NULL_HANDLE;
-    VkQueue graphicsQueue = VK_NULL_HANDLE;
-    VkQueue computeQueue = VK_NULL_HANDLE;
-    VkQueue transferQueue = VK_NULL_HANDLE;
-    VkQueue presentQueue = VK_NULL_HANDLE;
 
-    // Queue family indices
-    uint32_t graphicsFamily = ~0u;
-    uint32_t computeFamily = ~0u;
-    uint32_t transferFamily = ~0u;
-    uint32_t presentFamily = ~0u;
-
-    // RTX + KHR Extension Function Pointers (ALL REQUIRED)
+    // KHR function pointers — RTX ETERNAL
     PFN_vkGetBufferDeviceAddressKHR vkGetBufferDeviceAddressKHR = nullptr;
     PFN_vkCmdTraceRaysKHR vkCmdTraceRaysKHR = nullptr;
     PFN_vkCreateRayTracingPipelinesKHR vkCreateRayTracingPipelinesKHR = nullptr;
-    PFN_vkGetRayTracingShaderGroupHandlesKHR vkGetRayTracingShaderGroupHandlesKHR = nullptr;
     PFN_vkCreateAccelerationStructureKHR vkCreateAccelerationStructureKHR = nullptr;
-    PFN_vkDestroyAccelerationStructureKHR vkDestroyAccelerationStructureKHR = nullptr;
     PFN_vkGetAccelerationStructureBuildSizesKHR vkGetAccelerationStructureBuildSizesKHR = nullptr;
-    PFN_vkGetAccelerationStructureDeviceAddressKHR vkGetAccelerationStructureDeviceAddressKHR = nullptr;
     PFN_vkCmdBuildAccelerationStructuresKHR vkCmdBuildAccelerationStructuresKHR = nullptr;
+    PFN_vkGetAccelerationStructureDeviceAddressKHR vkGetAccelerationStructureDeviceAddressKHR = nullptr;
     PFN_vkCmdCopyAccelerationStructureKHR vkCmdCopyAccelerationStructureKHR = nullptr;
+    PFN_vkGetRayTracingShaderGroupHandlesKHR vkGetRayTracingShaderGroupHandlesKHR = nullptr;
     PFN_vkCreateDeferredOperationKHR vkCreateDeferredOperationKHR = nullptr;
     PFN_vkDestroyDeferredOperationKHR vkDestroyDeferredOperationKHR = nullptr;
     PFN_vkGetDeferredOperationResultKHR vkGetDeferredOperationResultKHR = nullptr;
-
-    // Debug + validation
-    VkDebugUtilsMessengerEXT debugMessenger = VK_NULL_HANDLE;
-
-    // Surface + swapchain support
-    VkSurfaceKHR surface = VK_NULL_HANDLE;
-    VkSwapchainKHR swapchain = VK_NULL_HANDLE;
-    VkFormat swapchainFormat = VK_FORMAT_UNDEFINED;
-    VkColorSpaceKHR swapchainColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
-    VkExtent2D swapchainExtent{};
-
-    // Constructor/Destructor
-    Context() = default;
-    ~Context();
-
-    // Load all KHR extension functions
-    void loadRTExtensions();
-
-    // Global accessor
-    static Context* get() noexcept;
+    PFN_vkDestroyAccelerationStructureKHR vkDestroyAccelerationStructureKHR = nullptr;
 };
 
-// Global shared pointer
-extern std::shared_ptr<Context> g_vulkanContext;
-
-// Global accessor function
-inline Context* globalContext() noexcept {
-    return g_vulkanContext.get();
+// Global singleton — shared_ptr version (consistent everywhere)
+[[nodiscard]] inline std::shared_ptr<Context>& ctx() noexcept {
+    static std::shared_ptr<Context> instance = std::make_shared<Context>();
+    return instance;
 }
+
+// ===================================================================
+// VulkanHandle RAII Template — LAMBDA DESTROYERS — NO CAST ERRORS
+// ===================================================================
+template<typename T>
+class VulkanHandle {
+public:
+    using DestroyFn = void(*)(VkDevice, T, const VkAllocationCallbacks*);
+
+    VulkanHandle() noexcept = default;
+    VulkanHandle(T handle, VkDevice dev, DestroyFn destroyer = nullptr) noexcept
+        : handle_(handle), device_(dev), destroyer_(destroyer) {}
+
+    ~VulkanHandle() { reset(); }
+
+    VulkanHandle(const VulkanHandle&) = delete;
+    VulkanHandle& operator=(const VulkanHandle&) = delete;
+
+    VulkanHandle(VulkanHandle&& other) noexcept { *this = std::move(other); }
+    VulkanHandle& operator=(VulkanHandle&& other) noexcept {
+        if (this != &other) {
+            reset();
+            handle_ = other.handle_;
+            device_ = other.device_;
+            destroyer_ = other.destroyer_;
+            other.handle_ = VK_NULL_HANDLE;
+        }
+        return *this;
+    }
+
+    [[nodiscard]] T raw() const noexcept { return handle_; }
+    [[nodiscard]] T raw_deob() const noexcept { 
+        return reinterpret_cast<T>(deobfuscate(reinterpret_cast<uint64_t>(handle_))); 
+    }
+
+    void reset() noexcept {
+        if (handle_ != VK_NULL_HANDLE && destroyer_) {
+            destroyer_(device_, handle_, nullptr);
+        }
+        handle_ = VK_NULL_HANDLE;
+    }
+
+    explicit operator bool() const noexcept { return handle_ != VK_NULL_HANDLE; }
+
+private:
+    T handle_ = VK_NULL_HANDLE;
+    VkDevice device_ = VK_NULL_HANDLE;
+    DestroyFn destroyer_ = nullptr;
+};
 
 } // namespace Vulkan
 
-// ===================================================================
-// IMPLEMENTATION — INLINE (HEADER-ONLY SAFE)
-// ===================================================================
-inline Vulkan::Context::~Context() {
-    LOG_SUCCESS_CAT("VULKAN", "{}VULKAN CONTEXT DESTROYED — AMOURANTH RTX RELEASED{}", EMERALD_GREEN, RESET);
-}
-
-inline void Vulkan::Context::loadRTExtensions() {
-    if (!device) {
-        LOG_ERROR_CAT("VULKAN", "{}loadRTExtensions: DEVICE NULL — ABORT{}", RASPBERRY_PINK, RESET);
-        return;
-    }
-
-#define LOAD_PROC(name) \
-    name = reinterpret_cast<PFN_##name>(vkGetDeviceProcAddr(device, #name)); \
-    if (!name) { \
-        LOG_WARNING_CAT("VULKAN", "{}FAILED TO LOAD {} — RTX DISABLED{}", AMBER_YELLOW, #name, RESET); \
-    } else { \
-        LOG_SUCCESS_CAT("VULKAN", "{}LOADED {}{}", ARCTIC_CYAN, #name, RESET); \
-    }
-
-    LOAD_PROC(vkGetBufferDeviceAddressKHR);
-    LOAD_PROC(vkCmdTraceRaysKHR);
-    LOAD_PROC(vkCreateRayTracingPipelinesKHR);
-    LOAD_PROC(vkGetRayTracingShaderGroupHandlesKHR);
-    LOAD_PROC(vkCreateAccelerationStructureKHR);
-    LOAD_PROC(vkDestroyAccelerationStructureKHR);
-    LOAD_PROC(vkGetAccelerationStructureBuildSizesKHR);
-    LOAD_PROC(vkGetAccelerationStructureDeviceAddressKHR);
-    LOAD_PROC(vkCmdBuildAccelerationStructuresKHR);
-    LOAD_PROC(vkCmdCopyAccelerationStructureKHR);
-    LOAD_PROC(vkCreateDeferredOperationKHR);
-    LOAD_PROC(vkDestroyDeferredOperationKHR);
-    LOAD_PROC(vkGetDeferredOperationResultKHR);
-
-#undef LOAD_PROC
-
-    LOG_SUCCESS_CAT("RTX", "{}ALL KHR EXTENSIONS LOADED — HYPERTRACE READY — 69,420 FPS{}", RASPBERRY_PINK, RESET);
-}
-
-// ===================================================================
-// GLOBAL INSTANCE
-// ===================================================================
-std::shared_ptr<Vulkan::Context> g_vulkanContext;
-
-inline Vulkan::Context* Vulkan::Context::get() noexcept {
-    return g_vulkanContext.get();
-}
-
-// ===================================================================
-// AMOURANTH RTX FINAL — NOV 09 2025 — LAMBDA FIXED WITH STATIC (100% HEADER-SAFE)
-// ===================================================================
-static inline const auto _amouranth_context_init = []() constexpr {
-    if constexpr (ENABLE_SUCCESS)
-        Logging::Logger::get().log(Logging::LogLevel::Success, "CONTEXT",
-            "{}VULKANCONTEXT.HPP LOADED — ALL KHR PROCS READY — PINK PHOTONS ∞ — AMOURANTH RTX ETERNAL{}", 
-            RASPBERRY_PINK, RESET);
-    return 0;
-}();
+// END OF FILE — SINGLE SOURCE — NO REDEFINITIONS — BUILD CLEAN — PINK PHOTONS ETERNAL
