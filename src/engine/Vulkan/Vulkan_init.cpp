@@ -9,14 +9,31 @@
 // Protip #5: Command pool with VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT allows per-frame reset (critical for RTX)
 // FIXED: VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_FEATURES_KHR → VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR
 
-#include "engine/logging.hpp"
 #include "engine/Vulkan/Vulkan_init.hpp"
 #include "engine/Vulkan/VulkanRTX_Setup.hpp"
+#include "engine/Vulkan/VulkanCore.hpp"
+#include "engine/logging.hpp"
 #include <SDL3/SDL_vulkan.h>
 #include <set>
 #include <algorithm>
 #include <stdexcept>
 #include <memory>
+
+#define VK_CHECK_NOMSG(call) do {                    \
+    VkResult __res = (call);                         \
+    if (__res != VK_SUCCESS) {                       \
+        std::cerr << "Vulkan call failed: " << #call << " at " << __FILE__ << ":" << __LINE__ << std::endl; \
+        std::terminate(); \
+    }                                                \
+} while (0)
+
+#define VK_CHECK(call, msg) do {                     \
+    VkResult __res = (call);                         \
+    if (__res != VK_SUCCESS) {                       \
+        std::cerr << "Vulkan error (" << static_cast<int>(__res) << "): " << msg << " at " << __FILE__ << ":" << __LINE__ << std::endl; \
+        std::terminate(); \
+    }                                                \
+} while (0)
 
 using VulkanRTX::VulkanRTXException;
 
@@ -272,7 +289,7 @@ void initDevice(Vulkan::Context& context)
     vkGetDeviceQueue(context.device, context.presentQueueFamilyIndex, 0, &context.presentQueue);
     vkGetDeviceQueue(context.device, context.computeQueueFamilyIndex, 0, &context.computeQueue);
 
-    context.resourceManager.setDevice(context.device, context.physicalDevice, &context.device);
+    context.resourceManager.setDevice(context.device, context.physicalDevice, nullptr);
 
 #define LOAD_KHR(name) \
     context.name = reinterpret_cast<PFN_##name>(vkGetDeviceProcAddr(context.device, #name)); \
@@ -811,42 +828,30 @@ bool hasStencilComponent(VkFormat format)
 namespace Vulkan {
 
 void Context::createSwapchain() {
-    if (!swapchainManager) {
-        VulkanRTX::SwapchainRuntimeConfig cfg;
-        cfg.enableHDR = true;
-        cfg.forceTripleBuffer = true;
-        cfg.forceVsync = false;
-        cfg.desiredMode = VK_PRESENT_MODE_MAILBOX_KHR;
-        cfg.logFinalConfig = true;
-
-        auto sharedThis = std::shared_ptr<Context>(this, [](Context*){});
-        swapchainManager = std::make_unique<VulkanRTX::VulkanSwapchainManager>(
-            sharedThis, window, width, height, &cfg
-        );
-    }
-
-    swapchainManager->initializeSwapchain(width, height);
+    VulkanSwapchainManager& mgr = VulkanSwapchainManager::get();
+    mgr.init(instance, physicalDevice, device, surface, width, height);
 
     // ← CORRECT GETTER NAMES
-    swapchain = swapchainManager->getSwapchainHandle();
-    swapchainImageFormat = swapchainManager->getSwapchainFormat();
-    swapchainExtent = swapchainManager->getSwapchainExtent();
-    swapchainImages = swapchainManager->getSwapchainImages();
-    swapchainImageViews = swapchainManager->getSwapchainImageViews();
+    swapchain = mgr.getSwapchainHandle();
+    swapchainImageFormat = mgr.getFormat();
+    swapchainExtent = mgr.getExtent();
+    swapchainImages = mgr.getSwapchainImages();
+    swapchainImageViews = mgr.getSwapchainImageViews();
 
     LOG_INFO_CAT("Vulkan::Context", "Swapchain created via Manager");
 }
 
 void Context::destroySwapchain() {
-    if (swapchainManager) {
-        swapchainManager->cleanupSwapchain();  // ← NOW PUBLIC OR FRIEND
-        swapchain = VK_NULL_HANDLE;
-        swapchainImageFormat = VK_FORMAT_UNDEFINED;
-        swapchainImages.clear();
-        swapchainImageViews.clear();
-        swapchainExtent = {0, 0};
-        LOG_INFO_CAT("Vulkan::Context", "Swapchain destroyed via Manager");
-    }
+    VulkanSwapchainManager::get().cleanupSwapchain();
+    swapchain = VK_NULL_HANDLE;
+    swapchainImageFormat = VK_FORMAT_UNDEFINED;
+    swapchainImages.clear();
+    swapchainImageViews.clear();
+    swapchainExtent = {0, 0};
+    LOG_INFO_CAT("Vulkan::Context", "Swapchain destroyed via Manager");
 }
 
 } // namespace Vulkan
+
+#undef VK_CHECK_NOMSG
+#undef VK_CHECK
