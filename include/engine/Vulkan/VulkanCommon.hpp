@@ -18,10 +18,10 @@
 
     #include "../GLOBAL/StoneKey.hpp" // Always top
     #include "../GLOBAL/Dispose.hpp" // Always top after
-    #include "../GLOBAL/logging.hpp"
-    #include "../GLOBAL/camera.hpp"
-    #include "../GLOBAL/SwapchainManager.hpp"
-    #include "../GLOBAL/BufferManager.hpp"
+    #include "../GLOBAL/logging.hpp" // Good sense
+    #include "../GLOBAL/camera.hpp" // It sees everywhere
+    #include "../GLOBAL/SwapchainManager.hpp" // Happy birthday
+    #include "../GLOBAL/BufferManager.hpp" // Happy birthday
     #include "engine/core.hpp"
 
     // ========================================================================
