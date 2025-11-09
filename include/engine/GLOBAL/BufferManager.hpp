@@ -15,24 +15,24 @@
 #include <random>
 #include <set>
 
-class VulkanBufferManager {
+class BufferManager {
 public:
     // VK_CHECK macro – visible to .cpp
     #define VK_CHECK(call, msg) do {                  \
         VkResult __res = (call);                      \
         if (__res != VK_SUCCESS) {                    \
-            VulkanBufferManager::vkError(__res, msg, __FILE__, __LINE__); \
+            BufferManager::vkError(__res, msg, __FILE__, __LINE__); \
         }                                             \
     } while (0)
 
-    static VulkanBufferManager& get() {
-        static VulkanBufferManager instance;
+    static BufferManager& get() {
+        static BufferManager instance;
         return instance;
     }
 
-    VulkanBufferManager(const VulkanBufferManager&) = delete;
-    VulkanBufferManager& operator=(const VulkanBufferManager&) = delete;
-    virtual ~VulkanBufferManager() { cleanup(); }
+    BufferManager(const BufferManager&) = delete;
+    BufferManager& operator=(const BufferManager&) = delete;
+    virtual ~BufferManager() { cleanup(); }
 
     void init(VkDevice device, VkPhysicalDevice physDevice);
     virtual void cleanup();
@@ -74,7 +74,7 @@ public:
     };
 
 private:
-    VulkanBufferManager() {
+    BufferManager() {
         std::random_device rd;
         std::mt19937_64 gen(rd());
         std::uniform_int_distribution<uint64_t> dis;
@@ -110,7 +110,7 @@ private:
 
 #undef VK_CHECK
 
-#define BUFFER_MGR VulkanBufferManager::get()
+#define BUFFER_MGR BufferManager::get()
 #define CREATE_BUFFER(...) BUFFER_MGR.createBuffer(__VA_ARGS__)
 #define DESTROY_BUFFER(h) BUFFER_MGR.destroyBuffer(h)
 #define RAW_BUFFER(h) BUFFER_MGR.getRawBuffer(h)

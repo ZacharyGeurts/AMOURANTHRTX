@@ -29,19 +29,19 @@ static void logSuccess(std::string_view action, int line) {
 namespace Dispose {
     void cleanupSwapchain() noexcept {
         logAttempt("Global swapchain cleanup", __LINE__);
-        VulkanSwapchainManager::get().cleanup();
+        SwapchainManager::get().cleanup();
         logSuccess("Global swapchain purged", __LINE__);
     }
 
     void recreateSwapchain(uint32_t width, uint32_t height) noexcept {
         logAttempt("Global swapchain recreate " + std::to_string(width) + "x" + std::to_string(height), __LINE__);
-        VulkanSwapchainManager::get().recreate(width, height);
+        SwapchainManager::get().recreate(width, height);
         logSuccess("Global swapchain recreated", __LINE__);
     }
 
     void releaseAllBuffers(VkDevice device) noexcept {
         logAttempt("Global buffer manager release all", __LINE__);
-        VulkanBufferManager::get().releaseAll(device);
+        BufferManager::get().releaseAll(device);
         logSuccess("All buffers released", __LINE__);
     }
 

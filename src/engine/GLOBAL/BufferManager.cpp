@@ -11,17 +11,17 @@
 #define VK_CHECK(call, msg) do {                     \
     VkResult __res = (call);                         \
     if (__res != VK_SUCCESS) {                       \
-        VulkanBufferManager::vkError(__res, msg, __FILE__, __LINE__); \
+        BufferManager::vkError(__res, msg, __FILE__, __LINE__); \
     }                                                \
 } while (0)
 
-void VulkanBufferManager::init(VkDevice device, VkPhysicalDevice physDevice) {
+void BufferManager::init(VkDevice device, VkPhysicalDevice physDevice) {
     device_ = device;
     physDevice_ = physDevice;
     LOG_SUCCESS_CAT("BufferManager", "Initialization complete");
 }
 
-uint32_t VulkanBufferManager::findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) const {
+uint32_t BufferManager::findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) const {
     VkPhysicalDeviceMemoryProperties memProps;
     vkGetPhysicalDeviceMemoryProperties(physDevice_, &memProps);
     for (uint32_t i = 0; i < memProps.memoryTypeCount; ++i) {
@@ -32,7 +32,7 @@ uint32_t VulkanBufferManager::findMemoryType(uint32_t typeFilter, VkMemoryProper
     vkThrow("Failed to find suitable memory type");
 }
 
-uint64_t VulkanBufferManager::createBuffer(VkDeviceSize size,
+uint64_t BufferManager::createBuffer(VkDeviceSize size,
                                            VkBufferUsageFlags usage,
                                            VkMemoryPropertyFlags properties,
                                            const std::string& debugName) {
@@ -86,7 +86,7 @@ uint64_t VulkanBufferManager::createBuffer(VkDeviceSize size,
     return handle;
 }
 
-void VulkanBufferManager::destroyBuffer(uint64_t enc_handle) {
+void BufferManager::destroyBuffer(uint64_t enc_handle) {
     std::lock_guard<std::mutex> lock(mutex_);
     auto it = buffers_.find(enc_handle);
     if (it == buffers_.end()) {
@@ -122,43 +122,43 @@ void VulkanBufferManager::destroyBuffer(uint64_t enc_handle) {
     buffers_.erase(it);
 }
 
-VkBuffer VulkanBufferManager::getRawBuffer(uint64_t enc_handle) const noexcept {
+VkBuffer BufferManager::getRawBuffer(uint64_t enc_handle) const noexcept {
     auto it = buffers_.find(enc_handle);
     return it != buffers_.end() ? it->second.buffer : VK_NULL_HANDLE;
 }
 
-VkDeviceSize VulkanBufferManager::getSize(uint64_t enc_handle) const noexcept {
+VkDeviceSize BufferManager::getSize(uint64_t enc_handle) const noexcept {
     auto it = buffers_.find(enc_handle);
     return it != buffers_.end() ? it->second.size : 0;
 }
 
-VkDeviceMemory VulkanBufferManager::getMemory(uint64_t enc_handle) const noexcept {
+VkDeviceMemory BufferManager::getMemory(uint64_t enc_handle) const noexcept {
     auto it = buffers_.find(enc_handle);
     return it != buffers_.end() ? it->second.memory : VK_NULL_HANDLE;
 }
 
-void* VulkanBufferManager::getMapped(uint64_t enc_handle) const noexcept {
+void* BufferManager::getMapped(uint64_t enc_handle) const noexcept {
     auto it = buffers_.find(enc_handle);
     return it != buffers_.end() ? it->second.mapped : nullptr;
 }
 
-std::string VulkanBufferManager::getDebugName(uint64_t enc_handle) const noexcept {
+std::string BufferManager::getDebugName(uint64_t enc_handle) const noexcept {
     auto it = buffers_.find(enc_handle);
     return it != buffers_.end() ? it->second.debugName : "";
 }
 
-bool VulkanBufferManager::isValid(uint64_t enc_handle) const noexcept {
+bool BufferManager::isValid(uint64_t enc_handle) const noexcept {
     return buffers_.find(enc_handle) != buffers_.end();
 }
 
-void VulkanBufferManager::setDebugName(uint64_t enc_handle, const std::string& name) {
+void BufferManager::setDebugName(uint64_t enc_handle, const std::string& name) {
     auto it = buffers_.find(enc_handle);
     if (it != buffers_.end()) {
         it->second.debugName = name;
     }
 }
 
-void* VulkanBufferManager::map(uint64_t enc_handle) {
+void* BufferManager::map(uint64_t enc_handle) {
     auto it = buffers_.find(enc_handle);
     if (it == buffers_.end() || it->second.mapped) {
         return nullptr;
@@ -169,7 +169,7 @@ void* VulkanBufferManager::map(uint64_t enc_handle) {
     return data;
 }
 
-void VulkanBufferManager::unmap(uint64_t enc_handle) {
+void BufferManager::unmap(uint64_t enc_handle) {
     auto it = buffers_.find(enc_handle);
     if (it != buffers_.end() && it->second.mapped) {
         vkUnmapMemory(device_, it->second.memory);
@@ -177,7 +177,7 @@ void VulkanBufferManager::unmap(uint64_t enc_handle) {
     }
 }
 
-void VulkanBufferManager::printStats() const {
+void BufferManager::printStats() const {
     size_t totalBuffers = buffers_.size();
     size_t totalFreeBlocks = 0;
     for (const auto& p : freePools_) {
@@ -187,7 +187,7 @@ void VulkanBufferManager::printStats() const {
 }
 
 // Global releaseAll – called from Dispose during shutdown
-void VulkanBufferManager::releaseAll(VkDevice device) noexcept {
+void BufferManager::releaseAll(VkDevice device) noexcept {
     std::lock_guard<std::mutex> lock(mutex_);
 
     std::set<VkDeviceMemory> memoriesToFree;
@@ -221,20 +221,20 @@ void VulkanBufferManager::releaseAll(VkDevice device) noexcept {
     LOG_SUCCESS_CAT("BufferManager", "Global cleanup complete – All buffers and memory released");
 }
 
-void VulkanBufferManager::cleanup() {
+void BufferManager::cleanup() {
     if (device_ != VK_NULL_HANDLE) {
         releaseAll(device_);
     }
 }
 
-[[noreturn]] void VulkanBufferManager::vkError(VkResult res, const std::string& msg, const char* file, int line) {
+[[noreturn]] void BufferManager::vkError(VkResult res, const std::string& msg, const char* file, int line) {
     std::ostringstream oss;
     oss << "Vulkan error " << res << ": " << msg << " [" << file << ":" << line << "]";
     LOG_ERROR_CAT("BufferManager", "{}", oss.str());
     throw std::runtime_error(oss.str());
 }
 
-[[noreturn]] void VulkanBufferManager::vkThrow(const std::string& msg) {
+[[noreturn]] void BufferManager::vkThrow(const std::string& msg) {
     LOG_ERROR_CAT("BufferManager", "Fatal error: {}", msg);
     throw std::runtime_error(msg);
 }

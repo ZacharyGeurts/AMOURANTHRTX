@@ -2,26 +2,28 @@
 // AMOURANTH RTX — HYPER-SECURE STONEKEYED SWAPCHAIN — PERFECT LOGGING — NOVEMBER 08 2025
 // GETTER/SETTER PERFECTION | HACKER-IMPENETRABLE | TOASTER-SECURE
 
+#include "engine/GLOBAL/BufferManager.hpp"
 #include "engine/GLOBAL/SwapchainManager.hpp"
 #include <algorithm>
 #include <set>
 #include <iomanip>
 
-#define VK_CHECK_NOMSG(call) do {                    \
-    VkResult __res = (call);                         \
-    if (__res != VK_SUCCESS) {                       \
-        VulkanSwapchainManager::vkError(__res, "Vulkan call failed", __FILE__, __LINE__); \
-    }                                                \
-} while (0)
-
 #define VK_CHECK(call, msg) do {                     \
     VkResult __res = (call);                         \
     if (__res != VK_SUCCESS) {                       \
-        VulkanSwapchainManager::vkError(__res, msg, __FILE__, __LINE__); \
+        SwapchainManager::vkError(__res, msg, __FILE__, __LINE__); \
     }                                                \
 } while (0)
 
-void VulkanSwapchainManager::init(VkInstance instance, VkPhysicalDevice physDev, VkDevice device,
+// ────── BULLETPROOF VK_CHECK_NOMSG — NO CUSTOM MESSAGE EDITION ──────
+#define VK_CHECK_NOMSG(call) do {                    \
+    VkResult __res = (call);                         \
+    if (__res != VK_SUCCESS) {                       \
+        SwapchainManager::vkError(__res, "Vulkan call failed", __FILE__, __LINE__); \
+    }                                                \
+} while (0)
+
+void SwapchainManager::init(VkInstance instance, VkPhysicalDevice physDev, VkDevice device,
                                   VkSurfaceKHR surface, uint32_t width, uint32_t height) {
     instance_ = instance;
     physDevice_ = physDev;
@@ -36,7 +38,7 @@ void VulkanSwapchainManager::init(VkInstance instance, VkPhysicalDevice physDev,
     printStats();
 }
 
-void VulkanSwapchainManager::createSwapchain(uint32_t width, uint32_t height) {
+void SwapchainManager::createSwapchain(uint32_t width, uint32_t height) {
     VK_CHECK(vkDeviceWaitIdle(device_), "Device not idle before swapchain creation");
 
     VkSurfaceCapabilitiesKHR caps{};
@@ -109,7 +111,7 @@ void VulkanSwapchainManager::createSwapchain(uint32_t width, uint32_t height) {
                     static_cast<uint32_t>(presentMode), Logging::Color::RESET);
 }
 
-void VulkanSwapchainManager::createImageViews() {
+void SwapchainManager::createImageViews() {
     swapchainImageViews_enc_.resize(swapchainImages_enc_.size());
 
     for (size_t i = 0; i < swapchainImages_enc_.size(); ++i) {
@@ -136,7 +138,7 @@ void VulkanSwapchainManager::createImageViews() {
                     Logging::Color::OCEAN_TEAL, swapchainImageViews_enc_.size(), static_cast<uint32_t>(swapchainFormat_), Logging::Color::RESET);
 }
 
-void VulkanSwapchainManager::cleanupSwapchainOnly() noexcept {
+void SwapchainManager::cleanupSwapchainOnly() noexcept {
     for (auto enc : swapchainImageViews_enc_) {
         if (enc != 0) {
             vkDestroyImageView(device_, decrypt<VkImageView>(enc), nullptr);
@@ -151,14 +153,14 @@ void VulkanSwapchainManager::cleanupSwapchainOnly() noexcept {
     }
 }
 
-void VulkanSwapchainManager::cleanup() noexcept {
+void SwapchainManager::cleanup() noexcept {
     VK_CHECK(vkDeviceWaitIdle(device_), "Cleanup wait idle failed");
     cleanupSwapchainOnly();
     LOG_SUCCESS_CAT("Swapchain", "{}STONKEYED SWAPCHAIN PURGED — {} HANDLES OBLITERATED — COSMIC VOID ACHIEVED 🩷💀{}",
                     Logging::Color::CRIMSON_MAGENTA, getImageCount() + 1, Logging::Color::RESET);
 }
 
-void VulkanSwapchainManager::recreate(uint32_t width, uint32_t height) {
+void SwapchainManager::recreate(uint32_t width, uint32_t height) {
     if (!isValid()) {
         LOG_WARN_CAT("Swapchain", "Recreate called on invalid swapchain — skipping");
         return;
@@ -175,7 +177,7 @@ void VulkanSwapchainManager::recreate(uint32_t width, uint32_t height) {
 }
 
 // ────── ADVANCED IMPLEMENTATIONS ──────
-std::optional<VkSurfaceFormatKHR> VulkanSwapchainManager::chooseSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats) const noexcept {
+std::optional<VkSurfaceFormatKHR> SwapchainManager::chooseSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats) const noexcept {
     // Improved selection: prefer SRGB, fallback to first
     for (const auto& format : availableFormats) {
         if (format.format == VK_FORMAT_B8G8R8A8_SRGB || format.format == VK_FORMAT_R8G8B8A8_SRGB) {
@@ -185,7 +187,7 @@ std::optional<VkSurfaceFormatKHR> VulkanSwapchainManager::chooseSurfaceFormat(co
     return availableFormats.empty() ? std::nullopt : std::optional(availableFormats[0]);
 }
 
-std::optional<VkPresentModeKHR> VulkanSwapchainManager::choosePresentMode(const std::vector<VkPresentModeKHR>& availablePresentModes) const noexcept {
+std::optional<VkPresentModeKHR> SwapchainManager::choosePresentMode(const std::vector<VkPresentModeKHR>& availablePresentModes) const noexcept {
     // Prefer mailbox for tear-free, fallback to FIFO
     for (const auto& mode : availablePresentModes) {
         if (mode == VK_PRESENT_MODE_MAILBOX_KHR) return mode;
@@ -196,13 +198,13 @@ std::optional<VkPresentModeKHR> VulkanSwapchainManager::choosePresentMode(const 
     return availablePresentModes.empty() ? std::nullopt : std::optional(availablePresentModes[0]);
 }
 
-void VulkanSwapchainManager::acquireNextImage(VkSemaphore imageAvailableSemaphore, VkFence imageAvailableFence, uint32_t& imageIndex) noexcept {
+void SwapchainManager::acquireNextImage(VkSemaphore imageAvailableSemaphore, VkFence imageAvailableFence, uint32_t& imageIndex) noexcept {
     VK_CHECK(vkAcquireNextImageKHR(device_, getRawSwapchain(), UINT64_MAX,
                                    imageAvailableSemaphore, imageAvailableFence, &imageIndex),
              "Acquire next image failed — FRAME STALLED");
 }
 
-VkResult VulkanSwapchainManager::present(VkQueue presentQueue, const std::vector<VkSemaphore>& waitSemaphores, uint32_t& imageIndex) noexcept {
+VkResult SwapchainManager::present(VkQueue presentQueue, const std::vector<VkSemaphore>& waitSemaphores, uint32_t& imageIndex) noexcept {
     VkPresentInfoKHR presentInfo{VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};
     presentInfo.waitSemaphoreCount = static_cast<uint32_t>(waitSemaphores.size());
     presentInfo.pWaitSemaphores = waitSemaphores.data();
@@ -215,14 +217,14 @@ VkResult VulkanSwapchainManager::present(VkQueue presentQueue, const std::vector
     return vkQueuePresentKHR(presentQueue, &presentInfo);
 }
 
-void VulkanSwapchainManager::printStats() const noexcept {
+void SwapchainManager::printStats() const noexcept {
     LOG_SUCCESS_CAT("Swapchain", "{}STONKEYED STATS — {}x{} | {} images | Format: 0x{:X} | Mode: 0x{:X} | Usage: 0x{:X} | {} ENCRYPTED 🩷{}",
                     Logging::Color::DIAMOND_WHITE, swapchainExtent_.width, swapchainExtent_.height,
                     getImageCount(), static_cast<uint32_t>(swapchainFormat_), static_cast<uint32_t>(presentMode_),
                     static_cast<uint32_t>(getImageUsage()), debugName_, Logging::Color::RESET);
 }
 
-void VulkanSwapchainManager::dumpAllHandles() const noexcept {
+void SwapchainManager::dumpAllHandles() const noexcept {
     LOG_DEBUG_CAT("Swapchain", "DUMPING ENCRYPTED HANDLES:");
     LOG_DEBUG_CAT("Swapchain", "  Swapchain: 0x{:016X}", swapchain_enc_);
     for (size_t i = 0; i < swapchainImages_enc_.size(); ++i) {
@@ -234,17 +236,23 @@ void VulkanSwapchainManager::dumpAllHandles() const noexcept {
 }
 
 // ────── PRIVATE HELPERS ──────
-VkSurfaceFormatKHR VulkanSwapchainManager::selectSwapchainFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats) const noexcept {
+VkSurfaceFormatKHR SwapchainManager::selectSwapchainFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats) const noexcept {
     auto opt = chooseSurfaceFormat(availableFormats);
-    return opt.value_or(availableFormats[0]);
+    if (!availableFormats.empty()) {
+        return opt.value_or(availableFormats[0]);
+    }
+    return {VK_FORMAT_UNDEFINED, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR};  // Fallback for empty
 }
 
-VkPresentModeKHR VulkanSwapchainManager::selectSwapchainPresentMode(const std::vector<VkPresentModeKHR>& availablePresentModes) const noexcept {
+VkPresentModeKHR SwapchainManager::selectSwapchainPresentMode(const std::vector<VkPresentModeKHR>& availablePresentModes) const noexcept {
     auto opt = choosePresentMode(availablePresentModes);
-    return opt.value_or(availablePresentModes[0]);
+    if (!availablePresentModes.empty()) {
+        return opt.value_or(availablePresentModes[0]);
+    }
+    return VK_PRESENT_MODE_FIFO_KHR;  // Fallback
 }
 
-VkExtent2D VulkanSwapchainManager::selectSwapchainExtent(const VkSurfaceCapabilitiesKHR& capabilities, uint32_t width, uint32_t height) const noexcept {
+VkExtent2D SwapchainManager::selectSwapchainExtent(const VkSurfaceCapabilitiesKHR& capabilities, uint32_t width, uint32_t height) const noexcept {
     if (capabilities.currentExtent.width != std::numeric_limits<uint32_t>::max()) {
         return capabilities.currentExtent;
     } else {
@@ -253,4 +261,12 @@ VkExtent2D VulkanSwapchainManager::selectSwapchainExtent(const VkSurfaceCapabili
         actualExtent.height = std::clamp(actualExtent.height, capabilities.minImageExtent.height, capabilities.maxImageExtent.height);
         return actualExtent;
     }
+}
+
+bool SwapchainManager::isValid() const noexcept {
+    return swapchain_enc_ != 0 && !swapchainImages_enc_.empty() && !swapchainImageViews_enc_.empty();
+}
+
+VkImageUsageFlags SwapchainManager::getImageUsage() const noexcept {
+    return VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | extraUsage_;
 }

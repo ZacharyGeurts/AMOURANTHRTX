@@ -18,28 +18,28 @@
 #define VK_CHECK_NOMSG(call) do {                    \
     VkResult __res = (call);                         \
     if (__res != VK_SUCCESS) {                       \
-        VulkanSwapchainManager::vkError(__res, "Vulkan call failed", __FILE__, __LINE__); \
+        SwapchainManager::vkError(__res, "Vulkan call failed", __FILE__, __LINE__); \
     }                                                \
 } while (0)
 
 #define VK_CHECK(call, msg) do {                     \
     VkResult __res = (call);                         \
     if (__res != VK_SUCCESS) {                       \
-        VulkanSwapchainManager::vkError(__res, msg, __FILE__, __LINE__); \
+        SwapchainManager::vkError(__res, msg, __FILE__, __LINE__); \
     }                                                \
 } while (0)
 
-class VulkanSwapchainManager {
+class SwapchainManager {
 public:
     // ────── GLOBAL SINGLETON — IMMORTAL & THREAD-SAFE ──────
-    static VulkanSwapchainManager& get() {
-        static VulkanSwapchainManager instance;
+    static SwapchainManager& get() {
+        static SwapchainManager instance;
         return instance;
     }
 
-    VulkanSwapchainManager(const VulkanSwapchainManager&) = delete;
-    VulkanSwapchainManager& operator=(const VulkanSwapchainManager&) = delete;
-    ~VulkanSwapchainManager() { cleanup(); }
+    SwapchainManager(const SwapchainManager&) = delete;
+    SwapchainManager& operator=(const SwapchainManager&) = delete;
+    ~SwapchainManager() { cleanup(); }
 
     // ────── CORE API ──────
     void init(VkInstance instance, VkPhysicalDevice physDev, VkDevice device, VkSurfaceKHR surface, uint32_t width, uint32_t height);
@@ -51,6 +51,7 @@ public:
     [[nodiscard]] VkExtent2D        getExtent() const noexcept { return swapchainExtent_; }
     [[nodiscard]] VkFormat          getFormat() const noexcept { return swapchainFormat_; }
     [[nodiscard]] VkPresentModeKHR  getPresentMode() const noexcept { return presentMode_; }
+    [[nodiscard]] VkImageUsageFlags getImageUsage() const noexcept;
 
     // RAW (DECRYPTED) — EXACT NAMES YOUR VulkanCommon.cpp EXPECTS
     [[nodiscard]] VkSwapchainKHR    getRawSwapchain() const noexcept { return decrypt<VkSwapchainKHR>(swapchain_enc_); }
@@ -88,10 +89,12 @@ public:
     void acquireNextImage(VkSemaphore imageAvailableSemaphore, VkFence imageAvailableFence, uint32_t& imageIndex) noexcept;
     VkResult present(VkQueue presentQueue, const std::vector<VkSemaphore>& waitSemaphores, uint32_t& imageIndex) noexcept;
     void printStats() const noexcept;
+    void dumpAllHandles() const noexcept;
+    [[nodiscard]] bool isValid() const noexcept;
 
 private:
     // PRIVATE CTOR — ONLY SINGLETON CAN LIVE
-    VulkanSwapchainManager() = default;
+    SwapchainManager() = default;
 
     VkInstance instance_ = VK_NULL_HANDLE;
     VkPhysicalDevice physDevice_ = VK_NULL_HANDLE;
@@ -105,6 +108,7 @@ private:
     VkFormat swapchainFormat_ = VK_FORMAT_B8G8R8A8_SRGB;
     VkExtent2D swapchainExtent_{};
     VkPresentModeKHR presentMode_ = VK_PRESENT_MODE_MAILBOX_KHR;
+    VkImageUsageFlags extraUsage_ = 0;
     std::string debugName_ = "AMOURANTH_GLOBAL_SWAPCHAIN";
 
     // ────── STONEKEY V6 — CONSTEXPR CHAOS — BUILD-UNIQUE ──────
@@ -135,12 +139,15 @@ private:
     [[nodiscard]] VkSurfaceFormatKHR selectSwapchainFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats) const noexcept;
     [[nodiscard]] VkPresentModeKHR selectSwapchainPresentMode(const std::vector<VkPresentModeKHR>& availablePresentModes) const noexcept;
     [[nodiscard]] VkExtent2D selectSwapchainExtent(const VkSurfaceCapabilitiesKHR& capabilities, uint32_t width, uint32_t height) const noexcept;
+
+    [[nodiscard]] std::optional<VkSurfaceFormatKHR> chooseSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats) const noexcept;
+    [[nodiscard]] std::optional<VkPresentModeKHR> choosePresentMode(const std::vector<VkPresentModeKHR>& availablePresentModes) const noexcept;
 };
 
 #undef VK_CHECK_NOMSG
 #undef VK_CHECK
 
-#define SWAPCHAIN_MGR VulkanSwapchainManager::get()
+#define SWAPCHAIN_MGR SwapchainManager::get()
 #define SWAPCHAIN_RAW SWAPCHAIN_MGR.getRawSwapchain()
 #define SWAPCHAIN_IMAGE(i) SWAPCHAIN_MGR.getSwapchainImage(i)
 #define SWAPCHAIN_VIEW(i) SWAPCHAIN_MGR.getSwapchainImageView(i)
