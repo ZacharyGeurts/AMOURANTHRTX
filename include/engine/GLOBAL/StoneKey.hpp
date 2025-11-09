@@ -75,7 +75,7 @@ constexpr uint64_t kStone2 = stone_key2();
 constexpr uint64_t kHandleObfuscator = kStone1 ^ kStone2 ^ 0x1337C0DEULL ^ 0x69F00D42ULL;
 
 // ──────────────────────────────────────────────────────────────────────────────
-// OBFUSCATION PRIMITIVES
+// OBFUSCATION PRIMITIVES — USED EVERYWHERE
 // ──────────────────────────────────────────────────────────────────────────────
 [[nodiscard]] inline constexpr uint64_t obfuscate(uint64_t h) noexcept {
     return h ^ kHandleObfuscator;
@@ -97,7 +97,6 @@ struct StoneKeyPrinter {
     static constexpr uint64_t v3 = kHandleObfuscator;
 };
 
-// This forces evaluation and prints real values in type info
 using RealKeys = StoneKeyPrinter;
 
 #pragma message("STONEKEY SUCCESS — FRESH KEYS GENERATED")

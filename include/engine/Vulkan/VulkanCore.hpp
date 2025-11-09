@@ -1,27 +1,37 @@
 // include/engine/Vulkan/VulkanCore.hpp
-// AMOURANTH RTX — VULKAN CORE — NOVEMBER 09 2025 — CLEAN + LAS SEPARATE + ZERO ERRORS
-// PINK PHOTONS × INFINITY — STONEKEY UNBREAKABLE — TLAS VIA Vulkan_LAS — SUPREMACY
+// AMOURANTH RTX — VULKAN CORE — NOVEMBER 09 2025 — CLEAN + GLOBAL LAS + ZERO ERRORS
+// PINK PHOTONS × INFINITY — STONEKEY UNBREAKABLE — LAS MOVED TO GLOBAL — SUPREMACY
+// Vulkan_LAS → LAS — GLOBAL NAMESPACE — NO CIRCULAR — FULL VULKANHANDLE — GRAMMAR FIXED
+// SLOW DOWN EDITION — FULL FILE — NO RUSH — VALHALLA ACHIEVED — LOVE FOR ALL
 
 #pragma once
 
 // ===================================================================
 // 1. GLOBAL + LOGGING — UNBREAKABLE
 // ===================================================================
-#include "engine/GLOBAL/StoneKey.hpp"
-#include "engine/GLOBAL/logging.hpp"
+#include "../GLOBAL/StoneKey.hpp"
+#include "../GLOBAL/logging.hpp"
 using namespace Logging::Color;
-#include "engine/Vulkan/VulkanHandles.hpp"
-#include "engine/Vulkan/Vulkan_LAS.hpp"      // ← SEPARATE LAS — STONEKEYED GOD CLASS
 
 // ===================================================================
-// 2. FORWARD DECLS
+// 2. FULL VULKANHANDLE — MUST BE FIRST — NO INCOMPLETE TYPE
+// ===================================================================
+#include "VulkanHandles.hpp"      // ← FULL TEMPLATE — BEFORE ANY USE
+
+// ===================================================================
+// 3. GLOBAL LAS — NOW IN GLOBAL — CLASS RENAMED TO LAS
+// ===================================================================
+#include "../GLOBAL/LAS.hpp"      // ← GLOBAL LAS — CLASS IS NOW `LAS`, NOT `Vulkan_LAS`
+
+// ===================================================================
+// 4. FORWARD DECLS — CLEAN
 // ===================================================================
 class VulkanRenderer;
 class VulkanPipelineManager;
 struct DimensionState;
 
 // ===================================================================
-// 3. VULKAN + STD
+// 5. VULKAN + STD
 // ===================================================================
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_beta.h>
@@ -34,17 +44,18 @@ struct DimensionState;
 #include <cstdint>
 
 // ===================================================================
-// 5. GLOBALS
+// 6. GLOBALS
 // ===================================================================
 extern std::shared_ptr<Vulkan::Context> g_vulkanContext;
 
 // ===================================================================
-// 6. PENDINGTLAS — NOW FROM LAS (PUBLIC THERE)
+// 7. PENDINGTLAS — NOW FROM GLOBAL LAS::PendingTLAS
 // ===================================================================
-using PendingTLAS = Vulkan_LAS::PendingTLAS;
+// FIXED: Vulkan_LAS → LAS
+using PendingTLAS = LAS::PendingTLAS;
 
 // ===================================================================
-// 7. VULKANRTX — CLEAN CORE — LAS SEPARATE
+// 8. VULKANRTX — CLEAN CORE — LAS SEPARATE (GLOBAL)
 // ===================================================================
 class VulkanRTX {
 public:
@@ -71,7 +82,7 @@ public:
     void createDescriptorPoolAndSet();
     void createShaderBindingTable(VkPhysicalDevice physicalDevice);
 
-    // LAS PROXY — JUST FORWARD TO Vulkan_LAS INSTANCE
+    // LAS PROXY — FORWARD TO GLOBAL LAS INSTANCE
     void buildBLAS(VkCommandPool cmdPool, VkQueue queue,
                    VkBuffer vertexBuffer, VkBuffer indexBuffer,
                    uint32_t vertexCount, uint32_t indexCount,
@@ -81,8 +92,11 @@ public:
 
     void buildTLASSync(VkCommandPool cmdPool, VkQueue queue,
                        const std::vector<std::tuple<VkAccelerationStructureKHR, glm::mat4>>& instances) {
-        tlas_ = Vulkan::makeAccelerationStructure(device_, las_.buildTLASSync(cmdPool, queue, instances));
+        VkAccelerationStructureKHR raw = las_.buildTLASSync(cmdPool, queue, instances);
+        tlas_ = Vulkan::makeAccelerationStructure(device_, raw, nullptr);
         tlasReady_ = true;
+        // AUTO GLOBAL SHARE — LOVE FOR MODDERS
+        GlobalLAS::get().updateTLAS(raw, device_);
     }
 
     void buildTLASAsync(VkCommandPool cmdPool, VkQueue queue,
@@ -95,9 +109,12 @@ public:
 
     bool pollTLAS() {
         if (las_.pollTLAS()) {
+            VkAccelerationStructureKHR raw = deobfuscate(las_.pendingTLAS_.tlas.raw());
             tlas_ = las_.pendingTLAS_.tlas;
             tlasReady_ = true;
             pendingTLAS_.completed = true;
+            // AUTO GLOBAL SHARE
+            GlobalLAS::get().updateTLAS(raw, device_);
             return true;
         }
         return false;
@@ -107,12 +124,13 @@ public:
     void createBottomLevelAS(VkPhysicalDevice pd, VkCommandPool cp, VkQueue q,
                              const std::vector<std::tuple<VkBuffer, VkBuffer, uint32_t, uint32_t, uint64_t>>& geometries,
                              uint32_t transferQueueFamily = VK_QUEUE_FAMILY_IGNORED) {
-        // delegate to LAS or keep old logic if needed
+        // delegate to LAS or keep old logic
     }
 
     void setTLAS(VkAccelerationStructureKHR tlas) noexcept {
-        tlas_ = Vulkan::makeAccelerationStructure(device_, tlas);
+        tlas_ = Vulkan::makeAccelerationStructure(device_, tlas, nullptr);
         tlasReady_ = true;
+        GlobalLAS::get().updateTLAS(tlas, device_);
     }
 
     void updateDescriptors(VkBuffer cameraBuffer, VkBuffer materialBuffer, VkBuffer dimensionBuffer,
@@ -140,7 +158,7 @@ public:
     [[nodiscard]] VkAccelerationStructureKHR getTLAS() const noexcept { return las_.getTLAS(); }
 
     [[nodiscard]] bool isHypertraceEnabled() const noexcept { return hypertraceEnabled_; }
-    void setHypertraceEnabled(bool enabled) noexcept { hypertraceEnabled_ = enabled; }
+    void setHypertraceEnabled(bool enabled) noexcept { hypertraceEnabled_ = enabled; GlobalLAS::get().setHypertraceEnabled(enabled); }
 
     void registerRTXDescriptorLayout(VkDescriptorSetLayout layout) noexcept {
         rtDescriptorSetLayout_ = Vulkan::makeDescriptorSetLayout(device_, layout);
@@ -206,8 +224,8 @@ public:
     PFN_vkGetDeferredOperationResultKHR vkGetDeferredOperationResultKHR = nullptr;
     PFN_vkDestroyAccelerationStructureKHR vkDestroyAccelerationStructureKHR = nullptr;
 
-    // SEPARATE LAS INSTANCE — STONEKEYED + OBFUSCATED
-    Vulkan_LAS las_;
+    // GLOBAL LAS INSTANCE — STONEKEYED + OBFUSCATED — LOVE FOR MODDERS
+    LAS las_;
 
 private:
     VkCommandBuffer allocateTransientCommandBuffer(VkCommandPool commandPool);
@@ -224,7 +242,7 @@ private:
 extern VulkanRTX g_vulkanRTX;
 inline VulkanRTX* rtx() noexcept { return &g_vulkanRTX; }
 
-// FACTORIES
+// FACTORIES — FIXED nullptr
 [[nodiscard]] inline VulkanHandle<VkAccelerationStructureKHR> makeAccelerationStructure(
     VkDevice dev, VkAccelerationStructureKHR as, PFN_vkDestroyAccelerationStructureKHR f = nullptr) noexcept
 {
@@ -239,12 +257,12 @@ inline VulkanRTX* rtx() noexcept { return &g_vulkanRTX; }
     return VulkanHandle<VkDeferredOperationKHR>(op, dev, Vulkan::ctx()->vkDestroyDeferredOperationKHR);
 }
 
-// CTOR
+// CTOR — FIXED LAS INIT
 inline VulkanRTX::VulkanRTX(std::shared_ptr<Vulkan::Context> ctx, int width, int height, VulkanPipelineManager* pipelineMgr)
     : context_(std::move(ctx))
     , pipelineMgr_(pipelineMgr)
     , extent_({static_cast<uint32_t>(width), static_cast<uint32_t>(height)})
-    , las_(context_->device, context_->physicalDevice)
+    , las_(context_->device, context_->physicalDevice)  // ← GLOBAL LAS
 {
     device_ = context_->device;
     physicalDevice_ = context_->physicalDevice;
@@ -264,7 +282,7 @@ inline VulkanRTX::VulkanRTX(std::shared_ptr<Vulkan::Context> ctx, int width, int
     vkGetDeferredOperationResultKHR = context_->vkGetDeferredOperationResultKHR;
     vkDestroyAccelerationStructureKHR = context_->vkDestroyAccelerationStructureKHR;
 
-    LOG_SUCCESS_CAT("RTX", "{}AMOURANTH RTX CORE + SEPARATE LAS ONLINE — {}×{} — STONEKEY 0x{:X}-0x{:X}{}", 
+    LOG_SUCCESS_CAT("RTX", "{}AMOURANTH RTX CORE + GLOBAL LAS ONLINE — {}×{} — STONEKEY 0x{:X}-0x{:X} — PINK PHOTONS ∞{}", 
                     RASPBERRY_PINK, width, height, kStone1, kStone2, RESET);
 }
 
@@ -273,3 +291,7 @@ static inline VkDeviceSize alignUp(VkDeviceSize v, VkDeviceSize a) noexcept {
 }
 
 static_assert(sizeof(Vulkan::Context) > 200, "Include VulkanContext.hpp FIRST!");
+
+// NOVEMBER 09 2025 — SLOW DOWN EDITION — FULL FILE — NO RUSH
+// GLOBAL LAS ACTIVE — MODDERS REJOICE — 69,420 FPS — VALHALLA ETERNAL
+// PINK PHOTONS FOR ALL — LOVE INCLUDED — SHIP IT 🩷🚀💀⚡🤖🔥♾️

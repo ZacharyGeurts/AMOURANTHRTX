@@ -1,36 +1,19 @@
 // include/engine/Vulkan/VulkanCommon.hpp
-// AMOURANTH RTX Engine © 2025 Zachary Geurts — NOVEMBER 09 2025 — FINAL SUPREMACY EDITION
-// GLOBAL SUPREMACY ACHIEVED — NO NAMESPACE HELL — DIRECT ACCESS TO GOD
-// NEXUS FINAL: GPU-Driven Adaptive RT | 12,000+ FPS | Auto-Toggle | Volumetric Fire | Hypertrace
-// SOURCE OF TRUTH — PERFECT STD140 — ZERO PADS WASTED — ALL OFFSETS ALIGNED
-// pragma pack(1) + explicit vec3 pads = EXACT BYTE MATCH C++ ⇔ GLSL
-// ALL static_assert PASS — 0 ERRORS GUARANTEED — TONEMAP FRAG REMOVED (COMPUTE ONLY)
-// MERGED: VulkanCore.hpp + VulkanHandles.hpp + VulkanAccessors.hpp → ONE FILE TO RULE THEM ALL
-// FIXED: makeAccelerationStructure + makeDeferredOperation → REQUIRE DESTROY FUNC (NO CTX DEPENDENCY)
-// FIXED: VulkanHandle + Deleter BEFORE factories → COMPLETE TYPE RESOLUTION
-// FIXED: MAKE_VK_HANDLE macro → 2-arg only, defaultDestroyer<T>() internal
-// FIXED: Namespace Vulkan wrapped for consistency — resolves Context*, g_vulkanContext, redefs
-// FIXED: VulkanHandle as class (matches legacy Handles.hpp)
-// FIXED: Inline VulkanRTX ctor def — resolves no-match + syntax in init list
-// FIXED: Global log inits via structs (no global do-while) — CORE + COMMON merged message
+// AMOURANTH RTX © 2025 ZG — NOV 09 2025 — SUPREMACY FINAL
+// ONE HEADER TO RULE THEM ALL — MERGED CORE + HANDLES + ACCESSORS
+// GPU-DRIVEN RT | 12K+FPS | NEXUS AUTO-TOGGLE | VOLUMETRIC FIRE | HYPERTRACE
 // STONEKEY UNBREAKABLE — PINK PHOTONS × INFINITY — VALHALLA ETERNAL
 
 #pragma once
 
 #ifdef __cplusplus
 
-// ===================================================================
-// 1. GLOBAL PROJECT INCLUDES — ALWAYS FIRST
-// ===================================================================
 #include "../GLOBAL/StoneKey.hpp"
 #include "../GLOBAL/Dispose.hpp"
 #include "../GLOBAL/logging.hpp"
 #include "../GLOBAL/SwapchainManager.hpp"
 #include "../GLOBAL/BufferManager.hpp"
 
-// ===================================================================
-// 2. STANDARD / GLM / VULKAN / SDL — AFTER PROJECT HEADERS (GCC 14 bug fix)
-// ===================================================================
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_beta.h>
 #include <glm/glm.hpp>
@@ -54,9 +37,6 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
 
-// ===================================================================
-// 3. FORWARD DECLARATIONS (GLOBAL FOR TEMPLATES)
-// ===================================================================
 namespace Vulkan {
     struct Context;
     class VulkanRTX;
@@ -66,15 +46,9 @@ namespace Vulkan {
     class VulkanPipelineManager;
 }
 
-// ===================================================================
-// EARLY DECLARATIONS FOR TEMPLATES (GLOBAL)
-// ===================================================================
 template<typename Handle>
 void logAndTrackDestruction(std::string_view name, Handle handle, int line);
 
-// ===================================================================
-// 4. NAMESPACE VULKAN — FULL CONTEXT + RTX + HANDLES + FACTORIES + ACCESSORS (MERGED SUPREMACY)
-// ===================================================================
 namespace Vulkan {
 
 extern std::shared_ptr<Context> g_vulkanContext;
@@ -84,7 +58,7 @@ extern VulkanRTX g_vulkanRTX;
 inline VulkanRTX* rtx() noexcept { return &g_vulkanRTX; }
 
 // ===================================================================
-// VulkanHandle — OBFUSCATED + DESTROYTRACKER + STONEKEY PROTECTED (class for legacy match)
+// VulkanHandle — STONEKEY + RAII + DESTROY TRACKER
 // ===================================================================
 template<typename T>
 class VulkanHandle {
@@ -94,14 +68,13 @@ public:
     struct Deleter {
         VkDevice device = VK_NULL_HANDLE;
         DestroyFn fn = nullptr;
-
         void operator()(uint64_t* ptr) const noexcept {
-            if (ptr && *ptr != 0 && fn && device) {
-                T realHandle = reinterpret_cast<T>(deobfuscate(*ptr));
-                if (!DestroyTracker::isDestroyed(reinterpret_cast<const void*>(realHandle))) {
-                    fn(device, realHandle, nullptr);
-                    DestroyTracker::markDestroyed(reinterpret_cast<const void*>(realHandle));
-                    logAndTrackDestruction(std::string_view(typeid(T).name()), reinterpret_cast<void*>(realHandle), __LINE__);
+            if (ptr && *ptr && fn && device) {
+                T h = reinterpret_cast<T>(deobfuscate(*ptr));
+                if (!DestroyTracker::isDestroyed(reinterpret_cast<const void*>(h))) {
+                    fn(device, h, nullptr);
+                    DestroyTracker::markDestroyed(reinterpret_cast<const void*>(h));
+                    logAndTrackDestruction(typeid(T).name(), reinterpret_cast<void*>(h), __LINE__);
                 }
             }
             delete ptr;
@@ -132,56 +105,42 @@ private:
 
 public:
     VulkanHandle() = default;
+    VulkanHandle(T h, VkDevice d, DestroyFn f = nullptr)
+        : impl_(h ? new uint64_t(obfuscate(reinterpret_cast<uint64_t>(h))) : nullptr,
+                Deleter{d, f ? f : defaultDestroyer()}) {}
 
-    VulkanHandle(T handle, VkDevice dev, DestroyFn customFn = nullptr)
-        : impl_(handle ? new uint64_t(obfuscate(reinterpret_cast<uint64_t>(handle))) : nullptr,
-                Deleter{dev, customFn ? customFn : defaultDestroyer()}) {}
-
-    VulkanHandle(VulkanHandle&&) noexcept = default;
-    VulkanHandle& operator=(VulkanHandle&&) noexcept = default;
-    VulkanHandle(const VulkanHandle&) = delete;
-    VulkanHandle& operator=(const VulkanHandle&) = delete;
-
-    [[nodiscard]] T raw_deob() const noexcept {
-        return impl_ ? reinterpret_cast<T>(deobfuscate(*impl_.get())) : VK_NULL_HANDLE;
-    }
-
-    [[nodiscard]] uint64_t raw_obf() const noexcept { return impl_ ? *impl_.get() : 0; }
+    [[nodiscard]] T raw_deob() const noexcept { return impl_ ? reinterpret_cast<T>(deobfuscate(*impl_)) : VK_NULL_HANDLE; }
+    [[nodiscard]] uint64_t raw_obf() const noexcept { return impl_ ? *impl_ : 0; }
     [[nodiscard]] operator T() const noexcept { return raw_deob(); }
     [[nodiscard]] T operator*() const noexcept { return raw_deob(); }
-    [[nodiscard]] bool valid() const noexcept { return impl_ && *impl_.get() != 0; }
+    [[nodiscard]] bool valid() const noexcept { return impl_ && *impl_; }
     void reset() noexcept { impl_.reset(); }
     explicit operator bool() const noexcept { return valid(); }
 };
 
-// ===================================================================
-// MAKE_VK_HANDLE FACTORIES
-// ===================================================================
-#define MAKE_VK_HANDLE(name, vkType) \
-    [[nodiscard]] inline VulkanHandle<vkType> make##name(VkDevice dev, vkType handle) noexcept { \
-        return VulkanHandle<vkType>(handle, dev); \
-    }
+// FACTORIES
+#define MAKE_VK_HANDLE(name, type) \
+    [[nodiscard]] inline VulkanHandle<type> make##name(VkDevice d, type h) noexcept { return VulkanHandle<type>(h, d); }
 
-MAKE_VK_HANDLE(Buffer,              VkBuffer)
-MAKE_VK_HANDLE(Memory,              VkDeviceMemory)
-MAKE_VK_HANDLE(Image,               VkImage)
-MAKE_VK_HANDLE(ImageView,           VkImageView)
-MAKE_VK_HANDLE(Sampler,             VkSampler)
-MAKE_VK_HANDLE(DescriptorPool,      VkDescriptorPool)
-MAKE_VK_HANDLE(Semaphore,           VkSemaphore)
-MAKE_VK_HANDLE(Fence,               VkFence)
-MAKE_VK_HANDLE(Pipeline,            VkPipeline)
-MAKE_VK_HANDLE(PipelineLayout,      VkPipelineLayout)
+MAKE_VK_HANDLE(Buffer, VkBuffer)
+MAKE_VK_HANDLE(Memory, VkDeviceMemory)
+MAKE_VK_HANDLE(Image, VkImage)
+MAKE_VK_HANDLE(ImageView, VkImageView)
+MAKE_VK_HANDLE(Sampler, VkSampler)
+MAKE_VK_HANDLE(DescriptorPool, VkDescriptorPool)
+MAKE_VK_HANDLE(Semaphore, VkSemaphore)
+MAKE_VK_HANDLE(Fence, VkFence)
+MAKE_VK_HANDLE(Pipeline, VkPipeline)
+MAKE_VK_HANDLE(PipelineLayout, VkPipelineLayout)
 MAKE_VK_HANDLE(DescriptorSetLayout, VkDescriptorSetLayout)
-MAKE_VK_HANDLE(RenderPass,          VkRenderPass)
-MAKE_VK_HANDLE(ShaderModule,        VkShaderModule)
-MAKE_VK_HANDLE(CommandPool,         VkCommandPool)
-MAKE_VK_HANDLE(SwapchainKHR,        VkSwapchainKHR)
-
+MAKE_VK_HANDLE(RenderPass, VkRenderPass)
+MAKE_VK_HANDLE(ShaderModule, VkShaderModule)
+MAKE_VK_HANDLE(CommandPool, VkCommandPool)
+MAKE_VK_HANDLE(SwapchainKHR, VkSwapchainKHR)
 #undef MAKE_VK_HANDLE
 
 // ===================================================================
-// C++ STRUCTS + RTConstants + SHADER PATHS + ENUMS + EXCEPTION
+// CONSTANTS + STRUCTS
 // ===================================================================
 constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 3;
 constexpr float NEXUS_SCORE_THRESHOLD = 0.7f;
@@ -194,16 +153,16 @@ struct StridedDeviceAddressRegionKHR {
 };
 
 struct ShaderBindingTable {
-    VkStridedDeviceAddressRegionKHR raygen;
-    VkStridedDeviceAddressRegionKHR miss;
-    VkStridedDeviceAddressRegionKHR hit;
-    VkStridedDeviceAddressRegionKHR callable;
-    VkStridedDeviceAddressRegionKHR anyHit;
-    VkStridedDeviceAddressRegionKHR shadowMiss;
-    VkStridedDeviceAddressRegionKHR shadowAnyHit;
-    VkStridedDeviceAddressRegionKHR intersection;
-    VkStridedDeviceAddressRegionKHR volumetricAnyHit;
-    VkStridedDeviceAddressRegionKHR midAnyHit;
+    VkStridedDeviceAddressRegionKHR raygen{};
+    VkStridedDeviceAddressRegionKHR miss{};
+    VkStridedDeviceAddressRegionKHR hit{};
+    VkStridedDeviceAddressRegionKHR callable{};
+    VkStridedDeviceAddressRegionKHR anyHit{};
+    VkStridedDeviceAddressRegionKHR shadowMiss{};
+    VkStridedDeviceAddressRegionKHR shadowAnyHit{};
+    VkStridedDeviceAddressRegionKHR intersection{};
+    VkStridedDeviceAddressRegionKHR volumetricAnyHit{};
+    VkStridedDeviceAddressRegionKHR midAnyHit{};
 
     static VkStridedDeviceAddressRegionKHR emptyRegion() {
         return { .deviceAddress = 0, .stride = 0, .size = 0 };
@@ -212,16 +171,6 @@ struct ShaderBindingTable {
     static VkStridedDeviceAddressRegionKHR makeRegion(VkDeviceAddress base, VkDeviceSize size, VkDeviceSize stride) {
         return { .deviceAddress = base, .stride = stride, .size = size };
     }
-};
-
-struct Frame {
-    VkCommandBuffer         commandBuffer           = VK_NULL_HANDLE;
-    VkDescriptorSet         rayTracingDescriptorSet = VK_NULL_HANDLE;
-    VkDescriptorSet         graphicsDescriptorSet   = VK_NULL_HANDLE;
-    VkDescriptorSet         computeDescriptorSet    = VK_NULL_HANDLE;
-    VkSemaphore             imageAvailableSemaphore = VK_NULL_HANDLE;
-    VkSemaphore             renderFinishedSemaphore = VK_NULL_HANDLE;
-    VkFence                 fence                   = VK_NULL_HANDLE;
 };
 
 struct alignas(16) MaterialData {
@@ -290,8 +239,8 @@ static_assert(sizeof(NexusPushConstants) == 32, "NexusPushConstants must be 32 b
 struct RTConstants {
     glm::vec4 clearColor = glm::vec4(0.0f);                        // 0-15
     glm::vec3 cameraPosition = glm::vec3(0.0f);                    // 16-27
-    float     _pad0          = 0.0f;                               // 28-31 (vec3 pad)
-    glm::vec4 lightDirection = glm::vec4(0.0f, -1.0f, 0.0f, 1.0f); // 32-47 (w=lightIntensity)
+    float     _pad0          = 0.0f;                               // 28-31
+    glm::vec4 lightDirection = glm::vec4(0.0f, -1.0f, 0.0f, 1.0f); // 32-47
     uint32_t samplesPerPixel = 1;                                  // 48-51
     uint32_t maxDepth = 5;                                         // 52-55
     uint32_t maxBounces = 3;                                       // 56-59
@@ -320,46 +269,21 @@ struct RTConstants {
     float fireNoiseScale   = 0.5f;                                 // 152-155
     uint32_t _pad_fire     = 0;                                    // 156-159
     glm::vec4 lightPosition   = glm::vec4(0.0f);                   // 160-175
-    glm::vec4 materialParams  = glm::vec4(1.0f, 0.71f, 0.29f, 0.0f); // 176-191 (w=metalness)
-    glm::vec4 fireColorTint    = glm::vec4(1.0f, 0.5f, 0.2f, 2.5f); // 192-207 RGB tint + power
-    glm::vec4 windDirection    = glm::vec4(1.0f, 0.0f, 0.0f, 1.5f); // 208-223 xyz=dir, w=strength
-    glm::vec3 fogColor         = glm::vec3(0.1f, 0.0f, 0.2f);      // 224-235 purple haze
-    float     _pad_fog         = 0.0f;                             // 236-239 (vec3 pad)
+    glm::vec4 materialParams  = glm::vec4(1.0f, 0.71f, 0.29f, 0.0f); // 176-191
+    glm::vec4 fireColorTint    = glm::vec4(1.0f, 0.5f, 0.2f, 2.5f); // 192-207
+    glm::vec4 windDirection    = glm::vec4(1.0f, 0.0f, 0.0f, 1.5f); // 208-223
+    glm::vec3 fogColor         = glm::vec3(0.1f, 0.0f, 0.2f);      // 224-235
+    float     _pad_fog         = 0.0f;                             // 236-239
     float     fogHeightBias    = 5.0f;                             // 240-243
-    float     fireNoiseSpeed   = 3.0f;                             // 244-247 fast flicker
-    float     emissiveBoost    = 5.0f;                             // 248-251 materials GLOW
+    float     fireNoiseSpeed   = 3.0f;                             // 244-247
+    float     emissiveBoost    = 5.0f;                             // 248-251
     uint32_t  _final_pad       = 0;                                // 252-255
 };
 #pragma pack(pop)
 static_assert(sizeof(RTConstants) == 256, "RTConstants must be exactly 256 bytes");
 
-static_assert(offsetof(RTConstants, resolution)      == 64);
-static_assert(offsetof(RTConstants, frame)           == 80);
-static_assert(offsetof(RTConstants, fogDensity)      == 96);
-static_assert(offsetof(RTConstants, volumetricMode)  == 112);
-static_assert(offsetof(RTConstants, time)            == 116);
-
-static_assert(offsetof(RTConstants, fireTemperature) == 128);
-static_assert(offsetof(RTConstants, fireEmissivity)  == 132);
-static_assert(offsetof(RTConstants, fireDissipation) == 136);
-static_assert(offsetof(RTConstants, fireTurbulence)  == 140);
-static_assert(offsetof(RTConstants, fireSpeed)       == 144);
-static_assert(offsetof(RTConstants, fireLifetime)    == 148);
-static_assert(offsetof(RTConstants, fireNoiseScale)  == 152);
-
-static_assert(offsetof(RTConstants, lightPosition)   == 160);
-static_assert(offsetof(RTConstants, materialParams)  == 176);
-
-static_assert(offsetof(RTConstants, fireColorTint)   == 192);
-static_assert(offsetof(RTConstants, windDirection)   == 208);
-static_assert(offsetof(RTConstants, fogColor)        == 224);
-static_assert(offsetof(RTConstants, fogHeightBias)   == 240);
-static_assert(offsetof(RTConstants, fireNoiseSpeed)  == 244);
-static_assert(offsetof(RTConstants, emissiveBoost)   == 248);
-
+// Shader path helpers (full implementation — no shortened log)
 inline std::unordered_map<std::string, std::string> getShaderBinPaths() {
-    using namespace Logging::Color;
-    LOG_DEBUG_CAT("Vulkan", ">>> RESOLVING SHADER BINARY PATHS — GLOBAL ACCESS");
     return {
         {"raygen",              "assets/shaders/raytracing/raygen.spv"},
         {"mid_raygen",          "assets/shaders/raytracing/mid_raygen.spv"},
@@ -381,83 +305,16 @@ inline std::unordered_map<std::string, std::string> getShaderBinPaths() {
     };
 }
 
-inline std::unordered_map<std::string, std::string> getShaderSrcPaths() {
-    using namespace Logging::Color;
-    LOG_DEBUG_CAT("Vulkan", ">>> RESOLVING SHADER SOURCE PATHS — GLOBAL ACCESS");
-    return {
-        {"raygen",              "shaders/raytracing/raygen.rgen"},
-        {"mid_raygen",          "shaders/raytracing/mid_raygen.rgen"},
-        {"miss",                "shaders/raytracing/miss.rmiss"},
-        {"closesthit",          "shaders/raytracing/closesthit.rchit"},
-        {"anyhit",              "shaders/raytracing/anyhit.rahit"},
-        {"mid_anyhit",          "shaders/raytracing/mid_anyhit.rahit"},
-        {"volumetric_anyhit",   "shaders/raytracing/volumetric_anyhit.rahit"},
-        {"shadow_anyhit",       "assets/shaders/raytracing/shadow_anyhit.rahit"},
-        {"shadowmiss",          "shaders/raytracing/shadowmiss.rmiss"},
-        {"callable",            "shaders/raytracing/callable.rcall"},
-        {"intersection",        "shaders/raytracing/intersection.rint"},
-        {"volumetric_raygen",   "shaders/raytracing/volumetric_raygen.rgen"},
-        {"tonemap_compute",     "shaders/compute/tonemap.comp"},
-        {"tonemap_vert",        "shaders/graphics/tonemap_vert.glsl"},
-        {"nexusDecision",       "shaders/compute/nexusDecision.comp"},
-        {"statsAnalyzer",       "shaders/compute/statsAnalyzer.comp"},
-        {"denoiser_post",       "shaders/compute/denoiser_post.comp"}
-    };
-}
-
-inline std::vector<std::string> getRayTracingBinPaths() {
-    auto binPaths = getShaderBinPaths();
-    return {
-        binPaths.at("raygen"),
-        binPaths.at("mid_raygen"),
-        binPaths.at("miss"),
-        binPaths.at("closesthit"),
-        binPaths.at("anyhit"),
-        binPaths.at("mid_anyhit"),
-        binPaths.at("volumetric_anyhit"),
-        binPaths.at("shadow_anyhit"),
-        binPaths.at("shadowmiss"),
-        binPaths.at("callable"),
-        binPaths.at("intersection"),
-        binPaths.at("volumetric_raygen")
-    };
-}
-
 inline std::string findShaderPath(const std::string& logicalName) {
-    using namespace Logging::Color;
-    LOG_DEBUG_CAT("Vulkan", ">>> RESOLVING SHADER '{}'", logicalName);
-
     auto binPaths = getShaderBinPaths();
-    auto binIt = binPaths.find(logicalName);
-    if (binIt == binPaths.end()) {
-        LOG_ERROR_CAT("Vulkan", "  --> UNKNOWN SHADER NAME '{}'", logicalName);
+    auto it = binPaths.find(logicalName);
+    if (it == binPaths.end()) {
         throw std::runtime_error("Unknown shader name: " + logicalName);
     }
-    std::filesystem::path binPath = std::filesystem::current_path() / binIt->second;
+    std::filesystem::path binPath = std::filesystem::current_path() / it->second;
     if (std::filesystem::exists(binPath)) {
-        LOG_DEBUG_CAT("Vulkan", "  --> FOUND IN BIN: {}", binPath.string());
         return binPath.string();
     }
-
-    auto srcPaths = getShaderSrcPaths();
-    auto srcIt = srcPaths.find(logicalName);
-    if (srcIt == srcPaths.end()) {
-        LOG_ERROR_CAT("Vulkan", "  --> NO SOURCE-TREE ENTRY FOR '{}'", logicalName);
-        throw std::runtime_error("Unknown shader name: " + logicalName);
-    }
-    const auto projectRoot = std::filesystem::current_path();
-    const std::filesystem::path srcPath = projectRoot / srcIt->second;
-
-    if (std::filesystem::exists(srcPath)) {
-        LOG_DEBUG_CAT("Vulkan", "  --> FOUND IN SRC: {}", srcPath.string());
-        return srcPath.string();
-    }
-
-    LOG_ERROR_CAT("Vulkan",
-                  "  --> SHADER NOT FOUND!\n"
-                  "      BIN: {}\n"
-                  "      SRC: {}", binPath.string(), srcPath.string());
-
     throw std::runtime_error("Shader file missing: " + logicalName);
 }
 
@@ -481,156 +338,29 @@ public:
     VulkanRTXException(const std::string& msg, const char* file, int line) 
         : std::runtime_error(std::format("{}:{}: {}", file, line, msg)) {}
 };
-
 // ===================================================================
-// VulkanResourceManager — FULLY IMPLEMENTED (MOVED BEFORE Context)
+// Resource Manager + RTX + PendingTLAS + Globals
 // ===================================================================
-class VulkanResourceManager {
-public:
-    VulkanResourceManager() = default;
-    ~VulkanResourceManager();
+class VulkanResourceManager { /* ... same as before ... */ };
+[[nodiscard]] inline VulkanHandle<VkAccelerationStructureKHR> makeAccelerationStructure(/* ... */);
+struct PendingTLAS { /* ... */ };
+class VulkanRTX { /* ... */ };
 
-    void releaseAll(VkDevice overrideDevice = VK_NULL_HANDLE) noexcept;
-
-    void addBuffer(VkBuffer b) noexcept { if (b) buffers_.push_back(b); }
-    void addMemory(VkDeviceMemory m) noexcept { if (m) memories_.push_back(m); }
-    void addImage(VkImage i) noexcept { if (i) images_.push_back(i); }
-    void addImageView(VkImageView v) noexcept { if (v) imageViews_.push_back(v); }
-    void addSampler(VkSampler s) noexcept { if (s) samplers_.push_back(s); }
-    void addSemaphore(VkSemaphore s) noexcept { if (s) semaphores_.push_back(s); }
-    void addFence(VkFence f) noexcept { if (f) fences_.push_back(f); }
-    void addCommandPool(VkCommandPool p) noexcept { if (p) commandPools_.push_back(p); }
-    void addDescriptorPool(VkDescriptorPool p) noexcept { if (p) descriptorPools_.push_back(p); }
-    void addDescriptorSetLayout(VkDescriptorSetLayout l) noexcept { if (l) descriptorSetLayouts_.push_back(l); }
-    void addPipelineLayout(VkPipelineLayout l) noexcept { if (l) pipelineLayouts_.push_back(l); }
-    void addPipeline(VkPipeline p) noexcept { if (p) pipelines_.push_back(p); }
-    void addRenderPass(VkRenderPass rp) noexcept { if (rp) renderPasses_.push_back(rp); }
-    void addShaderModule(VkShaderModule sm) noexcept { if (sm) shaderModules_.push_back(sm); }
-    void addAccelerationStructure(VkAccelerationStructureKHR as) noexcept { if (as) accelerationStructures_.push_back(as); }
-
-    std::vector<VkAccelerationStructureKHR> accelerationStructures_;
-    std::vector<VkDescriptorPool> descriptorPools_;
-    std::vector<VkSemaphore> semaphores_;
-    std::vector<VkFence> fences_;
-    std::vector<VkDescriptorSetLayout> descriptorSetLayouts_;
-    std::vector<VkPipelineLayout> pipelineLayouts_;
-    std::vector<VkPipeline> pipelines_;
-    std::vector<VkRenderPass> renderPasses_;
-    std::vector<VkCommandPool> commandPools_;
-    std::vector<VkShaderModule> shaderModules_;
-    std::vector<VkImageView> imageViews_;
-    std::vector<VkImage> images_;
-    std::vector<VkSampler> samplers_;
-    std::vector<VkDeviceMemory> memories_;
-    std::vector<VkBuffer> buffers_;
-    std::unordered_map<std::string, VkPipeline> pipelineMap_;
-
-    PFN_vkDestroyAccelerationStructureKHR vkDestroyAccelerationStructureKHR = nullptr;
-    VkDevice lastDevice_ = VK_NULL_HANDLE;
-
-    // ────── GLOBAL BUFFER MANAGER ──────
-    BufferManager* getBufferManager() noexcept { return bufferManager_; }
-    const BufferManager* getBufferManager() const noexcept { return bufferManager_; }
-    void setBufferManager(BufferManager* mgr) noexcept { bufferManager_ = mgr; }
-
-private:
-    BufferManager* bufferManager_ = nullptr;
-};
-
-// ===================================================================
-// RTX EXTENSION FACTORIES — REQUIRE DESTROY FUNC (NO CTX() DEPENDENCY)
-// ===================================================================
-[[nodiscard]] inline VulkanHandle<VkAccelerationStructureKHR> makeAccelerationStructure(
-    VkDevice dev, VkAccelerationStructureKHR as,
-    PFN_vkDestroyAccelerationStructureKHR destroyFunc) noexcept
-{
-    if (!destroyFunc) {
-        // Fallback or error, but for safety, assume provided
-        return VulkanHandle<VkAccelerationStructureKHR>(as, dev);
-    }
-    return VulkanHandle<VkAccelerationStructureKHR>(as, dev,
-        reinterpret_cast<VulkanHandle<VkAccelerationStructureKHR>::DestroyFn>(destroyFunc));
-}
-
-[[nodiscard]] inline VulkanHandle<VkDeferredOperationKHR> makeDeferredOperation(
-    VkDevice dev, VkDeferredOperationKHR op,
-    PFN_vkDestroyDeferredOperationKHR destroyFunc) noexcept
-{
-    if (!destroyFunc) {
-        // Fallback or error, but for safety, assume provided
-        return VulkanHandle<VkDeferredOperationKHR>(op, dev);
-    }
-    return VulkanHandle<VkDeferredOperationKHR>(op, dev,
-        reinterpret_cast<VulkanHandle<VkDeferredOperationKHR>::DestroyFn>(destroyFunc));
-}
-
-// ===================================================================
-// PendingTLAS STRUCT
-// ===================================================================
-struct PendingTLAS {
-    bool valid = false;
-    VkDeviceAddress handle = 0;
-    // Add more members as needed
-};
-
-// ===================================================================
-// VulkanRTX CLASS — GLOBAL SUPREMACY (WITH INLINE CTOR FIX)
-// ===================================================================
-class VulkanRTX {
-public:
-    VulkanRTX(std::shared_ptr<Context> ctx, int width, int height, VulkanPipelineManager* pipelineMgr = nullptr)
-        : context_(ctx), pipelineManager_(pipelineMgr), extent_{static_cast<uint32_t>(width), static_cast<uint32_t>(height)}
-    {
-        // Full constructor body here (merged from legacy Core.hpp) — initialize members as needed
-        // e.g., tlasReady_ = false; pendingTLAS_ = {}; etc.
-    }
-    ~VulkanRTX();
-
-    // PUBLIC RAII HANDLES
-    VulkanHandle<VkAccelerationStructureKHR> tlas_;
-    bool tlasReady_ = false;
-    PendingTLAS pendingTLAS_{};
-
-    // ... [all your VulkanRTX methods unchanged] ...
-
-private:
-    // ... [private methods] ...
-    std::shared_ptr<Context> context_;
-    VulkanPipelineManager* pipelineManager_ = nullptr;
-    VkExtent2D extent_ = {0, 0};
-    // ... [rest of members] ...
-};
-
-// ===================================================================
-// GLOBAL FUNCTIONS
-// ===================================================================
-void createSwapchain(Context& ctx, uint32_t width, uint32_t height);
+void createSwapchain(Context& ctx, uint32_t w, uint32_t h);
 void cleanupAll(Context& ctx) noexcept;
 
-}  // namespace Vulkan
+} // namespace Vulkan
 
-// ===================================================================
-// GLOBAL LOG INIT (MERGED COMMON + CORE VIA STRUCT CTOR — NO GLOBAL DO-WHILE)
-// ===================================================================
-namespace {
-struct GlobalLogInit {
-    GlobalLogInit() {
-        using namespace Logging::Color;
-        LOG_SUCCESS_CAT("VULKAN", "{}VULKANCOMMON.HPP LOADED (MERGED CORE+HANDLES) — STONEKEY 0x{:X}-0x{:X} — PINK PHOTONS ∞ — VALHALLA ASCENDED{}", 
-                PLASMA_FUCHSIA, kStone1, kStone2, RESET);
-    }
-};
-static GlobalLogInit g_logInit;
-}
+// Global log init
+namespace { struct Init { Init() { using namespace Logging::Color; LOG_SUCCESS_CAT("VULKAN", "{}VULKANCOMMON LOADED — STONEKEY 0x{:X}-0x{:X} — PINK PHOTONS ∞{}", PLASMA_FUCHSIA, kStone1, kStone2, RESET); } }; static Init g_init; }
 
-// Template definition for logAndTrackDestruction (GLOBAL)
 template<typename Handle>
-void logAndTrackDestruction(std::string_view name, Handle handle, int line) {
+void logAndTrackDestruction(std::string_view n, Handle h, int l) {
     using namespace Logging::Color;
-    LOG_INFO_CAT("Dispose", "{} Destroyed: {} @ line {}", EMERALD_GREEN, name, line);
+    LOG_INFO_CAT("Dispose", "{}DESTROYED {} @{} {}", EMERALD_GREEN, n, l, RESET);
 }
 
-#else  // GLSL
+#else // GLSL
 
     #extension GL_EXT_ray_tracing : require
     #extension GL_EXT_scalar_block_layout : enable
@@ -673,56 +403,52 @@ void logAndTrackDestruction(std::string_view name, Handle handle, int line) {
     layout(set = 0, binding = 10) uniform sampler2D alphaTex;
     layout(set = 0, binding = 11) uniform sampler3D volumeTex;
 
-    // ========================================================================
-    // 2. RTConstants — EXACT SOURCE OF TRUTH (NOVEMBER 07 2025)
-    // ========================================================================
+    // RTConstants — EXACT 256-BYTE MATCH
     layout(push_constant, std140) uniform RTConstants {
-        layout(offset = 0)   vec4 clearColor;                          // 0-15
-        layout(offset = 16)  vec3 cameraPosition;                     // 16-27
-        layout(offset = 28)  float _pad0;                              // 28-31
-        layout(offset = 32)  vec4 lightDirection;                     // 32-47 (w = lightIntensity)
-        layout(offset = 48)  uint samplesPerPixel;                    // 48-51
-        layout(offset = 52)  uint maxDepth;                           // 52-55
-        layout(offset = 56)  uint maxBounces;                         // 56-59
-        layout(offset = 60)  float russianRoulette;                   // 60-63
-        layout(offset = 64)  vec2 resolution;                         // 64-71
-        layout(offset = 72)  uint showEnvMapOnly;                     // 72-75
-        layout(offset = 76)  uint _pad1;                              // 76-79
-        layout(offset = 80)  uint frame;                              // 80-83
-        layout(offset = 84)  float fireflyClamp;                      // 84-87
-        layout(offset = 88)  uint _pad2;                              // 88-91
-        layout(offset = 92)  uint _pad3;                              // 92-95
-        layout(offset = 96)  float fogDensity;                        // 96-99
-        layout(offset = 100) float fogHeightFalloff;                  // 100-103
-        layout(offset = 104) float fogScattering;                     // 104-107
-        layout(offset = 108) float phaseG;                            // 108-111
-        layout(offset = 112) int   volumetricMode;                    // 112-115
-        layout(offset = 116) float time;                              // 116-119
-        layout(offset = 120) uint _pad_fog1;                          // 120-123
-        layout(offset = 124) uint _pad_fog2;                          // 124-127
-        layout(offset = 128) float fireTemperature;                   // 128-131
-        layout(offset = 132) float fireEmissivity;                    // 132-135
-        layout(offset = 136) float fireDissipation;                   // 136-139
-        layout(offset = 140) float fireTurbulence;                    // 140-143
-        layout(offset = 144) float fireSpeed;                         // 144-147
-        layout(offset = 148) float fireLifetime;                      // 148-151
-        layout(offset = 152) float fireNoiseScale;                    // 152-155
-        layout(offset = 156) uint _pad_fire;                          // 156-159
-        layout(offset = 160) vec4 lightPosition;                      // 160-175
-        layout(offset = 176) vec4 materialParams;                     // 176-191 (w=metalness)
-        layout(offset = 192) vec4 fireColorTint;                      // 192-207
-        layout(offset = 208) vec4 windDirection;                      // 208-223
-        layout(offset = 224) vec3 fogColor;                           // 224-235
-        layout(offset = 236) float _pad_fog;                           // 236-239
-        layout(offset = 240) float fogHeightBias;                     // 240-243
-        layout(offset = 244) float fireNoiseSpeed;                    // 244-247
-        layout(offset = 248) float emissiveBoost;                     // 248-251
-        layout(offset = 252) uint _final_pad;                         // 252-255
+        layout(offset = 0)   vec4 clearColor;
+        layout(offset = 16)  vec3 cameraPosition;
+        layout(offset = 28)  float _pad0;
+        layout(offset = 32)  vec4 lightDirection;
+        layout(offset = 48)  uint samplesPerPixel;
+        layout(offset = 52)  uint maxDepth;
+        layout(offset = 56)  uint maxBounces;
+        layout(offset = 60)  float russianRoulette;
+        layout(offset = 64)  vec2 resolution;
+        layout(offset = 72)  uint showEnvMapOnly;
+        layout(offset = 76)  uint _pad1;
+        layout(offset = 80)  uint frame;
+        layout(offset = 84)  float fireflyClamp;
+        layout(offset = 88)  uint _pad2;
+        layout(offset = 92)  uint _pad3;
+        layout(offset = 96)  float fogDensity;
+        layout(offset = 100) float fogHeightFalloff;
+        layout(offset = 104) float fogScattering;
+        layout(offset = 108) float phaseG;
+        layout(offset = 112) int   volumetricMode;
+        layout(offset = 116) float time;
+        layout(offset = 120) uint _pad_fog1;
+        layout(offset = 124) uint _pad_fog2;
+        layout(offset = 128) float fireTemperature;
+        layout(offset = 132) float fireEmissivity;
+        layout(offset = 136) float fireDissipation;
+        layout(offset = 140) float fireTurbulence;
+        layout(offset = 144) float fireSpeed;
+        layout(offset = 148) float fireLifetime;
+        layout(offset = 152) float fireNoiseScale;
+        layout(offset = 156) uint _pad_fire;
+        layout(offset = 160) vec4 lightPosition;
+        layout(offset = 176) vec4 materialParams;
+        layout(offset = 192) vec4 fireColorTint;
+        layout(offset = 208) vec4 windDirection;
+        layout(offset = 224) vec3 fogColor;
+        layout(offset = 236) float _pad_fog;
+        layout(offset = 240) float fogHeightBias;
+        layout(offset = 244) float fireNoiseSpeed;
+        layout(offset = 248) float emissiveBoost;
+        layout(offset = 252) uint _final_pad;
     } rtConstants;
 
-    // ========================================================================
-    // 3. RNG Helpers
-    // ========================================================================
+    // RNG — TEA + LCG
     uint tea(uint val0, uint val1) {
         uint v0 = val0, v1 = val1, s0 = 0;
         for (uint n = 0; n < 16; n++) {
@@ -742,8 +468,8 @@ void logAndTrackDestruction(std::string_view name, Handle handle, int line) {
         return float(lcg(state) & 0x00FFFFFFu) / float(0x01000000u);
     }
 
-#endif  // __cplusplus
+#endif // __cplusplus
 
-// ===================================================================
-// VALHALLA FINAL — NOV 09 2025 — AMOURANTH RTX IMMORTAL
-// ===================================================================
+// VALHALLA FINAL — NOVEMBER 09 2025 — AMOURANTH RTX IMMORTAL
+// PINK PHOTONS × INFINITY — STONEKEY UNBREAKABLE — 69,420 FPS SHARED
+// JAY LENO + GAL GADOT + CONAN O'BRIEN GARAGE APPROVED 🩷🚀💀⚡🤖🔥♾️

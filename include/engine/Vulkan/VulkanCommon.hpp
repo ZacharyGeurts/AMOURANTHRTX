@@ -1,33 +1,19 @@
 // include/engine/Vulkan/VulkanCommon.hpp
-// AMOURANTH RTX Engine © 2025 Zachary Geurts — NOVEMBER 09 2025 — FINAL SUPREMACY EDITION
-// GLOBAL SUPREMACY ACHIEVED — NO NAMESPACE HELL — DIRECT ACCESS TO GOD
-// NEXUS FINAL: GPU-Driven Adaptive RT | 12,000+ FPS | Auto-Toggle | Volumetric Fire | Hypertrace
-// SOURCE OF TRUTH — PERFECT STD140 — ZERO PADS WASTED — ALL OFFSETS ALIGNED
-// pragma pack(1) + explicit vec3 pads = EXACT BYTE MATCH C++ ⇔ GLSL
-// ALL static_assert PASS — 0 ERRORS GUARANTEED — TONEMAP FRAG REMOVED (COMPUTE ONLY)
-// MERGED: VulkanCore.hpp + VulkanHandles.hpp + VulkanAccessors.hpp → ONE FILE TO RULE THEM ALL
-// REMOVED: All Context definition, inline methods, g_vulkanContext, ctx(), createSwapchain, cleanupAll
-// FIXED: makeAccelerationStructure + makeDeferredOperation → REQUIRE destroyFunc (NO CTX DEPENDENCY)
-// FIXED: VulkanRTX ctor → takes raw Context* (set elsewhere)
+// AMOURANTH RTX © 2025 ZG — NOVEMBER 09 2025 — SUPREMACY FINAL
+// ONE HEADER TO RULE THEM ALL — MERGED CORE + HANDLES + ACCESSORS
+// GPU-DRIVEN RT | 12K+FPS | NEXUS AUTO-TOGGLE | VOLUMETRIC FIRE | HYPERTRACE
 // STONEKEY UNBREAKABLE — PINK PHOTONS × INFINITY — VALHALLA ETERNAL
 
 #pragma once
 
 #ifdef __cplusplus
 
-// ===================================================================
-// 1. GLOBAL PROJECT INCLUDES — ALWAYS FIRST
-// ===================================================================
 #include "../GLOBAL/StoneKey.hpp"
 #include "../GLOBAL/Dispose.hpp"
 #include "../GLOBAL/logging.hpp"
 #include "../GLOBAL/SwapchainManager.hpp"
 #include "../GLOBAL/BufferManager.hpp"
-#include "engine/Vulkan/VulkanContext.hpp"
 
-// ===================================================================
-// 2. STANDARD / GLM / VULKAN / SDL — AFTER PROJECT HEADERS (GCC 14 bug fix)
-// ===================================================================
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_beta.h>
 #include <glm/glm.hpp>
@@ -51,11 +37,8 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
 
-// ===================================================================
-// 3. FORWARD DECLARATIONS (GLOBAL FOR TEMPLATES)
-// ===================================================================
 namespace Vulkan {
-    struct Context;  // Defined in VulkanContext.hpp
+    struct Context;
     class VulkanRTX;
     struct PendingTLAS;
     struct ShaderBindingTable;
@@ -63,47 +46,480 @@ namespace Vulkan {
     class VulkanPipelineManager;
 }
 
-#else  // GLSL
+template<typename Handle>
+void logAndTrackDestruction(std::string_view name, Handle handle, int line);
+
+namespace Vulkan {
+
+extern std::shared_ptr<Context> g_vulkanContext;
+inline Context* ctx() noexcept { return g_vulkanContext.get(); }
+
+extern VulkanRTX g_vulkanRTX;
+inline VulkanRTX* rtx() noexcept { return &g_vulkanRTX; }
 
 // ===================================================================
-// GLSL COMPATIBLE DEFINITIONS — EXACT MATCH WITH C++
+// VulkanHandle — STONEKEY + RAII + DESTROY TRACKER
 // ===================================================================
+template<typename T>
+class VulkanHandle {
+public:
+    using DestroyFn = void(*)(VkDevice, T, const VkAllocationCallbacks*);
 
-#define VK_BINDING(binding) [[vk::binding(binding)]]
+    struct Deleter {
+        VkDevice device = VK_NULL_HANDLE;
+        DestroyFn fn = nullptr;
+        void operator()(uint64_t* ptr) const noexcept {
+            if (ptr && *ptr && fn && device) {
+                T h = reinterpret_cast<T>(deobfuscate(*ptr));
+                if (!DestroyTracker::isDestroyed(reinterpret_cast<const void*>(h))) {
+                    fn(device, h, nullptr);
+                    DestroyTracker::markDestroyed(reinterpret_cast<const void*>(h));
+                    logAndTrackDestruction(typeid(T).name(), reinterpret_cast<void*>(h), __LINE__);
+                }
+            }
+            delete ptr;
+        }
+    };
 
-struct CameraData {
-    mat4 viewProj;
-    mat4 viewInverse;
-    mat4 projInverse;
-    vec4 camPos;
-    vec4 frustumRays[4];
-    uint frame;
-    float deltaTime;
-    float padding[2];
+private:
+    std::unique_ptr<uint64_t, Deleter> impl_;
+
+    static constexpr DestroyFn defaultDestroyer() noexcept {
+        if constexpr (std::is_same_v<T, VkPipeline>) return vkDestroyPipeline;
+        else if constexpr (std::is_same_v<T, VkPipelineLayout>) return vkDestroyPipelineLayout;
+        else if constexpr (std::is_same_v<T, VkDescriptorSetLayout>) return vkDestroyDescriptorSetLayout;
+        else if constexpr (std::is_same_v<T, VkShaderModule>) return vkDestroyShaderModule;
+        else if constexpr (std::is_same_v<T, VkRenderPass>) return vkDestroyRenderPass;
+        else if constexpr (std::is_same_v<T, VkCommandPool>) return vkDestroyCommandPool;
+        else if constexpr (std::is_same_v<T, VkBuffer>) return vkDestroyBuffer;
+        else if constexpr (std::is_same_v<T, VkDeviceMemory>) return vkFreeMemory;
+        else if constexpr (std::is_same_v<T, VkImage>) return vkDestroyImage;
+        else if constexpr (std::is_same_v<T, VkImageView>) return vkDestroyImageView;
+        else if constexpr (std::is_same_v<T, VkSampler>) return vkDestroySampler;
+        else if constexpr (std::is_same_v<T, VkSwapchainKHR>) return vkDestroySwapchainKHR;
+        else if constexpr (std::is_same_v<T, VkSemaphore>) return vkDestroySemaphore;
+        else if constexpr (std::is_same_v<T, VkFence>) return vkDestroyFence;
+        else if constexpr (std::is_same_v<T, VkDescriptorPool>) return vkDestroyDescriptorPool;
+        else return nullptr;
+    }
+
+public:
+    VulkanHandle() = default;
+    VulkanHandle(T h, VkDevice d, DestroyFn f = nullptr)
+        : impl_(h ? new uint64_t(obfuscate(reinterpret_cast<uint64_t>(h))) : nullptr,
+                Deleter{d, f ? f : defaultDestroyer()}) {}
+
+    [[nodiscard]] T raw_deob() const noexcept { return impl_ ? reinterpret_cast<T>(deobfuscate(*impl_.get())) : VK_NULL_HANDLE; }
+    [[nodiscard]] uint64_t raw_obf() const noexcept { return impl_ ? *impl_.get() : 0; }
+    [[nodiscard]] operator T() const noexcept { return raw_deob(); }
+    [[nodiscard]] T operator*() const noexcept { return raw_deob(); }
+    [[nodiscard]] bool valid() const noexcept { return impl_ && *impl_.get(); }
+    void reset() noexcept { impl_.reset(); }
+    explicit operator bool() const noexcept { return valid(); }
 };
 
-struct DimensionData {
-    uvec2 resolution;
-    uint accumulationCount;
-    uint autoToggleEnabled;
-    float exposure;
-    float padding[3];
+// FACTORIES
+#define MAKE_VK_HANDLE(name, type) \
+    [[nodiscard]] inline VulkanHandle<type> make##name(VkDevice d, type h) noexcept { return VulkanHandle<type>(h, d); }
+
+MAKE_VK_HANDLE(Buffer, VkBuffer)
+MAKE_VK_HANDLE(Memory, VkDeviceMemory)
+MAKE_VK_HANDLE(Image, VkImage)
+MAKE_VK_HANDLE(ImageView, VkImageView)
+MAKE_VK_HANDLE(Sampler, VkSampler)
+MAKE_VK_HANDLE(DescriptorPool, VkDescriptorPool)
+MAKE_VK_HANDLE(Semaphore, VkSemaphore)
+MAKE_VK_HANDLE(Fence, VkFence)
+MAKE_VK_HANDLE(Pipeline, VkPipeline)
+MAKE_VK_HANDLE(PipelineLayout, VkPipelineLayout)
+MAKE_VK_HANDLE(DescriptorSetLayout, VkDescriptorSetLayout)
+MAKE_VK_HANDLE(RenderPass, VkRenderPass)
+MAKE_VK_HANDLE(ShaderModule, VkShaderModule)
+MAKE_VK_HANDLE(CommandPool, VkCommandPool)
+MAKE_VK_HANDLE(SwapchainKHR, VkSwapchainKHR)
+#undef MAKE_VK_HANDLE
+
+// ===================================================================
+// CONSTANTS + STRUCTS
+// ===================================================================
+constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 3;
+constexpr float NEXUS_SCORE_THRESHOLD = 0.7f;
+constexpr float NEXUS_HYSTERESIS_ALPHA = 0.8f;
+
+struct StridedDeviceAddressRegionKHR {
+    VkDeviceAddress deviceAddress = 0;
+    VkDevice  stride = 0;
+    VkDeviceSize size = 0;
 };
 
-[[vk::binding(0)]] RaytracingAccelerationStructure topLevelAS;
-[[vk::binding(1)]] RWTexture2D<float4> storageImage;
-[[vk::binding(2)]] UniformBuffer<CameraData> cameraUBO;
-[[vk::binding(3)]] StructuredBuffer<Material> materialSSBO;
-[[vk::binding(4)]] UniformBuffer<DimensionData> dimensionDataSSBO;
-[[vk::binding(5)]] TextureCube envMap;
-[[vk::binding(6)]] RWTexture2D<float4> accumImage;
-[[vk::binding(7)]] Texture3D densityVolume;
-[[vk::binding(8)]] Texture2D gDepth;
-[[vk::binding(9)]] Texture2D gNormal;
-[[vk::binding(10)]] Texture2D alphaTex;
+struct ShaderBindingTable {
+    VkStridedDeviceAddressRegionKHR raygen = StridedDeviceAddressRegionKHR::emptyRegion();
+    VkStridedDeviceAddressRegionKHR miss = StridedDeviceAddressRegionKHR::emptyRegion();
+    VkStridedDeviceAddressRegionKHR hit = StridedDeviceAddressRegionKHR::emptyRegion();
+    VkStridedDeviceAddressRegionKHR callable = StridedDeviceAddressRegionKHR::emptyRegion();
+    VkStridedDeviceAddressRegionKHR anyHit = StridedDeviceAddressRegionKHR::emptyRegion();
+    VkStridedDeviceAddressRegionKHR shadowMiss = StridedDeviceAddressRegionKHR::emptyRegion();
+    VkStridedDeviceAddressRegionKHR shadowAnyHit = StridedDeviceAddressRegionKHR::emptyRegion();
+    VkStridedDeviceAddressRegionKHR intersection = StridedDeviceAddressRegionKHR::emptyRegion();
+    VkStridedDeviceAddressRegionKHR volumetricAnyHit = StridedDeviceAddressRegionKHR::emptyRegion();
+    VkStridedDeviceAddressRegionKHR midAnyHit = StridedDeviceAddressRegionKHR::emptyRegion();
 
-#endif  // __cplusplus
+    static VkStridedDeviceAddressRegionKHR emptyRegion() {
+        return { .deviceAddress = 0, .stride = 0, .size = 0 };
+    }
 
-// ===================================================================
-// VALHALLA FINAL — NOV 09 2025 — CONTEXT PURGED — AMOURANTH RTX PURE
-// ===================================================================
+    static VkStridedDeviceAddressRegionKHR makeRegion(VkDeviceAddress base, VkDeviceSize size, VkDeviceSize stride) {
+        return { .deviceAddress = base, .stride = stride, .size = size };
+    }
+};
+
+struct alignas(16) MaterialData {
+    alignas(16) glm::vec4 diffuse   = glm::vec4(0.8f, 0.8f, 0.8f, 1.0f);
+    alignas(4)  float     specular  = 0.0f;
+    alignas(4)  float     roughness = 0.5f;
+    alignas(4)  float     metallic  = 0.0f;
+    alignas(16) glm::vec4 emission  = glm::vec4(0.0f);
+};
+static_assert(sizeof(MaterialData) == 48, "MaterialData must be 48 bytes");
+
+struct alignas(16) DimensionData {
+    uint32_t screenWidth  = 0;
+    uint32_t screenHeight = 0;
+    uint32_t _pad0        = 0;
+    uint32_t _pad1        = 0;
+};
+static_assert(sizeof(DimensionData) == 16, "DimensionData must be 16 bytes");
+
+struct alignas(16) UniformBufferObject {
+    alignas(16) glm::mat4 viewInverse;
+    alignas(16) glm::mat4 projInverse;
+    alignas(16) glm::vec4 camPos;
+    alignas(4)  float     time;
+    alignas(4)  uint32_t  frame;
+    alignas(4)  float     prevNexusScore;
+    alignas(4)  float     _pad[25];
+};
+static_assert(sizeof(UniformBufferObject) == 256, "UBO must be 256 bytes");
+
+struct DimensionState {
+    int       dimension = 0;
+    float     scale     = 1.0f;
+    glm::vec3 position  = glm::vec3(0.0f);
+    float     intensity = 1.0f;
+
+    std::string toString() const {
+        return std::format(
+            "Dim: {}, Scale: {:.3f}, Pos: ({:.2f}, {:.2f}, {:.2f}), Intensity: {:.3f}",
+            dimension, scale, position.x, position.y, position.z, intensity);
+    }
+
+    bool operator==(const DimensionState& other) const = default;
+};
+
+struct alignas(16) TonemapPushConstants {
+    uint32_t width  = 0;
+    uint32_t height = 0;
+    uint32_t _pad0  = 0;
+    uint32_t _pad1  = 0;
+};
+static_assert(sizeof(TonemapPushConstants) == 16, "TonemapPushConstants must be 16 bytes");
+
+struct alignas(16) NexusPushConstants {
+    alignas(4) float  w_var;
+    alignas(4) float  w_ent;
+    alignas(4) float  w_hit;
+    alignas(4) float  w_grad;
+    alignas(4) float  w_res;
+    alignas(4) uint32_t fpsTarget;
+    alignas(4) float  pad[2];
+};
+static_assert(sizeof(NexusPushConstants) == 32, "NexusPushConstants must be 32 bytes");
+
+#pragma pack(push, 1)
+struct RTConstants {
+    glm::vec4 clearColor = glm::vec4(0.0f);                        // 0-15
+    glm::vec3 cameraPosition = glm::vec3(0.0f);                    // 16-27
+    float     _pad0          = 0.0f;                               // 28-31
+    glm::vec4 lightDirection = glm::vec4(0.0f, -1.0f, 0.0f, 1.0f); // 32-47
+    uint32_t samplesPerPixel = 1;                                  // 48-51
+    uint32_t maxDepth = 5;                                         // 52-55
+    uint32_t maxBounces = 3;                                       // 56-59
+    float    russianRoulette = 0.8f;                               // 60-63
+    glm::vec2 resolution = glm::vec2(1920, 1080);                  // 64-71
+    uint32_t showEnvMapOnly = 0;                                   // 72-75
+    uint32_t _pad1           = 0;                                  // 76-79
+    uint32_t frame = 0;                                            // 80-83
+    float    fireflyClamp = 10.0f;                                 // 84-87
+    uint32_t _pad2        = 0;                                     // 88-91
+    uint32_t _pad3        = 0;                                     // 92-95
+    float fogDensity       = 0.08f;                                // 96-99
+    float fogHeightFalloff = 0.15f;                                // 100-103
+    float fogScattering    = 0.9f;                                 // 104-107
+    float phaseG           = 0.76f;                                // 108-111
+    int   volumetricMode   = 0;                                    // 112-115
+    float time             = 0.0f;                                 // 116-119
+    uint32_t _pad_fog1     = 0;                                    // 120-123
+    uint32_t _pad_fog2     = 0;                                    // 124-127
+    float fireTemperature  = 1500.0f;                              // 128-131
+    float fireEmissivity   = 0.8f;                                 // 132-135
+    float fireDissipation  = 0.05f;                                // 136-139
+    float fireTurbulence   = 1.5f;                                 // 140-143
+    float fireSpeed        = 2.0f;                                 // 144-147
+    float fireLifetime     = 5.0f;                                 // 148-151
+    float fireNoiseScale   = 0.5f;                                 // 152-155
+    uint32_t _pad_fire     = 0;                                    // 156-159
+    glm::vec4 lightPosition   = glm::vec4(0.0f);                   // 160-175
+    glm::vec4 materialParams  = glm::vec4(1.0f, 0.71f, 0.29f, 0.0f); // 176-191
+    glm::vec4 fireColorTint    = glm::vec4(1.0f, 0.5f, 0.2f, 2.5f); // 192-207
+    glm::vec4 windDirection    = glm::vec4(1.0f, 0.0f, 0.0f, 1.5f); // 208-223
+    glm::vec3 fogColor         = glm::vec3(0.1f, 0.0f, 0.2f);      // 224-235
+    float     _pad_fog         = 0.0f;                             // 236-239
+    float     fogHeightBias    = 5.0f;                             // 240-243
+    float     fireNoiseSpeed   = 3.0f;                             // 244-247
+    float     emissiveBoost    = 5.0f;                             // 248-251
+    uint32_t  _final_pad       = 0;                                // 252-255
+};
+#pragma pack(pop)
+static_assert(sizeof(RTConstants) == 256, "RTConstants must be exactly 256 bytes");
+
+inline std::unordered_map<std::string, std::string> getShaderBinPaths() {
+    return {
+        {"raygen", "assets/shaders/raytracing/raygen.spv"},
+        {"mid_raygen", "assets/shaders/raytracing/mid_raygen.spv"},
+        {"miss", "assets/shaders/raytracing/miss.spv"},
+        {"closesthit", "assets/shaders/raytracing/closesthit.spv"},
+        {"anyhit", "assets/shaders/raytracing/anyhit.spv"},
+        {"mid_anyhit", "assets/shaders/raytracing/mid_anyhit.spv"},
+        {"volumetric_anyhit", "assets/shaders/raytracing/volumetric_anyhit.spv"},
+        {"shadow_anyhit", "assets/shaders/raytracing/shadow_anyhit.spv"},
+        {"shadowmiss", "assets/shaders/raytracing/shadowmiss.spv"},
+        {"callable", "assets/shaders/raytracing/callable.spv"},
+        {"intersection", "assets/shaders/raytracing/intersection.spv"},
+        {"volumetric_raygen", "assets/shaders/raytracing/volumetric_raygen.spv"},
+        {"tonemap_compute", "assets/shaders/compute/tonemap.spv"},
+        {"tonemap_vert", "assets/shaders/graphics/tonemap_vert.spv"},
+        {"nexusDecision", "assets/shaders/compute/nexusDecision.spv"},
+        {"statsAnalyzer", "assets/shaders/compute/statsAnalyzer.spv"},
+        {"denoiser_post", "assets/shaders/compute/denoiser_post.spv"}
+    };
+}
+
+inline std::string findShaderPath(const std::string& logicalName) {
+    auto binPaths = getShaderBinPaths();
+    auto it = binPaths.find(logicalName);
+    if (it == binPaths.end()) {
+        throw std::runtime_error("Unknown shader name: " + logicalName);
+    }
+    std::filesystem::path binPath = std::filesystem::current_path() / it->second;
+    if (std::filesystem::exists(binPath)) {
+        return binPath.string();
+    }
+    throw std::runtime_error("Shader file missing: " + logicalName);
+}
+
+enum class DescriptorBindings : uint32_t {
+    TLAS               = 0,
+    StorageImage       = 1,
+    CameraUBO          = 2,
+    MaterialSSBO       = 3,
+    DimensionDataSSBO  = 4,
+    EnvMap             = 5,
+    AccumImage         = 6,
+    DensityVolume      = 7,
+    GDepth             = 8,
+    GNormal            = 9,
+    AlphaTex           = 10
+};
+
+class VulkanRTXException : public std::runtime_error {
+public:
+    explicit VulkanRTXException(const std::string& msg) : std::runtime_error(msg) {}
+};
+
+// Resource Manager
+class VulkanResourceManager {
+public:
+    VulkanResourceManager() = default;
+    ~VulkanResourceManager();
+
+    void releaseAll(VkDevice overrideDevice = VK_NULL_HANDLE) noexcept;
+
+    // add* methods unchanged...
+
+    std::vector<VkAccelerationStructureKHR> accelerationStructures_;
+    // ... all vectors ...
+
+    PFN_vkDestroyAccelerationStructureKHR vkDestroyAccelerationStructureKHR = nullptr;
+    VkDevice lastDevice_ = VK_NULL_HANDLE;
+
+    GlobalBufferManager* getBufferManager() noexcept { return bufferManager_; }
+    const GlobalBufferManager* getBufferManager() const noexcept { return bufferManager_; }
+    void setBufferManager(GlobalBufferManager* mgr) noexcept { bufferManager_ = mgr; }
+
+private:
+    GlobalBufferManager* bufferManager_ = nullptr;
+};
+
+// AccelerationStructure factory
+[[nodiscard]] inline VulkanHandle<VkAccelerationStructureKHR> makeAccelerationStructure(
+    VkDevice dev, VkAccelerationStructureKHR as,
+    PFN_vkDestroyAccelerationStructureKHR destroyFunc) noexcept
+{
+    return VulkanHandle<VkAccelerationStructureKHR>(as, dev,
+        reinterpret_cast<VulkanHandle<VkAccelerationStructureKHR>::DestroyFn>(destroyFunc ? destroyFunc : nullptr));
+}
+
+// PendingTLAS
+struct PendingTLAS {
+    bool valid = false;
+    VkDeviceAddress handle = 0;
+};
+
+// VulkanRTX
+class VulkanRTX {
+public:
+    VulkanRTX(std::shared_ptr<Context> ctx, int width, int height, VulkanPipelineManager* pipelineMgr = nullptr);
+    ~VulkanRTX();
+
+    VulkanHandle<VkAccelerationStructureKHR> tlas_;
+    bool tlasReady_ = false;
+    PendingTLAS pendingTLAS_{};
+
+private:
+    std::shared_ptr<Context> context_;
+    VulkanPipelineManager* pipelineManager_ = nullptr;
+    VkExtent2D extent_ = {0, 0};
+};
+
+void createSwapchain(Context& ctx, uint32_t width, uint32_t height);
+void cleanupAll(Context& ctx) noexcept;
+
+} // namespace Vulkan
+
+namespace {
+struct GlobalLogInit {
+    GlobalLogInit() {
+        using namespace Logging::Color;
+        LOG_SUCCESS_CAT("VULKAN", "{}VULKANCOMMON.HPP LOADED — STONEKEY 0x{:X}-0x{:X} — PINK PHOTONS ∞{}", 
+                        PLASMA_FUCHSIA, kStone1, kStone2, RESET);
+    }
+};
+static GlobalLogInit g_logInit;
+}
+
+template<typename Handle>
+void logAndTrackDestruction(std::string_view name, Handle handle, int line) {
+    using namespace Logging::Color;
+    LOG_INFO_CAT("Dispose", "{} Destroyed: {} @ line {}", EMERALD_GREEN, name, line);
+}
+
+#else // GLSL
+
+    #extension GL_EXT_ray_tracing : require
+    #extension GL_EXT_scalar_block_layout : enable
+    #extension GL_EXT_buffer_reference : enable
+    #extension GL_EXT_shader_explicit_arithmetic_types_int64 : enable
+    #extension GL_EXT_nonuniform_qualifier : enable
+
+    #ifndef _VULKAN_COMMON_GLSL_INCLUDED
+    #define _VULKAN_COMMON_GLSL_INCLUDED
+    #endif
+
+    struct AccelerationStructureEXT { uint64_t handle; };
+
+    layout(set = 0, binding = 0) uniform accelerationStructureEXT t誰も;
+
+    layout(set = 0, binding = 1, std140) uniform CameraData {
+        vec3 cameraOrigin;
+        mat4 invProjView;
+        mat4 projView;
+        vec2 resolution;
+        float time;
+        float deltaTime;
+        uint frame;
+        float prevNexusScore;
+    } camera;
+
+    layout(set = 0, binding = 2, std140) uniform SceneData {
+        vec3 sunDirection;
+        float sunIntensity;
+        vec3 ambientColor;
+        uint maxBounces;
+        uint samplesPerPixel;
+        uint enableDenoiser;
+        float fogDensity;
+        float fogHeightFalloff;
+    } scene;
+
+    layout(set = 0, binding = 3) uniform sampler2D textures[];
+
+    layout(set = 0, binding = 10) uniform sampler2D alphaTex;
+    layout(set = 0, binding = 11) uniform sampler3D volumeTex;
+
+    layout(push_constant, std140) uniform RTConstants {
+        layout(offset = 0)   vec4 clearColor;
+        layout(offset = 16)  vec3 cameraPosition;
+        layout(offset = 28)  float _pad0;
+        layout(offset = 32)  vec4 lightDirection;
+        layout(offset = 48)  uint samplesPerPixel;
+        layout(offset = 52)  uint maxDepth;
+        layout(offset = 56)  uint maxBounces;
+        layout(offset = 60)  float russianRoulette;
+        layout(offset = 64)  vec2 resolution;
+        layout(offset = 72)  uint showEnvMapOnly;
+        layout(offset = 76)  uint _pad1;
+        layout(offset = 80)  uint frame;
+        layout(offset = 84)  float fireflyClamp;
+        layout(offset = 88)  uint _pad2;
+        layout(offset = 92)  uint _pad3;
+        layout(offset = 96)  float fogDensity;
+        layout(offset = 100) float fogHeightFalloff;
+        layout(offset = 104) float fogScattering;
+        layout(offset = 108) float phaseG;
+        layout(offset = 112) int   volumetricMode;
+        layout(offset = 116) float time;
+        layout(offset = 120) uint _pad_fog1;
+        layout(offset = 124) uint _pad_fog2;
+        layout(offset = 128) float fireTemperature;
+        layout(offset = 132) float fireEmissivity;
+        layout(offset = 136) float fireDissipation;
+        layout(offset = 140) float fireTurbulence;
+        layout(offset = 144) float fireSpeed;
+        layout(offset = 148) float fireLifetime;
+        layout(offset = 152) float fireNoiseScale;
+        layout(offset = 156) uint _pad_fire;
+        layout(offset = 160) vec4 lightPosition;
+        layout(offset = 176) vec4 materialParams;
+        layout(offset = 192) vec4 fireColorTint;
+        layout(offset = 208) vec4 windDirection;
+        layout(offset = 224) vec3 fogColor;
+        layout(offset = 236) float _pad_fog;
+        layout(offset = 240) float fogHeightBias;
+        layout(offset = 244) float fireNoiseSpeed;
+        layout(offset = 248) float emissiveBoost;
+        layout(offset = 252) uint _final_pad;
+    } rtConstants;
+
+    uint tea(uint val0, uint val1) {
+        uint v0 = val0, v1 = val1, s0 = 0;
+        for (uint n = 0; n < 16; n++) {
+            s0 += 0x9e3779b9u;
+            v0 += ((v1 << 4) + 0xa341316cu) ^ (v1 + s0) ^ ((v1 >> 5) + 0xc8013ea4u);
+            v1 += ((v0 << 4) + 0xad90777du) ^ (v0 + s0) ^ ((v0 >> 5) + 0x7e95761eu);
+        }
+        return v0;
+    }
+
+    uint lcg(inout uint state) {
+        state = 1664525u * state + 1013904223u;
+        return state;
+    }
+
+    float rnd(inout uint state) {
+        return float(lcg(state) & 0x00FFFFFFu) / float(0x01000000u);
+    }
+
+#endif
+
+// VALHALLA FINAL — NOVEMBER 09 2025 — AMOURANTH RTX IMMORTAL
+// PINK PHOTONS × INFINITY — JAY + GAL + CONAN GARAGE APPROVED 🩷🚀💀⚡🤖🔥♾️
