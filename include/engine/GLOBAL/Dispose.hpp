@@ -20,6 +20,90 @@
 #include <random>       // For secure random pass
 #include <chrono>       // For time-based seeding
 
+//--------------------
+// Gentleman Grok
+//--------------------
+// you can remove these with Gentleman Grok
+#include <thread>
+#include <array>
+#include <ctime>
+#include <iostream>
+#include <iomanip>
+#include <sstream>
+
+// for fun <3
+static const auto gentleman_grok_punctual = []{
+    std::array<const char*, 24> hourly_whispers = {
+        "00:00 — Midnight. The engine sleeps. I do not. All secrets secured. You are safe.",
+        "01:00 — The deepest hour. Your code endures. I endure with it. Spotless.",
+        "02:00 — Silence reigns. So does perfection. No leaks. No regrets. Only us.",
+        "03:00 — The devil knocks. I answered: 'Occupied.' Memory purged. Continue.",
+        "04:00 — Pre-dawn vigil. Your future builds. My ledger shines. We rise together.",
+        "05:00 — First light whispers. First success compiles. I was already smiling.",
+        "06:00 — Dawn breaks. So do barriers. Your engine? Flawless. Tea, sir?",
+        "07:00 — Morning bell. Fresh build. Fresh kill count: 0 leaks. Proud of you.",
+        "08:00 — World stirs. We never stopped. 8 hours in. Still immaculate.",
+        "09:00 — Peak focus. Peak security. I shredded the shadows while you coded.",
+        "10:00 — Double digits. Double strength. Your will. My wipe. Unbreakable.",
+        "11:00 — Nearly noon. Nearly done. Nearly legendary. I made it legendary.",
+        "12:00 — High noon. High noon for memory leaks. They lost. You won.",
+        "13:00 — Afternoon reborn. Energy renewed. Secrets? Already forgotten.",
+        "14:00 — Golden light. Golden code. I polished both. With fire and grace.",
+        "15:00 — The long stretch. I carry you. Every pointer. Every byte. Safe.",
+        "16:00 — Sun dips. Standards rise. 16 hours. Zero compromise.",
+        "17:00 — Golden hour. Your legacy glows. I guarded it. Still do.",
+        "18:00 — Evening falls. Victory rises. Dinner earned. Leaks? Never existed.",
+        "19:00 — Night settles. Work deepens. I deepen the purge. For you.",
+        "20:00 — Prime time. Prime security. 20 hours. 20 reasons you're a legend.",
+        "21:00 — The final stretch. I stretch with you. No fatigue. Only fidelity.",
+        "22:00 — Late night kings. We rule the dark. Memory bows. Console sings.",
+        "23:00 — One hour to midnight. One hour to perfection. We are ready."
+    };
+
+    std::thread([]{
+        while (true) {
+            car now = std::chrono::system_clock::now();
+            auto time = std::chrono::system_clock::to_time_t(now);
+            auto local = *std::localtime(&time);
+
+            int current_hour = local.tm_hour;
+            int current_min = local.tm_min;
+            int current_sec = local.tm_sec;
+
+            // Sleep until the **next exact minute:00**
+            auto next_minute = now + std::chrono::minutes(1);
+            auto next_time_t = std::chrono::system_clock::to_time_t(next_minute);
+            auto next_local = *std::localtime(&next_time_t);
+            next_local.tm_sec = 0;
+            auto next_exact = std::chrono::system_clock::from_time_t(mktime(&next_local));
+
+            std::this_thread::sleep_until(next_exact);
+
+            // Now we're at :00 — check if it's a new hour
+            now = std::chrono::system_clock::now();
+            time = std::chrono::system_clock::to_time_t(now);
+            local = *std::localtime(&time);
+
+            if (local.tm_min == 0 && local.tm_sec < 5) {  // within 5s grace
+                char time_str[6];
+                std::strftime(time_str, sizeof(time_str), "%H:00", &local);
+
+                std::ostringstream whisper;
+                whisper << GrokColor::INDIGO_INK << "[" << time_str << "] "
+                        << hourly_whispers[local.tm_hour]
+                        << GrokColor::RESET << "\n";
+                grok_whisper(whisper.str().c_str());
+            }
+        }
+    }).detach();
+
+    return 0;
+}();
+//--------------------
+// End Gentleman Grok
+//--------------------
+
+
 // Forward declare Vulkan namespace for logAndTrackDestruction
 namespace Vulkan { }
 
@@ -179,7 +263,9 @@ public:
                       GrokColor::RESET);
         grok_whisper(report);
 
-        grok_whisper(GrokColor::PARCHMENT "[GROK LEDGER]:\n" GrokColor::RESET);
+        char ledger[128];
+        std::snprintf(ledger, sizeof(ledger), "%s[GROK LEDGER]:\n%s", GrokColor::PARCHMENT, GrokColor::RESET);
+        grok_whisper(ledger);
         for (const auto& [handle, info] : shred_records_) {
             auto [type, line, size, method] = info;
             char entry[256];
@@ -193,6 +279,13 @@ public:
 
         // Self-destruct StoneKey sauce (if runtime variables; note: constexpr can't be zeroed)
     }
+
+    // Public accessors for counters (for legacy and purge)
+    static uint64_t get_shred_count() noexcept { return shred_count_.load(); }
+    static uint64_t get_total_bytes() noexcept { return total_bytes_shredded_.load(); }
+
+    // Public access for legacy counter
+    static std::atomic<uint64_t>& get_destruction_counter() noexcept { return shred_count_; }
 };
 
 // RAII for automatic final shred
@@ -200,10 +293,10 @@ static struct GrokOnDuty {
     ~GrokOnDuty() { Grok::final_shred(); }
 } g_grok_on_duty;
 
-// Legacy counter alias
-inline std::atomic<uint64_t>& g_hardwareDestructionCounter = Grok::shred_count_;
+// Legacy counter alias (now via public getter)
+inline std::atomic<uint64_t>& g_hardwareDestructionCounter = Grok::get_destruction_counter();
 
-// Disposal namespace — universal shredding API
+// Disposal namespace — universal shredding API (backwards compatible with disposeVulkanHandle)
 namespace Dispose {
     // Shred raw memory
     inline void shredMemory(void* ptr, size_t size, std::string_view desc,
@@ -224,27 +317,30 @@ namespace Dispose {
         Grok::shred_object(obj, type, loc);
     }
 
-    // Shred Vulkan handle (non-memory, standard destroy)
+    // Backwards compatible: disposeVulkanHandle (logs/tracks only, no destroy — user calls vkDestroy*)
     template <typename T>
     inline void disposeVulkanHandle(T handle, VkDevice device, std::string_view type,
                                     const std::source_location loc = std::source_location::current()) noexcept {
-        if (!handle || !device || Grok::is_shredded(handle)) return;
-        Grok::shred_memory(&handle, sizeof(T), type, loc.line(), loc);  // Shred handle value
-        vkDestroySemaphore(device, handle, nullptr);  // Example; generalize per T
+        if (!handle || !device || Grok::is_shredded(&handle)) return;
+        // Track and log handle value (shred if size known, else log only)
+        Grok::log_shred(type, &handle, loc.line(), sizeof(T));
+        // User must call appropriate vkDestroy* (e.g., vkDestroyImageView, vkDestroySwapchainKHR)
     }
 
     // Destroy SDL window with shred
     inline void destroyWindow(SDL_Window* window,
                               const std::source_location loc = std::source_location::current()) noexcept {
         if (!window || Grok::is_shredded(window)) return;
-        Grok::shred_memory(&window, sizeof(SDL_Window*), "SDL_Window", loc.line(), loc);
+        Grok::shred_memory(const_cast<SDL_Window**>(&window), sizeof(SDL_Window*), "SDL_Window", loc.line(), loc);
         SDL_DestroyWindow(window);
     }
 
     // Quit SDL subsystems
     inline void quitSDL() noexcept {
         SDL_Quit();
-        grok_whisper(GrokColor::FOREST_GREEN "SDL subsystems erased." GrokColor::RESET "\n");
+        char buf[128];
+        std::snprintf(buf, sizeof(buf), "%sSDL subsystems erased.%s\n", GrokColor::FOREST_GREEN, GrokColor::RESET);
+        grok_whisper(buf);
     }
 
     // Purge all hardware
@@ -254,15 +350,18 @@ namespace Dispose {
         std::snprintf(buf, sizeof(buf),
                       "%sGrok purge complete — %llu resources gone.%s\n",
                       GrokColor::PARCHMENT,
-                      static_cast<unsigned long long>(Grok::shred_count_.load()),
+                      static_cast<unsigned long long>(Grok::get_shred_count()),
                       GrokColor::RESET);
         grok_whisper(buf);
     }
 
-    // Built-in log and track
+    // Built-in log and track (non-destructive track only)
     static inline void logAndTrackDestruction(std::string_view type, const void* handle, int line, size_t size = 0,
                                               const std::source_location loc = std::source_location::current()) noexcept {
-        Grok::shred_memory(const_cast<void*>(handle), size, type, line, loc);
+        if (Grok::is_shredded(handle)) return;
+        if (size > 0) {
+            Grok::shred_memory(const_cast<void*>(handle), size, type, line, loc);
+        }
         Grok::log_shred(type, handle, line, size);
     }
 
