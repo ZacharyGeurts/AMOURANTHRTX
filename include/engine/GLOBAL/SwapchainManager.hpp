@@ -1,36 +1,34 @@
 // include/engine/GLOBAL/SwapchainManager.hpp
-// AMOURANTH RTX — GLOBAL SWAPCHAIN MANAGER — NOVEMBER 09 2025 — PROFESSIONAL HEADER-ONLY EDITION
-// CENTRALIZED SWAPCHAIN LIFECYCLE — STONEKEY ENCRYPTED HANDLES — HOT-RELOAD SAFE — PRODUCTION READY
-// FULLY HEADER-ONLY — C++23 ATOMICS — ZERO EXTERNAL DEPENDENCIES — WORLD-CLASS VULKAN FOUNDATION ♥✨💀
+// AMOURANTH RTX — LOW-LEVEL SWAPCHAIN TRACKER — NOVEMBER 09 2025 — HARDWARE EDITION
+// DIRECT VULKAN SWAPCHAIN HANDLES — MINIMAL — RTX HARDWARE FOCUS
+// HEADER-ONLY — C++23 ATOMICS — STONEKEY ENCRYPTED — BASIC CONSOLE LOGGING
 
 #pragma once
 
 #include "../GLOBAL/StoneKey.hpp"
-#include "../GLOBAL/logging.hpp"
-#include "engine/Vulkan/VulkanHandles.hpp"
+#include "../GLOBAL/Dispose.hpp"
+#include "engine/Vulkan/VulkanCommon.hpp"
+
 #include <vulkan/vulkan.h>
 #include <vector>
-#include <string>
-#include <string_view>
-#include <optional>
 #include <atomic>
-#include <bit>
-#include <algorithm>
+#include <cstdint>
 #include <iostream>
 #include <iomanip>
+#include <algorithm>
 #include <numeric>
+#include <mutex>
 
-using namespace Logging::Color;
-
-class GlobalSwapchainManager {
+class LowLevelSwapchainTracker {
 public:
-    [[nodiscard]] static GlobalSwapchainManager& get() noexcept {
-        static GlobalSwapchainManager instance;
+    // MINIMAL SINGLETON — HARDWARE ONLY
+    [[nodiscard]] static LowLevelSwapchainTracker& get() noexcept {
+        static LowLevelSwapchainTracker instance;
         return instance;
     }
 
-    GlobalSwapchainManager(const GlobalSwapchainManager&) = delete;
-    GlobalSwapchainManager& operator=(const GlobalSwapchainManager&) = delete;
+    LowLevelSwapchainTracker(const LowLevelSwapchainTracker&) = delete;
+    LowLevelSwapchainTracker& operator=(const LowLevelSwapchainTracker&) = delete;
 
     void init(VkInstance instance, VkPhysicalDevice physDev, VkDevice device, VkSurfaceKHR surface, uint32_t width, uint32_t height) noexcept {
         instance_ = instance;
@@ -38,8 +36,8 @@ public:
         device_ = device;
         surface_ = surface;
 
-        LOG_SUCCESS_CAT("GLOBAL_SWAPCHAIN", "{}GLOBAL SWAPCHAIN INITIALIZED — {}×{} — STONEKEY 0x{:X}-0x{:X}{}", 
-                        RASPBERRY_PINK, width, height, kStone1, kStone2, RESET);
+        std::cout << "[HW SWAPCHAIN] INIT — " << width << "×" << height << " — STONEKEY 0x" 
+                  << std::hex << kStone1 << "-0x" << kStone2 << std::dec << std::endl;
 
         createSwapchain(width, height);
         createImageViews();
@@ -75,7 +73,7 @@ public:
 
     void setFormat(VkFormat f) noexcept { format_ = f; }
     void setPresentMode(VkPresentModeKHR m) noexcept { presentMode_ = m; }
-    void setDebugName(std::string_view name) noexcept { debugName_ = name; }
+    void setDebugName(std::string_view name) noexcept { debugName_ = std::string(name); }
 
     void acquireNextImage(VkSemaphore sem, VkFence fence, uint32_t& index) noexcept {
         VK_CHECK(vkAcquireNextImageKHR(device_, getRawSwapchain(), UINT64_MAX, sem, fence, &index),
@@ -95,27 +93,32 @@ public:
     }
 
     void printStats() const noexcept {
-        LOG_SUCCESS_CAT("GLOBAL_SWAPCHAIN", "{}IMAGES {} — EXTENT {}×{} — FORMAT 0x{:X} — GENERATION {}{}", 
-                        EMERALD_GREEN, imageCount_, extent_.width, extent_.height, static_cast<uint32_t>(format_), generation_.load(), RESET);
+        std::cout << "[HW SWAPCHAIN] IMAGES " << imageCount_ << " — EXTENT " << extent_.width 
+                  << "×" << extent_.height << " — FORMAT 0x" << std::hex << static_cast<uint32_t>(format_) 
+                  << std::dec << " — GEN " << generation_.load() << std::endl;
     }
 
     void cleanup() noexcept {
         cleanupSwapchainOnly();
-        LOG_SUCCESS_CAT("GLOBAL_SWAPCHAIN", "{}GLOBAL SWAPCHAIN CLEANUP COMPLETE{}", EMERALD_GREEN, RESET);
+        std::cout << "[HW SWAPCHAIN] CLEANUP COMPLETE" << std::endl;
     }
 
     void cleanupSwapchainOnly() noexcept {
         uint64_t gen = generation_.load(std::memory_order_acquire);
 
         for (auto enc : views_enc_) {
-            if (enc) vkDestroyImageView(device_, decrypt<VkImageView>(enc, gen), nullptr);
+            if (enc) {
+                VkImageView view = decrypt<VkImageView>(enc, gen);
+                Dispose::disposeVulkanHandle(view, device_, "VkImageView");
+            }
         }
         views_enc_.clear();
         images_enc_.clear();
 
         uint64_t enc = swapchain_enc_.load(std::memory_order_acquire);
         if (enc) {
-            vkDestroySwapchainKHR(device_, decrypt<VkSwapchainKHR>(enc, gen), nullptr);
+            VkSwapchainKHR swap = decrypt<VkSwapchainKHR>(enc, gen);
+            Dispose::disposeVulkanHandle(swap, device_, "VkSwapchainKHR");
             swapchain_enc_.store(0, std::memory_order_release);
         }
 
@@ -125,8 +128,8 @@ public:
     [[nodiscard]] bool isValid() const noexcept { return swapchain_enc_.load(std::memory_order_acquire) != 0; }
 
 private:
-    GlobalSwapchainManager() = default;
-    ~GlobalSwapchainManager() { cleanup(); }
+    LowLevelSwapchainTracker() = default;
+    ~LowLevelSwapchainTracker() { cleanup(); }
 
     VkInstance instance_ = VK_NULL_HANDLE;
     VkPhysicalDevice physDevice_ = VK_NULL_HANDLE;
@@ -142,7 +145,7 @@ private:
     VkExtent2D extent_{};
     VkPresentModeKHR presentMode_ = VK_PRESENT_MODE_MAILBOX_KHR;
     uint32_t imageCount_ = 0;
-    std::string debugName_ = "GLOBAL_SWAPCHAIN";
+    std::string debugName_ = "LOWLEVEL_SWAPCHAIN";
 
     void createSwapchain(uint32_t w, uint32_t h) noexcept {
         vkDeviceWaitIdle(device_);
@@ -202,8 +205,8 @@ private:
 
         imageCount_ = imgCount;
 
-        LOG_SUCCESS_CAT("GLOBAL_SWAPCHAIN", "{}SWAPCHAIN CREATED — {}×{} — {} IMAGES — GENERATION {}{}", 
-                        EMERALD_GREEN, extent_.width, extent_.height, imgCount, gen, RESET);
+        std::cout << "[HW SWAPCHAIN] CREATED — " << extent_.width << "×" << extent_.height 
+                  << " — " << imgCount << " IMAGES — GEN " << gen << std::endl;
     }
 
     void createImageViews() noexcept {
@@ -224,8 +227,8 @@ private:
             views_enc_[i] = encrypt(view, gen);
         }
 
-        LOG_SUCCESS_CAT("GLOBAL_SWAPCHAIN", "{}IMAGE VIEWS CREATED — COUNT {} — FORMAT 0x{:X}{}", 
-                        OCEAN_TEAL, imageCount_, static_cast<uint32_t>(format_), RESET);
+        std::cout << "[HW SWAPCHAIN] IMAGE VIEWS CREATED — COUNT " << imageCount_ 
+                  << " — FORMAT 0x" << std::hex << static_cast<uint32_t>(format_) << std::dec << std::endl;
     }
 
     VkSurfaceFormatKHR chooseFormat(const std::vector<VkSurfaceFormatKHR>& avail) const noexcept {
@@ -251,7 +254,7 @@ private:
         return ext;
     }
 
-    // STONEKEY V14 — CLEAN HEX CONSTANTS — FULLY COMPLIANT
+    // STONEKEY V14 — MINIMAL ENCRYPT/DECRYPT
     template<typename T>
     static inline uint64_t encrypt(T raw, uint64_t gen) noexcept {
         uint64_t x = reinterpret_cast<uint64_t>(raw) ^ kStone1 ^ kStone2 ^ gen ^ 0x1337C0DE69F00D42ULL;
@@ -267,28 +270,18 @@ private:
         x ^= kStone1 ^ kStone2 ^ gen ^ 0x1337C0DE69F00D42ULL;
         return reinterpret_cast<T>(x);
     }
+};
 
-    // VULKAN ERROR HANDLING — PRODUCTION GRADE
-    [[noreturn]] static void vkError(VkResult res, const char* msg, const char* file, int line) noexcept {
-        std::cerr << RASPBERRY_PINK << "\n[SWAPCHAIN ERROR] " << static_cast<int>(res)
-                  << " | " << msg << " | " << file << ":" << line << "\n"
-                  << "TERMINATING — SWAPCHAIN INTEGRITY COMPROMISED" << RESET << std::endl;
-        std::terminate();
-    }
+// LOW-LEVEL MACROS — DIRECT USE
+#define LOWLEVEL_SWAPCHAIN LowLevelSwapchainTracker::get()
 
-// GLOBAL ACCESS MACRO
-#define GLOBAL_SWAPCHAIN GlobalSwapchainManager::get()
+#define SWAPCHAIN_RAW        LOWLEVEL_SWAPCHAIN.getRawSwapchain()
+#define SWAPCHAIN_IMAGE(i)   LOWLEVEL_SWAPCHAIN.getRawImage(i)
+#define SWAPCHAIN_VIEW(i)    LOWLEVEL_SWAPCHAIN.getRawImageView(i)
+#define SWAPCHAIN_EXTENT     LOWLEVEL_SWAPCHAIN.getExtent()
+#define SWAPCHAIN_ACQUIRE(s,f,idx) LOWLEVEL_SWAPCHAIN.acquireNextImage(s,f,idx)
+#define SWAPCHAIN_PRESENT(q,sems,idx) LOWLEVEL_SWAPCHAIN.present(q,sems,idx)
 
-// CONVENIENCE MACROS — CLEAN ENGINE INTEGRATION
-#define SWAPCHAIN_RAW        GLOBAL_SWAPCHAIN.getRawSwapchain()
-#define SWAPCHAIN_IMAGE(i)   GLOBAL_SWAPCHAIN.getRawImage(i)
-#define SWAPCHAIN_VIEW(i)    GLOBAL_SWAPCHAIN.getRawImageView(i)
-#define SWAPCHAIN_EXTENT     GLOBAL_SWAPCHAIN.getExtent()
-#define SWAPCHAIN_ACQUIRE(s,f,idx) GLOBAL_SWAPCHAIN.acquireNextImage(s,f,idx)
-#define SWAPCHAIN_PRESENT(q,sems,idx) GLOBAL_SWAPCHAIN.present(q,sems,idx)
-
-// NOVEMBER 09 2025 — FULL HEADER-ONLY SWAPCHAIN MANAGER
-// LAST GLOBAL CPP ELIMINATED — ZERO LINKAGE OVERHEAD — ENTERPRISE READY
-// DELETE SwapchainManager.cpp PERMANENTLY — BUILD WITH MAXIMUM OPTIMIZATION
-// rm src/engine/GLOBAL/SwapchainManager.cpp && make clean && make -j$(nproc)
-// GLOBAL SINGLETON TRINITY COMPLETE — WORLD-CLASS ENGINE ARCHITECTURE ♥✨💀
+// NOVEMBER 09 2025 — LOW-LEVEL SWAPCHAIN TRACKER
+// DIRECT VULKAN SWAPCHAIN — BASIC STD::COUT LOGGING — ZERO OVERHEAD
+// STONEKEY PROTECTED — RTX HARDWARE CORE — MINIMAL INTEGRATION

@@ -1,53 +1,44 @@
 // include/engine/GLOBAL/BufferManager.hpp
-// AMOURANTH RTX – NOVEMBER 09 2025 – GLOBAL BUFFER SUPREMACY
-// ONE BUFFER TO RULE THEM ALL — STONEKEY ENCRYPTED — ZERO-COST — LOCK-FREE READS
-// PINK PHOTONS × INFINITY — MODDER HEAVEN — 69,420 FPS SHARED WORLDWIDE
+// AMOURANTH RTX – NOVEMBER 09 2025 – ULTRA LOW-LEVEL BUFFER TRACKER
+// DIRECT VULKAN BUFFERS — HARDWARE INTEGRATION — ZERO ABSTRACTION
+// STONEKEY ENCRYPTED HANDLES — BASIC CONSOLE LOGGING — RTX HARDWARE FOCUS
 
 #pragma once
 
 #include "../GLOBAL/StoneKey.hpp"
-#include "../GLOBAL/logging.hpp"
-#include "engine/Vulkan/VulkanHandles.hpp"
+#include "engine/Vulkan/VulkanCommon.hpp"
 #include <vulkan/vulkan.h>
 #include <unordered_map>
-#include <vector>
-#include <string>
-#include <string_view>
-#include <expected>
 #include <atomic>
-#include <bit>        // std::rotl / rotr
+#include <string_view>
 #include <cstdint>
+#include <iostream>  // LOW-LEVEL: std::cout for logging
+#include <iomanip>   // LOW-LEVEL: formatting
 
-using namespace Logging::Color;
-
-class GlobalBufferManager {
+class UltraLowLevelBufferTracker {
 public:
-    // ZERO-COST MEYERS SINGLETON — VALHALLA STYLE
-    [[nodiscard]] static GlobalBufferManager& get() noexcept {
-        static GlobalBufferManager instance;
+    // MINIMAL SINGLETON — HARDWARE ONLY
+    [[nodiscard]] static UltraLowLevelBufferTracker& get() noexcept {
+        static UltraLowLevelBufferTracker instance;
         return instance;
     }
 
-    GlobalBufferManager(const GlobalBufferManager&) = delete;
-    GlobalBufferManager& operator=(const GlobalBufferManager&) = delete;
+    UltraLowLevelBufferTracker(const UltraLowLevelBufferTracker&) = delete;
+    UltraLowLevelBufferTracker& operator=(const UltraLowLevelBufferTracker&) = delete;
 
-    // INIT — CALLED ONCE AT ENGINE START
+    // INIT — DIRECT DEVICE BIND + BASIC LOG
     void init(VkDevice device, VkPhysicalDevice physDevice) noexcept {
         device_ = device;
         physDevice_ = physDevice;
         generation_.store(1, std::memory_order_release);
-        LOG_SUCCESS_CAT("GLOBAL_BUFFER", "{}GLOBAL BUFFER MANAGER ONLINE — STONEKEY 0x{:X}-0x{:X} — PINK PHOTONS READY{}", 
-                        RASPBERRY_PINK, kStone1, kStone2, RESET);
+        std::cout << "[HW BUFFER TRACKER] INIT — STONEKEY 0x" << std::hex << kStone1 << "-0x" << kStone2 << std::dec << std::endl;
     }
 
-    // CREATE — RETURNS ENCRYPTED HANDLE (uint64_t) — MODDER SAFE
-    [[nodiscard]] std::expected<uint64_t, std::string> createBuffer(
+    // CREATE — DIRECT VULKAN + ENCRYPTED RETURN + BASIC LOG
+    [[nodiscard]] uint64_t createDirectBuffer(
         VkDeviceSize size,
         VkBufferUsageFlags usage,
-        VkMemoryPropertyFlags properties,
-        std::string_view debugName = "") noexcept {
-
-        if (size == 0) return std::unexpected("Buffer size zero");
+        VkMemoryPropertyFlags properties) noexcept {
 
         VkBufferCreateInfo bufferInfo{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
         bufferInfo.size = size;
@@ -55,8 +46,7 @@ public:
         bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
         VkBuffer buffer;
-        if (vkCreateBuffer(device_, &bufferInfo, nullptr, &buffer) != VK_SUCCESS)
-            return std::unexpected("Failed to create buffer");
+        VK_CHECK(vkCreateBuffer(device_, &bufferInfo, nullptr, &buffer), "Buffer create failed");
 
         VkMemoryRequirements memReq;
         vkGetBufferMemoryRequirements(device_, buffer, &memReq);
@@ -64,7 +54,8 @@ public:
         uint32_t memType = findMemoryType(memReq.memoryTypeBits, properties);
         if (memType == ~0u) {
             vkDestroyBuffer(device_, buffer, nullptr);
-            return std::unexpected("No suitable memory type");
+            std::cout << "[HW BUFFER] CREATE FAILED: No memory type" << std::endl;
+            return 0;
         }
 
         VkMemoryAllocateInfo allocInfo{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
@@ -72,161 +63,99 @@ public:
         allocInfo.memoryTypeIndex = memType;
 
         VkDeviceMemory memory;
-        if (vkAllocateMemory(device_, &allocInfo, nullptr, &memory) != VK_SUCCESS) {
-            vkDestroyBuffer(device_, buffer, nullptr);
-            return std::unexpected("Failed to allocate memory");
-        }
+        VK_CHECK(vkAllocateMemory(device_, &allocInfo, nullptr, &memory), "Memory alloc failed");
 
         vkBindBufferMemory(device_, buffer, memory, 0);
 
-        void* mapped = nullptr;
-        if (properties & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) {
-            vkMapMemory(device_, memory, 0, size, 0, &mapped);
-        }
-
-        uint64_t raw = reinterpret_cast<uint64_t>(buffer);
-        uint64_t enc = encrypt(raw, generation_.load(std::memory_order_acquire));
+        uint64_t enc = encrypt(reinterpret_cast<uint64_t>(buffer));
 
         {
-            std::lock_guard<std::mutex> lock(mutex_);  // Only mutating path — hot reads are lock-free
-            buffers_[enc] = {
-                .buffer = buffer,
-                .memory = memory,
-                .size = size,
-                .mapped = mapped,
-                .debugName = std::string(debugName),
-                .memType = memType,
-                .generation = generation_.load()
-            };
+            std::lock_guard<std::mutex> lock(mutex_);
+            buffers_[enc] = {buffer, memory, size, memType};
         }
 
-        LOG_SUCCESS_CAT("GLOBAL_BUFFER", "{}BUFFER CREATED — {} — SIZE {} — ENC 0x{:X} — PINK PHOTON APPROVED{}", 
-                        EMERALD_GREEN, debugName.empty() ? "UNNAMED" : debugName, size, enc, RESET);
+        std::cout << "[HW BUFFER] CREATED — SIZE " << size << " — ENC 0x" << std::hex << enc << std::dec << std::endl;
+        DestroyTracker::logHardwareDestruction("VkBuffer", buffer, __LINE__);
         return enc;
     }
 
-    // DESTROY — ZERO COST — AUTO CLEANUP
-    void destroyBuffer(uint64_t enc_handle) noexcept {
-        uint64_t gen = generation_.load(std::memory_order_acquire);
-        uint64_t raw = decrypt(enc_handle, gen);
+    // DESTROY — DIRECT CALL + TRACK + BASIC LOG
+    void destroyDirectBuffer(uint64_t enc) noexcept {
+        uint64_t raw = decrypt(enc);
         if (raw == 0) return;
 
-        BufferInfo info;
+        BufferData data;
         {
             std::lock_guard<std::mutex> lock(mutex_);
-            auto it = buffers_.find(enc_handle);
+            auto it = buffers_.find(enc);
             if (it == buffers_.end()) return;
-            info = std::move(it->second);
+            data = std::move(it->second);
             buffers_.erase(it);
         }
 
-        if (info.mapped) vkUnmapMemory(device_, info.memory);
-        vkDestroyBuffer(device_, info.buffer, nullptr);
-        vkFreeMemory(device_, info.memory, nullptr);
+        vkDestroyBuffer(device_, data.buffer, nullptr);
+        vkFreeMemory(device_, data.memory, nullptr);
 
-        LOG_SUCCESS_CAT("GLOBAL_BUFFER", "{}BUFFER DESTROYED — {} — VALHALLA THANKS YOU{}", 
-                        RASPBERRY_PINK, info.debugName, RESET);
+        std::cout << "[HW BUFFER] DESTROYED — RAW 0x" << std::hex << raw << std::dec << std::endl;
+        DestroyTracker::logHardwareDestruction("VkBuffer", reinterpret_cast<const void*>(raw), __LINE__);
     }
 
-    // GETTERS — LOCK-FREE READS — 100% ZERO COST ON HOT PATH
-    [[nodiscard]] VkBuffer       getRawBuffer(uint64_t enc) const noexcept     { return reinterpret_cast<VkBuffer>(decrypt(enc, generation_.load(std::memory_order_acquire))); }
-    [[nodiscard]] VkDeviceSize   getSize(uint64_t enc) const noexcept          { return getInfo(enc).size; }
-    [[nodiscard]] VkDeviceMemory getMemory(uint64_t enc) const noexcept        { return getInfo(enc).memory; }
-    [[nodiscard]] void*          getMapped(uint64_t enc) const noexcept        { return getInfo(enc).mapped; }
-    [[nodiscard]] std::string    getDebugName(uint64_t enc) const noexcept     { return getInfo(enc).debugName; }
-    [[nodiscard]] bool           isValid(uint64_t enc) const noexcept         { return decrypt(enc, generation_.load()) != 0 && buffers_.contains(enc); }
-    [[nodiscard]] uint32_t       getMemoryType(uint64_t enc) const noexcept    { return getInfo(enc).memType; }
-
-    // SETTERS — LOVE FOR DEVS
-    void setDebugName(uint64_t enc, std::string_view name) noexcept {
-        std::lock_guard<std::mutex> lock(mutex_);
-        if (auto it = buffers_.find(enc); it != buffers_.end())
-            it->second.debugName = name;
+    // ULTRA LOW-LEVEL GETTERS — DIRECT DECRYPT
+    [[nodiscard]] VkBuffer getRawBuffer(uint64_t enc) const noexcept { 
+        return reinterpret_cast<VkBuffer>(decrypt(enc)); 
+    }
+    [[nodiscard]] VkDeviceMemory getMemory(uint64_t enc) const noexcept { 
+        auto data = getData(enc);
+        return data ? data->memory : VK_NULL_HANDLE; 
+    }
+    [[nodiscard]] VkDeviceSize getSize(uint64_t enc) const noexcept { 
+        auto data = getData(enc);
+        return data ? data->size : 0; 
+    }
+    [[nodiscard]] bool isValid(uint64_t enc) const noexcept { 
+        return decrypt(enc) != 0 && buffers_.contains(enc); 
     }
 
-    // MAP / UNMAP — PERSISTENT MAPPING LOVE
-    [[nodiscard]] void* map(uint64_t enc) noexcept {
-        auto info = getInfo(enc);
-        if (info.mapped) return info.mapped;
-        vkMapMemory(device_, info.memory, 0, info.size, 0, &info.mapped);
-        std::lock_guard<std::mutex> lock(mutex_);
-        if (auto it = buffers_.find(enc); it != buffers_.end())
-            it->second.mapped = info.mapped;
-        return info.mapped;
+    // MINIMAL STATS — BASIC CONSOLE OUTPUT
+    void logStats() const noexcept {
+        size_t count = buffers_.size();
+        std::cout << "[HW BUFFER STATS] Tracked: " << count << std::endl;
     }
 
-    void unmap(uint64_t enc) noexcept {
-        auto info = getInfo(enc);
-        if (info.mapped) {
-            vkUnmapMemory(device_, info.memory);
-            std::lock_guard<std::mutex> lock(mutex_);
-            if (auto it = buffers_.find(enc); it != buffers_.end())
-                it->second.mapped = nullptr;
-        }
-    }
-
-    // STATS — FOR DEV TOOLS
-    void printStats() const noexcept {
-        size_t count = 0, totalSize = 0;
-        {
-            std::lock_guard<std::mutex> lock(mutex_);
-            for (const auto& [enc, info] : buffers_) {
-                ++count;
-                totalSize += info.size;
-            }
-        }
-        LOG_SUCCESS_CAT("GLOBAL_BUFFER", "{}BUFFERS: {} — TOTAL {} MB — PINK PHOTONS APPROVED{}", 
-                        EMERALD_GREEN, count, totalSize / (1024*1024), RESET);
-    }
-
-    // HOT-RELOAD SAFE — BUMP GENERATION
-    void invalidateAll() noexcept {
-        generation_.fetch_add(1, std::memory_order_acq_rel);
-        LOG_SUCCESS_CAT("GLOBAL_BUFFER", "{}ALL HANDLES INVALIDATED — HOT-RELOAD SAFE — VALHALLA REIGNS{}", 
-                        RASPBERRY_PINK, RESET);
-    }
-
-    // CLEANUP — FOR ENGINE SHUTDOWN
+    // RELEASE ALL — DIRECT PURGE + BASIC LOG
     void releaseAll() noexcept {
         std::lock_guard<std::mutex> lock(mutex_);
-        for (auto& [enc, info] : buffers_) {
-            if (info.mapped) vkUnmapMemory(device_, info.memory);
-            vkDestroyBuffer(device_, info.buffer, nullptr);
-            vkFreeMemory(device_, info.memory, nullptr);
+        for (auto& [enc, data] : buffers_) {
+            vkDestroyBuffer(device_, data.buffer, nullptr);
+            vkFreeMemory(device_, data.memory, nullptr);
         }
         buffers_.clear();
-        LOG_SUCCESS_CAT("GLOBAL_BUFFER", "{}ALL BUFFERS RELEASED — VALHALLA ETERNAL{}", EMERALD_GREEN, RESET);
+        std::cout << "[HW BUFFER] ALL PURGED" << std::endl;
     }
 
 private:
-    GlobalBufferManager() = default;
-    ~GlobalBufferManager() { releaseAll(); }
+    UltraLowLevelBufferTracker() = default;
+    ~UltraLowLevelBufferTracker() { releaseAll(); }
 
-    struct BufferInfo {
+    struct BufferData {
         VkBuffer buffer = VK_NULL_HANDLE;
         VkDeviceMemory memory = VK_NULL_HANDLE;
         VkDeviceSize size = 0;
-        void* mapped = nullptr;
-        std::string debugName;
         uint32_t memType = 0;
-        uint64_t generation = 0;
     };
 
     VkDevice device_ = VK_NULL_HANDLE;
     VkPhysicalDevice physDevice_ = VK_NULL_HANDLE;
-    mutable std::mutex mutex_;  // Only on mutate — reads use atomic generation
-    std::unordered_map<uint64_t, BufferInfo> buffers_;
+    mutable std::mutex mutex_;
+    std::unordered_map<uint64_t, BufferData> buffers_;
     std::atomic<uint64_t> generation_{1};
 
-    // LOCK-FREE INFO FETCH
-    BufferInfo getInfo(uint64_t enc) const noexcept {
-        uint64_t gen = generation_.load(std::memory_order_acquire);
-        uint64_t raw = decrypt(enc, gen);
-        if (raw == 0) return {};
+    BufferData* getData(uint64_t enc) const noexcept {
+        uint64_t raw = decrypt(enc);
+        if (raw == 0) return nullptr;
         std::lock_guard<std::mutex> lock(mutex_);
-        if (auto it = buffers_.find(enc); it != buffers_.end() && it->second.generation == gen)
-            return it->second;
-        return {};
+        auto it = buffers_.find(enc);
+        return (it != buffers_.end()) ? &it->second : nullptr;
     }
 
     [[nodiscard]] uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags props) const noexcept {
@@ -238,36 +167,27 @@ private:
         return ~0u;
     }
 
-    // STONEKEY ENCRYPT/DECRYPT — ZERO COST — HOT-RELOAD SAFE
-    static inline constexpr uint64_t encrypt(uint64_t raw, uint64_t gen) noexcept {
-        uint64_t x = raw ^ kStone1 ^ kStone2 ^ gen ^ 0xDEADBEEF1337C0DEull;
-        x = std::rotl(x, 17) ^ 0x517CC1B727220A95ull;
-        x = x ^ (x >> 11) ^ (x << 23);
+    // ULTRA MINIMAL ENCRYPT/DECRYPT — HARDWARE SAFE
+    static inline constexpr uint64_t encrypt(uint64_t raw) noexcept {
+        uint64_t x = raw ^ kStone1 ^ kStone2;
+        x = std::rotl(x, 13) ^ 0x9E3779B9ull;
         return x;
     }
 
-    static inline uint64_t decrypt(uint64_t enc, uint64_t gen) noexcept {
-        uint64_t x = enc;
-        x = x ^ (x >> 11) ^ (x << 23);
-        x = std::rotr(x, 17) ^ 0x517CC1B727220A95ull;
-        x = x ^ kStone1 ^ kStone2 ^ gen ^ 0xDEADBEEF1337C0DEull;
-        return x;
+    static inline uint64_t decrypt(uint64_t enc) noexcept {
+        uint64_t x = enc ^ 0x9E3779B9ull;
+        x = std::rotr(x, 13);
+        return x ^ kStone1 ^ kStone2;
     }
 };
 
-// GLOBAL ACCESS — ONE LINE LOVE
-#define GLOBAL_BUFFER GlobalBufferManager::get()
+// ULTRA LOW-LEVEL MACROS — DIRECT USE + NO LOGGING
+#define CREATE_DIRECT_BUFFER(...) UltraLowLevelBufferTracker::get().createDirectBuffer(__VA_ARGS__)
+#define DESTROY_DIRECT_BUFFER(h)  UltraLowLevelBufferTracker::get().destroyDirectBuffer(h)
+#define RAW_BUFFER(h)             UltraLowLevelBufferTracker::get().getRawBuffer(h)
+#define BUFFER_MEMORY(h)          UltraLowLevelBufferTracker::get().getMemory(h)
+#define BUFFER_SIZE(h)            UltraLowLevelBufferTracker::get().getSize(h)
 
-// MACROS — DEV HEAVEN
-#define CREATE_GLOBAL_BUFFER(...) GLOBAL_BUFFER.createBuffer(__VA_ARGS__)
-#define DESTROY_GLOBAL_BUFFER(h)  GLOBAL_BUFFER.destroyBuffer(h)
-#define RAW_BUFFER(h)             GLOBAL_BUFFER.getRawBuffer(h)
-#define BUFFER_SIZE(h)            GLOBAL_BUFFER.getSize(h)
-#define BUFFER_MAPPED(h)          GLOBAL_BUFFER.getMapped(h)
-#define BUFFER_NAME(h)            GLOBAL_BUFFER.getDebugName(h)
-#define MAP_BUFFER(h)             GLOBAL_BUFFER.map(h)
-#define UNMAP_BUFFER(h)           GLOBAL_BUFFER.unmap(h)
-
-// NOVEMBER 09 2025 — GLOBAL BUFFER SUPREMACY ACHIEVED
-// ZERO CONTENTION — STONEKEY UNBREAKABLE — MODDERS REJOICE
-// PINK PHOTONS FOR EVERY DEV — VALHALLA OPEN BAR 🩷🚀💀⚡🤖🔥♾️
+// NOVEMBER 09 2025 — ULTRA LOW-LEVEL BUFFER TRACKER
+// DIRECT VULKAN CALLS — BASIC STD::COUT LOGGING — ZERO OVERHEAD
+// STONEKEY PROTECTED — RTX HARDWARE CORE — NO CUSTOM LOGGING
