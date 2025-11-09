@@ -12,6 +12,8 @@
 // ===================================================================
 #include "../GLOBAL/StoneKey.hpp"  
 
+#include "engine/Vulkan/VulkanHandles.hpp"
+
 // ===================================================================
 // FORWARD DECLARE EVERYTHING — NO MORE CIRCULAR INCLUDE NIGHTMARES
 // CONAN: "I once had a circular dependency in my monologue — took three writers to break it!"

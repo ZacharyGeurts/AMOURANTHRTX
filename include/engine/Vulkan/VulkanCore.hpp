@@ -341,45 +341,6 @@ public:
     explicit operator bool() const noexcept { return valid(); }
 };
 
-#define MAKE_VK_HANDLE(name, vkType) \
-    inline VulkanHandle<vkType> make##name(VkDevice dev, vkType handle) { \
-        return VulkanHandle<vkType>(handle, dev); \
-    }
-
-MAKE_VK_HANDLE(Buffer,              VkBuffer)
-MAKE_VK_HANDLE(Memory,              VkDeviceMemory)
-MAKE_VK_HANDLE(Image,               VkImage)
-MAKE_VK_HANDLE(ImageView,           VkImageView)
-MAKE_VK_HANDLE(Sampler,             VkSampler)
-MAKE_VK_HANDLE(DescriptorPool,      VkDescriptorPool)
-MAKE_VK_HANDLE(Semaphore,           VkSemaphore)
-MAKE_VK_HANDLE(Fence,               VkFence)
-MAKE_VK_HANDLE(Pipeline,            VkPipeline)
-MAKE_VK_HANDLE(PipelineLayout,      VkPipelineLayout)
-MAKE_VK_HANDLE(DescriptorSetLayout, VkDescriptorSetLayout)
-MAKE_VK_HANDLE(RenderPass,          VkRenderPass)
-MAKE_VK_HANDLE(ShaderModule,        VkShaderModule)
-MAKE_VK_HANDLE(CommandPool,         VkCommandPool)
-MAKE_VK_HANDLE(SwapchainKHR,        VkSwapchainKHR)
-
-inline VulkanHandle<VkAccelerationStructureKHR> makeAccelerationStructure(
-    VkDevice dev, VkAccelerationStructureKHR as, PFN_vkDestroyAccelerationStructureKHR func = nullptr)
-{
-    return VulkanHandle<VkAccelerationStructureKHR>(
-        as, dev,
-        reinterpret_cast<VulkanHandle<VkAccelerationStructureKHR>::DestroyFn>(
-            func ? func : ctx()->vkDestroyAccelerationStructureKHR
-        )
-    );
-}
-
-inline VulkanHandle<VkDeferredOperationKHR> makeDeferredOperation(VkDevice dev, VkDeferredOperationKHR op)
-{
-    return VulkanHandle<VkDeferredOperationKHR>(op, dev, ctx()->vkDestroyDeferredOperationKHR);
-}
-
-#undef MAKE_VK_HANDLE
-
 // ===================================================================
 // CONSTRUCTOR FIX — PULL ALL KHR FUNCS + DEVICE
 // ===================================================================

@@ -168,7 +168,7 @@ inline void VulkanRTX_Setup::createBuffer(VkDeviceSize size,
     vkGetBufferMemoryRequirements(device_, rawBuffer, &memReqs);
 
     VkMemoryAllocateInfo allocInfo{
-        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOC_INFO,
+        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
         .allocationSize = memReqs.size,
         .memoryTypeIndex = findMemoryType(memReqs.memoryTypeBits, properties)
     };
