@@ -18,33 +18,34 @@
 #define VK_CHECK_NOMSG(call) do {                    \
     VkResult __res = (call);                         \
     if (__res != VK_SUCCESS) {                       \
-        SwapchainManager::vkError(__res, "Vulkan call failed", __FILE__, __LINE__); \
+        VulkanSwapchainManager::vkError(__res, "Vulkan call failed", __FILE__, __LINE__); \
     }                                                \
 } while (0)
 
 #define VK_CHECK(call, msg) do {                     \
     VkResult __res = (call);                         \
     if (__res != VK_SUCCESS) {                       \
-        SwapchainManager::vkError(__res, msg, __FILE__, __LINE__); \
+        VulkanSwapchainManager::vkError(__res, msg, __FILE__, __LINE__); \
     }                                                \
 } while (0)
 
-class SwapchainManager {
+class VulkanSwapchainManager {
 public:
     // ────── GLOBAL SINGLETON — IMMORTAL & THREAD-SAFE ──────
-    static SwapchainManager& get() {
-        static SwapchainManager instance;
+    static VulkanSwapchainManager& get() {
+        static VulkanSwapchainManager instance;
         return instance;
     }
 
-    SwapchainManager(const SwapchainManager&) = delete;
-    SwapchainManager& operator=(const SwapchainManager&) = delete;
-    ~SwapchainManager() { cleanup(); }
+    VulkanSwapchainManager(const VulkanSwapchainManager&) = delete;
+    VulkanSwapchainManager& operator=(const VulkanSwapchainManager&) = delete;
+    ~VulkanSwapchainManager() { cleanup(); }
 
     // ────── CORE API ──────
     void init(VkInstance instance, VkPhysicalDevice physDev, VkDevice device, VkSurfaceKHR surface, uint32_t width, uint32_t height);
     void cleanup() noexcept;
     void recreate(uint32_t width, uint32_t height);
+    void cleanupSwapchain() noexcept;
 
     // ────── GETTERS — RAW + ENCRYPTED — PERFECT NAMES ──────
     [[nodiscard]] uint32_t          getImageCount() const noexcept { return static_cast<uint32_t>(swapchainImages_enc_.size()); }
@@ -52,6 +53,9 @@ public:
     [[nodiscard]] VkFormat          getFormat() const noexcept { return swapchainFormat_; }
     [[nodiscard]] VkPresentModeKHR  getPresentMode() const noexcept { return presentMode_; }
     [[nodiscard]] VkImageUsageFlags getImageUsage() const noexcept;
+    [[nodiscard]] VkSwapchainKHR    getSwapchainHandle() const noexcept { return getRawSwapchain(); }
+    [[nodiscard]] std::vector<VkImage>       getSwapchainImages() const noexcept;
+    [[nodiscard]] std::vector<VkImageView>   getSwapchainImageViews() const noexcept;
 
     // RAW (DECRYPTED) — EXACT NAMES YOUR VulkanCommon.cpp EXPECTS
     [[nodiscard]] VkSwapchainKHR    getRawSwapchain() const noexcept { return decrypt<VkSwapchainKHR>(swapchain_enc_); }
@@ -94,7 +98,7 @@ public:
 
 private:
     // PRIVATE CTOR — ONLY SINGLETON CAN LIVE
-    SwapchainManager() = default;
+    VulkanSwapchainManager() = default;
 
     VkInstance instance_ = VK_NULL_HANDLE;
     VkPhysicalDevice physDevice_ = VK_NULL_HANDLE;
@@ -147,7 +151,7 @@ private:
 #undef VK_CHECK_NOMSG
 #undef VK_CHECK
 
-#define SWAPCHAIN_MGR SwapchainManager::get()
+#define SWAPCHAIN_MGR VulkanSwapchainManager::get()
 #define SWAPCHAIN_RAW SWAPCHAIN_MGR.getRawSwapchain()
 #define SWAPCHAIN_IMAGE(i) SWAPCHAIN_MGR.getSwapchainImage(i)
 #define SWAPCHAIN_VIEW(i) SWAPCHAIN_MGR.getSwapchainImageView(i)

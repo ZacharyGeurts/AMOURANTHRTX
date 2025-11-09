@@ -1,23 +1,21 @@
 // include/engine/GLOBAL/BufferManager.hpp
 // AMOURANTH RTX Engine – November 08 2025 – Vulkan Buffer Manager
-// Professional, high-performance, thread-safe buffer pooling with encrypted handles
+// Zero-cost, thread-safe pooling | Encrypted handles | C++23 | Console-portable
 
 #pragma once
 
 #include "engine/GLOBAL/StoneKey.hpp"
-#include "engine/GLOBAL/Dispose.hpp"  // For g_destructionCounter and DestroyTracker
+#include "engine/GLOBAL/Dispose.hpp"
 #include <vulkan/vulkan.h>
 #include <unordered_map>
 #include <vector>
 #include <cstdint>
 #include <string>
 #include <mutex>
-#include <random>
-#include <set>
+#include <expected>  // C++23 for error handling
 
 class BufferManager {
 public:
-    // VK_CHECK macro – visible to .cpp
     #define VK_CHECK(call, msg) do {                  \
         VkResult __res = (call);                      \
         if (__res != VK_SUCCESS) {                    \
@@ -25,23 +23,22 @@ public:
         }                                             \
     } while (0)
 
-    static BufferManager& get() {
+    static BufferManager& get() noexcept {  // Zero-cost Meyers singleton
         static BufferManager instance;
         return instance;
     }
 
     BufferManager(const BufferManager&) = delete;
     BufferManager& operator=(const BufferManager&) = delete;
-    virtual ~BufferManager() { cleanup(); }
+    ~BufferManager() { cleanup(); }
 
-    void init(VkDevice device, VkPhysicalDevice physDevice);
-    virtual void cleanup();
+    void init(VkDevice device, VkPhysicalDevice physDevice) noexcept;
 
-    // Global releaseAll used by Dispose
-    void releaseAll(VkDevice device) noexcept;
+    [[nodiscard]] std::expected<uint64_t, std::string> createBuffer(
+        VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties,
+        std::string_view debugName = "") noexcept;  // C++23 string_view
 
-    uint64_t createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, const std::string& debugName = "");
-    virtual void destroyBuffer(uint64_t enc_handle);
+    void destroyBuffer(uint64_t enc_handle) noexcept;
 
     [[nodiscard]] VkBuffer       getRawBuffer(uint64_t enc_handle) const noexcept;
     [[nodiscard]] VkDeviceSize   getSize(uint64_t enc_handle) const noexcept;
@@ -50,11 +47,20 @@ public:
     [[nodiscard]] std::string    getDebugName(uint64_t enc_handle) const noexcept;
     [[nodiscard]] bool           isValid(uint64_t enc_handle) const noexcept;
 
-    void* map(uint64_t enc_handle);
-    void unmap(uint64_t enc_handle);
+    [[nodiscard]] void* map(uint64_t enc_handle) noexcept;
+    void unmap(uint64_t enc_handle) noexcept;
 
-    void printStats() const;
-    void setDebugName(uint64_t enc_handle, const std::string& name);
+    void printStats() const noexcept;
+    void setDebugName(uint64_t enc_handle, std::string_view name) noexcept;
+
+    void releaseAll(VkDevice device) noexcept;  // For Dispose
+
+private:
+    BufferManager() = default;  // Zero-cost init
+
+    VkDevice device_ = VK_NULL_HANDLE;
+    VkPhysicalDevice physDevice_ = VK_NULL_HANDLE;
+    mutable std::mutex mutex_;  // Lock only on mutate (hot-path reads lock-free if no concurrent mod)
 
     struct FreeBlock {
         VkDeviceMemory memory;
@@ -73,39 +79,28 @@ public:
         uint32_t memType = 0;
     };
 
-private:
-    BufferManager() {
-        std::random_device rd;
-        std::mt19937_64 gen(rd());
-        std::uniform_int_distribution<uint64_t> dis;
-        runtimeSalt = 0xCAFEBABEDEADFA11ull ^ dis(gen) ^ __builtin_ia32_rdtsc();
-    }
-
-    VkDevice device_ = VK_NULL_HANDLE;
-    VkPhysicalDevice physDevice_ = VK_NULL_HANDLE;
-    std::mutex mutex_;
-
     std::unordered_map<uint64_t, BufferInfo> buffers_;
     std::unordered_map<uint32_t, std::vector<FreeBlock>> freePools_;
 
-    uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) const;
+    [[nodiscard]] uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) const noexcept;
 
-    static inline uint64_t runtimeSalt = 0;
-
-    static inline constexpr uint64_t encrypt(uintptr_t raw) noexcept {
-        uint64_t x = raw ^ kStone1 ^ kStone2 ^ 0xDEADBEEF1337C0DEull ^ runtimeSalt;
-        x = std::rotl(x, 13) ^ 0x517CC1B727220A95ull;
+    static inline constexpr uint64_t encrypt(uintptr_t raw) noexcept {  // Zero-cost constexpr
+        uint64_t x = static_cast<uint64_t>(raw) ^ kStone1 ^ kStone2 ^ 0xDEADBEEF1337C0DEull;
+        x = std::rotl(x, 13) ^ 0x517CC1B727220A95ull;  // C++20 rotl, zero-cost
         return x ^ (x >> 7) ^ (x << 25);
     }
+
     static inline constexpr uintptr_t decrypt(uint64_t enc) noexcept {
         uint64_t x = enc;
         x = x ^ (x >> 7) ^ (x << 25);
         x = std::rotr(x, 13) ^ 0x517CC1B727220A95ull;
-        return x ^ kStone1 ^ kStone2 ^ 0xDEADBEEF1337C0DEull ^ runtimeSalt;
+        return static_cast<uintptr_t>(x ^ kStone1 ^ kStone2 ^ 0xDEADBEEF1337C0DEull);
     }
 
-    [[noreturn]] static void vkError(VkResult res, const std::string& msg, const char* file, int line);
-    [[noreturn]] static void vkThrow(const std::string& msg);
+    void cleanup() noexcept { releaseAll(device_); }
+
+    [[noreturn]] static void vkError(VkResult res, std::string_view msg, const char* file, int line);
+    [[noreturn]] static void vkThrow(std::string_view msg);
 };
 
 #undef VK_CHECK

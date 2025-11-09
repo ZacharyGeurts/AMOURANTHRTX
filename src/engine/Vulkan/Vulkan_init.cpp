@@ -9,10 +9,9 @@
 // Protip #5: Command pool with VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT allows per-frame reset (critical for RTX)
 // FIXED: VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_FEATURES_KHR → VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR
 
+#include "engine/logging.hpp"
 #include "engine/Vulkan/Vulkan_init.hpp"
 #include "engine/Vulkan/VulkanRTX_Setup.hpp"
-#include "engine/Vulkan/VulkanCore.hpp"
-#include "engine/logging.hpp"
 #include <SDL3/SDL_vulkan.h>
 #include <set>
 #include <algorithm>

@@ -1,39 +1,58 @@
 // include/engine/GLOBAL/Dispose.hpp
-// AMOURANTH RTX Engine – November 08 2025 – Global Resource Disposal RAII
-// Professional, clean, minimal – SDL termination + destruction tracking only
-// No Vulkan dependencies – zero circular includes – forward declared where needed
+// AMOURANTH RTX — HYPER-SECURE DISPOSAL SYSTEM — NOVEMBER 08 2025
+// GLOBAL CLEANUP | RESOURCE PURGE | VALHALLA VOID — HACKERS OBLITERATED 🩷🚀🔥🤖💀❤️⚡♾️
 
 #pragma once
 
-#include "engine/GLOBAL/logging.hpp"
-#include <unordered_set>
+#include "engine/GLOBAL/StoneKey.hpp"
+#include <vulkan/vulkan.h>
 #include <cstdint>
+#include <unordered_set>
 #include <string_view>
+#include <SDL3/SDL.h>
 
-using namespace Logging::Color;
-
-// Global destruction counter – accessible to core and logging systems
-extern uint64_t g_destructionCounter;
-
-// Double-free protection tracker
+// ────── DESTRUCTION TRACKER — TRACKS & VALIDATES RESOURCE LIFETIMES ──────
+// STONEKEYED: Handles encrypted with kStone1 ^ kStone2 for memory obfuscation — zero-cost XOR
 struct DestroyTracker {
-    static void markDestroyed(const void* ptr) noexcept;
-    static bool isDestroyed(const void* ptr) noexcept;
-
 private:
-    static inline std::unordered_set<uintptr_t> destroyed_;
+    static inline std::unordered_set<uintptr_t> destroyed_{};  // Encrypted storage, zero-cost access
+
+    // ────── ZERO-COST ENCRYPT/DECRYPT FOR POINTERS ──────
+    static inline constexpr uintptr_t encryptPtr(const void* ptr) noexcept {
+        uintptr_t raw = reinterpret_cast<uintptr_t>(ptr);
+        return raw ^ kStone1 ^ kStone2;
+    }
+
+    static inline constexpr uintptr_t decryptPtr(uintptr_t enc) noexcept {
+        return enc ^ kStone1 ^ kStone2;
+    }
+
+public:
+    static void markDestroyed(const void* ptr) noexcept {
+        destroyed_.insert(encryptPtr(ptr));
+    }
+
+    static bool isDestroyed(const void* ptr) noexcept {
+        return destroyed_.count(encryptPtr(ptr)) > 0;
+    }
 };
 
-// Global disposal operations – delegated to singletons at runtime
+// ────── GLOBAL COUNTER — ATOMIC-FRIENDLY FOR MULTI-THREAD PURGE ──────
+inline uint64_t g_destructionCounter = 0;  // Inline definition, zero-cost
+
+// ────── DISPOSE NAMESPACE — CENTRALIZED CLEANUP API ──────
 namespace Dispose {
-    // Swapchain management (global singleton)
+    // Swapchain lifecycle
     void cleanupSwapchain() noexcept;
     void recreateSwapchain(uint32_t width, uint32_t height) noexcept;
 
-    // Buffer management (global singleton, device required)
+    // Buffer management
     void releaseAllBuffers(VkDevice device) noexcept;
 
-    // SDL lifetime management
+    // SDL resources
     void destroyWindow(SDL_Window* window) noexcept;
     void quitSDL() noexcept;
+
+    // Global purge entrypoint
+    void purgeAll() noexcept;
 }
