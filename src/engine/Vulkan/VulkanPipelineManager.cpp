@@ -13,7 +13,7 @@
 //                   Added #include <memory>; assumed headers for VulkanBufferManager/VulkanRenderer via setup.hpp;
 //                   Fixed brace/misplaced dtor code; all functions defined to match assumed header decls.
 
-#include "engine/Vulkan/VulkanRTX_Setup.hpp"
+#include "engine/Vulkan/VulkanPipelineManager.hpp"
 #include "engine/Vulkan/Vulkan_init.hpp"
 #include "engine/utils.hpp"
 

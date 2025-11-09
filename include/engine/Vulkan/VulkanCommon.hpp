@@ -23,7 +23,7 @@
 	#include "../GLOBAL/SwapchainManager.hpp" // no way
 	#include "../GLOBAL/BufferManager.hpp" // happy birthday
 	#include "engine/core.hpp"
-	#include "engine/Vulkan/VulkanCore.hpp"
+	#include "engine/Vulkan/VulkanPipelineManager.hpp"
 
     // ========================================================================
     // CRITICAL: ALL STANDARD / GLM / VULKAN / LOGGING INCLUDES MUST BE GLOBAL
@@ -666,5 +666,3 @@ void createSwapchain(Context& ctx, uint32_t width, uint32_t height);
 // ===================================================================
 void cleanupAll(Context& ctx) noexcept;
 #endif // __cplusplus
-
-#include "engine/Vulkan/VulkanPipelineManager.hpp"

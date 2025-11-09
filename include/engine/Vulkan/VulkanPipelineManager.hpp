@@ -10,8 +10,7 @@
 #pragma once
 
 #include "engine/GLOBAL/StoneKey.hpp"
-#include "engine/Vulkan/VulkanCommon.hpp"
-#include "engine/Vulkan/VulkanRTX_Setup.hpp"  // ← FULL VulkanRTX DEFINITION — KILLS INCOMPLETE TYPE
+#include "engine/Vulkan/VulkanRTX_Setup.hpp"
 
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_beta.h>
