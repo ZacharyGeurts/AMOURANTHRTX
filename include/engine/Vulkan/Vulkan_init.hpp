@@ -4,7 +4,6 @@
 
 #pragma once
 
-#include "engine/GLOBAL/SwapchainManager.hpp"
 #include "engine/Vulkan/VulkanCommon.hpp"
 #include "engine/utils.hpp"
 #include <SDL3/SDL_vulkan.h>

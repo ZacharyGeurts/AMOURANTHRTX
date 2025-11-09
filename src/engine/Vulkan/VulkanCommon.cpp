@@ -12,45 +12,6 @@
 #include <sstream>
 #include <thread>
 
-// FULL CLASS DEFINITION — RIGHT HERE IN CPP (avoids circular includes)
-class VulkanRTX {
-public:
-    VulkanRTX() = default;
-    ~VulkanRTX() { destroy(); }
-
-    bool init();
-    void destroy();
-
-    VkInstance instance = VK_NULL_HANDLE;
-    VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
-    VkDevice device = VK_NULL_HANDLE;
-    uint32_t graphicsQueueFamily = VK_QUEUE_FAMILY_IGNORED;
-    uint32_t presentQueueFamily = VK_QUEUE_FAMILY_IGNORED;
-    VkQueue graphicsQueue = VK_NULL_HANDLE;
-    VkQueue presentQueue = VK_NULL_HANDLE;
-
-    // OBFUSCATED HANDLES — STONEKEY SUPREMACY
-    VulkanHandle<VkSwapchainKHR> swapchain;
-    VulkanHandle<VkCommandPool> commandPool;
-    VulkanHandle<VkRenderPass> renderPass;
-    VulkanHandle<VkPipelineLayout> pipelineLayout;
-    VulkanHandle<VkPipelineCache> pipelineCache;
-
-    // Add more as needed...
-
-    bool initialized = false;
-};
-
-// GLOBAL INSTANCE — DEFINED HERE
-VulkanRTX g_vulkanRTX;
-
-// OPTIONAL: Auto-init on startup (runs before main)
-static struct VulkanRTXAutoInit {
-    VulkanRTXAutoInit() {
-        g_vulkanRTX.init();  // Your init function
-    }
-} g_vulkanRTXAutoInit;
-
 // ===================================================================
 // GLOBAL LOGGING HELPERS WITH STONEKEY — THREAD SAFE — HALO 19 APPROVED
 // ===================================================================

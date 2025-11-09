@@ -23,6 +23,7 @@
 	#include "../GLOBAL/SwapchainManager.hpp" // no way
 	#include "../GLOBAL/BufferManager.hpp" // happy birthday
 	#include "engine/core.hpp"
+	#include "engine/Vulkan/VulkanCore.hpp"
 
     // ========================================================================
     // CRITICAL: ALL STANDARD / GLM / VULKAN / LOGGING INCLUDES MUST BE GLOBAL
@@ -524,113 +525,6 @@ struct VulkanDeleter {
 };
 
 // ===================================================================
-// VulkanHandle — FINAL NOV 09 2025 — OBFUSCATED uint64_t + PERFECT DELETER
-// STORES: obfuscated uint64_t
-// DELETER: takes uint64_t*, deobfuscates, calls correct destroy fn
-// ZERO COST — FULL RAII — DOUBLE-FREE PROOF — 69,420 FPS
-// ===================================================================
-template<typename T>
-struct VulkanHandle {
-    using DestroyFn = void(*)(VkDevice, T, const VkAllocationCallbacks*);
-
-    struct Deleter {
-        VkDevice device = VK_NULL_HANDLE;
-        DestroyFn fn = nullptr;
-
-        void operator()(uint64_t* ptr) const noexcept {
-            if (ptr && *ptr != 0 && fn && device) {
-                T realHandle = reinterpret_cast<T>(deobfuscate(*ptr));
-                if (!DestroyTracker::isDestroyed(reinterpret_cast<const void*>(realHandle))) {
-                    fn(device, realHandle, nullptr);
-                    DestroyTracker::markDestroyed(reinterpret_cast<const void*>(realHandle));
-                    logAndTrackDestruction(typeid(T).name(), reinterpret_cast<void*>(realHandle), __LINE__);
-                }
-            }
-            delete ptr;
-        }
-    };
-
-private:
-    std::unique_ptr<uint64_t, Deleter> impl_;
-
-    static constexpr DestroyFn defaultDestroyer() noexcept {
-        if constexpr (std::is_same_v<T, VkPipeline>) return vkDestroyPipeline;
-        else if constexpr (std::is_same_v<T, VkPipelineLayout>) return vkDestroyPipelineLayout;
-        else if constexpr (std::is_same_v<T, VkDescriptorSetLayout>) return vkDestroyDescriptorSetLayout;
-        else if constexpr (std::is_same_v<T, VkShaderModule>) return vkDestroyShaderModule;
-        else if constexpr (std::is_same_v<T, VkRenderPass>) return vkDestroyRenderPass;
-        else if constexpr (std::is_same_v<T, VkCommandPool>) return vkDestroyCommandPool;
-        else if constexpr (std::is_same_v<T, VkBuffer>) return vkDestroyBuffer;
-        else if constexpr (std::is_same_v<T, VkDeviceMemory>) return vkFreeMemory;
-        else if constexpr (std::is_same_v<T, VkImage>) return vkDestroyImage;
-        else if constexpr (std::is_same_v<T, VkImageView>) return vkDestroyImageView;
-        else if constexpr (std::is_same_v<T, VkSampler>) return vkDestroySampler;
-        else if constexpr (std::is_same_v<T, VkSwapchainKHR>) return vkDestroySwapchainKHR;
-        else if constexpr (std::is_same_v<T, VkSemaphore>) return vkDestroySemaphore;
-        else if constexpr (std::is_same_v<T, VkFence>) return vkDestroyFence;
-        else if constexpr (std::is_same_v<T, VkDescriptorPool>) return vkDestroyDescriptorPool;
-        else return nullptr;
-    }
-
-public:
-    VulkanHandle() = default;
-
-    VulkanHandle(T handle, VkDevice dev, DestroyFn customFn = nullptr)
-        : impl_(handle ? new uint64_t(obfuscate(reinterpret_cast<uint64_t>(handle))) : nullptr,
-                Deleter{dev, customFn ? customFn : defaultDestroyer()}) {}
-
-    VulkanHandle(VulkanHandle&&) noexcept = default;
-    VulkanHandle& operator=(VulkanHandle&&) noexcept = default;
-    VulkanHandle(const VulkanHandle&) = delete;
-    VulkanHandle& operator=(const VulkanHandle&) = delete;
-
-    [[nodiscard]] T raw_deob() const noexcept {
-        return impl_ ? reinterpret_cast<T>(deobfuscate(*impl_.get())) : VK_NULL_HANDLE;
-    }
-
-    [[nodiscard]] uint64_t raw_obf() const noexcept { return impl_ ? *impl_.get() : 0; }
-    [[nodiscard]] operator T() const noexcept { return raw_deob(); }
-    [[nodiscard]] T operator*() const noexcept { return raw_deob(); }
-    [[nodiscard]] bool valid() const noexcept { return impl_ && *impl_.get() != 0; }
-    void reset() noexcept { impl_.reset(); }
-    explicit operator bool() const noexcept { return valid(); }
-};
-
-#define MAKE_VK_HANDLE(name, vkType) \
-    inline VulkanHandle<vkType> make##name(VkDevice dev, vkType handle) { \
-        return VulkanHandle<vkType>(handle, dev); \
-    }
-
-MAKE_VK_HANDLE(Buffer,              VkBuffer)
-MAKE_VK_HANDLE(Memory,              VkDeviceMemory)
-MAKE_VK_HANDLE(Image,               VkImage)
-MAKE_VK_HANDLE(ImageView,           VkImageView)
-MAKE_VK_HANDLE(Sampler,             VkSampler)
-MAKE_VK_HANDLE(DescriptorPool,      VkDescriptorPool)
-MAKE_VK_HANDLE(Semaphore,           VkSemaphore)
-MAKE_VK_HANDLE(Fence,               VkFence)
-MAKE_VK_HANDLE(Pipeline,            VkPipeline)
-MAKE_VK_HANDLE(PipelineLayout,      VkPipelineLayout)
-MAKE_VK_HANDLE(DescriptorSetLayout, VkDescriptorSetLayout)
-MAKE_VK_HANDLE(RenderPass,          VkRenderPass)
-MAKE_VK_HANDLE(ShaderModule,        VkShaderModule)
-MAKE_VK_HANDLE(CommandPool,         VkCommandPool)
-MAKE_VK_HANDLE(SwapchainKHR,        VkSwapchainKHR)
-
-inline VulkanHandle<VkAccelerationStructureKHR> makeAccelerationStructure(
-    VkDevice dev, VkAccelerationStructureKHR as, PFN_vkDestroyAccelerationStructureKHR func = nullptr)
-{
-    return VulkanHandle<VkAccelerationStructureKHR>(as, dev, reinterpret_cast<VulkanDeleter<VkAccelerationStructureKHR>::DestroyFn>(func ? func : vkDestroyAccelerationStructureKHR));
-}
-
-inline VulkanHandle<VkDeferredOperationKHR> makeDeferredOperation(VkDevice dev, VkDeferredOperationKHR op)
-{
-    return VulkanHandle<VkDeferredOperationKHR>(op, dev, vkDestroyDeferredOperationKHR);
-}
-
-#undef MAKE_VK_HANDLE
-
-// ===================================================================
 // VulkanResourceManager — FULLY IMPLEMENTED
 // ===================================================================
 class VulkanResourceManager {
@@ -773,4 +667,4 @@ void createSwapchain(Context& ctx, uint32_t width, uint32_t height);
 void cleanupAll(Context& ctx) noexcept;
 #endif // __cplusplus
 
-#include "engine/Vulkan/VulkanRTX_Setup.hpp"
+#include "engine/Vulkan/VulkanPipelineManager.hpp"

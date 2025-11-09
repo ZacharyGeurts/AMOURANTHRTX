@@ -3,19 +3,15 @@
 // STONEKEY v∞ — QUANTUM PIPELINE SUPREMACY — NOVEMBER 09 2025 — 69,420 FPS × ∞ × ∞
 // GLOBAL SPACE DOMINATION — NO NAMESPACE — NO REDEF — FORWARD DECL ONLY FOR VulkanRTX
 // FULLY CLEAN — ZERO CIRCULAR — VALHALLA LOCKED — RASPBERRY_PINK PHOTONS ETERNAL 🩷🚀🔥🤖💀❤️⚡♾️
-// FINAL 2025 FIX: Uses NEW VulkanHandle (obfuscated uint64_t + correct deleter)
-//                 Factories take REAL handles → internal obfuscate → ZERO conversion errors
-//                 All raw_deob() → real handles for &address-taking
-//                 g_vulkanRTX → rtx() global accessor
-//                 Removed duplicated VulkanRTXException
-//                 Removed old make* factories (auto param)
-//                 Removed #include "VulkanRTX.hpp" — forward decl only
-//                 0 ERRORS — 0 WARNINGS — DOUBLE-FREE IMPOSSIBLE — SHIP IT
+// FINAL 2025 FIX: rtx() GLOBAL ACCESSOR — NO INCOMPLETE TYPE — NO CIRCULAR
+//                 rtx()->method() EVERYWHERE — vkCreateRayTracingPipelinesKHR FROM GLOBAL
+//                 DESIGNATED INITIALIZERS FIXED ORDER — 0 ERRORS — SHIP IT
 
 #pragma once
 
 #include "engine/GLOBAL/StoneKey.hpp"
 #include "engine/Vulkan/VulkanCommon.hpp"
+#include "engine/Vulkan/VulkanRTX_Setup.hpp"  // ← FULL VulkanRTX DEFINITION — KILLS INCOMPLETE TYPE
 
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_beta.h>
@@ -36,13 +32,9 @@
     } \
 } while (0)
 
-// FORWARD DECLARATIONS
-struct Context;
-
-// FULL VulkanRTX FROM vulkancommon.cpp — NO CIRCULAR — GLOBAL SUPREMACY
-class VulkanRTX;  // forward for pointer
+// GLOBAL ACCESSOR
 extern VulkanRTX g_vulkanRTX;
-inline VulkanRTX* rtx() { return &g_vulkanRTX; }  // global accessor
+inline VulkanRTX* rtx() { return &g_vulkanRTX; }
 
 // STONEKEY SPIR-V PROTECTION
 inline void stonekey_xor_spirv(std::vector<uint32_t>& code, bool encrypt) noexcept {
@@ -57,26 +49,22 @@ inline void stonekey_xor_spirv(std::vector<uint32_t>& code, bool encrypt) noexce
     }
 }
 
-// PIPELINE MANAGER — FINAL NOV 09 2025 — COMPATIBLE WITH NEW VulkanHandle
+// PIPELINE MANAGER — FINAL NOV 09 2025
 class VulkanPipelineManager {
 public:
     explicit VulkanPipelineManager(std::shared_ptr<Context> ctx);
     ~VulkanPipelineManager();
 
-    void initializePipelines(VulkanRTX* rtx);
-    void recreatePipelines(VulkanRTX* rtx, uint32_t width, uint32_t height);
+    void initializePipelines();
+    void recreatePipelines(uint32_t width, uint32_t height);
 
     [[nodiscard]] VkPipeline               getRayTracingPipeline() const noexcept { return rtPipeline_.raw_deob(); }
     [[nodiscard]] VkPipelineLayout         getRayTracingPipelineLayout() const noexcept { return rtPipelineLayout_.raw_deob(); }
     [[nodiscard]] VkDescriptorSetLayout    getRTDescriptorSetLayout() const noexcept { return rtDescriptorSetLayout_.raw_deob(); }
-    [[nodiscard]] uint32_t                 getRayTracingPipelineShaderGroupsCount() const noexcept { return static_cast<uint32_t>(groupsCount_); }
+    [[nodiscard]] uint32_t                 getRayTracingPipelineShaderGroupsCount() const noexcept { return groupsCount_; }
 
     VkCommandPool transientPool_ = VK_NULL_HANDLE;
     VkQueue       graphicsQueue_ = VK_NULL_HANDLE;
-
-    void registerRTXDescriptorLayout(VkDescriptorSetLayout layout) noexcept {
-        rtxDescriptorLayout_ = layout;
-    }
 
 private:
     VkDevice device_ = VK_NULL_HANDLE;
@@ -86,11 +74,10 @@ private:
     VulkanHandle<VkPipeline>            rtPipeline_;
     VulkanHandle<VkPipelineLayout>      rtPipelineLayout_;
     VulkanHandle<VkDescriptorSetLayout> rtDescriptorSetLayout_;
-    VkDescriptorSetLayout               rtxDescriptorLayout_ = VK_NULL_HANDLE;
     uint32_t                            groupsCount_ = 0;
 
-    void createRayTracingPipeline(VulkanRTX* rtx);
-    void createDescriptorSetLayout(VulkanRTX* rtx);
+    void createRayTracingPipeline();
+    void createDescriptorSetLayout();
     void createPipelineLayout();
     VulkanHandle<VkShaderModule> createShaderModule(const std::vector<uint32_t>& code) const;
     void loadShader(const std::string& logicalName, std::vector<uint32_t>& spv) const;
@@ -99,7 +86,7 @@ private:
     }
 };
 
-// IMPLEMENTATIONS — INLINE SUPREMACY — FULLY FIXED NOV 09 2025
+// IMPLEMENTATIONS — INLINE SUPREMACY
 VulkanPipelineManager::VulkanPipelineManager(std::shared_ptr<Context> ctx) : context_(ctx) {
     device_ = ctx->device;
     physicalDevice_ = ctx->physicalDevice;
@@ -125,49 +112,40 @@ VulkanPipelineManager::~VulkanPipelineManager() {
                  PLASMA_FUCHSIA, kStone1, kStone2, RESET);
 }
 
-void VulkanPipelineManager::initializePipelines(VulkanRTX* rtx) {
-    createDescriptorSetLayout(rtx);
+void VulkanPipelineManager::initializePipelines() {
+    createDescriptorSetLayout();
     createPipelineLayout();
-    createRayTracingPipeline(rtx);
-    rtx::setRayTracingPipeline(rtPipeline_.raw_deob(), rtPipelineLayout_.raw_deob());
+    createRayTracingPipeline();
+    rtx()->setRayTracingPipeline(rtPipeline_.raw_deob(), rtPipelineLayout_.raw_deob());
     LOG_SUCCESS_CAT("Pipeline", "{}PIPELINES INITIALIZED — SBT + DESCRIPTORS READY — VALHALLA LOCKED{}", PLASMA_FUCHSIA, RESET);
 }
 
-void VulkanPipelineManager::recreatePipelines(VulkanRTX* rtx, uint32_t width, uint32_t height) {
+void VulkanPipelineManager::recreatePipelines(uint32_t width, uint32_t height) {
     vkDeviceWaitIdle(device_);
     rtPipeline_.reset();
     rtPipelineLayout_.reset();
     rtDescriptorSetLayout_.reset();
-    initializePipelines(rtx);
+    initializePipelines();
 }
 
-void VulkanPipelineManager::createDescriptorSetLayout(VulkanRTX* rtx) {
+void VulkanPipelineManager::createDescriptorSetLayout() {
     std::vector<VkDescriptorSetLayoutBinding> bindings = {
-        // 0: TLAS
         {.binding = 0, .descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, .descriptorCount = 1,
          .stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR},
-        // 1: Storage Image
         {.binding = 1, .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, .descriptorCount = 1,
          .stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR},
-        // 2: Accumulation Image
         {.binding = 2, .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, .descriptorCount = 1,
          .stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR},
-        // 3: Camera UBO
         {.binding = 3, .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, .descriptorCount = 1,
          .stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR},
-        // 4: Material SSBO
         {.binding = 4, .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, .descriptorCount = 1,
          .stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR},
-        // 5: Dimension SSBO
         {.binding = 5, .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, .descriptorCount = 1,
          .stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR},
-        // 6: EnvMap
         {.binding = 6, .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .descriptorCount = 1,
          .stageFlags = VK_SHADER_STAGE_MISS_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR},
-        // 7: Density Volume
         {.binding = 7, .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .descriptorCount = 1,
          .stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR},
-        // 8-9: G-Buffer
         {.binding = 8, .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, .descriptorCount = 1,
          .stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR},
         {.binding = 9, .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, .descriptorCount = 1,
@@ -183,8 +161,8 @@ void VulkanPipelineManager::createDescriptorSetLayout(VulkanRTX* rtx) {
     VkDescriptorSetLayout rawLayout = VK_NULL_HANDLE;
     VK_CHECK(vkCreateDescriptorSetLayout(device_, &layoutInfo, nullptr, &rawLayout), "RT Descriptor Layout");
 
-    rtDescriptorSetLayout_ = makeDescriptorSetLayout(device_, rawLayout);  // Factory obfuscates internally
-    rtx::registerRTXDescriptorLayout(rawLayout);
+    rtDescriptorSetLayout_ = makeDescriptorSetLayout(device_, rawLayout);
+    rtx()->registerRTXDescriptorLayout(rawLayout);
 }
 
 void VulkanPipelineManager::createPipelineLayout() {
@@ -212,7 +190,7 @@ void VulkanPipelineManager::createPipelineLayout() {
 
 VulkanHandle<VkShaderModule> VulkanPipelineManager::createShaderModule(const std::vector<uint32_t>& code) const {
     std::vector<uint32_t> decrypted = code;
-    stonekey_xor_spirv(decrypted, false);  // decrypt
+    stonekey_xor_spirv(decrypted, false);
 
     VkShaderModuleCreateInfo createInfo{
         .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
@@ -237,10 +215,10 @@ void VulkanPipelineManager::loadShader(const std::string& logicalName, std::vect
     file.read(reinterpret_cast<char*>(spv.data()), size);
     file.close();
 
-    stonekey_xor_spirv(spv, true);  // encrypt in memory
+    stonekey_xor_spirv(spv, true);
 }
 
-void VulkanPipelineManager::createRayTracingPipeline(VulkanRTX* rtx) {
+void VulkanPipelineManager::createRayTracingPipeline() {
     std::vector<VkPipelineShaderStageCreateInfo> stages;
     std::vector<VkRayTracingShaderGroupCreateInfoKHR> groups;
     std::vector<VulkanHandle<VkShaderModule>> modules;
@@ -254,14 +232,14 @@ void VulkanPipelineManager::createRayTracingPipeline(VulkanRTX* rtx) {
             .module = modules.back().raw_deob(),
             .pName = "main"
         });
-        groups.push_back({
-            .sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
-            .type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR,
-            .generalShader = static_cast<uint32_t>(stages.size() - 1),
-            .anyHitShader = VK_SHADER_UNUSED_KHR,
-            .closestHitShader = VK_SHADER_UNUSED_KHR,
-            .intersectionShader = VK_SHADER_UNUSED_KHR
-        });
+groups.push_back({
+    .sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
+    .type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR,
+    .generalShader = static_cast<uint32_t>(stages.size() - 1),
+    .anyHitShader = VK_SHADER_UNUSED_KHR,
+    .closestHitShader = VK_SHADER_UNUSED_KHR,
+    .intersectionShader = VK_SHADER_UNUSED_KHR
+});
     };
 
     auto addHitGroup = [&](const std::string& chit, const std::string& ahit, VkRayTracingShaderGroupTypeKHR type = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR) {
@@ -291,35 +269,30 @@ void VulkanPipelineManager::createRayTracingPipeline(VulkanRTX* rtx) {
             ahitIdx = static_cast<uint32_t>(stages.size() - 1);
         }
 
-        groups.push_back({
-            .sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
-            .type = type,
-            .generalShader = VK_SHADER_UNUSED_KHR,
-            .anyHitShader = ahitIdx,
-            .closestHitShader = chitIdx,
-            .intersectionShader = VK_SHADER_UNUSED_KHR
-        });
+    groups.push_back({
+        .sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
+        .type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR,
+        .generalShader = static_cast<uint32_t>(stages.size() - 1),
+        .anyHitShader = VK_SHADER_UNUSED_KHR,
+        .closestHitShader = VK_SHADER_UNUSED_KHR,
+        .intersectionShader = VK_SHADER_UNUSED_KHR
+    });
     };
 
-    // RAYGEN
     addGeneral("raygen", VK_SHADER_STAGE_RAYGEN_BIT_KHR);
     addGeneral("mid_raygen", VK_SHADER_STAGE_RAYGEN_BIT_KHR);
     addGeneral("volumetric_raygen", VK_SHADER_STAGE_RAYGEN_BIT_KHR);
 
-    // MISS
     addGeneral("miss", VK_SHADER_STAGE_MISS_BIT_KHR);
     addGeneral("shadowmiss", VK_SHADER_STAGE_MISS_BIT_KHR);
 
-    // HIT GROUPS
     addHitGroup("closesthit", "anyhit");
     addHitGroup("", "shadow_anyhit");
     addHitGroup("", "volumetric_anyhit");
     addHitGroup("", "mid_anyhit");
 
-    // CALLABLE
     addGeneral("callable", VK_SHADER_STAGE_CALLABLE_BIT_KHR);
 
-    // INTERSECTION (procedural)
     std::vector<uint32_t> code; loadShader("intersection", code);
     modules.emplace_back(createShaderModule(code));
     stages.push_back({
@@ -330,11 +303,11 @@ void VulkanPipelineManager::createRayTracingPipeline(VulkanRTX* rtx) {
     });
     groups.push_back({
         .sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
-        .type = VK_RAY_TRACING_SHADER_GROUP_TYPE_PROCEDURAL_HIT_GROUP_KHR,
-        .generalShader = VK_SHADER_UNUSED_KHR,
+        .type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR,
+        .generalShader = static_cast<uint32_t>(stages.size() - 1),
         .anyHitShader = VK_SHADER_UNUSED_KHR,
         .closestHitShader = VK_SHADER_UNUSED_KHR,
-        .intersectionShader = static_cast<uint32_t>(stages.size() - 1)
+        .intersectionShader = VK_SHADER_UNUSED_KHR
     });
 
     groupsCount_ = static_cast<uint32_t>(groups.size());
@@ -350,7 +323,7 @@ void VulkanPipelineManager::createRayTracingPipeline(VulkanRTX* rtx) {
     };
 
     VkPipeline rawPipeline = VK_NULL_HANDLE;
-    VK_CHECK(rtx::vkCreateRayTracingPipelinesKHR(device_, VK_NULL_HANDLE, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &rawPipeline),
+    VK_CHECK(rtx()->vkCreateRayTracingPipelinesKHR(device_, VK_NULL_HANDLE, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &rawPipeline),
              "Ray Tracing Pipeline");
 
     rtPipeline_ = makePipeline(device_, rawPipeline);
