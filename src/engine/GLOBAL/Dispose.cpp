@@ -1,10 +1,11 @@
 // src/engine/GLOBAL/Dispose.cpp
-// AMOURANTH RTX — HYPER-SECURE DISPOSAL SYSTEM — NOVEMBER 08 2025
+// AMOURANTH RTX — HYPER-SECURE DISPOSAL SYSTEM — NOVEMBER 09 2025
 // GLOBAL CLEANUP | RESOURCE PURGE | VALHALLA VOID — HACKERS OBLITERATED 🩷🚀🔥🤖💀❤️⚡♾️
+// SINGLETON SUPREMACY — PINK PHOTONS APPROVED — ZERO-COST DISPOSAL HEAVEN
 
 #include "engine/GLOBAL/Dispose.hpp"
-#include "engine/GLOBAL/SwapchainManager.hpp"
-#include "engine/GLOBAL/BufferManager.hpp"
+#include "engine/GLOBAL/SwapchainManager.hpp"  // Assumes GlobalSwapchainManager inside
+#include "engine/GLOBAL/BufferManager.hpp"     // GlobalBufferManager singleton
 #include "engine/GLOBAL/logging.hpp"
 #include <SDL3/SDL.h>
 
@@ -24,7 +25,7 @@ namespace Dispose {
     void cleanupSwapchain() noexcept {
         logAttempt("Global swapchain cleanup", __LINE__);
         try {
-            VulkanSwapchainManager::get().cleanup();
+            GlobalSwapchainManager::get().cleanup();  // Fixed: GlobalSwapchainManager singleton
             logSuccess("Global swapchain purged", __LINE__);
         } catch (...) {
             LOG_ERROR_CAT("Dispose", "Swapchain cleanup failed — fallback to manual purge");
@@ -35,7 +36,7 @@ namespace Dispose {
         std::string resStr = std::to_string(width) + "x" + std::to_string(height);
         logAttempt("Global swapchain recreate " + resStr, __LINE__);
         try {
-            VulkanSwapchainManager::get().recreate(width, height);
+            GlobalSwapchainManager::get().recreate(width, height);  // Fixed: GlobalSwapchainManager singleton
             logSuccess("Global swapchain recreated", __LINE__);
         } catch (...) {
             LOG_ERROR_CAT("Dispose", "Swapchain recreate failed — init required");
@@ -43,10 +44,10 @@ namespace Dispose {
     }
 
     // ────── BUFFER MANAGEMENT ──────
-    void releaseAllBuffers(VkDevice device) noexcept {
+    void releaseAllBuffers() noexcept {  // Fixed: No device param needed (uses internal device_)
         logAttempt("Global buffer manager release all", __LINE__);
         try {
-            BufferManager::get().releaseAll(device);
+            GlobalBufferManager::get().releaseAll();  // Fixed: GlobalBufferManager singleton + no param
             logSuccess("All buffers released", __LINE__);
         } catch (...) {
             LOG_ERROR_CAT("Dispose", "Buffer release failed — resources may leak");
@@ -71,7 +72,7 @@ namespace Dispose {
     void purgeAll() noexcept {
         logAttempt("Global resource purge", __LINE__);
         cleanupSwapchain();
-        releaseAllBuffers(VK_NULL_HANDLE);  // Assume device is valid; pass actual if needed
+        releaseAllBuffers();  // Fixed: No param
         quitSDL();  // SDL last to avoid surface issues
         logSuccess("Global purge complete", __LINE__);
     }
