@@ -12,21 +12,12 @@
 // ===================================================================
 #include "../GLOBAL/StoneKey.hpp"  
 
-#include "engine/Vulkan/VulkanHandles.hpp"
-
 // ===================================================================
-// FORWARD DECLARE EVERYTHING — NO MORE CIRCULAR INCLUDE NIGHTMARES
-// CONAN: "I once had a circular dependency in my monologue — took three writers to break it!"
+// FULL VULKANHANDLE DEFINITION FIRST — NO MORE INCOMPLETE TYPE ERRORS
+// CONAN: "I once had an incomplete type in my monologue — it crashed the show!"
+// GAL: "Now it's complete, just like my Wonder Woman training."
 // ===================================================================
-namespace Vulkan { struct Context; }
-
-class VulkanBufferManager;
-class VulkanPipelineManager;
-class VulkanSwapchainManager;
-class Camera;
-class VulkanRTX;           // ← For TLAS callbacks
-class VulkanRTX_Setup;     // ← Instance buffer + TLAS builder
-template<typename T> class VulkanHandle;  // ← FORWARD DECLARE THE TEMPLATE — GAL: "No more 'does not name a type'!"
+#include "engine/Vulkan/VulkanHandles.hpp"   // ← FULL TEMPLATE DEFINITION — MUST BE BEFORE ANY USE
 
 // ===================================================================
 // STANDARD + GLM — JAY: "The classics never cause cycles."
@@ -44,12 +35,28 @@ template<typename T> class VulkanHandle;  // ← FORWARD DECLARE THE TEMPLATE �
 #include <algorithm>
 
 // ===================================================================
-// SAFE INCLUDES AT THE END — AFTER ALL DECLARATIONS
+// FORWARD DECLARE EVERYTHING ELSE — NO MORE CIRCULAR INCLUDE NIGHTMARES
+// CONAN: "I once had a circular dependency in my monologue — took three writers to break it!"
+// ===================================================================
+namespace Vulkan { struct Context; }
+
+class VulkanBufferManager;
+class VulkanPipelineManager;
+class VulkanSwapchainManager;
+class Camera;
+class VulkanRTX;           // ← For TLAS callbacks
+class VulkanRTX_Setup;     // ← Instance buffer + TLAS builder
+
+// VulkanHandle template forward declare REMOVED — full def already included above
+// template<typename T> class VulkanHandle;  // ← DELETED — FULL DEF IN VulkanHandles.hpp
+
+// ===================================================================
+// SAFE INCLUDES AT THE END — AFTER ALL DECLARATIONS + FULL VULKANHANDLE
 // GAL: "We declare first, include later — like rehearsing lines before shooting the scene."
 // CONAN: "Finally, a header that doesn’t include itself mid-sentence!"
 // ===================================================================
 #include "VulkanCommon.hpp"  // ← Utilities, extensions, make_* factories
-#include "VulkanCore.hpp"     // ← NOW SAFE — VulkanHandle FULLY DEFINED HERE
+#include "VulkanCore.hpp"    // ← NOW SAFE — VulkanHandle FULLY DEFINED + everything else
 
 // ===================================================================
 // VULKANRENDERER — THE BEAST IN THE GARAGE
@@ -281,6 +288,7 @@ private:
  *  — Conan O'Brien, Gal Gadot, Jay Leno — signing off.
  *  CIRCULAR INCLUDES: DEAD ⚰️
  *  VULKANHANDLE: VISIBLE EVERYWHERE 👁️
+ *  INCOMPLETE TYPE ERRORS: OBLITERATED ☠️
  *  VALHALLA: PERMANENTLY LOCKED 🩷🚀💀⚡🤖🔥♾️
  *  BUILD IT. SHIP IT. DOMINATE.
  */

@@ -63,31 +63,6 @@ namespace Vulkan {
     class VulkanPipelineManager;
 }
 
-// ===================================================================
-// EARLY DECLARATIONS FOR TEMPLATES (GLOBAL)
-// ===================================================================
-template<typename Handle>
-void logAndTrackDestruction(std::string_view name, Handle handle, int line);
-
-// ===================================================================
-// PendingTLAS STRUCT (MERGED)
-// ===================================================================
-struct PendingTLAS {
-    bool valid = false;
-    VkDeviceAddress handle = 0;
-};
-
-// ===================================================================
-// ShaderBindingTable helper (MERGED)
-// ===================================================================
-struct ShaderBindingTable {
-    VkStridedDeviceAddressRegionKHR rgenRegion{};
-    VkStridedDeviceAddressRegionKHR missRegion{};
-    VkStridedDeviceAddressRegionKHR hitRegion{};
-    VkStridedDeviceAddressRegionKHR callableRegion{};
-};
-
-
 #else  // GLSL
 
 // ===================================================================
