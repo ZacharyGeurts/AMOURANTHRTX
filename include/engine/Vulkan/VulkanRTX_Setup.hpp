@@ -26,6 +26,10 @@
 // FORWARD DECLARATIONS — MINIMAL
 struct Context;
 class VulkanRenderer;
+class VulkanRTX;
+
+extern VulkanRTX g_vulkanRTX; // Global Vulkan context — STONEKEY OBFUSCATED HANDLES — VALHALLA LOCKED
+inline VulkanRTX& rtx() { return g_vulkanRTX; } // auto register
 
 // NUCLEAR PENDING TLAS — FULLY OBFUSCATED HANDLES
 struct PendingTLAS {
@@ -96,8 +100,9 @@ public:
                    uint32_t width, uint32_t height, uint32_t depth) const;
 
     [[nodiscard]] VkDescriptorSet getDescriptorSet() const noexcept { return ds_; }
-    [[nodiscard]] VkPipeline getPipeline() const noexcept { return deobfuscate(rtPipeline_.raw()); }
-    [[nodiscard]] const ShaderBindingTable& getSBT() const noexcept { return sbt_; }
+    [[nodiscard]] VkPipeline getPipeline() const noexcept { return rtPipeline_.raw_deob(); }
+    [[nodiscard]] const ShaderBindingTable& getSBT() const noexcept { return sbt_; }    
+    [[nodiscard]] VkDescriptorSetLayout getDescriptorSetLayout() const noexcept { return rtDescriptorSetLayout_.raw_deob(); }    
     [[nodiscard]] VkDescriptorSetLayout getDescriptorSetLayout() const noexcept { return deobfuscate(dsLayout_.raw()); }
     [[nodiscard]] VkBuffer getSBTBuffer() const noexcept { return deobfuscate(sbtBuffer_.raw()); }
     [[nodiscard]] VkAccelerationStructureKHR getTLAS() const noexcept { return deobfuscate(tlas_.raw()); }
