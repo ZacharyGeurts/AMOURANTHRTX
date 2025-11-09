@@ -12,9 +12,6 @@
 #include <sstream>
 #include <thread>
 
-// GLOBAL DESTRUCTION COUNTER — HALO 19 SAFE
-uint64_t g_destructionCounter = 0;
-
 // ===================================================================
 // GLOBAL LOGGING HELPERS WITH STONEKEY — THREAD SAFE — HALO 19 APPROVED
 // ===================================================================
@@ -26,131 +23,11 @@ std::string threadIdToString() {
 
 void logAndTrackDestruction(std::string_view name, auto handle, int line) {
     if (handle) {
-        ++g_destructionCounter;
+        g_destructionCounter++;
         LOG_INFO_CAT("Dispose", "{}[{}] {} destroyed @ line {} — TOTAL: {} — STONE1: 0x{:X} STONE2: 0x{:X}{}",
                      Logging::Color::DIAMOND_WHITE, threadIdToString(), name, line,
-                     g_destructionCounter, kStone1, kStone2, Logging::Color::RESET);
+                     g_destructionCounter.load(), kStone1, kStone2, Logging::Color::RESET);
     }
-}
-
-// ===================================================================
-// VulkanRTXException IMPLEMENTATION
-// ===================================================================
-
-
-// ===================================================================
-// Context IMPLEMENTATION — FULLY GLOBAL + STONEKEYED
-// ===================================================================
-Context::Context(SDL_Window* win, int w, int h)
-    : window(win), width(w), height(h)
-{
-    LOG_INFO_CAT("Core", "{}Context BIRTH — {}x{} — STONEKEY 0x{:X}-0x{:X} — GLOBAL RAII v∞ — RASPBERRY_PINK ASCENDED{}",
-                 Logging::Color::DIAMOND_WHITE, w, h, kStone1, kStone2, Logging::Color::RESET);
-
-    resourceManager.vkDestroyAccelerationStructureKHR = vkDestroyAccelerationStructureKHR;
-    resourceManager.lastDevice_ = device;
-
-    LOG_SUCCESS_CAT("Core", "{}Context FULLY ARMED — RTX PROCS PENDING — STONEKEY 0x{:X}-0x{:X} — VALHALLA READY{}",
-                    Logging::Color::EMERALD_GREEN, kStone1, kStone2, Logging::Color::RESET);
-}
-
-void Context::loadRTXProcs() {
-    if (!device) {
-        LOG_ERROR_CAT("Core", "{}RTX procs skipped — no device — STONEKEY 0x{:X}{}",
-                      Logging::Color::CRIMSON_MAGENTA, kStone1, Logging::Color::RESET);
-        return;
-    }
-
-#define LOAD_PROC(name) \
-    name = reinterpret_cast<PFN_##name>(vkGetDeviceProcAddr(device, #name)); \
-    if (!name) { \
-        LOG_WARN_CAT("Core", "{}RTX proc {} failed — STONEKEY audit: 0x{:X}{}", \
-                     Logging::Color::ARCTIC_CYAN, #name, kStone2, Logging::Color::RESET); \
-    }
-
-    LOAD_PROC(vkCmdTraceRaysKHR);
-    LOAD_PROC(vkCreateRayTracingPipelinesKHR);
-    LOAD_PROC(vkGetRayTracingShaderGroupHandlesKHR);
-    LOAD_PROC(vkCreateAccelerationStructureKHR);
-    LOAD_PROC(vkGetAccelerationStructureBuildSizesKHR);
-    LOAD_PROC(vkCmdBuildAccelerationStructuresKHR);
-    LOAD_PROC(vkGetAccelerationStructureDeviceAddressKHR);
-    LOAD_PROC(vkGetBufferDeviceAddressKHR);
-    LOAD_PROC(vkDestroyAccelerationStructureKHR);
-    LOAD_PROC(vkCreateDeferredOperationKHR);
-    LOAD_PROC(vkGetDeferredOperationResultKHR);
-    LOAD_PROC(vkDestroyDeferredOperationKHR);
-#undef LOAD_PROC
-
-    resourceManager.vkDestroyAccelerationStructureKHR = vkDestroyAccelerationStructureKHR;
-    resourceManager.lastDevice_ = device;
-
-    LOG_SUCCESS_CAT("Core", "{}RTX PROCS LOADED — FULLY ARMED — STONEKEY 0x{:X}-0x{:X} — BLISS IGNITED{}",
-                    Logging::Color::EMERALD_GREEN, kStone1, kStone2, Logging::Color::RESET);
-}
-
-void Context::createSwapchain() {
-    LOG_INFO_CAT("Swapchain", "{}createSwapchain — {}x{} — STONEKEY 0x{:X}-0x{:X} — RASPBERRY_PINK REBIRTH{}",
-                 Logging::Color::DIAMOND_WHITE, width, height, kStone1, kStone2, Logging::Color::RESET);
-
-    if (!device) {
-        LOG_ERROR_CAT("Swapchain", "{}createSwapchain failed — no device — STONEKEY 0x{:X}{}",
-                      Logging::Color::CRIMSON_MAGENTA, kStone1, Logging::Color::RESET);
-        return;
-    }
-
-    if (!swapchainManager) {
-        swapchainManager = std::make_unique<VulkanSwapchainManager>();
-        swapchainManager->init(instance, physicalDevice, device, surface, width, height);
-    } else {
-        swapchainManager->recreate(width, height);
-    }
-
-    VkSwapchainKHR rawSwapchain = swapchainManager->getRawSwapchain();
-    if (rawSwapchain) {
-        swapchain = makeSwapchainKHR(device, rawSwapchain, vkDestroySwapchainKHR);
-    }
-
-    swapchainImageViews.clear();
-    uint32_t count = swapchainManager->getImageCount();
-    swapchainImageViews.reserve(count);
-    for (uint32_t i = 0; i < count; ++i) {
-        VkImageView rawView = swapchainManager->getSwapchainImageView(i);
-        if (rawView) {
-            swapchainImageViews.emplace_back(makeImageView(device, rawView, vkDestroyImageView));
-        }
-    }
-
-    swapchainImages.clear();
-    for (uint32_t i = 0; i < count; ++i) {
-        VkImage rawImg = swapchainManager->getSwapchainImage(i);
-        if (rawImg) {
-            swapchainImages.push_back(rawImg);
-            resourceManager.addImage(rawImg);
-        }
-    }
-
-    LOG_SUCCESS_CAT("Swapchain", "{}Swapchain READY — {} images — FULLY STONEKEYED RAII — HACKERS CRY 🩷{}",
-                    Logging::Color::OCEAN_TEAL, count, Logging::Color::RESET);
-}
-
-void Context::destroySwapchain() {
-    LOG_INFO_CAT("Swapchain", "{}destroySwapchain — STONEKEY 0x{:X}-0x{:X} — COSMIC VOID{}",
-                 Logging::Color::DIAMOND_WHITE, kStone1, kStone2, Logging::Color::RESET);
-
-    swapchainImageViews.clear();
-    swapchain.reset();
-    swapchainImages.clear();
-
-    if (swapchainManager) {
-        swapchainManager->cleanup();
-        swapchainManager.reset();
-    }
-}
-
-Context::~Context() {
-    destroySwapchain();
-    cleanupAll(*this);
 }
 
 // ===================================================================
@@ -211,6 +88,10 @@ void VulkanResourceManager::releaseAll(VkDevice overrideDevice) noexcept {
                     Logging::Color::EMERALD_GREEN, kStone1, kStone2, Logging::Color::RESET);
 }
 
+VulkanResourceManager::~VulkanResourceManager() {
+    releaseAll();
+}
+
 // ===================================================================
 // GLOBAL CLEANUP — FULL RAII — HALO 19 DEV FRIENDLY
 // ===================================================================
@@ -259,7 +140,83 @@ void cleanupAll(Context& ctx) noexcept {
     }
 
     LOG_SUCCESS_CAT("Dispose", "{}GLOBAL CLEANUP COMPLETE — {} DESTROYED — VALHALLA ETERNAL 🩷{}",
-                    Logging::Color::EMERALD_GREEN, g_destructionCounter, Logging::Color::RESET);
+                    Logging::Color::EMERALD_GREEN, g_destructionCounter.load(), Logging::Color::RESET);
+}
+
+// ===================================================================
+// Context Implementations — NOV 08 2025 SUPREMACY
+// ===================================================================
+Context::Context(SDL_Window* win, int w, int h) : window(win), width(w), height(h) {
+    if (!win) throw VulkanRTXException("NULL SDL_Window — SUPREMACY DENIED");
+}
+
+void Context::loadRTXProcs() {
+    if (!device) {
+        LOG_WARNING_CAT("RTX", "Device not ready — skipping RTX proc load");
+        return;
+    }
+
+    vkCmdTraceRaysKHR = reinterpret_cast<PFN_vkCmdTraceRaysKHR>(vkGetDeviceProcAddr(device, "vkCmdTraceRaysKHR"));
+    vkCreateRayTracingPipelinesKHR = reinterpret_cast<PFN_vkCreateRayTracingPipelinesKHR>(vkGetDeviceProcAddr(device, "vkCreateRayTracingPipelinesKHR"));
+    vkGetRayTracingShaderGroupHandlesKHR = reinterpret_cast<PFN_vkGetRayTracingShaderGroupHandlesKHR>(vkGetDeviceProcAddr(device, "vkGetRayTracingShaderGroupHandlesKHR"));
+    vkCreateAccelerationStructureKHR = reinterpret_cast<PFN_vkCreateAccelerationStructureKHR>(vkGetDeviceProcAddr(device, "vkCreateAccelerationStructureKHR"));
+    vkGetAccelerationStructureBuildSizesKHR = reinterpret_cast<PFN_vkGetAccelerationStructureBuildSizesKHR>(vkGetDeviceProcAddr(device, "vkGetAccelerationStructureBuildSizesKHR"));
+    vkCmdBuildAccelerationStructuresKHR = reinterpret_cast<PFN_vkCmdBuildAccelerationStructuresKHR>(vkGetDeviceProcAddr(device, "vkCmdBuildAccelerationStructuresKHR"));
+    vkGetAccelerationStructureDeviceAddressKHR = reinterpret_cast<PFN_vkGetAccelerationStructureDeviceAddressKHR>(vkGetDeviceProcAddr(device, "vkGetAccelerationStructureDeviceAddressKHR"));
+    vkGetBufferDeviceAddressKHR = reinterpret_cast<PFN_vkGetBufferDeviceAddressKHR>(vkGetDeviceProcAddr(device, "vkGetBufferDeviceAddressKHR"));
+    vkDestroyAccelerationStructureKHR = reinterpret_cast<PFN_vkDestroyAccelerationStructureKHR>(vkGetDeviceProcAddr(device, "vkDestroyAccelerationStructureKHR"));
+    vkCreateDeferredOperationKHR = reinterpret_cast<PFN_vkCreateDeferredOperationKHR>(vkGetDeviceProcAddr(device, "vkCreateDeferredOperationKHR"));
+    vkGetDeferredOperationResultKHR = reinterpret_cast<PFN_vkGetDeferredOperationResultKHR>(vkGetDeviceProcAddr(device, "vkGetDeferredOperationResultKHR"));
+    vkDestroyDeferredOperationKHR = reinterpret_cast<PFN_vkDestroyDeferredOperationKHR>(vkGetDeviceProcAddr(device, "vkDestroyDeferredOperationKHR"));
+
+    resourceManager.vkDestroyAccelerationStructureKHR = vkDestroyAccelerationStructureKHR;
+
+    LOG_DEBUG_CAT("RTX", "RTX procs loaded — STONEKEY SECURED");
+}
+
+void Context::createSwapchain() noexcept {
+    auto& swapchainManager = VulkanSwapchainManager::get();
+
+    if (!swapchainManager.getImageCount()) {
+        swapchainManager.init(instance, physicalDevice, device, surface, width, height);
+    } else {
+        swapchainManager.recreate(width, height);
+    }
+
+    swapchainManager.printStats();
+
+    if (destructionCounterPtr) {
+        ++(*destructionCounterPtr);
+    }
+}
+
+void Context::destroySwapchain() {
+    // Singleton swapchain manager handles cleanup via resource manager integration
+    // No explicit destroy needed — RAII supremacy
+    LOG_DEBUG_CAT("Swapchain", "Swapchain destruction delegated to resource manager");
+}
+
+Context::~Context() {
+    destroySwapchain();
+    cleanupAll(*this);
+}
+
+void createSwapchain(Context& ctx, uint32_t width, uint32_t height) {
+    using namespace Logging::Color;
+    LOG_INFO_CAT("Swapchain", "{}SINGLETON SWAPCHAIN RECREATION — PINK PHOTON INJECTION 🩷🚀🔥🤖💀❤️⚡♾️{}", 
+                 RASPBERRY_PINK, RESET);
+
+    auto& mgr = VulkanSwapchainManager::get();
+    
+    // First time? Init. Later? Recreate.
+    if (!mgr.isValid()) {
+        mgr.init(ctx.instance, ctx.physicalDevice, ctx.device, ctx.surface, width, height);
+        LOG_SUCCESS_CAT("Swapchain", "{}SINGLETON SWAPCHAIN INITIALIZED — TOASTER-PROOF{}", RASPBERRY_PINK, RESET);
+    } else {
+        mgr.recreate(width, height);
+        LOG_SUCCESS_CAT("Swapchain", "{}SINGLETON SWAPCHAIN RECREATED @ {}x{} — {}-BIT ENCRYPTED{}", 
+                        RASPBERRY_PINK, width, height, sizeof(uint64_t)*8, RESET);
+    }
 }
 
 // ===================================================================

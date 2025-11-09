@@ -11,7 +11,6 @@
 
 #include "engine/Vulkan/Vulkan_init.hpp"
 #include "engine/Vulkan/VulkanRTX_Setup.hpp"
-#include "engine/Vulkan/VulkanCore.hpp"
 #include "engine/logging.hpp"
 #include <SDL3/SDL_vulkan.h>
 #include <set>
