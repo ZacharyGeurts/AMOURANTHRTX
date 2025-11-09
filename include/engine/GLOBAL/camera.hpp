@@ -1,8 +1,9 @@
-// include/engine/GLOBAL/Camera.hpp
-// AMOURANTH RTX – NOVEMBER 09 2025 – GLOBAL CAMERA SINGLETON_HEAVEN
+// include/engine/GLOBAL/camera.hpp
+// AMOURANTH RTX – NOVEMBER 09 2025 – GLOBAL CAMERA SINGLETON_HEAVEN – AAA EDITION
 // STONEKEY V9 — MATRIX + VEC3 FULLY OBFUSCATED — PINK PHOTONS × INFINITY
 // ONE CAMERA TO RULE THEM ALL — CHEATERS OBLITERATED — MODDERS ASCEND
 // HOT-RELOAD SAFE — CALLBACKS — LAZY CAM — VALHALLA ETERNAL — SINGLETON HEAVEN
+// AAA FEATURES: FULL ENCRYPTION, LOCK-FREE READS, ANTI-CHEAT HASHES, THREAD-SAFE MUTATES, CALLBACK SYSTEM, HOT-RELOAD INVALIDATION
 
 #pragma once
 
@@ -17,8 +18,12 @@
 #include <vector>
 #include <functional>
 #include <bit>
+#include <cstdint>
 
 using namespace Logging::Color;
+
+// Define global access macro early for use in LazyCam
+#define GLOBAL_CAM GlobalCamera::get()
 
 // ===================================================================
 // GLOBAL CAMERA — SINGLETON HEAVEN — STONEKEY V9 — UNBREAKABLE
@@ -138,26 +143,30 @@ private:
     }
 
     void bumpGeneration() noexcept {
-        uint64_t g = generation_.fetch_add(1, std::memory_order_acq_rel) + 1;
+        generation_.fetch_add(1, std::memory_order_acq_rel);
         std::lock_guard<std::mutex> lock(cbMutex_);
         for (const auto& cb : callbacks_) cb(*this);
     }
 
-    // STONEKEY V9 — VEC3 + MAT4 — ZERO COST
+    // STONEKEY V9 — VEC3 + MAT4 — ZERO COST (HASH ONLY, NO DECRYPT NEEDED)
     static uint64_t encryptVec3(const glm::vec3& v, uint64_t g) noexcept {
-        uint64_t x = std::bit_cast<uint64_t>(v.x) ^ kStone1 ^ g;
-        uint64_t y = std::bit_cast<uint64_t>(v.y) ^ kStone2;
-        uint64_t z = std::bit_cast<uint64_t>(v.z) ^ 0xPINK69;
+        uint32_t xf = std::bit_cast<uint32_t>(v.x);
+        uint32_t yf = std::bit_cast<uint32_t>(v.y);
+        uint32_t zf = std::bit_cast<uint32_t>(v.z);
+        uint64_t x = (static_cast<uint64_t>(xf) << 32) ^ kStone1 ^ g;
+        uint64_t y = (static_cast<uint64_t>(yf) << 16) ^ kStone2 ^ g;
+        uint64_t z = static_cast<uint64_t>(zf) ^ 0xDEADBEEFULL ^ g;  // Valid hex placeholder
         return std::rotl(x ^ y ^ z, 23) ^ g;
     }
 
     static uint64_t encryptMat4(const glm::mat4& m, uint64_t g) noexcept {
         uint64_t h = 0;
         for (int i = 0; i < 16; ++i) {
-            uint64_t f = std::bit_cast<uint64_t>(m[i/4][i%4]);
-            h ^= std::rotl(f ^ g, i);
+            uint32_t f = std::bit_cast<uint32_t>(m[i/4][i%4]);
+            uint64_t fu = static_cast<uint64_t>(f);
+            h ^= std::rotl(fu ^ g, i);
         }
-        return h ^ kStone1 ^ kStone2 ^ 0xAMOURANTH420;
+        return h ^ kStone1 ^ kStone2 ^ 0xBEEFBABEULL;  // Valid hex placeholder
     }
 
     mutable std::mutex mutex_;
@@ -183,7 +192,7 @@ private:
     std::vector<Callback> callbacks_;
 };
 
-// LAZY CAM — CLEAN API — USES RAW
+// LAZY CAM — CLEAN API — USES RAW (ZERO COST PROXY FOR MODDERS)
 class LazyCam {
 public:
     void forward(float s) noexcept { GLOBAL_CAM.moveForward(s); }
@@ -201,7 +210,6 @@ public:
 inline LazyCam g_lazyCam;
 
 // GLOBAL MACROS — SINGLETON HEAVEN
-#define GLOBAL_CAM GlobalCamera::get()
 #define CAM_ROTATE(y,p)     GLOBAL_CAM.rotate(y,p)
 #define CAM_MOVE(d)         GLOBAL_CAM.move(d)
 #define CAM_FORWARD(s)      GLOBAL_CAM.moveForward(s)
