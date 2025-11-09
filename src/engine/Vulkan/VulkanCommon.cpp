@@ -36,11 +36,7 @@ void logAndTrackDestruction(std::string_view name, auto handle, int line) {
 // ===================================================================
 // VulkanRTXException IMPLEMENTATION
 // ===================================================================
-VulkanRTXException::VulkanRTXException(const std::string& msg)
-    : std::runtime_error(msg) {}
 
-VulkanRTXException::VulkanRTXException(const std::string& msg, const char* file, int line)
-    : std::runtime_error(std::format("{}:{} — {}", file, line, msg)) {}
 
 // ===================================================================
 // Context IMPLEMENTATION — FULLY GLOBAL + STONEKEYED
