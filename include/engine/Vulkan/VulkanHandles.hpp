@@ -11,7 +11,6 @@
 #include "../GLOBAL/StoneKey.hpp"
 #include "../GLOBAL/Dispose.hpp"
 #include "../GLOBAL/logging.hpp"
-#include "../GLOBAL/SwapchainManager.hpp"
 #include "../GLOBAL/BufferManager.hpp"
 
 #include <vulkan/vulkan.h>
@@ -27,6 +26,7 @@
 #include <compare>
 #include <filesystem>
 #include <unordered_map>
+#include <unordered_set>
 #include <memory>
 #include <array>
 #include <sstream>
@@ -36,6 +36,19 @@
 #include <typeinfo>
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
+
+// Vulkan error checking macros (moved to top to ensure availability before includes that use them)
+#define VK_CHECK(call, msg) do { \
+    VkResult ___res = (call); \
+    if (___res != VK_SUCCESS) { \
+        throw VulkanRTXException(std::format("{}: Vulkan error (code {})", msg, static_cast<int>(___res))); \
+    } \
+} while(0)
+
+#define VK_CHECK_NOMSG(call) VK_CHECK(call, "Vulkan call failed")
+
+// Include SwapchainManager.hpp AFTER macros to resolve usage-before-definition
+#include "../GLOBAL/SwapchainManager.hpp"
 
 namespace Vulkan {
     struct Context;
@@ -56,6 +69,21 @@ inline Context* ctx() noexcept { return g_vulkanContext.get(); }
 
 extern VulkanRTX g_vulkanRTX;
 inline VulkanRTX* rtx() noexcept { return &g_vulkanRTX; }
+
+// DestroyTracker (missing declaration added for handle deletion tracking)
+class DestroyTracker {
+private:
+    inline static std::unordered_set<const void*> destroyedObjects;
+
+public:
+    static bool isDestroyed(const void* h) noexcept {
+        return destroyedObjects.count(h) > 0;
+    }
+
+    static void markDestroyed(const void* h) noexcept {
+        destroyedObjects.insert(h);
+    }
+};
 
 // ===================================================================
 // VulkanHandle — STONEKEY + RAII + DESTROY TRACKER

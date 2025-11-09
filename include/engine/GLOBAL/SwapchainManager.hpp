@@ -276,16 +276,6 @@ private:
         std::terminate();
     }
 
-#define VK_CHECK(call, msg) do { \
-    VkResult r = (call); \
-    if (r != VK_SUCCESS) { \
-        GlobalSwapchainManager::vkError(r, msg, __FILE__, __LINE__); \
-    } \
-} while (0)
-
-#define VK_CHECK_NOMSG(call) VK_CHECK(call, "Vulkan call failed")
-};
-
 // GLOBAL ACCESS MACRO
 #define GLOBAL_SWAPCHAIN GlobalSwapchainManager::get()
 
