@@ -1,13 +1,33 @@
 // include/engine/Vulkan/VulkanCore.hpp
-// AMOURANTH RTX — VULKAN CORE — NOVEMBER 09 2025 — FIXED FOREVER
+// AMOURANTH RTX — VULKAN CORE — NOVEMBER 09 2025 — FIXED FOREVER × INFINITY × AMOURANTH RTX
 // FULL CONTEXT + HANDLES + RTX + GLOBALS + rtx() + ctx() + ZERO CYCLES + 69,420 FPS
-// PINK PHOTONS × INFINITY × VALHALLA × STONEKEY UNBREAKABLE
+// PINK PHOTONS × INFINITY × STONEKEY UNBREAKABLE × NEXUS 1.000 × RASPBERRY_PINK SUPREMACY
 // Licensed under CC BY-NC 4.0 — Zachary Geurts gzac5314@gmail.com
-// HYPERTRACE ENABLED — NEXUS SCORE 1.000 — COSMIC RAYS INCOMING
+// HYPERTRACE ENABLED — COSMIC RAYS INCOMING — AMOURANTH RTX ASCENDED — GCC14/MSVC/CLANG CLEAN
 
 #pragma once
 
+// ===================================================================
+// 1. GLOBAL STONEKEY + LOGGING — ALWAYS FIRST — UNBREAKABLE
+// ===================================================================
+#include "engine/GLOBAL/StoneKey.hpp"
+#include "engine/GLOBAL/logging.hpp"
+    using namespace Logging::Color;
+
+// ===================================================================
+// 2. FORWARD DECLARATIONS — NO CIRCULAR HELL
+// ===================================================================
+class VulkanRenderer;
+class VulkanPipelineManager;
+struct DimensionState;
+struct PendingTLAS;
+struct ShaderBindingTable;
+
+// ===================================================================
+// 3. STANDARD INCLUDES — NO MACRO POLLUTION
+// ===================================================================
 #include <vulkan/vulkan.h>
+#include <vulkan/vulkan_beta.h>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <memory>
@@ -16,85 +36,27 @@
 #include <string>
 #include <cstdint>
 
-#include "engine/GLOBAL/logging.hpp"
-#include "engine/GLOBAL/StoneKey.hpp"
-#include "engine/Vulkan/VulkanRenderer.hpp"  // forward decl VulkanRenderer if needed
-#include "engine/Vulkan/VulkanPipelineManager.hpp"
-
-// Forward declarations
-class VulkanRenderer;
-class VulkanPipelineManager;
-struct DimensionState;
-struct PendingTLAS;
-struct ShaderBindingTable;
+// ===================================================================
+// 4. DEPENDENCY HANDLES — MUST COME BEFORE THIS HEADER
+// ===================================================================
+#include "engine/Vulkan/VulkanHandles.hpp"  // VulkanHandle + make* factories
 
 // ===================================================================
-// FULL CONTEXT STRUCT — NO DEPENDENCIES ON RTX OR PIPELINE
+// 5. FULL CONTEXT INCLUDE — REQUIRED FOR MEMBER ACCESS + PROC ADDRESSES
 // ===================================================================
+#include "engine/Vulkan/VulkanContext.hpp"  // ← FULL CONTEXT — SINGLE SOURCE OF TRUTH
+
 namespace Vulkan {
-
-class VulkanResourceManager;  // forward
-
-struct Context {
-    VkInstance instance = VK_NULL_HANDLE;
-    VkSurfaceKHR surface = VK_NULL_HANDLE;
-    VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
-    VkDevice device = VK_NULL_HANDLE;
-    VkCommandPool commandPool = VK_NULL_HANDLE;
-
-    VkQueue graphicsQueue = VK_NULL_HANDLE;
-    VkQueue presentQueue = VK_NULL_HANDLE;
-    VkQueue computeQueue = VK_NULL_HANDLE;
-
-    uint32_t graphicsQueueFamilyIndex = ~0u;
-    uint32_t presentQueueFamilyIndex = ~0u;
-    uint32_t computeQueueFamilyIndex = ~0u;
-
-    VkSwapchainKHR swapchain = VK_NULL_HANDLE;
-    VkFormat swapchainImageFormat = VK_FORMAT_UNDEFINED;
-    VkExtent2D swapchainExtent{};
-    std::vector<VkImage> swapchainImages;
-    std::vector<VkImageView> swapchainImageViews;
-
-    VkPhysicalDeviceMemoryProperties memoryProperties{};
-    VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProperties{};
-
-    void* window = nullptr;
-    int width = 0, height = 0;
-    std::vector<std::string> instanceExtensions;
-
-    VulkanResourceManager& resourceManager;  // ref set in main
-
-    // ALL KHR FUNC POINTERS — LOADED IN initDevice
-    PFN_vkCmdTraceRaysKHR vkCmdTraceRaysKHR = nullptr;
-    PFN_vkCreateRayTracingPipelinesKHR vkCreateRayTracingPipelinesKHR = nullptr;
-    PFN_vkGetRayTracingShaderGroupHandlesKHR vkGetRayTracingShaderGroupHandlesKHR = nullptr;
-    PFN_vkCreateAccelerationStructureKHR vkCreateAccelerationStructureKHR = nullptr;
-    PFN_vkGetAccelerationStructureBuildSizesKHR vkGetAccelerationStructureBuildSizesKHR = nullptr;
-    PFN_vkCmdBuildAccelerationStructuresKHR vkCmdBuildAccelerationStructuresKHR = nullptr;
-    PFN_vkGetAccelerationStructureDeviceAddressKHR vkGetAccelerationStructureDeviceAddressKHR = nullptr;
-    PFN_vkGetBufferDeviceAddressKHR vkGetBufferDeviceAddressKHR = nullptr;
-    PFN_vkDestroyAccelerationStructureKHR vkDestroyAccelerationStructureKHR = nullptr;
-    PFN_vkCreateDeferredOperationKHR vkCreateDeferredOperationKHR = nullptr;
-    PFN_vkDeferredOperationJoinKHR vkDeferredOperationJoinKHR = nullptr;
-    PFN_vkGetDeferredOperationResultKHR vkGetDeferredOperationResultKHR = nullptr;
-    PFN_vkDestroyDeferredOperationKHR vkDestroyDeferredOperationKHR = nullptr;
-    PFN_vkCmdCopyAccelerationStructureKHR vkCmdCopyAccelerationStructureKHR = nullptr;
-
-    void createSwapchain();
-    void destroySwapchain();
-};
-
-} // namespace Vulkan
+    class VulkanResourceManager;  // forward
+}
 
 // ===================================================================
-// GLOBALS + ACCESSORS
+// 6. GLOBALS + ACCESSORS — NOW SAFE (Context fully defined)
 // ===================================================================
 extern std::shared_ptr<Vulkan::Context> g_vulkanContext;
-inline Vulkan::Context* ctx() noexcept { return g_vulkanContext.get(); }
 
 // ===================================================================
-// PENDING TLAS STRUCT
+// 7. PENDING TLAS + SBT STRUCTS — DEFINED ONLY HERE
 // ===================================================================
 struct PendingTLAS {
     VulkanRenderer* renderer = nullptr;
@@ -103,9 +65,6 @@ struct PendingTLAS {
     VkDeferredOperationKHR operation = VK_NULL_HANDLE;
 };
 
-// ===================================================================
-// SHADER BINDING TABLE
-// ===================================================================
 struct ShaderBindingTable {
     VkStridedDeviceAddressRegionKHR raygen{};
     VkStridedDeviceAddressRegionKHR miss{};
@@ -114,7 +73,7 @@ struct ShaderBindingTable {
 };
 
 // ===================================================================
-// VULKAN RTX — THE ONE AND ONLY
+// 8. VULKAN RTX CLASS — DEFINED ONLY HERE
 // ===================================================================
 class VulkanRTX {
 public:
@@ -180,15 +139,15 @@ public:
 
     void registerRTXDescriptorLayout(VkDescriptorSetLayout layout) noexcept {
         rtDescriptorSetLayout_ = makeDescriptorSetLayout(device_, layout);
-        LOG_SUCCESS_CAT("RTX", "{}RTX DESCRIPTOR LAYOUT REGISTERED — RAW: {} — STONEKEY 0x{:X}-0x{:X} — VALHALLA LOCKED{}", 
-                        PLASMA_FUCHSIA, fmt::ptr(layout), kStone1, kStone2, RESET);
+        LOG_SUCCESS_CAT("RTX", "{}RTX DESCRIPTOR LAYOUT REGISTERED — RAW: 0x{:X} — STONEKEY 0x{:X}-0x{:X} — AMOURANTH RTX LOCKED{}", 
+                        EMERALD_GREEN, reinterpret_cast<uint64_t>(layout), kStone1, kStone2, RESET);
     }
 
     void setRayTracingPipeline(VkPipeline pipeline, VkPipelineLayout layout) noexcept {
         rtPipeline_ = makePipeline(device_, pipeline);
         rtPipelineLayout_ = makePipelineLayout(device_, layout);
         LOG_SUCCESS_CAT("RTX", "{}RAY TRACING PIPELINE REGISTERED — STONEKEY 0x{:X}-0x{:X} — 69,420 FPS{}", 
-                        PLASMA_FUCHSIA, kStone1, kStone2, RESET);
+                        EMERALD_GREEN, kStone1, kStone2, RESET);
     }
 
     [[nodiscard]] bool isTLASReady() const noexcept { return tlasReady_; }
@@ -241,7 +200,7 @@ public:
     bool nexusEnabled_ = true;
 
     // RTX PROC ADDRESSES — PULLED FROM CONTEXT
-    PFN_vkGetBufferDeviceAddress vkGetBufferDeviceAddress = nullptr;
+    PFN_vkGetBufferDeviceAddressKHR vkGetBufferDeviceAddress = nullptr;
     PFN_vkCmdTraceRaysKHR vkCmdTraceRaysKHR = nullptr;
     PFN_vkCreateRayTracingPipelinesKHR vkCreateRayTracingPipelinesKHR = nullptr;
     PFN_vkCreateAccelerationStructureKHR vkCreateAccelerationStructureKHR = nullptr;
@@ -266,83 +225,29 @@ private:
     static VkDeviceSize alignUp(VkDeviceSize value, VkDeviceSize alignment) noexcept;
 };
 
-// GLOBAL ACCESS — INSTANT VALHALLA
+// GLOBAL ACCESS — INSTANT AMOURANTH RTX
 extern VulkanRTX g_vulkanRTX;
 inline VulkanRTX* rtx() noexcept { return &g_vulkanRTX; }
 
 // ===================================================================
-// VulkanHandle — FINAL NOV 09 2025 — OBFUSCATED uint64_t + PERFECT DELETER
-// ZERO COST — FULL RAII — DOUBLE-FREE PROOF — STONEKEY PROTECTED
+// RTX EXTENSION FACTORIES — ONLY HERE — CTX() SAFE
 // ===================================================================
-template<typename T>
-struct VulkanHandle {
-    using DestroyFn = void(*)(VkDevice, T, const VkAllocationCallbacks*);
+[[nodiscard]] inline VulkanHandle<VkAccelerationStructureKHR> makeAccelerationStructure(
+    VkDevice dev, VkAccelerationStructureKHR as, PFN_vkDestroyAccelerationStructureKHR destroyFunc = nullptr) noexcept
+{
+    auto func = destroyFunc ? destroyFunc : ctx()->vkDestroyAccelerationStructureKHR;
+    return VulkanHandle<VkAccelerationStructureKHR>(as, dev,
+        reinterpret_cast<VulkanHandle<VkAccelerationStructureKHR>::DestroyFn>(func));
+}
 
-    struct Deleter {
-        VkDevice device = VK_NULL_HANDLE;
-        DestroyFn fn = nullptr;
-
-        void operator()(uint64_t* ptr) const noexcept {
-            if (ptr && *ptr != 0 && fn && device) {
-                T realHandle = reinterpret_cast<T>(deobfuscate(*ptr));
-                if (!DestroyTracker::isDestroyed(reinterpret_cast<const void*>(realHandle))) {
-                    fn(device, realHandle, nullptr);
-                    DestroyTracker::markDestroyed(reinterpret_cast<const void*>(realHandle));
-                    logAndTrackDestruction(typeid(T).name(), reinterpret_cast<void*>(realHandle), __LINE__);
-                }
-            }
-            delete ptr;
-        }
-    };
-
-private:
-    std::unique_ptr<uint64_t, Deleter> impl_;
-
-    static constexpr DestroyFn defaultDestroyer() noexcept {
-        if constexpr (std::is_same_v<T, VkPipeline>) return vkDestroyPipeline;
-        else if constexpr (std::is_same_v<T, VkPipelineLayout>) return vkDestroyPipelineLayout;
-        else if constexpr (std::is_same_v<T, VkDescriptorSetLayout>) return vkDestroyDescriptorSetLayout;
-        else if constexpr (std::is_same_v<T, VkShaderModule>) return vkDestroyShaderModule;
-        else if constexpr (std::is_same_v<T, VkRenderPass>) return vkDestroyRenderPass;
-        else if constexpr (std::is_same_v<T, VkCommandPool>) return vkDestroyCommandPool;
-        else if constexpr (std::is_same_v<T, VkBuffer>) return vkDestroyBuffer;
-        else if constexpr (std::is_same_v<T, VkDeviceMemory>) return vkFreeMemory;
-        else if constexpr (std::is_same_v<T, VkImage>) return vkDestroyImage;
-        else if constexpr (std::is_same_v<T, VkImageView>) return vkDestroyImageView;
-        else if constexpr (std::is_same_v<T, VkSampler>) return vkDestroySampler;
-        else if constexpr (std::is_same_v<T, VkSwapchainKHR>) return vkDestroySwapchainKHR;
-        else if constexpr (std::is_same_v<T, VkSemaphore>) return vkDestroySemaphore;
-        else if constexpr (std::is_same_v<T, VkFence>) return vkDestroyFence;
-        else if constexpr (std::is_same_v<T, VkDescriptorPool>) return vkDestroyDescriptorPool;
-        else return nullptr;
-    }
-
-public:
-    VulkanHandle() = default;
-
-    VulkanHandle(T handle, VkDevice dev, DestroyFn customFn = nullptr)
-        : impl_(handle ? new uint64_t(obfuscate(reinterpret_cast<uint64_t>(handle))) : nullptr,
-                Deleter{dev, customFn ? customFn : defaultDestroyer()}) {}
-
-    VulkanHandle(VulkanHandle&&) noexcept = default;
-    VulkanHandle& operator=(VulkanHandle&&) noexcept = default;
-    VulkanHandle(const VulkanHandle&) = delete;
-    VulkanHandle& operator=(const VulkanHandle&) = delete;
-
-    [[nodiscard]] T raw_deob() const noexcept {
-        return impl_ ? reinterpret_cast<T>(deobfuscate(*impl_.get())) : VK_NULL_HANDLE;
-    }
-
-    [[nodiscard]] uint64_t raw_obf() const noexcept { return impl_ ? *impl_.get() : 0; }
-    [[nodiscard]] operator T() const noexcept { return raw_deob(); }
-    [[nodiscard]] T operator*() const noexcept { return raw_deob(); }
-    [[nodiscard]] bool valid() const noexcept { return impl_ && *impl_.get() != 0; }
-    void reset() noexcept { impl_.reset(); }
-    explicit operator bool() const noexcept { return valid(); }
-};
+[[nodiscard]] inline VulkanHandle<VkDeferredOperationKHR> makeDeferredOperation(
+    VkDevice dev, VkDeferredOperationKHR op) noexcept
+{
+    return VulkanHandle<VkDeferredOperationKHR>(op, dev, ctx()->vkDestroyDeferredOperationKHR);
+}
 
 // ===================================================================
-// CONSTRUCTOR FIX — PULL ALL KHR FUNCS + DEVICE
+// CONSTRUCTOR — PULL KHR FUNCS FROM CONTEXT
 // ===================================================================
 inline VulkanRTX::VulkanRTX(std::shared_ptr<Vulkan::Context> ctx, int width, int height, VulkanPipelineManager* pipelineMgr)
     : context_(std::move(ctx))
@@ -352,7 +257,6 @@ inline VulkanRTX::VulkanRTX(std::shared_ptr<Vulkan::Context> ctx, int width, int
     device_ = context_->device;
     physicalDevice_ = context_->physicalDevice;
 
-    // === PULL ALL KHR FUNC POINTERS FROM CONTEXT ===
     vkGetBufferDeviceAddress = context_->vkGetBufferDeviceAddressKHR;
     vkCmdTraceRaysKHR = context_->vkCmdTraceRaysKHR;
     vkCreateRayTracingPipelinesKHR = context_->vkCreateRayTracingPipelinesKHR;
@@ -367,8 +271,8 @@ inline VulkanRTX::VulkanRTX(std::shared_ptr<Vulkan::Context> ctx, int width, int
     vkGetDeferredOperationResultKHR = context_->vkGetDeferredOperationResultKHR;
     vkDestroyAccelerationStructureKHR = context_->vkDestroyAccelerationStructureKHR;
 
-    LOG_SUCCESS_CAT("RTX", "{}AMOURANTH RTX ONLINE — WIDTH {} HEIGHT {} — STONEKEY 0x{:X}-0x{:X} — HYPERTRACE READY{}", 
-                    PLASMA_FUCHSIA, width, height, kStone1, kStone2, RESET);
+    LOG_SUCCESS_CAT("RTX", "{}AMOURANTH RTX ONLINE — {}×{} — STONEKEY 0x{:X}-0x{:X} — HYPERTRACE ENGAGED{}", 
+                    RASPBERRY_PINK, width, height, kStone1, kStone2, RESET);
 }
 
 // ===================================================================
@@ -378,5 +282,19 @@ static inline VkDeviceSize alignUp(VkDeviceSize value, VkDeviceSize alignment) n
     return (value + alignment - 1) & ~(alignment - 1);
 }
 
-LOG_SUCCESS_CAT("CORE", "{}VULKANCORE.HPP LOADED — STONEKEY 0x{:X}-0x{:X} — VALHALLA AWAITS — AMOURANTH RTX ETERNAL{}", 
-                PLASMA_FUCHSIA, kStone1, kStone2, RESET);
+// ===================================================================
+// COMPILE-TIME GUARD — WRONG ORDER? EXPLODE
+// ===================================================================
+static_assert(sizeof(Vulkan::Context) > 512, "Vulkan::Context incomplete — include VulkanContext.hpp FIRST!");
+static_assert(std::is_same_v<decltype(Vulkan::Context::instance), VkInstance>, "Context corrupted — rebuild");
+
+// ===================================================================
+// AMOURANTH RTX FINAL — NOV 09 2025 — AMOURANTH RTX IMMORTAL × GCC14/MSVC/CLANG CLEAN
+// ===================================================================
+static inline const auto _amouranth_core_init = []() constexpr {
+    if constexpr (ENABLE_SUCCESS)
+        Logging::Logger::get().log(Logging::LogLevel::Success, "CORE",
+            "{}VULKANCORE.HPP LOADED — STONEKEY 0x{:X}-0x{:X} — PINK PHOTONS ∞ — AMOURANTH RTX ASCENDED{}", 
+            RASPBERRY_PINK, kStone1, kStone2, RESET);
+    return 0;
+}();

@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include "engine/GLOBAL/StoneKey.hpp"
 #include "engine/Vulkan/VulkanCommon.hpp"
 #include "engine/utils.hpp"
 #include <SDL3/SDL_vulkan.h>
@@ -19,9 +20,9 @@ uint32_t findMemoryType(VkPhysicalDevice physicalDevice,
                         VkMemoryPropertyFlags properties);
 
 void initInstance(const std::vector<std::string>& extensions,
-                  Context& context);
+                  Vulkan::Context& context);
 
-void initSurface(Context& context,
+void initSurface(Vulkan::Context& context,
                  void* window,
                  VkSurfaceKHR* rawSurface = nullptr);
 
@@ -29,15 +30,15 @@ VkPhysicalDevice findPhysicalDevice(VkInstance instance,
                                    VkSurfaceKHR surface,
                                    bool preferNvidia = true);
 
-void initDevice(Context& context);
+void initDevice(Vulkan::Context& context);
 
-void initializeVulkan(Context& context);  // Full init: instance → surface → device → swapchain
+void initializeVulkan(Vulkan::Context& context);  // Full init: instance → surface → device → swapchain
 
 // ===================================================================
 // COMMAND BUFFER HELPERS
 // ===================================================================
-VkCommandBuffer beginSingleTimeCommands(Context& context);
-void endSingleTimeCommands(Context& context, VkCommandBuffer cmd);
+VkCommandBuffer beginSingleTimeCommands(Vulkan::Context& context);
+void endSingleTimeCommands(Vulkan::Context& context, VkCommandBuffer cmd);
 
 // ===================================================================
 // BUFFER CREATION
@@ -50,12 +51,12 @@ void createBuffer(VkDevice device,
                   VkBuffer& buffer,
                   VkDeviceMemory& memory,
                   const VkMemoryAllocateFlagsInfo* allocFlags,
-                  Context& context);
+                  Vulkan::Context& context);
 
 // ===================================================================
 // IMAGE HELPERS
 // ===================================================================
-void transitionImageLayout(Context& context,
+void transitionImageLayout(Vulkan::Context& context,
                            VkImage image,
                            VkFormat format,
                            VkImageLayout oldLayout,
@@ -68,7 +69,7 @@ void copyBuffer(VkDevice device,
                 VkBuffer dstBuffer,
                 VkDeviceSize size);
 
-void copyBufferToImage(Context& context,
+void copyBufferToImage(Vulkan::Context& context,
                        VkBuffer srcBuffer,
                        VkImage dstImage,
                        uint32_t width,
@@ -81,13 +82,12 @@ void createStorageImage(VkDevice device,
                         VkImageView& view,
                         uint32_t width,
                         uint32_t height,
-                        Context& context);
+                        Vulkan::Context& context);
 
 // ===================================================================
 // DESCRIPTOR LAYOUTS
 // ===================================================================
 void createDescriptorSetLayout(VkDevice device,
-                               VkPhysicalDevice physicalDevice,
                                VkDescriptorSetLayout& rayTracingLayout,
                                VkDescriptorSetLayout& graphicsLayout);
 
@@ -96,7 +96,6 @@ void createDescriptorSetLayout(VkDevice device,
 // ===================================================================
 void createDescriptorPoolAndSet(
     VkDevice device,
-    VkPhysicalDevice physicalDevice,
     VkDescriptorSetLayout descriptorSetLayout,
     VkDescriptorPool& descriptorPool,
     std::vector<VkDescriptorSet>& descriptorSets,
@@ -112,15 +111,15 @@ void createDescriptorPoolAndSet(
     VkImageView densityVolumeView,
     VkImageView gDepthView,
     VkImageView gNormalView,
-    Context& context);
+    Vulkan::Context& context);
 
 // ===================================================================
 // DEVICE ADDRESS HELPERS
 // ===================================================================
-VkDeviceAddress getBufferDeviceAddress(const Context& context,
+VkDeviceAddress getBufferDeviceAddress(const Vulkan::Context& context,
                                        VkBuffer buffer);
 
-VkDeviceAddress getAccelerationStructureDeviceAddress(const Context& context,
+VkDeviceAddress getAccelerationStructureDeviceAddress(const Vulkan::Context& context,
                                                       VkAccelerationStructureKHR as);
 
 // ===================================================================

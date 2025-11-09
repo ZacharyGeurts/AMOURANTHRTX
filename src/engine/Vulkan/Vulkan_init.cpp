@@ -2,13 +2,7 @@
 // AMOURANTH RTX Engine (C) 2025 by Zachary Geurts gzac5314@gmail.com
 // Licensed under CC BY-NC 4.0
 
-// Protip #1: Always prefer discrete GPUs (NVIDIA) — use vendorID 0x10DE + VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU
-// Protip #2: Enable VK_EXT_descriptor_indexing for runtimeDescriptorArray → dynamic material/dimension arrays
-// Protip #3: Use vkGetBufferDeviceAddressKHR + bufferDeviceAddress for SBT, BLAS/TLAS, and GPU-side meshlets
-// Protip #4: SDL_Vulkan_CreateSurface auto-adds VK_KHR_surface + platform surface (xlib/wayland/win32) — no manual ext
-// Protip #5: Command pool with VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT allows per-frame reset (critical for RTX)
-// FIXED: VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_FEATURES_KHR → VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR
-
+#include "engine/GLOBAL/StoneKey.hpp"
 #include "engine/Vulkan/Vulkan_init.hpp"
 #include "engine/GLOBAL/logging.hpp"
 #include <SDL3/SDL_vulkan.h>
@@ -16,6 +10,9 @@
 #include <algorithm>
 #include <stdexcept>
 #include <memory>
+#include <iostream>
+
+using namespace Logging::Color;
 
 #define VK_CHECK_NOMSG(call) do {                    \
     VkResult __res = (call);                         \
@@ -33,7 +30,7 @@
     }                                                \
 } while (0)
 
-using VulkanRTX::VulkanRTXException;
+using Vulkan::VulkanRTXException;
 
 namespace VulkanInitializer {
 
@@ -57,7 +54,7 @@ uint32_t findMemoryType(VkPhysicalDevice physicalDevice,
 }
 
 // ---------------------------------------------------------------------
-// INSTANCE CREATION — SDL PROVIDES REQUIRED EXTENSIONS
+// INSTANCE CREATION
 // ---------------------------------------------------------------------
 void initInstance(const std::vector<std::string>& extensions, Vulkan::Context& context)
 {
@@ -70,7 +67,6 @@ void initInstance(const std::vector<std::string>& extensions, Vulkan::Context& c
         .apiVersion = VK_API_VERSION_1_3
     };
 
-    // SDL_Vulkan_GetInstanceExtensions() already includes VK_KHR_surface + platform-specific
     std::vector<const char*> ext;
     ext.reserve(extensions.size() + 1);  // +1 for debug
     for (const auto& e : extensions) ext.push_back(e.c_str());
@@ -84,11 +80,15 @@ void initInstance(const std::vector<std::string>& extensions, Vulkan::Context& c
     };
 
     VK_CHECK(vkCreateInstance(&createInfo, nullptr, &context.instance), "vkCreateInstance");
+
+    // Obfuscate instance handle for storage
+    context.instance = reinterpret_cast<VkInstance>(obfuscate(reinterpret_cast<uint64_t>(context.instance)));
+
     LOG_INFO_CAT("Vulkan", "Vulkan instance created with {} extensions", ext.size());
 }
 
 // ---------------------------------------------------------------------
-// SURFACE CREATION — SDL HANDLES VK_KHR_SURFACE + PLATFORM EXT
+// SURFACE CREATION
 // ---------------------------------------------------------------------
 void initSurface(Vulkan::Context& context, void* window, VkSurfaceKHR* rawSurface)
 {
@@ -104,12 +104,16 @@ void initSurface(Vulkan::Context& context, void* window, VkSurfaceKHR* rawSurfac
         throw std::runtime_error("Window is null");
     }
 
-    // SDL_Vulkan_CreateSurface adds VK_KHR_surface + VK_KHR_xlib_surface (Linux) automatically
-    if (!SDL_Vulkan_CreateSurface(sdlWindow, context.instance, nullptr, &context.surface)) {
+    VkInstance deobfInstance = reinterpret_cast<VkInstance>(deobfuscate(reinterpret_cast<uint64_t>(context.instance)));
+    if (!SDL_Vulkan_CreateSurface(sdlWindow, deobfInstance, nullptr, &context.surface)) {
         LOG_ERROR_CAT("Vulkan", "SDL_Vulkan_CreateSurface failed: {}", SDL_GetError());
         throw std::runtime_error("Failed to create Vulkan surface");
     }
-    LOG_INFO_CAT("Vulkan", "Vulkan surface created via SDL (platform: Linux)");
+
+    // Obfuscate surface handle for storage
+    context.surface = reinterpret_cast<VkSurfaceKHR>(obfuscate(reinterpret_cast<uint64_t>(context.surface)));
+
+    LOG_INFO_CAT("Vulkan", "Vulkan surface created via SDL");
 }
 
 // ---------------------------------------------------------------------
@@ -150,7 +154,8 @@ VkPhysicalDevice findPhysicalDevice(VkInstance instance, VkSurfaceKHR surface, b
         for (const auto& e : available) missing.erase(e.extensionName);
         if (!missing.empty()) continue;
 
-        if (preferNvidia && props.vendorID == 0x10DE && props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) {
+        constexpr uint64_t nvidiaVendorObf = obfuscate(0x10DEULL);
+        if (preferNvidia && props.vendorID == static_cast<uint32_t>(deobfuscate(nvidiaVendorObf)) && props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) {
             LOG_INFO_CAT("Vulkan", "Selected discrete NVIDIA GPU: {}", props.deviceName);
             return dev;
         }
@@ -169,7 +174,7 @@ VkPhysicalDevice findPhysicalDevice(VkInstance instance, VkSurfaceKHR surface, b
 }
 
 // ---------------------------------------------------------------------
-// DEVICE CREATION + QUEUE SETUP + KHR + RT PROPS
+// DEVICE CREATION + QUEUE SETUP
 // ---------------------------------------------------------------------
 void initDevice(Vulkan::Context& context)
 {
@@ -178,7 +183,14 @@ void initDevice(Vulkan::Context& context)
         throw std::runtime_error("Surface must be created before device");
     }
 
-    context.physicalDevice = findPhysicalDevice(context.instance, context.surface, true);
+    // Deobfuscate for use
+    VkInstance deobfInstance = reinterpret_cast<VkInstance>(deobfuscate(reinterpret_cast<uint64_t>(context.instance)));
+    VkSurfaceKHR deobfSurface = reinterpret_cast<VkSurfaceKHR>(deobfuscate(reinterpret_cast<uint64_t>(context.surface)));
+
+    context.physicalDevice = findPhysicalDevice(deobfInstance, deobfSurface, true);
+
+    // Obfuscate physical device handle for storage
+    context.physicalDevice = reinterpret_cast<VkPhysicalDevice>(obfuscate(reinterpret_cast<uint64_t>(context.physicalDevice)));
 
     // Populate memory properties
     vkGetPhysicalDeviceMemoryProperties(context.physicalDevice, &context.memoryProperties);
@@ -205,7 +217,7 @@ void initDevice(Vulkan::Context& context)
         if (families[i].queueFlags & VK_QUEUE_COMPUTE_BIT) compute = i;
 
         VkBool32 supportsPresent = VK_FALSE;
-        VK_CHECK(vkGetPhysicalDeviceSurfaceSupportKHR(context.physicalDevice, i, context.surface, &supportsPresent),
+        VK_CHECK(vkGetPhysicalDeviceSurfaceSupportKHR(context.physicalDevice, i, deobfSurface, &supportsPresent),
                  "vkGetPhysicalDeviceSurfaceSupportKHR");
         if (supportsPresent && present == -1) present = i;
     }
@@ -283,14 +295,26 @@ void initDevice(Vulkan::Context& context)
 
     VK_CHECK(vkCreateDevice(context.physicalDevice, &deviceInfo, nullptr, &context.device), "vkCreateDevice");
 
-    vkGetDeviceQueue(context.device, context.graphicsQueueFamilyIndex, 0, &context.graphicsQueue);
-    vkGetDeviceQueue(context.device, context.presentQueueFamilyIndex, 0, &context.presentQueue);
-    vkGetDeviceQueue(context.device, context.computeQueueFamilyIndex, 0, &context.computeQueue);
+    // Obfuscate device handle for storage
+    context.device = reinterpret_cast<VkDevice>(obfuscate(reinterpret_cast<uint64_t>(context.device)));
 
-    context.resourceManager.setDevice(context.device, context.physicalDevice, nullptr);
+    // Deobfuscate for queue retrieval
+    VkDevice deobfDevice = reinterpret_cast<VkDevice>(deobfuscate(reinterpret_cast<uint64_t>(context.device)));
+
+    vkGetDeviceQueue(deobfDevice, context.graphicsQueueFamilyIndex, 0, &context.graphicsQueue);
+    // Obfuscate queue handles for storage
+    context.graphicsQueue = reinterpret_cast<VkQueue>(obfuscate(reinterpret_cast<uint64_t>(context.graphicsQueue)));
+
+    vkGetDeviceQueue(deobfDevice, context.presentQueueFamilyIndex, 0, &context.presentQueue);
+    context.presentQueue = reinterpret_cast<VkQueue>(obfuscate(reinterpret_cast<uint64_t>(context.presentQueue)));
+
+    vkGetDeviceQueue(deobfDevice, context.computeQueueFamilyIndex, 0, &context.computeQueue);
+    context.computeQueue = reinterpret_cast<VkQueue>(obfuscate(reinterpret_cast<uint64_t>(context.computeQueue)));
+
+    context.resourceManager.setDevice(deobfDevice, context.physicalDevice, nullptr);
 
 #define LOAD_KHR(name) \
-    context.name = reinterpret_cast<PFN_##name>(vkGetDeviceProcAddr(context.device, #name)); \
+    context.name = reinterpret_cast<PFN_##name>(vkGetDeviceProcAddr(deobfDevice, #name)); \
     if (!context.name) { \
         LOG_ERROR_CAT("Vulkan", "Failed to load " #name); \
         throw std::runtime_error("Missing KHR function: " #name); \
@@ -315,7 +339,7 @@ void initDevice(Vulkan::Context& context)
 }
 
 // ---------------------------------------------------------------------
-// FULL INITIALISATION: instance → surface → device → command pool → swapchain
+// FULL INITIALISATION
 // ---------------------------------------------------------------------
 void initializeVulkan(Vulkan::Context& context)
 {
@@ -324,11 +348,14 @@ void initializeVulkan(Vulkan::Context& context)
     // 1. INSTANCE
     initInstance(context.instanceExtensions, context);
 
-    // 2. SURFACE — SDL handles VK_KHR_surface + VK_KHR_xlib_surface
+    // 2. SURFACE
     initSurface(context, context.window, nullptr);
 
     // 3. DEVICE + QUEUES + KHR
     initDevice(context);
+
+    // Deobfuscate for command pool creation
+    VkDevice deobfDevice = reinterpret_cast<VkDevice>(deobfuscate(reinterpret_cast<uint64_t>(context.device)));
 
     // 4. COMMAND POOL
     VkCommandPoolCreateInfo poolInfo = {
@@ -336,9 +363,13 @@ void initializeVulkan(Vulkan::Context& context)
         .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
         .queueFamilyIndex = context.graphicsQueueFamilyIndex
     };
-    VK_CHECK(vkCreateCommandPool(context.device, &poolInfo, nullptr, &context.commandPool), "vkCreateCommandPool");
-    context.resourceManager.addCommandPool(context.commandPool);
-    LOG_INFO_CAT("CMD", "Command pool created: {}", ptr_to_hex(context.commandPool));
+    VK_CHECK(vkCreateCommandPool(deobfDevice, &poolInfo, nullptr, &context.commandPool), "vkCreateCommandPool");
+
+    // Obfuscate command pool handle for storage
+    context.commandPool = reinterpret_cast<VkCommandPool>(obfuscate(reinterpret_cast<uint64_t>(context.commandPool)));
+
+    context.resourceManager.addCommandPool(deobfuscate(reinterpret_cast<uint64_t>(context.commandPool)));
+    LOG_INFO_CAT("CMD", "Command pool created: {}", ptr_to_hex(deobfuscate(reinterpret_cast<uint64_t>(context.commandPool))));
 
     // 5. SWAPCHAIN
     context.createSwapchain();
@@ -360,14 +391,17 @@ void initializeVulkan(Vulkan::Context& context)
 // ---------------------------------------------------------------------
 VkCommandBuffer beginSingleTimeCommands(Vulkan::Context& context)
 {
+    VkDevice deobfDevice = reinterpret_cast<VkDevice>(deobfuscate(reinterpret_cast<uint64_t>(context.device)));
+    VkCommandPool deobfPool = reinterpret_cast<VkCommandPool>(deobfuscate(reinterpret_cast<uint64_t>(context.commandPool)));
+
     VkCommandBufferAllocateInfo allocInfo = {
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-        .commandPool = context.commandPool,
+        .commandPool = deobfPool,
         .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
         .commandBufferCount = 1
     };
     VkCommandBuffer cmd;
-    VK_CHECK(vkAllocateCommandBuffers(context.device, &allocInfo, &cmd), "vkAllocateCommandBuffers (single-time)");
+    VK_CHECK(vkAllocateCommandBuffers(deobfDevice, &allocInfo, &cmd), "vkAllocateCommandBuffers (single-time)");
 
     VkCommandBufferBeginInfo beginInfo = {
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
@@ -379,6 +413,10 @@ VkCommandBuffer beginSingleTimeCommands(Vulkan::Context& context)
 
 void endSingleTimeCommands(Vulkan::Context& context, VkCommandBuffer cmd)
 {
+    VkDevice deobfDevice = reinterpret_cast<VkDevice>(deobfuscate(reinterpret_cast<uint64_t>(context.device)));
+    VkCommandPool deobfPool = reinterpret_cast<VkCommandPool>(deobfuscate(reinterpret_cast<uint64_t>(context.commandPool)));
+    VkQueue deobfQueue = reinterpret_cast<VkQueue>(deobfuscate(reinterpret_cast<uint64_t>(context.graphicsQueue)));
+
     VK_CHECK(vkEndCommandBuffer(cmd), "vkEndCommandBuffer (single-time)");
 
     VkSubmitInfo submit = {
@@ -386,9 +424,9 @@ void endSingleTimeCommands(Vulkan::Context& context, VkCommandBuffer cmd)
         .commandBufferCount = 1,
         .pCommandBuffers = &cmd
     };
-    VK_CHECK(vkQueueSubmit(context.graphicsQueue, 1, &submit, VK_NULL_HANDLE), "vkQueueSubmit (single-time)");
-    VK_CHECK(vkQueueWaitIdle(context.graphicsQueue), "vkQueueWaitIdle (single-time)");
-    vkFreeCommandBuffers(context.device, context.commandPool, 1, &cmd);
+    VK_CHECK(vkQueueSubmit(deobfQueue, 1, &submit, VK_NULL_HANDLE), "vkQueueSubmit (single-time)");
+    VK_CHECK(vkQueueWaitIdle(deobfQueue), "vkQueueWaitIdle (single-time)");
+    vkFreeCommandBuffers(deobfDevice, deobfPool, 1, &cmd);
 }
 
 // ---------------------------------------------------------------------
@@ -494,20 +532,22 @@ void transitionImageLayout(Vulkan::Context& context,
 // ---------------------------------------------------------------------
 VkDeviceAddress getBufferDeviceAddress(const Vulkan::Context& context, VkBuffer buffer)
 {
+    VkDevice deobfDevice = reinterpret_cast<VkDevice>(deobfuscate(reinterpret_cast<uint64_t>(context.device)));
     VkBufferDeviceAddressInfo info = {
         .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
         .buffer = buffer
     };
-    return context.vkGetBufferDeviceAddressKHR(context.device, &info);
+    return context.vkGetBufferDeviceAddressKHR(deobfDevice, &info);
 }
 
 VkDeviceAddress getAccelerationStructureDeviceAddress(const Vulkan::Context& context, VkAccelerationStructureKHR as)
 {
+    VkDevice deobfDevice = reinterpret_cast<VkDevice>(deobfuscate(reinterpret_cast<uint64_t>(context.device)));
     VkAccelerationStructureDeviceAddressInfoKHR info = {
         .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR,
         .accelerationStructure = as
     };
-    return context.vkGetAccelerationStructureDeviceAddressKHR(context.device, &info);
+    return context.vkGetAccelerationStructureDeviceAddressKHR(deobfDevice, &info);
 }
 
 // ---------------------------------------------------------------------
@@ -617,7 +657,7 @@ void createStorageImage(VkDevice device, VkPhysicalDevice physicalDevice,
 // ---------------------------------------------------------------------
 // CREATE DESCRIPTOR SET LAYOUT
 // ---------------------------------------------------------------------
-void createDescriptorSetLayout(VkDevice device, VkPhysicalDevice,
+void createDescriptorSetLayout(VkDevice device,
                                VkDescriptorSetLayout& rayTracingLayout, VkDescriptorSetLayout& graphicsLayout)
 {
     // Ray-tracing layout
@@ -668,7 +708,6 @@ void createDescriptorSetLayout(VkDevice device, VkPhysicalDevice,
 // ---------------------------------------------------------------------
 void createDescriptorPoolAndSet(
     VkDevice device,
-    VkPhysicalDevice,
     VkDescriptorSetLayout descriptorSetLayout,
     VkDescriptorPool& descriptorPool,
     std::vector<VkDescriptorSet>& descriptorSets,
@@ -704,6 +743,9 @@ void createDescriptorPoolAndSet(
         .pPoolSizes = poolSizes.data()
     };
     VK_CHECK(vkCreateDescriptorPool(device, &poolInfo, nullptr, &descriptorPool), "vkCreateDescriptorPool");
+
+    // Obfuscate pool handle for storage
+    descriptorPool = reinterpret_cast<VkDescriptorPool>(obfuscate(reinterpret_cast<uint64_t>(descriptorPool)));
 
     VkDescriptorSetAllocateInfo allocInfo = {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
@@ -827,10 +869,16 @@ namespace Vulkan {
 
 void Context::createSwapchain() {
     VulkanSwapchainManager& mgr = VulkanSwapchainManager::get();
-    mgr.init(instance, physicalDevice, device, surface, width, height);
+    VkDevice deobfDevice = reinterpret_cast<VkDevice>(deobfuscate(reinterpret_cast<uint64_t>(device)));
+    VkPhysicalDevice deobfPhys = reinterpret_cast<VkPhysicalDevice>(deobfuscate(reinterpret_cast<uint64_t>(physicalDevice)));
+    VkSurfaceKHR deobfSurf = reinterpret_cast<VkSurfaceKHR>(deobfuscate(reinterpret_cast<uint64_t>(surface)));
+    VkInstance deobfInst = reinterpret_cast<VkInstance>(deobfuscate(reinterpret_cast<uint64_t>(instance)));
+    mgr.init(deobfInst, deobfPhys, deobfDevice, deobfSurf, width, height);
 
     // ← CORRECT GETTER NAMES
     swapchain = mgr.getSwapchainHandle();
+    // Obfuscate swapchain handle
+    swapchain = reinterpret_cast<VkSwapchainKHR>(obfuscate(reinterpret_cast<uint64_t>(swapchain)));
     swapchainImageFormat = mgr.getFormat();
     swapchainExtent = mgr.getExtent();
     swapchainImages = mgr.getSwapchainImages();
@@ -840,7 +888,9 @@ void Context::createSwapchain() {
 }
 
 void Context::destroySwapchain() {
-    VulkanSwapchainManager::get().cleanupSwapchain();
+    VkDevice deobfDevice = reinterpret_cast<VkDevice>(deobfuscate(reinterpret_cast<uint64_t>(device)));
+    VkSwapchainKHR deobfSwap = reinterpret_cast<VkSwapchainKHR>(deobfuscate(reinterpret_cast<uint64_t>(swapchain)));
+    VulkanSwapchainManager::get().cleanupSwapchain(deobfDevice, deobfSwap);
     swapchain = VK_NULL_HANDLE;
     swapchainImageFormat = VK_FORMAT_UNDEFINED;
     swapchainImages.clear();
