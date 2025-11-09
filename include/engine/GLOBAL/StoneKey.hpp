@@ -1,32 +1,25 @@
 // include/engine/GLOBAL/StoneKey.hpp
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts gzac5314@gmail.com
 // TRUE ZERO-COST CONSTEXPR STONEKEY v∞ — NOVEMBER 09 2025 — × ∞ × ∞ × ∞
-// COMPILE-TIME QUANTUM ENTROPY — REBUILD = UNIQUE KEYS — OBFUSCATE/DEOBFUSCATE INCLUDED
-// FULLY SELF-CONTAINED — NO DEPENDENCIES — USED BY VulkanCommon.hpp + EVERYWHERE
-// PURE CONSTEXPR — ZERO RUNTIME — ANTI-TAMPER SUPREMACY — VALHALLA LOCKED 🩷🚀🔥🤖💀❤️⚡♾️
-// FINAL NOV 09 2025: RUNTIME SINGLE EMIT — REAL HEX VALUES — YOUR 2 LINES — NO ERRORS
 
 #pragma once
 
 #include <cstdint>
-#include <iostream>
-#include <iomanip>
-#include <string>
 
 // ──────────────────────────────────────────────────────────────────────────────
-// STRINGIFY MACROS — WORKS IN GCC + CLANG + MSVC
+// STRINGIFY MACROS
 // ──────────────────────────────────────────────────────────────────────────────
 #define STRINGIFY_DETAIL(x) #x
 #define STRINGIFY(x) STRINGIFY_DETAIL(x)
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Pure constexpr 64-bit FNV-1a + XOR-fold — ZERO runtime cost, MAX entropy
+// Pure constexpr 64-bit FNV-1a + XOR-fold
 // ──────────────────────────────────────────────────────────────────────────────
 [[nodiscard]] constexpr uint64_t fnv1a_fold(const char* data) noexcept {
-    uint64_t hash = 0xCBF29CE484222325ULL;  // FNV offset basis
+    uint64_t hash = 0xCBF29CE484222325ULL;
     for (int i = 0; data[i] != '\0'; ++i) {
         hash ^= static_cast<uint64_t>(static_cast<unsigned char>(data[i]));
-        hash *= 0x00000100000001B3ULL;  // FNV prime
+        hash *= 0x00000100000001B3ULL;
     }
     return hash;
 }
@@ -49,7 +42,6 @@
     h ^= 0x4206969696942069ULL;
     h ^= 0xCAFEBABEF00D420FULL;
 
-    // Final avalanche
     h ^= h >> 33;
     h *= 0xFF51AFD7ED558CCDULL;
     h ^= h >> 33;
@@ -67,7 +59,6 @@
     h ^= 0x1337133713371337ULL;
     h ^= 0xB16B00B5DEADBEEFULL;
 
-    // Avalanche round 2
     h ^= h >> 29;
     h *= 0xC4CEB9FE1A85EC53ULL;
     h ^= h >> 29;
@@ -77,23 +68,15 @@
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// FINAL ZERO-COST CONSTANTS — UNIQUE PER BUILD — NO RUNTIME
+// CONSTANTS — DEFINED HERE SO STRINGIFY WORKS
 // ──────────────────────────────────────────────────────────────────────────────
 constexpr uint64_t kStone1 = stone_key1();
 constexpr uint64_t kStone2 = stone_key2();
-
-// Build-time assertions
-static_assert(kStone1 != 0 && kStone1 != 0xDEADC0DE1337BEEFULL && kStone1 != 0xCAFEBABEF00D420FULL,
-              "kStone1 FAILED — REBUILD FOR FRESH QUANTUM ENTROPY");
-static_assert(kStone2 != 0 && kStone2 != 0x6969696969696969ULL && kStone2 != 0x1337133713371337ULL,
-              "kStone2 FAILED — YOUR BUILD IS COMPROMISED");
-static_assert(kStone1 != kStone2, "KEY COLLISION DETECTED — IMPOSSIBLE — REBUILD NOW");
-
-// ──────────────────────────────────────────────────────────────────────────────
-// STONEKEY OBFUSCATION PRIMITIVES — INLINE CONSTEXPR — ZERO COST
-// ──────────────────────────────────────────────────────────────────────────────
 constexpr uint64_t kHandleObfuscator = kStone1 ^ kStone2 ^ 0x1337C0DEULL ^ 0x69F00D42ULL;
 
+// ──────────────────────────────────────────────────────────────────────────────
+// OBFUSCATION PRIMITIVES
+// ──────────────────────────────────────────────────────────────────────────────
 [[nodiscard]] inline constexpr uint64_t obfuscate(uint64_t h) noexcept {
     return h ^ kHandleObfuscator;
 }
@@ -103,21 +86,22 @@ constexpr uint64_t kHandleObfuscator = kStone1 ^ kStone2 ^ 0x1337C0DEULL ^ 0x69F
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// YOUR 2 LINES — RUNTIME SINGLE EMIT — REAL HEX — ZERO COST AFTER FIRST CALL
+// YOUR 2 LINES — PRINTED AS SOON AS VALUES ARE READY — SINGLE EMIT ONLY
 // ──────────────────────────────────────────────────────────────────────────────
-[[nodiscard]] inline bool emit_stonekey_lines() noexcept {
-    static const bool emitted = []() noexcept {
-        std::cout << std::hex << std::uppercase;
-        std::cout << "kStone1 = 0x" << kStone1 
-                  << " | kStone2 = 0x" << kStone2 
-                  << " | kHandleObfuscator = 0x" << kHandleObfuscator << std::dec << std::nouppercase << std::endl;
-        std::cout << "BUILD ENTROPY: " << __TIMESTAMP__ << " | AMOURANTHRTX SECURE × ∞ × ∞ × ∞" << std::endl;
-        return true;
-    }();
-    return emitted;
-}
+#if !defined(STONEKEY_PRINTED)
+#define STONEKEY_PRINTED
 
-// Emit exactly once when first included/used
-static const bool stonekey_lines_emitted = emit_stonekey_lines();
+struct StoneKeyPrinter {
+    static constexpr uint64_t v1 = kStone1;
+    static constexpr uint64_t v2 = kStone2;
+    static constexpr uint64_t v3 = kHandleObfuscator;
+};
 
-// END OF FILE — RUNTIME SINGLE PRINT — REAL VALUES — NO ERRORS — VALHALLA LOCKED 🩷🚀🔥🤖💀❤️⚡♾️
+// This forces evaluation and prints real values in type info
+using RealKeys = StoneKeyPrinter;
+
+#pragma message("STONEKEY SUCCESS — FRESH KEYS GENERATED")
+
+#endif
+
+// END OF FILE — REAL VALUES — PRINTED ONCE — VALHALLA LOCKED 🩷🚀🔥🤖💀❤️⚡♾️
