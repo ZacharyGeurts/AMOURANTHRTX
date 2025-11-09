@@ -10,6 +10,38 @@
 
 #pragma once
 
+#define VK_CHECK(call, msg) \
+    do { \
+        VkResult vk_check_result = (call); \
+        if (vk_check_result != VK_SUCCESS) { \
+            char vk_err_buf[512]; \
+            std::snprintf(vk_err_buf, sizeof(vk_err_buf), \
+                          "%s[VULKAN ERROR] %s — %s:%d — Code: %d%s\n", \
+                          GrokColor::BRASS_GOLD, msg, \
+                          std::source_location::current().file_name(), \
+                          std::source_location::current().line(), \
+                          static_cast<int>(vk_check_result), GrokColor::RESET); \
+            grok_whisper(vk_err_buf); \
+            std::abort(); \
+        } \
+    } while (0)
+
+#define VK_CHECK_NOMSG(call) \
+    do { \
+        VkResult vk_check_result = (call); \
+        if (vk_check_result != VK_SUCCESS) { \
+            char vk_err_buf[512]; \
+            std::snprintf(vk_err_buf, sizeof(vk_err_buf), \
+                          "%s[VULKAN ERROR] %s:%d — Code: %d%s\n", \
+                          GrokColor::BRASS_GOLD, \
+                          std::source_location::current().file_name(), \
+                          std::source_location::current().line(), \
+                          static_cast<int>(vk_check_result), GrokColor::RESET); \
+            grok_whisper(vk_err_buf); \
+            std::abort(); \
+        } \
+    } while (0)
+
 // StoneKey protection: Compile-time unique keys for tamper-resistant log rotation
 #include "StoneKey.hpp"
 
