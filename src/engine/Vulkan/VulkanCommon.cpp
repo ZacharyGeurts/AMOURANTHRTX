@@ -10,7 +10,7 @@
 // PINK PHOTONS ETERNAL — ZERO ZOMBIES — STONEKEY UNBREAKABLE — SHIP IT 🩷🚀🔥🤖💀❤️⚡♾️
 
 #include "engine/Vulkan/VulkanCommon.hpp"
-#include "engine/Vulkan/VulkanRTX.hpp"
+#include "engine/Vulkan/VulkanCore.hpp"
 #include "engine/Vulkan/VulkanRenderer.hpp"
 #include "engine/Vulkan/VulkanPipelineManager.hpp"
 
