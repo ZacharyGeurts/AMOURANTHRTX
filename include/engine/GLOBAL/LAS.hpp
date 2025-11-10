@@ -1,4 +1,4 @@
-// include/engine/Vulkan/../GLOBAL/LAS.hpp
+// include/engine/Vulkan/engine/GLOBAL/LAS.hpp
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
 // AMAZO_LAS vAMOURANTH_RTX_POWER — VALHALLA v26 FINAL SHIP — NOVEMBER 10, 2025
 // ALL Vulkan::Vulkan:: → Vulkan:: — NAMESPACE FIXED — UNUSED FUNCTION WARNING SILENCED
@@ -6,7 +6,7 @@
 
 #pragma once
 
-#define VK_ENABLE_BETA_EXTENSIONS 1 VK_EXTENSION_NAME_VK_KHR_ray_tracing_pipeline
+#define VK_ENABLE_BETA_EXTENSIONS 1
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_beta.h>
 
@@ -155,7 +155,8 @@ static TlasBuildSizes computeTlasSizes(VkDevice device, uint32_t instanceCount) 
 
     for (size_t i = 0; i < instances.size(); ++i) {
         const auto& [as, transform] = instances[i];
-        std::memcpy(&instData[i].transform, glm::value_ptr(transform), sizeof(glm::mat4));
+        glm::mat4 rowMajor = glm::transpose(transform);  // Convert column-major GLM to row-major for Vulkan
+        std::memcpy(&instData[i].transform, &rowMajor[0][0], sizeof(VkTransformMatrixKHR));  // Copy only 3x4 matrix (48 bytes)
 
         instData[i].instanceCustomIndex = static_cast<uint32_t>(i);
         instData[i].mask = 0xFF;

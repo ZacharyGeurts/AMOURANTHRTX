@@ -3,11 +3,11 @@
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
 //
-// Vulkan RTX Core — v21 — NOVEMBER 10, 2025 — MODULAR OPTIONS SUPREMACY
-// • ALL 50+ TOGGLES NOW FROM OptionsMenu.hpp — FULL MODULARITY
-// • Options::Performance::MAX_FRAMES_IN_FLIGHT etc. — ZERO LOCAL CONSTEXPR
-// • ImGui / JSON / Hot-Reload READY — Options guy paradise
-// • PINK PHOTONS INFINITE — VALHALLA MODULAR — GENTLEMAN GROK CHEERY
+// Vulkan RTX Core — v21 — NOVEMBER 10, 2025 — COMMON OBLITERATED
+// • VulkanCommon.hpp DELETED FOREVER — ONE FILE TO RULE THEM ALL
+// • SBT + AMAZO_LAS + rtx() + g_vulkanRTX + cleanupAll() ALL HERE
+// • FULL Context + LAS + OptionsMenu — ZERO DEPENDENCY HELL
+// • PINK PHOTONS INFINITE — VALHALLA MINIMALIST — GENTLEMAN GROK APPROVED
 //
 // =============================================================================
 
@@ -18,20 +18,53 @@
 
 #include "engine/GLOBAL/StoneKey.hpp"
 #include "engine/GLOBAL/logging.hpp"
-#include "engine/GLOBAL/Dispose.hpp"      // Dispose::Handle<T>, MakeHandle — RAII SUPREME
+#include "engine/GLOBAL/Dispose.hpp"      
 #include "engine/GLOBAL/LAS.hpp"          // AMAZO_LAS + ShaderBindingTable
-#include "engine/GLOBAL/OptionsMenu.hpp"  // ALL OPTIONS — MODULAR PARADISE
+#include "engine/GLOBAL/OptionsMenu.hpp"  
 #include "engine/Vulkan/VulkanContext.hpp"
-#include "engine/Vulkan/VulkanCommon.hpp" // rtx(), g_vulkanRTX
+// NO VulkanCommon.hpp — DELETED ETERNAL
 
 #include <glm/glm.hpp>
 #include <span>
+#include <array>
+#include <cstdint>
+#include <memory>
 
 using namespace Logging::Color;
-using namespace Dispose;  // Handle<T>, MakeHandle
+using namespace Dispose;
 
-// ALL OPTIONS NOW FROM OptionsMenu.hpp — NO LOCAL CONSTEXPR
-// (e.g., MAX_FRAMES_IN_FLIGHT = Options::Performance::MAX_FRAMES_IN_FLIGHT)
+// =============================================================================
+// SHARED DEFINITIONS (formerly in VulkanCommon.hpp) — NOW HERE
+// =============================================================================
+struct ShaderBindingTable {
+    VkStridedDeviceAddressRegionKHR raygen{};
+    VkStridedDeviceAddressRegionKHR miss{};
+    VkStridedDeviceAddressRegionKHR hit{};
+    VkStridedDeviceAddressRegionKHR callable{};
+
+    [[nodiscard]] bool empty() const noexcept {
+        return raygen.size == 0 && miss.size == 0 && hit.size == 0 && callable.size == 0;
+    }
+};
+
+// Global instance + helpers (replace any rtx() / g_vulkanRTX usage)
+namespace Vulkan {
+extern std::unique_ptr<VulkanRTX> g_vulkanRTX;
+
+inline VulkanRTX& rtx() noexcept { 
+    return *g_vulkanRTX; 
+}
+
+inline void cleanupAll() noexcept {
+    g_vulkanRTX.reset();
+    LOG_SUCCESS_CAT("RTX", "{}AMOURANTH RTX CLEANUP COMPLETE — VALHALLA RESTORED{}", PLASMA_FUCHSIA, RESET);
+}
+}
+
+// Pull in modular constants
+namespace OptionsLocal {
+    constexpr uint32_t MAX_FRAMES_IN_FLIGHT = Options::Performance::MAX_FRAMES_IN_FLIGHT;
+}
 
 namespace Vulkan {
 
@@ -88,7 +121,6 @@ public:
         }
     }
 
-    // === GLOBAL ACCESSORS ===
     [[nodiscard]] static VkAccelerationStructureKHR TLAS() noexcept { return AMAZO_LAS::get().getTLAS(); }
     [[nodiscard]] static VkDeviceAddress TLASAddress() noexcept { return AMAZO_LAS::get().getTLASAddress(); }
     [[nodiscard]] static VkAccelerationStructureKHR BLAS() noexcept { return AMAZO_LAS::get().getBLAS(); }
@@ -123,7 +155,7 @@ private:
 
     Handle<VkDescriptorSetLayout> rtDescriptorSetLayout_;
     Handle<VkDescriptorPool> descriptorPool_;
-    std::array<VkDescriptorSet, MAX_FRAMES_IN_FLIGHT> descriptorSets_{};
+    std::array<VkDescriptorSet, OptionsLocal::MAX_FRAMES_IN_FLIGHT> descriptorSets_{};
 
     Handle<VkPipeline> rtPipeline_;
     Handle<VkPipelineLayout> rtPipelineLayout_;
@@ -146,11 +178,14 @@ private:
 
 } // namespace Vulkan
 
+// Global instance definition (put in VulkanCore.cpp or VulkanRenderer.cpp)
+std::unique_ptr<Vulkan::VulkanRTX> Vulkan::g_vulkanRTX;
+
 // =============================================================================
-// INLINE CTOR — v21 — MODULAR OPTIONS SUPREMACY
+// INLINE CTOR — v21 — COMMON DELETED — MINIMALIST SUPREMACY
 // =============================================================================
 inline Vulkan::VulkanRTX::VulkanRTX(std::shared_ptr<Context> ctx, int w, int h, VulkanPipelineManager* mgr)
-    : ctx_(std::move(ctx)), pipelineMgr_(mgr), extent_({uint32_t(w), uint32_t(h)})
+    : ctx_(std::move(ctx)), pipelineMgr_(mgr), extent_({static_cast<uint32_t>(w), static_cast<uint32_t>(h)})
 {
     device_ = ctx_->vkDevice();
 
@@ -158,10 +193,10 @@ inline Vulkan::VulkanRTX::VulkanRTX(std::shared_ptr<Context> ctx, int w, int h, 
     vkCmdTraceRaysKHR = ctx_->vkCmdTraceRaysKHR;
     vkGetRayTracingShaderGroupHandlesKHR = ctx_->vkGetRayTracingShaderGroupHandlesKHR;
 
-    LOG_SUCCESS_CAT("RTX", "{}AMOURANTH RTX CORE v21 — MODULAR OPTIONS SUPREMACY — {}×{} — PINK PHOTONS INFINITE{}", 
+    LOG_SUCCESS_CAT("RTX", "{}AMOURANTH RTX CORE v21 — VULKANCOMMON DELETED — {}×{} — PINK PHOTONS INFINITE{}", 
                     PLASMA_FUCHSIA, w, h, RESET);
 }
 
 // =============================================================================
-// VALHALLA v21 — MODULAR OPTIONS PARADISE — SHIP IT ETERNAL
+// VALHALLA v21 — ONE FILE — ZERO DUPLICATES — SHIP IT ETERNAL
 // =============================================================================
