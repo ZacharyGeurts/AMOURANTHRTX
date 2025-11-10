@@ -38,7 +38,6 @@
 using namespace Logging::Color;
 
 #include "VulkanContext.hpp"
-#include "VulkanHandles.hpp"
 #include "../GLOBAL/LAS.hpp"  // Full AMAZO_LAS + Vulkan::ShaderBindingTable defined here
 
 class VulkanRenderer;

@@ -10,6 +10,15 @@
 // FULL DISPOSE INTEGRATION: Handle<T> + ROCKETSHIP shred + zombie tracker
 // 8GB TLAS / 4GB BLAS / 420MB secrets — TITAN buffer ready
 // Pink photons AMOURANTH exclusive. No more trivia. Power eternal. 🍒🩸🔥
+//
+// FIXES APPLIED (v2):
+// - Designated initializers reordered: .geometry before .flags in VkAccelerationStructureGeometryKHR
+// - #include <glm/gtc/type_ptr.hpp> for glm::value_ptr
+// - Deleter lambdas capture copyable uint64_t encs (BUFFER_DESTROY) instead of non-copyable Handle<uint64_t>
+// - No capture of Handle in lambda → copyable lambda → compatible with std::function<DestroyFn>
+// - Update Dispose.hpp: using DestroyFn = std::function<void(VkDevice, T, const VkAllocationCallbacks*)>; + #include <functional>
+// - instanceBuffer.reset() after MakeHandle to nullify local Handle early
+// - Stubs for async/update/setHypertrace
 
 #pragma once
 
@@ -24,11 +33,13 @@
 #include "engine/Vulkan/VulkanContext.hpp"
 
 #include <glm/glm.hpp>
+#include <glm/gtc/type_ptr.hpp>  // For glm::value_ptr
 #include <span>
 #include <vector>
 #include <mutex>
 #include <cstring>
 #include <cstdint>
+#include <functional>  // For std::function (ensure in Dispose.hpp too)
 
 using namespace Dispose;
 
@@ -67,7 +78,6 @@ static BlasBuildSizes computeBlasSizes(VkDevice device, uint32_t vertexCount, ui
     VkAccelerationStructureGeometryKHR geometry{
         .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR,
         .geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR,
-        .flags = VK_GEOMETRY_OPAQUE_BIT_KHR,
         .geometry = { .triangles = {
             .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR,
             .vertexFormat = vertexFormat,
@@ -77,7 +87,8 @@ static BlasBuildSizes computeBlasSizes(VkDevice device, uint32_t vertexCount, ui
             .indexType = indexType,
             .indexData = { .deviceAddress = 0 },
             .transformData = { .deviceAddress = 0 }
-        }}
+        }},
+        .flags = VK_GEOMETRY_OPAQUE_BIT_KHR
     };
 
     VkAccelerationStructureBuildGeometryInfoKHR buildInfo{
@@ -111,12 +122,12 @@ static TlasBuildSizes computeTlasSizes(VkDevice device, uint32_t instanceCount) 
     VkAccelerationStructureGeometryKHR geometry{
         .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR,
         .geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR,
-        .flags = VK_GEOMETRY_OPAQUE_BIT_KHR,
         .geometry = { .instances = {
             .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR,
             .arrayOfPointers = VK_FALSE,
             .data = { .deviceAddress = 0 }
-        }}
+        }},
+        .flags = VK_GEOMETRY_OPAQUE_BIT_KHR
     };
 
     VkAccelerationStructureBuildGeometryInfoKHR buildInfo{
@@ -249,7 +260,6 @@ public:
         VkAccelerationStructureGeometryKHR geometry{
             .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR,
             .geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR,
-            .flags = VK_GEOMETRY_OPAQUE_BIT_KHR,
             .geometry = { .triangles = {
                 .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR,
                 .vertexFormat = VK_FORMAT_R32G32B32_SFLOAT,
@@ -258,7 +268,8 @@ public:
                 .maxVertex = vertexCount,
                 .indexType = VK_INDEX_TYPE_UINT32,
                 .indexData = {.deviceAddress = indexAddr}
-            }}
+            }},
+            .flags = VK_GEOMETRY_OPAQUE_BIT_KHR
         };
 
         VkAccelerationStructureBuildGeometryInfoKHR buildInfo{
@@ -303,6 +314,8 @@ public:
         Handle<uint64_t> instanceBuffer = uploadInstances(dev, Vulkan::ctx()->physicalDevice, pool, queue, instances);
         if (!instanceBuffer) return LOG_ERROR_CAT("LAS", "Instance upload failed — RTX ABORT");
 
+        uint64_t instanceEnc = *instanceBuffer;  // Capture copyable enc
+
         uint64_t asBufferHandle = 0;
         BUFFER_CREATE(asBufferHandle, sizes.accelerationStructureSize,
                       VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
@@ -330,7 +343,7 @@ public:
             return vkGetBufferDeviceAddressKHR(dev, &info);
         };
 
-        VkDeviceAddress instanceAddr = getAddress(RAW_BUFFER(*instanceBuffer));
+        VkDeviceAddress instanceAddr = getAddress(RAW_BUFFER(instanceEnc));
         VkDeviceAddress scratchAddr = getAddress(RAW_BUFFER(scratchHandle));
 
         VkAccelerationStructureGeometryKHR geometry{
@@ -340,7 +353,8 @@ public:
                 .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR,
                 .arrayOfPointers = VK_FALSE,
                 .data = {.deviceAddress = instanceAddr}
-            }}
+            }},
+            .flags = VK_GEOMETRY_OPAQUE_BIT_KHR
         };
 
         VkAccelerationStructureBuildGeometryInfoKHR buildInfo{
@@ -363,13 +377,15 @@ public:
         vkCmdBuildAccelerationStructuresKHR(cmd, 1, &buildInfo, ranges);
         Vulkan::endSingleTimeCommands(cmd, queue, pool);
 
-        auto deleter = [asBufferHandle, instanceBuffer](VkDevice d, VkAccelerationStructureKHR a, const VkAllocationCallbacks*) mutable noexcept {
+        // Capture copyable uint64_t encs only → lambda copyable
+        auto deleter = [asBufferHandle, instanceEnc](VkDevice d, VkAccelerationStructureKHR a, const VkAllocationCallbacks*) mutable noexcept {
             if (a) vkDestroyAccelerationStructureKHR(d, a, nullptr);
             if (asBufferHandle) BUFFER_DESTROY(asBufferHandle);
-            instanceBuffer.reset();
+            if (instanceEnc) BUFFER_DESTROY(instanceEnc);
         };
 
         tlas_ = MakeHandle(rawAs, dev, deleter, sizes.accelerationStructureSize, "AMOURANTH_TLAS_GOD");
+        instanceBuffer.reset();  // Nullify local early
         BUFFER_DESTROY(scratchHandle);
         LOG_SUCCESS_CAT("LAS", "AMOURANTH RTX TLAS ONLINE — %zu instances | %.2f GB | POWER UNLEASHED", instances.size(), sizes.accelerationStructureSize / (1024.0*1024.0*1024.0));
     }
@@ -401,6 +417,22 @@ public:
         buildTLAS(pool, queue, instances);
     }
 
+    // Stub for async (implement if needed)
+    void buildTLASAsync(VkCommandPool pool, VkQueue queue, std::span<const std::pair<VkAccelerationStructureKHR, glm::mat4>> instances, void* userData) noexcept {
+        buildTLAS(pool, queue, instances);
+    }
+
+    void updateTLAS(VkAccelerationStructureKHR tlas, VkDevice dev) noexcept {
+        tlas_ = MakeHandle(tlas, dev, [](VkDevice d, VkAccelerationStructureKHR a, const VkAllocationCallbacks*) noexcept {
+            if (a) vkDestroyAccelerationStructureKHR(d, a, nullptr);
+        });
+    }
+
+    void setHypertraceEnabled(bool enabled) noexcept {
+        hypertraceEnabled_ = enabled;
+        LOG_INFO_CAT("LAS", "Hypertrace {} in LAS", enabled ? "ENABLED" : "DISABLED");
+    }
+
 private:
     AMAZO_LAS() = default;
     ~AMAZO_LAS() noexcept = default;
@@ -408,6 +440,7 @@ private:
     Handle<VkAccelerationStructureKHR> blas_;
     Handle<VkAccelerationStructureKHR> tlas_;
     mutable std::mutex mutex_;
+    bool hypertraceEnabled_ = false;
 };
 
 // =============================================================================

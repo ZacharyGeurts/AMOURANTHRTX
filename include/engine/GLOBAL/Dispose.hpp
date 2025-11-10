@@ -248,7 +248,7 @@ namespace Dispose {
     // ───── FINAL Handle<T> — AMOURANTH RTX FORM ─────
     template<typename T>
     struct Handle {
-        using DestroyFn = void(*)(VkDevice, T, const VkAllocationCallbacks*);
+        using DestroyFn = std::function<void(VkDevice, T, const VkAllocationCallbacks*)>;
 
         uint64_t raw = 0;
         VkDevice device = VK_NULL_HANDLE;
