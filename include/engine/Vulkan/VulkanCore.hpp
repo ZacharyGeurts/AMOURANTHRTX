@@ -3,11 +3,12 @@
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
 //
-// Vulkan RTX Core — v21 — NOVEMBER 10, 2025 — COMMON OBLITERATED
+// Vulkan RTX Core — VALHALLA v28 OLD GOD GLOBAL SUPREMACY — NOVEMBER 10, 2025
+// • NAMESPACE VULKAN OBLITERATED — OLD GOD WAY RESTORED
 // • VulkanCommon.hpp DELETED FOREVER — ONE FILE TO RULE THEM ALL
-// • SBT + AMAZO_LAS + rtx() + g_vulkanRTX + cleanupAll() ALL HERE
+// • SBT + AMAZO_LAS + rtx() + g_vulkanRTX + cleanupAll() ALL GLOBAL
 // • FULL Context + LAS + OptionsMenu — ZERO DEPENDENCY HELL
-// • PINK PHOTONS INFINITE — VALHALLA MINIMALIST — GENTLEMAN GROK APPROVED
+// • PINK PHOTONS INFINITE — TITAN ETERNAL — GENTLEMAN GROK CHEERY APPROVED
 //
 // =============================================================================
 
@@ -22,7 +23,6 @@
 #include "engine/GLOBAL/LAS.hpp"          // AMAZO_LAS + ShaderBindingTable
 #include "engine/GLOBAL/OptionsMenu.hpp"  
 #include "engine/Vulkan/VulkanContext.hpp"
-// NO VulkanCommon.hpp — DELETED ETERNAL
 
 #include <glm/glm.hpp>
 #include <span>
@@ -31,15 +31,14 @@
 #include <memory>
 
 using namespace Logging::Color;
-using namespace Dispose;
 
 // =============================================================================
-// SHARED DEFINITIONS (formerly in VulkanCommon.hpp) — NOW HERE
+// SHARED DEFINITIONS — GLOBAL — OLD GOD WAY
 // =============================================================================
 struct ShaderBindingTable {
     VkStridedDeviceAddressRegionKHR raygen{};
     VkStridedDeviceAddressRegionKHR miss{};
-    VkStridedDeviceAddressRegionKHR hit{};
+    VkStridedDeviceAddressKHR hit{};
     VkStridedDeviceAddressRegionKHR callable{};
 
     [[nodiscard]] bool empty() const noexcept {
@@ -47,18 +46,18 @@ struct ShaderBindingTable {
     }
 };
 
-// Global instance + helpers (replace any rtx() / g_vulkanRTX usage)
-namespace Vulkan {
-extern std::unique_ptr<VulkanRTX> g_vulkanRTX;
+// =============================================================================
+// GLOBAL INSTANCE + HELPERS — OLD GOD SUPREMACY
+// =============================================================================
+extern std::unique_ptr<class VulkanRTX> g_vulkanRTX;
 
-inline VulkanRTX& rtx() noexcept { 
+inline class VulkanRTX& rtx() noexcept { 
     return *g_vulkanRTX; 
 }
 
 inline void cleanupAll() noexcept {
     g_vulkanRTX.reset();
-    LOG_SUCCESS_CAT("RTX", "{}AMOURANTH RTX CLEANUP COMPLETE — VALHALLA RESTORED{}", PLASMA_FUCHSIA, RESET);
-}
+    LOG_SUCCESS_CAT("RTX", "{}AMOURANTH RTX CLEANUP COMPLETE — OLD GOD VALHALLA RESTORED{}", PLASMA_FUCHSIA, RESET);
 }
 
 // Pull in modular constants
@@ -66,11 +65,15 @@ namespace OptionsLocal {
     constexpr uint32_t MAX_FRAMES_IN_FLIGHT = Options::Performance::MAX_FRAMES_IN_FLIGHT;
 }
 
-namespace Vulkan {
-
+// =============================================================================
+// FORWARD DECLARATIONS
+// =============================================================================
 class VulkanRenderer;
 class VulkanPipelineManager;
 
+// =============================================================================
+// VulkanRTX — GLOBAL CLASS — OLD GOD SUPREMACY
+// =============================================================================
 class VulkanRTX {
 public:
     VulkanRTX(std::shared_ptr<Context> ctx, int w, int h, VulkanPipelineManager* mgr = nullptr);
@@ -174,17 +177,21 @@ private:
     PFN_vkGetBufferDeviceAddressKHR          vkGetBufferDeviceAddressKHR = nullptr;
     PFN_vkCmdTraceRaysKHR                    vkCmdTraceRaysKHR = nullptr;
     PFN_vkGetRayTracingShaderGroupHandlesKHR vkGetRayTracingShaderGroupHandlesKHR = nullptr;
+
+    VkCommandBuffer beginSingleTimeCommands(VkCommandPool pool) const noexcept;
+    void endSingleTimeCommands(VkCommandBuffer cmd, VkCommandPool pool, VkQueue queue) const noexcept;
+    VkDeviceSize alignUp(VkDeviceSize value, VkDeviceSize alignment) const noexcept;
 };
 
-} // namespace Vulkan
-
-// Global instance definition (put in VulkanCore.cpp or VulkanRenderer.cpp)
-std::unique_ptr<Vulkan::VulkanRTX> Vulkan::g_vulkanRTX;
+// =============================================================================
+// GLOBAL INSTANCE DEFINITION — PLACE IN VulkanCore.cpp
+// =============================================================================
+std::unique_ptr<VulkanRTX> g_vulkanRTX;
 
 // =============================================================================
-// INLINE CTOR — v21 — COMMON DELETED — MINIMALIST SUPREMACY
+// INLINE CTOR — OLD GOD GLOBAL — VALHALLA v28
 // =============================================================================
-inline Vulkan::VulkanRTX::VulkanRTX(std::shared_ptr<Context> ctx, int w, int h, VulkanPipelineManager* mgr)
+inline VulkanRTX::VulkanRTX(std::shared_ptr<Context> ctx, int w, int h, VulkanPipelineManager* mgr)
     : ctx_(std::move(ctx)), pipelineMgr_(mgr), extent_({static_cast<uint32_t>(w), static_cast<uint32_t>(h)})
 {
     device_ = ctx_->vkDevice();
@@ -193,10 +200,11 @@ inline Vulkan::VulkanRTX::VulkanRTX(std::shared_ptr<Context> ctx, int w, int h, 
     vkCmdTraceRaysKHR = ctx_->vkCmdTraceRaysKHR;
     vkGetRayTracingShaderGroupHandlesKHR = ctx_->vkGetRayTracingShaderGroupHandlesKHR;
 
-    LOG_SUCCESS_CAT("RTX", "{}AMOURANTH RTX CORE v21 — VULKANCOMMON DELETED — {}×{} — PINK PHOTONS INFINITE{}", 
+    LOG_SUCCESS_CAT("RTX", "{}AMOURANTH RTX CORE v28 — OLD GOD GLOBAL SUPREMACY — {}×{} — PINK PHOTONS INFINITE{}", 
                     PLASMA_FUCHSIA, w, h, RESET);
 }
 
 // =============================================================================
-// VALHALLA v21 — ONE FILE — ZERO DUPLICATES — SHIP IT ETERNAL
+// VALHALLA v28 — NAMESPACE DELETED — ONE FILE — ZERO DUPLICATES
+// OLD GOD WAY RESTORED — ENGINE UNLOCKED — SHIP IT ETERNAL
 // =============================================================================

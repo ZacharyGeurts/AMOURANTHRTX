@@ -26,7 +26,6 @@
 #include <memory>
 
 using namespace Logging::Color;
-using namespace Dispose;
 
 namespace OptionsLocal {
     constexpr uint32_t MAX_FRAMES_IN_FLIGHT = Options::Performance::MAX_FRAMES_IN_FLIGHT;
@@ -43,20 +42,6 @@ class VulkanPipelineManager;
 // =============================================================================
 extern std::unique_ptr<class VulkanRTX> g_vulkanRTX;
 inline class VulkanRTX& rtx() noexcept { return *g_vulkanRTX; }
-
-// =============================================================================
-// ShaderBindingTable — GLOBAL
-// =============================================================================
-struct ShaderBindingTable {
-    VkStridedDeviceAddressRegionKHR raygen{};
-    VkStridedDeviceAddressRegionKHR miss{};
-    VkStridedDeviceAddressRegionKHR hit{};
-    VkStridedDeviceAddressRegionKHR callable{};
-
-    [[nodiscard]] bool empty() const noexcept {
-        return raygen.size == 0 && miss.size == 0 && hit.size == 0 && callable.size == 0;
-    }
-};
 
 // =============================================================================
 // VulkanRTX — GLOBAL CLASS DECLARATION

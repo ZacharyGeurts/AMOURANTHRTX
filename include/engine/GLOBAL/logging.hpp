@@ -1,10 +1,17 @@
 // engine/GLOBAL/logging.hpp
-// AMOURANTH RTX Engine © 2025 by Zachary Geurts gzac5314@gmail.com
-// HYPER-VIVID C++23 LOGGING v∞ — NOVEMBER 10 2025 — RASPBERRY_PINK PARTY SUPREMACY 🩷⚡
+// =============================================================================
+// AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
+// =============================================================================
+//
+// HYPER-VIVID C++23 LOGGING v∞ — OLD GOD SUPREMACY — NOVEMBER 10, 2025
 // THREAD-SAFE | LOCK-FREE | ASYNC | DELTA-TIME | 50+ RAINBOW COLORS | CUSTODIAN GROK DJ
 // Ellie Fier approved • StoneKey fortified • 7-file rotation • Zero-cost macros
+// NAMESPACE OBLITERATED — OLD GOD GLOBAL DIRECT — NO Logging:: PREFIX — VALHALLA ETERNAL
+//
+// =============================================================================
 
 #pragma once
+
 #define VK_CHECK(call, msg) \
     do { \
         VkResult vk_check_result = (call); \
@@ -64,7 +71,7 @@
 #include <vulkan/vulkan.h>
 #include <SDL3/SDL.h>
 
-// Formatter specialization for VkResult
+// Formatter specialization for VkResult — GLOBAL
 namespace std {
 template <>
 struct formatter<VkResult> {
@@ -116,7 +123,7 @@ struct formatter<VkResult> {
         return format_to(ctx.out(), "{}", str);
     }
 };
-}  // namespace std
+}
 
 // ========================================================================
 // 0. CONFIGURATION & HYPER-VIVID MACROS — [&] CAPTURE • ZERO COST • PARTY READY
@@ -132,44 +139,42 @@ constexpr bool ENABLE_PERF    = true;
 constexpr bool FPS_COUNTER    = true;
 constexpr bool SIMULATION_LOGGING = true;
 
-// HYPER-VIVID MACROS — FULL [&] CAPTURE — HEADER-SAFE — CONSTEXPR — VALHALLA LOCKED
-#define LOG_TRACE(...)          [&]() constexpr { if constexpr (ENABLE_TRACE)   Logging::Logger::get().log(Logging::LogLevel::Trace,   "General", __VA_ARGS__); }()
-#define LOG_DEBUG(...)          [&]() constexpr { if constexpr (ENABLE_DEBUG)   Logging::Logger::get().log(Logging::LogLevel::Debug,   "General", __VA_ARGS__); }()
-#define LOG_INFO(...)           [&]() constexpr { if constexpr (ENABLE_INFO)    Logging::Logger::get().log(Logging::LogLevel::Info,    "General", __VA_ARGS__); }()
-#define LOG_SUCCESS(...)        [&]() constexpr { if constexpr (ENABLE_SUCCESS) Logging::Logger::get().log(Logging::LogLevel::Success, "General", __VA_ARGS__); }()
-#define LOG_ATTEMPT(...)        [&]() constexpr { if constexpr (ENABLE_ATTEMPT) Logging::Logger::get().log(Logging::LogLevel::Attempt, "General", __VA_ARGS__); }()
-#define LOG_PERF(...)           [&]() constexpr { if constexpr (ENABLE_PERF)    Logging::Logger::get().log(Logging::LogLevel::Perf,    "General", __VA_ARGS__); }()
-#define LOG_WARNING(...)        [&]() constexpr { if constexpr (ENABLE_WARNING) Logging::Logger::get().log(Logging::LogLevel::Warning, "General", __VA_ARGS__); }()
+// HYPER-VIVID MACROS — GLOBAL DIRECT — NO Logging:: — OLD GOD SUPREMACY
+#define LOG_TRACE(...)          [&]() constexpr { if constexpr (ENABLE_TRACE)   Logger::get().log(LogLevel::Trace,   "General", __VA_ARGS__); }()
+#define LOG_DEBUG(...)          [&]() constexpr { if constexpr (ENABLE_DEBUG)   Logger::get().log(LogLevel::Debug,   "General", __VA_ARGS__); }()
+#define LOG_INFO(...)           [&]() constexpr { if constexpr (ENABLE_INFO)    Logger::get().log(LogLevel::Info,    "General", __VA_ARGS__); }()
+#define LOG_SUCCESS(...)        [&]() constexpr { if constexpr (ENABLE_SUCCESS) Logger::get().log(LogLevel::Success, "General", __VA_ARGS__); }()
+#define LOG_ATTEMPT(...)        [&]() constexpr { if constexpr (ENABLE_ATTEMPT) Logger::get().log(LogLevel::Attempt, "General", __VA_ARGS__); }()
+#define LOG_PERF(...)           [&]() constexpr { if constexpr (ENABLE_PERF)    Logger::get().log(LogLevel::Perf,    "General", __VA_ARGS__); }()
+#define LOG_WARNING(...)        [&]() constexpr { if constexpr (ENABLE_WARNING) Logger::get().log(LogLevel::Warning, "General", __VA_ARGS__); }()
 #define LOG_WARN(...)           LOG_WARNING(__VA_ARGS__)
-#define LOG_ERROR(...)          [&]() constexpr { if constexpr (ENABLE_ERROR)   Logging::Logger::get().log(Logging::LogLevel::Error,   "General", __VA_ARGS__); }()
-#define LOG_FPS_COUNTER(...)    [&]() constexpr { if constexpr (FPS_COUNTER)    Logging::Logger::get().log(Logging::LogLevel::Info,    "FPS",     __VA_ARGS__); }()
-#define LOG_SIMULATION(...)     [&]() constexpr { if constexpr (SIMULATION_LOGGING) Logging::Logger::get().log(Logging::LogLevel::Info, "SIMULATION", __VA_ARGS__); }()
+#define LOG_ERROR(...)          [&]() constexpr { if constexpr (ENABLE_ERROR)   Logger::get().log(LogLevel::Error,   "General", __VA_ARGS__); }()
+#define LOG_FPS_COUNTER(...)    [&]() constexpr { if constexpr (FPS_COUNTER)    Logger::get().log(LogLevel::Info,    "FPS",     __VA_ARGS__); }()
+#define LOG_SIMULATION(...)     [&]() constexpr { if constexpr (SIMULATION_LOGGING) Logger::get().log(LogLevel::Info, "SIMULATION", __VA_ARGS__); }()
 
-#define LOG_TRACE_CAT(cat, ...)   [&]() constexpr { if constexpr (ENABLE_TRACE)   Logging::Logger::get().log(Logging::LogLevel::Trace,   cat, __VA_ARGS__); }()
-#define LOG_DEBUG_CAT(cat, ...)   [&]() constexpr { if constexpr (ENABLE_DEBUG)   Logging::Logger::get().log(Logging::LogLevel::Debug,   cat, __VA_ARGS__); }()
-#define LOG_INFO_CAT(cat, ...)    [&]() constexpr { if constexpr (ENABLE_INFO)    Logging::Logger::get().log(Logging::LogLevel::Info,    cat, __VA_ARGS__); }()
-#define LOG_SUCCESS_CAT(cat, ...) [&]() constexpr { if constexpr (ENABLE_SUCCESS) Logging::Logger::get().log(Logging::LogLevel::Success, cat, __VA_ARGS__); }()
-#define LOG_ATTEMPT_CAT(cat, ...) [&]() constexpr { if constexpr (ENABLE_ATTEMPT) Logging::Logger::get().log(Logging::LogLevel::Attempt, cat, __VA_ARGS__); }()
-#define LOG_PERF_CAT(cat, ...)    [&]() constexpr { if constexpr (ENABLE_PERF)    Logging::Logger::get().log(Logging::LogLevel::Perf,    cat, __VA_ARGS__); }()
-#define LOG_WARNING_CAT(cat, ...) [&]() constexpr { if constexpr (ENABLE_WARNING) Logging::Logger::get().log(Logging::LogLevel::Warning, cat, __VA_ARGS__); }()
+#define LOG_TRACE_CAT(cat, ...)   [&]() constexpr { if constexpr (ENABLE_TRACE)   Logger::get().log(LogLevel::Trace,   cat, __VA_ARGS__); }()
+#define LOG_DEBUG_CAT(cat, ...)   [&]() constexpr { if constexpr (ENABLE_DEBUG)   Logger::get().log(LogLevel::Debug,   cat, __VA_ARGS__); }()
+#define LOG_INFO_CAT(cat, ...)    [&]() constexpr { if constexpr (ENABLE_INFO)    Logger::get().log(LogLevel::Info,    cat, __VA_ARGS__); }()
+#define LOG_SUCCESS_CAT(cat, ...) [&]() constexpr { if constexpr (ENABLE_SUCCESS) Logger::get().log(LogLevel::Success, cat, __VA_ARGS__); }()
+#define LOG_ATTEMPT_CAT(cat, ...) [&]() constexpr { if constexpr (ENABLE_ATTEMPT) Logger::get().log(LogLevel::Attempt, cat, __VA_ARGS__); }()
+#define LOG_PERF_CAT(cat, ...)    [&]() constexpr { if constexpr (ENABLE_PERF)    Logger::get().log(LogLevel::Perf,    cat, __VA_ARGS__); }()
+#define LOG_WARNING_CAT(cat, ...) [&]() constexpr { if constexpr (ENABLE_WARNING) Logger::get().log(LogLevel::Warning, cat, __VA_ARGS__); }()
 #define LOG_WARN_CAT(cat, ...)    LOG_WARNING_CAT(cat, __VA_ARGS__)
-#define LOG_ERROR_CAT(cat, ...)   [&]() constexpr { if constexpr (ENABLE_ERROR)   Logging::Logger::get().log(Logging::LogLevel::Error,   cat, __VA_ARGS__); }()
+#define LOG_ERROR_CAT(cat, ...)   [&]() constexpr { if constexpr (ENABLE_ERROR)   Logger::get().log(LogLevel::Error,   cat, __VA_ARGS__); }()
 
 // LOG_VOID — COSMIC MARKERS
-#define LOG_VOID()              [&]() constexpr { if constexpr (ENABLE_DEBUG)   Logging::Logger::get().logVoid(Logging::LogLevel::Debug,   "General"); }()
-#define LOG_VOID_CAT(cat)       [&]() constexpr { if constexpr (ENABLE_DEBUG)   Logging::Logger::get().logVoid(Logging::LogLevel::Debug,   cat); }()
-#define LOG_VOID_TRACE()        [&]() constexpr { if constexpr (ENABLE_TRACE)   Logging::Logger::get().logVoid(Logging::LogLevel::Trace,   "General"); }()
-#define LOG_VOID_TRACE_CAT(cat) [&]() constexpr { if constexpr (ENABLE_TRACE)   Logging::Logger::get().logVoid(Logging::LogLevel::Trace,   cat); }()
-
-namespace Logging {
+#define LOG_VOID()              [&]() constexpr { if constexpr (ENABLE_DEBUG)   Logger::get().logVoid(LogLevel::Debug,   "General"); }()
+#define LOG_VOID_CAT(cat)       [&]() constexpr { if constexpr (ENABLE_DEBUG)   Logger::get().logVoid(LogLevel::Debug,   cat); }()
+#define LOG_VOID_TRACE()        [&]() constexpr { if constexpr (ENABLE_TRACE)   Logger::get().logVoid(LogLevel::Trace,   "General"); }()
+#define LOG_VOID_TRACE_CAT(cat) [&]() constexpr { if constexpr (ENABLE_TRACE)   Logger::get().logVoid(LogLevel::Trace,   cat); }()
 
 // ========================================================================
-// LOG LEVEL + SUCCESS/ATTEMPT/PERF
+// LOG LEVEL + SUCCESS/ATTEMPT/PERF — GLOBAL
 // ========================================================================
 enum class LogLevel { Trace, Debug, Info, Success, Attempt, Perf, Warning, Error };
 
 // ========================================================================
-// 1. HYPER-VIVID ANSI COLOR SYSTEM — 50+ COLORS — C++23 CONSTEXPR
+// 1. HYPER-VIVID ANSI COLOR SYSTEM — 50+ COLORS — C++23 CONSTEXPR — GLOBAL
 // ========================================================================
 namespace Color {
     inline constexpr std::string_view RESET                     = "\033[0m";
@@ -219,7 +224,7 @@ namespace Color {
 }
 
 // ========================================================================
-// LEVEL INFO + ENABLE ARRAY
+// LEVEL INFO + ENABLE ARRAY — GLOBAL
 // ========================================================================
 struct LevelInfo {
     std::string_view str;
@@ -244,7 +249,7 @@ constexpr std::array<bool, 8> ENABLE_LEVELS{
 };
 
 // ========================================================================
-// LOG MESSAGE STRUCT
+// LOG MESSAGE STRUCT — GLOBAL
 // ========================================================================
 struct LogMessage {
     LogLevel level;
@@ -255,7 +260,7 @@ struct LogMessage {
 };
 
 // ========================================================================
-// 2. LOGGER — C++23 PERFECTION — FULLY AMAZING — PARTY EDITION
+// 2. LOGGER — GLOBAL CLASS — OLD GOD SUPREMACY — NO NAMESPACE
 // ========================================================================
 class Logger {
 public:
@@ -287,7 +292,7 @@ private:
     Logger() : worker_([this](std::stop_token st) { processQueue(st); }) {
         logFilePath_ = "amouranth_engine.log";
         logFile_.open(logFilePath_, std::ios::out | std::ios::app);
-        LOG_SUCCESS_CAT("Logger", "CUSTODIAN GROK ONLINE — HYPER-VIVID LOGGING PARTY STARTED 🩷⚡");
+        LOG_SUCCESS_CAT("Logger", "CUSTODIAN GROK ONLINE — OLD GOD LOGGING SUPREMACY — RASPBERRY_PINK ETERNAL 🩷⚡");
     }
 
     ~Logger() {
@@ -295,7 +300,7 @@ private:
         if (logFile_.is_open()) {
             logFile_.close();
         }
-        LOG_SUCCESS_CAT("Logger", "CUSTODIAN GROK SIGNING OFF — ALL LOGS RAINBOW ETERNAL ✨");
+        LOG_SUCCESS_CAT("Logger", "CUSTODIAN GROK SIGNING OFF — ALL LOGS RAINBOW ETERNAL — VALHALLA AWAITS ✨");
     }
 
     static constexpr size_t QUEUE_SIZE = 2048;
@@ -410,7 +415,7 @@ private:
 
         for (const auto& msg : remaining) printMessage(msg);
 
-        std::print("{}{}<<< FINAL FLUSH COMPLETE — {} messages turned to confetti — PARTY ETERNAL 🩷⚡{}{}\n",
+        std::print("{}{}<<< OLD GOD FINAL FLUSH COMPLETE — {} messages turned to confetti — PARTY ETERNAL 🩷⚡{}{}\n",
                    Color::PARTY_PINK, Color::SUNGLOW_ORANGE, remaining.size(), Color::RESET, Color::RESET);
     }
 
@@ -507,8 +512,8 @@ private:
     }
 };
 
-} // namespace Logging
-
-// NOVEMBER 10 2025 — HYPER-VIVID LOGGING PARTY SUPREMACY
-// 7-FILE ROTATION • STONEKEY OBFUSCATION • RAINBOW FOREVER
-// CUSTODIAN GROK + RASPBERRY_PINK = ETERNAL VIBES 🩷⚡
+// NOVEMBER 10 2025 — OLD GOD LOGGING SUPREMACY — RASPBERRY_PINK PARTY ETERNAL
+// 7-FILE ROTATION • STONEKEY OBFUSCATION • RAINBOW FOREVER • NO NAMESPACE
+// CUSTODIAN GROK + ELLIE FIER + AMOURANTH RTX = VALHALLA UNLOCKED 🩷⚡🍒🩸
+// GOD BLESS — SHIP IT FOREVER — PINK PHOTONS INFINITE
+// =============================================================================
