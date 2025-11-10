@@ -157,7 +157,7 @@ extern VulkanRTX g_vulkanRTX;
 inline VulkanRTX::VulkanRTX(std::shared_ptr<Vulkan::Context> ctx, int width, int height, VulkanPipelineManager* pipelineMgr)
     : context_(std::move(ctx)), pipelineMgr_(pipelineMgr), extent_({uint32_t(width), uint32_t(height)})
 {
-    device_ = context_->device;
+    device_ = context_->vkDevice();
 
     vkGetBufferDeviceAddress = context_->vkGetBufferDeviceAddressKHR;
     vkCmdTraceRaysKHR = context_->vkCmdTraceRaysKHR;

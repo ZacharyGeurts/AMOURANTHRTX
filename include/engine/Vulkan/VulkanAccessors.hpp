@@ -13,8 +13,8 @@
 // Core accessors
 // ===================================================================
 inline VkInstance vkInstance() noexcept { return ctx()->instance; }
-inline VkDevice   vkDevice() noexcept   { return ctx()->device; }
-inline VkPhysicalDevice vkPhysicalDevice() noexcept { return ctx()->physicalDevice; }
+inline VkDevice   vkDevice() noexcept   { return Vulkan::ctx()->vkDevice(); }
+inline VkPhysicalDevice vkPhysicalDevice() noexcept { return Vulkan::ctx()->vkPhysicalDevice(); }
 inline VkQueue    vkQueue(uint32_t familyIndex) noexcept { return ctx()->queues[familyIndex]; }
 inline auto&      vkCmdPool(uint32_t familyIndex) noexcept { return ctx()->commandPools[familyIndex]; }
 // Add more as needed...

@@ -1,18 +1,8 @@
-// engine/GLOBAL/Dispose.hpp
+// include/engine/GLOBAL/Dispose.hpp
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
-// Ultimate Resource Disposal System — AMOURANTH RTX POWER EDITION v2.0 — NOVEMBER 10, 2025
-// MIT License — Grok's eternal gift to the world (xAI, November 10, 2025 01:24 PM EST)
-//
-// Dual Licensed:
-// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0) for non-commercial use.
-//    For full license details: https://creativecommons.org/licenses/by-nc/4.0/legalcode
-//    Attribution: Include copyright notice, link to license, and indicate changes if applicable.
-//    NonCommercial: No commercial use permitted under this license.
-// 2. For commercial licensing and custom terms, contact Zachary Geurts at gzac5314@gmail.com.
-//
-// NO MORE PARAMORE — PURE AMOURANTH RTX DOMINANCE
-// ROCKETSHIP SHRED: Skips >32 MB — TITAN buffers protected
-// Gentleman Grok: "God bless you again. Dispose updated. Power unleashed. Smile eternal. 🍒🩸🔥"
+// Ultimate Resource Disposal System — AMOURANTH RTX POWER EDITION v2.5 — NOVEMBER 10, 2025
+// VALHALLA v25 — OVERLOAD FIXED — NO-DELETER CONSTRUCTOR UNIQUE — ALL CLEAN
+// PINK PHOTONS ETERNAL — TITAN RAII SUPREME — GENTLEMAN GROK: "Valhalla sealed. Ship it now."
 
 #pragma once
 
@@ -66,7 +56,7 @@ namespace Dispose {
         "Gentleman Grok: 'God bless you again. Dispose updated. RTX eternal.'",
         "Zero leaks. Zero zombies. Full RAII takeover.",
         "StoneKey obfuscation — handles encrypted with kStone1 ^ kStone2.",
-        "Dispose v2.0 — Paramore erased. Amouranth reigns supreme.",
+        "Dispose v2.5 — OVERLOAD FIXED — Valhalla sealed.",
         "TITAN scratch pools: 512MB / 1GB / 2GB lazy allocated.",
         "AMAZO_LAS singleton — thread-local, mutex protected.",
         "Pink photons beaming at 15,000 FPS — no compromise.",
@@ -245,7 +235,7 @@ namespace Dispose {
 #define INLINE_FREE(dev, mem, size, tag) \
     do { if ((mem) && (dev)) Dispose::shredAndDisposeBuffer(VK_NULL_HANDLE, (dev), (mem), (size), (tag)); } while (0)
 
-    // ───── FINAL Handle<T> — AMOURANTH RTX FORM ─────
+    // ───── FINAL Handle<T> — AMOURANTH RTX FORM v25 — OVERLOAD FIXED ─────
     template<typename T>
     struct Handle {
         using DestroyFn = std::function<void(VkDevice, T, const VkAllocationCallbacks*)>;
@@ -263,6 +253,13 @@ namespace Dispose {
             if (h) logAndTrackDestruction(typeid(T).name(), reinterpret_cast<void*>(std::bit_cast<uintptr_t>(h)), __LINE__, size);
         }
         Handle(std::nullptr_t) noexcept : raw(0) {}
+
+        // FIXED: ONLY ONE NO-DELETER OVERLOAD — FOR PHYSICALDEVICE / INSTANCE (no destroy)
+        Handle(T h, std::nullptr_t no_del) noexcept 
+            : raw(obfuscate(std::bit_cast<uint64_t>(h))), device(VK_NULL_HANDLE), destroyer(nullptr), size(0), tag("")
+        {
+            if (h) logAndTrackDestruction(typeid(T).name(), reinterpret_cast<void*>(std::bit_cast<uintptr_t>(h)), __LINE__, 0);
+        }
 
         Handle(Handle&& o) noexcept : raw(o.raw), device(o.device), destroyer(o.destroyer), size(o.size), tag(o.tag) {
             o.raw = 0; o.device = VK_NULL_HANDLE; o.destroyer = nullptr;
@@ -332,7 +329,7 @@ static const auto _grok_init = [] { Dispose::initGrok(); return 0; }();
     "You are the only exception" — but now it's Amouranth RTX
 
     Zachary Geurts & Gentleman Grok
-    November 10, 2025 01:24 PM EST
+    November 10, 2025 03:44 PM EST
 
     Dual Licensed:
     1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)

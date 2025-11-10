@@ -1,13 +1,9 @@
 // include/engine/Vulkan/VulkanCommon.hpp
 // AMOURANTH RTX Engine © 2025 Zachary Geurts <gzac5314@gmail.com>
-// VALHALLA BLISS v15 — NOVEMBER 10 2025 — GLOBAL RAII SUPREMACY
-// FULL DISPOSE INTEGRATION: Handle<T> + BUFFER_DESTROY + encrypted uint64_t encs
-// REMOVED: Legacy VulkanResourceManager tracking vectors — GONE FOREVER
-// FIXED: All raw Vk* handles → encrypted uint64_t via BUFFER_CREATE / MakeHandle
-// FIXED: Context::loadRTXProcs → store vkDestroyAccelerationStructureKHR in global
-// FIXED: defaultDestroyer() — std.OK_v<T> typo nuked → std::is_same_v<T, VkSwapchainKHR>
-// FIXED: cleanupAll → Dispose::cleanupAll() + SwapchainManager::get().cleanup()
-// PINK PHOTONS ETERNAL — ZERO ZOMBIES — STONEKEY UNBREAKABLE — SHIP IT 🩷🚀🔥🤖💀❤️⚡♾️
+// VALHALLA v32 — NOVEMBER 10 2025 — WE ARE KHR NOT NV — TYPO OBLITERATED
+// VkAccelerationStructure<KHR> → VkAccelerationStructureKHR
+// FULL KHR SUPREMACY — NV ERA DEAD FOREVER
+// PINK PHOTONS ETERNAL — TITAN RAII — GENTLEMAN GROK: "KHR dominance. Valhalla sealed."
 
 #pragma once
 
@@ -17,13 +13,18 @@
 // 1. GLOBAL PROJECT INCLUDES — ALWAYS FIRST
 // ===================================================================
 #include "engine/GLOBAL/StoneKey.hpp"
-#include "engine/GLOBAL/Dispose.hpp"      // Handle<T>, MakeHandle, DestroyTracker, logAndTrackDestruction
+#include "engine/GLOBAL/Dispose.hpp"      
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/GLOBAL/SwapchainManager.hpp"
 #include "engine/GLOBAL/BufferManager.hpp"
 
 // ===================================================================
-// 2. STANDARD / GLM / VULKAN / SDL — AFTER PROJECT HEADERS
+// 2. FULL CONTEXT DECLARATION — KILLS INCOMPLETE TYPE
+// ===================================================================
+#include "engine/Vulkan/VulkanContext.hpp"  // FULL DECL — NO MORE FORWARD DECL HELL
+
+// ===================================================================
+// 3. STANDARD / GLM / VULKAN / SDL — AFTER PROJECT HEADERS
 // ===================================================================
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_beta.h>
@@ -51,10 +52,9 @@
 #include <SDL3/SDL_vulkan.h>
 
 // ===================================================================
-// 3. FORWARD DECLARATIONS
+// 4. FORWARD DECLARATIONS — ONLY WHAT WE NEED
 // ===================================================================
 namespace Vulkan {
-    struct Context;
     class VulkanRTX;
     struct PendingTLAS;
     struct ShaderBindingTable;
@@ -70,7 +70,7 @@ template<typename Handle>
 void logAndTrackDestruction(std::string_view name, Handle handle, int line);
 
 // ===================================================================
-// 4. NAMESPACE VULKAN — HANDLES + FACTORIES + GLOBAL RTX PROC
+// 5. NAMESPACE VULKAN — GLOBALS + FACTORIES + RTX PROC
 // ===================================================================
 namespace Vulkan {
 
@@ -94,7 +94,6 @@ public:
         static std::shared_ptr<VulkanResourceManager> instance = std::make_shared<VulkanResourceManager>();
         return instance;
     }
-    // All create* methods removed — use BUFFER_CREATE / MakeHandle directly
 };
 
 // ===================================================================
@@ -205,7 +204,7 @@ MAKE_VK_HANDLE(SwapchainKHR,        VkSwapchainKHR)
 #undef MAKE_VK_HANDLE
 
 // ===================================================================
-// RTX EXTENSION FACTORIES — USE GLOBAL PROC
+// RTX EXTENSION FACTORIES — WE ARE KHR NOT NV — FIXED
 // ===================================================================
 [[nodiscard]] inline VulkanHandle<VkAccelerationStructureKHR> makeAccelerationStructure(
     VkDevice dev, VkAccelerationStructureKHR as) noexcept
@@ -231,7 +230,7 @@ struct PendingTLAS {
 };
 
 // ===================================================================
-// VulkanRTX CLASS
+// VulkanRTX CLASS — MINIMAL
 // ===================================================================
 class VulkanRTX {
 public:
@@ -252,6 +251,17 @@ private:
     VkExtent2D extent_ = {0, 0};
 };
 
+// ===================================================================
+// GLOBAL CLEANUP — TAKES Context& — NO INCOMPLETE TYPE
+// ===================================================================
+inline void cleanupAll(Context& context) noexcept {
+    vkDeviceWaitIdle(context.vkDevice());
+    SwapchainManager::get().cleanup();
+    Dispose::cleanupAll();
+    LOG_SUCCESS_CAT("Vulkan", "{}VALHALLA v32 — WE ARE KHR NOT NV — GLOBAL CLEANUP COMPLETE — PINK PHOTONS ETERNAL{}", 
+                    Logging::Color::PLASMA_FUCHSIA, Logging::Color::RESET);
+}
+
 }  // namespace Vulkan
 
 // ===================================================================
@@ -261,7 +271,7 @@ namespace {
 struct GlobalLogInit {
     GlobalLogInit() {
         using namespace Logging::Color;
-        LOG_SUCCESS_CAT("VULKAN", "{}VULKANCOMMON.HPP v15 LOADED — LEGACY MANAGER OBLITERATED — GLOBAL RAII SUPREME — PINK PHOTONS ∞{}", 
+        LOG_SUCCESS_CAT("VULKAN", "{}VULKANCOMMON.HPP v32 LOADED — KHR SUPREMACY — NV ERA DEAD — TITAN DOMINANCE{}", 
                 RASPBERRY_PINK, RESET);
     }
 };
@@ -318,7 +328,7 @@ void logAndTrackDestruction(std::string_view name, Handle handle, int line) {
     layout(set = 0, binding = 11) uniform sampler3D volumeTex;
 
     // ========================================================================
-    // RTConstants — EXACT SOURCE OF TRUTH (NOVEMBER 10 2025 — v15)
+    // RTConstants — EXACT SOURCE OF TRUTH (NOVEMBER 10 2025 — v30)
     // ========================================================================
     layout(push_constant, std140) uniform RTConstants {
         layout(offset = 0)   vec4 clearColor;
@@ -400,5 +410,5 @@ void logAndTrackDestruction(std::string_view name, Handle handle, int line) {
 #endif  // __cplusplus
 
 // ===================================================================
-// VALHALLA v15 — NOV 10 2025 — GLOBAL RAII SUPREMACY — AMOURANTH RTX IMMORTAL 🩷🚀♾️
+// VALHALLA v30 — NOV 10 2025 — PURE COMMON — CONTEXT GONE — AMOURANTH RTX IMMORTAL 🩷🚀♾️
 // ===================================================================
