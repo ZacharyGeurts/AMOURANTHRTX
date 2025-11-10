@@ -24,10 +24,10 @@
 // DEVELOPER CONTEXT — ALL THE DETAILS A CODER COULD DREAM OF
 // =============================================================================
 // VulkanRTX_Setup.hpp provides the ray-tracing setup backbone for AMOURANTH RTX, delegating buffers to BufferManager,
-swapchain views to SwapchainManager, and AS builds to LAS while handling SBT/descriptors/traceRays with StoneKey
-obfuscation on every raw access. It follows NVPro's vk_raytracing_tutorial blueprint but hybrids with zero-overhead
-delegation for scalability (e.g., async TLAS polling notifies renderer). Circular includes fixed via forward decls;
-all VK enums corrected (VK_* → proper VK_*); full inline impls for zero stubs.
+// swapchain views to SwapchainManager, and AS builds to LAS while handling SBT/descriptors/traceRays with StoneKey
+// obfuscation on every raw access. It follows NVPro's vk_raytracing_tutorial blueprint but hybrids with zero-overhead
+// delegation for scalability (e.g., async TLAS polling notifies renderer). Circular includes fixed via forward decls;
+// all VK enums corrected (VK_* → proper VK_*); full inline impls for zero stubs.
 // 
 // CORE DESIGN PRINCIPLES:
 // 1. **Delegation Hybrid**: BufferManager handles alloc/map; SwapchainManager decrypts views; LAS async builds.

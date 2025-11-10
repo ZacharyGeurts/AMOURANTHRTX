@@ -294,7 +294,7 @@ static_assert(stone_key2_base() != 0, "stone_key2_base must be non-zero");
 
 #if !defined(STONEKEY_PRINTED)
 #define STONEKEY_PRINTED
-#pragma message("Dual Licensed: CC BY-NC 4.0 (non-commercial) | Commercial: gzac5314@gmail.com")
+#pragma message("AMOURANTH RTX StoneKey Applied: Dual Licensed: CC BY-NC 4.0 (non-commercial) | Commercial: gzac5314@gmail.com")
 #endif
 
 // =============================================================================
