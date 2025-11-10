@@ -24,7 +24,7 @@
 
 #pragma once
 
-#define VK_ENABLE_BETA_EXTENSIONS
+//#define VK_ENABLE_BETA_EXTENSIONS
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_beta.h>
 
@@ -33,6 +33,7 @@
 #include "../GLOBAL/logging.hpp"
 #include "../GLOBAL/SwapchainManager.hpp"
 #include "../GLOBAL/BufferManager.hpp"
+#include "../GLOBAL/ResourceManager.hpp"
 #include "VulkanCommon.hpp"
 
 #include <SDL3/SDL.h>
@@ -174,6 +175,9 @@ inline Vulkan::Context::Context(SDL_Window* win, int w, int h)
     meshFeatures.meshShader = VK_TRUE;
     rayQueryFeatures.rayQuery = VK_TRUE;
 
+    // Explicitly set pNext to nullptr for the chain tail
+    rayQueryFeatures.pNext = nullptr;
+
     void** next = reinterpret_cast<void**>(&asFeatures.pNext);
     *next = &rtFeatures; next = &rtFeatures.pNext;
     *next = &addrFeatures; next = &addrFeatures.pNext;
@@ -215,26 +219,31 @@ inline void Vulkan::Context::loadRTXProcs() noexcept {
     vkCmdWriteAccelerationStructuresPropertiesKHR = reinterpret_cast<PFN_vkCmdWriteAccelerationStructuresPropertiesKHR>(vkGetDeviceProcAddr(device, "vkCmdWriteAccelerationStructuresPropertiesKHR"));
     vkCopyAccelerationStructureKHR = reinterpret_cast<PFN_vkCopyAccelerationStructureKHR>(vkGetDeviceProcAddr(device, "vkCopyAccelerationStructureKHR"));
     vkWriteAccelerationStructuresPropertiesKHR = reinterpret_cast<PFN_vkWriteAccelerationStructuresPropertiesKHR>(vkGetDeviceProcAddr(device, "vkWriteAccelerationStructuresPropertiesKHR"));
+    vkGetRayTracingCaptureReplayShaderGroupHandlesKHR = reinterpret_cast<PFN_vkGetRayTracingCaptureReplayShaderGroupHandlesKHR>(vkGetDeviceProcAddr(device, "vkGetRayTracingCaptureReplayShaderGroupHandlesKHR"));
 
     vkCmdDrawMeshTasksEXT = reinterpret_cast<PFN_vkCmdDrawMeshTasksEXT>(vkGetDeviceProcAddr(device, "vkCmdDrawMeshTasksEXT"));
+    vkCmdDrawMeshTasksIndirectEXT = reinterpret_cast<PFN_vkCmdDrawMeshTasksIndirectEXT>(vkGetDeviceProcAddr(device, "vkCmdDrawMeshTasksIndirectEXT"));
+
     vkCreateDeferredOperationKHR = reinterpret_cast<PFN_vkCreateDeferredOperationKHR>(vkGetDeviceProcAddr(device, "vkCreateDeferredOperationKHR"));
     vkDestroyDeferredOperationKHR = reinterpret_cast<PFN_vkDestroyDeferredOperationKHR>(vkGetDeviceProcAddr(device, "vkDestroyDeferredOperationKHR"));
+    vkDeferredOperationJoinKHR = reinterpret_cast<PFN_vkDeferredOperationJoinKHR>(vkGetDeviceProcAddr(device, "vkDeferredOperationJoinKHR"));
+    vkGetDeferredOperationResultKHR = reinterpret_cast<PFN_vkGetDeferredOperationResultKHR>(vkGetDeviceProcAddr(device, "vkGetDeferredOperationResultKHR"));
 }
 
 inline Vulkan::Context::~Context() {
     resourceManager().releaseAll(device);
-    VulkanSwapchainManager::get().cleanup(device);
+    SwapchainManager::get().cleanup(device);
     if (device) vkDestroyDevice(device, nullptr);
     if (surface) vkDestroySurfaceKHR(instance, surface, nullptr);
     if (instance) vkDestroyInstance(instance, nullptr);
 }
 
 inline void Vulkan::Context::createSwapchain() noexcept {
-    auto& swap = VulkanSwapchainManager::get();
+    auto& swap = SwapchainManager::get();
     swap.init(instance, physicalDevice, device, surface, width, height);
     swap.recreate(width, height);
 }
 
 inline void Vulkan::Context::destroySwapchain() {
-    VulkanSwapchainManager::get().cleanup(device);
+    SwapchainManager::get().cleanup(device);
 }

@@ -55,7 +55,7 @@ typedef uint32_t                  VkMemoryPropertyFlags;
 
 // Full Vulkan headers AFTER forward decls (for real functions)
 #include <vulkan/vulkan_core.h>
-#define VK_ENABLE_BETA_EXTENSIONS
+//#define VK_ENABLE_BETA_EXTENSIONS
 #include <vulkan/vulkan.h>
 
 #include "engine/GLOBAL/StoneKey.hpp"

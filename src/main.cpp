@@ -112,7 +112,7 @@ using namespace Logging::Color;
 // TECHNICAL ENGINE TOGGLES — PRODUCTION SAFE DEFAULTS
 // ──────────────────────────────────────────────────────────────────────────────
 struct EngineToggles {
-    bool overclockMode       = false;   // false = 120 FPS max (thermal safe)
+    bool overclockMode       = false;   // Regulated thermals (caution?)
 } gEngineToggles;
 
 // ──────────────────────────────────────────────────────────────────────────────
