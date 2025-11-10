@@ -3,6 +3,7 @@
 // Vulkan Renderer - Professional Production Edition
 // Integrated with Global LAS (acceleration structures), Global Dispose (resource tracking),
 // and Global Buffers (encrypted, tracked memory management via BufferManager)
+// Wishlist Integration: Denoising, adaptive sampling, ACES tonemapping, overclock mode, quantum jitter
 
 #pragma once
 
@@ -69,9 +70,9 @@ class VulkanRenderer {
 public:
     static constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 3;
 
-    void shutdown() noexcept;
+    enum class FpsTarget { FPS_60 = 60, FPS_120 = 120, FPS_UNLIMITED };
 
-    enum class FpsTarget { FPS_60 = 60, FPS_120 = 120 };
+    enum class TonemapType { FILMIC, ACES, REINHARD };
 
     /* ---------- Command Helpers ---------- */
     static VkCommandBuffer beginSingleTimeCommands(VkDevice device, VkCommandPool pool);
@@ -92,7 +93,8 @@ public:
     VulkanRenderer(int width, int height, SDL_Window* window,
                    const std::vector<std::string>& shaderPaths,
                    std::shared_ptr<Vulkan::Context> context,
-                   VulkanPipelineManager* pipelineMgr);
+                   VulkanPipelineManager* pipelineMgr,
+                   bool overclockFromMain = false);
 
     ~VulkanRenderer();
 
@@ -102,7 +104,7 @@ public:
     void takeOwnership(std::unique_ptr<VulkanPipelineManager> pm,
                        std::unique_ptr<VulkanBufferManager> bm);
     void setSwapchainManager(std::unique_ptr<VulkanSwapchainManager> mgr);
-    VulkanSwapchainManager& getSwapchainManager();
+    VulkanSwapchainManager& getSwapchainManager() noexcept;
 
     /**
      * @brief Renders a frame using global LAS for acceleration structures
@@ -113,7 +115,7 @@ public:
      * @brief Handles window resize
      */
     void handleResize(int newWidth, int newHeight);
-    void setRenderMode(int mode);
+    void setRenderMode(int mode) noexcept;
 
     /**
      * @brief Records ray tracing commands, using GlobalLAS::get().getDeviceAddress() for TLAS
@@ -130,19 +132,28 @@ public:
      */
     void rebuildAccelerationStructures();
 
-    void toggleHypertrace();
-    void toggleFpsTarget();
+    void toggleHypertrace() noexcept;
+    void toggleFpsTarget() noexcept;
+    void toggleDenoising() noexcept;
+    void toggleAdaptiveSampling() noexcept;
+    void setTonemapType(TonemapType type) noexcept;
+    void setOverclockMode(bool enabled) noexcept;
 
-    [[nodiscard]] VulkanBufferManager*          getBufferManager() const;
-    [[nodiscard]] VulkanPipelineManager*        getPipelineManager() const;
+    [[nodiscard]] VulkanBufferManager*          getBufferManager() const noexcept;
+    [[nodiscard]] VulkanPipelineManager*        getPipelineManager() const noexcept;
     [[nodiscard]] std::shared_ptr<Vulkan::Context> getHvContext() const { return context_; }
     [[nodiscard]] FpsTarget                     getFpsTarget() const { return fpsTarget_; }
+    [[nodiscard]] TonemapType                   getTonemapType() const { return tonemapType_; }
+    [[nodiscard]] bool                          isOverclockMode() const { return overclockMode_; }
+    [[nodiscard]] bool                          isDenoisingEnabled() const { return denoisingEnabled_; }
+    [[nodiscard]] bool                          isAdaptiveSamplingEnabled() const { return adaptiveSamplingEnabled_; }
 
     [[nodiscard]] VkBuffer      getUniformBuffer(uint32_t frame) const noexcept;
     [[nodiscard]] VkBuffer      getMaterialBuffer(uint32_t frame) const noexcept;
     [[nodiscard]] VkBuffer      getDimensionBuffer(uint32_t frame) const noexcept;
     [[nodiscard]] VkImageView   getRTOutputImageView(uint32_t idx) const noexcept;
     [[nodiscard]] VkImageView   getAccumulationView(uint32_t idx) const noexcept;
+    [[nodiscard]] VkImageView   getDenoiserView() const noexcept;
     [[nodiscard]] VkImageView   getEnvironmentMapView() const noexcept;
     [[nodiscard]] VkSampler     getEnvironmentMapSampler() const noexcept;
 
@@ -158,21 +169,28 @@ public:
     void allocateDescriptorSets();
     void updateDescriptorSets();
 
-private:
     /**
      * @brief Updates RTX descriptors with TLAS from GlobalLAS
      */
     void updateRTXDescriptors(VkAccelerationStructureKHR tlas, bool hasTlas, uint32_t frameIdx);
 
+    /**
+     * @brief Get GPU time from timestamp query
+     */
+    [[nodiscard]] float getGpuTime() const noexcept;
+
+private:
     void destroyRTOutputImages() noexcept;  // Calls Dispose::logAndTrackDestruction
     void destroyAccumulationImages() noexcept;
     void destroyNexusScoreImage() noexcept;
+    void destroyDenoiserImage() noexcept;
     void destroyAllBuffers() noexcept;  // Integrates Global Dispose
 
     void createFramebuffers();
     void createCommandBuffers();
     void createRTOutputImages();  // Uses global buffers
     void createAccumulationImages();
+    void createDenoiserImage();
     void createEnvironmentMap();  // Uses global buffers for env map
     void createComputeDescriptorSets();
 
@@ -183,11 +201,13 @@ private:
                                    VkCommandPool pool, VkQueue queue);
 
     void updateNexusDescriptors();
+    void updateDenoiserDescriptors();
     void updateRTDescriptors();
-    void updateUniformBuffer(uint32_t curImg, const Camera& cam);  // Uses global uniform buffers
+    void updateUniformBuffer(uint32_t curImg, const Camera& cam, float jitter = 0.0f);  // Uses global uniform buffers
     void updateTonemapUniform(uint32_t curImg);
     void performCopyAccumToOutput(VkCommandBuffer cmd);
     void performTonemapPass(VkCommandBuffer cmd, uint32_t imageIdx);
+    void performDenoisingPass(VkCommandBuffer cmd);
 
     /**
      * @brief Transitions image layout (utility)
@@ -213,14 +233,21 @@ private:
      */
     uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags props);
 
+    void updateTimestampQuery();
+
     // ===================================================================
     // State Members - Integrated with Globals
     // ===================================================================
     FpsTarget fpsTarget_ = FpsTarget::FPS_60;
+    TonemapType tonemapType_ = TonemapType::ACES;
     bool      hypertraceEnabled_ = false;
+    bool      overclockMode_ = false;
+    bool      denoisingEnabled_ = true;
+    bool      adaptiveSamplingEnabled_ = true;
     uint32_t  hypertraceCounter_ = 0;
     float     prevNexusScore_ = 0.5f;
     float     currentNexusScore_ = 0.5f;
+    float     exposure_ = 1.0f;
 
     SDL_Window*                     window_;
     std::shared_ptr<Vulkan::Context> context_;
@@ -245,6 +272,10 @@ private:
     Vulkan::VulkanHandle<VkPipelineLayout>      nexusLayout_;
     std::vector<VkDescriptorSet> nexusDescriptorSets_;
 
+    Vulkan::VulkanHandle<VkPipeline>            denoiserPipeline_;
+    Vulkan::VulkanHandle<VkPipelineLayout>      denoiserLayout_;
+    std::vector<VkDescriptorSet> denoiserDescriptorSets_;
+
     Vulkan::VulkanHandle<VkDescriptorPool> descriptorPool_;
 
     std::array<Vulkan::VulkanHandle<VkImage>,        MAX_FRAMES_IN_FLIGHT> rtOutputImages_;
@@ -254,6 +285,10 @@ private:
     std::array<Vulkan::VulkanHandle<VkImage>,        MAX_FRAMES_IN_FLIGHT> accumImages_;
     std::array<Vulkan::VulkanHandle<VkDeviceMemory>, MAX_FRAMES_IN_FLIGHT> accumMemories_;
     std::array<Vulkan::VulkanHandle<VkImageView>,    MAX_FRAMES_IN_FLIGHT> accumViews_;
+
+    Vulkan::VulkanHandle<VkImage>        denoiserImage_;
+    Vulkan::VulkanHandle<VkDeviceMemory> denoiserMemory_;
+    Vulkan::VulkanHandle<VkImageView>    denoiserView_;
 
     // Global buffers: Use CREATE_DIRECT_BUFFER for allocation, DESTROY_DIRECT_BUFFER in deleters
     std::vector<uint64_t> uniformBufferEncs_;  // Encrypted handles for global tracking
@@ -288,15 +323,19 @@ private:
     uint32_t framesThisSecond_ = 0;
 
     double   timestampPeriod_ = 0.0;
-    float    avgFrameTimeMs_ = 0.0f;
-    float    minFrameTimeMs_ = std::numeric_limits<float>::max();
-    float    maxFrameTimeMs_ = 0.0f;
-    float    avgGpuTimeMs_   = 0.0f;
-    float    minGpuTimeMs_   = std::numeric_limits<float>::max();
-    float    maxGpuTimeMs_   = 0.0f;
+    VkQueryPool timestampQueryPool_ = VK_NULL_HANDLE;
+    uint32_t  timestampQueryCount_ = 0;
+    uint32_t  timestampLastQuery_ = 0;
+    uint32_t  timestampCurrentQuery_ = 0;
+    float     timestampLastTime_ = 0.0f;
+    float     timestampCurrentTime_ = 0.0f;
+    float     avgFrameTimeMs_ = 0.0f;
+    float     minFrameTimeMs_ = std::numeric_limits<float>::max();
+    float     maxFrameTimeMs_ = 0.0f;
+    float     avgGpuTimeMs_   = 0.0f;
+    float     minGpuTimeMs_   = std::numeric_limits<float>::max();
+    float     maxGpuTimeMs_   = 0.0f;
 
-    int      tonemapType_ = 1;
-    float    exposure_    = 1.0f;
     uint32_t maxAccumFrames_ = 1024;
 
     Vulkan::VulkanHandle<VkImage>        hypertraceScoreImage_;
@@ -307,6 +346,8 @@ private:
     Vulkan::VulkanHandle<VkDeviceMemory> hypertraceScoreStagingMemory_;
 
     uint64_t sharedStagingBufferEnc_ = 0;  // Global shared staging
+    Vulkan::VulkanHandle<VkBuffer>   sharedStagingBuffer_;
+    Vulkan::VulkanHandle<VkDeviceMemory> sharedStagingMemory_;
 
     Vulkan::VulkanHandle<VkDescriptorPool> rtDescriptorPool_;
 };
@@ -317,5 +358,6 @@ private:
  * Global Dispose: All destructions logged and tracked
  * Global Buffers: Encrypted allocations via BufferManager macros
  * Production-ready: Zero leaks, full RAII, RTX-optimized
+ * Wishlist: Denoising, adaptive sampling, ACES tonemap, overclock unlimited FPS
  * Build clean - High-performance rendering achieved
  */
