@@ -36,10 +36,11 @@ using namespace Logging::Color;
 // VulkanRTX IMPLEMENTATION — FULL GLOBAL DELEGATION
 // ===================================================================
 
-VulkanRTX::VulkanRTX(std::shared_ptr<Context> ctx, int width, int height, VulkanPipelineManager* pipelineMgr)
-    : context_(std::move(ctx))
-    , pipelineMgr_(pipelineMgr)
-    , extent_{static_cast<uint32_t>(width), static_cast<uint32_t>(height)}
+Vulkan::VulkanRTX::VulkanRTX(std::shared_ptr<Context> ctx, int width, int height, VulkanPipelineManager* pipelineMgr)
+    : context_(ctx), pipelineManager_(pipelineMgr), extent_{static_cast<uint32_t>(width), static_cast<uint32_t>(height)}
+{
+    LOG_INFO_CAT("RTX", "VulkanRTX initialized in CORE — Extent: {}x{}", extent_.width, extent_.height);
+}
 {
     device_ = context_->device;
     physicalDevice_ = context_->physicalDevice;
@@ -55,10 +56,9 @@ VulkanRTX::VulkanRTX(std::shared_ptr<Context> ctx, int width, int height, Vulkan
     LOG_SUCCESS_CAT("RTX", "🩷 VulkanRTX initialized — {}x{} — StoneKey thermal-quantum RAII engaged", width, height);
 }
 
-VulkanRTX::~VulkanRTX() noexcept {
-    vkDestroySemaphore(device_, imageAvailableSemaphore_, nullptr);
-    vkDestroyFence(device_, inFlightFence_, nullptr);
-    LOG_INFO_CAT("RTX", "🩸 Destroyed — Pink photons protected");
+// Destructor if needed
+Vulkan::VulkanRTX::~VulkanRTX() {
+    LOG_SUCCESS_CAT("RTX", "{}VulkanRTX destroyed — CORE CLEAN — PINK PHOTONS ETERNAL{}", PLASMA_FUCHSIA, RESET);
 }
 
 VkDeviceSize VulkanRTX::alignUp(VkDeviceSize value, VkDeviceSize alignment) noexcept {
@@ -72,7 +72,7 @@ void VulkanRTX::createBlackFallbackImage() {
         VK_BUFFER_USAGE_TRANSFER_SRC_BIT, 
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
     
-    void* data = BUFFER_MAP(stagingEnc);
+    void* data = BUFFER_MAP(stagingEnc, 0); 
     uint32_t blackPixel = 0xFF000000u;  // Opaque black RGBA
     std::memcpy(data, &blackPixel, 4);
     BUFFER_UNMAP(stagingEnc);
@@ -192,7 +192,7 @@ void VulkanRTX::endSingleTimeCommands(VkCommandBuffer cmd, VkCommandPool pool, V
 void VulkanRTX::createBottomLevelAS(const std::vector<VkGeometryKHR>& geometries) noexcept {
     // Delegate to AMAZO_LAS singleton
     std::vector<std::pair<VkAccelerationStructureKHR, glm::mat4>> instances;
-    LAS::BUILD_BLAS(context_->commandPool, context_->graphicsQueue, vertexBufferEnc_, indexBufferEnc_, vertexCount_, indexCount_);
+    LAS::BUILD_BLAS(context_->commandPool, context_->graphicsQueue, vertexBufferEnc_, indexBufferEnc_, vertexCount_, indexCount_, VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR);
     LOG_INFO_CAT("RTX", "🍒 BLAS built via GLOBAL LAS — TITAN buffers protected");
 }
 

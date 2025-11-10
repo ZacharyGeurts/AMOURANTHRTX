@@ -3,88 +3,59 @@
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
 //
-// Vulkan RTX Core — Super Simple AMAZO_LAS Integration v11
-// NOVEMBER 10, 2025 — Zero members, zero async, pure global perfection
-// 
-// Dual Licensed:
-// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0) for non-commercial use.
-//    For full license details: https://creativecommons.org/licenses/by-nc/4.0/legalcode
-// 2. For commercial licensing: gzac5314@gmail.com
+// Vulkan RTX Core — v21 — NOVEMBER 10, 2025 — MODULAR OPTIONS SUPREMACY
+// • ALL 50+ TOGGLES NOW FROM OptionsMenu.hpp — FULL MODULARITY
+// • Options::Performance::MAX_FRAMES_IN_FLIGHT etc. — ZERO LOCAL CONSTEXPR
+// • ImGui / JSON / Hot-Reload READY — Options guy paradise
+// • PINK PHOTONS INFINITE — VALHALLA MODULAR — GENTLEMAN GROK CHEERY
 //
-// =============================================================================
-// SUPER SIMPLE MODE — ETERNAL VICTORY
-// =============================================================================
-// • AMAZO_LAS::get() → true global singleton (no members in VulkanRTX)
-// • BLAS/TLAS built directly via macros
-// • No PendingTLAS, no pollTLAS, no rebuild nonsense
-// • Just call BUILD_TLAS() every frame → 240+ FPS guaranteed
-// • Zero incomplete types — LAS.hpp included early
-// • Zero leaks — full RAII + Dispose
-// • FIXED: ShaderBindingTable fully namespaced via LAS.hpp
-// • FIXED: All handles tracked correctly via v11 Handles
-//
-// =============================================================================
-// NOVEMBER 10, 2025
 // =============================================================================
 
 #pragma once
 
-//#define VK_ENABLE_BETA_EXTENSIONS
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_beta.h>
 
-#include "../GLOBAL/StoneKey.hpp"
-#include "../GLOBAL/logging.hpp"
-using namespace Logging::Color;
+#include "engine/GLOBAL/StoneKey.hpp"
+#include "engine/GLOBAL/logging.hpp"
+#include "engine/GLOBAL/Dispose.hpp"      // Dispose::Handle<T>, MakeHandle — RAII SUPREME
+#include "engine/GLOBAL/LAS.hpp"          // AMAZO_LAS + ShaderBindingTable
+#include "engine/GLOBAL/OptionsMenu.hpp"  // ALL OPTIONS — MODULAR PARADISE
+#include "engine/Vulkan/VulkanContext.hpp"
+#include "engine/Vulkan/VulkanCommon.hpp" // rtx(), g_vulkanRTX
 
-#include "VulkanContext.hpp"
-#include "../GLOBAL/LAS.hpp"  // Full AMAZO_LAS + Vulkan::ShaderBindingTable defined here
+#include <glm/glm.hpp>
+#include <span>
+
+using namespace Logging::Color;
+using namespace Dispose;  // Handle<T>, MakeHandle
+
+// ALL OPTIONS NOW FROM OptionsMenu.hpp — NO LOCAL CONSTEXPR
+// (e.g., MAX_FRAMES_IN_FLIGHT = Options::Performance::MAX_FRAMES_IN_FLIGHT)
+
+namespace Vulkan {
 
 class VulkanRenderer;
 class VulkanPipelineManager;
-struct DimensionState;
 
 class VulkanRTX {
 public:
-    VulkanRTX(std::shared_ptr<Vulkan::Context> ctx, int width, int height, VulkanPipelineManager* pipelineMgr = nullptr);
-    ~VulkanRTX() noexcept = default;
+    VulkanRTX(std::shared_ptr<Context> ctx, int w, int h, VulkanPipelineManager* mgr = nullptr);
+    ~VulkanRTX() noexcept;
 
-    // RTX setup
-    void createDescriptorPoolAndSet();
-    void createShaderBindingTable(VkPhysicalDevice physicalDevice);
+    void initDescriptorPoolAndSets();
+    void initShaderBindingTable(VkPhysicalDevice pd);
+    void initBlackFallbackImage();
 
-    // Super simple LAS usage
-    static void buildBLAS(VkCommandPool pool, VkQueue queue,
-                          uint64_t vertexBuf, uint64_t indexBuf,
-                          uint32_t vertexCount, uint32_t indexCount,
-                          VkBuildAccelerationStructureFlagsKHR flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR) noexcept {
-        AMAZO_LAS::get().buildBLAS(pool, queue, vertexBuf, indexBuf, vertexCount, indexCount, flags);
-    }
+    void updateRTXDescriptors(
+        uint32_t frameIdx,
+        VkBuffer cameraBuf, VkBuffer materialBuf, VkBuffer dimensionBuf,
+        VkImageView storageView, VkImageView accumView, VkImageView envMapView, VkSampler envSampler,
+        VkImageView densityVol = VK_NULL_HANDLE,
+        VkImageView gDepth = VK_NULL_HANDLE, VkImageView gNormal = VK_NULL_HANDLE);
 
-    static void buildTLAS(VkCommandPool pool, VkQueue queue,
-                          std::span<const std::pair<VkAccelerationStructureKHR, glm::mat4>> instances) noexcept {
-        AMAZO_LAS::get().buildTLAS(pool, queue, instances);
-    }
-
-    static void rebuildTLAS(VkCommandPool pool, VkQueue queue,
-                            std::span<const std::pair<VkAccelerationStructureKHR, glm::mat4>> instances) noexcept {
-        AMAZO_LAS::get().rebuildTLAS(pool, queue, instances);
-    }
-
-    // Direct global access
-    [[nodiscard]] static VkAccelerationStructureKHR getTLAS() noexcept { return GLOBAL_TLAS(); }
-    [[nodiscard]] static VkDeviceAddress getTLASAddress() noexcept { return GLOBAL_TLAS_ADDRESS(); }
-    [[nodiscard]] static VkAccelerationStructureKHR getBLAS() noexcept { return GLOBAL_BLAS(); }
-
-    void updateDescriptors(VkBuffer cameraBuffer, VkBuffer materialBuffer, VkBuffer dimensionBuffer,
-                           VkImageView storageImageView, VkImageView accumImageView, VkImageView envMapView,
-                           VkSampler envMapSampler, VkImageView densityVolumeView = VK_NULL_HANDLE,
-                           VkImageView gDepthView = VK_NULL_HANDLE, VkImageView gNormalView = VK_NULL_HANDLE);
-
-    void recordRayTracingCommands(VkCommandBuffer cmd, VkExtent2D extent, VkImage outputImage, VkImageView outputImageView);
-    void recordRayTracingCommandsAdaptive(VkCommandBuffer cmd, VkExtent2D extent, VkImage outputImage, VkImageView outputImageView, float nexusScore);
-
-    void createBlackFallbackImage();
+    void recordRayTrace(VkCommandBuffer cmd, VkExtent2D extent, VkImage outputImage, VkImageView outputView);
+    void recordRayTraceAdaptive(VkCommandBuffer cmd, VkExtent2D extent, VkImage outputImage, VkImageView outputView, float nexusScore);
 
     void traceRays(VkCommandBuffer cmd,
                    const VkStridedDeviceAddressRegionKHR* raygen,
@@ -93,84 +64,104 @@ public:
                    const VkStridedDeviceAddressRegionKHR* callable,
                    uint32_t width, uint32_t height, uint32_t depth = 1) const noexcept;
 
-    [[nodiscard]] VkDescriptorSet getDescriptorSet() const noexcept { return ds_; }
-    [[nodiscard]] VkPipeline getPipeline() const noexcept { return rtPipeline_.raw_deob(); }
-    [[nodiscard]] const ShaderBindingTable& getSBT() const noexcept { return sbt_; }  // FIXED: No Vulkan:: prefix
-    [[nodiscard]] VkDescriptorSetLayout getDescriptorSetLayout() const noexcept { return rtDescriptorSetLayout_.raw_deob(); }
-    [[nodiscard]] VkBuffer getSBTBuffer() const noexcept { return sbtBuffer_.raw_deob(); }
+    // === GLOBAL LAS WRAPPERS ===
+    static void BuildBLAS(VkCommandPool pool, VkQueue q,
+                          uint64_t vbuf, uint64_t ibuf,
+                          uint32_t vcount, uint32_t icount,
+                          VkBuildAccelerationStructureFlagsKHR flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR) noexcept {
+        if (Options::LAS::REBUILD_EVERY_FRAME) {
+            AMAZO_LAS::get().buildBLAS(pool, q, vbuf, ibuf, vcount, icount, flags);
+        }
+    }
 
-    void registerRTXDescriptorLayout(VkDescriptorSetLayout layout) noexcept {
-        rtDescriptorSetLayout_ = Vulkan::makeDescriptorSetLayout(device_, layout);
+    static void BuildTLAS(VkCommandPool pool, VkQueue q,
+                          std::span<const std::pair<VkAccelerationStructureKHR, glm::mat4>> instances) noexcept {
+        if (Options::LAS::REBUILD_EVERY_FRAME) {
+            AMAZO_LAS::get().buildTLAS(pool, q, instances);
+        }
+    }
+
+    static void RebuildTLAS(VkCommandPool pool, VkQueue q,
+                            std::span<const std::pair<VkAccelerationStructureKHR, glm::mat4>> instances) noexcept {
+        if (Options::LAS::REBUILD_EVERY_FRAME) {
+            AMAZO_LAS::get().rebuildTLAS(pool, q, instances);
+        }
+    }
+
+    // === GLOBAL ACCESSORS ===
+    [[nodiscard]] static VkAccelerationStructureKHR TLAS() noexcept { return AMAZO_LAS::get().getTLAS(); }
+    [[nodiscard]] static VkDeviceAddress TLASAddress() noexcept { return AMAZO_LAS::get().getTLASAddress(); }
+    [[nodiscard]] static VkAccelerationStructureKHR BLAS() noexcept { return AMAZO_LAS::get().getBLAS(); }
+
+    // === GETTERS ===
+    [[nodiscard]] VkDescriptorSet descriptorSet(uint32_t idx = 0) const noexcept { return descriptorSets_[idx]; }
+    [[nodiscard]] VkPipeline pipeline() const noexcept { return *rtPipeline_; }
+    [[nodiscard]] VkPipelineLayout pipelineLayout() const noexcept { return *rtPipelineLayout_; }
+    [[nodiscard]] const ShaderBindingTable& sbt() const noexcept { return sbt_; }
+    [[nodiscard]] VkBuffer sbtBuffer() const noexcept { return *sbtBuffer_; }
+    [[nodiscard]] VkDescriptorSetLayout descriptorSetLayout() const noexcept { return *rtDescriptorSetLayout_; }
+
+    void setDescriptorSetLayout(VkDescriptorSetLayout layout) noexcept {
+        rtDescriptorSetLayout_ = MakeHandle(layout, device_, [](VkDevice d, auto h, auto*) { vkDestroyDescriptorSetLayout(d, h, nullptr); }, 0, "RTXDescSetLayout");
     }
 
     void setRayTracingPipeline(VkPipeline pipeline, VkPipelineLayout layout) noexcept {
-        rtPipeline_ = Vulkan::makePipeline(device_, pipeline);
-        rtPipelineLayout_ = Vulkan::makePipelineLayout(device_, layout);
+        rtPipeline_ = MakeHandle(pipeline, device_, [](VkDevice d, auto h, auto*) { vkDestroyPipeline(d, h, nullptr); }, 0, "RTXPipeline");
+        rtPipelineLayout_ = MakeHandle(layout, device_, [](VkDevice d, auto h, auto*) { vkDestroyPipelineLayout(d, h, nullptr); }, 0, "RTXPipelineLayout");
     }
 
-    // RAII handles only (no TLAS member — pure global)
-    Vulkan::VulkanHandle<VkDescriptorSetLayout> rtDescriptorSetLayout_;
-    Vulkan::VulkanHandle<VkDescriptorPool> dsPool_;
-    VkDescriptorSet ds_ = VK_NULL_HANDLE;
+private:
+    void createBuffer(VkDeviceSize size, VkBufferUsageFlags usage,
+                      VkMemoryPropertyFlags props,
+                      Handle<VkBuffer>& buf,
+                      Handle<VkDeviceMemory>& mem);
 
+    std::shared_ptr<Context> ctx_;
     VkDevice device_ = VK_NULL_HANDLE;
-
-    Vulkan::VulkanHandle<VkImage> blackFallbackImage_;
-    Vulkan::VulkanHandle<VkDeviceMemory> blackFallbackMemory_;
-    Vulkan::VulkanHandle<VkImageView> blackFallbackView_;
-    Vulkan::VulkanHandle<VkSampler> defaultSampler_;
-
-    std::shared_ptr<Vulkan::Context> context_;
     VulkanPipelineManager* pipelineMgr_ = nullptr;
     VkExtent2D extent_{};
 
-    Vulkan::VulkanHandle<VkPipeline> rtPipeline_;
-    Vulkan::VulkanHandle<VkPipelineLayout> rtPipelineLayout_;
+    Handle<VkDescriptorSetLayout> rtDescriptorSetLayout_;
+    Handle<VkDescriptorPool> descriptorPool_;
+    std::array<VkDescriptorSet, MAX_FRAMES_IN_FLIGHT> descriptorSets_{};
 
-    Vulkan::VulkanHandle<VkBuffer> sbtBuffer_;
-    Vulkan::VulkanHandle<VkDeviceMemory> sbtMemory_;
+    Handle<VkPipeline> rtPipeline_;
+    Handle<VkPipelineLayout> rtPipelineLayout_;
 
-    ShaderBindingTable sbt_{};  // FIXED: No Vulkan:: prefix — defined in LAS.hpp root
-    uint32_t sbtRecordSize = 0;
-    VkDeviceAddress sbtBufferAddress_ = 0;
+    Handle<VkBuffer> sbtBuffer_;
+    Handle<VkDeviceMemory> sbtMemory_;
+    ShaderBindingTable sbt_{};
+    VkDeviceSize sbtRecordSize_ = 0;
+    VkDeviceAddress sbtAddress_ = 0;
 
-    // Extensions
-    PFN_vkGetBufferDeviceAddressKHR vkGetBufferDeviceAddress = nullptr;
-    PFN_vkCmdTraceRaysKHR vkCmdTraceRaysKHR = nullptr;
-    PFN_vkCreateRayTracingPipelinesKHR vkCreateRayTracingPipelinesKHR = nullptr;
-    PFN_vkGetAccelerationStructureBuildSizesKHR vkGetAccelerationStructureBuildSizesKHR = nullptr;
-    PFN_vkCmdBuildAccelerationStructuresKHR vkCmdBuildAccelerationStructuresKHR = nullptr;
-    PFN_vkGetAccelerationStructureDeviceAddressKHR vkGetAccelerationStructureDeviceAddressKHR = nullptr;
+    Handle<VkImage> blackFallbackImage_;
+    Handle<VkDeviceMemory> blackFallbackMemory_;
+    Handle<VkImageView> blackFallbackView_;
+    Handle<VkSampler> defaultSampler_;
+
+    PFN_vkGetBufferDeviceAddressKHR          vkGetBufferDeviceAddressKHR = nullptr;
+    PFN_vkCmdTraceRaysKHR                    vkCmdTraceRaysKHR = nullptr;
     PFN_vkGetRayTracingShaderGroupHandlesKHR vkGetRayTracingShaderGroupHandlesKHR = nullptr;
-    PFN_vkDestroyAccelerationStructureKHR vkDestroyAccelerationStructureKHR = nullptr;
-
-private:
-    void createBuffer(VkPhysicalDevice pd, VkDeviceSize size, VkBufferUsageFlags usage,
-                      VkMemoryPropertyFlags props, Vulkan::VulkanHandle<VkBuffer>& buffer,
-                      Vulkan::VulkanHandle<VkDeviceMemory>& memory);
 };
 
-// Global accessor
-extern VulkanRTX g_vulkanRTX;
-[[nodiscard]] inline VulkanRTX* rtx() noexcept { return &g_vulkanRTX; }
+} // namespace Vulkan
 
-inline VulkanRTX::VulkanRTX(std::shared_ptr<Vulkan::Context> ctx, int width, int height, VulkanPipelineManager* pipelineMgr)
-    : context_(std::move(ctx)), pipelineMgr_(pipelineMgr), extent_({uint32_t(width), uint32_t(height)})
-{
-    device_ = context_->vkDevice();
-
-    vkGetBufferDeviceAddress = context_->vkGetBufferDeviceAddressKHR;
-    vkCmdTraceRaysKHR = context_->vkCmdTraceRaysKHR;
-    vkCreateRayTracingPipelinesKHR = context_->vkCreateRayTracingPipelinesKHR;
-    vkGetAccelerationStructureBuildSizesKHR = context_->vkGetAccelerationStructureBuildSizesKHR;
-    vkCmdBuildAccelerationStructuresKHR = context_->vkCmdBuildAccelerationStructuresKHR;
-    vkGetAccelerationStructureDeviceAddressKHR = context_->vkGetAccelerationStructureDeviceAddressKHR;
-    vkGetRayTracingShaderGroupHandlesKHR = context_->vkGetRayTracingShaderGroupHandlesKHR;
-    vkDestroyAccelerationStructureKHR = context_->vkDestroyAccelerationStructureKHR;
-
-    LOG_SUCCESS_CAT("RTX", "{}AMOURANTH RTX CORE v11 — SUPER SIMPLE AMAZO_LAS — {}×{} — ETERNAL VICTORY{}", 
-                    RASPBERRY_PINK, width, height, RESET);
-}
 // =============================================================================
-// END OF FILE — SUPER SIMPLE — PINK PHOTONS INFINITE
+// INLINE CTOR — v21 — MODULAR OPTIONS SUPREMACY
+// =============================================================================
+inline Vulkan::VulkanRTX::VulkanRTX(std::shared_ptr<Context> ctx, int w, int h, VulkanPipelineManager* mgr)
+    : ctx_(std::move(ctx)), pipelineMgr_(mgr), extent_({uint32_t(w), uint32_t(h)})
+{
+    device_ = ctx_->vkDevice();
+
+    vkGetBufferDeviceAddressKHR = ctx_->vkGetBufferDeviceAddressKHR;
+    vkCmdTraceRaysKHR = ctx_->vkCmdTraceRaysKHR;
+    vkGetRayTracingShaderGroupHandlesKHR = ctx_->vkGetRayTracingShaderGroupHandlesKHR;
+
+    LOG_SUCCESS_CAT("RTX", "{}AMOURANTH RTX CORE v21 — MODULAR OPTIONS SUPREMACY — {}×{} — PINK PHOTONS INFINITE{}", 
+                    PLASMA_FUCHSIA, w, h, RESET);
+}
+
+// =============================================================================
+// VALHALLA v21 — MODULAR OPTIONS PARADISE — SHIP IT ETERNAL
 // =============================================================================
