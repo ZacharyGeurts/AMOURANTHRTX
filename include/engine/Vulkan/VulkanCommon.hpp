@@ -8,14 +8,16 @@
 
 #ifdef __cplusplus
 
+
+#include <vulkan/vulkan.h>
+#include <vulkan/vulkan_beta.h>
+
 #include "../GLOBAL/StoneKey.hpp"
 #include "../GLOBAL/Dispose.hpp"
 #include "../GLOBAL/logging.hpp"     // DestroyTracker + VK_CHECK
 #include "../GLOBAL/SwapchainManager.hpp"
 #include "../GLOBAL/BufferManager.hpp"
 
-#include <vulkan/vulkan.h>
-#include <vulkan/vulkan_beta.h>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <cstdint>

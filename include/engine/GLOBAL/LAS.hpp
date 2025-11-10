@@ -115,16 +115,6 @@ namespace Vulkan {
     void endSingleTimeCommands(VkCommandBuffer cmd, VkQueue queue, VkCommandPool pool) noexcept;
 }
 
-// VK_CHECK macro — logs + aborts on error (production: remove abort)
-#define VK_CHECK(call, msg) \
-    do { \
-        VkResult res = (call); \
-        if (res != VK_SUCCESS) { \
-            LOG_ERROR_CAT("LAS", "%s: VkResult %d", msg, res); \
-            std::abort(); \
-        } \
-    } while (0)
-
 // ===================================================================
 // Forward Declarations & Type Aliases
 // ===================================================================

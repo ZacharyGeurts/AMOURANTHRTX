@@ -294,7 +294,6 @@ static_assert(stone_key2_base() != 0, "stone_key2_base must be non-zero");
 
 #if !defined(STONEKEY_PRINTED)
 #define STONEKEY_PRINTED
-#pragma message("STONEKEY APOCALYPSE v3 — TLS JITTER + BMQ + VENDOR SIM + FUZZ ASSERTS — ROCK ETERNAL")
 #pragma message("Dual Licensed: CC BY-NC 4.0 (non-commercial) | Commercial: gzac5314@gmail.com")
 #endif
 
