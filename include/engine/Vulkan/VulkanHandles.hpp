@@ -1,29 +1,29 @@
 // include/engine/Vulkan/VulkanHandles.hpp
-// Vulkan RAII Handle Factory System
-// AMOURANTH RTX Engine © 2025 Zachary Geurts
-// Version: Valhalla Elite - November 09, 2025
-// FULL CONTEXT + FUNCTION POINTERS + LAMBDA-FREE DESTROY
+// AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
+// Vulkan RAII Handle Factory System - Professional Production Edition
+// Full StoneKey obfuscation, zero-cost, supports custom lambda deleters via std::function
 
 #pragma once
 
 #include <vulkan/vulkan.h>
+#include <functional>
 #include "../GLOBAL/StoneKey.hpp"
-#include "VulkanContext.hpp"      // FULL ctx() + VulkanHandle + function pointers
-#include <type_traits>
+#include "VulkanContext.hpp"
 
-using Vulkan::VulkanHandle;
+namespace Vulkan {
 
-// ===================================================================
-// Global Context Accessors
-// ===================================================================
-inline VkInstance vkInstance() noexcept { return Vulkan::ctx()->instance; }
-inline VkDevice   vkDevice()   noexcept { return Vulkan::ctx()->device;   }
+/**
+ * @brief Global context accessors
+ */
+inline VkInstance vkInstance() noexcept { return ctx()->instance; }
+inline VkDevice   vkDevice()   noexcept { return ctx()->device;   }
 
-// ===================================================================
-// Factory Macros — StoneKey Obfuscation
-// ===================================================================
+/**
+ * @brief Macro for creating standard Vulkan RAII handles with StoneKey obfuscation
+ */
 #define MAKE_VK_HANDLE(name, vkType) \
-    [[nodiscard]] inline VulkanHandle<vkType> make##name(VkDevice dev, vkType handle) noexcept { \
+    [[nodiscard]] inline VulkanHandle<vkType> make##name(VkDevice dev, vkType handle) noexcept \
+    { \
         uint64_t raw = reinterpret_cast<uint64_t>(handle); \
         uint64_t obf = (std::is_pointer_v<vkType> || handle == VK_NULL_HANDLE) ? raw : obfuscate(raw); \
         return VulkanHandle<vkType>(reinterpret_cast<vkType>(obf), dev); \
@@ -47,33 +47,48 @@ MAKE_VK_HANDLE(SwapchainKHR,        VkSwapchainKHR)
 
 #undef MAKE_VK_HANDLE
 
-// ===================================================================
-// Acceleration Structure — RAW FUNCTION POINTER (no cast needed)
-// ===================================================================
+/**
+ * @brief Deleter type for acceleration structures - supports full lambda capture
+ */
+using ASDeleter = std::function<void(VkDevice, VkAccelerationStructureKHR, const VkAllocationCallbacks*)>;
+
+/**
+ * @brief Creates RAII acceleration structure with custom deleter and StoneKey obfuscation
+ */
 [[nodiscard]] inline VulkanHandle<VkAccelerationStructureKHR> makeAccelerationStructure(
     VkDevice dev,
     VkAccelerationStructureKHR as,
-    PFN_vkDestroyAccelerationStructureKHR func = nullptr) noexcept
+    ASDeleter deleter = nullptr) noexcept
 {
-    auto destroyFn = func ? func : Vulkan::ctx()->vkDestroyAccelerationStructureKHR;
+    if (!deleter) {
+        deleter = [](VkDevice d, VkAccelerationStructureKHR a, const VkAllocationCallbacks* p) {
+            ctx()->vkDestroyAccelerationStructureKHR(d, a, p);
+        };
+    }
+
     uint64_t raw = reinterpret_cast<uint64_t>(as);
     uint64_t obf = (as == VK_NULL_HANDLE) ? raw : obfuscate(raw);
+
     return VulkanHandle<VkAccelerationStructureKHR>(
-        reinterpret_cast<VkAccelerationStructureKHR>(obf), dev, destroyFn);
+        reinterpret_cast<VkAccelerationStructureKHR>(obf),
+        dev,
+        std::move(deleter));
 }
 
-// ===================================================================
-// Deferred Operation — RAW FUNCTION POINTER
-// ===================================================================
+/**
+ * @brief Creates RAII deferred operation with raw function pointer deleter
+ */
 [[nodiscard]] inline VulkanHandle<VkDeferredOperationKHR> makeDeferredOperation(
     VkDevice dev,
     VkDeferredOperationKHR op) noexcept
 {
     uint64_t raw = reinterpret_cast<uint64_t>(op);
     uint64_t obf = (op == VK_NULL_HANDLE) ? raw : obfuscate(raw);
+
     return VulkanHandle<VkDeferredOperationKHR>(
-        reinterpret_cast<VkDeferredOperationKHR>(obf), dev,
-        Vulkan::ctx()->vkDestroyDeferredOperationKHR);
+        reinterpret_cast<VkDeferredOperationKHR>(obf),
+        dev,
+        ctx()->vkDestroyDeferredOperationKHR);
 }
 
-// END OF FILE — BUILD CLEAN — ZERO ERRORS — STONEKEY ETERNAL — VALHALLA ACHIEVED
+} // namespace Vulkan

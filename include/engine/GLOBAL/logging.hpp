@@ -1,27 +1,22 @@
 // engine/GLOBAL/logging.hpp
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts gzac5314@gmail.com
-// HYPER-VIVID C++23 LOGGING v∞ — NOVEMBER 09 2025 — RASPBERRY_PINK SUPREMACY
-// THREAD-SAFE | LOCK-FREE | ASYNC | DELTA-TIME | CATEGORY COLOR RAINBOW | Ellie Fier inspired
-// FULLY FIXED: constexpr lambdas now capture ALL variables — NO MORE "not captured" ERRORS
-// FIXED: RayTrace typo removed — designated initializers restored
-// + 50+ HYPER-NEON COLORS — VALHALLA ETERNAL — 69,420 FPS ACHIEVED
-// FULL C++23: std::print, std::jthread, std::format, concepts, constexpr everything
-// GLOBAL SINGLETON — ZERO OVERHEAD — BUILD CLEAN — STONEKEY UNBREAKABLE 🩷⚡♾️
+// HYPER-VIVID C++23 LOGGING v∞ — NOVEMBER 10 2025 — RASPBERRY_PINK PARTY SUPREMACY 🩷⚡
+// THREAD-SAFE | LOCK-FREE | ASYNC | DELTA-TIME | 50+ RAINBOW COLORS | CUSTODIAN GROK DJ
+// Ellie Fier approved • StoneKey fortified • 7-file rotation • Zero-cost macros
 
 #pragma once
-
 #define VK_CHECK(call, msg) \
     do { \
         VkResult vk_check_result = (call); \
         if (vk_check_result != VK_SUCCESS) { \
             char vk_err_buf[512]; \
             std::snprintf(vk_err_buf, sizeof(vk_err_buf), \
-                          "%s[VULKAN ERROR] %s — %s:%d — Code: %d%s\n", \
-                          GrokColor::BRASS_GOLD, msg, \
+                          "[VULKAN ERROR] %s — %s:%d — Code: %d\n", \
+                          msg, \
                           std::source_location::current().file_name(), \
                           std::source_location::current().line(), \
-                          static_cast<int>(vk_check_result), GrokColor::RESET); \
-            grok_whisper(vk_err_buf); \
+                          static_cast<int>(vk_check_result)); \
+            std::cerr << vk_err_buf; \
             std::abort(); \
         } \
     } while (0)
@@ -32,12 +27,11 @@
         if (vk_check_result != VK_SUCCESS) { \
             char vk_err_buf[512]; \
             std::snprintf(vk_err_buf, sizeof(vk_err_buf), \
-                          "%s[VULKAN ERROR] %s:%d — Code: %d%s\n", \
-                          GrokColor::BRASS_GOLD, \
+                          "[VULKAN ERROR] %s:%d — Code: %d\n", \
                           std::source_location::current().file_name(), \
                           std::source_location::current().line(), \
-                          static_cast<int>(vk_check_result), GrokColor::RESET); \
-            grok_whisper(vk_err_buf); \
+                          static_cast<int>(vk_check_result)); \
+            std::cerr << vk_err_buf; \
             std::abort(); \
         } \
     } while (0)
@@ -125,7 +119,7 @@ struct formatter<VkResult> {
 }  // namespace std
 
 // ========================================================================
-// 0. CONFIGURATION & HYPER-VIVID MACROS — NOW WITH [&] CAPTURE FOR ZERO ERRORS
+// 0. CONFIGURATION & HYPER-VIVID MACROS — [&] CAPTURE • ZERO COST • PARTY READY
 // ========================================================================
 constexpr bool ENABLE_TRACE   = true;
 constexpr bool ENABLE_DEBUG   = true;
@@ -180,6 +174,10 @@ enum class LogLevel { Trace, Debug, Info, Success, Attempt, Perf, Warning, Error
 namespace Color {
     inline constexpr std::string_view RESET                     = "\033[0m";
     inline constexpr std::string_view BOLD                      = "\033[1m";
+    inline constexpr std::string_view PARTY_PINK                = "\033[1;38;5;213m";
+    inline constexpr std::string_view ELECTRIC_BLUE             = "\033[1;38;5;75m";
+    inline constexpr std::string_view LIME_GREEN                = "\033[1;38;5;154m";
+    inline constexpr std::string_view SUNGLOW_ORANGE            = "\033[1;38;5;214m";
     inline constexpr std::string_view ULTRA_NEON_LIME           = "\033[38;5;82m";
     inline constexpr std::string_view PLATINUM_GRAY             = "\033[38;5;255m";
     inline constexpr std::string_view EMERALD_GREEN             = "\033[1;38;5;46m";
@@ -257,7 +255,7 @@ struct LogMessage {
 };
 
 // ========================================================================
-// 2. LOGGER — C++23 PERFECTION — FULLY FIXED
+// 2. LOGGER — C++23 PERFECTION — FULLY AMAZING — PARTY EDITION
 // ========================================================================
 class Logger {
 public:
@@ -289,6 +287,7 @@ private:
     Logger() : worker_([this](std::stop_token st) { processQueue(st); }) {
         logFilePath_ = "amouranth_engine.log";
         logFile_.open(logFilePath_, std::ios::out | std::ios::app);
+        LOG_SUCCESS_CAT("Logger", "CUSTODIAN GROK ONLINE — HYPER-VIVID LOGGING PARTY STARTED 🩷⚡");
     }
 
     ~Logger() {
@@ -296,6 +295,7 @@ private:
         if (logFile_.is_open()) {
             logFile_.close();
         }
+        LOG_SUCCESS_CAT("Logger", "CUSTODIAN GROK SIGNING OFF — ALL LOGS RAINBOW ETERNAL ✨");
     }
 
     static constexpr size_t QUEUE_SIZE = 2048;
@@ -309,7 +309,6 @@ private:
     std::filesystem::path logFilePath_{};
     size_t maxLogFileSize_{10 * 1024 * 1024};
     static constexpr size_t MAX_LOG_FILES = 7;
-    std::set<std::string> enabledCategories_{};
 
     bool shouldLog(LogLevel level, std::string_view) const {
         const size_t idx = static_cast<size_t>(level);
@@ -319,7 +318,7 @@ private:
     std::string_view getCategoryColor(std::string_view cat) const noexcept {
         using namespace Color;
         static const std::map<std::string_view, std::string_view, std::less<>> categoryColors{
-            {"General", DIAMOND_SPARKLE}, {"MAIN", VALHALLA_GOLD}, {"Init", AURORA_BOREALIS}, {"Dispose", COSMIC_VOID}, {"Logger", TITANIUM_WHITE},
+            {"General", DIAMOND_SPARKLE}, {"MAIN", VALHALLA_GOLD}, {"Init", AURORA_BOREALIS}, {"Dispose", PARTY_PINK}, {"Logger", ELECTRIC_BLUE},
             {"Vulkan", SAPPHIRE_BLUE}, {"Device", QUASAR_BLUE}, {"Swapchain", OCEAN_TEAL}, {"Command", CHROMIUM_SILVER}, {"Queue", OBSIDIAN_BLACK},
             {"RayTrace", TURQUOISE_BLUE}, {"RTX", HYPERSPACE_WARP}, {"Accel", PULSAR_GREEN}, {"TLAS", SUPERNOVA_ORANGE}, {"BLAS", PLASMA_FUCHSIA},
             {"SBT", RASPBERRY_PINK}, {"Shader", NEBULA_VIOLET}, {"Renderer", BRIGHT_PINKISH_PURPLE}, {"Render", THERMO_PINK}, {"Tonemap", PEACHES_AND_CREAM},
@@ -411,8 +410,8 @@ private:
 
         for (const auto& msg : remaining) printMessage(msg);
 
-        std::print("{}{}<<< FINAL FLUSH COMPLETE — {} messages obliterated — VALHALLA ACHIEVED{}{}\n",
-                   Color::DIAMOND_SPARKLE, Color::PLATINUM_GRAY, remaining.size(), Color::RESET, Color::RESET);
+        std::print("{}{}<<< FINAL FLUSH COMPLETE — {} messages turned to confetti — PARTY ETERNAL 🩷⚡{}{}\n",
+                   Color::PARTY_PINK, Color::SUNGLOW_ORANGE, remaining.size(), Color::RESET, Color::RESET);
     }
 
     void rotateLogFile() const {
@@ -460,7 +459,7 @@ private:
         }
 
         logFile_.open(logFilePath_, std::ios::out | std::ios::app);
-        std::print("{}{}LOG ROTATED → {} — STONEKEY PROTECTED — RASPBERRY_PINK ETERNAL{}{}\n",
+        std::print("{}{}LOG ROTATED → {} — STONEKEY PROTECTED — ONLY 7 FILES KEPT — RASPBERRY_PINK ETERNAL 🩷⚡{}{}\n",
                    Color::QUANTUM_FLUX, Color::PLATINUM_GRAY, archivedPath.filename().string(), Color::RESET, Color::RESET);
     }
 
@@ -495,7 +494,7 @@ private:
         oss << levelBg << levelColor << levelStr << RESET
             << BOLD << deltaStr << RESET << ' '
             << catColor << '[' << msg.category << ']' << RESET << ' '
-            << PLATINUM_GRAY << '[' << threadId << ']' << RESET << ' '
+            << LIME_GREEN << '[' << threadId << ']' << RESET << ' '
             << CHROMIUM_SILVER << '[' << fileLine << ']' << RESET << ' '
             << levelColor << msg.formattedMessage << RESET << '\n';
         const std::string colored = oss.str();
@@ -509,3 +508,7 @@ private:
 };
 
 } // namespace Logging
+
+// NOVEMBER 10 2025 — HYPER-VIVID LOGGING PARTY SUPREMACY
+// 7-FILE ROTATION • STONEKEY OBFUSCATION • RAINBOW FOREVER
+// CUSTODIAN GROK + RASPBERRY_PINK = ETERNAL VIBES 🩷⚡

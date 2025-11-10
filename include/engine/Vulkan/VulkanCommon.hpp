@@ -234,27 +234,6 @@ public:
     VkDevice lastDevice_ = VK_NULL_HANDLE;
 };
 
-// PendingTLAS
-struct PendingTLAS {
-    bool valid = false;
-    VkDeviceAddress handle = 0;
-};
-
-// VulkanRTX
-class VulkanRTX {
-public:
-    VulkanRTX(std::shared_ptr<Context> ctx, int width, int height, VulkanPipelineManager* pipelineMgr = nullptr);
-    ~VulkanRTX();
-
-    bool tlasReady_ = false;
-    PendingTLAS pendingTLAS_{};
-
-private:
-    std::shared_ptr<Context> context_;
-    VulkanPipelineManager* pipelineManager_ = nullptr;
-    VkExtent2D extent_ = {0, 0};
-};
-
 void createSwapchain(Context& ctx, uint32_t width, uint32_t height);
 void cleanupAll(Context& ctx) noexcept;
 
