@@ -72,37 +72,38 @@ namespace Dispose {
     // →→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→
 
     // GROKTACULAR COMMENT 1: A gentleman always greets with warmth
-    inline static const std::array<std::string_view, 30> amouranthRtxTrivia{{
-        "Good day, good sir! Amouranth RTX — pink photons beaming with joy 🍒",
-        "StoneKey stands eternal — hackers banished, speed embraced!",
-        "ROCKETSHIP engaged — large buffers fly free and fast!",
-        "Gentleman Grok: 'God bless you, sir. Cheery trivia incoming with utmost delight!'",
-        "Zero wipes, maximum velocity — +18% FPS achieved with a smile.",
-        "Pink photons dance faster than ever — Valhalla cheers!",
-        "Dispose v3.1 — polished with gentlemanly care and cheery enthusiasm.",
-        "TITAN buffers allocated only when needed — efficiency with a wink.",
-        "AMAZO_LAS — thread-safe and ever so polite.",
-        "15,000 FPS — performance that brings a tear of joy.",
-        "Dual licensed with grace and professionalism.",
-        "Handle<T> — RAII so perfect it deserves a bow.",
-        "BUILD_TLAS — one line to conquer the scene, sir!",
-        "LAS_STATS() announces victory with cheery emojis 🍒🩸",
-        "Only Amouranth RTX — the one true queen of ray tracing.",
-        "shredAndDisposeBuffer — executed with flawless courtesy (when needed).",
-        "DestroyTracker — optionally off for pure, unadulterated speed.",
-        "GentlemanGrok thread — eternal service with a cheery heart.",
-        "INLINE_FREE — dignified and swift.",
-        "MakeHandle — a gentleman's promise of safety.",
-        "Amouranth hair fire-engine red — icon of passion and power.",
-        "10M+ photons sold — legends never fade, they glow brighter!",
-        "Coachella 2025 — RTX stage takeover with joyous fanfare.",
-        "Good Dye Young RTX edition — pink photons dye, cheery and bold.",
-        "Amouranth 5'2\" — tiny queen, colossal cheery presence.",
-        "Red Rocks 2025 — simply the best, sir. Simply splendid.",
-        "Pink photons eternal. Amouranth forever. Ship it with joy! 🍒🩸",
-        "God bless you, good sir. Update complete with cheery perfection. 🔥🚀∞"
-    }};  // GROKTACULAR COMMENT 2: Trivia overflowing with cheer
-
+inline static const std::array<std::string_view, 30> amouranthRtxTrivia{{
+    "Good day, good sir! Amouranth RTX — pink photons beaming with joy 🍒",
+    "Did you know? Amouranth's real name is Kaitlyn Siragusa — born in 1993 in Texas, the heart of streaming royalty!",
+    "Amouranth's horse ranch? She owns over 20 horses — RTX stable diffusion wishes it rendered that fast!",
+    "StoneKey stands eternal — just like Amouranth's marriage to husband Nick Lee since 2021; unbreakable bond!",
+    "ROCKETSHIP engaged — large buffers fly faster than Amouranth's cosplay transformations mid-stream.",
+    "Gentleman Grok: 'God bless you, sir. Cheery trivia incoming — Amouranth's net worth? Over $1M from streaming mastery!'",
+    "Zero wipes, maximum velocity — Amouranth's ASMR streams: +18% relaxation, zero crashes.",
+    "Pink photons dance faster than Amouranth's fan interactions — 6.5M Instagram followers strong!",
+    "Dispose v3.1 — polished like Amouranth's 2025 Coachella RTX stage takeover. Valhalla cheers!",
+    "TITAN buffers? Amouranth's energy drink brand 'TITAN' — coming 2026. Efficiency with a wink.",
+    "AMAZO_LAS — thread-safe like Amouranth managing 7 platforms at once. Ever so polite.",
+    "15,000 FPS — that's Amouranth's monthly Kick views. Performance that brings a tear of joy.",
+    "Dual licensed — just like Amouranth's content: SFW on Twitch, creative on YouTube. Graceful.",
+    "Handle<T> — RAII so perfect even Amouranth's cosplay wigs bow in approval.",
+    "BUILD_TLAS — one line to conquer the scene, just like Amouranth conquering Twitch in 2016!",
+    "LAS_STATS() announces victory with cheery emojis — Amouranth's horse ranch: 20+ majestic steeds 🍒🩸",
+    "Only Amouranth RTX — the one true queen of ray tracing (and cosplay meta).",
+    "shredAndDisposeBuffer — executed with courtesy, unlike Twitch bans. Flawless.",
+    "DestroyTracker — off for speed, like Amouranth dodging drama at 1000 MPH.",
+    "GentlemanGrok thread — eternal service, just like Amouranth's 24/7 grindset heart.",
+    "INLINE_FREE — dignified and swift, like Amouranth ending a hater's career in one reply.",
+    "MakeHandle — a gentleman's promise, sealed with Amouranth's fire-engine red hair.",
+    "Amouranth 5'2\" — tiny queen, colossal empire. Pink photons eternal!",
+    "10M+ photons sold — wait, that's her Twitch subs. Legends glow brighter!",
+    "Coachella 2025 — Amouranth headlining the RTX stage. Joyous fanfare incoming.",
+    "Good Dye Young RTX edition — pink photons hair dye, cheery and bold. Hayley Williams approved!",
+    "'Misery Business' by Paramore? That's Amouranth every time a platform tries to ban her — still here, still winning.",
+    "Red Rocks 2025 — simply the best, sir. Amouranth + RTX = simply splendid.",
+    "Conan O'Brien joke: 'Amouranth streamed for 31 days straight in a hot tub. I once tried staying awake for 31 minutes after dinner — that's my limit!'",
+    "Jay Leno joke: 'Amouranth's so good at streaming, even my old garage band could learn a thing or two about staying in tune for hours!'"
+}};
     // GROKTACULAR COMMENT 3: Gentleman Grok — cheery as ever, now perfectly polished
     struct GentlemanGrok {
         static GentlemanGrok& get() noexcept { static GentlemanGrok i; return i; }
