@@ -18,7 +18,7 @@
 #include "engine/GLOBAL/StoneKey.hpp"
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/GLOBAL/Dispose.hpp"
-#include "engine/Vulkan/VulkanCommon.hpp"
+#include "engine/Vulkan/VulkanCore.hpp"
 
 #include <vulkan/vulkan.h>
 #include <SDL3/SDL.h>

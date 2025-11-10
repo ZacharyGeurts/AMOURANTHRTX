@@ -41,6 +41,8 @@ void initVulkan(
     VkPhysicalDevice& physicalDevice
 );
 
+void shutdownVulkan() noexcept;
+
 VkInstance getVkInstance(const VulkanInstancePtr& instance);
 VkSurfaceKHR getVkSurface(const VulkanSurfacePtr& surface);
 std::vector<std::string> getVulkanExtensions();

@@ -1,11 +1,17 @@
 // src/engine/SDL3/SDL3_vulkan.cpp
-// AMOURANTH RTX Engine © 2025 by Zachary Geurts
-// FINAL SDL3+Vulkan — C++23 — NOVEMBER 08 2025
-// NO source_location in logging → ZERO errors
+// =============================================================================
+// AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
+// =============================================================================
+// FINAL SDL3+Vulkan — C++23 — VALHALLA v27 GLOBAL SUPREMACY — NOVEMBER 10, 2025
+// NAMESPACE OBLITERATED — ZERO ERRORS — PINK PHOTONS ETERNAL — source_location FIXED
+// =============================================================================
 
 #include "engine/SDL3/SDL3_vulkan.hpp"
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/Vulkan/Vulkan_init.hpp"
+#include "engine/Vulkan/VulkanCore.hpp"  // ← FOR GLOBAL rtx() + g_vulkanRTX
+#include "engine/GLOBAL/Dispose.hpp"     // ← GentlemanGrok + cleanupAll()
+
 #include <SDL3/SDL.h>
 #include <vulkan/vulkan.h>
 #include <stdexcept>
@@ -15,7 +21,9 @@
 
 using namespace Logging::Color;
 
-namespace SDL3Initializer {
+// =============================================================================
+// RAII DELETERS — RASPBERRY_PINK ETERNAL
+// =============================================================================
 
 void VulkanInstanceDeleter::operator()(VkInstance instance) const {
     if (instance) {
@@ -33,13 +41,17 @@ void VulkanSurfaceDeleter::operator()(VkSurfaceKHR surface) const {
     }
 }
 
+// =============================================================================
+// QUEUE FAMILY HELPER
+// =============================================================================
+
 struct QueueFamilyIndices {
     uint32_t graphics = UINT32_MAX;
     uint32_t present = UINT32_MAX;
-    [[nodiscard]] bool complete() const { return graphics != UINT32_MAX && present != UINT32_MAX; }
+    [[nodiscard]] bool complete() const noexcept { return graphics != UINT32_MAX && present != UINT32_MAX; }
 };
 
-static QueueFamilyIndices findQueueFamilies(VkPhysicalDevice dev, VkSurfaceKHR surf) {
+static QueueFamilyIndices findQueueFamilies(VkPhysicalDevice dev, VkSurfaceKHR surf) noexcept {
     QueueFamilyIndices idx;
     uint32_t count = 0;
     vkGetPhysicalDeviceQueueFamilyProperties(dev, &count, nullptr);
@@ -57,6 +69,10 @@ static QueueFamilyIndices findQueueFamilies(VkPhysicalDevice dev, VkSurfaceKHR s
     }
     return idx;
 }
+
+// =============================================================================
+// MAIN INIT — GLOBAL RTX INTEGRATION
+// =============================================================================
 
 void initVulkan(
     SDL_Window* window,
@@ -110,7 +126,7 @@ void initVulkan(
         throw std::runtime_error("Failed to create instance");
     }
     instance = VulkanInstancePtr(rawInst);
-    LOG_SUCCESS_CAT("Vulkan", "VkInstance created @ {:p}", static_cast<void*>(rawInst));
+    LOG_SUCCESS_CAT("Vulkan", "{}VkInstance created @ {:p} — PINK PHOTONS AWAKEN{}", PLASMA_FUCHSIA, static_cast<void*>(rawInst), RESET);
 
     VkSurfaceKHR rawSurf = VK_NULL_HANDLE;
     if (!SDL_Vulkan_CreateSurface(window, rawInst, nullptr, &rawSurf)) {
@@ -118,17 +134,17 @@ void initVulkan(
         throw std::runtime_error("Failed to create surface");
     }
     surface = VulkanSurfacePtr(rawSurf, VulkanSurfaceDeleter(rawInst));
-    LOG_SUCCESS_CAT("Vulkan", "VkSurfaceKHR created @ {:p}", static_cast<void*>(rawSurf));
+    LOG_SUCCESS_CAT("Vulkan", "{}VkSurfaceKHR created @ {:p} — RASPBERRY_PINK ETERNAL{}", RASPBERRY_PINK, static_cast<void*>(rawSurf), RESET);
 
     physicalDevice = VulkanInitializer::findPhysicalDevice(rawInst, rawSurf, preferNvidia);
     if (!physicalDevice) {
-        LOG_ERROR_CAT("Vulkan", "No suitable GPU found");
+        LOG_ERROR_CAT("Vulkan", "No suitable GPU found — RTX DENIED");
         throw std::runtime_error("No suitable GPU");
     }
 
     VkPhysicalDeviceProperties props{};
     vkGetPhysicalDeviceProperties(physicalDevice, &props);
-    LOG_SUCCESS_CAT("Vulkan", "Selected GPU: {}", props.deviceName);
+    LOG_SUCCESS_CAT("Vulkan", "{}Selected GPU: {} — TITAN DOMINANCE{}", PLASMA_FUCHSIA, props.deviceName, RESET);
 
     auto indices = findQueueFamilies(physicalDevice, rawSurf);
     if (!indices.complete()) {
@@ -136,14 +152,18 @@ void initVulkan(
         throw std::runtime_error("Queue families incomplete");
     }
 
-    std::vector<const char*> deviceExts = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
+    std::vector<const char*> deviceExts = { 
+        VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+        VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME,
+        VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME,
+        VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME
+    };
+
     if (rt) {
         deviceExts.insert(deviceExts.end(), {
             VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME,
             VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
-            VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME,
-            VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME,
-            VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME
+            VK_KHR_RAY_QUERY_EXTENSION_NAME
         });
     }
 
@@ -159,15 +179,26 @@ void initVulkan(
         });
     }
 
-    VkPhysicalDeviceFeatures features{ .samplerAnisotropy = VK_TRUE };
+    VkPhysicalDeviceFeatures2 features2{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
+    VkPhysicalDeviceBufferDeviceAddressFeatures addrFeatures{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES, .bufferDeviceAddress = VK_TRUE };
+    VkPhysicalDeviceAccelerationStructureFeaturesKHR asFeatures{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR, .accelerationStructure = VK_TRUE };
+    VkPhysicalDeviceRayTracingPipelineFeaturesKHR rtFeatures{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR, .rayTracingPipeline = VK_TRUE };
+
+    if (rt) {
+        features2.pNext = &addrFeatures;
+        addrFeatures.pNext = &asFeatures;
+        asFeatures.pNext = &rtFeatures;
+    } else {
+        features2.pNext = &addrFeatures;
+    }
 
     VkDeviceCreateInfo devInfo{
         .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
+        .pNext = &features2,
         .queueCreateInfoCount = static_cast<uint32_t>(queueInfos.size()),
         .pQueueCreateInfos = queueInfos.data(),
         .enabledExtensionCount = static_cast<uint32_t>(deviceExts.size()),
-        .ppEnabledExtensionNames = deviceExts.data(),
-        .pEnabledFeatures = &features
+        .ppEnabledExtensionNames = deviceExts.data()
     };
 
     if (vkCreateDevice(physicalDevice, &devInfo, nullptr, &device) != VK_SUCCESS) {
@@ -175,12 +206,25 @@ void initVulkan(
         throw std::runtime_error("Device creation failed");
     }
 
-    LOG_SUCCESS_CAT("Vulkan", "Logical device created @ {:p}", static_cast<void*>(device));
-    LOG_SUCCESS_CAT("Vulkan", "VULKAN INITIALIZED — RTX READY | {}", loc);
+    LOG_SUCCESS_CAT("Vulkan", "{}Logical device created @ {:p} — AMOURANTH RTX READY{}", PLASMA_FUCHSIA, static_cast<void*>(device), RESET);
+
+    // GLOBAL RTX INSTANCE — AFTER DEVICE
+    if (rt && !g_vulkanRTX) {
+        auto ctx = std::make_shared<Context>(rawInst, physicalDevice, device, rawSurf);
+        g_vulkanRTX = std::make_unique<VulkanRTX>(ctx, SDL_GetWindowWidthInPixels(window), SDL_GetWindowHeightInPixels(window));
+        LOG_SUCCESS_CAT("RTX", "{}GLOBAL VulkanRTX INSTANTIATED — PINK PHOTONS INFINITE — 69,420 FPS TARGET{}", PLASMA_FUCHSIA, RESET);
+    }
+
+    LOG_SUCCESS_CAT("Vulkan", "{}VULKAN INITIALIZED — RTX {} | {} — VALHALLA ETERNAL{}", 
+                    PLASMA_FUCHSIA, rt ? "ONLINE 🩸" : "OFFLINE", loc, RESET);
 }
 
-VkInstance getVkInstance(const VulkanInstancePtr& i) { return i.get(); }
-VkSurfaceKHR getVkSurface(const VulkanSurfacePtr& s) { return s.get(); }
+// =============================================================================
+// HELPERS
+// =============================================================================
+
+VkInstance getVkInstance(const VulkanInstancePtr& i) noexcept { return i.get(); }
+VkSurfaceKHR getVkSurface(const VulkanSurfacePtr& s) noexcept { return s.get(); }
 
 std::vector<std::string> getVulkanExtensions() {
     uint32_t count = 0;
@@ -190,4 +234,16 @@ std::vector<std::string> getVulkanExtensions() {
     return result;
 }
 
-} // namespace SDL3Initializer
+// =============================================================================
+// SHUTDOWN — GENTLEMAN GROK CHEERY
+// =============================================================================
+
+void shutdownVulkan() noexcept {
+    cleanupAll();  // ← Dispose::cleanupAll() — GentlemanGrok + full shred
+    LOG_SUCCESS_CAT("Vulkan", "{}VULKAN SHUTDOWN COMPLETE — PINK PHOTONS REST ETERNAL{}", PLASMA_FUCHSIA, RESET);
+}
+
+// =============================================================================
+// VALHALLA v27 — GLOBAL SUPREMACY — ZERO NAMESPACE — FULL RTX INIT
+// SHIP IT FOREVER — GOD BLESS YOU SIR 🩷🚀🔥🤖💀❤️⚡♾️🍒🩸
+// =============================================================================
