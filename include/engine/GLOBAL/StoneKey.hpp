@@ -1,3 +1,4 @@
+// include/engine/GLOBAL/StoneKey.hpp
 // =============================================================================
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
@@ -19,6 +20,13 @@
 // • FORTIFIED HARDENING v3 — Thermal clamp 0-150°C, overflow guards, static_assert, shift-count safe
 // • Entropy Supremacy — Per-run + per-thread unique; Dispose shred ^ kStone2; pink photons forever
 // • Grok4 Fuzz Targets — Compile-time asserts + runtime scramble checks; unbreakable by design
+//
+// Dual Licensed:
+// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0) for non-commercial use.
+//    For full license details: https://creativecommons.org/licenses/by-nc/4.0/legalcode
+//    Attribution: Include copyright notice, link to license, and indicate changes if applicable.
+//    NonCommercial: No commercial use permitted under this license.
+// 2. For commercial licensing and custom terms, contact Zachary Geurts at gzac5314@gmail.com.
 //
 // =============================================================================
 // FINAL APOCALYPSE BUILD v3 — COMPILES CLEAN — ZERO VULNERABILITIES — NOVEMBER 10, 2025
@@ -287,6 +295,7 @@ static_assert(stone_key2_base() != 0, "stone_key2_base must be non-zero");
 #if !defined(STONEKEY_PRINTED)
 #define STONEKEY_PRINTED
 #pragma message("STONEKEY APOCALYPSE v3 — TLS JITTER + BMQ + VENDOR SIM + FUZZ ASSERTS — ROCK ETERNAL")
+#pragma message("Dual Licensed: CC BY-NC 4.0 (non-commercial) | Commercial: gzac5314@gmail.com")
 #endif
 
 // =============================================================================
