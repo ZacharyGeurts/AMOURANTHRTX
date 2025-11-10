@@ -173,11 +173,11 @@ public:
         void operator()(uint64_t* ptr) const noexcept {
             if (ptr && *ptr != 0 && fn && device) {
                 T realHandle = deobfuscate<T>(*ptr);
-                if (realHandle && !DestroyTracker::isDestroyed(reinterpret_cast<const void*>(realHandle))) {
-                    fn(device, realHandle, nullptr);
-                    DestroyTracker::markDestroyed(reinterpret_cast<const void*>(realHandle));
-                    logAndTrackDestruction(std::string_view(typeid(T).name()), reinterpret_cast<void*>(realHandle), __LINE__);
-                }
+if (realHandle && !Dispose::DestroyTracker::isDestroyed(reinterpret_cast<const void*>(realHandle))) {
+    fn(device, realHandle, nullptr);
+    Dispose::DestroyTracker::markDestroyed(reinterpret_cast<const void*>(realHandle));
+    logAndTrackDestruction(std::string_view(typeid(T).name()), reinterpret_cast<void*>(realHandle), __LINE__);
+}
             }
             delete ptr;
         }

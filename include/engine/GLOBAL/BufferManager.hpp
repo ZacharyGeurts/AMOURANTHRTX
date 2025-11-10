@@ -139,13 +139,6 @@ static inline uint32_t findMemoryType(VkPhysicalDevice physDev, uint32_t typeFil
         return mem; \
     })()
 
-#define INLINE_FREE(dev, mem, size, tag) \
-    do { \
-        if ((mem) != VK_NULL_HANDLE && (dev) != VK_NULL_HANDLE) { \
-            ::Dispose::shredAndDisposeBuffer(VK_NULL_HANDLE, (dev), (mem), (size), (tag)); \
-        } \
-    } while (0)
-
 #define INLINE_MAP(dev, mem, offset, size) \
     ([&]() -> void* { \
         if ((dev) == VK_NULL_HANDLE || (mem) == VK_NULL_HANDLE) return nullptr; \
