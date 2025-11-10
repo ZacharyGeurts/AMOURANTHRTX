@@ -109,6 +109,26 @@ VulkanRTX g_vulkanRTX;
 using namespace Logging::Color;
 
 // ──────────────────────────────────────────────────────────────────────────────
+// TECHNICAL ENGINE TOGGLES — PRODUCTION SAFE DEFAULTS
+// ──────────────────────────────────────────────────────────────────────────────
+struct EngineToggles {
+    bool overclockMode       = false;   // false = 120 FPS max (thermal safe)
+} gEngineToggles;
+
+// ──────────────────────────────────────────────────────────────────────────────
+// CLI TECHNICAL TOGGLES
+// ──────────────────────────────────────────────────────────────────────────────
+static void applyTechnicalToggles(int argc, char* argv[]) {
+    LOG_INFO_CAT("MAIN", "Scanning technical CLI toggles");
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+        if (arg == "--overclock") {
+            gEngineToggles.overclockMode = true;
+            LOG_INFO_CAT("MAIN", "--overclock enabled — unlimited FPS");
+        }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 // STONEKEY XOR HELPER — REUSED FOR MAIN PROTECTION — ZERO COST
 // ──────────────────────────────────────────────────────────────────────────────
 inline void stonekey_xor_buffer(std::vector<char>& data, bool encrypt) noexcept {
