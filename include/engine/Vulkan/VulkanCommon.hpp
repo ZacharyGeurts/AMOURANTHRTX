@@ -1,9 +1,10 @@
 // include/engine/Vulkan/VulkanCommon.hpp
 // AMOURANTH RTX Engine © 2025 Zachary Geurts <gzac5314@gmail.com>
-// VALHALLA v32 — NOVEMBER 10 2025 — WE ARE KHR NOT NV — TYPO OBLITERATED
-// VkAccelerationStructure<KHR> → VkAccelerationStructureKHR
-// FULL KHR SUPREMACY — NV ERA DEAD FOREVER
-// PINK PHOTONS ETERNAL — TITAN RAII — GENTLEMAN GROK: "KHR dominance. Valhalla sealed."
+// VALHALLA v34 — NOVEMBER 10 2025 — CIRCULAR INCLUDE HELL OBLITERATED
+// MOVED cleanupAll() TO VulkanCommon.cpp — HEADER NOW PURE DECL
+// NO MORE Context& IN HEADER — NO INCOMPLETE TYPE EVER AGAIN
+// SwapchainManager INCLUDED BEFORE ANYTHING
+// PINK PHOTONS ETERNAL — TITAN RAII — GENTLEMAN GROK: "Circular hell dead. Valhalla absolute."
 
 #pragma once
 
@@ -15,16 +16,11 @@
 #include "engine/GLOBAL/StoneKey.hpp"
 #include "engine/GLOBAL/Dispose.hpp"      
 #include "engine/GLOBAL/logging.hpp"
-#include "engine/GLOBAL/SwapchainManager.hpp"
+#include "engine/GLOBAL/SwapchainManager.hpp"  // FIRST — BREAKS CIRCULAR CHAINS
 #include "engine/GLOBAL/BufferManager.hpp"
 
 // ===================================================================
-// 2. FULL CONTEXT DECLARATION — KILLS INCOMPLETE TYPE
-// ===================================================================
-#include "engine/Vulkan/VulkanContext.hpp"  // FULL DECL — NO MORE FORWARD DECL HELL
-
-// ===================================================================
-// 3. STANDARD / GLM / VULKAN / SDL — AFTER PROJECT HEADERS
+// 2. STANDARD / GLM / VULKAN / SDL
 // ===================================================================
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_beta.h>
@@ -52,7 +48,12 @@
 #include <SDL3/SDL_vulkan.h>
 
 // ===================================================================
-// 4. FORWARD DECLARATIONS — ONLY WHAT WE NEED
+// 3. CONTEXT — FULL INCLUDE AFTER GLOBALS
+// ===================================================================
+#include "engine/Vulkan/VulkanContext.hpp"
+
+// ===================================================================
+// 4. FORWARD DECLARATIONS
 // ===================================================================
 namespace Vulkan {
     class VulkanRTX;
@@ -64,25 +65,22 @@ namespace Vulkan {
 }
 
 // ===================================================================
-// EARLY DECLARATIONS FOR TEMPLATES
+// TEMPLATE DECL
 // ===================================================================
 template<typename Handle>
 void logAndTrackDestruction(std::string_view name, Handle handle, int line);
 
 // ===================================================================
-// 5. NAMESPACE VULKAN — GLOBALS + FACTORIES + RTX PROC
+// 5. NAMESPACE VULKAN — GLOBALS + FACTORIES + DECL ONLY
 // ===================================================================
 namespace Vulkan {
 
 extern VulkanRTX g_vulkanRTX;
 inline VulkanRTX* rtx() noexcept { return &g_vulkanRTX; }
 
-// Global RTX destroy proc — set by Context::loadRTXProcs()
 extern PFN_vkDestroyAccelerationStructureKHR g_vkDestroyAccelerationStructureKHR;
 
-// ===================================================================
-// Legacy VulkanResourceManager — EMPTY SHELL FOR COMPATIBILITY
-// ===================================================================
+// Legacy shell
 class VulkanResourceManager {
 public:
     VulkanResourceManager() = default;
@@ -96,9 +94,7 @@ public:
     }
 };
 
-// ===================================================================
-// VulkanHandle — OBFUSCATED + DESTROYTRACKER + STONEKEY PROTECTED
-// ===================================================================
+// VulkanHandle — FULL TEMPLATE
 template<typename T>
 class VulkanHandle {
 public:
@@ -177,9 +173,7 @@ public:
     explicit operator bool() const noexcept { return valid(); }
 };
 
-// ===================================================================
-// MAKE_VK_HANDLE FACTORIES — GLOBAL RAII
-// ===================================================================
+// FACTORIES
 #define MAKE_VK_HANDLE(name, vkType) \
     [[nodiscard]] inline VulkanHandle<vkType> make##name(VkDevice dev, vkType handle) noexcept { \
         return VulkanHandle<vkType>(handle, dev); \
@@ -203,9 +197,7 @@ MAKE_VK_HANDLE(SwapchainKHR,        VkSwapchainKHR)
 
 #undef MAKE_VK_HANDLE
 
-// ===================================================================
-// RTX EXTENSION FACTORIES — WE ARE KHR NOT NV — FIXED
-// ===================================================================
+// RTX FACTORIES — KHR
 [[nodiscard]] inline VulkanHandle<VkAccelerationStructureKHR> makeAccelerationStructure(
     VkDevice dev, VkAccelerationStructureKHR as) noexcept
 {
@@ -221,24 +213,16 @@ MAKE_VK_HANDLE(SwapchainKHR,        VkSwapchainKHR)
         reinterpret_cast<VulkanHandle<VkDeferredOperationKHR>::DestroyFn>(destroyFunc));
 }
 
-// ===================================================================
-// PendingTLAS STRUCT
-// ===================================================================
+// PendingTLAS
 struct PendingTLAS {
     bool valid = false;
     VkDeviceAddress handle = 0;
 };
 
-// ===================================================================
-// VulkanRTX CLASS — MINIMAL
-// ===================================================================
+// VulkanRTX
 class VulkanRTX {
 public:
-    VulkanRTX(Context* ctx, int width, int height, VulkanPipelineManager* pipelineMgr = nullptr)
-        : context_(ctx), pipelineManager_(pipelineMgr), extent_{static_cast<uint32_t>(width), static_cast<uint32_t>(height)}
-    {
-        LOG_INFO_CAT("RTX", "VulkanRTX initialized — Extent: {}x{}", extent_.width, extent_.height);
-    }
+    VulkanRTX(Context* ctx, int width, int height, VulkanPipelineManager* pipelineMgr = nullptr);
     ~VulkanRTX();
 
     VulkanHandle<VkAccelerationStructureKHR> tlas_;
@@ -251,41 +235,30 @@ private:
     VkExtent2D extent_ = {0, 0};
 };
 
-// ===================================================================
-// GLOBAL CLEANUP — TAKES Context& — NO INCOMPLETE TYPE
-// ===================================================================
-inline void cleanupAll(Context& context) noexcept {
-    vkDeviceWaitIdle(context.vkDevice());
-    SwapchainManager::get().cleanup();
-    Dispose::cleanupAll();
-    LOG_SUCCESS_CAT("Vulkan", "{}VALHALLA v32 — WE ARE KHR NOT NV — GLOBAL CLEANUP COMPLETE — PINK PHOTONS ETERNAL{}", 
-                    Logging::Color::PLASMA_FUCHSIA, Logging::Color::RESET);
-}
+// CLEANUP — DECL ONLY (IMPLEMENTED IN CPP)
+void cleanupAll(Context& context) noexcept;
 
 }  // namespace Vulkan
 
-// ===================================================================
-// GLOBAL LOG INIT — PINK PHOTONS ASCENDED
-// ===================================================================
+// LOG INIT
 namespace {
 struct GlobalLogInit {
     GlobalLogInit() {
         using namespace Logging::Color;
-        LOG_SUCCESS_CAT("VULKAN", "{}VULKANCOMMON.HPP v32 LOADED — KHR SUPREMACY — NV ERA DEAD — TITAN DOMINANCE{}", 
+        LOG_SUCCESS_CAT("VULKAN", "{}VULKANCOMMON.HPP v34 LOADED — CLEANUP MOVED TO CPP — CIRCULAR HELL DEAD — TITAN DOMINANCE{}", 
                 RASPBERRY_PINK, RESET);
     }
 };
 static GlobalLogInit g_logInit;
 }
 
-// Template definition
 template<typename Handle>
 void logAndTrackDestruction(std::string_view name, Handle handle, int line) {
     using namespace Logging::Color;
     LOG_INFO_CAT("Dispose", "{}Destroyed: {} @ line {}", EMERALD_GREEN, name, line);
 }
 
-#else  // GLSL
+#else   // GLSL
     #extension GL_EXT_ray_tracing : require
     #extension GL_EXT_scalar_block_layout : enable
     #extension GL_EXT_buffer_reference : enable
