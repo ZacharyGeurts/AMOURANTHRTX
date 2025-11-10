@@ -16,11 +16,11 @@
 // ===================================================================
 // 1. GLOBAL PROJECT INCLUDES — ALWAYS FIRST
 // ===================================================================
-#include "../GLOBAL/StoneKey.hpp"
-#include "../GLOBAL/Dispose.hpp"      // Handle<T>, MakeHandle, DestroyTracker, logAndTrackDestruction
-#include "../GLOBAL/logging.hpp"
-#include "../GLOBAL/SwapchainManager.hpp"
-#include "../GLOBAL/BufferManager.hpp"
+#include "engine/GLOBAL/StoneKey.hpp"
+#include "engine/GLOBAL/Dispose.hpp"      // Handle<T>, MakeHandle, DestroyTracker, logAndTrackDestruction
+#include "engine/GLOBAL/logging.hpp"
+#include "engine/GLOBAL/SwapchainManager.hpp"
+#include "engine/GLOBAL/BufferManager.hpp"
 
 // ===================================================================
 // 2. STANDARD / GLM / VULKAN / SDL — AFTER PROJECT HEADERS

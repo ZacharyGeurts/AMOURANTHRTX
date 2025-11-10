@@ -14,10 +14,10 @@
 #include "engine/Vulkan/VulkanRenderer.hpp"
 #include "engine/Vulkan/VulkanPipelineManager.hpp"
 
-#include "../GLOBAL/Dispose.hpp"
-#include "../GLOBAL/BufferManager.hpp"
-#include "../GLOBAL/SwapchainManager.hpp"
-#include "../GLOBAL/logging.hpp"
+#include "engine/GLOBAL/Dispose.hpp"
+#include "engine/GLOBAL/BufferManager.hpp"
+#include "engine/GLOBAL/SwapchainManager.hpp"
+#include "engine/GLOBAL/logging.hpp"
 
 #include <SDL3/SDL.h>
 #include <sstream>

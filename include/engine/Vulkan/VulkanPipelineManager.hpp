@@ -75,7 +75,7 @@
 #pragma once
 
 #include "engine/GLOBAL/StoneKey.hpp"
-#include "engine/Vulkan/VulkanRTX_Setup.hpp"
+#include "engine/Vulkan/VulkanRTX.hpp"
 #include "engine/GLOBAL/logging.hpp"
 
 #include <vulkan/vulkan.h>
