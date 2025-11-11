@@ -17,7 +17,6 @@
 
 #pragma once
 
-#include "engine/GLOBAL/Dispose.hpp"   // ← ONLY SOURCE OF Handle<T>, ctx(), MakeHandle
 #include <vulkan/vulkan.h>
 #include <vector>
 #include <span>
