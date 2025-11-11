@@ -1,9 +1,22 @@
 // src/engine/SDL3/SDL3_window.cpp
-// AMOURANTH RTX Engine © 2025 by Zachary Geurts
-// FINAL SDL3 Window — GLOBAL VulkanRenderer — NOVEMBER 08 2025
-// ZERO conflicts — F11 toggle — resize — quit — pink dispose
+// =============================================================================
+// AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
+// =============================================================================
+//
+// Dual Licensed:
+// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
+//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
+// 2. Commercial licensing: gzac5314@gmail.com
+//
+// =============================================================================
+// SDL3 Window — PURE PRESENTATION LAYER — NOV 11 2025 11:18 AM EST
+// • NO VulkanRenderer.hpp — talks via SDL3_vulkan.hpp only
+// • F11 toggle, resize, quit — all routed to renderer via interface
+// • Pink dispose, zero leaks, Valhalla sealed
+// =============================================================================
 
 #include "engine/SDL3/SDL3_window.hpp"
+#include "engine/SDL3/SDL3_vulkan.hpp"     // ← ONLY INTERFACE TO RENDERER
 #include "engine/GLOBAL/logging.hpp"
 
 #include <SDL3/SDL.h>
@@ -20,7 +33,7 @@ namespace SDL3Initializer {
 // ---------------------------------------------------------------------------
 void SDLWindowDeleter::operator()(SDL_Window* w) const noexcept {
     if (w) {
-        LOG_INFO_CAT("Dispose", "{}Destroying SDL_Window @ {:p} — RASPBERRY_PINK IMMORTAL 🩷{}", 
+        LOG_INFO_CAT("Dispose", "{}Destroying SDL_Window @ {:p} — RASPBERRY_PINK IMMORTAL {}", 
                      RASPBERRY_PINK, static_cast<void*>(w), RESET);
         SDL_DestroyWindow(w);
     }
@@ -28,7 +41,7 @@ void SDLWindowDeleter::operator()(SDL_Window* w) const noexcept {
 }
 
 // ---------------------------------------------------------------------------
-// createWindow — GLOBAL RAII
+// createWindow — RAII + Vulkan-ready
 // ---------------------------------------------------------------------------
 SDLWindowPtr createWindow(const char* title, int w, int h, Uint32 flags) {
     LOG_SUCCESS_CAT("Window", "Creating SDL window: {} ({}x{})", title, w, h);
@@ -136,9 +149,9 @@ bool pollEventsForResize(const SDLWindowPtr& window,
 }
 
 // ---------------------------------------------------------------------------
-// toggleFullscreen — GLOBAL VulkanRenderer
+// toggleFullscreen — ROUTE THROUGH SDL3_vulkan
 // ---------------------------------------------------------------------------
-void toggleFullscreen(SDLWindowPtr& window, VulkanRenderer& renderer) noexcept {
+void toggleFullscreen(SDLWindowPtr& window) noexcept {
     auto* win = window.get();
     if (!win) return;
 
@@ -156,9 +169,21 @@ void toggleFullscreen(SDLWindowPtr& window, VulkanRenderer& renderer) noexcept {
     SDL_GetWindowSizeInPixels(win, &w, &h);
     if (w <= 0 || h <= 0) w = h = 1;
 
-    renderer.handleResize(w, h);  // ← NOW VALID — GLOBAL CLASS
+    // ROUTE TO RENDERER VIA INTERFACE
+    SDL3Vulkan::getRenderer().handleResize(w, h);
 
     LOG_SUCCESS_CAT("Window", "Fullscreen {} → {}×{}", isFs ? "OFF" : "ON", w, h);
 }
 
 } // namespace SDL3Initializer
+
+// =============================================================================
+// AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
+// =============================================================================
+//
+// Dual Licensed:
+// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
+//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
+// 2. Commercial licensing: gzac5314@gmail.com
+//
+// =============================================================================
