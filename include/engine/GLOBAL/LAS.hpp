@@ -17,6 +17,7 @@
 // • Global macros: BUILD_BLAS, GLOBAL_TLAS_ADDRESS
 // • UltraLowLevelBufferTracker, ctx(), Handle — all inlined
 // • C++23, -Werror clean, Valhalla sealed
+// • FIXED: Reinstated inline ctx() for Estate.cpp compatibility — RTX via GlobalRTXContext
 // =============================================================================
 
 #pragma once
@@ -27,6 +28,7 @@
 #include <SDL3/SDL.h>
 
 #include "engine/GLOBAL/GlobalContext.hpp"
+#include "engine/GLOBAL/Houston.hpp"  // For Handle<T>, UltraLowLevelBufferTracker, RAW_BUFFER, BUFFER_CREATE/DESTROY
 
 #include <glm/glm.hpp>
 #include <glm/gtc/type_ptr.hpp>
@@ -79,7 +81,7 @@ namespace Color {
     do { if (cond) { CONSOLE_ERROR(msg); throw std::runtime_error(msg); } } while(0)
 
 // ──────────────────────────────────────────────────────────────────────────────
-// GLOBAL CONTEXT — ETERNAL
+// GLOBAL CONTEXT — ETERNAL — RTX INTEGRATED
 // ──────────────────────────────────────────────────────────────────────────────
 inline GlobalRTXContext& ctx() noexcept { return GlobalRTXContext::get(); }
 
@@ -132,7 +134,7 @@ inline void endSingleTimeCommands(VkCommandBuffer cmd, VkQueue queue, VkCommandP
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// SIZE COMPUTATION
+// SIZE COMPUTATION — RTX FEATURES ENABLED VIA CTX
 // ──────────────────────────────────────────────────────────────────────────────
 static BlasBuildSizes computeBlasSizes(VkDevice device, uint32_t vertexCount, uint32_t indexCount) noexcept {
     VkAccelerationStructureGeometryKHR geometry{
@@ -200,7 +202,7 @@ static TlasBuildSizes computeTlasSizes(VkDevice device, uint32_t instanceCount) 
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// INSTANCE UPLOAD
+// INSTANCE UPLOAD — RTX BUFFER DEVICE ADDRESS VIA CTX
 // ──────────────────────────────────────────────────────────────────────────────
 [[nodiscard]] static uint64_t uploadInstances(
     VkDevice device, VkPhysicalDevice physDev, VkCommandPool pool, VkQueue queue,
@@ -256,7 +258,7 @@ static TlasBuildSizes computeTlasSizes(VkDevice device, uint32_t instanceCount) 
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// LIGHT_WARRIORS_LAS — GOD MODE
+// LIGHT_WARRIORS_LAS — GOD MODE — RTX VIA CTX
 // ──────────────────────────────────────────────────────────────────────────────
 class LIGHT_WARRIORS_LAS {
 public:
@@ -295,7 +297,7 @@ private:
 };
 
 // ──────────────────────────────────────────────────────────────────────────────
-// BLAS: FIGHTER'S RESOLVE
+// BLAS: FIGHTER'S RESOLVE — RTX ENABLED
 // ──────────────────────────────────────────────────────────────────────────────
 inline void LIGHT_WARRIORS_LAS::buildBLAS(VkCommandPool pool, VkQueue queue,
                                           uint64_t vertexBuf, uint64_t indexBuf,
@@ -383,7 +385,7 @@ inline void LIGHT_WARRIORS_LAS::buildBLAS(VkCommandPool pool, VkQueue queue,
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// TLAS: SAGE'S PROPHECY
+// TLAS: SAGE'S PROPHECY — RTX ENABLED
 // ──────────────────────────────────────────────────────────────────────────────
 inline void LIGHT_WARRIORS_LAS::buildTLAS(VkCommandPool pool, VkQueue queue,
                                           std::span<const std::pair<VkAccelerationStructureKHR, glm::mat4>> instances)
@@ -499,7 +501,7 @@ inline void LIGHT_WARRIORS_LAS::rebuildTLAS(VkCommandPool pool, VkQueue queue,
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// GLOBAL MACROS
+// GLOBAL MACROS — CTX/RTX READY
 // ──────────────────────────────────────────────────────────────────────────────
 #define BUILD_BLAS(pool, q, vbuf, ibuf, vcount, icount, flags) \
     LIGHT_WARRIORS_LAS::get().buildBLAS(pool, q, vbuf, ibuf, vcount, icount, flags)

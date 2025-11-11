@@ -17,6 +17,7 @@
 // • Professional, -Werror clean, C++23, zero leaks
 // • VulkanRenderer.hpp MOVED TO .cpp — HEADER PURITY RESTORED
 // • CROSS-PLATFORM: SDL3 abstracts X11/Wayland (Linux) / Win32 (Windows)
+// • FIXED: Minimal Context def; SDL3 bool return; RTX full names; CommandPool order
 //
 // =============================================================================
 
@@ -33,17 +34,28 @@
 #include <format>
 #include <set>
 #include <cstdint>  // For uint32_t
+#include <array>    // For constexpr RTX_EXTENSIONS
+#include <SDL3/SDL.h>
 
 // ──────────────────────────────────────────────────────────────────────────────
-// FORWARD DECLARATIONS — NO VulkanRenderer.hpp HERE
+// MINIMAL CONTEXT — SELF-CONTAINED — NO EXTERNAL .hpp
 // ──────────────────────────────────────────────────────────────────────────────
-struct Context;
+struct Context {
+    SDL_Window* m_window = nullptr;
+    bool m_enableValidation = true;
+
+    SDL_Window* getWindow() const noexcept { return m_window; }
+    bool enableValidation() const noexcept { return m_enableValidation; }
+    void setWindow(SDL_Window* win) noexcept { m_window = win; }
+    void setValidation(bool val) noexcept { m_enableValidation = val; }
+};
+
 class VulkanRenderer;
 
 // ──────────────────────────────────────────────────────────────────────────────
-// GLOBAL RTX EXTENSIONS — VULKAN 1.3+ COMPATIBLE — CROSS-PLATFORM
+// GLOBAL RTX EXTENSIONS — VULKAN 1.3+ COMPATIBLE — CROSS-PLATFORM — FIXED: std::array
 // ──────────────────────────────────────────────────────────────────────────────
-inline constexpr std::vector<const char*> RTX_EXTENSIONS = {
+inline constexpr std::array<const char*, 6> RTX_EXTENSIONS = {
     VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME,
     VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
     VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME,
@@ -72,12 +84,13 @@ void shutdownRenderer() noexcept;
 } // namespace SDL3Vulkan
 
 // ──────────────────────────────────────────────────────────────────────────────
-// GLOBAL STACK — ORDER IS LAW — Dispose FIRST
+// GLOBAL STACK — ORDER IS LAW — Dispose FIRST — FIXED: Include GlobalContext.hpp
 // ──────────────────────────────────────────────────────────────────────────────
-#include "engine/GLOBAL/StoneKey.hpp"      // FIRST — kStone1, obfuscate
-#include "engine/GLOBAL/Houston.hpp"       // SECOND — ctx(), Handle<T>, MakeHandle
-#include "engine/GLOBAL/logging.hpp"       // LOG_*, 
-#include "engine/GLOBAL/LAS.hpp"           // AMAZO_LAS::get()
+#include "engine/GLOBAL/StoneKey.hpp"           // FIRST — kStone1, obfuscate
+#include "engine/GLOBAL/Houston.hpp"            // SECOND — ctx(), Handle<T>, MakeHandle
+#include "engine/GLOBAL/GlobalContext.hpp"      // THIRD — GlobalRTXContext def (no redef)
+#include "engine/GLOBAL/logging.hpp"            // LOG_*, 
+#include "engine/GLOBAL/LAS.hpp"                // AMAZO_LAS::get()
 
 // ──────────────────────────────────────────────────────────────────────────────
 // RAII DELETERS — PINK PHOTONS ETERNAL — CROSS-PLATFORM SAFE
@@ -102,49 +115,6 @@ using VulkanInstancePtr = std::unique_ptr<VkInstance_T, VulkanInstanceDeleter>;
 using VulkanSurfacePtr = std::unique_ptr<VkSurfaceKHR_T, VulkanSurfaceDeleter>;
 
 // ──────────────────────────────────────────────────────────────────────────────
-// GLOBAL RTX CONTEXT — FULL DEFINITION — PASTE INTO Houston.hpp OR DEDICATED HEADER
-// ──────────────────────────────────────────────────────────────────────────────
-// (If not already defined; this is the fixed struct with all missing members)
-struct GlobalRTXContext {
-    VkInstance instance_ = VK_NULL_HANDLE;
-    VkPhysicalDevice physicalDevice_ = VK_NULL_HANDLE;
-    VkDevice device_ = VK_NULL_HANDLE;
-    VkSurfaceKHR surface_ = VK_NULL_HANDLE;
-    uint32_t graphicsFamily_ = UINT32_MAX;
-    uint32_t presentFamily_ = UINT32_MAX;
-    VkQueue graphicsQueue_ = VK_NULL_HANDLE;
-    VkQueue presentQueue_ = VK_NULL_HANDLE;
-    VkCommandPool commandPool_ = VK_NULL_HANDLE;
-    VkPhysicalDeviceProperties deviceProps_{};  // Fixed: Added missing member
-
-    struct RTX {
-        VkPhysicalDeviceBufferDeviceAddressFeatures bufferDeviceAddress{};
-        VkPhysicalDeviceAccelerationStructureFeaturesKHR accelerationStructure{};
-        VkPhysicalDeviceRayTracingPipelineFeaturesKHR rayTracingPipeline{};
-        VkPhysicalDeviceRayQueryFeaturesKHR rayQuery{};
-
-        void chain() noexcept {
-            bufferDeviceAddress.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES;
-            accelerationStructure.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
-            rayTracingPipeline.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR;
-            rayQuery.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR;
-
-            // Chain pNext for layered enablement.
-            bufferDeviceAddress.pNext = &accelerationStructure;
-            accelerationStructure.pNext = &rayTracingPipeline;
-            rayTracingPipeline.pNext = &rayQuery;
-            rayQuery.pNext = nullptr;
-        }
-    } rtx_{};  // Fixed: Full nested struct with members
-
-    bool createInstance(const std::vector<const char*>& extraExtensions) noexcept;
-    bool createSurface(SDL_Window* window, VkInstance instance) noexcept;
-    bool pickPhysicalDevice(VkSurfaceKHR surface, bool preferNvidia) noexcept;
-    bool createDevice(VkSurfaceKHR surface, bool enableRT) noexcept;
-    void cleanup() noexcept;
-};
-
-// ──────────────────────────────────────────────────────────────────────────────
 // GLOBAL INIT/SHUTDOWN — RAW POWER — NO NAMESPACE — SDL3 CROSS-PLATFORM ABSTRACTION
 // ──────────────────────────────────────────────────────────────────────────────
 void initVulkan(
@@ -167,7 +137,7 @@ VkSurfaceKHR getVkSurface(const VulkanSurfacePtr& surface) noexcept;
 std::vector<std::string> getVulkanExtensions();
 
 // ──────────────────────────────────────────────────────────────────────────────
-// INLINE HELPERS — C++23 PROFESSIONAL — CROSS-PLATFORM
+// INLINE HELPERS — C++23 PROFESSIONAL — CROSS-PLATFORM — FIXED: array to vector
 // ──────────────────────────────────────────────────────────────────────────────
 static inline std::string vkResultToString(VkResult result) noexcept {
     switch (result) {
@@ -183,6 +153,15 @@ static inline std::string vkResultToString(VkResult result) noexcept {
 
 static inline std::string locationString(const std::source_location& loc = std::source_location::current()) noexcept {
     return std::format("{}:{}:{}", loc.file_name(), loc.line(), loc.function_name());
+}
+
+inline std::vector<std::string> getVulkanExtensions() {
+    std::vector<std::string> exts;
+    exts.reserve(RTX_EXTENSIONS.size());
+    for (auto* ext : RTX_EXTENSIONS) {
+        exts.emplace_back(ext);
+    }
+    return exts;
 }
 
 // =============================================================================

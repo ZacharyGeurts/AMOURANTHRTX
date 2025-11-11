@@ -10,21 +10,20 @@
 //
 // =============================================================================
 // SDL3 Window — PURE PRESENTATION LAYER — NOV 11 2025 11:18 AM EST
-// • NO VulkanRenderer.hpp — talks via SDL3_vulkan.hpp only
+// • FULL GLOBAL VULKAN — INCLUDES VulkanRenderer.hpp — NO INCOMPLETES
 // • F11 toggle, resize, quit — all routed to renderer via interface
-// • Pink dispose, zero leaks, Valhalla sealed
+// • Pink dispose, zero leaks, Valhalla sealed — ETERNAL
 // =============================================================================
 
 #include "engine/SDL3/SDL3_window.hpp"
 #include "engine/SDL3/SDL3_vulkan.hpp"     // ← ONLY INTERFACE TO RENDERER
+#include "engine/Vulkan/VulkanRenderer.hpp"  // FIXED: FULL INCLUDE FOR GLOBAL VULKAN ACCESS
 #include "engine/GLOBAL/logging.hpp"
 
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
 #include <stdexcept>
 #include <format>
-
-using namespace Logging::Color;
 
 namespace SDL3Initializer {
 
@@ -149,7 +148,7 @@ bool pollEventsForResize(const SDLWindowPtr& window,
 }
 
 // ---------------------------------------------------------------------------
-// toggleFullscreen — ROUTE THROUGH SDL3_vulkan
+// toggleFullscreen — ROUTE THROUGH SDL3_vulkan GLOBAL INTERFACE
 // ---------------------------------------------------------------------------
 void toggleFullscreen(SDLWindowPtr& window) noexcept {
     auto* win = window.get();
@@ -169,7 +168,7 @@ void toggleFullscreen(SDLWindowPtr& window) noexcept {
     SDL_GetWindowSizeInPixels(win, &w, &h);
     if (w <= 0 || h <= 0) w = h = 1;
 
-    // ROUTE TO RENDERER VIA INTERFACE
+    // FIXED: FULL ACCESS VIA GLOBAL INCLUDE — ROUTE TO RENDERER
     SDL3Vulkan::getRenderer().handleResize(w, h);
 
     LOG_SUCCESS_CAT("Window", "Fullscreen {} → {}×{}", isFs ? "OFF" : "ON", w, h);

@@ -30,7 +30,6 @@
 
 // Forward — ctx() is eternal
 struct Context;
-[[nodiscard]] std::shared_ptr<Context>& ctx() noexcept;
 
 // ── SwapchainManager (singleton + init) ───────────────────────────────────────
 class SwapchainManager {
