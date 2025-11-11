@@ -2,7 +2,14 @@
 // =============================================================================
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
-// VulkanRTX Implementation — VALHALLA v44 — November 11, 2025 09:15 AM EST
+//
+// Dual Licensed:
+// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
+//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
+// 2. Commercial licensing: gzac5314@gmail.com
+//
+// =============================================================================
+// VulkanRTX Implementation — VALHALLA v44 — November 11, 2025 11:03 AM EST
 // • Full ray-tracing core with AMAZO_LAS integration
 // • Global singleton instance (g_vulkanRTX)
 // • Acceleration structures built at startup (BLAS + TLAS)
@@ -11,11 +18,8 @@
 // • **STONEKEY v∞ SECURED** — Runtime + compile-time entropy
 // • Production-ready, zero-leak, fully professional
 // • NO NAMESPACES IN VULKAN — SDL3 RESPECTED ONLY
+// • Dwarves live here — they forge LAS, swapchain, and RTX fire
 //
-// Dual Licensed:
-// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
-//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
-// 2. Commercial licensing: gzac5314@gmail.com
 // =============================================================================
 
 #include "engine/GLOBAL/StoneKey.hpp"        // UNBREAKABLE ENTROPY v∞
@@ -24,6 +28,7 @@
 #include "engine/GLOBAL/Bindings.hpp"        // Global binding definitions
 #include "engine/GLOBAL/SwapchainManager.hpp"
 #include "engine/GLOBAL/logging.hpp"
+#include "engine/GLOBAL/Dispose.hpp"         // Handle<T>, MakeHandle, BUFFER_*, ctx()
 
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
@@ -563,8 +568,19 @@ void VulkanRTX::endSingleTimeCommands(VkCommandBuffer cmd,
 }
 
 // =============================================================================
-// VALHALLA v44 — GLOBAL CORE — LAS + BINDINGS + STONEKEY v∞
+// VALHALLA v44 — DWARVEN FORGE — LAS + BINDINGS + STONEKEY v∞
 // NO NAMESPACES IN VULKAN — SDL3 RESPECTED — GLOBAL SUPREMACY
 // UNBREAKABLE ENTROPY — PINK PHOTONS ETERNAL — OUR ROCK v3
-// © 2025 Zachary Geurts — ALL RIGHTS RESERVED
+// © 2025 Zachary Geurts <gzac5314@gmail.com> — ALL RIGHTS RESERVED
+// =============================================================================
+
+// =============================================================================
+// AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
+// =============================================================================
+//
+// Dual Licensed:
+// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
+//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
+// 2. Commercial licensing: gzac5314@gmail.com
+//
 // =============================================================================

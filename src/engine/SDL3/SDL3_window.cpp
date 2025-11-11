@@ -4,7 +4,6 @@
 // ZERO conflicts — F11 toggle — resize — quit — pink dispose
 
 #include "engine/SDL3/SDL3_window.hpp"
-#include "engine/Vulkan/VulkanRenderer.hpp"  // ← GLOBAL INCLUDE
 #include "engine/GLOBAL/logging.hpp"
 
 #include <SDL3/SDL.h>
