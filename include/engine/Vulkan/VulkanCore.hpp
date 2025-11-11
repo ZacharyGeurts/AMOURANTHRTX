@@ -1,155 +1,209 @@
-// include/engine/Vulkan/VulkanCore.hpp
+// include/engine/GLOBAL/VulkanContext.hpp
 // =============================================================================
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
-// Vulkan RTX Core — VALHALLA v44 — NOVEMBER 11, 2025 09:37 AM EST
-// • SPINE DEFINES THE BRIDGE TO THE HEART — DISPOSE IS BOSS
-// • LAS MACROS DEFINED HERE — GLOBAL_TLAS, GLOBAL_BLAS, GLOBAL_TLAS_ADDRESS
-// • Dispose.hpp included FIRST — Heart beats through Spine
-// • g_vulkanRTX is the ONE TRUE CORE — GLOBAL SUPREMACY
-// • Production-ready, clean, and fully professional
+// Vulkan Context — VALHALLA v3.4 — NOV 11 2025 10:19 AM EST
+// • Moved ctx() declaration/definition to top to support forward usage in LAS.hpp
+// • Removed explicit #include LAS.hpp (pulled via Dispose.hpp)
+// • Added forward declaration compatibility for LAS
 // =============================================================================
 
 #pragma once
 
-// ──────────────────────────────────────────────────────────────────────────────
-// 1. DISPOSE IS BOSS — INCLUDED FIRST — HEART BEATS THROUGH SPINE
-// ──────────────────────────────────────────────────────────────────────────────
-#include "engine/GLOBAL/Dispose.hpp"   // LAS, Handle<T>, BufferTracker, StoneKey, logging
-
+#define VK_ENABLE_BETA_EXTENSIONS 1
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_beta.h>
+#include <SDL3/SDL.h>
+#include <SDL3/SDL_vulkan.h>
 
-#include <glm/glm.hpp>
-#include <span>
-#include <array>
-#include <cstdint>
 #include <memory>
-
-// CONFIG
-constexpr uint32_t MAX_FRAMES_IN_FLIGHT = Options::Performance::MAX_FRAMES_IN_FLIGHT;
+#include <vector>
+#include <stdexcept>
 
 // ──────────────────────────────────────────────────────────────────────────────
-// 2. SPINE BRIDGE — LAS MACROS DEFINED HERE — ETERNAL LINK TO HEART
+// Global Context Accessor — Defined Early for Forward Compatibility
 // ──────────────────────────────────────────────────────────────────────────────
-#define GLOBAL_TLAS()          (AMAZO_LAS::get().getTLAS())
-#define GLOBAL_TLAS_ADDRESS()  (AMAZO_LAS::get().getTLASAddress())
-#define GLOBAL_BLAS()          (AMAZO_LAS::get().getBLAS())
+struct Context;  // Forward declaration
 
-// =============================================================================
-// ShaderBindingTable
-// =============================================================================
-struct ShaderBindingTable {
-    VkStridedDeviceAddressRegionKHR raygen{};
-    VkStridedDeviceAddressRegionKHR miss{};
-    VkStridedDeviceAddressRegionKHR hit{};
-    VkStridedDeviceAddressRegionKHR callable{};
-
-    [[nodiscard]] bool empty() const noexcept {
-        return raygen.size == 0 && miss.size == 0 && hit.size == 0 && callable.size == 0;
-    }
-};
-
-// =============================================================================
-// Forward Declarations
-// =============================================================================
-class VulkanRenderer;
-class VulkanPipelineManager;
-
-// =============================================================================
-// Global RTX Instance — THE ONE
-// =============================================================================
-extern std::unique_ptr<class VulkanRTX> g_vulkanRTX;
-
-inline class VulkanRTX& rtx() noexcept { 
-    return *g_vulkanRTX; 
+[[nodiscard]] inline std::shared_ptr<Context>& ctx() noexcept {
+    static std::shared_ptr<Context> inst;
+    return inst;
 }
 
-// =============================================================================
-// VulkanRTX — Global RTX Manager — SPINE OF THE ENGINE
-// =============================================================================
-class VulkanRTX {
-public:
-    VulkanRTX(std::shared_ptr<Context> ctx, int w, int h, VulkanPipelineManager* mgr = nullptr);
-    ~VulkanRTX() noexcept;
+// ──────────────────────────────────────────────────────────────────────────────
+// Other Includes — After Globals
+// ──────────────────────────────────────────────────────────────────────────────
+#include "engine/GLOBAL/StoneKey.hpp"
+#include "engine/GLOBAL/logging.hpp"     // LOG_*, Color::, VK_CHECK
+#include "engine/GLOBAL/Dispose.hpp"     // Handle<T>, BUFFER_*, ctx() (now compatible), LAS.hpp via Dispose
+#include "engine/GLOBAL/SwapchainManager.hpp"
+#include "engine/Vulkan/VulkanCore.hpp"  // Now safe after Dispose/LAS
 
-    void initDescriptorPoolAndSets();
-    void initShaderBindingTable(VkPhysicalDevice pd);
-    void initBlackFallbackImage();
-    void buildAccelerationStructures();  // Build LAS at startup
+// ── FULL Context — NO INCOMPLETE TYPE HELL
+// ─────────────────────────────────────────────────────────────────────────────
+struct Context {
+    Context(SDL_Window* win, int w, int h);
+    ~Context() noexcept;
 
-    void updateRTXDescriptors(
-        uint32_t frameIdx,
-        VkBuffer cameraBuf, VkBuffer materialBuf, VkBuffer dimensionBuf,
-        VkImageView storageView, VkImageView accumView, VkImageView envMapView, VkSampler envSampler,
-        VkImageView densityVol = VK_NULL_HANDLE,
-        VkImageView gDepth = VK_NULL_HANDLE, VkImageView gNormal = VK_NULL_HANDLE);
+    void createSwapchain() noexcept;
+    void destroySwapchain() noexcept;
+    void loadRTXProcs() noexcept;
 
-    void recordRayTrace(VkCommandBuffer cmd, VkExtent2D extent, VkImage outputImage, VkImageView outputView);
-    void recordRayTraceAdaptive(VkCommandBuffer cmd, VkExtent2D extent, VkImage outputImage, VkImageView outputView, float nexusScore);
+    SDL_Window* window = nullptr;
+    int width = 0, height = 0;
 
-    void traceRays(VkCommandBuffer cmd,
-                   const VkStridedDeviceAddressRegionKHR* raygen,
-                   const VkStridedDeviceAddressRegionKHR* miss,
-                   const VkStridedDeviceAddressKHR* hit,
-                   const VkStridedDeviceAddressRegionKHR* callable,
-                   uint32_t width, uint32_t height, uint32_t depth = 1) const noexcept;
+    Handle<VkInstance>        instance;
+    Handle<VkDevice>          device;
+    Handle<VkSurfaceKHR>      surface;
+    Handle<VkPhysicalDevice>  physicalDevice;
 
-    // LAS Access — SPINE BRIDGE TO HEART — MACROS IN SCOPE
-    [[nodiscard]] static VkAccelerationStructureKHR TLAS() noexcept { return GLOBAL_TLAS(); }
-    [[nodiscard]] static VkDeviceAddress TLASAddress() noexcept { return GLOBAL_TLAS_ADDRESS(); }
-    [[nodiscard]] static VkAccelerationStructureKHR BLAS() noexcept { return GLOBAL_BLAS(); }
+    uint32_t graphicsFamilyIndex = ~0u;
+    VkPipelineCache pipelineCacheHandle = VK_NULL_HANDLE;
 
-    // Getters
-    [[nodiscard]] VkDescriptorSet descriptorSet(uint32_t idx = 0) const noexcept { return descriptorSets_[idx]; }
-    [[nodiscard]] VkPipeline pipeline() const noexcept { return *rtPipeline_; }
-    [[nodiscard]] VkPipelineLayout pipelineLayout() const noexcept { return *rtPipelineLayout_; }
-    [[nodiscard]] const ShaderBindingTable& sbt() const noexcept { return sbt_; }
-    [[nodiscard]] VkBuffer sbtBuffer() const noexcept { return *sbtBuffer_; }
-    [[nodiscard]] VkDescriptorSetLayout descriptorSetLayout() const noexcept { return *rtDescriptorSetLayout_; }
+    PFN_vkGetBufferDeviceAddressKHR                     vkGetBufferDeviceAddressKHR = nullptr;
+    PFN_vkCmdTraceRaysKHR                               vkCmdTraceRaysKHR = nullptr;
+    PFN_vkCreateRayTracingPipelinesKHR                  vkCreateRayTracingPipelinesKHR = nullptr;
+    PFN_vkGetRayTracingShaderGroupHandlesKHR            vkGetRayTracingShaderGroupHandlesKHR = nullptr;
+    PFN_vkGetAccelerationStructureBuildSizesKHR         vkGetAccelerationStructureBuildSizesKHR = nullptr;
+    PFN_vkCreateAccelerationStructureKHR                vkCreateAccelerationStructureKHR = nullptr;
+    PFN_vkDestroyAccelerationStructureKHR               vkDestroyAccelerationStructureKHR = nullptr;
+    PFN_vkCmdBuildAccelerationStructuresKHR             vkCmdBuildAccelerationStructuresKHR = nullptr;
+    PFN_vkGetAccelerationStructureDeviceAddressKHR     vkGetAccelerationStructureDeviceAddressKHR = nullptr;
+    PFN_vkCmdWriteAccelerationStructuresPropertiesKHR  vkCmdWriteAccelerationStructuresPropertiesKHR = nullptr;
+    PFN_vkCopyAccelerationStructureKHR                  vkCopyAccelerationStructureKHR = nullptr;
+    PFN_vkWriteAccelerationStructuresPropertiesKHR      vkWriteAccelerationStructuresPropertiesKHR = nullptr;
+    PFN_vkCmdDrawMeshTasksEXT                           vkCmdDrawMeshTasksEXT = nullptr;
+    PFN_vkCreateDeferredOperationKHR                    vkCreateDeferredOperationKHR = nullptr;
+    PFN_vkDestroyDeferredOperationKHR                   vkDestroyDeferredOperationKHR = nullptr;
 
-    void setDescriptorSetLayout(VkDescriptorSetLayout layout) noexcept;
-    void setRayTracingPipeline(VkPipeline pipeline, VkPipelineLayout layout) noexcept;
-
-private:
-    void createBuffer(VkDeviceSize size, VkBufferUsageFlags usage,
-                      VkMemoryPropertyFlags props,
-                      Handle<VkBuffer>& buf,
-                      Handle<VkDeviceMemory>& mem);
-
-    std::shared_ptr<Context> ctx_;
-    VkDevice device_ = VK_NULL_HANDLE;
-    VulkanPipelineManager* pipelineMgr_ = nullptr;
-    VkExtent2D extent_{};
-
-    Handle<VkDescriptorSetLayout> rtDescriptorSetLayout_;
-    Handle<VkDescriptorPool> descriptorPool_;
-    std::array<VkDescriptorSet, MAX_FRAMES_IN_FLIGHT> descriptorSets_{};
-
-    Handle<VkPipeline> rtPipeline_;
-    Handle<VkPipelineLayout> rtPipelineLayout_;
-
-    Handle<VkBuffer> sbtBuffer_;
-    Handle<VkDeviceMemory> sbtMemory_;
-    ShaderBindingTable sbt_{};
-    VkDeviceSize sbtRecordSize_ = 0;
-    VkDeviceAddress sbtAddress_ = 0;
-
-    Handle<VkImage> blackFallbackImage_;
-    Handle<VkDeviceMemory> blackFallbackMemory_;
-    Handle<VkImageView> blackFallbackView_;
-    Handle<VkSampler> defaultSampler_;
-
-    PFN_vkGetBufferDeviceAddressKHR          vkGetBufferDeviceAddressKHR = nullptr;
-    PFN_vkCmdTraceRaysKHR                    vkCmdTraceRaysKHR = nullptr;
-    PFN_vkGetRayTracingShaderGroupHandlesKHR vkGetRayTracingShaderGroupHandlesKHR = nullptr;
-
-    VkCommandBuffer beginSingleTimeCommands(VkCommandPool pool) const noexcept;
-    void endSingleTimeCommands(VkCommandBuffer cmd, VkCommandPool pool, VkQueue queue) const noexcept;
-    VkDeviceSize alignUp(VkDeviceSize value, VkDeviceSize alignment) const noexcept;
+    [[nodiscard]] inline VkInstance       vkInstance() const noexcept { return *instance; }
+    [[nodiscard]] inline VkPhysicalDevice vkPhysicalDevice() const noexcept { return *physicalDevice; }
+    [[nodiscard]] inline VkDevice         vkDevice() const noexcept { return *device; }
+    [[nodiscard]] inline VkSurfaceKHR     vkSurface() const noexcept { return *surface; }
 };
 
-// =============================================================================
-// Global Instance
-// =============================================================================
-std::unique_ptr<VulkanRTX> g_vulkanRTX;
+/* ── IMPLEMENTATION ────────────────────────────────────────────────────────── */
+inline Context::Context(SDL_Window* win, int w, int h)
+    : window(win), width(w), height(h)
+{
+    VkApplicationInfo appInfo{VK_STRUCTURE_TYPE_APPLICATION_INFO};
+    appInfo.pApplicationName = "AMOURANTH RTX";
+    appInfo.apiVersion = VK_API_VERSION_1_3;
+
+    std::vector<const char*> exts = { VK_KHR_SURFACE_EXTENSION_NAME, VK_EXT_DEBUG_UTILS_EXTENSION_NAME };
+    std::vector<const char*> layers = { "VK_LAYER_KHRONOS_validation" };
+
+    VkInstanceCreateInfo ci{VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
+    ci.pApplicationInfo = &appInfo;
+    ci.enabledExtensionCount = static_cast<uint32_t>(exts.size());
+    ci.ppEnabledExtensionNames = exts.data();
+    ci.enabledLayerCount = static_cast<uint32_t>(layers.size());
+    ci.ppEnabledLayerNames = layers.data();
+
+    VkInstance rawInst = VK_NULL_HANDLE;
+    VK_CHECK(vkCreateInstance(&ci, nullptr, &rawInst), "Instance");
+    instance = Handle<VkInstance>(rawInst, VK_NULL_HANDLE,
+        [](VkDevice, VkInstance i, const VkAllocationCallbacks*) { vkDestroyInstance(i, nullptr); });
+
+    VkSurfaceKHR rawSurf = VK_NULL_HANDLE;
+    SDL_Vulkan_CreateSurface(window, rawInst, nullptr, &rawSurf);
+    surface = Handle<VkSurfaceKHR>(rawSurf, VK_NULL_HANDLE,
+        [rawInst](VkDevice, VkSurfaceKHR s, const VkAllocationCallbacks*) mutable { vkDestroySurfaceKHR(rawInst, s, nullptr); });
+
+    uint32_t devCnt = 0; vkEnumeratePhysicalDevices(rawInst, &devCnt, nullptr);
+    std::vector<VkPhysicalDevice> devs(devCnt); vkEnumeratePhysicalDevices(rawInst, &devCnt, devs.data());
+    VkPhysicalDevice chosen = VK_NULL_HANDLE;
+    for (auto pd : devs) {
+        VkPhysicalDeviceProperties props{}; vkGetPhysicalDeviceProperties(pd, &props);
+        if (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) { chosen = pd; break; }
+    }
+    if (!chosen && !devs.empty()) chosen = devs[0];
+    physicalDevice = Handle<VkPhysicalDevice>(chosen, nullptr);
+
+    uint32_t qCnt = 0; vkGetPhysicalDeviceQueueFamilyProperties(chosen, &qCnt, nullptr);
+    std::vector<VkQueueFamilyProperties> qProps(qCnt); vkGetPhysicalDeviceQueueFamilyProperties(chosen, &qCnt, qProps.data());
+    for (uint32_t i = 0; i < qCnt; ++i)
+        if (qProps[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) { graphicsFamilyIndex = i; break; }
+    if (graphicsFamilyIndex == ~0u) throw std::runtime_error("no graphics queue");
+
+    std::vector<const char*> devExts = {
+        VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+        VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
+        VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME,
+        VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME,
+        VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME,
+        VK_EXT_MESH_SHADER_EXTENSION_NAME,
+        VK_KHR_RAY_QUERY_EXTENSION_NAME
+    };
+
+    float prio = 1.0f;
+    VkDeviceQueueCreateInfo qci{VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO};
+    qci.queueFamilyIndex = graphicsFamilyIndex; qci.queueCount = 1; qci.pQueuePriorities = &prio;
+
+    VkPhysicalDeviceAccelerationStructureFeaturesKHR asf{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR};
+    VkPhysicalDeviceRayTracingPipelineFeaturesKHR rtf{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR};
+    VkPhysicalDeviceBufferDeviceAddressFeatures bdaf{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES};
+    VkPhysicalDeviceMeshShaderFeaturesEXT msf{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT};
+    VkPhysicalDeviceRayQueryFeaturesKHR rqf{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR};
+
+    asf.accelerationStructure = VK_TRUE; rtf.rayTracingPipeline = VK_TRUE;
+    bdaf.bufferDeviceAddress = VK_TRUE; msf.meshShader = VK_TRUE; rqf.rayQuery = VK_TRUE;
+
+    void** pNext = &asf.pNext;
+    *pNext = &rtf; pNext = &rtf.pNext;
+    *pNext = &bdaf; pNext = &bdaf.pNext;
+    *pNext = &msf; pNext = &msf.pNext;
+    *pNext = &rqf;
+
+    VkDeviceCreateInfo dci{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
+    dci.pNext = &asf; dci.queueCreateInfoCount = 1; dci.pQueueCreateInfos = &qci;
+    dci.enabledExtensionCount = static_cast<uint32_t>(devExts.size());
+    dci.ppEnabledExtensionNames = devExts.data();
+
+    VkDevice rawDev = VK_NULL_HANDLE;
+    VK_CHECK(vkCreateDevice(chosen, &dci, nullptr, &rawDev), "Device");
+    device = Handle<VkDevice>(rawDev, VK_NULL_HANDLE,
+        [](VkDevice d, VkDevice, const VkAllocationCallbacks*) { vkDestroyDevice(d, nullptr); });
+
+    VkPipelineCacheCreateInfo pci{VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO};
+    VK_CHECK(vkCreatePipelineCache(vkDevice(), &pci, nullptr, &pipelineCacheHandle), "Pipeline cache");
+
+    loadRTXProcs();
+    createSwapchain();
+
+    LOG_SUCCESS_CAT("Vulkan",
+        "{}VALHALLA v3.4 — GLOBAL CTX SUPREMACY — {}×{} — TITAN READY{}", PLASMA_FUCHSIA, w, h, RESET);
+}
+
+inline Context::~Context() noexcept {
+    if (pipelineCacheHandle) vkDestroyPipelineCache(vkDevice(), pipelineCacheHandle, nullptr);
+    destroySwapchain();
+}
+
+inline void Context::loadRTXProcs() noexcept {
+    if (!vkDevice()) return;
+    #define LOAD(name) name = reinterpret_cast<PFN_##name>(vkGetDeviceProcAddr(vkDevice(), #name))
+    LOAD(vkGetBufferDeviceAddressKHR);
+    LOAD(vkCmdTraceRaysKHR);
+    LOAD(vkCreateRayTracingPipelinesKHR);
+    LOAD(vkGetRayTracingShaderGroupHandlesKHR);
+    LOAD(vkGetAccelerationStructureBuildSizesKHR);
+    LOAD(vkCreateAccelerationStructureKHR);
+    LOAD(vkDestroyAccelerationStructureKHR);
+    LOAD(vkCmdBuildAccelerationStructuresKHR);
+    LOAD(vkGetAccelerationStructureDeviceAddressKHR);
+    LOAD(vkCmdWriteAccelerationStructuresPropertiesKHR);
+    LOAD(vkCopyAccelerationStructureKHR);
+    LOAD(vkWriteAccelerationStructuresPropertiesKHR);
+    LOAD(vkCmdDrawMeshTasksEXT);
+    LOAD(vkCreateDeferredOperationKHR);
+    LOAD(vkDestroyDeferredOperationKHR);
+    #undef LOAD
+}
+
+inline void Context::createSwapchain() noexcept {
+    SwapchainManager::get().init(vkInstance(), vkPhysicalDevice(),
+                                 vkDevice(), vkSurface(), width, height);
+    SwapchainManager::get().recreate(width, height);
+}
+inline void Context::destroySwapchain() noexcept { SwapchainManager::get().cleanup(); }
