@@ -31,8 +31,6 @@
 
 // RESPECT SDL3 NAMESPACES — GOD INTENDED
 // ALL OTHER NAMESPACES OBLITERATED — GLOBAL SUPREMACY
-using namespace Logging::Color;
-using namespace Bindings::RTX;
 
 // =============================================================================
 // GLOBAL INSTANCE — THE ONE TRUE RTX

@@ -3,10 +3,16 @@
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
 //
-// HYPER-VIVID C++23 LOGGING v∞ — OLD GOD SUPREMACY — NOVEMBER 10, 2025
+// HYPER-VIVID C++23 LOGGING v∞ — OLD GOD SUPREMACY — NOVEMBER 11, 2025 09:47 AM EST
 // THREAD-SAFE | LOCK-FREE | ASYNC | DELTA-TIME | 50+ RAINBOW COLORS | CUSTODIAN GROK DJ
 // Ellie Fier approved • StoneKey fortified • 7-file rotation • Zero-cost macros
-// NAMESPACE OBLITERATED — OLD GOD GLOBAL DIRECT — NO Logging:: PREFIX — VALHALLA ETERNAL
+// **GLOBAL ECOSYSTEM** — **LOG_SUCCESS_CAT WORKS ANYWHERE** — **NO NAMESPACE**
+// **SDL3 RESPECTED ONLY** — **VULKAN IS RAW** — **GOD INTENDED**
+//
+// Dual Licensed:
+// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
+//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
+// 2. Commercial licensing: gzac5314@gmail.com
 //
 // =============================================================================
 
@@ -69,6 +75,9 @@
 #include <glm/glm.hpp>
 #include <glm/gtx/string_cast.hpp>
 #include <vulkan/vulkan.h>
+#include <vulkan/vulkan_beta.h>
+
+// SDL3 RESPECTED — GOD INTENDED
 #include <SDL3/SDL.h>
 
 // Formatter specialization for VkResult — GLOBAL
@@ -126,7 +135,7 @@ struct formatter<VkResult> {
 }
 
 // ========================================================================
-// 0. CONFIGURATION & HYPER-VIVID MACROS — [&] CAPTURE • ZERO COST • PARTY READY
+// 0. CONFIGURATION & HYPER-VIVID MACROS — GLOBAL ECOSYSTEM — ZERO COST
 // ========================================================================
 constexpr bool ENABLE_TRACE   = true;
 constexpr bool ENABLE_DEBUG   = true;
@@ -139,7 +148,7 @@ constexpr bool ENABLE_PERF    = true;
 constexpr bool FPS_COUNTER    = true;
 constexpr bool SIMULATION_LOGGING = true;
 
-// HYPER-VIVID MACROS — GLOBAL DIRECT — NO Logging:: — OLD GOD SUPREMACY
+// **GLOBAL MACROS — LOG_SUCCESS_CAT WORKS ANYWHERE — NO NAMESPACE**
 #define LOG_TRACE(...)          [&]() constexpr { if constexpr (ENABLE_TRACE)   Logger::get().log(LogLevel::Trace,   "General", __VA_ARGS__); }()
 #define LOG_DEBUG(...)          [&]() constexpr { if constexpr (ENABLE_DEBUG)   Logger::get().log(LogLevel::Debug,   "General", __VA_ARGS__); }()
 #define LOG_INFO(...)           [&]() constexpr { if constexpr (ENABLE_INFO)    Logger::get().log(LogLevel::Info,    "General", __VA_ARGS__); }()
@@ -162,7 +171,6 @@ constexpr bool SIMULATION_LOGGING = true;
 #define LOG_WARN_CAT(cat, ...)    LOG_WARNING_CAT(cat, __VA_ARGS__)
 #define LOG_ERROR_CAT(cat, ...)   [&]() constexpr { if constexpr (ENABLE_ERROR)   Logger::get().log(LogLevel::Error,   cat, __VA_ARGS__); }()
 
-// LOG_VOID — COSMIC MARKERS
 #define LOG_VOID()              [&]() constexpr { if constexpr (ENABLE_DEBUG)   Logger::get().logVoid(LogLevel::Debug,   "General"); }()
 #define LOG_VOID_CAT(cat)       [&]() constexpr { if constexpr (ENABLE_DEBUG)   Logger::get().logVoid(LogLevel::Debug,   cat); }()
 #define LOG_VOID_TRACE()        [&]() constexpr { if constexpr (ENABLE_TRACE)   Logger::get().logVoid(LogLevel::Trace,   "General"); }()
@@ -174,54 +182,52 @@ constexpr bool SIMULATION_LOGGING = true;
 enum class LogLevel { Trace, Debug, Info, Success, Attempt, Perf, Warning, Error };
 
 // ========================================================================
-// 1. HYPER-VIVID ANSI COLOR SYSTEM — 50+ COLORS — C++23 CONSTEXPR — GLOBAL
+// 1. HYPER-VIVID ANSI COLOR SYSTEM — 50+ COLORS — **GLOBAL Color::**
 // ========================================================================
-namespace Color {
-    inline constexpr std::string_view RESET                     = "\033[0m";
-    inline constexpr std::string_view BOLD                      = "\033[1m";
-    inline constexpr std::string_view PARTY_PINK                = "\033[1;38;5;213m";
-    inline constexpr std::string_view ELECTRIC_BLUE             = "\033[1;38;5;75m";
-    inline constexpr std::string_view LIME_GREEN                = "\033[1;38;5;154m";
-    inline constexpr std::string_view SUNGLOW_ORANGE            = "\033[1;38;5;214m";
-    inline constexpr std::string_view ULTRA_NEON_LIME           = "\033[38;5;82m";
-    inline constexpr std::string_view PLATINUM_GRAY             = "\033[38;5;255m";
-    inline constexpr std::string_view EMERALD_GREEN             = "\033[1;38;5;46m";
-    inline constexpr std::string_view QUANTUM_PURPLE            = "\033[1;38;5;129m";
-    inline constexpr std::string_view COSMIC_GOLD               = "\033[1;38;5;220m";
-    inline constexpr std::string_view ARCTIC_CYAN               = "\033[38;5;51m";
-    inline constexpr std::string_view AMBER_YELLOW              = "\033[38;5;226m";
-    inline constexpr std::string_view CRIMSON_MAGENTA           = "\033[1;38;5;198m";
-    inline constexpr std::string_view DIAMOND_WHITE             = "\033[1;38;5;231m";
-    inline constexpr std::string_view SAPPHIRE_BLUE             = "\033[38;5;33m";
-    inline constexpr std::string_view OCEAN_TEAL                = "\033[38;5;45m";
-    inline constexpr std::string_view FIERY_ORANGE              = "\033[1;38;5;208m";
-    inline constexpr std::string_view RASPBERRY_PINK            = "\033[1;38;5;204m";
-    inline constexpr std::string_view PEACHES_AND_CREAM         = "\033[38;5;223m";
-    inline constexpr std::string_view BRIGHT_PINKISH_PURPLE     = "\033[1;38;5;205m";
-    inline constexpr std::string_view LILAC_LAVENDER            = "\033[38;5;183m";
-    inline constexpr std::string_view SPEARMINT_MINT            = "\033[38;5;122m";
-    inline constexpr std::string_view THERMO_PINK               = "\033[1;38;5;213m";
-    inline constexpr std::string_view COSMIC_VOID               = "\033[38;5;232m";
-    inline constexpr std::string_view QUASAR_BLUE               = "\033[1;38;5;39m";
-    inline constexpr std::string_view NEBULA_VIOLET             = "\033[1;38;5;141m";
-    inline constexpr std::string_view PULSAR_GREEN              = "\033[1;38;5;118m";
-    inline constexpr std::string_view SUPERNOVA_ORANGE          = "\033[1;38;5;202m";
-    inline constexpr std::string_view BLACK_HOLE                = "\033[48;5;232m";
-    inline constexpr std::string_view DIAMOND_SPARKLE           = "\033[1;38;5;231m";
-    inline constexpr std::string_view QUANTUM_FLUX              = "\033[5;38;5;99m";
-    inline constexpr std::string_view PLASMA_FUCHSIA            = "\033[1;38;5;201m";
-    inline constexpr std::string_view CHROMIUM_SILVER           = "\033[38;5;252m";
-    inline constexpr std::string_view TITANIUM_WHITE            = "\033[1;38;5;255m";
-    inline constexpr std::string_view OBSIDIAN_BLACK            = "\033[38;5;16m";
-    inline constexpr std::string_view AURORA_BOREALIS           = "\033[38;5;86m";
-    inline constexpr std::string_view NUCLEAR_REACTOR           = "\033[1;38;5;190m";
-    inline constexpr std::string_view HYPERSPACE_WARP           = "\033[1;38;5;99m";
-    inline constexpr std::string_view VALHALLA_GOLD             = "\033[1;38;5;220m";
-    inline constexpr std::string_view TURQUOISE_BLUE            = "\033[38;5;44m";
-    inline constexpr std::string_view BRONZE_BROWN              = "\033[38;5;94m";
-    inline constexpr std::string_view LIME_YELLOW               = "\033[38;5;190m";
-    inline constexpr std::string_view FUCHSIA_MAGENTA           = "\033[38;5;205m";
-}
+inline constexpr std::string_view RESET                     = "\033[0m";
+inline constexpr std::string_view BOLD                      = "\033[1m";
+inline constexpr std::string_view PARTY_PINK                = "\033[1;38;5;213m";
+inline constexpr std::string_view ELECTRIC_BLUE             = "\033[1;38;5;75m";
+inline constexpr std::string_view LIME_GREEN                = "\033[1;38;5;154m";
+inline constexpr std::string_view SUNGLOW_ORANGE            = "\033[1;38;5;214m";
+inline constexpr std::string_view ULTRA_NEON_LIME           = "\033[38;5;82m";
+inline constexpr std::string_view PLATINUM_GRAY             = "\033[38;5;255m";
+inline constexpr std::string_view EMERALD_GREEN             = "\033[1;38;5;46m";
+inline constexpr std::string_view QUANTUM_PURPLE            = "\033[1;38;5;129m";
+inline constexpr std::string_view COSMIC_GOLD               = "\033[1;38;5;220m";
+inline constexpr std::string_view ARCTIC_CYAN               = "\033[38;5;51m";
+inline constexpr std::string_view AMBER_YELLOW              = "\033[38;5;226m";
+inline constexpr std::string_view CRIMSON_MAGENTA           = "\033[1;38;5;198m";
+inline constexpr std::string_view DIAMOND_WHITE             = "\033[1;38;5;231m";
+inline constexpr std::string_view SAPPHIRE_BLUE             = "\033[38;5;33m";
+inline constexpr std::string_view OCEAN_TEAL                = "\033[38;5;45m";
+inline constexpr std::string_view FIERY_ORANGE              = "\033[1;38;5;208m";
+inline constexpr std::string_view RASPBERRY_PINK            = "\033[1;38;5;204m";
+inline constexpr std::string_view PEACHES_AND_CREAM         = "\033[38;5;223m";
+inline constexpr std::string_view BRIGHT_PINKISH_PURPLE     = "\033[1;38;5;205m";
+inline constexpr std::string_view LILAC_LAVENDER            = "\033[38;5;183m";
+inline constexpr std::string_view SPEARMINT_MINT            = "\033[38;5;122m";
+inline constexpr std::string_view THERMO_PINK               = "\033[1;38;5;213m";
+inline constexpr std::string_view COSMIC_VOID               = "\033[38;5;232m";
+inline constexpr std::string_view QUASAR_BLUE               = "\033[1;38;5;39m";
+inline constexpr std::string_view NEBULA_VIOLET             = "\033[1;38;5;141m";
+inline constexpr std::string_view PULSAR_GREEN              = "\033[1;38;5;118m";
+inline constexpr std::string_view SUPERNOVA_ORANGE          = "\033[1;38;5;202m";
+inline constexpr std::string_view BLACK_HOLE                = "\033[48;5;232m";
+inline constexpr std::string_view DIAMOND_SPARKLE           = "\033[1;38;5;231m";
+inline constexpr std::string_view QUANTUM_FLUX              = "\033[5;38;5;99m";
+inline constexpr std::string_view PLASMA_FUCHSIA            = "\033[1;38;5;201m";
+inline constexpr std::string_view CHROMIUM_SILVER           = "\033[38;5;252m";
+inline constexpr std::string_view TITANIUM_WHITE            = "\033[1;38;5;255m";
+inline constexpr std::string_view OBSIDIAN_BLACK            = "\033[38;5;16m";
+inline constexpr std::string_view AURORA_BOREALIS           = "\033[38;5;86m";
+inline constexpr std::string_view NUCLEAR_REACTOR           = "\033[1;38;5;190m";
+inline constexpr std::string_view HYPERSPACE_WARP           = "\033[1;38;5;99m";
+inline constexpr std::string_view VALHALLA_GOLD             = "\033[1;38;5;220m";
+inline constexpr std::string_view TURQUOISE_BLUE            = "\033[38;5;44m";
+inline constexpr std::string_view BRONZE_BROWN              = "\033[38;5;94m";
+inline constexpr std::string_view LIME_YELLOW               = "\033[38;5;190m";
+inline constexpr std::string_view FUCHSIA_MAGENTA           = "\033[38;5;205m";
 
 // ========================================================================
 // LEVEL INFO + ENABLE ARRAY — GLOBAL
@@ -233,14 +239,14 @@ struct LevelInfo {
 };
 
 constexpr std::array<LevelInfo, 8> LEVEL_INFOS{{
-    {"[TRACE]",   Color::ULTRA_NEON_LIME,     ""},
-    {"[DEBUG]",   Color::ARCTIC_CYAN,         ""},
-    {"[INFO]",    Color::PLATINUM_GRAY,       ""},
-    {"[SUCCESS]", Color::EMERALD_GREEN,       Color::BLACK_HOLE},
-    {"[ATTEMPT]", Color::QUANTUM_PURPLE,      ""},
-    {"[PERF]",    Color::COSMIC_GOLD,         ""},
-    {"[WARN]",    Color::AMBER_YELLOW,        ""},
-    {"[ERROR]",   Color::CRIMSON_MAGENTA,     Color::BLACK_HOLE}
+    {"[TRACE]",   ULTRA_NEON_LIME,     ""},
+    {"[DEBUG]",   ARCTIC_CYAN,         ""},
+    {"[INFO]",    PLATINUM_GRAY,       ""},
+    {"[SUCCESS]", EMERALD_GREEN,       BLACK_HOLE},
+    {"[ATTEMPT]", QUANTUM_PURPLE,      ""},
+    {"[PERF]",    COSMIC_GOLD,         ""},
+    {"[WARN]",    AMBER_YELLOW,        ""},
+    {"[ERROR]",   CRIMSON_MAGENTA,     BLACK_HOLE}
 }};
 
 constexpr std::array<bool, 8> ENABLE_LEVELS{
@@ -260,7 +266,7 @@ struct LogMessage {
 };
 
 // ========================================================================
-// 2. LOGGER — GLOBAL CLASS — OLD GOD SUPREMACY — NO NAMESPACE
+// 2. LOGGER — GLOBAL CLASS — **NO NAMESPACE** — **LOG_SUCCESS_CAT WORKS ANYWHERE**
 // ========================================================================
 class Logger {
 public:
@@ -292,7 +298,7 @@ private:
     Logger() : worker_([this](std::stop_token st) { processQueue(st); }) {
         logFilePath_ = "amouranth_engine.log";
         logFile_.open(logFilePath_, std::ios::out | std::ios::app);
-        LOG_SUCCESS_CAT("Logger", "CUSTODIAN GROK ONLINE — OLD GOD LOGGING SUPREMACY — RASPBERRY_PINK ETERNAL 🩷⚡");
+        LOG_SUCCESS_CAT("Logger", "CUSTODIAN GROK ONLINE — OLD GOD LOGGING SUPREMACY — RASPBERRY_PINK ETERNAL");
     }
 
     ~Logger() {
@@ -300,7 +306,7 @@ private:
         if (logFile_.is_open()) {
             logFile_.close();
         }
-        LOG_SUCCESS_CAT("Logger", "CUSTODIAN GROK SIGNING OFF — ALL LOGS RAINBOW ETERNAL — VALHALLA AWAITS ✨");
+        LOG_SUCCESS_CAT("Logger", "CUSTODIAN GROK SIGNING OFF — ALL LOGS RAINBOW ETERNAL — VALHALLA AWAITS");
     }
 
     static constexpr size_t QUEUE_SIZE = 2048;
@@ -321,7 +327,6 @@ private:
     }
 
     std::string_view getCategoryColor(std::string_view cat) const noexcept {
-        using namespace Color;
         static const std::map<std::string_view, std::string_view, std::less<>> categoryColors{
             {"General", DIAMOND_SPARKLE}, {"MAIN", VALHALLA_GOLD}, {"Init", AURORA_BOREALIS}, {"Dispose", PARTY_PINK}, {"Logger", ELECTRIC_BLUE},
             {"Vulkan", SAPPHIRE_BLUE}, {"Device", QUASAR_BLUE}, {"Swapchain", OCEAN_TEAL}, {"Command", CHROMIUM_SILVER}, {"Queue", OBSIDIAN_BLACK},
@@ -346,7 +351,7 @@ private:
         if (next == tail_.load(std::memory_order_acquire)) [[unlikely]] {
             auto drop = QUEUE_SIZE / 2;
             tail_.store((tail_.load(std::memory_order_relaxed) + drop) % QUEUE_SIZE, std::memory_order_release);
-            LOG_ERROR_CAT("Logger", "QUEUE OVERFLOW — DROPPING {} MESSAGES — UPGRADE TO 4096 BRO 🩷", drop);
+            LOG_ERROR_CAT("Logger", "QUEUE OVERFLOW — DROPPING {} MESSAGES — UPGRADE TO 4096 BRO", drop);
         }
 
         auto now = std::chrono::steady_clock::now();
@@ -415,8 +420,8 @@ private:
 
         for (const auto& msg : remaining) printMessage(msg);
 
-        std::print("{}{}<<< OLD GOD FINAL FLUSH COMPLETE — {} messages turned to confetti — PARTY ETERNAL 🩷⚡{}{}\n",
-                   Color::PARTY_PINK, Color::SUNGLOW_ORANGE, remaining.size(), Color::RESET, Color::RESET);
+        std::print("{}{}<<< OLD GOD FINAL FLUSH COMPLETE — {} messages turned to confetti — PARTY ETERNAL{}{}\n",
+                   PARTY_PINK, SUNGLOW_ORANGE, remaining.size(), RESET, RESET);
     }
 
     void rotateLogFile() const {
@@ -464,12 +469,11 @@ private:
         }
 
         logFile_.open(logFilePath_, std::ios::out | std::ios::app);
-        std::print("{}{}LOG ROTATED → {} — STONEKEY PROTECTED — ONLY 7 FILES KEPT — RASPBERRY_PINK ETERNAL 🩷⚡{}{}\n",
-                   Color::QUANTUM_FLUX, Color::PLATINUM_GRAY, archivedPath.filename().string(), Color::RESET, Color::RESET);
+        std::print("{}{}LOG ROTATED → {} — STONEKEY PROTECTED — ONLY 7 FILES KEPT — RASPBERRY_PINK ETERNAL{}{}\n",
+                   QUANTUM_FLUX, PLATINUM_GRAY, archivedPath.filename().string(), RESET, RESET);
     }
 
     void printMessage(const LogMessage& msg) const {
-        using namespace Color;
         const auto levelIdx = static_cast<size_t>(msg.level);
         const auto& info = LEVEL_INFOS[levelIdx];
         const std::string_view levelColor = info.color;
@@ -512,8 +516,8 @@ private:
     }
 };
 
-// NOVEMBER 10 2025 — OLD GOD LOGGING SUPREMACY — RASPBERRY_PINK PARTY ETERNAL
-// 7-FILE ROTATION • STONEKEY OBFUSCATION • RAINBOW FOREVER • NO NAMESPACE
-// CUSTODIAN GROK + ELLIE FIER + AMOURANTH RTX = VALHALLA UNLOCKED 🩷⚡🍒🩸
+// NOVEMBER 11 2025 — OLD GOD LOGGING SUPREMACY — **NO NAMESPACE** — **GLOBAL ECOSYSTEM**
+// LOG_SUCCESS_CAT WORKS ANYWHERE — SDL3 RESPECTED — VULKAN RAW — RASPBERRY_PINK PARTY ETERNAL
+// CUSTODIAN GROK + ELLIE FIER + AMOURANTH RTX = VALHALLA UNLOCKED
 // GOD BLESS — SHIP IT FOREVER — PINK PHOTONS INFINITE
 // =============================================================================

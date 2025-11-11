@@ -448,7 +448,7 @@ inline void AMAZO_LAS::setHypertraceEnabled(bool enabled) noexcept {
 #define GLOBAL_BLAS()          (AMAZO_LAS::get().getBLAS())
 #define GLOBAL_BLAS_ADDRESS()  AMAZO_LAS::get().getBLASAddress()
 #define GLOBAL_TLAS()          (AMAZO_LAS::get().getTLAS())
-#define GLOBAL_TLAS_ADDRESS()  AMAZO_LAS::get().getTLASAddress()
+//#define GLOBAL_TLAS_ADDRESS()  AMAZO_LAS::get().getTLASAddress()
 
 #define LAS_STATS() \
     LOG_INFO_CAT("LAS", "AMOURANTH RTX: BLAS %s | TLAS %s | POWER %.2f GB", \

@@ -2,30 +2,23 @@
 // =============================================================================
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
-// Vulkan RTX Core — VALHALLA v43 — NOVEMBER 11, 2025 09:12 AM EST
-// • AMAZO_LAS integrated — BLAS/TLAS built at startup
+// Vulkan RTX Core — VALHALLA v44 — NOVEMBER 11, 2025 09:37 AM EST
+// • SPINE DEFINES THE BRIDGE TO THE HEART — DISPOSE IS BOSS
+// • LAS MACROS DEFINED HERE — GLOBAL_TLAS, GLOBAL_BLAS, GLOBAL_TLAS_ADDRESS
+// • Dispose.hpp included FIRST — Heart beats through Spine
 // • g_vulkanRTX is the ONE TRUE CORE — GLOBAL SUPREMACY
-// • All dependencies resolved: Context, LAS, logging, Dispose
 // • Production-ready, clean, and fully professional
-//
-// Dual Licensed:
-// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
-// 2. Commercial: gzac5314@gmail.com
 // =============================================================================
 
 #pragma once
 
+// ──────────────────────────────────────────────────────────────────────────────
+// 1. DISPOSE IS BOSS — INCLUDED FIRST — HEART BEATS THROUGH SPINE
+// ──────────────────────────────────────────────────────────────────────────────
+#include "engine/GLOBAL/Dispose.hpp"   // LAS, Handle<T>, BufferTracker, StoneKey, logging
+
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_beta.h>
-
-// GLOBAL DEPENDENCIES — ORDER CRITICAL
-#include "engine/GLOBAL/LAS.hpp"           // AMAZO_LAS + MACROS - Before Dispose
-#include "engine/GLOBAL/Dispose.hpp"
-#include "engine/GLOBAL/logging.hpp"
-#include "engine/GLOBAL/OptionsMenu.hpp"
-#include "engine/GLOBAL/VulkanContext.hpp"
-
-#include "engine/Vulkan/Bindings.hpp"
 
 #include <glm/glm.hpp>
 #include <span>
@@ -35,6 +28,27 @@
 
 // CONFIG
 constexpr uint32_t MAX_FRAMES_IN_FLIGHT = Options::Performance::MAX_FRAMES_IN_FLIGHT;
+
+// ──────────────────────────────────────────────────────────────────────────────
+// 2. SPINE BRIDGE — LAS MACROS DEFINED HERE — ETERNAL LINK TO HEART
+// ──────────────────────────────────────────────────────────────────────────────
+#define GLOBAL_TLAS()          (AMAZO_LAS::get().getTLAS())
+#define GLOBAL_TLAS_ADDRESS()  (AMAZO_LAS::get().getTLASAddress())
+#define GLOBAL_BLAS()          (AMAZO_LAS::get().getBLAS())
+
+// =============================================================================
+// ShaderBindingTable
+// =============================================================================
+struct ShaderBindingTable {
+    VkStridedDeviceAddressRegionKHR raygen{};
+    VkStridedDeviceAddressRegionKHR miss{};
+    VkStridedDeviceAddressRegionKHR hit{};
+    VkStridedDeviceAddressRegionKHR callable{};
+
+    [[nodiscard]] bool empty() const noexcept {
+        return raygen.size == 0 && miss.size == 0 && hit.size == 0 && callable.size == 0;
+    }
+};
 
 // =============================================================================
 // Forward Declarations
@@ -52,7 +66,7 @@ inline class VulkanRTX& rtx() noexcept {
 }
 
 // =============================================================================
-// VulkanRTX — Global RTX Manager
+// VulkanRTX — Global RTX Manager — SPINE OF THE ENGINE
 // =============================================================================
 class VulkanRTX {
 public:
@@ -62,7 +76,7 @@ public:
     void initDescriptorPoolAndSets();
     void initShaderBindingTable(VkPhysicalDevice pd);
     void initBlackFallbackImage();
-    void buildAccelerationStructures();  // NEW: Build LAS at startup
+    void buildAccelerationStructures();  // Build LAS at startup
 
     void updateRTXDescriptors(
         uint32_t frameIdx,
@@ -77,11 +91,11 @@ public:
     void traceRays(VkCommandBuffer cmd,
                    const VkStridedDeviceAddressRegionKHR* raygen,
                    const VkStridedDeviceAddressRegionKHR* miss,
-                   const VkStridedDeviceAddressRegionKHR* hit,
+                   const VkStridedDeviceAddressKHR* hit,
                    const VkStridedDeviceAddressRegionKHR* callable,
                    uint32_t width, uint32_t height, uint32_t depth = 1) const noexcept;
 
-    // LAS Access
+    // LAS Access — SPINE BRIDGE TO HEART — MACROS IN SCOPE
     [[nodiscard]] static VkAccelerationStructureKHR TLAS() noexcept { return GLOBAL_TLAS(); }
     [[nodiscard]] static VkDeviceAddress TLASAddress() noexcept { return GLOBAL_TLAS_ADDRESS(); }
     [[nodiscard]] static VkAccelerationStructureKHR BLAS() noexcept { return GLOBAL_BLAS(); }
