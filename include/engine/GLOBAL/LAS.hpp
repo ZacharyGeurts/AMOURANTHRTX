@@ -28,7 +28,6 @@
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_beta.h>
 
-#include "engine/GLOBAL/VulkanContext.hpp"   // ctx(), full Context
 #include "engine/GLOBAL/Dispose.hpp"         // Handle<T>, BUFFER_*, MakeHandle, UltraLowLevelBufferTracker
 #include "engine/GLOBAL/StoneKey.hpp"
 #include "engine/GLOBAL/logging.hpp"         // LOG_*, Color::

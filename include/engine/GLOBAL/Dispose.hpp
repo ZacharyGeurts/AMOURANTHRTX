@@ -21,7 +21,8 @@ struct Context;  // Full definition in VulkanContext.hpp
 // ──────────────────────────────────────────────────────────────────────────────
 // Includes
 // ──────────────────────────────────────────────────────────────────────────────
-#include "engine/GLOBAL/LAS.hpp"        // Acceleration structures: BUILD_BLAS, GLOBAL_TLAS, AMAZO_LAS
+//#include "engine/GLOBAL/LAS.hpp"
+#include "engine/Vulkan/VulkanCore.hpp"
 #include "engine/GLOBAL/StoneKey.hpp"   // Obfuscation keys
 #include "engine/GLOBAL/logging.hpp"    // Logging macros: LOG_SUCCESS_CAT, LOG_ERROR, Color::
 #include "engine/GLOBAL/OptionsMenu.hpp" // Configuration: MAX_FRAMES_IN_FLIGHT, REBUILD_EVERY_FRAME

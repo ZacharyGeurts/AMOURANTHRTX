@@ -18,11 +18,10 @@
 // 2. Commercial licensing: gzac5314@gmail.com
 // =============================================================================
 
-#include "engine/Vulkan/VulkanCore.hpp"
 #include "engine/GLOBAL/StoneKey.hpp"        // UNBREAKABLE ENTROPY v∞
-#include "engine/GLOBAL/Bindings.hpp"        // Global binding definitions
-#include "engine/GLOBAL/BufferManager.hpp"
 #include "engine/GLOBAL/LAS.hpp"
+#include "engine/Vulkan/VulkanCore.hpp"
+#include "engine/GLOBAL/Bindings.hpp"        // Global binding definitions
 #include "engine/GLOBAL/SwapchainManager.hpp"
 #include "engine/GLOBAL/logging.hpp"
 

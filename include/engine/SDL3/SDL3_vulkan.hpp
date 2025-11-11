@@ -1,7 +1,22 @@
 // include/engine/GLOBAL/SDL3_vulkan.hpp
-// AMOURANTH RTX Engine © 2025 by Zachary Geurts
-// SDL3 + Vulkan RAII — FULL C++23 — GLOBAL BROS v32 — NOVEMBER 10, 2025 09:40 PM EST
-// CIRCULAR INCLUDE OBLITERATED — NO NAMESPACES — ctx() SAFE ETERNAL — PINK PHOTONS ETERNAL
+// =============================================================================
+// AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
+// =============================================================================
+//
+// Dual Licensed:
+// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
+//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
+// 2. Commercial licensing: gzac5314@gmail.com
+//
+// =============================================================================
+// SDL3 + Vulkan RAII — FULL C++23 — GLOBAL BROS v3.3 — NOVEMBER 11, 2025 10:40 AM EST
+// • CIRCULAR INCLUDE OBLITERATED — NO NAMESPACES — ctx() SAFE ETERNAL
+// • PINK PHOTONS ETERNAL — VALHALLA SEALED — SHIP IT RAW
+// • initVulkan() populates global ctx() via RAII Handles (Dispose)
+// • LAS build deferred — use BUILD_BLAS/BUILD_TLAS after init
+// • Professional, -Werror clean, C++23, zero leaks
+//
+// =============================================================================
 
 #pragma once
 
@@ -20,8 +35,8 @@
 #include "engine/GLOBAL/Dispose.hpp"       // ← FIRST — struct Context; + ctx() + Handle + MakeHandle
 #include "engine/GLOBAL/StoneKey.hpp"
 #include "engine/GLOBAL/logging.hpp"       // ← AFTER Dispose — Color::PLASMA_FUCHSIA now visible
-#include "engine/GLOBAL/LAS.hpp"           // ← LAS BEFORE VulkanContext
-#include "engine/GLOBAL/VulkanContext.hpp" // ← LAST — FULL Context DEFINITION — ctx() now complete
+//#include "engine/GLOBAL/LAS.hpp"           // ← LAS BEFORE VulkanContext
+//#include "engine/GLOBAL/VulkanContext.hpp" // ← LAST — FULL Context DEFINITION — ctx() now complete
 
 // SDL3 keeps its namespace — respect
 // Vulkan stays raw — God intended
@@ -314,7 +329,7 @@ static inline std::string locationString(const std::source_location& loc = std::
 }
 
 /*
-    GLOBAL BROS v32 — LAS INCLUDED BEFORE VulkanContext — ctx() SAFE ETERNAL
+    GLOBAL BROS v3.3 — LAS INCLUDED BEFORE VulkanContext — ctx() SAFE ETERNAL
     NO NAMESPACES — SDL3 KEEPS THEIRS — ALL FUNCTIONS RAW
     Context POPULATED — OLD GOD GLOBAL READY
     initGrok() called automatically on first use via Dispose
@@ -322,3 +337,14 @@ static inline std::string locationString(const std::source_location& loc = std::
     SHIP IT RAW — PINK PHOTONS ETERNAL — VALHALLA SEALED
     God bless you again. SHIP IT FOREVER
 */
+
+// =============================================================================
+// AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
+// =============================================================================
+//
+// Dual Licensed:
+// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
+//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
+// 2. Commercial licensing: gzac5314@gmail.com
+//
+// =============================================================================
