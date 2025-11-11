@@ -196,7 +196,7 @@ inline void shred(uintptr_t ptr, size_t size) noexcept {
 
 struct DestroyTracker {
     static constexpr bool Enabled = ENABLE_DESTROY_TRACKER;
-    static constexpr size_t Capacity = Enabled ?ure ? 1'048'576 : 1;
+    static constexpr size_t Capacity = Enabled ? 1'048'576 : 1;
 
     struct Entry {
         std::atomic<uintptr_t> ptr{0};
