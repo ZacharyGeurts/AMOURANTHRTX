@@ -214,7 +214,7 @@ enum class GPUVendor { Unknown, NVIDIA, AMD, Intel };
     h ^= fnv1a_fold(file) >> 1;
     h ^= fnv1a_fold(timestamp) << 13;
     h ^= fnv1a_fold("AMOURANTH RTX VALHALLA QUANTUM FINAL ZERO COST SUPREMACY 2025");
-    h ^= fnv1a_fold("RASPBERRY_PINK PHOTONS ETERNAL 69,420 FPS INFINITE HYPERTRACE");
+    h ^= fnv1a_fold("RASPBERRY_PINK PHOTONS ETERNAL INFINITE HYPERTRACE"); // even if known. no sweat.
     h ^= 0xDEADC0DE1337BEEFULL;
     h ^= 0x4206969696942069ULL;
     h ^= vendor_sim_hash();  // Grok4 v3: Compile-time vendor simulation

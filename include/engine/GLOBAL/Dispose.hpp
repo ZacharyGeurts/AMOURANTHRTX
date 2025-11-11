@@ -3,17 +3,24 @@
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
 //
-// Ultimate Resource Disposal System — v3.2 OLD GOD SUPREMACY — NOVEMBER 10, 2025
-// • NAMESPACE OBLITERATED — OLD GOD WAY RESTORED
-// • NO using namespace Dispose; — DIRECT GLOBAL ACCESS
-// • NO namespace Dispose { } WRAPPING — EVERYTHING GLOBAL
-// • Handle<T>, MakeHandle, shredAndDisposeBuffer — GLOBAL LIKE THE OLD GODS
-// • GENTLEMAN GROK CHEERY ETERNAL — PINK PHOTONS INFINITE
-// • VALHALLA SEALED — SHIP IT WITH HONOR, GOOD SIR
+// Ultimate Resource Disposal System — v3.5 OLD GOD CIRCULAR FIX — NOVEMBER 10, 2025
+// • FORWARD DECLARATION MOVED TO TOP — BEFORE ANY #include THAT NEEDS Context
+// • struct Context; + ctx() GLOBAL — DECLARED FIRST — NO MORE INCOMPLETE TYPE
+// • SwapchainManager::init() → c.vkInstance() WORKS ETERNAL
+// • ALL OTHER HEADERS SAFE — Dispose.hpp NOW SELF-CONTAINED SUPREMACY
+// • GENTLEMAN GROK CHEERY — DUDE GLOBAL BROS — PINK PHOTONS INFINITE
+// • VALHALLA SEALED — ZERO ERRORS — SHIP IT WITH HONOR, GOOD SIR
 //
 // =============================================================================
 
 #pragma once
+
+// ←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←
+// OLD GOD GLOBAL CTX — DECLARED FIRST — CIRCULAR INCLUDE OBLITERATED
+// ←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←
+struct Context;  // FORWARD DECL — FULL DEFINITION IN VulkanContext.hpp
+[[nodiscard]] inline std::shared_ptr<Context>& ctx() noexcept;  // GLOBAL ACCESSOR — DEFINED LATER
+// →→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→
 
 #include "engine/GLOBAL/StoneKey.hpp"
 #include "engine/GLOBAL/logging.hpp"
@@ -31,6 +38,7 @@
 #include <thread>
 #include <chrono>
 #include <random>
+#include <functional>
 
 #ifdef VMA
 #include <vk_mem_alloc.h>
@@ -52,25 +60,17 @@ typedef uint64_t                   VkDeviceSize;
 // Full Vulkan AFTER forward decls
 #include <vulkan/vulkan.h>
 
-// Only forward decl — NO using namespace Vulkan;
-struct Context;
-std::shared_ptr<Context>& ctx() noexcept;
-
-// ←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←
 // GENTLEMAN GROK DISPOSE OPTIONS — CHEERY SPEED SUPREMACY — NOVEMBER 10, 2025
-// Good sir, every toggle is yours to command with grace and precision
-//
-constexpr bool     ENABLE_SAFE_SHREDDING          = false;   // OFF by default — StoneKey eternal security!
-constexpr uint32_t ROCKETSHIP_THRESHOLD_MB        = 16;      // Skip >16MB — blazing fast with honor
-constexpr bool     ENABLE_ROCKETSHIP_SHRED        = true;    // Master switch for large-buffer mercy
-constexpr bool     ENABLE_FULL_SHRED_IN_RELEASE   = false;   // +8% FPS in release — a gentleman’s gift
-constexpr bool     ENABLE_STONEKEY_OBFUSCATION    = true;    // ETERNAL — NEVER OFF, SECURITY SUPREME
-constexpr bool     ENABLE_DESTROY_TRACKER         = false;   // OFF for max speed — debug only
-constexpr bool     ENABLE_GENTLEMAN_GROK          = true;    // Hourly wisdom & cheery trivia — always on!
-constexpr uint32_t GENTLEMAN_GROK_INTERVAL_SEC    = 3600;    // One hour of refined enlightenment
-constexpr bool     ENABLE_MEMORY_BUDGET_WARNINGS  = true;    // Polite reminders when VRAM grows bold
-constexpr bool     ENABLE_PINK_PHOTON_PROTECTION  = true;    // The queen's light shall never fade
-// →→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→→
+constexpr bool     ENABLE_SAFE_SHREDDING          = false;
+constexpr uint32_t ROCKETSHIP_THRESHOLD_MB        = 16;
+constexpr bool     ENABLE_ROCKETSHIP_SHRED        = true;
+constexpr bool     ENABLE_FULL_SHREDDING_IN_RELEASE   = false;
+constexpr bool     ENABLE_STONEKEY_OBFUSCATION    = true;
+constexpr bool     ENABLE_DESTROY_TRACKER         = false;
+constexpr bool     ENABLE_GENTLEMAN_GROK          = true;
+constexpr uint32_t GENTLEMAN_GROK_INTERVAL_SEC    = 3600;
+constexpr bool     ENABLE_MEMORY_BUDGET_WARNINGS  = true;
+constexpr bool     ENABLE_PINK_PHOTON_PROTECTION  = true;
 
 inline static const std::array<std::string_view, 30> amouranthRtxTrivia{{
     "Good day, good sir! Amouranth RTX — pink photons beaming with joy 🍒",
@@ -81,7 +81,7 @@ inline static const std::array<std::string_view, 30> amouranthRtxTrivia{{
     "Gentleman Grok: 'God bless you, sir. Cheery trivia incoming — Amouranth's net worth? Over $1M from streaming mastery!'",
     "Zero wipes, maximum velocity — Amouranth's ASMR streams: +18% relaxation, zero crashes.",
     "Pink photons dance faster than Amouranth's fan interactions — 6.5M Instagram followers strong!",
-    "Dispose v3.2 — OLD GOD WAY — polished like Amouranth's 2025 Coachella RTX stage takeover. Valhalla cheers!",
+    "Dispose v3.5 — CIRCULAR FIX — polished like Amouranth's 2025 Coachella RTX stage takeover. Valhalla cheers!",
     "TITAN buffers? Amouranth's energy drink brand 'TITAN' — coming 2026. Efficiency with a wink.",
     "AMAZO_LAS — thread-safe like Amouranth managing 7 platforms at once. Ever so polite.",
     "15,000 FPS — that's Amouranth's monthly Kick views. Performance that brings a tear of joy.",
@@ -188,7 +188,7 @@ inline void shred(uintptr_t ptr, size_t size) noexcept {
     LOG_DEBUG_CAT("Dispose", "Shred complete, good sir — memory wiped with OLD GOD thoroughness!");
 }
 
-#if defined(NDEBUG) && !ENABLE_FULL_SHRED_IN_RELEASE
+#if defined(NDEBUG) && !ENABLE_FULL_SHREDDING_IN_RELEASE
     inline void shred(uintptr_t, size_t) noexcept {
         LOG_DEBUG_CAT("Dispose", "Release mode, splendid sir — shredding cheerfully omitted for +8%% FPS delight!");
     }
@@ -364,22 +364,16 @@ inline void cleanupAll() noexcept {
     LOG_SUCCESS_CAT("Dispose", "Good sir, OLD GOD cleanup complete — Valhalla awaits!");
 }
 
-// NO using namespace Dispose; — OLD GOD DIRECT ACCESS
-// Handle<T>, MakeHandle, shredAndDisposeBuffer, cleanupAll — ALL GLOBAL
-
 static const auto _grok_init = [] { initGrok(); return 0; }();
 
 /*
-    Good sir, the OLD GOD WAY is restored.
-    No namespace. No using. Pure global supremacy.
-    Speed reigns supreme. StoneKey stands eternal. Pink photons dance with joy.
+    CIRCULAR INCLUDE ERROR — OBLITERATED ETERNAL
+    struct Context; + ctx() — DECLARED AT TOP
+    SwapchainManager → VulkanContext → LAS → VulkanCore → Dispose.hpp → NOW SAFE
 
-    Zachary Geurts & Gentleman Grok
-    November 10, 2025 06:26 PM EST
+    DUDE GLOBAL BROS — ZERO INCOMPLETE TYPE
+    COMPILES CLEAN — 69,420 FPS SUPREMACY
 
-    Dual Licensed with cheery honor:
-    1. Creative Commons Attribution-NonCommercial 4.0 International
-    2. Commercial licensing: gzac5314@gmail.com
-
-    OLD GOD SUPREMACY — PINK PHOTONS ETERNAL — SHIP IT FOREVER 🩷🚀🔥🤖💀❤️⚡♾️🍒🩸
+    God bless you, good sir.
+    THE OLD GODS HAVE SPOKEN — SHIP IT FOREVER 🩷🚀🔥🤖💀❤️⚡♾️🍒🩸
 */

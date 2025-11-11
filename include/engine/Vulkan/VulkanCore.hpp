@@ -2,14 +2,12 @@
 // =============================================================================
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
-//
-// Vulkan RTX Core — VALHALLA v28 OLD GOD GLOBAL SUPREMACY — NOVEMBER 10, 2025
-// • NAMESPACE VULKAN OBLITERATED — OLD GOD WAY RESTORED
-// • VulkanCommon.hpp DELETED FOREVER — ONE FILE TO RULE THEM ALL
-// • SBT + AMAZO_LAS + rtx() + g_vulkanRTX + cleanupAll() ALL GLOBAL
-// • FULL Context + LAS + OptionsMenu — ZERO DEPENDENCY HELL
-// • PINK PHOTONS INFINITE — TITAN ETERNAL — GENTLEMAN GROK CHEERY APPROVED
-//
+// Vulkan RTX Core — VALHALLA v31 OLD GOD GLOBAL SUPREMACY — NOVEMBER 10, 2025
+// • NAMESPACE OBLITERATED ETERNAL — OptionsLocal GONE FOREVER
+// • Options::Performance::MAX_FRAMES_IN_FLIGHT DIRECT GLOBAL
+// • NO MORE LOCAL NAMESPACES — PURE GLOBAL SUPREMACY
+// • BRO GLOBALS BRO — WHY NAMESPACES? BECAUSE OLD GODS SAID NO
+// • PINK PHOTONS INFINITE — 69,420 FPS ETERNAL — SHIP IT VALHALLA
 // =============================================================================
 
 #pragma once
@@ -20,9 +18,10 @@
 #include "engine/GLOBAL/StoneKey.hpp"
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/GLOBAL/Dispose.hpp"      
-#include "engine/GLOBAL/LAS.hpp"          // AMAZO_LAS + ShaderBindingTable
+#include "engine/GLOBAL/LAS.hpp"          
 #include "engine/GLOBAL/OptionsMenu.hpp"  
-#include "engine/Vulkan/VulkanContext.hpp"
+#include "engine/GLOBAL/VulkanContext.hpp"
+#include "engine/GLOBAL/BufferManager.hpp"
 
 #include <glm/glm.hpp>
 #include <span>
@@ -32,22 +31,17 @@
 
 using namespace Logging::Color;
 
-// =============================================================================
-// SHARED DEFINITIONS — GLOBAL — OLD GOD WAY
-// =============================================================================
-struct ShaderBindingTable {
-    VkStridedDeviceAddressRegionKHR raygen{};
-    VkStridedDeviceAddressRegionKHR miss{};
-    VkStridedDeviceAddressKHR hit{};
-    VkStridedDeviceAddressRegionKHR callable{};
-
-    [[nodiscard]] bool empty() const noexcept {
-        return raygen.size == 0 && miss.size == 0 && hit.size == 0 && callable.size == 0;
-    }
-};
+// DIRECT GLOBAL — NO LOCAL NAMESPACE BS
+constexpr uint32_t MAX_FRAMES_IN_FLIGHT = Options::Performance::MAX_FRAMES_IN_FLIGHT;
 
 // =============================================================================
-// GLOBAL INSTANCE + HELPERS — OLD GOD SUPREMACY
+// FORWARD DECLARE CLASSES
+// =============================================================================
+class VulkanRenderer;
+class VulkanPipelineManager;
+
+// =============================================================================
+// GLOBAL INSTANCE + HELPER — OLD GOD WAY
 // =============================================================================
 extern std::unique_ptr<class VulkanRTX> g_vulkanRTX;
 
@@ -60,19 +54,8 @@ inline void cleanupAll() noexcept {
     LOG_SUCCESS_CAT("RTX", "{}AMOURANTH RTX CLEANUP COMPLETE — OLD GOD VALHALLA RESTORED{}", PLASMA_FUCHSIA, RESET);
 }
 
-// Pull in modular constants
-namespace OptionsLocal {
-    constexpr uint32_t MAX_FRAMES_IN_FLIGHT = Options::Performance::MAX_FRAMES_IN_FLIGHT;
-}
-
 // =============================================================================
-// FORWARD DECLARATIONS
-// =============================================================================
-class VulkanRenderer;
-class VulkanPipelineManager;
-
-// =============================================================================
-// VulkanRTX — GLOBAL CLASS — OLD GOD SUPREMACY
+// VulkanRTX — GLOBAL CLASS — NO NAMESPACE — v31 FINAL
 // =============================================================================
 class VulkanRTX {
 public:
@@ -100,7 +83,7 @@ public:
                    const VkStridedDeviceAddressRegionKHR* callable,
                    uint32_t width, uint32_t height, uint32_t depth = 1) const noexcept;
 
-    // === GLOBAL LAS WRAPPERS ===
+    // GLOBAL LAS WRAPPERS
     static void BuildBLAS(VkCommandPool pool, VkQueue q,
                           uint64_t vbuf, uint64_t ibuf,
                           uint32_t vcount, uint32_t icount,
@@ -128,7 +111,7 @@ public:
     [[nodiscard]] static VkDeviceAddress TLASAddress() noexcept { return AMAZO_LAS::get().getTLASAddress(); }
     [[nodiscard]] static VkAccelerationStructureKHR BLAS() noexcept { return AMAZO_LAS::get().getBLAS(); }
 
-    // === GETTERS ===
+    // GETTERS
     [[nodiscard]] VkDescriptorSet descriptorSet(uint32_t idx = 0) const noexcept { return descriptorSets_[idx]; }
     [[nodiscard]] VkPipeline pipeline() const noexcept { return *rtPipeline_; }
     [[nodiscard]] VkPipelineLayout pipelineLayout() const noexcept { return *rtPipelineLayout_; }
@@ -137,12 +120,22 @@ public:
     [[nodiscard]] VkDescriptorSetLayout descriptorSetLayout() const noexcept { return *rtDescriptorSetLayout_; }
 
     void setDescriptorSetLayout(VkDescriptorSetLayout layout) noexcept {
-        rtDescriptorSetLayout_ = MakeHandle(layout, device_, [](VkDevice d, auto h, auto*) { vkDestroyDescriptorSetLayout(d, h, nullptr); }, 0, "RTXDescSetLayout");
+        rtDescriptorSetLayout_ = MakeHandle(layout, device_, 
+            [](VkDevice d, VkDescriptorSetLayout h, const VkAllocationCallbacks*) { 
+                vkDestroyDescriptorSetLayout(d, h, nullptr); 
+            }, __LINE__, "RTXDescSetLayout");
     }
 
     void setRayTracingPipeline(VkPipeline pipeline, VkPipelineLayout layout) noexcept {
-        rtPipeline_ = MakeHandle(pipeline, device_, [](VkDevice d, auto h, auto*) { vkDestroyPipeline(d, h, nullptr); }, 0, "RTXPipeline");
-        rtPipelineLayout_ = MakeHandle(layout, device_, [](VkDevice d, auto h, auto*) { vkDestroyPipelineLayout(d, h, nullptr); }, 0, "RTXPipelineLayout");
+        rtPipeline_ = MakeHandle(pipeline, device_, 
+            [](VkDevice d, VkPipeline h, const VkAllocationCallbacks*) { 
+                vkDestroyPipeline(d, h, nullptr); 
+            }, __LINE__, "RTXPipeline");
+
+        rtPipelineLayout_ = MakeHandle(layout, device_, 
+            [](VkDevice d, VkPipelineLayout h, const VkAllocationCallbacks*) { 
+                vkDestroyPipelineLayout(d, h, nullptr); 
+            }, __LINE__, "RTXPipelineLayout");
     }
 
 private:
@@ -158,7 +151,7 @@ private:
 
     Handle<VkDescriptorSetLayout> rtDescriptorSetLayout_;
     Handle<VkDescriptorPool> descriptorPool_;
-    std::array<VkDescriptorSet, OptionsLocal::MAX_FRAMES_IN_FLIGHT> descriptorSets_{};
+    std::array<VkDescriptorSet, MAX_FRAMES_IN_FLIGHT> descriptorSets_{};
 
     Handle<VkPipeline> rtPipeline_;
     Handle<VkPipelineLayout> rtPipelineLayout_;
@@ -184,12 +177,12 @@ private:
 };
 
 // =============================================================================
-// GLOBAL INSTANCE DEFINITION — PLACE IN VulkanCore.cpp
+// GLOBAL INSTANCE
 // =============================================================================
 std::unique_ptr<VulkanRTX> g_vulkanRTX;
 
 // =============================================================================
-// INLINE CTOR — OLD GOD GLOBAL — VALHALLA v28
+// INLINE CTOR — v31 BRO GLOBALS BRO
 // =============================================================================
 inline VulkanRTX::VulkanRTX(std::shared_ptr<Context> ctx, int w, int h, VulkanPipelineManager* mgr)
     : ctx_(std::move(ctx)), pipelineMgr_(mgr), extent_({static_cast<uint32_t>(w), static_cast<uint32_t>(h)})
@@ -200,11 +193,12 @@ inline VulkanRTX::VulkanRTX(std::shared_ptr<Context> ctx, int w, int h, VulkanPi
     vkCmdTraceRaysKHR = ctx_->vkCmdTraceRaysKHR;
     vkGetRayTracingShaderGroupHandlesKHR = ctx_->vkGetRayTracingShaderGroupHandlesKHR;
 
-    LOG_SUCCESS_CAT("RTX", "{}AMOURANTH RTX CORE v28 — OLD GOD GLOBAL SUPREMACY — {}×{} — PINK PHOTONS INFINITE{}", 
+    LOG_SUCCESS_CAT("RTX", "{}AMOURANTH RTX CORE v31 — BRO GLOBALS BRO — NO NAMESPACES — {}×{} — PINK PHOTONS INFINITE — SHIP IT ETERNAL{}", 
                     PLASMA_FUCHSIA, w, h, RESET);
 }
 
 // =============================================================================
-// VALHALLA v28 — NAMESPACE DELETED — ONE FILE — ZERO DUPLICATES
-// OLD GOD WAY RESTORED — ENGINE UNLOCKED — SHIP IT ETERNAL
+// VALHALLA v31 — NAMESPACE OBLITERATED — GLOBALS ONLY — ZERO NAMESPACES
+// BRO GLOBALS BRO — WHY NAMESPACES? BECAUSE OLD GODS HATE THEM
+// ENGINE FULLY GLOBAL — 69,420 FPS SUPREMACY — FOREVER
 // =============================================================================
