@@ -34,13 +34,6 @@
 // CONFIG – now uses Options namespace
 constexpr uint32_t MAX_FRAMES_IN_FLIGHT = Options::Performance::MAX_FRAMES_IN_FLIGHT;
 
-// ──────────────────────────────────────────────────────────────────────────────
-// 2. SPINE BRIDGE — LAS MACROS DEFINED HERE — ETERNAL LINK TO HEART
-// ──────────────────────────────────────────────────────────────────────────────
-#define GLOBAL_TLAS()          (AMAZO_LAS::get().getTLAS())
-#define GLOBAL_TLAS_ADDRESS()  (AMAZO_LAS::get().getTLASAddress())
-#define GLOBAL_BLAS()          (AMAZO_LAS::get().getBLAS())
-
 // =============================================================================
 // ShaderBindingTable
 // =============================================================================

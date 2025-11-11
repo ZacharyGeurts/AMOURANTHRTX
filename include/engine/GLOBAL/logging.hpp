@@ -186,9 +186,10 @@ enum class LogLevel { Trace, Debug, Info, Success, Attempt, Perf, Warning, Error
 // ========================================================================
 inline constexpr std::string_view RESET                     = "\033[0m";
 inline constexpr std::string_view BOLD                      = "\033[1m";
-inline constexpr std::string_view PARTY_PINK                = "\033[1;38;5;213m";
-inline constexpr std::string_view ELECTRIC_BLUE             = "\033[1;38;5;75m";
-inline constexpr std::string_view LIME_GREEN                = "\033[1;38;5;154m";
+inline constexpr std::string_view FUCHSIA_MAGENTA           = "\033[1;38;5;205m";   // ERRORS
+inline constexpr std::string_view PARTY_PINK                = "\033[1;38;5;213m";   // LAS.hpp - BLAS
+inline constexpr std::string_view ELECTRIC_BLUE             = "\033[1;38;5;75m";    // LAS.hpp - TLAS
+inline constexpr std::string_view LIME_GREEN                = "\033[1;38;5;154m";   // LAS.hpp - other
 inline constexpr std::string_view SUNGLOW_ORANGE            = "\033[1;38;5;214m";
 inline constexpr std::string_view ULTRA_NEON_LIME           = "\033[38;5;82m";
 inline constexpr std::string_view PLATINUM_GRAY             = "\033[38;5;255m";
@@ -227,7 +228,6 @@ inline constexpr std::string_view VALHALLA_GOLD             = "\033[1;38;5;220m"
 inline constexpr std::string_view TURQUOISE_BLUE            = "\033[38;5;44m";
 inline constexpr std::string_view BRONZE_BROWN              = "\033[38;5;94m";
 inline constexpr std::string_view LIME_YELLOW               = "\033[38;5;190m";
-inline constexpr std::string_view FUCHSIA_MAGENTA           = "\033[38;5;205m";
 
 // ========================================================================
 // LEVEL INFO + ENABLE ARRAY — GLOBAL

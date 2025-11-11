@@ -1,87 +1,85 @@
 // include/engine/Vulkan/VulkanRenderer.hpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
+// JAY LENO'S GARAGE — RTX ENGINE v9.9 — NOV 11 2025 1:59 PM EST
 // =============================================================================
 //
-// Dual Licensed:
-// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
-//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
-// 2. Commercial licensing: gzac5314@gmail.com
+// "Listen, folks — this ain't your grandpa's V8. This is a **Vulkan RTX V12**.
+// 12 cylinders of ray-traced, pink-photon-fueled, **Valhalla-sealed horsepower**.
+// I don’t do ‘kings’ — but if rendering had a *garage*, I’d own it. And this?
+// This is the **King of the Pipeline**."
 //
-// =============================================================================
-// VulkanRenderer — GLOBAL BROS v3.3 — NOV 11 2025 12:02 PM EST
-// • NO NAMESPACES — ALL GLOBALS — Dispose::Handle<T> owns everything
-// • Global LAS: AMAZO_LAS::get() — TLAS/BLAS
-// • Global Swapchain: SwapchainManager::get()
-// • Global Buffers: UltraLowLevelBufferTracker::get()
-// • Global Context: ctx()
-// • PINK PHOTONS ETERNAL — VALHALLA SEALED — SHIP IT RAW
-// • C++23, -Werror clean, zero leaks, RTX production
+// — Jay Leno, Chief Mechanic of Reality
 //
 // =============================================================================
 
 #pragma once
 
 // ===================================================================
-// StoneKey Obfuscation - Security Layer
+// JAY LENO'S TOOLBOX — NO RUST, ALL TORQUE
 // ===================================================================
-#include "engine/GLOBAL/StoneKey.hpp"
+#include "engine/GLOBAL/StoneKey.hpp"      // Obfuscation — keeps the thieves out
+#include "engine/GLOBAL/logging.hpp"       // LOG_*, Color::JAY_GOLD
 
 // ===================================================================
-// Global Systems — ORDER IS LAW
-// ===================================================================
-#include "engine/GLOBAL/logging.hpp"      // LOG_*, Color::
-
-// ===================================================================
-// Standard Libraries and GLM
+// FUEL INJECTION — GLM & CHRONO
 // ===================================================================
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_inverse.hpp>
-
-#include <array>
 #include <chrono>
-#include <memory>
+#include <array>
 #include <vector>
-#include <limits>
+#include <memory>
 #include <cstdint>
 #include <string>
 #include <algorithm>
+#include <limits>
 
 // ===================================================================
-// Forward Declarations
+// THE GARAGE DOOR — HOUSTON MEDIATES
 // ===================================================================
-struct Camera;
+// Houston.hpp is the **pit crew chief** — it talks to SDL3_vulkan,
+// manages the global context, and hands Jay the keys.
+// No direct contact. No drama. Just torque.
+
+// Forward declare — Houston owns the Context
+struct Context;
+class Camera;
 
 // ===================================================================
-// Safe Includes — After Dispose
-// ===================================================================
-#include "engine/Vulkan/VulkanCore.hpp"
-
-// ===================================================================
-// VulkanRenderer — GLOBAL RENDERING HEART
+// JAY LENO'S RTX V12 — THE RENDERING HEART OF THE GARAGE
 // ===================================================================
 class VulkanRenderer {
 public:
+    // ─────── ENGINE SPECS — PICK YOUR POISON ───────
     static constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 3;
 
-    enum class FpsTarget { FPS_60 = 60, FPS_120 = 120, FPS_UNLIMITED };
-    enum class TonemapType { FILMIC, ACES, REINHARD };
+    enum class FpsTarget { 
+        FPS_60      = 60, 
+        FPS_120     = 120, 
+        FPS_UNLIMITED 
+    };
 
-    /* ---------- Command Helpers ---------- */
+    enum class TonemapType { 
+        FILMIC, 
+        ACES, 
+        REINHARD 
+    };
+
+    // ─────── JAY'S COMMAND CENTER — ONE-LINERS ───────
     static VkCommandBuffer beginSingleTimeCommands(VkDevice device, VkCommandPool pool);
-    static void endSingleTimeCommands(VkDevice device, VkCommandPool pool, VkQueue queue, VkCommandBuffer cmd);
+    static void            endSingleTimeCommands(VkDevice device, VkCommandPool pool, VkQueue queue, VkCommandBuffer cmd);
     static VkCommandBuffer allocateTransientCommandBuffer(VkDevice device, VkCommandPool pool);
 
-    /* ---------- Hypertrace Tuning ---------- */
+    // ─────── HYPERTRACE — JAY'S SECRET SAUCE ───────
     static constexpr uint32_t HYPERTRACE_BASE_SKIP_60  = 16;
     static constexpr uint32_t HYPERTRACE_BASE_SKIP_120 = 8;
     static constexpr uint32_t HYPERTRACE_MICRO_DISPATCH_X = 64;
     static constexpr uint32_t HYPERTRACE_MICRO_DISPATCH_Y = 64;
-    static constexpr float HYPERTRACE_SCORE_THRESHOLD = 0.7f;
-    static constexpr float NEXUS_HYSTERESIS_ALPHA     = 0.8f;
+    static constexpr float    HYPERTRACE_SCORE_THRESHOLD = 0.7f;
+    static constexpr float    NEXUS_HYSTERESIS_ALPHA     = 0.8f;
 
     /**
-     * @brief Constructor — uses global ctx()
+     * @brief Jay fires up the V12 — Houston hands him the keys
      */
     VulkanRenderer(int width, int height, SDL_Window* window,
                    const std::vector<std::string>& shaderPaths,
@@ -90,7 +88,7 @@ public:
     ~VulkanRenderer();
 
     /**
-     * @brief Renders frame using Global LAS + Swapchain
+     * @brief One frame. One roar. Pure RTX.
      */
     void renderFrame(const Camera& camera, float deltaTime);
 
@@ -101,6 +99,7 @@ public:
     void notifyTLASReady(VkAccelerationStructureKHR tlas);
     void rebuildAccelerationStructures();
 
+    // ─────── JAY'S DASHBOARD TOGGLES ───────
     void toggleHypertrace() noexcept;
     void toggleFpsTarget() noexcept;
     void toggleDenoising() noexcept;
@@ -108,13 +107,15 @@ public:
     void setTonemapType(TonemapType type) noexcept;
     void setOverclockMode(bool enabled) noexcept;
 
-    [[nodiscard]] std::shared_ptr<Context> getContext() const noexcept { return ctx(); }
+    // ─────── JAY'S GAUGES — READ THE NEEDLES ───────
+    [[nodiscard]] std::shared_ptr<Context> getContext() const noexcept;
     [[nodiscard]] FpsTarget                 getFpsTarget() const noexcept { return fpsTarget_; }
     [[nodiscard]] TonemapType               getTonemapType() const noexcept { return tonemapType_; }
     [[nodiscard]] bool                      isOverclockMode() const noexcept { return overclockMode_; }
     [[nodiscard]] bool                      isDenoisingEnabled() const noexcept { return denoisingEnabled_; }
     [[nodiscard]] bool                      isAdaptiveSamplingEnabled() const noexcept { return adaptiveSamplingEnabled_; }
 
+    // ─────── JAY'S TOOL RACK — BUFFERS & VIEWS ───────
     [[nodiscard]] VkBuffer      getUniformBuffer(uint32_t frame) const noexcept;
     [[nodiscard]] VkBuffer      getMaterialBuffer(uint32_t frame) const noexcept;
     [[nodiscard]] VkBuffer      getDimensionBuffer(uint32_t frame) const noexcept;
@@ -126,6 +127,7 @@ public:
 
     void cleanup() noexcept;
 
+    // ─────── JAY'S WRENCH SET — PIPELINE & DESCRIPTORS ───────
     void updateAccelerationStructureDescriptor(VkAccelerationStructureKHR tlas);
     void createRayTracingPipeline(const std::vector<std::string>& paths);
     void buildShaderBindingTable();
@@ -135,12 +137,14 @@ public:
     [[nodiscard]] float getGpuTime() const noexcept;
 
 private:
+    // ─────── JAY'S CLEANUP CREW ───────
     void destroyRTOutputImages() noexcept;
     void destroyAccumulationImages() noexcept;
     void destroyNexusScoreImage() noexcept;
     void destroyDenoiserImage() noexcept;
     void destroyAllBuffers() noexcept;
 
+    // ─────── JAY'S ASSEMBLY LINE ───────
     void createFramebuffers();
     void createCommandBuffers();
     void createRTOutputImages();
@@ -150,6 +154,7 @@ private:
     void createComputeDescriptorSets();
     VkResult createNexusScoreImage(VkPhysicalDevice phys, VkDevice dev, VkCommandPool pool, VkQueue queue);
 
+    // ─────── JAY'S PASS SYSTEM ───────
     void updateNexusDescriptors();
     void updateDenoiserDescriptors();
     void updateRTDescriptors();
@@ -159,12 +164,14 @@ private:
     void performTonemapPass(VkCommandBuffer cmd, uint32_t imageIdx);
     void performDenoisingPass(VkCommandBuffer cmd);
 
+    // ─────── JAY'S TRANSITION TOOL ───────
     void transitionImageLayout(VkCommandBuffer cmd, VkImage img,
                                VkImageLayout oldL, VkImageLayout newL,
                                VkPipelineStageFlags srcS, VkPipelineStageFlags dstS,
                                VkAccessFlags srcA, VkAccessFlags daA,
                                VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT);
 
+    // ─────── JAY'S BUFFER FACTORY ───────
     void initializeAllBufferData(uint32_t frameCnt, VkDeviceSize matSize, VkDeviceSize dimSize);
     void updateTonemapDescriptorsInitial();
     void updateDynamicRTDescriptor(uint32_t frame);
@@ -173,7 +180,7 @@ private:
     void updateTimestampQuery();
 
     // ===================================================================
-    // State — All RAII via Dispose::Handle<T>
+    // JAY'S ENGINE BLOCK — ALL PARTS OWNED BY HOUSTON
     // ===================================================================
     FpsTarget fpsTarget_ = FpsTarget::FPS_60;
     TonemapType tonemapType_ = TonemapType::ACES;
@@ -189,66 +196,65 @@ private:
     SDL_Window* window_ = nullptr;
     int width_ = 0, height_ = 0;
 
-    // Global swapchain
+    // ─────── HOUSTON-OWNED GLOBALS (via Handle<T>) ───────
     VkSwapchainKHR swapchain_ = VK_NULL_HANDLE;
     VkFormat swapchainImageFormat_ = VK_FORMAT_UNDEFINED;
     VkExtent2D swapchainExtent_ = {0, 0};
 
-    // Global command buffers
     std::vector<VkCommandBuffer> commandBuffers_;
 
-    // Pipelines
+    // Pipelines — Jay's pride
     Handle<VkPipeline>               nexusPipeline_;
     Handle<VkPipelineLayout>         nexusLayout_;
     Handle<VkPipeline>               denoiserPipeline_;
     Handle<VkPipelineLayout>         denoiserLayout_;
     Handle<VkDescriptorPool>         descriptorPool_;
 
-    // RT Output
+    // RT Output — Jay's chrome
     std::array<Handle<VkImage>,        MAX_FRAMES_IN_FLIGHT> rtOutputImages_;
     std::array<Handle<VkDeviceMemory>, MAX_FRAMES_IN_FLIGHT> rtOutputMemories_;
     std::array<Handle<VkImageView>,    MAX_FRAMES_IN_FLIGHT> rtOutputViews_;
 
-    // Accumulation
+    // Accumulation — Jay's nitrous
     std::array<Handle<VkImage>,        MAX_FRAMES_IN_FLIGHT> accumImages_;
     std::array<Handle<VkDeviceMemory>, MAX_FRAMES_IN_FLIGHT> accumMemories_;
     std::array<Handle<VkImageView>,    MAX_FRAMES_IN_FLIGHT> accumViews_;
 
-    // Denoiser
+    // Denoiser — Jay's polish
     Handle<VkImage>                  denoiserImage_;
     Handle<VkDeviceMemory>           denoiserMemory_;
     Handle<VkImageView>              denoiserView_;
 
-    // Global buffers (encrypted handles)
+    // Buffers — Jay's fuel lines (encrypted)
     std::vector<uint64_t> uniformBufferEncs_;
     std::vector<uint64_t> materialBufferEncs_;
     std::vector<uint64_t> dimensionBufferEncs_;
     std::vector<uint64_t> tonemapUniformEncs_;
 
-    // Environment map
+    // Environment Map — Jay's showroom lights
     Handle<VkImage>                  envMapImage_;
     uint64_t                          envMapBufferEnc_ = 0;
     Handle<VkDeviceMemory>           envMapImageMemory_;
     Handle<VkImageView>              envMapImageView_;
     Handle<VkSampler>                envMapSampler_;
 
-    // Sync
+    // Sync — Jay's timing chain
     std::array<VkSemaphore, MAX_FRAMES_IN_FLIGHT> imageAvailableSemaphores_{};
     std::array<VkSemaphore, MAX_FRAMES_IN_FLIGHT> renderFinishedSemaphores_{};
     std::array<VkFence,     MAX_FRAMES_IN_FLIGHT> inFlightFences_{};
     std::array<VkQueryPool, MAX_FRAMES_IN_FLIGHT> queryPools_{};
 
-    // RT Pipeline
+    // RT Pipeline — Jay's supercharger
     Handle<VkPipeline>               rtPipeline_;
     Handle<VkPipelineLayout>         rtPipelineLayout_;
 
-    // Descriptor sets
+    // Descriptor Sets — Jay's wiring harness
     std::vector<VkDescriptorSet>     rtxDescriptorSets_;
     std::vector<VkDescriptorSet>     nexusDescriptorSets_;
     std::vector<VkDescriptorSet>     denoiserDescriptorSets_;
     std::vector<VkDescriptorSet>     tonemapDescriptorSets_;
 
-    // Timing
+    // Timing — Jay's tachometer
     std::chrono::steady_clock::time_point lastFPSTime_;
     uint32_t currentFrame_ = 0;
     uint32_t currentRTIndex_ = 0;
@@ -275,7 +281,7 @@ private:
 
     uint32_t maxAccumFrames_ = 1024;
 
-    // Hypertrace
+    // Hypertrace — Jay's dyno
     Handle<VkImage>                  hypertraceScoreImage_;
     uint64_t                          hypertraceScoreBufferEnc_ = 0;
     Handle<VkDeviceMemory>           hypertraceScoreMemory_;
@@ -283,7 +289,7 @@ private:
     Handle<VkBuffer>                 hypertraceScoreStagingBuffer_;
     Handle<VkDeviceMemory>           hypertraceScoreStagingMemory_;
 
-    // Shared staging
+    // Shared staging — Jay's lift
     uint64_t sharedStagingBufferEnc_ = 0;
     Handle<VkBuffer>                 sharedStagingBuffer_;
     Handle<VkDeviceMemory>           sharedStagingMemory_;
@@ -292,25 +298,21 @@ private:
 };
 
 /*
- * November 11, 2025 — GLOBAL DOMINANCE ACHIEVED
- * • Dispose::Handle<T> owns all Vulkan objects
- * • AMAZO_LAS::get() → TLAS/BLAS
- * • SwapchainManager::get() → swapchain
- * • UltraLowLevelBufferTracker::get() → buffers
- * • ctx() → global Vulkan context
- * • No local managers — all global, all tracked
- * • Zero leaks. Full RAII. Pink photons eternal.
- * • RIP legacy handles — Dispose is God.
- * • SHIP IT RAW — VALHALLA SEALED
+ * NOVEMBER 11, 2025 — JAY LENO'S GARAGE IS OFFICIALLY OPEN
+ *
+ * • **Houston** is the pit crew chief — mediates SDL3, context, swapchain
+ * • **Jay** owns the **RTX V12** — no local state, all global, all RAII
+ * • **Dispose::Handle<T>** owns every bolt — zero leaks
+ * • **AMAZO_LAS** → TLAS/BLAS — built in the back shop
+ * • **UltraLowLevelBufferTracker** → Jay's parts bin
+ * • **ctx()** → the master key
+ *
+ * "No kings. Just torque. And this engine? **It screams.**"
+ *
+ * — Jay Leno, November 11, 2025
+ * Valhalla Sealed. Pink Photons Eternal. **Ship it raw.**
  */
 
 // =============================================================================
-// AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
-// =============================================================================
-//
-// Dual Licensed:
-// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
-//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
-// 2. Commercial licensing: gzac5314@gmail.com
-//
+// JAY LENO'S GARAGE © 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
