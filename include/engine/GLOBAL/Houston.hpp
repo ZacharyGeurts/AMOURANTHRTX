@@ -9,11 +9,12 @@
 // 2. Commercial licensing: gzac5314@gmail.com
 //
 // =============================================================================
-// HOUSTON v9.5 — FINAL & CLEAN — NOV 11 2025 1:46 PM EST
-// • All make_* helpers declared + implemented at bottom
-// • No duplicate SIZE_* constants
-// • Full power-of-two literals + make_* suite
-// • C++23, -Werror clean, zero leaks, Valhalla sealed
+// HOUSTON v9.6 — THE OLD WAY — NOV 11 2025 5:54 PM EST
+// • RAW GLOBAL g_ctx — NO SINGLETON — NO NAMESPACES
+// • make_* helpers — ALL IMPLEMENTED INLINE AT BOTTOM
+// • SIZE_* — UNIQUE, NO DUPLICATES
+// • POWER-OF-TWO LITERALS — C++23 — -Werror CLEAN
+// • PINK PHOTONS ETERNAL — 15,000 FPS — SHIP IT RAW
 // =============================================================================
 
 #pragma once
@@ -47,21 +48,21 @@
 #include <glm/gtc/type_ptr.hpp>
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Includes — MOVED EARLY FOR DEPENDENCIES
+// INCLUDES — EARLY FOR DEPENDENCIES
 // ──────────────────────────────────────────────────────────────────────────────
-#include "engine/GLOBAL/StoneKey.hpp"  // For obfuscate, deobfuscate, kStone1, kStone2
-#include "engine/GLOBAL/logging.hpp"   // For LOG_DEBUG_CAT, ENABLE_DEBUG
-#include "engine/GLOBAL/GlobalContext.hpp"
+#include "engine/GLOBAL/StoneKey.hpp"
+#include "engine/GLOBAL/logging.hpp"
+#include "engine/GLOBAL/GlobalContext.hpp"  // g_ctx
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Forward Declarations 
+// FORWARD DECLARATIONS
 // ──────────────────────────────────────────────────────────────────────────────
 struct Context;
 class VulkanRenderer;
 class Camera;
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Logging & Tracking — DECLARED EARLY
+// LOGGING & TRACKING
 // ──────────────────────────────────────────────────────────────────────────────
 #define INLINE_FREE(dev, mem, sz, tag) do { \
     vkFreeMemory(dev, mem, nullptr); \
@@ -93,8 +94,8 @@ struct UltraLowLevelBufferTracker {
     void destroy(uint64_t handle) noexcept;
     BufferData* getData(uint64_t handle) noexcept;
     const BufferData* getData(uint64_t handle) const noexcept;
-    VkDevice device() const noexcept;
-    VkPhysicalDevice physicalDevice() const noexcept;
+    VkDevice device() const noexcept { return g_ctx.vkDevice(); }
+    VkPhysicalDevice physicalDevice() const noexcept { return g_ctx.vkPhysicalDevice(); }
     void init(VkDevice dev, VkPhysicalDevice phys) noexcept;
     void purge_all() noexcept;
 
@@ -220,10 +221,10 @@ template<typename T, typename... Args>
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// GLOBALS
+// GLOBALS — RAW AS GOD INTENDED
 // ──────────────────────────────────────────────────────────────────────────────
 extern std::unique_ptr<VulkanRenderer> g_vulkanRenderer;
-extern std::shared_ptr<Context> g_context;
+extern Context g_ctx;  // RAW GLOBAL
 
 extern Handle<VkSwapchainKHR> g_swapchain;
 extern std::vector<VkImage> g_swapchainImages;
@@ -298,10 +299,10 @@ inline void buildTLAS(const std::vector<std::pair<VkAccelerationStructureKHR, gl
 
 #define BUFFER_MAP(h, ptr) \
     do { (ptr) = nullptr; auto* d = UltraLowLevelBufferTracker::get().getData((h)); \
-         if (d) { void* p{}; if (vkMapMemory(UltraLowLevelBufferTracker::get().device(), d->memory, 0, d->size, 0, &p) == VK_SUCCESS) (ptr) = p; } } while (0)
+         if (d) { void* p{}; if (vkMapMemory(g_ctx.vkDevice(), d->memory, 0, d->size, 0, &p) == VK_SUCCESS) (ptr) = p; } } while (0)
 
 #define BUFFER_UNMAP(h) \
-    do { auto* d = UltraLowLevelBufferTracker::get().getData((h)); if (d) vkUnmapMemory(UltraLowLevelBufferTracker::get().device(), d->memory); } while (0)
+    do { auto* d = UltraLowLevelBufferTracker::get().getData((h)); if (d) vkUnmapMemory(g_ctx.vkDevice(), d->memory); } while (0)
 
 #define BUFFER_DESTROY(handle) \
     do { UltraLowLevelBufferTracker::get().destroy((handle)); } while (0)
@@ -324,13 +325,13 @@ struct AutoBuffer {
 };
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Includes — AFTER Handle<T> and Macros
+// INCLUDES — AFTER Handle<T> and Macros
 // ──────────────────────────────────────────────────────────────────────────────
 #include "engine/GLOBAL/LAS.hpp"
 #include "engine/GLOBAL/OptionsMenu.hpp"
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Memory Literals — GLOBAL
+// MEMORY LITERALS — GLOBAL
 // ──────────────────────────────────────────────────────────────────────────────
 #define USE_POWER_OF_TWO_LITERALS
 #ifdef USE_POWER_OF_TWO_LITERALS

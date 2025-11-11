@@ -266,7 +266,7 @@ inline void recreateSwapchain(uint32_t w, uint32_t h) noexcept {
 // GLOBAL LAS MANAGEMENT — LIGHT WARRIORS EDITION
 // ──────────────────────────────────────────────────────────────────────────────
 void buildBLAS(uint64_t vertexBuf, uint64_t indexBuf, uint32_t vertexCount, uint32_t indexCount) noexcept {
-    auto& c = ctx();
+    auto& c = g_ctx; // g_ is for global
     if (!c.vkDevice()) return;
 
     LIGHT_WARRIORS_LAS::get().buildBLAS(
@@ -277,7 +277,7 @@ void buildBLAS(uint64_t vertexBuf, uint64_t indexBuf, uint32_t vertexCount, uint
 }
 
 void buildTLAS(const std::vector<std::pair<VkAccelerationStructureKHR, glm::mat4>>& instances) noexcept {
-    auto& c = ctx();
+    auto& c = g_ctx; // g_ is for global
     if (!c.vkDevice()) return;
 
     LIGHT_WARRIORS_LAS::get().buildTLAS(
@@ -314,9 +314,6 @@ inline void UltraLowLevelBufferTracker::init(VkDevice dev, VkPhysicalDevice phys
     physDev_ = phys;
     LOG_SUCCESS_CAT("Buffer", "{}UltraLowLevelBufferTracker initialized{}", NICK_COLOR, RESET);
 }
-
-inline VkDevice UltraLowLevelBufferTracker::device() const noexcept { return device_; }
-inline VkPhysicalDevice UltraLowLevelBufferTracker::physicalDevice() const noexcept { return physDev_; }
 
 inline uint64_t UltraLowLevelBufferTracker::create(VkDeviceSize size, VkBufferUsageFlags usage,
                     VkMemoryPropertyFlags props,

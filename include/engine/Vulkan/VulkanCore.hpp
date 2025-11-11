@@ -35,8 +35,12 @@
 constexpr uint32_t MAX_FRAMES_IN_FLIGHT = Options::Performance::MAX_FRAMES_IN_FLIGHT;
 
 // =============================================================================
-// ShaderBindingTable
+// Forward Declarations
 // =============================================================================
+struct Context;  // Forward for shared_ptr
+class VulkanRenderer;
+class VulkanPipelineManager;
+
 struct ShaderBindingTable {
     VkStridedDeviceAddressRegionKHR raygen{};
     VkStridedDeviceAddressRegionKHR miss{};
@@ -47,12 +51,6 @@ struct ShaderBindingTable {
         return raygen.size == 0 && miss.size == 0 && hit.size == 0 && callable.size == 0;
     }
 };
-
-// =============================================================================
-// Forward Declarations
-// =============================================================================
-class VulkanRenderer;
-class VulkanPipelineManager;
 
 // =============================================================================
 // Global RTX Instance — THE ONE
@@ -89,7 +87,7 @@ public:
     void traceRays(VkCommandBuffer cmd,
                    const VkStridedDeviceAddressRegionKHR* raygen,
                    const VkStridedDeviceAddressRegionKHR* miss,
-                   const VkStridedDeviceAddressKHR* hit,
+                   const VkStridedDeviceAddressRegionKHR* hit,
                    const VkStridedDeviceAddressRegionKHR* callable,
                    uint32_t width, uint32_t height, uint32_t depth = 1) const noexcept;
 
@@ -100,11 +98,13 @@ public:
 
     // Getters
     [[nodiscard]] VkDescriptorSet descriptorSet(uint32_t idx = 0) const noexcept { return descriptorSets_[idx]; }
-    [[nodiscard]] VkPipeline pipeline() const noexcept { return *rtPipeline_; }
-    [[nodiscard]] VkPipelineLayout pipelineLayout() const noexcept { return *rtPipelineLayout_; }
+    [[nodiscard]] VkPipeline pipeline() const noexcept { return reinterpret_cast<VkPipeline>(deobfuscate(*rtPipeline_)); }
+    [[nodiscard]] VkPipelineLayout pipelineLayout() const noexcept { return reinterpret_cast<VkPipelineLayout>(deobfuscate(*rtPipelineLayout_)); }
     [[nodiscard]] const ShaderBindingTable& sbt() const noexcept { return sbt_; }
-    [[nodiscard]] VkBuffer sbtBuffer() const noexcept { return *sbtBuffer_; }
-    [[nodiscard]] VkDescriptorSetLayout descriptorSetLayout() const noexcept { return *rtDescriptorSetLayout_; }
+    [[nodiscard]] VkBuffer sbtBuffer() const noexcept { return reinterpret_cast<VkBuffer>(deobfuscate(*sbtBuffer_)); }
+    [[nodiscard]] VkDescriptorSetLayout descriptorSetLayout() const noexcept { return reinterpret_cast<VkDescriptorSetLayout>(deobfuscate(*rtDescriptorSetLayout_)); }
+    [[nodiscard]] VkImage blackFallbackImage() const noexcept { return reinterpret_cast<VkImage>(deobfuscate(*blackFallbackImage_)); }
+    [[nodiscard]] VkImageView blackFallbackView() const noexcept { return reinterpret_cast<VkImageView>(deobfuscate(*blackFallbackView_)); }
 
     void setDescriptorSetLayout(VkDescriptorSetLayout layout) noexcept;
     void setRayTracingPipeline(VkPipeline pipeline, VkPipelineLayout layout) noexcept;
@@ -112,31 +112,31 @@ public:
 private:
     void createBuffer(VkDeviceSize size, VkBufferUsageFlags usage,
                       VkMemoryPropertyFlags props,
-                      Handle<VkBuffer>& buf,
-                      Handle<VkDeviceMemory>& mem);
+                      Handle<uint64_t>& buf,
+                      Handle<uint64_t>& mem);
 
     std::shared_ptr<Context> ctx_;
     VkDevice device_ = VK_NULL_HANDLE;
     VulkanPipelineManager* pipelineMgr_ = nullptr;
     VkExtent2D extent_{};
 
-    Handle<VkDescriptorSetLayout> rtDescriptorSetLayout_;
-    Handle<VkDescriptorPool> descriptorPool_;
+    Handle<uint64_t> rtDescriptorSetLayout_;
+    Handle<uint64_t> descriptorPool_;
     std::array<VkDescriptorSet, MAX_FRAMES_IN_FLIGHT> descriptorSets_{};
 
-    Handle<VkPipeline> rtPipeline_;
-    Handle<VkPipelineLayout> rtPipelineLayout_;
+    Handle<uint64_t> rtPipeline_;
+    Handle<uint64_t> rtPipelineLayout_;
 
-    Handle<VkBuffer> sbtBuffer_;
-    Handle<VkDeviceMemory> sbtMemory_;
+    Handle<uint64_t> sbtBuffer_;
+    Handle<uint64_t> sbtMemory_;
     ShaderBindingTable sbt_{};
     VkDeviceSize sbtRecordSize_ = 0;
     VkDeviceAddress sbtAddress_ = 0;
 
-    Handle<VkImage> blackFallbackImage_;
-    Handle<VkDeviceMemory> blackFallbackMemory_;
-    Handle<VkImageView> blackFallbackView_;
-    Handle<VkSampler> defaultSampler_;
+    Handle<uint64_t> blackFallbackImage_;
+    Handle<uint64_t> blackFallbackMemory_;
+    Handle<uint64_t> blackFallbackView_;
+    Handle<uint64_t> defaultSampler_;
 
     PFN_vkGetBufferDeviceAddressKHR          vkGetBufferDeviceAddressKHR = nullptr;
     PFN_vkCmdTraceRaysKHR                    vkCmdTraceRaysKHR = nullptr;

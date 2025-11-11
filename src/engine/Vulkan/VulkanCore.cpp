@@ -23,23 +23,70 @@
 // =============================================================================
 
 #include "engine/GLOBAL/StoneKey.hpp"        // UNBREAKABLE ENTROPY v∞
+#include "engine/GLOBAL/Houston.hpp"         // Handle<T>, MakeHandle, BUFFER_*, Dispose
 #include "engine/GLOBAL/LAS.hpp"
 #include "engine/Vulkan/VulkanCore.hpp"
-#include "engine/GLOBAL/Bindings.hpp"        // Global binding definitions
+#include "engine/GLOBAL/GlobalBindings.hpp"  // Global binding definitions
+#include "engine/GLOBAL/GlobalContext.hpp"   // Full Context definition
+#include "engine/Vulkan/VulkanPipelineManager.hpp"  // Full VulkanPipelineManager
 #include "engine/GLOBAL/SwapchainManager.hpp"
 #include "engine/GLOBAL/logging.hpp"
-#include "engine/GLOBAL/Dispose.hpp"         // Handle<T>, MakeHandle, BUFFER_*, ctx()
 
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
+#include <stdexcept>
 
 // RESPECT SDL3 NAMESPACES — GOD INTENDED
 // ALL OTHER NAMESPACES OBLITERATED — GLOBAL SUPREMACY
 
 // =============================================================================
-// GLOBAL INSTANCE — THE ONE TRUE RTX
+// Memory Type Finder
 // =============================================================================
-std::unique_ptr<VulkanRTX> g_vulkanRTX;
+uint32_t findMemoryType(VkPhysicalDevice device, uint32_t typeFilter, VkMemoryPropertyFlags properties) {
+    VkPhysicalDeviceMemoryProperties memProperties;
+    vkGetPhysicalDeviceMemoryProperties(device, &memProperties);
+
+    for (uint32_t i = 0; i < memProperties.memoryTypeCount; i++) {
+        if ((typeFilter & (1 << i)) && (memProperties.memoryTypes[i].propertyFlags & properties) == properties) {
+            return i;
+        }
+    }
+
+    throw std::runtime_error("failed to find suitable memory type!");
+}
+
+// Destroyer lambdas - defined as static functions for reuse
+namespace {
+    auto poolDestroyer = [](VkDevice d, uint64_t h, const VkAllocationCallbacks* a) {
+        VkDescriptorPool p = reinterpret_cast<VkDescriptorPool>(deobfuscate(h));
+        if (p) vkDestroyDescriptorPool(d, p, a);
+    };
+
+    auto bufferDestroyer = [](VkDevice d, uint64_t h, const VkAllocationCallbacks* a) {
+        VkBuffer b = reinterpret_cast<VkBuffer>(deobfuscate(h));
+        if (b) vkDestroyBuffer(d, b, a);
+    };
+
+    auto memoryDestroyer = [](VkDevice d, uint64_t h, const VkAllocationCallbacks* a) {
+        VkDeviceMemory m = reinterpret_cast<VkDeviceMemory>(deobfuscate(h));
+        if (m) vkFreeMemory(d, m, a);
+    };
+
+    auto imageDestroyer = [](VkDevice d, uint64_t h, const VkAllocationCallbacks* a) {
+        VkImage i = reinterpret_cast<VkImage>(deobfuscate(h));
+        if (i) vkDestroyImage(d, i, a);
+    };
+
+    auto viewDestroyer = [](VkDevice d, uint64_t h, const VkAllocationCallbacks* a) {
+        VkImageView v = reinterpret_cast<VkImageView>(deobfuscate(h));
+        if (v) vkDestroyImageView(d, v, a);
+    };
+
+    auto samplerDestroyer = [](VkDevice d, uint64_t h, const VkAllocationCallbacks* a) {
+        VkSampler s = reinterpret_cast<VkSampler>(deobfuscate(h));
+        if (s) vkDestroySampler(d, s, a);
+    };
+}
 
 // =============================================================================
 // DESTRUCTOR — CLEAN SHUTDOWN
@@ -47,7 +94,7 @@ std::unique_ptr<VulkanRTX> g_vulkanRTX;
 VulkanRTX::~VulkanRTX() noexcept
 {
     LOG_SUCCESS_CAT("RTX",
-        "{}VulkanRTX destroyed — resources cleaned{}", Color::PLASMA_FUCHSIA, Color::RESET);
+        "{}VulkanRTX destroyed — resources cleaned{}", PLASMA_FUCHSIA, Color::RESET);
 }
 
 // =============================================================================
@@ -56,7 +103,7 @@ VulkanRTX::~VulkanRTX() noexcept
 void VulkanRTX::buildAccelerationStructures()
 {
     LOG_INFO_CAT("RTX", "{}Building acceleration structures — AMAZO_LAS initializing{}",
-                 Color::PLASMA_FUCHSIA, Color::RESET);
+                 PLASMA_FUCHSIA, Color::RESET);
 
     // Dummy cube mesh (8 vertices, 36 indices) — replace with real mesh loading
     std::vector<glm::vec3> vertices = {
@@ -97,24 +144,32 @@ void VulkanRTX::buildAccelerationStructures()
                       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
                       "staging_las");
 
-        void* mapped = nullptr;
-        BUFFER_MAP(staging, mapped);
-
         // Upload vertices
-        std::memcpy(mapped, vertices.data(), vcount * sizeof(glm::vec3));
-        VkCommandBuffer cmd = beginSingleTimeCommands(ctx_->commandPool);
-        VkBufferCopy copy{0, 0, vcount * sizeof(glm::vec3)};
-        vkCmdCopyBuffer(cmd, RAW_BUFFER(staging), RAW_BUFFER(vbuf), 1, &copy);
-        endSingleTimeCommands(cmd, ctx_->graphicsQueue, ctx_->commandPool);
+        {
+            void* mapped = nullptr;
+            BUFFER_MAP(staging, mapped);
+            std::memcpy(mapped, vertices.data(), vcount * sizeof(glm::vec3));
+            BUFFER_UNMAP(staging);
+
+            VkCommandBuffer cmd = beginSingleTimeCommands(ctx_->commandPool);
+            VkBufferCopy copy{0, 0, vcount * sizeof(glm::vec3)};
+            vkCmdCopyBuffer(cmd, reinterpret_cast<VkBuffer>(deobfuscate(staging)), reinterpret_cast<VkBuffer>(deobfuscate(vbuf)), 1, &copy);
+            endSingleTimeCommands(cmd, ctx_->graphicsQueue, ctx_->commandPool);
+        }
 
         // Upload indices
-        std::memcpy(mapped, indices.data(), icount * sizeof(uint32_t));
-        cmd = beginSingleTimeCommands(ctx_->commandPool);
-        copy = {0, 0, icount * sizeof(uint32_t)};
-        vkCmdCopyBuffer(cmd, RAW_BUFFER(staging), RAW_BUFFER(ibuf), 1, &copy);
-        endSingleTimeCommands(cmd, ctx_->graphicsQueue, ctx_->commandPool);
+        {
+            void* mapped = nullptr;
+            BUFFER_MAP(staging, mapped);
+            std::memcpy(mapped, indices.data(), icount * sizeof(uint32_t));
+            BUFFER_UNMAP(staging);
 
-        BUFFER_UNMAP(staging);
+            VkCommandBuffer cmd = beginSingleTimeCommands(ctx_->commandPool);
+            VkBufferCopy copy{0, 0, icount * sizeof(uint32_t)};
+            vkCmdCopyBuffer(cmd, reinterpret_cast<VkBuffer>(deobfuscate(staging)), reinterpret_cast<VkBuffer>(deobfuscate(ibuf)), 1, &copy);
+            endSingleTimeCommands(cmd, ctx_->graphicsQueue, ctx_->commandPool);
+        }
+
         BUFFER_DESTROY(staging);
     }
 
@@ -122,14 +177,13 @@ void VulkanRTX::buildAccelerationStructures()
     AMAZO_LAS::get().buildBLAS(ctx_->commandPool, ctx_->graphicsQueue, vbuf, ibuf, vcount, icount);
 
     // Build TLAS (single instance)
-    std::vector<std::pair<VkAccelerationStructureKHR, glm::mat4>> instances = {
-        { AMAZO_LAS::get().getBLAS(), glm::mat4(1.0f) }
-    };
+    std::vector<std::pair<VkAccelerationStructureKHR, glm::mat4>> instances;
+    instances.emplace_back(AMAZO_LAS::get().getBLAS(), glm::mat4(1.0f));
     AMAZO_LAS::get().buildTLAS(ctx_->commandPool, ctx_->graphicsQueue, instances);
 
     LOG_SUCCESS_CAT("RTX",
         "{}Acceleration structures built — BLAS: 0x{:x} | TLAS: 0x{:x}{}",
-        Color::PLASMA_FUCHSIA,
+        PLASMA_FUCHSIA,
         AMAZO_LAS::get().getBLASAddress(),
         AMAZO_LAS::get().getTLASAddress(),
         Color::RESET);
@@ -153,7 +207,7 @@ VulkanRTX::VulkanRTX(std::shared_ptr<Context> ctx, int w, int h, VulkanPipelineM
 
     LOG_SUCCESS_CAT("RTX",
         "{}AMOURANTH RTX CORE v44 — initialized {}×{} — STONEKEY v∞ ACTIVE{}",
-        Color::PLASMA_FUCHSIA, w, h, Color::RESET);
+        PLASMA_FUCHSIA, w, h, Color::RESET);
 
     buildAccelerationStructures();  // LAS online before first frame
 }
@@ -183,22 +237,22 @@ void VulkanRTX::initDescriptorPoolAndSets()
     poolInfo.pPoolSizes      = poolSizes.data();
 
     VkDescriptorPool rawPool = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateDescriptorPool(device_, &poolInfo, nullptr, &rawPool));
-    descriptorPool_ = MakeHandle(obfuscate(reinterpret_cast<uint64_t>(rawPool)), device_, vkDestroyDescriptorPool, 0, "RTXDescriptorPool");
+    VK_CHECK(vkCreateDescriptorPool(device_, &poolInfo, nullptr, &rawPool), "Failed to create descriptor pool");
+    descriptorPool_ = MakeHandle(obfuscate(reinterpret_cast<uint64_t>(rawPool)), device_, poolDestroyer, 0, "RTXDescriptorPool");
 
     std::array<VkDescriptorSetLayout, MAX_FRAMES_IN_FLIGHT> layouts{};
-    layouts.fill(*rtDescriptorSetLayout_);
+    layouts.fill(reinterpret_cast<VkDescriptorSetLayout>(deobfuscate(*rtDescriptorSetLayout_)));
 
     VkDescriptorSetAllocateInfo allocInfo{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
-    allocInfo.descriptorPool      = rawPool;
+    allocInfo.descriptorPool      = reinterpret_cast<VkDescriptorPool>(deobfuscate(*descriptorPool_));
     allocInfo.descriptorSetCount  = MAX_FRAMES_IN_FLIGHT;
     allocInfo.pSetLayouts         = layouts.data();
 
-    VK_CHECK(vkAllocateDescriptorSets(device_, &allocInfo, descriptorSets_.data()));
+    VK_CHECK(vkAllocateDescriptorSets(device_, &allocInfo, descriptorSets_.data()), "Failed to allocate descriptor sets");
 
     LOG_SUCCESS_CAT("RTX",
         "{}Descriptor pool + {} sets allocated — TLAS binding ready{}",
-        Color::PLASMA_FUCHSIA, MAX_FRAMES_IN_FLIGHT, Color::RESET);
+        PLASMA_FUCHSIA, MAX_FRAMES_IN_FLIGHT, Color::RESET);
 }
 
 // =============================================================================
@@ -220,12 +274,15 @@ void VulkanRTX::initShaderBindingTable(VkPhysicalDevice pd)
                   VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
                   "AMOURANTH_SBT_64MB");
 
-    sbtBuffer_ = MakeHandle(obfuscate(RAW_BUFFER(sbtEnc)), device_, vkDestroyBuffer, 0, "SBTBuffer");
-    sbtMemory_ = MakeHandle(obfuscate(BUFFER_MEMORY(sbtEnc)), device_, vkFreeMemory, 64_MB, "SBTMemory");
+    VkBuffer rawSbtBuffer = reinterpret_cast<VkBuffer>(deobfuscate(sbtEnc));
+    sbtBuffer_ = MakeHandle(obfuscate(reinterpret_cast<uint64_t>(rawSbtBuffer)), device_, bufferDestroyer, 0, "SBTBuffer");
+
+    VkDeviceMemory rawSbtMemory = reinterpret_cast<VkDeviceMemory>(BUFFER_MEMORY(sbtEnc));
+    sbtMemory_ = MakeHandle(obfuscate(reinterpret_cast<uint64_t>(rawSbtMemory)), device_, memoryDestroyer, 64_MB, "SBTMemory");
 
     std::vector<uint8_t> shaderHandles(groupCount * handleSize);
-    VK_CHECK(vkGetRayTracingShaderGroupHandlesKHR(device_, *rtPipeline_, 0, groupCount,
-                                                  shaderHandles.size(), shaderHandles.data()));
+    VK_CHECK(vkGetRayTracingShaderGroupHandlesKHR(device_, reinterpret_cast<VkPipeline>(deobfuscate(*rtPipeline_)), 0, groupCount,
+                                                  shaderHandles.size(), shaderHandles.data()), "Failed to get shader group handles");
 
     void* mapped = nullptr;
     BUFFER_MAP(sbtEnc, mapped);
@@ -238,7 +295,7 @@ void VulkanRTX::initShaderBindingTable(VkPhysicalDevice pd)
     BUFFER_UNMAP(sbtEnc);
 
     VkBufferDeviceAddressInfo addrInfo{VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO};
-    addrInfo.buffer = deobfuscate(*sbtBuffer_);
+    addrInfo.buffer = rawSbtBuffer;
     sbtAddress_ = vkGetBufferDeviceAddressKHR(device_, &addrInfo);
 
     // SBT layout — matches Bindings.hpp
@@ -251,7 +308,7 @@ void VulkanRTX::initShaderBindingTable(VkPhysicalDevice pd)
 
     LOG_SUCCESS_CAT("RTX",
         "{}SBT initialized — {} groups, 64 MB buffer, address 0x{:x} — STONEKEY SECURED{}",
-        Color::PLASMA_FUCHSIA, groupCount, sbtAddress_, Color::RESET);
+        PLASMA_FUCHSIA, groupCount, sbtAddress_, Color::RESET);
 }
 
 // =============================================================================
@@ -284,11 +341,11 @@ void VulkanRTX::initBlackFallbackImage()
     imgInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
     VkImage rawImg = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateImage(device_, &imgInfo, nullptr, &rawImg));
-    blackFallbackImage_ = MakeHandle(obfuscate(reinterpret_cast<uint64_t>(rawImg)), device_, vkDestroyImage, 0, "BlackFallbackImage");
+    VK_CHECK(vkCreateImage(device_, &imgInfo, nullptr, &rawImg), "Failed to create black fallback image");
+    blackFallbackImage_ = MakeHandle(obfuscate(reinterpret_cast<uint64_t>(rawImg)), device_, imageDestroyer, 0, "BlackFallbackImage");
 
     VkMemoryRequirements memReqs{};
-    vkGetImageMemoryRequirements(device_, deobfuscate(*blackFallbackImage_), &memReqs);
+    vkGetImageMemoryRequirements(device_, rawImg, &memReqs);
     const uint32_t memType = findMemoryType(ctx_->vkPhysicalDevice(),
                                             memReqs.memoryTypeBits,
                                             VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
@@ -298,9 +355,9 @@ void VulkanRTX::initBlackFallbackImage()
     allocInfo.memoryTypeIndex = memType;
 
     VkDeviceMemory rawMem = VK_NULL_HANDLE;
-    VK_CHECK(vkAllocateMemory(device_, &allocInfo, nullptr, &rawMem));
-    VK_CHECK(vkBindImageMemory(device_, deobfuscate(*blackFallbackImage_), rawMem, 0));
-    blackFallbackMemory_ = MakeHandle(obfuscate(reinterpret_cast<uint64_t>(rawMem)), device_, vkFreeMemory, memReqs.size, "BlackFallbackMemory");
+    VK_CHECK(vkAllocateMemory(device_, &allocInfo, nullptr, &rawMem), "Failed to allocate memory for black fallback");
+    VK_CHECK(vkBindImageMemory(device_, rawImg, rawMem, 0), "Failed to bind memory to black fallback image");
+    blackFallbackMemory_ = MakeHandle(obfuscate(reinterpret_cast<uint64_t>(rawMem)), device_, memoryDestroyer, memReqs.size, "BlackFallbackMemory");
 
     VkCommandBuffer cmd = beginSingleTimeCommands(ctx_->commandPool);
 
@@ -309,7 +366,7 @@ void VulkanRTX::initBlackFallbackImage()
     barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
     barrier.oldLayout     = VK_IMAGE_LAYOUT_UNDEFINED;
     barrier.newLayout     = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-    barrier.image         = deobfuscate(*blackFallbackImage_);
+    barrier.image         = rawImg;
     barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
     vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
                          VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
@@ -317,7 +374,7 @@ void VulkanRTX::initBlackFallbackImage()
     VkBufferImageCopy copyRegion{};
     copyRegion.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
     copyRegion.imageExtent = {1, 1, 1};
-    vkCmdCopyBufferToImage(cmd, RAW_BUFFER(stagingEnc), deobfuscate(*blackFallbackImage_),
+    vkCmdCopyBufferToImage(cmd, reinterpret_cast<VkBuffer>(deobfuscate(stagingEnc)), rawImg,
                            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyRegion);
 
     barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
@@ -331,17 +388,17 @@ void VulkanRTX::initBlackFallbackImage()
     BUFFER_DESTROY(stagingEnc);
 
     VkImageViewCreateInfo viewInfo{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
-    viewInfo.image    = deobfuscate(*blackFallbackImage_);
+    viewInfo.image    = rawImg;
     viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
     viewInfo.format   = VK_FORMAT_R8G8B8A8_UNORM;
     viewInfo.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
 
     VkImageView rawView = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateImageView(device_, &viewInfo, nullptr, &rawView));
-    blackFallbackView_ = MakeHandle(obfuscate(reinterpret_cast<uint64_t>(rawView)), device_, vkDestroyImageView, 0, "BlackFallbackView");
+    VK_CHECK(vkCreateImageView(device_, &viewInfo, nullptr, &rawView), "Failed to create black fallback view");
+    blackFallbackView_ = MakeHandle(obfuscate(reinterpret_cast<uint64_t>(rawView)), device_, viewDestroyer, 0, "BlackFallbackView");
 
     LOG_SUCCESS_CAT("RTX", "{}Black fallback 1×1 image created — safety net active{}",
-                    Color::PLASMA_FUCHSIA, Color::RESET);
+                    PLASMA_FUCHSIA, Color::RESET);
 }
 
 // =============================================================================
@@ -349,15 +406,17 @@ void VulkanRTX::initBlackFallbackImage()
 // =============================================================================
 void VulkanRTX::createBuffer(VkDeviceSize size, VkBufferUsageFlags usage,
                              VkMemoryPropertyFlags props,
-                             Handle<VkBuffer>& buf,
-                             Handle<VkDeviceMemory>& mem)
+                             Handle<uint64_t>& buf,
+                             Handle<uint64_t>& mem)
 {
     uint64_t enc = 0;
     BUFFER_CREATE(enc, size, usage, props, "RTX_DynamicBuffer");
     if (!enc) return;
 
-    buf = MakeHandle(obfuscate(RAW_BUFFER(enc)), device_, vkDestroyBuffer, 0, "CreatedBuffer");
-    mem = MakeHandle(obfuscate(BUFFER_MEMORY(enc)), device_, vkFreeMemory, size, "CreatedMemory");
+    VkBuffer rawBuf = reinterpret_cast<VkBuffer>(deobfuscate(enc));
+    buf = MakeHandle(obfuscate(reinterpret_cast<uint64_t>(rawBuf)), device_, bufferDestroyer, 0, "CreatedBuffer");
+    VkDeviceMemory rawMem = reinterpret_cast<VkDeviceMemory>(BUFFER_MEMORY(enc));
+    mem = MakeHandle(obfuscate(reinterpret_cast<uint64_t>(rawMem)), device_, memoryDestroyer, size, "CreatedMemory");
 }
 
 // =============================================================================
@@ -382,87 +441,109 @@ void VulkanRTX::updateRTXDescriptors(uint32_t frameIdx,
     uint32_t writeCount = 0;
 
     // TLAS
-    writes[writeCount++] = {
-        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        .pNext = &asWrite,
-        .dstSet = dstSet,
-        .dstBinding = TLAS,
-        .descriptorCount = 1,
-        .descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR
-    };
+    {
+        VkWriteDescriptorSet& write = writes[writeCount++];
+        write = {};
+        write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        write.pNext = &asWrite;
+        write.dstSet = dstSet;
+        write.dstBinding = Bindings::RTX::TLAS;
+        write.descriptorCount = 1;
+        write.descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+    }
 
     // Output storage image
-    VkDescriptorImageInfo storageInfo{.imageView = storageView, .imageLayout = VK_IMAGE_LAYOUT_GENERAL};
-    writes[writeCount++] = {
-        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        .dstSet = dstSet,
-        .dstBinding = STORAGE_IMAGE,
-        .descriptorCount = 1,
-        .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-        .pImageInfo = &storageInfo
-    };
+    {
+        VkDescriptorImageInfo storageInfo{};
+        storageInfo.imageView = storageView;
+        storageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+        VkWriteDescriptorSet& write = writes[writeCount++];
+        write = {};
+        write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        write.dstSet = dstSet;
+        write.dstBinding = Bindings::RTX::STORAGE_IMAGE;
+        write.descriptorCount = 1;
+        write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        write.pImageInfo = &storageInfo;
+    }
 
     // Accumulation image
-    VkDescriptorImageInfo accumInfo{.imageView = accumView, .imageLayout = VK_IMAGE_LAYOUT_GENERAL};
-    writes[writeCount++] = {
-        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        .dstSet = dstSet,
-        .dstBinding = ACCUMULATION_IMAGE,
-        .descriptorCount = 1,
-        .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-        .pImageInfo = &accumInfo
-    };
+    {
+        VkDescriptorImageInfo accumInfo{};
+        accumInfo.imageView = accumView;
+        accumInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+        VkWriteDescriptorSet& write = writes[writeCount++];
+        write = {};
+        write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        write.dstSet = dstSet;
+        write.dstBinding = Bindings::RTX::ACCUMULATION_IMAGE;
+        write.descriptorCount = 1;
+        write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        write.pImageInfo = &accumInfo;
+    }
 
     // Camera UBO
-    VkDescriptorBufferInfo camInfo{.buffer = cameraBuf, .offset = 0, .range = VK_WHOLE_SIZE};
-    writes[writeCount++] = {
-        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        .dstSet = dstSet,
-        .dstBinding = CAMERA_UBO,
-        .descriptorCount = 1,
-        .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-        .pBufferInfo = &camInfo
-    };
+    {
+        VkDescriptorBufferInfo camInfo{};
+        camInfo.buffer = cameraBuf;
+        camInfo.offset = 0;
+        camInfo.range = VK_WHOLE_SIZE;
+        VkWriteDescriptorSet& write = writes[writeCount++];
+        write = {};
+        write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        write.dstSet = dstSet;
+        write.dstBinding = Bindings::RTX::CAMERA_UBO;
+        write.descriptorCount = 1;
+        write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        write.pBufferInfo = &camInfo;
+    }
 
     // Material SBO
-    VkDescriptorBufferInfo matInfo{.buffer = materialBuf, .offset = 0, .range = VK_WHOLE_SIZE};
-    writes[writeCount++] = {
-        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        .dstSet = dstSet,
-        .dstBinding = MATERIAL_SBO,
-        .descriptorCount = 1,
-        .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-        .pBufferInfo = &matInfo
-    };
+    {
+        VkDescriptorBufferInfo matInfo{};
+        matInfo.buffer = materialBuf;
+        matInfo.offset = 0;
+        matInfo.range = VK_WHOLE_SIZE;
+        VkWriteDescriptorSet& write = writes[writeCount++];
+        write = {};
+        write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        write.dstSet = dstSet;
+        write.dstBinding = Bindings::RTX::MATERIAL_SBO;
+        write.descriptorCount = 1;
+        write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        write.pBufferInfo = &matInfo;
+    }
 
     // Environment map
-    VkDescriptorImageInfo envInfo{
-        .sampler = envSampler,
-        .imageView = envMapView,
-        .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-    };
-    writes[writeCount++] = {
-        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        .dstSet = dstSet,
-        .dstBinding = ENV_MAP,
-        .descriptorCount = 1,
-        .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        .pImageInfo = &envInfo
-    };
+    {
+        VkDescriptorImageInfo envInfo{};
+        envInfo.sampler = envSampler;
+        envInfo.imageView = envMapView;
+        envInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        VkWriteDescriptorSet& write = writes[writeCount++];
+        write = {};
+        write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        write.dstSet = dstSet;
+        write.dstBinding = Bindings::RTX::ENV_MAP;
+        write.descriptorCount = 1;
+        write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        write.pImageInfo = &envInfo;
+    }
 
     // Black fallback
-    VkDescriptorImageInfo fallbackInfo{
-        .imageView = deobfuscate(*blackFallbackView_),
-        .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-    };
-    writes[writeCount++] = {
-        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        .dstSet = dstSet,
-        .dstBinding = BLACK_FALLBACK,
-        .descriptorCount = 1,
-        .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
-        .pImageInfo = &fallbackInfo
-    };
+    {
+        VkDescriptorImageInfo fallbackInfo{};
+        fallbackInfo.imageView = reinterpret_cast<VkImageView>(deobfuscate(*blackFallbackView_));
+        fallbackInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        VkWriteDescriptorSet& write = writes[writeCount++];
+        write = {};
+        write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        write.dstSet = dstSet;
+        write.dstBinding = Bindings::RTX::BLACK_FALLBACK;
+        write.descriptorCount = 1;
+        write.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+        write.pImageInfo = &fallbackInfo;
+    }
 
     vkUpdateDescriptorSets(device_, writeCount, writes, 0, nullptr);
 
@@ -488,10 +569,10 @@ void VulkanRTX::recordRayTrace(VkCommandBuffer cmd, VkExtent2D extent,
                          VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
                          0, 0, nullptr, 0, nullptr, 1, &barrier);
 
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, *rtPipeline_);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, reinterpret_cast<VkPipeline>(deobfuscate(*rtPipeline_)));
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
-                            *rtPipelineLayout_, 0, 1,
-                            &descriptorSets_[currentFrame_], 0, nullptr);
+                            reinterpret_cast<VkPipelineLayout>(deobfuscate(*rtPipelineLayout_)), 0, 1,
+                            &descriptorSets_[0], 0, nullptr);  // Use frame 0 for now
 
     vkCmdTraceRaysKHR(cmd,
         &sbt_.raygen,
@@ -545,11 +626,11 @@ VkCommandBuffer VulkanRTX::beginSingleTimeCommands(VkCommandPool pool) const noe
     allocInfo.commandBufferCount = 1;
 
     VkCommandBuffer cmd;
-    VK_CHECK(vkAllocateCommandBuffers(device_, &allocInfo, &cmd));
+    VK_CHECK(vkAllocateCommandBuffers(device_, &allocInfo, &cmd), "Failed to allocate single-time command buffer");
 
     VkCommandBufferBeginInfo beginInfo{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
     beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    VK_CHECK(vkBeginCommandBuffer(cmd, &beginInfo));
+    VK_CHECK(vkBeginCommandBuffer(cmd, &beginInfo), "Failed to begin single-time command buffer");
     return cmd;
 }
 
@@ -557,13 +638,13 @@ void VulkanRTX::endSingleTimeCommands(VkCommandBuffer cmd,
                                       VkCommandPool pool,
                                       VkQueue queue) const noexcept
 {
-    VK_CHECK(vkEndCommandBuffer(cmd));
+    VK_CHECK(vkEndCommandBuffer(cmd), "Failed to end single-time command buffer");
 
     VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
     submit.commandBufferCount = 1;
     submit.pCommandBuffers    = &cmd;
-    VK_CHECK(vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE));
-    VK_CHECK(vkQueueWaitIdle(queue));
+    VK_CHECK(vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE), "Failed to submit single-time commands");
+    VK_CHECK(vkQueueWaitIdle(queue), "Failed to wait for queue idle");
     vkFreeCommandBuffers(device_, pool, 1, &cmd);
 }
 
@@ -572,15 +653,4 @@ void VulkanRTX::endSingleTimeCommands(VkCommandBuffer cmd,
 // NO NAMESPACES IN VULKAN — SDL3 RESPECTED — GLOBAL SUPREMACY
 // UNBREAKABLE ENTROPY — PINK PHOTONS ETERNAL — OUR ROCK v3
 // © 2025 Zachary Geurts <gzac5314@gmail.com> — ALL RIGHTS RESERVED
-// =============================================================================
-
-// =============================================================================
-// AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
-// =============================================================================
-//
-// Dual Licensed:
-// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
-//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
-// 2. Commercial licensing: gzac5314@gmail.com
-//
 // =============================================================================

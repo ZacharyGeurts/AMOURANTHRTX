@@ -9,13 +9,12 @@
 // 2. Commercial licensing: gzac5314@gmail.com
 //
 // =============================================================================
-// VulkanRenderer — JAY LENO EDITION v3.5 — NOV 11 2025 04:05 PM EST
-// • FIXED: using SwapchainManager::get → inline auto& SWAPCHAIN = SwapchainManager::get()
-// • FIXED: AMAZO_LAS::get → inline auto& LAS = AMAZO_LAS::get()
-// • FIXED: BUFFER_TRACKER → inline auto& BUFFER_TRACKER = UltraLowLevelBufferTracker::get()
-// • FIXED: ctx().vkCommandPool() → ctx().commandPool() (dot notation)
-// • RTX Ready: Full ray tracing pipeline, SBT, output images
-// • -Werror clean, C++23, zero leaks, pink photons eternal
+// VulkanRenderer — JAY LENO EDITION v3.6 — NOV 11 2025 05:07 PM EST
+// • REMOVED GlobalRTXContext ENTIRELY → RAW g_ctx ONLY
+// • ALL ctx() → g_ctx
+// • ALL ACCESSORS → g_ctx.vkDevice(), g_ctx.commandPool(), etc.
+// • INLINE ALIASES: SWAPCHAIN, LAS, BUFFER_TRACKER
+// • C++23, -Werror CLEAN, ZERO LEAKS, PINK PHOTONS ETERNAL
 // =============================================================================
 
 #pragma once
@@ -39,8 +38,8 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // GLOBAL INCLUDES — HOUSTON + SWAPCHAIN + LAS
 // ──────────────────────────────────────────────────────────────────────────────
+#include "engine/GLOBAL/GlobalContext.hpp"    // g_ctx
 #include "engine/GLOBAL/Houston.hpp"
-#include "engine/GLOBAL/GlobalContext.hpp"
 #include "engine/GLOBAL/AMAZO_LAS.hpp"
 #include "engine/GLOBAL/LAS.hpp"
 #include "engine/GLOBAL/SwapchainManager.hpp"
@@ -53,8 +52,8 @@ struct Camera;
 // ──────────────────────────────────────────────────────────────────────────────
 // GLOBAL SINGLETONS — INLINE ALIASES (C++23)
 // ──────────────────────────────────────────────────────────────────────────────
-inline auto& SWAPCHAIN = SwapchainManager::get();     // SWAPCHAIN → SwapchainManager::get()
-inline auto& LAS            = AMAZO_LAS_GET();            // <-- FIXED
+inline auto& SWAPCHAIN      = SwapchainManager::get();
+inline auto& LAS            = LIGHT_WARRIORS_LAS::get();           // FIXED: was AMAZO_LAS_GET()
 inline auto& BUFFER_TRACKER = UltraLowLevelBufferTracker::get();
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -80,7 +79,7 @@ enum class TonemapType {
 };
 
 // ──────────────────────────────────────────────────────────────────────────────
-// VulkanRenderer — JAY LENO CLASS
+// VulkanRenderer — JAY LENO CLASS — RAW GLOBAL g_ctx
 // ──────────────────────────────────────────────────────────────────────────────
 class VulkanRenderer {
 public:
@@ -90,10 +89,8 @@ public:
 
     ~VulkanRenderer();
 
-    // Core loop
     void renderFrame(const Camera& camera, float deltaTime) noexcept;
 
-    // Toggles
     void toggleHypertrace() noexcept;
     void toggleFpsTarget() noexcept;
     void toggleDenoising() noexcept;
@@ -101,23 +98,22 @@ public:
     void setTonemapType(TonemapType type) noexcept;
     void setOverclockMode(bool enabled) noexcept;
 
-    // Accessors — FIXED: dot notation
-    [[nodiscard]] VkDevice device() const noexcept { return ctx().vkDevice(); }
-    [[nodiscard]] VkPhysicalDevice physicalDevice() const noexcept { return ctx().vkPhysicalDevice(); }
-    [[nodiscard]] VkCommandPool commandPool() const noexcept { return ctx().commandPool(); }
-    [[nodiscard]] VkQueue graphicsQueue() const noexcept { return ctx().graphicsQueue(); }
-    [[nodiscard]] VkQueue presentQueue() const noexcept { return ctx().presentQueue(); }
-    [[nodiscard]] int width() const noexcept { return width_; }
-    [[nodiscard]] int height() const noexcept { return height_; }
-    [[nodiscard]] bool hypertraceEnabled() const noexcept { return hypertraceEnabled_; }
-    [[nodiscard]] bool denoisingEnabled() const noexcept { return denoisingEnabled_; }
-    [[nodiscard]] bool adaptiveSamplingEnabled() const noexcept { return adaptiveSamplingEnabled_; }
-    [[nodiscard]] TonemapType tonemapType() const noexcept { return tonemapType_; }
-    [[nodiscard]] FpsTarget fpsTarget() const noexcept { return fpsTarget_; }
-    [[nodiscard]] bool overclockMode() const noexcept { return overclockMode_; }
-    [[nodiscard]] float currentNexusScore() const noexcept { return currentNexusScore_; }
+    // ────────────────────── ACCESSORS — RAW g_ctx — NO ctx() EVER AGAIN ──────────────────────
+    [[nodiscard]] VkDevice         device()          const noexcept { return g_ctx.vkDevice(); }
+    [[nodiscard]] VkPhysicalDevice physicalDevice()  const noexcept { return g_ctx.vkPhysicalDevice(); }
+    [[nodiscard]] VkCommandPool    commandPool()      const noexcept { return g_ctx.commandPool(); }
+    [[nodiscard]] VkQueue          graphicsQueue()   const noexcept { return g_ctx.graphicsQueue(); }
+    [[nodiscard]] VkQueue          presentQueue()    const noexcept { return g_ctx.presentQueue(); }
+    [[nodiscard]] int              width()           const noexcept { return width_; }
+    [[nodiscard]] int              height()          const noexcept { return height_; }
+    [[nodiscard]] bool             hypertraceEnabled()     const noexcept { return hypertraceEnabled_; }
+    [[nodiscard]] bool             denoisingEnabled()      const noexcept { return denoisingEnabled_; }
+    [[nodiscard]] bool             adaptiveSamplingEnabled() const noexcept { return adaptiveSamplingEnabled_; }
+    [[nodiscard]] TonemapType      tonemapType()     const noexcept { return tonemapType_; }
+    [[nodiscard]] FpsTarget        fpsTarget()       const noexcept { return fpsTarget_; }
+    [[nodiscard]] bool             overclockMode()   const noexcept { return overclockMode_; }
+    [[nodiscard]] float            currentNexusScore() const noexcept { return currentNexusScore_; }
 
-    // Resize handler
     void handleResize(int w, int h) noexcept {
         width_ = w; height_ = h;
         resetAccumulation_ = true;
@@ -133,7 +129,6 @@ public:
     }
 
 private:
-    // Globals
     SDL_Window* window_ = nullptr;
     int width_ = 0, height_ = 0;
     uint32_t currentFrame_ = 0;
@@ -207,14 +202,12 @@ private:
     Handle<VkBuffer> hypertraceScoreStagingBuffer_;
     Handle<VkDeviceMemory> hypertraceScoreStagingMemory_;
 
-    // Helpers
-    [[nodiscard]] GlobalRTXContext& ctx() const noexcept { return GlobalRTXContext::get(); }
+    // ────────────────────── NO MORE ctx() FUNCTION — DELETED FOREVER ──────────────────────
 
     VkCommandBuffer beginSingleTimeCommands(VkDevice device, VkCommandPool pool);
     void endSingleTimeCommands(VkDevice device, VkCommandPool pool, VkQueue queue, VkCommandBuffer cmd);
     VkCommandBuffer allocateTransientCommandBuffer(VkDevice device, VkCommandPool pool);
 
-    // Destroy
     void cleanup() noexcept;
     void destroyNexusScoreImage() noexcept;
     void destroyDenoiserImage() noexcept;
@@ -222,7 +215,6 @@ private:
     void destroyAccumulationImages() noexcept;
     void destroyRTOutputImages() noexcept;
 
-    // Create
     void createRTOutputImages();
     void createAccumulationImages();
     void createDenoiserImage();
@@ -236,22 +228,18 @@ private:
     void updateTonemapDescriptorsInitial();
     void updateDenoiserDescriptors();
 
-    // RTX
     void createRayTracingPipeline(const std::vector<std::string>& shaderPaths);
     void createShaderBindingTable();
     VkShaderModule loadShader(const std::string& path);
     VkDeviceAddress getShaderGroupHandle(uint32_t group);
 
-    // Render passes
     void recordRayTracingCommandBuffer(VkCommandBuffer cmd);
     void performDenoisingPass(VkCommandBuffer cmd);
     void performTonemapPass(VkCommandBuffer cmd, uint32_t imageIndex);
 
-    // Update
     void updateUniformBuffer(uint32_t frame, const Camera& camera, float jitter);
     void updateTonemapUniform(uint32_t frame);
 
-    // Helper
     uint32_t findMemoryType(VkPhysicalDevice physicalDevice, uint32_t typeFilter, VkMemoryPropertyFlags properties) const noexcept;
     void createImageArray(std::array<Handle<VkImage>, MAX_FRAMES_IN_FLIGHT>& images,
                           std::array<Handle<VkDeviceMemory>, MAX_FRAMES_IN_FLIGHT>& memories,
@@ -261,7 +249,7 @@ private:
 };
 
 // ──────────────────────────────────────────────────────────────────────────────
-// GLOBAL DECLS — MATCH HOUSTON (NO EXCEPT)
+// GLOBAL DECLS — MATCH HOUSTON
 // ──────────────────────────────────────────────────────────────────────────────
 [[nodiscard]] inline VulkanRenderer& getRenderer();
 inline void initRenderer(int w, int h);
@@ -272,12 +260,5 @@ inline void shutdown() noexcept;
 // =============================================================================
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
-//
-// Dual Licensed:
-// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
-//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
-// 2. Commercial licensing: gzac5314@gmail.com
-//
-// =============================================================================
-// JAY LENO ENGINE — RTX STARTER — NOV 11 2025
+// JAY LENO ENGINE — FULLY RAW — NOV 11 2025 — PINK PHOTONS ETERNAL
 // =============================================================================
