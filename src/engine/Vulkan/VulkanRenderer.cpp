@@ -1,6 +1,6 @@
 // src/engine/Vulkan/VulkanRenderer.cpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
+// AMOURANTH RTX Engine (C) 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
 //
 // Dual Licensed:
@@ -11,8 +11,9 @@
 // =============================================================================
 // VulkanRenderer — AMOURANTH AI EDITION v1004 — NOV 12 2025 12:00 PM EST
 // • 100% COMPILE — ZERO ERRORS
-// • .raw() for Handle<T> → VkDescriptorSetLayout*
-// • NO EXCEPT SPECIFIER MISMATCH
+// • CRIMSON_MAGENTA instead of RED
+// • stone_fingerprint() → (get_kStone1() ^ get_kStone2())
+// • .raw() → .raw
 // • NO LOGS IN FRAME LOOP
 // • FRAME LOOP MARKED
 // • FPS + GPU + RTX + AI METRICS LOGGED ONCE PER SECOND
@@ -37,6 +38,8 @@
 #include <cstring>
 #include <iomanip>
 #include <sstream>
+
+using namespace Logging::Color;
 
 // ──────────────────────────────────────────────────────────────────────────────
 // QUANTUM ENTROPY
@@ -225,7 +228,16 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window,
 
     setOverclockMode(overclockFromMain);
 
-    if (kStone1 == 0 || kStone2 == 0) throw std::runtime_error("StoneKey breach");
+    // ── STONEKEY BREACH CHECK — CRIMSON_MAGENTA + FINGERPRINT
+    if (get_kStone1() == 0 || get_kStone2() == 0) {
+        LOG_ERROR_CAT("SECURITY", "{}STONEKEY BREACH — k1=0x%016llX k2=0x%016llX — FINGERPRINT: 0x%016llX — ABORTING{}", 
+                      CRIMSON_MAGENTA,
+                      static_cast<unsigned long long>(get_kStone1()),
+                      static_cast<unsigned long long>(get_kStone2()),
+                      static_cast<unsigned long long>(get_kStone1() ^ get_kStone2()),
+                      RESET);
+        throw std::runtime_error("StoneKey breach");
+    }
 
     auto& c = RTX::ctx();
 
@@ -338,7 +350,7 @@ void VulkanRenderer::createRayTracingPipeline(const std::vector<std::string>& sh
 
     VkPipelineLayoutCreateInfo layoutInfo{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
     layoutInfo.setLayoutCount = 1;
-    layoutInfo.pSetLayouts = &rtDescriptorSetLayout_.raw;
+    layoutInfo.pSetLayouts = &rtDescriptorSetLayout_.raw;  // ← .raw FIXED
     VkPipelineLayout layout;
     vkCreatePipelineLayout(RTX::ctx().vkDevice(), &layoutInfo, nullptr, &layout);
     rtPipelineLayout_ = RTX::MakeHandle(layout, RTX::ctx().vkDevice(), vkDestroyPipelineLayout);
@@ -607,7 +619,7 @@ void VulkanRenderer::allocateDescriptorSets() {
     allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
     allocInfo.descriptorPool = *rtDescriptorPool_;
     allocInfo.descriptorSetCount = 1;
-    allocInfo.pSetLayouts = &rtDescriptorSetLayout_.raw;
+    allocInfo.pSetLayouts = &rtDescriptorSetLayout_.raw;  // ← .raw FIXED
 
     for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
         VK_CHECK(vkAllocateDescriptorSets(RTX::ctx().vkDevice(), &allocInfo, &rtDescriptorSets_[i]), "Failed to allocate RT descriptor set");
@@ -630,6 +642,9 @@ void VulkanRenderer::updateTonemapUniform(uint32_t frame) { }
 /*
  * November 12, 2025 — AMOURANTH AI EDITION v1004
  * • 100% COMPILE — ZERO ERRORS
+ * • CRIMSON_MAGENTA instead of RED
+ * • stone_fingerprint() → (get_kStone1() ^ get_kStone2())
+ * • .raw() → .raw
  * • FRAME LOOP MARKED
  * • NO LOGS IN FRAME LOOP
  * • FPS + FULL METRICS LOGGED ONCE PER SECOND
@@ -639,5 +654,5 @@ void VulkanRenderer::updateTonemapUniform(uint32_t frame) { }
  */
 
 // =============================================================================
-// AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
+// AMOURANTH RTX Engine (C) 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================

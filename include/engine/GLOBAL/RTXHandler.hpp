@@ -40,7 +40,6 @@
 #include <glm/gtc/type_ptr.hpp>
 
 #include "engine/GLOBAL/logging.hpp"
-#include "engine/GLOBAL/StoneKey.hpp"  // ← get_kStone1(), get_kStone2()
 
 // Forward declarations
 class VulkanRTX;

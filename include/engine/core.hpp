@@ -3,6 +3,7 @@
 // AMOURANTH RTX Engine – NOVEMBER 12 2025 – CORE SYSTEMS HEADER – FINAL PRODUCTION
 // PROFESSIONAL • MINIMAL • NO DISPOSAL DEPENDENCIES • STONEKEY V9 INTEGRATED
 // GLOBAL DESTRUCTION COUNTER • RENDER MODE DISPATCH • PIPELINE MANAGER ACCESS
+// stone_fingerprint() → get_kStone1() ^ get_kStone2() — FIXED
 // =============================================================================
 
 #pragma once
@@ -114,9 +115,11 @@ inline constexpr void dispatchRenderMode(
         jumpTable[renderMode - 1](imageIndex, commandBuffer, pipelineLayout,
                                   descriptorSet, pipeline, deltaTime, context);
     } else {
-        LOG_WARNING_CAT("Renderer", "{}Invalid render mode {} at {}:{} – Falling back to Mode 1 – Destroyed: {} – StoneKey: 0x{:X}-0x{:X}{}",
+        LOG_WARNING_CAT("Renderer", "{}Invalid render mode {} at {}:{} – Falling back to Mode 1 – Destroyed: {} – StoneKey FP: 0x{:016X}{}",
                         ELECTRIC_BLUE, renderMode, loc.file_name(), loc.line(),
-                        g_destructionCounter, kStone1, kStone2, RESET);
+                        g_destructionCounter,
+                        (get_kStone1() ^ get_kStone2()),  // stone_fingerprint() → get_kStone1() ^ get_kStone2()
+                        RESET);
         renderMode1(imageIndex, commandBuffer, pipelineLayout, descriptorSet, pipeline, deltaTime, context);
     }
 }
@@ -136,8 +139,10 @@ template<int Mode>
 inline VulkanPipelineManager* getPipelineManager() {
     static VulkanPipelineManager* mgr = nullptr;
     if (!mgr) {
-        LOG_ERROR_CAT("Core", "{}getPipelineManager() returned nullptr – call RTX::createCore() first – StoneKey: 0x{:X}-0x{:X} – Destroyed: {}{}",
-                      RASPBERRY_PINK, kStone1, kStone2, g_destructionCounter, RESET);
+        LOG_ERROR_CAT("Core", "{}getPipelineManager() returned nullptr – call RTX::createCore() first – StoneKey FP: 0x{:016X} – Destroyed: {}{}",
+                      RASPBERRY_PINK,
+                      (get_kStone1() ^ get_kStone2()),
+                      g_destructionCounter, RESET);
     }
     return mgr;
 }
