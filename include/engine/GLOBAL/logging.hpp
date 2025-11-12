@@ -3,8 +3,9 @@
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
 //
-// HYPER-VIVID C++23 LOGGING v∞ — OLD GOD SUPREMACY — NOVEMBER 11, 2025 09:47 AM EST
-// THREAD-SAFE | LOCK-FREE | ASYNC | DELTA-TIME | 50+ RAINBOW COLORS | CUSTODIAN GROK DJ
+// HYPER-VIVID C++23 LOGGING v∞ — NORMAL MODE — NOV 12 2025
+// THREAD-SAFE | LOCK-FREE | ASYNC | DELTA-TIME | 50+ RAINBOW COLORS
+// Amouranth: (PARTY_PINK) | Nick: (ELECTRIC_BLUE) | CUSTODIAN GROK DJ
 // Ellie Fier approved • StoneKey fortified • 7-file rotation • Zero-cost macros
 // **GLOBAL ECOSYSTEM** — **LOG_SUCCESS_CAT WORKS ANYWHERE** — **NO NAMESPACE**
 // **SDL3 RESPECTED ONLY** — **VULKAN IS RAW** — **GOD INTENDED**
@@ -49,7 +50,7 @@
         } \
     } while (0)
 
-// StoneKey protection: Compile-time unique keys for tamper-resistant log rotation
+// StoneKey protection
 #include "StoneKey.hpp"
 
 #include <string_view>
@@ -76,11 +77,9 @@
 #include <glm/gtx/string_cast.hpp>
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_beta.h>
-
-// SDL3 RESPECTED — GOD INTENDED
 #include <SDL3/SDL.h>
 
-// Formatter specialization for VkResult — GLOBAL
+// Formatter for VkResult
 namespace std {
 template <>
 struct formatter<VkResult> {
@@ -135,7 +134,7 @@ struct formatter<VkResult> {
 }
 
 // ========================================================================
-// 0. CONFIGURATION & HYPER-VIVID MACROS — GLOBAL ECOSYSTEM — ZERO COST
+// CONFIGURATION — NORMAL LOGGING
 // ========================================================================
 constexpr bool ENABLE_TRACE   = true;
 constexpr bool ENABLE_DEBUG   = true;
@@ -148,7 +147,7 @@ constexpr bool ENABLE_PERF    = true;
 constexpr bool FPS_COUNTER    = true;
 constexpr bool SIMULATION_LOGGING = true;
 
-// **GLOBAL MACROS — LOG_SUCCESS_CAT WORKS ANYWHERE — NO NAMESPACE**
+// **GLOBAL MACROS — LOG_SUCCESS_CAT WORKS ANYWHERE**
 #define LOG_TRACE(...)          [&]() constexpr { if constexpr (ENABLE_TRACE)   Logger::get().log(LogLevel::Trace,   "General", __VA_ARGS__); }()
 #define LOG_DEBUG(...)          [&]() constexpr { if constexpr (ENABLE_DEBUG)   Logger::get().log(LogLevel::Debug,   "General", __VA_ARGS__); }()
 #define LOG_INFO(...)           [&]() constexpr { if constexpr (ENABLE_INFO)    Logger::get().log(LogLevel::Info,    "General", __VA_ARGS__); }()
@@ -177,20 +176,22 @@ constexpr bool SIMULATION_LOGGING = true;
 #define LOG_VOID_TRACE_CAT(cat) [&]() constexpr { if constexpr (ENABLE_TRACE)   Logger::get().logVoid(LogLevel::Trace,   cat); }()
 
 // ========================================================================
-// LOG LEVEL + SUCCESS/ATTEMPT/PERF — GLOBAL
+// LOG LEVEL
 // ========================================================================
 enum class LogLevel { Trace, Debug, Info, Success, Attempt, Perf, Warning, Error };
 
 // ========================================================================
-// 1. HYPER-VIVID ANSI COLOR SYSTEM — 50+ COLORS — **Color::Logging::**
+// 1. HYPER-VIVID ANSI COLORS — USING EXISTING
 // ========================================================================
 namespace Color::Logging {
+    using namespace Color::Logging;  // ← ADD THIS LINE
+
     inline constexpr std::string_view RESET                     = "\033[0m";
     inline constexpr std::string_view BOLD                      = "\033[1m";
-    inline constexpr std::string_view FUCHSIA_MAGENTA           = "\033[1;38;5;205m";   // ERRORS
-    inline constexpr std::string_view PARTY_PINK                = "\033[1;38;5;213m";   // LAS.hpp - BLAS
-    inline constexpr std::string_view ELECTRIC_BLUE             = "\033[1;38;5;75m";    // LAS.hpp - TLAS
-    inline constexpr std::string_view LIME_GREEN                = "\033[1;38;5;154m";   // LAS.hpp - other
+    inline constexpr std::string_view FUCHSIA_MAGENTA           = "\033[1;38;5;205m";
+    inline constexpr std::string_view PARTY_PINK                = "\033[1;38;5;213m";   // Amouranth
+    inline constexpr std::string_view ELECTRIC_BLUE             = "\033[1;38;5;75m";    // Nick
+    inline constexpr std::string_view LIME_GREEN                = "\033[1;38;5;154m";
     inline constexpr std::string_view SUNGLOW_ORANGE            = "\033[1;38;5;214m";
     inline constexpr std::string_view ULTRA_NEON_LIME           = "\033[38;5;82m";
     inline constexpr std::string_view PLATINUM_GRAY             = "\033[38;5;255m";
@@ -232,7 +233,7 @@ namespace Color::Logging {
 }
 
 // ========================================================================
-// LEVEL INFO + ENABLE ARRAY — GLOBAL
+// LEVEL INFO
 // ========================================================================
 struct LevelInfo {
     std::string_view str;
@@ -257,7 +258,7 @@ constexpr std::array<bool, 8> ENABLE_LEVELS{
 };
 
 // ========================================================================
-// LOG MESSAGE STRUCT — GLOBAL
+// LOG MESSAGE
 // ========================================================================
 struct LogMessage {
     LogLevel level;
@@ -268,7 +269,7 @@ struct LogMessage {
 };
 
 // ========================================================================
-// 2. LOGGER — GLOBAL CLASS — **NO NAMESPACE** — **LOG_SUCCESS_CAT WORKS ANYWHERE**
+// 2. LOGGER — NORMAL LOGGING WITH Amouranth: / Nick:
 // ========================================================================
 class Logger {
 public:
@@ -300,7 +301,7 @@ private:
     Logger() : worker_([this](std::stop_token st) { processQueue(st); }) {
         logFilePath_ = "amouranth_engine.log";
         logFile_.open(logFilePath_, std::ios::out | std::ios::app);
-        LOG_SUCCESS_CAT("Logger", "CUSTODIAN GROK ONLINE — OLD GOD LOGGING SUPREMACY — RASPBERRY_PINK ETERNAL");
+        LOG_SUCCESS_CAT("Logger", "CUSTODIAN GROK ONLINE — NORMAL LOGGING — Amouranth: PARTY_PINK | Nick: ELECTRIC_BLUE");
     }
 
     ~Logger() {
@@ -308,7 +309,7 @@ private:
         if (logFile_.is_open()) {
             logFile_.close();
         }
-        LOG_SUCCESS_CAT("Logger", "CUSTODIAN GROK SIGNING OFF — ALL LOGS RAINBOW ETERNAL — VALHALLA AWAITS");
+        LOG_SUCCESS_CAT("Logger", "CUSTODIAN GROK SIGNING OFF — NORMAL LOGGING ETERNAL");
     }
 
     static constexpr size_t QUEUE_SIZE = 2048;
@@ -328,21 +329,9 @@ private:
         return idx < ENABLE_LEVELS.size() && ENABLE_LEVELS[idx];
     }
 
-    std::string_view getCategoryColor(std::string_view cat) const noexcept {
-        static const std::map<std::string_view, std::string_view, std::less<>> categoryColors{
-            {"General", Color::Logging::DIAMOND_SPARKLE}, {"MAIN", Color::Logging::VALHALLA_GOLD}, {"Init", Color::Logging::AURORA_BOREALIS}, {"Dispose", Color::Logging::PARTY_PINK}, {"Logger", Color::Logging::ELECTRIC_BLUE},
-            {"Vulkan", Color::Logging::SAPPHIRE_BLUE}, {"Device", Color::Logging::QUASAR_BLUE}, {"Swapchain", Color::Logging::OCEAN_TEAL}, {"Command", Color::Logging::CHROMIUM_SILVER}, {"Queue", Color::Logging::OBSIDIAN_BLACK},
-            {"RayTrace", Color::Logging::TURQUOISE_BLUE}, {"RTX", Color::Logging::HYPERSPACE_WARP}, {"Accel", Color::Logging::PULSAR_GREEN}, {"TLAS", Color::Logging::SUPERNOVA_ORANGE}, {"BLAS", Color::Logging::PLASMA_FUCHSIA},
-            {"SBT", Color::Logging::RASPBERRY_PINK}, {"Shader", Color::Logging::NEBULA_VIOLET}, {"Renderer", Color::Logging::BRIGHT_PINKISH_PURPLE}, {"Render", Color::Logging::THERMO_PINK}, {"Tonemap", Color::Logging::PEACHES_AND_CREAM},
-            {"GBuffer", Color::Logging::QUANTUM_FLUX}, {"Post", Color::Logging::NUCLEAR_REACTOR}, {"Buffer", Color::Logging::BRONZE_BROWN}, {"Image", Color::Logging::LIME_YELLOW}, {"Texture", Color::Logging::SPEARMINT_MINT},
-            {"Sampler", Color::Logging::LILAC_LAVENDER}, {"Descriptor", Color::Logging::FUCHSIA_MAGENTA}, {"Perf", Color::Logging::COSMIC_GOLD}, {"FPS", Color::Logging::FIERY_ORANGE}, {"GPU", Color::Logging::BLACK_HOLE},
-            {"CPU", Color::Logging::PLASMA_FUCHSIA}, {"Input", Color::Logging::SPEARMINT_MINT}, {"Audio", Color::Logging::OCEAN_TEAL}, {"Physics", Color::Logging::EMERALD_GREEN}, {"SIMULATION", Color::Logging::BRONZE_BROWN},
-            {"MeshLoader", Color::Logging::LIME_YELLOW}, {"GLTF", Color::Logging::QUANTUM_PURPLE}, {"Material", Color::Logging::PEACHES_AND_CREAM}, {"Debug", Color::Logging::ARCTIC_CYAN}, {"ImGui", Color::Logging::PLATINUM_GRAY},
-            {"Profiler", Color::Logging::COSMIC_GOLD}, {"SUCCESS", Color::Logging::EMERALD_GREEN}, {"ATTEMPT", Color::Logging::QUANTUM_PURPLE}, {"VOID", Color::Logging::COSMIC_VOID}, {"MARKER", Color::Logging::DIAMOND_SPARKLE}
-        };
-        if (auto it = categoryColors.find(cat); it != categoryColors.end()) [[likely]] {
-            return it->second;
-        }
+    std::string_view getSpeakerColor(std::string_view category) const noexcept {
+        if (category == "Amouranth") return Color::Logging::PARTY_PINK;
+        if (category == "Nick")      return Color::Logging::ELECTRIC_BLUE;
         return Color::Logging::DIAMOND_WHITE;
     }
 
@@ -353,7 +342,7 @@ private:
         if (next == tail_.load(std::memory_order_acquire)) [[unlikely]] {
             auto drop = QUEUE_SIZE / 2;
             tail_.store((tail_.load(std::memory_order_relaxed) + drop) % QUEUE_SIZE, std::memory_order_release);
-            LOG_ERROR_CAT("Logger", "QUEUE OVERFLOW — DROPPING {} MESSAGES — UPGRADE TO 4096 BRO", drop);
+            LOG_ERROR_CAT("Logger", "QUEUE OVERFLOW — DROPPING {} MESSAGES", drop);
         }
 
         auto now = std::chrono::steady_clock::now();
@@ -421,9 +410,6 @@ private:
         }
 
         for (const auto& msg : remaining) printMessage(msg);
-
-        std::print("{}{}<<< OLD GOD FINAL FLUSH COMPLETE — {} messages turned to confetti — PARTY ETERNAL{}{}\n",
-                   Color::Logging::PARTY_PINK, Color::Logging::SUNGLOW_ORANGE, remaining.size(), Color::Logging::RESET, Color::Logging::RESET);
     }
 
     void rotateLogFile() const {
@@ -471,7 +457,7 @@ private:
         }
 
         logFile_.open(logFilePath_, std::ios::out | std::ios::app);
-        std::print("{}{}LOG ROTATED → {} — STONEKEY PROTECTED — ONLY 7 FILES KEPT — RASPBERRY_PINK ETERNAL{}{}\n",
+        std::print("{}{}LOG ROTATED → {} — NORMAL LOGGING — 7 FILES KEPT{}{}\n",
                    Color::Logging::QUANTUM_FLUX, Color::Logging::PLATINUM_GRAY, archivedPath.filename().string(), Color::Logging::RESET, Color::Logging::RESET);
     }
 
@@ -481,7 +467,7 @@ private:
         const std::string_view levelColor = info.color;
         const std::string_view levelBg    = info.bg;
         const std::string_view levelStr   = info.str;
-        const std::string_view catColor = getCategoryColor(msg.category);
+        const std::string_view speakerColor = getSpeakerColor(msg.category);
 
         const auto deltaUs = std::chrono::duration_cast<std::chrono::microseconds>(
             msg.timestamp - firstLogTime_.value_or(msg.timestamp)).count();
@@ -504,7 +490,7 @@ private:
         std::ostringstream oss;
         oss << levelBg << levelColor << levelStr << Color::Logging::RESET
             << Color::Logging::BOLD << deltaStr << Color::Logging::RESET << ' '
-            << catColor << '[' << msg.category << ']' << Color::Logging::RESET << ' '
+            << speakerColor << msg.category << ":" << Color::Logging::RESET << ' '
             << Color::Logging::LIME_GREEN << '[' << threadId << ']' << Color::Logging::RESET << ' '
             << Color::Logging::CHROMIUM_SILVER << '[' << fileLine << ']' << Color::Logging::RESET << ' '
             << levelColor << msg.formattedMessage << Color::Logging::RESET << '\n';
@@ -518,8 +504,7 @@ private:
     }
 };
 
-// NOVEMBER 11 2025 — OLD GOD LOGGING SUPREMACY — **NO NAMESPACE** — **GLOBAL ECOSYSTEM**
-// LOG_SUCCESS_CAT WORKS ANYWHERE — SDL3 RESPECTED — VULKAN RAW — RASPBERRY_PINK PARTY ETERNAL
-// CUSTODIAN GROK + ELLIE FIER + AMOURANTH RTX = VALHALLA UNLOCKED
-// GOD BLESS — SHIP IT FOREVER — PINK PHOTONS INFINITE
+// =============================================================================
+// NORMAL LOGGING — Amouranth: (PARTY_PINK) | Nick: (ELECTRIC_BLUE)
+// GOD BLESS — SHIP IT RAW — PINK PHOTONS ETERNAL
 // =============================================================================

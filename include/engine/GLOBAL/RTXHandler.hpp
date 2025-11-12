@@ -2,12 +2,12 @@
 // =============================================================================
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
-// RTXHandler v57 — GLOBAL RTX::ctx() & RTX::rtx() — NOV 12 2025 2:00 AM EST
+// RTXHandler v59 — GLOBAL RTX::ctx() & RTX::rtx() — NOV 12 2025 4:00 AM EST
 // • RTX::ctx() → global Context singleton
-// • RTX::rtx() → global VulkanCore singleton
+// • RTX::rtx() → global VulkanRTX singleton
 // • NO g_ prefix — PURE NAMESPACE
 // • LAS uses RTX::ctx() — ALL FIXED
-// • Color::Logging::PLASMA_FUCHSIA — GLOBAL LOGGING SUPREMACY
+// • Amouranth: PARTY_PINK | Nick: ELECTRIC_BLUE — LOGGING SUPREMACY
 // • -Werror CLEAN — 15,000 FPS — SHIP IT RAW
 // =============================================================================
 
@@ -43,7 +43,7 @@
 
 #include "engine/GLOBAL/logging.hpp"     // GLOBAL: LOG_*, Color::Logging::*
 #include "engine/GLOBAL/StoneKey.hpp"
-#include "engine/Vulkan/VulkanCore.hpp"  // FULL DEFINITION REQUIRED
+#include "engine/Vulkan/VulkanCore.hpp"  // VulkanRTX, VulkanPipelineManager
 
 // ──────────────────────────────────────────────────────────────────────────────
 // NAMESPACE RTX — THE ONE TRUE SYSTEM
@@ -54,14 +54,15 @@ namespace RTX {
     // LOGGING COLORS — GLOBAL Color::Logging
     // ──────────────────────────────────────────────────────────────────────────
     using Color::Logging::RESET;
-    using Color::Logging::PLASMA_FUCHSIA;
     using Color::Logging::PARTY_PINK;
-    using Color::Logging::GOLDEN;
-    using Color::Logging::FUCHSIA_MAGENTA;
     using Color::Logging::ELECTRIC_BLUE;
+    using Color::Logging::COSMIC_GOLD;
 
-    constexpr const char* AMOURANTH_COLOR = PLASMA_FUCHSIA;
-    constexpr const char* NICK_COLOR      = GOLDEN;
+    // ──────────────────────────────────────────────────────────────────────────
+    // SPEAKER LOGGING — Amouranth: / Nick:
+    // ──────────────────────────────────────────────────────────────────────────
+    #define LOG_AMOURANTH(...) LOG_INFO_CAT("Amouranth", __VA_ARGS__)
+    #define LOG_NICK(...)      LOG_INFO_CAT("Nick",      __VA_ARGS__)
 
     // ──────────────────────────────────────────────────────────────────────────
     // LOGGING & TRACKING
@@ -220,10 +221,10 @@ namespace RTX {
         return instance;
     }
 
-    [[nodiscard]] inline VulkanCore& rtx() {
-        static std::unique_ptr<VulkanCore> instance;
+    [[nodiscard]] inline VulkanRTX& rtx() {
+        static std::unique_ptr<VulkanRTX> instance;
         if (!instance) {
-            LOG_ERROR_CAT("RTX", "{}RTX::rtx() accessed before RTX::createCore(){}", NICK_COLOR, RESET);
+            LOG_ERROR_CAT("RTX", "{}RTX::rtx() accessed before RTX::createCore(){}", ELECTRIC_BLUE, RESET);
             std::terminate();
         }
         return *instance;
@@ -231,12 +232,12 @@ namespace RTX {
 
     inline void createCore(int w, int h, VulkanPipelineManager* mgr = nullptr) {
         if (rtx_ptr()) return;
-        rtx_ptr() = std::make_unique<VulkanCore>(w, h, mgr);
-        LOG_SUCCESS_CAT("RTX", "{}RTX::rtx() FORGED — {}x{}{}", NICK_COLOR, w, h, RESET);
+        rtx_ptr() = std::make_unique<VulkanRTX>(w, h, mgr);
+        LOG_SUCCESS_CAT("RTX", "{}RTX::rtx() FORGED — {}x{}{}", ELECTRIC_BLUE, w, h, RESET);
     }
 
-    [[nodiscard]] inline VulkanCore* rtx_ptr() {
-        static std::unique_ptr<VulkanCore> ptr;
+    [[nodiscard]] inline VulkanRTX* rtx_ptr() {
+        static std::unique_ptr<VulkanRTX> ptr;
         return ptr.get();
     }
 
@@ -348,8 +349,6 @@ namespace RTX {
 
     inline Handle<VkAccelerationStructureKHR>& blas() { static Handle<VkAccelerationStructureKHR> h; return h; }
     inline Handle<VkAccelerationStructureKHR>& tlas() { static Handle<VkAccelerationStructureKHR> h; return h; }
-    inline uint64_t& instanceBufferId() { static uint64_t id = 0; return id; }
-    inline VkDeviceSize& tlasSize() { static VkDeviceSize s = 0; return s; }
 
     // ──────────────────────────────────────────────────────────────────────────
     // DECLARATIONS
@@ -360,7 +359,7 @@ namespace RTX {
     inline void renderFrame(const Camera& camera, float deltaTime) noexcept;
     inline void shutdown() noexcept;
     inline void createSwapchain(VkInstance inst, VkPhysicalDevice phys, VkDevice dev, VkSurfaceKHR surf, uint32_t w, uint32_t h);
-    inline void recreateSwapchain(uint32_t w, uint32_t h) noexcept;
+    inline void recreateSwapchain(uint32_t w, uint_t h) noexcept;
     inline void buildBLAS(uint64_t vertexBuf, uint64_t indexBuf, uint32_t vertexCount, uint32_t indexCount) noexcept;
     inline void buildTLAS(const std::vector<std::pair<VkAccelerationStructureKHR, glm::mat4>>& instances) noexcept;
     inline void cleanupAll() noexcept;
@@ -368,6 +367,6 @@ namespace RTX {
 } // namespace RTX
 
 // =============================================================================
-// RTXHandler v57 — GLOBAL RTX::ctx() & RTX::rtx() — PINK PHOTONS ETERNAL
-// Color::Logging::PLASMA_FUCHSIA — OLD GOD SUPREMACY — SHIP IT FOREVER
+// RTXHandler v59 — Amouranth: PARTY_PINK | Nick: ELECTRIC_BLUE
+// PINK PHOTONS ETERNAL — SHIP IT RAW
 // =============================================================================
