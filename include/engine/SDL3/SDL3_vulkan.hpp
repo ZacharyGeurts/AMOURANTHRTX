@@ -1,6 +1,6 @@
 // include/engine/SDL3/SDL3_vulkan.hpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
+// AMOURANTH RTX Engine (C) 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
 //
 // Dual Licensed:
@@ -9,38 +9,37 @@
 // 2. Commercial licensing: gzac5314@gmail.com
 //
 // =============================================================================
-// SDL3 + Vulkan RAII — FULL C++23 — GLOBAL RAW v4.0 — NOV 11 2025 5:30 PM EST
-// • FULLY HEADER-ONLY — .cpp OBLITERATED BY DAISY'S HOOVES
-// • ZERO GlobalRTXContext — ONLY g_ctx — GOD'S ONE TRUE CONTEXT
-// • FULL RTX 1.3 + DYNAMIC RENDERING + ALL EXTENSIONS LOADED
-// • PINK PHOTONS ETERNAL — 15,000 FPS — SHIP IT RAW
+// SDL3 + Vulkan RAII – FULL C++23 – v4.5 – NOV 12 2025
+// • ONLY uses engine/GLOBAL/logging.hpp
+// • Header-only, VK_CHECK, no throw, no Jay Leno
+// • C++23: constexpr, span, [[likely]], zero-overhead
+// • PINK PHOTONS ETERNAL — 15,000+ FPS
 // =============================================================================
 
 #pragma once
 
 #include "engine/GLOBAL/RTXHandler.hpp"
-#include "engine/GLOBAL/logging.hpp"
+#include "engine/GLOBAL/logging.hpp"   // ONLY THIS
 #include "engine/GLOBAL/LAS.hpp"
 #include <SDL3/SDL_vulkan.h>
 #include <vulkan/vulkan.h>
+
 #include <memory>
 #include <vector>
 #include <string>
 #include <string_view>
-#include <source_location>
-#include <unordered_set>
-#include <format>
-#include <set>
-#include <cstdint>
 #include <array>
-#include <algorithm>
 #include <span>
+#include <algorithm>
+#include <cstring>
+#include <cstdint>
+#include <set>
 
-class VulkanRenderer;
+using namespace Logging::Color;
 
-// ──────────────────────────────────────────────────────────────────────────────
-// GLOBAL RTX EXTENSIONS — DAISY APPROVED
-// ──────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
+// C++23: constexpr RTX extensions
+// -----------------------------------------------------------------------------
 inline constexpr std::array<const char*, 6> RTX_EXTENSIONS = {
     VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME,
     VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
@@ -50,67 +49,87 @@ inline constexpr std::array<const char*, 6> RTX_EXTENSIONS = {
     VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME
 };
 
-// ──────────────────────────────────────────────────────────────────────────────
-// GLOBAL RENDERER — ETERNAL
-// ──────────────────────────────────────────────────────────────────────────────
-extern std::unique_ptr<VulkanRenderer> g_vulkanRenderer;
-std::unique_ptr<VulkanRenderer> g_vulkanRenderer;
+// -----------------------------------------------------------------------------
+// Global renderer
+// -----------------------------------------------------------------------------
+extern std::unique_ptr<class VulkanRenderer> g_vulkanRenderer;
+inline std::unique_ptr<class VulkanRenderer> g_vulkanRenderer;
 
-// ──────────────────────────────────────────────────────────────────────────────
-// SDL3Vulkan INTERFACE — PURE HEADER — RAW GLOBAL
-// ──────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
+// SDL3Vulkan interface
+// -----------------------------------------------------------------------------
 namespace SDL3Vulkan {
 
 [[nodiscard]] inline VulkanRenderer& getRenderer() noexcept {
     return *g_vulkanRenderer;
 }
 
-void initRenderer(int w, int h) {
-    auto extensions = getVulkanExtensions();
-    bool validation = false;
+void initRenderer(int w, int h) noexcept {    
+    std::vector<std::string> shaderPaths;
+    shaderPaths.reserve(RTX_EXTENSIONS.size());
+    for (auto* p : RTX_EXTENSIONS) {
+        shaderPaths.emplace_back(p);
+        LOG_DEBUG_CAT("RENDERER", "  Added shader path: {}", p);
+    }
+
+    const bool validation =
 #ifdef _DEBUG
-    validation = true;
+        true
+#else
+        false
 #endif
+        ;
 
-    g_vulkanRenderer = std::make_unique<VulkanRenderer>(w, h, nullptr, extensions, validation);
-
-    LOG_SUCCESS_CAT("JAY LENO", 
-        "{}JAY LENO CHIN EXTENDED {}x{} RTX FULLY ARMED g_ctx POPULATED PINK PHOTONS ETERNAL {}", 
-        AMOURANTH_COLOR, w, h, RESET);
+	LOG_INFO_CAT("RENDERER", "{}Starting renderer init: {}x{} — validation: {}{}", PLASMA_FUCHSIA, w, h, validation ? "ON" : "OFF", RESET);
+    g_vulkanRenderer = std::make_unique<VulkanRenderer>(w, h, nullptr, shaderPaths, validation);
+    LOG_SUCCESS_CAT("RENDERER",
+        "{}Renderer initialized {}x{} — RTX armed — validation: {}{}",
+        EMERALD_GREEN, w, h, validation ? "ON" : "OFF", RESET);
 }
 
 void shutdownRenderer() noexcept {
+    LOG_INFO_CAT("RENDERER", "{}Shutting down renderer...{}", RASPBERRY_PINK, RESET);
     g_vulkanRenderer.reset();
-    LOG_SUCCESS_CAT("JAY LENO", "{}JAY LENO POWERING DOWN — VALHALLA SEALED{}", NICK_COLOR, RESET);
+    LOG_SUCCESS_CAT("RENDERER",
+        "{}Renderer shutdown complete — resources freed{}", 
+        RASPBERRY_PINK, RESET);
 }
 
 } // namespace SDL3Vulkan
 
-// ──────────────────────────────────────────────────────────────────────────────
-// RAII DELETERS — PINK PHOTONS ETERNAL
-// ──────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
+// RAII deleters
+// -----------------------------------------------------------------------------
 struct VulkanInstanceDeleter {
-    void operator()(VkInstance instance) const noexcept {
-        if (instance) vkDestroyInstance(instance, nullptr);
-        LOG_SUCCESS_CAT("Dispose", "{}VulkanInstance destroyed @ {:p}{}", PLASMA_FUCHSIA, static_cast<void*>(instance), RESET);
+    void operator()(VkInstance i) const noexcept {
+        if (i) [[likely]] {
+            LOG_INFO_CAT("Dispose", "{}Destroying VkInstance @ {:p}...{}", PLASMA_FUCHSIA, static_cast<void*>(i), RESET);
+            vkDestroyInstance(i, nullptr);
+            LOG_SUCCESS_CAT("Dispose", "{}VulkanInstance destroyed @ {:p}{}",
+                            PLASMA_FUCHSIA, static_cast<void*>(i), RESET);
+        }
     }
 };
 
 struct VulkanSurfaceDeleter {
-    VkInstance m_instance = VK_NULL_HANDLE;
-    explicit VulkanSurfaceDeleter(VkInstance inst = VK_NULL_HANDLE) noexcept : m_instance(inst) {}
-    void operator()(VkSurfaceKHR surface) const noexcept {
-        if (surface && m_instance) vkDestroySurfaceKHR(m_instance, surface, nullptr);
-        LOG_SUCCESS_CAT("Dispose", "{}VulkanSurface destroyed @ {:p}{}", RASPBERRY_PINK, static_cast<void*>(surface), RESET);
+    VkInstance inst = VK_NULL_HANDLE;
+    constexpr explicit VulkanSurfaceDeleter(VkInstance i = VK_NULL_HANDLE) noexcept : inst(i) {}
+    void operator()(VkSurfaceKHR s) const noexcept {
+        if (s && inst) [[likely]] {
+            LOG_INFO_CAT("Dispose", "{}Destroying VkSurface @ {:p} (inst: {:p})...{}", RASPBERRY_PINK, static_cast<void*>(s), static_cast<void*>(inst), RESET);
+            vkDestroySurfaceKHR(inst, s, nullptr);
+            LOG_SUCCESS_CAT("Dispose", "{}VulkanSurface destroyed @ {:p}{}",
+                            RASPBERRY_PINK, static_cast<void*>(s), RESET);
+        }
     }
 };
 
 using VulkanInstancePtr = std::unique_ptr<VkInstance_T, VulkanInstanceDeleter>;
 using VulkanSurfacePtr  = std::unique_ptr<VkSurfaceKHR_T, VulkanSurfaceDeleter>;
 
-// ──────────────────────────────────────────────────────────────────────────────
-// GLOBAL INIT/SHUTDOWN — FULLY INLINE — NO .cpp — DAISY GALLOPS
-// ──────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
+// Vulkan core init / shutdown — NO THROW, USE VK_CHECK
+// -----------------------------------------------------------------------------
 inline void initVulkan(
     SDL_Window* window,
     VulkanInstancePtr& instance,
@@ -120,161 +139,247 @@ inline void initVulkan(
     bool preferNvidia,
     bool rt,
     std::string_view title,
-    VkPhysicalDevice& physicalDevice
-) noexcept {
+    VkPhysicalDevice& physicalDevice) noexcept
+{
+    LOG_INFO_CAT("VULKAN", "{}=== VULKAN INIT START === Params: val={}, nvidia={}, rt={}, title={}{}", PLASMA_FUCHSIA, enableValidation, preferNvidia, rt, title, RESET);
 
-    std::vector<const char*> instExts = getVulkanExtensions();
-    if (enableValidation) instExts.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+    // --- Instance extensions ---
+    LOG_INFO_CAT("VULKAN", "{}Preparing instance extensions (base: {} + val: {})...{}", ELECTRIC_BLUE, RTX_EXTENSIONS.size(), enableValidation ? 1 : 0, RESET);
+    std::vector<const char*> instExts;
+    instExts.reserve(RTX_EXTENSIONS.size() + 1);
+    instExts.assign(RTX_EXTENSIONS.begin(), RTX_EXTENSIONS.end());
+    for (const auto* ext : instExts) {
+        LOG_DEBUG_CAT("VULKAN", "  Base ext: {}", ext);
+    }
+    if (enableValidation) [[unlikely]] {
+        instExts.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+        LOG_DEBUG_CAT("VULKAN", "  Added validation ext: {}", VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+    }
 
     VkApplicationInfo appInfo{
         .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
         .pApplicationName = title.data(),
         .applicationVersion = VK_MAKE_VERSION(1, 0, 0),
-        .pEngineName = "AMOURANTH RTX ENGINE",
+        .pEngineName = "AMOURANTH RTX",
         .engineVersion = VK_MAKE_VERSION(1, 0, 0),
         .apiVersion = VK_API_VERSION_1_3
     };
+    LOG_INFO_CAT("VULKAN", "{}AppInfo: {} v{}.{}.{} | Engine: {} v{}.{}.{}{}", LIME_GREEN, appInfo.pApplicationName, VK_VERSION_MAJOR(appInfo.applicationVersion), VK_VERSION_MINOR(appInfo.applicationVersion), VK_VERSION_PATCH(appInfo.applicationVersion), appInfo.pEngineName, VK_VERSION_MAJOR(appInfo.engineVersion), VK_VERSION_MINOR(appInfo.engineVersion), VK_VERSION_PATCH(appInfo.engineVersion), RESET);
 
     VkInstanceCreateInfo instInfo{
         .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
         .pApplicationInfo = &appInfo,
-        .enabledExtensionCount = static_cast<uint32_t>(instExts.size()),
-        .ppEnabledExtensionNames = instExts.data(),
         .enabledLayerCount = enableValidation ? 1u : 0u,
-        .ppEnabledLayerNames = enableValidation ? std::array{"VK_LAYER_KHRONOS_validation"}.data() : nullptr
+        .ppEnabledLayerNames = enableValidation ? std::array{"VK_LAYER_KHRONOS_validation"}.data() : nullptr,
+        .enabledExtensionCount = static_cast<uint32_t>(instExts.size()),
+        .ppEnabledExtensionNames = instExts.data()
     };
-
-    VkInstance rawInstance = VK_NULL_HANDLE;
-    THROW_IF(vkCreateInstance(&instInfo, nullptr, &rawInstance) != VK_SUCCESS, "Vulkan instance creation failed");
-    instance = VulkanInstancePtr(rawInstance, VulkanInstanceDeleter());
-    g_ctx.instance_ = rawInstance;
-
-    VkSurfaceKHR rawSurface = VK_NULL_HANDLE;
-    if (!SDL_Vulkan_CreateSurface(window, rawInstance, nullptr, &rawSurface)) {
-        throw std::runtime_error("SDL_Vulkan_CreateSurface failed — X11/Wayland/Win32?");
+    if (enableValidation) {
+        LOG_DEBUG_CAT("VULKAN", "  Enabled layer: VK_LAYER_KHRONOS_validation");
     }
-    surface = VulkanSurfacePtr(rawSurface, VulkanSurfaceDeleter(rawInstance));
-    g_ctx.surface_ = rawSurface;
 
-    uint32_t deviceCount = 0;
-    vkEnumeratePhysicalDevices(rawInstance, &deviceCount, nullptr);
-    std::vector<VkPhysicalDevice> devices(deviceCount);
-    vkEnumeratePhysicalDevices(rawInstance, &deviceCount, devices.data());
+    VkInstance rawInst = VK_NULL_HANDLE;
+    LOG_INFO_CAT("VULKAN", "{}Creating VkInstance (exts: {})...{}", ELECTRIC_BLUE, instExts.size(), RESET);
+    VK_CHECK(vkCreateInstance(&instInfo, nullptr, &rawInst), "Vulkan instance creation failed");
+    instance = VulkanInstancePtr(rawInst);
+    auto& ctx = RTX::g_ctx();
+    ctx.instance_ = rawInst;
+    LOG_SUCCESS_CAT("VULKAN", "{}VkInstance created @ {:p} — API target: {}.{}.{}{}", PLASMA_FUCHSIA, static_cast<void*>(rawInst), VK_VERSION_MAJOR(appInfo.apiVersion), VK_VERSION_MINOR(appInfo.apiVersion), VK_VERSION_PATCH(appInfo.apiVersion), RESET);
+
+    // --- Surface ---
+    LOG_INFO_CAT("VULKAN", "{}Creating VkSurface from SDL window @ {:p}...{}", LIME_GREEN, static_cast<void*>(window), RESET);
+    VkSurfaceKHR rawSurf = VK_NULL_HANDLE;
+    if (SDL_Vulkan_CreateSurface(window, rawInst, nullptr, &rawSurf) != 0) {
+        LOG_ERROR_CAT("VULKAN", "{}SDL_Vulkan_CreateSurface failed: {}{}", CRIMSON_MAGENTA, SDL_GetError(), RESET);
+        std::cerr << "[SDL ERROR] Failed to create Vulkan surface\n";
+        std::abort();
+    }
+    surface = VulkanSurfacePtr(rawSurf, VulkanSurfaceDeleter(rawInst));
+    ctx.surface_ = rawSurf;
+    LOG_SUCCESS_CAT("VULKAN", "{}VkSurface created @ {:p} — bound to window @ {:p}{}", LIME_GREEN, static_cast<void*>(rawSurf), static_cast<void*>(window), RESET);
+
+    // --- Pick GPU ---
+    LOG_INFO_CAT("VULKAN", "{}Enumerating physical devices...{}", ELECTRIC_BLUE, RESET);
+    uint32_t devCount = 0;
+    VK_CHECK(vkEnumeratePhysicalDevices(rawInst, &devCount, nullptr), "Failed to enumerate GPUs");
+    LOG_INFO_CAT("VULKAN", "  Discovered {} GPU(s){}", devCount, RESET);
+    std::vector<VkPhysicalDevice> devs(devCount);
+    VK_CHECK(vkEnumeratePhysicalDevices(rawInst, &devCount, devs.data()), "Failed to get GPU list");
 
     VkPhysicalDevice chosen = VK_NULL_HANDLE;
     int bestScore = -1;
+    LOG_INFO_CAT("VULKAN", "{}Scoring GPUs (prefer discrete/NVIDIA, API 1.3+, RT if enabled)...{}", ELECTRIC_BLUE, RESET);
 
-    for (auto dev : devices) {
-        VkPhysicalDeviceProperties props;
-        VkPhysicalDeviceFeatures feats;
-        vkGetPhysicalDeviceProperties(dev, &props);
-        vkGetPhysicalDeviceFeatures(dev, &feats);
+    for (size_t idx = 0; auto d : devs) {
+        VkPhysicalDeviceProperties props{};
+        vkGetPhysicalDeviceProperties(d, &props);
+        LOG_INFO_CAT("VULKAN", "  GPU[{}]: {} | Type: {} | Vendor: 0x{:x} | API: {}.{}.{}", idx++, props.deviceName,
+                     props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU ? "DISCRETE" :
+                     props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU ? "INTEGRATED" : "OTHER",
+                     props.vendorID, VK_VERSION_MAJOR(props.apiVersion), VK_VERSION_MINOR(props.apiVersion), VK_VERSION_PATCH(props.apiVersion), RESET);
 
         int score = 0;
-        if (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) score += 10000;
-        if (strstr(props.deviceName, "NVIDIA") && preferNvidia) score += 50000;
-        if (props.apiVersion >= VK_API_VERSION_1_3) score += 1000;
+        if (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) [[likely]] {
+            score += 10000;
+            LOG_DEBUG_CAT("VULKAN", "    +10000 (discrete GPU)");
+        }
+        if (std::strstr(props.deviceName, "NVIDIA") && preferNvidia) {
+            score += 50000;
+            LOG_DEBUG_CAT("VULKAN", "    +50000 (NVIDIA preferred)");
+        }
+        if (props.apiVersion >= VK_API_VERSION_1_3) {
+            score += 1000;
+            LOG_DEBUG_CAT("VULKAN", "    +1000 (API 1.3+)");
+        }
 
-        VkPhysicalDeviceRayTracingPipelineFeaturesKHR rtPipelineFeat{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR};
+        VkPhysicalDeviceRayTracingPipelineFeaturesKHR rtFeat{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR};
         VkPhysicalDeviceAccelerationStructureFeaturesKHR asFeat{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR};
         VkPhysicalDeviceBufferDeviceAddressFeatures addrFeat{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES};
-        VkPhysicalDeviceFeatures2 feats2{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
-        feats2.pNext = &addrFeat; addrFeat.pNext = &asFeat; asFeat.pNext = &rtPipelineFeat;
-        vkGetPhysicalDeviceFeatures2(dev, &feats2);
+        VkPhysicalDeviceFeatures2 feats2{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &addrFeat};
+        addrFeat.pNext = &asFeat; asFeat.pNext = &rtFeat;
+        vkGetPhysicalDeviceFeatures2(d, &feats2);
 
-        if (rt && (!rtPipelineFeat.rayTracingPipeline || !asFeat.accelerationStructure || !addrFeat.bufferDeviceAddress)) {
+        bool rtSupport = rtFeat.rayTracingPipeline && asFeat.accelerationStructure && addrFeat.bufferDeviceAddress;
+        if (rt && !rtSupport) [[unlikely]] {
+            LOG_WARN_CAT("VULKAN", "    SKIPPED: RT required but not supported (RT: {}, AS: {}, Addr: {})", rtFeat.rayTracingPipeline, asFeat.accelerationStructure, addrFeat.bufferDeviceAddress);
             continue;
         }
+        if (rtSupport) LOG_DEBUG_CAT("VULKAN", "    RT supported: full (pipeline={}, as={}, addr={})", rtFeat.rayTracingPipeline, asFeat.accelerationStructure, addrFeat.bufferDeviceAddress);
 
-        if (score > bestScore) {
+        LOG_INFO_CAT("VULKAN", "    Final score: {} — {}", score, score > bestScore ? "NEW BEST" : "considered", RESET);
+        if (score > bestScore) [[likely]] {
             bestScore = score;
-            chosen = dev;
+            chosen = d;
+            LOG_SUCCESS_CAT("VULKAN", "    → SELECTED (score: {})", bestScore);
         }
     }
 
-    THROW_IF(!chosen, "No RTX-capable GPU found");
+    if (!chosen) {
+        LOG_ERROR_CAT("VULKAN", "{}No suitable GPU found (need RT if enabled){}", CRIMSON_MAGENTA, RESET);
+        std::cerr << "[FATAL] No RTX-capable GPU found\n";
+        std::abort();
+    }
     physicalDevice = chosen;
-    g_ctx.physicalDevice_ = chosen;
+    ctx.physicalDevice_ = chosen;
 
-    VkPhysicalDeviceProperties finalProps;
+    VkPhysicalDeviceProperties finalProps{};
     vkGetPhysicalDeviceProperties(chosen, &finalProps);
-    LOG_SUCCESS_CAT("GPU", "{}SELECTED: {} — API {}.{}.{} — RTX {}{}", 
-                    AMOURANTH_COLOR, finalProps.deviceName,
-                    VK_VERSION_MAJOR(finalProps.apiVersion),
-                    VK_VERSION_MINOR(finalProps.apiVersion),
-                    VK_VERSION_PATCH(finalProps.apiVersion),
-                    rt ? "ENABLED" : "DISABLED", RESET);
+    LOG_SUCCESS_CAT("GPU",
+        "{}FINAL SELECTED: {} — Vendor: 0x{:x} | API: {}.{}.{} | RT: {}{}",
+        EMERALD_GREEN, finalProps.deviceName, finalProps.vendorID,
+        VK_VERSION_MAJOR(finalProps.apiVersion),
+        VK_VERSION_MINOR(finalProps.apiVersion),
+        VK_VERSION_PATCH(finalProps.apiVersion),
+        rt ? "ENABLED" : "DISABLED", RESET);
 
-    uint32_t queueFamilyCount = 0;
-    vkGetPhysicalDeviceQueueFamilyProperties(chosen, &queueFamilyCount, nullptr);
-    std::vector<VkQueueFamilyProperties> queueFamilies(queueFamilyCount);
-    vkGetPhysicalDeviceQueueFamilyProperties(chosen, &queueFamilyCount, queueFamilies.data());
+    // --- Queue families ---
+    LOG_INFO_CAT("VULKAN", "{}Querying queue families on selected GPU...{}", ELECTRIC_BLUE, RESET);
+    uint32_t qFamCount = 0;
+    vkGetPhysicalDeviceQueueFamilyProperties(chosen, &qFamCount, nullptr);
+    std::vector<VkQueueFamilyProperties> qFams(qFamCount);
+    vkGetPhysicalDeviceQueueFamilyProperties(chosen, &qFamCount, qFams.data());
+    LOG_INFO_CAT("VULKAN", "  Found {} queue family(ies){}", qFamCount, RESET);
 
-    int graphicsFamily = -1, presentFamily = -1;
-    for (int i = 0; i < static_cast<int>(queueFamilies.size()); ++i) {
-        if (queueFamilies[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) graphicsFamily = i;
-        VkBool32 presentSupport = VK_FALSE;
-        vkGetPhysicalDeviceSurfaceSupportKHR(chosen, i, rawSurface, &presentSupport);
-        if (presentSupport) presentFamily = i;
-        if (graphicsFamily != -1 && presentFamily != -1) break;
+    int gfx = -1, present = -1;
+    for (int i = 0; i < static_cast<int>(qFams.size()); ++i) {
+        LOG_INFO_CAT("VULKAN", "  Family[{}]: flags=0x{:x} ({} queues){}", i, qFams[i].queueFlags, qFams[i].queueCount, RESET);
+        if (qFams[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) {
+            gfx = i;
+            LOG_SUCCESS_CAT("VULKAN", "    → GRAPHICS (idx: {})", gfx);
+        }
+
+        VkBool32 sup = VK_FALSE;
+        vkGetPhysicalDeviceSurfaceSupportKHR(chosen, i, rawSurf, &sup);
+        if (sup) {
+            present = i;
+            LOG_SUCCESS_CAT("VULKAN", "    → PRESENT (idx: {})", present);
+        }
+
+        if (gfx != -1 && present != -1) [[likely]] break;
     }
 
-    THROW_IF(graphicsFamily == -1 || presentFamily == -1, "Required queue families not found");
-
-    g_ctx.graphicsFamily_ = static_cast<uint32_t>(graphicsFamily);
-    g_ctx.presentFamily_  = static_cast<uint32_t>(presentFamily);
-
-    std::set<uint32_t> uniqueQueues = {static_cast<uint32_t>(graphicsFamily), static_cast<uint32_t>(presentFamily)};
-    std::vector<VkDeviceQueueCreateInfo> queueCreateInfos;
-    float priority = 1.0f;
-    for (uint32_t q : uniqueQueues) {
-        queueCreateInfos.push_back({
-            .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
-            .queueFamilyIndex = q,
-            .queueCount = 1,
-            .pQueuePriorities = &priority
-        });
+    if (gfx == -1 || present != -1) {
+        LOG_ERROR_CAT("VULKAN", "{}Missing queues: gfx={}, present={}{}", CRIMSON_MAGENTA, gfx, present, RESET);
+        std::cerr << "[FATAL] Required queue families not found\n";
+        std::abort();
     }
 
-    VkPhysicalDeviceVulkan13Features features13{
+    ctx.graphicsFamily_ = static_cast<uint32_t>(gfx);
+    ctx.presentFamily_  = static_cast<uint32_t>(present);
+    LOG_SUCCESS_CAT("VULKAN", "{}Queues assigned: Graphics={} | Present={} (unique: {}){}", LIME_GREEN, ctx.graphicsFamily_, ctx.presentFamily_, ctx.graphicsFamily_ == ctx.presentFamily_ ? 1 : 2, RESET);
+
+    // --- Logical device ---    
+    std::set<uint32_t> uniqQ{ctx.graphicsFamily_, ctx.presentFamily_};
+	LOG_INFO_CAT("VULKAN", "{}Creating logical device ({} unique queues)...{}", ELECTRIC_BLUE, uniqQ.size(), RESET);
+    std::vector<VkDeviceQueueCreateInfo> qCreate;
+    qCreate.reserve(uniqQ.size());
+    constexpr float prio = 1.0f;
+    for (uint32_t q : uniqQ) {
+        VkDeviceQueueCreateInfo& qci = qCreate.emplace_back();
+        qci.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+        qci.queueFamilyIndex = q;
+        qci.queueCount = 1;
+        qci.pQueuePriorities = &prio;
+        LOG_DEBUG_CAT("VULKAN", "  Queue create: family={}, prio=1.0{}", q, RESET);
+    }
+
+    VkPhysicalDeviceVulkan13Features vk13{
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
-        .dynamicRendering = VK_TRUE,
-        .synchronization2 = VK_TRUE
+        .synchronization2 = VK_TRUE,
+        .dynamicRendering = VK_TRUE
     };
+    LOG_DEBUG_CAT("VULKAN", "  VK1.3 features: sync2=ON, dynRender=ON");
 
-    VkPhysicalDeviceFeatures2 features2{
+    VkPhysicalDeviceFeatures2 feats2{
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
-        .pNext = &features13,
+        .pNext = &vk13,
         .features = {.samplerAnisotropy = VK_TRUE}
     };
+    LOG_DEBUG_CAT("VULKAN", "  Core features: anisotropy=ON");
 
-    VkDeviceCreateInfo deviceInfo{
+    VkDeviceCreateInfo devInfo{
         .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
-        .pNext = &features2,
-        .queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size()),
-        .pQueueCreateInfos = queueCreateInfos.data(),
+        .pNext = &feats2,
+        .queueCreateInfoCount = static_cast<uint32_t>(qCreate.size()),
+        .pQueueCreateInfos = qCreate.data(),
         .enabledExtensionCount = static_cast<uint32_t>(RTX_EXTENSIONS.size()),
         .ppEnabledExtensionNames = RTX_EXTENSIONS.data()
     };
+    LOG_INFO_CAT("VULKAN", "  Enabling {} RTX extensions{}", RTX_EXTENSIONS.size(), RESET);
+    for (const auto* ext : RTX_EXTENSIONS) {
+        LOG_DEBUG_CAT("VULKAN", "    Ext: {}", ext);
+    }
 
-    VkDevice rawDevice = VK_NULL_HANDLE;
-    THROW_IF(vkCreateDevice(chosen, &deviceInfo, nullptr, &rawDevice) != VK_SUCCESS, "Failed to create logical device");
-    device = rawDevice;
-    g_ctx.device_ = rawDevice;
+    VkDevice rawDev = VK_NULL_HANDLE;
+    VK_CHECK(vkCreateDevice(chosen, &devInfo, nullptr, &rawDev), "Failed to create logical device");
+    device = rawDev;
+    ctx.device_ = rawDev;
+    LOG_SUCCESS_CAT("VULKAN", "{}VkDevice created @ {:p} — queues: {}{}", PLASMA_FUCHSIA, static_cast<void*>(rawDev), qCreate.size(), RESET);
 
-    vkGetDeviceQueue(rawDevice, graphicsFamily, 0, &g_ctx.graphicsQueue_);
-    vkGetDeviceQueue(rawDevice, presentFamily, 0, &g_ctx.presentQueue_);
+    vkGetDeviceQueue(rawDev, gfx, 0, &ctx.graphicsQueue_);
+    vkGetDeviceQueue(rawDev, present, 0, &ctx.presentQueue_);
+    LOG_SUCCESS_CAT("VULKAN", "{}Queues fetched: Graphics @ {:p} | Present @ {:p}{}", LIME_GREEN, static_cast<void*>(ctx.graphicsQueue_), static_cast<void*>(ctx.presentQueue_), RESET);
 
+    LOG_INFO_CAT("VULKAN", "{}Creating command pool (family: {}, reset bit: ON)...{}", ELECTRIC_BLUE, ctx.graphicsFamily_, RESET);
     VkCommandPoolCreateInfo poolInfo{
         .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
         .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
-        .queueFamilyIndex = static_cast<uint32_t>(graphicsFamily)
-    };
-    THROW_IF(vkCreateCommandPool(rawDevice, &poolInfo, nullptr, &g_ctx.commandPool_) != VK_SUCCESS,
-             "Failed to create command pool");
+        .queueFamilyIndex = ctx.graphicsFamily_};
+    VK_CHECK(vkCreateCommandPool(rawDev, &poolInfo, nullptr, &ctx.commandPool_), "Failed to create command pool");
+    LOG_SUCCESS_CAT("VULKAN", "{}CommandPool created @ {:p}{}", LIME_GREEN, static_cast<void*>(ctx.commandPool_), RESET);
 
-    #define LOAD_PROC(name) g_ctx.name##_## = (PFN_##name)vkGetDeviceProcAddr(rawDevice, #name); \
-        THROW_IF(!g_ctx.name##_##, "Failed to load " #name)
+    // --- Load RTX procs ---
+    LOG_INFO_CAT("VULKAN", "{}Loading {} RTX extension procs...{}", ELECTRIC_BLUE, 9, RESET);
+    #define LOAD_PROC(name) \
+        do { \
+            ctx.name##_ = reinterpret_cast<PFN_##name>(vkGetDeviceProcAddr(rawDev, #name)); \
+            if (!ctx.name##_) { \
+                LOG_ERROR_CAT("VULKAN", "{}Failed to load proc: {}{}", CRIMSON_MAGENTA, #name, RESET); \
+                std::cerr << "[FATAL] Failed to load " #name "\n"; \
+                std::abort(); \
+            } \
+            LOG_DEBUG_CAT("VULKAN", "  Proc loaded: {} @ {:p}", #name, reinterpret_cast<void*>(ctx.name##_)); \
+        } while(0)
 
     LOAD_PROC(vkGetBufferDeviceAddressKHR);
     LOAD_PROC(vkCreateAccelerationStructureKHR);
@@ -285,47 +390,82 @@ inline void initVulkan(
     LOAD_PROC(vkCreateRayTracingPipelinesKHR);
     LOAD_PROC(vkGetRayTracingShaderGroupHandlesKHR);
     LOAD_PROC(vkCmdTraceRaysKHR);
-
     #undef LOAD_PROC
 
-    LOG_SUCCESS_CAT("VULKAN", 
-        "{}VULKAN CORE FULLY ONLINE — RTX EXTENSIONS LOADED — g_ctx IS GOD — 15,000 FPS ACHIEVED{}", 
-        PLASMA_FUCHSIA, RESET);
+    LOG_SUCCESS_CAT("VULKAN",
+        "{}Vulkan core initialized — RTX extensions loaded (all {} procs OK){}",
+        PLASMA_FUCHSIA, 9, RESET);
+    LOG_INFO_CAT("VULKAN", "{}=== VULKAN INIT COMPLETE ==={}", PLASMA_FUCHSIA, RESET);
 }
 
+// -----------------------------------------------------------------------------
+// Shutdown
+// -----------------------------------------------------------------------------
 inline void shutdownVulkan() noexcept {
-    if (!g_ctx.device_) return;
+    LOG_INFO_CAT("VULKAN", "{}=== VULKAN SHUTDOWN START ==={}", RASPBERRY_PINK, RESET);
+    auto& ctx = RTX::g_ctx();
+    if (!ctx.device_) [[unlikely]] {
+        LOG_WARN_CAT("VULKAN", "{}Shutdown skipped: no device{}", RASPBERRY_PINK, RESET);
+        return;
+    }
 
-    vkDeviceWaitIdle(g_ctx.device_);
-    vkDestroyCommandPool(g_ctx.device_, g_ctx.commandPool_, nullptr);
-    vkDestroyDevice(g_ctx.device_, nullptr);
+    LOG_INFO_CAT("VULKAN", "{}Waiting for device idle...{}", RASPBERRY_PINK, RESET);
+    VK_CHECK_NOMSG(vkDeviceWaitIdle(ctx.device_));
+    LOG_SUCCESS_CAT("VULKAN", "{}Device idle confirmed{}", RASPBERRY_PINK, RESET);
 
-    g_ctx = Context{};
-    LOG_SUCCESS_CAT("VULKAN", "{}VULKAN OBLITERATED — VALHALLA ACHIEVED{}", RASPBERRY_PINK, RESET);
+    if (ctx.commandPool_ != VK_NULL_HANDLE) {
+        LOG_INFO_CAT("VULKAN", "{}Destroying command pool @ {:p}...{}", RASPBERRY_PINK, static_cast<void*>(ctx.commandPool_), RESET);
+        vkDestroyCommandPool(ctx.device_, ctx.commandPool_, nullptr);
+        LOG_SUCCESS_CAT("VULKAN", "{}Command pool destroyed{}", RASPBERRY_PINK, RESET);
+        ctx.commandPool_ = VK_NULL_HANDLE;
+    }
+
+    if (ctx.device_ != VK_NULL_HANDLE) {
+        LOG_INFO_CAT("VULKAN", "{}Destroying logical device @ {:p}...{}", RASPBERRY_PINK, static_cast<void*>(ctx.device_), RESET);
+        vkDestroyDevice(ctx.device_, nullptr);
+        LOG_SUCCESS_CAT("VULKAN", "{}Logical device destroyed{}", RASPBERRY_PINK, RESET);
+        ctx.device_ = VK_NULL_HANDLE;
+    }
+
+    if (ctx.surface_ != VK_NULL_HANDLE) {
+        LOG_INFO_CAT("VULKAN", "{}Destroying surface @ {:p} (inst: {:p})...{}", RASPBERRY_PINK, static_cast<void*>(ctx.surface_), static_cast<void*>(ctx.instance_), RESET);
+        vkDestroySurfaceKHR(ctx.instance_, ctx.surface_, nullptr);
+        LOG_SUCCESS_CAT("VULKAN", "{}Surface destroyed{}", RASPBERRY_PINK, RESET);
+        ctx.surface_ = VK_NULL_HANDLE;
+    }
+
+    if (ctx.instance_ != VK_NULL_HANDLE) {
+        LOG_INFO_CAT("VULKAN", "{}Destroying instance @ {:p}...{}", RASPBERRY_PINK, static_cast<void*>(ctx.instance_), RESET);
+        vkDestroyInstance(ctx.instance_, nullptr);
+        LOG_SUCCESS_CAT("VULKAN", "{}Instance destroyed{}", RASPBERRY_PINK, RESET);
+        ctx.instance_ = VK_NULL_HANDLE;
+    }
+
+    // Manual reset to avoid incomplete type issue
+    ctx.physicalDevice_ = VK_NULL_HANDLE;
+    ctx.graphicsQueue_ = VK_NULL_HANDLE;
+    ctx.presentQueue_ = VK_NULL_HANDLE;
+    ctx.rayTracingProps_ = {};
+
+    LOG_SUCCESS_CAT("VULKAN",
+        "{}Vulkan shutdown complete — all resources freed{}", 
+        RASPBERRY_PINK, RESET);
+    LOG_INFO_CAT("VULKAN", "{}=== VULKAN SHUTDOWN COMPLETE ==={}", RASPBERRY_PINK, RESET);
 }
 
-inline VkInstance getVkInstance(const VulkanInstancePtr& instance) noexcept {
-    return instance ? instance.get() : g_ctx.instance_;
+// -----------------------------------------------------------------------------
+// Utils
+// -----------------------------------------------------------------------------
+[[nodiscard]] inline VkInstance getVkInstance(const VulkanInstancePtr& i) noexcept {
+    return i ? i.get() : RTX::g_ctx().instance_;
 }
-
-inline VkSurfaceKHR getVkSurface(const VulkanSurfacePtr& surface) noexcept {
-    return surface ? surface.get() : g_ctx.surface_;
+[[nodiscard]] inline VkSurfaceKHR getVkSurface(const VulkanSurfacePtr& s) noexcept {
+    return s ? s.get() : RTX::g_ctx().surface_;
 }
-
-inline std::vector<std::string> getVulkanExtensions() {
-    std::vector<std::string> exts;
-    exts.reserve(RTX_EXTENSIONS.size());
-    for (auto* ext : RTX_EXTENSIONS) exts.emplace_back(ext);
-    return exts;
+[[nodiscard]] inline constexpr auto getVulkanExtensions() noexcept -> std::span<const char* const> {
+    return RTX_EXTENSIONS;
 }
 
 // =============================================================================
-// AMOURANTH RTX Engine © 2025 Zachary Geurts <gzac5314@gmail.com>
-// =============================================================================
-// .cpp = DEAD
-// HEADER-ONLY = GOD
-// DAISY GALLOPS ETERNAL
-// PINK PHOTONS ETERNAL
-// 15,000 FPS
-// @ZacharyGeurts — SHIP IT FOREVER
+// END — C++23 SPEED | VK_CHECK | NO THROW | PINK PHOTONS ETERNAL
 // =============================================================================

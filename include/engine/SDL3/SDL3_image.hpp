@@ -24,6 +24,8 @@
 #include <format>
 #include <vector>
 
+using namespace Logging::Color;
+
 namespace AmouranthRTX::Graphics {
 
 struct ImageConfig {
@@ -52,12 +54,12 @@ static const std::vector<std::string> SUPPORTED_FORMATS = {
 // =============================================================================
 inline void initImage(const ImageConfig& config = {}) {
     LOG_INFO_CAT("Image", "{}Initializing SDL_image subsystem{}", 
-                 Color::Logging::RASPBERRY_PINK, Color::Logging::RESET);
+                 RASPBERRY_PINK, RESET);
 
     std::string_view platform = SDL_GetPlatform();
     if (platform != "Linux" && platform != "Windows") {
         LOG_ERROR_CAT("Image", "{}Unsupported platform: {}{}", 
-                      Color::Logging::RASPBERRY_PINK, platform, Color::Logging::RESET);
+                      RASPBERRY_PINK, platform, RESET);
         throw std::runtime_error(std::string("Unsupported platform: ") + std::string(platform));
     }
 
@@ -65,16 +67,16 @@ inline void initImage(const ImageConfig& config = {}) {
         std::string formatsList;
         for (const auto& fmt : SUPPORTED_FORMATS) formatsList += fmt + " ";
         LOG_INFO_CAT("Image", "{}Supported formats: {}{}", 
-                     Color::Logging::RASPBERRY_PINK, formatsList, Color::Logging::RESET);
+                     RASPBERRY_PINK, formatsList, RESET);
     }
 
     LOG_SUCCESS_CAT("Image", "{}SDL_image initialized — all formats ready{}", 
-                    Color::Logging::RASPBERRY_PINK, Color::Logging::RESET);
+                    RASPBERRY_PINK, RESET);
 }
 
 inline void cleanupImage() {
     LOG_INFO_CAT("Image", "{}SDL_image cleanup complete{}", 
-                 Color::Logging::RASPBERRY_PINK, Color::Logging::RESET);
+                 RASPBERRY_PINK, RESET);
 }
 
 // =============================================================================
@@ -92,7 +94,7 @@ inline bool isSupportedImage(const std::string& filePath) {
 
     bool supported = std::find(SUPPORTED_FORMATS.begin(), SUPPORTED_FORMATS.end(), ext) != SUPPORTED_FORMATS.end();
     LOG_DEBUG_CAT("Image", "{}Format check '{}' → {} (ext: {})", 
-                  Color::Logging::RASPBERRY_PINK, filePath, supported ? "SUPPORTED" : "unsupported", ext);
+                  RASPBERRY_PINK, filePath, supported ? "SUPPORTED" : "unsupported", ext);
     return supported;
 }
 
@@ -124,22 +126,22 @@ inline bool detectFormat(SDL_IOStream* src, std::string& format) {
 // =============================================================================
 inline SDL_Surface* loadSurface(const std::string& file) {
     LOG_DEBUG_CAT("Image", "{}Loading surface: {}{}", 
-                  Color::Logging::RASPBERRY_PINK, file, Color::Logging::RESET);
+                  RASPBERRY_PINK, file, RESET);
 
     if (!isSupportedImage(file)) {
         LOG_WARNING_CAT("Image", "{}Potentially unsupported format: {}{}", 
-                        Color::Logging::RASPBERRY_PINK, file, Color::Logging::RESET);
+                        RASPBERRY_PINK, file, RESET);
     }
 
     SDL_Surface* surface = IMG_Load(file.c_str());
     if (!surface) {
         LOG_ERROR_CAT("Image", "{}IMG_Load failed: {} → {}{}", 
-                      Color::Logging::RASPBERRY_PINK, file, SDL_GetError(), Color::Logging::RESET);
+                      RASPBERRY_PINK, file, SDL_GetError(), RESET);
         throw std::runtime_error(std::string("IMG_Load failed: ") + SDL_GetError());
     }
 
     LOG_INFO_CAT("Image", "{}Surface loaded: {} ({}x{}){}", 
-                 Color::Logging::RASPBERRY_PINK, file, surface->w, surface->h, Color::Logging::RESET);
+                 RASPBERRY_PINK, file, surface->w, surface->h, RESET);
     return surface;
 }
 
@@ -149,18 +151,18 @@ inline SDL_Surface* loadSurfaceIO(SDL_IOStream* src, bool closeIO = true) {
     std::string fmt;
     detectFormat(src, fmt);
     LOG_DEBUG_CAT("Image", "{}IO stream format detected: {}{}", 
-                  Color::Logging::RASPBERRY_PINK, fmt, Color::Logging::RESET);
+                  RASPBERRY_PINK, fmt, RESET);
 
     SDL_SeekIO(src, 0, SDL_IO_SEEK_SET);
     SDL_Surface* surface = IMG_Load_IO(src, closeIO);
     if (!surface) {
         LOG_ERROR_CAT("Image", "{}IMG_Load_IO failed: {}{}", 
-                      Color::Logging::RASPBERRY_PINK, SDL_GetError(), Color::Logging::RESET);
+                      RASPBERRY_PINK, SDL_GetError(), RESET);
         throw std::runtime_error(std::string("IMG_Load_IO failed: ") + SDL_GetError());
     }
 
     LOG_INFO_CAT("Image", "{}Surface loaded from IO: {}x{}{}", 
-                 Color::Logging::RASPBERRY_PINK, surface->w, surface->h, Color::Logging::RESET);
+                 RASPBERRY_PINK, surface->w, surface->h, RESET);
     return surface;
 }
 
@@ -170,15 +172,15 @@ inline bool saveSurface(const SDL_Surface* surface, const std::string& file, con
     SDL_IOStream* dst = SDL_IOFromFile(file.c_str(), "wb");
     if (!dst) {
         LOG_ERROR_CAT("Image", "{}Cannot open file for writing: {}{}", 
-                      Color::Logging::RASPBERRY_PINK, file, Color::Logging::RESET);
+                      RASPBERRY_PINK, file, RESET);
         return false;
     }
 
     bool ok = IMG_SaveTyped_IO(const_cast<SDL_Surface*>(surface), dst, true, type.c_str());
     if (ok) LOG_INFO_CAT("Image", "{}Surface saved: {}{}", 
-                         Color::Logging::RASPBERRY_PINK, file, Color::Logging::RESET);
+                         RASPBERRY_PINK, file, RESET);
     else LOG_ERROR_CAT("Image", "{}Save failed: {}{}", 
-                       Color::Logging::RASPBERRY_PINK, SDL_GetError(), Color::Logging::RESET);
+                       RASPBERRY_PINK, SDL_GetError(), RESET);
     return ok;
 }
 
@@ -186,7 +188,7 @@ inline bool saveSurfaceIO(const SDL_Surface* surface, SDL_IOStream* dst, bool cl
     if (!surface || !dst) return false;
     bool ok = IMG_SaveTyped_IO(const_cast<SDL_Surface*>(surface), dst, closeIO, type.c_str());
     if (ok && closeIO) LOG_INFO_CAT("Image", "{}Surface saved to IO stream{}", 
-                                    Color::Logging::RASPBERRY_PINK, Color::Logging::RESET);
+                                    RASPBERRY_PINK, RESET);
     return ok;
 }
 
@@ -197,17 +199,17 @@ inline SDL_Texture* loadTextureRaw(SDL_Renderer* renderer, const std::string& fi
     if (!renderer) throw std::invalid_argument("Null renderer");
 
     LOG_DEBUG_CAT("Image", "{}Loading texture: {}{}", 
-                  Color::Logging::RASPBERRY_PINK, file, Color::Logging::RESET);
+                  RASPBERRY_PINK, file, RESET);
 
     SDL_Texture* tex = IMG_LoadTexture(renderer, file.c_str());
     if (!tex) {
         LOG_ERROR_CAT("Image", "{}IMG_LoadTexture failed: {} → {}{}", 
-                      Color::Logging::RASPBERRY_PINK, file, SDL_GetError(), Color::Logging::RESET);
+                      RASPBERRY_PINK, file, SDL_GetError(), RESET);
         throw std::runtime_error(std::string("LoadTexture failed: ") + SDL_GetError());
     }
 
     LOG_INFO_CAT("Image", "{}Texture loaded: {}{}", 
-                 Color::Logging::RASPBERRY_PINK, file, Color::Logging::RESET);
+                 RASPBERRY_PINK, file, RESET);
     return tex;
 }
 
@@ -216,25 +218,25 @@ inline SDL_Texture* loadTextureRawIO(SDL_Renderer* renderer, SDL_IOStream* src, 
 
     std::string fmt; detectFormat(src, fmt);
     LOG_DEBUG_CAT("Image", "{}Loading texture from IO (format: {}){}", 
-                  Color::Logging::RASPBERRY_PINK, fmt, Color::Logging::RESET);
+                  RASPBERRY_PINK, fmt, RESET);
 
     SDL_SeekIO(src, 0, SDL_IO_SEEK_SET);
     SDL_Texture* tex = IMG_LoadTexture_IO(renderer, src, closeIO);
     if (!tex) {
         LOG_ERROR_CAT("Image", "{}IMG_LoadTexture_IO failed: {}{}", 
-                      Color::Logging::RASPBERRY_PINK, SDL_GetError(), Color::Logging::RESET);
+                      RASPBERRY_PINK, SDL_GetError(), RESET);
         throw std::runtime_error(std::string("LoadTexture_IO failed: ") + SDL_GetError());
     }
 
     LOG_INFO_CAT("Image", "{}Texture loaded from IO{}", 
-                 Color::Logging::RASPBERRY_PINK, Color::Logging::RESET);
+                 RASPBERRY_PINK, RESET);
     return tex;
 }
 
 inline void freeTextureRaw(SDL_Texture* texture) {
     if (texture) {
         LOG_DEBUG_CAT("Image", "{}Destroying texture: {:p}{}", 
-                      Color::Logging::RASPBERRY_PINK, static_cast<void*>(texture), Color::Logging::RESET);
+                      RASPBERRY_PINK, static_cast<void*>(texture), RESET);
         SDL_DestroyTexture(texture);
     }
 }
@@ -258,9 +260,9 @@ inline SDL_Surface* textureToSurface(SDL_Texture* texture, SDL_Renderer* rendere
     SDL_SetRenderViewport(renderer, &prevViewport);
 
     if (surf) LOG_DEBUG_CAT("Image", "{}Texture → Surface: {}x{}{}", 
-                            Color::Logging::RASPBERRY_PINK, w, h, Color::Logging::RESET);
+                            RASPBERRY_PINK, w, h, RESET);
     else LOG_ERROR_CAT("Image", "{}textureToSurface failed: {}{}", 
-                       Color::Logging::RASPBERRY_PINK, SDL_GetError(), Color::Logging::RESET);
+                       RASPBERRY_PINK, SDL_GetError(), RESET);
 
     return surf;
 }
@@ -336,7 +338,7 @@ public:
     void setColorMod(Uint8 r, Uint8 g, Uint8 b) {
         if (SDL_SetTextureColorMod(m_handle, r, g, b)) {
             LOG_WARNING_CAT("Image", "{}setColorMod failed{}", 
-                            Color::Logging::RASPBERRY_PINK, Color::Logging::RESET);
+                            RASPBERRY_PINK, RESET);
         }
     }
 
@@ -347,7 +349,7 @@ public:
     void setAlphaMod(Uint8 alpha) {
         if (SDL_SetTextureAlphaMod(m_handle, alpha)) {
             LOG_WARNING_CAT("Image", "{}setAlphaMod failed{}", 
-                            Color::Logging::RASPBERRY_PINK, Color::Logging::RESET);
+                            RASPBERRY_PINK, RESET);
         }
     }
 
@@ -360,7 +362,7 @@ public:
             m_info.blendMode = mode;
         } else {
             LOG_WARNING_CAT("Image", "{}setBlendMode failed{}", 
-                            Color::Logging::RASPBERRY_PINK, Color::Logging::RESET);
+                            RASPBERRY_PINK, RESET);
         }
     }
 
@@ -395,21 +397,21 @@ public:
         auto it = m_cache.find(file);
         if (it != m_cache.end()) {
             LOG_DEBUG_CAT("Image", "{}Cache HIT: {}{}", 
-                          Color::Logging::RASPBERRY_PINK, file, Color::Logging::RESET);
+                          RASPBERRY_PINK, file, RESET);
             return it->second;
         }
 
         auto tex = std::make_shared<Texture>(m_renderer, file);
         m_cache[file] = tex;
         LOG_INFO_CAT("Image", "{}Cache MISS → loaded: {}{}", 
-                     Color::Logging::RASPBERRY_PINK, file, Color::Logging::RESET);
+                     RASPBERRY_PINK, file, RESET);
         return tex;
     }
 
     void clear() {
         m_cache.clear();
         LOG_INFO_CAT("Image", "{}Texture cache cleared{}", 
-                     Color::Logging::RASPBERRY_PINK, Color::Logging::RESET);
+                     RASPBERRY_PINK, RESET);
     }
 
     size_t size() const noexcept { return m_cache.size(); }

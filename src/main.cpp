@@ -10,7 +10,7 @@
 //
 // VALHALLA v44 FINAL — NOVEMBER 12, 2025 — RTX FULLY ENABLED
 // SPLASH → SDL3 → VULKAN → RTX WINDOW — FULL FLOW — NO SEGFAULT
-// GENTLEMAN GROK LOG AFTER VULKAN — PINK PHOTONS ETERNAL
+// AMOURANTH™ LOG AFTER VULKAN — PINK PHOTONS ETERNAL
 // LOG LITERALLY EVERYTHING — START TO END — AMOURANTH AI EDITION
 // =============================================================================
 
@@ -19,17 +19,20 @@
 #include "engine/GLOBAL/Amouranth.hpp"
 #include "engine/GLOBAL/RTXHandler.hpp"
 #include "engine/GLOBAL/SwapchainManager.hpp"
+
+// SDL3 WRAPPERS — ONLY THESE
+#include "engine/SDL3/SDL3_init.hpp"
+#include "engine/SDL3/SDL3_window.hpp"
+#include "engine/SDL3/SDL3_vulkan.hpp"
+#include "engine/SDL3/SDL3_image.hpp"
 #include "engine/SDL3/SDL3_audio.hpp"
+
 #include "engine/Vulkan/VulkanRenderer.hpp"
 #include "engine/Vulkan/VulkanPipelineManager.hpp"
 #include "engine/Vulkan/VulkanCore.hpp"
 #include "handle_app.hpp"
 #include "engine/utils.hpp"
 #include "engine/core.hpp"
-
-#include <SDL3/SDL.h>
-#include <SDL3/SDL_vulkan.h>
-#include <SDL3_image/SDL_image.h>
 
 #include <iostream>
 #include <stdexcept>
@@ -112,13 +115,14 @@ inline VulkanRTX& g_rtx() {
 static void initializeVulkanCore(SDL_Window* window) {
     LOG_INFO_CAT("VULKAN", "{}INITIALIZING VULKAN CORE — START{}", PLASMA_FUCHSIA, RESET);
 
-    LOG_INFO_CAT("VULKAN", "Querying SDL Vulkan extensions...");
+    LOG_INFO_CAT("VULKAN", "Querying SDL3 Vulkan extensions...");
     uint32_t extensionCount = 0;
-    auto extensions = SDL_Vulkan_GetInstanceExtensions(&extensionCount);
-    LOG_INFO_CAT("VULKAN", "SDL reports {} extensions", extensionCount);
+    auto extensions_raw = SDL_Vulkan_GetInstanceExtensions(&extensionCount);
+    LOG_INFO_CAT("VULKAN", "SDL3 reports {} extensions", extensionCount);
     for (uint32_t i = 0; i < extensionCount; ++i) {
-        LOG_INFO_CAT("VULKAN", "  [{}] {}", i, extensions[i]);
+        LOG_INFO_CAT("VULKAN", "  [{}] {}", i, extensions_raw[i]);
     }
+    const char* const* extensions = extensions_raw;
 
     VkApplicationInfo appInfo{};
     appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
@@ -132,7 +136,7 @@ static void initializeVulkanCore(SDL_Window* window) {
     createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
     createInfo.pApplicationInfo = &appInfo;
     createInfo.enabledExtensionCount = extensionCount;
-    createInfo.ppEnabledExtensionNames = const_cast<const char **>(extensions);
+    createInfo.ppEnabledExtensionNames = extensions;
 
     LOG_INFO_CAT("VULKAN", "Creating VkInstance...");
     VkInstance instance;
@@ -142,9 +146,9 @@ static void initializeVulkanCore(SDL_Window* window) {
     LOG_SUCCESS_CAT("VULKAN", "VkInstance created: 0x{:x}", reinterpret_cast<uint64_t>(instance));
     RTX::g_ctx().instance_ = instance;
 
-    LOG_INFO_CAT("VULKAN", "Creating Vulkan surface from SDL window...");
+    LOG_INFO_CAT("VULKAN", "Creating Vulkan surface from SDL3 window...");
     VkSurfaceKHR surface;
-    if (!SDL_Vulkan_CreateSurface(window, instance, nullptr, &surface)) {
+    if (SDL_Vulkan_CreateSurface(window, instance, nullptr, &surface) != 0) {
         THROW_MAIN("Failed to create Vulkan surface");
     }
     LOG_SUCCESS_CAT("VULKAN", "VkSurfaceKHR created: 0x{:x}", reinterpret_cast<uint64_t>(surface));
@@ -311,7 +315,7 @@ static void cleanupVulkanCore() {
         ctx.device_ = VK_NULL_HANDLE;
     }
     if (ctx.surface_ != VK_NULL_HANDLE) {
-        SDL_Vulkan_DestroySurface(ctx.instance_, ctx.surface_, nullptr);
+        vkDestroySurfaceKHR(ctx.instance_, ctx.surface_, nullptr);
         LOG_INFO_CAT("VULKAN", "Surface destroyed");
         ctx.surface_ = VK_NULL_HANDLE;
     }
@@ -350,8 +354,8 @@ int main(int argc, char* argv[]) {
         sdl_ok = true;
         LOG_SUCCESS_CAT("SDL", "SDL3 initialized");
 
-        LOG_INFO_CAT("SDL", "Loading Vulkan library via SDL...");
-        if (!SDL_Vulkan_LoadLibrary(nullptr))
+        LOG_INFO_CAT("SDL", "Loading Vulkan library via SDL3...");
+        if (SDL_Vulkan_LoadLibrary(nullptr) != 0)
             THROW_MAIN(SDL_GetError());
         LOG_SUCCESS_CAT("SDL", "Vulkan library loaded");
 
@@ -416,9 +420,9 @@ int main(int argc, char* argv[]) {
         LOG_INFO_CAT("VULKAN", "Initializing Vulkan core with main window...");
         initializeVulkanCore(app->getWindow());
 
-        // LOG AFTER VULKAN IS READY and show security enabled
-    	g_PhysicalDevice = RTX::ctx().physicalDevice_;
-        LOG_AMOURANTH(); // She turns on the security around here
+        // AMOURANTH™ SPEAKS — SECURITY ENABLED
+        g_PhysicalDevice = RTX::ctx().physicalDevice_;
+        LOG_AMOURANTH();
 
         LOG_INFO_CAT("SWAPCHAIN", "Initializing SwapchainManager...");
         auto& swapchainMgr = SwapchainManager::get();
@@ -486,7 +490,7 @@ int main(int argc, char* argv[]) {
     LOG_INFO_CAT("MAIN", "Final cleanup: Vulkan core...");
     cleanupVulkanCore();
     if (sdl_ok) {
-        LOG_INFO_CAT("SDL", "Quitting SDL...");
+        LOG_INFO_CAT("SDL", "Quitting SDL3...");
         SDL_Quit();
     }
 
@@ -499,14 +503,4 @@ int main(int argc, char* argv[]) {
 // NOVEMBER 12, 2025 — VALHALLA v44 FINAL — RTX ENABLED
 // @ZacharyGeurts — THE CHOSEN ONE — PINK PHOTONS ETERNAL
 // SHIP IT RAW — FOREVER
-// =============================================================================
-// AMOURANTH RTX Engine (C) 2025 by Zachary Geurts <gzac5314@gmail.com>
-// =============================================================================
-//
-// Dual Licensed:
-// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
-//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
-// 2. Commercial licensing: gzac5314@gmail.com
-//
-// PINK PHOTONS ETERNAL — VALHALLA v44 FINAL — OUR ROCK ETERNAL v3
 // =============================================================================
