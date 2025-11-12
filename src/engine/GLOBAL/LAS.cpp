@@ -2,22 +2,23 @@
 // =============================================================================
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
-// LIGHT_WARRIORS_LAS IMPLEMENTATION — NOV 11 2025 5:11 PM EST
-// • SPLIT FROM HEADER — FASTER COMPILES, SMALLER BINARY
-// • RAW g_ctx — NO SINGLETON — NO NAMESPACES
-// • FULL RTX BUILD — 15,000 FPS — SHIP IT RAW
+// LAS.cpp — LIGHT_WARRIORS_LAS → LAS — NOV 12 2025 6:00 AM EST
+// • FULLY IN NAMESPACE RTX
+// • NO g_ctx — USES RTX::ctx()
+// • RTX::Handle<T> — NO RAW Handle
+// • 15,000 FPS — SHIP IT RAW
 // =============================================================================
 
 #include "engine/GLOBAL/LAS.hpp"
-#include "engine/GLOBAL/GlobalContext.hpp"  // g_ctx
-#include "engine/GLOBAL/Houston.hpp"        // BUFFER_*, Handle<T>
+#include "engine/GLOBAL/RTXHandler.hpp"
 #include "engine/GLOBAL/logging.hpp"
-
 #include <glm/gtc/type_ptr.hpp>
 
 // ──────────────────────────────────────────────────────────────────────────────
-// SIZE COMPUTATION — IMPLEMENTATION
+// SIZE COMPUTATION
 // ──────────────────────────────────────────────────────────────────────────────
+namespace {
+
 BlasBuildSizes computeBlasSizes(VkDevice device, uint32_t vertexCount, uint32_t indexCount) {
     VkAccelerationStructureGeometryKHR geometry{
         .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR,
@@ -83,9 +84,6 @@ TlasBuildSizes computeTlasSizes(VkDevice device, uint32_t instanceCount) {
     };
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// PRIVATE: INSTANCE UPLOAD — USED INTERNALLY
-// ──────────────────────────────────────────────────────────────────────────────
 uint64_t uploadInstances(
     VkDevice device, VkPhysicalDevice physDev, VkCommandPool pool, VkQueue queue,
     std::span<const std::pair<VkAccelerationStructureKHR, glm::mat4>> instances)
@@ -97,10 +95,10 @@ uint64_t uploadInstances(
     BUFFER_CREATE(stagingHandle, instSize,
                   VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
                   VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                  "thief_instances");
+                  "las_instances");
 
     void* mapped = nullptr;
-    auto* d = UltraLowLevelBufferTracker::get().getData(stagingHandle);
+    auto* d = RTX::UltraLowLevelBufferTracker::get().getData(stagingHandle);
     THROW_IF(vkMapMemory(device, d->memory, 0, d->size, 0, &mapped) != VK_SUCCESS, "Failed to map staging buffer");
     auto* instData = static_cast<VkAccelerationStructureInstanceKHR*>(mapped);
 
@@ -126,7 +124,7 @@ uint64_t uploadInstances(
                   VK_BUFFER_USAGE_TRANSFER_DST_BIT |
                   VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
                   VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-                  VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "thief_rtx_instances");
+                  VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "las_rtx_instances");
 
     THROW_IF(deviceHandle == 0, "Failed to create device-local instance buffer");
 
@@ -139,25 +137,24 @@ uint64_t uploadInstances(
     return deviceHandle;
 }
 
+} // anonymous namespace
+
 // ──────────────────────────────────────────────────────────────────────────────
-// LIGHT_WARRIORS_LAS — GOD MODE — g_ctx RAW
+// LAS IMPLEMENTATION
 // ──────────────────────────────────────────────────────────────────────────────
-LIGHT_WARRIORS_LAS& LIGHT_WARRIORS_LAS::get() noexcept {
-    static LIGHT_WARRIORS_LAS instance;
-    return instance;
+namespace RTX {
+
+LAS::LAS() {
+    UltraLowLevelBufferTracker::get().init(ctx().vkDevice(), ctx().vkPhysicalDevice());
 }
 
-LIGHT_WARRIORS_LAS::LIGHT_WARRIORS_LAS() {
-    UltraLowLevelBufferTracker::get().init(g_ctx.vkDevice(), g_ctx.vkPhysicalDevice());
-}
-
-void LIGHT_WARRIORS_LAS::buildBLAS(VkCommandPool pool, VkQueue queue,
-                                   uint64_t vertexBuf, uint64_t indexBuf,
-                                   uint32_t vertexCount, uint32_t indexCount,
-                                   VkBuildAccelerationStructureFlagsKHR flags)
+void LAS::buildBLAS(VkCommandPool pool, VkQueue queue,
+                    uint64_t vertexBuf, uint64_t indexBuf,
+                    uint32_t vertexCount, uint32_t indexCount,
+                    VkBuildAccelerationStructureFlagsKHR flags)
 {
     std::lock_guard<std::mutex> lock(mutex_);
-    VkDevice dev = g_ctx.vkDevice();
+    VkDevice dev = ctx().vkDevice();
     THROW_IF(!dev, "Invalid device");
 
     auto sizes = computeBlasSizes(dev, vertexCount, indexCount);
@@ -166,7 +163,7 @@ void LIGHT_WARRIORS_LAS::buildBLAS(VkCommandPool pool, VkQueue queue,
     uint64_t asBufferHandle = 0;
     BUFFER_CREATE(asBufferHandle, sizes.accelerationStructureSize,
                   VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-                  VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "fighter_blas");
+                  VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "las_blas");
 
     VkAccelerationStructureKHR rawAs = VK_NULL_HANDLE;
     VkAccelerationStructureCreateInfoKHR createInfo{
@@ -231,30 +228,30 @@ void LIGHT_WARRIORS_LAS::buildBLAS(VkCommandPool pool, VkQueue queue,
         if (asBufferHandle) BUFFER_DESTROY(asBufferHandle);
     };
 
-    blas_ = Handle<VkAccelerationStructureKHR>(rawAs, dev, deleter, sizes.accelerationStructureSize, "FIGHTER_BLAS");
+    blas_ = RTX::Handle<VkAccelerationStructureKHR>(rawAs, dev, deleter, sizes.accelerationStructureSize, "LAS_BLAS");
     BUFFER_DESTROY(scratchHandle);
-    CONSOLE_BLAS(std::format("FIGHTER'S RESOLVE ONLINE — {} verts | {} indices | {:.2f} GB", vertexCount, indexCount, sizes.accelerationStructureSize / (1024.0*1024.0*1024.0)));
+    CONSOLE_BLAS(std::format("LAS BLAS ONLINE — {} verts | {} indices | {:.2f} GB", vertexCount, indexCount, sizes.accelerationStructureSize / (1024.0*1024.0*1024.0)));
 }
 
-void LIGHT_WARRIORS_LAS::buildTLAS(VkCommandPool pool, VkQueue queue,
-                                   std::span<const std::pair<VkAccelerationStructureKHR, glm::mat4>> instances)
+void LAS::buildTLAS(VkCommandPool pool, VkQueue queue,
+                    std::span<const std::pair<VkAccelerationStructureKHR, glm::mat4>> instances)
 {
     std::lock_guard<std::mutex> lock(mutex_);
     THROW_IF(instances.empty(), "TLAS: zero instances");
 
-    VkDevice dev = g_ctx.vkDevice();
+    VkDevice dev = ctx().vkDevice();
     THROW_IF(!dev, "Invalid device");
 
     auto sizes = computeTlasSizes(dev, static_cast<uint32_t>(instances.size()));
     THROW_IF(sizes.accelerationStructureSize == 0, "TLAS size zero");
 
-    uint64_t instanceEnc = uploadInstances(dev, g_ctx.vkPhysicalDevice(), pool, queue, instances);
+    uint64_t instanceEnc = uploadInstances(dev, ctx().vkPhysicalDevice(), pool, queue, instances);
     THROW_IF(instanceEnc == 0, "Instance upload failed");
 
     uint64_t asBufferHandle = 0;
     BUFFER_CREATE(asBufferHandle, sizes.accelerationStructureSize,
                   VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-                  VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "sage_tlas");
+                  VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "las_tlas");
 
     VkAccelerationStructureKHR rawAs = VK_NULL_HANDLE;
     VkAccelerationStructureCreateInfoKHR createInfo{
@@ -315,45 +312,45 @@ void LIGHT_WARRIORS_LAS::buildTLAS(VkCommandPool pool, VkQueue queue,
         if (instanceEnc) BUFFER_DESTROY(instanceEnc);
     };
 
-    tlas_ = Handle<VkAccelerationStructureKHR>(rawAs, dev, deleter, sizes.accelerationStructureSize, "SAGE_TLAS");
+    tlas_ = RTX::Handle<VkAccelerationStructureKHR>(rawAs, dev, deleter, sizes.accelerationStructureSize, "LAS_TLAS");
     tlasSize_ = sizes.accelerationStructureSize;
     instanceBufferId_ = instanceEnc;
     BUFFER_DESTROY(scratchHandle);
-    CONSOLE_TLAS(std::format("SAGE'S PROPHECY ONLINE — {} instances | {:.2f} GB", instances.size(), sizes.accelerationStructureSize / (1024.0*1024.0*1024.0)));
+    CONSOLE_TLAS(std::format("LAS TLAS ONLINE — {} instances | {:.2f} GB", instances.size(), sizes.accelerationStructureSize / (1024.0*1024.0*1024.0)));
 }
 
-VkAccelerationStructureKHR LIGHT_WARRIORS_LAS::getBLAS() const noexcept {
+VkAccelerationStructureKHR LAS::getBLAS() const noexcept {
     return blas_ ? *blas_ : VK_NULL_HANDLE;
 }
 
-VkDeviceAddress LIGHT_WARRIORS_LAS::getBLASAddress() const noexcept {
+VkDeviceAddress LAS::getBLASAddress() const noexcept {
     if (!blas_) return 0;
     VkAccelerationStructureDeviceAddressInfoKHR info{
         .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR,
         .accelerationStructure = *blas_
     };
-    return vkGetAccelerationStructureDeviceAddressKHR(g_ctx.vkDevice(), &info);
+    return vkGetAccelerationStructureDeviceAddressKHR(ctx().vkDevice(), &info);
 }
 
-VkAccelerationStructureKHR LIGHT_WARRIORS_LAS::getTLAS() const noexcept {
+VkAccelerationStructureKHR LAS::getTLAS() const noexcept {
     return tlas_ ? *tlas_ : VK_NULL_HANDLE;
 }
 
-VkDeviceAddress LIGHT_WARRIORS_LAS::getTLASAddress() const noexcept {
+VkDeviceAddress LAS::getTLASAddress() const noexcept {
     if (!tlas_) return 0;
     VkAccelerationStructureDeviceAddressInfoKHR info{
         .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR,
         .accelerationStructure = *tlas_
     };
-    return vkGetAccelerationStructureDeviceAddressKHR(g_ctx.vkDevice(), &info);
+    return vkGetAccelerationStructureDeviceAddressKHR(ctx().vkDevice(), &info);
 }
 
-VkDeviceSize LIGHT_WARRIORS_LAS::getTLASSize() const noexcept {
+VkDeviceSize LAS::getTLASSize() const noexcept {
     return tlasSize_;
 }
 
-void LIGHT_WARRIORS_LAS::rebuildTLAS(VkCommandPool pool, VkQueue queue,
-                                     std::span<const std::pair<VkAccelerationStructureKHR, glm::mat4>> instances) {
+void LAS::rebuildTLAS(VkCommandPool pool, VkQueue queue,
+                      std::span<const std::pair<VkAccelerationStructureKHR, glm::mat4>> instances) {
     std::lock_guard<std::mutex> lock(mutex_);
     tlas_.reset();
     instanceBufferId_ = 0;
@@ -361,6 +358,4 @@ void LIGHT_WARRIORS_LAS::rebuildTLAS(VkCommandPool pool, VkQueue queue,
     buildTLAS(pool, queue, instances);
 }
 
-// =============================================================================
-// AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
-// =============================================================================
+} // namespace RTX

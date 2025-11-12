@@ -182,52 +182,54 @@ constexpr bool SIMULATION_LOGGING = true;
 enum class LogLevel { Trace, Debug, Info, Success, Attempt, Perf, Warning, Error };
 
 // ========================================================================
-// 1. HYPER-VIVID ANSI COLOR SYSTEM — 50+ COLORS — **GLOBAL Color::**
+// 1. HYPER-VIVID ANSI COLOR SYSTEM — 50+ COLORS — **Color::Logging::**
 // ========================================================================
-inline constexpr std::string_view RESET                     = "\033[0m";
-inline constexpr std::string_view BOLD                      = "\033[1m";
-inline constexpr std::string_view FUCHSIA_MAGENTA           = "\033[1;38;5;205m";   // ERRORS
-inline constexpr std::string_view PARTY_PINK                = "\033[1;38;5;213m";   // LAS.hpp - BLAS
-inline constexpr std::string_view ELECTRIC_BLUE             = "\033[1;38;5;75m";    // LAS.hpp - TLAS
-inline constexpr std::string_view LIME_GREEN                = "\033[1;38;5;154m";   // LAS.hpp - other
-inline constexpr std::string_view SUNGLOW_ORANGE            = "\033[1;38;5;214m";
-inline constexpr std::string_view ULTRA_NEON_LIME           = "\033[38;5;82m";
-inline constexpr std::string_view PLATINUM_GRAY             = "\033[38;5;255m";
-inline constexpr std::string_view EMERALD_GREEN             = "\033[1;38;5;46m";
-inline constexpr std::string_view QUANTUM_PURPLE            = "\033[1;38;5;129m";
-inline constexpr std::string_view COSMIC_GOLD               = "\033[1;38;5;220m";
-inline constexpr std::string_view ARCTIC_CYAN               = "\033[38;5;51m";
-inline constexpr std::string_view AMBER_YELLOW              = "\033[38;5;226m";
-inline constexpr std::string_view CRIMSON_MAGENTA           = "\033[1;38;5;198m";
-inline constexpr std::string_view DIAMOND_WHITE             = "\033[1;38;5;231m";
-inline constexpr std::string_view SAPPHIRE_BLUE             = "\033[38;5;33m";
-inline constexpr std::string_view OCEAN_TEAL                = "\033[38;5;45m";
-inline constexpr std::string_view FIERY_ORANGE              = "\033[1;38;5;208m";
-inline constexpr std::string_view RASPBERRY_PINK            = "\033[1;38;5;204m";
-inline constexpr std::string_view PEACHES_AND_CREAM         = "\033[38;5;223m";
-inline constexpr std::string_view BRIGHT_PINKISH_PURPLE     = "\033[1;38;5;205m";
-inline constexpr std::string_view LILAC_LAVENDER            = "\033[38;5;183m";
-inline constexpr std::string_view SPEARMINT_MINT            = "\033[38;5;122m";
-inline constexpr std::string_view THERMO_PINK               = "\033[1;38;5;213m";
-inline constexpr std::string_view COSMIC_VOID               = "\033[38;5;232m";
-inline constexpr std::string_view QUASAR_BLUE               = "\033[1;38;5;39m";
-inline constexpr std::string_view NEBULA_VIOLET             = "\033[1;38;5;141m";
-inline constexpr std::string_view PULSAR_GREEN              = "\033[1;38;5;118m";
-inline constexpr std::string_view SUPERNOVA_ORANGE          = "\033[1;38;5;202m";
-inline constexpr std::string_view BLACK_HOLE                = "\033[48;5;232m";
-inline constexpr std::string_view DIAMOND_SPARKLE           = "\033[1;38;5;231m";
-inline constexpr std::string_view QUANTUM_FLUX              = "\033[5;38;5;99m";
-inline constexpr std::string_view PLASMA_FUCHSIA            = "\033[1;38;5;201m";
-inline constexpr std::string_view CHROMIUM_SILVER           = "\033[38;5;252m";
-inline constexpr std::string_view TITANIUM_WHITE            = "\033[1;38;5;255m";
-inline constexpr std::string_view OBSIDIAN_BLACK            = "\033[38;5;16m";
-inline constexpr std::string_view AURORA_BOREALIS           = "\033[38;5;86m";
-inline constexpr std::string_view NUCLEAR_REACTOR           = "\033[1;38;5;190m";
-inline constexpr std::string_view HYPERSPACE_WARP           = "\033[1;38;5;99m";
-inline constexpr std::string_view VALHALLA_GOLD             = "\033[1;38;5;220m";
-inline constexpr std::string_view TURQUOISE_BLUE            = "\033[38;5;44m";
-inline constexpr std::string_view BRONZE_BROWN              = "\033[38;5;94m";
-inline constexpr std::string_view LIME_YELLOW               = "\033[38;5;190m";
+namespace Color::Logging {
+    inline constexpr std::string_view RESET                     = "\033[0m";
+    inline constexpr std::string_view BOLD                      = "\033[1m";
+    inline constexpr std::string_view FUCHSIA_MAGENTA           = "\033[1;38;5;205m";   // ERRORS
+    inline constexpr std::string_view PARTY_PINK                = "\033[1;38;5;213m";   // LAS.hpp - BLAS
+    inline constexpr std::string_view ELECTRIC_BLUE             = "\033[1;38;5;75m";    // LAS.hpp - TLAS
+    inline constexpr std::string_view LIME_GREEN                = "\033[1;38;5;154m";   // LAS.hpp - other
+    inline constexpr std::string_view SUNGLOW_ORANGE            = "\033[1;38;5;214m";
+    inline constexpr std::string_view ULTRA_NEON_LIME           = "\033[38;5;82m";
+    inline constexpr std::string_view PLATINUM_GRAY             = "\033[38;5;255m";
+    inline constexpr std::string_view EMERALD_GREEN             = "\033[1;38;5;46m";
+    inline constexpr std::string_view QUANTUM_PURPLE            = "\033[1;38;5;129m";
+    inline constexpr std::string_view COSMIC_GOLD               = "\033[1;38;5;220m";
+    inline constexpr std::string_view ARCTIC_CYAN               = "\033[38;5;51m";
+    inline constexpr std::string_view AMBER_YELLOW              = "\033[38;5;226m";
+    inline constexpr std::string_view CRIMSON_MAGENTA           = "\033[1;38;5;198m";
+    inline constexpr std::string_view DIAMOND_WHITE             = "\033[1;38;5;231m";
+    inline constexpr std::string_view SAPPHIRE_BLUE             = "\033[38;5;33m";
+    inline constexpr std::string_view OCEAN_TEAL                = "\033[38;5;45m";
+    inline constexpr std::string_view FIERY_ORANGE              = "\033[1;38;5;208m";
+    inline constexpr std::string_view RASPBERRY_PINK            = "\033[1;38;5;204m";
+    inline constexpr std::string_view PEACHES_AND_CREAM         = "\033[38;5;223m";
+    inline constexpr std::string_view BRIGHT_PINKISH_PURPLE     = "\033[1;38;5;205m";
+    inline constexpr std::string_view LILAC_LAVENDER            = "\033[38;5;183m";
+    inline constexpr std::string_view SPEARMINT_MINT            = "\033[38;5;122m";
+    inline constexpr std::string_view THERMO_PINK               = "\033[1;38;5;213m";
+    inline constexpr std::string_view COSMIC_VOID               = "\033[38;5;232m";
+    inline constexpr std::string_view QUASAR_BLUE               = "\033[1;38;5;39m";
+    inline constexpr std::string_view NEBULA_VIOLET             = "\033[1;38;5;141m";
+    inline constexpr std::string_view PULSAR_GREEN              = "\033[1;38;5;118m";
+    inline constexpr std::string_view SUPERNOVA_ORANGE          = "\033[1;38;5;202m";
+    inline constexpr std::string_view BLACK_HOLE                = "\033[48;5;232m";
+    inline constexpr std::string_view DIAMOND_SPARKLE           = "\033[1;38;5;231m";
+    inline constexpr std::string_view QUANTUM_FLUX              = "\033[5;38;5;99m";
+    inline constexpr std::string_view PLASMA_FUCHSIA            = "\033[1;38;5;201m";
+    inline constexpr std::string_view CHROMIUM_SILVER           = "\033[38;5;252m";
+    inline constexpr std::string_view TITANIUM_WHITE            = "\033[1;38;5;255m";
+    inline constexpr std::string_view OBSIDIAN_BLACK            = "\033[38;5;16m";
+    inline constexpr std::string_view AURORA_BOREALIS           = "\033[38;5;86m";
+    inline constexpr std::string_view NUCLEAR_REACTOR           = "\033[1;38;5;190m";
+    inline constexpr std::string_view HYPERSPACE_WARP           = "\033[1;38;5;99m";
+    inline constexpr std::string_view VALHALLA_GOLD             = "\033[1;38;5;220m";
+    inline constexpr std::string_view TURQUOISE_BLUE            = "\033[38;5;44m";
+    inline constexpr std::string_view BRONZE_BROWN              = "\033[38;5;94m";
+    inline constexpr std::string_view LIME_YELLOW               = "\033[38;5;190m";
+}
 
 // ========================================================================
 // LEVEL INFO + ENABLE ARRAY — GLOBAL
@@ -239,14 +241,14 @@ struct LevelInfo {
 };
 
 constexpr std::array<LevelInfo, 8> LEVEL_INFOS{{
-    {"[TRACE]",   ULTRA_NEON_LIME,     ""},
-    {"[DEBUG]",   ARCTIC_CYAN,         ""},
-    {"[INFO]",    PLATINUM_GRAY,       ""},
-    {"[SUCCESS]", EMERALD_GREEN,       BLACK_HOLE},
-    {"[ATTEMPT]", QUANTUM_PURPLE,      ""},
-    {"[PERF]",    COSMIC_GOLD,         ""},
-    {"[WARN]",    AMBER_YELLOW,        ""},
-    {"[ERROR]",   CRIMSON_MAGENTA,     BLACK_HOLE}
+    {"[TRACE]",   Color::Logging::ULTRA_NEON_LIME,     ""},
+    {"[DEBUG]",   Color::Logging::ARCTIC_CYAN,         ""},
+    {"[INFO]",    Color::Logging::PLATINUM_GRAY,       ""},
+    {"[SUCCESS]", Color::Logging::EMERALD_GREEN,       Color::Logging::BLACK_HOLE},
+    {"[ATTEMPT]", Color::Logging::QUANTUM_PURPLE,      ""},
+    {"[PERF]",    Color::Logging::COSMIC_GOLD,         ""},
+    {"[WARN]",    Color::Logging::AMBER_YELLOW,        ""},
+    {"[ERROR]",   Color::Logging::CRIMSON_MAGENTA,     Color::Logging::BLACK_HOLE}
 }};
 
 constexpr std::array<bool, 8> ENABLE_LEVELS{
@@ -328,20 +330,20 @@ private:
 
     std::string_view getCategoryColor(std::string_view cat) const noexcept {
         static const std::map<std::string_view, std::string_view, std::less<>> categoryColors{
-            {"General", DIAMOND_SPARKLE}, {"MAIN", VALHALLA_GOLD}, {"Init", AURORA_BOREALIS}, {"Dispose", PARTY_PINK}, {"Logger", ELECTRIC_BLUE},
-            {"Vulkan", SAPPHIRE_BLUE}, {"Device", QUASAR_BLUE}, {"Swapchain", OCEAN_TEAL}, {"Command", CHROMIUM_SILVER}, {"Queue", OBSIDIAN_BLACK},
-            {"RayTrace", TURQUOISE_BLUE}, {"RTX", HYPERSPACE_WARP}, {"Accel", PULSAR_GREEN}, {"TLAS", SUPERNOVA_ORANGE}, {"BLAS", PLASMA_FUCHSIA},
-            {"SBT", RASPBERRY_PINK}, {"Shader", NEBULA_VIOLET}, {"Renderer", BRIGHT_PINKISH_PURPLE}, {"Render", THERMO_PINK}, {"Tonemap", PEACHES_AND_CREAM},
-            {"GBuffer", QUANTUM_FLUX}, {"Post", NUCLEAR_REACTOR}, {"Buffer", BRONZE_BROWN}, {"Image", LIME_YELLOW}, {"Texture", SPEARMINT_MINT},
-            {"Sampler", LILAC_LAVENDER}, {"Descriptor", FUCHSIA_MAGENTA}, {"Perf", COSMIC_GOLD}, {"FPS", FIERY_ORANGE}, {"GPU", BLACK_HOLE},
-            {"CPU", PLASMA_FUCHSIA}, {"Input", SPEARMINT_MINT}, {"Audio", OCEAN_TEAL}, {"Physics", EMERALD_GREEN}, {"SIMULATION", BRONZE_BROWN},
-            {"MeshLoader", LIME_YELLOW}, {"GLTF", QUANTUM_PURPLE}, {"Material", PEACHES_AND_CREAM}, {"Debug", ARCTIC_CYAN}, {"ImGui", PLATINUM_GRAY},
-            {"Profiler", COSMIC_GOLD}, {"SUCCESS", EMERALD_GREEN}, {"ATTEMPT", QUANTUM_PURPLE}, {"VOID", COSMIC_VOID}, {"MARKER", DIAMOND_SPARKLE}
+            {"General", Color::Logging::DIAMOND_SPARKLE}, {"MAIN", Color::Logging::VALHALLA_GOLD}, {"Init", Color::Logging::AURORA_BOREALIS}, {"Dispose", Color::Logging::PARTY_PINK}, {"Logger", Color::Logging::ELECTRIC_BLUE},
+            {"Vulkan", Color::Logging::SAPPHIRE_BLUE}, {"Device", Color::Logging::QUASAR_BLUE}, {"Swapchain", Color::Logging::OCEAN_TEAL}, {"Command", Color::Logging::CHROMIUM_SILVER}, {"Queue", Color::Logging::OBSIDIAN_BLACK},
+            {"RayTrace", Color::Logging::TURQUOISE_BLUE}, {"RTX", Color::Logging::HYPERSPACE_WARP}, {"Accel", Color::Logging::PULSAR_GREEN}, {"TLAS", Color::Logging::SUPERNOVA_ORANGE}, {"BLAS", Color::Logging::PLASMA_FUCHSIA},
+            {"SBT", Color::Logging::RASPBERRY_PINK}, {"Shader", Color::Logging::NEBULA_VIOLET}, {"Renderer", Color::Logging::BRIGHT_PINKISH_PURPLE}, {"Render", Color::Logging::THERMO_PINK}, {"Tonemap", Color::Logging::PEACHES_AND_CREAM},
+            {"GBuffer", Color::Logging::QUANTUM_FLUX}, {"Post", Color::Logging::NUCLEAR_REACTOR}, {"Buffer", Color::Logging::BRONZE_BROWN}, {"Image", Color::Logging::LIME_YELLOW}, {"Texture", Color::Logging::SPEARMINT_MINT},
+            {"Sampler", Color::Logging::LILAC_LAVENDER}, {"Descriptor", Color::Logging::FUCHSIA_MAGENTA}, {"Perf", Color::Logging::COSMIC_GOLD}, {"FPS", Color::Logging::FIERY_ORANGE}, {"GPU", Color::Logging::BLACK_HOLE},
+            {"CPU", Color::Logging::PLASMA_FUCHSIA}, {"Input", Color::Logging::SPEARMINT_MINT}, {"Audio", Color::Logging::OCEAN_TEAL}, {"Physics", Color::Logging::EMERALD_GREEN}, {"SIMULATION", Color::Logging::BRONZE_BROWN},
+            {"MeshLoader", Color::Logging::LIME_YELLOW}, {"GLTF", Color::Logging::QUANTUM_PURPLE}, {"Material", Color::Logging::PEACHES_AND_CREAM}, {"Debug", Color::Logging::ARCTIC_CYAN}, {"ImGui", Color::Logging::PLATINUM_GRAY},
+            {"Profiler", Color::Logging::COSMIC_GOLD}, {"SUCCESS", Color::Logging::EMERALD_GREEN}, {"ATTEMPT", Color::Logging::QUANTUM_PURPLE}, {"VOID", Color::Logging::COSMIC_VOID}, {"MARKER", Color::Logging::DIAMOND_SPARKLE}
         };
         if (auto it = categoryColors.find(cat); it != categoryColors.end()) [[likely]] {
             return it->second;
         }
-        return DIAMOND_WHITE;
+        return Color::Logging::DIAMOND_WHITE;
     }
 
     void enqueue(LogLevel level, std::string_view category, std::string msg) const {
@@ -421,7 +423,7 @@ private:
         for (const auto& msg : remaining) printMessage(msg);
 
         std::print("{}{}<<< OLD GOD FINAL FLUSH COMPLETE — {} messages turned to confetti — PARTY ETERNAL{}{}\n",
-                   PARTY_PINK, SUNGLOW_ORANGE, remaining.size(), RESET, RESET);
+                   Color::Logging::PARTY_PINK, Color::Logging::SUNGLOW_ORANGE, remaining.size(), Color::Logging::RESET, Color::Logging::RESET);
     }
 
     void rotateLogFile() const {
@@ -470,7 +472,7 @@ private:
 
         logFile_.open(logFilePath_, std::ios::out | std::ios::app);
         std::print("{}{}LOG ROTATED → {} — STONEKEY PROTECTED — ONLY 7 FILES KEPT — RASPBERRY_PINK ETERNAL{}{}\n",
-                   QUANTUM_FLUX, PLATINUM_GRAY, archivedPath.filename().string(), RESET, RESET);
+                   Color::Logging::QUANTUM_FLUX, Color::Logging::PLATINUM_GRAY, archivedPath.filename().string(), Color::Logging::RESET, Color::Logging::RESET);
     }
 
     void printMessage(const LogMessage& msg) const {
@@ -500,12 +502,12 @@ private:
         const std::string plain = std::format("{} {} [{}] [{}] {} {}\n", levelStr, deltaStr, msg.category, threadId, fileLine, msg.formattedMessage);
 
         std::ostringstream oss;
-        oss << levelBg << levelColor << levelStr << RESET
-            << BOLD << deltaStr << RESET << ' '
-            << catColor << '[' << msg.category << ']' << RESET << ' '
-            << LIME_GREEN << '[' << threadId << ']' << RESET << ' '
-            << CHROMIUM_SILVER << '[' << fileLine << ']' << RESET << ' '
-            << levelColor << msg.formattedMessage << RESET << '\n';
+        oss << levelBg << levelColor << levelStr << Color::Logging::RESET
+            << Color::Logging::BOLD << deltaStr << Color::Logging::RESET << ' '
+            << catColor << '[' << msg.category << ']' << Color::Logging::RESET << ' '
+            << Color::Logging::LIME_GREEN << '[' << threadId << ']' << Color::Logging::RESET << ' '
+            << Color::Logging::CHROMIUM_SILVER << '[' << fileLine << ']' << Color::Logging::RESET << ' '
+            << levelColor << msg.formattedMessage << Color::Logging::RESET << '\n';
         const std::string colored = oss.str();
 
         std::print(std::cout, "{}", colored);
