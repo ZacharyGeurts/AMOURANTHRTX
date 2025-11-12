@@ -2,15 +2,21 @@
 // =============================================================================
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
-// VulkanPipelineManager — FIXED v1.0 — NOV 12 2025
-// • Added #include "VulkanCore.hpp" to resolve incomplete VulkanRTX
-// • using namespace Logging::Color; for colors
-// • Functions using VulkanRTX now have full type access
-// • No circular includes — VulkanCore.hpp forward-declares PipelineManager
+// VulkanPipelineManager — FINAL v300 — NOV 12 2025
+// • REMOVED: VulkanCore.hpp → BREAKS CIRCULAR INCLUDE
+// • RTXHandler.hpp FIRST → Handle<T> DEFINED
+// • Forward declare VulkanRTX
 // =============================================================================
 
 #pragma once
 
+// 1. RTXHandler.hpp FIRST — DEFINES Handle<T>
+#include "engine/GLOBAL/RTXHandler.hpp"
+
+// 2. Forward declare VulkanRTX (no full include)
+class VulkanRTX;
+
+// 3. Standard includes
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_beta.h>
 #include <vector>
@@ -19,14 +25,14 @@
 #include <memory>
 #include <span>
 #include <format>
-
-#include "engine/GLOBAL/RTXHandler.hpp"
-#include "engine/Vulkan/VulkanCore.hpp"  // Added for full VulkanRTX definition
 #include "engine/GLOBAL/logging.hpp"
 
-using namespace Logging::Color;  // Brings in all colors: RESET, PLASMA_FUCHSIA, etc.
+using namespace Logging::Color;
 
-// Remove invalid lines like: using Color::Logging::RESET; etc. — now handled by using namespace
+using DescriptorSetLayoutDestroyer = void(*)(VkDevice, VkDescriptorSetLayout, const VkAllocationCallbacks*);
+using PipelineLayoutDestroyer      = void(*)(VkDevice, VkPipelineLayout, const VkAllocationCallbacks*);
+using PipelineDestroyer            = void(*)(VkDevice, VkPipeline, const VkAllocationCallbacks*);
+using ShaderModuleDestroyer        = void(*)(VkDevice, VkShaderModule, const VkAllocationCallbacks*);
 
 namespace RTX {
 
@@ -46,7 +52,6 @@ private:
     VkDevice device_{VK_NULL_HANDLE};
     VkPhysicalDevice physicalDevice_{VK_NULL_HANDLE};
 
-    // Handles for resources
     Handle<VkDescriptorSetLayout> rtDescriptorSetLayout_;
     Handle<VkPipelineLayout> rtPipelineLayout_;
     Handle<VkPipeline> rtPipeline_;
@@ -57,21 +62,17 @@ private:
 
     uint32_t groupCount_{0};
 
-    // Helper lambdas for destruction
-    auto descriptorSetLayoutDestroyer = [](VkDevice d, VkDescriptorSetLayout layout, const VkAllocationCallbacks*) {
-        if (layout) vkDestroyDescriptorSetLayout(d, layout, nullptr);
+    static inline const DescriptorSetLayoutDestroyer descriptorSetLayoutDestroyer = [](VkDevice d, VkDescriptorSetLayout l, const VkAllocationCallbacks*) {
+        if (l) vkDestroyDescriptorSetLayout(d, l, nullptr);
     };
-
-    auto pipelineLayoutDestroyer = [](VkDevice d, VkPipelineLayout layout, const VkAllocationCallbacks*) {
-        if (layout) vkDestroyPipelineLayout(d, layout, nullptr);
+    static inline const PipelineLayoutDestroyer pipelineLayoutDestroyer = [](VkDevice d, VkPipelineLayout l, const VkAllocationCallbacks*) {
+        if (l) vkDestroyPipelineLayout(d, l, nullptr);
     };
-
-    auto pipelineDestroyer = [](VkDevice d, VkPipeline pipeline, const VkAllocationCallbacks*) {
-        if (pipeline) vkDestroyPipeline(d, pipeline, nullptr);
+    static inline const PipelineDestroyer pipelineDestroyer = [](VkDevice d, VkPipeline p, const VkAllocationCallbacks*) {
+        if (p) vkDestroyPipeline(d, p, nullptr);
     };
-
-    auto shaderModuleDestroyer = [](VkDevice d, VkShaderModule module, const VkAllocationCallbacks*) {
-        if (module) vkDestroyShaderModule(d, module, nullptr);
+    static inline const ShaderModuleDestroyer shaderModuleDestroyer = [](VkDevice d, VkShaderModule m, const VkAllocationCallbacks*) {
+        if (m) vkDestroyShaderModule(d, m, nullptr);
     };
 };
 

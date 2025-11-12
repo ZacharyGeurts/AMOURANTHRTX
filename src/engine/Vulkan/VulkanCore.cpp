@@ -20,11 +20,10 @@
 
 #include "engine/Vulkan/VulkanCore.hpp"
 #include "engine/GLOBAL/RTXHandler.hpp"
+#include "engine/Vulkan/VulkanPipelineManager.hpp"
 #include "engine/GLOBAL/LAS.hpp"
 #include "engine/GLOBAL/GlobalBindings.hpp"
-#include "engine/Vulkan/VulkanPipelineManager.hpp"
 #include "engine/GLOBAL/logging.hpp"
-#include "engine/GLOBAL/LAS.hpp"
 
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
@@ -142,7 +141,7 @@ void VulkanRTX::setDescriptorSetLayout(VkDescriptorSetLayout layout) noexcept {
             vkDestroyDescriptorSetLayout(d, l, nullptr);
         }, 0, "RTDescSetLayout");
     LOG_SUCCESS_CAT("RTX", "{}Descriptor set layout bound — STONEKEY v∞{}", PLASMA_FUCHSIA, RESET);
-    RTX::AmouranthAI::get().onMemoryEvent("DescriptorSetLayout Handle", sizeof(Handle<VkDescriptorSetLayout>));
+    RTX::AmouranthAI::get().onMemoryEvent("DescriptorSetLayout Handle", sizeof(RTX::Handle<VkDescriptorSetLayout>));
 }
 
 void VulkanRTX::setRayTracingPipeline(VkPipeline p, VkPipelineLayout l) noexcept {
@@ -301,7 +300,7 @@ void VulkanRTX::initDescriptorPoolAndSets() {
 // =============================================================================
 
 void VulkanRTX::initShaderBindingTable(VkPhysicalDevice) {
-    const uint32_t groupCount = pipelineMgr_->getRayTracingGroupCount();
+    const uint32_t groupCount = 25;  // STONEKEY v∞: 1 rgen + 8 miss + 15 hit + 1 callable
     const auto& props = g_ctx().rayTracingProps();
     const VkDeviceSize handleSize = props.shaderGroupHandleSize;
     const VkDeviceSize baseAlignment = props.shaderGroupBaseAlignment;

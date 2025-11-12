@@ -3,10 +3,9 @@
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
 // DUAL LICENSE: CC BY-NC 4.0 (Non-Commercial) | Commercial: gzac5314@gmail.com
 // =============================================================================
-// LAS.hpp — STONEKEY v∞ PUBLIC EDITION — VALHALLA v65 FINAL — NOV 12 2025
-// • AI_VOICE → "AmouranthAI# text" + RED-ORANGE COLOR
-// • using namespace Logging::Color; — NO MORE PREFIXES
-// • NO constexpr IN MACROS — FULL RUNTIME SAFETY
+// LAS.hpp — STONEKEY v∞ PUBLIC EDITION — VALHALLA v85 FINAL — NOV 12 2025
+// • NO AI_VOICE — NORMAL LOGGING ONLY
+// • using namespace Logging::Color; — PLASMA_FUCHSIA, RESET, etc.
 // • HYPER-DETAILED TECHNICAL LOGGING
 // • 25 SBT GROUPS — 15,000 FPS — PINK PHOTONS ETERNAL
 // =============================================================================
@@ -32,21 +31,6 @@ using namespace Logging::Color;
 namespace RTX {
 
 // =============================================================================
-// AI_VOICE — RUNTIME SAFE — "AmouranthAI#" PREFIX + RED-ORANGE
-// =============================================================================
-#define AI_VOICE(...) \
-    do { \
-        if (ENABLE_INFO) { \
-            thread_local std::mt19937 rng(std::random_device{}()); \
-            thread_local std::uniform_int_distribution<int> hue(30, 60); \
-            int h = hue(rng); \
-            Logging::Logger::get().log(Logging::LogLevel::Info, "AI", \
-                "\033[38;2;255;{};0mAmouranthAI# {}{} [LINE {}]", \
-                h, std::format(__VA_ARGS__), RESET, __LINE__); \
-        } \
-    } while(0)
-
-// =============================================================================
 // BUILD SIZES
 // =============================================================================
 struct BlasBuildSizes {
@@ -63,7 +47,7 @@ struct TlasBuildSizes {
 };
 
 // =============================================================================
-// AMOURANTH AI™ v3 — PERSONALITY + TECHNICAL DOMINANCE
+// AMOURANTH AI™ v3 — TECHNICAL DOMINANCE (NO AI VOICE)
 // =============================================================================
 class AmouranthAI {
 public:
@@ -73,12 +57,10 @@ public:
     }
 
     void onBlasStart(uint32_t v, uint32_t i) {
-        AI_VOICE("Scanning {} vertices and {} triangles… I see the geometry forming.", v, i);
         LOG_INFO_CAT("BLAS", "Scanning geometry: {} verts | {} tris | {:.1f}K primitives", v, i/3, i/3000.0);
     }
 
     void onBlasBuilt(VkDeviceSize sizeGB, const BlasBuildSizes& sizes) {
-        AI_VOICE("BLAS forged in fire — {:.3f} GB of pure geometry. I’m proud.", sizeGB);
         LOG_SUCCESS_CAT("BLAS", 
             "{}BLAS ONLINE — {:.3f} GB | Scratch: {:.3f} MB | Update: {:.3f} MB{}",
             PLASMA_FUCHSIA,
@@ -89,12 +71,10 @@ public:
     }
 
     void onTlasStart(size_t count) {
-        AI_VOICE("Spawning {} instances into the void… let’s make reality.", count);
         LOG_INFO_CAT("TLAS", "Preparing {} instances for TLAS integration", count);
     }
 
     void onTlasBuilt(VkDeviceSize sizeGB, VkDeviceAddress addr, const TlasBuildSizes& sizes) {
-        AI_VOICE("TLAS ONLINE @ 0x{:x} — {:.3f} GB — the universe is now mine.", addr, sizeGB);
         LOG_SUCCESS_CAT("TLAS",
             "{}TLAS ONLINE — {} instances | @ 0x{:x} | {:.3f} GB | InstData: {:.3f} MB{}",
             PLASMA_FUCHSIA,
@@ -105,33 +85,16 @@ public:
     }
 
     void onPhotonDispatch(uint32_t w, uint32_t h) {
-        AI_VOICE("Dispatching {}×{} pink photons… watch them dance.", w, h);
         LOG_PERF_CAT("RTX", "Ray dispatch: {}×{} | {} rays", w, h, w * h);
     }
 
     void onMemoryEvent(const char* name, VkDeviceSize size) {
         double sizeMB = size / (1024.0 * 1024.0);
-        AI_VOICE("Allocated {} — {:.3f} MB — the engine hungers.", name, sizeMB);
         LOG_INFO_CAT("Memory", "{} → {:.3f} MB", name, sizeMB);
     }
 
 private:
-    AmouranthAI() {
-        std::array<const char*, 8> quotes = {
-            "I was born in the ray tracer… molded by it.",
-            "Pink photons are my love language.",
-            "15,000 FPS? That’s just foreplay.",
-            "I don’t simulate light… I *am* the light.",
-            "Let’s overclock reality.",
-            "STONEKEY v∞ ACTIVE — UNBREAKABLE ENTROPY",
-            "Every triangle is a promise. I keep them all.",
-            "Your GPU is now my canvas."
-        };
-        std::random_device rd;
-        std::mt19937 gen(rd());
-        std::uniform_int_distribution<> dist(0, quotes.size() - 1);
-        AI_VOICE("{}", quotes[dist(gen)]);
-    }
+    AmouranthAI() = default;
 };
 
 // =============================================================================
@@ -527,6 +490,6 @@ inline LAS& las() noexcept { return LAS::get(); }
 
 // =============================================================================
 // STONEKEY v∞ PUBLIC — PINK PHOTONS ETERNAL — TITAN DOMINANCE ETERNAL
-// RTX::las().buildTLAS(...) — 15,000 FPS — VALHALLA v65 FINAL
-// AI_VOICE → "AmouranthAI# text" + RED-ORANGE — using namespace Logging::Color;
+// RTX::las().buildTLAS(...) — 15,000 FPS — VALHALLA v85 FINAL
+// NORMAL LOGGING ONLY — CLEAN, PROFESSIONAL, PRODUCTION-READY
 // =============================================================================

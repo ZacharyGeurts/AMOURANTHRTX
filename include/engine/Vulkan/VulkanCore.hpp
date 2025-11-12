@@ -11,6 +11,7 @@
 #pragma once
 
 #include "engine/GLOBAL/RTXHandler.hpp"
+#include "engine/Vulkan/VulkanPipelineManager.hpp"
 #include "engine/GLOBAL/GlobalBindings.hpp"
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/GLOBAL/OptionsMenu.hpp"
@@ -23,7 +24,7 @@
 #include <format>
 
 // Forward declare
-class VulkanPipelineManager;
+//class VulkanPipelineManager;
 
 constexpr uint32_t MAX_FRAMES_IN_FLIGHT = Options::Performance::MAX_FRAMES_IN_FLIGHT;
 
@@ -105,12 +106,6 @@ private:
 
     [[nodiscard]] VkDeviceSize alignUp(VkDeviceSize value, VkDeviceSize alignment) const noexcept;
 };
-
-// Global accessors
-[[nodiscard]] inline VulkanRTX& g_rtx() {
-    if (!g_rtx_instance) { LOG_ERROR_CAT("RTX", "FATAL: g_rtx() before init"); std::terminate(); }
-    return *g_rtx_instance;
-}
 
 inline void createGlobalRTX(int w, int h, VulkanPipelineManager* mgr = nullptr) {
     if (g_rtx_instance) return;
