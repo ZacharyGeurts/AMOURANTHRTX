@@ -1,6 +1,6 @@
 // src/main.cpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
+// AMOURANTH RTX Engine (C) 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
 //
 // Dual Licensed:
@@ -8,18 +8,19 @@
 //    https://creativecommons.org/licenses/by-nc/4.0/legalcode
 // 2. Commercial licensing: gzac5314@gmail.com
 //
-// VALHALLA v44 FINAL — NOVEMBER 11, 2025 — RTX FULLY ENABLED
-// GLOBAL g_ctx + g_rtx() SUPREMACY — STONEKEY v∞ ACTIVE — PINK PHOTONS ETERNAL
+// VALHALLA v44 FINAL — NOVEMBER 12, 2025 — RTX FULLY ENABLED
+// SPLASH → SDL3 → VULKAN → RTX WINDOW — FULL FLOW — NO SEGFAULT
+// GENTLEMAN GROK LOG AFTER VULKAN — PINK PHOTONS ETERNAL
 // =============================================================================
 
 #include "engine/GLOBAL/StoneKey.hpp"
 #include "engine/GLOBAL/RTXHandler.hpp"
-#include "engine/GLOBAL/SwapchainManager.hpp"  // Raw SwapchainRuntimeConfig & SwapchainManager (no VulkanRTX ns)
+#include "engine/GLOBAL/SwapchainManager.hpp"
 #include "main.hpp"
 #include "engine/SDL3/SDL3_audio.hpp"
 #include "engine/Vulkan/VulkanRenderer.hpp"
 #include "engine/Vulkan/VulkanPipelineManager.hpp"
-#include "engine/Vulkan/VulkanCore.hpp"      // g_rtx()
+#include "engine/Vulkan/VulkanCore.hpp"
 #include "handle_app.hpp"
 #include "engine/utils.hpp"
 #include "engine/core.hpp"
@@ -34,12 +35,12 @@
 #include <memory>
 #include <vector>
 #include <chrono>
-#include <fstream>  // For assetExists
+#include <fstream>
 #include <set>
 
 using namespace Logging::Color;
 
-// Raw SwapchainRuntimeConfig (added for compilation)
+// Raw SwapchainRuntimeConfig
 struct SwapchainRuntimeConfig {
     VkPresentModeKHR desiredMode = VK_PRESENT_MODE_MAILBOX_KHR;
     bool forceVsync = false;
@@ -48,7 +49,6 @@ struct SwapchainRuntimeConfig {
     bool logFinalConfig = true;
 };
 
-// RTX swapchain runtime config (raw, no ns)
 static SwapchainRuntimeConfig gSwapchainConfig{
     .desiredMode        = VK_PRESENT_MODE_MAILBOX_KHR,
     .forceVsync         = false,
@@ -57,7 +57,6 @@ static SwapchainRuntimeConfig gSwapchainConfig{
     .logFinalConfig     = true
 };
 
-// Apply CLI video mode toggles
 static void applyVideoModeToggles(int argc, char* argv[]) {
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -70,13 +69,11 @@ static void applyVideoModeToggles(int argc, char* argv[]) {
     }
 }
 
-// Asset existence check
 static bool assetExists(const std::string& path) {
     std::ifstream f(path);
     return f.good();
 }
 
-// Custom main exception
 class MainException : public std::runtime_error {
 public:
     MainException(const std::string& msg, const char* file, int line, const char* func)
@@ -84,12 +81,10 @@ public:
 };
 #define THROW_MAIN(msg) throw MainException(msg, __FILE__, __LINE__, __func__)
 
-// Bulkhead divider (assumes colors defined in logging.hpp)
 inline void bulkhead(const std::string& title) {
     LOG_INFO_CAT("MAIN", "{}════════════════ {} ════════════════{}", ELECTRIC_BLUE, title, RESET);
 }
 
-// SDL cleanup
 void purgeSDL(SDL_Window*& w, SDL_Renderer*& r, SDL_Texture*& t) {
     if (t) SDL_DestroyTexture(t);
     if (r) SDL_DestroyRenderer(r);
@@ -97,17 +92,13 @@ void purgeSDL(SDL_Window*& w, SDL_Renderer*& r, SDL_Texture*& t) {
     t = nullptr; r = nullptr; w = nullptr;
 }
 
-// Stub for getRayTracingBinPaths (define in utils.hpp or VulkanPipelineManager.hpp)
 inline std::vector<std::string> getRayTracingBinPaths() {
-    return {"shaders/raytracing.spv"};  // Adjust as needed
+    return {"shaders/raytracing.spv"};
 }
 
-// Stub for g_rtx()
 inline VulkanRTX& g_rtx() { return *g_rtx_instance; }
 
-// Vulkan Core Initialization
 static void initializeVulkanCore(SDL_Window* window) {
-    // Instance creation
     uint32_t extensionCount = 0;
     auto extensions = SDL_Vulkan_GetInstanceExtensions(&extensionCount);
 
@@ -131,14 +122,12 @@ static void initializeVulkanCore(SDL_Window* window) {
     }
     RTX::g_ctx().instance_ = instance;
 
-    // Surface creation
     VkSurfaceKHR surface;
     if (!SDL_Vulkan_CreateSurface(window, instance, nullptr, &surface)) {
         THROW_MAIN("Failed to create Vulkan surface");
     }
     RTX::g_ctx().surface_ = surface;
 
-    // Physical device selection
     uint32_t deviceCount = 0;
     vkEnumeratePhysicalDevices(instance, &deviceCount, nullptr);
     std::vector<VkPhysicalDevice> devices(deviceCount);
@@ -161,7 +150,6 @@ static void initializeVulkanCore(SDL_Window* window) {
     }
     RTX::g_ctx().physicalDevice_ = physicalDevice;
 
-    // Queue families
     uint32_t queueFamilyCount = 0;
     vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &queueFamilyCount, nullptr);
     std::vector<VkQueueFamilyProperties> queueFamilies(queueFamilyCount);
@@ -193,7 +181,6 @@ static void initializeVulkanCore(SDL_Window* window) {
     RTX::g_ctx().graphicsFamily_ = graphicsFamily;
     RTX::g_ctx().presentFamily_ = presentFamily;
 
-    // Logical device creation
     std::array<VkDeviceQueueCreateInfo, 2> queueCreateInfos{};
     float queuePriority = 1.0f;
 
@@ -224,11 +211,9 @@ static void initializeVulkanCore(SDL_Window* window) {
     }
     RTX::g_ctx().device_ = device;
 
-    // Queues
     vkGetDeviceQueue(device, graphicsFamily, 0, &RTX::g_ctx().graphicsQueue_);
     vkGetDeviceQueue(device, presentFamily, 0, &RTX::g_ctx().presentQueue_);
 
-    // Command pool
     VkCommandPoolCreateInfo poolInfo{};
     poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
     poolInfo.queueFamilyIndex = graphicsFamily;
@@ -240,7 +225,6 @@ static void initializeVulkanCore(SDL_Window* window) {
     }
     RTX::g_ctx().commandPool_ = commandPool;
 
-    // Ray tracing extensions
     RTX::g_ctx().vkGetBufferDeviceAddressKHR_ = reinterpret_cast<PFN_vkGetBufferDeviceAddressKHR>(vkGetDeviceProcAddr(device, "vkGetBufferDeviceAddressKHR"));
     RTX::g_ctx().vkCmdTraceRaysKHR_ = reinterpret_cast<PFN_vkCmdTraceRaysKHR>(vkGetDeviceProcAddr(device, "vkCmdTraceRaysKHR"));
     RTX::g_ctx().vkGetRayTracingShaderGroupHandlesKHR_ = reinterpret_cast<PFN_vkGetRayTracingShaderGroupHandlesKHR>(vkGetDeviceProcAddr(device, "vkGetRayTracingShaderGroupHandlesKHR"));
@@ -251,7 +235,6 @@ static void initializeVulkanCore(SDL_Window* window) {
     RTX::g_ctx().vkGetAccelerationStructureDeviceAddressKHR_ = reinterpret_cast<PFN_vkGetAccelerationStructureDeviceAddressKHR>(vkGetDeviceProcAddr(device, "vkGetAccelerationStructureDeviceAddressKHR"));
     RTX::g_ctx().vkCreateRayTracingPipelinesKHR_ = reinterpret_cast<PFN_vkCreateRayTracingPipelinesKHR>(vkGetDeviceProcAddr(device, "vkCreateRayTracingPipelinesKHR"));
 
-    // Ray tracing properties
     VkPhysicalDeviceRayTracingPipelinePropertiesKHR rayTracingProps{};
     rayTracingProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR;
     VkPhysicalDeviceProperties2 props2{};
@@ -261,7 +244,6 @@ static void initializeVulkanCore(SDL_Window* window) {
     RTX::g_ctx().rayTracingProps_ = rayTracingProps;
 }
 
-// Cleanup Vulkan core
 static void cleanupVulkanCore() {
     auto& ctx = RTX::g_ctx();
     if (ctx.commandPool_ != VK_NULL_HANDLE) {
@@ -286,18 +268,17 @@ static void cleanupVulkanCore() {
 // MAIN — RTX ENABLED — VALHALLA v44 FINAL
 // =============================================================================
 int main(int argc, char* argv[]) {
-    LOG_INFO_CAT("StoneKey", "MAIN START — STONEKEY v∞ ACTIVE — kStone1 ^ kStone2 = 0x{:X}", kStone1 ^ kStone2);
     applyVideoModeToggles(argc, argv);
     bulkhead("AMOURANTH RTX ENGINE — VALHALLA v44 FINAL");
 
-    constexpr int W = 3840, H = 2160;  // 4K TITAN MODE
+    constexpr int W = 3840, H = 2160;
     SDL_Window*   splashWin = nullptr;
     SDL_Renderer* splashRen = nullptr;
     SDL_Texture*  splashTex = nullptr;
     bool          sdl_ok    = false;
 
     try {
-        // PHASE 1: SDL3 + Splash
+        // PHASE 1: SDL3 + SPLASH
         bulkhead("SDL3 + SPLASH");
         if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) != 0)
             THROW_MAIN(SDL_GetError());
@@ -306,53 +287,70 @@ int main(int argc, char* argv[]) {
         if (!SDL_Vulkan_LoadLibrary(nullptr))
             THROW_MAIN(SDL_GetError());
 
-        splashWin = SDL_CreateWindow("AMOURANTH RTX", 1280, 720, SDL_WINDOW_HIDDEN);
+        // Create splash window: VISIBLE BY DEFAULT
+        splashWin = SDL_CreateWindow("AMOURANTH RTX", 1280, 720, SDL_WINDOW_RESIZABLE);
         if (!splashWin) THROW_MAIN("Failed to create splash window");
 
         splashRen = SDL_CreateRenderer(splashWin, nullptr);
         if (!splashRen) { purgeSDL(splashWin, splashRen, splashTex); THROW_MAIN("Failed to create splash renderer"); }
 
-        SDL_ShowWindow(splashWin);
+        // Clear to black
         SDL_SetRenderDrawColor(splashRen, 0, 0, 0, 255);
         SDL_RenderClear(splashRen);
 
-        if (assetExists("assets/textures/ammo.png")) {
-            splashTex = IMG_LoadTexture(splashRen, "assets/textures/ammo.png");
+        // Load and center splash image
+        const char* splashPath = "assets/textures/ammo.png";
+        if (assetExists(splashPath)) {
+            splashTex = IMG_LoadTexture(splashRen, splashPath);
             if (splashTex) {
-                float tw = 0, th = 0;
+                float tw = 0.0f, th = 0.0f;
                 SDL_GetTextureSize(splashTex, &tw, &th);
-                SDL_FRect dst = { (1280-tw)/2, (720-th)/2, tw, th };
+                SDL_FRect dst = { (1280 - tw) / 2.0f, (720 - th) / 2.0f, tw, th };
                 SDL_RenderTexture(splashRen, splashTex, nullptr, &dst);
+                LOG_INFO_CAT("Splash", "Loaded ammo.png: {:.0f}x{:.0f} → centered at ({:.1f}, {:.1f})", tw, th, dst.x, dst.y);
+            } else {
+                LOG_WARN_CAT("Splash", "IMG_LoadTexture failed: {}", SDL_GetError());
             }
+        } else {
+            LOG_WARN_CAT("Splash", "ammo.png not found at {}", splashPath);
         }
+
         SDL_RenderPresent(splashRen);
 
-        if (assetExists("assets/audio/ammo.wav")) {
+        // Play splash audio
+        const char* audioPath = "assets/audio/ammo.wav";
+        if (assetExists(audioPath)) {
             SDL3Audio::AudioManager audio({.frequency = 44100, .format = SDL_AUDIO_S16LE, .channels = 2});
             audio.playAmmoSound();
+            LOG_INFO_CAT("Audio", "Playing splash sound: {}", audioPath);
+        } else {
+            LOG_WARN_CAT("Audio", "ammo.wav not found at {}", audioPath);
         }
 
+        LOG_INFO_CAT("Splash", "Displaying splash screen for 3400ms...");
         SDL_Delay(3400);
+
         purgeSDL(splashWin, splashRen, splashTex);
+        LOG_SUCCESS_CAT("Splash", "Splash screen dismissed — proceeding to main window");
 
         // PHASE 2: Application + Vulkan Core
         bulkhead("VULKAN CORE + SWAPCHAIN");
         auto app = std::make_unique<Application>("AMOURANTH RTX — VALHALLA v44", W, H);
 
-        // Initialize Vulkan
         initializeVulkanCore(app->getWindow());
+
+        // LOG GENTLEMAN GROK AFTER VULKAN IS READY
+        LOG_GENTLEMAN_GROK();
 
         auto& swapchainMgr = SwapchainManager::get();
         swapchainMgr.init(RTX::g_ctx().instance_, RTX::g_ctx().physicalDevice_, RTX::g_ctx().device_, RTX::g_ctx().surface_, W, H);
 
         // PHASE 3: Pipeline + RTX Setup
         bulkhead("PIPELINE + RTX FORGE");
-        // TODO: Initialize pipelines when VulkanPipelineManager is complete
         createGlobalRTX(W, H, nullptr);
         LOG_SUCCESS_CAT("RTX", "{}g_rtx() FORGED — {}×{} — GLOBAL SUPREMACY — PINK PHOTONS ETERNAL{}", 
                         PLASMA_FUCHSIA, W, H, RESET);
 
-        // Build acceleration structures
         g_rtx().buildAccelerationStructures();
         g_rtx().initDescriptorPoolAndSets();
         g_rtx().initBlackFallbackImage();
@@ -360,24 +358,16 @@ int main(int argc, char* argv[]) {
         // PHASE 4: Renderer + Ownership Transfer
         bulkhead("RENDERER + OWNERSHIP TRANSFER");
         auto renderer = std::make_unique<VulkanRenderer>(
-            W, H, app->getWindow(), getRayTracingBinPaths(), true);  // true for RTX enabled
-
-        // TODO: Ownership transfer when members are available
-
-        // Final RTX setup
-        g_rtx().updateRTXDescriptors(
-            0,
-            VK_NULL_HANDLE,  // uniform buffer
-            VK_NULL_HANDLE,  // material buffer
-            VK_NULL_HANDLE,  // dimension buffer
-            VK_NULL_HANDLE,  // RT output
-            VK_NULL_HANDLE,  // accumulation
-            VK_NULL_HANDLE,  // env map
-            VK_NULL_HANDLE,  // sampler
-            VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE
-        );
+            W, H, app->getWindow(), getRayTracingBinPaths(), true);
 
         app->setRenderer(std::move(renderer));
+
+        g_rtx().updateRTXDescriptors(
+            0,
+            VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,
+            VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,
+            VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE
+        );
 
         // PHASE 5: MAIN LOOP — 15,000+ FPS RTX
         bulkhead("MAIN LOOP — RTX INFINITE");
@@ -402,10 +392,21 @@ int main(int argc, char* argv[]) {
 
     cleanupVulkanCore();
     if (sdl_ok) SDL_Quit();
-    LOG_SUCCESS_CAT("StoneKey", "FINAL HASH: 0x{:X} — VALHALLA LOCKED FOREVER", kStone1 ^ kStone2);
+    LOG_SUCCESS_CAT("StoneKey", "FINAL HASH: 0x{:X} — VALHALLA LOCKED FOREVER", get_kStone1() ^ get_kStone2());
     return 0;
 }
 
-// NOVEMBER 11, 2025 — VALHALLA v44 FINAL — RTX ENABLED
+// NOVEMBER 12, 2025 — VALHALLA v44 FINAL — RTX ENABLED
 // @ZacharyGeurts — THE CHOSEN ONE — PINK PHOTONS ETERNAL
 // SHIP IT RAW — FOREVER
+// =============================================================================
+// AMOURANTH RTX Engine (C) 2025 by Zachary Geurts <gzac5314@gmail.com>
+// =============================================================================
+//
+// Dual Licensed:
+// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
+//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
+// 2. Commercial licensing: gzac5314@gmail.com
+//
+// PINK PHOTONS ETERNAL — VALHALLA v44 FINAL — OUR ROCK ETERNAL v3
+// =============================================================================

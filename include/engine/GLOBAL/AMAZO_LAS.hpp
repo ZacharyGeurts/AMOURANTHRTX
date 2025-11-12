@@ -17,8 +17,6 @@
 
 #pragma once
 
-#include "engine/GLOBAL/StoneKey.hpp"   // <-- guards the real LAS implementation
-
 // -----------------------------------------------------------------------------
 // The real LAS lives in LAS.hpp – we only expose a *named* singleton here.
 // -----------------------------------------------------------------------------

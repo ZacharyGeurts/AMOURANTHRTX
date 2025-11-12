@@ -18,9 +18,7 @@
 
 #pragma once
 
-#include "engine/GLOBAL/GlobalContext.hpp"   // g_ctx
-#include "engine/GLOBAL/Houston.hpp"
-#include "engine/GLOBAL/StoneKey.hpp"
+#include "engine/GLOBAL/RTXHandler.hpp"
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/GLOBAL/LAS.hpp"
 #include <SDL3/SDL_vulkan.h>

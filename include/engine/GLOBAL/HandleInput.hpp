@@ -10,8 +10,7 @@
 #include <atomic>
 #include <mutex>
 #include <vector>
-#include "../GLOBAL/camera.hpp"   // AAA GlobalCamera singleton
-#include "../GLOBAL/StoneKey.hpp"  // kStone1/kStone2 + obfuscate/deobfuscate
+#include "engine/GLOBAL/camera.hpp"   // AAA GlobalCamera singleton
 
 using namespace Logging::Color;
 

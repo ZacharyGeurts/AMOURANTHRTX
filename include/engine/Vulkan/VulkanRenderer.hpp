@@ -111,6 +111,9 @@ private:
     FpsTarget fpsTarget_ = FpsTarget::FPS_120;
     TonemapType tonemapType_ = TonemapType::ACES;
 
+	std::chrono::steady_clock::time_point lastPerfLogTime_;
+    uint32_t frameCounter_ = 0;
+
     // Sync
     std::array<VkSemaphore, MAX_FRAMES_IN_FLIGHT> imageAvailableSemaphores_{};
     std::array<VkSemaphore, MAX_FRAMES_IN_FLIGHT> renderFinishedSemaphores_{};

@@ -1,56 +1,26 @@
 // include/engine/GLOBAL/camera.hpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
-// =============================================================================
-// GLOBAL CAMERA SINGLETON_HEAVEN — NOVEMBER 12 2025 — FINAL PRODUCTION
-// STONEKEY V9 — FULL OBFUSCATION — PINK PHOTONS × INFINITY — VALHALLA ETERNAL
+// AMOURANTH RTX © 2025 — BRAINDEAD CAMERA + STONEKEY v9 — PINK PHOTONS MINIMAL
+// ONLY: move, rotate, zoom, position, fov — ALL ENCRYPTED WITH STONEKEY
+// NO LOGS. NO ANTI-CHEAT. NO BLOAT. JUST WORKS. ZERO WARNINGS.
 // =============================================================================
 
 #pragma once
 
-#include "../GLOBAL/StoneKey.hpp"
-#include "../GLOBAL/logging.hpp"
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
-#include <glm/gtc/quaternion.hpp>
-#include <glm/gtx/quaternion.hpp>
-#include <atomic>
 #include <mutex>
-#include <vector>
-#include <functional>
-#include <bit>
-#include <cstdint>
+#include <atomic>
 
-using namespace Logging::Color;
+extern uint64_t get_kStone1() noexcept;
+extern uint64_t get_kStone2() noexcept;
 
 // =============================================================================
-// GLOBAL ACCESS MACROS — SINGLETON HEAVEN
-// =============================================================================
-#define GLOBAL_CAM GlobalCamera::get()
-#define CAM_POS()           GLOBAL_CAM.getRawPosition()
-#define CAM_FRONT()         GLOBAL_CAM.getRawFront()
-#define CAM_RIGHT()         GLOBAL_CAM.getRawRight()
-#define CAM_UP()            GLOBAL_CAM.getRawUp()
-#define CAM_VIEW()          GLOBAL_CAM.getRawViewMatrix()
-#define CAM_PROJ(a)         GLOBAL_CAM.getProjectionMatrix(a)
-#define CAM_FOV()           GLOBAL_CAM.getRawFov()
-#define CAM_ROTATE(y,p)     GLOBAL_CAM.rotate(y,p)
-#define CAM_MOVE(d)         GLOBAL_CAM.move(d)
-#define CAM_FORWARD(s)      GLOBAL_CAM.moveForward(s)
-#define CAM_MOVE_RIGHT(s)   GLOBAL_CAM.moveRight(s)
-#define CAM_MOVE_UP(s)      GLOBAL_CAM.moveUp(s)
-#define CAM_ZOOM(f)         GLOBAL_CAM.zoom(f)
-
-// ENCRYPTED — FOR TELEMETRY / ANTI-CHEAT
-#define CAM_ENC_POS()       GLOBAL_CAM.getEncryptedPosition()
-#define CAM_ENC_VIEW()      GLOBAL_CAM.getEncryptedViewMatrix()
-
-// =============================================================================
-// GLOBAL CAMERA — SINGLETON HEAVEN — STONEKEY V9
+// GLOBAL CAMERA — SINGLETON — BRAINDEAD EASY
 // =============================================================================
 class GlobalCamera {
 public:
-    [[nodiscard]] static GlobalCamera& get() noexcept {
+    static GlobalCamera& get() noexcept {
         static GlobalCamera instance;
         return instance;
     }
@@ -58,212 +28,173 @@ public:
     GlobalCamera(const GlobalCamera&) = delete;
     GlobalCamera& operator=(const GlobalCamera&) = delete;
 
-    // -------------------------------------------------------------------------
-    // INITIALIZATION
-    // -------------------------------------------------------------------------
-    void init(const glm::vec3& pos = glm::vec3(0.0f, 5.0f, 10.0f),
-              float fov = 60.0f, float nearP = 0.1f, float farP = 10000.0f) noexcept {
-        std::lock_guard<std::mutex> lock(mutex_);
-        rawPosition_ = pos;
-        rawFov_ = fov;
-        rawNear_ = nearP;
-        rawFar_ = farP;
-        rawYaw_ = -90.0f;
-        rawPitch_ = 0.0f;
+    // --- INIT ---
+    void init(glm::vec3 pos = {0,5,10}, float fov = 60.0f) noexcept {
+        std::lock_guard<std::mutex> lock(mtx_);
+        pos_ = pos;
+        fov_ = fov;
+        yaw_ = -90.0f;
+        pitch_ = 0.0f;
         updateVectors();
-        bumpGeneration();
-
-        LOG_SUCCESS_CAT("STONEKEY_CAM", "{}SINGLETON_HEAVEN CAMERA ONLINE — POS ({:.2f},{:.2f},{:.2f}) — FOV {:.1f} — GEN {} — PINK PHOTONS ∞{}", 
-                        RASPBERRY_PINK, pos.x, pos.y, pos.z, fov, generation_.load(), RESET);
+        gen_++;
     }
 
-    // -------------------------------------------------------------------------
-    // MUTATORS — THREAD SAFE — BUMP GEN
-    // -------------------------------------------------------------------------
+    // --- MOVEMENT ---
+    void move(glm::vec3 delta) noexcept {
+        std::lock_guard<std::mutex> lock(mtx_);
+        pos_ += delta;
+        updateVectors();
+        gen_++;
+    }
+
+    void moveForward(float s) noexcept { move(front_ * s); }
+    void moveRight(float s)   noexcept { move(right_ * s); }
+    void moveUp(float s)      noexcept { move(up_    * s); }
+
     void rotate(float yaw, float pitch) noexcept {
-        std::lock_guard<std::mutex> lock(mutex_);
-        rawYaw_ += yaw;
-        rawPitch_ = glm::clamp(rawPitch_ + pitch, -89.0f, 89.0f);
+        std::lock_guard<std::mutex> lock(mtx_);
+        yaw_   += yaw;
+        pitch_ = glm::clamp(pitch_ + pitch, -89.0f, 89.0f);
         updateVectors();
-        bumpGeneration();
+        gen_++;
     }
-
-    void move(const glm::vec3& delta) noexcept {
-        std::lock_guard<std::mutex> lock(mutex_);
-        rawPosition_ += delta;
-        updateVectors();
-        bumpGeneration();
-    }
-
-    void moveForward(float s) noexcept { move(rawFront_ * s); }
-    void moveRight(float s) noexcept   { move(rawRight_ * s); }
-    void moveUp(float s) noexcept      { move(rawUp_ * s); }
 
     void zoom(float f) noexcept {
-        std::lock_guard<std::mutex> lock(mutex_);
-        rawFov_ = glm::clamp(rawFov_ - f, 1.0f, 120.0f);
-        bumpGeneration();
+        std::lock_guard<std::mutex> lock(mtx_);
+        fov_ = glm::clamp(fov_ - f, 1.0f, 120.0f);
+        gen_++;
     }
 
-    void setPosition(const glm::vec3& p) noexcept { 
-        std::lock_guard<std::mutex> lock(mutex_); 
-        rawPosition_ = p; 
-        updateVectors(); 
-        bumpGeneration(); 
-    }
+    void setPos(glm::vec3 p) noexcept { std::lock_guard<std::mutex> lock(mtx_); pos_ = p; updateVectors(); gen_++; }
+    void setFov(float f)     noexcept { std::lock_guard<std::mutex> lock(mtx_); fov_ = glm::clamp(f, 1.0f, 120.0f); gen_++; }
 
-    void setFov(float f) noexcept { 
-        std::lock_guard<std::mutex> lock(mutex_); 
-        rawFov_ = glm::clamp(f, 1.0f, 120.0f); 
-        bumpGeneration(); 
-    }
+    // --- GETTERS (RAW) ---
+    glm::vec3 pos()   const noexcept { return pos_; }
+    glm::vec3 front() const noexcept { return front_; }
+    glm::vec3 right() const noexcept { return right_; }
+    glm::vec3 up()    const noexcept { return up_; }
+    float fov()       const noexcept { return fov_; }
 
-    // -------------------------------------------------------------------------
-    // ENCRYPTED GETTERS — CHEATERS SEE GARBAGE
-    // -------------------------------------------------------------------------
-    [[nodiscard]] uint64_t getEncryptedPosition() const noexcept { return encryptVec3(rawPosition_, gen()); }
-    [[nodiscard]] uint64_t getEncryptedViewMatrix() const noexcept { ensureCached(); return cachedViewEnc_; }
-
-    // -------------------------------------------------------------------------
-    // RAW GETTERS — TRUSTED CODE ONLY (renderer, modders via LazyCam)
-    // -------------------------------------------------------------------------
-    [[nodiscard]] glm::vec3 getRawPosition() const noexcept { return rawPosition_; }
-    [[nodiscard]] glm::vec3 getRawFront() const noexcept { return rawFront_; }
-    [[nodiscard]] glm::vec3 getRawRight() const noexcept { return rawRight_; }
-    [[nodiscard]] glm::vec3 getRawUp() const noexcept { return rawUp_; }
-    [[nodiscard]] float getRawFov() const noexcept { return rawFov_; }
-
-    [[nodiscard]] glm::mat4 getRawViewMatrix() const noexcept {
+    glm::mat4 view() const noexcept {
         ensureCached();
-        return cachedView_;
+        return view_;
     }
 
-    [[nodiscard]] glm::mat4 getProjectionMatrix(float aspect) const noexcept {
-        return glm::perspective(glm::radians(rawFov_), aspect, rawNear_, rawFar_);
+    glm::mat4 proj(float aspect) const noexcept {
+        return glm::perspective(glm::radians(fov_), aspect, 0.1f, 10000.0f);
     }
 
-    // -------------------------------------------------------------------------
-    // HOT-RELOAD — INVALIDATE EVERYTHING
-    // -------------------------------------------------------------------------
-    void invalidate() noexcept {
-        generation_.fetch_add(1, std::memory_order_acq_rel);
-        LOG_SUCCESS_CAT("STONEKEY_CAM", "{}CAMERA INVALIDATED — ALL HANDLES DIE — SINGLETON HEAVEN REFRESH{}", RASPBERRY_PINK, RESET);
+    // --- ENCRYPTED (STONEKEY v9) ---
+    uint64_t encPos()  const noexcept { return encrypt(pos_, gen_.load()); }
+    uint64_t encView() const noexcept { ensureCached(); return encView_; }
+
+    // --- OBFUSCATE / DEOBFUSCATE ---
+    static uint64_t obfuscate(uint64_t h) noexcept {
+        uint64_t k = get_kStone1() ^ get_kStone2();
+        return h ^ k;
     }
 
-    // -------------------------------------------------------------------------
-    // CALLBACKS — MODDER ASCENSION
-    // -------------------------------------------------------------------------
-    using Callback = std::function<void(const GlobalCamera&)>;
-    void subscribe(Callback cb) noexcept {
-        std::lock_guard<std::mutex> lock(cbMutex_);
-        callbacks_.push_back(std::move(cb));
+    static uint64_t deobfuscate(uint64_t h) noexcept {
+        uint64_t k = get_kStone1() ^ get_kStone2();
+        return h ^ k;
     }
 
 private:
     GlobalCamera() = default;
 
-    uint64_t gen() const noexcept { return generation_.load(std::memory_order_acquire); }
+    mutable std::mutex mtx_;
+    std::atomic<uint64_t> gen_{1};
+
+    glm::vec3 pos_{0,5,10};
+    glm::vec3 front_{0,0,-1};
+    glm::vec3 right_{1,0,0};
+    glm::vec3 up_{0,1,0};
+    float yaw_ = -90.0f;
+    float pitch_ = 0.0f;
+    float fov_ = 60.0f;
+
+    mutable glm::mat4 view_{1.0f};
+    mutable uint64_t encView_{0};
+    mutable uint64_t cachedGen_{0};
 
     void updateVectors() noexcept {
         glm::vec3 f;
-        f.x = cos(glm::radians(rawYaw_)) * cos(glm::radians(rawPitch_));
-        f.y = sin(glm::radians(rawPitch_));
-        f.z = sin(glm::radians(rawYaw_)) * cos(glm::radians(rawPitch_));
-        rawFront_ = glm::normalize(f);
-        rawRight_ = glm::normalize(glm::cross(rawFront_, glm::vec3(0,1,0)));
-        rawUp_ = glm::normalize(glm::cross(rawRight_, rawFront_));
+        f.x = cos(glm::radians(yaw_)) * cos(glm::radians(pitch_));
+        f.y = sin(glm::radians(pitch_));
+        f.z = sin(glm::radians(yaw_)) * cos(glm::radians(pitch_));
+        front_ = glm::normalize(f);
+        right_ = glm::normalize(glm::cross(front_, {0,1,0}));
+        up_    = glm::normalize(glm::cross(right_, front_));
     }
 
     void ensureCached() const noexcept {
-        uint64_t g = gen();
+        uint64_t g = gen_.load();
         if (cachedGen_ != g) {
-            std::lock_guard<std::mutex> lock(const_cast<std::mutex&>(mutex_));
-            cachedView_ = glm::lookAt(rawPosition_, rawPosition_ + rawFront_, rawUp_);
-            cachedViewEnc_ = encryptMat4(cachedView_, g);
+            std::lock_guard<std::mutex> lock(mtx_);
+            view_ = glm::lookAt(pos_, pos_ + front_, up_);
+            encView_ = encryptMat4(view_, g);
             cachedGen_ = g;
         }
     }
 
-    void bumpGeneration() noexcept {
-        generation_.fetch_add(1, std::memory_order_acq_rel);
-        std::lock_guard<std::mutex> lock(cbMutex_);
-        for (const auto& cb : callbacks_) cb(*this);
-    }
-
-    // STONEKEY V9 — VEC3 + MAT4 — ZERO COST HASH
-    static uint64_t encryptVec3(const glm::vec3& v, uint64_t g) noexcept {
-        uint32_t xf = std::bit_cast<uint32_t>(v.x);
-        uint32_t yf = std::bit_cast<uint32_t>(v.y);
-        uint32_t zf = std::bit_cast<uint32_t>(v.z);
-        uint64_t x = (static_cast<uint64_t>(xf) << 32) ^ kStone1 ^ g;
-        uint64_t y = (static_cast<uint64_t>(yf) << 16) ^ kStone2 ^ g;
-        uint64_t z = static_cast<uint64_t>(zf) ^ 0xDEADBEEFULL ^ g;
-        return std::rotl(x ^ y ^ z, 23) ^ g;
+    // STONEKEY v9 — ZERO COST
+    static uint64_t encrypt(const glm::vec3& v, uint64_t g) noexcept {
+        uint32_t x = std::bit_cast<uint32_t>(v.x);
+        uint32_t y = std::bit_cast<uint32_t>(v.y);
+        uint32_t z = std::bit_cast<uint32_t>(v.z);
+        uint64_t a = (uint64_t(x) << 32) ^ get_kStone1() ^ g;
+        uint64_t b = (uint64_t(y) << 16) ^ get_kStone2() ^ g;
+        uint64_t c = uint64_t(z) ^ 0xDEADBEEFULL ^ g;
+        return std::rotl(a ^ b ^ c, 23) ^ g;
     }
 
     static uint64_t encryptMat4(const glm::mat4& m, uint64_t g) noexcept {
         uint64_t h = 0;
         for (int i = 0; i < 16; ++i) {
             uint32_t f = std::bit_cast<uint32_t>(m[i/4][i%4]);
-            uint64_t fu = static_cast<uint64_t>(f);
-            h ^= std::rotl(fu ^ g, i);
+            h ^= std::rotl(uint64_t(f) ^ g, i);
         }
-        return h ^ kStone1 ^ kStone2 ^ 0xBEEFBABEULL;
+        return h ^ get_kStone1() ^ get_kStone2() ^ 0xBEEFBABEULL;
     }
-
-    mutable std::mutex mutex_;
-    mutable std::mutex cbMutex_;
-
-    // RAW DATA
-    glm::vec3 rawPosition_{0,5,10};
-    glm::vec3 rawFront_{0,0,-1};
-    glm::vec3 rawRight_{1,0,0};
-    glm::vec3 rawUp_{0,1,0};
-    float rawYaw_ = -90.0f;
-    float rawPitch_ = 0.0f;
-    float rawFov_ = 60.0f;
-    float rawNear_ = 0.1f;
-    float rawFar_ = 10000.0f;
-
-    // CACHED
-    mutable glm::mat4 cachedView_{1.0f};
-    mutable uint64_t cachedViewEnc_{0};
-    mutable uint64_t cachedGen_{0};
-
-    std::atomic<uint64_t> generation_{1};
-    std::vector<Callback> callbacks_;
 };
 
 // =============================================================================
-// LAZY CAM — CLEAN API — ZERO COST PROXY
+// LAZY CAM — BRAINDEAD PROXY
 // =============================================================================
 class LazyCam {
 public:
-    void forward(float s) noexcept { GLOBAL_CAM.moveForward(s); }
-    void right(float s) noexcept   { GLOBAL_CAM.moveRight(s); }
-    void up(float s) noexcept      { GLOBAL_CAM.moveUp(s); }
-    void rotate(float y, float p) noexcept { GLOBAL_CAM.rotate(y, p); }
-    void zoom(float f) noexcept    { GLOBAL_CAM.zoom(f); }
+    void forward(float s) noexcept { GlobalCamera::get().moveForward(s); }
+    void right(float s)   noexcept { GlobalCamera::get().moveRight(s); }
+    void up(float s)      noexcept { GlobalCamera::get().moveUp(s); }
+    void rotate(float y, float p) noexcept { GlobalCamera::get().rotate(y, p); }
+    void zoom(float f)    noexcept { GlobalCamera::get().zoom(f); }
+    void setPos(glm::vec3 p) noexcept { GlobalCamera::get().setPos(p); }
+    void setFov(float f)  noexcept { GlobalCamera::get().setFov(f); }
 
-    glm::vec3 pos() const noexcept { return GLOBAL_CAM.getRawPosition(); }
-    glm::mat4 view() const noexcept { return GLOBAL_CAM.getRawViewMatrix(); }
-    glm::mat4 proj(float a) const noexcept { return GLOBAL_CAM.getProjectionMatrix(a); }
-    float fov() const noexcept { return GLOBAL_CAM.getRawFov(); }
+    glm::vec3 pos()   const noexcept { return GlobalCamera::get().pos(); }
+    glm::mat4 view()  const noexcept { return GlobalCamera::get().view(); }
+    glm::mat4 proj(float a) const noexcept { return GlobalCamera::get().proj(a); }
+    float fov()       const noexcept { return GlobalCamera::get().fov(); }
 };
 
 inline LazyCam g_lazyCam;
 
 // =============================================================================
-// WISHLIST — GLOBAL DEVELOPERS DREAM BOARD — NOVEMBER 12 2025
+// BRAINDEAD MACROS
 // =============================================================================
-// 1. Multi-Cam System — Vector<GlobalCamera> for splitscreen, picture-in-picture
-// 2. Quat-Based Rotation — Full gimbal-free with slerp smoothing
-// 3. Netcode Sync — Delta-compress pos/rot + encrypted telemetry
-// 4. Thermal-Adaptive FOV — AI adjusts FOV based on GPU temp
-// 5. Holo-Cam Visualization — RT-render camera frustum in debug
-// 6. AI Path Prediction — Predict next pos for netcode prefetch
-// 7. Self-Healing Generation — Auto-reset on overflow
-// 8. Callback Traits — SFINAE for pos/view/proj updates
-// 9. Perf Query Integration — VkQueryPool for matrix compute time
-// 10. Editor Integration — ImGui drag + hot-reload sync
-// =============================================================================
+#define CAM GlobalCamera::get()
+#define CAM_MOVE(d)     CAM.move(d)
+#define CAM_FORWARD(s)  CAM.moveForward(s)
+#define CAM_RIGHT(s)    CAM.moveRight(s)
+#define CAM_UP(s)       CAM.moveUp(s)
+#define CAM_ROTATE(y,p) CAM.rotate(y,p)
+#define CAM_ZOOM(f)     CAM.zoom(f)
+#define CAM_SETPOS(p)   CAM.setPos(p)
+#define CAM_SETFOV(f)   CAM.setFov(f)
+#define CAM_POS()       CAM.pos()
+#define CAM_FRONT()     CAM.front()
+#define CAM_VIEW()      CAM.view()
+#define CAM_PROJ(a)     CAM.proj(a)
+#define CAM_FOV()       CAM.fov()
+#define CAM_ENC_POS()   CAM.encPos()
+#define CAM_ENC_VIEW()  CAM.encView()

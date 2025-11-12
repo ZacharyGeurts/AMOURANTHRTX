@@ -15,7 +15,6 @@
 
 #pragma once
 
-#include "engine/GLOBAL/StoneKey.hpp"  // STONEKEY INTEGRATION — UNBREAKABLE
 #include "engine/camera.hpp"
 #include "engine/Vulkan/VulkanCore.hpp"
 #include "engine/Vulkan/VulkanRenderer.hpp"

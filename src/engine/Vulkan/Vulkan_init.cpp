@@ -5,7 +5,6 @@
 // Updated to global RTX::ctx() | SWAPCHAIN globals | No constexpr obfuscate
 // =============================================================================
 
-#include "engine/GLOBAL/StoneKey.hpp"
 #include "engine/Vulkan/Vulkan_init.hpp"
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/GLOBAL/RTXHandler.hpp"

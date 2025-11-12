@@ -40,7 +40,7 @@
 #include <glm/gtc/type_ptr.hpp>
 
 #include "engine/GLOBAL/logging.hpp"
-#include "engine/GLOBAL/StoneKey.hpp"
+#include "engine/GLOBAL/StoneKey.hpp"  // ← get_kStone1(), get_kStone2()
 
 // Forward declarations
 class VulkanRTX;
@@ -51,7 +51,7 @@ struct Camera;
 using namespace Logging::Color;
 
 // -----------------------------------------------------------------------------
-// 1. Add the missing user-defined literals (the compiler can’t find _MB)
+// 1. User-defined literals
 // -----------------------------------------------------------------------------
 constexpr uint64_t operator"" _KB(unsigned long long v) noexcept { return v << 10; }
 constexpr uint64_t operator"" _MB(unsigned long long v) noexcept { return v << 20; }
@@ -72,11 +72,11 @@ namespace RTX {
     }
 
     // =============================================================================
-    // stonekey_xor_spirv — inline
+    // stonekey_xor_spirv — fixed: use get_kStone1()
     // =============================================================================
     inline void stonekey_xor_spirv(std::vector<uint32_t>& data, bool encrypt = true) {
         for (auto& word : data) {
-            word ^= encrypt ? kStone1 : kStone1;
+            word ^= encrypt ? get_kStone1() : get_kStone1();
         }
     }
 
@@ -255,7 +255,7 @@ namespace RTX {
     };
 
     // -----------------------------------------------------------------
-    // PRE-DEFINED SIZES (must be before the make_* helpers)
+    // PRE-DEFINED SIZES
     // -----------------------------------------------------------------
     constexpr VkDeviceSize SIZE_64MB  =  64_MB;
     constexpr VkDeviceSize SIZE_128MB = 128_MB;
@@ -377,7 +377,7 @@ namespace RTX {
         }
 
         // -----------------------------------------------------------------
-        // PRE-MADE SIZES (now see the constants above)
+        // PRE-MADE SIZES
         // -----------------------------------------------------------------
         inline uint64_t make_64M (VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept { return create(SIZE_64MB,  extra, props, "64M"); }
         inline uint64_t make_128M(VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept { return create(SIZE_128MB, extra, props, "128M"); }
@@ -396,8 +396,8 @@ namespace RTX {
         VkDevice device_{VK_NULL_HANDLE};
         VkPhysicalDevice physDev_{VK_NULL_HANDLE};
 
-        uint64_t obfuscate(uint64_t raw) const noexcept { return raw ^ kStone1; }
-        uint64_t deobfuscate(uint64_t obf) const noexcept { return obf ^ kStone1; }
+        uint64_t obfuscate(uint64_t raw) const noexcept { return raw ^ get_kStone1(); }
+        uint64_t deobfuscate(uint64_t obf) const noexcept { return obf ^ get_kStone1(); }
 
         // -----------------------------------------------------------------
         // Helper: find memory type
@@ -417,14 +417,6 @@ namespace RTX {
             return 0;
         }
     };
-
-    // =============================================================================
-    // LITERALS + SIZES (duplicate of the block above – kept for backward compatibility)
-    // =============================================================================
-    constexpr uint64_t operator"" _KB(unsigned long long v) noexcept { return v << 10; }
-    constexpr uint64_t operator"" _MB(unsigned long long v) noexcept { return v << 20; }
-    constexpr uint64_t operator"" _GB(unsigned long long v) noexcept { return v << 30; }
-    constexpr uint64_t operator"" _TB(unsigned long long v) noexcept { return v << 40; }
 
     // =============================================================================
     // MACROS

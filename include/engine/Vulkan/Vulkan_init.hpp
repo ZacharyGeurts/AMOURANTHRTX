@@ -7,7 +7,6 @@
 
 #pragma once
 
-#include "engine/GLOBAL/StoneKey.hpp"
 #include "engine/Vulkan/VulkanCore.hpp"
 #include "engine/utils.hpp"
 #include <SDL3/SDL_vulkan.h>

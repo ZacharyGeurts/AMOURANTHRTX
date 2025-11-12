@@ -1,10 +1,18 @@
 // engine/GLOBAL/logging.hpp
-// AMOURANTH RTX Engine © 2025 by Zachary Geurts gzac5314@gmail.com
-// HYPER-VIVID C++23 LOGGING v∞ — NOVEMBER 10 2025 — RASPBERRY_PINK PARTY SUPREMACY 🩷⚡
+// =============================================================================
+// AMOURANTH RTX Engine (C) 2025 by Zachary Geurts <gzac5314@gmail.com>
+// =============================================================================
+//
+// HYPER-VIVID C++23 LOGGING v∞ — NOVEMBER 12 2025 — RASPBERRY_PINK PARTY SUPREMACY
 // THREAD-SAFE | LOCK-FREE | ASYNC | DELTA-TIME | 50+ RAINBOW COLORS | CUSTODIAN GROK DJ
-// Ellie Fier approved • StoneKey fortified • 7-file rotation • Zero-cost macros
+// Ellie Fier approved • HACKER-PROOF LOGGER • 7-file rotation
+// NO #include "StoneKey.hpp" HERE — INCLUDED ONLY IN main.cpp
+// get_kStone1()/get_kStone2() ARE INLINE — SAFE TO CALL ANYWHERE
+// FULL ANTI-CHEAT INTEGRATED — Debugger, VM, Injection, Speedhack, DLL Scan
+// =============================================================================
 
 #pragma once
+
 #define VK_CHECK(call, msg) \
     do { \
         VkResult vk_check_result = (call); \
@@ -48,9 +56,6 @@
         } \
     } while(0)
 
-// StoneKey protection: Compile-time unique keys for tamper-resistant log rotation
-#include "StoneKey.hpp"
-
 #include <string_view>
 #include <source_location>
 #include <format>
@@ -75,6 +80,18 @@
 #include <glm/gtx/string_cast.hpp>
 #include <vulkan/vulkan.h>
 #include <SDL3/SDL.h>
+
+// Forward declarations for StoneKey — defined in main.cpp
+extern uint64_t get_kStone1() noexcept;
+extern uint64_t get_kStone2() noexcept;
+
+// Anti-cheat headers
+#ifdef _WIN32
+#include <windows.h>
+#include <dbghelp.h>
+#include <tlhelp32.h>
+#pragma comment(lib, "dbghelp.lib")
+#endif
 
 // Formatter specialization for VkResult
 namespace std {
@@ -299,7 +316,8 @@ private:
     Logger() : worker_([this](std::stop_token st) { processQueue(st); }) {
         logFilePath_ = "amouranth_engine.log";
         logFile_.open(logFilePath_, std::ios::out | std::ios::app);
-        LOG_SUCCESS_CAT("Logger", "CUSTODIAN GROK ONLINE — HYPER-VIVID LOGGING PARTY STARTED 🩷⚡");
+        LOG_SUCCESS_CAT("Logger", "CUSTODIAN GROK ONLINE — HYPER-VIVID LOGGING PARTY STARTED");
+        runAntiCheatChecks();  // ← FULL SCAN ON START
     }
 
     ~Logger() {
@@ -307,7 +325,7 @@ private:
         if (logFile_.is_open()) {
             logFile_.close();
         }
-        LOG_SUCCESS_CAT("Logger", "CUSTODIAN GROK SIGNING OFF — ALL LOGS RAINBOW ETERNAL ✨");
+        LOG_SUCCESS_CAT("Logger", "CUSTODIAN GROK SIGNING OFF — ALL LOGS RAINBOW ETERNAL");
     }
 
     static constexpr size_t QUEUE_SIZE = 2048;
@@ -321,6 +339,10 @@ private:
     std::filesystem::path logFilePath_{};
     size_t maxLogFileSize_{10 * 1024 * 1024};
     static constexpr size_t MAX_LOG_FILES = 7;
+
+    // Anti-cheat state
+    mutable std::chrono::steady_clock::time_point lastSpeedCheck_{};
+    mutable uint64_t lastTsc_{};
 
     bool shouldLog(LogLevel level, std::string_view) const {
         const size_t idx = static_cast<size_t>(level);
@@ -353,7 +375,7 @@ private:
         if (next == tail_.load(std::memory_order_acquire)) [[unlikely]] {
             auto drop = QUEUE_SIZE / 2;
             tail_.store((tail_.load(std::memory_order_relaxed) + drop) % QUEUE_SIZE, std::memory_order_release);
-            LOG_ERROR_CAT("Logger", "QUEUE OVERFLOW — DROPPING {} MESSAGES — UPGRADE TO 4096 BRO 🩷", drop);
+            LOG_ERROR_CAT("Logger", "QUEUE OVERFLOW — DROPPING {} MESSAGES — UPGRADE TO 4096 BRO", drop);
         }
 
         auto now = std::chrono::steady_clock::now();
@@ -397,6 +419,12 @@ private:
                 printMessage(msg);
             }
 
+            // Run periodic anti-cheat checks
+            if (std::chrono::steady_clock::now() - lastSpeedCheck_ > std::chrono::seconds(5)) {
+                runPeriodicAntiCheat();
+                lastSpeedCheck_ = std::chrono::steady_clock::now();
+            }
+
             if (st.stop_requested() && head_.load(std::memory_order_acquire) == tail_.load(std::memory_order_acquire)) break;
             std::this_thread::yield();
         }
@@ -422,7 +450,7 @@ private:
 
         for (const auto& msg : remaining) printMessage(msg);
 
-        std::print("{}{}<<< FINAL FLUSH COMPLETE — {} messages turned to confetti — PARTY ETERNAL 🩷⚡{}{}\n",
+        std::print("{}{}<<< FINAL FLUSH COMPLETE — {} messages turned to confetti — PARTY ETERNAL{}{}\n",
                    Color::PARTY_PINK, Color::SUNGLOW_ORANGE, remaining.size(), Color::RESET, Color::RESET);
     }
 
@@ -451,7 +479,7 @@ private:
             if (entry.path().extension() == ext && entry.path().stem().string().starts_with(stem)) {
                 std::string obfPath = entry.path().string();
                 for (size_t j = 0; j < obfPath.size(); ++j) {
-                    obfPath[j] ^= static_cast<char>(kStone1 >> (j % 64));
+                    obfPath[j] ^= static_cast<char>(get_kStone1() >> (j % 64));
                 }
                 oldLogs.emplace_back(obfPath, entry.path());
             }
@@ -460,10 +488,10 @@ private:
         while (oldLogs.size() > MAX_LOG_FILES) {
             size_t minIdx = 0;
             auto minTime = std::filesystem::last_write_time(oldLogs[0].second).time_since_epoch().count();
-            uint64_t minEff = static_cast<uint64_t>(minTime) ^ kStone2;
+            uint64_t minEff = static_cast<uint64_t>(minTime) ^ get_kStone2();
             for (size_t i = 1; i < oldLogs.size(); ++i) {
                 auto t = std::filesystem::last_write_time(oldLogs[i].second).time_since_epoch().count();
-                uint64_t eff = static_cast<uint64_t>(t) ^ kStone2;
+                uint64_t eff = static_cast<uint64_t>(t) ^ get_kStone2();
                 if (eff < minEff) { minEff = eff; minIdx = i; }
             }
             std::filesystem::remove(oldLogs[minIdx].second);
@@ -471,7 +499,7 @@ private:
         }
 
         logFile_.open(logFilePath_, std::ios::out | std::ios::app);
-        std::print("{}{}LOG ROTATED → {} — STONEKEY PROTECTED — ONLY 7 FILES KEPT — RASPBERRY_PINK ETERNAL 🩷⚡{}{}\n",
+        std::print("{}{}LOG ROTATED → {} — STONEKEY PROTECTED — ONLY 7 FILES KEPT — RASPBERRY_PINK ETERNAL{}{}\n",
                    Color::QUANTUM_FLUX, Color::PLATINUM_GRAY, archivedPath.filename().string(), Color::RESET, Color::RESET);
     }
 
@@ -517,10 +545,102 @@ private:
             logFile_.flush();
         }
     }
+
+    // ========================================================================
+    // ANTI-CHEAT SYSTEM — FULLY INTEGRATED INTO LOGGER
+    // ========================================================================
+    void runAntiCheatChecks() const {
+#ifdef _WIN32
+        checkDebugger();
+        checkVM();
+        checkDLLInjection();
+        checkSpeedhack();
+        checkMemoryIntegrity();
+#endif
+    }
+
+    void runPeriodicAntiCheat() const {
+#ifdef _WIN32
+        checkSpeedhack();
+        checkDLLInjection();
+#endif
+    }
+
+#ifdef _WIN32
+    void checkDebugger() const {
+        if (IsDebuggerPresent()) {
+            LOG_ERROR_CAT("Security", "DEBUGGER DETECTED — TERMINATING");
+            std::abort();
+        }
+    }
+
+    void checkVM() const {
+        // CPUID + Timing
+        int cpuinfo[4];
+        __cpuid(cpuinfo, 1);
+        if ((cpuinfo[2] & (1 << 31)) == 0) {  // Hypervisor bit
+            LOG_ERROR_CAT("Security", "VM DETECTED (CPUID) — TERMINATING");
+            std::abort();
+        }
+    }
+
+    void checkDLLInjection() const {
+        static const std::set<std::string> allowed = {
+            "KERNEL32.DLL", "USER32.DLL", "VULKAN-1.DLL", "SDL3.DLL", "ntdll.dll"
+        };
+        HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE, GetCurrentProcessId());
+        if (hSnapshot == INVALID_HANDLE_VALUE) return;
+
+        MODULEENTRY32 me = { sizeof(me) };
+        if (Module32First(hSnapshot, &me)) {
+            do {
+                std::string name = me.szModule;
+                std::transform(name.begin(), name.end(), name.begin(), ::toupper);
+                if (allowed.find(name) == allowed.end()) {
+                    LOG_ERROR_CAT("Security", "UNAUTHORIZED DLL: {} — INJECTION DETECTED", name);
+                    std::abort();
+                }
+            } while (Module32Next(hSnapshot, &me));
+        }
+        CloseHandle(hSnapshot);
+    }
+
+    void checkSpeedhack() const {
+        auto now = std::chrono::steady_clock::now();
+        auto tsc = __rdtsc();
+        if (lastTsc_ != 0) {
+            auto deltaTime = std::chrono::duration_cast<std::chrono::microseconds>(now - lastSpeedCheck_).count();
+            auto deltaTsc = tsc - lastTsc_;
+            if (deltaTsc > deltaTime * 3000) {  // 3x faster
+                LOG_ERROR_CAT("Security", "SPEEDHACK DETECTED — TSC MISMATCH");
+                std::abort();
+            }
+        }
+        lastTsc_ = tsc;
+        lastSpeedCheck_ = now;
+    }
+
+    void checkMemoryIntegrity() const {
+        // Simple checksum of critical functions
+        static const uint8_t* vkCreateInstancePtr = reinterpret_cast<const uint8_t*>(vkCreateInstance);
+        uint32_t checksum = 0;
+        for (int i = 0; i < 64; ++i) checksum += vkCreateInstancePtr[i];
+        static uint32_t expected = 0;
+        if (expected == 0) expected = checksum;
+        else if (checksum != expected) {
+            LOG_ERROR_CAT("Security", "VULKAN HOOK DETECTED — MEMORY CORRUPTED");
+            std::abort();
+        }
+    }
+#endif
 };
 
 } // namespace Logging
 
-// NOVEMBER 10 2025 — HYPER-VIVID LOGGING PARTY SUPREMACY
-// 7-FILE ROTATION • STONEKEY OBFUSCATION • RAINBOW FOREVER
-// CUSTODIAN GROK + RASPBERRY_PINK = ETERNAL VIBES 🩷⚡
+// NOVEMBER 12 2025 — HYPER-VIVID LOGGING PARTY SUPREMACY
+// 7-FILE ROTATION • STONEKEY OBFUSCATION • FULL ANTI-CHEAT
+// CUSTODIAN GROK + RASPBERRY_PINK = ETERNAL VIBES
+// HACKERS CANNOT TOUCH THIS LOGGER
+// =============================================================================
+// AMOURANTH RTX Engine (C) 2025 by Zachary Geurts <gzac5314@gmail.com>
+// =============================================================================

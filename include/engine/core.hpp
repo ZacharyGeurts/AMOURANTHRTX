@@ -7,7 +7,6 @@
 
 #pragma once
 
-#include "GLOBAL/StoneKey.hpp"
 #include "GLOBAL/logging.hpp"
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_beta.h>
