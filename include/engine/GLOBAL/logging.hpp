@@ -183,8 +183,8 @@ enum class LogLevel { Trace, Debug, Info, Success, Attempt, Perf, Warning, Error
 // ========================================================================
 // 1. HYPER-VIVID ANSI COLORS — USING EXISTING
 // ========================================================================
-namespace Color::Logging {
-    using namespace Color::Logging;  // ← ADD THIS LINE
+namespace Logging::Color {
+    using namespace Logging::Color;  // ← ADD THIS LINE
 
     inline constexpr std::string_view RESET                     = "\033[0m";
     inline constexpr std::string_view BOLD                      = "\033[1m";
@@ -242,14 +242,14 @@ struct LevelInfo {
 };
 
 constexpr std::array<LevelInfo, 8> LEVEL_INFOS{{
-    {"[TRACE]",   Color::Logging::ULTRA_NEON_LIME,     ""},
-    {"[DEBUG]",   Color::Logging::ARCTIC_CYAN,         ""},
-    {"[INFO]",    Color::Logging::PLATINUM_GRAY,       ""},
-    {"[SUCCESS]", Color::Logging::EMERALD_GREEN,       Color::Logging::BLACK_HOLE},
-    {"[ATTEMPT]", Color::Logging::QUANTUM_PURPLE,      ""},
-    {"[PERF]",    Color::Logging::COSMIC_GOLD,         ""},
-    {"[WARN]",    Color::Logging::AMBER_YELLOW,        ""},
-    {"[ERROR]",   Color::Logging::CRIMSON_MAGENTA,     Color::Logging::BLACK_HOLE}
+    {"[TRACE]",   Logging::Color::ULTRA_NEON_LIME,     ""},
+    {"[DEBUG]",   Logging::Color::ARCTIC_CYAN,         ""},
+    {"[INFO]",    Logging::Color::PLATINUM_GRAY,       ""},
+    {"[SUCCESS]", Logging::Color::EMERALD_GREEN,       Logging::Color::BLACK_HOLE},
+    {"[ATTEMPT]", Logging::Color::QUANTUM_PURPLE,      ""},
+    {"[PERF]",    Logging::Color::COSMIC_GOLD,         ""},
+    {"[WARN]",    Logging::Color::AMBER_YELLOW,        ""},
+    {"[ERROR]",   Logging::Color::CRIMSON_MAGENTA,     Logging::Color::BLACK_HOLE}
 }};
 
 constexpr std::array<bool, 8> ENABLE_LEVELS{
@@ -330,9 +330,9 @@ private:
     }
 
     std::string_view getSpeakerColor(std::string_view category) const noexcept {
-        if (category == "Amouranth") return Color::Logging::PARTY_PINK;
-        if (category == "Nick")      return Color::Logging::ELECTRIC_BLUE;
-        return Color::Logging::DIAMOND_WHITE;
+        if (category == "Amouranth") return Logging::Color::PARTY_PINK;
+        if (category == "Nick")      return Logging::Color::ELECTRIC_BLUE;
+        return Logging::Color::DIAMOND_WHITE;
     }
 
     void enqueue(LogLevel level, std::string_view category, std::string msg) const {
@@ -458,7 +458,7 @@ private:
 
         logFile_.open(logFilePath_, std::ios::out | std::ios::app);
         std::print("{}{}LOG ROTATED → {} — NORMAL LOGGING — 7 FILES KEPT{}{}\n",
-                   Color::Logging::QUANTUM_FLUX, Color::Logging::PLATINUM_GRAY, archivedPath.filename().string(), Color::Logging::RESET, Color::Logging::RESET);
+                   Logging::Color::QUANTUM_FLUX, Logging::Color::PLATINUM_GRAY, archivedPath.filename().string(), Logging::Color::RESET, Logging::Color::RESET);
     }
 
     void printMessage(const LogMessage& msg) const {
@@ -488,12 +488,12 @@ private:
         const std::string plain = std::format("{} {} [{}] [{}] {} {}\n", levelStr, deltaStr, msg.category, threadId, fileLine, msg.formattedMessage);
 
         std::ostringstream oss;
-        oss << levelBg << levelColor << levelStr << Color::Logging::RESET
-            << Color::Logging::BOLD << deltaStr << Color::Logging::RESET << ' '
-            << speakerColor << msg.category << ":" << Color::Logging::RESET << ' '
-            << Color::Logging::LIME_GREEN << '[' << threadId << ']' << Color::Logging::RESET << ' '
-            << Color::Logging::CHROMIUM_SILVER << '[' << fileLine << ']' << Color::Logging::RESET << ' '
-            << levelColor << msg.formattedMessage << Color::Logging::RESET << '\n';
+        oss << levelBg << levelColor << levelStr << Logging::Color::RESET
+            << Logging::Color::BOLD << deltaStr << Logging::Color::RESET << ' '
+            << speakerColor << msg.category << ":" << Logging::Color::RESET << ' '
+            << Logging::Color::LIME_GREEN << '[' << threadId << ']' << Logging::Color::RESET << ' '
+            << Logging::Color::CHROMIUM_SILVER << '[' << fileLine << ']' << Logging::Color::RESET << ' '
+            << levelColor << msg.formattedMessage << Logging::Color::RESET << '\n';
         const std::string colored = oss.str();
 
         std::print(std::cout, "{}", colored);
