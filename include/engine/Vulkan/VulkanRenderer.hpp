@@ -38,7 +38,6 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // GLOBAL INCLUDES — HOUSTON + SWAPCHAIN + LAS
 // ──────────────────────────────────────────────────────────────────────────────
-#include "engine/GLOBAL/GlobalContext.hpp"    // g_ctx
 #include "engine/GLOBAL/Houston.hpp"
 #include "engine/GLOBAL/AMAZO_LAS.hpp"
 #include "engine/GLOBAL/LAS.hpp"

@@ -25,7 +25,6 @@
 #include <vulkan/vulkan_beta.h>
 #include <SDL3/SDL.h>
 
-#include "engine/GLOBAL/GlobalContext.hpp"   // g_ctx
 #include "engine/GLOBAL/Houston.hpp"         // Handle<T>, UltraLowLevelBufferTracker, RAW_BUFFER, BUFFER_CREATE/DESTROY
 
 #include <glm/glm.hpp>
@@ -46,7 +45,6 @@
 // COLOR CONSTANTS — GOD-INTENDED
 // ──────────────────────────────────────────────────────────────────────────────
 namespace Color {
-    inline constexpr std::string_view RESET           = "\033[0m";
     inline constexpr std::string_view BOLD            = "\033[1m";
     inline constexpr std::string_view FUCHSIA_MAGENTA = "\033[1;38;5;205m";  // ERROR
     inline constexpr std::string_view PARTY_PINK      = "\033[1;38;5;213m";  // BLAS
@@ -77,11 +75,6 @@ namespace Color {
 // ──────────────────────────────────────────────────────────────────────────────
 #define THROW_IF(cond, msg) \
     do { if (cond) { CONSOLE_ERROR(msg); throw std::runtime_error(msg); } } while(0)
-
-// ──────────────────────────────────────────────────────────────────────────────
-// GLOBAL CONTEXT — RAW g_ctx
-// ──────────────────────────────────────────────────────────────────────────────
-extern Context g_ctx;
 
 // ──────────────────────────────────────────────────────────────────────────────
 // BUILD SIZE STRUCTS
