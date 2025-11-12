@@ -2,6 +2,12 @@
 // =============================================================================
 // AMOURANTH RTX Engine (C) 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
+//
+// Dual Licensed:
+// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
+//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
+// 2. Commercial licensing: gzac5314@gmail.com
+//
 // VulkanInitializer → RTX namespace | Global RTX::ctx() | OBSIDIAN PRO EDITION
 // 100% COMPILE — ZERO ERRORS — NO REDEFINITIONS — NO UNUSED VARS
 // CRIMSON_MAGENTA | stone_fingerprint() → (get_kStone1() ^ get_kStone2())

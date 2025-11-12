@@ -1,5 +1,11 @@
 // include/engine/core.hpp
 // =============================================================================
+//
+// Dual Licensed:
+// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
+//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
+// 2. Commercial licensing: gzac5314@gmail.com
+//
 // AMOURANTH RTX Engine – NOVEMBER 12 2025 – CORE SYSTEMS HEADER – FINAL PRODUCTION
 // PROFESSIONAL • MINIMAL • NO DISPOSAL DEPENDENCIES • STONEKEY V9 INTEGRATED
 // GLOBAL DESTRUCTION COUNTER • RENDER MODE DISPATCH • PIPELINE MANAGER ACCESS

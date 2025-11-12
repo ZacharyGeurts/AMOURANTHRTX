@@ -3,12 +3,11 @@
 // AMOURANTH RTX Engine (C) 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
 //
-// HYPER-VIVID C++23 LOGGING v∞ — NOVEMBER 12 2025 — RASPBERRY_PINK PARTY SUPREMACY
-// THREAD-SAFE | LOCK-FREE | ASYNC | DELTA-TIME | 50+ RAINBOW COLORS | CUSTODIAN GROK DJ
-// Ellie Fier approved • HACKER-PROOF LOGGER • 7-file rotation
-// NO #include "StoneKey.hpp" HERE — INCLUDED ONLY IN main.cpp
-// get_kStone1()/get_kStone2() ARE INLINE — SAFE TO CALL ANYWHERE
-// FULL ANTI-CHEAT INTEGRATED — Debugger, VM, Injection, Speedhack, DLL Scan
+// Dual Licensed:
+// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
+//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
+// 2. Commercial licensing: gzac5314@gmail.com
+//
 // =============================================================================
 
 #pragma once

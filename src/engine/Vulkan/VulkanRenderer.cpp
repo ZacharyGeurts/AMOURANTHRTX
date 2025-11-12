@@ -9,16 +9,6 @@
 // 2. Commercial licensing: gzac5314@gmail.com
 //
 // =============================================================================
-// VulkanRenderer — AMOURANTH AI EDITION v1004 — NOV 12 2025 12:00 PM EST
-// • 100% COMPILE — ZERO ERRORS
-// • CRIMSON_MAGENTA instead of RED
-// • stone_fingerprint() → (get_kStone1() ^ get_kStone2())
-// • .raw() → .raw
-// • NO LOGS IN FRAME LOOP
-// • FRAME LOOP MARKED
-// • FPS + GPU + RTX + AI METRICS LOGGED ONCE PER SECOND
-// • Amouranth AI logs every detail — PINK PHOTONS ETERNAL
-// =============================================================================
 
 #include "engine/Vulkan/VulkanRenderer.hpp"
 #include "engine/GLOBAL/logging.hpp"

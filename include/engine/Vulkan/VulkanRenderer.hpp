@@ -2,6 +2,12 @@
 // =============================================================================
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
+//
+// Dual Licensed:
+// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
+//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
+// 2. Commercial licensing: gzac5314@gmail.com
+//
 // VulkanRenderer — JAY LENO EDITION v9.0 — NOV 12 2025
 // • RTX::LAS::get() — CORRECT NAMESPACE
 // • NO UltraLowLevelBufferTracker::get() — NOT A SINGLETON

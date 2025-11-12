@@ -2,11 +2,12 @@
 // =============================================================================
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
-// VulkanCore.hpp — VALHALLA v70 FINAL — HEADER ONLY — NOV 12 2025
-// • NO DUPLICATE DEFINITIONS
-// • ALL GLOBALS: extern
-// • ALL FUNCTIONS: forward declared
-// • STONEKEY v∞ ACTIVE — PINK PHOTONS ETERNAL
+//
+// Dual Licensed:
+// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
+//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
+// 2. Commercial licensing: gzac5314@gmail.com
+//
 // =============================================================================
 
 #pragma once
@@ -31,6 +32,7 @@ constexpr uint32_t MAX_FRAMES_IN_FLIGHT = Options::Performance::MAX_FRAMES_IN_FL
 // =============================================================================
 extern VkPhysicalDevice g_PhysicalDevice;
 extern std::unique_ptr<VulkanRTX> g_rtx_instance;
+
 
 // =============================================================================
 // Shader Binding Table

@@ -34,12 +34,23 @@
 using namespace Logging::Color;
 
 // -----------------------------------------------------------------------------
-// GLOBAL: g_PhysicalDevice — REQUIRED BY LEGACY CODE
+// GLOBAL DEFINITIONS
 // -----------------------------------------------------------------------------
 VkPhysicalDevice g_PhysicalDevice = VK_NULL_HANDLE;
-
-// Global RTX instance — singleton via unique_ptr
 std::unique_ptr<VulkanRTX> g_rtx_instance;
+
+// -----------------------------------------------------------------------------
+// ONE-TIME INITIALIZATION — CALLED ONCE AT STARTUP
+// -----------------------------------------------------------------------------
+void initVulkanCoreGlobals() {
+    LOG_INFO_CAT("VulkanCore", "{}initVulkanCoreGlobals() — START{}", PLASMA_FUCHSIA, RESET);
+    static bool initialized = false;
+    if (initialized) {
+        LOG_DEBUG_CAT("VulkanCore", "Already initialized — skipping");
+        return;
+    }
+    initialized = true;
+}
 
 // Global accessor — thread-safe, exception-safe
 [[nodiscard]] inline VulkanRTX& g_rtx() {
