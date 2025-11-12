@@ -23,7 +23,6 @@
 #include "engine/GLOBAL/RTXHandler.hpp"
 #include "engine/GLOBAL/LAS.hpp"
 #include "engine/GLOBAL/GlobalBindings.hpp"
-#include "engine/GLOBAL/GlobalContext.hpp"
 #include "engine/Vulkan/VulkanPipelineManager.hpp"
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/GLOBAL/OptionsMenu.hpp"
