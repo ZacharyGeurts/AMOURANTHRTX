@@ -29,6 +29,7 @@ static_assert(sizeof(uintptr_t) >= 8, "StoneKey requires 64-bit platform");
 static_assert(__cplusplus >= 202302L, "StoneKey requires C++23");
 
 using namespace Logging::Color;
+extern VkPhysicalDevice g_PhysicalDevice;
 
 // -----------------------------------------------------------------------------
 // 1. COMPILE-TIME ENTROPY (pure constexpr)
@@ -111,39 +112,39 @@ static_assert(stone_key2_base() != 0,
 
 [[nodiscard]] inline uint64_t runtime_stone_entropy() noexcept {
     LOG_INFO_CAT("StoneKey",
-                 "{}RUNTIME ENTROPY GEN — RDRAND + RDTSC + TLS JITTER{}",
+                 "{} 👩‍🦰 RUNTIME ENTROPY GEN — RDRAND + RDTSC + TLS JITTER {}",
                  LILAC_LAVENDER, RESET);
 
     static bool initialized = false;
     static uint64_t entropy = 0;
     if (initialized) {
-        LOG_DEBUG_CAT("StoneKey", "Runtime entropy already cached");
+        LOG_DEBUG_CAT("StoneKey", "{} 👩‍🦰 Runtime entropy already cached {}", OCEAN_TEAL, RESET);
         return entropy;
     }
 
     uint64_t e = 0;
-    e ^= rdrand64();                                            LOG_DEBUG_CAT("StoneKey", "RDRAND: 0x{:x}", e);
-    e ^= __rdtsc();                                             LOG_DEBUG_CAT("StoneKey", "RDTSC:  0x{:x}", e);
+    e ^= rdrand64();                                            LOG_DEBUG_CAT("StoneKey", "{} 👩‍🦰 RDRAND: 0x{:x} {}", OCEAN_TEAL, e, RESET);
+    e ^= __rdtsc();                                             LOG_DEBUG_CAT("StoneKey", "{} 👩‍🦰 RDTSC:  0x{:x} {}", OCEAN_TEAL, e, RESET);
     e ^= static_cast<uint64_t>(std::chrono::high_resolution_clock::now()
-                               .time_since_epoch().count()); LOG_DEBUG_CAT("StoneKey", "chrono: 0x{:x}", e);
-    e ^= reinterpret_cast<uintptr_t>(&e);                       LOG_DEBUG_CAT("StoneKey", "stack:  0x{:x}", e);
+                               .time_since_epoch().count()); LOG_DEBUG_CAT("StoneKey", "{} 👩‍🦰 chrono: 0x{:x} {}", OCEAN_TEAL, e, RESET);
+    e ^= reinterpret_cast<uintptr_t>(&e);                       LOG_DEBUG_CAT("StoneKey", "{} 👩‍🦰 stack:  0x{:x} {}", OCEAN_TEAL, e, RESET);
 
     thread_local uint64_t tls_jitter = 0;
     if (!tls_jitter) {
         tls_jitter = std::hash<std::thread::id>{}(std::this_thread::get_id())
                      ^ (__rdtsc() & 0xFFFFFFFFULL);
-        LOG_DEBUG_CAT("StoneKey", "TLS jitter init: 0x{:x}", tls_jitter);
+        LOG_DEBUG_CAT("StoneKey", "{} 👩‍🦰 TLS jitter init: 0x{:x} {}", OCEAN_TEAL, tls_jitter, RESET);
     }
-    e ^= tls_jitter;                                            LOG_DEBUG_CAT("StoneKey", "TLS XOR: 0x{:x}", e);
+    e ^= tls_jitter;                                            LOG_DEBUG_CAT("StoneKey", "{} 👩‍🦰 TLS XOR: 0x{:x} {}", OCEAN_TEAL, e, RESET);
 
     e ^= e >> 33; e *= 0xFF51AFD7ED558CCDULL;
     e ^= e >> 33; e *= 0xC4CEB9FE1A85EC53ULL;
-    e ^= e >> 29;                                               LOG_DEBUG_CAT("StoneKey", "XXHash fold: 0x{:x}", e);
+    e ^= e >> 29;                                               LOG_DEBUG_CAT("StoneKey", "{} 👩‍🦰 XXHash fold: 0x{:x} {}", OCEAN_TEAL, e, RESET);
 
     entropy = e;
     initialized = true;
     LOG_SUCCESS_CAT("StoneKey",
-                    "{}RUNTIME ENTROPY SEALED — PINK PHOTONS SCRAMBLED{}",
+                    "{} 👩‍🦰 RUNTIME ENTROPY SEALED — PINK PHOTONS SCRAMBLED {}",
                     RASPBERRY_PINK, RESET);
     return entropy;
 }
@@ -153,36 +154,36 @@ static_assert(stone_key2_base() != 0,
 // -----------------------------------------------------------------------------
 inline uint64_t get_kStone1() noexcept {
     LOG_INFO_CAT("StoneKey",
-                 "{}ACCESSING STONE KEY1 — LAZY INIT{}",
+                 "{} 👩‍🦰 ACCESSING STONE KEY1 — LAZY INIT {}",
                  LILAC_LAVENDER, RESET);
     static uint64_t key = stone_key1_base() ^ runtime_stone_entropy();
-    LOG_DEBUG_CAT("StoneKey", "Key1 = base ^ runtime (masked) 0x{:x}",
-                  key ^ 0xDEADBEEF);
+    LOG_DEBUG_CAT("StoneKey", "{} 👩‍🦰 Key1 = base ^ runtime (masked) 0x{:x} {}", OCEAN_TEAL,
+                  key ^ 0xDEADBEEF, RESET);
     LOG_SUCCESS_CAT("StoneKey",
-                    "{}STONE KEY1 RETRIEVED — SCRAMBLE ACTIVE{}",
+                    "{} 👩‍🦰 STONE KEY1 RETRIEVED — SCRAMBLE ACTIVE {}",
                     RASPBERRY_PINK, RESET);
     return key;
 }
 
 inline uint64_t get_kStone2() noexcept {
     LOG_INFO_CAT("StoneKey",
-                 "{}ACCESSING STONE KEY2 — LAZY INIT{}",
+                 "{} 👩‍🦰 ACCESSING STONE KEY2 — LAZY INIT {}",
                  LILAC_LAVENDER, RESET);
     static uint64_t key = stone_key2_base() ^ runtime_stone_entropy()
                           ^ 0x6969696942069420ULL;
-    LOG_DEBUG_CAT("StoneKey", "Key2 = base ^ runtime ^ salt (masked) 0x{:x}",
-                  key ^ 0xDEADBEEF);
+    LOG_DEBUG_CAT("StoneKey", "{} 👩‍🦰 Key2 = base ^ runtime ^ salt (masked) 0x{:x} {}", OCEAN_TEAL,
+                  key ^ 0xDEADBEEF, RESET);
     LOG_SUCCESS_CAT("StoneKey",
-                    "{}STONE KEY2 RETRIEVED — DUAL SCRAMBLE ENGAGED{}",
+                    "{} 👩‍🦰 STONE KEY2 RETRIEVED — DUAL SCRAMBLE ENGAGED {}",
                     RASPBERRY_PINK, RESET);
     return key;
 }
 
 inline uint64_t get_kHandleObfuscator() noexcept {
-    LOG_DEBUG_CAT("StoneKey", "Computing handle obfuscator");
+    LOG_DEBUG_CAT("StoneKey", "{} 👩‍🦰 Computing handle obfuscator {}", OCEAN_TEAL, RESET);
     static uint64_t key = get_kStone1() ^ get_kStone2()
                           ^ 0x1337C0DEULL ^ 0x69F00D42ULL;
-    LOG_DEBUG_CAT("StoneKey", "Obfuscator (masked) 0x{:x}", key ^ 0xDEADBEEF);
+    LOG_DEBUG_CAT("StoneKey", "{} 👩‍🦰 Obfuscator (masked) 0x{:x} {}", OCEAN_TEAL, key ^ 0xDEADBEEF, RESET);
     return key;
 }
 
@@ -195,18 +196,18 @@ inline constexpr uint64_t kHandleObfuscator  = 0;
 // 5. OBFUSCATE / DEOBFUSCATE (trace-level logging)
 // -----------------------------------------------------------------------------
 [[nodiscard]] inline uint64_t obfuscate(uint64_t h) noexcept {
-    LOG_TRACE_CAT("StoneKey", "Obfuscating handle 0x{:x}", h);
+    LOG_TRACE_CAT("StoneKey", "{} 👩‍🦰 Obfuscating handle 0x{:x}", OCEAN_TEAL, h);
     uint64_t mask   = -static_cast<uint64_t>(!!get_kHandleObfuscator());
     uint64_t result = h ^ (get_kHandleObfuscator() & mask);
-    LOG_TRACE_CAT("StoneKey", "Obfuscated to 0x{:x}", result);
+    LOG_TRACE_CAT("StoneKey", "{} 👩‍🦰 Obfuscated to 0x{:x}", OCEAN_TEAL, result);
     return result;
 }
 
 [[nodiscard]] inline uint64_t deobfuscate(uint64_t h) noexcept {
-    LOG_TRACE_CAT("StoneKey", "Deobfuscating handle 0x{:x}", h);
+    LOG_TRACE_CAT("StoneKey", "{} 👩‍🦰 Deobfuscating handle 0x{:x}", OCEAN_TEAL, h);
     uint64_t mask   = -static_cast<uint64_t>(!!get_kHandleObfuscator());
     uint64_t result = h ^ (get_kHandleObfuscator() & mask);
-    LOG_TRACE_CAT("StoneKey", "Deobfuscated to 0x{:x}", result);
+    LOG_TRACE_CAT("StoneKey", "{} 👩‍🦰 Deobfuscated to 0x{:x}", OCEAN_TEAL, result);
     return result;
 }
 
@@ -215,15 +216,15 @@ inline constexpr uint64_t kHandleObfuscator  = 0;
 // -----------------------------------------------------------------------------
 [[nodiscard]] inline uint64_t stone_fingerprint() noexcept {
     LOG_INFO_CAT("StoneKey",
-                 "{}COMPUTING SECURE FINGERPRINT — STONE1 ^ STONE2{}",
+                 "{} 👩‍🦰 COMPUTING SECURE FINGERPRINT — STONE1 ^ STONE2 {}",
                  LILAC_LAVENDER, RESET);
     uint64_t fp = get_kStone1() ^ get_kStone2();
-    LOG_DEBUG_CAT("StoneKey", "Raw XOR 0x{:x}", fp);
+    LOG_DEBUG_CAT("StoneKey", "{} 👩‍🦰 Raw XOR 0x{:x} {}", OCEAN_TEAL, fp, RESET);
     fp ^= fp >> 33; fp *= 0xFF51AFD7ED558CCDULL;
     fp ^= fp >> 33;
-    LOG_DEBUG_CAT("StoneKey", "Hashed FP 0x{:x}", fp);
+    LOG_DEBUG_CAT("StoneKey", "{} 👩‍🦰 Hashed FP 0x{:x} {}", OCEAN_TEAL, fp, RESET);
     LOG_SUCCESS_CAT("StoneKey",
-                    "{}FINGERPRINT GENERATED — ANON HASH SECURE{}",
+                    "{} 👩‍🦰 FINGERPRINT GENERATED — ANON HASH SECURE {}",
                     RASPBERRY_PINK, RESET);
     return fp;
 }
@@ -233,22 +234,24 @@ inline constexpr uint64_t kHandleObfuscator  = 0;
 // -----------------------------------------------------------------------------
 inline void log_amouranth() noexcept {
     LOG_INFO_CAT("StoneKey",
-                 "{}AMOURANTH™ INIT — STONEKEY APOCALYPSE v3{}",
+                 "{} 👩‍🦰 AMOURANTH™ INIT — STONEKEY APOCALYPSE v3 {}",
                  LILAC_LAVENDER, RESET);
     static bool logged = false;
     if (logged) {
-        LOG_DEBUG_CAT("StoneKey", "Amouranth log already emitted");
+        LOG_DEBUG_CAT("StoneKey", "{} 👩‍🦰 Amouranth log already emitted {}", OCEAN_TEAL, RESET);
         return;
     }
     logged = true;
 
     if (!g_PhysicalDevice) {
-        LOG_WARN_CAT("StoneKey", "Vendor: Unknown (Vulkan not ready) | StoneKey APOCALYPSE v3");
+        LOG_WARN_CAT("StoneKey", "{} 👩‍🦰 Vendor: Unknown (Vulkan not ready) | StoneKey APOCALYPSE v3 {}", CRIMSON_MAGENTA, RESET);
         LOG_INFO_CAT("StoneKey",
-                     "FINGERPRINT: 0x{:016X} | Scramble: PASS | TLS jitter active | BMQ shields up",
-                     static_cast<unsigned long long>(stone_fingerprint()));
+                     "{} 👩‍🦰 FINGERPRINT: 0x{:016X} | Scramble: PASS | TLS jitter active | BMQ shields up {}",
+                     RASPBERRY_PINK,
+                     static_cast<unsigned long long>(stone_fingerprint()),
+                     RESET);
         LOG_SUCCESS_CAT("StoneKey",
-                        "{}Our rock eternal v3. Keys sealed. Hackers blind.{}",
+                        "{} 👩‍🦰 Our rock eternal v3. Keys sealed. Hackers blind. {}",
                         RASPBERRY_PINK, RESET);
         return;
     }
@@ -260,12 +263,14 @@ inline void log_amouranth() noexcept {
                 dev_name.find("lavapipe") != std::string::npos;
     const char* vendor = mesa ? "CPU/Mesa" : props.deviceName;
 
-    LOG_INFO_CAT("StoneKey", "Vendor: {} | StoneKey APOCALYPSE v3", vendor);
+    LOG_INFO_CAT("StoneKey", "{} 👩‍🦰 Vendor: {} | StoneKey APOCALYPSE v3 {}", LIME_GREEN, vendor, RESET);
     LOG_INFO_CAT("StoneKey",
-                 "FINGERPRINT: 0x{:016X} | Scramble: PASS | TLS jitter active | BMQ shields up",
-                 static_cast<unsigned long long>(stone_fingerprint()));
+                 "{} 👩‍🦰 FINGERPRINT: 0x{:016X} | Scramble: PASS | TLS jitter active | BMQ shields up {}",
+                 RASPBERRY_PINK,
+                 static_cast<unsigned long long>(stone_fingerprint()),
+                 RESET);
     LOG_SUCCESS_CAT("StoneKey",
-                    "{}Our rock eternal v3. Keys sealed. Hackers blind.{}",
+                    "{} 👩‍🦰 Our rock eternal v3. Keys sealed. Hackers blind. {}",
                     RASPBERRY_PINK, RESET);
 }
 #define LOG_AMOURANTH() log_amouranth()

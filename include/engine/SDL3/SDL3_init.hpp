@@ -9,10 +9,12 @@
 #include <SDL3/SDL_vulkan.h>
 #include <vulkan/vulkan.h>
 #include <string>
+#include <memory>
 
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/GLOBAL/camera.hpp"     // GlobalCamera::deobfuscate
 #include "engine/GLOBAL/RTXHandler.hpp"
+#include "engine/GLOBAL/OptionsMenu.hpp"
 
 namespace SDL3Initializer {
 
@@ -23,6 +25,16 @@ public:
 
     [[nodiscard]] SDL_Window* getWindow() const noexcept;
     [[nodiscard]] VkSurfaceKHR getSurface() const noexcept;
+
+    // === FACTORY METHOD — RAII UNIQUE_PTR ===
+    [[nodiscard]] static std::unique_ptr<SDL3Initializer> create(
+        const char* title, int width, int height, Uint32 flags = 0) {
+        return std::make_unique<SDL3Initializer>(std::string(title), width, height, flags);
+    }
+
+    // === TOGGLES ===
+    void toggleFullscreen(bool enable) noexcept;
+    void toggleMaximize(bool enable) noexcept;
 
 private:
     SDL_Window* window_ = nullptr;

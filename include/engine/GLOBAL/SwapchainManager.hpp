@@ -1,23 +1,26 @@
 // include/engine/GLOBAL/SwapchainManager.hpp
 // =============================================================================
-// AMOURANTH RTX Engine (C) 2025 by Zachary Geurts <gzac5314@gmail.com>
+// AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
+//
+// SwapchainManager v9.0 — FINAL — NOV 13 2025 — FULLY FIXED
+// • NO string_VkFormat / string_VkColorSpaceKHR — RAW ENUM + std::format
+// • FULL LOGGING — OCEAN_TEAL + PINK PHOTONS
+// • NO WINDOW PARAMETER — recreate(w, h) ONLY
+// • GLOBAL ACCESS — SWAPCHAIN macro → SwapchainManager::get()
+// • NO CONFLICT WITH VulkanRenderer.hpp
+// • C++23, -Werror CLEAN
 //
 // Dual Licensed:
 // 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
 //    https://creativecommons.org/licenses/by-nc/4.0/legalcode
 // 2. Commercial licensing: gzac5314@gmail.com
-//
-// SwapchainManager v7.0 — FINAL — NOV 12 2025 — FULL LOGGING — FIXED
-// • NO string_VkFormat / string_VkColorSpaceKHR — REMOVED
-// • USING RAW ENUM VALUES + std::format
-// • FULL LOGGING — EVERY STEP — PINK PHOTONS ETERNAL
-// • OCEAN_TEAL FOR SWAPCHAIN MESSAGES
 // =============================================================================
 
 #pragma once
 
 #include "engine/GLOBAL/RTXHandler.hpp"
+#include "engine/GLOBAL/logging.hpp"
 #include <vulkan/vulkan.h>
 #include <vector>
 #include <span>
@@ -28,22 +31,26 @@
 #include <type_traits>
 #include <algorithm>
 #include <stdexcept>
-#include "engine/GLOBAL/logging.hpp"
 
 using namespace Logging::Color;
 
-// Forward — ctx() is eternal
+// ── Forward Declarations ───────────────────────────────────────────────────────
 struct Context;
 
-// ── SwapchainManager (singleton + init) ───────────────────────────────────────
+// ── Global Access Macro (Safe) ───────────────────────────────────────────────
+#define SWAPCHAIN SwapchainManager::get()
+
+// ── SwapchainManager (Singleton) ─────────────────────────────────────────────
 class SwapchainManager {
 public:
+    // ── Singleton Access ─────────────────────────────────────────────────────
     static SwapchainManager& get() noexcept { 
         LOG_INFO_CAT("SWAPCHAIN", "{}SwapchainManager::get() — singleton access{}", OCEAN_TEAL, RESET);
         static SwapchainManager inst; 
         return inst; 
     }
 
+    // ── Initialization ───────────────────────────────────────────────────────
     void init(VkInstance inst, VkPhysicalDevice phys, VkDevice dev,
               VkSurfaceKHR surf, uint32_t w, uint32_t h) {
         LOG_INFO_CAT("SWAPCHAIN", "{}SwapchainManager::init() — START — {}×{} {}", PLASMA_FUCHSIA, w, h, RESET);
@@ -63,6 +70,7 @@ public:
                         PLASMA_FUCHSIA, images_.size(), imageViews_.size(), RESET);
     }
 
+    // ── Recreate (NO WINDOW*) ────────────────────────────────────────────────
     void recreate(uint32_t w, uint32_t h) { 
         LOG_INFO_CAT("SWAPCHAIN", "{}SwapchainManager::recreate() — {}×{} {}", RASPBERRY_PINK, w, h, RESET);
         vkDeviceWaitIdle(device_); 
@@ -73,6 +81,7 @@ public:
         LOG_SUCCESS_CAT("SWAPCHAIN", "Recreate complete — {} images", images_.size());
     }
 
+    // ── Cleanup ──────────────────────────────────────────────────────────────
     void cleanup() noexcept {
         LOG_INFO_CAT("SWAPCHAIN", "{}SwapchainManager::cleanup() — START{}", RASPBERRY_PINK, RESET);
         for (auto& v : imageViews_) { 
@@ -88,6 +97,7 @@ public:
         LOG_SUCCESS_CAT("SWAPCHAIN", "Cleanup complete — all handles released");
     }
 
+    // ── Accessors ────────────────────────────────────────────────────────────
     [[nodiscard]] VkSwapchainKHR swapchain() const noexcept { 
         LOG_INFO_CAT("SWAPCHAIN", "swapchain() → 0x{:x}", reinterpret_cast<uint64_t>(*swapchain_));
         return *swapchain_; 
@@ -113,6 +123,7 @@ private:
     SwapchainManager() {
         LOG_INFO_CAT("SWAPCHAIN", "{}SwapchainManager constructed — singleton ready{}", OCEAN_TEAL, RESET);
     }
+
     void createSwapchain(uint32_t width, uint32_t height);
     void createImageViews();
 

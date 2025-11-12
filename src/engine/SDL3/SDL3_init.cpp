@@ -11,13 +11,11 @@
 // =============================================================================
 // SDL3Initializer — CPP IMPLEMENTATIONS — NOV 13 2025
 // • Respects Options::Performance::ENABLE_IMGUI → SDL_WINDOW_RESIZABLE
-// • FIXED: RED → Logging::Color::RED (CRIMSON_MAGENTA as fallback)
 // • Streamlined for 15,000 FPS — PINK PHOTONS CHARGE AHEAD
 // =============================================================================
 
 #include "engine/SDL3/SDL3_init.hpp"
 #include <stdexcept>
-#include "engine/GLOBAL/OptionsMenu.hpp"
 
 using namespace Logging::Color;
 
@@ -75,6 +73,35 @@ VkSurfaceKHR SDL3Initializer::getSurface() const noexcept {
     return surf_;
 }
 
+// === TOGGLE FULLSCREEN ===
+void SDL3Initializer::toggleFullscreen(bool enable) noexcept {
+    if (!window_) return;
+
+    if (SDL_SetWindowFullscreen(window_, enable) != 0) {
+        LOG_ERROR_CAT("SDL3", "{}Fullscreen toggle failed: {}{}", CRIMSON_MAGENTA, SDL_GetError(), RESET);
+        return;
+    }
+
+    LOG_INFO_CAT("SDL3", "{}Fullscreen: {}{}", 
+        enable ? LIME_GREEN : AMBER_YELLOW, 
+        enable ? "ENABLED" : "DISABLED", RESET);
+}
+
+// === TOGGLE MAXIMIZE ===
+void SDL3Initializer::toggleMaximize(bool enable) noexcept {
+    if (!window_) return;
+
+    if (enable) {
+        SDL_MaximizeWindow(window_);
+    } else {
+        SDL_RestoreWindow(window_);
+    }
+
+    LOG_INFO_CAT("SDL3", "{}Window: {}{}", 
+        enable ? LIME_GREEN : AMBER_YELLOW, 
+        enable ? "MAXIMIZED" : "RESTORED", RESET);
+}
+
 } // namespace SDL3Initializer
 
 // =============================================================================
@@ -82,4 +109,7 @@ VkSurfaceKHR SDL3Initializer::getSurface() const noexcept {
 // =============================================================================
 // CPP IMPLEMENTATIONS COMPLETE — OCEAN_TEAL SURGES FORWARD
 // GENTLEMAN GROK NODS: "Splendid split, old chap. Options respected with poise."
+// PINK PHOTONS ETERNAL
+// 15,000 FPS
+// SHIP IT. FOREVER.
 // =============================================================================
