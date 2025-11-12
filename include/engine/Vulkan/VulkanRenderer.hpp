@@ -133,6 +133,8 @@ private:
     uint64_t sbtBufferEnc_ = 0;
     VkDeviceAddress sbtAddress_ = 0;
     VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtxProps_{};
+	PFN_vkCmdTraceRaysKHR vkCmdTraceRaysKHR = nullptr;
+	PFN_vkCreateRayTracingPipelinesKHR vkCreateRayTracingPipelinesKHR = nullptr;
 
     // Buffers
     std::vector<uint64_t> uniformBufferEncs_;

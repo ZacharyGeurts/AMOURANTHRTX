@@ -227,6 +227,20 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window,
 
     auto& c = RTX::ctx();
 
+    // Load Ray Tracing Extension Function Pointers
+    vkCmdTraceRaysKHR = reinterpret_cast<PFN_vkCmdTraceRaysKHR>(vkGetDeviceProcAddr(c.vkDevice(), "vkCmdTraceRaysKHR"));
+    vkCreateRayTracingPipelinesKHR = reinterpret_cast<PFN_vkCreateRayTracingPipelinesKHR>(vkGetDeviceProcAddr(c.vkDevice(), "vkCreateRayTracingPipelinesKHR"));
+
+    if (!vkCmdTraceRaysKHR) {
+        throw std::runtime_error("Failed to load vkCmdTraceRaysKHR");
+    }
+    if (!vkCreateRayTracingPipelinesKHR) {
+        throw std::runtime_error("Failed to load vkCreateRayTracingPipelinesKHR");
+    }
+
+    LOG_INFO_CAT("RTX", "Ray tracing function pointers loaded — vkCmdTraceRaysKHR @ 0x{:x} | vkCreateRayTracingPipelinesKHR @ 0x{:x}", 
+                 reinterpret_cast<uint64_t>(vkCmdTraceRaysKHR), reinterpret_cast<uint64_t>(vkCreateRayTracingPipelinesKHR));
+
     // Sync objects
     VkSemaphoreCreateInfo semInfo{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
     VkFenceCreateInfo fenceInfo{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, nullptr, VK_FENCE_CREATE_SIGNALED_BIT};
