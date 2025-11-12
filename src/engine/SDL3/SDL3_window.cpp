@@ -47,7 +47,7 @@ SDLWindowPtr createWindow(const char* title, int w, int h, Uint32 flags) {
 
     SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "wayland,x11");
 
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) != 0) {
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) == 0) {
         LOG_ERROR_CAT("SDL", "{}SDL_Init failed: {}{}", CRIMSON_MAGENTA, SDL_GetError(), RESET);
         throw std::runtime_error("SDL_Init failed");
     }

@@ -148,7 +148,7 @@ void initVulkan(
     // --- Surface ---
     LOG_INFO_CAT("VULKAN", "{}Creating VkSurface from SDL window @ {:p}...{}", LIME_GREEN, static_cast<void*>(window), RESET);
     VkSurfaceKHR rawSurf = VK_NULL_HANDLE;
-    if (SDL_Vulkan_CreateSurface(window, rawInst, nullptr, &rawSurf) != 0) {
+    if (SDL_Vulkan_CreateSurface(window, rawInst, nullptr, &rawSurf) == 0) {
         LOG_ERROR_CAT("VULKAN", "{}SDL_Vulkan_CreateSurface failed: {}{}", CRIMSON_MAGENTA, SDL_GetError(), RESET);
         std::cerr << "[SDL ERROR] Failed to create Vulkan surface\n";
         std::abort();

@@ -8,6 +8,7 @@
 // • toggleMaximize → uses SDL_SetWindowFullscreen
 // • All inline — NO src/handle_app.cpp
 // • Full OptionsMenu integration
+// • NO GLOBAL LOGGING — NO FREEZE
 // =============================================================================
 
 #pragma once
@@ -88,7 +89,7 @@ private:
 };
 
 // =============================================================================
-// IMPLEMENTATION — LOGGED + MENU-WIRED
+// IMPLEMENTATION — LOGGED + MENU-WIRED — NO GLOBAL LOGGING
 // =============================================================================
 
 inline Application::Application(const char* title, int width, int height)
@@ -293,7 +294,7 @@ inline bool Application::shouldQuit() const { return quit_; }
 inline void Application::handleResize(int w, int h) {
     if (w <= 0 || h <= 0) return;
     width_ = w; height_ = h;
-    LOG_INFO_CAT("APP", "{}handleResize({}x{}) to recreating swapchain{}", 
+    LOG_INFO_CAT("APP", "{}handleResize({}x{}) → recreating swapchain{}", 
         PLASMA_FUCHSIA, w, h, RESET);
     if (renderer_) renderer_->handleResize(w, h);
 }

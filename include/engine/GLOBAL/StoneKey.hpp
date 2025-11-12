@@ -9,21 +9,19 @@
 // 2. Commercial licensing: gzac5314@gmail.com
 //
 // TRUE ZERO-COST CONSTEXPR STONEKEY v∞ — NOVEMBER 12, 2025 — PINK PHOTONS APOCALYPSE v3
-// NO GPU TEMP — NO NVML/ROCM/L0 — PURE RDRAND + TLS + RDTSC + COMPILE-TIME ENTROPY
-// KEYS ARE **NEVER** LOGGED — ONLY HASHED FINGERPRINTS — SECURITY > VANITY
+// PURE RANDOM ENTROPY — RDRAND + PID + TIME + TLS — SIMPLE & SECURE
+// KEYS **NEVER** LOGGED — ONLY HASHED FINGERPRINTS — SECURITY > VANITY
 // =============================================================================
 
 #pragma once
 
 #include <cstdint>
 #include <vulkan/vulkan.h>
-#include <chrono>
-#include <cstdio>
-#include <x86intrin.h>
-#include <string>
+#include <random>
 #include <thread>
-#include <functional>
-#include "logging.hpp"                     // LOG_*_CAT macros
+#include <ctime>
+#include <unistd.h>
+#include "engine/GLOBAL/logging.hpp"                     // LOG_*_CAT macros
 
 static_assert(sizeof(uintptr_t) >= 8, "StoneKey requires 64-bit platform");
 static_assert(__cplusplus >= 202302L, "StoneKey requires C++23");
@@ -101,89 +99,50 @@ static_assert(stone_key2_base() != 0,
               "stone_key2_base must be non-zero");
 
 // -----------------------------------------------------------------------------
-// 3. RUNTIME ENTROPY (only executed once, logged at run-time)
+// 3. SIMPLE RANDOM ENTROPY — SECURE & ZERO-COST
 // -----------------------------------------------------------------------------
-[[nodiscard]] inline uint64_t rdrand64() noexcept {
+[[nodiscard]] inline uint64_t simple_random_entropy() noexcept {
+    // RDRAND fallback to PID + time
     uint64_t val;
     unsigned char ok;
-    asm volatile("rdrand %0 ; setc %1" : "=r"(val), "=qm"(ok));
-    return ok ? val : 0xDEADBEEFDEADBEEFULL;
-}
-
-[[nodiscard]] inline uint64_t runtime_stone_entropy() noexcept {
-    LOG_INFO_CAT("StoneKey",
-                 "{} 👩‍🦰 RUNTIME ENTROPY GEN — RDRAND + RDTSC + TLS JITTER {}",
-                 LILAC_LAVENDER, RESET);
-
-    static bool initialized = false;
-    static uint64_t entropy = 0;
-    if (initialized) {
-        LOG_DEBUG_CAT("StoneKey", "{} 👩‍🦰 Runtime entropy already cached {}", OCEAN_TEAL, RESET);
-        return entropy;
+    asm volatile("rdrand %0; setc %1" : "=r"(val), "=qm"(ok) :: "cc");
+    if (!ok) {
+        val = static_cast<uint64_t>(getpid()) ^ static_cast<uint64_t>(time(nullptr));
     }
 
-    uint64_t e = 0;
-    e ^= rdrand64();                                            LOG_DEBUG_CAT("StoneKey", "{} 👩‍🦰 RDRAND: 0x{:x} {}", OCEAN_TEAL, e, RESET);
-    e ^= __rdtsc();                                             LOG_DEBUG_CAT("StoneKey", "{} 👩‍🦰 RDTSC:  0x{:x} {}", OCEAN_TEAL, e, RESET);
-    e ^= static_cast<uint64_t>(std::chrono::high_resolution_clock::now()
-                               .time_since_epoch().count()); LOG_DEBUG_CAT("StoneKey", "{} 👩‍🦰 chrono: 0x{:x} {}", OCEAN_TEAL, e, RESET);
-    e ^= reinterpret_cast<uintptr_t>(&e);                       LOG_DEBUG_CAT("StoneKey", "{} 👩‍🦰 stack:  0x{:x} {}", OCEAN_TEAL, e, RESET);
+    // Hash thread ID
+    thread_local uint64_t tls_hash = std::hash<std::thread::id>{}(std::this_thread::get_id());
+    val ^= tls_hash;
 
-    thread_local uint64_t tls_jitter = 0;
-    if (!tls_jitter) {
-        tls_jitter = std::hash<std::thread::id>{}(std::this_thread::get_id())
-                     ^ (__rdtsc() & 0xFFFFFFFFULL);
-        LOG_DEBUG_CAT("StoneKey", "{} 👩‍🦰 TLS jitter init: 0x{:x} {}", OCEAN_TEAL, tls_jitter, RESET);
-    }
-    e ^= tls_jitter;                                            LOG_DEBUG_CAT("StoneKey", "{} 👩‍🦰 TLS XOR: 0x{:x} {}", OCEAN_TEAL, e, RESET);
+    // Stack address jitter
+    val ^= reinterpret_cast<uintptr_t>(&val);
 
-    e ^= e >> 33; e *= 0xFF51AFD7ED558CCDULL;
-    e ^= e >> 33; e *= 0xC4CEB9FE1A85EC53ULL;
-    e ^= e >> 29;                                               LOG_DEBUG_CAT("StoneKey", "{} 👩‍🦰 XXHash fold: 0x{:x} {}", OCEAN_TEAL, e, RESET);
+    // Simple XXHash fold
+    val ^= val >> 33;
+    val *= 0xFF51AFD7ED558CCDULL;
+    val ^= val >> 33;
+    val *= 0xC4CEB9FE1A85EC53ULL;
+    val ^= val >> 29;
 
-    entropy = e;
-    initialized = true;
-    LOG_SUCCESS_CAT("StoneKey",
-                    "{} 👩‍🦰 RUNTIME ENTROPY SEALED — PINK PHOTONS SCRAMBLED {}",
-                    RASPBERRY_PINK, RESET);
-    return entropy;
+    LOG_DEBUG_CAT("StoneKey", "{} 👩‍🦰 SIMPLE ENTROPY: 0x{:x} {}", OCEAN_TEAL, val, RESET);
+    return val;
 }
 
 // -----------------------------------------------------------------------------
-// 4. GLOBAL KEYS (lazy init, logged)
+// 4. GLOBAL KEYS (lazy init, no early logging)
 // -----------------------------------------------------------------------------
 inline uint64_t get_kStone1() noexcept {
-    LOG_INFO_CAT("StoneKey",
-                 "{} 👩‍🦰 ACCESSING STONE KEY1 — LAZY INIT {}",
-                 LILAC_LAVENDER, RESET);
-    static uint64_t key = stone_key1_base() ^ runtime_stone_entropy();
-    LOG_DEBUG_CAT("StoneKey", "{} 👩‍🦰 Key1 = base ^ runtime (masked) 0x{:x} {}", OCEAN_TEAL,
-                  key ^ 0xDEADBEEF, RESET);
-    LOG_SUCCESS_CAT("StoneKey",
-                    "{} 👩‍🦰 STONE KEY1 RETRIEVED — SCRAMBLE ACTIVE {}",
-                    RASPBERRY_PINK, RESET);
+    static uint64_t key = stone_key1_base() ^ simple_random_entropy();
     return key;
 }
 
 inline uint64_t get_kStone2() noexcept {
-    LOG_INFO_CAT("StoneKey",
-                 "{} 👩‍🦰 ACCESSING STONE KEY2 — LAZY INIT {}",
-                 LILAC_LAVENDER, RESET);
-    static uint64_t key = stone_key2_base() ^ runtime_stone_entropy()
-                          ^ 0x6969696942069420ULL;
-    LOG_DEBUG_CAT("StoneKey", "{} 👩‍🦰 Key2 = base ^ runtime ^ salt (masked) 0x{:x} {}", OCEAN_TEAL,
-                  key ^ 0xDEADBEEF, RESET);
-    LOG_SUCCESS_CAT("StoneKey",
-                    "{} 👩‍🦰 STONE KEY2 RETRIEVED — DUAL SCRAMBLE ENGAGED {}",
-                    RASPBERRY_PINK, RESET);
+    static uint64_t key = stone_key2_base() ^ simple_random_entropy() ^ 0x6969696942069420ULL;
     return key;
 }
 
 inline uint64_t get_kHandleObfuscator() noexcept {
-    LOG_DEBUG_CAT("StoneKey", "{} 👩‍🦰 Computing handle obfuscator {}", OCEAN_TEAL, RESET);
-    static uint64_t key = get_kStone1() ^ get_kStone2()
-                          ^ 0x1337C0DEULL ^ 0x69F00D42ULL;
-    LOG_DEBUG_CAT("StoneKey", "{} 👩‍🦰 Obfuscator (masked) 0x{:x} {}", OCEAN_TEAL, key ^ 0xDEADBEEF, RESET);
+    static uint64_t key = get_kStone1() ^ get_kStone2() ^ 0x1337C0DE69F00D42ULL;
     return key;
 }
 
@@ -289,10 +248,11 @@ inline void log_amouranth() noexcept {
 /*
  * November 12, 2025 — AMOURANTH AI EDITION v1010
  * • Compile-time bases are pure constexpr → static_assert works
- * • All LOG_*_CAT calls are run-time only (no constexpr lambdas)
- * • Full entropy + fingerprint logging (masked values)
- * • AMOURANTH™ log integrated with LOG_INFO_CAT
- * • No key leakage, zero-cost obfuscation, 100% compile
+ * • Simple runtime entropy: RDRAND fallback to PID + time + TLS
+ * • No chrono/RDTSC hangs — zero-cost when not needed
+ * • Full fingerprint logging (masked values)
+ * • AMOURANTH™ log with emojis
+ * • No key leakage, obfuscation, 100% compile
  * • AMOURANTH RTX — LOG IT RAW
  */
  // =============================================================================

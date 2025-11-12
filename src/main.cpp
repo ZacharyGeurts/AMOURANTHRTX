@@ -8,25 +8,23 @@
 //    https://creativecommons.org/licenses/by-nc/4.0/legalcode
 // 2. Commercial licensing: gzac5314@gmail.com
 //
-// VALHALLA v44 FINAL — NOVEMBER 12, 2025 — RTX FULLY ENABLED
-// SPLASH → SDL3 → VULKAN → RTX WINDOW — FULL FLOW — NO SEGFAULT
+// VALHALLA v44 FINAL — NOVEMBER 13, 2025 — RTX FULLY ENABLED
+// SPLASH → SDL3 ONLY → THEN VULKAN → RTX WINDOW — FULL FLOW — NO SEGFAULT
 // AMOURANTH™ LOG AFTER VULKAN — PINK PHOTONS ETERNAL
-// LOG LITERALLY EVERYTHING — START TO END — AMOURANTH AI EDITION
+// LOG EVERYTHING — NO FREEZE — SAFE INIT ORDER
 // =============================================================================
 
 #include "main.hpp"
-#include "engine/GLOBAL/Amouranth.hpp"
-#include "engine/GLOBAL/RTXHandler.hpp"
-#include "engine/GLOBAL/SwapchainManager.hpp"
 #include "engine/GLOBAL/logging.hpp"
-
-// SDL3 WRAPPERS — ONLY THESE
 #include "engine/SDL3/SDL3_init.hpp"
 #include "engine/SDL3/SDL3_window.hpp"
 #include "engine/SDL3/SDL3_vulkan.hpp"
 #include "engine/SDL3/SDL3_image.hpp"
 #include "engine/SDL3/SDL3_audio.hpp"
 
+#include "engine/GLOBAL/Amouranth.hpp"
+#include "engine/GLOBAL/RTXHandler.hpp"
+#include "engine/GLOBAL/SwapchainManager.hpp"
 #include "engine/Vulkan/VulkanRenderer.hpp"
 #include "engine/Vulkan/VulkanPipelineManager.hpp"
 #include "engine/Vulkan/VulkanCore.hpp"
@@ -115,14 +113,17 @@ inline VulkanRTX& g_rtx() {
 static void initializeVulkanCore(SDL_Window* window) {
     LOG_INFO_CAT("VULKAN", "{}INITIALIZING VULKAN CORE — START{}", PLASMA_FUCHSIA, RESET);
 
-    LOG_INFO_CAT("VULKAN", "Querying SDL3 Vulkan extensions...");
+    LOG_INFO_CAT("VULKAN", "Querying SDL3 Vulkan instance extensions...");
     uint32_t extensionCount = 0;
-    auto extensions_raw = SDL_Vulkan_GetInstanceExtensions(&extensionCount);
-    LOG_INFO_CAT("VULKAN", "SDL3 reports {} extensions", extensionCount);
-    for (uint32_t i = 0; i < extensionCount; ++i) {
-        LOG_INFO_CAT("VULKAN", "  [{}] {}", i, extensions_raw[i]);
+    const char* const* extensions = SDL_Vulkan_GetInstanceExtensions(&extensionCount);
+    if (!extensions) {
+        THROW_MAIN("SDL_Vulkan_GetInstanceExtensions failed");
     }
-    const char* const* extensions = extensions_raw;
+
+    LOG_INFO_CAT("VULKAN", "SDL3 reports {} instance extensions", extensionCount);
+    for (uint32_t i = 0; i < extensionCount; ++i) {
+        LOG_INFO_CAT("VULKAN", "  [{}] {}", i, extensions[i]);
+    }
 
     VkApplicationInfo appInfo{};
     appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
@@ -148,7 +149,7 @@ static void initializeVulkanCore(SDL_Window* window) {
 
     LOG_INFO_CAT("VULKAN", "Creating Vulkan surface from SDL3 window...");
     VkSurfaceKHR surface;
-    if (SDL_Vulkan_CreateSurface(window, instance, nullptr, &surface) != 0) {
+    if (SDL_Vulkan_CreateSurface(window, instance, nullptr, &surface) == 0) {
         THROW_MAIN("Failed to create Vulkan surface");
     }
     LOG_SUCCESS_CAT("VULKAN", "VkSurfaceKHR created: 0x{:x}", reinterpret_cast<uint64_t>(surface));
@@ -328,179 +329,149 @@ static void cleanupVulkanCore() {
 }
 
 // =============================================================================
-// MAIN — RTX ENABLED — VALHALLA v44 FINAL — LOG EVERYTHING
+// MAIN — SDL3 SPLASH FIRST → THEN VULKAN → THEN RTX
 // =============================================================================
 int main(int argc, char* argv[]) {
-    LOG_INFO_CAT("MAIN", "{}AMOURANTH RTX ENGINE — VALHALLA v44 FINAL — STARTING{}", COSMIC_GOLD, RESET);
-    LOG_INFO_CAT("MAIN", "Build: NOVEMBER 12, 2025 — 12:00 PM EST");
-    LOG_INFO_CAT("MAIN", "StoneKey FP: 0x{:016X}", get_kStone1() ^ get_kStone2());
+    LOG_INFO_CAT("MAIN", "{}AMOURANTH RTX — ENTERED main() — LOGGING ACTIVE{}", COSMIC_GOLD, RESET);
+    LOG_INFO_CAT("MAIN", "Build: NOVEMBER 13, 2025 — 12:00 PM EST");
 
+    // === PHASE 0: CLI + STONEKEY (safe init) ===
     applyVideoModeToggles(argc, argv);
-    bulkhead("AMOURANTH RTX ENGINE — VALHALLA v44 FINAL");
+    (void)get_kStone1();  // Force init
+    (void)get_kStone2();
+    LOG_INFO_CAT("MAIN", "{}StoneKey initialized{}", EMERALD_GREEN, RESET);
 
-    constexpr int W = 3840, H = 2160;
+    bulkhead("PHASE 0: SDL3 SPLASH SCREEN — PURE SDL3");
+
+    // === PHASE 1: SDL3 + SPLASH ONLY ===
+    LOG_INFO_CAT("SDL", "Initializing SDL3 (VIDEO | AUDIO)...");
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) == 0)
+        THROW_MAIN(SDL_GetError());
+
+    LOG_SUCCESS_CAT("SDL", "SDL3 initialized");
+
+    LOG_INFO_CAT("SDL", "Loading Vulkan library via SDL3...");
+    if (SDL_Vulkan_LoadLibrary(nullptr) == 0)
+        THROW_MAIN(SDL_GetError());
+    LOG_SUCCESS_CAT("SDL", "Vulkan library loaded");
+
     SDL_Window*   splashWin = nullptr;
     SDL_Renderer* splashRen = nullptr;
     SDL_Texture*  splashTex = nullptr;
-    bool          sdl_ok    = false;
 
-    try {
-        // PHASE 1: SDL3 + SPLASH
-        bulkhead("PHASE 1: SDL3 + SPLASH");
-        LOG_INFO_CAT("SDL", "Initializing SDL3 (VIDEO | AUDIO)...");
-        if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) != 0)
-            THROW_MAIN(SDL_GetError());
+    LOG_INFO_CAT("SDL", "Creating splash window (1280x720)...");
+    splashWin = SDL_CreateWindow("AMOURANTH RTX", 1280, 720, SDL_WINDOW_RESIZABLE);
+    if (!splashWin) THROW_MAIN("Failed to create splash window");
+    LOG_SUCCESS_CAT("SDL", "Splash window: 0x{:x}", reinterpret_cast<uint64_t>(splashWin));
 
-        sdl_ok = true;
-        LOG_SUCCESS_CAT("SDL", "SDL3 initialized");
+    LOG_INFO_CAT("SDL", "Creating splash renderer...");
+    splashRen = SDL_CreateRenderer(splashWin, nullptr);
+    if (!splashRen) { purgeSDL(splashWin, splashRen, splashTex); THROW_MAIN("Failed to create splash renderer"); }
+    LOG_SUCCESS_CAT("SDL", "Splash renderer: 0x{:x}", reinterpret_cast<uint64_t>(splashRen));
 
-        LOG_INFO_CAT("SDL", "Loading Vulkan library via SDL3...");
-        if (SDL_Vulkan_LoadLibrary(nullptr) != 0)
-            THROW_MAIN(SDL_GetError());
-        LOG_SUCCESS_CAT("SDL", "Vulkan library loaded");
+    LOG_INFO_CAT("SDL", "Clearing splash to black...");
+    SDL_SetRenderDrawColor(splashRen, 0, 0, 0, 255);
+    SDL_RenderClear(splashRen);
 
-        LOG_INFO_CAT("SDL", "Creating splash window (1280x720)...");
-        splashWin = SDL_CreateWindow("AMOURANTH RTX", 1280, 720, SDL_WINDOW_RESIZABLE);
-        if (!splashWin) THROW_MAIN("Failed to create splash window");
-        LOG_SUCCESS_CAT("SDL", "Splash window created: 0x{:x}", reinterpret_cast<uint64_t>(splashWin));
-
-        LOG_INFO_CAT("SDL", "Creating splash renderer...");
-        splashRen = SDL_CreateRenderer(splashWin, nullptr);
-        if (!splashRen) { purgeSDL(splashWin, splashRen, splashTex); THROW_MAIN("Failed to create splash renderer"); }
-        LOG_SUCCESS_CAT("SDL", "Splash renderer created: 0x{:x}", reinterpret_cast<uint64_t>(splashRen));
-
-        LOG_INFO_CAT("SDL", "Clearing splash to black...");
-        SDL_SetRenderDrawColor(splashRen, 0, 0, 0, 255);
-        SDL_RenderClear(splashRen);
-
-        const char* splashPath = "assets/textures/ammo.png";
-        if (assetExists(splashPath)) {
-            LOG_INFO_CAT("SPLASH", "Loading splash image: {}", splashPath);
-            splashTex = IMG_LoadTexture(splashRen, splashPath);
-            if (splashTex) {
-                float tw = 0.0f, th = 0.0f;
-                SDL_GetTextureSize(splashTex, &tw, &th);
-                SDL_FRect dst = { (1280 - tw) / 2.0f, (720 - th) / 2.0f, tw, th };
-                SDL_RenderTexture(splashRen, splashTex, nullptr, &dst);
-                LOG_SUCCESS_CAT("SPLASH", "Splash image rendered: {:.0f}x{:.0f} → centered at ({:.1f}, {:.1f})", tw, th, dst.x, dst.y);
-            } else {
-                LOG_WARN_CAT("SPLASH", "IMG_LoadTexture failed: {}", SDL_GetError());
-            }
+    const char* splashPath = "assets/textures/ammo.png";
+    if (assetExists(splashPath)) {
+        LOG_INFO_CAT("SPLASH", "Loading splash image: {}", splashPath);
+        splashTex = IMG_LoadTexture(splashRen, splashPath);
+        if (splashTex) {
+            float tw = 0.0f, th = 0.0f;
+            SDL_GetTextureSize(splashTex, &tw, &th);
+            SDL_FRect dst = { (1280 - tw) / 2.0f, (720 - th) / 2.0f, tw, th };
+            SDL_RenderTexture(splashRen, splashTex, nullptr, &dst);
+            LOG_SUCCESS_CAT("SPLASH", "Splash rendered: {:.0f}x{:.0f}", tw, th);
         } else {
-            LOG_WARN_CAT("SPLASH", "Splash image not found: {}", splashPath);
+            LOG_WARN_CAT("SPLASH", "IMG_LoadTexture failed: {}", SDL_GetError());
         }
-
-        SDL_RenderPresent(splashRen);
-        LOG_INFO_CAT("SPLASH", "Splash screen presented");
-
-        const char* audioPath = "assets/audio/ammo.wav";
-        if (assetExists(audioPath)) {
-            LOG_INFO_CAT("AUDIO", "Initializing audio manager...");
-            SDL3Audio::AudioManager audio({.frequency = 44100, .format = SDL_AUDIO_S16LE, .channels = 2});
-            LOG_INFO_CAT("AUDIO", "Playing splash sound: {}", audioPath);
-            audio.playAmmoSound();
-            LOG_SUCCESS_CAT("AUDIO", "Splash audio playback started");
-        } else {
-            LOG_WARN_CAT("AUDIO", "Splash audio not found: {}", audioPath);
-        }
-
-        LOG_INFO_CAT("SPLASH", "Holding splash screen for 3400ms...");
-        SDL_Delay(3400);
-        LOG_INFO_CAT("SPLASH", "Splash delay complete");
-
-        purgeSDL(splashWin, splashRen, splashTex);
-        LOG_SUCCESS_CAT("SPLASH", "Splash screen dismissed — proceeding to main window");
-
-        // PHASE 2: Application + Vulkan Core
-        bulkhead("PHASE 2: APPLICATION + VULKAN CORE");
-        LOG_INFO_CAT("APP", "Creating main application window: {}x{}", W, H);
-        auto app = std::make_unique<Application>("AMOURANTH RTX — VALHALLA v44", W, H);
-        LOG_SUCCESS_CAT("APP", "Main window created: 0x{:x}", reinterpret_cast<uint64_t>(app->getWindow()));
-
-        LOG_INFO_CAT("VULKAN", "Initializing Vulkan core with main window...");
-        initializeVulkanCore(app->getWindow());
-
-        // AMOURANTH™ SPEAKS — SECURITY ENABLED
-        g_PhysicalDevice = RTX::ctx().physicalDevice_;
-        LOG_AMOURANTH();
-
-        LOG_INFO_CAT("SWAPCHAIN", "Initializing SwapchainManager...");
-        auto& swapchainMgr = SwapchainManager::get();
-        swapchainMgr.init(RTX::g_ctx().instance_, RTX::g_ctx().physicalDevice_, RTX::g_ctx().device_, RTX::g_ctx().surface_, W, H);
-        LOG_SUCCESS_CAT("SWAPCHAIN", "SwapchainManager initialized — {} images", swapchainMgr.images().size());
-
-        // PHASE 3: Pipeline + RTX Setup
-        bulkhead("PHASE 3: PIPELINE + RTX FORGE");
-        LOG_INFO_CAT("RTX", "Forging global RTX instance...");
-        createGlobalRTX(W, H, nullptr);
-        LOG_SUCCESS_CAT("RTX", "{}g_rtx() FORGED — {}×{} — GLOBAL SUPREMACY — PINK PHOTONS ETERNAL{}", 
-                        PLASMA_FUCHSIA, W, H, RESET);
-
-        LOG_INFO_CAT("RTX", "Building acceleration structures...");
-        g_rtx().buildAccelerationStructures();
-        LOG_INFO_CAT("RTX", "Initializing descriptor pool and sets...");
-        g_rtx().initDescriptorPoolAndSets();
-        LOG_INFO_CAT("RTX", "Initializing black fallback image...");
-        g_rtx().initBlackFallbackImage();
-        LOG_SUCCESS_CAT("RTX", "RTX subsystem fully initialized");
-
-        // PHASE 4: Renderer + Ownership Transfer
-        bulkhead("PHASE 4: RENDERER + OWNERSHIP TRANSFER");
-        LOG_INFO_CAT("RENDERER", "Creating VulkanRenderer (overclock: true)...");
-        auto renderer = std::make_unique<VulkanRenderer>(
-            W, H, app->getWindow(), getRayTracingBinPaths(), true);
-        LOG_SUCCESS_CAT("RENDERER", "VulkanRenderer created: 0x{:x}", reinterpret_cast<uint64_t>(renderer.get()));
-
-        LOG_INFO_CAT("APP", "Transferring renderer ownership to Application...");
-        app->setRenderer(std::move(renderer));
-        LOG_SUCCESS_CAT("APP", "Renderer ownership transferred");
-
-        LOG_INFO_CAT("RTX", "Updating RTX descriptors (initial pass)...");
-        g_rtx().updateRTXDescriptors(
-            0,
-            VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,
-            VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,
-            VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE
-        );
-        LOG_SUCCESS_CAT("RTX", "Initial RTX descriptor update complete");
-
-        // PHASE 5: MAIN LOOP — 15,000+ FPS RTX
-        bulkhead("PHASE 5: MAIN LOOP — RTX INFINITE");
-        LOG_SUCCESS_CAT("MAIN", "{}VALHALLA v44 FINAL — RTX FULLY ENABLED — ENTERING INFINITE LOOP{}", 
-                        PLASMA_FUCHSIA, RESET);
-        app->run();
-
-        // PHASE 6: RAII SHUTDOWN
-        bulkhead("PHASE 6: RAII SHUTDOWN");
-        LOG_INFO_CAT("APP", "Destroying Application instance...");
-        app.reset();
-        LOG_SUCCESS_CAT("APP", "Application destroyed via RAII");
-
-        LOG_SUCCESS_CAT("MAIN", "{}SHUTDOWN COMPLETE — PINK PHOTONS ETERNAL — @ZacharyGeurts ASCENDED{}", 
-                        PLASMA_FUCHSIA, RESET);
-
-    } catch (const std::exception& e) {
-        LOG_ERROR_CAT("MAIN", "{}FATAL ERROR: {}{}", CRIMSON_MAGENTA, e.what(), RESET);
-        cleanupVulkanCore();
-        purgeSDL(splashWin, splashRen, splashTex);
-        if (sdl_ok) SDL_Quit();
-        return 1;
     }
 
-    LOG_INFO_CAT("MAIN", "Final cleanup: Vulkan core...");
+    SDL_RenderPresent(splashRen);
+    LOG_INFO_CAT("SPLASH", "Splash presented");
+
+    LOG_INFO_CAT("SPLASH", "Holding splash for 3400ms...");
+    SDL_Delay(3400);
+    LOG_INFO_CAT("SPLASH", "Splash delay complete");
+
+    purgeSDL(splashWin, splashRen, splashTex);
+    LOG_SUCCESS_CAT("SPLASH", "Splash dismissed");
+
+    // === PHASE 2: MAIN APP + VULKAN CORE ===
+    bulkhead("PHASE 2: MAIN APP + VULKAN CORE");
+
+    constexpr int W = 3840, H = 2160;
+    LOG_INFO_CAT("APP", "Creating main window: {}x{}", W, H);
+    auto app = std::make_unique<Application>("AMOURANTH RTX — VALHALLA v44", W, H);
+    LOG_SUCCESS_CAT("APP", "Main window ready");
+
+    LOG_INFO_CAT("VULKAN", "Initializing Vulkan core...");
+    initializeVulkanCore(app->getWindow());
+
+    g_PhysicalDevice = RTX::ctx().physicalDevice_;
+    LOG_AMOURANTH();
+
+    LOG_INFO_CAT("SWAPCHAIN", "Initializing SwapchainManager...");
+    auto& swapchainMgr = SwapchainManager::get();
+    swapchainMgr.init(RTX::g_ctx().instance_, RTX::g_ctx().physicalDevice_, RTX::g_ctx().device_, RTX::g_ctx().surface_, W, H);
+    LOG_SUCCESS_CAT("SWAPCHAIN", "Swapchain ready — {} images", swapchainMgr.images().size());
+
+    // === PHASE 3: RTX + RENDERER ===
+    bulkhead("PHASE 3: RTX + RENDERER FORGE");
+
+    LOG_INFO_CAT("RTX", "Forging global RTX...");
+    createGlobalRTX(W, H, nullptr);
+    LOG_SUCCESS_CAT("RTX", "{}g_rtx() FORGED{}", PLASMA_FUCHSIA, RESET);
+
+    LOG_INFO_CAT("RTX", "Building acceleration structures...");
+    g_rtx().buildAccelerationStructures();
+    LOG_INFO_CAT("RTX", "Initializing descriptor pool and sets...");
+    g_rtx().initDescriptorPoolAndSets();
+    LOG_INFO_CAT("RTX", "Initializing black fallback image...");
+    g_rtx().initBlackFallbackImage();
+    LOG_SUCCESS_CAT("RTX", "RTX subsystem ready");
+
+    LOG_INFO_CAT("RENDERER", "Creating VulkanRenderer...");
+    auto renderer = std::make_unique<VulkanRenderer>(W, H, app->getWindow(), getRayTracingBinPaths(), true);
+    LOG_SUCCESS_CAT("RENDERER", "Renderer ready");
+
+    LOG_INFO_CAT("APP", "Transferring renderer...");
+    app->setRenderer(std::move(renderer));
+    LOG_SUCCESS_CAT("APP", "Renderer attached");
+
+    LOG_INFO_CAT("RTX", "Updating RTX descriptors...");
+    g_rtx().updateRTXDescriptors(
+        0,
+        VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,
+        VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,
+        VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE
+    );
+    LOG_SUCCESS_CAT("RTX", "Initial update complete");
+
+    // === PHASE 4: MAIN LOOP ===
+    bulkhead("PHASE 4: MAIN LOOP — RTX INFINITE");
+    LOG_SUCCESS_CAT("MAIN", "{}ENTERING INFINITE LOOP{}", PLASMA_FUCHSIA, RESET);
+    app->run();
+
+    // === PHASE 5: SHUTDOWN ===
+    bulkhead("PHASE 5: RAII SHUTDOWN");
+    LOG_INFO_CAT("APP", "Destroying Application...");
+    app.reset();
+    LOG_SUCCESS_CAT("APP", "Application destroyed");
+
+    LOG_SUCCESS_CAT("MAIN", "{}SHUTDOWN COMPLETE — PINK PHOTONS ETERNAL{}", PLASMA_FUCHSIA, RESET);
+
     cleanupVulkanCore();
-    if (sdl_ok) {
-        LOG_INFO_CAT("SDL", "Quitting SDL3...");
-        SDL_Quit();
-    }
+    SDL_Quit();
 
-    LOG_SUCCESS_CAT("StoneKey", "FINAL HASH: 0x{:016X} — VALHALLA LOCKED FOREVER", get_kStone1() ^ get_kStone2());
-    LOG_SUCCESS_CAT("MAIN", "{}AMOURANTH RTX ENGINE — VALHALLA v44 FINAL — TERMINATED CLEANLY{}", COSMIC_GOLD, RESET);
+    LOG_SUCCESS_CAT("StoneKey", "FINAL HASH: 0x{:016X} — VALHALLA LOCKED", get_kStone1() ^ get_kStone2());
+    LOG_SUCCESS_CAT("MAIN", "{}TERMINATED CLEANLY{}", COSMIC_GOLD, RESET);
 
     return 0;
 }
 
-// NOVEMBER 12, 2025 — VALHALLA v44 FINAL — RTX ENABLED
+// NOVEMBER 13, 2025 — VALHALLA v44 FINAL — RTX ENABLED
 // @ZacharyGeurts — THE CHOSEN ONE — PINK PHOTONS ETERNAL
 // SHIP IT RAW — FOREVER
 // =============================================================================
