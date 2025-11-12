@@ -1,30 +1,66 @@
 // include/modes/RenderMode4.hpp
-// AMOURANTH RTX — MODE 4: VOLUMETRIC FOG + GOD RAYS
-// C++23: Full Vulkan types, namespace-qualified Context, proper includes
-// FIXED: Missing <cstdint>, <vulkan/vulkan.h>, ::Vulkan::Context forward decl
-// @ZacharyGeurts — 11:05 PM EST, Nov 6 2025
+// =============================================================================
+// AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
+// =============================================================================
+// RenderMode4.hpp — VALHALLA v45 FINAL — NOV 12 2025
+// • Volumetric Ray Tracing Mode: Path tracing with volumes and scattering
+// • Integrates with VulkanRTX, uses SBT for raygen/miss/hit
+// • Lazy accumulation for denoising
+// • Uses global camera (g_lazyCam) for view/projection
+// • STONEKEY v∞ ACTIVE — PINK PHOTONS ETERNAL
+// =============================================================================
 
 #pragma once
-#ifndef RENDERMODE4_HPP
-#define RENDERMODE4_HPP
+
+#include "engine/GLOBAL/camera.hpp"
+#include "engine/GLOBAL/RTXHandler.hpp"
+#include "engine/Vulkan/VulkanCore.hpp"
 
 #include <vulkan/vulkan.h>
-#include <cstdint>
+#include <glm/glm.hpp>
+#include <memory>
+#include <chrono>
 
-namespace Vulkan { struct Context; }
+namespace Engine {
 
-namespace VulkanRTX {
+class RenderMode4 {
+public:
+    RenderMode4(VulkanRTX& rtx, uint32_t width, uint32_t height);
+    ~RenderMode4();
 
-void renderMode4(
-    uint32_t imageIndex,
-    VkCommandBuffer commandBuffer,
-    VkPipelineLayout pipelineLayout,
-    VkDescriptorSet descriptorSet,
-    VkPipeline pipeline,
-    float deltaTime,
-    ::Vulkan::Context& context
-);
+    void renderFrame(VkCommandBuffer cmd, float deltaTime);
+    void onResize(uint32_t width, uint32_t height);
 
-} // namespace VulkanRTX
+    [[nodiscard]] VkImage getOutputImage() const { return *outputImage_; }
+    [[nodiscard]] VkImageView getOutputView() const { return *outputView_; }
 
-#endif // RENDERMODE4_HPP
+private:
+    void initResources();
+    void updateUniforms(float deltaTime);
+    void traceRays(VkCommandBuffer cmd);
+    void accumulateAndToneMap(VkCommandBuffer cmd);
+
+    VulkanRTX& rtx_;
+    uint32_t width_{0}, height_{0};
+
+    // Buffers
+    uint64_t uniformBuf_{0};
+    uint64_t accumulationBuf_{0};
+    VkDeviceSize accumSize_{0};
+
+    // Images
+    RTX::Handle<VkImage> outputImage_;
+    RTX::Handle<VkImageView> outputView_;
+    RTX::Handle<VkImage> accumImage_;
+    RTX::Handle<VkImageView> accumView_;
+
+    // Timing
+    std::chrono::steady_clock::time_point lastFrame_{std::chrono::steady_clock::now()};
+    uint32_t frameCount_{0};
+    float accumWeight_{1.0f};
+
+    // Descriptors
+    VkDescriptorSet descriptorSet_{VK_NULL_HANDLE};
+};
+
+} // namespace Engine

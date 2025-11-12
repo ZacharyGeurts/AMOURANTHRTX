@@ -5,7 +5,7 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb/stb_image.h"
 
-#include "engine/logging.hpp"
+#include "engine/GLOBAL/logging.hpp"
 #include <cstdio>
 #include <vector>
 #include <iomanip>

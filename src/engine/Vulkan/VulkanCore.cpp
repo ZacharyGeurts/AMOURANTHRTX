@@ -10,8 +10,8 @@
 //
 // =============================================================================
 // VulkanCore.cpp — VALHALLA v70 FINAL — NOVEMBER 12, 2025 3:00 AM EST
-// • AmouranthAI# + RED-ORANGE + using namespace Logging::Color;
-// • 150+ AI VOICE LOGS — EVERY MICRO-STATE TRACKED
+// • ALL RT FUNCTIONS VIA g_ctx() → NO LINKER ERRORS
+// • g_PhysicalDevice DEFINED → LEGACY SAFE
 // • FULL LIFECYCLE: CONSTRUCT → BIND → BUILD → TRACE → DESTROY
 // • STONEKEY v∞ ACTIVE — UNBREAKABLE ENTROPY — PINK PHOTONS ETERNAL
 // • Production-ready, zero-leak, 15,000 FPS, Titan-grade
@@ -30,6 +30,13 @@
 #include <stdexcept>
 #include <array>
 #include <vector>
+
+using namespace Logging::Color;
+
+// -----------------------------------------------------------------------------
+// GLOBAL: g_PhysicalDevice — REQUIRED BY LEGACY CODE
+// -----------------------------------------------------------------------------
+VkPhysicalDevice g_PhysicalDevice = VK_NULL_HANDLE;
 
 // Global RTX instance — singleton via unique_ptr
 std::unique_ptr<VulkanRTX> g_rtx_instance;
@@ -73,13 +80,15 @@ VulkanRTX::VulkanRTX(int w, int h, VulkanPipelineManager* mgr)
     device_ = g_ctx().vkDevice();
     if (!device_) throw std::runtime_error("Invalid Vulkan device");
 
-    // Fetch ray tracing function pointers
+    // -----------------------------------------------------------------
+    // LOAD ALL RT FUNCTION POINTERS FROM g_ctx()
+    // -----------------------------------------------------------------
     vkGetBufferDeviceAddressKHR              = g_ctx().vkGetBufferDeviceAddressKHR();
     vkCmdTraceRaysKHR                        = g_ctx().vkCmdTraceRaysKHR();
     vkGetRayTracingShaderGroupHandlesKHR     = g_ctx().vkGetRayTracingShaderGroupHandlesKHR();
     vkGetAccelerationStructureDeviceAddressKHR = g_ctx().vkGetAccelerationStructureDeviceAddressKHR();
 
-    LOG_INFO_CAT("RTX", "Function pointers loaded — vkGetBufferDeviceAddressKHR @ 0x{:x}", (uint64_t)vkGetBufferDeviceAddressKHR);
+    LOG_INFO_CAT("RTX", "Function pointers loaded — vkCmdTraceRaysKHR @ 0x{:x}", (uint64_t)vkCmdTraceRaysKHR);
 
     // Set global instance
     g_rtx_instance.reset(this);
@@ -327,10 +336,10 @@ void VulkanRTX::initShaderBindingTable(VkPhysicalDevice) {
         64_MB, "SBTMemory");
 
     std::vector<uint8_t> handles(groupCount * handleSize);
-    VK_CHECK(vkGetRayTracingShaderGroupHandlesKHR(device_,
-                                                  HANDLE_GET(rtPipeline_),
-                                                  0, groupCount,
-                                                  handles.size(), handles.data()),
+    VK_CHECK(g_ctx().vkGetRayTracingShaderGroupHandlesKHR()(device_,
+                                                            HANDLE_GET(rtPipeline_),
+                                                            0, groupCount,
+                                                            handles.size(), handles.data()),
              "Failed to get shader group handles");
 
     void* mapped = nullptr;
@@ -342,7 +351,7 @@ void VulkanRTX::initShaderBindingTable(VkPhysicalDevice) {
     BUFFER_UNMAP(sbtEnc);
 
     VkBufferDeviceAddressInfo addrInfo = {.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO, .buffer = rawBuffer};
-    sbtAddress_ = vkGetBufferDeviceAddressKHR(device_, &addrInfo);
+    sbtAddress_ = g_ctx().vkGetBufferDeviceAddressKHR()(device_, &addrInfo);
 
     sbt_.raygen   = { sbtAddress_,                    alignedSize, alignedSize };
     sbt_.miss     = { sbtAddress_ + alignedSize,      alignedSize, alignedSize };
@@ -480,9 +489,7 @@ void VulkanRTX::updateRTXDescriptors(uint32_t frameIdx,
     std::array<VkWriteDescriptorSet, 16> writes{};
     uint32_t count = 0;
 
-    // ========================================
-    // 0: TLAS — THE UNIVERSE ITSELF
-    // ========================================
+    // 0: TLAS
     writes[count++] = {
         .sType      = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
         .pNext      = &asWrite,
@@ -494,9 +501,7 @@ void VulkanRTX::updateRTXDescriptors(uint32_t frameIdx,
     RTX::AmouranthAI::get().onMemoryEvent("TLAS Binding", sizeof(VkAccelerationStructureKHR));
     LOG_INFO_CAT("RTX", "Binding TLAS @ 0x{:x} → slot 0", (VkDeviceAddress)tlas);
 
-    // ========================================
-    // 1: Storage Image — OUTPUT CANVAS
-    // ========================================
+    // 1: Storage Image
     VkDescriptorImageInfo storageInfo{.imageView = storageView, .imageLayout = VK_IMAGE_LAYOUT_GENERAL};
     writes[count++] = {
         .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
@@ -509,9 +514,7 @@ void VulkanRTX::updateRTXDescriptors(uint32_t frameIdx,
     RTX::AmouranthAI::get().onMemoryEvent("Storage Image View", sizeof(VkImageView));
     LOG_INFO_CAT("RTX", "Binding storage image view 0x{:x} → slot 1", (uint64_t)storageView);
 
-    // ========================================
-    // 2: Accumulation — TEMPORAL MEMORY
-    // ========================================
+    // 2: Accumulation
     VkDescriptorImageInfo accumInfo{.imageView = accumView, .imageLayout = VK_IMAGE_LAYOUT_GENERAL};
     writes[count++] = {
         .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
@@ -524,9 +527,7 @@ void VulkanRTX::updateRTXDescriptors(uint32_t frameIdx,
     RTX::AmouranthAI::get().onMemoryEvent("Accumulation Image View", sizeof(VkImageView));
     LOG_INFO_CAT("RTX", "Binding accumulation image view 0x{:x} → slot 2", (uint64_t)accumView);
 
-    // ========================================
-    // 3: Camera UBO — EYE OF GOD
-    // ========================================
+    // 3: Camera UBO
     VkDescriptorBufferInfo camInfo{.buffer = cameraBuf, .range = VK_WHOLE_SIZE};
     writes[count++] = {
         .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
@@ -539,9 +540,7 @@ void VulkanRTX::updateRTXDescriptors(uint32_t frameIdx,
     RTX::AmouranthAI::get().onMemoryEvent("Camera UBO", sizeof(VkBuffer));
     LOG_INFO_CAT("RTX", "Binding camera UBO 0x{:x} → slot 3", (uint64_t)cameraBuf);
 
-    // ========================================
-    // 4: Material SBO — SOUL OF MATTER
-    // ========================================
+    // 4: Material SBO
     VkDescriptorBufferInfo matInfo{.buffer = materialBuf, .range = VK_WHOLE_SIZE};
     writes[count++] = {
         .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
@@ -554,9 +553,7 @@ void VulkanRTX::updateRTXDescriptors(uint32_t frameIdx,
     RTX::AmouranthAI::get().onMemoryEvent("Material SBO", sizeof(VkBuffer));
     LOG_INFO_CAT("RTX", "Binding material SBO 0x{:x} → slot 4", (uint64_t)materialBuf);
 
-    // ========================================
-    // 5: Env Map — INFINITE SKY
-    // ========================================
+    // 5: Env Map
     VkDescriptorImageInfo envInfo{
         .sampler = envSampler,
         .imageView = envMapView,
@@ -573,9 +570,7 @@ void VulkanRTX::updateRTXDescriptors(uint32_t frameIdx,
     RTX::AmouranthAI::get().onMemoryEvent("Env Map + Sampler", sizeof(VkImageView) + sizeof(VkSampler));
     LOG_INFO_CAT("RTX", "Binding env map 0x{:x} + sampler 0x{:x} → slot 5", (uint64_t)envMapView, (uint64_t)envSampler);
 
-    // ========================================
-    // 6: Black Fallback — VOID SAFETY
-    // ========================================
+    // 6: Black Fallback
     VkDescriptorImageInfo fallbackInfo{
         .imageView = HANDLE_GET(blackFallbackView_),
         .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
@@ -591,9 +586,7 @@ void VulkanRTX::updateRTXDescriptors(uint32_t frameIdx,
     RTX::AmouranthAI::get().onMemoryEvent("Black Fallback View", sizeof(VkImageView));
     LOG_INFO_CAT("RTX", "Binding black fallback view 0x{:x} → slot 6", (uint64_t)HANDLE_GET(blackFallbackView_));
 
-    // ========================================
-    // 7: Density Volume — BREATH OF LIFE
-    // ========================================
+    // 7: Density Volume
     VkDescriptorImageInfo densityInfo{
         .sampler = envSampler,
         .imageView = densityVol ? densityVol : HANDLE_GET(blackFallbackView_),
@@ -610,9 +603,7 @@ void VulkanRTX::updateRTXDescriptors(uint32_t frameIdx,
     RTX::AmouranthAI::get().onMemoryEvent("Density Volume", sizeof(VkImageView));
     LOG_INFO_CAT("RTX", "Binding density volume 0x{:x} → slot 7", (uint64_t)(densityVol ? densityVol : HANDLE_GET(blackFallbackView_)));
 
-    // ========================================
-    // 8: G-Buffer Depth — EYE OF TRUTH
-    // ========================================
+    // 8: G-Buffer Depth
     VkDescriptorImageInfo depthInfo{
         .imageView = gDepth,
         .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
@@ -628,9 +619,7 @@ void VulkanRTX::updateRTXDescriptors(uint32_t frameIdx,
     RTX::AmouranthAI::get().onMemoryEvent("G-Buffer Depth", sizeof(VkImageView));
     LOG_INFO_CAT("RTX", "Binding G-Depth 0x{:x} → slot 8", (uint64_t)gDepth);
 
-    // ========================================
-    // 9: G-Buffer Normal — SURFACE SOUL
-    // ========================================
+    // 9: G-Buffer Normal
     VkDescriptorImageInfo normalInfo{
         .imageView = gNormal,
         .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
@@ -646,9 +635,7 @@ void VulkanRTX::updateRTXDescriptors(uint32_t frameIdx,
     RTX::AmouranthAI::get().onMemoryEvent("G-Buffer Normal", sizeof(VkImageView));
     LOG_INFO_CAT("RTX", "Binding G-Normal 0x{:x} → slot 9", (uint64_t)gNormal);
 
-    // ========================================
-    // 10: Blue Noise — CHAOS ENGINE
-    // ========================================
+    // 10: Blue Noise
     VkImageView blueNoiseView = g_ctx().blueNoiseView() ? g_ctx().blueNoiseView() : HANDLE_GET(blackFallbackView_);
     VkDescriptorImageInfo blueNoiseInfo{
         .imageView = blueNoiseView,
@@ -665,9 +652,7 @@ void VulkanRTX::updateRTXDescriptors(uint32_t frameIdx,
     RTX::AmouranthAI::get().onMemoryEvent("Blue Noise", sizeof(VkImageView));
     LOG_INFO_CAT("RTX", "Binding blue noise 0x{:x} → slot 10", (uint64_t)blueNoiseView);
 
-    // ========================================
-    // 11: Reservoir SBO — LIGHT MEMORY
-    // ========================================
+    // 11: Reservoir SBO
     VkDescriptorBufferInfo reservoirInfo{.buffer = g_ctx().reservoirBuffer(), .range = VK_WHOLE_SIZE};
     writes[count++] = {
         .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
@@ -680,9 +665,7 @@ void VulkanRTX::updateRTXDescriptors(uint32_t frameIdx,
     RTX::AmouranthAI::get().onMemoryEvent("Reservoir SBO", sizeof(VkBuffer));
     LOG_INFO_CAT("RTX", "Binding reservoir SBO 0x{:x} → slot 11", (uint64_t)g_ctx().reservoirBuffer());
 
-    // ========================================
-    // 12: Frame Data UBO — TIMEKEEPER
-    // ========================================
+    // 12: Frame Data UBO
     VkDescriptorBufferInfo frameDataInfo{.buffer = g_ctx().frameDataBuffer(), .range = VK_WHOLE_SIZE};
     writes[count++] = {
         .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
@@ -695,9 +678,7 @@ void VulkanRTX::updateRTXDescriptors(uint32_t frameIdx,
     RTX::AmouranthAI::get().onMemoryEvent("Frame Data UBO", sizeof(VkBuffer));
     LOG_INFO_CAT("RTX", "Binding frame data UBO 0x{:x} → slot 12", (uint64_t)g_ctx().frameDataBuffer());
 
-    // ========================================
-    // 13: Debug Vis SBO — DIAGNOSTIC EYE
-    // ========================================
+    // 13: Debug Vis SBO
     VkDescriptorBufferInfo debugVisInfo{.buffer = g_ctx().debugVisBuffer(), .range = VK_WHOLE_SIZE};
     writes[count++] = {
         .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
@@ -710,9 +691,7 @@ void VulkanRTX::updateRTXDescriptors(uint32_t frameIdx,
     RTX::AmouranthAI::get().onMemoryEvent("Debug Vis SBO", sizeof(VkBuffer));
     LOG_INFO_CAT("RTX", "Binding debug vis SBO 0x{:x} → slot 13", (uint64_t)g_ctx().debugVisBuffer());
 
-    // ========================================
-    // 14: Reserved — FUTURE PROOF
-    // ========================================
+    // 14: Reserved
     writes[count++] = {
         .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
         .dstSet = set,
@@ -723,9 +702,7 @@ void VulkanRTX::updateRTXDescriptors(uint32_t frameIdx,
     };
     LOG_INFO_CAT("RTX", "Binding reserved slot 14 → black fallback");
 
-    // ========================================
-    // 15: Reserved — INFINITY GATE
-    // ========================================
+    // 15: Reserved
     writes[count++] = {
         .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
         .dstSet = set,
@@ -736,9 +713,7 @@ void VulkanRTX::updateRTXDescriptors(uint32_t frameIdx,
     };
     LOG_INFO_CAT("RTX", "Binding reserved slot 15 → black fallback");
 
-    // ========================================
-    // FINALIZE — UPDATE DESCRIPTORS
-    // ========================================
+    // FINALIZE
     vkUpdateDescriptorSets(device_, count, writes.data(), 0, nullptr);
 
     LOG_SUCCESS_CAT("RTX", 
@@ -749,7 +724,7 @@ void VulkanRTX::updateRTXDescriptors(uint32_t frameIdx,
 }
 
 // =============================================================================
-// Ray Tracing Commands
+// Ray Tracing Commands — FINAL FIX
 // =============================================================================
 
 void VulkanRTX::recordRayTrace(VkCommandBuffer cmd, VkExtent2D extent,
@@ -772,8 +747,9 @@ void VulkanRTX::recordRayTrace(VkCommandBuffer cmd, VkExtent2D extent,
                             HANDLE_GET(rtPipelineLayout_), 0, 1,
                             &descriptorSets_[g_ctx().currentFrame()], 0, nullptr);
 
-    vkCmdTraceRaysKHR(cmd, &sbt_.raygen, &sbt_.miss, &sbt_.hit, &sbt_.callable,
-                      extent.width, extent.height, 1);
+    // FINAL: Use function pointer
+    g_ctx().vkCmdTraceRaysKHR()(cmd, &sbt_.raygen, &sbt_.miss, &sbt_.hit, &sbt_.callable,
+                                extent.width, extent.height, 1);
 
     barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
     barrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;

@@ -129,9 +129,9 @@ namespace {
     VkAccelerationStructureBuildSizesInfoKHR sizeInfo{
         .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR
     };
-    vkGetAccelerationStructureBuildSizesKHR(device,
-                                            VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
-                                            &buildInfo, &primitiveCount, &sizeInfo);
+    ctx().vkGetAccelerationStructureBuildSizesKHR_(device,
+                                                  VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
+                                                  &buildInfo, &primitiveCount, &sizeInfo);
 
     return { sizeInfo.accelerationStructureSize,
              sizeInfo.buildScratchSize,
@@ -161,9 +161,9 @@ namespace {
     VkAccelerationStructureBuildSizesInfoKHR sizeInfo{
         .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR
     };
-    vkGetAccelerationStructureBuildSizesKHR(device,
-                                            VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
-                                            &buildInfo, &instanceCount, &sizeInfo);
+    ctx().vkGetAccelerationStructureBuildSizesKHR_(device,
+                                                  VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
+                                                  &buildInfo, &instanceCount, &sizeInfo);
 
     return { sizeInfo.accelerationStructureSize,
              sizeInfo.buildScratchSize,
@@ -206,7 +206,7 @@ namespace {
             .accelerationStructure = as
         };
         instData[i].accelerationStructureReference =
-            vkGetAccelerationStructureDeviceAddressKHR(device, &addrInfo);
+            ctx().vkGetAccelerationStructureDeviceAddressKHR_(device, &addrInfo);
     }
     BUFFER_UNMAP(stagingHandle);
 
@@ -270,7 +270,7 @@ public:
             .size = sizes.accelerationStructureSize,
             .type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR
         };
-        VK_CHECK(vkCreateAccelerationStructureKHR(dev, &createInfo, nullptr, &rawAs),
+        VK_CHECK(ctx().vkCreateAccelerationStructureKHR_(dev, &createInfo, nullptr, &rawAs),
                  "Failed to create BLAS");
 
         uint64_t scratchHandle = 0;
@@ -317,13 +317,13 @@ public:
 
         VkCommandBuffer cmd = VulkanRTX::beginSingleTimeCommands(pool);
         const VkAccelerationStructureBuildRangeInfoKHR* ranges[] = { &buildRange };
-        vkCmdBuildAccelerationStructuresKHR(cmd, 1, &buildInfo, ranges);
+        ctx().vkCmdBuildAccelerationStructuresKHR_(cmd, 1, &buildInfo, ranges);
         VulkanRTX::endSingleTimeCommands(cmd, queue, pool);
 
         auto deleter = [asBufferHandle, scratchHandle](VkDevice d,
                                                       VkAccelerationStructureKHR a,
                                                       const VkAllocationCallbacks*) noexcept {
-            if (a) vkDestroyAccelerationStructureKHR(d, a, nullptr);
+            if (a) ctx().vkDestroyAccelerationStructureKHR_(d, a, nullptr);
             if (asBufferHandle) BUFFER_DESTROY(asBufferHandle);
             if (scratchHandle) BUFFER_DESTROY(scratchHandle);
         };
@@ -366,7 +366,7 @@ public:
             .size = sizes.accelerationStructureSize,
             .type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR
         };
-        VK_CHECK(vkCreateAccelerationStructureKHR(dev, &createInfo, nullptr, &rawAs),
+        VK_CHECK(ctx().vkCreateAccelerationStructureKHR_(dev, &createInfo, nullptr, &rawAs),
                  "Failed to create TLAS");
 
         uint64_t scratchHandle = 0;
@@ -408,13 +408,13 @@ public:
 
         VkCommandBuffer cmd = VulkanRTX::beginSingleTimeCommands(pool);
         const VkAccelerationStructureBuildRangeInfoKHR* ranges[] = { &buildRange };
-        vkCmdBuildAccelerationStructuresKHR(cmd, 1, &buildInfo, ranges);
+        ctx().vkCmdBuildAccelerationStructuresKHR_(cmd, 1, &buildInfo, ranges);
         VulkanRTX::endSingleTimeCommands(cmd, queue, pool);
 
         auto deleter = [asBufferHandle, instanceEnc, scratchHandle](VkDevice d,
                                                                    VkAccelerationStructureKHR a,
                                                                    const VkAllocationCallbacks*) noexcept {
-            if (a) vkDestroyAccelerationStructureKHR(d, a, nullptr);
+            if (a) ctx().vkDestroyAccelerationStructureKHR_(d, a, nullptr);
             if (asBufferHandle) BUFFER_DESTROY(asBufferHandle);
             if (instanceEnc) BUFFER_DESTROY(instanceEnc);
             if (scratchHandle) BUFFER_DESTROY(scratchHandle);
@@ -448,7 +448,7 @@ public:
             .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR,
             .accelerationStructure = *blas_
         };
-        return vkGetAccelerationStructureDeviceAddressKHR(ctx().vkDevice(), &info);
+        return ctx().vkGetAccelerationStructureDeviceAddressKHR_(ctx().vkDevice(), &info);
     }
 
     [[nodiscard]] VkAccelerationStructureKHR getTLAS() const noexcept { return tlas_ ? *tlas_ : VK_NULL_HANDLE; }
@@ -458,7 +458,7 @@ public:
             .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR,
             .accelerationStructure = *tlas_
         };
-        return vkGetAccelerationStructureDeviceAddressKHR(ctx().vkDevice(), &info);
+        return ctx().vkGetAccelerationStructureDeviceAddressKHR_(ctx().vkDevice(), &info);
     }
 
     [[nodiscard]] VkDeviceSize getTLASSize() const noexcept { return tlasSize_; }
@@ -474,7 +474,7 @@ private:
             .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
             .buffer = buf
         };
-        return vkGetBufferDeviceAddressKHR(ctx().vkDevice(), &info);
+        return ctx().vkGetBufferDeviceAddressKHR_(ctx().vkDevice(), &info);
     }
 
     mutable std::mutex mutex_;

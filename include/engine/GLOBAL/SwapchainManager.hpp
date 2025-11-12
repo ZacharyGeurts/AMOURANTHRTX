@@ -2,21 +2,18 @@
 // =============================================================================
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
-//
-// Dual Licensed:
-// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
-//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
-// 2. Commercial licensing: gzac5314@gmail.com
-//
-// =============================================================================
-// SwapchainManager v6.3 — HANDLE FROM DISPOSE — NOV 11 2025 11:15 AM EST
-// • Handle<T> REMOVED — FULLY RELIES ON Dispose::Handle
-// • #include "engine/GLOBAL/Dispose.hpp" FIRST
-// • C++23, -Werror clean, Valhalla sealed, pink photons eternal
+// SwapchainManager v7.0 — FINAL — NOV 12 2025
+// • #include "RTXHandler.hpp" FIRST → Handle<T> + MakeHandle DEFINED
+// • No more 'Handle does not name a type'
+// • C++23, -Werror clean, Valhalla sealed
 // =============================================================================
 
 #pragma once
 
+// 1. RTXHandler.hpp FIRST — DEFINES Handle<T> + MakeHandle
+#include "engine/GLOBAL/RTXHandler.hpp"
+
+// 2. Vulkan + standard
 #include <vulkan/vulkan.h>
 #include <vector>
 #include <span>
@@ -60,7 +57,7 @@ public:
     [[nodiscard]] VkFormat format() const noexcept { return format_; }
     [[nodiscard]] VkExtent2D extent() const noexcept { return extent_; }
     [[nodiscard]] const std::vector<VkImage>& images() const noexcept { return images_; }
-    [[nodiscard]] const std::vector<Handle<VkImageView>>& imageViews() const noexcept { return imageViews_; }
+    [[nodiscard]] const std::vector<RTX::Handle<VkImageView>>& imageViews() const noexcept { return imageViews_; }
 
 private:
     SwapchainManager() = default;
@@ -73,8 +70,8 @@ private:
     VkFormat format_ = VK_FORMAT_UNDEFINED;
     VkExtent2D extent_{};
     std::vector<VkImage> images_;
-    std::vector<Handle<VkImageView>> imageViews_;   // ← Dispose::Handle<VkImageView>
-    Handle<VkSwapchainKHR> swapchain_;              // ← Dispose::Handle<VkSwapchainKHR>
+    std::vector<RTX::Handle<VkImageView>> imageViews_;   // ← RTX::Handle<VkImageView>
+    RTX::Handle<VkSwapchainKHR> swapchain_;              // ← RTX::Handle<VkSwapchainKHR>
 };
 
 /* ── INLINE IMPLEMENTATION ─────────────────────────────────────────────────── */
@@ -132,7 +129,7 @@ inline void SwapchainManager::createSwapchain(uint32_t width, uint32_t height) {
     if (vkCreateSwapchainKHR(device_, &ci, nullptr, &raw) != VK_SUCCESS)
         throw std::runtime_error("Failed to create swapchain");
 
-    swapchain_ = MakeHandle(raw, device_, vkDestroySwapchainKHR);
+    swapchain_ = RTX::MakeHandle(raw, device_, vkDestroySwapchainKHR);
     format_ = chosen.format;
     extent_ = {w, h};
 
@@ -161,17 +158,6 @@ inline void SwapchainManager::createImageViews() {
         if (vkCreateImageView(device_, &ci, nullptr, &view) != VK_SUCCESS)
             throw std::runtime_error("Failed to create image view");
 
-        imageViews_.emplace_back(MakeHandle(view, device_, vkDestroyImageView));
+        imageViews_.emplace_back(RTX::MakeHandle(view, device_, vkDestroyImageView));
     }
 }
-
-// =============================================================================
-// AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
-// =============================================================================
-//
-// Dual Licensed:
-// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
-//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
-// 2. Commercial licensing: gzac5314@gmail.com
-//
-// =============================================================================

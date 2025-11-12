@@ -1,28 +1,21 @@
 // include/handle_app.hpp
-// AMOURANTH RTX Engine (C) 2025 by Zachary Geurts gzac5314@gmail.com is licensed under CC BY-NC 4.0
-// FINAL: T = tonemap | O = overlay | 1-9 = modes | H = HYPERTRACE | F = FPS TARGET
-// PUBLIC: getRenderer() → safe access from camera, input, anywhere
-// OWNERSHIP: Application owns renderer for entire lifetime
-// GROK PROTIP: "Never access private members. Use getRenderer()."
-// C++23: Full turbo — <format>, <ranges> (via VulkanCore), std::expected if needed
-// FIXED: No namespace — all global (VulkanRTX class, VulkanRenderer, Camera) — resolves redeclaration
+// =============================================================================
+// AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
+// =============================================================================
+// APPLICATION — REAL SWAPCHAIN — SDL3 — LOGGING PARTY — NOV 12 2025
+// =============================================================================
 
 #pragma once
 
 #include <SDL3/SDL.h>
 #include <glm/glm.hpp>
 #include <memory>
-#include <vector>
 #include <chrono>
-#include <functional>
 #include <string>
-#include <expected>
 
-//#include "engine/Vulkan/VulkanCommon.hpp"
 #include "engine/SDL3/SDL3_init.hpp"
-
-class VulkanRenderer;  // Global forward decl — no namespace
-class VulkanRTX;       // Global forward decl — no namespace
+#include "engine/core.hpp"
+#include "engine/Vulkan/VulkanRenderer.hpp"
 
 class Application {
 public:
@@ -32,7 +25,7 @@ public:
     void run();
     void setRenderMode(int mode);
     [[nodiscard]] bool shouldQuit() const;
-    void handleResize(int width, int height);
+    void handleResize(int w, int h);
     void toggleFullscreen();
     void toggleMaximize();
 
@@ -40,50 +33,36 @@ public:
     bool& isMaximizedRef()  { return isMaximized_; }
     bool& isFullscreenRef() { return isFullscreen_; }
 
-    // -------------------------------------------------------------------------
-    //  RENDERER OWNERSHIP — Application owns it
-    // -------------------------------------------------------------------------
-    /**
-     * GROK PROTIP: Ownership is destiny.
-     *   - setRenderer() called ONCE at end of main.cpp
-     *   - getRenderer() is public, null-safe, used everywhere
-     */
-    void setRenderer(std::unique_ptr<VulkanRenderer> renderer);  // FIXED: Global VulkanRenderer — no VulkanRTX::
-    [[nodiscard]] VulkanRenderer* getRenderer() const;  // FIXED: Global VulkanRenderer*
+    void setRenderer(std::unique_ptr<VulkanRenderer> renderer);
+    [[nodiscard]] VulkanRenderer* getRenderer() const { return renderer_.get(); }
 
-    // USER CONTROLS
-    void toggleTonemap();      // T / t
-    void toggleOverlay();      // O / o
-    void toggleHypertrace();   // H / h — 12,000+ FPS
-    void toggleFpsTarget();    // F / f — 60 to 120 FPS
+    void toggleTonemap();
+    void toggleOverlay();
+    void toggleHypertrace();
+    void toggleFpsTarget();
 
     void setQuit(bool q) { quit_ = q; }
 
 private:
-    void initializeInput();
-    void render();
-    void updateWindowTitle();
-    void handleWindowEvent(const SDL_WindowEvent& we);  // FIXED: Declaration added
+    void render(float deltaTime, uint32_t imageIndex);
+    void updateWindowTitle(float deltaTime);
 
     std::string title_;
-    int width_;
-    int height_;
-    int mode_{1};               // 1-9
+    int width_, height_;
+    int mode_{1};
     bool quit_{false};
+
+    glm::mat4 renderView_{1.0f};
+    glm::mat4 renderProj_{1.0f};
 
     std::unique_ptr<SDL3Initializer::SDL3Initializer> sdl_;
 
     bool isFullscreen_{false};
     bool isMaximized_{false};
     bool showOverlay_{true};
-
-    // NEW – independent tonemap flag
     bool tonemapEnabled_{false};
 
-    std::vector<glm::vec3> vertices_;
-    std::vector<uint32_t> indices_;
     std::chrono::steady_clock::time_point lastFrameTime_;
 
-    // RENDERER — OWNED BY APPLICATION
-    std::unique_ptr<VulkanRenderer> renderer_;  // FIXED: Global VulkanRenderer — no VulkanRTX::
+    std::unique_ptr<VulkanRenderer> renderer_;
 };

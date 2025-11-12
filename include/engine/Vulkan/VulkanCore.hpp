@@ -2,9 +2,10 @@
 // =============================================================================
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
-// VulkanCore.hpp — VALHALLA v45 FINAL — FORWARD DECL — NOV 12 2025
-// • FORWARD DECLARE VulkanPipelineManager
-// • AMOURANTH AI™ v2 — LOG INJECTION — ORANGE-RED VOICE
+// VulkanCore.hpp — VALHALLA v70 FINAL — HEADER ONLY — NOV 12 2025
+// • NO DUPLICATE DEFINITIONS
+// • ALL GLOBALS: extern
+// • ALL FUNCTIONS: forward declared
 // • STONEKEY v∞ ACTIVE — PINK PHOTONS ETERNAL
 // =============================================================================
 
@@ -23,11 +24,17 @@
 #include <random>
 #include <format>
 
-// Forward declare
-//class VulkanPipelineManager;
-
 constexpr uint32_t MAX_FRAMES_IN_FLIGHT = Options::Performance::MAX_FRAMES_IN_FLIGHT;
 
+// =============================================================================
+// GLOBALS — extern ONLY
+// =============================================================================
+extern VkPhysicalDevice g_PhysicalDevice;
+extern std::unique_ptr<VulkanRTX> g_rtx_instance;
+
+// =============================================================================
+// Shader Binding Table
+// =============================================================================
 struct ShaderBindingTable {
     VkStridedDeviceAddressRegionKHR raygen{};
     VkStridedDeviceAddressRegionKHR miss{};
@@ -35,8 +42,9 @@ struct ShaderBindingTable {
     VkStridedDeviceAddressRegionKHR callable{};
 };
 
-extern std::unique_ptr<VulkanRTX> g_rtx_instance;
-
+// =============================================================================
+// VulkanRTX — CLASS DECLARATION
+// =============================================================================
 class VulkanRTX {
 public:
     VulkanRTX(int w, int h, VulkanPipelineManager* mgr = nullptr);

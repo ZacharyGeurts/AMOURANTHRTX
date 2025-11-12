@@ -240,7 +240,7 @@ private:
         std::streamsize size = fs.tellg();
         fs.seekg(0, std::ios::beg);
 
-        auto buffer = std::make_unique<std::byte[]>(static_cast<std::::size_t>(size));
+        auto buffer = std::make_unique<std::byte[]>(static_cast<std::size_t>(size));
         fs.read(reinterpret_cast<char*>(buffer.get()), size);
         fs.close();
 
@@ -254,7 +254,7 @@ private:
             return;
         }
 
-        m_activeBuffers.push_back({std::move(buffer), static_cast<std::size_t>(size)});
+        m_activeBuffers.emplace_back(AudioBuffer{std::move(buffer), static_cast<std::size_t>(size)});
         LOG_INFO_CAT("Audio", "{} queued: {} bytes | {} active", isMP3 ? "MP3" : "WAV", size, m_activeBuffers.size());
     }
 };

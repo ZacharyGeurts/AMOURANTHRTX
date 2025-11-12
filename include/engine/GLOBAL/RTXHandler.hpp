@@ -244,7 +244,7 @@ namespace RTX {
     void createCore(int w, int h, VulkanPipelineManager* mgr = nullptr);
 
     // =============================================================================
-    // UltraLowLevelBufferTracker — unchanged
+    // UltraLowLevelBufferTracker — FULL IMPLEMENTATION
     // =============================================================================
     struct BufferData {
         VkBuffer buffer = VK_NULL_HANDLE;
@@ -254,49 +254,9 @@ namespace RTX {
         std::string tag;
     };
 
-    struct UltraLowLevelBufferTracker {
-        static UltraLowLevelBufferTracker& get() noexcept {
-            static UltraLowLevelBufferTracker instance;
-            return instance;
-        }
-
-        uint64_t create(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags props, std::string_view tag) noexcept;
-        void destroy(uint64_t handle) noexcept;
-        BufferData* getData(uint64_t handle) noexcept;
-        const BufferData* getData(uint64_t handle) const noexcept;
-        VkDevice device() const noexcept { return ctx().vkDevice(); }
-        VkPhysicalDevice physicalDevice() const noexcept { return ctx().vkPhysicalDevice(); }
-        void init(VkDevice dev, VkPhysicalDevice phys) noexcept;
-        void purge_all() noexcept;
-
-        inline uint64_t make_64M(VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept;
-        inline uint64_t make_128M(VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept;
-        inline uint64_t make_256M(VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept;
-        inline uint64_t make_420M(VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept;
-        inline uint64_t make_512M(VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept;
-        inline uint64_t make_1G(VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept;
-        inline uint64_t make_2G(VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept;
-        inline uint64_t make_4G(VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept;
-        inline uint64_t make_8G(VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept;
-
-    private:
-        mutable std::mutex mutex_;
-        std::unordered_map<uint64_t, BufferData> map_;
-        std::atomic<uint64_t> counter_{0};
-        VkDevice device_{VK_NULL_HANDLE};
-        VkPhysicalDevice physDev_{VK_NULL_HANDLE};
-        uint64_t obfuscate(uint64_t raw) const noexcept { return raw ^ kStone1; }
-        uint64_t deobfuscate(uint64_t obf) const noexcept { return obf ^ kStone1; }
-    };
-
-    // =============================================================================
-    // LITERALS + SIZES
-    // =============================================================================
-    constexpr uint64_t operator"" _KB(unsigned long long v) noexcept { return v << 10; }
-    constexpr uint64_t operator"" _MB(unsigned long long v) noexcept { return v << 20; }
-    constexpr uint64_t operator"" _GB(unsigned long long v) noexcept { return v << 30; }
-    constexpr uint64_t operator"" _TB(unsigned long long v) noexcept { return v << 40; }
-
+    // -----------------------------------------------------------------
+    // PRE-DEFINED SIZES (must be before the make_* helpers)
+    // -----------------------------------------------------------------
     constexpr VkDeviceSize SIZE_64MB  =  64_MB;
     constexpr VkDeviceSize SIZE_128MB = 128_MB;
     constexpr VkDeviceSize SIZE_256MB = 256_MB;
@@ -306,6 +266,165 @@ namespace RTX {
     constexpr VkDeviceSize SIZE_2GB   =   2_GB;
     constexpr VkDeviceSize SIZE_4GB   =   4_GB;
     constexpr VkDeviceSize SIZE_8GB   =   8_GB;
+
+    struct UltraLowLevelBufferTracker {
+        static UltraLowLevelBufferTracker& get() noexcept {
+            static UltraLowLevelBufferTracker instance;
+            return instance;
+        }
+
+        // -----------------------------------------------------------------
+        // CREATE
+        // -----------------------------------------------------------------
+        uint64_t create(VkDeviceSize size,
+                        VkBufferUsageFlags usage,
+                        VkMemoryPropertyFlags props,
+                        std::string_view tag) noexcept
+        {
+            VkBufferCreateInfo bufInfo = {
+                .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+                .size  = size,
+                .usage = usage,
+                .sharingMode = VK_SHARING_MODE_EXCLUSIVE
+            };
+            VkBuffer buffer = VK_NULL_HANDLE;
+            VK_CHECK(vkCreateBuffer(device_, &bufInfo, nullptr, &buffer),
+                     "UltraLowLevelBufferTracker::create buffer");
+
+            VkMemoryRequirements memReq;
+            vkGetBufferMemoryRequirements(device_, buffer, &memReq);
+
+            VkMemoryAllocateFlagsInfo flagsInfo = {
+                .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO,
+                .flags = (usage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT)
+                         ? VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT : 0u
+            };
+
+            VkMemoryAllocateInfo allocInfo = {
+                .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+                .pNext = (usage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) ? &flagsInfo : nullptr,
+                .allocationSize  = memReq.size,
+                .memoryTypeIndex = findMemoryType(physDev_, memReq.memoryTypeBits, props)
+            };
+
+            VkDeviceMemory memory = VK_NULL_HANDLE;
+            VK_CHECK(vkAllocateMemory(device_, &allocInfo, nullptr, &memory),
+                     "UltraLowLevelBufferTracker::allocate memory");
+
+            VK_CHECK(vkBindBufferMemory(device_, buffer, memory, 0),
+                     "UltraLowLevelBufferTracker::bind memory");
+
+            const uint64_t raw = ++counter_;
+            const uint64_t obf = obfuscate(raw);
+
+            std::lock_guard<std::mutex> lk(mutex_);
+            map_.emplace(obf, BufferData{buffer, memory, size, usage, std::string(tag)});
+            return obf;
+        }
+
+        // -----------------------------------------------------------------
+        // DESTROY
+        // -----------------------------------------------------------------
+        void destroy(uint64_t handle) noexcept
+        {
+            const uint64_t raw = deobfuscate(handle);
+            std::lock_guard<std::mutex> lk(mutex_);
+            auto it = map_.find(raw);
+            if (it == map_.end()) return;
+
+            const BufferData& d = it->second;
+            if (d.buffer)  vkDestroyBuffer(device_, d.buffer, nullptr);
+            if (d.memory)  vkFreeMemory(device_, d.memory, nullptr);
+            map_.erase(it);
+        }
+
+        // -----------------------------------------------------------------
+        // GET DATA
+        // -----------------------------------------------------------------
+        BufferData* getData(uint64_t handle) noexcept
+        {
+            const uint64_t raw = deobfuscate(handle);
+            std::lock_guard<std::mutex> lk(mutex_);
+            auto it = map_.find(raw);
+            return (it != map_.end()) ? &it->second : nullptr;
+        }
+
+        const BufferData* getData(uint64_t handle) const noexcept
+        {
+            const uint64_t raw = deobfuscate(handle);
+            std::lock_guard<std::mutex> lk(mutex_);
+            auto it = map_.find(raw);
+            return (it != map_.end()) ? &it->second : nullptr;
+        }
+
+        // -----------------------------------------------------------------
+        // INIT / PURGE
+        // -----------------------------------------------------------------
+        void init(VkDevice dev, VkPhysicalDevice phys) noexcept
+        {
+            device_ = dev;
+            physDev_ = phys;
+        }
+
+        void purge_all() noexcept
+        {
+            std::lock_guard<std::mutex> lk(mutex_);
+            for (auto& [k, v] : map_) {
+                if (v.buffer)  vkDestroyBuffer(device_, v.buffer, nullptr);
+                if (v.memory)  vkFreeMemory(device_, v.memory, nullptr);
+            }
+            map_.clear();
+        }
+
+        // -----------------------------------------------------------------
+        // PRE-MADE SIZES (now see the constants above)
+        // -----------------------------------------------------------------
+        inline uint64_t make_64M (VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept { return create(SIZE_64MB,  extra, props, "64M"); }
+        inline uint64_t make_128M(VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept { return create(SIZE_128MB, extra, props, "128M"); }
+        inline uint64_t make_256M(VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept { return create(SIZE_256MB, extra, props, "256M"); }
+        inline uint64_t make_420M(VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept { return create(SIZE_420MB, extra, props, "420M"); }
+        inline uint64_t make_512M(VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept { return create(SIZE_512MB, extra, props, "512M"); }
+        inline uint64_t make_1G  (VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept { return create(SIZE_1GB,   extra, props, "1G"); }
+        inline uint64_t make_2G  (VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept { return create(SIZE_2GB,   extra, props, "2G"); }
+        inline uint64_t make_4G  (VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept { return create(SIZE_4GB,   extra, props, "4G"); }
+        inline uint64_t make_8G  (VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept { return create(SIZE_8GB,   extra, props, "8G"); }
+
+    private:
+        mutable std::mutex mutex_;
+        std::unordered_map<uint64_t, BufferData> map_;
+        std::atomic<uint64_t> counter_{0};
+        VkDevice device_{VK_NULL_HANDLE};
+        VkPhysicalDevice physDev_{VK_NULL_HANDLE};
+
+        uint64_t obfuscate(uint64_t raw) const noexcept { return raw ^ kStone1; }
+        uint64_t deobfuscate(uint64_t obf) const noexcept { return obf ^ kStone1; }
+
+        // -----------------------------------------------------------------
+        // Helper: find memory type
+        // -----------------------------------------------------------------
+        static uint32_t findMemoryType(VkPhysicalDevice phys,
+                                       uint32_t typeFilter,
+                                       VkMemoryPropertyFlags props) noexcept
+        {
+            VkPhysicalDeviceMemoryProperties memProps;
+            vkGetPhysicalDeviceMemoryProperties(phys, &memProps);
+            for (uint32_t i = 0; i < memProps.memoryTypeCount; ++i) {
+                if ((typeFilter & (1u << i)) &&
+                    (memProps.memoryTypes[i].propertyFlags & props) == props)
+                    return i;
+            }
+            LOG_ERROR_CAT("RTX", "No suitable memory type found");
+            return 0;
+        }
+    };
+
+    // =============================================================================
+    // LITERALS + SIZES (duplicate of the block above – kept for backward compatibility)
+    // =============================================================================
+    constexpr uint64_t operator"" _KB(unsigned long long v) noexcept { return v << 10; }
+    constexpr uint64_t operator"" _MB(unsigned long long v) noexcept { return v << 20; }
+    constexpr uint64_t operator"" _GB(unsigned long long v) noexcept { return v << 30; }
+    constexpr uint64_t operator"" _TB(unsigned long long v) noexcept { return v << 40; }
 
     // =============================================================================
     // MACROS
