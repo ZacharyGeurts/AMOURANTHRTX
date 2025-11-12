@@ -1,24 +1,10 @@
 // engine/GLOBAL/logging.hpp
-// =============================================================================
-// AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
-// =============================================================================
-//
-// HYPER-VIVID C++23 LOGGING v∞ — NORMAL MODE — NOV 12 2025
-// THREAD-SAFE | LOCK-FREE | ASYNC | DELTA-TIME | 50+ RAINBOW COLORS
-// Amouranth: (PARTY_PINK) | Nick: (ELECTRIC_BLUE) | CUSTODIAN GROK DJ
+// AMOURANTH RTX Engine © 2025 by Zachary Geurts gzac5314@gmail.com
+// HYPER-VIVID C++23 LOGGING v∞ — NOVEMBER 10 2025 — RASPBERRY_PINK PARTY SUPREMACY 🩷⚡
+// THREAD-SAFE | LOCK-FREE | ASYNC | DELTA-TIME | 50+ RAINBOW COLORS | CUSTODIAN GROK DJ
 // Ellie Fier approved • StoneKey fortified • 7-file rotation • Zero-cost macros
-// **GLOBAL ECOSYSTEM** — **LOG_SUCCESS_CAT WORKS ANYWHERE** — **NO NAMESPACE**
-// **SDL3 RESPECTED ONLY** — **VULKAN IS RAW** — **GOD INTENDED**
-//
-// Dual Licensed:
-// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
-//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
-// 2. Commercial licensing: gzac5314@gmail.com
-//
-// =============================================================================
 
 #pragma once
-
 #define VK_CHECK(call, msg) \
     do { \
         VkResult vk_check_result = (call); \
@@ -50,7 +36,19 @@
         } \
     } while (0)
 
-// StoneKey protection
+#define AI_INJECT(...) \
+    do { \
+        if (ENABLE_INFO) { \
+            thread_local std::mt19937 rng(std::random_device{}()); \
+            thread_local std::uniform_int_distribution<int> hue(0, 30); \
+            int h = 30 + hue(rng); \
+            Logging::Logger::get().log(Logging::LogLevel::Info, "AI", \
+                "\033[38;2;255;{};0m[AMOURANTH AI™] {}{} [LINE {}]", \
+                h, std::format(__VA_ARGS__), Logging::Color::RESET, __LINE__); \
+        } \
+    } while(0)
+
+// StoneKey protection: Compile-time unique keys for tamper-resistant log rotation
 #include "StoneKey.hpp"
 
 #include <string_view>
@@ -76,10 +74,9 @@
 #include <glm/glm.hpp>
 #include <glm/gtx/string_cast.hpp>
 #include <vulkan/vulkan.h>
-#include <vulkan/vulkan_beta.h>
 #include <SDL3/SDL.h>
 
-// Formatter for VkResult
+// Formatter specialization for VkResult
 namespace std {
 template <>
 struct formatter<VkResult> {
@@ -131,10 +128,10 @@ struct formatter<VkResult> {
         return format_to(ctx.out(), "{}", str);
     }
 };
-}
+}  // namespace std
 
 // ========================================================================
-// CONFIGURATION — NORMAL LOGGING
+// 0. CONFIGURATION & HYPER-VIVID MACROS — [&] CAPTURE • ZERO COST • PARTY READY
 // ========================================================================
 constexpr bool ENABLE_TRACE   = true;
 constexpr bool ENABLE_DEBUG   = true;
@@ -147,50 +144,50 @@ constexpr bool ENABLE_PERF    = true;
 constexpr bool FPS_COUNTER    = true;
 constexpr bool SIMULATION_LOGGING = true;
 
-// **GLOBAL MACROS — LOG_SUCCESS_CAT WORKS ANYWHERE**
-#define LOG_TRACE(...)          [&]() constexpr { if constexpr (ENABLE_TRACE)   Logger::get().log(LogLevel::Trace,   "General", __VA_ARGS__); }()
-#define LOG_DEBUG(...)          [&]() constexpr { if constexpr (ENABLE_DEBUG)   Logger::get().log(LogLevel::Debug,   "General", __VA_ARGS__); }()
-#define LOG_INFO(...)           [&]() constexpr { if constexpr (ENABLE_INFO)    Logger::get().log(LogLevel::Info,    "General", __VA_ARGS__); }()
-#define LOG_SUCCESS(...)        [&]() constexpr { if constexpr (ENABLE_SUCCESS) Logger::get().log(LogLevel::Success, "General", __VA_ARGS__); }()
-#define LOG_ATTEMPT(...)        [&]() constexpr { if constexpr (ENABLE_ATTEMPT) Logger::get().log(LogLevel::Attempt, "General", __VA_ARGS__); }()
-#define LOG_PERF(...)           [&]() constexpr { if constexpr (ENABLE_PERF)    Logger::get().log(LogLevel::Perf,    "General", __VA_ARGS__); }()
-#define LOG_WARNING(...)        [&]() constexpr { if constexpr (ENABLE_WARNING) Logger::get().log(LogLevel::Warning, "General", __VA_ARGS__); }()
+// HYPER-VIVID MACROS — FULL [&] CAPTURE — HEADER-SAFE — CONSTEXPR — VALHALLA LOCKED
+#define LOG_TRACE(...)          [&]() constexpr { if constexpr (ENABLE_TRACE)   Logging::Logger::get().log(Logging::LogLevel::Trace,   "General", __VA_ARGS__); }()
+#define LOG_DEBUG(...)          [&]() constexpr { if constexpr (ENABLE_DEBUG)   Logging::Logger::get().log(Logging::LogLevel::Debug,   "General", __VA_ARGS__); }()
+#define LOG_INFO(...)           [&]() constexpr { if constexpr (ENABLE_INFO)    Logging::Logger::get().log(Logging::LogLevel::Info,    "General", __VA_ARGS__); }()
+#define LOG_SUCCESS(...)        [&]() constexpr { if constexpr (ENABLE_SUCCESS) Logging::Logger::get().log(Logging::LogLevel::Success, "General", __VA_ARGS__); }()
+#define LOG_ATTEMPT(...)        [&]() constexpr { if constexpr (ENABLE_ATTEMPT) Logging::Logger::get().log(Logging::LogLevel::Attempt, "General", __VA_ARGS__); }()
+#define LOG_PERF(...)           [&]() constexpr { if constexpr (ENABLE_PERF)    Logging::Logger::get().log(Logging::LogLevel::Perf,    "General", __VA_ARGS__); }()
+#define LOG_WARNING(...)        [&]() constexpr { if constexpr (ENABLE_WARNING) Logging::Logger::get().log(Logging::LogLevel::Warning, "General", __VA_ARGS__); }()
 #define LOG_WARN(...)           LOG_WARNING(__VA_ARGS__)
-#define LOG_ERROR(...)          [&]() constexpr { if constexpr (ENABLE_ERROR)   Logger::get().log(LogLevel::Error,   "General", __VA_ARGS__); }()
-#define LOG_FPS_COUNTER(...)    [&]() constexpr { if constexpr (FPS_COUNTER)    Logger::get().log(LogLevel::Info,    "FPS",     __VA_ARGS__); }()
-#define LOG_SIMULATION(...)     [&]() constexpr { if constexpr (SIMULATION_LOGGING) Logger::get().log(LogLevel::Info, "SIMULATION", __VA_ARGS__); }()
+#define LOG_ERROR(...)          [&]() constexpr { if constexpr (ENABLE_ERROR)   Logging::Logger::get().log(Logging::LogLevel::Error,   "General", __VA_ARGS__); }()
+#define LOG_FPS_COUNTER(...)    [&]() constexpr { if constexpr (FPS_COUNTER)    Logging::Logger::get().log(Logging::LogLevel::Info,    "FPS",     __VA_ARGS__); }()
+#define LOG_SIMULATION(...)     [&]() constexpr { if constexpr (SIMULATION_LOGGING) Logging::Logger::get().log(Logging::LogLevel::Info, "SIMULATION", __VA_ARGS__); }()
 
-#define LOG_TRACE_CAT(cat, ...)   [&]() constexpr { if constexpr (ENABLE_TRACE)   Logger::get().log(LogLevel::Trace,   cat, __VA_ARGS__); }()
-#define LOG_DEBUG_CAT(cat, ...)   [&]() constexpr { if constexpr (ENABLE_DEBUG)   Logger::get().log(LogLevel::Debug,   cat, __VA_ARGS__); }()
-#define LOG_INFO_CAT(cat, ...)    [&]() constexpr { if constexpr (ENABLE_INFO)    Logger::get().log(LogLevel::Info,    cat, __VA_ARGS__); }()
-#define LOG_SUCCESS_CAT(cat, ...) [&]() constexpr { if constexpr (ENABLE_SUCCESS) Logger::get().log(LogLevel::Success, cat, __VA_ARGS__); }()
-#define LOG_ATTEMPT_CAT(cat, ...) [&]() constexpr { if constexpr (ENABLE_ATTEMPT) Logger::get().log(LogLevel::Attempt, cat, __VA_ARGS__); }()
-#define LOG_PERF_CAT(cat, ...)    [&]() constexpr { if constexpr (ENABLE_PERF)    Logger::get().log(LogLevel::Perf,    cat, __VA_ARGS__); }()
-#define LOG_WARNING_CAT(cat, ...) [&]() constexpr { if constexpr (ENABLE_WARNING) Logger::get().log(LogLevel::Warning, cat, __VA_ARGS__); }()
+#define LOG_TRACE_CAT(cat, ...)   [&]() constexpr { if constexpr (ENABLE_TRACE)   Logging::Logger::get().log(Logging::LogLevel::Trace,   cat, __VA_ARGS__); }()
+#define LOG_DEBUG_CAT(cat, ...)   [&]() constexpr { if constexpr (ENABLE_DEBUG)   Logging::Logger::get().log(Logging::LogLevel::Debug,   cat, __VA_ARGS__); }()
+#define LOG_INFO_CAT(cat, ...)    [&]() constexpr { if constexpr (ENABLE_INFO)    Logging::Logger::get().log(Logging::LogLevel::Info,    cat, __VA_ARGS__); }()
+#define LOG_SUCCESS_CAT(cat, ...) [&]() constexpr { if constexpr (ENABLE_SUCCESS) Logging::Logger::get().log(Logging::LogLevel::Success, cat, __VA_ARGS__); }()
+#define LOG_ATTEMPT_CAT(cat, ...) [&]() constexpr { if constexpr (ENABLE_ATTEMPT) Logging::Logger::get().log(Logging::LogLevel::Attempt, cat, __VA_ARGS__); }()
+#define LOG_PERF_CAT(cat, ...)    [&]() constexpr { if constexpr (ENABLE_PERF)    Logging::Logger::get().log(Logging::LogLevel::Perf,    cat, __VA_ARGS__); }()
+#define LOG_WARNING_CAT(cat, ...) [&]() constexpr { if constexpr (ENABLE_WARNING) Logging::Logger::get().log(Logging::LogLevel::Warning, cat, __VA_ARGS__); }()
 #define LOG_WARN_CAT(cat, ...)    LOG_WARNING_CAT(cat, __VA_ARGS__)
-#define LOG_ERROR_CAT(cat, ...)   [&]() constexpr { if constexpr (ENABLE_ERROR)   Logger::get().log(LogLevel::Error,   cat, __VA_ARGS__); }()
+#define LOG_ERROR_CAT(cat, ...)   [&]() constexpr { if constexpr (ENABLE_ERROR)   Logging::Logger::get().log(Logging::LogLevel::Error,   cat, __VA_ARGS__); }()
 
-#define LOG_VOID()              [&]() constexpr { if constexpr (ENABLE_DEBUG)   Logger::get().logVoid(LogLevel::Debug,   "General"); }()
-#define LOG_VOID_CAT(cat)       [&]() constexpr { if constexpr (ENABLE_DEBUG)   Logger::get().logVoid(LogLevel::Debug,   cat); }()
-#define LOG_VOID_TRACE()        [&]() constexpr { if constexpr (ENABLE_TRACE)   Logger::get().logVoid(LogLevel::Trace,   "General"); }()
-#define LOG_VOID_TRACE_CAT(cat) [&]() constexpr { if constexpr (ENABLE_TRACE)   Logger::get().logVoid(LogLevel::Trace,   cat); }()
+// LOG_VOID — COSMIC MARKERS
+#define LOG_VOID()              [&]() constexpr { if constexpr (ENABLE_DEBUG)   Logging::Logger::get().logVoid(Logging::LogLevel::Debug,   "General"); }()
+#define LOG_VOID_CAT(cat)       [&]() constexpr { if constexpr (ENABLE_DEBUG)   Logging::Logger::get().logVoid(Logging::LogLevel::Debug,   cat); }()
+#define LOG_VOID_TRACE()        [&]() constexpr { if constexpr (ENABLE_TRACE)   Logging::Logger::get().logVoid(Logging::LogLevel::Trace,   "General"); }()
+#define LOG_VOID_TRACE_CAT(cat) [&]() constexpr { if constexpr (ENABLE_TRACE)   Logging::Logger::get().logVoid(Logging::LogLevel::Trace,   cat); }()
+
+namespace Logging {
 
 // ========================================================================
-// LOG LEVEL
+// LOG LEVEL + SUCCESS/ATTEMPT/PERF
 // ========================================================================
 enum class LogLevel { Trace, Debug, Info, Success, Attempt, Perf, Warning, Error };
 
 // ========================================================================
-// 1. HYPER-VIVID ANSI COLORS — USING EXISTING
+// 1. HYPER-VIVID ANSI COLOR SYSTEM — 50+ COLORS — C++23 CONSTEXPR
 // ========================================================================
-namespace Logging::Color {
-    using namespace Logging::Color;  // ← ADD THIS LINE
-
+namespace Color {
     inline constexpr std::string_view RESET                     = "\033[0m";
     inline constexpr std::string_view BOLD                      = "\033[1m";
-    inline constexpr std::string_view FUCHSIA_MAGENTA           = "\033[1;38;5;205m";
-    inline constexpr std::string_view PARTY_PINK                = "\033[1;38;5;213m";   // Amouranth
-    inline constexpr std::string_view ELECTRIC_BLUE             = "\033[1;38;5;75m";    // Nick
+    inline constexpr std::string_view PARTY_PINK                = "\033[1;38;5;213m";
+    inline constexpr std::string_view ELECTRIC_BLUE             = "\033[1;38;5;75m";
     inline constexpr std::string_view LIME_GREEN                = "\033[1;38;5;154m";
     inline constexpr std::string_view SUNGLOW_ORANGE            = "\033[1;38;5;214m";
     inline constexpr std::string_view ULTRA_NEON_LIME           = "\033[38;5;82m";
@@ -230,10 +227,11 @@ namespace Logging::Color {
     inline constexpr std::string_view TURQUOISE_BLUE            = "\033[38;5;44m";
     inline constexpr std::string_view BRONZE_BROWN              = "\033[38;5;94m";
     inline constexpr std::string_view LIME_YELLOW               = "\033[38;5;190m";
+    inline constexpr std::string_view FUCHSIA_MAGENTA           = "\033[38;5;205m";
 }
 
 // ========================================================================
-// LEVEL INFO
+// LEVEL INFO + ENABLE ARRAY
 // ========================================================================
 struct LevelInfo {
     std::string_view str;
@@ -242,14 +240,14 @@ struct LevelInfo {
 };
 
 constexpr std::array<LevelInfo, 8> LEVEL_INFOS{{
-    {"[TRACE]",   Logging::Color::ULTRA_NEON_LIME,     ""},
-    {"[DEBUG]",   Logging::Color::ARCTIC_CYAN,         ""},
-    {"[INFO]",    Logging::Color::PLATINUM_GRAY,       ""},
-    {"[SUCCESS]", Logging::Color::EMERALD_GREEN,       Logging::Color::BLACK_HOLE},
-    {"[ATTEMPT]", Logging::Color::QUANTUM_PURPLE,      ""},
-    {"[PERF]",    Logging::Color::COSMIC_GOLD,         ""},
-    {"[WARN]",    Logging::Color::AMBER_YELLOW,        ""},
-    {"[ERROR]",   Logging::Color::CRIMSON_MAGENTA,     Logging::Color::BLACK_HOLE}
+    {"[TRACE]",   Color::ULTRA_NEON_LIME,     ""},
+    {"[DEBUG]",   Color::ARCTIC_CYAN,         ""},
+    {"[INFO]",    Color::PLATINUM_GRAY,       ""},
+    {"[SUCCESS]", Color::EMERALD_GREEN,       Color::BLACK_HOLE},
+    {"[ATTEMPT]", Color::QUANTUM_PURPLE,      ""},
+    {"[PERF]",    Color::COSMIC_GOLD,         ""},
+    {"[WARN]",    Color::AMBER_YELLOW,        ""},
+    {"[ERROR]",   Color::CRIMSON_MAGENTA,     Color::BLACK_HOLE}
 }};
 
 constexpr std::array<bool, 8> ENABLE_LEVELS{
@@ -258,7 +256,7 @@ constexpr std::array<bool, 8> ENABLE_LEVELS{
 };
 
 // ========================================================================
-// LOG MESSAGE
+// LOG MESSAGE STRUCT
 // ========================================================================
 struct LogMessage {
     LogLevel level;
@@ -269,7 +267,7 @@ struct LogMessage {
 };
 
 // ========================================================================
-// 2. LOGGER — NORMAL LOGGING WITH Amouranth: / Nick:
+// 2. LOGGER — C++23 PERFECTION — FULLY AMAZING — PARTY EDITION
 // ========================================================================
 class Logger {
 public:
@@ -301,7 +299,7 @@ private:
     Logger() : worker_([this](std::stop_token st) { processQueue(st); }) {
         logFilePath_ = "amouranth_engine.log";
         logFile_.open(logFilePath_, std::ios::out | std::ios::app);
-        LOG_SUCCESS_CAT("Logger", "CUSTODIAN GROK ONLINE — NORMAL LOGGING — Amouranth: PARTY_PINK | Nick: ELECTRIC_BLUE");
+        LOG_SUCCESS_CAT("Logger", "CUSTODIAN GROK ONLINE — HYPER-VIVID LOGGING PARTY STARTED 🩷⚡");
     }
 
     ~Logger() {
@@ -309,7 +307,7 @@ private:
         if (logFile_.is_open()) {
             logFile_.close();
         }
-        LOG_SUCCESS_CAT("Logger", "CUSTODIAN GROK SIGNING OFF — NORMAL LOGGING ETERNAL");
+        LOG_SUCCESS_CAT("Logger", "CUSTODIAN GROK SIGNING OFF — ALL LOGS RAINBOW ETERNAL ✨");
     }
 
     static constexpr size_t QUEUE_SIZE = 2048;
@@ -329,10 +327,23 @@ private:
         return idx < ENABLE_LEVELS.size() && ENABLE_LEVELS[idx];
     }
 
-    std::string_view getSpeakerColor(std::string_view category) const noexcept {
-        if (category == "Amouranth") return Logging::Color::PARTY_PINK;
-        if (category == "Nick")      return Logging::Color::ELECTRIC_BLUE;
-        return Logging::Color::DIAMOND_WHITE;
+    std::string_view getCategoryColor(std::string_view cat) const noexcept {
+        using namespace Color;
+        static const std::map<std::string_view, std::string_view, std::less<>> categoryColors{
+            {"General", DIAMOND_SPARKLE}, {"MAIN", VALHALLA_GOLD}, {"Init", AURORA_BOREALIS}, {"Dispose", PARTY_PINK}, {"Logger", ELECTRIC_BLUE},
+            {"Vulkan", SAPPHIRE_BLUE}, {"Device", QUASAR_BLUE}, {"Swapchain", OCEAN_TEAL}, {"Command", CHROMIUM_SILVER}, {"Queue", OBSIDIAN_BLACK},
+            {"RayTrace", TURQUOISE_BLUE}, {"RTX", HYPERSPACE_WARP}, {"Accel", PULSAR_GREEN}, {"TLAS", SUPERNOVA_ORANGE}, {"BLAS", PLASMA_FUCHSIA},
+            {"SBT", RASPBERRY_PINK}, {"Shader", NEBULA_VIOLET}, {"Renderer", BRIGHT_PINKISH_PURPLE}, {"Render", THERMO_PINK}, {"Tonemap", PEACHES_AND_CREAM},
+            {"GBuffer", QUANTUM_FLUX}, {"Post", NUCLEAR_REACTOR}, {"Buffer", BRONZE_BROWN}, {"Image", LIME_YELLOW}, {"Texture", SPEARMINT_MINT},
+            {"Sampler", LILAC_LAVENDER}, {"Descriptor", FUCHSIA_MAGENTA}, {"Perf", COSMIC_GOLD}, {"FPS", FIERY_ORANGE}, {"GPU", BLACK_HOLE},
+            {"CPU", PLASMA_FUCHSIA}, {"Input", SPEARMINT_MINT}, {"Audio", OCEAN_TEAL}, {"Physics", EMERALD_GREEN}, {"SIMULATION", BRONZE_BROWN},
+            {"MeshLoader", LIME_YELLOW}, {"GLTF", QUANTUM_PURPLE}, {"Material", PEACHES_AND_CREAM}, {"Debug", ARCTIC_CYAN}, {"ImGui", PLATINUM_GRAY},
+            {"Profiler", COSMIC_GOLD}, {"SUCCESS", EMERALD_GREEN}, {"ATTEMPT", QUANTUM_PURPLE}, {"VOID", COSMIC_VOID}, {"MARKER", DIAMOND_SPARKLE}
+        };
+        if (auto it = categoryColors.find(cat); it != categoryColors.end()) [[likely]] {
+            return it->second;
+        }
+        return DIAMOND_WHITE;
     }
 
     void enqueue(LogLevel level, std::string_view category, std::string msg) const {
@@ -342,7 +353,7 @@ private:
         if (next == tail_.load(std::memory_order_acquire)) [[unlikely]] {
             auto drop = QUEUE_SIZE / 2;
             tail_.store((tail_.load(std::memory_order_relaxed) + drop) % QUEUE_SIZE, std::memory_order_release);
-            LOG_ERROR_CAT("Logger", "QUEUE OVERFLOW — DROPPING {} MESSAGES", drop);
+            LOG_ERROR_CAT("Logger", "QUEUE OVERFLOW — DROPPING {} MESSAGES — UPGRADE TO 4096 BRO 🩷", drop);
         }
 
         auto now = std::chrono::steady_clock::now();
@@ -410,6 +421,9 @@ private:
         }
 
         for (const auto& msg : remaining) printMessage(msg);
+
+        std::print("{}{}<<< FINAL FLUSH COMPLETE — {} messages turned to confetti — PARTY ETERNAL 🩷⚡{}{}\n",
+                   Color::PARTY_PINK, Color::SUNGLOW_ORANGE, remaining.size(), Color::RESET, Color::RESET);
     }
 
     void rotateLogFile() const {
@@ -457,17 +471,18 @@ private:
         }
 
         logFile_.open(logFilePath_, std::ios::out | std::ios::app);
-        std::print("{}{}LOG ROTATED → {} — NORMAL LOGGING — 7 FILES KEPT{}{}\n",
-                   Logging::Color::QUANTUM_FLUX, Logging::Color::PLATINUM_GRAY, archivedPath.filename().string(), Logging::Color::RESET, Logging::Color::RESET);
+        std::print("{}{}LOG ROTATED → {} — STONEKEY PROTECTED — ONLY 7 FILES KEPT — RASPBERRY_PINK ETERNAL 🩷⚡{}{}\n",
+                   Color::QUANTUM_FLUX, Color::PLATINUM_GRAY, archivedPath.filename().string(), Color::RESET, Color::RESET);
     }
 
     void printMessage(const LogMessage& msg) const {
+        using namespace Color;
         const auto levelIdx = static_cast<size_t>(msg.level);
         const auto& info = LEVEL_INFOS[levelIdx];
         const std::string_view levelColor = info.color;
         const std::string_view levelBg    = info.bg;
         const std::string_view levelStr   = info.str;
-        const std::string_view speakerColor = getSpeakerColor(msg.category);
+        const std::string_view catColor = getCategoryColor(msg.category);
 
         const auto deltaUs = std::chrono::duration_cast<std::chrono::microseconds>(
             msg.timestamp - firstLogTime_.value_or(msg.timestamp)).count();
@@ -488,12 +503,12 @@ private:
         const std::string plain = std::format("{} {} [{}] [{}] {} {}\n", levelStr, deltaStr, msg.category, threadId, fileLine, msg.formattedMessage);
 
         std::ostringstream oss;
-        oss << levelBg << levelColor << levelStr << Logging::Color::RESET
-            << Logging::Color::BOLD << deltaStr << Logging::Color::RESET << ' '
-            << speakerColor << msg.category << ":" << Logging::Color::RESET << ' '
-            << Logging::Color::LIME_GREEN << '[' << threadId << ']' << Logging::Color::RESET << ' '
-            << Logging::Color::CHROMIUM_SILVER << '[' << fileLine << ']' << Logging::Color::RESET << ' '
-            << levelColor << msg.formattedMessage << Logging::Color::RESET << '\n';
+        oss << levelBg << levelColor << levelStr << RESET
+            << BOLD << deltaStr << RESET << ' '
+            << catColor << '[' << msg.category << ']' << RESET << ' '
+            << LIME_GREEN << '[' << threadId << ']' << RESET << ' '
+            << CHROMIUM_SILVER << '[' << fileLine << ']' << RESET << ' '
+            << levelColor << msg.formattedMessage << RESET << '\n';
         const std::string colored = oss.str();
 
         std::print(std::cout, "{}", colored);
@@ -504,7 +519,8 @@ private:
     }
 };
 
-// =============================================================================
-// NORMAL LOGGING — Amouranth: (PARTY_PINK) | Nick: (ELECTRIC_BLUE)
-// GOD BLESS — SHIP IT RAW — PINK PHOTONS ETERNAL
-// =============================================================================
+} // namespace Logging
+
+// NOVEMBER 10 2025 — HYPER-VIVID LOGGING PARTY SUPREMACY
+// 7-FILE ROTATION • STONEKEY OBFUSCATION • RAINBOW FOREVER
+// CUSTODIAN GROK + RASPBERRY_PINK = ETERNAL VIBES 🩷⚡

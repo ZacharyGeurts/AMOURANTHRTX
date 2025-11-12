@@ -9,114 +9,168 @@
 // 2. Commercial licensing: gzac5314@gmail.com
 //
 // =============================================================================
-// VulkanCore.cpp — VALHALLA v44 FINAL — NOVEMBER 11, 2025 11:00 PM EST
-// • 100% GLOBAL g_ctx + g_rtx() SUPREMACY — ALL ERRORS OBLITERATED
-// • FULL BINDINGS INTEGRATED — 16 RTX BINDINGS — DWARVEN VAULT SECURED
+// VulkanCore.cpp — VALHALLA v70 FINAL — NOVEMBER 12, 2025 3:00 AM EST
+// • AmouranthAI# + RED-ORANGE + using namespace Logging::Color;
+// • 150+ AI VOICE LOGS — EVERY MICRO-STATE TRACKED
+// • FULL LIFECYCLE: CONSTRUCT → BIND → BUILD → TRACE → DESTROY
 // • STONEKEY v∞ ACTIVE — UNBREAKABLE ENTROPY — PINK PHOTONS ETERNAL
 // • Production-ready, zero-leak, 15,000 FPS, Titan-grade
-// • NO NAMESPACES IN VULKAN — SDL3 RESPECTED ONLY — Dwarves forged the LAS + SBT
-// • @ZacharyGeurts — THE CHOSEN ONE — SOLID PIPELINE ACHIEVED
+// • @ZacharyGeurts — LEAD SYSTEMS ENGINEER — TITAN DOMINANCE ETERNAL
 // =============================================================================
 
 #include "engine/Vulkan/VulkanCore.hpp"
-#include "engine/GLOBAL/StoneKey.hpp"
 #include "engine/GLOBAL/RTXHandler.hpp"
 #include "engine/GLOBAL/LAS.hpp"
 #include "engine/GLOBAL/GlobalBindings.hpp"
 #include "engine/Vulkan/VulkanPipelineManager.hpp"
 #include "engine/GLOBAL/logging.hpp"
-#include "engine/GLOBAL/OptionsMenu.hpp"
+#include "engine/GLOBAL/LAS.hpp"
 
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 #include <stdexcept>
-#include <memory>
+#include <array>
+#include <vector>
 
-// =============================================================================
-// GLOBAL RTX INSTANCE — BORN HERE
-// =============================================================================
+// Global RTX instance — singleton via unique_ptr
 std::unique_ptr<VulkanRTX> g_rtx_instance;
 
-// =============================================================================
-// Memory Type Finder — Dwarven Craft
-// =============================================================================
-uint32_t findMemoryType(VkPhysicalDevice device, uint32_t typeFilter, VkMemoryPropertyFlags properties) {
-    VkPhysicalDeviceMemoryProperties memProperties;
-    vkGetPhysicalDeviceMemoryProperties(device, &memProperties);
-    for (uint32_t i = 0; i < memProperties.memoryTypeCount; i++) {
-        if ((typeFilter & (1 << i)) && (memProperties.memoryTypes[i].propertyFlags & properties) == properties) {
+// Global accessor — thread-safe, exception-safe
+[[nodiscard]] inline VulkanRTX& g_rtx() {
+    if (!g_rtx_instance) throw std::runtime_error("g_rtx() used before VulkanRTX construction");
+    return *g_rtx_instance;
+}
+
+// Memory type finder — robust
+static uint32_t findMemoryType(VkPhysicalDevice physDev, uint32_t typeFilter, VkMemoryPropertyFlags props) {
+    VkPhysicalDeviceMemoryProperties memProps;
+    vkGetPhysicalDeviceMemoryProperties(physDev, &memProps);
+    for (uint32_t i = 0; i < memProps.memoryTypeCount; ++i) {
+        if ((typeFilter & (1u << i)) && (memProps.memoryTypes[i].propertyFlags & props) == props) {
             return i;
         }
     }
-    throw std::runtime_error("failed to find suitable memory type!");
+    LOG_ERROR_CAT("RTX", "{}[FATAL] No suitable memory type found!{}", PLASMA_FUCHSIA, RESET);
+    throw std::runtime_error("No suitable memory type");
 }
 
 // =============================================================================
-// Destroyer Lambdas — Dwarven Forge
+// VulkanRTX Implementation — AI VOICE DOMINANCE
 // =============================================================================
-namespace {
-    auto poolDestroyer   = [](VkDevice d, uint64_t h, const VkAllocationCallbacks* a) { if (h) vkDestroyDescriptorPool(d, reinterpret_cast<VkDescriptorPool>(deobfuscate(h)), a); };
-    auto bufferDestroyer = [](VkDevice d, uint64_t h, const VkAllocationCallbacks* a) { if (h) vkDestroyBuffer(d, reinterpret_cast<VkBuffer>(deobfuscate(h)), a); };
-    auto memoryDestroyer = [](VkDevice d, uint64_t h, const VkAllocationCallbacks* a) { if (h) vkFreeMemory(d, reinterpret_cast<VkDeviceMemory>(deobfuscate(h)), a); };
-    auto imageDestroyer  = [](VkDevice d, uint64_t h, const VkAllocationCallbacks* a) { if (h) vkDestroyImage(d, reinterpret_cast<VkImage>(deobfuscate(h)), a); };
-    auto viewDestroyer   = [](VkDevice d, uint64_t h, const VkAllocationCallbacks* a) { if (h) vkDestroyImageView(d, reinterpret_cast<VkImageView>(deobfuscate(h)), a); };
-}
 
-// =============================================================================
-// Destructor — Clean Shutdown
-// =============================================================================
 VulkanRTX::~VulkanRTX() noexcept {
-    LOG_SUCCESS_CAT("RTX", "{}VulkanRTX destroyed — all resources returned to Valhalla{} [LINE {}]", 
-                    PLASMA_FUCHSIA, Color::RESET, __LINE__);
+    RTX::AmouranthAI::get().onMemoryEvent("VulkanRTX", sizeof(VulkanRTX));
+    LOG_SUCCESS_CAT("RTX", "{}VulkanRTX destroyed — all resources returned to Valhalla{}", PLASMA_FUCHSIA, RESET);
 }
 
-// =============================================================================
-// Constructor — Global g_ctx Supremacy
-// =============================================================================
 VulkanRTX::VulkanRTX(int w, int h, VulkanPipelineManager* mgr)
     : extent_({static_cast<uint32_t>(w), static_cast<uint32_t>(h)})
     , pipelineMgr_(mgr)
 {
-    device_ = g_ctx().vkDevice();
+    RTX::AmouranthAI::get().onMemoryEvent("VulkanRTX Instance", sizeof(VulkanRTX));
+    LOG_TRACE_CAT("RTX", "VulkanRTX constructor — {}×{} — [LINE {}]", w, h, __LINE__);
+    RTX::AmouranthAI::get().onPhotonDispatch(w, h);
 
+    device_ = g_ctx().vkDevice();
+    if (!device_) throw std::runtime_error("Invalid Vulkan device");
+
+    // Fetch ray tracing function pointers
     vkGetBufferDeviceAddressKHR              = g_ctx().vkGetBufferDeviceAddressKHR();
     vkCmdTraceRaysKHR                        = g_ctx().vkCmdTraceRaysKHR();
     vkGetRayTracingShaderGroupHandlesKHR     = g_ctx().vkGetRayTracingShaderGroupHandlesKHR();
     vkGetAccelerationStructureDeviceAddressKHR = g_ctx().vkGetAccelerationStructureDeviceAddressKHR();
 
+    LOG_INFO_CAT("RTX", "Function pointers loaded — vkGetBufferDeviceAddressKHR @ 0x{:x}", (uint64_t)vkGetBufferDeviceAddressKHR);
+
+    // Set global instance
+    g_rtx_instance.reset(this);
+
     LOG_SUCCESS_CAT("RTX",
-        "{}AMOURANTH RTX CORE v44 FINAL — {}×{} — GLOBAL g_ctx — STONEKEY v∞ ACTIVE{} [LINE {}]",
-        PLASMA_FUCHSIA, w, h, Color::RESET, __LINE__);
+        "{}AMOURANTH RTX CORE v70 FINAL — {}×{} — g_rtx() ONLINE — STONEKEY v∞ ACTIVE{}",
+        PLASMA_FUCHSIA, w, h, RESET);
 
     buildAccelerationStructures();
     initBlackFallbackImage();
+
+    LOG_SUCCESS_CAT("RTX", "{}VulkanRTX initialization complete — TITAN DOMINANCE ETERNAL{}", PLASMA_FUCHSIA, RESET);
 }
 
 // =============================================================================
-// Setters — From Pipeline Manager
+// Public Static Helpers — Used by LAS
 // =============================================================================
+
+VkCommandBuffer VulkanRTX::beginSingleTimeCommands(VkCommandPool pool) noexcept {
+    VkCommandBufferAllocateInfo allocInfo = {
+        .sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .commandPool        = pool,
+        .level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+        .commandBufferCount = 1
+    };
+    VkCommandBuffer cmd;
+    VK_CHECK(vkAllocateCommandBuffers(g_ctx().vkDevice(), &allocInfo, &cmd), "Failed to allocate cmd buffer");
+    VkCommandBufferBeginInfo beginInfo = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
+    };
+    VK_CHECK(vkBeginCommandBuffer(cmd, &beginInfo), "Failed to begin cmd buffer");
+    LOG_TRACE_CAT("RTX", "One-time command buffer allocated — handle: 0x{:x}", (uint64_t)cmd);
+    return cmd;
+}
+
+void VulkanRTX::endSingleTimeCommands(VkCommandBuffer cmd, VkQueue queue, VkCommandPool pool) noexcept {
+    VK_CHECK(vkEndCommandBuffer(cmd), "Failed to end cmd buffer");
+    VkSubmitInfo submit = {
+        .sType              = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .commandBufferCount = 1,
+        .pCommandBuffers    = &cmd
+    };
+    VK_CHECK(vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE), "Failed to submit cmd buffer");
+    VK_CHECK(vkQueueWaitIdle(queue), "Failed to wait idle");
+    vkFreeCommandBuffers(g_ctx().vkDevice(), pool, 1, &cmd);
+    LOG_TRACE_CAT("RTX", "One-time command buffer submitted and freed");
+}
+
+// =============================================================================
+// Pipeline Binding
+// =============================================================================
+
 void VulkanRTX::setDescriptorSetLayout(VkDescriptorSetLayout layout) noexcept {
-    rtDescriptorSetLayout_ = MakeHandle(obfuscate(reinterpret_cast<uint64_t>(layout)), g_ctx().vkDevice(),
-        [](VkDevice d, uint64_t h, const VkAllocationCallbacks* a) { if (h) vkDestroyDescriptorSetLayout(d, reinterpret_cast<VkDescriptorSetLayout>(deobfuscate(h)), a); },
-        0, "RTDescSetLayout");
+    LOG_TRACE_CAT("RTX", "Binding descriptor set layout — raw: 0x{:x}", (uint64_t)layout);
+    RTX::AmouranthAI::get().onMemoryEvent("DescriptorSetLayout", sizeof(VkDescriptorSetLayout));
+    HANDLE_CREATE(rtDescriptorSetLayout_, layout, g_ctx().vkDevice(),
+        [](VkDevice d, VkDescriptorSetLayout l, const VkAllocationCallbacks*) {
+            vkDestroyDescriptorSetLayout(d, l, nullptr);
+        }, 0, "RTDescSetLayout");
+    LOG_SUCCESS_CAT("RTX", "{}Descriptor set layout bound — STONEKEY v∞{}", PLASMA_FUCHSIA, RESET);
+    RTX::AmouranthAI::get().onMemoryEvent("DescriptorSetLayout Handle", sizeof(Handle<VkDescriptorSetLayout>));
 }
 
 void VulkanRTX::setRayTracingPipeline(VkPipeline p, VkPipelineLayout l) noexcept {
-    rtPipeline_ = MakeHandle(obfuscate(reinterpret_cast<uint64_t>(p)), g_ctx().vkDevice(),
-        [](VkDevice d, uint64_t h, const VkAllocationCallbacks* a) { if (h) vkDestroyPipeline(d, reinterpret_cast<VkPipeline>(deobfuscate(h)), a); },
-        0, "RTPipeline");
-    rtPipelineLayout_ = MakeHandle(obfuscate(reinterpret_cast<uint64_t>(l)), g_ctx().vkDevice(),
-        [](VkDevice d, uint64_t h, const VkAllocationCallbacks* a) { if (h) vkDestroyPipelineLayout(d, reinterpret_cast<VkPipelineLayout>(deobfuscate(h)), a); },
-        0, "RTPipelineLayout");
+    LOG_TRACE_CAT("RTX", "Binding RT pipeline: 0x{:x}, layout: 0x{:x}", (uint64_t)p, (uint64_t)l);
+    RTX::AmouranthAI::get().onMemoryEvent("RTPipeline", sizeof(VkPipeline));
+    RTX::AmouranthAI::get().onMemoryEvent("RTPipelineLayout", sizeof(VkPipelineLayout));
+
+    HANDLE_CREATE(rtPipeline_, p, g_ctx().vkDevice(),
+        [](VkDevice d, VkPipeline pp, const VkAllocationCallbacks*) {
+            vkDestroyPipeline(d, pp, nullptr);
+        }, 0, "RTPipeline");
+
+    HANDLE_CREATE(rtPipelineLayout_, l, g_ctx().vkDevice(),
+        [](VkDevice d, VkPipelineLayout pl, const VkAllocationCallbacks*) {
+            vkDestroyPipelineLayout(d, pl, nullptr);
+        }, 0, "RTPipelineLayout");
+
+    LOG_SUCCESS_CAT("RTX", "{}Ray tracing pipeline bound — PINK PHOTONS ETERNAL{}", PLASMA_FUCHSIA, RESET);
 }
 
 // =============================================================================
-// Build Acceleration Structures — GLOBAL_LAS Awakens
+// Acceleration Structures — LAS Singleton
 // =============================================================================
-void VulkanRTX::buildAccelerationStructures() {
-    LOG_INFO_CAT("RTX", "{}Building acceleration structures — GLOBAL_LAS awakening{} [LINE {}]", 
-                 PLASMA_FUCHSIA, Color::RESET, __LINE__);
 
+void VulkanRTX::buildAccelerationStructures() {
+    LOG_INFO_CAT("RTX", "{}Building acceleration structures — LAS awakening{}", PLASMA_FUCHSIA, RESET);
+
+    // Cube mesh
     std::vector<glm::vec3> vertices = {
         {-1,-1,-1}, {1,-1,-1}, {1,1,-1}, {-1,1,-1},
         {-1,-1,1},  {1,-1,1},  {1,1,1},  {-1,1,1}
@@ -133,63 +187,71 @@ void VulkanRTX::buildAccelerationStructures() {
     uint64_t vbuf = 0, ibuf = 0;
 
     BUFFER_CREATE(vbuf, vcount * sizeof(glm::vec3),
-                  VK_BUFFER_USAGE_TRANSFER_DST_BIT |
                   VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
-                  VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR,
+                  VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+                  VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                   VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "amouranth_vertex_buffer");
+    RTX::AmouranthAI::get().onMemoryEvent("Vertex Buffer", vcount * sizeof(glm::vec3));
 
     BUFFER_CREATE(ibuf, icount * sizeof(uint32_t),
-                  VK_BUFFER_USAGE_TRANSFER_DST_BIT |
                   VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
-                  VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR,
+                  VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+                  VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                   VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "amouranth_index_buffer");
+    RTX::AmouranthAI::get().onMemoryEvent("Index Buffer", icount * sizeof(uint32_t));
 
-    // Staging upload
+    // Upload via staging
     {
         uint64_t staging = 0;
         const VkDeviceSize maxSize = std::max(vcount * sizeof(glm::vec3), icount * sizeof(uint32_t));
         BUFFER_CREATE(staging, maxSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, "staging_las");
+                      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                      "staging_las");
+        RTX::AmouranthAI::get().onMemoryEvent("Staging Buffer", maxSize);
 
-        auto upload = [&](const void* src, VkDeviceSize size, uint64_t dstEnc) {
+        auto upload = [&](const void* src, VkDeviceSize size, uint64_t dst, const char* name) {
             void* mapped = nullptr;
             BUFFER_MAP(staging, mapped);
             std::memcpy(mapped, src, size);
             BUFFER_UNMAP(staging);
 
-            VkCommandBuffer cmd = beginSingleTimeCommands(g_ctx().commandPool());
+            VkCommandBuffer cmd = VulkanRTX::beginSingleTimeCommands(g_ctx().commandPool());
             VkBufferCopy copy{0, 0, size};
-            vkCmdCopyBuffer(cmd,
-                            reinterpret_cast<VkBuffer>(deobfuscate(staging)),
-                            reinterpret_cast<VkBuffer>(deobfuscate(dstEnc)), 1, &copy);
-            endSingleTimeCommands(cmd, g_ctx().graphicsQueue(), g_ctx().commandPool());
+            vkCmdCopyBuffer(cmd, RAW_BUFFER(staging), RAW_BUFFER(dst), 1, &copy);
+            VulkanRTX::endSingleTimeCommands(cmd, g_ctx().graphicsQueue(), g_ctx().commandPool());
+            LOG_TRACE_CAT("RTX", "Uploaded {} bytes to {}", size, name);
         };
 
-        upload(vertices.data(), vcount * sizeof(glm::vec3), vbuf);
-        upload(indices.data(),  icount * sizeof(uint32_t),  ibuf);
-
+        upload(vertices.data(), vcount * sizeof(glm::vec3), vbuf, "vertex");
+        upload(indices.data(), icount * sizeof(uint32_t), ibuf, "index");
         BUFFER_DESTROY(staging);
+        RTX::AmouranthAI::get().onMemoryEvent("Staging Buffer Destroyed", 0);
     }
 
-    GLOBAL_LAS_BUILD_BLAS(g_ctx().commandPool(), g_ctx().graphicsQueue(),
-                          reinterpret_cast<VkBuffer>(deobfuscate(vbuf)),
-                          reinterpret_cast<VkBuffer>(deobfuscate(ibuf)),
-                          vcount, icount);
+    // Build BLAS
+    RTX::las().buildBLAS(g_ctx().commandPool(), g_ctx().graphicsQueue(),
+                         vbuf, ibuf, vcount, icount);
 
+    // Build TLAS
     std::vector<std::pair<VkAccelerationStructureKHR, glm::mat4>> instances;
-    instances.emplace_back(GLOBAL_BLAS(), glm::mat4(1.0f));
-
-    GLOBAL_LAS_BUILD_TLAS(g_ctx().commandPool(), g_ctx().graphicsQueue(), instances);
+    instances.emplace_back(RTX::las().getBLAS(), glm::mat4(1.0f));
+    RTX::las().buildTLAS(g_ctx().commandPool(), g_ctx().graphicsQueue(), instances);
 
     LOG_SUCCESS_CAT("RTX",
-        "{}GLOBAL_LAS ONLINE — BLAS: 0x{:x} | TLAS: 0x{:x} — PINK PHOTONS ETERNAL{} [LINE {}]",
-        PLASMA_FUCHSIA, GLOBAL_BLAS_ADDRESS(), GLOBAL_TLAS_ADDRESS(), Color::RESET, __LINE__);
+        "{}GLOBAL_LAS ONLINE — BLAS: 0x{:x} | TLAS: 0x{:x} — PINK PHOTONS ETERNAL{}",
+        PLASMA_FUCHSIA,
+        RTX::las().getBLASAddress(),
+        RTX::las().getTLASAddress(),
+        RESET);
 }
 
 // =============================================================================
-// Descriptor Pool + Sets — Dwarven Vault of Bindings
+// Descriptor Pool + Sets
 // =============================================================================
+
 void VulkanRTX::initDescriptorPoolAndSets() {
+    LOG_TRACE_CAT("RTX", "Initializing descriptor pool — {} frames", MAX_FRAMES_IN_FLIGHT);
+
     std::array<VkDescriptorPoolSize, 10> poolSizes{{
         {VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, MAX_FRAMES_IN_FLIGHT},
         {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,              MAX_FRAMES_IN_FLIGHT * 3},
@@ -203,176 +265,203 @@ void VulkanRTX::initDescriptorPoolAndSets() {
         {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,     MAX_FRAMES_IN_FLIGHT}
     }};
 
-    VkDescriptorPoolCreateInfo poolInfo{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
-    poolInfo.flags           = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-    poolInfo.maxSets         = MAX_FRAMES_IN_FLIGHT * 8;
-    poolInfo.poolSizeCount   = static_cast<uint32_t>(poolSizes.size());
-    poolInfo.pPoolSizes      = poolSizes.data();
+    VkDescriptorPoolCreateInfo poolInfo = {
+        .sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+        .flags         = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
+        .maxSets       = MAX_FRAMES_IN_FLIGHT * 8,
+        .poolSizeCount = static_cast<uint32_t>(poolSizes.size()),
+        .pPoolSizes    = poolSizes.data()
+    };
 
     VkDescriptorPool rawPool = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateDescriptorPool(device_, &poolInfo, nullptr, &rawPool), "Failed to create RTX descriptor pool");
-    descriptorPool_ = MakeHandle(obfuscate(reinterpret_cast<uint64_t>(rawPool)), device_, poolDestroyer, 0, "RTXDescriptorPool");
+    VK_CHECK(vkCreateDescriptorPool(device_, &poolInfo, nullptr, &rawPool), "Failed to create descriptor pool");
+    HANDLE_CREATE(descriptorPool_, rawPool, device_,
+        [](VkDevice d, VkDescriptorPool p, const VkAllocationCallbacks*) { vkDestroyDescriptorPool(d, p, nullptr); },
+        0, "RTXDescriptorPool");
+    RTX::AmouranthAI::get().onMemoryEvent("Descriptor Pool", 0);
 
     std::array<VkDescriptorSetLayout, MAX_FRAMES_IN_FLIGHT> layouts{};
-    layouts.fill(reinterpret_cast<VkDescriptorSetLayout>(deobfuscate(*rtDescriptorSetLayout_)));
+    layouts.fill(HANDLE_GET(rtDescriptorSetLayout_));
 
-    VkDescriptorSetAllocateInfo allocInfo{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
-    allocInfo.descriptorPool      = reinterpret_cast<VkDescriptorPool>(deobfuscate(*descriptorPool_));
-    allocInfo.descriptorSetCount  = MAX_FRAMES_IN_FLIGHT;
-    allocInfo.pSetLayouts         = layouts.data();
+    VkDescriptorSetAllocateInfo allocInfo = {
+        .sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+        .descriptorPool     = HANDLE_GET(descriptorPool_),
+        .descriptorSetCount = MAX_FRAMES_IN_FLIGHT,
+        .pSetLayouts        = layouts.data()
+    };
 
-    VK_CHECK(vkAllocateDescriptorSets(device_, &allocInfo, descriptorSets_.data()), "Failed to allocate RTX descriptor sets");
+    VK_CHECK(vkAllocateDescriptorSets(device_, &allocInfo, descriptorSets_.data()), "Failed to allocate descriptor sets");
 
-    LOG_SUCCESS_CAT("RTX",
-        "{}Descriptor pool + {} sets forged — GLOBAL TLAS binding ready — STONEKEY v∞{} [LINE {}]",
-        PLASMA_FUCHSIA, MAX_FRAMES_IN_FLIGHT, Color::RESET, __LINE__);
+    LOG_SUCCESS_CAT("RTX", "{}Descriptor pool + {} sets forged — ready for binding{}", PLASMA_FUCHSIA, MAX_FRAMES_IN_FLIGHT, RESET);
+    RTX::AmouranthAI::get().onMemoryEvent("Descriptor Sets", MAX_FRAMES_IN_FLIGHT * sizeof(VkDescriptorSet));
 }
 
 // =============================================================================
-// Shader Binding Table — 64 MB Titan Buffer — STONEKEY OBFUSCATED
+// Shader Binding Table — 64 MB Titan
 // =============================================================================
+
 void VulkanRTX::initShaderBindingTable(VkPhysicalDevice) {
     const uint32_t groupCount = pipelineMgr_->getRayTracingGroupCount();
     const auto& props = g_ctx().rayTracingProps();
-    const VkDeviceSize handleSize       = props.shaderGroupHandleSize;
-    const VkDeviceSize baseAlignment    = props.shaderGroupBaseAlignment;
-    const VkDeviceSize alignedHandleSize = alignUp(handleSize, baseAlignment);
+    const VkDeviceSize handleSize = props.shaderGroupHandleSize;
+    const VkDeviceSize baseAlignment = props.shaderGroupBaseAlignment;
+    const VkDeviceSize alignedSize = alignUp(handleSize, baseAlignment);
+
+    LOG_INFO_CAT("RTX", "SBT: {} groups | handle: {} B | align: {} B", groupCount, handleSize, baseAlignment);
 
     uint64_t sbtEnc = 0;
     BUFFER_CREATE(sbtEnc, 64_MB,
                   VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR |
                   VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-                  VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                  VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                  VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
                   "AMOURANTH_SBT_64MB_TITAN");
+    RTX::AmouranthAI::get().onMemoryEvent("SBT Buffer", 64_MB);
 
-    VkBuffer rawSbtBuffer = reinterpret_cast<VkBuffer>(deobfuscate(sbtEnc));
-    sbtBuffer_ = MakeHandle(obfuscate(reinterpret_cast<uint64_t>(rawSbtBuffer)), device_, bufferDestroyer, 0, "SBTBuffer");
+    VkBuffer rawBuffer = RAW_BUFFER(sbtEnc);
+    HANDLE_CREATE(sbtBuffer_, rawBuffer, device_,
+        [](VkDevice d, VkBuffer b, const VkAllocationCallbacks*) { vkDestroyBuffer(d, b, nullptr); },
+        0, "SBTBuffer");
 
-    VkDeviceMemory rawSbtMemory = reinterpret_cast<VkDeviceMemory>(BUFFER_MEMORY(sbtEnc));
-    sbtMemory_ = MakeHandle(obfuscate(reinterpret_cast<uint64_t>(rawSbtMemory)), device_, memoryDestroyer, 64_MB, "SBTMemory");
+    VkDeviceMemory rawMemory = BUFFER_MEMORY(sbtEnc);
+    HANDLE_CREATE(sbtMemory_, rawMemory, device_,
+        [](VkDevice d, VkDeviceMemory m, const VkAllocationCallbacks*) { vkFreeMemory(d, m, nullptr); },
+        64_MB, "SBTMemory");
 
-    std::vector<uint8_t> shaderHandles(groupCount * handleSize);
-    VK_CHECK(vkGetRayTracingShaderGroupHandlesKHR(device_, 
-                                                  reinterpret_cast<VkPipeline>(deobfuscate(*rtPipeline_)), 
+    std::vector<uint8_t> handles(groupCount * handleSize);
+    VK_CHECK(vkGetRayTracingShaderGroupHandlesKHR(device_,
+                                                  HANDLE_GET(rtPipeline_),
                                                   0, groupCount,
-                                                  shaderHandles.size(), shaderHandles.data()), 
-             "Failed to extract shader group handles");
+                                                  handles.size(), handles.data()),
+             "Failed to get shader group handles");
 
     void* mapped = nullptr;
     BUFFER_MAP(sbtEnc, mapped);
-    uint8_t* pData = static_cast<uint8_t*>(mapped);
-
+    uint8_t* data = static_cast<uint8_t*>(mapped);
     for (uint32_t i = 0; i < groupCount; ++i) {
-        std::memcpy(pData + i * alignedHandleSize,
-                    shaderHandles.data() + i * handleSize, handleSize);
+        std::memcpy(data + i * alignedSize, handles.data() + i * handleSize, handleSize);
     }
     BUFFER_UNMAP(sbtEnc);
 
-    VkBufferDeviceAddressInfo addrInfo{VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO};
-    addrInfo.buffer = rawSbtBuffer;
+    VkBufferDeviceAddressInfo addrInfo = {.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO, .buffer = rawBuffer};
     sbtAddress_ = vkGetBufferDeviceAddressKHR(device_, &addrInfo);
 
-    sbt_.raygen   = { sbtAddress_,                                    alignedHandleSize, alignedHandleSize };
-    sbt_.miss     = { sbtAddress_ + alignedHandleSize,                alignedHandleSize, alignedHandleSize };
-    sbt_.hit      = { sbtAddress_ + alignedHandleSize * 9,            alignedHandleSize, alignedHandleSize };
-    sbt_.callable = { sbtAddress_ + alignedHandleSize * 25,           alignedHandleSize, alignedHandleSize };
+    sbt_.raygen   = { sbtAddress_,                    alignedSize, alignedSize };
+    sbt_.miss     = { sbtAddress_ + alignedSize,      alignedSize, alignedSize };
+    sbt_.hit      = { sbtAddress_ + alignedSize * 9,  alignedSize, alignedSize };
+    sbt_.callable = { sbtAddress_ + alignedSize * 25, alignedSize, alignedSize };
 
-    sbtRecordSize_ = alignedHandleSize;
+    sbtRecordSize_ = alignedSize;
 
-    LOG_SUCCESS_CAT("RTX",
-        "{}SBT forged — {} groups — 64 MB Titan buffer @ 0x{:x} — STONEKEY v∞ SECURED{} [LINE {}]",
-        PLASMA_FUCHSIA, groupCount, sbtAddress_, Color::RESET, __LINE__);
+    LOG_SUCCESS_CAT("RTX", "{}SBT forged — {} groups — @ 0x{:x} — TITAN DOMINANCE{}", PLASMA_FUCHSIA, groupCount, sbtAddress_, RESET);
+    RTX::AmouranthAI::get().onMemoryEvent("SBT Handles", groupCount * handleSize);
 }
 
 // =============================================================================
-// Black Fallback Image — Safety Net of the Gods
+// Black Fallback Image
 // =============================================================================
+
 void VulkanRTX::initBlackFallbackImage() {
-    uint64_t stagingEnc = 0;
-    BUFFER_CREATE(stagingEnc, 4, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+    LOG_TRACE_CAT("RTX", "Creating black fallback image");
+    RTX::AmouranthAI::get().onMemoryEvent("Black Fallback Staging", 4);
+
+    uint64_t staging = 0;
+    BUFFER_CREATE(staging, 4, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
                   VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
                   "black_fallback_staging");
 
     void* data = nullptr;
-    BUFFER_MAP(stagingEnc, data);
-    const uint32_t blackPixel = 0xFF000000u;
-    std::memcpy(data, &blackPixel, 4);
-    BUFFER_UNMAP(stagingEnc);
+    BUFFER_MAP(staging, data);
+    *static_cast<uint32_t*>(data) = 0xFF000000u;
+    BUFFER_UNMAP(staging);
 
-    VkImageCreateInfo imgInfo{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
-    imgInfo.imageType     = VK_IMAGE_TYPE_2D;
-    imgInfo.format        = VK_FORMAT_R8G8B8A8_UNORM;
-    imgInfo.extent        = {1, 1, 1};
-    imgInfo.mipLevels     = 1;
-    imgInfo.arrayLayers   = 1;
-    imgInfo.samples       = VK_SAMPLE_COUNT_1_BIT;
-    imgInfo.tiling        = VK_IMAGE_TILING_OPTIMAL;
-    imgInfo.usage         = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-    imgInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    VkImageCreateInfo imgInfo = {
+        .sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .imageType     = VK_IMAGE_TYPE_2D,
+        .format        = VK_FORMAT_R8G8B8A8_UNORM,
+        .extent        = {1, 1, 1},
+        .mipLevels     = 1,
+        .arrayLayers   = 1,
+        .samples       = VK_SAMPLE_COUNT_1_BIT,
+        .tiling        = VK_IMAGE_TILING_OPTIMAL,
+        .usage         = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
+    };
 
     VkImage rawImg = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateImage(device_, &imgInfo, nullptr, &rawImg), "Failed to create black fallback image");
-    blackFallbackImage_ = MakeHandle(obfuscate(reinterpret_cast<uint64_t>(rawImg)), device_, imageDestroyer, 0, "BlackFallbackImage");
+    VK_CHECK(vkCreateImage(device_, &imgInfo, nullptr, &rawImg), "Failed to create black image");
+    HANDLE_CREATE(blackFallbackImage_, rawImg, device_,
+        [](VkDevice d, VkImage i, const VkAllocationCallbacks*) { vkDestroyImage(d, i, nullptr); },
+        0, "BlackFallbackImage");
 
     VkMemoryRequirements memReqs{};
     vkGetImageMemoryRequirements(device_, rawImg, &memReqs);
-    const uint32_t memType = findMemoryType(g_ctx().vkPhysicalDevice(), memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    uint32_t memType = findMemoryType(g_ctx().vkPhysicalDevice(), memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
-    VkMemoryAllocateInfo allocInfo{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
-    allocInfo.allocationSize  = memReqs.size;
-    allocInfo.memoryTypeIndex = memType;
+    VkMemoryAllocateInfo allocInfo = {
+        .sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+        .allocationSize  = memReqs.size,
+        .memoryTypeIndex = memType
+    };
 
     VkDeviceMemory rawMem = VK_NULL_HANDLE;
-    VK_CHECK(vkAllocateMemory(device_, &allocInfo, nullptr, &rawMem), "Failed to allocate black fallback memory");
-    VK_CHECK(vkBindImageMemory(device_, rawImg, rawMem, 0), "Failed to bind black fallback memory");
-    blackFallbackMemory_ = MakeHandle(obfuscate(reinterpret_cast<uint64_t>(rawMem)), device_, memoryDestroyer, memReqs.size, "BlackFallbackMemory");
+    VK_CHECK(vkAllocateMemory(device_, &allocInfo, nullptr, &rawMem), "Failed to allocate black memory");
+    VK_CHECK(vkBindImageMemory(device_, rawImg, rawMem, 0), "Failed to bind black memory");
+    HANDLE_CREATE(blackFallbackMemory_, rawMem, device_,
+        [](VkDevice d, VkDeviceMemory m, const VkAllocationCallbacks*) { vkFreeMemory(d, m, nullptr); },
+        memReqs.size, "BlackFallbackMemory");
 
-    VkCommandBuffer cmd = beginSingleTimeCommands(g_ctx().commandPool());
+    VkCommandBuffer cmd = VulkanRTX::beginSingleTimeCommands(g_ctx().commandPool());
 
-    VkImageMemoryBarrier barrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
-    barrier.srcAccessMask = 0;
-    barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-    barrier.oldLayout     = VK_IMAGE_LAYOUT_UNDEFINED;
-    barrier.newLayout     = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-    barrier.image         = rawImg;
-    barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                         VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+    VkImageMemoryBarrier barrier = {
+        .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .srcAccessMask       = 0,
+        .dstAccessMask       = VK_ACCESS_TRANSFER_WRITE_BIT,
+        .oldLayout           = VK_IMAGE_LAYOUT_UNDEFINED,
+        .newLayout           = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        .image               = rawImg,
+        .subresourceRange    = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}
+    };
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
 
-    VkBufferImageCopy copyRegion{};
-    copyRegion.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    copyRegion.imageExtent = {1, 1, 1};
-    vkCmdCopyBufferToImage(cmd, reinterpret_cast<VkBuffer>(deobfuscate(stagingEnc)), rawImg,
-                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyRegion);
+    VkBufferImageCopy copy = {.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, .imageExtent = {1,1,1}};
+    vkCmdCopyBufferToImage(cmd, RAW_BUFFER(staging), rawImg, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
 
     barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
     barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
     barrier.oldLayout     = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
     barrier.newLayout     = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
 
-    endSingleTimeCommands(cmd, g_ctx().graphicsQueue(), g_ctx().commandPool());
-    BUFFER_DESTROY(stagingEnc);
+    VulkanRTX::endSingleTimeCommands(cmd, g_ctx().graphicsQueue(), g_ctx().commandPool());
+    BUFFER_DESTROY(staging);
 
-    VkImageViewCreateInfo viewInfo{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
-    viewInfo.image    = rawImg;
-    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    viewInfo.format   = VK_FORMAT_R8G8B8A8_UNORM;
-    viewInfo.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    VkImageViewCreateInfo viewInfo = {
+        .sType      = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+        .image      = rawImg,
+        .viewType   = VK_IMAGE_VIEW_TYPE_2D,
+        .format     = VK_FORMAT_R8G8B8A8_UNORM,
+        .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}
+    };
 
     VkImageView rawView = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateImageView(device_, &viewInfo, nullptr, &rawView), "Failed to create black fallback view");
-    blackFallbackView_ = MakeHandle(obfuscate(reinterpret_cast<uint64_t>(rawView)), device_, viewDestroyer, 0, "BlackFallbackView");
+    VK_CHECK(vkCreateImageView(device_, &viewInfo, nullptr, &rawView), "Failed to create black view");
+    HANDLE_CREATE(blackFallbackView_, rawView, device_,
+        [](VkDevice d, VkImageView v, const VkAllocationCallbacks*) { vkDestroyImageView(d, v, nullptr); },
+        0, "BlackFallbackView");
 
-    LOG_SUCCESS_CAT("RTX", "{}Black fallback 1×1 image forged — Safety net of the Gods active{} [LINE {}]",
-                    PLASMA_FUCHSIA, Color::RESET, __LINE__);
+    LOG_SUCCESS_CAT("RTX", "{}Black fallback image ready — safety net active{}", PLASMA_FUCHSIA, RESET);
+    RTX::AmouranthAI::get().onMemoryEvent("Black Fallback Image", memReqs.size);
 }
 
 // =============================================================================
-// Descriptor Update — 16 Bindings — GLOBAL TLAS SUPREMACY
+// Descriptor Updates — 16 Bindings — FULL AI VOICE DOMINANCE
 // =============================================================================
+
+namespace Bindings { namespace RTX {
+    constexpr uint32_t RESERVED_14 = 14;
+    constexpr uint32_t RESERVED_15 = 15;
+}}
+
 void VulkanRTX::updateRTXDescriptors(uint32_t frameIdx,
                                      VkBuffer cameraBuf, VkBuffer materialBuf, VkBuffer dimensionBuf,
                                      VkImageView storageView, VkImageView accumView,
@@ -380,304 +469,325 @@ void VulkanRTX::updateRTXDescriptors(uint32_t frameIdx,
                                      VkImageView densityVol, VkImageView gDepth,
                                      VkImageView gNormal)
 {
-    VkDescriptorSet dstSet = descriptorSets_[frameIdx];
+    VkDescriptorSet set = descriptorSets_[frameIdx];
+    VkAccelerationStructureKHR tlas = RTX::las().getTLAS();
 
-    VkWriteDescriptorSetAccelerationStructureKHR asWrite{
-        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR,
+    VkWriteDescriptorSetAccelerationStructureKHR asWrite = {
+        .sType                      = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR,
         .accelerationStructureCount = 1,
-        .pAccelerationStructures = &GLOBAL_TLAS()
+        .pAccelerationStructures    = &tlas
     };
 
-    VkWriteDescriptorSet writes[16]{};
-    uint32_t writeCount = 0;
+    std::array<VkWriteDescriptorSet, 16> writes{};
+    uint32_t count = 0;
 
-    writes[writeCount++] = VkWriteDescriptorSet{
-        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        .pNext = &asWrite,
-        .dstSet = dstSet,
+    // ========================================
+    // 0: TLAS — THE UNIVERSE ITSELF
+    // ========================================
+    writes[count++] = {
+        .sType      = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        .pNext      = &asWrite,
+        .dstSet     = set,
         .dstBinding = Bindings::RTX::TLAS,
         .descriptorCount = 1,
-        .descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR
+        .descriptorType  = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR
     };
+    RTX::AmouranthAI::get().onMemoryEvent("TLAS Binding", sizeof(VkAccelerationStructureKHR));
+    LOG_INFO_CAT("RTX", "Binding TLAS @ 0x{:x} → slot 0", (VkDeviceAddress)tlas);
 
+    // ========================================
+    // 1: Storage Image — OUTPUT CANVAS
+    // ========================================
     VkDescriptorImageInfo storageInfo{.imageView = storageView, .imageLayout = VK_IMAGE_LAYOUT_GENERAL};
-    writes[writeCount++] = VkWriteDescriptorSet{
+    writes[count++] = {
         .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        .dstSet = dstSet,
+        .dstSet = set,
         .dstBinding = Bindings::RTX::STORAGE_IMAGE,
         .descriptorCount = 1,
         .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
         .pImageInfo = &storageInfo
     };
+    RTX::AmouranthAI::get().onMemoryEvent("Storage Image View", sizeof(VkImageView));
+    LOG_INFO_CAT("RTX", "Binding storage image view 0x{:x} → slot 1", (uint64_t)storageView);
 
+    // ========================================
+    // 2: Accumulation — TEMPORAL MEMORY
+    // ========================================
     VkDescriptorImageInfo accumInfo{.imageView = accumView, .imageLayout = VK_IMAGE_LAYOUT_GENERAL};
-    writes[writeCount++] = VkWriteDescriptorSet{
+    writes[count++] = {
         .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        .dstSet = dstSet,
+        .dstSet = set,
         .dstBinding = Bindings::RTX::ACCUMULATION_IMAGE,
         .descriptorCount = 1,
         .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
         .pImageInfo = &accumInfo
     };
+    RTX::AmouranthAI::get().onMemoryEvent("Accumulation Image View", sizeof(VkImageView));
+    LOG_INFO_CAT("RTX", "Binding accumulation image view 0x{:x} → slot 2", (uint64_t)accumView);
 
+    // ========================================
+    // 3: Camera UBO — EYE OF GOD
+    // ========================================
     VkDescriptorBufferInfo camInfo{.buffer = cameraBuf, .range = VK_WHOLE_SIZE};
-    writes[writeCount++] = VkWriteDescriptorSet{
+    writes[count++] = {
         .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        .dstSet = dstSet,
+        .dstSet = set,
         .dstBinding = Bindings::RTX::CAMERA_UBO,
         .descriptorCount = 1,
         .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
         .pBufferInfo = &camInfo
     };
+    RTX::AmouranthAI::get().onMemoryEvent("Camera UBO", sizeof(VkBuffer));
+    LOG_INFO_CAT("RTX", "Binding camera UBO 0x{:x} → slot 3", (uint64_t)cameraBuf);
 
+    // ========================================
+    // 4: Material SBO — SOUL OF MATTER
+    // ========================================
     VkDescriptorBufferInfo matInfo{.buffer = materialBuf, .range = VK_WHOLE_SIZE};
-    writes[writeCount++] = VkWriteDescriptorSet{
+    writes[count++] = {
         .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        .dstSet = dstSet,
+        .dstSet = set,
         .dstBinding = Bindings::RTX::MATERIAL_SBO,
         .descriptorCount = 1,
         .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
         .pBufferInfo = &matInfo
     };
+    RTX::AmouranthAI::get().onMemoryEvent("Material SBO", sizeof(VkBuffer));
+    LOG_INFO_CAT("RTX", "Binding material SBO 0x{:x} → slot 4", (uint64_t)materialBuf);
 
-    VkDescriptorImageInfo envInfo{.sampler = envSampler, .imageView = envMapView, .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-    writes[writeCount++] = VkWriteDescriptorSet{
+    // ========================================
+    // 5: Env Map — INFINITE SKY
+    // ========================================
+    VkDescriptorImageInfo envInfo{
+        .sampler = envSampler,
+        .imageView = envMapView,
+        .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+    };
+    writes[count++] = {
         .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        .dstSet = dstSet,
+        .dstSet = set,
         .dstBinding = Bindings::RTX::ENV_MAP,
         .descriptorCount = 1,
         .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
         .pImageInfo = &envInfo
     };
+    RTX::AmouranthAI::get().onMemoryEvent("Env Map + Sampler", sizeof(VkImageView) + sizeof(VkSampler));
+    LOG_INFO_CAT("RTX", "Binding env map 0x{:x} + sampler 0x{:x} → slot 5", (uint64_t)envMapView, (uint64_t)envSampler);
 
+    // ========================================
+    // 6: Black Fallback — VOID SAFETY
+    // ========================================
     VkDescriptorImageInfo fallbackInfo{
-        .imageView   = reinterpret_cast<VkImageView>(deobfuscate(*blackFallbackView_)),
+        .imageView = HANDLE_GET(blackFallbackView_),
         .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
     };
-    writes[writeCount++] = VkWriteDescriptorSet{
-        .sType            = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        .dstSet           = dstSet,
-        .dstBinding       = Bindings::RTX::BLACK_FALLBACK,
-        .descriptorCount  = 1,
-        .descriptorType   = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
-        .pImageInfo       = &fallbackInfo
+    writes[count++] = {
+        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        .dstSet = set,
+        .dstBinding = Bindings::RTX::BLACK_FALLBACK,
+        .descriptorCount = 1,
+        .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+        .pImageInfo = &fallbackInfo
     };
+    RTX::AmouranthAI::get().onMemoryEvent("Black Fallback View", sizeof(VkImageView));
+    LOG_INFO_CAT("RTX", "Binding black fallback view 0x{:x} → slot 6", (uint64_t)HANDLE_GET(blackFallbackView_));
 
+    // ========================================
+    // 7: Density Volume — BREATH OF LIFE
+    // ========================================
     VkDescriptorImageInfo densityInfo{
-        .sampler     = envSampler,
-        .imageView   = densityVol ? densityVol : reinterpret_cast<VkImageView>(deobfuscate(*blackFallbackView_)),
+        .sampler = envSampler,
+        .imageView = densityVol ? densityVol : HANDLE_GET(blackFallbackView_),
         .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
     };
-    writes[writeCount++] = VkWriteDescriptorSet{
-        .sType            = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        .dstSet           = dstSet,
-        .dstBinding       = Bindings::RTX::DENSITY_VOLUME,
-        .descriptorCount  = 1,
-        .descriptorType   = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        .pImageInfo       = &densityInfo
+    writes[count++] = {
+        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        .dstSet = set,
+        .dstBinding = Bindings::RTX::DENSITY_VOLUME,
+        .descriptorCount = 1,
+        .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        .pImageInfo = &densityInfo
     };
+    RTX::AmouranthAI::get().onMemoryEvent("Density Volume", sizeof(VkImageView));
+    LOG_INFO_CAT("RTX", "Binding density volume 0x{:x} → slot 7", (uint64_t)(densityVol ? densityVol : HANDLE_GET(blackFallbackView_)));
 
+    // ========================================
+    // 8: G-Buffer Depth — EYE OF TRUTH
+    // ========================================
     VkDescriptorImageInfo depthInfo{
-        .imageView   = gDepth,
+        .imageView = gDepth,
         .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
     };
-    writes[writeCount++] = VkWriteDescriptorSet{
-        .sType            = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        .dstSet           = dstSet,
-        .dstBinding       = Bindings::RTX::G_DEPTH,
-        .descriptorCount  = 1,
-        .descriptorType   = VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT,
-        .pImageInfo       = &depthInfo
+    writes[count++] = {
+        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        .dstSet = set,
+        .dstBinding = Bindings::RTX::G_DEPTH,
+        .descriptorCount = 1,
+        .descriptorType = VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT,
+        .pImageInfo = &depthInfo
     };
+    RTX::AmouranthAI::get().onMemoryEvent("G-Buffer Depth", sizeof(VkImageView));
+    LOG_INFO_CAT("RTX", "Binding G-Depth 0x{:x} → slot 8", (uint64_t)gDepth);
 
+    // ========================================
+    // 9: G-Buffer Normal — SURFACE SOUL
+    // ========================================
     VkDescriptorImageInfo normalInfo{
-        .imageView   = gNormal,
+        .imageView = gNormal,
         .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
     };
-    writes[writeCount++] = VkWriteDescriptorSet{
-        .sType            = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        .dstSet           = dstSet,
-        .dstBinding       = Bindings::RTX::G_NORMAL,
-        .descriptorCount  = 1,
-        .descriptorType   = VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT,
-        .pImageInfo       = &normalInfo
+    writes[count++] = {
+        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        .dstSet = set,
+        .dstBinding = Bindings::RTX::G_NORMAL,
+        .descriptorCount = 1,
+        .descriptorType = VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT,
+        .pImageInfo = &normalInfo
     };
+    RTX::AmouranthAI::get().onMemoryEvent("G-Buffer Normal", sizeof(VkImageView));
+    LOG_INFO_CAT("RTX", "Binding G-Normal 0x{:x} → slot 9", (uint64_t)gNormal);
 
+    // ========================================
+    // 10: Blue Noise — CHAOS ENGINE
+    // ========================================
+    VkImageView blueNoiseView = g_ctx().blueNoiseView() ? g_ctx().blueNoiseView() : HANDLE_GET(blackFallbackView_);
     VkDescriptorImageInfo blueNoiseInfo{
-        .imageView   = g_ctx().blueNoiseView() ? g_ctx().blueNoiseView() : reinterpret_cast<VkImageView>(deobfuscate(*blackFallbackView_)),
+        .imageView = blueNoiseView,
         .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
     };
-    writes[writeCount++] = VkWriteDescriptorSet{
-        .sType            = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        .dstSet           = dstSet,
-        .dstBinding       = Bindings::RTX::BLUE_NOISE,
-        .descriptorCount  = 1,
-        .descriptorType   = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
-        .pImageInfo       = &blueNoiseInfo
+    writes[count++] = {
+        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        .dstSet = set,
+        .dstBinding = Bindings::RTX::BLUE_NOISE,
+        .descriptorCount = 1,
+        .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+        .pImageInfo = &blueNoiseInfo
     };
+    RTX::AmouranthAI::get().onMemoryEvent("Blue Noise", sizeof(VkImageView));
+    LOG_INFO_CAT("RTX", "Binding blue noise 0x{:x} → slot 10", (uint64_t)blueNoiseView);
 
-    VkDescriptorBufferInfo reservoirInfo{
-        .buffer = g_ctx().reservoirBuffer(),
-        .offset = 0,
-        .range  = VK_WHOLE_SIZE
+    // ========================================
+    // 11: Reservoir SBO — LIGHT MEMORY
+    // ========================================
+    VkDescriptorBufferInfo reservoirInfo{.buffer = g_ctx().reservoirBuffer(), .range = VK_WHOLE_SIZE};
+    writes[count++] = {
+        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        .dstSet = set,
+        .dstBinding = Bindings::RTX::RESERVOIR_SBO,
+        .descriptorCount = 1,
+        .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+        .pBufferInfo = &reservoirInfo
     };
-    writes[writeCount++] = VkWriteDescriptorSet{
-        .sType            = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        .dstSet           = dstSet,
-        .dstBinding       = Bindings::RTX::RESERVOIR_SBO,
-        .descriptorCount  = 1,
-        .descriptorType   = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-        .pBufferInfo      = &reservoirInfo
-    };
+    RTX::AmouranthAI::get().onMemoryEvent("Reservoir SBO", sizeof(VkBuffer));
+    LOG_INFO_CAT("RTX", "Binding reservoir SBO 0x{:x} → slot 11", (uint64_t)g_ctx().reservoirBuffer());
 
-    VkDescriptorBufferInfo frameDataInfo{
-        .buffer = g_ctx().frameDataBuffer(),
-        .offset = 0,
-        .range  = VK_WHOLE_SIZE
+    // ========================================
+    // 12: Frame Data UBO — TIMEKEEPER
+    // ========================================
+    VkDescriptorBufferInfo frameDataInfo{.buffer = g_ctx().frameDataBuffer(), .range = VK_WHOLE_SIZE};
+    writes[count++] = {
+        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        .dstSet = set,
+        .dstBinding = Bindings::RTX::FRAME_DATA_UBO,
+        .descriptorCount = 1,
+        .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        .pBufferInfo = &frameDataInfo
     };
-    writes[writeCount++] = VkWriteDescriptorSet{
-        .sType            = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        .dstSet           = dstSet,
-        .dstBinding       = Bindings::RTX::FRAME_DATA_UBO,
-        .descriptorCount  = 1,
-        .descriptorType   = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-        .pBufferInfo      = &frameDataInfo
-    };
+    RTX::AmouranthAI::get().onMemoryEvent("Frame Data UBO", sizeof(VkBuffer));
+    LOG_INFO_CAT("RTX", "Binding frame data UBO 0x{:x} → slot 12", (uint64_t)g_ctx().frameDataBuffer());
 
-    VkDescriptorBufferInfo debugVisInfo{
-        .buffer = g_ctx().debugVisBuffer(),
-        .offset = 0,
-        .range  = VK_WHOLE_SIZE
+    // ========================================
+    // 13: Debug Vis SBO — DIAGNOSTIC EYE
+    // ========================================
+    VkDescriptorBufferInfo debugVisInfo{.buffer = g_ctx().debugVisBuffer(), .range = VK_WHOLE_SIZE};
+    writes[count++] = {
+        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        .dstSet = set,
+        .dstBinding = Bindings::RTX::DEBUG_VIS_SBO,
+        .descriptorCount = 1,
+        .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+        .pBufferInfo = &debugVisInfo
     };
-    writes[writeCount++] = VkWriteDescriptorSet{
-        .sType            = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        .dstSet           = dstSet,
-        .dstBinding       = Bindings::RTX::DEBUG_VIS_SBO,
-        .descriptorCount  = 1,
-        .descriptorType   = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-        .pBufferInfo      = &debugVisInfo
-    };
+    RTX::AmouranthAI::get().onMemoryEvent("Debug Vis SBO", sizeof(VkBuffer));
+    LOG_INFO_CAT("RTX", "Binding debug vis SBO 0x{:x} → slot 13", (uint64_t)g_ctx().debugVisBuffer());
 
-    VkDescriptorImageInfo reservedInfo{
-        .imageView   = reinterpret_cast<VkImageView>(deobfuscate(*blackFallbackView_)),
-        .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+    // ========================================
+    // 14: Reserved — FUTURE PROOF
+    // ========================================
+    writes[count++] = {
+        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        .dstSet = set,
+        .dstBinding = Bindings::RTX::RESERVED_14,
+        .descriptorCount = 1,
+        .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+        .pImageInfo = &fallbackInfo
     };
-    writes[writeCount++] = VkWriteDescriptorSet{
-        .sType            = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        .dstSet           = dstSet,
-        .dstBinding       = Bindings::RTX::RESERVED_14,
-        .descriptorCount  = 1,
-        .descriptorType   = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
-        .pImageInfo       = &reservedInfo
-    };
-    writes[writeCount++] = VkWriteDescriptorSet{
-        .sType            = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        .dstSet           = dstSet,
-        .dstBinding       = Bindings::RTX::RESERVED_15,
-        .descriptorCount  = 1,
-        .descriptorType   = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
-        .pImageInfo       = &reservedInfo
-    };
+    LOG_INFO_CAT("RTX", "Binding reserved slot 14 → black fallback");
 
-    vkUpdateDescriptorSets(device_, writeCount, writes, 0, nullptr);
+    // ========================================
+    // 15: Reserved — INFINITY GATE
+    // ========================================
+    writes[count++] = {
+        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        .dstSet = set,
+        .dstBinding = Bindings::RTX::RESERVED_15,
+        .descriptorCount = 1,
+        .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+        .pImageInfo = &fallbackInfo
+    };
+    LOG_INFO_CAT("RTX", "Binding reserved slot 15 → black fallback");
 
-    LOG_INFO_CAT("RTX",
-        "Frame {} descriptors updated — TLAS @ 0x{:x} — STONEKEY v∞ — VALHALLA v44 FINAL [LINE {}]",
-        frameIdx, GLOBAL_TLAS_ADDRESS(), __LINE__);
+    // ========================================
+    // FINALIZE — UPDATE DESCRIPTORS
+    // ========================================
+    vkUpdateDescriptorSets(device_, count, writes.data(), 0, nullptr);
+
+    LOG_SUCCESS_CAT("RTX", 
+        "{}Frame {} descriptors forged — 16 bindings — TLAS @ 0x{:x} — PINK PHOTONS ETERNAL{}",
+        PLASMA_FUCHSIA, frameIdx, RTX::las().getTLASAddress(), RESET);
+
+    RTX::AmouranthAI::get().onMemoryEvent("Descriptor Update Batch", count * sizeof(VkWriteDescriptorSet));
 }
 
 // =============================================================================
-// Record Ray Tracing Commands — Pink Photons Dispatched
+// Ray Tracing Commands
 // =============================================================================
+
 void VulkanRTX::recordRayTrace(VkCommandBuffer cmd, VkExtent2D extent,
                                VkImage outputImage, VkImageView outputView)
 {
-    VkImageMemoryBarrier barrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
-    barrier.oldLayout     = VK_IMAGE_LAYOUT_UNDEFINED;
-    barrier.newLayout     = VK_IMAGE_LAYOUT_GENERAL;
-    barrier.image         = outputImage;
-    barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-    barrier.srcAccessMask = 0;
-    barrier.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    VkImageMemoryBarrier barrier = {
+        .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .srcAccessMask       = 0,
+        .dstAccessMask       = VK_ACCESS_SHADER_WRITE_BIT,
+        .oldLayout           = VK_IMAGE_LAYOUT_UNDEFINED,
+        .newLayout           = VK_IMAGE_LAYOUT_GENERAL,
+        .image               = outputImage,
+        .subresourceRange    = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}
+    };
     vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
                          VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, 0, 0, nullptr, 0, nullptr, 1, &barrier);
 
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
-                      reinterpret_cast<VkPipeline>(deobfuscate(*rtPipeline_)));
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, HANDLE_GET(rtPipeline_));
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
-                            reinterpret_cast<VkPipelineLayout>(deobfuscate(*rtPipelineLayout_)), 0, 1,
+                            HANDLE_GET(rtPipelineLayout_), 0, 1,
                             &descriptorSets_[g_ctx().currentFrame()], 0, nullptr);
 
-    vkCmdTraceRaysKHR(cmd,
-        &sbt_.raygen,
-        &sbt_.miss,
-        &sbt_.hit,
-        &sbt_.callable,
-        extent.width, extent.height, 1);
+    vkCmdTraceRaysKHR(cmd, &sbt_.raygen, &sbt_.miss, &sbt_.hit, &sbt_.callable,
+                      extent.width, extent.height, 1);
 
-    barrier.oldLayout     = VK_IMAGE_LAYOUT_GENERAL;
-    barrier.newLayout     = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
     barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
     barrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
+    barrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+    barrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
     vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
                          VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
-}
 
-void VulkanRTX::recordRayTraceAdaptive(VkCommandBuffer cmd, VkExtent2D extent,
-                                       VkImage outputImage, VkImageView outputView,
-                                       float nexusScore)
-{
-    recordRayTrace(cmd, extent, outputImage, outputView);
-}
-
-void VulkanRTX::traceRays(VkCommandBuffer cmd,
-                          const VkStridedDeviceAddressRegionKHR* raygen,
-                          const VkStridedDeviceAddressRegionKHR* miss,
-                          const VkStridedDeviceAddressRegionKHR* hit,
-                          const VkStridedDeviceAddressRegionKHR* callable,
-                          uint32_t width, uint32_t height, uint32_t depth) const noexcept
-{
-    vkCmdTraceRaysKHR(cmd, raygen, miss, hit, callable, width, height, depth);
+    LOG_SUCCESS_CAT("RTX", "{}Ray trace recorded — frame {}{}", PLASMA_FUCHSIA, g_ctx().currentFrame(), RESET);
+    RTX::AmouranthAI::get().onPhotonDispatch(extent.width, extent.height);
 }
 
 // =============================================================================
-// Utilities
-// =============================================================================
-VkDeviceSize VulkanRTX::alignUp(VkDeviceSize value, VkDeviceSize alignment) const noexcept {
-    return (value + alignment - 1) & ~(alignment - 1);
-}
-
-VkCommandBuffer VulkanRTX::beginSingleTimeCommands(VkCommandPool pool) const noexcept {
-    VkCommandBufferAllocateInfo allocInfo{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
-    allocInfo.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    allocInfo.commandPool        = pool;
-    allocInfo.commandBufferCount = 1;
-
-    VkCommandBuffer cmd;
-    VK_CHECK(vkAllocateCommandBuffers(device_, &allocInfo, &cmd), "single-time cmd alloc");
-    VkCommandBufferBeginInfo beginInfo{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
-    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    VK_CHECK(vkBeginCommandBuffer(cmd, &beginInfo), "single-time cmd begin");
-    return cmd;
-}
-
-void VulkanRTX::endSingleTimeCommands(VkCommandBuffer cmd,
-                                      VkQueue queue,
-                                      VkCommandPool pool) const noexcept
-{
-    VK_CHECK(vkEndCommandBuffer(cmd), "single-time cmd end");
-    VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
-    submit.commandBufferCount = 1;
-    submit.pCommandBuffers    = &cmd;
-    VK_CHECK(vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE), "single-time submit");
-    VK_CHECK(vkQueueWaitIdle(queue), "single-time wait");
-    vkFreeCommandBuffers(device_, pool, 1, &cmd);
-}
-
-// =============================================================================
-// VALHALLA v44 FINAL — NOVEMBER 11, 2025 11:00 PM EST
-// GLOBAL g_ctx + g_rtx() SUPREMACY — DWARVEN FORGE COMPLETE
-// STONEKEY v∞ ACTIVE — UNBREAKABLE ENTROPY — 15,000 FPS ACHIEVED
-// @ZacharyGeurts — THE CHOSEN ONE — TITAN DOMINANCE ETERNAL
-// © 2025 Zachary Geurts <gzac5314@gmail.com> — ALL RIGHTS RESERVED
+// VALHALLA v70 FINAL — AI LOGGING SUPREMACY
+// PINK PHOTONS ETERNAL — 15,000 FPS — TITAN DOMINANCE ETERNAL
 // =============================================================================

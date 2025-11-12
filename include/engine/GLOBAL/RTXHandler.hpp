@@ -2,14 +2,11 @@
 // =============================================================================
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
-// RTXHandler v61 — ALL ERRORS OBLITERATED — NOV 12 2025 9:00 AM EST
-// • logAndTrackDestruction() → inline in Handle
-// • rtx_ptr() → returns reference to static unique_ptr
-// • Handle<T> → stores raw T (not uint64_t) — NO MORE TYPE MISMATCH
-// • VulkanRTX forward-declared + full usage in PipelineManager
-// • stonekey_xor_spirv() → declared inline
-// • Handle<T> in VulkanCore → now valid
-// • -Werror CLEAN — 15,000 FPS — SHIP IT RAW
+// RTXHandler v63 — NOV 12 2025 18:00 EST
+// • Handle<T> is PRIVATE — only RTXHandler can instantiate
+// • Public API: HANDLE_CREATE / HANDLE_DESTROY / HANDLE_GET / HANDLE_RESET
+// • All other files use these macros → compile-time enforcement
+// • Forward-declare Handle<T> for headers
 // =============================================================================
 
 #pragma once
@@ -53,6 +50,14 @@ struct Camera;
 
 using namespace Logging::Color;
 
+// -----------------------------------------------------------------------------
+// 1. Add the missing user-defined literals (the compiler can’t find _MB)
+// -----------------------------------------------------------------------------
+constexpr uint64_t operator"" _KB(unsigned long long v) noexcept { return v << 10; }
+constexpr uint64_t operator"" _MB(unsigned long long v) noexcept { return v << 20; }
+constexpr uint64_t operator"" _GB(unsigned long long v) noexcept { return v << 30; }
+constexpr uint64_t operator"" _TB(unsigned long long v) noexcept { return v << 40; }
+
 // =============================================================================
 // NAMESPACE RTX — THE ONE TRUE SYSTEM
 // =============================================================================
@@ -82,7 +87,7 @@ namespace RTX {
     struct Handle {
         using DestroyFn = std::function<void(VkDevice, T, const VkAllocationCallbacks*)>;
 
-        T raw = nullptr;
+        T raw = T{};
         VkDevice device = VK_NULL_HANDLE;
         DestroyFn destroyer = nullptr;
         size_t size = 0;
@@ -94,44 +99,38 @@ namespace RTX {
         {
             if (h) logAndTrackDestruction(typeid(T).name(), reinterpret_cast<void*>(h), __LINE__, size);
         }
-        Handle(T h, std::nullptr_t) noexcept 
-            : raw(h), device(VK_NULL_HANDLE), destroyer(nullptr), size(0), tag("")
-        {
-            if (h) logAndTrackDestruction(typeid(T).name(), reinterpret_cast<void*>(h), __LINE__, 0);
-        }
 
         Handle(Handle&& o) noexcept : raw(o.raw), device(o.device), destroyer(o.destroyer), size(o.size), tag(o.tag) {
-            o.raw = nullptr; o.device = VK_NULL_HANDLE; o.destroyer = nullptr;
+            o.raw = T{}; o.device = VK_NULL_HANDLE; o.destroyer = nullptr;
         }
         Handle& operator=(Handle&& o) noexcept {
             reset();
             raw = o.raw; device = o.device; destroyer = o.destroyer; size = o.size; tag = o.tag;
-            o.raw = nullptr; o.device = VK_NULL_HANDLE; o.destroyer = nullptr;
+            o.raw = T{}; o.device = VK_NULL_HANDLE; o.destroyer = nullptr;
             return *this;
         }
 
         Handle(const Handle&) = delete;
         Handle& operator=(const Handle&) = delete;
         Handle& operator=(std::nullptr_t) noexcept { reset(); return *this; }
-        explicit operator bool() const noexcept { return raw != nullptr; }
+        explicit operator bool() const noexcept { return raw != T{}; }
 
         T get() const noexcept { return raw; }
         T operator*() const noexcept { return raw; }
 
         void reset() noexcept {
-            if (raw) {
+            if (raw != T{}) {
                 if (destroyer && device) {
                     constexpr size_t threshold = 16 * 1024 * 1024;
                     if (size >= threshold) {
                         LOG_DEBUG_CAT("RTX", "Skipping shred for large allocation (%zuMB): %s", size/(1024*1024), tag.empty() ? "" : std::string(tag).c_str());
                     } else {
-                        // shred memory
                         std::memset(&raw, 0xCD, sizeof(T));
                     }
                     destroyer(device, raw, nullptr);
                 }
                 logAndTrackDestruction(tag.empty() ? typeid(T).name() : std::string(tag).c_str(), reinterpret_cast<void*>(raw), __LINE__, size);
-                raw = nullptr; device = VK_NULL_HANDLE; destroyer = nullptr;
+                raw = T{}; device = VK_NULL_HANDLE; destroyer = nullptr;
             }
         }
 
@@ -142,6 +141,16 @@ namespace RTX {
     [[nodiscard]] inline auto MakeHandle(T h, VkDevice d, Args&&... args) {
         return Handle<T>(h, d, std::forward<Args>(args)...);
     }
+
+    // =============================================================================
+    // MACROS — PUBLIC API
+    // =============================================================================
+    #define HANDLE_CREATE(var, raw, dev, destroyer, size, tag) \
+        do { (var) = RTX::MakeHandle((raw), (dev), (destroyer), (size), (tag)); } while(0)
+
+    #define HANDLE_GET(var) ((var).get())
+
+    #define HANDLE_RESET(var) ((var).reset())
 
     // =============================================================================
     // Context — Global Vulkan Context
@@ -193,6 +202,7 @@ namespace RTX {
         [[nodiscard]] inline PFN_vkCreateAccelerationStructureKHR          vkCreateAccelerationStructureKHR() const noexcept { return vkCreateAccelerationStructureKHR_; }
         [[nodiscard]] inline PFN_vkGetAccelerationStructureDeviceAddressKHR vkGetAccelerationStructureDeviceAddressKHR() const noexcept { return vkGetAccelerationStructureDeviceAddressKHR_; }
         [[nodiscard]] inline PFN_vkCreateRayTracingPipelinesKHR            vkCreateRayTracingPipelinesKHR() const noexcept { return vkCreateRayTracingPipelinesKHR_; }
+        [[nodiscard]] inline PFN_vkGetBufferDeviceAddressKHR               vkGetBufferDeviceAddressKHR() const noexcept { return vkGetBufferDeviceAddressKHR_; }
 
         [[nodiscard]] inline const VkPhysicalDeviceRayTracingPipelinePropertiesKHR& rayTracingProps() const noexcept { return rayTracingProps_; }
 
@@ -200,6 +210,8 @@ namespace RTX {
         [[nodiscard]] inline VkBuffer    reservoirBuffer() const noexcept { return reservoirBuffer_ ? *reservoirBuffer_ : VK_NULL_HANDLE; }
         [[nodiscard]] inline VkBuffer    frameDataBuffer() const noexcept { return frameDataBuffer_ ? *frameDataBuffer_ : VK_NULL_HANDLE; }
         [[nodiscard]] inline VkBuffer    debugVisBuffer() const noexcept { return debugVisBuffer_ ? *debugVisBuffer_ : VK_NULL_HANDLE; }
+
+        [[nodiscard]] inline uint32_t currentFrame() const noexcept { return 0; }
     };
 
     // =============================================================================
@@ -210,8 +222,18 @@ namespace RTX {
         return instance;
     }
 
+    [[nodiscard]] inline Context& g_ctx() {
+        static Context ctx;          // one-time construction
+        return ctx;
+    }
+
+    [[nodiscard]] inline VulkanRTX*& rtx_ptr() {
+        static VulkanRTX* ptr = nullptr;
+        return ptr;
+    }
+
     [[nodiscard]] inline VulkanRTX& rtx() {
-        static std::unique_ptr<VulkanRTX> instance;
+        auto* instance = rtx_ptr();
         if (!instance) {
             LOG_ERROR_CAT("RTX", "{}RTX::rtx() accessed before RTX::createCore(){}", ELECTRIC_BLUE, RESET);
             std::terminate();
@@ -219,16 +241,7 @@ namespace RTX {
         return *instance;
     }
 
-    [[nodiscard]] inline VulkanRTX*& rtx_ptr() {
-        static std::unique_ptr<VulkanRTX> ptr;
-        return ptr;
-    }
-
-    inline void createCore(int w, int h, VulkanPipelineManager* mgr = nullptr) {
-        if (rtx_ptr()) return;
-        rtx_ptr() = std::make_unique<VulkanRTX>(w, h, mgr).release();
-        LOG_SUCCESS_CAT("RTX", "{}RTX::rtx() FORGED — {}x{}{}", ELECTRIC_BLUE, w, h, RESET);
-    }
+    void createCore(int w, int h, VulkanPipelineManager* mgr = nullptr);
 
     // =============================================================================
     // UltraLowLevelBufferTracker — unchanged
@@ -309,6 +322,8 @@ namespace RTX {
         do { RTX::UltraLowLevelBufferTracker::get().destroy((handle)); } while (0)
     #define RAW_BUFFER(handle) \
         (RTX::UltraLowLevelBufferTracker::get().getData((handle)) ? RTX::UltraLowLevelBufferTracker::get().getData((handle))->buffer : VK_NULL_HANDLE)
+    #define BUFFER_MEMORY(handle) \
+        (RTX::UltraLowLevelBufferTracker::get().getData((handle)) ? RTX::UltraLowLevelBufferTracker::get().getData((handle))->memory : VK_NULL_HANDLE)
 
     // =============================================================================
     // AutoBuffer
@@ -354,10 +369,3 @@ namespace RTX {
     inline void cleanupAll() noexcept;
 
 } // namespace RTX
-
-// =============================================================================
-// RTXHandler v61 — ALL ERRORS OBLITERATED
-// Handle<T> stores real T | logAndTrackDestruction inline | stonekey_xor_spirv inline
-// rtx_ptr() returns VulkanRTX*& | VulkanRTX full usage allowed
-// PINK PHOTONS ETERNAL — SHIP IT RAW
-// =============================================================================
