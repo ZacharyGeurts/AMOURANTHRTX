@@ -64,13 +64,9 @@ public:
     }
 
     void onBlasBuilt(VkDeviceSize sizeGB, const BlasBuildSizes& sizes) {
-        LOG_SUCCESS_CAT("BLAS", 
-            "{}BLAS ONLINE — {:.3f} GB | Scratch: {:.3f} MB | Update: {:.3f} MB{}",
-            PLASMA_FUCHSIA,
-            sizeGB,
-            sizes.buildScratchSize / (1024.0 * 1024.0),
-            sizes.updateScratchSize / (1024.0 * 1024.0),
-            RESET);
+        double scratchMB = sizes.buildScratchSize / (1024.0 * 1024.0);
+        double updateMB = sizes.updateScratchSize / (1024.0 * 1024.0);
+        LOG_SUCCESS_CAT("BLAS", "{}BLAS ONLINE - {:.3f} GB | Scratch: {:.3f} MB | Update: {:.3f} MB{}", PLASMA_FUCHSIA, static_cast<double>(sizeGB), scratchMB, updateMB, RESET);
     }
 
     void onTlasStart(size_t count) {
@@ -78,35 +74,33 @@ public:
     }
 
     void onTlasBuilt(VkDeviceSize sizeGB, VkDeviceAddress addr, const TlasBuildSizes& sizes) {
-        LOG_SUCCESS_CAT("TLAS",
-            "{}TLAS ONLINE — {} instances | @ 0x{:x} | {:.3f} GB | InstData: {:.3f} MB{}",
-            PLASMA_FUCHSIA,
-            sizes.instanceDataSize / sizeof(VkAccelerationStructureInstanceKHR),
-            addr, sizeGB,
-            sizes.instanceDataSize / (1024.0 * 1024.0),
-            RESET);
+        uint32_t numInstances = sizes.instanceDataSize / sizeof(VkAccelerationStructureInstanceKHR);
+        double instMB = sizes.instanceDataSize / (1024.0 * 1024.0);
+        LOG_SUCCESS_CAT("TLAS", "{}TLAS ONLINE - {} instances | @ 0x{:x} | {:.3f} GB | InstData: {:.3f} MB{}", PLASMA_FUCHSIA, numInstances, addr, static_cast<double>(sizeGB), instMB, RESET);
     }
 
     void onPhotonDispatch(uint32_t w, uint32_t h) {
-        LOG_PERF_CAT("RTX", "Ray dispatch: {}×{} | {} rays", w, h, w * h);
+        LOG_PERF_CAT("RTX", "Ray dispatch: {}x{} | {} rays", w, h, w * h);
     }
 
     void onMemoryEvent(const char* name, VkDeviceSize size) {
         double sizeMB = size / (1024.0 * 1024.0);
-        (void)sizeMB;
-        LOG_INFO_CAT("Memory", "{} → {:.3f} MB", name, sizeMB);
+        LOG_INFO_CAT("Memory", "{} -> {:.3f} MB", name, sizeMB);
     }
 
 private:
     AmouranthAI() = default;
 };
-
 // =============================================================================
 // INTERNAL: SIZE COMPUTATION + INSTANCE UPLOAD
 // =============================================================================
 namespace {
 
 [[nodiscard]] inline BlasBuildSizes computeBlasSizes(VkDevice device, uint32_t vertexCount, uint32_t indexCount) {
+    if (!g_ctx().vkGetAccelerationStructureBuildSizesKHR_) {
+        throw std::runtime_error("vkGetAccelerationStructureBuildSizesKHR not available. Enable VK_KHR_acceleration_structure extension and load function pointer.");
+    }
+
     LOG_DEBUG_CAT("LAS", "Computing BLAS sizes for {} verts, {} indices", vertexCount, indexCount);
 
     VkAccelerationStructureGeometryKHR geometry{
@@ -149,6 +143,10 @@ namespace {
 }
 
 [[nodiscard]] inline TlasBuildSizes computeTlasSizes(VkDevice device, uint32_t instanceCount) {
+    if (!g_ctx().vkGetAccelerationStructureBuildSizesKHR_) {
+        throw std::runtime_error("vkGetAccelerationStructureBuildSizesKHR not available. Enable VK_KHR_acceleration_structure extension and load function pointer.");
+    }
+
     LOG_DEBUG_CAT("LAS", "Computing TLAS sizes for {} instances", instanceCount);
 
     VkAccelerationStructureGeometryKHR geometry{
@@ -189,7 +187,7 @@ namespace {
 }
 
 [[nodiscard]] inline uint64_t uploadInstances(
-    VkDevice device, VkPhysicalDevice, VkCommandPool pool, VkQueue queue,
+    VkDevice device, VkCommandPool pool, VkQueue queue,
     std::span<const std::pair<VkAccelerationStructureKHR, glm::mat4>> instances)
 {
     if (instances.empty()) {
@@ -226,6 +224,10 @@ namespace {
             .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR,
             .accelerationStructure = as
         };
+        if (!g_ctx().vkGetAccelerationStructureDeviceAddressKHR_) {
+            BUFFER_DESTROY(stagingHandle);
+            throw std::runtime_error("vkGetAccelerationStructureDeviceAddressKHR not available. Enable VK_KHR_acceleration_structure and VK_KHR_buffer_device_address extensions.");
+        }
         instData[i].accelerationStructureReference =
             g_ctx().vkGetAccelerationStructureDeviceAddressKHR_(device, &addrInfo);
     }
@@ -271,6 +273,20 @@ public:
     {
         std::lock_guard<std::mutex> lock(mutex_);
         VkDevice dev = g_ctx().vkDevice();
+
+        if (vertexBuf == 0 || indexBuf == 0) {
+            throw std::runtime_error("buildBLAS: Invalid buffer handle (vertex or index is null)");
+        }
+
+        if (!g_ctx().vkCreateAccelerationStructureKHR_) {
+            throw std::runtime_error("vkCreateAccelerationStructureKHR not available. Enable VK_KHR_acceleration_structure extension and load function pointer.");
+        }
+        if (!g_ctx().vkGetBufferDeviceAddressKHR_) {
+            throw std::runtime_error("vkGetBufferDeviceAddressKHR not available. Enable VK_KHR_buffer_device_address extension and load function pointer.");
+        }
+        if (!g_ctx().vkCmdBuildAccelerationStructuresKHR_) {
+            throw std::runtime_error("vkCmdBuildAccelerationStructuresKHR not available. Enable VK_KHR_acceleration_structure extension and load function pointer.");
+        }
 
         LOG_INFO_CAT("LAS", "Building BLAS: {} verts, {} indices", vertexCount, indexCount);
         AmouranthAI::get().onBlasStart(vertexCount, indexCount);
@@ -381,6 +397,17 @@ public:
         if (instances.empty()) throw std::runtime_error("TLAS: zero instances");
 
         VkDevice dev = g_ctx().vkDevice();
+
+        if (!g_ctx().vkCreateAccelerationStructureKHR_) {
+            throw std::runtime_error("vkCreateAccelerationStructureKHR not available. Enable VK_KHR_acceleration_structure extension and load function pointer.");
+        }
+        if (!g_ctx().vkGetBufferDeviceAddressKHR_) {
+            throw std::runtime_error("vkGetBufferDeviceAddressKHR not available. Enable VK_KHR_buffer_device_address extension and load function pointer.");
+        }
+        if (!g_ctx().vkCmdBuildAccelerationStructuresKHR_) {
+            throw std::runtime_error("vkCmdBuildAccelerationStructuresKHR not available. Enable VK_KHR_acceleration_structure extension and load function pointer.");
+        }
+
         LOG_INFO_CAT("LAS", "Building TLAS with {} instances", instances.size());
         AmouranthAI::get().onTlasStart(instances.size());
 
@@ -388,7 +415,7 @@ public:
         if (sizes.accelerationStructureSize == 0)
             throw std::runtime_error("TLAS size zero");
 
-        uint64_t instanceEnc = uploadInstances(dev, g_ctx().vkPhysicalDevice(), pool, queue, instances);
+        uint64_t instanceEnc = uploadInstances(dev, pool, queue, instances);
         if (!instanceEnc) throw std::runtime_error("Instance upload failed");
 
         uint64_t asBufferHandle = 0;
@@ -495,6 +522,10 @@ public:
     [[nodiscard]] VkAccelerationStructureKHR getBLAS() const noexcept { return blas_ ? *blas_ : VK_NULL_HANDLE; }
     [[nodiscard]] VkDeviceAddress getBLASAddress() const noexcept {
         if (!blas_) return 0;
+        if (!g_ctx().vkGetAccelerationStructureDeviceAddressKHR_) {
+            LOG_ERROR_CAT("LAS", "vkGetAccelerationStructureDeviceAddressKHR not available");
+            return 0;
+        }
         VkAccelerationStructureDeviceAddressInfoKHR info{
             .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR,
             .accelerationStructure = *blas_
@@ -505,6 +536,10 @@ public:
     [[nodiscard]] VkAccelerationStructureKHR getTLAS() const noexcept { return tlas_ ? *tlas_ : VK_NULL_HANDLE; }
     [[nodiscard]] VkDeviceAddress getTLASAddress() const noexcept {
         if (!tlas_) return 0;
+        if (!g_ctx().vkGetAccelerationStructureDeviceAddressKHR_) {
+            LOG_ERROR_CAT("LAS", "vkGetAccelerationStructureDeviceAddressKHR not available");
+            return 0;
+        }
         VkAccelerationStructureDeviceAddressInfoKHR info{
             .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR,
             .accelerationStructure = *tlas_
@@ -534,6 +569,9 @@ inline LAS& las() noexcept { return LAS::get(); }
 // =============================================================================
 // STONEKEY v∞ PUBLIC — PINK PHOTONS ETERNAL — TITAN DOMINANCE ETERNAL
 // RTX::las().buildTLAS(...) — 15,000 FPS — VALHALLA v89 FINAL
+// FIXED: Added runtime checks for RT function pointers to prevent segfaults
 // FIXED: &(...) rvalue address errors → use stack variables
+// FIXED: Removed unused VkPhysicalDevice param from uploadInstances
+// FIXED: Added null buffer handle validation in buildBLAS to prevent invalid addresses
 // ZERO ERRORS — ZERO CIRCULAR — PRODUCTION-READY
 // =============================================================================

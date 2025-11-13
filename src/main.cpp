@@ -16,8 +16,33 @@
 //
 // =============================================================================
 
-
+#include "engine/GLOBAL/OptionsMenu.hpp"
 #include "engine/GLOBAL/StoneKey.hpp"
+// =============================================================================
+// stonekey_xor_spirv — ENCRYPTION MANDATORY (NO UNENCRYPTED ATTACH)
+// =============================================================================
+void stonekey_xor_spirv(std::vector<uint32_t>& data, bool encrypt) {
+    if (!encrypt) {
+        LOG_FATAL_CAT("SECURITY", "FATAL: UNENCRYPTED SPIR-V DETECTED!");
+        LOG_FATAL_CAT("SECURITY", "This build REFUSES to attach unencrypted shaders.");
+        LOG_FATAL_CAT("SECURITY", "PINK PHOTONS ETERNAL — NO COMPROMISE.");
+        std::terminate();
+    }
+
+    LOG_INFO_CAT("RTX", "Encrypting SPIR-V: {} words", data.size());
+
+    constexpr uint64_t STONEKEY = Options::Shader::STONEKEY_1;
+    static_assert(STONEKEY != 0, "STONEKEY_1 must be non-zero");
+
+    for (auto& word : data) {
+        word ^= static_cast<uint32_t>(STONEKEY);
+        word ^= static_cast<uint32_t>(STONEKEY >> 32);
+    }
+
+    LOG_SUCCESS_CAT("RTX", "SPIR-V ENCRYPTED — KEY: 0x{:x}{:x} — ATTACH AUTHORIZED", 
+                    static_cast<uint32_t>(STONEKEY >> 32), static_cast<uint32_t>(STONEKEY));
+}
+
 #include "main.hpp"
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/SDL3/SDL3_init.hpp"

@@ -290,7 +290,7 @@ void Context::init(SDL_Window* window, int width, int height) {
         queueInfos.push_back(qi);
     }
 
-    // Enable RT features
+    // Enable RT features (chain properly: innermost to outermost)
     VkPhysicalDeviceRayTracingPipelineFeaturesKHR rayTracingPipelineFeatures{};
     rayTracingPipelineFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR;
     rayTracingPipelineFeatures.rayTracingPipeline = VK_TRUE;
@@ -298,12 +298,12 @@ void Context::init(SDL_Window* window, int width, int height) {
     VkPhysicalDeviceAccelerationStructureFeaturesKHR accelStructureFeatures{};
     accelStructureFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
     accelStructureFeatures.accelerationStructure = VK_TRUE;
-    accelStructureFeatures.pNext = &rayTracingPipelineFeatures;
+    accelStructureFeatures.pNext = &rayTracingPipelineFeatures;  // Chain RT pipeline to AS
 
     VkPhysicalDeviceBufferDeviceAddressFeaturesKHR bufferDeviceAddressFeatures{};
     bufferDeviceAddressFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES_KHR;
     bufferDeviceAddressFeatures.bufferDeviceAddress = VK_TRUE;
-    bufferDeviceAddressFeatures.pNext = &accelStructureFeatures;
+    bufferDeviceAddressFeatures.pNext = &accelStructureFeatures;  // Chain AS to buffer addr
 
     VkPhysicalDeviceFeatures features{};
     features.samplerAnisotropy = VK_TRUE;
@@ -323,24 +323,40 @@ void Context::init(SDL_Window* window, int width, int height) {
     devInfo.pEnabledFeatures = &features;
     devInfo.enabledExtensionCount = static_cast<uint32_t>(devExts.size());
     devInfo.ppEnabledExtensionNames = devExts.data();
-    devInfo.pNext = &bufferDeviceAddressFeatures;
+    devInfo.pNext = &bufferDeviceAddressFeatures;  // Chain the whole feature tree here
 
     VK_CHECK(vkCreateDevice(physicalDevice_, &devInfo, nullptr, &device_),
              "Failed to create logical device");
     LOG_SUCCESS_CAT("RTX", "Device created: 0x{:x}", reinterpret_cast<uint64_t>(device_));
 
     // Load RT extension functions
-#define LOAD_PFN(name) vk##name##_ = reinterpret_cast<PFN_vk##name>(vkGetDeviceProcAddr(device_, #name));
-    LOAD_PFN(GetBufferDeviceAddressKHR);
-    LOAD_PFN(CmdTraceRaysKHR);
-    LOAD_PFN(GetRayTracingShaderGroupHandlesKHR);
-    LOAD_PFN(CreateAccelerationStructureKHR);
-    LOAD_PFN(DestroyAccelerationStructureKHR);
-    LOAD_PFN(GetAccelerationStructureBuildSizesKHR);
-    LOAD_PFN(CmdBuildAccelerationStructuresKHR);
-    LOAD_PFN(GetAccelerationStructureDeviceAddressKHR);
-    LOAD_PFN(CreateRayTracingPipelinesKHR);
+#define LOAD_PFN(member, full_name, pfn_type) \
+    do { \
+        member = [&]{ \
+            auto pfn = reinterpret_cast<pfn_type>(vkGetDeviceProcAddr(device_, #full_name)); \
+            if (pfn) { \
+                LOG_SUCCESS_CAT("RTX", "Loaded: " #full_name); \
+            } else { \
+                LOG_FATAL_CAT("RTX", "Failed to load: " #full_name); \
+            } \
+            return pfn; \
+        }(); \
+    } while(0)
+
+    LOAD_PFN(vkGetBufferDeviceAddressKHR_, vkGetBufferDeviceAddressKHR, PFN_vkGetBufferDeviceAddressKHR);
+    LOAD_PFN(vkCmdTraceRaysKHR_, vkCmdTraceRaysKHR, PFN_vkCmdTraceRaysKHR);
+    LOAD_PFN(vkGetRayTracingShaderGroupHandlesKHR_, vkGetRayTracingShaderGroupHandlesKHR, PFN_vkGetRayTracingShaderGroupHandlesKHR);
+    LOAD_PFN(vkCreateAccelerationStructureKHR_, vkCreateAccelerationStructureKHR, PFN_vkCreateAccelerationStructureKHR);
+    LOAD_PFN(vkDestroyAccelerationStructureKHR_, vkDestroyAccelerationStructureKHR, PFN_vkDestroyAccelerationStructureKHR);
+    LOAD_PFN(vkGetAccelerationStructureBuildSizesKHR_, vkGetAccelerationStructureBuildSizesKHR, PFN_vkGetAccelerationStructureBuildSizesKHR);
+    LOAD_PFN(vkCmdBuildAccelerationStructuresKHR_, vkCmdBuildAccelerationStructuresKHR, PFN_vkCmdBuildAccelerationStructuresKHR);
+    LOAD_PFN(vkGetAccelerationStructureDeviceAddressKHR_, vkGetAccelerationStructureDeviceAddressKHR, PFN_vkGetAccelerationStructureDeviceAddressKHR);
+    LOAD_PFN(vkCreateRayTracingPipelinesKHR_, vkCreateRayTracingPipelinesKHR, PFN_vkCreateRayTracingPipelinesKHR);
 #undef LOAD_PFN
+
+    if (!vkCreateAccelerationStructureKHR_) {
+        throw std::runtime_error("Critical RT functions failed to load — check GPU/driver support");
+    }
 
     // Get queues
     vkGetDeviceQueue(device_, graphicsFamily_, 0, &graphicsQueue_);
@@ -362,31 +378,6 @@ void Context::init(SDL_Window* window, int width, int height) {
 }
 
 // =============================================================================
-// stonekey_xor_spirv — ENCRYPTION MANDATORY (NO UNENCRYPTED ATTACH)
-// =============================================================================
-void stonekey_xor_spirv(std::vector<uint32_t>& data, bool encrypt) {
-    if (!encrypt) {
-        LOG_FATAL_CAT("SECURITY", "FATAL: UNENCRYPTED SPIR-V DETECTED!");
-        LOG_FATAL_CAT("SECURITY", "This build REFUSES to attach unencrypted shaders.");
-        LOG_FATAL_CAT("SECURITY", "PINK PHOTONS ETERNAL — NO COMPROMISE.");
-        std::terminate();
-    }
-
-    LOG_INFO_CAT("RTX", "Encrypting SPIR-V: {} words", data.size());
-
-    constexpr uint64_t STONEKEY = Options::Shader::STONEKEY_1;
-    static_assert(STONEKEY != 0, "STONEKEY_1 must be non-zero");
-
-    for (auto& word : data) {
-        word ^= static_cast<uint32_t>(STONEKEY);
-        word ^= static_cast<uint32_t>(STONEKEY >> 32);
-    }
-
-    LOG_SUCCESS_CAT("RTX", "SPIR-V ENCRYPTED — KEY: 0x{:x}{:x} — ATTACH AUTHORIZED", 
-                    static_cast<uint32_t>(STONEKEY >> 32), static_cast<uint32_t>(STONEKEY));
-}
-
-// =============================================================================
 // logAndTrackDestruction
 // =============================================================================
 void logAndTrackDestruction(const char* type, void* ptr, int line, size_t size) {
@@ -403,18 +394,6 @@ UltraLowLevelBufferTracker& UltraLowLevelBufferTracker::get() noexcept {
     return instance;
 }
 
-static uint32_t findMemoryType(VkPhysicalDevice phys, uint32_t typeFilter, VkMemoryPropertyFlags props) noexcept {
-    VkPhysicalDeviceMemoryProperties memProps;
-    vkGetPhysicalDeviceMemoryProperties(phys, &memProps);
-    for (uint32_t i = 0; i < memProps.memoryTypeCount; ++i) {
-        if ((typeFilter & (1u << i)) && (memProps.memoryTypes[i].propertyFlags & props) == props) {
-            return i;
-        }
-    }
-    LOG_ERROR_CAT("RTX", "No suitable memory type found (filter: 0x{:x}, props: 0x{:x})", typeFilter, props);
-    return UINT32_MAX;
-}
-
 uint64_t UltraLowLevelBufferTracker::create(VkDeviceSize size,
                                             VkBufferUsageFlags usage,
                                             VkMemoryPropertyFlags props,
@@ -427,11 +406,23 @@ uint64_t UltraLowLevelBufferTracker::create(VkDeviceSize size,
         return 0;
     }
 
+    // Align size for host-visible buffers
+    VkDeviceSize alignedSize = size;
+    if (props & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) {
+        VkPhysicalDeviceProperties devProps{};
+        vkGetPhysicalDeviceProperties(physDev_, &devProps);
+        VkDeviceSize atomSize = devProps.limits.nonCoherentAtomSize;
+        alignedSize = ((size + atomSize - 1) / atomSize) * atomSize;
+        if (alignedSize > size) {
+            LOG_WARN_CAT("RTX", "Aligned host-visible buffer from {} to {} bytes (atom: {})", size, alignedSize, atomSize);
+        }
+    }
+
     VkBufferCreateInfo bufInfo{
         .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
         .pNext = nullptr,
         .flags = 0,
-        .size = size,
+        .size = alignedSize,
         .usage = usage,
         .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
         .queueFamilyIndexCount = 0,
@@ -448,8 +439,8 @@ uint64_t UltraLowLevelBufferTracker::create(VkDeviceSize size,
     VkMemoryRequirements memReq{};
     vkGetBufferMemoryRequirements(device_, buffer, &memReq);
 
-    if (memReq.size > size) {
-        LOG_WARN_CAT("RTX", "Requested {} bytes, but driver requires {} bytes", size, memReq.size);
+    if (memReq.size > alignedSize) {
+        LOG_WARN_CAT("RTX", "Requested {} bytes, but driver requires {} bytes", alignedSize, memReq.size);
     }
 
     VkMemoryAllocateFlagsInfo flagsInfo{
@@ -493,7 +484,7 @@ uint64_t UltraLowLevelBufferTracker::create(VkDeviceSize size,
 
     {
         std::lock_guard<std::mutex> lk(mutex_);
-        map_.emplace(obf, BufferData{buffer, memory, memReq.size, usage, std::string(tag)});
+        map_.emplace(raw, BufferData{buffer, memory, memReq.size, usage, std::string(tag)});
     }
 
     LOG_SUCCESS_CAT("RTX", "Buffer created: 0x{:x} (obf: 0x{:x}) | Size: {} | MemType: {} | Tag: {}",
@@ -502,7 +493,39 @@ uint64_t UltraLowLevelBufferTracker::create(VkDeviceSize size,
     return obf;
 }
 
+void* UltraLowLevelBufferTracker::map(uint64_t handle) noexcept {
+    if (handle == 0) return nullptr;
+    const uint64_t raw = deobfuscate(handle);
+    std::lock_guard<std::mutex> lk(mutex_);
+    auto it = map_.find(raw);
+    if (it == map_.end()) {
+        LOG_ERROR_CAT("RTX", "map: Invalid handle 0x{:x} (raw 0x{:x})", handle, raw);
+        return nullptr;
+    }
+    void* ptr = nullptr;
+    VkResult res = vkMapMemory(device_, it->second.memory, 0, it->second.size, 0, &ptr);
+    if (res != VK_SUCCESS) {
+        LOG_ERROR_CAT("RTX", "vkMapMemory failed: {} for handle 0x{:x}", res, handle);
+        return nullptr;
+    }
+    return ptr;
+}
+
+void UltraLowLevelBufferTracker::unmap(uint64_t handle) noexcept {
+    if (handle == 0) return;
+    const uint64_t raw = deobfuscate(handle);
+    std::lock_guard<std::mutex> lk(mutex_);
+    auto it = map_.find(raw);
+    if (it != map_.end()) {
+        vkUnmapMemory(device_, it->second.memory);
+    }
+}
+
 void UltraLowLevelBufferTracker::destroy(uint64_t handle) noexcept {
+    if (handle == 0) {
+        LOG_WARN_CAT("RTX", "Invalid zero handle passed to destroy");
+        return;
+    }
     LOG_INFO_CAT("RTX", "Buffer destroy: 0x{:x}", handle);
     const uint64_t raw = deobfuscate(handle);
     std::lock_guard<std::mutex> lk(mutex_);
@@ -511,14 +534,15 @@ void UltraLowLevelBufferTracker::destroy(uint64_t handle) noexcept {
         LOG_WARN_CAT("RTX", "Buffer not found: raw 0x{:x}", raw);
         return;
     }
-    const BufferData& d = it->second;
+    BufferData d = std::move(it->second);  // Move out to avoid issues during erase
+    map_.erase(it);
     if (d.buffer) vkDestroyBuffer(device_, d.buffer, nullptr);
     if (d.memory) vkFreeMemory(device_, d.memory, nullptr);
-    map_.erase(it);
     LOG_SUCCESS_CAT("RTX", "Buffer destroyed: 0x{:x} | Tag: {}", handle, d.tag);
 }
 
 BufferData* UltraLowLevelBufferTracker::getData(uint64_t handle) noexcept {
+    if (handle == 0) return nullptr;
     const uint64_t raw = deobfuscate(handle);
     std::lock_guard<std::mutex> lk(mutex_);
     auto it = map_.find(raw);
@@ -526,6 +550,7 @@ BufferData* UltraLowLevelBufferTracker::getData(uint64_t handle) noexcept {
 }
 
 const BufferData* UltraLowLevelBufferTracker::getData(uint64_t handle) const noexcept {
+    if (handle == 0) return nullptr;
     const uint64_t raw = deobfuscate(handle);
     std::lock_guard<std::mutex> lk(mutex_);
     auto it = map_.find(raw);
@@ -535,18 +560,20 @@ const BufferData* UltraLowLevelBufferTracker::getData(uint64_t handle) const noe
 void UltraLowLevelBufferTracker::init(VkDevice dev, VkPhysicalDevice phys) noexcept {
     device_ = dev;
     physDev_ = phys;
-    LOG_SUCCESS_CAT("RTX", "BufferTracker initialized — READY FOR PINK PHOTONS");
+    LOG_SUCCESS_CAT("RTX", "BufferTracker initialized - READY FOR PINK PHOTONS");
 }
 
 void UltraLowLevelBufferTracker::purge_all() noexcept {
-    LOG_INFO_CAT("RTX", "Purging all buffers — Total: {}", map_.size());
+    LOG_INFO_CAT("RTX", "Purging all buffers - Total: {}", map_.size());
     std::lock_guard<std::mutex> lk(mutex_);
-    for (auto& [k, v] : map_) {
-        if (v.buffer) vkDestroyBuffer(device_, v.buffer, nullptr);
-        if (v.memory) vkFreeMemory(device_, v.memory, nullptr);
+    for (auto it = map_.begin(); it != map_.end(); ) {
+        BufferData d = std::move(it->second);
+        if (d.buffer) vkDestroyBuffer(device_, d.buffer, nullptr);
+        if (d.memory) vkFreeMemory(device_, d.memory, nullptr);
+        it = map_.erase(it);  // Correct: erase returns next iterator
     }
-    map_.clear();
-    LOG_SUCCESS_CAT("RTX", "All buffers purged — ZERO LEAKS");
+    map_.clear();  // Redundant but safe
+    LOG_SUCCESS_CAT("RTX", "All buffers purged - ZERO LEAKS");
 }
 
 uint64_t UltraLowLevelBufferTracker::make_64M (VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept { return create(SIZE_64MB,  extra, props, "64M"); }

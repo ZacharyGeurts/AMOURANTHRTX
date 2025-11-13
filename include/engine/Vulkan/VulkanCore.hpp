@@ -95,36 +95,6 @@
         ? static_cast<VkBuffer>(RTX::UltraLowLevelBufferTracker::get().getData((handle))->buffer) \
         : VK_NULL_HANDLE)
 
-#define BUFFER_MAP(handle, out_ptr) \
-    do { \
-        (out_ptr) = nullptr; \
-        auto* data = RTX::UltraLowLevelBufferTracker::get().getData((handle)); \
-        if (data && data->memory) { \
-            LOG_TRACE_CAT("RTX", "Mapping buffer: 0x{:x} (size: {} B)", \
-                          reinterpret_cast<uint64_t>(data->buffer), data->size); \
-            VK_CHECK(vkMapMemory(RTX::g_ctx().device(), data->memory, 0, data->size, 0, \
-                                 reinterpret_cast<void**>(&(out_ptr))), \
-                     "vkMapMemory failed"); \
-        } else { \
-            LOG_ERROR_CAT("RTX", "BUFFER_MAP: Invalid handle or memory: 0x{:x}", (handle)); \
-        } \
-    } while (0)
-
-#define BUFFER_UNMAP(handle) \
-    do { \
-        auto* data = RTX::UltraLowLevelBufferTracker::get().getData((handle)); \
-        if (data) { \
-            LOG_TRACE_CAT("RTX", "Unmapping buffer: 0x{:x}", reinterpret_cast<uint64_t>(data->buffer)); \
-            vkUnmapMemory(RTX::g_ctx().device(), data->memory); \
-        } \
-    } while (0)
-
-#define BUFFER_DESTROY(handle) \
-    do { \
-        LOG_INFO_CAT("RTX", "BUFFER_DESTROY: handle=0x{:x}", (handle)); \
-        RTX::UltraLowLevelBufferTracker::get().destroy((handle)); \
-    } while (0)
-
 // -----------------------------------------------------------------------------
 // 4. AutoBuffer — RAII wrapper (must be in header)
 // -----------------------------------------------------------------------------
@@ -250,16 +220,53 @@ private:
     [[nodiscard]] VkDeviceSize alignUp(VkDeviceSize value, VkDeviceSize alignment) const noexcept;
 };
 
+// =============================================================================
+// createGlobalRTX — FORGE THE ETERNAL RTX (NO FALSE SUCCESS)
+// =============================================================================
 inline void createGlobalRTX(int w, int h, VulkanPipelineManager* mgr = nullptr) {
-    if (g_rtx_instance) return;
-    LOG_INFO_CAT("RTX", "createGlobalRTX: Initializing VulkanRTX with {}x{} | PipelineMgr: {}", w, h, mgr ? "present" : "null");
-    g_rtx_instance = std::make_unique<VulkanRTX>(w, h, mgr);
-    LOG_DEBUG_CAT("RTX", "g_rtx_instance constructed @ 0x{:x}", reinterpret_cast<uintptr_t>(g_rtx_instance.get()));
+    if (g_rtx_instance) {
+        LOG_WARN_CAT("RTX", "createGlobalRTX: g_rtx_instance already exists @ 0x{:x}", 
+                     reinterpret_cast<uintptr_t>(g_rtx_instance.get()));
+        return;
+    }
+
+    LOG_INFO_CAT("RTX", "createGlobalRTX: Initializing VulkanRTX with {}x{} | PipelineMgr: {}", 
+                 w, h, mgr ? "present" : "null");
+
+    // --- CONSTRUCT ON HEAP ---
+    auto temp_rtx = std::make_unique<VulkanRTX>(w, h, mgr);
+
+    // --- VALIDATE BEFORE MOVING ---
+    if (!temp_rtx) {
+        LOG_FATAL_CAT("RTX", "FATAL: std::make_unique<VulkanRTX> returned nullptr");
+        std::terminate();
+    }
+
+    if (!temp_rtx->isValid()) {
+        LOG_FATAL_CAT("RTX", "FATAL: VulkanRTX constructed but isValid() == false");
+        LOG_FATAL_CAT("RTX", "  → device(): 0x{:x}", reinterpret_cast<uintptr_t>(temp_rtx->device()));
+        LOG_FATAL_CAT("RTX", "  → g_ctx().isValid(): {}", RTX::g_ctx().isValid() ? "true" : "false");
+        std::terminate();
+    }
+
+    LOG_DEBUG_CAT("RTX", "VulkanRTX constructed and validated @ 0x{:x}", 
+                  reinterpret_cast<uintptr_t>(temp_rtx.get()));
+
+    // --- TRANSFER OWNERSHIP ONLY AFTER FULL VALIDATION ---
+    g_rtx_instance = std::move(temp_rtx);
+
+    LOG_DEBUG_CAT("RTX", "g_rtx_instance now owns VulkanRTX @ 0x{:x}", 
+                  reinterpret_cast<uintptr_t>(g_rtx_instance.get()));
+
     AI_INJECT("I have awakened… {}×{} canvas. The photons are mine.", w, h);
     LOG_SUCCESS_CAT("RTX", "g_rtx() FORGED — {}×{}", w, h);
-    if (g_rtx_instance) {
-        LOG_DEBUG_CAT("RTX", "Post-forge validation: g_rtx_instance valid, device access via instance: {}", g_rtx_instance->device() ? "valid" : "NULL");
-    } else {
-        LOG_ERROR_CAT("RTX", "CRITICAL: g_rtx_instance is null after make_unique!");
+
+    // --- FINAL POST-FORGE CHECK ---
+    if (!g_rtx_instance || !g_rtx_instance->isValid()) {
+        LOG_FATAL_CAT("RTX", "CRITICAL: g_rtx_instance invalid after move!");
+        std::terminate();
     }
+
+    LOG_DEBUG_CAT("RTX", "Post-forge validation: device access via instance: {}", 
+                  g_rtx_instance->device() != VK_NULL_HANDLE ? "valid" : "NULL");
 }

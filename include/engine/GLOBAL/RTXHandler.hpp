@@ -206,6 +206,8 @@ namespace RTX {
         void destroy(uint64_t handle) noexcept;
         BufferData* getData(uint64_t handle) noexcept;
         const BufferData* getData(uint64_t handle) const noexcept;
+        void* map(uint64_t handle) noexcept;
+        void unmap(uint64_t handle) noexcept;
         void init(VkDevice dev, VkPhysicalDevice phys) noexcept;
         void purge_all() noexcept;
         uint64_t make_64M (VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept;
@@ -217,6 +219,19 @@ namespace RTX {
         uint64_t make_2G  (VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept;
         uint64_t make_4G  (VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept;
         uint64_t make_8G  (VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept;
+
+        // --- INLINE IMPLEMENTATION OF findMemoryType ---
+        static uint32_t findMemoryType(VkPhysicalDevice physDev, uint32_t typeFilter, VkMemoryPropertyFlags props) noexcept {
+            VkPhysicalDeviceMemoryProperties memProps;
+            vkGetPhysicalDeviceMemoryProperties(physDev, &memProps);
+            for (uint32_t i = 0; i < memProps.memoryTypeCount; ++i) {
+                if ((typeFilter & (1 << i)) &&
+                    (memProps.memoryTypes[i].propertyFlags & props) == props) {
+                    return i;
+                }
+            }
+            return UINT32_MAX;
+        }
 
     private:
         mutable std::mutex mutex_;
@@ -242,7 +257,7 @@ namespace RTX {
         (handle) = RTX::UltraLowLevelBufferTracker::get().create((size), (usage), (props), (tag)); \
     } while (0)
 
-/// Get the real VkBuffer from the opaque handle (VkBuffer → usable in Vulkan calls)
+/// Get the real VkBuffer from the opaque handle
 #define RAW_BUFFER(handle) \
     (RTX::UltraLowLevelBufferTracker::get().getData((handle)) \
         ? static_cast<VkBuffer>(RTX::UltraLowLevelBufferTracker::get().getData((handle))->buffer) \
@@ -253,6 +268,22 @@ namespace RTX {
     (RTX::UltraLowLevelBufferTracker::get().getData((handle)) \
         ? RTX::UltraLowLevelBufferTracker::get().getData((handle))->memory \
         : VK_NULL_HANDLE)
+
+/// Map buffer memory for CPU access
+#define BUFFER_MAP(handle, mapped) \
+    do { mapped = RTX::UltraLowLevelBufferTracker::get().map(handle); } while(0)
+
+/// Unmap buffer memory
+#define BUFFER_UNMAP(handle) RTX::UltraLowLevelBufferTracker::get().unmap(handle)
+
+/// Destroy buffer handle (does NOT reset variable)
+#define BUFFER_DESTROY(handle) \
+    do { \
+        if ((handle) != 0) { \
+            LOG_INFO_CAT("RTX", "BUFFER_DESTROY: handle={:x}", (handle)); \
+            RTX::UltraLowLevelBufferTracker::get().destroy((handle)); \
+        } \
+    } while(0)
 
     // =============================================================================
     // GLOBAL SWAPCHAIN + LAS

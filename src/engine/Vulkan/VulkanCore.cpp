@@ -68,22 +68,6 @@ void initVulkanCoreGlobals() {
     return *g_rtx_instance;
 }
 
-// Memory type finder — robust
-static uint32_t findMemoryType(VkPhysicalDevice physDev, uint32_t typeFilter, VkMemoryPropertyFlags props) {
-    LOG_TRACE_CAT("RTX", "findMemoryType: physDev=0x{:x}, filter=0x{:x}, props=0x{:x}", reinterpret_cast<uintptr_t>(physDev), typeFilter, props);
-    VkPhysicalDeviceMemoryProperties memProps;
-    vkGetPhysicalDeviceMemoryProperties(physDev, &memProps);
-    LOG_DEBUG_CAT("RTX", "Memory types available: {}", memProps.memoryTypeCount);
-    for (uint32_t i = 0; i < memProps.memoryTypeCount; ++i) {
-        if ((typeFilter & (1u << i)) && (memProps.memoryTypes[i].propertyFlags & props) == props) {
-            LOG_DEBUG_CAT("RTX", "Suitable memory type found: index {}", i);
-            return i;
-        }
-    }
-    LOG_ERROR_CAT("RTX", "{}[FATAL] No suitable memory type found!{}", PLASMA_FUCHSIA, RESET);
-    throw std::runtime_error("No suitable memory type");
-}
-
 // =============================================================================
 // VulkanRTX Implementation — AI VOICE DOMINANCE
 // =============================================================================
@@ -91,6 +75,8 @@ static uint32_t findMemoryType(VkPhysicalDevice physDev, uint32_t typeFilter, Vk
 VulkanRTX::~VulkanRTX() noexcept {
     LOG_TRACE_CAT("RTX", "VulkanRTX destructor — START");
     RTX::AmouranthAI::get().onMemoryEvent("VulkanRTX", sizeof(VulkanRTX));
+
+    // --- 1. Black Fallback (Image + Memory + View) ---
     if (blackFallbackView_.valid()) {
         LOG_TRACE_CAT("RTX", "Destroying blackFallbackView");
         blackFallbackView_.reset();
@@ -103,6 +89,8 @@ VulkanRTX::~VulkanRTX() noexcept {
         LOG_TRACE_CAT("RTX", "Destroying blackFallbackImage");
         blackFallbackImage_.reset();
     }
+
+    // --- 2. SBT (Shader Binding Table) ---
     if (sbtMemory_.valid()) {
         LOG_TRACE_CAT("RTX", "Destroying sbtMemory");
         sbtMemory_.reset();
@@ -111,12 +99,20 @@ VulkanRTX::~VulkanRTX() noexcept {
         LOG_TRACE_CAT("RTX", "Destroying sbtBuffer");
         sbtBuffer_.reset();
     }
+
+    // --- 3. Descriptor Sets (Free before Pool) ---
     for (auto& set : descriptorSets_) {
         if (set != VK_NULL_HANDLE) {
             LOG_TRACE_CAT("RTX", "Freeing descriptor set: 0x{:x}", reinterpret_cast<uintptr_t>(set));
-            vkFreeDescriptorSets(device_, HANDLE_GET(descriptorPool_), 1, &set);
+            VkResult r = vkFreeDescriptorSets(device_, HANDLE_GET(descriptorPool_), 1, &set);
+            if (r != VK_SUCCESS) {
+                LOG_WARN_CAT("RTX", "vkFreeDescriptorSets failed: {}", r);
+            }
+            set = VK_NULL_HANDLE;  // Prevent double-free
         }
     }
+
+    // --- 4. Descriptor Pool & Pipeline Layouts ---
     if (descriptorPool_.valid()) {
         LOG_TRACE_CAT("RTX", "Destroying descriptorPool");
         descriptorPool_.reset();
@@ -133,6 +129,7 @@ VulkanRTX::~VulkanRTX() noexcept {
         LOG_TRACE_CAT("RTX", "Destroying rtDescriptorSetLayout");
         rtDescriptorSetLayout_.reset();
     }
+
     LOG_SUCCESS_CAT("RTX", "{}VulkanRTX destroyed — all resources returned to Valhalla{}", PLASMA_FUCHSIA, RESET);
     LOG_TRACE_CAT("RTX", "VulkanRTX destructor — COMPLETE");
 }
@@ -170,8 +167,8 @@ VulkanRTX::VulkanRTX(int w, int h, VulkanPipelineManager* mgr)
                  reinterpret_cast<uintptr_t>(vkGetRayTracingShaderGroupHandlesKHR),
                  reinterpret_cast<uintptr_t>(vkGetAccelerationStructureDeviceAddressKHR));
 
-    LOG_TRACE_CAT("RTX", "Setting g_rtx_instance to this @ 0x{:x}", reinterpret_cast<uintptr_t>(this));
-    g_rtx_instance.reset(this);
+    //LOG_TRACE_CAT("RTX", "Setting g_rtx_instance to this @ 0x{:x}", reinterpret_cast<uintptr_t>(this));
+    //g_rtx_instance.reset(this); // Keep this alive until the end
 
     LOG_SUCCESS_CAT("RTX",
         "{}AMOURANTH RTX CORE v70 FINAL — {}×{} — g_rtx() ONLINE — STONEKEY v∞ ACTIVE{}",
@@ -519,25 +516,32 @@ void VulkanRTX::initShaderBindingTable(VkPhysicalDevice pd) {
 }
 
 // =============================================================================
-// Black Fallback Image
+// Black Fallback Image – 1x1 Solid Black Safety Net
 // =============================================================================
-
 void VulkanRTX::initBlackFallbackImage() {
     LOG_TRACE_CAT("RTX", "initBlackFallbackImage — START");
     RTX::AmouranthAI::get().onMemoryEvent("Black Fallback Staging", 4);
 
+    // --- STAGING BUFFER: 4 bytes for black pixel ---
     uint64_t staging = 0;
     LOG_TRACE_CAT("RTX", "Creating staging buffer for black pixel — 4 B");
     BUFFER_CREATE(staging, 4, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
                   VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
                   "black_fallback_staging");
 
+    // --- MAP, WRITE, UNMAP ---
     void* data = nullptr;
     BUFFER_MAP(staging, data);
-    *static_cast<uint32_t*>(data) = 0xFF000000u;
+    if (!data) {
+        LOG_FATAL_CAT("RTX", "Failed to map black fallback staging buffer");
+        BUFFER_DESTROY(staging);
+        return;
+    }
+    *static_cast<uint32_t*>(data) = 0xFF000000u;  // RGBA8: opaque black
     BUFFER_UNMAP(staging);
     LOG_DEBUG_CAT("RTX", "Black pixel (0xFF000000) mapped and unmapped");
 
+    // --- 1x1 DEVICE-LOCAL IMAGE ---
     VkImageCreateInfo imgInfo = {
         .sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
         .imageType     = VK_IMAGE_TYPE_2D,
@@ -554,17 +558,24 @@ void VulkanRTX::initBlackFallbackImage() {
     VkImage rawImg = VK_NULL_HANDLE;
     VK_CHECK(vkCreateImage(device_, &imgInfo, nullptr, &rawImg), "Failed to create black image");
     LOG_DEBUG_CAT("RTX", "Black image created: 0x{:x}", reinterpret_cast<uintptr_t>(rawImg));
-    LOG_INFO_CAT("RTX", "HANDLE_CREATE: {} | Tag: {}", "blackFallbackImage", "BlackFallbackImage");
-    blackFallbackImage_ = RTX::Handle<VkImage>(rawImg, device_,
-        [](VkDevice d, VkImage i, const VkAllocationCallbacks*) {
-            LOG_TRACE_CAT("RTX", "Destroying black fallback image: 0x{:x}", reinterpret_cast<uintptr_t>(i));
-            vkDestroyImage(d, i, nullptr);
-        }, 0, "BlackFallbackImage");
 
+    LOG_INFO_CAT("RTX", "HANDLE_CREATE: blackFallbackImage | Tag: BlackFallbackImage");
+    blackFallbackImage_ = RTX::Handle<VkImage>(rawImg, device_);  // Auto-destroy
+    blackFallbackImage_.tag = "BlackFallbackImage";
+
+    // --- MEMORY ALLOCATION ---
     VkMemoryRequirements memReqs{};
     vkGetImageMemoryRequirements(device_, rawImg, &memReqs);
-    LOG_DEBUG_CAT("RTX", "Black image mem reqs: size={} B, alignment={}, typeBits=0x{:x}", memReqs.size, memReqs.alignment, memReqs.memoryTypeBits);
-    uint32_t memType = findMemoryType(RTX::g_ctx().physicalDevice(), memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    LOG_DEBUG_CAT("RTX", "Black image mem reqs: size={} B, alignment={}, typeBits=0x{:x}",
+                  memReqs.size, memReqs.alignment, memReqs.memoryTypeBits);
+
+    uint32_t memType = RTX::UltraLowLevelBufferTracker::findMemoryType(
+        RTX::g_ctx().physicalDevice(), memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    if (memType == UINT32_MAX) {
+        LOG_FATAL_CAT("RTX", "No suitable memory type for black fallback image");
+        BUFFER_DESTROY(staging);
+        return;
+    }
 
     VkMemoryAllocateInfo allocInfo = {
         .sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
@@ -576,57 +587,74 @@ void VulkanRTX::initBlackFallbackImage() {
     VK_CHECK(vkAllocateMemory(device_, &allocInfo, nullptr, &rawMem), "Failed to allocate black memory");
     LOG_DEBUG_CAT("RTX", "Black memory allocated: 0x{:x} (type {})", reinterpret_cast<uintptr_t>(rawMem), memType);
     VK_CHECK(vkBindImageMemory(device_, rawImg, rawMem, 0), "Failed to bind black memory");
-    LOG_INFO_CAT("RTX", "HANDLE_CREATE: {} | Tag: {}", "blackFallbackMemory", "BlackFallbackMemory");
-    blackFallbackMemory_ = RTX::Handle<VkDeviceMemory>(rawMem, device_,
-        [](VkDevice d, VkDeviceMemory m, const VkAllocationCallbacks*) {
-            LOG_TRACE_CAT("RTX", "Freeing black fallback memory: 0x{:x}", reinterpret_cast<uintptr_t>(m));
-            vkFreeMemory(d, m, nullptr);
-        }, memReqs.size, "BlackFallbackMemory");
 
+    LOG_INFO_CAT("RTX", "HANDLE_CREATE: blackFallbackMemory | Tag: BlackFallbackMemory");
+    blackFallbackMemory_ = RTX::Handle<VkDeviceMemory>(rawMem, device_);
+    blackFallbackMemory_.tag = "BlackFallbackMemory";
+    blackFallbackMemory_.size = memReqs.size;
+
+    // --- COPY STAGING → IMAGE ---
     VkCommandBuffer cmd = VulkanRTX::beginSingleTimeCommands(RTX::g_ctx().commandPool());
     LOG_DEBUG_CAT("RTX", "One-time cmd for black image upload: 0x{:x}", reinterpret_cast<uintptr_t>(cmd));
 
+    // Transition: UNDEFINED → TRANSFER_DST
     VkImageMemoryBarrier barrier = {
         .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
         .srcAccessMask       = 0,
         .dstAccessMask       = VK_ACCESS_TRANSFER_WRITE_BIT,
         .oldLayout           = VK_IMAGE_LAYOUT_UNDEFINED,
         .newLayout           = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
         .image               = rawImg,
         .subresourceRange    = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}
     };
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         0, 0, nullptr, 0, nullptr, 1, &barrier);
 
-    VkBufferImageCopy copy = {.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, .imageExtent = {1,1,1}};
+    // Copy
+    VkBufferImageCopy copy = {
+        .bufferOffset      = 0,
+        .bufferRowLength   = 0,
+        .bufferImageHeight = 0,
+        .imageSubresource  = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+        .imageOffset       = {0, 0, 0},
+        .imageExtent       = {1, 1, 1}
+    };
     vkCmdCopyBufferToImage(cmd, RAW_BUFFER(staging), rawImg, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
 
+    // Transition: TRANSFER_DST → SHADER_READ
     barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
     barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-    barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-    barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+    barrier.oldLayout     = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrier.newLayout     = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                         0, 0, nullptr, 0, nullptr, 1, &barrier);
 
     VulkanRTX::endSingleTimeCommands(cmd, RTX::g_ctx().graphicsQueue(), RTX::g_ctx().commandPool());
+
+    // --- CLEANUP STAGING ---
     BUFFER_DESTROY(staging);
     LOG_TRACE_CAT("RTX", "Black pixel uploaded via staging");
 
+    // --- IMAGE VIEW ---
     VkImageViewCreateInfo viewInfo = {
-        .sType      = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-        .image      = rawImg,
-        .viewType   = VK_IMAGE_VIEW_TYPE_2D,
-        .format     = VK_FORMAT_R8G8B8A8_UNORM,
+        .sType            = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+        .image            = rawImg,
+        .viewType         = VK_IMAGE_VIEW_TYPE_2D,
+        .format           = VK_FORMAT_R8G8B8A8_UNORM,
+        .components       = {VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY,
+                             VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY},
         .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}
     };
 
     VkImageView rawView = VK_NULL_HANDLE;
     VK_CHECK(vkCreateImageView(device_, &viewInfo, nullptr, &rawView), "Failed to create black view");
     LOG_DEBUG_CAT("RTX", "Black image view created: 0x{:x}", reinterpret_cast<uintptr_t>(rawView));
-    LOG_INFO_CAT("RTX", "HANDLE_CREATE: {} | Tag: {}", "blackFallbackView", "BlackFallbackView");
-    blackFallbackView_ = RTX::Handle<VkImageView>(rawView, device_,
-        [](VkDevice d, VkImageView v, const VkAllocationCallbacks*) {
-            LOG_TRACE_CAT("RTX", "Destroying black fallback view: 0x{:x}", reinterpret_cast<uintptr_t>(v));
-            vkDestroyImageView(d, v, nullptr);
-        }, 0, "BlackFallbackView");
+
+    LOG_INFO_CAT("RTX", "HANDLE_CREATE: blackFallbackView | Tag: BlackFallbackView");
+    blackFallbackView_ = RTX::Handle<VkImageView>(rawView, device_);
+    blackFallbackView_.tag = "BlackFallbackView";
 
     LOG_SUCCESS_CAT("RTX", "{}Black fallback image ready — safety net active{}", PLASMA_FUCHSIA, RESET);
     RTX::AmouranthAI::get().onMemoryEvent("Black Fallback Image", memReqs.size);

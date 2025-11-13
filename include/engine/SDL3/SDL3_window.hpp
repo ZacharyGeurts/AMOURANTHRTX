@@ -8,6 +8,8 @@
 // • F11 toggle, resize, quit — routed via SDL3Vulkan::getRenderer()
 // • RESPECTS Options::Performance::ENABLE_IMGUI → resizable flag
 // • RASPBERRY_PINK DISPOSE — ZERO LEAKS — VALHALLA SEALED
+// • SDL3 GLOBAL POINTER: g_sdl3_window — SAFE, RAII
+// • CENTERED BY DEFAULT — SDL_SetWindowPosition
 // • PINK PHOTONS ETERNAL — 15,000 FPS — SHIP IT RAW
 // =============================================================================
 
@@ -23,6 +25,8 @@
 #include <vector>
 #include <stdexcept>
 
+using namespace Logging::Color;
+
 namespace SDL3Initializer {
 
 struct SDLWindowDeleter {
@@ -30,34 +34,41 @@ struct SDLWindowDeleter {
 };
 
 using SDLWindowPtr = std::unique_ptr<SDL_Window, SDLWindowDeleter>;
+extern SDLWindowPtr g_sdl3_window;  // ← SDL3 GLOBAL POINTER
 
-// ──────────────────────────────────────────────────────────────────────────────
-// createWindow — RAII + Vulkan-ready
-// ──────────────────────────────────────────────────────────────────────────────
 [[nodiscard]] SDLWindowPtr createWindow(const char* title, int w, int h, Uint32 flags = 0);
 
-// ──────────────────────────────────────────────────────────────────────────────
-// getWindowExtensions — leak-free
-// ──────────────────────────────────────────────────────────────────────────────
 [[nodiscard]] std::vector<std::string> getWindowExtensions(const SDLWindowPtr& window);
 
-// ──────────────────────────────────────────────────────────────────────────────
-// getWindow — direct access
-// ──────────────────────────────────────────────────────────────────────────────
 [[nodiscard]] inline SDL_Window* getWindow(const SDLWindowPtr& window) noexcept { 
     return window.get(); 
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// pollEventsForResize — F11 + quit + resize
-// ──────────────────────────────────────────────────────────────────────────────
+[[nodiscard]] inline SDL_Window* getSDL3Window() noexcept {
+    if (!g_sdl3_window) {
+        LOG_WARN_CAT("SDL3", "{}g_sdl3_window is null — returning nullptr{}", AMBER_YELLOW, RESET);
+        return nullptr;
+    }
+    LOG_TRACE_CAT("SDL3", "g_sdl3_window accessed @ {:p}", static_cast<void*>(g_sdl3_window.get()));
+    return g_sdl3_window.get();
+}
+
+inline void setSDL3Window(SDLWindowPtr&& ptr) noexcept {
+    if (g_sdl3_window) {
+        LOG_WARN_CAT("SDL3", "{}g_sdl3_window already assigned — overwriting @ {:p}{}", 
+                     CRIMSON_MAGENTA, static_cast<void*>(g_sdl3_window.get()), RESET);
+    } else {
+        LOG_INFO_CAT("SDL3", "{}g_sdl3_window being assigned for the first time{}", PLASMA_FUCHSIA, RESET);
+    }
+    g_sdl3_window = std::move(ptr);
+    LOG_SUCCESS_CAT("SDL3", "{}g_sdl3_window assigned @ {:p}{}", 
+                    EMERALD_GREEN, static_cast<void*>(g_sdl3_window.get()), RESET);
+}
+
 bool pollEventsForResize(const SDLWindowPtr& window,
                          int& newWidth, int& newHeight,
                          bool& shouldQuit, bool& toggleFullscreenKey) noexcept;
 
-// ──────────────────────────────────────────────────────────────────────────────
-// toggleFullscreen — ROUTES TO GLOBAL RENDERER
-// ──────────────────────────────────────────────────────────────────────────────
 void toggleFullscreen(SDLWindowPtr& window) noexcept;
 
 } // namespace SDL3Initializer
