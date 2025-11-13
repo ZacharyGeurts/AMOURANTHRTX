@@ -56,12 +56,8 @@ namespace RTX {
                       ELECTRIC_BLUE, type, ptr, line, size/(1024*1024), RESET);
     }
 
-    // =============================================================================
-    // UltraLowLevelBufferTracker — OBFUSCATED HANDLES
-    // =============================================================================
     UltraLowLevelBufferTracker& UltraLowLevelBufferTracker::get() noexcept {
         static UltraLowLevelBufferTracker instance;
-        LOG_DEBUG_CAT("RTX", "UltraLowLevelBufferTracker::get() — Singleton accessed");
         return instance;
     }
 

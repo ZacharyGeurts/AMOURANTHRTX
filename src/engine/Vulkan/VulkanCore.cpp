@@ -471,27 +471,26 @@ void VulkanRTX::uploadBatch(
 void VulkanRTX::initDescriptorPoolAndSets() {
     LOG_TRACE_CAT("RTX", "initDescriptorPoolAndSets — START — {} frames", MAX_FRAMES_IN_FLIGHT);
 
-    std::array<VkDescriptorPoolSize, 10> poolSizes{{
-        {VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, MAX_FRAMES_IN_FLIGHT},
-        {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,              MAX_FRAMES_IN_FLIGHT * 3},
-        {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,             MAX_FRAMES_IN_FLIGHT},
-        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,             MAX_FRAMES_IN_FLIGHT * 4},
-        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,     MAX_FRAMES_IN_FLIGHT * 2},
-        {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,              MAX_FRAMES_IN_FLIGHT * 2},
-        {VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT,           MAX_FRAMES_IN_FLIGHT},
-        {VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER,       MAX_FRAMES_IN_FLIGHT},
-        {VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER,       MAX_FRAMES_IN_FLIGHT},
-        {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,     MAX_FRAMES_IN_FLIGHT}
-    }};
+    // Step 1: Define pool sizes - ensure only supported types are used and counts are safe
+    std::array<VkDescriptorPoolSize, 10> poolSizes{};  // Zero-init for safety
+    poolSizes[0] = {VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT)};
+    poolSizes[1] = {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 3)};
+    poolSizes[2] = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT)};
+    poolSizes[3] = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 4)};
+    poolSizes[4] = {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 2)};
+    poolSizes[5] = {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 2)};
+    poolSizes[6] = {VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT)};
+    poolSizes[7] = {VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT)};
+    poolSizes[8] = {VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER, static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT)};
+    poolSizes[9] = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT)};
     LOG_DEBUG_CAT("RTX", "Descriptor pool sizes configured — 10 types for {} sets", MAX_FRAMES_IN_FLIGHT * 8);
 
-    VkDescriptorPoolCreateInfo poolInfo = {
-        .sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-        .flags         = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
-        .maxSets       = MAX_FRAMES_IN_FLIGHT * 8,
-        .poolSizeCount = static_cast<uint32_t>(poolSizes.size()),
-        .pPoolSizes    = poolSizes.data()
-    };
+    VkDescriptorPoolCreateInfo poolInfo{};
+    poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    poolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;  // Bulletproof: Allow free
+    poolInfo.maxSets = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 8);
+    poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
+    poolInfo.pPoolSizes = poolSizes.data();
 
     VkDescriptorPool rawPool = VK_NULL_HANDLE;
     VK_CHECK(vkCreateDescriptorPool(device_, &poolInfo, nullptr, &rawPool), "Failed to create descriptor pool");
@@ -500,26 +499,60 @@ void VulkanRTX::initDescriptorPoolAndSets() {
     descriptorPool_ = RTX::Handle<VkDescriptorPool>(rawPool, device_,
         [](VkDevice d, VkDescriptorPool p, const VkAllocationCallbacks*) {
             LOG_TRACE_CAT("RTX", "Destroying descriptor pool: 0x{:x}", reinterpret_cast<uintptr_t>(p));
-            vkDestroyDescriptorPool(d, p, nullptr);
+            if (p != VK_NULL_HANDLE) vkDestroyDescriptorPool(d, p, nullptr);
         }, 0, "RTXDescriptorPool");
     RTX::AmouranthAI::get().onMemoryEvent("Descriptor Pool", 0);
 
-    std::array<VkDescriptorSetLayout, MAX_FRAMES_IN_FLIGHT> layouts{};
-    layouts.fill(HANDLE_GET(rtDescriptorSetLayout_));
-    LOG_DEBUG_CAT("RTX", "Layouts filled with rtDescriptorSetLayout: 0x{:x}", reinterpret_cast<uintptr_t>(HANDLE_GET(rtDescriptorSetLayout_)));
+    // Step 2: Create or validate descriptor set layouts (CRITICAL: Ensure non-null!)
+    // If rtDescriptorSetLayout_ is invalid/null, create a fallback or throw
+    VkDescriptorSetLayout fallbackLayout = VK_NULL_HANDLE;
+    if (!rtDescriptorSetLayout_.valid()) {
+        LOG_WARN_CAT("RTX", "rtDescriptorSetLayout invalid — creating fallback RT layout");
 
-    VkDescriptorSetAllocateInfo allocInfo = {
-        .sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
-        .descriptorPool     = HANDLE_GET(descriptorPool_),
-        .descriptorSetCount = MAX_FRAMES_IN_FLIGHT,
-        .pSetLayouts        = layouts.data()
-    };
+        // Fallback RT layout: Minimal for AS + storage image
+        VkDescriptorSetLayoutBinding rtBindings[] = {
+            {0, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1, VK_SHADER_STAGE_RAYGEN_BIT_KHR, nullptr},
+            {1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_RAYGEN_BIT_KHR, nullptr}
+        };
+        VkDescriptorSetLayoutCreateInfo rtLayoutInfo{};
+        rtLayoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        rtLayoutInfo.bindingCount = 2;
+        rtLayoutInfo.pBindings = rtBindings;
+        VK_CHECK(vkCreateDescriptorSetLayout(device_, &rtLayoutInfo, nullptr, &fallbackLayout), "Create fallback RT set layout");
+
+        // Use fallback for all (or integrate properly if multiple layouts needed)
+    } else {
+        fallbackLayout = HANDLE_GET(rtDescriptorSetLayout_);
+        LOG_DEBUG_CAT("RTX", "Using existing rtDescriptorSetLayout: 0x{:x}", reinterpret_cast<uintptr_t>(fallbackLayout));
+    }
+
+    // Validate layout is non-null
+    if (fallbackLayout == VK_NULL_HANDLE) {
+        throw std::runtime_error("Descriptor set layout is null — cannot proceed with allocation");
+    }
+
+    std::array<VkDescriptorSetLayout, MAX_FRAMES_IN_FLIGHT> layouts{};
+    std::fill(layouts.begin(), layouts.end(), fallbackLayout);  // Use validated layout
+    LOG_DEBUG_CAT("RTX", "Layouts filled with valid layout: 0x{:x}", reinterpret_cast<uintptr_t>(fallbackLayout));
+
+    VkDescriptorSetAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    allocInfo.descriptorPool = HANDLE_GET(descriptorPool_);
+    allocInfo.descriptorSetCount = static_cast<uint32_t>(layouts.size());
+    allocInfo.pSetLayouts = layouts.data();  // Now guaranteed non-null
 
     VK_CHECK(vkAllocateDescriptorSets(device_, &allocInfo, descriptorSets_.data()), "Failed to allocate descriptor sets");
     LOG_DEBUG_CAT("RTX", "Descriptor sets allocated — first set: 0x{:x}", reinterpret_cast<uintptr_t>(descriptorSets_[0]));
 
+    // If fallback was created, store it or clean up if not needed
+    if (fallbackLayout != HANDLE_GET(rtDescriptorSetLayout_)) {
+        // TODO: Assign to rtDescriptorSetLayout_ if appropriate, or destroy after use
+        vkDestroyDescriptorSetLayout(device_, fallbackLayout, nullptr);  // Temp fallback, destroy
+        LOG_DEBUG_CAT("RTX", "Fallback layout destroyed after allocation");
+    }
+
     LOG_SUCCESS_CAT("RTX", "{}Descriptor pool + {} sets forged — ready for binding{}", PLASMA_FUCHSIA, MAX_FRAMES_IN_FLIGHT, RESET);
-    RTX::AmouranthAI::get().onMemoryEvent("Descriptor Sets", MAX_FRAMES_IN_FLIGHT * sizeof(VkDescriptorSet));
+    RTX::AmouranthAI::get().onMemoryEvent("Descriptor Sets", static_cast<VkDeviceSize>(MAX_FRAMES_IN_FLIGHT * sizeof(VkDescriptorSet)));
     LOG_TRACE_CAT("RTX", "initDescriptorPoolAndSets — COMPLETE");
 }
 

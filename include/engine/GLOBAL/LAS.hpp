@@ -372,8 +372,7 @@ public:
         // Retrieve GPU time (in host callback or next frame)
         if (QUERY_POOL_TIMESTAMP != VK_NULL_HANDLE) {
             uint64_t timestamps[2] = {0, 0};
-            vkGetQueryPoolResults(dev, QUERY_POOL_TIMESTAMP, 0, 2, sizeof(timestamps), timestamps, sizeof(uint64_t), VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
-            // FIXED: Use actual timestamp period from device properties (assume g_ctx().timestampPeriod)
+            VK_CHECK(vkGetQueryPoolResults(dev, QUERY_POOL_TIMESTAMP, 0, 2, sizeof(timestamps), timestamps, sizeof(uint64_t), VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT), "Failed to get query results for BLAS");
             double timestampPeriodNs = timestampPeriodNs_;
             double gpu_ns = static_cast<double>(timestamps[1] - timestamps[0]) * timestampPeriodNs;
             AmouranthAI::get().onBuildTime("BLAS", gpu_ns / 1000.0);
@@ -496,8 +495,7 @@ public:
 
         if (QUERY_POOL_TIMESTAMP != VK_NULL_HANDLE) {
             uint64_t timestamps[2] = {0, 0};
-            vkGetQueryPoolResults(dev, QUERY_POOL_TIMESTAMP, 0, 2, sizeof(timestamps), timestamps, sizeof(uint64_t), VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
-            // FIXED: Use actual timestamp period from device properties (assume g_ctx().timestampPeriod)
+            VK_CHECK(vkGetQueryPoolResults(dev, QUERY_POOL_TIMESTAMP, 0, 2, sizeof(timestamps), timestamps, sizeof(uint64_t), VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT), "Failed to get query results for TLAS");
             double timestampPeriodNs = timestampPeriodNs_;
             double gpu_ns = static_cast<double>(timestamps[1] - timestamps[0]) * timestampPeriodNs;
             AmouranthAI::get().onBuildTime("TLAS", gpu_ns / 1000.0);
@@ -645,24 +643,51 @@ private:
         VkCommandBufferBeginInfo beginInfo{};
         beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
         beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-        vkBeginCommandBuffer(cmd, &beginInfo);
+        VK_CHECK(vkBeginCommandBuffer(cmd, &beginInfo), "Begin RT cmdbuf");
 
         return cmd;
     }
 
     void submitOptimizedCmd(VkCommandBuffer cmd, VkQueue queue, VkCommandPool pool) {
-        vkEndCommandBuffer(cmd);
+        VkDevice dev = g_ctx().vkDevice();
+        VK_CHECK(vkEndCommandBuffer(cmd), "End RT cmdbuf");
 
         VkSubmitInfo submitInfo{};
         submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
         submitInfo.commandBufferCount = 1;
         submitInfo.pCommandBuffers = &cmd;
 
-        // OPT: Async submit (no wait; fence if sync needed elsewhere)
-        VK_CHECK(vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE), "Submit RT cmd");
-        // vkQueueWaitIdle(queue);  // Remove for async (~2x faster, but ensure deps)
+        VkFence fence = VK_NULL_HANDLE;
+        VkFenceCreateInfo fenceInfo{};
+        fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+        fenceInfo.flags = 0;
+        VK_CHECK(vkCreateFence(dev, &fenceInfo, nullptr, &fence), "Create RT fence");
 
-        vkFreeCommandBuffers(g_ctx().vkDevice(), pool, 1, &cmd);
+        // Submit with fence
+        VkResult submitRes = vkQueueSubmit(queue, 1, &submitInfo, fence);
+        if (submitRes != VK_SUCCESS) {
+            vkDestroyFence(dev, fence, nullptr);
+            if (submitRes == VK_ERROR_DEVICE_LOST) {
+                LOG_ERROR_CAT("LAS", "Device lost during RT submit — recreate device/context");
+                // TODO: Trigger device recreation upstream (e.g., via callback or exception)
+                throw std::runtime_error("VK_ERROR_DEVICE_LOST during RT submit");
+            }
+            VK_CHECK(submitRes, "Submit RT cmd");
+        }
+
+        // Wait on fence (targeted sync, not whole queue)
+        VkResult waitRes = vkWaitForFences(dev, 1, &fence, VK_TRUE, UINT64_MAX);
+        vkDestroyFence(dev, fence, nullptr);
+        if (waitRes != VK_SUCCESS) {
+            if (waitRes == VK_ERROR_DEVICE_LOST) {
+                LOG_ERROR_CAT("LAS", "Device lost during RT fence wait — recreate device/context");
+                // TODO: Trigger device recreation upstream
+                throw std::runtime_error("VK_ERROR_DEVICE_LOST during RT fence wait");
+            }
+            VK_CHECK(waitRes, "Wait for RT fence");
+        }
+
+        vkFreeCommandBuffers(dev, pool, 1, &cmd);
     }
 };
 
