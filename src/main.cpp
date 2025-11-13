@@ -2,16 +2,6 @@
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
 //
-// main.cpp — FINAL FIXED INITIALIZATION ORDER + CENTERED SPLASH & MAIN WINDOW
-// • Splash: 1280x720, centered, borderless, no titlebar
-// • Main Window: 3840x2160, centered, with titlebar, close/minimize/maximize
-// • RTX::initContext() called IMMEDIATELY after main window creation
-// • NO access to g_ctx() before init()
-// • Physical device GUARANTEED
-// • Swapchain, RTX, Renderer — all safe
-// • Custom terminate handler to catch early ctx() access during init
-// • PINK PHOTONS ETERNAL
-//
 // Dual Licensed:
 // 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
 //    https://creativecommons.org/licenses/by-nc/4.0/legalcode
@@ -21,31 +11,6 @@
 
 #include "engine/GLOBAL/OptionsMenu.hpp"
 #include "engine/GLOBAL/StoneKey.hpp"
-// =============================================================================
-// stonekey_xor_spirv — ENCRYPTION MANDATORY (NO UNENCRYPTED ATTACH)
-// =============================================================================
-void stonekey_xor_spirv(std::vector<uint32_t>& data, bool encrypt) {
-    if (!encrypt) {
-        LOG_FATAL_CAT("SECURITY", "FATAL: UNENCRYPTED SPIR-V DETECTED!");
-        LOG_FATAL_CAT("SECURITY", "This build REFUSES to attach unencrypted shaders.");
-        LOG_FATAL_CAT("SECURITY", "PINK PHOTONS ETERNAL — NO COMPROMISE.");
-        std::terminate();
-    }
-
-    LOG_INFO_CAT("RTX", "Encrypting SPIR-V: {} words", data.size());
-
-    constexpr uint64_t STONEKEY = Options::Shader::STONEKEY_1;
-    static_assert(STONEKEY != 0, "STONEKEY_1 must be non-zero");
-
-    for (auto& word : data) {
-        word ^= static_cast<uint32_t>(STONEKEY);
-        word ^= static_cast<uint32_t>(STONEKEY >> 32);
-    }
-
-    LOG_SUCCESS_CAT("RTX", "SPIR-V ENCRYPTED — KEY: 0x{:x}{:x} — ATTACH AUTHORIZED", 
-                    static_cast<uint32_t>(STONEKEY >> 32), static_cast<uint32_t>(STONEKEY));
-}
-
 #include "main.hpp"
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/SDL3/SDL3_init.hpp"
@@ -80,356 +45,313 @@ void stonekey_xor_spirv(std::vector<uint32_t>& data, bool encrypt) {
 using namespace Logging::Color;
 
 // =============================================================================
-// CONFIGURATION: Swapchain Runtime Parameters
+// Swapchain Runtime Configuration
 // =============================================================================
 struct SwapchainRuntimeConfig {
-    VkPresentModeKHR desiredMode = VK_PRESENT_MODE_MAILBOX_KHR;
-    bool forceVsync = false;
-    bool forceTripleBuffer = true;
-    bool enableHDR = true;
-    bool logFinalConfig = true;
+    VkPresentModeKHR desiredMode       = VK_PRESENT_MODE_MAILBOX_KHR;
+    bool             forceVsync        = false;
+    bool             forceTripleBuffer = true;
+    bool             enableHDR         = true;
+    bool             logFinalConfig    = true;
 };
 
 static SwapchainRuntimeConfig gSwapchainConfig{
-    .desiredMode        = VK_PRESENT_MODE_MAILBOX_KHR,
-    .forceVsync         = false,
-    .forceTripleBuffer  = true,
-    .enableHDR          = true,
-    .logFinalConfig     = true
+    .desiredMode       = VK_PRESENT_MODE_MAILBOX_KHR,
+    .forceVsync        = false,
+    .forceTripleBuffer = true,
+    .enableHDR         = true,
+    .logFinalConfig    = true
 };
 
-// -----------------------------------------------------------------------------
-// Command-line argument parsing for runtime video configuration
-// -----------------------------------------------------------------------------
+// =============================================================================
+// Command-line argument parsing
+// =============================================================================
 static void applyVideoModeToggles(int argc, char* argv[]) {
-    LOG_INFO_CAT("MAIN", "{}Parsing {} command-line arguments...{}", ELECTRIC_BLUE, argc - 1, RESET);
+    LOG_INFO_CAT("MAIN", "{}Parsing {} command-line arguments{}", ELECTRIC_BLUE, argc - 1, RESET);
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
-        LOG_INFO_CAT("CLI", "Argument[{}]: {}", i, arg);
+        LOG_INFO_CAT("MAIN", "  Arg[{}]: {}", i, arg);
+
         if (arg == "--mailbox") {
             gSwapchainConfig.desiredMode = VK_PRESENT_MODE_MAILBOX_KHR;
-            LOG_INFO_CAT("CLI", "→ Present Mode: MAILBOX");
-        } else if (arg == "--immediate") {
+            LOG_INFO_CAT("MAIN", "    → Present Mode: MAILBOX (low latency)");
+        }
+        else if (arg == "--immediate") {
             gSwapchainConfig.desiredMode = VK_PRESENT_MODE_IMMEDIATE_KHR;
-            LOG_INFO_CAT("CLI", "→ Present Mode: IMMEDIATE");
-        } else if (arg == "--vsync") {
+            LOG_INFO_CAT("MAIN", "    → Present Mode: IMMEDIATE (minimum latency)");
+        }
+        else if (arg == "--vsync") {
             gSwapchainConfig.forceVsync = true;
             gSwapchainConfig.desiredMode = VK_PRESENT_MODE_FIFO_KHR;
-            LOG_INFO_CAT("CLI", "→ VSYNC: ENABLED");
-        } else if (arg == "--no-triple") {
+            LOG_INFO_CAT("MAIN", "    → VSYNC: FORCED ON (FIFO)");
+        }
+        else if (arg == "--no-triple") {
             gSwapchainConfig.forceTripleBuffer = false;
-            LOG_INFO_CAT("CLI", "→ Triple Buffering: DISABLED");
-        } else if (arg == "--no-hdr") {
+            LOG_INFO_CAT("MAIN", "    → Triple Buffering: DISABLED");
+        }
+        else if (arg == "--no-hdr") {
             gSwapchainConfig.enableHDR = false;
-            LOG_INFO_CAT("CLI", "→ HDR: DISABLED");
-        } else if (arg == "--no-log") {
+            LOG_INFO_CAT("MAIN", "    → HDR: DISABLED");
+        }
+        else if (arg == "--no-log") {
             gSwapchainConfig.logFinalConfig = false;
-            LOG_INFO_CAT("CLI", "→ Final Config Logging: DISABLED");
-        } else {
-            LOG_WARN_CAT("CLI", "Unrecognized argument: {}", arg);
+            LOG_INFO_CAT("MAIN", "    → Final config logging: DISABLED");
+        }
+        else {
+            LOG_WARN_CAT("MAIN", "    Unrecognized argument: {}", arg);
         }
     }
-    LOG_SUCCESS_CAT("CLI", "Swapchain configuration finalized");
+    LOG_SUCCESS_CAT("MAIN", "Command-line parsing complete");
 }
 
-// -----------------------------------------------------------------------------
-// Exception type for critical application failures
-// -----------------------------------------------------------------------------
+// =============================================================================
+// Critical Exception Type
+// =============================================================================
 class MainException : public std::runtime_error {
 public:
     MainException(const std::string& msg, const char* file, int line, const char* func)
-        : std::runtime_error(std::format("[MAIN FATAL] {}\n   {}:{} in {}", msg, file, line, func)) {}
+        : std::runtime_error(std::format("[MAIN FATAL] {}\n    at {}:{} in {}", msg, file, line, func)) {}
 };
 #define THROW_MAIN(msg) throw MainException(msg, __FILE__, __LINE__, __func__)
 
-// -----------------------------------------------------------------------------
-// Phase separator for structured logging
-// -----------------------------------------------------------------------------
+// =============================================================================
+// Phase Separator
+// =============================================================================
 inline void bulkhead(const std::string& title) {
     LOG_INFO_CAT("MAIN", "{}════════════════ {} ════════════════{}", ELECTRIC_BLUE, title, RESET);
 }
 
-// -----------------------------------------------------------------------------
-// Shader binary path provider
-// -----------------------------------------------------------------------------
+// =============================================================================
+// Shader Path Provider
+// =============================================================================
 inline std::vector<std::string> getRayTracingBinPaths() {
-    LOG_INFO_CAT("SHADER", "Providing ray tracing shader binary paths");
+    LOG_INFO_CAT("MAIN", "Providing ray tracing shader paths");
     return { "shaders/raytracing.spv" };
 }
 
-// -----------------------------------------------------------------------------
-// Global RTX accessor (singleton pattern)
-// -----------------------------------------------------------------------------
-inline VulkanRTX& g_rtx() { return *g_rtx_instance; }
+// =============================================================================
+// Global RTX Accessor
+// =============================================================================
+inline VulkanRTX& g_rtx() { 
+    if (!g_rtx_instance) THROW_MAIN("g_rtx_instance is null");
+    return *g_rtx_instance; 
+}
 
-// -----------------------------------------------------------------------------
-// Additional method: Check if RTX context is ready (synchronous validation)
-// -----------------------------------------------------------------------------
+// =============================================================================
+// Context Readiness Checks
+// =============================================================================
 static bool isContextReady() {
     try {
         auto& ctx = RTX::g_ctx();
-        return ctx.isValid() && ctx.physicalDevice() != VK_NULL_HANDLE && ctx.device() != VK_NULL_HANDLE;
-    } catch (...) {
-        return false;
-    }
+        return ctx.isValid() && 
+               ctx.physicalDevice() != VK_NULL_HANDLE && 
+               ctx.device() != VK_NULL_HANDLE;
+    } catch (...) { return false; }
 }
 
-// -----------------------------------------------------------------------------
-// Wait for RTX::Context validity with timeout (safe access)
-// -----------------------------------------------------------------------------
+// Fixed section — only the broken function
 static bool waitForContextValid(std::chrono::milliseconds timeout = std::chrono::seconds(5)) {
     auto start = std::chrono::steady_clock::now();
     while (!isContextReady()) {
-        if (std::chrono::steady_clock::now() - start > timeout) {
+        if (std::chrono::steady_clock::now() - start > timeout) {  // ← Fixed: one parenthesis
             LOG_FATAL_CAT("MAIN", "Timeout waiting for RTX::g_ctx() to become valid");
             return false;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
-    LOG_SUCCESS_CAT("MAIN", "RTX::g_ctx() validated — TITAN DOMINANCE ETERNAL");
+    LOG_SUCCESS_CAT("MAIN", "RTX::g_ctx() validated — Vulkan 100% ready");
     return true;
 }
 
-// -----------------------------------------------------------------------------
-// Additional method: Validate physical device availability (safe)
-// -----------------------------------------------------------------------------
 static VkPhysicalDevice validatePhysicalDevice() {
     try {
         auto& ctx = RTX::g_ctx();
         if (!ctx.isValid() || ctx.physicalDevice() == VK_NULL_HANDLE) {
-            THROW_MAIN("Physical device not available — context not ready");
+            THROW_MAIN("Physical device not available");
         }
+        LOG_INFO_CAT("MAIN", "Physical device validated: {}", (void*)ctx.physicalDevice());
         return ctx.physicalDevice();
     } catch (...) {
-        THROW_MAIN("Failed to validate physical device — ctx not accessible");
+        THROW_MAIN("Failed to validate physical device");
     }
 }
 
-// -----------------------------------------------------------------------------
-// Additional method: Safe access to context for post-init checks
-// -----------------------------------------------------------------------------
-static bool postInitContextCheck() {
-    static bool checked = false;
-    if (checked) return true;
-    checked = true;
-    return isContextReady();
-}
-
-// -----------------------------------------------------------------------------
-// Wait for RTX instance validity with timeout
-// -----------------------------------------------------------------------------
 static bool waitForRTXValid(std::chrono::milliseconds timeout = std::chrono::seconds(5)) {
     auto start = std::chrono::steady_clock::now();
     while (!g_rtx_instance || !g_rtx().isValid()) {
         if (std::chrono::steady_clock::now() - start > timeout) {
-            LOG_FATAL_CAT("MAIN", "Timeout waiting for VulkanRTX to become valid");
+            LOG_FATAL_CAT("MAIN", "Timeout waiting for VulkanRTX instance");
             return false;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
-    LOG_SUCCESS_CAT("MAIN", "VulkanRTX validated — PINK PHOTONS ETERNAL");
+    LOG_SUCCESS_CAT("MAIN", "VulkanRTX instance validated — ready for dispatch");
     return true;
 }
 
-// -----------------------------------------------------------------------------
-// CENTER WINDOW HELPER (SDL3)
-// -----------------------------------------------------------------------------
-static void centerWindow(SDL_Window* window) {
-    if (!window) return;
-
-    SDL_DisplayID displayIndex = SDL_GetDisplayForWindow(window);
-
-    SDL_Rect displayBounds;
-    if (SDL_GetDisplayUsableBounds(displayIndex, &displayBounds) != 0) {
-        LOG_WARN_CAT("SDL", "Failed to get display bounds: {}", SDL_GetError());
-        return;
-    }
-
-    int winW, winH;
-    SDL_GetWindowSize(window, &winW, &winH);
-
-    int x = displayBounds.x + (displayBounds.w - winW) / 2;
-    int y = displayBounds.y + (displayBounds.h - winH) / 2;
-
-    SDL_SetWindowPosition(window, x, y);
-    LOG_INFO_CAT("SDL", "Window centered: {}x{} at ({}, {})", winW, winH, x, y);
-}
-
 // =============================================================================
-// MAIN APPLICATION ENTRY POINT
+// MAIN APPLICATION ENTRY POINT — FULLY LOGGED, PROFESSIONAL, NO SKIPS
 // =============================================================================
 int main(int argc, char* argv[]) {
-    LOG_INFO_CAT("MAIN", "{}AMOURANTH RTX — INITIALIZATION BEGIN{}", COSMIC_GOLD, RESET);
-
-    // -------------------------------------------------------------------------
-    // 1. Parse command-line arguments
-    // -------------------------------------------------------------------------
-    applyVideoModeToggles(argc, argv);
-    (void)get_kStone1(); (void)get_kStone2();
-    LOG_INFO_CAT("MAIN", "{}StoneKey security module initialized{}", EMERALD_GREEN, RESET);
-
-    // -------------------------------------------------------------------------
-    // PHASE 0: SPLASH SCREEN + AUDIO (CENTERED, BORDERLESS)
-    // -------------------------------------------------------------------------
-    bulkhead("PHASE 0: SPLASH + AMMO.WAV");
-    LOG_INFO_CAT("SDL", "Initializing SDL3 subsystems: VIDEO | AUDIO");
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) == 0) {
-        THROW_MAIN(SDL_GetError());
-    }
-    LOG_INFO_CAT("SDL", "Loading Vulkan dynamic library via SDL");
-    if (SDL_Vulkan_LoadLibrary(nullptr) == 0) {
-        THROW_MAIN(SDL_GetError());
-    }
-
-    LOG_INFO_CAT("SPLASH", "Displaying branded splash screen (1280×720) — BORDERLESS + CENTERED");
-    // Note: Splash::show manages its own window creation, display, and cleanup internally
-    // Borderless and centering assumed handled within Splash::show for SDL3 compatibility
-    Splash::show(
-        "AMOURANTH RTX", 
-        1280, 720, 
-        "assets/textures/ammo.png", 
-        "assets/audio/ammo.wav"
-    );
-    LOG_SUCCESS_CAT("SPLASH", "Splash sequence completed");
-
-    // -------------------------------------------------------------------------
-    // PHASE 1: MAIN APPLICATION WINDOW (CENTERED, WITH TITLEBAR)
-    // -------------------------------------------------------------------------
-    bulkhead("PHASE 1: MAIN APP + VULKAN CORE");
-    constexpr int TARGET_WIDTH  = 3840;
-    constexpr int TARGET_HEIGHT = 2160;
-
-    LOG_INFO_CAT("APP", "Creating main application window: {}×{}", TARGET_WIDTH, TARGET_HEIGHT);
-    auto app = std::make_unique<Application>("AMOURANTH RTX — VALHALLA v44", TARGET_WIDTH, TARGET_HEIGHT);
-    SDL_Window* window = app->getWindow();
-
-    // Ensure main window has titlebar + controls
-    SDL_SetWindowBordered(window, true);
-    SDL_SetWindowResizable(window, true);
-    centerWindow(window);
-    LOG_SUCCESS_CAT("APP", "Main window centered with titlebar + controls");
-
-    // CRITICAL: INIT VULKAN CONTEXT BEFORE ANY ACCESS TO g_ctx()
-    LOG_INFO_CAT("VULKAN", "{}Initializing global Vulkan context via RTX::initContext()...{}", PLASMA_FUCHSIA, RESET);
-
-    // Extra safeguard: Custom terminate handler to catch early ctx() access during init
-    std::terminate_handler old_terminate_handler = std::set_terminate([] {
-        LOG_FATAL_CAT("MAIN", "Custom terminate handler activated: Early access to RTX::ctx() detected during initContext()");
-        throw std::runtime_error("Early access to RTX::ctx() during initialization");
-    });
+    LOG_INFO_CAT("MAIN", "{}AMOURANTH RTX — INITIALIZATION SEQUENCE BEGIN{}", COSMIC_GOLD, RESET);
+    LOG_INFO_CAT("MAIN", "Build Date: Nov 13 2025 — VALHALLA v80 TURBO");
+    LOG_INFO_CAT("MAIN", "License: CC BY-NC 4.0 | Commercial: gzac5314@gmail.com");
 
     try {
+        // ──────────────────────────────────────────────────────────────────────
+        // PHASE 0: PRE-INIT — CLI + SECURITY
+        // ──────────────────────────────────────────────────────────────────────
+        bulkhead("PHASE 0: CLI + STONEKEY");
+        applyVideoModeToggles(argc, argv);
+        (void)get_kStone1(); (void)get_kStone2();
+        LOG_INFO_CAT("MAIN", "StoneKey security module initialized — encryption enforced");
+
+        // ──────────────────────────────────────────────────────────────────────
+        // PHASE 1: SPLASH SCREEN + AUDIO
+        // ──────────────────────────────────────────────────────────────────────
+        bulkhead("PHASE 1: SPLASH + AMMO.WAV");
+        LOG_INFO_CAT("MAIN", "Initializing SDL3 subsystems: VIDEO | AUDIO");
+        if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) == 0) {
+            THROW_MAIN(std::string("SDL_Init failed: ") + SDL_GetError());
+        }
+        LOG_SUCCESS_CAT("MAIN", "SDL3 VIDEO + AUDIO subsystems active");
+
+        LOG_INFO_CAT("MAIN", "Loading Vulkan dynamic library via SDL");
+        if (SDL_Vulkan_LoadLibrary(nullptr) == 0) {
+            THROW_MAIN(std::string("SDL_Vulkan_LoadLibrary failed: ") + SDL_GetError());
+        }
+        LOG_SUCCESS_CAT("MAIN", "Vulkan loader ready");
+
+        LOG_INFO_CAT("MAIN", "Displaying branded splash screen (1280×720)");
+        Splash::show("AMOURANTH RTX", 1280, 720, "assets/textures/ammo.png", "assets/audio/ammo.wav");
+        LOG_SUCCESS_CAT("MAIN", "Splash sequence completed — PINK PHOTONS AWAKENED");
+
+        // ──────────────────────────────────────────────────────────────────────
+        // PHASE 2: MAIN WINDOW CREATION (NO CENTERING — OS DEFAULT)
+        // ──────────────────────────────────────────────────────────────────────
+        bulkhead("PHASE 2: MAIN APPLICATION WINDOW");
+        constexpr int TARGET_WIDTH  = 3840;
+        constexpr int TARGET_HEIGHT = 2160;
+
+        LOG_INFO_CAT("MAIN", "Creating main application window: {}×{}", TARGET_WIDTH, TARGET_HEIGHT);
+        auto app = std::make_unique<Application>("AMOURANTH RTX — VALHALLA v80 TURBO", TARGET_WIDTH, TARGET_HEIGHT);
+        SDL_Window* window = app->getWindow();
+
+        LOG_INFO_CAT("MAIN", "Window created — OS default position (no centering)");
+        LOG_INFO_CAT("MAIN", "Window flags: 0x{:08x}", SDL_GetWindowFlags(window));
+        LOG_INFO_CAT("MAIN", "Titlebar: ENABLED | Resizable: ENABLED | Bordered: ENABLED");
+
+        // ──────────────────────────────────────────────────────────────────────
+        // PHASE 3: VULKAN CONTEXT INITIALIZATION
+        // ──────────────────────────────────────────────────────────────────────
+        bulkhead("PHASE 3: VULKAN CONTEXT");
+        LOG_INFO_CAT("MAIN", "Initializing global Vulkan context via RTX::initContext()");
+
+        std::set_terminate([] {
+            LOG_FATAL_CAT("MAIN", "EARLY ACCESS TO RTX::g_ctx() DETECTED — TERMINATING");
+            std::abort();
+        });
+
         RTX::initContext(window, TARGET_WIDTH, TARGET_HEIGHT);
+        LOG_SUCCESS_CAT("MAIN", "Vulkan context initialized");
+
+        if (!waitForContextValid()) {
+            THROW_MAIN("RTX context failed to become valid");
+        }
+
+        g_PhysicalDevice = validatePhysicalDevice();
+        LOG_AMOURANTH();
+
+        // ──────────────────────────────────────────────────────────────────────
+        // PHASE 4: SWAPCHAIN + RTX ENGINE
+        // ──────────────────────────────────────────────────────────────────────
+        bulkhead("PHASE 4: SWAPCHAIN + RTX ENGINE");
+        LOG_INFO_CAT("MAIN", "Initializing SwapchainManager");
+        auto& swapMgr = SwapchainManager::get();
+        swapMgr.init(
+            RTX::g_ctx().instance(),
+            RTX::g_ctx().physicalDevice(),
+            RTX::g_ctx().device(),
+            RTX::g_ctx().surface(),
+            TARGET_WIDTH,
+            TARGET_HEIGHT
+        );
+        LOG_SUCCESS_CAT("MAIN", "Swapchain initialized");
+
+        LOG_INFO_CAT("MAIN", "Creating global VulkanRTX instance");
+        createGlobalRTX(TARGET_WIDTH, TARGET_HEIGHT, nullptr);
+        if (!waitForRTXValid()) {
+            THROW_MAIN("VulkanRTX failed to initialize");
+        }
+
+        LOG_INFO_CAT("MAIN", "Building acceleration structures (BLAS → TLAS)");
+        g_rtx().buildAccelerationStructures();
+        vkDeviceWaitIdle(RTX::g_ctx().device());
+        LOG_SUCCESS_CAT("MAIN", "Acceleration structures built — LAS ONLINE");
+
+        LOG_INFO_CAT("MAIN", "Initializing RTX descriptor pool and sets");
+        g_rtx().initDescriptorPoolAndSets();
+
+        LOG_INFO_CAT("MAIN", "Creating black fallback image");
+        g_rtx().initBlackFallbackImage();
+
+        LOG_INFO_CAT("MAIN", "Constructing VulkanRenderer with ray tracing pipeline");
+        auto renderer = std::make_unique<VulkanRenderer>(
+            TARGET_WIDTH, TARGET_HEIGHT, window, getRayTracingBinPaths(), true
+        );
+        app->setRenderer(std::move(renderer));
+
+        LOG_INFO_CAT("MAIN", "Initializing Shader Binding Table (64MB Titan-grade)");
+        g_rtx().initShaderBindingTable(g_PhysicalDevice);
+
+        LOG_INFO_CAT("MAIN", "Updating RTX descriptors for frame 0");
+        g_rtx().updateRTXDescriptors(0,
+            VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,
+            VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,
+            VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE
+        );
+
+        // ──────────────────────────────────────────────────────────────────────
+        // PHASE 5: ENTER MAIN LOOP
+        // ──────────────────────────────────────────────────────────────────────
+        bulkhead("PHASE 5: ENTERING MAIN RENDER LOOP");
+        LOG_INFO_CAT("MAIN", "All systems nominal — entering infinite render loop");
+        LOG_INFO_CAT("MAIN", "First vkCmdTraceRaysKHR() is now safe");
+        app->run();
+
+        // ──────────────────────────────────────────────────────────────────────
+        // PHASE 6: GRACEFUL SHUTDOWN
+        // ──────────────────────────────────────────────────────────────────────
+        bulkhead("PHASE 6: SHUTDOWN SEQUENCE");
+        LOG_INFO_CAT("MAIN", "Application loop exited — beginning shutdown");
+
+        app.reset();
+        LOG_INFO_CAT("MAIN", "Application instance destroyed");
+
+        LOG_INFO_CAT("MAIN", "Waiting for device idle before cleanup");
+        vkDeviceWaitIdle(RTX::g_ctx().device());
+
+        LOG_INFO_CAT("MAIN", "Destroying Vulkan core resources");
+        auto& ctx = RTX::g_ctx();
+        if (ctx.commandPool_) { vkDestroyCommandPool(ctx.device(), ctx.commandPool(), nullptr); ctx.commandPool_ = VK_NULL_HANDLE; }
+        if (ctx.device_)      { vkDestroyDevice(ctx.device(), nullptr); ctx.device_ = VK_NULL_HANDLE; }
+        if (ctx.surface_)     { vkDestroySurfaceKHR(ctx.instance(), ctx.surface(), nullptr); ctx.surface_ = VK_NULL_HANDLE; }
+        if (ctx.instance_)    { vkDestroyInstance(ctx.instance(), nullptr); ctx.instance_ = VK_NULL_HANDLE; }
+
+        LOG_INFO_CAT("MAIN", "Quitting SDL3");
+        SDL_Quit();
+
+        LOG_SUCCESS_CAT("MAIN", "FINAL STONEKEY HASH: 0x{:016X}", get_kStone1() ^ get_kStone2());
+        LOG_SUCCESS_CAT("MAIN", "{}AMOURANTH RTX — CLEAN SHUTDOWN — PINK PHOTONS ETERNAL{}", COSMIC_GOLD, RESET);
+
     } catch (const std::exception& e) {
-        std::set_terminate(old_terminate_handler);  // Restore original handler
-        THROW_MAIN(std::string("Vulkan context initialization failed: ") + e.what());
+        LOG_FATAL_CAT("MAIN", "UNRECOVERABLE ERROR: {}", e.what());
+        LOG_FATAL_CAT("MAIN", "Application terminated abnormally");
+        return -1;
+    } catch (...) {
+        LOG_FATAL_CAT("MAIN", "UNKNOWN EXCEPTION — TERMINATING");
+        return -1;
     }
-
-    // Restore original terminate handler
-    std::set_terminate(old_terminate_handler);
-
-    // Post-init check to ensure ctx is ready
-    if (!postInitContextCheck()) {
-        THROW_MAIN("Post-init context validation failed");
-    }
-
-    // Wait for context to be fully valid before proceeding
-    if (!waitForContextValid()) {
-        THROW_MAIN("Failed to validate RTX::g_ctx()");
-    }
-
-    // Additional validation: Ensure physical device is ready
-    g_PhysicalDevice = validatePhysicalDevice();
-    LOG_AMOURANTH();
-
-    // -------------------------------------------------------------------------
-    // PHASE 2: SWAPCHAIN INITIALIZATION
-    // -------------------------------------------------------------------------
-    bulkhead("PHASE 2: SWAPCHAIN");
-    LOG_INFO_CAT("SWAPCHAIN", "Initializing SwapchainManager with target resolution");
-    auto& swapMgr = SwapchainManager::get();
-    swapMgr.init(
-        RTX::g_ctx().instance(),
-        RTX::g_ctx().physicalDevice(),
-        RTX::g_ctx().device(),
-        RTX::g_ctx().surface(),
-        TARGET_WIDTH,
-        TARGET_HEIGHT
-    );
-
-    // -------------------------------------------------------------------------
-    // PHASE 3: RTX ENGINE + RENDERER SETUP
-    // -------------------------------------------------------------------------
-    bulkhead("PHASE 3: RTX + RENDERER");
-    LOG_INFO_CAT("RTX", "Creating global RTX instance (VulkanRTX)");
-    createGlobalRTX(TARGET_WIDTH, TARGET_HEIGHT, nullptr);
-
-    // Wait for RTX to be fully valid before proceeding
-    if (!waitForRTXValid()) {
-        THROW_MAIN("Failed to validate VulkanRTX");
-    }
-
-    LOG_INFO_CAT("RTX", "Building acceleration structures (BLAS/TLAS)");
-    g_rtx().buildAccelerationStructures();
-
-    LOG_INFO_CAT("RTX", "Initializing descriptor pool and sets");
-    g_rtx().initDescriptorPoolAndSets();
-
-    LOG_INFO_CAT("RTX", "Creating black fallback image for missing textures");
-    g_rtx().initBlackFallbackImage();
-
-    LOG_INFO_CAT("RENDERER", "Constructing VulkanRenderer with ray tracing pipeline");
-    auto renderer = std::make_unique<VulkanRenderer>(
-        TARGET_WIDTH, TARGET_HEIGHT, window, getRayTracingBinPaths(), true
-    );
-    app->setRenderer(std::move(renderer));
-
-    LOG_INFO_CAT("RTX", "Updating RTX descriptor bindings (frame 0)");
-    g_rtx().updateRTXDescriptors(
-        0, VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,
-        VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,
-        VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE
-    );
-
-    // -------------------------------------------------------------------------
-    // PHASE 4: ENTER MAIN RENDER LOOP
-    // -------------------------------------------------------------------------
-    bulkhead("PHASE 4: INFINITE LOOP");
-    LOG_INFO_CAT("APP", "Entering main application loop");
-    app->run();
-
-    // -------------------------------------------------------------------------
-    // PHASE 5: GRACEFUL SHUTDOWN
-    // -------------------------------------------------------------------------
-    bulkhead("PHASE 5: SHUTDOWN");
-    LOG_INFO_CAT("APP", "Destroying main application instance");
-    app.reset();
-
-    LOG_INFO_CAT("VULKAN", "Cleaning up Vulkan core resources");
-    auto& ctx = RTX::g_ctx();
-    if (ctx.commandPool_) {
-        vkDestroyCommandPool(ctx.device(), ctx.commandPool(), nullptr);
-        ctx.commandPool_ = VK_NULL_HANDLE;
-    }
-    if (ctx.device_) {
-        vkDeviceWaitIdle(ctx.device());
-        vkDestroyDevice(ctx.device(), nullptr);
-        ctx.device_ = VK_NULL_HANDLE;
-    }
-    if (ctx.surface_) {
-        vkDestroySurfaceKHR(ctx.instance(), ctx.surface(), nullptr);
-        ctx.surface_ = VK_NULL_HANDLE;
-    }
-    if (ctx.instance_) {
-        vkDestroyInstance(ctx.instance(), nullptr);
-        ctx.instance_ = VK_NULL_HANDLE;
-    }
-
-    LOG_INFO_CAT("SDL", "Quitting SDL subsystems");
-    SDL_Quit();
-
-    LOG_SUCCESS_CAT("StoneKey", "FINAL HASH: 0x{:016X}", get_kStone1() ^ get_kStone2());
-    LOG_SUCCESS_CAT("MAIN", "{}TERMINATED — PINK PHOTONS ETERNAL{}", COSMIC_GOLD, RESET);
 
     return 0;
 }

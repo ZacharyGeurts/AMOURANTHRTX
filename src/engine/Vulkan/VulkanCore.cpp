@@ -34,19 +34,36 @@
 
 using namespace Logging::Color;
 
+// =============================================================================
+// VulkanCore.cpp — Persistent staging globals — ONLY ONE DEFINITION
+// =============================================================================
+namespace VulkanRTXDetail {  // Put in a named namespace to avoid conflicts
+
+    alignas(64) std::mutex g_stagingMutex;
+    alignas(64) uint64_t   g_stagingPool = 0;
+    alignas(64) VkDeviceMemory g_stagingMem = VK_NULL_HANDLE;
+    alignas(64) VkBuffer   g_stagingBuffer = VK_NULL_HANDLE;
+    alignas(64) void*      g_mappedBase = nullptr;
+    alignas(64) std::atomic<VkDeviceSize> g_mappedOffset{0};
+
+    constexpr VkDeviceSize STAGING_POOL_SIZE = 1ULL << 30; // 1 GB — production
+
+} // namespace VulkanRTXDetail
+
+// Convenient aliases — use these everywhere in the file
+using VulkanRTXDetail::g_stagingMutex;
+using VulkanRTXDetail::g_stagingPool;
+using VulkanRTXDetail::g_stagingMem;
+using VulkanRTXDetail::g_stagingBuffer;
+using VulkanRTXDetail::g_mappedBase;
+using VulkanRTXDetail::g_mappedOffset;
+using VulkanRTXDetail::STAGING_POOL_SIZE;
+
 // -----------------------------------------------------------------------------
 // GLOBAL DEFINITIONS
 // -----------------------------------------------------------------------------
 VkPhysicalDevice g_PhysicalDevice = VK_NULL_HANDLE;
 std::unique_ptr<VulkanRTX> g_rtx_instance;
-
-// Persistent staging pool globals (OPT: Reuse across uploads, map once)
-static uint64_t g_stagingPool = 0;
-static VkDeviceMemory g_stagingMem = VK_NULL_HANDLE;
-static std::mutex g_stagingMutex;
-static void* g_mappedBase = nullptr;
-static VkDeviceSize g_mappedOffset = 0;
-static constexpr VkDeviceSize STAGING_POOL_SIZE = 1_MB;  // Tune for scene (cube=240B batch)
 
 // -----------------------------------------------------------------------------
 // ONE-TIME INITIALIZATION — CALLED ONCE AT STARTUP
@@ -210,38 +227,72 @@ VulkanRTX::VulkanRTX(int w, int h, VulkanPipelineManager* mgr)
 // Public Static Helpers — Used by LAS
 // =============================================================================
 
-VkCommandBuffer VulkanRTX::beginSingleTimeCommands(VkCommandPool pool) noexcept {
-    LOG_TRACE_CAT("RTX", "beginSingleTimeCommands: pool=0x{:x}", reinterpret_cast<uintptr_t>(pool));
-    VkCommandBufferAllocateInfo allocInfo = {
-        .sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-        .commandPool        = pool,
-        .level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-        .commandBufferCount = 1
-    };
+VkCommandBuffer VulkanRTX::beginSingleTimeCommands(VkCommandPool pool) noexcept
+{
+    VkCommandBufferAllocateInfo allocInfo{ .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
+    allocInfo.commandPool        = pool;
+    allocInfo.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    allocInfo.commandBufferCount = 1;
+
     VkCommandBuffer cmd;
-    VK_CHECK(vkAllocateCommandBuffers(RTX::g_ctx().device(), &allocInfo, &cmd), "Failed to allocate cmd buffer");
-    LOG_DEBUG_CAT("RTX", "Command buffer allocated: 0x{:x}", reinterpret_cast<uintptr_t>(cmd));
-    VkCommandBufferBeginInfo beginInfo = {
-        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
-    };
-    VK_CHECK(vkBeginCommandBuffer(cmd, &beginInfo), "Failed to begin cmd buffer");
-    LOG_TRACE_CAT("RTX", "One-time command buffer allocated — handle: 0x{:x}", reinterpret_cast<uintptr_t>(cmd));
+    VK_CHECK(vkAllocateCommandBuffers(RTX::g_ctx().device(), &allocInfo, &cmd),
+             "Failed to allocate transient command buffer");
+
+    VkCommandBufferBeginInfo beginInfo{ .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+    VK_CHECK(vkBeginCommandBuffer(cmd, &beginInfo),
+             "Failed to begin transient command buffer");
+
     return cmd;
 }
 
-void VulkanRTX::endSingleTimeCommands(VkCommandBuffer cmd, VkQueue queue, VkCommandPool pool) noexcept {
-    LOG_TRACE_CAT("RTX", "endSingleTimeCommands: cmd=0x{:x}, queue=0x{:x}, pool=0x{:x}", reinterpret_cast<uintptr_t>(cmd), reinterpret_cast<uintptr_t>(queue), reinterpret_cast<uintptr_t>(pool));
-    VK_CHECK(vkEndCommandBuffer(cmd), "Failed to end cmd buffer");
-    VkSubmitInfo submit = {
-        .sType              = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-        .commandBufferCount = 1,
-        .pCommandBuffers    = &cmd
-    };
-    VK_CHECK(vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE), "Failed to submit cmd buffer");
-    VK_CHECK(vkQueueWaitIdle(queue), "Failed to wait idle");
+void VulkanRTX::endSingleTimeCommands(VkCommandBuffer cmd, VkQueue queue, VkCommandPool pool) noexcept
+{
+    LOG_TRACE_CAT("RTX", "endSingleTimeCommands: cmd=0x{:x}, queue=0x{:x}, pool=0x{:x}",
+                  reinterpret_cast<uintptr_t>(cmd),
+                  reinterpret_cast<uintptr_t>(queue),
+                  reinterpret_cast<uintptr_t>(pool));
+
+    if (cmd == VK_NULL_HANDLE || queue == VK_NULL_HANDLE || pool == VK_NULL_HANDLE) {
+        LOG_ERROR_CAT("RTX", "endSingleTimeCommands called with null handle");
+        return;
+    }
+
+    // 1. End recording
+    VK_CHECK(vkEndCommandBuffer(cmd), "Failed to end transient command buffer");
+
+    // 2. Create fence (unsignaled)
+    VkFence fence = VK_NULL_HANDLE;
+    VkFenceCreateInfo fenceInfo{ .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+    VK_CHECK(vkCreateFence(RTX::g_ctx().device(), &fenceInfo, nullptr, &fence),
+             "Failed to create transient fence");
+
+    // 3. Submit
+    VkSubmitInfo submit{ .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO };
+    submit.commandBufferCount = 1;
+    submit.pCommandBuffers    = &cmd;
+
+    VK_CHECK(vkQueueSubmit(queue, 1, &submit, fence),
+             "Failed to submit transient command buffer");
+
+    // 4. Wait safely — NO vkQueueWaitIdle() — prevents DEVICE_LOST on NVIDIA
+    const uint64_t timeout_ns = 10'000'000'000ULL;  // 10 seconds
+    VkResult waitResult = vkWaitForFences(RTX::g_ctx().device(), 1, &fence, VK_TRUE, timeout_ns);
+
+    if (waitResult == VK_TIMEOUT) {
+        LOG_FATAL_CAT("RTX", "Transient command buffer TIMED OUT after 10s — GPU HUNG");
+        vkDeviceWaitIdle(RTX::g_ctx().device());  // Last resort
+    } else if (waitResult != VK_SUCCESS) {
+        LOG_FATAL_CAT("RTX", "vkWaitForFences failed: {} — DEVICE LOST IMMINENT", static_cast<int>(waitResult));
+        vkDeviceWaitIdle(RTX::g_ctx().device());
+    }
+
+    // 5. Cleanup
+    vkDestroyFence(RTX::g_ctx().device(), fence, nullptr);
     vkFreeCommandBuffers(RTX::g_ctx().device(), pool, 1, &cmd);
-    LOG_TRACE_CAT("RTX", "One-time command buffer submitted and freed");
+
+    LOG_TRACE_CAT("RTX", "endSingleTimeCommands — COMPLETE (fence-synced, no device lost)");
 }
 
 // OPT: Async variant (no waitIdle—use fence for deps)
@@ -298,13 +349,29 @@ void VulkanRTX::setRayTracingPipeline(VkPipeline p, VkPipelineLayout l) noexcept
     LOG_TRACE_CAT("RTX", "setRayTracingPipeline — COMPLETE");
 }
 
-// =============================================================================
-// Acceleration Structures — LAS Singleton
-// =============================================================================
-
 void VulkanRTX::buildAccelerationStructures() {
     LOG_INFO_CAT("RTX", "{}Building acceleration structures — LAS awakening{}", PLASMA_FUCHSIA, RESET);
-    LOG_TRACE_CAT("RTX", "buildAccelerationStructures — START");
+
+    // === FORCE STAGING POOL CREATION FIRST (THIS IS THE KEY FIX) ===
+    {
+        std::lock_guard<std::mutex> lock(g_stagingMutex);
+        if (!g_stagingPool) {
+            LOG_INFO_CAT("RTX", "Forcing persistent 1GB staging pool creation (pre-LAS)");
+            BUFFER_CREATE(g_stagingPool, 1ULL << 30,
+                          VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                          VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                          "persistent_staging_1GB_FORCED");
+
+            g_stagingBuffer = RAW_BUFFER(g_stagingPool);
+            g_stagingMem    = BUFFER_MEMORY(g_stagingPool);
+
+            VK_CHECK(vkMapMemory(device_, g_stagingMem, 0, VK_WHOLE_SIZE, 0, &g_mappedBase),
+                     "Failed to map persistent staging buffer");
+
+            g_mappedOffset.store(0);
+            LOG_SUCCESS_CAT("RTX", "1GB persistent staging pool FORCED ONLINE — safe to proceed");
+        }
+    }
 
     std::vector<glm::vec3> vertices = {
         {-1,-1,-1}, {1,-1,-1}, {1,1,-1}, {-1,1,-1},
@@ -316,56 +383,70 @@ void VulkanRTX::buildAccelerationStructures() {
         3,2,6, 3,6,7, 0,4,5, 0,5,1
     };
 
-    const uint32_t vcount = static_cast<uint32_t>(vertices.size());
-    const uint32_t icount = static_cast<uint32_t>(indices.size());
-    LOG_DEBUG_CAT("RTX", "Cube mesh: {} verts, {} indices", vcount, icount);
-
     uint64_t vbuf = 0, ibuf = 0;
 
-    LOG_TRACE_CAT("RTX", "Creating vertex buffer — size: {} B", vcount * sizeof(glm::vec3));
-    BUFFER_CREATE(vbuf, vcount * sizeof(glm::vec3),
+    BUFFER_CREATE(vbuf, vertices.size() * sizeof(glm::vec3),
                   VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
                   VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
                   VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                   VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "amouranth_vertex_buffer");
-    LOG_DEBUG_CAT("RTX", "Vertex buffer created: 0x{:x}", reinterpret_cast<uintptr_t>(RAW_BUFFER(vbuf)));
 
-    LOG_TRACE_CAT("RTX", "Creating index buffer — size: {} B", icount * sizeof(uint32_t));
-    BUFFER_CREATE(ibuf, icount * sizeof(uint32_t),
+    BUFFER_CREATE(ibuf, indices.size() * sizeof(uint32_t),
                   VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
                   VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
                   VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                   VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "amouranth_index_buffer");
-    LOG_DEBUG_CAT("RTX", "Index buffer created: 0x{:x}", reinterpret_cast<uintptr_t>(RAW_BUFFER(ibuf)));
 
-    // OPT: Batched upload (verts + indices in one cmdbuf, persistent staging)
-    std::vector<std::tuple<const void*, VkDeviceSize, uint64_t, const char*>> batch = {
-        {vertices.data(), vcount * sizeof(glm::vec3), vbuf, "Vertex Buffer"},
-        {indices.data(), icount * sizeof(uint32_t), ibuf, "Index Buffer"}
+    // === SAFE SYNCHRONOUS UPLOAD ===
+    VkCommandBuffer cmd = beginSingleTimeCommands(RTX::g_ctx().commandPool());
+
+    VkDeviceSize vOffset = g_mappedOffset.fetch_add(vertices.size() * sizeof(glm::vec3) + 256);
+    VkDeviceSize iOffset = g_mappedOffset.fetch_add(indices.size()  * sizeof(uint32_t)  + 256);
+
+    std::memcpy((char*)g_mappedBase + vOffset, vertices.data(), vertices.size() * sizeof(glm::vec3));
+    std::memcpy((char*)g_mappedBase + iOffset, indices.data(),  indices.size()  * sizeof(uint32_t));
+
+    VkBufferCopy vcopy{vOffset, 0, vertices.size() * sizeof(glm::vec3)};
+    VkBufferCopy icopy{iOffset, 0, indices.size()  * sizeof(uint32_t)};
+
+    vkCmdCopyBuffer(cmd, g_stagingBuffer, RAW_BUFFER(vbuf), 1, &vcopy);
+    vkCmdCopyBuffer(cmd, g_stagingBuffer, RAW_BUFFER(ibuf), 1, &icopy);
+
+    VkMemoryBarrier barrier{
+        VK_STRUCTURE_TYPE_MEMORY_BARRIER,
+        nullptr,
+        VK_ACCESS_TRANSFER_WRITE_BIT,
+        VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR
     };
-    uploadBatch(batch, RTX::ctx().commandPool(), RTX::ctx().graphicsQueue(), false);  // ← NOW WAITS
+    vkCmdPipelineBarrier(cmd,
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+        0, 1, &barrier, 0, nullptr, 0, nullptr);
 
-    LOG_TRACE_CAT("RTX", "Building BLAS via RTX::las()");
-    RTX::las().buildBLAS(RTX::g_ctx().commandPool(), RTX::g_ctx().graphicsQueue(),
-                         vbuf, ibuf, vcount, icount);
-    LOG_DEBUG_CAT("RTX", "BLAS build complete — address: 0x{:x}", RTX::las().getBLASAddress());
+    endSingleTimeCommands(cmd, RTX::g_ctx().graphicsQueue(), RTX::g_ctx().commandPool());
 
-    LOG_TRACE_CAT("RTX", "Building TLAS via RTX::las() — 1 instance");
-    std::vector<std::pair<VkAccelerationStructureKHR, glm::mat4>> instances;
-    instances.emplace_back(RTX::las().getBLAS(), glm::mat4(1.0f));
+    LOG_SUCCESS_CAT("RTX", "Geometry uploaded safely — proceeding to BLAS/TLAS");
+
+    // === BUILD ACCELERATION STRUCTURES ===
+    RTX::las().buildBLAS(
+        RTX::g_ctx().commandPool(),
+        RTX::g_ctx().graphicsQueue(),
+        vbuf, ibuf,
+        static_cast<uint32_t>(vertices.size()),
+        static_cast<uint32_t>(indices.size())
+    );
+
+    std::array instances = { std::make_pair(RTX::las().getBLAS(), glm::mat4(1.0f)) };
     RTX::las().buildTLAS(RTX::g_ctx().commandPool(), RTX::g_ctx().graphicsQueue(), instances);
-    LOG_DEBUG_CAT("RTX", "TLAS build complete — address: 0x{:x}", RTX::las().getTLASAddress());
 
     LOG_SUCCESS_CAT("RTX",
         "{}GLOBAL_LAS ONLINE — BLAS: 0x{:x} | TLAS: 0x{:x} — PINK PHOTONS ETERNAL{}",
         PLASMA_FUCHSIA,
-        RTX::las().getBLASAddress(),
-        RTX::las().getTLASAddress(),
+        (uint64_t)RTX::las().getBLAS(),
+        (uint64_t)RTX::las().getTLAS(),
         RESET);
-    LOG_TRACE_CAT("RTX", "buildAccelerationStructures — COMPLETE");
 }
 
-// OPT: Turbo batched upload impl (persistent staging, async, aligned)
 void VulkanRTX::uploadBatch(
     const std::vector<std::tuple<const void*, VkDeviceSize, uint64_t, const char*>>& batch,
     VkCommandPool pool,
@@ -374,94 +455,89 @@ void VulkanRTX::uploadBatch(
 {
     if (batch.empty()) return;
 
-    VkDevice dev = RTX::g_ctx().device();
-    size_t totalSize = 0;
-    for (const auto& item : batch) {
-        auto [src, size, dst, name] = item;
-        if (!src || size == 0) {
-            LOG_WARN_CAT("RTX", "Skipping invalid batch item for: {}", name);
-            continue;
-        }
-        totalSize += size;
-    }
+    VkDevice dev = RTX::ctx().device();
+    VkDeviceSize totalSize = 0;
+    for (const auto& [src, size, dst, name] : batch)
+        if (src && size > 0) totalSize += size;
     if (totalSize == 0) return;
 
-    LOG_TRACE_CAT("RTX", "Batched upload: {} total bytes across {} items", totalSize, batch.size());
+    LOG_TRACE_CAT("RTX", "uploadBatch: {} bytes (async={})", totalSize, async);
 
-    // Lazy-init persistent staging (one-time, sub-alloc)
+    // Lazy-init persistent staging
     {
         std::lock_guard<std::mutex> lock(g_stagingMutex);
         if (g_stagingPool == 0) {
             BUFFER_CREATE(g_stagingPool, STAGING_POOL_SIZE,
-                          VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                          VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
                           VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
                           "persistent_staging_pool");
-            LOG_INFO_CAT("RTX", "Persistent staging pool initialized: {} MB", STAGING_POOL_SIZE / 1_MB);
 
             g_stagingMem = BUFFER_MEMORY(g_stagingPool);
+            g_stagingBuffer = RAW_BUFFER(g_stagingPool);
 
-            // Map once (persistent for coherent)
             void* mapped = nullptr;
-            VkResult mapRes = vkMapMemory(dev, g_stagingMem, 0, VK_WHOLE_SIZE, 0, &mapped);
-            if (mapRes != VK_SUCCESS || !mapped) {
-                LOG_ERROR_CAT("RTX", "Failed to map persistent staging (res: {})", mapRes);
-                return;
-            }
+            VK_CHECK(vkMapMemory(dev, g_stagingMem, 0, VK_WHOLE_SIZE, 0, &mapped),
+                     "Failed to map persistent staging");
+
             g_mappedBase = mapped;
-            g_mappedOffset = 0;
-            LOG_TRACE_CAT("RTX", "Persistent staging mapped at 0x{:x}", reinterpret_cast<uintptr_t>(g_mappedBase));
+            g_mappedOffset.store(0);
+            LOG_INFO_CAT("RTX", "Persistent 1GB staging pool initialized");
         }
     }
 
-    VkBuffer stagingBuffer = RAW_BUFFER(g_stagingPool);
-    if (!stagingBuffer) {
-        LOG_ERROR_CAT("RTX", "Persistent staging unavailable—upload skipped");
-        return;
-    }
+    if (!g_stagingBuffer) return;
 
     VkCommandBuffer cmd = beginSingleTimeCommands(pool);
 
-    // Batch writes + copies (single cmdbuf—faster)
-    VkDeviceSize currentOffset = g_mappedOffset;
-    for (const auto& item : batch) {
-        auto [src, size, dst, name] = item;
+    VkDeviceSize offset = g_mappedOffset.fetch_add(totalSize + 256, std::memory_order_relaxed);
+    if (offset + totalSize >= STAGING_POOL_SIZE) {
+        offset = 0;
+        g_mappedOffset.store(256, std::memory_order_relaxed);
+    }
+
+    for (const auto& [src, size, dstHandle, name] : batch) {
         if (!src || size == 0) continue;
 
-        // Sub-alloc + align (4B for memcpy perf)
-        VkDeviceSize alignPad = (4 - (currentOffset % 4)) % 4;
-        currentOffset += alignPad;
-        void* destPtr = static_cast<char*>(g_mappedBase) + currentOffset;
+        void* dstPtr = static_cast<char*>(g_mappedBase) + offset;
+        std::memcpy(dstPtr, src, size);
 
-        // Memcpy aligned
-        std::memcpy(destPtr, src, size);
-        RTX::AmouranthAI::get().onMemoryEvent(name, size);
-
-        // Queue copy
-        VkBuffer dstBuffer = RAW_BUFFER(dst);
-        if (dstBuffer) {
-            VkBufferCopy region{};
-            region.srcOffset = currentOffset;
-            region.dstOffset = 0;
-            region.size = size;
-            vkCmdCopyBuffer(cmd, stagingBuffer, dstBuffer, 1, &region);
-        } else {
-            LOG_WARN_CAT("RTX", "Skipped copy for invalid dst in: {}", name);
+        VkBuffer dstBuf = RAW_BUFFER(dstHandle);
+        if (dstBuf) {
+            VkBufferCopy copy{};
+            copy.srcOffset = offset;
+            copy.dstOffset = 0;
+            copy.size = size;
+            vkCmdCopyBuffer(cmd, g_stagingBuffer, dstBuf, 1, &copy);
         }
 
-        currentOffset += size;
-        LOG_TRACE_CAT("RTX", "Staged {} bytes for {} @ offset {}", size, name, currentOffset - size);
+        offset += size;
+        LOG_TRACE_CAT("RTX", "Staged {} bytes → {}", size, name);
     }
 
-    g_mappedOffset = currentOffset;  // Advance (reset on overflow if needed)
-
-    // Single async/sync submit
+    // RAW FENCE — no renderer() call
+    VkFence fence = VK_NULL_HANDLE;
     if (async) {
-        endSingleTimeCommandsAsync(cmd, queue, pool);
-    } else {
-        endSingleTimeCommands(cmd, queue, pool);
+        VkFenceCreateInfo fenceInfo{};
+        fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+        VK_CHECK(vkCreateFence(dev, &fenceInfo, nullptr, &fence),
+                 "Failed to create upload fence");
     }
 
-    LOG_PERF_CAT("RTX", "Batch upload {} bytes queued (async: {})", totalSize, async);
+    VkSubmitInfo submit{};
+    submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit.commandBufferCount = 1;
+    submit.pCommandBuffers = &cmd;
+
+    VK_CHECK(vkQueueSubmit(queue, 1, &submit, fence),
+             "Failed to submit upload batch");
+
+    if (!async) {
+        VK_CHECK(vkWaitForFences(dev, 1, &fence, VK_TRUE, UINT64_MAX),
+                 "Sync upload wait failed");
+        vkDestroyFence(dev, fence, nullptr);
+    }
+
+    LOG_PERF_CAT("RTX", "Batch upload {} bytes submitted (async={})", totalSize, async);
 }
 
 // =============================================================================
@@ -1057,6 +1133,11 @@ void VulkanRTX::recordRayTrace(VkCommandBuffer cmd, VkExtent2D extent,
     LOG_SUCCESS_CAT("RTX", "{}Ray trace recorded — frame {}{}", PLASMA_FUCHSIA, RTX::g_ctx().currentFrame(), RESET);
     RTX::AmouranthAI::get().onPhotonDispatch(extent.width, extent.height);
     LOG_TRACE_CAT("RTX", "recordRayTrace — COMPLETE");
+}
+
+uint64_t VulkanRTX::alignUp(uint64_t value, uint64_t alignment) const noexcept {
+    if (alignment == 0) return value;  // Edge case: avoid div-by-zero
+    return ((value + alignment - 1) / alignment) * alignment;
 }
 
 // =============================================================================

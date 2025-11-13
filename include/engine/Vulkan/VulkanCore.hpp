@@ -27,9 +27,11 @@
 #include <vector>
 #include <tuple>
 
-// -----------------------------------------------------------------------------
-// 1. VK_CHECK — 2-argument, aborts with file/line/code
-// -----------------------------------------------------------------------------
+// =============================================================================
+//  VULKAN ERROR CHECKING MACROS
+// =============================================================================
+
+/// VK_CHECK — 2-argument, aborts with file/line/code
 #define VK_CHECK(call, msg) \
     do { \
         VkResult r = (call); \
@@ -47,6 +49,7 @@
         } \
     } while (0)
 
+/// VK_CHECK_NOMSG — 1-argument, aborts with file/line/code (no custom msg)
 #define VK_CHECK_NOMSG(call) \
     do { \
         VkResult r = (call); \
@@ -63,9 +66,7 @@
         } \
     } while (0)
 
-// -----------------------------------------------------------------------------
-// 2. AI_INJECT — Rainbow AI log
-// -----------------------------------------------------------------------------
+/// AI_INJECT — Rainbow AI log (conditional, thread-local RNG)
 #define AI_INJECT(...) \
     do { \
         if (ENABLE_INFO) { \
@@ -80,22 +81,47 @@
         } \
     } while (0)
 
-// -----------------------------------------------------------------------------
-// 3. BUFFER MACROS — UltraLowLevelBufferTracker
-// -----------------------------------------------------------------------------
+// =============================================================================
+//  BUFFER MACROS – UltraLowLevelBufferTracker
+// =============================================================================
+
+/// Declare a buffer handle (uint64_t)
 #define BUFFER(handle) uint64_t handle = 0ULL
 
+/// Create a buffer and return its opaque handle
 #define BUFFER_CREATE(handle, size, usage, props, tag) \
     do { \
         LOG_INFO_CAT("RTX", "BUFFER_CREATE: {} | Size {} | Tag: {}", #handle, (size), (tag)); \
         (handle) = RTX::UltraLowLevelBufferTracker::get().create((size), (usage), (props), (tag)); \
     } while (0)
 
-// Returns VkBuffer — NEVER assign to uint64_t
+/// Get the real VkBuffer from the opaque handle
 #define RAW_BUFFER(handle) \
     (RTX::UltraLowLevelBufferTracker::get().getData((handle)) \
         ? static_cast<VkBuffer>(RTX::UltraLowLevelBufferTracker::get().getData((handle))->buffer) \
         : VK_NULL_HANDLE)
+
+/// Get the VkDeviceMemory from the opaque handle
+#define BUFFER_MEMORY(handle) \
+    (RTX::UltraLowLevelBufferTracker::get().getData((handle)) \
+        ? RTX::UltraLowLevelBufferTracker::get().getData((handle))->memory \
+        : VK_NULL_HANDLE)
+
+/// Map buffer memory for CPU access
+#define BUFFER_MAP(handle, mapped) \
+    do { mapped = RTX::UltraLowLevelBufferTracker::get().map(handle); } while(0)
+
+/// Unmap buffer memory
+#define BUFFER_UNMAP(handle) RTX::UltraLowLevelBufferTracker::get().unmap(handle)
+
+/// Destroy buffer handle (does NOT reset variable)
+#define BUFFER_DESTROY(handle) \
+    do { \
+        if ((handle) != 0) { \
+            LOG_INFO_CAT("RTX", "BUFFER_DESTROY: handle={:x}", (handle)); \
+            RTX::UltraLowLevelBufferTracker::get().destroy((handle)); \
+        } \
+    } while(0)
 
 // -----------------------------------------------------------------------------
 // 4. AutoBuffer — RAII wrapper (must be in header)
@@ -197,6 +223,8 @@ public:
     [[nodiscard]] VkPipeline pipeline() const noexcept { return HANDLE_GET(rtPipeline_); }
     [[nodiscard]] VkPipelineLayout pipelineLayout() const noexcept { return HANDLE_GET(rtPipelineLayout_); }
     [[nodiscard]] const ShaderBindingTable& sbt() const noexcept { return sbt_; }
+
+	void buildAccelerationStructuresBlocking() noexcept;
 
     void setDescriptorSetLayout(VkDescriptorSetLayout layout) noexcept;
     void setRayTracingPipeline(VkPipeline p, VkPipelineLayout l) noexcept;

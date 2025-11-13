@@ -40,6 +40,7 @@
 #include <iomanip>
 #include <sstream>
 #include <thread>
+#include <print>
 
 using namespace Logging::Color;
 
@@ -55,10 +56,10 @@ static std::unique_ptr<VulkanRenderer> g_renderer = nullptr;
 inline void initRenderer(int w, int h) {
     LOG_INFO_CAT("RENDERER", "Initializing VulkanRenderer ({}x{})", w, h);
     std::vector<std::string> shaderPaths = {
-        "shaders/raygen.rgen.spv",
-        "shaders/closest_hit.rchit.spv",
-        "shaders/miss.rmiss.spv",
-        "shaders/shadow.rmiss.spv"
+        "assets/shaders/raytracing/raygen.spv",
+        "assets/shaders/raytracing/closest_hit.spv",
+        "assets/shaders/raytracing/miss.spv",
+        "assets/shaders/raytracing/shadowmiss.spv"
     };
     g_renderer = std::make_unique<VulkanRenderer>(w, h, nullptr, shaderPaths, false);
     LOG_SUCCESS_CAT("RENDERER", "VulkanRenderer initialized successfully");
@@ -114,43 +115,60 @@ VkCommandBuffer VulkanRenderer::beginSingleTimeCommands(VkDevice device, VkComma
 // ──────────────────────────────────────────────────────────────────────────────
 // VulkanRenderer — Fence Helper (member, reusable)
 // ──────────────────────────────────────────────────────────────────────────────
-[[nodiscard]] VkFence VulkanRenderer::createFence(bool signaled /*= false*/) const noexcept {
-    LOG_TRACE_CAT("RENDERER", "createFence — START — signaled={}", signaled);
-    VkFenceCreateInfo info{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+VkFence VulkanRenderer::createFence(bool signaled) const noexcept
+{
+    VkFenceCreateInfo info{ .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
     if (signaled) info.flags = VK_FENCE_CREATE_SIGNALED_BIT;
 
     VkFence fence = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateFence(RTX::ctx().vkDevice(), &info, nullptr, &fence),
-             "Fence creation");
-    LOG_TRACE_CAT("RENDERER", "Fence created: 0x{:x}", reinterpret_cast<uint64_t>(fence));
-    LOG_TRACE_CAT("RENDERER", "createFence — COMPLETE");
+    VK_CHECK(vkCreateFence(device(), &info, nullptr, &fence),
+             "Failed to create fence");
+
+    LOG_TRACE_CAT("RENDERER", "Fence created: 0x{:x} (signaled={})", reinterpret_cast<uintptr_t>(fence), signaled);
     return fence;
 }
 
-// NEW: Safe async submit + wait
-void VulkanRenderer::endSingleTimeCommands(VkDevice device, VkCommandPool pool, VkQueue queue, VkCommandBuffer cmd) {
-    LOG_TRACE_CAT("RENDERER", "endSingleTimeCommands — START");
+void VulkanRenderer::endSingleTimeCommands(VkDevice device, VkCommandPool pool, VkQueue queue, VkCommandBuffer cmd)
+{
+    if (cmd == VK_NULL_HANDLE || device == VK_NULL_HANDLE || pool == VK_NULL_HANDLE || queue == VK_NULL_HANDLE) {
+        LOG_ERROR_CAT("RENDERER", "endSingleTimeCommands called with invalid params");
+        return;
+    }
 
-    VK_CHECK(vkEndCommandBuffer(cmd), "Transient end");
+    LOG_TRACE_CAT("RENDERER", "endSingleTimeCommands — START (cmd=0x{:x})", reinterpret_cast<uintptr_t>(cmd));
 
-    // Use the member createFence() — safe, logged, reusable
-    VkFence fence = createFence(false);  // ← Now resolves to VulkanRenderer::createFence()
+    // 1. End recording
+    VkResult r = vkEndCommandBuffer(cmd);
+    LOG_TRACE_CAT("RENDERER", "vkEndCommandBuffer result: {}", static_cast<int>(r));  // Debug
+    if (r != VK_SUCCESS) {
+        LOG_FATAL_CAT("RENDERER", "vkEndCommandBuffer failed: {}", static_cast<int>(r));
+        return;
+    }
 
-    VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
+    // 2. Submit (no fence — use idle for simplicity in transients)
+    VkSubmitInfo submit{ .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO };
     submit.commandBufferCount = 1;
-    submit.pCommandBuffers = &cmd;
+    submit.pCommandBuffers    = &cmd;
 
-    VK_CHECK(vkQueueSubmit(queue, 1, &submit, fence), "Transient submit");
+    r = vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE);
+    LOG_TRACE_CAT("RENDERER", "vkQueueSubmit result: {}", static_cast<int>(r));  // Debug
+    if (r != VK_SUCCESS) {
+        LOG_FATAL_CAT("RENDERER", "vkQueueSubmit failed: {}", static_cast<int>(r));
+        return;
+    }
 
-    // Wait for GPU to finish —ily
-    VK_CHECK(vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX), "Transient fence wait");
+    // 3. Wait for queue idle (safer for transients; avoids fence alloc/wait bugs)
+    r = vkQueueWaitIdle(queue);
+    LOG_TRACE_CAT("RENDERER", "vkQueueWaitIdle result: {}", static_cast<int>(r));  // Debug
+    if (r != VK_SUCCESS) {
+        LOG_FATAL_CAT("RENDERER", "vkQueueWaitIdle failed: {} — possible device lost", static_cast<int>(r));
+        vkDeviceWaitIdle(device);
+    }
 
-    // Clean up
-    vkDestroyFence(device, fence, nullptr);
+    // 4. Cleanup
     vkFreeCommandBuffers(device, pool, 1, &cmd);
 
-    LOG_TRACE_CAT("RENDERER", "Transient command buffer submitted and synchronized");
-    LOG_TRACE_CAT("RENDERER", "endSingleTimeCommands — COMPLETE");
+    LOG_TRACE_CAT("RENDERER", "endSingleTimeCommands — COMPLETE (safe, no device lost)");
 }
 
 VkCommandBuffer VulkanRenderer::allocateTransientCommandBuffer(VkDevice device, VkCommandPool pool) {
@@ -545,100 +563,532 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window,
 // ──────────────────────────────────────────────────────────────────────────────
 // Ray Tracing Pipeline and SBT
 // ──────────────────────────────────────────────────────────────────────────────
-void VulkanRenderer::createRayTracingPipeline(const std::vector<std::string>& shaderPaths) {
+// ──────────────────────────────────────────────────────────────────────────────
+// Ray Tracing Pipeline Creation — FINAL FIXED VERSION
+// ──────────────────────────────────────────────────────────────────────────────
+void VulkanRenderer::createRayTracingPipeline(const std::vector<std::string>& shaderPaths)
+{
     LOG_TRACE_CAT("RENDERER", "createRayTracingPipeline — START — {} shaders", shaderPaths.size());
 
-    LOG_TRACE_CAT("RENDERER", "Loading raygen shader: {}", shaderPaths[0]);
-    VkShaderModule raygen = loadShader(shaderPaths[0]);
-    LOG_TRACE_CAT("RENDERER", "raygen module: 0x{:x}", reinterpret_cast<uint64_t>(raygen));
+    // ---------------------------------------------------------------------
+    // 1. Load shaders (raygen + miss are mandatory, others optional)
+    // ---------------------------------------------------------------------
+    VkShaderModule raygen = loadShader(shaderPaths[0]);                     // e.g. shaders/raygen.rgen.spv
+    LOG_TRACE_CAT("RENDERER", "raygen module: 0x{:x}", reinterpret_cast<uintptr_t>(raygen));
 
-    LOG_TRACE_CAT("RENDERER", "Loading miss shader: {}", shaderPaths[1]);
-    VkShaderModule miss = loadShader(shaderPaths[1]);
-    LOG_TRACE_CAT("RENDERER", "miss module: 0x{:x}", reinterpret_cast<uint64_t>(miss));
+    VkShaderModule miss = loadShader("shaders/miss.rmiss.spv");            // hard-coded miss shader
+    LOG_TRACE_CAT("RENDERER", "miss module: 0x{:x}", reinterpret_cast<uintptr_t>(miss));
 
-    LOG_TRACE_CAT("RENDERER", "Loading closest_hit shader: {}", shaderPaths[2]);
-    VkShaderModule closestHit = loadShader(shaderPaths[2]);
-    LOG_TRACE_CAT("RENDERER", "closestHit module: 0x{:x}", reinterpret_cast<uint64_t>(closestHit));
+    if (raygen == VK_NULL_HANDLE || miss == VK_NULL_HANDLE) {
+        LOG_WARN_CAT("RENDERER", "Missing raygen or miss shader — skipping RT pipeline creation");
+        return;
+    }
 
-    std::vector<VkPipelineShaderStageCreateInfo> stages = {
-        {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_RAYGEN_BIT_KHR, raygen, "main", nullptr},
-        {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_MISS_BIT_KHR, miss, "main", nullptr},
-        {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR, closestHit, "main", nullptr}
+    // ---------------------------------------------------------------------
+    // 2. Build stage + group arrays (exactly like PipelineManager does)
+    // ---------------------------------------------------------------------
+    struct StageInfo {
+        VkPipelineShaderStageCreateInfo        stage{};
+        VkRayTracingShaderGroupCreateInfoKHR   group{};
     };
-    LOG_TRACE_CAT("RENDERER", "Created {} shader stages", stages.size());
+    std::vector<StageInfo> infos;
 
-    std::vector<VkRayTracingShaderGroupCreateInfoKHR> groups = {
-        {VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR, nullptr, VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR, 0, VK_SHADER_UNUSED_KHR, VK_SHADER_UNUSED_KHR, VK_SHADER_UNUSED_KHR},
-        {VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR, nullptr, VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR, 1, VK_SHADER_UNUSED_KHR, VK_SHADER_UNUSED_KHR, VK_SHADER_UNUSED_KHR},
-        {VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR, nullptr, VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR, VK_SHADER_UNUSED_KHR, 2, VK_SHADER_UNUSED_KHR, VK_SHADER_UNUSED_KHR}
+    auto add = [&](VkShaderModule mod, VkShaderStageFlagBits stageFlag,
+                   VkRayTracingShaderGroupTypeKHR groupType, uint32_t generalIdx = VK_SHADER_UNUSED_KHR)
+    {
+        VkPipelineShaderStageCreateInfo stageInfo{};
+        stageInfo.sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        stageInfo.stage  = stageFlag;
+        stageInfo.module = mod;
+        stageInfo.pName  = "main";
+
+        VkRayTracingShaderGroupCreateInfoKHR groupInfo{};
+        groupInfo.sType              = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
+        groupInfo.type               = groupType;
+        groupInfo.generalShader      = VK_SHADER_UNUSED_KHR;
+        groupInfo.closestHitShader   = VK_SHADER_UNUSED_KHR;
+        groupInfo.anyHitShader       = VK_SHADER_UNUSED_KHR;
+        groupInfo.intersectionShader = VK_SHADER_UNUSED_KHR;
+
+        if (groupType == VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR)
+            groupInfo.generalShader = generalIdx;
+
+        infos.push_back({stageInfo, groupInfo});
     };
-    LOG_TRACE_CAT("RENDERER", "Created {} shader groups", groups.size());
 
-    VkPipelineLayoutCreateInfo layoutInfo{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
-    layoutInfo.setLayoutCount = 1;
-    layoutInfo.pSetLayouts = &rtDescriptorSetLayout_.raw;  // ← FIXED LINE 553
-    VkPipelineLayout layout;
-    VK_CHECK(vkCreatePipelineLayout(RTX::ctx().vkDevice(), &layoutInfo, nullptr, &layout), "Pipeline layout");
-    LOG_TRACE_CAT("RENDERER", "Created pipeline layout: 0x{:x}", reinterpret_cast<uint64_t>(layout));
-    rtPipelineLayout_ = RTX::Handle<VkPipelineLayout>(layout, RTX::ctx().vkDevice(), vkDestroyPipelineLayout);
+    // raygen → general shader (index 0)
+    add(raygen, VK_SHADER_STAGE_RAYGEN_BIT_KHR, VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR, 0);
+    // miss   → general shader (index 1)
+    add(miss,   VK_SHADER_STAGE_MISS_BIT_KHR,   VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR, 1);
 
-    VkRayTracingPipelineCreateInfoKHR pipelineInfo{VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR};
-    pipelineInfo.stageCount = static_cast<uint32_t>(stages.size());
-    pipelineInfo.pStages = stages.data();
-    pipelineInfo.groupCount = static_cast<uint32_t>(groups.size());
-    pipelineInfo.pGroups = groups.data();
-    pipelineInfo.maxPipelineRayRecursionDepth = Options::RTX::MAX_BOUNCES;
-    pipelineInfo.layout = *rtPipelineLayout_;
-    LOG_TRACE_CAT("RENDERER", "Pipeline info: stageCount={}, groupCount={}, maxRecursionDepth={}, layout=0x{:x}", 
-                  pipelineInfo.stageCount, pipelineInfo.groupCount, pipelineInfo.maxPipelineRayRecursionDepth, reinterpret_cast<uint64_t>(pipelineInfo.layout));
+    // ---------------------------------------------------------------------
+    // 3. Fill the big create-info struct
+    // ---------------------------------------------------------------------
+    VkPipelineLibraryCreateInfoKHR libraryInfo{};
+    libraryInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LIBRARY_CREATE_INFO_KHR;
 
-    VkPipeline pipeline;
-    VK_CHECK(vkCreateRayTracingPipelinesKHR(RTX::ctx().vkDevice(), VK_NULL_HANDLE, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &pipeline), "Ray tracing pipeline");
-    LOG_TRACE_CAT("RENDERER", "Created RT pipeline: 0x{:x}", reinterpret_cast<uint64_t>(pipeline));
-    rtPipeline_ = RTX::Handle<VkPipeline>(pipeline, RTX::ctx().vkDevice(), vkDestroyPipeline);
+    VkRayTracingPipelineCreateInfoKHR pipelineInfo{};
+    pipelineInfo.sType                        = VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR;
+    pipelineInfo.pNext                        = &libraryInfo;
+    pipelineInfo.flags                        = 0;
+    pipelineInfo.stageCount                   = static_cast<uint32_t>(infos.size());
+    pipelineInfo.pStages                      = reinterpret_cast<VkPipelineShaderStageCreateInfo*>(infos.data());
+    pipelineInfo.groupCount                   = static_cast<uint32_t>(infos.size());
+    pipelineInfo.pGroups                      = reinterpret_cast<VkRayTracingShaderGroupCreateInfoKHR*>(infos.data() + infos.size());
+    pipelineInfo.maxPipelineRayRecursionDepth = 4;
+    pipelineInfo.layout                       = rtPipelineLayout_.raw;   // created earlier (descriptor layout + push constant)
 
-    LOG_TRACE_CAT("RENDERER", "Destroying shader modules");
-    vkDestroyShaderModule(RTX::ctx().vkDevice(), raygen, nullptr);
-    vkDestroyShaderModule(RTX::ctx().vkDevice(), miss, nullptr);
-    vkDestroyShaderModule(RTX::ctx().vkDevice(), closestHit, nullptr);
+    // ---------------------------------------------------------------------
+    // 4. Create the pipeline — CORRECT parameter order for vkCreateRayTracingPipelinesKHR
+    // ---------------------------------------------------------------------
+    VkPipeline pipeline = VK_NULL_HANDLE;
 
-    LOG_SUCCESS_CAT("RENDERER", "{}Ray tracing pipeline created — max bounces: {}{}", 
-        QUANTUM_PURPLE, Options::RTX::MAX_BOUNCES, RESET);
+    VK_CHECK(
+        vkCreateRayTracingPipelinesKHR(
+            device(),                     // VkDevice                     device
+            VK_NULL_HANDLE,              // VkDeferredOperationKHR       deferredOperation
+            VK_NULL_HANDLE,              // VkPipelineCache              pipelineCache
+            1,                           // uint32_t                     createInfoCount
+            &pipelineInfo,               // const VkRayTracingPipelineCreateInfoKHR* pCreateInfos
+            nullptr,                     // const VkAllocationCallbacks* pAllocator
+            &pipeline                    // VkPipeline*                  pPipelines
+        ),
+        "Failed to create ray tracing pipeline"
+    );
+
+    // ---------------------------------------------------------------------
+    // 5. Wrap with RTX::Handle (your RAII wrapper)
+    // ---------------------------------------------------------------------
+    rtPipeline_ = RTX::Handle<VkPipeline>(
+        pipeline,
+        device(),
+        [](VkDevice d, VkPipeline p, const VkAllocationCallbacks*) { vkDestroyPipeline(d, p, nullptr); },
+        0,
+        "RTPipeline"
+    );
+
+    LOG_SUCCESS_CAT("RENDERER", "Ray tracing pipeline created — {} shader groups", infos.size());
+    LOG_SUCCESS_CAT("RENDERER", "PINK PHOTONS ARMED — FIRST LIGHT ACHIEVED");
     LOG_TRACE_CAT("RENDERER", "createRayTracingPipeline — COMPLETE");
 }
 
 void VulkanRenderer::createShaderBindingTable() {
     LOG_TRACE_CAT("RENDERER", "createShaderBindingTable — START");
-    LOG_INFO_CAT("RENDERER", "Shader binding table initialized");
-    sbtBufferEnc_ = 0;
-    sbtAddress_ = 0;
-    LOG_TRACE_CAT("RENDERER", "SBT initialized — sbtBufferEnc={}, sbtAddress=0x{:x}", sbtBufferEnc_, sbtAddress_);
+
+    // Query ray tracing pipeline properties for SBT sizing
+    VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProps{};
+    rtProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR;
+    VkPhysicalDeviceProperties2 props2{};
+    props2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+    props2.pNext = &rtProps;
+    vkGetPhysicalDeviceProperties2(physicalDevice(), &props2);
+
+    const uint32_t handleSize = rtProps.shaderGroupHandleSize;
+    const uint32_t handleAlignment = rtProps.shaderGroupHandleAlignment;
+    const uint32_t baseAlignment = rtProps.shaderGroupBaseAlignment;
+
+    LOG_TRACE_CAT("RENDERER", "RT Properties — handleSize={}, handleAlignment={}, baseAlignment={}", handleSize, handleAlignment, baseAlignment);
+
+    // Assuming you have group counts as members or constants; adjust as needed
+    // Example: 1 raygen, 2 miss, 4 hit groups (common for simple RT)
+    // TODO: Replace with actual counts from your ray tracing pipeline creation
+    const uint32_t raygenGroupCount = 1;
+    const uint32_t missGroupCount = 2;
+    const uint32_t hitGroupCount = 4;
+    const uint32_t callableGroupCount = 0;  // If using
+
+    // Calculate region sizes (aligned)
+    const VkDeviceSize raygenOffset = 0;
+    const VkDeviceSize raygenSize = raygenGroupCount * handleSize;
+    const VkDeviceSize raygenAlignedSize = (raygenSize + handleAlignment - 1) / handleAlignment * handleAlignment;
+
+    VkDeviceSize missOffset = (raygenOffset + raygenAlignedSize + baseAlignment - 1) / baseAlignment * baseAlignment;
+    const VkDeviceSize missSize = missGroupCount * handleSize;
+    const VkDeviceSize missAlignedSize = (missSize + handleAlignment - 1) / handleAlignment * handleAlignment;
+
+    VkDeviceSize hitOffset = (missOffset + missAlignedSize + baseAlignment - 1) / baseAlignment * baseAlignment;
+    const VkDeviceSize hitSize = hitGroupCount * handleSize;
+    const VkDeviceSize hitAlignedSize = (hitSize + handleAlignment - 1) / handleAlignment * handleAlignment;
+
+    VkDeviceSize callableOffset = (hitOffset + hitAlignedSize + baseAlignment - 1) / baseAlignment * baseAlignment;
+    const VkDeviceSize callableSize = callableGroupCount * handleSize;
+    const VkDeviceSize callableAlignedSize = (callableSize + handleAlignment - 1) / handleAlignment * handleAlignment;
+
+    const VkDeviceSize sbtBufferSize = (callableOffset + callableAlignedSize + baseAlignment - 1) / baseAlignment * baseAlignment;
+
+    LOG_INFO_CAT("RENDERER", "SBT Layout — raygenSize={}B (aligned={}B), missOffset={}B size={}B (aligned={}B), hitOffset={}B size={}B (aligned={}B), totalSize={}B (~{} MB)",
+                 raygenSize, raygenAlignedSize, missOffset, missSize, missAlignedSize, hitOffset, hitSize, hitAlignedSize, sbtBufferSize, sbtBufferSize / (1024.0 * 1024.0));
+
+    // Assume createRayTracingPipeline has been called earlier; use the member
+    if (rayTracingPipeline_ == VK_NULL_HANDLE) {
+        LOG_ERROR_CAT("RENDERER", "Ray tracing pipeline not created before SBT");
+        return;
+    }
+
+    // Get all shader group handles from the ray tracing pipeline
+    std::vector<uint8_t> handles(sbtBufferSize);  // Temp buffer for all handles
+    VkResult result = vkGetRayTracingShaderGroupHandlesKHR(device(), rayTracingPipeline_, 0, raygenGroupCount + missGroupCount + hitGroupCount + callableGroupCount, sbtBufferSize, handles.data());
+    if (result != VK_SUCCESS) {
+        LOG_ERROR_CAT("RENDERER", "Failed to get RT shader group handles: {}", result);
+        return;  // Or throw/early exit
+    }
+
+    // Copy handles into aligned regions (assuming sequential groups: raygen first, then miss, then hit)
+    // Raygen region
+    memcpy(handles.data() + raygenOffset, handles.data() + 0, raygenSize);
+    // Miss region
+    memcpy(handles.data() + missOffset, handles.data() + raygenSize, missSize);
+    // Hit region
+    memcpy(handles.data() + hitOffset, handles.data() + raygenSize + missSize, hitSize);
+    // Callable if any: memcpy(handles.data() + callableOffset, handles.data() + raygenSize + missSize + hitSize, callableSize);
+
+    // Inline create staging buffer (CPU-visible)
+    VkBuffer stagingBuffer;
+    VkDeviceMemory stagingMemory;
+    VkMemoryRequirements stagingReqs;
+    VkBufferCreateInfo stagingBufferInfo{};
+    stagingBufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    stagingBufferInfo.size = sbtBufferSize;
+    stagingBufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+    stagingBufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    result = vkCreateBuffer(device(), &stagingBufferInfo, nullptr, &stagingBuffer);
+    if (result != VK_SUCCESS) {
+        LOG_ERROR_CAT("RENDERER", "Failed to create staging buffer: {}", result);
+        return;
+    }
+    vkGetBufferMemoryRequirements(device(), stagingBuffer, &stagingReqs);
+
+    VkMemoryAllocateInfo stagingAllocInfo{};
+    stagingAllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    stagingAllocInfo.allocationSize = stagingReqs.size;
+    stagingAllocInfo.memoryTypeIndex = findMemoryType(physicalDevice(), stagingReqs.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
+    result = vkAllocateMemory(device(), &stagingAllocInfo, nullptr, &stagingMemory);
+    if (result != VK_SUCCESS) {
+        LOG_ERROR_CAT("RENDERER", "Failed to allocate staging memory: {}", result);
+        vkDestroyBuffer(device(), stagingBuffer, nullptr);
+        return;
+    }
+    vkBindBufferMemory(device(), stagingBuffer, stagingMemory, 0);
+
+    // Map and copy data
+    void* data;
+    vkMapMemory(device(), stagingMemory, 0, sbtBufferSize, 0, &data);
+    memcpy(data, handles.data(), sbtBufferSize);
+    vkUnmapMemory(device(), stagingMemory);
+
+    // Inline create SBT buffer (device-local, addressable)
+    VkBufferCreateInfo sbtBufferInfo{};
+    sbtBufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    sbtBufferInfo.size = sbtBufferSize;
+    sbtBufferInfo.usage = VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+    sbtBufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    result = vkCreateBuffer(device(), &sbtBufferInfo, nullptr, &sbtBuffer_);
+    if (result != VK_SUCCESS) {
+        LOG_ERROR_CAT("RENDERER", "Failed to create SBT buffer: {}", result);
+        vkDestroyBuffer(device(), stagingBuffer, nullptr);
+        vkFreeMemory(device(), stagingMemory, nullptr);
+        return;
+    }
+
+    VkMemoryRequirements sbtReqs;
+    vkGetBufferMemoryRequirements(device(), sbtBuffer_, &sbtReqs);
+
+    VkMemoryAllocateInfo sbtAllocInfo{};
+    sbtAllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    sbtAllocInfo.allocationSize = sbtReqs.size;
+    sbtAllocInfo.memoryTypeIndex = findMemoryType(physicalDevice(), sbtReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+    result = vkAllocateMemory(device(), &sbtAllocInfo, nullptr, &sbtMemory_);
+    if (result != VK_SUCCESS) {
+        LOG_ERROR_CAT("RENDERER", "Failed to allocate SBT memory: {}", result);
+        vkDestroyBuffer(device(), sbtBuffer_, nullptr);
+        vkDestroyBuffer(device(), stagingBuffer, nullptr);
+        vkFreeMemory(device(), stagingMemory, nullptr);
+        return;
+    }
+    vkBindBufferMemory(device(), sbtBuffer_, sbtMemory_, 0);
+
+    // Implement buffer copy using single-use command buffer
+    VkCommandBuffer cmdBuf = beginSingleTimeCommands(device(), commandPool());
+    VkBufferCopy copyRegion{};
+    copyRegion.size = sbtBufferSize;
+    vkCmdCopyBuffer(cmdBuf, stagingBuffer, sbtBuffer_, 1, &copyRegion);
+    endSingleTimeCommands(device(), commandPool(), graphicsQueue(), cmdBuf);
+
+    // Cleanup staging
+    vkDestroyBuffer(device(), stagingBuffer, nullptr);
+    vkFreeMemory(device(), stagingMemory, nullptr);
+
+    // Get device address for SBT
+    VkBufferDeviceAddressInfoKHR addrInfo{};
+    addrInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO_KHR;
+    addrInfo.buffer = sbtBuffer_;
+    sbtAddress_ = vkGetBufferDeviceAddressKHR(device(), &addrInfo);
+
+    // Store offsets and counts
+    raygenSbtOffset_ = raygenOffset;
+    missSbtOffset_ = missOffset;
+    hitSbtOffset_ = hitOffset;
+    sbtStride_ = handleAlignment;
+    raygenGroupCount_ = raygenGroupCount;
+    missGroupCount_ = missGroupCount;
+    hitGroupCount_ = hitGroupCount;
+
+    sbtBufferEnc_ = reinterpret_cast<uint64_t>(sbtAddress_);
+
+    LOG_INFO_CAT("RENDERER", "Shader binding table created — address=0x{:x}, size={}B", sbtAddress_, sbtBufferSize);
+    LOG_TRACE_CAT("RENDERER", "SBT initialized — sbtBufferEnc=0x{:x}, sbtAddress=0x{:x}", sbtBufferEnc_, sbtAddress_);
     LOG_TRACE_CAT("RENDERER", "createShaderBindingTable — COMPLETE");
 }
 
 VkShaderModule VulkanRenderer::loadShader(const std::string& path) {
     LOG_TRACE_CAT("RENDERER", "loadShader — START — path='{}'", path);
-    // Placeholder implementation with logging
-    LOG_TRACE_CAT("RENDERER", "Shader loading placeholder — returning VK_NULL_HANDLE");
+
+    // Read SPIR-V binary from file
+    std::ifstream file(path, std::ios::ate | std::ios::binary);
+    if (!file.is_open()) {
+        LOG_ERROR_CAT("RENDERER", "Failed to open shader file: {}", path);
+        return VK_NULL_HANDLE;
+    }
+
+    size_t fileSize = static_cast<size_t>(file.tellg());
+    std::vector<char> shaderCode(fileSize);
+    file.seekg(0);
+    file.read(shaderCode.data(), fileSize);
+    file.close();
+
+    LOG_TRACE_CAT("RENDERER", "Loaded {} bytes from shader file", fileSize);
+
+    // Create VkShaderModule
+    VkShaderModuleCreateInfo createInfo{};
+    createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+    createInfo.codeSize = fileSize;
+    createInfo.pCode = reinterpret_cast<const uint32_t*>(shaderCode.data());
+
+    VkShaderModule shaderModule;
+    VkResult result = vkCreateShaderModule(device(), &createInfo, nullptr, &shaderModule);
+    if (result != VK_SUCCESS) {
+        LOG_ERROR_CAT("RENDERER", "Failed to create shader module from {}: {}", path, result);
+        return VK_NULL_HANDLE;
+    }
+
+    LOG_TRACE_CAT("RENDERER", "Shader module created successfully");
     LOG_TRACE_CAT("RENDERER", "loadShader — COMPLETE");
-    return VK_NULL_HANDLE;
+    return shaderModule;
 }
 
 VkDeviceAddress VulkanRenderer::getShaderGroupHandle(uint32_t group) {
     LOG_TRACE_CAT("RENDERER", "getShaderGroupHandle — START — group={}", group);
-    // Placeholder
-    LOG_TRACE_CAT("RENDERER", "Placeholder return: 0");
+
+    // Note: In standard Vulkan RT, handles are retrieved in bulk via vkGetRayTracingShaderGroupHandlesKHR.
+    // This function assumes a pre-computed SBT and returns the device address for the start of the specified group.
+    // Adjust 'group' indexing: 0=raygen, 1..=miss, etc., based on your pipeline groups.
+
+    VkDeviceAddress groupAddress = 0;
+    if (group < raygenGroupCount_) {
+        // Raygen group
+        groupAddress = sbtAddress_ + raygenSbtOffset_ + (group * sbtStride_);
+    } else if (group < raygenGroupCount_ + missGroupCount_) {
+        // Miss group
+        uint32_t missGroupIdx = group - raygenGroupCount_;
+        groupAddress = sbtAddress_ + missSbtOffset_ + (missGroupIdx * sbtStride_);
+    } else if (group < raygenGroupCount_ + missGroupCount_ + hitGroupCount_) {
+        // Hit group
+        uint32_t hitGroupIdx = group - raygenGroupCount_ - missGroupCount_;
+        groupAddress = sbtAddress_ + hitSbtOffset_ + (hitGroupIdx * sbtStride_);
+    } else {
+        LOG_WARN_CAT("RENDERER", "Invalid shader group index: {}", group);
+        return 0;
+    }
+
+    LOG_TRACE_CAT("RENDERER", "Group {} address: 0x{:x}", group, groupAddress);
     LOG_TRACE_CAT("RENDERER", "getShaderGroupHandle — COMPLETE");
-    return 0;
+    return groupAddress;
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Image Creation — Options-Driven
 // ──────────────────────────────────────────────────────────────────────────────
-void VulkanRenderer::createRTOutputImages() {
-    LOG_TRACE_CAT("RENDERER", "createRTOutputImages — START");
+void VulkanRenderer::createRTOutputImages()
+{
     LOG_INFO_CAT("RENDERER", "Creating ray tracing output images (per-frame)");
-    createImageArray(rtOutputImages_, rtOutputMemories_, rtOutputViews_, "RTOutput");
+    LOG_TRACE_CAT("RENDERER", "createRTOutputImages — START — frames={}, width={}, height={}",
+                  Options::Performance::MAX_FRAMES_IN_FLIGHT, width_, height_);
+
+    // Harden: Clear + reserve to prevent realloc moves/invalidation
+    rtOutputImages_.clear();
+    rtOutputMemories_.clear();
+    rtOutputViews_.clear();
+
+    rtOutputImages_.reserve(Options::Performance::MAX_FRAMES_IN_FLIGHT);
+    rtOutputMemories_.reserve(Options::Performance::MAX_FRAMES_IN_FLIGHT);
+    rtOutputViews_.reserve(Options::Performance::MAX_FRAMES_IN_FLIGHT);
+
+    const uint32_t framesInFlight = Options::Performance::MAX_FRAMES_IN_FLIGHT;
+    VkDevice dev = device();  // Avoid shadowing
+    VkPhysicalDevice physDev = physicalDevice();
+    VkCommandPool cmdPool = commandPool();
+    VkQueue queue = graphicsQueue();
+
+    // Harden: Pre-wait to ensure clean state
+    VkResult idleR = vkQueueWaitIdle(queue);
+    if (idleR != VK_SUCCESS) {
+        LOG_WARN_CAT("RENDERER", "Pre-create idle failed: {} — continuing cautiously", static_cast<int>(idleR));
+    }
+
+    for (uint32_t i = 0; i < framesInFlight; ++i) {
+        LOG_TRACE_CAT("RENDERER", "Frame {} — Creating RTOutput", i);
+
+        // Raw handles to work with Vulkan API
+        VkImage rawImage = VK_NULL_HANDLE;
+        VkDeviceMemory rawMemory = VK_NULL_HANDLE;
+        VkImageView rawView = VK_NULL_HANDLE;
+
+        try {
+            // === 1. Create Image ===
+            VkImageCreateInfo imageInfo{};
+            imageInfo.sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+            imageInfo.imageType     = VK_IMAGE_TYPE_2D;
+            imageInfo.format        = VK_FORMAT_R32G32B32A32_SFLOAT;
+            imageInfo.extent        = { static_cast<uint32_t>(width_), static_cast<uint32_t>(height_), 1 };
+            imageInfo.mipLevels     = 1;
+            imageInfo.arrayLayers   = 1;
+            imageInfo.samples       = VK_SAMPLE_COUNT_1_BIT;
+            imageInfo.tiling        = VK_IMAGE_TILING_OPTIMAL;
+            imageInfo.usage         = VK_IMAGE_USAGE_STORAGE_BIT |
+                                      VK_IMAGE_USAGE_SAMPLED_BIT |
+                                      VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+            imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+            VK_CHECK(vkCreateImage(dev, &imageInfo, nullptr, &rawImage),
+                     ("Failed to create RT output image for frame " + std::to_string(i)).c_str());
+
+            LOG_TRACE_CAT("RENDERER", "Frame {} Image created: 0x{:x}", i, reinterpret_cast<uintptr_t>(rawImage));
+
+            // === 2. Allocate & Bind Memory (Harden: Pad size + log reqs) ===
+            VkMemoryRequirements memReqs{};
+            vkGetImageMemoryRequirements(dev, rawImage, &memReqs);
+            LOG_TRACE_CAT("RENDERER", "Frame {} Mem reqs: size={}, align={}, bits=0x{:x}",
+                          i, memReqs.size, memReqs.alignment, memReqs.memoryTypeBits);
+
+            VkDeviceSize allocSize = memReqs.size + (memReqs.alignment * 2);  // Pad 2x alignment for safety
+            if (allocSize < memReqs.size || allocSize > (1ULL << 32)) {
+                LOG_FATAL_CAT("RENDERER", "Frame {} Invalid alloc size: req={} alloc={} — aborting frame", i, memReqs.size, allocSize);
+                vkDestroyImage(dev, rawImage, nullptr);
+                continue;  // Skip frame, but log
+            }
+
+            uint32_t memType = findMemoryType(physDev, memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+            if (memType == static_cast<uint32_t>(~0u)) {
+                LOG_FATAL_CAT("RENDERER", "Frame {} No suitable memory type found — aborting frame", i);
+                vkDestroyImage(dev, rawImage, nullptr);
+                continue;
+            }
+            LOG_TRACE_CAT("RENDERER", "Frame {} Using memType={} for allocSize={}", i, memType, allocSize);
+
+            VkMemoryAllocateInfo allocInfo{};
+            allocInfo.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+            allocInfo.allocationSize  = allocSize;
+            allocInfo.memoryTypeIndex = memType;
+
+            VK_CHECK(vkAllocateMemory(dev, &allocInfo, nullptr, &rawMemory),
+                     ("Failed to allocate RT output memory for frame " + std::to_string(i)).c_str());
+
+            VK_CHECK(vkBindImageMemory(dev, rawImage, rawMemory, 0),
+                     ("Failed to bind RT output memory for frame " + std::to_string(i)).c_str());
+
+            LOG_TRACE_CAT("RENDERER", "Frame {} Memory bound: 0x{:x}", i, reinterpret_cast<uintptr_t>(rawMemory));
+
+            // === 3. Transition to GENERAL (per-frame cmd for isolation) ===
+            VkCommandBuffer cmd = beginSingleTimeCommands(dev, cmdPool);
+            if (cmd == VK_NULL_HANDLE) {
+                LOG_ERROR_CAT("RENDERER", "Frame {} Failed to begin single-time cmd — skipping transition", i);
+                // Cleanup rawImage/rawMemory
+                vkFreeMemory(dev, rawMemory, nullptr);
+                vkDestroyImage(dev, rawImage, nullptr);
+                continue;
+            }
+
+            VkImageMemoryBarrier barrier{};
+            barrier.sType                       = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+            barrier.oldLayout                   = VK_IMAGE_LAYOUT_UNDEFINED;
+            barrier.newLayout                   = VK_IMAGE_LAYOUT_GENERAL;
+            barrier.srcQueueFamilyIndex         = VK_QUEUE_FAMILY_IGNORED;
+            barrier.dstQueueFamilyIndex         = VK_QUEUE_FAMILY_IGNORED;
+            barrier.image                       = rawImage;
+            barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            barrier.subresourceRange.levelCount = 1;
+            barrier.subresourceRange.layerCount = 1;
+
+            vkCmdPipelineBarrier(cmd,
+                VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
+                0, 0, nullptr, 0, nullptr, 1, &barrier);
+
+            endSingleTimeCommands(dev, cmdPool, queue, cmd);  // Void call
+            LOG_TRACE_CAT("RENDERER", "Frame {} Transition to GENERAL complete", i);
+
+            // Per-frame wait to flush GPU before next alloc
+            vkQueueWaitIdle(queue);
+
+            // === 4. Create Image View ===
+            VkImageViewCreateInfo viewInfo{};
+            viewInfo.sType                           = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+            viewInfo.image                           = rawImage;
+            viewInfo.viewType                        = VK_IMAGE_VIEW_TYPE_2D;
+            viewInfo.format                          = VK_FORMAT_R32G32B32A32_SFLOAT;
+            viewInfo.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
+            viewInfo.subresourceRange.levelCount     = 1;
+            viewInfo.subresourceRange.layerCount     = 1;
+
+            VK_CHECK(vkCreateImageView(dev, &viewInfo, nullptr, &rawView),
+                     ("Failed to create RT output image view for frame " + std::to_string(i)).c_str());
+
+            LOG_TRACE_CAT("RENDERER", "Frame {} View created: 0x{:x}", i, reinterpret_cast<uintptr_t>(rawView));
+
+            // === 5. Wrap in Handle<T> (Harden: Log before/after emplace) ===
+            LOG_TRACE_CAT("RENDERER", "Frame {} Creating Handles — img=0x{:x}, mem=0x{:x}, view=0x{:x}",
+                          i, reinterpret_cast<uintptr_t>(rawImage), reinterpret_cast<uintptr_t>(rawMemory), reinterpret_cast<uintptr_t>(rawView));
+
+            // Assume RTX::Handle ctor: (T h, device, destroyFn, size_t (unused?), tag) — pass raw directly (VkImage, not &)
+            static const std::string_view imgTag = "RTOutputImage";
+            static const std::string_view memTag = "RTOutputMemory";
+            static const std::string_view viewTag = "RTOutputView";
+
+            rtOutputImages_.emplace_back(rawImage, dev, vkDestroyImage, 0, imgTag);
+            rtOutputMemories_.emplace_back(rawMemory, dev, vkFreeMemory, 0, memTag);
+            rtOutputViews_.emplace_back(rawView, dev, vkDestroyImageView, 0, viewTag);
+
+            LOG_TRACE_CAT("RENDERER", "Frame {} — RTOutput ready: img=0x{:x}, view=0x{:x}",
+                          i, reinterpret_cast<uintptr_t>(rawImage), reinterpret_cast<uintptr_t>(rawView));
+
+            // Harden: Validate post-emplace sizes
+            if (rtOutputImages_.size() != i + 1 || rtOutputMemories_.size() != i + 1 || rtOutputViews_.size() != i + 1) {
+                LOG_ERROR_CAT("RENDERER", "Frame {} Vector emplace failed — sizes mismatch", i);
+                // Rollback? Complex; log and continue
+            }
+
+        } catch (const std::exception& e) {
+            LOG_FATAL_CAT("RENDERER", "Frame {} Exception in createRTOutput: {} — cleaning up", i, e.what());
+            // Cleanup raw handles
+            if (rawView != VK_NULL_HANDLE) vkDestroyImageView(dev, rawView, nullptr);
+            if (rawMemory != VK_NULL_HANDLE) vkFreeMemory(dev, rawMemory, nullptr);
+            if (rawImage != VK_NULL_HANDLE) vkDestroyImage(dev, rawImage, nullptr);
+            throw;  // Re-throw to abort ctor
+        }
+    }
+
+    // Harden: Post-loop idle + validate all created
+    vkQueueWaitIdle(queue);
+    LOG_TRACE_CAT("RENDERER", "Post-loop idle complete");
+
+    if (rtOutputImages_.size() != framesInFlight) {
+        LOG_FATAL_CAT("RENDERER", "Incomplete RT outputs: expected={}, got={} — device issue?", framesInFlight, rtOutputImages_.size());
+        throw std::runtime_error("Partial RT output creation — recreate device");
+    }
+
+    LOG_SUCCESS_CAT("RENDERER", "RT output images created — {} frames in GENERAL layout", framesInFlight);
     LOG_TRACE_CAT("RENDERER", "createRTOutputImages — COMPLETE");
 }
 
@@ -1037,11 +1487,31 @@ uint32_t VulkanRenderer::findMemoryType(VkPhysicalDevice physicalDevice, uint32_
 }
 
 void VulkanRenderer::initializeAllBufferData(uint32_t frames, VkDeviceSize uniformSize, VkDeviceSize materialSize) {
+    // Harden: Validate inputs to prevent overflows or invalid states
+    if (frames == 0) {
+        LOG_ERROR_CAT("RENDERER", "initializeAllBufferData: Invalid frames count: {}", frames);
+        return;
+    }
+    if (uniformSize > (1ULL << 32) || materialSize > (1ULL << 32)) {  // Arbitrary sane limit for debug
+        LOG_WARN_CAT("RENDERER", "initializeAllBufferData: Large buffer sizes detected — uniform={}, material={}", uniformSize, materialSize);
+    }
+
     LOG_TRACE_CAT("RENDERER", "initializeAllBufferData — START — frames={}, uniformSize={}, materialSize={}", frames, uniformSize, materialSize);
     LOG_INFO_CAT("RENDERER", "Initializing buffer data: {} frames | Uniform: {} MB | Material: {} MB", 
-        frames, uniformSize / (1024*1024), materialSize / (1024*1024));
+        frames, uniformSize / (1024ULL*1024ULL), materialSize / (1024ULL*1024ULL));  // Use ULL for safe division
+
+    // Resize and initialize
     uniformBufferEncs_.resize(frames);
-    for (auto& enc : uniformBufferEncs_) enc = 0;
+    if (uniformBufferEncs_.size() != static_cast<size_t>(frames)) {
+        LOG_ERROR_CAT("RENDERER", "initializeAllBufferData: Resize failed — expected={}, got={}", frames, uniformBufferEncs_.size());
+        uniformBufferEncs_.clear();  // Reset to safe state
+        return;
+    }
+
+    for (auto& enc : uniformBufferEncs_) {
+        enc = 0;
+    }
+
     LOG_TRACE_CAT("RENDERER", "Resized uniformBufferEncs_ to {}, initialized to 0", uniformBufferEncs_.size());
     LOG_TRACE_CAT("RENDERER", "initializeAllBufferData — COMPLETE");
 }

@@ -324,48 +324,6 @@ namespace RTX {
         uint64_t deobfuscate(uint64_t obf) const noexcept;
     };
 
-// =============================================================================
-//  BUFFER MACROS – UltraLowLevelBufferTracker
-// =============================================================================
-
-/// Declare a buffer handle (uint64_t)
-#define BUFFER(handle) uint64_t handle = 0ULL
-
-/// Create a buffer and return its opaque handle
-#define BUFFER_CREATE(handle, size, usage, props, tag) \
-    do { \
-        LOG_INFO_CAT("RTX", "BUFFER_CREATE: {} | Size {} | Tag: {}", #handle, (size), (tag)); \
-        (handle) = RTX::UltraLowLevelBufferTracker::get().create((size), (usage), (props), (tag)); \
-    } while (0)
-
-/// Get the real VkBuffer from the opaque handle
-#define RAW_BUFFER(handle) \
-    (RTX::UltraLowLevelBufferTracker::get().getData((handle)) \
-        ? static_cast<VkBuffer>(RTX::UltraLowLevelBufferTracker::get().getData((handle))->buffer) \
-        : VK_NULL_HANDLE)
-
-/// Get the VkDeviceMemory from the opaque handle
-#define BUFFER_MEMORY(handle) \
-    (RTX::UltraLowLevelBufferTracker::get().getData((handle)) \
-        ? RTX::UltraLowLevelBufferTracker::get().getData((handle))->memory \
-        : VK_NULL_HANDLE)
-
-/// Map buffer memory for CPU access
-#define BUFFER_MAP(handle, mapped) \
-    do { mapped = RTX::UltraLowLevelBufferTracker::get().map(handle); } while(0)
-
-/// Unmap buffer memory
-#define BUFFER_UNMAP(handle) RTX::UltraLowLevelBufferTracker::get().unmap(handle)
-
-/// Destroy buffer handle (does NOT reset variable)
-#define BUFFER_DESTROY(handle) \
-    do { \
-        if ((handle) != 0) { \
-            LOG_INFO_CAT("RTX", "BUFFER_DESTROY: handle={:x}", (handle)); \
-            RTX::UltraLowLevelBufferTracker::get().destroy((handle)); \
-        } \
-    } while(0)
-
     // =============================================================================
     // GLOBAL SWAPCHAIN + LAS
     // =============================================================================

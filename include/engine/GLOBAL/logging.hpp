@@ -43,6 +43,74 @@
 #include <stop_token>
 
 // =============================================================================
+// AMOURANTH RTX — DELTA TIME TRACKING v∞ — NOV 13 2025
+// PINK PHOTONS ETERNAL — FRAME-ACCURATE DELTAS — ZERO OVERHEAD
+// =============================================================================
+namespace Logging::DeltaTime {
+
+// Global high-resolution frame clock
+inline std::atomic<std::chrono::steady_clock::time_point> g_lastFrameTime{std::chrono::steady_clock::now()};
+inline std::atomic<double> g_deltaTimeSeconds{0.0};
+inline std::atomic<double> g_deltaTimeMs{0.0};
+inline std::atomic<double> g_deltaTimeUs{0.0};
+inline std::atomic<uint64_t> g_frameCount{0};
+
+// Call this ONCE per frame (in your render loop) — preferably right after present
+inline void update() noexcept {
+    auto now = std::chrono::steady_clock::now();
+    auto prev = g_lastFrameTime.load(std::memory_order_acquire);
+    
+    auto delta = std::chrono::duration_cast<std::chrono::nanoseconds>(now - prev);
+    double deltaSec = delta.count() * 1e-9;
+    double deltaMs  = deltaSec * 1000.0;
+    double deltaUs  = deltaSec * 1000000.0;
+
+    g_deltaTimeSeconds.store(deltaSec, std::memory_order_release);
+    g_deltaTimeMs.store(deltaMs, std::memory_order_release);
+    g_deltaTimeUs.store(deltaUs, std::memory_order_release);
+    g_frameCount.fetch_add(1, std::memory_order_release);
+    g_lastFrameTime.store(now, std::memory_order_release);
+}
+
+// PUBLIC READERS — ZERO COST — CAN BE CALLED ANYWHERE
+[[nodiscard]] inline double seconds() noexcept { return g_deltaTimeSeconds.load(std::memory_order_acquire); }
+[[nodiscard]] inline double ms()      noexcept { return g_deltaTimeMs.load(std::memory_order_acquire); }
+[[nodiscard]] inline double us()      noexcept { return g_deltaTimeUs.load(std::memory_order_acquire); }
+[[nodiscard]] inline uint64_t frame() noexcept { return g_frameCount.load(std::memory_order_acquire); }
+
+// FORMATTED STRINGS — FOR LOGGING
+[[nodiscard]] inline std::string strSec()  { return std::format("{:.6f}s",  seconds()); }
+[[nodiscard]] inline std::string strMs()   { return std::format("{:.3f}ms", ms()); }
+[[nodiscard]] inline std::string strUs()   { return std::format("{:.1f}µs", us()); }
+[[nodiscard]] inline std::string strFps()  { return seconds() > 0.0 ? std::format("{:.1f} FPS", 1.0 / seconds()) : "∞ FPS"; }
+
+} // namespace Logging::DeltaTime
+
+// =============================================================================
+// NEW LOG MACROS — WITH DELTA TIME
+// =============================================================================
+#define LOG_DELTA() \
+    LOG_INFO_CAT("DELTA", "Δt: {} | {} | {} | {} | Frame {}", \
+        Logging::DeltaTime::strUs(), \
+        Logging::DeltaTime::strMs(), \
+        Logging::DeltaTime::strSec(), \
+        Logging::DeltaTime::strFps(), \
+        Logging::DeltaTime::frame())
+
+#define LOG_DELTA_TRACE() \
+    LOG_TRACE_CAT("DELTA", "Δt: {} | {} | {} | {} | Frame {}", \
+        Logging::DeltaTime::strUs(), \
+        Logging::DeltaTime::strMs(), \
+        Logging::DeltaTime::strSec(), \
+        Logging::DeltaTime::strFps(), \
+        Logging::DeltaTime::frame())
+
+// For ultra-precise profiling (e.g. per-section)
+#define LOG_DELTA_PERF(section) \
+    LOG_PERF_CAT("DELTA", "[{}] Δt: {} → {} → {} FPS", section, \
+        Logging::DeltaTime::strUs(), Logging::DeltaTime::strMs(), Logging::DeltaTime::strFps())
+
+// =============================================================================
 // std::formatter<VkResult, char> — FULLY EXPANDED + DEFAULT
 // =============================================================================
 namespace std {
@@ -430,7 +498,7 @@ private:
             {"Device", QUASAR_BLUE}, {"Swapchain", OCEAN_TEAL}, {"Command", CHROMIUM_SILVER},
             {"Queue", OBSIDIAN_BLACK}, {"RayTrace", TURQUOISE_BLUE}, {"RTX", HYPERSPACE_WARP},
             {"Accel", PULSAR_GREEN}, {"TLAS", SUPERNOVA_ORANGE}, {"BLAS", SUPERNOVA_ORANGE},
-			{"LAS", SUPERNOVA_ORANGE}, {"AI", COSMIC_GOLD}, {"Memory", PEACHES_AND_CREAM},
+            {"LAS", SUPERNOVA_ORANGE}, {"AI", COSMIC_GOLD}, {"Memory", PEACHES_AND_CREAM},
             {"SBT", RASPBERRY_PINK}, {"Shader", NEBULA_VIOLET}, {"Renderer", BRIGHT_PINKISH_PURPLE},
             {"Render", THERMO_PINK}, {"Tonemap", PEACHES_AND_CREAM}, {"GBuffer", QUANTUM_FLUX},
             {"Post", NUCLEAR_REACTOR}, {"Buffer", BRONZE_BROWN}, {"Image", LIME_YELLOW},
@@ -491,23 +559,27 @@ private:
 
         const std::string fileLine = std::format("{}:{}:{}", loc.file_name(), loc.line(), loc.function_name());
 
-        const std::string plain = std::format("{:<{}} {:>{}} {:>{}} [{:>{}}] [{:>{}}] {} [{}]\n",
-                                             levelStr, LEVEL_WIDTH,
-                                             deltaStr, DELTA_WIDTH,
-                                             timeStr,  TIME_WIDTH,
-                                             category, CAT_WIDTH,
-                                             threadId, THREAD_WIDTH,
-                                             formattedMessage,
-                                             fileLine);
+        // Plain lines (file output)
+        const std::string plain_line1 = std::format("{:<{}} {:>{}} {:>{}} [{:>{}}] [{:>{}}] {}\n",
+                                                    levelStr, LEVEL_WIDTH,
+                                                    deltaStr, DELTA_WIDTH,
+                                                    timeStr,  TIME_WIDTH,
+                                                    category, CAT_WIDTH,
+                                                    threadId, THREAD_WIDTH,
+                                                    formattedMessage);
+        const std::string plain_line2 = std::format("{}\n", fileLine);
+        const std::string plain = plain_line1 + plain_line2 + "\n";
 
+        // Colored lines (terminal output)
         std::ostringstream oss;
         oss << levelBg << std::format("{:<{}}", levelStr, LEVEL_WIDTH) << RESET
             << " " << std::format("{:>{}}", deltaStr, DELTA_WIDTH) << " "
             << std::format("{:>{}}", timeStr, TIME_WIDTH) << " "
             << catColor << std::format("[{:<{}}]", category, CAT_WIDTH - 2) << RESET
             << " " << LIME_GREEN << std::format("[{:>{}}]", threadId, THREAD_WIDTH - 2) << RESET
-            << " " << levelColor << formattedMessage << RESET
-            << " " << CHROMIUM_SILVER << "[" << fileLine << "]" << RESET << '\n';
+            << " " << levelColor << formattedMessage << RESET << '\n'
+            << CHROMIUM_SILVER << fileLine << RESET << '\n'
+            << '\n';
         const std::string colored = oss.str();
 
         if (batch) {
