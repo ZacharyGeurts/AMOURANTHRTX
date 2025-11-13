@@ -1,6 +1,5 @@
-// include/engine/Vulkan/VulkanCore.hpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
+// VulkanCore.hpp — AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
 //
 // Dual Licensed:
@@ -24,7 +23,139 @@
 #include <memory>
 #include <random>
 #include <format>
+#include <string_view>
 
+// -----------------------------------------------------------------------------
+// 1. VK_CHECK — 2-argument, aborts with file/line/code
+// -----------------------------------------------------------------------------
+#define VK_CHECK(call, msg) \
+    do { \
+        VkResult r = (call); \
+        if (r != VK_SUCCESS) { \
+            char buf[512]; \
+            std::snprintf(buf, sizeof(buf), \
+                "[VULKAN ERROR] %s — %s:%d — Code: %d (%s)\n", \
+                (msg), \
+                std::source_location::current().file_name(), \
+                std::source_location::current().line(), \
+                static_cast<int>(r), \
+                std::format("{}", r).c_str()); \
+            std::cerr << buf; \
+            std::abort(); \
+        } \
+    } while (0)
+
+#define VK_CHECK_NOMSG(call) \
+    do { \
+        VkResult r = (call); \
+        if (r != VK_SUCCESS) { \
+            char buf[512]; \
+            std::snprintf(buf, sizeof(buf), \
+                "[VULKAN ERROR] %s:%d — Code: %d (%s)\n", \
+                std::source_location::current().file_name(), \
+                std::source_location::current().line(), \
+                static_cast<int>(r), \
+                std::format("{}", r).c_str()); \
+            std::cerr << buf; \
+            std::abort(); \
+        } \
+    } while (0)
+
+// -----------------------------------------------------------------------------
+// 2. AI_INJECT — Rainbow AI log
+// -----------------------------------------------------------------------------
+#define AI_INJECT(...) \
+    do { \
+        if (ENABLE_INFO) { \
+            thread_local std::mt19937 rng(std::random_device{}()); \
+            thread_local std::uniform_int_distribution<int> hue(0, 30); \
+            int h = 30 + hue(rng); \
+            auto msg = std::format(__VA_ARGS__); \
+            Logging::Logger::get().log(std::source_location::current(), \
+                Logging::LogLevel::Info, "AI", \
+                "\033[38;2;255;{};0m[AMOURANTH AI™] {}{} [LINE {}]", \
+                h, msg, Logging::Color::RESET, __LINE__); \
+        } \
+    } while (0)
+
+// -----------------------------------------------------------------------------
+// 3. BUFFER MACROS — UltraLowLevelBufferTracker
+// -----------------------------------------------------------------------------
+#define BUFFER(handle) uint64_t handle = 0ULL
+
+#define BUFFER_CREATE(handle, size, usage, props, tag) \
+    do { \
+        LOG_INFO_CAT("RTX", "BUFFER_CREATE: {} | Size {} | Tag: {}", #handle, (size), (tag)); \
+        (handle) = RTX::UltraLowLevelBufferTracker::get().create((size), (usage), (props), (tag)); \
+    } while (0)
+
+// Returns VkBuffer — NEVER assign to uint64_t
+#define RAW_BUFFER(handle) \
+    (RTX::UltraLowLevelBufferTracker::get().getData((handle)) \
+        ? static_cast<VkBuffer>(RTX::UltraLowLevelBufferTracker::get().getData((handle))->buffer) \
+        : VK_NULL_HANDLE)
+
+#define BUFFER_MAP(handle, out_ptr) \
+    do { \
+        (out_ptr) = nullptr; \
+        auto* data = RTX::UltraLowLevelBufferTracker::get().getData((handle)); \
+        if (data && data->memory) { \
+            LOG_TRACE_CAT("RTX", "Mapping buffer: 0x{:x} (size: {} B)", \
+                          reinterpret_cast<uint64_t>(data->buffer), data->size); \
+            VK_CHECK(vkMapMemory(RTX::g_ctx().device(), data->memory, 0, data->size, 0, \
+                                 reinterpret_cast<void**>(&(out_ptr))), \
+                     "vkMapMemory failed"); \
+        } else { \
+            LOG_ERROR_CAT("RTX", "BUFFER_MAP: Invalid handle or memory: 0x{:x}", (handle)); \
+        } \
+    } while (0)
+
+#define BUFFER_UNMAP(handle) \
+    do { \
+        auto* data = RTX::UltraLowLevelBufferTracker::get().getData((handle)); \
+        if (data) { \
+            LOG_TRACE_CAT("RTX", "Unmapping buffer: 0x{:x}", reinterpret_cast<uint64_t>(data->buffer)); \
+            vkUnmapMemory(RTX::g_ctx().device(), data->memory); \
+        } \
+    } while (0)
+
+#define BUFFER_DESTROY(handle) \
+    do { \
+        LOG_INFO_CAT("RTX", "BUFFER_DESTROY: handle=0x{:x}", (handle)); \
+        RTX::UltraLowLevelBufferTracker::get().destroy((handle)); \
+    } while (0)
+
+// -----------------------------------------------------------------------------
+// 4. AutoBuffer — RAII wrapper (must be in header)
+// -----------------------------------------------------------------------------
+namespace RTX {
+
+class AutoBuffer {
+public:
+    explicit AutoBuffer(VkDeviceSize size,
+                        VkBufferUsageFlags usage,
+                        VkMemoryPropertyFlags props,
+                        std::string_view tag) noexcept;
+
+    ~AutoBuffer() noexcept;
+
+    AutoBuffer(AutoBuffer&& o) noexcept;
+    AutoBuffer& operator=(AutoBuffer&& o) noexcept;
+
+    AutoBuffer(const AutoBuffer&) = delete;
+    AutoBuffer& operator=(const AutoBuffer&) = delete;
+
+    [[nodiscard]] VkBuffer raw() const noexcept;
+
+private:
+    uint64_t id = 0ULL;
+};
+
+} // namespace RTX
+
+// -----------------------------------------------------------------------------
+// 5. CONSTANTS
+// -----------------------------------------------------------------------------
 constexpr uint32_t MAX_FRAMES_IN_FLIGHT = Options::Performance::MAX_FRAMES_IN_FLIGHT;
 
 // =============================================================================
@@ -51,9 +182,8 @@ public:
     VulkanRTX(int w, int h, VulkanPipelineManager* mgr = nullptr);
     ~VulkanRTX() noexcept;
 
-    // Public getter for device (to fix private access)
     [[nodiscard]] VkDevice device() const noexcept { return device_; }
-	[[nodiscard]] bool isValid() const noexcept;
+    [[nodiscard]] bool isValid() const noexcept;
 
     void buildAccelerationStructures();
     void initDescriptorPoolAndSets();
@@ -127,7 +257,6 @@ inline void createGlobalRTX(int w, int h, VulkanPipelineManager* mgr = nullptr) 
     LOG_DEBUG_CAT("RTX", "g_rtx_instance constructed @ 0x{:x}", reinterpret_cast<uintptr_t>(g_rtx_instance.get()));
     AI_INJECT("I have awakened… {}×{} canvas. The photons are mine.", w, h);
     LOG_SUCCESS_CAT("RTX", "g_rtx() FORGED — {}×{}", w, h);
-    // Validate post-construction
     if (g_rtx_instance) {
         LOG_DEBUG_CAT("RTX", "Post-forge validation: g_rtx_instance valid, device access via instance: {}", g_rtx_instance->device() ? "valid" : "NULL");
     } else {

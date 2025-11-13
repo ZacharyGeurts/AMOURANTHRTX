@@ -3,8 +3,8 @@
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
 
-#include "modes/RenderMode5.hpp"
 #include "engine/GLOBAL/logging.hpp"
+#include "modes/RenderMode5.hpp"
 
 using namespace Engine;
 using namespace Logging::Color;

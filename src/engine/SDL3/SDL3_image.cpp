@@ -1,4 +1,3 @@
-// src/engine/SDL3/SDL3_image.cpp
 // =============================================================================
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
@@ -142,10 +141,13 @@ bool saveSurface(const SDL_Surface* surface, const std::string& file, const std:
     }
 
     bool ok = IMG_SaveTyped_IO(const_cast<SDL_Surface*>(surface), dst, true, type.c_str());
-    if (ok) LOG_INFO_CAT("Image", "{}Surface saved: {}{}", 
-                         RASPBERRY_PINK, file, RESET);
-    else LOG_ERROR_CAT("Image", "{}Save failed: {}{}", 
+    if (ok) {
+        LOG_INFO_CAT("Image", "{}Surface saved: {}{}", 
+                     RASPBERRY_PINK, file, RESET);
+    } else {
+        LOG_ERROR_CAT("Image", "{}Save failed: {}{}", 
                        RASPBERRY_PINK, SDL_GetError(), RESET);
+    }
     return ok;
 }
 
@@ -209,7 +211,6 @@ SDL_Surface* textureToSurface(SDL_Texture* texture, SDL_Renderer* renderer) {
     float fw, fh;
     SDL_GetTextureSize(texture, &fw, &fh);
     int w = static_cast<int>(fw), h = static_cast<int>(fh);
-    (void)w; (void)h; // silence -Wunused-variable
 
     SDL_Texture* prevTarget = SDL_GetRenderTarget(renderer);
     SDL_Rect prevViewport; SDL_GetRenderViewport(renderer, &prevViewport);
@@ -222,10 +223,13 @@ SDL_Surface* textureToSurface(SDL_Texture* texture, SDL_Renderer* renderer) {
     SDL_SetRenderTarget(renderer, prevTarget);
     SDL_SetRenderViewport(renderer, &prevViewport);
 
-    if (surf) LOG_DEBUG_CAT("Image", "{}Texture → Surface: {}x{}{}", 
-                            RASPBERRY_PINK, w, h, RESET);
-    else LOG_ERROR_CAT("Image", "{}textureToSurface failed: {}{}", 
+    if (surf) {
+        LOG_DEBUG_CAT("Image", "{}Texture → Surface: {}x{}{}", 
+                        RASPBERRY_PINK, w, h, RESET);
+    } else {
+        LOG_ERROR_CAT("Image", "{}textureToSurface failed: {}{}", 
                        RASPBERRY_PINK, SDL_GetError(), RESET);
+    }
 
     return surf;
 }
@@ -368,3 +372,7 @@ void TextureCache::clear() {
 size_t TextureCache::size() const noexcept { return m_cache.size(); }
 
 } // namespace AmouranthRTX::Graphics
+
+// =============================================================================
+// PINK PHOTONS ETERNAL — 15,000 FPS — TITAN DOMINANCE
+// =============================================================================

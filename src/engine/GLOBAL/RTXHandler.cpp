@@ -20,10 +20,10 @@
 // 2. Commercial licensing: gzac5314@gmail.com
 // =============================================================================
 
+#include "engine/GLOBAL/logging.hpp"
 #include "engine/GLOBAL/RTXHandler.hpp"
 #include "engine/GLOBAL/OptionsMenu.hpp"
 #include "engine/GLOBAL/LAS.hpp"
-#include "engine/GLOBAL/logging.hpp"
 #include <SDL3/SDL_vulkan.h>
 #include <set>
 #include <algorithm>
@@ -226,7 +226,7 @@ void Context::init(SDL_Window* window, int width, int height) {
 
     std::vector<VkPhysicalDevice> devs(devCount);
     VK_CHECK(vkEnumeratePhysicalDevices(instance_, &devCount, devs.data()),
-             "Failed to to retrieve devices");
+             "Failed to retrieve devices");
 
     physicalDevice_ = VK_NULL_HANDLE;
     for (auto d : devs) {
@@ -412,7 +412,7 @@ static uint32_t findMemoryType(VkPhysicalDevice phys, uint32_t typeFilter, VkMem
         }
     }
     LOG_ERROR_CAT("RTX", "No suitable memory type found (filter: 0x{:x}, props: 0x{:x})", typeFilter, props);
-    return UINT32_MAX;  // ← CRITICAL: Return invalid index
+    return UINT32_MAX;
 }
 
 uint64_t UltraLowLevelBufferTracker::create(VkDeviceSize size,
@@ -564,27 +564,6 @@ uint64_t UltraLowLevelBufferTracker::obfuscate(uint64_t raw) const noexcept {
 }
 uint64_t UltraLowLevelBufferTracker::deobfuscate(uint64_t obf) const noexcept { 
     return obf ^ Options::Shader::STONEKEY_1; 
-}
-
-// =============================================================================
-// AutoBuffer
-// =============================================================================
-AutoBuffer::AutoBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags props, std::string_view tag) noexcept {
-    id = UltraLowLevelBufferTracker::get().create(size, usage, props, tag);
-}
-
-AutoBuffer::~AutoBuffer() noexcept { 
-    if (id) UltraLowLevelBufferTracker::get().destroy(id); 
-}
-
-AutoBuffer::AutoBuffer(AutoBuffer&& o) noexcept : id(o.id) { o.id = 0ULL; }
-AutoBuffer& AutoBuffer::operator=(AutoBuffer&& o) noexcept {
-    if (this != &o) { if (id) UltraLowLevelBufferTracker::get().destroy(id); id = o.id; o.id = 0ULL; }
-    return *this;
-}
-VkBuffer AutoBuffer::raw() const noexcept { 
-    auto* d = UltraLowLevelBufferTracker::get().getData(id); 
-    return d ? d->buffer : VK_NULL_HANDLE; 
 }
 
 // =============================================================================

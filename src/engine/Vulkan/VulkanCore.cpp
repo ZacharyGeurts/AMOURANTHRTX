@@ -8,7 +8,7 @@
 // 2. Commercial licensing: gzac5314@gmail.com
 //
 // =============================================================================
-// VulkanCore.cpp — VALHALLA v70 FINAL — NOVEMBER 12, 2025 3:00 AM EST
+// VulkanCore.cpp — VALHALLA v70 FINAL — NOVEMBER 13, 2025 3:00 AM EST
 // • ALL RT FUNCTIONS VIA RTX::g_ctx() → NO LINKER ERRORS
 // • g_PhysicalDevice DEFINED → LEGACY SAFE
 // • FULL LIFECYCLE: CONSTRUCT → BIND → BUILD → TRACE → DESTROY
@@ -319,17 +319,42 @@ void VulkanRTX::buildAccelerationStructures() {
         RTX::AmouranthAI::get().onMemoryEvent("Staging Buffer", maxSize);
         LOG_DEBUG_CAT("RTX", "Staging buffer created: 0x{:x}", reinterpret_cast<uintptr_t>(RAW_BUFFER(staging)));
 
-        auto upload = [&](const void* src, VkDeviceSize size, uint64_t dst, const char* name) {
+        auto upload = [&](const void* src, VkDeviceSize size, uint64_t dstHandle, const char* name) {
             LOG_TRACE_CAT("RTX", "Uploading {} bytes to {} buffer", size, name);
+
+            VkBuffer stagingBuffer = RAW_BUFFER(staging);
+            if (!stagingBuffer) {
+                LOG_ERROR_CAT("RTX", "Failed to resolve staging buffer (handle: 0x{:x}) for upload: {}", staging, name);
+                return;
+            }
+
             void* mapped = nullptr;
             BUFFER_MAP(staging, mapped);
+            if (!mapped) {
+                LOG_ERROR_CAT("RTX", "Failed to map staging buffer (handle: 0x{:x}) for upload: {}", staging, name);
+                return;
+            }
+
             std::memcpy(mapped, src, size);
             BUFFER_UNMAP(staging);
 
+            VkBuffer dstBuffer = RAW_BUFFER(dstHandle);
+            if (!dstBuffer) {
+                LOG_ERROR_CAT("RTX", "Invalid destination buffer handle (0x{:x}) for upload: {}", dstHandle, name);
+                return;
+            }
+
             VkCommandBuffer cmd = VulkanRTX::beginSingleTimeCommands(RTX::g_ctx().commandPool());
-            VkBufferCopy copy{0, 0, size};
-            vkCmdCopyBuffer(cmd, RAW_BUFFER(staging), RAW_BUFFER(dst), 1, &copy);
+
+            VkBufferCopy copyRegion{};
+            copyRegion.srcOffset = 0;
+            copyRegion.dstOffset = 0;
+            copyRegion.size = size;
+
+            vkCmdCopyBuffer(cmd, stagingBuffer, dstBuffer, 1, &copyRegion);
+
             VulkanRTX::endSingleTimeCommands(cmd, RTX::g_ctx().graphicsQueue(), RTX::g_ctx().commandPool());
+
             LOG_TRACE_CAT("RTX", "Uploaded {} bytes to {}", size, name);
         };
 

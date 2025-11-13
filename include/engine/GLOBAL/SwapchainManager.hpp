@@ -20,8 +20,8 @@
 
 #pragma once
 
-#include "engine/GLOBAL/OptionsMenu.hpp"   // ← CRITICAL: Options first
 #include "engine/GLOBAL/logging.hpp"       // ← PINK_PHOTON, LOG_*, VkFormat formatter specialization
+#include "engine/GLOBAL/OptionsMenu.hpp"   // ← CRITICAL: Options first
 #include "engine/GLOBAL/RTXHandler.hpp"    // ← g_ctx(), Context, Handle
 #include <vulkan/vulkan.h>
 #include <vector>

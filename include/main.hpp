@@ -1,6 +1,36 @@
-#ifndef MAIN_HPP
-#define MAIN_HPP
+// =============================================================================
+// main.hpp — AMOURANTH RTX Engine © 2025
+// Central include: ALL .cpp files include this FIRST
+// Defines: VK_CHECK, AI_INJECT + core engine headers
+// =============================================================================
+#pragma once
 
-#include "engine/GLOBAL/StoneKey.hpp"
-#include "handle_app.hpp"
-#endif // MAIN_HPP
+// -----------------------------------------------------------------------------
+// 1. CORE DEPENDENCIES FOR MACROS
+// -----------------------------------------------------------------------------
+#include <vulkan/vulkan.h>
+#include <source_location>
+#include <format>
+#include <iostream>
+#include <random>
+#include "engine/GLOBAL/OptionsMenu.hpp"   // for ENABLE_INFO
+
+// -----------------------------------------------------------------------------
+// 2. ENGINE-WIDE MACROS — DEFINED HERE, VISIBLE EVERYWHERE
+// -----------------------------------------------------------------------------
+
+// VulkanCore.hpp
+
+// -----------------------------------------------------------------------------
+// 3. CORE ENGINE INCLUDES — AFTER MACROS (safe order)
+// -----------------------------------------------------------------------------
+#include "engine/GLOBAL/logging.hpp"
+#include "engine/GLOBAL/RTXHandler.hpp"
+#include "engine/GLOBAL/LAS.hpp"
+#include "handle_app.hpp"                 // ← your existing include
+// ... add more global headers here as needed ...
+
+// -----------------------------------------------------------------------------
+// 4. FORWARD DECLARATIONS / HELPERS
+// -----------------------------------------------------------------------------
+namespace RTX { struct Context; Context& g_ctx(); }

@@ -228,49 +228,31 @@ namespace RTX {
         uint64_t deobfuscate(uint64_t obf) const noexcept;
     };
 
-    // =============================================================================
-    // MACROS
-    // =============================================================================
-    #define BUFFER(handle) uint64_t handle = 0ULL
-    #define BUFFER_CREATE(handle, size, usage, props, tag) \
-        do { LOG_INFO_CAT("RTX", "BUFFER_CREATE: {} | Size {} | Tag: {}", #handle, size, tag); (handle) = RTX::UltraLowLevelBufferTracker::get().create((size), (usage), (props), (tag)); } while (0)
-#define BUFFER_MAP(h, ptr) \
-    do { \
-        (ptr) = nullptr; \
-        auto* d = RTX::UltraLowLevelBufferTracker::get().getData((h)); \
-        if (d && d->memory) { \
-            void* p = nullptr; \
-            LOG_INFO_CAT("RTX", "Mapping buffer: 0x{:x} | Size: {} | Tag: {}", \
-                         reinterpret_cast<uint64_t>(d->buffer), d->size, d->tag); \
-            if (vkMapMemory(RTX::g_ctx().device(), d->memory, 0, d->size, 0, &p) == VK_SUCCESS) { \
-                (ptr) = p; \
-            } else { \
-                LOG_ERROR_CAT("RTX", "vkMapMemory failed for buffer 0x{:x}", reinterpret_cast<uint64_t>(d->buffer)); \
-            } \
-        } else { \
-            LOG_ERROR_CAT("RTX", "BUFFER_MAP: Invalid handle or memory: 0x{:x}", (h)); \
-        } \
-    } while (0)
-    #define BUFFER_UNMAP(h) \
-        do { auto* d = RTX::UltraLowLevelBufferTracker::get().getData((h)); if (d) { LOG_INFO_CAT("RTX", "Unmapping buffer: 0x{:x}", reinterpret_cast<uint64_t>(d->buffer)); vkUnmapMemory(RTX::g_ctx().device(), d->memory); } } while (0)
-    #define BUFFER_DESTROY(handle) \
-        do { LOG_INFO_CAT("RTX", "BUFFER_DESTROY: {}", #handle); RTX::UltraLowLevelBufferTracker::get().destroy((handle)); } while (0)
-    #define RAW_BUFFER(handle) \
-        (RTX::UltraLowLevelBufferTracker::get().getData((handle)) ? RTX::UltraLowLevelBufferTracker::get().getData((handle))->buffer : VK_NULL_HANDLE)
-    #define BUFFER_MEMORY(handle) \
-        (RTX::UltraLowLevelBufferTracker::get().getData((handle)) ? RTX::UltraLowLevelBufferTracker::get().getData((handle))->memory : VK_NULL_HANDLE)
+// =============================================================================
+//  BUFFER MACROS – UltraLowLevelBufferTracker
+// =============================================================================
 
-    // =============================================================================
-    // AutoBuffer
-    // =============================================================================
-    struct AutoBuffer {
-        uint64_t id{0ULL};
-        AutoBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags props = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, std::string_view tag = "AutoBuffer") noexcept;
-        ~AutoBuffer() noexcept;
-        AutoBuffer(AutoBuffer&& o) noexcept;
-        AutoBuffer& operator=(AutoBuffer&& o) noexcept;
-        VkBuffer raw() const noexcept;
-    };
+/// Declare a buffer handle (uint64_t)
+#define BUFFER(handle) uint64_t handle = 0ULL
+
+/// Create a buffer and return its opaque handle
+#define BUFFER_CREATE(handle, size, usage, props, tag) \
+    do { \
+        LOG_INFO_CAT("RTX", "BUFFER_CREATE: {} | Size {} | Tag: {}", #handle, (size), (tag)); \
+        (handle) = RTX::UltraLowLevelBufferTracker::get().create((size), (usage), (props), (tag)); \
+    } while (0)
+
+/// Get the real VkBuffer from the opaque handle (VkBuffer → usable in Vulkan calls)
+#define RAW_BUFFER(handle) \
+    (RTX::UltraLowLevelBufferTracker::get().getData((handle)) \
+        ? static_cast<VkBuffer>(RTX::UltraLowLevelBufferTracker::get().getData((handle))->buffer) \
+        : VK_NULL_HANDLE)
+
+/// Get the VkDeviceMemory from the opaque handle
+#define BUFFER_MEMORY(handle) \
+    (RTX::UltraLowLevelBufferTracker::get().getData((handle)) \
+        ? RTX::UltraLowLevelBufferTracker::get().getData((handle))->memory \
+        : VK_NULL_HANDLE)
 
     // =============================================================================
     // GLOBAL SWAPCHAIN + LAS

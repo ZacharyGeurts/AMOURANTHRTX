@@ -16,6 +16,8 @@
 //
 // =============================================================================
 
+
+#include "engine/GLOBAL/StoneKey.hpp"
 #include "main.hpp"
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/SDL3/SDL3_init.hpp"
