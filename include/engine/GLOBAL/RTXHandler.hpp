@@ -18,6 +18,7 @@
 
 #pragma once
 
+#include <format>
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_beta.h>
 #include <SDL3/SDL.h>
@@ -38,7 +39,6 @@
 #include <utility>
 #include <span>
 #include <limits>
-#include <format>
 #include <source_location>
 #include <functional>
 #include <queue>
@@ -234,9 +234,23 @@ namespace RTX {
     #define BUFFER(handle) uint64_t handle = 0ULL
     #define BUFFER_CREATE(handle, size, usage, props, tag) \
         do { LOG_INFO_CAT("RTX", "BUFFER_CREATE: {} | Size {} | Tag: {}", #handle, size, tag); (handle) = RTX::UltraLowLevelBufferTracker::get().create((size), (usage), (props), (tag)); } while (0)
-    #define BUFFER_MAP(h, ptr) \
-        do { (ptr) = nullptr; auto* d = RTX::UltraLowLevelBufferTracker::get().getData((h)); \
-             if (d) { void* p{}; LOG_INFO_CAT("RTX", "Mapping buffer: 0x{:x} | Size {}", reinterpret_cast<uint64_t>(d->buffer), d->size); if (vkMapMemory(RTX::g_ctx().device(), d->memory, 0, d->size, 0, &p) == VK_SUCCESS) (ptr) = p; } } while (0)
+#define BUFFER_MAP(h, ptr) \
+    do { \
+        (ptr) = nullptr; \
+        auto* d = RTX::UltraLowLevelBufferTracker::get().getData((h)); \
+        if (d && d->memory) { \
+            void* p = nullptr; \
+            LOG_INFO_CAT("RTX", "Mapping buffer: 0x{:x} | Size: {} | Tag: {}", \
+                         reinterpret_cast<uint64_t>(d->buffer), d->size, d->tag); \
+            if (vkMapMemory(RTX::g_ctx().device(), d->memory, 0, d->size, 0, &p) == VK_SUCCESS) { \
+                (ptr) = p; \
+            } else { \
+                LOG_ERROR_CAT("RTX", "vkMapMemory failed for buffer 0x{:x}", reinterpret_cast<uint64_t>(d->buffer)); \
+            } \
+        } else { \
+            LOG_ERROR_CAT("RTX", "BUFFER_MAP: Invalid handle or memory: 0x{:x}", (h)); \
+        } \
+    } while (0)
     #define BUFFER_UNMAP(h) \
         do { auto* d = RTX::UltraLowLevelBufferTracker::get().getData((h)); if (d) { LOG_INFO_CAT("RTX", "Unmapping buffer: 0x{:x}", reinterpret_cast<uint64_t>(d->buffer)); vkUnmapMemory(RTX::g_ctx().device(), d->memory); } } while (0)
     #define BUFFER_DESTROY(handle) \

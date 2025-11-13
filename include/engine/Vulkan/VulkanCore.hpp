@@ -53,6 +53,7 @@ public:
 
     // Public getter for device (to fix private access)
     [[nodiscard]] VkDevice device() const noexcept { return device_; }
+	[[nodiscard]] bool isValid() const noexcept;
 
     void buildAccelerationStructures();
     void initDescriptorPoolAndSets();
@@ -132,29 +133,4 @@ inline void createGlobalRTX(int w, int h, VulkanPipelineManager* mgr = nullptr) 
     } else {
         LOG_ERROR_CAT("RTX", "CRITICAL: g_rtx_instance is null after make_unique!");
     }
-}
-
-[[nodiscard]] inline RTX::Context& g_ctx() {
-    static RTX::Context ctx;
-    static bool logged = false;
-    if (!logged) {
-        LOG_INFO_CAT("CTX", "g_ctx() static init — Default ctx created (uninitialized!)");
-        // Use getters or public access for members; assuming Context has public members or getters like device()
-        // Fallback to logging what we can; adjust based on RTX::Context definition
-        LOG_DEBUG_CAT("CTX", "g_ctx() static ctx: device=0x{:x} | physdev=0x{:x} | instance=0x{:x} | surface=0x{:x}",
-                      reinterpret_cast<uintptr_t>(RTX::ctx().device()),  // Use global ctx() if available, or adjust
-                      reinterpret_cast<uintptr_t>(RTX::ctx().physicalDevice()),
-                      reinterpret_cast<uintptr_t>(RTX::ctx().instance()),
-                      reinterpret_cast<uintptr_t>(RTX::ctx().surface()));
-        LOG_SUCCESS_CAT("CTX", "g_ctx() FORGED");  // This logs even if uninit — misleading!
-        logged = true;
-    }
-    // Post-return validation hook (logged on access)
-    LOG_TRACE_CAT("CTX", "g_ctx() returning ref — device ptr: 0x{:x} (valid: {})",
-                  reinterpret_cast<uintptr_t>(RTX::ctx().device()),  // Use RTX::ctx() or adjust to access
-                  RTX::ctx().device() ? "YES" : "NO — POTENTIAL CRASH!");
-    if (!RTX::ctx().device()) {  // Use global or adjust
-        LOG_WARN_CAT("CTX", "WARNING: g_ctx().device is NULL! Expect runtime_error downstream.");
-    }
-    return ctx;
 }

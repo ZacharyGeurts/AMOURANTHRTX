@@ -18,11 +18,12 @@
         if (vk_check_result != VK_SUCCESS) { \
             char vk_err_buf[512]; \
             std::snprintf(vk_err_buf, sizeof(vk_err_buf), \
-                          "[VULKAN ERROR] %s — %s:%d — Code: %d\n", \
+                          "[VULKAN ERROR] %s — %s:%d — Code: %d (%s)\n", \
                           msg, \
                           std::source_location::current().file_name(), \
                           std::source_location::current().line(), \
-                          static_cast<int>(vk_check_result)); \
+                          static_cast<int>(vk_check_result), \
+                          std::format("{}", vk_check_result).c_str()); \
             std::cerr << vk_err_buf; \
             std::abort(); \
         } \
@@ -34,10 +35,11 @@
         if (vk_check_result != VK_SUCCESS) { \
             char vk_err_buf[512]; \
             std::snprintf(vk_err_buf, sizeof(vk_err_buf), \
-                          "[VULKAN ERROR] %s:%d — Code: %d\n", \
+                          "[VULKAN ERROR] %s:%d — Code: %d (%s)\n", \
                           std::source_location::current().file_name(), \
                           std::source_location::current().line(), \
-                          static_cast<int>(vk_check_result)); \
+                          static_cast<int>(vk_check_result), \
+                          std::format("{}", vk_check_result).c_str()); \
             std::cerr << vk_err_buf; \
             std::abort(); \
         } \
@@ -76,84 +78,108 @@
 #include <glm/gtx/string_cast.hpp>
 #include <vulkan/vulkan.h>
 #include <SDL3/SDL.h>
-#include <ctime>                     // <-- NEW: needed for localtime/strftime
+#include <ctime>
+
+#include <queue>
+#include <atomic>
+#include <mutex>
+#include <shared_mutex>
+#include <deque>
+#include <vector>
+#include <algorithm>          // std::sort
+#include <stop_token>         // std::stop_token
+
+// =============================================================================
+// std::formatter<VkResult, char> — MUST BE IN HEADER
+// =============================================================================
+namespace std {
+    template <>
+    struct formatter<VkResult, char> {
+        constexpr auto parse(format_parse_context& ctx) {
+            return ctx.begin();
+        }
+
+        template <typename FormatContext>
+        auto format(VkResult const& result, FormatContext& ctx) const {
+            const char* str;
+            switch (result) {
+                case VK_SUCCESS:                                   str = "VK_SUCCESS"; break;
+                case VK_NOT_READY:                                 str = "VK_NOT_READY"; break;
+                case VK_TIMEOUT:                                   str = "VK_TIMEOUT"; break;
+                case VK_EVENT_SET:                                 str = "VK_EVENT_SET"; break;
+                case VK_EVENT_RESET:                               str = "VK_EVENT_RESET"; break;
+                case VK_INCOMPLETE:                                str = "VK_INCOMPLETE"; break;
+                case VK_ERROR_OUT_OF_HOST_MEMORY:                  str = "VK_ERROR_OUT_OF_HOST_MEMORY"; break;
+                case VK_ERROR_OUT_OF_DEVICE_MEMORY:                str = "VK_ERROR_OUT_OF_DEVICE_MEMORY"; break;
+                case VK_ERROR_INITIALIZATION_FAILED:               str = "VK_ERROR_INITIALIZATION_FAILED"; break;
+                case VK_ERROR_DEVICE_LOST:                         str = "VK_ERROR_DEVICE_LOST"; break;
+                case VK_ERROR_MEMORY_MAP_FAILED:                   str = "VK_ERROR_MEMORY_MAP_FAILED"; break;
+                case VK_ERROR_LAYER_NOT_PRESENT:                   str = "VK_ERROR_LAYER_NOT_PRESENT"; break;
+                case VK_ERROR_EXTENSION_NOT_PRESENT:               str = "VK_ERROR_EXTENSION_NOT_PRESENT"; break;
+                case VK_ERROR_FEATURE_NOT_PRESENT:                 str = "VK_ERROR_FEATURE_NOT_PRESENT"; break;
+                case VK_ERROR_INCOMPATIBLE_DRIVER:                 str = "VK_ERROR_INCOMPATIBLE_DRIVER"; break;
+                case VK_ERROR_TOO_MANY_OBJECTS:                    str = "VK_ERROR_TOO_MANY_OBJECTS"; break;
+                case VK_ERROR_FORMAT_NOT_SUPPORTED:                str = "VK_ERROR_FORMAT_NOT_SUPPORTED"; break;
+                case VK_ERROR_FRAGMENTED_POOL:                     str = "VK_ERROR_FRAGMENTED_POOL"; break;
+                case VK_ERROR_SURFACE_LOST_KHR:                    str = "VK_ERROR_SURFACE_LOST_KHR"; break;
+                case VK_ERROR_NATIVE_WINDOW_IN_USE_KHR:            str = "VK_ERROR_NATIVE_WINDOW_IN_USE_KHR"; break;
+                case VK_SUBOPTIMAL_KHR:                            str = "VK_SUBOPTIMAL_KHR"; break;
+                case VK_ERROR_OUT_OF_DATE_KHR:                     str = "VK_ERROR_OUT_OF_DATE_KHR"; break;
+                case VK_ERROR_INCOMPATIBLE_DISPLAY_KHR:            str = "VK_ERROR_INCOMPATIBLE_DISPLAY_KHR"; break;
+                case VK_ERROR_VALIDATION_FAILED_EXT:               str = "VK_ERROR_VALIDATION_FAILED_EXT"; break;
+                case VK_ERROR_INVALID_SHADER_NV:                   str = "VK_ERROR_INVALID_SHADER_NV"; break;
+                case VK_ERROR_INVALID_DRM_FORMAT_MODIFIER_PLANE_LAYOUT_EXT: str = "VK_ERROR_INVALID_DRM_FORMAT_MODIFIER_PLANE_LAYOUT_EXT"; break;
+                case VK_ERROR_FRAGMENTATION_EXT:                   str = "VK_ERROR_FRAGMENTATION_EXT"; break;
+                case VK_ERROR_NOT_PERMITTED_KHR:                   str = "VK_ERROR_NOT_PERMITTED_KHR"; break;
+                case VK_ERROR_INVALID_DEVICE_ADDRESS_EXT:          str = "VK_ERROR_INVALID_DEVICE_ADDRESS_EXT"; break;
+                case VK_ERROR_FULL_SCREEN_EXCLUSIVE_MODE_LOST_EXT: str = "VK_ERROR_FULL_SCREEN_EXCLUSIVE_MODE_LOST_EXT"; break;
+                case VK_THREAD_IDLE_KHR:                           str = "VK_THREAD_IDLE_KHR"; break;
+                case VK_THREAD_DONE_KHR:                           str = "VK_THREAD_DONE_KHR"; break;
+                case VK_OPERATION_DEFERRED_KHR:                    str = "VK_OPERATION_DEFERRED_KHR"; break;
+                case VK_OPERATION_NOT_DEFERRED_KHR:                str = "VK_OPERATION_NOT_DEFERRED_KHR"; break;
+                case VK_PIPELINE_COMPILE_REQUIRED_EXT:             str = "VK_PIPELINE_COMPILE_REQUIRED_EXT"; break;
+                default:                                           return format_to(ctx.out(), "VK_UNKNOWN_RESULT({})", static_cast<int>(result));
+            }
+            return format_to(ctx.out(), "{}", str);
+        }
+    };
+
+    // VkFormat formatter (unchanged)
+    template <>
+    struct formatter<VkFormat, char> {
+        constexpr auto parse(format_parse_context& ctx) {
+            return ctx.begin();
+        }
+        template <typename FormatContext>
+        auto format(VkFormat const& fmt, FormatContext& ctx) const {
+            return format_to(ctx.out(), "{}", static_cast<uint32_t>(fmt));
+        }
+    };
+
+    // Bonus formatters
+    template<> struct formatter<glm::mat4, char> : formatter<std::string_view, char> {
+        template <typename FormatContext>
+        auto format(const glm::mat4& mat, FormatContext& ctx) const {
+            return format_to(ctx.out(), "mat4({})", glm::to_string(mat));
+        }
+    };
+    template<> struct formatter<VkExtent2D, char> {
+        constexpr auto parse(format_parse_context& ctx) {
+            return ctx.begin();
+        }
+        template<typename FormatContext>
+        auto format(const VkExtent2D& ext, FormatContext& ctx) const {
+            return format_to(ctx.out(), "{}x{}", ext.width, ext.height);
+        }
+    };
+} // namespace std
 
 // Forward declarations for StoneKey — defined in main.cpp
 extern uint64_t get_kStone1() noexcept;
 extern uint64_t get_kStone2() noexcept;
 
-// Formatter specialization for VkResult
-namespace std {
-template <>
-struct formatter<VkResult> {
-    constexpr auto parse(format_parse_context& ctx) -> decltype(ctx.begin()) {
-        return ctx.begin();
-    }
-
-    template <typename FormatContext>
-    auto format(VkResult const& result, FormatContext& ctx) -> decltype(ctx.out()) {
-        const char* str;
-        switch (result) {
-            case VK_SUCCESS: str = "VK_SUCCESS"; break;
-            case VK_NOT_READY: str = "VK_NOT_READY"; break;
-            case VK_TIMEOUT: str = "VK_TIMEOUT"; break;
-            case VK_EVENT_SET: str = "VK_EVENT_SET"; break;
-            case VK_EVENT_RESET: str = "VK_EVENT_RESET"; break;
-            case VK_INCOMPLETE: str = "VK_INCOMPLETE"; break;
-            case VK_ERROR_OUT_OF_HOST_MEMORY: str = "VK_ERROR_OUT_OF_HOST_MEMORY"; break;
-            case VK_ERROR_OUT_OF_DEVICE_MEMORY: str = "VK_ERROR_OUT_OF_DEVICE_MEMORY"; break;
-            case VK_ERROR_INITIALIZATION_FAILED: str = "VK_ERROR_INITIALIZATION_FAILED"; break;
-            case VK_ERROR_DEVICE_LOST: str = "VK_ERROR_DEVICE_LOST"; break;
-            case VK_ERROR_MEMORY_MAP_FAILED: str = "VK_ERROR_MEMORY_MAP_FAILED"; break;
-            case VK_ERROR_LAYER_NOT_PRESENT: str = "VK_ERROR_LAYER_NOT_PRESENT"; break;
-            case VK_ERROR_EXTENSION_NOT_PRESENT: str = "VK_ERROR_EXTENSION_NOT_PRESENT"; break;
-            case VK_ERROR_FEATURE_NOT_PRESENT: str = "VK_ERROR_FEATURE_NOT_PRESENT"; break;
-            case VK_ERROR_INCOMPATIBLE_DRIVER: str = "VK_ERROR_INCOMPATIBLE_DRIVER"; break;
-            case VK_ERROR_TOO_MANY_OBJECTS: str = "VK_ERROR_TOO_MANY_OBJECTS"; break;
-            case VK_ERROR_FORMAT_NOT_SUPPORTED: str = "VK_ERROR_FORMAT_NOT_SUPPORTED"; break;
-            case VK_ERROR_FRAGMENTED_POOL: str = "VK_ERROR_FRAGMENTED_POOL"; break;
-            case VK_ERROR_SURFACE_LOST_KHR: str = "VK_ERROR_SURFACE_LOST_KHR"; break;
-            case VK_ERROR_NATIVE_WINDOW_IN_USE_KHR: str = "VK_ERROR_NATIVE_WINDOW_IN_USE_KHR"; break;
-            case VK_SUBOPTIMAL_KHR: str = "VK_SUBOPTIMAL_KHR"; break;
-            case VK_ERROR_OUT_OF_DATE_KHR: str = "VK_ERROR_OUT_OF_DATE_KHR"; break;
-            case VK_ERROR_INCOMPATIBLE_DISPLAY_KHR: str = "VK_ERROR_INCOMPATIBLE_DISPLAY_KHR"; break;
-            case VK_ERROR_VALIDATION_FAILED_EXT: str = "VK_ERROR_VALIDATION_FAILED_EXT"; break;
-            case VK_ERROR_INVALID_SHADER_NV: str = "VK_ERROR_INVALID_SHADER_NV"; break;
-            case VK_ERROR_INVALID_DRM_FORMAT_MODIFIER_PLANE_LAYOUT_EXT: str = "VK_ERROR_INVALID_DRM_FORMAT_MODIFIER_PLANE_LAYOUT_EXT"; break;
-            case VK_ERROR_FRAGMENTATION_EXT: str = "VK_ERROR_FRAGMENTATION_EXT"; break;
-            case VK_ERROR_NOT_PERMITTED_KHR: str = "VK_ERROR_NOT_PERMITTED_KHR"; break;
-            case VK_ERROR_INVALID_DEVICE_ADDRESS_EXT: str = "VK_ERROR_INVALID_DEVICE_ADDRESS_EXT"; break;
-            case VK_ERROR_FULL_SCREEN_EXCLUSIVE_MODE_LOST_EXT: str = "VK_ERROR_FULL_SCREEN_EXCLUSIVE_MODE_LOST_EXT"; break;
-            case VK_THREAD_IDLE_KHR: str = "VK_THREAD_IDLE_KHR"; break;
-            case VK_THREAD_DONE_KHR: str = "VK_THREAD_DONE_KHR"; break;
-            case VK_OPERATION_DEFERRED_KHR: str = "VK_OPERATION_DEFERRED_KHR"; break;
-            case VK_OPERATION_NOT_DEFERRED_KHR: str = "VK_OPERATION_NOT_DEFERRED_KHR"; break;
-            case VK_PIPELINE_COMPILE_REQUIRED_EXT: str = "VK_PIPELINE_COMPILE_REQUIRED_EXT"; break;
-            default: return format_to(ctx.out(), "VK_UNKNOWN_RESULT({})", static_cast<int>(result));
-        }
-        return format_to(ctx.out(), "{}", str);
-    }
-};
-}  // namespace std
-
-// Formatter specialization for VkFormat
-namespace std {
-template <>
-struct formatter<VkFormat, char> {
-    constexpr auto parse(format_parse_context& ctx) -> decltype(ctx.begin()) {
-        return ctx.begin();
-    }
-
-    template <typename FormatContext>
-    auto format(VkFormat const& fmt, FormatContext& ctx) const -> decltype(ctx.out()) {
-        // Numeric output; for enum names, add switch on common values (e.g., VK_FORMAT_R8G8B8A8_UNORM -> "R8G8B8A8_UNORM").
-        return format_to(ctx.out(), "{}", static_cast<uint32_t>(fmt));
-    }
-};
-}  // namespace std
-
 // ========================================================================
-// 0. CONFIGURATION & HYPER-VIVID MACROS — [&] CAPTURE • ZERO COST • PARTY READY
+// 0. CONFIGURATION & HYPER-VIVID MACROS
 // ========================================================================
 constexpr bool ENABLE_TRACE   = true;
 constexpr bool ENABLE_DEBUG   = true;
@@ -161,7 +187,7 @@ constexpr bool ENABLE_INFO    = true;
 constexpr bool ENABLE_WARNING = true;
 constexpr bool ENABLE_ERROR   = true;
 constexpr bool ENABLE_FAILURE = true;
-constexpr bool ENABLE_FATAL   = true;  // <-- NEW: Enable fatal logging (same as failure)
+constexpr bool ENABLE_FATAL   = true;
 constexpr bool ENABLE_SUCCESS = true;
 constexpr bool ENABLE_ATTEMPT = true;
 constexpr bool ENABLE_PERF    = true;
@@ -171,11 +197,11 @@ constexpr bool SIMULATION_LOGGING = true;
 // Column widths for alignment
 constexpr size_t LEVEL_WIDTH   = 10;
 constexpr size_t DELTA_WIDTH   = 10;
-constexpr size_t TIME_WIDTH    = 10;   // <-- NEW: width for HH:MM:SS
+constexpr size_t TIME_WIDTH    = 10;
 constexpr size_t CAT_WIDTH     = 12;
 constexpr size_t THREAD_WIDTH  = 18;
 
-// HYPER-VIVID MACROS — FULL [&] CAPTURE — HEADER-SAFE — CONSTEXPR — VALHALLA LOCKED
+// HYPER-VIVID MACROS (unchanged)
 #define LOG_TRACE(...)          [&]() constexpr { if constexpr (ENABLE_TRACE)   Logging::Logger::get().log(std::source_location::current(), Logging::LogLevel::Trace,   "General", __VA_ARGS__); }()
 #define LOG_DEBUG(...)          [&]() constexpr { if constexpr (ENABLE_DEBUG)   Logging::Logger::get().log(std::source_location::current(), Logging::LogLevel::Debug,   "General", __VA_ARGS__); }()
 #define LOG_INFO(...)           [&]() constexpr { if constexpr (ENABLE_INFO)    Logging::Logger::get().log(std::source_location::current(), Logging::LogLevel::Info,    "General", __VA_ARGS__); }()
@@ -186,24 +212,22 @@ constexpr size_t THREAD_WIDTH  = 18;
 #define LOG_WARN(...)           LOG_WARNING(__VA_ARGS__)
 #define LOG_ERROR(...)          [&]() constexpr { if constexpr (ENABLE_ERROR)   Logging::Logger::get().log(std::source_location::current(), Logging::LogLevel::Error,   "General", __VA_ARGS__); }()
 #define LOG_FAILURE(...)        [&]() constexpr { if constexpr (ENABLE_FAILURE) Logging::Logger::get().log(std::source_location::current(), Logging::LogLevel::Failure, "General", __VA_ARGS__); }()
-#define LOG_FATAL(...)          [&]() constexpr { if constexpr (ENABLE_FATAL)   Logging::Logger::get().log(std::source_location::current(), Logging::LogLevel::Fatal,   "General", __VA_ARGS__); }()  // <-- NEW: Fatal macro (behaves like Failure)
+#define LOG_FATAL(...)          [&]() constexpr { if constexpr (ENABLE_FATAL)   Logging::Logger::get().log(std::source_location::current(), Logging::LogLevel::Fatal,   "General", __VA_ARGS__); }()
 #define LOG_FPS_COUNTER(...)    [&]() constexpr { if constexpr (FPS_COUNTER)    Logging::Logger::get().log(std::source_location::current(), Logging::LogLevel::Info,    "FPS",     __VA_ARGS__); }()
 #define LOG_SIMULATION(...)     [&]() constexpr { if constexpr (SIMULATION_LOGGING) Logging::Logger::get().log(std::source_location::current(), Logging::LogLevel::Info, "SIMULATION", __VA_ARGS__); }()
 
 #define LOG_TRACE_CAT(cat, ...)   [&]() constexpr { if constexpr (ENABLE_TRACE)   Logging::Logger::get().log(std::source_location::current(), Logging::LogLevel::Trace,   cat, __VA_ARGS__); }()
-#define LOG_DEBUG_CAT(cat, ...)   [&]() constexpr { if constexpr (ENABLE_DEBUG)   Logging::Logger::get().log(std::source_location::current(), Logging::LogLevel::Debug,   cat, __VA_ARGS__); }()
-#define LOG_INFO_CAT(cat, ...)    [&]() constexpr { if constexpr (ENABLE_INFO)    Logging::Logger::get().log(std::source_location::current(), Logging::LogLevel::Info,    cat, __VA_ARGS__); }()
-#define LOG_SUCCESS_CAT(cat, ...) [&]() constexpr { if constexpr (ENABLE_SUCCESS) Logging::Logger::get().log(std::source_location::current(), Logging::LogLevel::Success, cat, __VA_ARGS__); }()
-#define LOG_ATTEMPT_CAT(cat, ...) [&]() constexpr { if constexpr (ENABLE_ATTEMPT) Logging::Logger::get().log(std::source_location::current(), Logging::LogLevel::Attempt, cat, __VA_ARGS__); }()
-#define LOG_PERF_CAT(cat, ...)    [&]() constexpr { if constexpr (ENABLE_PERF)    Logging::Logger::get().log(std::source_location::current(), Logging::LogLevel::Perf,    cat, __VA_ARGS__); }()
-#define LOG_WARNING_CAT(cat, ...) [&]() constexpr { if constexpr (ENABLE_WARNING) Logging::Logger::get().log(std::source_location::current(), Logging::LogLevel::Warning, cat, __VA_ARGS__); }()
+#define LOG_DEBUG_CAT(cat, ...)   [&]()  constexpr { if constexpr (ENABLE_DEBUG)   Logging::Logger::get().log(std::source_location::current(), Logging::LogLevel::Debug,   cat, __VA_ARGS__); }()
+#define LOG_INFO_CAT(cat, ...)    [&]()  constexpr { if constexpr (ENABLE_INFO)    Logging::Logger::get().log(std::source_location::current(), Logging::LogLevel::Info,    cat, __VA_ARGS__); }()
+#define LOG_SUCCESS_CAT(cat, ...) [&]()  constexpr { if constexpr (ENABLE_SUCCESS) Logging::Logger::get().log(std::source_location::current(), Logging::LogLevel::Success, cat, __VA_ARGS__); }()
+#define LOG_ATTEMPT_CAT(cat, ...) [&]()  constexpr { if constexpr (ENABLE_ATTEMPT) Logging::Logger::get().log(std::source_location::current(), Logging::LogLevel::Attempt, cat, __VA_ARGS__); }()
+#define LOG_PERF_CAT(cat, ...)    [&]()  constexpr { if constexpr (ENABLE_PERF)    Logging::Logger::get().log(std::source_location::current(), Logging::LogLevel::Perf,    cat, __VA_ARGS__); }()
+#define LOG_WARNING_CAT(cat, ...) [&]()  constexpr { if constexpr (ENABLE_WARNING) Logging::Logger::get().log(std::source_location::current(), Logging::LogLevel::Warning, cat, __VA_ARGS__); }()
 #define LOG_WARN_CAT(cat, ...)    LOG_WARNING_CAT(cat, __VA_ARGS__)
-#define LOG_ERROR_CAT(cat, ...)   [&]() constexpr { if constexpr (ENABLE_ERROR)   Logging::Logger::get().log(std::source_location::current(), Logging::LogLevel::Error,   cat, __VA_ARGS__); }()
-#define LOG_FAILURE_CAT(cat, ...) [&]() constexpr { if constexpr (ENABLE_FAILURE) Logging::Logger::get().log(std::source_location::current(), Logging::LogLevel::Failure, cat, __VA_ARGS__); }()
-#define LOG_FATAL_CAT(cat, ...)   [&]() constexpr { if constexpr (ENABLE_FATAL)   Logging::Logger::get().log(std::source_location::current(), Logging::LogLevel::Fatal,   cat, __VA_ARGS__); }()  // <-- NEW: Categorized fatal macro (behaves like Failure)
+#define LOG_ERROR_CAT(cat, ...)   [&]()  constexpr { if constexpr (ENABLE_ERROR)   Logging::Logger::get().log(std::source_location::current(), Logging::LogLevel::Error,   cat, __VA_ARGS__); }()
+#define LOG_FAILURE_CAT(cat, ...) [&]()  constexpr { if constexpr (ENABLE_FAILURE) Logging::Logger::get().log(std::source_location::current(), Logging::LogLevel::Failure, cat, __VA_ARGS__); }()
+#define LOG_FATAL_CAT(cat, ...)   [&]()  constexpr { if constexpr (ENABLE_FATAL)   Logging::Logger::get().log(std::source_location::current(), Logging::LogLevel::Fatal,   cat, __VA_ARGS__); }()
 
-
-// LOG_VOID — COSMIC MARKERS
 #define LOG_VOID()              [&]() constexpr { if constexpr (ENABLE_DEBUG)   Logging::Logger::get().log(std::source_location::current(), Logging::LogLevel::Debug,   "General", "[VOID MARKER]"); }()
 #define LOG_VOID_CAT(cat)       [&]() constexpr { if constexpr (ENABLE_DEBUG)   Logging::Logger::get().log(std::source_location::current(), Logging::LogLevel::Debug,   cat, "[VOID MARKER]"); }()
 #define LOG_VOID_TRACE()        [&]() constexpr { if constexpr (ENABLE_TRACE)   Logging::Logger::get().log(std::source_location::current(), Logging::LogLevel::Trace,   "General", "[VOID MARKER]"); }()
@@ -214,10 +238,10 @@ namespace Logging {
 // ========================================================================
 // LOG LEVEL + SUCCESS/ATTEMPT/PERF/FAILURE/FATAL
 // ========================================================================
-enum class LogLevel { Trace, Debug, Info, Success, Attempt, Perf, Warning, Error, Failure, Fatal };  // <-- UPDATED: Added Fatal
+enum class LogLevel { Trace, Debug, Info, Success, Attempt, Perf, Warning, Error, Failure, Fatal };
 
 // ========================================================================
-// 1. HYPER-VIVID ANSI COLOR SYSTEM — 50+ COLORS — C++23 CONSTEXPR
+// 1. HYPER-VIVID ANSI COLOR SYSTEM
 // ========================================================================
 namespace Color {
     inline constexpr std::string_view RESET                     = "\033[0m";
@@ -285,139 +309,222 @@ constexpr std::array<LevelInfo, 10> LEVEL_INFOS{{
     {"[WARN]",    Color::AMBER_YELLOW,        ""},
     {"[ERROR]",   Color::CRIMSON_MAGENTA,     Color::BLACK_HOLE},
     {"[FAILURE]", Color::RASPBERRY_PINK,      Color::BLACK_HOLE},
-    {"[FATAL]",   Color::RASPBERRY_PINK,      Color::BLACK_HOLE}  // <-- NEW: Fatal level info (same as Failure)
+    {"[FATAL]",   Color::RASPBERRY_PINK,      Color::BLACK_HOLE}
 }};
 
 constexpr std::array<bool, 10> ENABLE_LEVELS{
     ENABLE_TRACE, ENABLE_DEBUG, ENABLE_INFO, ENABLE_SUCCESS,
     ENABLE_ATTEMPT, ENABLE_PERF, ENABLE_WARNING, ENABLE_ERROR,
-    ENABLE_FAILURE, ENABLE_FATAL  // <-- NEW: Added to enable array
+    ENABLE_FAILURE, ENABLE_FATAL
 };
 
 // ========================================================================
-// 2. LOGGER — C++23 PERFECTION — FULLY AMAZING — PARTY EDITION (SIMPLIFIED)
+// 2. LOGGER – ORDERED ASYNC FIFO (C++23)
 // ========================================================================
 class Logger {
 public:
     static Logger& get() {
-        static Logger instance;
-        return instance;
+        static std::atomic<Logger*> instance{nullptr};
+        auto* p = instance.load(std::memory_order_relaxed);
+        if (!p) {
+            std::call_once(init_flag_, []{
+                instance.store(new Logger(), std::memory_order_release);
+            });
+            p = instance.load(std::memory_order_acquire);
+        }
+        return *p;
+    }
+
+    static void setAsync(bool enable) noexcept {
+        auto& self = get();
+        self.asyncEnabled_.store(enable, std::memory_order_release);
+        if (enable && !self.flusher_.joinable())
+            self.flusher_ = std::jthread([&self](std::stop_token st) { self.flushQueue(st); });
+        else if (!enable && self.flusher_.joinable())
+            self.flusher_.request_stop(), self.flusher_.join();
     }
 
     Logger(const Logger&) = delete;
     Logger& operator=(const Logger&) = delete;
 
+    mutable std::shared_mutex logMutex_;
+
     template<typename... Args>
-    void log(std::source_location loc, LogLevel level, std::string_view category, std::string_view fmt, const Args&... args) const {
+    void log(std::source_location loc,
+             LogLevel level,
+             std::string_view category,
+             std::string_view fmt,
+             const Args&... args) const
+    {
         if (!shouldLog(level, category)) return;
+
         auto now = std::chrono::steady_clock::now();
         if (!firstLogTime_.has_value()) firstLogTime_ = now;
-        auto formattedMessage = std::vformat(fmt, std::make_format_args(args...));
-        printMessage(loc, level, category, std::move(formattedMessage), now);
-    }
 
-private:
-    Logger() : logFile_("amouranth_engine.log", std::ios::out | std::ios::app) {
-        auto now = std::chrono::steady_clock::now();
-        firstLogTime_ = now;
-        printMessage(std::source_location::current(), LogLevel::Success, "Logger", "CUSTODIAN GROK ONLINE — HYPER-VIVID LOGGING PARTY STARTED", now);
-    }
+        // Global monotonic sequence number
+        static std::atomic<uint64_t> seq{0};
+        uint64_t id = seq.fetch_add(1, std::memory_order_relaxed);
 
-    ~Logger() {
-        auto now = std::chrono::steady_clock::now();
-        printMessage(std::source_location::current(), LogLevel::Success, "Logger", "CUSTODIAN GROK SIGNING OFF — ALL LOGS RAINBOW ETERNAL", now);
-        if (logFile_.is_open()) {
-            logFile_.flush();
-            logFile_.close();
+        auto msg = std::vformat(fmt, std::make_format_args(args...));
+
+        if (asyncEnabled_.load(std::memory_order_acquire)) {
+            std::scoped_lock lk(queueMutex_);
+            messageQueue_.emplace_back(id, loc, level, std::string{category}, std::move(msg), now);
+        } else {
+            std::shared_lock lk(logMutex_);
+            printMessage(loc, level, category, std::move(msg), now);
         }
     }
 
+private:
+    using Entry = std::tuple<uint64_t,                 // seq
+                            std::source_location,
+                            LogLevel,
+                            std::string,               // category
+                            std::string,               // message
+                            std::chrono::steady_clock::time_point>;
+
+    Logger() : logFile_("amouranth_engine.log", std::ios::out | std::ios::app) {
+        auto now = std::chrono::steady_clock::now();
+        firstLogTime_ = now;
+        printMessage(std::source_location::current(),
+                     LogLevel::Success,
+                     "Logger",
+                     "CUSTODIAN GROK ONLINE — HYPER-VIVID LOGGING PARTY STARTED (ORDERED ASYNC)",
+                     now);
+    }
+
+    ~Logger() {
+        setAsync(false);
+        auto now = std::chrono::steady_clock::now();
+        printMessage(std::source_location::current(),
+                     LogLevel::Success,
+                     "Logger",
+                     "CUSTODIAN GROK SIGNING OFF — ALL LOGS RAINBOW ETERNAL",
+                     now);
+        if (logFile_.is_open()) logFile_.flush(), logFile_.close();
+    }
+
+    static inline std::once_flag init_flag_{};
     mutable std::optional<std::chrono::steady_clock::time_point> firstLogTime_{};
     mutable std::ofstream logFile_;
 
+    mutable std::deque<Entry> messageQueue_;
+    mutable std::mutex queueMutex_;
+    mutable std::jthread flusher_;
+    mutable std::atomic<bool> asyncEnabled_{false};
+
     bool shouldLog(LogLevel level, std::string_view) const {
-        const size_t idx = static_cast<size_t>(level);
-        return idx < ENABLE_LEVELS.size() && ENABLE_LEVELS[idx];
+        const size_t i = static_cast<size_t>(level);
+        return i < ENABLE_LEVELS.size() && ENABLE_LEVELS[i];
+    }
+
+    // --------------------------------------------------------------
+    // Flusher – drains queue in batches, sorts by seq, prints
+    // --------------------------------------------------------------
+    void flushQueue(std::stop_token stoken) const {
+        std::vector<Entry> batch;
+        batch.reserve(64);
+
+        while (!stoken.stop_requested()) {
+            // ---- drain a batch -------------------------------------------------
+            {
+                std::unique_lock lk(queueMutex_);
+                if (messageQueue_.empty()) {
+                    lk.unlock();
+                    std::this_thread::sleep_for(std::chrono::microseconds(100));
+                    continue;
+                }
+                batch.clear();
+                while (!messageQueue_.empty() && batch.size() < 64) {
+                    batch.push_back(std::move(messageQueue_.front()));
+                    messageQueue_.pop_front();
+                }
+            }
+
+            // ---- sort batch by sequence number --------------------------------
+            std::sort(batch.begin(), batch.end(),
+                      [](const Entry& a, const Entry& b) { return std::get<0>(a) < std::get<0>(b); });
+
+            // ---- print sorted batch -------------------------------------------
+            {
+                std::shared_lock lk(logMutex_);
+                for (auto& e : batch) {
+                    const auto& [seq, loc, lvl, cat, msg, ts] = e;
+                    printMessage(loc, lvl, cat, std::move(msg), ts);
+                }
+            }
+        }
+
+        // ---- final drain on shutdown ---------------------------------------
+        std::vector<Entry> finalBatch;
+        {
+            std::unique_lock lk(queueMutex_);
+            while (!messageQueue_.empty()) {
+                finalBatch.push_back(std::move(messageQueue_.front()));
+                messageQueue_.pop_front();
+            }
+        }
+        if (!finalBatch.empty()) {
+            std::sort(finalBatch.begin(), finalBatch.end(),
+                      [](const Entry& a, const Entry& b) { return std::get<0>(a) < std::get<0>(b); });
+            std::shared_lock lk(logMutex_);
+            for (auto& e : finalBatch) {
+                const auto& [seq, loc, lvl, cat, msg, ts] = e;
+                printMessage(loc, lvl, cat, std::move(msg), ts);
+            }
+        }
     }
 
     std::string_view getCategoryColor(std::string_view cat) const noexcept {
         using namespace Color;
-        struct CaseInsensitiveLess {
-            bool operator()(std::string_view lhs, std::string_view rhs) const {
-                size_t len = std::min(lhs.size(), rhs.size());
-                for (size_t i = 0; i < len; ++i) {
-                    if (std::tolower(static_cast<unsigned char>(lhs[i])) !=
-                        std::tolower(static_cast<unsigned char>(rhs[i]))) {
-                        return std::tolower(static_cast<unsigned char>(lhs[i])) <
-                               std::tolower(static_cast<unsigned char>(rhs[i]));
-                    }
-                }
-                return lhs.size() < rhs.size();
+        struct CIless {
+            bool operator()(std::string_view a, std::string_view b) const {
+                size_t n = std::min(a.size(), b.size());
+                for (size_t i = 0; i < n; ++i)
+                    if (std::tolower(static_cast<unsigned char>(a[i])) !=
+                        std::tolower(static_cast<unsigned char>(b[i])))
+                        return std::tolower(static_cast<unsigned char>(a[i])) <
+                               std::tolower(static_cast<unsigned char>(b[i]));
+                return a.size() < b.size();
             }
         };
-        static const std::map<std::string_view, std::string_view, CaseInsensitiveLess> categoryColors{
-            {"General", DIAMOND_SPARKLE},
-            {"MAIN", VALHALLA_GOLD},
-            {"Init", AURORA_BOREALIS},
-            {"Dispose", PARTY_PINK},
-            {"Logger", ELECTRIC_BLUE},
-            {"Vulkan", SAPPHIRE_BLUE},
-            {"Device", QUASAR_BLUE},
-            {"Swapchain", OCEAN_TEAL},
-            {"Command", CHROMIUM_SILVER},
-            {"Queue", OBSIDIAN_BLACK},
-            {"RayTrace", TURQUOISE_BLUE},
-            {"RTX", HYPERSPACE_WARP},
-            {"Accel", PULSAR_GREEN},
-            {"TLAS", SUPERNOVA_ORANGE},
-            {"BLAS", PLASMA_FUCHSIA},
-            {"SBT", RASPBERRY_PINK},
-            {"Shader", NEBULA_VIOLET},
-            {"Renderer", BRIGHT_PINKISH_PURPLE},
-            {"Render", THERMO_PINK},
-            {"Tonemap", PEACHES_AND_CREAM},
-            {"GBuffer", QUANTUM_FLUX},
-            {"Post", NUCLEAR_REACTOR},
-            {"Buffer", BRONZE_BROWN},
-            {"Image", LIME_YELLOW},
-            {"Texture", SPEARMINT_MINT},
-            {"Sampler", LILAC_LAVENDER},
-            {"Descriptor", FUCHSIA_MAGENTA},
-            {"Perf", COSMIC_GOLD},
-            {"FPS", FIERY_ORANGE},
-            {"GPU", BLACK_HOLE},
-            {"CPU", PLASMA_FUCHSIA},
-            {"Input", SPEARMINT_MINT},
-            {"Audio", OCEAN_TEAL},
-            {"Physics", EMERALD_GREEN},
-            {"SIMULATION", BRONZE_BROWN},
-            {"MeshLoader", LIME_YELLOW},
-            {"GLTF", QUANTUM_PURPLE},
-            {"Material", PEACHES_AND_CREAM},
-            {"Debug", ARCTIC_CYAN},
-            {"ImGui", PLATINUM_GRAY},
-            {"Profiler", COSMIC_GOLD},
-            {"SUCCESS", EMERALD_GREEN},
-            {"ATTEMPT", QUANTUM_PURPLE},
-            {"VOID", COSMIC_VOID},
-            {"SPLASH", LILAC_LAVENDER},
+        static const std::map<std::string_view, std::string_view, CIless> map{
+            {"General", DIAMOND_SPARKLE}, {"MAIN", VALHALLA_GOLD}, {"Init", AURORA_BOREALIS},
+            {"Dispose", PARTY_PINK}, {"Logger", ELECTRIC_BLUE}, {"Vulkan", SAPPHIRE_BLUE},
+            {"Device", QUASAR_BLUE}, {"Swapchain", OCEAN_TEAL}, {"Command", CHROMIUM_SILVER},
+            {"Queue", OBSIDIAN_BLACK}, {"RayTrace", TURQUOISE_BLUE}, {"RTX", HYPERSPACE_WARP},
+            {"Accel", PULSAR_GREEN}, {"TLAS", SUPERNOVA_ORANGE}, {"BLAS", PLASMA_FUCHSIA},
+            {"SBT", RASPBERRY_PINK}, {"Shader", NEBULA_VIOLET}, {"Renderer", BRIGHT_PINKISH_PURPLE},
+            {"Render", THERMO_PINK}, {"Tonemap", PEACHES_AND_CREAM}, {"GBuffer", QUANTUM_FLUX},
+            {"Post", NUCLEAR_REACTOR}, {"Buffer", BRONZE_BROWN}, {"Image", LIME_YELLOW},
+            {"Texture", SPEARMINT_MINT}, {"Sampler", LILAC_LAVENDER}, {"Descriptor", FUCHSIA_MAGENTA},
+            {"Perf", COSMIC_GOLD}, {"FPS", FIERY_ORANGE}, {"GPU", BLACK_HOLE},
+            {"CPU", PLASMA_FUCHSIA}, {"Input", SPEARMINT_MINT}, {"Audio", OCEAN_TEAL},
+            {"Physics", EMERALD_GREEN}, {"SIMULATION", BRONZE_BROWN}, {"MeshLoader", LIME_YELLOW},
+            {"GLTF", QUANTUM_PURPLE}, {"Material", PEACHES_AND_CREAM}, {"Debug", ARCTIC_CYAN},
+            {"ImGui", PLATINUM_GRAY}, {"Profiler", COSMIC_GOLD}, {"SUCCESS", EMERALD_GREEN},
+            {"ATTEMPT", QUANTUM_PURPLE}, {"VOID", COSMIC_VOID}, {"SPLASH", LILAC_LAVENDER},
             {"MARKER", DIAMOND_SPARKLE}
         };
-        if (auto it = categoryColors.find(cat); it != categoryColors.end()) [[likely]] {
+        if (auto it = map.find(cat); it != map.end()) [[likely]]
             return it->second;
-        }
         return DIAMOND_WHITE;
     }
 
-    void printMessage(std::source_location loc, LogLevel level, std::string_view category, std::string formattedMessage,
-                      std::chrono::steady_clock::time_point timestamp) const {
+    void printMessage(std::source_location loc,
+                      LogLevel level,
+                      std::string_view category,
+                      std::string formattedMessage,
+                      std::chrono::steady_clock::time_point timestamp) const
+    {
         using namespace Color;
         const auto levelIdx = static_cast<size_t>(level);
         const auto& info = LEVEL_INFOS[levelIdx];
         const std::string_view levelColor = info.color;
         const std::string_view levelBg    = info.bg;
         const std::string_view levelStr   = info.str;
-        const std::string_view catColor = getCategoryColor(category);
+        const std::string_view catColor   = getCategoryColor(category);
 
         const auto deltaUs = std::chrono::duration_cast<std::chrono::microseconds>(
             timestamp - firstLogTime_.value()).count();
@@ -430,7 +537,6 @@ private:
             return std::format("{:>7.1f}h", deltaUs / 3'600'000'000.0);
         }();
 
-        // ---- NEW: wall-clock time (HH:MM:SS) ----
         const std::string timeStr = []() -> std::string {
             auto now = std::chrono::system_clock::now();
             auto tt  = std::chrono::system_clock::to_time_t(now);
@@ -439,7 +545,6 @@ private:
             std::strftime(buf, sizeof(buf), "%H:%M:%S", &tm);
             return std::string(buf);
         }();
-        // -----------------------------------------
 
         const std::string threadId = []() {
             std::ostringstream oss; oss << std::this_thread::get_id(); return oss.str();
@@ -447,7 +552,7 @@ private:
 
         const std::string fileLine = std::format("{}:{}:{}", loc.file_name(), loc.line(), loc.function_name());
 
-        // Plain log with alignment
+        // plain text
         const std::string plain = std::format("{:<{}} {:>{}} {:>{}} [{:>{}}] [{:>{}}] {} [{}]\n",
                                              levelStr, LEVEL_WIDTH,
                                              deltaStr, DELTA_WIDTH,
@@ -457,7 +562,7 @@ private:
                                              formattedMessage,
                                              fileLine);
 
-        // Colored aligned output
+        // colored
         std::ostringstream oss;
         oss << levelBg << std::format("{:<{}}", levelStr, LEVEL_WIDTH) << RESET
             << " " << std::format("{:>{}}", deltaStr, DELTA_WIDTH) << " "
@@ -469,16 +574,12 @@ private:
         const std::string colored = oss.str();
 
         std::print(std::cout, "{}", colored);
-        if (logFile_.is_open()) {
-            logFile_ << plain;
-        }
+        if (logFile_.is_open()) logFile_ << plain;
     }
 };
 
 } // namespace Logging
 
-// NOVEMBER 12 2025 — HYPER-VIVID LOGGING PARTY SUPREMACY (UPDATED WITH FATAL LOGGING)
-// SYNCHRONOUS • COLORS ETERNAL • COLUMNIZED ALIGNMENT • SEQUENTIAL ORDER
-// =============================================================================
-// AMOURANTH RTX Engine (C) 2025 by Zachary Geurts <gzac5314@gmail.com>
+// NOVEMBER 12 2025 — ORDERED ASYNC LOGGING SUPREMACY
+// SYNCHRONOUS BY DEFAULT • FIFO + SEQ ORDER • C++23 • PINK PHOTONS ETERNAL
 // =============================================================================

@@ -43,6 +43,8 @@
 #include <chrono>
 #include <fstream>
 #include <set>
+#include <thread>
+#include <atomic>
 
 using namespace Logging::Color;
 
@@ -129,6 +131,38 @@ inline std::vector<std::string> getRayTracingBinPaths() {
 // -----------------------------------------------------------------------------
 inline VulkanRTX& g_rtx() { return *g_rtx_instance; }
 
+// -----------------------------------------------------------------------------
+// Wait for RTX::Context validity with timeout
+// -----------------------------------------------------------------------------
+static bool waitForContextValid(std::chrono::milliseconds timeout = std::chrono::seconds(5)) {
+    auto start = std::chrono::steady_clock::now();
+    while (!RTX::g_ctx().isValid()) {
+        if (std::chrono::steady_clock::now() - start > timeout) {
+            LOG_FATAL_CAT("MAIN", "Timeout waiting for RTX::g_ctx() to become valid");
+            return false;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    LOG_SUCCESS_CAT("MAIN", "RTX::g_ctx() validated");
+    return true;
+}
+
+// -----------------------------------------------------------------------------
+// Wait for RTX instance validity with timeout
+// -----------------------------------------------------------------------------
+static bool waitForRTXValid(std::chrono::milliseconds timeout = std::chrono::seconds(5)) {
+    auto start = std::chrono::steady_clock::now();
+    while (!g_rtx_instance || !g_rtx().isValid()) {  // Assuming VulkanRTX has isValid()
+        if (std::chrono::steady_clock::now() - start > timeout) {
+            LOG_FATAL_CAT("MAIN", "Timeout waiting for VulkanRTX to become valid");
+            return false;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    LOG_SUCCESS_CAT("MAIN", "VulkanRTX validated");
+    return true;
+}
+
 // =============================================================================
 // MAIN APPLICATION ENTRY POINT
 // =============================================================================
@@ -147,11 +181,11 @@ int main(int argc, char* argv[]) {
     // -------------------------------------------------------------------------
     bulkhead("PHASE 0: SPLASH + AMMO.WAV");
     LOG_INFO_CAT("SDL", "Initializing SDL3 subsystems: VIDEO | AUDIO");
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) != 0) {
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) == 0) {
         THROW_MAIN(SDL_GetError());
     }
     LOG_INFO_CAT("SDL", "Loading Vulkan dynamic library via SDL");
-    if (SDL_Vulkan_LoadLibrary(nullptr) != 0) {
+    if (SDL_Vulkan_LoadLibrary(nullptr) == 0) {
         THROW_MAIN(SDL_GetError());
     }
 
@@ -175,6 +209,11 @@ int main(int argc, char* argv[]) {
         RTX::g_ctx().init(window, TARGET_WIDTH, TARGET_HEIGHT);
     } catch (const std::exception& e) {
         THROW_MAIN(std::string("Vulkan context initialization failed: ") + e.what());
+    }
+
+    // Wait for context to be fully valid before proceeding
+    if (!waitForContextValid()) {
+        THROW_MAIN("Failed to validate RTX::g_ctx()");
     }
 
     // Now safe to access
@@ -202,6 +241,11 @@ int main(int argc, char* argv[]) {
     bulkhead("PHASE 3: RTX + RENDERER");
     LOG_INFO_CAT("RTX", "Creating global RTX instance (VulkanRTX)");
     createGlobalRTX(TARGET_WIDTH, TARGET_HEIGHT, nullptr);
+
+    // Wait for RTX to be fully valid before proceeding
+    if (!waitForRTXValid()) {
+        THROW_MAIN("Failed to validate VulkanRTX");
+    }
 
     LOG_INFO_CAT("RTX", "Building acceleration structures (BLAS/TLAS)");
     g_rtx().buildAccelerationStructures();

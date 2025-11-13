@@ -4,7 +4,7 @@
 namespace SDL3Audio {
 
 AudioManager::AudioManager() {
-    if (!SDL_InitSubSystem(SDL_INIT_AUDIO)) {
+    if (SDL_InitSubSystem(SDL_INIT_AUDIO) == 0) {
         SDL_LogError(SDL_LOG_CATEGORY_AUDIO,
                      "Failed to init SDL audio: %s", SDL_GetError());
     }

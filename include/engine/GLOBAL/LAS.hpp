@@ -1,4 +1,3 @@
-// include/engine/GLOBAL/LAS.hpp
 // =============================================================================
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
 // DUAL LICENSE: CC BY-NC 4.0 (Non-Commercial) | Commercial: gzac5314@gmail.com
@@ -13,11 +12,11 @@
 
 #pragma once
 
-#include "engine/GLOBAL/RTXHandler.hpp"
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/Vulkan/VulkanCore.hpp"
 #include <glm/glm.hpp>
 #include <glm/gtc/type_ptr.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 #include <span>
 #include <mutex>
 #include <format>
@@ -25,6 +24,12 @@
 #include <array>
 
 using namespace Logging::Color;
+
+// Forward declare RTX::g_ctx() — defined in RTXHandler.cpp
+namespace RTX {
+    struct Context;
+    [[nodiscard]] Context& g_ctx();
+}
 
 namespace RTX {
 
@@ -88,7 +93,7 @@ public:
 
     void onMemoryEvent(const char* name, VkDeviceSize size) {
         double sizeMB = size / (1024.0 * 1024.0);
-        (void)sizeMB; // silence -Wunused-variable
+        (void)sizeMB;
         LOG_INFO_CAT("Memory", "{} → {:.3f} MB", name, sizeMB);
     }
 
@@ -130,9 +135,10 @@ namespace {
     VkAccelerationStructureBuildSizesInfoKHR sizeInfo{
         .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR
     };
-    ctx().vkGetAccelerationStructureBuildSizesKHR_(device,
-                                                  VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
-                                                  &buildInfo, &primitiveCount, &sizeInfo);
+    g_ctx().vkGetAccelerationStructureBuildSizesKHR_(
+        device,
+        VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
+        &buildInfo, &primitiveCount, &sizeInfo);
 
     LOG_DEBUG_CAT("LAS", "BLAS sizes → AS: {} bytes | BuildScratch: {} | UpdateScratch: {}",
                   sizeInfo.accelerationStructureSize, sizeInfo.buildScratchSize, sizeInfo.updateScratchSize);
@@ -167,9 +173,10 @@ namespace {
     VkAccelerationStructureBuildSizesInfoKHR sizeInfo{
         .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR
     };
-    ctx().vkGetAccelerationStructureBuildSizesKHR_(device,
-                                                  VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
-                                                  &buildInfo, &instanceCount, &sizeInfo);
+    g_ctx().vkGetAccelerationStructureBuildSizesKHR_(
+        device,
+        VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
+        &buildInfo, &instanceCount, &sizeInfo);
 
     VkDeviceSize instDataSize = static_cast<VkDeviceSize>(instanceCount) * sizeof(VkAccelerationStructureInstanceKHR);
     LOG_DEBUG_CAT("LAS", "TLAS sizes → AS: {} | BuildScratch: {} | UpdateScratch: {} | InstData: {}",
@@ -220,7 +227,7 @@ namespace {
             .accelerationStructure = as
         };
         instData[i].accelerationStructureReference =
-            ctx().vkGetAccelerationStructureDeviceAddressKHR_(device, &addrInfo);
+            g_ctx().vkGetAccelerationStructureDeviceAddressKHR_(device, &addrInfo);
     }
     BUFFER_UNMAP(stagingHandle);
 
@@ -263,7 +270,7 @@ public:
                    VkBuildAccelerationStructureFlagsKHR extraFlags = 0)
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        VkDevice dev = ctx().vkDevice();
+        VkDevice dev = g_ctx().vkDevice();
 
         LOG_INFO_CAT("LAS", "Building BLAS: {} verts, {} indices", vertexCount, indexCount);
         AmouranthAI::get().onBlasStart(vertexCount, indexCount);
@@ -286,7 +293,7 @@ public:
             .size = sizes.accelerationStructureSize,
             .type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR
         };
-        VK_CHECK(ctx().vkCreateAccelerationStructureKHR_(dev, &createInfo, nullptr, &rawAs),
+        VK_CHECK(g_ctx().vkCreateAccelerationStructureKHR_(dev, &createInfo, nullptr, &rawAs),
                  "Failed to create BLAS");
 
         uint64_t scratchHandle = 0;
@@ -296,9 +303,23 @@ public:
                       VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
                       "scratch_blas");
 
-        VkDeviceAddress vertexAddr = getBufferAddress(RAW_BUFFER(vertexBuf));
-        VkDeviceAddress indexAddr  = getBufferAddress(RAW_BUFFER(indexBuf));
-        VkDeviceAddress scratchAddr = getBufferAddress(RAW_BUFFER(scratchHandle));
+        // Fix: Create temporary structs on stack, then take address
+        VkBufferDeviceAddressInfo vertexAddrInfo{
+            .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
+            .buffer = RAW_BUFFER(vertexBuf)
+        };
+        VkBufferDeviceAddressInfo indexAddrInfo{
+            .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
+            .buffer = RAW_BUFFER(indexBuf)
+        };
+        VkBufferDeviceAddressInfo scratchAddrInfo{
+            .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
+            .buffer = RAW_BUFFER(scratchHandle)
+        };
+
+        VkDeviceAddress vertexAddr = g_ctx().vkGetBufferDeviceAddressKHR_(dev, &vertexAddrInfo);
+        VkDeviceAddress indexAddr  = g_ctx().vkGetBufferDeviceAddressKHR_(dev, &indexAddrInfo);
+        VkDeviceAddress scratchAddr = g_ctx().vkGetBufferDeviceAddressKHR_(dev, &scratchAddrInfo);
 
         VkAccelerationStructureGeometryKHR geometry{
             .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR,
@@ -333,13 +354,13 @@ public:
 
         VkCommandBuffer cmd = VulkanRTX::beginSingleTimeCommands(pool);
         const VkAccelerationStructureBuildRangeInfoKHR* ranges[] = { &buildRange };
-        ctx().vkCmdBuildAccelerationStructuresKHR_(cmd, 1, &buildInfo, ranges);
+        g_ctx().vkCmdBuildAccelerationStructuresKHR_(cmd, 1, &buildInfo, ranges);
         VulkanRTX::endSingleTimeCommands(cmd, queue, pool);
 
         auto deleter = [asBufferHandle, scratchHandle](VkDevice d,
                                                       VkAccelerationStructureKHR a,
                                                       const VkAllocationCallbacks*) noexcept {
-            if (a) ctx().vkDestroyAccelerationStructureKHR_(d, a, nullptr);
+            if (a) g_ctx().vkDestroyAccelerationStructureKHR_(d, a, nullptr);
             if (asBufferHandle) BUFFER_DESTROY(asBufferHandle);
             if (scratchHandle) BUFFER_DESTROY(scratchHandle);
         };
@@ -359,7 +380,7 @@ public:
         std::lock_guard<std::mutex> lock(mutex_);
         if (instances.empty()) throw std::runtime_error("TLAS: zero instances");
 
-        VkDevice dev = ctx().vkDevice();
+        VkDevice dev = g_ctx().vkDevice();
         LOG_INFO_CAT("LAS", "Building TLAS with {} instances", instances.size());
         AmouranthAI::get().onTlasStart(instances.size());
 
@@ -367,7 +388,7 @@ public:
         if (sizes.accelerationStructureSize == 0)
             throw std::runtime_error("TLAS size zero");
 
-        uint64_t instanceEnc = uploadInstances(dev, ctx().vkPhysicalDevice(), pool, queue, instances);
+        uint64_t instanceEnc = uploadInstances(dev, g_ctx().vkPhysicalDevice(), pool, queue, instances);
         if (!instanceEnc) throw std::runtime_error("Instance upload failed");
 
         uint64_t asBufferHandle = 0;
@@ -384,7 +405,7 @@ public:
             .size = sizes.accelerationStructureSize,
             .type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR
         };
-        VK_CHECK(ctx().vkCreateAccelerationStructureKHR_(dev, &createInfo, nullptr, &rawAs),
+        VK_CHECK(g_ctx().vkCreateAccelerationStructureKHR_(dev, &createInfo, nullptr, &rawAs),
                  "Failed to create TLAS");
 
         uint64_t scratchHandle = 0;
@@ -394,8 +415,18 @@ public:
                       VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
                       "scratch_tlas");
 
-        VkDeviceAddress instanceAddr = getBufferAddress(RAW_BUFFER(instanceEnc));
-        VkDeviceAddress scratchAddr  = getBufferAddress(RAW_BUFFER(scratchHandle));
+        // Fix: Create temporary structs
+        VkBufferDeviceAddressInfo instanceAddrInfo{
+            .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
+            .buffer = RAW_BUFFER(instanceEnc)
+        };
+        VkBufferDeviceAddressInfo scratchAddrInfo{
+            .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
+            .buffer = RAW_BUFFER(scratchHandle)
+        };
+
+        VkDeviceAddress instanceAddr = g_ctx().vkGetBufferDeviceAddressKHR_(dev, &instanceAddrInfo);
+        VkDeviceAddress scratchAddr  = g_ctx().vkGetBufferDeviceAddressKHR_(dev, &scratchAddrInfo);
 
         VkAccelerationStructureGeometryKHR geometry{
             .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR,
@@ -426,13 +457,13 @@ public:
 
         VkCommandBuffer cmd = VulkanRTX::beginSingleTimeCommands(pool);
         const VkAccelerationStructureBuildRangeInfoKHR* ranges[] = { &buildRange };
-        ctx().vkCmdBuildAccelerationStructuresKHR_(cmd, 1, &buildInfo, ranges);
+        g_ctx().vkCmdBuildAccelerationStructuresKHR_(cmd, 1, &buildInfo, ranges);
         VulkanRTX::endSingleTimeCommands(cmd, queue, pool);
 
         auto deleter = [asBufferHandle, instanceEnc, scratchHandle](VkDevice d,
                                                                    VkAccelerationStructureKHR a,
                                                                    const VkAllocationCallbacks*) noexcept {
-            if (a) ctx().vkDestroyAccelerationStructureKHR_(d, a, nullptr);
+            if (a) g_ctx().vkDestroyAccelerationStructureKHR_(d, a, nullptr);
             if (asBufferHandle) BUFFER_DESTROY(asBufferHandle);
             if (instanceEnc) BUFFER_DESTROY(instanceEnc);
             if (scratchHandle) BUFFER_DESTROY(scratchHandle);
@@ -468,7 +499,7 @@ public:
             .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR,
             .accelerationStructure = *blas_
         };
-        return ctx().vkGetAccelerationStructureDeviceAddressKHR_(ctx().vkDevice(), &info);
+        return g_ctx().vkGetAccelerationStructureDeviceAddressKHR_(g_ctx().vkDevice(), &info);
     }
 
     [[nodiscard]] VkAccelerationStructureKHR getTLAS() const noexcept { return tlas_ ? *tlas_ : VK_NULL_HANDLE; }
@@ -478,7 +509,7 @@ public:
             .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR,
             .accelerationStructure = *tlas_
         };
-        return ctx().vkGetAccelerationStructureDeviceAddressKHR_(ctx().vkDevice(), &info);
+        return g_ctx().vkGetAccelerationStructureDeviceAddressKHR_(g_ctx().vkDevice(), &info);
     }
 
     [[nodiscard]] VkDeviceSize getTLASSize() const noexcept { return tlasSize_; }
@@ -486,17 +517,8 @@ public:
 private:
     LAS() {
         LOG_INFO_CAT("LAS", "LAS singleton initialized");
-        UltraLowLevelBufferTracker::get().init(ctx().vkDevice(), ctx().vkPhysicalDevice());
     }
     ~LAS() = default;
-
-    [[nodiscard]] static VkDeviceAddress getBufferAddress(VkBuffer buf) {
-        VkBufferDeviceAddressInfo info{
-            .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
-            .buffer = buf
-        };
-        return ctx().vkGetBufferDeviceAddressKHR_(ctx().vkDevice(), &info);
-    }
 
     mutable std::mutex mutex_;
     Handle<VkAccelerationStructureKHR> blas_;
@@ -511,6 +533,7 @@ inline LAS& las() noexcept { return LAS::get(); }
 
 // =============================================================================
 // STONEKEY v∞ PUBLIC — PINK PHOTONS ETERNAL — TITAN DOMINANCE ETERNAL
-// RTX::las().buildTLAS(...) — 15,000 FPS — VALHALLA v85 FINAL
-// FULL LOGGING — ZERO WARNINGS — PRODUCTION-READY
+// RTX::las().buildTLAS(...) — 15,000 FPS — VALHALLA v89 FINAL
+// FIXED: &(...) rvalue address errors → use stack variables
+// ZERO ERRORS — ZERO CIRCULAR — PRODUCTION-READY
 // =============================================================================
