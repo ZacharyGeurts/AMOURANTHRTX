@@ -959,10 +959,6 @@ void VulkanRTX::recordRayTrace(VkCommandBuffer cmd, VkExtent2D extent,
     LOG_TRACE_CAT("RTX", "recordRayTrace — COMPLETE");
 }
 
-bool VulkanRTX::isValid() const noexcept {
-    return device_ != VK_NULL_HANDLE && pipeline() != VK_NULL_HANDLE;
-}
-
 // =============================================================================
 // VALHALLA v70 FINAL — AI LOGGING SUPREMACY
 // PINK PHOTONS ETERNAL — 15,000 FPS — TITAN DOMINANCE ETERNAL

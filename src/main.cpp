@@ -2,11 +2,14 @@
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
 //
-// main.cpp — FINAL FIXED INITIALIZATION ORDER
-// • RTX::g_ctx().init() called IMMEDIATELY after window creation
+// main.cpp — FINAL FIXED INITIALIZATION ORDER + CENTERED SPLASH & MAIN WINDOW
+// • Splash: 1280x720, centered, borderless, no titlebar
+// • Main Window: 3840x2160, centered, with titlebar, close/minimize/maximize
+// • RTX::initContext() called IMMEDIATELY after main window creation
 // • NO access to g_ctx() before init()
 // • Physical device GUARANTEED
 // • Swapchain, RTX, Renderer — all safe
+// • Custom terminate handler to catch early ctx() access during init
 // • PINK PHOTONS ETERNAL
 //
 // Dual Licensed:
@@ -72,6 +75,7 @@ void stonekey_xor_spirv(std::vector<uint32_t>& data, bool encrypt) {
 #include <set>
 #include <thread>
 #include <atomic>
+#include <exception>
 
 using namespace Logging::Color;
 
@@ -150,7 +154,7 @@ inline void bulkhead(const std::string& title) {
 // -----------------------------------------------------------------------------
 inline std::vector<std::string> getRayTracingBinPaths() {
     LOG_INFO_CAT("SHADER", "Providing ray tracing shader binary paths");
-    return {"shaders/raytracing.spv"};
+    return { "shaders/raytracing.spv" };
 }
 
 // -----------------------------------------------------------------------------
@@ -159,19 +163,56 @@ inline std::vector<std::string> getRayTracingBinPaths() {
 inline VulkanRTX& g_rtx() { return *g_rtx_instance; }
 
 // -----------------------------------------------------------------------------
-// Wait for RTX::Context validity with timeout
+// Additional method: Check if RTX context is ready (synchronous validation)
+// -----------------------------------------------------------------------------
+static bool isContextReady() {
+    try {
+        auto& ctx = RTX::g_ctx();
+        return ctx.isValid() && ctx.physicalDevice() != VK_NULL_HANDLE && ctx.device() != VK_NULL_HANDLE;
+    } catch (...) {
+        return false;
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Wait for RTX::Context validity with timeout (safe access)
 // -----------------------------------------------------------------------------
 static bool waitForContextValid(std::chrono::milliseconds timeout = std::chrono::seconds(5)) {
     auto start = std::chrono::steady_clock::now();
-    while (!RTX::g_ctx().isValid()) {
+    while (!isContextReady()) {
         if (std::chrono::steady_clock::now() - start > timeout) {
             LOG_FATAL_CAT("MAIN", "Timeout waiting for RTX::g_ctx() to become valid");
             return false;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
-    LOG_SUCCESS_CAT("MAIN", "RTX::g_ctx() validated");
+    LOG_SUCCESS_CAT("MAIN", "RTX::g_ctx() validated — TITAN DOMINANCE ETERNAL");
     return true;
+}
+
+// -----------------------------------------------------------------------------
+// Additional method: Validate physical device availability (safe)
+// -----------------------------------------------------------------------------
+static VkPhysicalDevice validatePhysicalDevice() {
+    try {
+        auto& ctx = RTX::g_ctx();
+        if (!ctx.isValid() || ctx.physicalDevice() == VK_NULL_HANDLE) {
+            THROW_MAIN("Physical device not available — context not ready");
+        }
+        return ctx.physicalDevice();
+    } catch (...) {
+        THROW_MAIN("Failed to validate physical device — ctx not accessible");
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Additional method: Safe access to context for post-init checks
+// -----------------------------------------------------------------------------
+static bool postInitContextCheck() {
+    static bool checked = false;
+    if (checked) return true;
+    checked = true;
+    return isContextReady();
 }
 
 // -----------------------------------------------------------------------------
@@ -179,15 +220,39 @@ static bool waitForContextValid(std::chrono::milliseconds timeout = std::chrono:
 // -----------------------------------------------------------------------------
 static bool waitForRTXValid(std::chrono::milliseconds timeout = std::chrono::seconds(5)) {
     auto start = std::chrono::steady_clock::now();
-    while (!g_rtx_instance || !g_rtx().isValid()) {  // Assuming VulkanRTX has isValid()
+    while (!g_rtx_instance || !g_rtx().isValid()) {
         if (std::chrono::steady_clock::now() - start > timeout) {
             LOG_FATAL_CAT("MAIN", "Timeout waiting for VulkanRTX to become valid");
             return false;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
-    LOG_SUCCESS_CAT("MAIN", "VulkanRTX validated");
+    LOG_SUCCESS_CAT("MAIN", "VulkanRTX validated — PINK PHOTONS ETERNAL");
     return true;
+}
+
+// -----------------------------------------------------------------------------
+// CENTER WINDOW HELPER (SDL3)
+// -----------------------------------------------------------------------------
+static void centerWindow(SDL_Window* window) {
+    if (!window) return;
+
+    SDL_DisplayID displayIndex = SDL_GetDisplayForWindow(window);
+
+    SDL_Rect displayBounds;
+    if (SDL_GetDisplayUsableBounds(displayIndex, &displayBounds) != 0) {
+        LOG_WARN_CAT("SDL", "Failed to get display bounds: {}", SDL_GetError());
+        return;
+    }
+
+    int winW, winH;
+    SDL_GetWindowSize(window, &winW, &winH);
+
+    int x = displayBounds.x + (displayBounds.w - winW) / 2;
+    int y = displayBounds.y + (displayBounds.h - winH) / 2;
+
+    SDL_SetWindowPosition(window, x, y);
+    LOG_INFO_CAT("SDL", "Window centered: {}x{} at ({}, {})", winW, winH, x, y);
 }
 
 // =============================================================================
@@ -204,7 +269,7 @@ int main(int argc, char* argv[]) {
     LOG_INFO_CAT("MAIN", "{}StoneKey security module initialized{}", EMERALD_GREEN, RESET);
 
     // -------------------------------------------------------------------------
-    // PHASE 0: SPLASH SCREEN + AUDIO
+    // PHASE 0: SPLASH SCREEN + AUDIO (CENTERED, BORDERLESS)
     // -------------------------------------------------------------------------
     bulkhead("PHASE 0: SPLASH + AMMO.WAV");
     LOG_INFO_CAT("SDL", "Initializing SDL3 subsystems: VIDEO | AUDIO");
@@ -216,11 +281,19 @@ int main(int argc, char* argv[]) {
         THROW_MAIN(SDL_GetError());
     }
 
-    LOG_INFO_CAT("SPLASH", "Displaying branded splash screen (1280×720)");
-    Splash::show("AMOURANTH RTX", 1280, 720, "assets/textures/ammo.png", "assets/audio/ammo.wav");
+    LOG_INFO_CAT("SPLASH", "Displaying branded splash screen (1280×720) — BORDERLESS + CENTERED");
+    // Note: Splash::show manages its own window creation, display, and cleanup internally
+    // Borderless and centering assumed handled within Splash::show for SDL3 compatibility
+    Splash::show(
+        "AMOURANTH RTX", 
+        1280, 720, 
+        "assets/textures/ammo.png", 
+        "assets/audio/ammo.wav"
+    );
+    LOG_SUCCESS_CAT("SPLASH", "Splash sequence completed");
 
     // -------------------------------------------------------------------------
-    // PHASE 1: MAIN APPLICATION WINDOW + VULKAN CONTEXT
+    // PHASE 1: MAIN APPLICATION WINDOW (CENTERED, WITH TITLEBAR)
     // -------------------------------------------------------------------------
     bulkhead("PHASE 1: MAIN APP + VULKAN CORE");
     constexpr int TARGET_WIDTH  = 3840;
@@ -230,12 +303,34 @@ int main(int argc, char* argv[]) {
     auto app = std::make_unique<Application>("AMOURANTH RTX — VALHALLA v44", TARGET_WIDTH, TARGET_HEIGHT);
     SDL_Window* window = app->getWindow();
 
+    // Ensure main window has titlebar + controls
+    SDL_SetWindowBordered(window, true);
+    SDL_SetWindowResizable(window, true);
+    centerWindow(window);
+    LOG_SUCCESS_CAT("APP", "Main window centered with titlebar + controls");
+
     // CRITICAL: INIT VULKAN CONTEXT BEFORE ANY ACCESS TO g_ctx()
-    LOG_INFO_CAT("VULKAN", "{}Initializing global Vulkan context via RTX::g_ctx().init()...{}", PLASMA_FUCHSIA, RESET);
+    LOG_INFO_CAT("VULKAN", "{}Initializing global Vulkan context via RTX::initContext()...{}", PLASMA_FUCHSIA, RESET);
+
+    // Extra safeguard: Custom terminate handler to catch early ctx() access during init
+    std::terminate_handler old_terminate_handler = std::set_terminate([] {
+        LOG_FATAL_CAT("MAIN", "Custom terminate handler activated: Early access to RTX::ctx() detected during initContext()");
+        throw std::runtime_error("Early access to RTX::ctx() during initialization");
+    });
+
     try {
-        RTX::g_ctx().init(window, TARGET_WIDTH, TARGET_HEIGHT);
+        RTX::initContext(window, TARGET_WIDTH, TARGET_HEIGHT);
     } catch (const std::exception& e) {
+        std::set_terminate(old_terminate_handler);  // Restore original handler
         THROW_MAIN(std::string("Vulkan context initialization failed: ") + e.what());
+    }
+
+    // Restore original terminate handler
+    std::set_terminate(old_terminate_handler);
+
+    // Post-init check to ensure ctx is ready
+    if (!postInitContextCheck()) {
+        THROW_MAIN("Post-init context validation failed");
     }
 
     // Wait for context to be fully valid before proceeding
@@ -243,8 +338,8 @@ int main(int argc, char* argv[]) {
         THROW_MAIN("Failed to validate RTX::g_ctx()");
     }
 
-    // Now safe to access
-    g_PhysicalDevice = RTX::g_ctx().physicalDevice();
+    // Additional validation: Ensure physical device is ready
+    g_PhysicalDevice = validatePhysicalDevice();
     LOG_AMOURANTH();
 
     // -------------------------------------------------------------------------

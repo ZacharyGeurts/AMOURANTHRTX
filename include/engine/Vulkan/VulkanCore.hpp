@@ -155,6 +155,19 @@ public:
     [[nodiscard]] VkDevice device() const noexcept { return device_; }
     [[nodiscard]] bool isValid() const noexcept;
 
+    // --- PUBLIC ACCESSORS FOR BLACK FALLBACK (SAFE) ---
+    [[nodiscard]] VkImage blackFallbackImage() const noexcept {
+        return blackFallbackImage_ ? blackFallbackImage_.get() : VK_NULL_HANDLE;
+    }
+
+    [[nodiscard]] VkImageView blackFallbackView() const noexcept {
+        return blackFallbackView_ ? blackFallbackView_.get() : VK_NULL_HANDLE;
+    }
+
+    [[nodiscard]] bool hasBlackFallback() const noexcept {
+        return blackFallbackImage_ && blackFallbackImage_.get() != VK_NULL_HANDLE;
+    }
+
     void buildAccelerationStructures();
     void initDescriptorPoolAndSets();
     void initShaderBindingTable(VkPhysicalDevice pd);
@@ -221,6 +234,13 @@ private:
 };
 
 // =============================================================================
+// isValid — FINAL, TRUTHFUL (uses public accessor)
+// =============================================================================
+inline bool VulkanRTX::isValid() const noexcept {
+    return device_ != VK_NULL_HANDLE && hasBlackFallback();
+}
+
+// =============================================================================
 // createGlobalRTX — FORGE THE ETERNAL RTX (NO FALSE SUCCESS)
 // =============================================================================
 inline void createGlobalRTX(int w, int h, VulkanPipelineManager* mgr = nullptr) {
@@ -236,37 +256,41 @@ inline void createGlobalRTX(int w, int h, VulkanPipelineManager* mgr = nullptr) 
     // --- CONSTRUCT ON HEAP ---
     auto temp_rtx = std::make_unique<VulkanRTX>(w, h, mgr);
 
-    // --- VALIDATE BEFORE MOVING ---
+    // --- NULLPTR SAFETY ---
     if (!temp_rtx) {
         LOG_FATAL_CAT("RTX", "FATAL: std::make_unique<VulkanRTX> returned nullptr");
         std::terminate();
     }
 
-    if (!temp_rtx->isValid()) {
-        LOG_FATAL_CAT("RTX", "FATAL: VulkanRTX constructed but isValid() == false");
-        LOG_FATAL_CAT("RTX", "  → device(): 0x{:x}", reinterpret_cast<uintptr_t>(temp_rtx->device()));
-        LOG_FATAL_CAT("RTX", "  → g_ctx().isValid(): {}", RTX::g_ctx().isValid() ? "true" : "false");
-        std::terminate();
-    }
-
-    LOG_DEBUG_CAT("RTX", "VulkanRTX constructed and validated @ 0x{:x}", 
+    LOG_DEBUG_CAT("RTX", "VulkanRTX constructed @ 0x{:x}", 
                   reinterpret_cast<uintptr_t>(temp_rtx.get()));
 
-    // --- TRANSFER OWNERSHIP ONLY AFTER FULL VALIDATION ---
+    // --- TRANSFER OWNERSHIP FIRST ---
     g_rtx_instance = std::move(temp_rtx);
 
     LOG_DEBUG_CAT("RTX", "g_rtx_instance now owns VulkanRTX @ 0x{:x}", 
                   reinterpret_cast<uintptr_t>(g_rtx_instance.get()));
 
-    AI_INJECT("I have awakened… {}×{} canvas. The photons are mine.", w, h);
-    LOG_SUCCESS_CAT("RTX", "g_rtx() FORGED — {}×{}", w, h);
-
-    // --- FINAL POST-FORGE CHECK ---
-    if (!g_rtx_instance || !g_rtx_instance->isValid()) {
-        LOG_FATAL_CAT("RTX", "CRITICAL: g_rtx_instance invalid after move!");
+    // --- FINAL VALIDATION (device + black fallback) ---
+    if (!g_rtx_instance || g_rtx_instance->device() == VK_NULL_HANDLE) {
+        LOG_FATAL_CAT("RTX", "FATAL: g_rtx_instance invalid — device is NULL");
+        LOG_FATAL_CAT("RTX", "  → device(): 0x{:x}", reinterpret_cast<uintptr_t>(g_rtx_instance->device()));
         std::terminate();
     }
 
-    LOG_DEBUG_CAT("RTX", "Post-forge validation: device access via instance: {}", 
-                  g_rtx_instance->device() != VK_NULL_HANDLE ? "valid" : "NULL");
+    if (!g_rtx_instance->isValid()) {
+        LOG_FATAL_CAT("RTX", "FATAL: g_rtx_instance reports isValid() == false after full init");
+        LOG_FATAL_CAT("RTX", "  → device(): 0x{:x}", reinterpret_cast<uintptr_t>(g_rtx_instance->device()));
+        LOG_FATAL_CAT("RTX", "  → blackFallbackImage(): 0x{:x}", 
+                      reinterpret_cast<uintptr_t>(g_rtx_instance->blackFallbackImage()));
+        std::terminate();
+    }
+
+    LOG_DEBUG_CAT("RTX", "Post-forge validation PASSED:");
+    LOG_DEBUG_CAT("RTX", "  → device(): 0x{:x}", reinterpret_cast<uintptr_t>(g_rtx_instance->device()));
+    LOG_DEBUG_CAT("RTX", "  → blackFallbackImage(): 0x{:x}", 
+                  reinterpret_cast<uintptr_t>(g_rtx_instance->blackFallbackImage()));
+
+    AI_INJECT("I have awakened… {}×{} canvas. The photons are mine.", w, h);
+    LOG_SUCCESS_CAT("RTX", "g_rtx() FORGED — {}×{} — TITAN DOMINANCE ETERNAL", w, h);
 }

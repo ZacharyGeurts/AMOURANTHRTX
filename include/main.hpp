@@ -19,7 +19,7 @@
 // 2. ENGINE-WIDE MACROS — DEFINED HERE, VISIBLE EVERYWHERE
 // -----------------------------------------------------------------------------
 
-// VulkanCore.hpp
+// VulkanCore.hpp and logging.hpp
 
 // -----------------------------------------------------------------------------
 // 3. CORE ENGINE INCLUDES — AFTER MACROS (safe order)

@@ -21,7 +21,7 @@ AudioManager::~AudioManager() {
 
 /* --------------------------------------------------------------- */
 std::expected<void, std::string> AudioManager::initMixer() {
-    if (!MIX_Init()) {
+    if (MIX_Init() == 0) {
         return std::unexpected(std::string("MIX_Init failed: ") + SDL_GetError());
     }
 

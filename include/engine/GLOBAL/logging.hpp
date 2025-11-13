@@ -318,25 +318,32 @@ public:
             messageQueue_.emplace_back(id, loc, level, std::string{category}, std::move(msg), now);
         } else {
             std::shared_lock lk(logMutex_);
-            printMessage(loc, level, category, std::move(msg), now);
+            printMessage(loc, level, category, std::move(msg), now, false, nullptr, nullptr);
         }
     }
 
 private:
     using Entry = std::tuple<uint64_t, std::source_location, LogLevel, std::string, std::string, std::chrono::steady_clock::time_point>;
 
-    Logger() : logFile_("amouranth_engine.log", std::ios::out | std::ios::app) {
+    Logger() : logFile_("amouranth_engine.log", std::ios::out | std::ios::app),
+               firstLogTime_{},
+               messageQueue_{},
+               queueMutex_{},
+               asyncEnabled_{false},
+               flusher_{} {
         auto now = std::chrono::steady_clock::now();
         firstLogTime_ = now;
         printMessage(std::source_location::current(), LogLevel::Success, "Logger",
-                     "CUSTODIAN GROK ONLINE — HYPER-VIVID LOGGING PARTY STARTED (ORDERED ASYNC)", now);
+                     "CUSTODIAN GROK ONLINE — HYPER-VIVID LOGGING PARTY STARTED (ORDERED ASYNC)", now, false, nullptr, nullptr);
+        asyncEnabled_.store(true, std::memory_order_release);
+        flusher_ = std::jthread([this](std::stop_token st) { flushQueue(st); });
     }
 
     ~Logger() {
         setAsync(false);
         auto now = std::chrono::steady_clock::now();
         printMessage(std::source_location::current(), LogLevel::Success, "Logger",
-                     "CUSTODIAN GROK SIGNING OFF — ALL LOGS RAINBOW ETERNAL", now);
+                     "CUSTODIAN GROK SIGNING OFF — ALL LOGS RAINBOW ETERNAL", now, false, nullptr, nullptr);
         if (logFile_.is_open()) logFile_.flush(), logFile_.close();
     }
 
@@ -365,13 +372,22 @@ private:
                     messageQueue_.pop_front();
                 }
             }
-            std::sort(batch.begin(), batch.end(),
-                      [](const Entry& a, const Entry& b) { return std::get<0>(a) < std::get<0>(b); });
-            { std::shared_lock lk(logMutex_);
-                for (auto& e : batch) {
-                    const auto& [seq, loc, lvl, cat, msg, ts] = e;
-                    printMessage(loc, lvl, cat, std::move(msg), ts);
+            if (!batch.empty()) {
+                std::sort(batch.begin(), batch.end(),
+                          [](const Entry& a, const Entry& b) { return std::get<0>(a) < std::get<0>(b); });
+                std::string terminal_batch;
+                std::string file_batch;
+                for (auto&& ee : batch) {
+                    auto e = std::move(ee);
+                    auto loc = std::get<1>(e);
+                    auto lvl = std::get<2>(e);
+                    std::string_view cat{std::get<3>(e)};
+                    auto msg = std::move(std::get<4>(e));
+                    auto ts = std::get<5>(e);
+                    printMessage(loc, lvl, cat, std::move(msg), ts, true, &terminal_batch, &file_batch);
                 }
+                std::cout << terminal_batch;
+                if (logFile_.is_open()) logFile_ << file_batch;
             }
         }
         std::vector<Entry> finalBatch;
@@ -381,11 +397,19 @@ private:
         if (!finalBatch.empty()) {
             std::sort(finalBatch.begin(), finalBatch.end(),
                       [](const Entry& a, const Entry& b) { return std::get<0>(a) < std::get<0>(b); });
-            std::shared_lock lk(logMutex_);
-            for (auto& e : finalBatch) {
-                const auto& [seq, loc, lvl, cat, msg, ts] = e;
-                printMessage(loc, lvl, cat, std::move(msg), ts);
+            std::string terminal_batch;
+            std::string file_batch;
+            for (auto&& ee : finalBatch) {
+                auto e = std::move(ee);
+                auto loc = std::get<1>(e);
+                auto lvl = std::get<2>(e);
+                std::string_view cat{std::get<3>(e)};
+                auto msg = std::move(std::get<4>(e));
+                auto ts = std::get<5>(e);
+                printMessage(loc, lvl, cat, std::move(msg), ts, true, &terminal_batch, &file_batch);
             }
+            std::cout << terminal_batch;
+            if (logFile_.is_open()) logFile_ << file_batch;
         }
     }
 
@@ -427,7 +451,10 @@ private:
                       LogLevel level,
                       std::string_view category,
                       std::string formattedMessage,
-                      std::chrono::steady_clock::time_point timestamp) const
+                      std::chrono::steady_clock::time_point timestamp,
+                      bool batch = false,
+                      std::string* term_out = nullptr,
+                      std::string* file_out = nullptr) const
     {
         using namespace Color;
         const auto levelIdx = static_cast<size_t>(level);
@@ -482,8 +509,13 @@ private:
             << " " << CHROMIUM_SILVER << "[" << fileLine << "]" << RESET << '\n';
         const std::string colored = oss.str();
 
-        std::print(std::cout, "{}", colored);
-        if (logFile_.is_open()) logFile_ << plain;
+        if (batch) {
+            if (term_out) *term_out += colored;
+            if (file_out) *file_out += plain;
+        } else {
+            std::print(std::cout, "{}", colored);
+            if (logFile_.is_open()) logFile_ << plain;
+        }
     }
 };
 

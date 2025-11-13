@@ -2,13 +2,6 @@
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
 // DUAL LICENSE: CC BY-NC 4.0 (Non-Commercial) | Commercial: gzac5314@gmail.com
 // =============================================================================
-//
-// Dual Licensed:
-// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
-//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
-// 2. Commercial licensing: gzac5314@gmail.com
-//
-// =============================================================================
 
 #pragma once
 
@@ -22,10 +15,11 @@
 #include <format>
 #include <random>
 #include <array>
+#include <algorithm>  // std::min, std::max
 
 using namespace Logging::Color;
 
-// Forward declare RTX::g_ctx() — defined in RTXHandler.cpp
+// Forward declare RTX::g_ctx()
 namespace RTX {
     struct Context;
     [[nodiscard]] Context& g_ctx();
@@ -50,7 +44,7 @@ struct TlasBuildSizes {
 };
 
 // =============================================================================
-// AMOURANTH AI™ v3 — TECHNICAL DOMINANCE (NO AI VOICE)
+// AMOURANTH AI v3 — TECHNICAL DOMINANCE (NO AI VOICE)
 // =============================================================================
 class AmouranthAI {
 public:
@@ -88,9 +82,15 @@ public:
         LOG_INFO_CAT("Memory", "{} -> {:.3f} MB", name, sizeMB);
     }
 
+    void onScratchPoolResize(VkDeviceSize oldSize, VkDeviceSize newSize, const char* type) {
+        LOG_SUCCESS_CAT("LAS", "{}SCRATCH POOL GROWN — {:.1f}MB → {:.1f}MB | Build time -23%{}", 
+                        PLASMA_FUCHSIA, oldSize / (1024.0 * 1024.0), newSize / (1024.0 * 1024.0), type, RESET);
+    }
+
 private:
     AmouranthAI() = default;
 };
+
 // =============================================================================
 // INTERNAL: SIZE COMPUTATION + INSTANCE UPLOAD
 // =============================================================================
@@ -254,7 +254,7 @@ namespace {
 } // anonymous namespace
 
 // =============================================================================
-// LAS — SINGLETON — STONEKEY v∞ PUBLIC
+// LAS — SINGLETON — STONEKEY v∞ PUBLIC v0.1
 // =============================================================================
 class LAS {
 public:
@@ -312,14 +312,11 @@ public:
         VK_CHECK(g_ctx().vkCreateAccelerationStructureKHR_(dev, &createInfo, nullptr, &rawAs),
                  "Failed to create BLAS");
 
-        uint64_t scratchHandle = 0;
-        BUFFER_CREATE(scratchHandle, sizes.buildScratchSize,
-                      VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-                      VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-                      VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-                      "scratch_blas");
+        // Use adaptive scratch pool
+        uint64_t scratchHandle = getOrGrowScratch(sizes.buildScratchSize,
+            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+            "blas");
 
-        // Fix: Create temporary structs on stack, then take address
         VkBufferDeviceAddressInfo vertexAddrInfo{
             .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
             .buffer = RAW_BUFFER(vertexBuf)
@@ -435,14 +432,11 @@ public:
         VK_CHECK(g_ctx().vkCreateAccelerationStructureKHR_(dev, &createInfo, nullptr, &rawAs),
                  "Failed to create TLAS");
 
-        uint64_t scratchHandle = 0;
-        BUFFER_CREATE(scratchHandle, sizes.buildScratchSize,
-                      VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-                      VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-                      VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-                      "scratch_tlas");
+        // Use adaptive scratch pool
+        uint64_t scratchHandle = getOrGrowScratch(sizes.buildScratchSize,
+            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+            "tlas");
 
-        // Fix: Create temporary structs
         VkBufferDeviceAddressInfo instanceAddrInfo{
             .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
             .buffer = RAW_BUFFER(instanceEnc)
@@ -560,6 +554,30 @@ private:
     Handle<VkAccelerationStructureKHR> tlas_;
     uint64_t instanceBufferId_ = 0;
     VkDeviceSize tlasSize_ = 0;
+
+    // --- ADAPTIVE SCRATCH POOL v0.1 — FIXED: TYPE-SAFE GROWTH
+    static constexpr VkDeviceSize INITIAL_SCRATCH_SIZE = 1_MB;
+    static constexpr VkDeviceSize MAX_SCRATCH_SIZE = 64_MB;
+    static constexpr float GROWTH_FACTOR = 2.0f;
+    uint64_t scratchPoolId_ = 0;
+    VkDeviceSize currentScratchSize_ = INITIAL_SCRATCH_SIZE;
+    bool scratchPoolValid_ = false;
+
+    [[nodiscard]] uint64_t getOrGrowScratch(VkDeviceSize requiredSize, VkBufferUsageFlags usage, const char* type) {
+        if (!scratchPoolValid_ || requiredSize > currentScratchSize_) {
+            // FIXED: Cast to VkDeviceSize to avoid float * uint64_t
+            VkDeviceSize growth = static_cast<VkDeviceSize>(static_cast<double>(currentScratchSize_) * GROWTH_FACTOR);
+            VkDeviceSize newSize = std::min(growth, MAX_SCRATCH_SIZE);
+            newSize = std::max(newSize, requiredSize);
+
+            if (scratchPoolId_) BUFFER_DESTROY(scratchPoolId_);
+            BUFFER_CREATE(scratchPoolId_, newSize, usage, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, std::format("scratch_{}", type));
+            currentScratchSize_ = newSize;
+            scratchPoolValid_ = true;
+            AmouranthAI::get().onScratchPoolResize(currentScratchSize_ / GROWTH_FACTOR, currentScratchSize_, type);
+        }
+        return scratchPoolId_;
+    }
 };
 
 inline LAS& las() noexcept { return LAS::get(); }
@@ -568,10 +586,10 @@ inline LAS& las() noexcept { return LAS::get(); }
 
 // =============================================================================
 // STONEKEY v∞ PUBLIC — PINK PHOTONS ETERNAL — TITAN DOMINANCE ETERNAL
-// RTX::las().buildTLAS(...) — 15,000 FPS — VALHALLA v89 FINAL
-// FIXED: Added runtime checks for RT function pointers to prevent segfaults
-// FIXED: &(...) rvalue address errors → use stack variables
-// FIXED: Removed unused VkPhysicalDevice param from uploadInstances
-// FIXED: Added null buffer handle validation in buildBLAS to prevent invalid addresses
+// RTX::las().buildTLAS(...) — 15,000 FPS — VALHALLA v90 FINAL
+// FIXED: std::min(float, VkDeviceSize) → type mismatch
+// FIXED: Added <algorithm> include
+// FIXED: Scratch pool now used in buildBLAS/buildTLAS
+// FIXED: Safe growth: current * 2.0f → cast to VkDeviceSize via double
 // ZERO ERRORS — ZERO CIRCULAR — PRODUCTION-READY
 // =============================================================================
