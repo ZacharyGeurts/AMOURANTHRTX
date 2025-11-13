@@ -90,7 +90,7 @@ float getJitter() {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// VulkanRenderer — Transient Command Buffers
+// VulkanRenderer — Transient Command Buffers (FIXED)
 // ──────────────────────────────────────────────────────────────────────────────
 VkCommandBuffer VulkanRenderer::beginSingleTimeCommands(VkDevice device, VkCommandPool pool) {
     LOG_TRACE_CAT("RENDERER", "beginSingleTimeCommands — START");
@@ -111,19 +111,45 @@ VkCommandBuffer VulkanRenderer::beginSingleTimeCommands(VkDevice device, VkComma
     return cmd;
 }
 
+// ──────────────────────────────────────────────────────────────────────────────
+// VulkanRenderer — Fence Helper (member, reusable)
+// ──────────────────────────────────────────────────────────────────────────────
+[[nodiscard]] VkFence VulkanRenderer::createFence(bool signaled /*= false*/) const noexcept {
+    LOG_TRACE_CAT("RENDERER", "createFence — START — signaled={}", signaled);
+    VkFenceCreateInfo info{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+    if (signaled) info.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+
+    VkFence fence = VK_NULL_HANDLE;
+    VK_CHECK(vkCreateFence(RTX::ctx().vkDevice(), &info, nullptr, &fence),
+             "Fence creation");
+    LOG_TRACE_CAT("RENDERER", "Fence created: 0x{:x}", reinterpret_cast<uint64_t>(fence));
+    LOG_TRACE_CAT("RENDERER", "createFence — COMPLETE");
+    return fence;
+}
+
+// NEW: Safe async submit + wait
 void VulkanRenderer::endSingleTimeCommands(VkDevice device, VkCommandPool pool, VkQueue queue, VkCommandBuffer cmd) {
     LOG_TRACE_CAT("RENDERER", "endSingleTimeCommands — START");
+
     VK_CHECK(vkEndCommandBuffer(cmd), "Transient end");
+
+    // Use the member createFence() — safe, logged, reusable
+    VkFence fence = createFence(false);  // ← Now resolves to VulkanRenderer::createFence()
 
     VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
     submit.commandBufferCount = 1;
     submit.pCommandBuffers = &cmd;
-    VK_CHECK(vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE), "Transient submit");
 
-    vkQueueWaitIdle(queue);
+    VK_CHECK(vkQueueSubmit(queue, 1, &submit, fence), "Transient submit");
+
+    // Wait for GPU to finish —ily
+    VK_CHECK(vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX), "Transient fence wait");
+
+    // Clean up
+    vkDestroyFence(device, fence, nullptr);
     vkFreeCommandBuffers(device, pool, 1, &cmd);
 
-    LOG_TRACE_CAT("RENDERER", "Transient command buffer submitted and freed");
+    LOG_TRACE_CAT("RENDERER", "Transient command buffer submitted and synchronized");
     LOG_TRACE_CAT("RENDERER", "endSingleTimeCommands — COMPLETE");
 }
 
@@ -550,11 +576,8 @@ void VulkanRenderer::createRayTracingPipeline(const std::vector<std::string>& sh
 
     VkPipelineLayoutCreateInfo layoutInfo{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
     layoutInfo.setLayoutCount = 1;
-    layoutInfo.pSetLayouts = &rtDescriptorSetLayout_.raw; 
+    layoutInfo.pSetLayouts = &rtDescriptorSetLayout_.raw;  // ← FIXED LINE 553
     VkPipelineLayout layout;
-    VK_CHECK(vkCreatePipelineLayout(RTX::ctx().vkDevice(), &layoutInfo, nullptr, &layout), "Pipeline layout");
-    rtPipelineLayout_ = RTX::Handle<VkPipelineLayout>(layout, RTX::ctx().vkDevice(), vkDestroyPipelineLayout);
-
     VK_CHECK(vkCreatePipelineLayout(RTX::ctx().vkDevice(), &layoutInfo, nullptr, &layout), "Pipeline layout");
     LOG_TRACE_CAT("RENDERER", "Created pipeline layout: 0x{:x}", reinterpret_cast<uint64_t>(layout));
     rtPipelineLayout_ = RTX::Handle<VkPipelineLayout>(layout, RTX::ctx().vkDevice(), vkDestroyPipelineLayout);
@@ -614,7 +637,7 @@ VkDeviceAddress VulkanRenderer::getShaderGroupHandle(uint32_t group) {
 // ──────────────────────────────────────────────────────────────────────────────
 void VulkanRenderer::createRTOutputImages() {
     LOG_TRACE_CAT("RENDERER", "createRTOutputImages — START");
-    LOG_INFO_CAT("RENDERER", "Creating ray tracing output images");
+    LOG_INFO_CAT("RENDERER", "Creating ray tracing output images (per-frame)");
     createImageArray(rtOutputImages_, rtOutputMemories_, rtOutputViews_, "RTOutput");
     LOG_TRACE_CAT("RENDERER", "createRTOutputImages — COMPLETE");
 }
@@ -669,26 +692,25 @@ void VulkanRenderer::createNexusScoreImage(VkPhysicalDevice phys, VkDevice dev, 
     LOG_TRACE_CAT("RENDERER", "createNexusScoreImage — COMPLETE");
 }
 
-void VulkanRenderer::createImageArray(std::vector<RTX::Handle<VkImage_T*>>& images,
-                                      std::vector<RTX::Handle<VkDeviceMemory_T*>>& memories,
-                                      std::vector<RTX::Handle<VkImageView_T*>>& views,
-                                      const std::string& tag) noexcept {
+void VulkanRenderer::createImageArray(
+    std::vector<RTX::Handle<VkImage>>& images,
+    std::vector<RTX::Handle<VkDeviceMemory>>& memories,
+    std::vector<RTX::Handle<VkImageView>>& views,
+    const std::string& tag) noexcept
+{
     LOG_TRACE_CAT("RENDERER", "createImageArray — START — tag='{}'", tag);
-    const uint32_t frames = Options::Performance::MAX_FRAMES_IN_FLIGHT;
-    VkFormat fmt = VK_FORMAT_R32G32B32A32_SFLOAT;
-    VkExtent2D ext = SWAPCHAIN.extent();
-    LOG_INFO_CAT("RENDERER", "{} image array: {}x{} | {} frames", tag, ext.width, ext.height, frames);
 
-    // Robustness: Validate extent (log only, no throw in noexcept)
+    const uint32_t frames = Options::Performance::MAX_FRAMES_IN_FLIGHT;
+    const VkFormat fmt = VK_FORMAT_R32G32B32A32_SFLOAT;
+    const VkExtent2D ext = SWAPCHAIN.extent();
+
     if (ext.width == 0 || ext.height == 0) {
         LOG_ERROR_CAT("RENDERER", "Invalid swapchain extent: {}x{}", ext.width, ext.height);
-        LOG_TRACE_CAT("RENDERER", "createImageArray — COMPLETE (early exit due to invalid extent)");
-        return;  // Early exit
+        return;
     }
 
     VkDevice device = RTX::ctx().vkDevice();
-    VkPhysicalDevice physDevice = RTX::ctx().vkPhysicalDevice();
-    LOG_DEBUG_CAT("RENDERER", "Using device=0x{:x}, physDevice=0x{:x}", reinterpret_cast<uintptr_t>(device), reinterpret_cast<uintptr_t>(physDevice));
+    VkPhysicalDevice phys = RTX::ctx().vkPhysicalDevice();
 
     VkImageCreateInfo imgInfo{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
     imgInfo.imageType = VK_IMAGE_TYPE_2D;
@@ -698,174 +720,87 @@ void VulkanRenderer::createImageArray(std::vector<RTX::Handle<VkImage_T*>>& imag
     imgInfo.arrayLayers = 1;
     imgInfo.samples = MSAA_SAMPLES;
     imgInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-    imgInfo.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    imgInfo.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
     imgInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    LOG_DEBUG_CAT("RENDERER", "Image info: type={}, fmt={}, extent={}x{}x{}, mip=1, layers=1, samples={}, tiling={}, usage=0x{:x}, initialLayout={}",
-                  static_cast<int>(imgInfo.imageType), static_cast<int>(imgInfo.format), imgInfo.extent.width, imgInfo.extent.height, imgInfo.extent.depth,
-                  static_cast<int>(imgInfo.samples), static_cast<int>(imgInfo.tiling), imgInfo.usage, static_cast<int>(imgInfo.initialLayout));
 
-    // Speed: Precompute memory type index once (all images identical)
-    VkMemoryRequirements req;
+    // ─── Precompute memory type ───
     uint32_t memTypeIndex = UINT32_MAX;
-    bool usePrecomputed = false;
     {
-        LOG_TRACE_CAT("RENDERER", "Precomputing memory type — dummy image creation — START");
-        VkImage dummyImg = VK_NULL_HANDLE;
-        VkResult dummyResult = vkCreateImage(device, &imgInfo, nullptr, &dummyImg);
-        if (dummyResult == VK_SUCCESS) {
-            vkGetImageMemoryRequirements(device, dummyImg, &req);
-            LOG_DEBUG_CAT("RENDERER", "Dummy image req: size={}, alignment={}, typeBits=0x{:x}", req.size, req.alignment, req.memoryTypeBits);
-            memTypeIndex = findMemoryType(physDevice, req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-            if (memTypeIndex != UINT32_MAX) {
-                LOG_DEBUG_CAT("RENDERER", "Precomputed memory type index: {}", memTypeIndex);
-                usePrecomputed = true;
-            }
-            vkDestroyImage(device, dummyImg, nullptr);
-            LOG_TRACE_CAT("RENDERER", "Dummy image destroyed");
-        } else {
-            LOG_WARN_CAT("RENDERER", "Dummy image creation failed ({}), using per-frame computation", static_cast<int>(dummyResult));
+        VkImage dummy = VK_NULL_HANDLE;
+        if (vkCreateImage(device, &imgInfo, nullptr, &dummy) == VK_SUCCESS) {
+            VkMemoryRequirements req;
+            vkGetImageMemoryRequirements(device, dummy, &req);
+            memTypeIndex = findMemoryType(phys, req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+            vkDestroyImage(device, dummy, nullptr);
         }
-        LOG_TRACE_CAT("RENDERER", "Precomputing memory type — COMPLETE — usePrecomputed={}", usePrecomputed);
+    }
+    if (memTypeIndex == UINT32_MAX) {
+        LOG_ERROR_CAT("RENDERER", "Failed to precompute memory type for {} images", tag);
+        return;
     }
 
-    // Resize vectors upfront
-    LOG_TRACE_CAT("RENDERER", "Resizing vectors — START");
+    // ─── Resize containers ───
     images.resize(frames);
     memories.resize(frames);
     views.resize(frames);
-    LOG_DEBUG_CAT("RENDERER", "Resized vectors: images.size={} (data=0x{:x}), memories.size={} (data=0x{:x}), views.size={} (data=0x{:x})",
-                  images.size(), reinterpret_cast<uintptr_t>(images.data()),
-                  memories.size(), reinterpret_cast<uintptr_t>(memories.data()),
-                  views.size(), reinterpret_cast<uintptr_t>(views.data()));
-    LOG_TRACE_CAT("RENDERER", "Resizing vectors — COMPLETE");
-
-    VkDeviceSize dummySize = 0;
 
     for (uint32_t i = 0; i < frames; ++i) {
-        LOG_DEBUG_CAT("RENDERER", "Processing frame {} of {}", i, frames - 1);
+        LOG_TRACE_CAT("RENDERER", "Frame {} — Creating {} image", i, tag);
 
-        // Create image
-        LOG_TRACE_CAT("RENDERER", "Frame {} — vkCreateImage — START", i);
+        // ─── Create Image ───
         VkImage img = VK_NULL_HANDLE;
-        VkResult imgResult = vkCreateImage(device, &imgInfo, nullptr, &img);
-        LOG_DEBUG_CAT("RENDERER", "vkCreateImage for frame {} returned: {}, img=0x{:x}", i, static_cast<int>(imgResult), reinterpret_cast<uintptr_t>(img));
-        if (imgResult != VK_SUCCESS) {
-            LOG_ERROR_CAT("RENDERER", "Failed to create image for frame {}: {}", i, static_cast<int>(imgResult));
-            LOG_TRACE_CAT("RENDERER", "Frame {} — vkCreateImage — COMPLETE (failed)", i);
-            continue;
-        }
-        LOG_TRACE_CAT("RENDERER", "Frame {} — Handle creation for image — START", i);
+        VK_CHECK(vkCreateImage(device, &imgInfo, nullptr, &img), "vkCreateImage");
 
-        // Correct Handle construction: raw handle, device, lambda with correct signature, size, tag
-        images[i] = RTX::Handle<VkImage_T*>(
-            img,
-            device,
-            [](VkDevice_T* d, VkImage_T* i, const VkAllocationCallbacks*) {
-                if (i) vkDestroyImage(d, i, nullptr);
-            },
-            dummySize,
-            tag + "Image"
-        );
-        LOG_DEBUG_CAT("RENDERER", "Created image handle for frame {}: 0x{:x}", i, reinterpret_cast<uintptr_t>(img));
-        LOG_TRACE_CAT("RENDERER", "Frame {} — Handle creation for image — COMPLETE", i);
-        LOG_TRACE_CAT("RENDERER", "Frame {} — vkCreateImage — COMPLETE", i);
+        // ─── Get Memory Requirements ───
+        VkMemoryRequirements req;
+        vkGetImageMemoryRequirements(device, img, &req);
 
-        // Get memory requirements
-        LOG_TRACE_CAT("RENDERER", "Frame {} — vkGetImageMemoryRequirements — START", i);
-        VkMemoryRequirements frameReq;
-        vkGetImageMemoryRequirements(device, img, &frameReq);
-        LOG_DEBUG_CAT("RENDERER", "Frame {} req: size={}, alignment={}, typeBits=0x{:x}", i, frameReq.size, frameReq.alignment, frameReq.memoryTypeBits);
-        LOG_TRACE_CAT("RENDERER", "Frame {} — vkGetImageMemoryRequirements — COMPLETE", i);
-
-        // Use precomputed or fallback
-        uint32_t frameMemType = usePrecomputed ? memTypeIndex : findMemoryType(physDevice, frameReq.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-        if (frameMemType == UINT32_MAX) {
-            LOG_ERROR_CAT("RENDERER", "No memory type for frame {}", i);
-            images[i].reset();
-            continue;
-        }
-        if (!usePrecomputed && frameMemType != UINT32_MAX) {
-            LOG_DEBUG_CAT("RENDERER", "Computed memory type index for frame {}: {}", i, frameMemType);
-        }
-
-        // Allocate and bind memory
-        LOG_TRACE_CAT("RENDERER", "Frame {} — vkAllocateMemory — START", i);
+        // ─── Allocate Memory ───
         VkMemoryAllocateInfo alloc{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
-        alloc.allocationSize = frameReq.size;
-        alloc.memoryTypeIndex = frameMemType;
-        VkDeviceMemory mem = VK_NULL_HANDLE;
-        VkResult memResult = vkAllocateMemory(device, &alloc, nullptr, &mem);
-        LOG_DEBUG_CAT("RENDERER", "vkAllocateMemory for frame {} returned: {}, mem=0x{:x}, size={} (type={})",
-                      i, static_cast<int>(memResult), reinterpret_cast<uintptr_t>(mem), alloc.allocationSize, frameMemType);
-        if (memResult != VK_SUCCESS) {
-            LOG_ERROR_CAT("RENDERER", "Failed to allocate memory for frame {}: {}", i, static_cast<int>(memResult));
-            images[i].reset();
-            LOG_TRACE_CAT("RENDERER", "Frame {} — vkAllocateMemory — COMPLETE (failed)", i);
-            continue;
-        }
-        LOG_TRACE_CAT("RENDERER", "Frame {} — vkBindImageMemory — START", i);
-        VkResult bindResult = vkBindImageMemory(device, img, mem, 0);
-        LOG_DEBUG_CAT("RENDERER", "vkBindImageMemory for frame {} returned: {}", i, static_cast<int>(bindResult));
-        if (bindResult != VK_SUCCESS) {
-            LOG_ERROR_CAT("RENDERER", "Failed to bind memory for frame {}: {}", i, static_cast<int>(bindResult));
-            vkFreeMemory(device, mem, nullptr);
-            images[i].reset();
-            LOG_TRACE_CAT("RENDERER", "Frame {} — vkBindImageMemory — COMPLETE (failed)", i);
-            continue;
-        }
-        LOG_TRACE_CAT("RENDERER", "Frame {} — Handle creation for memory — START", i);
-        memories[i] = RTX::Handle<VkDeviceMemory_T*>(
-            mem,
-            device,
-            [](VkDevice_T* d, VkDeviceMemory_T* m, const VkAllocationCallbacks*) {
-                if (m) vkFreeMemory(d, m, nullptr);
-            },
-            frameReq.size,
-            tag + "Memory"
-        );
-        LOG_DEBUG_CAT("RENDERER", "Created memory handle for frame {}: 0x{:x}", i, reinterpret_cast<uintptr_t>(mem));
-        LOG_TRACE_CAT("RENDERER", "Frame {} — Handle creation for memory — COMPLETE", i);
-        LOG_TRACE_CAT("RENDERER", "Frame {} — vkAllocateMemory/vkBindImageMemory — COMPLETE", i);
+        alloc.allocationSize = req.size;
+        alloc.memoryTypeIndex = memTypeIndex;
 
-        // Create view
-        LOG_TRACE_CAT("RENDERER", "Frame {} — vkCreateImageView — START", i);
+        VkDeviceMemory mem = VK_NULL_HANDLE;
+        VK_CHECK(vkAllocateMemory(device, &alloc, nullptr, &mem), "vkAllocateMemory");
+
+        // ─── BIND MEMORY BEFORE HANDLE ───
+        VK_CHECK(vkBindImageMemory(device, img, mem, 0), "vkBindImageMemory");
+
+        // ─── Create Handles ───
+        images[i] = RTX::Handle<VkImage>(
+            img, device,
+            [](VkDevice d, VkImage i, const VkAllocationCallbacks*) { vkDestroyImage(d, i, nullptr); },
+            0, tag + "Image"
+        );
+
+        memories[i] = RTX::Handle<VkDeviceMemory>(
+            mem, device,
+            [](VkDevice d, VkDeviceMemory m, const VkAllocationCallbacks*) { vkFreeMemory(d, m, nullptr); },
+            req.size, tag + "Memory"
+        );
+
+        // ─── Create Image View ───
         VkImageViewCreateInfo viewInfo{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
         viewInfo.image = img;
         viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
         viewInfo.format = fmt;
         viewInfo.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-        LOG_DEBUG_CAT("RENDERER", "View info for frame {}: image=0x{:x}, type={}, fmt={}, aspect=0x{:x}, baseMip=0, mipLevels=1, baseLayer=0, layers=1",
-                      i, reinterpret_cast<uintptr_t>(viewInfo.image), static_cast<int>(viewInfo.viewType), static_cast<int>(viewInfo.format),
-                      viewInfo.subresourceRange.aspectMask);
-        VkImageView view = VK_NULL_HANDLE;
-        VkResult viewResult = vkCreateImageView(device, &viewInfo, nullptr, &view);
-        LOG_DEBUG_CAT("RENDERER", "vkCreateImageView for frame {} returned: {}, view=0x{:x}", i, static_cast<int>(viewResult), reinterpret_cast<uintptr_t>(view));
-        if (viewResult != VK_SUCCESS) {
-            LOG_ERROR_CAT("RENDERER", "Failed to create view for frame {}: {}", i, static_cast<int>(viewResult));
-            memories[i].reset();
-            images[i].reset();
-            LOG_TRACE_CAT("RENDERER", "Frame {} — vkCreateImageView — COMPLETE (failed)", i);
-            continue;
-        }
-        LOG_TRACE_CAT("RENDERER", "Frame {} — Handle creation for view — START", i);
-        views[i] = RTX::Handle<VkImageView_T*>(
-            view,
-            device,
-            [](VkDevice_T* d, VkImageView_T* v, const VkAllocationCallbacks*) {
-                if (v) vkDestroyImageView(d, v, nullptr);
-            },
-            dummySize,
-            tag + "View"
-        );
-        LOG_DEBUG_CAT("RENDERER", "Created view handle for frame {}: 0x{:x}", i, reinterpret_cast<uintptr_t>(view));
-        LOG_TRACE_CAT("RENDERER", "Frame {} — Handle creation for view — COMPLETE", i);
-        LOG_TRACE_CAT("RENDERER", "Frame {} — vkCreateImageView — COMPLETE", i);
 
-        LOG_DEBUG_CAT("RENDERER", "Completed frame {}: image=0x{:x}, mem=0x{:x}, view=0x{:x}", i,
-                      reinterpret_cast<uintptr_t>(images[i].get()), reinterpret_cast<uintptr_t>(memories[i].get()), reinterpret_cast<uintptr_t>(views[i].get()));
+        VkImageView view = VK_NULL_HANDLE;
+        VK_CHECK(vkCreateImageView(device, &viewInfo, nullptr, &view), "vkCreateImageView");
+
+        views[i] = RTX::Handle<VkImageView>(
+            view, device,
+            [](VkDevice d, VkImageView v, const VkAllocationCallbacks*) { vkDestroyImageView(d, v, nullptr); },
+            0, tag + "View"
+        );
+
+        LOG_TRACE_CAT("RENDERER", "Frame {} — {} image ready: img=0x{:x}, mem=0x{:x}, view=0x{:x}",
+                      i, tag, reinterpret_cast<uintptr_t>(img),
+                      reinterpret_cast<uintptr_t>(mem), reinterpret_cast<uintptr_t>(view));
     }
 
-    LOG_SUCCESS_CAT("RENDERER", "{} image array creation complete — {} frames allocated", tag, frames);
+    LOG_SUCCESS_CAT("RENDERER", "{} image array created — {} frames", tag, frames);
     LOG_TRACE_CAT("RENDERER", "createImageArray — COMPLETE");
 }
 

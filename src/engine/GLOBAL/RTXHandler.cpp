@@ -454,43 +454,60 @@ namespace RTX {
             queueInfos.push_back(qi);
         }
 
-        // Enable RT features (chain properly: innermost to outermost)
-        VkPhysicalDeviceRayTracingPipelineFeaturesKHR rayTracingPipelineFeatures{};
-        rayTracingPipelineFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR;
-        rayTracingPipelineFeatures.rayTracingPipeline = VK_TRUE;
+        // === 7. Logical Device + Full Ray Tracing Feature Chain (CORRECT ORDER) ===
+        LOG_INFO_CAT("RTX", "Creating logical device with full ray tracing support...");
 
+        // 1. Buffer Device Address (base dependency)
+        VkPhysicalDeviceBufferDeviceAddressFeatures bufferDeviceAddressFeatures{};
+        bufferDeviceAddressFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES;
+        bufferDeviceAddressFeatures.bufferDeviceAddress = VK_TRUE;
+
+        // 2. Acceleration Structure (depends on BDA)
         VkPhysicalDeviceAccelerationStructureFeaturesKHR accelStructureFeatures{};
         accelStructureFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
         accelStructureFeatures.accelerationStructure = VK_TRUE;
-        accelStructureFeatures.pNext = &rayTracingPipelineFeatures;  // Chain RT pipeline to AS
+        accelStructureFeatures.pNext = &bufferDeviceAddressFeatures;
 
-        VkPhysicalDeviceBufferDeviceAddressFeaturesKHR bufferDeviceAddressFeatures{};
-        bufferDeviceAddressFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES_KHR;
-        bufferDeviceAddressFeatures.bufferDeviceAddress = VK_TRUE;
-        bufferDeviceAddressFeatures.pNext = &accelStructureFeatures;  // Chain AS to buffer addr
+        // 3. Ray Tracing Pipeline (depends on AS)
+        VkPhysicalDeviceRayTracingPipelineFeaturesKHR rayTracingPipelineFeatures{};
+        rayTracingPipelineFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR;
+        rayTracingPipelineFeatures.rayTracingPipeline = VK_TRUE;
+        rayTracingPipelineFeatures.pNext = &accelStructureFeatures;
 
-        VkPhysicalDeviceFeatures features{};
-        features.samplerAnisotropy = VK_TRUE;
+        // 4. Standard Vulkan 1.0 features
+        VkPhysicalDeviceFeatures deviceFeatures{};
+        deviceFeatures.samplerAnisotropy = VK_TRUE;
+        deviceFeatures.shaderInt64 = VK_TRUE;
+        deviceFeatures.fragmentStoresAndAtomics = VK_TRUE;
 
-        std::vector<const char*> devExts = {
+        // 5. Required device extensions
+        std::vector<const char*> deviceExtensions = {
             VK_KHR_SWAPCHAIN_EXTENSION_NAME,
-            VK_KHR_MAINTENANCE3_EXTENSION_NAME,
+            VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME,     // REQUIRED for vkCmdTraceRaysKHR
             VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
             VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME,
-            VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME
+            VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME,
+            VK_KHR_MAINTENANCE3_EXTENSION_NAME
         };
 
-        VkDeviceCreateInfo devInfo{};
-        devInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-        devInfo.queueCreateInfoCount = static_cast<uint32_t>(queueInfos.size());
-        devInfo.pQueueCreateInfos = queueInfos.data();
-        devInfo.pEnabledFeatures = &features;
-        devInfo.enabledExtensionCount = static_cast<uint32_t>(devExts.size());
-        devInfo.ppEnabledExtensionNames = devExts.data();
-        devInfo.pNext = &bufferDeviceAddressFeatures;  // Chain the whole feature tree here
+        // 6. Final VkDeviceCreateInfo — THIS IS THE ONE USED BELOW
+        VkDeviceCreateInfo deviceCreateInfo{};
+        deviceCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+        deviceCreateInfo.queueCreateInfoCount = static_cast<uint32_t>(queueInfos.size());
+        deviceCreateInfo.pQueueCreateInfos = queueInfos.data();
+        deviceCreateInfo.pEnabledFeatures = &deviceFeatures;
+        deviceCreateInfo.enabledExtensionCount = static_cast<uint32_t>(deviceExtensions.size());
+        deviceCreateInfo.ppEnabledExtensionNames = deviceExtensions.data();
+        deviceCreateInfo.pNext = &rayTracingPipelineFeatures;   // HEAD of the feature chain
 
-        VK_CHECK(vkCreateDevice(physicalDevice_, &devInfo, nullptr, &device_),
-                 "Failed to create logical device");
+        // CREATE THE DEVICE — NOTE: deviceCreateInfo, NOT devInfo!
+        VK_CHECK(vkCreateDevice(physicalDevice_, &deviceCreateInfo, nullptr, &device_),
+                 "Failed to create logical device with ray tracing support");
+
+        LOG_SUCCESS_CAT("RTX", "Logical device created — FULL RAY TRACING ENABLED");
+
+        VK_CHECK(vkCreateDevice(physicalDevice_, &deviceCreateInfo, nullptr, &device_),
+                 "Failed to create logical device with ray tracing support");
         LOG_SUCCESS_CAT("RTX", "Device created: 0x{:x}", reinterpret_cast<uint64_t>(device_));
 
         // Load RT extension functions

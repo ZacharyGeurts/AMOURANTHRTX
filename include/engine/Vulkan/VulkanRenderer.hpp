@@ -117,6 +117,11 @@ public:
 
     void handleResize(int w, int h) noexcept;
 
+    // ──────────────────────────────────────────────────────────────────────────
+    // VulkanRenderer — Fence Helper (member, reusable)
+    // ──────────────────────────────────────────────────────────────────────────
+    [[nodiscard]] VkFence createFence(bool signaled = false) const noexcept;
+
 private:
     // === WINDOW & FRAME STATE ===
     SDL_Window* window_ = nullptr;
@@ -257,12 +262,14 @@ private:
     void updateTonemapUniform(uint32_t frame);
 
     uint32_t findMemoryType(VkPhysicalDevice physicalDevice, uint32_t typeFilter, VkMemoryPropertyFlags properties) const noexcept;
-    void createImageArray(std::vector<RTX::Handle<VkImage>>& images,
-                          std::vector<RTX::Handle<VkDeviceMemory>>& memories,
-                          std::vector<RTX::Handle<VkImageView>>& views,
-                          const std::string& tag) noexcept;
-    void createImage(RTX::Handle<VkImage>& image, RTX::Handle<VkDeviceMemory>& memory, RTX::Handle<VkImageView>& view, const std::string& tag) noexcept;
-};
+
+	void createImageArray(
+        std::vector<RTX::Handle<VkImage>>& images,
+        std::vector<RTX::Handle<VkDeviceMemory>>& memories,
+        std::vector<RTX::Handle<VkImageView>>& views,
+        const std::string& tag) noexcept;
+        void createImage(RTX::Handle<VkImage>& image, RTX::Handle<VkDeviceMemory>& memory, RTX::Handle<VkImageView>& view, const std::string& tag) noexcept;
+    };
 
 // ──────────────────────────────────────────────────────────────────────────────
 // GLOBAL RENDERER ACCESS (NOT SINGLETON)
@@ -273,5 +280,5 @@ inline void renderFrame(const Camera& camera, float deltaTime) noexcept;
 inline void shutdown() noexcept;
 
 // =============================================================================
-// STATUS: PRODUCTION READY — g_PhysicalDevice DEFINED
+// STATUS: PRODUCTION READY — createFence() DECLARED — COMPILES CLEAN
 // =============================================================================

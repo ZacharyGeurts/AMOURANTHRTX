@@ -343,7 +343,7 @@ void VulkanRTX::buildAccelerationStructures() {
         {vertices.data(), vcount * sizeof(glm::vec3), vbuf, "Vertex Buffer"},
         {indices.data(), icount * sizeof(uint32_t), ibuf, "Index Buffer"}
     };
-    uploadBatch(batch, RTX::g_ctx().commandPool(), RTX::g_ctx().graphicsQueue(), true /*async*/);
+    uploadBatch(batch, RTX::ctx().commandPool(), RTX::ctx().graphicsQueue(), false);  // ← NOW WAITS
 
     LOG_TRACE_CAT("RTX", "Building BLAS via RTX::las()");
     RTX::las().buildBLAS(RTX::g_ctx().commandPool(), RTX::g_ctx().graphicsQueue(),
