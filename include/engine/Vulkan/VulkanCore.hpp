@@ -24,6 +24,8 @@
 #include <random>
 #include <format>
 #include <string_view>
+#include <vector>
+#include <tuple>
 
 // -----------------------------------------------------------------------------
 // 1. VK_CHECK — 2-argument, aborts with file/line/code
@@ -199,9 +201,19 @@ public:
     void setDescriptorSetLayout(VkDescriptorSetLayout layout) noexcept;
     void setRayTracingPipeline(VkPipeline p, VkPipelineLayout l) noexcept;
 
-    // PUBLIC STATIC
+    // PUBLIC STATIC HELPERS
     [[nodiscard]] static VkCommandBuffer beginSingleTimeCommands(VkCommandPool pool) noexcept;
     static void endSingleTimeCommands(VkCommandBuffer cmd, VkQueue queue, VkCommandPool pool) noexcept;
+
+    // ASYNC COMMAND SUBMIT
+    static void endSingleTimeCommandsAsync(VkCommandBuffer cmd, VkQueue queue, VkCommandPool pool, VkFence fence = VK_NULL_HANDLE) noexcept;
+
+    // BATCHED UPLOAD (persistent staging)
+    void uploadBatch(
+        const std::vector<std::tuple<const void*, VkDeviceSize, uint64_t, const char*>>& batch,
+        VkCommandPool pool,
+        VkQueue queue,
+        bool async = false);
 
 private:
     VkDevice device_ = VK_NULL_HANDLE;
