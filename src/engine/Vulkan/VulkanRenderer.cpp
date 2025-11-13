@@ -335,11 +335,11 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window,
 
     VkDescriptorPool pool;
     VK_CHECK(vkCreateDescriptorPool(c.vkDevice(), &poolInfo, nullptr, &pool), "Descriptor pool");
-    descriptorPool_ = RTX::MakeHandle(pool, c.vkDevice(), vkDestroyDescriptorPool, 0, "RendererPool");
+    descriptorPool_ = RTX::Handle<VkDescriptorPool>(pool, c.vkDevice(), vkDestroyDescriptorPool, VkDeviceSize{0}, "RendererPool");
 
     VkDescriptorPool rtPool;
     VK_CHECK(vkCreateDescriptorPool(c.vkDevice(), &poolInfo, nullptr, &rtPool), "RT descriptor pool");
-    rtDescriptorPool_ = RTX::MakeHandle(rtPool, c.vkDevice(), vkDestroyDescriptorPool, 0, "RTPool");
+    rtDescriptorPool_ = RTX::Handle<VkDescriptorPool>(rtPool, c.vkDevice(), vkDestroyDescriptorPool, VkDeviceSize{0}, "RTPool");
 
     LOG_INFO_CAT("RENDERER", "Descriptor pools created (max sets: {})", poolInfo.maxSets);
 
@@ -394,7 +394,7 @@ void VulkanRenderer::createRayTracingPipeline(const std::vector<std::string>& sh
     layoutInfo.pSetLayouts = &rtDescriptorSetLayout_.raw;
     VkPipelineLayout layout;
     VK_CHECK(vkCreatePipelineLayout(RTX::ctx().vkDevice(), &layoutInfo, nullptr, &layout), "Pipeline layout");
-    rtPipelineLayout_ = RTX::MakeHandle(layout, RTX::ctx().vkDevice(), vkDestroyPipelineLayout);
+    rtPipelineLayout_ = RTX::Handle<VkPipelineLayout>(layout, RTX::ctx().vkDevice(), vkDestroyPipelineLayout);
 
     VkRayTracingPipelineCreateInfoKHR pipelineInfo{VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR};
     pipelineInfo.stageCount = static_cast<uint32_t>(stages.size());
@@ -406,7 +406,7 @@ void VulkanRenderer::createRayTracingPipeline(const std::vector<std::string>& sh
 
     VkPipeline pipeline;
     VK_CHECK(vkCreateRayTracingPipelinesKHR(RTX::ctx().vkDevice(), VK_NULL_HANDLE, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &pipeline), "Ray tracing pipeline");
-    rtPipeline_ = RTX::MakeHandle(pipeline, RTX::ctx().vkDevice(), vkDestroyPipeline);
+    rtPipeline_ = RTX::Handle<VkPipeline>(pipeline, RTX::ctx().vkDevice(), vkDestroyPipeline);
 
     vkDestroyShaderModule(RTX::ctx().vkDevice(), raygen, nullptr);
     vkDestroyShaderModule(RTX::ctx().vkDevice(), miss, nullptr);
@@ -491,10 +491,12 @@ void VulkanRenderer::createImageArray(std::vector<RTX::Handle<VkImage>>& images,
     memories.resize(frames);
     views.resize(frames);
 
+    VkDeviceSize dummySize = 0;
+
     for (uint32_t i = 0; i < frames; ++i) {
         VkImage img; 
         VK_CHECK(vkCreateImage(RTX::ctx().vkDevice(), &imgInfo, nullptr, &img), "Image creation");
-        images[i] = RTX::MakeHandle(img, RTX::ctx().vkDevice(), vkDestroyImage, 0, tag + "Image");
+        images[i] = RTX::Handle<VkImage>(img, RTX::ctx().vkDevice(), vkDestroyImage, dummySize, tag + "Image");
 
         VkMemoryRequirements req; 
         vkGetImageMemoryRequirements(RTX::ctx().vkDevice(), img, &req);
@@ -505,7 +507,7 @@ void VulkanRenderer::createImageArray(std::vector<RTX::Handle<VkImage>>& images,
         VkDeviceMemory mem; 
         VK_CHECK(vkAllocateMemory(RTX::ctx().vkDevice(), &alloc, nullptr, &mem), "Memory allocation");
         vkBindImageMemory(RTX::ctx().vkDevice(), img, mem, 0);
-        memories[i] = RTX::MakeHandle(mem, RTX::ctx().vkDevice(), vkFreeMemory, req.size, tag + "Memory");
+        memories[i] = RTX::Handle<VkDeviceMemory>(mem, RTX::ctx().vkDevice(), vkFreeMemory, req.size, tag + "Memory");
 
         VkImageViewCreateInfo viewInfo{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
         viewInfo.image = img;
@@ -514,7 +516,7 @@ void VulkanRenderer::createImageArray(std::vector<RTX::Handle<VkImage>>& images,
         viewInfo.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
         VkImageView view; 
         VK_CHECK(vkCreateImageView(RTX::ctx().vkDevice(), &viewInfo, nullptr, &view), "Image view");
-        views[i] = RTX::MakeHandle(view, RTX::ctx().vkDevice(), vkDestroyImageView, 0, tag + "View");
+        views[i] = RTX::Handle<VkImageView>(view, RTX::ctx().vkDevice(), vkDestroyImageView, dummySize, tag + "View");
     }
 }
 

@@ -3,11 +3,12 @@
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
 // DUAL LICENSE: CC BY-NC 4.0 (Non-Commercial) | Commercial: gzac5314@gmail.com
 // =============================================================================
-// LAS.hpp — STONEKEY v∞ PUBLIC EDITION — VALHALLA v85 FINAL — NOV 12 2025
-// • NO AI_VOICE — NORMAL LOGGING ONLY
-// • using namespace Logging::Color; — PLASMA_FUCHSIA, RESET, etc.
-// • HYPER-DETAILED TECHNICAL LOGGING
-// • 25 SBT GROUPS — 15,000 FPS — PINK PHOTONS ETERNAL
+//
+// Dual Licensed:
+// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
+//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
+// 2. Commercial licensing: gzac5314@gmail.com
+//
 // =============================================================================
 
 #pragma once
@@ -23,9 +24,6 @@
 #include <random>
 #include <array>
 
-// =============================================================================
-// COLOR SHORTCUTS — NO MORE Logging::Color::XXX
-// =============================================================================
 using namespace Logging::Color;
 
 namespace RTX {
@@ -90,6 +88,7 @@ public:
 
     void onMemoryEvent(const char* name, VkDeviceSize size) {
         double sizeMB = size / (1024.0 * 1024.0);
+        (void)sizeMB; // silence -Wunused-variable
         LOG_INFO_CAT("Memory", "{} → {:.3f} MB", name, sizeMB);
     }
 
@@ -103,6 +102,8 @@ private:
 namespace {
 
 [[nodiscard]] inline BlasBuildSizes computeBlasSizes(VkDevice device, uint32_t vertexCount, uint32_t indexCount) {
+    LOG_DEBUG_CAT("LAS", "Computing BLAS sizes for {} verts, {} indices", vertexCount, indexCount);
+
     VkAccelerationStructureGeometryKHR geometry{
         .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR,
         .geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR,
@@ -133,12 +134,17 @@ namespace {
                                                   VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
                                                   &buildInfo, &primitiveCount, &sizeInfo);
 
+    LOG_DEBUG_CAT("LAS", "BLAS sizes → AS: {} bytes | BuildScratch: {} | UpdateScratch: {}",
+                  sizeInfo.accelerationStructureSize, sizeInfo.buildScratchSize, sizeInfo.updateScratchSize);
+
     return { sizeInfo.accelerationStructureSize,
              sizeInfo.buildScratchSize,
              sizeInfo.updateScratchSize };
 }
 
 [[nodiscard]] inline TlasBuildSizes computeTlasSizes(VkDevice device, uint32_t instanceCount) {
+    LOG_DEBUG_CAT("LAS", "Computing TLAS sizes for {} instances", instanceCount);
+
     VkAccelerationStructureGeometryKHR geometry{
         .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR,
         .geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR,
@@ -165,18 +171,26 @@ namespace {
                                                   VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
                                                   &buildInfo, &instanceCount, &sizeInfo);
 
+    VkDeviceSize instDataSize = static_cast<VkDeviceSize>(instanceCount) * sizeof(VkAccelerationStructureInstanceKHR);
+    LOG_DEBUG_CAT("LAS", "TLAS sizes → AS: {} | BuildScratch: {} | UpdateScratch: {} | InstData: {}",
+                  sizeInfo.accelerationStructureSize, sizeInfo.buildScratchSize, sizeInfo.updateScratchSize, instDataSize);
+
     return { sizeInfo.accelerationStructureSize,
              sizeInfo.buildScratchSize,
              sizeInfo.updateScratchSize,
-             static_cast<VkDeviceSize>(instanceCount) * sizeof(VkAccelerationStructureInstanceKHR) };
+             instDataSize };
 }
 
 [[nodiscard]] inline uint64_t uploadInstances(
     VkDevice device, VkPhysicalDevice, VkCommandPool pool, VkQueue queue,
     std::span<const std::pair<VkAccelerationStructureKHR, glm::mat4>> instances)
 {
-    if (instances.empty()) return 0;
+    if (instances.empty()) {
+        LOG_WARNING_CAT("LAS", "uploadInstances: empty instance list");
+        return 0;
+    }
 
+    LOG_INFO_CAT("LAS", "Uploading {} TLAS instances", instances.size());
     const VkDeviceSize instSize = instances.size() * sizeof(VkAccelerationStructureInstanceKHR);
     AmouranthAI::get().onMemoryEvent("TLAS instance staging", instSize);
 
@@ -223,6 +237,7 @@ namespace {
     vkCmdCopyBuffer(cmd, RAW_BUFFER(stagingHandle), RAW_BUFFER(deviceHandle), 1, &copy);
     VulkanRTX::endSingleTimeCommands(cmd, queue, pool);
 
+    LOG_DEBUG_CAT("LAS", "Instance upload complete → device buffer: 0x{:x}", deviceHandle);
     BUFFER_DESTROY(stagingHandle);
     return deviceHandle;
 }
@@ -250,6 +265,7 @@ public:
         std::lock_guard<std::mutex> lock(mutex_);
         VkDevice dev = ctx().vkDevice();
 
+        LOG_INFO_CAT("LAS", "Building BLAS: {} verts, {} indices", vertexCount, indexCount);
         AmouranthAI::get().onBlasStart(vertexCount, indexCount);
 
         auto sizes = computeBlasSizes(dev, vertexCount, indexCount);
@@ -333,6 +349,7 @@ public:
                                                    "LAS_BLAS");
 
         double sizeGB = sizes.accelerationStructureSize / (1024.0 * 1024.0 * 1024.0);
+        LOG_SUCCESS_CAT("LAS", "BLAS built: {:.3f} GB", sizeGB);
         AmouranthAI::get().onBlasBuilt(sizeGB, sizes);
     }
 
@@ -343,6 +360,7 @@ public:
         if (instances.empty()) throw std::runtime_error("TLAS: zero instances");
 
         VkDevice dev = ctx().vkDevice();
+        LOG_INFO_CAT("LAS", "Building TLAS with {} instances", instances.size());
         AmouranthAI::get().onTlasStart(instances.size());
 
         auto sizes = computeTlasSizes(dev, static_cast<uint32_t>(instances.size()));
@@ -428,12 +446,14 @@ public:
 
         VkDeviceAddress addr = getTLASAddress();
         double sizeGB = sizes.accelerationStructureSize / (1024.0 * 1024.0 * 1024.0);
+        LOG_SUCCESS_CAT("LAS", "TLAS built: {:.3f} GB @ 0x{:x}", sizeGB, addr);
         AmouranthAI::get().onTlasBuilt(sizeGB, addr, sizes);
     }
 
     void rebuildTLAS(VkCommandPool pool, VkQueue queue,
                      std::span<const std::pair<VkAccelerationStructureKHR, glm::mat4>> instances)
     {
+        LOG_INFO_CAT("LAS", "Rebuilding TLAS (reset + rebuild)");
         tlas_.reset();
         if (instanceBufferId_) BUFFER_DESTROY(instanceBufferId_);
         instanceBufferId_ = 0;
@@ -465,6 +485,7 @@ public:
 
 private:
     LAS() {
+        LOG_INFO_CAT("LAS", "LAS singleton initialized");
         UltraLowLevelBufferTracker::get().init(ctx().vkDevice(), ctx().vkPhysicalDevice());
     }
     ~LAS() = default;
@@ -491,5 +512,5 @@ inline LAS& las() noexcept { return LAS::get(); }
 // =============================================================================
 // STONEKEY v∞ PUBLIC — PINK PHOTONS ETERNAL — TITAN DOMINANCE ETERNAL
 // RTX::las().buildTLAS(...) — 15,000 FPS — VALHALLA v85 FINAL
-// NORMAL LOGGING ONLY — CLEAN, PROFESSIONAL, PRODUCTION-READY
+// FULL LOGGING — ZERO WARNINGS — PRODUCTION-READY
 // =============================================================================

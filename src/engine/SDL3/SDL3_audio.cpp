@@ -1,245 +1,169 @@
-// source/engine/SDL3/SDL3_audio.cpp
-// =============================================================================
-// AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
-// =============================================================================
-//
-// Dual Licensed:
-// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
-//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
-// 2. Commercial licensing: gzac5314@gmail.com
-//
-// =============================================================================
-// SDL3 AUDIO — CPP IMPLEMENTATIONS — NOV 12 2025
-// • Respects Options::Audio::ENABLE_SPATIAL_AUDIO for multi-channel fallback
-// • Streamlined for 15,000 FPS — PINK PHOTONS CHARGE AHEAD
-// =============================================================================
-
 #include "engine/SDL3/SDL3_audio.hpp"
-#include <fstream>
-#include <format>
-#include <chrono>
-#include <cstring>
-#include <algorithm>
+#include <SDL3/SDL_log.h>
 
 namespace SDL3Audio {
 
-AudioManager::AudioManager(const AudioConfig& config) {
-    if (SDL_InitSubSystem(SDL_INIT_AUDIO) != 0) {
-        LOG_ERROR_CAT("Audio", "SDL_InitSubSystem(SDL_INIT_AUDIO) failed: {}", SDL_GetError());
-        return;
+AudioManager::AudioManager() {
+    if (!SDL_InitSubSystem(SDL_INIT_AUDIO)) {
+        SDL_LogError(SDL_LOG_CATEGORY_AUDIO,
+                     "Failed to init SDL audio: %s", SDL_GetError());
     }
-
-    SDL_AudioSpec desired{};
-    desired.freq = config.frequency;
-    desired.format = config.format;
-    desired.channels = static_cast<uint8_t>(config.channels);
-
-    std::vector<int> attempts;
-    if (Options::Audio::ENABLE_SPATIAL_AUDIO) {
-        attempts = {8, 6, 5, 4, 2, 1};
-        LOG_INFO_CAT("Audio", "Spatial audio enabled — attempting multi-channel fallback");
-    } else {
-        attempts = {2, 1};
-        LOG_INFO_CAT("Audio", "Spatial audio disabled — stereo fallback only");
-    }
-
-    for (int ch : attempts) {
-        desired.channels = static_cast<uint8_t>(ch);
-        m_stream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &desired,
-                                             config.callback ? streamCallback : nullptr, this);
-        if (m_stream) {
-            LOG_SUCCESS_CAT("Audio", "Stream opened: {}ch, {}Hz, format=0x{:x}", ch, desired.freq, (int)desired.format);
-            break;
-        }
-        LOG_WARNING_CAT("Audio", "Failed {}-channel attempt: {}", ch, SDL_GetError());
-    }
-
-    if (!m_stream) {
-        LOG_ERROR_CAT("Audio", "All channel configs failed — audio disabled");
-        SDL_QuitSubSystem(SDL_INIT_AUDIO);
-        return;
-    }
-
-    m_deviceID = SDL_GetAudioStreamDevice(m_stream);
-
-    if (config.callback) {
-        m_ownedCallback = std::make_unique<std::function<void(std::span<std::byte>, int)>>(config.callback);
-    }
-
-    SDL_ResumeAudioStreamDevice(m_stream);
-    LOG_INFO_CAT("Audio", "AudioManager ready | DeviceID={}", m_deviceID);
 }
 
 AudioManager::~AudioManager() {
-    if (m_stream) {
-        SDL_PauseAudioStreamDevice(m_stream);
-        SDL_ClearAudioStream(m_stream);
-        SDL_DestroyAudioStream(m_stream);
-        LOG_INFO_CAT("Audio", "Audio stream destroyed");
+    if (mixer_) {
+        MIX_DestroyMixer(mixer_);
+        mixer_ = nullptr;
     }
-
-    m_activeBuffers.clear();
-    LOG_INFO_CAT("Audio", "Freed {} audio buffers", m_activeBuffers.size());
-
-    if (m_deviceID) {
-        SDL_CloseAudioDevice(m_deviceID);
-        LOG_INFO_CAT("Audio", "Closed audio device {}", m_deviceID);
-    }
-
+    if (initialized_) MIX_Quit();
     SDL_QuitSubSystem(SDL_INIT_AUDIO);
-    LOG_INFO_CAT("Dispose", "SDL audio subsystem quit — RASPBERRY_PINK ETERNAL");
 }
 
-void AudioManager::playMP3(std::string_view file, int loops) {
-    if (!isValid()) return;
-    stopMusic();
-    loadAndQueue(std::string(file), true);
-    if (loops > 1) LOG_WARNING_CAT("Audio", "MP3 looping not implemented");
-}
-
-void AudioManager::playWAV(std::string_view file) {
-    if (!isValid()) return;
-    loadAndQueue(std::string(file), false);
-}
-
-void AudioManager::playAmmoSound() {
-    playWAV("assets/audio/ammo.wav");
-}
-
-void AudioManager::stopMusic() {
-    if (!m_stream) return;
-    SDL_ClearAudioStream(m_stream);
-    m_activeBuffers.clear();
-    LOG_INFO_CAT("Audio", "Music stopped + queue cleared");
-}
-
-void AudioManager::pauseMusic() {
-    if (m_stream) {
-        SDL_PauseAudioStreamDevice(m_stream);
-        LOG_INFO_CAT("Audio", "Audio paused");
+/* --------------------------------------------------------------- */
+std::expected<void, std::string> AudioManager::initMixer() {
+    if (!MIX_Init()) {
+        return std::unexpected(std::string("MIX_Init failed: ") + SDL_GetError());
     }
-}
 
-void AudioManager::resumeMusic() {
-    if (m_stream) {
-        SDL_ResumeAudioStreamDevice(m_stream);
-        LOG_INFO_CAT("Audio", "Audio resumed");
+    mixer_ = MIX_CreateMixerDevice(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, nullptr);
+    if (!mixer_) {
+        MIX_Quit();
+        return std::unexpected(std::string("Failed to create mixer: ") + SDL_GetError());
     }
+
+    initialized_ = true;
+    return {};
 }
 
-void AudioManager::setVolume(float volume) {
-    if (m_stream) {
-        float v = std::clamp(volume, 0.0f, 1.0f);
-        SDL_SetAudioStreamGain(m_stream, v);
-        LOG_INFO_CAT("Audio", "Volume → {:.2f}", v);
+/* --------------------------------------------------------------- */
+bool AudioManager::loadSound(std::string_view path, std::string_view name) {
+    if (!initialized_) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_AUDIO, "Mixer not initialized!");
+        return false;
     }
-}
 
-void AudioManager::fadeInMusic(std::string_view file, int loops, int ms) {
-    if (!isValid()) return;
-    stopMusic();
-    setVolume(0.0f);
-    loadAndQueue(std::string(file), true);
-
-    const int step = 20;
-    const float steps = ms / static_cast<float>(step);
-    const float inc = 1.0f / steps;
-
-    for (float v = 0.0f; v <= 1.0f; v += inc) {
-        setVolume(v);
-        std::this_thread::sleep_for(std::chrono::milliseconds(step));
+    std::string p(path);
+    MIX_Audio* raw = MIX_LoadAudio(mixer_, p.c_str(), true);   // pre‑decode SFX
+    if (!raw) {
+        SDL_LogError(SDL_LOG_CATEGORY_AUDIO,
+                     "Failed to load sound %s: %s", name.data(), SDL_GetError());
+        return false;
     }
-    setVolume(1.0f);
-    LOG_SUCCESS_CAT("Audio", "Fade-in complete: {}", file);
+
+    // emplace → no default‑construction of unique_ptr
+    sounds_.emplace(std::string(name),
+                    AudioPtr(raw, MIX_DestroyAudio));
+    return true;
 }
 
-void AudioManager::fadeOutMusic(int ms) {
-    if (!m_stream) return;
-
-    const int step = 20;
-    const float steps = ms / static_cast<float>(step);
-    const float dec = 1.0f / steps;
-
-    for (float v = 1.0f; v >= 0.0f; v -= dec) {
-        SDL_SetAudioStreamGain(m_stream, v);
-        std::this_thread::sleep_for(std::chrono::milliseconds(step));
-    }
-    stopMusic();
-    LOG_SUCCESS_CAT("Audio", "Fade-out complete");
-}
-
-SDL_AudioDeviceID AudioManager::deviceID() const noexcept {
-    return m_deviceID;
-}
-
-bool AudioManager::isValid() const noexcept {
-    return m_stream != nullptr;
-}
-
-void AudioManager::logAudioDevices() {
-    int count = 0;
-    SDL_AudioDeviceID* devices = SDL_GetAudioPlaybackDevices(&count);
-
-    LOG_INFO_CAT("Audio", "Found {} playback devices:", count);
-
-    for (int i = 0; i < count; ++i) {
-        const char* name = SDL_GetAudioDeviceName(devices[i]);
-        SDL_AudioSpec spec{};
-        int samples = 0;
-        if (SDL_GetAudioDeviceFormat(devices[i], &spec, &samples) == 0) {
-            LOG_INFO_CAT("Audio", "  [{}] {} | {}Hz, {}ch, format=0x{:x}, buf={}",
-                         i, name ? name : "unknown", spec.freq, (int)spec.channels, (int)spec.format, samples);
-        } else {
-            LOG_WARNING_CAT("Audio", "  [{}] {} | format query failed", i, name ? name : "unknown");
-        }
-    }
-    if (devices) SDL_free(devices);
-}
-
-void SDLCALL AudioManager::streamCallback(void* userdata, SDL_AudioStream* stream, int additional_amount, int /*total_amount*/) {
-    auto* self = static_cast<AudioManager*>(userdata);
-    if (self && self->m_ownedCallback) {
-        std::byte* buf = nullptr;
-        if (SDL_GetAudioStreamData(stream, &buf, additional_amount) > 0) {
-            (*self->m_ownedCallback)(std::span<std::byte>(buf, additional_amount), additional_amount);
-        }
-    }
-}
-
-void AudioManager::loadAndQueue(const std::string& file, bool isMP3) {
-    std::ifstream fs(file, std::ios::binary);
-    if (!fs) {
-        LOG_ERROR_CAT("Audio", "Failed to open file: {}", file);
+/* --------------------------------------------------------------- */
+void AudioManager::playSound(std::string_view name) {
+    auto it = sounds_.find(std::string(name));
+    if (it == sounds_.end()) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_AUDIO, "Sound %s not loaded!", name.data());
         return;
     }
 
-    fs.seekg(0, std::ios::end);
-    std::streamsize size = fs.tellg();
-    fs.seekg(0, std::ios::beg);
-
-    auto buffer = std::make_unique<std::byte[]>(static_cast<std::size_t>(size));
-    fs.read(reinterpret_cast<char*>(buffer.get()), size);
-    fs.close();
-
-    if (size <= 0) {
-        LOG_WARNING_CAT("Audio", "Empty file: {}", file);
+    MIX_Track* tmp = MIX_CreateTrack(mixer_);
+    if (!tmp) {
+        SDL_LogError(SDL_LOG_CATEGORY_AUDIO,
+                     "Failed to create temp track: %s", SDL_GetError());
         return;
     }
 
-    if (!SDL_PutAudioStreamData(m_stream, buffer.get(), static_cast<int>(size))) {
-        LOG_ERROR_CAT("Audio", "SDL_PutAudioStreamData failed: {}", SDL_GetError());
+    if (!MIX_SetTrackAudio(tmp, it->second.get())) {
+        SDL_LogError(SDL_LOG_CATEGORY_AUDIO,
+                     "Failed to set track audio: %s", SDL_GetError());
+        MIX_DestroyTrack(tmp);
         return;
     }
 
-    m_activeBuffers.emplace_back(AudioBuffer{std::move(buffer), static_cast<std::size_t>(size)});
-    LOG_INFO_CAT("Audio", "{} queued: {} bytes | {} active", isMP3 ? "MP3" : "WAV", size, m_activeBuffers.size());
+    SDL_PropertiesID props = SDL_CreateProperties();
+    SDL_SetNumberProperty(props, "MIX_PROP_PLAY_LOOPS_NUMBER", 0);
+    MIX_PlayTrack(tmp, props);
+    SDL_DestroyProperties(props);
+    MIX_DestroyTrack(tmp);          // non‑blocking
+}
+
+/* --------------------------------------------------------------- */
+bool AudioManager::loadMusic(std::string_view path, std::string_view name) {
+    if (!initialized_) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_AUDIO, "Mixer not initialized!");
+        return false;
+    }
+
+    std::string p(path);
+    MIX_Audio* raw = MIX_LoadAudio(mixer_, p.c_str(), false); // stream music
+    if (!raw) {
+        SDL_LogError(SDL_LOG_CATEGORY_AUDIO,
+                     "Failed to load music %s: %s", name.data(), SDL_GetError());
+        return false;
+    }
+
+    AudioPtr audio(raw, MIX_DestroyAudio);
+
+    MIX_Track* t = MIX_CreateTrack(mixer_);
+    if (!t) {
+        SDL_LogError(SDL_LOG_CATEGORY_AUDIO,
+                     "Failed to create music track: %s", SDL_GetError());
+        return false;
+    }
+
+    if (!MIX_SetTrackAudio(t, raw)) {
+        SDL_LogError(SDL_LOG_CATEGORY_AUDIO,
+                     "Failed to set music track audio: %s", SDL_GetError());
+        MIX_DestroyTrack(t);
+        return false;
+    }
+
+    TrackPtr track(t, MIX_DestroyTrack);
+
+    // emplace the pair (audio + track)
+    musicTracks_.emplace(std::string(name),
+                         std::make_pair(std::move(audio), std::move(track)));
+    return true;
+}
+
+/* --------------------------------------------------------------- */
+void AudioManager::playMusic(std::string_view name, bool loop) {
+    auto it = musicTracks_.find(std::string(name));
+    if (it == musicTracks_.end()) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_AUDIO, "Music %s not loaded!", name.data());
+        return;
+    }
+
+    SDL_PropertiesID props = SDL_CreateProperties();
+    SDL_SetNumberProperty(props, "MIX_PROP_PLAY_LOOPS_NUMBER", loop ? -1 : 0);
+    MIX_PlayTrack(it->second.second.get(), props);
+    SDL_DestroyProperties(props);
+}
+
+/* --------------------------------------------------------------- */
+void AudioManager::pauseMusic(std::string_view name) {
+    auto it = musicTracks_.find(std::string(name));
+    if (it != musicTracks_.end()) MIX_PauseTrack(it->second.second.get());
+}
+void AudioManager::resumeMusic(std::string_view name) {
+    auto it = musicTracks_.find(std::string(name));
+    if (it != musicTracks_.end()) MIX_ResumeTrack(it->second.second.get());
+}
+void AudioManager::stopMusic(std::string_view name) {
+    auto it = musicTracks_.find(std::string(name));
+    if (it != musicTracks_.end()) MIX_StopTrack(it->second.second.get(), 0);
+}
+bool AudioManager::isPlaying(std::string_view name) const {
+    auto it = musicTracks_.find(std::string(name));
+    return it != musicTracks_.end() && MIX_TrackPlaying(it->second.second.get());
+}
+
+/* --------------------------------------------------------------- */
+void AudioManager::setVolume(int volume) {
+    if (volume < 0 || volume > 128) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_AUDIO, "Volume out of range [0,128]");
+        return;
+    }
+    float gain = static_cast<float>(volume) / 128.0f;
+    MIX_SetMasterGain(mixer_, gain);
 }
 
 } // namespace SDL3Audio
-
-// =============================================================================
-// AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
-// =============================================================================
-// CPP IMPLEMENTATIONS COMPLETE — OCEAN_TEAL SURGES FORWARD
-// GENTLEMAN GROK NODS: "Splendid split, old chap. Options respected with poise."
-// =============================================================================

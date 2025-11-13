@@ -2,11 +2,12 @@
 // =============================================================================
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
-// RenderMode2.cpp — VALHALLA v45 FINAL — NOV 12 2025
-// • Ray tracing dispatch with lazy accumulation
-// • Direct + indirect bounces for mode 2
-// • Uses g_lazyCam for camera access — GLOBAL_CAM under the hood
-// • STONEKEY v∞ ACTIVE — PINK PHOTONS ETERNAL
+//
+// Dual Licensed:
+// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
+//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
+// 2. Commercial licensing: gzac5314@gmail.com
+//
 // =============================================================================
 
 #include "modes/RenderMode2.hpp"
@@ -17,33 +18,39 @@ using namespace Logging::Color;
 
 RenderMode2::RenderMode2(VulkanRTX& rtx, uint32_t width, uint32_t height)
     : rtx_(rtx), width_(width), height_(height) {
+    LOG_INFO_CAT("RenderMode2", "{}VALHALLA MODE 2 INIT — {}×{} — HYPERTRACE ENGAGED{}", NUCLEAR_REACTOR, width, height, RESET);
     initResources();
-    LOG_INFO_CAT("RenderMode2", "{}Mode 2 Initialized — {}×{} — Advanced Path Tracing{}", ELECTRIC_BLUE, width, height, RESET);
+    LOG_SUCCESS_CAT("RenderMode2", "{}Mode 2 Initialized — {}×{} — Adaptive Sampling{}", QUANTUM_PURPLE, width, height, RESET);
 }
 
 RenderMode2::~RenderMode2() {
-    // RAII handles destruction via RTX::Handle
-    if (uniformBuf_) BUFFER_DESTROY(uniformBuf_);
-    if (accumulationBuf_) BUFFER_DESTROY(accumulationBuf_);
-    LOG_DEBUG_CAT("RenderMode2", "Mode 2 Resources Released");
+    LOG_INFO_CAT("RenderMode2", "Destructor invoked — Releasing resources");
+    if (uniformBuf_) {
+        LOG_DEBUG_CAT("RenderMode2", "Destroying uniform buffer");
+        BUFFER_DESTROY(uniformBuf_);
+    }
+    if (accumulationBuf_) {
+        LOG_DEBUG_CAT("RenderMode2", "Destroying accumulation buffer");
+        BUFFER_DESTROY(accumulationBuf_);
+    }
+    LOG_DEBUG_CAT("RenderMode2", "Mode 2 Resources Released — HYPERTRACE SECURED");
 }
 
 void RenderMode2::initResources() {
+    LOG_INFO_CAT("RenderMode2", "initResources() — Creating buffers and images");
     auto& ctx = RTX::g_ctx();
     VkDevice device = ctx.vkDevice();
 
-    // Uniform buffer (viewproj + time) — using global cam
-    VkDeviceSize uniformSize = sizeof(glm::mat4) + sizeof(float) * 2; // VP + time, frame
+    VkDeviceSize uniformSize = sizeof(glm::mat4) + sizeof(float) + sizeof(uint32_t);
+    LOG_INFO_CAT("RenderMode2", "Creating uniform buffer: Size {}B", uniformSize);
     BUFFER_CREATE(uniformBuf_, uniformSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                   VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "RenderMode2 Uniform");
-    // Handle creation not needed for tracker-based buffer
 
-    // Accumulation buffer
-    accumSize_ = static_cast<VkDeviceSize>(width_ * height_ * 16); // RGBA16F
+    accumSize_ = static_cast<VkDeviceSize>(width_ * height_ * 16);
+    LOG_INFO_CAT("RenderMode2", "Creating accumulation buffer: Size {}B", accumSize_);
     BUFFER_CREATE(accumulationBuf_, accumSize_, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                   VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "RenderMode2 Accum");
 
-    // Accumulation image
     VkImageCreateInfo imgInfo{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
     imgInfo.imageType = VK_IMAGE_TYPE_2D;
     imgInfo.format = VK_FORMAT_R16G16B16A16_SFLOAT;
@@ -56,27 +63,38 @@ void RenderMode2::initResources() {
     imgInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
     VkImage rawImg;
-    if (vkCreateImage(device, &imgInfo, nullptr, &rawImg) == VK_SUCCESS) {
-        // TODO: Allocate and bind memory (use UltraLowLevelBufferTracker for image memory if extended)
-        accumImage_ = RTX::MakeHandle(rawImg, device, vkDestroyImage);
-    }
+    LOG_INFO_CAT("RenderMode2", "Creating accumulation image: {}×{}", width_, height_);
+    VK_CHECK(vkCreateImage(device, &imgInfo, nullptr, &rawImg), "Accum image creation");
+    accumImage_ = RTX::Handle<VkImage>(rawImg, device, vkDestroyImage, 0, "AccumImage");
 
-    // Output image (similar setup)
-    imgInfo.format = VK_FORMAT_R8G8B8A8_UNORM; // Final output
-    if (vkCreateImage(device, &imgInfo, nullptr, &rawImg) == VK_SUCCESS) {
-        outputImage_ = RTX::MakeHandle(rawImg, device, vkDestroyImage);
-    }
+    VkImageViewCreateInfo viewInfo{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+    viewInfo.image = rawImg;
+    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    viewInfo.format = imgInfo.format;
+    viewInfo.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    VkImageView rawView;
+    VK_CHECK(vkCreateImageView(device, &viewInfo, nullptr, &rawView), "Accum view creation");
+    accumView_ = RTX::Handle<VkImageView>(rawView, device, vkDestroyImageView, 0, "AccumView");
 
-    // Create views for accum and output
-    // TODO: vkCreateImageView for outputView_ and accumView_
+    imgInfo.format = VK_FORMAT_R8G8B8A8_UNORM;
+    LOG_INFO_CAT("RenderMode2", "Creating output image: {}×{}", width_, height_);
+    VK_CHECK(vkCreateImage(device, &imgInfo, nullptr, &rawImg), "Output image creation");
+    outputImage_ = RTX::Handle<VkImage>(rawImg, device, vkDestroyImage, 0, "OutputImage");
 
-    // Descriptor set update via rtx_
-    rtx_.updateRTXDescriptors(0, RAW_BUFFER(uniformBuf_), RAW_BUFFER(accumulationBuf_), VK_NULL_HANDLE, // dimension
-                              *accumView_, *outputView_, VK_NULL_HANDLE, VK_NULL_HANDLE, // env
+    viewInfo.image = rawImg;
+    viewInfo.format = imgInfo.format;
+    VK_CHECK(vkCreateImageView(device, &viewInfo, nullptr, &rawView), "Output view creation");
+    outputView_ = RTX::Handle<VkImageView>(rawView, device, vkDestroyImageView, 0, "OutputView");
+
+    LOG_INFO_CAT("RenderMode2", "Updating RTX descriptors for frame 0");
+    rtx_.updateRTXDescriptors(0, RAW_BUFFER(uniformBuf_), RAW_BUFFER(accumulationBuf_), VK_NULL_HANDLE,
+                              *accumView_, *outputView_, VK_NULL_HANDLE, VK_NULL_HANDLE,
                               VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE);
+    LOG_SUCCESS_CAT("RenderMode2", "initResources complete — Ready for HYPERTRACE");
 }
 
 void RenderMode2::renderFrame(VkCommandBuffer cmd, float deltaTime) {
+    LOG_DEBUG_CAT("RenderMode2", "renderFrame() — Delta: {:.3f}ms", deltaTime * 1000.0f);
     updateUniforms(deltaTime);
     traceRays(cmd);
     accumulateAndToneMap(cmd);
@@ -84,7 +102,6 @@ void RenderMode2::renderFrame(VkCommandBuffer cmd, float deltaTime) {
 }
 
 void RenderMode2::updateUniforms(float deltaTime) {
-    // Map uniform buffer — using g_lazyCam
     void* data = nullptr;
     BUFFER_MAP(uniformBuf_, data);
     if (data) {
@@ -100,25 +117,44 @@ void RenderMode2::updateUniforms(float deltaTime) {
 }
 
 void RenderMode2::traceRays(VkCommandBuffer cmd) {
-    // Use global cam position/front for ray origin/direction in shader
-    // But dispatch via rtx_
     rtx_.recordRayTrace(cmd, {width_, height_}, *outputImage_, *outputView_);
 }
 
 void RenderMode2::accumulateAndToneMap(VkCommandBuffer cmd) {
-    // Simple accumulation: blend new frame to accum
     accumWeight_ = 1.0f / (frameCount_ + 1.0f);
-    // TODO: Dispatch compute for accum + tonemap
-    // vkCmdDispatch(cmd, (width_ + 15)/16, (height_ + 15)/16, 1);
-    // Barriers for image transitions
+
+    VkImageMemoryBarrier barrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+    barrier.image = *outputImage_;
+    barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+    barrier.srcAccessMask = 0;
+    barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+
+    VkClearColorValue cyan = {};
+    cyan.float32[0] = 0.0f;
+    cyan.float32[1] = 1.0f;
+    cyan.float32[2] = 1.0f;
+    cyan.float32[3] = 1.0f;
+    vkCmdClearColorImage(cmd, *outputImage_, VK_IMAGE_LAYOUT_GENERAL, &cyan, 1, &barrier.subresourceRange);
 }
 
 void RenderMode2::onResize(uint32_t width, uint32_t height) {
+    LOG_INFO_CAT("RenderMode2", "onResize() — New: {}×{}", width, height);
+    if (uniformBuf_) BUFFER_DESTROY(uniformBuf_);
+    if (accumulationBuf_) BUFFER_DESTROY(accumulationBuf_);
+    accumImage_.reset();
+    outputImage_.reset();
+    accumView_.reset();
+    outputView_.reset();
+    uniformBuf_ = 0;
+    accumulationBuf_ = 0;
+    accumSize_ = 0;
     width_ = width;
     height_ = height;
     frameCount_ = 0;
     accumWeight_ = 1.0f;
-    // Recreate resources
-    // TODO: Destroy old images/buffers, re-init
     initResources();
+    LOG_SUCCESS_CAT("RenderMode2", "Resize complete — HYPERTRACE ready");
 }

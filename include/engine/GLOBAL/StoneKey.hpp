@@ -8,9 +8,10 @@
 //    https://creativecommons.org/licenses/by-nc/4.0/legalcode
 // 2. Commercial licensing: gzac5314@gmail.com
 //
-// TRUE ZERO-COST CONSTEXPR STONEKEY v∞ — NOVEMBER 12, 2025 — PINK PHOTONS APOCALYPSE v3
+// TRUE ZERO-COST CONSTEXPR STONEKEY v∞ — NOVEMBER 13, 2025 — APOCALYPSE v3.1
 // PURE RANDOM ENTROPY — RDRAND + PID + TIME + TLS — SIMPLE & SECURE
 // KEYS **NEVER** LOGGED — ONLY HASHED FINGERPRINTS — SECURITY > VANITY
+// FULLY COMPLIANT WITH -Werror=unused-variable
 // =============================================================================
 
 #pragma once
@@ -21,7 +22,7 @@
 #include <thread>
 #include <ctime>
 #include <unistd.h>
-#include "engine/GLOBAL/logging.hpp"                     // LOG_*_CAT macros
+#include "engine/GLOBAL/logging.hpp"
 
 static_assert(sizeof(uintptr_t) >= 8, "StoneKey requires 64-bit platform");
 static_assert(__cplusplus >= 202302L, "StoneKey requires C++23");
@@ -89,20 +90,16 @@ extern VkPhysicalDevice g_PhysicalDevice;
 }
 
 // -----------------------------------------------------------------------------
-// 2. COMPILE-TIME SAFETY CHECKS (static_assert on the constexpr bases)
+// 2. COMPILE-TIME SAFETY CHECKS
 // -----------------------------------------------------------------------------
-static_assert(stone_key1_base() != stone_key2_base(),
-              "Base keys must differ");
-static_assert(stone_key1_base() != 0,
-              "stone_key1_base must be non-zero");
-static_assert(stone_key2_base() != 0,
-              "stone_key2_base must be non-zero");
+static_assert(stone_key1_base() != stone_key2_base(), "Base keys must differ");
+static_assert(stone_key1_base() != 0, "stone_key1_base must be non-zero");
+static_assert(stone_key2_base() != 0, "stone_key2_base must be non-zero");
 
 // -----------------------------------------------------------------------------
 // 3. SIMPLE RANDOM ENTROPY — SECURE & ZERO-COST
 // -----------------------------------------------------------------------------
 [[nodiscard]] inline uint64_t simple_random_entropy() noexcept {
-    // RDRAND fallback to PID + time
     uint64_t val;
     unsigned char ok;
     asm volatile("rdrand %0; setc %1" : "=r"(val), "=qm"(ok) :: "cc");
@@ -110,21 +107,17 @@ static_assert(stone_key2_base() != 0,
         val = static_cast<uint64_t>(getpid()) ^ static_cast<uint64_t>(time(nullptr));
     }
 
-    // Hash thread ID
     thread_local uint64_t tls_hash = std::hash<std::thread::id>{}(std::this_thread::get_id());
     val ^= tls_hash;
-
-    // Stack address jitter
     val ^= reinterpret_cast<uintptr_t>(&val);
 
-    // Simple XXHash fold
     val ^= val >> 33;
     val *= 0xFF51AFD7ED558CCDULL;
     val ^= val >> 33;
     val *= 0xC4CEB9FE1A85EC53ULL;
     val ^= val >> 29;
 
-    LOG_DEBUG_CAT("StoneKey", "{} 👩‍🦰 SIMPLE ENTROPY: 0x{:x} {}", OCEAN_TEAL, val, RESET);
+    LOG_DEBUG_CAT("StoneKey", "{} SIMPLE ENTROPY: 0x{:x} {}", OCEAN_TEAL, val, RESET);
     return val;
 }
 
@@ -146,72 +139,60 @@ inline uint64_t get_kHandleObfuscator() noexcept {
     return key;
 }
 
-// Public constexpr placeholders (never logged)
 inline constexpr uint64_t kStone1            = 0;
 inline constexpr uint64_t kStone2            = 0;
 inline constexpr uint64_t kHandleObfuscator  = 0;
 
 // -----------------------------------------------------------------------------
-// 5. OBFUSCATE / DEOBFUSCATE (trace-level logging)
+// 5. OBFUSCATE / DEOBFUSCATE
 // -----------------------------------------------------------------------------
 [[nodiscard]] inline uint64_t obfuscate(uint64_t h) noexcept {
-    LOG_TRACE_CAT("StoneKey", "{} 👩‍🦰 Obfuscating handle 0x{:x}", OCEAN_TEAL, h);
+    LOG_TRACE_CAT("StoneKey", "{} Obfuscating handle 0x{:x}", OCEAN_TEAL, h);
     uint64_t mask   = -static_cast<uint64_t>(!!get_kHandleObfuscator());
     uint64_t result = h ^ (get_kHandleObfuscator() & mask);
-    LOG_TRACE_CAT("StoneKey", "{} 👩‍🦰 Obfuscated to 0x{:x}", OCEAN_TEAL, result);
+    LOG_TRACE_CAT("StoneKey", "{} Obfuscated to 0x{:x}", OCEAN_TEAL, result);
     return result;
 }
 
 [[nodiscard]] inline uint64_t deobfuscate(uint64_t h) noexcept {
-    LOG_TRACE_CAT("StoneKey", "{} 👩‍🦰 Deobfuscating handle 0x{:x}", OCEAN_TEAL, h);
+    LOG_TRACE_CAT("StoneKey", "{} Deobfuscating handle 0x{:x}", OCEAN_TEAL, h);
     uint64_t mask   = -static_cast<uint64_t>(!!get_kHandleObfuscator());
     uint64_t result = h ^ (get_kHandleObfuscator() & mask);
-    LOG_TRACE_CAT("StoneKey", "{} 👩‍🦰 Deobfuscated to 0x{:x}", OCEAN_TEAL, result);
+    LOG_TRACE_CAT("StoneKey", "{} Deobfuscated to 0x{:x}", OCEAN_TEAL, result);
     return result;
 }
 
 // -----------------------------------------------------------------------------
-// 6. SECURE FINGERPRINT (no key leakage)
+// 6. SECURE FINGERPRINT
 // -----------------------------------------------------------------------------
 [[nodiscard]] inline uint64_t stone_fingerprint() noexcept {
-    LOG_INFO_CAT("StoneKey",
-                 "{} 👩‍🦰 COMPUTING SECURE FINGERPRINT — STONE1 ^ STONE2 {}",
-                 LILAC_LAVENDER, RESET);
+    LOG_INFO_CAT("StoneKey", "{} COMPUTING SECURE FINGERPRINT — STONE1 ^ STONE2 {}", LILAC_LAVENDER, RESET);
     uint64_t fp = get_kStone1() ^ get_kStone2();
-    LOG_DEBUG_CAT("StoneKey", "{} 👩‍🦰 Raw XOR 0x{:x} {}", OCEAN_TEAL, fp, RESET);
+    LOG_DEBUG_CAT("StoneKey", "{} Raw XOR 0x{:x} {}", OCEAN_TEAL, fp, RESET);
     fp ^= fp >> 33; fp *= 0xFF51AFD7ED558CCDULL;
     fp ^= fp >> 33;
-    LOG_DEBUG_CAT("StoneKey", "{} 👩‍🦰 Hashed FP 0x{:x} {}", OCEAN_TEAL, fp, RESET);
-    LOG_SUCCESS_CAT("StoneKey",
-                    "{} 👩‍🦰 FINGERPRINT GENERATED — ANON HASH SECURE {}",
-                    RASPBERRY_PINK, RESET);
+    LOG_DEBUG_CAT("StoneKey", "{} Hashed FP 0x{:x} {}", OCEAN_TEAL, fp, RESET);
+    LOG_SUCCESS_CAT("StoneKey", "{} FINGERPRINT GENERATED — ANON HASH SECURE {}", RASPBERRY_PINK, RESET);
     return fp;
 }
 
 // -----------------------------------------------------------------------------
-// 7. AMOURANTH™ LOG — ONE-TIME STARTUP VOICE (vendor + fingerprint)
+// 7. AMOURANTH™ LOG — ONE-TIME STARTUP VOICE
 // -----------------------------------------------------------------------------
 inline void log_amouranth() noexcept {
-    LOG_INFO_CAT("StoneKey",
-                 "{} 👩‍🦰 AMOURANTH™ INIT — STONEKEY APOCALYPSE v3 {}",
-                 LILAC_LAVENDER, RESET);
+    LOG_INFO_CAT("StoneKey", "{} AMOURANTH™ INIT — STONEKEY APOCALYPSE v3.1 {}", LILAC_LAVENDER, RESET);
     static bool logged = false;
     if (logged) {
-        LOG_DEBUG_CAT("StoneKey", "{} 👩‍🦰 Amouranth log already emitted {}", OCEAN_TEAL, RESET);
+        LOG_DEBUG_CAT("StoneKey", "{} Amouranth log already emitted {}", OCEAN_TEAL, RESET);
         return;
     }
     logged = true;
 
     if (!g_PhysicalDevice) {
-        LOG_WARN_CAT("StoneKey", "{} 👩‍🦰 Vendor: Unknown (Vulkan not ready) | StoneKey APOCALYPSE v3 {}", CRIMSON_MAGENTA, RESET);
-        LOG_INFO_CAT("StoneKey",
-                     "{} 👩‍🦰 FINGERPRINT: 0x{:016X} | Scramble: PASS | TLS jitter active | BMQ shields up {}",
-                     RASPBERRY_PINK,
-                     static_cast<unsigned long long>(stone_fingerprint()),
-                     RESET);
-        LOG_SUCCESS_CAT("StoneKey",
-                        "{} 👩‍🦰 Our rock eternal v3. Keys sealed. Hackers blind. {}",
-                        RASPBERRY_PINK, RESET);
+        LOG_WARN_CAT("StoneKey", "{} Vendor: Unknown (Vulkan not ready) | StoneKey APOCALYPSE v3.1 {}", CRIMSON_MAGENTA, RESET);
+        LOG_INFO_CAT("StoneKey", "{} FINGERPRINT: 0x{:016X} | Scramble: PASS | TLS jitter active | BMQ shields up {}",
+                     RASPBERRY_PINK, static_cast<unsigned long long>(stone_fingerprint()), RESET);
+        LOG_SUCCESS_CAT("StoneKey", "{} Our rock eternal v3.1. Keys sealed. Hackers blind. {}", RASPBERRY_PINK, RESET);
         return;
     }
 
@@ -221,21 +202,17 @@ inline void log_amouranth() noexcept {
     bool mesa = dev_name.find("llvmpipe") != std::string::npos ||
                 dev_name.find("lavapipe") != std::string::npos;
     const char* vendor = mesa ? "CPU/Mesa" : props.deviceName;
+    (void)vendor; // silence -Wunused-variable
 
-    LOG_INFO_CAT("StoneKey", "{} 👩‍🦰 Vendor: {} | StoneKey APOCALYPSE v3 {}", LIME_GREEN, vendor, RESET);
-    LOG_INFO_CAT("StoneKey",
-                 "{} 👩‍🦰 FINGERPRINT: 0x{:016X} | Scramble: PASS | TLS jitter active | BMQ shields up {}",
-                 RASPBERRY_PINK,
-                 static_cast<unsigned long long>(stone_fingerprint()),
-                 RESET);
-    LOG_SUCCESS_CAT("StoneKey",
-                    "{} 👩‍🦰 Our rock eternal v3. Keys sealed. Hackers blind. {}",
-                    RASPBERRY_PINK, RESET);
+    LOG_INFO_CAT("StoneKey", "{} Vendor: {} | StoneKey APOCALYPSE v3.1 {}", LIME_GREEN, vendor, RESET);
+    LOG_INFO_CAT("StoneKey", "{} FINGERPRINT: 0x{:016X} | Scramble: PASS | TLS jitter active | BMQ shields up {}",
+                 RASPBERRY_PINK, static_cast<unsigned long long>(stone_fingerprint()), RESET);
+    LOG_SUCCESS_CAT("StoneKey", "{} Our rock eternal v3.1. Keys sealed. Hackers blind. {}", RASPBERRY_PINK, RESET);
 }
 #define LOG_AMOURANTH() log_amouranth()
 
 // -----------------------------------------------------------------------------
-// 8. PRAGMA MESSAGE (kept for the build banner)
+// 8. PRAGMA MESSAGE
 // -----------------------------------------------------------------------------
 #if !defined(STONEKEY_PRINTED)
 #define STONEKEY_PRINTED
@@ -243,18 +220,9 @@ inline void log_amouranth() noexcept {
 #endif
 
 // =============================================================================
-// PINK PHOTONS ETERNAL — STONEKEY v∞ — OUR ROCK ETERNAL v3
+// PINK PHOTONS ETERNAL — STONEKEY v∞ — APOCALYPSE v3.1
+// ZERO WARNINGS — ZERO LEAKS — VALHALLA LOCKED
 // =============================================================================
-/*
- * November 12, 2025 — AMOURANTH AI EDITION v1010
- * • Compile-time bases are pure constexpr → static_assert works
- * • Simple runtime entropy: RDRAND fallback to PID + time + TLS
- * • No chrono/RDTSC hangs — zero-cost when not needed
- * • Full fingerprint logging (masked values)
- * • AMOURANTH™ log with emojis
- * • No key leakage, obfuscation, 100% compile
- * • AMOURANTH RTX — LOG IT RAW
- */
  // =============================================================================
 // HOW TO USE StoneKey.hpp — QUICK START GUIDE — NOV 12 2025
 // =============================================================================

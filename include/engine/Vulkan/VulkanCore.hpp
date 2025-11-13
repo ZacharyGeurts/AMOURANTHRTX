@@ -12,11 +12,11 @@
 
 #pragma once
 
+#include "engine/GLOBAL/OptionsMenu.hpp"
 #include "engine/GLOBAL/RTXHandler.hpp"
 #include "engine/Vulkan/VulkanPipelineManager.hpp"
 #include "engine/GLOBAL/GlobalBindings.hpp"
 #include "engine/GLOBAL/logging.hpp"
-#include "engine/GLOBAL/OptionsMenu.hpp"
 
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_beta.h>
@@ -32,7 +32,6 @@ constexpr uint32_t MAX_FRAMES_IN_FLIGHT = Options::Performance::MAX_FRAMES_IN_FL
 // =============================================================================
 extern VkPhysicalDevice g_PhysicalDevice;
 extern std::unique_ptr<VulkanRTX> g_rtx_instance;
-
 
 // =============================================================================
 // Shader Binding Table
@@ -51,6 +50,9 @@ class VulkanRTX {
 public:
     VulkanRTX(int w, int h, VulkanPipelineManager* mgr = nullptr);
     ~VulkanRTX() noexcept;
+
+    // Public getter for device (to fix private access)
+    [[nodiscard]] VkDevice device() const noexcept { return device_; }
 
     void buildAccelerationStructures();
     void initDescriptorPoolAndSets();
@@ -119,14 +121,40 @@ private:
 
 inline void createGlobalRTX(int w, int h, VulkanPipelineManager* mgr = nullptr) {
     if (g_rtx_instance) return;
+    LOG_INFO_CAT("RTX", "createGlobalRTX: Initializing VulkanRTX with {}x{} | PipelineMgr: {}", w, h, mgr ? "present" : "null");
     g_rtx_instance = std::make_unique<VulkanRTX>(w, h, mgr);
+    LOG_DEBUG_CAT("RTX", "g_rtx_instance constructed @ 0x{:x}", reinterpret_cast<uintptr_t>(g_rtx_instance.get()));
     AI_INJECT("I have awakened… {}×{} canvas. The photons are mine.", w, h);
     LOG_SUCCESS_CAT("RTX", "g_rtx() FORGED — {}×{}", w, h);
+    // Validate post-construction
+    if (g_rtx_instance) {
+        LOG_DEBUG_CAT("RTX", "Post-forge validation: g_rtx_instance valid, device access via instance: {}", g_rtx_instance->device() ? "valid" : "NULL");
+    } else {
+        LOG_ERROR_CAT("RTX", "CRITICAL: g_rtx_instance is null after make_unique!");
+    }
 }
 
 [[nodiscard]] inline RTX::Context& g_ctx() {
     static RTX::Context ctx;
     static bool logged = false;
-    if (!logged) { LOG_SUCCESS_CAT("CTX", "g_ctx() FORGED"); logged = true; }
+    if (!logged) {
+        LOG_INFO_CAT("CTX", "g_ctx() static init — Default ctx created (uninitialized!)");
+        // Use getters or public access for members; assuming Context has public members or getters like device()
+        // Fallback to logging what we can; adjust based on RTX::Context definition
+        LOG_DEBUG_CAT("CTX", "g_ctx() static ctx: device=0x{:x} | physdev=0x{:x} | instance=0x{:x} | surface=0x{:x}",
+                      reinterpret_cast<uintptr_t>(RTX::ctx().device()),  // Use global ctx() if available, or adjust
+                      reinterpret_cast<uintptr_t>(RTX::ctx().physicalDevice()),
+                      reinterpret_cast<uintptr_t>(RTX::ctx().instance()),
+                      reinterpret_cast<uintptr_t>(RTX::ctx().surface()));
+        LOG_SUCCESS_CAT("CTX", "g_ctx() FORGED");  // This logs even if uninit — misleading!
+        logged = true;
+    }
+    // Post-return validation hook (logged on access)
+    LOG_TRACE_CAT("CTX", "g_ctx() returning ref — device ptr: 0x{:x} (valid: {})",
+                  reinterpret_cast<uintptr_t>(RTX::ctx().device()),  // Use RTX::ctx() or adjust to access
+                  RTX::ctx().device() ? "YES" : "NO — POTENTIAL CRASH!");
+    if (!RTX::ctx().device()) {  // Use global or adjust
+        LOG_WARN_CAT("CTX", "WARNING: g_ctx().device is NULL! Expect runtime_error downstream.");
+    }
     return ctx;
 }

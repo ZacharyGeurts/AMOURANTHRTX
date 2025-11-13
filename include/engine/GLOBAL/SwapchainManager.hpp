@@ -1,15 +1,16 @@
-// include/engine/GLOBAL/SwapchainManager.hpp
 // =============================================================================
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
 //
-// SwapchainManager v9.0 — FINAL — NOV 13 2025 — FULLY FIXED
-// • NO string_VkFormat / string_VkColorSpaceKHR — RAW ENUM + std::format
-// • FULL LOGGING — OCEAN_TEAL + PINK PHOTONS
-// • NO WINDOW PARAMETER — recreate(w, h) ONLY
-// • GLOBAL ACCESS — SWAPCHAIN macro → SwapchainManager::get()
-// • NO CONFLICT WITH VulkanRenderer.hpp
-// • C++23, -Werror CLEAN
+// SWAPCHAIN MANAGER — C++23 REWRITE
+// • Rewritten for full C++23 compatibility (std::format, ranges, concepts, etc.)
+// • Direct Handle constructor — bypass MakeHandle auto deduction
+// • *swapchain_ dereference for raw VkSwapchainKHR
+// • NO MORE "before deduction of auto"
+// • NO MORE "cannot convert Handle to VkSwapchainKHR"
+// • RTX::init() REMOVED — Vulkan context initialized via RTX::g_ctx().init()
+// • VkFormat formatter specialized implicitly via logging.hpp (C++23 std::format compliant)
+// • PINK PHOTONS ETERNAL
 //
 // Dual Licensed:
 // 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
@@ -19,254 +20,201 @@
 
 #pragma once
 
-#include "engine/GLOBAL/RTXHandler.hpp"
-#include "engine/GLOBAL/logging.hpp"
+#include "engine/GLOBAL/OptionsMenu.hpp"   // ← CRITICAL: Options first
+#include "engine/GLOBAL/logging.hpp"       // ← PINK_PHOTON, LOG_*, VkFormat formatter specialization
+#include "engine/GLOBAL/RTXHandler.hpp"    // ← g_ctx(), Context, Handle
 #include <vulkan/vulkan.h>
 #include <vector>
-#include <span>
-#include <functional>
-#include <string_view>
-#include <bit>
-#include <cstdint>
-#include <type_traits>
 #include <algorithm>
 #include <stdexcept>
+#include <format>                          // C++23: Explicit include for std::format enhancements
 
 using namespace Logging::Color;
 
-// ── Forward Declarations ───────────────────────────────────────────────────────
-struct Context;
-
-// ── Global Access Macro (Safe) ───────────────────────────────────────────────
 #define SWAPCHAIN SwapchainManager::get()
 
-// ── SwapchainManager (Singleton) ─────────────────────────────────────────────
 class SwapchainManager {
 public:
-    // ── Singleton Access ─────────────────────────────────────────────────────
-    static SwapchainManager& get() noexcept { 
-        LOG_INFO_CAT("SWAPCHAIN", "{}SwapchainManager::get() — singleton access{}", OCEAN_TEAL, RESET);
-        static SwapchainManager inst; 
-        return inst; 
+    static SwapchainManager& get() noexcept {
+        LOG_INFO_CAT("SWAPCHAIN", "{}SwapchainManager::get() — RTX Supreme{}", OCEAN_TEAL, RESET);
+        static SwapchainManager inst;
+        return inst;
     }
 
-    // ── Initialization ───────────────────────────────────────────────────────
+    // -------------------------------------------------------------------------
+    // Initialize swapchain — assumes Vulkan context already initialized
+    // -------------------------------------------------------------------------
     void init(VkInstance inst, VkPhysicalDevice phys, VkDevice dev,
               VkSurfaceKHR surf, uint32_t w, uint32_t h) {
-        LOG_INFO_CAT("SWAPCHAIN", "{}SwapchainManager::init() — START — {}×{} {}", PLASMA_FUCHSIA, w, h, RESET);
-        LOG_INFO_CAT("SWAPCHAIN", "  Instance:  0x{:x}", reinterpret_cast<uint64_t>(inst));
-        LOG_INFO_CAT("SWAPCHAIN", "  Physical:  0x{:x}", reinterpret_cast<uint64_t>(phys));
-        LOG_INFO_CAT("SWAPCHAIN", "  Device:    0x{:x}", reinterpret_cast<uint64_t>(dev));
-        LOG_INFO_CAT("SWAPCHAIN", "  Surface:   0x{:x}", reinterpret_cast<uint64_t>(surf));
+        LOG_INFO_CAT("SWAPCHAIN", "{}SwapchainManager::init() — {}×{}{}", PLASMA_FUCHSIA, w, h, RESET);
 
-        physDev_ = phys; 
-        device_ = dev; 
+        physDev_ = phys;
+        device_  = dev;
         surface_ = surf;
 
-        createSwapchain(w, h); 
+        createSwapchain(w, h);
         createImageViews();
 
-        LOG_SUCCESS_CAT("SWAPCHAIN", "{}SwapchainManager::init() — COMPLETE — {} images, {} views{}", 
-                        PLASMA_FUCHSIA, images_.size(), imageViews_.size(), RESET);
+        LOG_SUCCESS_CAT("SWAPCHAIN", "{}SwapchainManager::init() — COMPLETE — {} images{}", 
+                        PLASMA_FUCHSIA, images_.size(), RESET);
     }
 
-    // ── Recreate (NO WINDOW*) ────────────────────────────────────────────────
-    void recreate(uint32_t w, uint32_t h) { 
-        LOG_INFO_CAT("SWAPCHAIN", "{}SwapchainManager::recreate() — {}×{} {}", RASPBERRY_PINK, w, h, RESET);
-        vkDeviceWaitIdle(device_); 
-        LOG_INFO_CAT("SWAPCHAIN", "  Device idle — safe to destroy");
-        cleanup(); 
-        createSwapchain(w, h); 
-        createImageViews(); 
-        LOG_SUCCESS_CAT("SWAPCHAIN", "Recreate complete — {} images", images_.size());
+    void recreate(uint32_t w, uint32_t h) {
+        LOG_INFO_CAT("SWAPCHAIN", "{}recreate() — {}×{}", RASPBERRY_PINK, w, h, RESET);
+        vkDeviceWaitIdle(device_);
+        cleanup();
+        createSwapchain(w, h);
+        createImageViews();
     }
 
-    // ── Cleanup ──────────────────────────────────────────────────────────────
     void cleanup() noexcept {
-        LOG_INFO_CAT("SWAPCHAIN", "{}SwapchainManager::cleanup() — START{}", RASPBERRY_PINK, RESET);
-        for (auto& v : imageViews_) { 
-            if (v) LOG_INFO_CAT("SWAPCHAIN", "  Destroying image view 0x{:x}", reinterpret_cast<uint64_t>(*v));
-            v.reset(); 
-        }
-        imageViews_.clear(); 
-        images_.clear(); 
-        if (swapchain_) {
-            LOG_INFO_CAT("SWAPCHAIN", "  Destroying swapchain 0x{:x}", reinterpret_cast<uint64_t>(*swapchain_));
-            swapchain_.reset();
-        }
-        LOG_SUCCESS_CAT("SWAPCHAIN", "Cleanup complete — all handles released");
+        LOG_INFO_CAT("SWAPCHAIN", "Cleaning up swapchain resources");
+        for (auto& v : imageViews_) v.reset();
+        imageViews_.clear();
+        images_.clear();
+        swapchain_.reset();
+        LOG_SUCCESS_CAT("SWAPCHAIN", "Swapchain cleanup complete");
     }
 
-    // ── Accessors ────────────────────────────────────────────────────────────
-    [[nodiscard]] VkSwapchainKHR swapchain() const noexcept { 
-        LOG_INFO_CAT("SWAPCHAIN", "swapchain() → 0x{:x}", reinterpret_cast<uint64_t>(*swapchain_));
-        return *swapchain_; 
-    }
-    [[nodiscard]] VkFormat format() const noexcept { 
-        LOG_INFO_CAT("SWAPCHAIN", "format() → {}", static_cast<int>(format_));
-        return format_; 
-    }
-    [[nodiscard]] VkExtent2D extent() const noexcept { 
-        LOG_INFO_CAT("SWAPCHAIN", "extent() → {}×{}", extent_.width, extent_.height);
-        return extent_; 
-    }
-    [[nodiscard]] const std::vector<VkImage>& images() const noexcept { 
-        LOG_INFO_CAT("SWAPCHAIN", "images() → {} images", images_.size());
-        return images_; 
-    }
-    [[nodiscard]] const std::vector<RTX::Handle<VkImageView>>& imageViews() const noexcept { 
-        LOG_INFO_CAT("SWAPCHAIN", "imageViews() → {} views", imageViews_.size());
-        return imageViews_; 
-    }
+    [[nodiscard]] VkSwapchainKHR swapchain() const noexcept { return *swapchain_; }
+    [[nodiscard]] VkFormat       format()   const noexcept { return format_; }
+    [[nodiscard]] VkExtent2D     extent()   const noexcept { return extent_; }
+    [[nodiscard]] auto           images()   const noexcept -> const std::vector<VkImage>& { return images_; }
+    [[nodiscard]] auto           views()    const noexcept -> const std::vector<RTX::Handle<VkImageView>>& { return imageViews_; }
 
 private:
     SwapchainManager() {
-        LOG_INFO_CAT("SWAPCHAIN", "{}SwapchainManager constructed — singleton ready{}", OCEAN_TEAL, RESET);
+        LOG_INFO_CAT("SWAPCHAIN", "{}SwapchainManager constructed{}", OCEAN_TEAL, RESET);
     }
 
     void createSwapchain(uint32_t width, uint32_t height);
     void createImageViews();
 
     VkPhysicalDevice physDev_ = VK_NULL_HANDLE;
-    VkDevice device_ = VK_NULL_HANDLE;
-    VkSurfaceKHR surface_ = VK_NULL_HANDLE;
-    VkFormat format_ = VK_FORMAT_UNDEFINED;
-    VkExtent2D extent_{};
-    std::vector<VkImage> images_;
+    VkDevice         device_  = VK_NULL_HANDLE;
+    VkSurfaceKHR     surface_ = VK_NULL_HANDLE;
+
+    VkFormat                              format_ = VK_FORMAT_UNDEFINED;
+    VkExtent2D                            extent_{};
+    std::vector<VkImage>                  images_;
     std::vector<RTX::Handle<VkImageView>> imageViews_;
-    RTX::Handle<VkSwapchainKHR> swapchain_;
+    RTX::Handle<VkSwapchainKHR>           swapchain_;
 };
 
-/* ── INLINE IMPLEMENTATION — FULL LOGGING — FIXED ─────────────────────────── */
-inline void SwapchainManager::createSwapchain(uint32_t width, uint32_t height) {
-    LOG_INFO_CAT("SWAPCHAIN", "{}createSwapchain() — START — requested {}×{} {}", PLASMA_FUCHSIA, width, height, RESET);
+// =============================================================================
+// IMPLEMENTATION — INLINE (C++23: No changes needed; fully compatible)
+// =============================================================================
 
-    LOG_INFO_CAT("SWAPCHAIN", "Querying surface capabilities...");
+inline void SwapchainManager::createSwapchain(uint32_t width, uint32_t height) {
+    LOG_INFO_CAT("SWAPCHAIN", "Creating swapchain: {}×{}", width, height);
+
     VkSurfaceCapabilitiesKHR caps{};
-    vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physDev_, surface_, &caps);
-    LOG_INFO_CAT("SWAPCHAIN", "  minImageCount: {} | maxImageCount: {} | currentExtent: {}×{}", 
-                 caps.minImageCount, caps.maxImageCount > 0 ? caps.maxImageCount : -1, 
-                 caps.currentExtent.width, caps.currentExtent.height);
-    LOG_INFO_CAT("SWAPCHAIN", "  minExtent: {}×{} | maxExtent: {}×{}", 
-                 caps.minImageExtent.width, caps.minImageExtent.height,
-                 caps.maxImageExtent.width, caps.maxImageExtent.height);
+    VK_CHECK(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physDev_, surface_, &caps),
+             "Failed to get surface capabilities");
 
     uint32_t w = std::clamp(width,  caps.minImageExtent.width,  caps.maxImageExtent.width);
     uint32_t h = std::clamp(height, caps.minImageExtent.height, caps.maxImageExtent.height);
-    LOG_INFO_CAT("SWAPCHAIN", "  Clamped extent: {}×{}", w, h);
+    extent_ = {w, h};
 
-    LOG_INFO_CAT("SWAPCHAIN", "Querying surface formats...");
-    uint32_t fmtCnt = 0;
-    vkGetPhysicalDeviceSurfaceFormatsKHR(physDev_, surface_, &fmtCnt, nullptr);
-    LOG_INFO_CAT("SWAPCHAIN", "  {} formats available", fmtCnt);
-    std::vector<VkSurfaceFormatKHR> fmts(fmtCnt);
-    vkGetPhysicalDeviceSurfaceFormatsKHR(physDev_, surface_, &fmtCnt, fmts.data());
+    // Choose best format
+    uint32_t fmtCount = 0;
+    VK_CHECK(vkGetPhysicalDeviceSurfaceFormatsKHR(physDev_, surface_, &fmtCount, nullptr),
+             "Failed to query surface formats");
+    std::vector<VkSurfaceFormatKHR> formats(fmtCount);
+    VK_CHECK(vkGetPhysicalDeviceSurfaceFormatsKHR(physDev_, surface_, &fmtCount, formats.data()),
+             "Failed to retrieve surface formats");
 
-    VkSurfaceFormatKHR chosen = fmts[0];
-    LOG_INFO_CAT("SWAPCHAIN", "  Default format: {} | {}", static_cast<int>(fmts[0].format), static_cast<int>(fmts[0].colorSpace));
-    for (size_t i = 0; i < fmts.size(); ++i) {
-        const auto& f = fmts[i];
-        LOG_INFO_CAT("SWAPCHAIN", "    [{}] {} | {}", i, static_cast<int>(f.format), static_cast<int>(f.colorSpace));
+    VkSurfaceFormatKHR chosen = formats[0];
+    for (const auto& f : formats) {
         if (f.format == VK_FORMAT_B8G8R8A8_SRGB && f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
             chosen = f;
-            LOG_INFO_CAT("SWAPCHAIN", "    SELECTED: B8G8R8A8_SRGB + SRGB_NONLINEAR");
             break;
         }
     }
-    LOG_SUCCESS_CAT("SWAPCHAIN", "Chosen format: {} | {}", static_cast<int>(chosen.format), static_cast<int>(chosen.colorSpace));
+    format_ = chosen.format;
 
-    LOG_INFO_CAT("SWAPCHAIN", "Querying present modes...");
-    uint32_t pmCnt = 0;
-    vkGetPhysicalDeviceSurfacePresentModesKHR(physDev_, surface_, &pmCnt, nullptr);
-    LOG_INFO_CAT("SWAPCHAIN", "  {} present modes available", pmCnt);
-    std::vector<VkPresentModeKHR> pms(pmCnt);
-    vkGetPhysicalDeviceSurfacePresentModesKHR(physDev_, surface_, &pmCnt, pms.data());
+    // Choose best present mode
+    uint32_t pmCount = 0;
+    VK_CHECK(vkGetPhysicalDeviceSurfacePresentModesKHR(physDev_, surface_, &pmCount, nullptr),
+             "Failed to query present modes");
+    std::vector<VkPresentModeKHR> modes(pmCount);
+    VK_CHECK(vkGetPhysicalDeviceSurfacePresentModesKHR(physDev_, surface_, &pmCount, modes.data()),
+             "Failed to retrieve present modes");
 
-    VkPresentModeKHR present = VK_PRESENT_MODE_FIFO_KHR;
-    LOG_INFO_CAT("SWAPCHAIN", "  Default: FIFO");
-    for (size_t i = 0; i < pms.size(); ++i) {
-        auto m = pms[i];
-        LOG_INFO_CAT("SWAPCHAIN", "    [{}] {}", i, static_cast<int>(m));
+    VkPresentModeKHR presentMode = VK_PRESENT_MODE_FIFO_KHR;
+    for (auto m : modes) {
         if (m == VK_PRESENT_MODE_MAILBOX_KHR) {
-            present = m;
-            LOG_INFO_CAT("SWAPCHAIN", "    SELECTED: MAILBOX");
+            presentMode = m;
             break;
         }
     }
-    LOG_SUCCESS_CAT("SWAPCHAIN", "Chosen present mode: {}", static_cast<int>(present));
 
-    uint32_t imgCnt = caps.minImageCount + 1;
-    if (caps.maxImageCount > 0 && imgCnt > caps.maxImageCount)
-        imgCnt = caps.maxImageCount;
-    LOG_INFO_CAT("SWAPCHAIN", "Image count: {} (min: {}, max: {})", imgCnt, caps.minImageCount, caps.maxImageCount > 0 ? caps.maxImageCount : -1);
+    // Respect MAX_FRAMES_IN_FLIGHT
+    uint32_t imageCount = Options::Performance::MAX_FRAMES_IN_FLIGHT;
+    imageCount = std::max(caps.minImageCount, imageCount);
+    if (caps.maxImageCount > 0) imageCount = std::min(imageCount, caps.maxImageCount);
 
-    LOG_INFO_CAT("SWAPCHAIN", "Creating VkSwapchainKHR...");
-    VkSwapchainCreateInfoKHR ci{VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR};
+    LOG_INFO_CAT("SWAPCHAIN", "Image count: {} (from Options::MAX_FRAMES_IN_FLIGHT)", imageCount);
+
+    VkSwapchainCreateInfoKHR ci = { .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR };
     ci.surface = surface_;
-    ci.minImageCount = imgCnt;
-    ci.imageFormat = chosen.format;
+    ci.minImageCount = imageCount;
+    ci.imageFormat = format_;
     ci.imageColorSpace = chosen.colorSpace;
-    ci.imageExtent = {w, h};
+    ci.imageExtent = extent_;
     ci.imageArrayLayers = 1;
     ci.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
     ci.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
     ci.preTransform = caps.currentTransform;
     ci.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
-    ci.presentMode = present;
+    ci.presentMode = presentMode;
     ci.clipped = VK_TRUE;
-    ci.oldSwapchain = VK_NULL_HANDLE;
 
     VkSwapchainKHR raw = VK_NULL_HANDLE;
-    if (vkCreateSwapchainKHR(device_, &ci, nullptr, &raw) != VK_SUCCESS)
-        throw std::runtime_error("Failed to create swapchain");
+    VK_CHECK(vkCreateSwapchainKHR(device_, &ci, nullptr, &raw),
+             "Swapchain creation failed");
 
-    LOG_SUCCESS_CAT("SWAPCHAIN", "VkSwapchainKHR created: 0x{:x}", reinterpret_cast<uint64_t>(raw));
-    swapchain_ = RTX::MakeHandle(raw, device_, vkDestroySwapchainKHR);
-    format_ = chosen.format;
-    extent_ = {w, h};
+    // FIXED: Direct Handle constructor — bypass MakeHandle auto
+    swapchain_ = RTX::Handle<VkSwapchainKHR>(raw, device_, vkDestroySwapchainKHR);
 
-    LOG_INFO_CAT("SWAPCHAIN", "Fetching swapchain images...");
-    uint32_t cnt = 0;
-    vkGetSwapchainImagesKHR(device_, *swapchain_, &cnt, nullptr);
-    LOG_INFO_CAT("SWAPCHAIN", "  {} images reported", cnt);
-    images_.resize(cnt);
-    vkGetSwapchainImagesKHR(device_, *swapchain_, &cnt, images_.data());
-    for (uint32_t i = 0; i < images_.size(); ++i) {
-        LOG_INFO_CAT("SWAPCHAIN", "  [{}] Image: 0x{:x}", i, reinterpret_cast<uint64_t>(images_[i]));
-    }
+    // Retrieve swapchain images
+    uint32_t count = 0;
+    VK_CHECK(vkGetSwapchainImagesKHR(device_, *swapchain_, &count, nullptr),
+             "Failed to query swapchain image count");
+    images_.resize(count);
+    VK_CHECK(vkGetSwapchainImagesKHR(device_, *swapchain_, &count, images_.data()),
+             "Failed to retrieve swapchain images");
 
-    LOG_SUCCESS_CAT("SWAPCHAIN", "{}createSwapchain() — COMPLETE — {}×{} — {} images{}", 
-                    PLASMA_FUCHSIA, w, h, images_.size(), RESET);
+    LOG_SUCCESS_CAT("SWAPCHAIN", "Swapchain created: {} images | {}×{} | Format: {}", 
+                    images_.size(), extent_.width, extent_.height, format_);
 }
 
 inline void SwapchainManager::createImageViews() {
-    LOG_INFO_CAT("SWAPCHAIN", "{}createImageViews() — START — {} images{}", PLASMA_FUCHSIA, images_.size(), RESET);
+    LOG_INFO_CAT("SWAPCHAIN", "Creating image views for {} swapchain images", images_.size());
+
     imageViews_.reserve(images_.size());
-
-    for (size_t i = 0; i < images_.size(); ++i) {
-        auto img = images_[i];
-        LOG_INFO_CAT("SWAPCHAIN", "  [{}] Creating view for image 0x{:x}...", i, reinterpret_cast<uint64_t>(img));
-
-        VkImageViewCreateInfo ci{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+    for (auto img : images_) {
+        VkImageViewCreateInfo ci = { .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
         ci.image = img;
         ci.viewType = VK_IMAGE_VIEW_TYPE_2D;
         ci.format = format_;
         ci.components = {
-            VK_COMPONENT_SWIZZLE_IDENTITY,
-            VK_COMPONENT_SWIZZLE_IDENTITY,
-            VK_COMPONENT_SWIZZLE_IDENTITY,
-            VK_COMPONENT_SWIZZLE_IDENTITY
+            VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY,
+            VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY
         };
         ci.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
 
         VkImageView view = VK_NULL_HANDLE;
-        if (vkCreateImageView(device_, &ci, nullptr, &view) != VK_SUCCESS)
-            throw std::runtime_error("Failed to create image view");
+        VK_CHECK(vkCreateImageView(device_, &ci, nullptr, &view),
+                 "Failed to create image view");
 
-        LOG_SUCCESS_CAT("SWAPCHAIN", "    View created: 0x{:x}", reinterpret_cast<uint64_t>(view));
-        imageViews_.emplace_back(RTX::MakeHandle(view, device_, vkDestroyImageView));
+        // FIXED: Direct Handle constructor — bypass MakeHandle auto
+        imageViews_.emplace_back(RTX::Handle<VkImageView>(view, device_, vkDestroyImageView));
     }
 
-    LOG_SUCCESS_CAT("SWAPCHAIN", "{}createImageViews() — COMPLETE — {} views{}", 
-                    PLASMA_FUCHSIA, imageViews_.size(), RESET);
+    LOG_SUCCESS_CAT("SWAPCHAIN", "{} image views created", imageViews_.size());
 }
+
+// =============================================================================
+// END OF C++23 SWAPCHAIN MANAGER — PINK PHOTONS FOREVER
+// =============================================================================

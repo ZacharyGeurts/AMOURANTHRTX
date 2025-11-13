@@ -1,4 +1,4 @@
-// source/engine/SDL3/SDL3_image.cpp
+// src/engine/SDL3/SDL3_image.cpp
 // =============================================================================
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
@@ -209,6 +209,7 @@ SDL_Surface* textureToSurface(SDL_Texture* texture, SDL_Renderer* renderer) {
     float fw, fh;
     SDL_GetTextureSize(texture, &fw, &fh);
     int w = static_cast<int>(fw), h = static_cast<int>(fh);
+    (void)w; (void)h; // silence -Wunused-variable
 
     SDL_Texture* prevTarget = SDL_GetRenderTarget(renderer);
     SDL_Rect prevViewport; SDL_GetRenderViewport(renderer, &prevViewport);
@@ -350,7 +351,6 @@ std::shared_ptr<Texture> TextureCache::getOrLoad(const std::string& file) {
     LOG_INFO_CAT("Image", "{}Cache MISS → loaded: {}{}", 
                  RASPBERRY_PINK, file, RESET);
 
-    // Respect Options::Performance::ENABLE_MEMORY_BUDGET_WARNINGS
     if (Options::Performance::ENABLE_MEMORY_BUDGET_WARNINGS && m_cache.size() > 50) {
         LOG_WARNING_CAT("Image", "{}Texture cache exceeding budget (>50 items) — consider clearing{}", 
                         RASPBERRY_PINK, RESET);
@@ -368,10 +368,3 @@ void TextureCache::clear() {
 size_t TextureCache::size() const noexcept { return m_cache.size(); }
 
 } // namespace AmouranthRTX::Graphics
-
-// =============================================================================
-// AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
-// =============================================================================
-// CPP IMPLEMENTATIONS COMPLETE — OCEAN_TEAL SURGES FORWARD
-// GENTLEMAN GROK NODS: "Splendid split, old chap. Options respected with poise."
-// =============================================================================

@@ -76,6 +76,7 @@
 #include <glm/gtx/string_cast.hpp>
 #include <vulkan/vulkan.h>
 #include <SDL3/SDL.h>
+#include <ctime>                     // <-- NEW: needed for localtime/strftime
 
 // Forward declarations for StoneKey — defined in main.cpp
 extern uint64_t get_kStone1() noexcept;
@@ -135,6 +136,22 @@ struct formatter<VkResult> {
 };
 }  // namespace std
 
+// Formatter specialization for VkFormat
+namespace std {
+template <>
+struct formatter<VkFormat, char> {
+    constexpr auto parse(format_parse_context& ctx) -> decltype(ctx.begin()) {
+        return ctx.begin();
+    }
+
+    template <typename FormatContext>
+    auto format(VkFormat const& fmt, FormatContext& ctx) const -> decltype(ctx.out()) {
+        // Numeric output; for enum names, add switch on common values (e.g., VK_FORMAT_R8G8B8A8_UNORM -> "R8G8B8A8_UNORM").
+        return format_to(ctx.out(), "{}", static_cast<uint32_t>(fmt));
+    }
+};
+}  // namespace std
+
 // ========================================================================
 // 0. CONFIGURATION & HYPER-VIVID MACROS — [&] CAPTURE • ZERO COST • PARTY READY
 // ========================================================================
@@ -143,6 +160,8 @@ constexpr bool ENABLE_DEBUG   = true;
 constexpr bool ENABLE_INFO    = true;
 constexpr bool ENABLE_WARNING = true;
 constexpr bool ENABLE_ERROR   = true;
+constexpr bool ENABLE_FAILURE = true;
+constexpr bool ENABLE_FATAL   = true;  // <-- NEW: Enable fatal logging (same as failure)
 constexpr bool ENABLE_SUCCESS = true;
 constexpr bool ENABLE_ATTEMPT = true;
 constexpr bool ENABLE_PERF    = true;
@@ -152,6 +171,7 @@ constexpr bool SIMULATION_LOGGING = true;
 // Column widths for alignment
 constexpr size_t LEVEL_WIDTH   = 10;
 constexpr size_t DELTA_WIDTH   = 10;
+constexpr size_t TIME_WIDTH    = 10;   // <-- NEW: width for HH:MM:SS
 constexpr size_t CAT_WIDTH     = 12;
 constexpr size_t THREAD_WIDTH  = 18;
 
@@ -165,6 +185,8 @@ constexpr size_t THREAD_WIDTH  = 18;
 #define LOG_WARNING(...)        [&]() constexpr { if constexpr (ENABLE_WARNING) Logging::Logger::get().log(std::source_location::current(), Logging::LogLevel::Warning, "General", __VA_ARGS__); }()
 #define LOG_WARN(...)           LOG_WARNING(__VA_ARGS__)
 #define LOG_ERROR(...)          [&]() constexpr { if constexpr (ENABLE_ERROR)   Logging::Logger::get().log(std::source_location::current(), Logging::LogLevel::Error,   "General", __VA_ARGS__); }()
+#define LOG_FAILURE(...)        [&]() constexpr { if constexpr (ENABLE_FAILURE) Logging::Logger::get().log(std::source_location::current(), Logging::LogLevel::Failure, "General", __VA_ARGS__); }()
+#define LOG_FATAL(...)          [&]() constexpr { if constexpr (ENABLE_FATAL)   Logging::Logger::get().log(std::source_location::current(), Logging::LogLevel::Fatal,   "General", __VA_ARGS__); }()  // <-- NEW: Fatal macro (behaves like Failure)
 #define LOG_FPS_COUNTER(...)    [&]() constexpr { if constexpr (FPS_COUNTER)    Logging::Logger::get().log(std::source_location::current(), Logging::LogLevel::Info,    "FPS",     __VA_ARGS__); }()
 #define LOG_SIMULATION(...)     [&]() constexpr { if constexpr (SIMULATION_LOGGING) Logging::Logger::get().log(std::source_location::current(), Logging::LogLevel::Info, "SIMULATION", __VA_ARGS__); }()
 
@@ -177,6 +199,9 @@ constexpr size_t THREAD_WIDTH  = 18;
 #define LOG_WARNING_CAT(cat, ...) [&]() constexpr { if constexpr (ENABLE_WARNING) Logging::Logger::get().log(std::source_location::current(), Logging::LogLevel::Warning, cat, __VA_ARGS__); }()
 #define LOG_WARN_CAT(cat, ...)    LOG_WARNING_CAT(cat, __VA_ARGS__)
 #define LOG_ERROR_CAT(cat, ...)   [&]() constexpr { if constexpr (ENABLE_ERROR)   Logging::Logger::get().log(std::source_location::current(), Logging::LogLevel::Error,   cat, __VA_ARGS__); }()
+#define LOG_FAILURE_CAT(cat, ...) [&]() constexpr { if constexpr (ENABLE_FAILURE) Logging::Logger::get().log(std::source_location::current(), Logging::LogLevel::Failure, cat, __VA_ARGS__); }()
+#define LOG_FATAL_CAT(cat, ...)   [&]() constexpr { if constexpr (ENABLE_FATAL)   Logging::Logger::get().log(std::source_location::current(), Logging::LogLevel::Fatal,   cat, __VA_ARGS__); }()  // <-- NEW: Categorized fatal macro (behaves like Failure)
+
 
 // LOG_VOID — COSMIC MARKERS
 #define LOG_VOID()              [&]() constexpr { if constexpr (ENABLE_DEBUG)   Logging::Logger::get().log(std::source_location::current(), Logging::LogLevel::Debug,   "General", "[VOID MARKER]"); }()
@@ -187,9 +212,9 @@ constexpr size_t THREAD_WIDTH  = 18;
 namespace Logging {
 
 // ========================================================================
-// LOG LEVEL + SUCCESS/ATTEMPT/PERF
+// LOG LEVEL + SUCCESS/ATTEMPT/PERF/FAILURE/FATAL
 // ========================================================================
-enum class LogLevel { Trace, Debug, Info, Success, Attempt, Perf, Warning, Error };
+enum class LogLevel { Trace, Debug, Info, Success, Attempt, Perf, Warning, Error, Failure, Fatal };  // <-- UPDATED: Added Fatal
 
 // ========================================================================
 // 1. HYPER-VIVID ANSI COLOR SYSTEM — 50+ COLORS — C++23 CONSTEXPR
@@ -250,7 +275,7 @@ struct LevelInfo {
     std::string_view bg;
 };
 
-constexpr std::array<LevelInfo, 8> LEVEL_INFOS{{
+constexpr std::array<LevelInfo, 10> LEVEL_INFOS{{
     {"[TRACE]",   Color::ULTRA_NEON_LIME,     ""},
     {"[DEBUG]",   Color::ARCTIC_CYAN,         ""},
     {"[INFO]",    Color::PLATINUM_GRAY,       ""},
@@ -258,12 +283,15 @@ constexpr std::array<LevelInfo, 8> LEVEL_INFOS{{
     {"[ATTEMPT]", Color::QUANTUM_PURPLE,      ""},
     {"[PERF]",    Color::COSMIC_GOLD,         ""},
     {"[WARN]",    Color::AMBER_YELLOW,        ""},
-    {"[ERROR]",   Color::CRIMSON_MAGENTA,     Color::BLACK_HOLE}
+    {"[ERROR]",   Color::CRIMSON_MAGENTA,     Color::BLACK_HOLE},
+    {"[FAILURE]", Color::RASPBERRY_PINK,      Color::BLACK_HOLE},
+    {"[FATAL]",   Color::RASPBERRY_PINK,      Color::BLACK_HOLE}  // <-- NEW: Fatal level info (same as Failure)
 }};
 
-constexpr std::array<bool, 8> ENABLE_LEVELS{
+constexpr std::array<bool, 10> ENABLE_LEVELS{
     ENABLE_TRACE, ENABLE_DEBUG, ENABLE_INFO, ENABLE_SUCCESS,
-    ENABLE_ATTEMPT, ENABLE_PERF, ENABLE_WARNING, ENABLE_ERROR
+    ENABLE_ATTEMPT, ENABLE_PERF, ENABLE_WARNING, ENABLE_ERROR,
+    ENABLE_FAILURE, ENABLE_FATAL  // <-- NEW: Added to enable array
 };
 
 // ========================================================================
@@ -372,6 +400,7 @@ private:
             {"SUCCESS", EMERALD_GREEN},
             {"ATTEMPT", QUANTUM_PURPLE},
             {"VOID", COSMIC_VOID},
+            {"SPLASH", LILAC_LAVENDER},
             {"MARKER", DIAMOND_SPARKLE}
         };
         if (auto it = categoryColors.find(cat); it != categoryColors.end()) [[likely]] {
@@ -401,6 +430,17 @@ private:
             return std::format("{:>7.1f}h", deltaUs / 3'600'000'000.0);
         }();
 
+        // ---- NEW: wall-clock time (HH:MM:SS) ----
+        const std::string timeStr = []() -> std::string {
+            auto now = std::chrono::system_clock::now();
+            auto tt  = std::chrono::system_clock::to_time_t(now);
+            auto tm  = *std::localtime(&tt);
+            char buf[9];
+            std::strftime(buf, sizeof(buf), "%H:%M:%S", &tm);
+            return std::string(buf);
+        }();
+        // -----------------------------------------
+
         const std::string threadId = []() {
             std::ostringstream oss; oss << std::this_thread::get_id(); return oss.str();
         }();
@@ -408,9 +448,10 @@ private:
         const std::string fileLine = std::format("{}:{}:{}", loc.file_name(), loc.line(), loc.function_name());
 
         // Plain log with alignment
-        const std::string plain = std::format("{:<{}} {:>{}} [{:>{}}] [{:>{}}] {} [{}]\n",
+        const std::string plain = std::format("{:<{}} {:>{}} {:>{}} [{:>{}}] [{:>{}}] {} [{}]\n",
                                              levelStr, LEVEL_WIDTH,
                                              deltaStr, DELTA_WIDTH,
+                                             timeStr,  TIME_WIDTH,
                                              category, CAT_WIDTH,
                                              threadId, THREAD_WIDTH,
                                              formattedMessage,
@@ -420,6 +461,7 @@ private:
         std::ostringstream oss;
         oss << levelBg << std::format("{:<{}}", levelStr, LEVEL_WIDTH) << RESET
             << " " << std::format("{:>{}}", deltaStr, DELTA_WIDTH) << " "
+            << std::format("{:>{}}", timeStr, TIME_WIDTH) << " "
             << catColor << std::format("[{:<{}}]", category, CAT_WIDTH - 2) << RESET
             << " " << LIME_GREEN << std::format("[{:>{}}]", threadId, THREAD_WIDTH - 2) << RESET
             << " " << levelColor << formattedMessage << RESET
@@ -435,7 +477,7 @@ private:
 
 } // namespace Logging
 
-// NOVEMBER 12 2025 — HYPER-VIVID LOGGING PARTY SUPREMACY (SIMPLIFIED)
+// NOVEMBER 12 2025 — HYPER-VIVID LOGGING PARTY SUPREMACY (UPDATED WITH FATAL LOGGING)
 // SYNCHRONOUS • COLORS ETERNAL • COLUMNIZED ALIGNMENT • SEQUENTIAL ORDER
 // =============================================================================
 // AMOURANTH RTX Engine (C) 2025 by Zachary Geurts <gzac5314@gmail.com>
