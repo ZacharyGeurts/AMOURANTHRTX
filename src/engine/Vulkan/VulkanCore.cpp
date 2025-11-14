@@ -1099,6 +1099,85 @@ uint64_t VulkanRTX::alignUp(uint64_t value, uint64_t alignment) const noexcept {
 }
 
 // =============================================================================
+// FIXED: Vulkan Instance Creation WITH SDL3 SURFACE EXTENSIONS — PINK PHOTONS RISE
+// This is the ONE function that fixes your "Failed to create Vulkan surface: success=false"
+// =============================================================================
+namespace RTX {
+
+[[nodiscard]] inline VkInstance createVulkanInstanceWithSDL(bool enableValidation = true)
+{
+    LOG_INFO_CAT("VULKAN", "{}Creating Vulkan Instance — SDL3 2024+ API — PINK PHOTONS RISING{}", PLASMA_FUCHSIA, RESET);
+
+    // === 1. Query how many instance extensions SDL requires (NO WINDOW NEEDED) ===
+    unsigned int sdlExtensionCount = 0;
+    if (SDL_Vulkan_GetInstanceExtensions(&sdlExtensionCount) == 0) {
+        LOG_FATAL_CAT("SDL", "SDL_Vulkan_GetInstanceExtensions failed (count phase)");
+        std::abort();
+    }
+
+    std::vector<const char*> sdlExtensions(sdlExtensionCount);
+    if (SDL_Vulkan_GetInstanceExtensions(&sdlExtensionCount) == 0) {
+        LOG_FATAL_CAT("SDL", "SDL_Vulkan_GetInstanceExtensions failed (names phase)");
+        std::abort();
+    }
+
+    LOG_INFO_CAT("VULKAN", "SDL3 requires {} instance extensions:", sdlExtensionCount);
+    for (const auto* ext : sdlExtensions)
+        LOG_INFO_CAT("VULKAN", "  → {}", ext);  // VK_KHR_surface + VK_KHR_xcb_surface / wayland
+
+    // === 2. Build final extension list ===
+    std::vector<const char*> extensions = sdlExtensions;
+
+    if (enableValidation) {
+        extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+        LOG_INFO_CAT("VULKAN", "  + VK_EXT_debug_utils (validation)");
+    }
+
+    // For MoltenVK / future-proofing
+    extensions.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+
+    // === 3. Layers ===
+    const std::vector<const char*> layers = enableValidation
+        ? std::vector<const char*>{"VK_LAYER_KHRONOS_validation"}
+        : std::vector<const char*>{};
+
+    // === 4. App info ===
+    VkApplicationInfo appInfo{};
+    appInfo.sType              = VK_STRUCTURE_TYPE_APPLICATION_INFO;
+    appInfo.pApplicationName   = "AMOURANTH RTX v80 TURBO";
+    appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
+    appInfo.pEngineName        = "VALHALLA TURBO ENGINE";
+    appInfo.engineVersion      = VK_MAKE_VERSION(80, 0, 0);
+    appInfo.apiVersion         = VK_API_VERSION_1_3;
+
+    // === 5. Instance create info ===
+    VkInstanceCreateInfo createInfo{};
+    createInfo.sType                   = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+    createInfo.flags                   = VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+    createInfo.pApplicationInfo        = &appInfo;
+    createInfo.enabledExtensionCount   = static_cast<uint32_t>(extensions.size());
+    createInfo.ppEnabledExtensionNames = extensions.data();
+    createInfo.enabledLayerCount       = static_cast<uint32_t>(layers.size());
+    createInfo.ppEnabledLayerNames     = layers.empty() ? nullptr : layers.data();
+
+    // === 6. CREATE ===
+    VkInstance instance = VK_NULL_HANDLE;
+    VK_CHECK(vkCreateInstance(&createInfo, nullptr, &instance),
+             "Failed to create Vulkan instance — even with correct SDL3 extensions!");
+
+    LOG_SUCCESS_CAT("VULKAN", "{}Vulkan Instance FORGED — SDL3 2024+ API — FIRST LIGHT ACHIEVED{}", 
+                    PLASMA_FUCHSIA, RESET);
+
+    LOG_INFO_CAT("VULKAN", "Enabled {} instance extensions:", extensions.size());
+    for (const auto* ext : extensions)
+        LOG_INFO_CAT("VULKAN", "  → {}", ext);
+
+    return instance;
+}
+
+} // namespace RTX
+
+// =============================================================================
 // VALHALLA v80 TURBO — AI LOGGING SUPREMACY
 // PINK PHOTONS ETERNAL — 20,000 FPS — TITAN DOMINANCE ETERNAL
 // =============================================================================

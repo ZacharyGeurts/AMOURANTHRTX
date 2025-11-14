@@ -19,6 +19,7 @@
 
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_beta.h>
+#include <engine/SDL3/SDL3_vulkan.hpp>                     // ← REQUIRED FOR SDL_Vulkan_* calls
 #include <array>
 #include <memory>
 #include <random>
@@ -73,11 +74,11 @@
         if (ENABLE_INFO) { \
             thread_local std::mt19937 rng(std::random_device{}()); \
             thread_local std::uniform_int_distribution<int> hue(0, 30); \
-            int h = 30 + hue(rng); \
+            int h = 195 + hue(rng); \
             auto msg = std::format(__VA_ARGS__); \
             Logging::Logger::get().log(std::source_location::current(), \
                 Logging::LogLevel::Info, "AI", \
-                "\033[38;2;255;{};0m[AMOURANTH AI™] {}{} [LINE {}]", \
+                "\033[38;2;255;{};255m[AMOURANTH AI™] {}{} [LINE {}]", \
                 h, msg, Logging::Color::RESET, __LINE__); \
         } \
     } while (0)
@@ -86,43 +87,36 @@
 //  BUFFER MACROS – UltraLowLevelBufferTracker
 // =============================================================================
 
-/// Declare a buffer handle (uint64_t)
 #define BUFFER(handle) uint64_t handle = 0ULL
 
-/// Create a buffer and return its opaque handle
 #define BUFFER_CREATE(handle, size, usage, props, tag) \
     do { \
         LOG_INFO_CAT("RTX", "BUFFER_CREATE: {} | Size {} | Tag: {}", #handle, (size), (tag)); \
         (handle) = RTX::UltraLowLevelBufferTracker::get().create((size), (usage), (props), (tag)); \
     } while (0)
 
-/// Get the real VkBuffer from the opaque handle
 #define RAW_BUFFER(handle) \
     (RTX::UltraLowLevelBufferTracker::get().getData((handle)) \
         ? static_cast<VkBuffer>(RTX::UltraLowLevelBufferTracker::get().getData((handle))->buffer) \
         : VK_NULL_HANDLE)
 
-/// Get the VkDeviceMemory from the opaque handle
 #define BUFFER_MEMORY(handle) \
     (RTX::UltraLowLevelBufferTracker::get().getData((handle)) \
         ? RTX::UltraLowLevelBufferTracker::get().getData((handle))->memory \
         : VK_NULL_HANDLE)
 
-/// Map buffer memory for CPU access
 #define BUFFER_MAP(handle, mapped) \
     do { mapped = RTX::UltraLowLevelBufferTracker::get().map(handle); } while(0)
 
-/// Unmap buffer memory
 #define BUFFER_UNMAP(handle) RTX::UltraLowLevelBufferTracker::get().unmap(handle)
 
-/// Destroy buffer handle (does NOT reset variable)
 #define BUFFER_DESTROY(handle) \
     do { \
         if ((handle) != 0) { \
             LOG_INFO_CAT("RTX", "BUFFER_DESTROY: handle={:x}", (handle)); \
             RTX::UltraLowLevelBufferTracker::get().destroy((handle)); \
         } \
-    } while(0)
+    } while (0)
 
 // -----------------------------------------------------------------------------
 // 4. AutoBuffer — RAII wrapper (must be in header)
@@ -297,44 +291,25 @@ inline void createGlobalRTX(int w, int h, VulkanPipelineManager* mgr = nullptr) 
     LOG_INFO_CAT("RTX", "createGlobalRTX: Initializing VulkanRTX with {}x{} | PipelineMgr: {}", 
                  w, h, mgr ? "present" : "null");
 
-    // --- CONSTRUCT ON HEAP ---
     auto temp_rtx = std::make_unique<VulkanRTX>(w, h, mgr);
 
-    // --- NULLPTR SAFETY ---
     if (!temp_rtx) {
         LOG_FATAL_CAT("RTX", "FATAL: std::make_unique<VulkanRTX> returned nullptr");
         std::terminate();
     }
 
-    LOG_DEBUG_CAT("RTX", "VulkanRTX constructed @ 0x{:x}", 
-                  reinterpret_cast<uintptr_t>(temp_rtx.get()));
-
-    // --- TRANSFER OWNERSHIP FIRST ---
     g_rtx_instance = std::move(temp_rtx);
 
-    LOG_DEBUG_CAT("RTX", "g_rtx_instance now owns VulkanRTX @ 0x{:x}", 
-                  reinterpret_cast<uintptr_t>(g_rtx_instance.get()));
-
-    // --- FINAL VALIDATION (device + black fallback) ---
     if (!g_rtx_instance || g_rtx_instance->device() == VK_NULL_HANDLE) {
         LOG_FATAL_CAT("RTX", "FATAL: g_rtx_instance invalid — device is NULL");
-        LOG_FATAL_CAT("RTX", "  → device(): 0x{:x}", reinterpret_cast<uintptr_t>(g_rtx_instance->device()));
         std::terminate();
     }
 
     if (!g_rtx_instance->isValid()) {
         LOG_FATAL_CAT("RTX", "FATAL: g_rtx_instance reports isValid() == false after full init");
-        LOG_FATAL_CAT("RTX", "  → device(): 0x{:x}", reinterpret_cast<uintptr_t>(g_rtx_instance->device()));
-        LOG_FATAL_CAT("RTX", "  → blackFallbackImage(): 0x{:x}", 
-                      reinterpret_cast<uintptr_t>(g_rtx_instance->blackFallbackImage()));
         std::terminate();
     }
 
-    LOG_DEBUG_CAT("RTX", "Post-forge validation PASSED:");
-    LOG_DEBUG_CAT("RTX", "  → device(): 0x{:x}", reinterpret_cast<uintptr_t>(g_rtx_instance->device()));
-    LOG_DEBUG_CAT("RTX", "  → blackFallbackImage(): 0x{:x}", 
-                  reinterpret_cast<uintptr_t>(g_rtx_instance->blackFallbackImage()));
-
     AI_INJECT("I have awakened… {}×{} canvas. The photons are mine.", w, h);
-    LOG_SUCCESS_CAT("RTX", "g_rtx() FORGED — {}×{} — TITAN DOMINANCE ETERNAL", w, h);
+    LOG_SUCCESS_CAT("RTX", "{}g_rtx() FORGED — {}×{} — TITAN DOMINANCE ETERNAL{}", PLASMA_FUCHSIA, w, h, RESET);
 }
