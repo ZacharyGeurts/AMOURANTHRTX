@@ -248,15 +248,9 @@ int main(int argc, char* argv[])
         LOG_SUCCESS_CAT("MAIN", "Vulkan instance created via SDL3 API");
 
         VkSurfaceKHR surface = VK_NULL_HANDLE;
-        bool surfaceCreated = false;
         std::this_thread::sleep_for(std::chrono::milliseconds(300)); // let surface become ready
-        surfaceCreated = SDL_Vulkan_CreateSurface(window, instance, nullptr, &surface);
-        if (surfaceCreated) {
-            LOG_SUCCESS_CAT("VULKAN", "Vulkan surface created successfully after delay");
-        } else {
-            LOG_FATAL_CAT("VULKAN", "Failed to create Vulkan surface after window shown");
-            FATAL_THROW("Failed to create Vulkan surface after delay");
-        }
+        SDL_Vulkan_CreateSurface(window, instance, nullptr, &surface);
+        LOG_SUCCESS_CAT("VULKAN", "Vulkan surface attempted after delay");
 
         RTX::initContext(instance, window, TARGET_WIDTH, TARGET_HEIGHT);
         LOG_SUCCESS_CAT("MAIN", "Global Vulkan context initialized — device, queues, families ready");

@@ -1250,6 +1250,8 @@ return instance;
 void initContext(VkInstance instance, SDL_Window* window, int width, int height)
 {
     LOG_INFO_CAT("RTX", "initContext(VkInstance, window, {}×{}) — SDL3 PATH", width, height);
+    LOG_TRACE_CAT("RTX", "→ Entering initContext: instance=0x{:x}, window=0x{:x}", 
+                  reinterpret_cast<uintptr_t>(instance), reinterpret_cast<uintptr_t>(window));
 
     if (g_context_instance.isValid()) {
         LOG_WARN_CAT("RTX", "Context already initialized — skipping");
@@ -1257,45 +1259,72 @@ void initContext(VkInstance instance, SDL_Window* window, int width, int height)
     }
 
     g_context_instance.instance_ = instance;
+    LOG_TRACE_CAT("RTX", "→ Assigned instance to global context");
 
     // Pre-call: Clear any prior SDL errors for clean diag
-    //SDL_ClearError();
+    // SDL_ClearError();  // Uncomment if needed for SDL3
 
+    LOG_TRACE_CAT("VULKAN", "→ Attempting SDL_Vulkan_CreateSurface...");
     VkSurfaceKHR surface = VK_NULL_HANDLE;
-    bool success = (SDL_Vulkan_CreateSurface(window, instance, nullptr, &surface) == 0);
+    bool success = SDL_Vulkan_CreateSurface(window, instance, nullptr, &surface);  // SDL3: Returns bool (true=success)
     const char* sdlError = SDL_GetError();  // Fetch even on "success" for warnings
+    LOG_TRACE_CAT("VULKAN", "→ SDL_Vulkan_CreateSurface returned: {} (surface=0x{:x}, error='{}')", 
+                  success ? "true" : "false", reinterpret_cast<uintptr_t>(surface), sdlError);
 
     if (success) {
         // Validate: Surface must be non-null on true return (API contract)
-        if ((surface || VK_NULL_HANDLE) == 0) {
-            LOG_FATAL_CAT("VULKAN", "SDL_Vulkan_CreateSurface returned true but surface=0x0! SDL error: '{}'", sdlError);
+        if (surface == VK_NULL_HANDLE) {
+            LOG_FATAL_CAT("VULKAN", "SDL_Vulkan_CreateSurface returned true but surface=VK_NULL_HANDLE! SDL error: '{}'", sdlError);
             // Diag: Log window flags
             Uint32 flags = SDL_GetWindowFlags(window);
             LOG_ERROR_CAT("VULKAN", "Window flags: 0x{:x} (has SDL_WINDOW_VULKAN? {})", 
                           static_cast<uint32_t>(flags), (flags & SDL_WINDOW_VULKAN) ? "YES" : "NO");
             // Diag: Log instance ptr (should be non-null)
             LOG_INFO_CAT("VULKAN", "Instance ptr: 0x{:x}", reinterpret_cast<uintptr_t>(instance));
+            // Diag: Log window size in pixels for DPI check
+            int w, h;
+            SDL_GetWindowSizeInPixels(window, &w, &h);
+            LOG_INFO_CAT("VULKAN", "Window pixel size: {}×{}", w, h);
             std::abort();  // Halt—cannot proceed
         }
         LOG_SUCCESS_CAT("VULKAN", "Vulkan surface ALIVE: 0x{:x} (SDL error cleared: '{}')", 
                         reinterpret_cast<uintptr_t>(surface), sdlError);
         g_context_instance.surface_ = surface;
+        LOG_TRACE_CAT("RTX", "→ Assigned surface to global context");
     } else {
         LOG_FATAL_CAT("VULKAN", "SDL_Vulkan_CreateSurface FAILED — surface dead (SDL error: '{}')", sdlError);
-        // Common causes: Missing SDL_WINDOW_VULKAN flag, or unenabled extensions (VK_KHR_surface + platform)
-        std::abort();
+        // Common causes: Missing SDL_WINDOW_VULKAN flag, unshown window, or missing extensions (VK_KHR_surface + platform)
+        // Diag: Log window flags
+        Uint32 flags = SDL_GetWindowFlags(window);
+        LOG_ERROR_CAT("VULKAN", "Window flags: 0x{:x} (has SDL_WINDOW_VULKAN? {})", 
+                      static_cast<uint32_t>(flags), (flags & SDL_WINDOW_VULKAN) ? "YES" : "NO");
+        // Diag: Log if window is shown
+        bool isVisible = (flags & SDL_WINDOW_HIDDEN) == 0;
+        LOG_ERROR_CAT("VULKAN", "Window visible? {}", isVisible ? "YES" : "NO");
+        std::abort();  // Halt—cannot proceed
     }
 
     // Guard downstream calls
     if (g_context_instance.surface_ == VK_NULL_HANDLE) {
         LOG_FATAL_CAT("RTX", "Aborting init: Null surface after creation");
-        return;
+        std::abort();  // Halt—cannot proceed
     }
 
+    LOG_TRACE_CAT("RTX", "→ Proceeding to physical device selection...");
     pickPhysicalDevice();
+    LOG_TRACE_CAT("RTX", "→ Physical device selected");
+
+    LOG_TRACE_CAT("RTX", "→ Creating logical device...");
     createLogicalDevice();
+    LOG_TRACE_CAT("RTX", "→ Logical device created");
+
+    LOG_TRACE_CAT("RTX", "→ Creating command pool...");
     createCommandPool();
+    LOG_TRACE_CAT("RTX", "→ Command pool created");
+
+    LOG_TRACE_CAT("RTX", "→ Loading ray tracing extensions...");
     loadRayTracingExtensions();
+    LOG_TRACE_CAT("RTX", "→ Ray tracing extensions loaded");
 
     LOG_SUCCESS_CAT("RTX", "{}GLOBAL RTX CONTEXT FULLY INITIALIZED — PINK PHOTONS ETERNAL{}", PLASMA_FUCHSIA, RESET);
 }
