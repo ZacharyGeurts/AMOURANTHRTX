@@ -32,6 +32,20 @@
 // =============================================================================
 //  VULKAN ERROR CHECKING MACROS
 // =============================================================================
+inline static VKAPI_ATTR VkBool32 VKAPI_CALL VulkanDebugCallback(
+    VkDebugUtilsMessageSeverityFlagBitsEXT      severity,
+    VkDebugUtilsMessageTypeFlagsEXT             /*type*/,
+    const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
+    void*                                       /*pUserData*/)
+{
+    if (severity >= VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT) {
+        std::cerr << "[VULKAN-VALIDATION] " << pCallbackData->pMessage << std::endl;
+    } else if (severity <= VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT) {
+        std::cerr << "[VULKAN-DEBUG] " << pCallbackData->pMessage << std::endl;
+    }
+    return VK_FALSE;
+}
+
 
 #define VK_CHECK(call, msg) \
     do { \

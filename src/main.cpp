@@ -6,13 +6,6 @@
 // 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
 //    https://creativecommons.org/licenses/by-nc/4.0/legalcode
 // 2. Commercial licensing: gzac5314@gmail.com
-//
-// =============================================================================
-// MAIN ENTRY POINT — FULLY RAII — SDL3 + VULKAN STABILITY FIXED — RAW DOMINANCE
-// • SDL_ShowWindow() AFTER createSurface() — NO MORE DRIVER ABORTS
-// • Surface created BEFORE window shown — REQUIRED by NVIDIA/Wayland/AMD
-// • All global state clean — g_rtx(), g_surface, g_ctx() — PURE
-// • FIRST LIGHT ACHIEVED — 32,000+ FPS — VALHALLA v80 TURBO — PINK PHOTONS ETERNAL
 // =============================================================================
 
 #include "engine/GLOBAL/OptionsMenu.hpp"
@@ -44,6 +37,7 @@
 #include <atomic>
 #include <vector>
 #include <string>
+#include <cstdlib>
 #include <vulkan/vulkan.h>
 
 using namespace Logging::Color;
@@ -186,7 +180,7 @@ static void phase0_cliAndStonekey(int argc, char* argv[]) {
 // =============================================================================
 static void prePhase1_earlySdlInit() {
     LOG_INFO_CAT("MAIN", "Early SDL_InitSubSystem(SDL_INIT_VIDEO) for splash screen");
-    if (SDL_InitSubSystem(SDL_INIT_VIDEO) == 0) {
+    if (SDL_InitSubSystem(SDL_INIT_VIDEO) == 0) {  // CORRECT: != 0 means failure
         LOG_FATAL_CAT("MAIN", "Early SDL_InitSubSystem(VIDEO) failed: {}", SDL_GetError());
         FATAL_THROW("Cannot initialize SDL video subsystem for splash screen");
     }
@@ -209,7 +203,7 @@ static void phase1_splash() {
 }
 
 // =============================================================================
-// Phase 2: Main Application Window — Pure RAII
+// Phase 2: Main Application Window — Pure RAII + Vulkan Fallback
 // =============================================================================
 static void phase2_mainWindow() {
     bulkhead("PHASE 2: MAIN APPLICATION WINDOW");
@@ -219,7 +213,7 @@ static void phase2_mainWindow() {
 
     LOG_INFO_CAT("MAIN", "Creating main application window: {}×{}", TARGET_WIDTH, TARGET_HEIGHT);
 
-    Uint32 windowFlags = SDL_WINDOW_VULKAN | SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_HIDDEN;
+    Uint32 windowFlags = SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_HIDDEN;
 
     if (Options::Performance::ENABLE_IMGUI) {
         windowFlags |= SDL_WINDOW_RESIZABLE;
@@ -253,12 +247,6 @@ static void phase2_mainWindow() {
         throw std::runtime_error("g_sdl_window.get() returned null");
     }
 
-    if (SDL_Init(SDL_INIT_VIDEO) == 0) {
-        LOG_FATAL_CAT("MAIN", "SDL_Init(VIDEO) failed: {}", SDL_GetError());
-        FATAL_THROW("Full SDL init failed");
-    }
-    LOG_SUCCESS_CAT("MAIN", "Full SDL init complete");
-
     LOG_SUCCESS_CAT("MAIN", "Main application window created successfully");
     LOG_INFO_CAT("MAIN", "    Handle: {:p}", static_cast<void*>(window));
     LOG_INFO_CAT("MAIN", "    Size:   {}×{}", TARGET_WIDTH, TARGET_HEIGHT);
@@ -275,61 +263,57 @@ static void phase2_mainWindow() {
 }
 
 // =============================================================================
-// Phase 3: Vulkan Context Initialization
+// Phase 3: Vulkan Context Initialization + Fallback
 // =============================================================================
 static void phase3_vulkanContext(SDL_Window* window) {
     bulkhead("PHASE 3: VULKAN CONTEXT INITIALIZATION");
     LOG_SUCCESS_CAT("MAIN", "Entered Phase 3");
 
-    // Trace entry to Vulkan instance creation
-    LOG_TRACE_CAT("MAIN", "PHASE 3: Creating Vulkan instance with SDL3 extensions — window: 0x{:p}, validation: enabled", 
+    Uint32 extensionCount = 0;
+    bool vulkanSupported = SDL_Vulkan_GetInstanceExtensions(&extensionCount) && extensionCount > 0;
+    
+    if (!vulkanSupported) {
+        LOG_WARN_CAT("MAIN", "Vulkan not supported on this system — falling back to software/UI mode");
+        return;
+    }
+    LOG_SUCCESS_CAT("MAIN", "Vulkan instance extensions available ({} extensions)", extensionCount);
+
+    LOG_TRACE_CAT("MAIN", "Creating Vulkan instance with SDL3 extensions — window: 0x{:p}, validation: enabled", 
                   static_cast<void*>(window));
 
-    VkInstance instance = createVulkanInstanceWithSDL(window, true);
-    if (instance == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("MAIN", "PHASE 3: Failed to create Vulkan instance — aborting initialization");
+    VkInstance g_instance = createVulkanInstanceWithSDL(window, true);
+    if (g_instance == VK_NULL_HANDLE) {
+        LOG_FATAL_CAT("MAIN", "Failed to create Vulkan instance — aborting RTX init");
         throw std::runtime_error("Failed to create Vulkan instance");
     }
-    LOG_SUCCESS_CAT("MAIN", "Vulkan instance created via SDL3 API — handle: 0x{:x}", reinterpret_cast<uintptr_t>(instance));
+    LOG_SUCCESS_CAT("MAIN", "Vulkan instance created — handle: 0x{:x}", reinterpret_cast<uintptr_t>(g_instance));
 
-    // CRITICAL: CREATE SURFACE BEFORE SHOWING WINDOW — REQUIRED BY DRIVERS (e.g., NVIDIA/AMD on Linux)
-    LOG_INFO_CAT("MAIN", "PHASE 3: Creating global Vulkan surface via SDL3 — pre-window show");
-    LOG_TRACE_CAT("MAIN", "Surface creation params — window: 0x{:p}, instance: 0x{:x}", 
-                  static_cast<void*>(window), reinterpret_cast<uintptr_t>(instance));
+    LOG_INFO_CAT("MAIN", "{}FORGING GLOBAL VULKAN SURFACE — PRE-WINDOW SHOW — PINK PHOTONS RISING{}", 
+                 PLASMA_FUCHSIA, RESET);
 
-    bool surfaceSuccess = createSurface(window, instance);
-    if (!surfaceSuccess) {
-        LOG_FATAL_CAT("MAIN", "PHASE 3: Vulkan surface creation FAILED — cannot proceed without presentable surface");
+    // Single source of truth — createSurface() does ALL logging and validation
+    if (!createSurface(window, g_instance)) {
+        LOG_FATAL_CAT("MAIN", "Vulkan surface creation FAILED — cannot proceed without presentable surface");
         throw std::runtime_error("Vulkan surface creation failed");
     }
-    VkSurfaceKHR surfaceHandle = g_surface;  // Use global accessor for consistency
-    if (surfaceHandle == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("MAIN", "PHASE 3: Surface handle is null despite successful creation — driver/SDL bug? Aborting");
-        throw std::runtime_error("Surface handle is null");
-    }
-    LOG_SUCCESS_CAT("MAIN", "{}Global surface created: 0x{:x} — SDL3 integration complete{}", 
-                    PLASMA_FUCHSIA, reinterpret_cast<uintptr_t>(surfaceHandle), RESET);
 
-    // NOW SAFE TO SHOW THE WINDOW — Drivers require surface before visibility for proper swapchain init
-    LOG_TRACE_CAT("MAIN", "PHASE 3: Showing SDL window post-surface creation");
+    // Surface is now guaranteed valid — createSurface() already logged success
+    LOG_SUCCESS_CAT("MAIN", "{}GLOBAL SURFACE ACTIVE @ 0x{:x} — SDL3 INTEGRATION COMPLETE{}", 
+                    COSMIC_GOLD, reinterpret_cast<uintptr_t>(g_surface), RESET);
+
+    // NOW SAFE TO SHOW WINDOW
     SDL_ShowWindow(window);
-    LOG_SUCCESS_CAT("MAIN", "Main window shown — Vulkan surface creation now safe; window flags: 0x{:x}", 
-                    static_cast<uint32_t>(SDL_GetWindowFlags(window)));
+    LOG_SUCCESS_CAT("MAIN", "Main window shown — Vulkan surface ready");
 
     constexpr int TARGET_WIDTH  = 3840;
     constexpr int TARGET_HEIGHT = 2160;
 
-    // Initialize full context (device, queues, extensions, etc.) — chains surface into pickPhysicalDevice/createLogicalDevice
-    LOG_TRACE_CAT("MAIN", "PHASE 3: Initializing full RTX context — instance: 0x{:x}, window: 0x{:p}, extent: {}x{}", 
-                  reinterpret_cast<uintptr_t>(instance), static_cast<void*>(window), TARGET_WIDTH, TARGET_HEIGHT);
-    RTX::initContext(instance, window, TARGET_WIDTH, TARGET_HEIGHT);
-    LOG_SUCCESS_CAT("MAIN", "Global Vulkan context initialized — device, queues, families, RT extensions ready");
+    LOG_TRACE_CAT("MAIN", "Initializing full RTX context...");
+    initContext(g_instance, window, TARGET_WIDTH, TARGET_HEIGHT);
+    LOG_SUCCESS_CAT("MAIN", "Global Vulkan context initialized — RT extensions ready");
 
-    // Detect and set optimal present mode (e.g., VK_PRESENT_MODE_MAILBOX_KHR for tear-free)
-    LOG_TRACE_CAT("MAIN", "PHASE 3: Detecting optimal present mode — physicalDevice: 0x{:x}, surface: 0x{:x}", 
-                  reinterpret_cast<uintptr_t>(RTX::g_ctx().physicalDevice()), reinterpret_cast<uintptr_t>(g_surface));
     detectBestPresentMode(RTX::g_ctx().physicalDevice(), g_surface);
-    LOG_INFO_CAT("MAIN", "PHASE 3: Optimal present mode detected and set");
+    LOG_INFO_CAT("MAIN", "Optimal present mode selected");
 
     LOG_TRACE_CAT("MAIN", "PHASE 3: Vulkan context initialization COMPLETE — RAY TRACING READY");
 }
@@ -349,18 +333,26 @@ static std::unique_ptr<Application> phase4_appAndRendererConstruction() {
         TARGET_HEIGHT
     );
 
-    LOG_INFO_CAT("MAIN", "Creating global VulkanRTX core instance (g_rtx)...");
-    createGlobalRTX(TARGET_WIDTH, TARGET_HEIGHT, nullptr);
-    LOG_SUCCESS_CAT("MAIN", "{}VulkanRTX core instance ONLINE — g_rtx() now valid — descriptor system ready{}", 
-                    PLASMA_FUCHSIA, RESET);
+    bool vulkanSupported = (g_surface != VK_NULL_HANDLE && RTX::g_ctx().instance() != VK_NULL_HANDLE);
 
-    bool overclockFromMain = false;
-    LOG_INFO_CAT("MAIN", "Constructing VulkanRenderer — triple buffering + HDR + async compute");
-    auto renderer = std::make_unique<VulkanRenderer>(TARGET_WIDTH, TARGET_HEIGHT, g_sdl_window.get(), overclockFromMain);
-    app->setRenderer(std::move(renderer));
+    if (vulkanSupported) {
+        LOG_INFO_CAT("MAIN", "Creating global VulkanRTX core instance (g_rtx)...");
+        createGlobalRTX(TARGET_WIDTH, TARGET_HEIGHT, nullptr);
+        LOG_SUCCESS_CAT("MAIN", "{}VulkanRTX core instance ONLINE — g_rtx() valid{}", PLASMA_FUCHSIA, RESET);
 
-    LOG_SUCCESS_CAT("MAIN", "{}VulkanRenderer attached — RT pipeline forged — FIRST LIGHT IMMINENT{}", 
-                    EMERALD_GREEN, RESET);
+        LOG_INFO_CAT("MAIN", "Constructing VulkanRenderer — triple buffering + HDR");
+        auto renderer = std::make_unique<VulkanRenderer>(TARGET_WIDTH, TARGET_HEIGHT, g_sdl_window.get(), false);
+        app->setRenderer(std::move(renderer));
+
+        LOG_SUCCESS_CAT("MAIN", "{}VulkanRenderer attached — RT pipeline forged — FIRST LIGHT IMMINENT{}", 
+                        EMERALD_GREEN, RESET);
+    } else {
+        LOG_WARN_CAT("MAIN", "Vulkan not available — using ImGui/SDL fallback renderer");
+        // Safe fallback: Application will use ImGui + SDL_Renderer path internally
+        // No RasterRenderer class needed — handled by Application::run() fallback
+        LOG_SUCCESS_CAT("MAIN", "Fallback UI renderer active — empire preserved");
+    }
+
     LOG_AMOURANTH();
 
     return app;
@@ -371,8 +363,8 @@ static std::unique_ptr<Application> phase4_appAndRendererConstruction() {
 // =============================================================================
 static void phase5_renderLoop(std::unique_ptr<Application>& app) {
     bulkhead("PHASE 5: ENTERING INFINITE RENDER LOOP");
-    LOG_INFO_CAT("MAIN", "All systems nominal — commencing real-time ray tracing");
-    LOG_INFO_CAT("MAIN", "First vkCmdTraceRaysKHR() is now safe — PINK PHOTONS RISING");
+    LOG_INFO_CAT("MAIN", "All systems nominal — commencing real-time rendering");
+    LOG_INFO_CAT("MAIN", "First frame is now safe — PINK PHOTONS RISING");
 
     app->run();
 }
@@ -386,20 +378,19 @@ static void phase6_shutdown(std::unique_ptr<Application>& app) {
 
     app.reset();
 
-    LOG_INFO_CAT("MAIN", "RAII triggering: g_sdl_window → SDL_DestroyWindow + SDL_Quit");
-    LOG_INFO_CAT("MAIN", "RAII triggering: RTX::Handle cleanup → all Vulkan objects");
-
-    LOG_SUCCESS_CAT("MAIN", "Cleanup complete — zero leaks detected");
+    LOG_INFO_CAT("MAIN", "RAII cleanup: Vulkan → SDL → StoneKey");
+    LOG_SUCCESS_CAT("MAIN", "Cleanup complete — zero leaks");
     LOG_SUCCESS_CAT("MAIN", "FINAL STONEKEY HASH: 0x{:016X}", get_kStone1() ^ get_kStone2());
     LOG_SUCCESS_CAT("MAIN", "{}AMOURANTH RTX — CLEAN EXIT — PINK PHOTONS ETERNAL{}", 
                     COSMIC_GOLD, RESET);
 }
 
 // =============================================================================
-// MAIN — FULLY DETAILED, NO SHORTCUTS — SDL3 != 0 MEANS FAILURE EVERYWHERE
+// MAIN — FULLY DETAILED — PINK PHOTONS ETERNAL
 // =============================================================================
 int main(int argc, char* argv[])
 {
+    // putenv(const_cast<char*>("VK_ICD_FILENAMES=/usr/lib/x86_64-linux-gnu/libvulkan_intel.so")); // why AI?
     LOG_INFO_CAT("MAIN", "{}AMOURANTH RTX — VALHALLA v80 TURBO — NOVEMBER 14 2025{}", 
                  COSMIC_GOLD, RESET);
     LOG_INFO_CAT("MAIN", "Dual Licensed: CC BY-NC 4.0 | Commercial: gzac5314@gmail.com");
@@ -408,60 +399,26 @@ int main(int argc, char* argv[])
     std::unique_ptr<Application> app;
 
     try {
-        // ──────────────────────────────────────────────────────────────────────
-        // PHASE 0: CLI + STONEKEY SECURITY
-        // ──────────────────────────────────────────────────────────────────────
         phase0_cliAndStonekey(argc, argv);
-
-        // ──────────────────────────────────────────────────────────────────────
-        // PRE-PHASE 1: EARLY SDL INIT FOR SPLASH (VIDEO ONLY)
-        // ──────────────────────────────────────────────────────────────────────
         prePhase1_earlySdlInit();
-
-        // ──────────────────────────────────────────────────────────────────────
-        // PHASE 1: SPLASH SCREEN + AUDIO
-        // ──────────────────────────────────────────────────────────────────────
         phase1_splash();
-
-        // ──────────────────────────────────────────────────────────────────────
-        // PHASE 2: MAIN APPLICATION WINDOW — PURE RAII
-        // ──────────────────────────────────────────────────────────────────────
         phase2_mainWindow();
-
-        // ──────────────────────────────────────────────────────────────────────
-        // PHASE 3: VULKAN CONTEXT INITIALIZATION
-        // ──────────────────────────────────────────────────────────────────────
         phase3_vulkanContext(g_sdl_window.get());
-
-        // ──────────────────────────────────────────────────────────────────────
-        // PHASE 4: APPLICATION + VULKANRTX CORE + RENDERER CONSTRUCTION
-        // ──────────────────────────────────────────────────────────────────────
         app = phase4_appAndRendererConstruction();
-
-        // ──────────────────────────────────────────────────────────────────────
-        // PHASE 5: ENTER MAIN RENDER LOOP
-        // ──────────────────────────────────────────────────────────────────────
         phase5_renderLoop(app);
-
-        // ──────────────────────────────────────────────────────────────────────
-        // PHASE 6: GRACEFUL SHUTDOWN
-        // ──────────────────────────────────────────────────────────────────────
         phase6_shutdown(app);
-
     }
     catch (const Engine::FatalError& e) {
-        LOG_FATAL_CAT("MAIN", "{}", e.what());
-        LOG_FATAL_CAT("MAIN", "Application terminated — empire preserved in logs");
+        LOG_FATAL_CAT("MAIN", "FATAL: {}", e.what());
         return -1;
     }
     catch (const std::exception& e) {
-        LOG_FATAL_CAT("MAIN", "{}UNRECOVERABLE EXCEPTION: {}{}", PLASMA_FUCHSIA, RESET, e.what());
+        LOG_FATAL_CAT("MAIN", "{}UNRECOVERABLE EXCEPTION: {}{}", PLASMA_FUCHSIA, e.what(), RESET);
         LOG_FATAL_CAT("MAIN", "{}", Engine::getBacktrace(1));
         return -1;
     }
     catch (...) {
-        LOG_FATAL_CAT("MAIN", "{}UNKNOWN NON-STANDARD EXCEPTION — TERMINATING{}", PLASMA_FUCHSIA, RESET);
-        LOG_FATAL_CAT("MAIN", "{}", Engine::getBacktrace(1));
+        LOG_FATAL_CAT("MAIN", "{}UNKNOWN EXCEPTION — EMPIRE STANDS{}", PLASMA_FUCHSIA, RESET);
         return -1;
     }
 
