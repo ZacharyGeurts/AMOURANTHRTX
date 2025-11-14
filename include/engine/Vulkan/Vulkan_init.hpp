@@ -78,15 +78,12 @@ inline void initSurface(void* window) {
         GlobalCamera::deobfuscate(reinterpret_cast<uint64_t>(ctx().instance_))
     );
 
-    if (!SDL_Vulkan_CreateSurface(static_cast<SDL_Window*>(window), deobfInstance, nullptr, &rawSurface)) {
-        LOG_ERROR_CAT("VULKAN", "{}SDL_Vulkan_CreateSurface failed: {}{}", CRIMSON_MAGENTA, SDL_GetError(), RESET);
-        throw std::runtime_error("Failed to create Vulkan surface");
+    if (SDL_Vulkan_CreateSurface(static_cast<SDL_Window*>(window), deobfInstance, &rawSurface)) {
+        LOG_SUCCESS_CAT("VULKAN", "SDL_Vulkan_CreateSurface success — surface ALIVE: 0x{:x}", static_cast<uintptr_t>(rawSurface));
+    } else {
+        const char* error = SDL_GetError();
+        LOG_ERROR_CAT("VULKAN", "SDL_Vulkan_CreateSurface failed: {}", error ? error : "Unknown SDL error");
     }
-
-    ctx().surface_ = reinterpret_cast<VkSurfaceKHR>(
-        GlobalCamera::obfuscate(reinterpret_cast<uint64_t>(rawSurface))
-    );
-}
 
 inline VkPhysicalDevice findPhysicalDevice(VkInstance instance,
                                           VkSurfaceKHR surface,

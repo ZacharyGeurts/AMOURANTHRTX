@@ -241,6 +241,7 @@ int main(int argc, char* argv[])
         // PHASE 3: VULKAN CONTEXT INITIALIZATION
         // ──────────────────────────────────────────────────────────────────────
         bulkhead("PHASE 3: VULKAN CONTEXT INITIALIZATION");
+		LOG_SUCCESS_CAT("MAIN", "Entered Phase 3");
 
         VkInstance instance = RTX::createVulkanInstanceWithSDL(true);
         LOG_SUCCESS_CAT("MAIN", "Vulkan instance created via SDL3 API");

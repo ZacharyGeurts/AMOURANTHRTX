@@ -1105,28 +1105,38 @@ namespace RTX {
 // =============================================================================
 [[nodiscard]] VkInstance createVulkanInstanceWithSDL(bool enableValidation)
 {
+    LOG_TRACE_CAT("VULKAN", "createVulkanInstanceWithSDL — START (validation={})", enableValidation ? "enabled" : "disabled");
     LOG_INFO_CAT("VULKAN", "{}FORGING VULKAN INSTANCE — SDL3 2024+ API — PINK PHOTONS RISING{}", PLASMA_FUCHSIA, RESET);
 
+    // Pre-call: Clear SDL errors for clean diagnostics
+    SDL_ClearError();
+
+    // Query SDL3 for required Vulkan instance extensions
+    LOG_TRACE_CAT("VULKAN", "Querying SDL3 for instance extensions...");
     Uint32 sdlCount = 0;  // Use Uint32 for SDL3 compatibility
     const char * const * sdlExtensions = SDL_Vulkan_GetInstanceExtensions(&sdlCount);
-    if (sdlExtensions == nullptr) {
-        LOG_FATAL_CAT("SDL", "SDL_Vulkan_GetInstanceExtensions failed (returned NULL)");
-        std::abort();
+    const char* sdlErr = SDL_GetError();  // Fetch post-call
+    if (sdlExtensions == nullptr || sdlCount == 0) {
+        LOG_WARN_CAT("VULKAN", "SDL_Vulkan_GetInstanceExtensions returned null/0 count (SDL error: '{}') — surface may fail; proceeding with manual exts", sdlErr ? sdlErr : "None");
+        sdlCount = 0;
+    } else {
+        LOG_DEBUG_CAT("VULKAN", "SDL3 reported {} extensions (no SDL error: '{}')", sdlCount, sdlErr ? sdlErr : "None");
     }
 
     std::vector<const char*> extensions;
     if (sdlCount > 0) {
         // Copy SDL's extensions into our vector
         extensions.assign(sdlExtensions, sdlExtensions + sdlCount);
-        LOG_INFO_CAT("VULKAN", "SDL3 reports {} instance extensions:", sdlCount);
-        for (const char* ext : extensions) {
-            LOG_INFO_CAT("VULKAN", "  → {}", ext ? ext : "<null extension pointer>");
+        LOG_SUCCESS_CAT("VULKAN", "SDL3 acquired {} required instance extensions", sdlCount);
+        for (size_t i = 0; i < extensions.size(); ++i) {
+            LOG_TRACE_CAT("VULKAN", "  → [{}] {}", i, extensions[i] ? extensions[i] : "<null extension pointer>");
         }
     } else {
-        LOG_WARN_CAT("VULKAN", "SDL3 reports 0 required extensions — likely software renderer (LLVMPipe)");
+        LOG_TRACE_CAT("VULKAN", "No SDL extensions; relying on manual additions");
     }
 
     // === ADD REQUIRED EXTENSIONS IF NOT ALREADY PRESENT (SDL3 usually includes surface) ===
+    LOG_TRACE_CAT("VULKAN", "Adding required extensions if missing...");
     const char* surfaceExt = VK_KHR_SURFACE_EXTENSION_NAME;
     if (std::find(extensions.begin(), extensions.end(), surfaceExt) == extensions.end()) {
         extensions.push_back(surfaceExt);
@@ -1148,20 +1158,44 @@ namespace RTX {
     }
 
     // === FINAL SAFETY: REMOVE ANY nullptr FROM LIST ===
+    size_t oldSize = extensions.size();
+
     extensions.erase(
-        std::remove_if(extensions.begin(), extensions.end(), [](const char* s) { return s == nullptr; }),
+        std::remove_if(extensions.begin(), extensions.end(),
+                       [](const char* s) { return s == nullptr; }),
         extensions.end()
     );
 
-    LOG_INFO_CAT("VULKAN", "Final instance extension count: {}", extensions.size());
-    for (const char* ext : extensions) {
-        LOG_INFO_CAT("VULKAN", "  → {}", ext);
+    size_t removed = oldSize - extensions.size();
+    if (removed > 0) {
+        LOG_WARN_CAT("VULKAN", "Removed {} null extension pointer(s) during cleanup", removed);
+    }
+    removed = oldSize - extensions.size();
+    if (removed > 0) {
+        LOG_DEBUG_CAT("VULKAN", "Removed {} null extensions", removed);
     }
 
+    LOG_INFO_CAT("VULKAN", "Final instance extension count: {}", extensions.size());
+    for (const char* ext : extensions) {
+        LOG_TRACE_CAT("VULKAN", "  → Final ext: {}", ext ? ext : "<null>");
+    }
+
+    // Prepare layers
+    LOG_TRACE_CAT("VULKAN", "Preparing validation layers (enableValidation={})...", enableValidation);
     const std::vector<const char*> layers = enableValidation
         ? std::vector<const char*>{"VK_LAYER_KHRONOS_validation"}
         : std::vector<const char*>{};
+    if (enableValidation && layers.empty()) {
+        LOG_WARN_CAT("VULKAN", "Validation requested but no layers defined — disabling");
+    } else if (!layers.empty()) {
+        LOG_DEBUG_CAT("VULKAN", "Enabled {} validation layer(s)", layers.size());
+        for (const char* layer : layers) {
+            LOG_TRACE_CAT("VULKAN", "  → Layer: {}", layer);
+        }
+    }
 
+    // Application info
+    LOG_TRACE_CAT("VULKAN", "Setting up application info...");
     VkApplicationInfo appInfo{
         .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
         .pApplicationName = "AMOURANTH RTX v80 TURBO",
@@ -1171,6 +1205,8 @@ namespace RTX {
         .apiVersion = VK_API_VERSION_1_3
     };
 
+    // Instance create info
+    LOG_TRACE_CAT("VULKAN", "Assembling VkInstanceCreateInfo...");
     VkInstanceCreateInfo createInfo{
         .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
         .pNext = nullptr,
@@ -1182,6 +1218,8 @@ namespace RTX {
         .ppEnabledExtensionNames = extensions.empty() ? nullptr : extensions.data()  // Null-safe
     };
 
+    // Create instance
+    LOG_TRACE_CAT("VULKAN", "Calling vkCreateInstance...");
     VkInstance instance = VK_NULL_HANDLE;
     VkResult result = vkCreateInstance(&createInfo, nullptr, &instance);
 
@@ -1189,20 +1227,22 @@ namespace RTX {
         LOG_FATAL_CAT("VULKAN", "vkCreateInstance failed: VK_ERROR_EXTENSION_NOT_PRESENT — missing required extension (check driver/Vulkan version)");
         std::abort();
     } else if (result == VK_ERROR_LAYER_NOT_PRESENT && enableValidation) {
-        LOG_WARN_CAT("VULKAN", "Validation layers requested but not found — continuing without validation");
+        LOG_WARN_CAT("VULKAN", "Validation layers requested but not found — retrying without layers");
         // Retry without layers
         createInfo.enabledLayerCount = 0;
         createInfo.ppEnabledLayerNames = nullptr;
         result = vkCreateInstance(&createInfo, nullptr, &instance);
         if (result != VK_SUCCESS) {
-            LOG_FATAL_CAT("VULKAN", "vkCreateInstance retry failed without layers");
+            LOG_FATAL_CAT("VULKAN", "vkCreateInstance retry failed without layers (result={})", result);
             std::abort();
         }
+        LOG_DEBUG_CAT("VULKAN", "Instance created successfully on retry (no validation)");
+    } else {
+        VK_CHECK(result, "vkCreateInstance FAILED — DRIVER MAY BE INCOMPATIBLE");
     }
 
-    VK_CHECK(result, "vkCreateInstance FAILED — DRIVER MAY BE INCOMPATIBLE");
-
-    LOG_SUCCESS_CAT("VULKAN", "{}VULKAN INSTANCE FORGED SUCCESSFULLY — PINK PHOTONS RISING{}", PLASMA_FUCHSIA, RESET);
+    LOG_SUCCESS_CAT("VULKAN", "{}VULKAN INSTANCE FORGED SUCCESSFULLY @ 0x{:x} — PINK PHOTONS RISING{}", PLASMA_FUCHSIA, reinterpret_cast<uintptr_t>(instance), RESET);
+    LOG_TRACE_CAT("VULKAN", "createVulkanInstanceWithSDL — COMPLETE");
     return instance;
 }
 
@@ -1220,14 +1260,39 @@ void initContext(VkInstance instance, SDL_Window* window, int width, int height)
 
     g_context_instance.instance_ = instance;
 
+    // Pre-call: Clear any prior SDL errors for clean diag
+    //SDL_ClearError();
+
     VkSurfaceKHR surface = VK_NULL_HANDLE;
-    if (!SDL_Vulkan_CreateSurface(window, instance, nullptr, &surface)) {
-        LOG_FATAL_CAT("SDL", "SDL_Vulkan_CreateSurface FAILED — surface dead");
+    bool success = (SDL_Vulkan_CreateSurface(window, instance, nullptr, &surface) == 0);
+    const char* sdlError = SDL_GetError();  // Fetch even on "success" for warnings
+
+    if (success) {
+        // Validate: Surface must be non-null on true return (API contract)
+        if ((surface || VK_NULL_HANDLE) == 0) {
+            LOG_FATAL_CAT("VULKAN", "SDL_Vulkan_CreateSurface returned true but surface=0x0! SDL error: '{}'", sdlError);
+            // Diag: Log window flags
+            Uint32 flags = SDL_GetWindowFlags(window);
+            LOG_ERROR_CAT("VULKAN", "Window flags: 0x{:x} (has SDL_WINDOW_VULKAN? {})", 
+                          static_cast<uint32_t>(flags), (flags & SDL_WINDOW_VULKAN) ? "YES" : "NO");
+            // Diag: Log instance ptr (should be non-null)
+            LOG_INFO_CAT("VULKAN", "Instance ptr: 0x{:x}", reinterpret_cast<uintptr_t>(instance));
+            std::abort();  // Halt—cannot proceed
+        }
+        LOG_SUCCESS_CAT("VULKAN", "Vulkan surface ALIVE: 0x{:x} (SDL error cleared: '{}')", 
+                        reinterpret_cast<uintptr_t>(surface), sdlError);
+        g_context_instance.surface_ = surface;
+    } else {
+        LOG_FATAL_CAT("VULKAN", "SDL_Vulkan_CreateSurface FAILED — surface dead (SDL error: '{}')", sdlError);
+        // Common causes: Missing SDL_WINDOW_VULKAN flag, or unenabled extensions (VK_KHR_surface + platform)
         std::abort();
     }
-    g_context_instance.surface_ = surface;
 
-    LOG_SUCCESS_CAT("VULKAN", "Vulkan surface ALIVE: 0x{:x}", uint64_t(surface));
+    // Guard downstream calls
+    if (g_context_instance.surface_ == VK_NULL_HANDLE) {
+        LOG_FATAL_CAT("RTX", "Aborting init: Null surface after creation");
+        return;
+    }
 
     pickPhysicalDevice();
     createLogicalDevice();
@@ -1245,7 +1310,7 @@ void pickPhysicalDevice()
     uint32_t deviceCount = 0;
     vkEnumeratePhysicalDevices(g_context_instance.instance_, &deviceCount, nullptr);
     if (deviceCount == 0) {
-        LOG_FATAL_CAT("VULKAN", "No Vulkan devices found!");
+        LOG_FAILURE_CAT("VULKAN", "Vulkan device count is 0!");
         std::abort();
     }
 
