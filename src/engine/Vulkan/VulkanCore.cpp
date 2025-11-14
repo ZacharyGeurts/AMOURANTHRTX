@@ -1116,7 +1116,7 @@ namespace RTX {
     Uint32 sdlCount = 0;  // Use Uint32 for SDL3 compatibility
     const char * const * sdlExtensions = SDL_Vulkan_GetInstanceExtensions(&sdlCount);
     const char* sdlErr = SDL_GetError();  // Fetch post-call
-    if (sdlExtensions == nullptr || sdlCount == 0) {
+    if ((sdlExtensions || sdlCount) == 0) {
         LOG_WARN_CAT("VULKAN", "SDL_Vulkan_GetInstanceExtensions returned null/0 count (SDL error: '{}') — surface may fail; proceeding with manual exts", sdlErr ? sdlErr : "None");
         sdlCount = 0;
     } else {
@@ -1218,32 +1218,30 @@ namespace RTX {
         .ppEnabledExtensionNames = extensions.empty() ? nullptr : extensions.data()  // Null-safe
     };
 
-    // Create instance
-    LOG_TRACE_CAT("VULKAN", "Calling vkCreateInstance...");
-    VkInstance instance = VK_NULL_HANDLE;
-    VkResult result = vkCreateInstance(&createInfo, nullptr, &instance);
+// Create instance
+LOG_TRACE_CAT("VULKAN", "Calling vkCreateInstance...");
+VkInstance instance = VK_NULL_HANDLE;
+VkResult result = vkCreateInstance(&createInfo, nullptr, &instance);
 
-    if (result == VK_ERROR_EXTENSION_NOT_PRESENT) {
-        LOG_FATAL_CAT("VULKAN", "vkCreateInstance failed: VK_ERROR_EXTENSION_NOT_PRESENT — missing required extension (check driver/Vulkan version)");
-        std::abort();
-    } else if (result == VK_ERROR_LAYER_NOT_PRESENT && enableValidation) {
-        LOG_WARN_CAT("VULKAN", "Validation layers requested but not found — retrying without layers");
-        // Retry without layers
-        createInfo.enabledLayerCount = 0;
-        createInfo.ppEnabledLayerNames = nullptr;
-        result = vkCreateInstance(&createInfo, nullptr, &instance);
-        if (result != VK_SUCCESS) {
-            LOG_FATAL_CAT("VULKAN", "vkCreateInstance retry failed without layers (result={})", result);
-            std::abort();
-        }
-        LOG_DEBUG_CAT("VULKAN", "Instance created successfully on retry (no validation)");
-    } else {
-        VK_CHECK(result, "vkCreateInstance FAILED — DRIVER MAY BE INCOMPATIBLE");
+if (result == VK_ERROR_EXTENSION_NOT_PRESENT) {
+    LOG_FATAL_CAT("VULKAN", "vkCreateInstance failed: VK_ERROR_EXTENSION_NOT_PRESENT — missing required extension (check driver/Vulkan version)");
+} else if (result == VK_ERROR_LAYER_NOT_PRESENT && enableValidation) {
+    LOG_WARN_CAT("VULKAN", "Validation layers requested but not found — retrying without layers");
+    // Retry without layers
+    createInfo.enabledLayerCount = 0;
+    createInfo.ppEnabledLayerNames = nullptr;
+    result = vkCreateInstance(&createInfo, nullptr, &instance);
+    if (result != VK_SUCCESS) {
+        LOG_FATAL_CAT("VULKAN", "vkCreateInstance retry failed without layers (result={})", result);
     }
+    LOG_DEBUG_CAT("VULKAN", "Instance created successfully on retry (no validation)");
+} else {
+    VK_CHECK(result, "vkCreateInstance FAILED — DRIVER MAY BE INCOMPATIBLE");
+}
 
-    LOG_SUCCESS_CAT("VULKAN", "{}VULKAN INSTANCE FORGED SUCCESSFULLY @ 0x{:x} — PINK PHOTONS RISING{}", PLASMA_FUCHSIA, reinterpret_cast<uintptr_t>(instance), RESET);
-    LOG_TRACE_CAT("VULKAN", "createVulkanInstanceWithSDL — COMPLETE");
-    return instance;
+LOG_SUCCESS_CAT("VULKAN", "{}VULKAN INSTANCE FORGED SUCCESSFULLY @ 0x{:x} — PINK PHOTONS RISING{}", PLASMA_FUCHSIA, reinterpret_cast<uintptr_t>(instance), RESET);
+LOG_TRACE_CAT("VULKAN", "createVulkanInstanceWithSDL — COMPLETE");
+return instance;
 }
 
 // =============================================================================
