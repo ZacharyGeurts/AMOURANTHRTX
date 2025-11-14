@@ -710,6 +710,12 @@ void initContext(VkInstance instance, SDL_Window* window, int width, int height)
     LOG_TRACE_CAT("RTX", "→ Calling RTX::loadRayTracingExtensions()");
     RTX::loadRayTracingExtensions();
 
+    // FIXED: Explicit tracker init post-device (missing in stepwise sub-calls)
+    LOG_TRACE_CAT("RTX", "→ Initializing UltraLowLevelBufferTracker with device=0x{:x}, phys=0x{:x}",
+                  reinterpret_cast<uintptr_t>(g_ctx().device()), reinterpret_cast<uintptr_t>(g_ctx().physicalDevice()));
+    UltraLowLevelBufferTracker::get().init(g_ctx().device(), g_ctx().physicalDevice());
+    LOG_SUCCESS_CAT("RTX", "BufferTracker initialized — ready for buffer forges");
+
     // =====================================================================
     // Final validation — re-check full readiness
     // =====================================================================

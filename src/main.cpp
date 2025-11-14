@@ -283,33 +283,46 @@ static void phase2_mainWindow() {
 }
 
 // =============================================================================
-// Phase 3: Vulkan Context Initialization + Fallback
+// Phase 3: Vulkan Context Initialization + Fallback — BULLETPROOF VALIDATION
 // =============================================================================
 [[maybe_unused]] static void phase3_vulkanContext(SDL_Window* window) {
     bulkhead("PHASE 3: VULKAN CONTEXT INITIALIZATION");
-    LOG_SUCCESS_CAT("MAIN", "Entered Phase 3");
+    LOG_ATTEMPT_CAT("MAIN", "{}Entered Phase 3 — forging Vulkan empire{}", EMERALD_GREEN, RESET);
+
+    if (!window) {
+        LOG_FATAL_CAT("MAIN", "{}PHASE 3 ABORT: Null window — cannot proceed{}", CRIMSON_MAGENTA, RESET);
+        return;  // BULLETPROOF: Early exit on invalid input
+    }
 
     Uint32 extensionCount = 0;
     bool vulkanSupported = SDL_Vulkan_GetInstanceExtensions(&extensionCount) && extensionCount > 0;
     
     if (!vulkanSupported) {
-        LOG_WARN_CAT("MAIN", "Vulkan not supported on this system — falling back to software/UI mode");
+        LOG_WARN_CAT("MAIN", "{}Vulkan not supported on this system — falling back to software/UI mode{}", OCEAN_TEAL, RESET);
         return;
     }
-    LOG_SUCCESS_CAT("MAIN", "Vulkan instance extensions available ({} extensions)", extensionCount);
+    LOG_SUCCESS_CAT("MAIN", "{}Vulkan instance extensions available ({} extensions){}", EMERALD_GREEN, extensionCount, RESET);
 
-    LOG_TRACE_CAT("MAIN", "Creating Vulkan instance with SDL3 extensions — window: 0x{:p}, validation: enabled", 
-                  static_cast<void*>(window));
+    LOG_TRACE_CAT("MAIN", "{}Creating Vulkan instance with SDL3 extensions — window: 0x{:p}, validation: enabled{}", 
+                  SAPPHIRE_BLUE, static_cast<void*>(window), RESET);
 
     VkInstance g_instance = RTX::createVulkanInstanceWithSDL(window, true);
 
-    LOG_SUCCESS_CAT("MAIN", "Vulkan instance created — handle: 0x{:x}", reinterpret_cast<uintptr_t>(g_instance));
+    if (g_instance == VK_NULL_HANDLE) {
+        LOG_FATAL_CAT("MAIN", "{}PHASE 3 ABORT: Null Vulkan instance — driver failure{}", CRIMSON_MAGENTA, RESET);
+        return;  // BULLETPROOF: Validate instance
+    }
+
+    LOG_SUCCESS_CAT("MAIN", "{}Vulkan instance created — handle: 0x{:x}{}", EMERALD_GREEN, reinterpret_cast<uintptr_t>(g_instance), RESET);
 
     LOG_INFO_CAT("MAIN", "{}FORGING GLOBAL VULKAN SURFACE — PRE-WINDOW SHOW — PINK PHOTONS RISING{}", 
                  PLASMA_FUCHSIA, RESET);
 
     // Single source of truth — createSurface() does ALL logging and validation
-    RTX::createSurface(window, g_instance);
+    if (!RTX::createSurface(window, g_instance)) {
+        LOG_FATAL_CAT("MAIN", "{}PHASE 3 ABORT: Surface creation failed — no rendering possible{}", CRIMSON_MAGENTA, RESET);
+        return;  // BULLETPROOF: Propagate failure
+    }
 
     // Surface is now guaranteed valid — createSurface() already logged success
     LOG_SUCCESS_CAT("MAIN", "{}GLOBAL SURFACE ACTIVE @ 0x{:x} — SDL3 INTEGRATION COMPLETE{}", 
@@ -322,14 +335,30 @@ static void phase2_mainWindow() {
     constexpr int TARGET_WIDTH  = 3840;
     constexpr int TARGET_HEIGHT = 2160;
 
-    LOG_TRACE_CAT("MAIN", "Initializing full RTX context...");
+    LOG_ATTEMPT_CAT("MAIN", "{}Initializing full RTX context ({}x{}){}", SAPPHIRE_BLUE, TARGET_WIDTH, TARGET_HEIGHT, RESET);
     RTX::initContext(g_instance, window, TARGET_WIDTH, TARGET_HEIGHT);
-    LOG_SUCCESS_CAT("MAIN", "Global Vulkan context initialized — RT extensions ready");
+    
+    // BULLETPROOF: Post-init validation — ensure device/queues ready for phase4
+    if (!RTX::g_ctx().isValid()) {
+        LOG_FATAL_CAT("MAIN", "{}PHASE 3 ABORT: Invalid RTX context post-init — device null{}", CRIMSON_MAGENTA, RESET);
+        return;
+    }
+    if (RTX::g_ctx().device() == VK_NULL_HANDLE) {
+        LOG_FATAL_CAT("MAIN", "{}PHASE 3 ABORT: Logical device null after initContext{}", CRIMSON_MAGENTA, RESET);
+        return;
+    }
+    if (RTX::g_ctx().graphicsQueue() == VK_NULL_HANDLE) {
+        LOG_FATAL_CAT("MAIN", "{}PHASE 3 ABORT: Graphics queue null after initContext{}", CRIMSON_MAGENTA, RESET);
+        return;
+    }
+    
+    LOG_SUCCESS_CAT("MAIN", "{}Global Vulkan context initialized — RT extensions ready (device: 0x{:x}){}", 
+                    EMERALD_GREEN, reinterpret_cast<uintptr_t>(RTX::g_ctx().device()), RESET);
 
     detectBestPresentMode(RTX::g_ctx().physicalDevice(), g_surface);
     LOG_INFO_CAT("MAIN", "Optimal present mode selected");
 
-    LOG_TRACE_CAT("MAIN", "PHASE 3: Vulkan context initialization COMPLETE — RAY TRACING READY");
+    LOG_TRACE_CAT("MAIN", "{}PHASE 3: Vulkan context initialization COMPLETE — RAY TRACING READY{}", SAPPHIRE_BLUE, RESET);
 }
 
 // =============================================================================
