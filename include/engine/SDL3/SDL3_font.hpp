@@ -9,9 +9,9 @@
 // 2. Commercial licensing: gzac5314@gmail.com
 //
 // =============================================================================
-// SDL3 FONT — SPLIT INTO HEADER + CPP — NOV 13 2025
+// SDL3 FONT — SPLIT INTO HEADER + CPP — NOV 14 2025
 // • Asynchronous TTF loading | RAII cleanup
-// • FIXED: TTF_Init() error check (==0 → !=0)
+// • FIXED: TTF_Init() bool return (SDL3_ttf: true success, false failure)
 // • RESPECTS Options::Performance::ENABLE_IMGUI — skips init if disabled
 // • Thread-safe C++20 | No mutexes
 // • PINK PHOTONS ETERNAL — 15,000 FPS — SHIP IT RAW

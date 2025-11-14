@@ -1,140 +1,122 @@
+// src/engine/SDL3/SDL3_window.cpp
 // =============================================================================
-// SDL3_window.cpp — FINAL SDL3 FIX — NOV 13 2025
-// • Fixed SDL_Vulkan_GetInstanceExtensions (SDL3 signature is different!)
-// • No centering, raw OS position
-// • PINK PHOTONS ETERNAL
+// FINAL RAII — NO DOUBLE SDL_Quit() — NO SEGFAULT — NOV 14 2025
 // =============================================================================
 
 #include "engine/SDL3/SDL3_window.hpp"
 #include "engine/SDL3/SDL3_vulkan.hpp"
-#include "engine/GLOBAL/OptionsMenu.hpp"
-#include "engine/GLOBAL/logging.hpp"
 #include "engine/Vulkan/VulkanRenderer.hpp"
-
-#include <SDL3/SDL.h>
-#include <SDL3/SDL_vulkan.h>
-#include <format>
-#include <vector>
+#include "engine/GLOBAL/OptionsMenu.hpp"
 
 using namespace Logging::Color;
 
-namespace SDL3Initializer {
+// One true global RAII window
+SDLWindowPtr g_sdl_window{nullptr};
 
-SDLWindowPtr g_sdl3_window = nullptr;
+namespace SDL3Window {
 
-void SDLWindowDeleter::operator()(SDL_Window* w) const noexcept {
-    if (w) {
-        LOG_INFO_CAT("Dispose", "{}Destroying SDL_Window @ {:p}{}", 
-                     RASPBERRY_PINK, static_cast<void*>(w), RESET);
-        SDL_DestroyWindow(w);
-    }
-    SDL_Quit();
-    LOG_SUCCESS_CAT("Dispose", "{}SDL3 subsystem shutdown complete{}", EMERALD_GREEN, RESET);
-}
+[[nodiscard]] SDLWindowPtr create(const char* title, int width, int height, Uint32 flags)
+{
+    LOG_ATTEMPT_CAT("Window", "Creating main window: '{}' {}x{}", title, width, height);
 
-SDLWindowPtr createWindow(const char* title, int w, int h, Uint32 flags) {
-    LOG_ATTEMPT_CAT("Window", "Creating SDL window: '{}' ({}x{}) — NO CENTERING", title, w, h);
-
-    flags |= SDL_WINDOW_VULKAN;
-
+    flags |= SDL_WINDOW_VULKAN | SDL_WINDOW_HIGH_PIXEL_DENSITY;
     if (Options::Performance::ENABLE_IMGUI) {
-        flags |= SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
+        flags |= SDL_WINDOW_RESIZABLE;
+        LOG_INFO_CAT("Window", "ImGui enabled → SDL_WINDOW_RESIZABLE added");
     }
-
-    SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "wayland,x11");
 
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) == 0) {
-        LOG_FATAL_CAT("SDL", "{}SDL_Init failed: {}{}", CRIMSON_MAGENTA, SDL_GetError(), RESET);
+        LOG_FATAL_CAT("SDL", "SDL_Init failed: {}", SDL_GetError());
         throw std::runtime_error("SDL_Init failed");
     }
 
-    SDL_Window* raw = SDL_CreateWindow(title, w, h, flags);
+    SDL_Window* raw = SDL_CreateWindow(title, width, height, flags);
     if (!raw) {
-        LOG_FATAL_CAT("SDL", "{}SDL_CreateWindow failed: {}{}", CRIMSON_MAGENTA, SDL_GetError(), RESET);
+        LOG_FATAL_CAT("SDL", "SDL_CreateWindow failed: {}", SDL_GetError());
+        SDL_Quit();  // Clean up partial init
         throw std::runtime_error("SDL_CreateWindow failed");
     }
 
-    int x, y;
-    SDL_GetWindowPosition(raw, &x, &y);
-    LOG_INFO_CAT("Window", "Window created @ OS default position: ({}, {})", x, y);
+    LOG_SUCCESS_CAT("Window", "Window created @ {:p} — {}x{}", static_cast<void*>(raw), width, height);
 
-    LOG_SUCCESS_CAT("Window", "{}SDL_Window created — RAW OS POSITION{}", PLASMA_FUCHSIA, RESET);
-    LOG_INFO_CAT("Window", "  Handle: {:p}", static_cast<void*>(raw));
-    LOG_INFO_CAT("Window", "  Size:   {}x{}", w, h);
-    LOG_INFO_CAT("Window", "  Flags:  0x{:08x}", SDL_GetWindowFlags(raw));
-
-    int pw, ph;
-    SDL_GetWindowSizeInPixels(raw, &pw, &ph);
-    if (pw != w || ph != h) {
-        LOG_INFO_CAT("Window", "  High DPI: {}x{} → {}x{} (scale: {:.2f})", w, h, pw, ph, static_cast<float>(pw)/w);
-    }
-
-    setSDL3Window(SDLWindowPtr(raw));
-    LOG_SUCCESS_CAT("SDL3", "{}g_sdl3_window assigned — GLOBAL READY{}", COSMIC_GOLD, RESET);
+    // Return ownership to caller (e.g., g_sdl_window = create(...)); global managed externally
     return SDLWindowPtr(raw);
 }
 
-// =============================================================================
-// FIXED: SDL3's Vulkan extension function has a DIFFERENT signature!
-// =============================================================================
-std::vector<std::string> getWindowExtensions(const SDLWindowPtr&) {
+[[nodiscard]] std::vector<std::string> getVulkanExtensions(SDL_Window* window)
+{
+    if (!window) return {};
+
+    // SDL3: Single call populates both count and array
     Uint32 count = 0;
-
-    // First call: get count only
-    if (!SDL_Vulkan_GetInstanceExtensions(&count)) {
-        LOG_ERROR_CAT("Vulkan", "SDL_Vulkan_GetInstanceExtensions failed (count): {}", SDL_GetError());
-        return {};
-    }
-
-    LOG_INFO_CAT("Vulkan", "SDL requires {} Vulkan instance extensions", count);
-
-    // Second call: get actual names
-    std::vector<const char*> names(count);
-    if (SDL_Vulkan_GetInstanceExtensions(&count) == 0) {
-        LOG_ERROR_CAT("Vulkan", "SDL_Vulkan_GetInstanceExtensions failed (names): {}", SDL_GetError());
+    const char * const * exts = SDL_Vulkan_GetInstanceExtensions(&count);
+    if (exts == nullptr) {
+        LOG_ERROR_CAT("Vulkan", "SDL_Vulkan_GetInstanceExtensions failed: {}", SDL_GetError());
         return {};
     }
 
     std::vector<std::string> result;
     result.reserve(count);
     for (Uint32 i = 0; i < count; ++i) {
-        result.emplace_back(names[i]);
-        LOG_TRACE_CAT("Vulkan", "  [{}] {}", i, names[i]);
+        if (exts[i]) result.emplace_back(exts[i]);  // Copy strings (SDL owns exts)
     }
 
-    LOG_SUCCESS_CAT("Vulkan", "{} Vulkan instance extensions retrieved{}", result.size(), RESET);
+    LOG_SUCCESS_CAT("Vulkan", "{} Vulkan instance extensions retrieved", result.size());
     return result;
 }
 
-// pollEventsForResize and toggleFullscreen unchanged — already correct
-bool pollEventsForResize(const SDLWindowPtr& window,
-                         int& newWidth, int& newHeight,
-                         bool& shouldQuit, bool& toggleFullscreenKey) noexcept {
-    SDL_Event event;
+bool pollEvents(int& outW, int& outH, bool& quit, bool& toggleFS) noexcept
+{
+    SDL_Event ev;
     bool resized = false;
-    shouldQuit = false;
-    toggleFullscreenKey = false;
+    quit = toggleFS = false;
 
-    while (SDL_PollEvent(&event)) {
-        if (event.type == SDL_EVENT_QUIT) shouldQuit = true;
-        else if (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_F11) toggleFullscreenKey = true;
-        else if (event.type == SDL_EVENT_WINDOW_RESIZED) {
-            newWidth = event.window.data1;
-            newHeight = event.window.data2;
-            resized = true;
-            LOG_INFO_CAT("APP", "Window resized: {}x{}", newWidth, newHeight);
+    while (SDL_PollEvent(&ev)) {
+        switch (ev.type) {
+            case SDL_EVENT_QUIT:
+                quit = true;
+                break;
+            case SDL_EVENT_KEY_DOWN:
+                if (ev.key.scancode == SDL_SCANCODE_F11) {
+                    toggleFS = true;
+                }
+                break;
+            case SDL_EVENT_WINDOW_RESIZED:
+                outW = ev.window.data1;
+                outH = ev.window.data2;
+                resized = true;
+                LOG_INFO_CAT("Window", "Resize: {}x{}", outW, outH);
+                break;
         }
     }
+
+    // Fallback: Query current size if no resize event
+    if (!resized && g_sdl_window) {
+        SDL_GetWindowSizeInPixels(g_sdl_window.get(), &outW, &outH);
+    }
+
     return resized;
 }
 
-void toggleFullscreen(SDLWindowPtr& window) noexcept {
-    bool isFullscreen = (SDL_GetWindowFlags(window.get()) & SDL_WINDOW_FULLSCREEN);
-    SDL_SetWindowFullscreen(window.get(), !isFullscreen);
+void toggleFullscreen() noexcept
+{
+    if (!g_sdl_window) {
+        LOG_WARN_CAT("Window", "toggleFullscreen(): no window");
+        return;
+    }
 
-    int w, h;
-    SDL_GetWindowSizeInPixels(window.get(), &w, &h);
-    if (auto* r = &SDL3Vulkan::getRenderer()) r->handleResize(w, h);
+    SDL_Window* window = g_sdl_window.get();
+    bool is_fs = (SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN) != 0;
+    SDL_SetWindowFullscreen(window, !is_fs);  // SDL3: bool (true=fullscreen, false=windowed)
+
+    int w = 0, h = 0;
+    SDL_GetWindowSizeInPixels(window, &w, &h);
+
+    LOG_INFO_CAT("Window", "Fullscreen → {} ({}x{})", !is_fs ? "ON" : "OFF", w, h);
+
+    if (auto* r = &SDL3Vulkan::renderer()) {
+        r->handleResize(w, h);
+    }
 }
 
-} // namespace SDL3Initializer
+} // namespace SDL3Window

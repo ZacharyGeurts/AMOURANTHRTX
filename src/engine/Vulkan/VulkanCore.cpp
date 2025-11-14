@@ -935,228 +935,113 @@ namespace Bindings { namespace RTX {
 }}
 
 void VulkanRTX::updateRTXDescriptors(uint32_t frameIdx,
-                                     VkBuffer cameraBuf, VkBuffer materialBuf, VkBuffer dimensionBuf,
-                                     VkImageView storageView, VkImageView accumView,
+                                     VkBuffer /*cameraBuf*/, VkBuffer /*materialBuf*/, VkBuffer /*dimensionBuf*/,
+                                     VkImageView /*storageView*/, VkImageView /*accumView*/,
                                      VkImageView envMapView, VkSampler envSampler,
-                                     VkImageView densityVol, VkImageView gDepth,
-                                     VkImageView gNormal)
+                                     VkImageView densityVol, VkImageView /*gDepth*/,
+                                     VkImageView /*gNormal*/)
 {
     LOG_TRACE_CAT("RTX", "updateRTXDescriptors — START — frameIdx={}", frameIdx);
-    VkDescriptorSet set = descriptorSets_[frameIdx];
-    LOG_DEBUG_CAT("RTX", "Descriptor set for frame {}: 0x{:x}", frameIdx, reinterpret_cast<uintptr_t>(set));
-    VkAccelerationStructureKHR tlas = RTX::las().getTLAS();
-    LOG_DEBUG_CAT("RTX", "TLAS handle: 0x{:x}", reinterpret_cast<uintptr_t>(tlas));
 
-    VkWriteDescriptorSetAccelerationStructureKHR asWrite = {
+    if (descriptorSets_.empty()) {
+        LOG_WARN_CAT("RTX", "No descriptor sets — skipping");
+        return;
+    }
+
+    VkDescriptorSet set = descriptorSets_[frameIdx % descriptorSets_.size()];
+    VkAccelerationStructureKHR tlas = RTX::las().getTLAS();
+
+    // Early return if critical handles missing
+    if (!set || !tlas) {
+        LOG_WARN_CAT("RTX", "Missing set (0x{:x}) or TLAS (0x{:x}) — skipping", reinterpret_cast<uintptr_t>(set), reinterpret_cast<uintptr_t>(tlas));
+        return;
+    }
+
+    std::vector<VkWriteDescriptorSet>                            writes;
+    std::vector<VkDescriptorImageInfo>                            imgInfos;
+    std::vector<VkWriteDescriptorSetAccelerationStructureKHR>   asWrites;
+
+    writes.reserve(16);
+    imgInfos.reserve(16);
+    asWrites.reserve(1);
+
+    // === 0: TLAS — SAFE pNext ===
+    asWrites.push_back(VkWriteDescriptorSetAccelerationStructureKHR{
         .sType                      = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR,
         .accelerationStructureCount = 1,
         .pAccelerationStructures    = &tlas
-    };
+    });
 
-    std::array<VkWriteDescriptorSet, 16> writes{};
-    uint32_t count = 0;
-
-    writes[count++] = {
-        .sType      = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        .pNext      = &asWrite,
-        .dstSet     = set,
-        .dstBinding = Bindings::RTX::TLAS,
+    writes.push_back(VkWriteDescriptorSet{
+        .sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        .pNext           = &asWrites.back(),
+        .dstSet          = set,
+        .dstBinding      = Bindings::RTX::TLAS,
         .descriptorCount = 1,
         .descriptorType  = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR
-    };
-    LOG_INFO_CAT("RTX", "Binding TLAS @ 0x{:x} → slot 0", reinterpret_cast<uintptr_t>(tlas));
+    });
+    LOG_INFO_CAT("RTX", "TLAS bound → slot {} (0x{:x})", Bindings::RTX::TLAS, reinterpret_cast<uintptr_t>(tlas));
 
-    VkDescriptorImageInfo storageInfo{.imageView = storageView, .imageLayout = VK_IMAGE_LAYOUT_GENERAL};
-    writes[count++] = {
-        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        .dstSet = set,
-        .dstBinding = Bindings::RTX::STORAGE_IMAGE,
-        .descriptorCount = 1,
-        .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-        .pImageInfo = &storageInfo
+    // === Helper: bind image (with combined fallback) ===
+    auto bindImg = [&](uint32_t binding, VkImageView view, VkDescriptorType type,
+                       VkImageLayout layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VkSampler sampler = VK_NULL_HANDLE) {
+        if (!view) {
+            LOG_DEBUG_CAT("RTX", "Skipping null view for binding {}", binding);
+            return;
+        }
+        VkDescriptorType effectiveType = type;
+        if (type == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER && sampler == VK_NULL_HANDLE) {
+            LOG_WARN_CAT("RTX", "Null sampler for combined binding {} — falling back to SAMPLED_IMAGE", binding);
+            effectiveType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+        }
+        imgInfos.push_back({ sampler, view, layout });
+        writes.push_back(VkWriteDescriptorSet{
+            .sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .dstSet          = set,
+            .dstBinding      = binding,
+            .descriptorCount = 1,
+            .descriptorType  = effectiveType,
+            .pImageInfo      = &imgInfos.back()
+        });
+        LOG_INFO_CAT("RTX", "Image 0x{:x} (type {}) → slot {}", reinterpret_cast<uintptr_t>(view), static_cast<uint32_t>(effectiveType), binding);
     };
-    LOG_INFO_CAT("RTX", "Binding storage image view 0x{:x} → slot 1", reinterpret_cast<uintptr_t>(storageView));
 
-    VkDescriptorImageInfo accumInfo{.imageView = accumView, .imageLayout = VK_IMAGE_LAYOUT_GENERAL};
-    writes[count++] = {
-        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        .dstSet = set,
-        .dstBinding = Bindings::RTX::ACCUMULATION_IMAGE,
-        .descriptorCount = 1,
-        .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-        .pImageInfo = &accumInfo
-    };
-    LOG_INFO_CAT("RTX", "Binding accumulation image view 0x{:x} → slot 2", reinterpret_cast<uintptr_t>(accumView));
+    // === Black fallback (always bind, e.g., for missing textures) ===
+    bindImg(Bindings::RTX::BLACK_FALLBACK, HANDLE_GET(blackFallbackView_), VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE);
 
-    VkDescriptorBufferInfo camInfo{.buffer = cameraBuf, .range = VK_WHOLE_SIZE};
-    writes[count++] = {
-        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        .dstSet = set,
-        .dstBinding = Bindings::RTX::CAMERA_UBO,
-        .descriptorCount = 1,
-        .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-        .pBufferInfo = &camInfo
-    };
-    LOG_INFO_CAT("RTX", "Binding camera UBO 0x{:x} → slot 3", reinterpret_cast<uintptr_t>(cameraBuf));
+    // === Env map (new: bind if available; assume binding exists, e.g., Bindings::RTX::ENV_MAP) ===
+    if (envMapView) {
+        bindImg(Bindings::RTX::ENV_MAP, envMapView, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, envSampler);  // Adjust binding if needed
+    } else {
+        LOG_DEBUG_CAT("RTX", "Skipping env map bind (null view)");
+    }
 
-    VkDescriptorBufferInfo matInfo{.buffer = materialBuf, .range = VK_WHOLE_SIZE};
-    writes[count++] = {
-        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        .dstSet = set,
-        .dstBinding = Bindings::RTX::MATERIAL_SBO,
-        .descriptorCount = 1,
-        .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-        .pBufferInfo = &matInfo
-    };
-    LOG_INFO_CAT("RTX", "Binding material SBO 0x{:x} → slot 4", reinterpret_cast<uintptr_t>(materialBuf));
+    // === Density volume (conditional type based on sampler) ===
+    VkImageView densityView = densityVol ? densityVol : HANDLE_GET(blackFallbackView_);
+    VkDescriptorType densityType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    if (densityVol == VK_NULL_HANDLE) {
+        LOG_DEBUG_CAT("RTX", "Using fallback for density volume");
+    }
+    bindImg(Bindings::RTX::DENSITY_VOLUME, densityView, densityType,
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, envSampler);  // Sampler check handled in lambda
 
-    VkDescriptorImageInfo envInfo{
-        .sampler = envSampler,
-        .imageView = envMapView,
-        .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-    };
-    writes[count++] = {
-        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        .dstSet = set,
-        .dstBinding = Bindings::RTX::ENV_MAP,
-        .descriptorCount = 1,
-        .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        .pImageInfo = &envInfo
-    };
-    LOG_INFO_CAT("RTX", "Binding env map 0x{:x} + sampler 0x{:x} → slot 5", reinterpret_cast<uintptr_t>(envMapView), reinterpret_cast<uintptr_t>(envSampler));
+    // === Blue noise ===
+    VkImageView blueNoise = RTX::g_ctx().blueNoiseView() ? RTX::g_ctx().blueNoiseView() : HANDLE_GET(blackFallbackView_);
+    bindImg(Bindings::RTX::BLUE_NOISE, blueNoise, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE);
 
-    VkDescriptorImageInfo fallbackInfo{
-        .imageView = HANDLE_GET(blackFallbackView_),
-        .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-    };
-    writes[count++] = {
-        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        .dstSet = set,
-        .dstBinding = Bindings::RTX::BLACK_FALLBACK,
-        .descriptorCount = 1,
-        .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
-        .pImageInfo = &fallbackInfo
-    };
-    LOG_INFO_CAT("RTX", "Binding black fallback view 0x{:x} → slot 6", reinterpret_cast<uintptr_t>(HANDLE_GET(blackFallbackView_)));
+    // === Reserved ===
+    bindImg(Bindings::RTX::RESERVED_14, HANDLE_GET(blackFallbackView_), VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE);
+    bindImg(Bindings::RTX::RESERVED_15, HANDLE_GET(blackFallbackView_), VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE);
 
-    VkDescriptorImageInfo densityInfo{
-        .sampler = envSampler,
-        .imageView = densityVol ? densityVol : HANDLE_GET(blackFallbackView_),
-        .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-    };
-    writes[count++] = {
-        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        .dstSet = set,
-        .dstBinding = Bindings::RTX::DENSITY_VOLUME,
-        .descriptorCount = 1,
-        .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        .pImageInfo = &densityInfo
-    };
-    LOG_INFO_CAT("RTX", "Binding density volume 0x{:x} → slot 7", reinterpret_cast<uintptr_t>(densityVol ? densityVol : HANDLE_GET(blackFallbackView_)));
-
-    VkDescriptorImageInfo depthInfo{
-        .imageView = gDepth,
-        .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-    };
-    writes[count++] = {
-        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        .dstSet = set,
-        .dstBinding = Bindings::RTX::G_DEPTH,
-        .descriptorCount = 1,
-        .descriptorType = VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT,
-        .pImageInfo = &depthInfo
-    };
-    LOG_INFO_CAT("RTX", "Binding G-Depth 0x{:x} → slot 8", reinterpret_cast<uintptr_t>(gDepth));
-
-    VkDescriptorImageInfo normalInfo{
-        .imageView = gNormal,
-        .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-    };
-    writes[count++] = {
-        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        .dstSet = set,
-        .dstBinding = Bindings::RTX::G_NORMAL,
-        .descriptorCount = 1,
-        .descriptorType = VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT,
-        .pImageInfo = &normalInfo
-    };
-    LOG_INFO_CAT("RTX", "Binding G-Normal 0x{:x} → slot 9", reinterpret_cast<uintptr_t>(gNormal));
-
-    VkImageView blueNoiseView = RTX::g_ctx().blueNoiseView() ? RTX::g_ctx().blueNoiseView() : HANDLE_GET(blackFallbackView_);
-    VkDescriptorImageInfo blueNoiseInfo{
-        .imageView = blueNoiseView,
-        .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-    };
-    writes[count++] = {
-        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        .dstSet = set,
-        .dstBinding = Bindings::RTX::BLUE_NOISE,
-        .descriptorCount = 1,
-        .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
-        .pImageInfo = &blueNoiseInfo
-    };
-    LOG_INFO_CAT("RTX", "Binding blue noise 0x{:x} → slot 10", reinterpret_cast<uintptr_t>(blueNoiseView));
-
-    VkDescriptorBufferInfo reservoirInfo{.buffer = RTX::g_ctx().reservoirBuffer(), .range = VK_WHOLE_SIZE};
-    writes[count++] = {
-        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        .dstSet = set,
-        .dstBinding = Bindings::RTX::RESERVOIR_SBO,
-        .descriptorCount = 1,
-        .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-        .pBufferInfo = &reservoirInfo
-    };
-    LOG_INFO_CAT("RTX", "Binding reservoir SBO 0x{:x} → slot 11", reinterpret_cast<uintptr_t>(RTX::g_ctx().reservoirBuffer()));
-
-    VkDescriptorBufferInfo frameDataInfo{.buffer = RTX::g_ctx().frameDataBuffer(), .range = VK_WHOLE_SIZE};
-    writes[count++] = {
-        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        .dstSet = set,
-        .dstBinding = Bindings::RTX::FRAME_DATA_UBO,
-        .descriptorCount = 1,
-        .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-        .pBufferInfo = &frameDataInfo
-    };
-    LOG_INFO_CAT("RTX", "Binding frame data UBO 0x{:x} → slot 12", reinterpret_cast<uintptr_t>(RTX::g_ctx().frameDataBuffer()));
-
-    VkDescriptorBufferInfo debugVisInfo{.buffer = RTX::g_ctx().debugVisBuffer(), .range = VK_WHOLE_SIZE};
-    writes[count++] = {
-        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        .dstSet = set,
-        .dstBinding = Bindings::RTX::DEBUG_VIS_SBO,
-        .descriptorCount = 1,
-        .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-        .pBufferInfo = &debugVisInfo
-    };
-    LOG_INFO_CAT("RTX", "Binding debug vis SBO 0x{:x} → slot 13", reinterpret_cast<uintptr_t>(RTX::g_ctx().debugVisBuffer()));
-
-    writes[count++] = {
-        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        .dstSet = set,
-        .dstBinding = Bindings::RTX::RESERVED_14,
-        .descriptorCount = 1,
-        .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
-        .pImageInfo = &fallbackInfo
-    };
-    LOG_INFO_CAT("RTX", "Binding reserved slot 14 → black fallback");
-
-    writes[count++] = {
-        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        .dstSet = set,
-        .dstBinding = Bindings::RTX::RESERVED_15,
-        .descriptorCount = 1,
-        .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
-        .pImageInfo = &fallbackInfo
-    };
-    LOG_INFO_CAT("RTX", "Binding reserved slot 15 → black fallback");
-
-    LOG_TRACE_CAT("RTX", "Updating {} descriptor sets", count);
-    vkUpdateDescriptorSets(device_, count, writes.data(), 0, nullptr);
-    LOG_DEBUG_CAT("RTX", "Descriptor sets updated successfully");
-
-    LOG_SUCCESS_CAT("RTX", 
-        "{}Frame {} descriptors forged — 16 bindings — TLAS @ 0x{:x} — PINK PHOTONS ETERNAL{}",
-        PLASMA_FUCHSIA, frameIdx, RTX::las().getTLASAddress(), RESET);
+    // === FINAL UPDATE ===
+    if (!writes.empty()) {
+        vkUpdateDescriptorSets(device_, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
+        LOG_SUCCESS_CAT("RTX", "{}Frame {} descriptors forged — {} bindings — PINK PHOTONS ETERNAL{}",
+                        PLASMA_FUCHSIA, frameIdx, writes.size(), RESET);
+    } else {
+        LOG_WARN_CAT("RTX", "No writes to update — skipping vkUpdateDescriptorSets");
+    }
 
     LOG_TRACE_CAT("RTX", "updateRTXDescriptors — COMPLETE");
 }

@@ -34,6 +34,7 @@ namespace Performance {
     constexpr bool     ENABLE_FRAME_TIME_LOGGING   = false;
     constexpr float    FRAME_TIME_LOG_THRESHOLD_MS = 16.666f;
 	static inline constexpr bool ENABLE_VALIDATION_LAYERS = false;
+	constexpr bool START_FULLSCREEN = false;
 
     // ADDED: Required by SDL3_input.cpp, SDL3_font.cpp, SDL3_init.cpp, SDL3_window.cpp
     constexpr bool     ENABLE_CONSOLE_LOG          = true;

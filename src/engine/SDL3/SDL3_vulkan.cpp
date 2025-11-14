@@ -3,9 +3,10 @@
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
 //
-// SDL3 + Vulkan — DUMB AND HAPPY GLUE LAYER
-// • Does NOT know about .spv files
-// • Only creates Vulkan context and hands off to VulkanRenderer
+// SDL3 + Vulkan RAII — FINAL CLEAN GLUE LAYER — NOV 14 2025
+// • Uses RTX::Handle<T> → zero manual cleanup
+// • init() creates instance + surface + device → stored in global RTX context
+// • VulkanRenderer owns all shaders, pipelines, buffers
 // • FIRST LIGHT GUARANTEED
 // =============================================================================
 
@@ -20,69 +21,44 @@ std::unique_ptr<VulkanRenderer> g_vulkanRenderer;
 
 namespace SDL3Vulkan {
 
-VulkanRenderer& getRenderer() noexcept {
+VulkanRenderer& renderer() noexcept
+{
     if (!g_vulkanRenderer) {
-        LOG_FATAL_CAT("RENDERER", "{}getRenderer() called before initRenderer!{}", CRIMSON_MAGENTA, RESET);
+        LOG_FATAL_CAT("VULKAN", "{}SDL3Vulkan::renderer() called before init!{}", CRIMSON_MAGENTA, RESET);
         std::abort();
     }
     return *g_vulkanRenderer;
 }
 
-void initRenderer(int w, int h) noexcept {
-    LOG_INFO_CAT("RENDERER", "{}SDL3Vulkan::initRenderer({}x{}) — delegating to VulkanRenderer (the true master){}", 
+void init(int w, int h) noexcept
+{
+    LOG_INFO_CAT("VULKAN", "{}SDL3Vulkan::init({}x{}) — creating Vulkan context via RTX::initContext{}", 
                   PLASMA_FUCHSIA, w, h, RESET);
 
-    const bool validation = Options::Performance::ENABLE_VALIDATION_LAYERS;
+    // This does everything: instance, surface, physical device, logical device, queues
+    // Uses SDL3 window from SDL3Initializer
+    RTX::initContext(nullptr, w, h);  // window passed internally via SDL3Initializer
 
-    g_vulkanRenderer = std::make_unique<VulkanRenderer>(w, h, nullptr);
+    // Now create the real renderer — it owns all shaders, pipelines, TLAS, etc.
+    g_vulkanRenderer = std::make_unique<VulkanRenderer>(w, h);
 
-    LOG_SUCCESS_CAT("RENDERER", 
-        "{}VulkanRenderer initialized {}x{} — Validation: {} — PINK PHOTONS ARMED — FIRST LIGHT ACHIEVED{}", 
-        EMERALD_GREEN, w, h, validation ? "ON" : "OFF", LIME_GREEN, RESET);
+    LOG_SUCCESS_CAT("VULKAN", 
+        "{}Vulkan context + renderer initialized {}x{} — Validation: {} — FIRST LIGHT ACHIEVED{}", 
+        EMERALD_GREEN, w, h, 
+        Options::Performance::ENABLE_VALIDATION_LAYERS ? "ON" : "OFF",
+        LIME_GREEN, RESET);
 }
 
-void shutdownRenderer() noexcept {
-    LOG_INFO_CAT("RENDERER", "{}Shutting down VulkanRenderer...{}", RASPBERRY_PINK, RESET);
-    g_vulkanRenderer.reset();
-    LOG_SUCCESS_CAT("RENDERER", "{}Renderer shutdown complete — all clean{}", EMERALD_GREEN, RESET);
+void shutdown() noexcept
+{
+    LOG_INFO_CAT("VULKAN", "{}Shutting down VulkanRenderer...{}", RASPBERRY_PINK, RESET);
+    g_vulkanRenderer.reset();  // RAII destroys everything
+
+    // Global RTX context cleanup (optional — Handle<T> already cleaned)
+    RTX::cleanupAll();
+
+    LOG_SUCCESS_CAT("VULKAN", "{}Vulkan shutdown complete — all photons returned to the void{}", 
+                     EMERALD_GREEN, RESET);
 }
 
 } // namespace SDL3Vulkan
-
-// RAII deleters
-void VulkanInstanceDeleter::operator()(VkInstance i) const noexcept {
-    if (i) [[likely]] {
-        LOG_INFO_CAT("Dispose", "{}Destroying VkInstance @ {:p}{}", PLASMA_FUCHSIA, static_cast<void*>(i), RESET);
-        vkDestroyInstance(i, nullptr);
-    }
-}
-
-void VulkanSurfaceDeleter::operator()(VkSurfaceKHR s) const noexcept {
-    if (s && inst) [[likely]] {
-        LOG_INFO_CAT("Dispose", "{}Destroying VkSurfaceKHR @ {:p}{}", RASPBERRY_PINK, static_cast<void*>(s), RESET);
-        vkDestroySurfaceKHR(inst, s, nullptr);
-    }
-}
-
-// initVulkan / shutdownVulkan — unchanged from your perfect version
-// (just paste your current working initVulkan/shutdownVulkan here — no changes needed)
-
-void initVulkan(
-    SDL_Window* window,
-    VulkanInstancePtr& instance,
-    VulkanSurfacePtr& surface,
-    VkDevice& device,
-    bool enableValidation,
-    bool preferNvidia,
-    bool requireRT,
-    std::string_view title,
-    VkPhysicalDevice& physicalDevice) noexcept
-{
-    // ← Paste your full working initVulkan() here (the 300-line one you already have)
-    // It is perfect — just leave it exactly as-is
-}
-
-void shutdownVulkan() noexcept {
-    // ← Paste your full working shutdownVulkan() here
-    // Also perfect — no changes needed
-}

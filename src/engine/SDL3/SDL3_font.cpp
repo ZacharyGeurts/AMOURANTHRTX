@@ -9,10 +9,11 @@
 // 2. Commercial licensing: gzac5314@gmail.com
 //
 // =============================================================================
-// SDL3 FONT — CPP IMPLEMENTATIONS — NOV 13 2025
+// SDL3 FONT — CPP IMPLEMENTATIONS — NOV 14 2025
 // • Respects Options::Performance::ENABLE_IMGUI for TTF init
 // • Async loading | RAII | C++20 coroutines-ready
 // • Streamlined for 15,000 FPS — PINK PHOTONS CHARGE AHEAD
+// • FIXED: SDL3_ttf bool returns (TTF_Init() == true for success)
 // =============================================================================
 
 #include "engine/SDL3/SDL3_font.hpp"
@@ -42,7 +43,7 @@ void SDL3Font::initialize(const std::string& fontPath) {
     }
 
     LOG_INFO_CAT("Font", "{}Initializing TTF{}", LIME_GREEN, RESET);
-    if (TTF_Init() != 0) {
+    if (!TTF_Init()) {  // FIXED: SDL3_ttf bool: false on failure
         const char* ttfError = SDL_GetError();
         LOG_ERROR_CAT("Font", "{}TTF_Init failed: {}{}", CRIMSON_MAGENTA, ttfError ? ttfError : "No error message provided", RESET);
         throw std::runtime_error(std::format("TTF_Init failed: {}", ttfError ? ttfError : "No error message provided"));
@@ -97,7 +98,7 @@ void SDL3Font::cleanup() {
         TTF_CloseFont(m_font);
         m_font = nullptr;
     }
-    if (TTF_WasInit()) {
+    if (TTF_WasInit() > 0) {  // FIXED: SDL3_ttf int return: >0 if initialized
         LOG_INFO_CAT("Font", "{}Quitting TTF{}", RASPBERRY_PINK, RESET);
         TTF_Quit();
     }

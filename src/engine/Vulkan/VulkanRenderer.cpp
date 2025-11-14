@@ -1790,7 +1790,7 @@ void VulkanRenderer::updateNexusDescriptors() {
 
 void VulkanRenderer::updateRTXDescriptors() {
     LOG_TRACE_CAT("RENDERER", "updateRTXDescriptors — START");
-    // Currently handled by VulkanRTX::updateRTXDescriptors()
+    // Currently handled by VulkanRTX::updateRTXDescriptors() in VulkanCore.cpp
     // This is a per-frame hook — can be used for dynamic bindings later
     LOG_TRACE_CAT("RENDERER", "updateRTXDescriptors — COMPLETE (delegated)");
 }

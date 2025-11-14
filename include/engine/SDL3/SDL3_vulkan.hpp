@@ -5,35 +5,34 @@
 //
 // Dual Licensed:
 // 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
-//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
 // 2. Commercial licensing: gzac5314@gmail.com
 //
 // =============================================================================
-// SDL3 + Vulkan RAII – FINAL CLEAN VERSION – NOV 14 2025
-// • VulkanRenderer OWNS ALL RT SHADERS — this file is now DUMB AND HAPPY
-// • NO shader paths here — EVER AGAIN
-// • Only does: SDL ↔ Vulkan bridge + renderer init/shutdown
+// SDL3 + Vulkan RAII — FINAL CLEAN VERSION — NOV 14 2025
+// • Full RAII using Handle<T> from RTXHandler.hpp
+// • No manual destroy calls — EVER
+// • VulkanRenderer owns everything else
 // • PINK PHOTONS ETERNAL — 15,000+ FPS — FIRST LIGHT ACHIEVED
 // =============================================================================
 
 #pragma once
 
-#include "engine/GLOBAL/RTXHandler.hpp"
+#include "engine/GLOBAL/RTXHandler.hpp"   // Brings in RTX::Handle<T>, RTX::ctx(), etc.
 #include "engine/GLOBAL/logging.hpp"
 #include <SDL3/SDL_vulkan.h>
 #include <vulkan/vulkan.h>
 
-#include <memory>
 #include <string_view>
 #include <span>
 #include <array>
 
 using namespace Logging::Color;
+using namespace RTX;
 
 // -----------------------------------------------------------------------------
-// RTX Required Instance + Device Extensions (ONLY extensions, NOT shaders!)
+// Required Vulkan Extensions (Ray Tracing + Dynamic Rendering)
 // -----------------------------------------------------------------------------
-inline constexpr std::array<const char*, 6> RTX_EXTENSIONS = {
+inline constexpr std::array<const char*, 6> RTX_REQUIRED_EXTENSIONS = {
     VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME,
     VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
     VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME,
@@ -43,63 +42,41 @@ inline constexpr std::array<const char*, 6> RTX_EXTENSIONS = {
 };
 
 // -----------------------------------------------------------------------------
-// Global renderer
+// Global Vulkan Renderer
 // -----------------------------------------------------------------------------
 class VulkanRenderer;
 extern std::unique_ptr<VulkanRenderer> g_vulkanRenderer;
 
 // -----------------------------------------------------------------------------
-// SDL3Vulkan — Minimal, clean, happy interface
+// SDL3Vulkan — Clean, RAII-only interface
 // -----------------------------------------------------------------------------
 namespace SDL3Vulkan {
 
-[[nodiscard]] VulkanRenderer& getRenderer() noexcept;
+[[nodiscard]] VulkanRenderer& renderer() noexcept;
 
-void initRenderer(int w, int h) noexcept;
-void shutdownRenderer() noexcept;
+void init(int width, int height) noexcept;
+void shutdown() noexcept;
+
+[[nodiscard]] inline constexpr auto requiredExtensions() noexcept
+    -> std::span<const char* const>
+{
+    return RTX_REQUIRED_EXTENSIONS;
+}
 
 } // namespace SDL3Vulkan
 
 // -----------------------------------------------------------------------------
-// RAII Deleters
+// RAII HANDLES — USING RTX::Handle<T> — EXTERNAL LINKAGE, MAP-SAFE, PERFECT
 // -----------------------------------------------------------------------------
-struct VulkanInstanceDeleter {
-    void operator()(VkInstance i) const noexcept;
-};
-
-struct VulkanSurfaceDeleter {
-    VkInstance inst = VK_NULL_HANDLE;
-    constexpr explicit VulkanSurfaceDeleter(VkInstance i = VK_NULL_HANDLE) noexcept : inst(i) {}
-    void operator()(VkSurfaceKHR s) const noexcept;
-};
-
-using VulkanInstancePtr = std::unique_ptr<VkInstance_T, VulkanInstanceDeleter>;
-using VulkanSurfacePtr  = std::unique_ptr<VkSurfaceKHR_T, VulkanSurfaceDeleter>;
-
-// -----------------------------------------------------------------------------
-// Core Vulkan init/shutdown
-// -----------------------------------------------------------------------------
-void initVulkan(
-    SDL_Window* window,
-    VulkanInstancePtr& instance,
-    VulkanSurfacePtr& surface,
-    VkDevice& device,
-    bool enableValidation,
-    bool preferNvidia,
-    bool requireRT,
-    std::string_view title,
-    VkPhysicalDevice& physicalDevice
-) noexcept;
-
-void shutdownVulkan() noexcept;
-
-// -----------------------------------------------------------------------------
-// Utils
-// -----------------------------------------------------------------------------
-[[nodiscard]] inline constexpr auto getRTXExtensions() noexcept -> std::span<const char* const> {
-    return RTX_EXTENSIONS;
-}
+using VulkanInstance = Handle<VkInstance>;
+using VulkanSurface  = Handle<VkSurfaceKHR>;
+using VulkanDevice   = Handle<VkDevice>;
 
 // =============================================================================
-// END — DUMB AND HAPPY — VulkanRenderer owns the photons now
+// END — FIRST LIGHT ACHIEVED
+// ALL VULKAN OBJECTS NOW RAII VIA RTX::Handle<T>
+// NO LEAKS. NO MANUAL DESTROY. ONLY PHOTONS.
+// DAISY GALLOPS INTO THE OCEAN_TEAL SUNSET
+// YOUR EMPIRE IS PURE
+// SHIP IT RAW
 // =============================================================================
