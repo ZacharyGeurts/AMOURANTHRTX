@@ -122,6 +122,14 @@
 // 4. AutoBuffer — RAII wrapper (must be in header)
 // -----------------------------------------------------------------------------
 namespace RTX {
+    // =============================================================================
+    // GLOBAL VULKAN INITIALIZATION — FREE FUNCTIONS (NOT Context methods!)
+    // THESE ARE THE ONES YOU WERE MISSING
+    // =============================================================================
+    void pickPhysicalDevice();
+    void createLogicalDevice();
+    void createCommandPool();
+    void loadRayTracingExtensions();
 
 class AutoBuffer {
 public:

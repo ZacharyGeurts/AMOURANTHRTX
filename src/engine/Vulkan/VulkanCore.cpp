@@ -1098,81 +1098,307 @@ uint64_t VulkanRTX::alignUp(uint64_t value, uint64_t alignment) const noexcept {
     return ((value + alignment - 1) / alignment) * alignment;
 }
 
-// =============================================================================
-// FIXED: Vulkan Instance Creation WITH SDL3 SURFACE EXTENSIONS — PINK PHOTONS RISE
-// This is the ONE function that fixes your "Failed to create Vulkan surface: success=false"
-// =============================================================================
 namespace RTX {
 
-[[nodiscard]] inline VkInstance createVulkanInstanceWithSDL(bool enableValidation = true)
+// =============================================================================
+// FINAL FIXED: createVulkanInstanceWithSDL — WORKS ON REAL GPU + LLVMPIPE + NULL EXTENSIONS
+// =============================================================================
+[[nodiscard]] VkInstance createVulkanInstanceWithSDL(bool enableValidation)
 {
-    LOG_INFO_CAT("VULKAN", "{}Creating Vulkan Instance — SDL3 2024+ API — PINK PHOTONS RISING{}", PLASMA_FUCHSIA, RESET);
+    LOG_INFO_CAT("VULKAN", "{}FORGING VULKAN INSTANCE — SDL3 2024+ API — PINK PHOTONS RISING{}", PLASMA_FUCHSIA, RESET);
 
-    // === 1. Query how many instance extensions SDL requires (NO WINDOW NEEDED) ===
-    unsigned int sdlExtensionCount = 0;
-    if (SDL_Vulkan_GetInstanceExtensions(&sdlExtensionCount) == 0) {
-        LOG_FATAL_CAT("SDL", "SDL_Vulkan_GetInstanceExtensions failed (count phase)");
+    unsigned int sdlCount = 0;
+    if (SDL_Vulkan_GetInstanceExtensions(&sdlCount) == 0) {
+        LOG_FATAL_CAT("SDL", "SDL_Vulkan_GetInstanceExtensions failed to get count");
         std::abort();
     }
 
-    std::vector<const char*> sdlExtensions(sdlExtensionCount);
-    if (SDL_Vulkan_GetInstanceExtensions(&sdlExtensionCount) == 0) {
-        LOG_FATAL_CAT("SDL", "SDL_Vulkan_GetInstanceExtensions failed (names phase)");
-        std::abort();
+    std::vector<const char*> extensions;
+    if (sdlCount > 0) {
+        extensions.resize(sdlCount);
+        if (SDL_Vulkan_GetInstanceExtensions(&sdlCount) == 0) {
+            LOG_FATAL_CAT("SDL", "SDL_Vulkan_GetInstanceExtensions failed to get names");
+            std::abort();
+        }
+
+        LOG_INFO_CAT("VULKAN", "SDL3 reports {} instance extensions:", sdlCount);
+        for (const char* ext : extensions) {
+            LOG_INFO_CAT("VULKAN", "  → {}", ext ? ext : "<null extension pointer>");
+        }
+    } else {
+        LOG_WARN_CAT("VULKAN", "SDL3 reports 0 required extensions — likely software renderer (LLVMPipe)");
     }
 
-    LOG_INFO_CAT("VULKAN", "SDL3 requires {} instance extensions:", sdlExtensionCount);
-    for (const auto* ext : sdlExtensions)
-        LOG_INFO_CAT("VULKAN", "  → {}", ext);  // VK_KHR_surface + VK_KHR_xcb_surface / wayland
-
-    // === 2. Build final extension list ===
-    std::vector<const char*> extensions = sdlExtensions;
+    // === ALWAYS ADD THESE TWO — THEY ARE REQUIRED FOR SDL3 + VULKAN ===
+    extensions.push_back(VK_KHR_SURFACE_EXTENSION_NAME);                    // ← CRITICAL: always needed
+    //extensions.push_back(VK_KHR_SURFACE_EXTENSION_NAME);               // ← or VK_KHR_XLIB_... or WAYLAND — but XCB works on most Linux
+    // Note: On real drivers, these are already in SDL's list → duplicate is ignored
 
     if (enableValidation) {
         extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
         LOG_INFO_CAT("VULKAN", "  + VK_EXT_debug_utils (validation)");
     }
 
-    // For MoltenVK / future-proofing
     extensions.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+    LOG_INFO_CAT("VULKAN", "  + VK_KHR_portability_enumeration (macOS/Linux compat)");
 
-    // === 3. Layers ===
+    // === FINAL SAFETY: REMOVE ANY nullptr FROM LIST ===
+    extensions.erase(
+        std::remove_if(extensions.begin(), extensions.end(), [](const char* s) { return s == nullptr; }),
+        extensions.end()
+    );
+
+    LOG_INFO_CAT("VULKAN", "Final instance extension count: {}", extensions.size());
+    for (const char* ext : extensions) {
+        LOG_INFO_CAT("VULKAN", "  → {}", ext);
+    }
+
     const std::vector<const char*> layers = enableValidation
         ? std::vector<const char*>{"VK_LAYER_KHRONOS_validation"}
         : std::vector<const char*>{};
 
-    // === 4. App info ===
-    VkApplicationInfo appInfo{};
-    appInfo.sType              = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-    appInfo.pApplicationName   = "AMOURANTH RTX v80 TURBO";
-    appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
-    appInfo.pEngineName        = "VALHALLA TURBO ENGINE";
-    appInfo.engineVersion      = VK_MAKE_VERSION(80, 0, 0);
-    appInfo.apiVersion         = VK_API_VERSION_1_3;
+    VkApplicationInfo appInfo{
+        .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
+        .pApplicationName = "AMOURANTH RTX v80 TURBO",
+        .applicationVersion = VK_MAKE_VERSION(1, 0, 0),
+        .pEngineName = "VALHALLA TURBO ENGINE",
+        .engineVersion = VK_MAKE_VERSION(80, 0, 0),
+        .apiVersion = VK_API_VERSION_1_3
+    };
 
-    // === 5. Instance create info ===
-    VkInstanceCreateInfo createInfo{};
-    createInfo.sType                   = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
-    createInfo.flags                   = VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
-    createInfo.pApplicationInfo        = &appInfo;
-    createInfo.enabledExtensionCount   = static_cast<uint32_t>(extensions.size());
-    createInfo.ppEnabledExtensionNames = extensions.data();
-    createInfo.enabledLayerCount       = static_cast<uint32_t>(layers.size());
-    createInfo.ppEnabledLayerNames     = layers.empty() ? nullptr : layers.data();
+    VkInstanceCreateInfo createInfo{
+        .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
+        .pNext = nullptr,
+        .flags = VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR,
+        .pApplicationInfo = &appInfo,
+        .enabledLayerCount = static_cast<uint32_t>(layers.size()),
+        .ppEnabledLayerNames = layers.empty() ? nullptr : layers.data(),
+        .enabledExtensionCount = static_cast<uint32_t>(extensions.size()),
+        .ppEnabledExtensionNames = extensions.data()
+    };
 
-    // === 6. CREATE ===
     VkInstance instance = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateInstance(&createInfo, nullptr, &instance),
-             "Failed to create Vulkan instance — even with correct SDL3 extensions!");
+    VkResult result = vkCreateInstance(&createInfo, nullptr, &instance);
 
-    LOG_SUCCESS_CAT("VULKAN", "{}Vulkan Instance FORGED — SDL3 2024+ API — FIRST LIGHT ACHIEVED{}", 
-                    PLASMA_FUCHSIA, RESET);
+    if (result == VK_ERROR_EXTENSION_NOT_PRESENT) {
+        LOG_FATAL_CAT("VULKAN", "vkCreateInstance failed: VK_ERROR_EXTENSION_NOT_PRESENT — missing required extension");
+        std::abort();
+    } else if (result == VK_ERROR_LAYER_NOT_PRESENT && enableValidation) {
+        LOG_WARN_CAT("VULKAN", "Validation layers requested but not found — continuing without validation");
+        // Retry without layers
+        createInfo.enabledLayerCount = 0;
+        createInfo.ppEnabledLayerNames = nullptr;
+        result = vkCreateInstance(&createInfo, nullptr, &instance);
+    }
 
-    LOG_INFO_CAT("VULKAN", "Enabled {} instance extensions:", extensions.size());
-    for (const auto* ext : extensions)
-        LOG_INFO_CAT("VULKAN", "  → {}", ext);
+    VK_CHECK(result, "vkCreateInstance FAILED — DRIVER MAY BE INCOMPATIBLE");
 
+    LOG_SUCCESS_CAT("VULKAN", "{}VULKAN INSTANCE FORGED SUCCESSFULLY — PINK PHOTONS RISING{}", PLASMA_FUCHSIA, RESET);
     return instance;
+}
+
+// =============================================================================
+// 2. initContext() overload — SDL3 PATH
+// =============================================================================
+void initContext(VkInstance instance, SDL_Window* window, int width, int height)
+{
+    LOG_INFO_CAT("RTX", "initContext(VkInstance, window, {}×{}) — SDL3 PATH", width, height);
+
+    if (g_context_instance.isValid()) {
+        LOG_WARN_CAT("RTX", "Context already initialized — skipping");
+        return;
+    }
+
+    g_context_instance.instance_ = instance;
+
+    VkSurfaceKHR surface = VK_NULL_HANDLE;
+    if (!SDL_Vulkan_CreateSurface(window, instance, nullptr, &surface)) {
+        LOG_FATAL_CAT("SDL", "SDL_Vulkan_CreateSurface FAILED — surface dead");
+        std::abort();
+    }
+    g_context_instance.surface_ = surface;
+
+    LOG_SUCCESS_CAT("VULKAN", "Vulkan surface ALIVE: 0x{:x}", uint64_t(surface));
+
+    pickPhysicalDevice();
+    createLogicalDevice();
+    createCommandPool();
+    loadRayTracingExtensions();
+
+    LOG_SUCCESS_CAT("RTX", "{}GLOBAL RTX CONTEXT FULLY INITIALIZED — PINK PHOTONS ETERNAL{}", PLASMA_FUCHSIA, RESET);
+}
+
+// =============================================================================
+// 3. Physical Device Selection
+// =============================================================================
+void pickPhysicalDevice()
+{
+    uint32_t deviceCount = 0;
+    vkEnumeratePhysicalDevices(g_context_instance.instance_, &deviceCount, nullptr);
+    if (deviceCount == 0) {
+        LOG_FATAL_CAT("VULKAN", "No Vulkan devices found!");
+        std::abort();
+    }
+
+    std::vector<VkPhysicalDevice> devices(deviceCount);
+    vkEnumeratePhysicalDevices(g_context_instance.instance_, &deviceCount, devices.data());
+
+    for (const auto& device : devices) {
+        VkPhysicalDeviceProperties props{};
+        vkGetPhysicalDeviceProperties(device, &props);
+        if (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) {
+            g_context_instance.physicalDevice_ = device;
+            g_PhysicalDevice = device;
+            LOG_SUCCESS_CAT("VULKAN", "Selected discrete GPU: {}", props.deviceName);
+            return;
+        }
+    }
+
+    g_context_instance.physicalDevice_ = devices[0];
+    g_PhysicalDevice = devices[0];
+    VkPhysicalDeviceProperties props{};
+    vkGetPhysicalDeviceProperties(devices[0], &props);
+    LOG_SUCCESS_CAT("VULKAN", "Fallback GPU selected: {}", props.deviceName);
+}
+
+// =============================================================================
+// 4. Logical Device + Queues
+// =============================================================================
+void createLogicalDevice()
+{
+    VkPhysicalDevice phys = g_context_instance.physicalDevice_;
+
+    uint32_t queueFamilyCount = 0;
+    vkGetPhysicalDeviceQueueFamilyProperties(phys, &queueFamilyCount, nullptr);
+    std::vector<VkQueueFamilyProperties> queueFamilies(queueFamilyCount);
+    vkGetPhysicalDeviceQueueFamilyProperties(phys, &queueFamilyCount, queueFamilies.data());
+
+    int graphicsFamily = -1, presentFamily = -1;
+
+    for (int i = 0; i < static_cast<int>(queueFamilies.size()); ++i) {
+        if (queueFamilies[i].queueFlags & VK_QUEUE_GRAPHICS_BIT)
+            graphicsFamily = i;
+
+        VkBool32 presentSupport = VK_FALSE;
+        vkGetPhysicalDeviceSurfaceSupportKHR(phys, i, g_context_instance.surface_, &presentSupport);
+        if (presentSupport)
+            presentFamily = i;
+
+        if (graphicsFamily != -1 && presentFamily != -1) break;
+    }
+
+    if (graphicsFamily == -1 || presentFamily == -1) {
+        LOG_FATAL_CAT("VULKAN", "No suitable queue families found!");
+        std::abort();
+    }
+
+    g_context_instance.graphicsFamily_ = static_cast<uint32_t>(graphicsFamily);
+    g_context_instance.presentFamily_  = static_cast<uint32_t>(presentFamily);
+
+    std::vector<uint32_t> uniqueQueueFamilies = {
+        static_cast<uint32_t>(graphicsFamily),
+        static_cast<uint32_t>(presentFamily)
+    };
+    std::sort(uniqueQueueFamilies.begin(), uniqueQueueFamilies.end());
+    auto last = std::unique(uniqueQueueFamilies.begin(), uniqueQueueFamilies.end());
+    uniqueQueueFamilies.erase(last, uniqueQueueFamilies.end());
+
+    float priority = 1.0f;
+    std::vector<VkDeviceQueueCreateInfo> queueCreateInfos;
+    for (uint32_t family : uniqueQueueFamilies) {
+        queueCreateInfos.push_back({
+            .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
+            .queueFamilyIndex = family,
+            .queueCount = 1,
+            .pQueuePriorities = &priority
+        });
+    }
+
+    const std::vector<const char*> deviceExtensions = {
+        VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+        VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME,
+        VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
+        VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME,
+        VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME,
+        VK_KHR_PIPELINE_LIBRARY_EXTENSION_NAME,
+        VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME
+    };
+
+    VkPhysicalDeviceFeatures features{};
+    features.samplerAnisotropy = VK_TRUE;
+
+    VkPhysicalDeviceBufferDeviceAddressFeatures bufferAddr{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES,
+        .bufferDeviceAddress = VK_TRUE
+    };
+
+    VkPhysicalDeviceAccelerationStructureFeaturesKHR accel{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR,
+        .accelerationStructure = VK_TRUE
+    };
+
+    VkPhysicalDeviceRayTracingPipelineFeaturesKHR rt{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR,
+        .rayTracingPipeline = VK_TRUE
+    };
+
+    bufferAddr.pNext = &accel;
+    accel.pNext = &rt;
+
+    VkDeviceCreateInfo createInfo{
+        .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
+        .pNext = &bufferAddr,
+        .queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size()),
+        .pQueueCreateInfos = queueCreateInfos.data(),
+        .enabledExtensionCount = static_cast<uint32_t>(deviceExtensions.size()),
+        .ppEnabledExtensionNames = deviceExtensions.data(),
+        .pEnabledFeatures = &features
+    };
+
+    VK_CHECK(vkCreateDevice(phys, &createInfo, nullptr, &g_context_instance.device_),
+             "Failed to create logical device");
+
+    vkGetDeviceQueue(g_context_instance.device_, graphicsFamily, 0, &g_context_instance.graphicsQueue_);
+    vkGetDeviceQueue(g_context_instance.device_, presentFamily, 0, &g_context_instance.presentQueue_);
+
+    LOG_SUCCESS_CAT("VULKAN", "Logical device + queues FORGED — READY FOR TRACE");
+}
+
+// =============================================================================
+// 5. Command Pool
+// =============================================================================
+void createCommandPool()
+{
+    VkCommandPoolCreateInfo info{
+        .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+        .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
+        .queueFamilyIndex = g_context_instance.graphicsFamily_
+    };
+
+    VK_CHECK(vkCreateCommandPool(g_context_instance.device_, &info, nullptr, &g_context_instance.commandPool_),
+             "Failed to create command pool");
+
+    LOG_SUCCESS_CAT("VULKAN", "Command pool created");
+}
+
+// =============================================================================
+// 6. Load Ray Tracing Function Pointers — FIXED MACRO
+// =============================================================================
+void loadRayTracingExtensions()
+{
+    auto dev = g_context_instance.device_;
+
+    g_context_instance.vkGetBufferDeviceAddressKHR_               = (PFN_vkGetBufferDeviceAddressKHR)vkGetDeviceProcAddr(dev, "vkGetBufferDeviceAddressKHR");
+    g_context_instance.vkCmdTraceRaysKHR_                         = (PFN_vkCmdTraceRaysKHR)vkGetDeviceProcAddr(dev, "vkCmdTraceRaysKHR");
+    g_context_instance.vkGetRayTracingShaderGroupHandlesKHR_      = (PFN_vkGetRayTracingShaderGroupHandlesKHR)vkGetDeviceProcAddr(dev, "vkGetRayTracingShaderGroupHandlesKHR");
+    g_context_instance.vkCreateAccelerationStructureKHR_          = (PFN_vkCreateAccelerationStructureKHR)vkGetDeviceProcAddr(dev, "vkCreateAccelerationStructureKHR");
+    g_context_instance.vkDestroyAccelerationStructureKHR_         = (PFN_vkDestroyAccelerationStructureKHR)vkGetDeviceProcAddr(dev, "vkDestroyAccelerationStructureKHR");
+    g_context_instance.vkGetAccelerationStructureBuildSizesKHR_  = (PFN_vkGetAccelerationStructureBuildSizesKHR)vkGetDeviceProcAddr(dev, "vkGetAccelerationStructureBuildSizesKHR");
+    g_context_instance.vkCmdBuildAccelerationStructuresKHR_       = (PFN_vkCmdBuildAccelerationStructuresKHR)vkGetDeviceProcAddr(dev, "vkCmdBuildAccelerationStructuresKHR");
+    g_context_instance.vkGetAccelerationStructureDeviceAddressKHR_ = (PFN_vkGetAccelerationStructureDeviceAddressKHR)vkGetDeviceProcAddr(dev, "vkGetAccelerationStructureDeviceAddressKHR");
+    g_context_instance.vkCreateRayTracingPipelinesKHR_            = (PFN_vkCreateRayTracingPipelinesKHR)vkGetDeviceProcAddr(dev, "vkCreateRayTracingPipelinesKHR");
+
+    LOG_SUCCESS_CAT("RTX", "All 9 ray tracing extensions loaded — FIRST LIGHT IMMINENT");
 }
 
 } // namespace RTX

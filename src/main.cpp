@@ -234,23 +234,16 @@ int main(int argc, char* argv[])
         LOG_SUCCESS_CAT("MAIN", "PHASE 2 COMPLETE — MAIN INTERFACE ONLINE — PINK PHOTONS RISING");
 
         // ──────────────────────────────────────────────────────────────────────
-        // PHASE 3: VULKAN CONTEXT INITIALIZATION
+        // PHASE 3: VULKAN CONTEXT INITIALIZATION — SDL3 2024+ API
         // ──────────────────────────────────────────────────────────────────────
         bulkhead("PHASE 3: VULKAN CONTEXT INITIALIZATION");
-        LOG_INFO_CAT("MAIN", "Initializing global Vulkan context via RTX::initContext()");
+        LOG_INFO_CAT("MAIN", "Creating Vulkan instance via SDL3 2024+ API (no window param needed)");
 
-        RTX::initContext(window, TARGET_WIDTH, TARGET_HEIGHT);
+        // THIS IS THE ONLY CORRECT CALL NOW
+        VkInstance instance = RTX::createVulkanInstanceWithSDL(true);  // true = validation layers
 
-        LOG_INFO_CAT("MAIN", "Waiting for RTX::g_ctx() to become valid...");
-        auto start = std::chrono::steady_clock::now();
-        while (!RTX::g_ctx().isValid()) {
-            if (std::chrono::duration<float>(std::chrono::steady_clock::now() - start).count() > 5.0f) {
-                THROW_MAIN("RTX context failed to initialize within 5 seconds");
-            }
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
-        }
-
-        LOG_SUCCESS_CAT("MAIN", "Vulkan context validated — instance, device, surface ready");
+        LOG_INFO_CAT("MAIN", "Initializing global Vulkan context with newly created instance");
+        RTX::initContext(instance, window, TARGET_WIDTH, TARGET_HEIGHT);
 
         // ──────────────────────────────────────────────────────────────────────
         // PHASE 4: APPLICATION + RENDERER

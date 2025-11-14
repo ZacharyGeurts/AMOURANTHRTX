@@ -59,6 +59,21 @@ struct Camera;
 
 using namespace Logging::Color;
 
+// Add this somewhere in your global Vulkan setup
+inline const char* getPlatformSurfaceExtension()
+{
+#if defined(__linux__)
+    return VK_KHR_SURFACE_EXTENSION_NAME;     // Most Linux
+    // return VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME; // Uncomment if using Wayland
+#elif defined(_WIN32)
+    return VK_KHR_WIN32_SURFACE_EXTENSION_NAME;
+#elif defined(__APPLE__)
+    return VK_EXT_METAL_SURFACE_EXTENSION_NAME;
+#else
+    return VK_KHR_XCB_SURFACE_EXTENSION_NAME;
+#endif
+}
+
 // -----------------------------------------------------------------------------
 // User-defined literals
 // -----------------------------------------------------------------------------
@@ -71,6 +86,11 @@ constexpr uint64_t operator"" _TB(unsigned long long v) noexcept { return v << 4
 // NAMESPACE RTX
 // =============================================================================
 namespace RTX {
+    // =============================================================================
+    // FIXED: SDL3 2024+ — CREATE INSTANCE + OVERLOAD FOR initContext
+    // =============================================================================
+    [[nodiscard]] VkInstance createVulkanInstanceWithSDL(bool enableValidation);
+    void initContext(VkInstance instance, SDL_Window* window, int width, int height);
 
     // =============================================================================
     // Helpers (declarations only) — MOVED UP FOR TEMPLATE VISIBILITY
