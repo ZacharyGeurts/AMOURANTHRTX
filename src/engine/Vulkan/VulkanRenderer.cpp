@@ -678,6 +678,9 @@ void VulkanRenderer::createRayTracingPipeline(const std::vector<std::string>& sh
     LOG_TRACE_CAT("RENDERER", "createRayTracingPipeline — COMPLETE");
 }
 
+// ──────────────────────────────────────────────────────────────────────────────
+// Shader Binding Table Creation — FIXED FOR GLOBAL QUEUE/POOL USAGE
+// ──────────────────────────────────────────────────────────────────────────────
 void VulkanRenderer::createShaderBindingTable() {
     LOG_TRACE_CAT("RENDERER", "createShaderBindingTable — START");
 
@@ -853,12 +856,12 @@ void VulkanRenderer::createShaderBindingTable() {
     VK_CHECK(vkAllocateMemory(device, &allocInfo, nullptr, &sbtMemory_), "Failed to allocate final SBT memory");
     VK_CHECK(vkBindBufferMemory(device, sbtBuffer_, sbtMemory_, 0), "Failed to bind final SBT memory");
 
-    // Copy staging → device
-    VkCommandBuffer cmd = beginSingleTimeCommands(device, *commandPool_);
+    // Copy staging → device (using global queue/pool)
+    VkCommandBuffer cmd = beginSingleTimeCommands(device, RTX::g_ctx().commandPool());
     VkBufferCopy copy{};
     copy.size = sbtBufferSize;
     vkCmdCopyBuffer(cmd, stagingBuffer, sbtBuffer_, 1, &copy);
-    endSingleTimeCommands(device, *commandPool_, *graphicsQueue_, cmd);
+    endSingleTimeCommands(device, RTX::g_ctx().commandPool(), RTX::g_ctx().graphicsQueue(), cmd);
 
     // Cleanup staging
     vkDestroyBuffer(device, stagingBuffer, nullptr);

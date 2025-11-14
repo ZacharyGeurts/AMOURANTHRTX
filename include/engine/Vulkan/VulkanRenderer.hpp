@@ -2,7 +2,9 @@
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
 //
-// VulkanRenderer — FINAL PRODUCTION v10.4 — NOV 14 2025
+// VulkanRenderer.hpp — FIXED v10.4.1 — NOV 14 2025
+// • FIXED: Invalid queue in vkQueueWaitIdle — Use global RTX::g_ctx() for queues/pools (no local Handles needed)
+// • NO OWNERSHIP: VkQueue/VkCommandPool managed by VulkanCore/RTXHandler — Avoid null deref crashes
 // • READY FOR RTX 50-SERIES & BEYOND: DLSS 4.0 Hooks, Mesh Shaders, Variable Rate Shading
 // • DEVELOPER WISHLIST: Path Tracing v2, Neural Rendering, AI Upscaling, Multi-GPU
 // • REMOVED: shaderPaths parameter — VulkanRenderer now OWNS its shaders
@@ -105,11 +107,11 @@ public:
     void setRenderMode(int mode) noexcept;
 
     // Accessors
-    [[nodiscard]] VkDevice         device()          const noexcept { return RTX::ctx().vkDevice(); }
-    [[nodiscard]] VkPhysicalDevice physicalDevice()  const noexcept { return RTX::ctx().vkPhysicalDevice(); }
-    [[nodiscard]] VkCommandPool    commandPool()      const noexcept { return *commandPool_; }
-    [[nodiscard]] VkQueue          graphicsQueue()   const noexcept { return *graphicsQueue_; }
-    [[nodiscard]] VkQueue          presentQueue()    const noexcept { return RTX::ctx().presentQueue(); }
+    [[nodiscard]] VkDevice         device()          const noexcept { return RTX::g_ctx().vkDevice(); }
+    [[nodiscard]] VkPhysicalDevice physicalDevice()  const noexcept { return RTX::g_ctx().vkPhysicalDevice(); }
+    [[nodiscard]] VkCommandPool    commandPool()     const noexcept { return RTX::g_ctx().commandPool(); }
+    [[nodiscard]] VkQueue          graphicsQueue()   const noexcept { return RTX::g_ctx().graphicsQueue(); }
+    [[nodiscard]] VkQueue          presentQueue()    const noexcept { return RTX::g_ctx().presentQueue(); }
 
     [[nodiscard]] int              width()           const noexcept { return width_; }
     [[nodiscard]] int              height()          const noexcept { return height_; }
@@ -174,10 +176,6 @@ private:
 
     // Command buffers
     std::vector<VkCommandBuffer> commandBuffers_;
-
-    // Core Handles (for SBT copy etc.)
-    RTX::Handle<VkCommandPool> commandPool_;
-    RTX::Handle<VkQueue> graphicsQueue_;
 
     // Descriptor pools
     RTX::Handle<VkDescriptorPool> descriptorPool_;
@@ -347,5 +345,5 @@ inline void shutdown() noexcept {
 
 // =============================================================================
 // STATUS: FIRST LIGHT ACHIEVED — PINK PHOTONS ARMED — ETERNAL
-// NOV 14 2025 — v10.4 — RTX & BEYOND — DEVELOPER WISHLIST ACTIVATED
+// NOV 14 2025 — v10.4.1 — FIXED QUEUE CRASH — RTX & BEYOND — DEVELOPER WISHLIST ACTIVATED
 // =============================================================================

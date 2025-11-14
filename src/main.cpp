@@ -301,9 +301,6 @@ int main(int argc, char* argv[]) {
         );
         app->setRenderer(std::move(renderer));
 
-        LOG_INFO_CAT("MAIN", "Initializing Shader Binding Table (64MB Titan-grade)");
-        g_rtx().initShaderBindingTable(g_PhysicalDevice);
-
         LOG_INFO_CAT("MAIN", "Updating RTX descriptors for frame 0");
         g_rtx().updateRTXDescriptors(0,
             VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,
