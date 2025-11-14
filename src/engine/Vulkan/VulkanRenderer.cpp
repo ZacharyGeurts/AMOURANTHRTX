@@ -450,7 +450,7 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, bool o
     // REPAIRED: SDL3 Vulkan surface creation — bool return
     VkSurfaceKHR surface = VK_NULL_HANDLE;
     bool surfaceSuccess = SDL_Vulkan_CreateSurface(window_, c.instance(), nullptr, &surface);
-    if (!surfaceSuccess || surface == VK_NULL_HANDLE) {
+    if ((surfaceSuccess || surface == VK_NULL_HANDLE) == 0) {
         LOG_FATAL_CAT("RENDERER", "Failed to create Vulkan surface: success={}, surface=0x{:x}", surfaceSuccess, reinterpret_cast<uintptr_t>(surface));
         throw std::runtime_error("Vulkan surface creation failed");
     }
