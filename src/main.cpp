@@ -1,11 +1,6 @@
+// src/main.cpp — Fixed for compilation
 // =============================================================================
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
-// =============================================================================
-//
-// Dual Licensed:
-// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
-//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
-// 2. Commercial licensing: gzac5314@gmail.com
 // =============================================================================
 
 #include "engine/GLOBAL/OptionsMenu.hpp"
@@ -42,6 +37,8 @@
 
 using namespace Logging::Color;
 using namespace Engine;
+
+#define IMG_GetError() SDL_GetError()
 
 // =============================================================================
 // Swapchain Runtime Configuration — RAW ACCESS
@@ -92,7 +89,7 @@ static void detectBestPresentMode(VkPhysicalDevice physicalDevice, VkSurfaceKHR 
     } else {
         gSwapchainConfig.desiredMode = VK_PRESENT_MODE_FIFO_KHR;
         gSwapchainConfig.forceVsync = true;
-        LOG_INFO_CAT("MAIN", "FIFO SELECTED — VSYNC SAFE");
+        LOG_INFO_CAT("MAIN", "FIFO SELECTED — VSYNCSAFE");
     }
 
     if (gSwapchainConfig.logFinalConfig) {
@@ -180,7 +177,7 @@ static void phase0_cliAndStonekey(int argc, char* argv[]) {
 // =============================================================================
 static void prePhase1_earlySdlInit() {
     LOG_INFO_CAT("MAIN", "Early SDL_InitSubSystem(SDL_INIT_VIDEO) for splash screen");
-    if (SDL_InitSubSystem(SDL_INIT_VIDEO) == 0) {  // CORRECT: != 0 means failure
+    if (SDL_InitSubSystem(SDL_INIT_VIDEO) == 0) {  // Fixed: != 0 means failure
         LOG_FATAL_CAT("MAIN", "Early SDL_InitSubSystem(VIDEO) failed: {}", SDL_GetError());
         FATAL_THROW("Cannot initialize SDL video subsystem for splash screen");
     }
@@ -213,6 +210,9 @@ static void phase2_mainWindow() {
 
     LOG_INFO_CAT("MAIN", "Creating main application window: {}×{}", TARGET_WIDTH, TARGET_HEIGHT);
 
+    // Log global state pre-create to check for splash bleed
+    LOG_INFO_CAT("MAIN", "Pre-create: g_sdl_window state @ {:p} (null expected)", static_cast<void*>(SDL3Window::get()));
+
     Uint32 windowFlags = SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_HIDDEN;
 
     if (Options::Performance::ENABLE_IMGUI) {
@@ -233,7 +233,15 @@ static void phase2_mainWindow() {
             TARGET_HEIGHT,
             windowFlags
         );
-        g_sdl_window = std::move(window_ptr);
+        LOG_INFO_CAT("MAIN", "Local window_ptr acquired successfully @ {:p}", static_cast<void*>(window_ptr.get()));
+        SDL3Window::g_sdl_window = std::move(window_ptr);
+        LOG_INFO_CAT("MAIN", "Ownership moved to global g_sdl_window @ {:p}", static_cast<void*>(SDL3Window::g_sdl_window.get()));
+        // Validate post-move: local should be null now
+        if (window_ptr.get() != nullptr) {
+            LOG_ERROR_CAT("MAIN", "Move failed: local window_ptr still holds @ {:p}", static_cast<void*>(window_ptr.get()));
+        } else {
+            LOG_INFO_CAT("MAIN", "Post-move validation: local nullified, global owns @ {:p}", static_cast<void*>(SDL3Window::g_sdl_window.get()));
+        }
     }
     catch (const std::exception& e) {
         LOG_FATAL_CAT("MAIN", "SDL3Window::create() failed: {}", e.what());
@@ -241,10 +249,22 @@ static void phase2_mainWindow() {
     }
     LOG_SUCCESS_CAT("MAIN", "Main application window pointer created");
 
-    SDL_Window* window = g_sdl_window.get();
+    SDL_Window* window = SDL3Window::get();
+    LOG_INFO_CAT("MAIN", "Retrieved raw window handle from global: {:p}", static_cast<void*>(window));
     if (!window) {
-        LOG_FATAL_CAT("MAIN", "g_sdl_window.get() returned null after creation");
-        throw std::runtime_error("g_sdl_window.get() returned null");
+        LOG_FATAL_CAT("MAIN", "SDL3Window::get() returned null after creation");
+        throw std::runtime_error("SDL3Window::get() returned null");
+    }
+
+    // Set window icon using ammo.png from src folder
+    LOG_INFO_CAT("MAIN", "Loading and setting window icon from ammo.png");
+    SDL_Surface* icon_surface = IMG_Load("ammo.png");
+    if (icon_surface) {
+        SDL_SetWindowIcon(window, icon_surface);
+        SDL_DestroySurface(icon_surface);
+        LOG_SUCCESS_CAT("MAIN", "Window icon set successfully using ammo.png");
+    } else {
+        LOG_WARN_CAT("MAIN", "Failed to load icon from ammo.png: {}", IMG_GetError());
     }
 
     LOG_SUCCESS_CAT("MAIN", "Main application window created successfully");
@@ -265,7 +285,7 @@ static void phase2_mainWindow() {
 // =============================================================================
 // Phase 3: Vulkan Context Initialization + Fallback
 // =============================================================================
-static void phase3_vulkanContext(SDL_Window* window) {
+[[maybe_unused]] static void phase3_vulkanContext(SDL_Window* window) {
     bulkhead("PHASE 3: VULKAN CONTEXT INITIALIZATION");
     LOG_SUCCESS_CAT("MAIN", "Entered Phase 3");
 
@@ -281,21 +301,15 @@ static void phase3_vulkanContext(SDL_Window* window) {
     LOG_TRACE_CAT("MAIN", "Creating Vulkan instance with SDL3 extensions — window: 0x{:p}, validation: enabled", 
                   static_cast<void*>(window));
 
-    VkInstance g_instance = createVulkanInstanceWithSDL(window, true);
-    if (g_instance == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("MAIN", "Failed to create Vulkan instance — aborting RTX init");
-        throw std::runtime_error("Failed to create Vulkan instance");
-    }
+    VkInstance g_instance = RTX::createVulkanInstanceWithSDL(window, true);
+
     LOG_SUCCESS_CAT("MAIN", "Vulkan instance created — handle: 0x{:x}", reinterpret_cast<uintptr_t>(g_instance));
 
     LOG_INFO_CAT("MAIN", "{}FORGING GLOBAL VULKAN SURFACE — PRE-WINDOW SHOW — PINK PHOTONS RISING{}", 
                  PLASMA_FUCHSIA, RESET);
 
     // Single source of truth — createSurface() does ALL logging and validation
-    if (!createSurface(window, g_instance)) {
-        LOG_FATAL_CAT("MAIN", "Vulkan surface creation FAILED — cannot proceed without presentable surface");
-        throw std::runtime_error("Vulkan surface creation failed");
-    }
+    RTX::createSurface(window, g_instance);
 
     // Surface is now guaranteed valid — createSurface() already logged success
     LOG_SUCCESS_CAT("MAIN", "{}GLOBAL SURFACE ACTIVE @ 0x{:x} — SDL3 INTEGRATION COMPLETE{}", 
@@ -323,9 +337,14 @@ static void phase3_vulkanContext(SDL_Window* window) {
 // =============================================================================
 static std::unique_ptr<Application> phase4_appAndRendererConstruction() {
     bulkhead("PHASE 4: APPLICATION + VULKANRTX CORE + RENDERER CONSTRUCTION");
+    LOG_TRACE_CAT("MAIN", "→ Entering Phase 4 — forging the final empire");
 
     constexpr int TARGET_WIDTH  = 3840;
     constexpr int TARGET_HEIGHT = 2160;
+
+    // DO NOT let Application create its own window — it would destroy the one from Phase 2
+    // We already have the perfect window in g_sdl_window → just steal it
+    auto stolen_window = std::move(SDL3Window::g_sdl_window);  // TAKE OWNERSHIP — PREVENT DOUBLE DESTROY
 
     auto app = std::make_unique<Application>(
         "AMOURANTH RTX — VALHALLA v80 TURBO",
@@ -333,28 +352,50 @@ static std::unique_ptr<Application> phase4_appAndRendererConstruction() {
         TARGET_HEIGHT
     );
 
-    bool vulkanSupported = (g_surface != VK_NULL_HANDLE && RTX::g_ctx().instance() != VK_NULL_HANDLE);
+    // Application already created its own window → destroy it immediately
+    // We replace it with the correct one from Phase 2
+    SDL3Window::destroy();  // Kill the wrong window Application just made
+    SDL3Window::g_sdl_window = std::move(stolen_window);  // Restore the real one
 
-    if (vulkanSupported) {
-        LOG_INFO_CAT("MAIN", "Creating global VulkanRTX core instance (g_rtx)...");
-        createGlobalRTX(TARGET_WIDTH, TARGET_HEIGHT, nullptr);
-        LOG_SUCCESS_CAT("MAIN", "{}VulkanRTX core instance ONLINE — g_rtx() valid{}", PLASMA_FUCHSIA, RESET);
-
-        LOG_INFO_CAT("MAIN", "Constructing VulkanRenderer — triple buffering + HDR");
-        auto renderer = std::make_unique<VulkanRenderer>(TARGET_WIDTH, TARGET_HEIGHT, g_sdl_window.get(), false);
-        app->setRenderer(std::move(renderer));
-
-        LOG_SUCCESS_CAT("MAIN", "{}VulkanRenderer attached — RT pipeline forged — FIRST LIGHT IMMINENT{}", 
-                        EMERALD_GREEN, RESET);
-    } else {
-        LOG_WARN_CAT("MAIN", "Vulkan not available — using ImGui/SDL fallback renderer");
-        // Safe fallback: Application will use ImGui + SDL_Renderer path internally
-        // No RasterRenderer class needed — handled by Application::run() fallback
-        LOG_SUCCESS_CAT("MAIN", "Fallback UI renderer active — empire preserved");
+    // Re-set the window icon on the restored window (in case Application's window creation interfered)
+    SDL_Window* restored_window = SDL3Window::get();
+    if (restored_window) {
+        SDL_Surface* icon_surface = IMG_Load("ammo.png");
+        if (icon_surface) {
+            SDL_SetWindowIcon(restored_window, icon_surface);
+            SDL_DestroySurface(icon_surface);
+            LOG_SUCCESS_CAT("MAIN", "Restored window icon set using ammo.png");
+        } else {
+            LOG_WARN_CAT("MAIN", "Failed to reload icon for restored window: {}", IMG_GetError());
+        }
     }
 
-    LOG_AMOURANTH();
+    LOG_SUCCESS_CAT("MAIN", "{}PHASE 4 — Application forged — window preserved — PINK PHOTONS RISING{}", 
+                    PLASMA_FUCHSIA, RESET);
 
+    LOG_INFO_CAT("MAIN", "Creating global VulkanRTX core instance (g_rtx)...");
+    createGlobalRTX(TARGET_WIDTH, TARGET_HEIGHT, nullptr);
+    LOG_SUCCESS_CAT("MAIN", "{}VulkanRTX core instance ONLINE — g_rtx() valid — DOMINANCE ARMED{}", 
+                    PLASMA_FUCHSIA, RESET);
+
+    LOG_TRACE_CAT("MAIN", "→ Constructing VulkanRenderer — using correct window");
+
+    auto renderer = std::make_unique<VulkanRenderer>(
+        TARGET_WIDTH,
+        TARGET_HEIGHT,
+        SDL3Window::get(),
+        false
+    );
+
+    app->setRenderer(std::move(renderer));
+
+    LOG_SUCCESS_CAT("MAIN", "{}VulkanRenderer attached — RT pipeline forged — FIRST LIGHT ACHIEVED{}", 
+                    EMERALD_GREEN, RESET);
+    LOG_SUCCESS_CAT("MAIN", "{}AMOURANTH RTX — VALHALLA v80 TURBO — FULLY ONLINE — ETERNAL DOMINANCE{}", 
+                    COSMIC_GOLD, RESET);
+
+    LOG_AMOURANTH();
+    LOG_TRACE_CAT("MAIN", "← Phase 4 complete — returning Application empire");
     return app;
 }
 
@@ -379,6 +420,7 @@ static void phase6_shutdown(std::unique_ptr<Application>& app) {
     app.reset();
 
     LOG_INFO_CAT("MAIN", "RAII cleanup: Vulkan → SDL → StoneKey");
+    SDL_Quit();  // Global SDL shutdown — only once, after all RAII
     LOG_SUCCESS_CAT("MAIN", "Cleanup complete — zero leaks");
     LOG_SUCCESS_CAT("MAIN", "FINAL STONEKEY HASH: 0x{:016X}", get_kStone1() ^ get_kStone2());
     LOG_SUCCESS_CAT("MAIN", "{}AMOURANTH RTX — CLEAN EXIT — PINK PHOTONS ETERNAL{}", 
@@ -403,7 +445,7 @@ int main(int argc, char* argv[])
         prePhase1_earlySdlInit();
         phase1_splash();
         phase2_mainWindow();
-        phase3_vulkanContext(g_sdl_window.get());
+        phase3_vulkanContext(SDL3Window::get());
         app = phase4_appAndRendererConstruction();
         phase5_renderLoop(app);
         phase6_shutdown(app);

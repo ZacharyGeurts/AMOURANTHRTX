@@ -18,7 +18,6 @@
 // -----------------------------------------------------------------------------
 // 2. ENGINE-WIDE MACROS — DEFINED HERE, VISIBLE EVERYWHERE
 // -----------------------------------------------------------------------------
-
 // VulkanCore.hpp and logging.hpp
 
 // -----------------------------------------------------------------------------
@@ -27,6 +26,7 @@
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/GLOBAL/RTXHandler.hpp"
 #include "engine/GLOBAL/LAS.hpp"
+#include "engine/SDL3/SDL3_image.hpp"  // For IMG_Load, IMG_Init/Quit, and error handling
 #include "handle_app.hpp"                 // ← your existing include
 // ... add more global headers here as needed ...
 

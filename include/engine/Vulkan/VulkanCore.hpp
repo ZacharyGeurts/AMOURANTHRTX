@@ -46,6 +46,26 @@ inline static VKAPI_ATTR VkBool32 VKAPI_CALL VulkanDebugCallback(
     return VK_FALSE;
 }
 
+template <>
+struct std::formatter<VkPhysicalDeviceType, char> : std::formatter<std::string_view, char> {
+    constexpr auto parse(format_parse_context& ctx) -> decltype(ctx.begin()) {
+        return std::formatter<std::string_view, char>::parse(ctx);
+    }
+
+    template <typename FormatContext>
+    auto format(VkPhysicalDeviceType type, FormatContext& ctx) const {
+        const char* name;
+        switch (type) {
+            case VK_PHYSICAL_DEVICE_TYPE_OTHER:              name = "Other"; break;
+            case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU:     name = "Integrated"; break;
+            case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU:       name = "Discrete"; break;
+            case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU:        name = "Virtual"; break;
+            case VK_PHYSICAL_DEVICE_TYPE_CPU:                name = "CPU"; break;
+            default:                                         name = "Unknown"; break;
+        }
+        return std::formatter<std::string_view, char>::format(name, ctx);
+    }
+};
 
 #define VK_CHECK(call, msg) \
     do { \

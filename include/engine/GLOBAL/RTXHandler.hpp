@@ -197,98 +197,131 @@ namespace RTX {
     #define HANDLE_GET(var) ((var).get())
     #define HANDLE_RESET(var) do { LOG_INFO_CAT("RTX", "HANDLE_RESET: {}", #var); (var).reset(); } while(0)
 
-    // =============================================================================
-    // Context — FINAL: Async Compute + Ready Flag + Full Cleanup + Safe Accessors
-    // =============================================================================
-    struct Context {
-        VkInstance       instance_       = VK_NULL_HANDLE;
-        VkSurfaceKHR     surface_        = VK_NULL_HANDLE;
-        VkPhysicalDevice physicalDevice_ = VK_NULL_HANDLE;
-        VkDevice         device_         = VK_NULL_HANDLE;
-        VkQueue          graphicsQueue_  = VK_NULL_HANDLE;
-        VkQueue          presentQueue_   = VK_NULL_HANDLE;
-        VkCommandPool    commandPool_    = VK_NULL_HANDLE;
-        VkPipelineCache  pipelineCache_  = VK_NULL_HANDLE;
-		VkDebugUtilsMessengerEXT debugMessenger_ = VK_NULL_HANDLE;
+// =============================================================================
+// Context — FINAL: Async Compute + Ready Flag + Full Cleanup + Safe Accessors
+// =============================================================================
+// =============================================================================
+// Context — FINAL: Async Compute + Ready Flag + Full Cleanup + Safe Accessors
+// =============================================================================
+struct Context {
+public:
+    // Core Vulkan Handles
+    VkInstance       instance_       = VK_NULL_HANDLE;
+    VkSurfaceKHR     surface_        = VK_NULL_HANDLE;
+    VkPhysicalDevice physicalDevice_ = VK_NULL_HANDLE;
+    VkDevice         device_         = VK_NULL_HANDLE;
+    VkQueue          graphicsQueue_  = VK_NULL_HANDLE;
+    VkQueue          presentQueue_   = VK_NULL_HANDLE;
+    VkCommandPool    commandPool_    = VK_NULL_HANDLE;
+    VkPipelineCache  pipelineCache_  = VK_NULL_HANDLE;
+    VkDebugUtilsMessengerEXT debugMessenger_ = VK_NULL_HANDLE;
 
-        // NEW: Async Compute Support
-        uint32_t         computeFamily_      = UINT32_MAX;
-        VkQueue          computeQueue_       = VK_NULL_HANDLE;
-        VkCommandPool    computeCommandPool_ = VK_NULL_HANDLE;
+    // Window and Dimensions
+    SDL_Window*      window   = nullptr;
+    int              width    = 0;
+    int              height   = 0;
 
-        uint32_t         graphicsFamily_    = UINT32_MAX;
-        uint32_t         presentFamily_     = UINT32_MAX;
+    // Validity and Readiness Flags
+    bool             valid_   = false;  // For ctx() guard during init
 
-        // Ray Tracing Extensions
-        PFN_vkGetBufferDeviceAddressKHR               vkGetBufferDeviceAddressKHR_               = nullptr;
-        PFN_vkCmdTraceRaysKHR                         vkCmdTraceRaysKHR_                         = nullptr;
-        PFN_vkGetRayTracingShaderGroupHandlesKHR      vkGetRayTracingShaderGroupHandlesKHR_      = nullptr;
-        PFN_vkCreateAccelerationStructureKHR          vkCreateAccelerationStructureKHR_          = nullptr;
-        PFN_vkDestroyAccelerationStructureKHR         vkDestroyAccelerationStructureKHR_         = nullptr;
-        PFN_vkGetAccelerationStructureBuildSizesKHR  vkGetAccelerationStructureBuildSizesKHR_  = nullptr;
-        PFN_vkCmdBuildAccelerationStructuresKHR       vkCmdBuildAccelerationStructuresKHR_       = nullptr;
-        PFN_vkGetAccelerationStructureDeviceAddressKHR vkGetAccelerationStructureDeviceAddressKHR_ = nullptr;
-        PFN_vkCreateRayTracingPipelinesKHR            vkCreateRayTracingPipelinesKHR_            = nullptr;
+    mutable std::atomic<bool> ready_{false};  // Thread-safe for renderer
 
-        VkPhysicalDeviceRayTracingPipelinePropertiesKHR rayTracingProps_{
-            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR
-        };
+    // Async Compute Support
+    uint32_t         computeFamily_      = UINT32_MAX;
+    VkQueue          computeQueue_       = VK_NULL_HANDLE;
+    VkCommandPool    computeCommandPool_ = VK_NULL_HANDLE;
 
-        Handle<VkImageView> blueNoiseView_;
-        Handle<VkBuffer>    reservoirBuffer_;
-        Handle<VkBuffer>    frameDataBuffer_;
-        Handle<VkBuffer>    debugVisBuffer_;
+    uint32_t         graphicsFamily_    = UINT32_MAX;
+    uint32_t         presentFamily_     = UINT32_MAX;
 
-        // NEW: Context readiness guard — prevents renderer from touching device() too early
-        mutable std::atomic<bool> ready_{false};
+    // Ray Tracing Extensions (Function Pointers) — Public for direct access in LAS.hpp et al.
+    PFN_vkGetBufferDeviceAddressKHR               vkGetBufferDeviceAddressKHR_               = nullptr;
+    PFN_vkCmdTraceRaysKHR                         vkCmdTraceRaysKHR_                         = nullptr;
+    PFN_vkGetRayTracingShaderGroupHandlesKHR      vkGetRayTracingShaderGroupHandlesKHR_      = nullptr;
+    PFN_vkCreateAccelerationStructureKHR          vkCreateAccelerationStructureKHR_          = nullptr;
+    PFN_vkDestroyAccelerationStructureKHR         vkDestroyAccelerationStructureKHR_         = nullptr;
+    PFN_vkGetAccelerationStructureBuildSizesKHR  vkGetAccelerationStructureBuildSizesKHR_  = nullptr;
+    PFN_vkCmdBuildAccelerationStructuresKHR       vkCmdBuildAccelerationStructuresKHR_       = nullptr;
+    PFN_vkGetAccelerationStructureDeviceAddressKHR vkGetAccelerationStructureDeviceAddressKHR_ = nullptr;
+    PFN_vkCreateRayTracingPipelinesKHR            vkCreateRayTracingPipelinesKHR_            = nullptr;
 
-        void init(SDL_Window* window, int width, int height);
-        void cleanup() noexcept;
-        
-        [[nodiscard]] bool isValid() const noexcept;
-        [[nodiscard]] bool isReady() const noexcept { return ready_.load(std::memory_order_acquire); }
-        void markReady() noexcept { ready_.store(true, std::memory_order_release); }
-
-        [[nodiscard]] VkDevice          device()         const noexcept { return device_; }
-        [[nodiscard]] VkPhysicalDevice  physicalDevice() const noexcept { return physicalDevice_; }
-        [[nodiscard]] VkInstance        instance()       const noexcept { return instance_; }
-        [[nodiscard]] VkSurfaceKHR      surface()        const noexcept { return surface_; }
-
-        // Legacy aliases (kept for compatibility)
-        [[nodiscard]] VkDevice         vkDevice() const noexcept { return device(); }
-        [[nodiscard]] VkPhysicalDevice vkPhysicalDevice() const noexcept { return physicalDevice(); }
-        [[nodiscard]] VkSurfaceKHR     vkSurface() const noexcept { return surface(); }
-
-        [[nodiscard]] uint32_t         graphicsFamily() const noexcept { return graphicsFamily_; }
-        [[nodiscard]] uint32_t         presentFamily()  const noexcept { return presentFamily_; }
-        [[nodiscard]] uint32_t         computeFamily()  const noexcept { return computeFamily_; }
-
-        [[nodiscard]] VkCommandPool    commandPool()       const noexcept { return commandPool_; }
-        [[nodiscard]] VkCommandPool    computeCommandPool()const noexcept { return computeCommandPool_; }
-
-        [[nodiscard]] VkQueue          graphicsQueue() const noexcept { return graphicsQueue_; }
-        [[nodiscard]] VkQueue          presentQueue()  const noexcept { return presentQueue_; }
-        [[nodiscard]] VkQueue          computeQueue()   const noexcept { return computeQueue_; }
-
-        [[nodiscard]] VkPipelineCache  pipelineCacheHandle() const noexcept { return pipelineCache_; }
-
-        // Ray Tracing Function Pointers
-        [[nodiscard]] PFN_vkCmdTraceRaysKHR                         vkCmdTraceRaysKHR() const noexcept { return vkCmdTraceRaysKHR_; }
-        [[nodiscard]] PFN_vkGetRayTracingShaderGroupHandlesKHR      vkGetRayTracingShaderGroupHandlesKHR() const noexcept { return vkGetRayTracingShaderGroupHandlesKHR_; }
-        [[nodiscard]] PFN_vkCreateAccelerationStructureKHR          vkCreateAccelerationStructureKHR() const noexcept { return vkCreateAccelerationStructureKHR_; }
-        [[nodiscard]] PFN_vkGetAccelerationStructureDeviceAddressKHR vkGetAccelerationStructureDeviceAddressKHR() const noexcept { return vkGetAccelerationStructureDeviceAddressKHR_; }
-        [[nodiscard]] PFN_vkCreateRayTracingPipelinesKHR            vkCreateRayTracingPipelinesKHR() const noexcept { return vkCreateRayTracingPipelinesKHR_; }
-        [[nodiscard]] PFN_vkGetBufferDeviceAddressKHR               vkGetBufferDeviceAddressKHR() const noexcept { return vkGetBufferDeviceAddressKHR_; }
-
-        [[nodiscard]] const VkPhysicalDeviceRayTracingPipelinePropertiesKHR& rayTracingProps() const noexcept { return rayTracingProps_; }
-
-        [[nodiscard]] VkImageView blueNoiseView() const noexcept { return blueNoiseView_ ? *blueNoiseView_ : VK_NULL_HANDLE; }
-        [[nodiscard]] VkBuffer    reservoirBuffer() const noexcept { return reservoirBuffer_ ? *reservoirBuffer_ : VK_NULL_HANDLE; }
-        [[nodiscard]] VkBuffer    frameDataBuffer() const noexcept { return frameDataBuffer_ ? *frameDataBuffer_ : VK_NULL_HANDLE; }
-        [[nodiscard]] VkBuffer    debugVisBuffer() const noexcept { return debugVisBuffer_ ? *debugVisBuffer_ : VK_NULL_HANDLE; }
-
-        [[nodiscard]] uint32_t currentFrame() const noexcept { return 0; }
+    VkPhysicalDeviceRayTracingPipelinePropertiesKHR rayTracingProps_{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR
     };
+
+    // Custom Buffers/Views (Wrapped Handles)
+    Handle<VkImageView> blueNoiseView_;
+    Handle<VkBuffer>    reservoirBuffer_;
+    Handle<VkBuffer>    frameDataBuffer_;
+    Handle<VkBuffer>    debugVisBuffer_;
+
+    // Initialization and Cleanup
+    void init(SDL_Window* window, int width, int height);
+    void cleanup() noexcept;
+
+    // Validity and Readiness Accessors
+    [[nodiscard]] bool isValid() const noexcept {
+        // Flag enables during init; full check enforces handles post-setup
+        return valid_ &&
+               instance_ != VK_NULL_HANDLE &&
+               surface_ != VK_NULL_HANDLE &&
+               physicalDevice_ != VK_NULL_HANDLE &&
+               device_ != VK_NULL_HANDLE;
+    }
+    [[nodiscard]] bool isReady() const noexcept { return ready_.load(std::memory_order_acquire); }
+    void markReady() noexcept { ready_.store(true, std::memory_order_release); }
+    void setValid(bool v) noexcept { valid_ = v; }
+
+    // Core Vulkan Accessors
+    [[nodiscard]] VkDevice          device()         const noexcept { return device_; }
+    [[nodiscard]] VkPhysicalDevice  physicalDevice() const noexcept { return physicalDevice_; }
+    [[nodiscard]] VkInstance        instance()       const noexcept { return instance_; }
+    [[nodiscard]] VkSurfaceKHR      surface()        const noexcept { return surface_; }
+
+    // Legacy Aliases
+    [[nodiscard]] VkDevice         vkDevice() const noexcept { return device(); }
+    [[nodiscard]] VkPhysicalDevice vkPhysicalDevice() const noexcept { return physicalDevice(); }
+    [[nodiscard]] VkSurfaceKHR     vkSurface() const noexcept { return surface(); }
+
+    // Queue Family Accessors
+    [[nodiscard]] uint32_t         graphicsFamily() const noexcept { return graphicsFamily_; }
+    [[nodiscard]] uint32_t         presentFamily()  const noexcept { return presentFamily_; }
+    [[nodiscard]] uint32_t         computeFamily()  const noexcept { return computeFamily_; }
+
+    // Command Pool Accessors
+    [[nodiscard]] VkCommandPool    commandPool()       const noexcept { return commandPool_; }
+    [[nodiscard]] VkCommandPool    computeCommandPool()const noexcept { return computeCommandPool_; }
+
+    // Queue Accessors
+    [[nodiscard]] VkQueue          graphicsQueue() const noexcept { return graphicsQueue_; }
+    [[nodiscard]] VkQueue          presentQueue()  const noexcept { return presentQueue_; }
+    [[nodiscard]] VkQueue          computeQueue()   const noexcept { return computeQueue_; }
+
+    // Pipeline Cache
+    [[nodiscard]] VkPipelineCache  pipelineCacheHandle() const noexcept { return pipelineCache_; }
+
+    // Ray Tracing Function Pointer Accessors (Direct access via members; accessors for consistency)
+    [[nodiscard]] PFN_vkCmdTraceRaysKHR                         vkCmdTraceRaysKHR() const noexcept { return vkCmdTraceRaysKHR_; }
+    [[nodiscard]] PFN_vkGetRayTracingShaderGroupHandlesKHR      vkGetRayTracingShaderGroupHandlesKHR() const noexcept { return vkGetRayTracingShaderGroupHandlesKHR_; }
+    [[nodiscard]] PFN_vkCreateAccelerationStructureKHR          vkCreateAccelerationStructureKHR() const noexcept { return vkCreateAccelerationStructureKHR_; }
+    [[nodiscard]] PFN_vkGetAccelerationStructureDeviceAddressKHR vkGetAccelerationStructureDeviceAddressKHR() const noexcept { return vkGetAccelerationStructureDeviceAddressKHR_; }
+    [[nodiscard]] PFN_vkCreateRayTracingPipelinesKHR            vkCreateRayTracingPipelinesKHR() const noexcept { return vkCreateRayTracingPipelinesKHR_; }
+    [[nodiscard]] PFN_vkGetBufferDeviceAddressKHR               vkGetBufferDeviceAddressKHR() const noexcept { return vkGetBufferDeviceAddressKHR_; }
+    [[nodiscard]] PFN_vkGetAccelerationStructureBuildSizesKHR   vkGetAccelerationStructureBuildSizesKHR() const noexcept { return vkGetAccelerationStructureBuildSizesKHR_; }
+    [[nodiscard]] PFN_vkCmdBuildAccelerationStructuresKHR       vkCmdBuildAccelerationStructuresKHR() const noexcept { return vkCmdBuildAccelerationStructuresKHR_; }
+    [[nodiscard]] PFN_vkDestroyAccelerationStructureKHR         vkDestroyAccelerationStructureKHR() const noexcept { return vkDestroyAccelerationStructureKHR_; }
+
+    [[nodiscard]] const VkPhysicalDeviceRayTracingPipelinePropertiesKHR& rayTracingProps() const noexcept { return rayTracingProps_; }
+
+    // Custom Buffer/View Accessors
+    [[nodiscard]] VkImageView blueNoiseView() const noexcept { return blueNoiseView_ ? *blueNoiseView_ : VK_NULL_HANDLE; }
+    [[nodiscard]] VkBuffer    reservoirBuffer() const noexcept { return reservoirBuffer_ ? *reservoirBuffer_ : VK_NULL_HANDLE; }
+    [[nodiscard]] VkBuffer    frameDataBuffer() const noexcept { return frameDataBuffer_ ? *frameDataBuffer_ : VK_NULL_HANDLE; }
+    [[nodiscard]] VkBuffer    debugVisBuffer() const noexcept { return debugVisBuffer_ ? *debugVisBuffer_ : VK_NULL_HANDLE; }
+
+    // Utility
+    [[nodiscard]] uint32_t currentFrame() const noexcept { return 0; }  // Placeholder
+};
 
     // =============================================================================
     // GLOBAL ACCESSORS — FIXED: ctx() == g_ctx() + NULL GUARD
@@ -298,20 +331,8 @@ namespace RTX {
     // Global context instance declaration
     extern Context g_context_instance;
 
-    // =============================================================================
-    // GLOBAL ACCESSORS — FIXED: ctx() == g_ctx() + GLOBAL GUARD
-    // =============================================================================
-    [[nodiscard]] inline Context& ctx() {
-        if (!g_context_instance.isValid()) {
-            LOG_FATAL_CAT("RTX", "ctx() accessed before RTX::initContext() was called");
-            std::terminate();
-        }
-        return g_context_instance;
-    }
-
-    [[nodiscard]] inline Context& g_ctx() { return ctx(); }
-
-    void initContext(SDL_Window* window, int width, int height);
+    [[nodiscard]] inline Context& ctx()  { return g_context_instance; }
+	[[nodiscard]] inline Context& g_ctx(){ return g_context_instance; }
 
     // =============================================================================
     // UltraLowLevelBufferTracker

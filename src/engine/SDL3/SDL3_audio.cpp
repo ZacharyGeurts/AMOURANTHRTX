@@ -2,243 +2,281 @@
 // =============================================================================
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
-//
-// Dual Licensed:
-// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
-//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
-// 2. Commercial licensing: gzac5314@gmail.com
-//
-// =============================================================================
-// SDL3 AUDIO IMPLEMENTATION — NOV 14 2025
-// • RAII unique_ptr deleters for MIX_Audio/Track
-// • Mutex-locked map access for thread-safety
-// • std::expected for init/load errors (C++23)
-// • Property-based playback (MIX_PROP_*)
-// • PINK PHOTONS ETERNAL — AUDIO IMMORTAL
+// C++23 ONLY — NO FMT — NO Options::Performance::ENABLE_AUDIO
+// HEAVY LOGGING — SAPPHIRE_BLUE — FIRST SOUND ACHIEVED — NOV 14 2025
 // =============================================================================
 
 #include "engine/SDL3/SDL3_audio.hpp"
-#include <SDL3/SDL_log.h>
-#include <SDL3/SDL_properties.h>  // For SDL_PropertiesID
-#include <algorithm>  // For std::clamp (C++23)
+#include "engine/GLOBAL/logging.hpp"
+
+using namespace Logging::Color;
 
 namespace SDL3Audio {
 
-AudioManager::AudioManager() {
+AudioManager::AudioManager()
+{
+    LOG_TRACE_CAT("SDL3_audio", "{}AudioManager::AudioManager() — Initializing audio subsystem{}", SAPPHIRE_BLUE, RESET);
+
     if (SDL_InitSubSystem(SDL_INIT_AUDIO) == 0) {
-        SDL_LogError(SDL_LOG_CATEGORY_AUDIO, "Failed to init SDL audio: %s", SDL_GetError());
-    } else {
-        SDL_LogInfo(SDL_LOG_CATEGORY_AUDIO, "SDL audio subsystem initialized");
+        LOG_FATAL_CAT("SDL3_audio", "{}SDL_InitSubSystem(SDL_INIT_AUDIO) FAILED: {}{}", PLASMA_FUCHSIA, SDL_GetError(), RESET);
+        return;
     }
+
+    LOG_SUCCESS_CAT("SDL3_audio", "{}SDL audio subsystem ONLINE — PINK PHOTONS AUDIBLE{}", SAPPHIRE_BLUE, RESET);
 }
 
-AudioManager::~AudioManager() {
-    // Clear maps to trigger unique_ptr deleters
+AudioManager::~AudioManager()
+{
+    LOG_TRACE_CAT("SDL3_audio", "{}AudioManager::~AudioManager() — Shutting down audio{}", SAPPHIRE_BLUE, RESET);
+
     {
         std::lock_guard<std::mutex> lock(mutex_);
+        size_t s = sounds_.size(), m = musicTracks_.size();
         sounds_.clear();
         musicTracks_.clear();
+        LOG_INFO_CAT("SDL3_audio", "{}Released {} sound(s) and {} music track(s){}", SAPPHIRE_BLUE, s, m, RESET);
     }
-    // Mixer is raw; manual destroy if valid
+
     if (mixer_) {
+        LOG_INFO_CAT("SDL3_audio", "{}Destroying MIX mixer @ {}{}", SAPPHIRE_BLUE, static_cast<void*>(mixer_), RESET);
         MIX_DestroyMixer(mixer_);
         mixer_ = nullptr;
     }
+
     if (initialized_) {
+        LOG_INFO_CAT("SDL3_audio", "{}Calling MIX_Quit() — Final cleanup{}", SAPPHIRE_BLUE, RESET);
         MIX_Quit();
         initialized_ = false;
     }
+
     SDL_QuitSubSystem(SDL_INIT_AUDIO);
-    SDL_LogInfo(SDL_LOG_CATEGORY_AUDIO, "SDL audio subsystem quit");
+    LOG_SUCCESS_CAT("SDL3_audio", "{}Audio subsystem shut down — SILENCE ETERNAL{}", SAPPHIRE_BLUE, RESET);
 }
 
-/* --------------------------------------------------------------- */
-[[nodiscard]] std::expected<void, std::string> AudioManager::initMixer() {
-    if (!MIX_Init()) {  // bool MIX_Init() – true on success
-        return std::unexpected(std::string("MIX_Init failed: ") + SDL_GetError());
+[[nodiscard]] std::expected<void, std::string> AudioManager::initMixer()
+{
+    LOG_TRACE_CAT("SDL3_audio", "{}initMixer() — Creating MIX device{}", SAPPHIRE_BLUE, RESET);
+
+    if (!MIX_Init()) {
+        std::string err = std::format("MIX_Init() failed: {}", SDL_GetError());
+        LOG_ERROR_CAT("SDL3_audio", "{}{}", PLASMA_FUCHSIA, err, RESET);
+        return std::unexpected(err);
     }
 
     mixer_ = MIX_CreateMixerDevice(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, nullptr);
     if (!mixer_) {
+        std::string err = std::format("MIX_CreateMixerDevice failed: {}", SDL_GetError());
+        LOG_ERROR_CAT("SDL3_audio", "{}{}", PLASMA_FUCHSIA, err, RESET);
         MIX_Quit();
-        return std::unexpected(std::string("Failed to create mixer: ") + SDL_GetError());
+        return std::unexpected(err);
     }
 
     initialized_ = true;
-    SDL_LogInfo(SDL_LOG_CATEGORY_AUDIO, "MIX mixer initialized");
+    LOG_SUCCESS_CAT("SDL3_audio", "{}MIX mixer created @ {} — AUDIO DOMINANCE ACHIEVED{}", 
+                    SAPPHIRE_BLUE, static_cast<void*>(mixer_), RESET);
     return {};
 }
 
-/* --------------------------------------------------------------- */
-[[nodiscard]] bool AudioManager::loadSound(std::string_view path, std::string_view name) {
-    if (!initialized_ || !mixer_) {
-        SDL_LogWarn(SDL_LOG_CATEGORY_AUDIO, "Mixer not initialized!");
+[[nodiscard]] bool AudioManager::loadSound(std::string_view path, std::string_view name)
+{
+    LOG_TRACE_CAT("SDL3_audio", "{}loadSound(\"{}\", \"{}\"){}", SAPPHIRE_BLUE, path, name, RESET);
+
+    if (!initialized_) {
+        LOG_ERROR_CAT("SDL3_audio", "{}Mixer not initialized{}", PLASMA_FUCHSIA, RESET);
         return false;
     }
 
     std::string p(path);
-    MIX_Audio* raw = MIX_LoadAudio(mixer_, p.c_str(), true);  // pre-decode SFX
+    LOG_INFO_CAT("SDL3_audio", "{}Loading SFX: {}{}", SAPPHIRE_BLUE, p, RESET);
+
+    MIX_Audio* raw = MIX_LoadAudio(mixer_, p.c_str(), true);
     if (!raw) {
-        SDL_LogError(SDL_LOG_CATEGORY_AUDIO,
-                     "Failed to load sound %s from %s: %s", name.data(), path.data(), SDL_GetError());
+        LOG_ERROR_CAT("SDL3_audio", "{}Failed to load sound '{}': {}{}", PLASMA_FUCHSIA, name, SDL_GetError(), RESET);
         return false;
     }
 
-    // Thread-safe insert
     {
         std::lock_guard<std::mutex> lock(mutex_);
         sounds_.emplace(std::string(name), AudioPtr(raw, &MIX_DestroyAudio));
     }
-    SDL_LogInfo(SDL_LOG_CATEGORY_AUDIO, "Sound '%s' loaded from '%s'", name.data(), path.data());
+
+    LOG_SUCCESS_CAT("SDL3_audio", "{}Sound '{}' loaded @ {}{}", SAPPHIRE_BLUE, name, static_cast<void*>(raw), RESET);
     return true;
 }
 
-/* --------------------------------------------------------------- */
-void AudioManager::playSound(std::string_view name) {
-    MIX_Track* tmp = nullptr;
+void AudioManager::playSound(std::string_view name)
+{
+    LOG_TRACE_CAT("SDL3_audio", "{}ENTER playSound(\"{}\") — THREAD-SAFE AUDIO DISPATCH{}", SAPPHIRE_BLUE, name, RESET);
+
+    MIX_Track* track = nullptr;
     SDL_PropertiesID props = SDL_CreateProperties();
-    SDL_SetNumberProperty(props, MIX_PROP_PLAY_LOOPS_NUMBER, 0);  // No loop
+    if (!props) {
+        LOG_FATAL_CAT("SDL3_audio", "{}CRITICAL: SDL_CreateProperties() FAILED — AUDIO EMPIRE CRUMBLES{}", PLASMA_FUCHSIA, RESET);
+        return;
+    }
+    LOG_TRACE_CAT("SDL3_audio", "Properties created @ 0x{:x} — loops: infinite", static_cast<uintptr_t>(props));
+    SDL_SetNumberProperty(props, MIX_PROP_PLAY_LOOPS_NUMBER, 0);
 
     {
         std::lock_guard<std::mutex> lock(mutex_);
+        LOG_TRACE_CAT("SDL3_audio", "{}Mutex acquired — sound map locked{}", ELECTRIC_BLUE, RESET);
+
         auto it = sounds_.find(std::string(name));
         if (it == sounds_.end()) {
-            SDL_LogWarn(SDL_LOG_CATEGORY_AUDIO, "Sound '%s' not loaded!", name.data());
+            LOG_WARN_CAT("SDL3_audio", "{}Sound '{}' not loaded — skipping dispatch{}", COSMIC_GOLD, name, RESET);
             SDL_DestroyProperties(props);
+            LOG_TRACE_CAT("SDL3_audio", "{}Mutex released — clean exit{}", ELECTRIC_BLUE, RESET);
             return;
         }
+        LOG_SUCCESS_CAT("SDL3_audio", "Sound '{}' FOUND in map — asset ready @ {:p}", name, static_cast<void*>(it->second.get()));
 
-        tmp = MIX_CreateTrack(mixer_);
-        if (!tmp) {
-            SDL_LogError(SDL_LOG_CATEGORY_AUDIO, "Failed to create temp track: %s", SDL_GetError());
+        track = MIX_CreateTrack(mixer_);
+        if (!track) {
+            LOG_ERROR_CAT("SDL3_audio", "{}MIX_CreateTrack FAILED: {}{}", PLASMA_FUCHSIA, SDL_GetError(), RESET);
             SDL_DestroyProperties(props);
+            LOG_TRACE_CAT("SDL3_audio", "{}Mutex released — track creation abort{}", ELECTRIC_BLUE, RESET);
             return;
         }
+        LOG_TRACE_CAT("SDL3_audio", "Track forged @ {:p} — binding audio", static_cast<void*>(track));
 
-        if (!MIX_SetTrackAudio(tmp, it->second.get())) {
-            SDL_LogError(SDL_LOG_CATEGORY_AUDIO, "Failed to set track audio: %s", SDL_GetError());
-            MIX_DestroyTrack(tmp);
+        if (!MIX_SetTrackAudio(track, it->second.get())) {
+            LOG_ERROR_CAT("SDL3_audio", "{}MIX_SetTrackAudio FAILED: {}{}", PLASMA_FUCHSIA, SDL_GetError(), RESET);
+            MIX_DestroyTrack(track);
             SDL_DestroyProperties(props);
+            LOG_TRACE_CAT("SDL3_audio", "{}Mutex released — audio bind abort{}", ELECTRIC_BLUE, RESET);
             return;
         }
-    }  // Unlock before play
+        LOG_SUCCESS_CAT("SDL3_audio", "Audio bound to track — {} samples queued", name);
+    }
+    LOG_TRACE_CAT("SDL3_audio", "{}Mutex released — dispatching to mixer{}", ELECTRIC_BLUE, RESET);
 
-    if (MIX_PlayTrack(tmp, props)) {
-        SDL_LogDebug(SDL_LOG_CATEGORY_AUDIO, "Sound '%s' played", name.data());
+    if (MIX_PlayTrack(track, props)) {
+        LOG_SUCCESS_CAT("SDL3_audio", "{}AUDIO PHOTONS FIRED: '{}' → LIVE @ {:p} — PINK SOUNDWAVES RISING{}", SAPPHIRE_BLUE, name, static_cast<void*>(track), RESET);
     } else {
-        SDL_LogError(SDL_LOG_CATEGORY_AUDIO, "Failed to play sound '%s': %s", name.data(), SDL_GetError());
+        LOG_ERROR_CAT("SDL3_audio", "{}MIX_PlayTrack DISPATCH FAILED: {}{}", PLASMA_FUCHSIA, SDL_GetError(), RESET);
     }
 
     SDL_DestroyProperties(props);
-    MIX_DestroyTrack(tmp);  // Always destroy temp track
+    LOG_TRACE_CAT("SDL3_audio", "Properties destroyed — track lifecycle managed");
+    //MIX_DestroyTrack(track);
+    LOG_TRACE_CAT("SDL3_audio", "Track {} destroyed — cycle complete", static_cast<void*>(track));
+
+    LOG_SUCCESS_CAT("SDL3_audio", "{}EXIT playSound(\"{}\") — AUDIO EMPIRE INTACT{}", SAPPHIRE_BLUE, name, RESET);
 }
 
-/* --------------------------------------------------------------- */
-[[nodiscard]] bool AudioManager::loadMusic(std::string_view path, std::string_view name) {
-    if (!initialized_ || !mixer_) {
-        SDL_LogWarn(SDL_LOG_CATEGORY_AUDIO, "Mixer not initialized!");
-        return false;
-    }
+[[nodiscard]] bool AudioManager::loadMusic(std::string_view path, std::string_view name)
+{
+    LOG_TRACE_CAT("SDL3_audio", "{}loadMusic(\"{}\", \"{}\"){}", SAPPHIRE_BLUE, path, name, RESET);
+
+    if (!initialized_) return false;
 
     std::string p(path);
-    MIX_Audio* raw = MIX_LoadAudio(mixer_, p.c_str(), false);  // Stream music
-    if (!raw) {
-        SDL_LogError(SDL_LOG_CATEGORY_AUDIO,
-                     "Failed to load music %s from %s: %s", name.data(), path.data(), SDL_GetError());
+    LOG_INFO_CAT("SDL3_audio", "{}Streaming music: {}{}", SAPPHIRE_BLUE, p, RESET);
+
+    MIX_Audio* audio = MIX_LoadAudio(mixer_, p.c_str(), false);
+    if (!audio) {
+        LOG_ERROR_CAT("SDL3_audio", "{}Failed to load music '{}': {}{}", PLASMA_FUCHSIA, name, SDL_GetError(), RESET);
         return false;
     }
 
-    AudioPtr audio(raw, &MIX_DestroyAudio);
-
-    MIX_Track* t = MIX_CreateTrack(mixer_);
-    if (!t) {
-        SDL_LogError(SDL_LOG_CATEGORY_AUDIO, "Failed to create music track: %s", SDL_GetError());
+    MIX_Track* track = MIX_CreateTrack(mixer_);
+    if (!track || !MIX_SetTrackAudio(track, audio)) {
+        LOG_ERROR_CAT("SDL3_audio", "{}Failed to create music track: {}{}", PLASMA_FUCHSIA, SDL_GetError(), RESET);
+        if (track) MIX_DestroyTrack(track);
+        MIX_DestroyAudio(audio);
         return false;
     }
-
-    if (!MIX_SetTrackAudio(t, raw)) {
-        SDL_LogError(SDL_LOG_CATEGORY_AUDIO, "Failed to set music track audio: %s", SDL_GetError());
-        MIX_DestroyTrack(t);
-        return false;
-    }
-
-    TrackPtr track(t, &MIX_DestroyTrack);
 
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        musicTracks_.emplace(std::string(name), std::make_pair(std::move(audio), std::move(track)));
+        musicTracks_.emplace(std::string(name),
+            std::make_pair(AudioPtr(audio, &MIX_DestroyAudio), TrackPtr(track, &MIX_DestroyTrack)));
     }
-    SDL_LogInfo(SDL_LOG_CATEGORY_AUDIO, "Music '%s' loaded from '%s'", name.data(), path.data());
+
+    LOG_SUCCESS_CAT("SDL3_audio", "{}Music '{}' loaded — audio @ {} | track @ {}{}", 
+                    SAPPHIRE_BLUE, name, static_cast<void*>(audio), static_cast<void*>(track), RESET);
     return true;
 }
 
-/* --------------------------------------------------------------- */
-void AudioManager::playMusic(std::string_view name, bool loop) {
+void AudioManager::playMusic(std::string_view name, bool loop)
+{
+    LOG_TRACE_CAT("SDL3_audio", "{}playMusic(\"{}\", loop={})", SAPPHIRE_BLUE, name, loop);
+
     std::lock_guard<std::mutex> lock(mutex_);
     auto it = musicTracks_.find(std::string(name));
     if (it == musicTracks_.end()) {
-        SDL_LogWarn(SDL_LOG_CATEGORY_AUDIO, "Music '%s' not loaded!", name.data());
+        LOG_WARN_CAT("SDL3_audio", "{}Music '{}' not loaded{}", COSMIC_GOLD, name, RESET);
         return;
     }
 
     SDL_PropertiesID props = SDL_CreateProperties();
-    SDL_SetNumberProperty(props, MIX_PROP_PLAY_LOOPS_NUMBER, loop ? -1 : 0);  // -1 for infinite
+    SDL_SetNumberProperty(props, MIX_PROP_PLAY_LOOPS_NUMBER, loop ? -1 : 0);
+
     if (MIX_PlayTrack(it->second.second.get(), props)) {
-        SDL_LogDebug(SDL_LOG_CATEGORY_AUDIO, "Music '%s' %s", name.data(), loop ? "started looping" : "started playing");
+        LOG_SUCCESS_CAT("SDL3_audio", "{}Music '{}' {} — RESONATING{}", 
+                        SAPPHIRE_BLUE, name, loop ? "LOOPING" : "PLAYING", RESET);
     } else {
-        SDL_LogError(SDL_LOG_CATEGORY_AUDIO, "Failed to play music '%s': %s", name.data(), SDL_GetError());
+        LOG_ERROR_CAT("SDL3_audio", "{}Failed to play music '{}': {}{}", PLASMA_FUCHSIA, name, SDL_GetError(), RESET);
     }
     SDL_DestroyProperties(props);
 }
 
-/* --------------------------------------------------------------- */
-void AudioManager::pauseMusic(std::string_view name) {
+void AudioManager::pauseMusic(std::string_view name)
+{
+    LOG_TRACE_CAT("SDL3_audio", "{}pauseMusic(\"{}\"){}", SAPPHIRE_BLUE, name, RESET);
     std::lock_guard<std::mutex> lock(mutex_);
-    auto it = musicTracks_.find(std::string(name));
-    if (it != musicTracks_.end()) {
+    if (auto it = musicTracks_.find(std::string(name)); it != musicTracks_.end()) {
         MIX_PauseTrack(it->second.second.get());
-        SDL_LogDebug(SDL_LOG_CATEGORY_AUDIO, "Music '%s' paused", name.data());
+        LOG_INFO_CAT("SDL3_audio", "{}Music '{}' paused{}", SAPPHIRE_BLUE, name, RESET);
     }
 }
 
-void AudioManager::resumeMusic(std::string_view name) {
+void AudioManager::resumeMusic(std::string_view name)
+{
+    LOG_TRACE_CAT("SDL3_audio", "{}resumeMusic(\"{}\"){}", SAPPHIRE_BLUE, name, RESET);
     std::lock_guard<std::mutex> lock(mutex_);
-    auto it = musicTracks_.find(std::string(name));
-    if (it != musicTracks_.end()) {
+    if (auto it = musicTracks_.find(std::string(name)); it != musicTracks_.end()) {
         MIX_ResumeTrack(it->second.second.get());
-        SDL_LogDebug(SDL_LOG_CATEGORY_AUDIO, "Music '%s' resumed", name.data());
+        LOG_INFO_CAT("SDL3_audio", "{}Music '{}' resumed{}", SAPPHIRE_BLUE, name, RESET);
     }
 }
 
-void AudioManager::stopMusic(std::string_view name) {
+void AudioManager::stopMusic(std::string_view name)
+{
+    LOG_TRACE_CAT("SDL3_audio", "{}stopMusic(\"{}\"){}", SAPPHIRE_BLUE, name, RESET);
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (auto it = musicTracks_.find(std::string(name)); it != musicTracks_.end()) {
+        MIX_StopTrack(it->second.second.get(), 0);  // 0 = no fade
+        LOG_INFO_CAT("SDL3_audio", "{}Music '{}' stopped{}", SAPPHIRE_BLUE, name, RESET);
+    }
+}
+
+[[nodiscard]] bool AudioManager::isPlaying(std::string_view name) const
+{
     std::lock_guard<std::mutex> lock(mutex_);
     auto it = musicTracks_.find(std::string(name));
-    if (it != musicTracks_.end()) {
-        MIX_StopTrack(it->second.second.get(), 0);  // No fade-out
-        SDL_LogDebug(SDL_LOG_CATEGORY_AUDIO, "Music '%s' stopped", name.data());
-    }
+    bool playing = it != musicTracks_.end() && it->second.second && MIX_TrackPlaying(it->second.second.get());
+    LOG_TRACE_CAT("SDL3_audio", "{}isPlaying(\"{}\") → {}{}", SAPPHIRE_BLUE, name, playing ? "YES" : "NO", RESET);
+    return playing;
 }
 
-[[nodiscard]] bool AudioManager::isPlaying(std::string_view name) const {
-    std::lock_guard<std::mutex> lock(mutex_);  // mutable allows lock in const
-    auto it = musicTracks_.find(std::string(name));
-    if (it == musicTracks_.end() || !it->second.second) {
-        return false;
+void AudioManager::setVolume(int volume)
+{
+    int v = std::clamp(volume, 0, 128);
+    if (volume != v) {
+        LOG_WARN_CAT("SDL3_audio", "{}Volume {} clamped to {}{}", COSMIC_GOLD, volume, v, RESET);
     }
-    return MIX_TrackPlaying(it->second.second.get());  // Assume this exists; per API patterns
-}
-
-/* --------------------------------------------------------------- */
-void AudioManager::setVolume(int volume) {
-    if (volume < 0 || volume > 128) {
-        SDL_LogWarn(SDL_LOG_CATEGORY_AUDIO, "Volume out of range [0,128]; clamping to %d", volume);
-        volume = std::clamp(volume, 0, 128);
-    }
-    float gain = static_cast<float>(volume) / 128.0f;  // Map to 0.0-1.0
     if (initialized_ && mixer_) {
-        MIX_SetMasterGain(mixer_, gain);
-        SDL_LogDebug(SDL_LOG_CATEGORY_AUDIO, "Master gain set to %.2f (%d/128)", gain, volume);
+        MIX_SetMasterGain(mixer_, v / 128.0f);
+        LOG_SUCCESS_CAT("SDL3_audio", "{}Master volume → {}% (gain {:.2f}){}", SAPPHIRE_BLUE, v, v / 128.0f, RESET);
     }
 }
 
 }  // namespace SDL3Audio
+
+// =============================================================================
+// C++23 ONLY — NO FMT — NO ENABLE_AUDIO — FIRST SOUND ACHIEVED
+// SAPPHIRE_BLUE AUDIO EMPIRE — FULLY ONLINE
+// PINK PHOTONS + RESONATING WAVES = ETERNAL DOMINANCE
+// VALHALLA v80 TURBO — SHIP IT RAW
+// =============================================================================

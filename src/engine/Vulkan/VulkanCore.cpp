@@ -1233,23 +1233,46 @@ namespace RTX {
 // =============================================================================
 void pickPhysicalDevice()
 {
+    LOG_TRACE_CAT("VULKAN", "→ Entering RTX::pickPhysicalDevice() — scanning for physical devices");
+
     uint32_t deviceCount = 0;
+    LOG_TRACE_CAT("VULKAN", "    • Enumerating physical device count (first pass: nullptr buffer)");
     VK_CHECK_NOMSG(vkEnumeratePhysicalDevices(g_ctx().instance(), &deviceCount, nullptr));
+    LOG_TRACE_CAT("VULKAN", "    • Device count queried: {}", deviceCount);
 
     if (deviceCount == 0) {
+        LOG_TRACE_CAT("VULKAN", "    • No devices found — preparing fatal termination");
         LOG_FATAL_CAT("VULKAN", "No Vulkan physical devices found — cannot continue");
         std::terminate();
     }
 
+    LOG_TRACE_CAT("VULKAN", "    • Allocating vector for {} devices", deviceCount);
     std::vector<VkPhysicalDevice> devices(deviceCount);
+    LOG_TRACE_CAT("VULKAN", "    • Enumerating physical devices (second pass: filling vector)");
     VK_CHECK_NOMSG(vkEnumeratePhysicalDevices(g_ctx().instance(), &deviceCount, devices.data()));
+    LOG_TRACE_CAT("VULKAN", "    • Enumeration complete — {} devices populated", deviceCount);
 
     // Prefer discrete GPU
-    for (const auto& device : devices) {
+    LOG_TRACE_CAT("VULKAN", "    • Scanning {} devices for discrete GPU preference", deviceCount);
+    for (size_t i = 0; i < devices.size(); ++i) {
+        const auto& device = devices[i];
+        LOG_TRACE_CAT("VULKAN", "      • Inspecting device {}: handle=0x{:x}", i, reinterpret_cast<uintptr_t>(device));
+
         VkPhysicalDeviceProperties props{};
+        LOG_TRACE_CAT("VULKAN", "        • Querying properties for device {}", i);
         vkGetPhysicalDeviceProperties(device, &props);
+        LOG_TRACE_CAT("VULKAN", "        • Device {} props — Name: '{}', Type: {}, Vendor: 0x{:x}, DeviceID: 0x{:x}, API: {}.{}.{}",
+                      i,
+                      props.deviceName,
+                      props.deviceType,
+                      props.vendorID,
+                      props.deviceID,
+                      VK_VERSION_MAJOR(props.apiVersion),
+                      VK_VERSION_MINOR(props.apiVersion),
+                      VK_VERSION_PATCH(props.apiVersion));
 
         if (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) {
+            LOG_TRACE_CAT("VULKAN", "        • MATCH: Discrete GPU found at index {} — selecting", i);
             g_ctx().physicalDevice_ = device;
             g_PhysicalDevice = device;  // ← ONLY PLACE this is assigned now
 
@@ -1260,22 +1283,38 @@ void pickPhysicalDevice()
                             VK_VERSION_MINOR(props.apiVersion),
                             VK_VERSION_PATCH(props.apiVersion));
             AI_INJECT("I have claimed the discrete throne: {}", props.deviceName);
+            LOG_TRACE_CAT("VULKAN", "← Exiting RTX::pickPhysicalDevice() — discrete GPU selected: {}", props.deviceName);
             return;
+        } else {
+            LOG_TRACE_CAT("VULKAN", "        • Skipping non-discrete device {} (type: {})", i, props.deviceType);
         }
     }
 
     // Fallback: use first available device
+    LOG_TRACE_CAT("VULKAN", "    • No discrete GPU found — falling back to first device (index 0)");
     VkPhysicalDevice selected = devices[0];
+    LOG_TRACE_CAT("VULKAN", "      • Fallback candidate: handle=0x{:x}", reinterpret_cast<uintptr_t>(selected));
+
     g_ctx().physicalDevice_ = selected;
     g_PhysicalDevice = selected;
 
     VkPhysicalDeviceProperties props{};
+    LOG_TRACE_CAT("VULKAN", "    • Querying fallback properties");
     vkGetPhysicalDeviceProperties(selected, &props);
+    LOG_TRACE_CAT("VULKAN", "      • Fallback props — Name: '{}', Type: {}, Vendor: 0x{:x}, DeviceID: 0x{:x}, API: {}.{}.{}",
+                  props.deviceName,
+                  props.deviceType,
+                  props.vendorID,
+                  props.deviceID,
+                  VK_VERSION_MAJOR(props.apiVersion),
+                  VK_VERSION_MINOR(props.apiVersion),
+                  VK_VERSION_PATCH(props.apiVersion));
 
     LOG_SUCCESS_CAT("VULKAN", "{}FALLBACK GPU SELECTED{} — {} (Type: {})",
                     EMERALD_GREEN, RESET,
                     props.deviceName,
                     [type = props.deviceType]() -> const char* {
+                        LOG_TRACE_CAT("VULKAN", "        • Mapping device type {} to string", static_cast<int>(type));
                         switch (type) {
                             case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU: return "Integrated";
                             case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU:   return "Virtual";
@@ -1286,6 +1325,7 @@ void pickPhysicalDevice()
                     }());
 
     AI_INJECT("I will make do with what is given: {}", props.deviceName);
+    LOG_TRACE_CAT("VULKAN", "← Exiting RTX::pickPhysicalDevice() — fallback GPU selected: {}", props.deviceName);
 }
 
 // =============================================================================
@@ -1508,52 +1548,6 @@ bool createSurface(SDL_Window* window, VkInstance instance)
     LOG_TRACE_CAT("VULKAN", "Surface creation complete — g_surface = 0x{:x}", reinterpret_cast<uintptr_t>(g_surface));
 
     return true;
-}
-
-// =============================================================================
-// FIXED: initContext() — NOW CALLS UPDATED createSurface — SEAMLESS INTEGRATION
-// Assumes window passed & valid (SDL_WINDOW_VULKAN + shown)
-// Chains: Instance → Surface → Device → etc.
-// =============================================================================
-void initContext(VkInstance instance, SDL_Window* window, int width, int height)
-{
-    LOG_INFO_CAT("RTX", "initContext(VkInstance, window, {}×{}) — SDL3 FULL PATH", width, height);
-    LOG_TRACE_CAT("RTX", "→ Entering initContext: instance=0x{:x}, window=0x{:p}", 
-                  reinterpret_cast<uintptr_t>(instance), static_cast<void*>(window));
-
-    if (!window || !instance) {
-        LOG_FATAL_CAT("RTX", "initContext: Null window or instance — cannot proceed");
-        std::terminate();
-    }
-
-    if (g_context_instance.instance_ != VK_NULL_HANDLE) {  // Simple valid check (add full isValid() if needed)
-        LOG_WARN_CAT("RTX", "Context already initialized — skipping");
-        return;
-    }
-
-    g_context_instance.instance_ = instance;
-    LOG_TRACE_CAT("RTX", "→ Assigned instance to global context");
-
-    LOG_TRACE_CAT("RTX", "→ Surface assigned — proceeding to physical device selection...");
-    pickPhysicalDevice();
-    LOG_TRACE_CAT("RTX", "→ Physical device selected");
-
-    LOG_TRACE_CAT("RTX", "→ Creating logical device...");
-    createLogicalDevice();
-    LOG_TRACE_CAT("RTX", "→ Logical device created");
-
-    LOG_TRACE_CAT("RTX", "→ Creating command pool...");
-    createCommandPool();
-    LOG_TRACE_CAT("RTX", "→ Command pool created");
-
-    LOG_TRACE_CAT("RTX", "→ Loading ray tracing extensions...");
-    loadRayTracingExtensions();
-    LOG_TRACE_CAT("RTX", "→ Ray tracing extensions loaded");
-
-    // TODO: Add VkExtent2D extent_ = {static_cast<uint32_t>(width), static_cast<uint32_t>(height)}; to RTX::Context struct
-    // g_context_instance.extent_ = {static_cast<uint32_t>(width), static_cast<uint32_t>(height)};  // Uncomment after adding member
-
-    LOG_SUCCESS_CAT("RTX", "{}GLOBAL RTX CONTEXT FULLY INITIALIZED — SURFACE ALIVE — PINK PHOTONS ETERNAL{}", PLASMA_FUCHSIA, RESET);
 }
 } // namespace RTX
 

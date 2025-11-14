@@ -46,11 +46,6 @@ namespace RTX {
 
     Context g_context_instance;
 
-    void initContext(SDL_Window* window, int width, int height) {
-        g_context_instance.init(window, width, height);
-        LOG_SUCCESS_CAT("RTX", "Context initialized — PINK PHOTONS ETERNAL");
-    }
-
     // =============================================================================
     // logAndTrackDestruction
     // =============================================================================
@@ -297,16 +292,6 @@ namespace RTX {
     void buildBLAS(uint64_t, uint64_t, uint32_t, uint32_t) noexcept {}
     void buildTLAS(const std::vector<std::pair<VkAccelerationStructureKHR, glm::mat4>>&) noexcept {}
     void cleanupAll() noexcept {}
-
-    // =============================================================================
-    // Context Getters — SECURE ACCESSORS
-    // =============================================================================
-    bool Context::isValid() const noexcept {
-        return instance_ != VK_NULL_HANDLE &&
-               surface_ != VK_NULL_HANDLE &&
-               physicalDevice_ != VK_NULL_HANDLE &&
-               device_ != VK_NULL_HANDLE;
-    }
 
 // =============================================================================
 // Context::init — FULL VULKAN SETUP (SECURE + LOGGED + ASYNC COMPUTE)
@@ -640,11 +625,90 @@ void Context::cleanup() noexcept {
     LOG_SUCCESS_CAT("RTX", "Vulkan context cleaned — ZERO LEAKS");
 }
 
-} // namespace RTX
+// =============================================================================
+// RTX Context Initialization — Ensures g_ctx() Safety During Stepwise Setup
+// =============================================================================
+void initContext(VkInstance instance, SDL_Window* window, int width, int height)
+{
+    LOG_TRACE_CAT("RTX", "→ Entering RTX::initContext: instance=0x{:x}, window=0x{:p}, {}×{}",
+                  reinterpret_cast<uintptr_t>(instance),
+                  static_cast<void*>(window), width, height);
 
-// =============================================================================
-// Explicit instantiations — REMOVED: Inline templates don't need them
-// =============================================================================
+    LOG_INFO_CAT("RTX", "{}FORGING VULKAN CONTEXT — VALHALLA v80 TURBO — PINK PHOTONS RISING{}", 
+                 PLASMA_FUCHSIA, RESET);
+
+    // =====================================================================
+    // Assign core handles FIRST — before any function that uses g_ctx()
+    // =====================================================================
+    g_context_instance.instance_ = instance;
+    g_context_instance.surface_  = g_surface;
+    g_context_instance.window   = window;  // ← This member DOES exist in your header
+    g_context_instance.width    = width;   // ← Add these to Context struct if missing
+    g_context_instance.height   = height;  // ← Add these to Context struct if missing
+
+    // Mark context as partially valid for intra-init access (bypasses guard safely)
+    g_context_instance.valid_ = true;  // ← Enables g_ctx() without abort during setup
+
+    LOG_TRACE_CAT("RTX", "→ Core handles injected:");
+    LOG_TRACE_CAT("RTX", "   • instance = 0x{:x}", reinterpret_cast<uintptr_t>(instance));
+    LOG_TRACE_CAT("RTX", "   • surface  = 0x{:x}", reinterpret_cast<uintptr_t>(g_surface));
+    LOG_TRACE_CAT("RTX", "   • window   = 0x{:p}", static_cast<void*>(window));
+    LOG_TRACE_CAT("RTX", "   • extent   = {}×{}", width, height);
+
+    LOG_INFO_CAT("RTX", "{}Core context primed — commencing physical device selection{}", 
+                 EMERALD_GREEN, RESET);
+
+    // =====================================================================
+    // NOW SAFE: pickPhysicalDevice() and others can use g_ctx()
+    // =====================================================================
+    LOG_TRACE_CAT("RTX", "→ Calling RTX::pickPhysicalDevice()");
+    RTX::pickPhysicalDevice();
+
+    LOG_TRACE_CAT("RTX", "→ Calling RTX::createLogicalDevice()");
+    RTX::createLogicalDevice();
+
+    LOG_TRACE_CAT("RTX", "→ Calling RTX::createCommandPool()");
+    RTX::createCommandPool();
+
+    LOG_TRACE_CAT("RTX", "→ Calling RTX::loadRayTracingExtensions()");
+    RTX::loadRayTracingExtensions();
+
+    // =====================================================================
+    // Final validation — re-check full readiness
+    // =====================================================================
+    if (g_ctx().device() == VK_NULL_HANDLE) {
+        LOG_FATAL_CAT("RTX", "{}FATAL: Logical device creation failed — VK_NULL_HANDLE{}", 
+                      COSMIC_GOLD, RESET);
+        g_context_instance.valid_ = false;  // Reset on failure
+        std::abort();
+    }
+
+    if (g_ctx().graphicsQueue() == VK_NULL_HANDLE) {
+        LOG_FATAL_CAT("RTX", "{}FATAL: Graphics queue not acquired — cannot render{}", 
+                      COSMIC_GOLD, RESET);
+        g_context_instance.valid_ = false;  // Reset on failure
+        std::abort();
+    }
+
+    if (g_ctx().computeQueue() == VK_NULL_HANDLE && g_ctx().computeFamily() != UINT32_MAX) {
+        LOG_WARN_CAT("RTX", "Compute queue not acquired — async compute disabled");
+    }
+
+    // Re-affirm full validity post-validation
+    g_context_instance.valid_ = true;
+
+    LOG_SUCCESS_CAT("RTX", "{}VULKAN CONTEXT FULLY INITIALIZED — {}×{} — RAY TRACING ARMED{}", 
+                    PLASMA_FUCHSIA, width, height, RESET);
+
+    LOG_SUCCESS_CAT("RTX", "{}PINK PHOTONS ACHIEVED — FIRST LIGHT @ {}×{} — TITAN DOMINANCE ETERNAL{}", 
+                    COSMIC_GOLD, width, height, RESET);
+
+    LOG_SUCCESS_CAT("RTX", "{}AMOURANTH RTX — VALHALLA v80 TURBO — ONLINE{}", 
+                    PLASMA_FUCHSIA, RESET);
+
+    LOG_TRACE_CAT("RTX", "← RTX::initContext() complete — empire is ready");
+}
+} // namespace RTX
 
 // =============================================================================
 // VALHALLA v70 FINAL — UNIFIED RTX::g_ctx() — NO LINKER ERRORS

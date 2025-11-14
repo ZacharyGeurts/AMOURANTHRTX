@@ -509,7 +509,9 @@ private:
             {"GLTF", QUANTUM_PURPLE}, {"Material", PEACHES_AND_CREAM}, {"Debug", ARCTIC_CYAN},
             {"ImGui", PLATINUM_GRAY}, {"Profiler", COSMIC_GOLD}, {"SUCCESS", EMERALD_GREEN},
             {"ATTEMPT", QUANTUM_PURPLE}, {"VOID", COSMIC_VOID}, {"SPLASH", LILAC_LAVENDER},
-            {"MARKER", DIAMOND_SPARKLE}
+            {"MARKER", DIAMOND_SPARKLE}, {"SDL3_window", SAPPHIRE_BLUE}, {"SDL3_audio", SAPPHIRE_BLUE},
+			{"SDL3_font", SAPPHIRE_BLUE}, {"SDL3_image", SAPPHIRE_BLUE}, {"SDL3_init", SAPPHIRE_BLUE},
+			{"SDL3_input", SAPPHIRE_BLUE}, {"SDL3_vulkan", SAPPHIRE_BLUE}
         };
         if (auto it = map.find(cat); it != map.end()) [[likely]]
             return it->second;

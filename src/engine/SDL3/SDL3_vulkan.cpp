@@ -32,18 +32,22 @@ VulkanRenderer& renderer() noexcept
 
 void init(int w, int h) noexcept
 {
-    LOG_INFO_CAT("VULKAN", "{}SDL3Vulkan::init({}x{}) — creating Vulkan context via RTX::initContext{}", 
+    LOG_INFO_CAT("VULKAN", "{}SDL3Vulkan::init({}x{}) — RTX context already initialized by SDL3Initializer{}", 
                   PLASMA_FUCHSIA, w, h, RESET);
 
-    // This does everything: instance, surface, physical device, logical device, queues
-    // Uses SDL3 window from SDL3Initializer
-    RTX::initContext(nullptr, w, h);  // window passed internally via SDL3Initializer
+    // The heavy lifting (instance, surface, device, queues) was already done in SDL3Initializer
+    // We only need to create the renderer now
 
-    // Now create the real renderer — it owns all shaders, pipelines, TLAS, etc.
+    if (RTX::g_ctx().device() == VK_NULL_HANDLE) {
+        LOG_FATAL_CAT("VULKAN", "{}RTX context not initialized! Did SDL3Initializer run?{}", 
+                      CRIMSON_MAGENTA, RESET);
+        std::abort();
+    }
+
     g_vulkanRenderer = std::make_unique<VulkanRenderer>(w, h);
 
     LOG_SUCCESS_CAT("VULKAN", 
-        "{}Vulkan context + renderer initialized {}x{} — Validation: {} — FIRST LIGHT ACHIEVED{}", 
+        "{}VulkanRenderer initialized {}x{} — Validation: {} — FIRST LIGHT ACHIEVED{}", 
         EMERALD_GREEN, w, h, 
         Options::Performance::ENABLE_VALIDATION_LAYERS ? "ON" : "OFF",
         LIME_GREEN, RESET);
@@ -51,7 +55,7 @@ void init(int w, int h) noexcept
 
 void shutdown() noexcept
 {
-    LOG_INFO_CAT("VULKAN", "{}Shutting down VulkanRenderer...{}", RASPBERRY_PINK, RESET);
+    LOG_INFO_CAT("VULKAN", "{}Shutting down VulkanRenderer...{}", SAPPHIRE_BLUE, RESET);
     g_vulkanRenderer.reset();  // RAII destroys everything
 
     // Global RTX context cleanup (optional — Handle<T> already cleaned)
