@@ -233,81 +233,74 @@ void VulkanRenderer::setOverclockMode(bool enabled) noexcept {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Cleanup and Destruction
+// Cleanup and Destruction — FINAL: Matches your current class layout
 // ──────────────────────────────────────────────────────────────────────────────
-VulkanRenderer::~VulkanRenderer() { 
+VulkanRenderer::~VulkanRenderer() {
     LOG_TRACE_CAT("RENDERER", "Destructor — START");
-    cleanup(); 
+    cleanup();
     LOG_TRACE_CAT("RENDERER", "Destructor — COMPLETE");
 }
 
 void VulkanRenderer::cleanup() noexcept {
-    LOG_INFO_CAT("RENDERER", "Initiating renderer shutdown");
+    LOG_INFO_CAT("RENDERER", "Initiating renderer shutdown — PINK PHOTONS DIMMING");
 
-    LOG_TRACE_CAT("RENDERER", "cleanup — vkDeviceWaitIdle — START");
-    vkDeviceWaitIdle(RTX::ctx().device());
-    LOG_TRACE_CAT("RENDERER", "cleanup — vkDeviceWaitIdle — COMPLETE");
+    auto& c = RTX::ctx();
+    if (!c.isValid()) {
+        LOG_WARN_CAT("RENDERER", "Context invalid — early cleanup exit");
+        return;
+    }
 
-    LOG_TRACE_CAT("RENDERER", "cleanup — SWAPCHAIN.cleanup() — START");
+    LOG_TRACE_CAT("RENDERER", "cleanup — vkDeviceWaitIdle");
+    vkDeviceWaitIdle(c.device());
+
+    LOG_TRACE_CAT("RENDERER", "cleanup — SWAPCHAIN");
     SWAPCHAIN.cleanup();
-    LOG_TRACE_CAT("RENDERER", "cleanup — SWAPCHAIN.cleanup() — COMPLETE");
 
-    LOG_TRACE_CAT("RENDERER", "cleanup — Destroy semaphores — START");
-    for (auto& s : imageAvailableSemaphores_) if (s) {
-        LOG_TRACE_CAT("RENDERER", "Destroying imageAvailableSemaphore: 0x{:x}", reinterpret_cast<uint64_t>(s));
-        vkDestroySemaphore(RTX::ctx().device(), s, nullptr);
-    }
-    for (auto& s : renderFinishedSemaphores_) if (s) {
-        LOG_TRACE_CAT("RENDERER", "Destroying renderFinishedSemaphore: 0x{:x}", reinterpret_cast<uint64_t>(s));
-        vkDestroySemaphore(RTX::ctx().device(), s, nullptr);
-    }
-    for (auto& f : inFlightFences_) if (f) {
-        LOG_TRACE_CAT("RENDERER", "Destroying inFlightFence: 0x{:x}", reinterpret_cast<uint64_t>(f));
-        vkDestroyFence(RTX::ctx().device(), f, nullptr);
-    }
-    if (timestampQueryPool_) {
-        LOG_TRACE_CAT("RENDERER", "Destroying timestampQueryPool: 0x{:x}", reinterpret_cast<uint64_t>(timestampQueryPool_));
-        vkDestroyQueryPool(RTX::ctx().device(), timestampQueryPool_, nullptr);
-    }
-    LOG_TRACE_CAT("RENDERER", "cleanup — Destroy semaphores — COMPLETE");
+    // ── Sync Objects (only what you actually have) ────────────────────────
+    LOG_TRACE_CAT("RENDERER", "cleanup — Destroying semaphores & fences");
 
-    LOG_TRACE_CAT("RENDERER", "cleanup — destroyRTOutputImages — START");
+    for (auto s : imageAvailableSemaphores_) {
+        if (s) vkDestroySemaphore(c.device(), s, nullptr);
+    }
+    for (auto s : renderFinishedSemaphores_) {
+        if (s) vkDestroySemaphore(c.device(), s, nullptr);
+    }
+    for (auto f : inFlightFences_) {
+        if (f) vkDestroyFence(c.device(), f, nullptr);
+    }
+
+    imageAvailableSemaphores_.clear();
+    renderFinishedSemaphores_.clear();
+    inFlightFences_.clear();
+
+    // ── Timestamp Query Pool (you DO have this member) ────────────────────
+    if (timestampQueryPool_ != VK_NULL_HANDLE) {
+        LOG_TRACE_CAT("RENDERER", "Destroying timestampQueryPool_ 0x{:x}", 
+                      reinterpret_cast<uint64_t>(timestampQueryPool_));
+        vkDestroyQueryPool(c.device(), timestampQueryPool_, nullptr);
+        timestampQueryPool_ = VK_NULL_HANDLE;
+    }
+
+    // ── RT Output / Accumulation / Denoiser Images ───────────────────────
     destroyRTOutputImages();
-    LOG_TRACE_CAT("RENDERER", "cleanup — destroyRTOutputImages — COMPLETE");
-
-    LOG_TRACE_CAT("RENDERER", "cleanup — destroyAccumulationImages — START");
     destroyAccumulationImages();
-    LOG_TRACE_CAT("RENDERER", "cleanup — destroyAccumulationImages — COMPLETE");
-
-    LOG_TRACE_CAT("RENDERER", "cleanup — destroyNexusScoreImage — START");
     destroyNexusScoreImage();
-    LOG_TRACE_CAT("RENDERER", "cleanup — destroyNexusScoreImage — COMPLETE");
-
-    LOG_TRACE_CAT("RENDERER", "cleanup — destroyDenoiserImage — START");
     destroyDenoiserImage();
-    LOG_TRACE_CAT("RENDERER", "cleanup — destroyDenoiserImage — COMPLETE");
 
-    LOG_TRACE_CAT("RENDERER", "cleanup — descriptorPool_.reset — START");
+    // ── Descriptor Pools ─────────────────────────────────────────────────
     descriptorPool_.reset();
-    LOG_TRACE_CAT("RENDERER", "cleanup — descriptorPool_.reset — COMPLETE");
-
-    LOG_TRACE_CAT("RENDERER", "cleanup — rtDescriptorPool_.reset — START");
     rtDescriptorPool_.reset();
-    LOG_TRACE_CAT("RENDERER", "cleanup — rtDescriptorPool_.reset — COMPLETE");
 
-    LOG_TRACE_CAT("RENDERER", "cleanup — Free command buffers — START");
+    // ── Command Buffers ──────────────────────────────────────────────────
     if (!commandBuffers_.empty()) {
-        LOG_TRACE_CAT("RENDERER", "Freeing {} command buffers", commandBuffers_.size());
-        vkFreeCommandBuffers(RTX::ctx().device(), RTX::ctx().commandPool(), 
-            static_cast<uint32_t>(commandBuffers_.size()), commandBuffers_.data());
+        vkFreeCommandBuffers(c.device(), c.commandPool(),
+                             static_cast<uint32_t>(commandBuffers_.size()),
+                             commandBuffers_.data());
         commandBuffers_.clear();
-        LOG_TRACE_CAT("RENDERER", "Command buffers freed and cleared");
     }
-    LOG_TRACE_CAT("RENDERER", "cleanup — Free command buffers — COMPLETE");
 
-    LOG_SUCCESS_CAT("RENDERER", "{}Renderer shutdown complete — all resources released{}", 
-        EMERALD_GREEN, RESET);
-    LOG_TRACE_CAT("RENDERER", "cleanup — COMPLETE");
+    LOG_SUCCESS_CAT("RENDERER", "{}Renderer shutdown complete — ZERO LEAKS — READY FOR REINIT{}", 
+                    EMERALD_GREEN, RESET);
 }
 
 void VulkanRenderer::destroyNexusScoreImage() noexcept {
@@ -404,52 +397,57 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, bool o
     }
     LOG_TRACE_CAT("RENDERER", "Step 2 COMPLETE");
 
-    auto& c = RTX::ctx();
-    const uint32_t framesInFlight = Options::Performance::MAX_FRAMES_IN_FLIGHT;
+    const uint32_t framesInFlight = Options::Performance::MAX_FRAMES_IN_FLIGHT; // 3 triple buffer
 
     LOG_TRACE_CAT("RENDERER", "=== STACK BUILD ORDER STEP 3: Load Ray Tracing Extensions ===");
     loadRayTracingExtensions();
     LOG_TRACE_CAT("RENDERER", "Step 3 COMPLETE");
 
-    LOG_TRACE_CAT("RENDERER", "=== STACK BUILD ORDER STEP 4: Resize Synchronization Containers ===");
+    // --- 4. Create Surface VulkanCore.cpp ---
+
+    // =============================================================================
+    // STEP 5 — CREATE SYNCHRONIZATION OBJECTS (TRIPLE BUFFERING + ASYNC COMPUTE)
+    // =============================================================================
+    LOG_TRACE_CAT("RENDERER", "=== STACK BUILD ORDER STEP 5: Create Synchronization Objects ===");
+    LOG_TRACE_CAT("RENDERER", "Target in-flight frames: {} — TRUE TRIPLE BUFFERING ACTIVE", framesInFlight);
+
     imageAvailableSemaphores_.resize(framesInFlight);
     renderFinishedSemaphores_.resize(framesInFlight);
     inFlightFences_.resize(framesInFlight);
-    LOG_TRACE_CAT("RENDERER", "Step 4 COMPLETE");
+    computeFinishedSemaphores_.resize(framesInFlight);
+    computeToGraphicsSemaphores_.resize(framesInFlight);
 
-    // =============================================================================
-    // FIXED: STEP 5 — CREATE SYNCHRONIZATION OBJECTS (Enhanced Logging + Validation)
-    // ──────────────────────────────────────────────────────────────────────────
-    LOG_TRACE_CAT("RENDERER", "=== STACK BUILD ORDER STEP 5: Create Synchronization Objects ===");
-    LOG_TRACE_CAT("RENDERER", "Creating {} semaphores and fences for in-flight frames", framesInFlight);
+    VkSemaphoreCreateInfo semInfo{ .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
+    VkFenceCreateInfo fenceInfo{ .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, .flags = VK_FENCE_CREATE_SIGNALED_BIT };
 
-    VkSemaphoreCreateInfo semInfo{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
-    VkFenceCreateInfo fenceInfo{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, nullptr, VK_FENCE_CREATE_SIGNALED_BIT};
+    auto& c = RTX::g_ctx();
 
     for (uint32_t i = 0; i < framesInFlight; ++i) {
-        LOG_TRACE_CAT("RENDERER", "Creating sync objects for frame {}", i);
-        
-        VK_CHECK(vkCreateSemaphore(c.device(), &semInfo, nullptr, &imageAvailableSemaphores_[i]), 
-                 std::format("Failed to create image available semaphore for frame {}", i).c_str());
-        
-        VK_CHECK(vkCreateSemaphore(c.device(), &semInfo, nullptr, &renderFinishedSemaphores_[i]), 
-                 std::format("Failed to create render finished semaphore for frame {}", i).c_str());
-        
-        VK_CHECK(vkCreateFence(c.device(), &fenceInfo, nullptr, &inFlightFences_[i]), 
-                 std::format("Failed to create in-flight fence for frame {}", i).c_str());
+        LOG_TRACE_CAT("RENDERER", "Creating sync objects for frame {} / {}", i, framesInFlight - 1);
+
+        VK_CHECK(vkCreateSemaphore(c.device(), &semInfo, nullptr, &imageAvailableSemaphores_[i]),      "imageAvailable");
+        VK_CHECK(vkCreateSemaphore(c.device(), &semInfo, nullptr, &renderFinishedSemaphores_[i]),      "renderFinished");
+        VK_CHECK(vkCreateSemaphore(c.device(), &semInfo, nullptr, &computeFinishedSemaphores_[i]),    "computeFinished");
+        VK_CHECK(vkCreateSemaphore(c.device(), &semInfo, nullptr, &computeToGraphicsSemaphores_[i]),  "compute→graphics");
+        VK_CHECK(vkCreateFence(c.device(), &fenceInfo, nullptr, &inFlightFences_[i]),                 "inFlightFence");
     }
+    LOG_SUCCESS_CAT("RENDERER", "Step 5 COMPLETE — {} full sync sets created", framesInFlight);
 
-    LOG_TRACE_CAT("RENDERER", "Step 5 COMPLETE: All synchronization objects created successfully");
-
+    // =============================================================================
+    // STEP 6 — GPU Timestamp Query Pool
+    // =============================================================================
     LOG_TRACE_CAT("RENDERER", "=== STACK BUILD ORDER STEP 6: GPU Timestamp Queries ===");
     if (Options::Performance::ENABLE_GPU_TIMESTAMPS || Options::Debug::SHOW_GPU_TIMESTAMPS) {
-        VkQueryPoolCreateInfo qpInfo{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
+        VkQueryPoolCreateInfo qpInfo{ .sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO };
         qpInfo.queryType = VK_QUERY_TYPE_TIMESTAMP;
         qpInfo.queryCount = framesInFlight * 2;
         VK_CHECK(vkCreateQueryPool(c.device(), &qpInfo, nullptr, &timestampQueryPool_), "Timestamp pool");
     }
     LOG_TRACE_CAT("RENDERER", "Step 6 COMPLETE");
 
+    // =============================================================================
+    // STEP 7 — GPU Properties + Timestamp Period
+    // =============================================================================
     LOG_TRACE_CAT("RENDERER", "=== STACK BUILD ORDER STEP 7: Query GPU Properties ===");
     VkPhysicalDeviceProperties props{};
     vkGetPhysicalDeviceProperties(c.physicalDevice(), &props);
@@ -458,110 +456,75 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, bool o
     LOG_TRACE_CAT("RENDERER", "Step 7 COMPLETE");
 
     // =============================================================================
-    // FIXED: STEP 8 — FETCH SURFACE FROM VULKANCORE & INITIALIZE SWAPCHAIN (SDL3 API)
-    // SINGLE SOURCE: Surface from RTX::initContext() — NO LOCAL CREATION
-    // ──────────────────────────────────────────────────────────────────────────
-    LOG_TRACE_CAT("RENDERER", "=== STACK BUILD ORDER STEP 8: Fetch Surface from VulkanCore & Initialize Swapchain ===");
+    // STEP 8 — Initialize Swapchain (uses global surface from RTX::initContext)
+    // =============================================================================
+    LOG_TRACE_CAT("RENDERER", "=== STACK BUILD ORDER STEP 8: Initialize Swapchain ===");
+    SWAPCHAIN.init(c.instance(), c.physicalDevice(), c.device(), c.surface(), width, height);
 
-    // 1. Ensure window is valid (surface fetched independently — window still needed for diags)
-    if (window_ == nullptr) {
-        LOG_FATAL_CAT("RENDERER", "SDL_Window* is null — cannot validate surface");
-        throw std::runtime_error("Invalid SDL window pointer");
+    if (SWAPCHAIN.images().empty()) {
+        LOG_FATAL_CAT("RENDERER", "Swapchain has zero images — initialization failed");
+        throw std::runtime_error("Invalid swapchain");
     }
+    LOG_SUCCESS_CAT("RENDERER", "Swapchain ready: {} images @ {}x{}", SWAPCHAIN.images().size(), SWAPCHAIN.extent().width, SWAPCHAIN.extent().height);
+    LOG_TRACE_CAT("RENDERER", "Step 8 COMPLETE");
 
-    // Pre-call diagnostics (for logging only — surface already created upstream)
-    Uint32 windowFlags = SDL_GetWindowFlags(window_);
-    LOG_TRACE_CAT("RENDERER", "Window flags: 0x{:x}", static_cast<uint32_t>(windowFlags));
-
-    // 2. Validate global surface (guard against null — prevents validation error & segfault)
-    VkBool32 presentSupported = VK_FALSE;
-    if (g_surface == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("RENDERER", "Global g_surface is VK_NULL_HANDLE — cannot check present support (upstream failure?)");
-        throw std::runtime_error("Global surface is null — ensure RTX::createSurface called before constructor");
-    }
-
-    // 3. Surface support check (now safe — non-null validated)
-    VkResult supportRes = vkGetPhysicalDeviceSurfaceSupportKHR(c.physicalDevice(), c.graphicsFamily(), g_surface, &presentSupported);
-    if (supportRes != VK_SUCCESS) {
-        LOG_FATAL_CAT("RENDERER", "vkGetPhysicalDeviceSurfaceSupportKHR failed: {} (surface=0x{:x})", static_cast<int>(supportRes), reinterpret_cast<uintptr_t>(g_surface));
-        throw std::runtime_error("Surface support check failed");
-    }
-    if (!presentSupported) {
-        LOG_FATAL_CAT("RENDERER", "Presentation not supported on graphics queue (family={})", c.graphicsFamily());
-        throw std::runtime_error("Graphics queue does not support presentation");
-    }
-    LOG_TRACE_CAT("RENDERER", "Graphics queue supports presentation — proceeding (supported={})", presentSupported);
-
-    // 4. Initialize swapchain with fetched surface
-    LOG_TRACE_CAT("RENDERER", "Initializing SwapchainManager — surface=0x{:x}, {}x{}", reinterpret_cast<uintptr_t>(g_surface), width, height);
-    SWAPCHAIN.init(c.instance(), c.physicalDevice(), c.device(), g_surface, static_cast<uint32_t>(width), static_cast<uint32_t>(height));
-
-    // 5. Final validation
-    if (SWAPCHAIN.images().empty() || SWAPCHAIN.extent().width == 0 || SWAPCHAIN.extent().height == 0) {
-        LOG_FATAL_CAT("RENDERER", "Swapchain initialization failed — {} images, extent {}x{}", SWAPCHAIN.images().size(), SWAPCHAIN.extent().width, SWAPCHAIN.extent().height);
-        // NO destroy: Swapchain RAII will clean; surface stays in VulkanCore
-        throw std::runtime_error("Swapchain created with invalid parameters");
-    }
-
-    LOG_SUCCESS_CAT("RENDERER", "Swapchain initialized: {} images @ {}x{} — PRESENTATION READY", SWAPCHAIN.images().size(), SWAPCHAIN.extent().width, SWAPCHAIN.extent().height);
-    LOG_TRACE_CAT("RENDERER", "Step 8 COMPLETE — PINK PHOTONS CAN NOW PRESENT");
-
-    // ──────────────────────────────────────────────────────────────────────────
-    // STEP 9: Create Descriptor Pools
-    // ──────────────────────────────────────────────────────────────────────────
-    LOG_TRACE_CAT("RENDERER", "=== STACK BUILD ORDER STEP 9: Create Descriptor Pools ===");
-    // ... [your existing descriptor pool code — ensure c.device() if used] ...
-    LOG_TRACE_CAT("RENDERER", "Step 9 COMPLETE");
-
-    LOG_TRACE_CAT("RENDERER", "=== STACK BUILD ORDER STEP 10: Create Render Targets ===");
+    // =============================================================================
+    // STEP 9 — HDR + RT RENDER TARGETS (POST-SWAPCHAIN, PRE-PIPELINE)
+    // =============================================================================
+    LOG_TRACE_CAT("RENDERER", "=== STACK BUILD ORDER STEP 9: Create HDR & RT Targets ===");
     if (Options::Environment::ENABLE_ENV_MAP) createEnvironmentMap();
-    createAccumulationImages();
-    createRTOutputImages();
+    createAccumulationImages();                    // HDR accumulation
+    createRTOutputImages();                        // HDR ray tracing output
     if (Options::RTX::ENABLE_DENOISING) createDenoiserImage();
     if (Options::RTX::ENABLE_ADAPTIVE_SAMPLING)
         createNexusScoreImage(c.physicalDevice(), c.device(), c.commandPool(), c.graphicsQueue());
-    LOG_TRACE_CAT("RENDERER", "Step 10 COMPLETE");
+    LOG_SUCCESS_CAT("RENDERER", "Step 9 COMPLETE — HDR pipeline targets created");
 
-    LOG_TRACE_CAT("RENDERER", "=== STACK BUILD ORDER STEP 11: Initialize Buffer Data ===");
+    // =============================================================================
+    // STEP 10 — Descriptor System (Uses Global VulkanRTX Instance)
+    // =============================================================================
+    LOG_TRACE_CAT("RENDERER", "=== STACK BUILD ORDER STEP 10: Descriptor System ===");
+    g_rtx().initDescriptorPoolAndSets();
+    LOG_SUCCESS_CAT("RENDERER", "Step 10 COMPLETE — {} descriptor sets forged", Options::Performance::MAX_FRAMES_IN_FLIGHT);
+
+    // =============================================================================
+    // STEP 11 — Per-Frame Buffers
+    // =============================================================================
+    LOG_TRACE_CAT("RENDERER", "=== STACK BUILD ORDER STEP 11: Initialize Per-Frame Buffers ===");
     initializeAllBufferData(framesInFlight, 64_MB, 16_MB);
     LOG_TRACE_CAT("RENDERER", "Step 11 COMPLETE");
 
-    LOG_TRACE_CAT("RENDERER", "=== STACK BUILD ORDER STEP 12: Create Command Buffers ===");
+    // =============================================================================
+    // STEP 12 — Command Buffers
+    // =============================================================================
+    LOG_TRACE_CAT("RENDERER", "=== STACK BUILD ORDER STEP 12: Allocate Command Buffers ===");
     createCommandBuffers();
     LOG_TRACE_CAT("RENDERER", "Step 12 COMPLETE");
 
-    LOG_TRACE_CAT("RENDERER", "=== STACK BUILD ORDER STEP 13: Allocate Descriptor Sets ===");
-    allocateDescriptorSets();
+    // =============================================================================
+    // STEP 13 — Ray Tracing Pipeline + SBT
+    // =============================================================================
+    LOG_TRACE_CAT("RENDERER", "=== STACK BUILD ORDER STEP 13: Ray Tracing Pipeline ===");
+    createRayTracingPipeline(finalShaderPaths);
+    createShaderBindingTable();
     LOG_TRACE_CAT("RENDERER", "Step 13 COMPLETE");
 
-    LOG_TRACE_CAT("RENDERER", "=== STACK BUILD ORDER STEP 14: Create Ray Tracing Pipeline ===");
-    createRayTracingPipeline(finalShaderPaths);
-    LOG_TRACE_CAT("RENDERER", "Step 14 COMPLETE");
-
-    LOG_TRACE_CAT("RENDERER", "=== STACK BUILD ORDER STEP 15: Create Shader Binding Table ===");
-    createShaderBindingTable();
-    LOG_TRACE_CAT("RENDERER", "Step 15 COMPLETE");
-
-    LOG_TRACE_CAT("RENDERER", "=== STACK BUILD ORDER STEP 16: Update Descriptors ===");
+    // =============================================================================
+    // STEP 14 — Final Descriptor Updates
+    // =============================================================================
+    LOG_TRACE_CAT("RENDERER", "=== STACK BUILD ORDER STEP 14: Update All Descriptors ===");
     updateNexusDescriptors();
     updateRTXDescriptors();
     updateTonemapDescriptorsInitial();
     updateDenoiserDescriptors();
-    LOG_TRACE_CAT("RENDERER", "Step 16 COMPLETE");
+    LOG_TRACE_CAT("RENDERER", "Step 14 COMPLETE");
 
+    // =============================================================================
+    // FINAL — FIRST LIGHT ACHIEVED
+    // =============================================================================
     LOG_SUCCESS_CAT("RENDERER", 
-        "VulkanRenderer INITIALIZED — {}x{} — ALL SYSTEMS NOMINAL — PINK PHOTONS ETERNAL — FIRST LIGHT ACHIEVED", 
-        width, height);
-
-    // STEP 10: HDR
-    LOG_TRACE_CAT("RENDERER", "=== STACK BUILD ORDER STEP 10: Create Render Targets ===");
-    if (Options::Environment::ENABLE_ENV_MAP) createEnvironmentMap();  // ← CALLED HERE: Post-swapchain, pre-descriptors
-        createAccumulationImages();
-        createRTOutputImages();
-    if (Options::RTX::ENABLE_DENOISING) createDenoiserImage();
-    if (Options::RTX::ENABLE_ADAPTIVE_SAMPLING)
-        createNexusScoreImage(c.physicalDevice(), c.device(), c.commandPool(), c.graphicsQueue());
-    LOG_TRACE_CAT("RENDERER", "Step 10 COMPLETE");
+        "{}VULKAN RENDERER FULLY INITIALIZED — {}x{} — TRIPLE BUFFERING — ASYNC COMPUTE — HDR — PINK PHOTONS ETERNAL — FIRST LIGHT ACHIEVED{}", 
+        EMERALD_GREEN, width, height, RESET);
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

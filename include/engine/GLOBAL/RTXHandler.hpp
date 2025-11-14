@@ -11,6 +11,9 @@
 // • NEW: initContext() — SAFE CONTEXT INITIALIZATION
 // • FIXED: Handle<T> template with full inline implementations (valid(), ~Handle(), etc.)
 // • FIXED: logAndTrackDestruction declaration moved BEFORE Handle template
+// • NEW: Async Compute Support — computeFamily, computeQueue, computeCommandPool
+// • FIXED: Accessors for compute queue/pool
+// • NEW: cleanup() declaration for Context
 // • PINK PHOTONS ETERNAL
 //
 // Dual Licensed:
@@ -59,7 +62,9 @@ struct Camera;
 
 using namespace Logging::Color;
 
-// Add this somewhere in your global Vulkan setup
+extern VkPhysicalDevice  g_PhysicalDevice;
+extern VkSurfaceKHR      g_surface;
+
 inline const char* getPlatformSurfaceExtension()
 {
 #if defined(__linux__)
@@ -89,7 +94,7 @@ namespace RTX {
     // =============================================================================
     // FIXED: SDL3 2024+ — CREATE INSTANCE + OVERLOAD FOR initContext
     // =============================================================================
-    [[nodiscard]] VkInstance createVulkanInstanceWithSDL(bool enableValidation);
+    [[nodiscard]] VkInstance createVulkanInstanceWithSDL(SDL_Window* window, bool enableValidation);  // UPDATED: Added SDL_Window* window
     void initContext(VkInstance instance, SDL_Window* window, int width, int height);
 
     // =============================================================================
@@ -193,7 +198,7 @@ namespace RTX {
     #define HANDLE_RESET(var) do { LOG_INFO_CAT("RTX", "HANDLE_RESET: {}", #var); (var).reset(); } while(0)
 
     // =============================================================================
-    // Context
+    // Context — FINAL: Async Compute + Ready Flag + Full Cleanup + Safe Accessors
     // =============================================================================
     struct Context {
         VkInstance       instance_       = VK_NULL_HANDLE;
@@ -204,9 +209,15 @@ namespace RTX {
         VkQueue          presentQueue_   = VK_NULL_HANDLE;
         VkCommandPool    commandPool_    = VK_NULL_HANDLE;
         VkPipelineCache  pipelineCache_  = VK_NULL_HANDLE;
+		VkDebugUtilsMessengerEXT debugMessenger_ = VK_NULL_HANDLE;
 
-        uint32_t graphicsFamily_ = UINT32_MAX;
-        uint32_t presentFamily_  = UINT32_MAX;
+        // NEW: Async Compute Support
+        uint32_t         computeFamily_      = UINT32_MAX;
+        VkQueue          computeQueue_       = VK_NULL_HANDLE;
+        VkCommandPool    computeCommandPool_ = VK_NULL_HANDLE;
+
+        uint32_t         graphicsFamily_    = UINT32_MAX;
+        uint32_t         presentFamily_     = UINT32_MAX;
 
         // Ray Tracing Extensions
         PFN_vkGetBufferDeviceAddressKHR               vkGetBufferDeviceAddressKHR_               = nullptr;
@@ -228,32 +239,54 @@ namespace RTX {
         Handle<VkBuffer>    frameDataBuffer_;
         Handle<VkBuffer>    debugVisBuffer_;
 
+        // NEW: Context readiness guard — prevents renderer from touching device() too early
+        mutable std::atomic<bool> ready_{false};
+
         void init(SDL_Window* window, int width, int height);
+        void cleanup() noexcept;
+        
         [[nodiscard]] bool isValid() const noexcept;
-        [[nodiscard]] VkDevice          device()         const noexcept;
-        [[nodiscard]] VkPhysicalDevice  physicalDevice() const noexcept;
-        [[nodiscard]] VkInstance        instance()       const noexcept;
-        [[nodiscard]] VkSurfaceKHR      surface()        const noexcept;
+        [[nodiscard]] bool isReady() const noexcept { return ready_.load(std::memory_order_acquire); }
+        void markReady() noexcept { ready_.store(true, std::memory_order_release); }
+
+        [[nodiscard]] VkDevice          device()         const noexcept { return device_; }
+        [[nodiscard]] VkPhysicalDevice  physicalDevice() const noexcept { return physicalDevice_; }
+        [[nodiscard]] VkInstance        instance()       const noexcept { return instance_; }
+        [[nodiscard]] VkSurfaceKHR      surface()        const noexcept { return surface_; }
+
+        // Legacy aliases (kept for compatibility)
         [[nodiscard]] VkDevice         vkDevice() const noexcept { return device(); }
         [[nodiscard]] VkPhysicalDevice vkPhysicalDevice() const noexcept { return physicalDevice(); }
         [[nodiscard]] VkSurfaceKHR     vkSurface() const noexcept { return surface(); }
+
         [[nodiscard]] uint32_t         graphicsFamily() const noexcept { return graphicsFamily_; }
-        [[nodiscard]] uint32_t         presentFamily() const noexcept { return presentFamily_; }
-        [[nodiscard]] VkCommandPool    commandPool() const noexcept { return commandPool_; }
+        [[nodiscard]] uint32_t         presentFamily()  const noexcept { return presentFamily_; }
+        [[nodiscard]] uint32_t         computeFamily()  const noexcept { return computeFamily_; }
+
+        [[nodiscard]] VkCommandPool    commandPool()       const noexcept { return commandPool_; }
+        [[nodiscard]] VkCommandPool    computeCommandPool()const noexcept { return computeCommandPool_; }
+
         [[nodiscard]] VkQueue          graphicsQueue() const noexcept { return graphicsQueue_; }
-        [[nodiscard]] VkQueue          presentQueue() const noexcept { return presentQueue_; }
+        [[nodiscard]] VkQueue          presentQueue()  const noexcept { return presentQueue_; }
+        [[nodiscard]] VkQueue          computeQueue()   const noexcept { return computeQueue_; }
+
         [[nodiscard]] VkPipelineCache  pipelineCacheHandle() const noexcept { return pipelineCache_; }
+
+        // Ray Tracing Function Pointers
         [[nodiscard]] PFN_vkCmdTraceRaysKHR                         vkCmdTraceRaysKHR() const noexcept { return vkCmdTraceRaysKHR_; }
         [[nodiscard]] PFN_vkGetRayTracingShaderGroupHandlesKHR      vkGetRayTracingShaderGroupHandlesKHR() const noexcept { return vkGetRayTracingShaderGroupHandlesKHR_; }
         [[nodiscard]] PFN_vkCreateAccelerationStructureKHR          vkCreateAccelerationStructureKHR() const noexcept { return vkCreateAccelerationStructureKHR_; }
         [[nodiscard]] PFN_vkGetAccelerationStructureDeviceAddressKHR vkGetAccelerationStructureDeviceAddressKHR() const noexcept { return vkGetAccelerationStructureDeviceAddressKHR_; }
         [[nodiscard]] PFN_vkCreateRayTracingPipelinesKHR            vkCreateRayTracingPipelinesKHR() const noexcept { return vkCreateRayTracingPipelinesKHR_; }
         [[nodiscard]] PFN_vkGetBufferDeviceAddressKHR               vkGetBufferDeviceAddressKHR() const noexcept { return vkGetBufferDeviceAddressKHR_; }
+
         [[nodiscard]] const VkPhysicalDeviceRayTracingPipelinePropertiesKHR& rayTracingProps() const noexcept { return rayTracingProps_; }
+
         [[nodiscard]] VkImageView blueNoiseView() const noexcept { return blueNoiseView_ ? *blueNoiseView_ : VK_NULL_HANDLE; }
         [[nodiscard]] VkBuffer    reservoirBuffer() const noexcept { return reservoirBuffer_ ? *reservoirBuffer_ : VK_NULL_HANDLE; }
         [[nodiscard]] VkBuffer    frameDataBuffer() const noexcept { return frameDataBuffer_ ? *frameDataBuffer_ : VK_NULL_HANDLE; }
         [[nodiscard]] VkBuffer    debugVisBuffer() const noexcept { return debugVisBuffer_ ? *debugVisBuffer_ : VK_NULL_HANDLE; }
+
         [[nodiscard]] uint32_t currentFrame() const noexcept { return 0; }
     };
 
@@ -383,5 +416,7 @@ namespace RTX {
 // ADDED: initContext() — safe static Context init
 // FIXED: Handle<T> full inline template defs (valid(), ~Handle(), etc.)
 // FIXED: logAndTrackDestruction declaration moved BEFORE Handle template
+// NEW: Async Compute — computeFamily, computeQueue, computeCommandPool + accessors
+// NEW: cleanup() declaration in Context
 // ZERO CRASH — PRODUCTION READY
 // =============================================================================

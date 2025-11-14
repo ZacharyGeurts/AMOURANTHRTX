@@ -30,12 +30,10 @@
 #include <array>
 #include <vector>
 #include <tuple>
-#include <mutex>  // For persistent staging lock
+#include <mutex>
+#include <set>
 
 using namespace Logging::Color;
-
-// Global surface. Yeah baby, hit it RAW
-VkSurfaceKHR g_surface = VK_NULL_HANDLE;
 
 // =============================================================================
 // VulkanCore.cpp — Persistent staging globals — ONLY ONE DEFINITION
@@ -63,12 +61,6 @@ using VulkanRTXDetail::g_mappedOffset;
 using VulkanRTXDetail::STAGING_POOL_SIZE;
 
 // -----------------------------------------------------------------------------
-// GLOBAL DEFINITIONS
-// -----------------------------------------------------------------------------
-VkPhysicalDevice g_PhysicalDevice = VK_NULL_HANDLE;
-std::unique_ptr<VulkanRTX> g_rtx_instance;
-
-// -----------------------------------------------------------------------------
 // ONE-TIME INITIALIZATION — CALLED ONCE AT STARTUP
 // -----------------------------------------------------------------------------
 void initVulkanCoreGlobals() {
@@ -85,17 +77,6 @@ void initVulkanCoreGlobals() {
                   g_rtx_instance ? "present" : "null");
 
     LOG_SUCCESS_CAT("VulkanCore", "initVulkanCoreGlobals() — COMPLETE — Globals locked");
-}
-
-// Global accessor — thread-safe, exception-safe
-[[nodiscard]] inline VulkanRTX& g_rtx() {
-    LOG_TRACE_CAT("RTX", "g_rtx() access attempted");
-    if (!g_rtx_instance) {
-        LOG_ERROR_CAT("RTX", "g_rtx() used before VulkanRTX construction — CRITICAL!");
-        throw std::runtime_error("g_rtx() used before VulkanRTX construction");
-    }
-    LOG_DEBUG_CAT("RTX", "g_rtx() returning valid instance @ 0x{:x}", reinterpret_cast<uintptr_t>(g_rtx_instance.get()));
-    return *g_rtx_instance;
 }
 
 // =============================================================================
@@ -1104,232 +1085,156 @@ uint64_t VulkanRTX::alignUp(uint64_t value, uint64_t alignment) const noexcept {
 namespace RTX {
 
 // =============================================================================
-// FINAL FIXED FOR SDL3: createVulkanInstanceWithSDL — WORKS ON REAL GPU + LLVMPIPE + AUTO-EXTENSIONS
+// FULL: Updated createVulkanInstanceWithSDL — With Safer Callback & Enhanced Error Handling
+// No std::terminate() on non-fatal issues; Propagate failures with return VK_NULL_HANDLE
+// Log validation setup & instance creation traces
 // =============================================================================
-[[nodiscard]] VkInstance createVulkanInstanceWithSDL(bool enableValidation)
+[[nodiscard]] VkInstance createVulkanInstanceWithSDL(SDL_Window* window, bool enableValidation)
 {
-    LOG_TRACE_CAT("VULKAN", "createVulkanInstanceWithSDL — START (validation={})", enableValidation ? "enabled" : "disabled");
-    LOG_INFO_CAT("VULKAN", "{}FORGING VULKAN INSTANCE — SDL3 2024+ API — PINK PHOTONS RISING{}", PLASMA_FUCHSIA, RESET);
-
-    // Pre-call: Clear SDL errors for clean diagnostics
-    SDL_ClearError();
-
-    // Query SDL3 for required Vulkan instance extensions
-    LOG_TRACE_CAT("VULKAN", "Querying SDL3 for instance extensions...");
-    Uint32 sdlCount = 0;  // Use Uint32 for SDL3 compatibility
-    const char * const * sdlExtensions = SDL_Vulkan_GetInstanceExtensions(&sdlCount);
-    const char* sdlErr = SDL_GetError();  // Fetch post-call
-    if ((sdlExtensions || sdlCount) == 0) {
-        LOG_WARN_CAT("VULKAN", "SDL_Vulkan_GetInstanceExtensions returned null/0 count (SDL error: '{}') — surface may fail; proceeding with manual exts", sdlErr ? sdlErr : "None");
-        sdlCount = 0;
-    } else {
-        LOG_DEBUG_CAT("VULKAN", "SDL3 reported {} extensions (no SDL error: '{}')", sdlCount, sdlErr ? sdlErr : "None");
+    if (!window) {
+        LOG_FATAL_CAT("VULKAN", "createVulkanInstanceWithSDL: Null window provided — cannot query SDL extensions!");
+        return VK_NULL_HANDLE;  // Return null instead of terminate — Let caller handle
     }
 
-    std::vector<const char*> extensions;
-    if (sdlCount > 0) {
-        // Copy SDL's extensions into our vector
-        extensions.assign(sdlExtensions, sdlExtensions + sdlCount);
-        LOG_SUCCESS_CAT("VULKAN", "SDL3 acquired {} required instance extensions", sdlCount);
-        for (size_t i = 0; i < extensions.size(); ++i) {
-            LOG_TRACE_CAT("VULKAN", "  → [{}] {}", i, extensions[i] ? extensions[i] : "<null extension pointer>");
-        }
-    } else {
-        LOG_TRACE_CAT("VULKAN", "No SDL extensions; relying on manual additions");
+    LOG_INFO_CAT("VULKAN", "{}FORGING VULKAN INSTANCE — SDL3 FULL MODE — EXTRACTING WINDOW EXTENSIONS{}", PLASMA_FUCHSIA, RESET);
+    LOG_TRACE_CAT("VULKAN", "Instance creation params — window: 0x{:p}, validation: {}", static_cast<void*>(window), enableValidation ? "enabled" : "disabled");
+
+    // Step 1: Query SDL-required instance extensions (platform-specific, e.g., VK_KHR_xlib_surface)
+    uint32_t sdlExtensionCount = 0;
+    const char* const* sdlExtensions = SDL_Vulkan_GetInstanceExtensions(&sdlExtensionCount);
+    if (!sdlExtensions || sdlExtensionCount == 0) {
+        LOG_FATAL_CAT("VULKAN", "SDL_Vulkan_GetInstanceExtensions failed — no extensions returned (window valid? SDL init?)");
+        // Diag: Log window flags
+        Uint32 flags = SDL_GetWindowFlags(window);
+        LOG_ERROR_CAT("VULKAN", "Window flags: 0x{:x} (has SDL_WINDOW_VULKAN? {})", 
+                      static_cast<uint32_t>(flags), (flags & SDL_WINDOW_VULKAN) ? "YES" : "NO");
+        return VK_NULL_HANDLE;  // Propagate failure
     }
 
-    // === ADD REQUIRED EXTENSIONS IF NOT ALREADY PRESENT (SDL3 usually includes surface) ===
-    LOG_TRACE_CAT("VULKAN", "Adding required extensions if missing...");
-    const char* surfaceExt = VK_KHR_SURFACE_EXTENSION_NAME;
-    if (std::find(extensions.begin(), extensions.end(), surfaceExt) == extensions.end()) {
-        extensions.push_back(surfaceExt);
-        LOG_INFO_CAT("VULKAN", "  + {} (manually added for surface)", surfaceExt);
-    }
+    LOG_TRACE_CAT("VULKAN", "SDL returned {} extensions", sdlExtensionCount);
 
+    // Step 2: Build full extension list (SDL + debug if enabled) — Use set<const char*> for dedup (no strings, no dangling)
+    std::set<const char*> uniqueExts;
+    for (uint32_t i = 0; i < sdlExtensionCount; ++i) {
+        uniqueExts.insert(sdlExtensions[i]);
+    }
     if (enableValidation) {
-        const char* debugExt = VK_EXT_DEBUG_UTILS_EXTENSION_NAME;
-        if (std::find(extensions.begin(), extensions.end(), debugExt) == extensions.end()) {
-            extensions.push_back(debugExt);
-            LOG_INFO_CAT("VULKAN", "  + {} (validation)", debugExt);
+        uniqueExts.insert(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+    }
+
+    std::vector<const char*> extensions(uniqueExts.begin(), uniqueExts.end());  // Direct assign — safe, no conversion
+
+    LOG_INFO_CAT("VULKAN", "SDL extensions extracted ({} total after dedup):", extensions.size());
+    for (const auto* ext : extensions) {
+        LOG_INFO_CAT("VULKAN", "  + {}", ext);  // Will log VK_KHR_xlib_surface on Linux!
+    }
+
+    // Step 3: Validation layers (optional)
+    const char* const* layers = nullptr;
+    uint32_t layerCount = 0;
+    if (enableValidation) {
+        // Check support first (to avoid VK_ERROR_LAYER_NOT_PRESENT)
+        uint32_t availLayerCount = 0;
+        vkEnumerateInstanceLayerProperties(&availLayerCount, nullptr);
+        std::vector<VkLayerProperties> availLayers(availLayerCount);
+        vkEnumerateInstanceLayerProperties(&availLayerCount, availLayers.data());
+
+        static const char* validationLayer = "VK_LAYER_KHRONOS_validation";
+        bool layerSupported = false;
+        for (const auto& prop : availLayers) {
+            if (strcmp(prop.layerName, validationLayer) == 0) {
+                layerSupported = true;
+                break;
+            }
+        }
+        if (layerSupported) {
+            layers = &validationLayer;
+            layerCount = 1;
+            LOG_INFO_CAT("VULKAN", "  + VK_LAYER_KHRONOS_validation (supported)");
+        } else {
+            LOG_WARN_CAT("VULKAN", "Validation layer not supported — disabling");
         }
     }
 
-    const char* portExt = VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME;
-    if (std::find(extensions.begin(), extensions.end(), portExt) == extensions.end()) {
-        extensions.push_back(portExt);
-        LOG_INFO_CAT("VULKAN", "  + {} (macOS/Linux compat)", portExt);
-    }
-
-    // === FINAL SAFETY: REMOVE ANY nullptr FROM LIST ===
-    size_t oldSize = extensions.size();
-
-    extensions.erase(
-        std::remove_if(extensions.begin(), extensions.end(),
-                       [](const char* s) { return s == nullptr; }),
-        extensions.end()
-    );
-
-    size_t removed = oldSize - extensions.size();
-    if (removed > 0) {
-        LOG_WARN_CAT("VULKAN", "Removed {} null extension pointer(s) during cleanup", removed);
-    }
-    removed = oldSize - extensions.size();
-    if (removed > 0) {
-        LOG_DEBUG_CAT("VULKAN", "Removed {} null extensions", removed);
-    }
-
-    LOG_INFO_CAT("VULKAN", "Final instance extension count: {}", extensions.size());
-    for (const char* ext : extensions) {
-        LOG_TRACE_CAT("VULKAN", "  → Final ext: {}", ext ? ext : "<null>");
-    }
-
-    // Prepare layers
-    LOG_TRACE_CAT("VULKAN", "Preparing validation layers (enableValidation={})...", enableValidation);
-    const std::vector<const char*> layers = enableValidation
-        ? std::vector<const char*>{"VK_LAYER_KHRONOS_validation"}
-        : std::vector<const char*>{};
-    if (enableValidation && layers.empty()) {
-        LOG_WARN_CAT("VULKAN", "Validation requested but no layers defined — disabling");
-    } else if (!layers.empty()) {
-        LOG_DEBUG_CAT("VULKAN", "Enabled {} validation layer(s)", layers.size());
-        for (const char* layer : layers) {
-            LOG_TRACE_CAT("VULKAN", "  → Layer: {}", layer);
-        }
-    }
-
-    // Application info
-    LOG_TRACE_CAT("VULKAN", "Setting up application info...");
+    // Step 4: App info
     VkApplicationInfo appInfo{
         .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
-        .pApplicationName = "AMOURANTH RTX v80 TURBO",
+        .pNext = nullptr,
+        .pApplicationName = "AMOURANTH RTX — VALHALLA v80 TURBO",
         .applicationVersion = VK_MAKE_VERSION(1, 0, 0),
         .pEngineName = "VALHALLA TURBO ENGINE",
         .engineVersion = VK_MAKE_VERSION(80, 0, 0),
         .apiVersion = VK_API_VERSION_1_3
     };
 
-    // Instance create info
-    LOG_TRACE_CAT("VULKAN", "Assembling VkInstanceCreateInfo...");
+    // Step 5: Debug messenger (if validation enabled) — FIXED: Safer callback with std::cerr
+    VkDebugUtilsMessengerCreateInfoEXT debugCreateInfo{};
+    if (enableValidation && layerCount > 0) {
+        debugCreateInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
+        debugCreateInfo.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT | 
+                                          VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | 
+                                          VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
+        debugCreateInfo.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | 
+                                      VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT | 
+                                      VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
+        debugCreateInfo.pfnUserCallback = [](VkDebugUtilsMessageSeverityFlagBitsEXT severity,
+                                             VkDebugUtilsMessageTypeFlagsEXT /*type*/,
+                                             const VkDebugUtilsMessengerCallbackDataEXT* callbackData,
+                                             void* /*pUserData*/) -> VkBool32 {
+            // FIXED: Use std::cerr — Avoid custom LOG_* in callback (potential reentrancy/thread issues)
+            if (severity >= VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT) {
+                std::cerr << "[VULKAN-VALIDATION] " << callbackData->pMessage << std::endl;
+            } else if (severity == VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT || severity == VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT) {
+                std::cerr << "[VULKAN-DEBUG] " << callbackData->pMessage << std::endl;
+            }
+            return VK_FALSE;  // Continue execution (VK_TRUE aborts on message)
+        };
+        LOG_TRACE_CAT("VULKAN", "Debug messenger callback configured — verbose validation active");
+    }
+
+    // Step 6: Create info
     VkInstanceCreateInfo createInfo{
         .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
-        .pNext = nullptr,
-        .flags = VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR,
+        .pNext = enableValidation ? &debugCreateInfo : nullptr,
         .pApplicationInfo = &appInfo,
-        .enabledLayerCount = static_cast<uint32_t>(layers.size()),
-        .ppEnabledLayerNames = layers.empty() ? nullptr : layers.data(),
+        .enabledLayerCount = layerCount,
+        .ppEnabledLayerNames = layers,
         .enabledExtensionCount = static_cast<uint32_t>(extensions.size()),
-        .ppEnabledExtensionNames = extensions.empty() ? nullptr : extensions.data()  // Null-safe
+        .ppEnabledExtensionNames = extensions.data()
     };
 
-// Create instance
-LOG_TRACE_CAT("VULKAN", "Calling vkCreateInstance...");
-VkInstance instance = VK_NULL_HANDLE;
-VkResult result = vkCreateInstance(&createInfo, nullptr, &instance);
+    LOG_TRACE_CAT("VULKAN", "vkCreateInstance — {} extensions, {} layers", extensions.size(), layerCount);
 
-if (result == VK_ERROR_EXTENSION_NOT_PRESENT) {
-    LOG_FATAL_CAT("VULKAN", "vkCreateInstance failed: VK_ERROR_EXTENSION_NOT_PRESENT — missing required extension (check driver/Vulkan version)");
-} else if (result == VK_ERROR_LAYER_NOT_PRESENT && enableValidation) {
-    LOG_WARN_CAT("VULKAN", "Validation layers requested but not found — retrying without layers");
-    // Retry without layers
-    createInfo.enabledLayerCount = 0;
-    createInfo.ppEnabledLayerNames = nullptr;
-    result = vkCreateInstance(&createInfo, nullptr, &instance);
+    VkInstance instance = VK_NULL_HANDLE;
+    VkResult result = vkCreateInstance(&createInfo, nullptr, &instance);
+
     if (result != VK_SUCCESS) {
-        LOG_FATAL_CAT("VULKAN", "vkCreateInstance retry failed without layers (result={})", result);
-    }
-    LOG_DEBUG_CAT("VULKAN", "Instance created successfully on retry (no validation)");
-} else {
-    VK_CHECK(result, "vkCreateInstance FAILED — DRIVER MAY BE INCOMPATIBLE");
-}
-
-LOG_SUCCESS_CAT("VULKAN", "{}VULKAN INSTANCE FORGED SUCCESSFULLY @ 0x{:x} — PINK PHOTONS RISING{}", PLASMA_FUCHSIA, reinterpret_cast<uintptr_t>(instance), RESET);
-LOG_TRACE_CAT("VULKAN", "createVulkanInstanceWithSDL — COMPLETE");
-return instance;
-}
-
-// =============================================================================
-// 2. initContext() overload — SDL3 PATH
-// =============================================================================
-void initContext(VkInstance instance, SDL_Window* window, int width, int height)
-{
-    LOG_INFO_CAT("RTX", "initContext(VkInstance, window, {}×{}) — SDL3 PATH", width, height);
-    LOG_TRACE_CAT("RTX", "→ Entering initContext: instance=0x{:x}, window=0x{:x}", 
-                  reinterpret_cast<uintptr_t>(instance), reinterpret_cast<uintptr_t>(window));
-
-    if (g_context_instance.isValid()) {
-        LOG_WARN_CAT("RTX", "Context already initialized — skipping");
-        return;
+        LOG_FATAL_CAT("VULKAN", "vkCreateInstance FAILED — code {} ({}) — Check SDL window & Vulkan driver", 
+                      static_cast<int>(result), result);
+        return VK_NULL_HANDLE;  // Propagate failure instead of terminate
     }
 
-    g_context_instance.instance_ = instance;
-    LOG_TRACE_CAT("RTX", "→ Assigned instance to global context");
-
-    // Pre-call: Clear any prior SDL errors for clean diag
-    // SDL_ClearError();  // Uncomment if needed for SDL3
-
-    LOG_TRACE_CAT("VULKAN", "→ Attempting SDL_Vulkan_CreateSurface...");
-    VkSurfaceKHR surface = VK_NULL_HANDLE;
-    bool success = SDL_Vulkan_CreateSurface(window, instance, nullptr, &surface);  // SDL3: Returns bool (true=success)
-    const char* sdlError = SDL_GetError();  // Fetch even on "success" for warnings
-    LOG_TRACE_CAT("VULKAN", "→ SDL_Vulkan_CreateSurface returned: {} (surface=0x{:x}, error='{}')", 
-                  success ? "true" : "false", reinterpret_cast<uintptr_t>(surface), sdlError);
-
-    if (success) {
-        // Validate: Surface must be non-null on true return (API contract)
-        if (surface == VK_NULL_HANDLE) {
-            LOG_FATAL_CAT("VULKAN", "SDL_Vulkan_CreateSurface returned true but surface=VK_NULL_HANDLE! SDL error: '{}'", sdlError);
-            // Diag: Log window flags
-            Uint32 flags = SDL_GetWindowFlags(window);
-            LOG_ERROR_CAT("VULKAN", "Window flags: 0x{:x} (has SDL_WINDOW_VULKAN? {})", 
-                          static_cast<uint32_t>(flags), (flags & SDL_WINDOW_VULKAN) ? "YES" : "NO");
-            // Diag: Log instance ptr (should be non-null)
-            LOG_INFO_CAT("VULKAN", "Instance ptr: 0x{:x}", reinterpret_cast<uintptr_t>(instance));
-            // Diag: Log window size in pixels for DPI check
-            int w, h;
-            SDL_GetWindowSizeInPixels(window, &w, &h);
-            LOG_INFO_CAT("VULKAN", "Window pixel size: {}×{}", w, h);
-            std::abort();  // Halt—cannot proceed
+    // Step 7: Create & store debug messenger if enabled — Post-instance creation
+    if (enableValidation && layerCount > 0) {
+        VkDebugUtilsMessengerEXT messenger = VK_NULL_HANDLE;
+        PFN_vkCreateDebugUtilsMessengerEXT createFunc = (PFN_vkCreateDebugUtilsMessengerEXT)vkGetInstanceProcAddr(instance, "vkCreateDebugUtilsMessengerEXT");
+        if (createFunc) {
+            VkResult msgResult = createFunc(instance, &debugCreateInfo, nullptr, &messenger);
+            if (msgResult == VK_SUCCESS) {
+                // Assume debugMessenger_ added to Context struct
+                g_context_instance.debugMessenger_ = messenger;
+                LOG_DEBUG_CAT("VULKAN", "Debug messenger created & stored: 0x{:x}", reinterpret_cast<uintptr_t>(messenger));
+            } else {
+                LOG_WARN_CAT("VULKAN", "Failed to create debug messenger: {} — Continuing without messenger", msgResult);
+            }
+        } else {
+            LOG_WARN_CAT("VULKAN", "vkCreateDebugUtilsMessengerEXT not available — Validation active but no messenger");
         }
-        LOG_SUCCESS_CAT("VULKAN", "Vulkan surface ALIVE: 0x{:x} (SDL error cleared: '{}')", 
-                        reinterpret_cast<uintptr_t>(surface), sdlError);
-        g_context_instance.surface_ = surface;
-        LOG_TRACE_CAT("RTX", "→ Assigned surface to global context");
-    } else {
-        LOG_FATAL_CAT("VULKAN", "SDL_Vulkan_CreateSurface FAILED — surface dead (SDL error: '{}')", sdlError);
-        // Common causes: Missing SDL_WINDOW_VULKAN flag, unshown window, or missing extensions (VK_KHR_surface + platform)
-        // Diag: Log window flags
-        Uint32 flags = SDL_GetWindowFlags(window);
-        LOG_ERROR_CAT("VULKAN", "Window flags: 0x{:x} (has SDL_WINDOW_VULKAN? {})", 
-                      static_cast<uint32_t>(flags), (flags & SDL_WINDOW_VULKAN) ? "YES" : "NO");
-        // Diag: Log if window is shown
-        bool isVisible = (flags & SDL_WINDOW_HIDDEN) == 0;
-        LOG_ERROR_CAT("VULKAN", "Window visible? {}", isVisible ? "YES" : "NO");
-        std::abort();  // Halt—cannot proceed
     }
 
-    // Guard downstream calls
-    if (g_context_instance.surface_ == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("RTX", "Aborting init: Null surface after creation");
-        std::abort();  // Halt—cannot proceed
-    }
-
-    LOG_TRACE_CAT("RTX", "→ Proceeding to physical device selection...");
-    pickPhysicalDevice();
-    LOG_TRACE_CAT("RTX", "→ Physical device selected");
-
-    LOG_TRACE_CAT("RTX", "→ Creating logical device...");
-    createLogicalDevice();
-    LOG_TRACE_CAT("RTX", "→ Logical device created");
-
-    LOG_TRACE_CAT("RTX", "→ Creating command pool...");
-    createCommandPool();
-    LOG_TRACE_CAT("RTX", "→ Command pool created");
-
-    LOG_TRACE_CAT("RTX", "→ Loading ray tracing extensions...");
-    loadRayTracingExtensions();
-    LOG_TRACE_CAT("RTX", "→ Ray tracing extensions loaded");
-
-    LOG_SUCCESS_CAT("RTX", "{}GLOBAL RTX CONTEXT FULLY INITIALIZED — PINK PHOTONS ETERNAL{}", PLASMA_FUCHSIA, RESET);
+    LOG_SUCCESS_CAT("VULKAN", "{}VULKAN INSTANCE FORGED @ 0x{:x} — SDL EXTENSIONS ACTIVE — TITAN DOMINANCE ETERNAL{}", 
+                    PLASMA_FUCHSIA, reinterpret_cast<uintptr_t>(instance), RESET);
+    return instance;
 }
 
 // =============================================================================
@@ -1338,31 +1243,58 @@ void initContext(VkInstance instance, SDL_Window* window, int width, int height)
 void pickPhysicalDevice()
 {
     uint32_t deviceCount = 0;
-    vkEnumeratePhysicalDevices(g_context_instance.instance_, &deviceCount, nullptr);
+    VK_CHECK_NOMSG(vkEnumeratePhysicalDevices(g_ctx().instance(), &deviceCount, nullptr));
+
     if (deviceCount == 0) {
-        LOG_FAILURE_CAT("VULKAN", "Vulkan device count is 0!");
-        std::abort();
+        LOG_FATAL_CAT("VULKAN", "No Vulkan physical devices found — cannot continue");
+        std::terminate();
     }
 
     std::vector<VkPhysicalDevice> devices(deviceCount);
-    vkEnumeratePhysicalDevices(g_context_instance.instance_, &deviceCount, devices.data());
+    VK_CHECK_NOMSG(vkEnumeratePhysicalDevices(g_ctx().instance(), &deviceCount, devices.data()));
 
+    // Prefer discrete GPU
     for (const auto& device : devices) {
         VkPhysicalDeviceProperties props{};
         vkGetPhysicalDeviceProperties(device, &props);
+
         if (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) {
-            g_context_instance.physicalDevice_ = device;
-            g_PhysicalDevice = device;
-            LOG_SUCCESS_CAT("VULKAN", "Selected discrete GPU: {}", props.deviceName);
+            g_ctx().physicalDevice_ = device;
+            g_PhysicalDevice = device;  // ← ONLY PLACE this is assigned now
+
+            LOG_SUCCESS_CAT("VULKAN", "{}DISCRETE GPU SELECTED{} — {} (API: {}.{}.{})",
+                            PLASMA_FUCHSIA, RESET,
+                            props.deviceName,
+                            VK_VERSION_MAJOR(props.apiVersion),
+                            VK_VERSION_MINOR(props.apiVersion),
+                            VK_VERSION_PATCH(props.apiVersion));
+            AI_INJECT("I have claimed the discrete throne: {}", props.deviceName);
             return;
         }
     }
 
-    g_context_instance.physicalDevice_ = devices[0];
-    g_PhysicalDevice = devices[0];
+    // Fallback: use first available device
+    VkPhysicalDevice selected = devices[0];
+    g_ctx().physicalDevice_ = selected;
+    g_PhysicalDevice = selected;
+
     VkPhysicalDeviceProperties props{};
-    vkGetPhysicalDeviceProperties(devices[0], &props);
-    LOG_SUCCESS_CAT("VULKAN", "Fallback GPU selected: {}", props.deviceName);
+    vkGetPhysicalDeviceProperties(selected, &props);
+
+    LOG_SUCCESS_CAT("VULKAN", "{}FALLBACK GPU SELECTED{} — {} (Type: {})",
+                    EMERALD_GREEN, RESET,
+                    props.deviceName,
+                    [type = props.deviceType]() -> const char* {
+                        switch (type) {
+                            case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU: return "Integrated";
+                            case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU:   return "Virtual";
+                            case VK_PHYSICAL_DEVICE_TYPE_CPU:            return "CPU";
+                            case VK_PHYSICAL_DEVICE_TYPE_OTHER:          return "Other";
+                            default:                                     return "Unknown";
+                        }
+                    }());
+
+    AI_INJECT("I will make do with what is given: {}", props.deviceName);
 }
 
 // =============================================================================
@@ -1545,6 +1477,122 @@ void loadRayTracingExtensions()
 
     // Unreachable, but silences warnings
     return VK_NULL_HANDLE;
+}
+
+#include <cstdint>  // For uintptr_t (add if missing)
+
+// =============================================================================
+// FIXED: createSurface — INTEGRATED WITH g_ctx() — NO GLOBAL g_surface NEEDED
+// CALL THIS IMMEDIATELY AFTER INSTANCE CREATION (post-window creation)
+// Updates g_ctx().surface_ directly — Bulletproof validation & logging
+// =============================================================================
+bool createSurface(SDL_Window* window, VkInstance instance) {
+    LOG_INFO_CAT("VULKAN", "Creating Vulkan surface via SDL3...");
+
+    // Trace entry with parameters
+    LOG_TRACE_CAT("VULKAN", "createSurface entry — window: 0x{:p}, instance: 0x{:x}", 
+                  static_cast<void*>(window), reinterpret_cast<uintptr_t>(instance));
+
+    if (!window || !instance) {
+        LOG_FATAL_CAT("VULKAN", "createSurface: Null window (0x{:p}) or instance (0x{:x}) — aborting", 
+                      static_cast<void*>(window), reinterpret_cast<uintptr_t>(instance));
+        return false;
+    }
+
+    // Destroy previous surface if it exists
+    if (g_surface != VK_NULL_HANDLE) {
+        LOG_WARN_CAT("VULKAN", "createSurface: destroying previous surface 0x{:x}", reinterpret_cast<uintptr_t>(g_surface));
+        vkDestroySurfaceKHR(instance, g_surface, nullptr);
+        g_surface = VK_NULL_HANDLE;
+        LOG_TRACE_CAT("VULKAN", "Previous surface destroyed");
+    }
+
+    // Clear prior SDL errors
+    SDL_ClearError();
+
+    // Create the new surface (FIXED: Pass &g_surface for output param)
+    bool success = SDL_Vulkan_CreateSurface(window, instance, nullptr, &g_surface);
+    const char* err = SDL_GetError();  // Always fetch for full diag (even on success)
+    LOG_TRACE_CAT("VULKAN", "SDL_Vulkan_CreateSurface returned: {} | error: '{}'", success ? "true" : "false", err ? err : "none");
+
+    if (!success) {
+        g_surface = VK_NULL_HANDLE;
+        LOG_ERROR_CAT("VULKAN", "SDL_Vulkan_CreateSurface FAILED — surface: VK_NULL_HANDLE | SDL error: {}", 
+                      err ? err : "null");
+        LOG_ERROR_CAT("VULKAN", "Hint: Ensure window created with SDL_WINDOW_VULKAN, instance has SDL extensions (e.g., VK_KHR_xlib_surface), and window is shown/valid");
+        // Diag: Window flags & visibility
+        Uint32 flags = SDL_GetWindowFlags(window);
+        bool visible = (flags & SDL_WINDOW_HIDDEN) == 0;
+        LOG_ERROR_CAT("VULKAN", "Window flags: 0x{:x} (VULKAN? {} | Visible? {})", 
+                      static_cast<uint32_t>(flags), (flags & SDL_WINDOW_VULKAN) ? "YES" : "NO", visible ? "YES" : "NO");
+        return false;  // Propagate failure
+    }
+
+    // Validate surface was actually created (defensive check, though SDL3 should set it on success)
+    if (g_surface == VK_NULL_HANDLE) {
+        LOG_ERROR_CAT("VULKAN", "SDL_Vulkan_CreateSurface reported success but surface is null — SDL error: '{}'", err);
+        return false;
+    }
+
+    // Trace successful creation
+    LOG_TRACE_CAT("VULKAN", "Surface created successfully: 0x{:x} (SDL error cleared: '{}')", 
+                  reinterpret_cast<uintptr_t>(g_surface), err ? err : "none");
+
+    LOG_SUCCESS_CAT("VULKAN", "{}Global Vulkan surface forged: 0x{:x} — READY FOR PRESENT{}", 
+                    PLASMA_FUCHSIA, reinterpret_cast<uintptr_t>(g_surface), RESET);
+    return true;
+}
+
+// =============================================================================
+// FIXED: initContext() — NOW CALLS UPDATED createSurface — SEAMLESS INTEGRATION
+// Assumes window passed & valid (SDL_WINDOW_VULKAN + shown)
+// Chains: Instance → Surface → Device → etc.
+// =============================================================================
+void initContext(VkInstance instance, SDL_Window* window, int width, int height)
+{
+    LOG_INFO_CAT("RTX", "initContext(VkInstance, window, {}×{}) — SDL3 FULL PATH", width, height);
+    LOG_TRACE_CAT("RTX", "→ Entering initContext: instance=0x{:x}, window=0x{:p}", 
+                  reinterpret_cast<uintptr_t>(instance), static_cast<void*>(window));
+
+    if (!window || !instance) {
+        LOG_FATAL_CAT("RTX", "initContext: Null window or instance — cannot proceed");
+        std::terminate();
+    }
+
+    if (g_context_instance.instance_ != VK_NULL_HANDLE) {  // Simple valid check (add full isValid() if needed)
+        LOG_WARN_CAT("RTX", "Context already initialized — skipping");
+        return;
+    }
+
+    g_context_instance.instance_ = instance;
+    LOG_TRACE_CAT("RTX", "→ Assigned instance to global context");
+
+    // FIXED: Create surface using updated function (returns bool)
+    if (createSurface(window, instance)) {
+        LOG_FATAL_CAT("RTX", "Surface creation failed in initContext — cannot continue");
+        std::abort();
+    }
+
+    LOG_TRACE_CAT("RTX", "→ Surface assigned — proceeding to physical device selection...");
+    pickPhysicalDevice();
+    LOG_TRACE_CAT("RTX", "→ Physical device selected");
+
+    LOG_TRACE_CAT("RTX", "→ Creating logical device...");
+    createLogicalDevice();
+    LOG_TRACE_CAT("RTX", "→ Logical device created");
+
+    LOG_TRACE_CAT("RTX", "→ Creating command pool...");
+    createCommandPool();
+    LOG_TRACE_CAT("RTX", "→ Command pool created");
+
+    LOG_TRACE_CAT("RTX", "→ Loading ray tracing extensions...");
+    loadRayTracingExtensions();
+    LOG_TRACE_CAT("RTX", "→ Ray tracing extensions loaded");
+
+    // TODO: Add VkExtent2D extent_ = {static_cast<uint32_t>(width), static_cast<uint32_t>(height)}; to RTX::Context struct
+    // g_context_instance.extent_ = {static_cast<uint32_t>(width), static_cast<uint32_t>(height)};  // Uncomment after adding member
+
+    LOG_SUCCESS_CAT("RTX", "{}GLOBAL RTX CONTEXT FULLY INITIALIZED — SURFACE ALIVE — PINK PHOTONS ETERNAL{}", PLASMA_FUCHSIA, RESET);
 }
 } // namespace RTX
 

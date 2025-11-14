@@ -149,6 +149,7 @@ private:
     float currentNexusScore_ = 0.5f;
     uint32_t currentSpp_ = Options::RTX::MIN_SPP;
     float hypertraceCounter_ = 0.0f;
+	VkQueryPool timestampQueryPool_ = VK_NULL_HANDLE;
     double timestampPeriod_ = 0.0;
     bool resetAccumulation_ = true;
 
@@ -170,13 +171,15 @@ private:
     uint32_t frameCounter_ = 0;
 
     // Sync objects (dynamic)
+private:
     std::vector<VkSemaphore> imageAvailableSemaphores_;
     std::vector<VkSemaphore> renderFinishedSemaphores_;
+    std::vector<VkSemaphore> computeFinishedSemaphores_;      // NEW
+    std::vector<VkSemaphore> computeToGraphicsSemaphores_;    // NEW
     std::vector<VkFence>     inFlightFences_;
-    VkQueryPool timestampQueryPool_ = VK_NULL_HANDLE;
 
-    // Command buffers
-    std::vector<VkCommandBuffer> commandBuffers_;
+    std::vector<VkCommandBuffer> commandBuffers_;         // graphics
+    std::vector<VkCommandBuffer> computeCommandBuffers_; // async compute
 
     // Descriptor pools
     RTX::Handle<VkDescriptorPool> descriptorPool_;
