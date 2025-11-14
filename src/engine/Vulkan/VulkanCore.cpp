@@ -1101,26 +1101,23 @@ uint64_t VulkanRTX::alignUp(uint64_t value, uint64_t alignment) const noexcept {
 namespace RTX {
 
 // =============================================================================
-// FINAL FIXED: createVulkanInstanceWithSDL — WORKS ON REAL GPU + LLVMPIPE + NULL EXTENSIONS
+// FINAL FIXED FOR SDL3: createVulkanInstanceWithSDL — WORKS ON REAL GPU + LLVMPIPE + AUTO-EXTENSIONS
 // =============================================================================
 [[nodiscard]] VkInstance createVulkanInstanceWithSDL(bool enableValidation)
 {
     LOG_INFO_CAT("VULKAN", "{}FORGING VULKAN INSTANCE — SDL3 2024+ API — PINK PHOTONS RISING{}", PLASMA_FUCHSIA, RESET);
 
-    unsigned int sdlCount = 0;
-    if (SDL_Vulkan_GetInstanceExtensions(&sdlCount) == 0) {
-        LOG_FATAL_CAT("SDL", "SDL_Vulkan_GetInstanceExtensions failed to get count");
+    Uint32 sdlCount = 0;  // Use Uint32 for SDL3 compatibility
+    const char * const * sdlExtensions = SDL_Vulkan_GetInstanceExtensions(&sdlCount);
+    if (sdlExtensions == nullptr) {
+        LOG_FATAL_CAT("SDL", "SDL_Vulkan_GetInstanceExtensions failed (returned NULL)");
         std::abort();
     }
 
     std::vector<const char*> extensions;
     if (sdlCount > 0) {
-        extensions.resize(sdlCount);
-        if (SDL_Vulkan_GetInstanceExtensions(&sdlCount) == 0) {
-            LOG_FATAL_CAT("SDL", "SDL_Vulkan_GetInstanceExtensions failed to get names");
-            std::abort();
-        }
-
+        // Copy SDL's extensions into our vector
+        extensions.assign(sdlExtensions, sdlExtensions + sdlCount);
         LOG_INFO_CAT("VULKAN", "SDL3 reports {} instance extensions:", sdlCount);
         for (const char* ext : extensions) {
             LOG_INFO_CAT("VULKAN", "  → {}", ext ? ext : "<null extension pointer>");
@@ -1129,18 +1126,26 @@ namespace RTX {
         LOG_WARN_CAT("VULKAN", "SDL3 reports 0 required extensions — likely software renderer (LLVMPipe)");
     }
 
-    // === ALWAYS ADD THESE TWO — THEY ARE REQUIRED FOR SDL3 + VULKAN ===
-    extensions.push_back(VK_KHR_SURFACE_EXTENSION_NAME);                    // ← CRITICAL: always needed
-    //extensions.push_back(VK_KHR_SURFACE_EXTENSION_NAME);               // ← or VK_KHR_XLIB_... or WAYLAND — but XCB works on most Linux
-    // Note: On real drivers, these are already in SDL's list → duplicate is ignored
-
-    if (enableValidation) {
-        extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
-        LOG_INFO_CAT("VULKAN", "  + VK_EXT_debug_utils (validation)");
+    // === ADD REQUIRED EXTENSIONS IF NOT ALREADY PRESENT (SDL3 usually includes surface) ===
+    const char* surfaceExt = VK_KHR_SURFACE_EXTENSION_NAME;
+    if (std::find(extensions.begin(), extensions.end(), surfaceExt) == extensions.end()) {
+        extensions.push_back(surfaceExt);
+        LOG_INFO_CAT("VULKAN", "  + {} (manually added for surface)", surfaceExt);
     }
 
-    extensions.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
-    LOG_INFO_CAT("VULKAN", "  + VK_KHR_portability_enumeration (macOS/Linux compat)");
+    if (enableValidation) {
+        const char* debugExt = VK_EXT_DEBUG_UTILS_EXTENSION_NAME;
+        if (std::find(extensions.begin(), extensions.end(), debugExt) == extensions.end()) {
+            extensions.push_back(debugExt);
+            LOG_INFO_CAT("VULKAN", "  + {} (validation)", debugExt);
+        }
+    }
+
+    const char* portExt = VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME;
+    if (std::find(extensions.begin(), extensions.end(), portExt) == extensions.end()) {
+        extensions.push_back(portExt);
+        LOG_INFO_CAT("VULKAN", "  + {} (macOS/Linux compat)", portExt);
+    }
 
     // === FINAL SAFETY: REMOVE ANY nullptr FROM LIST ===
     extensions.erase(
@@ -1174,14 +1179,14 @@ namespace RTX {
         .enabledLayerCount = static_cast<uint32_t>(layers.size()),
         .ppEnabledLayerNames = layers.empty() ? nullptr : layers.data(),
         .enabledExtensionCount = static_cast<uint32_t>(extensions.size()),
-        .ppEnabledExtensionNames = extensions.data()
+        .ppEnabledExtensionNames = extensions.empty() ? nullptr : extensions.data()  // Null-safe
     };
 
     VkInstance instance = VK_NULL_HANDLE;
     VkResult result = vkCreateInstance(&createInfo, nullptr, &instance);
 
     if (result == VK_ERROR_EXTENSION_NOT_PRESENT) {
-        LOG_FATAL_CAT("VULKAN", "vkCreateInstance failed: VK_ERROR_EXTENSION_NOT_PRESENT — missing required extension");
+        LOG_FATAL_CAT("VULKAN", "vkCreateInstance failed: VK_ERROR_EXTENSION_NOT_PRESENT — missing required extension (check driver/Vulkan version)");
         std::abort();
     } else if (result == VK_ERROR_LAYER_NOT_PRESENT && enableValidation) {
         LOG_WARN_CAT("VULKAN", "Validation layers requested but not found — continuing without validation");
@@ -1189,6 +1194,10 @@ namespace RTX {
         createInfo.enabledLayerCount = 0;
         createInfo.ppEnabledLayerNames = nullptr;
         result = vkCreateInstance(&createInfo, nullptr, &instance);
+        if (result != VK_SUCCESS) {
+            LOG_FATAL_CAT("VULKAN", "vkCreateInstance retry failed without layers");
+            std::abort();
+        }
     }
 
     VK_CHECK(result, "vkCreateInstance FAILED — DRIVER MAY BE INCOMPATIBLE");
