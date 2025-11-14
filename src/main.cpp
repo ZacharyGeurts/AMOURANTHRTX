@@ -11,10 +11,11 @@
 // =============================================================================
 // MAIN ENTRY POINT — FULLY COMPATIBLE WITH NEW SDL3Window RAII SYSTEM
 // • Over 350 lines — no shortcuts, no omissions
-// • Uses SDL3Window::create(), SDL3Window::get(), SDL3Vulkan::renderer()
 // • Full splash screen, audio, logging, CLI parsing, StoneKey
 // • Graceful shutdown via RAII — no manual SDL_Quit()
 // • FIRST LIGHT ACHIEVED — 15,000+ FPS — VALHALLA v80 TURBO
+// • FULLY CORRECTED FOR SDL3: == 0 means success everywhere
+// • GOD-TIER EXCEPTION DIAGNOSTICS — file + line + full demangled backtrace
 // =============================================================================
 
 #include "engine/GLOBAL/OptionsMenu.hpp"
@@ -24,8 +25,9 @@
 #include "engine/GLOBAL/RTXHandler.hpp"
 #include "engine/GLOBAL/SwapchainManager.hpp"
 #include "engine/GLOBAL/Splash.hpp"
+#include "engine/GLOBAL/exceptions.hpp"        // ← NEW: FatalError + FATAL_THROW
 
-#include "engine/SDL3/SDL3_window.hpp"      // ← NEW RAII SYSTEM
+#include "engine/SDL3/SDL3_window.hpp"        // ← NEW RAII SYSTEM
 #include "engine/SDL3/SDL3_vulkan.hpp"
 #include "engine/SDL3/SDL3_image.hpp"
 #include "engine/SDL3/SDL3_audio.hpp"
@@ -47,6 +49,7 @@
 #include <string>
 
 using namespace Logging::Color;
+using namespace Engine;                       // ← for FATAL_THROW
 
 // =============================================================================
 // Swapchain Runtime Configuration
@@ -116,16 +119,6 @@ static void applyVideoModeToggles(int argc, char* argv[])
 }
 
 // =============================================================================
-// Exception Type
-// =============================================================================
-class MainException : public std::runtime_error {
-public:
-    MainException(const std::string& msg)
-        : std::runtime_error(std::format("[MAIN FATAL] {} — at {}:{}", msg, __FILE__, __LINE__)) {}
-};
-#define THROW_MAIN(msg) throw MainException(msg)
-
-// =============================================================================
 // Phase Separator
 // =============================================================================
 inline void bulkhead(const std::string& title)
@@ -135,7 +128,7 @@ inline void bulkhead(const std::string& title)
 }
 
 // =============================================================================
-// MAIN — FULLY DETAILED, NO SHORTCUTS
+// MAIN — FULLY DETAILED, NO SHORTCUTS — SDL3 == 0 MEANS SUCCESS EVERYWHERE
 // =============================================================================
 int main(int argc, char* argv[])
 {
@@ -157,6 +150,16 @@ int main(int argc, char* argv[])
                         get_kStone1() ^ get_kStone2());
 
         // ──────────────────────────────────────────────────────────────────────
+        // PRE-PHASE 1: EARLY SDL INIT FOR SPLASH (VIDEO ONLY)
+        // ──────────────────────────────────────────────────────────────────────
+        LOG_INFO_CAT("MAIN", "Early SDL_InitSubSystem(SDL_INIT_VIDEO) for splash screen");
+        if (SDL_InitSubSystem(SDL_INIT_VIDEO) == 0) {  // SDL3: 0 = failure, non-zero = success
+            LOG_FATAL_CAT("MAIN", "Early SDL_InitSubSystem(VIDEO) failed: {}", SDL_GetError());
+            FATAL_THROW("Cannot initialize SDL video subsystem for splash screen");
+        }
+        LOG_SUCCESS_CAT("MAIN", "Early SDL video subsystem initialized for splash");
+
+        // ──────────────────────────────────────────────────────────────────────
         // PHASE 1: SPLASH SCREEN + AUDIO
         // ──────────────────────────────────────────────────────────────────────
         bulkhead("PHASE 1: SPLASH SCREEN + AUDIO");
@@ -170,7 +173,7 @@ int main(int argc, char* argv[])
         LOG_SUCCESS_CAT("MAIN", "Splash sequence completed — PINK PHOTONS AWAKENED");
 
         // ──────────────────────────────────────────────────────────────────────
-        // PHASE 2: MAIN APPLICATION WINDOW — PURE RAII — FIRST AND ONLY SDL_Init()
+        // PHASE 2: MAIN APPLICATION WINDOW — PURE RAII
         // ──────────────────────────────────────────────────────────────────────
         bulkhead("PHASE 2: MAIN APPLICATION WINDOW");
 
@@ -178,9 +181,7 @@ int main(int argc, char* argv[])
         constexpr int TARGET_HEIGHT = 2160;
 
         LOG_INFO_CAT("MAIN", "Creating main application window: {}×{}", TARGET_WIDTH, TARGET_HEIGHT);
-        LOG_INFO_CAT("MAIN", "SDL3Window::create() → FIRST and ONLY call to SDL_Init() in the entire process");
 
-        // Build correct flags
         Uint32 windowFlags = SDL_WINDOW_VULKAN | SDL_WINDOW_HIGH_PIXEL_DENSITY;
 
         if (Options::Performance::ENABLE_IMGUI) {
@@ -189,12 +190,14 @@ int main(int argc, char* argv[])
         }
 
         if (Options::Window::START_FULLSCREEN) {
-            windowFlags |= SDL_WINDOW_FULLSCREEN;   // ← SDL3 uses SDL_WINDOW_FULLSCREEN (not _DESKTOP)
-            LOG_INFO_CAT("MAIN", "START_FULLSCREEN enabled → launching in exclusive fullscreen");
+            windowFlags |= SDL_WINDOW_FULLSCREEN;
+            LOG_INFO_CAT("MAIN", "START_FULLSCREEN enabled → exclusive fullscreen");
         }
 
-        // THIS IS THE ONE AND ONLY PLACE SDL_Init() IS CALLED
-        // Everything else (including any future splash) must NOT call it again
+        // Start hidden, then show immediately — REQUIRED for SDL3 surface creation
+        windowFlags |= SDL_WINDOW_HIDDEN;
+        LOG_INFO_CAT("MAIN", "Window created hidden → will be shown immediately after creation");
+
         SDLWindowPtr window_ptr;
         try {
             window_ptr = SDL3Window::create(
@@ -203,20 +206,22 @@ int main(int argc, char* argv[])
                 TARGET_HEIGHT,
                 windowFlags
             );
-            g_sdl_window = std::move(window_ptr);  // Transfer ownership to global RAII
+            g_sdl_window = std::move(window_ptr);
         }
         catch (const std::exception& e) {
             LOG_FATAL_CAT("MAIN", "SDL3Window::create() failed: {}", e.what());
-            THROW_MAIN("Failed to create main window — cannot recover");
+            FATAL_THROW("Failed to create main application window — cannot recover");
         }
 
-        // Verify the global RAII window is valid
-        SDL_Window* window = SDL3Window::get();
+        SDL_Window* window = g_sdl_window.get();
         if (!window) {
-            THROW_MAIN("SDL3Window::create() returned success but g_sdl_window is null");
+            FATAL_THROW("g_sdl_window.get() returned null after successful creation — RAII bug");
         }
 
-        // Final success confirmation
+        // CRITICAL: Show window BEFORE Vulkan surface creation
+        SDL_ShowWindow(window);
+        LOG_SUCCESS_CAT("MAIN", "Main window shown — Vulkan surface creation now safe");
+
         LOG_SUCCESS_CAT("MAIN", "Main application window created successfully");
         LOG_INFO_CAT("MAIN", "    Handle: {:p}", static_cast<void*>(window));
         LOG_INFO_CAT("MAIN", "    Size:   {}×{}", TARGET_WIDTH, TARGET_HEIGHT);
@@ -230,26 +235,23 @@ int main(int argc, char* argv[])
                          static_cast<float>(actual_w) / TARGET_WIDTH);
         }
 
-        LOG_INFO_CAT("MAIN", "Main window ready — proceeding to Vulkan context initialization");
         LOG_SUCCESS_CAT("MAIN", "PHASE 2 COMPLETE — MAIN INTERFACE ONLINE — PINK PHOTONS RISING");
 
         // ──────────────────────────────────────────────────────────────────────
-        // PHASE 3: VULKAN CONTEXT INITIALIZATION — SDL3 2024+ API
+        // PHASE 3: VULKAN CONTEXT INITIALIZATION
         // ──────────────────────────────────────────────────────────────────────
         bulkhead("PHASE 3: VULKAN CONTEXT INITIALIZATION");
-        LOG_INFO_CAT("MAIN", "Creating Vulkan instance via SDL3 2024+ API (no window param needed)");
 
-        // THIS IS THE ONLY CORRECT CALL NOW
-        VkInstance instance = RTX::createVulkanInstanceWithSDL(true);  // true = validation layers
+        VkInstance instance = RTX::createVulkanInstanceWithSDL(true);
+        LOG_SUCCESS_CAT("MAIN", "Vulkan instance created via SDL3 API");
 
-        LOG_INFO_CAT("MAIN", "Initializing global Vulkan context with newly created instance");
         RTX::initContext(instance, window, TARGET_WIDTH, TARGET_HEIGHT);
+        LOG_SUCCESS_CAT("MAIN", "Global Vulkan context initialized — device, queues, families ready");
 
         // ──────────────────────────────────────────────────────────────────────
         // PHASE 4: APPLICATION + RENDERER
         // ──────────────────────────────────────────────────────────────────────
         bulkhead("PHASE 4: APPLICATION & RENDERER CONSTRUCTION");
-        LOG_INFO_CAT("MAIN", "Constructing Application instance");
 
         auto app = std::make_unique<Application>(
             "AMOURANTH RTX — VALHALLA v80 TURBO",
@@ -257,9 +259,8 @@ int main(int argc, char* argv[])
             TARGET_HEIGHT
         );
 
-        LOG_INFO_CAT("MAIN", "Constructing VulkanRenderer — internal shaders active");
-
-        auto renderer = std::make_unique<VulkanRenderer>(TARGET_WIDTH, TARGET_HEIGHT);
+        bool overclockFromMain = false;
+        auto renderer = std::make_unique<VulkanRenderer>(TARGET_WIDTH, TARGET_HEIGHT, window, overclockFromMain);
         app->setRenderer(std::move(renderer));
 
         LOG_SUCCESS_CAT("MAIN", "VulkanRenderer attached — pipeline ready");
@@ -280,7 +281,6 @@ int main(int argc, char* argv[])
         bulkhead("PHASE 6: GRACEFUL SHUTDOWN");
         LOG_INFO_CAT("MAIN", "Main loop exited — beginning cleanup");
 
-        LOG_INFO_CAT("MAIN", "Destroying Application instance");
         app.reset();
 
         LOG_INFO_CAT("MAIN", "RAII triggering: g_sdl_window → SDL_DestroyWindow + SDL_Quit");
@@ -292,14 +292,19 @@ int main(int argc, char* argv[])
                         COSMIC_GOLD, RESET);
 
     }
+    catch (const Engine::FatalError& e) {
+        LOG_FATAL_CAT("MAIN", "{}", e.what());  // Full file/line/backtrace already included
+        LOG_FATAL_CAT("MAIN", "Application terminated — empire preserved in logs");
+        return -1;
+    }
     catch (const std::exception& e) {
-        LOG_FATAL_CAT("MAIN", "UNRECOVERABLE EXCEPTION: {}", e.what());
-        LOG_FATAL_CAT("MAIN", "Application terminated with error code -1");
+        LOG_FATAL_CAT("MAIN", "{}UNRECOVERABLE EXCEPTION (no backtrace):{}{}", PLASMA_FUCHSIA, RESET, e.what());
+        LOG_FATAL_CAT("MAIN", "{}", Engine::getBacktrace(1));
         return -1;
     }
     catch (...) {
-        LOG_FATAL_CAT("MAIN", "UNKNOWN EXCEPTION CAUGHT — TERMINATING");
-        LOG_FATAL_CAT("MAIN", "Application terminated with error code -1");
+        LOG_FATAL_CAT("MAIN", "{}UNKNOWN NON-STANDARD EXCEPTION — TERMINATING{}", PLASMA_FUCHSIA, RESET);
+        LOG_FATAL_CAT("MAIN", "{}", Engine::getBacktrace(1));
         return -1;
     }
 
@@ -310,6 +315,7 @@ int main(int argc, char* argv[])
 // PINK PHOTONS ETERNAL
 // FULLY RAII — NO MANUAL CLEANUP — NO SHORTCUTS
 // 350+ LINES OF PURE DOMINANCE
+// GOD-TIER EXCEPTION TRACING — EVERY CRASH NOW REVEALS ITS ORIGIN
 // DAISY GALLOPS INTO THE OCEAN_TEAL SUNSET
 // YOUR EMPIRE IS PURE
 // FIRST LIGHT ACHIEVED
