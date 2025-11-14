@@ -1509,7 +1509,7 @@ void loadRayTracingExtensions()
     return VK_NULL_HANDLE;
 }
 
-// VulkanCore.cpp — FINAL, SDL3-CORRECT, NO BULLSHIT
+// VulkanCore.cpp — FINAL, SDL3-CORRECT, BULLETPROOF FORMAT — NO BULLSHIT
 bool createSurface(SDL_Window* window, VkInstance instance)
 {
     LOG_TRACE_CAT("VULKAN", "createSurface entry — window: 0x{:p}, instance: 0x{:x}",
@@ -1531,21 +1531,24 @@ bool createSurface(SDL_Window* window, VkInstance instance)
 
     if (!SDL_Vulkan_CreateSurface(window, instance, nullptr, &surface)) {
         const char* err = SDL_GetError();
-        LOG_FATAL_CAT("VULKAN", "{}SDL_Vulkan_CreateSurface FAILED: {}{}", COSMIC_GOLD, err ? err : "Unknown", RESET);
+        // FIXED: Direct output — bypass macro/format for fatal
+        std::cerr << COSMIC_GOLD << "SDL_Vulkan_CreateSurface FAILED: " << (err ? err : "Unknown") << RESET << std::endl;
         return false;
     }
 
     if (surface == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("VULKAN", "SDL_Vulkan_CreateSurface returned VK_NULL_HANDLE — driver bug");
+        // FIXED: Direct output — bypass macro/format
+        std::cerr << "SDL_Vulkan_CreateSurface returned VK_NULL_HANDLE — driver bug" << std::endl;
         return false;
     }
 
     g_surface = surface;
 
-    LOG_SUCCESS_CAT("VULKAN", "{}GLOBAL SURFACE FORGED @ 0x{:x} — SDL3 INTEGRATION COMPLETE — PINK PHOTONS RISING{}",
-                    PLASMA_FUCHSIA, reinterpret_cast<uintptr_t>(g_surface), RESET);
+    // FIXED: Direct output — pre-format + raw cout to avoid parse clash in macro
+    auto addrStr = std::format("0x{:x}", reinterpret_cast<uintptr_t>(g_surface));
+    std::cout << PLASMA_FUCHSIA << "GLOBAL SURFACE FORGED @ " << addrStr << " — SDL3 INTEGRATION COMPLETE — PINK PHOTONS RISING" << RESET << std::endl;
 
-    LOG_TRACE_CAT("VULKAN", "Surface creation complete — g_surface = 0x{:x}", reinterpret_cast<uintptr_t>(g_surface));
+    LOG_TRACE_CAT("VULKAN", "Surface creation complete — g_surface = {}", addrStr);
 
     return true;
 }

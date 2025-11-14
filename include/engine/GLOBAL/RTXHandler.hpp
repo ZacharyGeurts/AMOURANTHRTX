@@ -14,6 +14,7 @@
 // • NEW: Async Compute Support — computeFamily, computeQueue, computeCommandPool
 // • FIXED: Accessors for compute queue/pool
 // • NEW: cleanup() declaration for Context
+// • FIXED: Remove noexcept from create() — allows throws without terminate
 // • PINK PHOTONS ETERNAL
 //
 // Dual Licensed:
@@ -200,9 +201,6 @@ namespace RTX {
 // =============================================================================
 // Context — FINAL: Async Compute + Ready Flag + Full Cleanup + Safe Accessors
 // =============================================================================
-// =============================================================================
-// Context — FINAL: Async Compute + Ready Flag + Full Cleanup + Safe Accessors
-// =============================================================================
 struct Context {
 public:
     // Core Vulkan Handles
@@ -332,7 +330,7 @@ public:
     extern Context g_context_instance;
 
     [[nodiscard]] inline Context& ctx()  { return g_context_instance; }
-	[[nodiscard]] inline Context& g_ctx(){ return g_context_instance; }
+    [[nodiscard]] inline Context& g_ctx(){ return g_context_instance; }
 
     // =============================================================================
     // UltraLowLevelBufferTracker
@@ -357,7 +355,7 @@ public:
 
     struct UltraLowLevelBufferTracker {
         static UltraLowLevelBufferTracker& get() noexcept;
-        uint64_t create(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags props, std::string_view tag) noexcept;
+        uint64_t create(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags props, std::string_view tag);  // FIXED: Removed noexcept — allows throws
         void destroy(uint64_t handle) noexcept;
         BufferData* getData(uint64_t handle) noexcept;
         const BufferData* getData(uint64_t handle) const noexcept;
@@ -439,5 +437,6 @@ public:
 // FIXED: logAndTrackDestruction declaration moved BEFORE Handle template
 // NEW: Async Compute — computeFamily, computeQueue, computeCommandPool + accessors
 // NEW: cleanup() declaration in Context
+// FIXED: Remove noexcept from create() — prevents terminate on throw
 // ZERO CRASH — PRODUCTION READY
 // =============================================================================
