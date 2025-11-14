@@ -72,6 +72,60 @@ static SwapchainRuntimeConfig gSwapchainConfig{
 };
 
 // =============================================================================
+// Detect Best Present Mode — X11/Wayland Agnostic
+// =============================================================================
+static void detectBestPresentMode(VkPhysicalDevice physicalDevice, VkSurfaceKHR surface) {
+    LOG_INFO_CAT("MAIN", "Detecting optimal present mode for system...");
+
+    uint32_t presentModeCount = 0;
+    VK_CHECK_NOMSG(vkGetPhysicalDeviceSurfacePresentModesKHR(physicalDevice, surface, &presentModeCount, nullptr));
+
+    if (presentModeCount == 0) {
+        LOG_WARN_CAT("MAIN", "No present modes available — defaulting to FIFO");
+        gSwapchainConfig.desiredMode = VK_PRESENT_MODE_FIFO_KHR;
+        return;
+    }
+
+    std::vector<VkPresentModeKHR> availableModes(presentModeCount);
+    VK_CHECK_NOMSG(vkGetPhysicalDeviceSurfacePresentModesKHR(physicalDevice, surface, &presentModeCount, availableModes.data()));
+
+    LOG_INFO_CAT("MAIN", "Available present modes ({}):", presentModeCount);
+    for (auto mode : availableModes) {
+        std::string modeStr;
+        switch (mode) {
+            case VK_PRESENT_MODE_IMMEDIATE_KHR: modeStr = "IMMEDIATE"; break;
+            case VK_PRESENT_MODE_MAILBOX_KHR: modeStr = "MAILBOX"; break;
+            case VK_PRESENT_MODE_FIFO_KHR: modeStr = "FIFO"; break;
+            case VK_PRESENT_MODE_FIFO_RELAXED_KHR: modeStr = "FIFO_RELAXED"; break;
+            default: modeStr = std::format("UNKNOWN({})", static_cast<uint32_t>(mode)); break;
+        }
+        LOG_INFO_CAT("MAIN", "  - {}", modeStr);
+    }
+
+    // Priority: MAILBOX (triple-buffered low-latency) > IMMEDIATE (min latency, possible tearing) > FIFO (vsync-safe)
+    if (std::find(availableModes.begin(), availableModes.end(), VK_PRESENT_MODE_MAILBOX_KHR) != availableModes.end()) {
+        gSwapchainConfig.desiredMode = VK_PRESENT_MODE_MAILBOX_KHR;
+        LOG_SUCCESS_CAT("MAIN", "Selected MAILBOX — optimal for triple buffering on capable systems");
+    } else if (std::find(availableModes.begin(), availableModes.end(), VK_PRESENT_MODE_IMMEDIATE_KHR) != availableModes.end()) {
+        gSwapchainConfig.desiredMode = VK_PRESENT_MODE_IMMEDIATE_KHR;
+        LOG_INFO_CAT("MAIN", "Selected IMMEDIATE — low latency fallback (tearing possible on X11)");
+    } else {
+        gSwapchainConfig.desiredMode = VK_PRESENT_MODE_FIFO_KHR;
+        LOG_INFO_CAT("MAIN", "Selected FIFO — vsync-safe default");
+        gSwapchainConfig.forceVsync = true;  // Enforce vsync if no better mode
+    }
+
+    if (gSwapchainConfig.logFinalConfig) {
+        LOG_SUCCESS_CAT("MAIN", "Final present mode: {} | VSync: {} | Triple Buffer: {} | HDR: {}",
+                        gSwapchainConfig.desiredMode == VK_PRESENT_MODE_MAILBOX_KHR ? "MAILBOX" :
+                        (gSwapchainConfig.desiredMode == VK_PRESENT_MODE_IMMEDIATE_KHR ? "IMMEDIATE" : "FIFO"),
+                        gSwapchainConfig.forceVsync ? "ON" : "OFF",
+                        gSwapchainConfig.forceTripleBuffer ? "FORCED" : "AUTO",
+                        gSwapchainConfig.enableHDR ? "ENABLED" : "DISABLED");
+    }
+}
+
+// =============================================================================
 // Command-line argument parsing — FULLY LOGGED
 // =============================================================================
 static void applyVideoModeToggles(int argc, char* argv[])
@@ -220,7 +274,7 @@ int main(int argc, char* argv[])
             throw std::runtime_error("g_sdl_window.get() returned null after successful creation - RAII bug");
         }
 
-        if (SDL_Init(SDL_INIT_VIDEO) != 0) {  // SDL3: != 0 = failure
+        if (SDL_Init(SDL_INIT_VIDEO) == 0) {  // SDL3: != 0 = failure
             LOG_FATAL_CAT("MAIN", "SDL_Init(VIDEO) failed: {}", SDL_GetError());
             LOG_FATAL_CAT("MAIN", "Full SDL init failed");
         }
@@ -261,6 +315,9 @@ int main(int argc, char* argv[])
 
         RTX::initContext(instance, window, TARGET_WIDTH, TARGET_HEIGHT);
         LOG_SUCCESS_CAT("MAIN", "Global Vulkan context initialized — device, queues, families ready");
+
+        // NEW: Detect and set optimal present mode post-context init
+        detectBestPresentMode(RTX::g_ctx().physicalDevice(), g_surface);
 
         // ──────────────────────────────────────────────────────────────────────
         // PHASE 4: APPLICATION + RENDERER

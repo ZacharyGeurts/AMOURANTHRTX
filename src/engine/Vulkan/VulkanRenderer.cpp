@@ -28,6 +28,7 @@
 #include "engine/GLOBAL/OptionsMenu.hpp"
 #include "engine/GLOBAL/camera.hpp"
 #include "engine/SDL3/SDL3_vulkan.hpp"
+#include "stb/stb_image.h"
 
 #include <glm/gtc/matrix_inverse.hpp>
 #include <glm/gtc/type_ptr.hpp>
@@ -416,29 +417,29 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, bool o
     inFlightFences_.resize(framesInFlight);
     LOG_TRACE_CAT("RENDERER", "Step 4 COMPLETE");
 
-// =============================================================================
-// FIXED: STEP 5 — CREATE SYNCHRONIZATION OBJECTS (Enhanced Logging + Validation)
-// ──────────────────────────────────────────────────────────────────────────
-LOG_TRACE_CAT("RENDERER", "=== STACK BUILD ORDER STEP 5: Create Synchronization Objects ===");
-LOG_TRACE_CAT("RENDERER", "Creating {} semaphores and fences for in-flight frames", framesInFlight);
+    // =============================================================================
+    // FIXED: STEP 5 — CREATE SYNCHRONIZATION OBJECTS (Enhanced Logging + Validation)
+    // ──────────────────────────────────────────────────────────────────────────
+    LOG_TRACE_CAT("RENDERER", "=== STACK BUILD ORDER STEP 5: Create Synchronization Objects ===");
+    LOG_TRACE_CAT("RENDERER", "Creating {} semaphores and fences for in-flight frames", framesInFlight);
 
-VkSemaphoreCreateInfo semInfo{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
-VkFenceCreateInfo fenceInfo{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, nullptr, VK_FENCE_CREATE_SIGNALED_BIT};
+    VkSemaphoreCreateInfo semInfo{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
+    VkFenceCreateInfo fenceInfo{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, nullptr, VK_FENCE_CREATE_SIGNALED_BIT};
 
-for (uint32_t i = 0; i < framesInFlight; ++i) {
-    LOG_TRACE_CAT("RENDERER", "Creating sync objects for frame {}", i);
-    
-    VK_CHECK(vkCreateSemaphore(c.device(), &semInfo, nullptr, &imageAvailableSemaphores_[i]), 
-             std::format("Failed to create image available semaphore for frame {}", i).c_str());
-    
-    VK_CHECK(vkCreateSemaphore(c.device(), &semInfo, nullptr, &renderFinishedSemaphores_[i]), 
-             std::format("Failed to create render finished semaphore for frame {}", i).c_str());
-    
-    VK_CHECK(vkCreateFence(c.device(), &fenceInfo, nullptr, &inFlightFences_[i]), 
-             std::format("Failed to create in-flight fence for frame {}", i).c_str());
-}
+    for (uint32_t i = 0; i < framesInFlight; ++i) {
+        LOG_TRACE_CAT("RENDERER", "Creating sync objects for frame {}", i);
+        
+        VK_CHECK(vkCreateSemaphore(c.device(), &semInfo, nullptr, &imageAvailableSemaphores_[i]), 
+                 std::format("Failed to create image available semaphore for frame {}", i).c_str());
+        
+        VK_CHECK(vkCreateSemaphore(c.device(), &semInfo, nullptr, &renderFinishedSemaphores_[i]), 
+                 std::format("Failed to create render finished semaphore for frame {}", i).c_str());
+        
+        VK_CHECK(vkCreateFence(c.device(), &fenceInfo, nullptr, &inFlightFences_[i]), 
+                 std::format("Failed to create in-flight fence for frame {}", i).c_str());
+    }
 
-LOG_TRACE_CAT("RENDERER", "Step 5 COMPLETE: All synchronization objects created successfully");
+    LOG_TRACE_CAT("RENDERER", "Step 5 COMPLETE: All synchronization objects created successfully");
 
     LOG_TRACE_CAT("RENDERER", "=== STACK BUILD ORDER STEP 6: GPU Timestamp Queries ===");
     if (Options::Performance::ENABLE_GPU_TIMESTAMPS || Options::Debug::SHOW_GPU_TIMESTAMPS) {
@@ -456,61 +457,57 @@ LOG_TRACE_CAT("RENDERER", "Step 5 COMPLETE: All synchronization objects created 
     LOG_INFO_CAT("RENDERER", "GPU: {} | Timestamp period: {:.3f} ms", props.deviceName, timestampPeriod_);
     LOG_TRACE_CAT("RENDERER", "Step 7 COMPLETE");
 
-// =============================================================================
-// FIXED: STEP 8 — FETCH SURFACE FROM VULKANCORE & INITIALIZE SWAPCHAIN (SDL3 API)
-// SINGLE SOURCE: Surface from RTX::initContext() — NO LOCAL CREATION
-// ──────────────────────────────────────────────────────────────────────────
-LOG_TRACE_CAT("RENDERER", "=== STACK BUILD ORDER STEP 8: Fetch Surface from VulkanCore & Initialize Swapchain ===");
-
-// 1. Ensure window is valid (surface fetched independently — window still needed for diags)
-if (window_ == nullptr) {
-    LOG_FATAL_CAT("RENDERER", "SDL_Window* is null — cannot validate surface");
-    throw std::runtime_error("Invalid SDL window pointer");
-}
-
-// Pre-call diagnostics (for logging only — surface already created upstream)
-Uint32 windowFlags = SDL_GetWindowFlags(window_);
-bool hasVulkanFlag = (windowFlags & SDL_WINDOW_VULKAN) != 0;  // Fixed: != 0 for true
-LOG_TRACE_CAT("RENDERER", "Window flags: 0x{:x}, has SDL_WINDOW_VULKAN: {}", static_cast<uint32_t>(windowFlags), hasVulkanFlag ? "YES" : "NO");
-if (!hasVulkanFlag) {
-    LOG_WARN_CAT("RENDERER", "Window missing SDL_WINDOW_VULKAN flag — upstream creation may have failed");
-    // No throw: Upstream (initContext) already checked; log for diags
-}
-
-// 2. Validate global surface (guard against null — prevents validation error & segfault)
-VkBool32 presentSupported = VK_FALSE;
-if (g_surface == VK_NULL_HANDLE) {
-    LOG_FATAL_CAT("RENDERER", "Global g_surface is VK_NULL_HANDLE — cannot check present support (upstream failure?)");
-    throw std::runtime_error("Global surface is null — ensure RTX::createSurface called before constructor");
-}
-
-// 3. Surface support check (now safe — non-null validated)
-VkResult supportRes = vkGetPhysicalDeviceSurfaceSupportKHR(c.physicalDevice(), c.graphicsFamily(), g_surface, &presentSupported);
-if (supportRes != VK_SUCCESS) {
-    LOG_FATAL_CAT("RENDERER", "vkGetPhysicalDeviceSurfaceSupportKHR failed: {} (surface=0x{:x})", static_cast<int>(supportRes), reinterpret_cast<uintptr_t>(g_surface));
-    throw std::runtime_error("Surface support check failed");
-}
-if (!presentSupported) {
-    LOG_FATAL_CAT("RENDERER", "Presentation not supported on graphics queue (family={})", c.graphicsFamily());
-    throw std::runtime_error("Graphics queue does not support presentation");
-}
-LOG_TRACE_CAT("RENDERER", "Graphics queue supports presentation — proceeding (supported={})", presentSupported);
-
-// 4. Initialize swapchain with fetched surface
-LOG_TRACE_CAT("RENDERER", "Initializing SwapchainManager — surface=0x{:x}, {}x{}", reinterpret_cast<uintptr_t>(g_surface), width, height);
-SWAPCHAIN.init(c.instance(), c.physicalDevice(), c.device(), g_surface, static_cast<uint32_t>(width), static_cast<uint32_t>(height));
-
-// 5. Final validation
-if (SWAPCHAIN.images().empty() || SWAPCHAIN.extent().width == 0 || SWAPCHAIN.extent().height == 0) {
-    LOG_FATAL_CAT("RENDERER", "Swapchain initialization failed — {} images, extent {}x{}", SWAPCHAIN.images().size(), SWAPCHAIN.extent().width, SWAPCHAIN.extent().height);
-    // NO destroy: Swapchain RAII will clean; surface stays in VulkanCore
-    throw std::runtime_error("Swapchain created with invalid parameters");
-}
-
-LOG_SUCCESS_CAT("RENDERER", "Swapchain initialized: {} images @ {}x{} — PRESENTATION READY", SWAPCHAIN.images().size(), SWAPCHAIN.extent().width, SWAPCHAIN.extent().height);
-LOG_TRACE_CAT("RENDERER", "Step 8 COMPLETE — PINK PHOTONS CAN NOW PRESENT");
+    // =============================================================================
+    // FIXED: STEP 8 — FETCH SURFACE FROM VULKANCORE & INITIALIZE SWAPCHAIN (SDL3 API)
+    // SINGLE SOURCE: Surface from RTX::initContext() — NO LOCAL CREATION
     // ──────────────────────────────────────────────────────────────────────────
-    // SHIFTED: Original Step 8 → Now Step 9: Create Descriptor Pools
+    LOG_TRACE_CAT("RENDERER", "=== STACK BUILD ORDER STEP 8: Fetch Surface from VulkanCore & Initialize Swapchain ===");
+
+    // 1. Ensure window is valid (surface fetched independently — window still needed for diags)
+    if (window_ == nullptr) {
+        LOG_FATAL_CAT("RENDERER", "SDL_Window* is null — cannot validate surface");
+        throw std::runtime_error("Invalid SDL window pointer");
+    }
+
+    // Pre-call diagnostics (for logging only — surface already created upstream)
+    Uint32 windowFlags = SDL_GetWindowFlags(window_);
+    LOG_TRACE_CAT("RENDERER", "Window flags: 0x{:x}", static_cast<uint32_t>(windowFlags));
+
+    // 2. Validate global surface (guard against null — prevents validation error & segfault)
+    VkBool32 presentSupported = VK_FALSE;
+    if (g_surface == VK_NULL_HANDLE) {
+        LOG_FATAL_CAT("RENDERER", "Global g_surface is VK_NULL_HANDLE — cannot check present support (upstream failure?)");
+        throw std::runtime_error("Global surface is null — ensure RTX::createSurface called before constructor");
+    }
+
+    // 3. Surface support check (now safe — non-null validated)
+    VkResult supportRes = vkGetPhysicalDeviceSurfaceSupportKHR(c.physicalDevice(), c.graphicsFamily(), g_surface, &presentSupported);
+    if (supportRes != VK_SUCCESS) {
+        LOG_FATAL_CAT("RENDERER", "vkGetPhysicalDeviceSurfaceSupportKHR failed: {} (surface=0x{:x})", static_cast<int>(supportRes), reinterpret_cast<uintptr_t>(g_surface));
+        throw std::runtime_error("Surface support check failed");
+    }
+    if (!presentSupported) {
+        LOG_FATAL_CAT("RENDERER", "Presentation not supported on graphics queue (family={})", c.graphicsFamily());
+        throw std::runtime_error("Graphics queue does not support presentation");
+    }
+    LOG_TRACE_CAT("RENDERER", "Graphics queue supports presentation — proceeding (supported={})", presentSupported);
+
+    // 4. Initialize swapchain with fetched surface
+    LOG_TRACE_CAT("RENDERER", "Initializing SwapchainManager — surface=0x{:x}, {}x{}", reinterpret_cast<uintptr_t>(g_surface), width, height);
+    SWAPCHAIN.init(c.instance(), c.physicalDevice(), c.device(), g_surface, static_cast<uint32_t>(width), static_cast<uint32_t>(height));
+
+    // 5. Final validation
+    if (SWAPCHAIN.images().empty() || SWAPCHAIN.extent().width == 0 || SWAPCHAIN.extent().height == 0) {
+        LOG_FATAL_CAT("RENDERER", "Swapchain initialization failed — {} images, extent {}x{}", SWAPCHAIN.images().size(), SWAPCHAIN.extent().width, SWAPCHAIN.extent().height);
+        // NO destroy: Swapchain RAII will clean; surface stays in VulkanCore
+        throw std::runtime_error("Swapchain created with invalid parameters");
+    }
+
+    LOG_SUCCESS_CAT("RENDERER", "Swapchain initialized: {} images @ {}x{} — PRESENTATION READY", SWAPCHAIN.images().size(), SWAPCHAIN.extent().width, SWAPCHAIN.extent().height);
+    LOG_TRACE_CAT("RENDERER", "Step 8 COMPLETE — PINK PHOTONS CAN NOW PRESENT");
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // STEP 9: Create Descriptor Pools
     // ──────────────────────────────────────────────────────────────────────────
     LOG_TRACE_CAT("RENDERER", "=== STACK BUILD ORDER STEP 9: Create Descriptor Pools ===");
     // ... [your existing descriptor pool code — ensure c.device() if used] ...
@@ -555,6 +552,16 @@ LOG_TRACE_CAT("RENDERER", "Step 8 COMPLETE — PINK PHOTONS CAN NOW PRESENT");
     LOG_SUCCESS_CAT("RENDERER", 
         "VulkanRenderer INITIALIZED — {}x{} — ALL SYSTEMS NOMINAL — PINK PHOTONS ETERNAL — FIRST LIGHT ACHIEVED", 
         width, height);
+
+    // STEP 10: HDR
+    LOG_TRACE_CAT("RENDERER", "=== STACK BUILD ORDER STEP 10: Create Render Targets ===");
+    if (Options::Environment::ENABLE_ENV_MAP) createEnvironmentMap();  // ← CALLED HERE: Post-swapchain, pre-descriptors
+        createAccumulationImages();
+        createRTOutputImages();
+    if (Options::RTX::ENABLE_DENOISING) createDenoiserImage();
+    if (Options::RTX::ENABLE_ADAPTIVE_SAMPLING)
+        createNexusScoreImage(c.physicalDevice(), c.device(), c.commandPool(), c.graphicsQueue());
+    LOG_TRACE_CAT("RENDERER", "Step 10 COMPLETE");
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -1237,9 +1244,126 @@ void VulkanRenderer::createEnvironmentMap() {
         LOG_TRACE_CAT("RENDERER", "createEnvironmentMap — COMPLETE (disabled)");
         return;
     }
-    LOG_INFO_CAT("RENDERER", "Creating environment map (IBL)");
-    // Placeholder logging for IBL creation
-    LOG_TRACE_CAT("RENDERER", "IBL creation placeholder executed");
+
+    // Load HDR file (use stb_image or similar; assume assets/textures/envmap.hdr)
+    int width, height, channels;
+    float* pixels = stbi_loadf("assets/textures/envmap.hdr", &width, &height, &channels, 4);  // RGBA float
+    if (!pixels) {
+        LOG_ERROR_CAT("RENDERER", "Failed to load envmap.hdr: {}", stbi_failure_reason());
+        LOG_TRACE_CAT("RENDERER", "createEnvironmentMap — COMPLETE (load failed)");
+        return;
+    }
+    LOG_INFO_CAT("RENDERER", "Loaded HDR envmap: {}x{} ({} channels)", width, height, channels);
+    VkDeviceSize imageSize = width * height * sizeof(float) * 4;
+
+    // Create staging buffer + upload (similar to your buffer macros)
+    uint64_t stagingEnc = 0;
+    BUFFER_CREATE(stagingEnc, imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, "EnvMapStaging");
+    void* data = nullptr;
+    BUFFER_MAP(stagingEnc, data);
+    memcpy(data, pixels, imageSize);
+    BUFFER_UNMAP(stagingEnc);
+    stbi_image_free(pixels);
+
+    // Create device-local image (cubemap for equirectangular envmap)
+    VkImageCreateInfo imgInfo{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+    imgInfo.imageType = VK_IMAGE_TYPE_2D;
+    imgInfo.format = VK_FORMAT_R32G32B32A32_SFLOAT;  // HDR float
+    imgInfo.extent = {static_cast<uint32_t>(width), static_cast<uint32_t>(height), 1};
+    imgInfo.mipLevels = 1;  // Add mipgen for better sampling if needed
+    imgInfo.arrayLayers = 1;
+    imgInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+    imgInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+    imgInfo.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    imgInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    imgInfo.flags = 0;
+
+    VkImage rawImg = VK_NULL_HANDLE;
+    VK_CHECK(vkCreateImage(device(), &imgInfo, nullptr, &rawImg), "Create envmap image");
+
+    // Allocate/bind memory (device local)
+    VkMemoryRequirements memReqs;
+    vkGetImageMemoryRequirements(device(), rawImg, &memReqs);
+    uint32_t memType = findMemoryType(physicalDevice(), memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+    VkMemoryAllocateInfo allocInfo{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+    allocInfo.allocationSize = memReqs.size;
+    allocInfo.memoryTypeIndex = memType;
+    VkDeviceMemory rawMem = VK_NULL_HANDLE;
+    VK_CHECK(vkAllocateMemory(device(), &allocInfo, nullptr, &rawMem), "Alloc envmap memory");
+    VK_CHECK(vkBindImageMemory(device(), rawImg, rawMem, 0), "Bind envmap memory");
+
+    // Transition + copy (use single-time commands)
+    VkCommandBuffer cmd = beginSingleTimeCommands(device(), commandPool());
+    VkImageMemoryBarrier barrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+    barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.image = rawImg;
+    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.baseMipLevel = 0;
+    barrier.subresourceRange.levelCount = 1;
+    barrier.subresourceRange.baseArrayLayer = 0;
+    barrier.subresourceRange.layerCount = 1;
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+
+    VkBufferImageCopy region = {};  // Zero-init for compatibility
+    region.bufferRowLength = 0;
+    region.bufferImageHeight = 0;
+    region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    region.imageSubresource.mipLevel = 0;
+    region.imageSubresource.baseArrayLayer = 0;
+    region.imageSubresource.layerCount = 1;
+    region.imageOffset = {0, 0, 0};
+    region.imageExtent = {static_cast<uint32_t>(width), static_cast<uint32_t>(height), 1};
+    VkBuffer stagingBuf = RAW_BUFFER(stagingEnc);
+    vkCmdCopyBufferToImage(cmd, stagingBuf, rawImg, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+
+    // Transition back to sampled
+    barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+    endSingleTimeCommands(device(), commandPool(), graphicsQueue(), cmd);
+
+    // Create view + sampler
+    VkImageViewCreateInfo viewInfo{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+    viewInfo.image = rawImg;
+    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    viewInfo.format = VK_FORMAT_R32G32B32A32_SFLOAT;
+    viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    viewInfo.subresourceRange.baseMipLevel = 0;
+    viewInfo.subresourceRange.levelCount = 1;
+    viewInfo.subresourceRange.baseArrayLayer = 0;
+    viewInfo.subresourceRange.layerCount = 1;
+    VkImageView rawView = VK_NULL_HANDLE;
+    VK_CHECK(vkCreateImageView(device(), &viewInfo, nullptr, &rawView), "Create envmap view");
+
+    VkSamplerCreateInfo samplerInfo{VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
+    samplerInfo.magFilter = VK_FILTER_LINEAR;
+    samplerInfo.minFilter = VK_FILTER_LINEAR;
+    samplerInfo.addressModeU = samplerInfo.addressModeV = samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    samplerInfo.unnormalizedCoordinates = VK_FALSE;
+    samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+    samplerInfo.mipLodBias = 0.0f;
+    samplerInfo.minLod = 0.0f;
+    samplerInfo.maxLod = 1.0f;
+    samplerInfo.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
+    VkSampler rawSampler = VK_NULL_HANDLE;
+    VK_CHECK(vkCreateSampler(device(), &samplerInfo, nullptr, &rawSampler), "Create envmap sampler");
+
+    // Wrap in Handles (match class member names)
+    envMapImage_ = RTX::Handle<VkImage>(rawImg, device(), [](VkDevice d, VkImage i, auto) { vkDestroyImage(d, i, nullptr); }, 0, "EnvMapImage");
+    envMapImageMemory_ = RTX::Handle<VkDeviceMemory>(rawMem, device(), [](VkDevice d, VkDeviceMemory m, auto) { vkFreeMemory(d, m, nullptr); }, memReqs.size, "EnvMapMemory");
+    envMapImageView_ = RTX::Handle<VkImageView>(rawView, device(), [](VkDevice d, VkImageView v, auto) { vkDestroyImageView(d, v, nullptr); }, 0, "EnvMapView");
+    envMapSampler_ = RTX::Handle<VkSampler>(rawSampler, device(), [](VkDevice d, VkSampler s, auto) { vkDestroySampler(d, s, nullptr); }, 0, "EnvMapSampler");
+
+    // Cleanup staging
+    BUFFER_DESTROY(stagingEnc);
+
+    LOG_SUCCESS_CAT("RENDERER", "HDR envmap loaded & uploaded — {}x{} float RGBA", width, height);
     LOG_TRACE_CAT("RENDERER", "createEnvironmentMap — COMPLETE");
 }
 
