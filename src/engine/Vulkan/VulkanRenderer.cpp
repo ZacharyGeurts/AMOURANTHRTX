@@ -26,6 +26,7 @@
 #include "engine/GLOBAL/LAS.hpp"
 #include "engine/GLOBAL/SwapchainManager.hpp"
 #include "engine/GLOBAL/OptionsMenu.hpp"
+#include "engine/GLOBAL/camera.hpp"
 
 #include <glm/gtc/matrix_inverse.hpp>
 #include <glm/gtc/type_ptr.hpp>
@@ -1758,39 +1759,248 @@ void VulkanRenderer::allocateDescriptorSets() {
     LOG_SUCCESS_CAT("RENDERER", "{}RT descriptor sets allocated — {} frames ready{}", PLASMA_FUCHSIA, Options::Performance::MAX_FRAMES_IN_FLIGHT, RESET);
     LOG_TRACE_CAT("RENDERER", "allocateDescriptorSets — COMPLETE");
 }
+void VulkanRenderer::updateNexusDescriptors() {
+    LOG_TRACE_CAT("RENDERER", "updateNexusDescriptors — START");
 
-void VulkanRenderer::updateNexusDescriptors() { 
-    LOG_TRACE_CAT("RENDERER", "updateNexusDescriptors — START/COMPLETE (placeholder)"); 
+    if (!hypertraceScoreView_.valid() || rtDescriptorSets_.empty()) {
+        LOG_DEBUG_CAT("RENDERER", "updateNexusDescriptors — SKIPPED (no view or sets)");
+        LOG_TRACE_CAT("RENDERER", "updateNexusDescriptors — COMPLETE (skipped)");
+        return;
+    }
+
+    VkDescriptorSet set = rtDescriptorSets_[currentFrame_ % rtDescriptorSets_.size()];
+
+    VkDescriptorImageInfo nexusInfo{};
+    nexusInfo.imageView = *hypertraceScoreView_;
+    nexusInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+    VkWriteDescriptorSet write{};
+    write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    write.dstSet = set;
+    write.dstBinding = 16;
+    write.descriptorCount = 1;
+    write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    write.pImageInfo = &nexusInfo;
+
+    vkUpdateDescriptorSets(RTX::g_ctx().vkDevice(), 1, &write, 0, nullptr);
+    LOG_DEBUG_CAT("RENDERER", "Nexus score image bound → binding 16");
+
+    LOG_TRACE_CAT("RENDERER", "updateNexusDescriptors — COMPLETE");
 }
-void VulkanRenderer::updateRTXDescriptors() { 
-    LOG_TRACE_CAT("RENDERER", "updateRTXDescriptors — START/COMPLETE (placeholder)"); 
+
+void VulkanRenderer::updateRTXDescriptors() {
+    LOG_TRACE_CAT("RENDERER", "updateRTXDescriptors — START");
+    // Currently handled by VulkanRTX::updateRTXDescriptors()
+    // This is a per-frame hook — can be used for dynamic bindings later
+    LOG_TRACE_CAT("RENDERER", "updateRTXDescriptors — COMPLETE (delegated)");
 }
-void VulkanRenderer::updateTonemapDescriptorsInitial() { 
-    LOG_TRACE_CAT("RENDERER", "updateTonemapDescriptorsInitial — START/COMPLETE (placeholder)"); 
+
+void VulkanRenderer::updateTonemapDescriptorsInitial() {
+    LOG_TRACE_CAT("RENDERER", "updateTonemapDescriptorsInitial — START");
+
+    if (tonemapSets_.empty() || rtOutputViews_.empty()) {
+        LOG_TRACE_CAT("RENDERER", "updateTonemapDescriptorsInitial — SKIPPED (no sets/views)");
+        return;
+    }
+
+    VkDevice device = RTX::g_ctx().vkDevice();
+
+    for (size_t i = 0; i < tonemapSets_.size(); ++i) {
+        VkDescriptorSet set = tonemapSets_[i];
+
+        VkDescriptorImageInfo imgInfo{};
+        imgInfo.imageView = *rtOutputViews_[i % rtOutputViews_.size()];
+        imgInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+        VkWriteDescriptorSet write{};
+        write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        write.dstSet = set;
+        write.dstBinding = 0;
+        write.descriptorCount = 1;
+        write.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+        write.pImageInfo = &imgInfo;
+
+        vkUpdateDescriptorSets(device, 1, &write, 0, nullptr);
+    }
+
+    LOG_TRACE_CAT("RENDERER", "updateTonemapDescriptorsInitial — COMPLETE");
 }
-void VulkanRenderer::updateDenoiserDescriptors() { 
-    LOG_TRACE_CAT("RENDERER", "updateDenoiserDescriptors — START/COMPLETE (placeholder)"); 
+
+void VulkanRenderer::updateDenoiserDescriptors() {
+    LOG_TRACE_CAT("RENDERER", "updateDenoiserDescriptors — START");
+
+    if (denoiserSets_.empty() || !denoiserView_.valid() || rtOutputViews_.empty()) {
+        LOG_TRACE_CAT("RENDERER", "updateDenoiserDescriptors — SKIPPED");
+        return;
+    }
+
+    VkDescriptorSet set = denoiserSets_[currentFrame_ % denoiserSets_.size()];
+
+    std::array<VkWriteDescriptorSet, 2> writes{};
+    std::array<VkDescriptorImageInfo, 2> infos{};
+
+    // Input: noisy RT output
+    infos[0].imageView = *rtOutputViews_[currentFrame_ % rtOutputViews_.size()];
+    infos[0].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+    writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[0].dstSet = set;
+    writes[0].dstBinding = 0;
+    writes[0].descriptorCount = 1;
+    writes[0].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+    writes[0].pImageInfo = &infos[0];
+
+    // Output: denoised result
+    infos[1].imageView = *denoiserView_;
+    infos[1].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+    writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[1].dstSet = set;
+    writes[1].dstBinding = 1;
+    writes[1].descriptorCount = 1;
+    writes[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    writes[1].pImageInfo = &infos[1];
+
+    vkUpdateDescriptorSets(RTX::g_ctx().vkDevice(), static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
+    LOG_TRACE_CAT("RENDERER", "updateDenoiserDescriptors — COMPLETE");
 }
-void VulkanRenderer::performDenoisingPass(VkCommandBuffer cmd) { 
-    if (!Options::RTX::ENABLE_DENOISING) {
+
+void VulkanRenderer::performDenoisingPass(VkCommandBuffer cmd) {
+    if (!denoisingEnabled_ || !denoiserPipeline_.valid()) {
         LOG_TRACE_CAT("RENDERER", "performDenoisingPass — SKIPPED (disabled)");
         return;
     }
-    LOG_PERF_CAT("RENDERER", "Executing SVGF denoising pass — cmd=0x{:x}", reinterpret_cast<uint64_t>(cmd));
+
+    LOG_PERF_CAT("RENDERER", "Executing SVGF denoiser — cmd=0x{:x}", reinterpret_cast<uintptr_t>(cmd));
+
+    VkDescriptorSet set = denoiserSets_[currentFrame_ % denoiserSets_.size()];
+
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, *denoiserPipeline_);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, *denoiserLayout_, 0, 1, &set, 0, nullptr);
+
+    uint32_t wgX = (width_ + 15) / 16;
+    uint32_t wgY = (height_ + 15) / 16;
+    vkCmdDispatch(cmd, wgX, wgY, 1);
+
+    // Memory barrier for next pass
+    VkMemoryBarrier barrier{
+        .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
+        .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
+        .dstAccessMask = VK_ACCESS_SHADER_READ_BIT
+    };
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                         0, 1, &barrier, 0, nullptr, 0, nullptr);
+
     LOG_TRACE_CAT("RENDERER", "performDenoisingPass — COMPLETE");
 }
-void VulkanRenderer::performTonemapPass(VkCommandBuffer cmd, uint32_t imageIndex) { 
-    LOG_PERF_CAT("RENDERER", "Executing tonemapping pass — cmd=0x{:x}, imageIndex={}", reinterpret_cast<uint64_t>(cmd), imageIndex);
+
+void VulkanRenderer::performTonemapPass(VkCommandBuffer cmd, uint32_t imageIndex) {
+    if (!tonemapEnabled_ || !tonemapPipeline_.valid()) {
+        LOG_TRACE_CAT("RENDERER", "performTonemapPass — SKIPPED (disabled)");
+        return;
+    }
+
+    LOG_PERF_CAT("RENDERER", "Executing tonemap pass — imageIndex={}", imageIndex);
+
+    VkDescriptorSet set = tonemapSets_[imageIndex % tonemapSets_.size()];
+
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, *tonemapPipeline_);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, *tonemapLayout_, 0, 1, &set, 0, nullptr);
+    vkCmdDraw(cmd, 3, 1, 0, 0);
+
+    // RAW ACCESS — your actual swapchain images are stored here:
+    VkImageMemoryBarrier barrier = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+        .dstAccessMask = 0,
+        .oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+        .newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+        .image = SwapchainManager::get().images()[imageIndex],
+        .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
+    };
+
+    vkCmdPipelineBarrier(cmd,
+        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+        VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+        0, 0, nullptr, 0, nullptr, 1, &barrier);
+
     LOG_TRACE_CAT("RENDERER", "performTonemapPass — COMPLETE");
 }
-void VulkanRenderer::updateUniformBuffer(uint32_t frame, const Camera& camera, float jitter) { 
-    LOG_TRACE_CAT("RENDERER", "updateUniformBuffer — START — frame={}, jitter={:.3f}", frame, jitter);
-    // Placeholder
+
+void VulkanRenderer::updateUniformBuffer(uint32_t frame, const Camera& camera, float jitter) {
+    LOG_TRACE_CAT("RENDERER", "updateUniformBuffer — START — frame={}, jitter={:.4f}", frame, jitter);
+
+    if (uniformBufferEncs_.empty() || !sharedStagingBuffer_.valid()) {
+        LOG_TRACE_CAT("RENDERER", "updateUniformBuffer — SKIPPED (no buffer)");
+        return;
+    }
+
+    void* data = nullptr;
+    vkMapMemory(RTX::g_ctx().vkDevice(), *sharedStagingMemory_, 0, VK_WHOLE_SIZE, 0, &data);
+
+    alignas(16) struct {
+        glm::mat4 view;
+        glm::mat4 proj;
+        glm::mat4 viewProj;
+        glm::mat4 invView;
+        glm::mat4 invProj;
+        glm::vec4 cameraPos;
+        glm::vec2 jitter;
+        uint32_t frame;
+        float time;
+        uint32_t spp;
+        float _pad[3];
+    } ubo{};
+
+    // Use the real GlobalCamera singleton — this is how your engine actually works
+    const auto& cam = GlobalCamera::get();
+
+    ubo.view     = cam.view();
+    ubo.proj     = cam.proj(width_ / float(height_));
+    ubo.viewProj = ubo.proj * ubo.view;
+    ubo.invView  = glm::inverse(ubo.view);
+    ubo.invProj  = glm::inverse(ubo.proj);
+    ubo.cameraPos = glm::vec4(cam.pos(), 1.0f);
+    ubo.jitter   = glm::vec2(jitter);
+    ubo.frame    = frameNumber_;
+    ubo.time     = frameTime_;
+    ubo.spp      = currentSpp_;
+
+    std::memcpy(data, &ubo, sizeof(ubo));
+    vkUnmapMemory(RTX::g_ctx().vkDevice(), *sharedStagingMemory_);
+
     LOG_TRACE_CAT("RENDERER", "updateUniformBuffer — COMPLETE");
 }
-void VulkanRenderer::updateTonemapUniform(uint32_t frame) { 
+
+void VulkanRenderer::updateTonemapUniform(uint32_t frame) {
     LOG_TRACE_CAT("RENDERER", "updateTonemapUniform — START — frame={}", frame);
-    // Placeholder
+
+    if (tonemapUniformEncs_.empty() || !sharedStagingBuffer_.valid()) {
+        LOG_TRACE_CAT("RENDERER", "updateTonemapUniform — SKIPPED");
+        return;
+    }
+
+    void* data = nullptr;
+    vkMapMemory(RTX::g_ctx().vkDevice(), *sharedStagingMemory_, 0, VK_WHOLE_SIZE, 0, &data);
+
+    struct TonemapUniform {
+        float exposure = 1.0f;
+        uint32_t type;
+        uint32_t enabled;
+        float nexusScore;
+        uint32_t frame;
+        uint32_t spp;
+    } ubo{};
+
+    ubo.type = static_cast<uint32_t>(tonemapType_);
+    ubo.enabled = tonemapEnabled_ ? 1u : 0u;
+    ubo.nexusScore = currentNexusScore_;
+    ubo.frame = frameNumber_;
+    ubo.spp = currentSpp_;
+
+    std::memcpy(data, &ubo, sizeof(ubo));
+    vkUnmapMemory(RTX::g_ctx().vkDevice(), *sharedStagingMemory_);
+
     LOG_TRACE_CAT("RENDERER", "updateTonemapUniform — COMPLETE");
 }
 
