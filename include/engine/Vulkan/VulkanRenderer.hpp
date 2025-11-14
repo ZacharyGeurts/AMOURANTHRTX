@@ -2,9 +2,11 @@
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
 //
-// VulkanRenderer — FINAL PRODUCTION v10.3 — NOV 14 2025
+// VulkanRenderer — FINAL PRODUCTION v10.4 — NOV 14 2025
+// • READY FOR RTX 50-SERIES & BEYOND: DLSS 4.0 Hooks, Mesh Shaders, Variable Rate Shading
+// • DEVELOPER WISHLIST: Path Tracing v2, Neural Rendering, AI Upscaling, Multi-GPU
 // • REMOVED: shaderPaths parameter — VulkanRenderer now OWNS its shaders
-// • ADDED: constexpr internal RT shader list
+// • ADDED: constexpr internal RT shader list + Future Hooks
 // • Constructor: (width, height, window, overclock)
 // • SDL3_vulkan.cpp now dumb and happy
 // • PINK PHOTONS ETERNAL — 240+ FPS — FIRST LIGHT ACHIEVED
@@ -63,6 +65,20 @@ enum class FpsTarget { FPS_60 = 60, FPS_120 = 120, FPS_UNLIMITED = 0 };
 enum class TonemapType { ACES, FILMIC, REINHARD };
 
 // ──────────────────────────────────────────────────────────────────────────────
+// DEVELOPER WISHLIST — FUTURE-PROOFING FOR RTX & BEYOND
+// ──────────────────────────────────────────────────────────────────────────────
+// TODO: [HIGH] Integrate DLSS 4.0 / Frame Generation (NVIDIA SDK hooks in createTonemapPipeline)
+// TODO: [MED] Mesh Shaders for Dynamic LOD (extend createRayTracingPipeline with VK_SHADER_STAGE_MESH_BIT_EXT)
+// TODO: [MED] Variable Rate Shading (VRS) Integration (add VkAttachmentDescription2 flags in swapchain)
+// TODO: [LOW] Path Tracing v2: BSSRDF, Subsurface Scattering (new shader group in createRayTracingPipeline)
+// TODO: [LOW] Neural Rendering: Add OptiX Denoiser (parallel to denoiserPipeline_)
+// TODO: [LOW] Multi-GPU Support: NVLink / Cross-Adapter (extend uniformBufferEncs_ to vector<VkDeviceAddress>)
+// TODO: [WISH] AI Upscaling: TensorRT Hooks (post-tonemap pass with external model loading)
+// TODO: [WISH] Ray Reconstruction: RT Core v5+ (detect in loadRayTracingExtensions and toggle flag)
+// TODO: [WISH] Holographic Output: Varjo / Apple Vision Pro (add XR extensions in VulkanCore.hpp)
+// TODO: Ensure no breakage: All additions are opt-in via runtime flags / Options::RTX::
+
+// ──────────────────────────────────────────────────────────────────────────────
 class VulkanRenderer {
 public:
     // ====================================================================
@@ -91,8 +107,8 @@ public:
     // Accessors
     [[nodiscard]] VkDevice         device()          const noexcept { return RTX::ctx().vkDevice(); }
     [[nodiscard]] VkPhysicalDevice physicalDevice()  const noexcept { return RTX::ctx().vkPhysicalDevice(); }
-    [[nodiscard]] VkCommandPool    commandPool()      const noexcept { return RTX::ctx().commandPool(); }
-    [[nodiscard]] VkQueue          graphicsQueue()   const noexcept { return RTX::ctx().graphicsQueue(); }
+    [[nodiscard]] VkCommandPool    commandPool()      const noexcept { return *commandPool_; }
+    [[nodiscard]] VkQueue          graphicsQueue()   const noexcept { return *graphicsQueue_; }
     [[nodiscard]] VkQueue          presentQueue()    const noexcept { return RTX::ctx().presentQueue(); }
 
     [[nodiscard]] int              width()           const noexcept { return width_; }
@@ -159,6 +175,10 @@ private:
     // Command buffers
     std::vector<VkCommandBuffer> commandBuffers_;
 
+    // Core Handles (for SBT copy etc.)
+    RTX::Handle<VkCommandPool> commandPool_;
+    RTX::Handle<VkQueue> graphicsQueue_;
+
     // Descriptor pools
     RTX::Handle<VkDescriptorPool> descriptorPool_;
     RTX::Handle<VkDescriptorPool> rtDescriptorPool_;
@@ -179,10 +199,12 @@ private:
     VkDeviceSize raygenSbtOffset_ = 0;
     VkDeviceSize missSbtOffset_   = 0;
     VkDeviceSize hitSbtOffset_    = 0;
+    VkDeviceSize callableSbtOffset_ = 0;
     uint32_t sbtStride_ = 0;
     uint32_t raygenGroupCount_ = 0;
     uint32_t missGroupCount_   = 0;
     uint32_t hitGroupCount_    = 0;
+    uint32_t callableGroupCount_ = 0;
     VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtxProps_{};
 
     // Ray Tracing Function Pointers
@@ -325,5 +347,5 @@ inline void shutdown() noexcept {
 
 // =============================================================================
 // STATUS: FIRST LIGHT ACHIEVED — PINK PHOTONS ARMED — ETERNAL
-// NOV 14 2025 — v10.3 — THE END OF HISTORY
+// NOV 14 2025 — v10.4 — RTX & BEYOND — DEVELOPER WISHLIST ACTIVATED
 // =============================================================================

@@ -480,9 +480,12 @@ void VulkanRenderer::createRayTracingPipeline(const std::vector<std::string>& sh
 {
     LOG_TRACE_CAT("RENDERER", "createRayTracingPipeline — START — {} shaders provided", shaderPaths.size());
 
+    VkDevice device = RTX::g_ctx().vkDevice();
+    LOG_DEBUG_CAT("RENDERER", "Retrieved device: 0x{:x}", reinterpret_cast<uintptr_t>(device));
+
     if (shaderPaths.size() < 2) {
         LOG_ERROR_CAT("RENDERER", "Insufficient shader paths: expected at least raygen + miss, got {}", shaderPaths.size());
-        return;
+        throw std::runtime_error("Insufficient shader paths for RT pipeline");
     }
 
     // ---------------------------------------------------------------------
@@ -493,11 +496,11 @@ void VulkanRenderer::createRayTracingPipeline(const std::vector<std::string>& sh
 
     if (raygenModule == VK_NULL_HANDLE) {
         LOG_FATAL_CAT("RENDERER", "Failed to load raygen shader: {}", shaderPaths[0]);
-        return;
+        throw std::runtime_error("Failed to load raygen shader");
     }
     if (missModule == VK_NULL_HANDLE) {
         LOG_FATAL_CAT("RENDERER", "Failed to load primary miss shader: {}", shaderPaths[1]);
-        return;
+        throw std::runtime_error("Failed to load primary miss shader");
     }
 
     LOG_TRACE_CAT("RENDERER", "Raygen module loaded: 0x{:x}", reinterpret_cast<uintptr_t>(raygenModule));
@@ -507,11 +510,18 @@ void VulkanRenderer::createRayTracingPipeline(const std::vector<std::string>& sh
     VkShaderModule closestHitModule = VK_NULL_HANDLE;
     VkShaderModule shadowMissModule = VK_NULL_HANDLE;
 
-    if (shaderPaths.size() > 2 && !shaderPaths[2].empty())
-        closestHitModule = loadShader(shaderPaths[2]);
+    bool hasClosestHit = false;
+    bool hasShadowMiss = false;
 
-    if (shaderPaths.size() > 3 && !shaderPaths[3].empty())
+    if (shaderPaths.size() > 2 && !shaderPaths[2].empty()) {
+        closestHitModule = loadShader(shaderPaths[2]);
+        hasClosestHit = (closestHitModule != VK_NULL_HANDLE);
+    }
+
+    if (shaderPaths.size() > 3 && !shaderPaths[3].empty()) {
         shadowMissModule = loadShader(shaderPaths[3]);
+        hasShadowMiss = (shadowMissModule != VK_NULL_HANDLE);
+    }
 
     // ---------------------------------------------------------------------
     // 2. Build shader stages and groups
@@ -567,17 +577,57 @@ void VulkanRenderer::createRayTracingPipeline(const std::vector<std::string>& sh
     addGeneral(missModule, VK_SHADER_STAGE_MISS_BIT_KHR, "Primary Miss");
 
     // Optional: shadow miss (index 2)
-    if (shadowMissModule != VK_NULL_HANDLE) {
+    uint32_t missGroupCount = 1;
+    if (hasShadowMiss) {
         addGeneral(shadowMissModule, VK_SHADER_STAGE_MISS_BIT_KHR, "Shadow Miss");
+        missGroupCount = 2;
     }
 
-    // Optional: closest hit → creates a hit group
-    if (closestHitModule != VK_NULL_HANDLE) {
+    // Optional: closest hit → creates a hit group (index 2 or 3)
+    uint32_t hitGroupCount = 0;
+    if (hasClosestHit) {
         addTriangleHitGroup(closestHitModule);
+        hitGroupCount = 1;
     }
+
+    const uint32_t raygenGroupCount = 1;
+
+    // Store counts for SBT
+    raygenGroupCount_ = raygenGroupCount;
+    missGroupCount_ = missGroupCount;
+    hitGroupCount_ = hitGroupCount;
+    callableGroupCount_ = 0;
 
     // ---------------------------------------------------------------------
-    // 3. Create pipeline
+    // 3. Create pipeline layout (CRITICAL: Ensure valid layout)
+    // ---------------------------------------------------------------------
+    LOG_DEBUG_CAT("RENDERER", "Creating RT pipeline layout");
+    VkPipelineLayoutCreateInfo layoutCreateInfo{};
+    layoutCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    layoutCreateInfo.setLayoutCount = 1;
+    VkDescriptorSetLayout layout = *rtDescriptorSetLayout_;
+    layoutCreateInfo.pSetLayouts = &layout;
+    layoutCreateInfo.pushConstantRangeCount = 0;
+    layoutCreateInfo.pPushConstantRanges = nullptr;
+
+    VkPipelineLayout rawPipelineLayout = VK_NULL_HANDLE;
+    VkResult layoutResult = vkCreatePipelineLayout(device, &layoutCreateInfo, nullptr, &rawPipelineLayout);
+    LOG_DEBUG_CAT("RENDERER", "vkCreatePipelineLayout returned: {}", static_cast<int>(layoutResult));
+    if (layoutResult != VK_SUCCESS) {
+        LOG_ERROR_CAT("RENDERER", "Failed to create RT pipeline layout: {}", static_cast<int>(layoutResult));
+        throw std::runtime_error("Create RT pipeline layout failed");
+    }
+    VK_CHECK(layoutResult, "Create RT pipeline layout");
+
+    // Assign to Handle
+    rtPipelineLayout_ = RTX::Handle<VkPipelineLayout>(rawPipelineLayout, device,
+        [](VkDevice d, VkPipelineLayout l, const VkAllocationCallbacks*) {
+            if (l != VK_NULL_HANDLE) vkDestroyPipelineLayout(d, l, nullptr);
+        }, 0, "RTPipelineLayout");
+    LOG_DEBUG_CAT("RENDERER", "Created RT pipeline layout: 0x{:x}", reinterpret_cast<uintptr_t>(rawPipelineLayout));
+
+    // ---------------------------------------------------------------------
+    // 4. Create pipeline
     // ---------------------------------------------------------------------
     VkPipelineLibraryCreateInfoKHR libraryInfo = {};
     libraryInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LIBRARY_CREATE_INFO_KHR;
@@ -599,28 +649,28 @@ void VulkanRenderer::createRayTracingPipeline(const std::vector<std::string>& sh
     pipelineInfo.groupCount                   = static_cast<uint32_t>(groups.size());
     pipelineInfo.pGroups                      = groups.data();
     pipelineInfo.maxPipelineRayRecursionDepth = 4;
-    pipelineInfo.layout                       = rtPipelineLayout_.raw;
+    pipelineInfo.layout                       = *rtPipelineLayout_;
 
     VkPipeline pipeline = VK_NULL_HANDLE;
     VK_CHECK(vkCreateRayTracingPipelinesKHR(
-        device(), VK_NULL_HANDLE, VK_NULL_HANDLE,
+        device, VK_NULL_HANDLE, VK_NULL_HANDLE,
         1, &pipelineInfo, nullptr, &pipeline),
         "Failed to create ray tracing pipeline");
 
     // ---------------------------------------------------------------------
-    // 4. Store in RAII handle
+    // 5. Store in RAII handle
     // ---------------------------------------------------------------------
     rtPipeline_ = RTX::Handle<VkPipeline>(
-        pipeline, device(),
+        pipeline, device,
         [](VkDevice d, VkPipeline p, const VkAllocationCallbacks*) { vkDestroyPipeline(d, p, nullptr); },
         0, "RTPipeline"
     );
 
     // Cleanup shader modules
-    vkDestroyShaderModule(device(), raygenModule, nullptr);
-    vkDestroyShaderModule(device(), missModule, nullptr);
-    if (closestHitModule) vkDestroyShaderModule(device(), closestHitModule, nullptr);
-    if (shadowMissModule) vkDestroyShaderModule(device(), shadowMissModule, nullptr);
+    vkDestroyShaderModule(device, raygenModule, nullptr);
+    vkDestroyShaderModule(device, missModule, nullptr);
+    if (hasClosestHit) vkDestroyShaderModule(device, closestHitModule, nullptr);
+    if (hasShadowMiss) vkDestroyShaderModule(device, shadowMissModule, nullptr);
 
     LOG_SUCCESS_CAT("RENDERER", "{}Ray tracing pipeline created successfully — {} stages, {} groups{}",
                     LIME_GREEN, stages.size(), groups.size(), RESET);
@@ -631,14 +681,16 @@ void VulkanRenderer::createRayTracingPipeline(const std::vector<std::string>& sh
 void VulkanRenderer::createShaderBindingTable() {
     LOG_TRACE_CAT("RENDERER", "createShaderBindingTable — START");
 
+    VkDevice device = RTX::g_ctx().vkDevice();
+
     // ====================================================================
     // Step 1: Validate pipeline exists
     // ====================================================================
-    if (!rtPipeline_) {
+    if (!rtPipeline_.valid() || *rtPipeline_ == VK_NULL_HANDLE) {
         LOG_FATAL_CAT("RENDERER", "createShaderBindingTable called but rtPipeline_ is null! Did createRayTracingPipeline() run?");
-        std::abort();
+        throw std::runtime_error("rtPipeline_ is invalid in createShaderBindingTable");
     }
-    LOG_TRACE_CAT("RENDERER", "Step 1 — rtPipeline_ valid @ 0x{:x}", reinterpret_cast<uintptr_t>(rtPipeline_.raw));
+    LOG_TRACE_CAT("RENDERER", "Step 1 — rtPipeline_ valid @ 0x{:x}", reinterpret_cast<uintptr_t>(*rtPipeline_));
 
     // ====================================================================
     // Step 2: Query ray tracing pipeline properties
@@ -651,7 +703,7 @@ void VulkanRenderer::createShaderBindingTable() {
     props2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
     props2.pNext = &rtProps;
 
-    vkGetPhysicalDeviceProperties2(physicalDevice(), &props2);
+    vkGetPhysicalDeviceProperties2(RTX::g_ctx().vkPhysicalDevice(), &props2);
 
     const uint32_t handleSize        = rtProps.shaderGroupHandleSize;
     const uint32_t handleAlignment   = rtProps.shaderGroupHandleAlignment;
@@ -662,12 +714,12 @@ void VulkanRenderer::createShaderBindingTable() {
                  handleSize, handleAlignment, baseAlignment, maxHandleSize);
 
     // ====================================================================
-    // Step 3: Define actual group counts from pipeline (you already know these)
+    // Step 3: Use stored group counts from pipeline creation
     // ====================================================================
-    const uint32_t raygenGroupCount   = 1;    // raygen.rgen
-    const uint32_t missGroupCount     = 2;    // miss.rmiss + shadowmiss.rmiss
-    const uint32_t hitGroupCount      = 1;    // closest_hit.rchit (triangle hit group)
-    const uint32_t callableGroupCount = 0;
+    const uint32_t raygenGroupCount   = raygenGroupCount_;
+    const uint32_t missGroupCount     = missGroupCount_;
+    const uint32_t hitGroupCount      = hitGroupCount_;
+    const uint32_t callableGroupCount = callableGroupCount_;
 
     const uint32_t totalGroups = raygenGroupCount + missGroupCount + hitGroupCount + callableGroupCount;
 
@@ -716,8 +768,8 @@ void VulkanRenderer::createShaderBindingTable() {
     std::vector<uint8_t> shaderHandles(totalGroups * handleSize);
 
     VK_CHECK(vkGetRayTracingShaderGroupHandlesKHR(
-        device(),
-        rtPipeline_.raw,
+        device,
+        *rtPipeline_,
         0,
         totalGroups,
         shaderHandles.size(),
@@ -739,34 +791,44 @@ void VulkanRenderer::createShaderBindingTable() {
     stagingInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
     stagingInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-    VK_CHECK(vkCreateBuffer(device(), &stagingInfo, nullptr, &stagingBuffer), "Failed to create SBT staging buffer");
+    VK_CHECK(vkCreateBuffer(device, &stagingInfo, nullptr, &stagingBuffer), "Failed to create SBT staging buffer");
 
     VkMemoryRequirements memReqs;
-    vkGetBufferMemoryRequirements(device(), stagingBuffer, &memReqs);
+    vkGetBufferMemoryRequirements(device, stagingBuffer, &memReqs);
 
     VkMemoryAllocateInfo allocInfo{};
     allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
     allocInfo.allocationSize = memReqs.size;
-    allocInfo.memoryTypeIndex = findMemoryType(physicalDevice(), memReqs.memoryTypeBits,
+    allocInfo.memoryTypeIndex = findMemoryType(RTX::g_ctx().vkPhysicalDevice(), memReqs.memoryTypeBits,
                                                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
 
-    VK_CHECK(vkAllocateMemory(device(), &allocInfo, nullptr, &stagingMemory), "Failed to allocate SBT staging memory");
-    VK_CHECK(vkBindBufferMemory(device(), stagingBuffer, stagingMemory, 0), "Failed to bind SBT staging memory");
+    VK_CHECK(vkAllocateMemory(device, &allocInfo, nullptr, &stagingMemory), "Failed to allocate SBT staging memory");
+    VK_CHECK(vkBindBufferMemory(device, stagingBuffer, stagingMemory, 0), "Failed to bind SBT staging memory");
 
     // Map and fill
     void* mapped = nullptr;
-    VK_CHECK(vkMapMemory(device(), stagingMemory, 0, sbtBufferSize, 0, &mapped), "Failed to map SBT staging memory");
+    VK_CHECK(vkMapMemory(device, stagingMemory, 0, sbtBufferSize, 0, &mapped), "Failed to map SBT staging memory");
 
     auto copyGroup = [&](uint32_t groupIndex, VkDeviceSize destOffset) {
         const uint8_t* src = shaderHandles.data() + groupIndex * handleSize;
         std::memcpy(reinterpret_cast<uint8_t*>(mapped) + destOffset, src, handleSize);
     };
 
-    for (uint32_t i = 0; i < raygenGroupCount; ++i)   copyGroup(i, raygenOffset + i * handleSizeAligned);
-    for (uint32_t i = 0; i < missGroupCount; ++i)     copyGroup(raygenGroupCount + i, missOffset + i * handleSizeAligned);
-    for (uint32_t i = 0; i < hitGroupCount; ++i)      copyGroup(raygenGroupCount + missGroupCount + i, hitOffset + i * handleSizeAligned);
+    uint32_t currentGroupIndex = 0;
+    for (uint32_t i = 0; i < raygenGroupCount; ++i) {
+        copyGroup(currentGroupIndex++, raygenOffset + i * handleSizeAligned);
+    }
+    for (uint32_t i = 0; i < missGroupCount; ++i) {
+        copyGroup(currentGroupIndex++, missOffset + i * handleSizeAligned);
+    }
+    for (uint32_t i = 0; i < hitGroupCount; ++i) {
+        copyGroup(currentGroupIndex++, hitOffset + i * handleSizeAligned);
+    }
+    for (uint32_t i = 0; i < callableGroupCount; ++i) {
+        copyGroup(currentGroupIndex++, callableOffset + i * handleSizeAligned);
+    }
 
-    vkUnmapMemory(device(), stagingMemory);
+    vkUnmapMemory(device, stagingMemory);
     LOG_TRACE_CAT("RENDERER", "Step 6 — Staging buffer filled and unmapped");
 
     // ====================================================================
@@ -782,25 +844,25 @@ void VulkanRenderer::createShaderBindingTable() {
                      VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
     sbtInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-    VK_CHECK(vkCreateBuffer(device(), &sbtInfo, nullptr, &sbtBuffer_), "Failed to create final SBT buffer");
-    vkGetBufferMemoryRequirements(device(), sbtBuffer_, &memReqs);
+    VK_CHECK(vkCreateBuffer(device, &sbtInfo, nullptr, &sbtBuffer_), "Failed to create final SBT buffer");
+    vkGetBufferMemoryRequirements(device, sbtBuffer_, &memReqs);
 
     allocInfo.allocationSize = memReqs.size;
-    allocInfo.memoryTypeIndex = findMemoryType(physicalDevice(), memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    allocInfo.memoryTypeIndex = findMemoryType(RTX::g_ctx().vkPhysicalDevice(), memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
-    VK_CHECK(vkAllocateMemory(device(), &allocInfo, nullptr, &sbtMemory_), "Failed to allocate final SBT memory");
-    VK_CHECK(vkBindBufferMemory(device(), sbtBuffer_, sbtMemory_, 0), "Failed to bind final SBT memory");
+    VK_CHECK(vkAllocateMemory(device, &allocInfo, nullptr, &sbtMemory_), "Failed to allocate final SBT memory");
+    VK_CHECK(vkBindBufferMemory(device, sbtBuffer_, sbtMemory_, 0), "Failed to bind final SBT memory");
 
     // Copy staging → device
-    VkCommandBuffer cmd = beginSingleTimeCommands(device(), commandPool());
+    VkCommandBuffer cmd = beginSingleTimeCommands(device, *commandPool_);
     VkBufferCopy copy{};
     copy.size = sbtBufferSize;
     vkCmdCopyBuffer(cmd, stagingBuffer, sbtBuffer_, 1, &copy);
-    endSingleTimeCommands(device(), commandPool(), graphicsQueue(), cmd);
+    endSingleTimeCommands(device, *commandPool_, *graphicsQueue_, cmd);
 
     // Cleanup staging
-    vkDestroyBuffer(device(), stagingBuffer, nullptr);
-    vkFreeMemory(device(), stagingMemory, nullptr);
+    vkDestroyBuffer(device, stagingBuffer, nullptr);
+    vkFreeMemory(device, stagingMemory, nullptr);
     LOG_TRACE_CAT("RENDERER", "Step 7 — Final SBT buffer created and copied");
 
     // ====================================================================
@@ -809,24 +871,22 @@ void VulkanRenderer::createShaderBindingTable() {
     VkBufferDeviceAddressInfo addrInfo{};
     addrInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
     addrInfo.buffer = sbtBuffer_;
-    sbtAddress_ = vkGetBufferDeviceAddressKHR(device(), &addrInfo);
+    sbtAddress_ = vkGetBufferDeviceAddressKHR(device, &addrInfo);
 
     // Store offsets and metadata
     raygenSbtOffset_ = raygenOffset;
     missSbtOffset_   = missOffset;
     hitSbtOffset_    = hitOffset;
+    callableSbtOffset_ = callableOffset;
     sbtStride_       = handleSizeAligned;
-
-    raygenGroupCount_ = raygenGroupCount;
-    missGroupCount_   = missGroupCount;
-    hitGroupCount_    = hitGroupCount;
 
     sbtBufferEnc_ = sbtAddress_;
 
     LOG_SUCCESS_CAT("RENDERER", 
         "Shader Binding Table CREATED — Address: 0x{:x} | Size: {} bytes | Stride: {}B", 
         sbtAddress_, sbtBufferSize, sbtStride_);
-    LOG_TRACE_CAT("RENDERER", "SBT Offsets — RayGen: {} | Miss: {} | Hit: {}", raygenSbtOffset_, missSbtOffset_, hitSbtOffset_);
+    LOG_TRACE_CAT("RENDERER", "SBT Offsets — RayGen: {} | Miss: {} | Hit: {} | Callable: {}", 
+                  raygenSbtOffset_, missSbtOffset_, hitSbtOffset_, callableSbtOffset_);
     LOG_TRACE_CAT("RENDERER", "createShaderBindingTable — COMPLETE — PINK PHOTONS FULLY ARMED");
 }
 
