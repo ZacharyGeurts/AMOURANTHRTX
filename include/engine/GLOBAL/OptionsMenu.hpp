@@ -33,6 +33,7 @@ namespace Performance {
     constexpr uint32_t GPU_TIMESTAMP_QUERY_COUNT   = 128;
     constexpr bool     ENABLE_FRAME_TIME_LOGGING   = false;
     constexpr float    FRAME_TIME_LOG_THRESHOLD_MS = 16.666f;
+	static inline constexpr bool ENABLE_VALIDATION_LAYERS = false;
 
     // ADDED: Required by SDL3_input.cpp, SDL3_font.cpp, SDL3_init.cpp, SDL3_window.cpp
     constexpr bool     ENABLE_CONSOLE_LOG          = true;

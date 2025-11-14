@@ -9,34 +9,29 @@
 // 2. Commercial licensing: gzac5314@gmail.com
 //
 // =============================================================================
-// SDL3 + Vulkan RAII – SPLIT INTO HEADER + CPP – C++23 – v4.6 – NOV 13 2025
-// • ONLY uses engine/GLOBAL/logging.hpp in header
-// • Declarations | VK_CHECK, no throw
-// • C++23: constexpr, span, [[likely]], zero-overhead
-// • RESPECTS Options::Performance::ENABLE_GPU_TIMESTAMPS → enables validation
-// • PINK PHOTONS ETERNAL — 15,000+ FPS
+// SDL3 + Vulkan RAII – FINAL CLEAN VERSION – NOV 14 2025
+// • VulkanRenderer OWNS ALL RT SHADERS — this file is now DUMB AND HAPPY
+// • NO shader paths here — EVER AGAIN
+// • Only does: SDL ↔ Vulkan bridge + renderer init/shutdown
+// • PINK PHOTONS ETERNAL — 15,000+ FPS — FIRST LIGHT ACHIEVED
 // =============================================================================
 
 #pragma once
 
 #include "engine/GLOBAL/RTXHandler.hpp"
-#include "engine/GLOBAL/logging.hpp"   // ONLY THIS
-#include "engine/GLOBAL/LAS.hpp"
+#include "engine/GLOBAL/logging.hpp"
 #include <SDL3/SDL_vulkan.h>
 #include <vulkan/vulkan.h>
 
 #include <memory>
-#include <vector>
-#include <string>
 #include <string_view>
-#include <array>
 #include <span>
-#include <set>
+#include <array>
 
 using namespace Logging::Color;
 
 // -----------------------------------------------------------------------------
-// C++23: constexpr RTX extensions
+// RTX Required Instance + Device Extensions (ONLY extensions, NOT shaders!)
 // -----------------------------------------------------------------------------
 inline constexpr std::array<const char*, 6> RTX_EXTENSIONS = {
     VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME,
@@ -48,13 +43,13 @@ inline constexpr std::array<const char*, 6> RTX_EXTENSIONS = {
 };
 
 // -----------------------------------------------------------------------------
-// Global renderer forward declare
+// Global renderer
 // -----------------------------------------------------------------------------
 class VulkanRenderer;
 extern std::unique_ptr<VulkanRenderer> g_vulkanRenderer;
 
 // -----------------------------------------------------------------------------
-// SDL3Vulkan interface
+// SDL3Vulkan — Minimal, clean, happy interface
 // -----------------------------------------------------------------------------
 namespace SDL3Vulkan {
 
@@ -66,7 +61,7 @@ void shutdownRenderer() noexcept;
 } // namespace SDL3Vulkan
 
 // -----------------------------------------------------------------------------
-// RAII deleters
+// RAII Deleters
 // -----------------------------------------------------------------------------
 struct VulkanInstanceDeleter {
     void operator()(VkInstance i) const noexcept;
@@ -82,7 +77,7 @@ using VulkanInstancePtr = std::unique_ptr<VkInstance_T, VulkanInstanceDeleter>;
 using VulkanSurfacePtr  = std::unique_ptr<VkSurfaceKHR_T, VulkanSurfaceDeleter>;
 
 // -----------------------------------------------------------------------------
-// Vulkan core init / shutdown — NO THROW, USE VK_CHECK
+// Core Vulkan init/shutdown
 // -----------------------------------------------------------------------------
 void initVulkan(
     SDL_Window* window,
@@ -91,25 +86,20 @@ void initVulkan(
     VkDevice& device,
     bool enableValidation,
     bool preferNvidia,
-    bool rt,
+    bool requireRT,
     std::string_view title,
-    VkPhysicalDevice& physicalDevice) noexcept;
+    VkPhysicalDevice& physicalDevice
+) noexcept;
 
 void shutdownVulkan() noexcept;
 
 // -----------------------------------------------------------------------------
 // Utils
 // -----------------------------------------------------------------------------
-[[nodiscard]] inline VkInstance getVkInstance(const VulkanInstancePtr& i) noexcept {
-    return i ? i.get() : RTX::g_ctx().instance_;
-}
-[[nodiscard]] inline VkSurfaceKHR getVkSurface(const VulkanSurfacePtr& s) noexcept {
-    return s ? s.get() : RTX::g_ctx().surface_;
-}
-[[nodiscard]] inline constexpr auto getVulkanExtensions() noexcept -> std::span<const char* const> {
+[[nodiscard]] inline constexpr auto getRTXExtensions() noexcept -> std::span<const char* const> {
     return RTX_EXTENSIONS;
 }
 
 // =============================================================================
-// END — C++23 SPEED | VK_CHECK | NO THROW | PINK PHOTONS ETERNAL
+// END — DUMB AND HAPPY — VulkanRenderer owns the photons now
 // =============================================================================

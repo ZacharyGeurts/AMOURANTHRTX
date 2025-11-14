@@ -26,6 +26,7 @@
 #include <string_view>
 #include <vector>
 #include <tuple>
+#include <cstdint>
 
 // =============================================================================
 //  VULKAN ERROR CHECKING MACROS
@@ -224,7 +225,7 @@ public:
     [[nodiscard]] VkPipelineLayout pipelineLayout() const noexcept { return HANDLE_GET(rtPipelineLayout_); }
     [[nodiscard]] const ShaderBindingTable& sbt() const noexcept { return sbt_; }
 
-	void buildAccelerationStructuresBlocking() noexcept;
+    void buildAccelerationStructuresBlocking() noexcept;
 
     void setDescriptorSetLayout(VkDescriptorSetLayout layout) noexcept;
     void setRayTracingPipeline(VkPipeline p, VkPipelineLayout l) noexcept;
@@ -235,6 +236,9 @@ public:
 
     // ASYNC COMMAND SUBMIT
     static void endSingleTimeCommandsAsync(VkCommandBuffer cmd, VkQueue queue, VkCommandPool pool, VkFence fence = VK_NULL_HANDLE) noexcept;
+
+    // ASYNC FENCE POLLING HELPER
+    [[nodiscard]] static bool pollAsyncFence(VkFence fence, uint64_t timeout_ns = UINT64_MAX) noexcept;
 
     // BATCHED UPLOAD (persistent staging)
     void uploadBatch(

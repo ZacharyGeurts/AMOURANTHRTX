@@ -295,9 +295,9 @@ int main(int argc, char* argv[]) {
         LOG_INFO_CAT("MAIN", "Creating black fallback image");
         g_rtx().initBlackFallbackImage();
 
-        LOG_INFO_CAT("MAIN", "Constructing VulkanRenderer with ray tracing pipeline");
+        LOG_INFO_CAT("MAIN", "Constructing VulkanRenderer — INTERNAL SHADERS ACTIVE — PINK PHOTONS RISING");
         auto renderer = std::make_unique<VulkanRenderer>(
-            TARGET_WIDTH, TARGET_HEIGHT, window, getRayTracingBinPaths(), true
+            TARGET_WIDTH, TARGET_HEIGHT, window, true
         );
         app->setRenderer(std::move(renderer));
 
