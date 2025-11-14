@@ -53,13 +53,6 @@ SDL3Initializer::SDL3Initializer(const std::string& title, int width, int height
 
     // Initialize RTX context with our window (creates physical device, logical device, etc.)
     RTX::initContext(raw, width, height);
-
-    if (!SDL_Vulkan_CreateSurface(raw, vkInstance_, nullptr, &surface_)) {
-        LOG_WARNING_CAT("SDL3", "{}Vulkan surface failed (non-fatal): {}{}", AMBER_YELLOW, SDL_GetError(), RESET);
-        surface_ = VK_NULL_HANDLE;
-    } else {
-        LOG_SUCCESS_CAT("SDL3", "{}Vulkan surface created{}", OCEAN_TEAL, RESET);
-    }
 }
 
 SDL3Initializer::~SDL3Initializer()

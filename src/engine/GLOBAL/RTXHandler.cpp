@@ -376,26 +376,7 @@ void Context::init(SDL_Window* window, int width, int height) {
     LOG_SUCCESS_CAT("RTX", "Vulkan instance created: 0x{:x}", reinterpret_cast<uintptr_t>(instance_));
 
     // --- 4. Create Surface ---
-    LOG_TRACE_CAT("RTX", "Step 4: Creating Vulkan surface via SDL3...");
-    SDL_ClearError();  // Clear for surface diag
-    surface_ = VK_NULL_HANDLE;
-    bool surfaceSuccess = SDL_Vulkan_CreateSurface(window, instance_, nullptr, &surface_);  // allocator=nullptr
-    const char* sdlErr = SDL_GetError();
-    if (!surfaceSuccess) {
-        LOG_FATAL_CAT("SDL", "SDL_Vulkan_CreateSurface failed outright (error: '{}') — check SDL_WINDOW_VULKAN flag & extensions", sdlErr);
-        vkDestroyInstance(instance_, nullptr);
-        throw std::runtime_error("Failed to create surface");
-    }
-    // Validate handle post-success (API contract: non-null on true)
-    if (surface_ == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("VULKAN", "SDL_Vulkan_CreateSurface returned true but surface=0x0! SDL error: '{}' — API violation", sdlErr);
-        // Diag: Window flags
-        Uint32 flags = SDL_GetWindowFlags(window);
-        LOG_ERROR_CAT("VULKAN", "Window flags: 0x{:x} (has SDL_WINDOW_VULKAN? {})", static_cast<uint32_t>(flags), (flags & SDL_WINDOW_VULKAN) ? "YES" : "NO");
-        vkDestroyInstance(instance_, nullptr);
-        throw std::runtime_error("Invalid null surface handle");
-    }
-    LOG_SUCCESS_CAT("RTX", "Surface created: 0x{:x} (SDL error cleared: '{}')", reinterpret_cast<uintptr_t>(surface_), sdlErr);
+	// VulkanCore.cpp
 
     // --- 5. Select Physical Device (GUARANTEED + SECURE) ---
     LOG_TRACE_CAT("RTX", "Step 5: Enumerating physical devices...");

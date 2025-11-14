@@ -52,7 +52,8 @@
 
 // ──────────────────────────────────────────────────────────────────────────────
 // GLOBAL PHYSICAL DEVICE
-inline VkPhysicalDevice g_PhysicalDevice = VK_NULL_HANDLE;
+extern VkPhysicalDevice g_PhysicalDevice;
+extern VkSurfaceKHR g_surface;
 
 // ──────────────────────────────────────────────────────────────────────────────
 struct Camera;

@@ -34,6 +34,9 @@
 
 using namespace Logging::Color;
 
+// Global surface. Yeah baby, hit it RAW
+VkSurfaceKHR g_surface = VK_NULL_HANDLE;
+
 // =============================================================================
 // VulkanCore.cpp — Persistent staging globals — ONLY ONE DEFINITION
 // =============================================================================
@@ -1502,6 +1505,47 @@ void loadRayTracingExtensions()
     LOG_SUCCESS_CAT("RTX", "All 9 ray tracing extensions loaded — FIRST LIGHT IMMINENT");
 }
 
+// =============================================================================
+// RTX::surface() — RAW, LIGHTNING-FAST, FULLY LOGGED
+// =============================================================================
+[[nodiscard]] constexpr VkSurfaceKHR surface() noexcept
+{
+    // Fast path — normal case (99.999% of calls)
+    if (g_context_instance.surface_ != VK_NULL_HANDLE) {
+        return g_context_instance.surface_;
+    }
+
+    // ---------------------------------------------------------------------
+    // SLOW PATH: Surface not created yet — this should NEVER happen in production
+    // ---------------------------------------------------------------------
+    LOG_FATAL_CAT("RTX", 
+        "RTX::surface() called but g_context_instance.surface_ is VK_NULL_HANDLE!\n"
+        "    → This means initContext() was never called, or SDL_Vulkan_CreateSurface failed!\n"
+        "    → Current call stack MUST be after RTX::initContext() in main.cpp PHASE 3\n"
+        "    → Aborting — cannot render without a valid Vulkan surface!"
+    );
+
+    // Extra diagnostics — help you hunt down the bug instantly
+    LOG_ERROR_CAT("RTX", "Call order violation detected:");
+    LOG_ERROR_CAT("RTX", "    • g_context_instance.instance_  = 0x{:x}", 
+                  reinterpret_cast<uintptr_t>(g_context_instance.instance_));
+    LOG_ERROR_CAT("RTX", "    • g_context_instance.device_    = 0x{:x}", 
+                  reinterpret_cast<uintptr_t>(g_context_instance.device_));
+    LOG_ERROR_CAT("RTX", "    • g_context_instance.surface_   = VK_NULL_HANDLE");
+    LOG_ERROR_CAT("RTX", "    • Thread ID: {}", std::this_thread::get_id());
+
+    // Optional: Print stack trace if you have a backtrace lib
+    // Logging::Stacktrace::print();
+
+    // Final word from AMOURANTH AI
+    AI_INJECT("Surface requested before existence... I cannot reflect photons in the void.");
+
+    // Hard abort — no silent nulls, no undefined behavior
+    std::abort();
+
+    // Unreachable, but silences warnings
+    return VK_NULL_HANDLE;
+}
 } // namespace RTX
 
 // =============================================================================

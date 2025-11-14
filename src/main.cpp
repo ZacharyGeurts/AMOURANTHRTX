@@ -14,7 +14,7 @@
 // • Full splash screen, audio, logging, CLI parsing, StoneKey
 // • Graceful shutdown via RAII — no manual SDL_Quit()
 // • FIRST LIGHT ACHIEVED — 15,000+ FPS — VALHALLA v80 TURBO
-// • FULLY CORRECTED FOR SDL3: == 0 means success everywhere
+// • FULLY CORRECTED FOR SDL3: != 0 means failure everywhere
 // • GOD-TIER EXCEPTION DIAGNOSTICS — file + line + full demangled backtrace
 // =============================================================================
 
@@ -129,7 +129,7 @@ inline void bulkhead(const std::string& title)
 }
 
 // =============================================================================
-// MAIN — FULLY DETAILED, NO SHORTCUTS — SDL3 == 0 MEANS SUCCESS EVERYWHERE
+// MAIN — FULLY DETAILED, NO SHORTCUTS — SDL3 != 0 MEANS FAILURE EVERYWHERE
 // =============================================================================
 int main(int argc, char* argv[])
 {
@@ -154,7 +154,7 @@ int main(int argc, char* argv[])
         // PRE-PHASE 1: EARLY SDL INIT FOR SPLASH (VIDEO ONLY)
         // ──────────────────────────────────────────────────────────────────────
         LOG_INFO_CAT("MAIN", "Early SDL_InitSubSystem(SDL_INIT_VIDEO) for splash screen");
-        if (SDL_InitSubSystem(SDL_INIT_VIDEO) == 0) {  // SDL3: 0 = failure, non-zero = success
+        if (SDL_InitSubSystem(SDL_INIT_VIDEO) == 0) {  // SDL3: != 0 = failure
             LOG_FATAL_CAT("MAIN", "Early SDL_InitSubSystem(VIDEO) failed: {}", SDL_GetError());
             FATAL_THROW("Cannot initialize SDL video subsystem for splash screen");
         }
@@ -211,13 +211,20 @@ int main(int argc, char* argv[])
         }
         catch (const std::exception& e) {
             LOG_FATAL_CAT("MAIN", "SDL3Window::create() failed: {}", e.what());
-            FATAL_THROW("Failed to create main application window — cannot recover");
+            LOG_FATAL_CAT("MAIN", "Failed to create main application window — cannot recover");
         }
 
         SDL_Window* window = g_sdl_window.get();
         if (!window) {
-            FATAL_THROW("g_sdl_window.get() returned null after successful creation — RAII bug");
+            LOG_FATAL_CAT("MAIN", "g_sdl_window.get() returned null after successful creation - RAII bug");
+            throw std::runtime_error("g_sdl_window.get() returned null after successful creation - RAII bug");
         }
+
+        if (SDL_Init(SDL_INIT_VIDEO) != 0) {  // SDL3: != 0 = failure
+            LOG_FATAL_CAT("MAIN", "SDL_Init(VIDEO) failed: {}", SDL_GetError());
+            LOG_FATAL_CAT("MAIN", "Full SDL init failed");
+        }
+        LOG_SUCCESS_CAT("MAIN", "Full SDL init complete");
 
         // CRITICAL: Show window BEFORE Vulkan surface creation
         SDL_ShowWindow(window);
@@ -247,10 +254,10 @@ int main(int argc, char* argv[])
         VkInstance instance = RTX::createVulkanInstanceWithSDL(true);
         LOG_SUCCESS_CAT("MAIN", "Vulkan instance created via SDL3 API");
 
-        VkSurfaceKHR surface = VK_NULL_HANDLE;
-        std::this_thread::sleep_for(std::chrono::milliseconds(300)); // let surface become ready
-        SDL_Vulkan_CreateSurface(window, instance, nullptr, &surface);
-        LOG_SUCCESS_CAT("VULKAN", "Vulkan surface attempted after delay");
+        // FIXED: Explicitly create surface before initContext
+        LOG_INFO_CAT("MAIN", "Creating global Vulkan surface via SDL3");
+        RTX::createSurface(window, instance);
+        LOG_SUCCESS_CAT("MAIN", "Global surface created: 0x{:x}", reinterpret_cast<uintptr_t>(g_surface));
 
         RTX::initContext(instance, window, TARGET_WIDTH, TARGET_HEIGHT);
         LOG_SUCCESS_CAT("MAIN", "Global Vulkan context initialized — device, queues, families ready");

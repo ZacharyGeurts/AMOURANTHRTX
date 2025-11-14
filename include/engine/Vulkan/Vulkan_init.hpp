@@ -78,13 +78,6 @@ inline void initSurface(void* window) {
         GlobalCamera::deobfuscate(reinterpret_cast<uint64_t>(ctx().instance_))
     );
 
-    if (SDL_Vulkan_CreateSurface(static_cast<SDL_Window*>(window), deobfInstance, &rawSurface)) {
-        LOG_SUCCESS_CAT("VULKAN", "SDL_Vulkan_CreateSurface success — surface ALIVE: 0x{:x}", static_cast<uintptr_t>(rawSurface));
-    } else {
-        const char* error = SDL_GetError();
-        LOG_ERROR_CAT("VULKAN", "SDL_Vulkan_CreateSurface failed: {}", error ? error : "Unknown SDL error");
-    }
-
 inline VkPhysicalDevice findPhysicalDevice(VkInstance instance,
                                           VkSurfaceKHR surface,
                                           bool preferNvidia = true) {

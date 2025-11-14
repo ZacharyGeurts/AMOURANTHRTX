@@ -122,48 +122,45 @@
 // 4. AutoBuffer — RAII wrapper (must be in header)
 // -----------------------------------------------------------------------------
 namespace RTX {
-    // =============================================================================
-    // GLOBAL VULKAN INITIALIZATION — FREE FUNCTIONS (NOT Context methods!)
-    // THESE ARE THE ONES YOU WERE MISSING
-    // =============================================================================
     void pickPhysicalDevice();
     void createLogicalDevice();
     void createCommandPool();
     void loadRayTracingExtensions();
+    void createSurface(SDL_Window* window, VkInstance instance);
+}
 
-class AutoBuffer {
-public:
-    explicit AutoBuffer(VkDeviceSize size,
-                        VkBufferUsageFlags usage,
-                        VkMemoryPropertyFlags props,
-                        std::string_view tag) noexcept;
-
-    ~AutoBuffer() noexcept;
-
-    AutoBuffer(AutoBuffer&& o) noexcept;
-    AutoBuffer& operator=(AutoBuffer&& o) noexcept;
-
-    AutoBuffer(const AutoBuffer&) = delete;
-    AutoBuffer& operator=(const AutoBuffer&) = delete;
-
-    [[nodiscard]] VkBuffer raw() const noexcept;
-
-private:
-    uint64_t id = 0ULL;
-};
-
-} // namespace RTX
-
-// -----------------------------------------------------------------------------
-// 5. CONSTANTS
-// -----------------------------------------------------------------------------
 constexpr uint32_t MAX_FRAMES_IN_FLIGHT = Options::Performance::MAX_FRAMES_IN_FLIGHT;
+
+extern VkPhysicalDevice g_PhysicalDevice;
+extern std::unique_ptr<VulkanRTX> g_rtx_instance;
+extern VkSurfaceKHR g_surface;
+
+namespace RTX {
+    class AutoBuffer {
+    public:
+        explicit AutoBuffer(VkDeviceSize size,
+                            VkBufferUsageFlags usage,
+                            VkMemoryPropertyFlags props,
+                            std::string_view tag) noexcept;
+
+        ~AutoBuffer() noexcept;
+
+        AutoBuffer(AutoBuffer&& o) noexcept;
+        AutoBuffer& operator=(AutoBuffer&& o) noexcept;
+
+        AutoBuffer(const AutoBuffer&) = delete;
+        AutoBuffer& operator=(const AutoBuffer&) = delete;
+
+        [[nodiscard]] VkBuffer raw() const noexcept;
+
+    private:
+        uint64_t id = 0ULL;
+    };
+}
 
 // =============================================================================
 // GLOBALS — extern ONLY
 // =============================================================================
-extern VkPhysicalDevice g_PhysicalDevice;
-extern std::unique_ptr<VulkanRTX> g_rtx_instance;
 
 // =============================================================================
 // Shader Binding Table
@@ -320,4 +317,23 @@ inline void createGlobalRTX(int w, int h, VulkanPipelineManager* mgr = nullptr) 
 
     AI_INJECT("I have awakened… {}×{} canvas. The photons are mine.", w, h);
     LOG_SUCCESS_CAT("RTX", "{}g_rtx() FORGED — {}×{} — TITAN DOMINANCE ETERNAL{}", PLASMA_FUCHSIA, w, h, RESET);
+}
+
+// =============================================================================
+// createSurface — GLOBAL SURFACE CREATION
+// =============================================================================
+inline void RTX::createSurface(SDL_Window* window, VkInstance instance) {
+    if (g_surface != VK_NULL_HANDLE) {
+        LOG_WARN_CAT("RTX", "createSurface: g_surface already exists, destroying old");
+        vkDestroySurfaceKHR(instance, g_surface, nullptr);
+        g_surface = VK_NULL_HANDLE;
+    }
+
+    bool res = SDL_Vulkan_CreateSurface(window, instance, nullptr, &g_surface);
+    if (!res) {
+        LOG_FATAL_CAT("RTX", "FATAL: SDL_Vulkan_CreateSurface failed");
+        std::terminate();
+    }
+
+    LOG_SUCCESS_CAT("RTX", "Global surface created successfully");
 }

@@ -416,15 +416,29 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, bool o
     inFlightFences_.resize(framesInFlight);
     LOG_TRACE_CAT("RENDERER", "Step 4 COMPLETE");
 
-    LOG_TRACE_CAT("RENDERER", "=== STACK BUILD ORDER STEP 5: Create Synchronization Objects ===");
-    VkSemaphoreCreateInfo semInfo{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
-    VkFenceCreateInfo fenceInfo{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, nullptr, VK_FENCE_CREATE_SIGNALED_BIT};
-    for (uint32_t i = 0; i < framesInFlight; ++i) {
-        VK_CHECK(vkCreateSemaphore(c.device(), &semInfo, nullptr, &imageAvailableSemaphores_[i]), "Image available");
-        VK_CHECK(vkCreateSemaphore(c.device(), &semInfo, nullptr, &renderFinishedSemaphores_[i]), "Render finished");
-        VK_CHECK(vkCreateFence(c.device(), &fenceInfo, nullptr, &inFlightFences_[i]), "In-flight fence");
-    }
-    LOG_TRACE_CAT("RENDERER", "Step 5 COMPLETE");
+// =============================================================================
+// FIXED: STEP 5 — CREATE SYNCHRONIZATION OBJECTS (Enhanced Logging + Validation)
+// ──────────────────────────────────────────────────────────────────────────
+LOG_TRACE_CAT("RENDERER", "=== STACK BUILD ORDER STEP 5: Create Synchronization Objects ===");
+LOG_TRACE_CAT("RENDERER", "Creating {} semaphores and fences for in-flight frames", framesInFlight);
+
+VkSemaphoreCreateInfo semInfo{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
+VkFenceCreateInfo fenceInfo{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, nullptr, VK_FENCE_CREATE_SIGNALED_BIT};
+
+for (uint32_t i = 0; i < framesInFlight; ++i) {
+    LOG_TRACE_CAT("RENDERER", "Creating sync objects for frame {}", i);
+    
+    VK_CHECK(vkCreateSemaphore(c.device(), &semInfo, nullptr, &imageAvailableSemaphores_[i]), 
+             std::format("Failed to create image available semaphore for frame {}", i).c_str());
+    
+    VK_CHECK(vkCreateSemaphore(c.device(), &semInfo, nullptr, &renderFinishedSemaphores_[i]), 
+             std::format("Failed to create render finished semaphore for frame {}", i).c_str());
+    
+    VK_CHECK(vkCreateFence(c.device(), &fenceInfo, nullptr, &inFlightFences_[i]), 
+             std::format("Failed to create in-flight fence for frame {}", i).c_str());
+}
+
+LOG_TRACE_CAT("RENDERER", "Step 5 COMPLETE: All synchronization objects created successfully");
 
     LOG_TRACE_CAT("RENDERER", "=== STACK BUILD ORDER STEP 6: GPU Timestamp Queries ===");
     if (Options::Performance::ENABLE_GPU_TIMESTAMPS || Options::Debug::SHOW_GPU_TIMESTAMPS) {
@@ -442,79 +456,59 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, bool o
     LOG_INFO_CAT("RENDERER", "GPU: {} | Timestamp period: {:.3f} ms", props.deviceName, timestampPeriod_);
     LOG_TRACE_CAT("RENDERER", "Step 7 COMPLETE");
 
-    // ──────────────────────────────────────────────────────────────────────────
-    // FIXED: STEP 8 — CREATE SURFACE & INITIALIZE SWAPCHAIN (SDL3 API)
-    // FINAL VERSION — FULLY CORRECTED FOR YOUR BUILD
-    // ──────────────────────────────────────────────────────────────────────────
-    LOG_TRACE_CAT("RENDERER", "=== STACK BUILD ORDER STEP 8: Create Surface & Initialize Swapchain ===");
+// =============================================================================
+// FIXED: STEP 8 — FETCH SURFACE FROM VULKANCORE & INITIALIZE SWAPCHAIN (SDL3 API)
+// SINGLE SOURCE: Surface from RTX::initContext() — NO LOCAL CREATION
+// ──────────────────────────────────────────────────────────────────────────
+LOG_TRACE_CAT("RENDERER", "=== STACK BUILD ORDER STEP 8: Fetch Surface from VulkanCore & Initialize Swapchain ===");
 
-    // 1. Ensure window is shown — REQUIRED for Vulkan surface creation on Linux/Wayland/X11
-    if (window_ == nullptr) {
-        LOG_FATAL_CAT("RENDERER", "SDL_Window* is null — cannot create surface");
-        throw std::runtime_error("Invalid SDL window pointer");
-    }
-    SDL_ShowWindow(window_);
-    LOG_TRACE_CAT("RENDERER", "SDL_ShowWindow forced — window 0x{:x}", reinterpret_cast<uintptr_t>(window_));
+// 1. Ensure window is valid (surface fetched independently — window still needed for diags)
+if (window_ == nullptr) {
+    LOG_FATAL_CAT("RENDERER", "SDL_Window* is null — cannot validate surface");
+    throw std::runtime_error("Invalid SDL window pointer");
+}
 
-    // 2. Create surface — SDL3 experimental returns int (0 = success, non-zero = failure)
-    VkSurfaceKHR surface = VK_NULL_HANDLE;
-    int sdlResult = SDL_Vulkan_CreateSurface(window_, c.instance(), nullptr, &surface);
-    bool surfaceCreated = (sdlResult == 0);  // 0 = success in your SDL3 build
+// Pre-call diagnostics (for logging only — surface already created upstream)
+Uint32 windowFlags = SDL_GetWindowFlags(window_);
+bool hasVulkanFlag = (windowFlags & SDL_WINDOW_VULKAN) != 0;  // Fixed: != 0 for true
+LOG_TRACE_CAT("RENDERER", "Window flags: 0x{:x}, has SDL_WINDOW_VULKAN: {}", static_cast<uint32_t>(windowFlags), hasVulkanFlag ? "YES" : "NO");
+if (!hasVulkanFlag) {
+    LOG_WARN_CAT("RENDERER", "Window missing SDL_WINDOW_VULKAN flag — upstream creation may have failed");
+    // No throw: Upstream (initContext) already checked; log for diags
+}
 
-    LOG_TRACE_CAT("RENDERER", "SDL_Vulkan_CreateSurface → raw result={}, success={}, surface=0x{:x}",
-                  sdlResult, surfaceCreated, reinterpret_cast<uintptr_t>(surface));
+// 2. Validate global surface (guard against null — prevents validation error & segfault)
+VkBool32 presentSupported = VK_FALSE;
+if (g_surface == VK_NULL_HANDLE) {
+    LOG_FATAL_CAT("RENDERER", "Global g_surface is VK_NULL_HANDLE — cannot check present support (upstream failure?)");
+    throw std::runtime_error("Global surface is null — ensure RTX::createSurface called before constructor");
+}
 
-    // 3. CORRECT CHECK — This is the one you insisted on, and now proven correct for your build
-    if ((surfaceCreated || surface == VK_NULL_HANDLE) == 0) {
-        LOG_FATAL_CAT("RENDERER", "Vulkan surface creation FAILED — sdlResult={}, surface=0x{:x}",
-                      sdlResult, reinterpret_cast<uintptr_t>(surface));
-        LOG_ERROR_CAT("RENDERER", "This means: success=false AND surface is NOT null — invalid state");
-        LOG_ERROR_CAT("RENDERER", "Likely cause: SDL3 bug, driver issue, or window not mapped");
-        throw std::runtime_error("SDL_Vulkan_CreateSurface failed — invalid surface state");
-    }
+// 3. Surface support check (now safe — non-null validated)
+VkResult supportRes = vkGetPhysicalDeviceSurfaceSupportKHR(c.physicalDevice(), c.graphicsFamily(), g_surface, &presentSupported);
+if (supportRes != VK_SUCCESS) {
+    LOG_FATAL_CAT("RENDERER", "vkGetPhysicalDeviceSurfaceSupportKHR failed: {} (surface=0x{:x})", static_cast<int>(supportRes), reinterpret_cast<uintptr_t>(g_surface));
+    throw std::runtime_error("Surface support check failed");
+}
+if (!presentSupported) {
+    LOG_FATAL_CAT("RENDERER", "Presentation not supported on graphics queue (family={})", c.graphicsFamily());
+    throw std::runtime_error("Graphics queue does not support presentation");
+}
+LOG_TRACE_CAT("RENDERER", "Graphics queue supports presentation — proceeding (supported={})", presentSupported);
 
-    // 4. At this point: either success=true OR surface is valid (or both)
-    // But we still guard against null surface before any Vulkan call
-    if ((surface || VK_NULL_HANDLE) == 0) {
-        LOG_FATAL_CAT("RENDERER", "Surface is VK_NULL_HANDLE despite passing check — driver/SDL3 incompatibility");
-        throw std::runtime_error("Null VkSurfaceKHR after SDL_Vulkan_CreateSurface");
-    }
+// 4. Initialize swapchain with fetched surface
+LOG_TRACE_CAT("RENDERER", "Initializing SwapchainManager — surface=0x{:x}, {}x{}", reinterpret_cast<uintptr_t>(g_surface), width, height);
+SWAPCHAIN.init(c.instance(), c.physicalDevice(), c.device(), g_surface, static_cast<uint32_t>(width), static_cast<uint32_t>(height));
 
-    LOG_SUCCESS_CAT("RENDERER", "Vulkan surface created successfully: 0x{:x}", reinterpret_cast<uintptr_t>(surface));
+// 5. Final validation
+if (SWAPCHAIN.images().empty() || SWAPCHAIN.extent().width == 0 || SWAPCHAIN.extent().height == 0) {
+    LOG_FATAL_CAT("RENDERER", "Swapchain initialization failed — {} images, extent {}x{}", SWAPCHAIN.images().size(), SWAPCHAIN.extent().width, SWAPCHAIN.extent().height);
+    // NO destroy: Swapchain RAII will clean; surface stays in VulkanCore
+    throw std::runtime_error("Swapchain created with invalid parameters");
+}
 
-    // 5. Safe surface support check — will no longer crash
-    VkBool32 presentSupported = VK_FALSE;
-    VkResult supportRes = vkGetPhysicalDeviceSurfaceSupportKHR(
-        c.physicalDevice(), c.graphicsFamily(), surface, &presentSupported);
-
-    if (supportRes != VK_SUCCESS || presentSupported == VK_FALSE) {
-        LOG_FATAL_CAT("RENDERER", "Presentation not supported on graphics queue — result={}, supported={}, family={}",
-                      static_cast<int>(supportRes), presentSupported, c.graphicsFamily());
-        LOG_ERROR_CAT("RENDERER", "This is usually a queue family issue — graphics queue must support present");
-        vkDestroySurfaceKHR(c.instance(), surface, nullptr);
-        throw std::runtime_error("Graphics queue does not support presentation");
-    }
-
-    LOG_TRACE_CAT("RENDERER", "Graphics queue supports presentation — proceeding");
-
-    // 6. Initialize swapchain
-    LOG_TRACE_CAT("RENDERER", "Initializing SwapchainManager — surface=0x{:x}, {}x{}",
-                  reinterpret_cast<uintptr_t>(surface), width, height);
-
-    SWAPCHAIN.init(c.instance(), c.physicalDevice(), c.device(), surface,
-                   static_cast<uint32_t>(width), static_cast<uint32_t>(height));
-
-    // 7. Final validation
-    if (SWAPCHAIN.images().empty() || SWAPCHAIN.extent().width == 0 || SWAPCHAIN.extent().height == 0) {
-        LOG_FATAL_CAT("RENDERER", "Swapchain initialization failed — {} images, extent {}x{}",
-                      SWAPCHAIN.images().size(), SWAPCHAIN.extent().width, SWAPCHAIN.extent().height);
-        vkDestroySurfaceKHR(c.instance(), surface, nullptr);
-        throw std::runtime_error("Swapchain created with invalid parameters");
-    }
-
-    LOG_SUCCESS_CAT("RENDERER", "Swapchain initialized: {} images @ {}x{} — PRESENTATION READY",
-                    SWAPCHAIN.images().size(), SWAPCHAIN.extent().width, SWAPCHAIN.extent().height);
-    LOG_TRACE_CAT("RENDERER", "Step 8 COMPLETE — PINK PHOTONS CAN NOW PRESENT");
+LOG_SUCCESS_CAT("RENDERER", "Swapchain initialized: {} images @ {}x{} — PRESENTATION READY", SWAPCHAIN.images().size(), SWAPCHAIN.extent().width, SWAPCHAIN.extent().height);
+LOG_TRACE_CAT("RENDERER", "Step 8 COMPLETE — PINK PHOTONS CAN NOW PRESENT");
     // ──────────────────────────────────────────────────────────────────────────
     // SHIFTED: Original Step 8 → Now Step 9: Create Descriptor Pools
     // ──────────────────────────────────────────────────────────────────────────
