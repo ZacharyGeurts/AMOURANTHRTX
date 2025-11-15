@@ -52,42 +52,28 @@ public:
     }
 
     void onBlasStart(uint32_t v, uint32_t i) {
-        LOG_INFO_CAT("BLAS", "Scanning geometry: {} verts | {} tris | {:.1f}K primitives", v, i/3, i/3000.0);
     }
 
     void onBlasBuilt(double sizeGB, const BlasBuildSizes& sizes) {
-        double scratchMB = sizes.buildScratchSize / (1024.0 * 1024.0);
-        double updateMB = sizes.updateScratchSize / (1024.0 * 1024.0);
-        LOG_SUCCESS_CAT("BLAS", "{}BLAS ONLINE - {:.3f} GB | Scratch: {:.3f} MB | Update: {:.3f} MB{}", PLASMA_FUCHSIA, sizeGB, scratchMB, updateMB, RESET);
     }
 
     void onTlasStart(size_t count) {
-        LOG_INFO_CAT("TLAS", "Preparing {} instances for TLAS integration", count);
     }
 
     void onTlasBuilt(double sizeGB, VkDeviceAddress addr, const TlasBuildSizes& sizes) {
-        uint32_t numInstances = sizes.instanceDataSize / sizeof(VkAccelerationStructureInstanceKHR);
-        double instMB = sizes.instanceDataSize / (1024.0 * 1024.0);
-        LOG_SUCCESS_CAT("TLAS", "{}TLAS ONLINE - {} instances | @ 0x{:x} | {:.3f} GB | InstData: {:.3f} MB{}", PLASMA_FUCHSIA, numInstances, addr, sizeGB, instMB, RESET);
     }
 
     void onPhotonDispatch(uint32_t w, uint32_t h) {
-        LOG_PERF_CAT("RTX", "Ray dispatch: {}x{} | {} rays", w, h, w * h);
     }
 
     void onMemoryEvent(const char* name, VkDeviceSize size) {
-        double sizeMB = size / (1024.0 * 1024.0);
-        LOG_INFO_CAT("Memory", "{} -> {:.3f} MB", name, sizeMB);
     }
 
     void onScratchPoolResize(VkDeviceSize oldSize, VkDeviceSize newSize, const char* type) {
-        LOG_SUCCESS_CAT("LAS", "{}SCRATCH POOL GROWN — {:.1f}MB → {:.1f}MB | Build time -23% ({}){}", 
-                        PLASMA_FUCHSIA, oldSize / (1024.0 * 1024.0), newSize / (1024.0 * 1024.0), type, RESET);
     }
 
     // Perf hook: Log build time (GPU timestamps)
     void onBuildTime(const char* type, double gpu_us) {
-        LOG_PERF_CAT("LAS", "{} build: {:.2f} µs (GPU)", type, gpu_us);
     }
 
 private:
@@ -103,8 +89,6 @@ namespace {
     if (!g_ctx().vkGetAccelerationStructureBuildSizesKHR_) {
         throw std::runtime_error("vkGetAccelerationStructureBuildSizesKHR not available. Enable VK_KHR_acceleration_structure extension and load function pointer.");
     }
-
-    LOG_DEBUG_CAT("LAS", "Computing BLAS sizes for {} verts, {} indices", vertexCount, indexCount);
 
     VkAccelerationStructureGeometryKHR geometry{};
     geometry.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
@@ -132,9 +116,6 @@ namespace {
         VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
         &buildInfo, &primitiveCount, &sizeInfo);
 
-    LOG_DEBUG_CAT("LAS", "BLAS sizes → AS: {} bytes | BuildScratch: {} | UpdateScratch: {}",
-                  sizeInfo.accelerationStructureSize, sizeInfo.buildScratchSize, sizeInfo.updateScratchSize);
-
     return { sizeInfo.accelerationStructureSize,
              sizeInfo.buildScratchSize,
              sizeInfo.updateScratchSize };
@@ -144,8 +125,6 @@ namespace {
     if (!g_ctx().vkGetAccelerationStructureBuildSizesKHR_) {
         throw std::runtime_error("vkGetAccelerationStructureBuildSizesKHR not available. Enable VK_KHR_acceleration_structure extension and load function pointer.");
     }
-
-    LOG_DEBUG_CAT("LAS", "Computing TLAS sizes for {} instances", instanceCount);
 
     VkAccelerationStructureGeometryKHR geometry{};
     geometry.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
@@ -170,8 +149,6 @@ namespace {
         &buildInfo, &instanceCount, &sizeInfo);
 
     VkDeviceSize instDataSize = static_cast<VkDeviceSize>(instanceCount) * sizeof(VkAccelerationStructureInstanceKHR);
-    LOG_DEBUG_CAT("LAS", "TLAS sizes → AS: {} | BuildScratch: {} | UpdateScratch: {} | InstData: {}",
-                  sizeInfo.accelerationStructureSize, sizeInfo.buildScratchSize, sizeInfo.updateScratchSize, instDataSize);
 
     return { sizeInfo.accelerationStructureSize,
              sizeInfo.buildScratchSize,
@@ -185,11 +162,10 @@ namespace {
     std::span<const std::pair<VkAccelerationStructureKHR, glm::mat4>> instances)
 {
     if (instances.empty()) {
-        LOG_WARNING_CAT("LAS", "uploadInstances: empty instance list");
+        LOG_WARN_CAT("LAS", "uploadInstances: empty instance list");
         return 0;
     }
 
-    LOG_INFO_CAT("LAS", "Uploading {} TLAS instances", instances.size());
     const VkDeviceSize instSize = instances.size() * sizeof(VkAccelerationStructureInstanceKHR);
     AmouranthAI::get().onMemoryEvent("TLAS instance staging", instSize);
 
@@ -240,7 +216,6 @@ namespace {
     vkCmdCopyBuffer(cmd, RAW_BUFFER(stagingHandle), RAW_BUFFER(deviceHandle), 1, &copy);
     VulkanRTX::endSingleTimeCommands(cmd, queue, pool);
 
-    LOG_DEBUG_CAT("LAS", "Instance upload complete → device buffer: 0x{:x}", deviceHandle);
     BUFFER_DESTROY(stagingHandle);
     return deviceHandle;
 }
@@ -284,7 +259,6 @@ public:
             throw std::runtime_error("vkCmdBuildAccelerationStructuresKHR not available. Enable VK_KHR_acceleration_structure extension and load function pointer.");
         }
 
-        LOG_INFO_CAT("LAS", "Building BLAS: {} verts, {} indices", vertexCount, indexCount);
         AmouranthAI::get().onBlasStart(vertexCount, indexCount);
 
         auto sizes = computeBlasSizes(dev, vertexCount, indexCount);
@@ -399,7 +373,6 @@ public:
                                                    "LAS_BLAS");
 
         double sizeGB = sizes.accelerationStructureSize / (1024.0 * 1024.0 * 1024.0);
-        LOG_SUCCESS_CAT("LAS", "BLAS built: {:.3f} GB", sizeGB);
         AmouranthAI::get().onBlasBuilt(sizeGB, sizes);
     }
 
@@ -422,7 +395,6 @@ public:
             throw std::runtime_error("vkCmdBuildAccelerationStructuresKHR not available. Enable VK_KHR_acceleration_structure extension and load function pointer.");
         }
 
-        LOG_INFO_CAT("LAS", "Building TLAS with {} instances", instances.size());
         AmouranthAI::get().onTlasStart(instances.size());
 
         auto sizes = computeTlasSizes(dev, static_cast<uint32_t>(instances.size()));
@@ -537,7 +509,6 @@ public:
 
         VkDeviceAddress addr = getTLASAddress();
         double sizeGB = sizes.accelerationStructureSize / (1024.0 * 1024.0 * 1024.0);
-        LOG_SUCCESS_CAT("LAS", "TLAS built: {:.3f} GB @ 0x{:x}", sizeGB, addr);
         AmouranthAI::get().onTlasBuilt(sizeGB, addr, sizes);
     }
 
@@ -545,7 +516,6 @@ public:
                      std::span<const std::pair<VkAccelerationStructureKHR, glm::mat4>> instances,
                      bool fastBuild = false)
     {
-        LOG_INFO_CAT("LAS", "Rebuilding TLAS (reset + rebuild)");
         tlas_.reset();
         if (instanceBufferId_) BUFFER_DESTROY(instanceBufferId_);
         instanceBufferId_ = 0;
@@ -586,7 +556,6 @@ private:
     static constexpr VkDeviceSize MAX_SCRATCH_SIZE = 64ULL * 1024ULL * 1024ULL;
 
     LAS() {
-        LOG_INFO_CAT("LAS", "LAS singleton initialized");
         // FIXED: Defer query pool creation to first use (post-ctx init); avoid static init order fiasco
     }
     ~LAS() noexcept {  // FIXED: noexcept + full guards to prevent crash/leaks on static dtor (post-main)
@@ -594,13 +563,11 @@ private:
         if (dev != VK_NULL_HANDLE && QUERY_POOL_TIMESTAMP != VK_NULL_HANDLE) {
             vkDestroyQueryPool(dev, QUERY_POOL_TIMESTAMP, nullptr);
             QUERY_POOL_TIMESTAMP = VK_NULL_HANDLE;
-            LOG_TRACE_CAT("LAS", "Timestamp query pool destroyed");
         } else if (QUERY_POOL_TIMESTAMP != VK_NULL_HANDLE) {
             LOG_WARN_CAT("LAS", "Skipped timestamp query pool destroy — null device");
         }
         if (dev != VK_NULL_HANDLE && scratchPoolId_ != 0) {
             BUFFER_DESTROY(scratchPoolId_);  // Assume BUFFER_DESTROY guarded
-            LOG_TRACE_CAT("LAS", "Scratch pool destroyed");
         } else if (scratchPoolId_ != 0) {
             LOG_WARN_CAT("LAS", "Skipped scratch pool destroy — null device");
             scratchPoolId_ = 0;  // Nullify ref
@@ -614,7 +581,6 @@ private:
             LOG_WARN_CAT("LAS", "Skipped instance buffer destroy — null device");
             instanceBufferId_ = 0;
         }
-        LOG_TRACE_CAT("LAS", "Static dtor complete — all resources purged");
     }
 
     mutable std::mutex mutex_;

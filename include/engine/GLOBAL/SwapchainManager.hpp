@@ -40,7 +40,6 @@ using namespace Logging::Color;
 class SwapchainManager {
 public:
     static SwapchainManager& get() noexcept {
-        LOG_INFO_CAT("SWAPCHAIN", "{}SwapchainManager::get() — RTX Supreme{}", OCEAN_TEAL, RESET);
         static SwapchainManager inst;
         return inst;
     }
@@ -50,7 +49,6 @@ public:
     // -------------------------------------------------------------------------
     void init(VkInstance inst, VkPhysicalDevice phys, VkDevice dev,
               VkSurfaceKHR surf, uint32_t w, uint32_t h) {
-        LOG_INFO_CAT("SWAPCHAIN", "{}SwapchainManager::init() — {}×{}{}", PLASMA_FUCHSIA, w, h, RESET);
 
         physDev_ = phys;
         device_  = dev;
@@ -58,13 +56,9 @@ public:
 
         createSwapchain(w, h);
         createImageViews();
-
-        LOG_SUCCESS_CAT("SWAPCHAIN", "{}SwapchainManager::init() — COMPLETE — {} images{}", 
-                        PLASMA_FUCHSIA, images_.size(), RESET);
     }
 
     void recreate(uint32_t w, uint32_t h) {
-        LOG_INFO_CAT("SWAPCHAIN", "{}recreate() — {}×{}", RASPBERRY_PINK, w, h, RESET);
         // FIXED: Guard vkDeviceWaitIdle — null device invalid (VUID-vkDeviceWaitIdle-device-parameter)
         if (device_ != VK_NULL_HANDLE) {
             vkDeviceWaitIdle(device_);
@@ -77,7 +71,6 @@ public:
     }
 
     void cleanup() noexcept {
-        LOG_INFO_CAT("SWAPCHAIN", "Cleaning up swapchain resources");
         // FIXED: Guard all destroys/resets — prevents VUID-vkDestroySwapchainKHR-device-parameter & vkDestroyImageView-device-parameter
         VkDevice dev = device_;  // Cache for efficiency
         if (dev != VK_NULL_HANDLE) {
@@ -96,7 +89,6 @@ public:
             LOG_WARN_CAT("SWAPCHAIN", "Skipped swapchain reset — null device (nullifying only)");
             swapchain_ = RTX::Handle<VkSwapchainKHR>();  // Nullify without destroy
         }
-        LOG_SUCCESS_CAT("SWAPCHAIN", "Swapchain cleanup complete");
     }
 
     [[nodiscard]] VkSwapchainKHR swapchain() const noexcept { return *swapchain_; }
@@ -106,9 +98,7 @@ public:
     [[nodiscard]] auto           views()    const noexcept -> const std::vector<RTX::Handle<VkImageView>>& { return imageViews_; }
 
 private:
-    SwapchainManager() {
-        LOG_INFO_CAT("SWAPCHAIN", "{}SwapchainManager constructed{}", OCEAN_TEAL, RESET);
-    }
+    SwapchainManager() = default;
 
     void createSwapchain(uint32_t width, uint32_t height);
     void createImageViews();
@@ -129,7 +119,6 @@ private:
 // =============================================================================
 
 inline void SwapchainManager::createSwapchain(uint32_t width, uint32_t height) {
-    LOG_INFO_CAT("SWAPCHAIN", "Creating swapchain: {}×{}", width, height);
 
     VkSurfaceCapabilitiesKHR caps{};
     VK_CHECK(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physDev_, surface_, &caps),
@@ -156,45 +145,29 @@ inline void SwapchainManager::createSwapchain(uint32_t width, uint32_t height) {
     }
     format_ = chosen.format;
 
-// Choose best present mode — prioritize uncapped
-uint32_t pmCount = 0;
-VK_CHECK(vkGetPhysicalDeviceSurfacePresentModesKHR(physDev_, surface_, &pmCount, nullptr),
-         "Failed to query present modes");
-std::vector<VkPresentModeKHR> modes(pmCount);
-VK_CHECK(vkGetPhysicalDeviceSurfacePresentModesKHR(physDev_, surface_, &pmCount, modes.data()),
-         "Failed to retrieve present modes");
+    // Choose best present mode — prioritize uncapped
+    uint32_t pmCount = 0;
+    VK_CHECK(vkGetPhysicalDeviceSurfacePresentModesKHR(physDev_, surface_, &pmCount, nullptr),
+             "Failed to query present modes");
+    std::vector<VkPresentModeKHR> modes(pmCount);
+    VK_CHECK(vkGetPhysicalDeviceSurfacePresentModesKHR(physDev_, surface_, &pmCount, modes.data()),
+             "Failed to retrieve present modes");
 
-// Log all available modes for debugging (remove after testing)
-std::stringstream modeLog;
-modeLog << "Available present modes: ";
-for (auto m : modes) {
-    modeLog << (m == VK_PRESENT_MODE_IMMEDIATE_KHR ? "IMMEDIATE " :
-                m == VK_PRESENT_MODE_MAILBOX_KHR ? "MAILBOX " :
-                m == VK_PRESENT_MODE_FIFO_KHR ? "FIFO " :
-                m == VK_PRESENT_MODE_FIFO_RELAXED_KHR ? "FIFO_RELAXED " : "OTHER ") ;
-}
-LOG_INFO_CAT("SWAPCHAIN", "{}", modeLog.str());
-
-VkPresentModeKHR presentMode = VK_PRESENT_MODE_FIFO_KHR;  // Safe fallback
-if (std::find(modes.begin(), modes.end(), VK_PRESENT_MODE_IMMEDIATE_KHR) != modes.end()) {
-    presentMode = VK_PRESENT_MODE_IMMEDIATE_KHR;  // Uncapped, tearing OK — max FPS
-    LOG_INFO_CAT("SWAPCHAIN", "Selected IMMEDIATE_KHR — uncapped FPS enabled");
-} else if (std::find(modes.begin(), modes.end(), VK_PRESENT_MODE_MAILBOX_KHR) != modes.end()) {
-    presentMode = VK_PRESENT_MODE_MAILBOX_KHR;  // Uncapped, no tearing — ideal if supported
-    LOG_INFO_CAT("SWAPCHAIN", "Selected MAILBOX_KHR — uncapped, tear-free");
-} else if (std::find(modes.begin(), modes.end(), VK_PRESENT_MODE_FIFO_RELAXED_KHR) != modes.end()) {
-    presentMode = VK_PRESENT_MODE_FIFO_RELAXED_KHR;  // Vsync but tearing-tolerant
-    LOG_INFO_CAT("SWAPCHAIN", "Selected FIFO_RELAXED_KHR — vsync with flexibility");
-} else {
-    LOG_WARN_CAT("SWAPCHAIN", "Only FIFO_KHR available — vsync-capped FPS; check driver/display");
-}
+    VkPresentModeKHR presentMode = VK_PRESENT_MODE_FIFO_KHR;  // Safe fallback
+    if (std::find(modes.begin(), modes.end(), VK_PRESENT_MODE_IMMEDIATE_KHR) != modes.end()) {
+        presentMode = VK_PRESENT_MODE_IMMEDIATE_KHR;  // Uncapped, tearing OK — max FPS
+    } else if (std::find(modes.begin(), modes.end(), VK_PRESENT_MODE_MAILBOX_KHR) != modes.end()) {
+        presentMode = VK_PRESENT_MODE_MAILBOX_KHR;  // Uncapped, no tearing — ideal if supported
+    } else if (std::find(modes.begin(), modes.end(), VK_PRESENT_MODE_FIFO_RELAXED_KHR) != modes.end()) {
+        presentMode = VK_PRESENT_MODE_FIFO_RELAXED_KHR;  // Vsync but tearing-tolerant
+    } else {
+        LOG_WARN_CAT("SWAPCHAIN", "Only FIFO_KHR available — vsync-capped FPS; check driver/display");
+    }
 
     // Respect MAX_FRAMES_IN_FLIGHT
     uint32_t imageCount = Options::Performance::MAX_FRAMES_IN_FLIGHT;
     imageCount = std::max(caps.minImageCount, imageCount);
     if (caps.maxImageCount > 0) imageCount = std::min(imageCount, caps.maxImageCount);
-
-    LOG_INFO_CAT("SWAPCHAIN", "Image count: {} (from Options::MAX_FRAMES_IN_FLIGHT)", imageCount);
 
     VkSwapchainCreateInfoKHR ci = { .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR };
     ci.surface = surface_;
@@ -224,13 +197,9 @@ if (std::find(modes.begin(), modes.end(), VK_PRESENT_MODE_IMMEDIATE_KHR) != mode
     images_.resize(count);
     VK_CHECK(vkGetSwapchainImagesKHR(device_, *swapchain_, &count, images_.data()),
              "Failed to retrieve swapchain images");
-
-    LOG_SUCCESS_CAT("SWAPCHAIN", "Swapchain created: {} images | {}×{} | Format: {}", 
-                    images_.size(), extent_.width, extent_.height, format_);
 }
 
 inline void SwapchainManager::createImageViews() {
-    LOG_INFO_CAT("SWAPCHAIN", "Creating image views for {} swapchain images", images_.size());
 
     imageViews_.reserve(images_.size());
     for (auto img : images_) {
@@ -251,8 +220,6 @@ inline void SwapchainManager::createImageViews() {
         // FIXED: Direct Handle constructor — bypass MakeHandle auto
         imageViews_.emplace_back(RTX::Handle<VkImageView>(view, device_, vkDestroyImageView));
     }
-
-    LOG_SUCCESS_CAT("SWAPCHAIN", "{} image views created", imageViews_.size());
 }
 
 // =============================================================================

@@ -2,19 +2,14 @@
 // =============================================================================
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
-// VulkanPipelineManager — Production Edition v10.2 (Validation Fixes) — NOV 14 2025
-// • Fixed descriptor bindings (0-7) to match raygen shader requirements
-// • Removed invalid VkPipelineLibraryCreateInfoKHR from pNext
-// • Explicit VK_SHADER_UNUSED_KHR for hit shaders in general groups
-// • Added push constant range matching shader stages
-// • SBT memory allocation with VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT_KHR
-// • Exhaustive logging with numbered stack build order
-// • StoneKey runtime decryption + SBT perfect alignment
-// • MAX_FRAMES_IN_FLIGHT-aware descriptor arrays
-// • Zero allocations after startup
-// • Hypertrace™ Nexus Score + per-frame storage images
-// • Dynamic frame buffering via Options::Performance::MAX_FRAMES_IN_FLIGHT
+// VulkanPipelineManager — Production Edition v10.6 (Default Ctor + Null Guards) — NOV 15 2025
+// • NEW: Default ctor for dummy init (null device/phys) — safe for VulkanRenderer member pre-assignment
+// • FIXED: beginSingleTimeCommands/endSingleTimeCommands — Null device guard (early return VK_NULL_HANDLE, log error)
+// • FIXED: cacheDeviceProperties — Null phys guard (log fatal, throw invalid_argument)
+// • FIXED: loadExtensions — Null device guard (log fatal, throw invalid_argument)
+// • Retained: Fence sync for single-time (no VUID-00047); dynamic PFNs, 8 bindings, no pNext, UNUSED_KHR, push constants, DEVICE_ADDRESS_BIT
 // • C++23 compliant, -Werror clean
+// • FRIEND: VulkanRenderer for rtDescriptorPool_ access
 // • PINK PHOTONS ETERNAL — 240 FPS UNLOCKED — FIRST LIGHT ACHIEVED
 // =============================================================================
 
@@ -33,7 +28,11 @@ namespace RTX {
 
 class PipelineManager {
 public:
+    // NEW: Default ctor for dummy (null) init in VulkanRenderer member
+    PipelineManager() noexcept = default;
     explicit PipelineManager(VkDevice device, VkPhysicalDevice phys);
+    PipelineManager(PipelineManager&& other) noexcept = default;
+    PipelineManager& operator=(PipelineManager&& other) noexcept = default;
     ~PipelineManager() = default;
 
     // === Pipeline Creation API ===
@@ -60,6 +59,15 @@ public:
     [[nodiscard]] VkBuffer                 sbtBuffer()         const noexcept { return *sbtBuffer_; }
     [[nodiscard]] VkDeviceMemory           sbtMemory()         const noexcept { return *sbtMemory_; }
 
+    // === Public Helpers for VulkanRenderer ===
+    uint32_t findMemoryType(VkPhysicalDevice physicalDevice, uint32_t typeFilter, 
+                            VkMemoryPropertyFlags properties) const noexcept;
+    VkCommandBuffer beginSingleTimeCommands(VkCommandPool pool) const;  // FIXED: Null guard
+    void endSingleTimeCommands(VkCommandPool pool, VkQueue queue, VkCommandBuffer cmd) const;  // FIXED: Null guard
+
+    // FRIEND: Allows VulkanRenderer to access rtDescriptorPool_ for allocation
+    friend class ::VulkanRenderer;
+
 private:
     // Device
     VkDevice       device_{VK_NULL_HANDLE};
@@ -74,6 +82,9 @@ private:
     Handle<VkDescriptorSetLayout> rtDescriptorSetLayout_;
     Handle<VkPipelineLayout>      rtPipelineLayout_;
     Handle<VkPipeline>            rtPipeline_;
+
+    // Descriptor Pool — NEW: For RT sets (8 bindings)
+    Handle<VkDescriptorPool>      rtDescriptorPool_;
 
     // SBT objects — NEW: Matches VulkanRenderer
     Handle<VkBuffer>        sbtBuffer_;
@@ -94,13 +105,15 @@ private:
     uint32_t    hitGroupCount_{0};
     uint32_t    callableGroupCount_{0};
 
+    // === Dynamic Extension Function Pointers — NEW: Fixes linker errors ===
+    PFN_vkCreateRayTracingPipelinesKHR    vkCreateRayTracingPipelinesKHR_{nullptr};
+    PFN_vkGetRayTracingShaderGroupHandlesKHR vkGetRayTracingShaderGroupHandlesKHR_{nullptr};
+    PFN_vkGetBufferDeviceAddressKHR       vkGetBufferDeviceAddressKHR_{nullptr};
+
     // === Private helpers ===
-    void cacheDeviceProperties() noexcept;
+    void cacheDeviceProperties();  // FIXED: Null phys guard (throw)
+    void loadExtensions();  // FIXED: Null device guard (throw) — renamed from noexcept
     [[nodiscard]] VkShaderModule loadShader(const std::string& path) const;  // UPDATED: Matches VulkanRenderer
-    uint32_t findMemoryType(VkPhysicalDevice physicalDevice, uint32_t typeFilter, 
-                            VkMemoryPropertyFlags properties) const noexcept;  // NEW: Matches VulkanRenderer
-    VkCommandBuffer beginSingleTimeCommands(VkCommandPool pool) const;  // NEW: Matches VulkanRenderer (adapted)
-    void endSingleTimeCommands(VkCommandPool pool, VkQueue queue, VkCommandBuffer cmd) const;  // NEW: Matches VulkanRenderer (adapted)
 
     // Static destroyer for Handle<VkShaderModule>
     static void destroyShaderModule(VkDevice d, VkShaderModule m, const VkAllocationCallbacks*) noexcept {

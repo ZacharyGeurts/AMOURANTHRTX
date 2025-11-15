@@ -75,9 +75,8 @@ namespace RTX {
     // =============================================================================
     // logAndTrackDestruction
     // =============================================================================
+
     void logAndTrackDestruction(const char* type, void* ptr, int line, size_t size) {
-        LOG_DEBUG_CAT("RTX", "{}[Handle] {} @ {}:{} | size: {}MB{}", 
-                      ELECTRIC_BLUE, type, ptr, line, size/(1024*1024), RESET);
     }
 
     UltraLowLevelBufferTracker& UltraLowLevelBufferTracker::get() noexcept {
@@ -95,8 +94,6 @@ namespace RTX {
             return 0;
         }
 
-        LOG_ATTEMPT_CAT("RTX", "{}Buffer creation probe: {} bytes | Usage: 0x{:08X} | Props: 0x{:08X} | Tag: {}{}", SAPPHIRE_BLUE, size, static_cast<uint32_t>(usage), static_cast<uint32_t>(props), tag, RESET);
-
         if (device_ == VK_NULL_HANDLE) {
             LOG_FATAL_CAT("RTX", "{}vkCreateBuffer aborted: Invalid device (null handle) — call RTX::initContext() first{}", CRIMSON_MAGENTA, RESET);
             throw std::runtime_error(std::format("Buffer creation failed: Invalid Vulkan device (null) — ensure RTX::initContext called"));
@@ -105,7 +102,6 @@ namespace RTX {
         // Align size for host-visible buffers
         VkDeviceSize alignedSize = size;
         if ((props & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) && physDev_ != VK_NULL_HANDLE) {
-            LOG_DEBUG_CAT("RTX", "{}Probing physical device limits for host-visible alignment (physDev_ @ 0x{:x}){}", SAPPHIRE_BLUE, reinterpret_cast<uintptr_t>(physDev_), RESET);
             VkPhysicalDeviceProperties devProps{};
             vkGetPhysicalDeviceProperties(physDev_, &devProps);  // Void — always "succeeds" if physDev_ valid
             VkDeviceSize atomSize = devProps.limits.nonCoherentAtomSize;
@@ -114,7 +110,6 @@ namespace RTX {
                 if (alignedSize > size) {
                     LOG_WARN_CAT("RTX", "{}Aligned host-visible buffer from {} to {} bytes (atom: {}){}", SAPPHIRE_BLUE, size, alignedSize, atomSize, RESET);
                 } else {
-                    LOG_DEBUG_CAT("RTX", "{}Host-visible buffer size unchanged (already aligned: {} bytes, atom: {}){}", SAPPHIRE_BLUE, size, atomSize, RESET);
                 }
             } else {
                 LOG_WARN_CAT("RTX", "{}Invalid atomSize (0) from physDev_ limits — skipping alignment{}", SAPPHIRE_BLUE, RESET);
@@ -122,7 +117,6 @@ namespace RTX {
         } else if (props & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) {
             LOG_WARN_CAT("RTX", "{}Host-visible buffer requested but physDev_ null (0x0) — skipping alignment (use RTX::initContext first){}", SAPPHIRE_BLUE, RESET);
         } else {
-            LOG_DEBUG_CAT("RTX", "{}Non-host-visible buffer — no alignment needed{}", SAPPHIRE_BLUE, RESET);
         }
 
         VkBuffer buffer = VK_NULL_HANDLE;
@@ -132,14 +126,11 @@ namespace RTX {
         bufInfo.usage = usage;
         bufInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-        LOG_INFO_CAT("RTX", "{}Invoking vkCreateBuffer on device @ 0x{:x} (size={}){}", SAPPHIRE_BLUE, reinterpret_cast<uintptr_t>(device_), alignedSize, RESET);
         VkResult result = vkCreateBuffer(device_, &bufInfo, nullptr, &buffer);
         if (result != VK_SUCCESS) {
             LOG_FATAL_CAT("RTX", "{}vkCreateBuffer failed (result=0x{:08X}): {}{}", CRIMSON_MAGENTA, static_cast<uint32_t>(result), VulkanResultToString(result), RESET);
             throw std::runtime_error(std::format("vkCreateBuffer failed: {}", VulkanResultToString(result)));
         }
-
-        LOG_SUCCESS_CAT("RTX", "{}vkCreateBuffer success: Buffer @ 0x{:x} forged ({} bytes, tag: {}){}", EMERALD_GREEN, reinterpret_cast<uintptr_t>(buffer), alignedSize, tag, RESET);
 
         VkMemoryRequirements memReq{};
         vkGetBufferMemoryRequirements(device_, buffer, &memReq);
@@ -189,9 +180,6 @@ namespace RTX {
             map_.emplace(raw, BufferData{buffer, memory, memReq.size, usage, std::string(tag)});
         }
 
-        LOG_SUCCESS_CAT("RTX", "{}Buffer created: 0x{:x} (obf: 0x{:x}) | Size: {} | MemType: {} | Tag: {}{}", 
-                        EMERALD_GREEN, reinterpret_cast<uint64_t>(buffer), obf, memReq.size, memTypeIndex, tag, RESET);
-
         return obf;
     }
 
@@ -228,7 +216,6 @@ namespace RTX {
             LOG_WARN_CAT("RTX", "{}Invalid zero handle passed to destroy{}", SAPPHIRE_BLUE, RESET);
             return;
         }
-        LOG_INFO_CAT("RTX", "{}Buffer destroy: 0x{:x}{}", RASPBERRY_PINK, handle, RESET);
         const uint64_t raw = deobfuscate(handle);
         std::lock_guard<std::mutex> lk(mutex_);
         auto it = map_.find(raw);
@@ -240,7 +227,6 @@ namespace RTX {
         map_.erase(it);
         if (d.buffer) vkDestroyBuffer(device_, d.buffer, nullptr);
         if (d.memory) vkFreeMemory(device_, d.memory, nullptr);
-        LOG_SUCCESS_CAT("RTX", "{}Buffer destroyed: 0x{:x} | Tag: {}{}", EMERALD_GREEN, handle, d.tag, RESET);
     }
 
     BufferData* UltraLowLevelBufferTracker::getData(uint64_t handle) noexcept {
@@ -262,11 +248,9 @@ namespace RTX {
     void UltraLowLevelBufferTracker::init(VkDevice dev, VkPhysicalDevice phys) noexcept {
         device_ = dev;
         physDev_ = phys;
-        LOG_SUCCESS_CAT("RTX", "{}BufferTracker initialized - READY FOR PINK PHOTONS{}", EMERALD_GREEN, RESET);
     }
 
     void UltraLowLevelBufferTracker::purge_all() noexcept {
-        LOG_INFO_CAT("RTX", "{}Purging all buffers - Total: {}{}", RASPBERRY_PINK, map_.size(), RESET);
         std::lock_guard<std::mutex> lk(mutex_);
         for (auto it = map_.begin(); it != map_.end(); ) {
             BufferData d = std::move(it->second);
@@ -275,7 +259,6 @@ namespace RTX {
             it = map_.erase(it);  // Correct: erase returns next iterator
         }
         map_.clear();  // Redundant but safe
-        LOG_SUCCESS_CAT("RTX", "{}All buffers purged - ZERO LEAKS{}", EMERALD_GREEN, RESET);
     }
 
     uint64_t UltraLowLevelBufferTracker::make_64M (VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept { return create(SIZE_64MB,  extra, props, "64M"); }
@@ -318,11 +301,9 @@ namespace RTX {
     void renderFrame(const Camera&, float) noexcept {}
     
     void shutdown() noexcept {
-        LOG_INFO_CAT("RTX", "{}Shutting down RTX context...{}", RASPBERRY_PINK, RESET);
         if (RTX::g_ctx().isValid()) {
             RTX::g_ctx().cleanup();  // NEW: Full cleanup including compute pool
         }
-        LOG_SUCCESS_CAT("RTX", "{}RTX shutdown complete — PINK PHOTONS DIMMED{}", EMERALD_GREEN, RESET);
     }
     void createSwapchain(VkInstance, VkPhysicalDevice, VkDevice, VkSurfaceKHR, uint32_t, uint32_t) {}
     void recreateSwapchain(uint32_t, uint32_t) noexcept {}
@@ -335,25 +316,19 @@ namespace RTX {
 // =============================================================================
 void Context::init(SDL_Window* window, int width, int height) {
     if (isValid()) {
-        LOG_INFO_CAT("RTX", "{}Vulkan context already initialized — skipping{}", OCEAN_TEAL, RESET);
         return;
     }
 
-    LOG_ATTEMPT_CAT("RTX", "{}RTX::Context::init() — FORGING VULKAN {}x{}{}", PLASMA_FUCHSIA, width, height, RESET);
-
     // --- 1. Query SDL3 for required Vulkan instance extensions ---
-    LOG_TRACE_CAT("RTX", "{}Step 1: Querying SDL3 for Vulkan instance extension count...{}", SAPPHIRE_BLUE, RESET);
     SDL_ClearError();  // Clear prior errors for clean diag
     uint32_t extCount = 0;
     SDL_Vulkan_GetInstanceExtensions(&extCount);  // First call: populate count (returns nullptr or array if count>0)
-    LOG_DEBUG_CAT("RTX", "{}SDL3 reported {} instance extensions{}", SAPPHIRE_BLUE, extCount, RESET);
     if (extCount == 0) {
         const char* err = SDL_GetError();
         LOG_WARN_CAT("RTX", "{}SDL3 reports 0 extensions (SDL error: '{}') — surface may fail later{}", SAPPHIRE_BLUE, err ? err : "None", RESET);
     }
 
     // --- 2. Retrieve extension names ---
-    LOG_TRACE_CAT("RTX", "{}Step 2: Retrieving extension names from SDL3...{}", SAPPHIRE_BLUE, RESET);
     const char* const* sdlExts = SDL_Vulkan_GetInstanceExtensions(&extCount);  // Second call: get array
     if (!sdlExts || extCount == 0) {
         const char* err = SDL_GetError();
@@ -361,15 +336,9 @@ void Context::init(SDL_Window* window, int width, int height) {
         throw std::runtime_error("SDL_Vulkan_GetInstanceExtensions failed");
     }
     std::vector<const char*> exts(sdlExts, sdlExts + extCount);
-    LOG_DEBUG_CAT("RTX", "{}Raw SDL extensions loaded: {}{}", SAPPHIRE_BLUE, extCount, RESET);
-    for (size_t i = 0; i < extCount; ++i) {
-        LOG_TRACE_CAT("RTX", "{}  → SDL Ext[{}]: {}{}", SAPPHIRE_BLUE, i, sdlExts[i] ? sdlExts[i] : "<null>", RESET);
-    }
     exts.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
-    LOG_SUCCESS_CAT("RTX", "{}Extensions loaded: {} SDL + 1 portability = {}{}", EMERALD_GREEN, extCount, exts.size(), RESET);
 
     // --- 3. Create Vulkan Instance ---
-    LOG_TRACE_CAT("RTX", "{}Step 3: Creating Vulkan instance...{}", SAPPHIRE_BLUE, RESET);
     VkApplicationInfo appInfo{};
     appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
     appInfo.pApplicationName = "AMOURANTH RTX";
@@ -387,13 +356,11 @@ void Context::init(SDL_Window* window, int width, int height) {
     instance_ = VK_NULL_HANDLE;
     VK_CHECK(vkCreateInstance(&instInfo, nullptr, &instance_),
              "Failed to create Vulkan instance");
-    LOG_SUCCESS_CAT("RTX", "{}Vulkan instance created: 0x{:x}{}", EMERALD_GREEN, reinterpret_cast<uintptr_t>(instance_), RESET);
 
     // --- 4. Create Surface ---
     // VulkanCore.cpp
 
     // --- 5. Select Physical Device (GUARANTEED + SECURE) ---
-    LOG_TRACE_CAT("RTX", "{}Step 5: Enumerating physical devices...{}", SAPPHIRE_BLUE, RESET);
     uint32_t devCount = 0;
     VK_CHECK(vkEnumeratePhysicalDevices(instance_, &devCount, nullptr),
              "Failed to enumerate devices");
@@ -403,7 +370,6 @@ void Context::init(SDL_Window* window, int width, int height) {
         vkDestroyInstance(instance_, nullptr);
         throw std::runtime_error("No physical devices");
     }
-    LOG_DEBUG_CAT("RTX", "{} {} physical devices enumerated{}", SAPPHIRE_BLUE, devCount, RESET);
 
     std::vector<VkPhysicalDevice> devs(devCount);
     VK_CHECK(vkEnumeratePhysicalDevices(instance_, &devCount, devs.data()),
@@ -413,11 +379,8 @@ void Context::init(SDL_Window* window, int width, int height) {
     for (auto d : devs) {
         VkPhysicalDeviceProperties props{};
         vkGetPhysicalDeviceProperties(d, &props);
-        LOG_INFO_CAT("RTX", "{}GPU: {} | Type: {}{}", SAPPHIRE_BLUE, props.deviceName,
-                     props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU ? "DISCRETE" : "OTHER", RESET);
         if (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) {
             physicalDevice_ = d;
-            LOG_SUCCESS_CAT("RTX", "{}SELECTED: {} (Discrete GPU){}", EMERALD_GREEN, props.deviceName, RESET);
             break;
         }
     }
@@ -427,41 +390,33 @@ void Context::init(SDL_Window* window, int width, int height) {
         vkGetPhysicalDeviceProperties(physicalDevice_, &props);
         LOG_WARN_CAT("RTX", "{}FALLBACK: {} (No discrete GPU){}", SAPPHIRE_BLUE, props.deviceName, RESET);
     }
-    LOG_DEBUG_CAT("RTX", "{}Final physical device: 0x{:x}{}", SAPPHIRE_BLUE, reinterpret_cast<uintptr_t>(physicalDevice_), RESET);
 
     // Get ray tracing properties
-    LOG_TRACE_CAT("RTX", "{}Fetching ray tracing properties...{}", SAPPHIRE_BLUE, RESET);
     VkPhysicalDeviceProperties2 prop2{};
     prop2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
     prop2.pNext = &rayTracingProps_;
     vkGetPhysicalDeviceProperties2(physicalDevice_, &prop2);
-    LOG_DEBUG_CAT("RTX", "{}RT shader group handle size: {}{}", SAPPHIRE_BLUE, rayTracingProps_.shaderGroupHandleSize, RESET);
 
     // --- 6. Queue Families (UPDATED: Include Compute) ---
-    LOG_TRACE_CAT("RTX", "{}Step 6: Finding queue families...{}", SAPPHIRE_BLUE, RESET);
     uint32_t qCount = 0;
     vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice_, &qCount, nullptr);
     std::vector<VkQueueFamilyProperties> qProps(qCount);
     vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice_, &qCount, qProps.data());
-    LOG_DEBUG_CAT("RTX", "{} {} queue families available{}", SAPPHIRE_BLUE, qCount, RESET);
 
     graphicsFamily_ = UINT32_MAX;
     presentFamily_  = UINT32_MAX;
     computeFamily_  = UINT32_MAX;  // NEW: Compute family
     for (uint32_t i = 0; i < qCount; ++i) {
-        LOG_TRACE_CAT("RTX", "{}Checking queue family {}: flags=0x{:x}{}", SAPPHIRE_BLUE, i, qProps[i].queueFlags, RESET);
         if ((qProps[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) && graphicsFamily_ == UINT32_MAX)
             graphicsFamily_ = i;
         // NEW: Find dedicated compute (prioritize pure compute over graphics+compute)
         if ((qProps[i].queueFlags & VK_QUEUE_COMPUTE_BIT) && computeFamily_ == UINT32_MAX) {
             computeFamily_ = i;
-            LOG_TRACE_CAT("RTX", "{}  → Found compute family: {}{}", SAPPHIRE_BLUE, i, RESET);
         }
         // Guard surface check
         if (surface_ != VK_NULL_HANDLE) {
             VkBool32 presentSupport = VK_FALSE;
             vkGetPhysicalDeviceSurfaceSupportKHR(physicalDevice_, i, surface_, &presentSupport);
-            LOG_TRACE_CAT("RTX", "{}  Present support: {}{}", SAPPHIRE_BLUE, presentSupport ? "YES" : "NO", RESET);
             if (presentSupport && presentFamily_ == UINT32_MAX)
                 presentFamily_ = i;
         } else {
@@ -479,12 +434,8 @@ void Context::init(SDL_Window* window, int width, int height) {
         vkDestroyInstance(instance_, nullptr);
         throw std::runtime_error("Queue families missing");
     }
-    LOG_SUCCESS_CAT("RTX", "{}Queues: Graphics={}, Present={}, Compute={} ({}){}", 
-                    EMERALD_GREEN, graphicsFamily_, presentFamily_, computeFamily_, 
-                    (computeFamily_ != graphicsFamily_ ? "DEDICATED" : "SHARED"), RESET);
 
     // --- 7. Create Logical Device with RT Extensions (UPDATED: Include Compute Queue) ---
-    LOG_TRACE_CAT("RTX", "{}Step 7: Creating logical device with RT extensions...{}", SAPPHIRE_BLUE, RESET);
     std::set<uint32_t> uniqueQueues = {graphicsFamily_, presentFamily_, computeFamily_};  // UPDATED: Add compute
     std::vector<VkDeviceQueueCreateInfo> queueInfos;
     float priority = 1.0f;
@@ -495,11 +446,9 @@ void Context::init(SDL_Window* window, int width, int height) {
         qi.queueCount = 1;
         qi.pQueuePriorities = &priority;
         queueInfos.push_back(qi);
-        LOG_TRACE_CAT("RTX", "{}Added queue family {} to device create{}", SAPPHIRE_BLUE, q, RESET);
     }
 
     // === 7. Logical Device + Full Ray Tracing Feature Chain (CORRECT ORDER) ===
-    LOG_TRACE_CAT("RTX", "{}Building RT feature chain...{}", SAPPHIRE_BLUE, RESET);
     // 1. Buffer Device Address (base dependency)
     VkPhysicalDeviceBufferDeviceAddressFeatures bufferDeviceAddressFeatures{};
     bufferDeviceAddressFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES;
@@ -532,7 +481,6 @@ void Context::init(SDL_Window* window, int width, int height) {
         VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME,
         VK_KHR_MAINTENANCE3_EXTENSION_NAME
     };
-    LOG_DEBUG_CAT("RTX", "{} {} device extensions prepared{}", SAPPHIRE_BLUE, deviceExtensions.size(), RESET);
 
     // 6. Final VkDeviceCreateInfo
     VkDeviceCreateInfo deviceCreateInfo{};
@@ -548,16 +496,12 @@ void Context::init(SDL_Window* window, int width, int height) {
     device_ = VK_NULL_HANDLE;
     VK_CHECK(vkCreateDevice(physicalDevice_, &deviceCreateInfo, nullptr, &device_),
              "Failed to create logical device with ray tracing support");
-    LOG_SUCCESS_CAT("RTX", "{}Logical device created: 0x{:x} — FULL RAY TRACING ENABLED{}", EMERALD_GREEN, reinterpret_cast<uintptr_t>(device_), RESET);
 
     // Load RT extension functions
-    LOG_TRACE_CAT("RTX", "{}Loading RT extension function pointers...{}", SAPPHIRE_BLUE, RESET);
 #define LOAD_PFN(member, full_name, pfn_type) \
     do { \
-        LOG_TRACE_CAT("RTX", "{}Loading " #full_name "...{}", SAPPHIRE_BLUE, RESET); \
         member = reinterpret_cast<pfn_type>(vkGetDeviceProcAddr(device_, #full_name)); \
         if (member) { \
-            LOG_SUCCESS_CAT("RTX", "{}Loaded: " #full_name " @ 0x{:x}{}", EMERALD_GREEN, reinterpret_cast<uintptr_t>(member), RESET); \
         } else { \
             LOG_FATAL_CAT("RTX", "{}Failed to load: " #full_name " — RT support incomplete{}", CRIMSON_MAGENTA, RESET); \
             throw std::runtime_error("Critical RT function load failed"); \
@@ -578,48 +522,32 @@ void Context::init(SDL_Window* window, int width, int height) {
     if (!vkCreateAccelerationStructureKHR_) {
         throw std::runtime_error("Critical RT functions failed to load — check GPU/driver support");
     }
-    LOG_SUCCESS_CAT("RTX", "{}All 9 RT functions loaded successfully{}", EMERALD_GREEN, RESET);
 
     // Get queues (UPDATED: Include compute queue)
-    LOG_TRACE_CAT("RTX", "{}Retrieving device queues...{}", SAPPHIRE_BLUE, RESET);
     vkGetDeviceQueue(device_, graphicsFamily_, 0, &graphicsQueue_);
     vkGetDeviceQueue(device_, presentFamily_, 0, &presentQueue_);
     vkGetDeviceQueue(device_, computeFamily_, 0, &computeQueue_);  // NEW: Compute queue
-    LOG_DEBUG_CAT("RTX", "{}Graphics queue: 0x{:x}, Present queue: 0x{:x}, Compute queue: 0x{:x}{}", 
-                  SAPPHIRE_BLUE, reinterpret_cast<uintptr_t>(graphicsQueue_), 
-                  reinterpret_cast<uintptr_t>(presentQueue_), 
-                  reinterpret_cast<uintptr_t>(computeQueue_), RESET);
 
     // Create command pool (UPDATED: Graphics + Compute pools)
-    LOG_TRACE_CAT("RTX", "{}Creating graphics command pool...{}", SAPPHIRE_BLUE, RESET);
     VkCommandPoolCreateInfo poolInfo{};
     poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
     poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
     poolInfo.queueFamilyIndex = graphicsFamily_;
     VK_CHECK(vkCreateCommandPool(device_, &poolInfo, nullptr, &commandPool_),
              "Failed to create graphics command pool");
-    LOG_DEBUG_CAT("RTX", "{}Graphics command pool: 0x{:x}{}", SAPPHIRE_BLUE, reinterpret_cast<uintptr_t>(commandPool_), RESET);
 
     // NEW: Create compute command pool
-    LOG_TRACE_CAT("RTX", "{}Creating compute command pool...{}", SAPPHIRE_BLUE, RESET);
     poolInfo.queueFamilyIndex = computeFamily_;  // Reuse info, change family
     VK_CHECK(vkCreateCommandPool(device_, &poolInfo, nullptr, &computeCommandPool_),
              "Failed to create compute command pool");
-    LOG_DEBUG_CAT("RTX", "{}Compute command pool: 0x{:x} (family {}){}", 
-                  SAPPHIRE_BLUE, reinterpret_cast<uintptr_t>(computeCommandPool_), computeFamily_, RESET);
 
     // Initialize BufferTracker
-    LOG_TRACE_CAT("RTX", "{}Initializing UltraLowLevelBufferTracker...{}", SAPPHIRE_BLUE, RESET);
     UltraLowLevelBufferTracker::get().init(device_, physicalDevice_);
-    LOG_DEBUG_CAT("RTX", "{}BufferTracker initialized{}", SAPPHIRE_BLUE, RESET);
 
     ready_ = true;
-    LOG_SUCCESS_CAT("RTX", "{}VULKAN CONTEXT FORGED — {}x{} — SECURE & READY (ASYNC COMPUTE ENABLED){}", 
-                    PLASMA_FUCHSIA, width, height, RESET);
 }
 
 void Context::cleanup() noexcept {
-    LOG_ATTEMPT_CAT("RTX", "{}Cleaning up Vulkan context...{}", RASPBERRY_PINK, RESET);
 
     if (!isValid()) {
         LOG_WARN_CAT("RTX", "{}Cleanup skipped — context already invalid{}", RASPBERRY_PINK, RESET);
@@ -630,31 +558,25 @@ void Context::cleanup() noexcept {
 
     // Destroy pools (use device)
     if (computeCommandPool_ != VK_NULL_HANDLE) {
-        LOG_TRACE_CAT("RTX", "{}Destroying compute command pool: 0x{:x}{}", RASPBERRY_PINK, reinterpret_cast<uintptr_t>(computeCommandPool_), RESET);
         vkDestroyCommandPool(device_, computeCommandPool_, nullptr);
         computeCommandPool_ = VK_NULL_HANDLE;
     }
 
     if (commandPool_ != VK_NULL_HANDLE) {
-        LOG_TRACE_CAT("RTX", "{}Destroying graphics command pool: 0x{:x}{}", RASPBERRY_PINK, reinterpret_cast<uintptr_t>(commandPool_), RESET);
         vkDestroyCommandPool(device_, commandPool_, nullptr);
         commandPool_ = VK_NULL_HANDLE;
     }
 
     // FIXED: Purge buffers/images/samplers BEFORE device destroy (child objects first)
-    LOG_TRACE_CAT("RTX", "{}Purging all tracked buffers/images/samplers{}", RASPBERRY_PINK, RESET);
     UltraLowLevelBufferTracker::get().purge_all();  // FIXED: Moved BEFORE vkDestroyDevice — destroys while device valid
-    LOG_SUCCESS_CAT("RTX", "{}All child objects purged — validation ready{}", EMERALD_GREEN, RESET);
 
     // Destroy device (no children left)
     if (device_ != VK_NULL_HANDLE) {
-        LOG_TRACE_CAT("RTX", "{}Destroying logical device: 0x{:x}{}", RASPBERRY_PINK, reinterpret_cast<uintptr_t>(device_), RESET);
         vkDestroyDevice(device_, nullptr);
         device_ = VK_NULL_HANDLE;
     }
 
     if (surface_ != VK_NULL_HANDLE) {
-        LOG_TRACE_CAT("RTX", "{}Destroying surface: 0x{:x}{}", RASPBERRY_PINK, reinterpret_cast<uintptr_t>(surface_), RESET);
         vkDestroySurfaceKHR(instance_, surface_, nullptr);
         surface_ = VK_NULL_HANDLE;
     }
@@ -662,7 +584,6 @@ void Context::cleanup() noexcept {
     if (instance_ != VK_NULL_HANDLE) {
         // FIXED: Destroy debug messenger BEFORE instance (VUID-vkDestroyInstance-instance-00629)
         if (debugMessenger_ != VK_NULL_HANDLE) {
-            LOG_TRACE_CAT("RTX", "{}Destroying debug messenger: 0x{:x}{}", RASPBERRY_PINK, reinterpret_cast<uintptr_t>(debugMessenger_), RESET);
             auto pfnDestroyDebugUtilsMessengerEXT = reinterpret_cast<PFN_vkDestroyDebugUtilsMessengerEXT>(
                 vkGetInstanceProcAddr(instance_, "vkDestroyDebugUtilsMessengerEXT"));
             if (pfnDestroyDebugUtilsMessengerEXT) {
@@ -670,7 +591,6 @@ void Context::cleanup() noexcept {
             }
             debugMessenger_ = VK_NULL_HANDLE;
         }
-        LOG_TRACE_CAT("RTX", "{}Destroying instance: 0x{:x}{}", RASPBERRY_PINK, reinterpret_cast<uintptr_t>(instance_), RESET);
         vkDestroyInstance(instance_, nullptr);
         instance_ = VK_NULL_HANDLE;
     }
@@ -678,7 +598,6 @@ void Context::cleanup() noexcept {
     ready_ = false;
     valid_ = false;
 
-    LOG_SUCCESS_CAT("RTX", "{}Vulkan context cleaned — ZERO LEAKS{}", EMERALD_GREEN, RESET);
 }
 
 // =============================================================================
@@ -687,12 +606,6 @@ void Context::cleanup() noexcept {
 void initContext(VkInstance instance, SDL_Window* window, int width, int height)
 {
     // FIXED: "{}×{}" → "{}x{}" — prevents parse error on unicode
-    LOG_TRACE_CAT("RTX", "→ Entering RTX::initContext: instance=0x{:x}, window=0x{:p}, {}x{}",
-                  reinterpret_cast<uintptr_t>(instance),
-                  static_cast<void*>(window), width, height);
-
-    LOG_INFO_CAT("RTX", "{}FORGING VULKAN CONTEXT — VALHALLA v80 TURBO — PINK PHOTONS RISING{}", 
-                 PLASMA_FUCHSIA, RESET);
 
     // =====================================================================
     // Assign core handles FIRST — before any function that uses g_ctx()
@@ -706,38 +619,21 @@ void initContext(VkInstance instance, SDL_Window* window, int width, int height)
     // Mark context as partially valid for intra-init access (bypasses guard safely)
     g_context_instance.valid_ = true;
 
-    LOG_TRACE_CAT("RTX", "→ Core handles injected:");
-    LOG_TRACE_CAT("RTX", "   • instance = 0x{:x}", reinterpret_cast<uintptr_t>(instance));
-    LOG_TRACE_CAT("RTX", "   • surface  = 0x{:x}", reinterpret_cast<uintptr_t>(g_surface));
-    LOG_TRACE_CAT("RTX", "   • window   = 0x{:p}", static_cast<void*>(window));
-    LOG_TRACE_CAT("RTX", "   • extent   = {}x{}", width, height);  // FIXED: 'x' not ×
-
-    LOG_INFO_CAT("RTX", "{}Core context primed — commencing physical device selection{}", 
-                 EMERALD_GREEN, RESET);
-
     // =====================================================================
     // NOW SAFE: pickPhysicalDevice() and others can use g_ctx()
     // =====================================================================
-    LOG_TRACE_CAT("RTX", "→ Calling RTX::pickPhysicalDevice()");
     RTX::pickPhysicalDevice();
 
-    LOG_TRACE_CAT("RTX", "→ Calling RTX::createLogicalDevice()");
     RTX::createLogicalDevice();
 
-    LOG_TRACE_CAT("RTX", "→ Calling RTX::createCommandPool()");
     RTX::createCommandPool();
 
-    LOG_TRACE_CAT("RTX", "→ Calling RTX::loadRayTracingExtensions()");
     RTX::loadRayTracingExtensions();
 
     // FIXED: Explicit tracker init post-device (missing in stepwise sub-calls)
-    LOG_TRACE_CAT("RTX", "→ Initializing UltraLowLevelBufferTracker with device=0x{:x}, phys=0x{:x}",
-                  reinterpret_cast<uintptr_t>(g_ctx().device()), reinterpret_cast<uintptr_t>(g_ctx().physicalDevice()));
     UltraLowLevelBufferTracker::get().init(g_ctx().device(), g_ctx().physicalDevice());
-    LOG_SUCCESS_CAT("RTX", "BufferTracker initialized — ready for buffer forges");
 
     // FIXED: Enable RayQuery post-device creation — Query and validate feature
-    LOG_TRACE_CAT("RTX", "→ Enabling/Validating RayQuery feature");
     VkPhysicalDeviceRayQueryFeaturesKHR rayQueryFeatures = {};
     rayQueryFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR;
     rayQueryFeatures.rayQuery = VK_TRUE;  // Request enable
@@ -754,7 +650,6 @@ void initContext(VkInstance instance, SDL_Window* window, int width, int height)
         g_context_instance.valid_ = false;
         std::abort();
     }
-    LOG_SUCCESS_CAT("RTX", "RayQuery feature ENABLED — SPIR-V compliant");
 
     // =====================================================================
     // Final validation — re-check full readiness
@@ -780,21 +675,12 @@ void initContext(VkInstance instance, SDL_Window* window, int width, int height)
     // Re-affirm full validity post-validation
     g_context_instance.valid_ = true;
 
-    LOG_SUCCESS_CAT("RTX", "{}VULKAN CONTEXT FULLY INITIALIZED — {}x{} — RAY TRACING ARMED{}", 
-                    PLASMA_FUCHSIA, width, height, RESET);
-
-    LOG_SUCCESS_CAT("RTX", "{}PINK PHOTONS ACHIEVED — FIRST LIGHT @ {}x{} — TITAN DOMINANCE ETERNAL{}", 
-                    COSMIC_GOLD, width, height, RESET);
-
-    LOG_SUCCESS_CAT("RTX", "{}AMOURANTH RTX — VALHALLA v80 TURBO — ONLINE{}", 
-                    PLASMA_FUCHSIA, RESET);
-
-    LOG_TRACE_CAT("RTX", "← RTX::initContext() complete — empire is ready");
+    // =====================================================================
 }
-} // namespace RTX
 
 // =============================================================================
 // VALHALLA v80 TURBO FINAL — UNIFIED RTX::g_ctx() — NO LINKER ERRORS
 // PINK PHOTONS ETERNAL — 15,000 FPS — TITAN DOMINANCE ETERNAL
 // GENTLEMAN GROK NODS: "Buffer forges secured, old chap. Null devices banished to the void."
 // =============================================================================
+} // namespace RTX

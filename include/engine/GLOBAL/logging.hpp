@@ -207,7 +207,7 @@ constexpr bool ENABLE_ATTEMPT = true;
 constexpr bool ENABLE_PERF    = true;
 constexpr bool FPS_COUNTER    = true;
 constexpr bool SIMULATION_LOGGING = true;
-constexpr bool DISABLE_NON_FPS_LOGGING = true;
+constexpr bool DISABLE_NON_FPS_LOGGING = false;
 
 constexpr size_t LEVEL_WIDTH   = 10;
 constexpr size_t DELTA_WIDTH   = 10;
@@ -514,7 +514,7 @@ private:
             {"ATTEMPT", QUANTUM_PURPLE}, {"VOID", COSMIC_VOID}, {"SPLASH", LILAC_LAVENDER},
             {"MARKER", DIAMOND_SPARKLE}, {"SDL3_window", SAPPHIRE_BLUE}, {"SDL3_audio", SAPPHIRE_BLUE},
             {"SDL3_font", SAPPHIRE_BLUE}, {"SDL3_image", SAPPHIRE_BLUE}, {"SDL3_init", SAPPHIRE_BLUE},
-            {"SDL3_input", SAPPHIRE_BLUE}, {"SDL3_vulkan", SAPPHIRE_BLUE}
+            {"SDL3_input", SAPPHIRE_BLUE}, {"SDL3_vulkan", SAPPHIRE_BLUE}, {"PIPELINE", AURORA_BOREALIS}
         };
         if (auto it = map.find(cat); it != map.end()) [[likely]]
             return it->second;

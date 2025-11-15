@@ -1,14 +1,11 @@
-// =============================================================================
-// AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
-// =============================================================================
-//
-// VulkanRenderer.hpp — FIXED v10.4.1 — NOV 14 2025
-// • FIXED: Invalid queue in vkQueueWaitIdle — Use global RTX::g_ctx() for queues/pools (no local Handles needed)
-// • NO OWNERSHIP: VkQueue/VkCommandPool managed by VulkanCore/RTXHandler — Avoid null deref crashes
+// VulkanRenderer.hpp — FIXED v10.4.2 — NOV 15 2025
+// • FIXED: All Context access with () (e.g., c.device()); const auto& c = RTX::g_ctx() (no copy); Logging macros with []() (no capture-default)
+// • FIXED: Compilation: C++20 compliance, no dangling refs, deleted copy avoidance
 // • READY FOR RTX 50-SERIES & BEYOND: DLSS 4.0 Hooks, Mesh Shaders, Variable Rate Shading
 // • DEVELOPER WISHLIST: Path Tracing v2, Neural Rendering, AI Upscaling, Multi-GPU
 // • REMOVED: shaderPaths parameter — VulkanRenderer now OWNS its shaders
 // • ADDED: constexpr internal RT shader list + Future Hooks
+// • INTEGRATED: PipelineManager for RT pipeline/SBT/descriptor management (reduced code)
 // • Constructor: (width, height, window, overclock)
 // • SDL3_vulkan.cpp now dumb and happy
 // • PINK PHOTONS ETERNAL — 240+ FPS — FIRST LIGHT ACHIEVED
@@ -45,10 +42,11 @@
 #include "engine/GLOBAL/RTXHandler.hpp"
 
 // ──────────────────────────────────────────────────────────────────────────────
-// LAS + Swapchain + Core
+// LAS + Swapchain + Core + PipelineManager
 #include "engine/GLOBAL/LAS.hpp"
 #include "engine/GLOBAL/SwapchainManager.hpp"
 #include "engine/Vulkan/VulkanCore.hpp"
+#include "engine/Vulkan/VulkanPipelineManager.hpp"  // ← INTEGRATED: For RT pipeline/SBT/descriptors
 
 // ──────────────────────────────────────────────────────────────────────────────
 // GLOBAL PHYSICAL DEVICE
@@ -71,9 +69,9 @@ enum class TonemapType { ACES, FILMIC, REINHARD };
 // DEVELOPER WISHLIST — FUTURE-PROOFING FOR RTX & BEYOND
 // ──────────────────────────────────────────────────────────────────────────────
 // TODO: [HIGH] Integrate DLSS 4.0 / Frame Generation (NVIDIA SDK hooks in createTonemapPipeline)
-// TODO: [MED] Mesh Shaders for Dynamic LOD (extend createRayTracingPipeline with VK_SHADER_STAGE_MESH_BIT_EXT)
+// TODO: [MED] Mesh Shaders for Dynamic LOD (extend PipelineManager::createRayTracingPipeline with VK_SHADER_STAGE_MESH_BIT_EXT)
 // TODO: [MED] Variable Rate Shading (VRS) Integration (add VkAttachmentDescription2 flags in swapchain)
-// TODO: [LOW] Path Tracing v2: BSSRDF, Subsurface Scattering (new shader group in createRayTracingPipeline)
+// TODO: [LOW] Path Tracing v2: BSSRDF, Subsurface Scattering (new shader group in PipelineManager::createRayTracingPipeline)
 // TODO: [LOW] Neural Rendering: Add OptiX Denoiser (parallel to denoiserPipeline_)
 // TODO: [LOW] Multi-GPU Support: NVLink / Cross-Adapter (extend uniformBufferEncs_ to vector<VkDeviceAddress>)
 // TODO: [WISH] AI Upscaling: TensorRT Hooks (post-tonemap pass with external model loading)
@@ -106,7 +104,7 @@ public:
     void setTonemap(bool enabled) noexcept;
     void setOverlay(bool show) noexcept;
     void setRenderMode(int mode) noexcept;
-	void cleanup() noexcept;
+    void cleanup() noexcept;
 
     // Accessors
     [[nodiscard]] VkDevice         device()          const noexcept { return RTX::g_ctx().vkDevice(); }
@@ -150,7 +148,7 @@ private:
     float currentNexusScore_ = 0.5f;
     uint32_t currentSpp_ = Options::RTX::MIN_SPP;
     float hypertraceCounter_ = 0.0f;
-	VkQueryPool timestampQueryPool_ = VK_NULL_HANDLE;
+    VkQueryPool timestampQueryPool_ = VK_NULL_HANDLE;
     double timestampPeriod_ = 0.0;
     bool resetAccumulation_ = true;
 
@@ -187,28 +185,14 @@ private:
     RTX::Handle<VkDescriptorPool> rtDescriptorPool_;
 
     // ──────────────────────────────────────────────────────────────────────
-    // Ray Tracing Pipeline — FINAL & IMMORTAL
+    // Ray Tracing Pipeline — DELEGATED TO PIPELINEMANAGER
     // ──────────────────────────────────────────────────────────────────────
-    RTX::Handle<VkPipeline>               rtPipeline_;
-    RTX::Handle<VkPipelineLayout>         rtPipelineLayout_;
-    RTX::Handle<VkDescriptorSetLayout>   rtDescriptorSetLayout_;
-    std::vector<VkDescriptorSet>          rtDescriptorSets_;
+    RTX::PipelineManager pipelineManager_;  // ← FULL INTEGRATION: Owns rtPipeline_, rtPipelineLayout_, rtDescriptorSetLayout_, SBT, etc.
 
-    // SBT — Shader Binding Table
-    uint64_t sbtBufferEnc_ = 0;
-    VkDeviceAddress sbtAddress_ = 0;
-    VkBuffer sbtBuffer_ = VK_NULL_HANDLE;
-    VkDeviceMemory sbtMemory_ = VK_NULL_HANDLE;
-    VkDeviceSize raygenSbtOffset_ = 0;
-    VkDeviceSize missSbtOffset_   = 0;
-    VkDeviceSize hitSbtOffset_    = 0;
-    VkDeviceSize callableSbtOffset_ = 0;
-    uint32_t sbtStride_ = 0;
-    uint32_t raygenGroupCount_ = 0;
-    uint32_t missGroupCount_   = 0;
-    uint32_t hitGroupCount_    = 0;
-    uint32_t callableGroupCount_ = 0;
-    VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtxProps_{};
+    std::vector<VkDescriptorSet>          rtDescriptorSets_;  // ← Allocated post-PipelineManager
+
+    // SBT — DELEGATED TO PIPELINEMANAGER (sbtAddress_, offsets, stride, counts)
+    // (No longer members: Use pipelineManager_.sbtAddress_, etc.)
 
     // Ray Tracing Function Pointers
     PFN_vkCmdTraceRaysKHR                    vkCmdTraceRaysKHR               = nullptr;
@@ -262,7 +246,7 @@ private:
     RTX::Handle<VkPipelineLayout> tonemapLayout_;
     std::vector<VkDescriptorSet>  tonemapSets_;
 
-    // Helper Methods
+    // Helper Methods (Delegated where possible)
     VkCommandBuffer beginSingleTimeCommands(VkDevice device, VkCommandPool pool);
     void endSingleTimeCommands(VkDevice device, VkCommandPool pool, VkQueue queue, VkCommandBuffer cmd);
     VkCommandBuffer allocateTransientCommandBuffer(VkDevice device, VkCommandPool pool);
@@ -272,7 +256,7 @@ private:
     void destroyAllBuffers() noexcept;
     void destroyAccumulationImages() noexcept;
     void destroyRTOutputImages() noexcept;
-    void destroySBT() noexcept;
+    void destroySBT() noexcept;  // ← Wrapper: Delegates to pipelineManager_.destroySBT() if needed
 
     void createRTOutputImages();
     void createAccumulationImages();
@@ -281,27 +265,28 @@ private:
     void createNexusScoreImage(VkPhysicalDevice phys, VkDevice dev, VkCommandPool pool, VkQueue queue);
     void initializeAllBufferData(uint32_t frames, VkDeviceSize uniformSize, VkDeviceSize materialSize);
     void createCommandBuffers();
-    void allocateDescriptorSets();
-    void updateNexusDescriptors();
+    void allocateDescriptorSets();  // ← Uses pipelineManager_.rtDescriptorSetLayout_ & rtDescriptorPool_
+    void updateNexusDescriptors();  // ← Binding 6 from PipelineManager
     void updateRTXDescriptors();
     void updateTonemapDescriptorsInitial();
     void updateDenoiserDescriptors();
 
-    void createRayTracingPipeline(const std::vector<std::string>& shaderPaths);
-    void createShaderBindingTable();
-    VkShaderModule loadShader(const std::string& path);
-    VkDeviceAddress getShaderGroupHandle(uint32_t group);
+    // DELEGATED: Wrappers for PipelineManager (reduced impl in .cpp)
+    void createRayTracingPipeline(const std::vector<std::string>& shaderPaths);  // ← Delegates to pipelineManager_
+    void createShaderBindingTable();  // ← Delegates to pipelineManager_
+    VkShaderModule loadShader(const std::string& path);  // ← Delegates to pipelineManager_
+    VkDeviceAddress getShaderGroupHandle(uint32_t group);  // ← Uses pipelineManager_.SBT
 
     void loadRayTracingExtensions() noexcept;
 
-    void recordRayTracingCommandBuffer(VkCommandBuffer cmd);
+    void recordRayTracingCommandBuffer(VkCommandBuffer cmd);  // ← Uses pipelineManager_.rtPipeline_, SBT, etc.
     void performDenoisingPass(VkCommandBuffer cmd);
     void performTonemapPass(VkCommandBuffer cmd, uint32_t imageIndex);
 
     void updateUniformBuffer(uint32_t frame, const Camera& camera, float jitter);
     void updateTonemapUniform(uint32_t frame);
 
-    uint32_t findMemoryType(VkPhysicalDevice physicalDevice, uint32_t typeFilter, VkMemoryPropertyFlags properties) const noexcept;
+    uint32_t findMemoryType(VkPhysicalDevice physicalDevice, uint32_t typeFilter, VkMemoryPropertyFlags properties) const noexcept;  // ← Delegates to pipelineManager_
 
     void createImageArray(
         std::vector<RTX::Handle<VkImage>>& images,
@@ -343,11 +328,12 @@ inline void renderFrame(const Camera& camera, float deltaTime) noexcept {
 
 inline void shutdown() noexcept {
     LOG_INFO_CAT("RENDERER", "Shutting down VulkanRenderer — returning photons to the void");
+    if (g_renderer) g_renderer->cleanup();
     g_renderer.reset();
     LOG_SUCCESS_CAT("RENDERER", "VulkanRenderer shutdown complete — silence is golden");
 }
 
 // =============================================================================
 // STATUS: FIRST LIGHT ACHIEVED — PINK PHOTONS ARMED — ETERNAL
-// NOV 14 2025 — v10.4.1 — FIXED QUEUE CRASH — RTX & BEYOND — DEVELOPER WISHLIST ACTIVATED
+// NOV 15 2025 — v10.4.2 — COMPILATION FIXED — RTX & BEYOND — DEVELOPER WISHLIST ACTIVATED
 // =============================================================================

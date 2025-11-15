@@ -58,6 +58,12 @@ add_compile_options(
     -g -ggdb
 )
 
+# Option to disable trace & debug logging (for performance in release/debug builds) — DEFAULT: DISABLED
+option(DISABLE_TRACE_AND_DEBUG_LOGS "Disable trace (LOG_TRACE_CAT) & debug (LOG_DEBUG_CAT) logging" ON)
+if(DISABLE_TRACE_AND_DEBUG_LOGS)
+    add_definitions(-DDISABLE_TRACE_AND_DEBUG_LOGS)
+endif()
+
 if(CMAKE_BUILD_TYPE MATCHES Debug)
     add_compile_options(-fsanitize=address,undefined,leak)
     add_link_options(-fsanitize=address,undefined,leak)

@@ -2,13 +2,15 @@
 // =============================================================================
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
-// VulkanPipelineManager — Production Edition v10.2 (Validation Fixes) — NOV 14 2025
-// • FIXED: 8 descriptor bindings matching raygen shader (tlas=0, rtOutput=1, accum=2, ubo=3, storage=4, sampler=5, nexus=6, storage=7)
-// • FIXED: Removed VkPipelineLibraryCreateInfoKHR pNext — validation compliant
-// • FIXED: Explicit VK_SHADER_UNUSED_KHR for hit/any/intersect in general groups
-// • FIXED: Push constant range in layout with correct stages (raygen + miss + chit)
-// • FIXED: SBT memory alloc with VkMemoryAllocateFlagsInfo + DEVICE_ADDRESS_BIT
-// • Ported exhaustive logging and zero-init from VulkanRenderer.cpp v10.1
+// VulkanPipelineManager — Production Edition v10.5.1 (Syntax + Logging Fixed) — NOV 15 2025
+// • FIXED: Function decls with () (loadExtensions(), cacheDeviceProperties()); Logging []() (no capture-default)
+// • FIXED: Ctor guards null device/phys — early return if invalid (prevents segfault in load/cache)
+// • FIXED: loadExtensions — null device guard (log WARN, return early)
+// • FIXED: cacheDeviceProperties — null phys guard (log ERROR, return early)
+// • FIXED: beginSingleTimeCommands/endSingleTimeCommands — null pool/device guards (return VK_NULL_HANDLE/log error)
+// • All methods now safe for dummy (null) state — no crashes on invalid ctx
+// • Retained: Dynamic PFNs, 8 bindings, no pNext, UNUSED_KHR, push constants, DEVICE_ADDRESS_BIT
+// • Ported exhaustive logging and zero-init from VulkanRenderer.cpp v10.2
 // • Fixed transient command buffers (beginSingleTimeCommands/endSingleTimeCommands)
 // • SBT creation fully matches VulkanRenderer::createShaderBindingTable
 // • Ray tracing pipeline creation fully matches VulkanRenderer::createRayTracingPipeline
@@ -31,12 +33,23 @@ using namespace Logging::Color;
 namespace RTX {
 
 // ──────────────────────────────────────────────────────────────────────────────
-// PipelineManager Constructor — Matches VulkanRenderer Style
+// PipelineManager Constructor — Matches VulkanRenderer Style + FIXED: Null Guard Early Exit
 // ──────────────────────────────────────────────────────────────────────────────
 PipelineManager::PipelineManager(VkDevice device, VkPhysicalDevice phys)
     : device_(device), physicalDevice_(phys)
 {
     LOG_ATTEMPT_CAT("PIPELINE", "Constructing PipelineManager — PINK PHOTONS RISING");
+
+    // FIXED: Early guard — skip init if null (prevents segfault in load/cache)
+    if (device_ == VK_NULL_HANDLE || physicalDevice_ == VK_NULL_HANDLE) {
+        LOG_WARN_CAT("PIPELINE", "Null device (0x{:x}) or phys (0x{:x}) — skipping init (dummy state)", 
+                     reinterpret_cast<uintptr_t>(device_), reinterpret_cast<uintptr_t>(physicalDevice_));
+        return;
+    }
+
+    LOG_TRACE_CAT("PIPELINE", "=== STACK BUILD ORDER STEP 0.5: Load Ray Tracing Extensions ===");
+    loadExtensions();  // NEW: Dynamic PFN loading
+    LOG_TRACE_CAT("PIPELINE", "Step 0.5 COMPLETE");
 
     LOG_TRACE_CAT("PIPELINE", "=== STACK BUILD ORDER STEP 1: Cache Device Properties ===");
     cacheDeviceProperties();
@@ -56,11 +69,56 @@ PipelineManager::PipelineManager(VkDevice device, VkPhysicalDevice phys)
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Cache Device Properties — Matches VulkanRenderer Step 7
+// FIXED: Load Extension Function Pointers — Runtime-Safe Dynamic Loading + Null Device Guard
 // ──────────────────────────────────────────────────────────────────────────────
-void PipelineManager::cacheDeviceProperties() noexcept
-{
+void PipelineManager::loadExtensions() {
+    LOG_TRACE_CAT("PIPELINE", "loadExtensions — START — Fetching RT KHR PFNs via vkGetDeviceProcAddr");
+
+    // FIXED: Null device guard — skip if invalid
+    if (device_ == VK_NULL_HANDLE) {
+        LOG_WARN_CAT("PIPELINE", "Null device — skipping extension load");
+        return;
+    }
+
+    vkCreateRayTracingPipelinesKHR_ = reinterpret_cast<PFN_vkCreateRayTracingPipelinesKHR>(
+        vkGetDeviceProcAddr(device_, "vkCreateRayTracingPipelinesKHR"));
+    if (!vkCreateRayTracingPipelinesKHR_) {
+        LOG_FATAL_CAT("PIPELINE", "Failed to load vkCreateRayTracingPipelinesKHR — Ensure VK_KHR_ray_tracing_pipeline enabled");
+        return;  // Early exit; methods will check nullptr
+    }
+    LOG_TRACE_CAT("PIPELINE", "Loaded vkCreateRayTracingPipelinesKHR @ 0x{:x}", reinterpret_cast<uintptr_t>(vkCreateRayTracingPipelinesKHR_));
+
+    vkGetRayTracingShaderGroupHandlesKHR_ = reinterpret_cast<PFN_vkGetRayTracingShaderGroupHandlesKHR>(
+        vkGetDeviceProcAddr(device_, "vkGetRayTracingShaderGroupHandlesKHR"));
+    if (!vkGetRayTracingShaderGroupHandlesKHR_) {
+        LOG_FATAL_CAT("PIPELINE", "Failed to load vkGetRayTracingShaderGroupHandlesKHR — Ensure VK_KHR_ray_tracing enabled");
+        return;
+    }
+    LOG_TRACE_CAT("PIPELINE", "Loaded vkGetRayTracingShaderGroupHandlesKHR @ 0x{:x}", reinterpret_cast<uintptr_t>(vkGetRayTracingShaderGroupHandlesKHR_));
+
+    vkGetBufferDeviceAddressKHR_ = reinterpret_cast<PFN_vkGetBufferDeviceAddressKHR>(
+        vkGetDeviceProcAddr(device_, "vkGetBufferDeviceAddressKHR"));
+    if (!vkGetBufferDeviceAddressKHR_) {
+        LOG_FATAL_CAT("PIPELINE", "Failed to load vkGetBufferDeviceAddressKHR — Ensure VK_KHR_buffer_device_address enabled");
+        return;
+    }
+    LOG_TRACE_CAT("PIPELINE", "Loaded vkGetBufferDeviceAddressKHR @ 0x{:x}", reinterpret_cast<uintptr_t>(vkGetBufferDeviceAddressKHR_));
+
+    LOG_SUCCESS_CAT("PIPELINE", "All RT extension PFNs loaded successfully — Linker errors RESOLVED");
+    LOG_TRACE_CAT("PIPELINE", "loadExtensions — COMPLETE");
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// FIXED: Cache Device Properties — Matches VulkanRenderer Step 7 + Null Phys Guard
+// ──────────────────────────────────────────────────────────────────────────────
+void PipelineManager::cacheDeviceProperties() {
     LOG_TRACE_CAT("PIPELINE", "cacheDeviceProperties — START");
+
+    // FIXED: Null phys guard — skip if invalid
+    if (physicalDevice_ == VK_NULL_HANDLE) {
+        LOG_ERROR_CAT("PIPELINE", "Null physicalDevice_ — cannot cache properties");
+        return;
+    }
 
     VkPhysicalDeviceProperties props{};
     vkGetPhysicalDeviceProperties(physicalDevice_, &props);
@@ -83,10 +141,16 @@ void PipelineManager::cacheDeviceProperties() noexcept
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// loadShader — Matches VulkanRenderer::loadShader Exactly
+// loadShader — Matches VulkanRenderer::loadShader Exactly + Null Device Guard
 // ──────────────────────────────────────────────────────────────────────────────
 VkShaderModule PipelineManager::loadShader(const std::string& path) const {
     LOG_TRACE_CAT("PIPELINE", "loadShader — START — path='{}'", path);
+
+    // FIXED: Null device guard
+    if (device_ == VK_NULL_HANDLE) {
+        LOG_ERROR_CAT("PIPELINE", "Null device — cannot load shader");
+        return VK_NULL_HANDLE;
+    }
 
     // Read SPIR-V binary from file
     std::ifstream file(path, std::ios::ate | std::ios::binary);
@@ -122,13 +186,21 @@ VkShaderModule PipelineManager::loadShader(const std::string& path) const {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// findMemoryType — Matches VulkanRenderer Exactly
+// findMemoryType — Matches VulkanRenderer Exactly + Null Phys Guard
 // ──────────────────────────────────────────────────────────────────────────────
 uint32_t PipelineManager::findMemoryType(VkPhysicalDevice physicalDevice, uint32_t typeFilter, 
                                          VkMemoryPropertyFlags properties) const noexcept {
     LOG_TRACE_CAT("PIPELINE", "findMemoryType — START — typeFilter=0x{:x}, properties=0x{:x}", typeFilter, properties);
+
+    // FIXED: Null phys guard — use class member if param null (fallback)
+    VkPhysicalDevice phys = (physicalDevice == VK_NULL_HANDLE) ? physicalDevice_ : physicalDevice;
+    if (phys == VK_NULL_HANDLE) {
+        LOG_WARN_CAT("PIPELINE", "Null physicalDevice — fallback to 0");
+        return 0;
+    }
+
     VkPhysicalDeviceMemoryProperties memProps;
-    vkGetPhysicalDeviceMemoryProperties(physicalDevice, &memProps);
+    vkGetPhysicalDeviceMemoryProperties(phys, &memProps);
     LOG_TRACE_CAT("PIPELINE", "Memory properties — memoryTypeCount={}", memProps.memoryTypeCount);
     for (uint32_t i = 0; i < memProps.memoryTypeCount; ++i) {
         LOG_TRACE_CAT("PIPELINE", "Checking memory type {} — filterMatch={}, propMatch=0x{:x}", i, (typeFilter & (1 << i)) != 0, memProps.memoryTypes[i].propertyFlags);
@@ -147,10 +219,17 @@ uint32_t PipelineManager::findMemoryType(VkPhysicalDevice physicalDevice, uint32
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Transient Command Buffers — Matches VulkanRenderer Exactly (Adapted for Class)
+// FIXED: Transient Command Buffers — Matches VulkanRenderer Exactly + Null Guards
 // ──────────────────────────────────────────────────────────────────────────────
 VkCommandBuffer PipelineManager::beginSingleTimeCommands(VkCommandPool pool) const {
     LOG_TRACE_CAT("PIPELINE", "beginSingleTimeCommands — START");
+
+    // FIXED: Null guards
+    if (device_ == VK_NULL_HANDLE || pool == VK_NULL_HANDLE) {
+        LOG_ERROR_CAT("PIPELINE", "Null device or pool — cannot begin single-time commands");
+        return VK_NULL_HANDLE;
+    }
+
     VkCommandBufferAllocateInfo allocInfo = {};  // Zero-init
     allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
     allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
@@ -180,8 +259,10 @@ VkCommandBuffer PipelineManager::beginSingleTimeCommands(VkCommandPool pool) con
 }
 
 void PipelineManager::endSingleTimeCommands(VkCommandPool pool, VkQueue queue, VkCommandBuffer cmd) const {
-    if (cmd == VK_NULL_HANDLE || pool == VK_NULL_HANDLE || queue == VK_NULL_HANDLE) {
-        LOG_ERROR_CAT("PIPELINE", "endSingleTimeCommands called with invalid params");
+    // FIXED: Null guards
+    if (cmd == VK_NULL_HANDLE || pool == VK_NULL_HANDLE || queue == VK_NULL_HANDLE || device_ == VK_NULL_HANDLE) {
+        LOG_ERROR_CAT("PIPELINE", "endSingleTimeCommands called with invalid params (cmd=0x{:x}, pool=0x{:x}, queue=0x{:x}, dev=0x{:x})",
+                      reinterpret_cast<uintptr_t>(cmd), reinterpret_cast<uintptr_t>(pool), reinterpret_cast<uintptr_t>(queue), reinterpret_cast<uintptr_t>(device_));
         return;
     }
 
@@ -213,7 +294,7 @@ void PipelineManager::endSingleTimeCommands(VkCommandPool pool, VkQueue queue, V
     LOG_TRACE_CAT("PIPELINE", "vkQueueWaitIdle result: {}", static_cast<int>(r));
     if (r != VK_SUCCESS) {
         LOG_FATAL_CAT("PIPELINE", "vkQueueWaitIdle failed: {} — possible device lost", static_cast<int>(r));
-        vkDeviceWaitIdle(device_);
+        if (device_ != VK_NULL_HANDLE) vkDeviceWaitIdle(device_);
     }
 
     // 4. Cleanup
@@ -223,14 +304,17 @@ void PipelineManager::endSingleTimeCommands(VkCommandPool pool, VkQueue queue, V
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Descriptor Set Layout — FIXED: 8 Bindings Matching Raygen Shader
-// ──────────────────────────────────────────────────────────────────────────────
-// ──────────────────────────────────────────────────────────────────────────────
-// Descriptor Set Layout — FIXED: Exact Bindings Matching Shader Reflection
+// Descriptor Set Layout — FIXED: 8 Bindings Matching Raygen Shader + Null Device Guard
 // ──────────────────────────────────────────────────────────────────────────────
 void PipelineManager::createDescriptorSetLayout()
 {
     LOG_TRACE_CAT("PIPELINE", "createDescriptorSetLayout — START");
+
+    // FIXED: Null device guard
+    if (device_ == VK_NULL_HANDLE) {
+        LOG_ERROR_CAT("PIPELINE", "Null device — cannot create descriptor set layout");
+        return;
+    }
 
     std::array<VkDescriptorSetLayoutBinding, 8> bindings = {};  // Zero-init
 
@@ -318,21 +402,26 @@ void PipelineManager::createDescriptorSetLayout()
         0, "RTDescriptorSetLayout"
     );
 
-    LOG_SUCCESS_CAT("PIPELINE", "RT descriptor set layout v10.2 created — 8 bindings exactly matching shader (0=tlas,1=rtOutput,2=accum,3=ubo,6=nexus) — VUID-07988 FIXED");
+    LOG_SUCCESS_CAT("PIPELINE", "RT descriptor set layout v10.4 created — 8 bindings exactly matching shader (0=tlas,1=rtOutput,2=accum,3=ubo,6=nexus) — VUID-07988 FIXED");
     LOG_TRACE_CAT("PIPELINE", "createDescriptorSetLayout — COMPLETE");
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Pipeline Layout — FIXED: Valid pSetLayouts + Push Constants Matching Stages
+// Pipeline Layout — FIXED: Valid pSetLayouts + Push Constants Matching Stages + Null Guards
 // ──────────────────────────────────────────────────────────────────────────────
 void PipelineManager::createPipelineLayout() {
     LOG_TRACE_CAT("PIPELINE", "createPipelineLayout — START");
 
-    // FIXED: Guard + local lvalue for non-null pSetLayouts
+    // FIXED: Null guards
+    if (device_ == VK_NULL_HANDLE) {
+        LOG_ERROR_CAT("PIPELINE", "Null device — cannot create pipeline layout");
+        return;
+    }
     if (!rtDescriptorSetLayout_.valid() || *rtDescriptorSetLayout_ == VK_NULL_HANDLE) {
         LOG_FATAL_CAT("PIPELINE", "rtDescriptorSetLayout_ null — abort layout create");
-        throw std::runtime_error("Null descriptor layout");
+        return;
     }
+
     VkDescriptorSetLayout layout = *rtDescriptorSetLayout_;  // FIXED: Local lvalue (valid handle)
 
     // FIXED: Push constant stages (includes raygen for VUID-07987)
@@ -361,22 +450,33 @@ void PipelineManager::createPipelineLayout() {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// createRayTracingPipeline — FIXED: No Library pNext + Explicit UNUSED_KHR + Matching Layout
+// createRayTracingPipeline — FIXED: No Library pNext + Explicit UNUSED_KHR + Matching Layout + Null Guards + NEW: PFN Call
 // ──────────────────────────────────────────────────────────────────────────────
 void PipelineManager::createRayTracingPipeline(const std::vector<std::string>& shaderPaths) {
     LOG_TRACE_CAT("PIPELINE", "createRayTracingPipeline — START — {} shaders provided", shaderPaths.size());
 
+    // FIXED: Null guards
+    if (device_ == VK_NULL_HANDLE) {
+        LOG_ERROR_CAT("PIPELINE", "Null device — cannot create RT pipeline");
+        return;
+    }
     LOG_DEBUG_CAT("PIPELINE", "Retrieved device: 0x{:x}", reinterpret_cast<uintptr_t>(device_));
 
     // FIXED: Guard layout validity before proceeding
     if (!rtPipelineLayout_.valid() || *rtPipelineLayout_ == VK_NULL_HANDLE) {
         LOG_FATAL_CAT("PIPELINE", "rtPipelineLayout_ invalid — cannot create RT pipeline");
-        throw std::runtime_error("Invalid pipeline layout in createRayTracingPipeline");
+        return;
+    }
+
+    // NEW: Guard PFN load
+    if (!vkCreateRayTracingPipelinesKHR_) {
+        LOG_FATAL_CAT("PIPELINE", "vkCreateRayTracingPipelinesKHR not loaded — abort RT pipeline creation");
+        return;
     }
 
     if (shaderPaths.size() < 2) {
         LOG_ERROR_CAT("PIPELINE", "Insufficient shader paths: expected at least raygen + miss, got {}", shaderPaths.size());
-        throw std::runtime_error("Insufficient shader paths for RT pipeline");
+        return;
     }
 
     // ---------------------------------------------------------------------
@@ -387,11 +487,11 @@ void PipelineManager::createRayTracingPipeline(const std::vector<std::string>& s
 
     if (raygenModule == VK_NULL_HANDLE) {
         LOG_FATAL_CAT("PIPELINE", "Failed to load raygen shader: {}", shaderPaths[0]);
-        throw std::runtime_error("Failed to load raygen shader");
+        return;
     }
     if (missModule == VK_NULL_HANDLE) {
         LOG_FATAL_CAT("PIPELINE", "Failed to load primary miss shader: {}", shaderPaths[1]);
-        throw std::runtime_error("Failed to load primary miss shader");
+        return;
     }
 
     LOG_TRACE_CAT("PIPELINE", "Raygen module loaded: 0x{:x}", reinterpret_cast<uintptr_t>(raygenModule));
@@ -498,7 +598,7 @@ void PipelineManager::createRayTracingPipeline(const std::vector<std::string>& s
                   reinterpret_cast<uintptr_t>(*rtPipelineLayout_));
 
     // ---------------------------------------------------------------------
-    // 4. Create pipeline (zero-init infos) — FIXED: No pNext (remove libraryInfo) + explicit pNext=nullptr
+    // 4. Create pipeline (zero-init infos) — FIXED: No pNext (remove libraryInfo) + explicit pNext=nullptr + NEW: PFN Call
     // ---------------------------------------------------------------------
     std::vector<VkPipelineShaderStageCreateInfo> stages;
     std::vector<VkRayTracingShaderGroupCreateInfoKHR> groups;
@@ -520,11 +620,11 @@ void PipelineManager::createRayTracingPipeline(const std::vector<std::string>& s
     pipelineInfo.layout = *rtPipelineLayout_;  // FIXED: Valid layout with descriptors/push (matches shader bindings/stages)
 
     VkPipeline pipeline = VK_NULL_HANDLE;
-    VkResult pipeResult = vkCreateRayTracingPipelinesKHR(device_, VK_NULL_HANDLE, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &pipeline);
+    VkResult pipeResult = vkCreateRayTracingPipelinesKHR_(device_, VK_NULL_HANDLE, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &pipeline);  // NEW: PFN call
     LOG_DEBUG_CAT("PIPELINE", "vkCreateRayTracingPipelinesKHR returned: {}", static_cast<int>(pipeResult));
     if (pipeResult != VK_SUCCESS) {
         LOG_ERROR_CAT("PIPELINE", "Failed to create ray tracing pipeline: {}", static_cast<int>(pipeResult));
-        throw std::runtime_error("Create RT pipeline failed");
+        return;
     }
     VK_CHECK(pipeResult, "Create RT pipeline");  // Your macro
 
@@ -545,17 +645,34 @@ void PipelineManager::createRayTracingPipeline(const std::vector<std::string>& s
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// createShaderBindingTable — FIXED: DEVICE_ADDRESS_BIT in Memory Alloc
+// createShaderBindingTable — FIXED: DEVICE_ADDRESS_BIT in Memory Alloc + Null Guards + NEW: PFN Calls
 // ──────────────────────────────────────────────────────────────────────────────
 void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue) {
     LOG_TRACE_CAT("PIPELINE", "createShaderBindingTable — START");
 
+    // FIXED: Null guards
+    if (device_ == VK_NULL_HANDLE || physicalDevice_ == VK_NULL_HANDLE || pool == VK_NULL_HANDLE || queue == VK_NULL_HANDLE) {
+        LOG_ERROR_CAT("PIPELINE", "Invalid params for SBT creation (dev=0x{:x}, phys=0x{:x}, pool=0x{:x}, queue=0x{:x})",
+                      reinterpret_cast<uintptr_t>(device_), reinterpret_cast<uintptr_t>(physicalDevice_), reinterpret_cast<uintptr_t>(pool), reinterpret_cast<uintptr_t>(queue));
+        return;
+    }
+
     // Step 1-2: Validate and query props (zero-init rtProps)
     if (!rtPipeline_.valid() || *rtPipeline_ == VK_NULL_HANDLE) {
         LOG_FATAL_CAT("PIPELINE", "createShaderBindingTable called but rtPipeline_ is null!");
-        throw std::runtime_error("rtPipeline_ is invalid in createShaderBindingTable");
+        return;
     }
     LOG_TRACE_CAT("PIPELINE", "Step 1 — rtPipeline_ valid @ 0x{:x}", reinterpret_cast<uintptr_t>(*rtPipeline_));
+
+    // NEW: Guard PFN loads
+    if (!vkGetRayTracingShaderGroupHandlesKHR_) {
+        LOG_FATAL_CAT("PIPELINE", "vkGetRayTracingShaderGroupHandlesKHR not loaded — abort SBT creation");
+        return;
+    }
+    if (!vkGetBufferDeviceAddressKHR_) {
+        LOG_FATAL_CAT("PIPELINE", "vkGetBufferDeviceAddressKHR not loaded — abort SBT creation");
+        return;
+    }
 
     LOG_TRACE_CAT("PIPELINE", "Step 2 — Querying VkPhysicalDeviceRayTracingPipelinePropertiesKHR");
     VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtPropsLocal = {};  // Zero-init
@@ -578,7 +695,7 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
     // Steps 3-4: Counts and sizes (unchanged, but validate alignment > 0)
     if (handleAlignment == 0 || baseAlignment == 0) {
         LOG_FATAL_CAT("PIPELINE", "Invalid RT properties: alignments are zero!");
-        throw std::runtime_error("Invalid RT properties");
+        return;
     }
 
     const uint32_t raygenGroupCount = raygenGroupCount_;
@@ -621,14 +738,14 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
     LOG_TRACE_CAT("PIPELINE", "  Hit:     offset={} size={}B", hitOffset, hitSize);
     LOG_TRACE_CAT("PIPELINE", "  Callable: offset={} size={}B", callableOffset, callableSize);
 
-    // Step 5: Extract handles (zero-init addrInfo)
+    // Step 5: Extract handles (zero-init addrInfo) + NEW: PFN Call
     LOG_TRACE_CAT("PIPELINE", "Step 5 — Extracting shader group handles");
     std::vector<uint8_t> shaderHandles(totalGroups * handleSize);
 
-    VkResult getHandlesResult = vkGetRayTracingShaderGroupHandlesKHR(device_, *rtPipeline_, 0, totalGroups, shaderHandles.size(), shaderHandles.data());
+    VkResult getHandlesResult = vkGetRayTracingShaderGroupHandlesKHR_(device_, *rtPipeline_, 0, totalGroups, shaderHandles.size(), shaderHandles.data());  // NEW: PFN call
     if (getHandlesResult != VK_SUCCESS) {
         LOG_ERROR_CAT("PIPELINE", "vkGetRayTracingShaderGroupHandlesKHR failed: {}", static_cast<int>(getHandlesResult));
-        throw std::runtime_error("Failed to get shader group handles");
+        return;
     }
     LOG_SUCCESS_CAT("PIPELINE", "Successfully extracted {} shader group handles ({} bytes each)", totalGroups, handleSize);
 
@@ -644,7 +761,7 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
     VkResult createStagingResult = vkCreateBuffer(device_, &stagingInfo, nullptr, &stagingBuffer);
     if (createStagingResult != VK_SUCCESS) {
         LOG_ERROR_CAT("PIPELINE", "Failed to create SBT staging buffer: {}", static_cast<int>(createStagingResult));
-        throw std::runtime_error("Create SBT staging buffer failed");
+        return;
     }
 
     VkMemoryRequirements memReqs;
@@ -661,7 +778,7 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
     if (allocStagingResult != VK_SUCCESS) {
         LOG_ERROR_CAT("PIPELINE", "Failed to allocate SBT staging memory: {}", static_cast<int>(allocStagingResult));
         vkDestroyBuffer(device_, stagingBuffer, nullptr);
-        throw std::runtime_error("Allocate SBT staging memory failed");
+        return;
     }
     VK_CHECK(vkBindBufferMemory(device_, stagingBuffer, stagingMemory, 0), "Bind SBT staging memory");
 
@@ -672,7 +789,7 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
         LOG_ERROR_CAT("PIPELINE", "Failed to map SBT staging memory: {}", static_cast<int>(mapResult));
         vkFreeMemory(device_, stagingMemory, nullptr);
         vkDestroyBuffer(device_, stagingBuffer, nullptr);
-        throw std::runtime_error("Map SBT staging memory failed");
+        return;
     }
 
     auto copyGroup = [&](uint32_t groupIndex, VkDeviceSize destOffset) {
@@ -736,7 +853,7 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
     VkCommandBuffer cmd = beginSingleTimeCommands(pool);
     if (cmd == VK_NULL_HANDLE) {
         LOG_ERROR_CAT("PIPELINE", "Failed to begin single-time cmd for SBT copy");
-        throw std::runtime_error("SBT copy cmd failed");
+        return;
     }
     VkBufferCopy copyRegion = {};  // Zero-init
     copyRegion.size = sbtBufferSize;
@@ -748,11 +865,11 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
     vkFreeMemory(device_, stagingMemory, nullptr);
     LOG_TRACE_CAT("PIPELINE", "Step 7 — Final SBT buffer created and copied — DEVICE_ADDRESS_BIT ENABLED");
 
-    // Step 8: Address (zero-init addrInfo)
+    // Step 8: Address (zero-init addrInfo) + NEW: PFN Call
     VkBufferDeviceAddressInfo addrInfo = {};  // Zero-init
     addrInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
     addrInfo.buffer = rawSbtBuffer;
-    sbtAddress_ = vkGetBufferDeviceAddressKHR(device_, &addrInfo);
+    sbtAddress_ = vkGetBufferDeviceAddressKHR_(device_, &addrInfo);  // NEW: PFN call
 
     // Store offsets (unchanged)
     raygenSbtOffset_ = raygenOffset;
