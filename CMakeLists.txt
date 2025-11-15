@@ -317,50 +317,74 @@ set(SHADER_INCLUDE_FLAGS
 
 set(SHADER_DEBUG_FLAGS -g -O0)
 
-file(GLOB_RECURSE SHADER_SOURCES
-    shaders/raytracing/*.rgen shaders/raytracing/*.rmiss shaders/raytracing/*.rchit
-    shaders/raytracing/*.rahit shaders/raytracing/*.rint shaders/raytracing/*.rcall
-    shaders/compute/*.comp
-    shaders/graphics/*.vert shaders/graphics/*.frag shaders/rasterization/*.vert shaders/rasterization/*.frag
+file(GLOB_RECURSE POTENTIAL_SHADERS
+    shaders/raytracing/*
+    shaders/compute/*
+    shaders/graphics/*
+    shaders/rasterization/*
 )
 
 set(SPV_OUTPUTS "")
-foreach(SRC ${SHADER_SOURCES})
+foreach(SRC ${POTENTIAL_SHADERS})
+    if(IS_DIRECTORY "${SRC}")
+        continue()
+    endif()
+
     get_filename_component(NAME ${SRC} NAME)
     get_filename_component(BASE ${SRC} NAME_WE)
     get_filename_component(DIR ${SRC} DIRECTORY)
     get_filename_component(REL_DIR ${DIR} NAME)
 
     set(OUT_DIR "${BIN_DIR}/assets/shaders/${REL_DIR}")
-    set(SPV "${OUT_DIR}/${BASE}.spv")
+    set(STAGE "")
+    set(TARGET "")
 
     if(REL_DIR STREQUAL "raytracing")
-        set(TARGET --target-spv=spv1.5 --target-env=vulkan1.3)
-        set(STAGE rgen)  # default fallback
-        if(NAME MATCHES "\\.rgen$")
-            set(STAGE rgen)
-        elseif(NAME MATCHES "\\.rmiss$")
-            set(STAGE rmiss)
-        elseif(NAME MATCHES "\\.rchit$")
-            set(STAGE rchit)
-        elseif(NAME MATCHES "\\.rahit$")
-            set(STAGE rahit)
-        elseif(NAME MATCHES "\\.rint$")
-            set(STAGE rint)
-        elseif(NAME MATCHES "\\.rcall$")
-            set(STAGE rcall)
+        if(NAME MATCHES "[_.](rgen|rmiss|rchit|rahit|rint|rcall)(\\.glsl)?$")
+            set(TARGET --target-spv=spv1.5 --target-env=vulkan1.3)
+            if(NAME MATCHES "[_.]rgen(\\.glsl)?$")
+                set(STAGE rgen)
+            elseif(NAME MATCHES "[_.]rmiss(\\.glsl)?$")
+                set(STAGE rmiss)
+            elseif(NAME MATCHES "[_.]rchit(\\.glsl)?$")
+                set(STAGE rchit)
+            elseif(NAME MATCHES "[_.]rahit(\\.glsl)?$")
+                set(STAGE rahit)
+            elseif(NAME MATCHES "[_.]rint(\\.glsl)?$")
+                set(STAGE rint)
+            elseif(NAME MATCHES "[_.]rcall(\\.glsl)?$")
+                set(STAGE rcall)
+            endif()
         endif()
     elseif(REL_DIR MATCHES "compute")
-        set(TARGET --target-spv=spv1.4 --target-env=vulkan1.2)
-        set(STAGE comp)
-    elseif(NAME MATCHES "\\.vert$")
-        set(TARGET --target-spv=spv1.4 --target-env=vulkan1.2)
-        set(STAGE vert)
-    elseif(NAME MATCHES "\\.frag$")
-        set(TARGET --target-spv=spv1.4 --target-env=vulkan1.2)
-        set(STAGE frag)
-    else()
+        if(NAME MATCHES "[_.]comp(\\.glsl)?$")
+            set(TARGET --target-spv=spv1.4 --target-env=vulkan1.2)
+            set(STAGE comp)
+        endif()
+    else()  # graphics or rasterization
+        if(NAME MATCHES "[_.]vert(\\.glsl)?$")
+            set(TARGET --target-spv=spv1.4 --target-env=vulkan1.2)
+            set(STAGE vert)
+        elseif(NAME MATCHES "[_.]frag(\\.glsl)?$")
+            set(TARGET --target-spv=spv1.4 --target-env=vulkan1.2)
+            set(STAGE frag)
+        endif()
+    endif()
+
+    if(NOT STAGE)
         continue()
+    endif()
+
+    get_filename_component(EXT ${SRC} EXT)
+    set(SPV_BASE "${BASE}")
+    if(EXT STREQUAL ".glsl")
+        string(REGEX REPLACE "(_|\\.)?${STAGE}$" "" SPV_BASE "${BASE}")
+    endif()
+    set(SPV "${OUT_DIR}/${SPV_BASE}.spv")
+
+    set(VALIDATION_ENV vulkan1.2)
+    if(REL_DIR STREQUAL "raytracing")
+        set(VALIDATION_ENV vulkan1.3)
     endif()
 
     add_custom_command(
@@ -368,7 +392,7 @@ foreach(SRC ${SHADER_SOURCES})
         COMMAND ${CMAKE_COMMAND} -E make_directory ${OUT_DIR}
         COMMAND ${GLSLC} ${SHADER_INCLUDE_FLAGS} ${TARGET} ${SHADER_DEBUG_FLAGS}
                -fshader-stage=${STAGE} "${SRC}" -o "${SPV}"
-        COMMAND ${SPIRV_VAL} --target-env vulkan1.3 "${SPV}"
+        COMMAND ${SPIRV_VAL} --target-env ${VALIDATION_ENV} "${SPV}"
         DEPENDS "${SRC}"
         COMMENT "glslc → ${REL_DIR}/${NAME} (stage=${STAGE})"
         VERBATIM
@@ -376,18 +400,22 @@ foreach(SRC ${SHADER_SOURCES})
     list(APPEND SPV_OUTPUTS ${SPV})
 endforeach()
 
-# Copy .glsl headers
+# Copy .glsl headers (skip shader sources)
 file(GLOB_RECURSE GLSL_HEADERS shaders/**/*.glsl)
 foreach(H ${GLSL_HEADERS})
-    get_filename_component(NAME ${H} NAME)
+    get_filename_component(HNAME ${H} NAME)
+    if(HNAME MATCHES "[_.](rgen|rmiss|rchit|rahit|rint|rcall|comp|vert|frag)(\\.glsl)?$")
+        continue()
+    endif()
     get_filename_component(DIR ${H} DIRECTORY)
     get_filename_component(REL_DIR ${DIR} NAME)
-    set(OUT "${BIN_DIR}/assets/shaders/${REL_DIR}/${NAME}")
+    set(OUT "${BIN_DIR}/assets/shaders/${REL_DIR}/${HNAME}")
     add_custom_command(
         OUTPUT ${OUT}
         COMMAND ${CMAKE_COMMAND} -E copy_if_different ${H} ${OUT}
         DEPENDS ${H}
-        COMMENT "Copy .glsl: ${REL_DIR}/${NAME}"
+        COMMENT "Copy .glsl header: ${REL_DIR}/${HNAME}"
+        VERBATIM
     )
     list(APPEND SPV_OUTPUTS ${OUT})
 endforeach()
