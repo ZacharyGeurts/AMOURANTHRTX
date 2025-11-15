@@ -2,7 +2,7 @@ Currently compiles and I am establishing the boot process.
 See the [Wiki](https://github.com/ZacharyGeurts/AMOURANTHRTX/wiki) for engine information.  
 AMOURANTH RTX a next generation engine for raw performance.  
 <img width="820" src="https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/assets/textures/ammo.png" />  
-<img width="820" src="https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/media/G5lqJPqXwAAwUZG.jpeg" />  
+<img width="820" src="https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/media/Screenshot%20from%202025-11-14%2021-05-10.png" />  
 
 AMOURANTH RTX © 2025 by Zachary Geurts gzac5314@gmail.com is licensed under [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0)  
 Unreal developers may consider some of this parody.  
