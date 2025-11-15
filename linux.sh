@@ -31,11 +31,11 @@ echo "Building AMOURANTH RTX for Linux..."
 cmake --build . -j $(nproc)
 
 # Verify output
-if [ -f "../$BIN_DIR/Navigator" ]; then
+if [ -f "../bin/Linux/Navigator" ]; then
     echo "Linux build successful! Binary located at ../$BIN_DIR/Navigator"
 else
-    echo "Linux build finished! Check for errors above."
+    echo "Linux build completed. cd bin/Linux/ ./Navigator"
     exit 1
 fi
 
-echo "Linux build completed."
+echo "ERRORS DURING BUILD PROCESS!!!"
