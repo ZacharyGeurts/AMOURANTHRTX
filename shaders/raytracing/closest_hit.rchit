@@ -1,3 +1,4 @@
+// File: shaders/raytracing/closesthit.chit
 #version 460
 #extension GL_EXT_ray_tracing : require
 
@@ -13,5 +14,5 @@ void main()
     vec3 baseColor = vec3(0.9, 0.2, 0.7); // Signature Amouranth pink
     vec3 diffuse = baseColor * (0.1 + 0.9 * NdotL);
 
-    hitValue = diffuse;
+    hitValue = diffuse; // Non-zero lit color
 }
