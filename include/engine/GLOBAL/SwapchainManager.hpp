@@ -71,6 +71,20 @@ public:
     }
 
     void cleanup() noexcept {
+        // FIXED: Add vkDeviceWaitIdle — Ensures all commands complete before destroying swapchain/images/views
+        //        (Resolves VUID-vkDestroyImageView-imageView-01026: ImageView in use by descriptor set/cmds during shutdown)
+        if (device_ != VK_NULL_HANDLE) {
+            LOG_TRACE_CAT("SWAPCHAIN", "cleanup — vkDeviceWaitIdle (shutdown safety)");
+            VkResult idleResult = vkDeviceWaitIdle(device_);
+            if (idleResult == VK_SUCCESS) {
+                LOG_TRACE_CAT("SWAPCHAIN", "vkDeviceWaitIdle — SUCCESS: All cmds complete, views safe to destroy");
+            } else {
+                LOG_WARN_CAT("SWAPCHAIN", "vkDeviceWaitIdle failed: {} — Proceeding (possible device lost)", static_cast<int>(idleResult));
+            }
+        } else {
+            LOG_TRACE_CAT("SWAPCHAIN", "Null device — Skipping vkDeviceWaitIdle (dummy state)");
+        }
+
         // FIXED: Guard all destroys/resets — prevents VUID-vkDestroySwapchainKHR-device-parameter & vkDestroyImageView-device-parameter
         VkDevice dev = device_;  // Cache for efficiency
         if (dev != VK_NULL_HANDLE) {

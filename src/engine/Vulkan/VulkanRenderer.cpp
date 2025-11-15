@@ -3,16 +3,6 @@
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
 //
-// VulkanRenderer — Production Implementation v10.5 (Validation Fixes) — NOV 15 2025
-// • FIXED: Push constants stageFlags=RAYGEN|HIT|MISS (VUID-01796)
-// • FIXED: updateRTXDescriptors impl — bindings 0/1/2/3/6 w/ GENERAL layout (VUID-08114)
-// • FIXED: Per-frame descriptor updates in renderFrame (tlas/ubo/images dynamic)
-// • FIXED: Image barriers ensure GENERAL at RT write (VUID-09600)
-// • FIXED: Render loop logging — NO trace/debug/info, ONLY errors/warns
-// • Retained: Delegated to PipelineManager; Triple buffering; Options:: respect
-// • C++20 compliant, -Werror clean
-// • PINK PHOTONS ETERNAL — 240 FPS UNLOCKED — FIRST LIGHT ACHIEVED
-//
 // Dual Licensed:
 // 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
 //    https://creativecommons.org/licenses/by-nc/4.0/legalcode
@@ -163,6 +153,38 @@ void VulkanRenderer::cleanup() noexcept {
         SWAPCHAIN.cleanup();  // Assume SWAPCHAIN has internal guards
     } else {
         LOG_WARN_CAT("RENDERER", "Skipped SWAPCHAIN.cleanup — null device");
+    }
+
+    // ── NEW: Free All Descriptor Sets BEFORE Destroying Views/Images/Pools (Fixes VUID-vkDestroyImageView-imageView-01026) ──
+    LOG_TRACE_CAT("RENDERER", "cleanup — Freeing descriptor sets (unbinds views from sets)");
+    if (dev != VK_NULL_HANDLE) {
+        std::vector<VkDescriptorSet> rtSets(rtDescriptorSets_.begin(), rtDescriptorSets_.end());
+        std::vector<VkDescriptorSet> tonemapSets(tonemapSets_.begin(), tonemapSets_.end());
+        std::vector<VkDescriptorSet> denoiserSets(denoiserSets_.begin(), denoiserSets_.end());
+        // Add other sets if any (e.g., from g_rtx() or graphics/compute)
+
+        // Free RT sets from rtDescriptorPool_
+        if (!rtSets.empty() && rtDescriptorPool_.valid() && *rtDescriptorPool_ != VK_NULL_HANDLE) {
+            vkFreeDescriptorSets(dev, *rtDescriptorPool_, static_cast<uint32_t>(rtSets.size()), rtSets.data());
+            rtDescriptorSets_.clear();
+            LOG_TRACE_CAT("RENDERER", "Freed {} RT descriptor sets", rtSets.size());
+        }
+
+        // Free tonemap/denoiser from descriptorPool_ (assume shared pool)
+        std::vector<VkDescriptorSet> graphicsSets;
+        graphicsSets.insert(graphicsSets.end(), tonemapSets.begin(), tonemapSets.end());
+        graphicsSets.insert(graphicsSets.end(), denoiserSets.begin(), denoiserSets.end());
+        if (!graphicsSets.empty() && descriptorPool_.valid() && *descriptorPool_ != VK_NULL_HANDLE) {
+            vkFreeDescriptorSets(dev, *descriptorPool_, static_cast<uint32_t>(graphicsSets.size()), graphicsSets.data());
+            tonemapSets_.clear();
+            denoiserSets_.clear();
+            LOG_TRACE_CAT("RENDERER", "Freed {} graphics descriptor sets", graphicsSets.size());
+        }
+    } else {
+        LOG_WARN_CAT("RENDERER", "Skipped descriptor set free — null device");
+        rtDescriptorSets_.clear();
+        tonemapSets_.clear();
+        denoiserSets_.clear();
     }
 
     // ── Sync Objects (only what you actually have) ────────────────────────
@@ -880,16 +902,139 @@ void VulkanRenderer::createEnvironmentMap() {
 }
 
 void VulkanRenderer::createNexusScoreImage(VkPhysicalDevice phys, VkDevice dev, VkCommandPool pool, VkQueue queue) {
-    LOG_TRACE_CAT("RENDERER", "createNexusScoreImage — START");
     if (!Options::RTX::ENABLE_ADAPTIVE_SAMPLING) {
-        LOG_TRACE_CAT("RENDERER", "NexusScore disabled via options");
-        LOG_TRACE_CAT("RENDERER", "createNexusScoreImage — COMPLETE (disabled)");
         return;
     }
-    LOG_INFO_CAT("RENDERER", "Creating NexusScore image for adaptive sampling");
-    LOG_TRACE_CAT("RENDERER", "NexusScore image creation placeholder — phys=0x{:x}, dev=0x{:x}, pool=0x{:x}, queue=0x{:x}", 
-                  reinterpret_cast<uintptr_t>(phys), reinterpret_cast<uintptr_t>(dev), reinterpret_cast<uintptr_t>(pool), reinterpret_cast<uintptr_t>(queue));
-    LOG_TRACE_CAT("RENDERER", "createNexusScoreImage — COMPLETE");
+
+    // FIXED: Full impl — single RGBA32_SFLOAT storage image in GENERAL layout (matches shader Rgba32f)
+    VkFormat format = VK_FORMAT_R32G32B32A32_SFLOAT;
+    VkImage rawImage = VK_NULL_HANDLE;
+    VkDeviceMemory rawMemory = VK_NULL_HANDLE;
+    VkImageView rawView = VK_NULL_HANDLE;
+
+    try {
+        // === 1. Create Image ===
+        VkImageCreateInfo imageInfo{};
+        imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+        imageInfo.imageType = VK_IMAGE_TYPE_2D;
+        imageInfo.format = format;
+        imageInfo.extent = { static_cast<uint32_t>(width_), static_cast<uint32_t>(height_), 1 };
+        imageInfo.mipLevels = 1;
+        imageInfo.arrayLayers = 1;
+        imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+        imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+        imageInfo.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+        imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+        VK_CHECK(vkCreateImage(dev, &imageInfo, nullptr, &rawImage), "Create nexus image");
+
+        // === 2. Allocate & Bind Memory ===
+        VkMemoryRequirements memReqs{};
+        vkGetImageMemoryRequirements(dev, rawImage, &memReqs);
+
+        uint32_t memType = pipelineManager_.findMemoryType(phys, memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        if (memType == static_cast<uint32_t>(~0u)) {
+            throw std::runtime_error("No suitable memory type for nexus image");
+        }
+
+        VkMemoryAllocateInfo allocInfo{};
+        allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        allocInfo.allocationSize = memReqs.size;
+        allocInfo.memoryTypeIndex = memType;
+
+        VK_CHECK(vkAllocateMemory(dev, &allocInfo, nullptr, &rawMemory), "Alloc nexus memory");
+        VK_CHECK(vkBindImageMemory(dev, rawImage, rawMemory, 0), "Bind nexus memory");
+
+        // === 3. Transition to GENERAL ===
+        VkCommandBuffer cmd = pipelineManager_.beginSingleTimeCommands(pool);
+        if (cmd == VK_NULL_HANDLE) {
+            throw std::runtime_error("Failed to begin single-time cmd for nexus transition");
+        }
+
+        VkImageMemoryBarrier barrier{};
+        barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+        barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.image = rawImage;
+        barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        barrier.subresourceRange.levelCount = 1;
+        barrier.subresourceRange.layerCount = 1;
+
+        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+
+        pipelineManager_.endSingleTimeCommands(pool, queue, cmd);
+
+        // === 4. Create Image View ===
+        VkImageViewCreateInfo viewInfo{};
+        viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        viewInfo.image = rawImage;
+        viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        viewInfo.format = format;
+        viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        viewInfo.subresourceRange.levelCount = 1;
+        viewInfo.subresourceRange.layerCount = 1;
+
+        VK_CHECK(vkCreateImageView(dev, &viewInfo, nullptr, &rawView), "Create nexus view");
+
+        // === 5. Wrap in Handles ===
+        hypertraceScoreImage_ = RTX::Handle<VkImage>(rawImage, dev, vkDestroyImage, 0, "NexusScoreImage");
+        hypertraceScoreMemory_ = RTX::Handle<VkDeviceMemory>(rawMemory, dev, vkFreeMemory, memReqs.size, "NexusScoreMemory");
+        hypertraceScoreView_ = RTX::Handle<VkImageView>(rawView, dev, vkDestroyImageView, 0, "NexusScoreView");
+
+        // Staging buffer (host-visible for score uploads if needed; init to 0)
+        VkDeviceSize stagingSize = static_cast<VkDeviceSize>(width_) * height_ * sizeof(float) * 4;  // RGBA
+        uint64_t stagingEnc = 0;
+        BUFFER_CREATE(stagingEnc, stagingSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, "NexusStaging");
+        void* stagingData = nullptr;
+        BUFFER_MAP(stagingEnc, stagingData);
+        memset(stagingData, 0, stagingSize);  // Init to 0 score
+        BUFFER_UNMAP(stagingEnc);
+
+        // Copy staging to image (clear to 0)
+        cmd = pipelineManager_.beginSingleTimeCommands(pool);
+        VkBuffer stagingBuf = RAW_BUFFER(stagingEnc);
+        VkBufferImageCopy region{};
+        region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        region.imageSubresource.mipLevel = 0;
+        region.imageSubresource.baseArrayLayer = 0;
+        region.imageSubresource.layerCount = 1;
+        region.imageExtent = { static_cast<uint32_t>(width_), static_cast<uint32_t>(height_), 1 };
+
+        // FIXED: Transition to TRANSFER_DST_OPTIMAL before copy
+        VkImageMemoryBarrier preCopyBarrier{};
+        preCopyBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        preCopyBarrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+        preCopyBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        preCopyBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        preCopyBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        preCopyBarrier.image = *hypertraceScoreImage_;
+        preCopyBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        preCopyBarrier.subresourceRange.levelCount = 1;
+        preCopyBarrier.subresourceRange.layerCount = 1;
+        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &preCopyBarrier);
+
+        vkCmdCopyBufferToImage(cmd, stagingBuf, *hypertraceScoreImage_, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+
+        // Transition back to GENERAL post-copy
+        barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+        barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+        pipelineManager_.endSingleTimeCommands(pool, queue, cmd);
+
+        // FIXED: Destroy staging immediately after use — no Handle wrapping to avoid double-destroy
+        BUFFER_DESTROY(stagingEnc);
+
+    } catch (const std::exception& e) {
+        LOG_FATAL_CAT("RENDERER", "Exception in createNexusScoreImage: {} — cleaning up", e.what());
+        if (rawView != VK_NULL_HANDLE) vkDestroyImageView(dev, rawView, nullptr);
+        if (rawMemory != VK_NULL_HANDLE) vkFreeMemory(dev, rawMemory, nullptr);
+        if (rawImage != VK_NULL_HANDLE) vkDestroyImage(dev, rawImage, nullptr);
+        throw;
+    }
 }
 
 void VulkanRenderer::recordRayTracingCommandBuffer(VkCommandBuffer cmd) noexcept
@@ -933,6 +1078,9 @@ void VulkanRenderer::recordRayTracingCommandBuffer(VkCommandBuffer cmd) noexcept
         for (auto& img : rtOutputImages_)  clearImage(img);
         if (Options::RTX::ENABLE_ACCUMULATION) {
             for (auto& img : accumImages_) clearImage(img);
+        }
+        if (Options::RTX::ENABLE_ADAPTIVE_SAMPLING && hypertraceScoreImage_.valid()) {
+            clearImage(hypertraceScoreImage_);
         }
 
         resetAccumulation_ = false;
@@ -1270,19 +1418,30 @@ void VulkanRenderer::initializeAllBufferData(uint32_t frames, VkDeviceSize unifo
     LOG_INFO_CAT("RENDERER", "Initializing buffer data: {} frames | Uniform: {} MB | Material: {} MB", 
         frames, uniformSize / (1024ULL*1024ULL), materialSize / (1024ULL*1024ULL));  // Use ULL for safe division
 
-    // Resize and initialize
+    // FIXED: Resize all buffer encodings + create actual buffers via macros
     uniformBufferEncs_.resize(frames);
+    materialBufferEncs_.resize(frames);
+    dimensionBufferEncs_.resize(frames);
     if (uniformBufferEncs_.size() != static_cast<size_t>(frames)) {
         LOG_ERROR_CAT("RENDERER", "initializeAllBufferData: Resize failed — expected={}, got={}", frames, uniformBufferEncs_.size());
         uniformBufferEncs_.clear();  // Reset to safe state
         return;
     }
 
-    for (auto& enc : uniformBufferEncs_) {
-        enc = 0;
+    VkDeviceSize dimSize = 64;  // sizeof(uvec2 extent) + uint32 spp + uint32 frame + pad
+
+    for (uint32_t i = 0; i < frames; ++i) {
+        // Uniform Buffer (camera/proj etc.)
+        BUFFER_CREATE(uniformBufferEncs_[i], uniformSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, std::format("UBO[{}]", i).c_str());
+
+        // Material Storage Buffer
+        BUFFER_CREATE(materialBufferEncs_[i], materialSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, std::format("Materials[{}]", i).c_str());
+
+        // Dimension Storage Buffer (small: extent, spp, frame)
+        BUFFER_CREATE(dimensionBufferEncs_[i], dimSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, std::format("Dimensions[{}]", i).c_str());
     }
 
-    LOG_TRACE_CAT("RENDERER", "Resized uniformBufferEncs_ to {}, initialized to 0", uniformBufferEncs_.size());
+    LOG_TRACE_CAT("RENDERER", "Resized & created buffers for {} frames (UBO/Mat/Dim)", frames);
     LOG_TRACE_CAT("RENDERER", "initializeAllBufferData — COMPLETE");
 }
 
@@ -1477,6 +1636,11 @@ void VulkanRenderer::updateRTXDescriptors(uint32_t frame) noexcept {
     // • From RTX::LAS::get().getTlas() — single global TLAS (requires public getter in LAS.hpp)
     {
         VkAccelerationStructureKHR tlasHandle = RTX::LAS::get().getTLAS();  // FIXED: Use public getter
+        // FIXED: Guard invalid handle — set null to avoid VUID-VkWriteDescriptorSetAccelerationStructureKHR-pAccelerationStructures-parameter
+        if (tlasHandle == VK_NULL_HANDLE || reinterpret_cast<uint64_t>(tlasHandle) < 0x1000) {  // Basic sanity: low addresses likely invalid
+            LOG_WARN_CAT("RENDERER", "Invalid TLAS handle 0x{:x} — using VK_NULL_HANDLE for frame {}", reinterpret_cast<uint64_t>(tlasHandle), frame);
+            tlasHandle = VK_NULL_HANDLE;
+        }
         accelInfo.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR;
         accelInfo.accelerationStructureCount = 1;
         accelInfo.pAccelerationStructures = &tlasHandle;
@@ -1670,10 +1834,10 @@ void VulkanRenderer::updateTonemapDescriptorsInitial() {
 }
 
 void VulkanRenderer::updateDenoiserDescriptors() {
-    LOG_TRACE_CAT("RENDERER", "updateDenoiserDescriptors — START");
+    //LOG_TRACE_CAT("RENDERER", "updateDenoiserDescriptors — START");
 
     if (denoiserSets_.empty() || !denoiserView_.valid() || rtOutputViews_.empty()) {
-        LOG_TRACE_CAT("RENDERER", "updateDenoiserDescriptors — SKIPPED");
+        //LOG_TRACE_CAT("RENDERER", "updateDenoiserDescriptors — SKIPPED");
         return;
     }
 
@@ -1706,7 +1870,7 @@ void VulkanRenderer::updateDenoiserDescriptors() {
 
     const auto& ctx = RTX::g_ctx();  // const ref
     vkUpdateDescriptorSets(ctx.vkDevice(), static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
-    LOG_TRACE_CAT("RENDERER", "updateDenoiserDescriptors — COMPLETE");
+    //LOG_TRACE_CAT("RENDERER", "updateDenoiserDescriptors — COMPLETE");
 }
 
 void VulkanRenderer::performDenoisingPass(VkCommandBuffer cmd) {
@@ -1801,6 +1965,28 @@ void VulkanRenderer::updateUniformBuffer(uint32_t frame, const Camera& camera, f
 
     std::memcpy(data, &ubo, sizeof(ubo));
     vkUnmapMemory(ctx.vkDevice(), *sharedStagingMemory_);
+
+    // FIXED: Copy staging to device UBO (use single-time commands for immediate copy)
+    VkCommandPool cmdPool = ctx.commandPool();
+    VkQueue queue = ctx.graphicsQueue();
+    VkCommandBuffer copyCmd = pipelineManager_.beginSingleTimeCommands(cmdPool);
+    if (copyCmd != VK_NULL_HANDLE) {
+        VkBufferCopy copyRegion{};
+        copyRegion.srcOffset = 0;
+        copyRegion.dstOffset = 0;
+        copyRegion.size = sizeof(ubo);
+        VkBuffer stagingBuf = *sharedStagingBuffer_;
+        VkBuffer deviceBuf = RAW_BUFFER(uniformBufferEncs_[frame]);
+        vkCmdCopyBuffer(copyCmd, stagingBuf, deviceBuf, 1, &copyRegion);
+
+        // Barrier for uniform read
+        VkMemoryBarrier uniformBarrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
+        uniformBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        uniformBarrier.dstAccessMask = VK_ACCESS_UNIFORM_READ_BIT;
+        vkCmdPipelineBarrier(copyCmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, 0, 1, &uniformBarrier, 0, nullptr, 0, nullptr);
+
+        pipelineManager_.endSingleTimeCommands(cmdPool, queue, copyCmd);
+    }
 }
 
 void VulkanRenderer::updateTonemapUniform(uint32_t frame) {
@@ -1882,43 +2068,44 @@ void VulkanRenderer::setRenderMode(int mode) noexcept {
 // Resize Handling
 // ──────────────────────────────────────────────────────────────────────────────
 void VulkanRenderer::handleResize(int w, int h) noexcept {
-    LOG_TRACE_CAT("RENDERER", "handleResize — START — w={}, h={}", w, h);
+    //LOG_TRACE_CAT("RENDERER", "handleResize — START — w={}, h={}", w, h);
     if (w <= 0 || h <= 0) {
-        LOG_TRACE_CAT("RENDERER", "Invalid dimensions — abort");
-        LOG_TRACE_CAT("RENDERER", "handleResize — COMPLETE (invalid)");
+        //LOG_TRACE_CAT("RENDERER", "Invalid dimensions — abort");
+        //LOG_TRACE_CAT("RENDERER", "handleResize — COMPLETE (invalid)");
         return;
     }
     if (width_ == w && height_ == h) {
-        LOG_TRACE_CAT("RENDERER", "No change needed");
-        LOG_TRACE_CAT("RENDERER", "handleResize — COMPLETE (no change)");
+        //LOG_TRACE_CAT("RENDERER", "No change needed");
+        //LOG_TRACE_CAT("RENDERER", "handleResize — COMPLETE (no change)");
         return;
     }
 
     width_ = w;
     height_ = h;
     resetAccumulation_ = true;
-    LOG_TRACE_CAT("RENDERER", "Updated dimensions — width_={}, height_={}, resetAccumulation_={}", width_, height_, resetAccumulation_);
+    //LOG_TRACE_CAT("RENDERER", "Updated dimensions — width_={}, height_={}, resetAccumulation_={}", width_, height_, resetAccumulation_);
 
     const auto& ctx = RTX::g_ctx();  // const ref
-    LOG_TRACE_CAT("RENDERER", "vkDeviceWaitIdle — START");
+    //LOG_TRACE_CAT("RENDERER", "vkDeviceWaitIdle — START");
     vkDeviceWaitIdle(ctx.vkDevice());
-    LOG_TRACE_CAT("RENDERER", "vkDeviceWaitIdle — COMPLETE");
+    //LOG_TRACE_CAT("RENDERER", "vkDeviceWaitIdle — COMPLETE");
 
-    LOG_TRACE_CAT("RENDERER", "SWAPCHAIN.recreate — START");
+    //LOG_TRACE_CAT("RENDERER", "SWAPCHAIN.recreate — START");
     SWAPCHAIN.recreate(w, h);
-    LOG_TRACE_CAT("RENDERER", "SWAPCHAIN.recreate — COMPLETE");
+    //LOG_TRACE_CAT("RENDERER", "SWAPCHAIN.recreate — COMPLETE");
 
-    LOG_TRACE_CAT("RENDERER", "Recreating render targets — START");
+    //LOG_TRACE_CAT("RENDERER", "Recreating render targets — START");
     createRTOutputImages();
     createAccumulationImages();
     createDenoiserImage();
+    if (Options::RTX::ENABLE_ADAPTIVE_SAMPLING) createNexusScoreImage(ctx.physicalDevice(), ctx.device(), ctx.commandPool(), ctx.graphicsQueue());
     updateRTXDescriptors(currentFrame_);
     updateTonemapDescriptorsInitial();
     updateDenoiserDescriptors();
-    LOG_TRACE_CAT("RENDERER", "Recreating render targets — COMPLETE");
+    //LOG_TRACE_CAT("RENDERER", "Recreating render targets — COMPLETE");
 
     LOG_SUCCESS_CAT("Renderer", "{}Swapchain resized to {}x{}{}", SAPPHIRE_BLUE, w, h, RESET);
-    LOG_TRACE_CAT("RENDERER", "handleResize — COMPLETE");
+    //LOG_TRACE_CAT("RENDERER", "handleResize — COMPLETE");
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -1947,7 +2134,7 @@ void VulkanRenderer::loadRayTracingExtensions() noexcept
     vkGetBufferDeviceAddressKHR = reinterpret_cast<PFN_vkGetBufferDeviceAddressKHR>(
         vkGetDeviceProcAddr(dev, "vkGetBufferDeviceAddressKHR"));
 
-    // ──────────────────────────────────────────────────────────────────────
+    // ───────────────────���──────────────────────────────────────────────────
     // Validate every pointer with loud logging
     // ──────────────────────────────────────────────────────────────────────
     bool allGood = true;
@@ -2005,13 +2192,4 @@ void VulkanRenderer::loadRayTracingExtensions() noexcept
 // ──────────────────────────────────────────────────────────────────────────────
 /*
  * November 15, 2025 — PipelineManager Integration v10.5
- * • FIXED: Push constants stageFlags=RAYGEN|HIT|MISS (VUID-01796)
- * • FIXED: updateRTXDescriptors impl — bindings 0/1/2/3/6 w/ GENERAL layout (VUID-08114)
- * • FIXED: Per-frame descriptor updates in renderFrame (tlas/ubo/images dynamic)
- * • FIXED: Image barriers ensure GENERAL at RT write (VUID-09600)
- * • FIXED: Render loop logging — NO trace/debug/info, ONLY errors/warns
- * • Retained: Delegated to PipelineManager; Triple buffering; Options:: respect
- * • C++20 compliant, -Werror clean
- * • No singletons, full RAII via RTX::Handle<T>
- * • Production ready with debug visibility — 240 FPS UNLOCKED
  */

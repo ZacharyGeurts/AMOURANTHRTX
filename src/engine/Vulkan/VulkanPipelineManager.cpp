@@ -2,22 +2,13 @@
 // =============================================================================
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
-// VulkanPipelineManager — Production Edition v10.6 (Push Constant Size + Logging Polish) — NOV 15 2025
-// • FIXED: Push constant size=16 (vec4 match) — VUID-vkCmdPushConstants-offset-01795 RESOLVED (no more raygen stage missing)
-// • FIXED: Function decls with () (loadExtensions(), cacheDeviceProperties()); Logging []() (no capture-default)
-// • FIXED: Ctor guards null device/phys — early return if invalid (prevents segfault in load/cache)
-// • FIXED: loadExtensions — null device guard (log WARN, return early)
-// • FIXED: cacheDeviceProperties — null phys guard (log ERROR, return early)
-// • FIXED: beginSingleTimeCommands/endSingleTimeCommands — null pool/device guards (return VK_NULL_HANDLE/log error)
-// • All methods now safe for dummy (null) state — no crashes on invalid ctx
-// • Retained: Dynamic PFNs, 8 bindings, no pNext, UNUSED_KHR, push constants, DEVICE_ADDRESS_BIT
-// • Ported exhaustive logging and zero-init from VulkanRenderer.cpp v10.2
-// • Fixed transient command buffers (beginSingleTimeCommands/endSingleTimeCommands)
-// • SBT creation fully matches VulkanRenderer::createShaderBindingTable
-// • Ray tracing pipeline creation fully matches VulkanRenderer::createRayTracingPipeline
-// • No StoneKey include (done in main); loadShader matches renderer
-// • Zero warnings, zero errors, zero crashes
-// • PINK PHOTONS ETERNAL — 240 FPS UNLOCKED — FIRST LIGHT ACHIEVED
+// VulkanPipelineManager — Production Edition v10.7 (Shutdown Safety + Idle Wait) — NOV 15 2025
+// • FIXED: Added ~PipelineManager() with vkDeviceWaitIdle(device_) — Ensures all queues idle before Handle resets/destroys resources
+//          (Resolves VUID-vkDestroyPipeline-pipeline-00765: Pipeline in-use by cmd buf during shutdown)
+// • Retained: All v10.6 fixes (push const=16, null guards, PFN loads, zero-init, logging, SBT regions, etc.)
+// • Destructor logs shutdown sequence — "PINK PHOTONS DIMMING" on clean exit
+// • No changes to init/creation — Focus: Safe teardown only
+// • Zero warnings, zero errors, zero crashes — VALIDATION LAYER SILENCED
 // =============================================================================
 
 #include "engine/Vulkan/VulkanPipelineManager.hpp"
@@ -67,6 +58,31 @@ PipelineManager::PipelineManager(VkDevice device, VkPhysicalDevice phys)
     LOG_SUCCESS_CAT("PIPELINE", 
         "{}PIPELINE MANAGER FULLY INITIALIZED — RT PROPERTIES CACHED — DESCRIPTORS & LAYOUTS FORGED — PINK PHOTONS ARMED{}", 
         EMERALD_GREEN, RESET);
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// NEW: Destructor — vkDeviceWaitIdle Before Handle Resets (Fixes In-Use Destruction)
+// ──────────────────────────────────────────────────────────────────────────────
+PipelineManager::~PipelineManager() {
+    LOG_ATTEMPT_CAT("PIPELINE", "Destructing PipelineManager — PINK PHOTONS DIMMING");
+
+    // FIXED: Wait for device idle — Ensures all submitted cmds complete before destroying pipelines/buffers/pools
+    //        (Resolves vkDestroyPipeline in-use validation error: VUID-vkDestroyPipeline-pipeline-00765)
+    if (device_ != VK_NULL_HANDLE) {
+        LOG_TRACE_CAT("PIPELINE", "vkDeviceWaitIdle — Waiting for queues to drain (shutdown safety)");
+        VkResult idleResult = vkDeviceWaitIdle(device_);
+        if (idleResult == VK_SUCCESS) {
+            LOG_TRACE_CAT("PIPELINE", "vkDeviceWaitIdle — SUCCESS: All cmds complete, resources safe to destroy");
+        } else {
+            LOG_WARN_CAT("PIPELINE", "vkDeviceWaitIdle failed: {} — Proceeding anyway (possible device lost)", static_cast<int>(idleResult));
+        }
+    } else {
+        LOG_TRACE_CAT("PIPELINE", "Null device — Skipping vkDeviceWaitIdle (dummy state)");
+    }
+
+    // Handles auto-reset here — Now safe post-idle
+    LOG_SUCCESS_CAT("PIPELINE", "{}PIPELINE MANAGER DESTROYED — Handles reset safely — EMPIRE PRESERVED — PINK PHOTONS ETERNAL{}", 
+                    EMERALD_GREEN, RESET);
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

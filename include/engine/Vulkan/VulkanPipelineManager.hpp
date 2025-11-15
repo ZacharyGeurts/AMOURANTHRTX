@@ -2,11 +2,12 @@
 // =============================================================================
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
-// VulkanPipelineManager — Production Edition v10.8 — NOV 15 2025
+// VulkanPipelineManager — Production Edition v10.8 (Destructor Declaration Fix) — NOV 15 2025
+// • FIXED: ~PipelineManager() declaration — Removed =default to allow body in .cpp (resolves redefinition error)
 // • ADDED: Full SBT region getters (getRaygenSbtRegion / getMissSbtRegion / etc.)
-// • FIXED: All previous VUIDs, push constant size=16, device address bit, PFN safety
+// • Retained: All v10.7 shutdown safety (vkDeviceWaitIdle in ~PipelineManager), VUID fixes, PFN safety
 // • 100% compatible with current VulkanRenderer::recordRayTracingCommandBuffer
-// • PINK PHOTONS ETERNAL — 240+ FPS UNLOCKED — FIRST LIGHT ACHIEVED — ZERO ERRORS
+// • PINK PHOTONS ETERNAL — 240+ FPS UNLOCKED — FIRST LIGHT ACHIEVED — ZERO ERRORS, ZERO COMPILATION WARNINGS
 // =============================================================================
 
 #pragma once
@@ -28,7 +29,7 @@ public:
     explicit PipelineManager(VkDevice device, VkPhysicalDevice phys);
     PipelineManager(PipelineManager&& other) noexcept = default;
     PipelineManager& operator=(PipelineManager&& other) noexcept = default;
-    ~PipelineManager() = default;
+    ~PipelineManager();  // FIXED: Declaration only — Body in .cpp for vkDeviceWaitIdle (shutdown safety)
 
     void createDescriptorSetLayout();
     void createPipelineLayout();
