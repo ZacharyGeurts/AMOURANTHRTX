@@ -904,6 +904,8 @@ namespace Bindings { namespace RTX {
     constexpr uint32_t RESERVED_15 = 15;
 }}
 
+// • C++20 clean, zero warnings
+// ──────────────────────────────────────────────────────────────────────────────
 void VulkanRTX::updateRTXDescriptors(uint32_t frameIdx,
                                      VkBuffer /*cameraBuf*/, VkBuffer /*materialBuf*/, VkBuffer /*dimensionBuf*/,
                                      VkImageView /*storageView*/, VkImageView /*accumView*/,
@@ -911,15 +913,13 @@ void VulkanRTX::updateRTXDescriptors(uint32_t frameIdx,
                                      VkImageView densityVol, VkImageView /*gDepth*/,
                                      VkImageView /*gNormal*/)
 {
-    LOG_TRACE_CAT("RTX", "updateRTXDescriptors — START — frameIdx={}", frameIdx);
-
     if (descriptorSets_.empty()) {
-        LOG_WARN_CAT("RTX", "No descriptor sets — skipping");
+        LOG_WARN_CAT("RTX", "updateRTXDescriptors skipped — no descriptor sets");
         return;
     }
 
     VkDescriptorSet set = descriptorSets_[frameIdx % descriptorSets_.size()];
-    VkAccelerationStructureKHR tlas = RTX::las().getTLAS();
+    VkAccelerationStructureKHR tlas = RTX::LAS::get().getTLAS();  // FIXED: Use public getTLAS() accessor
 
     // Early return if critical handles missing
     if (!set || !tlas) {
@@ -950,7 +950,6 @@ void VulkanRTX::updateRTXDescriptors(uint32_t frameIdx,
         .descriptorCount = 1,
         .descriptorType  = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR
     });
-    LOG_INFO_CAT("RTX", "TLAS bound → slot {} (0x{:x})", Bindings::RTX::TLAS, reinterpret_cast<uintptr_t>(tlas));
 
     // === Helper: bind image (with combined fallback) ===
     auto bindImg = [&](uint32_t binding, VkImageView view, VkDescriptorType type,
@@ -973,18 +972,15 @@ void VulkanRTX::updateRTXDescriptors(uint32_t frameIdx,
             .descriptorType  = effectiveType,
             .pImageInfo      = &imgInfos.back()
         });
-        LOG_INFO_CAT("RTX", "Image 0x{:x} (type {}) → slot {}", reinterpret_cast<uintptr_t>(view), static_cast<uint32_t>(effectiveType), binding);
     };
 
     // === Black fallback (always bind, e.g., for missing textures) ===
     bindImg(Bindings::RTX::BLACK_FALLBACK, HANDLE_GET(blackFallbackView_), VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE);
 
-    // === Env map (new: bind if available; assume binding exists, e.g., Bindings::RTX::ENV_MAP) ===
+    // === Env map (bind if available) ===
     if (envMapView) {
         bindImg(Bindings::RTX::ENV_MAP, envMapView, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, envSampler);  // Adjust binding if needed
-    } else {
-        LOG_DEBUG_CAT("RTX", "Skipping env map bind (null view)");
+                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, envSampler);
     }
 
     // === Density volume (conditional type based on sampler) ===
@@ -994,7 +990,7 @@ void VulkanRTX::updateRTXDescriptors(uint32_t frameIdx,
         LOG_DEBUG_CAT("RTX", "Using fallback for density volume");
     }
     bindImg(Bindings::RTX::DENSITY_VOLUME, densityView, densityType,
-            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, envSampler);  // Sampler check handled in lambda
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, envSampler);
 
     // === Blue noise ===
     VkImageView blueNoise = RTX::g_ctx().blueNoiseView() ? RTX::g_ctx().blueNoiseView() : HANDLE_GET(blackFallbackView_);
@@ -1007,13 +1003,7 @@ void VulkanRTX::updateRTXDescriptors(uint32_t frameIdx,
     // === FINAL UPDATE ===
     if (!writes.empty()) {
         vkUpdateDescriptorSets(device_, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
-        LOG_SUCCESS_CAT("RTX", "{}Frame {} descriptors forged — {} bindings — PINK PHOTONS ETERNAL{}",
-                        PLASMA_FUCHSIA, frameIdx, writes.size(), RESET);
-    } else {
-        LOG_WARN_CAT("RTX", "No writes to update — skipping vkUpdateDescriptorSets");
     }
-
-    LOG_TRACE_CAT("RTX", "updateRTXDescriptors — COMPLETE");
 }
 
 // =============================================================================

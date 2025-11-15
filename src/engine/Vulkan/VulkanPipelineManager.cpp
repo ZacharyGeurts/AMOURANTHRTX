@@ -2,7 +2,8 @@
 // =============================================================================
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
-// VulkanPipelineManager — Production Edition v10.5.1 (Syntax + Logging Fixed) — NOV 15 2025
+// VulkanPipelineManager — Production Edition v10.6 (Push Constant Size + Logging Polish) — NOV 15 2025
+// • FIXED: Push constant size=16 (vec4 match) — VUID-vkCmdPushConstants-offset-01795 RESOLVED (no more raygen stage missing)
 // • FIXED: Function decls with () (loadExtensions(), cacheDeviceProperties()); Logging []() (no capture-default)
 // • FIXED: Ctor guards null device/phys — early return if invalid (prevents segfault in load/cache)
 // • FIXED: loadExtensions — null device guard (log WARN, return early)
@@ -407,7 +408,7 @@ void PipelineManager::createDescriptorSetLayout()
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Pipeline Layout — FIXED: Valid pSetLayouts + Push Constants Matching Stages + Null Guards
+// Pipeline Layout — FIXED: Valid pSetLayouts + Push Constants Matching Stages + Null Guards + FIXED: size=16 for vec4
 // ──────────────────────────────────────────────────────────────────────────────
 void PipelineManager::createPipelineLayout() {
     LOG_TRACE_CAT("PIPELINE", "createPipelineLayout — START");
@@ -424,11 +425,11 @@ void PipelineManager::createPipelineLayout() {
 
     VkDescriptorSetLayout layout = *rtDescriptorSetLayout_;  // FIXED: Local lvalue (valid handle)
 
-    // FIXED: Push constant stages (includes raygen for VUID-07987)
+    // FIXED: Push constant stages (includes raygen for VUID-07987) + FIXED: size=16 (matches vkCmdPushConstants size=16)
     VkPushConstantRange pushConstant = {};  // Zero-init
     pushConstant.stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
     pushConstant.offset = 0;
-    pushConstant.size = sizeof(uint32_t);
+    pushConstant.size = 16;  // FIXED: sizeof(vec4) = 16 bytes — matches shader push constant usage
 
     VkPipelineLayoutCreateInfo layoutInfo = {};  // Zero-init
     layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
@@ -445,7 +446,7 @@ void PipelineManager::createPipelineLayout() {
         [](VkDevice d, VkPipelineLayout l, const VkAllocationCallbacks*) { vkDestroyPipelineLayout(d, l, nullptr); },
         0, "RTPipelineLayout");
 
-    LOG_SUCCESS_CAT("PIPELINE", "Pipeline layout created — non-null pSetLayouts + raygen stages — FIXED");
+    LOG_SUCCESS_CAT("PIPELINE", "Pipeline layout created — non-null pSetLayouts + raygen stages + size=16 — VUID-01795 FIXED");
     LOG_TRACE_CAT("PIPELINE", "createPipelineLayout — COMPLETE");
 }
 
@@ -877,6 +878,39 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
     hitSbtOffset_ = hitOffset;
     callableSbtOffset_ = callableOffset;
     sbtStride_ = handleSizeAligned;
+
+    // ──────────────────────────────────────────────────────────────────────────────
+    // FINAL STEP: Construct SBT Regions — REQUIRED FOR vkCmdTraceRaysKHR
+    // ──────────────────────────────────────────────────────────────────────────────
+    raygenSbtRegion_ = {
+        .deviceAddress = sbtAddress_ + raygenSbtOffset_,
+        .stride        = sbtStride_,
+        .size          = raygenGroupCount * sbtStride_
+    };
+
+    missSbtRegion_ = {
+        .deviceAddress = sbtAddress_ + missSbtOffset_,
+        .stride        = sbtStride_,
+        .size          = missGroupCount * sbtStride_
+    };
+
+    hitSbtRegion_ = {
+        .deviceAddress = sbtAddress_ + hitSbtOffset_,
+        .stride        = sbtStride_,
+        .size          = hitGroupCount * sbtStride_
+    };
+
+    callableSbtRegion_ = {
+        .deviceAddress = sbtAddress_ + callableSbtOffset_,
+        .stride        = sbtStride_,
+        .size          = callableGroupCount * sbtStride_
+    };
+
+    LOG_SUCCESS_CAT("PIPELINE", "SBT Regions constructed — RayGen: 0x{:x} ({} entries) | Miss: 0x{:x} | Hit: 0x{:x} | Callable: 0x{:x}",
+                    raygenSbtRegion_.deviceAddress, raygenGroupCount,
+                    missSbtRegion_.deviceAddress,
+                    hitSbtRegion_.deviceAddress,
+                    callableSbtRegion_.deviceAddress);
 
     LOG_SUCCESS_CAT("PIPELINE", "Shader Binding Table CREATED — Address: 0x{:x} | Size: {} bytes | Stride: {}B — DEVICE_ADDRESS VALIDATION FIXED", sbtAddress_, sbtBufferSize, sbtStride_);
     LOG_TRACE_CAT("PIPELINE", "SBT Offsets — RayGen: {} | Miss: {} | Hit: {} | Callable: {}", raygenSbtOffset_, missSbtOffset_, hitSbtOffset_, callableSbtOffset_);

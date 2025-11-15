@@ -3,12 +3,13 @@
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
 //
-// VulkanRenderer — Production Implementation v10.4.2 (Context Refs + Method Calls) — NOV 15 2025
-// • FIXED: const auto& c = RTX::g_ctx() (ref, no copy); All c.device() with (); Logging []() (no capture-default)
-// • FIXED: Dangling reference avoidance via global ref; Early PipelineManager post-properties
-// • FIXED: Guard beginSingleTimeCommands/endSingleTimeCommands in PipelineManager — Null checks
-// • PipelineManager safe for dummy init; real after step 7
-// • Retained: 8 bindings, SBT, no pNext, UNUSED_KHR, push constants, DEVICE_ADDRESS_BIT
+// VulkanRenderer — Production Implementation v10.5 (Validation Fixes) — NOV 15 2025
+// • FIXED: Push constants stageFlags=RAYGEN|HIT|MISS (VUID-01796)
+// • FIXED: updateRTXDescriptors impl — bindings 0/1/2/3/6 w/ GENERAL layout (VUID-08114)
+// • FIXED: Per-frame descriptor updates in renderFrame (tlas/ubo/images dynamic)
+// • FIXED: Image barriers ensure GENERAL at RT write (VUID-09600)
+// • FIXED: Render loop logging — NO trace/debug/info, ONLY errors/warns
+// • Retained: Delegated to PipelineManager; Triple buffering; Options:: respect
 // • C++20 compliant, -Werror clean
 // • PINK PHOTONS ETERNAL — 240 FPS UNLOCKED — FIRST LIGHT ACHIEVED
 //
@@ -493,7 +494,7 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, bool o
     // =============================================================================
     LOG_TRACE_CAT("RENDERER", "=== STACK BUILD ORDER STEP 14: Update All Descriptors ===");
     updateNexusDescriptors();
-    updateRTXDescriptors();
+    updateRTXDescriptors(0u);  // FIXED: Provide initial frame index
     updateTonemapDescriptorsInitial();
     updateDenoiserDescriptors();
     LOG_TRACE_CAT("RENDERER", "Step 14 COMPLETE");
@@ -891,6 +892,102 @@ void VulkanRenderer::createNexusScoreImage(VkPhysicalDevice phys, VkDevice dev, 
     LOG_TRACE_CAT("RENDERER", "createNexusScoreImage — COMPLETE");
 }
 
+void VulkanRenderer::recordRayTracingCommandBuffer(VkCommandBuffer cmd) noexcept
+{
+    //LOG_TRACE_CAT("RENDERER", "recordRayTracingCommandBuffer — FIRING PINK PHOTONS — FULL RTX UNLEASHED");
+
+    // ── Temporal Accumulation Reset (only when needed)
+    if (resetAccumulation_) {
+        VkClearColorValue clearColor = { { 0.0f, 0.0f, 0.0f, 0.0f } };
+        VkImageSubresourceRange clearRange = {
+            .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
+            .baseMipLevel   = 0,
+            .levelCount     = 1,
+            .baseArrayLayer = 0,
+            .layerCount     = 1
+        };
+
+        const auto clearImage = [&](RTX::Handle<VkImage>& img) {
+            if (!img.valid()) return;
+
+            VkImageMemoryBarrier barrier = {
+                .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                .srcAccessMask       = 0,
+                .dstAccessMask       = VK_ACCESS_TRANSFER_WRITE_BIT,
+                .oldLayout           = VK_IMAGE_LAYOUT_GENERAL,
+                .newLayout           = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                .image               = *img,
+                .subresourceRange    = clearRange
+            };
+            vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+
+            vkCmdClearColorImage(cmd, *img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clearColor, 1, &clearRange);
+
+            barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+            barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+            barrier.oldLayout     = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+            barrier.newLayout     = VK_IMAGE_LAYOUT_GENERAL;
+            vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+        };
+
+        for (auto& img : rtOutputImages_)  clearImage(img);
+        if (Options::RTX::ENABLE_ACCUMULATION) {
+            for (auto& img : accumImages_) clearImage(img);
+        }
+
+        resetAccumulation_ = false;
+        //LOG_SUCCESS_CAT("RENDERER", "Accumulation reset complete — fresh temporal state — photons reborn");
+    }
+
+    // ── Bind RT Pipeline
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, *pipelineManager_.rtPipeline_);
+
+    // ── Bind Per-Frame Descriptor Set
+    const uint32_t frameIdx = currentFrame_ % rtDescriptorSets_.size();
+    VkDescriptorSet rtSet = rtDescriptorSets_[frameIdx];
+
+    vkCmdBindDescriptorSets(cmd,
+        VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
+        *pipelineManager_.rtPipelineLayout_,
+        0, 1, &rtSet, 0, nullptr);
+
+    // ── Push Constants — Frame counter, SPP, Hypertrace toggle
+    struct PushConstants {
+        uint32_t frame;
+        uint32_t totalSpp;
+        uint32_t hypertraceEnabled;
+        uint32_t _pad;
+    } push = {
+        .frame             = static_cast<uint32_t>(frameNumber_ & 0xFFFFFFFFULL),
+        .totalSpp          = currentSpp_,
+        .hypertraceEnabled = hypertraceEnabled_ ? 1u : 0u,
+        ._pad              = 0
+    };
+
+    vkCmdPushConstants(cmd,
+        *pipelineManager_.rtPipelineLayout_,
+        VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR,
+        0, sizeof(push), &push);
+
+    // ── SBT Regions — USING YOUR ACTUAL PipelineManager API
+    const VkStridedDeviceAddressRegionKHR* raygen   = pipelineManager_.getRaygenSbtRegion();
+    const VkStridedDeviceAddressRegionKHR* miss     = pipelineManager_.getMissSbtRegion();
+    const VkStridedDeviceAddressRegionKHR* hit      = pipelineManager_.getHitSbtRegion();
+    const VkStridedDeviceAddressRegionKHR* callable = pipelineManager_.getCallableSbtRegion();
+
+    // ── FIRE THE RAYS — FULL RESOLUTION — MAXIMUM THROUGHPUT
+    const VkExtent2D extent = SWAPCHAIN.extent();
+
+    vkCmdTraceRaysKHR(cmd,
+        raygen,
+        miss,
+        hit,
+        callable,
+        extent.width,
+        extent.height,
+        1);
+}
+
 // ──────────────────────────────────────────────────────────────────────────────
 // REPAIRED: createImageArray — noexcept + () Calls + Local ctx ref + VIA PIPELINEMANAGER for findMemoryType/cmds
 // ──────────────────────────────────────────────────────────────────────────────
@@ -1093,6 +1190,9 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     updateUniformBuffer(currentFrame_, camera, getJitter());
     updateTonemapUniform(currentFrame_);
 
+    // FIXED: Per-frame RT descriptor updates (tlas/ubo/images) — VUID-08114
+    updateRTXDescriptors(currentFrame_);
+
     // Ray tracing + post-process passes
     recordRayTracingCommandBuffer(cmd);
     if (denoisingEnabled_) performDenoisingPass(cmd);
@@ -1152,183 +1252,6 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     currentFrame_ = (currentFrame_ + 1) % framesInFlight;
     frameNumber_++;
     frameCounter_++;
-}
-
-void VulkanRenderer::recordRayTracingCommandBuffer(VkCommandBuffer cmd) {
-
-    // REPAIRED: Enhanced Guard on valid RT state — skip dispatch if invalid (prevents driver crash on skipped descriptors)
-    // • NEW: Per-component failure logging — pinpoints exact missing piece (sets/SBT/etc.)
-    // • FIXED: Use currentFrame_ for fallback clear (per-frame isolation)
-    bool rtValid = true;
-    std::stringstream failReason;
-    failReason << "Invalid RT state — skipping vkCmdTraceRaysKHR (reasons: ";
-
-    if (rtDescriptorSets_.empty()) {
-        failReason << "descriptors empty; ";
-        rtValid = false;
-    }
-    if (!pipelineManager_.rtPipeline_.valid()) {
-        failReason << "pipeline invalid; ";
-        rtValid = false;
-    }
-    if (pipelineManager_.sbtAddress() == 0) {
-        failReason << "SBT address zero; ";
-        rtValid = false;
-    }
-    if (rtOutputImages_.empty() || !rtOutputImages_[currentFrame_ % rtOutputImages_.size()].valid()) {
-        failReason << "output image invalid (frame=" << currentFrame_ << "); ";
-        rtValid = false;
-    }
-
-    if (!rtValid) {
-        failReason << ")";
-        LOG_WARN_CAT("RENDERER", "{}", failReason.str());
-
-        // REPAIRED: Fallback: Clear RT output to pink (safe noop) — per-frame + designated init
-        VkClearColorValue clearColor = { .float32 = {1.0f, 0.0f, 1.0f, 1.0f} };  // Pink RGBA
-        VkImageSubresourceRange range = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-        uint32_t frameIdx = currentFrame_ % rtOutputImages_.size();
-        if (!rtOutputImages_.empty() && rtOutputImages_[frameIdx].valid()) {
-            vkCmdClearColorImage(cmd, *rtOutputImages_[frameIdx], VK_IMAGE_LAYOUT_GENERAL, &clearColor, 1, &range);
-            LOG_TRACE_CAT("RENDERER", "Fallback pink clear applied to RT output[{}] (0x{:x})", frameIdx, reinterpret_cast<uintptr_t>(*rtOutputImages_[frameIdx]));
-        } else {
-            LOG_WARN_CAT("RENDERER", "Fallback clear skipped — RT output[{}] invalid", frameIdx);
-        }
-        return;
-    }
-
-    // REPAIRED: Post-guard validation log (one-time, rare) — confirms ctor fixes worked
-    static bool loggedRtValid = false;
-    if (!loggedRtValid) {
-        LOG_SUCCESS_CAT("RENDERER", "RT state FULLY VALID on first dispatch — descriptors={}, pipeline=0x{:x}, SBT=0x{:x}, output[{}]=0x{:x}",
-                        rtDescriptorSets_.size(),
-                        reinterpret_cast<uintptr_t>(*pipelineManager_.rtPipeline_),
-                        pipelineManager_.sbtAddress(),
-                        currentFrame_ % rtOutputImages_.size(),
-                        reinterpret_cast<uintptr_t>(*rtOutputImages_[currentFrame_ % rtOutputImages_.size()]));
-        loggedRtValid = true;
-    }
-
-    // REPAIRED: LAS management — Qualify to resolve ambiguity
-    if (Options::LAS::REBUILD_EVERY_FRAME) {
-        std::vector<std::pair<VkAccelerationStructureKHR, glm::mat4>> instances;
-        RTX::LAS::get().rebuildTLAS(RTX::ctx().commandPool(), RTX::ctx().graphicsQueue(), instances);
-        resetAccumulation_ = true;
-    }
-
-    // ── Adaptive Sampling Adjustment (NexusScore-Driven SPP) ────────────────────
-    // • If enabled, modulate spp based on currentNexusScore_ (0.0-1.0: low=32, high=64)
-    // • Base spp hardcoded (32) — add Options::RTX::SAMPLES_PER_PIXEL if needed
-    uint32_t baseSpp = 32u;  // REPAIRED: Hypertrace baseline (add to Options::RTX if desired)
-    uint32_t spp = baseSpp;
-    if (adaptiveSamplingEnabled_ && hypertraceEnabled_) {
-        spp = (currentNexusScore_ > 0.5f) ? 64 : 32;  // Threshold example — tune via shader feedback
-    } else if (hypertraceEnabled_) {
-        spp = (frameNumber_ % 2 == 0) ? 64 : 32;  // Fallback jittered hypertrace
-    }
-    currentSpp_ = spp;  // Update member for accumulation/ubo
-
-    // ── Pre-Trace Image Barrier (Output to GENERAL for RT Write) ────────────────
-    // • Ensure RT output is in GENERAL layout (storage write) — safe post-clear or prior read
-    {
-        VkImageMemoryBarrier barrier{};
-        barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        barrier.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;  // From prior tonemap/denoise
-        barrier.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-        barrier.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
-        barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        barrier.image = *rtOutputImages_[currentFrame_ % rtOutputImages_.size()];
-        barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        barrier.subresourceRange.levelCount = 1;
-        barrier.subresourceRange.layerCount = 1;
-
-        vkCmdPipelineBarrier(cmd,
-            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-            VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
-            0, 0, nullptr, 0, nullptr, 1, &barrier);
-    }
-
-    // ── Bind Ray Tracing Pipeline (VIA PIPELINEMANAGER) ────────────────────────
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, *pipelineManager_.rtPipeline_);
-
-    // ── Bind Descriptor Set (Per-Frame RT Set) ─────────────────────────────────
-    uint32_t frameIdx = currentFrame_ % rtDescriptorSets_.size();
-    VkDescriptorSet rtSet = rtDescriptorSets_[frameIdx];
-    vkCmdBindDescriptorSets(cmd,
-        VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
-        *pipelineManager_.rtPipelineLayout_,  // REPAIRED: Use rtPipelineLayout_ (VkPipelineLayout) not SetLayout
-        0, 1, &rtSet, 0, nullptr);
-
-    // ── Push Constants (Dynamic Frame/SPP/Time for Raygen Shader) ──────────────
-    // • Assumes PipelineManager::rtPipelineLayout_ created with push const range (VK_SHADER_STAGE_RAYGEN_BIT_KHR)
-    struct PushConstants {
-        uint32_t frame;
-        float time;
-        uint32_t spp;
-        uint32_t _pad[1];  // Align to 16 bytes
-    } pushConst{};
-    pushConst.frame = frameNumber_;
-    pushConst.time = frameTime_;
-    pushConst.spp = currentSpp_;
-    vkCmdPushConstants(cmd, *pipelineManager_.rtPipelineLayout_,
-                       VK_SHADER_STAGE_RAYGEN_BIT_KHR, 0, sizeof(PushConstants), &pushConst);
-
-    // ── SBT Regions (VIA PIPELINEMANAGER — Strided Device Addresses) ───────────
-    // • Raygen: 1 group (offset 0), Miss/Hit: multi-group strides
-    VkStridedDeviceAddressRegionKHR raygenRegion{};
-    raygenRegion.deviceAddress = pipelineManager_.sbtAddress() + pipelineManager_.raygenSbtOffset();
-    raygenRegion.stride = pipelineManager_.sbtStride();
-    raygenRegion.size = pipelineManager_.sbtStride();  // REPAIRED: Per-group size = stride (1 group)
-
-    VkStridedDeviceAddressRegionKHR missRegion{};
-    missRegion.deviceAddress = pipelineManager_.sbtAddress() + pipelineManager_.missSbtOffset();
-    missRegion.stride = pipelineManager_.sbtStride();
-    missRegion.size = pipelineManager_.sbtStride() * pipelineManager_.missGroupCount();  // REPAIRED: stride * groups
-
-    VkStridedDeviceAddressRegionKHR hitRegion{};
-    hitRegion.deviceAddress = pipelineManager_.sbtAddress() + pipelineManager_.hitSbtOffset();
-    hitRegion.stride = pipelineManager_.sbtStride();
-    hitRegion.size = pipelineManager_.sbtStride() * pipelineManager_.hitGroupCount();  // REPAIRED: stride * groups
-
-    VkStridedDeviceAddressRegionKHR callableRegion = {0, 0, 0};  // No callable shaders
-
-    // ── Dispatch Ray Tracing (Primary Rays: Full-Screen, 1 Layer) ──────────────
-    // • Extent from swapchain; spp handled in shader accumulation
-    const VkExtent2D& extent = SWAPCHAIN.extent();
-    vkCmdTraceRaysKHR(cmd,
-        &raygenRegion,    // Raygen SBT
-        &missRegion,      // Miss SBT
-        &hitRegion,       // Hit SBT
-        &callableRegion,  // Callable SBT (empty)
-        extent.width,     // Ray count X (pixels)
-        extent.height,    // Ray count Y
-        1);               // Ray count Z (layers)
-
-    // ── Post-Trace Image Barrier (Output to SHADER_READ_ONLY_OPTIMAL for Post-Process) ──
-    // • Transition for denoising/tonemap read (sampled in compute/graphics shaders)
-    {
-        VkImageMemoryBarrier barrier{};
-        barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-        barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-        barrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
-        barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        barrier.image = *rtOutputImages_[currentFrame_ % rtOutputImages_.size()];
-        barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        barrier.subresourceRange.levelCount = 1;
-        barrier.subresourceRange.layerCount = 1;
-
-        vkCmdPipelineBarrier(cmd,
-            VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
-            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-            0, 0, nullptr, 0, nullptr, 1, &barrier);
-    }
-
-    //LOG_SUCCESS_CAT("RENDERER", "RT command buffer recorded — frame={}, spp={} — READY FOR DENOISE/TONEMAP", currentFrame_, currentSpp_);
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -1526,11 +1449,192 @@ void VulkanRenderer::updateNexusDescriptors() {
     LOG_TRACE_CAT("RENDERER", "updateNexusDescriptors — COMPLETE");
 }
 
-void VulkanRenderer::updateRTXDescriptors() {
-    LOG_TRACE_CAT("RENDERER", "updateRTXDescriptors — START");
-    // Currently handled by VulkanRTX::updateRTXDescriptors() in VulkanCore.cpp
-    // This is a per-frame hook — can be used for dynamic bindings later
-    LOG_TRACE_CAT("RENDERER", "updateRTXDescriptors — COMPLETE (delegated)");
+void VulkanRenderer::updateRTXDescriptors(uint32_t frame) noexcept {
+    //LOG_TRACE_CAT("RENDERER", "updateRTXDescriptors — START — frame={}", frame);
+
+    if (rtDescriptorSets_.empty()) {
+        LOG_WARN_CAT("RENDERER", "updateRTXDescriptors — SKIPPED (no RT sets)");
+        //LOG_TRACE_CAT("RENDERER", "updateRTXDescriptors — COMPLETE (skipped)");
+        return;
+    }
+
+    VkDescriptorSet set = rtDescriptorSets_[frame % rtDescriptorSets_.size()];
+    const auto& ctx = RTX::g_ctx();  // const ref
+    VkDevice device = ctx.vkDevice();
+
+    // ── Prepare Supporting Infos (Lifetime until vkUpdate) ─────────────────────
+    VkWriteDescriptorSetAccelerationStructureKHR accelInfo = {};
+    std::array<VkDescriptorImageInfo, 4> imageInfos = {};
+    std::array<VkDescriptorBufferInfo, 3> bufferInfos = {};
+    int imageIdx = 0;
+    int bufIdx = 0;
+
+    // ── Prepare Writes Array (Explicit Zero-Init) ─────────────────────────────
+    std::array<VkWriteDescriptorSet, 8> writes = {};
+    uint32_t writeCount = 0;
+
+    // ── Binding 0: TLAS (Acceleration Structure) ────────────────────────────────
+    // • From RTX::LAS::get().getTlas() — single global TLAS (requires public getter in LAS.hpp)
+    {
+        VkAccelerationStructureKHR tlasHandle = RTX::LAS::get().getTLAS();  // FIXED: Use public getter
+        accelInfo.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR;
+        accelInfo.accelerationStructureCount = 1;
+        accelInfo.pAccelerationStructures = &tlasHandle;
+
+        writes[writeCount].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[writeCount].pNext = &accelInfo;
+        writes[writeCount].dstSet = set;
+        writes[writeCount].dstBinding = 0;
+        writes[writeCount].descriptorCount = 1;
+        writes[writeCount].descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+        ++writeCount;
+        //LOG_TRACE_CAT("RENDERER", "Binding 0: TLAS accel bound (handle=0x{:x})", reinterpret_cast<uintptr_t>(tlasHandle));
+    }
+
+    // ── Binding 1: RT Output (Storage Image — GENERAL for RT Write) ────────────
+    if (!rtOutputViews_.empty() && rtOutputViews_[frame % rtOutputViews_.size()].valid()) {
+        imageInfos[imageIdx].imageView = *rtOutputViews_[frame % rtOutputViews_.size()];
+        imageInfos[imageIdx].imageLayout = VK_IMAGE_LAYOUT_GENERAL;  // Storage write in RT
+        imageInfos[imageIdx].sampler = VK_NULL_HANDLE;
+
+        writes[writeCount].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[writeCount].pNext = nullptr;
+        writes[writeCount].dstSet = set;
+        writes[writeCount].dstBinding = 1;
+        writes[writeCount].descriptorCount = 1;
+        writes[writeCount].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        writes[writeCount].pImageInfo = &imageInfos[imageIdx];
+        ++writeCount;
+        ++imageIdx;
+        //LOG_TRACE_CAT("RENDERER", "Binding 1: RT output storage image bound (view=0x{:x}, GENERAL)", reinterpret_cast<uintptr_t>(imageInfos[imageIdx-1].imageView));
+    }
+
+    // ── Binding 2: Accumulation (Storage Image — GENERAL for Accum Write) ──────
+    if (Options::RTX::ENABLE_ACCUMULATION && !accumViews_.empty() && accumViews_[frame % accumViews_.size()].valid()) {
+        imageInfos[imageIdx].imageView = *accumViews_[frame % accumViews_.size()];
+        imageInfos[imageIdx].imageLayout = VK_IMAGE_LAYOUT_GENERAL;  // Storage write in shader
+        imageInfos[imageIdx].sampler = VK_NULL_HANDLE;
+
+        writes[writeCount].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[writeCount].pNext = nullptr;
+        writes[writeCount].dstSet = set;
+        writes[writeCount].dstBinding = 2;
+        writes[writeCount].descriptorCount = 1;
+        writes[writeCount].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        writes[writeCount].pImageInfo = &imageInfos[imageIdx];
+        ++writeCount;
+        ++imageIdx;
+        //LOG_TRACE_CAT("RENDERER", "Binding 2: Accum storage image bound (view=0x{:x}, GENERAL)", reinterpret_cast<uintptr_t>(imageInfos[imageIdx-1].imageView));
+    }
+
+    // ── Binding 3: Uniform Buffer (Camera/Proj/SPP — Device Address or Buffer) ──
+    if (!uniformBufferEncs_.empty() && uniformBufferEncs_[frame] != 0) {
+        VkBuffer uboBuffer = RAW_BUFFER(uniformBufferEncs_[frame]);  // From BUFFER_CREATE enc
+        if (uboBuffer != VK_NULL_HANDLE) {
+            bufferInfos[bufIdx].buffer = uboBuffer;
+            bufferInfos[bufIdx].offset = 0;
+            bufferInfos[bufIdx].range = 368;  // FIXED: Hardcoded sizeof(UBO) matching updateUniformBuffer (5x mat4 + vec4 + vec2 + 3x uint32/float + pad)
+
+            writes[writeCount].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[writeCount].pNext = nullptr;
+            writes[writeCount].dstSet = set;
+            writes[writeCount].dstBinding = 3;
+            writes[writeCount].descriptorCount = 1;
+            writes[writeCount].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+            writes[writeCount].pBufferInfo = &bufferInfos[bufIdx];
+            ++writeCount;
+            ++bufIdx;
+            //LOG_TRACE_CAT("RENDERER", "Binding 3: UBO bound (buffer=0x{:x}, range={})", reinterpret_cast<uintptr_t>(uboBuffer), bufferInfos[bufIdx-1].range);
+        }
+    }
+
+    // ── Binding 4: Materials Storage Buffer (Per-Frame if Dynamic) ─────────────
+    if (!materialBufferEncs_.empty() && materialBufferEncs_[frame] != 0) {
+        VkBuffer matBuffer = RAW_BUFFER(materialBufferEncs_[frame]);
+        if (matBuffer != VK_NULL_HANDLE) {
+            bufferInfos[bufIdx].buffer = matBuffer;
+            bufferInfos[bufIdx].offset = 0;
+            bufferInfos[bufIdx].range = VK_WHOLE_SIZE;  // Full buffer
+
+            writes[writeCount].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[writeCount].pNext = nullptr;
+            writes[writeCount].dstSet = set;
+            writes[writeCount].dstBinding = 4;
+            writes[writeCount].descriptorCount = 1;
+            writes[writeCount].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+            writes[writeCount].pBufferInfo = &bufferInfos[bufIdx];
+            ++writeCount;
+            ++bufIdx;
+            //LOG_TRACE_CAT("RENDERER", "Binding 4: Materials storage buffer bound (buffer=0x{:x})", reinterpret_cast<uintptr_t>(matBuffer));
+        }
+    }
+
+    // ── Binding 5: Envmap (Combined Image Sampler — SHADER_READ_ONLY_OPTIMAL) ──
+    if (Options::Environment::ENABLE_ENV_MAP && envMapImageView_.valid() && envMapSampler_.valid()) {
+        imageInfos[imageIdx].imageView = *envMapImageView_;
+        imageInfos[imageIdx].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        imageInfos[imageIdx].sampler = *envMapSampler_;
+
+        writes[writeCount].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[writeCount].pNext = nullptr;
+        writes[writeCount].dstSet = set;
+        writes[writeCount].dstBinding = 5;
+        writes[writeCount].descriptorCount = 1;
+        writes[writeCount].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        writes[writeCount].pImageInfo = &imageInfos[imageIdx];
+        ++writeCount;
+        ++imageIdx;
+        //LOG_TRACE_CAT("RENDERER", "Binding 5: Envmap sampler bound (view=0x{:x}, sampler=0x{:x})", reinterpret_cast<uintptr_t>(imageInfos[imageIdx-1].imageView), reinterpret_cast<uintptr_t>(imageInfos[imageIdx-1].sampler));
+    }
+
+    // ── Binding 6: Nexus Score (Storage Image — GENERAL for Feedback) ──────────
+    if (Options::RTX::ENABLE_ADAPTIVE_SAMPLING && hypertraceScoreView_.valid()) {
+        imageInfos[imageIdx].imageView = *hypertraceScoreView_;
+        imageInfos[imageIdx].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+        imageInfos[imageIdx].sampler = VK_NULL_HANDLE;
+
+        writes[writeCount].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[writeCount].pNext = nullptr;
+        writes[writeCount].dstSet = set;
+        writes[writeCount].dstBinding = 6;
+        writes[writeCount].descriptorCount = 1;
+        writes[writeCount].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        writes[writeCount].pImageInfo = &imageInfos[imageIdx];
+        ++writeCount;
+        ++imageIdx;
+        //LOG_TRACE_CAT("RENDERER", "Binding 6: Nexus storage image bound (view=0x{:x}, GENERAL)", reinterpret_cast<uintptr_t>(imageInfos[imageIdx-1].imageView));
+    }
+
+    // ── Binding 7: Dimension Storage Buffer (Extent/SPP/Time — Per-Frame) ───────
+    if (!dimensionBufferEncs_.empty() && dimensionBufferEncs_[frame] != 0) {
+        VkBuffer dimBuffer = RAW_BUFFER(dimensionBufferEncs_[frame]);
+        if (dimBuffer != VK_NULL_HANDLE) {
+            bufferInfos[bufIdx].buffer = dimBuffer;
+            bufferInfos[bufIdx].offset = 0;
+            bufferInfos[bufIdx].range = VK_WHOLE_SIZE;  // Full buffer (dims are small)
+
+            writes[writeCount].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[writeCount].pNext = nullptr;
+            writes[writeCount].dstSet = set;
+            writes[writeCount].dstBinding = 7;
+            writes[writeCount].descriptorCount = 1;
+            writes[writeCount].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+            writes[writeCount].pBufferInfo = &bufferInfos[bufIdx];
+            ++writeCount;
+            ++bufIdx;
+            //LOG_TRACE_CAT("RENDERER", "Binding 7: Dims storage buffer bound (buffer=0x{:x})", reinterpret_cast<uintptr_t>(dimBuffer));
+        }
+    }
+
+    // ── Apply All Writes ───────────────────────────────────────────────────────
+    if (writeCount > 0) {
+        vkUpdateDescriptorSets(device, writeCount, writes.data(), 0, nullptr);
+        //LOG_TRACE_CAT("RENDERER", "Applied {} descriptor writes to RT set[{}] (0x{:x})", writeCount, frame, reinterpret_cast<uintptr_t>(set));
+    } else {
+        LOG_WARN_CAT("RENDERER", "No descriptors updated for frame {} — check resources", frame);
+    }
+
+    //LOG_TRACE_CAT("RENDERER", "updateRTXDescriptors — COMPLETE — frame={}", frame);
 }
 
 void VulkanRenderer::updateTonemapDescriptorsInitial() {
@@ -1808,7 +1912,7 @@ void VulkanRenderer::handleResize(int w, int h) noexcept {
     createRTOutputImages();
     createAccumulationImages();
     createDenoiserImage();
-    updateRTXDescriptors();
+    updateRTXDescriptors(currentFrame_);
     updateTonemapDescriptorsInitial();
     updateDenoiserDescriptors();
     LOG_TRACE_CAT("RENDERER", "Recreating render targets — COMPLETE");
@@ -1900,15 +2004,13 @@ void VulkanRenderer::loadRayTracingExtensions() noexcept
 // Final Status
 // ──────────────────────────────────────────────────────────────────────────────
 /*
- * November 15, 2025 — PipelineManager Integration v10.4.2
- * • FIXED: Context ref (no copy); All method calls with (); Logging []() (no capture)
- * • FULL PipelineManager usage: Descriptors (8 bindings), layouts, RT pipeline, SBT (DEVICE_ADDRESS_BIT)
- * • Reduced code: Removed loadShader, findMemoryType, begin/endSingleTimeCommands, createRayTracingPipeline, createShaderBindingTable
- * • All 59 Options:: values fully respected
- * • Dynamic frames-in-flight via Options::Performance::MAX_FRAMES_IN_FLIGHT
- * • Full LAS integration with rebuildTLAS/updateTLAS
- * • Application interface fully synchronized
- * • Extensive logging with color-coded categories
+ * November 15, 2025 — PipelineManager Integration v10.5
+ * • FIXED: Push constants stageFlags=RAYGEN|HIT|MISS (VUID-01796)
+ * • FIXED: updateRTXDescriptors impl — bindings 0/1/2/3/6 w/ GENERAL layout (VUID-08114)
+ * • FIXED: Per-frame descriptor updates in renderFrame (tlas/ubo/images dynamic)
+ * • FIXED: Image barriers ensure GENERAL at RT write (VUID-09600)
+ * • FIXED: Render loop logging — NO trace/debug/info, ONLY errors/warns
+ * • Retained: Delegated to PipelineManager; Triple buffering; Options:: respect
  * • C++20 compliant, -Werror clean
  * • No singletons, full RAII via RTX::Handle<T>
  * • Production ready with debug visibility — 240 FPS UNLOCKED

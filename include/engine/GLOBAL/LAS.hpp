@@ -728,21 +728,5 @@ inline LAS& las() noexcept { return LAS::get(); }
 } // namespace RTX
 
 // =============================================================================
-// STONEKEY v∞ PUBLIC — PINK PHOTONS ETERNAL — TITAN DOMINANCE ETERNAL
-// RTX::las().buildTLAS(..., true) — ~0.3µs GPU (RTX 40-series, tiny scene)
-// NEW: fastBuild flag (PREFER_FAST_BUILD for rebuilds; +trace cost negligible for small AS)
-// NEW: Timestamp queries for true GPU time (no CPU skew; log µs)
-// NEW: Dedicated/transient cmd alloc (vs single-time: -30-50% overhead)
-// OPT: Async submit (no waitIdle; fence upstream if needed)
-// OPT: Structs zero-init with {} everywhere
-// OPT: SIMD hints in upload (manual unroll for N<16)
-// FIXED: Lazy-init query pool in build* (ensureTimestampPool() → post-ctx safe; no static init crash)
-// FIXED: Graceful fallback if pool create fails (perf logs off, no abort)
-// FIXED: cmdPool → commandPool() in free (method call with ())
-// FIXED: vkCmdResetQueryPool(..., 2) for start/end timestamps
-// FIXED: Guards in deleters/~LAS() — prevents VUID crashes/leaks on static dtor (null device safe)
-// FIXED: BUFFER_DESTROY guards in getOrGrowScratch/deleters (assume tracker guarded; explicit nullify fallback)
-// FIXED: Fence destroy guarded in submitOptimizedCmd (no leak on error path)
-// FIXED: ensureTimestampPool guards (null dev skip)
-// ZERO ERRORS — ZERO CIRCULAR — PRODUCTION-READY — 15k FPS VALHALLA
+// STONEKEY v∞ PUBLIC — PINK PHOTONS ETERNAL — DOMINANCE ETERNAL
 // =============================================================================
