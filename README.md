@@ -1,14 +1,22 @@
 Currently compiles and I am establishing the boot process.  
-See the [Wiki](https://github.com/ZacharyGeurts/AMOURANTHRTX/wiki) for engine information.  
-AMOURANTH RTX a next generation engine for raw performance.  
-<img width="820" src="https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/assets/textures/ammo.png" />  
-<img width="820" src="https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/media/Screenshot%20from%202025-11-14%2021-05-10.png" />  
 
 AMOURANTH RTX © 2025 by Zachary Geurts gzac5314@gmail.com is licensed under [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0)  
 Unreal developers may consider some of this parody.  
 I welcome those whose minds seek knowledge and education.  
 Windows toolchain currently under development.  
 Hearer and Console are not part of the RTX program.  
+
+See the [Wiki](https://github.com/ZacharyGeurts/AMOURANTHRTX/wiki) for engine information.  
+AMOURANTH RTX a next generation engine for raw performance.  
+<img width="820" src="https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/assets/textures/ammo.png" />  
+<img width="820" src="https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/media/Screenshot%20from%202025-11-14%2021-05-10.png" />  
+
+```
+git clone https://github.com/ZacharyGeurts/AMOURANTHRTX
+cd AMOURANTHRTX
+chmod +x linux.sh
+./linux.sh clean
+```
 
 [AMOURANTH RTX Video](https://x.com/i/status/1982578590593282537)  
 
@@ -30,12 +38,6 @@ Robust logging system inspired by: [Ellie Fier](https://www.twitch.tv/elliefier)
 
 Have a look. I promise to get libraries in the future.  
 sudo apt update && sudo apt install gcc-14 g++-14
-```
-git clone https://github.com/ZacharyGeurts/AMOURANTHRTX
-cd AMOURANTHRTX
-chmod +x linux.sh
-./linux.sh clean
-```
 
 Made with Grok sized files for AI updates.  
 
