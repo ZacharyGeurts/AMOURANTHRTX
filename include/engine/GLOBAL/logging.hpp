@@ -207,6 +207,7 @@ constexpr bool ENABLE_ATTEMPT = true;
 constexpr bool ENABLE_PERF    = true;
 constexpr bool FPS_COUNTER    = true;
 constexpr bool SIMULATION_LOGGING = true;
+constexpr bool DISABLE_NON_FPS_LOGGING = true;
 
 constexpr size_t LEVEL_WIDTH   = 10;
 constexpr size_t DELTA_WIDTH   = 10;
@@ -424,9 +425,11 @@ private:
     mutable std::jthread flusher_;
     mutable std::atomic<bool> asyncEnabled_{false};
 
-    bool shouldLog(LogLevel level, std::string_view) const {
+    bool shouldLog(LogLevel level, std::string_view category) const {
         const size_t i = static_cast<size_t>(level);
-        return i < ENABLE_LEVELS.size() && ENABLE_LEVELS[i];
+        if (i >= ENABLE_LEVELS.size() || !ENABLE_LEVELS[i]) return false;
+        if (DISABLE_NON_FPS_LOGGING && category != std::string_view{"FPS"}) return false;
+        return true;
     }
 
     void flushQueue(std::stop_token stoken) const {
@@ -510,8 +513,8 @@ private:
             {"ImGui", PLATINUM_GRAY}, {"Profiler", COSMIC_GOLD}, {"SUCCESS", EMERALD_GREEN},
             {"ATTEMPT", QUANTUM_PURPLE}, {"VOID", COSMIC_VOID}, {"SPLASH", LILAC_LAVENDER},
             {"MARKER", DIAMOND_SPARKLE}, {"SDL3_window", SAPPHIRE_BLUE}, {"SDL3_audio", SAPPHIRE_BLUE},
-			{"SDL3_font", SAPPHIRE_BLUE}, {"SDL3_image", SAPPHIRE_BLUE}, {"SDL3_init", SAPPHIRE_BLUE},
-			{"SDL3_input", SAPPHIRE_BLUE}, {"SDL3_vulkan", SAPPHIRE_BLUE}
+            {"SDL3_font", SAPPHIRE_BLUE}, {"SDL3_image", SAPPHIRE_BLUE}, {"SDL3_init", SAPPHIRE_BLUE},
+            {"SDL3_input", SAPPHIRE_BLUE}, {"SDL3_vulkan", SAPPHIRE_BLUE}
         };
         if (auto it = map.find(cat); it != map.end()) [[likely]]
             return it->second;

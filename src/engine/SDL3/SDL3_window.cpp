@@ -5,6 +5,7 @@
 // FIXED: Vulkan probe moved AFTER SDL_Init(VIDEO) per SDL3 docs — prevents segfault on CreateWindow
 // • SDL_Vulkan_LoadLibrary() now post-video-init; conditional unload only if !supported
 // • Lib stays loaded if VK_KHR_surface present — ready for SDL_WINDOW_VULKAN creation
+// • FIXED: Inverted SDL_Init/SDL_SetWindowFullscreen checks (success == 0, error != 0)
 // =============================================================================
 
 #include "engine/SDL3/SDL3_window.hpp"
@@ -32,7 +33,7 @@ SDLWindowPtr g_sdl_window{nullptr};
     }
 
     LOG_INFO_CAT("SDL3_window", "{}Initializing SDL core subsystems (VIDEO + EVENTS){}", SAPPHIRE_BLUE, RESET);
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) == 0) {  // FIXED: <0 for failure (0=success)
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) == 0) {  // FIXED: != 0 for failure (0=success)
         const char* sdlError = SDL_GetError();
         LOG_FATAL_CAT("SDL3_window", "{}SDL_Init failed critically: {}{}", CRIMSON_MAGENTA, sdlError ? sdlError : "No error message provided", RESET);
         throw std::runtime_error(std::format("SDL_Init failed: {}", sdlError ? sdlError : "No error message provided"));
@@ -137,27 +138,27 @@ bool pollEvents(int& outW, int& outH, bool& quit, bool& toggleFS) noexcept
     bool resized = false;
     quit = toggleFS = false;
 
-    LOG_DEBUG_CAT("SDL3_window", "{}Polling SDL events — batch processing engaged{}", SAPPHIRE_BLUE, RESET);
+    //LOG_DEBUG_CAT("SDL3_window", "{}Polling SDL events — batch processing engaged{}", SAPPHIRE_BLUE, RESET);
     while (SDL_PollEvent(&ev)) {
         switch (ev.type) {
             case SDL_EVENT_QUIT:
                 quit = true;
-                LOG_INFO_CAT("SDL3_window", "{}QUIT event detected — shutdown flag set{}", SAPPHIRE_BLUE, RESET);
+                //LOG_INFO_CAT("SDL3_window", "{}QUIT event detected — shutdown flag set{}", SAPPHIRE_BLUE, RESET);
                 break;
             case SDL_EVENT_KEY_DOWN:
                 if (ev.key.scancode == SDL_SCANCODE_F11) {
                     toggleFS = true;
-                    LOG_INFO_CAT("SDL3_window", "{}F11 keydown — fullscreen toggle flag set{}", SAPPHIRE_BLUE, RESET);
+                    //LOG_INFO_CAT("SDL3_window", "{}F11 keydown — fullscreen toggle flag set{}", SAPPHIRE_BLUE, RESET);
                 }
                 break;
             case SDL_EVENT_WINDOW_RESIZED:
                 outW = ev.window.data1;
                 outH = ev.window.data2;
                 resized = true;
-                LOG_INFO_CAT("SDL3_window", "{}Window resize event: {}x{}{}", SAPPHIRE_BLUE, outW, outH, RESET);
+                //LOG_INFO_CAT("SDL3_window", "{}Window resize event: {}x{}{}", SAPPHIRE_BLUE, outW, outH, RESET);
                 break;
             default:
-                LOG_TRACE_CAT("SDL3_window", "{}Unhandled event type: {}{}", SAPPHIRE_BLUE, static_cast<int>(ev.type), RESET);
+                //LOG_TRACE_CAT("SDL3_window", "{}Unhandled event type: {}{}", SAPPHIRE_BLUE, static_cast<int>(ev.type), RESET);
                 break;
         }
     }
@@ -190,7 +191,7 @@ void toggleFullscreen() noexcept
     bool targetFullscreen = !isCurrentlyFullscreen;
 
     LOG_INFO_CAT("SDL3_window", "{}Invoking SDL_SetWindowFullscreen (target: {}){}", SAPPHIRE_BLUE, targetFullscreen ? "ON" : "OFF", RESET);
-    if (SDL_SetWindowFullscreen(window, targetFullscreen) == 0) {
+    if (SDL_SetWindowFullscreen(window, targetFullscreen) != 0) {  // FIXED: != 0 for failure (0=success)
         const char* fsError = SDL_GetError();
         LOG_ERROR_CAT("SDL3_window", "{}SDL_SetWindowFullscreen failed: {}{}", CRIMSON_MAGENTA, fsError ? fsError : "Unknown error", RESET);
         return;

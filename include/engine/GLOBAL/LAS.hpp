@@ -248,7 +248,7 @@ namespace {
 } // anonymous namespace
 
 // =============================================================================
-// LAS — SINGLETON — STONEKEY v∞ PUBLIC v0.3 (PERF: ~0.3µs TARGET | FIXED STATIC INIT)
+// LAS — SINGLETON — STONEKEY v∞ PUBLIC v0.3 (PERF: ~0.3µs TARGET | FIXED STATIC INIT + CLEANUP GUARDS)
 // =============================================================================
 class LAS {
 public:
@@ -381,8 +381,17 @@ public:
         auto deleter = [asBufferHandle](VkDevice d,
                                         VkAccelerationStructureKHR a,
                                         const VkAllocationCallbacks*) noexcept {
-            if (a) g_ctx().vkDestroyAccelerationStructureKHR_(d, a, nullptr);
-            if (asBufferHandle) BUFFER_DESTROY(asBufferHandle);
+            // FIXED: Guard destroy calls — skip if device null (post-shutdown safe)
+            if (d == VK_NULL_HANDLE) {
+                LOG_WARN_CAT("LAS", "Skipped BLAS deleter — null device");
+                return;
+            }
+            if (a != VK_NULL_HANDLE && g_ctx().vkDestroyAccelerationStructureKHR_) {
+                g_ctx().vkDestroyAccelerationStructureKHR_(d, a, nullptr);
+            }
+            if (asBufferHandle != 0) {
+                BUFFER_DESTROY(asBufferHandle);  // Assume BUFFER_DESTROY guarded
+            }
         };
 
         blas_ = Handle<VkAccelerationStructureKHR>(rawAs, dev, deleter,
@@ -504,9 +513,20 @@ public:
         auto deleter = [asBufferHandle, instanceEnc](VkDevice d,
                                                      VkAccelerationStructureKHR a,
                                                      const VkAllocationCallbacks*) noexcept {
-            if (a) g_ctx().vkDestroyAccelerationStructureKHR_(d, a, nullptr);
-            if (asBufferHandle) BUFFER_DESTROY(asBufferHandle);
-            if (instanceEnc) BUFFER_DESTROY(instanceEnc);
+            // FIXED: Guard destroy calls — skip if device null (post-shutdown safe)
+            if (d == VK_NULL_HANDLE) {
+                LOG_WARN_CAT("LAS", "Skipped TLAS deleter — null device");
+                return;
+            }
+            if (a != VK_NULL_HANDLE && g_ctx().vkDestroyAccelerationStructureKHR_) {
+                g_ctx().vkDestroyAccelerationStructureKHR_(d, a, nullptr);
+            }
+            if (asBufferHandle != 0) {
+                BUFFER_DESTROY(asBufferHandle);  // Assume BUFFER_DESTROY guarded
+            }
+            if (instanceEnc != 0) {
+                BUFFER_DESTROY(instanceEnc);  // Assume BUFFER_DESTROY guarded
+            }
         };
 
         tlas_ = Handle<VkAccelerationStructureKHR>(rawAs, dev, deleter,
@@ -569,13 +589,32 @@ private:
         LOG_INFO_CAT("LAS", "LAS singleton initialized");
         // FIXED: Defer query pool creation to first use (post-ctx init); avoid static init order fiasco
     }
-    ~LAS() {
-        VkDevice dev = g_ctx().vkDevice();
-        if (QUERY_POOL_TIMESTAMP != VK_NULL_HANDLE) {
+    ~LAS() noexcept {  // FIXED: noexcept + full guards to prevent crash/leaks on static dtor (post-main)
+        VkDevice dev = g_ctx().device();  // Use accessor for current state
+        if (dev != VK_NULL_HANDLE && QUERY_POOL_TIMESTAMP != VK_NULL_HANDLE) {
             vkDestroyQueryPool(dev, QUERY_POOL_TIMESTAMP, nullptr);
             QUERY_POOL_TIMESTAMP = VK_NULL_HANDLE;
+            LOG_TRACE_CAT("LAS", "Timestamp query pool destroyed");
+        } else if (QUERY_POOL_TIMESTAMP != VK_NULL_HANDLE) {
+            LOG_WARN_CAT("LAS", "Skipped timestamp query pool destroy — null device");
         }
-        if (scratchPoolId_) BUFFER_DESTROY(scratchPoolId_);
+        if (dev != VK_NULL_HANDLE && scratchPoolId_ != 0) {
+            BUFFER_DESTROY(scratchPoolId_);  // Assume BUFFER_DESTROY guarded
+            LOG_TRACE_CAT("LAS", "Scratch pool destroyed");
+        } else if (scratchPoolId_ != 0) {
+            LOG_WARN_CAT("LAS", "Skipped scratch pool destroy — null device");
+            scratchPoolId_ = 0;  // Nullify ref
+        }
+        // FIXED: Explicitly reset handles (triggers guarded ~Handle)
+        blas_.reset();
+        tlas_.reset();
+        if (instanceBufferId_ != 0 && dev != VK_NULL_HANDLE) {
+            BUFFER_DESTROY(instanceBufferId_);
+        } else if (instanceBufferId_ != 0) {
+            LOG_WARN_CAT("LAS", "Skipped instance buffer destroy — null device");
+            instanceBufferId_ = 0;
+        }
+        LOG_TRACE_CAT("LAS", "Static dtor complete — all resources purged");
     }
 
     mutable std::mutex mutex_;
@@ -589,37 +628,55 @@ private:
     // FIXED: Lazy-init helper for pool (called in build* funcs, safe post-ctx)
     void ensureTimestampPool() noexcept {
         if (QUERY_POOL_TIMESTAMP == VK_NULL_HANDLE) {
+            VkDevice dev = g_ctx().device();
+            if (dev == VK_NULL_HANDLE) {
+                LOG_WARN_CAT("LAS", "Skipped timestamp pool create — null device");
+                return;
+            }
             VkQueryPoolCreateInfo qpoolInfo{};
             qpoolInfo.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
             qpoolInfo.queryType = VK_QUERY_TYPE_TIMESTAMP;
             qpoolInfo.queryCount = 2;  // Start/end
-            VkResult r = vkCreateQueryPool(g_ctx().vkDevice(), &qpoolInfo, nullptr, &QUERY_POOL_TIMESTAMP);
+            VkResult r = vkCreateQueryPool(dev, &qpoolInfo, nullptr, &QUERY_POOL_TIMESTAMP);
             if (r != VK_SUCCESS) {
                 LOG_WARN_CAT("LAS", "Failed to create timestamp query pool (perf logs disabled)");
                 QUERY_POOL_TIMESTAMP = VK_NULL_HANDLE;  // Graceful fallback
             }
         }
         if (timestampPeriodNs_ == 0.0f) {
-            VkPhysicalDeviceProperties props{};
-            vkGetPhysicalDeviceProperties(g_ctx().physicalDevice(), &props);
-            timestampPeriodNs_ = props.limits.timestampPeriod;
+            VkPhysicalDevice phys = g_ctx().physicalDevice();
+            if (phys != VK_NULL_HANDLE) {
+                VkPhysicalDeviceProperties props{};
+                vkGetPhysicalDeviceProperties(phys, &props);
+                timestampPeriodNs_ = props.limits.timestampPeriod;
+            } else {
+                LOG_WARN_CAT("LAS", "Skipped timestamp period query — null phys dev");
+                timestampPeriodNs_ = 1.0f;  // Fallback (no-op)
+            }
         }
     }
 
-    // --- ADAPTIVE SCRATCH POOL v0.2 — FIXED + PREFETCH
+    // --- ADAPTIVE SCRATCH POOL v0.2 — FIXED + PREFETCH + GUARDS
     static constexpr float GROWTH_FACTOR = 2.0f;
     uint64_t scratchPoolId_ = 0;
     VkDeviceSize currentScratchSize_ = INITIAL_SCRATCH_SIZE;
     bool scratchPoolValid_ = false;
 
     [[nodiscard]] uint64_t getOrGrowScratch(VkDeviceSize requiredSize, VkBufferUsageFlags usage, const char* type) {
+        VkDevice dev = g_ctx().device();
+        if (dev == VK_NULL_HANDLE) {
+            LOG_WARN_CAT("LAS", "Skipped scratch grow — null device");
+            return 0;
+        }
         if (!scratchPoolValid_ || requiredSize > currentScratchSize_) {
             VkDeviceSize oldSize = currentScratchSize_;
             VkDeviceSize growth = static_cast<VkDeviceSize>(static_cast<double>(currentScratchSize_) * GROWTH_FACTOR);
             VkDeviceSize newSize = std::min(growth, MAX_SCRATCH_SIZE);
             newSize = std::max(newSize, requiredSize);
 
-            if (scratchPoolId_) BUFFER_DESTROY(scratchPoolId_);
+            if (scratchPoolId_ != 0) {
+                BUFFER_DESTROY(scratchPoolId_);  // Guarded in tracker
+            }
             BUFFER_CREATE(scratchPoolId_, newSize, usage, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, std::format("scratch_{}", type).c_str());
             currentScratchSize_ = newSize;
             scratchPoolValid_ = true;
@@ -631,6 +688,10 @@ private:
     // OPT TRICK: Dedicated RT cmd pool (transient, pre-alloc 1-2 buffers; ~50% faster than single-time)
     // Assume VulkanCore exposes a RT-specific pool; fallback to general if not
     [[nodiscard]] VkCommandBuffer beginOptimizedCmd(VkCommandPool pool) {
+        VkDevice dev = g_ctx().device();
+        if (dev == VK_NULL_HANDLE) {
+            throw std::runtime_error("beginOptimizedCmd: null device");
+        }
         VkCommandBufferAllocateInfo allocInfo{};
         allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
         allocInfo.commandPool = pool;  // Or dedicated RT pool: g_ctx().rtCmdPool
@@ -638,7 +699,7 @@ private:
         allocInfo.commandBufferCount = 1;
 
         VkCommandBuffer cmd;
-        VK_CHECK(vkAllocateCommandBuffers(g_ctx().vkDevice(), &allocInfo, &cmd), "Alloc RT cmdbuf");
+        VK_CHECK(vkAllocateCommandBuffers(dev, &allocInfo, &cmd), "Alloc RT cmdbuf");
 
         VkCommandBufferBeginInfo beginInfo{};
         beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -649,7 +710,11 @@ private:
     }
 
     void submitOptimizedCmd(VkCommandBuffer cmd, VkQueue queue, VkCommandPool pool) {
-        VkDevice dev = g_ctx().vkDevice();
+        VkDevice dev = g_ctx().device();
+        if (dev == VK_NULL_HANDLE) {
+            LOG_WARN_CAT("LAS", "Skipped submitOptimizedCmd — null device");
+            return;
+        }
         VK_CHECK(vkEndCommandBuffer(cmd), "End RT cmdbuf");
 
         VkSubmitInfo submitInfo{};
@@ -666,7 +731,8 @@ private:
         // Submit with fence
         VkResult submitRes = vkQueueSubmit(queue, 1, &submitInfo, fence);
         if (submitRes != VK_SUCCESS) {
-            vkDestroyFence(dev, fence, nullptr);
+            // FIXED: Guard fence destroy
+            if (fence != VK_NULL_HANDLE) vkDestroyFence(dev, fence, nullptr);
             if (submitRes == VK_ERROR_DEVICE_LOST) {
                 LOG_ERROR_CAT("LAS", "Device lost during RT submit — recreate device/context");
                 // TODO: Trigger device recreation upstream (e.g., via callback or exception)
@@ -677,7 +743,7 @@ private:
 
         // Wait on fence (targeted sync, not whole queue)
         VkResult waitRes = vkWaitForFences(dev, 1, &fence, VK_TRUE, UINT64_MAX);
-        vkDestroyFence(dev, fence, nullptr);
+        vkDestroyFence(dev, fence, nullptr);  // Safe: always created above
         if (waitRes != VK_SUCCESS) {
             if (waitRes == VK_ERROR_DEVICE_LOST) {
                 LOG_ERROR_CAT("LAS", "Device lost during RT fence wait — recreate device/context");
@@ -708,5 +774,9 @@ inline LAS& las() noexcept { return LAS::get(); }
 // FIXED: Graceful fallback if pool create fails (perf logs off, no abort)
 // FIXED: cmdPool → commandPool() in free (method call with ())
 // FIXED: vkCmdResetQueryPool(..., 2) for start/end timestamps
+// FIXED: Guards in deleters/~LAS() — prevents VUID crashes/leaks on static dtor (null device safe)
+// FIXED: BUFFER_DESTROY guards in getOrGrowScratch/deleters (assume tracker guarded; explicit nullify fallback)
+// FIXED: Fence destroy guarded in submitOptimizedCmd (no leak on error path)
+// FIXED: ensureTimestampPool guards (null dev skip)
 // ZERO ERRORS — ZERO CIRCULAR — PRODUCTION-READY — 15k FPS VALHALLA
 // =============================================================================

@@ -120,7 +120,7 @@ SDL3Initializer::~SDL3Initializer()
     window_.reset();  // Explicit for log clarity, though dtor does it
 
     LOG_ATTEMPT_CAT("SDL3", "{}Shutting down global SDL subsystems via SDL_Quit(){}", OCEAN_TEAL, RESET);
-    SDL_Quit();
+    //SDL_Quit(); // we only use the one in main
     LOG_SUCCESS_CAT("SDL3", "{}SDL_Quit executed — all subsystems quiesced{}", LIME_GREEN, RESET);
 
     LOG_SUCCESS_CAT("SDL3", "{}=== SDL3INITIALIZER RAII DESTRUCTOR COMPLETE — ZERO LEAKS ==={}", LIME_GREEN, RESET);

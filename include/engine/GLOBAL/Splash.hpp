@@ -13,6 +13,7 @@
 // • Image centered from frame 1
 // • No SIGSEGV
 // • ENHANCED LOGGING — DETAILED TRACE FOR DEBUG
+// • FIXED: Window centered on screen via SDL_SetWindowPosition (SDL3 spec)
 // • PINK PHOTONS + AMMO.WAV ETERNAL
 // =============================================================================
 
@@ -60,6 +61,11 @@ inline void show(const char* title, int w, int h, const char* imagePath, const c
         return;
     }
     LOG_SUCCESS_CAT("SPLASH", "Window created: 0x{:x}", reinterpret_cast<uint64_t>(win));
+
+    // FIXED: Center window on screen (SDL3: SDL_SetWindowPosition after creation)
+    LOG_DEBUG_CAT("SPLASH", "Centering window on screen");
+    SDL_SetWindowPosition(win, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+    LOG_SUCCESS_CAT("SPLASH", "Window centered on primary display");
 
     // --- 2. Create renderer ---
     LOG_DEBUG_CAT("SPLASH", "Creating renderer for window 0x{:x}", reinterpret_cast<uint64_t>(win));

@@ -618,14 +618,17 @@ void Context::init(SDL_Window* window, int width, int height) {
                     PLASMA_FUCHSIA, width, height, RESET);
 }
 
-// =============================================================================
-// Context Cleanup (NEW: Includes Async Compute)
-// =============================================================================
 void Context::cleanup() noexcept {
     LOG_ATTEMPT_CAT("RTX", "{}Cleaning up Vulkan context...{}", RASPBERRY_PINK, RESET);
 
+    if (!isValid()) {
+        LOG_WARN_CAT("RTX", "{}Cleanup skipped — context already invalid{}", RASPBERRY_PINK, RESET);
+        return;
+    }
+
     vkDeviceWaitIdle(device_);
 
+    // Destroy pools (use device)
     if (computeCommandPool_ != VK_NULL_HANDLE) {
         LOG_TRACE_CAT("RTX", "{}Destroying compute command pool: 0x{:x}{}", RASPBERRY_PINK, reinterpret_cast<uintptr_t>(computeCommandPool_), RESET);
         vkDestroyCommandPool(device_, computeCommandPool_, nullptr);
@@ -638,6 +641,12 @@ void Context::cleanup() noexcept {
         commandPool_ = VK_NULL_HANDLE;
     }
 
+    // FIXED: Purge buffers/images/samplers BEFORE device destroy (child objects first)
+    LOG_TRACE_CAT("RTX", "{}Purging all tracked buffers/images/samplers{}", RASPBERRY_PINK, RESET);
+    UltraLowLevelBufferTracker::get().purge_all();  // FIXED: Moved BEFORE vkDestroyDevice — destroys while device valid
+    LOG_SUCCESS_CAT("RTX", "{}All child objects purged — validation ready{}", EMERALD_GREEN, RESET);
+
+    // Destroy device (no children left)
     if (device_ != VK_NULL_HANDLE) {
         LOG_TRACE_CAT("RTX", "{}Destroying logical device: 0x{:x}{}", RASPBERRY_PINK, reinterpret_cast<uintptr_t>(device_), RESET);
         vkDestroyDevice(device_, nullptr);
@@ -651,12 +660,23 @@ void Context::cleanup() noexcept {
     }
 
     if (instance_ != VK_NULL_HANDLE) {
+        // FIXED: Destroy debug messenger BEFORE instance (VUID-vkDestroyInstance-instance-00629)
+        if (debugMessenger_ != VK_NULL_HANDLE) {
+            LOG_TRACE_CAT("RTX", "{}Destroying debug messenger: 0x{:x}{}", RASPBERRY_PINK, reinterpret_cast<uintptr_t>(debugMessenger_), RESET);
+            auto pfnDestroyDebugUtilsMessengerEXT = reinterpret_cast<PFN_vkDestroyDebugUtilsMessengerEXT>(
+                vkGetInstanceProcAddr(instance_, "vkDestroyDebugUtilsMessengerEXT"));
+            if (pfnDestroyDebugUtilsMessengerEXT) {
+                pfnDestroyDebugUtilsMessengerEXT(instance_, debugMessenger_, nullptr);
+            }
+            debugMessenger_ = VK_NULL_HANDLE;
+        }
         LOG_TRACE_CAT("RTX", "{}Destroying instance: 0x{:x}{}", RASPBERRY_PINK, reinterpret_cast<uintptr_t>(instance_), RESET);
         vkDestroyInstance(instance_, nullptr);
         instance_ = VK_NULL_HANDLE;
     }
 
-    UltraLowLevelBufferTracker::get().purge_all();
+    ready_ = false;
+    valid_ = false;
 
     LOG_SUCCESS_CAT("RTX", "{}Vulkan context cleaned — ZERO LEAKS{}", EMERALD_GREEN, RESET);
 }

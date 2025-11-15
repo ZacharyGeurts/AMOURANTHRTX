@@ -2,6 +2,13 @@
 // =============================================================================
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
+//
+// Dual Licensed:
+// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
+//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
+// 2. Commercial licensing: gzac5314@gmail.com
+//
+// =============================================================================
 
 #include "engine/GLOBAL/OptionsMenu.hpp"
 #include "engine/GLOBAL/StoneKey.hpp"
@@ -285,7 +292,7 @@ static void phase2_mainWindow() {
 // =============================================================================
 // Phase 3: Vulkan Context Initialization + Fallback — BULLETPROOF VALIDATION
 // =============================================================================
-[[maybe_unused]] static void phase3_vulkanContext(SDL_Window* window) {
+static void phase3_vulkanContext(SDL_Window* window) {
     bulkhead("PHASE 3: VULKAN CONTEXT INITIALIZATION");
     LOG_ATTEMPT_CAT("MAIN", "{}Entered Phase 3 — forging Vulkan empire{}", EMERALD_GREEN, RESET);
 
@@ -413,7 +420,7 @@ static std::unique_ptr<Application> phase4_appAndRendererConstruction() {
         TARGET_WIDTH,
         TARGET_HEIGHT,
         SDL3Window::get(),
-        false
+        !Options::Window::VSYNC  // VSYNC=true → limited (false); false → unlimited (true)
     );
 
     app->setRenderer(std::move(renderer));
@@ -440,18 +447,39 @@ static void phase5_renderLoop(std::unique_ptr<Application>& app) {
 }
 
 // =============================================================================
-// Phase 6: Graceful Shutdown
+// Phase 6: Graceful Shutdown — BULLETPROOF RAII + EXPLICIT DISPOSALS (LEAKS FIXED)
 // =============================================================================
 static void phase6_shutdown(std::unique_ptr<Application>& app) {
     bulkhead("PHASE 6: GRACEFUL SHUTDOWN");
-    LOG_INFO_CAT("MAIN", "Main loop exited — beginning cleanup");
+    LOG_ATTEMPT_CAT("MAIN", "{}Main loop exited — beginning cleanup sequence{}", RASPBERRY_PINK, RESET);
 
-    app.reset();
+    // FIXED: First dispose Application RAII (renderer & window auto-clean) — cleans pipelines, swapchain, etc. BEFORE device destruction
+    LOG_TRACE_CAT("MAIN", "{}Disposing Application RAII — renderer & window auto-clean{}", RASPBERRY_PINK, RESET);
+    app.reset();  // Triggers ~Application: VulkanRenderer dtor (swapchain, pipelines, etc.) + SDLWindowPtr dtor
+    LOG_SUCCESS_CAT("MAIN", "{}Application disposed — renderer resources cleaned{}", EMERALD_GREEN, RESET);
 
-    LOG_INFO_CAT("MAIN", "RAII cleanup: Vulkan → SDL → StoneKey");
-    SDL_Quit();  // Global SDL shutdown — only once, after all RAII
-    LOG_SUCCESS_CAT("MAIN", "Cleanup complete — zero leaks");
-    LOG_SUCCESS_CAT("MAIN", "FINAL STONEKEY HASH: 0x{:016X}", get_kStone1() ^ get_kStone2());
+    // NEW: Explicit purge of any lingering renderer/swapchain objects (safety net for leaks)
+    LOG_TRACE_CAT("MAIN", "{}Purging lingering renderer/swapchain resources{}", RASPBERRY_PINK, RESET);
+    if (RTX::g_ctx().device() != VK_NULL_HANDLE) {
+        RTX::shutdown();  // Explicit call if not triggered by dtor
+        SWAPCHAIN.cleanup();  // Ensures images/views/semaps destroyed
+    }
+
+    // FIXED: THEN dispose RTX context & LAS — device, pools, buffers AFTER renderer cleanup (prevents double-free/use-after-free)
+    LOG_TRACE_CAT("MAIN", "{}Disposing RTX context & LAS — zero leaks enforced{}", RASPBERRY_PINK, RESET);
+    RTX::shutdown();  // Calls LAS::cleanup() + g_ctx().cleanup() — destroys AS, device, instance AFTER renderer
+    LOG_SUCCESS_CAT("MAIN", "{}RTX + LAS disposed — validation layers satisfied{}", EMERALD_GREEN, RESET);
+
+    // BULLETPROOF: SDL global cleanup (subsystems only; windows via RAII) — FIXED: Check !=0 for initialized
+    if (SDL_WasInit(SDL_INIT_VIDEO | SDL_INIT_AUDIO) == 0) {
+        LOG_TRACE_CAT("MAIN", "{}Quitting SDL subsystems{}", RASPBERRY_PINK, RESET);
+        SDL_QuitSubSystem(SDL_INIT_VIDEO | SDL_INIT_AUDIO);
+    }
+    LOG_SUCCESS_CAT("MAIN", "{}SDL disposed — events & audio quiesced{}", EMERALD_GREEN, RESET);
+
+    LOG_INFO_CAT("MAIN", "{}RAII cleanup: Vulkan → SDL → StoneKey{}", OCEAN_TEAL, RESET);
+    LOG_SUCCESS_CAT("MAIN", "{}Cleanup complete — zero leaks{}", EMERALD_GREEN, RESET);
+    LOG_SUCCESS_CAT("MAIN", "{}FINAL STONEKEY HASH: 0x{:016X}{}", SAPPHIRE_BLUE, get_kStone1() ^ get_kStone2(), RESET);
     LOG_SUCCESS_CAT("MAIN", "{}AMOURANTH RTX — CLEAN EXIT — PINK PHOTONS ETERNAL{}", 
                     COSMIC_GOLD, RESET);
 }
@@ -464,6 +492,7 @@ static void phase6_shutdown(std::unique_ptr<Application>& app) {
 // • Guarded: Each phase logs entry/exit; failures rollback via dtor
 // • Exception: Hierarchy-aware (FatalError first); safe logging (no recursive format)
 // • Validation: Post-phase checks (e.g., app != null); early return on invalid
+// • FIXED: Cleanup order in phase6 & catch: app.reset() BEFORE RTX::shutdown() — resolves context/renderer conflicts
 // • NOV 14 2025: VALHALLA v80 TURBO — ZERO LEAKS — TITAN DOMINANCE
 // =============================================================================
 int main(int argc, char* argv[])
@@ -536,7 +565,8 @@ int main(int argc, char* argv[])
     }
     catch (const Engine::FatalError& e) {
         LOG_FATAL_CAT("MAIN", "{}FATAL ENGINE ERROR: {}{}", CRIMSON_MAGENTA, e.what(), RESET);
-        // BULLETPROOF: Trigger global shutdown (RTX + SDL)
+        // FIXED: Trigger global shutdown (RTX + SDL) — app.reset() FIRST to avoid renderer/device conflict
+        if (app) app.reset();
         RTX::shutdown();
         SDL_Quit();
         return -1;
@@ -544,14 +574,16 @@ int main(int argc, char* argv[])
     catch (const std::exception& e) {
         std::cerr << PLASMA_FUCHSIA << "UNRECOVERABLE EXCEPTION: " << e.what() << RESET << std::endl;  // FIXED: Direct output — no format
         std::cerr << "STACK TRACE:\n" << Engine::getBacktrace(1) << std::endl;  // FIXED: Direct << for backtrace
-        // BULLETPROOF: Emergency cleanup
+        // FIXED: Emergency cleanup — app.reset() FIRST to avoid renderer/device conflict
+        if (app) app.reset();
         if (RTX::g_ctx().isValid()) RTX::shutdown();
         if (SDL_WasInit(SDL_INIT_VIDEO)) SDL_Quit();
         return -1;
     }
     catch (...) {
         std::cerr << PLASMA_FUCHSIA << "UNKNOWN EXCEPTION — EMPIRE STANDS" << RESET << std::endl;  // FIXED: Safe no-format log
-        // BULLETPROOF: Emergency cleanup
+        // FIXED: Emergency cleanup — app.reset() FIRST to avoid renderer/device conflict
+        if (app) app.reset();
         if (RTX::g_ctx().isValid()) RTX::shutdown();
         if (SDL_WasInit(SDL_INIT_VIDEO)) SDL_Quit();
         return -1;

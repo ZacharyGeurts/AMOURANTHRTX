@@ -106,6 +106,7 @@ public:
     void setTonemap(bool enabled) noexcept;
     void setOverlay(bool show) noexcept;
     void setRenderMode(int mode) noexcept;
+	void cleanup() noexcept;
 
     // Accessors
     [[nodiscard]] VkDevice         device()          const noexcept { return RTX::g_ctx().vkDevice(); }
@@ -266,7 +267,6 @@ private:
     void endSingleTimeCommands(VkDevice device, VkCommandPool pool, VkQueue queue, VkCommandBuffer cmd);
     VkCommandBuffer allocateTransientCommandBuffer(VkDevice device, VkCommandPool pool);
 
-    void cleanup() noexcept;
     void destroyNexusScoreImage() noexcept;
     void destroyDenoiserImage() noexcept;
     void destroyAllBuffers() noexcept;

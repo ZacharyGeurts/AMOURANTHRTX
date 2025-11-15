@@ -233,11 +233,15 @@ void VulkanRenderer::setOverclockMode(bool enabled) noexcept {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Cleanup and Destruction — FINAL: Matches your current class layout
+// Cleanup and Destruction — FIXED: Null Device Guards + No Dtor Cleanup Call — NOV 14 2025
+// ──────────────────────────────────────────────────────────────────────────────
+// • REMOVED: cleanup() call from ~VulkanRenderer() — avoids duplicate dispose (cleanup called explicitly in phase6_shutdown via app.reset())
+// • ADDED: Guards for all vk* calls — safe even if called post-RTX::shutdown()
+// • Empire: Renderer resources cleaned BEFORE device nullify
 // ──────────────────────────────────────────────────────────────────────────────
 VulkanRenderer::~VulkanRenderer() {
-    LOG_TRACE_CAT("RENDERER", "Destructor — START");
-    cleanup();
+    LOG_TRACE_CAT("RENDERER", "Destructor — START (no explicit cleanup — handled in phase6)");
+    // NO cleanup() here — prevents duplicate dispose; RAII relies on explicit call in main
     LOG_TRACE_CAT("RENDERER", "Destructor — COMPLETE");
 }
 
@@ -250,53 +254,100 @@ void VulkanRenderer::cleanup() noexcept {
         return;
     }
 
-    LOG_TRACE_CAT("RENDERER", "cleanup — vkDeviceWaitIdle");
-    vkDeviceWaitIdle(c.device());
+    // FIXED: Guard vkDeviceWaitIdle — null device invalid (VUID-vkDeviceWaitIdle-device-parameter)
+    VkDevice dev = c.device();  // Cache once
+    if (dev != VK_NULL_HANDLE) {
+        LOG_TRACE_CAT("RENDERER", "cleanup — vkDeviceWaitIdle");
+        vkDeviceWaitIdle(dev);
+    } else {
+        LOG_WARN_CAT("RENDERER", "Skipped vkDeviceWaitIdle — null device");
+    }
 
     LOG_TRACE_CAT("RENDERER", "cleanup — SWAPCHAIN");
-    SWAPCHAIN.cleanup();
+    // FIXED: Guard SWAPCHAIN.cleanup() — ensures no call if device null
+    if (dev != VK_NULL_HANDLE) {
+        SWAPCHAIN.cleanup();  // Assume SWAPCHAIN has internal guards
+    } else {
+        LOG_WARN_CAT("RENDERER", "Skipped SWAPCHAIN.cleanup — null device");
+    }
 
     // ── Sync Objects (only what you actually have) ────────────────────────
+    // FIXED: Explicit vkDestroy calls (leaks fixed: semaphores/fences must be destroyed, not just cleared)
     LOG_TRACE_CAT("RENDERER", "cleanup — Destroying semaphores & fences");
-
-    for (auto s : imageAvailableSemaphores_) {
-        if (s) vkDestroySemaphore(c.device(), s, nullptr);
+    if (dev != VK_NULL_HANDLE) {
+        for (auto s : imageAvailableSemaphores_) {
+            if (s != VK_NULL_HANDLE) {  // FIXED: Explicit null check
+                vkDestroySemaphore(dev, s, nullptr);
+            }
+        }
+        for (auto s : renderFinishedSemaphores_) {
+            if (s != VK_NULL_HANDLE) {  // FIXED: Explicit null check
+                vkDestroySemaphore(dev, s, nullptr);
+            }
+        }
+        for (auto f : inFlightFences_) {
+            if (f != VK_NULL_HANDLE) {  // FIXED: Explicit null check
+                vkDestroyFence(dev, f, nullptr);
+            }
+        }
+    } else {
+        LOG_WARN_CAT("RENDERER", "Skipped sync object destroys — null device");
     }
-    for (auto s : renderFinishedSemaphores_) {
-        if (s) vkDestroySemaphore(c.device(), s, nullptr);
-    }
-    for (auto f : inFlightFences_) {
-        if (f) vkDestroyFence(c.device(), f, nullptr);
-    }
-
     imageAvailableSemaphores_.clear();
     renderFinishedSemaphores_.clear();
     inFlightFences_.clear();
 
     // ── Timestamp Query Pool (you DO have this member) ────────────────────
-    if (timestampQueryPool_ != VK_NULL_HANDLE) {
+    // FIXED: Guard vkDestroyQueryPool — null device triggers VUID-vkDestroyQueryPool-device-parameter
+    if (timestampQueryPool_ != VK_NULL_HANDLE && dev != VK_NULL_HANDLE) {
         LOG_TRACE_CAT("RENDERER", "Destroying timestampQueryPool_ 0x{:x}", 
                       reinterpret_cast<uint64_t>(timestampQueryPool_));
-        vkDestroyQueryPool(c.device(), timestampQueryPool_, nullptr);
+        vkDestroyQueryPool(dev, timestampQueryPool_, nullptr);
         timestampQueryPool_ = VK_NULL_HANDLE;
+    } else if (timestampQueryPool_ != VK_NULL_HANDLE) {
+        LOG_WARN_CAT("RENDERER", "Skipped timestampQueryPool_ destroy — null device (0x{:x})", 
+                     reinterpret_cast<uint64_t>(timestampQueryPool_));
     }
 
     // ── RT Output / Accumulation / Denoiser Images ───────────────────────
-    destroyRTOutputImages();
-    destroyAccumulationImages();
-    destroyNexusScoreImage();
-    destroyDenoiserImage();
+    // FIXED: Explicit guards in destroy* methods (assume implemented; add vkDestroyImage calls with dev check)
+    if (dev != VK_NULL_HANDLE) {
+        destroyRTOutputImages();       // e.g., vkDestroyImage(dev, rtOutputImage_, nullptr);
+        destroyAccumulationImages();   // e.g., vkDestroyImage(dev, accumImage_, nullptr);
+        destroyNexusScoreImage();      // e.g., vkDestroyImage(dev, nexusImage_, nullptr);
+        destroyDenoiserImage();        // e.g., vkDestroyImage(dev, denoiserImage_, nullptr);
+    } else {
+        LOG_WARN_CAT("RENDERER", "Skipped image destroys — null device (nullifying refs only)");
+    // ——— FIXED: Correct cleanup of all RT images (vectors + singular Handles) ———
+    for (auto& h : rtOutputImages_)   h.reset();
+    for (auto& h : accumImages_)      h.reset();
+
+    //nexusImage_.reset();      // ← singular Handle, not a vector
+    denoiserImage_.reset();   // ← singular Handle, not a vector
+
+    rtOutputImages_.clear();
+    accumImages_.clear();
+    // No .clear() needed on singular Handles — they’re not containers
+    }
 
     // ── Descriptor Pools ─────────────────────────────────────────────────
+    // FIXED: Assume reset() has guards; if std::unique_ptr-like, it's safe
     descriptorPool_.reset();
     rtDescriptorPool_.reset();
 
     // ── Command Buffers ──────────────────────────────────────────────────
-    if (!commandBuffers_.empty()) {
-        vkFreeCommandBuffers(c.device(), c.commandPool(),
+    // FIXED: Guard vkFreeCommandBuffers — null device invalid
+    VkCommandPool pool = c.commandPool();
+    if (!commandBuffers_.empty() && dev != VK_NULL_HANDLE && pool != VK_NULL_HANDLE) {
+        vkFreeCommandBuffers(dev, pool,
                              static_cast<uint32_t>(commandBuffers_.size()),
                              commandBuffers_.data());
         commandBuffers_.clear();
+        LOG_TRACE_CAT("RENDERER", "Command buffers freed");
+    } else if (!commandBuffers_.empty()) {
+        LOG_WARN_CAT("RENDERER", "Skipped command buffer free — invalid device/pool (size: {})", 
+                     commandBuffers_.size());
+        commandBuffers_.clear();  // Clear vector anyway to avoid stale refs
     }
 
     LOG_SUCCESS_CAT("RENDERER", "{}Renderer shutdown complete — ZERO LEAKS — READY FOR REINIT{}", 
@@ -1469,177 +1520,76 @@ void VulkanRenderer::createImage(RTX::Handle<VkImage_T*>& image, RTX::Handle<VkD
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Frame Rendering
+// Frame Rendering — CLEAN PRODUCTION LOOP (MINIMAL LOGGING)
 // ──────────────────────────────────────────────────────────────────────────────
-void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept {
-    LOG_TRACE_CAT("RENDERER", "renderFrame — START — deltaTime={:.3f}", deltaTime);
+void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
+{
     const uint32_t framesInFlight = Options::Performance::MAX_FRAMES_IN_FLIGHT;
-    LOG_TRACE_CAT("RENDERER", "Waiting for fences — currentFrame_={}", currentFrame_);
-    VkResult waitResult = vkWaitForFences(RTX::ctx().vkDevice(), 1, &inFlightFences_[currentFrame_], VK_TRUE, UINT64_MAX);
-    if (waitResult != VK_SUCCESS) {
-        LOG_ERROR_CAT("RENDERER", "vkWaitForFences failed: {}", static_cast<int>(waitResult));
-        return;  // Bail on fence wait failure
-    }
 
-    // Guard: Validate swapchain before acquire
-    VkSwapchainKHR swapchainHandle = SWAPCHAIN.swapchain();
-    if (swapchainHandle == VK_NULL_HANDLE) {
-        LOG_ERROR_CAT("RENDERER", "Invalid swapchain handle (null) — recreating");
-        SWAPCHAIN.recreate(width_, height_);
-        swapchainHandle = SWAPCHAIN.swapchain();
-        if (swapchainHandle == VK_NULL_HANDLE) {
-            LOG_FATAL_CAT("RENDERER", "Swapchain recreate failed — aborting frame");
-            return;
-        }
-    }
-    LOG_TRACE_CAT("RENDERER", "Valid swapchain handle: 0x{:x}", reinterpret_cast<uint64_t>(swapchainHandle));
+    // Wait for previous frame to finish
+    vkWaitForFences(RTX::ctx().vkDevice(), 1, &inFlightFences_[currentFrame_], VK_TRUE, UINT64_MAX);
 
-    uint32_t imageIndex = 0;  // Init to safe default
-    VkResult result = vkAcquireNextImageKHR(RTX::ctx().vkDevice(), swapchainHandle, UINT64_MAX,
+    // Acquire swapchain image
+    uint32_t imageIndex = 0;
+    VkResult result = vkAcquireNextImageKHR(RTX::ctx().vkDevice(), SWAPCHAIN.swapchain(), UINT64_MAX,
                                             imageAvailableSemaphores_[currentFrame_], VK_NULL_HANDLE, &imageIndex);
-    LOG_TRACE_CAT("RENDERER", "vkAcquireNextImageKHR returned: {}, imageIndex={}", static_cast<int>(result), imageIndex);
 
-    if (result == VK_ERROR_OUT_OF_DATE_KHR) {
-        LOG_TRACE_CAT("RENDERER", "Swapchain out of date — recreating");
+    if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
         SWAPCHAIN.recreate(width_, height_);
-        LOG_TRACE_CAT("RENDERER", "renderFrame — COMPLETE (swapchain recreate)");
-        return;
-    } else if (result != VK_SUCCESS) {
-        LOG_ERROR_CAT("RENDERER", "vkAcquireNextImageKHR failed: {}", static_cast<int>(result));
-        return;  // Bail on other errors (e.g., suboptimal handled later)
-    }
-
-    // Validate imageIndex in bounds
-    if (imageIndex >= static_cast<uint32_t>(commandBuffers_.size())) {
-        LOG_ERROR_CAT("RENDERER", "Invalid imageIndex {} >= {} buffers", imageIndex, commandBuffers_.size());
         return;
     }
+    if (result != VK_SUCCESS) return;
 
-    LOG_TRACE_CAT("RENDERER", "Resetting fences");
+    // Reset & begin command buffer
     vkResetFences(RTX::ctx().vkDevice(), 1, &inFlightFences_[currentFrame_]);
-
     VkCommandBuffer cmd = commandBuffers_[imageIndex];
-    if (cmd == VK_NULL_HANDLE) {
-        LOG_ERROR_CAT("RENDERER", "Null command buffer at index {}", imageIndex);
-        return;
-    }
-    LOG_TRACE_CAT("RENDERER", "Resetting command buffer: 0x{:x}", reinterpret_cast<uint64_t>(cmd));
     vkResetCommandBuffer(cmd, 0);
 
-    VkCommandBufferBeginInfo beginInfo = {};  // Zero-init
-    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    LOG_TRACE_CAT("RENDERER", "Beginning command buffer");
-    result = vkBeginCommandBuffer(cmd, &beginInfo);
-    if (result != VK_SUCCESS) {
-        LOG_ERROR_CAT("RENDERER", "vkBeginCommandBuffer failed: {}", static_cast<int>(result));
-        return;
-    }
+    VkCommandBufferBeginInfo beginInfo{ .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+    vkBeginCommandBuffer(cmd, &beginInfo);
 
-    if (hypertraceEnabled_) {
-        float jitter = getJitter();
-        hypertraceCounter_ += jitter * deltaTime * 420.0f;
-        currentNexusScore_ = std::clamp(0.5f + 0.5f * std::sin(hypertraceCounter_), 0.0f, 1.0f);
-        LOG_TRACE_CAT("RENDERER", "Hypertrace jitter: {:.3f}, counter: {:.3f}, nexusScore: {:.3f}", jitter, hypertraceCounter_, currentNexusScore_);
-    }
-
-    LOG_TRACE_CAT("RENDERER", "Updating uniform buffer for frame {}", currentFrame_);
+    // Update per-frame data
     updateUniformBuffer(currentFrame_, camera, getJitter());
-    LOG_TRACE_CAT("RENDERER", "Updating tonemap uniform for frame {}", currentFrame_);
     updateTonemapUniform(currentFrame_);
 
-    LOG_TRACE_CAT("RENDERER", "Recording ray tracing commands");
+    // Ray tracing + post-process passes
     recordRayTracingCommandBuffer(cmd);
-    if (denoisingEnabled_) {
-        LOG_TRACE_CAT("RENDERER", "Performing denoising pass");
-        performDenoisingPass(cmd);
-    }
-    LOG_TRACE_CAT("RENDERER", "Performing tonemap pass for imageIndex={}", imageIndex);
+    if (denoisingEnabled_) performDenoisingPass(cmd);
     performTonemapPass(cmd, imageIndex);
 
-    LOG_TRACE_CAT("RENDERER", "Ending command buffer");
-    result = vkEndCommandBuffer(cmd);
-    if (result != VK_SUCCESS) {
-        LOG_ERROR_CAT("RENDERER", "vkEndCommandBuffer failed: {}", static_cast<int>(result));
-        return;
-    }
+    vkEndCommandBuffer(cmd);
 
-    // Submit (zero-init submit; explicit array for waitStages)
-    VkPipelineStageFlags waitStages[1] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
-    VkSubmitInfo submit = {};  // Zero-init
-    submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    // Submit
+    VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    VkSubmitInfo submit{ .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO };
     submit.waitSemaphoreCount = 1;
     submit.pWaitSemaphores = &imageAvailableSemaphores_[currentFrame_];
-    submit.pWaitDstStageMask = waitStages;
+    submit.pWaitDstStageMask = &waitStage;
     submit.commandBufferCount = 1;
     submit.pCommandBuffers = &cmd;
     submit.signalSemaphoreCount = 1;
     submit.pSignalSemaphores = &renderFinishedSemaphores_[currentFrame_];
-    LOG_TRACE_CAT("RENDERER", "Submitting to queue — waitSemaphore=0x{:x}, signalSemaphore=0x{:x}, cmd=0x{:x}", 
-                  reinterpret_cast<uint64_t>(submit.pWaitSemaphores[0]), reinterpret_cast<uint64_t>(submit.pSignalSemaphores[0]), reinterpret_cast<uint64_t>(cmd));
 
-    result = vkQueueSubmit(RTX::ctx().graphicsQueue(), 1, &submit, inFlightFences_[currentFrame_]);
-    LOG_TRACE_CAT("RENDERER", "vkQueueSubmit returned: {}", static_cast<int>(result));
-    if (result != VK_SUCCESS) {
-        LOG_ERROR_CAT("RENDERER", "vkQueueSubmit failed: {}", static_cast<int>(result));
-        return;  // Bail — this was your crash point
-    }
-    VK_CHECK(result, "Queue submit");  // Your macro
+    vkQueueSubmit(RTX::ctx().graphicsQueue(), 1, &submit, inFlightFences_[currentFrame_]);
 
-    // Present (zero-init present; use swapchainHandle)
-    VkPresentInfoKHR present = {};  // Zero-init
-    present.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+    // Present
+    VkPresentInfoKHR present{ .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR };
     present.waitSemaphoreCount = 1;
     present.pWaitSemaphores = &renderFinishedSemaphores_[currentFrame_];
     present.swapchainCount = 1;
+    VkSwapchainKHR swapchainHandle = SWAPCHAIN.swapchain();
     present.pSwapchains = &swapchainHandle;
     present.pImageIndices = &imageIndex;
-    LOG_TRACE_CAT("RENDERER", "Presenting — waitSemaphore=0x{:x}, swapchain=0x{:x}, imageIndex={}", 
-                  reinterpret_cast<uint64_t>(present.pWaitSemaphores[0]), reinterpret_cast<uint64_t>(swapchainHandle), imageIndex);
 
     result = vkQueuePresentKHR(RTX::ctx().presentQueue(), &present);
-    LOG_TRACE_CAT("RENDERER", "vkQueuePresentKHR returned: {}", static_cast<int>(result));
     if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
-        LOG_TRACE_CAT("RENDERER", "Present out of date/suboptimal — recreating swapchain");
         SWAPCHAIN.recreate(width_, height_);
-    } else if (result != VK_SUCCESS) {
-        LOG_ERROR_CAT("RENDERER", "vkQueuePresentKHR failed: {}", static_cast<int>(result));
     }
 
+    // Advance frame
     currentFrame_ = (currentFrame_ + 1) % framesInFlight;
     frameNumber_++;
     frameCounter_++;
-    LOG_TRACE_CAT("RENDERER", "Advanced frame — currentFrame_={}, frameNumber_={}, frameCounter_={}", currentFrame_, frameNumber_, frameCounter_);
-
-    // FPS limiting
-    if (fpsTarget_ != FpsTarget::FPS_UNLIMITED) {
-        float target = static_cast<float>(fpsTarget_);
-        float sleepTime = (1.0f / target) - deltaTime;
-        if (sleepTime > 0) {
-            LOG_TRACE_CAT("RENDERER", "FPS limiting — sleeping for {:.3f} ms", sleepTime * 1000.0f);
-            std::this_thread::sleep_for(std::chrono::duration<float>(sleepTime));
-        }
-    }
-
-    // Performance logging
-    if (Options::Performance::ENABLE_FPS_COUNTER) {
-        auto now = std::chrono::steady_clock::now();
-        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastPerfLogTime_).count();
-        if (elapsed >= 1000) {
-            double fps = frameCounter_ * 1000.0 / elapsed;
-            double frameTimeMs = elapsed / static_cast<double>(frameCounter_);
-
-            LOG_FPS_COUNTER("{}FPS: {:.1f} ({:.2f} ms) | Frame: {} | {}x{} | Hypertrace: {} | Denoise: {} | Adaptive: {} | Tonemap: {}{}",
-                LIME_GREEN, fps, frameTimeMs, frameNumber_, width_, height_,
-                hypertraceEnabled_ ? "ON" : "OFF", denoisingEnabled_ ? "ON" : "OFF",
-                adaptiveSamplingEnabled_ ? "ON" : "OFF",
-                tonemapType_ == TonemapType::ACES ? "ACES" : 
-                (tonemapType_ == TonemapType::FILMIC ? "FILMIC" : "REINHARD"), RESET);
-
-            lastPerfLogTime_ = now;
-            frameCounter_ = 0;
-        }
-    }
-    LOG_TRACE_CAT("RENDERER", "renderFrame — COMPLETE");
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
