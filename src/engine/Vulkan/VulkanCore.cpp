@@ -369,21 +369,6 @@ bool VulkanRTX::pollAsyncFence(VkFence fence, uint64_t timeout_ns) noexcept {
 // =============================================================================
 // Pipeline Binding
 // =============================================================================
-
-void VulkanRTX::setDescriptorSetLayout(VkDescriptorSetLayout layout) noexcept {
-    LOG_TRACE_CAT("RTX", "setDescriptorSetLayout — START — raw layout: 0x{:x}", reinterpret_cast<uintptr_t>(layout));
-    RTX::AmouranthAI::get().onMemoryEvent("DescriptorSetLayout", sizeof(VkDescriptorSetLayout));
-    LOG_INFO_CAT("RTX", "HANDLE_CREATE: {} | Tag: {}", "rtDescriptorSetLayout", "RTDescSetLayout");
-    rtDescriptorSetLayout_ = RTX::Handle<VkDescriptorSetLayout>(layout, RTX::g_ctx().device(),
-        [](VkDevice d, VkDescriptorSetLayout l, const VkAllocationCallbacks*) {
-            LOG_TRACE_CAT("RTX", "Destroying DescriptorSetLayout: 0x{:x}", reinterpret_cast<uintptr_t>(l));
-            vkDestroyDescriptorSetLayout(d, l, nullptr);
-        }, 0, "RTDescSetLayout");
-    LOG_SUCCESS_CAT("RTX", "{}Descriptor set layout bound — STONEKEY v∞{}", PLASMA_FUCHSIA, RESET);
-    RTX::AmouranthAI::get().onMemoryEvent("DescriptorSetLayout Handle", sizeof(RTX::Handle<VkDescriptorSetLayout>));
-    LOG_TRACE_CAT("RTX", "setDescriptorSetLayout — COMPLETE");
-}
-
 void VulkanRTX::setRayTracingPipeline(VkPipeline p, VkPipelineLayout l) noexcept {
     LOG_TRACE_CAT("RTX", "setRayTracingPipeline — START — pipeline: 0x{:x}, layout: 0x{:x}", reinterpret_cast<uintptr_t>(p), reinterpret_cast<uintptr_t>(l));
     RTX::AmouranthAI::get().onMemoryEvent("RTPipeline", sizeof(VkPipeline));
@@ -1388,7 +1373,8 @@ void createLogicalDevice()
         VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME,
         VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME,
         VK_KHR_PIPELINE_LIBRARY_EXTENSION_NAME,
-        VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME
+        VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME,
+        VK_KHR_RAY_QUERY_EXTENSION_NAME  // FIXED: Enable ray query extension for SPIR-V compliance
     };
 
     VkPhysicalDeviceFeatures features{};
@@ -1409,8 +1395,16 @@ void createLogicalDevice()
         .rayTracingPipeline = VK_TRUE
     };
 
+    // FIXED: Add RayQuery features — Chain to RT for SPIR-V ray query support
+    VkPhysicalDeviceRayQueryFeaturesKHR rayQuery{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR,
+        .rayQuery = VK_TRUE
+    };
+
+    // Chain: bufferAddr -> accel -> rt -> rayQuery
     bufferAddr.pNext = &accel;
     accel.pNext = &rt;
+    rt.pNext = &rayQuery;
 
     VkDeviceCreateInfo createInfo{
         .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
@@ -1428,7 +1422,7 @@ void createLogicalDevice()
     vkGetDeviceQueue(g_context_instance.device_, graphicsFamily, 0, &g_context_instance.graphicsQueue_);
     vkGetDeviceQueue(g_context_instance.device_, presentFamily, 0, &g_context_instance.presentQueue_);
 
-    LOG_SUCCESS_CAT("VULKAN", "Logical device + queues FORGED — READY FOR TRACE");
+    LOG_SUCCESS_CAT("VULKAN", "Logical device + queues FORGED — RayQuery ENABLED — READY FOR TRACE");
 }
 
 // =============================================================================

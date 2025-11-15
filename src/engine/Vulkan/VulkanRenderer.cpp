@@ -123,31 +123,43 @@ void VulkanRenderer::endSingleTimeCommands(VkDevice device, VkCommandPool pool, 
         return;
     }
 
-    // 2. Submit (zero-init submit)
-    VkSubmitInfo submit = {};  // Zero-init (fixes garbage counts/pointers)
+    // 2. Create one-shot fence (FIXED: Ensures submission sync)
+    VkFenceCreateInfo fenceInfo = {};  // Zero-init
+    fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    VkFence fence = VK_NULL_HANDLE;
+    r = vkCreateFence(device, &fenceInfo, nullptr, &fence);
+    if (r != VK_SUCCESS) {
+        LOG_FATAL_CAT("RENDERER", "vkCreateFence failed: {}", static_cast<int>(r));
+        return;
+    }
+    LOG_TRACE_CAT("RENDERER", "Fence created: 0x{:x}", reinterpret_cast<uintptr_t>(fence));
+
+    // 3. Submit with fence (FIXED: Tracks exact submission)
+    VkSubmitInfo submit = {};  // Zero-init
     submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submit.commandBufferCount = 1;
     submit.pCommandBuffers = &cmd;
-
-    r = vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE);
+    r = vkQueueSubmit(queue, 1, &submit, fence);  // FIXED: Submit *with* fence
     LOG_TRACE_CAT("RENDERER", "vkQueueSubmit result: {}", static_cast<int>(r));
     if (r != VK_SUCCESS) {
         LOG_FATAL_CAT("RENDERER", "vkQueueSubmit failed: {}", static_cast<int>(r));
+        vkDestroyFence(device, fence, nullptr);
         return;
     }
 
-    // 3. Wait for queue idle
-    r = vkQueueWaitIdle(queue);
-    LOG_TRACE_CAT("RENDERER", "vkQueueWaitIdle result: {}", static_cast<int>(r));
+    // 4. Wait on fence (FIXED: Submission-specific; no pending state)
+    r = vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX);
+    LOG_TRACE_CAT("RENDERER", "vkWaitForFences result: {}", static_cast<int>(r));
     if (r != VK_SUCCESS) {
-        LOG_FATAL_CAT("RENDERER", "vkQueueWaitIdle failed: {} — possible device lost", static_cast<int>(r));
+        LOG_FATAL_CAT("RENDERER", "vkWaitForFences failed: {} — device lost?", static_cast<int>(r));
         vkDeviceWaitIdle(device);
     }
 
-    // 4. Cleanup
+    // 5. Cleanup fence then buffer (FIXED: Safe free post-sync)
+    vkDestroyFence(device, fence, nullptr);
     vkFreeCommandBuffers(device, pool, 1, &cmd);
 
-    LOG_TRACE_CAT("RENDERER", "endSingleTimeCommands — COMPLETE (safe, no device lost)");
+    LOG_TRACE_CAT("RENDERER", "endSingleTimeCommands — COMPLETE (fence-synced, no pending)");
 }
 
 VkCommandBuffer VulkanRenderer::allocateTransientCommandBuffer(VkDevice device, VkCommandPool pool) {
@@ -1093,13 +1105,14 @@ void VulkanRenderer::createRTOutputImages()
             imageInfo.tiling        = VK_IMAGE_TILING_OPTIMAL;
             imageInfo.usage         = VK_IMAGE_USAGE_STORAGE_BIT |
                                       VK_IMAGE_USAGE_SAMPLED_BIT |
-                                      VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+                                      VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                                      VK_IMAGE_USAGE_TRANSFER_DST_BIT;  // FIXED: Add TRANSFER_DST for vkCmdClearColorImage
             imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
             VK_CHECK(vkCreateImage(dev, &imageInfo, nullptr, &rawImage),
                      ("Failed to create RT output image for frame " + std::to_string(i)).c_str());
 
-            LOG_TRACE_CAT("RENDERER", "Frame {} Image created: 0x{:x}", i, reinterpret_cast<uintptr_t>(rawImage));
+            LOG_TRACE_CAT("RENDERER", "Frame {} Image created: 0x{:x} (usage incl. TRANSFER_DST)", i, reinterpret_cast<uintptr_t>(rawImage));
 
             // === 2. Allocate & Bind Memory (Harden: Pad size + log reqs) ===
             VkMemoryRequirements memReqs{};
@@ -1195,7 +1208,7 @@ void VulkanRenderer::createRTOutputImages()
             rtOutputMemories_.emplace_back(rawMemory, dev, vkFreeMemory, 0, memTag);
             rtOutputViews_.emplace_back(rawView, dev, vkDestroyImageView, 0, viewTag);
 
-            LOG_TRACE_CAT("RENDERER", "Frame {} — RTOutput ready: img=0x{:x}, view=0x{:x}",
+            LOG_TRACE_CAT("RENDERER", "Frame {} — RTOutput ready: img=0x{:x}, view=0x{:x} (TRANSFER_DST enabled)",
                           i, reinterpret_cast<uintptr_t>(rawImage), reinterpret_cast<uintptr_t>(rawView));
 
             // Harden: Validate post-emplace sizes
@@ -1223,7 +1236,7 @@ void VulkanRenderer::createRTOutputImages()
         throw std::runtime_error("Partial RT output creation — recreate device");
     }
 
-    LOG_SUCCESS_CAT("RENDERER", "RT output images created — {} frames in GENERAL layout", framesInFlight);
+    LOG_SUCCESS_CAT("RENDERER", "RT output images created — {} frames in GENERAL layout (TRANSFER_DST enabled for clears)", framesInFlight);
     LOG_TRACE_CAT("RENDERER", "createRTOutputImages — COMPLETE");
 }
 
@@ -1548,6 +1561,28 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     VkCommandBufferBeginInfo beginInfo{ .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
     vkBeginCommandBuffer(cmd, &beginInfo);
 
+    // FIXED: Barrier 1 — Transition acquired swapchain image from UNDEFINED to COLOR_ATTACHMENT_OPTIMAL
+    {
+        VkImageMemoryBarrier barrier = {};  // Zero-init
+        barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        barrier.srcAccessMask = 0;
+        barrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        barrier.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.image = SWAPCHAIN.images()[imageIndex];
+        barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        barrier.subresourceRange.levelCount = 1;
+        barrier.subresourceRange.layerCount = 1;
+
+        vkCmdPipelineBarrier(cmd,
+            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,  // Src stage (post-acquire)
+            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,  // Dst stage (pre-render)
+            0, 0, nullptr, 0, nullptr, 1, &barrier);
+    }
+    LOG_TRACE_CAT("RENDERER", "Swapchain image {} transitioned: UNDEFINED → COLOR_ATTACHMENT_OPTIMAL", imageIndex);
+
     // Update per-frame data
     updateUniformBuffer(currentFrame_, camera, getJitter());
     updateTonemapUniform(currentFrame_);
@@ -1556,6 +1591,28 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     recordRayTracingCommandBuffer(cmd);
     if (denoisingEnabled_) performDenoisingPass(cmd);
     performTonemapPass(cmd, imageIndex);
+
+    // FIXED: Barrier 2 — Transition swapchain image from COLOR_ATTACHMENT_OPTIMAL to PRESENT_SRC_KHR
+    {
+        VkImageMemoryBarrier barrier = {};  // Zero-init
+        barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        barrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        barrier.dstAccessMask = 0;
+        barrier.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        barrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+        barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.image = SWAPCHAIN.images()[imageIndex];
+        barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        barrier.subresourceRange.levelCount = 1;
+        barrier.subresourceRange.layerCount = 1;
+
+        vkCmdPipelineBarrier(cmd,
+            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,  // Src stage (post-render)
+            VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,           // Dst stage (pre-present)
+            0, 0, nullptr, 0, nullptr, 1, &barrier);
+    }
+    LOG_TRACE_CAT("RENDERER", "Swapchain image {} transitioned: COLOR_ATTACHMENT_OPTIMAL → PRESENT_SRC_KHR", imageIndex);
 
     vkEndCommandBuffer(cmd);
 
@@ -1765,10 +1822,6 @@ void VulkanRenderer::allocateDescriptorSets() {
             throw std::runtime_error("Create RT descriptor set layout failed");
         }
 
-        rtDescriptorSetLayout_ = RTX::Handle<VkDescriptorSetLayout>(rawLayout, device,
-            [](VkDevice d, VkDescriptorSetLayout l, const VkAllocationCallbacks*) {
-                if (l != VK_NULL_HANDLE) vkDestroyDescriptorSetLayout(d, l, nullptr);
-            }, 0, "RTDescriptorSetLayout");
         LOG_DEBUG_CAT("RENDERER", "Created new RT descriptor set layout: 0x{:x}", reinterpret_cast<uintptr_t>(rawLayout));
     }
 

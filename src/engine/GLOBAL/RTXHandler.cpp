@@ -736,6 +736,26 @@ void initContext(VkInstance instance, SDL_Window* window, int width, int height)
     UltraLowLevelBufferTracker::get().init(g_ctx().device(), g_ctx().physicalDevice());
     LOG_SUCCESS_CAT("RTX", "BufferTracker initialized — ready for buffer forges");
 
+    // FIXED: Enable RayQuery post-device creation — Query and validate feature
+    LOG_TRACE_CAT("RTX", "→ Enabling/Validating RayQuery feature");
+    VkPhysicalDeviceRayQueryFeaturesKHR rayQueryFeatures = {};
+    rayQueryFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR;
+    rayQueryFeatures.rayQuery = VK_TRUE;  // Request enable
+
+    VkPhysicalDeviceFeatures2 features2 = {};
+    features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+    features2.pNext = &rayQueryFeatures;
+
+    // Query actual support (post-device, but use phys dev)
+    vkGetPhysicalDeviceFeatures2(g_ctx().physicalDevice(), &features2);
+    if (!rayQueryFeatures.rayQuery) {
+        LOG_FATAL_CAT("RTX", "{}FATAL: RayQuery feature not supported/enabled — RT shaders incompatible{}", 
+                      COSMIC_GOLD, RESET);
+        g_context_instance.valid_ = false;
+        std::abort();
+    }
+    LOG_SUCCESS_CAT("RTX", "RayQuery feature ENABLED — SPIR-V compliant");
+
     // =====================================================================
     // Final validation — re-check full readiness
     // =====================================================================
