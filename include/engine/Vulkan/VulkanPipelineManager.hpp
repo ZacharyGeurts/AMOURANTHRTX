@@ -34,7 +34,7 @@ public:
     void createDescriptorSetLayout();
     void createPipelineLayout();
     void createRayTracingPipeline(const std::vector<std::string>& shaderPaths);
-    void createShaderBindingTable(VkCommandPool pool, VkQueue queue);
+	void createShaderBindingTable(VkCommandPool pool, VkQueue queue);
 
     // === Core Accessors ===
     [[nodiscard]] VkPipeline               pipeline()          const noexcept { return *rtPipeline_; }

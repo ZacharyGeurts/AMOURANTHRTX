@@ -322,6 +322,7 @@ file(GLOB_RECURSE POTENTIAL_SHADERS
     shaders/compute/*
     shaders/graphics/*
     shaders/rasterization/*
+    shaders/tonemaps/*   # ← ADDED: Include tonemaps shaders
 )
 
 set(SPV_OUTPUTS "")
@@ -334,6 +335,11 @@ foreach(SRC ${POTENTIAL_SHADERS})
     get_filename_component(BASE ${SRC} NAME_WE)
     get_filename_component(DIR ${SRC} DIRECTORY)
     get_filename_component(REL_DIR ${DIR} NAME)
+
+    # ← ADDED: Redirect tonemaps to graphics path
+    if(REL_DIR STREQUAL "tonemaps")
+        set(REL_DIR "graphics")
+    endif()
 
     set(OUT_DIR "${BIN_DIR}/assets/shaders/${REL_DIR}")
     set(STAGE "")
@@ -357,15 +363,15 @@ foreach(SRC ${POTENTIAL_SHADERS})
             endif()
         endif()
     elseif(REL_DIR MATCHES "compute")
-        if(NAME MATCHES "[_.]comp(\\.glsl)?$")
+        if(NAME MATCHES "([_.])?comp(\\.glsl)?$")
             set(TARGET --target-spv=spv1.4 --target-env=vulkan1.2)
             set(STAGE comp)
         endif()
-    else()  # graphics or rasterization
-        if(NAME MATCHES "[_.]vert(\\.glsl)?$")
+    else()  # graphics or rasterization or tonemaps (redirected)
+        if(NAME MATCHES "([_.])?vert(\\.glsl)?$")
             set(TARGET --target-spv=spv1.4 --target-env=vulkan1.2)
             set(STAGE vert)
-        elseif(NAME MATCHES "[_.]frag(\\.glsl)?$")
+        elseif(NAME MATCHES "([_.])?frag(\\.glsl)?$")
             set(TARGET --target-spv=spv1.4 --target-env=vulkan1.2)
             set(STAGE frag)
         endif()
@@ -375,11 +381,8 @@ foreach(SRC ${POTENTIAL_SHADERS})
         continue()
     endif()
 
-    get_filename_component(EXT ${SRC} EXT)
+    # FIXED: Keep full BASE name (e.g., tonemap_vert.spv) — no stage suffix removal
     set(SPV_BASE "${BASE}")
-    if(EXT STREQUAL ".glsl")
-        string(REGEX REPLACE "(_|\\.)?${STAGE}$" "" SPV_BASE "${BASE}")
-    endif()
     set(SPV "${OUT_DIR}/${SPV_BASE}.spv")
 
     set(VALIDATION_ENV vulkan1.2)
@@ -394,31 +397,13 @@ foreach(SRC ${POTENTIAL_SHADERS})
                -fshader-stage=${STAGE} "${SRC}" -o "${SPV}"
         COMMAND ${SPIRV_VAL} --target-env ${VALIDATION_ENV} "${SPV}"
         DEPENDS "${SRC}"
-        COMMENT "glslc → ${REL_DIR}/${NAME} (stage=${STAGE})"
+        COMMENT "glslc → ${REL_DIR}/${NAME} (stage=${STAGE}) → ${SPV_BASE}.spv"
         VERBATIM
     )
     list(APPEND SPV_OUTPUTS ${SPV})
 endforeach()
 
-# Copy .glsl headers (skip shader sources)
-file(GLOB_RECURSE GLSL_HEADERS shaders/**/*.glsl)
-foreach(H ${GLSL_HEADERS})
-    get_filename_component(HNAME ${H} NAME)
-    if(HNAME MATCHES "[_.](rgen|rmiss|rchit|rahit|rint|rcall|comp|vert|frag)(\\.glsl)?$")
-        continue()
-    endif()
-    get_filename_component(DIR ${H} DIRECTORY)
-    get_filename_component(REL_DIR ${DIR} NAME)
-    set(OUT "${BIN_DIR}/assets/shaders/${REL_DIR}/${HNAME}")
-    add_custom_command(
-        OUTPUT ${OUT}
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${H} ${OUT}
-        DEPENDS ${H}
-        COMMENT "Copy .glsl header: ${REL_DIR}/${HNAME}"
-        VERBATIM
-    )
-    list(APPEND SPV_OUTPUTS ${OUT})
-endforeach()
+# REMOVED: GLSL header copying — shaders now compiled to SPV only
 
 add_custom_target(shaders ALL DEPENDS ${SPV_OUTPUTS})
 add_dependencies(amouranth_engine shaders)

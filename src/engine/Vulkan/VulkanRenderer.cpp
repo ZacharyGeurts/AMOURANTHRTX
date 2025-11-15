@@ -180,6 +180,13 @@ void VulkanRenderer::cleanup() noexcept {
             denoiserSets_.clear();
             LOG_TRACE_CAT("RENDERER", "Freed {} graphics descriptor sets", graphicsSets.size());
         }
+
+        // FREE TONEMAP SETS FROM TONEMAP DESCRIPTOR POOL
+        if (!tonemapSets.empty() && tonemapDescriptorPool_.valid() && *tonemapDescriptorPool_ != VK_NULL_HANDLE) {
+            vkFreeDescriptorSets(dev, *tonemapDescriptorPool_, static_cast<uint32_t>(tonemapSets.size()), tonemapSets.data());
+            tonemapSets_.clear();
+            LOG_TRACE_CAT("RENDERER", "Freed {} tonemap descriptor sets", tonemapSets.size());
+        }
     } else {
         LOG_WARN_CAT("RENDERER", "Skipped descriptor set free — null device");
         rtDescriptorSets_.clear();
@@ -250,6 +257,7 @@ void VulkanRenderer::cleanup() noexcept {
     // FIXED: Assume reset() has guards; if std::unique_ptr-like, it's safe
     descriptorPool_.reset();
     rtDescriptorPool_.reset();
+    tonemapDescriptorPool_.reset();  // ADD: Tonemap pool cleanup
 
     // ── Command Buffers ──────────────────────────────────────────────────
     // FIXED: Guard vkFreeCommandBuffers — null device invalid
@@ -265,6 +273,12 @@ void VulkanRenderer::cleanup() noexcept {
                      commandBuffers_.size());
         commandBuffers_.clear();  // Clear vector anyway to avoid stale refs
     }
+
+    // ADD: Cleanup tonemap UBOs
+    for (auto& enc : tonemapUniformEncs_) {
+        BUFFER_DESTROY(enc);
+    }
+    tonemapUniformEncs_.clear();
 
     LOG_SUCCESS_CAT("RENDERER", "{}Renderer shutdown complete — ZERO LEAKS — READY FOR REINIT{}", 
                     EMERALD_GREEN, RESET);
@@ -520,6 +534,170 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, bool o
     updateTonemapDescriptorsInitial();
     updateDenoiserDescriptors();
     LOG_TRACE_CAT("RENDERER", "Step 14 COMPLETE");
+
+    // =============================================================================
+    // STEP 14.5 — Create Tonemap Pipeline — FINAL WARNING-FREE EDITION
+    // =============================================================================
+    LOG_TRACE_CAT("RENDERER", "=== STEP 14.5: Creating Tonemap Graphics Pipeline (Manual) ===");
+
+    // Load shaders
+    VkShaderModule vertShader = loadShader("assets/shaders/graphics/tonemap_vert.spv");
+    VkShaderModule fragShader = loadShader("assets/shaders/graphics/tonemap_frag.spv");
+
+    VkPipelineShaderStageCreateInfo shaderStages[] = {
+        { .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_VERTEX_BIT,   .module = vertShader, .pName = "main" },
+        { .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_FRAGMENT_BIT, .module = fragShader, .pName = "main" }
+    };
+
+    VkPipelineVertexInputStateCreateInfo vertexInputInfo = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+        .vertexBindingDescriptionCount = 0,
+        .vertexAttributeDescriptionCount = 0
+    };
+
+    VkPipelineInputAssemblyStateCreateInfo inputAssembly = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+        .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+        .primitiveRestartEnable = VK_FALSE
+    };
+
+    VkViewport viewport = {
+        .x = 0.0f,
+        .y = 0.0f,
+        .width  = static_cast<float>(width_),   // ← explicit cast: int → float
+        .height = static_cast<float>(height_),  // ← explicit cast: int → float
+        .minDepth = 0.0f,
+        .maxDepth = 1.0f
+    };
+
+    VkRect2D scissor = {
+        .offset = {0, 0},
+        .extent = {static_cast<uint32_t>(width_), static_cast<uint32_t>(height_)}  // ← FIXED: int → uint32_t
+    };
+
+    VkPipelineViewportStateCreateInfo viewportState = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+        .viewportCount = 1, .pViewports = &viewport,
+        .scissorCount  = 1, .pScissors  = &scissor
+    };
+
+    VkPipelineRasterizationStateCreateInfo rasterizer = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+        .depthClampEnable = VK_FALSE,
+        .rasterizerDiscardEnable = VK_FALSE,
+        .polygonMode = VK_POLYGON_MODE_FILL,
+        .cullMode = VK_CULL_MODE_NONE,
+        .frontFace = VK_FRONT_FACE_CLOCKWISE,
+        .depthBiasEnable = VK_FALSE,
+        .lineWidth = 1.0f
+    };
+
+    VkPipelineMultisampleStateCreateInfo multisampling = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+        .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT,
+        .sampleShadingEnable = VK_FALSE
+    };
+
+    // ← FIXED: Field order now matches exact VkPipelineColorBlendAttachmentState declaration order
+    VkPipelineColorBlendAttachmentState colorBlendAttachment = {
+        .blendEnable = VK_FALSE,
+        .srcColorBlendFactor = VK_BLEND_FACTOR_ONE,
+        .dstColorBlendFactor = VK_BLEND_FACTOR_ZERO,
+        .colorBlendOp = VK_BLEND_OP_ADD,
+        .srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE,
+        .dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO,
+        .alphaBlendOp = VK_BLEND_OP_ADD,
+        .colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT
+    };
+
+    VkPipelineColorBlendStateCreateInfo colorBlending = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+        .logicOpEnable = VK_FALSE,
+        .attachmentCount = 1,
+        .pAttachments = &colorBlendAttachment
+    };
+
+    // === Descriptor Set Layout ===
+    VkDescriptorSetLayoutBinding bindings[2] = {};
+    bindings[0] = { .binding = 0, .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,   .descriptorCount = 1, .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT };
+    bindings[1] = { .binding = 1, .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, .descriptorCount = 1, .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT };
+
+    VkDescriptorSetLayoutCreateInfo layoutInfo = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+        .bindingCount = 2,
+        .pBindings = bindings
+    };
+
+    VkDescriptorSetLayout tonemapSetLayout = VK_NULL_HANDLE;
+    VK_CHECK(vkCreateDescriptorSetLayout(device(), &layoutInfo, nullptr, &tonemapSetLayout), "Tonemap descriptor set layout");
+
+    VkPipelineLayoutCreateInfo pipelineLayoutInfo = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+        .setLayoutCount = 1,
+        .pSetLayouts = &tonemapSetLayout
+    };
+
+    VkPipelineLayout tonemapPipelineLayout = VK_NULL_HANDLE;
+    VK_CHECK(vkCreatePipelineLayout(device(), &pipelineLayoutInfo, nullptr, &tonemapPipelineLayout), "Tonemap pipeline layout");
+
+    // === Graphics Pipeline — Render Pass from SWAPCHAIN (not Context) ===
+    VkGraphicsPipelineCreateInfo pipelineInfo = {
+        .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
+        .stageCount = 2,
+        .pStages = shaderStages,
+        .pVertexInputState = &vertexInputInfo,
+        .pInputAssemblyState = &inputAssembly,
+        .pViewportState = &viewportState,
+        .pRasterizationState = &rasterizer,
+        .pMultisampleState = &multisampling,
+        .pColorBlendState = &colorBlending,
+        .layout = tonemapPipelineLayout,
+        .renderPass = *RTX::g_ctx().renderPass_,
+        .subpass = 0
+    };
+
+    VkPipeline tonemapPipeline = VK_NULL_HANDLE;
+    VK_CHECK(vkCreateGraphicsPipelines(device(), VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &tonemapPipeline),
+             "Failed to create tonemap graphics pipeline");
+
+    // Wrap in Handles
+    tonemapPipeline_ = RTX::Handle<VkPipeline>(tonemapPipeline, device(), vkDestroyPipeline, 0, "TonemapPipeline");
+    tonemapLayout_   = RTX::Handle<VkPipelineLayout>(tonemapPipelineLayout, device(), vkDestroyPipelineLayout, 0, "TonemapPipelineLayout");
+
+    // === Descriptor Pool & Sets ===
+    VkDescriptorPoolSize poolSizes[2] = {
+        { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,   framesInFlight },
+        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, framesInFlight }
+    };
+
+    VkDescriptorPoolCreateInfo poolInfo = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+        .maxSets = framesInFlight,
+        .poolSizeCount = 2,
+        .pPoolSizes = poolSizes
+    };
+
+    VkDescriptorPool rawPool = VK_NULL_HANDLE;
+    VK_CHECK(vkCreateDescriptorPool(device(), &poolInfo, nullptr, &rawPool), "Tonemap descriptor pool");
+    tonemapDescriptorPool_ = RTX::Handle<VkDescriptorPool>(rawPool, device(), vkDestroyDescriptorPool, 0, "TonemapDescriptorPool");
+
+    std::vector<VkDescriptorSetLayout> layouts(framesInFlight, tonemapSetLayout);
+    tonemapSets_.resize(framesInFlight);
+
+    VkDescriptorSetAllocateInfo allocInfo = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+        .descriptorPool = rawPool,
+        .descriptorSetCount = framesInFlight,
+        .pSetLayouts = layouts.data()
+    };
+
+    VK_CHECK(vkAllocateDescriptorSets(device(), &allocInfo, tonemapSets_.data()), "Allocate tonemap descriptor sets");
+
+    // Cleanup
+    vkDestroyShaderModule(device(), vertShader, nullptr);
+    vkDestroyShaderModule(device(), fragShader, nullptr);
+
+    LOG_SUCCESS_CAT("RENDERER", "Tonemap pipeline created — ZERO WARNINGS — PINK PHOTONS ETERNAL");
 
     // =============================================================================
     // FINAL — FIRST LIGHT ACHIEVED
@@ -1422,6 +1600,7 @@ void VulkanRenderer::initializeAllBufferData(uint32_t frames, VkDeviceSize unifo
     uniformBufferEncs_.resize(frames);
     materialBufferEncs_.resize(frames);
     dimensionBufferEncs_.resize(frames);
+    tonemapUniformEncs_.resize(frames);  // ADD: Tonemap UBOs
     if (uniformBufferEncs_.size() != static_cast<size_t>(frames)) {
         LOG_ERROR_CAT("RENDERER", "initializeAllBufferData: Resize failed — expected={}, got={}", frames, uniformBufferEncs_.size());
         uniformBufferEncs_.clear();  // Reset to safe state
@@ -1429,6 +1608,7 @@ void VulkanRenderer::initializeAllBufferData(uint32_t frames, VkDeviceSize unifo
     }
 
     VkDeviceSize dimSize = 64;  // sizeof(uvec2 extent) + uint32 spp + uint32 frame + pad
+    VkDeviceSize tonemapSize = 64;  // sizeof(TonemapUniform)
 
     for (uint32_t i = 0; i < frames; ++i) {
         // Uniform Buffer (camera/proj etc.)
@@ -1439,9 +1619,12 @@ void VulkanRenderer::initializeAllBufferData(uint32_t frames, VkDeviceSize unifo
 
         // Dimension Storage Buffer (small: extent, spp, frame)
         BUFFER_CREATE(dimensionBufferEncs_[i], dimSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, std::format("Dimensions[{}]", i).c_str());
+
+        // ADD: Tonemap Uniform Buffer
+        BUFFER_CREATE(tonemapUniformEncs_[i], tonemapSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, std::format("TonemapUBO[{}]", i).c_str());
     }
 
-    LOG_TRACE_CAT("RENDERER", "Resized & created buffers for {} frames (UBO/Mat/Dim)", frames);
+    LOG_TRACE_CAT("RENDERER", "Resized & created buffers for {} frames (UBO/Mat/Dim/Tonemap)", frames);
     LOG_TRACE_CAT("RENDERER", "initializeAllBufferData — COMPLETE");
 }
 
@@ -1815,19 +1998,35 @@ void VulkanRenderer::updateTonemapDescriptorsInitial() {
     for (size_t i = 0; i < tonemapSets_.size(); ++i) {
         VkDescriptorSet set = tonemapSets_[i];
 
+        // Binding 0: Sampled RT Output Image
         VkDescriptorImageInfo imgInfo{};
         imgInfo.imageView = *rtOutputViews_[i % rtOutputViews_.size()];
         imgInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
-        VkWriteDescriptorSet write{};
-        write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        write.dstSet = set;
-        write.dstBinding = 0;
-        write.descriptorCount = 1;
-        write.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-        write.pImageInfo = &imgInfo;
+        VkWriteDescriptorSet imgWrite{};
+        imgWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        imgWrite.dstSet = set;
+        imgWrite.dstBinding = 0;
+        imgWrite.descriptorCount = 1;
+        imgWrite.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+        imgWrite.pImageInfo = &imgInfo;
 
-        vkUpdateDescriptorSets(device, 1, &write, 0, nullptr);
+        // Binding 1: Tonemap UBO
+        VkDescriptorBufferInfo uboInfo{};
+        uboInfo.buffer = RAW_BUFFER(tonemapUniformEncs_[i]);
+        uboInfo.offset = 0;
+        uboInfo.range = VK_WHOLE_SIZE;
+
+        VkWriteDescriptorSet uboWrite{};
+        uboWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        uboWrite.dstSet = set;
+        uboWrite.dstBinding = 1;
+        uboWrite.descriptorCount = 1;
+        uboWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        uboWrite.pBufferInfo = &uboInfo;
+
+        std::array<VkWriteDescriptorSet, 2> writes = {imgWrite, uboWrite};
+        vkUpdateDescriptorSets(device, 2, writes.data(), 0, nullptr);
     }
 
     LOG_TRACE_CAT("RENDERER", "updateTonemapDescriptorsInitial — COMPLETE");
@@ -1908,14 +2107,14 @@ void VulkanRenderer::performTonemapPass(VkCommandBuffer cmd, uint32_t imageIndex
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, *tonemapLayout_, 0, 1, &set, 0, nullptr);
     vkCmdDraw(cmd, 3, 1, 0, 0);
 
-    // RAW ACCESS — your actual swapchain images are stored here:
+    // FIXED: Barrier using SWAPCHAIN.images()[imageIndex]
     VkImageMemoryBarrier barrier = {
         .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
         .srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
         .dstAccessMask = 0,
         .oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
         .newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-        .image = SwapchainManager::get().images()[imageIndex],
+        .image = SWAPCHAIN.images()[imageIndex],
         .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
     };
 
@@ -2016,6 +2215,24 @@ void VulkanRenderer::updateTonemapUniform(uint32_t frame) {
 
     std::memcpy(data, &ubo, sizeof(ubo));
     vkUnmapMemory(ctx.vkDevice(), *sharedStagingMemory_);
+
+    // FIXED: Copy staging to device UBO (similar to updateUniformBuffer)
+    VkCommandPool cmdPool = ctx.commandPool();
+    VkQueue queue = ctx.graphicsQueue();
+    VkCommandBuffer copyCmd = pipelineManager_.beginSingleTimeCommands(cmdPool);
+    if (copyCmd != VK_NULL_HANDLE) {
+        VkBufferCopy copyRegion{0, 0, sizeof(ubo)};
+        VkBuffer stagingBuf = *sharedStagingBuffer_;
+        VkBuffer deviceBuf = RAW_BUFFER(tonemapUniformEncs_[frame]);
+        vkCmdCopyBuffer(copyCmd, stagingBuf, deviceBuf, 1, &copyRegion);
+        
+        VkMemoryBarrier barrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
+        barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        barrier.dstAccessMask = VK_ACCESS_UNIFORM_READ_BIT;
+        vkCmdPipelineBarrier(copyCmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 1, &barrier, 0, nullptr, 0, nullptr);
+        
+        pipelineManager_.endSingleTimeCommands(cmdPool, queue, copyCmd);
+    }
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -2185,6 +2402,81 @@ void VulkanRenderer::loadRayTracingExtensions() noexcept
     LOG_SUCCESS_CAT("RENDERER", "{}ALL RAY TRACING EXTENSIONS LOADED SUCCESSFULLY — PINK PHOTONS ARMED{}", 
                     LIME_GREEN, RESET);
     LOG_TRACE_CAT("RENDERER", "Step 3 COMPLETE — PROCEEDING TO SYNCHRONIZATION");
+}
+
+VkShaderModule VulkanRenderer::loadShader(const std::string& path) {
+    LOG_TRACE_CAT("RENDERER", "loadShader — START — path='{}'", path);
+
+    // === 1. File Validation & Open ===
+    FILE* file = fopen(path.c_str(), "rb");
+    if (!file) {
+        LOG_ERROR_CAT("RENDERER", "Failed to open shader file: '{}' — Check assets/shaders/ dir", path);
+        LOG_TRACE_CAT("RENDERER", "loadShader — COMPLETE (file open failed)");
+        return VK_NULL_HANDLE;
+    }
+    LOG_DEBUG_CAT("RENDERER", "Shader file opened successfully: '{}'", path);
+
+    // === 2. Read Binary Size ===
+    fseek(file, 0, SEEK_END);
+    size_t fileSize = ftell(file);
+    fseek(file, 0, SEEK_SET);
+    if (fileSize == 0 || fileSize > (1ULL << 30)) {  // Sanity: 0 or >1GB invalid
+        LOG_ERROR_CAT("RENDERER", "Invalid shader file size: {} bytes — expected SPIR-V binary", fileSize);
+        fclose(file);
+        LOG_TRACE_CAT("RENDERER", "loadShader — COMPLETE (invalid size)");
+        return VK_NULL_HANDLE;
+    }
+    LOG_DEBUG_CAT("RENDERER", "Shader file size: {} bytes", fileSize);
+
+    // === 3. Zero-Copy Read (std::vector<uint32_t> for alignment) ===
+    std::vector<uint32_t> code(fileSize / sizeof(uint32_t));
+    if (code.size() * sizeof(uint32_t) != fileSize) {
+        LOG_ERROR_CAT("RENDERER", "File size {} not aligned to uint32_t — SPIR-V corruption?", fileSize);
+        fclose(file);
+        LOG_TRACE_CAT("RENDERER", "loadShader — COMPLETE (alignment fail)");
+        return VK_NULL_HANDLE;
+    }
+    size_t bytesRead = fread(code.data(), 1, fileSize, file);
+    fclose(file);
+    if (bytesRead != fileSize) {
+        LOG_ERROR_CAT("RENDERER", "Failed to read {} bytes from shader file (read: {})", fileSize, bytesRead);
+        LOG_TRACE_CAT("RENDERER", "loadShader — COMPLETE (read fail)");
+        return VK_NULL_HANDLE;
+    }
+    LOG_DEBUG_CAT("RENDERER", "Shader binary read: {} uint32_t words", code.size());
+
+    // === 4. SPIR-V Magic Validation ===
+    if (code.empty() || code[0] != 0x07230203u) {  // SPIR-V magic header
+        LOG_ERROR_CAT("RENDERER", "Invalid SPIR-V magic header in '{}': 0x{:08x} (expected 0x07230203)", path, code.empty() ? 0u : code[0]);
+        LOG_TRACE_CAT("RENDERER", "loadShader — COMPLETE (magic fail)");
+        return VK_NULL_HANDLE;
+    }
+    LOG_DEBUG_CAT("RENDERER", "SPIR-V magic validated: 0x{:08x}", code[0]);
+
+    const auto& ctx = RTX::g_ctx();  // const ref for device
+    VkDevice device = ctx.vkDevice();  // Cached for readability
+
+    // === 5. Create VkShaderModule ===
+    VkShaderModuleCreateInfo createInfo{};
+    createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+    createInfo.codeSize = fileSize;
+    createInfo.pCode = code.data();
+    // FIXED: Explicit stage flags — ALL_GRAPHICS + COMPUTE for versatility (raygen/closest/miss + tonemap/denoise)
+    createInfo.flags = 0;  // No special flags; stage inferred at pipeline creation
+
+    VkShaderModule module = VK_NULL_HANDLE;
+    VkResult result = vkCreateShaderModule(device, &createInfo, nullptr, &module);
+    if (result != VK_SUCCESS) {
+        LOG_ERROR_CAT("RENDERER", "vkCreateShaderModule failed for '{}': {} ({}) — Invalid SPIR-V?", path, static_cast<int>(result), result);
+        LOG_TRACE_CAT("RENDERER", "loadShader — COMPLETE (module create fail)");
+        return VK_NULL_HANDLE;
+    }
+    LOG_DEBUG_CAT("RENDERER", "VkShaderModule created: 0x{:x} (codeSize={})", reinterpret_cast<uintptr_t>(module), createInfo.codeSize);
+
+    LOG_SUCCESS_CAT("RENDERER", "{}Shader '{}' loaded & module forged — {} bytes — PINK PHOTONS ARMED{}", 
+                    EMERALD_GREEN, path, fileSize, RESET);
+    LOG_TRACE_CAT("RENDERER", "loadShader — COMPLETE — module=0x{:x}", reinterpret_cast<uintptr_t>(module));
+    return module;
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

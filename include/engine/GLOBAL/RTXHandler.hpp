@@ -15,6 +15,9 @@
 // • FIXED: Accessors for compute queue/pool
 // • NEW: cleanup() declaration for Context
 // • FIXED: Remove noexcept from create() — allows throws without terminate
+// • FIXED: Removed global g_renderPass — now ref to ctx.renderPass_
+// • FIXED: renderPass() returns Handle<VkRenderPass>& to ctx.renderPass_
+// • FIXED: Removed unnecessary forward decl for VulkanPipelineManager
 // • PINK PHOTONS ETERNAL
 //
 // Dual Licensed:
@@ -57,7 +60,6 @@
 
 // Forward declarations
 class VulkanRTX;
-class VulkanPipelineManager;
 class VulkanRenderer;
 struct Camera;
 
@@ -199,7 +201,7 @@ namespace RTX {
     #define HANDLE_RESET(var) do { LOG_INFO_CAT("RTX", "HANDLE_RESET: {}", #var); (var).reset(); } while(0)
 
 // =============================================================================
-// Context — FINAL: Async Compute + Ready Flag + Full Cleanup + Safe Accessors
+// Context — FINAL: Async Compute + Ready Flag + Full Cleanup + Safe Accessors + renderPass
 // =============================================================================
 struct Context {
 public:
@@ -252,6 +254,7 @@ public:
     Handle<VkBuffer>    reservoirBuffer_;
     Handle<VkBuffer>    frameDataBuffer_;
     Handle<VkBuffer>    debugVisBuffer_;
+    Handle<VkRenderPass> renderPass_;  // FIXED: Added renderPass_ member
 
     // Initialization and Cleanup
     void init(SDL_Window* window, int width, int height);
@@ -275,6 +278,9 @@ public:
     [[nodiscard]] VkPhysicalDevice  physicalDevice() const noexcept { return physicalDevice_; }
     [[nodiscard]] VkInstance        instance()       const noexcept { return instance_; }
     [[nodiscard]] VkSurfaceKHR      surface()        const noexcept { return surface_; }
+
+    // FIXED: Added renderPass() accessor
+    [[nodiscard]] VkRenderPass renderPass() const noexcept { return renderPass_.valid() ? renderPass_.get() : VK_NULL_HANDLE; }
 
     // Legacy Aliases
     [[nodiscard]] VkDevice         vkDevice() const noexcept { return device(); }
@@ -324,8 +330,6 @@ public:
     // =============================================================================
     // GLOBAL ACCESSORS — FIXED: ctx() == g_ctx() + NULL GUARD
     // =============================================================================
-    class Context;
-
     // Global context instance declaration
     extern Context g_context_instance;
 
@@ -406,6 +410,7 @@ public:
     VkExtent2D& swapchainExtent();
     Handle<VkAccelerationStructureKHR>& blas();
     Handle<VkAccelerationStructureKHR>& tlas();
+    Handle<VkRenderPass>& renderPass();  // FIXED: Now returns ref to ctx.renderPass_
 
     // =============================================================================
     // RENDERER + FRAME
@@ -420,6 +425,7 @@ public:
     void buildBLAS(uint64_t vertexBuf, uint64_t indexBuf, uint32_t vertexCount, uint32_t indexCount) noexcept;
     void buildTLAS(const std::vector<std::pair<VkAccelerationStructureKHR, glm::mat4>>& instances) noexcept;
     void cleanupAll() noexcept;
+    void createGlobalRenderPass();  // FIXED: Added declaration
 
     // stonekey_xor_spirv → MOVED TO .cpp (uses Options::Shader::STONEKEY_1)
     void stonekey_xor_spirv(std::vector<uint32_t>& data, bool encrypt = true);
@@ -438,5 +444,8 @@ public:
 // NEW: Async Compute — computeFamily, computeQueue, computeCommandPool + accessors
 // NEW: cleanup() declaration in Context
 // FIXED: Remove noexcept from create() — prevents terminate on throw
+// FIXED: Removed global g_renderPass — ref to ctx
+// FIXED: renderPass() returns Handle ref
+// FIXED: Removed forward decl for VulkanPipelineManager
 // ZERO CRASH — PRODUCTION READY
 // =============================================================================

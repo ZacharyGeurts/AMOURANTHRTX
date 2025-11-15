@@ -160,7 +160,7 @@ VulkanRTX::~VulkanRTX() noexcept {
     LOG_TRACE_CAT("RTX", "VulkanRTX destructor — COMPLETE");
 }
 
-VulkanRTX::VulkanRTX(int w, int h, VulkanPipelineManager* mgr)
+VulkanRTX::VulkanRTX(int w, int h, RTX::PipelineManager* mgr)
     : extent_({static_cast<uint32_t>(w), static_cast<uint32_t>(h)})
     , pipelineMgr_(mgr)
 {

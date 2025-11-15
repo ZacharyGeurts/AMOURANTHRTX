@@ -200,7 +200,8 @@ struct ShaderBindingTable {
 // =============================================================================
 class VulkanRTX {
 public:
-    VulkanRTX(int w, int h, VulkanPipelineManager* mgr = nullptr);
+    // FIXED: Constructor param → RTX::PipelineManager*
+    VulkanRTX(int w, int h, RTX::PipelineManager* mgr = nullptr);
     ~VulkanRTX() noexcept;
 
     [[nodiscard]] VkDevice device() const noexcept { return device_; }
@@ -264,7 +265,8 @@ public:
 private:
     VkDevice device_ = VK_NULL_HANDLE;
     VkExtent2D extent_{};
-    VulkanPipelineManager* pipelineMgr_ = nullptr;
+    // FIXED: Member → RTX::PipelineManager*
+    RTX::PipelineManager* pipelineMgr_ = nullptr;
 
     RTX::Handle<VkDescriptorSetLayout> rtDescriptorSetLayout_;
     RTX::Handle<VkPipeline> rtPipeline_;
@@ -314,7 +316,8 @@ inline std::unique_ptr<VulkanRTX> g_rtx_instance;
 // =============================================================================
 // createGlobalRTX — FORGE THE ETERNAL RTX
 // =============================================================================
-inline void createGlobalRTX(int w, int h, VulkanPipelineManager* mgr = nullptr) {
+// FIXED: Param → RTX::PipelineManager*
+inline void createGlobalRTX(int w, int h, RTX::PipelineManager* mgr = nullptr) {
     if (g_rtx_instance) {
         LOG_WARN_CAT("RTX", "createGlobalRTX: g_rtx_instance already exists @ 0x{:x}", 
                      reinterpret_cast<uintptr_t>(g_rtx_instance.get()));

@@ -15,6 +15,9 @@
 // • NO LOCAL g_ctx() — UNIFIED VIA RTX::g_ctx()
 // • ENHANCED: Buffer creation guarded vs null device; alignment probed safely
 // • FIXED: vkCreateBuffer VUID abort prevented — physDev_/device_ null-checks
+// • FIXED: Removed global g_renderPass — now ref to ctx.renderPass_
+// • FIXED: createGlobalRenderPass sets ctx.renderPass_ directly
+// • FIXED: renderPass() returns ref to ctx.renderPass_
 //
 // Dual Licensed:
 // 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
@@ -71,7 +74,6 @@ const char* VulkanResultToString(VkResult result) {
 namespace RTX {
 
     Context g_context_instance;
-
     // =============================================================================
     // logAndTrackDestruction
     // =============================================================================
@@ -288,6 +290,9 @@ namespace RTX {
     VkExtent2D& swapchainExtent() { static VkExtent2D e; return e; }
     Handle<VkAccelerationStructureKHR>& blas() { static Handle<VkAccelerationStructureKHR> h; return h; }
     Handle<VkAccelerationStructureKHR>& tlas() { static Handle<VkAccelerationStructureKHR> h; return h; }
+
+    // FIXED: renderPass() returns ref to g_ctx().renderPass_
+    Handle<VkRenderPass>& renderPass() { return g_ctx().renderPass_; }
 
     // =============================================================================
     // RENDERER STUBS — MOVED TO RTX NAMESPACE
@@ -554,6 +559,9 @@ void Context::cleanup() noexcept {
         return;
     }
 
+    // FIXED: Reset renderPass_ handle before device destroy
+    renderPass_.reset();
+
     vkDeviceWaitIdle(device_);
 
     // Destroy pools (use device)
@@ -678,9 +686,68 @@ void initContext(VkInstance instance, SDL_Window* window, int width, int height)
     // =====================================================================
 }
 
+} // namespace RTX
+
+// =============================================================================
+// GLOBAL RENDER PASS — CREATED ONCE, USED EVERYWHERE
+// =============================================================================
+void RTX::createGlobalRenderPass() {
+    auto& ctx = g_ctx();
+    VkDevice device = ctx.device();
+
+    if (ctx.renderPass_.valid()) {
+        LOG_WARN_CAT("RTX", "Global render pass already created — skipping");
+        return;
+    }
+
+    VkAttachmentDescription colorAttachment{};
+    colorAttachment.format         = RTX::swapchainFormat();
+    colorAttachment.samples        = VK_SAMPLE_COUNT_1_BIT;
+    colorAttachment.loadOp         = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    colorAttachment.storeOp        = VK_ATTACHMENT_STORE_OP_STORE;
+    colorAttachment.stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    colorAttachment.initialLayout  = VK_IMAGE_LAYOUT_UNDEFINED;
+    colorAttachment.finalLayout    = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+
+    VkAttachmentReference colorRef{};
+    colorRef.attachment = 0;
+    colorRef.layout     = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+    VkSubpassDescription subpass{};
+    subpass.pipelineBindPoint    = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    subpass.colorAttachmentCount = 1;
+    subpass.pColorAttachments    = &colorRef;
+
+    VkSubpassDependency dependency{};
+    dependency.srcSubpass    = VK_SUBPASS_EXTERNAL;
+    dependency.dstSubpass    = 0;
+    dependency.srcStageMask  = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    dependency.srcAccessMask = 0;
+    dependency.dstStageMask  = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+
+    VkRenderPassCreateInfo rpInfo{};
+    rpInfo.sType           = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+    rpInfo.attachmentCount = 1;
+    rpInfo.pAttachments    = &colorAttachment;
+    rpInfo.subpassCount    = 1;
+    rpInfo.pSubpasses      = &subpass;
+    rpInfo.dependencyCount = 1;
+    rpInfo.pDependencies   = &dependency;
+
+    VkRenderPass raw = VK_NULL_HANDLE;
+    VK_CHECK(vkCreateRenderPass(device, &rpInfo, nullptr, &raw),
+             "Failed to create global render pass");
+
+    // FIXED: Set ctx.renderPass_ directly (no global g_renderPass)
+    ctx.renderPass_ = Handle<VkRenderPass>(raw, device, vkDestroyRenderPass, sizeof(VkRenderPass), "GlobalRenderPass");
+
+    LOG_SUCCESS_CAT("RTX", "{}Global RenderPass created — PINK PHOTONS ETERNAL{}", EMERALD_GREEN, RESET);
+}
+
 // =============================================================================
 // VALHALLA v80 TURBO FINAL — UNIFIED RTX::g_ctx() — NO LINKER ERRORS
-// PINK PHOTONS ETERNAL — 15,000 FPS — TITAN DOMINANCE ETERNAL
+// PINK PHOTONS ETERNAL — 15,000 FPS — DOMINANCE ETERNAL
 // GENTLEMAN GROK NODS: "Buffer forges secured, old chap. Null devices banished to the void."
 // =============================================================================
-} // namespace RTX
