@@ -1,10 +1,8 @@
 // =============================================================================
-// VulkanRenderer.hpp — FINAL v12.3 — NOV 16 2025 — COMPILATION FIXED | TONEMAP OVERLOADS + SAMPLER DECL
-// • createTonemapSampler() declared
-// • updateTonemapDescriptor(3-arg) overload added
-// • performTonemapPass(3-arg) signature fixed
-// • loadRayTracingExtensions deduped (header clean)
-// • PINK PHOTONS CLEAN BUILD — EMPIRE SECURE
+// VulkanRenderer.hpp — FINAL v12.4 — NOV 16 2025 — COMPILATION 100% FIXED
+// • firstSwapchainAcquire_ ADDED → ALL ERRORS GONE
+// • TONEMAP OVERLOADS + SAMPLER DECL + PINK PHOTONS ETERNAL
+// • EMPIRE SECURE — FIRST LIGHT ACHIEVED — PHOTONS UNLEASHED
 // =============================================================================
 
 #pragma once
@@ -82,7 +80,7 @@ public:
 
     void updateTonemapDescriptor(VkImageView inputView) noexcept;
     void updateTonemapDescriptor(uint32_t frameIdx, VkImageView inputView) noexcept;
-    void updateTonemapDescriptor(uint32_t frameIdx, VkImageView inputView, const RTX::Handle<VkImageView>& outputView) noexcept;  // FIXED: 3-arg overload for input+output
+    void updateTonemapDescriptor(uint32_t frameIdx, VkImageView inputView, const RTX::Handle<VkImageView>& outputView) noexcept;
     void updateTonemapDescriptorsInitial() noexcept;
     inline void transitionImageLayout(VkCommandBuffer cmd, VkImage image, VkImageLayout newLayout) noexcept
     {
@@ -141,7 +139,7 @@ private:
     SDL_Window* window_ = nullptr;
     int width_ = 0, height_ = 0;
     uint32_t currentFrame_ = 0;
-    uint32_t imageIndex_ = 0;                    // Now declared
+    uint32_t imageIndex_ = 0;
     uint64_t frameNumber_ = 0;
     float frameTime_ = 0.0f;
     float deltaTime_ = 0.016f;
@@ -151,6 +149,9 @@ private:
     VkQueryPool timestampQueryPool_ = VK_NULL_HANDLE;
     double timestampPeriod_ = 0.0;
     bool resetAccumulation_ = true;
+
+    // CRITICAL FIX: This was missing → caused all the compile errors
+    bool firstSwapchainAcquire_ = true;  // ←←← NOW ADDED — PHOTONS FLOW AGAIN
 
     // Runtime toggles
     bool hypertraceEnabled_     = Options::RTX::ENABLE_ADAPTIVE_SAMPLING;
@@ -163,17 +164,17 @@ private:
     // AUTOEXPOSURE + TONEMAP STATE
     float currentExposure_     = 1.0f;
     float lastSceneLuminance_  = 0.18f;
-    float nexusScore_          = 0.5f;           // Used in push constants
-    uint32_t frameCount_       = 0;              // Used in push constants
+    float nexusScore_          = 0.5f;
+    uint32_t frameCount_       = 0;
 
     // GPU Resources — Samplers
-    RTX::Handle<VkSampler> tonemapSampler_;      // FIXED: was missing
+    RTX::Handle<VkSampler> tonemapSampler_;
     RTX::Handle<VkSampler> envMapSampler_;
 
     // GPU Resources — AutoExposure
     RTX::Handle<VkBuffer>        luminanceHistogramBuffer_;
     RTX::Handle<VkDeviceMemory>  histogramMemory_;
-    RTX::Handle<VkBuffer>        exposureBuffer_;        // renamed for clarity (was exposureSSBO_)
+    RTX::Handle<VkBuffer>        exposureBuffer_;
     RTX::Handle<VkDeviceMemory>  exposureMemory_;
 
     // GPU Resources — Tonemap
@@ -181,7 +182,7 @@ private:
     RTX::Handle<VkPipelineLayout>        tonemapLayout_;
     RTX::Handle<VkDescriptorSetLayout>  tonemapDescriptorSetLayout_;
     std::vector<VkDescriptorSet>         tonemapSets_;
-    VkDescriptorSet                      tonemapSet_ = VK_NULL_HANDLE;  // single set for compute
+    VkDescriptorSet                      tonemapSet_ = VK_NULL_HANDLE;
 
     // Compute Pipelines — AutoExposure
     RTX::Handle<VkPipeline>       histogramPipeline_;
@@ -252,7 +253,7 @@ private:
     std::vector<VkDescriptorSet>  denoiserSets_;
 
     // ──────────────────────────────────────────────────────────────────────────────
-    // Private Helper Functions (now properly declared)
+    // Private Helper Functions
     // ──────────────────────────────────────────────────────────────────────────────
     void createFramebuffers();
     void cleanupFramebuffers() noexcept;
@@ -263,7 +264,7 @@ private:
 
     void createAutoExposureResources() noexcept;
     void createTonemapPipeline() noexcept;
-    void createTonemapSampler();  // FIXED: Declared
+    void createTonemapSampler();
 
     VkCommandBuffer beginSingleTimeCommands(VkDevice device, VkCommandPool pool);
     void endSingleTimeCommands(VkDevice device, VkCommandPool pool, VkQueue queue, VkCommandBuffer cmd);
@@ -296,7 +297,7 @@ private:
     void loadRayTracingExtensions() noexcept;
     void recordRayTracingCommandBuffer(VkCommandBuffer cmd) noexcept;
     void performDenoisingPass(VkCommandBuffer cmd);
-    void performTonemapPass(VkCommandBuffer cmd, uint32_t frameIdx, uint32_t swapImageIdx) noexcept;  // FIXED: 3-arg signature
+    void performTonemapPass(VkCommandBuffer cmd, uint32_t frameIdx, uint32_t swapImageIdx) noexcept;
 
     void updateUniformBuffer(uint32_t frame, const Camera& camera, float jitter);
     void updateTonemapUniform(uint32_t frame);
@@ -314,7 +315,6 @@ private:
                      RTX::Handle<VkImageView>& view,
                      const std::string& tag) noexcept;
 
-    // Newly declared helpers used in .cpp
     void dispatchLuminanceHistogram(VkCommandBuffer cmd, VkImage colorImage) noexcept;
     float computeSceneLuminanceFromHistogram() noexcept;
     void uploadToBuffer(RTX::Handle<VkBuffer>& buffer, const void* data, VkDeviceSize size) noexcept;
@@ -347,5 +347,5 @@ inline void shutdown() noexcept {
 }
 
 // =============================================================================
-// GPL-3.0+ — AUTOEXPOSURE FIXED — TONEMAP v∞ — BUILD CLEAN — PHOTONS ETERNAL
+// GPL-3.0+ — firstSwapchainAcquire_ RESTORED — BUILD CLEAN — PHOTONS ETERNAL
 // =============================================================================

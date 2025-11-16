@@ -9,8 +9,8 @@
 
 layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;  // 16x16 = faster than 8x8
 
-layout(set = 0, binding = 0, rgba32f) readonly  uniform image2D  hdrInput;
-layout(set = 0, binding = 1, rgba8)   writeonly uniform image2D  ldrOutput;
+layout(set = 0, binding = 0) uniform sampler2D hdrInput;  // FIXED: sampler2D to match COMBINED_IMAGE_SAMPLER layout (VUID-07990)
+layout(set = 0, binding = 1, rgba8) writeonly uniform image2D ldrOutput;
 
 layout(set = 0, binding = 2, scalar) uniform TonemapParams {
     float exposure;           // Final exposure (from auto-exposure)
@@ -47,11 +47,11 @@ vec3 tonemapReinhard(vec3 x)
 void main()
 {
     ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
-    ivec2 size  = imageSize(hdrInput);
+    ivec2 size  = textureSize(hdrInput, 0);  // FIXED: textureSize for sampler2D
 
     if (any(greaterThanEqual(pixel, size))) return;
 
-    vec3 hdrColor = imageLoad(hdrInput, pixel).rgb;
+    vec3 hdrColor = texture(hdrInput, (vec2(pixel) + 0.5f) / vec2(size)).rgb;  // FIXED: texture() for sampler2D
 
     // Bypass tonemapping if disabled
     if (params.enableTonemap == 0u) {

@@ -2,8 +2,8 @@
 // AMOURANTH RTX — PINK PLASMA ASCENSION — NOVEMBER 2025
 
 #version 460
-#extension GL_EXT_scalar_block_layout : require   // ← THIS WAS MISSING
-#extension GL_ARB_gpu_shader_int64     : require   // StoneKey v∞
+#extension GL_EXT_scalar_block_layout : require
+#extension GL_ARB_gpu_shader_int64 : require
 
 #include "../StoneKey.glsl"   // PINK PHOTONS ETERNAL — VALHALLA LOCKED
 

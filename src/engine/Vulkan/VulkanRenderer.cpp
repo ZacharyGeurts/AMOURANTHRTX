@@ -317,6 +317,7 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, bool o
       denoisingEnabled_(Options::RTX::ENABLE_DENOISING),
       adaptiveSamplingEnabled_(Options::RTX::ENABLE_ADAPTIVE_SAMPLING),
       tonemapType_(TonemapType::ACES),
+      firstSwapchainAcquire_(true),
       lastPerfLogTime_(std::chrono::steady_clock::now()), frameCounter_(0),
       pipelineManager_()  // ← FIXED: Default ctor (nulls) — real instance assigned post-step 7
 {
@@ -1661,10 +1662,11 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     // FIXED: Transition Swapchain: PRESENT_SRC_KHR → GENERAL (for tonemap write, VUID-VkImageMemoryBarrier-oldLayout-01197)
     {
         VkImageMemoryBarrier barrier = {};  // Zero-init
+        VkImageLayout oldLayout = firstSwapchainAcquire_ ? VK_IMAGE_LAYOUT_UNDEFINED : VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
         barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
         barrier.srcAccessMask = 0;
         barrier.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-        barrier.oldLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;  // ← Correct old layout post-acquire
+        barrier.oldLayout = oldLayout;  // FIXED: Handle first acquire (UNDEFINED) vs subsequent (PRESENT_SRC_KHR)
         barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;  // For storage write
         barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
@@ -1677,6 +1679,11 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
             VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,  // Src stage (post-acquire: after acquire)
             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,  // Dst stage (pre-tonemap)
             0, 0, nullptr, 0, nullptr, 1, &barrier);
+
+        if (firstSwapchainAcquire_) {
+            firstSwapchainAcquire_ = false;
+            LOG_TRACE_CAT("RENDERER", "First swapchain acquire handled — transitioned from UNDEFINED to GENERAL");
+        }
     }
 
     // FIXED: Update Tonemap Descriptor per-frame (select input based on denoising) — After transitions (VUID-vkCmdDraw-None-09600)
@@ -1728,6 +1735,27 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
                 VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
                 0, 0, nullptr, 0, nullptr, 1, &barrier);
         }
+    }
+
+    // FIXED: Reverse Denoiser: SHADER_READ_ONLY_OPTIMAL → GENERAL (if enabled, for next denoising write; VUID-vkCmdDraw-None-09600)
+    if (denoisingEnabled_ && denoiserImage_.valid()) {
+        VkImageMemoryBarrier barrier = {};  // Zero-init
+        barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        barrier.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        barrier.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+        barrier.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;  // Post-tonemap read
+        barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;                   // For next denoising write
+        barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.image = *denoiserImage_;
+        barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        barrier.subresourceRange.levelCount = 1;
+        barrier.subresourceRange.layerCount = 1;
+
+        vkCmdPipelineBarrier(cmd,
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,  // For next denoising compute
+            0, 0, nullptr, 0, nullptr, 1, &barrier);
     }
 
     vkEndCommandBuffer(cmd);
@@ -2447,6 +2475,7 @@ void VulkanRenderer::handleResize(int w, int h) noexcept {
     width_  = w;
     height_ = h;
     resetAccumulation_ = true;
+    firstSwapchainAcquire_ = true;  // FIXED: Reset flag for new swapchain
 
     const auto& ctx = RTX::g_ctx();
 

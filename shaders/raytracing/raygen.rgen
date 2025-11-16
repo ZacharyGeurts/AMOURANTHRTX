@@ -6,12 +6,10 @@
 
 #include "../StoneKey.glsl"
 
-#define MAX_FRAMES_IN_FLIGHT 3
-
 layout(set = 0, binding = 0) uniform accelerationStructureEXT tlas;
 
-layout(set = 0, binding = 1, rgba32f) uniform writeonly image2D rtOutput[MAX_FRAMES_IN_FLIGHT];
-layout(set = 0, binding = 2, rgba32f) uniform image2D accumulation[MAX_FRAMES_IN_FLIGHT];
+layout(set = 0, binding = 1, rgba32f) uniform writeonly image2D rtOutput;
+layout(set = 0, binding = 2, rgba32f) uniform readonly image2D accumulation;
 
 // BINDING 3 — 100% SCALAR + 16-BYTE ALIGNED — NO ARRAYS OF 3
 layout(set = 0, binding = 3, scalar) uniform FrameUBO {
@@ -58,11 +56,10 @@ void main()
         color = mix(vec3(0.96f, 0.38f, 0.88f), vec3(0.99f, 0.78f, 0.96f), pow(uv.y, 0.6f));
     }
 
-    uint idx = push.frame % MAX_FRAMES_IN_FLIGHT;
-    vec3 prev = imageLoad(accumulation[idx], ivec2(pixel)).rgb;
+    vec3 prev = imageLoad(accumulation, ivec2(pixel)).rgb;
     color = mix(prev, color, 1.0f / float(push.frame + 1u));
 
-    imageStore(rtOutput[idx], ivec2(pixel), vec4(color, 1.0f));
+    imageStore(rtOutput, ivec2(pixel), vec4(color, 1.0f));
 
     if (pixel.x == 0 && pixel.y == 0) {
         imageStore(nexusScore, ivec2(0,0), vec4(color, 1.0f));
