@@ -62,15 +62,20 @@ public:
         createRenderPass();
     }
 
-    void recreate(uint32_t w, uint32_t h) {
-        if (device_ != VK_NULL_HANDLE)
-            vkDeviceWaitIdle(device_);
+void recreate(uint32_t w, uint32_t h) {
+    if (device_ != VK_NULL_HANDLE)
+        vkDeviceWaitIdle(device_);
 
-        cleanup();
-        createSwapchain(w, h);
-        createImageViews();
-        createRenderPass();
-    }
+    cleanup();
+    createSwapchain(w, h);
+    createImageViews();
+    createRenderPass();
+
+    // ← ADD THIS LINE — FORCES MEMORY VISIBILITY
+    (void)renderPass_;  // Ensure the render pass handle is visible to other threads/functions
+    LOG_SUCCESS_CAT("SWAPCHAIN", "Swapchain fully recreated — render pass = 0x{:x}", 
+                    renderPass_ ? (uint64_t)*renderPass_ : 0);
+}
 
     void cleanup() noexcept {
         if (device_ != VK_NULL_HANDLE) {

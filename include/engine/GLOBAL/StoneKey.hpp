@@ -287,7 +287,7 @@ inline void log_amouranth() noexcept {
 // -----------------------------------------------------------------------------
 #if !defined(STONEKEY_PRINTED)
 #define STONEKEY_PRINTED
-#pragma message("AMOURANTH RTX StoneKey Applied: Dual Licensed: GPL v3 | Commercial: gzac5314@gmail.com")
+//#pragma message("AMOURANTH RTX StoneKey Applied: Dual Licensed: GPL v3 | Commercial: gzac5314@gmail.com")
 #endif
 
 // =============================================================================

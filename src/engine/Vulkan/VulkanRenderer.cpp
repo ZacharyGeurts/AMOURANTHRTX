@@ -142,8 +142,7 @@ void VulkanRenderer::cleanup() noexcept {
         return;
     }
 
-    // FIXED: Guard vkDeviceWaitIdle — null device invalid (VUID-vkDeviceWaitIdle-device-parameter)
-    VkDevice dev = c.device();  // Cache once
+    VkDevice dev = c.device();
     if (dev != VK_NULL_HANDLE) {
         LOG_TRACE_CAT("RENDERER", "cleanup — vkDeviceWaitIdle");
         vkDeviceWaitIdle(dev);
@@ -151,140 +150,115 @@ void VulkanRenderer::cleanup() noexcept {
         LOG_WARN_CAT("RENDERER", "Skipped vkDeviceWaitIdle — null device");
     }
 
-    LOG_TRACE_CAT("RENDERER", "cleanup — SWAPCHAIN");
-    // FIXED: Guard SWAPCHAIN.cleanup() — ensures no call if device null
+    // ── FRAMEBUFFERS: DESTROY FIRST (critical for resize safety) ─────────────────
+    cleanupFramebuffers();  // ← ADDED: Prevents dangling framebuffer crash on resize
+
+    // ── SWAPCHAIN: Destroy swapchain + render pass + image views ─────────────────
     if (dev != VK_NULL_HANDLE) {
-        SWAPCHAIN.cleanup();  // Assume SWAPCHAIN has internal guards
+        SWAPCHAIN.cleanup();
     } else {
         LOG_WARN_CAT("RENDERER", "Skipped SWAPCHAIN.cleanup — null device");
     }
 
-    // ── NEW: Free All Descriptor Sets BEFORE Destroying Views/Images/Pools (Fixes VUID-vkDestroyImageView-imageView-01026) ──
-    LOG_TRACE_CAT("RENDERER", "cleanup — Freeing descriptor sets (unbinds views from sets)");
+    // ── Free All Descriptor Sets BEFORE destroying images/views/pools ───────────
+    LOG_TRACE_CAT("RENDERER", "cleanup — Freeing descriptor sets");
     if (dev != VK_NULL_HANDLE) {
-        std::vector<VkDescriptorSet> rtSets(rtDescriptorSets_.begin(), rtDescriptorSets_.end());
-        std::vector<VkDescriptorSet> tonemapSets(tonemapSets_.begin(), tonemapSets_.end());
-        std::vector<VkDescriptorSet> denoiserSets(denoiserSets_.begin(), denoiserSets_.end());
-        // Add other sets if any (e.g., from g_rtx() or graphics/compute)
-
-        // Free RT sets from rtDescriptorPool_
-        if (!rtSets.empty() && rtDescriptorPool_.valid() && *rtDescriptorPool_ != VK_NULL_HANDLE) {
-            vkFreeDescriptorSets(dev, *rtDescriptorPool_, static_cast<uint32_t>(rtSets.size()), rtSets.data());
+        // RT sets
+        if (!rtDescriptorSets_.empty() && rtDescriptorPool_.valid() && *rtDescriptorPool_) {
+            vkFreeDescriptorSets(dev, *rtDescriptorPool_, static_cast<uint32_t>(rtDescriptorSets_.size()), rtDescriptorSets_.data());
             rtDescriptorSets_.clear();
-            LOG_TRACE_CAT("RENDERER", "Freed {} RT descriptor sets", rtSets.size());
         }
 
-        // Free tonemap/denoiser from descriptorPool_ (assume shared pool)
+        // Tonemap + denoiser sets (assume shared pool or dedicated)
         std::vector<VkDescriptorSet> graphicsSets;
-        graphicsSets.insert(graphicsSets.end(), tonemapSets.begin(), tonemapSets.end());
-        graphicsSets.insert(graphicsSets.end(), denoiserSets.begin(), denoiserSets.end());
-        if (!graphicsSets.empty() && descriptorPool_.valid() && *descriptorPool_ != VK_NULL_HANDLE) {
-            vkFreeDescriptorSets(dev, *descriptorPool_, static_cast<uint32_t>(graphicsSets.size()), graphicsSets.data());
+        graphicsSets.insert(graphicsSets.end(), tonemapSets_.begin(), tonemapSets_.end());
+        graphicsSets.insert(graphicsSets.end(), denoiserSets_.begin(), denoiserSets_.end());
+
+        if (!graphicsSets.empty()) {
+            if (tonemapDescriptorPool_.valid() && *tonemapDescriptorPool_) {
+                vkFreeDescriptorSets(dev, *tonemapDescriptorPool_, static_cast<uint32_t>(graphicsSets.size()), graphicsSets.data());
+            } else if (descriptorPool_.valid() && *descriptorPool_) {
+                vkFreeDescriptorSets(dev, *descriptorPool_, static_cast<uint32_t>(graphicsSets.size()), graphicsSets.data());
+            }
             tonemapSets_.clear();
             denoiserSets_.clear();
-            LOG_TRACE_CAT("RENDERER", "Freed {} graphics descriptor sets", graphicsSets.size());
-        }
-
-        // FIXED: Free tonemap sets from dedicated tonemapDescriptorPool_
-        if (!tonemapSets.empty() && tonemapDescriptorPool_.valid() && *tonemapDescriptorPool_ != VK_NULL_HANDLE) {
-            vkFreeDescriptorSets(dev, *tonemapDescriptorPool_, static_cast<uint32_t>(tonemapSets.size()), tonemapSets.data());
-            tonemapSets_.clear();
-            LOG_TRACE_CAT("RENDERER", "Freed {} tonemap descriptor sets from dedicated pool", tonemapSets.size());
         }
     } else {
-        LOG_WARN_CAT("RENDERER", "Skipped descriptor set free — null device");
         rtDescriptorSets_.clear();
         tonemapSets_.clear();
         denoiserSets_.clear();
     }
 
-    // ── Sync Objects (only what you actually have) ────────────────────────
-    // FIXED: Explicit vkDestroy calls (leaks fixed: semaphores/fences must be destroyed, not just cleared)
-    LOG_TRACE_CAT("RENDERER", "cleanup — Destroying semaphores & fences");
+    // ── Sync Objects ─────────────────────────────────────────────────────────────
     if (dev != VK_NULL_HANDLE) {
-        for (auto s : imageAvailableSemaphores_) {
-            if (s != VK_NULL_HANDLE) {  // FIXED: Explicit null check
-                vkDestroySemaphore(dev, s, nullptr);
-            }
-        }
-        for (auto s : renderFinishedSemaphores_) {
-            if (s != VK_NULL_HANDLE) {  // FIXED: Explicit null check
-                vkDestroySemaphore(dev, s, nullptr);
-            }
-        }
-        for (auto f : inFlightFences_) {
-            if (f != VK_NULL_HANDLE) {  // FIXED: Explicit null check
-                vkDestroyFence(dev, f, nullptr);
-            }
-        }
-    } else {
-        LOG_WARN_CAT("RENDERER", "Skipped sync object destroys — null device");
+        for (auto s : imageAvailableSemaphores_)  if (s) vkDestroySemaphore(dev, s, nullptr);
+        for (auto s : renderFinishedSemaphores_)  if (s) vkDestroySemaphore(dev, s, nullptr);
+        for (auto s : computeFinishedSemaphores_) if (s) vkDestroySemaphore(dev, s, nullptr);
+        for (auto s : computeToGraphicsSemaphores_) if (s) vkDestroySemaphore(dev, s, nullptr);
+        for (auto f : inFlightFences_)            if (f) vkDestroyFence(dev, f, nullptr);
     }
     imageAvailableSemaphores_.clear();
     renderFinishedSemaphores_.clear();
+    computeFinishedSemaphores_.clear();
+    computeToGraphicsSemaphores_.clear();
     inFlightFences_.clear();
 
-    // ── Timestamp Query Pool (you DO have this member) ────────────────────
-    // FIXED: Guard vkDestroyQueryPool — null device triggers VUID-vkDestroyQueryPool-device-parameter
+    // ── Timestamp Query Pool ────────────────────────────────────────────────────
     if (timestampQueryPool_ != VK_NULL_HANDLE && dev != VK_NULL_HANDLE) {
-        LOG_TRACE_CAT("RENDERER", "Destroying timestampQueryPool_ 0x{:x}", 
-                      reinterpret_cast<uint64_t>(timestampQueryPool_));
         vkDestroyQueryPool(dev, timestampQueryPool_, nullptr);
         timestampQueryPool_ = VK_NULL_HANDLE;
-    } else if (timestampQueryPool_ != VK_NULL_HANDLE) {
-        LOG_WARN_CAT("RENDERER", "Skipped timestampQueryPool_ destroy — null device (0x{:x})", 
-                     reinterpret_cast<uint64_t>(timestampQueryPool_));
     }
 
-    // ── RT Output / Accumulation / Denoiser Images ───────────────────────
-    // FIXED: Explicit guards in destroy* methods (assume implemented; add vkDestroyImage calls with dev check)
+    // ── Images & Views (RT Output, Accumulation, Denoiser, Nexus) ───────────────
     if (dev != VK_NULL_HANDLE) {
-        destroyRTOutputImages();       // e.g., vkDestroyImage(dev, rtOutputImage_, nullptr);
-        destroyAccumulationImages();   // e.g., vkDestroyImage(dev, accumImage_, nullptr);
-        destroyNexusScoreImage();      // e.g., vkDestroyImage(dev, nexusImage_, nullptr);
-        destroyDenoiserImage();        // e.g., vkDestroyImage(dev, denoiserImage_, nullptr);
-    } else {
-        LOG_WARN_CAT("RENDERER", "Skipped image destroys — null device (nullifying refs only)");
-    // ——— FIXED: Correct cleanup of all RT images (vectors + singular Handles) ———
-    for (auto& h : rtOutputImages_)   h.reset();
-    for (auto& h : accumImages_)      h.reset();
-
-    //nexusImage_.reset();      // ← singular Handle, not a vector
-    denoiserImage_.reset();   // ← singular Handle, not a vector
-
-    rtOutputImages_.clear();
-    accumImages_.clear();
-    // No .clear() needed on singular Handles — they’re not containers
+        destroyRTOutputImages();
+        destroyAccumulationImages();
+        destroyDenoiserImage();
+        destroyNexusScoreImage();
     }
 
-    // ── Descriptor Pools ─────────────────────────────────────────────────
-    // FIXED: Assume reset() has guards; if std::unique_ptr-like, it's safe
+    // Nullify handles even if device is gone (prevents double-free on reinit)
+    for (auto& h : rtOutputImages_)     h.reset();
+    for (auto& h : rtOutputMemories_)   h.reset();
+    for (auto& h : rtOutputViews_)      h.reset();
+    for (auto& h : accumImages_)        h.reset();
+    for (auto& h : accumMemories_)      h.reset();
+    for (auto& h : accumViews_)         h.reset();
+    denoiserImage_.reset();     denoiserMemory_.reset();     denoiserView_.reset();
+    hypertraceScoreImage_.reset(); hypertraceScoreMemory_.reset(); hypertraceScoreView_.reset();
+
+    rtOutputImages_.clear(); rtOutputMemories_.clear(); rtOutputViews_.clear();
+    accumImages_.clear();    accumMemories_.clear();    accumViews_.clear();
+
+    // ── Environment Map & Samplers ─────────────────────────────────────────────
+    envMapImage_.reset(); envMapImageMemory_.reset(); envMapImageView_.reset();
+    envMapSampler_.reset();
+    tonemapSampler_.reset();
+
+    // ── Descriptor Pools ────────────────────────────────────────────────────────
     descriptorPool_.reset();
     rtDescriptorPool_.reset();
-    tonemapDescriptorPool_.reset();  // ADD: Tonemap pool cleanup
+    tonemapDescriptorPool_.reset();
 
-    // ── Command Buffers ──────────────────────────────────────────────────
-    // FIXED: Guard vkFreeCommandBuffers — null device invalid
+    // ── Command Buffers ─────────────────────────────────────────────────────────
     VkCommandPool pool = c.commandPool();
     if (!commandBuffers_.empty() && dev != VK_NULL_HANDLE && pool != VK_NULL_HANDLE) {
-        vkFreeCommandBuffers(dev, pool,
-                             static_cast<uint32_t>(commandBuffers_.size()),
-                             commandBuffers_.data());
+        vkFreeCommandBuffers(dev, pool, static_cast<uint32_t>(commandBuffers_.size()), commandBuffers_.data());
         commandBuffers_.clear();
-        LOG_TRACE_CAT("RENDERER", "Command buffers freed");
-    } else if (!commandBuffers_.empty()) {
-        LOG_WARN_CAT("RENDERER", "Skipped command buffer free — invalid device/pool (size: {})", 
-                     commandBuffers_.size());
-        commandBuffers_.clear();  // Clear vector anyway to avoid stale refs
+    }
+    if (!computeCommandBuffers_.empty() && dev != VK_NULL_HANDLE && pool != VK_NULL_HANDLE) {
+        vkFreeCommandBuffers(dev, pool, static_cast<uint32_t>(computeCommandBuffers_.size()), computeCommandBuffers_.data());
+        computeCommandBuffers_.clear();
     }
 
-    // ADD: Cleanup tonemap UBOs
+    // ── Uniform Buffers (tonemap UBOs) ─────────────────────────────────────────
     for (auto& enc : tonemapUniformEncs_) {
         BUFFER_DESTROY(enc);
     }
     tonemapUniformEncs_.clear();
 
-    LOG_SUCCESS_CAT("RENDERER", "{}Renderer shutdown complete — ZERO LEAKS — READY FOR REINIT{}", 
+    // ── Final Success ───────────────────────────────────────────────────────────
+    LOG_SUCCESS_CAT("RENDERER", "{}Renderer shutdown complete — ZERO LEAKS — FRAMEBUFFERS SAFE — READY FOR REINIT{}", 
                     EMERALD_GREEN, RESET);
 }
 
@@ -1542,7 +1516,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
         VkFramebuffer fb = framebuffers_[imageIndex];
         VkRenderPassBeginInfo rpBegin = {};
         rpBegin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-        rpBegin.renderPass = *RTX::g_ctx().renderPass_,  // CLASSIC RENDER PASS (dynamicRendering OFF)
+        rpBegin.renderPass = SWAPCHAIN.renderPass(),  // CLASSIC RENDER PASS (dynamicRendering OFF)
         rpBegin.framebuffer = fb;
         rpBegin.renderArea.offset = {0, 0};
         rpBegin.renderArea.extent = SWAPCHAIN.extent();
@@ -2280,44 +2254,71 @@ void VulkanRenderer::setRenderMode(int mode) noexcept {
 // Resize Handling
 // ──────────────────────────────────────────────────────────────────────────────
 void VulkanRenderer::handleResize(int w, int h) noexcept {
-    //LOG_TRACE_CAT("RENDERER", "handleResize — START — w={}, h={}", w, h);
-    if (w <= 0 || h <= 0) {
-        //LOG_TRACE_CAT("RENDERER", "Invalid dimensions — abort");
-        //LOG_TRACE_CAT("RENDERER", "handleResize — COMPLETE (invalid)");
-        return;
-    }
-    if (width_ == w && height_ == h) {
-        //LOG_TRACE_CAT("RENDERER", "No change needed");
-        //LOG_TRACE_CAT("RENDERER", "handleResize — COMPLETE (no change)");
-        return;
-    }
+    if (w <= 0 || h <= 0) return;
+    if (width_ == w && height_ == h) return;
 
-    width_ = w;
+    width_  = w;
     height_ = h;
     resetAccumulation_ = true;
-    //LOG_TRACE_CAT("RENDERER", "Updated dimensions — width_={}, height_={}, resetAccumulation_={}", width_, height_, resetAccumulation_);
 
-    const auto& ctx = RTX::g_ctx();  // const ref
-    //LOG_TRACE_CAT("RENDERER", "vkDeviceWaitIdle — START");
+    const auto& ctx = RTX::g_ctx();
     vkDeviceWaitIdle(ctx.vkDevice());
-    //LOG_TRACE_CAT("RENDERER", "vkDeviceWaitIdle — COMPLETE");
 
-    //LOG_TRACE_CAT("RENDERER", "SWAPCHAIN.recreate — START");
+    // 1. Recreate swapchain + render pass (your SwapchainManager does this perfectly)
     SWAPCHAIN.recreate(w, h);
-    //LOG_TRACE_CAT("RENDERER", "SWAPCHAIN.recreate — COMPLETE");
+	(void)SWAPCHAIN.renderPass();
 
-    //LOG_TRACE_CAT("RENDERER", "Recreating render targets — START");
+    // 2. Destroy old framebuffers (CRITICAL — THIS WAS MISSING)
+    cleanupFramebuffers();          // ← ADD THIS
+    // (you can also destroy old RT images here if you want, but you’re recreating them anyway)
+
+    // 3. Recreate all render targets
     createRTOutputImages();
     createAccumulationImages();
     createDenoiserImage();
-    if (Options::RTX::ENABLE_ADAPTIVE_SAMPLING) createNexusScoreImage(ctx.physicalDevice(), ctx.device(), ctx.commandPool(), ctx.graphicsQueue());
+    if (Options::RTX::ENABLE_ADAPTIVE_SAMPLING)
+        createNexusScoreImage(ctx.physicalDevice(), ctx.device(), ctx.commandPool(), ctx.graphicsQueue());
+
+    // 4. Recreate framebuffers using new swapchain image views + new render pass
+    createFramebuffers();           // ← ADD THIS — THE ONE TRUE FIX
+    createCommandBuffers();         // ← RE-RECORD ALL COMMAND BUFFERS WITH NEW RENDER PASS
+    // 5. Update all descriptors
     updateRTXDescriptors(currentFrame_);
     updateTonemapDescriptorsInitial();
     updateDenoiserDescriptors();
-    //LOG_TRACE_CAT("RENDERER", "Recreating render targets — COMPLETE");
 
-    LOG_SUCCESS_CAT("Renderer", "{}Swapchain resized to {}x{}{}", SAPPHIRE_BLUE, w, h, RESET);
-    //LOG_TRACE_CAT("RENDERER", "handleResize — COMPLETE");
+    LOG_SUCCESS_CAT("Renderer", "{}Swapchain + Framebuffers resized to {}x{}{}", 
+                    SAPPHIRE_BLUE, w, h, RESET);
+}
+
+void VulkanRenderer::createFramebuffers() {
+    framebuffers_.resize(SWAPCHAIN.views().size());
+
+    for (size_t i = 0; i < SWAPCHAIN.views().size(); ++i) {
+        VkImageView attachment = *SWAPCHAIN.views()[i];  // FIXED
+
+        VkFramebufferCreateInfo fbInfo = {
+            .sType           = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
+            .renderPass      = SWAPCHAIN.renderPass(),
+            .attachmentCount = 1,
+            .pAttachments    = &attachment,
+            .width           = SWAPCHAIN.extent().width,
+            .height          = SWAPCHAIN.extent().height,
+            .layers          = 1
+        };
+
+        VK_CHECK(vkCreateFramebuffer(device(), &fbInfo, nullptr, &framebuffers_[i]),
+                 "Failed to create framebuffer!");
+    }
+
+    LOG_SUCCESS_CAT("RENDERER", "Framebuffers recreated — {} total", framebuffers_.size());
+}
+
+void VulkanRenderer::cleanupFramebuffers() noexcept {
+    for (auto fb : framebuffers_) {
+        if (fb) vkDestroyFramebuffer(device(), fb, nullptr);
+    }
+    framebuffers_.clear();
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
