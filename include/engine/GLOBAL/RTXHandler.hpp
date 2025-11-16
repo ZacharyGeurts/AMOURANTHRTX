@@ -51,14 +51,12 @@ struct Camera;
 
 using namespace Logging::Color;
 
-// Forward-declare StoneKey funcs (no include needed—defined in main.cpp TU)
 extern uint64_t get_kHandleObfuscator() noexcept;
 
 inline const char* getPlatformSurfaceExtension()
 {
 #if defined(__linux__)
-    return VK_KHR_SURFACE_EXTENSION_NAME;     // Most Linux
-    // return VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME; // Uncomment if using Wayland
+    return VK_KHR_SURFACE_EXTENSION_NAME;
 #elif defined(_WIN32)
     return VK_KHR_WIN32_SURFACE_EXTENSION_NAME;
 #elif defined(__APPLE__)
@@ -74,31 +72,24 @@ inline const char* getPlatformSurfaceExtension()
 constexpr uint64_t operator"" _KB(unsigned long long v) noexcept { return v << 10; }
 constexpr uint64_t operator"" _MB(unsigned long long v) noexcept { return v << 20; }
 constexpr uint64_t operator"" _GB(unsigned long long v) noexcept { return v << 30; }
-constexpr uint64_t operator"" _TB(unsigned long long v) noexcept { return v << 40; }
+constexpr uint64_t operator"" _TB64_tB(unsigned long long v) noexcept { return v << 40; }
 
 // =============================================================================
 // NAMESPACE RTX
 // =============================================================================
 namespace RTX {
-    // =============================================================================
-    // FIXED: SDL3 2024+ — CREATE INSTANCE + OVERLOAD FOR initContext
-    // =============================================================================
-    [[nodiscard]] VkInstance createVulkanInstanceWithSDL(SDL_Window* window, bool enableValidation);  // UPDATED: Added SDL_Window* window
+    [[nodiscard]] VkInstance createVulkanInstanceWithSDL(SDL_Window* window, bool enableValidation);
     void initContext(VkInstance instance, SDL_Window* window, int width, int height);
 
-    // =============================================================================
-    // Helpers (declarations only) — MOVED UP FOR TEMPLATE VISIBILITY
-    // =============================================================================
     void logAndTrackDestruction(const char* type, void* ptr, int line, size_t size);
 
-    // Internal sub-functions for stepwise initialization (declared here for modularity; defined in RTXHandler.cpp)
     void pickPhysicalDevice();
     void createLogicalDevice();
     void createCommandPool();
     void loadRayTracingExtensions();
 
     // =============================================================================
-    // Handle<T> — FIXED: FULL INLINE IMPLEMENTATIONS FOR TEMPLATE
+    // Handle<T>
     // =============================================================================
     template<typename T>
     struct Handle {
@@ -135,15 +126,9 @@ namespace RTX {
         Handle(const Handle&) = delete;
         Handle& operator=(const Handle&) = delete;
 
-        Handle& operator=(std::nullptr_t) noexcept {
-            reset();
-            return *this;
-        }
-
+        Handle& operator=(std::nullptr_t) noexcept { reset(); return *this; }
         explicit operator bool() const noexcept { return valid(); }
-
         T get() const noexcept { return raw; }
-
         T operator*() const noexcept { return raw; }
 
         [[nodiscard]] bool valid() const noexcept {
@@ -155,15 +140,9 @@ namespace RTX {
                 LOG_INFO_CAT("RTX", "Handle reset: {} @ 0x{:x} | Tag: {}", 
                              typeid(T).name(), reinterpret_cast<uint64_t>(raw), tag);
                 if (destroyer && device) {
-                    // CRITICAL: Destroy FIRST with original raw handle
                     destroyer(device, raw, nullptr);
-                    
-                    // THEN shred the local raw value if not too large (simple poison, StoneKey protects in-flight)
                     constexpr size_t threshold = 16 * 1024 * 1024;
-                    if (size >= threshold) {
-                        LOG_DEBUG_CAT("RTX", "Skipping shred for large allocation ({}MB): {}", 
-                                      size / (1024 * 1024), tag.empty() ? "" : tag.c_str());
-                    } else {
+                    if (size < threshold) {
                         std::memset(&raw, 0xCD, sizeof(T));
                     }
                 }
@@ -173,31 +152,25 @@ namespace RTX {
             }
         }
 
-        ~Handle() {
-            reset();
-        }
+        ~Handle() { reset(); }
     };
 
     template<typename T, typename... Args>
     [[nodiscard]] auto MakeHandle(T h, VkDevice d, Args&&... args) {
-        using H = Handle<T>;
-        return H(h, d, std::forward<Args>(args)...);
+        return Handle<T>(h, d, std::forward<Args>(args)...);
     }
 
-    // =============================================================================
-    // MACROS
-    // =============================================================================
     #define HANDLE_CREATE(var, raw, dev, destroyer, size, tag) \
         do { LOG_INFO_CAT("RTX", "HANDLE_CREATE: {} | Tag: {}", #var, tag); (var) = RTX::MakeHandle((raw), (dev), (destroyer), (size), (tag)); } while(0)
     #define HANDLE_GET(var) ((var).get())
     #define HANDLE_RESET(var) do { LOG_INFO_CAT("RTX", "HANDLE_RESET: {}", #var); (var).reset(); } while(0)
 
     // =============================================================================
-    // Context — FINAL: Async Compute + Ready Flag + Full Cleanup + Safe Accessors + renderPass + physProps for alignment
+    // Context — Vulkan 1.4 ready, maximum pink photon dominance
     // =============================================================================
     struct Context {
     public:
-        // Core Vulkan Handles (raw for local use; access via secure getters)
+        // Core handles
         VkInstance       instance_       = VK_NULL_HANDLE;
         VkSurfaceKHR     surface_        = VK_NULL_HANDLE;
         VkPhysicalDevice physicalDevice_ = VK_NULL_HANDLE;
@@ -207,31 +180,26 @@ namespace RTX {
         VkCommandPool    commandPool_    = VK_NULL_HANDLE;
         VkPipelineCache  pipelineCache_  = VK_NULL_HANDLE;
         VkDebugUtilsMessengerEXT debugMessenger_ = VK_NULL_HANDLE;
-		VkFormat        hdr_format       = VK_FORMAT_UNDEFINED;
+        VkFormat        hdr_format       = VK_FORMAT_UNDEFINED;
         VkColorSpaceKHR hdr_color_space  = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
 
-        // Device Properties for Alignment (NEW: Fixes driver min size warnings)
         VkPhysicalDeviceProperties physProps_{};
 
-        // Window and Dimensions
         SDL_Window*      window   = nullptr;
         int              width    = 0;
         int              height   = 0;
 
-        // Validity and Readiness Flags
-        bool             valid_   = false;  // For ctx() guard during init
+        bool             valid_   = false;
+        mutable std::atomic<bool> ready_{false};
 
-        mutable std::atomic<bool> ready_{false};  // Thread-safe for renderer
-
-        // Async Compute Support
         uint32_t         computeFamily_      = UINT32_MAX;
         VkQueue          computeQueue_       = VK_NULL_HANDLE;
         VkCommandPool    computeCommandPool_ = VK_NULL_HANDLE;
 
-        uint32_t         graphicsFamily_    = UINT32_MAX;
-        uint32_t         presentFamily_     = UINT32_MAX;
+        uint32_t         graphicsFamily_ = UINT32_MAX;
+        uint32_t         presentFamily_  = UINT32_MAX;
 
-        // Ray Tracing Extensions (Function Pointers) — Public for direct access in LAS.hpp et al.
+        // Ray Tracing (KHR)
         PFN_vkGetBufferDeviceAddressKHR               vkGetBufferDeviceAddressKHR_               = nullptr;
         PFN_vkCmdTraceRaysKHR                         vkCmdTraceRaysKHR_                         = nullptr;
         PFN_vkGetRayTracingShaderGroupHandlesKHR      vkGetRayTracingShaderGroupHandlesKHR_      = nullptr;
@@ -246,80 +214,94 @@ namespace RTX {
             .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR
         };
 
-        // Custom Buffers/Views (Wrapped Handles)
+        // Display Timing (GOOGLE)
+        PFN_vkGetPastPresentationTimingGOOGLE         vkGetPastPresentationTimingGOOGLE_         = nullptr;
+        PFN_vkGetRefreshCycleDurationGOOGLE           vkGetRefreshCycleDurationGOOGLE_           = nullptr;
+
+        // HDR & Advanced Present
+        PFN_vkSetHdrMetadataEXT                       vkSetHdrMetadataEXT_                       = nullptr;
+        PFN_vkAcquireNextImage2KHR                    vkAcquireNextImage2KHR_                    = nullptr;
+
+        // Synchronization (Vulkan 1.2+ core + KHR extensions)
+        PFN_vkGetSemaphoreFdKHR                        vkGetSemaphoreFdKHR_                       = nullptr;
+        PFN_vkImportSemaphoreFdKHR                    vkImportSemaphoreFdKHR_                    = nullptr;
+
+        // Dynamic Rendering
+        PFN_vkCmdBeginRenderingKHR                    vkCmdBeginRenderingKHR_                    = nullptr;
+        PFN_vkCmdEndRenderingKHR                      vkCmdEndRenderingKHR_                      = nullptr;
+
+        // Mesh Shaders (EXT) — correct names
+        PFN_vkCmdDrawMeshTasksEXT                     vkCmdDrawMeshTasksEXT_                     = nullptr;
+        PFN_vkCmdDrawMeshTasksIndirectEXT             vkCmdDrawMeshTasksIndirectEXT_             = nullptr;
+
+        // Variable Rate Shading
+        PFN_vkCmdSetFragmentShadingRateKHR            vkCmdSetFragmentShadingRateKHR_            = nullptr;
+
+        // Descriptor & Push Extensions
+        PFN_vkCmdPushDescriptorSetKHR                 vkCmdPushDescriptorSetKHR_                 = nullptr;
+        PFN_vkCmdPushConstants2KHR                    vkCmdPushConstants2KHR_                    = nullptr;
+        PFN_vkCmdPushDescriptorSet2KHR                vkCmdPushDescriptorSet2KHR_                = nullptr;
+
+        // Debug Labels
+        PFN_vkCmdBeginDebugUtilsLabelEXT              vkCmdBeginDebugUtilsLabelEXT_              = nullptr;
+        PFN_vkCmdEndDebugUtilsLabelEXT                vkCmdEndDebugUtilsLabelEXT_                = nullptr;
+        PFN_vkCmdInsertDebugUtilsLabelEXT             vkCmdInsertDebugUtilsLabelEXT_             = nullptr;
+
+        // Custom wrapped resources
         Handle<VkImageView> blueNoiseView_;
         Handle<VkBuffer>    reservoirBuffer_;
         Handle<VkBuffer>    frameDataBuffer_;
         Handle<VkBuffer>    debugVisBuffer_;
-        Handle<VkRenderPass> renderPass_;  // FIXED: Added renderPass_ member
+        Handle<VkRenderPass> renderPass_;
 
-		// STONEKEY v∞ — THE ONE TRUE SHARED STAGING BUFFER
-		uint64_t sharedStagingEnc_ = 0;   // Obfuscated handle — eternal, protected, unbreakable
+        uint64_t sharedStagingEnc_ = 0;
 
-        // Initialization and Cleanup
         void init(SDL_Window* window, int width, int height);
         void cleanup() noexcept;
 
-        // Validity and Readiness Accessors
         [[nodiscard]] bool isValid() const noexcept {
-            // Flag enables during init; full check enforces handles post-setup
-            return valid_ &&
-                   instance_ != VK_NULL_HANDLE &&
-                   surface_ != VK_NULL_HANDLE &&
-                   physicalDevice_ != VK_NULL_HANDLE &&
-                   device_ != VK_NULL_HANDLE;
+            return valid_ && instance_ && surface_ && physicalDevice_ && device_;
         }
         [[nodiscard]] bool isReady() const noexcept { return ready_.load(std::memory_order_acquire); }
         void markReady() noexcept { ready_.store(true, std::memory_order_release); }
         void setValid(bool v) noexcept { valid_ = v; }
 
-        // NEW: Buffer Alignment Helper (for UltraLowLevelBufferTracker::create to fix min size warnings)
         [[nodiscard]] VkDeviceSize getBufferAlignment(VkBufferUsageFlags usage) const noexcept {
             VkDeviceSize alignment = physProps_.limits.nonCoherentAtomSize;
-            if (usage & VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT) {
+            if (usage & VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT)
                 alignment = physProps_.limits.minUniformBufferOffsetAlignment;
-            } else if (usage & VK_BUFFER_USAGE_STORAGE_BUFFER_BIT) {
+            else if (usage & VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
                 alignment = physProps_.limits.minStorageBufferOffsetAlignment;
-            }
-            // For AS storage, treat as storage buffer
-            if (usage & VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR) {
+            if (usage & VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR)
                 alignment = physProps_.limits.minStorageBufferOffsetAlignment;
-            }
             return alignment;
         }
 
-        // Core Vulkan Accessors — SECURE VIA STONEKEY
-        [[nodiscard]] VkDevice          device()         const noexcept { return g_device(); }
-        [[nodiscard]] VkPhysicalDevice  physicalDevice() const noexcept { return g_PhysicalDevice(); }
-        [[nodiscard]] VkInstance        instance()       const noexcept { return g_instance(); }
-        [[nodiscard]] VkSurfaceKHR      surface()        const noexcept { return g_surface(); }
+        // Secure accessors (StoneKey)
+        [[nodiscard]] VkDevice         device()         const noexcept { return g_device(); }
+        [[nodiscard]] VkPhysicalDevice physicalDevice() const noexcept { return g_PhysicalDevice(); }
+        [[nodiscard]] VkInstance       instance()       const noexcept { return g_instance(); }
+        [[nodiscard]] VkSurfaceKHR     surface()        const noexcept { return g_surface(); }
+        [[nodiscard]] VkRenderPass     renderPass()      const noexcept { return renderPass_.valid() ? renderPass_.get() : VK_NULL_HANDLE; }
 
-        // FIXED: Added renderPass() accessor
-        [[nodiscard]] VkRenderPass renderPass() const noexcept { return renderPass_.valid() ? renderPass_.get() : VK_NULL_HANDLE; }
-
-        // Legacy Aliases
         [[nodiscard]] VkDevice         vkDevice() const noexcept { return device(); }
         [[nodiscard]] VkPhysicalDevice vkPhysicalDevice() const noexcept { return physicalDevice(); }
         [[nodiscard]] VkSurfaceKHR     vkSurface() const noexcept { return surface(); }
 
-        // Queue Family Accessors
-        [[nodiscard]] uint32_t         graphicsFamily() const noexcept { return graphicsFamily_; }
-        [[nodiscard]] uint32_t         presentFamily()  const noexcept { return presentFamily_; }
-        [[nodiscard]] uint32_t         computeFamily()  const noexcept { return computeFamily_; }
+        [[nodiscard]] uint32_t graphicsFamily() const noexcept { return graphicsFamily_; }
+        [[nodiscard]] uint32_t presentFamily()  const noexcept { return presentFamily_; }
+        [[nodiscard]] uint32_t computeFamily()  const noexcept { return computeFamily_; }
 
-        // Command Pool Accessors
-        [[nodiscard]] VkCommandPool    commandPool()       const noexcept { return commandPool_; }
-        [[nodiscard]] VkCommandPool    computeCommandPool()const noexcept { return computeCommandPool_; }
+        [[nodiscard]] VkCommandPool commandPool()        const noexcept { return commandPool_; }
+        [[nodiscard]] VkCommandPool computeCommandPool() const noexcept { return computeCommandPool_; }
 
-        // Queue Accessors
-        [[nodiscard]] VkQueue          graphicsQueue() const noexcept { return graphicsQueue_; }
-        [[nodiscard]] VkQueue          presentQueue()  const noexcept { return presentQueue_; }
-        [[nodiscard]] VkQueue          computeQueue()   const noexcept { return computeQueue_; }
+        [[nodiscard]] VkQueue graphicsQueue() const noexcept { return graphicsQueue_; }
+        [[nodiscard]] VkQueue presentQueue()  const noexcept { return presentQueue_; }
+        [[nodiscard]] VkQueue computeQueue()   const noexcept { return computeQueue_; }
 
-        // Pipeline Cache
-        [[nodiscard]] VkPipelineCache  pipelineCacheHandle() const noexcept { return pipelineCache_; }
+        [[nodiscard]] VkPipelineCache pipelineCacheHandle() const noexcept { return pipelineCache_; }
 
-        // Ray Tracing Function Pointer Accessors (Direct access via members; accessors for consistency)
+        // Ray Tracing accessors
         [[nodiscard]] PFN_vkCmdTraceRaysKHR                         vkCmdTraceRaysKHR() const noexcept { return vkCmdTraceRaysKHR_; }
         [[nodiscard]] PFN_vkGetRayTracingShaderGroupHandlesKHR      vkGetRayTracingShaderGroupHandlesKHR() const noexcept { return vkGetRayTracingShaderGroupHandlesKHR_; }
         [[nodiscard]] PFN_vkCreateAccelerationStructureKHR          vkCreateAccelerationStructureKHR() const noexcept { return vkCreateAccelerationStructureKHR_; }
@@ -330,24 +312,40 @@ namespace RTX {
         [[nodiscard]] PFN_vkCmdBuildAccelerationStructuresKHR       vkCmdBuildAccelerationStructuresKHR() const noexcept { return vkCmdBuildAccelerationStructuresKHR_; }
         [[nodiscard]] PFN_vkDestroyAccelerationStructureKHR         vkDestroyAccelerationStructureKHR() const noexcept { return vkDestroyAccelerationStructureKHR_; }
 
+        // Misc accessors
+        [[nodiscard]] PFN_vkGetPastPresentationTimingGOOGLE         vkGetPastPresentationTimingGOOGLE() const noexcept { return vkGetPastPresentationTimingGOOGLE_; }
+        [[nodiscard]] PFN_vkGetRefreshCycleDurationGOOGLE           vkGetRefreshCycleDurationGOOGLE() const noexcept { return vkGetRefreshCycleDurationGOOGLE_; }
+        [[nodiscard]] PFN_vkSetHdrMetadataEXT                       vkSetHdrMetadataEXT() const noexcept { return vkSetHdrMetadataEXT_; }
+        [[nodiscard]] PFN_vkAcquireNextImage2KHR                    vkAcquireNextImage2KHR() const noexcept { return vkAcquireNextImage2KHR_; }
+        [[nodiscard]] PFN_vkGetSemaphoreFdKHR                        vkGetSemaphoreFdKHR() const noexcept { return vkGetSemaphoreFdKHR_; }
+        [[nodiscard]] PFN_vkImportSemaphoreFdKHR                    vkImportSemaphoreFdKHR() const noexcept { return vkImportSemaphoreFdKHR_; }
+
+        [[nodiscard]] PFN_vkCmdBeginRenderingKHR                    vkCmdBeginRenderingKHR() const noexcept { return vkCmdBeginRenderingKHR_; }
+        [[nodiscard]] PFN_vkCmdEndRenderingKHR                      vkCmdEndRenderingKHR() const noexcept { return vkCmdEndRenderingKHR_; }
+
+        [[nodiscard]] PFN_vkCmdDrawMeshTasksEXT                     vkCmdDrawMeshTasksEXT() const noexcept { return vkCmdDrawMeshTasksEXT_; }
+        [[nodiscard]] PFN_vkCmdDrawMeshTasksIndirectEXT             vkCmdDrawMeshTasksIndirectEXT() const noexcept { return vkCmdDrawMeshTasksIndirectEXT_; }
+
+        [[nodiscard]] PFN_vkCmdSetFragmentShadingRateKHR            vkCmdSetFragmentShadingRateKHR() const noexcept { return vkCmdSetFragmentShadingRateKHR_; }
+        [[nodiscard]] PFN_vkCmdPushDescriptorSetKHR                 vkCmdPushDescriptorSetKHR() const noexcept { return vkCmdPushDescriptorSetKHR_; }
+        [[nodiscard]] PFN_vkCmdPushConstants2KHR                    vkCmdPushConstants2KHR() const noexcept { return vkCmdPushConstants2KHR_; }
+        [[nodiscard]] PFN_vkCmdPushDescriptorSet2KHR                vkCmdPushDescriptorSet2KHR() const noexcept { return vkCmdPushDescriptorSet2KHR_; }
+
+        [[nodiscard]] PFN_vkCmdBeginDebugUtilsLabelEXT              vkCmdBeginDebugUtilsLabelEXT() const noexcept { return vkCmdBeginDebugUtilsLabelEXT_; }
+        [[nodiscard]] PFN_vkCmdEndDebugUtilsLabelEXT                vkCmdEndDebugUtilsLabelEXT() const noexcept { return vkCmdEndDebugUtilsLabelEXT_; }
+        [[nodiscard]] PFN_vkCmdInsertDebugUtilsLabelEXT             vkCmdInsertDebugUtilsLabelEXT() const noexcept { return vkCmdInsertDebugUtilsLabelEXT_; }
+
         [[nodiscard]] const VkPhysicalDeviceRayTracingPipelinePropertiesKHR& rayTracingProps() const noexcept { return rayTracingProps_; }
 
-        // Custom Buffer/View Accessors
         [[nodiscard]] VkImageView blueNoiseView() const noexcept { return blueNoiseView_ ? *blueNoiseView_ : VK_NULL_HANDLE; }
         [[nodiscard]] VkBuffer    reservoirBuffer() const noexcept { return reservoirBuffer_ ? *reservoirBuffer_ : VK_NULL_HANDLE; }
         [[nodiscard]] VkBuffer    frameDataBuffer() const noexcept { return frameDataBuffer_ ? *frameDataBuffer_ : VK_NULL_HANDLE; }
         [[nodiscard]] VkBuffer    debugVisBuffer() const noexcept { return debugVisBuffer_ ? *debugVisBuffer_ : VK_NULL_HANDLE; }
 
-        // Utility
-        [[nodiscard]] uint32_t currentFrame() const noexcept { return 0; }  // Placeholder
+        [[nodiscard]] uint32_t currentFrame() const noexcept { return 0; }
     };
 
-    // =============================================================================
-    // GLOBAL ACCESSORS — FIXED: ctx() == g_ctx() + NULL GUARD
-    // =============================================================================
-    // Global context instance declaration
     extern Context g_context_instance;
-
     [[nodiscard]] Context& g_ctx() noexcept;
 
     // =============================================================================
@@ -356,8 +354,8 @@ namespace RTX {
     struct BufferData {
         VkBuffer buffer = VK_NULL_HANDLE;
         VkDeviceMemory memory = VK_NULL_HANDLE;
-        VkDeviceSize size = 0;  // Original requested size
-        VkDeviceSize alignedSize = 0;  // Aligned allocation size (NEW)
+        VkDeviceSize size = 0;
+        VkDeviceSize alignedSize = 0;
         VkBufferUsageFlags usage = 0;
         std::string tag;
     };
@@ -374,7 +372,7 @@ namespace RTX {
 
     struct UltraLowLevelBufferTracker {
         static UltraLowLevelBufferTracker& get() noexcept;
-        uint64_t create(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags props, std::string_view tag);  // FIXED: Removed noexcept — allows throws
+        uint64_t create(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags props, std::string_view tag);
         void destroy(uint64_t handle) noexcept;
         BufferData* getData(uint64_t handle) noexcept;
         const BufferData* getData(uint64_t handle) const noexcept;
@@ -382,6 +380,7 @@ namespace RTX {
         void unmap(uint64_t handle) noexcept;
         void init(VkDevice dev, VkPhysicalDevice phys) noexcept;
         void purge_all() noexcept;
+
         uint64_t make_64M (VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept;
         uint64_t make_128M(VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept;
         uint64_t make_256M(VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept;
@@ -392,16 +391,11 @@ namespace RTX {
         uint64_t make_4G  (VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept;
         uint64_t make_8G  (VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept;
 
-        // NEW: Alignment helper (use in .cpp create: VkDeviceSize align = g_ctx().getBufferAlignment(usage); aligned = ((size + align - 1)/align)*align;)
-        // This ensures requested sizes like 96 bytes are padded to 256 (common minStorageBufferOffsetAlignment on RTX)
-
-        // --- INLINE IMPLEMENTATION OF findMemoryType ---
         static uint32_t findMemoryType(VkPhysicalDevice physDev, uint32_t typeFilter, VkMemoryPropertyFlags props) noexcept {
             VkPhysicalDeviceMemoryProperties memProps;
             vkGetPhysicalDeviceMemoryProperties(physDev, &memProps);
             for (uint32_t i = 0; i < memProps.memoryTypeCount; ++i) {
-                if ((typeFilter & (1 << i)) &&
-                    (memProps.memoryTypes[i].propertyFlags & props) == props) {
+                if ((typeFilter & (1 << i)) && (memProps.memoryTypes[i].propertyFlags & props) == props) {
                     return i;
                 }
             }
@@ -419,7 +413,7 @@ namespace RTX {
     };
 
     // =============================================================================
-    // GLOBAL SWAPCHAIN + LAS
+    // Global resources
     // =============================================================================
     Handle<VkSwapchainKHR>& swapchain();
     std::vector<VkImage>& swapchainImages();
@@ -428,10 +422,10 @@ namespace RTX {
     VkExtent2D& swapchainExtent();
     Handle<VkAccelerationStructureKHR>& blas();
     Handle<VkAccelerationStructureKHR>& tlas();
-    Handle<VkRenderPass>& renderPass();  // FIXED: Now returns ref to ctx.renderPass_
+    Handle<VkRenderPass>& renderPass();
 
     // =============================================================================
-    // RENDERER + FRAME
+    // Renderer entry points
     // =============================================================================
     [[nodiscard]] VulkanRenderer& renderer();
     void initRenderer(int w, int h);
@@ -443,9 +437,8 @@ namespace RTX {
     void buildBLAS(uint64_t vertexBuf, uint64_t indexBuf, uint32_t vertexCount, uint32_t indexCount) noexcept;
     void buildTLAS(const std::vector<std::pair<VkAccelerationStructureKHR, glm::mat4>>& instances) noexcept;
     void cleanupAll() noexcept;
-    void createGlobalRenderPass();  // FIXED: Added declaration
+    void createGlobalRenderPass();
 
-    // stonekey_xor_spirv → MOVED TO .cpp (uses Options::Shader::STONEKEY_1)
     void stonekey_xor_spirv(std::vector<uint32_t>& data, bool encrypt = true);
 
 } // namespace RTX
