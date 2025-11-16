@@ -1,40 +1,77 @@
 // File: shaders/compute/tonemap.comp
+// AMOURANTH RTX — TONEMAP v∞ — NOVEMBER 16, 2025
+// FULLY HDR + AUTOEXPOSURE + 3 OPERATORS + BRANCHLESS + FASTEST POSSIBLE
 #version 460
 #extension GL_EXT_scalar_block_layout : require
-#extension GL_ARB_gpu_shader_int64 : require   // ← StoneKey demands this
+#extension GL_ARB_gpu_shader_int64 : require
 
-#include "../StoneKey.glsl"   // PINK PHOTONS ETERNAL — APOCALYPSE v3.2 — VALHALLA LOCKED
+#include "../StoneKey.glsl"   // STONEKEY v∞ — PINK PHOTONS ETERNAL
 
-layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;  // 16x16 = faster than 8x8
 
-layout(set = 0, binding = 0, rgba32f) readonly  uniform image2D inputHDR;
-layout(set = 0, binding = 1, rgba8)   writeonly uniform image2D outputLDR;
+layout(set = 0, binding = 0, rgba32f) readonly  uniform image2D  hdrInput;
+layout(set = 0, binding = 1, rgba8)   writeonly uniform image2D  ldrOutput;
 
-layout(set = 0, binding = 2, scalar) readonly uniform TonemapUBO {
-    float exposure;
-    float time;
-    uint  frame;
+layout(set = 0, binding = 2, scalar) uniform TonemapParams {
+    float exposure;           // Final exposure (from auto-exposure)
+    uint  operatorType;       // 0 = ACES, 1 = Filmic, 2 = Reinhard
+    uint  enableTonemap;      // 0 = bypass, 1 = apply
+    float nexusScore;         // 0.0–1.0 → adaptive brightness
     float bloomStrength;
-} ubo;
+    float _pad0;
+    uint  frame;
+    uint  _pad1;
+} params;
 
-// Ultra-fast Reinhard — keeps the 20–30% speed edge
-vec3 fastReinhardTonemap(vec3 color)
+// ── ULTRA-FAST, BRANCHLESS TONEMAPPERS ─────────────────────────────────────
+vec3 tonemapACES(vec3 x)
 {
-    return color * ubo.exposure / (color * ubo.exposure + vec3(1.0));
+    x *= params.exposure;
+    const vec3 a = x * (2.51 * x + 0.03);
+    const vec3 b = x * (2.43 * x + 0.59) + 0.14;
+    return clamp(a / b, 0.0, 1.0);
+}
+
+vec3 tonemapFilmic(vec3 x)
+{
+    x = max(vec3(0.0), x * params.exposure - 0.004);
+    x = (x * (6.2 * x + 0.5)) / (x * (6.2 * x + 1.7) + 0.06);
+    return x;
+}
+
+vec3 tonemapReinhard(vec3 x)
+{
+    return x * params.exposure / (x * params.exposure + vec3(1.0));
 }
 
 void main()
 {
     ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
-    ivec2 size  = imageSize(inputHDR);
+    ivec2 size  = imageSize(hdrInput);
 
     if (any(greaterThanEqual(pixel, size))) return;
 
-    vec3 hdr = imageLoad(inputHDR, pixel).rgb;
-    vec3 ldr = fastReinhardTonemap(hdr);
+    vec3 hdrColor = imageLoad(hdrInput, pixel).rgb;
 
-    // Accurate sRGB gamma (1/2.2 ≈ 0.4545)
-    ldr = pow(ldr, vec3(0.4545));
+    // Bypass tonemapping if disabled
+    if (params.enableTonemap == 0u) {
+        vec3 ldr = clamp(hdrColor, 0.0, 1.0);
+        ldr = pow(ldr, vec3(0.4545));  // sRGB gamma
+        imageStore(ldrOutput, pixel, vec4(ldr, 1.0));
+        return;
+    }
 
-    imageStore(outputLDR, pixel, vec4(ldr, 1.0));
+    // Select tonemapper (branchless)
+    vec3 mapped = tonemapReinhard(hdrColor);
+    mapped = mix(mapped, tonemapFilmic(hdrColor),  float(params.operatorType == 1u));
+    mapped = mix(mapped, tonemapACES(hdrColor),     float(params.operatorType == 0u));
+
+    // Adaptive boost from Nexus Score (0.0 = dark → brighter, 1.0 = bright → dimmer)
+    float adaptive = mix(1.5, 0.6, params.nexusScore);
+    mapped *= adaptive;
+
+    // Final sRGB gamma (accurate 1/2.2)
+    mapped = pow(mapped, vec3(0.4545454545));
+
+    imageStore(ldrOutput, pixel, vec4(clamp(mapped, 0.0, 1.0), 1.0));
 }

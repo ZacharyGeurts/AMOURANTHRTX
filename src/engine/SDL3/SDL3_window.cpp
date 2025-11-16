@@ -164,7 +164,7 @@ void toggleFullscreen() noexcept
     bool isCurrentlyFullscreen = (currentFlags & SDL_WINDOW_FULLSCREEN) == 0;
     bool targetFullscreen = !isCurrentlyFullscreen;
 
-    if (SDL_SetWindowFullscreen(window, targetFullscreen) != 0) {  // FIXED: != 0 for failure (0=success)
+    if (SDL_SetWindowFullscreen(window, targetFullscreen) == 0) {  // FIXED: != 0 for failure (0=success)
         const char* fsError = SDL_GetError();
         LOG_ERROR_CAT("SDL3_window", "{}SDL_SetWindowFullscreen failed: {}{}", CRIMSON_MAGENTA, fsError ? fsError : "Unknown error", RESET);
         return;

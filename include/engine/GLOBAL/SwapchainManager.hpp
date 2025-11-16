@@ -219,47 +219,73 @@ inline void SwapchainManager::createImageViews() noexcept {
 }
 
 inline void SwapchainManager::createRenderPass() noexcept {
+    namespace Disp = Options::Display;
+    namespace AE   = Options::AutoExposure;
+
+    VkFormat renderFormat = format_;
+    if (Disp::ENABLE_HDR) {
+        renderFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
+    }
+
     VkAttachmentDescription colorAttachment{};
-    colorAttachment.format         = format_;
+    colorAttachment.format         = renderFormat;
     colorAttachment.samples        = VK_SAMPLE_COUNT_1_BIT;
     colorAttachment.loadOp         = VK_ATTACHMENT_LOAD_OP_CLEAR;
     colorAttachment.storeOp        = VK_ATTACHMENT_STORE_OP_STORE;
     colorAttachment.stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
     colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    colorAttachment.initialLayout  = VK_IMAGE_LAYOUT_UNDEFINED;  // VUID-safe: Matches barrier oldLayout=UNDEFINED or PRESENT_SRC_KHR
+    colorAttachment.initialLayout  = VK_IMAGE_LAYOUT_UNDEFINED;
     colorAttachment.finalLayout    = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 
-    VkAttachmentReference colorRef{};
-    colorRef.attachment = 0;
-    colorRef.layout     = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    VkAttachmentReference colorRef{0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
 
     VkSubpassDescription subpass{};
     subpass.pipelineBindPoint    = VK_PIPELINE_BIND_POINT_GRAPHICS;
     subpass.colorAttachmentCount = 1;
     subpass.pColorAttachments    = &colorRef;
 
-    VkSubpassDependency dependency{};
-    dependency.srcSubpass    = VK_SUBPASS_EXTERNAL;
-    dependency.dstSubpass    = 0;
-    dependency.srcStageMask  = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;  // Added BOTTOM_OF_PIPE for present sync
-    dependency.srcAccessMask = VK_ACCESS_HOST_WRITE_BIT | VK_ACCESS_MEMORY_READ_BIT;  // FIXED: Host/present queue access (VUID-01197 safe)
-    dependency.dstStageMask  = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    std::array<VkSubpassDependency, 2> deps{};
+
+    deps[0] = {
+        .srcSubpass       = VK_SUBPASS_EXTERNAL,
+        .dstSubpass       = 0,
+        .srcStageMask     = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+        .dstStageMask     = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+        .srcAccessMask    = 0,
+        .dstAccessMask    = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+        .dependencyFlags  = VK_DEPENDENCY_BY_REGION_BIT
+    };
+
+    deps[1] = {
+        .srcSubpass       = 0,
+        .dstSubpass       = VK_SUBPASS_EXTERNAL,
+        .srcStageMask     = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+        .dstStageMask     = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+        .srcAccessMask    = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+        .dstAccessMask    = 0,
+        .dependencyFlags  = VK_DEPENDENCY_BY_REGION_BIT
+    };
 
     VkRenderPassCreateInfo rpInfo{VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};
     rpInfo.attachmentCount = 1;
     rpInfo.pAttachments    = &colorAttachment;
     rpInfo.subpassCount    = 1;
     rpInfo.pSubpasses      = &subpass;
-    rpInfo.dependencyCount = 1;
-    rpInfo.pDependencies   = &dependency;
+    rpInfo.dependencyCount = static_cast<uint32_t>(deps.size());
+    rpInfo.pDependencies   = deps.data();
 
     VkRenderPass rp = VK_NULL_HANDLE;
     VK_CHECK(vkCreateRenderPass(device_, &rpInfo, nullptr, &rp),
-             "Failed to create swapchain render pass");
+             "Failed to create HDR + AutoExposure render pass");
 
     renderPass_ = RTX::Handle<VkRenderPass>(rp, device_, vkDestroyRenderPass);
-    LOG_SUCCESS_CAT("SWAPCHAIN", "Classic render pass created — tonemap pipeline now 100% valid (VUID-hardened dependencies)");
+
+    LOG_SUCCESS_CAT("SWAPCHAIN",
+        "AUTOEXPOSURE v∞ | HDR: {} | AE: {} | Format: {} | PINK PHOTONS ASCEND",
+        Disp::ENABLE_HDR ? "ON" : "OFF",
+        AE::ENABLE_AUTO_EXPOSURE ? "ON" : "OFF",
+        renderFormat == VK_FORMAT_R16G16B16A16_SFLOAT ? "R16G16B16A16_SFLOAT" : "B8G8R8A8_SRGB"
+    );
 }
 
 // =============================================================================

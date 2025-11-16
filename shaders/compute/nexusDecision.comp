@@ -1,96 +1,57 @@
+// shaders/compute/nexusDecision.comp
 #version 460
 #extension GL_EXT_shader_image_load_formatted : require
-#extension GL_KHR_shader_subgroup_basic      : require
+#extension GL_KHR_shader_subgroup_basic : require
+#extension GL_ARB_gpu_shader_int64 : require
 
-// ---------------------------------------------------------------------------
-//  Layout – matches VulkanRenderer::updateNexusDescriptors()
-// ---------------------------------------------------------------------------
-layout(set = 0, binding = 0, rgba32f) readonly  uniform image2D  prevAccum;   // previous accumulation
-layout(set = 0, binding = 1, rgba32f) readonly  uniform image2D  currOutput;  // current RT output
-layout(set = 0, binding = 2)          uniform  BufferStats {
+#include "../StoneKey.glsl"
+
+layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
+
+layout(set = 0, binding = 0, rgba32f) readonly  uniform image2D prevFrame;
+layout(set = 0, binding = 1, rgba32f) readonly  uniform image2D currFrame;
+layout(set = 0, binding = 2) uniform Stats {
     uint   hitCount;
     uint   totalRays;
     float  variance;
     float  entropy;
     float  gradMag;
-    float  pad[3];
+    float  _pad[3];
 } stats;
-layout(set = 0, binding = 3, r32f)    writeonly uniform image2D  scoreOut;   // 1x1 score image
 
-// ---------------------------------------------------------------------------
-//  Push-constant block (weights + thresholds + FPS mode)
-// ---------------------------------------------------------------------------
-layout(push_constant) uniform PushConsts {
-    float w_var;      // variance weight
-    float w_ent;      // entropy weight
-    float w_hit;      // hit-rate weight
-    float w_grad;     // gradient weight
-    float w_res;      // resonance-threshold weight
-    uint  fpsTarget;  // 60 or 120
-    float pad[2];
+layout(set = 0, binding = 6, rgba32f) writeonly uniform image2D nexusScore;
+
+layout(push_constant, std430) uniform Push {
+    float w_variance;
+    float w_entropy;
+    float w_hitrates;
+    float w_gradient;
+    float w_resonance;
+    uint  targetFPS;
 } pc;
 
-// ---------------------------------------------------------------------------
-//  Helper: simple reduction over a 16x16 tile
-// ---------------------------------------------------------------------------
 void main()
 {
-    // One invocation per pixel – we only need a single value in the 1x1 score image
-    if (gl_GlobalInvocationID.x != 0 || gl_GlobalInvocationID.y != 0)
-        return;
+    if (gl_GlobalInvocationID.x != 0 || gl_GlobalInvocationID.y != 0) return;
 
-    // ---------------------------------------------------------------
-    // 1. Hit-rate (0-1)
-    // ---------------------------------------------------------------
-    float hitRate = (stats.totalRays > 0)
-                  ? float(stats.hitCount) / float(stats.totalRays)
-                  : 0.0;
+    float hitRate = stats.totalRays > 0 ? float(stats.hitCount) / float(stats.totalRays) : 0.0f;
 
-    // ---------------------------------------------------------------
-    // 2. Normalised variance / entropy / gradient (already in [0,1] range)
-    // ---------------------------------------------------------------
-    float var   = stats.variance;
-    float ent   = stats.entropy;
-    float grad  = stats.gradMag;
+    float w_var = pc.w_variance;
+    float w_ent = pc.w_entropy;
+    float w_hit = pc.w_hitrates;
+    float w_grad = pc.w_gradient;
 
-    // ---------------------------------------------------------------
-    // 3. FPS-AWARE WEIGHT ADAPTATION
-    // ---------------------------------------------------------------
-    float effective_w_var  = pc.w_var;
-    float effective_w_ent  = pc.w_ent;
-    float effective_w_hit  = pc.w_hit;
-    float effective_w_grad = pc.w_grad;
-
-    if (pc.fpsTarget == 120) {
-        // 120 FPS: Prioritize stability & hit-rate → reduce variance/entropy noise
-        effective_w_var  *= 0.7;  // Less sensitive to noise
-        effective_w_ent  *= 0.7;
-        effective_w_hit  *= 1.3;  // More emphasis on ray efficiency
-        effective_w_grad *= 1.1;  // Slightly more edge-aware
+    if (pc.targetFPS >= 120) {
+        w_var *= 0.7f;  w_ent *= 0.7f;  w_hit *= 1.35f;  w_grad *= 1.15f;
     } else {
-        // 60 FPS: Allow more aggressive denoising → trust variance/entropy
-        effective_w_var  *= 1.2;
-        effective_w_ent  *= 1.2;
-        effective_w_hit  *= 0.9;
-        effective_w_grad *= 0.9;
+        w_var *= 1.25f; w_ent *= 1.25f; w_hit *= 0.85f; w_grad *= 0.90f;
     }
 
-    // ---------------------------------------------------------------
-    // 4. Combine with adapted weights
-    // ---------------------------------------------------------------
-    float rawScore = effective_w_var  * var
-                   + effective_w_ent  * ent
-                   + effective_w_hit  * hitRate
-                   + effective_w_grad * grad;
+    float score = clamp(w_var * stats.variance +
+                        w_ent * stats.entropy +
+                        w_hit * hitRate +
+                        w_grad * stats.gradMag, 0.0f, 1.0f);
 
-    // ---------------------------------------------------------------
-    // 5. Resonance threshold (optional — can be used in host code)
-    // ---------------------------------------------------------------
-    float resonance = pc.w_res;  // Pass-through for host-side logic
-
-    // ---------------------------------------------------------------
-    // 6. Clamp & write to 1x1 score image
-    // ---------------------------------------------------------------
-    float finalScore = clamp(rawScore, 0.0, 1.0);
-    imageStore(scoreOut, ivec2(0,0), vec4(finalScore, resonance, float(pc.fpsTarget), 0.0));
+    imageStore(nexusScore, ivec2(0,0),
+               vec4(score, pc.w_resonance, float(pc.targetFPS)/60.0f, 0.0f));
 }

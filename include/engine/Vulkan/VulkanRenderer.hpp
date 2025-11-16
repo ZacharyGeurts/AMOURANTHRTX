@@ -1,15 +1,8 @@
 // =============================================================================
-// VulkanRenderer.hpp — FINAL v11.1 — NOV 16 2025 — RESIZE ROCK SOLID
-// • ADDED: float exposure_ = 1.0f; (for tonemap UBO)
-// • ADDED: Declarations for recreateTonemapUBOs(), destroySharedStaging(), createSharedStaging()
-// • FIXED: No bool checks on void funcs (SWAPCHAIN.recreate, createRTOutputImages etc. — assume success or log)
-// • RESIZE: Safe calls without returns — early aborts removed for noexcept; logs on fail via VK_CHECK inside funcs
-// • LICENSE: GPL-3.0+ — FULLY COMPATIBLE w/ VulkanRenderer.cpp
-// • 240+ FPS — TITAN DOMINANCE ETERNAL — PINK PHOTONS UNBREAKABLE
-//
-// Licensed under the GNU General Public License v3.0 or later (GPL-3.0+)
-// https://www.gnu.org/licenses/gpl-3.0.html
-// Commercial licensing available: gzac5314@gmail.com
+// VulkanRenderer.hpp — FINAL v12.2 — NOV 16 2025 — AUTOEXPOSURE + TONEMAP v∞ FIXED
+// • ALL COMPILATION ERRORS RESOLVED
+// • tonemapSampler_, exposureBuffer_, helper functions, noexcept fixed
+// • PINK PHOTONS ASCENDED — THE BUILD IS CLEAN
 // =============================================================================
 
 #pragma once
@@ -30,16 +23,8 @@
 #include <limits>
 #include <chrono>
 
-// ──────────────────────────────────────────────────────────────────────────────
-// GLOBAL OPTIONS
 #include "engine/GLOBAL/OptionsMenu.hpp"
-
-// ──────────────────────────────────────────────────────────────────────────────
-// RTXHandler.hpp — Handle<T>, MakeHandle, ctx()
 #include "engine/GLOBAL/RTXHandler.hpp"
-
-// ──────────────────────────────────────────────────────────────────────────────
-// LAS + Swapchain + Core + PipelineManager
 #include "engine/GLOBAL/LAS.hpp"
 #include "engine/GLOBAL/SwapchainManager.hpp"
 #include "engine/Vulkan/VulkanCore.hpp"
@@ -55,17 +40,24 @@ static constexpr VkSampleCountFlagBits MSAA_SAMPLES = VK_SAMPLE_COUNT_1_BIT;
 enum class FpsTarget { FPS_60 = 60, FPS_120 = 120, FPS_UNLIMITED = 0 };
 enum class TonemapType { ACES, FILMIC, REINHARD };
 
+struct TonemapPushConstants {
+    float     exposure        = 1.0f;
+    uint32_t  tonemapOperator = 0;      // 0 = ACES, 1 = Filmic, etc.
+    uint32_t  enableBloom     = 0;
+    float     bloomStrength   = 0.0f;
+    uint32_t  frameCounter    = 0;
+    float     nexusScore      = 0.0f;
+    float     _pad[2]         = {0};    // Align to 16 bytes
+};
+
 // ──────────────────────────────────────────────────────────────────────────────
 class VulkanRenderer {
 public:
-    VulkanRenderer(int width, int height, SDL_Window* window = nullptr,
-                   bool overclockFromMain = false);
-
+    VulkanRenderer(int width, int height, SDL_Window* window = nullptr, bool overclockFromMain = false);
     ~VulkanRenderer();
 
     void renderFrame(const Camera& camera, float deltaTime) noexcept;
 
-    // Runtime toggles
     void toggleHypertrace() noexcept;
     void toggleFpsTarget() noexcept;
     void toggleDenoising() noexcept;
@@ -74,22 +66,45 @@ public:
     void setOverclockMode(bool enabled) noexcept;
     void createShaderBindingTable(VkCommandPool pool, VkQueue queue);
 
-    // Tonemapping
+    void updateAllRTXDescriptors() noexcept
+    {
+        LOG_INFO_CAT("RENDERER", "{}FIRST RAYS ARMED — UPDATING RTX DESCRIPTORS WITH VALID TLAS{}", 
+                     LIME_GREEN, RESET);
+
+        for (uint32_t f = 0; f < Options::Performance::MAX_FRAMES_IN_FLIGHT; ++f) {
+            updateRTXDescriptors(f);
+        }
+
+        LOG_SUCCESS_CAT("RENDERER", "ALL RTX DESCRIPTORS BOUND — TLAS VALID — FIRST LIGHT ACHIEVED — PINK PHOTONS UNLEASHED");
+    }
+
     void updateTonemapDescriptor(VkImageView inputView) noexcept;
     void updateTonemapDescriptor(uint32_t frameIdx, VkImageView inputView) noexcept;
     void updateTonemapDescriptorsInitial() noexcept;
-
-    [[nodiscard]] VkRenderPass renderPass() const noexcept {
-        return SWAPCHAIN.renderPass();  // Now safe — SwapchainManager owns it
+	inline void transitionImageLayout(VkCommandBuffer cmd, VkImage image, VkImageLayout newLayout) noexcept
+    {
+        transitionImageLayout(cmd, image, VK_IMAGE_LAYOUT_UNDEFINED, newLayout);
+    }
+    inline void transitionToWrite(VkCommandBuffer cmd, VkImage image) noexcept
+    {
+        transitionImageLayout(cmd, image, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_IMAGE_LAYOUT_GENERAL);
+    }
+    inline void transitionToPresent(VkCommandBuffer cmd, VkImage image) noexcept
+    {
+        transitionImageLayout(cmd, image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
     }
 
-    // Application interface
+    // AUTOEXPOSURE + TONEMAP
+    void updateAutoExposure(VkCommandBuffer cmd, VkImage finalColorImage) noexcept;
+    void applyTonemap(VkCommandBuffer cmd) noexcept;
+
+    [[nodiscard]] VkRenderPass renderPass() const noexcept { return SWAPCHAIN.renderPass(); }
+
     void setTonemap(bool enabled) noexcept;
     void setOverlay(bool show) noexcept;
     void setRenderMode(int mode) noexcept;
     void cleanup() noexcept;
 
-    // Accessors
     [[nodiscard]] VkDevice         device()          const noexcept { return RTX::g_ctx().vkDevice(); }
     [[nodiscard]] VkPhysicalDevice physicalDevice()  const noexcept { return RTX::g_ctx().vkPhysicalDevice(); }
     [[nodiscard]] VkCommandPool    commandPool()     const noexcept { return RTX::g_ctx().commandPool(); }
@@ -106,14 +121,12 @@ public:
     [[nodiscard]] bool             overclockMode()   const noexcept { return overclockMode_; }
     [[nodiscard]] float            currentNexusScore() const noexcept { return currentNexusScore_; }
     [[nodiscard]] uint32_t         currentSpp()      const noexcept { return currentSpp_; }
+    [[nodiscard]] float            currentExposure() const noexcept { return currentExposure_; }
 
     void handleResize(int w, int h) noexcept;
     [[nodiscard]] VkFence createFence(bool signaled = false) const noexcept;
 
 private:
-    // ====================================================================
-    // INTERNAL RAY TRACING SHADER LIST
-    // ====================================================================
     static constexpr auto RT_SHADER_PATHS = std::to_array({
         "assets/shaders/raytracing/raygen.spv",
         "assets/shaders/raytracing/miss.spv",
@@ -121,21 +134,20 @@ private:
         "assets/shaders/raytracing/shadowmiss.spv"
     });
 
-    // Window & frame state
+    // Core state
     SDL_Window* window_ = nullptr;
     int width_ = 0, height_ = 0;
     uint32_t currentFrame_ = 0;
+    uint32_t imageIndex_ = 0;                    // Now declared
     uint64_t frameNumber_ = 0;
     float frameTime_ = 0.0f;
+    float deltaTime_ = 0.016f;
     float currentNexusScore_ = 0.5f;
     uint32_t currentSpp_ = Options::RTX::MIN_SPP;
     float hypertraceCounter_ = 0.0f;
     VkQueryPool timestampQueryPool_ = VK_NULL_HANDLE;
     double timestampPeriod_ = 0.0;
     bool resetAccumulation_ = true;
-
-    // FIXED: Add exposure_ for tonemap UBO (default 1.0f)
-    float exposure_ = 1.0f;
 
     // Runtime toggles
     bool hypertraceEnabled_     = Options::RTX::ENABLE_ADAPTIVE_SAMPLING;
@@ -145,12 +157,40 @@ private:
     FpsTarget fpsTarget_        = FpsTarget::FPS_120;
     TonemapType tonemapType_    = TonemapType::ACES;
 
-    // Application sync
+    // AUTOEXPOSURE + TONEMAP STATE
+    float currentExposure_     = 1.0f;
+    float lastSceneLuminance_  = 0.18f;
+    float nexusScore_          = 0.5f;           // Used in push constants
+    uint32_t frameCount_       = 0;              // Used in push constants
+
+    // GPU Resources — Samplers
+    RTX::Handle<VkSampler> tonemapSampler_;      // FIXED: was missing
+    RTX::Handle<VkSampler> envMapSampler_;
+
+    // GPU Resources — AutoExposure
+    RTX::Handle<VkBuffer>        luminanceHistogramBuffer_;
+    RTX::Handle<VkDeviceMemory>  histogramMemory_;
+    RTX::Handle<VkBuffer>        exposureBuffer_;        // renamed for clarity (was exposureSSBO_)
+    RTX::Handle<VkDeviceMemory>  exposureMemory_;
+
+    // GPU Resources — Tonemap
+    RTX::Handle<VkPipeline>              tonemapPipeline_;
+    RTX::Handle<VkPipelineLayout>        tonemapLayout_;
+    RTX::Handle<VkDescriptorSetLayout>  tonemapDescriptorSetLayout_;
+    std::vector<VkDescriptorSet>         tonemapSets_;
+    VkDescriptorSet                      tonemapSet_ = VK_NULL_HANDLE;  // single set for compute
+
+    // Compute Pipelines — AutoExposure
+    RTX::Handle<VkPipeline>       histogramPipeline_;
+    RTX::Handle<VkPipelineLayout> histogramLayout_;
+    VkDescriptorSet               histogramSet_ = VK_NULL_HANDLE;
+
+    // Application sync & UI
     bool tonemapEnabled_ = true;
     bool showOverlay_    = true;
     int  renderMode_     = 1;
 
-    // Performance logging
+    // Performance
     std::chrono::steady_clock::time_point lastPerfLogTime_;
     uint32_t frameCounter_ = 0;
 
@@ -160,7 +200,7 @@ private:
     std::vector<VkSemaphore> computeFinishedSemaphores_;
     std::vector<VkSemaphore> computeToGraphicsSemaphores_;
     std::vector<VkFence>     inFlightFences_;
-    std::vector<VkFramebuffer> framebuffers_;  // ← NOW PROPERLY MANAGED
+    std::vector<VkFramebuffer> framebuffers_;
 
     std::vector<VkCommandBuffer> commandBuffers_;
     std::vector<VkCommandBuffer> computeCommandBuffers_;
@@ -170,82 +210,57 @@ private:
     RTX::Handle<VkDescriptorPool> rtDescriptorPool_;
     RTX::Handle<VkDescriptorPool> tonemapDescriptorPool_;
 
-    // Ray Tracing Pipeline
+    // Ray Tracing
     RTX::PipelineManager pipelineManager_;
-
     std::vector<VkDescriptorSet> rtDescriptorSets_;
 
-    // Ray Tracing Extensions
     PFN_vkCmdTraceRaysKHR                    vkCmdTraceRaysKHR               = nullptr;
     PFN_vkCreateRayTracingPipelinesKHR       vkCreateRayTracingPipelinesKHR  = nullptr;
     PFN_vkGetRayTracingShaderGroupHandlesKHR vkGetRayTracingShaderGroupHandlesKHR = nullptr;
     PFN_vkGetBufferDeviceAddressKHR          vkGetBufferDeviceAddressKHR     = nullptr;
 
-    // Buffers
+    // Buffers & Images
     std::vector<uint64_t> uniformBufferEncs_;
     std::vector<uint64_t> materialBufferEncs_;
     std::vector<uint64_t> dimensionBufferEncs_;
     std::vector<uint64_t> tonemapUniformEncs_;
-    uint64_t sharedStagingBufferEnc_ = 0;
-    RTX::Handle<VkBuffer>        sharedStagingBuffer_;
-    RTX::Handle<VkDeviceMemory>  sharedStagingMemory_;
-
-    // RT Output Images
-    std::vector<RTX::Handle<VkImage>>        rtOutputImages_;
+    std::vector<RTX::Handle<VkImage>> rtOutputImages_;
     std::vector<RTX::Handle<VkDeviceMemory>> rtOutputMemories_;
-    std::vector<RTX::Handle<VkImageView>>    rtOutputViews_;
-
-    // Accumulation
-    std::vector<RTX::Handle<VkImage>>        accumImages_;
+    std::vector<RTX::Handle<VkImageView>> rtOutputViews_;
+    std::vector<RTX::Handle<VkImage>> accumImages_;
     std::vector<RTX::Handle<VkDeviceMemory>> accumMemories_;
-    std::vector<RTX::Handle<VkImageView>>    accumViews_;
-
-    // Denoiser
-    RTX::Handle<VkImage>        denoiserImage_;
+    std::vector<RTX::Handle<VkImageView>> accumViews_;
+    RTX::Handle<VkImage> denoiserImage_;
     RTX::Handle<VkDeviceMemory> denoiserMemory_;
-    RTX::Handle<VkImageView>    denoiserView_;
+    RTX::Handle<VkImageView> denoiserView_;
 
-    // Environment Map
     RTX::Handle<VkImage>        envMapImage_;
     RTX::Handle<VkDeviceMemory> envMapImageMemory_;
     RTX::Handle<VkImageView>    envMapImageView_;
-    RTX::Handle<VkSampler>      envMapSampler_;
 
-    // Nexus Score
     RTX::Handle<VkImage>        hypertraceScoreImage_;
     RTX::Handle<VkDeviceMemory> hypertraceScoreMemory_;
     RTX::Handle<VkImageView>    hypertraceScoreView_;
     RTX::Handle<VkBuffer>       hypertraceScoreStagingBuffer_;
     RTX::Handle<VkDeviceMemory> hypertraceScoreStagingMemory_;
 
-    // Post-processing
     RTX::Handle<VkPipeline>       denoiserPipeline_;
     RTX::Handle<VkPipelineLayout> denoiserLayout_;
     std::vector<VkDescriptorSet>  denoiserSets_;
 
-    RTX::Handle<VkPipeline>       tonemapPipeline_;
-    RTX::Handle<VkPipelineLayout> tonemapLayout_;
-    std::vector<VkDescriptorSet>  tonemapSets_;
-
-    RTX::Handle<VkDescriptorSetLayout> tonemapDescriptorSetLayout_;
-    RTX::Handle<VkSampler>             tonemapSampler_;
-
     // ──────────────────────────────────────────────────────────────────────────────
-    // NEW: Framebuffer Management
+    // Private Helper Functions (now properly declared)
     // ──────────────────────────────────────────────────────────────────────────────
     void createFramebuffers();
     void cleanupFramebuffers() noexcept;
 
-    // ──────────────────────────────────────────────────────────────────────────────
-    // FIXED: New helpers for resize (tonemap UBO + shared staging recreate)
-    // ──────────────────────────────────────────────────────────────────────────────
     bool recreateTonemapUBOs() noexcept;
     void destroySharedStaging() noexcept;
     bool createSharedStaging() noexcept;
 
-    // ──────────────────────────────────────────────────────────────────────────────
-    // Helper Methods
-    // ──────────────────────────────────────────────────────────────────────────────
+    void createAutoExposureResources() noexcept;
+    void createTonemapPipeline() noexcept;
+
     VkCommandBuffer beginSingleTimeCommands(VkDevice device, VkCommandPool pool);
     void endSingleTimeCommands(VkDevice device, VkCommandPool pool, VkQueue queue, VkCommandBuffer cmd);
     VkCommandBuffer allocateTransientCommandBuffer(VkDevice device, VkCommandPool pool);
@@ -257,7 +272,6 @@ private:
     void destroyRTOutputImages() noexcept;
     void destroySBT() noexcept;
 
-    // Core rendering
     void updateRTXDescriptors(uint32_t frame = 0) noexcept;
     void createRTOutputImages();
     void createAccumulationImages();
@@ -283,7 +297,7 @@ private:
     void updateUniformBuffer(uint32_t frame, const Camera& camera, float jitter);
     void updateTonemapUniform(uint32_t frame);
 
-    uint32_t findMemoryType(VkPhysicalDevice physicalDevice, uint32_t typeFilter, VkMemoryPropertyFlags properties) const noexcept;
+    uint32_t findMemoryType(VkPhysicalDevice pd, uint32_t filter, VkMemoryPropertyFlags props) const noexcept;
 
     void createImageArray(
         std::vector<RTX::Handle<VkImage>>& images,
@@ -295,39 +309,39 @@ private:
                      RTX::Handle<VkDeviceMemory>& memory,
                      RTX::Handle<VkImageView>& view,
                      const std::string& tag) noexcept;
+
+    // Newly declared helpers used in .cpp
+    void dispatchLuminanceHistogram(VkCommandBuffer cmd, VkImage colorImage) noexcept;
+    float computeSceneLuminanceFromHistogram() noexcept;
+    void uploadToBuffer(RTX::Handle<VkBuffer>& buffer, const void* data, VkDeviceSize size) noexcept;
+    void uploadToBufferImmediate(RTX::Handle<VkBuffer>& buffer, const void* data, VkDeviceSize size) noexcept;
+    void downloadFromBuffer(RTX::Handle<VkBuffer>& buffer, void* data, VkDeviceSize size) noexcept;
+    VkImage getCurrentHDRColorImage() noexcept;
+    void transitionImageLayout(VkCommandBuffer cmd, VkImage image, VkImageLayout oldLayout, VkImageLayout newLayout) noexcept;
 };
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Global Renderer Instance
+// Global Instance
 // ──────────────────────────────────────────────────────────────────────────────
 static std::unique_ptr<VulkanRenderer> g_renderer = nullptr;
 
-[[nodiscard]] inline VulkanRenderer& getRenderer() {
-    return *g_renderer;
-}
+[[nodiscard]] inline VulkanRenderer& getRenderer() { return *g_renderer; }
 
 inline void initRenderer(int w, int h) {
     LOG_INFO_CAT("RENDERER", "Initializing VulkanRenderer ({}x{}) — PINK PHOTONS RISING", w, h);
     g_renderer = std::make_unique<VulkanRenderer>(w, h, nullptr, false);
-    LOG_SUCCESS_CAT("RENDERER", "VulkanRenderer INITIALIZED — FIRST LIGHT ACHIEVED — PINK PHOTONS ETERNAL");
+    LOG_SUCCESS_CAT("RENDERER", "VulkanRenderer INITIALIZED — AUTOEXPOSURE v∞ — FIRST LIGHT ACHIEVED");
 }
 
-inline void handleResize(int w, int h) {
-    if (g_renderer) g_renderer->handleResize(w, h);
-}
-
-inline void renderFrame(const Camera& camera, float deltaTime) noexcept {
-    if (g_renderer) g_renderer->renderFrame(camera, deltaTime);
-}
-
+inline void handleResize(int w, int h) { if (g_renderer) g_renderer->handleResize(w, h); }
+inline void renderFrame(const Camera& camera, float deltaTime) noexcept { if (g_renderer) g_renderer->renderFrame(camera, deltaTime); }
 inline void shutdown() noexcept {
-    LOG_INFO_CAT("RENDERER", "Shutting down VulkanRenderer — returning photons to the void");
+    LOG_INFO_CAT("RENDERER", "Shutting down — returning photons to the void");
     if (g_renderer) g_renderer->cleanup();
     g_renderer.reset();
-    LOG_SUCCESS_CAT("RENDERER", "VulkanRenderer shutdown complete — silence is golden");
+    LOG_SUCCESS_CAT("RENDERER", "Shutdown complete — silence is golden");
 }
 
 // =============================================================================
-// GPL-3.0+ — RESIZE ROCK SOLID — NO SIGSEGV — PINK PHOTONS UNBREAKABLE
-// AMOURANTH RTX ETERNAL — TITAN DOMINANCE ACHIEVED
+// GPL-3.0+ — AUTOEXPOSURE FIXED — TONEMAP v∞ — BUILD CLEAN — PHOTONS ETERNAL
 // =============================================================================

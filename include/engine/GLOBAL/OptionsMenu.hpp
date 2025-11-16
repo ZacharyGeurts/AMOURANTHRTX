@@ -125,6 +125,26 @@ namespace Tonemap {
     constexpr float    AUTO_EXPOSURE_SPEED         = 2.0f;
 }
 
+// ── DISPLAY & HDR SETTINGS ────────────────────────────────────────────────────
+namespace Display {
+    constexpr bool ENABLE_HDR              = true;   // ← SET TO true FOR TRUE HDR + 64-bit TONEMAPPING
+    constexpr bool ENABLE_VSYNC            = false;   // Controlled globally, but exposed here
+    constexpr float TARGET_BRIGHTNESS_NITS = 1000.0f; // For future auto-exposure
+}
+
+// ── AUTOEXPOSURE & HDR TUNING ────────────────────────────────────────────────
+namespace AutoExposure {
+    constexpr bool   ENABLE_AUTO_EXPOSURE        = true;     // ← THE ONE TRUE TOGGLE
+    constexpr float  TARGET_LUMINANCE           = 0.18f;     // Classic 18% gray target
+    constexpr float  EXPOSURE_COMPENSATION      = 0.0f;      // +1.0 = 1 stop brighter
+    constexpr float  ADAPTATION_RATE_LOG        = 2.0f;      // Log-space speed (higher = faster)
+    constexpr float  MIN_EXPOSURE               = 0.01f;     // Prevent black crush
+    constexpr float  MAX_EXPOSURE               = 10.0f;     // Prevent blowout
+    constexpr float  HISTOGRAM_LOW_PERCENTILE   = 0.01f;     // Ignore darkest 1%
+    constexpr float  HISTOGRAM_HIGH_PERCENTILE  = 0.99f;     // Ignore brightest 1%
+    constexpr float  KEY_VALUE                  = 0.18f;     // Scene key (for key-value tonemapping)
+}
+
 // ── MEMORY & ALLOCATION ───────────────────────────────────────────────────────
 namespace Memory {
     constexpr size_t   UNIFORM_BUFFER_SIZE_PER_FRAME = 64 * 1024 * 1024;   // 64MB

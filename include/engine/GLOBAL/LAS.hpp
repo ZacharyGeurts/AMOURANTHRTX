@@ -727,8 +727,8 @@ private:
             if (fence != VK_NULL_HANDLE) vkDestroyFence(dev, fence, nullptr);
             if (submitRes == VK_ERROR_DEVICE_LOST) {
                 LOG_ERROR_CAT("LAS", "Device lost during RT submit — recreate device/context");
-                LOG_ERROR_CAT("LAS", "%sVK_ERROR_DEVICE_LOST during RT acceleration structure submit — GPU has abandoned us. The void claims another. Terminating immediately.%s", 
-              OBSIDIAN_BLACK, RESET);
+                LOG_ERROR_CAT("LAS", "VK_ERROR_DEVICE_LOST during RT acceleration structure submit — GPU has abandoned us. The void claims another. Terminating immediately.", 
+              INVIS_BLACK, RESET);
 			  std::terminate();
             }
             VK_CHECK(submitRes, "Submit RT cmd (VUID-vkQueueSubmit-pSubmits-00007)");
@@ -739,8 +739,8 @@ private:
         if (waitRes != VK_SUCCESS) {
             if (waitRes == VK_ERROR_DEVICE_LOST) {
                 LOG_ERROR_CAT("LAS", "Device lost during RT fence wait — recreate device/context");
-                LOG_ERROR_CAT("LAS", "%sVK_ERROR_DEVICE_LOST while waiting on RT fence — driver bled out, GPU is a corpse, the pipeline is ash. There is no recovery. Terminating.%s", 
-              OBSIDIAN_BLACK, RESET);
+                LOG_ERROR_CAT("LAS", "VK_ERROR_DEVICE_LOST while waiting on RT fence — driver bled out, GPU is a corpse, the pipeline is ash. There is no recovery. Terminating.", 
+              INVIS_BLACK, RESET);
 			  std::terminate();
             }
             VK_CHECK(waitRes, "Wait for RT fence (VUID-vkWaitForFences-fenceCount-00064)");
