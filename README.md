@@ -1,6 +1,7 @@
 Currently compiles and reaches render loop. Much more work needed yet.  
 I work fast but slow. Rather than rendering fast and working backwards HDR and features come with.    
 The goal is a fast as pink photons SDL3 RTX engine that is ready for you, the developer.  
+Our defaults are power. 10bit HDR forced on if you have it. No remorse :D  
 Logging is extensive with trace, debug, info, etc.  
 
 AMOURANTH RTX © 2025 by Zachary Geurts gzac5314@gmail.com is licensed under GPL v3.0 or higher   
