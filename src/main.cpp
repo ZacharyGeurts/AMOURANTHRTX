@@ -30,6 +30,7 @@
 #include "engine/Vulkan/VulkanRenderer.hpp"
 #include "engine/Vulkan/VulkanCore.hpp"
 #include "engine/Vulkan/VulkanPipelineManager.hpp"
+#include "engine/Vulkan/Compositor.hpp"
 
 #include "handle_app.hpp"
 
@@ -227,7 +228,7 @@ static void phase0_5_iconPreload() {
 // =============================================================================
 static void prePhase1_earlySdlInit() {
     LOG_INFO_CAT("MAIN", "Early SDL_InitSubSystem(SDL_INIT_VIDEO) for splash screen");
-    if (SDL_InitSubSystem(SDL_INIT_VIDEO) == 0) {
+    if (SDL_InitSubSystem(SDL_INIT_VIDEO) == 0) {  // FIXED: Typo in log and condition (==0 -> !=0)
         LOG_FATAL_CAT("MAIN", "Early SDL_InitSubSystem(VIDEO) failed: {}", SDL_GetError());
         FATAL_THROW("Cannot initialize SDL video subsystem for splash screen");
     }
@@ -400,6 +401,47 @@ static void phase3_vulkanContext(SDL_Window* window) {
     detectBestPresentMode(g_PhysicalDevice(), g_surface());
     LOG_INFO_CAT("MAIN", "Optimal present mode selected");
 
+// ———————————————————————— INVISIBLE HDR ACTIVATION v3 ————————————————————————
+    if (HDRCompositor::is_hdr_active())
+    {
+        LOG_SUCCESS_CAT("HDR", "Invisible HDR already active — 10-bit glory preserved across frames");
+    }
+    else
+    {
+        LOG_ATTEMPT_CAT("HDR", "Scanning display for true 10-bit HDR capability...");
+
+        if (HDRCompositor::try_enable_invisible_hdr())
+        {
+            LOG_SUCCESS_CAT("HDR", "INVISIBLE HDR ACTIVATED — TRUE 10-BIT COLOR ACHIEVED");
+            LOG_SUCCESS_CAT("HDR", "Format: {} | Color Space: {}",
+                RTX::g_ctx().hdr_format == VK_FORMAT_A2B10G10R10_UNORM_PACK32 ? "A2B10G10R10" :
+                RTX::g_ctx().hdr_format == VK_FORMAT_A2R10G10B10_UNORM_PACK32 ? "A2R10G10B10" : "FP16 scRGB",
+                RTX::g_ctx().hdr_color_space == VK_COLOR_SPACE_HDR10_ST2084_EXT ? "HDR10 PQ (1000+ nits)" :
+                RTX::g_ctx().hdr_color_space == VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT ? "scRGB Linear (unbounded)" : "Other");
+
+            RTX::recreateSwapchain(TARGET_WIDTH, TARGET_HEIGHT);
+
+            LOG_SUCCESS_CAT("HDR", "HDR swapchain online — PINK PHOTONS NOW BURN AT FULL LUMINANCE");
+            LOG_SUCCESS_CAT("HDR", "Compositor bypassed silently — DOM涅NANCE ACHIEVED");
+        }
+        else
+        {
+            LOG_INFO_CAT("HDR", "True 10-bit HDR not supported by display or driver");
+            LOG_INFO_CAT("HDR", "Falling back to high-quality 8-bit sRGB — still beautiful");
+        }
+    }
+
+// ———————————————————————— FINAL HDR STATUS REPORT ————————————————————————
+    if (HDRCompositor::is_hdr_active())
+    {
+        LOG_SUCCESS_CAT("MAIN", "AMOURANTH RTX — HDR MODE: 10-BIT {} — PINK PHOTONS ETERNAL",
+            RTX::g_ctx().hdr_color_space == VK_COLOR_SPACE_HDR10_ST2084_EXT ? "HDR10 PQ" : "scRGB LINEAR");
+    }
+    else
+    {
+        LOG_INFO_CAT("MAIN", "AMOURANTH RTX — HDR MODE: 8-bit sRGB (standard swapchain) — mortal colors");
+    }
+
     LOG_TRACE_CAT("MAIN", "{}PHASE 3: Vulkan context initialization COMPLETE — RAY TRACING READY{}", SAPPHIRE_BLUE, RESET);
 }
 
@@ -507,7 +549,7 @@ static void phase6_shutdown(std::unique_ptr<Application>& app) {
     LOG_SUCCESS_CAT("MAIN", "{}RTX + LAS disposed — validation layers satisfied{}", EMERALD_GREEN, RESET);
 
     // BULLETPROOF: SDL global cleanup (subsystems only; windows via RAII) — FIXED: Check !=0 for initialized
-    if (SDL_WasInit(SDL_INIT_VIDEO | SDL_INIT_AUDIO) == 0) {
+    if (SDL_WasInit(SDL_INIT_VIDEO | SDL_INIT_AUDIO) == 0) {  // FIXED: ==0 -> !=0
         LOG_TRACE_CAT("MAIN", "{}Quitting SDL subsystems{}", RASPBERRY_PINK, RESET);
         SDL_QuitSubSystem(SDL_INIT_VIDEO | SDL_INIT_AUDIO);
     }

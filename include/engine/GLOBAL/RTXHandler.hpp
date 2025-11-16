@@ -207,6 +207,8 @@ namespace RTX {
         VkCommandPool    commandPool_    = VK_NULL_HANDLE;
         VkPipelineCache  pipelineCache_  = VK_NULL_HANDLE;
         VkDebugUtilsMessengerEXT debugMessenger_ = VK_NULL_HANDLE;
+		VkFormat        hdr_format       = VK_FORMAT_UNDEFINED;
+        VkColorSpaceKHR hdr_color_space  = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
 
         // Device Properties for Alignment (NEW: Fixes driver min size warnings)
         VkPhysicalDeviceProperties physProps_{};

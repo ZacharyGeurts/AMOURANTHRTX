@@ -1846,185 +1846,174 @@ void VulkanRenderer::updateRTXDescriptors(uint32_t frame) noexcept
     VkDescriptorSet set = rtDescriptorSets_[frame % rtDescriptorSets_.size()];
     VkDevice device = RTX::g_ctx().device();
 
-    // ── ONE TRUE WRITE ARRAY — NO GHOSTS, NO DANGLING pNext ─────────────────────
-    VkWriteDescriptorSet writes[8] = {};
-    VkDescriptorImageInfo imageInfos[6] = {};
-    VkDescriptorBufferInfo bufferInfos[4] = {};
-    
-    uint32_t writeCount = 0;
-    uint32_t imgIdx = 0;
-    uint32_t bufIdx = 0;
+    std::vector<VkWriteDescriptorSet> writes;
+    std::vector<VkDescriptorImageInfo> imageInfos;
+    std::vector<VkDescriptorBufferInfo> bufferInfos;
+    imageInfos.reserve(4);  // Max images: 1(RT)+1(accum)+1(env)+1(nexus)
+    bufferInfos.reserve(3); // UBO + 2 SSBOs
 
-// ── BINDING 0: TLAS — FINAL, UNBREAKABLE, SPEC-COMPLIANT VERSION ─────────────
-{
-    VkAccelerationStructureKHR tlas = RTX::LAS::get().getTLAS();
+// ── BINDING 0: TLAS ─────────────
+    {
+        VkAccelerationStructureKHR tlas = RTX::LAS::get().getTLAS();
+        if (tlas != VK_NULL_HANDLE) {
+            VkWriteDescriptorSetAccelerationStructureKHR asInfo = {
+                .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR,
+                .accelerationStructureCount = 1,
+                .pAccelerationStructures = &tlas
+            };
 
-    // CRITICAL: ONLY write the binding if TLAS is actually valid
-    if (tlas != VK_NULL_HANDLE) {
-        VkWriteDescriptorSetAccelerationStructureKHR asInfo = {
-            .sType                      = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR,
-            .accelerationStructureCount = 1,
-            .pAccelerationStructures    = &tlas
-        };
-
-        writes[writeCount++] = {
-            .sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-            .pNext           = &asInfo,
-            .dstSet          = set,
-            .dstBinding      = 0,
-            .descriptorCount = 1,
-            .descriptorType  = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR
-        };
-
-        LOG_TRACE_CAT("RENDERER", "TLAS bound successfully — handle=0x{:x}", (uint64_t)tlas);
-    } else {
-        // DO NOT WRITE THE BINDING AT ALL
-        // Vulkan will retain the previous (undefined) content — which is fine
-        // The shader will see garbage only if used before first valid bind
-        LOG_TRACE_CAT("RENDERER", "TLAS not ready — skipping binding 0 (safe)");
+            VkWriteDescriptorSet write = {
+                .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                .pNext = &asInfo,
+                .dstSet = set,
+                .dstBinding = 0,
+                .dstArrayElement = 0,
+                .descriptorCount = 1,
+                .descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR
+            };
+            writes.push_back(write);
+            LOG_TRACE_CAT("RENDERER", "TLAS bound — handle=0x{:x}", (uint64_t)tlas);
+        }
     }
-}
 
-    // ── BINDING 1: RT Output (storage image) ───────────────────────────────────
+    // ── BINDING 1: RT Output ───────
     {
         VkImageView view = rtOutputViews_.empty() ? VK_NULL_HANDLE : *rtOutputViews_[frame % rtOutputViews_.size()];
-        imageInfos[imgIdx] = { .imageView = view, .imageLayout = VK_IMAGE_LAYOUT_GENERAL };
-
-        writes[writeCount] = {
-            .sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-            .dstSet          = set,
-            .dstBinding      = 1,
-            .descriptorCount = 1,
-            .descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-            .pImageInfo      = &imageInfos[imgIdx++]
-        };
-        ++writeCount;
+        if (view != VK_NULL_HANDLE) {
+            imageInfos.push_back({ .imageView = view, .imageLayout = VK_IMAGE_LAYOUT_GENERAL });
+            VkWriteDescriptorSet write = {
+                .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                .dstSet = set,
+                .dstBinding = 1,
+                .dstArrayElement = 0,  // FIXED: 0 (count=1)
+                .descriptorCount = 1,
+                .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                .pImageInfo = &imageInfos.back()
+            };
+            writes.push_back(write);
+        }
     }
 
-    // ── BINDING 2: Accumulation (storage image) ────────────────────────────────
+    // ── BINDING 2: Accumulation ───
     {
         VkImageView view = (!Options::RTX::ENABLE_ACCUMULATION || accumViews_.empty())
                          ? VK_NULL_HANDLE
                          : *accumViews_[frame % accumViews_.size()];
-
-        imageInfos[imgIdx] = { .imageView = view, .imageLayout = VK_IMAGE_LAYOUT_GENERAL };
-
-        writes[writeCount] = {
-            .sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-            .dstSet          = set,
-            .dstBinding      = 2,
-            .descriptorCount = 1,
-            .descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-            .pImageInfo      = &imageInfos[imgIdx++]
-        };
-        ++writeCount;
+        if (view != VK_NULL_HANDLE) {  // FIXED: Skip if null/disabled
+            imageInfos.push_back({ .imageView = view, .imageLayout = VK_IMAGE_LAYOUT_GENERAL });
+            VkWriteDescriptorSet write = {
+                .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                .dstSet = set,
+                .dstBinding = 2,
+                .dstArrayElement = 0,  // FIXED: 0
+                .descriptorCount = 1,
+                .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                .pImageInfo = &imageInfos.back()
+            };
+            writes.push_back(write);
+        }
     }
 
-    // ── BINDING 3: Frame UBO ───────────────────────────────────────────────────
-    if (!uniformBufferEncs_.empty() && uniformBufferEncs_[frame] != 0)
-    {
+    // ── BINDING 3: Frame UBO ──────
+    if (!uniformBufferEncs_.empty() && uniformBufferEncs_[frame] != 0) {
         VkBuffer buf = RAW_BUFFER(uniformBufferEncs_[frame]);
-        if (buf != VK_NULL_HANDLE)
-        {
-            bufferInfos[bufIdx] = { .buffer = buf, .offset = 0, .range = 368 };
-
-            writes[writeCount] = {
-                .sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-                .dstSet          = set,
-                .dstBinding      = 3,
+        if (buf != VK_NULL_HANDLE) {
+            bufferInfos.push_back({ .buffer = buf, .offset = 0, .range = 368 });
+            VkWriteDescriptorSet write = {
+                .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                .dstSet = set,
+                .dstBinding = 3,
+                .dstArrayElement = 0,
                 .descriptorCount = 1,
-                .descriptorType  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-                .pBufferInfo     = &bufferInfos[bufIdx++]
+                .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                .pBufferInfo = &bufferInfos.back()
             };
-            ++writeCount;
+            writes.push_back(write);
         }
     }
 
-    // ── BINDING 4: Materials SSBO ──────────────────────────────────────────────
-    if (!materialBufferEncs_.empty() && materialBufferEncs_[frame] != 0)
-    {
+    // ── BINDING 4: Materials SSBO ─
+    if (!materialBufferEncs_.empty() && materialBufferEncs_[frame] != 0) {
         VkBuffer buf = RAW_BUFFER(materialBufferEncs_[frame]);
-        if (buf != VK_NULL_HANDLE)
-        {
-            bufferInfos[bufIdx] = { .buffer = buf, .offset = 0, .range = VK_WHOLE_SIZE };
-
-            writes[writeCount] = {
-                .sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-                .dstSet          = set,
-                .dstBinding      = 4,
+        if (buf != VK_NULL_HANDLE) {
+            bufferInfos.push_back({ .buffer = buf, .offset = 0, .range = VK_WHOLE_SIZE });
+            VkWriteDescriptorSet write = {
+                .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                .dstSet = set,
+                .dstBinding = 4,
+                .dstArrayElement = 0,
                 .descriptorCount = 1,
-                .descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                .pBufferInfo     = &bufferInfos[bufIdx++]
+                .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                .pBufferInfo = &bufferInfos.back()
             };
-            ++writeCount;
+            writes.push_back(write);
         }
     }
 
-    // ── BINDING 5: Environment Map ─────────────────────────────────────────────
-    if (Options::Environment::ENABLE_ENV_MAP && envMapImageView_.valid() && envMapSampler_.valid())
-    {
-        imageInfos[imgIdx] = {
-            .sampler     = *envMapSampler_,
-            .imageView   = *envMapImageView_,
+    // ── BINDING 5: Environment Map ─
+    if (Options::Environment::ENABLE_ENV_MAP && envMapImageView_.valid() && envMapSampler_.valid()) {
+        imageInfos.push_back({
+            .sampler = *envMapSampler_,
+            .imageView = *envMapImageView_,
             .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-        };
-
-        writes[writeCount] = {
-            .sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-            .dstSet          = set,
-            .dstBinding      = 5,
+        });
+        VkWriteDescriptorSet write = {
+            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .dstSet = set,
+            .dstBinding = 5,
+            .dstArrayElement = 0,
             .descriptorCount = 1,
-            .descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            .pImageInfo      = &imageInfos[imgIdx++]
+            .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            .pImageInfo = &imageInfos.back()
         };
-        ++writeCount;
+        writes.push_back(write);
     }
 
-    // ── BINDING 6: Nexus Score ─────────────────────────────────────────────────
+    // ── BINDING 6: Nexus Score ────
     {
         VkImageView view = (Options::RTX::ENABLE_ADAPTIVE_SAMPLING && hypertraceScoreView_.valid())
                          ? *hypertraceScoreView_
                          : VK_NULL_HANDLE;
-
-        imageInfos[imgIdx] = { .imageView = view, .imageLayout = VK_IMAGE_LAYOUT_GENERAL };
-
-        writes[writeCount] = {
-            .sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-            .dstSet          = set,
-            .dstBinding      = 6,
-            .descriptorCount = 1,
-            .descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-            .pImageInfo      = &imageInfos[imgIdx++]
-        };
-        ++writeCount;
-    }
-
-    // ── BINDING 7: Dimension Buffer ────────────────────────────────────────────
-    if (!dimensionBufferEncs_.empty() && dimensionBufferEncs_[frame] != 0)
-    {
-        VkBuffer buf = RAW_BUFFER(dimensionBufferEncs_[frame]);
-        if (buf != VK_NULL_HANDLE)
-        {
-            bufferInfos[bufIdx] = { .buffer = buf, .offset = 0, .range = VK_WHOLE_SIZE };
-
-            writes[writeCount] = {
-                .sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-                .dstSet          = set,
-                .dstBinding      = 7,
+        if (view != VK_NULL_HANDLE) {  // FIXED: Skip if null/disabled
+            imageInfos.push_back({ .imageView = view, .imageLayout = VK_IMAGE_LAYOUT_GENERAL });
+            VkWriteDescriptorSet write = {
+                .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                .dstSet = set,
+                .dstBinding = 6,
+                .dstArrayElement = 0,  // FIXED: 0
                 .descriptorCount = 1,
-                .descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                .pBufferInfo     = &bufferInfos[bufIdx++]
+                .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                .pImageInfo = &imageInfos.back()
             };
-            ++writeCount;
+            writes.push_back(write);
         }
     }
 
-    // ── FINAL UPDATE — ONE CALL TO RULE THEM ALL ───────────────────────────────
-    if (writeCount > 0)
-    {
-        vkUpdateDescriptorSets(device, writeCount, writes, 0, nullptr);
-        LOG_TRACE_CAT("RENDERER", "RTX descriptors updated — frame {} — {} writes (TLAS valid={})", 
-                      frame, writeCount, (RTX::LAS::get().getTLAS() != VK_NULL_HANDLE) ? "YES" : "NO");
+    // ── BINDING 7: Dimension Buffer
+    if (!dimensionBufferEncs_.empty() && dimensionBufferEncs_[frame] != 0) {
+        VkBuffer buf = RAW_BUFFER(dimensionBufferEncs_[frame]);
+        if (buf != VK_NULL_HANDLE) {
+            bufferInfos.push_back({ .buffer = buf, .offset = 0, .range = VK_WHOLE_SIZE });
+            VkWriteDescriptorSet write = {
+                .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                .dstSet = set,
+                .dstBinding = 7,
+                .dstArrayElement = 0,
+                .descriptorCount = 1,
+                .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                .pBufferInfo = &bufferInfos.back()
+            };
+            writes.push_back(write);
+        }
+    }
+
+    // ── FINAL UPDATE ──────────────
+    if (!writes.empty()) {
+        vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
+        LOG_TRACE_CAT("RENDERER", "RTX descriptors updated — frame {} — {} valid writes (no nulls)", 
+                      frame, writes.size());
+    } else {
+        LOG_WARN_CAT("RENDERER", "No valid RTX descriptors for frame {} — missing resources?", frame);
     }
 }
 

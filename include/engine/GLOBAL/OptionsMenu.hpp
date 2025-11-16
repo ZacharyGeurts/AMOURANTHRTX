@@ -3,8 +3,8 @@
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
 //
-// OPTIONS MENU v1001 — GROK INTEGRATION COMPLETE — NOV 13 2025
-// • ALL 59+ OPTIONS PRESERVED + 4 CRITICAL FIXES + GROK NAMESPACE
+// OPTIONS MENU v1002 — GROK INTEGRATION + FRAME PREDICTION — NOV 16 2025
+// • ALL 59+ OPTIONS PRESERVED + ENABLE_FRAME_PREDICTION ADDED
 // • ZERO INCLUDES — NO DEPENDENCIES
 // • NO VULKAN, NO HANDLE, NO LOGGING, NO CONFLICTS
 // • PURE constexpr CONFIGURATION — RTX SUPREME
@@ -33,12 +33,15 @@ namespace Performance {
     constexpr uint32_t GPU_TIMESTAMP_QUERY_COUNT   = 128;
     constexpr bool     ENABLE_FRAME_TIME_LOGGING   = false;
     constexpr float    FRAME_TIME_LOG_THRESHOLD_MS = 16.666f;
-	static inline constexpr bool ENABLE_VALIDATION_LAYERS = false;
-	constexpr bool START_FULLSCREEN = false;
+    static inline constexpr bool ENABLE_VALIDATION_LAYERS = false;
+    constexpr bool START_FULLSCREEN = false;
 
     // ADDED: Required by SDL3_input.cpp, SDL3_font.cpp, SDL3_init.cpp, SDL3_window.cpp
     constexpr bool     ENABLE_CONSOLE_LOG          = true;
     constexpr bool     ENABLE_IMGUI                = true;
+
+    // NEW: Frame prediction & jitter recovery (VK_GOOGLE_display_timing)
+    constexpr bool     ENABLE_FRAME_PREDICTION     = true;  // AAAA pacing — predict vsync, recover jitter
 }
 
 // ── AUDIO (NEW NAMESPACE) ─────────────────────────────────────────────────────

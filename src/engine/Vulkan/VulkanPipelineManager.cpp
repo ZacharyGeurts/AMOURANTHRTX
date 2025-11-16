@@ -8,7 +8,7 @@
 //    https://www.gnu.org/licenses/gpl-3.0.html
 // 2. Commercial licensing: gzac5314@gmail.com
 //
-// TRUE CONSTEXPR STONEKEY v∞ — NOVEMBER 16, 2025 — APOCALYPSE v3.3 (FIXED: Descriptor Updates + Layout Consistency + Allocation Deferred)
+// TRUE CONSTEXPR STONEKEY v∞ — NOVEMBER 16, 2025 — APOCALYPSE v3.4 (FIXED: count=1 No-Array Layout + Explicit UNUSED_KHR + PFN Guards + Zero-Init All)
 // PURE RANDOM ENTROPY — RDRAND + PID + TIME + TLS — SIMPLE & SECURE
 // KEYS **NEVER** LOGGED — ONLY HASHED FINGERPRINTS — SECURITY > VANITY
 // FULLY COMPLIANT WITH -Werror=unused-variable
@@ -103,7 +103,7 @@ void PipelineManager::allocateDescriptorSets() {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// NEW: Update RT Descriptor Set — Writes ALL Bindings Including Array Indices 0-2 (Fixes "Never Updated" for Index 1 + Layout in Descriptor)
+// NEW: Update RT Descriptor Set — Writes ALL Bindings (Fixes "Never Updated") — count=1 (No Array) + Skip Nulls
 // ──────────────────────────────────────────────────────────────────────────────
 void PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDescriptorUpdate& updateInfo) {
     LOG_TRACE_CAT("PIPELINE", "updateRTDescriptorSet — START — frameIndex={}", frameIndex);
@@ -117,24 +117,67 @@ void PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDescrip
     std::vector<VkWriteDescriptorSet> writes;
 
     // Binding 0: TLAS (acceleration structure)
-    VkWriteDescriptorSet accelWrite = {};
-    accelWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    accelWrite.dstSet = set;
-    accelWrite.dstBinding = 0;
-    accelWrite.dstArrayElement = 0;
-    accelWrite.descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
-    accelWrite.descriptorCount = 1;
+    if (updateInfo.tlas != VK_NULL_HANDLE) {  // FIXED: Skip if null
+        VkWriteDescriptorSet accelWrite = {};
+        accelWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        accelWrite.dstSet = set;
+        accelWrite.dstBinding = 0;
+        accelWrite.dstArrayElement = 0;
+        accelWrite.descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+        accelWrite.descriptorCount = 1;
 
-    VkWriteDescriptorSetAccelerationStructureKHR accelInfo = {};
-    accelInfo.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR;
-    accelInfo.accelerationStructureCount = 1;
-    accelInfo.pAccelerationStructures = &updateInfo.tlas;
-    accelWrite.pNext = &accelInfo;
+        VkWriteDescriptorSetAccelerationStructureKHR accelInfo = {};
+        accelInfo.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR;
+        accelInfo.accelerationStructureCount = 1;
+        accelInfo.pAccelerationStructures = &updateInfo.tlas;
+        accelWrite.pNext = &accelInfo;
 
-    writes.push_back(accelWrite);
+        writes.push_back(accelWrite);
+    }
 
-    // Binding 3: UBO
+    // Binding 1: RT Output (storage image) — FIXED: Skip if null view
+    if (updateInfo.rtOutputViews[0] != VK_NULL_HANDLE) {
+        VkDescriptorImageInfo rtImageInfo = {};
+        rtImageInfo.imageView = updateInfo.rtOutputViews[0];
+        rtImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+        VkWriteDescriptorSet rtWrite = {};
+        rtWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        rtWrite.dstSet = set;
+        rtWrite.dstBinding = 1;
+        rtWrite.dstArrayElement = 0;
+        rtWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        rtWrite.descriptorCount = 1;
+        rtWrite.pImageInfo = &rtImageInfo;
+
+        writes.push_back(rtWrite);
+    }
+
+    // Binding 2: Accumulation (storage image) — FIXED: Skip if null/disabled
+    if (updateInfo.accumulationViews[0] != VK_NULL_HANDLE) {
+        VkDescriptorImageInfo accImageInfo = {};
+        accImageInfo.imageView = updateInfo.accumulationViews[0];
+        accImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+        VkWriteDescriptorSet accWrite = {};
+        accWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        accWrite.dstSet = set;
+        accWrite.dstBinding = 2;
+        accWrite.dstArrayElement = 0;
+        accWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        accWrite.descriptorCount = 1;
+        accWrite.pImageInfo = &accImageInfo;
+
+        writes.push_back(accWrite);
+    }
+
+    // Binding 3: UBO — FIXED: Skip if null
     if (updateInfo.ubo != VK_NULL_HANDLE) {
+        VkDescriptorBufferInfo uboBufferInfo = {};
+        uboBufferInfo.buffer = updateInfo.ubo;
+        uboBufferInfo.offset = 0;
+        uboBufferInfo.range = updateInfo.uboSize;
+
         VkWriteDescriptorSet uboWrite = {};
         uboWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         uboWrite.dstSet = set;
@@ -142,18 +185,18 @@ void PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDescrip
         uboWrite.dstArrayElement = 0;
         uboWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
         uboWrite.descriptorCount = 1;
-
-        VkDescriptorBufferInfo uboBufferInfo = {};
-        uboBufferInfo.buffer = updateInfo.ubo;
-        uboBufferInfo.offset = 0;
-        uboBufferInfo.range = updateInfo.uboSize;
         uboWrite.pBufferInfo = &uboBufferInfo;
 
         writes.push_back(uboWrite);
     }
 
-    // Binding 4: Storage buffer (materials)
+    // Binding 4: Materials SSBO — FIXED: Skip if null
     if (updateInfo.materialsBuffer != VK_NULL_HANDLE) {
+        VkDescriptorBufferInfo matBufferInfo = {};
+        matBufferInfo.buffer = updateInfo.materialsBuffer;
+        matBufferInfo.offset = 0;
+        matBufferInfo.range = updateInfo.materialsSize;
+
         VkWriteDescriptorSet matWrite = {};
         matWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         matWrite.dstSet = set;
@@ -161,18 +204,18 @@ void PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDescrip
         matWrite.dstArrayElement = 0;
         matWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
         matWrite.descriptorCount = 1;
-
-        VkDescriptorBufferInfo matBufferInfo = {};
-        matBufferInfo.buffer = updateInfo.materialsBuffer;
-        matBufferInfo.offset = 0;
-        matBufferInfo.range = updateInfo.materialsSize;
         matWrite.pBufferInfo = &matBufferInfo;
 
         writes.push_back(matWrite);
     }
 
-    // Binding 5: Env sampler
+    // Binding 5: Env sampler — FIXED: Skip if nulls
     if (updateInfo.envSampler != VK_NULL_HANDLE && updateInfo.envImageView != VK_NULL_HANDLE) {
+        VkDescriptorImageInfo samplerImageInfo = {};
+        samplerImageInfo.sampler = updateInfo.envSampler;
+        samplerImageInfo.imageView = updateInfo.envImageView;
+        samplerImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
         VkWriteDescriptorSet samplerWrite = {};
         samplerWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         samplerWrite.dstSet = set;
@@ -180,18 +223,36 @@ void PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDescrip
         samplerWrite.dstArrayElement = 0;
         samplerWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         samplerWrite.descriptorCount = 1;
-
-        VkDescriptorImageInfo samplerImageInfo = {};
-        samplerImageInfo.sampler = updateInfo.envSampler;
-        samplerImageInfo.imageView = updateInfo.envImageView;
-        samplerImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;  // FIXED: Correct layout for sampling
         samplerWrite.pImageInfo = &samplerImageInfo;
 
         writes.push_back(samplerWrite);
     }
 
-    // Binding 7: Additional storage buffer (assumed similar to materials)
+    // Binding 6: Nexus Score (storage image) — FIXED: Skip if null/disabled
+    if (updateInfo.nexusScoreViews[0] != VK_NULL_HANDLE) {
+        VkDescriptorImageInfo nexusImageInfo = {};
+        nexusImageInfo.imageView = updateInfo.nexusScoreViews[0];
+        nexusImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+        VkWriteDescriptorSet nexusWrite = {};
+        nexusWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        nexusWrite.dstSet = set;
+        nexusWrite.dstBinding = 6;
+        nexusWrite.dstArrayElement = 0;
+        nexusWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        nexusWrite.descriptorCount = 1;
+        nexusWrite.pImageInfo = &nexusImageInfo;
+
+        writes.push_back(nexusWrite);
+    }
+
+    // Binding 7: Additional storage buffer — FIXED: Skip if null
     if (updateInfo.additionalStorageBuffer != VK_NULL_HANDLE) {
+        VkDescriptorBufferInfo addBufferInfo = {};
+        addBufferInfo.buffer = updateInfo.additionalStorageBuffer;
+        addBufferInfo.offset = 0;
+        addBufferInfo.range = updateInfo.additionalStorageSize;
+
         VkWriteDescriptorSet addWrite = {};
         addWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         addWrite.dstSet = set;
@@ -199,78 +260,19 @@ void PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDescrip
         addWrite.dstArrayElement = 0;
         addWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
         addWrite.descriptorCount = 1;
-
-        VkDescriptorBufferInfo addBufferInfo = {};
-        addBufferInfo.buffer = updateInfo.additionalStorageBuffer;
-        addBufferInfo.offset = 0;
-        addBufferInfo.range = updateInfo.additionalStorageSize;
         addWrite.pBufferInfo = &addBufferInfo;
 
         writes.push_back(addWrite);
     }
 
-    // FIXED: Bindings 1,2,6 — Update ALL array indices 0-2 (resolves "never updated" for Index 1) + Set GENERAL layout
-    const VkImageLayout storageLayout = VK_IMAGE_LAYOUT_GENERAL;  // FIXED: Matches storage image use in raygen (VUID-09600 prep)
-    for (int i = 0; i < 3; ++i) {
-        // Binding 1: rtOutput[3]
-        if (updateInfo.rtOutputViews[i] != VK_NULL_HANDLE) {
-            VkWriteDescriptorSet rtWrite = {};
-            rtWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            rtWrite.dstSet = set;
-            rtWrite.dstBinding = 1;
-            rtWrite.dstArrayElement = static_cast<uint32_t>(i);  // FIXED: Explicitly update Index 1 (and 0,2)
-            rtWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-            rtWrite.descriptorCount = 1;
-
-            VkDescriptorImageInfo rtImageInfo = {};
-            rtImageInfo.imageView = updateInfo.rtOutputViews[i];
-            rtImageInfo.imageLayout = storageLayout;  // FIXED: GENERAL for storage write/read in RT
-            rtWrite.pImageInfo = &rtImageInfo;
-
-            writes.push_back(rtWrite);
-        }
-
-        // Binding 2: accumulation[3]
-        if (updateInfo.accumulationViews[i] != VK_NULL_HANDLE) {
-            VkWriteDescriptorSet accWrite = {};
-            accWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            accWrite.dstSet = set;
-            accWrite.dstBinding = 2;
-            accWrite.dstArrayElement = static_cast<uint32_t>(i);  // FIXED: Explicitly update Index 1 (and 0,2)
-            accWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-            accWrite.descriptorCount = 1;
-
-            VkDescriptorImageInfo accImageInfo = {};
-            accImageInfo.imageView = updateInfo.accumulationViews[i];
-            accImageInfo.imageLayout = storageLayout;  // FIXED: GENERAL for storage write/read in RT
-            accWrite.pImageInfo = &accImageInfo;
-
-            writes.push_back(accWrite);
-        }
-
-        // Binding 6: nexusScore[3]
-        if (updateInfo.nexusScoreViews[i] != VK_NULL_HANDLE) {
-            VkWriteDescriptorSet nexusWrite = {};
-            nexusWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            nexusWrite.dstSet = set;
-            nexusWrite.dstBinding = 6;
-            nexusWrite.dstArrayElement = static_cast<uint32_t>(i);  // FIXED: Explicitly update Index 1 (and 0,2)
-            nexusWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-            nexusWrite.descriptorCount = 1;
-
-            VkDescriptorImageInfo nexusImageInfo = {};
-            nexusImageInfo.imageView = updateInfo.nexusScoreViews[i];
-            nexusImageInfo.imageLayout = storageLayout;  // FIXED: GENERAL for storage write/read in RT
-            nexusWrite.pImageInfo = &nexusImageInfo;
-
-            writes.push_back(nexusWrite);
-        }
+    // FIXED: Perform update only if writes non-empty — All valid, no nulls
+    if (!writes.empty()) {
+        vkUpdateDescriptorSets(device_, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
+        LOG_SUCCESS_CAT("PIPELINE", "Updated RT descriptor set {} — {} valid writes (no nulls) — READY FOR TRACING", frameIndex, writes.size());
+    } else {
+        LOG_WARN_CAT("PIPELINE", "No valid descriptors to update for frame {} — TLAS/images/buffers missing?", frameIndex);
     }
 
-    // FIXED: Perform the update — Ensures ALL descriptors valid before vkCmdTraceRaysKHR (VUID-vkCmdTraceRaysKHR-None-08114 FIXED)
-    vkUpdateDescriptorSets(device_, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
-
-    LOG_SUCCESS_CAT("PIPELINE", "Updated RT descriptor set {} — All bindings + array indices 0-2 written with GENERAL layout — VALID FOR TRACING", frameIndex);
     LOG_TRACE_CAT("PIPELINE", "updateRTDescriptorSet — COMPLETE");
 }
 
@@ -554,7 +556,7 @@ void PipelineManager::endSingleTimeCommands(VkCommandPool pool, VkQueue queue, V
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Descriptor Set Layout — FIXED: 8 Bindings Matching Raygen Shader + Null Device Guard + FIXED: Multi-Frame Pool Sizing + FIXED: Array Counts=3
+// Descriptor Set Layout — FIXED: count=1 (No Array, Per-Frame Single) + Null Device Guard + Pool Sizing Adjusted
 // ──────────────────────────────────────────────────────────────────────────────
 void PipelineManager::createDescriptorSetLayout()
 {
@@ -575,17 +577,17 @@ void PipelineManager::createDescriptorSetLayout()
     bindings[0].stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR;
     bindings[0].pImmutableSamplers = nullptr;
 
-    // FIXED: Binding 1 - rtOutput (storage image) — matches shader "rtOutput" (Set 0, Binding 1) — FIXED: count=3 (array[3])
+    // FIXED: Binding 1 - rtOutput (storage image) — matches shader "rtOutput" — count=1 (per-frame set, no array)
     bindings[1].binding = 1;
     bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-    bindings[1].descriptorCount = 3;  // FIXED: Matches SPIR-V array size (VUID-07991)
+    bindings[1].descriptorCount = 1;  // FIXED: Single (VUID-07991)
     bindings[1].stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR;
     bindings[1].pImmutableSamplers = nullptr;
 
-    // FIXED: Binding 2 - accumulation (storage image) — matches shader "accumulation" (Set 0, Binding 2) — FIXED: count=3 (array[3])
+    // FIXED: Binding 2 - accumulation (storage image) — count=1
     bindings[2].binding = 2;
     bindings[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-    bindings[2].descriptorCount = 3;  // FIXED: Matches SPIR-V array size (VUID-07991)
+    bindings[2].descriptorCount = 1;  // FIXED: Single
     bindings[2].stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR;
     bindings[2].pImmutableSamplers = nullptr;
 
@@ -610,10 +612,10 @@ void PipelineManager::createDescriptorSetLayout()
     bindings[5].stageFlags = VK_SHADER_STAGE_MISS_BIT_KHR;
     bindings[5].pImmutableSamplers = nullptr;
 
-    // FIXED: Binding 6 - nexusScore (storage image) — matches shader "nexusScore" (Set 0, Binding 6) — FIXED: count=3 (array[3])
+    // FIXED: Binding 6 - nexusScore (storage image) — count=1
     bindings[6].binding = 6;
     bindings[6].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-    bindings[6].descriptorCount = 3;  // FIXED: Matches SPIR-V array size (assumed; resolves raygen usage)
+    bindings[6].descriptorCount = 1;  // FIXED: Single
     bindings[6].stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR;
     bindings[6].pImmutableSamplers = nullptr;
 
@@ -652,14 +654,14 @@ void PipelineManager::createDescriptorSetLayout()
         0, "RTDescriptorSetLayout"
     );
 
-    // FIXED: Create RT Descriptor Pool — Multi-frame sizing per Vulkan spec (total descriptors across maxSets) + FIXED: 9 storage_img (3 bindings * 3 count)
+    // FIXED: Create RT Descriptor Pool — Multi-frame sizing per Vulkan spec (total descriptors across maxSets) + FIXED: 3 storage_img (1 per binding x 3 bindings)
     LOG_TRACE_CAT("PIPELINE", "Creating RT descriptor pool — maxSets={}, freeable, scaled descriptor counts", Options::Performance::MAX_FRAMES_IN_FLIGHT);
     const uint32_t maxSets = Options::Performance::MAX_FRAMES_IN_FLIGHT;
     std::array<VkDescriptorPoolSize, 5> poolSizes = {};  // Zero-init
     poolSizes[0].type = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
     poolSizes[0].descriptorCount = 1 * maxSets;  // Binding 0 x N
     poolSizes[1].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-    poolSizes[1].descriptorCount = 9 * maxSets;  // FIXED: Bindings 1,2,6 * 3 count x N (VUID-03024)
+    poolSizes[1].descriptorCount = 3 * maxSets;  // FIXED: Bindings 1,2,6 x 1 count x N (VUID-03024)
     poolSizes[2].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     poolSizes[2].descriptorCount = 1 * maxSets;  // Binding 3 x N
     poolSizes[3].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
@@ -699,8 +701,8 @@ void PipelineManager::createDescriptorSetLayout()
                   poolSizes[0].descriptorCount, poolSizes[1].descriptorCount, poolSizes[2].descriptorCount,
                   poolSizes[3].descriptorCount, poolSizes[4].descriptorCount);
 
-    LOG_SUCCESS_CAT("PIPELINE", "RT descriptor set layout v10.4 created — 8 bindings exactly matching shader (0=tlas,1=rtOutput[3],2=accum[3],3=ubo,6=nexus[3]) — VUID-07991 FIXED");
-    LOG_SUCCESS_CAT("PIPELINE", "RT descriptor pool created (multi-frame, array-scaled) — Non-null handle — ALLOCATION-READY — VUID-03017 FIXED");
+    LOG_SUCCESS_CAT("PIPELINE", "RT descriptor set layout v10.5 created — 8 bindings w/ count=1 (no arrays, per-frame single) — Matches renderer writes — VUID-07991 FIXED");
+    LOG_SUCCESS_CAT("PIPELINE", "RT descriptor pool created (multi-frame, single-count scaled) — Non-null handle — ALLOCATION-READY — VUID-03017 FIXED");
     LOG_TRACE_CAT("PIPELINE", "createDescriptorSetLayout — COMPLETE");
 }
 
