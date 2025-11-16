@@ -183,6 +183,12 @@ namespace RTX {
             return nullptr;
         }
         void* ptr = nullptr;
+    // FIXED: Null guard before buffer map in tracker (VUID-vkMapMemory-memory-parameter + segfault fix)
+    if (it->second.memory == VK_NULL_HANDLE) {
+        LOG_FATAL_CAT("RTX", "Buffer map aborted: memory null for handle 0x{:x} (destroyed/recreated?).", handle);
+        ptr = nullptr;
+        return nullptr;
+    }
         VkResult res = vkMapMemory(device_, it->second.memory, 0, VK_WHOLE_SIZE, 0, &ptr);  // FIXED: Use VK_WHOLE_SIZE for full mapping
         if (res != VK_SUCCESS) {
             LOG_ERROR_CAT("RTX", "{}vkMapMemory failed: {} for handle 0x{:x}{}", CRIMSON_MAGENTA, res, handle, RESET);

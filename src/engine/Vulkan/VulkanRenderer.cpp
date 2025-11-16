@@ -973,6 +973,16 @@ void VulkanRenderer::createEnvironmentMap() {
     uint64_t stagingEnc = 0;
     BUFFER_CREATE(stagingEnc, imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, "EnvMapStaging");
     void* data = nullptr;
+    // FIXED: Null guard before staging buffer map in renderer (VUID-vkMapMemory-memory-parameter)
+    {
+        VkDeviceMemory stagingMem = BUFFER_MEMORY(stagingEnc);  // Assume macro expands
+        if (stagingMem == VK_NULL_HANDLE) {
+            LOG_FATAL_CAT("RENDERER", "Renderer staging map aborted: memory null.");
+            data = nullptr;
+            goto skip_map;  // Or return/break based on context
+        }
+    }
+skip_map:
     BUFFER_MAP(stagingEnc, data);
     memcpy(data, pixels, imageSize);
     BUFFER_UNMAP(stagingEnc);

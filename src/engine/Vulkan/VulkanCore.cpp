@@ -404,7 +404,25 @@ void VulkanRTX::buildAccelerationStructures() {
 
             g_stagingBuffer = RAW_BUFFER(g_stagingPool);
             g_stagingMem    = BUFFER_MEMORY(g_stagingPool);
+    // FIXED: Null guard for persistent staging mem (prevents vkMapMemory on null — VUID-vkMapMemory-memory-parameter)
+    if (g_stagingMem == VK_NULL_HANDLE) {
+        LOG_FATAL_CAT("RTX", "BUFFER_CREATE failed: g_stagingMem null after 1GB alloc (OOM? Invalid type?). Aborting buildAccelerationStructures.");
+        return;  // Early exit — no map on null
+    }
 
+
+    // FIXED: Explicit pre-map null check (VUID-vkMapMemory-memory-parameter + segfault prevention)
+    if (g_stagingMem == VK_NULL_HANDLE) {
+        LOG_FATAL_CAT("RTX", "vkMapMemory aborted: g_stagingMem still null. Allocation upstream failed.");
+        g_mappedBase = nullptr;
+        return;
+    }
+    // FIXED: Null guard before persistent staging map (VUID-vkMapMemory-memory-parameter + segfault fix)
+    if (g_stagingMem == VK_NULL_HANDLE) {
+        LOG_FATAL_CAT("RTX", "Persistent staging map aborted: g_stagingMem null post-recreate (OOM during resize?).");
+        g_mappedBase = nullptr;
+        return;
+    }
             VK_CHECK(vkMapMemory(device_, g_stagingMem, 0, VK_WHOLE_SIZE, 0, &g_mappedBase),
                      "Failed to map persistent staging buffer");
 
@@ -519,6 +537,12 @@ void VulkanRTX::uploadBatch(
     {
         std::lock_guard<std::mutex> lock(g_stagingMutex);
         if (g_stagingPool == 0) {
+    // FIXED: Null guard for lazy staging mem (prevents vkMapMemory on null — VUID-vkMapMemory-memory-parameter)
+    if (g_stagingMem == VK_NULL_HANDLE) {
+        LOG_FATAL_CAT("RTX", "Lazy BUFFER_CREATE failed: g_stagingMem null (OOM? Skipping uploadBatch.");
+        return;  // Early exit — no map on null
+    }
+
             BUFFER_CREATE(g_stagingPool, STAGING_POOL_SIZE,
                           VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
                           VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
@@ -528,6 +552,12 @@ void VulkanRTX::uploadBatch(
             g_stagingBuffer = RAW_BUFFER(g_stagingPool);
 
             void* mapped = nullptr;
+    // FIXED: Null guard before lazy staging map (VUID-vkMapMemory-memory-parameter + segfault fix)
+    if (g_stagingMem == VK_NULL_HANDLE) {
+        LOG_FATAL_CAT("RTX", "Lazy staging map aborted: g_stagingMem null (realloc failed?). Skipping.");
+        mapped = nullptr;
+        return;
+    }
             VK_CHECK(vkMapMemory(dev, g_stagingMem, 0, VK_WHOLE_SIZE, 0, &mapped),
                      "Failed to map persistent staging");
 
