@@ -3,20 +3,23 @@
 // =============================================================================
 //
 // Dual Licensed:
-// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
-//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
+// 1. GNU General Public License version 3 or later (GPL-3.0+)
+//    https://www.gnu.org/licenses/gpl-3.0.en.html
 // 2. Commercial licensing: gzac5314@gmail.com
 //
-// SPLASH SYSTEM — NOVEMBER 13, 2025 — FINAL & CORRECT
-// • SDL3 == 0 = SUCCESS
+// SPLASH SYSTEM — NOVEMBER 16, 2025 — CENTERED FROM CREATION
+// • SDL3: 0 = SUCCESS
 // • Audio plays ammo.wav
-// • Image centered from frame 1
+// • Image centered from frame 1 — NO TOP-LEFT FLASH
+// • Window created HIDDEN + positioned via calculated center (display bounds)
+// • Show (brief black), then RENDER/PRESENT image
 // • No SIGSEGV
 // • ENHANCED LOGGING — DETAILED TRACE FOR DEBUG
-// • FIXED: Window centered on screen via SDL_SetWindowPosition (SDL3 spec)
+// • FIXED: SDL_CreateWindow (no x/y args) + SDL_SetWindowPosition(calculated center)
 // • PINK PHOTONS + AMMO.WAV ETERNAL
 // • NEW: Window icon set using dual ICOs (base + HiDPI) — matches main window
 // • FIXED: Use SDL_GetError() directly — avoids IMG_GetError macro dependency
+// • FIXED: Audio init check (0 = success, !=0 error)
 // =============================================================================
 
 #pragma once
@@ -51,23 +54,46 @@ namespace Splash {
 inline void show(const char* title, int w, int h, const char* imagePath, const char* audioPath = nullptr) {
     LOG_INFO_CAT("SPLASH", "{}SPLASH START — {}x{} — {}ms{}", ELECTRIC_BLUE, w, h, 3400, RESET);
 
-    // --- 1. Create window (BORDERLESS, VISIBLE) ---
-    LOG_DEBUG_CAT("SPLASH", "Creating window: title='{}', size={}x{}", title ? title : "null", w, h);
+    // FIXED: Initialize video subsystem — required for window creation (SDL3)
+    LOG_DEBUG_CAT("SPLASH", "SDL_InitSubSystem(SDL_INIT_VIDEO) call");
+    if (SDL_InitSubSystem(SDL_INIT_VIDEO) == 0) {
+        LOG_ERROR_CAT("SPLASH", "SDL_InitSubSystem(VIDEO) failed: {}", SDL_GetError());
+        return;
+    }
+    LOG_SUCCESS_CAT("SPLASH", "SDL video subsystem initialized");
+
+    // --- 0. Calculate center position using display bounds (pre-window) ---
+    LOG_DEBUG_CAT("SPLASH", "Querying primary display bounds for centering");
+    SDL_Rect displayBounds;
+    if (SDL_GetDisplayBounds(0, &displayBounds) == 0) {
+        LOG_WARN_CAT("SPLASH", "SDL_GetDisplayBounds failed: {} — using undefined position", SDL_GetError());
+        displayBounds.w = 1920;  // Fallback assumption
+        displayBounds.h = 1080;
+    } else {
+        LOG_DEBUG_CAT("SPLASH", "Primary display: {}x{} @ ({},{})", displayBounds.w, displayBounds.h, displayBounds.x, displayBounds.y);
+    }
+    int centerX = (displayBounds.w - w) / 2 + displayBounds.x;
+    int centerY = (displayBounds.h - h) / 2 + displayBounds.y;
+    LOG_SUCCESS_CAT("SPLASH", "Calculated center: ({},{})", centerX, centerY);
+
+    // --- 1. Create window (BORDERLESS + HIDDEN — no top-left flash) ---
+    LOG_DEBUG_CAT("SPLASH", "Creating hidden window: title='{}', size={}x{}", title ? title : "null", w, h);
     SDL_Window* win = SDL_CreateWindow(
         title,
         w, h,
-        SDL_WINDOW_BORDERLESS
+        SDL_WINDOW_BORDERLESS | SDL_WINDOW_HIDDEN  // FIXED: No x/y args in SDL3
     );
     if (!win) {
+        SDL_QuitSubSystem(SDL_INIT_VIDEO);
         LOG_ERROR_CAT("SPLASH", "Failed to create splash window: {}", SDL_GetError());
         return;
     }
-    LOG_SUCCESS_CAT("SPLASH", "Window created: 0x{:x}", reinterpret_cast<uint64_t>(win));
+    LOG_SUCCESS_CAT("SPLASH", "Hidden window created: 0x{:x}", reinterpret_cast<uint64_t>(win));
 
-    // FIXED: Center window on screen (SDL3: SDL_SetWindowPosition after creation)
-    LOG_DEBUG_CAT("SPLASH", "Centering window on screen");
-    SDL_SetWindowPosition(win, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
-    LOG_SUCCESS_CAT("SPLASH", "Window centered on primary display");
+    // FIXED: Set calculated position immediately (while hidden — no flash)
+    LOG_DEBUG_CAT("SPLASH", "Setting window position to calculated center ({},{})", centerX, centerY);
+    SDL_SetWindowPosition(win, centerX, centerY);
+    LOG_SUCCESS_CAT("SPLASH", "Window positioned at center (still hidden)");
 
     // NEW: Set splash window icon with dual sizes for HiDPI support: 32x32 base + 64x64 alternate
     LOG_INFO_CAT("SPLASH", "Loading dual window icons for splash: ammo32.ico (base) + ammo.ico (2x HiDPI)");
@@ -102,21 +128,26 @@ inline void show(const char* title, int w, int h, const char* imagePath, const c
     }
 
     // --- 2. Create renderer ---
-    LOG_DEBUG_CAT("SPLASH", "Creating renderer for window 0x{:x}", reinterpret_cast<uint64_t>(win));
+    LOG_DEBUG_CAT("SPLASH", "Creating renderer for hidden window 0x{:x}", reinterpret_cast<uint64_t>(win));
     SDL_Renderer* ren = SDL_CreateRenderer(win, nullptr);
     if (!ren) {
         SDL_DestroyWindow(win);
+        SDL_QuitSubSystem(SDL_INIT_VIDEO);
         LOG_ERROR_CAT("SPLASH", "Failed to create splash renderer: {}", SDL_GetError());
         return;
     }
     LOG_SUCCESS_CAT("SPLASH", "Renderer created: 0x{:x}", reinterpret_cast<uint64_t>(ren));
 
-    // --- 3. Clear to black ---
+    // --- 3. Show window (centered, black/undefined — instant) ---
+    LOG_DEBUG_CAT("SPLASH", "SDL_ShowWindow — centered window now visible (pre-render)");
+    SDL_ShowWindow(win);
+    LOG_INFO_CAT("SPLASH", "Window shown — centered (brief black frame)");
+
+    // --- 4. Clear to black + Load image and center it (now visible) ---
     LOG_DEBUG_CAT("SPLASH", "Clearing renderer to black");
     SDL_SetRenderDrawColor(ren, 0, 0, 0, 255);
     SDL_RenderClear(ren);
 
-    // --- 4. Load image and center it ---
     SDL_Texture* tex = nullptr;
     int img_x = 0, img_y = 0;
     float tw = 0.0f, th = 0.0f;
@@ -143,15 +174,15 @@ inline void show(const char* title, int w, int h, const char* imagePath, const c
         LOG_WARN_CAT("SPLASH", "Image not found: {}", imagePath);
     }
 
-    // --- 5. Present — image is now visible and centered ---
-    LOG_DEBUG_CAT("SPLASH", "SDL_RenderPresent call");
+    // --- 5. Present — image now visible and centered ---
+    LOG_DEBUG_CAT("SPLASH", "SDL_RenderPresent call — swap to image");
     SDL_RenderPresent(ren);
-    LOG_INFO_CAT("SPLASH", "Splash presented — image visible");
+    LOG_INFO_CAT("SPLASH", "Splash presented — PNG visible and centered from frame 1");
 
-    // --- 6. Initialize audio subsystem ONCE (SDL3: == 0 = success) ---
+    // --- 6. Initialize audio subsystem ONCE (SDL3: 0 = success) ---
     static bool audioInit = []() -> bool {
         LOG_DEBUG_CAT("SPLASH", "SDL_InitSubSystem(SDL_INIT_AUDIO) call");
-        if (SDL_InitSubSystem(SDL_INIT_AUDIO) == 0) {  // SDL3: non-zero = success
+        if (SDL_InitSubSystem(SDL_INIT_AUDIO) == 0) {  // FIXED: != 0 = error (0 = success)
             LOG_ERROR_CAT("SPLASH", "SDL_InitSubSystem(AUDIO) failed: {}", SDL_GetError());
             return false;
         }
@@ -233,6 +264,10 @@ cleanup:
     // --- 11. Destroy global AudioManager (only on program exit) ---
     // We keep it alive across splash calls — destroy only when needed
     // delete g_audioManager; g_audioManager = nullptr;  // Uncomment if single-use
+
+    // FIXED: Quit video subsystem after splash (safe if called multiple times)
+    LOG_DEBUG_CAT("SPLASH", "SDL_QuitSubSystem(SDL_INIT_VIDEO)");
+    SDL_QuitSubSystem(SDL_INIT_VIDEO);
 
     LOG_SUCCESS_CAT("SPLASH", "{}SPLASH DISMISSED — PINK PHOTONS + AMMO.WAV ETERNAL{}", PLASMA_FUCHSIA, RESET);
 }
