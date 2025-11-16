@@ -1108,61 +1108,46 @@ namespace RTX {
 {
     if (!window) {
         LOG_FATAL_CAT("VULKAN", "createVulkanInstanceWithSDL: Null window provided — cannot query SDL extensions!");
-        return VK_NULL_HANDLE;  // Return null instead of terminate — Let caller handle
+        return VK_NULL_HANDLE;
     }
 
     LOG_INFO_CAT("VULKAN", "{}FORGING VULKAN INSTANCE — SDL3 FULL MODE — EXTRACTING WINDOW EXTENSIONS{}", PLASMA_FUCHSIA, RESET);
-    LOG_TRACE_CAT("VULKAN", "Instance creation params — window: 0x{:p}, validation: {}", static_cast<void*>(window), enableValidation ? "enabled" : "disabled");
 
-    // Step 1: Query SDL-required instance extensions (platform-specific, e.g., VK_KHR_xlib_surface)
+    // Step 1: Query SDL-required instance extensions
     uint32_t sdlExtensionCount = 0;
     const char* const* sdlExtensions = SDL_Vulkan_GetInstanceExtensions(&sdlExtensionCount);
-    if (!sdlExtensions || sdlExtensionCount == 0) {
-        LOG_FATAL_CAT("VULKAN", "SDL_Vulkan_GetInstanceExtensions failed — no extensions returned (window valid? SDL init?)");
-        // Diag: Log window flags
-        Uint32 flags = SDL_GetWindowFlags(window);
-        LOG_ERROR_CAT("VULKAN", "Window flags: 0x{:x} (has SDL_WINDOW_VULKAN? {})", 
-                      static_cast<uint32_t>(flags), (flags & SDL_WINDOW_VULKAN) ? "YES" : "NO");
-        return VK_NULL_HANDLE;  // Propagate failure
+    if ((sdlExtensions || sdlExtensionCount) == 0) { // == 0 for true never !
+        LOG_FATAL_CAT("VULKAN", "SDL_Vulkan_GetInstanceExtensions failed — no extensions returned");
+        LOG_ERROR_CAT("VULKAN", "Window flags: 0x{:x} (SDL_WINDOW_VULKAN? {})", SDL_GetWindowFlags(window), 
+                      (SDL_GetWindowFlags(window) & SDL_WINDOW_VULKAN) ? "YES" : "NO");
+        return VK_NULL_HANDLE;
     }
 
-    LOG_TRACE_CAT("VULKAN", "SDL returned {} extensions", sdlExtensionCount);
-
-    // Step 2: Build full extension list (SDL + debug if enabled) — Use set<const char*> for dedup (no strings, no dangling)
+    // Step 2: Build extension list with deduplication
     std::set<const char*> uniqueExts;
-    for (uint32_t i = 0; i < sdlExtensionCount; ++i) {
+    for (uint32_t i = 0; i < sdlExtensionCount; ++i)
         uniqueExts.insert(sdlExtensions[i]);
-    }
-    if (enableValidation) {
+    if (enableValidation)
         uniqueExts.insert(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
-    }
 
-    std::vector<const char*> extensions(uniqueExts.begin(), uniqueExts.end());  // Direct assign — safe, no conversion
+    std::vector<const char*> extensions(uniqueExts.begin(), uniqueExts.end());
 
-    LOG_INFO_CAT("VULKAN", "SDL extensions extracted ({} total after dedup):", extensions.size());
-    for (const auto* ext : extensions) {
-        LOG_INFO_CAT("VULKAN", "  + {}", ext);  // Will log VK_KHR_xlib_surface on Linux!
-    }
+    LOG_INFO_CAT("VULKAN", "SDL extensions extracted ({} total):", extensions.size());
+    for (const auto* ext : extensions)
+        LOG_INFO_CAT("VULKAN", "  + {}", ext);
 
-    // Step 3: Validation layers (optional)
+    // Step 3: Validation layers
     const char* const* layers = nullptr;
     uint32_t layerCount = 0;
     if (enableValidation) {
-        // Check support first (to avoid VK_ERROR_LAYER_NOT_PRESENT)
-        uint32_t availLayerCount = 0;
-        vkEnumerateInstanceLayerProperties(&availLayerCount, nullptr);
-        std::vector<VkLayerProperties> availLayers(availLayerCount);
-        vkEnumerateInstanceLayerProperties(&availLayerCount, availLayers.data());
+        uint32_t availCount = 0;
+        vkEnumerateInstanceLayerProperties(&availCount, nullptr);
+        std::vector<VkLayerProperties> availLayers(availCount);
+        vkEnumerateInstanceLayerProperties(&availCount, availLayers.data());
 
         static const char* validationLayer = "VK_LAYER_KHRONOS_validation";
-        bool layerSupported = false;
-        for (const auto& prop : availLayers) {
-            if (strcmp(prop.layerName, validationLayer) == 0) {
-                layerSupported = true;
-                break;
-            }
-        }
-        if (layerSupported) {
+        if (std::any_of(availLayers.begin(), availLayers.end(),
+            [](const auto& p) { return strcmp(p.layerName, validationLayer) == 0; })) {
             layers = &validationLayer;
             layerCount = 1;
             LOG_INFO_CAT("VULKAN", "  + VK_LAYER_KHRONOS_validation (supported)");
@@ -1174,7 +1159,6 @@ namespace RTX {
     // Step 4: App info
     VkApplicationInfo appInfo{
         .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
-        .pNext = nullptr,
         .pApplicationName = "AMOURANTH RTX — VALHALLA v80 TURBO",
         .applicationVersion = VK_MAKE_VERSION(1, 0, 0),
         .pEngineName = "VALHALLA TURBO ENGINE",
@@ -1182,26 +1166,25 @@ namespace RTX {
         .apiVersion = VK_API_VERSION_1_3
     };
 
-    // Step 5: Debug messenger (if validation enabled) — NOW 100% SAFE
+    // Step 5: Debug messenger setup
     VkDebugUtilsMessengerCreateInfoEXT debugCreateInfo{};
     if (enableValidation && layerCount > 0) {
-        debugCreateInfo.sType           = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
-        debugCreateInfo.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT |
-                                          VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
-                                          VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
-        debugCreateInfo.messageType     = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT |
-                                          VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
-                                          VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
-        debugCreateInfo.pfnUserCallback = VulkanDebugCallback;  // ← THIS IS THE FIX
-        debugCreateInfo.pUserData       = nullptr;
-
-        LOG_TRACE_CAT("VULKAN", "Debug messenger configured — validation layers active");
+        debugCreateInfo = {
+            .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
+            .messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT |
+                               VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
+                               VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT,
+            .messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT |
+                           VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
+                           VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT,
+            .pfnUserCallback = VulkanDebugCallback
+        };
     }
 
-    // Step 6: Create info
+    // Step 6: Instance create info
     VkInstanceCreateInfo createInfo{
         .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
-        .pNext = enableValidation ? &debugCreateInfo : nullptr,
+        .pNext = (enableValidation && layerCount > 0) ? &debugCreateInfo : nullptr,
         .pApplicationInfo = &appInfo,
         .enabledLayerCount = layerCount,
         .ppEnabledLayerNames = layers,
@@ -1209,141 +1192,135 @@ namespace RTX {
         .ppEnabledExtensionNames = extensions.data()
     };
 
-    LOG_TRACE_CAT("VULKAN", "vkCreateInstance — {} extensions, {} layers", extensions.size(), layerCount);
-
     VkInstance instance = VK_NULL_HANDLE;
     VkResult result = vkCreateInstance(&createInfo, nullptr, &instance);
 
     if (result != VK_SUCCESS) {
-        LOG_FATAL_CAT("VULKAN", "vkCreateInstance FAILED — code {} ({}) — Check SDL window & Vulkan driver", 
-                      static_cast<int>(result), result);
-        return VK_NULL_HANDLE;  // Propagate failure instead of terminate
+        LOG_FATAL_CAT("VULKAN", "vkCreateInstance FAILED — result: {} ({})", static_cast<int>(result), result);
+        return VK_NULL_HANDLE;
     }
-    // Step 7: Create & store debug messenger if enabled — Post-instance creation
+
+    // === CRITICAL STONEKEY FIX: STORE RAW FIRST, THEN OBFUSCATE ===
+    g_context_instance.instance_ = instance;           // ← Raw handle stored (used by vkEnumeratePhysicalDevices)
+	set_g_instance(instance);  // ← Now safe: raw cached
+
+    LOG_SUCCESS_CAT("VULKAN", "{}VULKAN INSTANCE FORGED @ 0x{:016x} — STONEKEY v∞ ARMED — PINK PHOTONS PROTECTED{}", 
+                    PLASMA_FUCHSIA, reinterpret_cast<uintptr_t>(instance), RESET);
+
+    // Step 7: Create debug messenger (post-instance)
     if (enableValidation && layerCount > 0) {
-        VkDebugUtilsMessengerEXT messenger = VK_NULL_HANDLE;
-        PFN_vkCreateDebugUtilsMessengerEXT createFunc = (PFN_vkCreateDebugUtilsMessengerEXT)vkGetInstanceProcAddr(instance, "vkCreateDebugUtilsMessengerEXT");
+        auto createFunc = (PFN_vkCreateDebugUtilsMessengerEXT)vkGetInstanceProcAddr(instance, "vkCreateDebugUtilsMessengerEXT");
         if (createFunc) {
-            VkResult msgResult = createFunc(instance, &debugCreateInfo, nullptr, &messenger);
-            if (msgResult == VK_SUCCESS) {
-                // Assume debugMessenger_ added to Context struct
+            VkDebugUtilsMessengerEXT messenger = VK_NULL_HANDLE;
+            if (createFunc(instance, &debugCreateInfo, nullptr, &messenger) == VK_SUCCESS) {
                 g_context_instance.debugMessenger_ = messenger;
-                LOG_DEBUG_CAT("VULKAN", "Debug messenger created & stored: 0x{:x}", reinterpret_cast<uintptr_t>(messenger));
-            } else {
-                LOG_WARN_CAT("VULKAN", "Failed to create debug messenger: {} — Continuing without messenger", msgResult);
+                LOG_DEBUG_CAT("VULKAN", "Debug messenger created: 0x{:x}", reinterpret_cast<uintptr_t>(messenger));
             }
-        } else {
-            LOG_WARN_CAT("VULKAN", "vkCreateDebugUtilsMessengerEXT not available — Validation active but no messenger");
         }
     }
 
-    LOG_SUCCESS_CAT("VULKAN", "{}VULKAN INSTANCE FORGED @ 0x{:x} — SDL EXTENSIONS ACTIVE — TITAN DOMINANCE ETERNAL{}", 
-                    PLASMA_FUCHSIA, reinterpret_cast<uintptr_t>(instance), RESET);
-    return instance;
+    // Final confirmation
+	g_context_instance.instance_ = instance;  // ← Raw handle stored safely
+    LOG_SUCCESS_CAT("VULKAN", "{}STONEKEY v∞ FULLY ACTIVE — INSTANCE OBFUSCATED — TITAN DOMINANCE ETERNAL{}", LILAC_LAVENDER, RESET);
+    return instance;  // Caller gets raw handle — StoneKey already protects global access
 }
 
 // =============================================================================
-// 3. Physical Device Selection
+// 3. Physical Device Selection — STONEKEY v∞ DELAYED ACTIVATION (CRITICAL)
 // =============================================================================
 void pickPhysicalDevice()
 {
     LOG_TRACE_CAT("VULKAN", "→ Entering RTX::pickPhysicalDevice() — scanning for physical devices");
 
+    // CRITICAL: Use RAW instance — StoneKey is NOT active yet!
+    VkInstance rawInstance = g_context_instance.instance_;
+    LOG_TRACE_CAT("VULKAN", "    • Using RAW instance for enumeration: 0x{:016x}", reinterpret_cast<uintptr_t>(rawInstance));
+
     uint32_t deviceCount = 0;
-    LOG_TRACE_CAT("VULKAN", "    • Enumerating physical device count (first pass: nullptr buffer)");
-    VK_CHECK_NOMSG(vkEnumeratePhysicalDevices(g_ctx().instance(), &deviceCount, nullptr));
+    LOG_TRACE_CAT("VULKAN", "    • Enumerating physical device count (first pass)");
+    VK_CHECK_NOMSG(vkEnumeratePhysicalDevices(rawInstance, &deviceCount, nullptr));
     LOG_TRACE_CAT("VULKAN", "    • Device count queried: {}", deviceCount);
 
     if (deviceCount == 0) {
-        LOG_TRACE_CAT("VULKAN", "    • No devices found — preparing fatal termination");
         LOG_FATAL_CAT("VULKAN", "No Vulkan physical devices found — cannot continue");
         std::terminate();
     }
 
-    LOG_TRACE_CAT("VULKAN", "    • Allocating vector for {} devices", deviceCount);
     std::vector<VkPhysicalDevice> devices(deviceCount);
-    LOG_TRACE_CAT("VULKAN", "    • Enumerating physical devices (second pass: filling vector)");
-    VK_CHECK_NOMSG(vkEnumeratePhysicalDevices(g_ctx().instance(), &deviceCount, devices.data()));
+    LOG_TRACE_CAT("VULKAN", "    • Enumerating physical devices (second pass)");
+    VK_CHECK_NOMSG(vkEnumeratePhysicalDevices(rawInstance, &deviceCount, devices.data()));
     LOG_TRACE_CAT("VULKAN", "    • Enumeration complete — {} devices populated", deviceCount);
 
-    // Prefer discrete GPU
     LOG_TRACE_CAT("VULKAN", "    • Scanning {} devices for discrete GPU preference", deviceCount);
+
+    VkPhysicalDevice selected = VK_NULL_HANDLE;
+
     for (size_t i = 0; i < devices.size(); ++i) {
         const auto& device = devices[i];
-        LOG_TRACE_CAT("VULKAN", "      • Inspecting device {}: handle=0x{:x}", i, reinterpret_cast<uintptr_t>(device));
-
         VkPhysicalDeviceProperties props{};
-        LOG_TRACE_CAT("VULKAN", "        • Querying properties for device {}", i);
         vkGetPhysicalDeviceProperties(device, &props);
-        LOG_TRACE_CAT("VULKAN", "        • Device {} props — Name: '{}', Type: {}, Vendor: 0x{:x}, DeviceID: 0x{:x}, API: {}.{}.{}",
-                      i,
-                      props.deviceName,
-                      props.deviceType,
+
+        LOG_TRACE_CAT("VULKAN", "      • Device {}: '{}' — Type: {} — Vendor: 0x{:x} — API: {}.{}.{}",
+                      i, props.deviceName, props.deviceType,
                       props.vendorID,
-                      props.deviceID,
                       VK_VERSION_MAJOR(props.apiVersion),
                       VK_VERSION_MINOR(props.apiVersion),
                       VK_VERSION_PATCH(props.apiVersion));
 
         if (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) {
-            LOG_TRACE_CAT("VULKAN", "        • MATCH: Discrete GPU found at index {} — selecting", i);
-            g_ctx().physicalDevice_ = device;
-            set_g_PhysicalDevice(device);
+            LOG_TRACE_CAT("VULKAN", "        • DISCRETE GPU FOUND — claiming throne");
+            selected = device;
+            g_ctx().physicalDevice_ = selected;
+            set_g_PhysicalDevice(selected);
 
-            LOG_SUCCESS_CAT("VULKAN", "{}DISCRETE GPU SELECTED{} — {} (API: {}.{}.{})",
+            LOG_SUCCESS_CAT("VULKAN", "{}DISCRETE GPU CLAIMED{} — {} (API: {}.{}.{})",
                             PLASMA_FUCHSIA, RESET,
                             props.deviceName,
                             VK_VERSION_MAJOR(props.apiVersion),
                             VK_VERSION_MINOR(props.apiVersion),
                             VK_VERSION_PATCH(props.apiVersion));
+
             AI_INJECT("I have claimed the discrete throne: {}", props.deviceName);
-            LOG_TRACE_CAT("VULKAN", "← Exiting RTX::pickPhysicalDevice() — discrete GPU selected: {}", props.deviceName);
-            return;
-        } else {
-            LOG_TRACE_CAT("VULKAN", "        • Skipping non-discrete device {} (type: {})", i, props.deviceType);
+            break;
         }
     }
 
-    // Fallback: use first available device
-    LOG_TRACE_CAT("VULKAN", "    • No discrete GPU found — falling back to first device (index 0)");
-    VkPhysicalDevice selected = devices[0];
-    LOG_TRACE_CAT("VULKAN", "      • Fallback candidate: handle=0x{:x}", reinterpret_cast<uintptr_t>(selected));
+    // Fallback if no discrete GPU
+    if (selected == VK_NULL_HANDLE) {
+        selected = devices[0];
+        g_ctx().physicalDevice_ = selected;
+        set_g_PhysicalDevice(selected);
 
-    g_ctx().physicalDevice_ = selected;
-    set_g_PhysicalDevice(selected);
+        VkPhysicalDeviceProperties props{};
+        vkGetPhysicalDeviceProperties(selected, &props);
 
-    VkPhysicalDeviceProperties props{};
-    LOG_TRACE_CAT("VULKAN", "    • Querying fallback properties");
-    vkGetPhysicalDeviceProperties(selected, &props);
-    LOG_TRACE_CAT("VULKAN", "      • Fallback props — Name: '{}', Type: {}, Vendor: 0x{:x}, DeviceID: 0x{:x}, API: {}.{}.{}",
-                  props.deviceName,
-                  props.deviceType,
-                  props.vendorID,
-                  props.deviceID,
-                  VK_VERSION_MAJOR(props.apiVersion),
-                  VK_VERSION_MINOR(props.apiVersion),
-                  VK_VERSION_PATCH(props.apiVersion));
+        LOG_SUCCESS_CAT("VULKAN", "{}FALLBACK GPU SELECTED{} — {} ({})",
+                        EMERALD_GREEN, RESET,
+                        props.deviceName,
+                        [t = props.deviceType]() -> const char* {
+                            switch (t) {
+                                case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU: return "Integrated";
+                                case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU:   return "Virtual";
+                                case VK_PHYSICAL_DEVICE_TYPE_CPU:            return "CPU";
+                                default:                                     return "Other";
+                            }
+                        }());
 
-    LOG_SUCCESS_CAT("VULKAN", "{}FALLBACK GPU SELECTED{} — {} (Type: {})",
-                    EMERALD_GREEN, RESET,
-                    props.deviceName,
-                    [type = props.deviceType]() -> const char* {
-                        LOG_TRACE_CAT("VULKAN", "        • Mapping device type {} to string", static_cast<int>(type));
-                        switch (type) {
-                            case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU: return "Integrated";
-                            case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU:   return "Virtual";
-                            case VK_PHYSICAL_DEVICE_TYPE_CPU:            return "CPU";
-                            case VK_PHYSICAL_DEVICE_TYPE_OTHER:          return "Other";
-                            default:                                     return "Unknown";
-                        }
-                    }());
+        AI_INJECT("I will make do with what is given: {}", props.deviceName);
+    }
 
-    AI_INJECT("I will make do with what is given: {}", props.deviceName);
-    LOG_TRACE_CAT("VULKAN", "← Exiting RTX::pickPhysicalDevice() — fallback GPU selected: {}", props.deviceName);
+    // CRITICAL: NOW — AND ONLY NOW — ENGAGE STONEKEY ON THE INSTANCE
+    // All vkEnumeratePhysicalDevices() calls are done. Safe to obfuscate.
+    set_g_instance(rawInstance);
+
+    LOG_SUCCESS_CAT("VULKAN", "{}STONEKEY v∞ ENGAGED ON VkInstance — FULL OBFUSCATION ACTIVE — APOCALYPSE v3.2 ARMED{}",
+                    LILAC_LAVENDER, RESET);
+
+    LOG_TRACE_CAT("VULKAN", "← Exiting RTX::pickPhysicalDevice() — GPU selected, StoneKey armed");
 }
 
 // =============================================================================
-// 4. Logical Device + Queues
+// 4. Logical Device + Queues — STONEKEY v∞ FULLY COMPATIBLE — AAAA 2025
 // =============================================================================
 void createLogicalDevice()
 {
@@ -1403,26 +1380,17 @@ void createLogicalDevice()
         VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME,
         VK_KHR_PIPELINE_LIBRARY_EXTENSION_NAME,
         VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME,
-        VK_KHR_RAY_QUERY_EXTENSION_NAME  // FIXED: Enable ray query extension for SPIR-V compliance
+        VK_KHR_RAY_QUERY_EXTENSION_NAME
     };
 
     VkPhysicalDeviceFeatures features{};
     features.samplerAnisotropy = VK_TRUE;
-    // FIXED: Enable shaderInt64 if supported (resolves VUID-VkShaderModuleCreateInfo-pCode-08740 Int64 validation)
+
     VkPhysicalDeviceFeatures supportedFeatures{};
     vkGetPhysicalDeviceFeatures(phys, &supportedFeatures);
     if (supportedFeatures.shaderInt64) {
         features.shaderInt64 = VK_TRUE;
-        LOG_SUCCESS_CAT("VULKAN", "Enabled shaderInt64 — 64-bit shader support unlocked for ray tracing!");
-    } else {
-        LOG_WARN_CAT("VULKAN", "GPU lacks shaderInt64 support — shaders using 64-bit ints will fail validation. Refactor GLSL or select another GPU.");
-    }
-    vkGetPhysicalDeviceFeatures(phys, &supportedFeatures);
-    if (supportedFeatures.shaderInt64) {
-        features.shaderInt64 = VK_TRUE;
-        LOG_SUCCESS_CAT("VULKAN", "Enabled shaderInt64 — 64-bit shader support unlocked for ray tracing!");
-    } else {
-        LOG_WARN_CAT("VULKAN", "GPU lacks shaderInt64 support — shaders using 64-bit ints will fail validation. Refactor GLSL or select another GPU.");
+        LOG_SUCCESS_CAT("VULKAN", "{}shaderInt64 ENABLED — 64-bit atomic paradise unlocked{}", PLASMA_FUCHSIA, RESET);
     }
 
     VkPhysicalDeviceBufferDeviceAddressFeatures bufferAddr{
@@ -1440,13 +1408,11 @@ void createLogicalDevice()
         .rayTracingPipeline = VK_TRUE
     };
 
-    // FIXED: Add RayQuery features — Chain to RT for SPIR-V ray query support
     VkPhysicalDeviceRayQueryFeaturesKHR rayQuery{
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR,
         .rayQuery = VK_TRUE
     };
 
-    // Chain: bufferAddr -> accel -> rt -> rayQuery
     bufferAddr.pNext = &accel;
     accel.pNext = &rt;
     rt.pNext = &rayQuery;
@@ -1461,13 +1427,23 @@ void createLogicalDevice()
         .pEnabledFeatures = &features
     };
 
-    VK_CHECK(vkCreateDevice(phys, &createInfo, nullptr, &g_context_instance.device_),
+    VkDevice device = VK_NULL_HANDLE;
+    VK_CHECK(vkCreateDevice(phys, &createInfo, nullptr, &device),
              "Failed to create logical device");
 
-    vkGetDeviceQueue(g_context_instance.device_, graphicsFamily, 0, &g_context_instance.graphicsQueue_);
-    vkGetDeviceQueue(g_context_instance.device_, presentFamily, 0, &g_context_instance.presentQueue_);
+    // CRITICAL: Store raw first → then engage StoneKey
+    g_context_instance.device_ = device;           // ← Raw handle (used by VulkanRTX constructor)
+    set_g_device(device);                          // ← Immediate obfuscation + raw caching (safe now)
 
-    LOG_SUCCESS_CAT("VULKAN", "Logical device + queues FORGED — RayQuery ENABLED — READY FOR TRACE");
+    vkGetDeviceQueue(device, graphicsFamily, 0, &g_context_instance.graphicsQueue_);
+    vkGetDeviceQueue(device, presentFamily,  0, &g_context_instance.presentQueue_);
+
+    LOG_SUCCESS_CAT("VULKAN", "{}LOGICAL DEVICE FORGED @ 0x{:016x}{}", 
+                    RASPBERRY_PINK, reinterpret_cast<uintptr_t>(device), RESET);
+    LOG_SUCCESS_CAT("VULKAN", "{}STONEKEY v∞ ACTIVE ON VkDevice — PINK PHOTONS PROTECTED — RAYQUERY ARMED{}", 
+                    LILAC_LAVENDER, RESET);
+    LOG_SUCCESS_CAT("VULKAN", "{}QUEUES ACQUIRED — GRAPHICS: {} | PRESENT: {} — READY FOR VALHALLA{}",
+                    EMERALD_GREEN, graphicsFamily, presentFamily, RESET);
 }
 
 // =============================================================================
@@ -1549,6 +1525,7 @@ void loadRayTracingExtensions()
 }
 
 // VulkanCore.cpp — FINAL, SDL3-CORRECT, BULLETPROOF FORMAT — NO BULLSHIT
+// VulkanCore.cpp — FINAL, SDL3-CORRECT, BULLETPROOF + STONEKEY v∞ ACTIVE
 bool createSurface(SDL_Window* window, VkInstance instance)
 {
     LOG_TRACE_CAT("VULKAN", "createSurface entry — window: 0x{:p}, instance: 0x{:x}",
@@ -1561,33 +1538,42 @@ bool createSurface(SDL_Window* window, VkInstance instance)
         std::abort();
     }
 
-    LOG_INFO_CAT("VULKAN", "{}Creating Vulkan surface via SDL3 (official spec)...{}", EMERALD_GREEN, RESET);
+    LOG_INFO_CAT("VULKAN", "{}FORGING VULKAN SURFACE — SDL3 OFFICIAL PATH — PINK PHOTONS RISING{}", EMERALD_GREEN, RESET);
 
     VkSurfaceKHR surface = VK_NULL_HANDLE;
 
-    LOG_TRACE_CAT("VULKAN", "Calling SDL_Vulkan_CreateSurface(window=0x{:p}, instance=0x{:x}, allocator=nullptr, &surface)",
+    LOG_TRACE_CAT("VULKAN", "Calling SDL_Vulkan_CreateSurface(window=0x{:p}, instance=0x{:x}, &surface)",
                   static_cast<void*>(window), reinterpret_cast<uintptr_t>(instance));
 
-    if (!SDL_Vulkan_CreateSurface(window, instance, nullptr, &surface)) {
+    if (SDL_Vulkan_CreateSurface(window, instance, nullptr, &surface) == 0) { // == 0 do not !
         const char* err = SDL_GetError();
-        // FIXED: Direct output — bypass macro/format for fatal
-        std::cerr << COSMIC_GOLD << "SDL_Vulkan_CreateSurface FAILED: " << (err ? err : "Unknown") << RESET << std::endl;
+        std::cerr << COSMIC_GOLD << "SDL_Vulkan_CreateSurface FAILED: " << (err ? err : "Unknown error") << RESET << std::endl;
         return false;
     }
 
     if (surface == VK_NULL_HANDLE) {
-        // FIXED: Direct output — bypass macro/format
-        std::cerr << "SDL_Vulkan_CreateSurface returned VK_NULL_HANDLE — driver bug" << std::endl;
+        std::cerr << "SDL_Vulkan_CreateSurface returned VK_NULL_HANDLE — driver bug or zombie window" << std::endl;
         return false;
     }
 
-    set_g_surface(surface);
+    // CRITICAL STONEKEY FIX:
+    // 1. Store RAW surface first → vkGetPhysicalDeviceSurfaceSupportKHR() uses it
+    // 2. THEN engage StoneKey → protected for the rest of eternity
+    g_context_instance.surface_ = surface;   // ← Raw handle stored (used by queue family selection)
+    set_g_surface(surface);                  // ← StoneKey v∞ now guards it forever
 
-    // FIXED: Direct output — pre-format + raw cout to avoid parse clash in macro
-    auto addrStr = std::format("0x{:x}", reinterpret_cast<uintptr_t>(g_surface));
-    std::cout << PLASMA_FUCHSIA << "GLOBAL SURFACE FORGED @ " << addrStr << " — SDL3 INTEGRATION COMPLETE — PINK PHOTONS RISING" << RESET << std::endl;
+    LOG_SUCCESS_CAT("VULKAN", "{}SURFACE FORGED @ 0x{:016x} — STONEKEY v∞ ENGAGED — APOCALYPSE v3.2 ARMED{}",
+                    RASPBERRY_PINK, reinterpret_cast<uintptr_t>(surface), RESET);
 
-    LOG_TRACE_CAT("VULKAN", "Surface creation complete — g_surface = {}", addrStr);
+    // Final empire announcement
+    std::cout << PLASMA_FUCHSIA 
+              << "GLOBAL SURFACE FORGED & STONEKEY-PROTECTED @ 0x" 
+              << std::hex << reinterpret_cast<uintptr_t>(g_surface()) 
+              << " — SDL3 INTEGRATION COMPLETE — PINK PHOTONS ETERNAL" 
+              << RESET << std::endl;
+
+    LOG_TRACE_CAT("VULKAN", "Surface creation complete — g_surface() = 0x{:x} (StoneKey active)",
+                  reinterpret_cast<uintptr_t>(g_surface()));
 
     return true;
 }

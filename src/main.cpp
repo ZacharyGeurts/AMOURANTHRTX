@@ -368,20 +368,6 @@ static void phase3_vulkanContext(SDL_Window* window) {
 
     LOG_SUCCESS_CAT("MAIN", "{}Vulkan instance created — handle: 0x{:x}{}", EMERALD_GREEN, reinterpret_cast<uintptr_t>(g_instance), RESET);
 
-    LOG_INFO_CAT("MAIN", "{}FORGING GLOBAL VULKAN SURFACE — PRE-WINDOW SHOW — PINK PHOTONS RISING{}", 
-                 PLASMA_FUCHSIA, RESET);
-
-    // Single source of truth — createSurface() does ALL logging and validation
-    if (!RTX::createSurface(window, g_instance)) {
-        LOG_FATAL_CAT("MAIN", "{}PHASE 3 ABORT: Surface creation failed — no rendering possible{}", CRIMSON_MAGENTA, RESET);
-        return;  // BULLETPROOF: Propagate failure
-    }
-
-    // Surface is now guaranteed valid — createSurface() already logged success
-    LOG_SUCCESS_CAT("MAIN", "{}GLOBAL SURFACE ACTIVE @ 0x{:x} — SDL3 INTEGRATION COMPLETE{}", 
-                    COSMIC_GOLD, reinterpret_cast<uintptr_t>(g_surface()), RESET);
-
-    // NOW SAFE TO SHOW WINDOW
     SDL_ShowWindow(window);
     LOG_SUCCESS_CAT("MAIN", "Main window shown — Vulkan surface ready");
 

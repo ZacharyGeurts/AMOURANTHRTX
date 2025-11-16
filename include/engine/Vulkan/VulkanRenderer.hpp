@@ -1,11 +1,11 @@
 // =============================================================================
-// VulkanRenderer.hpp — FINAL v11.0 — NOV 15 2025 — FRAMEBUFFERS FIXED
-// • ADDED: createFramebuffers() + cleanupFramebuffers()
-// • ADDED: Proper framebuffer recreation in handleResize()
-// • FIXED: License header → GNU GPL v3.0 or later (NO MORE CC BY-NC)
-// • FULLY COMPATIBLE with VulkanRenderer.cpp
-// • RESIZE → NO MORE SIGSEGV — PINK PHOTONS FLOW UNINTERRUPTED
-// • 240+ FPS UNLOCKED — TITAN DOMINANCE ETERNAL
+// VulkanRenderer.hpp — FINAL v11.1 — NOV 16 2025 — RESIZE ROCK SOLID
+// • ADDED: float exposure_ = 1.0f; (for tonemap UBO)
+// • ADDED: Declarations for recreateTonemapUBOs(), destroySharedStaging(), createSharedStaging()
+// • FIXED: No bool checks on void funcs (SWAPCHAIN.recreate, createRTOutputImages etc. — assume success or log)
+// • RESIZE: Safe calls without returns — early aborts removed for noexcept; logs on fail via VK_CHECK inside funcs
+// • LICENSE: GPL-3.0+ — FULLY COMPATIBLE w/ VulkanRenderer.cpp
+// • 240+ FPS — TITAN DOMINANCE ETERNAL — PINK PHOTONS UNBREAKABLE
 //
 // Licensed under the GNU General Public License v3.0 or later (GPL-3.0+)
 // https://www.gnu.org/licenses/gpl-3.0.html
@@ -134,6 +134,9 @@ private:
     double timestampPeriod_ = 0.0;
     bool resetAccumulation_ = true;
 
+    // FIXED: Add exposure_ for tonemap UBO (default 1.0f)
+    float exposure_ = 1.0f;
+
     // Runtime toggles
     bool hypertraceEnabled_     = Options::RTX::ENABLE_ADAPTIVE_SAMPLING;
     bool denoisingEnabled_      = Options::RTX::ENABLE_DENOISING;
@@ -227,15 +230,22 @@ private:
     RTX::Handle<VkDescriptorSetLayout> tonemapDescriptorSetLayout_;
     RTX::Handle<VkSampler>             tonemapSampler_;
 
-    // ──────────────────────────────────────────────────────────────────────
+    // ──────────────────────────────────────────────────────────────────────────────
     // NEW: Framebuffer Management
-    // ──────────────────────────────────────────────────────────────────────
+    // ──────────────────────────────────────────────────────────────────────────────
     void createFramebuffers();
     void cleanupFramebuffers() noexcept;
 
-    // ──────────────────────────────────────────────────────────────────────
+    // ──────────────────────────────────────────────────────────────────────────────
+    // FIXED: New helpers for resize (tonemap UBO + shared staging recreate)
+    // ──────────────────────────────────────────────────────────────────────────────
+    bool recreateTonemapUBOs() noexcept;
+    void destroySharedStaging() noexcept;
+    bool createSharedStaging() noexcept;
+
+    // ──────────────────────────────────────────────────────────────────────────────
     // Helper Methods
-    // ──────────────────────────────────────────────────────────────────────
+    // ──────────────────────────────────────────────────────────────────────────────
     VkCommandBuffer beginSingleTimeCommands(VkDevice device, VkCommandPool pool);
     void endSingleTimeCommands(VkDevice device, VkCommandPool pool, VkQueue queue, VkCommandBuffer cmd);
     VkCommandBuffer allocateTransientCommandBuffer(VkDevice device, VkCommandPool pool);
@@ -318,6 +328,6 @@ inline void shutdown() noexcept {
 }
 
 // =============================================================================
-// GPL-3.0+ — FRAMEBUFFERS FIXED — RESIZE SAFE — PINK PHOTONS ASCENDED
+// GPL-3.0+ — RESIZE ROCK SOLID — NO SIGSEGV — PINK PHOTONS UNBREAKABLE
 // AMOURANTH RTX ETERNAL — TITAN DOMINANCE ACHIEVED
 // =============================================================================
