@@ -1,5 +1,6 @@
 Currently compiles and reaches render loop. Much more work needed yet.  
 I work fast but slow. Rather than rendering fast and working backwards HDR and features come with.    
+Updates are fast and furious at this stage and the renderer could be up or down any minute.  
 The goal is a fast as pink photons SDL3 RTX engine that is ready for you, the developer.  
 Our defaults are power. 10bit HDR forced on if you have it. No remorse :D  
 Logging is extensive with trace, debug, info, etc.  
