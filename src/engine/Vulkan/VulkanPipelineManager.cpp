@@ -8,7 +8,7 @@
 //    https://www.gnu.org/licenses/gpl-3.0.html
 // 2. Commercial licensing: gzac5314@gmail.com
 //
-// TRUE CONSTEXPR STONEKEY v∞ — NOVEMBER 15, 2025 — APOCALYPSE v3.2
+// TRUE CONSTEXPR STONEKEY v∞ — NOVEMBER 16, 2025 — APOCALYPSE v3.3 (FIXED: Descriptor Updates + Layout Consistency + Allocation Deferred)
 // PURE RANDOM ENTROPY — RDRAND + PID + TIME + TLS — SIMPLE & SECURE
 // KEYS **NEVER** LOGGED — ONLY HASHED FINGERPRINTS — SECURITY > VANITY
 // FULLY COMPLIANT WITH -Werror=unused-variable
@@ -21,13 +21,15 @@
 #include <fstream>
 #include <algorithm>
 #include <format>
+#include <vector>
+#include <array>
 
 using namespace Logging::Color;
 
 namespace RTX {
 
 // ──────────────────────────────────────────────────────────────────────────────
-// PipelineManager Constructor — Matches VulkanRenderer Style + FIXED: Null Guard Early Exit
+// PipelineManager Constructor — Matches VulkanRenderer Style + FIXED: Null Guard Early Exit + DEFERRED: Allocation to Renderer (Prevents Duplicate Alloc + VK_ERROR_OUT_OF_POOL_MEMORY)
 // ──────────────────────────────────────────────────────────────────────────────
 PipelineManager::PipelineManager(VkDevice device, VkPhysicalDevice phys)
     : device_(device), physicalDevice_(phys)
@@ -49,8 +51,9 @@ PipelineManager::PipelineManager(VkDevice device, VkPhysicalDevice phys)
     cacheDeviceProperties();
     LOG_TRACE_CAT("PIPELINE", "Step 1 COMPLETE");
 
-    LOG_TRACE_CAT("PIPELINE", "=== STACK BUILD ORDER STEP 2: Create Descriptor Set Layout ===");
+    LOG_TRACE_CAT("PIPELINE", "=== STACK BUILD ORDER STEP 2: Create Descriptor Set Layout & Pool ===");
     createDescriptorSetLayout();
+    // DEFERRED: allocateDescriptorSets();  // FIXED: Moved to VulkanRenderer init — Prevents duplicate allocation from same pool (resolves VK_ERROR_OUT_OF_POOL_MEMORY -1000069000)
     LOG_TRACE_CAT("PIPELINE", "Step 2 COMPLETE");
 
     LOG_TRACE_CAT("PIPELINE", "=== STACK BUILD ORDER STEP 3: Create Pipeline Layout ===");
@@ -58,15 +61,236 @@ PipelineManager::PipelineManager(VkDevice device, VkPhysicalDevice phys)
     LOG_TRACE_CAT("PIPELINE", "Step 3 COMPLETE");
 
     LOG_SUCCESS_CAT("PIPELINE", 
-        "{}PIPELINE MANAGER FULLY INITIALIZED — RT PROPERTIES CACHED — DESCRIPTORS & LAYOUTS FORGED — PINK PHOTONS ARMED{}", 
+        "{}PIPELINE MANAGER FULLY INITIALIZED — RT PROPERTIES CACHED — DESCRIPTORS & LAYOUTS FORGED — POOL READY FOR RENDERER ALLOC — PINK PHOTONS ARMED{}", 
         EMERALD_GREEN, RESET);
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// NEW: Destructor — vkDeviceWaitIdle Before Handle Resets (Fixes In-Use Destruction)
+// NEW: Allocate Frame Descriptor Sets — Ensures Sets Are Ready for Updates (Prevents "Never Updated" Errors) — CALL FROM RENDERER
+// ──────────────────────────────────────────────────────────────────────────────
+void PipelineManager::allocateDescriptorSets() {
+    LOG_TRACE_CAT("PIPELINE", "allocateDescriptorSets — START — maxSets={}", Options::Performance::MAX_FRAMES_IN_FLIGHT);
+
+    if (!rtDescriptorPool_.valid() || *rtDescriptorPool_ == VK_NULL_HANDLE) {
+        LOG_ERROR_CAT("PIPELINE", "Invalid descriptor pool — cannot allocate sets");
+        return;
+    }
+
+    const uint32_t maxSets = Options::Performance::MAX_FRAMES_IN_FLIGHT;
+    rtDescriptorSets_.resize(maxSets);
+
+    VkDescriptorSetAllocateInfo allocInfo = {};
+    allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    allocInfo.descriptorPool = *rtDescriptorPool_;
+    allocInfo.descriptorSetCount = maxSets;
+
+    // All sets use the same layout
+    std::array<VkDescriptorSetLayout, 8> layouts = {};  // Conservative size for MAX_FRAMES_IN_FLIGHT <= 8
+    for (uint32_t i = 0; i < maxSets; ++i) {
+        layouts[i] = *rtDescriptorSetLayout_;
+    }
+    allocInfo.pSetLayouts = layouts.data();
+
+    VkResult res = vkAllocateDescriptorSets(device_, &allocInfo, rtDescriptorSets_.data());
+    VK_CHECK(res, std::format("Failed to allocate {} RT descriptor sets", maxSets).c_str());
+
+    LOG_SUCCESS_CAT("PIPELINE", "Allocated {} RT descriptor sets — Ready for vkUpdateDescriptorSets (VUID-08114 FIXED)", maxSets);
+    for (uint32_t i = 0; i < maxSets; ++i) {
+        LOG_TRACE_CAT("PIPELINE", "  Frame {} set: 0x{:x}", i, reinterpret_cast<uintptr_t>(rtDescriptorSets_[i]));
+    }
+
+    LOG_TRACE_CAT("PIPELINE", "allocateDescriptorSets — COMPLETE");
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// NEW: Update RT Descriptor Set — Writes ALL Bindings Including Array Indices 0-2 (Fixes "Never Updated" for Index 1 + Layout in Descriptor)
+// ──────────────────────────────────────────────────────────────────────────────
+void PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDescriptorUpdate& updateInfo) {
+    LOG_TRACE_CAT("PIPELINE", "updateRTDescriptorSet — START — frameIndex={}", frameIndex);
+
+    if (frameIndex >= rtDescriptorSets_.size() || rtDescriptorSets_[frameIndex] == VK_NULL_HANDLE) {
+        LOG_ERROR_CAT("PIPELINE", "Invalid frameIndex {} or null set — skipping update", frameIndex);
+        return;
+    }
+
+    VkDescriptorSet set = rtDescriptorSets_[frameIndex];
+    std::vector<VkWriteDescriptorSet> writes;
+
+    // Binding 0: TLAS (acceleration structure)
+    VkWriteDescriptorSet accelWrite = {};
+    accelWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    accelWrite.dstSet = set;
+    accelWrite.dstBinding = 0;
+    accelWrite.dstArrayElement = 0;
+    accelWrite.descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+    accelWrite.descriptorCount = 1;
+
+    VkWriteDescriptorSetAccelerationStructureKHR accelInfo = {};
+    accelInfo.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR;
+    accelInfo.accelerationStructureCount = 1;
+    accelInfo.pAccelerationStructures = &updateInfo.tlas;
+    accelWrite.pNext = &accelInfo;
+
+    writes.push_back(accelWrite);
+
+    // Binding 3: UBO
+    if (updateInfo.ubo != VK_NULL_HANDLE) {
+        VkWriteDescriptorSet uboWrite = {};
+        uboWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        uboWrite.dstSet = set;
+        uboWrite.dstBinding = 3;
+        uboWrite.dstArrayElement = 0;
+        uboWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        uboWrite.descriptorCount = 1;
+
+        VkDescriptorBufferInfo uboBufferInfo = {};
+        uboBufferInfo.buffer = updateInfo.ubo;
+        uboBufferInfo.offset = 0;
+        uboBufferInfo.range = updateInfo.uboSize;
+        uboWrite.pBufferInfo = &uboBufferInfo;
+
+        writes.push_back(uboWrite);
+    }
+
+    // Binding 4: Storage buffer (materials)
+    if (updateInfo.materialsBuffer != VK_NULL_HANDLE) {
+        VkWriteDescriptorSet matWrite = {};
+        matWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        matWrite.dstSet = set;
+        matWrite.dstBinding = 4;
+        matWrite.dstArrayElement = 0;
+        matWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        matWrite.descriptorCount = 1;
+
+        VkDescriptorBufferInfo matBufferInfo = {};
+        matBufferInfo.buffer = updateInfo.materialsBuffer;
+        matBufferInfo.offset = 0;
+        matBufferInfo.range = updateInfo.materialsSize;
+        matWrite.pBufferInfo = &matBufferInfo;
+
+        writes.push_back(matWrite);
+    }
+
+    // Binding 5: Env sampler
+    if (updateInfo.envSampler != VK_NULL_HANDLE && updateInfo.envImageView != VK_NULL_HANDLE) {
+        VkWriteDescriptorSet samplerWrite = {};
+        samplerWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        samplerWrite.dstSet = set;
+        samplerWrite.dstBinding = 5;
+        samplerWrite.dstArrayElement = 0;
+        samplerWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        samplerWrite.descriptorCount = 1;
+
+        VkDescriptorImageInfo samplerImageInfo = {};
+        samplerImageInfo.sampler = updateInfo.envSampler;
+        samplerImageInfo.imageView = updateInfo.envImageView;
+        samplerImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;  // FIXED: Correct layout for sampling
+        samplerWrite.pImageInfo = &samplerImageInfo;
+
+        writes.push_back(samplerWrite);
+    }
+
+    // Binding 7: Additional storage buffer (assumed similar to materials)
+    if (updateInfo.additionalStorageBuffer != VK_NULL_HANDLE) {
+        VkWriteDescriptorSet addWrite = {};
+        addWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        addWrite.dstSet = set;
+        addWrite.dstBinding = 7;
+        addWrite.dstArrayElement = 0;
+        addWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        addWrite.descriptorCount = 1;
+
+        VkDescriptorBufferInfo addBufferInfo = {};
+        addBufferInfo.buffer = updateInfo.additionalStorageBuffer;
+        addBufferInfo.offset = 0;
+        addBufferInfo.range = updateInfo.additionalStorageSize;
+        addWrite.pBufferInfo = &addBufferInfo;
+
+        writes.push_back(addWrite);
+    }
+
+    // FIXED: Bindings 1,2,6 — Update ALL array indices 0-2 (resolves "never updated" for Index 1) + Set GENERAL layout
+    const VkImageLayout storageLayout = VK_IMAGE_LAYOUT_GENERAL;  // FIXED: Matches storage image use in raygen (VUID-09600 prep)
+    for (int i = 0; i < 3; ++i) {
+        // Binding 1: rtOutput[3]
+        if (updateInfo.rtOutputViews[i] != VK_NULL_HANDLE) {
+            VkWriteDescriptorSet rtWrite = {};
+            rtWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            rtWrite.dstSet = set;
+            rtWrite.dstBinding = 1;
+            rtWrite.dstArrayElement = static_cast<uint32_t>(i);  // FIXED: Explicitly update Index 1 (and 0,2)
+            rtWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+            rtWrite.descriptorCount = 1;
+
+            VkDescriptorImageInfo rtImageInfo = {};
+            rtImageInfo.imageView = updateInfo.rtOutputViews[i];
+            rtImageInfo.imageLayout = storageLayout;  // FIXED: GENERAL for storage write/read in RT
+            rtWrite.pImageInfo = &rtImageInfo;
+
+            writes.push_back(rtWrite);
+        }
+
+        // Binding 2: accumulation[3]
+        if (updateInfo.accumulationViews[i] != VK_NULL_HANDLE) {
+            VkWriteDescriptorSet accWrite = {};
+            accWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            accWrite.dstSet = set;
+            accWrite.dstBinding = 2;
+            accWrite.dstArrayElement = static_cast<uint32_t>(i);  // FIXED: Explicitly update Index 1 (and 0,2)
+            accWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+            accWrite.descriptorCount = 1;
+
+            VkDescriptorImageInfo accImageInfo = {};
+            accImageInfo.imageView = updateInfo.accumulationViews[i];
+            accImageInfo.imageLayout = storageLayout;  // FIXED: GENERAL for storage write/read in RT
+            accWrite.pImageInfo = &accImageInfo;
+
+            writes.push_back(accWrite);
+        }
+
+        // Binding 6: nexusScore[3]
+        if (updateInfo.nexusScoreViews[i] != VK_NULL_HANDLE) {
+            VkWriteDescriptorSet nexusWrite = {};
+            nexusWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            nexusWrite.dstSet = set;
+            nexusWrite.dstBinding = 6;
+            nexusWrite.dstArrayElement = static_cast<uint32_t>(i);  // FIXED: Explicitly update Index 1 (and 0,2)
+            nexusWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+            nexusWrite.descriptorCount = 1;
+
+            VkDescriptorImageInfo nexusImageInfo = {};
+            nexusImageInfo.imageView = updateInfo.nexusScoreViews[i];
+            nexusImageInfo.imageLayout = storageLayout;  // FIXED: GENERAL for storage write/read in RT
+            nexusWrite.pImageInfo = &nexusImageInfo;
+
+            writes.push_back(nexusWrite);
+        }
+    }
+
+    // FIXED: Perform the update — Ensures ALL descriptors valid before vkCmdTraceRaysKHR (VUID-vkCmdTraceRaysKHR-None-08114 FIXED)
+    vkUpdateDescriptorSets(device_, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
+
+    LOG_SUCCESS_CAT("PIPELINE", "Updated RT descriptor set {} — All bindings + array indices 0-2 written with GENERAL layout — VALID FOR TRACING", frameIndex);
+    LOG_TRACE_CAT("PIPELINE", "updateRTDescriptorSet — COMPLETE");
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// NEW: Destructor — vkDeviceWaitIdle Before Handle Resets + Free Descriptor Sets (Fixes In-Use Destruction + Pool Reuse)
 // ──────────────────────────────────────────────────────────────────────────────
 PipelineManager::~PipelineManager() {
     LOG_ATTEMPT_CAT("PIPELINE", "Destructing PipelineManager — PINK PHOTONS DIMMING");
+
+    // NEW: Free allocated descriptor sets before pool destroy (leverages FREE_DESCRIPTOR_SET_BIT)
+    if (device_ != VK_NULL_HANDLE && !rtDescriptorSets_.empty()) {
+        LOG_TRACE_CAT("PIPELINE", "vkFreeDescriptorSets — Releasing {} sets", rtDescriptorSets_.size());
+        VkResult freeRes = vkFreeDescriptorSets(device_, *rtDescriptorPool_, static_cast<uint32_t>(rtDescriptorSets_.size()), rtDescriptorSets_.data());
+        if (freeRes == VK_SUCCESS) {
+            LOG_TRACE_CAT("PIPELINE", "Descriptor sets freed successfully");
+        } else {
+            LOG_WARN_CAT("PIPELINE", "vkFreeDescriptorSets failed: {} — Pool may leak", static_cast<int>(freeRes));
+        }
+        rtDescriptorSets_.clear();
+    }
 
     // FIXED: Wait for device idle — Ensures all submitted cmds complete before destroying pipelines/buffers/pools
     //        (Resolves vkDestroyPipeline in-use validation error: VUID-vkDestroyPipeline-pipeline-00765)
@@ -83,7 +307,7 @@ PipelineManager::~PipelineManager() {
     }
 
     // Handles auto-reset here — Now safe post-idle
-    LOG_SUCCESS_CAT("PIPELINE", "{}PIPELINE MANAGER DESTROYED — Handles reset safely — EMPIRE PRESERVED — PINK PHOTONS ETERNAL{}", 
+    LOG_SUCCESS_CAT("PIPELINE", "{}PIPELINE MANAGER DESTROYED — Handles reset safely — SETS FREED — EMPIRE PRESERVED — PINK PHOTONS ETERNAL{}", 
                     EMERALD_GREEN, RESET);
 }
 

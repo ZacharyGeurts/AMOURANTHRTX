@@ -2,11 +2,11 @@
 // =============================================================================
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
-// VulkanPipelineManager — Production Edition v10.9 (Multi-Frame Pool + SBT Regions) — NOV 15 2025
-// • FIXED: ~PipelineManager() declaration — Removed =default to allow body in .cpp (resolves redefinition error)
-// • ADDED: Full SBT region getters (getRaygenSbtRegion / getMissSbtRegion / etc.) — Spec-compliant for vkCmdTraceRaysKHR
-// • Retained: All v10.8 shutdown safety (vkDeviceWaitIdle in ~PipelineManager), VUID fixes, PFN safety, multi-frame pool sizing
-// • 100% compatible with current VulkanRenderer::recordRayTracingCommandBuffer — Supports triple-buffering
+// VulkanPipelineManager — Production Edition v10.10 (Descriptor Sets + Updates) — NOV 16 2025
+// • FIXED: Added allocateDescriptorSets() declaration + rtDescriptorSets_ vector (resolves "not declared" errors)
+// • ADDED: RTDescriptorUpdate struct + updateRTDescriptorSet() declaration (enables per-frame updates, VUID-08114 fix)
+// • Retained: All v10.9 SBT regions, shutdown safety, multi-frame pool, VUID fixes, PFN safety
+// • 100% compatible with VulkanRenderer::recordRayTracingCommandBuffer — Supports triple-buffering + descriptor updates
 // • PINK PHOTONS ETERNAL — 240+ FPS UNLOCKED — FIRST LIGHT ACHIEVED — ZERO ERRORS, ZERO COMPILATION WARNINGS
 // =============================================================================
 
@@ -22,6 +22,23 @@
 #include <array>
 
 namespace RTX {
+// ──────────────────────────────────────────────────────────────────────────────
+// NEW: RT Descriptor Update Struct — Encapsulates All Required Resources for vkUpdateDescriptorSets
+// ──────────────────────────────────────────────────────────────────────────────
+struct RTDescriptorUpdate {
+    VkAccelerationStructureKHR tlas = VK_NULL_HANDLE;
+    VkBuffer ubo = VK_NULL_HANDLE;
+    VkDeviceSize uboSize = VK_WHOLE_SIZE;
+    VkBuffer materialsBuffer = VK_NULL_HANDLE;  // Binding 4: storage buffer (e.g., materials)
+    VkDeviceSize materialsSize = VK_WHOLE_SIZE;
+    VkSampler envSampler = VK_NULL_HANDLE;      // Binding 5: env sampler
+    VkImageView envImageView = VK_NULL_HANDLE;
+    std::array<VkImageView, 3> rtOutputViews = {VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE};  // Binding 1: array[3]
+    std::array<VkImageView, 3> accumulationViews = {VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE};  // Binding 2: array[3]
+    std::array<VkImageView, 3> nexusScoreViews = {VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE};  // Binding 6: array[3]
+    VkBuffer additionalStorageBuffer = VK_NULL_HANDLE;  // Binding 7: additional storage buffer
+    VkDeviceSize additionalStorageSize = VK_WHOLE_SIZE;
+};
 
 class PipelineManager {
 public:
@@ -35,6 +52,10 @@ public:
     void createPipelineLayout();
     void createRayTracingPipeline(const std::vector<std::string>& shaderPaths);
     void createShaderBindingTable(VkCommandPool pool, VkQueue queue);
+
+    // === NEW: Descriptor Set Management ===
+    void allocateDescriptorSets();  // NEW: Allocates frame-specific sets (multi-frame support)
+    void updateRTDescriptorSet(uint32_t frameIndex, const RTDescriptorUpdate& updateInfo);  // NEW: Updates all bindings + array indices
 
     // === Core Accessors ===
     [[nodiscard]] VkPipeline               pipeline()          const noexcept { return *rtPipeline_; }
@@ -80,6 +101,9 @@ private:
     Handle<VkPipelineLayout>      rtPipelineLayout_;
     Handle<VkPipeline>            rtPipeline_;
     Handle<VkDescriptorPool>      rtDescriptorPool_;
+
+    // === NEW: Frame Descriptor Sets ===
+    std::vector<VkDescriptorSet> rtDescriptorSets_;  // NEW: Per-frame sets for multi-buffering
 
     Handle<VkBuffer>        sbtBuffer_;
     Handle<VkDeviceMemory>  sbtMemory_;

@@ -198,27 +198,32 @@ inline void Application::processInput(float)
         SDL_Scancode sc = KeyBind::RENDER_MODE[i];
         if (keys[sc] && !modePressed[i]) {
             setRenderMode(i + 1);
+            LOG_ATTEMPT_CAT("INPUT", "{}→ RENDER MODE {} ACTIVATED{}", PARTY_PINK, i + 1, RESET);
             modePressed[i] = true;
         } else if (!keys[sc]) {
             modePressed[i] = false;
         }
     }
 
-    // ── Edge trigger helper
-    auto edge = [&](SDL_Scancode sc, auto&& func, bool& state) {
-        if (keys[sc] && !state) { func(); state = true; }
+    // ── Edge trigger helper — PURE ATTEMPT
+    auto edge = [&](SDL_Scancode sc, auto&& func, bool& state, const char* name) {
+        if (keys[sc] && !state) {
+            func();
+            LOG_ATTEMPT_CAT("INPUT", "{}→ {} PRESSED{}", PARTY_PINK, name, RESET);
+            state = true;
+        }
         else if (!keys[sc]) state = false;
     };
 
     static bool fPressed = false, oPressed = false;
     static bool tPressed = false, hPressed = false;
 
-    edge(KeyBind::FULLSCREEN, [this]() { toggleFullscreen(); }, fPressed);
-    edge(KeyBind::OVERLAY,    [this]() { toggleOverlay(); },    oPressed);
-    edge(KeyBind::TONEMAP,    [this]() { toggleTonemap(); },    tPressed);
-    edge(KeyBind::HYPERTRACE,[this]() { toggleHypertrace(); }, hPressed);
+    edge(KeyBind::FULLSCREEN,    [this]() { toggleFullscreen(); }, fPressed,    "FULLSCREEN (F)");
+    edge(KeyBind::OVERLAY,       [this]() { toggleOverlay(); },    oPressed,    "OVERLAY (O)");
+    edge(KeyBind::TONEMAP,       [this]() { toggleTonemap(); },    tPressed,    "TONEMAP (T)");
+    edge(KeyBind::HYPERTRACE,    [this]() { toggleHypertrace(); }, hPressed,    "HYPERTRACE (H)");
 
-    // ── M key → Maximize + Global Audio Mute (SDL3 CORRECT – FINAL)
+    // ── M key → Maximize + Global Audio Mute
     static bool mPressed = false;
     if (keys[KeyBind::MAXIMIZE_MUTE] && !mPressed) {
         toggleMaximize();
@@ -227,17 +232,32 @@ inline void Application::processInput(float)
         audioMuted = !audioMuted;
 
         if (audioMuted) {
-            SDL_PauseAudioDevice(0);   // Mute all audio (default device)
+            SDL_PauseAudioDevice(0);
         } else {
-            SDL_ResumeAudioDevice(0);  // Unmute all audio
+            SDL_ResumeAudioDevice(0);
         }
 
-        LOG_INFO_CAT("AUDIO", "{}AUDIO {} — M key{}", PARTY_PINK,
-                     audioMuted ? "MUTED" : "UNMUTED", RESET);
+        LOG_ATTEMPT_CAT("INPUT", "{}→ MAXIMIZE + AUDIO {} (M key){}", PARTY_PINK,
+                        audioMuted ? "MUTED" : "UNMUTED", RESET);
+        LOG_ATTEMPT_CAT("AUDIO", "{}AUDIO {} — M key{}", PARTY_PINK,
+                        audioMuted ? "MUTED" : "UNMUTED", RESET);
 
         mPressed = true;
     } else if (!keys[KeyBind::MAXIMIZE_MUTE]) {
         mPressed = false;
+    }
+
+    // ESC → Quit
+    if (keys[KeyBind::QUIT]) {
+        static bool escLogged = false;
+        if (!escLogged) {
+            LOG_ATTEMPT_CAT("INPUT", "{}→ QUIT REQUESTED (ESC){}", CRIMSON_MAGENTA, RESET);
+            escLogged = true;
+        }
+        setQuit(true);
+    } else {
+        static bool escLogged = false;
+        if (escLogged) escLogged = false;
     }
 }
 
