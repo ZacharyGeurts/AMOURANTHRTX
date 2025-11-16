@@ -24,6 +24,7 @@ using namespace Logging::Color;
 
 // ── RAW PFN DECLARATIONS (AAAAA STYLE — NO WRAPPERS, NO BLOAT) ─────────────────
 static PFN_vkGetPastPresentationTimingGOOGLE g_vkGetPastPresentationTimingGOOGLE = nullptr;
+static PFN_vkSetHdrMetadataEXT g_vkSetHdrMetadataEXT = nullptr;
 
 // Preferred formats — god tier first, peasant last
 static constexpr std::array kPreferredFormats = {
@@ -60,9 +61,17 @@ void SwapchainManager::init(VkInstance instance, VkPhysicalDevice phys, VkDevice
         }
     }
 
+    // Load HDR metadata PFN
+    g_vkSetHdrMetadataEXT = reinterpret_cast<PFN_vkSetHdrMetadataEXT>(
+        vkGetDeviceProcAddr(device_, "vkSetHdrMetadataEXT"));
+
     createSwapchain(w, h);
     createImageViews();
     createRenderPass();
+
+    if (isHDR() && !g_vkSetHdrMetadataEXT) {
+        LOG_WARN_CAT("SWAPCHAIN", "VK_EXT_hdr_metadata not supported — HDR metadata updates disabled");
+    }
 
     if (isPeasantMode()) {
         LOG_WARN_CAT("SWAPCHAIN",
@@ -127,6 +136,30 @@ format_chosen:
     uint32_t imageCount = std::max(Options::Performance::MAX_FRAMES_IN_FLIGHT, caps.minImageCount);
     if (caps.maxImageCount > 0) imageCount = std::min(imageCount, caps.maxImageCount);
 
+    // Select supported image usage
+    VkImageUsageFlags imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    if (caps.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_DST_BIT) {
+        imageUsage |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    } else {
+        LOG_WARN_CAT("SWAPCHAIN", "VK_IMAGE_USAGE_TRANSFER_DST_BIT not supported — proceeding without transfer dst usage");
+    }
+
+    // Select supported composite alpha, preferring opaque
+    VkCompositeAlphaFlagBitsKHR compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+    if (!(caps.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR)) {
+        if (caps.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_POST_MULTIPLIED_BIT_KHR) {
+            compositeAlpha = VK_COMPOSITE_ALPHA_POST_MULTIPLIED_BIT_KHR;
+        } else if (caps.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR) {
+            compositeAlpha = VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR;
+        } else if (caps.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR) {
+            compositeAlpha = VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR;
+        } else {
+            LOG_ERROR_CAT("SWAPCHAIN", "No supported composite alpha flags available");
+            // Fallback to opaque anyway, but this should not happen
+            compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+        }
+    }
+
     VkSwapchainCreateInfoKHR createInfo{VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR};
     createInfo.surface          = surface_;
     createInfo.minImageCount    = imageCount;
@@ -134,10 +167,10 @@ format_chosen:
     createInfo.imageColorSpace  = surfaceFormat_.colorSpace;
     createInfo.imageExtent      = extent_;
     createInfo.imageArrayLayers = 1;
-    createInfo.imageUsage       = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    createInfo.imageUsage       = imageUsage;
     createInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
     createInfo.preTransform     = caps.currentTransform;
-    createInfo.compositeAlpha   = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+    createInfo.compositeAlpha   = compositeAlpha;
     createInfo.presentMode      = presentMode_;
     createInfo.clipped          = VK_TRUE;
     createInfo.oldSwapchain     = swapchain_ ? *swapchain_ : VK_NULL_HANDLE;
@@ -240,7 +273,7 @@ void SwapchainManager::cleanup() noexcept {
 
 // ─────────────────────────────────────────────────────────────────────────────
 void SwapchainManager::updateHDRMetadata(float maxCLL, float maxFALL, float displayPeakNits) const noexcept {
-    if (!isHDR()) return;
+    if (!isHDR() || !g_vkSetHdrMetadataEXT) return;
 
     VkHdrMetadataEXT hdr{};
     hdr.sType = VK_STRUCTURE_TYPE_HDR_METADATA_EXT;
@@ -254,7 +287,7 @@ void SwapchainManager::updateHDRMetadata(float maxCLL, float maxFALL, float disp
     hdr.maxFrameAverageLightLevel = maxFALL;
 
     const VkSwapchainKHR sw = *swapchain_;
-    vkSetHdrMetadataEXT(device_, 1, &sw, &hdr);
+    g_vkSetHdrMetadataEXT(device_, 1, &sw, &hdr);
 }
 
 // ── Query helpers ────────────────────────────────────────────────────────────
