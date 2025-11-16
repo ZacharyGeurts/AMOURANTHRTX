@@ -151,6 +151,15 @@ void PipelineManager::cacheDeviceProperties() {
     VkPhysicalDeviceProperties2 props2 = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
                                            .pNext = &asProps_ };
     vkGetPhysicalDeviceProperties2(physicalDevice_, &props2);
+    // NEW: Query and log shaderInt64 support (fixes Int64 validation upstream)
+    VkPhysicalDeviceFeatures features{};
+    vkGetPhysicalDeviceFeatures(physicalDevice_, &features);
+    
+    if (features.shaderInt64) {
+        LOG_SUCCESS_CAT("PIPELINE", "GPU supports shaderInt64 — 64-bit rays ready to trace!");
+    } else {
+        LOG_ERROR_CAT("PIPELINE", "GPU lacks shaderInt64 support — shaders will fail validation! Enable in device creation or refactor GLSL.");
+    }
 
     LOG_SUCCESS_CAT("PIPELINE", "RT properties cached — handleSize={}B, handleAlignment={}B, baseAlignment={}B, maxStride={}B",
                     rtProps_.shaderGroupHandleSize, rtProps_.shaderGroupHandleAlignment, 
@@ -748,6 +757,15 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
     props2.pNext = &rtPropsLocal;
 
     vkGetPhysicalDeviceProperties2(physicalDevice_, &props2);
+    // NEW: Query and log shaderInt64 support (fixes Int64 validation upstream)
+    VkPhysicalDeviceFeatures features{};
+    vkGetPhysicalDeviceFeatures(physicalDevice_, &features);
+    
+    if (features.shaderInt64) {
+        LOG_SUCCESS_CAT("PIPELINE", "GPU supports shaderInt64 — 64-bit rays ready to trace!");
+    } else {
+        LOG_ERROR_CAT("PIPELINE", "GPU lacks shaderInt64 support — shaders will fail validation! Enable in device creation or refactor GLSL.");
+    }
 
     const uint32_t handleSize = rtPropsLocal.shaderGroupHandleSize;
     const uint32_t handleAlignment = rtPropsLocal.shaderGroupHandleAlignment;
