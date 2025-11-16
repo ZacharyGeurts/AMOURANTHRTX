@@ -1,4 +1,5 @@
 Currently compiles and reaches render loop. Much more work needed yet.  
+Note: Shaders still need to configure with StoneKey for security.  
 I work fast but slow. Rather than see something I would rather ensure the HDR, tonemap, triple buffering, etc.  
 The goal is a fast as pink photons SDL3 RTX engine that is ready for you, the developer.  
 Logging is extensive with trace, debug, info, etc.  
