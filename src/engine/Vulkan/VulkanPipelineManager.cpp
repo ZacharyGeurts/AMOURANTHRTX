@@ -14,7 +14,6 @@
 // FULLY COMPLIANT WITH -Werror=unused-variable
 // =============================================================================
 
-#include "engine/Vulkan/VulkanPipelineManager.hpp"
 #include "engine/Vulkan/VulkanCore.hpp"      // ← VK_CHECK macro
 #include "engine/GLOBAL/RTXHandler.hpp"      // For RTX::g_ctx()
 #include "engine/GLOBAL/OptionsMenu.hpp"
@@ -267,7 +266,7 @@ VkCommandBuffer PipelineManager::beginSingleTimeCommands(VkCommandPool pool) con
     result = vkBeginCommandBuffer(cmd, &beginInfo);
     if (result != VK_SUCCESS) {
         LOG_ERROR_CAT("PIPELINE", "vkBeginCommandBuffer failed: {}", static_cast<int>(result));
-    // REMOVED DOUBLE FREE: endSingleTimeCommands() already frees this cmd
+        vkFreeCommandBuffers(device_, pool, 1, &cmd);
         return VK_NULL_HANDLE;
     }
 
@@ -316,7 +315,7 @@ void PipelineManager::endSingleTimeCommands(VkCommandPool pool, VkQueue queue, V
     }
 
     // 4. Cleanup
-    // REMOVED DOUBLE FREE: endSingleTimeCommands() already frees this cmd
+    vkFreeCommandBuffers(device_, pool, 1, &cmd);
 
     LOG_TRACE_CAT("PIPELINE", "endSingleTimeCommands — COMPLETE (safe, no device lost)");
 }
@@ -442,25 +441,25 @@ void PipelineManager::createDescriptorSetLayout()
     poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
     poolInfo.pPoolSizes = poolSizes.data();
 
-rtDescriptorPool_.reset();  // <-- CRITICAL: wipe any previous garbage state
+    rtDescriptorPool_.reset();  // <-- CRITICAL: wipe any previous garbage state
 
-VkDescriptorPool rawPool = VK_NULL_HANDLE;
-VK_CHECK(vkCreateDescriptorPool(device_, &poolInfo, nullptr, &rawPool),
-         "Failed to create RT descriptor pool");
+    VkDescriptorPool rawPool = VK_NULL_HANDLE;
+    VK_CHECK(vkCreateDescriptorPool(device_, &poolInfo, nullptr, &rawPool),
+             "Failed to create RT descriptor pool");
 
-rtDescriptorPool_ = Handle<VkDescriptorPool>(
-    rawPool,
-    device_,
-    [](VkDevice d, VkDescriptorPool p, const VkAllocationCallbacks*) {
-        if (p != VK_NULL_HANDLE) vkDestroyDescriptorPool(d, p, nullptr);
-    },
-    0,
-    "RTDescriptorPool"
-);
+    rtDescriptorPool_ = Handle<VkDescriptorPool>(
+        rawPool,
+        device_,
+        [](VkDevice d, VkDescriptorPool p, const VkAllocationCallbacks*) {
+            if (p != VK_NULL_HANDLE) vkDestroyDescriptorPool(d, p, nullptr);
+        },
+        0,
+        "RTDescriptorPool"
+    );
 
-assert(rtDescriptorPool_.valid() && "*rtDescriptorPool_ is null after creation!");
-LOG_SUCCESS_CAT("PIPELINE", "RT descriptor pool created and assigned: 0x{:x}",
-                reinterpret_cast<uintptr_t>(*rtDescriptorPool_));
+    assert(rtDescriptorPool_.valid() && "*rtDescriptorPool_ is null after creation!");
+    LOG_SUCCESS_CAT("PIPELINE", "RT descriptor pool created and assigned: 0x{:x}",
+                    reinterpret_cast<uintptr_t>(*rtDescriptorPool_));
 
     LOG_TRACE_CAT("PIPELINE", "RT descriptor pool created: 0x{:x} — maxSets={}, sizes=[accel:{}, img:{}, ubo:{}, buf:{}, sampler:{}]",
                   reinterpret_cast<uintptr_t>(rawPool), maxSets,
@@ -682,7 +681,7 @@ void PipelineManager::createRayTracingPipeline(const std::vector<std::string>& s
     pipelineInfo.pStages = stages.data();
     pipelineInfo.groupCount = static_cast<uint32_t>(groups.size());
     pipelineInfo.pGroups = groups.data();
-    pipelineInfo.maxPipelineRayRecursionDepth = 4;
+    pipelineInfo.maxPipelineRayRecursionDepth = std::min(4u, rtProps_.maxRayRecursionDepth);
     pipelineInfo.layout = *rtPipelineLayout_;  // FIXED: Valid layout with descriptors/push (matches shader bindings/stages)
 
     VkPipeline pipeline = VK_NULL_HANDLE;

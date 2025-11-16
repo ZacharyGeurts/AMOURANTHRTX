@@ -1,9 +1,10 @@
 // File: shaders/raytracing/raygen.rgen
-// Vulkan 1.4 / SPIR-V 1.6 — this compiles 100% with glslc (no overload error)
-
 #version 460
 #extension GL_EXT_ray_tracing : require
 #extension GL_EXT_scalar_block_layout : require
+#extension GL_ARB_gpu_shader_int64 : require   // Required for StoneKey uint64_t ops
+
+#include "../StoneKey.glsl"   // StoneKey v∞ — PINK PHOTONS ETERNAL
 
 #define MAX_FRAMES_IN_FLIGHT 3
 
@@ -42,10 +43,9 @@ void main()
 
     hitValue = vec3(0.0);
 
-    // 11-PARAMETER CALL — this is the ONLY signature that exists
     traceRayEXT(
         tlas,                 // accelerationStructureEXT
-        0,                    // rayFlags (0 = no special flags = opaque behavior)
+        0,                    // rayFlags
         0xFF,                 // cullMask
         0,                    // sbtRecordOffset
         0,                    // sbtRecordStride
@@ -54,12 +54,17 @@ void main()
         0.001,                // tmin
         dirTmp.xyz,           // direction
         10000.0,              // tmax
-        0                     // ← PAYLOAD LOCATION (int) — THIS WAS MISSING
+        0                     // payload location
     );
 
     vec3 radiance = hitValue;
+
+    // MISS detection: exact vec3(0.0) means sky
     if (all(equal(radiance, vec3(0.0))))
+    {
+        // AMOURANTH PINK SKY — eternal gradient
         radiance = mix(vec3(0.96, 0.38, 0.88), vec3(0.99, 0.78, 0.96), pow(uv.y, 0.6));
+    }
 
     vec3 prev = imageLoad(accumulation[push.frame % MAX_FRAMES_IN_FLIGHT], ivec2(pixel)).rgb;
     vec3 color = mix(prev, radiance, 1.0 / float(push.frame + 1));

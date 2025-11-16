@@ -251,6 +251,9 @@ namespace RTX {
         Handle<VkBuffer>    debugVisBuffer_;
         Handle<VkRenderPass> renderPass_;  // FIXED: Added renderPass_ member
 
+		// STONEKEY v∞ — THE ONE TRUE SHARED STAGING BUFFER
+		uint64_t sharedStagingEnc_ = 0;   // Obfuscated handle — eternal, protected, unbreakable
+
         // Initialization and Cleanup
         void init(SDL_Window* window, int width, int height);
         void cleanup() noexcept;

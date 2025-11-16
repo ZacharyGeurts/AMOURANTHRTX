@@ -1,37 +1,40 @@
 // File: shaders/compute/tonemap.comp
-// Optimized Vulkan 1.4 compute shader: ~20-30% faster (simpler tonemap, no extras)
-// Compile: glslc -fshader-stage=compute tonemap.comp --target-env=vulkan1.4 -o tonemap.spv
-
 #version 460
 #extension GL_EXT_scalar_block_layout : require
+#extension GL_ARB_gpu_shader_int64 : require   // ← StoneKey demands this
 
-layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;  // 8x8 tiles (optimal for shared mem if expanded)
+#include "../StoneKey.glsl"   // PINK PHOTONS ETERNAL — APOCALYPSE v3.2 — VALHALLA LOCKED
 
-layout(set = 0, binding = 0, rgba32f) readonly uniform image2D inputHDR;
-layout(set = 0, binding = 1, rgba8) writeonly uniform image2D outputLDR;
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(set = 0, binding = 0, rgba32f) readonly  uniform image2D inputHDR;
+layout(set = 0, binding = 1, rgba8)   writeonly uniform image2D outputLDR;
+
 layout(set = 0, binding = 2, scalar) readonly uniform TonemapUBO {
     float exposure;
-    float time;  // Unused in fast mode
-    uint frame;  // Unused
-    float bloomStrength;  // Unused
+    float time;
+    uint  frame;
+    float bloomStrength;
 } ubo;
 
-vec3 fastReinhardTonemap(vec3 color) {
-    // Simplified Reinhard: 3x faster than ACES, good HDR compression
+// Ultra-fast Reinhard — keeps the 20–30% speed edge
+vec3 fastReinhardTonemap(vec3 color)
+{
     return color * ubo.exposure / (color * ubo.exposure + vec3(1.0));
 }
 
-void main() {
+void main()
+{
     ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
-    ivec2 size = imageSize(inputHDR);
+    ivec2 size  = imageSize(inputHDR);
 
-    if (all(greaterThanEqual(pixel, size))) return;  // Early out (vectorized)
+    if (any(greaterThanEqual(pixel, size))) return;
 
-    vec3 hdrColor = imageLoad(inputHDR, pixel).rgb;
-    vec3 ldrColor = fastReinhardTonemap(hdrColor);
+    vec3 hdr = imageLoad(inputHDR, pixel).rgb;
+    vec3 ldr = fastReinhardTonemap(hdr);
 
-    // Fast gamma (pow is expensive; approx with sqrt if needed, but keep for accuracy)
-    ldrColor = pow(ldrColor, vec3(0.4545));  // 1/2.2 precomputed
+    // Accurate sRGB gamma (1/2.2 ≈ 0.4545)
+    ldr = pow(ldr, vec3(0.4545));
 
-    imageStore(outputLDR, pixel, vec4(ldrColor, 1.0));
+    imageStore(outputLDR, pixel, vec4(ldr, 1.0));
 }
