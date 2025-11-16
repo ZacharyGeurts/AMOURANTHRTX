@@ -1,8 +1,10 @@
 // =============================================================================
-// VulkanRenderer.hpp — FINAL v12.2 — NOV 16 2025 — AUTOEXPOSURE + TONEMAP v∞ FIXED
-// • ALL COMPILATION ERRORS RESOLVED
-// • tonemapSampler_, exposureBuffer_, helper functions, noexcept fixed
-// • PINK PHOTONS ASCENDED — THE BUILD IS CLEAN
+// VulkanRenderer.hpp — FINAL v12.3 — NOV 16 2025 — COMPILATION FIXED | TONEMAP OVERLOADS + SAMPLER DECL
+// • createTonemapSampler() declared
+// • updateTonemapDescriptor(3-arg) overload added
+// • performTonemapPass(3-arg) signature fixed
+// • loadRayTracingExtensions deduped (header clean)
+// • PINK PHOTONS CLEAN BUILD — EMPIRE SECURE
 // =============================================================================
 
 #pragma once
@@ -80,8 +82,9 @@ public:
 
     void updateTonemapDescriptor(VkImageView inputView) noexcept;
     void updateTonemapDescriptor(uint32_t frameIdx, VkImageView inputView) noexcept;
+    void updateTonemapDescriptor(uint32_t frameIdx, VkImageView inputView, const RTX::Handle<VkImageView>& outputView) noexcept;  // FIXED: 3-arg overload for input+output
     void updateTonemapDescriptorsInitial() noexcept;
-	inline void transitionImageLayout(VkCommandBuffer cmd, VkImage image, VkImageLayout newLayout) noexcept
+    inline void transitionImageLayout(VkCommandBuffer cmd, VkImage image, VkImageLayout newLayout) noexcept
     {
         transitionImageLayout(cmd, image, VK_IMAGE_LAYOUT_UNDEFINED, newLayout);
     }
@@ -260,6 +263,7 @@ private:
 
     void createAutoExposureResources() noexcept;
     void createTonemapPipeline() noexcept;
+    void createTonemapSampler();  // FIXED: Declared
 
     VkCommandBuffer beginSingleTimeCommands(VkDevice device, VkCommandPool pool);
     void endSingleTimeCommands(VkDevice device, VkCommandPool pool, VkQueue queue, VkCommandBuffer cmd);
@@ -292,7 +296,7 @@ private:
     void loadRayTracingExtensions() noexcept;
     void recordRayTracingCommandBuffer(VkCommandBuffer cmd) noexcept;
     void performDenoisingPass(VkCommandBuffer cmd);
-    void performTonemapPass(VkCommandBuffer cmd, uint32_t imageIndex);
+    void performTonemapPass(VkCommandBuffer cmd, uint32_t frameIdx, uint32_t swapImageIdx) noexcept;  // FIXED: 3-arg signature
 
     void updateUniformBuffer(uint32_t frame, const Camera& camera, float jitter);
     void updateTonemapUniform(uint32_t frame);
