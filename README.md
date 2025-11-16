@@ -3,7 +3,7 @@ I work fast but slow. Rather than see something I would rather ensure the HDR, t
 The goal is a fast as pink photons SDL3 RTX engine that is ready for you, the developer.  
 Logging is extensive with trace, debug, info, etc.  
 
-AMOURANTH RTX © 2025 by Zachary Geurts gzac5314@gmail.com is licensed under [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0)  
+AMOURANTH RTX © 2025 by Zachary Geurts gzac5314@gmail.com is licensed under GPL v3.0 or higher   
 Unreal developers may consider some of this parody.  
 I welcome those whose minds seek knowledge and education.  
 Windows toolchain currently under development.  
