@@ -195,9 +195,9 @@ extern uint64_t get_kStone2() noexcept;
 // ========================================================================
 // 0. CONFIGURATION
 // ========================================================================
-constexpr bool ENABLE_TRACE   = true;
+constexpr bool ENABLE_TRACE   = false;
 constexpr bool ENABLE_DEBUG   = true;
-constexpr bool ENABLE_INFO    = true;
+constexpr bool ENABLE_INFO    = false;
 constexpr bool ENABLE_WARNING = true;
 constexpr bool ENABLE_ERROR   = true;
 constexpr bool ENABLE_FAILURE = true;
@@ -207,7 +207,7 @@ constexpr bool ENABLE_ATTEMPT = true;
 constexpr bool ENABLE_PERF    = true;
 constexpr bool FPS_COUNTER    = true;
 constexpr bool SIMULATION_LOGGING = true;
-constexpr bool DISABLE_NON_FPS_LOGGING = false;
+constexpr bool DISABLE_NON_FPS_LOGGING = false; // one shot
 
 constexpr size_t LEVEL_WIDTH   = 10;
 constexpr size_t DELTA_WIDTH   = 10;

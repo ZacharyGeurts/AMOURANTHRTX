@@ -4,9 +4,10 @@
 //
 // Dual Licensed:
 // 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
-//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
+//    https://creativecommons.org/licenses/by-nc/4.0/
 // 2. Commercial licensing: gzac5314@gmail.com
 //
+// PINK PHOTONS ETERNAL — TITAN DOMINANCE — VALHALLA v80 TURBO
 // =============================================================================
 
 #pragma once
@@ -20,6 +21,7 @@
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_beta.h>
 #include <engine/SDL3/SDL3_vulkan.hpp>
+
 #include <array>
 #include <memory>
 #include <random>
@@ -30,7 +32,7 @@
 #include <cstdint>
 
 // =============================================================================
-//  VULKAN ERROR CHECKING MACROS
+// Vulkan Debug Callback
 // =============================================================================
 inline static VKAPI_ATTR VkBool32 VKAPI_CALL VulkanDebugCallback(
     VkDebugUtilsMessageSeverityFlagBitsEXT      severity,
@@ -46,6 +48,9 @@ inline static VKAPI_ATTR VkBool32 VKAPI_CALL VulkanDebugCallback(
     return VK_FALSE;
 }
 
+// =============================================================================
+// std::formatter for VkPhysicalDeviceType
+// =============================================================================
 template <>
 struct std::formatter<VkPhysicalDeviceType, char> : std::formatter<std::string_view, char> {
     constexpr auto parse(format_parse_context& ctx) -> decltype(ctx.begin()) {
@@ -56,17 +61,20 @@ struct std::formatter<VkPhysicalDeviceType, char> : std::formatter<std::string_v
     auto format(VkPhysicalDeviceType type, FormatContext& ctx) const {
         const char* name;
         switch (type) {
-            case VK_PHYSICAL_DEVICE_TYPE_OTHER:              name = "Other"; break;
-            case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU:     name = "Integrated"; break;
-            case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU:       name = "Discrete"; break;
-            case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU:        name = "Virtual"; break;
-            case VK_PHYSICAL_DEVICE_TYPE_CPU:                name = "CPU"; break;
-            default:                                         name = "Unknown"; break;
+            case VK_PHYSICAL_DEVICE_TYPE_OTHER:          name = "Other"; break;
+            case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU: name = "Integrated"; break;
+            case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU:   name = "Discrete"; break;
+            case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU:    name = "Virtual"; break;
+            case VK_PHYSICAL_DEVICE_TYPE_CPU:            name = "CPU"; break;
+            default:                                     name = "Unknown"; break;
         }
         return std::formatter<std::string_view, char>::format(name, ctx);
     }
 };
 
+// =============================================================================
+// VK_CHECK Macros
+// =============================================================================
 #define VK_CHECK(call, msg) \
     do { \
         VkResult r = (call); \
@@ -100,6 +108,9 @@ struct std::formatter<VkPhysicalDeviceType, char> : std::formatter<std::string_v
         } \
     } while (0)
 
+// =============================================================================
+// AI_INJECT — AMOURANTH AI™ Voice Lines
+// =============================================================================
 #define AI_INJECT(...) \
     do { \
         if (ENABLE_INFO) { \
@@ -115,9 +126,8 @@ struct std::formatter<VkPhysicalDeviceType, char> : std::formatter<std::string_v
     } while (0)
 
 // =============================================================================
-//  BUFFER MACROS – UltraLowLevelBufferTracker
+// Buffer Macros — UltraLowLevelBufferTracker Integration
 // =============================================================================
-
 #define BUFFER(handle) uint64_t handle = 0ULL
 
 #define BUFFER_CREATE(handle, size, usage, props, tag) \
@@ -149,9 +159,9 @@ struct std::formatter<VkPhysicalDeviceType, char> : std::formatter<std::string_v
         } \
     } while (0)
 
-// -----------------------------------------------------------------------------
-// 4. AutoBuffer — RAII wrapper
-// -----------------------------------------------------------------------------
+// =============================================================================
+// Forward Declarations
+// =============================================================================
 namespace RTX {
     void pickPhysicalDevice();
     void createLogicalDevice();
@@ -162,6 +172,9 @@ namespace RTX {
 
 constexpr uint32_t MAX_FRAMES_IN_FLIGHT = Options::Performance::MAX_FRAMES_IN_FLIGHT;
 
+// =============================================================================
+// AutoBuffer — RAII Wrapper
+// =============================================================================
 namespace RTX {
     class AutoBuffer {
     public:
@@ -196,11 +209,10 @@ struct ShaderBindingTable {
 };
 
 // =============================================================================
-// VulkanRTX — FULL CLASS DEFINITION (MOVED HERE FROM NON-EXISTENT FILE)
+// VulkanRTX — The Eternal Core
 // =============================================================================
 class VulkanRTX {
 public:
-    // FIXED: Constructor param → RTX::PipelineManager*
     VulkanRTX(int w, int h, RTX::PipelineManager* mgr = nullptr);
     ~VulkanRTX() noexcept;
 
@@ -265,7 +277,6 @@ public:
 private:
     VkDevice device_ = VK_NULL_HANDLE;
     VkExtent2D extent_{};
-    // FIXED: Member → RTX::PipelineManager*
     RTX::PipelineManager* pipelineMgr_ = nullptr;
 
     RTX::Handle<VkDescriptorSetLayout> rtDescriptorSetLayout_;
@@ -298,12 +309,12 @@ inline bool VulkanRTX::isValid() const noexcept {
 }
 
 // =============================================================================
-// GLOBAL RTX INSTANCE — DEFINED HERE ONCE AND ONLY ONCE
+// Global RTX Instance — ONE TRUE INSTANCE
 // =============================================================================
 inline std::unique_ptr<VulkanRTX> g_rtx_instance;
 
 // =============================================================================
-// SAFE GLOBAL ACCESSOR — NO MORE GHOSTS
+// Safe Global Accessor
 // =============================================================================
 [[nodiscard]] inline VulkanRTX& g_rtx() {
     if (!g_rtx_instance) {
@@ -314,9 +325,8 @@ inline std::unique_ptr<VulkanRTX> g_rtx_instance;
 }
 
 // =============================================================================
-// createGlobalRTX — FORGE THE ETERNAL RTX
+// createGlobalRTX — Forge the Eternal Engine
 // =============================================================================
-// FIXED: Param → RTX::PipelineManager*
 inline void createGlobalRTX(int w, int h, RTX::PipelineManager* mgr = nullptr) {
     if (g_rtx_instance) {
         LOG_WARN_CAT("RTX", "createGlobalRTX: g_rtx_instance already exists @ 0x{:x}", 

@@ -1,20 +1,16 @@
 // =============================================================================
-// AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
+// AMOURANTH RTX Engine (C) 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
 //
 // Dual Licensed:
-// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
-//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
+// 1. GNU General Public License v3.0 (or later) (GPL v3)
+//    https://www.gnu.org/licenses/gpl-3.0.html
 // 2. Commercial licensing: gzac5314@gmail.com
 //
-// =============================================================================
-// VulkanCore.cpp — VALHALLA v80 TURBO — NOVEMBER 13, 2025 3:00 AM EST
-// • ALL RT FUNCTIONS VIA RTX::g_ctx() → NO LINKER ERRORS
-// • g_PhysicalDevice DEFINED → LEGACY SAFE
-// • FULL LIFECYCLE: CONSTRUCT → BIND → BUILD → TRACE → DESTROY
-// • STONEKEY v∞ ACTIVE — UNBREAKABLE ENTROPY — PINK PHOTONS ETERNAL
-// • Production-ready, zero-leak, 20,000 FPS, Titan-grade (OPT: Batched uploads, persistent staging, async submits)
-// • @ZacharyGeurts — LEAD SYSTEMS ENGINEER — TITAN DOMINANCE ETERNAL
+// TRUE CONSTEXPR STONEKEY v∞ — NOVEMBER 15, 2025 — APOCALYPSE v3.2
+// PURE RANDOM ENTROPY — RDRAND + PID + TIME + TLS — SIMPLE & SECURE
+// KEYS **NEVER** LOGGED — ONLY HASHED FINGERPRINTS — SECURITY > VANITY
+// FULLY COMPLIANT WITH -Werror=unused-variable
 // =============================================================================
 
 #include "engine/Vulkan/VulkanCore.hpp"
@@ -23,6 +19,7 @@
 #include "engine/GLOBAL/LAS.hpp"
 #include "engine/GLOBAL/GlobalBindings.hpp"
 #include "engine/GLOBAL/logging.hpp"
+#include "engine/GLOBAL/StoneKey.hpp"  // StoneKey: The One True Global Authority
 
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
@@ -74,7 +71,7 @@ void initVulkanCoreGlobals() {
     initialized = true;
 
     LOG_TRACE_CAT("VulkanCore", "Global definitions initialized — g_PhysicalDevice: 0x{:x} | g_rtx_instance: {}", 
-                  reinterpret_cast<uintptr_t>(g_PhysicalDevice), 
+                  reinterpret_cast<uintptr_t>(::g_PhysicalDevice()),  // StoneKey secured
                   g_rtx_instance ? "present" : "null");
 
     LOG_SUCCESS_CAT("VulkanCore", "initVulkanCoreGlobals() — COMPLETE — Globals locked");
@@ -328,7 +325,7 @@ void VulkanRTX::endSingleTimeCommandsAsync(VkCommandBuffer cmd, VkQueue queue, V
         destroy_after = false;  // Caller manages
     }
 
-    VkSubmitInfo submit{ .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO, .commandBufferCount = 1, .pCommandBuffers = &cmd };
+    VkSubmitInfo submit { .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO, .commandBufferCount = 1, .pCommandBuffers = &cmd };
     VK_CHECK(vkQueueSubmit(queue, 1, &submit, fence), "Failed to submit async command buffer");
 
     vkFreeCommandBuffers(RTX::g_ctx().device(), pool, 1, &cmd);
@@ -349,7 +346,7 @@ void VulkanRTX::endSingleTimeCommandsAsync(VkCommandBuffer cmd, VkQueue queue, V
     // Note: If fence provided by caller, they must poll/wait & destroy it later
 }
 
-// Helper: Utility for polling async fences in a loop (e.g., in render loop)
+// Helper: Utility for polling polling async fences in a loop (e.g., in render loop)
 // Call this externally where needed, e.g., before next frame submission
 bool VulkanRTX::pollAsyncFence(VkFence fence, uint64_t timeout_ns) noexcept {
     if (fence == VK_NULL_HANDLE) return true;  // Already done
@@ -440,6 +437,18 @@ void VulkanRTX::buildAccelerationStructures() {
                   VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                   VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "amouranth_index_buffer");
 
+    BUFFER_CREATE(vbuf, vertices.size() * sizeof(glm::vec3),
+                  VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                  VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+                  VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                  VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "amouranth_vertex_buffer");
+
+    BUFFER_CREATE(ibuf, indices.size() * sizeof(uint32_t),
+                  VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                  VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+                  VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                  VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "amouranth_index_buffer");
+
     // === SAFE SYNCHRONOUS UPLOAD ===
     VkCommandBuffer cmd = beginSingleTimeCommands(RTX::g_ctx().commandPool());
 
@@ -498,7 +507,7 @@ void VulkanRTX::uploadBatch(
 {
     if (batch.empty()) return;
 
-    VkDevice dev = RTX::ctx().device();
+    VkDevice dev = RTX::g_ctx().device();
     VkDeviceSize totalSize = 0;
     for (const auto& [src, size, dst, name] : batch)
         if (src && size > 0) totalSize += size;
@@ -532,10 +541,10 @@ void VulkanRTX::uploadBatch(
 
     VkCommandBuffer cmd = beginSingleTimeCommands(pool);
 
-    VkDeviceSize offset = g_mappedOffset.fetch_add(totalSize + 256, std::memory_order_relaxed);
+    VkDeviceSize offset = g_mappedOffset.fetch_add(totalSize + 256);
     if (offset + totalSize >= STAGING_POOL_SIZE) {
         offset = 0;
-        g_mappedOffset.store(256, std::memory_order_relaxed);
+        g_mappedOffset.store(256);
     }
 
     for (const auto& [src, size, dstHandle, name] : batch) {
@@ -560,13 +569,13 @@ void VulkanRTX::uploadBatch(
     // RAW FENCE — no renderer() call
     VkFence fence = VK_NULL_HANDLE;
     if (async) {
-        VkFenceCreateInfo fenceInfo{};
+        VkFenceCreateInfo fenceInfo = {};
         fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
         VK_CHECK(vkCreateFence(dev, &fenceInfo, nullptr, &fence),
                  "Failed to create upload fence");
     }
 
-    VkSubmitInfo submit{};
+    VkSubmitInfo submit = {};
     submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submit.commandBufferCount = 1;
     submit.pCommandBuffers = &cmd;
@@ -1249,7 +1258,7 @@ void pickPhysicalDevice()
         if (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) {
             LOG_TRACE_CAT("VULKAN", "        • MATCH: Discrete GPU found at index {} — selecting", i);
             g_ctx().physicalDevice_ = device;
-            g_PhysicalDevice = device;  // ← ONLY PLACE this is assigned now
+            set_g_PhysicalDevice(device);
 
             LOG_SUCCESS_CAT("VULKAN", "{}DISCRETE GPU SELECTED{} — {} (API: {}.{}.{})",
                             PLASMA_FUCHSIA, RESET,
@@ -1271,7 +1280,7 @@ void pickPhysicalDevice()
     LOG_TRACE_CAT("VULKAN", "      • Fallback candidate: handle=0x{:x}", reinterpret_cast<uintptr_t>(selected));
 
     g_ctx().physicalDevice_ = selected;
-    g_PhysicalDevice = selected;
+    set_g_PhysicalDevice(selected);
 
     VkPhysicalDeviceProperties props{};
     LOG_TRACE_CAT("VULKAN", "    • Querying fallback properties");
@@ -1499,7 +1508,7 @@ bool createSurface(SDL_Window* window, VkInstance instance)
     LOG_TRACE_CAT("VULKAN", "createSurface entry — window: 0x{:p}, instance: 0x{:x}",
                   static_cast<void*>(window), reinterpret_cast<uintptr_t>(instance));
 
-    if (g_surface != VK_NULL_HANDLE) {
+    if (g_surface() != VK_NULL_HANDLE) {
         LOG_FATAL_CAT("VULKAN", "{}FATAL: createSurface() called twice! Existing surface: 0x{:x}{}",
                       PLASMA_FUCHSIA, reinterpret_cast<uintptr_t>(g_surface), RESET);
         LOG_FATAL_CAT("VULKAN", "Empire demands single surface truth — aborting");
@@ -1526,7 +1535,7 @@ bool createSurface(SDL_Window* window, VkInstance instance)
         return false;
     }
 
-    g_surface = surface;
+    set_g_surface(surface);
 
     // FIXED: Direct output — pre-format + raw cout to avoid parse clash in macro
     auto addrStr = std::format("0x{:x}", reinterpret_cast<uintptr_t>(g_surface));

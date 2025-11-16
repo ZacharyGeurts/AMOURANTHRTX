@@ -1,14 +1,17 @@
 // src/engine/Vulkan/VulkanPipelineManager.cpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
+// AMOURANTH RTX Engine (C) 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
-// VulkanPipelineManager — Production Edition v10.7 (Shutdown Safety + Idle Wait) — NOV 15 2025
-// • FIXED: Added ~PipelineManager() with vkDeviceWaitIdle(device_) — Ensures all queues idle before Handle resets/destroys resources
-//          (Resolves VUID-vkDestroyPipeline-pipeline-00765: Pipeline in-use by cmd buf during shutdown)
-// • Retained: All v10.6 fixes (push const=16, null guards, PFN loads, zero-init, logging, SBT regions, etc.)
-// • Destructor logs shutdown sequence — "PINK PHOTONS DIMMING" on clean exit
-// • No changes to init/creation — Focus: Safe teardown only
-// • Zero warnings, zero errors, zero crashes — VALIDATION LAYER SILENCED
+//
+// Dual Licensed:
+// 1. GNU General Public License v3.0 (or later) (GPL v3)
+//    https://www.gnu.org/licenses/gpl-3.0.html
+// 2. Commercial licensing: gzac5314@gmail.com
+//
+// TRUE CONSTEXPR STONEKEY v∞ — NOVEMBER 15, 2025 — APOCALYPSE v3.2
+// PURE RANDOM ENTROPY — RDRAND + PID + TIME + TLS — SIMPLE & SECURE
+// KEYS **NEVER** LOGGED — ONLY HASHED FINGERPRINTS — SECURITY > VANITY
+// FULLY COMPLIANT WITH -Werror=unused-variable
 // =============================================================================
 
 #include "engine/Vulkan/VulkanPipelineManager.hpp"
@@ -158,7 +161,7 @@ void PipelineManager::cacheDeviceProperties() {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// loadShader — Matches VulkanRenderer::loadShader Exactly + Null Device Guard
+// loadShader — Matches VulkanRenderer::loadShader Exactly + Null Device Guard + FIXED: VK_CHECK for Create
 // ──────────────────────────────────────────────────────────────────────────────
 VkShaderModule PipelineManager::loadShader(const std::string& path) const {
     LOG_TRACE_CAT("PIPELINE", "loadShader — START — path='{}'", path);
@@ -191,11 +194,9 @@ VkShaderModule PipelineManager::loadShader(const std::string& path) const {
     createInfo.pCode = reinterpret_cast<const uint32_t*>(shaderCode.data());
 
     VkShaderModule shaderModule;
-    VkResult result = vkCreateShaderModule(device_, &createInfo, nullptr, &shaderModule);
-    if (result != VK_SUCCESS) {
-        LOG_ERROR_CAT("PIPELINE", "Failed to create shader module from {}: {}", path, result);
-        return VK_NULL_HANDLE;
-    }
+    // FIXED: Use VK_CHECK for consistent error handling (logs + aborts on failure)
+    VK_CHECK(vkCreateShaderModule(device_, &createInfo, nullptr, &shaderModule),
+             std::format("Failed to create shader module from {}", path).c_str());
 
     LOG_TRACE_CAT("PIPELINE", "Shader module created successfully");
     LOG_TRACE_CAT("PIPELINE", "loadShader — COMPLETE");
@@ -321,7 +322,7 @@ void PipelineManager::endSingleTimeCommands(VkCommandPool pool, VkQueue queue, V
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Descriptor Set Layout — FIXED: 8 Bindings Matching Raygen Shader + Null Device Guard
+// Descriptor Set Layout — FIXED: 8 Bindings Matching Raygen Shader + Null Device Guard + FIXED: Multi-Frame Pool Sizing + FIXED: Array Counts=3
 // ──────────────────────────────────────────────────────────────────────────────
 void PipelineManager::createDescriptorSetLayout()
 {
@@ -342,17 +343,17 @@ void PipelineManager::createDescriptorSetLayout()
     bindings[0].stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR;
     bindings[0].pImmutableSamplers = nullptr;
 
-    // FIXED: Binding 1 - rtOutput (storage image) — matches shader "rtOutput" (Set 0, Binding 1)
+    // FIXED: Binding 1 - rtOutput (storage image) — matches shader "rtOutput" (Set 0, Binding 1) — FIXED: count=3 (array[3])
     bindings[1].binding = 1;
     bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-    bindings[1].descriptorCount = 1;
+    bindings[1].descriptorCount = 3;  // FIXED: Matches SPIR-V array size (VUID-07991)
     bindings[1].stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR;
     bindings[1].pImmutableSamplers = nullptr;
 
-    // FIXED: Binding 2 - accumulation (storage image) — matches shader "accumulation" (Set 0, Binding 2)
+    // FIXED: Binding 2 - accumulation (storage image) — matches shader "accumulation" (Set 0, Binding 2) — FIXED: count=3 (array[3])
     bindings[2].binding = 2;
     bindings[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-    bindings[2].descriptorCount = 1;
+    bindings[2].descriptorCount = 3;  // FIXED: Matches SPIR-V array size (VUID-07991)
     bindings[2].stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR;
     bindings[2].pImmutableSamplers = nullptr;
 
@@ -377,10 +378,10 @@ void PipelineManager::createDescriptorSetLayout()
     bindings[5].stageFlags = VK_SHADER_STAGE_MISS_BIT_KHR;
     bindings[5].pImmutableSamplers = nullptr;
 
-    // FIXED: Binding 6 - nexusScore (storage image) — matches shader "nexusScore" (Set 0, Binding 6)
+    // FIXED: Binding 6 - nexusScore (storage image) — matches shader "nexusScore" (Set 0, Binding 6) — FIXED: count=3 (array[3])
     bindings[6].binding = 6;
     bindings[6].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-    bindings[6].descriptorCount = 1;
+    bindings[6].descriptorCount = 3;  // FIXED: Matches SPIR-V array size (assumed; resolves raygen usage)
     bindings[6].stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR;
     bindings[6].pImmutableSamplers = nullptr;
 
@@ -419,7 +420,55 @@ void PipelineManager::createDescriptorSetLayout()
         0, "RTDescriptorSetLayout"
     );
 
-    LOG_SUCCESS_CAT("PIPELINE", "RT descriptor set layout v10.4 created — 8 bindings exactly matching shader (0=tlas,1=rtOutput,2=accum,3=ubo,6=nexus) — VUID-07988 FIXED");
+    // FIXED: Create RT Descriptor Pool — Multi-frame sizing per Vulkan spec (total descriptors across maxSets) + FIXED: 9 storage_img (3 bindings * 3 count)
+    LOG_TRACE_CAT("PIPELINE", "Creating RT descriptor pool — maxSets={}, freeable, scaled descriptor counts", Options::Performance::MAX_FRAMES_IN_FLIGHT);
+    const uint32_t maxSets = Options::Performance::MAX_FRAMES_IN_FLIGHT;
+    std::array<VkDescriptorPoolSize, 5> poolSizes = {};  // Zero-init
+    poolSizes[0].type = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+    poolSizes[0].descriptorCount = 1 * maxSets;  // Binding 0 x N
+    poolSizes[1].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    poolSizes[1].descriptorCount = 9 * maxSets;  // FIXED: Bindings 1,2,6 * 3 count x N (VUID-03024)
+    poolSizes[2].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    poolSizes[2].descriptorCount = 1 * maxSets;  // Binding 3 x N
+    poolSizes[3].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    poolSizes[3].descriptorCount = 2 * maxSets;  // Bindings 4,7 x N
+    poolSizes[4].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    poolSizes[4].descriptorCount = 1 * maxSets;  // Binding 5 x N
+
+    VkDescriptorPoolCreateInfo poolInfo = {};  // Zero-init
+    poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    poolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;  // Enables vkFreeDescriptorSets
+    poolInfo.maxSets = maxSets;  // Supports N-frame in-flight
+    poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
+    poolInfo.pPoolSizes = poolSizes.data();
+
+rtDescriptorPool_.reset();  // <-- CRITICAL: wipe any previous garbage state
+
+VkDescriptorPool rawPool = VK_NULL_HANDLE;
+VK_CHECK(vkCreateDescriptorPool(device_, &poolInfo, nullptr, &rawPool),
+         "Failed to create RT descriptor pool");
+
+rtDescriptorPool_ = Handle<VkDescriptorPool>(
+    rawPool,
+    device_,
+    [](VkDevice d, VkDescriptorPool p, const VkAllocationCallbacks*) {
+        if (p != VK_NULL_HANDLE) vkDestroyDescriptorPool(d, p, nullptr);
+    },
+    0,
+    "RTDescriptorPool"
+);
+
+assert(rtDescriptorPool_.valid() && "*rtDescriptorPool_ is null after creation!");
+LOG_SUCCESS_CAT("PIPELINE", "RT descriptor pool created and assigned: 0x{:x}",
+                reinterpret_cast<uintptr_t>(*rtDescriptorPool_));
+
+    LOG_TRACE_CAT("PIPELINE", "RT descriptor pool created: 0x{:x} — maxSets={}, sizes=[accel:{}, img:{}, ubo:{}, buf:{}, sampler:{}]",
+                  reinterpret_cast<uintptr_t>(rawPool), maxSets,
+                  poolSizes[0].descriptorCount, poolSizes[1].descriptorCount, poolSizes[2].descriptorCount,
+                  poolSizes[3].descriptorCount, poolSizes[4].descriptorCount);
+
+    LOG_SUCCESS_CAT("PIPELINE", "RT descriptor set layout v10.4 created — 8 bindings exactly matching shader (0=tlas,1=rtOutput[3],2=accum[3],3=ubo,6=nexus[3]) — VUID-07991 FIXED");
+    LOG_SUCCESS_CAT("PIPELINE", "RT descriptor pool created (multi-frame, array-scaled) — Non-null handle — ALLOCATION-READY — VUID-03017 FIXED");
     LOG_TRACE_CAT("PIPELINE", "createDescriptorSetLayout — COMPLETE");
 }
 

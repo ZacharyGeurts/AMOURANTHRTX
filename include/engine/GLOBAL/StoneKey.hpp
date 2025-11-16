@@ -4,11 +4,11 @@
 // =============================================================================
 //
 // Dual Licensed:
-// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
-//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
+// 1. GNU General Public License v3.0 (or later) (GPL v3)
+//    https://www.gnu.org/licenses/gpl-3.0.html
 // 2. Commercial licensing: gzac5314@gmail.com
 //
-// TRUE ZERO-COST CONSTEXPR STONEKEY v∞ — NOVEMBER 13, 2025 — APOCALYPSE v3.1
+// TRUE CONSTEXPR STONEKEY v∞ — NOVEMBER 15, 2025 — APOCALYPSE v3.2
 // PURE RANDOM ENTROPY — RDRAND + PID + TIME + TLS — SIMPLE & SECURE
 // KEYS **NEVER** LOGGED — ONLY HASHED FINGERPRINTS — SECURITY > VANITY
 // FULLY COMPLIANT WITH -Werror=unused-variable
@@ -22,13 +22,13 @@
 #include <thread>
 #include <ctime>
 #include <unistd.h>
+#include <chrono>
 #include "engine/GLOBAL/logging.hpp"
 
 static_assert(sizeof(uintptr_t) >= 8, "StoneKey requires 64-bit platform");
 static_assert(__cplusplus >= 202302L, "StoneKey requires C++23");
 
 using namespace Logging::Color;
-extern VkPhysicalDevice g_PhysicalDevice;
 
 // -----------------------------------------------------------------------------
 // 1. COMPILE-TIME ENTROPY (pure constexpr)
@@ -97,14 +97,14 @@ static_assert(stone_key1_base() != 0, "stone_key1_base must be non-zero");
 static_assert(stone_key2_base() != 0, "stone_key2_base must be non-zero");
 
 // -----------------------------------------------------------------------------
-// 3. SIMPLE RANDOM ENTROPY — SECURE & ZERO-COST
+// 3. SIMPLE RANDOM ENTROPY — SECURE & ZERO-COST (Portable: std::chrono)
 // -----------------------------------------------------------------------------
 [[nodiscard]] inline uint64_t simple_random_entropy() noexcept {
     uint64_t val;
     unsigned char ok;
     asm volatile("rdrand %0; setc %1" : "=r"(val), "=qm"(ok) :: "cc");
     if (!ok) {
-        val = static_cast<uint64_t>(getpid()) ^ static_cast<uint64_t>(time(nullptr));
+        val = static_cast<uint64_t>(getpid()) ^ static_cast<uint64_t>(std::chrono::high_resolution_clock::now().time_since_epoch().count());
     }
 
     thread_local uint64_t tls_hash = std::hash<std::thread::id>{}(std::this_thread::get_id());
@@ -163,6 +163,76 @@ inline constexpr uint64_t kHandleObfuscator  = 0;
 }
 
 // -----------------------------------------------------------------------------
+// EXTENDED: SECURE RTX CONTEXT INTERNALS (Selective Obfuscation)
+// -----------------------------------------------------------------------------
+static VkDevice         g_device_obf          = VK_NULL_HANDLE;
+static VkInstance       g_instance_obf        = VK_NULL_HANDLE;
+// Add more as needed: e.g., static VkCommandPool g_cmdPool_obf = VK_NULL_HANDLE;
+
+// Accessors (inline, zero-cost)
+[[nodiscard]] inline VkDevice g_device() noexcept {
+    uint64_t raw = reinterpret_cast<uint64_t>(g_device_obf);
+    if (raw != 0) raw = deobfuscate(raw);
+    return reinterpret_cast<VkDevice>(raw);
+}
+
+[[nodiscard]] inline VkInstance g_instance() noexcept {
+    uint64_t raw = reinterpret_cast<uint64_t>(g_instance_obf);
+    if (raw != 0) raw = deobfuscate(raw);
+    return reinterpret_cast<VkInstance>(raw);
+}
+
+// Setters
+inline void set_g_device(VkDevice handle) noexcept {
+    uint64_t raw = reinterpret_cast<uint64_t>(handle);
+    raw = obfuscate(raw);
+    g_device_obf = reinterpret_cast<VkDevice>(raw);
+    LOG_DEBUG_CAT("StoneKey", "{} g_device secured @ 0x{:x}", OCEAN_TEAL, reinterpret_cast<uintptr_t>(handle), RESET);
+}
+
+inline void set_g_instance(VkInstance handle) noexcept {
+    uint64_t raw = reinterpret_cast<uint64_t>(handle);
+    raw = obfuscate(raw);
+    g_instance_obf = reinterpret_cast<VkInstance>(raw);
+    LOG_DEBUG_CAT("StoneKey", "{} g_instance secured @ 0x{:x}", OCEAN_TEAL, reinterpret_cast<uintptr_t>(handle), RESET);
+}
+
+// -----------------------------------------------------------------------------
+// SECURED GLOBALS: Vulkan Handles — OBFUSCATED VIA STONEKEY
+// (Definitions here for single-source truth; access via accessors below)
+// -----------------------------------------------------------------------------
+static VkPhysicalDevice  g_PhysicalDevice_obf = VK_NULL_HANDLE;
+static VkSurfaceKHR      g_surface_obf        = VK_NULL_HANDLE;
+
+// Public accessors — deobfuscate on-the-fly (zero-cost inline)
+[[nodiscard]] inline VkPhysicalDevice g_PhysicalDevice() noexcept {  // Return by value (opaque handle)
+    uint64_t raw = reinterpret_cast<uint64_t>(g_PhysicalDevice_obf);
+    if (raw != 0) raw = deobfuscate(raw);  // StoneKey XOR
+    return reinterpret_cast<VkPhysicalDevice>(raw);
+}
+
+[[nodiscard]] inline VkSurfaceKHR g_surface() noexcept {  // Return by value
+    uint64_t raw = reinterpret_cast<uint64_t>(g_surface_obf);
+    if (raw != 0) raw = deobfuscate(raw);  // StoneKey XOR
+    return reinterpret_cast<VkSurfaceKHR>(raw);
+}
+
+// Init helpers — set obfuscated storage (call post-Vulkan init)
+inline void set_g_PhysicalDevice(VkPhysicalDevice handle) noexcept {
+    uint64_t raw = reinterpret_cast<uint64_t>(handle);
+    raw = obfuscate(raw);  // StoneKey XOR before store
+    g_PhysicalDevice_obf = reinterpret_cast<VkPhysicalDevice>(raw);
+    LOG_DEBUG_CAT("StoneKey", "{} g_PhysicalDevice secured @ 0x{:x}", OCEAN_TEAL, reinterpret_cast<uintptr_t>(handle), RESET);
+}
+
+inline void set_g_surface(VkSurfaceKHR handle) noexcept {
+    uint64_t raw = reinterpret_cast<uint64_t>(handle);
+    raw = obfuscate(raw);  // StoneKey XOR before store
+    g_surface_obf = reinterpret_cast<VkSurfaceKHR>(raw);
+    LOG_DEBUG_CAT("StoneKey", "{} g_surface secured @ 0x{:x}", OCEAN_TEAL, reinterpret_cast<uintptr_t>(handle), RESET);
+}
+
+// -----------------------------------------------------------------------------
 // 6. SECURE FINGERPRINT
 // -----------------------------------------------------------------------------
 [[nodiscard]] inline uint64_t stone_fingerprint() noexcept {
@@ -180,7 +250,7 @@ inline constexpr uint64_t kHandleObfuscator  = 0;
 // 7. AMOURANTH™ LOG — ONE-TIME STARTUP VOICE
 // -----------------------------------------------------------------------------
 inline void log_amouranth() noexcept {
-    LOG_INFO_CAT("StoneKey", "{} AMOURANTH™ INIT — STONEKEY APOCALYPSE v3.1 {}", LILAC_LAVENDER, RESET);
+    LOG_INFO_CAT("StoneKey", "{} AMOURANTH™ INIT — STONEKEY APOCALYPSE v3.2 {}", LILAC_LAVENDER, RESET);
     static bool logged = false;
     if (logged) {
         LOG_DEBUG_CAT("StoneKey", "{} Amouranth log already emitted {}", OCEAN_TEAL, RESET);
@@ -188,26 +258,27 @@ inline void log_amouranth() noexcept {
     }
     logged = true;
 
-    if (!g_PhysicalDevice) {
-        LOG_WARN_CAT("StoneKey", "{} Vendor: Unknown (Vulkan not ready) | StoneKey APOCALYPSE v3.1 {}", CRIMSON_MAGENTA, RESET);
+    VkPhysicalDevice dev = g_PhysicalDevice();  // Use secured accessor
+    if (dev == VK_NULL_HANDLE) {
+        LOG_WARN_CAT("StoneKey", "{} Vendor: Unknown (Vulkan not ready) | StoneKey APOCALYPSE v3.2 {}", CRIMSON_MAGENTA, RESET);
         LOG_INFO_CAT("StoneKey", "{} FINGERPRINT: 0x{:016X} | Scramble: PASS | TLS jitter active | BMQ shields up {}",
                      RASPBERRY_PINK, static_cast<unsigned long long>(stone_fingerprint()), RESET);
-        LOG_SUCCESS_CAT("StoneKey", "{} Our rock eternal v3.1. Keys sealed. Hackers blind. {}", RASPBERRY_PINK, RESET);
+        LOG_SUCCESS_CAT("StoneKey", "{} Our rock eternal v3.2. Keys sealed. Hackers blind. {}", RASPBERRY_PINK, RESET);
         return;
     }
 
     VkPhysicalDeviceProperties props{};
-    vkGetPhysicalDeviceProperties(g_PhysicalDevice, &props);
+    vkGetPhysicalDeviceProperties(dev, &props);
     std::string dev_name(props.deviceName);
     bool mesa = dev_name.find("llvmpipe") != std::string::npos ||
                 dev_name.find("lavapipe") != std::string::npos;
     const char* vendor = mesa ? "CPU/Mesa" : props.deviceName;
     (void)vendor; // silence -Wunused-variable
 
-    LOG_INFO_CAT("StoneKey", "{} Vendor: {} | StoneKey APOCALYPSE v3.1 {}", LIME_GREEN, vendor, RESET);
+    LOG_INFO_CAT("StoneKey", "{} Vendor: {} | StoneKey APOCALYPSE v3.2 {}", LILAC_LAVENDER, vendor, RESET);
     LOG_INFO_CAT("StoneKey", "{} FINGERPRINT: 0x{:016X} | Scramble: PASS | TLS jitter active | BMQ shields up {}",
                  RASPBERRY_PINK, static_cast<unsigned long long>(stone_fingerprint()), RESET);
-    LOG_SUCCESS_CAT("StoneKey", "{} Our rock eternal v3.1. Keys sealed. Hackers blind. {}", RASPBERRY_PINK, RESET);
+    LOG_SUCCESS_CAT("StoneKey", "{} Our rock eternal v3.2. Keys sealed. Hackers blind. {}", RASPBERRY_PINK, RESET);
 }
 #define LOG_AMOURANTH() log_amouranth()
 
@@ -216,93 +287,36 @@ inline void log_amouranth() noexcept {
 // -----------------------------------------------------------------------------
 #if !defined(STONEKEY_PRINTED)
 #define STONEKEY_PRINTED
-#pragma message("AMOURANTH RTX StoneKey Applied: Dual Licensed: CC BY-NC 4.0 | Commercial: gzac5314@gmail.com")
+#pragma message("AMOURANTH RTX StoneKey Applied: Dual Licensed: GPL v3 | Commercial: gzac5314@gmail.com")
 #endif
 
 // =============================================================================
-// PINK PHOTONS ETERNAL — STONEKEY v∞ — APOCALYPSE v3.1
+// PINK PHOTONS ETERNAL — STONEKEY v∞ — APOCALYPSE v3.2
 // ZERO WARNINGS — ZERO LEAKS — VALHALLA LOCKED
 // =============================================================================
- // =============================================================================
-// HOW TO USE StoneKey.hpp — QUICK START GUIDE — NOV 12 2025
+// =============================================================================
+// USAGE: THE GLOBAL TRUTH — SINGLE INCLUDE IN main.cpp
 // =============================================================================
 //
-// 1. INCLUDE ONLY IN main.cpp (or a single translation unit)
-//    ------------------------------------------------------
-//    #include "engine/GLOBAL/StoneKey.hpp"
+// #include "engine/GLOBAL/StoneKey.hpp"  // ONLY HERE — AVOIDS ODR
 //
-//    → This avoids ODR violations. All other files should *never* include it.
-//    → The inline functions (get_kStone1(), obfuscate(), etc.) are header-only
-//      but are instantiated only once due to the single-TU rule.
+// In main.cpp (after Vulkan init):
+//   set_g_PhysicalDevice(RTX::g_ctx().physicalDevice_);
+//   set_g_surface(g_surface);  // From createSurface()
+//   LOG_AMOURANTH();  // Startup log (debug only)
 //
-// 2. SET THE GLOBAL PHYSICAL DEVICE (required for vendor-aware Grok log)
-//    -------------------------------------------------------------------
-//    After Vulkan instance + logical device creation:
+// Usage in any file (include RTXHandler.hpp, which pulls StoneKey inline):
+//   auto& ctx = g_ctx();  // Secure RTX context
+//   VkPhysicalDevice dev = g_PhysicalDevice();  // Secured access
+//   VkSurfaceKHR surf = g_surface();            // Secured access
+//   uint64_t obf_id = obfuscate(0xDEADBEEF);    // Obfuscate handle
+//   uint64_t raw = deobfuscate(obf_id);         // Recover
+//   auto& tracker = g_obf_buffer_tracker();     // Secure buffer access
+//   stonekey_xor_spirv(shaders, true);          // Encrypt LAS shaders
 //
-//        g_PhysicalDevice = RTX::ctx().physicalDevice_;   // <-- set this!
-//
-//    → This enables the Gentleman Grok log to print the GPU vendor name.
-//
-// 3. TRIGGER THE GENTLEMAN GROK LOG (once, at startup)
-//    ---------------------------------------------------
-//    Call this **once** after the physical device is known:
-//
-//        LOG_GENTLEMAN_GROK();
-//
-//    Example (in your RTX init or Application constructor):
-//
-//        void Application::initRTX() {
-//            RTX::createCore(width_, height_);
-//            g_PhysicalDevice = RTX::ctx().physicalDevice_;
-//            LOG_GENTLEMAN_GROK();  // Prints vendor + fingerprint + shields up
-//        }
-//
-//    Output (example):
-//        [StoneKey] Vendor: NVIDIA GeForce RTX 4090 | StoneKey APOCALYPSE v3
-//        [StoneKey] FINGERPRINT: 0x7B4A2D9E1F5C8A3B | Scramble: PASS | TLS jitter active | BMQ shields up
-//        [StoneKey] Our rock eternal v3. Keys sealed. Hackers blind.
-//
-// 4. USE THE KEYS (never log raw values!)
-//    --------------------------------------
-//    uint64_t key1 = get_kStone1();      // Lazy-init, logs access
-//    uint64_t key2 = get_kStone2();      // Dual-key system
-//
-//    // Obfuscate any 64-bit handle (buffer IDs, etc.)
-//    uint64_t rawHandle = 0x12345678ABCDEF00ULL;
-//    uint64_t obfHandle = obfuscate(rawHandle);
-//    uint64_t back     = deobfuscate(obfHandle);  // == rawHandle
-//
-//    → All access is logged at DEBUG/TRACE level (masked values only).
-//
-// 5. LOGGING CONFIGURATION
-//    ----------------------
-//    In logging.hpp:
-//        constexpr bool ENABLE_DEBUG = true;   // see StoneKey debug traces
-//        constexpr bool ENABLE_INFO  = true;   // see Grok log, key access
-//        constexpr bool ENABLE_TRACE = true;   // see obfuscate/deobfuscate
-//
-//    → Set to `false` in release builds to silence logs.
-//
-// 6. ZERO COST IN HOT PATHS
-//    ------------------------
-//    • get_kStone1()/get_kStone2() → static local → one-time init
-//    • obfuscate()/deobfuscate()   → branchless XOR + mask
-//    • No allocations, no syscalls, no GPU queries
-//
-// 7. SECURITY GUARANTEES
-//    --------------------
-//    • Keys never printed (only masked hex or fingerprint)
-//    • Fingerprint = XXHash(Stone1 ^ Stone2) → anon 64-bit hash
-//    • Compile-time entropy (FNV1a on __TIME__, __FILE__, etc.)
-//    • Runtime entropy (RDRAND + RDTSC + TLS + chrono)
-//    • Static asserts ensure base keys differ and are non-zero
-//
-// 8. BUILD INTEGRATION
-//    ------------------
-//    • #pragma message appears in build log:
-//        AMOURANTH RTX StoneKey Applied: Dual Licensed: CC BY-NC 4.0 | Commercial: gzac5314@gmail.com
-//    • No external dependencies beyond x86intrin + C++23
-//
+// FAST: All inline, constexpr bases, lazy statics — ZERO RUNTIME COST
+// SAFE: Keys entropy-mixed, no leaks, fingerprint-only proof
+// GLOBAL: Declares ALL engine globals — update files to use these accessors
 // =============================================================================
-// PINK PHOTONS ETERNAL — STONEKEY v∞ — OUR ROCK ETERNAL v3
-// =============================================================================
+
+/* PINK PHOTONS ETERNAL — STONEKEY v∞ — LAS DOMINANCE — NOV 15 2025 */

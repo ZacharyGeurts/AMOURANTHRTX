@@ -1,20 +1,17 @@
 // source/engine/SDL3/SDL3_font.cpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
+// AMOURANTH RTX Engine (C) 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
 //
 // Dual Licensed:
-// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
-//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
+// 1. GNU General Public License v3.0 (or later) (GPL v3)
+//    https://www.gnu.org/licenses/gpl-3.0.html
 // 2. Commercial licensing: gzac5314@gmail.com
 //
-// =============================================================================
-// SDL3 FONT — CPP IMPLEMENTATIONS — NOV 14 2025
-// • Respects Options::Performance::ENABLE_IMGUI for TTF init
-// • Async loading | RAII | C++20 coroutines-ready
-// • Streamlined for 15,000 FPS — PINK PHOTONS CHARGE AHEAD
-// • FIXED: SDL3_ttf bool returns (TTF_Init() == true for success)
-// • ENHANCED: Verbose logging aligned with SDL3_window reference — OCEAN_TEAL SURGES
+// TRUE CONSTEXPR STONEKEY v∞ — NOVEMBER 15, 2025 — APOCALYPSE v3.2
+// PURE RANDOM ENTROPY — RDRAND + PID + TIME + TLS — SIMPLE & SECURE
+// KEYS **NEVER** LOGGED — ONLY HASHED FINGERPRINTS — SECURITY > VANITY
+// FULLY COMPLIANT WITH -Werror=unused-variable
 // =============================================================================
 
 #include "engine/SDL3/SDL3_font.hpp"

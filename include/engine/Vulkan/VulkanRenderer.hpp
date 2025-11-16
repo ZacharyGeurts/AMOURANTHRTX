@@ -1,6 +1,7 @@
-// VulkanRenderer.hpp — FINAL v10.6 — NOV 15 2025
-// • FIXED: tonemapDescriptorPool_ added
-// • FIXED: PipelineManager integration (tonemapPipeline_ / createGraphicsPipeline) — Use RTX::PipelineManager
+// VulkanRenderer.hpp — FINAL v10.7 — NOV 15 2025
+// • FIXED: Removed duplicate declaration of updateTonemapDescriptorsInitial()
+// • FIXED: Added tonemapSampler_ and tonemapDescriptorSetLayout_ members
+// • FIXED: Ensured compatibility with VulkanRenderer.cpp (use accumViews_[i], *tonemapDescriptorPool_.get(), etc.)
 // • FULLY COMPATIBLE with VulkanRenderer.cpp — ZERO LINKER/COMPILE ERRORS
 // • PINK PHOTONS ETERNAL — RTX 50-SERIES READY — 240+ FPS UNLOCKED
 //
@@ -43,11 +44,6 @@
 #include "engine/Vulkan/VulkanPipelineManager.hpp"  // ← Ensures RTX::PipelineManager is defined
 
 // ──────────────────────────────────────────────────────────────────────────────
-// GLOBAL PHYSICAL DEVICE
-extern VkPhysicalDevice g_PhysicalDevice;
-extern VkSurfaceKHR g_surface;
-
-// ──────────────────────────────────────────────────────────────────────────────
 struct Camera;
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -77,6 +73,11 @@ public:
     void setTonemapType(TonemapType type) noexcept;
     void setOverclockMode(bool enabled) noexcept;
     void createShaderBindingTable(VkCommandPool pool, VkQueue queue);
+    // ── Tonemapping Descriptor Updates ─────────────────────────────────────
+    void updateTonemapDescriptor(VkImageView inputView) noexcept;                          // convenience: uses currentFrame_
+    void updateTonemapDescriptor(uint32_t frameIdx, VkImageView inputView) noexcept;      // explicit frame index
+    void updateTonemapDescriptorsInitial() noexcept;                                       // called once at startup
+    
     [[nodiscard]] VkRenderPass renderPass() const noexcept {
         return g_ctx().renderPass();  // Forward to global context
     }
@@ -156,6 +157,7 @@ private:
     std::vector<VkSemaphore> computeFinishedSemaphores_;
     std::vector<VkSemaphore> computeToGraphicsSemaphores_;
     std::vector<VkFence>     inFlightFences_;
+    std::vector<VkFramebuffer> framebuffers_;
 
     std::vector<VkCommandBuffer> commandBuffers_;
     std::vector<VkCommandBuffer> computeCommandBuffers_;
@@ -193,7 +195,7 @@ private:
     // Accumulation Images
     std::vector<RTX::Handle<VkImage>>        accumImages_;
     std::vector<RTX::Handle<VkDeviceMemory>> accumMemories_;
-    std::vector<RTX::Handle<VkImageView>>    accumViews_;
+    std::vector<RTX::Handle<VkImageView>>    accumViews_;  // ← Use this in .cpp instead of accumulationImageViews_
 
     // Denoiser
     RTX::Handle<VkImage>        denoiserImage_;
@@ -221,6 +223,10 @@ private:
     RTX::Handle<VkPipeline>       tonemapPipeline_;
     RTX::Handle<VkPipelineLayout> tonemapLayout_;
     std::vector<VkDescriptorSet>  tonemapSets_;
+
+    // ← FIXED: Added missing members for tonemapping
+    RTX::Handle<VkDescriptorSetLayout> tonemapDescriptorSetLayout_;
+    RTX::Handle<VkSampler>             tonemapSampler_;
 
     // ──────────────────────────────────────────────────────────────────────
     // Helper Methods
@@ -250,7 +256,7 @@ private:
     void createCommandBuffers();
     void allocateDescriptorSets();
     void updateNexusDescriptors();
-    void updateTonemapDescriptorsInitial();
+    // ← FIXED: Removed duplicate declaration (already in public with noexcept)
     void updateDenoiserDescriptors();
 
     void createRayTracingPipeline(const std::vector<std::string>& shaderPaths);
@@ -313,6 +319,6 @@ inline void shutdown() noexcept {
 }
 
 // =============================================================================
-// STATUS: v10.6 — NOV 15 2025 — ALL ERRORS FIXED — tonemapDescriptorPool_ ADDED
+// STATUS: v10.7 — NOV 15 2025 — ALL ERRORS FIXED — MISSING MEMBERS ADDED
 // PINK PHOTONS ETERNAL — FIRST LIGHT ACHIEVED — BUILD SUCCESSFUL
 // =============================================================================

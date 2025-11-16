@@ -364,15 +364,15 @@ foreach(SRC ${POTENTIAL_SHADERS})
         endif()
     elseif(REL_DIR MATCHES "compute")
         if(NAME MATCHES "([_.])?comp(\\.glsl)?$")
-            set(TARGET --target-spv=spv1.4 --target-env=vulkan1.2)
+            set(TARGET --target-spv=spv1.5 --target-env=vulkan1.4)
             set(STAGE comp)
         endif()
     else()  # graphics or rasterization or tonemaps (redirected)
         if(NAME MATCHES "([_.])?vert(\\.glsl)?$")
-            set(TARGET --target-spv=spv1.4 --target-env=vulkan1.2)
+            set(TARGET --target-spv=spv1.5 --target-env=vulkan1.4)
             set(STAGE vert)
         elseif(NAME MATCHES "([_.])?frag(\\.glsl)?$")
-            set(TARGET --target-spv=spv1.4 --target-env=vulkan1.2)
+            set(TARGET --target-spv=spv1.5 --target-env=vulkan1.4)
             set(STAGE frag)
         endif()
     endif()
@@ -413,7 +413,7 @@ add_dependencies(amouranth_engine shaders)
 # =============================================================================
 set(ASSET_MAP
     "fonts:*.ttf,*.otf"
-    "textures:*.png,*.jpg,*.ktx2,*.dds,*.hdr"
+    "textures:*.png,*.jpg,*.ktx2,*.dds,*.hdr,*.ico"
     "models:*.obj,*.gltf,*.glb"
     "materials:*.json"
     "scenes:*.json"

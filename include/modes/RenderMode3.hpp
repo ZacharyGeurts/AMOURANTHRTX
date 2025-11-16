@@ -1,25 +1,31 @@
-// include/modes/RenderMode3.hpp
+// modes/RenderMode3.hpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
+// AMOURANTH RTX Engine (C) 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
-// RenderMode3.hpp — VALHALLA v45 FINAL — NOV 12 2025
-// • Full GI Ray Tracing Mode: Path tracing with global illumination
-// • Integrates with VulkanRTX, uses SBT for raygen/miss/hit
-// • Lazy accumulation for denoising
-// • Uses global camera (g_lazyCam) for view/projection
-// • STONEKEY v∞ ACTIVE — PINK PHOTONS ETERNAL
+//
+// Dual Licensed:
+// 1. GNU General Public License v3.0 (or later) (GPL v3)
+//    https://www.gnu.org/licenses/gpl-3.0.html
+// 2. Commercial licensing: gzac5314@gmail.com
+//
+// RenderMode3: Random Color Clear — Per-Frame Stochastic Hues
+// • No uniforms or ray tracing — Direct output clear with random RGB each frame
+// • Uses Mersenne Twister RNG: uniform [0,1) for R/G/B, A=1.0
+// • Chaotic, vibrant mode for testing randomness/resizing
+// • VALHALLA v80 TURBO — NOVEMBER 15, 2025 — CHAOS PHOTONS ETERNAL
 // =============================================================================
 
 #pragma once
 
-#include "engine/GLOBAL/camera.hpp"
 #include "engine/GLOBAL/RTXHandler.hpp"
-#include "engine/Vulkan/VulkanCore.hpp"
+#include "engine/GLOBAL/StoneKey.hpp"
+#include "engine/GLOBAL/logging.hpp"
+#include "engine/GLOBAL/camera.hpp"
 
 #include <vulkan/vulkan.h>
 #include <glm/glm.hpp>
-#include <memory>
 #include <chrono>
+#include <random>
 
 namespace Engine {
 
@@ -28,39 +34,24 @@ public:
     RenderMode3(VulkanRTX& rtx, uint32_t width, uint32_t height);
     ~RenderMode3();
 
+    void initResources();
     void renderFrame(VkCommandBuffer cmd, float deltaTime);
     void onResize(uint32_t width, uint32_t height);
 
-    [[nodiscard]] VkImage getOutputImage() const { return *outputImage_; }
-    [[nodiscard]] VkImageView getOutputView() const { return *outputView_; }
-
 private:
-    void initResources();
-    void updateUniforms(float deltaTime);
-    void traceRays(VkCommandBuffer cmd);
-    void accumulateAndToneMap(VkCommandBuffer cmd);
-
     VulkanRTX& rtx_;
-    uint32_t width_{0}, height_{0};
+    uint32_t width_, height_;
 
-    // Buffers
-    uint64_t uniformBuf_{0};
-    uint64_t accumulationBuf_{0};
-    VkDeviceSize accumSize_{0};
-
-    // Images
+    // Resources
     RTX::Handle<VkImage> outputImage_;
     RTX::Handle<VkImageView> outputView_;
-    RTX::Handle<VkImage> accumImage_;
-    RTX::Handle<VkImageView> accumView_;
 
-    // Timing
-    std::chrono::steady_clock::time_point lastFrame_{std::chrono::steady_clock::now()};
-    uint32_t frameCount_{0};
-    float accumWeight_{1.0f};
+    // RNG
+    std::random_device rd_;
+    std::mt19937 gen_;
+    std::uniform_real_distribution<float> dist_{0.0f, 1.0f};
 
-    // Descriptors
-    VkDescriptorSet descriptorSet_{VK_NULL_HANDLE};
+    void clearRandom(VkCommandBuffer cmd);
 };
 
-} // namespace Engine
+}  // namespace Engine

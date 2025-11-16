@@ -4,68 +4,62 @@
 // =============================================================================
 //
 // Dual Licensed:
-// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
-//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
+// 1. GNU General Public License v3.0 (or later) (GPL v3)
+//    https://www.gnu.org/licenses/gpl-3.0.html
 // 2. Commercial licensing: gzac5314@gmail.com
 //
 // =============================================================================
 
 #include "modes/RenderMode2.hpp"
 #include "engine/GLOBAL/logging.hpp"
+#include "engine/GLOBAL/StoneKey.hpp"
+#include "engine/GLOBAL/RTXHandler.hpp"
+#include "engine/Vulkan/VulkanCore.hpp"
 
 using namespace Engine;
 using namespace Logging::Color;
 
 RenderMode2::RenderMode2(VulkanRTX& rtx, uint32_t width, uint32_t height)
-    : rtx_(rtx), width_(width), height_(height) {
-    LOG_INFO_CAT("RenderMode2", "{}VALHALLA MODE 2 INIT — {}×{} — HYPERTRACE ENGAGED{}", NUCLEAR_REACTOR, width, height, RESET);
+    : rtx_(rtx), width_(width), height_(height), startTime_(std::chrono::steady_clock::now()) {
+    LOG_INFO_CAT("RenderMode2", "{}VALHALLA MODE 2 INIT — {}×{} — ANIMATED CLEAR ENGAGED{}", PLASMA_FUCHSIA, width, height, RESET);
     initResources();
-    LOG_SUCCESS_CAT("RenderMode2", "{}Mode 2 Initialized — {}×{} — Adaptive Sampling{}", QUANTUM_PURPLE, width, height, RESET);
+    LOG_SUCCESS_CAT("RenderMode2", "{}Mode 2 Initialized — {}×{} — Sine Wave Rainbow{}", ELECTRIC_BLUE, width, height, RESET);
 }
 
 RenderMode2::~RenderMode2() {
-    LOG_INFO_CAT("RenderMode2", "Destructor invoked — Releasing resources");
-    if (uniformBuf_) {
-        LOG_DEBUG_CAT("RenderMode2", "Destroying uniform buffer");
-        BUFFER_DESTROY(uniformBuf_);
-    }
-    if (accumulationBuf_) {
-        LOG_DEBUG_CAT("RenderMode2", "Destroying accumulation buffer");
-        BUFFER_DESTROY(accumulationBuf_);
-    }
-    LOG_DEBUG_CAT("RenderMode2", "Mode 2 Resources Released — HYPERTRACE SECURED");
+    LOG_INFO_CAT("RenderMode2", "Destructor invoked — Safe cleanup");
+
+    vkDeviceWaitIdle(RTX::g_ctx().vkDevice());
+
+    rtx_.updateRTXDescriptors(0,
+        VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,
+        VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,
+        VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE);
+
+    LOG_SUCCESS_CAT("RenderMode2", "Mode 2 destroyed — RAINBOW PHOTONS ETERNAL");
 }
 
 void RenderMode2::initResources() {
-    LOG_INFO_CAT("RenderMode2", "initResources() — Creating buffers and images");
+    LOG_INFO_CAT("RenderMode2", "initResources() — Creating output image only");
     auto& ctx = RTX::g_ctx();
     VkDevice device = ctx.vkDevice();
 
-    VkDeviceSize uniformSize = sizeof(glm::mat4) + sizeof(float) + sizeof(uint32_t);
-    LOG_INFO_CAT("RenderMode2", "Creating uniform buffer: Size {}B", uniformSize);
-    BUFFER_CREATE(uniformBuf_, uniformSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                  VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "RenderMode2 Uniform");
-
-    accumSize_ = static_cast<VkDeviceSize>(width_ * height_ * 16);
-    LOG_INFO_CAT("RenderMode2", "Creating accumulation buffer: Size {}B", accumSize_);
-    BUFFER_CREATE(accumulationBuf_, accumSize_, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                  VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "RenderMode2 Accum");
-
     VkImageCreateInfo imgInfo{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
     imgInfo.imageType = VK_IMAGE_TYPE_2D;
-    imgInfo.format = VK_FORMAT_R16G16B16A16_SFLOAT;
+    imgInfo.format = VK_FORMAT_R8G8B8A8_UNORM;
     imgInfo.extent = {width_, height_, 1};
     imgInfo.mipLevels = 1;
     imgInfo.arrayLayers = 1;
     imgInfo.samples = VK_SAMPLE_COUNT_1_BIT;
     imgInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-    imgInfo.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    imgInfo.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
     imgInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
     VkImage rawImg;
-    LOG_INFO_CAT("RenderMode2", "Creating accumulation image: {}×{}", width_, height_);
-    VK_CHECK(vkCreateImage(device, &imgInfo, nullptr, &rawImg), "Accum image creation");
-    accumImage_ = RTX::Handle<VkImage>(rawImg, device, vkDestroyImage, 0, "AccumImage");
+    LOG_INFO_CAT("RenderMode2", "Creating output image: {}×{} | Format: R8G8B8A8_UNORM", width_, height_);
+    VK_CHECK(vkCreateImage(device, &imgInfo, nullptr, &rawImg), "Output image creation");
+    LOG_DEBUG_CAT("RenderMode2", "Output image created: 0x{:x}", reinterpret_cast<uint64_t>(rawImg));
+    outputImage_ = RTX::Handle<VkImage>(rawImg, device, vkDestroyImage, 0, "OutputImage");
 
     VkImageViewCreateInfo viewInfo{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
     viewInfo.image = rawImg;
@@ -73,55 +67,28 @@ void RenderMode2::initResources() {
     viewInfo.format = imgInfo.format;
     viewInfo.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
     VkImageView rawView;
-    VK_CHECK(vkCreateImageView(device, &viewInfo, nullptr, &rawView), "Accum view creation");
-    accumView_ = RTX::Handle<VkImageView>(rawView, device, vkDestroyImageView, 0, "AccumView");
-
-    imgInfo.format = VK_FORMAT_R8G8B8A8_UNORM;
-    LOG_INFO_CAT("RenderMode2", "Creating output image: {}×{}", width_, height_);
-    VK_CHECK(vkCreateImage(device, &imgInfo, nullptr, &rawImg), "Output image creation");
-    outputImage_ = RTX::Handle<VkImage>(rawImg, device, vkDestroyImage, 0, "OutputImage");
-
-    viewInfo.image = rawImg;
-    viewInfo.format = imgInfo.format;
     VK_CHECK(vkCreateImageView(device, &viewInfo, nullptr, &rawView), "Output view creation");
     outputView_ = RTX::Handle<VkImageView>(rawView, device, vkDestroyImageView, 0, "OutputView");
 
-    LOG_INFO_CAT("RenderMode2", "Updating RTX descriptors for frame 0");
-    rtx_.updateRTXDescriptors(0, RAW_BUFFER(uniformBuf_), RAW_BUFFER(accumulationBuf_), VK_NULL_HANDLE,
-                              *accumView_, *outputView_, VK_NULL_HANDLE, VK_NULL_HANDLE,
+    LOG_INFO_CAT("RenderMode2", "Updating RTX descriptors for frame 0 (output only)");
+    rtx_.updateRTXDescriptors(0, VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,
+                              VK_NULL_HANDLE, *outputView_, VK_NULL_HANDLE, VK_NULL_HANDLE,
                               VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE);
-    LOG_SUCCESS_CAT("RenderMode2", "initResources complete — Ready for HYPERTRACE");
+    LOG_SUCCESS_CAT("RenderMode2", "initResources complete — Ready for animated clears");
 }
 
 void RenderMode2::renderFrame(VkCommandBuffer cmd, float deltaTime) {
     LOG_DEBUG_CAT("RenderMode2", "renderFrame() — Delta: {:.3f}ms", deltaTime * 1000.0f);
-    updateUniforms(deltaTime);
-    traceRays(cmd);
-    accumulateAndToneMap(cmd);
-    frameCount_++;
+    clearAnimated(cmd);
 }
 
-void RenderMode2::updateUniforms(float deltaTime) {
-    void* data = nullptr;
-    BUFFER_MAP(uniformBuf_, data);
-    if (data) {
-        float aspect = static_cast<float>(width_) / height_;
-        glm::mat4 vp = g_lazyCam.proj(aspect) * g_lazyCam.view();
-        float time = std::chrono::duration<float>(std::chrono::steady_clock::now() - lastFrame_).count();
-        memcpy(data, glm::value_ptr(vp), sizeof(vp));
-        memcpy(static_cast<char*>(data) + sizeof(vp), &time, sizeof(time));
-        memcpy(static_cast<char*>(data) + sizeof(vp) + sizeof(time), &frameCount_, sizeof(frameCount_));
-        BUFFER_UNMAP(uniformBuf_);
-    }
-    lastFrame_ = std::chrono::steady_clock::now();
-}
+void RenderMode2::clearAnimated(VkCommandBuffer cmd) {
+    float time = std::chrono::duration<float>(std::chrono::steady_clock::now() - startTime_).count();
 
-void RenderMode2::traceRays(VkCommandBuffer cmd) {
-    rtx_.recordRayTrace(cmd, {width_, height_}, *outputImage_, *outputView_);
-}
-
-void RenderMode2::accumulateAndToneMap(VkCommandBuffer cmd) {
-    accumWeight_ = 1.0f / (frameCount_ + 1.0f);
+    float r = 0.5f + 0.5f * std::sin(time);
+    float g = 0.5f + 0.5f * std::sin(time + (2.0f * 3.14159265359f / 3.0f));
+    float b = 0.5f + 0.5f * std::sin(time + (4.0f * 3.14159265359f / 3.0f));
+    float a = 1.0f;
 
     VkImageMemoryBarrier barrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
     barrier.image = *outputImage_;
@@ -130,31 +97,30 @@ void RenderMode2::accumulateAndToneMap(VkCommandBuffer cmd) {
     barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
     barrier.srcAccessMask = 0;
     barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+
     vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
 
-    VkClearColorValue cyan = {};
-    cyan.float32[0] = 0.0f;
-    cyan.float32[1] = 1.0f;
-    cyan.float32[2] = 1.0f;
-    cyan.float32[3] = 1.0f;
-    vkCmdClearColorImage(cmd, *outputImage_, VK_IMAGE_LAYOUT_GENERAL, &cyan, 1, &barrier.subresourceRange);
+    VkClearColorValue color{{r, g, b, a}};
+    vkCmdClearColorImage(cmd, *outputImage_, VK_IMAGE_LAYOUT_GENERAL, &color, 1, &barrier.subresourceRange);
 }
 
 void RenderMode2::onResize(uint32_t width, uint32_t height) {
-    LOG_INFO_CAT("RenderMode2", "onResize() — New: {}×{}", width, height);
-    if (uniformBuf_) BUFFER_DESTROY(uniformBuf_);
-    if (accumulationBuf_) BUFFER_DESTROY(accumulationBuf_);
-    accumImage_.reset();
+    LOG_INFO_CAT("RenderMode2", "onResize() — New: {}×{} (old: {}×{})", width, height, width_, height_);
+
+    auto& ctx = RTX::g_ctx();
+    VkDevice device = ctx.vkDevice();
+    VK_CHECK(vkDeviceWaitIdle(device), "vkDeviceWaitIdle failed in onResize");
+
+    rtx_.updateRTXDescriptors(0, VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,
+                              VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,
+                              VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE);
+
     outputImage_.reset();
-    accumView_.reset();
     outputView_.reset();
-    uniformBuf_ = 0;
-    accumulationBuf_ = 0;
-    accumSize_ = 0;
     width_ = width;
     height_ = height;
-    frameCount_ = 0;
-    accumWeight_ = 1.0f;
+    startTime_ = std::chrono::steady_clock::now();
     initResources();
-    LOG_SUCCESS_CAT("RenderMode2", "Resize complete — HYPERTRACE ready");
+
+    LOG_SUCCESS_CAT("RenderMode2", "Resize complete — Resources recreated");
 }

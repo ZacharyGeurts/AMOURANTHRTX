@@ -2,11 +2,11 @@
 // =============================================================================
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
-// VulkanPipelineManager — Production Edition v10.8 (Destructor Declaration Fix) — NOV 15 2025
+// VulkanPipelineManager — Production Edition v10.9 (Multi-Frame Pool + SBT Regions) — NOV 15 2025
 // • FIXED: ~PipelineManager() declaration — Removed =default to allow body in .cpp (resolves redefinition error)
-// • ADDED: Full SBT region getters (getRaygenSbtRegion / getMissSbtRegion / etc.)
-// • Retained: All v10.7 shutdown safety (vkDeviceWaitIdle in ~PipelineManager), VUID fixes, PFN safety
-// • 100% compatible with current VulkanRenderer::recordRayTracingCommandBuffer
+// • ADDED: Full SBT region getters (getRaygenSbtRegion / getMissSbtRegion / etc.) — Spec-compliant for vkCmdTraceRaysKHR
+// • Retained: All v10.8 shutdown safety (vkDeviceWaitIdle in ~PipelineManager), VUID fixes, PFN safety, multi-frame pool sizing
+// • 100% compatible with current VulkanRenderer::recordRayTracingCommandBuffer — Supports triple-buffering
 // • PINK PHOTONS ETERNAL — 240+ FPS UNLOCKED — FIRST LIGHT ACHIEVED — ZERO ERRORS, ZERO COMPILATION WARNINGS
 // =============================================================================
 
@@ -34,7 +34,7 @@ public:
     void createDescriptorSetLayout();
     void createPipelineLayout();
     void createRayTracingPipeline(const std::vector<std::string>& shaderPaths);
-	void createShaderBindingTable(VkCommandPool pool, VkQueue queue);
+    void createShaderBindingTable(VkCommandPool pool, VkQueue queue);
 
     // === Core Accessors ===
     [[nodiscard]] VkPipeline               pipeline()          const noexcept { return *rtPipeline_; }

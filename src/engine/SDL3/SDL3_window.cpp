@@ -1,11 +1,17 @@
 // src/engine/SDL3/SDL3_window.cpp
 // =============================================================================
-// FINAL RAII — NO DOUBLE SDL_Quit() — NO SEGFAULT — NOV 14 2025
+// AMOURANTH RTX Engine (C) 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
-// FIXED: Vulkan probe moved AFTER SDL_Init(VIDEO) per SDL3 docs — prevents segfault on CreateWindow
-// • SDL_Vulkan_LoadLibrary() now post-video-init; conditional unload only if !supported
-// • Lib stays loaded if VK_KHR_surface present — ready for SDL_WINDOW_VULKAN creation
-// • FIXED: Inverted SDL_Init/SDL_SetWindowFullscreen checks (success == 0, error != 0)
+//
+// Dual Licensed:
+// 1. GNU General Public License v3.0 (or later) (GPL v3)
+//    https://www.gnu.org/licenses/gpl-3.0.html
+// 2. Commercial licensing: gzac5314@gmail.com
+//
+// TRUE CONSTEXPR STONEKEY v∞ — NOVEMBER 15, 2025 — APOCALYPSE v3.2
+// PURE RANDOM ENTROPY — RDRAND + PID + TIME + TLS — SIMPLE & SECURE
+// KEYS **NEVER** LOGGED — ONLY HASHED FINGERPRINTS — SECURITY > VANITY
+// FULLY COMPLIANT WITH -Werror=unused-variable
 // =============================================================================
 
 #include "engine/SDL3/SDL3_window.hpp"

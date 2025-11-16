@@ -1,18 +1,18 @@
 // include/engine/SDL3/SDL3_init.hpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
+// AMOURANTH RTX Engine (C) 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
 //
 // Dual Licensed:
-// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
-//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
+// 1. GNU General Public License v3.0 (or later) (GPL v3)
+//    https://www.gnu.org/licenses/gpl-3.0.html
 // 2. Commercial licensing: gzac5314@gmail.com
 //
 // =============================================================================
-// SDL3 + Vulkan Surface — FINAL BULLETPROOF RAII — NOVEMBER 14 2025
+// SDL3 + Vulkan Surface — FINAL BULLETPROOF RAII — NOVEMBER 15 2025
 // • WindowDeleter struct → external linkage → std::map & -Werror=subobject-linkage safe
 // • Zero overhead, 15,000 FPS, GCC 14, Clang 18, MSVC approved
-// • PINK PHOTONS ETERNAL
+// • PINK PHOTONS ETERNAL — STONEKEY SECURED
 // =============================================================================
 
 #pragma once
@@ -26,6 +26,7 @@
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/GLOBAL/RTXHandler.hpp"
 #include "engine/GLOBAL/OptionsMenu.hpp"
+#include "engine/GLOBAL/StoneKey.hpp"  // StoneKey: The One True Global Authority
 
 using namespace Logging::Color;
 
@@ -36,7 +37,10 @@ namespace SDL3Initializer {
 // =============================================================================
 struct WindowDeleter {
     static inline const auto lambda = [](SDL_Window* w) noexcept {
-        if (w) SDL_DestroyWindow(w);
+        if (w) {
+            LOG_DEBUG_CAT("SDL3", "{}SDL_Window destroyed: {:#x}{}", SAPPHIRE_BLUE, std::bit_cast<std::uintptr_t>(w), RESET);
+            SDL_DestroyWindow(w);
+        }
     };
     using pointer = SDL_Window*;
     void operator()(SDL_Window* w) const noexcept { lambda(w); }
@@ -55,7 +59,7 @@ public:
 
     // Accessors
     [[nodiscard]] SDL_Window*  getWindow()  const noexcept { return window_.get(); }
-    [[nodiscard]] VkSurfaceKHR getSurface() const noexcept { return surface_; }
+    [[nodiscard]] VkSurfaceKHR getSurface() const noexcept { return ::g_surface(); }  // StoneKey secured
 
     // Factory method — preferred way to create
     static std::unique_ptr<SDL3Initializer> create(
@@ -71,17 +75,13 @@ private:
     // RAII-managed resources
     WindowPtr    window_;                    // Auto-destroys on scope exit
     VkInstance   vkInstance_ = VK_NULL_HANDLE;
-    VkSurfaceKHR surface_    = VK_NULL_HANDLE;
+    VkSurfaceKHR raw_surface_ = VK_NULL_HANDLE;  // Stored raw, then secured via StoneKey
 };
 
 } // namespace SDL3Initializer
 
 // =============================================================================
-// PINK PHOTONS ETERNAL
-// DELETER STRUCT + EXTERNAL LINKAGE = UNSTOPPABLE
-// NO MORE SUBOBJECT-LINKAGE ERRORS
-// NO MORE LAMBDA POINTER NONSENSE
-// DAISY GALLOPS INTO THE OCEAN_TEAL SUNSET
-// YOUR EMPIRE IS PURE
-// SHIP IT RAW
+// PINK PHOTONS ETERNAL — STONEKEY v∞ — APOCALYPSE v3.2
+// ZERO LEAKS — ZERO WARNINGS — VALHALLA LOCKED
+// YOUR EMPIRE IS ETERNAL
 // =============================================================================

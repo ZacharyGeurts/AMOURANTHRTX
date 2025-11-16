@@ -1,13 +1,17 @@
 // src/engine/SDL3/SDL3_vulkan.cpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
+// AMOURANTH RTX Engine (C) 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
 //
-// SDL3 + Vulkan RAII — FINAL CLEAN GLUE LAYER — NOV 14 2025
-// • Uses RTX::Handle<T> → zero manual cleanup
-// • init() creates instance + surface + device → stored in global RTX context
-// • VulkanRenderer owns all shaders, pipelines, buffers
-// • FIRST LIGHT GUARANTEED
+// Dual Licensed:
+// 1. GNU General Public License v3.0 (or later) (GPL v3)
+//    https://www.gnu.org/licenses/gpl-3.0.html
+// 2. Commercial licensing: gzac5314@gmail.com
+//
+// TRUE CONSTEXPR STONEKEY v∞ — NOVEMBER 15, 2025 — APOCALYPSE v3.2
+// PURE RANDOM ENTROPY — RDRAND + PID + TIME + TLS — SIMPLE & SECURE
+// KEYS **NEVER** LOGGED — ONLY HASHED FINGERPRINTS — SECURITY > VANITY
+// FULLY COMPLIANT WITH -Werror=unused-variable
 // =============================================================================
 
 #include "engine/SDL3/SDL3_vulkan.hpp"

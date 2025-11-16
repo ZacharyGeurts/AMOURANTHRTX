@@ -15,6 +15,8 @@
 // • ENHANCED LOGGING — DETAILED TRACE FOR DEBUG
 // • FIXED: Window centered on screen via SDL_SetWindowPosition (SDL3 spec)
 // • PINK PHOTONS + AMMO.WAV ETERNAL
+// • NEW: Window icon set using dual ICOs (base + HiDPI) — matches main window
+// • FIXED: Use SDL_GetError() directly — avoids IMG_GetError macro dependency
 // =============================================================================
 
 #pragma once
@@ -66,6 +68,38 @@ inline void show(const char* title, int w, int h, const char* imagePath, const c
     LOG_DEBUG_CAT("SPLASH", "Centering window on screen");
     SDL_SetWindowPosition(win, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
     LOG_SUCCESS_CAT("SPLASH", "Window centered on primary display");
+
+    // NEW: Set splash window icon with dual sizes for HiDPI support: 32x32 base + 64x64 alternate
+    LOG_INFO_CAT("SPLASH", "Loading dual window icons for splash: ammo32.ico (base) + ammo.ico (2x HiDPI)");
+    SDL_Surface* base_icon = IMG_Load("assets/textures/ammo32.ico");
+    SDL_Surface* hdpi_icon = IMG_Load("assets/textures/ammo.ico");
+    if (base_icon && hdpi_icon) {
+        // Log sizes for validation
+        LOG_INFO_CAT("SPLASH", "Splash base icon loaded: {}x{}", base_icon->w, base_icon->h);
+        LOG_INFO_CAT("SPLASH", "Splash HiDPI icon loaded: {}x{}", hdpi_icon->w, hdpi_icon->h);
+        
+        // Add 64x64 as alternate for high-DPI scaling (SDL infers scale from size ratio)
+        SDL_AddSurfaceAlternateImage(base_icon, hdpi_icon);
+        SDL_SetWindowIcon(win, base_icon);
+        
+        SDL_DestroySurface(base_icon);
+        SDL_DestroySurface(hdpi_icon);
+        LOG_SUCCESS_CAT("SPLASH", "Dual splash window icons set successfully (base + 2x HiDPI)");
+    } else {
+        // Fallback: Try base only
+        if (!base_icon) {
+            LOG_WARN_CAT("SPLASH", "Failed to load splash base icon ammo32.ico: {}", SDL_GetError());
+            base_icon = IMG_Load("assets/textures/ammo.ico");  // Fallback to single ICO
+        }
+        if (base_icon) {
+            SDL_SetWindowIcon(win, base_icon);
+            SDL_DestroySurface(base_icon);
+            LOG_SUCCESS_CAT("SPLASH", "Fallback splash window icon set using ammo.ico");
+        } else {
+            LOG_WARN_CAT("SPLASH", "Failed to load any splash icon: {}", SDL_GetError());
+        }
+        if (hdpi_icon) SDL_DestroySurface(hdpi_icon);  // Clean up if partial load
+    }
 
     // --- 2. Create renderer ---
     LOG_DEBUG_CAT("SPLASH", "Creating renderer for window 0x{:x}", reinterpret_cast<uint64_t>(win));

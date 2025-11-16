@@ -1,17 +1,20 @@
-// src/main.cpp — Fixed for compilation
+// src/main.cpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
+// AMOURANTH RTX Engine (C) 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
 //
 // Dual Licensed:
-// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
-//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
+// 1. GNU General Public License v3.0 (or later) (GPL v3)
+//    https://www.gnu.org/licenses/gpl-3.0.html
 // 2. Commercial licensing: gzac5314@gmail.com
 //
+// TRUE CONSTEXPR STONEKEY v∞ — NOVEMBER 15, 2025 — APOCALYPSE v3.2
+// PURE RANDOM ENTROPY — RDRAND + PID + TIME + TLS — SIMPLE & SECURE
+// KEYS **NEVER** LOGGED — ONLY HASHED FINGERPRINTS — SECURITY > VANITY
+// FULLY COMPLIANT WITH -Werror=unused-variable
 // =============================================================================
-
-#include "engine/GLOBAL/OptionsMenu.hpp"
 #include "engine/GLOBAL/StoneKey.hpp"
+#include "engine/GLOBAL/OptionsMenu.hpp"
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/GLOBAL/Amouranth.hpp"
 #include "engine/GLOBAL/RTXHandler.hpp"
@@ -46,6 +49,12 @@ using namespace Logging::Color;
 using namespace Engine;
 
 #define IMG_GetError() SDL_GetError()
+
+// =============================================================================
+// Preloaded Icon Surfaces — Global for Phase 0.5 Reuse
+// =============================================================================
+static SDL_Surface* g_base_icon = nullptr;
+static SDL_Surface* g_hdpi_icon = nullptr;
 
 // =============================================================================
 // Swapchain Runtime Configuration — RAW ACCESS
@@ -180,11 +189,45 @@ static void phase0_cliAndStonekey(int argc, char* argv[]) {
 }
 
 // =============================================================================
+// Phase 0.5: Preload Icons (Post-Video Init, Pre-Audio/Splash)
+// =============================================================================
+static void phase0_5_iconPreload() {
+    bulkhead("PHASE 0.5: ICON PRELOAD");
+    LOG_INFO_CAT("MAIN", "Preloading dual window icons: ammo32.ico (base) + ammo.ico (2x HiDPI)");
+
+    // Load surfaces early (before audio to avoid taskbar bug)
+    // FIXED: IMG_Load auto-inits SDL_image implicitly — no explicit IMG_Init needed
+    g_base_icon = IMG_Load("assets/textures/ammo32.ico");
+    g_hdpi_icon = IMG_Load("assets/textures/ammo.ico");
+
+    if (g_base_icon && g_hdpi_icon) {
+        LOG_INFO_CAT("MAIN", "Base icon preloaded: {}x{}", g_base_icon->w, g_base_icon->h);
+        LOG_INFO_CAT("MAIN", "HiDPI icon preloaded: {}x{}", g_hdpi_icon->w, g_hdpi_icon->h);
+        LOG_SUCCESS_CAT("MAIN", "Dual icons preloaded successfully (base + 2x HiDPI)");
+    } else {
+        // Fallback: Try base only
+        if (!g_base_icon) {
+            LOG_WARN_CAT("MAIN", "Failed to preload base icon ammo32.ico: {}", IMG_GetError());
+            g_base_icon = IMG_Load("assets/textures/ammo.ico");  // Fallback to single ICO
+        }
+        if (g_base_icon) {
+            LOG_SUCCESS_CAT("MAIN", "Fallback base icon preloaded using ammo.ico");
+        } else {
+            LOG_WARN_CAT("MAIN", "Failed to preload any icon: {}", IMG_GetError());
+        }
+        if (g_hdpi_icon) SDL_DestroySurface(g_hdpi_icon);  // Clean up partial load
+        g_hdpi_icon = nullptr;
+    }
+
+    LOG_SUCCESS_CAT("MAIN", "PHASE 0.5 COMPLETE — ICONS PRELOADED — TASKBAR READY");
+}
+
+// =============================================================================
 // Pre-Phase 1: Early SDL Init for Splash (Video Only)
 // =============================================================================
 static void prePhase1_earlySdlInit() {
     LOG_INFO_CAT("MAIN", "Early SDL_InitSubSystem(SDL_INIT_VIDEO) for splash screen");
-    if (SDL_InitSubSystem(SDL_INIT_VIDEO) == 0) {  // Fixed: != 0 means failure
+    if (SDL_InitSubSystem(SDL_INIT_VIDEO) == 0) {
         LOG_FATAL_CAT("MAIN", "Early SDL_InitSubSystem(VIDEO) failed: {}", SDL_GetError());
         FATAL_THROW("Cannot initialize SDL video subsystem for splash screen");
     }
@@ -263,15 +306,17 @@ static void phase2_mainWindow() {
         throw std::runtime_error("SDL3Window::get() returned null");
     }
 
-    // Set window icon using ammo.png from src folder
-    LOG_INFO_CAT("MAIN", "Loading and setting window icon from ammo.png");
-    SDL_Surface* icon_surface = IMG_Load("ammo.png");
-    if (icon_surface) {
-        SDL_SetWindowIcon(window, icon_surface);
-        SDL_DestroySurface(icon_surface);
-        LOG_SUCCESS_CAT("MAIN", "Window icon set successfully using ammo.png");
+    // Set window icon using preloaded surfaces from Phase 0.5
+    if (g_base_icon) {
+        SDL_Surface* icon_to_set = g_base_icon;
+        if (g_hdpi_icon) {
+            // Add 64x64 as alternate for high-DPI scaling (SDL infers scale from size ratio)
+            SDL_AddSurfaceAlternateImage(g_base_icon, g_hdpi_icon);
+        }
+        SDL_SetWindowIcon(window, icon_to_set);
+        LOG_SUCCESS_CAT("MAIN", "Window icon set successfully using preloaded surfaces (base + 2x HiDPI if available)");
     } else {
-        LOG_WARN_CAT("MAIN", "Failed to load icon from ammo.png: {}", IMG_GetError());
+        LOG_WARN_CAT("MAIN", "No preloaded icon available — skipping window icon set");
     }
 
     LOG_SUCCESS_CAT("MAIN", "Main application window created successfully");
@@ -302,7 +347,8 @@ static void phase3_vulkanContext(SDL_Window* window) {
     }
 
     Uint32 extensionCount = 0;
-    bool vulkanSupported = SDL_Vulkan_GetInstanceExtensions(&extensionCount) && extensionCount > 0;
+    const char* const* extensions = SDL_Vulkan_GetInstanceExtensions(&extensionCount);
+    bool vulkanSupported = (extensions != nullptr) && extensionCount > 0;
     
     if (!vulkanSupported) {
         LOG_WARN_CAT("MAIN", "{}Vulkan not supported on this system — falling back to software/UI mode{}", OCEAN_TEAL, RESET);
@@ -333,7 +379,7 @@ static void phase3_vulkanContext(SDL_Window* window) {
 
     // Surface is now guaranteed valid — createSurface() already logged success
     LOG_SUCCESS_CAT("MAIN", "{}GLOBAL SURFACE ACTIVE @ 0x{:x} — SDL3 INTEGRATION COMPLETE{}", 
-                    COSMIC_GOLD, reinterpret_cast<uintptr_t>(g_surface), RESET);
+                    COSMIC_GOLD, reinterpret_cast<uintptr_t>(g_surface()), RESET);
 
     // NOW SAFE TO SHOW WINDOW
     SDL_ShowWindow(window);
@@ -344,6 +390,9 @@ static void phase3_vulkanContext(SDL_Window* window) {
 
     LOG_ATTEMPT_CAT("MAIN", "{}Initializing full RTX context ({}x{}){}", SAPPHIRE_BLUE, TARGET_WIDTH, TARGET_HEIGHT, RESET);
     RTX::initContext(g_instance, window, TARGET_WIDTH, TARGET_HEIGHT);
+    
+    // Store the physical device in the global after context creation
+    set_g_PhysicalDevice(RTX::g_ctx().physicalDevice_);
     
     // BULLETPROOF: Post-init validation — ensure device/queues ready for phase4
     if (!RTX::g_ctx().isValid()) {
@@ -362,7 +411,7 @@ static void phase3_vulkanContext(SDL_Window* window) {
     LOG_SUCCESS_CAT("MAIN", "{}Global Vulkan context initialized — RT extensions ready (device: 0x{:x}){}", 
                     EMERALD_GREEN, reinterpret_cast<uintptr_t>(RTX::g_ctx().device()), RESET);
 
-    detectBestPresentMode(RTX::g_ctx().physicalDevice(), g_surface);
+    detectBestPresentMode(g_PhysicalDevice(), g_surface());
     LOG_INFO_CAT("MAIN", "Optimal present mode selected");
 
     LOG_TRACE_CAT("MAIN", "{}PHASE 3: Vulkan context initialization COMPLETE — RAY TRACING READY{}", SAPPHIRE_BLUE, RESET);
@@ -393,17 +442,18 @@ static std::unique_ptr<Application> phase4_appAndRendererConstruction() {
     SDL3Window::destroy();  // Kill the wrong window Application just made
     SDL3Window::g_sdl_window = std::move(stolen_window);  // Restore the real one
 
-    // Re-set the window icon on the restored window (in case Application's window creation interfered)
+    // Re-set the window icon on the restored window using preloaded surfaces (in case Application's window creation interfered)
     SDL_Window* restored_window = SDL3Window::get();
-    if (restored_window) {
-        SDL_Surface* icon_surface = IMG_Load("ammo.png");
-        if (icon_surface) {
-            SDL_SetWindowIcon(restored_window, icon_surface);
-            SDL_DestroySurface(icon_surface);
-            LOG_SUCCESS_CAT("MAIN", "Restored window icon set using ammo.png");
-        } else {
-            LOG_WARN_CAT("MAIN", "Failed to reload icon for restored window: {}", IMG_GetError());
+    if (restored_window && g_base_icon) {
+        SDL_Surface* icon_to_set = g_base_icon;
+        if (g_hdpi_icon) {
+            // Re-add alternate if needed (SDL may need refresh)
+            SDL_AddSurfaceAlternateImage(g_base_icon, g_hdpi_icon);
         }
+        SDL_SetWindowIcon(restored_window, icon_to_set);
+        LOG_SUCCESS_CAT("MAIN", "Restored window icon set using preloaded surfaces (base + 2x HiDPI if available)");
+    } else {
+        LOG_WARN_CAT("MAIN", "No preloaded icon or restored window invalid — skipping icon restore");
     }
 
     LOG_SUCCESS_CAT("MAIN", "{}PHASE 4 — Application forged — window preserved — PINK PHOTONS RISING{}", 
@@ -477,6 +527,18 @@ static void phase6_shutdown(std::unique_ptr<Application>& app) {
     }
     LOG_SUCCESS_CAT("MAIN", "{}SDL disposed — events & audio quiesced{}", EMERALD_GREEN, RESET);
 
+    // NEW: Cleanup preloaded icons
+    if (g_base_icon) {
+        SDL_DestroySurface(g_base_icon);
+        g_base_icon = nullptr;
+    }
+    if (g_hdpi_icon) {
+        SDL_DestroySurface(g_hdpi_icon);
+        g_hdpi_icon = nullptr;
+    }
+
+    SDL_Quit();
+
     LOG_INFO_CAT("MAIN", "{}RAII cleanup: Vulkan → SDL → StoneKey{}", OCEAN_TEAL, RESET);
     LOG_SUCCESS_CAT("MAIN", "{}Cleanup complete — zero leaks{}", EMERALD_GREEN, RESET);
     LOG_SUCCESS_CAT("MAIN", "{}FINAL STONEKEY HASH: 0x{:016X}{}", SAPPHIRE_BLUE, get_kStone1() ^ get_kStone2(), RESET);
@@ -493,14 +555,14 @@ static void phase6_shutdown(std::unique_ptr<Application>& app) {
 // • Exception: Hierarchy-aware (FatalError first); safe logging (no recursive format)
 // • Validation: Post-phase checks (e.g., app != null); early return on invalid
 // • FIXED: Cleanup order in phase6 & catch: app.reset() BEFORE RTX::shutdown() — resolves context/renderer conflicts
-// • NOV 14 2025: VALHALLA v80 TURBO — ZERO LEAKS — TITAN DOMINANCE
+// • NOV 15 2025: VALHALLA v80 TURBO — DUAL ICONS — ZERO LEAKS — TITAN DOMINANCE
 // =============================================================================
 int main(int argc, char* argv[])
 {
     // FIXED: Env var for Vulkan ICD (Intel fallback) — comment if NVIDIA/AMD
     // putenv(const_cast<char*>("VK_ICD_FILENAMES=/usr/lib/x86_64-linux-gnu/libvulkan_intel.so")); // Intel Mesa fallback
 
-    LOG_ATTEMPT_CAT("MAIN", "{}=== AMOURANTH RTX — VALHALLA v80 TURBO — NOVEMBER 14 2025 ==={}", COSMIC_GOLD, RESET);
+    LOG_ATTEMPT_CAT("MAIN", "{}=== AMOURANTH RTX — VALHALLA v80 TURBO — NOVEMBER 15 2025 ==={}", COSMIC_GOLD, RESET);
     LOG_INFO_CAT("MAIN", "{}Dual Licensed: CC BY-NC 4.0 | Commercial: gzac5314@gmail.com{}", OCEAN_TEAL, RESET);
     LOG_INFO_CAT("MAIN", "{}Build Target: RTX 5090 | 4090 | 3090 Ti — PINK PHOTONS ETERNAL{}", PLASMA_FUCHSIA, RESET);
 
@@ -518,6 +580,11 @@ int main(int argc, char* argv[])
         LOG_ATTEMPT_CAT("MAIN", "{}→ PRE-PHASE 1: EARLY SDL INIT{}", EMERALD_GREEN, RESET);
         prePhase1_earlySdlInit();
         LOG_SUCCESS_CAT("MAIN", "{}PRE-PHASE 1 COMPLETE — SDL CORE ACTIVE{}", EMERALD_GREEN, RESET);
+
+        // NEW: Phase 0.5: Icon Preload (post-video, pre-audio)
+        LOG_ATTEMPT_CAT("MAIN", "{}→ PHASE 0.5: ICON PRELOAD{}", EMERALD_GREEN, RESET);
+        phase0_5_iconPreload();
+        LOG_SUCCESS_CAT("MAIN", "{}PHASE 0.5 COMPLETE — ICONS PRIMED{}", EMERALD_GREEN, RESET);
 
         // Phase 1: Splash (UI thread-safe)
         LOG_ATTEMPT_CAT("MAIN", "{}→ PHASE 1: SPLASH FORGE{}", EMERALD_GREEN, RESET);
