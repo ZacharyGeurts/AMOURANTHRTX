@@ -2141,26 +2141,47 @@ void VulkanRenderer::performTonemapPass(VkCommandBuffer cmd, uint32_t frameIdx) 
     // FIXED: REMOVED duplicate barrier — handled in renderFrame
 }
 
-void VulkanRenderer::updateUniformBuffer(uint32_t frame, const Camera& camera, float jitter) {
-
-    if (uniformBufferEncs_.empty() || RTX::g_ctx().sharedStagingEnc_ == 0) {  // FIXED: Use enc check
+void VulkanRenderer::updateUniformBuffer(uint32_t frame, const Camera& camera, float jitter)
+{
+    if (uniformBufferEncs_.empty() || RTX::g_ctx().sharedStagingEnc_ == 0) {
         return;
     }
 
-    const auto& ctx = RTX::g_ctx();  // const ref
+    const auto& ctx = RTX::g_ctx();
+
     void* data = nullptr;
-    // FIXED: Null check after tonemap UBO map (pre-memcpy segfault post-resize)
-    if (data == nullptr) {
-        LOG_WARN_CAT("RENDERER",  "Tonemap UBO map returned null (OOM post-resize?) — skipping memcpy.", frame);
-        return;
-    }
-    // FIXED: Explicit null check post-map in updateUniformBuffer (pre-memcpy segfault after resize)
-    if (data == nullptr) {
-        LOG_WARN_CAT("RENDERER", "UBO map returned null for frame {} (OOM post-resize?) — skipping memcpy.", frame);
-        return;
-    }
-    vkMapMemory(ctx.device(), BUFFER_MEMORY(RTX::g_ctx().sharedStagingEnc_), 0, VK_WHOLE_SIZE, 0, &data);
+    VkResult mapResult = vkMapMemory(
+        ctx.device(),
+        BUFFER_MEMORY(RTX::g_ctx().sharedStagingEnc_),
+        0, VK_WHOLE_SIZE, 0, &data
+    );
 
+    if (mapResult != VK_SUCCESS || data == nullptr) {
+        LOG_WARN_CAT("RENDERER", 
+            "vkMapMemory failed (result: {}) — forcing remap recovery — frame {}", 
+            static_cast<int>(mapResult), frameNumber_);
+
+        // Force unmap + invalidate + remap
+        vkUnmapMemory(ctx.device(), BUFFER_MEMORY(RTX::g_ctx().sharedStagingEnc_));
+
+        VkMappedMemoryRange range = {
+            .sType  = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE,
+            .memory = BUFFER_MEMORY(RTX::g_ctx().sharedStagingEnc_),
+            .offset = 0,
+            .size   = VK_WHOLE_SIZE
+        };
+        vkInvalidateMappedMemoryRanges(ctx.device(), 1, &range);
+
+        mapResult = vkMapMemory(ctx.device(), BUFFER_MEMORY(RTX::g_ctx().sharedStagingEnc_), 0, VK_WHOLE_SIZE, 0, &data);
+        if (mapResult != VK_SUCCESS || data == nullptr) {
+            LOG_FATAL_CAT("RENDERER", "CRITICAL: vkMapMemory failed twice — GPU OOM or driver dead. Frame {} lost.", frameNumber_);
+            return;
+        }
+
+        LOG_SUCCESS_CAT("RENDERER", "vkMapMemory recovered after force-remap — frame {} saved", frameNumber_);
+    }
+
+    // Fill UBO
     alignas(16) struct {
         glm::mat4 view;
         glm::mat4 proj;
@@ -2175,43 +2196,45 @@ void VulkanRenderer::updateUniformBuffer(uint32_t frame, const Camera& camera, f
         float _pad[3];
     } ubo{};
 
-    // Use the real GlobalCamera singleton — this is how your engine actually works
     const auto& cam = GlobalCamera::get();
-
-    ubo.view     = cam.view();
-    ubo.proj     = cam.proj(width_ / float(height_));
-    ubo.viewProj = ubo.proj * ubo.view;
-    ubo.invView  = glm::inverse(ubo.view);
-    ubo.invProj  = glm::inverse(ubo.proj);
-    ubo.cameraPos = glm::vec4(cam.pos(), 1.0f);
-    ubo.jitter   = glm::vec2(jitter);
-    ubo.frame    = frameNumber_;
-    ubo.time     = frameTime_;
-    ubo.spp      = currentSpp_;
+    ubo.view       = cam.view();
+    ubo.proj       = cam.proj(width_ / float(height_));
+    ubo.viewProj   = ubo.proj * ubo.view;
+    ubo.invView    = glm::inverse(ubo.view);      // ← FIXED: "ab" → proper formatting
+    ubo.invProj    = glm::inverse(ubo.proj);
+    ubo.cameraPos  = glm::vec4(cam.pos(), 1.0f);
+    ubo.jitter     = glm::vec2(jitter);
+    ubo.frame      = frameNumber_;
+    ubo.time       = frameTime_;
+    ubo.spp        = currentSpp_;
 
     std::memcpy(data, &ubo, sizeof(ubo));
     vkUnmapMemory(ctx.device(), BUFFER_MEMORY(RTX::g_ctx().sharedStagingEnc_));
 
-    // FIXED: Copy staging to device UBO (use single-time commands for immediate copy)
-    VkCommandPool cmdPool = ctx.commandPool();
-    VkQueue queue = ctx.graphicsQueue();
-    VkCommandBuffer copyCmd = pipelineManager_.beginSingleTimeCommands(cmdPool);
-    if (copyCmd != VK_NULL_HANDLE) {
-        VkBufferCopy copyRegion{};
-        copyRegion.srcOffset = 0;
-        copyRegion.dstOffset = 0;
-        copyRegion.size = sizeof(ubo);
-        VkBuffer stagingBuf = RTX::UltraLowLevelBufferTracker::get().getData(RTX::g_ctx().sharedStagingEnc_)->buffer;  // FIXED: Use enc
-        VkBuffer deviceBuf = RAW_BUFFER(uniformBufferEncs_[frame]);
-        vkCmdCopyBuffer(copyCmd, stagingBuf, deviceBuf, 1, &copyRegion);
+    // Immediate staging → device-local copy
+    VkCommandBuffer cmd = pipelineManager_.beginSingleTimeCommands(ctx.commandPool());
+    if (cmd != VK_NULL_HANDLE) {
+        VkBuffer src = RTX::UltraLowLevelBufferTracker::get().getData(RTX::g_ctx().sharedStagingEnc_)->buffer;
+        VkBuffer dst = RAW_BUFFER(uniformBufferEncs_[frame]);
 
-        // Barrier for uniform read
-        VkMemoryBarrier uniformBarrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
-        uniformBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-        uniformBarrier.dstAccessMask = VK_ACCESS_UNIFORM_READ_BIT;
-        vkCmdPipelineBarrier(copyCmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, 0, 1, &uniformBarrier, 0, nullptr, 0, nullptr);
+        VkBufferCopy copyRegion{
+            .srcOffset = 0,
+            .dstOffset = 0,
+            .size      = sizeof(ubo)
+        };
+        vkCmdCopyBuffer(cmd, src, dst, 1, &copyRegion);
 
-        pipelineManager_.endSingleTimeCommands(cmdPool, queue, copyCmd);
+        VkMemoryBarrier barrier{
+            .sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
+            .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+            .dstAccessMask = VK_ACCESS_UNIFORM_READ_BIT
+        };
+        vkCmdPipelineBarrier(cmd,
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
+            VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
+            0, 1, &barrier, 0, nullptr, 0, nullptr);
+
+        pipelineManager_.endSingleTimeCommands(ctx.commandPool(), ctx.graphicsQueue(), cmd);
     }
 }
 

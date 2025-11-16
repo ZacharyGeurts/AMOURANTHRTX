@@ -16,6 +16,7 @@
 #pragma once
 
 #include "engine/GLOBAL/logging.hpp"
+#include "engine/KeyBindings.hpp"
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_beta.h>
 #include <glm/glm.hpp>
