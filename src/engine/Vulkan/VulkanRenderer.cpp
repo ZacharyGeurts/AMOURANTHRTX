@@ -1533,7 +1533,9 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     updateTonemapUniform(currentFrame_);
 
     // FIXED: Per-frame RT descriptor updates (tlas/ubo/images) — VUID-vkCmdTraceRaysKHR-None-08114
-    updateRTXDescriptors(currentFrame_);
+    for (uint32_t f = 0; f < Options::Performance::MAX_FRAMES_IN_FLIGHT; ++f) {
+    updateRTXDescriptors(f);
+}
     updateNexusDescriptors(); // Bind nexus post-resize (VUID-vkCmdTraceRaysKHR-None-08114)
 
     // FIXED: Ray Tracing Outside Render Pass (VUID-vkCmdTraceRaysKHR-renderpass)
@@ -1632,6 +1634,30 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
 
     // FIXED: End Render Pass — No barriers inside (VUID-vkCmdPipelineBarrier-None-07889)
     vkCmdEndRenderPass(cmd);
+
+	// FIXED: Reverse RT Output: SHADER_READ_ONLY_OPTIMAL → GENERAL (for next RT write, VUID-vkCmdDraw-None-09600)
+    {
+    uint32_t rtFrameIdx = currentFrame_ % rtOutputImages_.size();
+        if (rtOutputImages_[rtFrameIdx].valid()) {
+            VkImageMemoryBarrier barrier = {};
+            barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+            barrier.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+            barrier.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+            barrier.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;  // Post-tonemap
+            barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;                   // For RT write
+            barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            barrier.image = *rtOutputImages_[rtFrameIdx];
+            barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            barrier.subresourceRange.levelCount = 1;
+            barrier.subresourceRange.layerCount = 1;
+
+            vkCmdPipelineBarrier(cmd,
+                VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
+                0, 0, nullptr, 0, nullptr, 1, &barrier);
+        }
+    }
 
     // FIXED: Barrier for Swapchain: COLOR_ATTACHMENT_OPTIMAL → PRESENT_SRC_KHR (Outside RP, VUID-VkImageMemoryBarrier-oldLayout-01197)
     {
@@ -1922,6 +1948,7 @@ void VulkanRenderer::updateRTXDescriptors(uint32_t frame) noexcept {
         writes[writeCount].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         writes[writeCount].pNext = nullptr;
         writes[writeCount].dstSet = set;
+writes[writeCount].dstArrayElement = 0;
         writes[writeCount].dstBinding = 1;
         writes[writeCount].descriptorCount = 1;
         writes[writeCount].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
@@ -1942,6 +1969,7 @@ void VulkanRenderer::updateRTXDescriptors(uint32_t frame) noexcept {
         writes[writeCount].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         writes[writeCount].pNext = nullptr;
         writes[writeCount].dstSet = set;
+writes[writeCount].dstArrayElement = 0;
         writes[writeCount].dstBinding = 2;
         writes[writeCount].descriptorCount = 1;
         writes[writeCount].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
@@ -2022,6 +2050,7 @@ void VulkanRenderer::updateRTXDescriptors(uint32_t frame) noexcept {
         writes[writeCount].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         writes[writeCount].pNext = nullptr;
         writes[writeCount].dstSet = set;
+writes[writeCount].dstArrayElement = 0;
         writes[writeCount].dstBinding = 6;
         writes[writeCount].descriptorCount = 1;
         writes[writeCount].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
@@ -2420,7 +2449,9 @@ void VulkanRenderer::handleResize(int w, int h) noexcept {
     createCommandBuffers();  // Full rebuild: RT trace + tonemap + barriers
 
     // 6. Update ALL descriptors (rebind fresh Handles/views; VUID-vkCmdTraceRaysKHR-None-08114)
-    updateRTXDescriptors(currentFrame_);     // TLAS/bindings
+    for (uint32_t f = 0; f < Options::Performance::MAX_FRAMES_IN_FLIGHT; ++f) {
+    updateRTXDescriptors(f);
+}     // TLAS/bindings
     if (Options::RTX::ENABLE_ADAPTIVE_SAMPLING)
         updateNexusDescriptors();            // Nexus post-resize
     updateTonemapDescriptorsInitial();       // Tonemap: new RT/accum views + UBOs
