@@ -267,7 +267,7 @@ VkCommandBuffer PipelineManager::beginSingleTimeCommands(VkCommandPool pool) con
     result = vkBeginCommandBuffer(cmd, &beginInfo);
     if (result != VK_SUCCESS) {
         LOG_ERROR_CAT("PIPELINE", "vkBeginCommandBuffer failed: {}", static_cast<int>(result));
-        vkFreeCommandBuffers(device_, pool, 1, &cmd);
+    // REMOVED DOUBLE FREE: endSingleTimeCommands() already frees this cmd
         return VK_NULL_HANDLE;
     }
 
@@ -316,7 +316,7 @@ void PipelineManager::endSingleTimeCommands(VkCommandPool pool, VkQueue queue, V
     }
 
     // 4. Cleanup
-    vkFreeCommandBuffers(device_, pool, 1, &cmd);
+    // REMOVED DOUBLE FREE: endSingleTimeCommands() already frees this cmd
 
     LOG_TRACE_CAT("PIPELINE", "endSingleTimeCommands — COMPLETE (safe, no device lost)");
 }

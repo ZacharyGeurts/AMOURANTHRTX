@@ -661,20 +661,22 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, bool o
     VK_CHECK(vkCreatePipelineLayout(device(), &pipelineLayoutInfo, nullptr, &tonemapPipelineLayout), "Tonemap pipeline layout");
 
     // === Graphics Pipeline — Render Pass from SWAPCHAIN (not Context) ===
-    VkGraphicsPipelineCreateInfo pipelineInfo = {
-        .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
-        .stageCount = 2,
-        .pStages = shaderStages,
-        .pVertexInputState = &vertexInputInfo,
-        .pInputAssemblyState = &inputAssembly,
-        .pViewportState = &viewportState,
-        .pRasterizationState = &rasterizer,
-        .pMultisampleState = &multisampling,
-        .pColorBlendState = &colorBlending,
-        .layout = tonemapPipelineLayout,
-        .renderPass = *RTX::g_ctx().renderPass_,
-        .subpass = 0
-    };
+    VkGraphicsPipelineCreateInfo pipelineInfo{};
+    pipelineInfo.sType               = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+    pipelineInfo.pNext               = nullptr;                                   // KILL DYNAMIC RENDERING VUIDs
+    pipelineInfo.stageCount          = 2;
+    pipelineInfo.pStages             = shaderStages;
+    pipelineInfo.pVertexInputState   = &vertexInputInfo;
+    pipelineInfo.pInputAssemblyState = &inputAssembly;
+    pipelineInfo.pViewportState      = &viewportState;
+    pipelineInfo.pRasterizationState = &rasterizer;
+    pipelineInfo.pMultisampleState   = &multisampling;
+    pipelineInfo.pColorBlendState    = &colorBlending;
+    pipelineInfo.layout              = tonemapPipelineLayout;
+    
+    pipelineInfo.renderPass = SWAPCHAIN.renderPass();     // FIXED: Use swapchain RP directly — never null
+    pipelineInfo.subpass    = 0;
+    pipelineInfo.subpass             = 0;
 
     VkPipeline tonemapPipeline = VK_NULL_HANDLE;
     VK_CHECK(vkCreateGraphicsPipelines(device(), VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &tonemapPipeline),
@@ -1540,7 +1542,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
         VkFramebuffer fb = framebuffers_[imageIndex];
         VkRenderPassBeginInfo rpBegin = {};
         rpBegin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-        rpBegin.renderPass = *RTX::g_ctx().renderPass_;
+        rpBegin.renderPass = *RTX::g_ctx().renderPass_,  // CLASSIC RENDER PASS (dynamicRendering OFF)
         rpBegin.framebuffer = fb;
         rpBegin.renderArea.offset = {0, 0};
         rpBegin.renderArea.extent = SWAPCHAIN.extent();

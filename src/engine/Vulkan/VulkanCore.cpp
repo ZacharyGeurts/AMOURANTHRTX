@@ -294,7 +294,7 @@ void VulkanRTX::endSingleTimeCommands(VkCommandBuffer cmd, VkQueue queue, VkComm
 
     // 5. Cleanup: Destroy fence & free buffer (safe post-wait/error)
     vkDestroyFence(RTX::g_ctx().device(), fence, nullptr);
-    vkFreeCommandBuffers(RTX::g_ctx().device(), pool, 1, &cmd);
+    // REMOVED DOUBLE FREE: endSingleTimeCommands() already frees this cmd
 
     LOG_TRACE_CAT("RTX", "endSingleTimeCommands — COMPLETE (resilient fence sync)");
 }
@@ -328,7 +328,7 @@ void VulkanRTX::endSingleTimeCommandsAsync(VkCommandBuffer cmd, VkQueue queue, V
     VkSubmitInfo submit { .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO, .commandBufferCount = 1, .pCommandBuffers = &cmd };
     VK_CHECK(vkQueueSubmit(queue, 1, &submit, fence), "Failed to submit async command buffer");
 
-    vkFreeCommandBuffers(RTX::g_ctx().device(), pool, 1, &cmd);
+    // REMOVED DOUBLE FREE: endSingleTimeCommands() already frees this cmd
 
     LOG_TRACE_CAT("RTX", "endSingleTimeCommandsAsync — Submitted (fence: 0x{:x})",
                   reinterpret_cast<uintptr_t>(fence));
