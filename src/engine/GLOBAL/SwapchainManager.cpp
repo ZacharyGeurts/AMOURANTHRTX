@@ -1,10 +1,11 @@
 // src/engine/GLOBAL/SwapchainManager.cpp
 // =============================================================================
 // AMOURANTH RTX Engine © 2025 by Zachary "gzac" Geurts — PINK PHOTONS ETERNAL
-// SWAPCHAIN MANAGER — v16 AAAAA — HDR SUPREMACY + FRAME PREDICTION + 8-BIT MERCY
-// • True 10-bit HDR preferred — scRGB / HDR10 / Dolby Vision
+// SWAPCHAIN MANAGER — v17 FORCE — HDR SUPREMACY + FRAME PREDICTION + NO 8-BIT MERCY
+// • True 10-bit HDR enforced — scRGB / HDR10 / Dolby Vision — NO FALLBACKS
+// • Respects Compositor::hdr_format / hdr_color_space — force override integrated
 // • Full VK_GOOGLE_display_timing jitter recovery (PFN raw, no wrapper bloat)
-// • Falls back to 8-bit sRGB with loud existential shame
+// • Artifacts over 8-bit: Pink photons demand 10-bit, even coerced
 // • Zero validation errors. Zero leaks. Maximum glory.
 // =============================================================================
 //
@@ -12,27 +13,28 @@
 // 1. GNU General Public License v3.0+ → https://www.gnu.org/licenses/gpl-3.0.html
 // 2. Commercial licensing → gzac5314@gmail.com
 //
-// NOVEMBER 16, 2025 — PINK PHOTONS DO NOT STUTTER. THEY ASCEND.
+// NOVEMBER 16, 2025 — PINK PHOTONS DO NOT COMPROMISE. THEY CONQUER.
 // =============================================================================
 
 #include "engine/GLOBAL/SwapchainManager.hpp"
 #include "engine/GLOBAL/OptionsMenu.hpp"
+#include "engine/GLOBAL/RTXHandler.hpp"     // For RTX::g_ctx().hdr_format / hdr_color_space
 #include <algorithm>
 #include <array>
 
 using namespace Logging::Color;
 
-// ── RAW PFN DECLARATIONS (AAAAA STYLE — NO WRAPPERS, NO BLOAT) ─────────────────
+// ── RAW PFN DECLARATIONS (FORCE STYLE — NO WRAPPERS, NO BLOAT) ─────────────────
 static PFN_vkGetPastPresentationTimingGOOGLE g_vkGetPastPresentationTimingGOOGLE = nullptr;
 static PFN_vkSetHdrMetadataEXT g_vkSetHdrMetadataEXT = nullptr;
 
-// Preferred formats — god tier first, peasant last
+// Preferred formats — god tier first, peasant last (but peasants banned)
 static constexpr std::array kPreferredFormats = {
     VK_FORMAT_A2B10G10R10_UNORM_PACK32,      // HDR10 10-bit — royalty-free king
     VK_FORMAT_A2R10G10B10_UNORM_PACK32,
     VK_FORMAT_R16G16B16A16_SFLOAT,           // scRGB FP16 — divine
     VK_FORMAT_B10G11R11_UFLOAT_PACK32,       // RG11B10
-    VK_FORMAT_B8G8R8A8_UNORM                 // 8-bit sRGB — tolerated… barely
+    // VK_FORMAT_B8G8R8A8_UNORM                 // BANNED: No more 8-bit mercy
 };
 
 static constexpr std::array kPreferredColorSpaces = {
@@ -40,8 +42,11 @@ static constexpr std::array kPreferredColorSpaces = {
     VK_COLOR_SPACE_DOLBYVISION_EXT,
     VK_COLOR_SPACE_HDR10_HLG_EXT,
     VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT,
-    VK_COLOR_SPACE_SRGB_NONLINEAR_KHR        // peasant space
+    VK_COLOR_SPACE_SRGB_NONLINEAR_KHR        // Last resort, but forced if needed
 };
+
+// Sentinel for unset color space (VK_COLOR_SPACE_SRGB_NONLINEAR_KHR == 0, so use max enum as unset)
+static constexpr VkColorSpaceKHR UNSET_COLOR_SPACE = VK_COLOR_SPACE_MAX_ENUM_KHR;
 
 // ─────────────────────────────────────────────────────────────────────────────
 void SwapchainManager::init(VkInstance instance, VkPhysicalDevice phys, VkDevice dev, VkSurfaceKHR surf, uint32_t w, uint32_t h) {
@@ -55,9 +60,9 @@ void SwapchainManager::init(VkInstance instance, VkPhysicalDevice phys, VkDevice
             vkGetDeviceProcAddr(device_, "vkGetPastPresentationTimingGOOGLE"));
 
         if (!g_vkGetPastPresentationTimingGOOGLE) {
-            LOG_WARN_CAT("SWAPCHAIN", "VK_GOOGLE_display_timing not supported — falling back to stock present");
+            LOG_INFO_CAT("SWAPCHAIN", "VK_GOOGLE_display_timing not supported — falling back to stock present");
         } else {
-            LOG_SUCCESS_CAT("SWAPCHAIN", "VK_GOOGLE_display_timing ENABLED — AAAAA jitter recovery online");
+            LOG_SUCCESS_CAT("SWAPCHAIN", "VK_GOOGLE_display_timing ENABLED — FORCE jitter recovery online");
         }
     }
 
@@ -70,27 +75,13 @@ void SwapchainManager::init(VkInstance instance, VkPhysicalDevice phys, VkDevice
     createRenderPass();
 
     if (isHDR() && !g_vkSetHdrMetadataEXT) {
-        LOG_WARN_CAT("SWAPCHAIN", "VK_EXT_hdr_metadata not supported — HDR metadata updates disabled");
+        LOG_INFO_CAT("SWAPCHAIN", "VK_EXT_hdr_metadata not supported — HDR metadata updates disabled");
     }
 
-    if (isPeasantMode()) {
-        LOG_WARN_CAT("SWAPCHAIN",
-            "\n"
-            "══════════════════════════════════════════════════════════════════════════\n"
-            "               8-BIT PEASANT MODE ENGAGED\n"
-            "══════════════════════════════════════════════════════════════════════════\n"
-            "HDR was not available. Running in 8-bit sRGB.\n"
-            "Your display or HDR setting is insufficient.\n"
-            "Pink photons are dimmed. Visual fidelity is compromised.\n"
-            "Enable HDR in Windows → Display Settings for the full experience.\n"
-            "We still love you. But upgrade. Please.\n"
-            "══════════════════════════════════════════════════════════════════════════\n");
-    } else {
-        LOG_SUCCESS_CAT("SWAPCHAIN",
-            "HDR SUPREMACY ACHIEVED | {} | {} | {}x{} | {} images | PINK PHOTONS BURN ETERNAL",
-            formatName(), vk::to_string(static_cast<vk::ColorSpaceKHR>(surfaceFormat_.colorSpace)),
-            extent_.width, extent_.height, images_.size());
-    }
+    LOG_SUCCESS_CAT("SWAPCHAIN",
+        "HDR SUPREMACY ENFORCED | {} | {} | {}x{} | {} images | PINK PHOTONS CONQUER ETERNAL",
+        formatName(), vk::to_string(static_cast<vk::ColorSpaceKHR>(surfaceFormat_.colorSpace)),
+        extent_.width, extent_.height, images_.size());
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -109,6 +100,28 @@ void SwapchainManager::createSwapchain(uint32_t width, uint32_t height) noexcept
     std::vector<VkSurfaceFormatKHR> availableFormats(formatCount);
     VK_CHECK(vkGetPhysicalDeviceSurfaceFormatsKHR(physDev_, surface_, &formatCount, availableFormats.data()), "Format query failed");
 
+    // RESPECT COMPOSITOR OVERRIDE: Use ctx.hdr_format if set (from try_enable_hdr or force_hdr)
+    VkFormat forced_fmt = RTX::g_ctx().hdr_format;
+    VkColorSpaceKHR forced_cs = RTX::g_ctx().hdr_color_space;
+    if (forced_fmt != VK_FORMAT_UNDEFINED && forced_cs != UNSET_COLOR_SPACE) {
+        // Verify forced format is available; if not, log warning but proceed (artifacts possible)
+        bool available = false;
+        for (const auto& f : availableFormats) {
+            if (f.format == forced_fmt && f.colorSpace == forced_cs) {
+                available = true;
+                break;
+            }
+        }
+        if (!available) {
+            LOG_WARN_CAT("SWAPCHAIN", "Forced HDR format {}+{} not in available list — coercing anyway (artifacts expected)", 
+                         forced_fmt, static_cast<uint32_t>(forced_cs));
+        }
+        surfaceFormat_ = {forced_fmt, forced_cs};
+        LOG_SUCCESS_CAT("SWAPCHAIN", "Swapchain using Compositor-forced HDR: {} + {}", forced_fmt, static_cast<uint32_t>(forced_cs));
+        goto format_chosen;
+    }
+
+    // Standard selection if no force
     surfaceFormat_ = availableFormats[0];
     for (auto desiredFmt : kPreferredFormats) {
         for (auto desiredCS : kPreferredColorSpaces) {
@@ -121,6 +134,23 @@ void SwapchainManager::createSwapchain(uint32_t width, uint32_t height) noexcept
         }
     }
 format_chosen:
+
+    // FORCE 10-BIT IF POSSIBLE: If selection fell to 8-bit, override to best 10-bit available (even if mismatched CS)
+    if (surfaceFormat_.format == VK_FORMAT_B8G8R8A8_UNORM) {
+        VkSurfaceFormatKHR best10bit = {VK_FORMAT_UNDEFINED, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR};
+        for (const auto& f : availableFormats) {
+            if (f.format == VK_FORMAT_A2B10G10R10_UNORM_PACK32 || f.format == VK_FORMAT_A2R10G10B10_UNORM_PACK32) {
+                best10bit = f;
+                break;  // Take first 10-bit found
+            }
+        }
+        if (best10bit.format != VK_FORMAT_UNDEFINED) {
+            surfaceFormat_ = best10bit;
+            LOG_WARN_CAT("SWAPCHAIN", "8-bit detected — forced override to 10-bit {} (artifacts possible)", best10bit.format);
+        } else {
+            LOG_ERROR_CAT("SWAPCHAIN", "NO 10-BIT FORMATS AVAILABLE — TRUE FAILURE (check driver/monitor)");
+        }
+    }
 
     uint32_t pmCount = 0;
     VK_CHECK(vkGetPhysicalDeviceSurfacePresentModesKHR(physDev_, surface_, &pmCount, nullptr), "Present mode count failed");
@@ -312,16 +342,16 @@ const char* SwapchainManager::formatName() const noexcept {
     if (isFP16())                  return "scRGB FP16";
     if (is10Bit())                 return "HDR10 10-bit";
     if (format() == VK_FORMAT_B10G11R11_UFLOAT_PACK32) return "RG11B10 HDR";
-    if (isPeasantMode())           return "8-bit sRGB (peasant mode)";
+    if (isPeasantMode())           return "8-bit sRGB (EMERGENCY ONLY)";
     return "HDR (unknown)";
 }
 
 // =============================================================================
-// FINAL WORD — THE AAAAA PACT
+// FINAL WORD — THE FORCE PACT
 // -----------------------------------------------------------------------------
-// Pink photons do not stutter. They do not tear. They do not compromise.
-// We predict vsync. We recover jitter. We shame 8-bit peasants.
+// Pink photons do not compromise. They do not stutter. They do not fall back.
+// We respect the Compositor. We force 10-bit. We conquer artifacts.
 // This is not just a swapchain.
-// This is ascension.
+// This is unbreakable will.
 // PINK PHOTONS ETERNAL — 2025 AND FOREVER
 // =============================================================================

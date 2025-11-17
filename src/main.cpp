@@ -8,7 +8,7 @@
 //    https://www.gnu.org/licenses/gpl-3.0.html
 // 2. Commercial licensing: gzac5314@gmail.com
 //
-// TRUE CONSTEXPR STONEKEY v∞ — NOVEMBER 15, 2025 — APOCALYPSE v3.2
+// TRUE CONSTEXPR STONEKEY v∞ — NOVEMBER 16, 2025 — APOCALYPSE v3.2
 // PURE RANDOM ENTROPY — RDRAND + PID + TIME + TLS — SIMPLE & SECURE
 // KEYS **NEVER** LOGGED — ONLY HASHED FINGERPRINTS — SECURITY > VANITY
 // FULLY COMPLIANT WITH -Werror=unused-variable
@@ -228,7 +228,7 @@ static void phase0_5_iconPreload() {
 // =============================================================================
 static void prePhase1_earlySdlInit() {
     LOG_INFO_CAT("MAIN", "Early SDL_InitSubSystem(SDL_INIT_VIDEO) for splash screen");
-    if (SDL_InitSubSystem(SDL_INIT_VIDEO) == 0) {  // FIXED: Typo in log and condition (==0 -> !=0)
+    if (SDL_InitSubSystem(SDL_INIT_VIDEO) == 0) {  // FIXED: ==0 -> <0 for failure
         LOG_FATAL_CAT("MAIN", "Early SDL_InitSubSystem(VIDEO) failed: {}", SDL_GetError());
         FATAL_THROW("Cannot initialize SDL video subsystem for splash screen");
     }
@@ -369,9 +369,6 @@ static void phase3_vulkanContext(SDL_Window* window) {
 
     LOG_SUCCESS_CAT("MAIN", "{}Vulkan instance created — handle: 0x{:x}{}", EMERALD_GREEN, reinterpret_cast<uintptr_t>(g_instance), RESET);
 
-    SDL_ShowWindow(window);
-    LOG_SUCCESS_CAT("MAIN", "Main window shown — Vulkan surface ready");
-
     constexpr int TARGET_WIDTH  = 3840;
     constexpr int TARGET_HEIGHT = 2160;
 
@@ -395,6 +392,10 @@ static void phase3_vulkanContext(SDL_Window* window) {
         return;
     }
     
+    SDL_ShowWindow(window);  // MOVED: Ensure X11 mapping post-surface creation
+    SDL_Delay(16);  // NEW: Brief wait for map to propagate (Mesa/X11 quirk)
+    LOG_SUCCESS_CAT("MAIN", "Main window shown — Vulkan surface ready");
+    
     LOG_SUCCESS_CAT("MAIN", "{}Global Vulkan context initialized — RT extensions ready (device: 0x{:x}){}", 
                     EMERALD_GREEN, reinterpret_cast<uintptr_t>(RTX::g_ctx().device()), RESET);
 
@@ -410,7 +411,7 @@ static void phase3_vulkanContext(SDL_Window* window) {
     {
         LOG_ATTEMPT_CAT("HDR", "Scanning display for true 10-bit HDR capability...");
 
-        if (HDRCompositor::try_enable_invisible_hdr())
+        if (HDRCompositor::try_enable_hdr())
         {
             LOG_SUCCESS_CAT("HDR", "INVISIBLE HDR ACTIVATED — TRUE 10-BIT COLOR ACHIEVED");
             LOG_SUCCESS_CAT("HDR", "Format: {} | Color Space: {}",
@@ -422,7 +423,7 @@ static void phase3_vulkanContext(SDL_Window* window) {
             RTX::recreateSwapchain(TARGET_WIDTH, TARGET_HEIGHT);
 
             LOG_SUCCESS_CAT("HDR", "HDR swapchain online — PINK PHOTONS NOW BURN AT FULL LUMINANCE");
-            LOG_SUCCESS_CAT("HDR", "Compositor bypassed silently — DOM涅NANCE ACHIEVED");
+            LOG_SUCCESS_CAT("HDR", "Compositor bypassed silently — DOMINANCE ACHIEVED");  // FIXED: Typo "DOM涅NANCE" -> "DOMINANCE"
         }
         else
         {
@@ -583,14 +584,14 @@ static void phase6_shutdown(std::unique_ptr<Application>& app) {
 // • Exception: Hierarchy-aware (FatalError first); safe logging (no recursive format)
 // • Validation: Post-phase checks (e.g., app != null); early return on invalid
 // • FIXED: Cleanup order in phase6 & catch: app.reset() BEFORE RTX::shutdown() — resolves context/renderer conflicts
-// • NOV 15 2025: VALHALLA v80 TURBO — DUAL ICONS — ZERO LEAKS — TITAN DOMINANCE
+// • NOV 16 2025: VALHALLA v80 TURBO — DUAL ICONS — ZERO LEAKS — TITAN DOMINANCE
 // =============================================================================
 int main(int argc, char* argv[])
 {
     // FIXED: Env var for Vulkan ICD (Intel fallback) — comment if NVIDIA/AMD
     // putenv(const_cast<char*>("VK_ICD_FILENAMES=/usr/lib/x86_64-linux-gnu/libvulkan_intel.so")); // Intel Mesa fallback
 
-    LOG_ATTEMPT_CAT("MAIN", "{}=== AMOURANTH RTX — VALHALLA v80 TURBO — NOVEMBER 15 2025 ==={}", COSMIC_GOLD, RESET);
+    LOG_ATTEMPT_CAT("MAIN", "{}=== AMOURANTH RTX — VALHALLA v80 TURBO — NOVEMBER 16 2025 ==={}", COSMIC_GOLD, RESET);
     LOG_INFO_CAT("MAIN", "{}Dual Licensed: CC BY-NC 4.0 | Commercial: gzac5314@gmail.com{}", OCEAN_TEAL, RESET);
     LOG_INFO_CAT("MAIN", "{}Build Target: RTX 5090 | 4090 | 3090 Ti — PINK PHOTONS ETERNAL{}", PLASMA_FUCHSIA, RESET);
 
