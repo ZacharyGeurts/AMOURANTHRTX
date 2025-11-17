@@ -70,6 +70,8 @@ inline const char* getPlatformSurfaceExtension()
 #endif
 }
 
+extern const char* extra_extensions[];
+
 // -----------------------------------------------------------------------------
 // User-defined literals
 // -----------------------------------------------------------------------------

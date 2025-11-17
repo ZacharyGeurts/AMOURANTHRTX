@@ -14,6 +14,7 @@
 #include "engine/GLOBAL/OptionsMenu.hpp"
 #include "engine/GLOBAL/RTXHandler.hpp"
 #include "engine/Vulkan/VulkanCore.hpp"
+#include "engine/Vulkan/HDR_surface.hpp"
 #include <vulkan/vulkan.hpp>  // For vk::to_string
 #include <vector>
 #include <array>
@@ -57,7 +58,7 @@ public:
 
     [[nodiscard]] bool                    isHDR()        const noexcept;
     [[nodiscard]] bool                    is10Bit()      const noexcept;
-    [[nodiscard]] bool                    isFP16()       const noexcept;
+    [[nodiscard]] bool                    isFP16()      const noexcept;
     [[nodiscard]] bool                    isPeasantMode()const noexcept;  // 8-bit shame
     [[nodiscard]] const char*             formatName()   const noexcept;
 

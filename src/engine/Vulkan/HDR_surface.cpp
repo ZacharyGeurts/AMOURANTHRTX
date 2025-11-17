@@ -1,217 +1,197 @@
 // src/engine/Vulkan/HDR_surface.cpp
+// =============================================================================
 // AMOURANTH RTX Engine © 2025 by Zachary "gzac" Geurts — PINK PHOTONS ETERNAL
-// HDR SURFACE FORGERY — Full implementation (single definition)
+// HDR SURFACE FORGE — 2025 Standard — GBM Direct + Platform Fallback
+// =============================================================================
 
 #include "engine/Vulkan/HDR_surface.hpp"
 #include "engine/GLOBAL/logging.hpp"
-#include "engine/GLOBAL/StoneKey.hpp"   // g_window(), g_wl_display(), g_hwnd(), etc.
+#include "engine/GLOBAL/RTXHandler.hpp"
 
-#if defined(VK_USE_PLATFORM_XLIB_KHR)
-#include <X11/Xlib.h>
-#include <X11/extensions/Xrandr.h>
-#include <vulkan/vulkan_xlib.h>
-#elif defined(VK_USE_PLATFORM_WAYLAND_KHR)
-#include <wayland-client.h>
-#include <vulkan/vulkan_wayland.h>
-#elif defined(VK_USE_PLATFORM_WIN32_KHR)
-#include <windows.h>
-#include <vulkan/vulkan_win32.h>
-#elif defined(VK_USE_PLATFORM_METAL_EXT)
-#include <vulkan/vulkan_metal.h>
-#include <QuartzCore/CAMetalLayer.h>
-extern CAMetalLayer* g_metal_layer();
+#ifdef __linux__
+#include <xf86drm.h>
+#include <gbm.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <cstring>
+#include <X11/Xlib.h>                       // X11 detection
+#include <X11/extensions/Xrandr.h>          // RandR for CRTC probe + mailbox sync
+#undef Success                             // Undefine X11 macro to avoid conflict with LogLevel::Success
 #endif
 
 namespace HDRSurface {
 
-// -----------------------------------------------------------------------------
-// Global forge pointer definition (thread_local)
 thread_local HDRSurfaceForge* g_hdr_forge = nullptr;
 
-// -----------------------------------------------------------------------------
-// Constructor
 HDRSurfaceForge::HDRSurfaceForge(VkInstance instance, VkPhysicalDevice phys_dev,
                                  uint32_t width, uint32_t height)
     : instance_(instance), phys_dev_(phys_dev), width_(width), height_(height)
 {
     std::lock_guard<std::mutex> lock(forge_mutex_);
 
-    if (!create_platform_surface()) {
-        LOG_ERROR_CAT("HDR_SURFACE", "Failed to create platform-specific surface — HDR forging aborted");
-        return;
+    is_gbm_direct_ = create_gbm_direct_surface();
+
+    if (!is_gbm_direct_) {
+        LOG_INFO_CAT("HDR_SURFACE", "GBM direct unavailable — using X11 platform surface");
+        if (!create_platform_surface()) {
+            LOG_ERROR_CAT("HDR_SURFACE", "Failed to create any display surface");
+            return;
+        }
     }
 
-    if (!probe_and_select_best()) {
-        LOG_WARN_CAT("HDR_SURFACE", "No native HDR formats found — coercing to 10-bit PQ");
-        coerce_hdr();
-    }
+    probe_formats();
 
-    if (forged_success()) {
-        LOG_SUCCESS_CAT("HDR_SURFACE",
-            "HDR Surface Forged — {} + {} | {}x{} | PINK PHOTONS ETERNAL",
-            vk::to_string(static_cast<vk::Format>(best_fmt_.format)),
-            vk::to_string(static_cast<vk::ColorSpaceKHR>(best_cs_)),
-            width_, height_);
-    } else {
-        LOG_WARN_CAT("HDR_SURFACE", "Surface created but SDR — enable monitor HDR mode for true glory");
-    }
+    RTX::g_ctx().hdr_format      = best_fmt_.format;
+    RTX::g_ctx().hdr_color_space = best_fmt_.colorSpace;
+
+    const char* mode = is_gbm_direct_ ? (gbm_hdr_ ? "GBM Direct 10-bit" : "GBM Direct 8-bit") : "X11";
+    const char* hdr_status = is_hdr() ? (forced_hdr_ ? "FORCED" : "NATIVE") : "SDR";
+    LOG_SUCCESS_CAT("HDR_SURFACE", 
+        "Surface forged — {} | {} HDR | {}×{} — Video card has the ballz: {}",
+        mode, hdr_status, width_, height_, is_hdr() ? "YES — PINK PHOTONS ETERNAL" : "NO — PEASANT MODE");
 }
 
-// -----------------------------------------------------------------------------
-// Destructor
 HDRSurfaceForge::~HDRSurfaceForge()
 {
-    if (surface_ != VK_NULL_HANDLE) {
+#ifdef __linux__
+    if (gbm_surface_) { gbm_surface_destroy(gbm_surface_); gbm_surface_ = nullptr; }
+    if (gbm_device_)  { gbm_device_destroy(gbm_device_);  gbm_device_ = nullptr; }
+    if (drm_fd_ >= 0) { close(drm_fd_); drm_fd_ = -1; }
+#endif
+
+    if (surface_ != VK_NULL_HANDLE && !is_gbm_direct_) {
         vkDestroySurfaceKHR(instance_, surface_, nullptr);
         surface_ = VK_NULL_HANDLE;
     }
 }
 
-// -----------------------------------------------------------------------------
-// Public: reprobe (called on resize / hotplug)
-void HDRSurfaceForge::reprobe() noexcept
+bool HDRSurfaceForge::is_hdr() const noexcept {
+    return best_fmt_.colorSpace != VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+}
+
+void HDRSurfaceForge::install_to_ctx() noexcept
 {
-    VkSurfaceCapabilitiesKHR caps{};
-    if (vkGetPhysicalDeviceSurfaceCapabilitiesKHR(phys_dev_, surface_, &caps) != VK_SUCCESS) {
+    RTX::g_ctx().surface_ = surface_;
+}
+
+void HDRSurfaceForge::reprobe() noexcept {
+    probe_formats();
+}
+
+void HDRSurfaceForge::probe_formats() noexcept {
+    VkSurfaceFormatKHR default_fmt = { VK_FORMAT_B8G8R8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR };
+
+    if (is_gbm_direct_) {
+#ifdef __linux__
+        best_fmt_ = gbm_hdr_ ? VkSurfaceFormatKHR{ VK_FORMAT_A2B10G10R10_UNORM_PACK32, VK_COLOR_SPACE_HDR10_ST2084_EXT }
+                             : default_fmt;
+#endif
         return;
     }
 
-    if (caps.currentExtent.width != width_ || caps.currentExtent.height != height_) {
-        width_  = caps.currentExtent.width != UINT32_MAX ? caps.currentExtent.width : width_;
-        height_ = caps.currentExtent.height != UINT32_MAX ? caps.currentExtent.height : height_;
+    if (surface_ == VK_NULL_HANDLE) {
+        best_fmt_ = default_fmt;
+        return;
+    }
 
-        if (probe_and_select_best()) {
-            LOG_INFO_CAT("HDR_SURFACE", "HDR Surface reprobed — new resolution {}x{}", width_, height_);
-        } else {
-            coerce_hdr();
+    uint32_t formatCount = 0;
+    vkGetPhysicalDeviceSurfaceFormatsKHR(phys_dev_, surface_, &formatCount, nullptr);
+    if (formatCount == 0) {
+        best_fmt_ = default_fmt;
+        return;
+    }
+
+    std::vector<VkSurfaceFormatKHR> availableFormats(formatCount);
+    vkGetPhysicalDeviceSurfaceFormatsKHR(phys_dev_, surface_, &formatCount, availableFormats.data());
+
+    // Preferred HDR formats
+    const std::vector<std::pair<VkFormat, VkColorSpaceKHR>> preferred = {
+        { VK_FORMAT_A2B10G10R10_UNORM_PACK32, VK_COLOR_SPACE_HDR10_ST2084_EXT },
+        { VK_FORMAT_A2R10G10B10_UNORM_PACK32, VK_COLOR_SPACE_HDR10_ST2084_EXT },
+        { VK_FORMAT_R16G16B16A16_SFLOAT, VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT }
+    };
+
+    for (const auto& pref : preferred) {
+        for (const auto& avail : availableFormats) {
+            if (avail.format == pref.first && avail.colorSpace == pref.second) {
+                best_fmt_ = avail;
+                forced_hdr_ = false;
+                return;
+            }
         }
     }
+
+    // No native HDR? Check if GPU has the ballz (extension support)
+    if (has_hdr_metadata_ext()) {
+        // Force HDR — video card capable, driver will kneel
+        best_fmt_ = { VK_FORMAT_A2B10G10R10_UNORM_PACK32, VK_COLOR_SPACE_HDR10_ST2084_EXT };
+        forced_hdr_ = true;
+        LOG_WARN_CAT("HDR_SURFACE", "No native HDR formats — forcing 10-bit (GPU capable via ext)");
+    } else {
+        // True peasant — pick first available (SDR)
+        best_fmt_ = availableFormats[0];
+        forced_hdr_ = false;
+        LOG_ERROR_CAT("HDR_SURFACE", "No HDR support or capability — locked to SDR");
+    }
 }
 
-// -----------------------------------------------------------------------------
-// Public: HDR metadata injection
-void HDRSurfaceForge::set_hdr_metadata(VkSwapchainKHR swapchain, float max_lum, float min_lum)
+bool HDRSurfaceForge::create_gbm_direct_surface() noexcept
 {
-    if (!has_hdr_metadata_ext()) {
-        return;
+#ifdef __linux__
+    const char* paths[] = { "/dev/dri/renderD128", "/dev/dri/card0", "/dev/dri/renderD129" };
+    for (const char* p : paths) {
+        drm_fd_ = open(p, O_RDWR | O_CLOEXEC);
+        if (drm_fd_ >= 0) break;
+    }
+    if (drm_fd_ < 0) return false;
+
+    gbm_device_ = gbm_create_device(drm_fd_);
+    if (!gbm_device_) { close(drm_fd_); drm_fd_ = -1; return false; }
+
+    // Try 10-bit first
+    gbm_surface_ = gbm_surface_create(gbm_device_, width_, height_,
+                                      GBM_FORMAT_XRGB2101010,
+                                      GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING);
+    gbm_hdr_ = (gbm_surface_ != nullptr);
+
+    if (!gbm_surface_) {
+        // Fallback to 8-bit
+        gbm_surface_ = gbm_surface_create(gbm_device_, width_, height_,
+                                          GBM_FORMAT_XRGB8888,
+                                          GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING);
+        if (!gbm_surface_) {
+            gbm_device_destroy(gbm_device_);
+            close(drm_fd_);
+            gbm_device_ = nullptr; drm_fd_ = -1;
+            return false;
+        }
     }
 
-    VkHdrMetadataEXT metadata{};
-    metadata.sType = VK_STRUCTURE_TYPE_HDR_METADATA_EXT;
-    metadata.displayPrimaryRed   = {0.708f, 0.292f};
-    metadata.displayPrimaryGreen = {0.170f, 0.797f};
-    metadata.displayPrimaryBlue  = {0.131f, 0.046f};
-    metadata.whitePoint          = {0.3127f, 0.3290f};
-    metadata.maxLuminance        = static_cast<uint32_t>(max_lum * 10000.0f);
-    metadata.minLuminance        = static_cast<uint32_t>(min_lum * 10000.0f);
-    metadata.maxContentLightLevel     = 1000;
-    metadata.maxFrameAverageLightLevel = 400;
-
-    auto pfn = RTX::g_ctx().vkSetHdrMetadataEXT();
-    if (pfn) {
-        pfn(RTX::g_ctx().device(), 1, &swapchain, &metadata);
-        LOG_DEBUG_CAT("HDR_SURFACE", "HDR metadata injected — peak {:.1f} nits", max_lum);
-    }
+    surface_ = VK_NULL_HANDLE;
+    return true;
+#else
+    return false;
+#endif
 }
 
-// -----------------------------------------------------------------------------
-// Private: Platform-specific surface creation
 bool HDRSurfaceForge::create_platform_surface() noexcept
 {
 #if defined(VK_USE_PLATFORM_XLIB_KHR)
     Display* dpy = XOpenDisplay(nullptr);
     if (!dpy) return false;
 
-    VkXlibSurfaceCreateInfoKHR ci{VK_STRUCTURE_TYPE_XLIB_SURFACE_CREATE_INFO_KHR};
+    VkXlibSurfaceCreateInfoKHR ci{ VK_STRUCTURE_TYPE_XLIB_SURFACE_CREATE_INFO_KHR };
     ci.dpy    = dpy;
-    ci.window = g_window();
+    ci.window = g_window();  // Assume global window handle
 
     VkResult r = vkCreateXlibSurfaceKHR(instance_, &ci, nullptr, &surface_);
     XCloseDisplay(dpy);
     return r == VK_SUCCESS;
-
-#elif defined(VK_USE_PLATFORM_WAYLAND_KHR)
-    VkWaylandSurfaceCreateInfoKHR ci{VK_STRUCTURE_TYPE_WAYLAND_SURFACE_CREATE_INFO_KHR};
-    ci.display = g_wl_display();
-    ci.surface = g_wl_surface();
-    return vkCreateWaylandSurfaceKHR(instance_, &ci, nullptr, &surface_) == VK_SUCCESS;
-
-#elif defined(VK_USE_PLATFORM_WIN32_KHR)
-    VkWin32SurfaceCreateInfoKHR ci{VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR};
-    ci.hinstance = GetModuleHandle(nullptr);
-    ci.hwnd      = g_hwnd();
-    return vkCreateWin32SurfaceKHR(instance_, &ci, nullptr, &surface_) == VK_SUCCESS;
-
-#elif defined(VK_USE_PLATFORM_METAL_EXT)
-    CAMetalLayer* layer = g_metal_layer();
-    if (!layer) return false;
-
-    VkMetalSurfaceCreateInfoEXT ci{VK_STRUCTURE_TYPE_METAL_SURFACE_CREATE_INFO_EXT};
-    ci.pLayer = layer;
-    return vkCreateMetalSurfaceEXT(instance_, &ci, nullptr, &surface_) == VK_SUCCESS;
-
 #else
-    LOG_ERROR_CAT("HDR_SURFACE", "No supported platform surface extension");
     return false;
 #endif
 }
 
-// -----------------------------------------------------------------------------
-// Private: Probe and pick best native HDR format
-bool HDRSurfaceForge::probe_and_select_best() noexcept
-{
-    uint32_t count = 0;
-    if (vkGetPhysicalDeviceSurfaceFormatsKHR(phys_dev_, surface_, &count, nullptr) != VK_SUCCESS || count == 0) {
-        return false;
-    }
-
-    std::vector<VkSurfaceFormatKHR> formats(count);
-    if (vkGetPhysicalDeviceSurfaceFormatsKHR(phys_dev_, surface_, &count, formats.data()) != VK_SUCCESS) {
-        return false;
-    }
-
-    for (VkFormat fmt : kHDRFormats) {
-        for (VkColorSpaceKHR cs : kHDRSpaces) {
-            auto it = std::find_if(formats.begin(), formats.end(),
-                [fmt, cs](const VkSurfaceFormatKHR& f) { return f.format == fmt && f.colorSpace == cs; });
-            if (it != formats.end()) {
-                best_fmt_ = *it;
-                best_cs_  = cs;
-                return true;
-            }
-        }
-    }
-    return false;
-}
-
-// -----------------------------------------------------------------------------
-// Private: Force HDR when nothing native is available
-void HDRSurfaceForge::coerce_hdr() noexcept
-{
-    best_fmt_.format = VK_FORMAT_A2B10G10R10_UNORM_PACK32;
-    best_cs_ = has_hdr_metadata_ext() ? VK_COLOR_SPACE_HDR10_ST2084_EXT
-                                      : VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
-
-    RTX::g_ctx().hdr_format      = best_fmt_.format;
-    RTX::g_ctx().hdr_color_space = best_cs_;
-
-    LOG_WARN_CAT("HDR_SURFACE", "HDR coerced — {} + {} (artifacts possible but glory demanded)",
-                 vk::to_string(static_cast<vk::Format>(best_fmt_.format)),
-                 vk::to_string(static_cast<vk::ColorSpaceKHR>(best_cs_)));
-
-    parse_edid_for_hdr_caps(); // Gamescope-style fake-it-til-you-make-it
-}
-
-// -----------------------------------------------------------------------------
-// Private: EDID parsing stub (Gamescope does this for real)
-void HDRSurfaceForge::parse_edid_for_hdr_caps() noexcept
-{
-    LOG_DEBUG_CAT("HDR_SURFACE", "EDID parsed — HDR10 capabilities assumed/faked if needed");
-    // Real implementation would use libdisplay-info or XRandR EDID blobs
-}
-
-// -----------------------------------------------------------------------------
-// Private: Check for VK_EXT_hdr_metadata
 bool HDRSurfaceForge::has_hdr_metadata_ext() const noexcept
 {
     uint32_t count = 0;
@@ -220,11 +200,31 @@ bool HDRSurfaceForge::has_hdr_metadata_ext() const noexcept
     vkEnumerateDeviceExtensionProperties(phys_dev_, nullptr, &count, exts.data());
 
     for (const auto& e : exts) {
-        if (strcmp(e.extensionName, VK_EXT_HDR_METADATA_EXTENSION_NAME) == 0) {
+        if (std::strcmp(e.extensionName, VK_EXT_HDR_METADATA_EXTENSION_NAME) == 0) {
             return true;
         }
     }
     return false;
+}
+
+void HDRSurfaceForge::set_hdr_metadata(VkSwapchainKHR swapchain, float max_lum, float min_lum)
+{
+    if (!has_hdr_metadata_ext() || !is_hdr()) return;
+
+    VkHdrMetadataEXT md{};
+    md.sType = VK_STRUCTURE_TYPE_HDR_METADATA_EXT;
+    md.displayPrimaryRed = {0.680f, 0.320f};
+    md.displayPrimaryGreen = {0.265f, 0.690f};
+    md.displayPrimaryBlue = {0.150f, 0.060f};
+    md.whitePoint = {0.3127f, 0.3290f};
+    md.maxLuminance = static_cast<uint32_t>(max_lum * 10000.0f);
+    md.minLuminance = static_cast<uint32_t>(min_lum * 10000.0f);
+    md.maxContentLightLevel = 1000;
+    md.maxFrameAverageLightLevel = 400;
+
+    if (auto pfn = RTX::g_ctx().vkSetHdrMetadataEXT()) {
+        pfn(RTX::g_ctx().device(), 1, &swapchain, &md);
+    }
 }
 
 } // namespace HDRSurface

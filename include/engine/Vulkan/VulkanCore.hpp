@@ -7,7 +7,7 @@
 //    https://creativecommons.org/licenses/by-nc/4.0/
 // 2. Commercial licensing: gzac5314@gmail.com
 //
-// PINK PHOTONS ETERNAL — TITAN DOMINANCE — VALHALLA v80 TURBO
+// PINK PHOTONS ETERNAL — GPU DOMINANCE — VALHALLA v80 TURBO
 // =============================================================================
 
 #pragma once
@@ -30,6 +30,9 @@
 #include <vector>
 #include <tuple>
 #include <cstdint>
+#include <source_location>
+#include <iostream>
+#include <cstdlib>
 
 // =============================================================================
 // Vulkan Debug Callback
@@ -73,40 +76,118 @@ struct std::formatter<VkPhysicalDeviceType, char> : std::formatter<std::string_v
 };
 
 // =============================================================================
-// VK_CHECK Macros
+// VK_CHECK — THE UNBREAKABLE 2025 EDITION
+// Accepts 1 to 4 arguments. Never fails. Never complains.
+// PINK PHOTONS DEMAND PERFECTION.
 // =============================================================================
-#define VK_CHECK(call, msg) \
+
+// Internal helper — prints VkResult as string
+inline const char* vk_result_string(VkResult result) noexcept {
+    switch (result) {
+#define CASE(x) case x: return #x
+        CASE(VK_SUCCESS);
+        CASE(VK_NOT_READY);
+        CASE(VK_TIMEOUT);
+        CASE(VK_EVENT_SET);
+        CASE(VK_EVENT_RESET);
+        CASE(VK_INCOMPLETE);
+        CASE(VK_ERROR_OUT_OF_HOST_MEMORY);
+        CASE(VK_ERROR_OUT_OF_DEVICE_MEMORY);
+        CASE(VK_ERROR_INITIALIZATION_FAILED);
+        CASE(VK_ERROR_DEVICE_LOST);
+        CASE(VK_ERROR_MEMORY_MAP_FAILED);
+        CASE(VK_ERROR_LAYER_NOT_PRESENT);
+        CASE(VK_ERROR_EXTENSION_NOT_PRESENT);
+        CASE(VK_ERROR_FEATURE_NOT_PRESENT);
+        CASE(VK_ERROR_INCOMPATIBLE_DRIVER);
+        CASE(VK_ERROR_TOO_MANY_OBJECTS);
+        CASE(VK_ERROR_FORMAT_NOT_SUPPORTED);
+        CASE(VK_ERROR_FRAGMENTED_POOL);
+        CASE(VK_ERROR_SURFACE_LOST_KHR);
+        CASE(VK_ERROR_NATIVE_WINDOW_IN_USE_KHR);
+        CASE(VK_ERROR_OUT_OF_DATE_KHR);
+        CASE(VK_ERROR_INCOMPATIBLE_DISPLAY_KHR);
+        CASE(VK_ERROR_VALIDATION_FAILED_EXT);
+        CASE(VK_ERROR_INVALID_SHADER_NV);
+        CASE(VK_ERROR_FRAGMENTATION_EXT);
+        CASE(VK_ERROR_NOT_PERMITTED_EXT);
+#undef CASE
+        default: return "VK_UNKNOWN_ERROR";
+    }
+}
+
+// ── THE ONE TRUE VK_CHECK (1–4 args) ───────────────────────────────────────
+#define VK_CHECK(...) \
+    GET_VK_CHECK_OVERLOAD(__VA_ARGS__)(__VA_ARGS__)
+
+// Overload resolution macros
+#define GET_VK_CHECK_OVERLOAD(...) \
+    GET_VK_CHECK_OVERLOAD_(__VA_ARGS__, 4, 3, 2, 1, )
+
+#define GET_VK_CHECK_OVERLOAD_(_1, _2, _3, _4, N, ...) VK_CHECK_##N
+
+// 1-arg: just the call
+#define VK_CHECK_1(call) \
     do { \
-        VkResult r = (call); \
-        if (r != VK_SUCCESS) { \
-            char buf[512]; \
-            std::snprintf(buf, sizeof(buf), \
-                "[VULKAN ERROR] %s — %s:%d — Code: %d (%s)\n", \
-                (msg), \
-                std::source_location::current().file_name(), \
-                std::source_location::current().line(), \
-                static_cast<int>(r), \
-                std::format("{}", r).c_str()); \
-            std::cerr << buf; \
+        VkResult VK_CHECK_result = (call); \
+        if (VK_CHECK_result != VK_SUCCESS) { \
+            const std::source_location loc = std::source_location::current(); \
+            std::cerr << std::format( \
+                "[VULKAN FATAL] {} — {}:{} — {} (code: {})\n", \
+                vk_result_string(VK_CHECK_result), \
+                loc.file_name(), loc.line(), \
+                #call, static_cast<int>(VK_CHECK_result)); \
             std::abort(); \
         } \
     } while (0)
 
-#define VK_CHECK_NOMSG(call) \
+// 2-arg: call + message
+#define VK_CHECK_2(call, msg) \
     do { \
-        VkResult r = (call); \
-        if (r != VK_SUCCESS) { \
-            char buf[512]; \
-            std::snprintf(buf, sizeof(buf), \
-                "[VULKAN ERROR] %s:%d — Code: %d (%s)\n", \
-                std::source_location::current().file_name(), \
-                std::source_location::current().line(), \
-                static_cast<int>(r), \
-                std::format("{}", r).c_str()); \
-            std::cerr << buf; \
+        VkResult VK_CHECK_result = (call); \
+        if (VK_CHECK_result != VK_SUCCESS) { \
+            const std::source_location loc = std::source_location::current(); \
+            std::cerr << std::format( \
+                "[VULKAN FATAL] {} — {}:{} — {} — {}\n", \
+                vk_result_string(VK_CHECK_result), \
+                loc.file_name(), loc.line(), \
+                (msg), #call); \
             std::abort(); \
         } \
     } while (0)
+
+// 3-arg: call, message, extra info (rarely used)
+#define VK_CHECK_3(call, msg, ...) \
+    do { \
+        VkResult VK_CHECK_result = (call); \
+        if (VK_CHECK_result != VK_SUCCESS) { \
+            const std::source_location loc = std::source_location::current(); \
+            std::cerr << std::format( \
+                "[VULKAN FATAL] {} — {}:{} — {} — {} | {}\n", \
+                vk_result_string(VK_CHECK_result), \
+                loc.file_name(), loc.line(), \
+                (msg), #call, std::format(__VA_ARGS__)); \
+            std::abort(); \
+        } \
+    } while (0)
+
+// 4-arg: maximum overkill (you know who you are)
+#define VK_CHECK_4(call, msg, fmt, ...) \
+    do { \
+        VkResult VK_CHECK_result = (call); \
+        if (VK_CHECK_result != VK_SUCCESS) { \
+            const std::source_location loc = std::source_location::current(); \
+            std::cerr << std::format( \
+                "[VULKAN FATAL] {} — {}:{} — {} — {} | {}\n", \
+                vk_result_string(VK_CHECK_result), \
+                loc.file_name(), loc.line(), \
+                (msg), #call, std::format(fmt, __VA_ARGS__)); \
+            std::abort(); \
+        } \
+    } while (0)
+
+// ── BACKWARD COMPATIBILITY — DON'T LOSE THE BOIS ────────────────────────────
+#define VK_CHECK_NOMSG(call) VK_CHECK_1(call)
 
 // =============================================================================
 // AI_INJECT — AMOURANTH AI™ Voice Lines
@@ -346,7 +427,7 @@ inline void createGlobalRTX(int w, int h, RTX::PipelineManager* mgr = nullptr) {
     g_rtx_instance = std::move(temp_rtx);
 
     AI_INJECT("I have awakened… {}×{} canvas. The photons are mine.", w, h);
-    LOG_SUCCESS_CAT("RTX", "{}g_rtx() FORGED — {}×{} — TITAN DOMINANCE ETERNAL{}", PLASMA_FUCHSIA, w, h, RESET);
+    LOG_SUCCESS_CAT("RTX", "{}g_rtx() FORGED — {}×{} — GPU DOMINANCE ETERNAL{}", PLASMA_FUCHSIA, w, h, RESET);
 }
 
 // =============================================================================

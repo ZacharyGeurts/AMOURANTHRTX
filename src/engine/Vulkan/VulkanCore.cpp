@@ -58,6 +58,93 @@ using VulkanRTXDetail::g_mappedBase;
 using VulkanRTXDetail::g_mappedOffset;
 using VulkanRTXDetail::STAGING_POOL_SIZE;
 
+// =============================================================================
+// AMOURANTH RTX — ETERNAL EXTENSION MANIFEST — v80 VALHALLA TURBO (2025+)
+// PINK PHOTONS DEMAND MAXIMUM FUTURE-PROOFING — COMPILABLE EDITION
+// =============================================================================
+#include <vulkan/vulkan.h>
+#include <array>
+
+// ────────────────────── INSTANCE EXTENSIONS ──────────────────────
+static constexpr const char* kInstanceExtensions[] = {
+    VK_KHR_SURFACE_EXTENSION_NAME,
+    VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME,
+
+    // HDR + Advanced Color (INSTANCE LEVEL REQUIRED)
+    VK_EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME,   // ← THIS IS THE CORRECT NAME
+
+    // Debug & Validation
+    VK_EXT_DEBUG_UTILS_EXTENSION_NAME,
+    VK_EXT_VALIDATION_FEATURES_EXTENSION_NAME,
+
+    // Surface & Display Timing
+    VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME,
+    VK_GOOGLE_DISPLAY_TIMING_EXTENSION_NAME,
+
+    // Future-proof
+    VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME,
+    VK_KHR_DEVICE_GROUP_CREATION_EXTENSION_NAME,
+};
+
+// ────────────────────── DEVICE EXTENSIONS ──────────────────────
+static constexpr std::array<const char*, 28> kDeviceExtensions = {
+    // Core
+    VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+    VK_EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME,     // ← THIS IS THE CORRECT NAME (underscore!)
+
+    // Ray Tracing Full Suite
+    VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
+    VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME,
+    VK_KHR_RAY_QUERY_EXTENSION_NAME,
+    VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME,
+
+    // Buffer Device Address + Timeline Semaphores
+    VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME,
+    VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME,
+
+    // Dynamic Rendering
+    VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME,
+
+    // HDR Metadata
+    VK_EXT_HDR_METADATA_EXTENSION_NAME,
+
+    // Mesh Shaders
+    VK_EXT_MESH_SHADER_EXTENSION_NAME,
+
+    // Variable Rate Shading
+    VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME,
+
+    // Descriptor Goodies
+    VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME,
+    VK_KHR_DESCRIPTOR_UPDATE_TEMPLATE_EXTENSION_NAME,
+
+    // Pipeline Cache & Libraries
+    VK_KHR_PIPELINE_LIBRARY_EXTENSION_NAME,
+    VK_KHR_PIPELINE_EXECUTABLE_PROPERTIES_EXTENSION_NAME,
+
+    // SPIR-V & Shader Object
+    VK_KHR_SPIRV_1_4_EXTENSION_NAME,
+    VK_EXT_SHADER_OBJECT_EXTENSION_NAME,
+
+    // Sync2 + Maintenance
+    VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME,
+    VK_KHR_MAINTENANCE_4_EXTENSION_NAME,
+
+    // Memory Enhancements
+    VK_EXT_MEMORY_BUDGET_EXTENSION_NAME,
+    VK_EXT_MEMORY_PRIORITY_EXTENSION_NAME,
+
+    // Robustness & Dynamic State
+    VK_EXT_ROBUSTNESS_2_EXTENSION_NAME,
+    VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME,
+
+    // Optional but powerful
+    VK_EXT_PIPELINE_CREATION_CACHE_CONTROL_EXTENSION_NAME,
+    VK_EXT_GRAPHICS_PIPELINE_LIBRARY_EXTENSION_NAME,
+    VK_NV_DEVICE_DIAGNOSTIC_CHECKPOINTS_EXTENSION_NAME,
+    VK_NV_LOW_LATENCY_2_EXTENSION_NAME,
+};
+
 // -----------------------------------------------------------------------------
 // ONE-TIME INITIALIZATION — CALLED ONCE AT STARTUP
 // -----------------------------------------------------------------------------
@@ -294,7 +381,7 @@ void VulkanRTX::endSingleTimeCommands(VkCommandBuffer cmd, VkQueue queue, VkComm
 
     // 5. Cleanup: Destroy fence & free buffer (safe post-wait/error)
     vkDestroyFence(RTX::g_ctx().device(), fence, nullptr);
-    // REMOVED DOUBLE FREE: endSingleTimeCommands() already frees this cmd
+    vkFreeCommandBuffers(RTX::g_ctx().device(), pool, 1, &cmd);
 
     LOG_TRACE_CAT("RTX", "endSingleTimeCommands — COMPLETE (resilient fence sync)");
 }
@@ -328,7 +415,7 @@ void VulkanRTX::endSingleTimeCommandsAsync(VkCommandBuffer cmd, VkQueue queue, V
     VkSubmitInfo submit { .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO, .commandBufferCount = 1, .pCommandBuffers = &cmd };
     VK_CHECK(vkQueueSubmit(queue, 1, &submit, fence), "Failed to submit async command buffer");
 
-    // REMOVED DOUBLE FREE: endSingleTimeCommands() already frees this cmd
+    vkFreeCommandBuffers(RTX::g_ctx().device(), pool, 1, &cmd);
 
     LOG_TRACE_CAT("RTX", "endSingleTimeCommandsAsync — Submitted (fence: 0x{:x})",
                   reinterpret_cast<uintptr_t>(fence));
@@ -404,25 +491,19 @@ void VulkanRTX::buildAccelerationStructures() {
 
             g_stagingBuffer = RAW_BUFFER(g_stagingPool);
             g_stagingMem    = BUFFER_MEMORY(g_stagingPool);
-    // FIXED: Null guard for persistent staging mem (prevents vkMapMemory on null — VUID-vkMapMemory-memory-parameter)
-    if (g_stagingMem == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("RTX", "BUFFER_CREATE failed: g_stagingMem null after 1GB alloc (OOM? Invalid type?). Aborting buildAccelerationStructures.");
-        return;  // Early exit — no map on null
-    }
 
+            // FIXED: Null guard for persistent staging mem (prevents vkMapMemory on null — VUID-vkMapMemory-memory-parameter)
+            if (g_stagingMem == VK_NULL_HANDLE) {
+                LOG_FATAL_CAT("RTX", "BUFFER_CREATE failed: g_stagingMem null after 1GB alloc (OOM? Invalid type?). Aborting buildAccelerationStructures.");
+                return;  // Early exit — no map on null
+            }
 
-    // FIXED: Explicit pre-map null check (VUID-vkMapMemory-memory-parameter + segfault prevention)
-    if (g_stagingMem == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("RTX", "vkMapMemory aborted: g_stagingMem still null. Allocation upstream failed.");
-        g_mappedBase = nullptr;
-        return;
-    }
-    // FIXED: Null guard before persistent staging map (VUID-vkMapMemory-memory-parameter + segfault fix)
-    if (g_stagingMem == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("RTX", "Persistent staging map aborted: g_stagingMem null post-recreate (OOM during resize?).");
-        g_mappedBase = nullptr;
-        return;
-    }
+            // FIXED: Null guard before persistent staging map (VUID-vkMapMemory-memory-parameter + segfault fix)
+            if (g_stagingMem == VK_NULL_HANDLE) {
+                LOG_FATAL_CAT("RTX", "Persistent staging map aborted: g_stagingMem null post-recreate (OOM during resize?).");
+                g_mappedBase = nullptr;
+                return;
+            }
             VK_CHECK(vkMapMemory(device_, g_stagingMem, 0, VK_WHOLE_SIZE, 0, &g_mappedBase),
                      "Failed to map persistent staging buffer");
 
@@ -442,18 +523,6 @@ void VulkanRTX::buildAccelerationStructures() {
     };
 
     uint64_t vbuf = 0, ibuf = 0;
-
-    BUFFER_CREATE(vbuf, vertices.size() * sizeof(glm::vec3),
-                  VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
-                  VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
-                  VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                  VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "amouranth_vertex_buffer");
-
-    BUFFER_CREATE(ibuf, indices.size() * sizeof(uint32_t),
-                  VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
-                  VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
-                  VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                  VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "amouranth_index_buffer");
 
     BUFFER_CREATE(vbuf, vertices.size() * sizeof(glm::vec3),
                   VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
@@ -537,12 +606,6 @@ void VulkanRTX::uploadBatch(
     {
         std::lock_guard<std::mutex> lock(g_stagingMutex);
         if (g_stagingPool == 0) {
-    // FIXED: Null guard for lazy staging mem (prevents vkMapMemory on null — VUID-vkMapMemory-memory-parameter)
-    if (g_stagingMem == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("RTX", "Lazy BUFFER_CREATE failed: g_stagingMem null (OOM? Skipping uploadBatch.");
-        return;  // Early exit — no map on null
-    }
-
             BUFFER_CREATE(g_stagingPool, STAGING_POOL_SIZE,
                           VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
                           VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
@@ -551,13 +614,20 @@ void VulkanRTX::uploadBatch(
             g_stagingMem = BUFFER_MEMORY(g_stagingPool);
             g_stagingBuffer = RAW_BUFFER(g_stagingPool);
 
+            // FIXED: Null guard for lazy staging mem (prevents vkMapMemory on null — VUID-vkMapMemory-memory-parameter)
+            if (g_stagingMem == VK_NULL_HANDLE) {
+                LOG_FATAL_CAT("RTX", "Lazy BUFFER_CREATE failed: g_stagingMem null (OOM? Skipping uploadBatch.");
+                return;  // Early exit — no map on null
+            }
+
             void* mapped = nullptr;
-    // FIXED: Null guard before lazy staging map (VUID-vkMapMemory-memory-parameter + segfault fix)
-    if (g_stagingMem == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("RTX", "Lazy staging map aborted: g_stagingMem null (realloc failed?). Skipping.");
-        mapped = nullptr;
-        return;
-    }
+
+            // FIXED: Null guard before lazy staging map (VUID-vkMapMemory-memory-parameter + segfault fix)
+            if (g_stagingMem == VK_NULL_HANDLE) {
+                LOG_FATAL_CAT("RTX", "Lazy staging map aborted: g_stagingMem null (realloc failed?). Skipping.");
+                mapped = nullptr;
+                return;
+            }
             VK_CHECK(vkMapMemory(dev, g_stagingMem, 0, VK_WHOLE_SIZE, 0, &mapped),
                      "Failed to map persistent staging");
 
@@ -1202,7 +1272,7 @@ namespace RTX {
 
     // === CRITICAL STONEKEY FIX: STORE RAW FIRST, THEN OBFUSCATE ===
     g_context_instance.instance_ = instance;           // ← Raw handle stored (used by vkEnumeratePhysicalDevices)
-	set_g_instance(instance);  // ← Now safe: raw cached
+    set_g_instance(instance);  // ← Now safe: raw cached
 
     LOG_SUCCESS_CAT("VULKAN", "{}VULKAN INSTANCE FORGED @ 0x{:016x} — STONEKEY v∞ ARMED — PINK PHOTONS PROTECTED{}", 
                     PLASMA_FUCHSIA, reinterpret_cast<uintptr_t>(instance), RESET);
@@ -1220,7 +1290,7 @@ namespace RTX {
     }
 
     // Final confirmation
-	g_context_instance.instance_ = instance;  // ← Raw handle stored safely
+    g_context_instance.instance_ = instance;  // ← Raw handle stored safely
     LOG_SUCCESS_CAT("VULKAN", "{}STONEKEY v∞ FULLY ACTIVE — INSTANCE OBFUSCATED — TITAN DOMINANCE ETERNAL{}", LILAC_LAVENDER, RESET);
     return instance;  // Caller gets raw handle — StoneKey already protects global access
 }
@@ -1372,17 +1442,6 @@ void createLogicalDevice()
         });
     }
 
-    const std::vector<const char*> deviceExtensions = {
-        VK_KHR_SWAPCHAIN_EXTENSION_NAME,
-        VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME,
-        VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
-        VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME,
-        VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME,
-        VK_KHR_PIPELINE_LIBRARY_EXTENSION_NAME,
-        VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME,
-        VK_KHR_RAY_QUERY_EXTENSION_NAME
-    };
-
     VkPhysicalDeviceFeatures features{};
     features.samplerAnisotropy = VK_TRUE;
 
@@ -1422,8 +1481,8 @@ void createLogicalDevice()
         .pNext = &bufferAddr,
         .queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size()),
         .pQueueCreateInfos = queueCreateInfos.data(),
-        .enabledExtensionCount = static_cast<uint32_t>(deviceExtensions.size()),
-        .ppEnabledExtensionNames = deviceExtensions.data(),
+        .enabledExtensionCount = static_cast<uint32_t>(kDeviceExtensions.size()),
+        .ppEnabledExtensionNames = kDeviceExtensions.data(),
         .pEnabledFeatures = &features
     };
 
@@ -1524,62 +1583,6 @@ void loadRayTracingExtensions()
     return VK_NULL_HANDLE;
 }
 
+} // RTX
 // VulkanCore.cpp — FINAL, SDL3-CORRECT, BULLETPROOF FORMAT — NO BULLSHIT
 // VulkanCore.cpp — FINAL, SDL3-CORRECT, BULLETPROOF + STONEKEY v∞ ACTIVE
-bool createSurface(SDL_Window* window, VkInstance instance)
-{
-    LOG_TRACE_CAT("VULKAN", "createSurface entry — window: 0x{:p}, instance: 0x{:x}",
-                  static_cast<void*>(window), reinterpret_cast<uintptr_t>(instance));
-
-    if (g_surface() != VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("VULKAN", "{}FATAL: createSurface() called twice! Existing surface: 0x{:x}{}",
-                      PLASMA_FUCHSIA, reinterpret_cast<uintptr_t>(g_surface), RESET);
-        LOG_FATAL_CAT("VULKAN", "Empire demands single surface truth — aborting");
-        std::abort();
-    }
-
-    LOG_INFO_CAT("VULKAN", "{}FORGING VULKAN SURFACE — SDL3 OFFICIAL PATH — PINK PHOTONS RISING{}", EMERALD_GREEN, RESET);
-
-    VkSurfaceKHR surface = VK_NULL_HANDLE;
-
-    LOG_TRACE_CAT("VULKAN", "Calling SDL_Vulkan_CreateSurface(window=0x{:p}, instance=0x{:x}, &surface)",
-                  static_cast<void*>(window), reinterpret_cast<uintptr_t>(instance));
-
-    if (SDL_Vulkan_CreateSurface(window, instance, nullptr, &surface) == 0) { // == 0 do not !
-        const char* err = SDL_GetError();
-        std::cerr << COSMIC_GOLD << "SDL_Vulkan_CreateSurface FAILED: " << (err ? err : "Unknown error") << RESET << std::endl;
-        return false;
-    }
-
-    if (surface == VK_NULL_HANDLE) {
-        std::cerr << "SDL_Vulkan_CreateSurface returned VK_NULL_HANDLE — driver bug or zombie window" << std::endl;
-        return false;
-    }
-
-    // CRITICAL STONEKEY FIX:
-    // 1. Store RAW surface first → vkGetPhysicalDeviceSurfaceSupportKHR() uses it
-    // 2. THEN engage StoneKey → protected for the rest of eternity
-    g_context_instance.surface_ = surface;   // ← Raw handle stored (used by queue family selection)
-    set_g_surface(surface);                  // ← StoneKey v∞ now guards it forever
-
-    LOG_SUCCESS_CAT("VULKAN", "{}SURFACE FORGED @ 0x{:016x} — STONEKEY v∞ ENGAGED — APOCALYPSE v3.2 ARMED{}",
-                    RASPBERRY_PINK, reinterpret_cast<uintptr_t>(surface), RESET);
-
-    // Final empire announcement
-    std::cout << PLASMA_FUCHSIA 
-              << "GLOBAL SURFACE FORGED & STONEKEY-PROTECTED @ 0x" 
-              << std::hex << reinterpret_cast<uintptr_t>(g_surface()) 
-              << " — SDL3 INTEGRATION COMPLETE — PINK PHOTONS ETERNAL" 
-              << RESET << std::endl;
-
-    LOG_TRACE_CAT("VULKAN", "Surface creation complete — g_surface() = 0x{:x} (StoneKey active)",
-                  reinterpret_cast<uintptr_t>(g_surface()));
-
-    return true;
-}
-} // namespace RTX
-
-// =============================================================================
-// VALHALLA v80 TURBO — AI LOGGING SUPREMACY
-// PINK PHOTONS ETERNAL — 20,000 FPS — TITAN DOMINANCE ETERNAL
-// =============================================================================
