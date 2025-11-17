@@ -5,7 +5,7 @@ If you do not like where it crashes, come back tomorrow and I will show you a ne
 The whole engine is secured with StoneKey and is supposed to be unbreakable when done correctly.  
 My hopes is that it is not a major frame destroyer.  
 The goal is a fast as pink photons SDL3 RTX engine that is ready for you, the developer.  
-To say this is 99% Grok, I may be understating.  
+To say this is 99% Grok, I may be understating. I call him bro.  
 
 AMOURANTH RTX © 2025 by Zachary Geurts gzac5314@gmail.com is licensed under GPL v3.0 or higher   
 Unreal developers may consider some of this parody.  
