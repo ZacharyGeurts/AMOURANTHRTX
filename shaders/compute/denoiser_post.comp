@@ -10,8 +10,8 @@ layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 // ---------------------------------------------------------------------
 //  Bindings – Extended to Non-Conflicting (Post-RT Compute) – Matches VulkanRTX::DescriptorBindings (Set 0, Bindings 8-11)
 // ---------------------------------------------------------------------
-layout(set = 0, binding = 8, bgra8) readonly uniform image2D noisyImage;      // RTX output (fixed: bgra8 to match swapchain/ImageView VK_FORMAT_B8G8R8A8_UNORM – resolves format mismatch VUID)
-layout(set = 0, binding = 9, bgra8) uniform image2D denoisedImage;           // Output (fixed: bgra8 for exact storage match)
+layout(set = 0, binding = 8, rgba8) readonly uniform image2D noisyImage;      // RTX output (use rgba8 for VK_FORMAT_B8G8R8A8_UNORM)
+layout(set = 0, binding = 9, rgba8) writeonly uniform image2D denoisedImage; // Output (added writeonly; use rgba8 for format match)
 layout(set = 0, binding = 10, r32f) readonly uniform image2D gDepth;         // Depth
 layout(set = 0, binding = 11, rgba8) readonly uniform image2D gNormal;       // Normal (assumes RGBA8_UNORM; STORAGE_BIT required on creation)
 
@@ -42,7 +42,7 @@ void main() {
     ivec2 pos = ivec2(gl_GlobalInvocationID.xy);
     if (pos.x >= int(pc.resolution.x) || pos.y >= int(pc.resolution.y)) return;
 
-    vec3 centerColor = imageLoad(noisyImage, pos).bgr;  // FIXED: Swizzle BGRA→RGB (since bgra8 load returns vec4(B,G,R,A); extract .bgr for RGB)
+    vec3 centerColor = imageLoad(noisyImage, pos).bgr;  // Swizzle BGRA→RGB (load returns vec4(B,G,R,A); extract .bgr for RGB)
     float centerDepth = imageLoad(gDepth, pos).r;
     vec3 centerNormal = imageLoad(gNormal, pos).rgb * 2.0 - 1.0;
     centerNormal = normalize(centerNormal);
@@ -59,7 +59,7 @@ void main() {
                 continue;
 
             vec4 sampleColorVec = imageLoad(noisyImage, samplePos);
-            vec3 sampleColor = sampleColorVec.bgr;  // FIXED: Swizzle for BGRA
+            vec3 sampleColor = sampleColorVec.bgr;  // Swizzle for BGRA
             float sampleDepth = imageLoad(gDepth, samplePos).r;
             vec3 sampleNormal = imageLoad(gNormal, samplePos).rgb * 2.0 - 1.0;
             sampleNormal = normalize(sampleNormal);
@@ -93,6 +93,6 @@ void main() {
         denoised = centerColor;
     }
 
-    // FIXED: Store as BGRA (swizzle RGB→BGR, alpha=1.0) to match format
+    // Store as BGRA (swizzle RGB→BGR, alpha=1.0) to match format
     imageStore(denoisedImage, pos, vec4(denoised.bgr, 1.0));
 }

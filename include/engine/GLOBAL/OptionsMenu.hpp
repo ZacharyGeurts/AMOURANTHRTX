@@ -42,6 +42,9 @@ namespace Performance {
 
     // NEW: Frame prediction & jitter recovery (VK_GOOGLE_display_timing)
     constexpr bool     ENABLE_FRAME_PREDICTION     = true;  // AAAA pacing — predict vsync, recover jitter
+
+    // ADDED: For swapchain present mode selection (immediate present for low-latency non-VSYNC)
+    constexpr bool     ENABLE_IMMEDIATE_PRESENT    = false; // Set to true for VK_PRESENT_MODE_IMMEDIATE_KHR (tearing possible)
 }
 
 // ── AUDIO (NEW NAMESPACE) ─────────────────────────────────────────────────────

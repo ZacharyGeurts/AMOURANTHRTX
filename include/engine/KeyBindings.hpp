@@ -15,6 +15,7 @@ inline constexpr SDL_Scancode OVERLAY         = SDL_SCANCODE_O;
 inline constexpr SDL_Scancode TONEMAP         = SDL_SCANCODE_T;
 inline constexpr SDL_Scancode HYPERTRACE      = SDL_SCANCODE_H;
 inline constexpr SDL_Scancode MAXIMIZE_MUTE   = SDL_SCANCODE_M;      // M = maximize + mute
+inline constexpr SDL_Scancode HDR_TOGGLE      = SDL_SCANCODE_F12;    // F12 → HDR toggle (on/off)
 inline constexpr SDL_Scancode QUIT            = SDL_SCANCODE_ESCAPE;
 
 inline constexpr std::array<SDL_Scancode, 9> RENDER_MODE{{

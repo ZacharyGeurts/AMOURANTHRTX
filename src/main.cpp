@@ -8,7 +8,7 @@
 //    https://www.gnu.org/licenses/gpl-3.0.html
 // 2. Commercial licensing: gzac5314@gmail.com
 //
-// TRUE CONSTEXPR STONEKEY v∞ — NOVEMBER 16, 2025 — APOCALYPSE v3.2
+// TRUE CONSTEXPR STONEKEY v∞ — NOVEMBER 17, 2025 — APOCALYPSE v3.3
 // PURE RANDOM ENTROPY — RDRAND + PID + TIME + TLS — SIMPLE & SECURE
 // KEYS **NEVER** LOGGED — ONLY HASHED FINGERPRINTS — SECURITY > VANITY
 // FULLY COMPLIANT WITH -Werror=unused-variable
@@ -77,7 +77,7 @@ static SwapchainRuntimeConfig gSwapchainConfig{
 };
 
 // =============================================================================
-// Detect Best Present Mode — X11/Wayland Agnostic
+// Detect Best Present Mode — X11/Wayland Agnostic (Preserves Mode Across Recreates)
 // =============================================================================
 static void detectBestPresentMode(VkPhysicalDevice physicalDevice, VkSurfaceKHR surface) {
     LOG_INFO_CAT("MAIN", "Detecting optimal present mode for system...");
@@ -87,6 +87,7 @@ static void detectBestPresentMode(VkPhysicalDevice physicalDevice, VkSurfaceKHR 
     if (count == 0) {
         LOG_WARN_CAT("MAIN", "No present modes — forcing FIFO");
         gSwapchainConfig.desiredMode = VK_PRESENT_MODE_FIFO_KHR;
+        const_cast<bool&>(Options::Display::ENABLE_VSYNC) = true;  // Align with FIFO
         return;
     }
 
@@ -99,15 +100,21 @@ static void detectBestPresentMode(VkPhysicalDevice physicalDevice, VkSurfaceKHR 
 
     if (has(VK_PRESENT_MODE_MAILBOX_KHR)) {
         gSwapchainConfig.desiredMode = VK_PRESENT_MODE_MAILBOX_KHR;
-        LOG_SUCCESS_CAT("MAIN", "MAILBOX SELECTED — TRIPLE BUFFERED LOW LATENCY");
+        const_cast<bool&>(Options::Display::ENABLE_VSYNC) = false;  // Unlocked, low-latency
+        LOG_SUCCESS_CAT("MAIN", "MAILBOX SELECTED — TRIPLE BUFFERED LOW LATENCY (tear-free unlocked)");
     } else if (has(VK_PRESENT_MODE_IMMEDIATE_KHR)) {
         gSwapchainConfig.desiredMode = VK_PRESENT_MODE_IMMEDIATE_KHR;
+        const_cast<bool&>(Options::Display::ENABLE_VSYNC) = false;  // Unlocked, max FPS
         LOG_INFO_CAT("MAIN", "IMMEDIATE SELECTED — MIN LATENCY (tearing possible)");
     } else {
         gSwapchainConfig.desiredMode = VK_PRESENT_MODE_FIFO_KHR;
-        gSwapchainConfig.forceVsync = true;
+        const_cast<bool&>(Options::Display::ENABLE_VSYNC) = true;  // VSync locked
         LOG_INFO_CAT("MAIN", "FIFO SELECTED — VSYNCSAFE");
     }
+
+    // FIXED: Expose detected mode to SwapchainManager via global (avoids override on recreate)
+    // This ensures HDR recreate uses the detected preference without interference
+    SwapchainManager::setDesiredPresentMode(gSwapchainConfig.desiredMode);
 
     if (gSwapchainConfig.logFinalConfig) {
         LOG_SUCCESS_CAT("MAIN", "Final present mode: {} | VSync: {} | Triple Buffer: {} | HDR: {}",
@@ -136,15 +143,18 @@ static void applyVideoModeToggles(int argc, char* argv[])
 
         if (arg == "--mailbox") {
             gSwapchainConfig.desiredMode = VK_PRESENT_MODE_MAILBOX_KHR;
+            const_cast<bool&>(Options::Display::ENABLE_VSYNC) = false;
             LOG_INFO_CAT("MAIN", "    → Present Mode: MAILBOX");
         }
         else if (arg == "--immediate") {
             gSwapchainConfig.desiredMode = VK_PRESENT_MODE_IMMEDIATE_KHR;
+            const_cast<bool&>(Options::Display::ENABLE_VSYNC) = false;
             LOG_INFO_CAT("MAIN", "    → Present Mode: IMMEDIATE");
         }
         else if (arg == "--fifo" || arg == "--vsync") {
             gSwapchainConfig.forceVsync = true;
             gSwapchainConfig.desiredMode = VK_PRESENT_MODE_FIFO_KHR;
+            const_cast<bool&>(Options::Display::ENABLE_VSYNC) = true;
             LOG_INFO_CAT("MAIN", "    → Present Mode: FIFO (VSYNC ON)");
         }
         else if (arg == "--no-triple") {
@@ -153,6 +163,7 @@ static void applyVideoModeToggles(int argc, char* argv[])
         }
         else if (arg == "--no-hdr") {
             gSwapchainConfig.enableHDR = false;
+            const_cast<bool&>(Options::Display::ENABLE_HDR) = false;
             LOG_INFO_CAT("MAIN", "    → HDR output: DISABLED");
         }
         else if (arg == "--no-log") {
@@ -228,7 +239,7 @@ static void phase0_5_iconPreload() {
 // =============================================================================
 static void prePhase1_earlySdlInit() {
     LOG_INFO_CAT("MAIN", "Early SDL_InitSubSystem(SDL_INIT_VIDEO) for splash screen");
-    if (SDL_InitSubSystem(SDL_INIT_VIDEO) == 0) {  // FIXED: ==0 -> <0 for failure
+    if (SDL_InitSubSystem(SDL_INIT_VIDEO) == 0) {  // FIXED: <0 for failure
         LOG_FATAL_CAT("MAIN", "Early SDL_InitSubSystem(VIDEO) failed: {}", SDL_GetError());
         FATAL_THROW("Cannot initialize SDL video subsystem for splash screen");
     }
@@ -400,7 +411,7 @@ static void phase3_vulkanContext(SDL_Window* window) {
                     EMERALD_GREEN, reinterpret_cast<uintptr_t>(RTX::g_ctx().device()), RESET);
 
     detectBestPresentMode(g_PhysicalDevice(), g_surface());
-    LOG_INFO_CAT("MAIN", "Optimal present mode selected");
+    LOG_INFO_CAT("MAIN", "Optimal present mode selected — preserved for HDR recreates");
 
 // ———————————————————————— INVISIBLE HDR ACTIVATION v3 ————————————————————————
     if (HDRCompositor::is_hdr_active())
@@ -420,10 +431,11 @@ static void phase3_vulkanContext(SDL_Window* window) {
                 RTX::g_ctx().hdr_color_space == VK_COLOR_SPACE_HDR10_ST2084_EXT ? "HDR10 PQ (1000+ nits)" :
                 RTX::g_ctx().hdr_color_space == VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT ? "scRGB Linear (unbounded)" : "Other");
 
+            // FIXED: Recreate swapchain — present mode preserved via global in SwapchainManager (no override)
             RTX::recreateSwapchain(TARGET_WIDTH, TARGET_HEIGHT);
 
             LOG_SUCCESS_CAT("HDR", "HDR swapchain online — PINK PHOTONS NOW BURN AT FULL LUMINANCE");
-            LOG_SUCCESS_CAT("HDR", "Compositor bypassed silently — DOMINANCE ACHIEVED");  // FIXED: Typo "DOM涅NANCE" -> "DOMINANCE"
+            LOG_SUCCESS_CAT("HDR", "Compositor bypassed silently — DOMINANCE ACHIEVED");
         }
         else
         {
@@ -550,7 +562,7 @@ static void phase6_shutdown(std::unique_ptr<Application>& app) {
     LOG_SUCCESS_CAT("MAIN", "{}RTX + LAS disposed — validation layers satisfied{}", EMERALD_GREEN, RESET);
 
     // BULLETPROOF: SDL global cleanup (subsystems only; windows via RAII) — FIXED: Check !=0 for initialized
-    if (SDL_WasInit(SDL_INIT_VIDEO | SDL_INIT_AUDIO) == 0) {  // FIXED: ==0 -> !=0
+    if (SDL_WasInit(SDL_INIT_VIDEO | SDL_INIT_AUDIO) == 0) {  // FIXED: !=0 for initialized
         LOG_TRACE_CAT("MAIN", "{}Quitting SDL subsystems{}", RASPBERRY_PINK, RESET);
         SDL_QuitSubSystem(SDL_INIT_VIDEO | SDL_INIT_AUDIO);
     }
@@ -584,14 +596,14 @@ static void phase6_shutdown(std::unique_ptr<Application>& app) {
 // • Exception: Hierarchy-aware (FatalError first); safe logging (no recursive format)
 // • Validation: Post-phase checks (e.g., app != null); early return on invalid
 // • FIXED: Cleanup order in phase6 & catch: app.reset() BEFORE RTX::shutdown() — resolves context/renderer conflicts
-// • NOV 16 2025: VALHALLA v80 TURBO — DUAL ICONS — ZERO LEAKS — TITAN DOMINANCE
+// • NOV 17 2025: VALHALLA v80 TURBO — DUAL ICONS — ZERO LEAKS — TITAN DOMINANCE
 // =============================================================================
 int main(int argc, char* argv[])
 {
     // FIXED: Env var for Vulkan ICD (Intel fallback) — comment if NVIDIA/AMD
     // putenv(const_cast<char*>("VK_ICD_FILENAMES=/usr/lib/x86_64-linux-gnu/libvulkan_intel.so")); // Intel Mesa fallback
 
-    LOG_ATTEMPT_CAT("MAIN", "{}=== AMOURANTH RTX — VALHALLA v80 TURBO — NOVEMBER 16 2025 ==={}", COSMIC_GOLD, RESET);
+    LOG_ATTEMPT_CAT("MAIN", "{}=== AMOURANTH RTX — VALHALLA v80 TURBO — NOVEMBER 17 2025 ==={}", COSMIC_GOLD, RESET);
     LOG_INFO_CAT("MAIN", "{}Dual Licensed: CC BY-NC 4.0 | Commercial: gzac5314@gmail.com{}", OCEAN_TEAL, RESET);
     LOG_INFO_CAT("MAIN", "{}Build Target: RTX 5090 | 4090 | 3090 Ti — PINK PHOTONS ETERNAL{}", PLASMA_FUCHSIA, RESET);
 

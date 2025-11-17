@@ -1,17 +1,11 @@
 // include/engine/GLOBAL/SwapchainManager.hpp
 // =============================================================================
 // AMOURANTH RTX Engine © 2025 by Zachary "gzac" Geurts — PINK PHOTONS ETERNAL
-// SWAPCHAIN MANAGER — v15 ULTIMATE — HDR SUPREMACY + 8-BIT MERCY EDITION
+// SWAPCHAIN MANAGER — v16 ULTIMATE — PRESENT MODE PRESERVATION EDITION
 // • Prefers true 10-bit HDR10 / scRGB FP16 / Dolby Vision above all
 // • Falls back to 8-bit sRGB only if forced — with loud shame in the log
+// • Desired present mode is now globally preserved (HDR recreate safe)
 // • Zero validation errors. Zero leaks. Maximum glory.
-// =============================================================================
-//
-// Dual Licensed:
-// 1. GNU General Public License v3.0+ → https://www.gnu.org/licenses/gpl-3.0.html
-// 2. Commercial licensing → gzac5314@gmail.com
-//
-// NOVEMBER 16, 2025 — WE PREFER PINK PHOTONS, BUT WE WON'T CRASH ON SDR SINNERS
 // =============================================================================
 
 #pragma once
@@ -24,6 +18,7 @@
 #include <vector>
 #include <array>
 #include <span>
+#include <SDL2/SDL.h>         // For SDL_Window*
 
 #define SWAPCHAIN SwapchainManager::get()
 
@@ -32,6 +27,20 @@ public:
     static SwapchainManager& get() noexcept {
         static SwapchainManager instance;
         return instance;
+    }
+
+    // -------------------------------------------------------------------------
+    // NEW: Global desired present mode — set once in main(), respected forever
+    // -------------------------------------------------------------------------
+    static void setDesiredPresentMode(VkPresentModeKHR mode) noexcept {
+        s_desiredPresentMode = mode;
+        LOG_SUCCESS_CAT("SWAPCHAIN", "Desired present mode locked globally: {} (will survive HDR recreate)",
+                        mode == VK_PRESENT_MODE_MAILBOX_KHR ? "MAILBOX" :
+                        mode == VK_PRESENT_MODE_IMMEDIATE_KHR ? "IMMEDIATE" : "FIFO");
+    }
+
+    [[nodiscard]] static VkPresentModeKHR desiredPresentMode() noexcept {
+        return s_desiredPresentMode;
     }
 
     // -------------------------------------------------------------------------
@@ -51,6 +60,12 @@ public:
     [[nodiscard]] bool                    isFP16()       const noexcept;
     [[nodiscard]] bool                    isPeasantMode()const noexcept;  // 8-bit shame
     [[nodiscard]] const char*             formatName()   const noexcept;
+
+    [[nodiscard]] bool                    isMailbox()    const noexcept;
+    [[nodiscard]] const char*             presentModeName() const noexcept;
+
+    // FPS window title update (C++23 safe formatting for clean display)
+    void updateWindowTitle(SDL_Window* window, float fps, uint32_t width, uint32_t height) noexcept;
 
     void init(VkInstance instance, VkPhysicalDevice phys, VkDevice dev, VkSurfaceKHR surface, uint32_t w, uint32_t h);
     void recreate(uint32_t w, uint32_t h) noexcept;
@@ -82,4 +97,9 @@ private:
     // Handles
     RTX::Handle<VkSwapchainKHR>         swapchain_;
     RTX::Handle<VkRenderPass>           renderPass_;
+
+    // -------------------------------------------------------------------------
+    // Static storage for globally desired present mode (set once in main.cpp)
+    // -------------------------------------------------------------------------
+    static inline VkPresentModeKHR s_desiredPresentMode = VK_PRESENT_MODE_MAX_ENUM_KHR; // invalid sentinel
 };

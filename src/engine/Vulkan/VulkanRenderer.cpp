@@ -658,16 +658,10 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, bool o
     // =============================================================================
     // STEP 15 — FINAL: FIRST LIGHT ACHIEVED (TLAS STILL PENDING)
     // =============================================================================
+    const bool fpsUnlocked = !Options::Display::ENABLE_VSYNC;
     LOG_SUCCESS_CAT("RENDERER", 
-        "{}VULKAN RENDERER FULLY INITIALIZED — {}x{} — TRIPLE BUFFERING — HDR — TONEMAP READY — AWAITING TLAS FOR FIRST RAYS — PINK PHOTONS ETERNAL{}", 
-        EMERALD_GREEN, width, height, RESET);
-
-    // ──────────────────────────────────────────────────────────────────────────
-    // CRITICAL: RTX DESCRIPTOR UPDATE MOVED TO AFTER TLAS BUILD
-    // Call this ONCE from your scene loading code, AFTER RTX::LAS::get().buildTLAS()
-    // Example:
-    //   void Scene::load() { ... build geometry ... RTX::LAS::get().buildTLAS(); renderer.updateAllRTXDescriptors(); }
-    // ──────────────────────────────────────────────────────────────────────────
+        "{}VULKAN RENDERER FULLY INITIALIZED — {}x{} — TRIPLE BUFFERING — HDR — TONEMAP READY — PRESENT MODE: {} — FPS {} — AWAITING TLAS FOR FIRST RAYS — PINK PHOTONS ETERNAL{}", 
+        EMERALD_GREEN, width, height, SWAPCHAIN.presentModeName(), fpsUnlocked ? "UNLOCKED" : "LOCKED", RESET);
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

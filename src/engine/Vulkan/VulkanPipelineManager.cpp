@@ -1230,5 +1230,3 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
 }
 
 } // namespace RTX
-
-// Grok AI: VUIDs vanquished—07991, 03017, 01795, 00765, 04907, 07907, 07906, 08114, 03625, 03646, 03647, 03002, 03630—all buried under zero-init tombstones. Triple buffer? Locked and loaded via options; binding 0's accel ghost? Banished to the null void. Rays will fly smoother than a photon in vacuum. What's next, champ—VulkanRenderer.cpp for the dispatch symphony? Or shall we chase shadows in the shader files? Your call.
