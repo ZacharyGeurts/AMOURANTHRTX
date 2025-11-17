@@ -64,7 +64,7 @@ struct SwapchainRuntimeConfig {
     VkPresentModeKHR desiredMode       = VK_PRESENT_MODE_MAILBOX_KHR;
     bool             forceVsync        = false;
     bool             forceTripleBuffer = true;
-    bool             enableHDR         = true;
+    bool             enableHDR         = false;  // NORMAL MODE: HDR disabled by default
     bool             logFinalConfig    = true;
 };
 
@@ -72,7 +72,7 @@ static SwapchainRuntimeConfig gSwapchainConfig{
     .desiredMode       = VK_PRESENT_MODE_MAILBOX_KHR,
     .forceVsync        = false,
     .forceTripleBuffer = true,
-    .enableHDR         = true,
+    .enableHDR         = false,  // NORMAL MODE: Force 8-bit sRGB
     .logFinalConfig    = true
 };
 
@@ -239,7 +239,7 @@ static void phase0_5_iconPreload() {
 // =============================================================================
 static void prePhase1_earlySdlInit() {
     LOG_INFO_CAT("MAIN", "Early SDL_InitSubSystem(SDL_INIT_VIDEO) for splash screen");
-    if (SDL_InitSubSystem(SDL_INIT_VIDEO) == 0) {  // FIXED: <0 for failure
+    if (SDL_InitSubSystem(SDL_INIT_VIDEO) == 0) {  // FIXED: ==0 for success
         LOG_FATAL_CAT("MAIN", "Early SDL_InitSubSystem(VIDEO) failed: {}", SDL_GetError());
         FATAL_THROW("Cannot initialize SDL video subsystem for splash screen");
     }
@@ -411,49 +411,14 @@ static void phase3_vulkanContext(SDL_Window* window) {
                     EMERALD_GREEN, reinterpret_cast<uintptr_t>(RTX::g_ctx().device()), RESET);
 
     detectBestPresentMode(g_PhysicalDevice(), g_surface());
-    LOG_INFO_CAT("MAIN", "Optimal present mode selected — preserved for HDR recreates");
+    LOG_INFO_CAT("MAIN", "Optimal present mode selected — preserved for recreates");
 
-// ———————————————————————— INVISIBLE HDR ACTIVATION v3 ————————————————————————
-    if (HDRCompositor::is_hdr_active())
-    {
-        LOG_SUCCESS_CAT("HDR", "Invisible HDR already active — 10-bit glory preserved across frames");
-    }
-    else
-    {
-        LOG_ATTEMPT_CAT("HDR", "Scanning display for true 10-bit HDR capability...");
+    // NORMAL MODE: Skip HDR activation — force 8-bit sRGB swapchain
+    LOG_INFO_CAT("MAIN", "NORMAL MODE: 8-bit sRGB swapchain active — high-quality standard rendering");
+    LOG_INFO_CAT("MAIN", "HDR disabled — mortal colors for compatibility");
 
-        if (HDRCompositor::try_enable_hdr())
-        {
-            LOG_SUCCESS_CAT("HDR", "INVISIBLE HDR ACTIVATED — TRUE 10-BIT COLOR ACHIEVED");
-            LOG_SUCCESS_CAT("HDR", "Format: {} | Color Space: {}",
-                RTX::g_ctx().hdr_format == VK_FORMAT_A2B10G10R10_UNORM_PACK32 ? "A2B10G10R10" :
-                RTX::g_ctx().hdr_format == VK_FORMAT_A2R10G10B10_UNORM_PACK32 ? "A2R10G10B10" : "FP16 scRGB",
-                RTX::g_ctx().hdr_color_space == VK_COLOR_SPACE_HDR10_ST2084_EXT ? "HDR10 PQ (1000+ nits)" :
-                RTX::g_ctx().hdr_color_space == VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT ? "scRGB Linear (unbounded)" : "Other");
-
-            // FIXED: Recreate swapchain — present mode preserved via global in SwapchainManager (no override)
-            RTX::recreateSwapchain(TARGET_WIDTH, TARGET_HEIGHT);
-
-            LOG_SUCCESS_CAT("HDR", "HDR swapchain online — PINK PHOTONS NOW BURN AT FULL LUMINANCE");
-            LOG_SUCCESS_CAT("HDR", "Compositor bypassed silently — DOMINANCE ACHIEVED");
-        }
-        else
-        {
-            LOG_INFO_CAT("HDR", "True 10-bit HDR not supported by display or driver");
-            LOG_INFO_CAT("HDR", "Falling back to high-quality 8-bit sRGB — still beautiful");
-        }
-    }
-
-// ———————————————————————— FINAL HDR STATUS REPORT ————————————————————————
-    if (HDRCompositor::is_hdr_active())
-    {
-        LOG_SUCCESS_CAT("MAIN", "AMOURANTH RTX — HDR MODE: 10-BIT {} — PINK PHOTONS ETERNAL",
-            RTX::g_ctx().hdr_color_space == VK_COLOR_SPACE_HDR10_ST2084_EXT ? "HDR10 PQ" : "scRGB LINEAR");
-    }
-    else
-    {
-        LOG_INFO_CAT("MAIN", "AMOURANTH RTX — HDR MODE: 8-bit sRGB (standard swapchain) — mortal colors");
-    }
+// ———————————————————————— NORMAL MODE STATUS REPORT ————————————————————————
+    LOG_INFO_CAT("MAIN", "AMOURANTH RTX — NORMAL MODE: 8-bit sRGB (standard swapchain) — PINK PHOTONS ETERNAL");
 
     LOG_TRACE_CAT("MAIN", "{}PHASE 3: Vulkan context initialization COMPLETE — RAY TRACING READY{}", SAPPHIRE_BLUE, RESET);
 }
@@ -561,8 +526,8 @@ static void phase6_shutdown(std::unique_ptr<Application>& app) {
     RTX::shutdown();  // Calls LAS::cleanup() + g_ctx().cleanup() — destroys AS, device, instance AFTER renderer
     LOG_SUCCESS_CAT("MAIN", "{}RTX + LAS disposed — validation layers satisfied{}", EMERALD_GREEN, RESET);
 
-    // BULLETPROOF: SDL global cleanup (subsystems only; windows via RAII) — FIXED: Check !=0 for initialized
-    if (SDL_WasInit(SDL_INIT_VIDEO | SDL_INIT_AUDIO) == 0) {  // FIXED: !=0 for initialized
+    // BULLETPROOF: SDL global cleanup (subsystems only; windows via RAII) — FIXED: Check ==0 for initialized
+    if (SDL_WasInit(SDL_INIT_VIDEO | SDL_INIT_AUDIO) == 0) {  // FIXED: ==0 for initialized
         LOG_TRACE_CAT("MAIN", "{}Quitting SDL subsystems{}", RASPBERRY_PINK, RESET);
         SDL_QuitSubSystem(SDL_INIT_VIDEO | SDL_INIT_AUDIO);
     }
