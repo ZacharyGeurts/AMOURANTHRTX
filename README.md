@@ -55,7 +55,6 @@ Made with Grok sized files for AI updates.
 <img width="1300" alt="StonekeyBlack" src="https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/media/Screenshot%20from%202025-11-08%2012-08-47.png" />  
 <img width="1300" alt="Hypertrace" src="https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/media/nexus.png" />  
 <img width="1300" alt="Renderer" src="https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/media/Screenshot%20from%202025-11-04%2008-26-37.png" />  
-<img width="1300" alt="Swapchain" src="https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/media/Screenshot%20from%202025-10-30%2010-11-52.png" />  
 <img width="1300" alt="Buffer" src="https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/media/Screenshot%20from%202025-10-30%2010-12-49.png" />  
 
 - **Distribution**: gzac5314@gmail.com for AMOURANTH RTX engine license  
