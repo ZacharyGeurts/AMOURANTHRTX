@@ -6,7 +6,7 @@ chmod +x linux.sh
 ```
 Currently compiles and reaches render loop. Much more work needed yet.  
 I work fast but slow. Rather than rendering fast and working backwards,  
-HDR and incredible features come with.  
+HDR and incredible features come with. (12,000+ on 4070ti to work with)  
 Updates are fast and furious at this stage and the renderer could be up or down any minute.  
 If you do not like where it crashes, come back tomorrow and I will show you a new one.  
 Labor of love, blah blah.  
