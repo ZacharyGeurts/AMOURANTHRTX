@@ -1517,7 +1517,6 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     vkResetCommandBuffer(cmd, 0);
     VkCommandBufferBeginInfo beginInfo{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, nullptr, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT};
     vkBeginCommandBuffer(cmd, &beginInfo);
-
     // SWAPCHAIN: UNDEFINED/PRESENT → GENERAL
     {
         VkImageMemoryBarrier barrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
@@ -1528,36 +1527,74 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
         barrier.image = SWAPCHAIN.images()[imageIndex];
         barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
         barrier.srcAccessMask = 0;
-        barrier.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+        barrier.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT; // for compute/RT writes
 
-        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                             0, 0, nullptr, 0, nullptr, 1, &barrier);
+        vkCmdPipelineBarrier(cmd,
+            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
+            0, 0, nullptr, 0, nullptr, 1, &barrier);
     }
     firstSwapchainAcquire_ = false;
 
-// Accumulation reset — MUST BE BEFORE any transition
-if (resetAccumulation_) {
-    const VkClearColorValue clear = {{0,0,0,0}};
-    const VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    // Accumulation reset — MUST BE BEFORE any transition
+    if (resetAccumulation_) {
+        const VkClearColorValue clear = {{0,0,0,0}};
+        const VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
 
-    // Capture cmd, clear, and range by value/reference
-    auto clearImg = [cmd, clear, range](VkImage i) {
-        if (i) vkCmdClearColorImage(cmd, i, VK_IMAGE_LAYOUT_GENERAL, &clear, 1, &range);
-    };
+        auto clearImg = [cmd, clear, range](VkImage i) {
+            if (i) vkCmdClearColorImage(cmd, i, VK_IMAGE_LAYOUT_GENERAL, &clear, 1, &range);
+        };
 
-    for (auto& h : rtOutputImages_) clearImg(*h);
-    if (Options::RTX::ENABLE_ACCUMULATION) for (auto& h : accumImages_) clearImg(*h);
-    if (Options::RTX::ENABLE_ADAPTIVE_SAMPLING && hypertraceScoreImage_.valid()) clearImg(*hypertraceScoreImage_);
+        for (auto& h : rtOutputImages_) clearImg(*h);
+        if (Options::RTX::ENABLE_ACCUMULATION) for (auto& h : accumImages_) clearImg(*h);
+        if (Options::RTX::ENABLE_ADAPTIVE_SAMPLING && hypertraceScoreImage_.valid()) clearImg(*hypertraceScoreImage_);
 
-    resetAccumulation_ = false;
-}
+        resetAccumulation_ = false;
+    }
 
     updateUniformBuffer(frameIdx, camera, getJitter());
     updateTonemapUniform(frameIdx);
+
+    // CRITICAL FIX #1: ALWAYS update RTX descriptors — even when TLAS is rebuilding
+    // (Your PipelineManager now always binds a valid TLAS handle, even dummy)
     updateRTXDescriptors(frameIdx);
     if (Options::RTX::ENABLE_ADAPTIVE_SAMPLING) updateNexusDescriptors();
 
     recordRayTracingCommandBuffer(cmd);
+    // FIXED: GENERAL → SHADER_READ_ONLY_OPTIMAL — layout mismatch dead
+    {
+        VkImageMemoryBarrier barrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+        barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+        barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        barrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+        barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        barrier.image = *rtOutputImages_[frameIdx % rtOutputImages_.size()];
+        barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+
+        vkCmdPipelineBarrier(cmd,
+            VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
+            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+            0, 0, nullptr, 0, nullptr, 1, &barrier);
+    }
+
+    // CRITICAL FIX #2: Transition RT output from GENERAL → SHADER_READ_ONLY_OPTIMAL
+    // This eliminates "expects SHADER_READ_ONLY_OPTIMAL but is GENERAL"
+    {
+        VkImageMemoryBarrier barrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+        barrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+        barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+        barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.image = *rtOutputImages_[frameIdx % rtOutputImages_.size()];
+        barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+
+        vkCmdPipelineBarrier(cmd,
+            VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+            0, 0, nullptr, 0, nullptr, 1, &barrier);
+    }
 
     VkImageView tonemapSrc = denoisingEnabled_ && denoiserView_.valid()
                            ? *denoiserView_
@@ -1572,20 +1609,23 @@ if (resetAccumulation_) {
         VkImageMemoryBarrier barrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
         barrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
         barrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+        barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;  // tonemap wrote to swapchain image
+        barrier.dstAccessMask = 0;
         barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         barrier.image = SWAPCHAIN.images()[imageIndex];
         barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-        barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-        barrier.dstAccessMask = 0;
 
-        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
-                             0, 0, nullptr, 0, nullptr, 1, &barrier);
+        vkCmdPipelineBarrier(cmd,
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+            VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+            0, 0, nullptr, 0, nullptr, 1, &barrier);
     }
 
     vkEndCommandBuffer(cmd);
 
-    VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+    VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT |
+                                     VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR;
     VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
     submit.waitSemaphoreCount = 1;
     submit.pWaitSemaphores = &imageAvailableSemaphores_[frameIdx];
@@ -1621,6 +1661,19 @@ if (resetAccumulation_) {
 
     currentFrame_ = (currentFrame_ + 1) % Options::Performance::MAX_FRAMES_IN_FLIGHT;
     frameNumber_++;
+
+// Activate StoneKey exactly once, on frame 4 (safe point: everything is created)
+if (frameNumber_ == 4 && !stonekey_active_) {
+    StoneKey::Raw::transition_to_obfuscated();
+    stonekey_active_ = true;
+}
+    // Optional: Celebrate with a single frame of pure pink
+    if (Options::Debug::ENABLE_CELEBRATION_MODE) {
+        VkClearColorValue pink = {{1.0f, 0.0f, 1.0f, 1.0f}};
+        VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+        vkCmdClearColorImage(cmd, SWAPCHAIN.images()[imageIndex], VK_IMAGE_LAYOUT_GENERAL, &pink, 1, &range);
+        LOG_SUCCESS_CAT("CELEBRATION", "P I N K  F L A S H — VALHALLA ACKNOWLEDGED");
+    }
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -2056,90 +2109,96 @@ void VulkanRenderer::updateUniformBuffer(uint32_t frame, const Camera& camera, f
         return;
     }
 
+    // NEW: After StoneKey transition, we can no longer allocate command buffers
+    const bool useTransientCmd = !stonekey_active_;  // only frames 0–3
+
     const auto& ctx = RTX::g_ctx();
+    VkCommandBuffer cmd = VK_NULL_HANDLE;
 
+    // ------------------------------------------------------------------
+    // 1. Map + fill staging buffer (this is safe — uses g_device() only for memory)
+    // ------------------------------------------------------------------
     void* data = nullptr;
-    VkResult mapResult = vkMapMemory(
-        ctx.device(),
-        BUFFER_MEMORY(RTX::g_ctx().sharedStagingEnc_),
-        0, VK_WHOLE_SIZE, 0, &data
-    );
+    VkResult r = vkMapMemory(g_device(),
+                             BUFFER_MEMORY(RTX::g_ctx().sharedStagingEnc_),
+                             0, VK_WHOLE_SIZE, 0, &data);
 
-    if (mapResult != VK_SUCCESS || data == nullptr) {
-        LOG_WARN_CAT("RENDERER", 
-            "vkMapMemory failed (result: {}) — forcing remap recovery — frame {}", 
-            static_cast<int>(mapResult), frameNumber_);
-
-        // Force unmap + invalidate + remap
-        vkUnmapMemory(ctx.device(), BUFFER_MEMORY(RTX::g_ctx().sharedStagingEnc_));
-
-        VkMappedMemoryRange range = {VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE};
-        range.memory = BUFFER_MEMORY(RTX::g_ctx().sharedStagingEnc_);
-        range.offset = 0;
-        range.size   = VK_WHOLE_SIZE;
-        vkInvalidateMappedMemoryRanges(ctx.device(), 1, &range);
-
-        mapResult = vkMapMemory(ctx.device(), BUFFER_MEMORY(RTX::g_ctx().sharedStagingEnc_), 0, VK_WHOLE_SIZE, 0, &data);
-        if (mapResult != VK_SUCCESS || data == nullptr) {
-            LOG_FATAL_CAT("RENDERER", "CRITICAL: vkMapMemory failed twice — GPU OOM or driver dead. Frame {} lost.", frameNumber_);
+    if (r != VK_SUCCESS || data == nullptr) {
+        // recovery path unchanged — still safe
+        vkUnmapMemory(g_device(), BUFFER_MEMORY(RTX::g_ctx().sharedStagingEnc_));
+        VkMappedMemoryRange range{VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE, nullptr,
+                                  BUFFER_MEMORY(RTX::g_ctx().sharedStagingEnc_), 0, VK_WHOLE_SIZE};
+        vkInvalidateMappedMemoryRanges(g_device(), 1, &range);
+        r = vkMapMemory(g_device(), BUFFER_MEMORY(RTX::g_ctx().sharedStagingEnc_), 0, VK_WHOLE_SIZE, 0, &data);
+        if (r != VK_SUCCESS || data == nullptr) {
+            LOG_FATAL_CAT("RENDERER", "vkMapMemory failed permanently — frame {} lost", frameNumber_);
             return;
         }
-
-        LOG_SUCCESS_CAT("RENDERER", "vkMapMemory recovered after force-remap — frame {} saved", frameNumber_);
     }
 
-    // Fill UBO
-    alignas(16) struct {
-        glm::mat4 view;
-        glm::mat4 proj;
-        glm::mat4 viewProj;
-        glm::mat4 invView;
-        glm::mat4 invProj;
+    alignas(16) struct LocalUBO {
+        glm::mat4 view, proj, viewProj, invView, invProj;
         glm::vec4 cameraPos;
         glm::vec2 jitter;
         uint32_t frame;
         float time;
         uint32_t spp;
         float _pad[3];
-    } ubo = {};  // Zero-init
+    } ubo{};
 
     const auto& cam = GlobalCamera::get();
-    ubo.view       = cam.view();
-    ubo.proj       = cam.proj(width_ / float(height_));
-    ubo.viewProj   = ubo.proj * ubo.view;
-    ubo.invView    = glm::inverse(ubo.view);      // ← FIXED: "ab" → proper formatting
-    ubo.invProj    = glm::inverse(ubo.proj);
-    ubo.cameraPos  = glm::vec4(cam.pos(), 1.0f);
-    ubo.jitter     = glm::vec2(jitter);
-    ubo.frame      = frameNumber_;
-    ubo.time       = frameTime_;
-    ubo.spp        = currentSpp_;
+    ubo.view      = cam.view();
+    ubo.proj      = cam.proj(width_ / float(height_));
+    ubo.viewProj  = ubo.proj * ubo.view;
+    ubo.invView   = glm::inverse(ubo.view);
+    ubo.invProj   = glm::inverse(ubo.proj);
+    ubo.cameraPos = glm::vec4(cam.pos(), 1.0f);
+    ubo.jitter    = glm::vec2(jitter);
+    ubo.frame     = frameNumber_;
+    ubo.time      = frameTime_;
+    ubo.spp       = currentSpp_;
 
     std::memcpy(data, &ubo, sizeof(ubo));
-    vkUnmapMemory(ctx.device(), BUFFER_MEMORY(RTX::g_ctx().sharedStagingEnc_));
+    vkUnmapMemory(g_device(), BUFFER_MEMORY(RTX::g_ctx().sharedStagingEnc_));
 
-    // Immediate staging → device-local copy
-    VkCommandBuffer cmd = pipelineManager_.beginSingleTimeCommands(ctx.commandPool());
+    // ------------------------------------------------------------------
+    // 2. Copy staging → device-local UBO
+    // ------------------------------------------------------------------
+    if (useTransientCmd) {
+        // Frames 0–3 only — safe to allocate a one-time command buffer
+        cmd = pipelineManager_.beginSingleTimeCommands(ctx.commandPool());
+    } else {
+        // Frame 4+ — use the per-frame command buffer that is already recording
+        cmd = commandBuffers_[frame];
+    }
+
     if (cmd != VK_NULL_HANDLE) {
         VkBuffer src = RTX::UltraLowLevelBufferTracker::get().getData(RTX::g_ctx().sharedStagingEnc_)->buffer;
         VkBuffer dst = RAW_BUFFER(uniformBufferEncs_[frame]);
 
-        VkBufferCopy copyRegion = {};  // Zero-init
-        copyRegion.srcOffset = 0;
-        copyRegion.dstOffset = 0;
-        copyRegion.size      = sizeof(ubo);
+        VkBufferCopy copyRegion{};
+        copyRegion.size = sizeof(ubo);
         vkCmdCopyBuffer(cmd, src, dst, 1, &copyRegion);
 
-        VkMemoryBarrier barrier = {VK_STRUCTURE_TYPE_MEMORY_BARRIER};
+        VkMemoryBarrier barrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
         barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
         barrier.dstAccessMask = VK_ACCESS_UNIFORM_READ_BIT;
+
         vkCmdPipelineBarrier(cmd,
             VK_PIPELINE_STAGE_TRANSFER_BIT,
-            VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
+            VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR |
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT |
+            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
             0, 1, &barrier, 0, nullptr, 0, nullptr);
+    }
 
+    // ------------------------------------------------------------------
+    // 3. Submit transient command buffer only if we allocated one
+    // ------------------------------------------------------------------
+    if (useTransientCmd && cmd != VK_NULL_HANDLE) {
         pipelineManager_.endSingleTimeCommands(ctx.commandPool(), ctx.graphicsQueue(), cmd);
     }
+    // else: barriers already recorded into the main per-frame cmd → nothing to do
 }
 
 void VulkanRenderer::updateTonemapUniform(uint32_t frame) {

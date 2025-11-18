@@ -119,6 +119,7 @@ namespace Debug {
     constexpr bool     ENABLE_WIREFRAME            = false;
     constexpr bool     ENABLE_DEBUG_VISUALIZATION  = false;
     constexpr uint32_t DEBUG_VISUALIZATION_MODE    = 0;
+	constexpr bool     ENABLE_CELEBRATION_MODE     = true;   // PINK FLASH ON FRAME 5
 }
 
 // ── TONEMAPPING & COLOR GRADING ───────────────────────────────────────────────

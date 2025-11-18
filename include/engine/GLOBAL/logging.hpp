@@ -305,6 +305,7 @@ namespace Color {
     inline constexpr std::string_view LIME_YELLOW               = "\033[38;5;190m";
     inline constexpr std::string_view FUCHSIA_MAGENTA           = "\033[38;5;205m";
 	inline constexpr std::string_view INVIS_BLACK               = "\033[1;38;5;0m";
+	inline constexpr std::string_view BLOOD_RED                 = "\033[1;38;5;196m";
 }
 
 // ========================================================================

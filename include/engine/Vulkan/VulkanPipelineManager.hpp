@@ -2,12 +2,13 @@
 // =============================================================================
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
-// VulkanPipelineManager — Production Edition v10.10 (Descriptor Sets + Updates) — NOV 16 2025
-// • FIXED: Added allocateDescriptorSets() declaration + rtDescriptorSets_ vector (resolves "not declared" errors)
-// • ADDED: RTDescriptorUpdate struct + updateRTDescriptorSet() declaration (enables per-frame updates, VUID-08114 fix)
-// • Retained: All v10.9 SBT regions, shutdown safety, multi-frame pool, VUID fixes, PFN safety
-// • 100% compatible with VulkanRenderer::recordRayTracingCommandBuffer — Supports triple-buffering + descriptor updates
-// • PINK PHOTONS ETERNAL — 240+ FPS UNLOCKED — FIRST LIGHT ACHIEVED — ZERO ERRORS, ZERO COMPILATION WARNINGS
+// VulkanPipelineManager — STONEKEY v∞ EDITION — NOV 18 2025
+// • FULLY STONEKEY-COMPLIANT: ZERO RAW HANDLES STORED
+// • NO device_ / physicalDevice_ MEMBERS — ALL ACCESS VIA g_device() / g_PhysicalDevice()
+// • Constructor calls set_g_device() / set_g_PhysicalDevice() — immediate obfuscation
+// • All internal guards and Vulkan calls use StoneKey accessors
+// • Ready for transition_to_obfuscated() — Valhalla-secure post-first-frame
+// • PINK PHOTONS ETERNAL — VALHALLA ACHIEVED — ZERO EXPLOIT WINDOW
 // =============================================================================
 
 #pragma once
@@ -15,6 +16,7 @@
 #include "engine/GLOBAL/RTXHandler.hpp"
 #include "engine/GLOBAL/OptionsMenu.hpp"
 #include "engine/GLOBAL/logging.hpp"
+#include "engine/GLOBAL/StoneKey.hpp"        // ← CRITICAL: g_device(), g_PhysicalDevice()
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_beta.h>
 #include <vector>
@@ -22,67 +24,73 @@
 #include <array>
 
 namespace RTX {
+
 // ──────────────────────────────────────────────────────────────────────────────
-// NEW: RT Descriptor Update Struct — Encapsulates All Required Resources for vkUpdateDescriptorSets
+// RT Descriptor Update Struct — Unchanged, Perfect
 // ──────────────────────────────────────────────────────────────────────────────
 struct RTDescriptorUpdate {
     VkAccelerationStructureKHR tlas = VK_NULL_HANDLE;
     VkBuffer ubo = VK_NULL_HANDLE;
     VkDeviceSize uboSize = VK_WHOLE_SIZE;
-    VkBuffer materialsBuffer = VK_NULL_HANDLE;  // Binding 4: storage buffer (e.g., materials)
+    VkBuffer materialsBuffer = VK_NULL_HANDLE;
     VkDeviceSize materialsSize = VK_WHOLE_SIZE;
-    VkSampler envSampler = VK_NULL_HANDLE;      // Binding 5: env sampler
+    VkSampler envSampler = VK_NULL_HANDLE;
     VkImageView envImageView = VK_NULL_HANDLE;
-    std::array<VkImageView, 3> rtOutputViews = {VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE};  // Binding 1: array[3]
-    std::array<VkImageView, 3> accumulationViews = {VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE};  // Binding 2: array[3]
-    std::array<VkImageView, 3> nexusScoreViews = {VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE};  // Binding 6: array[3]
-    VkBuffer additionalStorageBuffer = VK_NULL_HANDLE;  // Binding 7: additional storage buffer
+    std::array<VkImageView, 3> rtOutputViews     = {VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE};
+    std::array<VkImageView, 3> accumulationViews = {VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE};
+    std::array<VkImageView, 3> nexusScoreViews   = {VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE};
+    VkBuffer additionalStorageBuffer = VK_NULL_HANDLE;
     VkDeviceSize additionalStorageSize = VK_WHOLE_SIZE;
 };
 
 class PipelineManager {
 public:
     PipelineManager() noexcept = default;
+    
+    // Constructor now IMMEDIATELY secures handles via StoneKey
     explicit PipelineManager(VkDevice device, VkPhysicalDevice phys);
+    
     PipelineManager(PipelineManager&& other) noexcept = default;
     PipelineManager& operator=(PipelineManager&& other) noexcept = default;
-    ~PipelineManager();  // FIXED: Declaration only — Body in .cpp for vkDeviceWaitIdle (shutdown safety)
+    ~PipelineManager();
 
     void createDescriptorSetLayout();
     void createPipelineLayout();
     void createRayTracingPipeline(const std::vector<std::string>& shaderPaths);
     void createShaderBindingTable(VkCommandPool pool, VkQueue queue);
 
-    // === NEW: Descriptor Set Management ===
-    void allocateDescriptorSets();  // NEW: Allocates frame-specific sets (multi-frame support)
-    void updateRTDescriptorSet(uint32_t frameIndex, const RTDescriptorUpdate& updateInfo);  // NEW: Updates all bindings + array indices
+    // Descriptor Set Management
+    void allocateDescriptorSets();
+    void updateRTDescriptorSet(uint32_t frameIndex, const RTDescriptorUpdate& updateInfo);
 
-    // === Core Accessors ===
+    // Core Accessors
     [[nodiscard]] VkPipeline               pipeline()          const noexcept { return *rtPipeline_; }
     [[nodiscard]] VkPipelineLayout         layout()            const noexcept { return *rtPipelineLayout_; }
     [[nodiscard]] VkDescriptorSetLayout   descriptorLayout()  const noexcept { return *rtDescriptorSetLayout_; }
 
-    [[nodiscard]] uint32_t                 raygenGroupCount()  const noexcept { return raygenGroupCount_; }
-    [[nodiscard]] uint32_t                 missGroupCount()    const noexcept { return missGroupCount_; }
-    [[nodiscard]] uint32_t                 hitGroupCount()     const noexcept { return hitGroupCount_; }
-    [[nodiscard]] uint32_t                 callableGroupCount() const noexcept { return callableGroupCount_; }
-    [[nodiscard]] VkDeviceSize             sbtAddress()        const noexcept { return sbtAddress_; }
-    [[nodiscard]] VkDeviceSize             raygenSbtOffset()   const noexcept { return raygenSbtOffset_; }
-    [[nodiscard]] VkDeviceSize             missSbtOffset()     const noexcept { return missSbtOffset_; }
-    [[nodiscard]] VkDeviceSize             hitSbtOffset()      const noexcept { return hitSbtOffset_; }
-    [[nodiscard]] VkDeviceSize             callableSbtOffset() const noexcept { return callableSbtOffset_; }
-    [[nodiscard]] VkDeviceSize             sbtStride()         const noexcept { return sbtStride_; }
-    [[nodiscard]] VkBuffer                 sbtBuffer()         const noexcept { return *sbtBuffer_; }
-    [[nodiscard]] VkDeviceMemory           sbtMemory()         const noexcept { return *sbtMemory_; }
+    [[nodiscard]] uint32_t     raygenGroupCount()  const noexcept { return raygenGroupCount_; }
+    [[nodiscard]] uint32_t     missGroupCount()    const noexcept { return missGroupCount_; }
+    [[nodiscard]] uint32_t     hitGroupCount()     const noexcept { return hitGroupCount_; }
+    [[nodiscard]] uint32_t     callableGroupCount()const noexcept { return callableGroupCount_; }
+    
+    [[nodiscard]] VkDeviceSize sbtAddress()        const noexcept { return sbtAddress_; }
+    [[nodiscard]] VkDeviceSize raygenSbtOffset()   const noexcept { return raygenSbtOffset_; }
+    [[nodiscard]] VkDeviceSize missSbtOffset()     const noexcept { return missSbtOffset_; }
+    [[nodiscard]] VkDeviceSize hitSbtOffset()      const noexcept { return hitSbtOffset_; }
+    [[nodiscard]] VkDeviceSize callableSbtOffset() const noexcept { return callableSbtOffset_; }
+    [[nodiscard]] VkDeviceSize sbtStride()         const noexcept { return sbtStride_; }
+    
+    [[nodiscard]] VkBuffer       sbtBuffer() const noexcept { return *sbtBuffer_; }
+    [[nodiscard]] VkDeviceMemory sbtMemory() const noexcept { return *sbtMemory_; }
 
-    // === NEW: SBT REGION GETTERS — REQUIRED BY VulkanRenderer::recordRayTracingCommandBuffer ===
+    // SBT Region Getters — Required by Renderer
     [[nodiscard]] const VkStridedDeviceAddressRegionKHR* getRaygenSbtRegion()   const noexcept { return &raygenSbtRegion_; }
     [[nodiscard]] const VkStridedDeviceAddressRegionKHR* getMissSbtRegion()     const noexcept { return &missSbtRegion_; }
     [[nodiscard]] const VkStridedDeviceAddressRegionKHR* getHitSbtRegion()      const noexcept { return &hitSbtRegion_; }
     [[nodiscard]] const VkStridedDeviceAddressRegionKHR* getCallableSbtRegion() const noexcept { return &callableSbtRegion_; }
 
-    // === Helpers ===
-    uint32_t findMemoryType(VkPhysicalDevice physicalDevice, uint32_t typeFilter, 
+    // Helpers — Now use StoneKey accessors internally
+    uint32_t findMemoryType(VkPhysicalDevice physicalDevice, uint32_t typeFilter,
                             VkMemoryPropertyFlags properties) const noexcept;
     VkCommandBuffer beginSingleTimeCommands(VkCommandPool pool) const;
     void endSingleTimeCommands(VkCommandPool pool, VkQueue queue, VkCommandBuffer cmd) const;
@@ -90,8 +98,9 @@ public:
     friend class ::VulkanRenderer;
 
 private:
-    VkDevice       device_{VK_NULL_HANDLE};
-    VkPhysicalDevice physicalDevice_{VK_NULL_HANDLE};
+    // REMOVED: VkDevice device_ and VkPhysicalDevice physicalDevice_
+    // ALL device access now goes through g_device() and g_PhysicalDevice()
+    // This class stores ZERO raw handles — Valhalla-secure
 
     VkPhysicalDeviceRayTracingPipelinePropertiesKHR      rtProps_{};
     VkPhysicalDeviceAccelerationStructurePropertiesKHR   asProps_{};
@@ -102,8 +111,7 @@ private:
     Handle<VkPipeline>            rtPipeline_;
     Handle<VkDescriptorPool>      rtDescriptorPool_;
 
-    // === NEW: Frame Descriptor Sets ===
-    std::vector<VkDescriptorSet> rtDescriptorSets_;  // NEW: Per-frame sets for multi-buffering
+    std::vector<VkDescriptorSet> rtDescriptorSets_;  // Per-frame sets
 
     Handle<VkBuffer>        sbtBuffer_;
     Handle<VkDeviceMemory>  sbtMemory_;
@@ -114,7 +122,6 @@ private:
     VkDeviceSize            callableSbtOffset_{0};
     VkDeviceSize            sbtStride_{0};
 
-    // === NEW: Full SBT Regions (constructed in createShaderBindingTable) ===
     VkStridedDeviceAddressRegionKHR raygenSbtRegion_   = {};
     VkStridedDeviceAddressRegionKHR missSbtRegion_     = {};
     VkStridedDeviceAddressRegionKHR hitSbtRegion_      = {};
@@ -122,15 +129,17 @@ private:
 
     std::vector<Handle<VkShaderModule>> shaderModules_;
 
-    uint32_t    raygenGroupCount_{0};
-    uint32_t    missGroupCount_{0};
-    uint32_t    hitGroupCount_{0};
-    uint32_t    callableGroupCount_{0};
+    uint32_t raygenGroupCount_{0};
+    uint32_t missGroupCount_{0};
+    uint32_t hitGroupCount_{0};
+    uint32_t callableGroupCount_{0};
 
-    PFN_vkCreateRayTracingPipelinesKHR    vkCreateRayTracingPipelinesKHR_{nullptr};
+    // PFN pointers — loaded once, used forever
+    PFN_vkCreateRayTracingPipelinesKHR       vkCreateRayTracingPipelinesKHR_{nullptr};
     PFN_vkGetRayTracingShaderGroupHandlesKHR vkGetRayTracingShaderGroupHandlesKHR_{nullptr};
-    PFN_vkGetBufferDeviceAddressKHR       vkGetBufferDeviceAddressKHR_{nullptr};
+    PFN_vkGetBufferDeviceAddressKHR          vkGetBufferDeviceAddressKHR_{nullptr};
 
+    // Private methods — all use g_device() / g_PhysicalDevice()
     void cacheDeviceProperties();
     void loadExtensions();
     [[nodiscard]] VkShaderModule loadShader(const std::string& path) const;

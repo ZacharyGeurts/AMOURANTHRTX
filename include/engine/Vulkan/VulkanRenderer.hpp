@@ -142,6 +142,7 @@ public:
     void setApplication(Application* app) noexcept { app_ = app; }
 
 private:
+    bool stonekey_active_ = false;
     static inline ImFont* plasmaticaFont = nullptr;
     static inline ImFont* arialBoldFont  = nullptr;
     static inline ImFont* arialFont      = nullptr;

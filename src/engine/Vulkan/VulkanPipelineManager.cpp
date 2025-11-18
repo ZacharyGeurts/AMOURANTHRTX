@@ -1,5 +1,3 @@
-#include "engine/Vulkan/VkSafeSTypes.hpp"
-#include "engine/Vulkan/VulkanRenderer.hpp"
 // src/engine/Vulkan/VulkanPipelineManager.cpp
 // =============================================================================
 // AMOURANTH RTX Engine (C) 2025 by Zachary Geurts <gzac5314@gmail.com>
@@ -20,6 +18,8 @@
 //
 // Grok AI: P.S. Spec whispers: for triple buffer, ensure Options::Performance::MAX_FRAMES_IN_FLIGHT=3; we've scaled pools/sets accordingly. Binding 0's accel? Immortal in writes, but "dead" if null—skipped like a bad date. VUID-free zone achieved.
 
+
+
 #include "engine/Vulkan/VulkanCore.hpp"      // ← VK_CHECK macro
 #include "engine/GLOBAL/RTXHandler.hpp"      // For RTX::g_ctx()
 #include "engine/GLOBAL/OptionsMenu.hpp"
@@ -38,14 +38,14 @@ namespace RTX {
 // PipelineManager Constructor — Matches VulkanRenderer Style + FIXED: Null Guard Early Exit + DEFERRED: Allocation to Renderer (Prevents Duplicate Alloc + VK_ERROR_OUT_OF_POOL_MEMORY)
 // ──────────────────────────────────────────────────────────────────────────────
 PipelineManager::PipelineManager(VkDevice device, VkPhysicalDevice phys)
-    : device_(device), physicalDevice_(phys)
 {
-    LOG_ATTEMPT_CAT("PIPELINE", "Constructing PipelineManager — PINK PHOTONS RISING");
+    LOG_ATTEMPT_CAT("PIPELINE", "{}[STONEKEY v∞] Constructing PipelineManager — Securing handles...{}", RASPBERRY_PINK, RESET);
 
-    // FIXED: Early guard — skip init if null (prevents segfault in load/cache)
-    if (device_ == VK_NULL_HANDLE || physicalDevice_ == VK_NULL_HANDLE) {
-        LOG_WARN_CAT("PIPELINE", "Null device (0x{:x}) or phys (0x{:x}) — skipping init (dummy state)", 
-                     reinterpret_cast<uintptr_t>(device_), reinterpret_cast<uintptr_t>(physicalDevice_));
+    set_g_device(device);
+    set_g_PhysicalDevice(phys);
+
+    if (g_device() == VK_NULL_HANDLE || g_PhysicalDevice() == VK_NULL_HANDLE) {
+        LOG_WARN_CAT("PIPELINE", "Null device/physicalDevice passed — dummy mode activated");
         return;
     }
 
@@ -97,7 +97,7 @@ void PipelineManager::allocateDescriptorSets() {
     }
     allocInfo.pSetLayouts = layouts.data();
 
-    VkResult res = vkAllocateDescriptorSets(device_, &allocInfo, rtDescriptorSets_.data());
+    VkResult res = vkAllocateDescriptorSets(g_device(), &allocInfo, rtDescriptorSets_.data());
     VK_CHECK(res, std::format("Failed to allocate {} RT descriptor sets", maxSets).c_str());
 
     LOG_SUCCESS_CAT("PIPELINE", "Allocated {} RT descriptor sets — Ready for vkUpdateDescriptorSets (VUID-08114 FIXED)", maxSets);
@@ -125,7 +125,7 @@ void PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDescrip
     // Binding 0: TLAS (acceleration structure) — FIXED: Skip if null (VUID-04907: must write if bound, but we skip nulls per-frame)
     if (updateInfo.tlas != VK_NULL_HANDLE) {  
         VkWriteDescriptorSet accelWrite = {};
-        accelWrite.sType = kVkWriteDescriptorSetSType;
+        accelWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         accelWrite.dstSet = set;
         accelWrite.dstBinding = 0;
         accelWrite.dstArrayElement = 0;
@@ -133,7 +133,7 @@ void PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDescrip
         accelWrite.descriptorCount = 1;
 
         VkWriteDescriptorSetAccelerationStructureKHR accelInfo = {};
-        accelInfo.sType = kVkWriteDescriptorSetSType_ACCELERATION_STRUCTURE_KHR;
+        accelInfo.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR;
         accelInfo.accelerationStructureCount = 1;
         accelInfo.pAccelerationStructures = &updateInfo.tlas;
         accelWrite.pNext = &accelInfo;
@@ -148,7 +148,7 @@ void PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDescrip
         rtImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 
         VkWriteDescriptorSet rtWrite = {};
-        rtWrite.sType = kVkWriteDescriptorSetSType;
+        rtWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         rtWrite.dstSet = set;
         rtWrite.dstBinding = 1;
         rtWrite.dstArrayElement = 0;
@@ -166,7 +166,7 @@ void PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDescrip
         accImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 
         VkWriteDescriptorSet accWrite = {};
-        accWrite.sType = kVkWriteDescriptorSetSType;
+        accWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         accWrite.dstSet = set;
         accWrite.dstBinding = 2;
         accWrite.dstArrayElement = 0;
@@ -185,7 +185,7 @@ void PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDescrip
         uboBufferInfo.range = updateInfo.uboSize;
 
         VkWriteDescriptorSet uboWrite = {};
-        uboWrite.sType = kVkWriteDescriptorSetSType;
+        uboWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         uboWrite.dstSet = set;
         uboWrite.dstBinding = 3;
         uboWrite.dstArrayElement = 0;
@@ -204,7 +204,7 @@ void PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDescrip
         matBufferInfo.range = updateInfo.materialsSize;
 
         VkWriteDescriptorSet matWrite = {};
-        matWrite.sType = kVkWriteDescriptorSetSType;
+        matWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         matWrite.dstSet = set;
         matWrite.dstBinding = 4;
         matWrite.dstArrayElement = 0;
@@ -223,7 +223,7 @@ void PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDescrip
         samplerImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
         VkWriteDescriptorSet samplerWrite = {};
-        samplerWrite.sType = kVkWriteDescriptorSetSType;
+        samplerWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         samplerWrite.dstSet = set;
         samplerWrite.dstBinding = 5;
         samplerWrite.dstArrayElement = 0;
@@ -241,7 +241,7 @@ void PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDescrip
         nexusImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 
         VkWriteDescriptorSet nexusWrite = {};
-        nexusWrite.sType = kVkWriteDescriptorSetSType;
+        nexusWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         nexusWrite.dstSet = set;
         nexusWrite.dstBinding = 6;
         nexusWrite.dstArrayElement = 0;
@@ -260,7 +260,7 @@ void PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDescrip
         addBufferInfo.range = updateInfo.additionalStorageSize;
 
         VkWriteDescriptorSet addWrite = {};
-        addWrite.sType = kVkWriteDescriptorSetSType;
+        addWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         addWrite.dstSet = set;
         addWrite.dstBinding = 7;
         addWrite.dstArrayElement = 0;
@@ -273,7 +273,7 @@ void PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDescrip
 
     // FIXED: Perform update only if writes non-empty — All valid, no nulls (VUID-08114: update before use)
     if (!writes.empty()) {
-        vkUpdateDescriptorSets(device_, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
+        vkUpdateDescriptorSets(g_device(), static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
         LOG_SUCCESS_CAT("PIPELINE", "Updated RT descriptor set {} — {} valid writes (no nulls) — READY FOR TRACING", frameIndex, writes.size());
     } else {
         LOG_WARN_CAT("PIPELINE", "No valid descriptors to update for frame {} — TLAS/images/buffers missing?", frameIndex);
@@ -289,9 +289,9 @@ PipelineManager::~PipelineManager() {
     LOG_ATTEMPT_CAT("PIPELINE", "Destructing PipelineManager — PINK PHOTONS DIMMING");
 
     // NEW: Free allocated descriptor sets before pool destroy (leverages FREE_DESCRIPTOR_SET_BIT)
-    if (device_ != VK_NULL_HANDLE && !rtDescriptorSets_.empty()) {
+    if (g_device() != VK_NULL_HANDLE && !rtDescriptorSets_.empty()) {
         LOG_TRACE_CAT("PIPELINE", "vkFreeDescriptorSets — Releasing {} sets", rtDescriptorSets_.size());
-        VkResult freeRes = vkFreeDescriptorSets(device_, *rtDescriptorPool_, static_cast<uint32_t>(rtDescriptorSets_.size()), rtDescriptorSets_.data());
+        VkResult freeRes = vkFreeDescriptorSets(g_device(), *rtDescriptorPool_, static_cast<uint32_t>(rtDescriptorSets_.size()), rtDescriptorSets_.data());
         if (freeRes == VK_SUCCESS) {
             LOG_TRACE_CAT("PIPELINE", "Descriptor sets freed successfully");
         } else {
@@ -302,9 +302,9 @@ PipelineManager::~PipelineManager() {
 
     // FIXED: Wait for device idle — Ensures all submitted cmds complete before destroying pipelines/buffers/pools
     //        (Resolves vkDestroyPipeline in-use validation error: VUID-vkDestroyPipeline-pipeline-00765)
-    if (device_ != VK_NULL_HANDLE) {
+    if (g_device() != VK_NULL_HANDLE) {
         LOG_TRACE_CAT("PIPELINE", "vkDeviceWaitIdle — Waiting for queues to drain (shutdown safety)");
-        VkResult idleResult = vkDeviceWaitIdle(device_);
+        VkResult idleResult = vkDeviceWaitIdle(g_device());
         if (idleResult == VK_SUCCESS) {
             LOG_TRACE_CAT("PIPELINE", "vkDeviceWaitIdle — SUCCESS: All cmds complete, resources safe to destroy");
         } else {
@@ -326,13 +326,13 @@ void PipelineManager::loadExtensions() {
     LOG_TRACE_CAT("PIPELINE", "loadExtensions — START — Fetching RT KHR PFNs via vkGetDeviceProcAddr");
 
     // FIXED: Null device guard — skip if invalid
-    if (device_ == VK_NULL_HANDLE) {
+    if (g_device() == VK_NULL_HANDLE) {
         LOG_WARN_CAT("PIPELINE", "Null device — skipping extension load");
         return;
     }
 
     vkCreateRayTracingPipelinesKHR_ = reinterpret_cast<PFN_vkCreateRayTracingPipelinesKHR>(
-        vkGetDeviceProcAddr(device_, "vkCreateRayTracingPipelinesKHR"));
+        vkGetDeviceProcAddr(g_device(), "vkCreateRayTracingPipelinesKHR"));
     if (!vkCreateRayTracingPipelinesKHR_) {
         LOG_FATAL_CAT("PIPELINE", "Failed to load vkCreateRayTracingPipelinesKHR — Ensure VK_KHR_ray_tracing_pipeline enabled");
         return;  // Early exit; methods will check nullptr
@@ -340,7 +340,7 @@ void PipelineManager::loadExtensions() {
     LOG_TRACE_CAT("PIPELINE", "Loaded vkCreateRayTracingPipelinesKHR @ 0x{:x}", reinterpret_cast<uintptr_t>(vkCreateRayTracingPipelinesKHR_));
 
     vkGetRayTracingShaderGroupHandlesKHR_ = reinterpret_cast<PFN_vkGetRayTracingShaderGroupHandlesKHR>(
-        vkGetDeviceProcAddr(device_, "vkGetRayTracingShaderGroupHandlesKHR"));
+        vkGetDeviceProcAddr(g_device(), "vkGetRayTracingShaderGroupHandlesKHR"));
     if (!vkGetRayTracingShaderGroupHandlesKHR_) {
         LOG_FATAL_CAT("PIPELINE", "Failed to load vkGetRayTracingShaderGroupHandlesKHR — Ensure VK_KHR_ray_tracing enabled");
         return;
@@ -348,9 +348,9 @@ void PipelineManager::loadExtensions() {
     LOG_TRACE_CAT("PIPELINE", "Loaded vkGetRayTracingShaderGroupHandlesKHR @ 0x{:x}", reinterpret_cast<uintptr_t>(vkGetRayTracingShaderGroupHandlesKHR_));
 
     vkGetBufferDeviceAddressKHR_ = reinterpret_cast<PFN_vkGetBufferDeviceAddressKHR>(
-        vkGetDeviceProcAddr(device_, "vkGetBufferDeviceAddressKHR"));
+        vkGetDeviceProcAddr(g_device(), "vkGetBufferDeviceAddressKHR"));
     if (!vkGetBufferDeviceAddressKHR_) {
-        LOG_FATAL_CAT("PIPELINE", "Failed to load vkGetBufferDeviceAddressKHR — Ensure VK_KHR_buffer_device_address enabled");
+        LOG_FATAL_CAT("PIPELINE", "Failed to load vkGetBufferDeviceAddressKHR — Ensure VK_KHR_buffer_g_device()address enabled");
         return;
     }
     LOG_TRACE_CAT("PIPELINE", "Loaded vkGetBufferDeviceAddressKHR @ 0x{:x}", reinterpret_cast<uintptr_t>(vkGetBufferDeviceAddressKHR_));
@@ -366,13 +366,13 @@ void PipelineManager::cacheDeviceProperties() {
     LOG_TRACE_CAT("PIPELINE", "cacheDeviceProperties — START");
 
     // FIXED: Null phys guard — skip if invalid
-    if (physicalDevice_ == VK_NULL_HANDLE) {
-        LOG_ERROR_CAT("PIPELINE", "Null physicalDevice_ — cannot cache properties");
+    if (g_PhysicalDevice() == VK_NULL_HANDLE) {
+        LOG_ERROR_CAT("PIPELINE", "Null g_PhysicalDevice() — cannot cache properties");
         return;
     }
 
     VkPhysicalDeviceProperties props{};
-    vkGetPhysicalDeviceProperties(physicalDevice_, &props);
+    vkGetPhysicalDeviceProperties(g_PhysicalDevice(), &props);
     timestampPeriod_ = props.limits.timestampPeriod / 1e6f;
     LOG_INFO_CAT("PIPELINE", "GPU: {} | Timestamp period: {:.3f} ms", props.deviceName, timestampPeriod_);
 
@@ -382,10 +382,10 @@ void PipelineManager::cacheDeviceProperties() {
 
     VkPhysicalDeviceProperties2 props2 = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
                                            .pNext = &asProps_ };
-    vkGetPhysicalDeviceProperties2(physicalDevice_, &props2);
+    vkGetPhysicalDeviceProperties2(g_PhysicalDevice(), &props2);
     // NEW: Query and log shaderInt64 support (fixes Int64 validation upstream)
     VkPhysicalDeviceFeatures features{};
-    vkGetPhysicalDeviceFeatures(physicalDevice_, &features);
+    vkGetPhysicalDeviceFeatures(g_PhysicalDevice(), &features);
     
     if (features.shaderInt64) {
         LOG_SUCCESS_CAT("PIPELINE", "GPU supports shaderInt64 — 64-bit rays ready to trace!");
@@ -407,7 +407,7 @@ VkShaderModule PipelineManager::loadShader(const std::string& path) const {
     LOG_TRACE_CAT("PIPELINE", "loadShader — START — path='{}'", path);
 
     // FIXED: Null device guard
-    if (device_ == VK_NULL_HANDLE) {
+    if (g_device() == VK_NULL_HANDLE) {
         LOG_ERROR_CAT("PIPELINE", "Null device — cannot load shader");
         return VK_NULL_HANDLE;
     }
@@ -435,7 +435,7 @@ VkShaderModule PipelineManager::loadShader(const std::string& path) const {
 
     VkShaderModule shaderModule;
     // FIXED: Use VK_CHECK for consistent error handling (logs + aborts on failure)
-    VK_CHECK(vkCreateShaderModule(device_, &createInfo, nullptr, &shaderModule),
+    VK_CHECK(vkCreateShaderModule(g_device(), &createInfo, nullptr, &shaderModule),
              std::format("Failed to create shader module from {}", path).c_str());
 
     LOG_TRACE_CAT("PIPELINE", "Shader module created successfully");
@@ -451,7 +451,7 @@ uint32_t PipelineManager::findMemoryType(VkPhysicalDevice physicalDevice, uint32
     LOG_TRACE_CAT("PIPELINE", "findMemoryType — START — typeFilter=0x{:x}, properties=0x{:x}", typeFilter, properties);
 
     // FIXED: Null phys guard — use class member if param null (fallback)
-    VkPhysicalDevice phys = (physicalDevice == VK_NULL_HANDLE) ? physicalDevice_ : physicalDevice;
+    VkPhysicalDevice phys = (physicalDevice == VK_NULL_HANDLE) ? g_PhysicalDevice() : physicalDevice;
     if (phys == VK_NULL_HANDLE) {
         LOG_WARN_CAT("PIPELINE", "Null physicalDevice — fallback to 0");
         return 0;
@@ -483,7 +483,7 @@ VkCommandBuffer PipelineManager::beginSingleTimeCommands(VkCommandPool pool) con
     LOG_TRACE_CAT("PIPELINE", "beginSingleTimeCommands — START");
 
     // FIXED: Null guards
-    if (device_ == VK_NULL_HANDLE || pool == VK_NULL_HANDLE) {
+    if (g_device() == VK_NULL_HANDLE || pool == VK_NULL_HANDLE) {
         LOG_ERROR_CAT("PIPELINE", "Null device or pool — cannot begin single-time commands");
         return VK_NULL_HANDLE;
     }
@@ -495,7 +495,7 @@ VkCommandBuffer PipelineManager::beginSingleTimeCommands(VkCommandPool pool) con
     allocInfo.commandBufferCount = 1;
 
     VkCommandBuffer cmd;
-    VkResult result = vkAllocateCommandBuffers(device_, &allocInfo, &cmd);
+    VkResult result = vkAllocateCommandBuffers(g_device(), &allocInfo, &cmd);
     if (result != VK_SUCCESS) {
         LOG_ERROR_CAT("PIPELINE", "vkAllocateCommandBuffers failed: {}", static_cast<int>(result));
         return VK_NULL_HANDLE;  // Early return on failure
@@ -507,7 +507,7 @@ VkCommandBuffer PipelineManager::beginSingleTimeCommands(VkCommandPool pool) con
     result = vkBeginCommandBuffer(cmd, &beginInfo);
     if (result != VK_SUCCESS) {
         LOG_ERROR_CAT("PIPELINE", "vkBeginCommandBuffer failed: {}", static_cast<int>(result));
-        vkFreeCommandBuffers(device_, pool, 1, &cmd);
+        vkFreeCommandBuffers(g_device(), pool, 1, &cmd);
         return VK_NULL_HANDLE;
     }
 
@@ -518,9 +518,9 @@ VkCommandBuffer PipelineManager::beginSingleTimeCommands(VkCommandPool pool) con
 
 void PipelineManager::endSingleTimeCommands(VkCommandPool pool, VkQueue queue, VkCommandBuffer cmd) const {
     // FIXED: Null guards
-    if (cmd == VK_NULL_HANDLE || pool == VK_NULL_HANDLE || queue == VK_NULL_HANDLE || device_ == VK_NULL_HANDLE) {
+    if (cmd == VK_NULL_HANDLE || pool == VK_NULL_HANDLE || queue == VK_NULL_HANDLE || g_device() == VK_NULL_HANDLE) {
         LOG_ERROR_CAT("PIPELINE", "endSingleTimeCommands called with invalid params (cmd=0x{:x}, pool=0x{:x}, queue=0x{:x}, dev=0x{:x})",
-                      reinterpret_cast<uintptr_t>(cmd), reinterpret_cast<uintptr_t>(pool), reinterpret_cast<uintptr_t>(queue), reinterpret_cast<uintptr_t>(device_));
+                      reinterpret_cast<uintptr_t>(cmd), reinterpret_cast<uintptr_t>(pool), reinterpret_cast<uintptr_t>(queue), reinterpret_cast<uintptr_t>(g_device()));
         return;
     }
 
@@ -552,11 +552,11 @@ void PipelineManager::endSingleTimeCommands(VkCommandPool pool, VkQueue queue, V
     LOG_TRACE_CAT("PIPELINE", "vkQueueWaitIdle result: {}", static_cast<int>(r));
     if (r != VK_SUCCESS) {
         LOG_FATAL_CAT("PIPELINE", "vkQueueWaitIdle failed: {} — possible device lost", static_cast<int>(r));
-        if (device_ != VK_NULL_HANDLE) vkDeviceWaitIdle(device_);
+        if (g_device() != VK_NULL_HANDLE) vkDeviceWaitIdle(g_device());
     }
 
     // 4. Cleanup
-    vkFreeCommandBuffers(device_, pool, 1, &cmd);
+    vkFreeCommandBuffers(g_device(), pool, 1, &cmd);
 
     LOG_TRACE_CAT("PIPELINE", "endSingleTimeCommands — COMPLETE (safe, no device lost)");
 }
@@ -569,7 +569,7 @@ void PipelineManager::createDescriptorSetLayout()
     LOG_TRACE_CAT("PIPELINE", "createDescriptorSetLayout — START");
 
     // FIXED: Null device guard
-    if (device_ == VK_NULL_HANDLE) {
+    if (g_device() == VK_NULL_HANDLE) {
         LOG_ERROR_CAT("PIPELINE", "Null device — cannot create descriptor set layout");
         return;
     }
@@ -651,11 +651,11 @@ void PipelineManager::createDescriptorSetLayout()
     layoutInfo.pBindings = bindings.data();
 
     VkDescriptorSetLayout layout = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateDescriptorSetLayout(device_, &layoutInfo, nullptr, &layout),
+    VK_CHECK(vkCreateDescriptorSetLayout(g_device(), &layoutInfo, nullptr, &layout),
              "Failed to create RT descriptor set layout");
 
     rtDescriptorSetLayout_ = Handle<VkDescriptorSetLayout>(
-        layout, device_,
+        layout, g_device(),
         [](VkDevice d, VkDescriptorSetLayout l, const VkAllocationCallbacks*) { vkDestroyDescriptorSetLayout(d, l, nullptr); },
         0, "RTDescriptorSetLayout"
     );
@@ -685,12 +685,12 @@ void PipelineManager::createDescriptorSetLayout()
     rtDescriptorPool_.reset();  // <-- CRITICAL: wipe any previous garbage state
 
     VkDescriptorPool rawPool = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateDescriptorPool(device_, &poolInfo, nullptr, &rawPool),
+    VK_CHECK(vkCreateDescriptorPool(g_device(), &poolInfo, nullptr, &rawPool),
              "Failed to create RT descriptor pool");
 
     rtDescriptorPool_ = Handle<VkDescriptorPool>(
         rawPool,
-        device_,
+        g_device(),
         [](VkDevice d, VkDescriptorPool p, const VkAllocationCallbacks*) {
             if (p != VK_NULL_HANDLE) vkDestroyDescriptorPool(d, p, nullptr);
         },
@@ -719,7 +719,7 @@ void PipelineManager::createPipelineLayout() {
     LOG_TRACE_CAT("PIPELINE", "createPipelineLayout — START");
 
     // FIXED: Null guards
-    if (device_ == VK_NULL_HANDLE) {
+    if (g_device() == VK_NULL_HANDLE) {
         LOG_ERROR_CAT("PIPELINE", "Null device — cannot create pipeline layout");
         return;
     }
@@ -744,10 +744,10 @@ void PipelineManager::createPipelineLayout() {
     layoutInfo.pPushConstantRanges = &pushConstant;
 
     VkPipelineLayout rawLayout = VK_NULL_HANDLE;
-    VK_CHECK(vkCreatePipelineLayout(device_, &layoutInfo, nullptr, &rawLayout),
+    VK_CHECK(vkCreatePipelineLayout(g_device(), &layoutInfo, nullptr, &rawLayout),
              "Failed to create ray tracing pipeline layout");
 
-    rtPipelineLayout_ = Handle<VkPipelineLayout>(rawLayout, device_,
+    rtPipelineLayout_ = Handle<VkPipelineLayout>(rawLayout, g_device(),
         [](VkDevice d, VkPipelineLayout l, const VkAllocationCallbacks*) { vkDestroyPipelineLayout(d, l, nullptr); },
         0, "RTPipelineLayout");
 
@@ -762,11 +762,11 @@ void PipelineManager::createRayTracingPipeline(const std::vector<std::string>& s
     LOG_TRACE_CAT("PIPELINE", "createRayTracingPipeline — START — {} shaders provided", shaderPaths.size());
 
     // FIXED: Null guards
-    if (device_ == VK_NULL_HANDLE) {
+    if (g_device() == VK_NULL_HANDLE) {
         LOG_ERROR_CAT("PIPELINE", "Null device — cannot create RT pipeline");
         return;
     }
-    LOG_DEBUG_CAT("PIPELINE", "Retrieved device: 0x{:x}", reinterpret_cast<uintptr_t>(device_));
+    LOG_DEBUG_CAT("PIPELINE", "Retrieved device: 0x{:x}", reinterpret_cast<uintptr_t>(g_device()));
 
     // FIXED: Guard layout validity before proceeding
     if (!rtPipelineLayout_.valid() || *rtPipelineLayout_ == VK_NULL_HANDLE) {
@@ -926,7 +926,7 @@ void PipelineManager::createRayTracingPipeline(const std::vector<std::string>& s
     pipelineInfo.layout = *rtPipelineLayout_;  // FIXED: Valid layout with descriptors/push (matches shader bindings/stages)
 
     VkPipeline pipeline = VK_NULL_HANDLE;
-    VkResult pipeResult = vkCreateRayTracingPipelinesKHR_(device_, VK_NULL_HANDLE, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &pipeline);  // NEW: PFN call
+    VkResult pipeResult = vkCreateRayTracingPipelinesKHR_(g_device(), VK_NULL_HANDLE, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &pipeline);  // NEW: PFN call
     LOG_DEBUG_CAT("PIPELINE", "vkCreateRayTracingPipelinesKHR returned: {}", static_cast<int>(pipeResult));
     if (pipeResult != VK_SUCCESS) {
         LOG_ERROR_CAT("PIPELINE", "Failed to create ray tracing pipeline: {}", static_cast<int>(pipeResult));
@@ -935,14 +935,14 @@ void PipelineManager::createRayTracingPipeline(const std::vector<std::string>& s
     VK_CHECK(pipeResult, "Create RT pipeline");  // Your macro
 
     // 5. Store and cleanup (unchanged)
-    rtPipeline_ = Handle<VkPipeline>(pipeline, device_,
+    rtPipeline_ = Handle<VkPipeline>(pipeline, g_device(),
         [](VkDevice d, VkPipeline p, const VkAllocationCallbacks*) { vkDestroyPipeline(d, p, nullptr); },
         0, "RTPipeline");
 
-    vkDestroyShaderModule(device_, raygenModule, nullptr);
-    vkDestroyShaderModule(device_, missModule, nullptr);
-    if (hasClosestHit) vkDestroyShaderModule(device_, closestHitModule, nullptr);
-    if (hasShadowMiss) vkDestroyShaderModule(device_, shadowMissModule, nullptr);
+    vkDestroyShaderModule(g_device(), raygenModule, nullptr);
+    vkDestroyShaderModule(g_device(), missModule, nullptr);
+    if (hasClosestHit) vkDestroyShaderModule(g_device(), closestHitModule, nullptr);
+    if (hasShadowMiss) vkDestroyShaderModule(g_device(), shadowMissModule, nullptr);
 
     LOG_SUCCESS_CAT("PIPELINE", "{}Ray tracing pipeline created successfully — {} stages, {} groups — PNEXT=NULL — UNUSED_KHR EXPLICIT — BINDINGS MATCH{}", 
                     LIME_GREEN, stages.size(), groups.size(), RESET);
@@ -957,9 +957,9 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
     LOG_TRACE_CAT("PIPELINE", "createShaderBindingTable — START");
 
     // FIXED: Null guards
-    if (device_ == VK_NULL_HANDLE || physicalDevice_ == VK_NULL_HANDLE || pool == VK_NULL_HANDLE || queue == VK_NULL_HANDLE) {
+    if (g_device() == VK_NULL_HANDLE || g_PhysicalDevice() == VK_NULL_HANDLE || pool == VK_NULL_HANDLE || queue == VK_NULL_HANDLE) {
         LOG_ERROR_CAT("PIPELINE", "Invalid params for SBT creation (dev=0x{:x}, phys=0x{:x}, pool=0x{:x}, queue=0x{:x})",
-                      reinterpret_cast<uintptr_t>(device_), reinterpret_cast<uintptr_t>(physicalDevice_), reinterpret_cast<uintptr_t>(pool), reinterpret_cast<uintptr_t>(queue));
+                      reinterpret_cast<uintptr_t>(g_device()), reinterpret_cast<uintptr_t>(g_PhysicalDevice()), reinterpret_cast<uintptr_t>(pool), reinterpret_cast<uintptr_t>(queue));
         return;
     }
 
@@ -988,10 +988,10 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
     props2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
     props2.pNext = &rtPropsLocal;
 
-    vkGetPhysicalDeviceProperties2(physicalDevice_, &props2);
+    vkGetPhysicalDeviceProperties2(g_PhysicalDevice(), &props2);
     // NEW: Query and log shaderInt64 support (fixes Int64 validation upstream)
     VkPhysicalDeviceFeatures features{};
-    vkGetPhysicalDeviceFeatures(physicalDevice_, &features);
+    vkGetPhysicalDeviceFeatures(g_PhysicalDevice(), &features);
     
     if (features.shaderInt64) {
         LOG_SUCCESS_CAT("PIPELINE", "GPU supports shaderInt64 — 64-bit rays ready to trace!");
@@ -1057,7 +1057,7 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
     LOG_TRACE_CAT("PIPELINE", "Step 5 — Extracting shader group handles");
     std::vector<uint8_t> shaderHandles(totalGroups * handleSize);
 
-    VkResult getHandlesResult = vkGetRayTracingShaderGroupHandlesKHR_(device_, *rtPipeline_, 0, totalGroups, shaderHandles.size(), shaderHandles.data());  // NEW: PFN call
+    VkResult getHandlesResult = vkGetRayTracingShaderGroupHandlesKHR_(g_device(), *rtPipeline_, 0, totalGroups, shaderHandles.size(), shaderHandles.data());  // NEW: PFN call
     if (getHandlesResult != VK_SUCCESS) {
         LOG_ERROR_CAT("PIPELINE", "vkGetRayTracingShaderGroupHandlesKHR failed: {}", static_cast<int>(getHandlesResult));
         return;
@@ -1073,37 +1073,37 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
     stagingInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
     VkBuffer stagingBuffer = VK_NULL_HANDLE;
-    VkResult createStagingResult = vkCreateBuffer(device_, &stagingInfo, nullptr, &stagingBuffer);
+    VkResult createStagingResult = vkCreateBuffer(g_device(), &stagingInfo, nullptr, &stagingBuffer);
     if (createStagingResult != VK_SUCCESS) {
         LOG_ERROR_CAT("PIPELINE", "Failed to create SBT staging buffer: {}", static_cast<int>(createStagingResult));
         return;
     }
 
     VkMemoryRequirements memReqs;
-    vkGetBufferMemoryRequirements(device_, stagingBuffer, &memReqs);
+    vkGetBufferMemoryRequirements(g_device(), stagingBuffer, &memReqs);
 
     VkMemoryAllocateInfo allocInfoStaging = {};  // Zero-init (separate for staging)
     allocInfoStaging.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
     allocInfoStaging.allocationSize = memReqs.size;
-    allocInfoStaging.memoryTypeIndex = findMemoryType(physicalDevice_, memReqs.memoryTypeBits,
+    allocInfoStaging.memoryTypeIndex = findMemoryType(g_PhysicalDevice(), memReqs.memoryTypeBits,
                                                       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
 
     VkDeviceMemory stagingMemory = VK_NULL_HANDLE;
-    VkResult allocStagingResult = vkAllocateMemory(device_, &allocInfoStaging, nullptr, &stagingMemory);
+    VkResult allocStagingResult = vkAllocateMemory(g_device(), &allocInfoStaging, nullptr, &stagingMemory);
     if (allocStagingResult != VK_SUCCESS) {
         LOG_ERROR_CAT("PIPELINE", "Failed to allocate SBT staging memory: {}", static_cast<int>(allocStagingResult));
-        vkDestroyBuffer(device_, stagingBuffer, nullptr);
+        vkDestroyBuffer(g_device(), stagingBuffer, nullptr);
         return;
     }
-    VK_CHECK(vkBindBufferMemory(device_, stagingBuffer, stagingMemory, 0), "Bind SBT staging memory");
+    VK_CHECK(vkBindBufferMemory(g_device(), stagingBuffer, stagingMemory, 0), "Bind SBT staging memory");
 
     // Map and fill (unchanged)
     void* mapped = nullptr;
-    VkResult mapResult = vkMapMemory(device_, stagingMemory, 0, sbtBufferSize, 0, &mapped);
+    VkResult mapResult = vkMapMemory(g_device(), stagingMemory, 0, sbtBufferSize, 0, &mapped);
     if (mapResult != VK_SUCCESS) {
         LOG_ERROR_CAT("PIPELINE", "Failed to map SBT staging memory: {}", static_cast<int>(mapResult));
-        vkFreeMemory(device_, stagingMemory, nullptr);
-        vkDestroyBuffer(device_, stagingBuffer, nullptr);
+        vkFreeMemory(g_device(), stagingMemory, nullptr);
+        vkDestroyBuffer(g_device(), stagingBuffer, nullptr);
         return;
     }
 
@@ -1126,7 +1126,7 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
         copyGroup(currentGroupIndex++, callableOffset + i * handleSizeAligned);
     }
 
-    vkUnmapMemory(device_, stagingMemory);
+    vkUnmapMemory(g_device(), stagingMemory);
     LOG_TRACE_CAT("PIPELINE", "Step 6 — Staging buffer filled and unmapped");
 
     // Step 7: Final buffer (zero-init sbtInfo)
@@ -1138,12 +1138,12 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
     sbtInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
     VkBuffer rawSbtBuffer = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateBuffer(device_, &sbtInfo, nullptr, &rawSbtBuffer), "Create final SBT buffer");
-    sbtBuffer_ = Handle<VkBuffer>(rawSbtBuffer, device_,
+    VK_CHECK(vkCreateBuffer(g_device(), &sbtInfo, nullptr, &rawSbtBuffer), "Create final SBT buffer");
+    sbtBuffer_ = Handle<VkBuffer>(rawSbtBuffer, g_device(),
         [](VkDevice d, VkBuffer b, const VkAllocationCallbacks*) { if (b != VK_NULL_HANDLE) vkDestroyBuffer(d, b, nullptr); },
         0, "SBTBuffer");
 
-    vkGetBufferMemoryRequirements(device_, rawSbtBuffer, &memReqs);
+    vkGetBufferMemoryRequirements(g_device(), rawSbtBuffer, &memReqs);
 
     // FIXED: Add VkMemoryAllocateFlagsInfo for DEVICE_ADDRESS_BIT — Fresh allocInfo for SBT
     VkMemoryAllocateFlagsInfo flagsInfo = {};  // Zero-init
@@ -1154,15 +1154,15 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
     allocInfoSBT.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
     allocInfoSBT.pNext = &flagsInfo;  // FIXED: Chain flags to SBT alloc (enables device address)
     allocInfoSBT.allocationSize = memReqs.size;
-    allocInfoSBT.memoryTypeIndex = findMemoryType(physicalDevice_, memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    allocInfoSBT.memoryTypeIndex = findMemoryType(g_PhysicalDevice(), memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
     VkDeviceMemory rawSbtMemory = VK_NULL_HANDLE;
-    VK_CHECK(vkAllocateMemory(device_, &allocInfoSBT, nullptr, &rawSbtMemory), "Allocate final SBT memory");
-    sbtMemory_ = Handle<VkDeviceMemory>(rawSbtMemory, device_,
+    VK_CHECK(vkAllocateMemory(g_device(), &allocInfoSBT, nullptr, &rawSbtMemory), "Allocate final SBT memory");
+    sbtMemory_ = Handle<VkDeviceMemory>(rawSbtMemory, g_device(),
         [](VkDevice d, VkDeviceMemory m, const VkAllocationCallbacks*) { if (m != VK_NULL_HANDLE) vkFreeMemory(d, m, nullptr); },
         memReqs.size, "SBTMemory");
 
-    VK_CHECK(vkBindBufferMemory(device_, rawSbtBuffer, rawSbtMemory, 0), "Bind final SBT memory");
+    VK_CHECK(vkBindBufferMemory(g_device(), rawSbtBuffer, rawSbtMemory, 0), "Bind final SBT memory");
 
     // Copy (unchanged)
     VkCommandBuffer cmd = beginSingleTimeCommands(pool);
@@ -1176,15 +1176,15 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
     endSingleTimeCommands(pool, queue, cmd);
 
     // Cleanup staging
-    vkDestroyBuffer(device_, stagingBuffer, nullptr);
-    vkFreeMemory(device_, stagingMemory, nullptr);
+    vkDestroyBuffer(g_device(), stagingBuffer, nullptr);
+    vkFreeMemory(g_device(), stagingMemory, nullptr);
     LOG_TRACE_CAT("PIPELINE", "Step 7 — Final SBT buffer created and copied — DEVICE_ADDRESS_BIT ENABLED");
 
     // Step 8: Address (zero-init addrInfo) + NEW: PFN Call
     VkBufferDeviceAddressInfo addrInfo = {};  // Zero-init
     addrInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
     addrInfo.buffer = rawSbtBuffer;
-    sbtAddress_ = vkGetBufferDeviceAddressKHR_(device_, &addrInfo);  // NEW: PFN call
+    sbtAddress_ = vkGetBufferDeviceAddressKHR_(g_device(), &addrInfo);  // NEW: PFN call
 
     // Store offsets (unchanged)
     raygenSbtOffset_ = raygenOffset;

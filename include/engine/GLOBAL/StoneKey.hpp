@@ -111,7 +111,7 @@ inline uint64_t get_kHandleObfuscator() noexcept { static uint64_t key = get_kSt
 
 // -----------------------------------------------------------------------------
 // 5. OBFUSCATE / DEOBFUSCATE (unchanged)
- // -----------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 [[nodiscard]] inline uint64_t obfuscate(uint64_t h) noexcept {
     uint64_t mask = -static_cast<uint64_t>(!!get_kHandleObfuscator());
     uint64_t result = h ^ (get_kHandleObfuscator() & mask);
@@ -125,34 +125,38 @@ inline uint64_t get_kHandleObfuscator() noexcept { static uint64_t key = get_kSt
 }
 
 // =============================================================================
- // AAAA SAFETY LAYER — RAW CACHING (with timed transition)
- // =============================================================================
+// AAAA SAFETY LAYER — RAW CACHING (with MANUAL transition for production safety)
+// =============================================================================
 
-// Raw cache — NEVER obfuscated, used only during early init (0.3s window)
+// Raw cache — NEVER obfuscated, used only during early init (manual control)
 namespace StoneKey::Raw {
     inline std::atomic<VkInstance>       instance       {VK_NULL_HANDLE};
     inline std::atomic<VkDevice>         device         {VK_NULL_HANDLE};
     inline std::atomic<VkPhysicalDevice> physicalDevice {VK_NULL_HANDLE};
     inline std::atomic<VkSurfaceKHR>     surface        {VK_NULL_HANDLE};
 
-    // Startup timestamp — set once on first setter call
-    inline std::atomic<std::chrono::steady_clock::time_point> startup_time {
-        std::chrono::steady_clock::time_point::min()  // Unset initial value
-    };
+    // NEW: Manual control — no auto-timer in production
+    inline std::atomic<bool> obfuscated_mode{false};  // False = raw cache active
 
-    // Helper: Transition to obfuscated (call once, atomically)
-    inline void transition_if_ready() noexcept {
-        auto now = std::chrono::steady_clock::now();
-        auto start = startup_time.load(std::memory_order_acquire);
-        if (start != std::chrono::steady_clock::time_point::min() &&
-            (now - start) > std::chrono::duration<double>(0.3)) {
-            // One-time clear: Nul out raws to force obfuscated fallback
-            instance.store(VK_NULL_HANDLE, std::memory_order_release);
-            device.store(VK_NULL_HANDLE, std::memory_order_release);
-            physicalDevice.store(VK_NULL_HANDLE, std::memory_order_release);
-            surface.store(VK_NULL_HANDLE, std::memory_order_release);
-            LOG_DEBUG_CAT("StoneKey", "{}Raw cache transitioned to OBFUSCATED after 0.3s window{}", RASPBERRY_PINK, RESET);
+    // Helper: Transition to obfuscated (call MANUALLY when safe, e.g. after first render)
+    inline void transition_to_obfuscated() noexcept {
+        if (obfuscated_mode.exchange(true, std::memory_order_acq_rel)) {
+            return;  // Already done
         }
+
+        // Clear raw cache atomically
+        instance.store(VK_NULL_HANDLE, std::memory_order_release);
+        device.store(VK_NULL_HANDLE, std::memory_order_release);
+        physicalDevice.store(VK_NULL_HANDLE, std::memory_order_release);
+        surface.store(VK_NULL_HANDLE, std::memory_order_release);
+
+        LOG_SUCCESS_CAT("StoneKey", "{}RAW CACHE PURGED — FULL OBFUSCATION ACTIVE — VALHALLA SECURED{}", 
+                        RASPBERRY_PINK, RESET);
+    }
+
+    // REMOVE: Old timer-based transition (too aggressive for render)
+    inline void transition_if_ready() noexcept {
+        // NO-OP in production — call transition_to_obfuscated() manually
     }
 }
 
@@ -172,13 +176,6 @@ inline void set_g_device(VkDevice handle) noexcept {
     g_device_obf = reinterpret_cast<VkDevice>(obfuscate(raw));
     StoneKey::Raw::device.store(handle, std::memory_order_release);  // Atomic store
 
-    // Set startup time once (if not already)
-    if (StoneKey::Raw::startup_time.load(std::memory_order_acquire) == std::chrono::steady_clock::time_point::min()) {
-        StoneKey::Raw::startup_time.store(std::chrono::steady_clock::now(), std::memory_order_release);
-        LOG_DEBUG_CAT("StoneKey", "{}Raw cache armed — 0.3s startup window active{}", LILAC_LAVENDER, RESET);
-    }
-
-    StoneKey::Raw::transition_if_ready();  // Check immediately (harmless if too early)
     LOG_DEBUG_CAT("StoneKey", "{} g_device secured @ 0x{:x}", OCEAN_TEAL, reinterpret_cast<uintptr_t>(handle), RESET);
 }
 
@@ -187,13 +184,6 @@ inline void set_g_instance(VkInstance handle) noexcept {
     g_instance_obf = reinterpret_cast<VkInstance>(obfuscate(raw));
     StoneKey::Raw::instance.store(handle, std::memory_order_release);  // Atomic store
 
-    // Set startup time once (if not already)
-    if (StoneKey::Raw::startup_time.load(std::memory_order_acquire) == std::chrono::steady_clock::time_point::min()) {
-        StoneKey::Raw::startup_time.store(std::chrono::steady_clock::now(), std::memory_order_release);
-        LOG_DEBUG_CAT("StoneKey", "{}Raw cache armed — 0.3s startup window active{}", LILAC_LAVENDER, RESET);
-    }
-
-    StoneKey::Raw::transition_if_ready();  // Check immediately (harmless if too early)
     LOG_DEBUG_CAT("StoneKey", "{} g_instance secured @ 0x{:x}", OCEAN_TEAL, reinterpret_cast<uintptr_t>(handle), RESET);
 }
 
@@ -202,13 +192,6 @@ inline void set_g_PhysicalDevice(VkPhysicalDevice handle) noexcept {
     g_PhysicalDevice_obf = reinterpret_cast<VkPhysicalDevice>(obfuscate(raw));
     StoneKey::Raw::physicalDevice.store(handle, std::memory_order_release);  // Atomic store
 
-    // Set startup time once (if not already)
-    if (StoneKey::Raw::startup_time.load(std::memory_order_acquire) == std::chrono::steady_clock::time_point::min()) {
-        StoneKey::Raw::startup_time.store(std::chrono::steady_clock::now(), std::memory_order_release);
-        LOG_DEBUG_CAT("StoneKey", "{}Raw cache armed — 0.3s startup window active{}", LILAC_LAVENDER, RESET);
-    }
-
-    StoneKey::Raw::transition_if_ready();  // Check immediately (harmless if too early)
     LOG_DEBUG_CAT("StoneKey", "{} g_PhysicalDevice secured @ 0x{:x}", OCEAN_TEAL, reinterpret_cast<uintptr_t>(handle), RESET);
 }
 
@@ -217,39 +200,32 @@ inline void set_g_surface(VkSurfaceKHR handle) noexcept {
     g_surface_obf = reinterpret_cast<VkSurfaceKHR>(obfuscate(raw));
     StoneKey::Raw::surface.store(handle, std::memory_order_release);  // Atomic store
 
-    // Set startup time once (if not already)
-    if (StoneKey::Raw::startup_time.load(std::memory_order_acquire) == std::chrono::steady_clock::time_point::min()) {
-        StoneKey::Raw::startup_time.store(std::chrono::steady_clock::now(), std::memory_order_release);
-        LOG_DEBUG_CAT("StoneKey", "{}Raw cache armed — 0.3s startup window active{}", LILAC_LAVENDER, RESET);
-    }
-
-    StoneKey::Raw::transition_if_ready();  // Check immediately (harmless if too early)
     LOG_DEBUG_CAT("StoneKey", "{} g_surface secured @ 0x{:x}", OCEAN_TEAL, reinterpret_cast<uintptr_t>(handle), RESET);
 }
 
 // -----------------------------------------------------------------------------
-// PUBLIC ACCESSORS — DUAL PATH (early = raw, late = deobfuscated)
- // -----------------------------------------------------------------------------
+// PUBLIC ACCESSORS — DUAL PATH (raw if active, else deobfuscated)
+// -----------------------------------------------------------------------------
 [[nodiscard]] inline VkDevice g_device() noexcept {
-    StoneKey::Raw::transition_if_ready();  // Quick elapsed check + possible one-time clear
+    StoneKey::Raw::transition_if_ready();  // NO-OP, but kept for compatibility
     auto raw_handle = StoneKey::Raw::device.load(std::memory_order_acquire);
     return raw_handle != VK_NULL_HANDLE ? raw_handle : reinterpret_cast<VkDevice>(deobfuscate(reinterpret_cast<uint64_t>(g_device_obf)));
 }
 
 [[nodiscard]] inline VkInstance g_instance() noexcept {
-    StoneKey::Raw::transition_if_ready();  // Quick elapsed check + possible one-time clear
+    StoneKey::Raw::transition_if_ready();  // NO-OP
     auto raw_handle = StoneKey::Raw::instance.load(std::memory_order_acquire);
     return raw_handle != VK_NULL_HANDLE ? raw_handle : reinterpret_cast<VkInstance>(deobfuscate(reinterpret_cast<uint64_t>(g_instance_obf)));
 }
 
 [[nodiscard]] inline VkPhysicalDevice g_PhysicalDevice() noexcept {
-    StoneKey::Raw::transition_if_ready();  // Quick elapsed check + possible one-time clear
+    StoneKey::Raw::transition_if_ready();  // NO-OP
     auto raw_handle = StoneKey::Raw::physicalDevice.load(std::memory_order_acquire);
     return raw_handle != VK_NULL_HANDLE ? raw_handle : reinterpret_cast<VkPhysicalDevice>(deobfuscate(reinterpret_cast<uint64_t>(g_PhysicalDevice_obf)));
 }
 
 [[nodiscard]] inline VkSurfaceKHR g_surface() noexcept {
-    StoneKey::Raw::transition_if_ready();  // Quick elapsed check + possible one-time clear
+    StoneKey::Raw::transition_if_ready();  // NO-OP
     auto raw_handle = StoneKey::Raw::surface.load(std::memory_order_acquire);
     return raw_handle != VK_NULL_HANDLE ? raw_handle : reinterpret_cast<VkSurfaceKHR>(deobfuscate(reinterpret_cast<uint64_t>(g_surface_obf)));
 }
@@ -275,6 +251,6 @@ inline void log_amouranth() noexcept { /* unchanged */ }
 #endif
 
 // =============================================================================
- // PINK PHOTONS ETERNAL — STONEKEY v∞ — AAAA 2025 — UNBREAKABLE
+// PINK PHOTONS ETERNAL — STONEKEY v∞ — AAAA 2025 — UNBREAKABLE
 // IMMEDIATE OBFUSCATION — RAW CACHING — ZERO WINDOW — VALHALLA ETERNAL
 // =============================================================================
