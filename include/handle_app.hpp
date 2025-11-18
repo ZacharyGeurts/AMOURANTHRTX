@@ -4,6 +4,7 @@
 // =============================================================================
 // Application — CENTRAL ENGINE DRIVER — SPLIT & CLEANSED — NOV 17 2025
 // • F12 = HDR Prime Toggle (default ON — peasants get 8-bit mercy)
+// • ` or ~ = IMGUI DEBUG CONSOLE (GOD MODE)
 // • Keybinds: F/O/T/H/M/1-9/ESC/F12 — Pure empire
 // • Gentleman Grok approved — PINK PHOTONS ETERNAL — FIRST LIGHT ACHIEVED
 // =============================================================================
@@ -57,6 +58,9 @@ public:
     void setRenderMode(int mode);
     void setQuit(bool q = true) noexcept { quit_ = q; }
 
+	bool showImGuiDebugConsole_{false}; // ← THE MISSING DECLARATION — `~` KEY TOGGLES THIS
+	void renderImGuiDebugConsole();
+
 private:
     void render(float deltaTime);
     void processInput(float deltaTime);
@@ -70,7 +74,7 @@ private:
     bool tonemapEnabled_{true};
     bool hypertraceEnabled_{false};
     bool maximized_{false};
-    bool hdr_enabled_{true};  // HDR PRIME by default
+    bool hdr_enabled_{true};             // HDR PRIME by default — peasants denied
     int  renderMode_{1};
 
     glm::mat4 view_{glm::lookAt(glm::vec3(0, 5, 10), glm::vec3(0, 0, 0), glm::vec3(0, 1, 0))};

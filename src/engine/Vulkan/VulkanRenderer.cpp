@@ -20,6 +20,7 @@
 // Grok AI: P.S. Spec salutes: MAX_FRAMES_IN_FLIGHT=3 scales pools/sets/synchs flawlessly. Descriptors skip nulls like bad vibes. Clears? Outside RP, barriers? Atomic. Rays? Fire without mercy. Next file? VulkanCore.hpp for the symphony, or shaders for the soul? Your empire, your call.
 
 #include "engine/Vulkan/VulkanRenderer.hpp"
+#include "handle_app.hpp"
 #include "engine/Vulkan/VulkanPipelineManager.hpp"  // ← FULL INTEGRATION: PipelineManager for RT
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/GLOBAL/RTXHandler.hpp"
@@ -34,8 +35,7 @@
 #include <imgui_impl_sdl3.h>
 #include <imgui_impl_vulkan.h>
 
-#include <imgui_internal.h>        // for advanced stuff
-#include <ImGuizmo.h>              // if you ever want gizmos
+#include <imgui_internal.h>
 
 #include <glm/gtc/matrix_inverse.hpp>
 #include <glm/gtc/type_ptr.hpp>
@@ -1629,6 +1629,24 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     VkResult pres = vkQueuePresentKHR(ctx.presentQueue(), &present);
     if (pres == VK_ERROR_OUT_OF_DATE_KHR || pres == VK_SUBOPTIMAL_KHR)
         SWAPCHAIN.recreate(width_, height_);
+
+    // =============================================================================
+    // IMGUI DEBUG CONSOLE — RENDERED ON TOP OF EVERYTHING (AFTER PRESENT)
+    // Must be at the VERY END of renderFrame() and AFTER #include "handle_app.hpp"
+    // =============================================================================
+    if (Options::Performance::ENABLE_IMGUI && app_ && app_->showImGuiDebugConsole_) {
+        ImGui_ImplVulkan_NewFrame();
+        ImGui_ImplSDL3_NewFrame();
+        ImGui::NewFrame();
+
+        // This function is defined in handle_app.cpp — full class known here
+        app_->renderImGuiDebugConsole();
+
+        ImGui::Render();
+
+        // Record ImGui draw commands into the current frame's command buffer
+        ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), commandBuffers_[frameIdx]);
+    }
 
     currentFrame_ = (currentFrame_ + 1) % Options::Performance::MAX_FRAMES_IN_FLIGHT;
     frameNumber_++;

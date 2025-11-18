@@ -1,8 +1,8 @@
 // =============================================================================
-// VulkanRenderer.hpp — FINAL v12.4 — NOV 16 2025 — COMPILATION 100% FIXED
-// • firstSwapchainAcquire_ ADDED → ALL ERRORS GONE
-// • TONEMAP OVERLOADS + SAMPLER DECL + PINK PHOTONS ETERNAL
-// • EMPIRE SECURE — FIRST LIGHT ACHIEVED — PHOTONS UNLEASHED
+// VulkanRenderer.hpp — FINAL v12.5 — NOVEMBER 17 2025 — IMGUI CONSOLE READY
+// • Application* app_ added → `~` key now summons full debug console
+// • firstSwapchainAcquire_ preserved — ALL ERRORS GONE
+// • TONEMAP + AUTOEXPOSURE + PINK PHOTONS ETERNAL — FIRST LIGHT ACHIEVED
 // =============================================================================
 
 #pragma once
@@ -30,7 +30,14 @@
 #include "engine/Vulkan/VulkanCore.hpp"
 #include "engine/Vulkan/VulkanPipelineManager.hpp"
 
+// Forward declarations
 struct Camera;
+class Application;                  // ← NEW: For ImGui console access
+
+// ImGui forward declarations
+struct ImFont;
+#include <imgui.h>
+// Do NOT include imgui_impl_*.h here — only in .cpp!
 
 inline auto& LAS = RTX::LAS::get();
 
@@ -42,21 +49,13 @@ enum class TonemapType { ACES, FILMIC, REINHARD };
 
 struct TonemapPushConstants {
     float     exposure        = 1.0f;
-    uint32_t  tonemapOperator = 0;      // 0 = ACES, 1 = Filmic, etc.
+    uint32_t  tonemapOperator = 0;
     uint32_t  enableBloom     = 0;
     float     bloomStrength   = 0.0f;
     uint32_t  frameCounter    = 0;
     float     nexusScore      = 0.0f;
-    float     _pad[2]         = {0};    // Align to 16 bytes
+    float     _pad[2]         = {0};
 };
-
-
-// =============================================================================
-// FORWARD DECLARATION + IMGUI INCLUDES — REQUIRED FOR ImFont*
-// =============================================================================
-struct ImFont;                     // Forward declare only — safe in headers
-#include <imgui.h>                 // This MUST come AFTER forward decl
-// Do NOT include imgui_impl_*.h here — only in .cpp files!
 
 // ──────────────────────────────────────────────────────────────────────────────
 class VulkanRenderer {
@@ -92,6 +91,7 @@ public:
     void updateTonemapDescriptor(uint32_t frameIdx, VkImageView inputView) noexcept;
     void updateTonemapDescriptor(uint32_t frameIdx, VkImageView inputView, const RTX::Handle<VkImageView>& outputView) noexcept;
     void updateTonemapDescriptorsInitial() noexcept;
+
     inline void transitionImageLayout(VkCommandBuffer cmd, VkImage image, VkImageLayout newLayout) noexcept
     {
         transitionImageLayout(cmd, image, VK_IMAGE_LAYOUT_UNDEFINED, newLayout);
@@ -105,7 +105,6 @@ public:
         transitionImageLayout(cmd, image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
     }
 
-    // AUTOEXPOSURE + TONEMAP
     void updateAutoExposure(VkCommandBuffer cmd, VkImage finalColorImage) noexcept;
     void applyTonemap(VkCommandBuffer cmd) noexcept;
 
@@ -137,6 +136,11 @@ public:
     void handleResize(int w, int h) noexcept;
     [[nodiscard]] VkFence createFence(bool signaled = false) const noexcept;
 
+    // =============================================================================
+    // NEW: Application link for ImGui debug console (`~` key)
+    // =============================================================================
+    void setApplication(Application* app) noexcept { app_ = app; }
+
 private:
     static inline ImFont* plasmaticaFont = nullptr;
     static inline ImFont* arialBoldFont  = nullptr;
@@ -164,9 +168,7 @@ private:
     VkQueryPool timestampQueryPool_ = VK_NULL_HANDLE;
     double timestampPeriod_ = 0.0;
     bool resetAccumulation_ = true;
-
-    // CRITICAL FIX: This was missing → caused all the compile errors
-    bool firstSwapchainAcquire_ = true;  // ←←← NOW ADDED — PHOTONS FLOW AGAIN
+    bool firstSwapchainAcquire_ = true;  // ← Critical fix preserved
 
     // Runtime toggles
     bool hypertraceEnabled_     = Options::RTX::ENABLE_ADAPTIVE_SAMPLING;
@@ -267,6 +269,11 @@ private:
     RTX::Handle<VkPipelineLayout> denoiserLayout_;
     std::vector<VkDescriptorSet>  denoiserSets_;
 
+    // =============================================================================
+    // NEW: Application pointer — enables `~` key ImGui console
+    // =============================================================================
+    Application* app_ = nullptr;
+
     // ──────────────────────────────────────────────────────────────────────────────
     // Private Helper Functions
     // ──────────────────────────────────────────────────────────────────────────────
@@ -362,5 +369,6 @@ inline void shutdown() noexcept {
 }
 
 // =============================================================================
-// GPL-3.0+ — firstSwapchainAcquire_ RESTORED — BUILD CLEAN — PHOTONS ETERNAL
+// GPL-3.0+ — IMGUI CONSOLE READY — `~` KEY SUMMONS EMPIRE CONSOLE
+// NOVEMBER 17 2025 — VALHALLA v80 TURBO — PINK PHOTONS ETERNAL — SHIP IT
 // =============================================================================

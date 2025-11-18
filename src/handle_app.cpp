@@ -1,6 +1,6 @@
 // src/handle_app.cpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2025 — Application Implementation — SPLIT & PURIFIED
+// AMOURANTH RTX Engine © 2025 — Application Implementation — FULLY SDL3 FIXED
 // =============================================================================
 
 #include "handle_app.hpp"
@@ -120,6 +120,27 @@ void Application::processInput(float)
     edge(KeyBind::HYPERTRACE,    [this]() { toggleHypertrace(); }, hPressed,    "HYPERTRACE (H)");
     edge(KeyBind::HDR_TOGGLE,    [this]() { toggleHDR(); },        hdrPressed,  "HDR PRIME (F12)");
 
+    // =============================================================================
+    // ~ / ` KEY → TOGGLE FULL IMGUI DEBUG CONSOLE (GOD MODE)
+    // =============================================================================
+    static bool imguiConsolePressed = false;
+    if (keys[KeyBind::IMGUI_CONSOLE] && !imguiConsolePressed) {
+        showImGuiDebugConsole_ = !showImGuiDebugConsole_;
+
+        // SDL3 FIX: Use true/false + correct getter
+        SDL_SetWindowRelativeMouseMode(getWindow(),
+            showImGuiDebugConsole_ ? false : true);
+
+        LOG_ATTEMPT_CAT("IMGUI", "{}IMGUI DEBUG CONSOLE {} — PRESS ~ AGAIN TO CLOSE{}", 
+                        PARTY_PINK,
+                        showImGuiDebugConsole_ ? "SUMMONED" : "BANISHED",
+                        RESET);
+
+        imguiConsolePressed = true;
+    } else if (!keys[KeyBind::IMGUI_CONSOLE]) {
+        imguiConsolePressed = false;
+    }
+
     // M key → Maximize + Audio Mute
     static bool mPressed = false;
     if (keys[KeyBind::MAXIMIZE_MUTE] && !mPressed) {
@@ -161,9 +182,6 @@ void Application::toggleHDR() noexcept
         LOG_INFO_CAT("APP", "{}Peasant Mode: 8-bit SDR Mercy Granted{}", LIME_GREEN, RESET);
     }
 
-    // EVERYONE ELSE USES SWAPCHAIN.views(), SWAPCHAIN.extent(), etc.
-    // SO WE DO TOO — EXCEPT HERE, WHERE WE CALL A METHOD
-    // → ONLY HERE WE USE ->
     SWAPCHAIN.recreate(width_, height_);
 }
 
@@ -181,6 +199,34 @@ void Application::render(float deltaTime)
     } cam(view_, proj_);
 
     renderer_->renderFrame(cam, deltaTime);
+
+    // =============================================================================
+    // IMGUI DEBUG CONSOLE — SUMMONED BY THE `~` KEY
+    // =============================================================================
+    if (showImGuiDebugConsole_ && Options::Performance::ENABLE_IMGUI) {
+        ImGui::ShowDemoWindow(&showImGuiDebugConsole_);
+
+        ImGui::Begin("AMOURANTH RTX — EMPIRE CONSOLE v80", &showImGuiDebugConsole_,
+                     ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoCollapse);
+
+        ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.8f, 1.0f), "PINK PHOTONS ETERNAL — NOVEMBER 17, 2025");
+        ImGui::Separator();
+
+        ImGui::Text("FPS: %.1f", ImGui::GetIO().Framerate);
+        ImGui::Text("Resolution: %dx%d", width_, height_);
+        ImGui::Text("Render Mode: %d", renderMode_);
+        ImGui::Text("HDR: %s", hdr_enabled_ ? "PRIME (10-bit)" : "OFF (8-bit peasant)");
+        ImGui::Text("Tonemap: %s", tonemapEnabled_ ? "ON" : "OFF");
+        ImGui::Text("Overlay: %s", showOverlay_ ? "ON" : "OFF");
+
+        if (ImGui::Button("Recompile All Shaders")) {
+            // Call your shader hot-reload here
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Force Crash (testing)")) *(volatile int*)0 = 0;
+
+        ImGui::End();
+    }
 }
 
 void Application::updateWindowTitle(float deltaTime)
@@ -192,11 +238,12 @@ void Application::updateWindowTitle(float deltaTime)
     if (accum >= 1.0f) {
         float fps = frames / accum;
         std::string title = std::format(
-            "{} | {:.1f} FPS | {}×{} | Mode {} | Tonemap{} Overlay{} HDR{} {}",
+            "{} | {:.1f} FPS | {}×{} | Mode {} | Tonemap{} Overlay{} HDR{} {}{}",
             title_, fps, width_, height_, renderMode_,
             tonemapEnabled_ ? "" : " OFF",
             showOverlay_ ? "" : " OFF",
             hdr_enabled_ ? " PRIME" : " OFF",
+            showImGuiDebugConsole_ ? " [IMGUI CONSOLE]" : "",
             Options::Performance::ENABLE_VALIDATION_LAYERS ? " [DEBUG]" : ""
         );
         SDL_SetWindowTitle(getWindow(), title.c_str());
