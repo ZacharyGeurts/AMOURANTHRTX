@@ -381,51 +381,68 @@ void VulkanRTX::endSingleTimeCommands(VkCommandBuffer cmd, VkQueue queue, VkComm
     LOG_TRACE_CAT("RTX", "endSingleTimeCommands — COMPLETE (resilient fence sync)");
 }
 
-// OPT: Enhanced async variant — For pipeline deps without blocking
-// - Matches header: If fence provided, submit & return (caller polls/destroys)
-// - If fence == VK_NULL_HANDLE, create transient fence, submit, wait (falls back to sync for simplicity)
-// - Supports wait-any/all via external semaphore/fence chains
-void VulkanRTX::endSingleTimeCommandsAsync(VkCommandBuffer cmd, VkQueue queue, VkCommandPool pool, VkFence fence) noexcept {
+// =============================================================================
+// FINAL FORM: endSingleTimeCommandsAsync — PINK PHOTON EDITION v∞
+// - Truly async when fence provided (caller owns lifetime)
+// - Fully sync + auto-cleanup when fence == VK_NULL_HANDLE (startup path)
+// - NEVER frees command buffer before GPU is done
+// - No leaks, no races, no VUID-00047 — EVER
+// - Used in initBlackFallbackImage(), buildAccelerationStructures(), etc.
+// =============================================================================
+void VulkanRTX::endSingleTimeCommandsAsync(
+    VkCommandBuffer cmd,
+    VkQueue queue,
+    VkCommandPool pool,
+    VkFence fence) noexcept                     // ← NO DEFAULT HERE
+{
     if (cmd == VK_NULL_HANDLE || queue == VK_NULL_HANDLE || pool == VK_NULL_HANDLE) {
-        LOG_ERROR_CAT("RTX", "endSingleTimeCommandsAsync called with invalid params");
+        LOG_ERROR_CAT("RTX", "endSingleTimeCommandsAsync: invalid handle");
         return;
     }
 
-    VK_CHECK(vkEndCommandBuffer(cmd), "Failed to end transient command buffer (async)");
+    VK_CHECK(vkEndCommandBuffer(cmd), "Failed to end one-time command buffer");
 
-    bool destroy_after = false;
+    VkDevice dev = RTX::g_ctx().device();
+    bool ownsFence = (fence == VK_NULL_HANDLE);
 
-    // Handle fence: Create if null (and treat as sync), or reset if provided
-    if (fence == VK_NULL_HANDLE) {
-        VkFenceCreateInfo fenceInfo{ .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, .flags = 0 };
-        VK_CHECK(vkCreateFence(RTX::g_ctx().device(), &fenceInfo, nullptr, &fence),
-                 "Failed to create async/transient fence");
-        destroy_after = true;  // Will wait & destroy for sync fallback
+    // If caller didn't provide a fence → create our own transient one
+    if (ownsFence) {
+        VkFenceCreateInfo fenceInfo{ .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+        VK_CHECK(vkCreateFence(dev, &fenceInfo, nullptr, &fence),
+                 "Failed to create transient fence for one-time submit");
     } else {
-        // Reset if signaled/reused
-        VK_CHECK(vkResetFences(RTX::g_ctx().device(), 1, &fence), "Failed to reset async fence");
-        destroy_after = false;  // Caller manages
+        VK_CHECK(vkResetFences(dev, 1, &fence), "Failed to reset user fence");
     }
 
-    VkSubmitInfo submit { .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO, .commandBufferCount = 1, .pCommandBuffers = &cmd };
-    VK_CHECK(vkQueueSubmit(queue, 1, &submit, fence), "Failed to submit async command buffer");
+    VkSubmitInfo submit{
+        .sType              = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .commandBufferCount = 1,
+        .pCommandBuffers    = &cmd
+    };
 
-    vkFreeCommandBuffers(RTX::g_ctx().device(), pool, 1, &cmd);
+    VK_CHECK(vkQueueSubmit(queue, 1, &submit, fence),
+             "Failed to submit one-time command buffer");
 
-    LOG_TRACE_CAT("RTX", "endSingleTimeCommandsAsync — Submitted (fence: 0x{:x})",
-                  reinterpret_cast<uintptr_t>(fence));
+    LOG_TRACE_CAT("RTX", "One-time submit → fence 0x{:x} (owned={})",
+                  reinterpret_cast<uintptr_t>(fence), ownsFence);
 
-    // If created (null input), fallback to wait & destroy for "async with auto-sync"
-    if (destroy_after) {
-        const uint64_t timeout_ns = 5'000'000'000ULL;
-        VkResult res = vkWaitForFences(RTX::g_ctx().device(), 1, &fence, VK_TRUE, timeout_ns);
-        if (res != VK_SUCCESS) {
-            LOG_ERROR_CAT("RTX", "Transient async fence wait failed: {}", res);
-            vkDeviceWaitIdle(RTX::g_ctx().device());
+    // Only if we created the fence → wait + cleanup immediately
+    if (ownsFence) {
+        const uint64_t timeout_ns = 10'000'000'000ULL;  // 10s max during init
+
+        VkResult waitRes = vkWaitForFences(dev, 1, &fence, VK_TRUE, timeout_ns);
+        if (waitRes != VK_SUCCESS) {
+            LOG_FATAL_CAT("RTX", "One-time fence timeout ({}) — forcing device idle", waitRes);
+            vkDeviceWaitIdle(dev);
         }
-        vkDestroyFence(RTX::g_ctx().device(), fence, nullptr);
+
+        // NOW 100% safe to free
+        vkFreeCommandBuffers(dev, pool, 1, &cmd);
+        vkDestroyFence(dev, fence, nullptr);
+
+        LOG_TRACE_CAT("RTX", "One-time command auto-cleaned (sync path)");
     }
-    // Note: If fence provided by caller, they must poll/wait & destroy it later
+    // else: caller passed a real fence → they are responsible for waiting + freeing cmd + destroying fence
 }
 
 // Helper: Utility for polling polling async fences in a loop (e.g., in render loop)
