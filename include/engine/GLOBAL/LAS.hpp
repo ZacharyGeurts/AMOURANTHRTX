@@ -1,4 +1,3 @@
-// src/include/engine/GLOBAL/LAS.hpp
 // =============================================================================
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
@@ -539,7 +538,7 @@ public:
         VkDeviceAddress addr = getTLASAddress();
         double sizeGB = sizes.accelerationStructureSize / (1024.0 * 1024.0 * 1024.0);
         AmouranthAI::get().onTlasBuilt(sizeGB, addr, sizes);
-		++tlasGeneration_;  // TLAS is now valid and alive
+        ++tlasGeneration_;  // TLAS is now valid and alive
     }
 
     void rebuildTLAS(VkCommandPool pool, VkQueue queue,
@@ -577,7 +576,7 @@ public:
     }
 
     [[nodiscard]] VkDeviceSize getTLASSize() const noexcept { return tlasSize_; }
-	[[nodiscard]] bool isValid() const noexcept {
+    [[nodiscard]] bool isValid() const noexcept {
         return tlas_ && tlasGeneration_ > 0;
     }
 
@@ -629,7 +628,7 @@ private:
     Handle<VkAccelerationStructureKHR> tlas_;
     uint64_t instanceBufferId_ = 0;
     VkDeviceSize tlasSize_ = 0;
-	uint32_t tlasGeneration_ = 0;
+    uint32_t tlasGeneration_ = 0;
     VkQueryPool QUERY_POOL_TIMESTAMP = VK_NULL_HANDLE;
     float timestampPeriodNs_ = 0.0f;
 
