@@ -46,7 +46,7 @@ echo "        ██████████████████████
 echo " "
 echo "══════════════════════════════════════════════════════════"
 echo "       AMOURANTH RTX — LINUX BUILD SUCCESSFUL"
-echo "       Binary: ../bin/Linux/Navigator"
+echo "       Binary: build/bin/Linux/Navigator"
 echo "       Run:   cd build/bin/Linux && ./Navigator"
 echo "══════════════════════════════════════════════════════════"
 echo " "
