@@ -84,11 +84,11 @@ inline void show(const char* title, int w, int h, const char* imagePath, const c
 
     // Audio — using your already-working AudioManager
     static bool audioInit = []() -> bool {
-        return SDL_InitSubSystem(SDL_INIT_AUDIO) != 0;
+        return SDL_InitSubSystem(SDL_INIT_AUDIO) == 0;
     }();
 
     static SDL3Audio::AudioManager* audio = nullptr;
-    if (audioInit && !audio) {
+    if ((audioInit && !audio) == 0) {
         audio = new SDL3Audio::AudioManager();
         (void)audio->initMixer();  // consume nodiscard
     }
