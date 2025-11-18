@@ -28,6 +28,7 @@
 #include "engine/GLOBAL/LAS.hpp"
 #include "engine/GLOBAL/SwapchainManager.hpp"
 #include "engine/Vulkan/VulkanCore.hpp"
+#include "engine/Vulkan/ImGuiStoneKeyShield.hpp"
 #include "engine/Vulkan/VulkanPipelineManager.hpp"
 
 // Forward declarations
@@ -140,6 +141,10 @@ public:
     // NEW: Application link for ImGui debug console (`~` key)
     // =============================================================================
     void setApplication(Application* app) noexcept { app_ = app; }
+
+    static VulkanRenderer& getInstance();  // already exists
+
+    uint64_t getFrameNumber() const noexcept { return frameNumber_; }
 
 private:
     bool stonekey_active_ = false;

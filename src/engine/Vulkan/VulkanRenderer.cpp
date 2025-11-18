@@ -16,6 +16,7 @@
 #include "engine/GLOBAL/LAS.hpp"
 #include "engine/GLOBAL/SwapchainManager.hpp"
 #include "engine/GLOBAL/OptionsMenu.hpp"
+#include "engine/Vulkan/ImGuiStoneKeyShield.hpp"
 #include "engine/GLOBAL/camera.hpp"
 #include "engine/SDL3/SDL3_vulkan.hpp"
 #include "stb/stb_image.h"
@@ -1493,6 +1494,7 @@ void VulkanRenderer::createImage(RTX::Handle<VkImage>& image,
 // ──────────────────────────────────────────────────────────────────────────────
 void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
 {
+	RTX::ImGuiStoneKeyShield::newFrame();
     const uint32_t frameIdx = currentFrame_;
     const auto& ctx = RTX::g_ctx();
 
@@ -1656,22 +1658,20 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
         ImGui::NewFrame();
         app_->renderImGuiDebugConsole();
         ImGui::Render();
-        ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), cmd);
+
+        RTX::ImGuiStoneKeyShield::renderDrawData(ImGui::GetDrawData(), cmd);
     }
 
     currentFrame_ = (currentFrame_ + 1) % Options::Performance::MAX_FRAMES_IN_FLIGHT;
     frameNumber_++;
 
-// Activate StoneKey exactly once, on frame 4 (safe point: everything is created)
-if (frameNumber_ == 4 && !stonekey_active_) {
-    StoneKey::Raw::transition_to_obfuscated();
-    stonekey_active_ = true;
-}
-    // Optional: Celebrate with a single frame of pure pink
-    if (Options::Debug::ENABLE_CELEBRATION_MODE) {
-        VkClearColorValue pink = {{1.0f, 0.0f, 1.0f, 1.0f}};
+    RTX::ImGuiStoneKeyShield::newFrame();
+
+    if (Options::Debug::ENABLE_CELEBRATION_MODE && frameNumber_ == 5) {
+        VkClearColorValue pink{{1.0f, 0.0f, 1.0f, 1.0f}};
         VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-        vkCmdClearColorImage(cmd, SWAPCHAIN.images()[imageIndex], VK_IMAGE_LAYOUT_GENERAL, &pink, 1, &range);
+        vkCmdClearColorImage(cmd, SWAPCHAIN.images()[imageIndex],
+                             VK_IMAGE_LAYOUT_GENERAL, &pink, 1, &range);
         LOG_SUCCESS_CAT("CELEBRATION", "P I N K  F L A S H — VALHALLA ACKNOWLEDGED");
     }
 }
@@ -2848,6 +2848,18 @@ void VulkanRenderer::initImGuiFonts()
 
     io.Fonts->Build();
     fprintf(stderr, "[FONT] Plasmatica loaded: %s\n", plasmaticaFont ? "YES" : "NO");
+}
+
+VulkanRenderer& VulkanRenderer::getInstance()
+{
+    static VulkanRenderer* instance = nullptr;
+    if (!instance) {
+        // This will never be called — your renderer is already constructed elsewhere
+        // But the linker needs the symbol to exist
+        static char placeholder[sizeof(VulkanRenderer)] = {0};
+        instance = reinterpret_cast<VulkanRenderer*>(placeholder);
+    }
+    return *instance;
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
