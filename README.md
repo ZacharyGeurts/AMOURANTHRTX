@@ -1,3 +1,11 @@
+
+```
+git clone https://github.com/ZacharyGeurts/AMOURANTHRTX
+cd AMOURANTHRTX
+chmod +x linux.sh
+./linux.sh clean
+```
+
 Currently compiles and reaches render loop. Much more work needed yet.  
 I work fast but slow. Rather than rendering fast and working backwards,  
 HDR and incredible features come with.  
@@ -20,13 +28,6 @@ See the [Wiki](https://github.com/ZacharyGeurts/AMOURANTHRTX/wiki) for engine in
 AMOURANTH RTX a next generation engine for raw performance.  
 <img width="820" src="https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/assets/textures/ammo.png" />  
 <img width="820" src="https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/media/Screenshot%20from%202025-11-14%2021-05-10.png" />  
-
-```
-git clone https://github.com/ZacharyGeurts/AMOURANTHRTX
-cd AMOURANTHRTX
-chmod +x linux.sh
-./linux.sh clean
-```
 
 [AMOURANTH RTX Video](https://x.com/i/status/1982578590593282537)  
 
