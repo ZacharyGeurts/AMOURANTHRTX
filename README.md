@@ -13,7 +13,7 @@ To say this is 99% Grok, I may be understating. I call him bro.
 AMOURANTH RTX © 2025 by Zachary Geurts gzac5314@gmail.com is licensed under GPL v3.0 or higher   
 Unreal developers may consider some of this parody.  
 I welcome those whose minds seek knowledge and education.  
-Windows toolchain currently under development.  
+Linux for now, and Windows toolchain currently under development.  
 Hearer and Console are not part of the RTX program.  
 
 See the [Wiki](https://github.com/ZacharyGeurts/AMOURANTHRTX/wiki) for engine information.  
