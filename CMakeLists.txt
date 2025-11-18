@@ -407,13 +407,13 @@ add_dependencies(amouranth_engine shaders)
 # ASSET COPY
 # =============================================================================
 set(ASSET_MAP
-    "fonts:*.ttf,*.otf"
-    "textures:*.png,*.jpg,*.ktx2,*.dds,*.hdr,*.ico"
-    "models:*.obj,*.gltf,*.glb"
-    "materials:*.json"
-    "scenes:*.json"
-    "audio:*.wav,*.ogg"
-    "scripts:*.lua"
+    "fonts:*.ttf,*.otf,*.font,*.bdf,*.fnt"
+    "textures:*.png,*.jpg,*.ktx2,*.dds,*.hdr,*.ico,*.bmp,*.gif,*.tga,*.webp,*.jp2,*.svg"
+    "models:*.obj,*.gltf,*.glb,*.fbx,*.stl,*.blend"
+    "materials:*.json,*.mtl"
+    "scenes:*.json,*.xml,*.yaml"
+    "audio:*.wav,*.ogg,*.mp3,*.flac,*.aac,*.m4a,*.wma"
+    "scripts:*.lua,*.py,*.js,*.glsl"
 )
 foreach(MAP ${ASSET_MAP})
     string(REPLACE ":" ";" PAIR ${MAP})
@@ -440,16 +440,10 @@ message(STATUS "")
 message(STATUS "==================================================================")
 message(STATUS "")
 message(STATUS "")
-message(STATUS "               █████╗ ███╗   ███╗ ██████╗ ██╗   ██╗██████╗  █████╗ ███╗   ██╗████████╗██╗  ██╗")
-message(STATUS "              ██╔══██╗████╗ ████║██╔═══██╗██║   ██║██╔══██╗██╔══██╗████╗  ██║╚══██╔══╝██║  ██║")
-message(STATUS "              ███████║██╔████╔██║██║   ██║██║   ██║██████╔╝███████║██╔██╗ ██║   ██║   ███████║")
 message(STATUS "              ██╔══██║██║╚██╔╝██║██║   ██║██║   ██║██╔══██╗██╔══██║██║╚██╗██║   ██║   ██╔══██║")
 message(STATUS "              ██║  ██║██║ ╚═╝ ██║╚██████╔╝╚██████╔╝██║  ██║██║  ██║██║ ╚████║   ██║   ██║  ██║")
 message(STATUS "              ╚═╝  ╚═╝╚═╝     ╚═╝ ╚═════╝  ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝   ╚═╝   ╚═╝  ╚═╝")
 message(STATUS "")
-message(STATUS "               ██████╗ ████████╗██╗  ██╗    ███████╗███╗   ██╗ ██████╗ ██╗███╗   ██╗███████╗")
-message(STATUS "               ██╔══██╗╚══██╔══╝╚██╗██╔╝    ██╔════╝████╗  ██║██╔════╝ ██║████╗  ██║██╔════╝")
-message(STATUS "               ██████╔╝   ██║    ╚███╔╝     █████╗  ██╔██╗ ██║██║  ███╗██║██╔██╗ ██║█████╗  ")
 message(STATUS "               ██╔══██╗   ██║    ██╔██╗     ██╔══╝  ██║╚██╗██║██║   ██║██║██║╚██╗██║██╔══╝  ")
 message(STATUS "               ██║  ██║   ██║   ██╔╝ ██╗    ███████╗██║ ╚████║╚██████╔╝██║██║ ╚████║███████╗")
 message(STATUS "               ╚═╝  ╚═╝   ╚═╝   ╚═╝  ╚═╝    ╚══════╝╚═╝  ╚═══╝ ╚═════╝ ╚═╝╚═╝  ╚═══╝╚══════╝")
@@ -460,6 +454,6 @@ message(STATUS "================================================================
 message(STATUS " AMOURANTH RTX — FULLY FIXED + Dear ImGui (SDL3+Vulkan) — NOVEMBER 17 2025")
 message(STATUS " Target: ${BIN_DIR}/Navigator${EXE_SUFFIX}")
 message(STATUS " ImGui location: src/engine/imgui (auto-cloned on first build)")
-message(STATUS " Run: ./linux.sh clean && ./linux.sh")
+message(STATUS " Run: ./linux.sh clean")
 message(STATUS " HDR: 10-bit invisible HDR via GBM — works even on Cinnamon/GNOME")
 message(STATUS "==================================================================")
