@@ -510,7 +510,6 @@ namespace RTX {
     // =============================================================================
     [[nodiscard]] VulkanRenderer& renderer();
     void initRenderer(int w, int h);
-    void handleResize(int w, int h);
     void renderFrame(const Camera& camera, float deltaTime) noexcept;
     void shutdown() noexcept;
     void createSwapchain(VkInstance inst, VkPhysicalDevice phys, VkDevice dev, VkSurfaceKHR surf, uint32_t w, uint32_t h);

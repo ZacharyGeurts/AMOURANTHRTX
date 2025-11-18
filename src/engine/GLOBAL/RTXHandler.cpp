@@ -339,7 +339,6 @@ namespace RTX {
         std::terminate(); 
     }
     void initRenderer(int, int) {}
-    void handleResize(int, int) {}
     void renderFrame(const Camera&, float) noexcept {}
     
     void shutdown() noexcept {

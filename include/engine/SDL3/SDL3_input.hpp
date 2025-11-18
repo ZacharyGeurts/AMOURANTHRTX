@@ -2,6 +2,13 @@
 // =============================================================================
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
+//
+// Dual Licensed:
+// 1. GNU General Public License v3.0 (or later) (GPL v3)
+//    https://www.gnu.org/licenses/gpl-3.0.html
+// 2. Commercial licensing: gzac5314@gmail.com
+//
+// =============================================================================
 // SDL3 Input — FINAL BULLETPROOF RAII — NOVEMBER 14 2025
 // • Deleter structs with static inline lambdas → external linkage → map-safe
 // • Zero overhead, 15,000 FPS, GCC 14 approved

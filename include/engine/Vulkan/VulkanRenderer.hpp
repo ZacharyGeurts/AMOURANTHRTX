@@ -134,7 +134,6 @@ public:
     [[nodiscard]] uint32_t         currentSpp()      const noexcept { return currentSpp_; }
     [[nodiscard]] float            currentExposure() const noexcept { return currentExposure_; }
 
-    void handleResize(int w, int h) noexcept;
     [[nodiscard]] VkFence createFence(bool signaled = false) const noexcept;
 
     // =============================================================================
@@ -145,8 +144,10 @@ public:
     static VulkanRenderer& getInstance();  // already exists
 
     uint64_t getFrameNumber() const noexcept { return frameNumber_; }
+	void onWindowResize(uint32_t w, uint32_t h) noexcept; 
 
 private:
+    bool minimized_ = false;
     bool stonekey_active_ = false;
     static inline ImFont* plasmaticaFont = nullptr;
     static inline ImFont* arialBoldFont  = nullptr;
@@ -365,7 +366,6 @@ inline void initRenderer(int w, int h) {
     LOG_SUCCESS_CAT("RENDERER", "VulkanRenderer INITIALIZED — AUTOEXPOSURE v∞ — FIRST LIGHT ACHIEVED");
 }
 
-inline void handleResize(int w, int h) { if (g_renderer) g_renderer->handleResize(w, h); }
 inline void renderFrame(const Camera& camera, float deltaTime) noexcept { if (g_renderer) g_renderer->renderFrame(camera, deltaTime); }
 inline void shutdown() noexcept {
     LOG_INFO_CAT("RENDERER", "Shutting down — returning photons to the void");

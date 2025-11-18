@@ -7,8 +7,16 @@
 #include "engine/Vulkan/Compositor.hpp"
 #include "engine/Vulkan/HDR_surface.hpp"
 #include "engine/GLOBAL/SwapchainManager.hpp"
+#include "engine/Vulkan/VulkanRenderer.hpp"
+#include "engine/SDL3/SDL3_window.hpp"
 
 using namespace Logging::Color;
+
+// CRITICAL: DEFINE THE STATIC MEMBERS FROM THE HEADER
+SDLWindowPtr SDL3Window::g_sdl_window = nullptr;
+std::atomic<int>  SDL3Window::g_resizeWidth{0};
+std::atomic<int>  SDL3Window::g_resizeHeight{0};
+std::atomic<bool> SDL3Window::g_resizeRequested{false};
 
 Application::Application(const std::string& title, int width, int height)
     : title_(title), width_(width), height_(height),
@@ -65,7 +73,7 @@ void Application::run()
         if (SDL3Window::pollEvents(w, h, quitReq, toggleFS)) {
             width_ = w; height_ = h;
             proj_ = glm::perspective(glm::radians(75.0f), static_cast<float>(w)/h, 0.1f, 1000.0f);
-            if (renderer_) renderer_->handleResize(w, h);
+            if (renderer_) renderer_->onWindowResize(w, h);
         }
         if (quitReq) quit_ = true;
         if (toggleFS) toggleFullscreen();

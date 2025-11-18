@@ -1494,6 +1494,10 @@ void VulkanRenderer::createImage(RTX::Handle<VkImage>& image,
 // ──────────────────────────────────────────────────────────────────────────────
 void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
 {
+    if (minimized_) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        return;
+    }
 	RTX::ImGuiStoneKeyShield::newFrame();
     const uint32_t frameIdx = currentFrame_;
     const auto& ctx = RTX::g_ctx();
@@ -2321,83 +2325,6 @@ void VulkanRenderer::setRenderMode(int mode) noexcept {
     LOG_TRACE_CAT("RENDERER", "setRenderMode — COMPLETE");
 }
 
-void VulkanRenderer::handleResize(int w, int h) noexcept {
-    if (w <= 0 || h <= 0) {
-        LOG_WARN_CAT("Renderer", "Invalid resize {}x{} — noop", w, h);
-        return;
-    }
-    if (width_ == w && height_ == h) {
-        LOG_DEBUG_CAT("Renderer", "Resize noop — already {}x{}", w, h);
-        return;
-    }
-
-    LOG_INFO_CAT("Renderer", "Resize INITIATED: {}x{} → {}x{} — full rebuild in progress...", 
-                 width_, height_, w, h);
-
-    width_  = w;
-    height_ = h;
-    resetAccumulation_ = true;
-    firstSwapchainAcquire_ = true;
-
-    const auto& ctx = RTX::g_ctx();
-
-    // 1. Wait for GPU to finish all work — sacred silence
-    vkDeviceWaitIdle(ctx.device());
-
-    // 2. Recreate swapchain first (new images/views)
-    SWAPCHAIN.recreate(static_cast<uint32_t>(w), static_cast<uint32_t>(h));
-
-    // 3. Nuke everything that depends on old size
-    cleanupFramebuffers();
-    destroyRTOutputImages();
-    destroyAccumulationImages();
-    destroyDenoiserImage();
-    if (Options::RTX::ENABLE_ADAPTIVE_SAMPLING)
-        destroyNexusScoreImage();
-
-    // Shared staging & tonemap UBOs may have alignment/size dependencies
-    recreateTonemapUBOs();
-    if (RTX::g_ctx().sharedStagingEnc_ != 0) {
-        destroySharedStaging();
-        createSharedStaging();  // assume it can't fail or you handle it
-    }
-
-    // 4. Invalidate TLAS — CRITICAL: prevents binding destroyed handle
-    RTX::LAS::get().invalidate();  // generation++ → isValid() = false
-
-    // 5. Recreate all new-size render targets
-    createRTOutputImages();
-    createAccumulationImages();
-    createDenoiserImage();
-    if (Options::RTX::ENABLE_ADAPTIVE_SAMPLING) {
-        createNexusScoreImage(ctx.physicalDevice(), ctx.device(), ctx.commandPool(), ctx.graphicsQueue());
-    }
-
-    // 6. Recreate framebuffers with new swapchain images
-    createFramebuffers();
-
-    // 7. Wait again — GPU must be idle before re-recording commands
-    vkDeviceWaitIdle(ctx.device());
-
-    // 8. Re-record ALL command buffers (new images, new barriers)
-    createCommandBuffers();
-
-    // 9. DESCRIPTOR UPDATES — NOW SAFE & SILENT
-    //     TLAS is currently invalid → updateRTXDescriptors() will gracefully skip binding 0
-    //     All other bindings (images, buffers) are fresh and valid
-    for (uint32_t f = 0; f < Options::Performance::MAX_FRAMES_IN_FLIGHT; ++f) {
-        updateRTXDescriptors(f);           // ← skips TLAS if !isValid(), no spam, no crash
-    }
-    if (Options::RTX::ENABLE_ADAPTIVE_SAMPLING)
-        updateNexusDescriptors();
-    updateTonemapDescriptorsInitial();
-    updateDenoiserDescriptors();
-
-    LOG_SUCCESS_CAT("Renderer", 
-        "Resize COMPLETE → {}x{} — TLAS temporarily invalid (normal) — waiting for next scene build ♡", 
-        w, h);
-}
-
 void VulkanRenderer::drawLoadingOverlay() noexcept
 {
     // Skip overlay when everything is perfect — invisible like a ghost
@@ -2860,6 +2787,50 @@ VulkanRenderer& VulkanRenderer::getInstance()
         instance = reinterpret_cast<VulkanRenderer*>(placeholder);
     }
     return *instance;
+}
+
+// VulkanRenderer.cpp — REPLACE THE ENTIRE OLD handleResize WITH THIS ONE
+void VulkanRenderer::onWindowResize(uint32_t w, uint32_t h) noexcept
+{
+    if (w == 0 || h == 0) {
+        minimized_ = true;
+        return;
+    }
+    minimized_ = false;
+
+    if (width_ == static_cast<int>(w) && height_ == static_cast<int>(h)) return;
+
+    LOG_INFO_CAT("Renderer", "RESIZE FINAL → {}x{}", w, h);
+
+    width_  = static_cast<int>(w);
+    height_ = static_cast<int>(h);
+    resetAccumulation_ = true;
+    firstSwapchainAcquire_ = true;
+
+    const auto& ctx = RTX::g_ctx();
+    vkDeviceWaitIdle(ctx.device());  // ONE AND ONLY ONE
+
+    // Destroy old
+    cleanupFramebuffers();
+    destroyRTOutputImages();
+    destroyAccumulationImages();
+    destroyDenoiserImage();
+    destroyNexusScoreImage();
+    RTX::LAS::get().invalidate();
+
+    // Recreate
+    SWAPCHAIN.recreate(w, h);
+    createRTOutputImages();
+    createAccumulationImages();
+    if (Options::RTX::ENABLE_DENOISING) createDenoiserImage();
+    if (Options::RTX::ENABLE_ADAPTIVE_SAMPLING)
+        createNexusScoreImage(ctx.physicalDevice(), ctx.device(), ctx.commandPool(), ctx.graphicsQueue());
+
+    createFramebuffers();
+    commandBuffers_.clear();
+    createCommandBuffers();
+
+    LOG_SUCCESS_CAT("Renderer", "RESIZE COMPLETE — BUTTERY SMOOTH");
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
