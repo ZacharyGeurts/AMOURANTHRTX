@@ -25,14 +25,14 @@ inline void show(const char* title, int w, int h, const char* imagePath, const c
     LOG_INFO_CAT("SPLASH", "SPLASH START — {}x{}", w, h);
 
     // Video init
-    if (SDL_InitSubSystem(SDL_INIT_VIDEO) != 0) {
+    if (SDL_InitSubSystem(SDL_INIT_VIDEO) == 0) {
         LOG_ERROR_CAT("SPLASH", "SDL_InitSubSystem(VIDEO) failed: {}", SDL_GetError());
         return;
     }
 
     // Center on screen
     SDL_Rect bounds{};
-    if (SDL_GetDisplayBounds(0, &bounds) != 0) {
+    if (SDL_GetDisplayBounds(0, &bounds) == 0) {
         bounds.w = 1920; bounds.h = 1080;
     }
     int cx = bounds.x + (bounds.w - w) / 2;
@@ -84,7 +84,7 @@ inline void show(const char* title, int w, int h, const char* imagePath, const c
 
     // Audio — using your already-working AudioManager
     static bool audioInit = []() -> bool {
-        return SDL_InitSubSystem(SDL_INIT_AUDIO) == 0;
+        return SDL_InitSubSystem(SDL_INIT_AUDIO) != 0;
     }();
 
     static SDL3Audio::AudioManager* audio = nullptr;
