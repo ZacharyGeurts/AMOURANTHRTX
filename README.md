@@ -1,11 +1,9 @@
-
 ```
 git clone https://github.com/ZacharyGeurts/AMOURANTHRTX
 cd AMOURANTHRTX
 chmod +x linux.sh
 ./linux.sh clean
 ```
-
 Currently compiles and reaches render loop. Much more work needed yet.  
 I work fast but slow. Rather than rendering fast and working backwards,  
 HDR and incredible features come with.  
