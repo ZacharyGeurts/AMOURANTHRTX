@@ -64,12 +64,23 @@ static void detectBestPresentMode(VkPhysicalDevice phys, VkSurfaceKHR surface) {
     std::vector<VkPresentModeKHR> modes(count);
     vkGetPhysicalDeviceSurfacePresentModesKHR(phys, surface, &count, modes.data());
 
-    if (std::find(modes.begin(), modes.end(), VK_PRESENT_MODE_MAILBOX_KHR) != modes.end()) {
-        gSwapchainConfig.desiredMode = VK_PRESENT_MODE_MAILBOX_KHR;
-        LOG_SUCCESS_CAT("MAIN", "MAILBOX SELECTED — TRIPLE BUFFERED LOW LATENCY");
+    const char* driver = SDL_GetCurrentVideoDriver();
+    bool isX11 = (std::string(driver) == "x11");
+
+    VkPresentModeKHR preferred = VK_PRESENT_MODE_MAILBOX_KHR;
+    if (isX11) {
+        preferred = VK_PRESENT_MODE_IMMEDIATE_KHR;
+        LOG_INFO_CAT("MAIN", "Detected X11 — preferring IMMEDIATE for lowest latency. Enable force full compositing in nvidia-settings for no tearing.");
+    } else {
+        LOG_INFO_CAT("MAIN", "Detected Wayland or other — preferring MAILBOX for low latency no tearing.");
+    }
+
+    if (std::find(modes.begin(), modes.end(), preferred) != modes.end()) {
+        gSwapchainConfig.desiredMode = preferred;
+        LOG_SUCCESS_CAT("MAIN", "{} SELECTED — LOW LATENCY NO TEARING", preferred == VK_PRESENT_MODE_IMMEDIATE_KHR ? "IMMEDIATE" : "MAILBOX");
     } else if (std::find(modes.begin(), modes.end(), VK_PRESENT_MODE_IMMEDIATE_KHR) != modes.end()) {
         gSwapchainConfig.desiredMode = VK_PRESENT_MODE_IMMEDIATE_KHR;
-        LOG_INFO_CAT("MAIN", "IMMEDIATE SELECTED — MIN LATENCY");
+        LOG_INFO_CAT("MAIN", "IMMEDIATE SELECTED — MIN LATENCY (may tear on X11)");
     } else {
         gSwapchainConfig.desiredMode = VK_PRESENT_MODE_FIFO_KHR;
         LOG_INFO_CAT("MAIN", "FIFO SELECTED — VSYNCSAFE");
@@ -111,7 +122,7 @@ static void prePhase1_earlySdlInit() {
 static void phase1_splash() {
     bulkhead("PHASE 1: SPLASH");
     Splash::show("AMOURANTH RTX", 1280, 720, "assets/textures/ammo.png", "assets/audio/ammo.wav");
-    LOG_SUCCESS_CAT("MAIN", "Splash complete — PINK PHOTONS AWAKENED");
+    LOG_SUCCESS_CAT("MAIN", "Splash dismissed — handing over to main window");
 }
 
 static void phase2_mainWindow() {
@@ -132,20 +143,35 @@ static void phase2_mainWindow() {
 }
 
 static void phase3_vulkanContext(SDL_Window* window) {
-    bulkhead("PHASE 3: VULKAN CONTEXT");
-    if (!window) throw std::runtime_error("Null window");
+    bulkhead("PHASE 3: VULKAN CONTEXT + SWAPCHAIN FORGE");
+
+    if (!window) throw std::runtime_error("Null window in phase3");
 
     VkInstance instance = RTX::createVulkanInstanceWithSDL(window, true);
-    if (!instance) throw std::runtime_error("Vulkan instance failed");
+    if (!instance) throw std::runtime_error("Vulkan instance creation failed");
 
     RTX::initContext(instance, window, 3840, 2160);
     if (!RTX::g_ctx().isValid()) throw std::runtime_error("Vulkan context invalid");
 
     set_g_PhysicalDevice(RTX::g_ctx().physicalDevice());
+
+    // FIRST LIGHT MOMENT — SWAPCHAIN MANAGER MUST BE BORN BEFORE DETECT
+    LOG_SUCCESS_CAT("MAIN", "Forging SwapchainManager — PINK PHOTONS AWAKEN");
+    SwapchainManager::init(
+        instance,
+        RTX::g_ctx().physicalDevice(),
+        RTX::g_ctx().device(),
+        window,                    // ← now pass the window directly
+        3840, 2160
+    );
+
+    // Now safe to detect present modes — singleton exists
+    detectBestPresentMode(RTX::g_ctx().physicalDevice(), RTX::g_ctx().surface());
+
     SDL_ShowWindow(window);
     SDL_Delay(16);
-    detectBestPresentMode(RTX::g_ctx().physicalDevice(), RTX::g_ctx().surface());
-    LOG_SUCCESS_CAT("MAIN", "Vulkan empire forged — PHASE 3 COMPLETE");
+
+    LOG_SUCCESS_CAT("MAIN", "Vulkan empire + swapchain forged — FIRST LIGHT ACHIEVED");
 }
 
 static std::unique_ptr<Application> phase4_appAndRendererConstruction() {
