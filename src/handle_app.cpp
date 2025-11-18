@@ -4,8 +4,6 @@
 // =============================================================================
 
 #include "handle_app.hpp"
-#include "engine/Vulkan/Compositor.hpp"
-#include "engine/Vulkan/HDR_surface.hpp"
 #include "engine/GLOBAL/SwapchainManager.hpp"
 #include "engine/Vulkan/VulkanRenderer.hpp"
 #include "engine/SDL3/SDL3_window.hpp"
@@ -24,10 +22,15 @@ Application::Application(const std::string& title, int width, int height)
 {
     LOG_ATTEMPT_CAT("APP", "Forging Application(\"{}\", {}×{}) — VALHALLA v80 TURBO", title_, width_, height_);
 
-    Uint32 flags = SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_HIDDEN;
-    if (Options::Performance::ENABLE_IMGUI) flags |= SDL_WINDOW_RESIZABLE;
+    // THE WINDOW WAS ALREADY CREATED IN PHASE 2 — DO NOT CREATE IT AGAIN
+    // SDL3Window::create(...) ← HERESY — DELETED FOREVER
 
-    (void)SDL3Window::create(title_.c_str(), width_, height_, flags);
+    if (!SDL3Window::get()) {
+        throw std::runtime_error("FATAL: Main window not created before Application — phase order violated");
+    }
+
+    // Optional: update title if you really want (safe)
+    SDL_SetWindowTitle(SDL3Window::get(), title_.c_str());
 
     lastFrameTime_ = lastGrokTime_ = std::chrono::steady_clock::now();
 
@@ -120,13 +123,12 @@ void Application::processInput(float)
     };
 
     static bool fPressed = false, oPressed = false, tPressed = false;
-    static bool hPressed = false, hdrPressed = false;
+    static bool hPressed = false;
 
     edge(KeyBind::FULLSCREEN,    [this]() { toggleFullscreen(); }, fPressed,    "FULLSCREEN (F)");
     edge(KeyBind::OVERLAY,       [this]() { toggleOverlay(); },    oPressed,    "OVERLAY (O)");
     edge(KeyBind::TONEMAP,       [this]() { toggleTonemap(); },    tPressed,    "TONEMAP (T)");
     edge(KeyBind::HYPERTRACE,    [this]() { toggleHypertrace(); }, hPressed,    "HYPERTRACE (H)");
-    edge(KeyBind::HDR_TOGGLE,    [this]() { toggleHDR(); },        hdrPressed,  "HDR PRIME (F12)");
 
     // =============================================================================
     // ~ / ` KEY → TOGGLE FULL IMGUI DEBUG CONSOLE (GOD MODE)
@@ -170,27 +172,6 @@ void Application::processInput(float)
         }
         setQuit(true);
     }
-}
-
-void Application::toggleHDR() noexcept
-{
-    hdr_enabled_ = !hdr_enabled_;
-
-    if (hdr_enabled_) {
-        if (HDRCompositor::try_enable_hdr() && HDRSurface::g_hdr_surface()) {
-            HDRSurface::g_hdr_surface()->reprobe();
-            LOG_SUCCESS_CAT("APP", "{}HDR PRIME ACTIVATED — 10-bit Glory Locked | Pink Photons Rise{}", PARTY_PINK, RESET);
-        } else {
-            LOG_WARN_CAT("APP", "HDR Prime Failed — Peasant Fallback (8-bit SDR)");
-            hdr_enabled_ = false;
-        }
-    } else {
-        RTX::g_ctx().hdr_format = VK_FORMAT_B8G8R8A8_UNORM;
-        RTX::g_ctx().hdr_color_space = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
-        LOG_INFO_CAT("APP", "{}Peasant Mode: 8-bit SDR Mercy Granted{}", LIME_GREEN, RESET);
-    }
-
-    SWAPCHAIN.recreate(width_, height_);
 }
 
 void Application::render(float deltaTime)

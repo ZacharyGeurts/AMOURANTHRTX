@@ -21,7 +21,6 @@
 #include "engine/Vulkan/VulkanRenderer.hpp"
 #include "engine/Vulkan/VulkanCore.hpp"
 #include "engine/Vulkan/VulkanPipelineManager.hpp"
-#include "engine/Vulkan/Compositor.hpp"
 
 #include "handle_app.hpp"
 
@@ -155,21 +154,25 @@ static void phase3_vulkanContext(SDL_Window* window) {
 
     set_g_PhysicalDevice(RTX::g_ctx().physicalDevice());
 
-    // FIRST LIGHT MOMENT — SWAPCHAIN MANAGER MUST BE BORN BEFORE DETECT
     LOG_SUCCESS_CAT("MAIN", "Forging SwapchainManager — PINK PHOTONS AWAKEN");
     SwapchainManager::init(
         instance,
         RTX::g_ctx().physicalDevice(),
         RTX::g_ctx().device(),
-        window,                    // ← now pass the window directly
+        window,
         3840, 2160
     );
 
-    // Now safe to detect present modes — singleton exists
     detectBestPresentMode(RTX::g_ctx().physicalDevice(), RTX::g_ctx().surface());
 
+    // ←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←
+    // THIS IS THE ONE AND ONLY PLACE SDL_ShowWindow() IS ALLOWED
+    // Do it AFTER SwapchainManager exists and surface is valid
+    // This instantly shows window + triggers first swapchain creation
+    // HDR kicks in immediately, no blind delay, no double-show crash
+    // ←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←
     SDL_ShowWindow(window);
-    SDL_Delay(16);
+    SDL_RaiseWindow(window);  // optional: ensure it's on top
 
     LOG_SUCCESS_CAT("MAIN", "Vulkan empire + swapchain forged — FIRST LIGHT ACHIEVED");
 }
@@ -177,11 +180,15 @@ static void phase3_vulkanContext(SDL_Window* window) {
 static std::unique_ptr<Application> phase4_appAndRendererConstruction() {
     bulkhead("PHASE 4: APP + RENDERER");
 
-    auto app = std::make_unique<Application>("AMOURANTH RTX — VALHALLA v80 TURBO", 3840, 2160);
-    createGlobalRTX(3840, 2160, nullptr);
+    // 1. FIRST — forge the eternal g_rtx() — this must live longer than the renderer
+    createGlobalRTX(3840, 2160, nullptr);   // ← MUST BE FIRST
 
-    // Renderer now uses the already-initialized swapchain
-    auto renderer = std::make_unique<VulkanRenderer>(3840, 2160, SDL3Window::get(), !Options::Window::VSYNC);
+    // 2. NOW create the renderer — it safely binds to the CURRENT g_rtx()
+    auto renderer = std::make_unique<VulkanRenderer>(
+        3840, 2160, SDL3Window::get(), !Options::Window::VSYNC);
+
+    // 3. NOW create the Application and give it ownership
+    auto app = std::make_unique<Application>("AMOURANTH RTX — VALHALLA v80 TURBO", 3840, 2160);
     app->setRenderer(std::move(renderer));
 
     LOG_SUCCESS_CAT("MAIN", "Renderer ascended — RAY TRACING ONLINE — PINK PHOTONS ETERNAL");
