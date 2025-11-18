@@ -60,6 +60,8 @@ using VulkanRTXDetail::g_mappedBase;
 using VulkanRTXDetail::g_mappedOffset;
 using VulkanRTXDetail::STAGING_POOL_SIZE;
 
+static std::unique_ptr<RTX::PipelineManager> g_pipelineManager = nullptr;
+
 // =============================================================================
 // AMOURANTH RTX — ETERNAL EXTENSION MANIFEST — v80 VALHALLA TURBO (2025+)
 // PINK PHOTONS DEMAND MAXIMUM FUTURE-PROOFING — COMPILABLE EDITION
@@ -1727,6 +1729,19 @@ void loadRayTracingExtensions()
 
     // Unreachable, but silences warnings
     return VK_NULL_HANDLE;
+}
+
+// GLOBAL IMMORTAL PIPELINE MANAGER — PINK PHOTONS ETERNAL
+static std::unique_ptr<PipelineManager> g_pipelineManager = nullptr;
+
+void createGlobalPipelineManager(VkDevice device, VkPhysicalDevice phys)
+{
+    g_pipelineManager = std::make_unique<PipelineManager>(device, phys);
+}
+
+PipelineManager* getGlobalPipelineManager()
+{
+    return g_pipelineManager.get();
 }
 
 } // RTX

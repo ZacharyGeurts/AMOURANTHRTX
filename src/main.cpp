@@ -150,11 +150,15 @@ static void phase3_vulkanContext(SDL_Window* window) {
 
 static std::unique_ptr<Application> phase4_appAndRendererConstruction() {
     bulkhead("PHASE 4: APP + RENDERER");
+
     auto app = std::make_unique<Application>("AMOURANTH RTX — VALHALLA v80 TURBO", 3840, 2160);
     createGlobalRTX(3840, 2160, nullptr);
+
+    // Renderer now uses the already-initialized swapchain
     auto renderer = std::make_unique<VulkanRenderer>(3840, 2160, SDL3Window::get(), !Options::Window::VSYNC);
     app->setRenderer(std::move(renderer));
-    LOG_SUCCESS_CAT("MAIN", "FIRST LIGHT ACHIEVED — PHASE 4 COMPLETE");
+
+    LOG_SUCCESS_CAT("MAIN", "Renderer ascended — RAY TRACING ONLINE — PINK PHOTONS ETERNAL");
     return app;
 }
 

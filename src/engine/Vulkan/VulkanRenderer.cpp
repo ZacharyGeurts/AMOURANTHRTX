@@ -410,7 +410,7 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, bool o
     // STEP 8 — Initialize Swapchain (uses global surface from RTX::initContext)
     // =============================================================================
     LOG_TRACE_CAT("RENDERER", "=== STACK BUILD ORDER STEP 8: Initialize Swapchain ===");
-    SWAPCHAIN.init(c.instance(), c.physicalDevice(), c.device(), c.surface(), width, height);
+    SWAPCHAIN.init(c.instance(), c.physicalDevice(), c.device(), window, width, height);
 
     if (SWAPCHAIN.images().empty()) {
         LOG_FATAL_CAT("RENDERER", "Swapchain has zero images — initialization failed");
@@ -1498,42 +1498,60 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
         return;
     }
-	RTX::ImGuiStoneKeyShield::newFrame();
-    const uint32_t frameIdx = currentFrame_;
+
+    RTX::ImGuiStoneKeyShield::newFrame();
+    const uint32_t frameIdx = currentFrame_ % Options::Performance::MAX_FRAMES_IN_FLIGHT;
     const auto& ctx = RTX::g_ctx();
 
     vkWaitForFences(ctx.device(), 1, &inFlightFences_[frameIdx], VK_TRUE, UINT64_MAX);
     vkResetFences(ctx.device(), 1, &inFlightFences_[frameIdx]);
 
     uint32_t imageIndex = 0;
-    VkResult acq = vkAcquireNextImageKHR(ctx.device(), SWAPCHAIN.swapchain(), 1'000'000,
-                                         imageAvailableSemaphores_[frameIdx], VK_NULL_HANDLE, &imageIndex);
+    VkResult acquireResult = vkAcquireNextImageKHR(
+        ctx.device(),
+        SWAPCHAIN.swapchain(),
+        1'000'000'000ULL,  // 1 second timeout
+        imageAvailableSemaphores_[frameIdx],
+        VK_NULL_HANDLE,
+        &imageIndex
+    );
 
-    if (acq == VK_ERROR_OUT_OF_DATE_KHR || acq == VK_SUBOPTIMAL_KHR) {
+    // ──────── THIS IS THE FIX — HANDLE OUT-OF-DATE ON FIRST FRAME ────────
+    if (acquireResult == VK_ERROR_OUT_OF_DATE_KHR ||
+        acquireResult == VK_SUBOPTIMAL_KHR ||
+        acquireResult == VK_ERROR_SURFACE_LOST_KHR)
+    {
+        LOG_WARN_CAT("RENDER", "Swapchain out-of-date/surface lost on acquire — recreating (frame {})", frameNumber_);
         SWAPCHAIN.recreate(width_, height_);
         currentFrame_ = (currentFrame_ + 1) % Options::Performance::MAX_FRAMES_IN_FLIGHT;
-        return;
+        return;  // Skip this frame — next one will work
     }
-    if (acq != VK_SUCCESS) {
+
+    if (acquireResult != VK_SUCCESS) {
+        LOG_ERROR_CAT("RENDER", "vkAcquireNextImageKHR failed: {} — skipping frame", (int)acquireResult);
         currentFrame_ = (currentFrame_ + 1) % Options::Performance::MAX_FRAMES_IN_FLIGHT;
         return;
     }
+    // ─────────────────────────────────────────────────────────────────────
 
     VkCommandBuffer cmd = commandBuffers_[frameIdx];
     vkResetCommandBuffer(cmd, 0);
-    VkCommandBufferBeginInfo beginInfo{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, nullptr, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT};
+
+    VkCommandBufferBeginInfo beginInfo = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     vkBeginCommandBuffer(cmd, &beginInfo);
-    // SWAPCHAIN: UNDEFINED/PRESENT → GENERAL
+
+    // ── Swapchain image: UNDEFINED/PRESENT → GENERAL ──
     {
-        VkImageMemoryBarrier barrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+        VkImageMemoryBarrier barrier = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
         barrier.oldLayout = firstSwapchainAcquire_ ? VK_IMAGE_LAYOUT_UNDEFINED : VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
         barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
         barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         barrier.image = SWAPCHAIN.images()[imageIndex];
-        barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+        barrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
         barrier.srcAccessMask = 0;
-        barrier.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT; // for compute/RT writes
+        barrier.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
 
         vkCmdPipelineBarrier(cmd,
             VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
@@ -1542,13 +1560,12 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     }
     firstSwapchainAcquire_ = false;
 
-    // Accumulation reset — MUST BE BEFORE any transition
+    // ── Clear accumulation if needed ──
     if (resetAccumulation_) {
-        const VkClearColorValue clear = {{0,0,0,0}};
-        const VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-
-        auto clearImg = [cmd, clear, range](VkImage i) {
-            if (i) vkCmdClearColorImage(cmd, i, VK_IMAGE_LAYOUT_GENERAL, &clear, 1, &range);
+        VkClearColorValue clear{{0,0,0,0}};
+        VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+        auto clearImg = [&](VkImage img) {
+            if (img) vkCmdClearColorImage(cmd, img, VK_IMAGE_LAYOUT_GENERAL, &clear, 1, &range);
         };
 
         for (auto& h : rtOutputImages_) clearImg(*h);
@@ -1561,78 +1578,56 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     updateUniformBuffer(frameIdx, camera, getJitter());
     updateTonemapUniform(frameIdx);
 
-    // CRITICAL FIX #1: ALWAYS update RTX descriptors — even when TLAS is rebuilding
-    // (Your PipelineManager now always binds a valid TLAS handle, even dummy)
     updateRTXDescriptors(frameIdx);
     if (Options::RTX::ENABLE_ADAPTIVE_SAMPLING) updateNexusDescriptors();
 
     recordRayTracingCommandBuffer(cmd);
-    // FIXED: GENERAL → SHADER_READ_ONLY_OPTIMAL — layout mismatch dead
+
+    // ── RT Output → SHADER_READ_ONLY_OPTIMAL ──
     {
-        VkImageMemoryBarrier barrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
-        barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-        barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-        barrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
-        barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        barrier.image = *rtOutputImages_[frameIdx % rtOutputImages_.size()];
-        barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+        VkImageMemoryBarrier b = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
+        b.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+        b.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        b.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+        b.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        b.image = *rtOutputImages_[frameIdx % rtOutputImages_.size()];
+        b.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
 
         vkCmdPipelineBarrier(cmd,
             VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
-            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-            0, 0, nullptr, 0, nullptr, 1, &barrier);
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+            0, 0, nullptr, 0, nullptr, 1, &b);
     }
 
-    // CRITICAL FIX #2: Transition RT output from GENERAL → SHADER_READ_ONLY_OPTIMAL
-    // This eliminates "expects SHADER_READ_ONLY_OPTIMAL but is GENERAL"
-    {
-        VkImageMemoryBarrier barrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
-        barrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
-        barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-        barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-        barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        barrier.image = *rtOutputImages_[frameIdx % rtOutputImages_.size()];
-        barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    VkImageView tonemapInput = denoisingEnabled_ && denoiserView_.valid()
+        ? *denoiserView_
+        : *rtOutputViews_[frameIdx % rtOutputViews_.size()];
 
-        vkCmdPipelineBarrier(cmd,
-            VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-            0, 0, nullptr, 0, nullptr, 1, &barrier);
-    }
+    updateTonemapDescriptor(frameIdx, tonemapInput, SWAPCHAIN.views()[imageIndex]);
 
-    VkImageView tonemapSrc = denoisingEnabled_ && denoiserView_.valid()
-                           ? *denoiserView_
-                           : *rtOutputViews_[frameIdx % rtOutputViews_.size()];
-
-    updateTonemapDescriptor(frameIdx, tonemapSrc, SWAPCHAIN.views()[imageIndex]);
     if (denoisingEnabled_) performDenoisingPass(cmd);
     performTonemapPass(cmd, frameIdx, imageIndex);
 
-    // FINAL: GENERAL → PRESENT_SRC_KHR
+    // ── Swapchain image → PRESENT ──
     {
-        VkImageMemoryBarrier barrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
-        barrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
-        barrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-        barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;  // tonemap wrote to swapchain image
-        barrier.dstAccessMask = 0;
-        barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        barrier.image = SWAPCHAIN.images()[imageIndex];
-        barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+        VkImageMemoryBarrier b = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
+        b.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+        b.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+        b.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+        b.dstAccessMask = 0;
+        b.image = SWAPCHAIN.images()[imageIndex];
+        b.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
 
         vkCmdPipelineBarrier(cmd,
-            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
             VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
-            0, 0, nullptr, 0, nullptr, 1, &barrier);
+            0, 0, nullptr, 0, nullptr, 1, &b);
     }
 
     vkEndCommandBuffer(cmd);
 
-    VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT |
-                                     VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR;
-    VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
+    VkSubmitInfo submit = { VK_STRUCTURE_TYPE_SUBMIT_INFO };
+    VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
     submit.waitSemaphoreCount = 1;
     submit.pWaitSemaphores = &imageAvailableSemaphores_[frameIdx];
     submit.pWaitDstStageMask = &waitStage;
@@ -1641,43 +1636,36 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     submit.signalSemaphoreCount = 1;
     submit.pSignalSemaphores = &renderFinishedSemaphores_[frameIdx];
 
-    vkQueueSubmit(ctx.graphicsQueue(), 1, &submit, inFlightFences_[frameIdx]);
+    VK_CHECK(vkQueueSubmit(ctx.graphicsQueue(), 1, &submit, inFlightFences_[frameIdx]), "Queue submit");
 
-    VkSwapchainKHR swapchainHandle = SWAPCHAIN.swapchain();
-    VkPresentInfoKHR present{VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};
+    VkPresentInfoKHR present = { VK_STRUCTURE_TYPE_PRESENT_INFO_KHR };
     present.waitSemaphoreCount = 1;
     present.pWaitSemaphores = &renderFinishedSemaphores_[frameIdx];
     present.swapchainCount = 1;
-    present.pSwapchains = &swapchainHandle;
+    VkSwapchainKHR swapchain = SWAPCHAIN.swapchain();
+    present.pSwapchains = &swapchain;
     present.pImageIndices = &imageIndex;
 
-    VkResult pres = vkQueuePresentKHR(ctx.presentQueue(), &present);
-    if (pres == VK_ERROR_OUT_OF_DATE_KHR || pres == VK_SUBOPTIMAL_KHR) {
+    VkResult presentResult = vkQueuePresentKHR(ctx.presentQueue(), &present);
+
+    if (presentResult == VK_ERROR_OUT_OF_DATE_KHR || presentResult == VK_SUBOPTIMAL_KHR) {
         SWAPCHAIN.recreate(width_, height_);
+    } else if (presentResult != VK_SUCCESS) {
+        LOG_ERROR_CAT("RENDER", "vkQueuePresentKHR failed: {}", (int)presentResult);
     }
 
+    // ImGui (only if enabled)
     if (Options::Performance::ENABLE_IMGUI && app_ && app_->showImGuiDebugConsole_) {
         ImGui_ImplVulkan_NewFrame();
         ImGui_ImplSDL3_NewFrame();
         ImGui::NewFrame();
         app_->renderImGuiDebugConsole();
         ImGui::Render();
-
         RTX::ImGuiStoneKeyShield::renderDrawData(ImGui::GetDrawData(), cmd);
     }
 
     currentFrame_ = (currentFrame_ + 1) % Options::Performance::MAX_FRAMES_IN_FLIGHT;
     frameNumber_++;
-
-    RTX::ImGuiStoneKeyShield::newFrame();
-
-    if (Options::Debug::ENABLE_CELEBRATION_MODE && frameNumber_ == 5) {
-        VkClearColorValue pink{{1.0f, 0.0f, 1.0f, 1.0f}};
-        VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-        vkCmdClearColorImage(cmd, SWAPCHAIN.images()[imageIndex],
-                             VK_IMAGE_LAYOUT_GENERAL, &pink, 1, &range);
-        LOG_SUCCESS_CAT("CELEBRATION", "P I N K  F L A S H — VALHALLA ACKNOWLEDGED");
-    }
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -2800,17 +2788,13 @@ void VulkanRenderer::onWindowResize(uint32_t w, uint32_t h) noexcept
 
     if (width_ == static_cast<int>(w) && height_ == static_cast<int>(h)) return;
 
-    LOG_INFO_CAT("Renderer", "RESIZE FINAL → {}x{}", w, h);
-
-    width_  = static_cast<int>(w);
-    height_ = static_cast<int>(h);
+    width_ = w; height_ = h;
     resetAccumulation_ = true;
     firstSwapchainAcquire_ = true;
 
     const auto& ctx = RTX::g_ctx();
-    vkDeviceWaitIdle(ctx.device());  // ONE AND ONLY ONE
+    vkDeviceWaitIdle(ctx.device());
 
-    // Destroy old
     cleanupFramebuffers();
     destroyRTOutputImages();
     destroyAccumulationImages();
@@ -2818,8 +2802,8 @@ void VulkanRenderer::onWindowResize(uint32_t w, uint32_t h) noexcept
     destroyNexusScoreImage();
     RTX::LAS::get().invalidate();
 
-    // Recreate
     SWAPCHAIN.recreate(w, h);
+
     createRTOutputImages();
     createAccumulationImages();
     if (Options::RTX::ENABLE_DENOISING) createDenoiserImage();
@@ -2829,8 +2813,6 @@ void VulkanRenderer::onWindowResize(uint32_t w, uint32_t h) noexcept
     createFramebuffers();
     commandBuffers_.clear();
     createCommandBuffers();
-
-    LOG_SUCCESS_CAT("Renderer", "RESIZE COMPLETE — BUTTERY SMOOTH");
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

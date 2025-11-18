@@ -34,6 +34,9 @@
 #include <iostream>
 #include <cstdlib>
 
+void createGlobalPipelineManager(VkDevice device, VkPhysicalDevice phys);
+RTX::PipelineManager* getGlobalPipelineManager();
+
 // =============================================================================
 // Vulkan Debug Callback
 // =============================================================================
