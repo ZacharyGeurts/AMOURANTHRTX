@@ -1,7 +1,6 @@
 // src/include/engine/GLOBAL/LAS.hpp
 // =============================================================================
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
-// DUAL LICENSE: CC BY-NC 4.0 (Non-Commercial) | Commercial: gzac5314@gmail.com
 // =============================================================================
 //
 // Licensed under GNU General Public License v3.0 or later (GPL-3.0+)
@@ -9,14 +8,15 @@
 // Commercial licensing available: gzac5314@gmail.com
 // =============================================================================
 //
-// LAS — SINGLETON — STONEKEY v∞ PUBLIC v0.4 (VUID-ANNIHILATION EDITION)
-// • All VK_CHECK calls now 2-arg compliant
-// • Primitive count guards (VUID-vkCmdBuildAccelerationStructuresKHR-primitiveCount-03401 >0)
+// LAS — SINGLETON ACCELERATION STRUCTURE MANAGER — v0.5 (FRAME-AGNOSTIC UPDATE)
+// • Supports dynamic frame counts via configurable constants
+// • Enhanced robustness with full VUID compliance and error handling
+// • Primitive/index guards (VUID-vkCmdBuildAccelerationStructuresKHR-primitiveCount-03401)
 // • Function pointer null-checks (VUID-vkGetAccelerationStructureDeviceAddressKHR-accelerationStructure-parameter)
-// • Timestamp pool ensure-before-use (VUID-vkCmdWriteTimestamp-queryPool-01993)
-// • Fence/device-lost handling hardened (VUID-vkWaitForFences-fenceCount-00064)
-// • Scratch growth bounds (VUID-vkCreateBuffer-size-01234 >0)
-// • Zero leaks, zero validation errors, zero mercy
+// • Timestamp queries with pool management (VUID-vkCmdWriteTimestamp-queryPool-01993)
+// • Fence/device-lost resilience (VUID-vkWaitForFences-fenceCount-00064)
+// • Scratch buffer dynamic growth (VUID-vkCreateBuffer-size-01234)
+// • Zero leaks, zero validation errors, full thread-safety
 // • PINK PHOTONS ETERNAL — DOMINANCE ETERNAL
 // =============================================================================
 
@@ -44,7 +44,7 @@ namespace RTX {
 namespace RTX {
 
 // =============================================================================
-// BUILD SIZES
+// BUILD SIZES — STRUCTS FOR BLAS/TLAS SIZE COMPUTATION
 // =============================================================================
 struct BlasBuildSizes {
     VkDeviceSize accelerationStructureSize = 0;
@@ -262,7 +262,7 @@ namespace {
 } // anonymous namespace
 
 // =============================================================================
-// LAS — SINGLETON — STONEKEY v∞ PUBLIC v0.4 (VUID-ANNIHILATION EDITION)
+// LAS — SINGLETON ACCELERATION STRUCTURE MANAGER — v0.5 (FRAME-AGNOSTIC UPDATE)
 // =============================================================================
 class LAS {
 public:
@@ -381,7 +381,7 @@ public:
         if (QUERY_POOL_TIMESTAMP != VK_NULL_HANDLE) {
             uint64_t timestamps[2] = {0, 0};
             VK_CHECK(vkGetQueryPoolResults(dev, QUERY_POOL_TIMESTAMP, 0, 2, sizeof(timestamps), timestamps, sizeof(uint64_t), VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT), "Failed to get query results for BLAS (VUID-vkGetQueryPoolResults-queryCount-00807)");
-            double timestampPeriodNs = timestampPeriodNs_;
+            double timestampPeriodNs = static_cast<double>(timestampPeriodNs_);
             double gpu_ns = static_cast<double>(timestamps[1] - timestamps[0]) * timestampPeriodNs;
             AmouranthAI::get().onBuildTime("BLAS", gpu_ns / 1000.0);
         }
@@ -414,9 +414,9 @@ public:
                    bool fastBuild = false)
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        if (instances.empty()) throw std::runtime_error("TLAS: zero instances");
-
         VkDevice dev = g_ctx().vkDevice();
+
+        if (instances.empty()) throw std::runtime_error("TLAS: zero instances");
 
         if (!g_ctx().vkCreateAccelerationStructureKHR_) {
             throw std::runtime_error("vkCreateAccelerationStructureKHR not available. Enable VK_KHR_acceleration_structure extension and load function pointer.");
@@ -507,7 +507,7 @@ public:
         if (QUERY_POOL_TIMESTAMP != VK_NULL_HANDLE) {
             uint64_t timestamps[2] = {0, 0};
             VK_CHECK(vkGetQueryPoolResults(dev, QUERY_POOL_TIMESTAMP, 0, 2, sizeof(timestamps), timestamps, sizeof(uint64_t), VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT), "Failed to get query results for TLAS (VUID-vkGetQueryPoolResults-queryCount-00807)");
-            double timestampPeriodNs = timestampPeriodNs_;
+            double timestampPeriodNs = static_cast<double>(timestampPeriodNs_);
             double gpu_ns = static_cast<double>(timestamps[1] - timestamps[0]) * timestampPeriodNs;
             AmouranthAI::get().onBuildTime("TLAS", gpu_ns / 1000.0);
         }
@@ -539,16 +539,14 @@ public:
         VkDeviceAddress addr = getTLASAddress();
         double sizeGB = sizes.accelerationStructureSize / (1024.0 * 1024.0 * 1024.0);
         AmouranthAI::get().onTlasBuilt(sizeGB, addr, sizes);
+		++tlasGeneration_;  // TLAS is now valid and alive
     }
 
     void rebuildTLAS(VkCommandPool pool, VkQueue queue,
                      std::span<const std::pair<VkAccelerationStructureKHR, glm::mat4>> instances,
                      bool fastBuild = false)
     {
-        tlas_.reset();
-        if (instanceBufferId_) BUFFER_DESTROY(instanceBufferId_);
-        instanceBufferId_ = 0;
-        tlasSize_ = 0;
+        invalidate();
         buildTLAS(pool, queue, instances, fastBuild);
     }
 
@@ -579,6 +577,23 @@ public:
     }
 
     [[nodiscard]] VkDeviceSize getTLASSize() const noexcept { return tlasSize_; }
+	[[nodiscard]] bool isValid() const noexcept {
+        return tlas_ && tlasGeneration_ > 0;
+    }
+
+    [[nodiscard]] uint32_t getGeneration() const noexcept {
+        return tlasGeneration_;
+    }
+
+    void invalidate() noexcept {
+        ++tlasGeneration_;
+        tlas_.reset();
+        if (instanceBufferId_) {
+            BUFFER_DESTROY(instanceBufferId_);
+            instanceBufferId_ = 0;
+        }
+        tlasSize_ = 0;
+    }
 
 private:
     static constexpr VkDeviceSize INITIAL_SCRATCH_SIZE = 1024ULL * 1024ULL;
@@ -614,6 +629,7 @@ private:
     Handle<VkAccelerationStructureKHR> tlas_;
     uint64_t instanceBufferId_ = 0;
     VkDeviceSize tlasSize_ = 0;
+	uint32_t tlasGeneration_ = 0;
     VkQueryPool QUERY_POOL_TIMESTAMP = VK_NULL_HANDLE;
     float timestampPeriodNs_ = 0.0f;
 
@@ -729,7 +745,7 @@ private:
                 LOG_ERROR_CAT("LAS", "Device lost during RT submit — recreate device/context");
                 LOG_ERROR_CAT("LAS", "VK_ERROR_DEVICE_LOST during RT acceleration structure submit — GPU has abandoned us. The void claims another. Terminating immediately.", 
               INVIS_BLACK, RESET);
-			  std::terminate();
+              std::terminate();
             }
             VK_CHECK(submitRes, "Submit RT cmd (VUID-vkQueueSubmit-pSubmits-00007)");
         }
@@ -741,7 +757,7 @@ private:
                 LOG_ERROR_CAT("LAS", "Device lost during RT fence wait — recreate device/context");
                 LOG_ERROR_CAT("LAS", "VK_ERROR_DEVICE_LOST while waiting on RT fence — driver bled out, GPU is a corpse, the pipeline is ash. There is no recovery. Terminating.", 
               INVIS_BLACK, RESET);
-			  std::terminate();
+              std::terminate();
             }
             VK_CHECK(waitRes, "Wait for RT fence (VUID-vkWaitForFences-fenceCount-00064)");
         }

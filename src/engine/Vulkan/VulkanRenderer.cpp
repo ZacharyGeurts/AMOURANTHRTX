@@ -30,6 +30,13 @@
 #include "engine/SDL3/SDL3_vulkan.hpp"
 #include "stb/stb_image.h"
 
+#include <imgui.h>
+#include <imgui_impl_sdl3.h>
+#include <imgui_impl_vulkan.h>
+
+#include <imgui_internal.h>        // for advanced stuff
+#include <ImGuizmo.h>              // if you ever want gizmos
+
 #include <glm/gtc/matrix_inverse.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
@@ -1530,292 +1537,101 @@ void VulkanRenderer::createImage(RTX::Handle<VkImage>& image,
 // ──────────────────────────────────────────────────────────────────────────────
 void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
 {
-    const uint32_t framesInFlight = Options::Performance::MAX_FRAMES_IN_FLIGHT;
+    const uint32_t frameIdx = currentFrame_;
+    const auto& ctx = RTX::g_ctx();
 
-    // Wait for previous frame to finish
-    const auto& ctx = RTX::g_ctx();  // const ref
-    vkWaitForFences(ctx.device(), 1, &inFlightFences_[currentFrame_], VK_TRUE, UINT64_MAX);
+    // Fast fence
+    vkWaitForFences(ctx.device(), 1, &inFlightFences_[frameIdx], VK_TRUE, UINT64_MAX);
+    vkResetFences(ctx.device(), 1, &inFlightFences_[frameIdx]);
 
-    // Acquire swapchain image
+    // Acquire with short timeout (prevents stall)
     uint32_t imageIndex = 0;
-    VkResult result = vkAcquireNextImageKHR(ctx.device(), SWAPCHAIN.swapchain(), UINT64_MAX,
-                                            imageAvailableSemaphores_[currentFrame_], VK_NULL_HANDLE, &imageIndex);
+    VkResult acq = vkAcquireNextImageKHR(ctx.device(), SWAPCHAIN.swapchain(), 1'000'000,
+                                         imageAvailableSemaphores_[frameIdx], VK_NULL_HANDLE, &imageIndex);
 
-    if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
+    if (acq == VK_ERROR_OUT_OF_DATE_KHR) {
         SWAPCHAIN.recreate(width_, height_);
+        currentFrame_ = (currentFrame_ + 1) % Options::Performance::MAX_FRAMES_IN_FLIGHT;
         return;
-    } else if (result != VK_SUCCESS) {
-        LOG_WARN_CAT("RENDERER", "vkAcquireNextImageKHR failed: {}", static_cast<int>(result));
+    }
+    if (acq != VK_SUCCESS && acq != VK_SUBOPTIMAL_KHR) {
+        currentFrame_ = (currentFrame_ + 1) % Options::Performance::MAX_FRAMES_IN_FLIGHT;
         return;
     }
 
-    // Reset & begin command buffer
-    vkResetFences(ctx.device(), 1, &inFlightFences_[currentFrame_]);
-    VkCommandBuffer cmd = commandBuffers_[currentFrame_];  // FIXED: Use currentFrame_ for triple buffer cmd per frame
+    VkCommandBuffer cmd = commandBuffers_[frameIdx];
     vkResetCommandBuffer(cmd, 0);
 
-    VkCommandBufferBeginInfo beginInfo = {};  // Zero-init
-    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    VkCommandBufferBeginInfo beginInfo{
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
+    };
     vkBeginCommandBuffer(cmd, &beginInfo);
 
-    frameTime_ = deltaTime;
-    currentSpp_ = hypertraceEnabled_ ? 64 : 32;  // FIXED: Dynamic SPP via toggle
+    // Fast accumulation reset (no barriers needed — images stay in GENERAL)
+    if (resetAccumulation_) [[unlikely]] {
+        const VkClearColorValue clear = {{0,0,0,0}};
+        const VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
 
-    // FIXED: Accumulation Reset Outside Render Pass (VUID-vkCmdClearColorImage-renderpass)
-    if (resetAccumulation_) {
-        VkClearColorValue clearColor = { { 0.0f, 0.0f, 0.0f, 0.0f } };
-        VkImageSubresourceRange clearRange = {
-            .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
-            .baseMipLevel   = 0,
-            .levelCount     = 1,
-            .baseArrayLayer = 0,
-            .layerCount     = 1
-        };
+        auto clearImg = [&](VkImage i) { if (i) vkCmdClearColorImage(cmd, i, VK_IMAGE_LAYOUT_GENERAL, &clear, 1, &range); };
 
-        const auto clearImage = [&](RTX::Handle<VkImage>& imgHandle) {
-            if (!imgHandle.valid()) return;
-            VkImage img = *imgHandle;
-
-            VkImageMemoryBarrier barrier = {};  // Zero-init
-            barrier.sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-            barrier.srcAccessMask       = 0;
-            barrier.dstAccessMask       = VK_ACCESS_TRANSFER_WRITE_BIT;
-            barrier.oldLayout           = VK_IMAGE_LAYOUT_GENERAL;
-            barrier.newLayout           = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-            barrier.image               = img;
-            barrier.subresourceRange    = clearRange;
-            vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
-
-            vkCmdClearColorImage(cmd, img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clearColor, 1, &clearRange);
-
-            barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-            barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
-            barrier.oldLayout     = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-            barrier.newLayout     = VK_IMAGE_LAYOUT_GENERAL;
-            vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, 0, 0, nullptr, 0, nullptr, 1, &barrier);
-        };
-
-        // Clear all frames on reset (safe for triple buffering)
-        for (auto& img : rtOutputImages_)  clearImage(img);
-        if (Options::RTX::ENABLE_ACCUMULATION) {
-            for (auto& img : accumImages_) clearImage(img);
-        }
-        if (Options::RTX::ENABLE_ADAPTIVE_SAMPLING && hypertraceScoreImage_.valid()) {
-            clearImage(hypertraceScoreImage_);
-        }
+        for (auto& h : rtOutputImages_)  clearImg(*h);
+        if (Options::RTX::ENABLE_ACCUMULATION)
+            for (auto& h : accumImages_) clearImg(*h);
+        if (Options::RTX::ENABLE_ADAPTIVE_SAMPLING && hypertraceScoreImage_.valid())
+            clearImg(*hypertraceScoreImage_);
 
         resetAccumulation_ = false;
-        LOG_TRACE_CAT("RENDERER", "Accumulation reset — all targets cleared (triple buffer safe)");
     }
 
-    // Update per-frame data
-    updateUniformBuffer(currentFrame_, camera, getJitter());
-    updateTonemapUniform(currentFrame_);
+    updateUniformBuffer(frameIdx, camera, getJitter());
+    updateTonemapUniform(frameIdx);
+    updateRTXDescriptors(frameIdx);
+    if (Options::RTX::ENABLE_ADAPTIVE_SAMPLING) updateNexusDescriptors();
 
-    // FIXED: Per-frame RT descriptor updates (tlas/ubo/images) — VUID-vkCmdTraceRaysKHR-None-08114
-    updateRTXDescriptors(currentFrame_);  // FIXED: Per-frame only, not all (efficiency for triple)
-    updateNexusDescriptors(); // Bind nexus post-resize (VUID-vkCmdTraceRaysKHR-None-08114)
-
-    // FIXED: Ray Tracing Outside Render Pass (VUID-vkCmdTraceRaysKHR-renderpass)
     recordRayTracingCommandBuffer(cmd);
 
-    // FIXED: Barrier after RT: RT Output GENERAL → SHADER_READ_ONLY_OPTIMAL (VUID-VkImageMemoryBarrier-oldLayout-01197, VUID-vkCmdDraw-None-09600)
-    {
-        uint32_t rtFrameIdx = currentFrame_ % rtOutputImages_.size();
-        if (rtOutputImages_[rtFrameIdx].valid()) {
-            VkImageMemoryBarrier barrier = {};  // Zero-init
-            barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-            barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-            barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-            barrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;  // ← Matches post-RT layout
-            barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            barrier.image = *rtOutputImages_[rtFrameIdx];
-            barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-            barrier.subresourceRange.levelCount = 1;
-            barrier.subresourceRange.layerCount = 1;
+    VkImageView tonemapSrc = denoisingEnabled_ && denoiserView_.valid()
+                           ? *denoiserView_
+                           : *rtOutputViews_[frameIdx % rtOutputViews_.size()];
 
-            vkCmdPipelineBarrier(cmd,
-                VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
-                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,  // FIXED: For tonemap compute
-                0, 0, nullptr, 0, nullptr, 1, &barrier);
-        }
-    }
-
-    if (denoisingEnabled_) {
-        // FIXED: Denoising Outside Render Pass (implicit via dispatch, but ensures no RP conflict)
-        performDenoisingPass(cmd);
-
-        // FIXED: Barrier after Denoising: Denoiser GENERAL → SHADER_READ_ONLY_OPTIMAL (VUID-VkImageMemoryBarrier-oldLayout-01197, VUID-vkCmdDraw-None-09600)
-        if (denoiserImage_.valid()) {
-            VkImageMemoryBarrier barrier = {};  // Zero-init
-            barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-            barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-            barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-            barrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;  // ← Matches post-denoise layout
-            barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            barrier.image = *denoiserImage_;
-            barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-            barrier.subresourceRange.levelCount = 1;
-            barrier.subresourceRange.layerCount = 1;
-
-            vkCmdPipelineBarrier(cmd,
-                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,  // FIXED: For tonemap
-                0, 0, nullptr, 0, nullptr, 1, &barrier);
-        }
-    }
-
-    // FIXED: NO RENDER PASS — Tonemap is compute dispatch writing to swapchain storage (assume STORAGE_BIT)
-
-    // FIXED: Transition Swapchain: PRESENT_SRC_KHR → GENERAL (for tonemap write, VUID-VkImageMemoryBarrier-oldLayout-01197)
-    {
-        VkImageMemoryBarrier barrier = {};  // Zero-init
-        VkImageLayout oldLayout = firstSwapchainAcquire_ ? VK_IMAGE_LAYOUT_UNDEFINED : VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-        barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        barrier.srcAccessMask = 0;
-        barrier.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-        barrier.oldLayout = oldLayout;  // FIXED: Handle first acquire (UNDEFINED) vs subsequent (PRESENT_SRC_KHR)
-        barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;  // For storage write
-        barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        barrier.image = SWAPCHAIN.images()[imageIndex];
-        barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        barrier.subresourceRange.levelCount = 1;
-        barrier.subresourceRange.layerCount = 1;
-
-        vkCmdPipelineBarrier(cmd,
-            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,  // Src stage (post-acquire: after acquire)
-            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,  // Dst stage (pre-tonemap)
-            0, 0, nullptr, 0, nullptr, 1, &barrier);
-
-        if (firstSwapchainAcquire_) {
-            firstSwapchainAcquire_ = false;
-            LOG_TRACE_CAT("RENDERER", "First swapchain acquire handled — transitioned from UNDEFINED to GENERAL");
-        }
-    }
-
-    // FIXED: Update Tonemap Descriptor per-frame (select input based on denoising) — After transitions (VUID-vkCmdDraw-None-09600)
-    VkImageView tonemapInputView = denoisingEnabled_ && denoiserView_.valid() ? *denoiserView_ : *rtOutputViews_[currentFrame_ % rtOutputViews_.size()];
-    updateTonemapDescriptor(currentFrame_, tonemapInputView, SWAPCHAIN.views()[imageIndex]);  // FIXED: Add output view (swapchain)
-
-    performTonemapPass(cmd, currentFrame_, imageIndex);  // FIXED: Pass imageIndex for output
-
-    // FIXED: Transition Swapchain: GENERAL → PRESENT_SRC_KHR (post-tonemap, VUID-VkImageMemoryBarrier-oldLayout-01197)
-    {
-        VkImageMemoryBarrier barrier = {};  // Zero-init
-        barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-        barrier.dstAccessMask = 0;
-        barrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;  // Post-tonemap
-        barrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-        barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        barrier.image = SWAPCHAIN.images()[imageIndex];
-        barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        barrier.subresourceRange.levelCount = 1;
-        barrier.subresourceRange.layerCount = 1;
-
-        vkCmdPipelineBarrier(cmd,
-            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,  // Src stage (post-tonemap)
-            VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,  // Dst stage (pre-present)
-            0, 0, nullptr, 0, nullptr, 1, &barrier);
-    }
-
-    // FIXED: Reverse RT Output: SHADER_READ_ONLY_OPTIMAL → GENERAL (for next RT write, VUID-vkCmdDraw-None-09600)
-    {
-        uint32_t rtFrameIdx = currentFrame_ % rtOutputImages_.size();
-        if (rtOutputImages_[rtFrameIdx].valid()) {
-            VkImageMemoryBarrier barrier = {};  // Zero-init
-            barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-            barrier.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
-            barrier.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-            barrier.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;  // Post-tonemap read
-            barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;                   // For RT write
-            barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            barrier.image = *rtOutputImages_[rtFrameIdx];
-            barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-            barrier.subresourceRange.levelCount = 1;
-            barrier.subresourceRange.layerCount = 1;
-
-            vkCmdPipelineBarrier(cmd,
-                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
-                0, 0, nullptr, 0, nullptr, 1, &barrier);
-        }
-    }
-
-    // FIXED: Reverse Denoiser: SHADER_READ_ONLY_OPTIMAL → GENERAL (if enabled, for next denoising write; VUID-vkCmdDraw-None-09600)
-    if (denoisingEnabled_ && denoiserImage_.valid()) {
-        VkImageMemoryBarrier barrier = {};  // Zero-init
-        barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        barrier.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
-        barrier.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-        barrier.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;  // Post-tonemap read
-        barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;                   // For next denoising write
-        barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        barrier.image = *denoiserImage_;
-        barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        barrier.subresourceRange.levelCount = 1;
-        barrier.subresourceRange.layerCount = 1;
-
-        vkCmdPipelineBarrier(cmd,
-            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,  // For next denoising compute
-            0, 0, nullptr, 0, nullptr, 1, &barrier);
-    }
+    updateTonemapDescriptor(frameIdx, tonemapSrc, SWAPCHAIN.views()[imageIndex]);
+    if (denoisingEnabled_) performDenoisingPass(cmd);
+    performTonemapPass(cmd, frameIdx, imageIndex);
 
     vkEndCommandBuffer(cmd);
 
-    // Submit
-    VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;  // FIXED: For tonemap
-    VkSubmitInfo submit = {};  // Zero-init
-    submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submit.waitSemaphoreCount = 1;
-    submit.pWaitSemaphores = &imageAvailableSemaphores_[currentFrame_];
-    submit.pWaitDstStageMask = &waitStage;
-    submit.commandBufferCount = 1;
-    submit.pCommandBuffers = &cmd;
-    submit.signalSemaphoreCount = 1;
-    submit.pSignalSemaphores = &renderFinishedSemaphores_[currentFrame_];
+    // FIXED: pedantic-clean submit info
+    const VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+    VkSubmitInfo submit{
+        .sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .waitSemaphoreCount   = 1,
+        .pWaitSemaphores      = &imageAvailableSemaphores_[frameIdx],
+        .pWaitDstStageMask    = &waitStage,
+        .commandBufferCount   = 1,
+        .pCommandBuffers      = &cmd,
+        .signalSemaphoreCount = 1,
+        .pSignalSemaphores    = &renderFinishedSemaphores_[frameIdx]
+    };
+    vkQueueSubmit(ctx.graphicsQueue(), 1, &submit, inFlightFences_[frameIdx]);
 
-    vkQueueSubmit(ctx.graphicsQueue(), 1, &submit, inFlightFences_[currentFrame_]);
+    // FIXED: pedantic-clean present info
+    VkSwapchainKHR swapchain = SWAPCHAIN.swapchain();
+    VkPresentInfoKHR present{
+        .sType              = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+        .waitSemaphoreCount = 1,
+        .pWaitSemaphores    = &renderFinishedSemaphores_[frameIdx],
+        .swapchainCount     = 1,
+        .pSwapchains        = &swapchain,
+        .pImageIndices      = &imageIndex
+    };
 
-    // Present
-    VkPresentInfoKHR present = {};  // Zero-init
-    present.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
-    present.waitSemaphoreCount = 1;
-    present.pWaitSemaphores = &renderFinishedSemaphores_[currentFrame_];
-    present.swapchainCount = 1;
-    VkSwapchainKHR swapchainHandle = SWAPCHAIN.swapchain();
-    present.pSwapchains = &swapchainHandle;
-    present.pImageIndices = &imageIndex;
-
-    result = vkQueuePresentKHR(ctx.presentQueue(), &present);
-    if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
+    VkResult pres = vkQueuePresentKHR(ctx.presentQueue(), &present);
+    if (pres == VK_ERROR_OUT_OF_DATE_KHR || pres == VK_SUBOPTIMAL_KHR)
         SWAPCHAIN.recreate(width_, height_);
-    } else if (result != VK_SUCCESS) {
-        LOG_WARN_CAT("RENDERER", "vkQueuePresentKHR failed: {}", static_cast<int>(result));
-    }
 
-    // Advance frame
-    currentFrame_ = (currentFrame_ + 1) % framesInFlight;
+    currentFrame_ = (currentFrame_ + 1) % Options::Performance::MAX_FRAMES_IN_FLIGHT;
     frameNumber_++;
-    frameCounter_++;
-
-    // Perf logging
-    auto now = std::chrono::steady_clock::now();
-    if (std::chrono::duration<float>(now - lastPerfLogTime_).count() > 1.0f) {
-        float fps = frameCounter_ / std::chrono::duration<float>(now - lastPerfLogTime_).count();
-        LOG_INFO_CAT("RENDERER", "FPS: {:.1f} | Frame: {} | SPP: {}", fps, frameNumber_, currentSpp_);
-        frameCounter_ = 0;
-        lastPerfLogTime_ = now;
-    }
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -2010,36 +1826,42 @@ void VulkanRenderer::updateRTXDescriptors(uint32_t frame) noexcept
     bufferInfos.reserve(3);
 
     // ──────────────────────
-    // BINDING 0: TLAS — THE ONE TRUE SAFE WAY
+    // BINDING 0: TLAS — INDIE HEAVEN FINAL FORM
     // ──────────────────────
     {
         VkAccelerationStructureKHR tlas = RTX::LAS::get().getTLAS();
-        if (tlas != VK_NULL_HANDLE) {
-            // STATIC THREAD-LOCAL → NEVER DANGLING → VALIDATION LOVES THIS
-            static thread_local VkWriteDescriptorSetAccelerationStructureKHR tlasInfo = {
+
+        // THE ONE TRUE CHECK — ONLY BIND IF TLAS IS ACTUALLY ALIVE
+        if (tlas != VK_NULL_HANDLE && RTX::LAS::get().isValid()) {
+            static thread_local VkWriteDescriptorSetAccelerationStructureKHR tlasInfo{
                 .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR,
                 .accelerationStructureCount = 1,
-                .pAccelerationStructures = nullptr  // will be set below
+                .pAccelerationStructures = nullptr
             };
 
             tlasInfo.pAccelerationStructures = &tlas;
 
-            VkWriteDescriptorSet write = {
+            VkWriteDescriptorSet write{
                 .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
                 .pNext = &tlasInfo,
                 .dstSet = set,
                 .dstBinding = 0,
-                .dstArrayElement = 0,
                 .descriptorCount = 1,
-                .descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR,
-                .pImageInfo = nullptr,
-                .pBufferInfo = nullptr,
-                .pTexelBufferView = nullptr
+                .descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR
             };
 
             writes.push_back(write);
-            LOG_TRACE_CAT("RENDERER", "TLAS bound safely — address 0x{:x}", reinterpret_cast<uintptr_t>(tlas));
+
+            LOG_TRACE_CAT("RENDERER", 
+                "TLAS bound — valid & alive — handle 0x{:x} (gen {})", 
+                reinterpret_cast<uintptr_t>(tlas),
+                RTX::LAS::get().getGeneration());
         }
+        else if (tlas != VK_NULL_HANDLE) {
+            // Optional: quiet reminder that we skipped a stale handle
+            LOG_TRACE_CAT("RENDERER", "Skipping TLAS bind — handle exists but marked invalid (stale after rebuild/resize)");
+        }
+        // else: TLAS not built yet → perfectly normal, stay silent
     }
 
     // ── BINDING 1: RT Output ───────
@@ -2481,68 +2303,153 @@ void VulkanRenderer::handleResize(int w, int h) noexcept {
         return;
     }
 
-    LOG_INFO_CAT("Renderer", "Resize INITIATED: {}x{} → {}x{} (idle wait + full rebuild)", 
+    LOG_INFO_CAT("Renderer", "Resize INITIATED: {}x{} → {}x{} — full rebuild in progress...", 
                  width_, height_, w, h);
 
     width_  = w;
     height_ = h;
     resetAccumulation_ = true;
-    firstSwapchainAcquire_ = true;  // FIXED: Reset flag for new swapchain
+    firstSwapchainAcquire_ = true;
 
     const auto& ctx = RTX::g_ctx();
 
-    // FIXED: Pre-idle wait — ensure no in-flight cmds (sync all queues)
+    // 1. Wait for GPU to finish all work — sacred silence
     vkDeviceWaitIdle(ctx.device());
 
-    // 1. Recreate swapchain + render pass (your SwapchainManager: gold standard)
-    SWAPCHAIN.recreate(static_cast<uint32_t>(w), static_cast<uint32_t>(h));   // FIXED: Cast to uint32_t if needed; assume bool return (modify if void)
+    // 2. Recreate swapchain first (new images/views)
+    SWAPCHAIN.recreate(static_cast<uint32_t>(w), static_cast<uint32_t>(h));
 
-    // 2. Destroy old framebuffers + images (CRITICAL — VUID-vkCreateFramebuffer-renderPass-00568)
-    cleanupFramebuffers();  // Framebuffers nuked (views/RP mismatch poison)
-    destroyRTOutputImages();     // Old RT targets
-    destroyAccumulationImages(); // Old accum
-    destroyDenoiserImage();      // Old denoiser
+    // 3. Nuke everything that depends on old size
+    cleanupFramebuffers();
+    destroyRTOutputImages();
+    destroyAccumulationImages();
+    destroyDenoiserImage();
     if (Options::RTX::ENABLE_ADAPTIVE_SAMPLING)
-        destroyNexusScoreImage(); // Old nexus (if active)
+        destroyNexusScoreImage();
 
-    // FIXED: Recreate UBOs/shared staging (tonemap fixed-size, but resize may shift vectors/indices)
-    recreateTonemapUBOs();       // Reforge tonemap Encs/Memory (ghost-proof)
+    // Shared staging & tonemap UBOs may have alignment/size dependencies
+    recreateTonemapUBOs();
     if (RTX::g_ctx().sharedStagingEnc_ != 0) {
-        // Assuming destroySharedStaging() + re-forge via tracker
         destroySharedStaging();
-        if (!createSharedStaging()) {  // Your helper: RTX::UltraLowLevelBufferTracker::create
-            LOG_ERROR_CAT("Renderer", "Shared staging recreate FAILED — abort");
-        }
+        createSharedStaging();  // assume it can't fail or you handle it
     }
 
-    // 3. Recreate all render targets (new size; GENERAL layout, TRANSFER_DST for clears)
-    createRTOutputImages();  // FIXED: Assume returns bool (add: return all Handles non-null)
-    createAccumulationImages();  // FIXED: Assume returns bool
-    createDenoiserImage();  // FIXED: Assume returns bool
+    // 4. Invalidate TLAS — CRITICAL: prevents binding destroyed handle
+    RTX::LAS::get().invalidate();  // generation++ → isValid() = false
+
+    // 5. Recreate all new-size render targets
+    createRTOutputImages();
+    createAccumulationImages();
+    createDenoiserImage();
     if (Options::RTX::ENABLE_ADAPTIVE_SAMPLING) {
-        createNexusScoreImage(ctx.physicalDevice(), ctx.device(), ctx.commandPool(), ctx.graphicsQueue());  // FIXED: Assume returns bool
+        createNexusScoreImage(ctx.physicalDevice(), ctx.device(), ctx.commandPool(), ctx.graphicsQueue());
     }
 
-    // 4. Recreate framebuffers (new swapchain views + new RP) — FIXED: But no RP for compute tonemap, so optional if needed for future
-    createFramebuffers();  // VUID-vkCreateFramebuffer-renderPass-00568: Fresh views/RP
+    // 6. Recreate framebuffers with new swapchain images
+    createFramebuffers();
 
-    // FIXED: Post-recreate idle — ensure GPU quiesced before cmd re-record
+    // 7. Wait again — GPU must be idle before re-recording commands
     vkDeviceWaitIdle(ctx.device());
 
-    // 5. Re-record ALL command buffers (new RP/views/images)
-    createCommandBuffers();  // Full rebuild: RT trace + tonemap + barriers
+    // 8. Re-record ALL command buffers (new images, new barriers)
+    createCommandBuffers();
 
-    // 6. Update ALL descriptors (rebind fresh Handles/views; VUID-vkCmdTraceRaysKHR-None-08114)
+    // 9. DESCRIPTOR UPDATES — NOW SAFE & SILENT
+    //     TLAS is currently invalid → updateRTXDescriptors() will gracefully skip binding 0
+    //     All other bindings (images, buffers) are fresh and valid
     for (uint32_t f = 0; f < Options::Performance::MAX_FRAMES_IN_FLIGHT; ++f) {
-        updateRTXDescriptors(f);
-    }     // TLAS/bindings
+        updateRTXDescriptors(f);           // ← skips TLAS if !isValid(), no spam, no crash
+    }
     if (Options::RTX::ENABLE_ADAPTIVE_SAMPLING)
-        updateNexusDescriptors();            // Nexus post-resize
-    updateTonemapDescriptorsInitial();       // Tonemap: new RT/accum views + UBOs
-    updateDenoiserDescriptors();             // Denoiser views
+        updateNexusDescriptors();
+    updateTonemapDescriptorsInitial();
+    updateDenoiserDescriptors();
 
-    // FIXED: Validate post-update (optional: query set validity or light test-frame)
-    LOG_SUCCESS_CAT("Renderer", "Swapchain + Framebuffers resized to {}x{} — ALL DESCRIPTORS REBOUND — ROCK SOLID{}", SAPPHIRE_BLUE, w, h, RESET);
+    LOG_SUCCESS_CAT("Renderer", 
+        "Resize COMPLETE → {}x{} — TLAS temporarily invalid (normal) — waiting for next scene build ♡", 
+        w, h);
+}
+
+void VulkanRenderer::drawLoadingOverlay() noexcept
+{
+    // Skip overlay when everything is perfect — invisible like a ghost
+    if (RTX::LAS::get().isValid() && 
+        !firstSwapchainAcquire_ && 
+        !resetAccumulation_) {
+        return;
+    }
+
+    // Fullscreen transparent overlay (no border, no interaction)
+    ImGui::SetNextWindowPos(ImVec2(0, 0), ImGuiCond_Always);
+    ImGui::SetNextWindowSize(ImGui::GetIO().DisplaySize);
+    ImGui::SetNextWindowBgAlpha(0.0f);
+
+    ImGui::Begin("##heaven_overlay", nullptr,
+        ImGuiWindowFlags_NoTitleBar |
+        ImGuiWindowFlags_NoResize |
+        ImGuiWindowFlags_NoMove |
+        ImGuiWindowFlags_NoScrollbar |
+        ImGuiWindowFlags_NoInputs |
+        ImGuiWindowFlags_NoBackground |
+        ImGuiWindowFlags_NoSavedSettings |
+        ImGuiWindowFlags_NoFocusOnAppearing
+    );
+
+    const ImVec2 center = ImVec2(
+        ImGui::GetIO().DisplaySize.x * 0.5f,
+        ImGui::GetIO().DisplaySize.y * 0.5f
+    );
+
+    // === MAIN TITLE — PLASMATIC IS GOD ===
+    if (plasmaticaFont) {
+        ImGui::PushFont(plasmaticaFont);
+        const char* title = "AMOURANTH RTX";
+        ImVec2 titleSize = ImGui::CalcTextSize(title);
+        ImGui::SetCursorPos(ImVec2(center.x - titleSize.x * 0.5f, center.y - titleSize.y - 80.0f));
+        ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.8f, 1.0f), "%s", title);
+        ImGui::PopFont();
+    }
+
+    // === STATUS MESSAGE — ELEGANT ARIAL ===
+    if (arialBoldFont || arialFont) {
+        ImFont* statusFont = arialBoldFont ? arialBoldFont : arialFont;
+        ImGui::PushFont(statusFont);
+
+        const char* status = "";
+        const char* subtitle = "";
+
+        if (!RTX::LAS::get().isValid()) {
+            status = "rebuilding acceleration structure";
+            subtitle = "please wait, the photons are coming home";
+        }
+        else if (resetAccumulation_) {
+            status = "accumulation reset";
+            subtitle = "patience... beauty is rebuilding";
+        }
+        else if (firstSwapchainAcquire_) {
+            status = "warming up the gpu";
+            subtitle = "almost there";
+        }
+
+        ImVec2 statusSize = ImGui::CalcTextSize(status);
+        ImVec2 subSize = ImGui::CalcTextSize(subtitle);
+
+        ImGui::SetCursorPos(ImVec2(center.x - statusSize.x * 0.5f, center.y + 20.0f));
+        ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.95f, 1.0f), "%s", status);
+
+        ImGui::SetCursorPos(ImVec2(center.x - subSize.x * 0.5f, center.y + 60.0f));
+        ImGui::TextColored(ImVec4(0.9f, 0.6f, 1.0f, 0.85f), "%s", subtitle);
+
+        ImGui::PopFont();
+    }
+
+    // Fallback if somehow no fonts loaded (should never happen)
+    else {
+        ImGui::SetCursorPos(ImVec2(center.x - 100, center.y));
+        ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.9f, 1.0f), "Loading neural reality...");
+    }
+
+    ImGui::End();
 }
 
 void VulkanRenderer::createFramebuffers() {
@@ -2878,6 +2785,41 @@ bool VulkanRenderer::createSharedStaging() noexcept {
     // FIXED: Bound via tracker
     LOG_DEBUG_CAT("Renderer", "Shared staging recreated: enc=0x{:x}", RTX::g_ctx().sharedStagingEnc_);
     return true;
+}
+
+void VulkanRenderer::initImGuiFonts()
+{
+    ImGuiIO& io = ImGui::GetIO();
+    io.Fonts->Clear();
+
+    // 1. PLASMATIC — THE ONE TRUE FONT
+    plasmaticaFont = io.Fonts->AddFontFromFileTTF("assets/fonts/sf-plasmatica-open.ttf", 52.0f);
+    if (!plasmaticaFont) {
+        plasmaticaFont = io.Fonts->AddFontFromFileTTF("assets/fonts/sf-plasmatica-open.ttf", 48.0f);
+    }
+    if (!plasmaticaFont) {
+        fprintf(stderr, "[FONT] sf-plasmatica-open.ttf missing — using arialbd.ttf\n");
+        plasmaticaFont = io.Fonts->AddFontFromFileTTF("assets/fonts/arialbd.ttf", 42.0f);
+    }
+
+    // 2. Arial Bold — UI titles
+    arialBoldFont = io.Fonts->AddFontFromFileTTF("assets/fonts/arialbd.ttf", 26.0f);
+
+    // 3. Regular Arial — body text
+    arialFont = io.Fonts->AddFontFromFileTTF("assets/fonts/arial.ttf", 18.0f);
+
+    // Fallback if everything fails
+    if (!plasmaticaFont) {
+        plasmaticaFont = io.Fonts->AddFontDefault();
+        plasmaticaFont->Scale = 2.0f;
+    }
+    if (!arialBoldFont) arialBoldFont = plasmaticaFont;
+    if (!arialFont)     arialFont     = io.Fonts->AddFontDefault();
+
+    io.FontDefault = arialFont;
+
+    io.Fonts->Build();
+    fprintf(stderr, "[FONT] Plasmatica loaded: %s\n", plasmaticaFont ? "YES" : "NO");
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

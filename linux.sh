@@ -1,41 +1,52 @@
 #!/bin/bash
-# linux.sh
-# Builds AMOURANTH RTX for Linux natively
-# Usage: ./linux.sh [clean]
+# linux.sh — AMOURANTH RTX Linux builder — NOW IMMUNE TO CMAKE LOOP
 
 set -e
 
-# Define directories
 BUILD_DIR="build"
 BIN_DIR="bin/Linux"
-SHADER_DIR="shaders/raytracing"
-SHADER_RM_DIR="shaders"
-RASTERIZATION_SHADER_DIR="shaders/rasterization"
 
-# Clean build directory and shader SPV files if 'clean' is passed
-if [ "$1" == "clean" ]; then
+# Always nuke build dir on clean — prevents the compiler loop forever
+if [ "$1" == "clean" ] || [ "$1" == "Clean" ] || [ "$1" == "CLEAN" ]; then
     echo "Cleaning Linux build directory and shader SPV files..."
     rm -rf "$BUILD_DIR" "$BIN_DIR"
-    rm -f "$SHADER_RM_DIR"/*.spv
-    rm -f "$RASTERIZATION_SHADER_DIR"/*.spv
+    find shaders -name "*.spv" -delete 2>/dev/null || true
+    echo "Clean complete — fresh start guaranteed"
 fi
 
-# Create and enter build directory
+# Fresh configure every time — eliminates the restart loop permanently
+echo "Configuring CMake for Linux (fresh configure)..."
+rm -rf "$BUILD_DIR"
 mkdir -p "$BUILD_DIR"
 cd "$BUILD_DIR"
 
-# Run CMake and build
-echo "Configuring CMake for Linux..."
-cmake ..
-echo "Building AMOURANTH RTX for Linux..."
-cmake --build . -j $(nproc)
+# Force g++-14 from the start via command line — bypasses the whole loop
+cmake .. -DCMAKE_CXX_COMPILER=g++-14 -DCMAKE_BUILD_TYPE=Release
 
-# Verify output
-if [ -f "../bin/Linux/Navigator" ]; then
-    echo "Linux build successful! Binary located at ../$BIN_DIR/Navigator"
-else
-    echo "Linux build completed. cd bin/Linux/ ./Navigator"
-    exit 1
-fi
+echo "Building AMOURANTH RTX with all cores..."
+cmake --build . -j$(nproc)
 
-echo "ERRORS DURING BUILD PROCESS!!!"
+echo ""
+echo " "
+echo "               █████╗ ███╗   ███╗ ██████╗ ██╗   ██╗██████╗  █████╗ ███╗   ██╗████████╗██╗  ██╗"
+echo "              ██╔══██╗████╗ ████║██╔═══██╗██║   ██║██╔══██╗██╔══██╗████╗  ██║╚══██╔══╝██║  ██║"
+echo "              ███████║██╔████╔██║██║   ██║██║   ██║██████╔╝███████║██╔██╗ ██║   ██║   ███████║"
+echo "              ██╔══██║██║╚██╔╝██║██║   ██║██║   ██║██╔══██╗██╔══██║██║╚██╗██║   ██║   ██╔══██║"
+echo "              ██║  ██║██║ ╚═╝ ██║╚██████╔╝╚██████╔╝██║  ██║██║  ██║██║ ╚████║   ██║   ██║  ██║"
+echo "              ╚═╝  ╚═╝╚═╝     ╚═╝ ╚═════╝  ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝   ╚═╝   ╚═╝  ╚═╝"
+echo " "
+echo "               ██████╗ ████████╗██╗  ██╗    ███████╗███╗   ██╗ ██████╗ ██╗███╗   ██╗███████╗"
+echo "               ██╔══██╗╚══██╔══╝╚██╗██╔╝    ██╔════╝████╗  ██║██╔════╝ ██║████╗  ██║██╔════╝"
+echo "               ██████╔╝   ██║    ╚███╔╝     █████╗  ██╔██╗ ██║██║  ███╗██║██╔██╗ ██║█████╗  "
+echo "               ██╔══██╗   ██║    ██╔██╗     ██╔══╝  ██║╚██╗██║██║   ██║██║██║╚██╗██║██╔══╝  "
+echo "               ██║  ██║   ██║   ██╔╝ ██╗    ███████╗██║ ╚████║╚██████╔╝██║██║ ╚████║███████╗"
+echo "               ╚═╝  ╚═╝   ╚═╝   ╚═╝  ╚═╝    ╚══════╝╚═╝  ╚═══╝ ╚═════╝ ╚═╝╚═╝  ╚═══╝╚══════╝"
+echo " "
+echo "        ██████████████████████████████████████████████████████████████████████████████████████"
+echo " "
+echo "══════════════════════════════════════════════════════════"
+echo "       AMOURANTH RTX — LINUX BUILD SUCCESSFUL"
+echo "       Binary: ../bin/Linux/Navigator"
+echo "       Run:   cd ../bin/Linux && ./Navigator"
+echo "══════════════════════════════════════════════════════════"
+echo " "

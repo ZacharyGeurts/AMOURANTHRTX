@@ -50,9 +50,19 @@ struct TonemapPushConstants {
     float     _pad[2]         = {0};    // Align to 16 bytes
 };
 
+
+// =============================================================================
+// FORWARD DECLARATION + IMGUI INCLUDES — REQUIRED FOR ImFont*
+// =============================================================================
+struct ImFont;                     // Forward declare only — safe in headers
+#include <imgui.h>                 // This MUST come AFTER forward decl
+// Do NOT include imgui_impl_*.h here — only in .cpp files!
+
 // ──────────────────────────────────────────────────────────────────────────────
 class VulkanRenderer {
 public:
+    void initImGuiFonts();
+    void drawLoadingOverlay() noexcept;
     VulkanRenderer(int width, int height, SDL_Window* window = nullptr, bool overclockFromMain = false);
     ~VulkanRenderer();
 
@@ -128,6 +138,11 @@ public:
     [[nodiscard]] VkFence createFence(bool signaled = false) const noexcept;
 
 private:
+    static inline ImFont* plasmaticaFont = nullptr;
+    static inline ImFont* arialBoldFont  = nullptr;
+    static inline ImFont* arialFont      = nullptr;
+    static inline ImFont* iconFont       = nullptr;
+
     static constexpr auto RT_SHADER_PATHS = std::to_array({
         "assets/shaders/raytracing/raygen.spv",
         "assets/shaders/raytracing/miss.spv",

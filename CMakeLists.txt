@@ -2,41 +2,40 @@ cmake_minimum_required(VERSION 3.21)
 project(AMOURANTH_RTX LANGUAGES CXX)
 
 # =============================================================================
+# ENABLE FETCHCONTENT + GIT FOR EXTERNAL DEPENDENCIES (OLD CMAKE FIX)
+# =============================================================================
+include(FetchContent)
+find_package(Git REQUIRED)
+
+function(git_clone_if_missing URL REPO TAG DEST)
+    if(NOT EXISTS "${DEST}/.git")
+        message(STATUS "Cloning ${REPO} (${TAG}) → ${DEST}")
+        execute_process(
+            COMMAND ${GIT_EXECUTABLE} clone --depth 1 --branch ${TAG} ${URL} "${DEST}"
+            RESULT_VARIABLE GIT_RESULT
+            ERROR_QUIET
+        )
+        if(NOT GIT_RESULT EQUAL "0")
+            message(FATAL_ERROR "Failed to git clone ${REPO}")
+        endif()
+    else()
+        message(STATUS "${REPO} already present – skipping clone")
+    endif()
+endfunction()
+
+# =============================================================================
 # C++23 TURBO — FULL POWER, NO COMPROMISE
 # =============================================================================
-# Force GCC 14+ for full <print> and C++23 support (native + cross)
 if(CMAKE_CROSSCOMPILING)
     find_program(GCC14_BIN x86_64-w64-mingw32-g++-14)
     if(NOT GCC14_BIN)
-        message(FATAL_ERROR "
-    *** MinGW-w64 GCC 14+ REQUIRED FOR CROSS-COMPILE C++23 <print> HEADER ***
-    
-    Install via MSYS2 (recommended for Windows cross):
-        pacman -S mingw-w64-x86_64-gcc  # Gets latest GCC 14+ in MSYS2
-    
-    Or WinLibs: Download GCC 14+ MinGW-w64 from https://winlibs.com/
-    
-    Then re-run CMake. Fallback to C++20 if unavailable (revert logging.hpp).
-    ")
+        message(FATAL_ERROR "MinGW-w64 GCC 14+ required for cross-compile")
     endif()
     message(STATUS "Using MinGW-w64 GCC 14+: ${GCC14_BIN}")
 else()
     find_program(GCC14_BIN g++-14)
     if(NOT GCC14_BIN)
-        message(FATAL_ERROR "
-    *** GCC 14+ REQUIRED FOR NATIVE C++23 <print> HEADER ***
-    
-    Install on Ubuntu/Debian/Mint/Pop!_OS:
-        sudo apt update && sudo apt install gcc-14 g++-14
-    
-    On Fedora/RHEL/CentOS:
-        sudo dnf install gcc-toolset-14
-    
-    On Arch/Manjaro:
-        sudo pacman -Syu gcc
-    
-    Then re-run CMake. Fallback to C++20 if unavailable (revert logging.hpp).
-    ")
+        message(FATAL_ERROR "GCC 14+ required for native build")
     endif()
     message(STATUS "Using native GCC 14+: ${GCC14_BIN}")
 endif()
@@ -47,8 +46,6 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 
-# Global optimizations + warnings
-set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 add_compile_options(
     -Wall -Wextra -Wpedantic -Werror
     -Wno-missing-field-initializers
@@ -58,8 +55,7 @@ add_compile_options(
     -g -ggdb
 )
 
-# Option to disable trace & debug logging (for performance in release/debug builds) — DEFAULT: DISABLED
-option(DISABLE_TRACE_AND_DEBUG_LOGS "Disable trace (LOG_TRACE_CAT) & debug (LOG_DEBUG_CAT) logging" ON)
+option(DISABLE_TRACE_AND_DEBUG_LOGS "Disable trace & debug logging" ON)
 if(DISABLE_TRACE_AND_DEBUG_LOGS)
     add_definitions(-DDISABLE_TRACE_AND_DEBUG_LOGS)
 endif()
@@ -70,16 +66,13 @@ if(CMAKE_BUILD_TYPE MATCHES Debug)
 endif()
 
 # =============================================================================
-# PLATFORM DETECTION — LINUX NATIVE + MINGW64 CROSS ONLY
+# PLATFORM DETECTION
 # =============================================================================
 if(NOT CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux")
-    message(FATAL_ERROR "AMOURANTH RTX builds are ONLY supported on Linux hosts (native + cross).")
+    message(FATAL_ERROR "AMOURANTH RTX builds are ONLY supported on Linux hosts.")
 endif()
 
 if(CMAKE_CROSSCOMPILING)
-    if(NOT CMAKE_CXX_COMPILER_ID MATCHES "GNU")
-        message(FATAL_ERROR "Cross-compilation REQUIRES x86_64-w64-mingw32-g++ (MinGW64).")
-    endif()
     set(IS_WINDOWS TRUE)
     set(IS_LINUX FALSE)
     set(BIN_DIR "${CMAKE_BINARY_DIR}/bin/Windows")
@@ -92,7 +85,7 @@ else()
 endif()
 
 # =============================================================================
-# DIRECTORY CREATION — SOURCE + OUTPUT (Linux & Windows)
+# DIRECTORY CREATION
 # =============================================================================
 set(SOURCE_DIRS
     assets/fonts assets/textures assets/models assets/materials assets/scenes
@@ -132,27 +125,17 @@ foreach(D ${OUTPUT_DIRS})
 endforeach()
 
 # =============================================================================
-# DEPENDENCY DETECTION — ROBUST + FATAL ON MISSING
+# DEPENDENCIES
 # =============================================================================
 find_package(PkgConfig REQUIRED)
 find_package(Vulkan REQUIRED)
 if(Vulkan_VERSION VERSION_LESS "1.3.250")
-    message(FATAL_ERROR "Vulkan SDK >= 1.3.250 REQUIRED — install vulkan-tools libvulkan-dev vulkan-headers")
+    message(FATAL_ERROR "Vulkan SDK >= 1.3.250 REQUIRED")
 endif()
 
 find_program(GLSLC glslc REQUIRED HINTS $ENV{VULKAN_SDK}/bin /usr/bin)
 find_program(SPIRV_VAL spirv-val HINTS $ENV{VULKAN_SDK}/bin /usr/bin)
 
-# =============================================================================
-# HDR SUPPORT — 2025 MESA WAY (no VK_KHR_display needed)
-# =============================================================================
-message(STATUS "AMOURANTH RTX — 10-bit HDR enabled via standard WSI + VK_EXT_swapchain_colorspace")
-message(STATUS "   Works perfectly on Mesa 24.2+, AMD, NVIDIA, Intel — no extra headers required")
-message(STATUS "   Invisible HDR via GBM + normal swapchain — PINK PHOTONS ETERNAL")
-
-# =============================================================================
-# REMAINING DEPENDENCIES (unchanged)
-# =============================================================================
 find_package(TBB REQUIRED)
 find_package(OpenMP REQUIRED)
 find_package(Freetype REQUIRED)
@@ -176,65 +159,69 @@ if(IS_WINDOWS)
     find_library(SDL3_MIXER_LIB NAMES SDL3_mixer PATHS /usr/x86_64-w64-mingw32/lib REQUIRED)
 endif()
 
-# =============================================================================
-# LIBATOMIC — FIXED
-# =============================================================================
-find_library(ATOMIC_LIB
-    NAMES atomic libatomic atomic.so.1 libatomic.so.1
-    HINTS
-        /usr/lib
-        /usr/lib/x86_64-linux-gnu
-        /usr/lib64
-        /lib/x86_64-linux-gnu
-    PATH_SUFFIXES lib lib64
-)
-
+find_library(ATOMIC_LIB NAMES atomic libatomic atomic.so.1 libatomic.so.1
+    HINTS /usr/lib /usr/lib/x86_64-linux-gnu /usr/lib64)
 if(NOT ATOMIC_LIB)
-    message(FATAL_ERROR "
-        
-        *** LIBATOMIC NOT FOUND ***
-        
-        On Ubuntu/Debian/Mint/Pop!_OS run:
-            sudo apt update && sudo apt install libatomic1 libatomic-dev gcc-multilib g++-multilib
-        
-        On Fedora/RHEL/CentOS:
-            sudo dnf install libatomic
-        
-        On Arch/Manjaro:
-            sudo pacman -S libatomic_ops
-        
-        Then re-run CMake.
-    ")
+    message(FATAL_ERROR "libatomic not found")
 endif()
 message(STATUS "Found libatomic: ${ATOMIC_LIB}")
 
 # =============================================================================
-# TINYOBJLOADER — BACK TO ORIGINAL WORKING METHOD (release tag)
+# Dear ImGui — ONLY SDL3 + Vulkan, NO examples, NO other backends, NO junk EVER
 # =============================================================================
-set(TINYOBJLOADER_DIR "${CMAKE_CURRENT_BINARY_DIR}/_deps/tinyobjloader")
-set(TINYOBJLOADER_REPO "https://github.com/tinyobjloader/tinyobjloader.git")
+set(IMGUI_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src/engine/imgui")
 
-include(FetchContent)
-FetchContent_Declare(
-    tinyobjloader
-    GIT_REPOSITORY ${TINYOBJLOADER_REPO}
-    GIT_TAG release          # ← WORKING TAG FROM ORIGINAL CMAKE
-    SOURCE_DIR ${TINYOBJLOADER_DIR}
+git_clone_if_missing(
+    https://github.com/ocornut/imgui.git
+    imgui
+    v1.91.3
+    ${IMGUI_DIR}
 )
 
-if(NOT tinyobjloader_POPULATED)
-    FetchContent_Populate(tinyobjloader)
-    message(STATUS "tinyobjloader populated (cloned/updated)")
-else()
-    message(STATUS "tinyobjloader already populated – skipping clone")
-endif()
+# Explicitly list ONLY the files we want compiled
+set(IMGUI_CORE_SOURCES
+    ${IMGUI_DIR}/imgui.cpp
+    ${IMGUI_DIR}/imgui_draw.cpp
+    ${IMGUI_DIR}/imgui_tables.cpp
+    ${IMGUI_DIR}/imgui_widgets.cpp
+    ${IMGUI_DIR}/imgui_demo.cpp                 # optional but harmless + useful
+)
 
-FetchContent_GetProperties(tinyobjloader)
+set(IMGUI_BACKEND_SOURCES
+    ${IMGUI_DIR}/backends/imgui_impl_sdl3.cpp
+    ${IMGUI_DIR}/backends/imgui_impl_vulkan.cpp
+)
+
+# Mark EVERYTHING else in the imgui folder as HEADER_FILE_ONLY so CMake NEVER compiles it
+file(GLOB_RECURSE IMGUI_ALL_FILES "${IMGUI_DIR}/*")
+list(REMOVE_ITEM IMGUI_ALL_FILES ${IMGUI_CORE_SOURCES} ${IMGUI_BACKEND_SOURCES})
+set_source_files_properties(${IMGUI_ALL_FILES} PROPERTIES HEADER_FILE_ONLY ON)
+
+# Now build only what we want
+add_library(imgui STATIC ${IMGUI_CORE_SOURCES} ${IMGUI_BACKEND_SOURCES})
+
+target_include_directories(imgui PUBLIC
+    ${IMGUI_DIR}
+    ${IMGUI_DIR}/backends
+    ${Vulkan_INCLUDE_DIRS}
+    ${SDL3_INCLUDE_DIRS}
+)
+
+target_link_libraries(imgui PUBLIC Vulkan::Vulkan ${SDL3_LIBRARIES})
+target_compile_features(imgui PUBLIC cxx_std_17)
+
+message(STATUS "ImGui configured — ONLY SDL3+Vulkan backend — examples & other backends completely ignored")
+
+# =============================================================================
+# tinyobjloader
+# =============================================================================
+FetchContent_Declare(
+    tinyobjloader
+    GIT_REPOSITORY https://github.com/tinyobjloader/tinyobjloader.git
+    GIT_TAG release
+)
+FetchContent_MakeAvailable(tinyobjloader)
 set(TINYOBJLOADER_SRC "${tinyobjloader_SOURCE_DIR}/tiny_obj_loader.cc")
-if(NOT EXISTS "${TINYOBJLOADER_SRC}")
-    message(FATAL_ERROR "tinyobjloader failed to download tiny_obj_loader.cc. Check internet or Git.")
-endif()
-message(STATUS "tinyobjloader ready: ${TINYOBJLOADER_SRC}")
 
 # =============================================================================
 # SOURCE COLLECTION
@@ -257,21 +244,7 @@ set_target_properties(amouranth_engine PROPERTIES
 )
 
 # =============================================================================
-# RAY TRACING EXTENSIONS
-# =============================================================================
-target_compile_definitions(amouranth_engine PRIVATE
-    VK_KHR_ray_tracing_pipeline
-    VK_KHR_acceleration_structure
-    VK_KHR_deferred_host_operations
-    VK_EXT_descriptor_indexing
-    VK_KHR_buffer_device_address
-    VK_KHR_ray_query
-    VK_KHR_display  # For HDR direct display
-    VK_EXT_hdr_metadata  # For PQ metadata
-)
-
-# =============================================================================
-# INCLUDES
+# INCLUDES + DEFINES + LINKING
 # =============================================================================
 target_include_directories(amouranth_engine PRIVATE
     include include/modes
@@ -279,10 +252,10 @@ target_include_directories(amouranth_engine PRIVATE
     ${FREETYPE_INCLUDE_DIRS}
     ${glm_INCLUDE_DIRS}
     ${tinyobjloader_SOURCE_DIR}
+    ${IMGUI_DIR}
+    ${IMGUI_DIR}/backends
 )
-if(NOT VULKAN_HEADERS_DIR STREQUAL "")
-    target_include_directories(amouranth_engine PRIVATE ${VULKAN_HEADERS_DIR}/include)
-endif()
+
 if(IS_LINUX)
     target_include_directories(amouranth_engine PRIVATE
         ${SDL3_INCLUDE_DIRS}
@@ -296,16 +269,26 @@ if(IS_LINUX)
     )
 endif()
 
-# =============================================================================
-# LINKING
-# =============================================================================
+target_compile_definitions(amouranth_engine PRIVATE
+    VK_KHR_ray_tracing_pipeline
+    VK_KHR_acceleration_structure
+    VK_KHR_deferred_host_operations
+    VK_EXT_descriptor_indexing
+    VK_KHR_buffer_device_address
+    VK_KHR_ray_query
+    VK_KHR_display
+    VK_EXT_hdr_metadata
+)
+
 target_link_libraries(amouranth_engine PRIVATE
     Vulkan::Vulkan
     TBB::tbb
     OpenMP::OpenMP_CXX
     Freetype::Freetype
     ${ATOMIC_LIB}
+    imgui
 )
+
 if(IS_LINUX)
     target_link_libraries(amouranth_engine PRIVATE
         ${SDL3_LIBRARIES}
@@ -325,15 +308,13 @@ else()
 endif()
 
 # =============================================================================
-# SHADER COMPILATION — FIXED INCLUDE PATH + STAGE + VALIDATION FAIL HARD
+# SHADER COMPILATION — FIXED (no more stray parentheses!)
 # =============================================================================
 set(SHADER_INCLUDE_FLAGS
     -I${CMAKE_CURRENT_SOURCE_DIR}/include/engine/Vulkan
     -I${CMAKE_CURRENT_SOURCE_DIR}/include/engine
-    -I${CMAKE_CURRENT_SOURCE_DIR}/engine/Vulkan   # ← ORIGINAL WORKING PATH
     -I${CMAKE_CURRENT_SOURCE_DIR}/shaders
 )
-
 set(SHADER_DEBUG_FLAGS -g -O0)
 
 file(GLOB_RECURSE POTENTIAL_SHADERS
@@ -341,7 +322,7 @@ file(GLOB_RECURSE POTENTIAL_SHADERS
     shaders/compute/*
     shaders/graphics/*
     shaders/rasterization/*
-    shaders/tonemaps/*   # ← ADDED: Include tonemaps shaders
+    shaders/tonemaps/*
 )
 
 set(SPV_OUTPUTS "")
@@ -355,7 +336,6 @@ foreach(SRC ${POTENTIAL_SHADERS})
     get_filename_component(DIR ${SRC} DIRECTORY)
     get_filename_component(REL_DIR ${DIR} NAME)
 
-    # ← ADDED: Redirect tonemaps to graphics path
     if(REL_DIR STREQUAL "tonemaps")
         set(REL_DIR "graphics")
     endif()
@@ -364,44 +344,43 @@ foreach(SRC ${POTENTIAL_SHADERS})
     set(STAGE "")
     set(TARGET "")
 
-if(REL_DIR STREQUAL "raytracing")
-    if(NAME MATCHES "[_.](rgen|rmiss|rchit|rahit|rint|rcall)(\\.glsl)?$")
-        set(TARGET --target-spv=spv1.6 --target-env=vulkan1.4)
-        if(NAME MATCHES "[_.]rgen(\\.glsl)?$")
-            set(STAGE rgen)
-        elseif(NAME MATCHES "[_.]rmiss(\\.glsl)?$")
-            set(STAGE rmiss)
-        elseif(NAME MATCHES "[_.]rchit(\\.glsl)?$")
-            set(STAGE rchit)
-        elseif(NAME MATCHES "[_.]rahit(\\.glsl)?$")
-            set(STAGE rahit)
-        elseif(NAME MATCHES "[_.]rint(\\.glsl)?$")
-            set(STAGE rint)
-        elseif(NAME MATCHES "[_.]rcall(\\.glsl)?$")
-            set(STAGE rcall)
+    if(REL_DIR STREQUAL "raytracing")
+        if(NAME MATCHES "[_.](rgen|rmiss|rchit|rahit|rint|rcall)(\\.glsl)?$")
+            set(TARGET --target-spv=spv1.6 --target-env=vulkan1.4)
+            if(NAME MATCHES "[_.]rgen(\\.glsl)?$")
+                set(STAGE rgen)
+            elseif(NAME MATCHES "[_.]rmiss(\\.glsl)?$")
+                set(STAGE rmiss)
+            elseif(NAME MATCHES "[_.]rchit(\\.glsl)?$")
+                set(STAGE rchit)
+            elseif(NAME MATCHES "[_.]rahit(\\.glsl)?$")
+                set(STAGE rahit)
+            elseif(NAME MATCHES "[_.]rint(\\.glsl)?$")
+                set(STAGE rint)
+            elseif(NAME MATCHES "[_.]rcall(\\.glsl)?$")
+                set(STAGE rcall)
+            endif()
+        endif()
+    elseif(REL_DIR MATCHES "compute")
+        if(NAME MATCHES "([_.])?comp(\\.glsl)?$")
+            set(TARGET --target-spv=spv1.6 --target-env=vulkan1.4)
+            set(STAGE comp)
+        endif()
+    else()
+        if(NAME MATCHES "([_.])?vert(\\.glsl)?$")
+            set(TARGET --target-spv=spv1.6 --target-env=vulkan1.4)
+            set(STAGE vert)
+        elseif(NAME MATCHES "([_.])?frag(\\.glsl)?$")
+            set(TARGET --target-spv=spv1.6 --target-env=vulkan1.4)
+            set(STAGE frag)
         endif()
     endif()
-elseif(REL_DIR MATCHES "compute")
-    if(NAME MATCHES "([_.])?comp(\\.glsl)?$")
-        set(TARGET --target-spv=spv1.6 --target-env=vulkan1.4)
-        set(STAGE comp)
-    endif()
-else()  # graphics or rasterization or tonemaps (redirected)
-    if(NAME MATCHES "([_.])?vert(\\.glsl)?$")
-        set(TARGET --target-spv=spv1.6 --target-env=vulkan1.4)
-        set(STAGE vert)
-    elseif(NAME MATCHES "([_.])?frag(\\.glsl)?$")
-        set(TARGET --target-spv=spv1.6 --target-env=vulkan1.4)
-        set(STAGE frag)
-    endif()
-endif()
+
     if(NOT STAGE)
         continue()
     endif()
 
-    # FIXED: Keep full BASE name (e.g., tonemap_vert.spv) — no stage suffix removal
-    set(SPV_BASE "${BASE}")
-    set(SPV "${OUT_DIR}/${SPV_BASE}.spv")
+    set(SPV "${OUT_DIR}/${BASE}.spv")
 
     set(VALIDATION_ENV vulkan1.4)
     if(REL_DIR STREQUAL "raytracing")
@@ -412,16 +391,14 @@ endif()
         OUTPUT ${SPV}
         COMMAND ${CMAKE_COMMAND} -E make_directory ${OUT_DIR}
         COMMAND ${GLSLC} ${SHADER_INCLUDE_FLAGS} ${TARGET} ${SHADER_DEBUG_FLAGS}
-               -fshader-stage=${STAGE} "${SRC}" -o "${SPV}"
+                -fshader-stage=${STAGE} "${SRC}" -o "${SPV}"
         COMMAND ${SPIRV_VAL} --target-env ${VALIDATION_ENV} "${SPV}"
         DEPENDS "${SRC}"
-        COMMENT "glslc → ${REL_DIR}/${NAME} (stage=${STAGE}) → ${SPV_BASE}.spv"
+        COMMENT "Compiling shader: ${REL_DIR}/${NAME} → ${BASE}.spv"
         VERBATIM
     )
     list(APPEND SPV_OUTPUTS ${SPV})
 endforeach()
-
-# REMOVED: GLSL header copying — shaders now compiled to SPV only
 
 add_custom_target(shaders ALL DEPENDS ${SPV_OUTPUTS})
 add_dependencies(amouranth_engine shaders)
@@ -455,6 +432,10 @@ foreach(MAP ${ASSET_MAP})
         )
     endif()
 endforeach()
+
+# =============================================================================
+# LEGENDARY BANNER — NOVEMBER 17 2025 — FINAL FIXED EDITION
+# =============================================================================
 message(STATUS "")
 message(STATUS "==================================================================")
 message(STATUS "")
@@ -476,8 +457,9 @@ message(STATUS "")
 message(STATUS "        ██████████████████████████████████████████████████████████████████████████████████████")
 message(STATUS "")
 message(STATUS "==================================================================")
-message(STATUS " AMOURANTH RTX — BUILD FIXED — NOVEMBER 16 2025 — 10-BIT HDR SUPPORT")
+message(STATUS " AMOURANTH RTX — FULLY FIXED + Dear ImGui (SDL3+Vulkan) — NOVEMBER 17 2025")
 message(STATUS " Target: ${BIN_DIR}/Navigator${EXE_SUFFIX}")
-message(STATUS " Run: chmod + x ./linux.sh and then ./linux.sh clean")
-message(STATUS " HDR Note: Invisible 10-bit HDR via DRM/KMS+GBM — works on Cinnamon without Plasma")
+message(STATUS " ImGui location: src/engine/imgui (auto-cloned on first build)")
+message(STATUS " Run: ./linux.sh clean && ./linux.sh")
+message(STATUS " HDR: 10-bit invisible HDR via GBM — works even on Cinnamon/GNOME")
 message(STATUS "==================================================================")
