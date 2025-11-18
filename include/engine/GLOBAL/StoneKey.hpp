@@ -111,7 +111,7 @@ inline uint64_t get_kHandleObfuscator() noexcept { static uint64_t key = get_kSt
 
 // -----------------------------------------------------------------------------
 // 5. OBFUSCATE / DEOBFUSCATE (unchanged)
-// -----------------------------------------------------------------------------
+ // -----------------------------------------------------------------------------
 [[nodiscard]] inline uint64_t obfuscate(uint64_t h) noexcept {
     uint64_t mask = -static_cast<uint64_t>(!!get_kHandleObfuscator());
     uint64_t result = h ^ (get_kHandleObfuscator() & mask);
@@ -125,8 +125,8 @@ inline uint64_t get_kHandleObfuscator() noexcept { static uint64_t key = get_kSt
 }
 
 // =============================================================================
-// AAAA SAFETY LAYER — RAW CACHING (with timed transition)
-// =============================================================================
+ // AAAA SAFETY LAYER — RAW CACHING (with timed transition)
+ // =============================================================================
 
 // Raw cache — NEVER obfuscated, used only during early init (0.3s window)
 namespace StoneKey::Raw {
@@ -229,7 +229,7 @@ inline void set_g_surface(VkSurfaceKHR handle) noexcept {
 
 // -----------------------------------------------------------------------------
 // PUBLIC ACCESSORS — DUAL PATH (early = raw, late = deobfuscated)
-// -----------------------------------------------------------------------------
+ // -----------------------------------------------------------------------------
 [[nodiscard]] inline VkDevice g_device() noexcept {
     StoneKey::Raw::transition_if_ready();  // Quick elapsed check + possible one-time clear
     auto raw_handle = StoneKey::Raw::device.load(std::memory_order_acquire);
@@ -275,6 +275,6 @@ inline void log_amouranth() noexcept { /* unchanged */ }
 #endif
 
 // =============================================================================
-// PINK PHOTONS ETERNAL — STONEKEY v∞ — AAAA 2025 — UNBREAKABLE
+ // PINK PHOTONS ETERNAL — STONEKEY v∞ — AAAA 2025 — UNBREAKABLE
 // IMMEDIATE OBFUSCATION — RAW CACHING — ZERO WINDOW — VALHALLA ETERNAL
 // =============================================================================

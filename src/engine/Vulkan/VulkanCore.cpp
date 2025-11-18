@@ -1,3 +1,5 @@
+#include "engine/Vulkan/VkSafeSTypes.hpp"
+#include "engine/Vulkan/VulkanRenderer.hpp"
 // =============================================================================
 // AMOURANTH RTX Engine (C) 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
@@ -1039,13 +1041,13 @@ void VulkanRTX::updateRTXDescriptors(uint32_t frameIdx,
 
     // === 0: TLAS — SAFE pNext ===
     asWrites.push_back(VkWriteDescriptorSetAccelerationStructureKHR{
-        .sType                      = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR,
+        .sType                      = kVkWriteDescriptorSetSType_ACCELERATION_STRUCTURE_KHR,
         .accelerationStructureCount = 1,
         .pAccelerationStructures    = &tlas
     });
 
     writes.push_back(VkWriteDescriptorSet{
-        .sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        .sType           = kVkWriteDescriptorSetSType,
         .pNext           = &asWrites.back(),
         .dstSet          = set,
         .dstBinding      = Bindings::RTX::TLAS,
@@ -1067,7 +1069,7 @@ void VulkanRTX::updateRTXDescriptors(uint32_t frameIdx,
         }
         imgInfos.push_back({ sampler, view, layout });
         writes.push_back(VkWriteDescriptorSet{
-            .sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .sType           = kVkWriteDescriptorSetSType,
             .dstSet          = set,
             .dstBinding      = binding,
             .descriptorCount = 1,

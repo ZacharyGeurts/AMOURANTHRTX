@@ -1,3 +1,5 @@
+#include "engine/Vulkan/VkSafeSTypes.hpp"
+#include "engine/Vulkan/VulkanRenderer.hpp"
 // src/engine/Vulkan/VulkanPipelineManager.cpp
 // =============================================================================
 // AMOURANTH RTX Engine (C) 2025 by Zachary Geurts <gzac5314@gmail.com>
@@ -123,7 +125,7 @@ void PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDescrip
     // Binding 0: TLAS (acceleration structure) — FIXED: Skip if null (VUID-04907: must write if bound, but we skip nulls per-frame)
     if (updateInfo.tlas != VK_NULL_HANDLE) {  
         VkWriteDescriptorSet accelWrite = {};
-        accelWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        accelWrite.sType = kVkWriteDescriptorSetSType;
         accelWrite.dstSet = set;
         accelWrite.dstBinding = 0;
         accelWrite.dstArrayElement = 0;
@@ -131,7 +133,7 @@ void PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDescrip
         accelWrite.descriptorCount = 1;
 
         VkWriteDescriptorSetAccelerationStructureKHR accelInfo = {};
-        accelInfo.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR;
+        accelInfo.sType = kVkWriteDescriptorSetSType_ACCELERATION_STRUCTURE_KHR;
         accelInfo.accelerationStructureCount = 1;
         accelInfo.pAccelerationStructures = &updateInfo.tlas;
         accelWrite.pNext = &accelInfo;
@@ -146,7 +148,7 @@ void PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDescrip
         rtImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 
         VkWriteDescriptorSet rtWrite = {};
-        rtWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        rtWrite.sType = kVkWriteDescriptorSetSType;
         rtWrite.dstSet = set;
         rtWrite.dstBinding = 1;
         rtWrite.dstArrayElement = 0;
@@ -164,7 +166,7 @@ void PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDescrip
         accImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 
         VkWriteDescriptorSet accWrite = {};
-        accWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        accWrite.sType = kVkWriteDescriptorSetSType;
         accWrite.dstSet = set;
         accWrite.dstBinding = 2;
         accWrite.dstArrayElement = 0;
@@ -183,7 +185,7 @@ void PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDescrip
         uboBufferInfo.range = updateInfo.uboSize;
 
         VkWriteDescriptorSet uboWrite = {};
-        uboWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        uboWrite.sType = kVkWriteDescriptorSetSType;
         uboWrite.dstSet = set;
         uboWrite.dstBinding = 3;
         uboWrite.dstArrayElement = 0;
@@ -202,7 +204,7 @@ void PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDescrip
         matBufferInfo.range = updateInfo.materialsSize;
 
         VkWriteDescriptorSet matWrite = {};
-        matWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        matWrite.sType = kVkWriteDescriptorSetSType;
         matWrite.dstSet = set;
         matWrite.dstBinding = 4;
         matWrite.dstArrayElement = 0;
@@ -221,7 +223,7 @@ void PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDescrip
         samplerImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
         VkWriteDescriptorSet samplerWrite = {};
-        samplerWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        samplerWrite.sType = kVkWriteDescriptorSetSType;
         samplerWrite.dstSet = set;
         samplerWrite.dstBinding = 5;
         samplerWrite.dstArrayElement = 0;
@@ -239,7 +241,7 @@ void PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDescrip
         nexusImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 
         VkWriteDescriptorSet nexusWrite = {};
-        nexusWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        nexusWrite.sType = kVkWriteDescriptorSetSType;
         nexusWrite.dstSet = set;
         nexusWrite.dstBinding = 6;
         nexusWrite.dstArrayElement = 0;
@@ -258,7 +260,7 @@ void PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDescrip
         addBufferInfo.range = updateInfo.additionalStorageSize;
 
         VkWriteDescriptorSet addWrite = {};
-        addWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        addWrite.sType = kVkWriteDescriptorSetSType;
         addWrite.dstSet = set;
         addWrite.dstBinding = 7;
         addWrite.dstArrayElement = 0;

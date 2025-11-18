@@ -1,3 +1,4 @@
+// include/engine/GLOBAL/RTXHandler.hpp
 // =============================================================================
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
@@ -85,7 +86,7 @@ constexpr uint64_t operator"" _TB(unsigned long long v) noexcept { return v << 4
 // =============================================================================
 namespace RTX {
     // =============================================================================
-    // FIXED: SDL3 2024+ — CREATE INSTANCE + OVERLOAD FOR initContext
+    // FIXED: SDL3 2024+ — CREATE INSTANCE + OVERLOAD for initContext
     // =============================================================================
     [[nodiscard]] VkInstance createVulkanInstanceWithSDL(SDL_Window* window, bool enableValidation);  // UPDATED: Added SDL_Window* window
     void initContext(VkInstance instance, SDL_Window* window, int width, int height);
@@ -327,11 +328,11 @@ namespace RTX {
             return alignment;
         }
 
-        // Core Vulkan Accessors — SECURE VIA STONEKEY
-        [[nodiscard]] VkDevice          device()         const noexcept { return g_device(); }
-        [[nodiscard]] VkPhysicalDevice  physicalDevice() const noexcept { return g_PhysicalDevice(); }
-        [[nodiscard]] VkInstance        instance()       const noexcept { return g_instance(); }
-        [[nodiscard]] VkSurfaceKHR      surface()        const noexcept { return g_surface(); }
+        // Core Vulkan Accessors — FIXED: DIRECT RAW ACCESS — STONEKEY NEVER TOUCHES DRIVER OBJECTS
+        [[nodiscard]] VkDevice          device()         const noexcept { return device_; }
+        [[nodiscard]] VkPhysicalDevice  physicalDevice() const noexcept { return physicalDevice_; }
+        [[nodiscard]] VkInstance        instance()       const noexcept { return instance_; }
+        [[nodiscard]] VkSurfaceKHR      surface()        const noexcept { return surface_; }
 
         // FIXED: Added renderPass() accessor
         [[nodiscard]] VkRenderPass renderPass() const noexcept { return renderPass_.valid() ? renderPass_.get() : VK_NULL_HANDLE; }

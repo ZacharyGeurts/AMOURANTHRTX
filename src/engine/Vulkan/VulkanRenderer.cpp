@@ -1,3 +1,4 @@
+#include "engine/Vulkan/VkSafeSTypes.hpp"
 // src/engine/Vulkan/VulkanRenderer.cpp
 // =============================================================================
 // AMOURANTH RTX Engine (C) 2025 by Zachary Geurts <gzac5314@gmail.com>
@@ -1960,7 +1961,7 @@ void VulkanRenderer::updateNexusDescriptors() {
     nexusInfo.imageView = hypertraceScoreView_.valid() ? *hypertraceScoreView_ : VK_NULL_HANDLE;
 
     VkWriteDescriptorSet write = {};  // Zero-init
-    write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    write.sType = kVkWriteDescriptorSetSType;
     write.dstSet = set;
     write.dstBinding = 6;  // ← FIXED: Binding 6 from PipelineManager (nexusScore)
     write.dstArrayElement = 0;
@@ -1992,28 +1993,28 @@ void VulkanRenderer::updateRTXDescriptors(uint32_t frame) noexcept
     bufferInfos.reserve(3); // UBO + 2 SSBOs
 
 // ── BINDING 0: TLAS ─────────────
-    {
-        VkAccelerationStructureKHR tlas = RTX::LAS::get().getTLAS();
-        if (tlas != VK_NULL_HANDLE) {  // FIXED: Skip if null (binding 0 dead if no TLAS)
-            VkWriteDescriptorSetAccelerationStructureKHR asInfo = {};  // Zero-init
-            asInfo.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR;
-            asInfo.accelerationStructureCount = 1;
-            asInfo.pAccelerationStructures = &tlas;
+{
+    VkAccelerationStructureKHR tlas = RTX::LAS::get().getTLAS();
+    if (tlas != VK_NULL_HANDLE) {
+        // Stack-local — NEVER let StoneKey touch these
+        VkWriteDescriptorSetAccelerationStructureKHR asInfo{};
+        asInfo.sType = kVkWriteDescriptorSetSType_ACCELERATION_STRUCTURE_KHR;
+        asInfo.accelerationStructureCount = 1;
+        asInfo.pAccelerationStructures = &tlas;
 
-            VkWriteDescriptorSet write = {};  // Zero-init
-            write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            write.pNext = &asInfo;
-            write.dstSet = set;
-            write.dstBinding = 0;
-            write.dstArrayElement = 0;
-            write.descriptorCount = 1;
-            write.descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
-            writes.push_back(write);
-            LOG_TRACE_CAT("RENDERER", "TLAS bound — handle=0x{:x}", reinterpret_cast<uint64_t>(tlas));
-        } else {
-            LOG_TRACE_CAT("RENDERER", "TLAS null — binding 0 skipped (dead to us)");
-        }
+        VkWriteDescriptorSet write{};
+        // CRITICAL: Use raw literal OR constinit — bypass any StoneKey macro poisoning
+        write.sType = kVkWriteDescriptorSetSType;  // kVkWriteDescriptorSetSType hard-coded
+        write.pNext = &asInfo;
+        write.dstSet = set;
+        write.dstBinding = 0;
+        write.descriptorCount = 1;
+        write.descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+
+        writes.push_back(write);
+        LOG_TRACE_CAT("RENDERER", "TLAS bound — StoneKey cleansed — phantom eternally slain");
     }
+}
 
     // ── BINDING 1: RT Output ───────
     {
@@ -2021,7 +2022,7 @@ void VulkanRenderer::updateRTXDescriptors(uint32_t frame) noexcept
         if (view != VK_NULL_HANDLE) {
             imageInfos.push_back({ .imageView = view, .imageLayout = VK_IMAGE_LAYOUT_GENERAL });
             VkWriteDescriptorSet write = {};  // Zero-init
-            write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            write.sType = kVkWriteDescriptorSetSType;
             write.dstSet = set;
             write.dstBinding = 1;
             write.dstArrayElement = 0;  // FIXED: 0 (count=1)
@@ -2040,7 +2041,7 @@ void VulkanRenderer::updateRTXDescriptors(uint32_t frame) noexcept
         if (view != VK_NULL_HANDLE) {  // FIXED: Skip if null/disabled
             imageInfos.push_back({ .imageView = view, .imageLayout = VK_IMAGE_LAYOUT_GENERAL });
             VkWriteDescriptorSet write = {};  // Zero-init
-            write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            write.sType = kVkWriteDescriptorSetSType;
             write.dstSet = set;
             write.dstBinding = 2;
             write.dstArrayElement = 0;  // FIXED: 0
@@ -2057,7 +2058,7 @@ void VulkanRenderer::updateRTXDescriptors(uint32_t frame) noexcept
         if (buf != VK_NULL_HANDLE) {
             bufferInfos.push_back({ .buffer = buf, .offset = 0, .range = 368 });
             VkWriteDescriptorSet write = {};  // Zero-init
-            write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            write.sType = kVkWriteDescriptorSetSType;
             write.dstSet = set;
             write.dstBinding = 3;
             write.dstArrayElement = 0;
@@ -2074,7 +2075,7 @@ void VulkanRenderer::updateRTXDescriptors(uint32_t frame) noexcept
         if (buf != VK_NULL_HANDLE) {
             bufferInfos.push_back({ .buffer = buf, .offset = 0, .range = VK_WHOLE_SIZE });
             VkWriteDescriptorSet write = {};  // Zero-init
-            write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            write.sType = kVkWriteDescriptorSetSType;
             write.dstSet = set;
             write.dstBinding = 4;
             write.dstArrayElement = 0;
@@ -2093,7 +2094,7 @@ void VulkanRenderer::updateRTXDescriptors(uint32_t frame) noexcept
             .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
         });
         VkWriteDescriptorSet write = {};  // Zero-init
-        write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        write.sType = kVkWriteDescriptorSetSType;
         write.dstSet = set;
         write.dstBinding = 5;
         write.dstArrayElement = 0;
@@ -2111,7 +2112,7 @@ void VulkanRenderer::updateRTXDescriptors(uint32_t frame) noexcept
         if (view != VK_NULL_HANDLE) {  // FIXED: Skip if null/disabled
             imageInfos.push_back({ .imageView = view, .imageLayout = VK_IMAGE_LAYOUT_GENERAL });
             VkWriteDescriptorSet write = {};  // Zero-init
-            write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            write.sType = kVkWriteDescriptorSetSType;
             write.dstSet = set;
             write.dstBinding = 6;
             write.dstArrayElement = 0;  // FIXED: 0
@@ -2128,7 +2129,7 @@ void VulkanRenderer::updateRTXDescriptors(uint32_t frame) noexcept
         if (buf != VK_NULL_HANDLE) {
             bufferInfos.push_back({ .buffer = buf, .offset = 0, .range = VK_WHOLE_SIZE });
             VkWriteDescriptorSet write = {};  // Zero-init
-            write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            write.sType = kVkWriteDescriptorSetSType;
             write.dstSet = set;
             write.dstBinding = 7;
             write.dstArrayElement = 0;
@@ -2166,7 +2167,7 @@ void VulkanRenderer::updateDenoiserDescriptors() {
     infos[0].imageView = *rtOutputViews_[currentFrame_ % rtOutputViews_.size()];
     infos[0].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
-    writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[0].sType = kVkWriteDescriptorSetSType;
     writes[0].dstSet = set;
     writes[0].dstBinding = 0;
     writes[0].descriptorCount = 1;
@@ -2177,7 +2178,7 @@ void VulkanRenderer::updateDenoiserDescriptors() {
     infos[1].imageView = denoiserView_.valid() ? *denoiserView_ : VK_NULL_HANDLE;
     infos[1].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 
-    writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[1].sType = kVkWriteDescriptorSetSType;
     writes[1].dstSet = set;
     writes[1].dstBinding = 1;
     writes[1].descriptorCount = 1;
@@ -2744,7 +2745,7 @@ void VulkanRenderer::updateTonemapDescriptor(uint32_t frameIdx, VkImageView inpu
     inputInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;  // Matches post-transition
 
     VkWriteDescriptorSet inputWrite = {};  // Zero-init
-    inputWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    inputWrite.sType = kVkWriteDescriptorSetSType;
     inputWrite.dstSet = tonemapSets_[frameIdx];
     inputWrite.dstBinding = 0;
     inputWrite.dstArrayElement = 0;
@@ -2758,7 +2759,7 @@ void VulkanRenderer::updateTonemapDescriptor(uint32_t frameIdx, VkImageView inpu
     outputInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;  // For write
 
     VkWriteDescriptorSet outputWrite = {};  // Zero-init
-    outputWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    outputWrite.sType = kVkWriteDescriptorSetSType;
     outputWrite.dstSet = tonemapSets_[frameIdx];
     outputWrite.dstBinding = 1;
     outputWrite.dstArrayElement = 0;
@@ -2773,7 +2774,7 @@ void VulkanRenderer::updateTonemapDescriptor(uint32_t frameIdx, VkImageView inpu
     uboInfo.range = VK_WHOLE_SIZE;
 
     VkWriteDescriptorSet uboWrite = {};  // Zero-init
-    uboWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    uboWrite.sType = kVkWriteDescriptorSetSType;
     uboWrite.dstSet = tonemapSets_[frameIdx];
     uboWrite.dstBinding = 2;
     uboWrite.dstArrayElement = 0;
