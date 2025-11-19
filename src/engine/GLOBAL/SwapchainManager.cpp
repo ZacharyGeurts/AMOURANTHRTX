@@ -1,24 +1,30 @@
-// AMOURANTH RTX ENGINE © 2025 — FINAL WAYLAND-IMMUNE SWAPCHAIN v3.0
-// BULLETPROOF • HDR10 → scRGB → sRGB • STONEKEY PROTECTED • PINK PHOTONS ETERNAL
+// src/engine/GLOBAL/SwapchainManager.cpp
+// =============================================================================
+//
+// Dual Licensed:
+// 1. GNU General Public License v3.0 (or later) (GPL v3)
+//    https://www.gnu.org/licenses/gpl-3.0.html
+// 2. Commercial licensing: gzac5314@gmail.com
+//
+// TRUE CONSTEXPR STONEKEY v∞ — NOVEMBER 16, 2025 — APOCALYPSE v3.4
+// PURE RANDOM ENTROPY — RDRAND + PID + TIME + TLS — KEYS NEVER LOGGED
+// =============================================================================
+// AMOURANTH RTX ENGINE © 2025 — FINAL WAYLAND-IMMUNE SWAPCHAIN v6.0
+// BULLETPROOF • HDR10 → scRGB → sRGB • FULLY STONEKEY SAFE • PINK PHOTONS ETERNAL
 
 #include "engine/GLOBAL/SwapchainManager.hpp"
 #include "engine/GLOBAL/OptionsMenu.hpp"
 #include "engine/GLOBAL/logging.hpp"
-#include "engine/GLOBAL/StoneKey.hpp"
 
 using namespace Logging::Color;
 
-// -----------------------------------------------------------------------------
-// Helper – use the engine’s VK_CHECK (already defined in VulkanCore)
-// -----------------------------------------------------------------------------
+// Use the engine’s built-in VK_CHECK from VulkanCore (no custom macro needed)
+// But we define a tiny wrapper for clarity
 #define VK_VERIFY(call) \
-    do { \
-        VkResult r = (call); \
-        if (r != VK_SUCCESS) { \
-            LOG_ERROR_CAT("SWAPCHAIN", "Vulkan error {} (code {}) in {}", #call, (int)r, __FUNCTION__); \
-            std::abort(); \
-        } \
-    } while(0)
+    do { VkResult r = (call); if (r != VK_SUCCESS) { \
+        LOG_ERROR_CAT("SWAPCHAIN", "Vulkan error in {}: {} ({})", #call, static_cast<int>(r), __FUNCTION__); \
+        std::abort(); \
+    } } while(0)
 
 // -----------------------------------------------------------------------------
 // Singleton init
@@ -35,13 +41,13 @@ void SwapchainManager::init(VkInstance instance, VkPhysicalDevice phys, VkDevice
     s_instance->device_     = dev;
     s_instance->window_     = window;
 
-    // Create surface immediately – Wayland can destroy it later, we will resurrect
+    // Create surface — Wayland may destroy it later, we handle resurrection
     if (!SDL_Vulkan_CreateSurface(window, instance, nullptr, &s_instance->surface_)) {
         LOG_ERROR_CAT("SWAPCHAIN", "SDL_Vulkan_CreateSurface failed: {}", SDL_GetError());
         std::abort();
     }
 
-    // Store in StoneKey raw cache (safe until first render)
+    // Feed StoneKey raw cache — safe until transition_to_obfuscated() is called
     set_g_instance(instance);
     set_g_PhysicalDevice(phys);
     set_g_device(dev);
@@ -51,7 +57,7 @@ void SwapchainManager::init(VkInstance instance, VkPhysicalDevice phys, VkDevice
 }
 
 // -----------------------------------------------------------------------------
-// Surface resurrection – Wayland loves to kill surfaces
+// Surface resurrection – critical for Wayland
 // -----------------------------------------------------------------------------
 bool SwapchainManager::recreateSurfaceIfLost()
 {
@@ -62,32 +68,36 @@ bool SwapchainManager::recreateSurfaceIfLost()
         return true;
 
     if (res == VK_ERROR_SURFACE_LOST_KHR) {
-        LOG_WARN_CAT("SWAPCHAIN", "Surface lost – resurrecting...");
+        LOG_WARN_CAT("SWAPCHAIN", "Surface lost detected — resurrecting from SDL window...");
 
         vkDestroySurfaceKHR(vkInstance_, surface_, nullptr);
 
         VkSurfaceKHR newSurf = VK_NULL_HANDLE;
         if (!SDL_Vulkan_CreateSurface(window_, vkInstance_, nullptr, &newSurf)) {
-            LOG_ERROR_CAT("SWAPCHAIN", "Resurrection failed: {}", SDL_GetError());
+            LOG_ERROR_CAT("SWAPCHAIN", "Failed to resurrect surface: {}", SDL_GetError());
             return false;
         }
+
         surface_ = newSurf;
         set_g_surface(newSurf);
-        LOG_SUCCESS_CAT("SWAPCHAIN", "Surface resurrected");
+
+        LOG_SUCCESS_CAT("SWAPCHAIN", "Surface successfully resurrected");
         return true;
     }
+
+    LOG_ERROR_CAT("SWAPCHAIN", "vkGetPhysicalDeviceSurfaceCapabilitiesKHR failed: {}", static_cast<int>(res));
     return false;
 }
 
 // -----------------------------------------------------------------------------
-// Best format selection – HDR10 > scRGB > sRGB
+// Best format selection — HDR10 > scRGB > sRGB
 // -----------------------------------------------------------------------------
 static VkSurfaceFormatKHR selectBestFormat(VkPhysicalDevice phys, VkSurfaceKHR surface)
 {
     uint32_t count = 0;
     vkGetPhysicalDeviceSurfaceFormatsKHR(phys, surface, &count, nullptr);
     if (count == 0) {
-        LOG_ERROR_CAT("SWAPCHAIN", "No surface formats!");
+        LOG_ERROR_CAT("SWAPCHAIN", "No surface formats available!");
         std::abort();
     }
 
@@ -101,7 +111,7 @@ static VkSurfaceFormatKHR selectBestFormat(VkPhysicalDevice phys, VkSurfaceKHR s
         const char*     name;
     };
 
-    constexpr Candidate list[] = {
+    constexpr Candidate candidates[] = {
         {VK_FORMAT_A2B10G10R10_UNORM_PACK32, VK_COLOR_SPACE_HDR10_ST2084_EXT,        1000, "HDR10 10-bit (A2B10G10R10)"},
         {VK_FORMAT_A2R10G10B10_UNORM_PACK32, VK_COLOR_SPACE_HDR10_ST2084_EXT,        999,  "HDR10 10-bit (A2R10G10B10)"},
         {VK_FORMAT_R16G16B16A16_SFLOAT,      VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT, 800, "scRGB FP16"},
@@ -110,21 +120,21 @@ static VkSurfaceFormatKHR selectBestFormat(VkPhysicalDevice phys, VkSurfaceKHR s
         {VK_FORMAT_R8G8B8A8_UNORM,           VK_COLOR_SPACE_SRGB_NONLINEAR_KHR,        90, "sRGB R8G8B8A8"},
     };
 
-    for (const auto& c : list) {
+    for (const auto& c : candidates) {
         for (const auto& f : formats) {
             if (f.format == c.format && f.colorSpace == c.colorSpace) {
-                LOG_SUCCESS_CAT("SWAPCHAIN", "Selected format: {}", c.name);
+                LOG_SUCCESS_CAT("SWAPCHAIN", "Selected surface format: {}", c.name);
                 return f;
             }
         }
     }
 
-    LOG_WARN_CAT("SWAPCHAIN", "Falling back to first format");
+    LOG_WARN_CAT("SWAPCHAIN", "No preferred format found — using first available");
     return formats[0];
 }
 
 // -----------------------------------------------------------------------------
-// Best present mode
+// Best present mode selection
 // -----------------------------------------------------------------------------
 static VkPresentModeKHR selectBestPresentMode(VkPhysicalDevice phys, VkSurfaceKHR surface,
                                             VkPresentModeKHR desired)
@@ -144,35 +154,37 @@ static VkPresentModeKHR selectBestPresentMode(VkPhysicalDevice phys, VkSurfaceKH
     };
 
     if (desired != VK_PRESENT_MODE_MAX_ENUM_KHR &&
-        std::find(modes.begin(), modes.end(), desired) != modes.end())
+        std::ranges::find(modes, desired) != modes.end())
         return desired;
 
-    for (auto pm : order) {
-        if (std::find(modes.begin(), modes.end(), pm) != modes.end())
-            return pm;
+    for (auto mode : order) {
+        if (std::ranges::find(modes, mode) != modes.end())
+            return mode;
     }
-    return VK_PRESENT_MODE_FIFO_KHR;
+
+    return VK_PRESENT_MODE_FIFO_KHR; // guaranteed by spec
 }
 
 // -----------------------------------------------------------------------------
-// Core recreate – called on startup and on resize / surface loss
+// Core recreate
 // -----------------------------------------------------------------------------
 void SwapchainManager::recreate(uint32_t w, uint32_t h)
 {
     vkDeviceWaitIdle(device_);
 
+    // Ensure surface is alive
     while (!recreateSurfaceIfLost())
         SDL_Delay(50);
 
     VkSurfaceCapabilitiesKHR caps{};
     VK_VERIFY(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physDev_, surface_, &caps));
 
-    // Extent
+    // Resolve extent
     if (caps.currentExtent.width != UINT32_MAX) {
         extent_ = caps.currentExtent;
     } else {
         extent_ = {
-            std::clamp(w, caps.minImageExtent.width,  caps.maxImageExtent.width),
+            std::clamp(w,  caps.minImageExtent.width,  caps.maxImageExtent.width),
             std::clamp(h, caps.minImageExtent.height, caps.maxImageExtent.height)
         };
     }
@@ -184,7 +196,7 @@ void SwapchainManager::recreate(uint32_t w, uint32_t h)
     if (caps.maxImageCount > 0)
         imageCount = std::min(imageCount, caps.maxImageCount);
 
-    VkSwapchainCreateInfoKHR ci = { VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR };
+    VkSwapchainCreateInfoKHR ci{ VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR };
     ci.surface          = surface_;
     ci.minImageCount    = imageCount;
     ci.imageFormat      = surfaceFormat_.format;
@@ -194,7 +206,7 @@ void SwapchainManager::recreate(uint32_t w, uint32_t h)
     ci.imageUsage       = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
                          VK_IMAGE_USAGE_TRANSFER_DST_BIT |
                          VK_IMAGE_USAGE_STORAGE_BIT;
-    ci.imageSharingMode  = VK_SHARING_MODE_EXCLUSIVE;
+    ci.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
     ci.preTransform     = caps.currentTransform;
     ci.compositeAlpha   = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
     ci.presentMode      = presentMode_;
@@ -207,11 +219,10 @@ void SwapchainManager::recreate(uint32_t w, uint32_t h)
     if (swapchain_) vkDestroySwapchainKHR(device_, *swapchain_, nullptr);
     swapchain_ = RTX::Handle<VkSwapchainKHR>(raw, device_, vkDestroySwapchainKHR);
 
-    // Retrieve images
-    uint32_t cnt = 0;
-    VK_VERIFY(vkGetSwapchainImagesKHR(device_, raw, &cnt, nullptr));
-    images_.resize(cnt);
-    VK_VERIFY(vkGetSwapchainImagesKHR(device_, raw, &cnt, images_.data()));
+    uint32_t imgCount = 0;
+    VK_VERIFY(vkGetSwapchainImagesKHR(device_, raw, &imgCount, nullptr));
+    images_.resize(imgCount);
+    VK_VERIFY(vkGetSwapchainImagesKHR(device_, raw, &imgCount, images_.data()));
 
     createImageViews();
     createRenderPass();
@@ -228,26 +239,24 @@ void SwapchainManager::createImageViews()
     imageViews_.clear();
     imageViews_.reserve(images_.size());
 
-    VkImageViewCreateInfo civ = { VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
-    civ.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    civ.format   = surfaceFormat_.format;
-    civ.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
-    civ.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
-    civ.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
-    civ.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
-    civ.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+    VkImageViewCreateInfo ci{ VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
+    ci.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    ci.format   = surfaceFormat_.format;
+    ci.components = { VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY,
+                      VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY };
+    ci.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
 
     for (VkImage img : images_) {
-        civ.image = img;
+        ci.image = img;
         VkImageView view = VK_NULL_HANDLE;
-        VK_VERIFY(vkCreateImageView(device_, &civ, nullptr, &view));
+        VK_VERIFY(vkCreateImageView(device_, &ci, nullptr, &view));
         imageViews_.emplace_back(view, device_, vkDestroyImageView);
     }
 }
 
 void SwapchainManager::createRenderPass()
 {
-    VkAttachmentDescription att = {};
+    VkAttachmentDescription att{};
     att.format         = surfaceFormat_.format;
     att.samples        = VK_SAMPLE_COUNT_1_BIT;
     att.loadOp         = VK_ATTACHMENT_LOAD_OP_CLEAR;
@@ -255,27 +264,31 @@ void SwapchainManager::createRenderPass()
     att.initialLayout  = VK_IMAGE_LAYOUT_UNDEFINED;
     att.finalLayout    = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 
-    VkAttachmentReference ref = { 0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL };
+    VkAttachmentReference ref{ 0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL };
 
-    VkSubpassDescription sub = {};
+    VkSubpassDescription sub{};
     sub.pipelineBindPoint    = VK_PIPELINE_BIND_POINT_GRAPHICS;
     sub.colorAttachmentCount = 1;
     sub.pColorAttachments    = &ref;
 
-    constexpr VkSubpassDependency deps[2] = {
-        { VK_SUBPASS_EXTERNAL, 0, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-          VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_DEPENDENCY_BY_REGION_BIT },
-        { 0, VK_SUBPASS_EXTERNAL, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-          VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, 0, VK_DEPENDENCY_BY_REGION_BIT }
+    constexpr std::array deps = {
+        VkSubpassDependency{ VK_SUBPASS_EXTERNAL, 0,
+            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+            0, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_DEPENDENCY_BY_REGION_BIT },
+        VkSubpassDependency{ 0, VK_SUBPASS_EXTERNAL,
+            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+            VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+            VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, 0, VK_DEPENDENCY_BY_REGION_BIT }
     };
 
-    VkRenderPassCreateInfo rp = { VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO };
+    VkRenderPassCreateInfo rp{ VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO };
     rp.attachmentCount = 1;
     rp.pAttachments    = &att;
     rp.subpassCount    = 1;
     rp.pSubpasses      = &sub;
-    rp.dependencyCount = 2;
-    rp.pDependencies   = deps;
+    rp.dependencyCount = static_cast<uint32_t>(deps.size());
+    rp.pDependencies   = deps.data();
 
     VkRenderPass handle = VK_NULL_HANDLE;
     VK_VERIFY(vkCreateRenderPass(device_, &rp, nullptr, &handle));
@@ -325,9 +338,9 @@ const char* SwapchainManager::presentModeName() const
 void SwapchainManager::updateWindowTitle(SDL_Window* window, float fps)
 {
     if (!window) return;
-    char buf[256];
-    snprintf(buf, sizeof(buf),
+    char title[256];
+    snprintf(title, sizeof(title),
              "AMOURANTH RTX v80 — %.0f FPS | %ux%u | %s | %s — PINK PHOTONS ETERNAL",
              fps, extent_.width, extent_.height, formatName(), presentModeName());
-    SDL_SetWindowTitle(window, buf);
+    SDL_SetWindowTitle(window, title);
 }
