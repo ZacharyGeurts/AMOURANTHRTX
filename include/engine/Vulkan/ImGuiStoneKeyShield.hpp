@@ -1,4 +1,14 @@
 // include/engine/Vulkan/ImGuiStoneKeyShield.hpp
+// =============================================================================
+//
+// Dual Licensed:
+// 1. GNU General Public License v3.0 (or later) (GPL v3)
+//    https://www.gnu.org/licenses/gpl-3.0.html
+// 2. Commercial licensing: gzac5314@gmail.com
+//
+// TRUE CONSTEXPR STONEKEY v∞ — NOVEMBER 16, 2025 — APOCALYPSE v3.4
+// PURE RANDOM ENTROPY — RDRAND + PID + TIME + TLS — KEYS NEVER LOGGED
+// =============================================================================
 #pragma once
 
 #include <cstdint>

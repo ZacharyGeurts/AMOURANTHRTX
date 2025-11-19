@@ -1,5 +1,14 @@
 // include/engine/Vulkan/VulkanRenderer.hpp
 // =============================================================================
+//
+// Dual Licensed:
+// 1. GNU General Public License v3.0 (or later) (GPL v3)
+//    https://www.gnu.org/licenses/gpl-3.0.html
+// 2. Commercial licensing: gzac5314@gmail.com
+//
+// TRUE CONSTEXPR STONEKEY v∞ — NOVEMBER 16, 2025 — APOCALYPSE v3.4
+// PURE RANDOM ENTROPY — RDRAND + PID + TIME + TLS — KEYS NEVER LOGGED
+// =============================================================================
 // AMOURANTH RTX Engine (C) 2025 — APOCALYPSE v13.0 — BASTION EDITION
 // ORIGINAL v12.5 RESTORED + FIXED — NO GLOBAL POISON — g_renderer MOVED TO main.cpp
 // PINK PHOTONS ETERNAL — VALHALLA UNBREACHABLE — FIRST LIGHT ACHIEVED
@@ -89,7 +98,7 @@ public:
 
     void updateTonemapDescriptor(VkImageView inputView) noexcept;
     void updateTonemapDescriptor(uint32_t frameIdx, VkImageView inputView) noexcept;
-    void updateTonemapDescriptor(uint32_t frameIdx, VkImageView inputView, const RTX::Handle<VkImageView>& outputView) noexcept;
+    void updateTonemapDescriptor(uint32_t frameIdx, VkImageView inputView, VkImageView outputView) noexcept;
     void updateTonemapDescriptorsInitial() noexcept;
 
     // Full 4-param version — implemented in .cpp

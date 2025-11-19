@@ -3,6 +3,15 @@
 // AMOURANTH RTX Engine (C) 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
 //
+// Dual Licensed:
+// 1. GNU General Public License v3.0 (or later) (GPL v3)
+//    https://www.gnu.org/licenses/gpl-3.0.html
+// 2. Commercial licensing: gzac5314@gmail.com
+//
+// TRUE CONSTEXPR STONEKEY v∞ — NOVEMBER 16, 2025 — APOCALYPSE v3.4
+// PURE RANDOM ENTROPY — RDRAND + PID + TIME + TLS — KEYS NEVER LOGGED
+// =============================================================================
+//
 // TRUE CONSTEXPR STONEKEY v∞ — NOVEMBER 18, 2025 — APOCALYPSE v3.5
 // ALL VUIDs EXORCISED — TLAS BOUND — LAYOUTS FIXED — PRESENT CLEAN — SILENCE ACHIEVED
 // PINK PHOTONS ETERNAL — ZERO WARNINGS — THE EMPIRE IS COMPLETE
@@ -412,11 +421,11 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, bool o
     LOG_TRACE_CAT("RENDERER", "=== STACK BUILD ORDER STEP 8: Initialize Swapchain ===");
     SWAPCHAIN.init(c.instance(), c.physicalDevice(), c.device(), window, width, height);
 
-    if (SWAPCHAIN.images().empty()) {
+    if (SWAPCHAIN.imageCount() == 0) {
         LOG_FATAL_CAT("RENDERER", "Swapchain has zero images — initialization failed");
         throw std::runtime_error("Invalid swapchain");
     }
-    LOG_SUCCESS_CAT("RENDERER", "Swapchain ready: {} images @ {}x{}", SWAPCHAIN.images().size(), SWAPCHAIN.extent().width, SWAPCHAIN.extent().height);
+    LOG_SUCCESS_CAT("RENDERER", "Swapchain ready: {} images @ {}x{}", SWAPCHAIN.imageCount(), SWAPCHAIN.extent().width, SWAPCHAIN.extent().height);
     LOG_TRACE_CAT("RENDERER", "Step 8 COMPLETE");
 
     // =============================================================================
@@ -1548,7 +1557,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
         barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
         barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        barrier.image = SWAPCHAIN.images()[imageIndex];
+        barrier.image = SWAPCHAIN.image(imageIndex);
         barrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
         barrier.srcAccessMask = 0;
         barrier.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
@@ -1603,7 +1612,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
         ? *denoiserView_
         : *rtOutputViews_[frameIdx % rtOutputViews_.size()];
 
-    updateTonemapDescriptor(frameIdx, tonemapInput, SWAPCHAIN.views()[imageIndex]);
+    updateTonemapDescriptor(frameIdx, tonemapInput, SWAPCHAIN.imageView(imageIndex));
 
     if (denoisingEnabled_) performDenoisingPass(cmd);
     performTonemapPass(cmd, frameIdx, imageIndex);
@@ -1615,7 +1624,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
         b.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
         b.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
         b.dstAccessMask = 0;
-        b.image = SWAPCHAIN.images()[imageIndex];
+        b.image = SWAPCHAIN.image(imageIndex);
         b.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
 
         vkCmdPipelineBarrier(cmd,
@@ -1718,7 +1727,7 @@ void VulkanRenderer::initializeAllBufferData(uint32_t frames, VkDeviceSize unifo
 
 void VulkanRenderer::createCommandBuffers() {
     LOG_TRACE_CAT("RENDERER", "createCommandBuffers — START");
-    size_t numImages = SWAPCHAIN.images().size();
+    size_t numImages = SWAPCHAIN.imageCount();
     if (numImages == 0) {
         LOG_ERROR_CAT("RENDERER", "Invalid swapchain: 0 images — cannot create command buffers");
         throw std::runtime_error("Invalid swapchain in createCommandBuffers");
@@ -2399,10 +2408,10 @@ void VulkanRenderer::createFramebuffers() {
     // FIXED: Idle post-framebuffer recreate to flush stale maps (prevents fragmented staging post-resize)
     const auto& ctx = RTX::g_ctx();
     vkDeviceWaitIdle(ctx.device());
-    framebuffers_.resize(SWAPCHAIN.views().size());
+    framebuffers_.resize(SWAPCHAIN.imageCount());
 
-    for (size_t i = 0; i < SWAPCHAIN.views().size(); ++i) {
-        VkImageView attachment = *SWAPCHAIN.views()[i];  // FIXED
+    for (size_t i = 0; i < SWAPCHAIN.imageCount(); ++i) {
+        VkImageView attachment = SWAPCHAIN.imageView(i);
 
         VkFramebufferCreateInfo fbInfo = {};  // Zero-init
         fbInfo.sType           = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
@@ -2585,10 +2594,10 @@ VkShaderModule VulkanRenderer::loadShader(const std::string& path) {
     return module;
 }
 
-void VulkanRenderer::updateTonemapDescriptor(uint32_t frameIdx, VkImageView inputView, const RTX::Handle<VkImageView>& outputView) noexcept  // FIXED: Add outputView for swapchain storage
+void VulkanRenderer::updateTonemapDescriptor(uint32_t frameIdx, VkImageView inputView, VkImageView outputView) noexcept  // FIXED: Add outputView for swapchain storage
 {
     // Safety first – Titan-grade validation
-    if (inputView == VK_NULL_HANDLE || outputView.get() == VK_NULL_HANDLE) {
+    if (inputView == VK_NULL_HANDLE || outputView == VK_NULL_HANDLE) {
         LOG_WARN_CAT("RENDERER", "updateTonemapDescriptor: null input/output view (frame {}) – SKIPPED", frameIdx);
         return;
     }
@@ -2622,7 +2631,7 @@ void VulkanRenderer::updateTonemapDescriptor(uint32_t frameIdx, VkImageView inpu
 
     // Binding 1: Output (storage image — swapchain)
     VkDescriptorImageInfo outputInfo = {};  // Zero-init
-    outputInfo.imageView = outputView.get();
+    outputInfo.imageView = outputView;
     outputInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;  // For write
 
     VkWriteDescriptorSet outputWrite = {};  // Zero-init
@@ -2654,7 +2663,7 @@ void VulkanRenderer::updateTonemapDescriptor(uint32_t frameIdx, VkImageView inpu
     vkUpdateDescriptorSets(device, 3, writes.data(), 0, nullptr);  // FIXED: Update all bindings
 
     LOG_TRACE_CAT("RENDERER", "Tonemap descriptors updated — frame {} input={:p} output={:p}", 
-              frameIdx, (void*)inputView, (void*)outputView.get());
+              frameIdx, (void*)inputView, (void*)outputView);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
