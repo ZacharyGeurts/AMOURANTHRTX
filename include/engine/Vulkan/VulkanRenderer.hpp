@@ -6,7 +6,7 @@
 //    https://www.gnu.org/licenses/gpl-3.0.html
 // 2. Commercial licensing: gzac5314@gmail.com
 //
-// TRUE CONSTEXPR STONEKEY v∞ — NOVEMBER 16, 2025 — APOCALYPSE v3.4
+// TRUE CONSTEXPR STONEKEY v∞ — NOVEMBER 19, 2025 — APOCALYPSE FINAL
 // PURE RANDOM ENTROPY — RDRAND + PID + TIME + TLS — KEYS NEVER LOGGED
 // =============================================================================
 // AMOURANTH RTX Engine (C) 2025 — APOCALYPSE v13.0 — BASTION EDITION
@@ -69,7 +69,7 @@ struct TonemapPushConstants {
 // ──────────────────────────────────────────────────────────────────────────────
 class VulkanRenderer {
 public:
-    void initImGuiFonts();
+    void initImGuiFonts() noexcept;
     void drawLoadingOverlay() noexcept;
     VulkanRenderer(int width, int height, SDL_Window* window = nullptr, bool overclockFromMain = false);
     ~VulkanRenderer();
@@ -156,10 +156,13 @@ public:
 private:
     bool minimized_ = false;
     bool stonekey_active_ = false;
+	bool destroyed_ = false; // window
     static inline ImFont* plasmaticaFont = nullptr;
     static inline ImFont* arialBoldFont  = nullptr;
     static inline ImFont* arialFont      = nullptr;
     static inline ImFont* iconFont       = nullptr;
+
+	void waitForAllFences() const noexcept;
 
     static constexpr auto RT_SHADER_PATHS = std::to_array({
         "assets/shaders/raytracing/raygen.spv",
@@ -274,17 +277,17 @@ private:
     Application* app_ = nullptr;
 
     // Private helpers — implemented in VulkanRenderer.cpp
-    void createFramebuffers();
+    void createFramebuffers() noexcept;
     void cleanupFramebuffers() noexcept;
     bool recreateTonemapUBOs() noexcept;
     void destroySharedStaging() noexcept;
     bool createSharedStaging() noexcept;
     void createAutoExposureResources() noexcept;
     void createTonemapPipeline() noexcept;
-    void createTonemapSampler();
-    VkCommandBuffer beginSingleTimeCommands(VkDevice device, VkCommandPool pool);
-    void endSingleTimeCommands(VkDevice device, VkCommandPool pool, VkQueue queue, VkCommandBuffer cmd);
-    VkCommandBuffer allocateTransientCommandBuffer(VkDevice device, VkCommandPool pool);
+    void createTonemapSampler() noexcept;
+    VkCommandBuffer beginSingleTimeCommands(VkDevice device, VkCommandPool pool) noexcept;
+    void endSingleTimeCommands(VkDevice device, VkCommandPool pool, VkQueue queue, VkCommandBuffer cmd) noexcept;
+    VkCommandBuffer allocateTransientCommandBuffer(VkDevice device, VkCommandPool pool) noexcept;
     void destroyNexusScoreImage() noexcept;
     void destroyDenoiserImage() noexcept;
     void destroyAllBuffers() noexcept;
@@ -292,26 +295,26 @@ private:
     void destroyRTOutputImages() noexcept;
     void destroySBT() noexcept;
     void updateRTXDescriptors(uint32_t frame = 0) noexcept;
-    void createRTOutputImages();
-    void createAccumulationImages();
-    void createDenoiserImage();
-    void createEnvironmentMap();
-    void createNexusScoreImage(VkPhysicalDevice phys, VkDevice dev, VkCommandPool pool, VkQueue queue);
-    void initializeAllBufferData(uint32_t frames, VkDeviceSize uniformSize, VkDeviceSize materialSize);
-    void createCommandBuffers();
-    void allocateDescriptorSets();
-    void updateNexusDescriptors();
-    void updateDenoiserDescriptors();
-    void createRayTracingPipeline(const std::vector<std::string>& shaderPaths);
-    void createShaderBindingTable();
-    VkShaderModule loadShader(const std::string& path);
-    VkDeviceAddress getShaderGroupHandle(uint32_t group);
+    void createRTOutputImages() noexcept;
+    void createAccumulationImages() noexcept;
+    void createDenoiserImage() noexcept;
+    void createEnvironmentMap() noexcept;
+    void createNexusScoreImage(VkCommandPool pool, VkQueue queue) noexcept;
+    void initializeAllBufferData(uint32_t frames, VkDeviceSize uniformSize, VkDeviceSize materialSize) noexcept;
+    void createCommandBuffers() noexcept;
+    void allocateDescriptorSets() noexcept;
+    void updateNexusDescriptors() noexcept;
+    void updateDenoiserDescriptors() noexcept;
+    void createRayTracingPipeline(const std::vector<std::string>& shaderPaths) noexcept;
+    void createShaderBindingTable() noexcept;
+    VkShaderModule loadShader(const std::string& path) noexcept;
+    VkDeviceAddress getShaderGroupHandle(uint32_t group) noexcept;
     void loadRayTracingExtensions() noexcept;
     void recordRayTracingCommandBuffer(VkCommandBuffer cmd) noexcept;
-    void performDenoisingPass(VkCommandBuffer cmd);
+    void performDenoisingPass(VkCommandBuffer cmd) noexcept;
     void performTonemapPass(VkCommandBuffer cmd, uint32_t frameIdx, uint32_t swapImageIdx) noexcept;
-    void updateUniformBuffer(uint32_t frame, const Camera& camera, float jitter);
-    void updateTonemapUniform(uint32_t frame);
+    void updateUniformBuffer(uint32_t frame, const Camera& camera, float jitter) noexcept;
+    void updateTonemapUniform(uint32_t frame) noexcept;
     uint32_t findMemoryType(VkPhysicalDevice pd, uint32_t filter, VkMemoryPropertyFlags props) const noexcept;
     void createImageArray(
         std::vector<RTX::Handle<VkImage>>& images,

@@ -15,8 +15,11 @@
 #include "engine/GLOBAL/StoneKey.hpp"
 #include "engine/GLOBAL/RTXHandler.hpp"
 #include "engine/Vulkan/VulkanCore.hpp"
+#include "engine/GLOBAL/PipelineManager.hpp"
+#include "engine/GLOBAL/camera.hpp"
 
-using namespace Engine;
+extern RTX::PipelineManager* g_pipeline_manager;
+
 using namespace Logging::Color;
 
 RenderMode1::RenderMode1(VulkanRTX& rtx, uint32_t width, uint32_t height)
@@ -29,7 +32,7 @@ RenderMode1::RenderMode1(VulkanRTX& rtx, uint32_t width, uint32_t height)
 RenderMode1::~RenderMode1() {
     LOG_INFO_CAT("RenderMode1", "Destructor invoked — Safe cleanup");
 
-    vkDeviceWaitIdle(RTX::g_ctx().vkDevice());
+    vkDeviceWaitIdle(g_device());
 
     rtx_.updateRTXDescriptors(0,
         VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,
@@ -44,8 +47,6 @@ RenderMode1::~RenderMode1() {
 
 void RenderMode1::initResources() {
     LOG_INFO_CAT("RenderMode1", "initResources() — Creating buffers and images");
-    auto& ctx = RTX::g_ctx();
-    VkDevice device = ctx.vkDevice();
 
     VkDeviceSize uniformSize = sizeof(glm::mat4) + sizeof(float) + sizeof(uint32_t);
     LOG_INFO_CAT("RenderMode1", "Creating uniform buffer: Size {}B | Usage: UNIFORM + TRANSFER_DST", uniformSize);
@@ -57,7 +58,7 @@ void RenderMode1::initResources() {
     BUFFER_CREATE(accumulationBuf_, accumSize_, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                   VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "RenderMode1 Accum");
 
-    VkImageCreateInfo imgInfo{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+    VkImageCreateInfo imgInfo = { VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
     imgInfo.imageType = VK_IMAGE_TYPE_2D;
     imgInfo.format = VK_FORMAT_R16G16B16A16_SFLOAT;
     imgInfo.extent = {width_, height_, 1};
@@ -68,35 +69,72 @@ void RenderMode1::initResources() {
     imgInfo.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
     imgInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
-    VkImage rawImg;
+    VkImage rawImg = VK_NULL_HANDLE;
     LOG_INFO_CAT("RenderMode1", "Creating accumulation image: {}×{} | Format: R16G16B16A16_SFLOAT", width_, height_);
-    VK_CHECK(vkCreateImage(device, &imgInfo, nullptr, &rawImg), "Accum image creation");
-    accumImage_ = RTX::Handle<VkImage>(rawImg, device, vkDestroyImage, 0, "AccumImage");
+    VK_CHECK(vkCreateImage(g_device(), &imgInfo, nullptr, &rawImg), "Accum image creation");
+    accumImage_ = RTX::Handle<VkImage>(rawImg, g_device(), vkDestroyImage, 0, "AccumImage");
 
-    VkImageViewCreateInfo viewInfo{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+    VkMemoryRequirements memReqs;
+    vkGetImageMemoryRequirements(g_device(), rawImg, &memReqs);
+    uint32_t memType = g_pipeline_manager->findMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    VkMemoryAllocateInfo alloc = { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, nullptr, memReqs.size, memType };
+    VkDeviceMemory rawMem = VK_NULL_HANDLE;
+    VK_CHECK(vkAllocateMemory(g_device(), &alloc, nullptr, &rawMem), "Accum memory allocation");
+    VK_CHECK(vkBindImageMemory(g_device(), rawImg, rawMem, 0), "Bind accum memory");
+    accumMem_ = RTX::Handle<VkDeviceMemory>(rawMem, g_device(), vkFreeMemory, memReqs.size, "AccumMemory");
+
+    VkImageViewCreateInfo viewInfo = { VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
     viewInfo.image = rawImg;
     viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
     viewInfo.format = imgInfo.format;
     viewInfo.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-    VkImageView rawView;
-    VK_CHECK(vkCreateImageView(device, &viewInfo, nullptr, &rawView), "Accum view creation");
-    accumView_ = RTX::Handle<VkImageView>(rawView, device, vkDestroyImageView, 0, "AccumView");
+    VkImageView rawView = VK_NULL_HANDLE;
+    VK_CHECK(vkCreateImageView(g_device(), &viewInfo, nullptr, &rawView), "Accum view creation");
+    accumView_ = RTX::Handle<VkImageView>(rawView, g_device(), vkDestroyImageView, 0, "AccumView");
 
     imgInfo.format = VK_FORMAT_R8G8B8A8_UNORM;
     LOG_INFO_CAT("RenderMode1", "Creating output image: {}×{} | Format: R8G8B8A8_UNORM", width_, height_);
-    VK_CHECK(vkCreateImage(device, &imgInfo, nullptr, &rawImg), "Output image creation");
-    outputImage_ = RTX::Handle<VkImage>(rawImg, device, vkDestroyImage, 0, "OutputImage");
+    VK_CHECK(vkCreateImage(g_device(), &imgInfo, nullptr, &rawImg), "Output image creation");
+    outputImage_ = RTX::Handle<VkImage>(rawImg, g_device(), vkDestroyImage, 0, "OutputImage");
+
+    vkGetImageMemoryRequirements(g_device(), rawImg, &memReqs);
+    alloc.allocationSize = memReqs.size;
+    alloc.memoryTypeIndex = memType;
+    VK_CHECK(vkAllocateMemory(g_device(), &alloc, nullptr, &rawMem), "Output memory allocation");
+    VK_CHECK(vkBindImageMemory(g_device(), rawImg, rawMem, 0), "Bind output memory");
+    outputMem_ = RTX::Handle<VkDeviceMemory>(rawMem, g_device(), vkFreeMemory, memReqs.size, "OutputMemory");
 
     viewInfo.image = rawImg;
     viewInfo.format = imgInfo.format;
-    VK_CHECK(vkCreateImageView(device, &viewInfo, nullptr, &rawView), "Output view creation");
-    outputView_ = RTX::Handle<VkImageView>(rawView, device, vkDestroyImageView, 0, "OutputView");
+    VK_CHECK(vkCreateImageView(g_device(), &viewInfo, nullptr, &rawView), "Output view creation");
+    outputView_ = RTX::Handle<VkImageView>(rawView, g_device(), vkDestroyImageView, 0, "OutputView");
+
+    // Transition images to GENERAL with barriers (VUID compliant)
+    VkCommandBuffer cmd = VulkanRTX::beginSingleTimeCommands(RTX::g_ctx().commandPool());
+    VkImageMemoryBarrier barrier = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
+    barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.levelCount = 1;
+    barrier.subresourceRange.layerCount = 1;
+
+    // Accum image transition
+    barrier.image = *accumImage_;
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+
+    // Output image transition
+    barrier.image = *outputImage_;
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+
+    g_pipeline_manager->endSingleTimeCommands(RTX::g_ctx().commandPool(), RTX::g_ctx().graphicsQueue(), cmd);
 
     LOG_INFO_CAT("RenderMode1", "Updating RTX descriptors for frame 0");
     rtx_.updateRTXDescriptors(0, RAW_BUFFER(uniformBuf_), RAW_BUFFER(accumulationBuf_), VK_NULL_HANDLE,
                               *accumView_, *outputView_, VK_NULL_HANDLE, VK_NULL_HANDLE,
                               VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE);
-    LOG_SUCCESS_CAT("RenderMode1", "initResources complete — Resources ready for dispatch");
+    LOG_SUCCESS_CAT("RenderMode1", "initResources complete — Resources ready for dispatch — VUID Compliant");
 }
 
 void RenderMode1::renderFrame(VkCommandBuffer cmd, float deltaTime) {
@@ -112,7 +150,7 @@ void RenderMode1::updateUniforms(float deltaTime) {
     BUFFER_MAP(uniformBuf_, data);
     if (data) {
         float aspect = static_cast<float>(width_) / height_;
-        glm::mat4 vp = g_lazyCam.proj(aspect) * g_lazyCam.view();
+        glm::mat4 vp = GlobalCamera::get().proj(aspect) * GlobalCamera::get().view();
         float time = std::chrono::duration<float>(std::chrono::steady_clock::now() - lastFrame_).count();
         memcpy(data, glm::value_ptr(vp), sizeof(vp));
         memcpy(static_cast<char*>(data) + sizeof(vp), &time, sizeof(time));
@@ -145,9 +183,7 @@ void RenderMode1::accumulateAndToneMap(VkCommandBuffer cmd) {
 void RenderMode1::onResize(uint32_t width, uint32_t height) {
     LOG_INFO_CAT("RenderMode1", "onResize() — New: {}×{} (old: {}×{})", width, height, width_, height_);
 
-    auto& ctx = RTX::g_ctx();
-    VkDevice device = ctx.vkDevice();
-    VK_CHECK(vkDeviceWaitIdle(device), "vkDeviceWaitIdle failed in onResize");
+    vkDeviceWaitIdle(g_device());
 
     rtx_.updateRTXDescriptors(0, VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,
                               VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,
@@ -169,5 +205,5 @@ void RenderMode1::onResize(uint32_t width, uint32_t height) {
     lastFrame_ = std::chrono::steady_clock::now();
     initResources();
 
-    LOG_SUCCESS_CAT("RenderMode1", "Resize complete — Resources recreated");
+    LOG_SUCCESS_CAT("RenderMode1", "Resize complete — Resources recreated — VUID Compliant");
 }

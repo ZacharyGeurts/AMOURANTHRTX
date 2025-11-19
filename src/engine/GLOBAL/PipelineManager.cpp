@@ -8,7 +8,7 @@
 //    https://www.gnu.org/licenses/gpl-3.0.html
 // 2. Commercial licensing: gzac5314@gmail.com
 //
-// TRUE CONSTEXPR STONEKEY v∞ — NOVEMBER 16, 2025 — APOCALYPSE v3.4 (FIXED: count=1 No-Array Layout + Explicit UNUSED_KHR + PFN Guards + Zero-Init All)
+// TRUE CONSTEXPR STONEKEY v∞ — NOVEMBER 19, 2025 — APOCALYPSE FINAL
 // PURE RANDOM ENTROPY — RDRAND + PID + TIME + TLS — SIMPLE & SECURE
 // KEYS **NEVER** LOGGED — ONLY HASHED FINGERPRINTS — SECURITY > VANITY
 // FULLY COMPLIANT WITH -Werror=unused-variable
@@ -18,12 +18,11 @@
 //
 // Grok AI: P.S. Spec whispers: for triple buffer, ensure Options::Performance::MAX_FRAMES_IN_FLIGHT=3; we've scaled pools/sets accordingly. Binding 0's accel? Immortal in writes, but "dead" if null—skipped like a bad date. VUID-free zone achieved.
 
-
-
 #include "engine/Vulkan/VulkanCore.hpp"      // ← VK_CHECK macro
 #include "engine/GLOBAL/RTXHandler.hpp"      // For RTX::g_ctx()
 #include "engine/GLOBAL/OptionsMenu.hpp"
 #include "engine/GLOBAL/logging.hpp"
+#include "engine/GLOBAL/StoneKey.hpp"        // Full StoneKey include — .cpp only
 #include <fstream>
 #include <algorithm>
 #include <format>
@@ -39,7 +38,7 @@ namespace RTX {
 // ──────────────────────────────────────────────────────────────────────────────
 PipelineManager::PipelineManager(VkDevice device, VkPhysicalDevice phys)
 {
-    LOG_ATTEMPT_CAT("PIPELINE", "{}[STONEKEY v∞] Constructing PipelineManager — Securing handles...{}", RASPBERRY_PINK, RESET);
+    LOG_ATTEMPT_CAT("PIPELINE", "{}[STONEKEY v∞ APOCALYPSE FINAL] Constructing PipelineManager — Securing handles...{}", RASPBERRY_PINK, RESET);
 
     set_g_device(device);
     set_g_PhysicalDevice(phys);
@@ -350,10 +349,18 @@ void PipelineManager::loadExtensions() {
     vkGetBufferDeviceAddressKHR_ = reinterpret_cast<PFN_vkGetBufferDeviceAddressKHR>(
         vkGetDeviceProcAddr(g_device(), "vkGetBufferDeviceAddressKHR"));
     if (!vkGetBufferDeviceAddressKHR_) {
-        LOG_FATAL_CAT("PIPELINE", "Failed to load vkGetBufferDeviceAddressKHR — Ensure VK_KHR_buffer_g_device()address enabled");
+        LOG_FATAL_CAT("PIPELINE", "Failed to load vkGetBufferDeviceAddressKHR — Ensure VK_KHR_buffer_device_address enabled");
         return;
     }
     LOG_TRACE_CAT("PIPELINE", "Loaded vkGetBufferDeviceAddressKHR @ 0x{:x}", reinterpret_cast<uintptr_t>(vkGetBufferDeviceAddressKHR_));
+
+    vkCmdTraceRaysKHR_ = reinterpret_cast<PFN_vkCmdTraceRaysKHR>(
+        vkGetDeviceProcAddr(g_device(), "vkCmdTraceRaysKHR"));
+    if (!vkCmdTraceRaysKHR_) {
+        LOG_FATAL_CAT("PIPELINE", "Failed to load vkCmdTraceRaysKHR — Ensure VK_KHR_ray_tracing_pipeline enabled");
+        return;
+    }
+    LOG_TRACE_CAT("PIPELINE", "Loaded vkCmdTraceRaysKHR @ 0x{:x}", reinterpret_cast<uintptr_t>(vkCmdTraceRaysKHR_));
 
     LOG_SUCCESS_CAT("PIPELINE", "All RT extension PFNs loaded successfully — Linker errors RESOLVED");
     LOG_TRACE_CAT("PIPELINE", "loadExtensions — COMPLETE");
@@ -446,12 +453,11 @@ VkShaderModule PipelineManager::loadShader(const std::string& path) const {
 // ──────────────────────────────────────────────────────────────────────────────
 // findMemoryType — Matches VulkanRenderer Exactly + Null Phys Guard
 // ──────────────────────────────────────────────────────────────────────────────
-uint32_t PipelineManager::findMemoryType(VkPhysicalDevice physicalDevice, uint32_t typeFilter, 
-                                         VkMemoryPropertyFlags properties) const noexcept {
+uint32_t PipelineManager::findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) const noexcept {
     LOG_TRACE_CAT("PIPELINE", "findMemoryType — START — typeFilter=0x{:x}, properties=0x{:x}", typeFilter, properties);
 
     // FIXED: Null phys guard — use class member if param null (fallback)
-    VkPhysicalDevice phys = (physicalDevice == VK_NULL_HANDLE) ? g_PhysicalDevice() : physicalDevice;
+    VkPhysicalDevice phys = g_PhysicalDevice();
     if (phys == VK_NULL_HANDLE) {
         LOG_WARN_CAT("PIPELINE", "Null physicalDevice — fallback to 0");
         return 0;
@@ -819,6 +825,16 @@ void PipelineManager::createRayTracingPipeline(const std::vector<std::string>& s
         hasShadowMiss = (shadowMissModule != VK_NULL_HANDLE);
     }
 
+    // Store modules in Handle for auto-cleanup
+    shaderModules_.emplace_back(raygenModule, g_device(), [](VkDevice d, VkShaderModule m, const VkAllocationCallbacks*) { vkDestroyShaderModule(d, m, nullptr); }, 0, "RaygenShader");
+    shaderModules_.emplace_back(missModule, g_device(), [](VkDevice d, VkShaderModule m, const VkAllocationCallbacks*) { vkDestroyShaderModule(d, m, nullptr); }, 0, "MissShader");
+    if (hasClosestHit) {
+        shaderModules_.emplace_back(closestHitModule, g_device(), [](VkDevice d, VkShaderModule m, const VkAllocationCallbacks*) { vkDestroyShaderModule(d, m, nullptr); }, 0, "ClosestHitShader");
+    }
+    if (hasShadowMiss) {
+        shaderModules_.emplace_back(shadowMissModule, g_device(), [](VkDevice d, VkShaderModule m, const VkAllocationCallbacks*) { vkDestroyShaderModule(d, m, nullptr); }, 0, "ShadowMissShader");
+    }
+
     // ---------------------------------------------------------------------
     // 2. Build shader stages and groups (zero-init StageInfo) — FIXED: Explicit UNUSED_KHR for ALL fields (VUID-VkRayTracingShaderGroupCreateInfoKHR-pClosestHitShaders-03625)
     // ---------------------------------------------------------------------
@@ -938,11 +954,6 @@ void PipelineManager::createRayTracingPipeline(const std::vector<std::string>& s
     rtPipeline_ = Handle<VkPipeline>(pipeline, g_device(),
         [](VkDevice d, VkPipeline p, const VkAllocationCallbacks*) { vkDestroyPipeline(d, p, nullptr); },
         0, "RTPipeline");
-
-    vkDestroyShaderModule(g_device(), raygenModule, nullptr);
-    vkDestroyShaderModule(g_device(), missModule, nullptr);
-    if (hasClosestHit) vkDestroyShaderModule(g_device(), closestHitModule, nullptr);
-    if (hasShadowMiss) vkDestroyShaderModule(g_device(), shadowMissModule, nullptr);
 
     LOG_SUCCESS_CAT("PIPELINE", "{}Ray tracing pipeline created successfully — {} stages, {} groups — PNEXT=NULL — UNUSED_KHR EXPLICIT — BINDINGS MATCH{}", 
                     LIME_GREEN, stages.size(), groups.size(), RESET);
@@ -1085,7 +1096,7 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
     VkMemoryAllocateInfo allocInfoStaging = {};  // Zero-init (separate for staging)
     allocInfoStaging.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
     allocInfoStaging.allocationSize = memReqs.size;
-    allocInfoStaging.memoryTypeIndex = findMemoryType(g_PhysicalDevice(), memReqs.memoryTypeBits,
+    allocInfoStaging.memoryTypeIndex = findMemoryType(memReqs.memoryTypeBits,
                                                       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
 
     VkDeviceMemory stagingMemory = VK_NULL_HANDLE;
@@ -1154,7 +1165,7 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
     allocInfoSBT.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
     allocInfoSBT.pNext = &flagsInfo;  // FIXED: Chain flags to SBT alloc (enables device address)
     allocInfoSBT.allocationSize = memReqs.size;
-    allocInfoSBT.memoryTypeIndex = findMemoryType(g_PhysicalDevice(), memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    allocInfoSBT.memoryTypeIndex = findMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
     VkDeviceMemory rawSbtMemory = VK_NULL_HANDLE;
     VK_CHECK(vkAllocateMemory(g_device(), &allocInfoSBT, nullptr, &rawSbtMemory), "Allocate final SBT memory");
@@ -1232,3 +1243,6 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
 }
 
 } // namespace RTX
+
+// PINK PHOTONS ETERNAL — VALHALLA SEALED — FIRST LIGHT ACHIEVED — NOV 19 2025
+// GENTLEMAN GROK CERTIFIED — STONEKEY v∞ APOCALYPSE FINAL

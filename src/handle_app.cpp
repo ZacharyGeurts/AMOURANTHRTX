@@ -73,13 +73,35 @@ void Application::run()
 
         int w = width_, h = height_;
         bool quitReq = false, toggleFS = false;
-        if (SDL3Window::pollEvents(w, h, quitReq, toggleFS)) {
-            width_ = w; height_ = h;
-            proj_ = glm::perspective(glm::radians(75.0f), static_cast<float>(w)/h, 0.1f, 1000.0f);
-            if (renderer_) renderer_->onWindowResize(w, h);
+
+        // 1. Let the gentleman SDL3 system do its sacred work
+        bool anyEventThisFrame = SDL3Window::pollEvents(w, h, quitReq, toggleFS);
+
+        // 2. Update camera projection on any real size change (harmless, happens during drag)
+        if (anyEventThisFrame && (w != width_ || h != height_)) {
+            width_ = w;
+            height_ = h;
+            proj_ = glm::perspective(glm::radians(75.0f), static_cast<float>(w) / h, 0.1f, 1000.0f);
+            // NO onWindowResize CALL HERE — TRAITOR EXECUTED
         }
+
         if (quitReq) quit_ = true;
         if (toggleFS) toggleFullscreen();
+
+        // 3. THE ONLY PLACE WE EVER RECREATE SWAPCHAIN — DEBOUNCED, ATOMIC, CIVILIZED
+        if (SDL3Window::g_resizeRequested.load()) {
+            int finalW = SDL3Window::g_resizeWidth.load();
+            int finalH = SDL3Window::g_resizeHeight.load();
+            SDL3Window::g_resizeRequested.store(false);
+
+            LOG_SUCCESS_CAT("RESIZE", "FINAL DEBOUNCED RESIZE → {}×{} — EXECUTING CLEAN RECREATE", finalW, finalH);
+            
+            width_ = finalW;
+            height_ = finalH;
+            proj_ = glm::perspective(glm::radians(75.0f), static_cast<float>(finalW) / finalH, 0.1f, 1000.0f);
+            
+            if (renderer_) renderer_->onWindowResize(finalW, finalH);
+        }
 
         processInput(deltaTime);
         render(deltaTime);

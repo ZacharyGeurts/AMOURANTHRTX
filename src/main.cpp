@@ -93,6 +93,23 @@ static void phase0_cliAndStonekey(int argc, char* argv[]) {
     bulkhead("PHASE 0: CLI + STONEKEY v∞");
     (void)get_kStone1(); (void)get_kStone2();
     LOG_SUCCESS_CAT("MAIN", "StoneKey active — XOR fingerprint: 0x{:016X}", get_kStone1() ^ get_kStone2());
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // STONEKEY v∞ — APOCALYPSE FINAL v1.5 — NOVEMBER 19, 2025
+    // RAW CACHE FED HERE — CONTEXT NOW VALID — VALHALLA SEALED
+    // This is the ONLY required change for permanent key protection
+    // Called right after Vulkan context exists → perfect timing
+    // ─────────────────────────────────────────────────────────────────────────────
+    if (RTX::g_ctx().isValid()) {
+        set_g_instance(RTX::g_ctx().instance());
+        set_g_device(RTX::g_ctx().vkDevice());
+        set_g_PhysicalDevice(RTX::g_ctx().physicalDevice());
+        set_g_surface(RTX::g_ctx().surface());
+
+        // Optional: trigger full obfuscation after a few frames
+        // (do this in your render loop if you want delay, or leave commented)
+        // StoneKey::Raw::transition_to_obfuscated();
+    }
 }
 
 static void phase0_5_iconPreload() {
