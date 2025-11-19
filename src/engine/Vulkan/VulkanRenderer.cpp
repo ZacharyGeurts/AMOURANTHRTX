@@ -416,19 +416,23 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, bool o
     LOG_TRACE_CAT("RENDERER", "Step 7.5 COMPLETE — PipelineManager armed (dev=0x{:x}, phys=0x{:x})", reinterpret_cast<uintptr_t>(c.device()), reinterpret_cast<uintptr_t>(c.physicalDevice()));
 
     // =============================================================================
-    // STEP 8 — Initialize Swapchain (uses global surface from RTX::initContext)
+    // STEP 8 — Initialize Swapchain (MUST BE BEFORE ANY ACCESS TO SWAPCHAIN)
     // =============================================================================
     LOG_TRACE_CAT("RENDERER", "=== STACK BUILD ORDER STEP 8: Initialize Swapchain ===");
     SwapchainManager::init(window, width, height);
-    LOG_TRACE_CAT("RENDERER", "Step 8 — init called");
+    LOG_TRACE_CAT("RENDERER", "SwapchainManager::init() completed — singleton now alive");
 
-    // ← NOW SAFE: SWAPCHAIN is fully initialized
+    // ← NOW 100% SAFE — SWAPCHAIN is fully initialized
     if (SWAPCHAIN.imageCount() == 0) {
-        LOG_FATAL_CAT("RENDERER", "Swapchain has zero images — initialization failed");
-        throw std::runtime_error("Invalid swapchain");
+        LOG_FATAL_CAT("RENDERER", "Swapchain has zero images after init — driver/surface issue");
+        throw std::runtime_error("Swapchain initialization failed — zero images");
     }
-    LOG_SUCCESS_CAT("RENDERER", "Swapchain ready: {} images @ {}x{}", SWAPCHAIN.imageCount(), SWAPCHAIN.extent().width, SWAPCHAIN.extent().height);
-    LOG_TRACE_CAT("RENDERER", "Step 8 COMPLETE");
+
+	assert(SWAPCHAIN.imageCount() > 0 && "Swapchain failed to initialize — check surface compatibility");
+
+    LOG_SUCCESS_CAT("RENDERER", "Swapchain FORGED — {} images @ {}x{} — PINK PHOTONS READY", 
+                    SWAPCHAIN.imageCount(), SWAPCHAIN.extent().width, SWAPCHAIN.extent().height);
+    LOG_TRACE_CAT("RENDERER", "Step 8 COMPLETE — Swapchain validated and armed");
 	
     // =============================================================================
     // STEP 9 — HDR + RT RENDER TARGETS (POST-SWAPCHAIN, POST-PIPELINEMANAGER)

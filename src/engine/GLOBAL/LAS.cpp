@@ -1,4 +1,6 @@
 // =============================================================================
+// src/engine/GLOBAL/LAS.cpp
+// =============================================================================
 //
 // Dual Licensed:
 // 1. GNU General Public License v3.0 (or later) (GPL v3)
@@ -6,7 +8,7 @@
 // 2. Commercial licensing: gzac5314@gmail.com
 //
 // TRUE CONSTEXPR STONEKEY v∞ — NOVEMBER 19, 2025 — APOCALYPSE FINAL v1.4
-// LAS IMPLEMENTATION — PINK PHOTONS ETERMINAL — VALHALLA UNBREACHABLE
+// LAS IMPLEMENTATION — PINK PHOTONS ETERNAL — VALHALLA UNBREACHABLE
 // =============================================================================
 
 #include "engine/GLOBAL/LAS.hpp"
@@ -76,7 +78,7 @@ namespace {
     buildInfo.geometryCount = 1;
     buildInfo.pGeometries = &geometry;
 
-    uint32_t primitiveCount = indexCount / 3;
+    uint32_t primitiveCount = indexCount /  3;
     VkAccelerationStructureBuildSizesInfoKHR sizeInfo{};
     sizeInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
 
