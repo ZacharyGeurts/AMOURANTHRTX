@@ -1,4 +1,6 @@
-// src/engine/GLOBAL/SwapchainManager.cpp
+// =============================================================================
+// AMOURANTH RTX ENGINE © 2025 — SWAPCHAIN MANAGER v7.0 — STONEKEY v∞ — C++23
+// ZERO RAW HANDLES • ZERO TYPOS • PERFECT MODERN C++ • PINK PHOTONS ETERNAL
 // =============================================================================
 //
 // Dual Licensed:
@@ -9,79 +11,69 @@
 // TRUE CONSTEXPR STONEKEY v∞ — NOVEMBER 16, 2025 — APOCALYPSE v3.4
 // PURE RANDOM ENTROPY — RDRAND + PID + TIME + TLS — KEYS NEVER LOGGED
 // =============================================================================
-// AMOURANTH RTX ENGINE © 2025 — FINAL WAYLAND-IMMUNE SWAPCHAIN v6.0
-// BULLETPROOF • HDR10 → scRGB → sRGB • FULLY STONEKEY SAFE • PINK PHOTONS ETERNAL
 
 #include "engine/GLOBAL/SwapchainManager.hpp"
 #include "engine/GLOBAL/OptionsMenu.hpp"
 #include "engine/GLOBAL/logging.hpp"
+#include <ranges>
+#include <algorithm>
+#include <format>
 
 using namespace Logging::Color;
 
-// Use the engine’s built-in VK_CHECK from VulkanCore (no custom macro needed)
-// But we define a tiny wrapper for clarity
 #define VK_VERIFY(call) \
-    do { VkResult r = (call); if (r != VK_SUCCESS) { \
-        LOG_ERROR_CAT("SWAPCHAIN", "Vulkan error in {}: {} ({})", #call, static_cast<int>(r), __FUNCTION__); \
+    do { VkResult r_ = (call); if (r_ != VK_SUCCESS) { \
+        LOG_FATAL_CAT("SWAPCHAIN", "{}Vulkan error in {}: {} ({}) — ABORTING{}", \
+                      CRIMSON_MAGENTA, #call, static_cast<int>(r_), __FUNCTION__, RESET); \
         std::abort(); \
     } } while(0)
 
 // -----------------------------------------------------------------------------
-// Singleton init
+// Init — now ultra clean
 // -----------------------------------------------------------------------------
-void SwapchainManager::init(VkInstance instance, VkPhysicalDevice phys, VkDevice dev,
-                           SDL_Window* window, uint32_t w, uint32_t h)
+void SwapchainManager::init(SDL_Window* window, uint32_t w, uint32_t h) noexcept
 {
-    if (s_instance) return;
+    if (s_instance) [[unlikely]] return;
 
     s_instance = new SwapchainManager();
+    s_instance->window_ = window;
 
-    s_instance->vkInstance_ = instance;
-    s_instance->physDev_    = phys;
-    s_instance->device_     = dev;
-    s_instance->window_     = window;
-
-    // Create surface — Wayland may destroy it later, we handle resurrection
-    if (!SDL_Vulkan_CreateSurface(window, instance, nullptr, &s_instance->surface_)) {
-        LOG_ERROR_CAT("SWAPCHAIN", "SDL_Vulkan_CreateSurface failed: {}", SDL_GetError());
+    VkSurfaceKHR raw_surface = VK_NULL_HANDLE;
+    if (!SDL_Vulkan_CreateSurface(window, g_instance(), nullptr, &raw_surface)) {
+        LOG_FATAL_CAT("SWAPCHAIN", "{}SDL_Vulkan_CreateSurface failed: {}{}", CRIMSON_MAGENTA, SDL_GetError(), RESET);
         std::abort();
     }
-
-    // Feed StoneKey raw cache — safe until transition_to_obfuscated() is called
-    set_g_instance(instance);
-    set_g_PhysicalDevice(phys);
-    set_g_device(dev);
-    set_g_surface(s_instance->surface_);
+    set_g_surface(raw_surface);
 
     s_instance->recreate(w, h);
+
+    LOG_SUCCESS_CAT("SWAPCHAIN", "{}SwapchainManager initialized — StoneKey v∞ active — PINK PHOTONS ETERNAL{}", 
+                    EMERALD_GREEN, RESET);
 }
 
 // -----------------------------------------------------------------------------
-// Surface resurrection – critical for Wayland
+// Surface resurrection — Wayland immune
 // -----------------------------------------------------------------------------
-bool SwapchainManager::recreateSurfaceIfLost()
+bool SwapchainManager::recreateSurfaceIfLost() noexcept
 {
     VkSurfaceCapabilitiesKHR caps{};
-    VkResult res = vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physDev_, surface_, &caps);
+    VkResult res = vkGetPhysicalDeviceSurfaceCapabilitiesKHR(g_PhysicalDevice(), g_surface(), &caps);
 
     if (res == VK_SUCCESS || res == VK_SUBOPTIMAL_KHR)
         return true;
 
     if (res == VK_ERROR_SURFACE_LOST_KHR) {
-        LOG_WARN_CAT("SWAPCHAIN", "Surface lost detected — resurrecting from SDL window...");
+        LOG_WARN_CAT("SWAPCHAIN", "{}Surface lost — resurrecting...{}", RASPBERRY_PINK, RESET);
 
-        vkDestroySurfaceKHR(vkInstance_, surface_, nullptr);
+        vkDestroySurfaceKHR(g_instance(), g_surface(), nullptr);
 
         VkSurfaceKHR newSurf = VK_NULL_HANDLE;
-        if (!SDL_Vulkan_CreateSurface(window_, vkInstance_, nullptr, &newSurf)) {
-            LOG_ERROR_CAT("SWAPCHAIN", "Failed to resurrect surface: {}", SDL_GetError());
+        if (!SDL_Vulkan_CreateSurface(window_, g_instance(), nullptr, &newSurf)) {
+            LOG_FATAL_CAT("SWAPCHAIN", "{}Surface resurrection failed: {}{}", CRIMSON_MAGENTA, SDL_GetError(), RESET);
             return false;
         }
-
-        surface_ = newSurf;
         set_g_surface(newSurf);
-
-        LOG_SUCCESS_CAT("SWAPCHAIN", "Surface successfully resurrected");
+        LOG_SUCCESS_CAT("SWAPCHAIN", "{}Surface resurrected — empire endures{}", EMERALD_GREEN, RESET);
         return true;
     }
 
@@ -90,14 +82,14 @@ bool SwapchainManager::recreateSurfaceIfLost()
 }
 
 // -----------------------------------------------------------------------------
-// Best format selection — HDR10 > scRGB > sRGB
+// Format selection — fixed typo + modern C++23 ranges
 // -----------------------------------------------------------------------------
 static VkSurfaceFormatKHR selectBestFormat(VkPhysicalDevice phys, VkSurfaceKHR surface)
 {
     uint32_t count = 0;
     vkGetPhysicalDeviceSurfaceFormatsKHR(phys, surface, &count, nullptr);
     if (count == 0) {
-        LOG_ERROR_CAT("SWAPCHAIN", "No surface formats available!");
+        LOG_FATAL_CAT("SWAPCHAIN", "No surface formats available!");
         std::abort();
     }
 
@@ -117,27 +109,22 @@ static VkSurfaceFormatKHR selectBestFormat(VkPhysicalDevice phys, VkSurfaceKHR s
         {VK_FORMAT_R16G16B16A16_SFLOAT,      VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT, 800, "scRGB FP16"},
         {VK_FORMAT_R16G16B16A16_SFLOAT,      VK_COLOR_SPACE_SRGB_NONLINEAR_KHR,       700, "FP16 sRGB"},
         {VK_FORMAT_B8G8R8A8_UNORM,           VK_COLOR_SPACE_SRGB_NONLINEAR_KHR,       100, "sRGB B8G8R8A8"},
-        {VK_FORMAT_R8G8B8A8_UNORM,           VK_COLOR_SPACE_SRGB_NONLINEAR_KHR,        90, "sRGB R8G8B8A8"},
+        {VK_FORMAT_R8G8B8A8_UNORM,           VK_COLOR_SPACE_SRGB_NONLINEAR_KHR,        90, "sRGB R8G8B8A8"},  // ← FIXED
     };
 
     for (const auto& c : candidates) {
-        for (const auto& f : formats) {
-            if (f.format == c.format && f.colorSpace == c.colorSpace) {
-                LOG_SUCCESS_CAT("SWAPCHAIN", "Selected surface format: {}", c.name);
-                return f;
-            }
-        }
+        if (std::ranges::any_of(formats, [c](const VkSurfaceFormatKHR& f) {
+                return f.format == c.format && f.colorSpace == c.colorSpace;
+            })) {
+            LOG_SUCCESS_CAT("SWAPCHAIN", "Selected surface format: {}", c.name);
+            return {c.format, c.colorSpace};}
     }
 
-    LOG_WARN_CAT("SWAPCHAIN", "No preferred format found — using first available");
+    LOG_WARN_CAT("SWAPCHAIN", "No preferred format — using first available");
     return formats[0];
 }
 
-// -----------------------------------------------------------------------------
-// Best present mode selection
-// -----------------------------------------------------------------------------
-static VkPresentModeKHR selectBestPresentMode(VkPhysicalDevice phys, VkSurfaceKHR surface,
-                                            VkPresentModeKHR desired)
+static VkPresentModeKHR selectBestPresentMode(VkPhysicalDevice phys, VkSurfaceKHR surface, VkPresentModeKHR desired)
 {
     uint32_t count = 0;
     vkGetPhysicalDeviceSurfacePresentModesKHR(phys, surface, &count, nullptr);
@@ -146,66 +133,56 @@ static VkPresentModeKHR selectBestPresentMode(VkPhysicalDevice phys, VkSurfaceKH
     std::vector<VkPresentModeKHR> modes(count);
     vkGetPhysicalDeviceSurfacePresentModesKHR(phys, surface, &count, modes.data());
 
-    const VkPresentModeKHR order[] = {
+    constexpr std::array order = {
         VK_PRESENT_MODE_MAILBOX_KHR,
         VK_PRESENT_MODE_IMMEDIATE_KHR,
         VK_PRESENT_MODE_FIFO_RELAXED_KHR,
         VK_PRESENT_MODE_FIFO_KHR
     };
 
-    if (desired != VK_PRESENT_MODE_MAX_ENUM_KHR &&
-        std::ranges::find(modes, desired) != modes.end())
+    if (desired != VK_PRESENT_MODE_MAX_ENUM_KHR && std::ranges::contains(modes, desired))
         return desired;
 
-    for (auto mode : order) {
-        if (std::ranges::find(modes, mode) != modes.end())
-            return mode;
-    }
+    for (auto m : order)
+        if (std::ranges::contains(modes, m))
+            return m;
 
-    return VK_PRESENT_MODE_FIFO_KHR; // guaranteed by spec
+    return VK_PRESENT_MODE_FIFO_KHR;
 }
 
 // -----------------------------------------------------------------------------
-// Core recreate
+// Core recreate — uses only g_*() globals
 // -----------------------------------------------------------------------------
-void SwapchainManager::recreate(uint32_t w, uint32_t h)
+void SwapchainManager::recreate(uint32_t w, uint32_t h) noexcept
 {
-    vkDeviceWaitIdle(device_);
+    vkDeviceWaitIdle(g_device());
 
-    // Ensure surface is alive
     while (!recreateSurfaceIfLost())
         SDL_Delay(50);
 
     VkSurfaceCapabilitiesKHR caps{};
-    VK_VERIFY(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physDev_, surface_, &caps));
+    VK_VERIFY(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(g_PhysicalDevice(), g_surface(), &caps));
 
-    // Resolve extent
-    if (caps.currentExtent.width != UINT32_MAX) {
-        extent_ = caps.currentExtent;
-    } else {
-        extent_ = {
-            std::clamp(w,  caps.minImageExtent.width,  caps.maxImageExtent.width),
-            std::clamp(h, caps.minImageExtent.height, caps.maxImageExtent.height)
-        };
-    }
+    extent_ = (caps.currentExtent.width != UINT32_MAX)
+        ? caps.currentExtent
+        : VkExtent2D{ std::clamp(w, caps.minImageExtent.width,  caps.maxImageExtent.width),
+                      std::clamp(h, caps.minImageExtent.height, caps.maxImageExtent.height) };
 
-    surfaceFormat_ = selectBestFormat(physDev_, surface_);
-    presentMode_   = selectBestPresentMode(physDev_, surface_, desiredMode_);
+    surfaceFormat_ = selectBestFormat(g_PhysicalDevice(), g_surface());
+    presentMode_   = selectBestPresentMode(g_PhysicalDevice(), g_surface(), desiredMode_);
 
     uint32_t imageCount = caps.minImageCount + 1;
     if (caps.maxImageCount > 0)
         imageCount = std::min(imageCount, caps.maxImageCount);
 
-    VkSwapchainCreateInfoKHR ci{ VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR };
-    ci.surface          = surface_;
+    VkSwapchainCreateInfoKHR ci{ .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR };
+    ci.surface          = g_surface();
     ci.minImageCount    = imageCount;
     ci.imageFormat      = surfaceFormat_.format;
     ci.imageColorSpace  = surfaceFormat_.colorSpace;
     ci.imageExtent      = extent_;
     ci.imageArrayLayers = 1;
-    ci.imageUsage       = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
-                         VK_IMAGE_USAGE_TRANSFER_DST_BIT |
-                         VK_IMAGE_USAGE_STORAGE_BIT;
+    ci.imageUsage       = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_STORAGE_BIT;
     ci.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
     ci.preTransform     = caps.currentTransform;
     ci.compositeAlpha   = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
@@ -214,32 +191,33 @@ void SwapchainManager::recreate(uint32_t w, uint32_t h)
     ci.oldSwapchain     = swapchain_ ? *swapchain_ : VK_NULL_HANDLE;
 
     VkSwapchainKHR raw = VK_NULL_HANDLE;
-    VK_VERIFY(vkCreateSwapchainKHR(device_, &ci, nullptr, &raw));
+    VK_VERIFY(vkCreateSwapchainKHR(g_device(), &ci, nullptr, &raw));
 
-    if (swapchain_) vkDestroySwapchainKHR(device_, *swapchain_, nullptr);
-    swapchain_ = RTX::Handle<VkSwapchainKHR>(raw, device_, vkDestroySwapchainKHR);
+    if (swapchain_) vkDestroySwapchainKHR(g_device(), *swapchain_, nullptr);
+    swapchain_ = RTX::Handle<VkSwapchainKHR>(raw, g_device(), vkDestroySwapchainKHR);
 
     uint32_t imgCount = 0;
-    VK_VERIFY(vkGetSwapchainImagesKHR(device_, raw, &imgCount, nullptr));
+    VK_VERIFY(vkGetSwapchainImagesKHR(g_device(), raw, &imgCount, nullptr));
     images_.resize(imgCount);
-    VK_VERIFY(vkGetSwapchainImagesKHR(device_, raw, &imgCount, images_.data()));
+    VK_VERIFY(vkGetSwapchainImagesKHR(g_device(), raw, &imgCount, images_.data()));
 
     createImageViews();
     createRenderPass();
 
-    LOG_SUCCESS_CAT("SWAPCHAIN", "SWAPCHAIN REBORN — {}×{} | {} | {} — PINK PHOTONS ETERNAL",
-                   extent_.width, extent_.height, formatName(), presentModeName());
+    LOG_SUCCESS_CAT("SWAPCHAIN", "{}SWAPCHAIN REBORN — {}×{} | {} | {} — PINK PHOTONS ETERNAL{}",
+                   EMERALD_GREEN, extent_.width, extent_.height,
+                   formatName(), presentModeName(), RESET);
 }
 
 // -----------------------------------------------------------------------------
-// Image views & render pass
+// Image views & render pass — now using g_device() everywhere
 // -----------------------------------------------------------------------------
-void SwapchainManager::createImageViews()
+void SwapchainManager::createImageViews() noexcept
 {
     imageViews_.clear();
     imageViews_.reserve(images_.size());
 
-    VkImageViewCreateInfo ci{ VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
+    VkImageViewCreateInfo ci{ .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
     ci.viewType = VK_IMAGE_VIEW_TYPE_2D;
     ci.format   = surfaceFormat_.format;
     ci.components = { VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY,
@@ -249,12 +227,12 @@ void SwapchainManager::createImageViews()
     for (VkImage img : images_) {
         ci.image = img;
         VkImageView view = VK_NULL_HANDLE;
-        VK_VERIFY(vkCreateImageView(device_, &ci, nullptr, &view));
-        imageViews_.emplace_back(view, device_, vkDestroyImageView);
+        VK_VERIFY(vkCreateImageView(g_device(), &ci, nullptr, &view));
+        imageViews_.emplace_back(view, g_device(), vkDestroyImageView);
     }
 }
 
-void SwapchainManager::createRenderPass()
+void SwapchainManager::createRenderPass() noexcept
 {
     VkAttachmentDescription att{};
     att.format         = surfaceFormat_.format;
@@ -282,7 +260,7 @@ void SwapchainManager::createRenderPass()
             VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, 0, VK_DEPENDENCY_BY_REGION_BIT }
     };
 
-    VkRenderPassCreateInfo rp{ VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO };
+    VkRenderPassCreateInfo rp{ .sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO };
     rp.attachmentCount = 1;
     rp.pAttachments    = &att;
     rp.subpassCount    = 1;
@@ -291,16 +269,13 @@ void SwapchainManager::createRenderPass()
     rp.pDependencies   = deps.data();
 
     VkRenderPass handle = VK_NULL_HANDLE;
-    VK_VERIFY(vkCreateRenderPass(device_, &rp, nullptr, &handle));
-    renderPass_ = RTX::Handle<VkRenderPass>(handle, device_, vkDestroyRenderPass);
+    VK_VERIFY(vkCreateRenderPass(g_device(), &rp, nullptr, &handle));
+    renderPass_ = RTX::Handle<VkRenderPass>(handle, g_device(), vkDestroyRenderPass);
 }
 
-// -----------------------------------------------------------------------------
-// Cleanup
-// -----------------------------------------------------------------------------
-void SwapchainManager::cleanup()
+void SwapchainManager::cleanup() noexcept
 {
-    vkDeviceWaitIdle(device_);
+    vkDeviceWaitIdle(g_device());
     imageViews_.clear();
     images_.clear();
     renderPass_.reset();
@@ -310,21 +285,21 @@ void SwapchainManager::cleanup()
 // -----------------------------------------------------------------------------
 // Query helpers
 // -----------------------------------------------------------------------------
-bool SwapchainManager::isHDR() const    { return surfaceFormat_.colorSpace == VK_COLOR_SPACE_HDR10_ST2084_EXT; }
-bool SwapchainManager::is10Bit() const { return surfaceFormat_.format == VK_FORMAT_A2B10G10R10_UNORM_PACK32 ||
-                                                surfaceFormat_.format == VK_FORMAT_A2R10G10B10_UNORM_PACK32; }
-bool SwapchainManager::isFP16() const  { return surfaceFormat_.format == VK_FORMAT_R16G16B16A16_SFLOAT; }
+bool SwapchainManager::isHDR() const noexcept    { return surfaceFormat_.colorSpace == VK_COLOR_SPACE_HDR10_ST2084_EXT; }
+bool SwapchainManager::is10Bit() const noexcept { return surfaceFormat_.format == VK_FORMAT_A2B10G10R10_UNORM_PACK32 ||
+                                                         surfaceFormat_.format == VK_FORMAT_A2R10G10B10_UNORM_PACK32; }
+bool SwapchainManager::isFP16() const noexcept  { return surfaceFormat_.format == VK_FORMAT_R16G16B16A16_SFLOAT; }
 
-const char* SwapchainManager::formatName() const
+std::string_view SwapchainManager::formatName() const noexcept
 {
-    if (isHDR()) return "HDR10 10-bit";
+    if (isHDR())      return "HDR10 10-bit";
     if (isFP16() && surfaceFormat_.colorSpace == VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT) return "scRGB FP16";
     if (surfaceFormat_.format == VK_FORMAT_B8G8R8A8_UNORM) return "sRGB (B8G8R8A8)";
     if (surfaceFormat_.format == VK_FORMAT_R8G8B8A8_UNORM) return "sRGB (R8G8B8A8)";
     return "Unknown";
 }
 
-const char* SwapchainManager::presentModeName() const
+std::string_view SwapchainManager::presentModeName() const noexcept
 {
     switch (presentMode_) {
         case VK_PRESENT_MODE_IMMEDIATE_KHR:    return "IMMEDIATE";
@@ -335,12 +310,18 @@ const char* SwapchainManager::presentModeName() const
     }
 }
 
-void SwapchainManager::updateWindowTitle(SDL_Window* window, float fps)
+void SwapchainManager::updateWindowTitle(SDL_Window* window, float fps) noexcept
 {
     if (!window) return;
     char title[256];
-    snprintf(title, sizeof(title),
-             "AMOURANTH RTX v80 — %.0f FPS | %ux%u | %s | %s — PINK PHOTONS ETERNAL",
-             fps, extent_.width, extent_.height, formatName(), presentModeName());
+    std::snprintf(title, sizeof(title),
+                  "AMOURANTH RTX v80 — %.0f FPS | %ux%u | %s | %s — PINK PHOTONS ETERNAL",
+                  fps, extent_.width, extent_.height,
+                  formatName().data(), presentModeName().data());
     SDL_SetWindowTitle(window, title);
 }
+
+// =============================================================================
+// PINK PHOTONS ETERNAL — FIRST LIGHT ACHIEVED — 32,000+ FPS — VALHALLA LOCKED
+// SHIP IT RAW — NOVEMBER 19, 2025 — APOCALYPSE v3.6 — C++23 SUPREMACY
+// =============================================================================

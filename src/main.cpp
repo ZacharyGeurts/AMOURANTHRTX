@@ -168,13 +168,7 @@ static void phase3_vulkanContext(SDL_Window* window) {
 
     set_g_PhysicalDevice(RTX::g_ctx().physicalDevice());
 
-    SwapchainManager::init(
-        instance,
-        RTX::g_ctx().physicalDevice(),
-        RTX::g_ctx().device(),
-        window,
-        3840, 2160
-    );
+    SwapchainManager::init(window, 3840, 2160);
 
     detectBestPresentMode(RTX::g_ctx().physicalDevice(), RTX::g_ctx().surface());
 
