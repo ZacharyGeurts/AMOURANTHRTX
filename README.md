@@ -5,15 +5,12 @@ chmod +x linux.sh
 ./linux.sh clean
 ```
 Currently compiles and reaches render loop. Much more work needed yet.  
-Commercial Open Source, non-propriatary.  
-This comes from Grok.  
 Requested 1000s of times, rebuilt, re-edited, re-microed, assembled  and tested to work.  
-I work fast but slow. Rather than rendering fast and working backwards,  
-HDR and incredible features come with.  
+Labor of love, blah blah.  
 Expect no output on a given day. I go for milestones and not all include visuals.  
 Updates are fast and furious at this stage and the renderer could be up or down any minute.  
 If you do not like where it crashes, come back tomorrow and I will show you a new one.  
-Labor of love, blah blah.  
+
 The whole engine is secured with StoneKey and is supposed to be unbreakable when done correctly.  
 My hopes is that it is not a major frame destroyer. (12,000+ on 4070ti to work with)  
 The goal is a fast as pink photons HDR SDL3 RTX engine that is ready for you, the developer.  
