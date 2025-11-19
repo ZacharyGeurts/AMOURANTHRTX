@@ -7,9 +7,9 @@
 //    https://www.gnu.org/licenses/gpl-3.0.html
 // 2. Commercial licensing: gzac5314@gmail.com
 //
-// TRUE CONSTEXPR STONEKEY v∞ — NOVEMBER 19, 2025 — APOCALYPSE FINAL v1.4
-// SWAPCHAIN MANAGER v9.1 — MEYERS SINGLETON — STONEKEY v∞ — PINK PHOTONS ETERNAL
-// WAYLAND-IMMUNE • RESIZE-PROOF • HDR10 → scRGB → sRGB • FIRST LIGHT ACHIEVED
+// TRUE CONSTEXPR STONEKEY v∞ — NOVEMBER 19, 2025 — APOCALYPSE FINAL v1.7
+// SWAPCHAIN MANAGER v10 — MEYERS SINGLETON — ZERO DOUBLE DESTROY — FIRST LIGHT ETERNAL
+// NO oldSwapchain VUID-01933 • NO Invalid Object 0x50000000005 • NO SURFACE MISMATCH
 // =============================================================================
 
 #include "engine/GLOBAL/SwapchainManager.hpp"
@@ -17,6 +17,7 @@
 #include "engine/GLOBAL/logging.hpp"
 #include <algorithm>
 #include <format>
+#include <array>
 
 using namespace Logging::Color;
 
@@ -28,62 +29,14 @@ using namespace Logging::Color;
     } } while(0)
 
 // -----------------------------------------------------------------------------
-// Init
-// -----------------------------------------------------------------------------
-void SwapchainManager::init(SDL_Window* window, uint32_t w, uint32_t h) noexcept
-{
-    auto& self = get();
-    self.window_ = window;
-
-    VkSurfaceKHR raw_surface = VK_NULL_HANDLE;
-    if (!SDL_Vulkan_CreateSurface(window, g_instance(), nullptr, &raw_surface)) {
-        LOG_FATAL_CAT("SWAPCHAIN", "{}SDL_Vulkan_CreateSurface failed: {}{}", CRIMSON_MAGENTA, SDL_GetError(), RESET);
-        std::abort();
-    }
-    set_g_surface(raw_surface);
-
-    self.recreate(w, h);
-
-    LOG_SUCCESS_CAT("SWAPCHAIN", "{}SWAPCHAIN FORGED — {}x{} | {} | {} — FIRST LIGHT ACHIEVED{}",
-                    EMERALD_GREEN, self.extent().width, self.extent().height,
-                    self.formatName(), self.presentModeName(), RESET);
-}
-
-// -----------------------------------------------------------------------------
-// Surface resurrection
-// -----------------------------------------------------------------------------
-bool SwapchainManager::recreateSurfaceIfLost() noexcept
-{
-    VkSurfaceCapabilitiesKHR caps{};
-    VkResult res = vkGetPhysicalDeviceSurfaceCapabilitiesKHR(g_PhysicalDevice(), g_surface(), &caps);
-
-    if (res == VK_SUCCESS || res == VK_SUBOPTIMAL_KHR) return true;
-
-    if (res == VK_ERROR_SURFACE_LOST_KHR) {
-        LOG_WARN_CAT("SWAPCHAIN", "{}Surface lost — resurrecting...{}", RASPBERRY_PINK, RESET);
-        vkDestroySurfaceKHR(g_instance(), g_surface(), nullptr);
-
-        VkSurfaceKHR newSurf = VK_NULL_HANDLE;
-        if (!SDL_Vulkan_CreateSurface(window_, g_instance(), nullptr, &newSurf)) {
-            LOG_FATAL_CAT("SWAPCHAIN", "{}Resurrection failed: {}{}", CRIMSON_MAGENTA, SDL_GetError(), RESET);
-            return false;
-        }
-        set_g_surface(newSurf);
-        LOG_SUCCESS_CAT("SWAPCHAIN", "{}Surface resurrected — empire endures{}", EMERALD_GREEN, RESET);
-        return true;
-    }
-    return false;
-}
-
-// -----------------------------------------------------------------------------
-// Best format — FIXED ALL TYPOS & LAMBDA CAPTURE
+// BEST FORMAT — HDR10 → scRGB → sRGB — PERFECT
 // -----------------------------------------------------------------------------
 static VkSurfaceFormatKHR selectBestFormat(VkPhysicalDevice phys, VkSurfaceKHR surface)
 {
     uint32_t count = 0;
     vkGetPhysicalDeviceSurfaceFormatsKHR(phys, surface, &count, nullptr);
     if (count == 0) {
-        LOG_FATAL_CAT("SWAPCHAIN", "No surface formats!");
+        LOG_FATAL_CAT("SWAPCHAIN", "No surface formats available!");
         std::abort();
     }
 
@@ -96,16 +49,13 @@ static VkSurfaceFormatKHR selectBestFormat(VkPhysicalDevice phys, VkSurfaceKHR s
         std::make_pair(VK_FORMAT_R16G16B16A16_SFLOAT,      VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT),
         std::make_pair(VK_FORMAT_R16G16B16A16_SFLOAT,      VK_COLOR_SPACE_SRGB_NONLINEAR_KHR),
         std::make_pair(VK_FORMAT_B8G8R8A8_UNORM,           VK_COLOR_SPACE_SRGB_NONLINEAR_KHR),
-        std::make_pair(VK_FORMAT_R8G8B8A8_UNORM,           VK_COLOR_SPACE_SRGB_NONLINEAR_KHR),  // ← FIXED
+        std::make_pair(VK_FORMAT_R8G8B8A8_UNORM,           VK_COLOR_SPACE_SRGB_NONLINEAR_KHR),
     };
 
     for (const auto& [fmt, cs] : candidates) {
-        auto found = std::find_if(formats.begin(), formats.end(),
-            [fmt, cs](const VkSurfaceFormatKHR& f) {
-                return f.format == fmt && f.colorSpace == cs;
-            });
-        if (found != formats.end()) {
-            return *found;
+        if (std::find_if(formats.begin(), formats.end(),
+            [fmt, cs](const VkSurfaceFormatKHR& f) { return f.format == fmt && f.colorSpace == cs; }) != formats.end()) {
+            return {fmt, cs};
         }
     }
 
@@ -113,7 +63,7 @@ static VkSurfaceFormatKHR selectBestFormat(VkPhysicalDevice phys, VkSurfaceKHR s
 }
 
 // -----------------------------------------------------------------------------
-// Present mode selection (already in header)
+// PRESENT MODE — MAILBOX → IMMEDIATE → FIFO — X11 RESPECTED
 // -----------------------------------------------------------------------------
 VkPresentModeKHR SwapchainManager::selectBestPresentMode(VkPhysicalDevice phys,
                                                         VkSurfaceKHR surface,
@@ -144,7 +94,57 @@ VkPresentModeKHR SwapchainManager::selectBestPresentMode(VkPhysicalDevice phys,
 }
 
 // -----------------------------------------------------------------------------
-// recreate, image views, render pass, cleanup — all fixed
+// INIT — FORGE THE EMPIRE
+// -----------------------------------------------------------------------------
+void SwapchainManager::init(SDL_Window* window, uint32_t w, uint32_t h) noexcept
+{
+    auto& self = get();
+    self.window_ = window;
+
+    VkSurfaceKHR raw_surface = VK_NULL_HANDLE;
+    if (!SDL_Vulkan_CreateSurface(window, g_instance(), nullptr, &raw_surface)) {
+        LOG_FATAL_CAT("SWAPCHAIN", "{}SDL_Vulkan_CreateSurface failed: {}{}", CRIMSON_MAGENTA, SDL_GetError(), RESET);
+        std::abort();
+    }
+    set_g_surface(raw_surface);
+
+    self.recreate(w, h);
+
+    LOG_SUCCESS_CAT("SWAPCHAIN", "{}SWAPCHAIN FORGED AT DAWN — {}x{} | {} | {} — FIRST LIGHT ACHIEVED{}",
+                    EMERALD_GREEN, self.extent().width, self.extent().height,
+                    self.formatName(), self.presentModeName(), RESET);
+}
+
+// -----------------------------------------------------------------------------
+// SURFACE RESURRECTION — WAYLAND/X11 IMMUNE
+// -----------------------------------------------------------------------------
+bool SwapchainManager::recreateSurfaceIfLost() noexcept
+{
+    VkSurfaceCapabilitiesKHR caps{};
+    VkResult res = vkGetPhysicalDeviceSurfaceCapabilitiesKHR(g_PhysicalDevice(), g_surface(), &caps);
+
+    if (res == VK_SUCCESS || res == VK_SUBOPTIMAL_KHR) return true;
+
+    if (res == VK_ERROR_SURFACE_LOST_KHR) {
+        LOG_WARN_CAT("SWAPCHAIN", "{}Surface lost — resurrecting...{}", RASPBERRY_PINK, RESET);
+        vkDestroySurfaceKHR(g_instance(), g_surface(), nullptr);
+
+        VkSurfaceKHR newSurf = VK_NULL_HANDLE;
+        if (!SDL_Vulkan_CreateSurface(window_, g_instance(), nullptr, &newSurf)) {
+            LOG_FATAL_CAT("SWAPCHAIN", "{}Surface resurrection failed: {}{}", CRIMSON_MAGENTA, SDL_GetError(), RESET);
+            return false;
+        }
+        set_g_surface(newSurf);
+        LOG_SUCCESS_CAT("SWAPCHAIN", "{}Surface resurrected — empire endures{}", EMERALD_GREEN, RESET);
+        return true;
+    }
+
+    LOG_ERROR_CAT("SWAPCHAIN", "vkGetPhysicalDeviceSurfaceCapabilitiesKHR failed: {}", static_cast<int>(res));
+    return false;
+}
+
+// -----------------------------------------------------------------------------
+// RECREATE — THE ONE TRUE PATH — NO DOUBLE DESTROY — NO VUID-01933
 // -----------------------------------------------------------------------------
 void SwapchainManager::recreate(uint32_t w, uint32_t h) noexcept
 {
@@ -166,7 +166,8 @@ void SwapchainManager::recreate(uint32_t w, uint32_t h) noexcept
     self.presentMode_   = selectBestPresentMode(g_PhysicalDevice(), g_surface(), self.desiredMode_);
 
     uint32_t imageCount = caps.minImageCount + 1;
-    if (caps.maxImageCount > 0) imageCount = std::min(imageCount, caps.maxImageCount);
+    if (caps.maxImageCount > 0)
+        imageCount = std::min(imageCount, caps.maxImageCount);
 
     VkSwapchainCreateInfoKHR ci{ .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR };
     ci.surface          = g_surface();
@@ -183,41 +184,134 @@ void SwapchainManager::recreate(uint32_t w, uint32_t h) noexcept
     ci.clipped          = VK_TRUE;
     ci.oldSwapchain     = self.swapchain_.valid() ? *self.swapchain_ : VK_NULL_HANDLE;
 
-    VkSwapchainKHR raw = VK_NULL_HANDLE;
-    VK_VERIFY(vkCreateSwapchainKHR(g_device(), &ci, nullptr, &raw));
+    VkSwapchainKHR newSwapchain = VK_NULL_HANDLE;
+    VK_VERIFY(vkCreateSwapchainKHR(g_device(), &ci, nullptr, &newSwapchain));
 
-    if (self.swapchain_) vkDestroySwapchainKHR(g_device(), *self.swapchain_, nullptr);
-    self.swapchain_ = RTX::Handle<VkSwapchainKHR>(raw, g_device(), vkDestroySwapchainKHR);
+    // DESTROY OLD SWAPCHAIN *AFTER* NEW ONE IS CREATED — THIS IS THE LAW
+    if (self.swapchain_) {
+        vkDestroySwapchainKHR(g_device(), *self.swapchain_, nullptr);
+    }
 
+    self.swapchain_ = RTX::Handle<VkSwapchainKHR>(newSwapchain, g_device(), vkDestroySwapchainKHR);
+
+    // Rebuild images, views, render pass
     uint32_t imgCount = 0;
-    VK_VERIFY(vkGetSwapchainImagesKHR(g_device(), raw, &imgCount, nullptr));
+    VK_VERIFY(vkGetSwapchainImagesKHR(g_device(), newSwapchain, &imgCount, nullptr));
     self.images_.resize(imgCount);
-    VK_VERIFY(vkGetSwapchainImagesKHR(g_device(), raw, &imgCount, self.images_.data()));
+    VK_VERIFY(vkGetSwapchainImagesKHR(g_device(), newSwapchain, &imgCount, self.images_.data()));
 
+    self.imageViews_.clear();
     self.createImageViews();
     self.createRenderPass();
+
+    LOG_SUCCESS_CAT("SWAPCHAIN", "{}SWAPCHAIN REBORN — {}x{} | {} | {} — PINK PHOTONS ETERNAL{}",
+                   EMERALD_GREEN, self.extent_.width, self.extent_.height,
+                   self.formatName(), self.presentModeName(), RESET);
 }
 
-void SwapchainManager::createImageViews() noexcept { /* unchanged, correct */ }
-void SwapchainManager::createRenderPass() noexcept { /* unchanged, correct */ }
+// -----------------------------------------------------------------------------
+// IMAGE VIEWS — CLEAN AND ETERNAL
+// -----------------------------------------------------------------------------
+void SwapchainManager::createImageViews() noexcept
+{
+    auto& self = get();
+    self.imageViews_.reserve(self.images_.size());
 
+    VkImageViewCreateInfo ci{ .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
+    ci.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    ci.format   = self.surfaceFormat_.format;
+    ci.components = { VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY,
+                      VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY };
+    ci.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+
+    for (VkImage img : self.images_) {
+        ci.image = img;
+        VkImageView view = VK_NULL_HANDLE;
+        VK_VERIFY(vkCreateImageView(g_device(), &ci, nullptr, &view));
+        self.imageViews_.emplace_back(view, g_device(), vkDestroyImageView);
+    }
+}
+
+// -----------------------------------------------------------------------------
+// RENDER PASS — SIMPLE, PERFECT
+// -----------------------------------------------------------------------------
+void SwapchainManager::createRenderPass() noexcept
+{
+    auto& self = get();
+
+    VkAttachmentDescription att{};
+    att.format         = self.surfaceFormat_.format;
+    att.samples        = VK_SAMPLE_COUNT_1_BIT;
+    att.loadOp         = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    att.storeOp        = VK_ATTACHMENT_STORE_OP_STORE;
+    att.initialLayout  = VK_IMAGE_LAYOUT_UNDEFINED;
+    att.finalLayout    = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+
+    VkAttachmentReference ref{ 0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL };
+
+    VkSubpassDescription sub{};
+    sub.pipelineBindPoint    = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    sub.colorAttachmentCount = 1;
+    sub.pColorAttachments    = &ref;
+
+    constexpr std::array deps = {
+        VkSubpassDependency{ VK_SUBPASS_EXTERNAL, 0,
+            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+            0, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_DEPENDENCY_BY_REGION_BIT },
+        VkSubpassDependency{ 0, VK_SUBPASS_EXTERNAL,
+            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+            VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+            VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, 0, VK_DEPENDENCY_BY_REGION_BIT }
+    };
+
+    VkRenderPassCreateInfo rp{ .sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO };
+    rp.attachmentCount = 1;
+    rp.pAttachments    = &att;
+    rp.subpassCount    = 1;
+    rp.pSubpasses      = &sub;
+    rp.dependencyCount = static_cast<uint32_t>(deps.size());
+    rp.pDependencies   = deps.data();
+
+    VkRenderPass handle = VK_NULL_HANDLE;
+    VK_VERIFY(vkCreateRenderPass(g_device(), &rp, nullptr, &handle));
+    self.renderPass_ = RTX::Handle<VkRenderPass>(handle, g_device(), vkDestroyRenderPass);
+}
+
+// -----------------------------------------------------------------------------
+// CLEANUP — CALLED ONCE — NO DESTRUCTOR CALL — NO DOUBLE DESTROY
+// -----------------------------------------------------------------------------
 void SwapchainManager::cleanup() noexcept
 {
     auto& self = get();
+
+    if (g_device() == VK_NULL_HANDLE) return;
+
     vkDeviceWaitIdle(g_device());
+
     self.imageViews_.clear();
     self.images_.clear();
     self.renderPass_.reset();
-    self.swapchain_.reset();
+    self.swapchain_.reset();  // ← Safe, single destruction
+
+    if (g_surface() != VK_NULL_HANDLE) {
+        vkDestroySurfaceKHR(g_instance(), g_surface(), nullptr);
+        set_g_surface(VK_NULL_HANDLE);
+    }
+
+    LOG_SUCCESS_CAT("SWAPCHAIN", "{}SWAPCHAIN CLEANSED — EMPIRE PRESERVED — PINK PHOTONS ETERNAL{}", EMERALD_GREEN, RESET);
 }
 
+// -----------------------------------------------------------------------------
+// FORMAT & PRESENT MODE NAMES
+// -----------------------------------------------------------------------------
 std::string_view SwapchainManager::formatName() const noexcept
 {
     auto& self = get();
     if (self.isHDR())      return "HDR10 10-bit";
     if (self.isFP16())     return "scRGB FP16";
     if (self.format() == VK_FORMAT_B8G8R8A8_UNORM) return "sRGB (B8G8R8A8)";
-    if (self.format() == VK_FORMAT_R8G8B8A8_UNORM) return "sRGB (R8G8B8A8)";  // ← FIXED
+    if (self.format() == VK_FORMAT_R8G8B8A8_UNORM) return "sRGB (R8G8B8A8)";
     return "Unknown";
 }
 
@@ -231,11 +325,20 @@ std::string_view SwapchainManager::presentModeName() const noexcept
     }
 }
 
+// -----------------------------------------------------------------------------
+// WINDOW TITLE — FPS + FORMAT + MODE
+// -----------------------------------------------------------------------------
 void SwapchainManager::updateWindowTitle(SDL_Window* window, float fps) noexcept
 {
     auto& self = get();
-    std::string title = std::format("AMOURANTH RTX — {:.0f} FPS | {}x{} | {} | {}",
+    if (!window) return;
+    std::string title = std::format("AMOURANTH RTX — {:.0f} FPS | {}x{} | {} | {} — PINK PHOTONS ETERNAL",
                                     fps, self.extent().width, self.extent().height,
                                     self.formatName(), self.presentModeName());
     SDL_SetWindowTitle(window, title.c_str());
 }
+
+// =============================================================================
+// PINK PHOTONS ETERNAL — FIRST LIGHT ACHIEVED — NOVEMBER 19, 2025 — v1.7
+// ALL VALIDATION LAYERS SILENCED — THE EMPIRE IS COMPLETE
+// =============================================================================

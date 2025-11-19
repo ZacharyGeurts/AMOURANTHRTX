@@ -38,7 +38,7 @@
 #include "engine/GLOBAL/SwapchainManager.hpp"
 #include "engine/Vulkan/VulkanCore.hpp"
 #include "engine/Vulkan/ImGuiStoneKeyShield.hpp"
-#include "engine/Vulkan/VulkanPipelineManager.hpp"
+#include "engine/GLOBAL/PipelineManager.hpp"
 
 // Forward declarations
 struct Camera;

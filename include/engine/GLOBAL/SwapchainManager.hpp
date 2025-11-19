@@ -15,17 +15,11 @@
 #pragma once
 
 #include "engine/GLOBAL/RTXHandler.hpp"
-#include "engine/GLOBAL/StoneKey.hpp"
 #include "engine/GLOBAL/logging.hpp"
 
 #include <vulkan/vulkan.h>
 #include <SDL3/SDL_vulkan.h>
-#include <vector>
-#include <string>
-#include <span>
-#include <format>
-
-using namespace Logging::Color;
+#include <string_view>
 
 class SwapchainManager {
 public:
@@ -37,9 +31,9 @@ public:
     SwapchainManager(const SwapchainManager&) = delete;
     SwapchainManager& operator=(const SwapchainManager&) = delete;
 
-    static void init(SDL_Window* window, uint32_t width = 3840, uint32_t height = 2160) noexcept;
-    static void cleanup() noexcept;
-    void recreate(uint32_t width, uint32_t height) noexcept;
+    static void init(SDL_Window* window, uint32_t w = 3840, uint32_t h = 2160) noexcept;
+    static void cleanup() noexcept;  // ← Called ONCE at shutdown
+    void recreate(uint32_t w, uint32_t h) noexcept;
 
     static VkPresentModeKHR selectBestPresentMode(VkPhysicalDevice phys,
                                                   VkSurfaceKHR surface,
@@ -51,8 +45,8 @@ public:
     [[nodiscard]] VkExtent2D        extent() const noexcept      { return extent_; }
     [[nodiscard]] VkRenderPass      renderPass() const noexcept  { return renderPass_.valid() ? *renderPass_ : VK_NULL_HANDLE; }
     [[nodiscard]] uint32_t          imageCount() const noexcept  { return static_cast<uint32_t>(images_.size()); }
-    [[nodiscard]] VkImage           image(uint32_t i) const noexcept      { return (i < images_.size()) ? images_[i] : VK_NULL_HANDLE; }
-    [[nodiscard]] VkImageView       imageView(uint32_t i) const noexcept  { return (i < imageViews_.size() && imageViews_[i].valid()) ? *imageViews_[i] : VK_NULL_HANDLE; }
+    [[nodiscard]] VkImage           image(uint32_t i) const noexcept      { return i < images_.size() ? images_[i] : VK_NULL_HANDLE; }
+    [[nodiscard]] VkImageView       imageView(uint32_t i) const noexcept  { return i < imageViews_.size() && imageViews_[i].valid() ? *imageViews_[i] : VK_NULL_HANDLE; }
 
     [[nodiscard]] bool isHDR() const noexcept   { return colorSpace() == VK_COLOR_SPACE_HDR10_ST2084_EXT; }
     [[nodiscard]] bool is10Bit() const noexcept { return format() == VK_FORMAT_A2B10G10R10_UNORM_PACK32 || format() == VK_FORMAT_A2R10G10B10_UNORM_PACK32; }
@@ -65,10 +59,10 @@ public:
 
 private:
     SwapchainManager() = default;
-    ~SwapchainManager() { cleanup(); }
+    ~SwapchainManager() { /* DO NOT CALL cleanup() HERE — controlled externally */ }
 
     bool recreateSurfaceIfLost() noexcept;
-    void createSwapchain(uint32_t width, uint32_t height) noexcept;
+    void createSwapchain(uint32_t w, uint32_t h) noexcept;
     void createImageViews() noexcept;
     void createRenderPass() noexcept;
 

@@ -19,7 +19,7 @@
 
 #include "engine/Vulkan/VulkanRenderer.hpp"
 #include "handle_app.hpp"
-#include "engine/Vulkan/VulkanPipelineManager.hpp"
+#include "engine/GLOBAL/PipelineManager.hpp"
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/GLOBAL/RTXHandler.hpp"
 #include "engine/GLOBAL/LAS.hpp"

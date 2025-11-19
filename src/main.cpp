@@ -26,7 +26,7 @@
 
 #include "engine/Vulkan/VulkanRenderer.hpp"
 #include "engine/Vulkan/VulkanCore.hpp"
-#include "engine/Vulkan/VulkanPipelineManager.hpp"
+#include "engine/GLOBAL/PipelineManager.hpp"
 
 #include "handle_app.hpp"
 
@@ -185,16 +185,13 @@ static void phase5_shutdown() {
 
     g_app.reset();
     g_renderer.reset();
+    if (g_pipeline_manager) { delete g_pipeline_manager; g_pipeline_manager = nullptr; }
 
-    if (g_pipeline_manager) {
-        delete g_pipeline_manager;
-        g_pipeline_manager = nullptr;
-    }
-
+    SwapchainManager::cleanup();  // ← ONLY CALL HERE
     RTX::shutdown();
     SDL_Quit();
 
-    LOG_SUCCESS_CAT("MAIN", "Clean shutdown — empire preserved — PINK PHOTONS ETERNAL");
+    LOG_SUCCESS_CAT("MAIN", "EMPIRE ETERNAL — PINK PHOTONS UNDYING");
 }
 
 // =============================================================================
