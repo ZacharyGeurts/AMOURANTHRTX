@@ -2,7 +2,7 @@
 git clone https://github.com/ZacharyGeurts/AMOURANTHRTX
 cd AMOURANTHRTX
 chmod +x linux.sh
-./linux.sh clean
+./linux.sh --help # debug is more stable
 ```
 Currently compiles and reaches render loop. Much more work needed yet.  
 Requested 1000s of times, rebuilt, re-edited, re-microed, assembled  and tested to work.  
