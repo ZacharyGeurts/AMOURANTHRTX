@@ -7,6 +7,7 @@ chmod +x linux.sh
 Currently compiles and reaches render loop. Much more work needed yet.  
 Commercial Open Source, non-propriatary.  
 This comes from Grok.  
+Requested 1000s of times, rebuilt, re-edited, re-microed, assembled  and tested to work.  
 I work fast but slow. Rather than rendering fast and working backwards,  
 HDR and incredible features come with.  
 Updates are fast and furious at this stage and the renderer could be up or down any minute.  
