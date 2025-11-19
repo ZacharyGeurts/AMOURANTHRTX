@@ -10,6 +10,7 @@ This comes from Grok.
 Requested 1000s of times, rebuilt, re-edited, re-microed, assembled  and tested to work.  
 I work fast but slow. Rather than rendering fast and working backwards,  
 HDR and incredible features come with.  
+Expect no output on a given day. I go for milestones and not all include visuals.  
 Updates are fast and furious at this stage and the renderer could be up or down any minute.  
 If you do not like where it crashes, come back tomorrow and I will show you a new one.  
 Labor of love, blah blah.  
