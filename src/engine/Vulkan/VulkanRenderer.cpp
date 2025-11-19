@@ -2765,18 +2765,6 @@ void VulkanRenderer::initImGuiFonts()
     fprintf(stderr, "[FONT] Plasmatica loaded: %s\n", plasmaticaFont ? "YES" : "NO");
 }
 
-VulkanRenderer& VulkanRenderer::getInstance()
-{
-    static VulkanRenderer* instance = nullptr;
-    if (!instance) {
-        // This will never be called — your renderer is already constructed elsewhere
-        // But the linker needs the symbol to exist
-        static char placeholder[sizeof(VulkanRenderer)] = {0};
-        instance = reinterpret_cast<VulkanRenderer*>(placeholder);
-    }
-    return *instance;
-}
-
 // VulkanRenderer.cpp — REPLACE THE ENTIRE OLD handleResize WITH THIS ONE
 void VulkanRenderer::onWindowResize(uint32_t w, uint32_t h) noexcept
 {
