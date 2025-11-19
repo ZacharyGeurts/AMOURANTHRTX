@@ -522,6 +522,19 @@ namespace RTX {
     // stonekey_xor_spirv → MOVED TO .cpp (uses Options::Shader::STONEKEY_1)
     void stonekey_xor_spirv(std::vector<uint32_t>& data, bool encrypt = true);
 
+
+// Helper
+[[nodiscard]] inline bool isDeviceExtensionPresent(VkPhysicalDevice phys, const char* name) noexcept {
+    uint32_t count = 0;
+    vkEnumerateDeviceExtensionProperties(phys, nullptr, &count, nullptr);
+    std::vector<VkExtensionProperties> exts(count);
+    vkEnumerateDeviceExtensionProperties(phys, nullptr, &count, exts.data());
+    for (const auto& e : exts)
+        if (strcmp(e.extensionName, name) == 0)
+            return true;
+    return false;
+}
+
 } // namespace RTX
 
 // =============================================================================
