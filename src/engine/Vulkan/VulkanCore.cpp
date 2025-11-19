@@ -1,5 +1,3 @@
-#include "engine/Vulkan/VkSafeSTypes.hpp"
-#include "engine/Vulkan/VulkanRenderer.hpp"
 // =============================================================================
 // AMOURANTH RTX Engine (C) 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
@@ -15,10 +13,12 @@
 // FULLY COMPLIANT WITH -Werror=unused-variable
 // =============================================================================
 
+#include "engine/GLOBAL/LAS.hpp"
+#include "engine/Vulkan/VkSafeSTypes.hpp"
 #include "engine/Vulkan/VulkanCore.hpp"
+#include "engine/Vulkan/VulkanRenderer.hpp"
 #include "engine/GLOBAL/RTXHandler.hpp"
 #include "engine/Vulkan/VulkanPipelineManager.hpp"
-#include "engine/GLOBAL/LAS.hpp"
 #include "engine/GLOBAL/GlobalBindings.hpp"
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/GLOBAL/StoneKey.hpp"  // StoneKey: The One True Global Authority
