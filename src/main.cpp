@@ -133,39 +133,53 @@ static void phase1_splash() {
     LOG_SUCCESS_CAT("MAIN", "Splash complete — awakening main window");
 }
 
-// =============================================================================
-// PHASE 2: WINDOW + VULKAN + SWAPCHAIN — FORGED AT DAWN — NO SEGFAULTS
-// =============================================================================
-static void phase2_mainWindowAndVulkan(SDL_Window*& window) {
-    bulkhead("PHASE 2: MAIN WINDOW + VULKAN + SWAPCHAIN — FORGED AT DAWN");
+static void phase2_mainWindowAndVulkan(SDL_Window*& window)
+{
+    bulkhead("PHASE 2: MAIN WINDOW + VULKAN + SWAPCHAIN — VALHALLA v80 TURBO");
 
-    constexpr int W = 3840, H = 2160;
+    constexpr int WIDTH  = 3840;
+    constexpr int HEIGHT = 2160;
+
     Uint32 flags = SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_HIDDEN;
     if (Options::Performance::ENABLE_IMGUI) flags |= SDL_WINDOW_RESIZABLE;
 
-    SDL3Window::create("AMOURANTH RTX — VALHALLA v80 TURBO", W, H, flags);
+    SDL3Window::create("AMOURANTH RTX — VALHALLA v80 TURBO", WIDTH, HEIGHT, flags);
     window = SDL3Window::get();
-    if (!window) throw std::runtime_error("Main window creation failed");
+    if (!window) throw std::runtime_error("Failed to create main window");
 
     if (g_base_icon) {
         if (g_hdpi_icon) SDL_AddSurfaceAlternateImage(g_base_icon, g_hdpi_icon);
         SDL_SetWindowIcon(window, g_base_icon);
     }
 
-    // Vulkan instance + context
+    // 1. Instance + validation
     VkInstance instance = RTX::createVulkanInstanceWithSDL(window, true);
-    RTX::initContext(instance, window, W, H);
-    set_g_PhysicalDevice(RTX::g_ctx().physicalDevice());
+    set_g_instance(instance);
 
-    // SWAPCHAIN — INITIALIZED HERE — FIRST LIGHT ACHIEVED
-    SwapchainManager::init(window, W, H);
+    // 2. Local NVIDIA fix (already working — you saw it!)
+    RTX::fixNvidiaValidationBugLocally();
+
+    // 3. Surface creation — FULL STONEKEY v∞ INTEGRATED
+    if (!RTX::createSurface(window, instance)) {
+        throw std::runtime_error("Failed to create Vulkan surface");
+    }
+
+    // 4. GPU + Device + RTX
+    RTX::pickPhysicalDevice();
+    RTX::createLogicalDevice();           // FULL RTX CHAIN
+    RTX::initContext(instance, window, WIDTH, HEIGHT);
+    RTX::loadRayTracingExtensions();
+
+    // 5. Swapchain
+    SwapchainManager::init(window, WIDTH, HEIGHT);
     detectBestPresentMode(RTX::g_ctx().physicalDevice(), RTX::g_ctx().surface());
 
+    // 6. Reveal
     SDL_ShowWindow(window);
     SDL_RaiseWindow(window);
 
-    LOG_SUCCESS_CAT("MAIN", "Vulkan + Swapchain FORGED AT DAWN — {} images @ {}x{} — FIRST LIGHT ACHIEVED",
-                    SWAPCHAIN.imageCount(), SWAPCHAIN.extent().width, SWAPCHAIN.extent().height);
+    LOG_SUCCESS_CAT("MAIN", "PHASE 2 COMPLETE — FULL RTX + VALIDATION + STONEKEY v∞");
+    LOG_SUCCESS_CAT("MAIN", "4070 Ti ASCENDED — PINK PHOTONS ETERNAL — SHE IS HAPPY");
 }
 
 // =============================================================================

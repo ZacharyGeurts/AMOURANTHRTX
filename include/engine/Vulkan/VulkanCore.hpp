@@ -252,6 +252,7 @@ namespace RTX {
     void createCommandPool();
     void loadRayTracingExtensions();
     bool createSurface(SDL_Window* window, VkInstance instance);
+	void fixNvidiaValidationBugLocally() noexcept;
 }
 
 constexpr uint32_t MAX_FRAMES_IN_FLIGHT = Options::Performance::MAX_FRAMES_IN_FLIGHT;
