@@ -296,7 +296,7 @@ private:
     void updateDenoiserDescriptors() noexcept;
     void createRayTracingPipeline(const std::vector<std::string>& shaderPaths) noexcept;
     void createShaderBindingTable() noexcept;
-    VkShaderModule loadShader(const std::string& path) noexcept;
+    VkShaderModule loadShader(const std::string& filename) const;
     VkDeviceAddress getShaderGroupHandle(uint32_t group) noexcept;
     void recordRayTracingCommandBuffer(VkCommandBuffer cmd) noexcept;
     void performDenoisingPass(VkCommandBuffer cmd) noexcept;

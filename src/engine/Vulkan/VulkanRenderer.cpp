@@ -405,21 +405,6 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, bool o
     pipelineManager_ = RTX::PipelineManager(g_device(), g_PhysicalDevice());  // ← FIXED: Move-assign valid instance early
     LOG_TRACE_CAT("RENDERER", "Step 7.5 COMPLETE — PipelineManager armed (dev=0x{:x}, phys=0x{:x})", reinterpret_cast<uintptr_t>(g_device()), reinterpret_cast<uintptr_t>(g_PhysicalDevice()));
 
-    // =============================================================================
-    // STEP 8 — Initialize Swapchain (MUST BE BEFORE ANY ACCESS TO SWAPCHAIN)
-    // =============================================================================
-    LOG_TRACE_CAT("RENDERER", "=== STACK BUILD ORDER STEP 8: Initialize Swapchain ===");
-    SwapchainManager::init(window, width, height);
-    LOG_TRACE_CAT("RENDERER", "SwapchainManager::init() completed — singleton now alive");
-
-    // ← NOW 100% SAFE — SWAPCHAIN is fully initialized
-    if (SWAPCHAIN.imageCount() == 0) {
-        LOG_FATAL_CAT("RENDERER", "Swapchain has zero images after init — driver/surface issue");
-        LOG_FATAL_CAT("RENDERER", "Fatal error in noexcept function"); std::abort();
-    }
-
-    assert(SWAPCHAIN.imageCount() > 0 && "Swapchain failed to initialize — check surface compatibility");
-
     LOG_SUCCESS_CAT("RENDERER", "Swapchain FORGED — {} images @ {}x{} — PINK PHOTONS READY", 
                     SWAPCHAIN.imageCount(), SWAPCHAIN.extent().width, SWAPCHAIN.extent().height);
     LOG_TRACE_CAT("RENDERER", "Step 8 COMPLETE — Swapchain validated and armed");
@@ -1955,77 +1940,58 @@ void VulkanRenderer::cleanupFramebuffers() noexcept {
     framebuffers_.clear();
 }
 
-VkShaderModule VulkanRenderer::loadShader(const std::string& path) noexcept {
-    LOG_TRACE_CAT("RENDERER", "loadShader — START — path='{}'", path);
+VkShaderModule VulkanRenderer::loadShader(const std::string& filename) const
+{
+    std::string fullPath = "assets/shaders/compute/" + filename;
 
-    // === 1. File Validation & Open ===
-    FILE* file = fopen(path.c_str(), "rb");
+    LOG_FATAL_CAT("RENDERER", "LOADING SHADER → {}", fullPath);
+
+    FILE* file = fopen(fullPath.c_str(), "rb");
     if (!file) {
-        LOG_ERROR_CAT("RENDERER", "Failed to open shader file: '{}' — Check assets/shaders/ dir", path);
-        LOG_TRACE_CAT("RENDERER", "loadShader — COMPLETE (file open failed)");
+        LOG_FATAL_CAT("RENDERER", "SHADER NOT FOUND: {}", fullPath);
         return VK_NULL_HANDLE;
     }
-    LOG_DEBUG_CAT("RENDERER", "Shader file opened successfully: '{}'", path);
 
-    // === 2. Read Binary Size ===
     fseek(file, 0, SEEK_END);
-    size_t fileSize = ftell(file);
+    size_t size = ftell(file);
     fseek(file, 0, SEEK_SET);
-    if (fileSize == 0 || fileSize > (1ULL << 30)) {  // Sanity: 0 or >1GB invalid
-        LOG_ERROR_CAT("RENDERER", "Invalid shader file size: {} bytes — expected SPIR-V binary", fileSize);
-        fclose(file);
-        LOG_TRACE_CAT("RENDERER", "loadShader — COMPLETE (invalid size)");
-        return VK_NULL_HANDLE;
-    }
-    LOG_DEBUG_CAT("RENDERER", "Shader file size: {} bytes", fileSize);
 
-    // === 3. Zero-Copy Read (std::vector<uint32_t> for alignment) ===
-    std::vector<uint32_t> code(fileSize / sizeof(uint32_t));
-    if (code.size() * sizeof(uint32_t) != fileSize) {
-        LOG_ERROR_CAT("RENDERER", "File size {} not aligned to uint32_t — SPIR-V corruption?", fileSize);
+    if (size == 0 || (size % 4) != 0) {
+        LOG_FATAL_CAT("RENDERER", "INVALID SPIR-V SIZE: {} bytes", size);
         fclose(file);
-        LOG_TRACE_CAT("RENDERER", "loadShader — COMPLETE (alignment fail)");
         return VK_NULL_HANDLE;
     }
-    size_t bytesRead = fread(code.data(), 1, fileSize, file);
+
+    std::vector<uint32_t> code(size / 4);
+    if (fread(code.data(), 1, size, file) != size) {
+        LOG_FATAL_CAT("RENDERER", "FAILED TO READ SHADER");
+        fclose(file);
+        return VK_NULL_HANDLE;
+    }
     fclose(file);
-    if (bytesRead != fileSize) {
-        LOG_ERROR_CAT("RENDERER", "Failed to read {} bytes from shader file (read: {})", fileSize, bytesRead);
-        LOG_TRACE_CAT("RENDERER", "loadShader — COMPLETE (read fail)");
+
+    if (code[0] != 0x07230203u) {
+        LOG_FATAL_CAT("RENDERER", "BAD SPIR-V MAGIC: 0x{:08x} — FILE CORRUPTED OR ENCRYPTED", code[0]);
         return VK_NULL_HANDLE;
     }
-    LOG_DEBUG_CAT("RENDERER", "Shader binary read: {} uint32_t words", code.size());
 
-    // === 4. SPIR-V Magic Validation ===
-    if (code.empty() || code[0] != 0x07230203u) {  // SPIR-V magic header
-        LOG_ERROR_CAT("RENDERER", "Invalid SPIR-V magic header in '{}': 0x{:08x} (expected 0x07230203)", path, code.empty() ? 0u : code[0]);
-        LOG_TRACE_CAT("RENDERER", "loadShader — COMPLETE (magic fail)");
-        return VK_NULL_HANDLE;
-    }
-    LOG_DEBUG_CAT("RENDERER", "SPIR-V magic validated: 0x{:08x}", code[0]);
+    LOG_SUCCESS_CAT("RENDERER", "SPIR-V VALID → {} bytes", size);
 
-    VkDevice device = g_device();  // Cached for readability
-
-    // === 5. Create VkShaderModule ===
-    VkShaderModuleCreateInfo createInfo = {};  // Zero-init
-    createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-    createInfo.codeSize = fileSize;
-    createInfo.pCode = code.data();
-    // FIXED: Explicit stage flags — ALL_GRAPHICS + COMPUTE for versatility (raygen/closest/miss + tonemap/denoise)
-    createInfo.flags = 0;  // No special flags; stage inferred at pipeline creation
+    VkShaderModuleCreateInfo createInfo = {
+        .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+        .codeSize = size,
+        .pCode = code.data()
+    };
 
     VkShaderModule module = VK_NULL_HANDLE;
-    VkResult result = vkCreateShaderModule(device, &createInfo, nullptr, &module);
-    if (result != VK_SUCCESS) {
-        LOG_ERROR_CAT("RENDERER", "vkCreateShaderModule failed for '{}': {} ({}) — Invalid SPIR-V?", path, static_cast<int>(result), result);
-        LOG_TRACE_CAT("RENDERER", "loadShader — COMPLETE (module create fail)");
+    VkResult r = vkCreateShaderModule(g_device(), &createInfo, nullptr, &module);
+
+    if (r != VK_SUCCESS) {
+        LOG_FATAL_CAT("RENDERER", "vkCreateShaderModule FAILED: {} — SHADER REJECTED", static_cast<int>(r));
         return VK_NULL_HANDLE;
     }
-    LOG_DEBUG_CAT("RENDERER", "VkShaderModule created: 0x{:x} (codeSize={})", reinterpret_cast<uintptr_t>(module), createInfo.codeSize);
 
-    LOG_SUCCESS_CAT("RENDERER", "{}Shader '{}' loaded & module forged — {} bytes — PINK PHOTONS ARMED{}", 
-                    EMERALD_GREEN, path, fileSize, RESET);
-    LOG_TRACE_CAT("RENDERER", "loadShader — COMPLETE — module=0x{:x}", reinterpret_cast<uintptr_t>(module));
+    LOG_SUCCESS_CAT("RENDERER", "SHADER LOADED → {} — {} bytes — PINK PHOTONS ARMED", filename, size);
     return module;
 }
 

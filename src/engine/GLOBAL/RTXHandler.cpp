@@ -342,11 +342,61 @@ namespace RTX {
     void initRenderer(int, int) {}
     void renderFrame(const Camera&, float) noexcept {}
     
-    void shutdown() noexcept {
-        if (g_ctx().isValid()) {
-            g_ctx().cleanup();
-        }
+void shutdown() noexcept
+{
+    auto& ctx = g_ctx();
+
+    if (!ctx.isValid()) {
+        LOG_WARN_CAT("RTX", "{}RTX::shutdown() called but context invalid — already cleaned{}", RASPBERRY_PINK, RESET);
+        return;
     }
+
+    LOG_SUCCESS_CAT("RTX", "{}RTX::shutdown() initiated — beginning graceful dissolution of the empire...{}", 
+                    PLASMA_FUCHSIA, RESET);
+
+    // 1. Wait for all GPU work to finish
+    if (ctx.device_ != VK_NULL_HANDLE) {
+        LOG_SUCCESS_CAT("RTX", "vkDeviceWaitIdle — waiting for all queues to drain...");
+        vkDeviceWaitIdle(ctx.device_);
+    }
+
+    // 2. Purge all tracked buffers FIRST (SBT, mesh, staging, etc.)
+    UltraLowLevelBufferTracker::get().purge_all();
+
+    // 3. Destroy command pools
+    if (ctx.computeCommandPool_ != VK_NULL_HANDLE) {
+        vkDestroyCommandPool(ctx.device_, ctx.computeCommandPool_, nullptr);
+        ctx.computeCommandPool_ = VK_NULL_HANDLE;
+        LOG_DEBUG_CAT("RTX", "Compute command pool destroyed");
+    }
+    if (ctx.commandPool_ != VK_NULL_HANDLE) {
+        vkDestroyCommandPool(ctx.device_, ctx.commandPool_, nullptr);
+        ctx.commandPool_ = VK_NULL_HANDLE;
+        LOG_DEBUG_CAT("RTX", "Graphics command pool destroyed");
+    }
+
+    // 4. Destroy global render pass
+    ctx.renderPass_.reset();
+
+    // 5. DO NOT destroy swapchain here — main() already called SwapchainManager::cleanup()
+    // 6. DO NOT destroy surface here — main() will do it
+    // 7. NOW safe to destroy device
+    if (ctx.device_ != VK_NULL_HANDLE) {
+        LOG_SUCCESS_CAT("RTX", "vkDestroyDevice — dissolving logical device...");
+        vkDestroyDevice(ctx.device_, nullptr);
+        set_g_device(VK_NULL_HANDLE);
+        ctx.device_ = VK_NULL_HANDLE;
+    }
+
+    // 8. Surface and instance are destroyed in phase5_shutdown() — NOT HERE
+    //    This prevents double-free when SDL owns the surface memory
+
+    ctx.valid_ = false;
+    ctx.ready_.store(false, std::memory_order_release);
+
+    LOG_SUCCESS_CAT("RTX", "{}RTX::shutdown() complete — device dissolved — pink photons dimming...{}", 
+                    EMERALD_GREEN, RESET);
+}
     void createSwapchain(VkInstance, VkPhysicalDevice, VkDevice, VkSurfaceKHR, uint32_t, uint32_t) {}
     void recreateSwapchain(uint32_t, uint32_t) noexcept {}
     void buildBLAS(uint64_t, uint64_t, uint32_t, uint32_t) noexcept {}
@@ -360,7 +410,7 @@ void initContext(VkInstance instance, SDL_Window* window, int width, int height)
     // Guard against double init
     if (ctx.isValid()) {
         LOG_WARN_CAT("RTX", "{}RTX::initContext() called twice — already initialized. Ignoring.{}", 
-                     RASPBERRY_PINK, RESET);
+                     PLASMA_FUCHSIA, RESET);
         return;
     }
 
@@ -394,54 +444,17 @@ void initContext(VkInstance instance, SDL_Window* window, int width, int height)
                     EMERALD_GREEN, reinterpret_cast<uint64_t>(ctx.device_), RESET);
 }
 
-    void Context::cleanup() noexcept {
-        if (!isValid()) {
-            LOG_WARN_CAT("RTX", "{}Cleanup skipped — context already invalid{}", RASPBERRY_PINK, RESET);
-            return;
-        }
+void Context::cleanup() noexcept
+{
+    // This is now a lightweight stub — heavy lifting moved to RTX::shutdown()
+    // Prevents double cleanup when called from shutdown()
+    LOG_WARN_CAT("RTX", "{}Context::cleanup() called directly — use RTX::shutdown() instead{}", 
+                 PLASMA_FUCHSIA, RESET);
 
-        renderPass_.reset();
-
-        vkDeviceWaitIdle(device_);
-
-        if (computeCommandPool_ != VK_NULL_HANDLE) {
-            vkDestroyCommandPool(device_, computeCommandPool_, nullptr);
-            computeCommandPool_ = VK_NULL_HANDLE;
-        }
-        if (commandPool_ != VK_NULL_HANDLE) {
-            vkDestroyCommandPool(device_, commandPool_, nullptr);
-            commandPool_ = VK_NULL_HANDLE;
-        }
-
-        UltraLowLevelBufferTracker::get().purge_all();
-
-        if (device_ != VK_NULL_HANDLE) {
-            vkDestroyDevice(device_, nullptr);
-            set_g_device(VK_NULL_HANDLE);
-            device_ = VK_NULL_HANDLE;
-        }
-
-        if (surface_ != VK_NULL_HANDLE) {
-            vkDestroySurfaceKHR(instance_, surface_, nullptr);
-            set_g_surface(VK_NULL_HANDLE);
-            surface_ = VK_NULL_HANDLE;
-        }
-
-        if (instance_ != VK_NULL_HANDLE) {
-            if (debugMessenger_ != VK_NULL_HANDLE) {
-                auto pfn = reinterpret_cast<PFN_vkDestroyDebugUtilsMessengerEXT>(
-                    vkGetInstanceProcAddr(instance_, "vkDestroyDebugUtilsMessengerEXT"));
-                if (pfn) pfn(instance_, debugMessenger_, nullptr);
-                debugMessenger_ = VK_NULL_HANDLE;
-            }
-            vkDestroyInstance(instance_, nullptr);
-            set_g_instance(VK_NULL_HANDLE);
-            instance_ = VK_NULL_HANDLE;
-        }
-
-        ready_.store(false, std::memory_order_release);
-        valid_ = false;
-    }
+    // Just invalidate
+    valid_ = false;
+    ready_.store(false, std::memory_order_release);
+}
 
     void createGlobalRenderPass() {
         auto& ctx = g_ctx();

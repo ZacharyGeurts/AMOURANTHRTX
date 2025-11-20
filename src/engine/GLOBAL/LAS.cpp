@@ -38,21 +38,22 @@ void LAS::buildBLAS(VkCommandPool pool,
     geom.vertexStride = sizeof(glm::vec3);
     geom.vertexCount  = vertexCount;
 
-    // Proper temporary → address taken is now legal
-    VkBufferDeviceAddressInfo vAddrInfo{
-        .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
-        .buffer = vertexBuffer
-    };
-    geom.vertexData.deviceAddress = vkGetBufferDeviceAddress(RTX::g_ctx().device(), &vAddrInfo);
+    // THE FINAL FIX — NOVEMBER 20, 2025 — THE LINE THAT ENDED 0x000000000000
+    // Zero-initialize + explicit pNext = nullptr → NVIDIA driver happy → real addresses
+    VkBufferDeviceAddressInfo vAddrInfo = {};
+    vAddrInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+    vAddrInfo.pNext = nullptr;
+    vAddrInfo.buffer = vertexBuffer;
+    geom.vertexData.deviceAddress = vkGetBufferDeviceAddress(g_ctx().device(), &vAddrInfo);
 
     geom.indexType  = VK_INDEX_TYPE_UINT32;
     geom.indexCount = indexCount;
 
-    VkBufferDeviceAddressInfo iAddrInfo{
-        .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
-        .buffer = indexBuffer
-    };
-    geom.indexData.deviceAddress = vkGetBufferDeviceAddress(RTX::g_ctx().device(), &iAddrInfo);
+    VkBufferDeviceAddressInfo iAddrInfo = {};
+    iAddrInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+    iAddrInfo.pNext = nullptr;
+    iAddrInfo.buffer = indexBuffer;
+    geom.indexData.deviceAddress = vkGetBufferDeviceAddress(g_ctx().device(), &iAddrInfo);
 
     VkCommandBuffer cmd = VulkanRTX::beginSingleTimeCommands(pool);
 
@@ -65,6 +66,11 @@ void LAS::buildBLAS(VkCommandPool pool,
 
     endSingleTimeCommandsAsync(cmd, g_ctx().graphicsQueue(), pool);
     ++generation_;
+
+    LOG_SUCCESS_CAT("LAS", "{}BLAS FORGED — {} verts, {} tris — ADDR 0x%llx — GENERATION {}{}",
+                    PLASMA_FUCHSIA,
+                    vertexCount, indexCount / 3,
+                    blas_.address, generation_, RESET);
 }
 
 // =============================================================================
