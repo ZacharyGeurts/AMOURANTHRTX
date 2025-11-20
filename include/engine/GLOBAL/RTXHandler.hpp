@@ -300,6 +300,7 @@ namespace RTX {
 
         // Device Properties for Alignment (NEW: Fixes driver min size warnings)
         VkPhysicalDeviceProperties physProps_{};
+		uint32_t graphicsQueueFamily = static_cast<uint32_t>(-1);  // ← ADD THIS LINE
 
 		bool             hasFullRTX_     = false;
 

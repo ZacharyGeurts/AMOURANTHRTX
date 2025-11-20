@@ -5,6 +5,7 @@
 // =============================================================================
 
 #include "engine/GLOBAL/SwapchainManager.hpp"
+#include "engine/GLOBAL/RTXHandler.hpp"
 #include "engine/GLOBAL/OptionsMenu.hpp"
 #include "engine/GLOBAL/StoneKey.hpp"
 #include "engine/GLOBAL/logging.hpp"
@@ -147,7 +148,11 @@ void SwapchainManager::createDeviceAndQueues() noexcept
             presentFamily = static_cast<int>(i);
         }
 
-        if (graphicsFamily != -1 && presentFamily != -1) break;
+        if (graphicsFamily != -1 && presentFamily != -1) {
+            RTX::g_ctx().graphicsQueueFamily = static_cast<uint32_t>(graphicsFamily);
+            RTX::g_ctx().presentFamily_     = static_cast<uint32_t>(presentFamily);
+            break;
+        }
     }
 
     if (graphicsFamily == -1 || presentFamily == -1) {
@@ -234,10 +239,8 @@ void SwapchainManager::init(SDL_Window* window, uint32_t w, uint32_t h) noexcept
     }
     set_g_surface(raw_surface);
 
-    // DEVICE IS CREATED HERE — BY SWAPCHAIN — AS INTENDED
     self.createDeviceAndQueues();
-
-    self.recreate(w, h);
+	self.recreate(w, h);
 
     LOG_SUCCESS_CAT("SWAPCHAIN", "{}SWAPCHAIN + DEVICE FORGED — {}x{} | {} | {} — FIRST LIGHT ETERNAL{}",
                     PLASMA_FUCHSIA, self.extent().width, self.extent().height,
