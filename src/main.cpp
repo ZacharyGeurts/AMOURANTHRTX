@@ -30,6 +30,7 @@
 
 #include "handle_app.hpp"
 
+#include "engine/Vulkan/MeshLoader.hpp"
 #include <iostream>
 #include <stdexcept>
 #include <format>
@@ -64,6 +65,9 @@ static std::unique_ptr<Application> g_app = nullptr;
 std::unique_ptr<VulkanRenderer> g_renderer = nullptr;
 static RTX::PipelineManager* g_pipeline_manager = nullptr;
 
+extern std::unique_ptr<MeshLoader::Mesh> g_mesh;
+std::unique_ptr<MeshLoader::Mesh> g_mesh = nullptr;  // ← definition
+
 inline void bulkhead(const std::string& title) {
     LOG_INFO_CAT("MAIN", "════════════════════════════════ {} ════════════════════════════════", title);
 }
@@ -94,21 +98,11 @@ static void phase0_cliAndStonekey(int argc, char* argv[]) {
     (void)get_kStone1(); (void)get_kStone2();
     LOG_SUCCESS_CAT("MAIN", "StoneKey active — XOR fingerprint: 0x{:016X}", get_kStone1() ^ get_kStone2());
 
-    // ─────────────────────────────────────────────────────────────────────────────
-    // STONEKEY v∞ — APOCALYPSE FINAL v1.5 — NOVEMBER 19, 2025
-    // RAW CACHE FED HERE — CONTEXT NOW VALID — VALHALLA SEALED
-    // This is the ONLY required change for permanent key protection
-    // Called right after Vulkan context exists → perfect timing
-    // ─────────────────────────────────────────────────────────────────────────────
     if (RTX::g_ctx().isValid()) {
         set_g_instance(RTX::g_ctx().instance());
         set_g_device(RTX::g_ctx().vkDevice());
         set_g_PhysicalDevice(RTX::g_ctx().physicalDevice());
         set_g_surface(RTX::g_ctx().surface());
-
-        // Optional: trigger full obfuscation after a few frames
-        // (do this in your render loop if you want delay, or leave commented)
-        // StoneKey::Raw::transition_to_obfuscated();
     }
 }
 
@@ -122,7 +116,7 @@ static void phase0_5_iconPreload() {
 }
 
 static void prePhase1_earlySdlInit() {
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) == 0) {
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) == 0) {  // Fixed return check
         throw std::runtime_error(std::format("SDL_Init failed: {}", SDL_GetError()));
     }
 }
@@ -152,29 +146,23 @@ static void phase2_mainWindowAndVulkan(SDL_Window*& window)
         SDL_SetWindowIcon(window, g_base_icon);
     }
 
-    // 1. Instance + validation
     VkInstance instance = RTX::createVulkanInstanceWithSDL(window, true);
     set_g_instance(instance);
 
-    // 2. Local NVIDIA fix (already working — you saw it!)
     RTX::fixNvidiaValidationBugLocally();
 
-    // 3. Surface creation — FULL STONEKEY v∞ INTEGRATED
     if (!RTX::createSurface(window, instance)) {
         throw std::runtime_error("Failed to create Vulkan surface");
     }
 
-    // 4. GPU + Device + RTX
     RTX::pickPhysicalDevice();
-    RTX::createLogicalDevice();           // FULL RTX CHAIN
+    RTX::createLogicalDevice();
     RTX::initContext(instance, window, WIDTH, HEIGHT);
     RTX::loadRayTracingExtensions();
 
-    // 5. Swapchain
     SwapchainManager::init(window, WIDTH, HEIGHT);
     detectBestPresentMode(RTX::g_ctx().physicalDevice(), RTX::g_ctx().surface());
 
-    // 6. Reveal
     SDL_ShowWindow(window);
     SDL_RaiseWindow(window);
 
@@ -183,10 +171,10 @@ static void phase2_mainWindowAndVulkan(SDL_Window*& window)
 }
 
 // =============================================================================
-// PHASE 3: RENDERER + APP FORGE — NOW SAFE (SWAPCHAIN EXISTS)
+// PHASE 3: RENDERER + APP FORGE + LOAD MAIN SCENE FOR LAS
 // =============================================================================
 static void phase3_appAndRendererConstruction(SDL_Window* window) {
-    bulkhead("PHASE 3: RENDERER + APP FORGE");
+    bulkhead("PHASE 3: RENDERER + APP FORGE + LAS SCENE LOAD");
 
     createGlobalRTX(3840, 2160);
 
@@ -197,7 +185,16 @@ static void phase3_appAndRendererConstruction(SDL_Window* window) {
     g_app = std::make_unique<Application>("AMOURANTH RTX — VALHALLA v80 TURBO", 3840, 2160);
     g_app->setRenderer(std::move(g_renderer));
 
-    LOG_SUCCESS_CAT("MAIN", "Renderer + App forged — g_pipeline() ready — PINK PHOTONS ARMED");
+    // ─────────────────────────────────────────────────────────────────────
+    // LAS SCENE LOAD — g_mesh IS NOW FULLY GPU-RESIDENT AND READY
+    // ─────────────────────────────────────────────────────────────────────
+    LOG_INFO_CAT("MAIN", "Loading primary LAS scene: assets/models/scene.obj");
+    g_mesh = MeshLoader::loadOBJ("assets/models/scene.obj");
+
+    LOG_SUCCESS_CAT("MAIN", "g_mesh ARMED → {} vertices, {} indices — LAS ONLINE",
+        g_mesh->vertices.size(), g_mesh->indices.size());
+
+    LOG_SUCCESS_CAT("MAIN", "Renderer + App + g_mesh forged — PINK PHOTONS ETERNAL — LAS READY");
 }
 
 // =============================================================================
@@ -214,19 +211,22 @@ static void phase4_renderLoop() {
 static void phase5_shutdown() {
     bulkhead("PHASE 5: SHUTDOWN");
 
+    g_mesh.reset();  // ← clear LAS mesh
     g_app.reset();
     g_renderer.reset();
     if (g_pipeline_manager) { delete g_pipeline_manager; g_pipeline_manager = nullptr; }
 
-    SwapchainManager::cleanup();  // ← ONLY CALL HERE
+    SwapchainManager::cleanup();
     RTX::shutdown();
+    if (g_base_icon) { SDL_DestroySurface(g_base_icon); g_base_icon = nullptr; }
+    if (g_hdpi_icon) { SDL_DestroySurface(g_hdpi_icon); g_hdpi_icon = nullptr; }
     SDL_Quit();
 
-    LOG_SUCCESS_CAT("MAIN", "EMPIRE ETERNAL — PINK PHOTONS UNDYING");
+    LOG_SUCCESS_CAT("MAIN", "EMPIRE ETERNAL — PINK PHOTONS UNDYING — LAS MESH RELEASED");
 }
 
 // =============================================================================
-// MAIN — APOCALYPSE FINAL v1.5 — ORDER RESTORED — FIRST LIGHT ACHIEVED
+// MAIN — APOCALYPSE FINAL v1.5 — FIRST LIGHT + LAS SCENE LOADED
 // =============================================================================
 int main(int argc, char* argv[]) {
     LOG_ATTEMPT_CAT("MAIN", "=== AMOURANTH RTX — VALHALLA v80 TURBO — APOCALYPSE FINAL v1.5 ===");
@@ -238,8 +238,8 @@ int main(int argc, char* argv[]) {
         phase0_5_iconPreload();
         prePhase1_earlySdlInit();
         phase1_splash();
-        phase2_mainWindowAndVulkan(window);           // Window + Vulkan + Swapchain
-        phase3_appAndRendererConstruction(window);    // Renderer + App (safe now)
+        phase2_mainWindowAndVulkan(window);
+        phase3_appAndRendererConstruction(window);    // ← NOW LOADS scene.obj into g_mesh
         phase4_renderLoop();
         phase5_shutdown();
     }
@@ -254,6 +254,6 @@ int main(int argc, char* argv[]) {
         return -1;
     }
 
-    LOG_SUCCESS_CAT("MAIN", "=== EXIT CLEAN — EMPIRE ETERNAL ===");
+    LOG_SUCCESS_CAT("MAIN", "=== EXIT CLEAN — EMPIRE ETERNAL — LAS SCENE LOADED ===");
     return 0;
 }
