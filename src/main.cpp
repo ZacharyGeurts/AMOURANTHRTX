@@ -49,26 +49,29 @@ using namespace Logging::Color;
 #define IMG_GetError() SDL_GetError()
 
 // =============================================================================
-// BASTION GLOBALS — PUBLIC DUE TO NO FEAR
+// BASTION GLOBALS — PUBLIC DUE TO NO FEAR — STONEKEY v∞ EDITION
 // =============================================================================
+
 static SDL_Surface* g_base_icon = nullptr;
 static SDL_Surface* g_hdpi_icon = nullptr;
 
+// Swapchain runtime config — now lives forever in the empire
 struct SwapchainRuntimeConfig {
-    VkPresentModeKHR desiredMode = VK_PRESENT_MODE_MAILBOX_KHR;
-    bool forceVsync = false;
-    bool forceTripleBuffer = true;
-    bool enableHDR = false;
-    bool logFinalConfig = true;
+    VkPresentModeKHR desiredMode      = VK_PRESENT_MODE_MAILBOX_KHR;
+    bool             forceVsync       = false;
+    bool             forceTripleBuffer = true;
+    bool             enableHDR        = false;
+    bool             logFinalConfig   = true;
 };
-static SwapchainRuntimeConfig g_swapchain_config;
+inline SwapchainRuntimeConfig g_swapchain_config;  // ← no static, global eternal
 
-static std::unique_ptr<Application> g_app = nullptr;
-std::unique_ptr<VulkanRenderer> g_renderer = nullptr;
-static RTX::PipelineManager* g_pipeline_manager = nullptr;
+// CORE EMPIRE SINGLETONS — NO MORE RTX::g_rtx() GHOSTS
+inline std::unique_ptr<Application>      g_app            = nullptr;
+inline std::unique_ptr<VulkanRenderer> g_renderer       = nullptr;
+inline RTX::PipelineManager*             g_pipeline_manager = nullptr;
 
-extern std::unique_ptr<MeshLoader::Mesh> g_mesh;
-std::unique_ptr<MeshLoader::Mesh> g_mesh = nullptr;
+// Primary scene mesh — sacred, protected, eternal
+inline std::unique_ptr<MeshLoader::Mesh> g_mesh = nullptr;
 
 // =============================================================================
 // RTX TOGGLE — TRUE = FULL RTX (validation layers force-disabled)
@@ -171,7 +174,7 @@ static void phase2_mainWindowAndVulkan(SDL_Window*& window)
     SwapchainManager::init(window, WIDTH, HEIGHT);
 
     // Present mode detection (uses g_ctx() — now fully populated and encrypted)
-    detectBestPresentMode(RTX::g_ctx().physicalDevice(), RTX::g_ctx().surface());
+    detectBestPresentMode(g_PhysicalDevice(), g_surface());
 
     SDL_ShowWindow(window);
     SDL_RaiseWindow(window);

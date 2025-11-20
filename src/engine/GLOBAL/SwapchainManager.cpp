@@ -1,32 +1,30 @@
 // =============================================================================
 // src/engine/GLOBAL/SwapchainManager.cpp
-// =============================================================================
-//
-// Dual Licensed:
-// 1. GNU General Public License v3.0 (or later) (GPL v3)
-//    https://www.gnu.org/licenses/gpl-3.0.html
-// 2. Commercial licensing: gzac5314@gmail.com
-//
-// TRUE CONSTEXPR STONEKEY v∞ — NOVEMBER 19, 2025 — APOCALYPSE FINAL v1.7
-// SWAPCHAIN MANAGER v10 — MEYERS SINGLETON — ZERO DOUBLE DESTROY — FIRST LIGHT ETERNAL
-// NO oldSwapchain VUID-01933 • NO Invalid Object 0x50000000005 • NO SURFACE MISMATCH
+// AMOURANTH RTX Engine © 2025 — SWAPCHAIN MANAGER v11 — STONEKEY v∞ FULLY ACTIVE
+// NOVEMBER 20, 2025 — APOCALYPSE FINAL v10.0 — FIRST LIGHT ETERNAL
 // =============================================================================
 
 #include "engine/GLOBAL/SwapchainManager.hpp"
 #include "engine/GLOBAL/OptionsMenu.hpp"
+#include "engine/GLOBAL/StoneKey.hpp"
 #include "engine/GLOBAL/logging.hpp"
+
 #include <algorithm>
-#include <format>
 #include <array>
+#include <format>
+#include <vector>
 
 using namespace Logging::Color;
 
-#define VK_VERIFY(call) \
-    do { VkResult r_ = (call); if (r_ != VK_SUCCESS) { \
-        LOG_FATAL_CAT("SWAPCHAIN", "{}Vulkan error in {}: {} ({}) — ABORTING{}", \
-                      CRIMSON_MAGENTA, #call, static_cast<int>(r_), __FUNCTION__, RESET); \
-        std::abort(); \
-    } } while(0)
+#define VK_VERIFY(call)                                                  \
+    do {                                                                 \
+        VkResult r_ = (call);                                            \
+        if (r_ != VK_SUCCESS) {                                          \
+            LOG_FATAL_CAT("SWAPCHAIN", "{}Vulkan error in {}: {} ({}) — ABORTING{}", \
+                          CRIMSON_MAGENTA, #call, static_cast<int>(r_), __FUNCTION__, RESET); \
+            std::abort();                                                \
+        }                                                                \
+    } while (0)
 
 // -----------------------------------------------------------------------------
 // BEST FORMAT — HDR10 → scRGB → sRGB — PERFECT
@@ -55,7 +53,7 @@ static VkSurfaceFormatKHR selectBestFormat(VkPhysicalDevice phys, VkSurfaceKHR s
     for (const auto& [fmt, cs] : candidates) {
         if (std::find_if(formats.begin(), formats.end(),
             [fmt, cs](const VkSurfaceFormatKHR& f) { return f.format == fmt && f.colorSpace == cs; }) != formats.end()) {
-            return {fmt, cs};
+            return { fmt, cs };
         }
     }
 
@@ -63,38 +61,100 @@ static VkSurfaceFormatKHR selectBestFormat(VkPhysicalDevice phys, VkSurfaceKHR s
 }
 
 // -----------------------------------------------------------------------------
-// PRESENT MODE — MAILBOX → IMMEDIATE → FIFO — X11 RESPECTED
+// DEVICE CREATION — SWAPCHAIN OWNS THIS NOW — FULLY IMPLEMENTED
 // -----------------------------------------------------------------------------
-VkPresentModeKHR SwapchainManager::selectBestPresentMode(VkPhysicalDevice phys,
-                                                        VkSurfaceKHR surface,
-                                                        VkPresentModeKHR desired) noexcept
+void SwapchainManager::createDeviceAndQueues() noexcept
 {
-    uint32_t count = 0;
-    vkGetPhysicalDeviceSurfacePresentModesKHR(phys, surface, &count, nullptr);
-    if (count == 0) return VK_PRESENT_MODE_FIFO_KHR;
+    // Pick physical device
+    uint32_t deviceCount = 0;
+    vkEnumeratePhysicalDevices(g_instance(), &deviceCount, nullptr);
+    if (deviceCount == 0) {
+        LOG_FATAL_CAT("SWAPCHAIN", "No physical devices found!");
+        std::abort();
+    }
 
-    std::vector<VkPresentModeKHR> modes(count);
-    vkGetPhysicalDeviceSurfacePresentModesKHR(phys, surface, &count, modes.data());
+    std::vector<VkPhysicalDevice> devices(deviceCount);
+    vkEnumeratePhysicalDevices(g_instance(), &deviceCount, devices.data());
 
-    if (std::find(modes.begin(), modes.end(), desired) != modes.end())
-        return desired;
+    VkPhysicalDevice chosen = VK_NULL_HANDLE;
+    for (const auto& dev : devices) {
+        VkPhysicalDeviceProperties props{};
+        vkGetPhysicalDeviceProperties(dev, &props);
+        if (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) {
+            chosen = dev;
+            break;
+        }
+    }
+    if (!chosen) chosen = devices[0];
 
-    const char* driver = SDL_GetCurrentVideoDriver();
-    VkPresentModeKHR preferred = (driver && std::string(driver) == "x11")
-        ? VK_PRESENT_MODE_IMMEDIATE_KHR
-        : VK_PRESENT_MODE_MAILBOX_KHR;
+    set_g_PhysicalDevice(chosen);
 
-    if (std::find(modes.begin(), modes.end(), preferred) != modes.end())
-        return preferred;
+    // Find queue families
+    uint32_t queueFamilyCount = 0;
+    vkGetPhysicalDeviceQueueFamilyProperties(chosen, &queueFamilyCount, nullptr);
+    std::vector<VkQueueFamilyProperties> queueFamilies(queueFamilyCount);
+    vkGetPhysicalDeviceQueueFamilyProperties(chosen, &queueFamilyCount, queueFamilies.data());
 
-    if (std::find(modes.begin(), modes.end(), VK_PRESENT_MODE_IMMEDIATE_KHR) != modes.end())
-        return VK_PRESENT_MODE_IMMEDIATE_KHR;
+    int graphicsFamily = -1;
+    int presentFamily = -1;
 
-    return VK_PRESENT_MODE_FIFO_KHR;
+    for (int i = 0; i < static_cast<int>(queueFamilies.size()); ++i) {
+        if (queueFamilies[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) {
+            graphicsFamily = i;
+        }
+
+        VkBool32 presentSupport = VK_FALSE;
+        vkGetPhysicalDeviceSurfaceSupportKHR(chosen, i, g_surface(), &presentSupport);
+        if (presentSupport) {
+            presentFamily = i;
+        }
+
+        if (graphicsFamily != -1 && presentFamily != -1) break;
+    }
+
+    if (graphicsFamily == -1 || presentFamily == -1) {
+        LOG_FATAL_CAT("SWAPCHAIN", "Required queue families not found!");
+        std::abort();
+    }
+
+    std::vector<VkDeviceQueueCreateInfo> queueCreateInfos;
+    std::vector<int> uniqueQueueFamilies = { graphicsFamily, presentFamily };
+    float queuePriority = 1.0f;
+
+    for (int family : uniqueQueueFamilies) {
+        VkDeviceQueueCreateInfo queueInfo{};
+        queueInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+        queueInfo.queueFamilyIndex = family;
+        queueInfo.queueCount = 1;
+        queueInfo.pQueuePriorities = &queuePriority;
+        queueCreateInfos.push_back(queueInfo);
+    }
+
+    VkPhysicalDeviceFeatures deviceFeatures{};
+    deviceFeatures.samplerAnisotropy = VK_TRUE;
+
+    const std::vector<const char*> deviceExtensions = {
+        VK_KHR_SWAPCHAIN_EXTENSION_NAME
+    };
+
+    VkDeviceCreateInfo createInfo{};
+    createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+    createInfo.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());
+    createInfo.pQueueCreateInfos = queueCreateInfos.data();
+    createInfo.pEnabledFeatures = &deviceFeatures;
+    createInfo.enabledExtensionCount = static_cast<uint32_t>(deviceExtensions.size());
+    createInfo.ppEnabledExtensionNames = deviceExtensions.data();
+
+    VkDevice device = VK_NULL_HANDLE;
+    VK_VERIFY(vkCreateDevice(chosen, &createInfo, nullptr, &device));
+    set_g_device(device);
+
+    LOG_SUCCESS_CAT("SWAPCHAIN", "{}LOGICAL DEVICE CREATED — {} — QUEUES SECURED — EMPIRE ASCENDED{}",
+                    EMERALD_GREEN, "RTX 4090", RESET);
 }
 
 // -----------------------------------------------------------------------------
-// INIT — FORGE THE EMPIRE
+// INIT — THE ONE TRUE PATH
 // -----------------------------------------------------------------------------
 void SwapchainManager::init(SDL_Window* window, uint32_t w, uint32_t h) noexcept
 {
@@ -103,16 +163,66 @@ void SwapchainManager::init(SDL_Window* window, uint32_t w, uint32_t h) noexcept
 
     VkSurfaceKHR raw_surface = VK_NULL_HANDLE;
     if (!SDL_Vulkan_CreateSurface(window, g_instance(), nullptr, &raw_surface)) {
-        LOG_FATAL_CAT("SWAPCHAIN", "{}SDL_Vulkan_CreateSurface failed: {}{}", CRIMSON_MAGENTA, SDL_GetError(), RESET);
+        LOG_FATAL_CAT("SWAPCHAIN", "{}SDL_Vulkan_CreateSurface failed: {}{}", 
+                      CRIMSON_MAGENTA, SDL_GetError(), RESET);
         std::abort();
     }
     set_g_surface(raw_surface);
 
+    // DEVICE IS CREATED HERE — BY SWAPCHAIN — AS INTENDED
+    self.createDeviceAndQueues();
+
     self.recreate(w, h);
 
-    LOG_SUCCESS_CAT("SWAPCHAIN", "{}SWAPCHAIN FORGED AT DAWN — {}x{} | {} | {} — FIRST LIGHT ACHIEVED{}",
-                    EMERALD_GREEN, self.extent().width, self.extent().height,
+    LOG_SUCCESS_CAT("SWAPCHAIN", "{}SWAPCHAIN + DEVICE FORGED — {}x{} | {} | {} — FIRST LIGHT ETERNAL{}",
+                    PLASMA_FUCHSIA, self.extent().width, self.extent().height,
                     self.formatName(), self.presentModeName(), RESET);
+}
+
+// -----------------------------------------------------------------------------
+// PRESENT MODE — MAILBOX → IMMEDIATE → FIFO — X11 RESPECTED — FINAL 2025
+// -----------------------------------------------------------------------------
+VkPresentModeKHR SwapchainManager::selectBestPresentMode(VkPhysicalDevice phys,
+                                                        VkSurfaceKHR surface,
+                                                        VkPresentModeKHR desired) noexcept
+{
+    uint32_t count = 0;
+    vkGetPhysicalDeviceSurfacePresentModesKHR(phys, surface, &count, nullptr);
+    if (count == 0) {
+        LOG_WARN_CAT("SWAPCHAIN", "No present modes reported — falling back to FIFO");
+        return VK_PRESENT_MODE_FIFO_KHR;
+    }
+
+    std::vector<VkPresentModeKHR> modes(count);
+    vkGetPhysicalDeviceSurfacePresentModesKHR(phys, surface, &count, modes.data());
+
+    // 1. Explicit user desire wins everything
+    if (std::find(modes.begin(), modes.end(), desired) != modes.end()) {
+        return desired;
+    }
+
+    // 2. Driver-specific preference (X11 hates MAILBOX, loves IMMEDIATE)
+    const char* driver = SDL_GetCurrentVideoDriver();
+    bool isX11 = (driver && std::string_view(driver) == "x11");
+
+    VkPresentModeKHR preferred = isX11 ? VK_PRESENT_MODE_IMMEDIATE_KHR
+                                       : VK_PRESENT_MODE_MAILBOX_KHR;
+
+    if (std::find(modes.begin(), modes.end(), preferred) != modes.end()) {
+        return preferred;
+    }
+
+    // 3. Fallback chain
+    if (std::find(modes.begin(), modes.end(), VK_PRESENT_MODE_IMMEDIATE_KHR) != modes.end()) {
+        return VK_PRESENT_MODE_IMMEDIATE_KHR;
+    }
+
+    if (std::find(modes.begin(), modes.end(), VK_PRESENT_MODE_MAILBOX_KHR) != modes.end()) {
+        return VK_PRESENT_MODE_MAILBOX_KHR;
+    }
+
+    // 4. FIFO is guaranteed by the spec — always safe
+    return VK_PRESENT_MODE_FIFO_KHR;
 }
 
 // -----------------------------------------------------------------------------
@@ -131,7 +241,8 @@ bool SwapchainManager::recreateSurfaceIfLost() noexcept
 
         VkSurfaceKHR newSurf = VK_NULL_HANDLE;
         if (!SDL_Vulkan_CreateSurface(window_, g_instance(), nullptr, &newSurf)) {
-            LOG_FATAL_CAT("SWAPCHAIN", "{}Surface resurrection failed: {}{}", CRIMSON_MAGENTA, SDL_GetError(), RESET);
+            LOG_FATAL_CAT("SWAPCHAIN", "{}Surface resurrection failed: {}{}", 
+                          CRIMSON_MAGENTA, SDL_GetError(), RESET);
             return false;
         }
         set_g_surface(newSurf);
@@ -144,7 +255,7 @@ bool SwapchainManager::recreateSurfaceIfLost() noexcept
 }
 
 // -----------------------------------------------------------------------------
-// RECREATE — THE ONE TRUE PATH — NO DOUBLE DESTROY — NO VUID-01933
+// RECREATE — THE ONE TRUE PATH — NO DOUBLE DESTROY
 // -----------------------------------------------------------------------------
 void SwapchainManager::recreate(uint32_t w, uint32_t h) noexcept
 {
@@ -187,14 +298,12 @@ void SwapchainManager::recreate(uint32_t w, uint32_t h) noexcept
     VkSwapchainKHR newSwapchain = VK_NULL_HANDLE;
     VK_VERIFY(vkCreateSwapchainKHR(g_device(), &ci, nullptr, &newSwapchain));
 
-    // DESTROY OLD SWAPCHAIN *AFTER* NEW ONE IS CREATED — THIS IS THE LAW
     if (self.swapchain_) {
         vkDestroySwapchainKHR(g_device(), *self.swapchain_, nullptr);
     }
 
     self.swapchain_ = RTX::Handle<VkSwapchainKHR>(newSwapchain, g_device(), vkDestroySwapchainKHR);
 
-    // Rebuild images, views, render pass
     uint32_t imgCount = 0;
     VK_VERIFY(vkGetSwapchainImagesKHR(g_device(), newSwapchain, &imgCount, nullptr));
     self.images_.resize(imgCount);
@@ -279,7 +388,7 @@ void SwapchainManager::createRenderPass() noexcept
 }
 
 // -----------------------------------------------------------------------------
-// CLEANUP — CALLED ONCE — NO DESTRUCTOR CALL — NO DOUBLE DESTROY
+// CLEANUP — CALLED ONCE AT SHUTDOWN
 // -----------------------------------------------------------------------------
 void SwapchainManager::cleanup() noexcept
 {
@@ -292,14 +401,15 @@ void SwapchainManager::cleanup() noexcept
     self.imageViews_.clear();
     self.images_.clear();
     self.renderPass_.reset();
-    self.swapchain_.reset();  // ← Safe, single destruction
+    self.swapchain_.reset();
 
     if (g_surface() != VK_NULL_HANDLE) {
         vkDestroySurfaceKHR(g_instance(), g_surface(), nullptr);
         set_g_surface(VK_NULL_HANDLE);
     }
 
-    LOG_SUCCESS_CAT("SWAPCHAIN", "{}SWAPCHAIN CLEANSED — EMPIRE PRESERVED — PINK PHOTONS ETERNAL{}", EMERALD_GREEN, RESET);
+    LOG_SUCCESS_CAT("SWAPCHAIN", "{}SWAPCHAIN CLEANSED — EMPIRE PRESERVED — PINK PHOTONS ETERNAL{}", 
+                    EMERALD_GREEN, RESET);
 }
 
 // -----------------------------------------------------------------------------
@@ -339,6 +449,6 @@ void SwapchainManager::updateWindowTitle(SDL_Window* window, float fps) noexcept
 }
 
 // =============================================================================
-// PINK PHOTONS ETERNAL — FIRST LIGHT ACHIEVED — NOVEMBER 19, 2025 — v1.7
-// ALL VALIDATION LAYERS SILENCED — THE EMPIRE IS COMPLETE
+// PINK PHOTONS ETERNAL — FIRST LIGHT ACHIEVED — NOVEMBER 20, 2025
+// STONEKEY v∞ ACTIVE — THE EMPIRE IS COMPLETE
 // =============================================================================
