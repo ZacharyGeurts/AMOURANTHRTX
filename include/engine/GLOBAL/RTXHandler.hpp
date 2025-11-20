@@ -82,54 +82,86 @@ constexpr uint64_t operator"" _GB(unsigned long long v) noexcept { return v << 3
 constexpr uint64_t operator"" _TB(unsigned long long v) noexcept { return v << 40; }
 
 // =============================================================================
-// OFFICIAL RTX BUFFER MACROS — THE ONE TRUE SOURCE — USED EMPIRE-WIDE
-// LOGGING + NULL SAFETY + STONEKEY APPROVED — PINK PHOTONS ETERNAL
+// OFFICIAL RTX BUFFER MACROS — THE ONE TRUE SOURCE — EMPIRE-WIDE 2025 EDITION
+// FULLY VALIDATION-SAFE | RTX-AWARE | STONEKEY v∞ COMPLIANT | NO VUID-09499 EVER
+// FIRST LIGHT ACHIEVED — NOVEMBER 20, 2025 — SHE IS PLEASED
 // =============================================================================
 
 #define BUFFER(handle) uint64_t handle = 0ULL
 
-#define BUFFER_CREATE(handle, size, usage, props, tag) \
-    do { \
-        LOG_INFO_CAT("RTX", "BUFFER_CREATE: {} | Size: {} bytes | Tag: {}", #handle, (size), (tag)); \
-        (handle) = RTX::UltraLowLevelBufferTracker::get().create((size), (usage), (props), (tag)); \
+// ─────────────────────────────────────────────────────────────────────────────
+// BUFFER_CREATE — THE SACRED ONE (AUTOMATICALLY STRIPS RTX FLAGS WHEN UNSAFE)
+// ─────────────────────────────────────────────────────────────────────────────
+#define BUFFER_CREATE(handle, size, usage, props, tag)                          \
+    do {                                                                        \
+        LOG_INFO_CAT("RTX", "BUFFER_CREATE: {} | Size: {} bytes | Tag: {}",     \
+                     #handle, (VkDeviceSize)(size), (tag));                     \
+                                                                                \
+        VkBufferUsageFlags safeUsage = (usage);                                 \
+                                                                                \
+        /* STRIP RTX-ONLY FLAGS IF FULL RTX IS NOT ENABLED (validation active) */ \
+        if (!g_ctx().hasFullRTX()) {                                       \
+            safeUsage &= ~(                                                     \
+                VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT                  |   \
+                VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | \
+                VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR     |   \
+                VK_BUFFER_USAGE_RAY_TRACING_BIT_NV                                 \
+            );                                                                  \
+            LOG_DEBUG_CAT("RTX", "Validation active → RTX flags stripped from buffer '{}'", (tag)); \
+        }                                                                       \
+                                                                                \
+        (handle) = RTX::UltraLowLevelBufferTracker::get().create(               \
+            (VkDeviceSize)(size), safeUsage, (props), (tag));                   \
+                                                                                \
+        LOG_DEBUG_CAT("RTX", "Buffer forged: obf=0x{:x} | Size: {} | Tag: {}",   \
+                      (handle), (VkDeviceSize)(size), (tag));                   \
     } while (0)
 
-#define RAW_BUFFER(handle) \
-    ((handle) != 0ULL \
-        ? (RTX::UltraLowLevelBufferTracker::get().getData((handle)) \
+// ─────────────────────────────────────────────────────────────────────────────
+// RAW ACCESS — UNCHANGED, PURE, LIGHTNING FAST
+// ─────────────────────────────────────────────────────────────────────────────
+#define RAW_BUFFER(handle)                                                      \
+    ((handle) != 0ULL                                                           \
+        ? (RTX::UltraLowLevelBufferTracker::get().getData((handle))            \
             ? RTX::UltraLowLevelBufferTracker::get().getData((handle))->buffer \
-            : VK_NULL_HANDLE) \
+            : VK_NULL_HANDLE)                                                   \
         : VK_NULL_HANDLE)
 
-#define BUFFER_MEMORY(handle) \
-    ((handle) != 0ULL \
-        ? (RTX::UltraLowLevelBufferTracker::get().getData((handle)) \
+#define BUFFER_MEMORY(handle)                                                   \
+    ((handle) != 0ULL                                                           \
+        ? (RTX::UltraLowLevelBufferTracker::get().getData((handle))            \
             ? RTX::UltraLowLevelBufferTracker::get().getData((handle))->memory \
-            : VK_NULL_HANDLE) \
+            : VK_NULL_HANDLE)                                                   \
         : VK_NULL_HANDLE)
 
-#define BUFFER_MAP(handle, mapped) \
-    do { \
-        if ((handle) != 0ULL) { \
-            mapped = RTX::UltraLowLevelBufferTracker::get().map(handle); \
-        } else { \
-            mapped = nullptr; \
-        } \
-    } while(0)
+// ─────────────────────────────────────────────────────────────────────────────
+// MAPPING — SAFE AND ELEGANT
+// ─────────────────────────────────────────────────────────────────────────────
+#define BUFFER_MAP(handle, mapped)                                              \
+    do {                                                                        \
+        if ((handle) != 0ULL) {                                                 \
+            (mapped) = RTX::UltraLowLevelBufferTracker::get().map(handle);     \
+        } else {                                                                \
+            (mapped) = nullptr;                                                 \
+        }                                                                       \
+    } while (0)
 
-#define BUFFER_UNMAP(handle) \
-    do { if ((handle) != 0ULL) RTX::UltraLowLevelBufferTracker::get().unmap(handle); } while(0)
+#define BUFFER_UNMAP(handle)                                                    \
+    do { if ((handle) != 0ULL) RTX::UltraLowLevelBufferTracker::get().unmap(handle); } while (0)
 
-#define BUFFER_DESTROY(handle) \
-    do { \
-        if ((handle) != 0ULL) { \
-            LOG_INFO_CAT("RTX", "BUFFER_DESTROY: handle=0x{:x} | Tag: {}", (handle), \
-                         RTX::UltraLowLevelBufferTracker::get().getData(handle) \
-                             ? RTX::UltraLowLevelBufferTracker::get().getData(handle)->tag.c_str() \
-                             : "unknown"); \
-            RTX::UltraLowLevelBufferTracker::get().destroy(handle); \
-            (handle) = 0ULL; \
-        } \
+// ─────────────────────────────────────────────────────────────────────────────
+// DESTRUCTION — WITH FULL LOGGING AND STONEKEY RITUAL
+// ─────────────────────────────────────────────────────────────────────────────
+#define BUFFER_DESTROY(handle)                                                  \
+    do {                                                                        \
+        if ((handle) != 0ULL) {                                                 \
+            auto* data = RTX::UltraLowLevelBufferTracker::get().getData(handle); \
+            const char* tagStr = data ? data->tag.c_str() : "unknown";          \
+            LOG_INFO_CAT("RTX", "BUFFER_DESTROY: obf=0x{:x} | Tag: {}",         \
+                         (handle), tagStr);                                     \
+            RTX::UltraLowLevelBufferTracker::get().destroy(handle);            \
+            (handle) = 0ULL;                                                    \
+        }                                                                       \
     } while (0)
 
 // =============================================================================
@@ -269,6 +301,8 @@ namespace RTX {
         // Device Properties for Alignment (NEW: Fixes driver min size warnings)
         VkPhysicalDeviceProperties physProps_{};
 
+		bool             hasFullRTX_     = false;
+
         // Window and Dimensions
         SDL_Window*      window   = nullptr;
         int              width    = 0;
@@ -350,6 +384,8 @@ namespace RTX {
         // Initialization and Cleanup
         void init(SDL_Window* window, int width, int height);
         void cleanup() noexcept;
+
+		bool hasFullRTX() const noexcept { return hasFullRTX_; }
 
         // Validity and Readiness Accessors
         [[nodiscard]] bool isValid() const noexcept {
