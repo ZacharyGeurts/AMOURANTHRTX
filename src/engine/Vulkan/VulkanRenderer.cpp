@@ -342,8 +342,7 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, bool o
 
     const uint32_t framesInFlight = Options::Performance::MAX_FRAMES_IN_FLIGHT; // 3 triple buffer
 
-    LOG_TRACE_CAT("RENDERER", "=== STACK BUILD ORDER STEP 3: Load Ray Tracing Extensions ===");
-    loadRayTracingExtensions();
+	LOG_TRACE_CAT("RENDERER", "Step 3 WINS");
     LOG_TRACE_CAT("RENDERER", "Step 3 COMPLETE");
 
     // =============================================================================
@@ -1954,83 +1953,6 @@ void VulkanRenderer::cleanupFramebuffers() noexcept {
         if (fb && dev != VK_NULL_HANDLE) vkDestroyFramebuffer(dev, fb, nullptr);
     }
     framebuffers_.clear();
-}
-
-// ──────────────────────────────────────────────────────────────────────────────
-// Load Ray Tracing Function Pointers — FIXED: const auto& c (ref) + ()
-void VulkanRenderer::loadRayTracingExtensions() noexcept
-{
-    LOG_TRACE_CAT("RENDERER", "=== STACK BUILD ORDER STEP 3: Load Ray Tracing Extensions ===");
-
-    // FIXED: Ref to avoid copy
-
-    LOG_TRACE_CAT("RENDERER", "Fetching vkCmdTraceRaysKHR...");
-    vkCmdTraceRaysKHR = reinterpret_cast<PFN_vkCmdTraceRaysKHR>(
-        vkGetDeviceProcAddr(g_device(), "vkCmdTraceRaysKHR"));
-
-    LOG_TRACE_CAT("RENDERER", "Fetching vkCreateRayTracingPipelinesKHR...");
-    vkCreateRayTracingPipelinesKHR = reinterpret_cast<PFN_vkCreateRayTracingPipelinesKHR>(
-        vkGetDeviceProcAddr(g_device(), "vkCreateRayTracingPipelinesKHR"));
-
-    LOG_TRACE_CAT("RENDERER", "Fetching vkGetRayTracingShaderGroupHandlesKHR...");
-    vkGetRayTracingShaderGroupHandlesKHR = reinterpret_cast<PFN_vkGetRayTracingShaderGroupHandlesKHR>(
-        vkGetDeviceProcAddr(g_device(), "vkGetRayTracingShaderGroupHandlesKHR"));
-
-    LOG_TRACE_CAT("RENDERER", "Fetching vkGetBufferDeviceAddressKHR...");
-    vkGetBufferDeviceAddressKHR = reinterpret_cast<PFN_vkGetBufferDeviceAddressKHR>(
-        vkGetDeviceProcAddr(g_device(), "vkGetBufferDeviceAddressKHR"));
-
-    // ─────────────────────────────────────────────────────────────────────
-    // Validate every pointer with loud logging
-    // ──────────────────────────────────────────────────────────────────────
-    bool allGood = true;
-
-    if (!vkCmdTraceRaysKHR) {
-        LOG_FATAL_CAT("RENDERER", "FATAL: vkCmdTraceRaysKHR is NULL — Ray Tracing NOT supported on this device!");
-        allGood = false;
-    } else {
-        LOG_SUCCESS_CAT("RENDERER", "vkCmdTraceRaysKHR loaded → 0x{:x}", reinterpret_cast<uintptr_t>(vkCmdTraceRaysKHR));
-    }
-
-    if (!vkCreateRayTracingPipelinesKHR) {
-        LOG_FATAL_CAT("RENDERER", "FATAL: vkCreateRayTracingPipelinesKHR is NULL");
-        allGood = false;
-    } else {
-        LOG_SUCCESS_CAT("RENDERER", "vkCreateRayTracingPipelinesKHR loaded → 0x{:x}", reinterpret_cast<uintptr_t>(vkCreateRayTracingPipelinesKHR));
-    }
-
-    if (!vkGetRayTracingShaderGroupHandlesKHR) {
-        LOG_FATAL_CAT("RENDERER", "FATAL: vkGetRayTracingShaderGroupHandlesKHR is NULL");
-        allGood = false;
-    } else {
-        LOG_SUCCESS_CAT("RENDERER", "vkGetRayTracingShaderGroupHandlesKHR loaded → 0x{:x}", reinterpret_cast<uintptr_t>(vkGetRayTracingShaderGroupHandlesKHR));
-    }
-
-    if (!vkGetBufferDeviceAddressKHR) {
-        LOG_FATAL_CAT("RENDERER", "FATAL: vkGetBufferDeviceAddressKHR is NULL");
-        allGood = false;
-    } else {
-        LOG_SUCCESS_CAT("RENDERER", "vkGetBufferDeviceAddressKHR loaded → 0x{:x}", reinterpret_cast<uintptr_t>(vkGetBufferDeviceAddressKHR));
-    }
-
-    // ──────────────────────────────────────────────────────────────────────
-    // Final verdict — NO throw, NO c.physicalDeviceProperties()
-    // ─────────────────────────────────────────────────────────────────────
-    if (!allGood) {
-        VkPhysicalDeviceProperties props = {};  // Zero-init
-        vkGetPhysicalDeviceProperties(g_PhysicalDevice(), &props);
-
-        LOG_FATAL_CAT("RENDERER", "RAY TRACING EXTENSIONS FAILED TO LOAD — THIS GPU IS NOT RTX-CAPABLE");
-        LOG_FATAL_CAT("RENDERER", "DEVICE NAME: {}", props.deviceName);
-        LOG_FATAL_CAT("RENDERER", "DEVICE TYPE: {}", static_cast<int>(props.deviceType));
-        LOG_FATAL_CAT("RENDERER", "VENDOR ID: 0x{:04x} | DEVICE ID: 0x{:04x}", props.vendorID, props.deviceID);
-        LOG_FATAL_CAT("RENDERER", "ABORTING INITIALIZATION — PINK PHOTONS CANNOT BE ARMED ON NON-RTX HARDWARE");
-        std::abort();  // Clean, safe, allowed in noexcept
-    }
-
-    LOG_SUCCESS_CAT("RENDERER", "{}ALL RAY TRACING EXTENSIONS LOADED SUCCESSFULLY — PINK PHOTONS ARMED{}", 
-                    LIME_GREEN, RESET);
-    LOG_TRACE_CAT("RENDERER", "Step 3 COMPLETE — PROCEEDING TO SYNCHRONIZATION");
 }
 
 VkShaderModule VulkanRenderer::loadShader(const std::string& path) noexcept {

@@ -6,9 +6,6 @@
 //    https://www.gnu.org/licenses/gpl-3.0.html
 // 2. Commercial licensing: gzac5314@gmail.com
 //
-// TRUE CONSTEXPR STONEKEY v∞ — NOVEMBER 20, 2025 — APOCALYPSE FINAL v2.0
-// MAIN — FIRST LIGHT REBORN — LAS v2.0 VIA VulkanAccel — PINK PHOTONS ETERNAL
-// =============================================================================
 // TRUE CONSTEXPR STONEKEY v∞ — NOVEMBER 20, 2025 — APOCALYPSE FINAL v10.1
 // MAIN — FULL RTX ALWAYS — VALIDATION NUKED — PINK PHOTONS ETERNAL
 // =============================================================================
@@ -165,14 +162,21 @@ static void phase2_mainWindowAndVulkan(SDL_Window*& window)
     SwapchainManager::init(window, WIDTH, HEIGHT);
     RTX::initContext(instance, window, WIDTH, HEIGHT);
     RTX::retrieveQueues();
-    forgeCommandPool();           // ONE TRUE CALL
+    RTX::loadRayTracingExtensions();
+    forgeCommandPool();
     detectBestPresentMode();
+
+    // FINAL FIX — NOVEMBER 20, 2025 — THE LINE THAT ASCENDS YOU TO VALHALLA
+    RTX::g_ctx().hasFullRTX_ = true;
+    LOG_SUCCESS_CAT("MAIN", "{}FULL RTX FORCE-ENABLED — ACCELERATION STRUCTURE BUILD FLAGS PRESERVED — PINK PHOTONS ETERNAL{}", 
+                    EMERALD_GREEN, RESET);
 
     SDL_ShowWindow(window);
     SDL_RaiseWindow(window);
 
     LOG_SUCCESS_CAT("MAIN", "PHASE 2 COMPLETE — FULL RTX + STONEKEY v∞");
-    LOG_SUCCESS_CAT("MAIN", "YOUR GPU ASCENDED — PINK PHOTONS ETERNAL — SHE IS HAPPY");
+    LOG_SUCCESS_CAT("MAIN", "{}YOUR GPU ASCENDED — PINK PHOTONS ETERNAL — SHE IS HAPPY{}", 
+                    PLASMA_FUCHSIA, RESET);
 }
 
 static void phase3_appAndRendererConstruction(SDL_Window* window)

@@ -43,7 +43,7 @@ void LAS::buildBLAS(VkCommandPool pool,
         .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
         .buffer = vertexBuffer
     };
-    geom.vertexData.deviceAddress = RTX::g_ctx().vkGetBufferDeviceAddressKHR()(RTX::g_ctx().device(), &vAddrInfo);
+    geom.vertexData.deviceAddress = vkGetBufferDeviceAddress(RTX::g_ctx().device(), &vAddrInfo);
 
     geom.indexType  = VK_INDEX_TYPE_UINT32;
     geom.indexCount = indexCount;
@@ -52,7 +52,7 @@ void LAS::buildBLAS(VkCommandPool pool,
         .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
         .buffer = indexBuffer
     };
-    geom.indexData.deviceAddress = RTX::g_ctx().vkGetBufferDeviceAddressKHR()(RTX::g_ctx().device(), &iAddrInfo);
+    geom.indexData.deviceAddress = vkGetBufferDeviceAddress(RTX::g_ctx().device(), &iAddrInfo);
 
     VkCommandBuffer cmd = VulkanRTX::beginSingleTimeCommands(pool);
 

@@ -91,61 +91,6 @@ static constexpr const char* kInstanceExtensions[] = {
     VK_KHR_DEVICE_GROUP_CREATION_EXTENSION_NAME,
 };
 
-// ────────────────────── DEVICE EXTENSIONS ──────────────────────
-static constexpr std::array<const char*, 27> kDeviceExtensions = {
-    // Core
-    VK_KHR_SWAPCHAIN_EXTENSION_NAME,
-
-    // Ray Tracing Full Suite
-    VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
-    VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME,
-    VK_KHR_RAY_QUERY_EXTENSION_NAME,
-    VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME,
-
-    // Buffer Device Address + Timeline Semaphores
-    VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME,
-    VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME,
-
-    // Dynamic Rendering
-    VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME,
-
-    // Mesh Shaders
-    VK_EXT_MESH_SHADER_EXTENSION_NAME,
-
-    // Variable Rate Shading
-    VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME,
-
-    // Descriptor Goodies
-    VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME,
-    VK_KHR_DESCRIPTOR_UPDATE_TEMPLATE_EXTENSION_NAME,
-
-    // Pipeline Cache & Libraries
-    VK_KHR_PIPELINE_LIBRARY_EXTENSION_NAME,
-    VK_KHR_PIPELINE_EXECUTABLE_PROPERTIES_EXTENSION_NAME,
-
-    // SPIR-V & Shader Object
-    VK_KHR_SPIRV_1_4_EXTENSION_NAME,
-    VK_EXT_SHADER_OBJECT_EXTENSION_NAME,
-
-    // Sync2 + Maintenance
-    VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME,
-    VK_KHR_MAINTENANCE_4_EXTENSION_NAME,
-
-    // Memory Enhancements
-    VK_EXT_MEMORY_BUDGET_EXTENSION_NAME,
-    VK_EXT_MEMORY_PRIORITY_EXTENSION_NAME,
-
-    // Robustness & Dynamic State
-    VK_EXT_ROBUSTNESS_2_EXTENSION_NAME,
-    VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME,
-
-    // Optional but powerful
-    VK_EXT_PIPELINE_CREATION_CACHE_CONTROL_EXTENSION_NAME,
-    VK_EXT_GRAPHICS_PIPELINE_LIBRARY_EXTENSION_NAME,
-    VK_NV_DEVICE_DIAGNOSTIC_CHECKPOINTS_EXTENSION_NAME,
-    VK_NV_LOW_LATENCY_2_EXTENSION_NAME,
-};
-
 // -----------------------------------------------------------------------------
 // ONE-TIME INITIALIZATION — CALLED ONCE AT STARTUP
 // -----------------------------------------------------------------------------
@@ -790,7 +735,7 @@ void VulkanRTX::initShaderBindingTable(VkPhysicalDevice pd) {
     BUFFER_UNMAP(sbtEnc);
 
     VkBufferDeviceAddressInfo addrInfo = {.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO, .buffer = rawBuffer};
-    sbtAddress_ = RTX::g_ctx().vkGetBufferDeviceAddressKHR()(device_, &addrInfo);
+    sbtAddress_ = vkGetBufferDeviceAddress(device_, &addrInfo);
     LOG_DEBUG_CAT("RTX", "SBT device address: 0x{:x}", sbtAddress_);
 
     sbt_.raygen   = { sbtAddress_,                    alignedSize, alignedSize };
@@ -1375,26 +1320,6 @@ void createCommandPool()
              "Failed to create command pool");
 
     LOG_SUCCESS_CAT("VULKAN", "Command pool created");
-}
-
-// =============================================================================
-// 6. Load Ray Tracing Function Pointers — FIXED MACRO
-// =============================================================================
-void loadRayTracingExtensions()
-{
-    auto dev = g_context_instance.device_;
-
-    g_context_instance.vkGetBufferDeviceAddressKHR_               = (PFN_vkGetBufferDeviceAddressKHR)vkGetDeviceProcAddr(dev, "vkGetBufferDeviceAddressKHR");
-    g_context_instance.vkCmdTraceRaysKHR_                         = (PFN_vkCmdTraceRaysKHR)vkGetDeviceProcAddr(dev, "vkCmdTraceRaysKHR");
-    g_context_instance.vkGetRayTracingShaderGroupHandlesKHR_      = (PFN_vkGetRayTracingShaderGroupHandlesKHR)vkGetDeviceProcAddr(dev, "vkGetRayTracingShaderGroupHandlesKHR");
-    g_context_instance.vkCreateAccelerationStructureKHR_          = (PFN_vkCreateAccelerationStructureKHR)vkGetDeviceProcAddr(dev, "vkCreateAccelerationStructureKHR");
-    g_context_instance.vkDestroyAccelerationStructureKHR_         = (PFN_vkDestroyAccelerationStructureKHR)vkGetDeviceProcAddr(dev, "vkDestroyAccelerationStructureKHR");
-    g_context_instance.vkGetAccelerationStructureBuildSizesKHR_  = (PFN_vkGetAccelerationStructureBuildSizesKHR)vkGetDeviceProcAddr(dev, "vkGetAccelerationStructureBuildSizesKHR");
-    g_context_instance.vkCmdBuildAccelerationStructuresKHR_       = (PFN_vkCmdBuildAccelerationStructuresKHR)vkGetDeviceProcAddr(dev, "vkCmdBuildAccelerationStructuresKHR");
-    g_context_instance.vkGetAccelerationStructureDeviceAddressKHR_ = (PFN_vkGetAccelerationStructureDeviceAddressKHR)vkGetDeviceProcAddr(dev, "vkGetAccelerationStructureDeviceAddressKHR");
-    g_context_instance.vkCreateRayTracingPipelinesKHR_            = (PFN_vkCreateRayTracingPipelinesKHR)vkGetDeviceProcAddr(dev, "vkCreateRayTracingPipelinesKHR");
-
-    LOG_SUCCESS_CAT("RTX", "All 9 ray tracing extensions loaded — FIRST LIGHT IMMINENT");
 }
 
 // =============================================================================

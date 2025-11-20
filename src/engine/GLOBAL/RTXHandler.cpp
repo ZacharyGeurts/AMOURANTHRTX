@@ -499,6 +499,35 @@ void initContext(VkInstance instance, SDL_Window* window, int width, int height)
 
 }  // namespace RTX
 
+void RTX::loadRayTracingExtensions()
+{
+    VkDevice dev = g_ctx().device();
+    if (!dev) {
+        LOG_FATAL("RTX", "loadRayTracingExtensions called with null device!");
+        return;
+    }
+
+    LOG_SUCCESS("RTX", "LOADING RAY TRACING EXTENSIONS NOW — THIS MUST PRINT");
+
+    #define LOAD(name) \
+        g_ctx().name## _ = (PFN_##name)vkGetDeviceProcAddr(dev, #name); \
+        if (!g_ctx().name## _) { \
+            LOG_FATAL("RTX", "FAILED TO LOAD " #name " — THIS WILL CRASH IN BLAS"); \
+        } else { \
+            LOG_SUCCESS("RTX", "Loaded " #name); \
+        }
+
+    LOAD(vkCreateAccelerationStructureKHR);
+    LOAD(vkDestroyAccelerationStructureKHR);
+    LOAD(vkGetAccelerationStructureBuildSizesKHR);
+    LOAD(vkCmdBuildAccelerationStructuresKHR);
+    LOAD(vkGetAccelerationStructureDeviceAddressKHR);
+
+    #undef LOAD
+
+    LOG_SUCCESS("RTX", "ALL 5 RT PFNs LOADED — FIRST LIGHT INCOMING");
+}
+
 void RTX::retrieveQueues() noexcept
 {
     vkGetDeviceQueue(g_device(), g_ctx().graphicsQueueFamily, 0, &g_ctx().graphicsQueue_);

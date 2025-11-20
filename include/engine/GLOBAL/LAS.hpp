@@ -18,6 +18,7 @@
 #pragma once
 
 #include "engine/Vulkan/VulkanAccel.hpp"
+#include "engine/GLOBAL/RTXHandler.hpp"
 #include "engine/GLOBAL/logging.hpp"
 #include <glm/glm.hpp>
 #include <vector>

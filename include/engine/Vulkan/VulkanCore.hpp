@@ -214,7 +214,6 @@ inline const char* vk_result_string(VkResult result) noexcept {
 // =============================================================================
 namespace RTX {
     void createCommandPool();
-    void loadRayTracingExtensions();
     bool createSurface(SDL_Window* window, VkInstance instance);
 	void fixNvidiaValidationBugLocally() noexcept;
 }

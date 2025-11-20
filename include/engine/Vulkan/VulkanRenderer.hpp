@@ -298,7 +298,6 @@ private:
     void createShaderBindingTable() noexcept;
     VkShaderModule loadShader(const std::string& path) noexcept;
     VkDeviceAddress getShaderGroupHandle(uint32_t group) noexcept;
-    void loadRayTracingExtensions() noexcept;
     void recordRayTracingCommandBuffer(VkCommandBuffer cmd) noexcept;
     void performDenoisingPass(VkCommandBuffer cmd) noexcept;
     void performTonemapPass(VkCommandBuffer cmd, uint32_t frameIdx, uint32_t swapImageIdx) noexcept;

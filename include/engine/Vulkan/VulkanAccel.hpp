@@ -58,9 +58,6 @@ public:
         std::string                  name;
     };
 
-    static PFN_vkCreateAccelerationStructureKHR vkCreateAccelerationStructureKHR;
-    static PFN_vkDestroyAccelerationStructureKHR vkDestroyAccelerationStructureKHR;
-
     explicit VulkanAccel(VkDevice device);
     ~VulkanAccel() = default;
 
