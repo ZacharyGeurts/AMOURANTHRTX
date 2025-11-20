@@ -185,10 +185,14 @@ static void phase3_appAndRendererConstruction(SDL_Window* window)
     LOG_SUCCESS_CAT("MAIN", "g_mesh ARMED → {} verts, {} indices", 
                     g_mesh->vertices.size(), g_mesh->indices.size());
 
-    // FIXED: Use StoneKey-safe getters → returns raw VkBuffer
+    // CRITICAL FIX: Just touch the singleton once → constructs it safely
+    las();  // ← THIS IS ALL YOU NEED — NO initLAS(), NO STATIC CALLS
+    LOG_SUCCESS_CAT("MAIN", "{}LAS v2.0 SINGLETON AWAKENED — PINK PHOTONS LOCKED{}", PLASMA_FUCHSIA, RESET);
+
+    // Now it's safe — accel_ will be created inside buildBLAS()
     las().buildBLAS(RTX::g_ctx().commandPool_,
-                    g_mesh->getVertexBuffer(),   // ← CORRECT
-                    g_mesh->getIndexBuffer(),    // ← CORRECT
+                    g_mesh->getVertexBuffer(),
+                    g_mesh->getIndexBuffer(),
                     static_cast<uint32_t>(g_mesh->vertices.size()),
                     static_cast<uint32_t>(g_mesh->indices.size()),
                     VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR);
