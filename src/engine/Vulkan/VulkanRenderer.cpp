@@ -25,16 +25,10 @@
 #include "engine/GLOBAL/LAS.hpp"
 #include "engine/GLOBAL/SwapchainManager.hpp"
 #include "engine/GLOBAL/OptionsMenu.hpp"
-#include "engine/Vulkan/ImGuiStoneKeyShield.hpp"
 #include "engine/GLOBAL/camera.hpp"
 #include "engine/SDL3/SDL3_vulkan.hpp"
 #include "engine/GLOBAL/StoneKey.hpp"  // Full include — .cpp only
 #include "stb/stb_image.h"
-
-#include <imgui.h>
-#include <imgui_impl_sdl3.h>
-#include <imgui_impl_vulkan.h>
-#include <imgui_internal.h>
 
 #include <glm/gtc/matrix_inverse.hpp>
 #include <glm/gtc/type_ptr.hpp>
@@ -1281,7 +1275,6 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
         return;
     }
 
-    RTX::ImGuiStoneKeyShield::newFrame();
     const uint32_t frameIdx = currentFrame_ % Options::Performance::MAX_FRAMES_IN_FLIGHT;
     const auto& ctx = RTX::g_ctx();
 
@@ -1436,14 +1429,6 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
         LOG_ERROR_CAT("RENDER", "vkQueuePresentKHR failed: {}", (int)presentResult);
     }
 
-    // ImGui (only if enabled)
-    if (Options::Performance::ENABLE_IMGUI && app_ && app_->showImGuiDebugConsole_) {
-        ImGui_ImplVulkan_NewFrame();
-        ImGui_ImplSDL3_NewFrame();
-        ImGui::NewFrame();
-        app_->renderImGuiDebugConsole();
-        ImGui::Render();
-        RTX::ImGuiStoneKeyShield::renderDrawData(ImGui::GetDrawData(), cmd);
     }
 
     currentFrame_ = (currentFrame_ + 1) % Options::Performance::MAX_FRAMES_IN_FLIGHT;
@@ -1918,7 +1903,6 @@ void VulkanRenderer::setOverlay(bool show) noexcept {
         return;
     }
     showOverlay_ = show;
-    LOG_INFO_CAT("Renderer", "{}ImGui Overlay: {}{}", 
         show ? LIME_GREEN : CRIMSON_MAGENTA,
         show ? "VISIBLE" : "HIDDEN", RESET);
     LOG_TRACE_CAT("RENDERER", "setOverlay — COMPLETE");
@@ -1948,40 +1932,20 @@ void VulkanRenderer::drawLoadingOverlay() noexcept
     }
 
     // Fullscreen transparent overlay (no border, no interaction)
-    ImGui::SetNextWindowPos(ImVec2(0, 0), ImGuiCond_Always);
-    ImGui::SetNextWindowSize(ImGui::GetIO().DisplaySize);
-    ImGui::SetNextWindowBgAlpha(0.0f);
 
-    ImGui::Begin("##heaven_overlay", nullptr,
-        ImGuiWindowFlags_NoTitleBar |
-        ImGuiWindowFlags_NoResize |
-        ImGuiWindowFlags_NoMove |
-        ImGuiWindowFlags_NoScrollbar |
-        ImGuiWindowFlags_NoInputs |
-        ImGuiWindowFlags_NoBackground |
-        ImGuiWindowFlags_NoSavedSettings |
-        ImGuiWindowFlags_NoFocusOnAppearing
     );
 
     const ImVec2 center = ImVec2(
-        ImGui::GetIO().DisplaySize.x * 0.5f,
-        ImGui::GetIO().DisplaySize.y * 0.5f
     );
 
     // === MAIN TITLE — PLASMATIC IS GOD ===
     if (plasmaticaFont) {
-        ImGui::PushFont(plasmaticaFont);
         const char* title = "AMOURANTH RTX";
-        ImVec2 titleSize = ImGui::CalcTextSize(title);
-        ImGui::SetCursorPos(ImVec2(center.x - titleSize.x * 0.5f, center.y - titleSize.y - 80.0f));
-        ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.8f, 1.0f), "%s", title);
-        ImGui::PopFont();
     }
 
     // === STATUS MESSAGE — ELEGANT ARIAL ===
     if (arialBoldFont || arialFont) {
         ImFont* statusFont = arialBoldFont ? arialBoldFont : arialFont;
-        ImGui::PushFont(statusFont);
 
         const char* status = "";
         const char* subtitle = "";
@@ -1999,25 +1963,15 @@ void VulkanRenderer::drawLoadingOverlay() noexcept
             subtitle = "almost there";
         }
 
-        ImVec2 statusSize = ImGui::CalcTextSize(status);
-        ImVec2 subSize = ImGui::CalcTextSize(subtitle);
 
-        ImGui::SetCursorPos(ImVec2(center.x - statusSize.x * 0.5f, center.y + 20.0f));
-        ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.95f, 1.0f), "%s", status);
 
-        ImGui::SetCursorPos(ImVec2(center.x - subSize.x * 0.5f, center.y + 60.0f));
-        ImGui::TextColored(ImVec4(0.9f, 0.6f, 1.0f, 0.85f), "%s", subtitle);
 
-        ImGui::PopFont();
     }
 
     // Fallback if somehow no fonts loaded (should never happen)
     else {
-        ImGui::SetCursorPos(ImVec2(center.x - 100, center.y));
-        ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.9f, 1.0f), "Loading neural reality...");
     }
 
-    ImGui::End();
 }
 
 void VulkanRenderer::createFramebuffers() noexcept {
@@ -2329,9 +2283,7 @@ bool VulkanRenderer::createSharedStaging() noexcept {
     return true;
 }
 
-void VulkanRenderer::initImGuiFonts() noexcept
 {
-    ImGuiIO& io = ImGui::GetIO();
     io.Fonts->Clear();
 
     // 1. PLASMATIC — THE ONE TRUE FONT

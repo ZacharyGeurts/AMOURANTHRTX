@@ -51,7 +51,6 @@ namespace SDL3Window {
 void create(const char* title, int width, int height, Uint32 flags)
 {
     flags |= SDL_WINDOW_HIGH_PIXEL_DENSITY;
-    if (Options::Performance::ENABLE_IMGUI) flags |= SDL_WINDOW_RESIZABLE;
 
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) == 0) {
         LOG_FATAL_CAT("SDL3", "SDL_Init failed: {}", SDL_GetError());

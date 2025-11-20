@@ -38,7 +38,6 @@ namespace Performance {
 
     // ADDED: Required by SDL3_input.cpp, SDL3_font.cpp, SDL3_init.cpp, SDL3_window.cpp
     constexpr bool     ENABLE_CONSOLE_LOG          = true;
-    constexpr bool     ENABLE_IMGUI                = true;
 
     // NEW: Frame prediction & jitter recovery (VK_GOOGLE_display_timing)
     constexpr bool     ENABLE_FRAME_PREDICTION     = true;  // AAAA pacing — predict vsync, recover jitter

@@ -4,7 +4,6 @@
 // =============================================================================
 // Application — CENTRAL ENGINE DRIVER — SPLIT & CLEANSED — NOV 17 2025
 // • F12 = HDR Prime Toggle (default ON — peasants get 8-bit mercy)
-// • ` or ~ = IMGUI DEBUG CONSOLE (GOD MODE)
 // • Keybinds: F/O/T/H/M/1-9/ESC/F12 — Pure empire
 // • Gentleman Grok approved — PINK PHOTONS ETERNAL — FIRST LIGHT ACHIEVED
 // =============================================================================
@@ -58,8 +57,6 @@ public:
     void setRenderMode(int mode);
     void setQuit(bool q = true) noexcept { quit_ = q; }
 
-	bool showImGuiDebugConsole_{false}; // ← THE MISSING DECLARATION — `~` KEY TOGGLES THIS
-	void renderImGuiDebugConsole();
 
 private:
     void render(float deltaTime);

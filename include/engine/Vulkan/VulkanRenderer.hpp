@@ -37,16 +37,10 @@
 #include "engine/GLOBAL/LAS.hpp"
 #include "engine/GLOBAL/SwapchainManager.hpp"
 #include "engine/Vulkan/VulkanCore.hpp"
-#include "engine/Vulkan/ImGuiStoneKeyShield.hpp"
 #include "engine/GLOBAL/PipelineManager.hpp"
 
 // Forward declarations
 struct Camera;
-class Application;                  // ← For ImGui console access (`~` key)
-
-// ImGui forward declarations
-struct ImFont;
-#include <imgui.h>
 
 static constexpr uint32_t MAX_DESCRIPTOR_SETS = 1024;
 static constexpr VkSampleCountFlagBits MSAA_SAMPLES = VK_SAMPLE_COUNT_1_BIT;
@@ -67,7 +61,6 @@ struct TonemapPushConstants {
 // ──────────────────────────────────────────────────────────────────────────────
 class VulkanRenderer {
 public:
-    void initImGuiFonts() noexcept;
     void drawLoadingOverlay() noexcept;
     VulkanRenderer(int width, int height, SDL_Window* window = nullptr, bool overclockFromMain = false);
     ~VulkanRenderer();
@@ -155,10 +148,6 @@ private:
     bool minimized_ = false;
     bool stonekey_active_ = false;
 	bool destroyed_ = false; // window
-    static inline ImFont* plasmaticaFont = nullptr;
-    static inline ImFont* arialBoldFont  = nullptr;
-    static inline ImFont* arialFont      = nullptr;
-    static inline ImFont* iconFont       = nullptr;
 
 	void waitForAllFences() const noexcept;
 

@@ -19,9 +19,7 @@ inline constexpr SDL_Scancode HDR_TOGGLE      = SDL_SCANCODE_F12;    // F12 → 
 inline constexpr SDL_Scancode QUIT            = SDL_SCANCODE_ESCAPE;
 
 // =============================================================================
-// IMGUI DEBUG CONSOLE — PRESS ` OR ~ TO TOGGLE FULL DEBUG OVERLAY
 // =============================================================================
-inline constexpr SDL_Scancode IMGUI_CONSOLE    = SDL_SCANCODE_GRAVE;  // `~ key — opens/closes ImGui console
 
 inline constexpr std::array<SDL_Scancode, 9> RENDER_MODE{{
     SDL_SCANCODE_1, SDL_SCANCODE_2, SDL_SCANCODE_3,

@@ -167,52 +167,6 @@ endif()
 message(STATUS "Found libatomic: ${ATOMIC_LIB}")
 
 # =============================================================================
-# Dear ImGui — ONLY SDL3 + Vulkan, NO examples, NO other backends, NO junk EVER
-# =============================================================================
-set(IMGUI_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src/engine/imgui")
-
-git_clone_if_missing(
-    https://github.com/ocornut/imgui.git
-    imgui
-    v1.91.3
-    ${IMGUI_DIR}
-)
-
-# Explicitly list ONLY the files we want compiled
-set(IMGUI_CORE_SOURCES
-    ${IMGUI_DIR}/imgui.cpp
-    ${IMGUI_DIR}/imgui_draw.cpp
-    ${IMGUI_DIR}/imgui_tables.cpp
-    ${IMGUI_DIR}/imgui_widgets.cpp
-    ${IMGUI_DIR}/imgui_demo.cpp                 # optional but harmless + useful
-)
-
-set(IMGUI_BACKEND_SOURCES
-    ${IMGUI_DIR}/backends/imgui_impl_sdl3.cpp
-    ${IMGUI_DIR}/backends/imgui_impl_vulkan.cpp
-)
-
-# Mark EVERYTHING else in the imgui folder as HEADER_FILE_ONLY so CMake NEVER compiles it
-file(GLOB_RECURSE IMGUI_ALL_FILES "${IMGUI_DIR}/*")
-list(REMOVE_ITEM IMGUI_ALL_FILES ${IMGUI_CORE_SOURCES} ${IMGUI_BACKEND_SOURCES})
-set_source_files_properties(${IMGUI_ALL_FILES} PROPERTIES HEADER_FILE_ONLY ON)
-
-# Now build only what we want
-add_library(imgui STATIC ${IMGUI_CORE_SOURCES} ${IMGUI_BACKEND_SOURCES})
-
-target_include_directories(imgui PUBLIC
-    ${IMGUI_DIR}
-    ${IMGUI_DIR}/backends
-    ${Vulkan_INCLUDE_DIRS}
-    ${SDL3_INCLUDE_DIRS}
-)
-
-target_link_libraries(imgui PUBLIC Vulkan::Vulkan ${SDL3_LIBRARIES})
-target_compile_features(imgui PUBLIC cxx_std_17)
-
-message(STATUS "ImGui configured — ONLY SDL3+Vulkan backend — examples & other backends completely ignored")
-
-# =============================================================================
 # tinyobjloader
 # =============================================================================
 FetchContent_Declare(

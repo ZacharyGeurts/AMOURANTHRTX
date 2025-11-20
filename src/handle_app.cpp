@@ -149,22 +149,12 @@ void Application::processInput(float)
     edge(KeyBind::TONEMAP,       [this]() { toggleTonemap(); },    tPressed,    "TONEMAP (T)");
     edge(KeyBind::HYPERTRACE,    [this]() { toggleHypertrace(); }, hPressed,    "HYPERTRACE (H)");
 
-    // ~ KEY → IMGUI CONSOLE
-    static bool imguiConsolePressed = false;
-    if (keys[KeyBind::IMGUI_CONSOLE] && !imguiConsolePressed) {
-        showImGuiDebugConsole_ = !showImGuiDebugConsole_;
 
         SDL_SetWindowRelativeMouseMode(SDL3Window::get(),
-            showImGuiDebugConsole_ ? false : true);
 
-        LOG_ATTEMPT_CAT("IMGUI", "{}IMGUI DEBUG CONSOLE {} — PRESS ~ AGAIN TO CLOSE{}", 
                         PARTY_PINK,
-                        showImGuiDebugConsole_ ? "SUMMONED" : "BANISHED",
                         RESET);
 
-        imguiConsolePressed = true;
-    } else if (!keys[KeyBind::IMGUI_CONSOLE]) {
-        imguiConsolePressed = false;
     }
 
     // M key → Maximize + Audio Mute
@@ -204,31 +194,6 @@ void Application::render(float deltaTime)
     } cam(view_, proj_);
 
     renderer_->renderFrame(cam, deltaTime);
-
-    if (showImGuiDebugConsole_ && Options::Performance::ENABLE_IMGUI) {
-        ImGui::ShowDemoWindow(&showImGuiDebugConsole_);
-
-        ImGui::Begin("AMOURANTH RTX — EMPIRE CONSOLE v80", &showImGuiDebugConsole_,
-                     ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoCollapse);
-
-        ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.8f, 1.0f), "PINK PHOTONS ETERNAL — NOVEMBER 20, 2025");
-        ImGui::Separator();
-
-        ImGui::Text("FPS: %.1f", ImGui::GetIO().Framerate);
-        ImGui::Text("Resolution: %dx%d", width_, height_);
-        ImGui::Text("Render Mode: %d", renderMode_);
-        ImGui::Text("HDR: %s", hdr_enabled_ ? "PRIME (10-bit)" : "OFF");
-        ImGui::Text("Tonemap: %s", tonemapEnabled_ ? "ON" : "OFF");
-        ImGui::Text("Overlay: %s", showOverlay_ ? "ON" : "OFF");
-
-        if (ImGui::Button("Recompile All Shaders")) {
-            // hot-reload here
-        }
-        ImGui::SameLine();
-        if (ImGui::Button("Force Crash (testing)")) *(volatile int*)0 = 0;
-
-        ImGui::End();
-    }
 }
 
 void Application::updateWindowTitle(float deltaTime)
@@ -245,7 +210,6 @@ void Application::updateWindowTitle(float deltaTime)
             tonemapEnabled_ ? "" : " OFF",
             showOverlay_ ? "" : " OFF",
             hdr_enabled_ ? " PRIME" : " OFF",
-            showImGuiDebugConsole_ ? " [IMGUI CONSOLE]" : "",
             Options::Performance::ENABLE_VALIDATION_LAYERS ? " [DEBUG]" : ""
         );
         SDL_SetWindowTitle(SDL3Window::get(), title.c_str());

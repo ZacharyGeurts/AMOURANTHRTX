@@ -151,7 +151,6 @@ static void phase2_mainWindowAndVulkan(SDL_Window*& window)
     constexpr int HEIGHT = 2160;
 
     Uint32 flags = SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_HIDDEN;
-    if (Options::Performance::ENABLE_IMGUI) flags |= SDL_WINDOW_RESIZABLE;
 
     SDL3Window::create("AMOURANTH RTX — VALHALLA v80 TURBO", WIDTH, HEIGHT, flags);
     window = SDL3Window::get();

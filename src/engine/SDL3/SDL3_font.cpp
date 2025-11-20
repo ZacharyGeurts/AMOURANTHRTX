@@ -39,8 +39,6 @@ SDL3Font::~SDL3Font() {
 void SDL3Font::initialize(const std::string& fontPath) {
     LOG_ATTEMPT_CAT("SDL3_font", "{}=== SDL3 TTF INITIALIZATION FORGE BEGUN ==={}", OCEAN_TEAL, RESET);
 
-    if (!Options::Performance::ENABLE_IMGUI) {
-        LOG_WARN_CAT("SDL3_font", "{}ImGui disabled — skipping TTF subsystem init (performance optimization){}", OCEAN_TEAL, RESET);
         LOG_INFO_CAT("SDL3_font", "{}Font init bypassed — returning to caller{}", OCEAN_TEAL, RESET);
         return;
     }
