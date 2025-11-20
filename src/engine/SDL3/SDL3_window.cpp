@@ -2,15 +2,6 @@
 // src/engine/SDL3/SDL3_window.cpp
 // STONEKEY v∞ FULLY ACTIVE — PINK PHOTONS ETERNAL — APOCALYPSE FINAL 2025 AAAA
 // =============================================================================
-//
-// Dual Licensed:
-// 1. GNU General Public License v3.0 (or later) (GPL v3)
-//    https://www.gnu.org/licenses/gpl-3.0.html
-// 2. Commercial licensing: gzac5314@gmail.com
-//
-// TRUE CONSTEXPR STONEKEY v∞ — NOVEMBER 20, 2025 — APOCALYPSE FINAL v7.0
-// MAIN — FULL RTX ALWAYS — VALIDATION LAYERS FORCE-DISABLED — PINK PHOTONS ETERNAL
-// =============================================================================
 
 #include "engine/SDL3/SDL3_window.hpp"
 #include "engine/GLOBAL/StoneKey.hpp"
@@ -51,6 +42,7 @@ namespace SDL3Window {
 void create(const char* title, int width, int height, Uint32 flags)
 {
     flags |= SDL_WINDOW_HIGH_PIXEL_DENSITY;
+    if (Options::Performance::ENABLE_IMGUI) flags |= SDL_WINDOW_RESIZABLE;
 
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) == 0) {
         LOG_FATAL_CAT("SDL3", "SDL_Init failed: {}", SDL_GetError());
