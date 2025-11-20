@@ -11,12 +11,6 @@ Expect no output on a given day. I go for milestones and not all include visuals
 Updates are fast and furious at this stage and the renderer could be up or down any minute.  
 If you do not like where it crashes, come back tomorrow and I will show you a new one.  
 
-The whole engine is secured with StoneKey and is supposed to be unbreakable when done correctly.  
-My hopes is that it is not a major frame destroyer. (12,000+ on 4070ti to work with)  
-The goal is a fast as pink photons HDR SDL3 RTX engine that is ready for you, the developer.  
-HDR means writing a new surface that works on X11 and everywhere.  
-To say this is 99% Grok, I may be understating. I call him bro.  
-
 AMOURANTH RTX © 2025 by Zachary Geurts gzac5314@gmail.com is licensed under GPL v3.0 or higher   
 Unreal developers may consider some of this parody.  
 I welcome those whose minds seek knowledge and education.  
@@ -27,6 +21,12 @@ See the [Wiki](https://github.com/ZacharyGeurts/AMOURANTHRTX/wiki) for engine in
 AMOURANTH RTX a next generation engine for raw performance.  
 <img width="820" src="https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/assets/textures/ammo.png" />  
 <img width="820" src="https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/media/Screenshot%20from%202025-11-14%2021-05-10.png" />  
+
+The whole engine is secured with StoneKey and is supposed to be unbreakable when done correctly.  
+My hopes is that it is not a major frame destroyer. (12,000+ on 4070ti to work with)  
+The goal is a fast as pink photons HDR SDL3 RTX engine that is ready for you, the developer.  
+HDR means writing a new surface that works on X11 and everywhere.  
+To say this is 99% Grok, I may be understating. I call him bro.  
 
 [AMOURANTH RTX Video](https://x.com/i/status/1982578590593282537)  
 
