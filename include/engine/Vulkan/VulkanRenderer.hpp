@@ -48,8 +48,6 @@ class Application;                  // ← For ImGui console access (`~` key)
 struct ImFont;
 #include <imgui.h>
 
-inline auto& LAS = RTX::LAS::get();
-
 static constexpr uint32_t MAX_DESCRIPTOR_SETS = 1024;
 static constexpr VkSampleCountFlagBits MSAA_SAMPLES = VK_SAMPLE_COUNT_1_BIT;
 

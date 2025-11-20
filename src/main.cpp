@@ -6,8 +6,8 @@
 //    https://www.gnu.org/licenses/gpl-3.0.html
 // 2. Commercial licensing: gzac5314@gmail.com
 //
-// TRUE CONSTEXPR STONEKEY v∞ — NOVEMBER 19, 2025 — APOCALYPSE FINAL v1.5
-// MAIN — SWAPCHAIN FORGED AT DAWN — PINK PHOTONS ETERNAL — VALHALLA UNBREACHABLE
+// TRUE CONSTEXPR STONEKEY v∞ — NOVEMBER 20, 2025 — APOCALYPSE FINAL v2.0
+// MAIN — FIRST LIGHT REBORN — LAS v2.0 VIA VulkanAccel — PINK PHOTONS ETERNAL
 // =============================================================================
 
 #include "engine/GLOBAL/StoneKey.hpp"
@@ -18,6 +18,7 @@
 #include "engine/GLOBAL/SwapchainManager.hpp"
 #include "engine/GLOBAL/Splash.hpp"
 #include "engine/GLOBAL/exceptions.hpp"
+#include "engine/GLOBAL/LAS.hpp"                 // ← NEW LAS v2.0
 
 #include "engine/SDL3/SDL3_window.hpp"
 #include "engine/SDL3/SDL3_vulkan.hpp"
@@ -25,6 +26,7 @@
 #include "engine/SDL3/SDL3_audio.hpp"
 
 #include "engine/Vulkan/VulkanRenderer.hpp"
+#include "engine/Vulkan/VulkanAccel.hpp"
 #include "engine/Vulkan/VulkanCore.hpp"
 #include "engine/GLOBAL/PipelineManager.hpp"
 
@@ -47,7 +49,7 @@ using namespace Logging::Color;
 #define IMG_GetError() SDL_GetError()
 
 // =============================================================================
-// BASTION GLOBALS — PUBLIC DUE TO NO FEAR — DECLARED UP FRONT
+// BASTION GLOBALS — PUBLIC DUE TO NO FEAR
 // =============================================================================
 static SDL_Surface* g_base_icon = nullptr;
 static SDL_Surface* g_hdpi_icon = nullptr;
@@ -66,24 +68,18 @@ std::unique_ptr<VulkanRenderer> g_renderer = nullptr;
 static RTX::PipelineManager* g_pipeline_manager = nullptr;
 
 extern std::unique_ptr<MeshLoader::Mesh> g_mesh;
-std::unique_ptr<MeshLoader::Mesh> g_mesh = nullptr;  // ← definition
+std::unique_ptr<MeshLoader::Mesh> g_mesh = nullptr;  // ← global GPU-resident mesh
 
 inline void bulkhead(const std::string& title) {
     LOG_INFO_CAT("MAIN", "════════════════════════════════ {} ════════════════════════════════", title);
 }
 
 // =============================================================================
-// PRESENT MODE DETECTION — THE ONE TRUE FUNCTION
+// PRESENT MODE DETECTION — UNCHANGED AND PERFECT
 // =============================================================================
 static void detectBestPresentMode(VkPhysicalDevice phys, VkSurfaceKHR surface) {
     LOG_INFO_CAT("MAIN", "Detecting optimal present mode...");
-
-    VkPresentModeKHR chosen = SwapchainManager::selectBestPresentMode(
-        phys,
-        surface,
-        g_swapchain_config.desiredMode
-    );
-
+    VkPresentModeKHR chosen = SwapchainManager::selectBestPresentMode(phys, surface, g_swapchain_config.desiredMode);
     LOG_SUCCESS_CAT("MAIN", "Present mode selected: {} — LOW LATENCY NO TEARING",
         chosen == VK_PRESENT_MODE_IMMEDIATE_KHR ? "IMMEDIATE" :
         chosen == VK_PRESENT_MODE_MAILBOX_KHR   ? "MAILBOX" :
@@ -91,7 +87,7 @@ static void detectBestPresentMode(VkPhysicalDevice phys, VkSurfaceKHR surface) {
 }
 
 // =============================================================================
-// PHASES — APOCALYPSE FINAL v1.5 — ORDER RESTORED — FIRST LIGHT ACHIEVED
+// PHASES — APOCALYPSE FINAL v2.0 — ORDER RESTORED — FIRST LIGHT ETERNAL
 // =============================================================================
 static void phase0_cliAndStonekey(int argc, char* argv[]) {
     bulkhead("PHASE 0: CLI + STONEKEY v∞");
@@ -116,7 +112,7 @@ static void phase0_5_iconPreload() {
 }
 
 static void prePhase1_earlySdlInit() {
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) == 0) {  // Fixed return check
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) == 0) {  // Fixed: SDL_Init returns 0 on success
         throw std::runtime_error(std::format("SDL_Init failed: {}", SDL_GetError()));
     }
 }
@@ -158,7 +154,7 @@ static void phase2_mainWindowAndVulkan(SDL_Window*& window)
     RTX::pickPhysicalDevice();
     RTX::createLogicalDevice();
     RTX::initContext(instance, window, WIDTH, HEIGHT);
-    RTX::loadRayTracingExtensions();
+    RTX::loadRayTracingExtensions();  // ← ensures core 1.4+ RT functions available
 
     SwapchainManager::init(window, WIDTH, HEIGHT);
     detectBestPresentMode(RTX::g_ctx().physicalDevice(), RTX::g_ctx().surface());
@@ -171,47 +167,62 @@ static void phase2_mainWindowAndVulkan(SDL_Window*& window)
 }
 
 // =============================================================================
-// PHASE 3: RENDERER + APP FORGE + LOAD MAIN SCENE FOR LAS
+// PHASE 3: RENDERER + APP + LAS v2.0 SCENE BUILD — FINAL ETERNAL FORM
+// NOVEMBER 20, 2025 — STONEKEY v∞ — PINK PHOTONS ASCENDED
 // =============================================================================
 static void phase3_appAndRendererConstruction(SDL_Window* window) {
-    bulkhead("PHASE 3: RENDERER + APP FORGE + LAS SCENE LOAD");
+    bulkhead("PHASE 3: RENDERER + APP + LAS v2.0 SCENE BUILD");
 
     createGlobalRTX(3840, 2160);
 
     g_pipeline_manager = new RTX::PipelineManager(RTX::g_ctx().device(), RTX::g_ctx().physicalDevice());
-
     g_renderer = std::make_unique<VulkanRenderer>(3840, 2160, window, !Options::Window::VSYNC);
-
     g_app = std::make_unique<Application>("AMOURANTH RTX — VALHALLA v80 TURBO", 3840, 2160);
     g_app->setRenderer(std::move(g_renderer));
 
-    // ─────────────────────────────────────────────────────────────────────
-    // LAS SCENE LOAD — g_mesh IS NOW FULLY GPU-RESIDENT AND READY
-    // ─────────────────────────────────────────────────────────────────────
     LOG_INFO_CAT("MAIN", "Loading primary LAS scene: assets/models/scene.obj");
     g_mesh = MeshLoader::loadOBJ("assets/models/scene.obj");
 
-    LOG_SUCCESS_CAT("MAIN", "g_mesh ARMED → {} vertices, {} indices — LAS ONLINE",
-        g_mesh->vertices.size(), g_mesh->indices.size());
+    LOG_SUCCESS_CAT("MAIN", "g_mesh ARMED → {} vertices, {} indices",
+                    g_mesh->vertices.size(), g_mesh->indices.size());
 
-    LOG_SUCCESS_CAT("MAIN", "Renderer + App + g_mesh forged — PINK PHOTONS ETERNAL — LAS READY");
+    // ── BLAS BUILD (uses new VkCommandPool API) ─────────────────────────────────
+    las().buildBLAS(
+        RTX::g_ctx().commandPool(),
+        g_mesh->vertexBuffer,
+        g_mesh->indexBuffer,
+        static_cast<uint32_t>(g_mesh->vertices.size()),
+        static_cast<uint32_t>(g_mesh->indices.size()),
+        VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR
+    );
+
+    // ── TLAS BUILD (single instance scene) ─────────────────────────────────────
+    std::vector<std::pair<VkAccelerationStructureKHR, glm::mat4>> instances = {
+        { las().getBLAS(), glm::mat4(1.0f) }
+    };
+
+    las().buildTLAS(RTX::g_ctx().commandPool(), instances);
+
+    LOG_SUCCESS_CAT("MAIN", 
+        "LAS v2.0 FULLY ASCENDED — BLAS 0x{:x} | TLAS 0x{:x} — GENERATION {} — FIRST LIGHT ETERNAL",
+        (uint64_t)las().getBLAS(),
+        (uint64_t)las().getTLAS(),
+        las().getGeneration()
+    );
 }
 
 // =============================================================================
-// PHASE 4: RENDER LOOP
+// PHASE 4 & 5 — UNCHANGED AND PERFECT
 // =============================================================================
 static void phase4_renderLoop() {
     bulkhead("PHASE 4: RENDER LOOP");
     g_app->run();
 }
 
-// =============================================================================
-// PHASE 5: SHUTDOWN — CLEAN AND ETERNAL
-// =============================================================================
 static void phase5_shutdown() {
     bulkhead("PHASE 5: SHUTDOWN");
 
-    g_mesh.reset();  // ← clear LAS mesh
+    g_mesh.reset();
     g_app.reset();
     g_renderer.reset();
     if (g_pipeline_manager) { delete g_pipeline_manager; g_pipeline_manager = nullptr; }
@@ -222,14 +233,14 @@ static void phase5_shutdown() {
     if (g_hdpi_icon) { SDL_DestroySurface(g_hdpi_icon); g_hdpi_icon = nullptr; }
     SDL_Quit();
 
-    LOG_SUCCESS_CAT("MAIN", "EMPIRE ETERNAL — PINK PHOTONS UNDYING — LAS MESH RELEASED");
+    LOG_SUCCESS_CAT("MAIN", "EMPIRE ETERNAL — PINK PHOTONS UNDYING — LAS v2.0 RELEASED");
 }
 
 // =============================================================================
-// MAIN — APOCALYPSE FINAL v1.5 — FIRST LIGHT + LAS SCENE LOADED
+// MAIN — APOCALYPSE FINAL v2.0 — LAS v2.0 + VulkanAccel — FIRST LIGHT ETERNAL
 // =============================================================================
 int main(int argc, char* argv[]) {
-    LOG_ATTEMPT_CAT("MAIN", "=== AMOURANTH RTX — VALHALLA v80 TURBO — APOCALYPSE FINAL v1.5 ===");
+    LOG_ATTEMPT_CAT("MAIN", "=== AMOURANTH RTX — VALHALLA v80 TURBO — APOCALYPSE FINAL v2.0 ===");
 
     SDL_Window* window = nullptr;
 
@@ -239,7 +250,7 @@ int main(int argc, char* argv[]) {
         prePhase1_earlySdlInit();
         phase1_splash();
         phase2_mainWindowAndVulkan(window);
-        phase3_appAndRendererConstruction(window);    // ← NOW LOADS scene.obj into g_mesh
+        phase3_appAndRendererConstruction(window);    // ← NOW AUTO-BUILDS LAS v2.0
         phase4_renderLoop();
         phase5_shutdown();
     }
@@ -254,6 +265,6 @@ int main(int argc, char* argv[]) {
         return -1;
     }
 
-    LOG_SUCCESS_CAT("MAIN", "=== EXIT CLEAN — EMPIRE ETERNAL — LAS SCENE LOADED ===");
+    LOG_SUCCESS_CAT("MAIN", "=== EXIT CLEAN — EMPIRE ETERNAL — LAS v2.0 ASCENDED ===");
     return 0;
 }

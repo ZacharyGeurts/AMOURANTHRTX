@@ -1359,7 +1359,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     updateUniformBuffer(frameIdx, camera, getJitter());
     updateTonemapUniform(frameIdx);
 
-    pipelineManager_.updateRTDescriptorSet(frameIdx, {.tlas = RTX::LAS::get().getTLAS()});  // Use PipelineManager's update
+    pipelineManager_.updateRTDescriptorSet(frameIdx, {.tlas = LAS::get().getTLAS()});  // Use PipelineManager's update
     if (Options::RTX::ENABLE_ADAPTIVE_SAMPLING) updateNexusDescriptors();
 
     recordRayTracingCommandBuffer(cmd);
@@ -1563,7 +1563,7 @@ void VulkanRenderer::updateNexusDescriptors() noexcept {
 void VulkanRenderer::updateRTXDescriptors(uint32_t frame) noexcept
 {
     RTX::RTDescriptorUpdate updateInfo = {};  // Zero-init all
-    updateInfo.tlas = RTX::LAS::get().getTLAS();
+    updateInfo.tlas = LAS::get().getTLAS();
 
     // FIXED: Use raw handles from Handle<T> only if valid
     if (!rtOutputViews_.empty() && rtOutputViews_[frame % rtOutputViews_.size()].valid()) {
@@ -1940,7 +1940,7 @@ void VulkanRenderer::setRenderMode(int mode) noexcept {
 void VulkanRenderer::drawLoadingOverlay() noexcept
 {
     // Skip overlay when everything is perfect — invisible like a ghost
-    if (RTX::LAS::get().isValid() && 
+    if (LAS::get().isValid() && 
         !firstSwapchainAcquire_ && 
         !resetAccumulation_) {
         return;
@@ -1985,7 +1985,7 @@ void VulkanRenderer::drawLoadingOverlay() noexcept
         const char* status = "";
         const char* subtitle = "";
 
-        if (!RTX::LAS::get().isValid()) {
+        if (!LAS::get().isValid()) {
             status = "rebuilding acceleration structure";
             subtitle = "please wait, the photons are coming home";
         }
@@ -2402,7 +2402,7 @@ void VulkanRenderer::onWindowResize(uint32_t w, uint32_t h) noexcept
     destroyDenoiserImage();
     destroyNexusScoreImage();
 
-    RTX::LAS::get().invalidate();
+    LAS::get().invalidate();
 
     if (tonemapDescriptorPool_.valid() && *tonemapDescriptorPool_) {
         vkFreeDescriptorSets(g_device(), *tonemapDescriptorPool_,

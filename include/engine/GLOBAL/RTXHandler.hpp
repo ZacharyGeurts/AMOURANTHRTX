@@ -82,6 +82,57 @@ constexpr uint64_t operator"" _GB(unsigned long long v) noexcept { return v << 3
 constexpr uint64_t operator"" _TB(unsigned long long v) noexcept { return v << 40; }
 
 // =============================================================================
+// OFFICIAL RTX BUFFER MACROS — THE ONE TRUE SOURCE — USED EMPIRE-WIDE
+// LOGGING + NULL SAFETY + STONEKEY APPROVED — PINK PHOTONS ETERNAL
+// =============================================================================
+
+#define BUFFER(handle) uint64_t handle = 0ULL
+
+#define BUFFER_CREATE(handle, size, usage, props, tag) \
+    do { \
+        LOG_INFO_CAT("RTX", "BUFFER_CREATE: {} | Size: {} bytes | Tag: {}", #handle, (size), (tag)); \
+        (handle) = RTX::UltraLowLevelBufferTracker::get().create((size), (usage), (props), (tag)); \
+    } while (0)
+
+#define RAW_BUFFER(handle) \
+    ((handle) != 0ULL \
+        ? (RTX::UltraLowLevelBufferTracker::get().getData((handle)) \
+            ? RTX::UltraLowLevelBufferTracker::get().getData((handle))->buffer \
+            : VK_NULL_HANDLE) \
+        : VK_NULL_HANDLE)
+
+#define BUFFER_MEMORY(handle) \
+    ((handle) != 0ULL \
+        ? (RTX::UltraLowLevelBufferTracker::get().getData((handle)) \
+            ? RTX::UltraLowLevelBufferTracker::get().getData((handle))->memory \
+            : VK_NULL_HANDLE) \
+        : VK_NULL_HANDLE)
+
+#define BUFFER_MAP(handle, mapped) \
+    do { \
+        if ((handle) != 0ULL) { \
+            mapped = RTX::UltraLowLevelBufferTracker::get().map(handle); \
+        } else { \
+            mapped = nullptr; \
+        } \
+    } while(0)
+
+#define BUFFER_UNMAP(handle) \
+    do { if ((handle) != 0ULL) RTX::UltraLowLevelBufferTracker::get().unmap(handle); } while(0)
+
+#define BUFFER_DESTROY(handle) \
+    do { \
+        if ((handle) != 0ULL) { \
+            LOG_INFO_CAT("RTX", "BUFFER_DESTROY: handle=0x{:x} | Tag: {}", (handle), \
+                         RTX::UltraLowLevelBufferTracker::get().getData(handle) \
+                             ? RTX::UltraLowLevelBufferTracker::get().getData(handle)->tag.c_str() \
+                             : "unknown"); \
+            RTX::UltraLowLevelBufferTracker::get().destroy(handle); \
+            (handle) = 0ULL; \
+        } \
+    } while (0)
+
+// =============================================================================
 // NAMESPACE RTX
 // =============================================================================
 namespace RTX {

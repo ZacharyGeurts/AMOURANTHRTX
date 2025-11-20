@@ -383,70 +383,6 @@ void VulkanRTX::endSingleTimeCommands(VkCommandBuffer cmd, VkQueue queue, VkComm
     LOG_TRACE_CAT("RTX", "endSingleTimeCommands — COMPLETE (resilient fence sync)");
 }
 
-// =============================================================================
-// FINAL FORM: endSingleTimeCommandsAsync — PINK PHOTON EDITION v∞
-// - Truly async when fence provided (caller owns lifetime)
-// - Fully sync + auto-cleanup when fence == VK_NULL_HANDLE (startup path)
-// - NEVER frees command buffer before GPU is done
-// - No leaks, no races, no VUID-00047 — EVER
-// - Used in initBlackFallbackImage(), buildAccelerationStructures(), etc.
-// =============================================================================
-void VulkanRTX::endSingleTimeCommandsAsync(
-    VkCommandBuffer cmd,
-    VkQueue queue,
-    VkCommandPool pool,
-    VkFence fence) noexcept                     // ← NO DEFAULT HERE
-{
-    if (cmd == VK_NULL_HANDLE || queue == VK_NULL_HANDLE || pool == VK_NULL_HANDLE) {
-        LOG_ERROR_CAT("RTX", "endSingleTimeCommandsAsync: invalid handle");
-        return;
-    }
-
-    VK_CHECK(vkEndCommandBuffer(cmd), "Failed to end one-time command buffer");
-
-    VkDevice dev = RTX::g_ctx().device();
-    bool ownsFence = (fence == VK_NULL_HANDLE);
-
-    // If caller didn't provide a fence → create our own transient one
-    if (ownsFence) {
-        VkFenceCreateInfo fenceInfo{ .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
-        VK_CHECK(vkCreateFence(dev, &fenceInfo, nullptr, &fence),
-                 "Failed to create transient fence for one-time submit");
-    } else {
-        VK_CHECK(vkResetFences(dev, 1, &fence), "Failed to reset user fence");
-    }
-
-    VkSubmitInfo submit{
-        .sType              = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-        .commandBufferCount = 1,
-        .pCommandBuffers    = &cmd
-    };
-
-    VK_CHECK(vkQueueSubmit(queue, 1, &submit, fence),
-             "Failed to submit one-time command buffer");
-
-    LOG_TRACE_CAT("RTX", "One-time submit → fence 0x{:x} (owned={})",
-                  reinterpret_cast<uintptr_t>(fence), ownsFence);
-
-    // Only if we created the fence → wait + cleanup immediately
-    if (ownsFence) {
-        const uint64_t timeout_ns = 10'000'000'000ULL;  // 10s max during init
-
-        VkResult waitRes = vkWaitForFences(dev, 1, &fence, VK_TRUE, timeout_ns);
-        if (waitRes != VK_SUCCESS) {
-            LOG_FATAL_CAT("RTX", "One-time fence timeout ({}) — forcing device idle", waitRes);
-            vkDeviceWaitIdle(dev);
-        }
-
-        // NOW 100% safe to free
-        vkFreeCommandBuffers(dev, pool, 1, &cmd);
-        vkDestroyFence(dev, fence, nullptr);
-
-        LOG_TRACE_CAT("RTX", "One-time command auto-cleaned (sync path)");
-    }
-    // else: caller passed a real fence → they are responsible for waiting + freeing cmd + destroying fence
-}
-
 // Helper: Utility for polling polling async fences in a loop (e.g., in render loop)
 // Call this externally where needed, e.g., before next frame submission
 bool VulkanRTX::pollAsyncFence(VkFence fence, uint64_t timeout_ns) noexcept {
@@ -493,7 +429,7 @@ void VulkanRTX::setRayTracingPipeline(VkPipeline p, VkPipelineLayout l) noexcept
 void VulkanRTX::buildAccelerationStructures() {
     LOG_INFO_CAT("RTX", "{}Building acceleration structures — LAS awakening{}", PLASMA_FUCHSIA, RESET);
 
-    // === FORCE STAGING POOL CREATION FIRST (THIS IS THE KEY FIX) ===
+    // === FORCE STAGING POOL CREATION FIRST (CRITICAL FIX) ===
     {
         std::lock_guard<std::mutex> lock(g_stagingMutex);
         if (!g_stagingPool) {
@@ -506,26 +442,19 @@ void VulkanRTX::buildAccelerationStructures() {
             g_stagingBuffer = RAW_BUFFER(g_stagingPool);
             g_stagingMem    = BUFFER_MEMORY(g_stagingPool);
 
-            // FIXED: Null guard for persistent staging mem (prevents vkMapMemory on null — VUID-vkMapMemory-memory-parameter)
             if (g_stagingMem == VK_NULL_HANDLE) {
-                LOG_FATAL_CAT("RTX", "BUFFER_CREATE failed: g_stagingMem null after 1GB alloc (OOM? Invalid type?). Aborting buildAccelerationStructures.");
-                return;  // Early exit — no map on null
-            }
-
-            // FIXED: Null guard before persistent staging map (VUID-vkMapMemory-memory-parameter + segfault fix)
-            if (g_stagingMem == VK_NULL_HANDLE) {
-                LOG_FATAL_CAT("RTX", "Persistent staging map aborted: g_stagingMem null post-recreate (OOM during resize?).");
-                g_mappedBase = nullptr;
+                LOG_FATAL_CAT("RTX", "Failed to create 1GB staging pool — OOM or invalid memory type");
                 return;
             }
+
             VK_CHECK(vkMapMemory(device_, g_stagingMem, 0, VK_WHOLE_SIZE, 0, &g_mappedBase),
                      "Failed to map persistent staging buffer");
-
             g_mappedOffset.store(0);
-            LOG_SUCCESS_CAT("RTX", "1GB persistent staging pool FORCED ONLINE — safe to proceed");
+            LOG_SUCCESS_CAT("RTX", "1GB persistent staging pool FORCED ONLINE");
         }
     }
 
+    // Simple test cube (same as before)
     std::vector<glm::vec3> vertices = {
         {-1,-1,-1}, {1,-1,-1}, {1,1,-1}, {-1,1,-1},
         {-1,-1,1},  {1,-1,1},  {1,1,1},  {-1,1,1}
@@ -550,26 +479,25 @@ void VulkanRTX::buildAccelerationStructures() {
                   VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                   VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "amouranth_index_buffer");
 
-    // === SAFE SYNCHRONOUS UPLOAD ===
+    // === SAFE UPLOAD USING PERSISTENT STAGING ===
     VkCommandBuffer cmd = beginSingleTimeCommands(RTX::g_ctx().commandPool());
 
-    VkDeviceSize vOffset = g_mappedOffset.fetch_add(vertices.size() * sizeof(glm::vec3) + 256);
-    VkDeviceSize iOffset = g_mappedOffset.fetch_add(indices.size()  * sizeof(uint32_t)  + 256);
+    VkDeviceSize vOffset = g_mappedOffset.fetch_add(vertices.size() * sizeof(glm::vec3) + 256, std::memory_order_relaxed);
+    VkDeviceSize iOffset = g_mappedOffset.fetch_add(indices.size()  * sizeof(uint32_t)  + 256, std::memory_order_relaxed);
 
     std::memcpy((char*)g_mappedBase + vOffset, vertices.data(), vertices.size() * sizeof(glm::vec3));
     std::memcpy((char*)g_mappedBase + iOffset, indices.data(),  indices.size()  * sizeof(uint32_t));
 
-    VkBufferCopy vcopy{vOffset, 0, vertices.size() * sizeof(glm::vec3)};
-    VkBufferCopy icopy{iOffset, 0, indices.size()  * sizeof(uint32_t)};
+    VkBufferCopy vcopy{ .srcOffset = vOffset, .dstOffset = 0, .size = vertices.size() * sizeof(glm::vec3) };
+    VkBufferCopy icopy{ .srcOffset = iOffset, .dstOffset = 0, .size = indices.size()  * sizeof(uint32_t) };
 
     vkCmdCopyBuffer(cmd, g_stagingBuffer, RAW_BUFFER(vbuf), 1, &vcopy);
     vkCmdCopyBuffer(cmd, g_stagingBuffer, RAW_BUFFER(ibuf), 1, &icopy);
 
     VkMemoryBarrier barrier{
-        VK_STRUCTURE_TYPE_MEMORY_BARRIER,
-        nullptr,
-        VK_ACCESS_TRANSFER_WRITE_BIT,
-        VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR
+        .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
+        .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+        .dstAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR
     };
     vkCmdPipelineBarrier(cmd,
         VK_PIPELINE_STAGE_TRANSFER_BIT,
@@ -578,25 +506,27 @@ void VulkanRTX::buildAccelerationStructures() {
 
     endSingleTimeCommands(cmd, RTX::g_ctx().graphicsQueue(), RTX::g_ctx().commandPool());
 
-    LOG_SUCCESS_CAT("RTX", "Geometry uploaded safely — proceeding to BLAS/TLAS");
+    LOG_SUCCESS_CAT("RTX", "Geometry uploaded — building BLAS/TLAS via global LAS");
 
-    // === BUILD ACCELERATION STRUCTURES ===
-    RTX::las().buildBLAS(
+    // === BUILD VIA GLOBAL LAS (NEW SYSTEM) ===
+    las().buildBLAS(
         RTX::g_ctx().commandPool(),
-        RTX::g_ctx().graphicsQueue(),
-        vbuf, ibuf,
+        RAW_BUFFER(vbuf),
+        RAW_BUFFER(ibuf),
         static_cast<uint32_t>(vertices.size()),
         static_cast<uint32_t>(indices.size())
     );
 
-    std::array instances = { std::make_pair(RTX::las().getBLAS(), glm::mat4(1.0f)) };
-    RTX::las().buildTLAS(RTX::g_ctx().commandPool(), RTX::g_ctx().graphicsQueue(), instances);
+    std::vector<std::pair<VkAccelerationStructureKHR, glm::mat4>> instances{
+        std::make_pair(las().getBLAS(), glm::mat4(1.0f))
+    };
+    las().buildTLAS(g_ctx().commandPool(), instances);
 
     LOG_SUCCESS_CAT("RTX",
         "{}GLOBAL_LAS ONLINE — BLAS: 0x{:x} | TLAS: 0x{:x} — PINK PHOTONS ETERNAL{}",
         PLASMA_FUCHSIA,
-        (uint64_t)RTX::las().getBLAS(),
-        (uint64_t)RTX::las().getTLAS(),
+        (uint64_t)las().getBLAS(),
+        (uint64_t)las().getTLAS(),
         RESET);
 }
 
@@ -1042,7 +972,7 @@ void VulkanRTX::updateRTXDescriptors(uint32_t frameIdx,
     }
 
     VkDescriptorSet set = descriptorSets_[frameIdx % descriptorSets_.size()];
-    VkAccelerationStructureKHR tlas = RTX::LAS::get().getTLAS();  // FIXED: Use public getTLAS() accessor
+    VkAccelerationStructureKHR tlas = LAS::get().getTLAS();  // FIXED: Use public getTLAS() accessor
 
     // Early return if critical handles missing
     if (!set || !tlas) {

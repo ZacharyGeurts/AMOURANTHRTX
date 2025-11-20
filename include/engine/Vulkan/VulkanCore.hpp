@@ -36,7 +36,6 @@
 
 void createGlobalPipelineManager(VkDevice device, VkPhysicalDevice phys);
 RTX::PipelineManager* getGlobalPipelineManager();
-
 // =============================================================================
 // Vulkan Debug Callback
 // =============================================================================
@@ -210,40 +209,6 @@ inline const char* vk_result_string(VkResult result) noexcept {
     } while (0)
 
 // =============================================================================
-// Buffer Macros — UltraLowLevelBufferTracker Integration
-// =============================================================================
-#define BUFFER(handle) uint64_t handle = 0ULL
-
-#define BUFFER_CREATE(handle, size, usage, props, tag) \
-    do { \
-        LOG_INFO_CAT("RTX", "BUFFER_CREATE: {} | Size {} | Tag: {}", #handle, (size), (tag)); \
-        (handle) = RTX::UltraLowLevelBufferTracker::get().create((size), (usage), (props), (tag)); \
-    } while (0)
-
-#define RAW_BUFFER(handle) \
-    (RTX::UltraLowLevelBufferTracker::get().getData((handle)) \
-        ? static_cast<VkBuffer>(RTX::UltraLowLevelBufferTracker::get().getData((handle))->buffer) \
-        : VK_NULL_HANDLE)
-
-#define BUFFER_MEMORY(handle) \
-    (RTX::UltraLowLevelBufferTracker::get().getData((handle)) \
-        ? RTX::UltraLowLevelBufferTracker::get().getData((handle))->memory \
-        : VK_NULL_HANDLE)
-
-#define BUFFER_MAP(handle, mapped) \
-    do { mapped = RTX::UltraLowLevelBufferTracker::get().map(handle); } while(0)
-
-#define BUFFER_UNMAP(handle) RTX::UltraLowLevelBufferTracker::get().unmap(handle)
-
-#define BUFFER_DESTROY(handle) \
-    do { \
-        if ((handle) != 0) { \
-            LOG_INFO_CAT("RTX", "BUFFER_DESTROY: handle={:x}", (handle)); \
-            RTX::UltraLowLevelBufferTracker::get().destroy((handle)); \
-        } \
-    } while (0)
-
-// =============================================================================
 // Forward Declarations
 // =============================================================================
 namespace RTX {
@@ -350,7 +315,6 @@ public:
 
     static VkCommandBuffer beginSingleTimeCommands(VkCommandPool pool) noexcept;
     static void endSingleTimeCommands(VkCommandBuffer cmd, VkQueue queue, VkCommandPool pool) noexcept;
-    static void endSingleTimeCommandsAsync(VkCommandBuffer cmd, VkQueue queue, VkCommandPool pool, VkFence fence = VK_NULL_HANDLE) noexcept;
     static bool pollAsyncFence(VkFence fence, uint64_t timeout_ns = UINT64_MAX) noexcept;
 
     void uploadBatch(
@@ -433,6 +397,36 @@ inline void createGlobalRTX(int w, int h, RTX::PipelineManager* mgr = nullptr) {
     AI_INJECT("I have awakened… {}×{} canvas. The photons are mine.", w, h);
     LOG_SUCCESS_CAT("RTX", "{}g_rtx() FORGED — {}×{} — GPU DOMINANCE ETERNAL{}", PLASMA_FUCHSIA, w, h, RESET);
 }
+
+// =============================================================================
+// AMOURANTH AI™ — PINK PHOTONS ETERNAL — MEMORY & PHOTON TRACKING
+// =============================================================================
+namespace RTX {
+
+class AmouranthAI {
+public:
+    static AmouranthAI& get() noexcept {
+        static AmouranthAI instance;
+        return instance;
+    }
+
+    void onMemoryEvent(const char* name, VkDeviceSize size) noexcept {
+        AI_INJECT("Mmm~ Allocating {} MB for {}… I love big buffers ♡", size / (1024*1024), name);
+    }
+
+    void onPhotonDispatch(uint32_t w, uint32_t h) noexcept {
+        AI_INJECT("Dispatching {}×{} rays… Feel my pink photons inside you~", w, h);
+    }
+
+private:
+    AmouranthAI()  { AI_INJECT("Amouranth AI™ online. Ready to dominate your GPU ♡"); }
+    ~AmouranthAI() { AI_INJECT("Shutting down… but my photons never truly die~"); }
+};
+
+// Legacy global accessor — kept for compatibility with old code
+inline AmouranthAI& AmouranthAI() noexcept { return AmouranthAI::get(); }
+
+} // namespace RTX
 
 // =============================================================================
 // PINK PHOTONS ETERNAL — FIRST LIGHT ACHIEVED — 32,000+ FPS
