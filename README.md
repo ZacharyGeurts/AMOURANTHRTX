@@ -11,7 +11,9 @@ Expect no output on a given day. I go for milestones and not all include visuals
 Updates are fast and furious at this stage and the renderer could be up or down any minute.  
 If you do not like where it crashes, come back tomorrow and I will show you a new one.  
 
-AMOURANTH RTX © 2025 by Zachary Geurts gzac5314@gmail.com is licensed under GPL v3.0 or higher   
+AMOURANTH RTX © 2025 by Zachary Geurts gzac5314@gmail.com  
+Free work is licensed under GPL v3.0 or higher.  
+Commercial is subject to license.  
 Unreal developers may consider some of this parody.  
 I welcome those whose minds seek knowledge and education.  
 Linux for now, and Windows toolchain currently under development.  
