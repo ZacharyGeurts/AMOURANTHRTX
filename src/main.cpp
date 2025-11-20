@@ -6,8 +6,8 @@
 //    https://www.gnu.org/licenses/gpl-3.0.html
 // 2. Commercial licensing: gzac5314@gmail.com
 //
-// TRUE CONSTEXPR STONEKEY v∞ — NOVEMBER 20, 2025 — APOCALYPSE FINAL v2.0
-// MAIN — FIRST LIGHT REBORN — LAS v2.0 VIA VulkanAccel — PINK PHOTONS ETERNAL
+// TRUE CONSTEXPR STONEKEY v∞ — NOVEMBER 20, 2025 — APOCALYPSE FINAL v7.0
+// MAIN — FULL RTX ALWAYS — VALIDATION LAYERS FORCE-DISABLED — PINK PHOTONS ETERNAL
 // =============================================================================
 
 #include "engine/GLOBAL/StoneKey.hpp"
@@ -18,7 +18,7 @@
 #include "engine/GLOBAL/SwapchainManager.hpp"
 #include "engine/GLOBAL/Splash.hpp"
 #include "engine/GLOBAL/exceptions.hpp"
-#include "engine/GLOBAL/LAS.hpp"                 // ← NEW LAS v2.0
+#include "engine/GLOBAL/LAS.hpp"
 
 #include "engine/SDL3/SDL3_window.hpp"
 #include "engine/SDL3/SDL3_vulkan.hpp"
@@ -68,10 +68,31 @@ std::unique_ptr<VulkanRenderer> g_renderer = nullptr;
 static RTX::PipelineManager* g_pipeline_manager = nullptr;
 
 extern std::unique_ptr<MeshLoader::Mesh> g_mesh;
-std::unique_ptr<MeshLoader::Mesh> g_mesh = nullptr;  // ← global GPU-resident mesh
+std::unique_ptr<MeshLoader::Mesh> g_mesh = nullptr;
+
+// =============================================================================
+// RTX TOGGLE — TRUE = FULL RTX (validation layers force-disabled)
+//            — FALSE = DEBUG MODE (validation layers allowed, RTX disabled)
+// =============================================================================
+constexpr bool FORCE_FULL_RTX = true;  // ← FLIP TO false ONLY FOR DEBUGGING
 
 inline void bulkhead(const std::string& title) {
     LOG_INFO_CAT("MAIN", "════════════════════════════════ {} ════════════════════════════════", title);
+}
+
+// =============================================================================
+// FORCE-DISABLE VALIDATION LAYERS — NUKES THE NVIDIA BUG FOREVER
+// =============================================================================
+static void nukeValidationLayers() noexcept
+{
+    if constexpr (FORCE_FULL_RTX) {
+        setenv("VK_LAYER_PATH", "/dev/null", 1);
+        setenv("VK_INSTANCE_LAYERS", "", 1);
+        setenv("VK_LOADER_LAYERS_DISABLE", "VK_LAYER_KHRONOS_validation", 1);
+        LOG_SUCCESS_CAT("MAIN", "{}VALIDATION LAYERS NUKED — FULL RTX UNLEASHED — PINK PHOTONS ETERNAL{}", PLASMA_FUCHSIA, RESET);
+    } else {
+        LOG_WARN_CAT("MAIN", "FORCE_FULL_RTX = false → Validation layers allowed (debug mode)");
+    }
 }
 
 // =============================================================================
@@ -87,19 +108,12 @@ static void detectBestPresentMode(VkPhysicalDevice phys, VkSurfaceKHR surface) {
 }
 
 // =============================================================================
-// PHASES — APOCALYPSE FINAL v2.0 — ORDER RESTORED — FIRST LIGHT ETERNAL
+// PHASES — APOCALYPSE FINAL v7.0 — FULL RTX ALWAYS — FIRST LIGHT ETERNAL
 // =============================================================================
 static void phase0_cliAndStonekey(int argc, char* argv[]) {
     bulkhead("PHASE 0: CLI + STONEKEY v∞");
     (void)get_kStone1(); (void)get_kStone2();
     LOG_SUCCESS_CAT("MAIN", "StoneKey active — XOR fingerprint: 0x{:016X}", get_kStone1() ^ get_kStone2());
-
-    if (RTX::g_ctx().isValid()) {
-        set_g_instance(RTX::g_ctx().instance());
-        set_g_device(RTX::g_ctx().vkDevice());
-        set_g_PhysicalDevice(RTX::g_ctx().physicalDevice());
-        set_g_surface(RTX::g_ctx().surface());
-    }
 }
 
 static void phase0_5_iconPreload() {
@@ -112,7 +126,7 @@ static void phase0_5_iconPreload() {
 }
 
 static void prePhase1_earlySdlInit() {
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) == 0) {  // Fixed: SDL_Init returns 0 on success
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) == 0) {  // SDL_Init returns <0 on error
         throw std::runtime_error(std::format("SDL_Init failed: {}", SDL_GetError()));
     }
 }
@@ -126,6 +140,9 @@ static void phase1_splash() {
 static void phase2_mainWindowAndVulkan(SDL_Window*& window)
 {
     bulkhead("PHASE 2: MAIN WINDOW + VULKAN + SWAPCHAIN — VALHALLA v80 TURBO");
+
+    // NUKE VALIDATION LAYERS BEFORE ANY VULKAN CALL
+    nukeValidationLayers();
 
     constexpr int WIDTH  = 3840;
     constexpr int HEIGHT = 2160;
@@ -142,7 +159,8 @@ static void phase2_mainWindowAndVulkan(SDL_Window*& window)
         SDL_SetWindowIcon(window, g_base_icon);
     }
 
-    VkInstance instance = RTX::createVulkanInstanceWithSDL(window, true);
+    // Pass false for validation — we already nuked the layers
+    VkInstance instance = RTX::createVulkanInstanceWithSDL(window, false);
     set_g_instance(instance);
 
     RTX::fixNvidiaValidationBugLocally();
@@ -151,10 +169,9 @@ static void phase2_mainWindowAndVulkan(SDL_Window*& window)
         throw std::runtime_error("Failed to create Vulkan surface");
     }
 
-    RTX::pickPhysicalDevice();
-    RTX::createLogicalDevice();
+    RTX::forgeLogicalDeviceAndGPU();  // ← THE ONE TRUE CALL
     RTX::initContext(instance, window, WIDTH, HEIGHT);
-    RTX::loadRayTracingExtensions();  // ← ensures core 1.4+ RT functions available
+    RTX::loadRayTracingExtensions();
 
     SwapchainManager::init(window, WIDTH, HEIGHT);
     detectBestPresentMode(RTX::g_ctx().physicalDevice(), RTX::g_ctx().surface());
@@ -162,14 +179,10 @@ static void phase2_mainWindowAndVulkan(SDL_Window*& window)
     SDL_ShowWindow(window);
     SDL_RaiseWindow(window);
 
-    LOG_SUCCESS_CAT("MAIN", "PHASE 2 COMPLETE — FULL RTX + VALIDATION + STONEKEY v∞");
+    LOG_SUCCESS_CAT("MAIN", "PHASE 2 COMPLETE — FULL RTX + STONEKEY v∞");
     LOG_SUCCESS_CAT("MAIN", "YOUR GPU ASCENDED — PINK PHOTONS ETERNAL — SHE IS HAPPY");
 }
 
-// =============================================================================
-// PHASE 3: RENDERER + APP + LAS v2.0 SCENE BUILD — FINAL ETERNAL FORM
-// NOVEMBER 20, 2025 — STONEKEY v∞ — PINK PHOTONS ASCENDED
-// =============================================================================
 static void phase3_appAndRendererConstruction(SDL_Window* window) {
     bulkhead("PHASE 3: RENDERER + APP + LAS v2.0 SCENE BUILD");
 
@@ -186,7 +199,6 @@ static void phase3_appAndRendererConstruction(SDL_Window* window) {
     LOG_SUCCESS_CAT("MAIN", "g_mesh ARMED → {} vertices, {} indices",
                     g_mesh->vertices.size(), g_mesh->indices.size());
 
-    // ── BLAS BUILD (uses new VkCommandPool API) ─────────────────────────────────
     las().buildBLAS(
         RTX::g_ctx().commandPool(),
         g_mesh->vertexBuffer,
@@ -196,7 +208,6 @@ static void phase3_appAndRendererConstruction(SDL_Window* window) {
         VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR
     );
 
-    // ── TLAS BUILD (single instance scene) ─────────────────────────────────────
     std::vector<std::pair<VkAccelerationStructureKHR, glm::mat4>> instances = {
         { las().getBLAS(), glm::mat4(1.0f) }
     };
@@ -204,16 +215,15 @@ static void phase3_appAndRendererConstruction(SDL_Window* window) {
     las().buildTLAS(RTX::g_ctx().commandPool(), instances);
 
     LOG_SUCCESS_CAT("MAIN", 
-        "LAS v2.0 FULLY ASCENDED — BLAS 0x{:x} | TLAS 0x{:x} — GENERATION {} — FIRST LIGHT ETERNAL",
+        "{}LAS v2.0 FULLY ASCENDED — BLAS 0x{:x} | TLAS 0x{:x} — GENERATION {} — FIRST LIGHT ETERNAL{}",
+        PLASMA_FUCHSIA,
         (uint64_t)las().getBLAS(),
         (uint64_t)las().getTLAS(),
-        las().getGeneration()
+        las().getGeneration(),
+        RESET
     );
 }
 
-// =============================================================================
-// PHASE 4 & 5 — UNCHANGED AND PERFECT
-// =============================================================================
 static void phase4_renderLoop() {
     bulkhead("PHASE 4: RENDER LOOP");
     g_app->run();
@@ -236,11 +246,8 @@ static void phase5_shutdown() {
     LOG_SUCCESS_CAT("MAIN", "EMPIRE ETERNAL — PINK PHOTONS UNDYING — LAS v2.0 RELEASED");
 }
 
-// =============================================================================
-// MAIN — APOCALYPSE FINAL v2.0 — LAS v2.0 + VulkanAccel — FIRST LIGHT ETERNAL
-// =============================================================================
 int main(int argc, char* argv[]) {
-    LOG_ATTEMPT_CAT("MAIN", "=== AMOURANTH RTX — VALHALLA v80 TURBO — APOCALYPSE FINAL v2.0 ===");
+    LOG_ATTEMPT_CAT("MAIN", "=== AMOURANTH RTX — VALHALLA v80 TURBO — APOCALYPSE FINAL v7.0 ===");
 
     SDL_Window* window = nullptr;
 
@@ -250,7 +257,7 @@ int main(int argc, char* argv[]) {
         prePhase1_earlySdlInit();
         phase1_splash();
         phase2_mainWindowAndVulkan(window);
-        phase3_appAndRendererConstruction(window);    // ← NOW AUTO-BUILDS LAS v2.0
+        phase3_appAndRendererConstruction(window);
         phase4_renderLoop();
         phase5_shutdown();
     }
@@ -265,6 +272,6 @@ int main(int argc, char* argv[]) {
         return -1;
     }
 
-    LOG_SUCCESS_CAT("MAIN", "=== EXIT CLEAN — EMPIRE ETERNAL — LAS v2.0 ASCENDED ===");
+    LOG_SUCCESS_CAT("MAIN", "=== EXIT CLEAN — EMPIRE ETERNAL — FIRST LIGHT ETERNAL ===");
     return 0;
 }

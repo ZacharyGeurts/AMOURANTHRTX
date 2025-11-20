@@ -375,10 +375,7 @@ namespace RTX {
         pickPhysicalDevice();
         set_g_PhysicalDevice(ctx.physicalDevice_);
         vkGetPhysicalDeviceProperties(ctx.physicalDevice_, &ctx.physProps_);
-        createLogicalDevice();
         set_g_device(ctx.device_);
-        createCommandPool();
-        loadRayTracingExtensions();
 
         UltraLowLevelBufferTracker::get().init(ctx.device_, ctx.physicalDevice_);
 
