@@ -1,5 +1,14 @@
 // engine/Vulkan/MeshLoader.hpp
 // =============================================================================
+//
+// Dual Licensed:
+// 1. GNU General Public License v3.0 (or later) (GPL v3)
+//    https://www.gnu.org/licenses/gpl-3.0.html
+// 2. Commercial licensing: gzac5314@gmail.com
+//
+// TRUE CONSTEXPR STONEKEY v∞ — NOVEMBER 20, 2025 — APOCALYPSE FINAL v2.0
+// MAIN — FIRST LIGHT REBORN — LAS v2.0 VIA VulkanAccel — PINK PHOTONS ETERNAL
+// =============================================================================
 // AMOURANTH RTX — FINAL FIX — NO NEW FILES — NO BUFFERUTILS — LAS READY
 // SELF-CONTAINED OBJ LOADER + GPU UPLOAD — PINK PHOTONS ETERNAL
 // =============================================================================

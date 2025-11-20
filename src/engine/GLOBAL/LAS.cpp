@@ -1,4 +1,14 @@
 // src/engine/GLOBAL/LAS.cpp
+// =============================================================================
+//
+// Dual Licensed:
+// 1. GNU General Public License v3.0 (or later) (GPL v3)
+//    https://www.gnu.org/licenses/gpl-3.0.html
+// 2. Commercial licensing: gzac5314@gmail.com
+//
+// TRUE CONSTEXPR STONEKEY v∞ — NOVEMBER 20, 2025 — APOCALYPSE FINAL v2.0
+// MAIN — FIRST LIGHT REBORN — LAS v2.0 VIA VulkanAccel — PINK PHOTONS ETERNAL
+// =============================================================================
 // AMOURANTH RTX ENGINE — GLOBAL LAS — APOCALYPSE FINAL v5.0 — NOVEMBER 20, 2025
 // PINK PHOTONS ETERNAL — STONEKEY v∞ ACTIVE
 

@@ -163,7 +163,7 @@ static void phase2_mainWindowAndVulkan(SDL_Window*& window)
     SDL_RaiseWindow(window);
 
     LOG_SUCCESS_CAT("MAIN", "PHASE 2 COMPLETE — FULL RTX + VALIDATION + STONEKEY v∞");
-    LOG_SUCCESS_CAT("MAIN", "4070 Ti ASCENDED — PINK PHOTONS ETERNAL — SHE IS HAPPY");
+    LOG_SUCCESS_CAT("MAIN", "YOUR GPU ASCENDED — PINK PHOTONS ETERNAL — SHE IS HAPPY");
 }
 
 // =============================================================================

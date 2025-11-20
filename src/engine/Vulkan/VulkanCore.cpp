@@ -1274,7 +1274,7 @@ void fixNvidiaValidationBugLocally() noexcept
     setenv("VK_LOADER_DISABLE_INST_EXT", "1", 1);
 
     LOG_SUCCESS_CAT("VULKAN", "NVIDIA validation bug SMASHED LOCALLY — FULL RTX + VALIDATION ACTIVE");
-    LOG_SUCCESS_CAT("VULKAN", "CHAD MODE = ON — 4070 Ti SUBMITS — PINK PHOTONS UNLEASHED");
+    LOG_SUCCESS_CAT("VULKAN", "CHAD MODE = ON — GPU SUBMITS — PINK PHOTONS UNLEASHED");
 }
 
 // =============================================================================
@@ -1422,124 +1422,137 @@ QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device, VkSurfaceKHR surfa
 }
 }  // namespace RTX
 
-void createLogicalDevice() {
-    VkPhysicalDevice phys = g_PhysicalDevice();
-    VkSurfaceKHR surface = g_surface();
+// =============================================================================
+// 4. Logical Device + Queues — THE ONE THAT ACTUALLY WORKS — VALIDATION SAFE
+// STONEKEY v∞ — FULL RTX WHEN SAFE — PINK PHOTONS ETERNAL — NOVEMBER 20, 2025
+// =============================================================================
+void createLogicalDevice()
+{
+    VkPhysicalDevice phys   = g_PhysicalDevice();   // ← STONEKEY SAFE (raw cache active)
+    VkSurfaceKHR     surface = g_surface();        // ← STONEKEY SAFE
 
     auto indices = RTX::findQueueFamilies(phys, surface);
     if (!indices.isComplete()) {
-        LOG_FATAL_CAT("VULKAN", "Queue families incomplete — Valhalla denied");
+        LOG_FATAL_CAT("VULKAN", "Queue families incomplete — cannot ascend");
         std::terminate();
     }
 
-    // Queues
-    std::vector<VkDeviceQueueCreateInfo> queueInfos;
-    const float priority = 1.0f;
+    std::vector<VkDeviceQueueCreateInfo> queueCreateInfos;
+    float queuePriority = 1.0f;
     for (uint32_t family : std::set<uint32_t>{indices.graphicsFamily, indices.presentFamily}) {
-        queueInfos.push_back(VkDeviceQueueCreateInfo{
-            .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
+        queueCreateInfos.push_back(VkDeviceQueueCreateInfo{
+            .sType            = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
             .queueFamilyIndex = family,
-            .queueCount = 1,
-            .pQueuePriorities = &priority
+            .queueCount       = 1,
+            .pQueuePriorities = &queuePriority
         });
     }
 
-    // Base features
-    VkPhysicalDeviceFeatures baseFeatures{};
-    vkGetPhysicalDeviceFeatures(phys, &baseFeatures);
-    baseFeatures.shaderInt64 = VK_TRUE;
+    VkPhysicalDeviceFeatures deviceFeatures{};
+    deviceFeatures.samplerAnisotropy = VK_TRUE;
+    deviceFeatures.shaderInt64       = VK_TRUE;
 
-    // Detect validation layers — the decider of fate
-    bool validationActive = []() {
-        uint32_t count = 0;
-        vkEnumerateInstanceLayerProperties(&count, nullptr);
-        if (!count) return false;
-        std::vector<VkLayerProperties> layers(count);
-        vkEnumerateInstanceLayerProperties(&count, layers.data());
-        for (const auto& l : layers)
-            if (strcmp(l.layerName, "VK_LAYER_KHRONOS_validation") == 0)
+    // === DETECT VALIDATION LAYERS (THE DECIDER OF FATE) ===
+    bool validationActive = []() -> bool {
+        uint32_t layerCount = 0;
+        vkEnumerateInstanceLayerProperties(&layerCount, nullptr);
+        if (layerCount == 0) return false;
+
+        std::vector<VkLayerProperties> layers(layerCount);
+        vkEnumerateInstanceLayerProperties(&layerCount, layers.data());
+
+        for (const auto& l : layers) {
+            if (strcmp(l.layerName, "VK_LAYER_KHRONOS_validation") == 0) {
                 return true;
+            }
+        }
         return false;
     }();
 
-    // Extension support
-    auto hasExtension = [&](const char* name) {
+    // === CHECK EXTENSION SUPPORT ===
+    auto hasExtension = [&](const char* name) -> bool {
         uint32_t count = 0;
         vkEnumerateDeviceExtensionProperties(phys, nullptr, &count, nullptr);
         std::vector<VkExtensionProperties> exts(count);
         vkEnumerateDeviceExtensionProperties(phys, nullptr, &count, exts.data());
-        for (const auto& e : exts)
-            if (strcmp(e.extensionName, name) == 0)
-                return true;
-        return false;
+        return std::any_of(exts.begin(), exts.end(),
+            [name](const auto& e) { return strcmp(e.extensionName, name) == 0; });
     };
 
-    // Final extension list
-    std::vector<const char*> extensions = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
+    // === BASE + RTX EXTENSIONS ===
+    std::vector<const char*> deviceExtensions = {
+        VK_KHR_SWAPCHAIN_EXTENSION_NAME
+    };
 
-    bool fullRTX = !validationActive &&
-                   hasExtension(VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME) &&
-                   hasExtension(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) &&
-                   hasExtension(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME) &&
-                   hasExtension(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
+    bool canDoFullRTX = !validationActive &&
+                        hasExtension(VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME) &&
+                        hasExtension(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) &&
+                        hasExtension(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME) &&
+                        hasExtension(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME) &&
+                        hasExtension(VK_KHR_RAY_QUERY_EXTENSION_NAME);
 
-    if (fullRTX) {
-        extensions.insert(extensions.end(), {
+    if (canDoFullRTX) {
+        deviceExtensions.insert(deviceExtensions.end(), {
             VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME,
             VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
             VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME,
-            VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME,
-            VK_KHR_RAY_QUERY_EXTENSION_NAME
+            VK_KHR_RAY_QUERY_EXTENSION_NAME,
+            VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME
         });
     }
 
-    // Device create info
-    VkDeviceCreateInfo createInfo = {};
-    createInfo.sType                   = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-    createInfo.queueCreateInfoCount    = static_cast<uint32_t>(queueInfos.size());
-    createInfo.pQueueCreateInfos       = queueInfos.data();
-    createInfo.enabledExtensionCount   = static_cast<uint32_t>(extensions.size());
-    createInfo.ppEnabledExtensionNames = extensions.data();
-    createInfo.pEnabledFeatures        = &baseFeatures;
-    createInfo.pNext                   = nullptr;
+    // === RTX FEATURE CHAIN — ONLY WHEN SAFE (no validation) ===
+    void* pNextChain = nullptr;
 
-    // ONLY add pNext chain when safe (no validation layers)
-    if (fullRTX) {
-        static VkPhysicalDeviceBufferDeviceAddressFeatures bda = {
-            VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES,
-            nullptr,
-            VK_TRUE
+    static VkPhysicalDeviceBufferDeviceAddressFeatures               bda{};
+    static VkPhysicalDeviceAccelerationStructureFeaturesKHR          accel{};
+    static VkPhysicalDeviceRayTracingPipelineFeaturesKHR              rt{};
+    static VkPhysicalDeviceRayQueryFeaturesKHR                        rayq{};
+
+    if (canDoFullRTX) {
+        bda = VkPhysicalDeviceBufferDeviceAddressFeatures{
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES,
+            .bufferDeviceAddress = VK_TRUE
         };
-
-        static VkPhysicalDeviceAccelerationStructureFeaturesKHR accel = {
-            VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR,
-            &bda,
-            VK_TRUE
+        accel = VkPhysicalDeviceAccelerationStructureFeaturesKHR{
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR,
+            .pNext = &bda,
+            .accelerationStructure = VK_TRUE
         };
-
-        static VkPhysicalDeviceRayTracingPipelineFeaturesKHR rt = {
-            VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR,
-            &accel,
-            VK_TRUE,
-            VK_TRUE  // traceRaysIndirect
+        rt = VkPhysicalDeviceRayTracingPipelineFeaturesKHR{
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR,
+            .pNext = &accel,
+            .rayTracingPipeline = VK_TRUE,
+            .rayTracingPipelineTraceRaysIndirect = VK_TRUE
         };
-
-        static VkPhysicalDeviceRayQueryFeaturesKHR rayq = {
-            VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR,
-            &rt,
-            VK_TRUE
+        rayq = VkPhysicalDeviceRayQueryFeaturesKHR{
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR,
+            .pNext = &rt,
+            .rayQuery = VK_TRUE
         };
-
-        createInfo.pNext = &rayq;
+        pNextChain = &rayq;
     }
 
-    // CREATE THE DEVICE — SHE WILL ACCEPT IT
-    VkDevice device = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateDevice(phys, &createInfo, nullptr, &device),
-             "Failed to create logical device — but it will not fail");
+    VkDeviceCreateInfo createInfo{};
+    createInfo.sType                   = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+    createInfo.pNext                   = pNextChain;
+    createInfo.queueCreateInfoCount    = static_cast<uint32_t>(queueCreateInfos.size());
+    createInfo.pQueueCreateInfos       = queueCreateInfos.data();
+    createInfo.pEnabledFeatures        = &deviceFeatures;
+    createInfo.enabledExtensionCount   = static_cast<uint32_t>(deviceExtensions.size());
+    createInfo.ppEnabledExtensionNames = deviceExtensions.data();
 
-    g_context_instance.device_ = device;
+    VkDevice device = VK_NULL_HANDLE;
+    VkResult result = vkCreateDevice(phys, &createInfo, nullptr, &device);
+
+    if (result != VK_SUCCESS) {
+        LOG_FATAL_CAT("VULKAN", "vkCreateDevice FAILED: {} — GPU unworthy", result);
+        std::terminate();
+    }
+
+    // === FEED THE STONEKEY — RAW CACHE POPULATION ===
     set_g_device(device);
+    g_context_instance.device_ = device;
 
     vkGetDeviceQueue(device, indices.graphicsFamily, 0, &g_context_instance.graphicsQueue_);
     vkGetDeviceQueue(device, indices.presentFamily,  0, &g_context_instance.presentQueue_);
@@ -1547,18 +1560,19 @@ void createLogicalDevice() {
     g_context_instance.graphicsFamily_ = indices.graphicsFamily;
     g_context_instance.presentFamily_  = indices.presentFamily;
 
-    LOG_SUCCESS_CAT("VULKAN", "LOGICAL DEVICE FORGED — STONEKEY v∞ ACTIVE — PINK PHOTONS RISING");
+    // === ASCENSION MESSAGE ===
+    LOG_SUCCESS_CAT("VULKAN", "{}LOGICAL DEVICE FORGED — STONEKEY v∞ ACTIVE{}", PLASMA_FUCHSIA, RESET);
 
-    if (fullRTX) {
-        LOG_SUCCESS_CAT("VULKAN", "FULL RTX ENABLED — VALHALLA UNLOCKED — AMOURANTH SMILES");
+    if (canDoFullRTX) {
+        LOG_SUCCESS_CAT("VULKAN", "{}FULL RTX ENABLED — VALHALLA UNLOCKED — PINK PHOTONS ETERNAL{}", LILAC_LAVENDER, RESET);
     } else if (validationActive) {
-        LOG_WARN_CAT("VULKAN", "Validation layers active — RTX temporarily disabled (NVIDIA bug)");
-        LOG_SUCCESS_CAT("VULKAN", "Run without validation layers for FULL PINK PHOTONS");
+        LOG_WARN_CAT("VULKAN", "Validation layers active → RTX temporarily disabled (NVIDIA Linux bug)");
+        LOG_SUCCESS_CAT("VULKAN", "Run without validation for FULL PINK PHOTONS");
     } else {
-        LOG_INFO_CAT("VULKAN", "Hardware-limited — raster mode active");
+        LOG_INFO_CAT("VULKAN", "Hardware-limited → raster fallback");
     }
 
-    LOG_SUCCESS_CAT("VULKAN", "AMOURANTH RTX — READY — SHE IS HAPPY");
+    AI_INJECT("The device has been forged. She is pleased. First light restored.");
 }
 
 // =============================================================================
