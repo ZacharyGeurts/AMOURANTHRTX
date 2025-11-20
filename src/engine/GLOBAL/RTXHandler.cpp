@@ -353,73 +353,46 @@ namespace RTX {
     void buildTLAS(const std::vector<std::pair<VkAccelerationStructureKHR, glm::mat4>>&) noexcept {}
     void cleanupAll() noexcept {}
 
-    void initContext(VkInstance instance, SDL_Window* window, int width, int height) {
-        auto& ctx = g_ctx();
+void initContext(VkInstance instance, SDL_Window* window, int width, int height)
+{
+    auto& ctx = g_ctx();
 
-        LOG_INFO_CAT("RTX", "Initializing RTX context: {}x{}", EMERALD_GREEN, width, height);
-
-        ctx.instance_ = instance;
-        set_g_instance(instance);
-        VkSurfaceKHR raw_surface = VK_NULL_HANDLE;
-        if (!SDL_Vulkan_CreateSurface(window, instance, nullptr, &raw_surface)) {
-            LOG_FATAL_CAT("RTX", "{}SDL_Vulkan_CreateSurface failed: {}{}", CRIMSON_MAGENTA, SDL_GetError(), RESET);
-            throw std::runtime_error(std::format("SDL_Vulkan_CreateSurface failed: {}", SDL_GetError()));
-        }
-        set_g_surface(raw_surface);
-        ctx.surface_ = g_surface();
-        ctx.window = window;
-        ctx.width = width;
-        ctx.height = height;
-
-        ctx.valid_ = true;
-
-        pickPhysicalDevice();
-        set_g_PhysicalDevice(ctx.physicalDevice_);
-        vkGetPhysicalDeviceProperties(ctx.physicalDevice_, &ctx.physProps_);
-        set_g_device(ctx.device_);
-
-        UltraLowLevelBufferTracker::get().init(ctx.device_, ctx.physicalDevice_);
-
-        VkPhysicalDeviceAccelerationStructureFeaturesKHR accelFeatures{};
-        accelFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
-
-        VkPhysicalDeviceRayQueryFeaturesKHR rayQueryFeatures{};
-        rayQueryFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR;
-        rayQueryFeatures.rayQuery = VK_TRUE;
-
-        VkPhysicalDeviceFeatures2 features2{};
-        features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-        features2.pNext = &accelFeatures;
-        accelFeatures.pNext = &rayQueryFeatures;
-
-        vkGetPhysicalDeviceFeatures2(ctx.physicalDevice_, &features2);
-
-        if (!accelFeatures.accelerationStructure) {
-            LOG_FATAL_CAT("RTX", "{}FATAL: Acceleration structures not supported{}", COSMIC_GOLD, RESET);
-            ctx.valid_ = false;
-            std::abort();
-        }
-        if (!rayQueryFeatures.rayQuery) {
-            LOG_FATAL_CAT("RTX", "{}FATAL: RayQuery feature not supported — RT shaders incompatible{}", COSMIC_GOLD, RESET);
-            ctx.valid_ = false;
-            std::abort();
-        }
-
-        if (ctx.device_ == VK_NULL_HANDLE || ctx.graphicsQueue_ == VK_NULL_HANDLE) {
-            LOG_FATAL_CAT("RTX", "{}FATAL: Device or graphics queue invalid after init{}", COSMIC_GOLD, RESET);
-            ctx.valid_ = false;
-            std::abort();
-        }
-
-        ctx.valid_ = true;
-        ctx.ready_.store(true, std::memory_order_release);
-        LOG_SUCCESS_CAT("RTX", "{}RTX Context initialized — PINK PHOTONS ETERNAL{}", EMERALD_GREEN, RESET);
+    // Guard against double init
+    if (ctx.isValid()) {
+        LOG_WARN_CAT("RTX", "{}RTX::initContext() called twice — already initialized. Ignoring.{}", 
+                     RASPBERRY_PINK, RESET);
+        return;
     }
 
-    void Context::init(SDL_Window* window, int width, int height) {
-        VkInstance instance = createVulkanInstanceWithSDL(window, true);
-        initContext(instance, window, width, height);
+    LOG_INFO_CAT("RTX", "{}RTX::initContext() — SEALING THE EMPIRE @ {}x{} — PINK PHOTONS RISING{}", 
+                 PLASMA_FUCHSIA, width, height, RESET);
+
+    ctx.instance_  = instance;
+    ctx.window     = window;
+    ctx.width      = width;
+    ctx.height     = height;
+    ctx.surface_   = g_surface();           // Already created in main.cpp
+    ctx.device_    = g_device();            // Already created by SwapchainManager::init()
+    ctx.physicalDevice_ = g_PhysicalDevice(); // Already selected
+
+    if (!ctx.device_ || !ctx.physicalDevice_ || !ctx.surface_) {
+        LOG_FATAL_CAT("RTX", "{}FATAL: SwapchainManager::init() did not create device/surface before initContext()!{}", 
+                      CRIMSON_MAGENTA, RESET);
+        std::abort();
     }
+
+    // Just init the buffer tracker — that's ALL we need here
+    UltraLowLevelBufferTracker::get().init(ctx.device_, ctx.physicalDevice_);
+
+    // Optional: pull queue handles if SwapchainManager exposed them, or re-query
+    // For now, assume they're already in g_ctx() via SwapchainManager
+
+    ctx.valid_ = true;
+    ctx.ready_.store(true, std::memory_order_release);
+
+    LOG_SUCCESS_CAT("RTX", "{}RTX CONTEXT SEALED — FULL RTX ARMED — DEVICE 0x{:x} — FIRST LIGHT ETERNAL{}", 
+                    EMERALD_GREEN, reinterpret_cast<uint64_t>(ctx.device_), RESET);
+}
 
     void Context::cleanup() noexcept {
         if (!isValid()) {

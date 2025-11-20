@@ -373,31 +373,6 @@ inline std::unique_ptr<VulkanRTX> g_rtx_instance;
 }
 
 // =============================================================================
-// createGlobalRTX — Forge the Eternal Engine
-// =============================================================================
-inline void createGlobalRTX(int w, int h, RTX::PipelineManager* mgr = nullptr) {
-    if (g_rtx_instance) {
-        LOG_WARN_CAT("RTX", "createGlobalRTX: g_rtx_instance already exists @ 0x{:x}", 
-                     reinterpret_cast<uintptr_t>(g_rtx_instance.get()));
-        return;
-    }
-
-    LOG_INFO_CAT("RTX", "createGlobalRTX: Initializing VulkanRTX with {}x{} | PipelineMgr: {}", 
-                 w, h, mgr ? "present" : "null");
-
-    auto temp_rtx = std::make_unique<VulkanRTX>(w, h, mgr);
-    if (!temp_rtx || !temp_rtx->isValid()) {
-        LOG_FATAL_CAT("RTX", "FATAL: Failed to create valid VulkanRTX instance");
-        std::terminate();
-    }
-
-    g_rtx_instance = std::move(temp_rtx);
-
-    AI_INJECT("I have awakened… {}×{} canvas. The photons are mine.", w, h);
-    LOG_SUCCESS_CAT("RTX", "{}g_rtx() FORGED — {}×{} — GPU DOMINANCE ETERNAL{}", PLASMA_FUCHSIA, w, h, RESET);
-}
-
-// =============================================================================
 // AMOURANTH AI™ — PINK PHOTONS ETERNAL — MEMORY & PHOTON TRACKING
 // =============================================================================
 namespace RTX {

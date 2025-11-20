@@ -53,7 +53,7 @@ void Application::run()
         const float deltaTime = std::chrono::duration<float>(now - lastFrameTime_).count();
         lastFrameTime_ = now;
 
-        // FPS Counter — Sacred
+        // FPS Counter
         if (Options::Performance::ENABLE_FPS_COUNTER) {
             ++frameCount;
             if (std::chrono::duration<float>(now - fpsStart).count() >= 1.0f) {
@@ -63,38 +63,36 @@ void Application::run()
             }
         }
 
-        int currentW = width_;
-        int currentH = height_;
+        int pixelW = width_;
+        int pixelH = height_;
         bool quitRequested = false;
         bool fullscreenRequested = false;
 
-        const bool hadEvents = SDL3Window::pollEvents(currentW, currentH, quitRequested, fullscreenRequested);
+        SDL3Window::pollEvents(pixelW, pixelH, quitRequested, fullscreenRequested);
 
-        // Immediate projection update (for camera, UI, etc.)
-        if (hadEvents && (currentW != width_ || currentH != height_)) {
-            width_  = currentW;
-            height_ = currentH;
-            proj_ = glm::perspective(glm::radians(75.0f), static_cast<float>(width_) / height_, 0.1f, 1000.0f);
-        }
+        // DO NOT UPDATE LOGICAL SIZE FROM PIXEL SIZE — THIS IS THE BUG THAT KILLED THE EMPIRE
+        // pixelW/pixelH = HiDPI scaled, width_/height_ = logical window size
+        // They are NOT the same thing!
 
-        if (quitRequested)        quit_ = true;
-        if (fullscreenRequested)  toggleFullscreen();
+        if (quitRequested)         quit_ = true;
+        if (fullscreenRequested)   toggleFullscreen();
 
-        // DEBOUNCED RESIZE — THE ONE TRUE CLEAN PATH
+        // ONLY UPDATE FROM THE DEBOUNCED RESIZE PATH — THIS IS THE ONE TRUE SOURCE
         if (SDL3Window::g_resizeRequested.load(std::memory_order_acquire)) {
-            const int finalW = SDL3Window::g_resizeWidth.load(std::memory_order_acquire);
-            const int finalH = SDL3Window::g_resizeHeight.load(std::memory_order_acquire);
+            const int newLogicalW = SDL3Window::g_resizeWidth.load(std::memory_order_acquire);
+            const int newLogicalH = SDL3Window::g_resizeHeight.load(std::memory_order_acquire);
             SDL3Window::g_resizeRequested.store(false, std::memory_order_release);
 
-            LOG_SUCCESS_CAT("RESIZE", "{}FINAL DEBOUNCED RESIZE → {}×{} — SWAPCHAIN RECREATION INITIATED{}", 
-                            PLASMA_FUCHSIA, finalW, finalH, RESET);
+            width_  = newLogicalW;
+            height_ = newLogicalH;
 
-            width_  = finalW;
-            height_ = finalH;
-            proj_   = glm::perspective(glm::radians(75.0f), static_cast<float>(finalW) / finalH, 0.1f, 1000.0f);
+            // Safe perspective — height_ guaranteed > 0 here
+            proj_ = glm::perspective(glm::radians(75.0f), 
+                                     static_cast<float>(width_) / static_cast<float>(height_), 
+                                     0.1f, 1000.0f);
 
             if (renderer_) {
-                renderer_->onWindowResize(finalW, finalH);
+                renderer_->onWindowResize(width_, height_);
             }
         }
 

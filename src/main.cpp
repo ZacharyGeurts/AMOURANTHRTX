@@ -168,7 +168,6 @@ static void phase2_mainWindowAndVulkan(SDL_Window*& window)
 {
     bulkhead("PHASE 2: MAIN WINDOW + VULKAN + SWAPCHAIN — VALHALLA v80 TURBO");
 
-    // NUKE VALIDATION LAYERS BEFORE ANY VULKAN CALL
     nukeValidationLayers();
 
     constexpr int WIDTH  = 3840;
@@ -185,7 +184,6 @@ static void phase2_mainWindowAndVulkan(SDL_Window*& window)
         SDL_SetWindowIcon(window, g_base_icon);
     }
 
-    // Instance creation — raw, before StoneKey
     VkInstance instance = RTX::createVulkanInstanceWithSDL(window, false);
     set_g_instance(instance);
 
@@ -193,10 +191,12 @@ static void phase2_mainWindowAndVulkan(SDL_Window*& window)
         throw std::runtime_error("Failed to create Vulkan surface");
     }
 
-    // THE ONE TRUE ATOMIC RITUAL — FULL RTX, STONEKEY v∞ SAFE
+    // THIS CREATES THE LOGICAL DEVICE — g_device() becomes valid here
     SwapchainManager::init(window, WIDTH, HEIGHT);
 
-    // Present mode detection (uses g_ctx() — now fully populated and encrypted)
+    // NOW THE DEVICE EXISTS — SAFE TO CALL initContext()
+    RTX::initContext(instance, window, WIDTH, HEIGHT);
+
     detectBestPresentMode(g_PhysicalDevice(), g_surface());
 
     SDL_ShowWindow(window);
@@ -206,10 +206,9 @@ static void phase2_mainWindowAndVulkan(SDL_Window*& window)
     LOG_SUCCESS_CAT("MAIN", "YOUR GPU ASCENDED — PINK PHOTONS ETERNAL — SHE IS HAPPY");
 }
 
-static void phase3_appAndRendererConstruction(SDL_Window* window) {
+static void phase3_appAndRendererConstruction(SDL_Window* window)
+{
     bulkhead("PHASE 3: RENDERER + APP + LAS v2.0 SCENE BUILD");
-
-    createGlobalRTX(3840, 2160);
 
     g_pipeline_manager = new RTX::PipelineManager(RTX::g_ctx().device(), RTX::g_ctx().physicalDevice());
     g_renderer = std::make_unique<VulkanRenderer>(3840, 2160, window, !Options::Window::VSYNC);
