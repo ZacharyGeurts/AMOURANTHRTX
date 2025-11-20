@@ -44,26 +44,18 @@ inline SDL_Window* get() noexcept {
 
 inline void create(const char* title, int width, int height, Uint32 flags = 0) {
     flags |= SDL_WINDOW_HIGH_PIXEL_DENSITY;
-    // Fixed size forever — ImGui is dead
 
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) == 0) {
         LOG_FATAL_CAT("SDL3", "SDL_Init failed: {}", SDL_GetError());
         throw std::runtime_error("SDL_Init failed");
     }
 
-    bool vulkanReady = false;
-    if (SDL_Vulkan_LoadLibrary(nullptr) == 0) {
-        uint32_t count = 0;
-        vkEnumerateInstanceExtensionProperties(nullptr, &count, nullptr);
-        if (count > 0) {
-            std::vector<VkExtensionProperties> exts(count);
-            vkEnumerateInstanceExtensionProperties(nullptr, &count, exts.data());
-            for (const auto& e : exts)
-                if (strcmp(e.extensionName, VK_KHR_SURFACE_EXTENSION_NAME) == 0)
-                    vulkanReady = true;
-        }
-        if (vulkanReady) flags |= SDL_WINDOW_VULKAN;
-        else SDL_Vulkan_UnloadLibrary();
+    // FORCE VULKAN WINDOW EVEN IF DETECTION IS FLAWED — WE'LL DIE LOUDLY IF IMPOSSIBLE
+    flags |= SDL_WINDOW_VULKAN;  // <────────── THIS IS THE MISSING LINE, MANDATORY
+
+    // Optional: still try to load library early for extensions, but don't trust the result for the flag
+    if (SDL_Vulkan_LoadLibrary(nullptr) != 0) {
+        LOG_WARNING_CAT("SDL3", "SDL_Vulkan_LoadLibrary failed early — proceeding anyway (common on some drivers)");
     }
 
     SDL_Window* win = SDL_CreateWindow(title, width, height, flags);
@@ -73,8 +65,7 @@ inline void create(const char* title, int width, int height, Uint32 flags = 0) {
     }
 
     g_sdl_window.reset(win);
-    LOG_SUCCESS_CAT("SDL3", "Window created {}x{} — Vulkan {} — HEADER-ONLY BUILD", 
-                    width, height, vulkanReady ? "ENABLED" : "FALLBACK");
+    LOG_SUCCESS_CAT("SDL3", "Window created {}x{} — VULKAN WINDOW FORCED — HEADER-ONLY BUILD", width, height);
 }
 
 inline std::vector<std::string> getVulkanExtensions(SDL_Window* window = nullptr) {
