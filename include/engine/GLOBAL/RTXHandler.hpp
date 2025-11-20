@@ -184,7 +184,8 @@ namespace RTX {
     void createLogicalDevice();
     void createCommandPool();
     void loadRayTracingExtensions();
-
+    void retrieveQueues() noexcept;
+	
     // =============================================================================
     // Handle<T> — FIXED: FULL INLINE IMPLEMENTATIONS FOR TEMPLATE
     // =============================================================================

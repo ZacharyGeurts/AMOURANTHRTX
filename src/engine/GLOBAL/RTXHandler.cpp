@@ -499,6 +499,18 @@ void initContext(VkInstance instance, SDL_Window* window, int width, int height)
 
 }  // namespace RTX
 
+void RTX::retrieveQueues() noexcept
+{
+    vkGetDeviceQueue(g_device(), g_ctx().graphicsQueueFamily, 0, &g_ctx().graphicsQueue_);
+    vkGetDeviceQueue(g_device(), g_ctx().presentFamily_,      0, &g_ctx().presentQueue_);
+
+    LOG_SUCCESS_CAT("RTX", "{}QUEUES RETRIEVED — graphicsFamily={} presentFamily={} — SUBMIT READY{}",
+                    PLASMA_FUCHSIA,
+                    g_ctx().graphicsQueueFamily,
+                    g_ctx().presentFamily_,
+                    RESET);
+}
+
 // =============================================================================
 // PINK PHOTONS ETERNAL — FIRST LIGHT ACHIEVED — 32,000+ FPS
 // FULLY STABLE — DRIVER COMPATIBLE — RAW DOMINANCE

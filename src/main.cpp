@@ -164,7 +164,7 @@ static void phase2_mainWindowAndVulkan(SDL_Window*& window)
 
     SwapchainManager::init(window, WIDTH, HEIGHT);
     RTX::initContext(instance, window, WIDTH, HEIGHT);
-
+    RTX::retrieveQueues();
     forgeCommandPool();           // ONE TRUE CALL
     detectBestPresentMode();
 
@@ -182,20 +182,26 @@ static void phase3_appAndRendererConstruction(SDL_Window* window)
     g_pipeline_manager = new RTX::PipelineManager(g_device(), g_PhysicalDevice());
 
     g_mesh = MeshLoader::loadOBJ("assets/models/scene.obj");
-    LOG_SUCCESS_CAT("MAIN", "g_mesh ARMED → {} verts, {} indices", g_mesh->vertices.size(), g_mesh->indices.size());
+    LOG_SUCCESS_CAT("MAIN", "g_mesh ARMED → {} verts, {} indices", 
+                    g_mesh->vertices.size(), g_mesh->indices.size());
 
-    las().buildBLAS(RTX::g_ctx().commandPool_, g_mesh->vertexBuffer, g_mesh->indexBuffer,
+    // FIXED: Use StoneKey-safe getters → returns raw VkBuffer
+    las().buildBLAS(RTX::g_ctx().commandPool_,
+                    g_mesh->getVertexBuffer(),   // ← CORRECT
+                    g_mesh->getIndexBuffer(),    // ← CORRECT
                     static_cast<uint32_t>(g_mesh->vertices.size()),
                     static_cast<uint32_t>(g_mesh->indices.size()),
                     VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR);
 
-    las().buildTLAS(RTX::g_ctx().commandPool_, {{las().getBLAS(), glm::mat4(1.0f)}});
+    las().buildTLAS(RTX::g_ctx().commandPool_, 
+                    {{las().getBLAS(), glm::mat4(1.0f)}});
 
     g_renderer = std::make_unique<VulkanRenderer>(3840, 2160, window, !Options::Window::VSYNC);
     g_app      = std::make_unique<Application>("AMOURANTH RTX — VALHALLA v80 TURBO", 3840, 2160);
     g_app->setRenderer(std::move(g_renderer));
 
-    LOG_SUCCESS_CAT("MAIN", "{}LAS v2.0 + RENDERER ASCENDED — FIRST LIGHT ETERNAL{}", PLASMA_FUCHSIA, RESET);
+    LOG_SUCCESS_CAT("MAIN", "{}LAS v2.0 + RENDERER ASCENDED — FIRST LIGHT ETERNAL{}", 
+                    PLASMA_FUCHSIA, RESET);
 }
 
 static void phase4_renderLoop() {
@@ -207,7 +213,11 @@ static void phase5_shutdown()
 {
     bulkhead("PHASE 5: SHUTDOWN");
 
-    g_mesh.reset();
+    if (g_mesh) {
+        g_mesh->destroy();   // ← PROPER STONEKEY BUFFER_DESTRUCTION
+        g_mesh.reset();
+    }
+
     g_app.reset();
     g_renderer.reset();
     if (g_pipeline_manager) { delete g_pipeline_manager; g_pipeline_manager = nullptr; }
