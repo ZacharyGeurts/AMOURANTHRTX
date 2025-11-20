@@ -18,6 +18,8 @@
 #include <vulkan/vulkan.h>
 #include <cstdint>
 
+using namespace RTX;
+
 namespace Engine {
 
 class RenderMode6 {

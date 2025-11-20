@@ -27,6 +27,8 @@
 #include <chrono>
 #include <cmath>
 
+using namespace RTX;
+
 namespace Engine {
 
 class RenderMode2 {

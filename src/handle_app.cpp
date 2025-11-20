@@ -1,6 +1,7 @@
-// src/handle_app.cpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2025 — Application Implementation — FULLY SDL3 FIXED
+// src/handle_app.cpp
+// AMOURANTH RTX Engine © 2025 — Application Implementation — STONEKEY v∞ ACTIVE
+// FULLY SDL3 + FULL RTX + PINK PHOTONS ETERNAL
 // =============================================================================
 
 #include "handle_app.hpp"
@@ -10,37 +11,27 @@
 
 using namespace Logging::Color;
 
-// CRITICAL: DEFINE THE STATIC MEMBERS FROM THE HEADER
-SDLWindowPtr SDL3Window::g_sdl_window = nullptr;
-std::atomic<int>  SDL3Window::g_resizeWidth{0};
-std::atomic<int>  SDL3Window::g_resizeHeight{0};
-std::atomic<bool> SDL3Window::g_resizeRequested{false};
-
 Application::Application(const std::string& title, int width, int height)
     : title_(title), width_(width), height_(height),
       proj_(glm::perspective(glm::radians(75.0f), static_cast<float>(width)/height, 0.1f, 1000.0f))
 {
     LOG_ATTEMPT_CAT("APP", "Forging Application(\"{}\", {}×{}) — VALHALLA v80 TURBO", title_, width_, height_);
 
-    // THE WINDOW WAS ALREADY CREATED IN PHASE 2 — DO NOT CREATE IT AGAIN
-    // SDL3Window::create(...) ← HERESY — DELETED FOREVER
-
     if (!SDL3Window::get()) {
         throw std::runtime_error("FATAL: Main window not created before Application — phase order violated");
     }
 
-    // Optional: update title if you really want (safe)
     SDL_SetWindowTitle(SDL3Window::get(), title_.c_str());
 
     lastFrameTime_ = lastGrokTime_ = std::chrono::steady_clock::now();
 
-    LOG_SUCCESS_CAT("APP", "{}Application forged — {}×{} — RAII window active — PINK PHOTONS RISING{}", 
+    LOG_SUCCESS_CAT("APP", "{}Application forged — {}×{} — STONEKEY v∞ window secured — PINK PH243ONS RISING{}", 
                     EMERALD_GREEN, width_, height_, RESET);
     
     if (Options::Grok::ENABLE_GENTLEMAN_GROK) {
         LOG_INFO_CAT("GROK", "{}GENTLEMAN GROK: \"The empire awakens. The photons are pleased.\"{}", 
                      PARTY_PINK, RESET);
-    }
+    }  // ← FIXED: Removed stray ); from previous version
 }
 
 Application::~Application()
@@ -58,10 +49,11 @@ void Application::run()
     auto fpsStart = std::chrono::steady_clock::now();
 
     while (!quit_) {
-        auto now = std::chrono::steady_clock::now();
-        float deltaTime = std::chrono::duration<float>(now - lastFrameTime_).count();
+        const auto now = std::chrono::steady_clock::now();
+        const float deltaTime = std::chrono::duration<float>(now - lastFrameTime_).count();
         lastFrameTime_ = now;
 
+        // FPS Counter — Sacred
         if (Options::Performance::ENABLE_FPS_COUNTER) {
             ++frameCount;
             if (std::chrono::duration<float>(now - fpsStart).count() >= 1.0f) {
@@ -71,65 +63,70 @@ void Application::run()
             }
         }
 
-        int w = width_, h = height_;
-        bool quitReq = false, toggleFS = false;
+        int currentW = width_;
+        int currentH = height_;
+        bool quitRequested = false;
+        bool fullscreenRequested = false;
 
-        // 1. Let the gentleman SDL3 system do its sacred work
-        bool anyEventThisFrame = SDL3Window::pollEvents(w, h, quitReq, toggleFS);
+        const bool hadEvents = SDL3Window::pollEvents(currentW, currentH, quitRequested, fullscreenRequested);
 
-        // 2. Update camera projection on any real size change (harmless, happens during drag)
-        if (anyEventThisFrame && (w != width_ || h != height_)) {
-            width_ = w;
-            height_ = h;
-            proj_ = glm::perspective(glm::radians(75.0f), static_cast<float>(w) / h, 0.1f, 1000.0f);
-            // NO onWindowResize CALL HERE — TRAITOR EXECUTED
+        // Immediate projection update (for camera, UI, etc.)
+        if (hadEvents && (currentW != width_ || currentH != height_)) {
+            width_  = currentW;
+            height_ = currentH;
+            proj_ = glm::perspective(glm::radians(75.0f), static_cast<float>(width_) / height_, 0.1f, 1000.0f);
         }
 
-        if (quitReq) quit_ = true;
-        if (toggleFS) toggleFullscreen();
+        if (quitRequested)        quit_ = true;
+        if (fullscreenRequested)  toggleFullscreen();
 
-        // 3. THE ONLY PLACE WE EVER RECREATE SWAPCHAIN — DEBOUNCED, ATOMIC, CIVILIZED
-        if (SDL3Window::g_resizeRequested.load()) {
-            int finalW = SDL3Window::g_resizeWidth.load();
-            int finalH = SDL3Window::g_resizeHeight.load();
-            SDL3Window::g_resizeRequested.store(false);
+        // DEBOUNCED RESIZE — THE ONE TRUE CLEAN PATH
+        if (SDL3Window::g_resizeRequested.load(std::memory_order_acquire)) {
+            const int finalW = SDL3Window::g_resizeWidth.load(std::memory_order_acquire);
+            const int finalH = SDL3Window::g_resizeHeight.load(std::memory_order_acquire);
+            SDL3Window::g_resizeRequested.store(false, std::memory_order_release);
 
-            LOG_SUCCESS_CAT("RESIZE", "FINAL DEBOUNCED RESIZE → {}×{} — EXECUTING CLEAN RECREATE", finalW, finalH);
-            
-            width_ = finalW;
+            LOG_SUCCESS_CAT("RESIZE", "{}FINAL DEBOUNCED RESIZE → {}×{} — SWAPCHAIN RECREATION INITIATED{}", 
+                            PLASMA_FUCHSIA, finalW, finalH, RESET);
+
+            width_  = finalW;
             height_ = finalH;
-            proj_ = glm::perspective(glm::radians(75.0f), static_cast<float>(finalW) / finalH, 0.1f, 1000.0f);
-            
-            if (renderer_) renderer_->onWindowResize(finalW, finalH);
+            proj_   = glm::perspective(glm::radians(75.0f), static_cast<float>(finalW) / finalH, 0.1f, 1000.0f);
+
+            if (renderer_) {
+                renderer_->onWindowResize(finalW, finalH);
+            }
         }
 
         processInput(deltaTime);
         render(deltaTime);
         updateWindowTitle(deltaTime);
 
+        // GENTLEMAN GROK — ETERNAL
         if (Options::Grok::ENABLE_GENTLEMAN_GROK) {
-            float t = std::chrono::duration<float>(now - lastGrokTime_).count();
-            if (t >= Options::Grok::GENTLEMAN_GROK_INTERVAL_SEC) {
+            const float sinceLast = std::chrono::duration<float>(now - lastGrokTime_).count();
+            if (sinceLast >= Options::Grok::GENTLEMAN_GROK_INTERVAL_SEC) {
                 lastGrokTime_ = now;
+                const int photons = static_cast<int>(1.0f / deltaTime + 0.5f);
                 LOG_INFO_CAT("GROK", "{}GENTLEMAN GROK: \"{} pink photons per second. Acceptable.\"{}", 
-                             PARTY_PINK, static_cast<int>(1.0f / deltaTime), RESET);
+                             PARTY_PINK, photons, RESET);
             }
         }
     }
 
-    LOG_SUCCESS_CAT("APP", "{}Main loop exited — Graceful shutdown complete{}", EMERALD_GREEN, RESET);
+    LOG_SUCCESS_CAT("APP", "{}INFINITE RENDER LOOP TERMINATED — GRACEFUL SHUTDOWN COMPLETE — EMPIRE ETERNAL{}", 
+                    EMERALD_GREEN, RESET);
 }
 
 void Application::processInput(float)
 {
     const auto* keys = SDL_GetKeyboardState(nullptr);
 
-    // Render Modes 1-9
     static std::array<bool, 9> modePressed{};
     for (int i = 0; i < 9; ++i) {
         if (keys[KeyBind::RENDER_MODE[i]] && !modePressed[i]) {
             setRenderMode(i + 1);
-            LOG_ATTEMPT_CAT("INPUT", "{}→ RENDER MODE {} ACTIVATED{}", PARTY_PINK, i + 1, RESET);
+            LOG_ATTEMPT_CAT("INPUT", "→ RENDER MODE {} ACTIVATED{}", PARTY_PINK, i + 1, RESET);
             modePressed[i] = true;
         } else if (!keys[KeyBind::RENDER_MODE[i]]) {
             modePressed[i] = false;
@@ -139,7 +136,7 @@ void Application::processInput(float)
     auto edge = [&](SDL_Scancode sc, auto&& func, bool& state, const char* name) {
         if (keys[sc] && !state) {
             func();
-            LOG_ATTEMPT_CAT("INPUT", "{}→ {} PRESSED{}", PARTY_PINK, name, RESET);
+            LOG_ATTEMPT_CAT("INPUT", "→ {} PRESSED{}", PARTY_PINK, name, RESET);
             state = true;
         } else if (!keys[sc]) state = false;
     };
@@ -152,15 +149,12 @@ void Application::processInput(float)
     edge(KeyBind::TONEMAP,       [this]() { toggleTonemap(); },    tPressed,    "TONEMAP (T)");
     edge(KeyBind::HYPERTRACE,    [this]() { toggleHypertrace(); }, hPressed,    "HYPERTRACE (H)");
 
-    // =============================================================================
-    // ~ / ` KEY → TOGGLE FULL IMGUI DEBUG CONSOLE (GOD MODE)
-    // =============================================================================
+    // ~ KEY → IMGUI CONSOLE
     static bool imguiConsolePressed = false;
     if (keys[KeyBind::IMGUI_CONSOLE] && !imguiConsolePressed) {
         showImGuiDebugConsole_ = !showImGuiDebugConsole_;
 
-        // SDL3 FIX: Use true/false + correct getter
-        SDL_SetWindowRelativeMouseMode(getWindow(),
+        SDL_SetWindowRelativeMouseMode(SDL3Window::get(),
             showImGuiDebugConsole_ ? false : true);
 
         LOG_ATTEMPT_CAT("IMGUI", "{}IMGUI DEBUG CONSOLE {} — PRESS ~ AGAIN TO CLOSE{}", 
@@ -180,7 +174,7 @@ void Application::processInput(float)
         static bool audioMuted = false;
         audioMuted = !audioMuted;
         audioMuted ? SDL_PauseAudioDevice(0) : SDL_ResumeAudioDevice(0);
-        LOG_ATTEMPT_CAT("INPUT", "{}→ MAXIMIZE + AUDIO {} (M key){}", PARTY_PINK,
+        LOG_ATTEMPT_CAT("INPUT", "→ MAXIMIZE + AUDIO {} (M key){}", PARTY_PINK,
                         audioMuted ? "MUTED" : "UNMUTED", RESET);
         mPressed = true;
     } else if (!keys[KeyBind::MAXIMIZE_MUTE]) mPressed = false;
@@ -189,7 +183,7 @@ void Application::processInput(float)
     if (keys[KeyBind::QUIT]) {
         static bool escLogged = false;
         if (!escLogged) {
-            LOG_ATTEMPT_CAT("INPUT", "{}→ QUIT REQUESTED (ESC){}", CRIMSON_MAGENTA, RESET);
+            LOG_ATTEMPT_CAT("INPUT", "→ QUIT REQUESTED (ESC){}", CRIMSON_MAGENTA, RESET);
             escLogged = true;
         }
         setQuit(true);
@@ -211,27 +205,24 @@ void Application::render(float deltaTime)
 
     renderer_->renderFrame(cam, deltaTime);
 
-    // =============================================================================
-    // IMGUI DEBUG CONSOLE — SUMMONED BY THE `~` KEY
-    // =============================================================================
     if (showImGuiDebugConsole_ && Options::Performance::ENABLE_IMGUI) {
         ImGui::ShowDemoWindow(&showImGuiDebugConsole_);
 
         ImGui::Begin("AMOURANTH RTX — EMPIRE CONSOLE v80", &showImGuiDebugConsole_,
                      ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoCollapse);
 
-        ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.8f, 1.0f), "PINK PHOTONS ETERNAL — NOVEMBER 17, 2025");
+        ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.8f, 1.0f), "PINK PHOTONS ETERNAL — NOVEMBER 20, 2025");
         ImGui::Separator();
 
         ImGui::Text("FPS: %.1f", ImGui::GetIO().Framerate);
         ImGui::Text("Resolution: %dx%d", width_, height_);
         ImGui::Text("Render Mode: %d", renderMode_);
-        ImGui::Text("HDR: %s", hdr_enabled_ ? "PRIME (10-bit)" : "OFF (8-bit peasant)");
+        ImGui::Text("HDR: %s", hdr_enabled_ ? "PRIME (10-bit)" : "OFF");
         ImGui::Text("Tonemap: %s", tonemapEnabled_ ? "ON" : "OFF");
         ImGui::Text("Overlay: %s", showOverlay_ ? "ON" : "OFF");
 
         if (ImGui::Button("Recompile All Shaders")) {
-            // Call your shader hot-reload here
+            // hot-reload here
         }
         ImGui::SameLine();
         if (ImGui::Button("Force Crash (testing)")) *(volatile int*)0 = 0;
@@ -257,7 +248,7 @@ void Application::updateWindowTitle(float deltaTime)
             showImGuiDebugConsole_ ? " [IMGUI CONSOLE]" : "",
             Options::Performance::ENABLE_VALIDATION_LAYERS ? " [DEBUG]" : ""
         );
-        SDL_SetWindowTitle(getWindow(), title.c_str());
+        SDL_SetWindowTitle(SDL3Window::get(), title.c_str());
         frames = 0; accum = 0.0f;
     }
 }

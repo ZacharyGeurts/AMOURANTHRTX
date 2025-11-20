@@ -159,21 +159,18 @@ static void phase2_mainWindowAndVulkan(SDL_Window*& window)
         SDL_SetWindowIcon(window, g_base_icon);
     }
 
-    // Pass false for validation — we already nuked the layers
+    // Instance creation — raw, before StoneKey
     VkInstance instance = RTX::createVulkanInstanceWithSDL(window, false);
     set_g_instance(instance);
-
-    RTX::fixNvidiaValidationBugLocally();
 
     if (!RTX::createSurface(window, instance)) {
         throw std::runtime_error("Failed to create Vulkan surface");
     }
 
-    RTX::forgeLogicalDeviceAndGPU();  // ← THE ONE TRUE CALL
-    RTX::initContext(instance, window, WIDTH, HEIGHT);
-    RTX::loadRayTracingExtensions();
-
+    // THE ONE TRUE ATOMIC RITUAL — FULL RTX, STONEKEY v∞ SAFE
     SwapchainManager::init(window, WIDTH, HEIGHT);
+
+    // Present mode detection (uses g_ctx() — now fully populated and encrypted)
     detectBestPresentMode(RTX::g_ctx().physicalDevice(), RTX::g_ctx().surface());
 
     SDL_ShowWindow(window);

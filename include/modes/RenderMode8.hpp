@@ -17,6 +17,8 @@
 
 #include <vulkan/vulkan.h>
 
+using namespace RTX;
+
 namespace Engine {
 
 class RenderMode8 {

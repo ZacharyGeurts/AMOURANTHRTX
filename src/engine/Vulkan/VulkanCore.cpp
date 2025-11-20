@@ -37,6 +37,7 @@
 #include <set>
 
 using namespace Logging::Color;
+using namespace RTX;
 
 // =============================================================================
 // VulkanCore.cpp — Persistent staging globals — ONLY ONE DEFINITION
@@ -1264,20 +1265,6 @@ bool createSurface(SDL_Window* window, VkInstance instance)
     LOG_SUCCESS_CAT("VULKAN", "FIRST LIGHT ACHIEVED — PINK PHOTONS IMMINENT");
 
     return true;
-}
-
-void fixNvidiaValidationBugLocally() noexcept
-{
-    static bool done = false;
-    if (done) return;
-    done = true;
-
-    // This single line defeats the loader injecting VK_KHR_portability_subset
-    // → terminator_CreateDevice gone forever
-    setenv("VK_LOADER_DISABLE_INST_EXT", "1", 1);
-
-    LOG_SUCCESS_CAT("VULKAN", "NVIDIA validation bug SMASHED LOCALLY — FULL RTX + VALIDATION ACTIVE");
-    LOG_SUCCESS_CAT("VULKAN", "CHAD MODE = ON — GPU SUBMITS — PINK PHOTONS UNLEASHED");
 }
 
 // =============================================================================

@@ -100,7 +100,7 @@ constexpr uint64_t operator"" _TB(unsigned long long v) noexcept { return v << 4
         VkBufferUsageFlags safeUsage = (usage);                                 \
                                                                                 \
         /* STRIP RTX-ONLY FLAGS IF FULL RTX IS NOT ENABLED (validation active) */ \
-        if (!g_ctx().hasFullRTX()) {                                       \
+        if (!RTX::g_ctx().hasFullRTX()) {                                       \
             safeUsage &= ~(                                                     \
                 VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT                  |   \
                 VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | \

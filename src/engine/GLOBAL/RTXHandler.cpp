@@ -37,6 +37,7 @@
 #endif
 
 using namespace Logging::Color;
+using namespace RTX;
 
 const char* VulkanResultToString(VkResult result) {
     switch (result) {

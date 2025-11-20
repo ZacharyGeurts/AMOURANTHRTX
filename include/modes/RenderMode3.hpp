@@ -27,6 +27,8 @@
 #include <chrono>
 #include <random>
 
+using namespace RTX;
+
 namespace Engine {
 
 class RenderMode3 {

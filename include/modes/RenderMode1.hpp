@@ -11,6 +11,8 @@
 #include <glm/glm.hpp>
 #include <chrono>
 
+using namespace RTX;
+
 class RenderMode1 {
 public:
     RenderMode1(uint32_t width, uint32_t height);

@@ -52,6 +52,7 @@
 #include <print>
 
 using namespace Logging::Color;
+using namespace RTX;
 
 // =============================================================================
 // PINK PHOTON SAFETY OVERRIDE

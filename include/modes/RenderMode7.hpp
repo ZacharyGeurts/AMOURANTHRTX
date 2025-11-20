@@ -18,6 +18,8 @@
 #include <glm/glm.hpp>
 #include <chrono>
 
+using namespace RTX;
+
 namespace Engine {
 
 class RenderMode7 {
