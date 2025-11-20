@@ -149,14 +149,6 @@ void Application::processInput(float)
     edge(KeyBind::TONEMAP,       [this]() { toggleTonemap(); },    tPressed,    "TONEMAP (T)");
     edge(KeyBind::HYPERTRACE,    [this]() { toggleHypertrace(); }, hPressed,    "HYPERTRACE (H)");
 
-
-        SDL_SetWindowRelativeMouseMode(SDL3Window::get(),
-
-                        PARTY_PINK,
-                        RESET);
-
-    }
-
     // M key → Maximize + Audio Mute
     static bool mPressed = false;
     if (keys[KeyBind::MAXIMIZE_MUTE] && !mPressed) {
@@ -200,20 +192,30 @@ void Application::updateWindowTitle(float deltaTime)
 {
     static int frames = 0;
     static float accum = 0.0f;
-    ++frames; accum += deltaTime;
+    ++frames;
+    accum += deltaTime;
 
     if (accum >= 1.0f) {
-        float fps = frames / accum;
-        std::string title = std::format(
-            "{} | {:.1f} FPS | {}×{} | Mode {} | Tonemap{} Overlay{} HDR{} {}{}",
-            title_, fps, width_, height_, renderMode_,
-            tonemapEnabled_ ? "" : " OFF",
-            showOverlay_ ? "" : " OFF",
-            hdr_enabled_ ? " PRIME" : " OFF",
-            Options::Performance::ENABLE_VALIDATION_LAYERS ? " [DEBUG]" : ""
-        );
-        SDL_SetWindowTitle(SDL3Window::get(), title.c_str());
-        frames = 0; accum = 0.0f;
+        const float fps = frames / accum;
+
+        // Build title manually with std::ostringstream – 100% safe at runtime, no consteval issues
+        std::ostringstream oss;
+        oss << title_
+            << " | " << std::fixed << std::setprecision(1) << fps << " FPS"
+            << " | " << width_ << 'x' << height_
+            << " | Mode " << renderMode_
+            << " | Tonemap" << (tonemapEnabled_ ? "" : " OFF")
+            << " | HDR" << (hdr_enabled_ ? " PRIME" : " OFF");
+
+        if (Options::Performance::ENABLE_VALIDATION_LAYERS) {
+            oss << " [DEBUG]";
+        }
+
+        const std::string finalTitle = oss.str();
+        SDL_SetWindowTitle(SDL3Window::get(), finalTitle.c_str());
+
+        frames = 0;
+        accum = 0.0f;
     }
 }
 

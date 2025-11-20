@@ -41,6 +41,7 @@
 
 // Forward declarations
 struct Camera;
+class Application;                  // ← For ImGui console access (`~` key)
 
 static constexpr uint32_t MAX_DESCRIPTOR_SETS = 1024;
 static constexpr VkSampleCountFlagBits MSAA_SAMPLES = VK_SAMPLE_COUNT_1_BIT;
@@ -61,6 +62,7 @@ struct TonemapPushConstants {
 // ──────────────────────────────────────────────────────────────────────────────
 class VulkanRenderer {
 public:
+    void initImGuiFonts() noexcept;
     void drawLoadingOverlay() noexcept;
     VulkanRenderer(int width, int height, SDL_Window* window = nullptr, bool overclockFromMain = false);
     ~VulkanRenderer();

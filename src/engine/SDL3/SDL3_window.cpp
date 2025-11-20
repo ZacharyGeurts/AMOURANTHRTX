@@ -42,7 +42,8 @@ namespace SDL3Window {
 void create(const char* title, int width, int height, Uint32 flags)
 {
     flags |= SDL_WINDOW_HIGH_PIXEL_DENSITY;
-    if (Options::Performance::ENABLE_IMGUI) flags |= SDL_WINDOW_RESIZABLE;
+    // ImGui removed — window is now fixed-size, maximum performance
+    flags |= SDL_WINDOW_VULKAN;
 
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) == 0) {
         LOG_FATAL_CAT("SDL3", "SDL_Init failed: {}", SDL_GetError());
@@ -58,7 +59,6 @@ void create(const char* title, int width, int height, Uint32 flags)
         for (const auto& e : exts)
             if (strcmp(e.extensionName, VK_KHR_SURFACE_EXTENSION_NAME) == 0)
                 vulkanReady = true;
-        if (vulkanReady) flags |= SDL_WINDOW_VULKAN;
     }
 
     SDL_Window* raw = SDL_CreateWindow(title, width, height, flags);

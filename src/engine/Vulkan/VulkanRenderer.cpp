@@ -1291,7 +1291,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
         &imageIndex
     );
 
-    // ──────── THIS IS THE FIX — HANDLE OUT-OF-DATE ON FIRST FRAME ────────
+    // Handle out-of-date swapchain gracefully
     if (acquireResult == VK_ERROR_OUT_OF_DATE_KHR ||
         acquireResult == VK_SUBOPTIMAL_KHR ||
         acquireResult == VK_ERROR_SURFACE_LOST_KHR)
@@ -1299,7 +1299,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
         LOG_WARN_CAT("RENDER", "Swapchain out-of-date/surface lost on acquire — recreating (frame {})", frameNumber_);
         SWAPCHAIN.recreate(width_, height_);
         currentFrame_ = (currentFrame_ + 1) % Options::Performance::MAX_FRAMES_IN_FLIGHT;
-        return;  // Skip this frame — next one will work
+        return;
     }
 
     if (acquireResult != VK_SUCCESS) {
@@ -1307,7 +1307,6 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
         currentFrame_ = (currentFrame_ + 1) % Options::Performance::MAX_FRAMES_IN_FLIGHT;
         return;
     }
-    // ─────────────────────────────────────────────────────────────────────
 
     VkCommandBuffer cmd = commandBuffers_[frameIdx];
     vkResetCommandBuffer(cmd, 0);
@@ -1316,7 +1315,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     vkBeginCommandBuffer(cmd, &beginInfo);
 
-    // ── Swapchain image: UNDEFINED/PRESENT → GENERAL ──
+    // Swapchain image: UNDEFINED/PRESENT → GENERAL
     {
         VkImageMemoryBarrier barrier = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
         barrier.oldLayout = firstSwapchainAcquire_ ? VK_IMAGE_LAYOUT_UNDEFINED : VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
@@ -1335,7 +1334,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     }
     firstSwapchainAcquire_ = false;
 
-    // ── Clear accumulation if needed ──
+    // Clear accumulation buffers when required
     if (resetAccumulation_) {
         VkClearColorValue clear{{0,0,0,0}};
         VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
@@ -1353,12 +1352,12 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     updateUniformBuffer(frameIdx, camera, getJitter());
     updateTonemapUniform(frameIdx);
 
-    pipelineManager_.updateRTDescriptorSet(frameIdx, {.tlas = LAS::get().getTLAS()});  // Use PipelineManager's update
+    pipelineManager_.updateRTDescriptorSet(frameIdx, {.tlas = LAS::get().getTLAS()});
     if (Options::RTX::ENABLE_ADAPTIVE_SAMPLING) updateNexusDescriptors();
 
     recordRayTracingCommandBuffer(cmd);
 
-    // ── RT Output → SHADER_READ_ONLY_OPTIMAL ──
+    // Transition RT output for tonemap sampling
     {
         VkImageMemoryBarrier b = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
         b.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
@@ -1383,7 +1382,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     if (denoisingEnabled_) performDenoisingPass(cmd);
     performTonemapPass(cmd, frameIdx, imageIndex);
 
-    // ── Swapchain image → PRESENT ──
+    // Swapchain image → PRESENT
     {
         VkImageMemoryBarrier b = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
         b.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
@@ -1429,7 +1428,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
         LOG_ERROR_CAT("RENDER", "vkQueuePresentKHR failed: {}", (int)presentResult);
     }
 
-    }
+    // ImGui fully purged — no more overlay, no more debug console, no more bloat
 
     currentFrame_ = (currentFrame_ + 1) % Options::Performance::MAX_FRAMES_IN_FLIGHT;
     frameNumber_++;
@@ -1903,6 +1902,7 @@ void VulkanRenderer::setOverlay(bool show) noexcept {
         return;
     }
     showOverlay_ = show;
+    LOG_INFO_CAT("Renderer", "{}ImGui Overlay: {}{}", 
         show ? LIME_GREEN : CRIMSON_MAGENTA,
         show ? "VISIBLE" : "HIDDEN", RESET);
     LOG_TRACE_CAT("RENDERER", "setOverlay — COMPLETE");
@@ -1920,58 +1920,6 @@ void VulkanRenderer::setRenderMode(int mode) noexcept {
     LOG_INFO_CAT("Renderer", "{}Render Mode: {} → {}{}", 
         PULSAR_GREEN, renderMode_, mode, RESET);
     LOG_TRACE_CAT("RENDERER", "setRenderMode — COMPLETE");
-}
-
-void VulkanRenderer::drawLoadingOverlay() noexcept
-{
-    // Skip overlay when everything is perfect — invisible like a ghost
-    if (LAS::get().isValid() && 
-        !firstSwapchainAcquire_ && 
-        !resetAccumulation_) {
-        return;
-    }
-
-    // Fullscreen transparent overlay (no border, no interaction)
-
-    );
-
-    const ImVec2 center = ImVec2(
-    );
-
-    // === MAIN TITLE — PLASMATIC IS GOD ===
-    if (plasmaticaFont) {
-        const char* title = "AMOURANTH RTX";
-    }
-
-    // === STATUS MESSAGE — ELEGANT ARIAL ===
-    if (arialBoldFont || arialFont) {
-        ImFont* statusFont = arialBoldFont ? arialBoldFont : arialFont;
-
-        const char* status = "";
-        const char* subtitle = "";
-
-        if (!LAS::get().isValid()) {
-            status = "rebuilding acceleration structure";
-            subtitle = "please wait, the photons are coming home";
-        }
-        else if (resetAccumulation_) {
-            status = "accumulation reset";
-            subtitle = "patience... beauty is rebuilding";
-        }
-        else if (firstSwapchainAcquire_) {
-            status = "warming up the gpu";
-            subtitle = "almost there";
-        }
-
-
-
-
-    }
-
-    // Fallback if somehow no fonts loaded (should never happen)
-    else {
-    }
-
 }
 
 void VulkanRenderer::createFramebuffers() noexcept {
@@ -2281,39 +2229,6 @@ bool VulkanRenderer::createSharedStaging() noexcept {
     // FIXED: Bound via tracker
     LOG_DEBUG_CAT("Renderer", "Shared staging recreated: enc=0x{:x}", RTX::g_ctx().sharedStagingEnc_);
     return true;
-}
-
-{
-    io.Fonts->Clear();
-
-    // 1. PLASMATIC — THE ONE TRUE FONT
-    plasmaticaFont = io.Fonts->AddFontFromFileTTF("assets/fonts/sf-plasmatica-open.ttf", 52.0f);
-    if (!plasmaticaFont) {
-        plasmaticaFont = io.Fonts->AddFontFromFileTTF("assets/fonts/sf-plasmatica-open.ttf", 48.0f);
-    }
-    if (!plasmaticaFont) {
-        fprintf(stderr, "[FONT] sf-plasmatica-open.ttf missing — using arialbd.ttf\n");
-        plasmaticaFont = io.Fonts->AddFontFromFileTTF("assets/fonts/arialbd.ttf", 42.0f);
-    }
-
-    // 2. Arial Bold — UI titles
-    arialBoldFont = io.Fonts->AddFontFromFileTTF("assets/fonts/arialbd.ttf", 26.0f);
-
-    // 3. Regular Arial — body text
-    arialFont = io.Fonts->AddFontFromFileTTF("assets/fonts/arial.ttf", 18.0f);
-
-    // Fallback if everything fails
-    if (!plasmaticaFont) {
-        plasmaticaFont = io.Fonts->AddFontDefault();
-        plasmaticaFont->Scale = 2.0f;
-    }
-    if (!arialBoldFont) arialBoldFont = plasmaticaFont;
-    if (!arialFont)     arialFont     = io.Fonts->AddFontDefault();
-
-    io.FontDefault = arialFont;
-
-    io.Fonts->Build();
-    fprintf(stderr, "[FONT] Plasmatica loaded: %s\n", plasmaticaFont ? "YES" : "NO");
 }
 
 void VulkanRenderer::onWindowResize(uint32_t w, uint32_t h) noexcept
