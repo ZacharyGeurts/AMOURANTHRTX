@@ -254,8 +254,7 @@ VulkanRTX::VulkanRTX(int w, int h, RTX::PipelineManager* mgr)
     RTX::AmouranthAI::get().onMemoryEvent("VulkanRTX Instance", sizeof(VulkanRTX));
     RTX::AmouranthAI::get().onPhotonDispatch(w, h);
 
-    // === FIXED: Use RTX::g_ctx() — THE ONE THAT WAS INITIALIZED ===
-    device_ = RTX::g_ctx().device();
+    device_ = g_device();
     LOG_DEBUG_CAT("RTX", "RTX::g_ctx().device() returned: 0x{:x}", reinterpret_cast<uintptr_t>(device_));
     if (!device_) {
         LOG_ERROR_CAT("RTX", "device_ is null from RTX::g_ctx().device() — THROWING runtime_error!");

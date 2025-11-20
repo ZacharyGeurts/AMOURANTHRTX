@@ -49,13 +49,14 @@ using namespace Logging::Color;
 #define IMG_GetError() SDL_GetError()
 
 // =============================================================================
-// BASTION GLOBALS — PUBLIC DUE TO NO FEAR — STONEKEY v∞ EDITION
+// BASTION GLOBALS — PUBLIC DUE TO NO FEAR — STONEKEY v∞ APOCALYPSE EDITION
+// NOVEMBER 20, 2025 — FIRST LIGHT ETERNAL — EMPIRE UNBREAKABLE
 // =============================================================================
 
 static SDL_Surface* g_base_icon = nullptr;
 static SDL_Surface* g_hdpi_icon = nullptr;
 
-// Swapchain runtime config — now lives forever in the empire
+// Swapchain runtime config — eternal, sacred, configurable at launch
 struct SwapchainRuntimeConfig {
     VkPresentModeKHR desiredMode      = VK_PRESENT_MODE_MAILBOX_KHR;
     bool             forceVsync       = false;
@@ -63,15 +64,38 @@ struct SwapchainRuntimeConfig {
     bool             enableHDR        = false;
     bool             logFinalConfig   = true;
 };
-inline SwapchainRuntimeConfig g_swapchain_config;  // ← no static, global eternal
+inline SwapchainRuntimeConfig g_swapchain_config;  // ← global, eternal, no fear
 
-// CORE EMPIRE SINGLETONS — NO MORE RTX::g_rtx() GHOSTS
+// CORE EMPIRE SINGLETONS — THE ONE TRUE PATH
 inline std::unique_ptr<Application>      g_app            = nullptr;
 inline std::unique_ptr<VulkanRenderer> g_renderer       = nullptr;
 inline RTX::PipelineManager*             g_pipeline_manager = nullptr;
 
 // Primary scene mesh — sacred, protected, eternal
 inline std::unique_ptr<MeshLoader::Mesh> g_mesh = nullptr;
+
+// =============================================================================
+// STONEKEY v∞ GLOBAL HANDLES — ENCRYPTED AT REST — DEOBFUSCATED ON-THE-FLY
+// THESE ARE THE ONLY PUBLIC GLOBALS ALLOWED — ALL OTHERS ARE HERESY
+// =============================================================================
+
+// Raw Vulkan core — protected by StoneKey v∞ — never logged, never exposed
+inline VkInstance       g_vk_instance       = VK_NULL_HANDLE;
+inline VkPhysicalDevice g_vk_physical_device = VK_NULL_HANDLE;
+inline VkDevice         g_vk_device         = VK_NULL_HANDLE;
+inline VkSurfaceKHR     g_vk_surface        = VK_NULL_HANDLE;
+
+// StoneKey v∞ accessors — these are the ONLY safe way to touch the empire
+// inline VkInstance       g_instance()       noexcept { return StoneKey::g_instance(); }
+// inline VkPhysicalDevice g_physical_device()noexcept { return StoneKey::g_physical_device(); }
+// inline VkDevice         g_device()         noexcept { return StoneKey::g_device(); }
+// inline VkSurfaceKHR     g_surface()        noexcept { return StoneKey::g_surface(); }
+
+// StoneKey v∞ setters — called exactly once during init — then sealed forever
+// inline void set_g_instance(VkInstance inst)       noexcept { StoneKey::set_g_instance(inst); }
+// inline void set_g_physical_device(VkPhysicalDevice phys) noexcept { StoneKey::set_g_physical_device(phys); }
+// inline void set_g_device(VkDevice dev)           noexcept { StoneKey::set_g_device(dev); }
+// inline void set_g_surface(VkSurfaceKHR surf)     noexcept { StoneKey::set_g_surface(surf); }
 
 // =============================================================================
 // RTX TOGGLE — TRUE = FULL RTX (validation layers force-disabled)

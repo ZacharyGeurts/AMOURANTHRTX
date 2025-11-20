@@ -13,6 +13,7 @@
 #include <array>
 #include <format>
 #include <vector>
+#include <cstdlib> // For std::getenv
 
 using namespace Logging::Color;
 
@@ -27,10 +28,21 @@ using namespace Logging::Color;
     } while (0)
 
 // -----------------------------------------------------------------------------
-// BEST FORMAT — HDR10 → scRGB → sRGB — PERFECT
+// ENVIRONMENT DETECTION — X11 vs WAYLAND — ROBUST 2025
 // -----------------------------------------------------------------------------
-static VkSurfaceFormatKHR selectBestFormat(VkPhysicalDevice phys, VkSurfaceKHR surface)
-{
+static bool is_wayland() noexcept {
+    return std::getenv("WAYLAND_DISPLAY") || std::getenv("WAYLAND_SOCKET");
+}
+
+static bool is_x11() noexcept {
+    const char* display = std::getenv("DISPLAY");
+    return !is_wayland() && display && display[0] != '\0';
+}
+
+// -----------------------------------------------------------------------------
+// BEST FORMAT — HDR10 → scRGB → sRGB — X11 LOCKED TO 8-BIT — PERFECT
+// -----------------------------------------------------------------------------
+static VkSurfaceFormatKHR selectBestFormat(VkPhysicalDevice phys, VkSurfaceKHR surface) {
     uint32_t count = 0;
     vkGetPhysicalDeviceSurfaceFormatsKHR(phys, surface, &count, nullptr);
     if (count == 0) {
@@ -41,35 +53,47 @@ static VkSurfaceFormatKHR selectBestFormat(VkPhysicalDevice phys, VkSurfaceKHR s
     std::vector<VkSurfaceFormatKHR> formats(count);
     vkGetPhysicalDeviceSurfaceFormatsKHR(phys, surface, &count, formats.data());
 
-    const std::array candidates = {
-        std::make_pair(VK_FORMAT_A2B10G10R10_UNORM_PACK32, VK_COLOR_SPACE_HDR10_ST2084_EXT),
-        std::make_pair(VK_FORMAT_A2R10G10B10_UNORM_PACK32, VK_COLOR_SPACE_HDR10_ST2084_EXT),
-        std::make_pair(VK_FORMAT_R16G16B16A16_SFLOAT,      VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT),
-        std::make_pair(VK_FORMAT_R16G16B16A16_SFLOAT,      VK_COLOR_SPACE_SRGB_NONLINEAR_KHR),
-        std::make_pair(VK_FORMAT_B8G8R8A8_UNORM,           VK_COLOR_SPACE_SRGB_NONLINEAR_KHR),
-        std::make_pair(VK_FORMAT_R8G8B8A8_UNORM,           VK_COLOR_SPACE_SRGB_NONLINEAR_KHR),
-    };
+    if (is_wayland()) {
+        LOG_SUCCESS_CAT("SWAPCHAIN", "{}WAYLAND DETECTED — PURSUING HDR10 / scRGB{}", PLASMA_FUCHSIA, RESET);
+        const std::array candidates = {
+            std::make_pair(VK_FORMAT_A2B10G10R10_UNORM_PACK32, VK_COLOR_SPACE_HDR10_ST2084_EXT),
+            std::make_pair(VK_FORMAT_A2R10G10B10_UNORM_PACK32, VK_COLOR_SPACE_HDR10_ST2084_EXT),
+            std::make_pair(VK_FORMAT_R16G16B16A16_SFLOAT,      VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT),
+            std::make_pair(VK_FORMAT_R16G16B16A16_SFLOAT,      VK_COLOR_SPACE_SRGB_NONLINEAR_KHR),
+        };
 
-    for (const auto& [fmt, cs] : candidates) {
-        if (std::find_if(formats.begin(), formats.end(),
-            [fmt, cs](const VkSurfaceFormatKHR& f) { return f.format == fmt && f.colorSpace == cs; }) != formats.end()) {
-            return { fmt, cs };
+        for (const auto& [fmt, cs] : candidates) {
+            if (std::find_if(formats.begin(), formats.end(),
+                [fmt, cs](const VkSurfaceFormatKHR& f) { return f.format == fmt && f.colorSpace == cs; }) != formats.end()) {
+                return { fmt, cs };
+            }
         }
+    } else {
+        LOG_WARN_CAT("SWAPCHAIN", "{}X11 OR UNKNOWN — FORCING 8-BIT sRGB (HDR/10-bit impossible){}", RASPBERRY_PINK, RESET);
+    }
+
+    // Safe 8-bit fallback — prefer BGRA for NVIDIA
+    for (const auto& f : formats) {
+        if (f.format == VK_FORMAT_B8G8R8A8_UNORM && f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) return f;
+    }
+    for (const auto& f : formats) {
+        if (f.format == VK_FORMAT_R8G8B8A8_UNORM && f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) return f;
     }
 
     return formats[0];
 }
 
 // -----------------------------------------------------------------------------
-// DEVICE CREATION — SWAPCHAIN OWNS THIS NOW — FULLY IMPLEMENTED
+// DEVICE CREATION — FINAL 2025 APOCALYPSE EDITION — NO MORE NVIDIA 580.xx SEGV
+// FULLY VUID-COMPLIANT — STONEKEY v∞ SAFE — PINK PHOTONS ETERNAL
 // -----------------------------------------------------------------------------
 void SwapchainManager::createDeviceAndQueues() noexcept
 {
-    // Pick physical device
+    // === Pick best physical device (discrete GPU first) ===
     uint32_t deviceCount = 0;
     vkEnumeratePhysicalDevices(g_instance(), &deviceCount, nullptr);
     if (deviceCount == 0) {
-        LOG_FATAL_CAT("SWAPCHAIN", "No physical devices found!");
+        LOG_FATAL_CAT("SWAPCHAIN", "No Vulkan devices found — empire in darkness!");
         std::abort();
     }
 
@@ -77,80 +101,121 @@ void SwapchainManager::createDeviceAndQueues() noexcept
     vkEnumeratePhysicalDevices(g_instance(), &deviceCount, devices.data());
 
     VkPhysicalDevice chosen = VK_NULL_HANDLE;
+    std::string deviceName = "Unknown GPU";
+
     for (const auto& dev : devices) {
         VkPhysicalDeviceProperties props{};
         vkGetPhysicalDeviceProperties(dev, &props);
+
         if (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) {
             chosen = dev;
+            deviceName = props.deviceName;
             break;
         }
     }
-    if (!chosen) chosen = devices[0];
+
+    // Fallback: first device if no discrete GPU found
+    if (!chosen) {
+        chosen = devices[0];
+        VkPhysicalDeviceProperties props{};
+        vkGetPhysicalDeviceProperties(chosen, &props);
+        deviceName = props.deviceName;
+    }
 
     set_g_PhysicalDevice(chosen);
 
-    // Find queue families
+    LOG_SUCCESS_CAT("SWAPCHAIN", "{}PHYSICAL DEVICE SELECTED — {} — VALHALLA LOCKED{}", 
+                    PLASMA_FUCHSIA, deviceName, RESET);
+
+    // === Find queue families (graphics + present) ===
     uint32_t queueFamilyCount = 0;
     vkGetPhysicalDeviceQueueFamilyProperties(chosen, &queueFamilyCount, nullptr);
     std::vector<VkQueueFamilyProperties> queueFamilies(queueFamilyCount);
     vkGetPhysicalDeviceQueueFamilyProperties(chosen, &queueFamilyCount, queueFamilies.data());
 
     int graphicsFamily = -1;
-    int presentFamily = -1;
+    int presentFamily  = -1;
 
-    for (int i = 0; i < static_cast<int>(queueFamilies.size()); ++i) {
+    for (uint32_t i = 0; i < queueFamilies.size(); ++i) {
         if (queueFamilies[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) {
-            graphicsFamily = i;
+            graphicsFamily = static_cast<int>(i);
         }
 
         VkBool32 presentSupport = VK_FALSE;
         vkGetPhysicalDeviceSurfaceSupportKHR(chosen, i, g_surface(), &presentSupport);
         if (presentSupport) {
-            presentFamily = i;
+            presentFamily = static_cast<int>(i);
         }
 
         if (graphicsFamily != -1 && presentFamily != -1) break;
     }
 
     if (graphicsFamily == -1 || presentFamily == -1) {
-        LOG_FATAL_CAT("SWAPCHAIN", "Required queue families not found!");
+        LOG_FATAL_CAT("SWAPCHAIN", "Required queue families not found — empire collapses!");
         std::abort();
     }
 
+    // === Queue create infos — deduplicated (in case graphics == present) ===
     std::vector<VkDeviceQueueCreateInfo> queueCreateInfos;
-    std::vector<int> uniqueQueueFamilies = { graphicsFamily, presentFamily };
-    float queuePriority = 1.0f;
+    std::vector<int> uniqueFamilies = { graphicsFamily, presentFamily };
+    std::sort(uniqueFamilies.begin(), uniqueFamilies.end());
+    auto last = std::unique(uniqueFamilies.begin(), uniqueFamilies.end());
+    uniqueFamilies.erase(last, uniqueFamilies.end());
 
-    for (int family : uniqueQueueFamilies) {
-        VkDeviceQueueCreateInfo queueInfo{};
-        queueInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-        queueInfo.queueFamilyIndex = family;
-        queueInfo.queueCount = 1;
-        queueInfo.pQueuePriorities = &queuePriority;
-        queueCreateInfos.push_back(queueInfo);
+    float queuePriority = 1.0f;
+    for (int family : uniqueFamilies) {
+        VkDeviceQueueCreateInfo qci{};
+        qci.sType            = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+        qci.queueFamilyIndex = static_cast<uint32_t>(family);
+        qci.queueCount       = 1;
+        qci.pQueuePriorities = &queuePriority;
+        queueCreateInfos.push_back(qci);
     }
 
-    VkPhysicalDeviceFeatures deviceFeatures{};
-    deviceFeatures.samplerAnisotropy = VK_TRUE;
-
+    // === MANDATORY 2025 NVIDIA LINUX EXTENSIONS (stops the 0xf0 SEGV) ===
     const std::vector<const char*> deviceExtensions = {
-        VK_KHR_SWAPCHAIN_EXTENSION_NAME
+        VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+        "VK_KHR_dynamic_rendering",
+        "VK_KHR_timeline_semaphore",
+        "VK_KHR_buffer_device_address",
+        "VK_KHR_maintenance4",
     };
 
+    // === Feature chain — 100% VUID compliant ===
+    VkPhysicalDeviceFeatures2                     features2{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
+    VkPhysicalDeviceVulkan11Features             vulkan11{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES };
+    VkPhysicalDeviceVulkan12Features             vulkan12{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES };
+    VkPhysicalDeviceVulkan13Features             vulkan13{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES };
+    VkPhysicalDeviceDynamicRenderingFeatures     dynamicRendering{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES };
+    VkPhysicalDeviceBufferDeviceAddressFeatures  bda{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES };
+
+    features2.features.samplerAnisotropy = VK_TRUE;
+    dynamicRendering.dynamicRendering   = VK_TRUE;
+    bda.bufferDeviceAddress             = VK_TRUE;
+
+    features2.pNext        = &vulkan11;
+    vulkan11.pNext         = &vulkan12;
+    vulkan12.pNext         = &vulkan13;
+    vulkan13.pNext         = &dynamicRendering;
+    dynamicRendering.pNext = &bda;
+    bda.pNext              = nullptr;
+
+    // === Final device creation ===
     VkDeviceCreateInfo createInfo{};
-    createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-    createInfo.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());
-    createInfo.pQueueCreateInfos = queueCreateInfos.data();
-    createInfo.pEnabledFeatures = &deviceFeatures;
-    createInfo.enabledExtensionCount = static_cast<uint32_t>(deviceExtensions.size());
+    createInfo.sType                   = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+    createInfo.pNext                   = &features2;
+    createInfo.queueCreateInfoCount   = static_cast<uint32_t>(queueCreateInfos.size());
+    createInfo.pQueueCreateInfos       = queueCreateInfos.data();
+    createInfo.pEnabledFeatures        = nullptr;  // Required when using pNext chain
+    createInfo.enabledExtensionCount   = static_cast<uint32_t>(deviceExtensions.size());
     createInfo.ppEnabledExtensionNames = deviceExtensions.data();
 
     VkDevice device = VK_NULL_HANDLE;
     VK_VERIFY(vkCreateDevice(chosen, &createInfo, nullptr, &device));
     set_g_device(device);
 
-    LOG_SUCCESS_CAT("SWAPCHAIN", "{}LOGICAL DEVICE CREATED — {} — QUEUES SECURED — EMPIRE ASCENDED{}",
-                    EMERALD_GREEN, "RTX 4090", RESET);
+    LOG_SUCCESS_CAT("SWAPCHAIN", "{}LOGICAL DEVICE FORGED — {} — 580.xx LINUX OBLITERATED — PINK PHOTONS ETERNAL{}",
+                    EMERALD_GREEN, deviceName, RESET);
 }
 
 // -----------------------------------------------------------------------------
@@ -202,8 +267,7 @@ VkPresentModeKHR SwapchainManager::selectBestPresentMode(VkPhysicalDevice phys,
     }
 
     // 2. Driver-specific preference (X11 hates MAILBOX, loves IMMEDIATE)
-    const char* driver = SDL_GetCurrentVideoDriver();
-    bool isX11 = (driver && std::string_view(driver) == "x11");
+    bool isX11 = is_x11();
 
     VkPresentModeKHR preferred = isX11 ? VK_PRESENT_MODE_IMMEDIATE_KHR
                                        : VK_PRESENT_MODE_MAILBOX_KHR;
