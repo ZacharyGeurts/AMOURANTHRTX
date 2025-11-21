@@ -113,31 +113,31 @@ int present  = -1;
 
 for (uint32_t i = 0; i < qCount; ++i) {
     const auto& q = qProps[i];
+	LOG_SUCCESS_CAT("SWAPCHAIN", "{}HIT LOG 1 : 116 in SwapchainManager.cpp{}", DIAMOND_SPARKLE, RESET);
 
     // Graphics queue — first one wins
     if (graphics == -1 && (q.queueFlags & VK_QUEUE_GRAPHICS_BIT)) {
         graphics = static_cast<int>(i);
-        LOG_SUCCESS_CAT("SWAPCHAIN", "{}GRAPHICS QUEUE FAMILY LOCKED → {}{}", VALHALLA_GOLD, i, RESET);
     }
+	LOG_SUCCESS_CAT("SWAPCHAIN", "{}HIT LOG 2 : 122 in SwapchainManager.cpp{}", DIAMOND_SPARKLE, RESET);
 
     // Present support — SLOW AND SAFE
     VkBool32 supportsPresent = VK_FALSE;
-    LOG_INFO_CAT("SWAPCHAIN", "{}Querying present support for family {}...{}", RASPBERRY_PINK, i, RESET);
+	LOG_SUCCESS_CAT("SWAPCHAIN", "{}HIT LOG 3 : 126 in SwapchainManager.cpp{}", DIAMOND_SPARKLE, RESET);
 
     VkResult queryResult = vkGetPhysicalDeviceSurfaceSupportKHR(chosen, i, g_surface(), &supportsPresent);
-    
+    LOG_SUCCESS_CAT("SWAPCHAIN", "{}HIT LOG 4 : 129 in SwapchainManager.cpp{}", DIAMOND_SPARKLE, RESET);
+
+	LOG_SUCCESS_CAT("SWAPCHAIN", "{}HIT LOG 5 : THIS NOT?{}", DIAMOND_SPARKLE, RESET);
     if (queryResult != VK_SUCCESS) {
         std::abort();
     }
-
-    LOG_INFO_CAT("SWAPCHAIN", "{}Family {} present support: {}{}", 
-                 supportsPresent ? EMERALD_GREEN : AMBER_YELLOW, 
-                 i, supportsPresent ? "YES" : "NO", RESET);
+	LOG_SUCCESS_CAT("SWAPCHAIN", "{}WAS NOT?{}", DIAMOND_SPARKLE, RESET);
 
     if (supportsPresent && present == -1) {
-        present = static_cast<int>(i);
-        LOG_SUCCESS_CAT("SWAPCHAIN", "{}PRESENT QUEUE FAMILY LOCKED → {}{}", PLASMA_FUCHSIA, i, RESET);
+        present = static_cast<int>(i);     
     }
+	LOG_SUCCESS_CAT("SWAPCHAIN", "{}HIT LOG 6 : 140 THIS NOT? - the end{}", DIAMOND_SPARKLE, RESET);
 
     // Optional: break early if we have both
     if (graphics != -1 && present != -1) {
