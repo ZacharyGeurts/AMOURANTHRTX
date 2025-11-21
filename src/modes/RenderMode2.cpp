@@ -29,7 +29,7 @@ RenderMode2::RenderMode2(VulkanRTX& rtx, uint32_t width, uint32_t height)
 RenderMode2::~RenderMode2() {
     LOG_INFO_CAT("RenderMode2", "Destructor invoked — Safe cleanup");
 
-    vkDeviceWaitIdle(RTX::g_ctx().vkDevice());
+    vkDeviceWaitIdle(RTX::g_ctx().device());
 
     rtx_.updateRTXDescriptors(0,
         VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,
@@ -42,7 +42,7 @@ RenderMode2::~RenderMode2() {
 void RenderMode2::initResources() {
     LOG_INFO_CAT("RenderMode2", "initResources() — Creating output image only");
     auto& ctx = RTX::g_ctx();
-    VkDevice device = ctx.vkDevice();
+    VkDevice device = ctx.device();
 
     VkImageCreateInfo imgInfo{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
     imgInfo.imageType = VK_IMAGE_TYPE_2D;
@@ -108,7 +108,7 @@ void RenderMode2::onResize(uint32_t width, uint32_t height) {
     LOG_INFO_CAT("RenderMode2", "onResize() — New: {}×{} (old: {}×{})", width, height, width_, height_);
 
     auto& ctx = RTX::g_ctx();
-    VkDevice device = ctx.vkDevice();
+    VkDevice device = ctx.device();
     VK_CHECK(vkDeviceWaitIdle(device), "vkDeviceWaitIdle failed in onResize");
 
     rtx_.updateRTXDescriptors(0, VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,

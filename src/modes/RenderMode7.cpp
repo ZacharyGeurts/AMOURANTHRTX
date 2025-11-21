@@ -30,7 +30,7 @@ RenderMode7::RenderMode7(VulkanRTX& rtx, uint32_t width, uint32_t height)
 
 RenderMode7::~RenderMode7()
 {
-    vkDeviceWaitIdle(RTX::g_ctx().vkDevice());
+    vkDeviceWaitIdle(RTX::g_ctx().device());
 
     rtx_.updateRTXDescriptors(0, VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,
                               VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,
@@ -42,7 +42,7 @@ RenderMode7::~RenderMode7()
 void RenderMode7::initResources()
 {
     auto& ctx = RTX::g_ctx();
-    VkDevice device = ctx.vkDevice();
+    VkDevice device = ctx.device();
 
     VkImageCreateInfo imgInfo{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
     imgInfo.imageType = VK_IMAGE_TYPE_2D;
@@ -131,7 +131,7 @@ void RenderMode7::clearVortex(VkCommandBuffer cmd)
 
 void RenderMode7::onResize(uint32_t width, uint32_t height)
 {
-    vkDeviceWaitIdle(RTX::g_ctx().vkDevice());
+    vkDeviceWaitIdle(RTX::g_ctx().device());
 
     rtx_.updateRTXDescriptors(0, VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,
                               VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,

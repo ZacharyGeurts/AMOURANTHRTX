@@ -29,7 +29,7 @@ RenderMode9::RenderMode9(VulkanRTX& rtx, uint32_t width, uint32_t height)
 
 RenderMode9::~RenderMode9()
 {
-    vkDeviceWaitIdle(RTX::g_ctx().vkDevice());
+    vkDeviceWaitIdle(RTX::g_ctx().device());
 
     rtx_.updateRTXDescriptors(0,
         VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,
@@ -44,7 +44,7 @@ RenderMode9::~RenderMode9()
 void RenderMode9::initResources()
 {
     auto& ctx = RTX::g_ctx();
-    VkDevice device = ctx.vkDevice();
+    VkDevice device = ctx.device();
 
     // Uniform buffer: time (float) + frame (uint32) + padding to 16 bytes
     VkDeviceSize uboSize = 16;
@@ -127,7 +127,7 @@ void RenderMode9::onResize(uint32_t width, uint32_t height)
 {
     LOG_INFO_CAT("RenderMode9", "onResize() {}x{} — Re-ascending...", width, height);
 
-    vkDeviceWaitIdle(RTX::g_ctx().vkDevice());
+    vkDeviceWaitIdle(RTX::g_ctx().device());
 
     rtx_.updateRTXDescriptors(0, VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,
                               VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,

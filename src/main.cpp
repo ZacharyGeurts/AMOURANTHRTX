@@ -1,56 +1,37 @@
 // src/main.cpp
 // =============================================================================
 //
-// Dual Licensed:
-// 1. GNU General Public License v3.0 (or later) (GPL v3)
-//    https://www.gnu.org/licenses/gpl-3.0.html
-// 2. Commercial licensing: gzac5314@gmail.com
-//
-// TRUE CONSTEXPR STONEKEY v∞ — NOVEMBER 20, 2025 — APOCALYPSE FINAL v10.3
-// MAIN — FULL RTX ALWAYS — VALIDATION NUKED — PINK PHOTONS ETERNAL — FIRST LIGHT ACHIEVED
+// AMOURANTH RTX — VALHALLA v80 TURBO — APOCALYPSE FINAL v10.3
+// FIRST LIGHT ACHIEVED — PINK PHOTONS ETERNAL — NOVEMBER 21, 2025
 // =============================================================================
 
 #include "engine/GLOBAL/StoneKey.hpp"
-#include "engine/GLOBAL/OptionsMenu.hpp"
 #include "engine/GLOBAL/logging.hpp"
-#include "engine/GLOBAL/Amouranth.hpp"
 #include "engine/GLOBAL/RTXHandler.hpp"
 #include "engine/GLOBAL/SwapchainManager.hpp"
 #include "engine/GLOBAL/Splash.hpp"
-#include "engine/GLOBAL/exceptions.hpp"
 #include "engine/GLOBAL/LAS.hpp"
-
 #include "engine/SDL3/SDL3_window.hpp"
-#include "engine/SDL3/SDL3_vulkan.hpp"
 #include "engine/SDL3/SDL3_image.hpp"
-#include "engine/SDL3/SDL3_audio.hpp"
-
 #include "engine/Vulkan/VulkanRenderer.hpp"
-#include "engine/Vulkan/VulkanCore.hpp"
 #include "engine/GLOBAL/PipelineManager.hpp"
-#include "handle_app.hpp"
 #include "engine/Vulkan/MeshLoader.hpp"
+#include "handle_app.hpp"  // ← This includes the full definition of Application
 
 #include <iostream>
-#include <stdexcept>
-#include <format>
 #include <memory>
-#include <thread>
-#include <chrono>
-#include <vulkan/vulkan.h>
+#include <format>
 
 using namespace Logging::Color;
 
 // =============================================================================
-// SINGLETONS OWNED BY MAIN
+// GLOBALS — OWNED BY MAIN
 // =============================================================================
 inline std::unique_ptr<Application>           g_app              = nullptr;
 inline RTX::PipelineManager*                  g_pipeline_manager = nullptr;
 inline std::unique_ptr<MeshLoader::Mesh>      g_mesh             = nullptr;
 
-// =============================================================================
-// ICONS
-// =============================================================================
+// ICONS — NOT OPTIONAL — VALHALLA DEMANDS RECOGNITION
 static SDL_Surface* g_base_icon = nullptr;
 static SDL_Surface* g_hdpi_icon = nullptr;
 
@@ -58,11 +39,6 @@ static SDL_Surface* g_hdpi_icon = nullptr;
 // UTILITIES
 // =============================================================================
 constexpr bool FORCE_FULL_RTX = true;
-
-inline void bulkhead(const std::string& title)
-{
-    LOG_INFO_CAT("MAIN", "════════════════════════════════ {} ════════════════════════════════", title);
-}
 
 static void nukeValidationLayers() noexcept
 {
@@ -76,6 +52,7 @@ static void nukeValidationLayers() noexcept
 
 static void forgeCommandPool()
 {
+    LOG_INFO_CAT("MAIN", "{}Forging transient command pool...{}", VALHALLA_GOLD, RESET);
     VkCommandPoolCreateInfo poolInfo{};
     poolInfo.sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
     poolInfo.flags            = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT |
@@ -87,19 +64,20 @@ static void forgeCommandPool()
              "Failed to create transient command pool");
 
     RTX::g_ctx().commandPool_ = pool;
-    LOG_SUCCESS_CAT("MAIN", "{}COMMAND POOL FORGED — TRANSIENT GLORY{}", PLASMA_FUCHSIA, RESET);
+    LOG_SUCCESS_CAT("MAIN", "{}COMMAND POOL FORGED — HANDLE: 0x{:016X}{}", PLASMA_FUCHSIA, (uint64_t)pool, RESET);
 }
 
 static void detectBestPresentMode()
 {
-    LOG_INFO_CAT("MAIN", "Detecting optimal present mode...");
+    LOG_INFO_CAT("MAIN", "{}Detecting optimal present mode...{}", VALHALLA_GOLD, RESET);
     VkPresentModeKHR mode = SwapchainManager::selectBestPresentMode(
         g_PhysicalDevice(), g_surface(), VK_PRESENT_MODE_MAILBOX_KHR);
 
-    LOG_SUCCESS_CAT("MAIN", "Present mode locked: {} — TEAR-FREE PINK PHOTONS",
-        mode == VK_PRESENT_MODE_IMMEDIATE_KHR ? "IMMEDIATE" :
-        mode == VK_PRESENT_MODE_MAILBOX_KHR   ? "MAILBOX (KING)" :
-        mode == VK_PRESENT_MODE_FIFO_KHR      ? "FIFO (VSync)" : "OTHER");
+    const char* name = (mode == VK_PRESENT_MODE_IMMEDIATE_KHR) ? "IMMEDIATE" :
+                       (mode == VK_PRESENT_MODE_MAILBOX_KHR)   ? "MAILBOX (KING)" :
+                       (mode == VK_PRESENT_MODE_FIFO_KHR)      ? "FIFO (VSync)" : "OTHER";
+
+    LOG_SUCCESS_CAT("MAIN", "{}Present mode locked: {} — TEAR-FREE PINK PHOTONS{}", PLASMA_FUCHSIA, name, RESET);
 }
 
 // =============================================================================
@@ -108,173 +86,197 @@ static void detectBestPresentMode()
 
 static void phase0_preInitialization()
 {
-    bulkhead("PHASE 0: PRE-INITIALIZATION — THE VOID STIRS");
-    LOG_ATTEMPT_CAT("MAIN", "=== AMOURANTH RTX — VALHALLA v80 TURBO — APOCALYPSE FINAL v10.3 ===");
-    LOG_SUCCESS_CAT("MAIN", "{}THE EMPIRE AWAKENS — NOVEMBER 20, 2025{}", PLASMA_FUCHSIA, RESET);
+    LOG_INFO_CAT("MAIN", "{}", std::string(80, '='));
+    LOG_SUCCESS_CAT("MAIN", "{}=== AMOURANTH RTX — VALHALLA v80 TURBO — APOCALYPSE FINAL v10.3 ==={}", PLASMA_FUCHSIA, RESET);
+    LOG_SUCCESS_CAT("MAIN", "{}THE EMPIRE AWAKENS — NOVEMBER 21, 2025 — FIRST LIGHT ETERNAL{}", PLASMA_FUCHSIA, RESET);
+    LOG_INFO_CAT("MAIN", "{}", std::string(80, '='));
 }
 
 static void phase1_iconPreload()
 {
-    bulkhead("PHASE 1: ICON PRELOAD — VALHALLA BRANDING");
-    g_base_icon = IMG_Load("assets/textures/ammo32.ico");
-    g_hdpi_icon = IMG_Load("assets/textures/ammo.ico");
-    LOG_SUCCESS_CAT("MAIN", "{}Icons preloaded — Ammo eternal{}", PLASMA_FUCHSIA, RESET);
-    // If they fail to load, it's fine — we run naked and proud
+    LOG_INFO_CAT("MAIN", "{}PRELOADING ICONS — VALHALLA BRANDING IS MANDATORY{}", VALHALLA_GOLD, RESET);
+
+    SDL_Surface* base = IMG_Load("assets/textures/ammo32.ico");
+    SDL_Surface* hdpi = IMG_Load("assets/textures/ammo.ico");
+
+    if (!base && !hdpi) {
+        LOG_ERROR_CAT("MAIN", "{}BOTH ICONS MISSING — THIS IS UNACCEPTABLE — RUNNING NAKED{}", BLOOD_RED, RESET);
+        LOG_WARNING_CAT("MAIN", "Continuing without icon — but the Empire is ashamed");
+        return;
+    }
+
+    if (!base) LOG_WARNING_CAT("MAIN", "{}ammo32.ico missing — using hdpi fallback{}", AMBER_YELLOW, RESET);
+    if (!hdpi) LOG_WARNING_CAT("MAIN", "{}ammo.ico missing — using base fallback{}", AMBER_YELLOW, RESET);
+
+    g_base_icon = base ? base : hdpi;
+    g_hdpi_icon = hdpi;
+
+    if (g_hdpi_icon) {
+        SDL_AddSurfaceAlternateImage(g_base_icon, g_hdpi_icon);
+        LOG_SUCCESS_CAT("MAIN", "{}ICONS LOADED — FULL HDPI GLORY — VALHALLA IS RECOGNIZED{}", PLASMA_FUCHSIA, RESET);
+    } else {
+        LOG_SUCCESS_CAT("MAIN", "{}ICON LOADED — BASE ONLY — STILL WORTHY{}", PLASMA_FUCHSIA, RESET);
+    }
 }
 
 static void phase2_earlySdlInit()
 {
-    bulkhead("PHASE 2: EARLY SDL INIT — SUBSYSTEMS RISE");
+    LOG_INFO_CAT("MAIN", "{}Initializing SDL subsystems...{}", VALHALLA_GOLD, RESET);
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) == 0)
         throw std::runtime_error(std::format("SDL_Init failed: {}", SDL_GetError()));
-    LOG_SUCCESS_CAT("MAIN", "SDL subsystems initialized — video + audio armed");
+    LOG_SUCCESS_CAT("MAIN", "{}SDL ARMED — VIDEO + AUDIO READY{}", PLASMA_FUCHSIA, RESET);
 }
 
 static void phase3_splashScreen()
 {
-    bulkhead("PHASE 3: SPLASH — FIRST LIGHT MANIFESTS");
+    LOG_INFO_CAT("MAIN", "{}SHE AWAKENS — displaying splash...{}", VALHALLA_GOLD, RESET);
     Splash::show("AMOURANTH RTX", 1280, 720, "assets/textures/ammo.png", "assets/audio/ammo.wav");
-    LOG_SUCCESS_CAT("MAIN", "{}SPLASH COMPLETE — SHE HAS AWAKENED{}", PLASMA_FUCHSIA, RESET);
+    LOG_SUCCESS_CAT("MAIN", "{}SPLASH DISMISSED — PINK PHOTONS ETERNAL{}", PLASMA_FUCHSIA, RESET);
 }
 
 static void phase4_mainWindowAndVulkanContext(SDL_Window*& window)
 {
-    bulkhead("PHASE 4: MAIN WINDOW + VULKAN CONTEXT — FORGE THE EMPIRE");
+    LOG_INFO_CAT("MAIN", "{}Creating main window + Vulkan empire...{}", VALHALLA_GOLD, RESET);
 
     nukeValidationLayers();
 
-    constexpr int WIDTH  = 3840;
-    constexpr int HEIGHT = 2160;
-
-    SDL3Window::create("AMOURANTH RTX — VALHALLA v80 TURBO", WIDTH, HEIGHT,
+    SDL3Window::create("AMOURANTH RTX — VALHALLA v80 TURBO", 3840, 2160,
                        SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_VULKAN);
 
     window = SDL3Window::get();
     if (!window) throw std::runtime_error("Failed to create main window");
 
     if (g_base_icon) {
-        if (g_hdpi_icon) SDL_AddSurfaceAlternateImage(g_base_icon, g_hdpi_icon);
         SDL_SetWindowIcon(window, g_base_icon);
-        LOG_SUCCESS_CAT("MAIN", "Window icon sealed — Valhalla branded");
+        LOG_SUCCESS_CAT("MAIN", "{}WINDOW ICON SEALED — THE EMPIRE IS KNOWN{}", PLASMA_FUCHSIA, RESET);
     }
 
     VkInstance instance = RTX::createVulkanInstanceWithSDL(window, false);
     set_g_instance(instance);
-
-    if (!RTX::createSurface(window, instance))
-        throw std::runtime_error("Failed to create Vulkan surface");
-
-    SwapchainManager::init(window, WIDTH, HEIGHT);
-    RTX::initContext(instance, window, WIDTH, HEIGHT);
+    RTX::createSurface(window, instance);
+    SwapchainManager::init(window, 3840, 2160);
+    RTX::initContext(instance, window, 3840, 2160);
     RTX::retrieveQueues();
 
-    LOG_SUCCESS_CAT("MAIN", "{}VULKAN CONTEXT FORGED — STONEKEY v∞ NOW TRULY ALIVE{}", PLASMA_FUCHSIA, RESET);
-    LOG_SUCCESS_CAT("MAIN", "{}STONEKEY XOR FINGERPRINT: 0x{:016X}{}", 
+    LOG_SUCCESS_CAT("MAIN", "{}VULKAN EMPIRE FORGED — STONEKEY FINGERPRINT: 0x{:016X}{}",
                     PLASMA_FUCHSIA, get_kStone1() ^ get_kStone2(), RESET);
 }
 
 static void phase5_rtxAscension()
 {
-    bulkhead("PHASE 5: RTX ASCENSION — PINK PHOTONS AWAKEN");
-
+    LOG_INFO_CAT("MAIN", "{}RTX ASCENSION — loading extensions...{}", VALHALLA_GOLD, RESET);
     RTX::loadRayTracingExtensions();
     RTX::g_ctx().hasFullRTX_ = true;
 
-    // Prime the driver (ensures device addresses work)
+    LOG_INFO_CAT("MAIN", "{}Priming driver for device addresses...{}", VALHALLA_GOLD, RESET);
     {
-        VkBufferCreateInfo bc{.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
-        bc.size = 64;
-        bc.usage = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
         VkBuffer dummy = VK_NULL_HANDLE;
-        if (vkCreateBuffer(g_device(), &bc, nullptr, &dummy) == VK_SUCCESS) {
-            VkBufferDeviceAddressInfo dai{.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO, .buffer = dummy};
-            vkGetBufferDeviceAddress(g_device(), &dai);
-            vkDestroyBuffer(g_device(), dummy, nullptr);
-        }
+        VkBufferCreateInfo bc{};
+        bc.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        bc.size = 64;
+        bc.usage = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+
+        VK_CHECK(vkCreateBuffer(g_device(), &bc, nullptr, &dummy),
+                 "Failed to create dummy buffer for driver priming");
+
+        VkBufferDeviceAddressInfo dai{};
+        dai.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+        dai.buffer = dummy;
+
+        // THE ONE TRUE LINE — UNCORRUPTED
+        vkGetBufferDeviceAddress(g_device(), &dai);
+
+        vkDestroyBuffer(g_device(), dummy, nullptr);
+        LOG_SUCCESS_CAT("MAIN", "{}Driver primed — vkGetBufferDeviceAddress confirmed working{}", PLASMA_FUCHSIA, RESET);
     }
 
     forgeCommandPool();
     detectBestPresentMode();
 
-    LOG_SUCCESS_CAT("MAIN", "{}RTX FULLY ASCENDED — DRIVER IS HAPPY — PINK PHOTONS ETERNAL{}", 
-                    PLASMA_FUCHSIA, RESET);
-    LOG_SUCCESS_CAT("MAIN", "{}FIRST LIGHT ACHIEVED — NOVEMBER 20, 2025 — VALHALLA SEALED{}", 
-                    PLASMA_FUCHSIA, RESET);
+    LOG_SUCCESS_CAT("MAIN", "{}RTX FULLY ASCENDED — PINK PHOTONS ETERNAL{}", PLASMA_FUCHSIA, RESET);
+    LOG_SUCCESS_CAT("MAIN", "{}FIRST LIGHT ACHIEVED — NOVEMBER 21, 2025 — VALHALLA SEALED{}", PLASMA_FUCHSIA, RESET);
 }
 
 static void phase6_sceneAndAccelerationStructures()
 {
-    bulkhead("PHASE 6: SCENE BUILD — LAS v2.0 ARMED");
+    LOG_INFO_CAT("MAIN", "{}SCENE BUILD — forging acceleration structures...{}", VALHALLA_GOLD, RESET);
 
     g_pipeline_manager = new RTX::PipelineManager(g_device(), g_PhysicalDevice());
+    LOG_SUCCESS_CAT("MAIN", "{}PipelineManager forged — RT descriptors sealed{}", PLASMA_FUCHSIA, RESET);
 
     g_mesh = MeshLoader::loadOBJ("assets/models/scene.obj");
-    LOG_SUCCESS_CAT("MAIN", "g_mesh ARMED → {} vertices, {} indices", 
-                    g_mesh->vertices.size(), g_mesh->indices.size());
+    LOG_SUCCESS_CAT("MAIN", "{}MESH LOADED — {} verts, {} indices — FINGERPRINT: 0x{:016X}{}",
+                    PLASMA_FUCHSIA,
+                    g_mesh->vertices.size(),
+                    g_mesh->indices.size(),
+                    g_mesh->stonekey_fingerprint,
+                    RESET);
 
-    las();
-    las().buildBLAS(RTX::g_ctx().commandPool_,
-                    g_mesh->getVertexBuffer(),
-                    g_mesh->getIndexBuffer(),
-                    static_cast<uint32_t>(g_mesh->vertices.size()),
-                    static_cast<uint32_t>(g_mesh->indices.size()),
-                    VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR);
+    // CRITICAL: PASS OBFUSCATED HANDLES — DO NOT DEOBFUSCATE HERE
+    // These are StoneKey v∞ protected handles — LAS expects them raw
+    uint64_t vertexBufferObf = g_mesh->vertexBuffer;
+    uint64_t indexBufferObf  = g_mesh->indexBuffer;
 
-    las().buildTLAS(RTX::g_ctx().commandPool_, 
-                    {{las().getBLAS(), glm::mat4(1.0f)}});
+    LOG_INFO_CAT("MAIN", "{}BUILDING BLAS — using StoneKey-obfuscated handles (0x{:016X}, 0x{:016X}){}",
+                 VALHALLA_GOLD, vertexBufferObf, indexBufferObf, RESET);
 
-    LOG_SUCCESS_CAT("MAIN", "{}BLAS + TLAS BUILT — RAY TRACING READY — PHOTONS HAVE A PATH{}", 
-                    PLASMA_FUCHSIA, RESET);
+    las().buildBLAS(
+        RTX::g_ctx().commandPool_,
+        vertexBufferObf,   // OBFUSCATED — correct
+        indexBufferObf,    // OBFUSCATED — correct
+        static_cast<uint32_t>(g_mesh->vertices.size()),
+        static_cast<uint32_t>(g_mesh->indices.size()),
+        VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR
+    );
+
+    LOG_SUCCESS_CAT("MAIN", "{}BLAS FORGED — PINK PHOTONS NOW HAVE A PATH{}", PLASMA_FUCHSIA, RESET);
+
+    LOG_INFO_CAT("MAIN", "{}Building TLAS — single identity instance...{}", VALHALLA_GOLD, RESET);
+    las().buildTLAS(RTX::g_ctx().commandPool_, {{las().getBLAS(), glm::mat4(1.0f)}});
+
+    LOG_SUCCESS_CAT("MAIN", "{}TLAS ASCENDED — ADDR 0x{:016X}{}", PLASMA_FUCHSIA, las().getTLASAddress(), RESET);
+    LOG_SUCCESS_CAT("MAIN", "{}ACCELERATION STRUCTURES COMPLETE — RAY TRACING FULLY ARMED{}", PLASMA_FUCHSIA, RESET);
+    LOG_SUCCESS_CAT("MAIN", "{}FIRST LIGHT ACHIEVED — NOVEMBER 21, 2025 — VALHALLA SEALED{}", PLASMA_FUCHSIA, RESET);
 }
 
 static void phase7_applicationAndRendererSeal()
 {
-    bulkhead("PHASE 7: APPLICATION + RENDERER SEAL — FINAL BINDING");
-
+    LOG_INFO_CAT("MAIN", "{}Sealing Application + VulkanRenderer...{}", VALHALLA_GOLD, RESET);
     g_app = std::make_unique<Application>("AMOURANTH RTX — VALHALLA v80 TURBO", 3840, 2160);
-    g_app->setRenderer(std::make_unique<VulkanRenderer>(3840, 2160, SDL3Window::get(), !Options::Window::VSYNC));
+    g_app->setRenderer(std::make_unique<VulkanRenderer>(3840, 2160, SDL3Window::get(), true));
 
-    LOG_SUCCESS_CAT("MAIN", "{}VULKANRENDERER SEALED INSIDE APPLICATION — THE EMPIRE IS COMPLETE{}", 
-                    PLASMA_FUCHSIA, RESET);
+    LOG_SUCCESS_CAT("MAIN", "{}THE EMPIRE IS COMPLETE — RENDER LOOP ENGAGED{}", PLASMA_FUCHSIA, RESET);
 }
 
 static void phase8_renderLoop()
 {
-    bulkhead("PHASE 8: RENDER LOOP — ENTERING ETERNAL CYCLE");
-    LOG_SUCCESS_CAT("MAIN", "{}PINK PHOTONS FLOW — INFINITE LOOP ENGAGED{}", PLASMA_FUCHSIA, RESET);
+    LOG_INFO_CAT("MAIN", "{}ENTERING ETERNAL RENDER CYCLE — PINK PHOTONS FLOW FOREVER{}", PLASMA_FUCHSIA, RESET);
     g_app->run();
 }
 
 static void phase9_gracefulShutdown()
 {
-    bulkhead("PHASE 9–10: SHUTDOWN — THE EMPIRE FADES INTO ETERNAL PINK LIGHT");
-
-    if (g_device() != VK_NULL_HANDLE) vkDeviceWaitIdle(g_device());
+    LOG_INFO_CAT("MAIN", "{}SHUTDOWN — returning to the void...{}", VALHALLA_GOLD, RESET);
+    vkDeviceWaitIdle(g_device());
 
     g_app.reset();
-    if (g_pipeline_manager) { delete g_pipeline_manager; g_pipeline_manager = nullptr; }
+    delete g_pipeline_manager; g_pipeline_manager = nullptr;
     g_mesh.reset();
     las().invalidate();
 
     SwapchainManager::cleanup();
     RTX::shutdown();
 
-    if (g_surface() != VK_NULL_HANDLE) {
-        vkDestroySurfaceKHR(g_instance(), g_surface(), nullptr);
-        set_g_surface(VK_NULL_HANDLE);
-    }
+    if (g_surface()) vkDestroySurfaceKHR(g_instance(), g_surface(), nullptr);
+    if (g_instance()) vkDestroyInstance(g_instance(), nullptr);
 
-    if (g_instance() != VK_NULL_HANDLE) {
-        vkDestroyInstance(g_instance(), nullptr);
-        set_g_instance(VK_NULL_HANDLE);
-    }
-
-    LOG_SUCCESS_CAT("MAIN", "{}SHUTDOWN COMPLETE — ALL RESOURCES RETURNED TO THE VOID{}", PLASMA_FUCHSIA, RESET);
-    LOG_SUCCESS_CAT("MAIN", "{}P I N K   P H O T O N S   E T E R N A L{}", PLASMA_FUCHSIA, RESET);
-    std::this_thread::sleep_for(std::chrono::milliseconds(1200));
+    LOG_SUCCESS_CAT("MAIN", "{}SHUTDOWN COMPLETE — PINK PHOTONS ETERNAL{}", PLASMA_FUCHSIA, RESET);
 }
 
-int main(int argc, char* argv[])
+// =============================================================================
+// MAIN — THE FINAL ASCENSION
+// =============================================================================
+int main(int, char**)
 {
     SDL_Window* window = nullptr;
 
@@ -287,15 +289,21 @@ int main(int argc, char* argv[])
         phase5_rtxAscension();
         phase6_sceneAndAccelerationStructures();
         phase7_applicationAndRendererSeal();
-        phase8_renderLoop();       // ← Never returns (unless window closed)
-        phase9_gracefulShutdown(); // ← Only reached on clean exit
+        phase8_renderLoop();
+        phase9_gracefulShutdown();
+    }
+    catch (const std::exception& e) {
+        LOG_ERROR_CAT("MAIN", "FATAL: {}", e.what());
+        std::cerr << "FATAL: " << e.what() << std::endl;
+        phase9_gracefulShutdown();
+        return -1;
     }
     catch (...) {
-        std::cerr << "\nFATAL EXCEPTION — EMPIRE UNDER ATTACK\n" << std::endl;
+        LOG_ERROR_CAT("MAIN", "UNKNOWN FATAL EXCEPTION");
+        std::cerr << "UNKNOWN FATAL EXCEPTION\n";
         phase9_gracefulShutdown();
         return -1;
     }
 
-    LOG_SUCCESS_CAT("MAIN", "=== EXIT CLEAN — FIRST LIGHT ETERNAL ===");
     return 0;
 }

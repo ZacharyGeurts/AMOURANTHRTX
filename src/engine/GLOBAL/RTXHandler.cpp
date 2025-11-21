@@ -516,29 +516,38 @@ void RTX::loadRayTracingExtensions()
 {
     VkDevice dev = g_ctx().device();
     if (!dev) {
-        LOG_FATAL("RTX", "loadRayTracingExtensions called with null device!");
+        LOG_FATAL_CAT("RTX", "{}loadRayTracingExtensions() called with null device!{}", CRIMSON_MAGENTA, RESET);
         return;
     }
 
-    LOG_SUCCESS("RTX", "LOADING RAY TRACING EXTENSIONS NOW — THIS MUST PRINT");
+    LOG_SUCCESS_CAT("RTX", "{}=== LOADING VULKAN RAY TRACING EXTENSIONS (1.4 CORE) ==={}", PLASMA_FUCHSIA, RESET);
 
-    #define LOAD(name) \
-        g_ctx().name## _ = (PFN_##name)vkGetDeviceProcAddr(dev, #name); \
-        if (!g_ctx().name## _) { \
-            LOG_FATAL("RTX", "FAILED TO LOAD " #name " — THIS WILL CRASH IN BLAS"); \
-        } else { \
-            LOG_SUCCESS("RTX", "Loaded " #name); \
-        }
+#define LOAD_RT_PFN(name) \
+    g_ctx().name## _ = reinterpret_cast<PFN_##name>(vkGetDeviceProcAddr(dev, #name)); \
+    if (!g_ctx().name## _) { \
+        LOG_FATAL_CAT("RTX", "{}FAILED TO LOAD {} — WILL CRASH ON BLAS/TLAS!{}", CRIMSON_MAGENTA, #name, RESET); \
+    } else { \
+        LOG_SUCCESS_CAT("RTX", "Loaded {} @ 0x{:016x}", #name, reinterpret_cast<uintptr_t>(g_ctx().name## _)); \
+    }
 
-    LOAD(vkCreateAccelerationStructureKHR);
-    LOAD(vkDestroyAccelerationStructureKHR);
-    LOAD(vkGetAccelerationStructureBuildSizesKHR);
-    LOAD(vkCmdBuildAccelerationStructuresKHR);
-    LOAD(vkGetAccelerationStructureDeviceAddressKHR);
+    // Core ray tracing pipeline
+    LOAD_RT_PFN(vkCmdTraceRaysKHR);
+    LOAD_RT_PFN(vkCreateRayTracingPipelinesKHR);
+    LOAD_RT_PFN(vkGetRayTracingShaderGroupHandlesKHR);
+    LOAD_RT_PFN(vkGetBufferDeviceAddressKHR);
 
-    #undef LOAD
+    // CRITICAL: Acceleration structure functions (this was your segfault)
+    LOAD_RT_PFN(vkCreateAccelerationStructureKHR);
+    LOAD_RT_PFN(vkDestroyAccelerationStructureKHR);
+    LOAD_RT_PFN(vkGetAccelerationStructureBuildSizesKHR);
+    LOAD_RT_PFN(vkCmdBuildAccelerationStructuresKHR);
+    LOAD_RT_PFN(vkGetAccelerationStructureDeviceAddressKHR);
 
-    LOG_SUCCESS("RTX", "ALL 5 RT PFNs LOADED — FIRST LIGHT INCOMING");
+    // Optional but highly recommended
+
+#undef LOAD_RT_PFN
+
+    LOG_SUCCESS_CAT("RTX", "{}ALL RAY TRACING + ACCELERATION STRUCTURE PFNs LOADED — VALHALLA UNLOCKED{}", EMERALD_GREEN, RESET);
 }
 
 void RTX::retrieveQueues() noexcept

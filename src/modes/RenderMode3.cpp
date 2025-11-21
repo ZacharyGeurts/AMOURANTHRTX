@@ -31,7 +31,7 @@ RenderMode3::RenderMode3(VulkanRTX& rtx, uint32_t width, uint32_t height)
 
 RenderMode3::~RenderMode3() {
     LOG_INFO_CAT("RenderMode3", "Destructor invoked — Safe cleanup");
-    vkDeviceWaitIdle(RTX::g_ctx().vkDevice());
+    vkDeviceWaitIdle(RTX::g_ctx().device());
 
     rtx_.updateRTXDescriptors(0,
         VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,
@@ -44,7 +44,7 @@ RenderMode3::~RenderMode3() {
 void RenderMode3::initResources() {
     LOG_INFO_CAT("RenderMode3", "initResources() — Creating output image only");
     auto& ctx = RTX::g_ctx();
-    VkDevice device = ctx.vkDevice();
+    VkDevice device = ctx.device();
 
     VkImageCreateInfo imgInfo{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
     imgInfo.imageType = VK_IMAGE_TYPE_2D;
@@ -104,7 +104,7 @@ void RenderMode3::clearRandom(VkCommandBuffer cmd) {
 void RenderMode3::onResize(uint32_t width, uint32_t height) {
     LOG_INFO_CAT("RenderMode3", "onResize() — New: {}×{} → Re-seeding chaos", width, height);
 
-    vkDeviceWaitIdle(RTX::g_ctx().vkDevice());
+    vkDeviceWaitIdle(RTX::g_ctx().device());
 
     rtx_.updateRTXDescriptors(0, VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,
                               VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,

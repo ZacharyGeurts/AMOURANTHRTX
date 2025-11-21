@@ -258,37 +258,40 @@ VulkanAccel::TLAS VulkanAccel::createTLAS(const std::vector<VkAccelerationStruct
 // LAS BLAS BUILD — CONSOLIDATED — 0x0 RESOLVED FOREVER — NOVEMBER 20, 2025
 // =============================================================================
 void LAS::buildBLAS(VkCommandPool pool,
-                    VkBuffer vertexBuffer,
-                    VkBuffer indexBuffer,
+                    uint64_t vertexBufferObf,   // obfuscated StoneKey handle
+                    uint64_t indexBufferObf,    // obfuscated StoneKey handle
                     uint32_t vertexCount,
                     uint32_t indexCount,
                     VkBuildAccelerationStructureFlagsKHR extraFlags)
 {
-    LOG_INFO_CAT("LAS", "Forging BLAS — verts: {}, indices: {}", vertexCount, indexCount);
+    LOG_INFO_CAT("LAS", "{}Forging BLAS — {} verts, {} indices — StoneKey v∞ ACTIVE{}", 
+                 PLASMA_FUCHSIA, vertexCount, indexCount, RESET);
 
-    // Lazy-create VulkanAccel
     if (!accel_) {
         accel_ = std::make_unique<VulkanAccel>(RTX::g_ctx().device());
     }
 
     AccelGeometry geom{};
+    geom.type = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
+    geom.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
     geom.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
-    geom.vertexStride = sizeof(glm::vec3);
-    geom.vertexCount  = vertexCount;
+    geom.vertexStride = 44;
+    geom.vertexCount = vertexCount;
 
-    // THE FINAL 0x0 FIX — NOVEMBER 20, 2025 — FULLY INITIALIZED
-    VkBufferDeviceAddressInfo vAddrInfo = { VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO };
-    vAddrInfo.buffer = vertexBuffer;
-    geom.vertexData.deviceAddress = vkGetBufferDeviceAddress(g_ctx().device(), &vAddrInfo);
-    LOG_DEBUG_CAT("LAS", "Vertex address: 0x{:016X}", geom.vertexData.deviceAddress);
+    // Correct: Use obfuscated handle → RAW_BUFFER → device address
+    geom.vertexData.deviceAddress = [] (uint64_t h) {
+        VkBufferDeviceAddressInfo info{VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO};
+        info.buffer = RAW_BUFFER(h);
+        return vkGetBufferDeviceAddress(g_ctx().device(), &info);
+    }(vertexBufferObf);
 
-    geom.indexType  = VK_INDEX_TYPE_UINT32;
+    geom.indexType = VK_INDEX_TYPE_UINT32;
     geom.indexCount = indexCount;
-
-    VkBufferDeviceAddressInfo iAddrInfo = { VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO };
-    iAddrInfo.buffer = indexBuffer;
-    geom.indexData.deviceAddress = vkGetBufferDeviceAddress(g_ctx().device(), &iAddrInfo);
-    LOG_DEBUG_CAT("LAS", "Index address: 0x{:016X}", geom.indexData.deviceAddress);
+    geom.indexData.deviceAddress = [] (uint64_t h) {
+        VkBufferDeviceAddressInfo info{VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO};
+        info.buffer = RAW_BUFFER(h);
+        return vkGetBufferDeviceAddress(g_ctx().device(), &info);
+    }(indexBufferObf);
 
     VkCommandBuffer cmd = beginOneTime(pool);
 
@@ -296,14 +299,14 @@ void LAS::buildBLAS(VkCommandPool pool,
         {geom},
         VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR | extraFlags,
         cmd,
-        "AmouranthCube_BLAS"
+        "AmouranthScene_BLAS"
     );
 
     endSingleTimeCommandsAsync(cmd, g_ctx().graphicsQueue_, pool);
     ++generation_;
 
-    LOG_SUCCESS_CAT("LAS", "{}BLAS FORGED — {} verts, {} tris — ADDR 0x{:016X} — GENERATION {}{}",
-                    PLASMA_FUCHSIA, vertexCount, indexCount / 3, blas_.address, generation_, RESET);
+    LOG_SUCCESS_CAT("LAS", "{}BLAS FORGED — ADDR 0x{:016X} — GEN {}{}", 
+                    PLASMA_FUCHSIA, blas_.address, generation_, RESET);
 }
 
 // =============================================================================

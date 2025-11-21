@@ -180,11 +180,11 @@ public:
     static LAS& get() noexcept { static LAS instance; return instance; }
 
     void buildBLAS(VkCommandPool pool,
-                   VkBuffer vertexBuffer,
-                   VkBuffer indexBuffer,
-                   uint32_t vertexCount,
-                   uint32_t indexCount,
-                   VkBuildAccelerationStructureFlagsKHR extraFlags = 0);
+               uint64_t vertexBufferObf,   // ← obfuscated StoneKey handle
+               uint64_t indexBufferObf,    // ← obfuscated StoneKey handle
+               uint32_t vertexCount,
+               uint32_t indexCount,
+               VkBuildAccelerationStructureFlagsKHR extraFlags = 0);
 
     void buildTLAS(VkCommandPool pool,
                    const std::vector<std::pair<VkAccelerationStructureKHR, glm::mat4>>& instances);

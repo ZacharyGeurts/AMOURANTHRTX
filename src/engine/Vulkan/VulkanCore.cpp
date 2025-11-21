@@ -374,7 +374,8 @@ void VulkanRTX::setRayTracingPipeline(VkPipeline p, VkPipelineLayout l) noexcept
     LOG_TRACE_CAT("RTX", "setRayTracingPipeline — COMPLETE");
 }
 
-void VulkanRTX::buildAccelerationStructures() {
+void VulkanRTX::buildAccelerationStructures()
+{
     LOG_INFO_CAT("RTX", "{}Building acceleration structures — LAS awakening{}", PLASMA_FUCHSIA, RESET);
 
     // === FORCE STAGING POOL CREATION FIRST (CRITICAL FIX) ===
@@ -402,7 +403,7 @@ void VulkanRTX::buildAccelerationStructures() {
         }
     }
 
-    // Simple test cube (same as before)
+    // Simple test cube
     std::vector<glm::vec3> vertices = {
         {-1,-1,-1}, {1,-1,-1}, {1,1,-1}, {-1,1,-1},
         {-1,-1,1},  {1,-1,1},  {1,1,1},  {-1,1,1}
@@ -413,6 +414,7 @@ void VulkanRTX::buildAccelerationStructures() {
         3,2,6, 3,6,7, 0,4,5, 0,5,1
     };
 
+    // === CREATE BUFFERS — KEEP OBFUSCATED HANDLES ===
     uint64_t vbuf = 0, ibuf = 0;
 
     BUFFER_CREATE(vbuf, vertices.size() * sizeof(glm::vec3),
@@ -456,25 +458,26 @@ void VulkanRTX::buildAccelerationStructures() {
 
     LOG_SUCCESS_CAT("RTX", "Geometry uploaded — building BLAS/TLAS via global LAS");
 
-    // === BUILD VIA GLOBAL LAS (NEW SYSTEM) ===
+    // === BUILD VIA GLOBAL LAS — PASS OBFUSCATED HANDLES DIRECTLY ===
     las().buildBLAS(
         RTX::g_ctx().commandPool(),
-        RAW_BUFFER(vbuf),
-        RAW_BUFFER(ibuf),
+        vbuf,      // ← obfuscated uint64_t — CORRECT
+        ibuf,      // ← obfuscated uint64_t — CORRECT
         static_cast<uint32_t>(vertices.size()),
-        static_cast<uint32_t>(indices.size())
+        static_cast<uint32_t>(indices.size()),
+        VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR
     );
 
     std::vector<std::pair<VkAccelerationStructureKHR, glm::mat4>> instances{
-        std::make_pair(las().getBLAS(), glm::mat4(1.0f))
+        { las().getBLAS(), glm::mat4(1.0f) }
     };
-    las().buildTLAS(g_ctx().commandPool(), instances);
+    las().buildTLAS(RTX::g_ctx().commandPool(), instances);
 
     LOG_SUCCESS_CAT("RTX",
-        "{}GLOBAL_LAS ONLINE — BLAS: 0x{:x} | TLAS: 0x{:x} — PINK PHOTONS ETERNAL{}",
+        "{}GLOBAL_LAS ONLINE — BLAS: 0x{:016X} | TLAS: 0x{:016X} — PINK PHOTONS ETERNAL{}",
         PLASMA_FUCHSIA,
         (uint64_t)las().getBLAS(),
-        (uint64_t)las().getTLAS(),
+        las().getTLASAddress(),
         RESET);
 }
 
@@ -994,7 +997,7 @@ void VulkanRTX::updateRTXDescriptors(uint32_t frameIdx,
             VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, envSampler);
 
     // === Blue noise ===
-    VkImageView blueNoise = RTX::g_ctx().blueNoiseView() ? RTX::g_ctx().blueNoiseView() : HANDLE_GET(blackFallbackView_);
+        VkImageView blueNoise = RTX::g_ctx().blueNoiseView_.valid() ? RTX::g_ctx().blueNoiseView_.get() : HANDLE_GET(blackFallbackView_);
     bindImg(Bindings::RTX::BLUE_NOISE, blueNoise, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE);
 
     // === Reserved ===
@@ -1033,8 +1036,8 @@ void VulkanRTX::recordRayTrace(VkCommandBuffer cmd, VkExtent2D extent,
     LOG_DEBUG_CAT("RTX", "RT pipeline bound: 0x{:x}", reinterpret_cast<uintptr_t>(HANDLE_GET(rtPipeline_)));
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
                             HANDLE_GET(rtPipelineLayout_), 0, 1,
-                            &descriptorSets_[RTX::g_ctx().currentFrame()], 0, nullptr);
-    LOG_DEBUG_CAT("RTX", "Descriptor sets bound for frame {}", RTX::g_ctx().currentFrame());
+                            &descriptorSets_[0], 0, nullptr);
+    LOG_DEBUG_CAT("RTX", "Descriptor sets bound for frame {}", 0);
 
     LOG_TRACE_CAT("RTX", "Dispatching vkCmdTraceRaysKHR — — extent: {}x{}", extent.width, extent.height);
     RTX::g_ctx().vkCmdTraceRaysKHR()(cmd, &sbt_.raygen, &sbt_.miss, &sbt_.hit, &sbt_.callable,
@@ -1049,7 +1052,7 @@ void VulkanRTX::recordRayTrace(VkCommandBuffer cmd, VkExtent2D extent,
                          VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
     LOG_TRACE_CAT("RTX", "Post-trace barrier applied — PRESENT_SRC_KHR layout");
 
-    LOG_SUCCESS_CAT("RTX", "{}Ray trace recorded — frame {}{}", PLASMA_FUCHSIA, RTX::g_ctx().currentFrame(), RESET);
+    LOG_SUCCESS_CAT("RTX", "{}Ray trace recorded — frame {}{}", PLASMA_FUCHSIA, 0, RESET);
     RTX::AmouranthAI::get().onPhotonDispatch(extent.width, extent.height);
     LOG_TRACE_CAT("RTX", "recordRayTrace — COMPLETE");
 }
