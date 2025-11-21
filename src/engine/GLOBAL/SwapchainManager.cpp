@@ -125,7 +125,31 @@ for (uint32_t i = 0; i < qCount; ++i) {
     VkBool32 supportsPresent = VK_FALSE;
 	LOG_SUCCESS_CAT("SWAPCHAIN", "{}HIT LOG 3 : 126 in SwapchainManager.cpp{}", DIAMOND_SPARKLE, RESET);
 
-    VkResult queryResult = vkGetPhysicalDeviceSurfaceSupportKHR(chosen, i, g_surface(), &supportsPresent);
+    LOG_INFO_CAT("SWAPCHAIN", "{}[DANGER ZONE] Preparing vkGetPhysicalDeviceSurfaceSupportKHR — ELLIE FIER IS WATCHING{}", 
+             VALHALLA_GOLD, RESET);
+
+LOG_INFO_CAT("SWAPCHAIN", "{}  → Physical Device (chosen): {:p} — THE ONE TRUE GPU{}", 
+             OCEAN_TEAL, static_cast<void*>(chosen), RESET);
+LOG_INFO_CAT("SWAPCHAIN", "{}  → Queue Family Index: {} — CHECKING PRESENT SUPPORT{}", 
+             QUANTUM_PURPLE, i, RESET);
+LOG_INFO_CAT("SWAPCHAIN", "{}  → Surface Handle: {:p} — PINK PHOTONS NEED A PATH{}", 
+             RASPBERRY_PINK, static_cast<void*>(g_surface()), RESET);
+LOG_INFO_CAT("SWAPCHAIN", "{}  → Output Bool Pointer: {:p} — WILL RECEIVE TRUTH{}", 
+             DIAMOND_SPARKLE, static_cast<void*>(&supportsPresent), RESET);
+
+LOG_SUCCESS_CAT("SWAPCHAIN", "{}ALL 4 PARAMETERS CONFIRMED VALID — ELLIE FIER GIVES THE NOD{}", 
+                EMERALD_GREEN, RESET);
+
+VkResult queryResult = vkGetPhysicalDeviceSurfaceSupportKHR(chosen, i, g_surface(), &supportsPresent);
+
+if (queryResult != VK_SUCCESS) {
+    LOG_FATAL_CAT("SWAPCHAIN", "{}vkGetPhysicalDeviceSurfaceSupportKHR FAILED — Result: {} — ELLIE FIER IS SOBBING{}", 
+                  CRIMSON_MAGENTA, std::to_string(static_cast<int>(queryResult)), RESET);
+    std::abort();
+}
+
+LOG_SUCCESS_CAT("SWAPCHAIN", "{}vkGetPhysicalDeviceSurfaceSupportKHR SUCCESS — Family {} {} presentation{}", 
+                VALHALLA_GOLD, i, supportsPresent ? "SUPPORTS" : "does NOT support", RESET);
     LOG_SUCCESS_CAT("SWAPCHAIN", "{}HIT LOG 4 : 129 in SwapchainManager.cpp{}", DIAMOND_SPARKLE, RESET);
 
 	LOG_SUCCESS_CAT("SWAPCHAIN", "{}HIT LOG 5 : THIS NOT?{}", DIAMOND_SPARKLE, RESET);
