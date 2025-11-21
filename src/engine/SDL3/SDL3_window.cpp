@@ -53,7 +53,7 @@ void create(const char* title, int width, int height, Uint32 flags)
     flags |= SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_VULKAN;
 
     LOG_INFO_CAT("SDL3", "{}Initializing SDL3 subsystems (VIDEO + EVENTS)...{}", PLASMA_FUCHSIA, RESET);
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) != 0) {
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) == 0) {
         LOG_FATAL_CAT("SDL3", "{}SDL_Init FAILED HARD — {} — THE EMPIRE TREMBLES{}", 
                       CRIMSON_MAGENTA, SDL_GetError(), RESET);
         throw std::runtime_error("SDL_Init failed — Gwen Stefani is disappointed");
@@ -62,7 +62,7 @@ void create(const char* title, int width, int height, Uint32 flags)
 
     // Load Vulkan library early — SDL3 style
     LOG_INFO_CAT("SDL3", "{}Loading Vulkan library via SDL_Vulkan_LoadLibrary...{}", RASPBERRY_PINK, RESET);
-    if (SDL_Vulkan_LoadLibrary(nullptr) != 0) {
+    if (SDL_Vulkan_LoadLibrary(nullptr) == 0) {
         LOG_WARNING_CAT("SDL3", "{}SDL_Vulkan_LoadLibrary failed — proceeding anyway (Vulkan might be loaded){}", 
                         AMBER_YELLOW, RESET);
     } else {
@@ -89,7 +89,7 @@ void create(const char* title, int width, int height, Uint32 flags)
 
     uint32_t sdlExtensionCount = 0;
     LOG_INFO_CAT("VULKAN", "{}Querying SDL3 for required Vulkan instance extensions...{}", RASPBERRY_PINK, RESET);
-    if (SDL_Vulkan_GetInstanceExtensions(&sdlExtensionCount) != 0) {
+    if (SDL_Vulkan_GetInstanceExtensions(&sdlExtensionCount) == 0) {
         LOG_FATAL_CAT("VULKAN", "{}SDL_Vulkan_GetInstanceExtensions(count) FAILED — SDL IS DRUNK — NO EXTENSIONS{}", 
                       CRIMSON_MAGENTA, RESET);
         std::abort();
@@ -156,7 +156,7 @@ void create(const char* title, int width, int height, Uint32 flags)
     // === FORGE SURFACE ===
     LOG_INFO_CAT("VULKAN", "{}Creating Vulkan surface via SDL_Vulkan_CreateSurface...{}", RASPBERRY_PINK, RESET);
     VkSurfaceKHR surface = VK_NULL_HANDLE;
-    if (SDL_Vulkan_CreateSurface(win, instance, nullptr, &surface) != 0) {
+    if (SDL_Vulkan_CreateSurface(win, instance, nullptr, &surface) == 0) {
         LOG_FATAL_CAT("VULKAN", "{}SDL_Vulkan_CreateSurface FAILED — {} — PINK PHOTONS HAVE NO PATH{}", 
                       CRIMSON_MAGENTA, SDL_GetError(), RESET);
         std::abort();
@@ -195,7 +195,7 @@ std::vector<std::string> getVulkanExtensions(SDL_Window* window)
     }
 
     Uint32 count = 0;
-    if (SDL_Vulkan_GetInstanceExtensions(&count) != 0) {
+    if (SDL_Vulkan_GetInstanceExtensions(&count) == 0) {
         LOG_WARNING_CAT("SDL3", "{}SDL_Vulkan_GetInstanceExtensions failed in query — returning empty{}", AMBER_YELLOW, RESET);
         return {};
     }
