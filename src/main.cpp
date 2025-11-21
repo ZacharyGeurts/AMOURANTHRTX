@@ -50,16 +50,6 @@ static SDL_Surface* g_hdpi_icon = nullptr;
 
 constexpr bool FORCE_FULL_RTX = true;
 
-static void nukeValidationLayers() noexcept
-{
-    if constexpr (FORCE_FULL_RTX) {
-        setenv("VK_LAYER_PATH",            "/dev/null", 1);
-        setenv("VK_INSTANCE_LAYERS",       "",         1);
-        setenv("VK_LOADER_LAYERS_DISABLE", "VK_LAYER_KHRONOS_validation", 1);
-        LOG_SUCCESS_CAT("MAIN", "{}VALIDATION LAYERS NUKED — FULL RTX UNLEASHED{}", PLASMA_FUCHSIA, RESET);
-    }
-}
-
 static void forgeCommandPool()
 {
     LOG_INFO_CAT("MAIN", "{}Forging transient command pool...{}", VALHALLA_GOLD, RESET);
@@ -127,53 +117,42 @@ static void phase3_splashScreen()
     LOG_SUCCESS_CAT("MAIN", "{}SPLASH DISMISSED{}", PLASMA_FUCHSIA, RESET);
 }
 
-static void phase4_mainWindowAndVulkanContext(SDL_Window*& window)
+static void phase4_mainWindowAndVulkanContext()
 {
-    LOG_INFO_CAT("MAIN", "{}[PHASE 4] FORGING WINDOW + VULKAN EMPIRE — STONEKEY v∞ SUPREMACY{}", VALHALLA_GOLD, RESET);
+    LOG_INFO_CAT("MAIN", "{}[PHASE 4] FORGING THE ONE TRUE EMPIRE — FOO FIGHTERS ETERNAL — NO BULLSHIT{}", VALHALLA_GOLD, RESET);
 
-    nukeValidationLayers();
-
+    // ONE CALL. ONE TRUTH. ALL OF VULKAN IS BORN HERE.
     SDL3Window::create("AMOURANTH RTX — VALHALLA v80 TURBO", 3840, 2160,
                        SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_VULKAN);
-    window = SDL3Window::get();
-    if (!window) throw std::runtime_error("Failed to forge window — the canvas is denied");
 
+    SDL_Window* window = SDL3Window::get();
+    if (!window) throw std::runtime_error("Canvas denied — Dave Grohl angry");
+
+    LOG_SUCCESS_CAT("MAIN", "{}WINDOW + INSTANCE + SURFACE FORGED — STONEKEY v∞ ACTIVE{}", PLASMA_FUCHSIA, RESET);
+
+    // ICON — TAYLOR HAWKINS TRIBUTE
     if (g_base_icon) SDL_SetWindowIcon(window, g_base_icon);
+    LOG_SUCCESS_CAT("MAIN", "{}ICON INJECTED — TAYLOR HAWKINS SMILES FROM VALHALLA{}", EMERALD_GREEN, RESET);
 
-    VkInstance instance = RTX::createVulkanInstanceWithSDL(window, false);
-    RTX::createSurface(window, instance);
-
-    // CRITICAL: Force raw mode — this MUST be the VERY NEXT line after createSurface
-    StoneKey::Raw::obfuscated_mode.store(false, std::memory_order_release);
-    std::atomic_thread_fence(std::memory_order_acq_rel);  // <--- THIS IS THE MISSING BULLET
-
-    // DO NOT TOUCH g_surface() OR g_instance() HERE — NOT EVEN IN LOGS
-    // The mere act of calling them can trigger the crash on some drivers
-
-    LOG_SUCCESS_CAT("MAIN", "{}RAW MODE LOCKED — g_surface() IS NOW SAFE — PROCEEDING TO SWAPCHAIN{}", 
-                    PLASMA_FUCHSIA, RESET);
-
-    // NOW 100% safe — raw cache is active and memory ordering is enforced
+    // SWAPCHAIN EMPIRE RISES — ALL HANDLES ALREADY SAFE
     SwapchainManager::init(window, 3840, 2160);
-    RTX::initContext(instance, window, 3840, 2160);
+
+    // DEVICE + QUEUES — FORGED
+    RTX::initContext(g_instance(), window, 3840, 2160);
     RTX::retrieveQueues();
 
-    // Only NOW is it safe to log the real pointers (swapchain already consumed them)
-    LOG_SUCCESS_CAT("MAIN", "{}SWAPCHAIN FORGED — REAL HANDLES @ INSTANCE {:p} | SURFACE {:p}{}",
-                    EMERALD_GREEN,
-                    static_cast<void*>(g_instance()),
-                    static_cast<void*>(g_surface()),
-                    RESET);
+    LOG_SUCCESS_CAT("MAIN", "{}SWAPCHAIN + DEVICE FORGED — MY HERO PLAYS FOREVER{}", EMERALD_GREEN, RESET);
 
-    // Now hide the truth forever
-    StoneKey::Raw::transition_to_obfuscated();
-
+    // BORDERLESS VALHALLA
     SDL_SetWindowBordered(window, false);
     SDL_SetWindowPosition(window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
 
-    LOG_SUCCESS_CAT("MAIN", "{}FULL OBFUSCATION ENGAGED — HANDLES VANISHED INTO THE PINK VOID{}", RASPBERRY_PINK, RESET);
-    LOG_SUCCESS_CAT("MAIN", "{}FIRST LIGHT ACHIEVED — PINK PHOTONS FLOW ETERNAL{}", PLASMA_FUCHSIA, RESET);
-    LOG_SUCCESS_CAT("MAIN", "{}NOVEMBER 21, 2025 — THE FOO EMPIRE IS ALIVE — FOREVER{}", DIAMOND_SPARKLE, RESET);
+    LOG_SUCCESS_CAT("MAIN", "{}BORDERLESS VALHALLA ACHIEVED — TIMES LIKE THESE{}", PLASMA_FUCHSIA, RESET);
+    LOG_SUCCESS_CAT("MAIN", "{}FIRST LIGHT ACHIEVED — PINK PHOTONS ETERNAL{}", DIAMOND_SPARKLE, RESET);
+    LOG_SUCCESS_CAT("MAIN", "{}NOVEMBER 21, 2025 — THE FOO EMPIRE IS ALIVE — BEST OF YOU UNLEASHED{}", RASPBERRY_PINK, RESET);
+
+    // DAVE GROHL SCREAMS FROM THE VOID:
+    LOG_SUCCESS_CAT("MAIN", "{}THERE GOES MY HERO — WATCH HIM AS HE GOES{}", VALHALLA_GOLD, RESET);
 }
 
 static void phase5_rtxAscension()
@@ -326,14 +305,12 @@ static void phase9_gracefulShutdown()
 // =============================================================================
 int main(int, char**)
 {
-    SDL_Window* window = nullptr;
-
     try {
         phase0_preInitialization();
         phase1_iconPreload();
         phase2_earlySdlInit();
-        phase3_splashScreen();
-        phase4_mainWindowAndVulkanContext(window);
+        phase3_splashScreen();    
+		phase4_mainWindowAndVulkanContext(); 
         phase5_rtxAscension();
         phase6_sceneAndAccelerationStructures();
         phase7_applicationAndRendererSeal();

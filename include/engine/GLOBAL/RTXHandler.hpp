@@ -171,7 +171,7 @@ namespace RTX {
     // =============================================================================
     // FIXED: SDL3 2024+ — CREATE INSTANCE + OVERLOAD for initContext
     // =============================================================================
-    [[nodiscard]] VkInstance createVulkanInstanceWithSDL(SDL_Window* window, bool enableValidation);  // UPDATED: Added SDL_Window* window
+    [[nodiscard]] VkInstance createVulkanInstanceWithSDL(bool enableValidation);  // UPDATED: Added SDL_Window* window
     void initContext(VkInstance instance, SDL_Window* window, int width, int height);
 
     // =============================================================================

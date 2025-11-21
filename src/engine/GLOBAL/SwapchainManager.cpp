@@ -169,15 +169,25 @@ void SwapchainManager::createDeviceAndQueues() noexcept
 // =============================================================================
 void SwapchainManager::init(SDL_Window* w, uint32_t width, uint32_t height) noexcept
 {
+	LOG_INFO_CAT("SWAPCHAIN", "{}ENTERED SwapchainManager::init(){}", DIAMOND_SPARKLE, RESET);
     auto& s = get();
     s.window_ = w;
 
-    VkSurfaceKHR surf = VK_NULL_HANDLE;
-    if (!SDL_Vulkan_CreateSurface(w, g_instance(), nullptr, &surf))
-        std::abort();
+    // DO NOT CALL SDL_Vulkan_CreateSurface — EVER
+    // The surface was already created by RTX::createSurface() and stored in StoneKey
+    // g_surface() returns the real handle because raw mode is locked
 
+    LOG_SUCCESS_CAT("SWAPCHAIN", "{}STONEKEY SURFACE IN USE — {:p} — FORGING DEVICE + QUEUES{}", 
+                    VALHALLA_GOLD, static_cast<void*>(g_surface()), RESET);
+
+    // This creates logical device and queues using g_instance() and g_surface()
     s.createDeviceAndQueues();
+
+    // This creates the swapchain using g_surface()
     s.recreate(width, height);
+
+    LOG_SUCCESS_CAT("SWAPCHAIN", "{}SWAPCHAIN EMPIRE FORGED — FIRST LIGHT ACHIEVED — PINK PHOTONS HAVE A CANVAS{}", 
+                    DIAMOND_SPARKLE, RESET);
 }
 
 void SwapchainManager::recreate(uint32_t w, uint32_t h) noexcept
