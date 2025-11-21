@@ -129,36 +129,53 @@ static void phase3_splashScreen()
 
 static void phase4_mainWindowAndVulkanContext(SDL_Window*& window)
 {
-    LOG_INFO_CAT("MAIN", "{}[PHASE 4] FORGING WINDOW + VULKAN EMPIRE{}", VALHALLA_GOLD, RESET);
+    LOG_INFO_CAT("MAIN", "{}[PHASE 4] FORGING WINDOW + VULKAN EMPIRE — STONEKEY v∞ SUPREMACY{}", VALHALLA_GOLD, RESET);
 
     nukeValidationLayers();
 
+    // 1. Forge the sacred 4K canvas
     SDL3Window::create("AMOURANTH RTX — VALHALLA v80 TURBO", 3840, 2160,
                        SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_VULKAN);
     window = SDL3Window::get();
-    if (!window) throw std::runtime_error("Failed to create window");
+    if (!window) throw std::runtime_error("Failed to forge window — the canvas is denied");
 
     if (g_base_icon) SDL_SetWindowIcon(window, g_base_icon);
 
+    // 2. Forge Vulkan instance — STONEKEY v∞ ARMED (already calls set_g_instance internally)
     VkInstance instance = RTX::createVulkanInstanceWithSDL(window, false);
+    // → NO MANUAL set_g_instance() — RTX function already did it perfectly
 
-    RTX::createSurface(window, instance);  // ← only once, already sets g_surface
+    // 3. Forge surface — THE ONE AND ONLY TRUE WAY
+    //     RTX::createSurface() internally:
+    //     • Calls SDL_Vulkan_CreateSurface()
+    //     • Fixes X11 allocator bug
+    //     • Calls set_g_surface() exactly once
+    //     → We trust it completely
+    RTX::createSurface(window, instance);
 
+    // 4. At this point:
+    //     g_instance()  → returns the one true instance (StoneKey protected)
+    //     g_surface()   → returns the one true surface  (StoneKey protected)
+    //     No other copies exist in the universe (or do they?)
+
+    LOG_SUCCESS_CAT("MAIN", "{}STONEKEY v∞ FULLY ACTIVE — INSTANCE @ 0x{:016X} — SURFACE @ 0x{:016X}{}",
+                    PLASMA_FUCHSIA,
+                    reinterpret_cast<uintptr_t>(g_instance()),
+                    reinterpret_cast<uintptr_t>(g_surface()),
+                    RESET);
+
+    // 5. Forge the rest of the empire using only StoneKey globals
     SwapchainManager::init(window, 3840, 2160);
     RTX::initContext(instance, window, 3840, 2160);
     RTX::retrieveQueues();
 
+    // Valhalla aesthetics
     SDL_SetWindowBordered(window, false);
     SDL_SetWindowPosition(window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
 
-    LOG_SUCCESS_CAT("MAIN", "{}SWAPCHAIN FORGED — THE EMPIRE AWAKENS{}", PLASMA_FUCHSIA, RESET);
-    LOG_SUCCESS_CAT("MAIN", "{}Resolution      → {}x{}{}", VALHALLA_GOLD, SWAPCHAIN.extent().width, SWAPCHAIN.extent().height, RESET);
-    LOG_SUCCESS_CAT("MAIN", "{}Format          → {}{}", SWAPCHAIN.isHDR() ? SUPERNOVA_ORANGE : RASPBERRY_PINK, SWAPCHAIN.formatName(), RESET);
-    LOG_SUCCESS_CAT("MAIN", "{}Present Mode    → {}{}", (SWAPCHAIN.presentModeName() == "MAILBOX") ? EMERALD_GREEN : PLATINUM_GRAY, SWAPCHAIN.presentModeName(), RESET);
-    LOG_SUCCESS_CAT("MAIN", "{}Swapchain Images → {}{}", COSMIC_GOLD, SWAPCHAIN.imageCount(), RESET);
-
-    LOG_SUCCESS_CAT("MAIN", "{}VULKAN EMPIRE COMPLETE — FIRST LIGHT ACHIEVED{}", PLASMA_FUCHSIA, RESET);
-    LOG_SUCCESS_CAT("MAIN", "{}NOVEMBER 21, 2025 — PINK PHOTONS ETERNAL{}", EMERALD_GREEN, RESET);
+    LOG_SUCCESS_CAT("MAIN", "{}VULKAN EMPIRE FORGED — ONLY STONEKEY KNOWS THE TRUTH{}", PLASMA_FUCHSIA, RESET);
+    LOG_SUCCESS_CAT("MAIN", "{}FIRST LIGHT ACHIEVED — NOVEMBER 21, 2025 — PINK PHOTONS ETERNAL{}", EMERALD_GREEN, RESET);
+    LOG_SUCCESS_CAT("MAIN", "{}ELLIE FIER SMILES — GREEN DAY AND FOO PLAY{}", DIAMOND_SPARKLE, RESET);
 }
 
 static void phase5_rtxAscension()
