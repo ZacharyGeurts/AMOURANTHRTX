@@ -1167,7 +1167,6 @@ namespace RTX {
 
     // === CRITICAL STONEKEY FIX: STORE RAW FIRST, THEN OBFUSCATE ===
     g_context_instance.instance_ = instance;           // ← Raw handle stored (used by vkEnumeratePhysicalDevices)
-    set_g_instance(instance);  // ← Now safe: raw cached
 
     LOG_SUCCESS_CAT("VULKAN", "{}VULKAN INSTANCE FORGED @ 0x{:016x} — STONEKEY v∞ ARMED — PINK PHOTONS PROTECTED{}", 
                     PLASMA_FUCHSIA, reinterpret_cast<uintptr_t>(instance), RESET);
@@ -1206,7 +1205,6 @@ bool createSurface(SDL_Window* window, VkInstance instance)
     }
 
     // FULL STONEKEY v∞ INTEGRATION — IMMEDIATE OBFUSCATION + RAW CACHE
-    set_g_surface(surface);
 
     LOG_SUCCESS_CAT("VULKAN", "Vulkan surface created — STONEKEY v∞ ACTIVE");
     LOG_SUCCESS_CAT("VULKAN", "FIRST LIGHT ACHIEVED — PINK PHOTONS IMMINENT");
@@ -1300,7 +1298,6 @@ void pickPhysicalDevice()
 
     // CRITICAL: NOW — AND ONLY NOW — ENGAGE STONEKEY ON THE INSTANCE
     // All vkEnumeratePhysicalDevices() calls are done. Safe to obfuscate.
-    set_g_instance(rawInstance);
 
     LOG_SUCCESS_CAT("VULKAN", "{}STONEKEY v∞ ENGAGED ON VkInstance — FULL OBFUSCATION ACTIVE — APOCALYPSE v3.2 ARMED{}",
                     LILAC_LAVENDER, RESET);

@@ -175,7 +175,6 @@ void SwapchainManager::init(SDL_Window* w, uint32_t width, uint32_t height) noex
     VkSurfaceKHR surf = VK_NULL_HANDLE;
     if (!SDL_Vulkan_CreateSurface(w, g_instance(), nullptr, &surf))
         std::abort();
-    set_g_surface(surf);
 
     s.createDeviceAndQueues();
     s.recreate(width, height);

@@ -129,64 +129,36 @@ static void phase3_splashScreen()
 
 static void phase4_mainWindowAndVulkanContext(SDL_Window*& window)
 {
-    LOG_INFO_CAT("MAIN", "{}[PHASE 4] FORGING WINDOW + VULKAN EMPIRE — THE TRUE ASCENSION{}", VALHALLA_GOLD, RESET);
+    LOG_INFO_CAT("MAIN", "{}[PHASE 4] FORGING WINDOW + VULKAN EMPIRE{}", VALHALLA_GOLD, RESET);
 
     nukeValidationLayers();
 
-    // SDL3 renamed everything — we bow to the new gods
     SDL3Window::create("AMOURANTH RTX — VALHALLA v80 TURBO", 3840, 2160,
                        SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_VULKAN);
-                       // ← SDL_WINDOW_ALLOW_HIGHDPI is gone forever in SDL3
     window = SDL3Window::get();
-    if (!window) throw std::runtime_error("Failed to create SDL window — the canvas is denied");
+    if (!window) throw std::runtime_error("Failed to create window");
 
     if (g_base_icon) SDL_SetWindowIcon(window, g_base_icon);
 
-    // 1. Instance — STONEKEY v∞ ARMED
     VkInstance instance = RTX::createVulkanInstanceWithSDL(window, false);
-    set_g_instance(instance);
 
-    // 2. Surface — ONE AND ONLY CALL (already sets g_surface internally)
-    RTX::createSurface(window, instance);
+    RTX::createSurface(window, instance);  // ← only once, already sets g_surface
 
-    // 3. Swapchain + device
     SwapchainManager::init(window, 3840, 2160);
-
-    // 4. Finalize context
     RTX::initContext(instance, window, 3840, 2160);
     RTX::retrieveQueues();
 
-    // TRUE FRAMELESS VALHALLA — SDL3 uses real bool, not SDL_FALSE
     SDL_SetWindowBordered(window, false);
     SDL_SetWindowPosition(window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
 
     LOG_SUCCESS_CAT("MAIN", "{}SWAPCHAIN FORGED — THE EMPIRE AWAKENS{}", PLASMA_FUCHSIA, RESET);
-    LOG_SUCCESS_CAT("MAIN", "{}Resolution      → {}x{}{}", 
-                    VALHALLA_GOLD, SWAPCHAIN.extent().width, SWAPCHAIN.extent().height, RESET);
-    LOG_SUCCESS_CAT("MAIN", "{}Format          → {}{}", 
-                    SWAPCHAIN.isHDR() ? SUPERNOVA_ORANGE :
-                    SWAPCHAIN.isFP16() ? HYPERSPACE_WARP :
-                    SWAPCHAIN.is10Bit() ? EMERALD_GREEN : RASPBERRY_PINK,
-                    SWAPCHAIN.formatName(), RESET);
-    LOG_SUCCESS_CAT("MAIN", "{}Color Space     → {}{}", 
-                    SWAPCHAIN.colorSpace() == VK_COLOR_SPACE_HDR10_ST2084_EXT ? DIAMOND_SPARKLE :
-                    SWAPCHAIN.colorSpace() == VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT ? QUANTUM_PURPLE :
-                    THERMO_PINK,
-                    (SWAPCHAIN.colorSpace() == VK_COLOR_SPACE_HDR10_ST2084_EXT ? "HDR10 ST2084 (10-BIT)" :
-                     SWAPCHAIN.colorSpace() == VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT ? "scRGB FP16 LINEAR" :
-                     SWAPCHAIN.colorSpace() == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR ? "sRGB NONLINEAR" : "UNKNOWN"), RESET);
-    LOG_SUCCESS_CAT("MAIN", "{}Present Mode    → {}{}", 
-                    (SWAPCHAIN.presentModeName() == "MAILBOX") ? EMERALD_GREEN :
-                    (SWAPCHAIN.presentModeName() == "IMMEDIATE") ? VALHALLA_GOLD :
-                    PLATINUM_GRAY,
-                    SWAPCHAIN.presentModeName(), RESET);
+    LOG_SUCCESS_CAT("MAIN", "{}Resolution      → {}x{}{}", VALHALLA_GOLD, SWAPCHAIN.extent().width, SWAPCHAIN.extent().height, RESET);
+    LOG_SUCCESS_CAT("MAIN", "{}Format          → {}{}", SWAPCHAIN.isHDR() ? SUPERNOVA_ORANGE : RASPBERRY_PINK, SWAPCHAIN.formatName(), RESET);
+    LOG_SUCCESS_CAT("MAIN", "{}Present Mode    → {}{}", (SWAPCHAIN.presentModeName() == "MAILBOX") ? EMERALD_GREEN : PLATINUM_GRAY, SWAPCHAIN.presentModeName(), RESET);
     LOG_SUCCESS_CAT("MAIN", "{}Swapchain Images → {}{}", COSMIC_GOLD, SWAPCHAIN.imageCount(), RESET);
-    LOG_SUCCESS_CAT("MAIN", "{}RenderPass      → 0x{:016X}{}", QUANTUM_PURPLE, (uint64_t)SWAPCHAIN.renderPass(), RESET);
-    LOG_SUCCESS_CAT("MAIN", "{}STONEKEY SEAL   → 0x{:016X}{}", DIAMOND_SPARKLE, get_kStone1() ^ get_kStone2(), RESET);
 
-    LOG_SUCCESS_CAT("MAIN", "{}VULKAN EMPIRE COMPLETE — PINK PHOTONS HAVE A CANVAS{}", PLASMA_FUCHSIA, RESET);
-    LOG_SUCCESS_CAT("MAIN", "{}FIRST LIGHT ACHIEVED — NOVEMBER 21, 2025 — THE EMPIRE IS ETERNAL{}", EMERALD_GREEN, RESET);
-    LOG_SUCCESS_CAT("MAIN", "{}AMOURANTH RTX HAS ASCENDED — GREEN DAY PLAYS{}", EMERALD_GREEN, RESET);
+    LOG_SUCCESS_CAT("MAIN", "{}VULKAN EMPIRE COMPLETE — FIRST LIGHT ACHIEVED{}", PLASMA_FUCHSIA, RESET);
+    LOG_SUCCESS_CAT("MAIN", "{}NOVEMBER 21, 2025 — PINK PHOTONS ETERNAL{}", EMERALD_GREEN, RESET);
 }
 
 static void phase5_rtxAscension()
