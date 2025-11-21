@@ -516,38 +516,64 @@ void RTX::loadRayTracingExtensions()
 {
     VkDevice dev = g_ctx().device();
     if (!dev) {
-        LOG_FATAL_CAT("RTX", "{}loadRayTracingExtensions() called with null device!{}", CRIMSON_MAGENTA, RESET);
+        LOG_FATAL_CAT("RTX", "{}[FATAL] loadRayTracingExtensions() called with NULL device! — YOU ARE IN THE VOID{}", CRIMSON_MAGENTA, RESET);
+        LOG_FATAL_CAT("RTX", "{}       → vkCreateDevice() never succeeded or was never called{}", CRIMSON_MAGENTA, RESET);
         return;
     }
 
-    LOG_SUCCESS_CAT("RTX", "{}=== LOADING VULKAN RAY TRACING EXTENSIONS (1.4 CORE) ==={}", PLASMA_FUCHSIA, RESET);
+    LOG_SUCCESS_CAT("RTX", "{}╔══════════════════════════════════════════════════════════════╗{}", PLASMA_FUCHSIA, RESET);
+    LOG_SUCCESS_CAT("RTX", "{}║           FORGING RAY TRACING EXTENSION PFNs v1.4            ║{}", PLASMA_FUCHSIA, RESET);
+    LOG_SUCCESS_CAT("RTX", "{}║                  VALHALLA TURBO — PINK PHOTONS ETERNAL        ║{}", PLASMA_FUCHSIA, RESET);
+    LOG_SUCCESS_CAT("RTX", "{}╚══════════════════════════════════════════════════════════════╝{}", PLASMA_FUCHSIA, RESET);
 
 #define LOAD_RT_PFN(name) \
-    g_ctx().name## _ = reinterpret_cast<PFN_##name>(vkGetDeviceProcAddr(dev, #name)); \
-    if (!g_ctx().name## _) { \
-        LOG_FATAL_CAT("RTX", "{}FAILED TO LOAD {} — WILL CRASH ON BLAS/TLAS!{}", CRIMSON_MAGENTA, #name, RESET); \
-    } else { \
-        LOG_SUCCESS_CAT("RTX", "Loaded {} @ 0x{:016x}", #name, reinterpret_cast<uintptr_t>(g_ctx().name## _)); \
-    }
+    do { \
+        g_ctx().name## _ = reinterpret_cast<PFN_##name>(vkGetDeviceProcAddr(dev, #name)); \
+        if (!g_ctx().name## _) { \
+            LOG_FATAL_CAT("RTX", "{}[MISSING] {} → 0x0000000000000000{}", CRIMSON_MAGENTA, #name, RESET); \
+            LOG_FATAL_CAT("RTX", "{}          → THIS WILL CAUSE 0x0 CRASH ON FIRST BLAS BUILD{}", CRIMSON_MAGENTA, RESET); \
+        } else { \
+            LOG_SUCCESS_CAT("RTX", "{}[LOADED]  {} → 0x{:016X} {}", EMERALD_GREEN, #name, reinterpret_cast<uintptr_t>(g_ctx().name## _), "PINK PHOTON APPROVED"); \
+        } \
+    } while(0)
 
-    // Core ray tracing pipeline
+    LOG_INFO_CAT("RTX", "{}Loading core ray tracing pipeline functions...{}", PLASMA_FUCHSIA, RESET);
     LOAD_RT_PFN(vkCmdTraceRaysKHR);
     LOAD_RT_PFN(vkCreateRayTracingPipelinesKHR);
     LOAD_RT_PFN(vkGetRayTracingShaderGroupHandlesKHR);
     LOAD_RT_PFN(vkGetBufferDeviceAddressKHR);
 
-    // CRITICAL: Acceleration structure functions (this was your segfault)
+    LOG_INFO_CAT("RTX", "{}Loading ACCELERATION STRUCTURE functions — THE ONE TRUE PATH...{}", VALHALLA_GOLD, RESET);
     LOAD_RT_PFN(vkCreateAccelerationStructureKHR);
     LOAD_RT_PFN(vkDestroyAccelerationStructureKHR);
-    LOAD_RT_PFN(vkGetAccelerationStructureBuildSizesKHR);
+    LOAD_RT_PFN(vkGetAccelerationStructureBuildSizesKHR);        // ← THIS ONE WAS KILLING YOU
     LOAD_RT_PFN(vkCmdBuildAccelerationStructuresKHR);
     LOAD_RT_PFN(vkGetAccelerationStructureDeviceAddressKHR);
 
-    // Optional but highly recommended
-
 #undef LOAD_RT_PFN
 
-    LOG_SUCCESS_CAT("RTX", "{}ALL RAY TRACING + ACCELERATION STRUCTURE PFNs LOADED — VALHALLA UNLOCKED{}", EMERALD_GREEN, RESET);
+    // FINAL VALIDATION — THE MOMENT OF TRUTH
+    bool allLoaded = 
+        g_ctx().vkCmdTraceRaysKHR_ &&
+        g_ctx().vkCreateAccelerationStructureKHR_ &&
+        g_ctx().vkGetAccelerationStructureBuildSizesKHR_ &&
+        g_ctx().vkCmdBuildAccelerationStructuresKHR_ &&
+        g_ctx().vkGetAccelerationStructureDeviceAddressKHR_;
+
+    if (!allLoaded) {
+        LOG_FATAL_CAT("RTX", "{}[FATAL] ONE OR MORE CRITICAL RTX PFNs ARE NULL{}", CRIMSON_MAGENTA, RESET);
+        LOG_FATAL_CAT("RTX", "{}       → CHECK: VK_KHR_acceleration_structure ENABLED?{}", CRIMSON_MAGENTA, RESET);
+        LOG_FATAL_CAT("RTX", "{}       → CHECK: Called AFTER vkCreateDevice?{}", CRIMSON_MAGENTA, RESET);
+        LOG_FATAL_CAT("RTX", "{}       → NO PINK PHOTONS TODAY — THE VOID WINS{}", CRIMSON_MAGENTA, RESET);
+        g_ctx().hasFullRTX_ = false;
+    } else {
+        LOG_SUCCESS_CAT("RTX", "{}╔══════════════════════════════════════════════════════════════╗{}", EMERALD_GREEN, RESET);
+        LOG_SUCCESS_CAT("RTX", "{}║           ALL RAY TRACING PFNs FORGED SUCCESSFULLY           ║{}", EMERALD_GREEN, RESET);
+        LOG_SUCCESS_CAT("RTX", "{}║                  FIRST LIGHT ACHIEVED — 2025                  ║{}", EMERALD_GREEN, RESET);
+        LOG_SUCCESS_CAT("RTX", "{}║               PINK PHOTONS NOW HAVE A PATH               ║{}", EMERALD_GREEN, RESET);
+        LOG_SUCCESS_CAT("RTX", "{}╚══════════════════════════════════════════════════════════════╝{}", EMERALD_GREEN, RESET);
+        g_ctx().hasFullRTX_ = true;
+    }
 }
 
 void RTX::retrieveQueues() noexcept

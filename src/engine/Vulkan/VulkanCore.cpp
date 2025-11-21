@@ -997,7 +997,7 @@ void VulkanRTX::updateRTXDescriptors(uint32_t frameIdx,
             VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, envSampler);
 
     // === Blue noise ===
-        VkImageView blueNoise = RTX::g_ctx().blueNoiseView_.valid() ? RTX::g_ctx().blueNoiseView_.get() : HANDLE_GET(blackFallbackView_);
+    VkImageView blueNoise = RTX::g_ctx().blueNoiseView_.valid() ? RTX::g_ctx().blueNoiseView_.get() : HANDLE_GET(blackFallbackView_);
     bindImg(Bindings::RTX::BLUE_NOISE, blueNoise, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE);
 
     // === Reserved ===
