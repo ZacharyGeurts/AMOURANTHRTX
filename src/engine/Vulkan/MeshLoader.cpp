@@ -1,43 +1,55 @@
 // src/engine/Vulkan/MeshLoader.cpp
-// MESH LOADER — FULL STONEKEY v∞ — PINK PHOTONS ETERNAL
+// =============================================================================
+//
+// Dual Licensed:
+// 1. GNU General Public License v3.0 (or later) (GPL v3)
+//    https://www.gnu.org/licenses/gpl-3.0.html
+// 2. Commercial licensing: gzac5314@gmail.com
+//
+// TRUE CONSTEXPR STONEKEY v∞ — NOVEMBER 20, 2025 — APOCALYPSE FINAL v2.0
+// MAIN — FIRST LIGHT REBORN — LAS v2.0 VIA VulkanAccel — PINK PHOTONS ETERNAL
+// =============================================================================
+// MESH LOADER — FULL STONEKEY v∞ — PINK PHOTONS ETERNAL — 0x0 CRASH DEAD
 #include "engine/Vulkan/MeshLoader.hpp"
 #include "engine/GLOBAL/StoneKey.hpp"
 #include "engine/GLOBAL/RTXHandler.hpp"
 #include "engine/GLOBAL/logging.hpp"
 #include <tinyobjloader/tiny_obj_loader.h>
 #include <unordered_map>
+#include <cstring>
 
 using namespace Logging::Color;
 
 namespace MeshLoader {
 
-// === NESTED DEFINITIONS OUTSIDE (required for templates) ===
-bool Mesh::Vertex::operator==(const Vertex& o) const {
-    return pos == o.pos && normal == o.normal && uv == o.uv;
-}
-
-std::size_t Mesh::Vertex::Hash::operator()(const Vertex& v) const noexcept {
-    std::size_t h1 = std::hash<float>{}(v.pos.x) ^ std::hash<float>{}(v.pos.y) ^ std::hash<float>{}(v.pos.z);
-    std::size_t h2 = std::hash<float>{}(v.normal.x) ^ std::hash<float>{}(v.normal.y) ^ std::hash<float>{}(v.normal.z);
-    std::size_t h3 = std::hash<float>{}(v.uv.x) ^ std::hash<float>{}(v.uv.y);
-    return h1 ^ (h2 << 1) ^ (h3 << 2);
-}
-
 void Mesh::destroy() noexcept {
     BUFFER_DESTROY(vertexBuffer);
     BUFFER_DESTROY(indexBuffer);
+    stonekey_fingerprint = 0xDEADDEADBEEF1337ULL;
+    LOG_SUCCESS_CAT("MeshLoader", "{}MESH SACRIFICED — BUFFERS RETURNED TO THE VOID{}", PLASMA_FUCHSIA, RESET);
 }
 
-VkBuffer Mesh::getVertexBuffer() const noexcept { return RAW_BUFFER(vertexBuffer); }
-VkBuffer Mesh::getIndexBuffer()  const noexcept { return RAW_BUFFER(indexBuffer);  }
+VkBuffer Mesh::getVertexBuffer() const noexcept {
+    if (stonekey_fingerprint == 0 || stonekey_fingerprint == 0xDEADDEADBEEF1337ULL) {
+        LOG_FATAL("STONEKEY BREACH: Accessing destroyed mesh vertex buffer");
+        std::abort();
+    }
+    return RAW_BUFFER(vertexBuffer);
+}
 
-// === UPLOAD HELPER ===
-static void uploadBuffer(const void* data, VkDeviceSize size, VkBufferUsageFlags usage, uint64_t& handle)
+VkBuffer Mesh::getIndexBuffer() const noexcept {
+    if (stonekey_fingerprint == 0 || stonekey_fingerprint == 0xDEADDEADBEEF1337ULL) {
+        LOG_FATAL("STONEKEY BREACH: Accessing destroyed mesh index buffer");
+        std::abort();
+    }
+    return RAW_BUFFER(indexBuffer);
+}
+
+static void uploadBuffer(const void* data, VkDeviceSize size, VkBufferUsageFlags usage, uint64_t& outHandle)
 {
-    BUFFER_CREATE(handle, size,
-                  VK_BUFFER_USAGE_TRANSFER_DST_BIT | usage,
-                  VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-                  usage & VK_BUFFER_USAGE_VERTEX_BUFFER_BIT ? "Mesh_Vertex" : "Mesh_Index");
+    LOG_INFO_CAT("MeshLoader", "Uploading buffer — size: {} bytes", size);
+
+    auto& tracker = RTX::UltraLowLevelBufferTracker::get();
 
     uint64_t staging = 0;
     BUFFER_CREATE(staging, size,
@@ -45,64 +57,72 @@ static void uploadBuffer(const void* data, VkDeviceSize size, VkBufferUsageFlags
                   VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
                   "Mesh_Staging");
 
-    void* mapped = RTX::UltraLowLevelBufferTracker::get().map(staging);
-    memcpy(mapped, data, size);
-    RTX::UltraLowLevelBufferTracker::get().unmap(staging);
+    void* mapped = tracker.map(staging);
+    std::memcpy(mapped, data, size);
+    tracker.unmap(staging);
 
+    BUFFER_CREATE(outHandle, size,
+                  VK_BUFFER_USAGE_TRANSFER_DST_BIT | usage | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                  VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                  usage & VK_BUFFER_USAGE_VERTEX_BUFFER_BIT ? "Mesh_Vertex_Final" : "Mesh_Index_Final");
+
+    // Manual one-time submit — your codebase style
     VkCommandBuffer cmd = VK_NULL_HANDLE;
-    VkCommandBufferAllocateInfo allocInfo{
-        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-        .commandPool = RTX::g_ctx().commandPool(),
-        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-        .commandBufferCount = 1
-    };
-    vkAllocateCommandBuffers(g_device(), &allocInfo, &cmd);
+    VkCommandBufferAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    allocInfo.commandPool = RTX::g_ctx().commandPool_;
+    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    allocInfo.commandBufferCount = 1;
+    VK_CHECK(vkAllocateCommandBuffers(g_device(), &allocInfo, &cmd), "Failed to allocate upload cmd buffer");
 
-    VkCommandBufferBeginInfo beginInfo{
-        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
-    };
+    VkCommandBufferBeginInfo beginInfo{};
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     vkBeginCommandBuffer(cmd, &beginInfo);
 
-    VkBufferCopy copy{ .size = size };
-    vkCmdCopyBuffer(cmd, RAW_BUFFER(staging), RAW_BUFFER(handle), 1, &copy);
+    VkBufferCopy copy{.size = size};
+    vkCmdCopyBuffer(cmd, RAW_BUFFER(staging), RAW_BUFFER(outHandle), 1, &copy);
 
     vkEndCommandBuffer(cmd);
 
-    VkSubmitInfo submit{
-        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-        .commandBufferCount = 1,
-        .pCommandBuffers = &cmd
-    };
-    vkQueueSubmit(RTX::g_ctx().graphicsQueue(), 1, &submit, VK_NULL_HANDLE);
-    vkQueueWaitIdle(RTX::g_ctx().graphicsQueue());
+    VkSubmitInfo submit{};
+    submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit.commandBufferCount = 1;
+    submit.pCommandBuffers = &cmd;
+    VK_CHECK(vkQueueSubmit(RTX::g_ctx().graphicsQueue_, 1, &submit, VK_NULL_HANDLE), "Mesh upload submit failed");
 
-    vkFreeCommandBuffers(g_device(), RTX::g_ctx().commandPool(), 1, &cmd);
+    vkQueueWaitIdle(RTX::g_ctx().graphicsQueue_);
+    vkFreeCommandBuffers(g_device(), RTX::g_ctx().commandPool_, 1, &cmd);
+
     BUFFER_DESTROY(staging);
+    LOG_SUCCESS_CAT("MeshLoader", "Buffer upload complete — obf handle: 0x{:016X}", outHandle);
 }
 
-// === MAIN LOADER ===
 std::unique_ptr<Mesh> loadOBJ(const std::string& path)
 {
+    LOG_ATTEMPT_CAT("MeshLoader", "Loading OBJ: {}", path);
+
     tinyobj::attrib_t attrib;
     std::vector<tinyobj::shape_t> shapes;
     std::vector<tinyobj::material_t> materials;
     std::string warn, err;
 
     if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, path.c_str(), "assets/models/")) {
-        if (!err.empty()) throw std::runtime_error("TinyObjLoader: " + err);
-        if (!warn.empty()) LOG_WARN_CAT("MeshLoader", "{}", warn);
+        if (!err.empty()) {
+            LOG_FATAL("TinyObjLoader failed: {}", err);
+            throw std::runtime_error("TinyObjLoader: " + err);
+        }
+        if (!warn.empty()) LOG_WARNING_CAT("MeshLoader", "{}", warn);
     }
 
     auto mesh = std::make_unique<Mesh>();
 
-    // ← FULLY QUALIFIED TYPES — THIS WAS THE ERROR
-    using Vertex = Mesh::Vertex;
-    std::unordered_map<Vertex, uint32_t, Vertex::Hash> uniqueVertices;
+    // FULLY QUALIFIED — NO SCOPE ISSUES
+    std::unordered_map<Mesh::Vertex, uint32_t, Mesh::Vertex::Hash> uniqueVertices;
 
     for (const auto& shape : shapes) {
         for (const auto& index : shape.mesh.indices) {
-            Vertex v{};
+            Mesh::Vertex v{};
 
             v.pos = {
                 attrib.vertices[3 * index.vertex_index + 0],
@@ -126,19 +146,18 @@ std::unique_ptr<Mesh> loadOBJ(const std::string& path)
             }
 
             if (uniqueVertices.find(v) == uniqueVertices.end()) {
-                uint32_t newIndex = static_cast<uint32_t>(mesh->vertices.size());
-                uniqueVertices[v] = newIndex;
+                uniqueVertices[v] = static_cast<uint32_t>(mesh->vertices.size());
                 mesh->vertices.push_back(v);
             }
             mesh->indices.push_back(uniqueVertices[v]);
         }
     }
 
-    LOG_SUCCESS_CAT("MeshLoader", "Loaded {} → {} verts, {} indices — STONEKEY v∞ ACTIVE",
+    LOG_SUCCESS_CAT("MeshLoader", "Loaded {} → {} vertices, {} indices — GEOMETRY FORGED",
                     path, mesh->vertices.size(), mesh->indices.size());
 
     uploadBuffer(mesh->vertices.data(),
-                 mesh->vertices.size() * sizeof(Vertex),
+                 mesh->vertices.size() * sizeof(Mesh::Vertex),
                  VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
                  mesh->vertexBuffer);
 
@@ -146,6 +165,16 @@ std::unique_ptr<Mesh> loadOBJ(const std::string& path)
                  mesh->indices.size() * sizeof(uint32_t),
                  VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
                  mesh->indexBuffer);
+
+    // FINAL STONEKEY RITE
+    mesh->stonekey_fingerprint =
+        get_kStone1() ^ get_kStone2() ^
+        std::hash<std::string>{}(path) ^
+        mesh->vertices.size() ^ mesh->indices.size();
+
+    LOG_SUCCESS_CAT("MeshLoader",
+        "{}MESH FULLY STONEKEYED v∞ — FINGERPRINT 0x{:016X} — PINK PHOTONS BOUND TO GEOMETRY{}",
+        PLASMA_FUCHSIA, mesh->stonekey_fingerprint, RESET);
 
     return mesh;
 }
