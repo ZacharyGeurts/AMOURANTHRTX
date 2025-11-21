@@ -61,7 +61,7 @@ if(DISABLE_TRACE_AND_DEBUG_LOGS)
 endif()
 
 # =============================================================================
-# ADDRESS SANITIZER COMPLETELY DISABLED — STONEKEY v∞ IS SACRED
+# ADDRESS SANITIZER COMPLETELY DISABLED — STONEKEY v∞ IS DECEIVING
 # =============================================================================
 # ASan conflicts with StoneKey's intentional pointer obfuscation
 # → NEVER ENABLE IT — EVER
