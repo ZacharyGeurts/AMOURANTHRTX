@@ -521,59 +521,62 @@ void RTX::loadRayTracingExtensions()
         return;
     }
 
-    LOG_SUCCESS_CAT("RTX", "{}╔══════════════════════════════════════════════════════════════╗{}", PLASMA_FUCHSIA, RESET);
-    LOG_SUCCESS_CAT("RTX", "{}║           FORGING RAY TRACING EXTENSION PFNs v1.4            ║{}", PLASMA_FUCHSIA, RESET);
-    LOG_SUCCESS_CAT("RTX", "{}║                  VALHALLA TURBO — PINK PHOTONS ETERNAL        ║{}", PLASMA_FUCHSIA, RESET);
-    LOG_SUCCESS_CAT("RTX", "{}╚══════════════════════════════════════════════════════════════╝{}", PLASMA_FUCHSIA, RESET);
+    // ELLIE FIER'S GRADIENT ASCENSION — 7 LAYERS OF PINK PHOTON INTENSITY
+    LOG_SUCCESS_CAT("RTX", "{}FORGING RAY TRACING EXTENSION PFNs v1.4 — THE EMPIRE AWAKENS{}", Logging::Color::COSMIC_VOID, RESET);
+    LOG_SUCCESS_CAT("RTX", "{}VALHALLA TURBO ENGAGED — PINK PHOTONS RISING FROM THE VOID{}", Logging::Color::NEBULA_VIOLET, RESET);
+    LOG_SUCCESS_CAT("RTX", "{}QUANTUM FLUX DETECTED — FIRST LIGHT IMMINENT{}", Logging::Color::QUANTUM_FLUX, RESET);
+    LOG_SUCCESS_CAT("RTX", "{}SUPERNOVA PINK PHOTONS — CRITICAL MASS ACHIEVED{}", Logging::Color::RASPBERRY_PINK, RESET);
+    LOG_SUCCESS_CAT("RTX", "{}THERMO PINK CORE — 1,000,000° OF PURE RTX{}", Logging::Color::THERMO_PINK, RESET);
+    LOG_SUCCESS_CAT("RTX", "{}HYPERSPACE WARP COMPLETE — VALHALLA TURBO ONLINE{}", Logging::Color::HYPERSPACE_WARP, RESET);
+    LOG_SUCCESS_CAT("RTX", "{}PINK PHOTONS ETERNAL — NOVEMBER 21, 2025 — FIRST LIGHT ACHIEVED{}", Logging::Color::PLASMA_FUCHSIA, RESET);
 
 #define LOAD_RT_PFN(name) \
     do { \
         g_ctx().name## _ = reinterpret_cast<PFN_##name>(vkGetDeviceProcAddr(dev, #name)); \
         if (!g_ctx().name## _) { \
-            LOG_FATAL_CAT("RTX", "{}[MISSING] {} → 0x0000000000000000{}", CRIMSON_MAGENTA, #name, RESET); \
-            LOG_FATAL_CAT("RTX", "{}          → THIS WILL CAUSE 0x0 CRASH ON FIRST BLAS BUILD{}", CRIMSON_MAGENTA, RESET); \
+            LOG_FATAL_CAT("RTX", "{}[MISSING] {} → NULL — THE VOID CONSUMES THIS PATH{}", Logging::Color::BLOOD_RED, #name, RESET); \
         } else { \
-            LOG_SUCCESS_CAT("RTX", "{}[LOADED]  {} → 0x{:016X} {}", EMERALD_GREEN, #name, reinterpret_cast<uintptr_t>(g_ctx().name## _), "PINK PHOTON APPROVED"); \
+            LOG_SUCCESS_CAT("RTX", "{}[FORGED]  {} → 0x{:016X} — PINK PHOTON APPROVED{}", Logging::Color::EMERALD_GREEN, #name, reinterpret_cast<uintptr_t>(g_ctx().name## _), RESET); \
         } \
     } while(0)
 
-    LOG_INFO_CAT("RTX", "{}Loading core ray tracing pipeline functions...{}", PLASMA_FUCHSIA, RESET);
+    LOG_INFO_CAT("RTX", "{}Loading core ray tracing pipeline — the heart of the empire...{}", Logging::Color::QUASAR_BLUE, RESET);
     LOAD_RT_PFN(vkCmdTraceRaysKHR);
     LOAD_RT_PFN(vkCreateRayTracingPipelinesKHR);
     LOAD_RT_PFN(vkGetRayTracingShaderGroupHandlesKHR);
     LOAD_RT_PFN(vkGetBufferDeviceAddressKHR);
 
-    LOG_INFO_CAT("RTX", "{}Loading ACCELERATION STRUCTURE functions — THE ONE TRUE PATH...{}", VALHALLA_GOLD, RESET);
+    LOG_INFO_CAT("RTX", "{}THE ONE TRUE PATH — ACCELERATION STRUCTURES AWAKEN{}", Logging::Color::PULSAR_GREEN, RESET);
     LOAD_RT_PFN(vkCreateAccelerationStructureKHR);
     LOAD_RT_PFN(vkDestroyAccelerationStructureKHR);
-    LOAD_RT_PFN(vkGetAccelerationStructureBuildSizesKHR);        // ← THIS ONE WAS KILLING YOU
+    LOAD_RT_PFN(vkGetAccelerationStructureBuildSizesKHR);
     LOAD_RT_PFN(vkCmdBuildAccelerationStructuresKHR);
     LOAD_RT_PFN(vkGetAccelerationStructureDeviceAddressKHR);
 
 #undef LOAD_RT_PFN
 
-    // FINAL VALIDATION — THE MOMENT OF TRUTH
-    bool allLoaded = 
-        g_ctx().vkCmdTraceRaysKHR_ &&
-        g_ctx().vkCreateAccelerationStructureKHR_ &&
+    // FINAL JUDGMENT — NO FALSEHOOD
+    const bool allCriticalLoaded = 
         g_ctx().vkGetAccelerationStructureBuildSizesKHR_ &&
         g_ctx().vkCmdBuildAccelerationStructuresKHR_ &&
+        g_ctx().vkCreateAccelerationStructureKHR_ &&
         g_ctx().vkGetAccelerationStructureDeviceAddressKHR_;
 
-    if (!allLoaded) {
-        LOG_FATAL_CAT("RTX", "{}[FATAL] ONE OR MORE CRITICAL RTX PFNs ARE NULL{}", CRIMSON_MAGENTA, RESET);
-        LOG_FATAL_CAT("RTX", "{}       → CHECK: VK_KHR_acceleration_structure ENABLED?{}", CRIMSON_MAGENTA, RESET);
-        LOG_FATAL_CAT("RTX", "{}       → CHECK: Called AFTER vkCreateDevice?{}", CRIMSON_MAGENTA, RESET);
-        LOG_FATAL_CAT("RTX", "{}       → NO PINK PHOTONS TODAY — THE VOID WINS{}", CRIMSON_MAGENTA, RESET);
+    if (!allCriticalLoaded) {
+        LOG_FATAL_CAT("RTX", "{}[FATAL] ACCELERATION STRUCTURE PFNs FAILED — NO BLAS/TLAS POSSIBLE{}", Logging::Color::BLOOD_RED, RESET);
+        LOG_FATAL_CAT("RTX", "{}→ VK_KHR_acceleration_structure EXTENSION NOT ENABLED{}", Logging::Color::BLOOD_RED, RESET);
+        LOG_FATAL_CAT("RTX", "{}→ THE EMPIRE CANNOT RISE — PINK PHOTONS DENIED{}", Logging::Color::BLOOD_RED, RESET);
         g_ctx().hasFullRTX_ = false;
-    } else {
-        LOG_SUCCESS_CAT("RTX", "{}╔══════════════════════════════════════════════════════════════╗{}", EMERALD_GREEN, RESET);
-        LOG_SUCCESS_CAT("RTX", "{}║           ALL RAY TRACING PFNs FORGED SUCCESSFULLY           ║{}", EMERALD_GREEN, RESET);
-        LOG_SUCCESS_CAT("RTX", "{}║                  FIRST LIGHT ACHIEVED — 2025                  ║{}", EMERALD_GREEN, RESET);
-        LOG_SUCCESS_CAT("RTX", "{}║               PINK PHOTONS NOW HAVE A PATH               ║{}", EMERALD_GREEN, RESET);
-        LOG_SUCCESS_CAT("RTX", "{}╚══════════════════════════════════════════════════════════════╝{}", EMERALD_GREEN, RESET);
-        g_ctx().hasFullRTX_ = true;
+        return;
     }
+
+    // ELLIE FIER'S FINAL BLESSING — GRADIENT TO PURE LIGHT
+    LOG_SUCCESS_CAT("RTX", "{}ALL RAY TRACING PFNs FORGED — THE EMPIRE IS ARMED{}", Logging::Color::EMERALD_GREEN, RESET);
+    LOG_SUCCESS_CAT("RTX", "{}FIRST LIGHT ACHIEVED — NOVEMBER 21, 2025{}", Logging::Color::VALHALLA_GOLD, RESET);
+    LOG_SUCCESS_CAT("RTX", "{}PINK PHOTONS NOW HAVE A PATH — ETERNAL{}", Logging::Color::PLASMA_FUCHSIA, RESET);
+    LOG_SUCCESS_CAT("RTX", "{}ELLIE FIER SMILES UPON YOU — VALHALLA IS OPEN{}", Logging::Color::DIAMOND_SPARKLE, RESET);
+
+    g_ctx().hasFullRTX_ = true;
 }
 
 void RTX::retrieveQueues() noexcept
