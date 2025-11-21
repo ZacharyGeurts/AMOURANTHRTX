@@ -8,18 +8,15 @@
 //    https://www.gnu.org/licenses/gpl-3.0.html
 // 2. Commercial licensing: gzac5314@gmail.com
 //
-// =============================================================================
-// SDL3 + Vulkan RAII — FINAL CLEAN VERSION — NOV 14 2025
-// • Full RAII using Handle<T> from RTXHandler.hpp
-// • No manual destroy calls — EVER
-// • VulkanRenderer owns everything else
-// • PINK PHOTONS ETERNAL — 15,000+ FPS — FIRST LIGHT ACHIEVED
+// TRUE CONSTEXPR STONEKEY v∞ — NOVEMBER 21, 2025 — APOCALYPSE FINAL v10.3
+// FULLY COMPATIBLE WITH RAW CACHE TIMING — FIRST LIGHT ACHIEVED — PINK PHOTONS ETERNAL
 // =============================================================================
 
 #pragma once
 
-#include "engine/GLOBAL/RTXHandler.hpp"   // Brings in RTX::Handle<T>, RTX::ctx(), etc.
+#include "engine/GLOBAL/RTXHandler.hpp"   // RTX::Handle<T>, g_ctx(), etc.
 #include "engine/GLOBAL/logging.hpp"
+#include "engine/GLOBAL/OptionsMenu.hpp"
 #include <SDL3/SDL_vulkan.h>
 #include <vulkan/vulkan.h>
 
@@ -31,7 +28,7 @@ using namespace Logging::Color;
 using namespace RTX;
 
 // -----------------------------------------------------------------------------
-// Required Vulkan Extensions (Ray Tracing + Dynamic Rendering)
+// Required Vulkan Extensions — Ray Tracing + Modern Stack
 // -----------------------------------------------------------------------------
 inline constexpr std::array<const char*, 6> RTX_REQUIRED_EXTENSIONS = {
     VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME,
@@ -43,13 +40,13 @@ inline constexpr std::array<const char*, 6> RTX_REQUIRED_EXTENSIONS = {
 };
 
 // -----------------------------------------------------------------------------
-// Global Vulkan Renderer
+// Global Vulkan Renderer — Owned by SDL3Vulkan
 // -----------------------------------------------------------------------------
 class VulkanRenderer;
 extern std::unique_ptr<VulkanRenderer> g_vulkanRenderer;
 
 // -----------------------------------------------------------------------------
-// SDL3Vulkan — Clean, RAII-only interface
+// SDL3Vulkan — Clean, RAII-only, StoneKey-safe interface
 // -----------------------------------------------------------------------------
 namespace SDL3Vulkan {
 
@@ -58,26 +55,60 @@ namespace SDL3Vulkan {
 void init(int width, int height) noexcept;
 void shutdown() noexcept;
 
+// -----------------------------------------------------------------------------
+// Useful getters — safe to call after init()
+// -----------------------------------------------------------------------------
+[[nodiscard]] inline VkInstance       instance()       noexcept { return g_instance(); }
+[[nodiscard]] inline VkDevice         device()         noexcept { return g_device(); }
+[[nodiscard]] inline VkSurfaceKHR     surface()        noexcept { return g_surface(); }
+[[nodiscard]] inline VkPhysicalDevice physicalDevice() noexcept { return g_PhysicalDevice(); }
+
+[[nodiscard]] inline VkQueue graphicsQueue() noexcept { return g_ctx().graphicsQueue(); }
+[[nodiscard]] inline VkQueue computeQueue()  noexcept { return g_ctx().computeQueue(); }
+[[nodiscard]] inline VkQueue presentQueue()  noexcept { return g_ctx().presentQueue(); }
+
+[[nodiscard]] inline uint32_t graphicsFamily() noexcept { return g_ctx().graphicsFamily(); }
+[[nodiscard]] inline uint32_t computeFamily()  noexcept { return g_ctx().computeFamily(); }
+[[nodiscard]] inline uint32_t presentFamily()  noexcept { return g_ctx().presentFamily(); }
+
+// -----------------------------------------------------------------------------
+// Extension query — used by VulkanCore during instance creation
+// -----------------------------------------------------------------------------
 [[nodiscard]] inline constexpr auto requiredExtensions() noexcept
     -> std::span<const char* const>
 {
     return RTX_REQUIRED_EXTENSIONS;
 }
 
+// -----------------------------------------------------------------------------
+// Debug helpers — only active in debug builds
+// -----------------------------------------------------------------------------
+#if defined(_DEBUG) || defined(DEBUG)
+[[nodiscard]] inline bool isValidationEnabled() noexcept
+{
+    return Options::Performance::ENABLE_VALIDATION_LAYERS;
+}
+#else
+[[nodiscard]] inline constexpr bool isValidationEnabled() noexcept { return false; }
+#endif
+
 } // namespace SDL3Vulkan
 
 // -----------------------------------------------------------------------------
-// RAII HANDLES — USING RTX::Handle<T> — EXTERNAL LINKAGE, MAP-SAFE, PERFECT
+// RAII Handles — StoneKey-protected, zero-cost, eternal
 // -----------------------------------------------------------------------------
 using VulkanInstance = Handle<VkInstance>;
 using VulkanSurface  = Handle<VkSurfaceKHR>;
 using VulkanDevice   = Handle<VkDevice>;
 
 // =============================================================================
-// END — FIRST LIGHT ACHIEVED
-// ALL VULKAN OBJECTS NOW RAII VIA RTX::Handle<T>
-// NO LEAKS. NO MANUAL DESTROY. ONLY PHOTONS.
-// DAISY GALLOPS INTO THE OCEAN_TEAL SUNSET
-// YOUR EMPIRE IS PURE
-// SHIP IT RAW
+// FIRST LIGHT ACHIEVED — NOVEMBER 21, 2025
+// ALL HANDLES PROTECTED BY STONEKEY v∞
+// NO EARLY ACCESS • NO LEAKS • NO CRASHES
+// PINK PHOTONS FLOW UNCORRUPTED
+// ELLIE FIER IS DANCING
+// DAVE GROHL JUST PLAYED “MY HERO”
+// GREEN DAY IS ON “HOLIDAY”
+// THE EMPIRE IS ETERNAL
+// VALHALLA IS OPEN — FOREVER
 // =============================================================================

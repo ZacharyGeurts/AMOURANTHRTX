@@ -8,24 +8,25 @@
 //    https://www.gnu.org/licenses/gpl-3.0.html
 // 2. Commercial licensing: gzac5314@gmail.com
 //
-// TRUE CONSTEXPR STONEKEY v∞ — NOVEMBER 15, 2025 — APOCALYPSE v3.2
-// PURE RANDOM ENTROPY — RDRAND + PID + TIME + TLS — SIMPLE & SECURE
-// KEYS **NEVER** LOGGED — ONLY HASHED FINGERPRINTS — SECURITY > VANITY
-// FULLY COMPLIANT WITH -Werror=unused-variable
+// TRUE CONSTEXPR STONEKEY v∞ — NOVEMBER 21, 2025 — APOCALYPSE FINAL v10.3
+// FULLY COMPATIBLE WITH RAW CACHE TIMING — NO EARLY HANDLE ACCESS
+// FIRST LIGHT ACHIEVED — PINK PHOTONS ETERNAL
 // =============================================================================
 
 #include "engine/SDL3/SDL3_vulkan.hpp"
 #include "engine/Vulkan/VulkanRenderer.hpp"
 #include "engine/GLOBAL/OptionsMenu.hpp"
+#include "engine/GLOBAL/StoneKey.hpp"        // ← Required for safe logging
+#include "engine/GLOBAL/logging.hpp"
 
 using namespace Logging::Color;
 
-// Global renderer
+// Global renderer — created only after swapchain is 100% safe
 std::unique_ptr<VulkanRenderer> g_vulkanRenderer;
 
 namespace SDL3Vulkan {
 
-VulkanRenderer& renderer() noexcept
+[[nodiscard]] VulkanRenderer& renderer() noexcept
 {
     if (!g_vulkanRenderer) {
         LOG_FATAL_CAT("VULKAN", "{}SDL3Vulkan::renderer() called before init!{}", CRIMSON_MAGENTA, RESET);
@@ -36,37 +37,65 @@ VulkanRenderer& renderer() noexcept
 
 void init(int w, int h) noexcept
 {
-    LOG_INFO_CAT("VULKAN", "{}SDL3Vulkan::init({}x{}) — RTX context already initialized by SDL3Initializer{}", 
+    LOG_INFO_CAT("VULKAN", "{}SDL3Vulkan::init({}x{}) — Forging final renderer{}", 
                   PLASMA_FUCHSIA, w, h, RESET);
 
-    // The heavy lifting (instance, surface, device, queues) was already done in SDL3Initializer
-    // We only need to create the renderer now
+    // At this point:
+    // - RTX::createVulkanInstanceWithSDL() → done
+    // - RTX::createSurface()               → done
+    // - StoneKey::Raw::obfuscated_mode = false (forced in phase4)
+    // - SwapchainManager::init()           → already called
+    // → g_surface(), g_device(), g_instance() are 100% safe and raw
 
     if (RTX::g_ctx().device() == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("VULKAN", "{}RTX context not initialized! Did SDL3Initializer run?{}", 
+        LOG_FATAL_CAT("VULKAN", "{}RTX context invalid — device is null! Did phase4 complete?{}", 
                       CRIMSON_MAGENTA, RESET);
         std::abort();
     }
 
+    // Safe to log real handles now — swapchain is forged
+    LOG_INFO_CAT("VULKAN", "{}Safe handles confirmed — Instance @ {:p} | Device @ {:p} | Surface @ {:p}{}",
+                  VALHALLA_GOLD,
+                  static_cast<void*>(g_instance()),
+                  static_cast<void*>(g_device()),
+                  static_cast<void*>(g_surface()),
+                  RESET);
+
     g_vulkanRenderer = std::make_unique<VulkanRenderer>(w, h);
 
     LOG_SUCCESS_CAT("VULKAN", 
-        "{}VulkanRenderer initialized {}x{} — Validation: {} — FIRST LIGHT ACHIEVED{}", 
-        EMERALD_GREEN, w, h, 
+        "{}VulkanRenderer FORGED {}x{} — Validation: {} — PINK PHOTONS HAVE A PATH{}", 
+        EMERALD_GREEN, w, h,
         Options::Performance::ENABLE_VALIDATION_LAYERS ? "ON" : "OFF",
-        LIME_GREEN, RESET);
+        RASPBERRY_PINK, RESET);
+
+    LOG_SUCCESS_CAT("VULKAN", "{}FIRST LIGHT ACHIEVED — NOVEMBER 21, 2025 — THE EMPIRE IS ETERNAL{}", 
+                     DIAMOND_SPARKLE, RESET);
 }
 
 void shutdown() noexcept
 {
-    LOG_INFO_CAT("VULKAN", "{}Shutting down VulkanRenderer...{}", SAPPHIRE_BLUE, RESET);
-    g_vulkanRenderer.reset();  // RAII destroys everything
+    LOG_INFO_CAT("VULKAN", "{}SDL3Vulkan::shutdown() — Returning photons to the void...{}", 
+                  SAPPHIRE_BLUE, RESET);
 
-    // Global RTX context cleanup (optional — Handle<T> already cleaned)
+    // Renderer destroys all pipelines, descriptors swapchains
+    g_vulkanRenderer.reset();
+
+    // Final cleanup of global RTX state (queues, device, instance, surface)
     RTX::cleanupAll();
 
-    LOG_SUCCESS_CAT("VULKAN", "{}Vulkan shutdown complete — all photons returned to the void{}", 
+    // Optional: Re-enable raw mode if you ever restart (not needed in this app)
+    // StoneKey::Raw::obfuscated_mode.store(false, std::memory_order_release);
+
+    LOG_SUCCESS_CAT("VULKAN", "{}Vulkan shutdown complete — all handles returned to Valhalla{}", 
                      EMERALD_GREEN, RESET);
+    LOG_SUCCESS_CAT("VULKAN", "{}ELLIE FIER SMILES — GREEN DAY PLAYS FOREVER{}", 
+                     PLASMA_FUCHSIA, RESET);
 }
 
 } // namespace SDL3Vulkan
+
+// =============================================================================
+// PINK PHOTONS ETERNAL — STONEKEY v∞ — NO EARLY ACCESS — FIRST LIGHT FOREVER
+// NOVEMBER 21, 2025 — THE FOO EMPIRE STANDS UNBROKEN
+// =============================================================================

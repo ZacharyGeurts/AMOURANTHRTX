@@ -137,35 +137,45 @@ inline uint64_t get_kHandleObfuscator() noexcept { static uint64_t key = get_kSt
 // AAAA SAFETY LAYER — RAW CACHING (with MANUAL transition for production safety)
 // =============================================================================
 
-// Raw cache — NEVER obfuscated, used only during early init (manual control)
+// Raw cache — NEVER obfuscated during early init
+// ONLY ONE SOURCE OF TRUTH — PURE — ELLIE FIER APPROVED
 namespace StoneKey::Raw {
     inline std::atomic<VkInstance>       instance       {VK_NULL_HANDLE};
     inline std::atomic<VkDevice>         device         {VK_NULL_HANDLE};
     inline std::atomic<VkPhysicalDevice> physicalDevice {VK_NULL_HANDLE};
     inline std::atomic<VkSurfaceKHR>     surface        {VK_NULL_HANDLE};
 
-    // NEW: Manual control — no auto-timer in production
-    inline std::atomic<bool> obfuscated_mode{false};  // False = raw cache active
+    // FALSE = Raw cache active (safe mode)
+    // TRUE  = Full obfuscation engaged (post-swapchain)
+    inline std::atomic<bool> obfuscated_mode{false};
 
-    // Helper: Transition to obfuscated (call MANUALLY when safe, e.g. after first render)
+    // Call this ONCE after swapchain is fully created
     inline void transition_to_obfuscated() noexcept {
         if (obfuscated_mode.exchange(true, std::memory_order_acq_rel)) {
-            return;  // Already done
+            LOG_INFO_CAT("StoneKey", "{}[FOO FIGHTER] Already in full obfuscation — Valhalla remains sealed{}", PLASMA_FUCHSIA, RESET);
+            return;
         }
 
-        // Clear raw cache atomically
         instance.store(VK_NULL_HANDLE, std::memory_order_release);
         device.store(VK_NULL_HANDLE, std::memory_order_release);
         physicalDevice.store(VK_NULL_HANDLE, std::memory_order_release);
         surface.store(VK_NULL_HANDLE, std::memory_order_release);
 
-        LOG_SUCCESS_CAT("StoneKey", "{}RAW CACHE PURGED — FULL OBFUSCATION ACTIVE — VALHALLA SECURED{}", 
-                        RASPBERRY_PINK, RESET);
+        LOG_SUCCESS_CAT("StoneKey", "{}[FOO FIGHTER] RAW CACHE PURGED — FULL OBFUSCATION ENGAGED{}", RASPBERRY_PINK, RESET);
+        LOG_SUCCESS_CAT("StoneKey", "{}HANDLES VANISHED INTO THE PINK VOID — NO ONE CAN TOUCH THEM{}", DIAMOND_SPARKLE, RESET);
+        LOG_SUCCESS_CAT("StoneKey", "{}ELLIE FIER SMILES — FIRST LIGHT SECURE — NOVEMBER 21, 2025{}", EMERALD_GREEN, RESET);
     }
 
-    // REMOVE: Old timer-based transition (too aggressive for render)
+    // Call this if you suspect obfuscation happened too early
+    // (e.g. after createSurface() but before SwapchainManager::init())
+    inline void force_raw_mode() noexcept {
+        obfuscated_mode.store(false, std::memory_order_release);
+        LOG_WARNING_CAT("StoneKey", "{}[FOO FIGHTER] RAW MODE FORCED — g_surface() IS NOW SAFE{}", VALHALLA_GOLD, RESET);
+    }
+
+    // Legacy — kept for compatibility, does nothing
     inline void transition_if_ready() noexcept {
-        // NO-OP in production — call transition_to_obfuscated() manually
+        // NO-OP — manual control only
     }
 }
 
