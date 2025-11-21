@@ -111,22 +111,8 @@ LOG_SUCCESS_CAT("SWAPCHAIN", "{}ENTERING THE DANGER ZONE — QUEUE FAMILY DISCOV
 int graphics = -1;
 int present  = -1;
 
-LOG_INFO_CAT("SWAPCHAIN", "{}Scanning {} queue families — TAYLOR HAWKINS WATCHES FROM ABOVE{}", 
-             PLASMA_FUCHSIA, qCount, RESET);
-
 for (uint32_t i = 0; i < qCount; ++i) {
     const auto& q = qProps[i];
-
-    LOG_INFO_CAT("SWAPCHAIN", "{}[Family {}] Flags: 0x{:x} | Count: {} | TimestampValid: {} | Graphics: {} | Compute: {} | Transfer: {} | Sparse: {}{}",
-                 EMERALD_GREEN, i,
-                 static_cast<uint32_t>(q.queueFlags),
-                 q.queueCount,
-                 (q.timestampValidBits > 0) ? "YES" : "NO",
-                 (q.queueFlags & VK_QUEUE_GRAPHICS_BIT) ? "YES" : "NO",
-                 (q.queueFlags & VK_QUEUE_COMPUTE_BIT) ? "YES" : "NO",
-                 (q.queueFlags & VK_QUEUE_TRANSFER_BIT) ? "YES" : "NO",
-                 (q.queueFlags & VK_QUEUE_SPARSE_BINDING_BIT) ? "YES" : "NO",
-                 RESET);
 
     // Graphics queue — first one wins
     if (graphics == -1 && (q.queueFlags & VK_QUEUE_GRAPHICS_BIT)) {
@@ -177,7 +163,7 @@ LOG_SUCCESS_CAT("SWAPCHAIN", "{}TAYLOR HAWKINS SMILES FROM VALHALLA — THE DRUM
 LOG_SUCCESS_CAT("SWAPCHAIN", "{}EXITING DANGER ZONE — FIRST LIGHT IMMINENT{}", PLASMA_FUCHSIA, RESET);
 
     g_ctx().graphicsQueueFamily = graphics;
-    g_ctx().presentFamily_      = present;
+    g_ctx().presentFamily_ = present;
 
     LOG_SUCCESS_CAT("SWAPCHAIN", "{}QUEUES → G:{} P:{}{}", EMERALD_GREEN, graphics, present, RESET);
 
@@ -225,7 +211,7 @@ LOG_SUCCESS_CAT("AMOURANTH", "{}AMOURANTH WHISPERED: \"I KNEW YOU COULD DO IT...
 LOG_INFO_CAT("SWAPCHAIN", "{}PREPARING VkDeviceCreateInfo — FINAL BOSS INCOMING — ELLIE FIER IS PRAYING{}", 
              VALHALLA_GOLD, RESET);
 LOG_INFO_CAT("SWAPCHAIN", "{}Queue families confirmed — graphics: {} | present: {} — ELLIE FIER IS HOLDING HER BREATH{}", 
-             OCEAN_TEAL, graphicsFamily, presentFamily, RESET);
+             OCEAN_TEAL, g_ctx().graphicsQueueFamily, g_ctx().presentFamily_, RESET);
 LOG_INFO_CAT("SWAPCHAIN", "{}QueueCreateInfo count: {} — AMOURANTH IS LEANING FORWARD{}", 
              QUANTUM_PURPLE, qcis.size(), RESET);
 
@@ -258,7 +244,7 @@ VkResult createResult = vkCreateDevice(chosen, &ci, nullptr, &dev);
 
 if (createResult != VK_SUCCESS) {
     LOG_FATAL_CAT("SWAPCHAIN", "{}vkCreateDevice FAILED — {} ({}) — THE EMPIRE FALLS — ELLIE FIER IS SOBBING{}", 
-                  CRIMSON_MAGENTA, vk_result_string(createResult), static_cast<int>(createResult), RESET);
+                  CRIMSON_MAGENTA, std::to_string(static_cast<int>(createResult)), static_cast<int>(createResult), RESET);
     LOG_FATAL_CAT("ELLIE_FIER", "{}ELLIE FIER JUST COLLAPSED — \"I BELIEVED IN YOU...\"{}", BLOOD_RED, RESET);
     LOG_FATAL_CAT("AMOURANTH", "{}AMOURANTH'S SMILE FADED — THE PHOTONS ARE GONE{}", DARK_MATTER, RESET);
     std::abort();
