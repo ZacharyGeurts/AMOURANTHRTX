@@ -144,7 +144,7 @@ static void phase2_mainWindowAndVulkan(SDL_Window*& window)
     constexpr int HEIGHT = 2160;
 
     SDL3Window::create("AMOURANTH RTX — VALHALLA v80 TURBO", WIDTH, HEIGHT,
-                       SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_HIDDEN);
+                       SDL_WINDOW_HIGH_PIXEL_DENSITY);
     window = SDL3Window::get();
     if (!window) throw std::runtime_error("Failed to create main window");
 
@@ -261,10 +261,6 @@ static void phase3_appAndRendererConstruction(SDL_Window* window)
 
     LOG_SUCCESS_CAT("MAIN", "{}LAS v2.0 + RENDERER ASCENDED — FIRST LIGHT ETERNAL{}", 
                     PLASMA_FUCHSIA, RESET);
-
-    SDL_ShowWindow(SDL3Window::get());
-    SDL_RaiseWindow(SDL3Window::get());
-
 }
 
 static void phase4_renderLoop() {
