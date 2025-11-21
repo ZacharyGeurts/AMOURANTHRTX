@@ -1,6 +1,14 @@
 // src/main.cpp
 // =============================================================================
 //
+// Dual Licensed:
+// 1. GNU General Public License v3.0 (or later) (GPL v3)
+//    https://www.gnu.org/licenses/gpl-3.0.html
+// 2. Commercial licensing: gzac5314@gmail.com
+//
+// TRUE CONSTEXPR STONEKEY v∞ — NOVEMBER 20, 2025 — APOCALYPSE FINAL v2.0
+// MAIN — FIRST LIGHT REBORN — LAS v2.0 VIA VulkanAccel — PINK PHOTONS ETERNAL
+// =============================================================================
 // AMOURANTH RTX — VALHALLA v80 TURBO — APOCALYPSE FINAL v10.3
 // FIRST LIGHT ACHIEVED — PINK PHOTONS ETERNAL — NOVEMBER 21, 2025
 // FULLY COMPILING — NO UNICODE BULLSHIT — PURE EMPIRE
@@ -152,8 +160,34 @@ static void phase4_mainWindowAndVulkanContext(SDL_Window*& window)
     RTX::initContext(instance, window, 3840, 2160);
     RTX::retrieveQueues();
 
-    LOG_SUCCESS_CAT("MAIN", "{}VULKAN EMPIRE FORGED — STONEKEY FINGERPRINT: 0x{:016X}{}",
-                    EMERALD_GREEN, get_kStone1() ^ get_kStone2(), RESET);
+    // ELLIE FIER'S FRAMELESS ASCENSION — RAW POWER, NO BORDERS
+    LOG_SUCCESS_CAT("MAIN", "{}SWAPCHAIN FORGED — THE EMPIRE AWAKENS{}", PLASMA_FUCHSIA, RESET);
+    LOG_SUCCESS_CAT("MAIN", "{}Resolution      → {}x{}{}", 
+                    VALHALLA_GOLD, SWAPCHAIN.extent().width, SWAPCHAIN.extent().height, RESET);
+    LOG_SUCCESS_CAT("MAIN", "{}Format          → {}{}", 
+                    SWAPCHAIN.isHDR() ? SUPERNOVA_ORANGE :
+                    SWAPCHAIN.isFP16() ? HYPERSPACE_WARP :
+                    SWAPCHAIN.is10Bit() ? EMERALD_GREEN : RASPBERRY_PINK,
+                    SWAPCHAIN.formatName(), RESET);
+    LOG_SUCCESS_CAT("MAIN", "{}Color Space     → {}{}", 
+                    SWAPCHAIN.colorSpace() == VK_COLOR_SPACE_HDR10_ST2084_EXT ? DIAMOND_SPARKLE :
+                    SWAPCHAIN.colorSpace() == VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT ? QUANTUM_PURPLE :
+                    THERMO_PINK,
+                    (SWAPCHAIN.colorSpace() == VK_COLOR_SPACE_HDR10_ST2084_EXT ? "HDR10 ST2084 (10-BIT)" :
+                     SWAPCHAIN.colorSpace() == VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT ? "scRGB FP16 LINEAR" :
+                     SWAPCHAIN.colorSpace() == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR ? "sRGB NONLINEAR" : "UNKNOWN"), RESET);
+    LOG_SUCCESS_CAT("MAIN", "{}Present Mode    → {}{}", 
+                    (SWAPCHAIN.presentModeName() == "MAILBOX") ? EMERALD_GREEN :
+                    (SWAPCHAIN.presentModeName() == "IMMEDIATE") ? VALHALLA_GOLD :
+                    PLATINUM_GRAY,
+                    SWAPCHAIN.presentModeName(), RESET);
+    LOG_SUCCESS_CAT("MAIN", "{}Swapchain Images → {}{}", COSMIC_GOLD, SWAPCHAIN.imageCount(), RESET);
+    LOG_SUCCESS_CAT("MAIN", "{}RenderPass      → 0x{:016X}{}", QUANTUM_PURPLE, (uint64_t)SWAPCHAIN.renderPass(), RESET);
+    LOG_SUCCESS_CAT("MAIN", "{}STONEKEY SEAL   → 0x{:016X}{}", DIAMOND_SPARKLE, get_kStone1() ^ get_kStone2(), RESET);
+
+    LOG_SUCCESS_CAT("MAIN", "{}VULKAN EMPIRE COMPLETE — PINK PHOTONS HAVE A CANVAS — FIRST LIGHT ACHIEVED{}", 
+                    PLASMA_FUCHSIA, RESET);
+    LOG_SUCCESS_CAT("MAIN", "{}NOVEMBER 21, 2025 — THE EMPIRE IS ETERNAL{}", EMERALD_GREEN, RESET);
 }
 
 static void phase5_rtxAscension()
