@@ -107,8 +107,8 @@ void SwapchainManager::createDeviceAndQueues() noexcept
     vkGetPhysicalDeviceQueueFamilyProperties(chosen, &qCount, qProps.data());
 
 LOG_SUCCESS_CAT("SWAPCHAIN", "{}ENTERING THE DANGER ZONE — QUEUE FAMILY DISCOVERY BEGINS{}", EMERALD_GREEN, RESET);
-LOG_INFO_CAT("SWAPCHAIN", "{}Physical device: {:p} | Surface: {:p}{}", 
-             VALHALLA_GOLD, static_cast<void*>(chosen), static_cast<void*>(g_surface()), RESET);
+LOG_INFO_CAT("SWAPCHAIN", "{}Physical device: {:p} | Surface: [raw mode locked — access delayed]{}", 
+             VALHALLA_GOLD, static_cast<void*>(chosen), RESET);
 
 int graphics = -1;
 int present  = -1;
