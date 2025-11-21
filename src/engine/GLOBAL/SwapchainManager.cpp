@@ -100,10 +100,13 @@ void SwapchainManager::createDeviceAndQueues() noexcept
 
     // Queue families
     uint32_t qCount = 0;
+	LOG_INFO_CAT("SWAPCHAIN", "{}vkGetPhysicalDeviceQueueFamilyProperties{}", EMERALD_GREEN, RESET);
     vkGetPhysicalDeviceQueueFamilyProperties(chosen, &qCount, nullptr);
     std::vector<VkQueueFamilyProperties> qProps(qCount);
+	LOG_INFO_CAT("SWAPCHAIN", "{}vkGetPhysicalDeviceQueueFamilyProperties qProps{}", EMERALD_GREEN, RESET);
     vkGetPhysicalDeviceQueueFamilyProperties(chosen, &qCount, qProps.data());
 
+	LOG_SUCCESS_CAT("SWAPCHAIN", "{}WE DIE IN THERE{}", EMERALD_GREEN, RESET);
     int graphics = -1, present = -1;
     for (uint32_t i = 0; i < qCount; ++i) {
         if (graphics == -1 && (qProps[i].queueFlags & VK_QUEUE_GRAPHICS_BIT))
@@ -113,6 +116,7 @@ void SwapchainManager::createDeviceAndQueues() noexcept
         if (sup && present == -1)
             present = i;
     }
+	LOG_SUCCESS_CAT("SWAPCHAIN", "{}WE DID NOT IN FACT DIE IN THERE{}", EMERALD_GREEN, RESET);
 
     g_ctx().graphicsQueueFamily = graphics;
     g_ctx().presentFamily_      = present;
@@ -129,6 +133,7 @@ void SwapchainManager::createDeviceAndQueues() noexcept
         VK_EXT_HDR_METADATA_EXTENSION_NAME,
         VK_KHR_MAINTENANCE_4_EXTENSION_NAME,
     };
+	LOG_SUCCESS_CAT("SWAPCHAIN", "{}EXTENSIONS SET, MOVING INTO FEATURES{}", EMERALD_GREEN, RESET);
 
     // Features
     VkPhysicalDeviceFeatures2 f2{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
@@ -143,12 +148,16 @@ void SwapchainManager::createDeviceAndQueues() noexcept
 
     f2.pNext = &bda; bda.pNext = &accel; accel.pNext = &rt;
 
+	LOG_SUCCESS_CAT("SWAPCHAIN", "{}NOW QUEUES{}", EMERALD_GREEN, RESET);
+
     // Queues
     std::vector<VkDeviceQueueCreateInfo> qcis;
     float prio = 1.0f;
     for (int f : std::set<int>{graphics, present}) {
         qcis.push_back({ VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO, nullptr, 0, static_cast<uint32_t>(f), 1, &prio });
     }
+
+	LOG_SUCCESS_CAT("SWAPCHAIN", "{}GOOD NEWS, WE CRASHED BEFORE THIS!!!!{}", EMERALD_GREEN, RESET);
 
     VkDeviceCreateInfo ci{ VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO };
     ci.pNext = &f2;

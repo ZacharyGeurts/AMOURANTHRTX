@@ -134,8 +134,10 @@ static void phase4_mainWindowAndVulkanContext()
     if (g_base_icon) SDL_SetWindowIcon(window, g_base_icon);
     LOG_SUCCESS_CAT("MAIN", "{}ICON INJECTED — TAYLOR HAWKINS SMILES FROM VALHALLA{}", EMERALD_GREEN, RESET);
 
+	LOG_SUCCESS_CAT("MAIN", "{}INIALIZING SWAPCHAIN{}", EMERALD_GREEN, RESET);
     // SWAPCHAIN EMPIRE RISES — ALL HANDLES ALREADY SAFE
     SwapchainManager::init(window, 3840, 2160);
+	LOG_SUCCESS_CAT("MAIN", "{}ICON INJECTED — TAYLOR HAWKINS SMILES FROM VALHALLA{}", EMERALD_GREEN, RESET);
 
     // DEVICE + QUEUES — FORGED
     RTX::initContext(g_instance(), window, 3840, 2160);
