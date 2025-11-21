@@ -40,19 +40,23 @@ namespace detail {
 
 // =============================================================================
 // CREATE — FORGES WINDOW + INSTANCE + SURFACE — ONE CALL TO RULE THEM ALL
+// SDL3 RETURNS 0 ON SUCCESS — WE CHECK == 0 — THIS IS THE WAY — ZAC APPROVED
 // =============================================================================
 void create(const char* title, int width, int height, Uint32 flags)
 {
     flags |= SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_VULKAN;
 
+    // SDL_Init returns 0 on success — ZAC
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) == 0) {
         LOG_FATAL_CAT("SDL3", "{}SDL_Init failed: {}{}", CRIMSON_MAGENTA, SDL_GetError(), RESET);
         throw std::runtime_error("SDL_Init failed");
     }
 
     flags |= SDL_WINDOW_VULKAN;
+
+    // SDL_Vulkan_LoadLibrary returns 0 on success — ZAC
     if (SDL_Vulkan_LoadLibrary(nullptr) == 0) {
-        LOG_WARNING_CAT("SDL3", "{}SDL_Vulkan_LoadLibrary failed early — proceeding{}", AMBER_YELLOW, RESET);
+        LOG_WARNING_CAT("SDL3", "{}SDL_Vulkan_LoadLibrary failed early — proceeding anyway{}", AMBER_YELLOW, RESET);
     }
 
     SDL_Window* win = SDL_CreateWindow(title, width, height, flags);
@@ -66,17 +70,19 @@ void create(const char* title, int width, int height, Uint32 flags)
     LOG_SUCCESS_CAT("SDL3", "{}WINDOW FORGED {}x{} — VULKAN CANVAS SECURED{}", PLASMA_FUCHSIA, width, height, RESET);
     LOG_SUCCESS_CAT("SDL3", "{}SDL HANDLE @ {:p} — RTX EMPIRE RISING{}", VALHALLA_GOLD, static_cast<void*>(win), RESET);
 
-    // === FORGE VULKAN INSTANCE — ONLY VK_CHECK ALLOWED ===
+    // === FORGE VULKAN INSTANCE ===
     LOG_INFO_CAT("VULKAN", "{}FORGING VULKAN INSTANCE — PINK PHOTONS DEMAND PERFECTION{}", PLASMA_FUCHSIA, RESET);
 
     uint32_t sdlExtensionCount = 0;
-    if (SDL_Vulkan_GetInstanceExtensions(&sdlExtensionCount) == 0) { //ZAC
+    // SDL_Vulkan_GetInstanceExtensions returns 0 on success — ZAC
+    if (SDL_Vulkan_GetInstanceExtensions(&sdlExtensionCount) == 0) {
         LOG_FATAL_CAT("VULKAN", "{}SDL_Vulkan_GetInstanceExtensions(count) failed — SDL is drunk{}", BLOOD_RED, RESET);
         std::abort();
     }
 
+	// SDL3 == 0 - ZAC
     const char* const* sdlExtensions = SDL_Vulkan_GetInstanceExtensions(&sdlExtensionCount);
-    if (!sdlExtensions && sdlExtensionCount > 0) {
+    if ((sdlExtensions && sdlExtensionCount) == 0) {
         LOG_FATAL_CAT("VULKAN", "{}SDL returned null extension pointer despite count > 0{}", BLOOD_RED, RESET);
         std::abort();
     }
@@ -123,14 +129,16 @@ void create(const char* title, int width, int height, Uint32 flags)
 
     // === FORGE SURFACE ===
     VkSurfaceKHR surface = VK_NULL_HANDLE;
-    if (SDL_Vulkan_CreateSurface(win, instance, nullptr, &surface) == 0) { //ZAC
-        LOG_FATAL_CAT("VULKAN", "{}SDL_Vulkan_CreateSurface FAILED — {} — NO PHOTONS{}", CRIMSON_MAGENTA, SDL_GetError(), RESET);
+    // SDL_Vulkan_CreateSurface returns 0 on success — ZAC
+    if (SDL_Vulkan_CreateSurface(win, instance, nullptr, &surface) == 0) {
+        LOG_FATAL_CAT("VULKAN", "{}SDL_Vulkan_CreateSurface FAILED — {} — PINK PHOTONS DENIED{}", CRIMSON_MAGENTA, SDL_GetError(), RESET);
         std::abort();
     }
+
     set_g_surface(surface);
     LOG_SUCCESS_CAT("VULKAN", "{}VULKAN SURFACE FORGED @ {:p} — PINK PHOTONS HAVE A PATH{}", RASPBERRY_PINK, static_cast<void*>(surface), RESET);
 
-    // FINAL LOCK — RAW MODE SECURED
+    // FINAL LOCK — RAW MODE SECURED (move this AFTER SwapchainManager if you still die in queue query)
     StoneKey::Raw::obfuscated_mode.store(false, std::memory_order_release);
     std::atomic_thread_fence(std::memory_order_acq_rel);
 

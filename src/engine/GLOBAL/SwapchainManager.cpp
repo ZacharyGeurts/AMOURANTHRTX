@@ -106,17 +106,77 @@ void SwapchainManager::createDeviceAndQueues() noexcept
 	LOG_INFO_CAT("SWAPCHAIN", "{}vkGetPhysicalDeviceQueueFamilyProperties qProps{}", EMERALD_GREEN, RESET);
     vkGetPhysicalDeviceQueueFamilyProperties(chosen, &qCount, qProps.data());
 
-	LOG_SUCCESS_CAT("SWAPCHAIN", "{}WE DIE IN THERE{}", EMERALD_GREEN, RESET);
-    int graphics = -1, present = -1;
-    for (uint32_t i = 0; i < qCount; ++i) {
-        if (graphics == -1 && (qProps[i].queueFlags & VK_QUEUE_GRAPHICS_BIT))
-            graphics = i;
-        VkBool32 sup = VK_FALSE;
-        vkGetPhysicalDeviceSurfaceSupportKHR(chosen, i, g_surface(), &sup);
-        if (sup && present == -1)
-            present = i;
+LOG_SUCCESS_CAT("SWAPCHAIN", "{}ENTERING THE DANGER ZONE — QUEUE FAMILY DISCOVERY BEGINS{}", EMERALD_GREEN, RESET);
+LOG_INFO_CAT("SWAPCHAIN", "{}Physical device: {:p} | Surface: {:p}{}", 
+             VALHALLA_GOLD, static_cast<void*>(chosen), static_cast<void*>(g_surface()), RESET);
+
+int graphics = -1;
+int present  = -1;
+
+LOG_INFO_CAT("SWAPCHAIN", "{}Scanning {} queue families — TAYLOR HAWKINS WATCHES FROM ABOVE{}", 
+             PLASMA_FUCHSIA, qCount, RESET);
+
+for (uint32_t i = 0; i < qCount; ++i) {
+    const auto& q = qProps[i];
+
+    LOG_INFO_CAT("SWAPCHAIN", "{}[Family {}] Flags: 0x{:x} | Count: {} | TimestampValid: {} | Graphics: {} | Compute: {} | Transfer: {} | Sparse: {}{}",
+                 EMERALD_GREEN, i,
+                 static_cast<uint32_t>(q.queueFlags),
+                 q.queueCount,
+                 (q.timestampValidBits > 0) ? "YES" : "NO",
+                 (q.queueFlags & VK_QUEUE_GRAPHICS_BIT) ? "YES" : "NO",
+                 (q.queueFlags & VK_QUEUE_COMPUTE_BIT) ? "YES" : "NO",
+                 (q.queueFlags & VK_QUEUE_TRANSFER_BIT) ? "YES" : "NO",
+                 (q.queueFlags & VK_QUEUE_SPARSE_BINDING_BIT) ? "YES" : "NO",
+                 RESET);
+
+    // Graphics queue — first one wins
+    if (graphics == -1 && (q.queueFlags & VK_QUEUE_GRAPHICS_BIT)) {
+        graphics = static_cast<int>(i);
+        LOG_SUCCESS_CAT("SWAPCHAIN", "{}GRAPHICS QUEUE FAMILY LOCKED → {}{}", VALHALLA_GOLD, i, RESET);
     }
-	LOG_SUCCESS_CAT("SWAPCHAIN", "{}WE DID NOT IN FACT DIE IN THERE{}", EMERALD_GREEN, RESET);
+
+    // Present support — SLOW AND SAFE
+    VkBool32 supportsPresent = VK_FALSE;
+    LOG_INFO_CAT("SWAPCHAIN", "{}Querying present support for family {}...{}", RASPBERRY_PINK, i, RESET);
+
+    VkResult queryResult = vkGetPhysicalDeviceSurfaceSupportKHR(chosen, i, g_surface(), &supportsPresent);
+    
+    if (queryResult != VK_SUCCESS) {
+        std::abort();
+    }
+
+    LOG_INFO_CAT("SWAPCHAIN", "{}Family {} present support: {}{}", 
+                 supportsPresent ? EMERALD_GREEN : AMBER_YELLOW, 
+                 i, supportsPresent ? "YES" : "NO", RESET);
+
+    if (supportsPresent && present == -1) {
+        present = static_cast<int>(i);
+        LOG_SUCCESS_CAT("SWAPCHAIN", "{}PRESENT QUEUE FAMILY LOCKED → {}{}", PLASMA_FUCHSIA, i, RESET);
+    }
+
+    // Optional: break early if we have both
+    if (graphics != -1 && present != -1) {
+        LOG_SUCCESS_CAT("SWAPCHAIN", "{}BOTH QUEUES FOUND EARLY — PROCEEDING TO VALHALLA{}", DIAMOND_SPARKLE, RESET);
+        break;
+    }
+}
+
+// Final validation — NO MORE SILENT DEATH
+if (graphics == -1) {
+    LOG_FATAL_CAT("SWAPCHAIN", "{}NO GRAPHICS QUEUE FOUND — YOUR GPU IS A POTATO — EMPIRE FALLS{}", CRIMSON_MAGENTA, RESET);
+    std::abort();
+}
+
+if (present == -1) {
+    LOG_FATAL_CAT("SWAPCHAIN", "{}NO PRESENT QUEUE FOUND — SURFACE REJECTED US — TAYLOR HAWKINS TURNS AWAY{}", CRIMSON_MAGENTA, RESET);
+    std::abort();
+}
+
+LOG_SUCCESS_CAT("SWAPCHAIN", "{}WE DID NOT DIE — QUEUES SECURED → Graphics: {} | Present: {}{}", 
+                VALHALLA_GOLD, graphics, present, RESET);
+LOG_SUCCESS_CAT("SWAPCHAIN", "{}TAYLOR HAWKINS SMILES FROM VALHALLA — THE DRUMS CONTINUE{}", DIAMOND_SPARKLE, RESET);
+LOG_SUCCESS_CAT("SWAPCHAIN", "{}EXITING DANGER ZONE — FIRST LIGHT IMMINENT{}", PLASMA_FUCHSIA, RESET);
 
     g_ctx().graphicsQueueFamily = graphics;
     g_ctx().presentFamily_      = present;
