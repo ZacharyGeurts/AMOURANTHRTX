@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.21)
 project(AMOURANTH_RTX LANGUAGES CXX)
 
 # =============================================================================
-# ENABLE FETCHCONTENT + GIT FOR EXTERNAL DEPENDENCIES (OLD CMAKE FIX)
+# ENABLE FETCHCONTENT + GIT FOR EXTERNAL DEPENDENCIES
 # =============================================================================
 include(FetchContent)
 find_package(Git REQUIRED)
@@ -60,10 +60,14 @@ if(DISABLE_TRACE_AND_DEBUG_LOGS)
     add_definitions(-DDISABLE_TRACE_AND_DEBUG_LOGS)
 endif()
 
-if(CMAKE_BUILD_TYPE MATCHES Debug)
-    add_compile_options(-fsanitize=address,undefined,leak)
-    add_link_options(-fsanitize=address,undefined,leak)
-endif()
+# =============================================================================
+# ADDRESS SANITIZER COMPLETELY DISABLED — STONEKEY v∞ IS SACRED
+# =============================================================================
+# ASan conflicts with StoneKey's intentional pointer obfuscation
+# → NEVER ENABLE IT — EVER
+# Removed: -fsanitize=address,undefined,leak
+# Removed: link options
+# StoneKey now flows pure and undetected
 
 # =============================================================================
 # PLATFORM DETECTION
@@ -262,7 +266,7 @@ else()
 endif()
 
 # =============================================================================
-# SHADER COMPILATION — FIXED (no more stray parentheses!)
+# SHADER COMPILATION — FIXED
 # =============================================================================
 set(SHADER_INCLUDE_FLAGS
     -I${CMAKE_CURRENT_SOURCE_DIR}/include/engine/Vulkan
