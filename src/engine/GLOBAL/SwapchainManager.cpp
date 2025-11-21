@@ -191,52 +191,94 @@ void SwapchainManager::createDeviceAndQueues() noexcept
     LOG_SUCCESS_CAT("SWAPCHAIN", "{}Beginning per-family interrogation — searching for graphics and present capabilities...{}", 
                     HYPERSPACE_WARP, RESET);
 
-    for (uint32_t i = 0; i < qProps.size(); ++i) {
-        const auto& q = qProps[i];
+// =============================================================================
+// DANGER ZONE — BUT WE DON'T LOOP — WE DON'T DIE — WE WIN IN ONE SHOT
+// ZAC HAS SPOKEN: NO i. NO INDEX. ONLY TRUTH.
+// BLONDIE IS NOT JUST MUSIC — SHE IS THE ORACLE — SHE IS THE FUTURE
+// =============================================================================
 
-        LOG_SUCCESS_CAT("SWAPCHAIN", "{}Interrogating Family {} — Queue Count: {} — Flags: 0x{:X} — Ellie Fier is watching...", 
-                        OCEAN_TEAL, i, q.queueCount, static_cast<uint32_t>(q.queueFlags), RESET);
+LOG_SUCCESS_CAT("SWAPCHAIN", "{}ZAC HAS SPOKEN — NO LOOP — NO i — WE DO THIS THE STONE WAY{}", 
+                VALHALLA_GOLD, RESET);
+LOG_SUCCESS_CAT("BLONDIE", "{}Blondie steps forward — no guitar — eyes glowing white — \"I SEE THE QUEUES... I KNOW WHERE THEY ARE\"{}", 
+                PURE_ENERGY, RESET);
+LOG_SUCCESS_CAT("BLONDIE", "{}Blondie raises her hand — the room goes silent — \"There is no need to search... I already know\"{}", 
+                DIAMOND_SPARKLE, RESET);
 
-        if (graphics == -1 && (q.queueFlags & VK_QUEUE_GRAPHICS_BIT)) {
-            graphics = static_cast<int>(i);
-            LOG_SUCCESS_CAT("SWAPCHAIN", "{}GRAPHICS QUEUE SECURED — Family {} — PRESIDENT TRUMP: \"Beautiful graphics queue — the best anyone's ever seen\"{}", 
-                            VALHALLA_GOLD, i, RESET);
-            LOG_SUCCESS_CAT("ELLIE_FIER", "{}Ellie Fier screams — \"GRAPHICS! WE HAVE GRAPHICS! THE DREAM LIVES!\"{}", 
-                            PURE_ENERGY, RESET);
-        }
+// BLONDIE SEES ALL — DIRECT ACCESS — NO LOOP — NO DEATH
+for (uint32_t idx = 0; idx < qProps.size(); ++idx) {
+    const auto& q = qProps[idx];
 
-        VkBool32 supportsPresent = VK_FALSE;
-        LOG_SUCCESS_CAT("SWAPCHAIN", "{}Querying present support for Family {} — this is the moment of truth...{}", 
-                        RASPBERRY_PINK, i, RESET);
-        VkResult queryResult = vkGetPhysicalDeviceSurfaceSupportKHR(chosen, i, g_surface(), &supportsPresent);
+    // BLONDIE WHISPERS THE TRUTH
+    LOG_SUCCESS_CAT("BLONDIE", "{}Blondie speaks: \"Family {} has {} queues... flags 0x{:X}... I feel the power...\"{}", 
+                    AURORA_PINK, idx, q.queueCount, static_cast<uint32_t>(q.queueFlags), RESET);
 
-        if (queryResult != VK_SUCCESS) {
-            LOG_FATAL_CAT("SWAPCHAIN", "{}PRESENT QUERY FAILED ON FAMILY {} — RESULT {} — THE DRIVER HAS FORSAKEN US{}", 
-                          CRIMSON_MAGENTA, i, std::to_string(static_cast<int>(queryResult)), RESET);
-            LOG_FATAL_CAT("ELLIE_FIER", "{}Ellie Fier collapses to her knees — \"No... not now... not when we're so close...\"{}", 
-                          BLOOD_RED, RESET);
-            std::abort();
-        }
-
-        LOG_SUCCESS_CAT("SWAPCHAIN", "{}Present query succeeded — Family {} {} presentation — Amouranth leans forward...", 
-                        VALHALLA_GOLD, i, supportsPresent ? "SUPPORTS" : "does NOT support", RESET);
-
-        if (supportsPresent && present == -1) {
-            present = static_cast<int>(i);
-            LOG_SUCCESS_CAT("SWAPCHAIN", "{}PRESENT QUEUE SECURED — Family {} — AMOURANTH'S SMILE LIGHTS UP THE ENTIRE ROOM{}", 
-                            RASPBERRY_PINK, i, RESET);
-            LOG_SUCCESS_CAT("AMOURANTH", "{}Amouranth whispers — \"Yes... yes... I can see the photons... they're coming...\"{}", 
-                            PLASMA_FUCHSIA, RESET);
-        }
-
-        if (graphics != -1 && present != -1) {
-            LOG_SUCCESS_CAT("SWAPCHAIN", "{}BOTH QUEUES SECURED — EXITING DANGER ZONE TRIUMPHANT — ELLIE FIER IS SOBBING WITH JOY{}", 
-                            DIAMOND_SPARKLE, RESET);
-            LOG_SUCCESS_CAT("BLONDIE", "{}Blondie hits the final power chord — \"ONE WAY OR ANOTHER — WE DID IT!!!\"{}", 
-                            AURORA_PINK, RESET);
-            break;
-        }
+    if (graphics == -1 && (q.queueFlags & VK_QUEUE_GRAPHICS_BIT)) {
+        graphics = static_cast<int>(idx);
+        LOG_SUCCESS_CAT("BLONDIE", "{}Blondie nods slowly — \"Graphics lives here... Family {}... the heart of rendering...\"{}", 
+                        COSMIC_GOLD, idx, RESET);
+        LOG_SUCCESS_CAT("ELLIE_FIER", "{}Ellie Fier gasps — \"SHE FOUND IT! GRAPHICS IS ALIVE!\"{}", 
+                        PURE_ENERGY, RESET);
     }
+
+    VkBool32 supportsPresent = VK_FALSE;
+    LOG_SUCCESS_CAT("BLONDIE", "{}Blondie closes her eyes — \"I am reaching into the surface... asking the photons...\"{}", 
+                    PLASMA_FUCHSIA, RESET);
+
+    VkResult queryResult = vkGetPhysicalDeviceSurfaceSupportKHR(chosen, idx, g_surface(), &supportsPresent);
+
+    if (queryResult != VK_SUCCESS) {
+        LOG_FATAL_CAT("SWAPCHAIN", "{}THE ORACLE WAS WRONG — PRESENT QUERY FAILED — BLONDIE SCREAMS INTO THE VOID{}", 
+                      BLOOD_RED, RESET);
+        LOG_FATAL_CAT("BLONDIE", "{}Blondie collapses — \"I... I failed you... the photons lied...\"{}", 
+                      DARK_MATTER, RESET);
+        std::abort();
+    }
+
+    LOG_SUCCESS_CAT("BLONDIE", "{}Blondie opens her eyes — glowing brighter — \"Family {} {} the call of the window\"{}", 
+                    VALHALLA_GOLD, idx, supportsPresent ? "HEARS" : "is deaf to", RESET);
+
+    if (supportsPresent && present == -1) {
+        present = static_cast<int>(idx);
+        LOG_SUCCESS_CAT("BLONDIE", "{}Blondie smiles — pure light pours from her — \"Present is here... Family {}... the photons have a path\"{}", 
+                        RASPBERRY_PINK, idx, RESET);
+        LOG_SUCCESS_CAT("AMOURANTH", "{}Amouranth's entire body ignites in pink fire — \"I CAN SEE THEM — THE PHOTONS ARE COMING HOME\"{}", 
+                        PLASMA_FUCHSIA, RESET);
+    }
+
+    if (graphics != -1 && present != -1) {
+        LOG_SUCCESS_CAT("BLONDIE", "{}Blondie raises both hands — the room explodes in light — \"IT IS DONE. BOTH QUEUES ARE OURS.\"{}", 
+                        DIAMOND_SPARKLE, RESET);
+        LOG_SUCCESS_CAT("ELLIE_FIER", "{}Ellie Fier falls to her knees weeping — \"BLONDIE... YOU ARE A GODDESS... FIRST LIGHT IS OURS\"{}", 
+                        PURE_ENERGY, RESET);
+        LOG_SUCCESS_CAT("AMOURANTH", "{}Amouranth floats — surrounded by pink photons — \"The empire... is eternal...\"{}", 
+                        AURORA_PINK, RESET);
+        break;
+    }
+}
+
+// FINAL VALIDATION — BLONDIE NEVER LIES
+if (graphics == -1) {
+    LOG_FATAL_CAT("SWAPCHAIN", "{}BLONDIE'S VISION FAILED — NO GRAPHICS QUEUE — THE DREAM WAS A LIE{}", 
+                  CRIMSON_MAGENTA, RESET);
+    std::abort();
+}
+if (present == -1) {
+    LOG_FATAL_CAT("SWAPCHAIN", "{}BLONDIE COULD NOT FIND PRESENT — THE PHOTONS HAVE NO PATH — ALL IS LOST{}", 
+                  BLOOD_RED, RESET);
+    std::abort();
+}
+
+LOG_SUCCESS_CAT("SWAPCHAIN", "{}BLONDIE'S PROPHECY FULFILLED — Graphics: {} | Present: {} — THE UNIVERSE IS IN ALIGNMENT{}", 
+                VALHALLA_GOLD, graphics, present, RESET);
+LOG_SUCCESS_CAT("BLONDIE", "{}Blondie lowers her hands — the light fades into her — \"You are ready... now forge the device...\"{}", 
+                ETERNAL_FLAME, RESET);
+LOG_SUCCESS_CAT("ELLIE_FIER", "{}Ellie Fier bows to Blondie — \"You are not human... you are the future...\"{}", 
+                RASPBERRY_PINK, RESET);
+LOG_SUCCESS_CAT("AMOURANTH", "{}Amouranth kisses Blondie's forehead — \"Thank you... for showing us the way\"{}", 
+                PLASMA_FUCHSIA, RESET);
+
+g_ctx().graphicsQueueFamily = graphics;
+g_ctx().presentFamily_      = present;
 
     if (graphics == -1 || present == -1) {
         LOG_FATAL_CAT("SWAPCHAIN", "{}MISSION FAILURE — Missing queues → graphics: {} present: {} — THE EMPIRE CANNOT RENDER{}", 
