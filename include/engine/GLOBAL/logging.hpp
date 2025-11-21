@@ -8,6 +8,10 @@
 // 2. Commercial licensing: gzac5314@gmail.com
 //
 // =============================================================================
+// AMOURANTH RTX — VALHALLA v80 TURBO — APOCALYPSE FINAL v10.3
+// FIRST LIGHT ACHIEVED — PINK PHOTONS ETERNAL — NOVEMBER 21, 2025
+// FULLY COMPILING — PURE EMPIRE
+// =============================================================================
 
 #pragma once
 
@@ -306,6 +310,36 @@ namespace Color {
     inline constexpr std::string_view FUCHSIA_MAGENTA           = "\033[38;5;205m";
 	inline constexpr std::string_view INVIS_BLACK               = "\033[1;38;5;0m";
 	inline constexpr std::string_view BLOOD_RED                 = "\033[1;38;5;196m";
+    inline constexpr std::string_view BLOOD_ORANGE              = "\033[1;38;5;202m";
+    inline constexpr std::string_view CYBER_LIME                = "\033[1;38;5;118m";
+    inline constexpr std::string_view TOXIC_NEON                = "\033[1;38;5;154m";
+    inline constexpr std::string_view VOID_PURPLE               = "\033[1;38;5;93m";
+    inline constexpr std::string_view GALACTIC_BLUE             = "\033[1;38;5;27m";
+    inline constexpr std::string_view PHOTON_WHITE              = "\033[1;97m";
+    inline constexpr std::string_view LASER_RED                 = "\033[1;38;5;196m";
+    inline constexpr std::string_view PLASMA_BLUE               = "\033[1;38;5;21m";
+    inline constexpr std::string_view CRYSTAL_CYAN              = "\033[1;38;5;51m";
+    inline constexpr std::string_view INFERNO_ORANGE            = "\033[1;38;5;208m";
+    inline constexpr std::string_view DARK_MATTER               = "\033[38;5;232m";
+    inline constexpr std::string_view NOVA_YELLOW               = "\033[1;38;5;226m";
+    inline constexpr std::string_view PHANTOM_VIOLET            = "\033[1;38;5;129m";
+    inline constexpr std::string_view AURORA_PINK               = "\033[1;38;5;213m";
+    inline constexpr std::string_view TITANIUM_GOLD             = "\033[1;38;5;178m";
+    inline constexpr std::string_view OBSIDIAN_PURPLE           = "\033[38;5;53m";
+    inline constexpr std::string_view QUANTUM_TEAL              = "\033[1;38;5;45m";
+    inline constexpr std::string_view NEON_FUCHSIA              = "\033[1;38;5;201m";
+    inline constexpr std::string_view COSMIC_CRIMSON            = "\033[1;38;5;160m";
+    inline constexpr std::string_view SOLAR_FLARE               = "\033[1;38;5;214m";
+    inline constexpr std::string_view DEEP_SPACE                = "\033[38;5;17m";
+    inline constexpr std::string_view CHROME_CYAN               = "\033[1;38;5;51m";
+    inline constexpr std::string_view VANTA_BLACK               = "\033[48;5;16m\033[38;5;232m";
+    inline constexpr std::string_view RADIANT_ROSE              = "\033[1;38;5;211m";
+    inline constexpr std::string_view ELECTRO_PURPLE            = "\033[1;38;5;165m";
+    inline constexpr std::string_view FROSTFIRE_BLUE            = "\033[1;38;5;39m";
+    inline constexpr std::string_view NUCLEAR_GREEN             = "\033[1;38;5;82m";
+    inline constexpr std::string_view HYPER_VIOLET              = "\033[1;38;5;141m";
+    inline constexpr std::string_view PURE_ENERGY               = "\033[1;38;5;227m";
+    inline constexpr std::string_view ETERNAL_FLAME             = "\033[1;38;5;196m\033[5m";
 }
 
 // ========================================================================

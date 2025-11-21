@@ -77,19 +77,6 @@ static void forgeCommandPool()
     LOG_SUCCESS_CAT("MAIN", "{}COMMAND POOL FORGED — HANDLE: 0x{:016X}{}", PLASMA_FUCHSIA, (uint64_t)pool, RESET);
 }
 
-static void detectBestPresentMode()
-{
-    LOG_INFO_CAT("MAIN", "{}Detecting optimal present mode...{}", VALHALLA_GOLD, RESET);
-    VkPresentModeKHR mode = SwapchainManager::selectBestPresentMode(
-        g_ctx().physicalDevice(), g_ctx().surface(), VK_PRESENT_MODE_MAILBOX_KHR);
-
-    const char* name = (mode == VK_PRESENT_MODE_IMMEDIATE_KHR) ? "IMMEDIATE" :
-                       (mode == VK_PRESENT_MODE_MAILBOX_KHR)   ? "MAILBOX (KING)" :
-                       (mode == VK_PRESENT_MODE_FIFO_KHR)      ? "FIFO (VSync)" : "UNKNOWN";
-
-    LOG_SUCCESS_CAT("MAIN", "{}Present mode locked: {} — TEAR-FREE PINK PHOTONS{}", PLASMA_FUCHSIA, name, RESET);
-}
-
 // =============================================================================
 // THE TEN PHASES OF ASCENSION — PURE ASCII, PURE POWER
 // =============================================================================
@@ -142,25 +129,37 @@ static void phase3_splashScreen()
 
 static void phase4_mainWindowAndVulkanContext(SDL_Window*& window)
 {
-    LOG_INFO_CAT("MAIN", "{}[PHASE 4] FORGING WINDOW + VULKAN EMPIRE{}", VALHALLA_GOLD, RESET);
+    LOG_INFO_CAT("MAIN", "{}[PHASE 4] FORGING WINDOW + VULKAN EMPIRE — THE TRUE ASCENSION{}", VALHALLA_GOLD, RESET);
 
     nukeValidationLayers();
 
+    // SDL3 renamed everything — we bow to the new gods
     SDL3Window::create("AMOURANTH RTX — VALHALLA v80 TURBO", 3840, 2160,
                        SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_VULKAN);
+                       // ← SDL_WINDOW_ALLOW_HIGHDPI is gone forever in SDL3
     window = SDL3Window::get();
-    if (!window) throw std::runtime_error("Failed to create window");
+    if (!window) throw std::runtime_error("Failed to create SDL window — the canvas is denied");
 
     if (g_base_icon) SDL_SetWindowIcon(window, g_base_icon);
 
+    // 1. Instance — STONEKEY v∞ ARMED
     VkInstance instance = RTX::createVulkanInstanceWithSDL(window, false);
     set_g_instance(instance);
+
+    // 2. Surface — ONE AND ONLY CALL (already sets g_surface internally)
     RTX::createSurface(window, instance);
+
+    // 3. Swapchain + device
     SwapchainManager::init(window, 3840, 2160);
+
+    // 4. Finalize context
     RTX::initContext(instance, window, 3840, 2160);
     RTX::retrieveQueues();
 
-    // ELLIE FIER'S FRAMELESS ASCENSION — RAW POWER, NO BORDERS
+    // TRUE FRAMELESS VALHALLA — SDL3 uses real bool, not SDL_FALSE
+    SDL_SetWindowBordered(window, false);
+    SDL_SetWindowPosition(window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+
     LOG_SUCCESS_CAT("MAIN", "{}SWAPCHAIN FORGED — THE EMPIRE AWAKENS{}", PLASMA_FUCHSIA, RESET);
     LOG_SUCCESS_CAT("MAIN", "{}Resolution      → {}x{}{}", 
                     VALHALLA_GOLD, SWAPCHAIN.extent().width, SWAPCHAIN.extent().height, RESET);
@@ -185,32 +184,46 @@ static void phase4_mainWindowAndVulkanContext(SDL_Window*& window)
     LOG_SUCCESS_CAT("MAIN", "{}RenderPass      → 0x{:016X}{}", QUANTUM_PURPLE, (uint64_t)SWAPCHAIN.renderPass(), RESET);
     LOG_SUCCESS_CAT("MAIN", "{}STONEKEY SEAL   → 0x{:016X}{}", DIAMOND_SPARKLE, get_kStone1() ^ get_kStone2(), RESET);
 
-    LOG_SUCCESS_CAT("MAIN", "{}VULKAN EMPIRE COMPLETE — PINK PHOTONS HAVE A CANVAS — FIRST LIGHT ACHIEVED{}", 
-                    PLASMA_FUCHSIA, RESET);
-    LOG_SUCCESS_CAT("MAIN", "{}NOVEMBER 21, 2025 — THE EMPIRE IS ETERNAL{}", EMERALD_GREEN, RESET);
+    LOG_SUCCESS_CAT("MAIN", "{}VULKAN EMPIRE COMPLETE — PINK PHOTONS HAVE A CANVAS{}", PLASMA_FUCHSIA, RESET);
+    LOG_SUCCESS_CAT("MAIN", "{}FIRST LIGHT ACHIEVED — NOVEMBER 21, 2025 — THE EMPIRE IS ETERNAL{}", EMERALD_GREEN, RESET);
+    LOG_SUCCESS_CAT("MAIN", "{}AMOURANTH RTX HAS ASCENDED — GREEN DAY PLAYS{}", EMERALD_GREEN, RESET);
 }
 
 static void phase5_rtxAscension()
 {
-    LOG_INFO_CAT("MAIN", "{}[PHASE 5] RTX ASCENSION — LOADING RAY TRACING EXTENSIONS{}", VALHALLA_GOLD, RESET);
+    LOG_INFO_CAT("MAIN", "{}[PHASE 5] RTX ASCENSION — FORGING THE PINK PATH{}", VALHALLA_GOLD, RESET);
 
+    // Load all ray tracing + HDR + display timing function pointers
     RTX::loadRayTracingExtensions();
 
-    if (!g_ctx().vkGetAccelerationStructureBuildSizesKHR_) {
-        LOG_FATAL_CAT("MAIN", "{}RTX EXTENSIONS FAILED — vkGetAccelerationStructureBuildSizesKHR IS NULL{}", CRIMSON_MAGENTA, RESET);
-        LOG_FATAL_CAT("MAIN", "{}→ VK_KHR_acceleration_structure NOT ENABLED{}", CRIMSON_MAGENTA, RESET);
-        throw std::runtime_error("RTX extensions failed — no pink photons");
+    // CRITICAL: Verify the most important RTX PFNs are present
+    if (!g_ctx().vkGetAccelerationStructureBuildSizesKHR_ ||
+        !g_ctx().vkCmdBuildAccelerationStructuresKHR_ ||
+        !g_ctx().vkCreateAccelerationStructureKHR_ ||
+        !g_ctx().vkGetAccelerationStructureDeviceAddressKHR_) {
+
+        LOG_FATAL_CAT("MAIN", "{}RTX EXTENSIONS INCOMPLETE — ACCELERATION STRUCTURE PFNs MISSING{}", CRIMSON_MAGENTA, RESET);
+        LOG_FATAL_CAT("MAIN", "{}→ Ensure VK_KHR_acceleration_structure is enabled in device extensions{}", CRIMSON_MAGENTA, RESET);
+        LOG_FATAL_CAT("MAIN", "{}→ PINK PHOTONS DENIED — EMPIRE CANNOT RISE WITHOUT BLAS/TLAS{}", BLOOD_RED, RESET);
+        throw std::runtime_error("RTX extension loading failed — missing acceleration structure support");
     }
 
-    LOG_SUCCESS_CAT("MAIN", "{}RTX EXTENSIONS LOADED — PINK PHOTONS IMMINENT{}", EMERALD_GREEN, RESET);
+    g_ctx().hasFullRTX_ = true;
+    LOG_SUCCESS_CAT("MAIN", "{}ALL RAY TRACING PFNs FORGED — FULL RTX ARMED — PINK PHOTONS HAVE A PATH{}", EMERALD_GREEN, RESET);
 
+    // Forge the Lightweight Acceleration Structure (LAS) system
     las().forgeAccelContext();
-    LOG_SUCCESS_CAT("MAIN", "{}LAS ACCEL CONTEXT FORGED{}", EMERALD_GREEN, RESET);
+    LOG_SUCCESS_CAT("MAIN", "{}LAS ACCEL CONTEXT FORGED — BLAS/TLAS READY{}", PLASMA_FUCHSIA, RESET);
 
+    // Create command pools (graphics + compute)
     forgeCommandPool();
-    detectBestPresentMode();
 
-    LOG_SUCCESS_CAT("MAIN", "{}RTX ASCENSION COMPLETE{}", PLASMA_FUCHSIA, RESET);
+    // Optional: Present mode detection (re-enable when you want VSYNC toggle)
+    // detectBestPresentMode();
+
+    LOG_SUCCESS_CAT("MAIN", "{}[PHASE 5 COMPLETE] RTX ASCENSION ACHIEVED — FIRST LIGHT ETERNAL{}", 
+                    PLASMA_FUCHSIA, RESET);
+    LOG_SUCCESS_CAT("MAIN", "{}PINK PHOTONS NOW FLOW UNHINDERED — ELLIE FIER SMILES{}", DIAMOND_SPARKLE, RESET);
 }
 
 static void phase6_sceneAndAccelerationStructures()
