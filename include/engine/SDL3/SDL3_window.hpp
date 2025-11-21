@@ -54,7 +54,7 @@ inline void create(const char* title, int width, int height, Uint32 flags = 0) {
     flags |= SDL_WINDOW_VULKAN;  // <────────── THIS IS THE MISSING LINE, MANDATORY
 
     // Optional: still try to load library early for extensions, but don't trust the result for the flag
-    if (SDL_Vulkan_LoadLibrary(nullptr) != 0) {
+    if (SDL_Vulkan_LoadLibrary(nullptr) == 0) {
         LOG_WARNING_CAT("SDL3", "SDL_Vulkan_LoadLibrary failed early — proceeding anyway (common on some drivers)");
     }
 
