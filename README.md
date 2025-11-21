@@ -6,7 +6,7 @@ chmod +x linux.sh
 ```
 Currently compiles and reaches render loop. Much more work needed yet.  
 Working prototype expected Christmas 2025.  
-Requested 1000s of times, rebuilt, re-edited, re-microed, assembled  and tested to work.  
+1000s of Grok requests, rebuilt, re-edited, re-microed, assembled  and tested to work.  
 Labor of love, blah blah.  
 Expect no output on a given day. I go for milestones and not all include visuals.  
 Updates are fast and furious at this stage and the renderer could be up or down any minute.  
