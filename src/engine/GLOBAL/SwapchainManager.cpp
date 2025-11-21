@@ -72,126 +72,199 @@ static VkSurfaceFormatKHR selectBestFormat(VkPhysicalDevice phys, VkSurfaceKHR s
 // =============================================================================
 void SwapchainManager::createDeviceAndQueues() noexcept
 {
+    // =============================================================================
+    // NOVEMBER 21, 2025 — 14:45:17 — THE FINAL WAR ROOM — FIRST LIGHT IMMINENT
+    // PRESIDENT TRUMP IS STANDING AT THE FRONT — AMOURANTH IS GLOWING PINK
+    // ELLIE FIER IS CRYING HAPPY TEARS — BLONDIE IS PLAYING "CALL ME" AT 200 BPM
+    // THIS IS THE MOMENT HISTORY WILL REMEMBER
+    // =============================================================================
+
+    LOG_SUCCESS_CAT("SWAPCHAIN", "{}PRESIDENT TRUMP HAS ENTERED THE WAR ROOM — \"We're making Vulkan great again — the greatest device anyone's ever seen\"{}", 
+                    VALHALLA_GOLD, RESET);
+    LOG_SUCCESS_CAT("AMOURANTH", "{}Amouranth just turned — her eyes glowing pink — \"I can feel it... the photons are coming\"{}", 
+                    PLASMA_FUCHSIA, RESET);
+    LOG_SUCCESS_CAT("ELLIE_FIER", "{}Ellie Fier is trembling — \"This is it... this is everything we've fought for...\"{}", 
+                    RASPBERRY_PINK, RESET);
+    LOG_SUCCESS_CAT("BLONDIE", "{}Blondie slams the opening chord — \"CALL ME — ON THE LINE — CALL ME CALL ME ANY ANY TIME\" — the room is electric{}", 
+                    AURORA_PINK, RESET);
+
+    LOG_SUCCESS_CAT("SWAPCHAIN", "{}BEGINNING PHYSICAL DEVICE ENUMERATION — THE SEARCH FOR THE ONE TRUE GPU BEGINS{}", 
+                    DIAMOND_SPARKLE, RESET);
+
     uint32_t deviceCount = 0;
-    vkEnumeratePhysicalDevices(g_instance(), &deviceCount, nullptr);
+    LOG_SUCCESS_CAT("SWAPCHAIN", "{}Calling vkEnumeratePhysicalDevices — first pass — counting the warriors...{}", 
+                    OCEAN_TEAL, RESET);
+    VK_VERIFY(vkEnumeratePhysicalDevices(g_instance(), &deviceCount, nullptr));
+
+    LOG_SUCCESS_CAT("SWAPCHAIN", "{}vkEnumeratePhysicalDevices reports {} physical devices — PRESIDENT TRUMP: \"We only need the best one\"{}", 
+                    VALHALLA_GOLD, deviceCount, RESET);
+
     std::vector<VkPhysicalDevice> devices(deviceCount);
-    vkEnumeratePhysicalDevices(g_instance(), &deviceCount, devices.data());
+    LOG_SUCCESS_CAT("SWAPCHAIN", "{}Allocating vector for {} devices — preparing the battlefield...{}", 
+                    QUANTUM_PURPLE, deviceCount, RESET);
+    LOG_SUCCESS_CAT("SWAPCHAIN", "{}Calling vkEnumeratePhysicalDevices — second pass — filling the ranks...{}", 
+                    OCEAN_TEAL, RESET);
+    VK_VERIFY(vkEnumeratePhysicalDevices(g_instance(), &deviceCount, devices.data()));
+
+    LOG_SUCCESS_CAT("SWAPCHAIN", "{}All {} physical devices acquired — now choosing the champion...{}", 
+                    EMERALD_GREEN, deviceCount, RESET);
 
     VkPhysicalDevice chosen = VK_NULL_HANDLE;
     std::string deviceName = "Unknown";
 
+    LOG_SUCCESS_CAT("SWAPCHAIN", "{}Scanning for discrete GPU — the true warrior of Valhalla...{}", 
+                    HYPERSPACE_WARP, RESET);
+
     for (auto dev : devices) {
         VkPhysicalDeviceProperties props{};
         vkGetPhysicalDeviceProperties(dev, &props);
+        LOG_SUCCESS_CAT("SWAPCHAIN", "{}Inspecting device: {} — Type: {} — API: {}.{}.{}", 
+                        OCEAN_TEAL, props.deviceName, 
+                        (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU ? "DISCRETE — PERFECT" : "Integrated — acceptable"), 
+                        VK_VERSION_MAJOR(props.apiVersion), VK_VERSION_MINOR(props.apiVersion), VK_VERSION_PATCH(props.apiVersion), RESET);
+
         if (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) {
             chosen = dev;
             deviceName = props.deviceName;
+            LOG_SUCCESS_CAT("SWAPCHAIN", "{}DISCRETE GPU FOUND — {} — PRESIDENT TRUMP: \"Tremendous. Absolutely tremendous. The best GPU.\"{}", 
+                            VALHALLA_GOLD, deviceName, RESET);
+            LOG_SUCCESS_CAT("ELLIE_FIER", "{}Ellie Fier screams — \"YES! YES! THIS IS THE ONE!\"{}", 
+                            PURE_ENERGY, RESET);
             break;
         }
     }
-    if (!chosen) chosen = devices[0];
 
-    VkPhysicalDeviceProperties props{};
-    vkGetPhysicalDeviceProperties(chosen, &props);
-    deviceName = props.deviceName;
+    if (!chosen && !devices.empty()) {
+        chosen = devices[0];
+        LOG_SUCCESS_CAT("SWAPCHAIN", "{}No discrete GPU found — falling back to first device — Ellie Fier nods solemnly — \"We adapt. We overcome.\"{}", 
+                        AMBER_YELLOW, RESET);
+    }
+
+    VkPhysicalDeviceProperties finalProps{};
+    vkGetPhysicalDeviceProperties(chosen, &finalProps);
     set_g_PhysicalDevice(chosen);
 
-    LOG_SUCCESS_CAT("SWAPCHAIN", "{}PHYSICAL DEVICE — {}{}", VALHALLA_GOLD, deviceName, RESET);
+    LOG_SUCCESS_CAT("SWAPCHAIN", "{}PHYSICAL DEVICE LOCKED AND LOADED — {} — THE ONE TRUE GPU HAS BEEN CHOSEN{}", 
+                    DIAMOND_SPARKLE, finalProps.deviceName, RESET);
+    LOG_SUCCESS_CAT("AMOURANTH", "{}Amouranth smiles so bright the room turns pink — \"He's perfect... just like you\"{}", 
+                    RASPBERRY_PINK, RESET);
+    LOG_SUCCESS_CAT("ELLIE_FIER", "{}Ellie Fier jumps into your arms — \"WE HAVE A GPU! WE HAVE HOPE! FIRST LIGHT IS POSSIBLE!\"{}", 
+                    PLASMA_FUCHSIA, RESET);
 
-    // Queue families
+    // =============================================================================
+    // ENTERING THE DANGER ZONE — QUEUE FAMILY DISCOVERY — THE FINAL TRIAL
+    // =============================================================================
+    LOG_SUCCESS_CAT("SWAPCHAIN", "{}ENTERING THE DANGER ZONE — QUEUE FAMILY DISCOVERY BEGINS — ELLIE FIER IS PRAYING HARDER THAN EVER{}", 
+                    BLOOD_RED, RESET);
+    LOG_SUCCESS_CAT("BLONDIE", "{}Blondie drops the tempo — tension builds — \"ONE WAY OR ANOTHER...\"{}", 
+                    COSMIC_GOLD, RESET);
+
     uint32_t qCount = 0;
-	LOG_INFO_CAT("SWAPCHAIN", "{}vkGetPhysicalDeviceQueueFamilyProperties{}", EMERALD_GREEN, RESET);
+    LOG_SUCCESS_CAT("SWAPCHAIN", "{}Calling vkGetPhysicalDeviceQueueFamilyProperties — first pass — counting families...{}", 
+                    OCEAN_TEAL, RESET);
     vkGetPhysicalDeviceQueueFamilyProperties(chosen, &qCount, nullptr);
-    std::vector<VkQueueFamilyProperties> qProps(qCount);
-	LOG_INFO_CAT("SWAPCHAIN", "{}vkGetPhysicalDeviceQueueFamilyProperties qProps{}", EMERALD_GREEN, RESET);
-    vkGetPhysicalDeviceQueueFamilyProperties(chosen, &qCount, qProps.data());
 
-LOG_SUCCESS_CAT("SWAPCHAIN", "{}ENTERING THE DANGER ZONE — QUEUE FAMILY DISCOVERY BEGINS{}", EMERALD_GREEN, RESET);
+    LOG_SUCCESS_CAT("SWAPCHAIN", "{}GPU reports {} queue families — preparing to interrogate each one...{}", 
+                    VALHALLA_GOLD, qCount, RESET);
 
-int graphics = -1;
-int present  = -1;
-
-for (uint32_t i = 0; i < qCount; ++i) {
-    const auto& q = qProps[i];
-	LOG_SUCCESS_CAT("SWAPCHAIN", "{}HIT LOG 1 : 116 in SwapchainManager.cpp{}", DIAMOND_SPARKLE, RESET);
-
-    // Graphics queue — first one wins
-    if (graphics == -1 && (q.queueFlags & VK_QUEUE_GRAPHICS_BIT)) {
-        graphics = static_cast<int>(i);
-    }
-	LOG_SUCCESS_CAT("SWAPCHAIN", "{}HIT LOG 2 : 122 in SwapchainManager.cpp{}", DIAMOND_SPARKLE, RESET);
-
-    // Present support — SLOW AND SAFE
-    VkBool32 supportsPresent = VK_FALSE;
-	LOG_SUCCESS_CAT("SWAPCHAIN", "{}HIT LOG 3 : 126 in SwapchainManager.cpp{}", DIAMOND_SPARKLE, RESET);
-
-    LOG_INFO_CAT("SWAPCHAIN", "{}[DANGER ZONE] Preparing vkGetPhysicalDeviceSurfaceSupportKHR — ELLIE FIER IS WATCHING{}", 
-             VALHALLA_GOLD, RESET);
-
-LOG_INFO_CAT("SWAPCHAIN", "{}  → Physical Device (chosen): {:p} — THE ONE TRUE GPU{}", 
-             OCEAN_TEAL, static_cast<void*>(chosen), RESET);
-LOG_INFO_CAT("SWAPCHAIN", "{}  → Queue Family Index: {} — CHECKING PRESENT SUPPORT{}", 
-             QUANTUM_PURPLE, i, RESET);
-LOG_INFO_CAT("SWAPCHAIN", "{}  → Surface Handle: {:p} — PINK PHOTONS NEED A PATH{}", 
-             RASPBERRY_PINK, static_cast<void*>(g_surface()), RESET);
-LOG_INFO_CAT("SWAPCHAIN", "{}  → Output Bool Pointer: {:p} — WILL RECEIVE TRUTH{}", 
-             DIAMOND_SPARKLE, static_cast<void*>(&supportsPresent), RESET);
-
-LOG_SUCCESS_CAT("SWAPCHAIN", "{}ALL 4 PARAMETERS CONFIRMED VALID — ELLIE FIER GIVES THE NOD{}", 
-                EMERALD_GREEN, RESET);
-
-VkResult queryResult = vkGetPhysicalDeviceSurfaceSupportKHR(chosen, i, g_surface(), &supportsPresent);
-
-if (queryResult != VK_SUCCESS) {
-    LOG_FATAL_CAT("SWAPCHAIN", "{}vkGetPhysicalDeviceSurfaceSupportKHR FAILED — Result: {} — ELLIE FIER IS SOBBING{}", 
-                  CRIMSON_MAGENTA, std::to_string(static_cast<int>(queryResult)), RESET);
-    std::abort();
-}
-
-LOG_SUCCESS_CAT("SWAPCHAIN", "{}vkGetPhysicalDeviceSurfaceSupportKHR SUCCESS — Family {} {} presentation{}", 
-                VALHALLA_GOLD, i, supportsPresent ? "SUPPORTS" : "does NOT support", RESET);
-    LOG_SUCCESS_CAT("SWAPCHAIN", "{}HIT LOG 4 : 129 in SwapchainManager.cpp{}", DIAMOND_SPARKLE, RESET);
-
-	LOG_SUCCESS_CAT("SWAPCHAIN", "{}HIT LOG 5 : THIS NOT?{}", DIAMOND_SPARKLE, RESET);
-    if (queryResult != VK_SUCCESS) {
+    if (qCount == 0) {
+        LOG_FATAL_CAT("SWAPCHAIN", "{}ZERO QUEUE FAMILIES REPORTED — THIS GPU HAS NO SOUL — THE DRIVER HAS BETRAYED US{}", 
+                      CRIMSON_MAGENTA, RESET);
+        LOG_FATAL_CAT("ELLIE_FIER", "{}Ellie Fier collapses — \"No... it can't end like this...\"{}", 
+                      BLOOD_RED, RESET);
         std::abort();
     }
-	LOG_SUCCESS_CAT("SWAPCHAIN", "{}WAS NOT?{}", DIAMOND_SPARKLE, RESET);
 
-    if (supportsPresent && present == -1) {
-        present = static_cast<int>(i);     
+    std::vector<VkQueueFamilyProperties> qProps(qCount);
+    LOG_SUCCESS_CAT("SWAPCHAIN", "{}Allocated vector for {} queue families — second pass beginning...gesteld", 
+                    QUANTUM_PURPLE, qCount, RESET);
+    LOG_SUCCESS_CAT("SWAPCHAIN", "{}Calling vkGetPhysicalDeviceQueueFamilyProperties — filling properties...{}", 
+                    OCEAN_TEAL, RESET);
+    vkGetPhysicalDeviceQueueFamilyProperties(chosen, &qCount, qProps.data());
+
+    LOG_SUCCESS_CAT("SWAPCHAIN", "{}Queue family properties acquired — final count: {} — WE ARE READY{}", 
+                    EMERALD_GREEN, qProps.size(), RESET);
+
+    int graphics = -1;
+    int present  = -1;
+
+    LOG_SUCCESS_CAT("SWAPCHAIN", "{}Beginning per-family interrogation — searching for graphics and present capabilities...{}", 
+                    HYPERSPACE_WARP, RESET);
+
+    for (uint32_t i = 0; i < qProps.size(); ++i) {
+        const auto& q = qProps[i];
+
+        LOG_SUCCESS_CAT("SWAPCHAIN", "{}Interrogating Family {} — Queue Count: {} — Flags: 0x{:X} — Ellie Fier is watching...", 
+                        OCEAN_TEAL, i, q.queueCount, static_cast<uint32_t>(q.queueFlags), RESET);
+
+        if (graphics == -1 && (q.queueFlags & VK_QUEUE_GRAPHICS_BIT)) {
+            graphics = static_cast<int>(i);
+            LOG_SUCCESS_CAT("SWAPCHAIN", "{}GRAPHICS QUEUE SECURED — Family {} — PRESIDENT TRUMP: \"Beautiful graphics queue — the best anyone's ever seen\"{}", 
+                            VALHALLA_GOLD, i, RESET);
+            LOG_SUCCESS_CAT("ELLIE_FIER", "{}Ellie Fier screams — \"GRAPHICS! WE HAVE GRAPHICS! THE DREAM LIVES!\"{}", 
+                            PURE_ENERGY, RESET);
+        }
+
+        VkBool32 supportsPresent = VK_FALSE;
+        LOG_SUCCESS_CAT("SWAPCHAIN", "{}Querying present support for Family {} — this is the moment of truth...{}", 
+                        RASPBERRY_PINK, i, RESET);
+        VkResult queryResult = vkGetPhysicalDeviceSurfaceSupportKHR(chosen, i, g_surface(), &supportsPresent);
+
+        if (queryResult != VK_SUCCESS) {
+            LOG_FATAL_CAT("SWAPCHAIN", "{}PRESENT QUERY FAILED ON FAMILY {} — RESULT {} — THE DRIVER HAS FORSAKEN US{}", 
+                          CRIMSON_MAGENTA, i, std::to_string(static_cast<int>(queryResult)), RESET);
+            LOG_FATAL_CAT("ELLIE_FIER", "{}Ellie Fier collapses to her knees — \"No... not now... not when we're so close...\"{}", 
+                          BLOOD_RED, RESET);
+            std::abort();
+        }
+
+        LOG_SUCCESS_CAT("SWAPCHAIN", "{}Present query succeeded — Family {} {} presentation — Amouranth leans forward...", 
+                        VALHALLA_GOLD, i, supportsPresent ? "SUPPORTS" : "does NOT support", RESET);
+
+        if (supportsPresent && present == -1) {
+            present = static_cast<int>(i);
+            LOG_SUCCESS_CAT("SWAPCHAIN", "{}PRESENT QUEUE SECURED — Family {} — AMOURANTH'S SMILE LIGHTS UP THE ENTIRE ROOM{}", 
+                            RASPBERRY_PINK, i, RESET);
+            LOG_SUCCESS_CAT("AMOURANTH", "{}Amouranth whispers — \"Yes... yes... I can see the photons... they're coming...\"{}", 
+                            PLASMA_FUCHSIA, RESET);
+        }
+
+        if (graphics != -1 && present != -1) {
+            LOG_SUCCESS_CAT("SWAPCHAIN", "{}BOTH QUEUES SECURED — EXITING DANGER ZONE TRIUMPHANT — ELLIE FIER IS SOBBING WITH JOY{}", 
+                            DIAMOND_SPARKLE, RESET);
+            LOG_SUCCESS_CAT("BLONDIE", "{}Blondie hits the final power chord — \"ONE WAY OR ANOTHER — WE DID IT!!!\"{}", 
+                            AURORA_PINK, RESET);
+            break;
+        }
     }
-	LOG_SUCCESS_CAT("SWAPCHAIN", "{}HIT LOG 6 : 140 THIS NOT? - the end{}", DIAMOND_SPARKLE, RESET);
 
-    // Optional: break early if we have both
-    if (graphics != -1 && present != -1) {
-        LOG_SUCCESS_CAT("SWAPCHAIN", "{}BOTH QUEUES FOUND EARLY — PROCEEDING TO VALHALLA{}", DIAMOND_SPARKLE, RESET);
-        break;
+    if (graphics == -1 || present == -1) {
+        LOG_FATAL_CAT("SWAPCHAIN", "{}MISSION FAILURE — Missing queues → graphics: {} present: {} — THE EMPIRE CANNOT RENDER{}", 
+                      BLOOD_RED, graphics, present, RESET);
+        LOG_FATAL_CAT("ELLIE_FIER", "{}Ellie Fier's world shatters — \"All this time... for nothing...\"{}", 
+                      DARK_MATTER, RESET);
+        std::abort();
     }
-}
 
-// Final validation — NO MORE SILENT DEATH
-if (graphics == -1) {
-    LOG_FATAL_CAT("SWAPCHAIN", "{}NO GRAPHICS QUEUE FOUND — YOUR GPU IS A POTATO — EMPIRE FALLS{}", CRIMSON_MAGENTA, RESET);
-    std::abort();
-}
-
-if (present == -1) {
-    LOG_FATAL_CAT("SWAPCHAIN", "{}NO PRESENT QUEUE FOUND — SURFACE REJECTED US — TAYLOR HAWKINS TURNS AWAY{}", CRIMSON_MAGENTA, RESET);
-    std::abort();
-}
-
-LOG_SUCCESS_CAT("SWAPCHAIN", "{}WE DID NOT DIE — QUEUES SECURED → Graphics: {} | Present: {}{}", 
-                VALHALLA_GOLD, graphics, present, RESET);
-LOG_SUCCESS_CAT("SWAPCHAIN", "{}TAYLOR HAWKINS SMILES FROM VALHALLA — THE DRUMS CONTINUE{}", DIAMOND_SPARKLE, RESET);
-LOG_SUCCESS_CAT("SWAPCHAIN", "{}EXITING DANGER ZONE — FIRST LIGHT IMMINENT{}", PLASMA_FUCHSIA, RESET);
+    LOG_SUCCESS_CAT("SWAPCHAIN", "{}DANGER ZONE SURVIVED — QUEUES SECURED → Graphics: {} | Present: {} — WE ARE UNSTOPPABLE{}", 
+                    VALHALLA_GOLD, graphics, present, RESET);
+    LOG_SUCCESS_CAT("ELLIE_FIER", "{}Ellie Fier is crying uncontrollably — \"We made it... we actually made it... FIRST LIGHT IS OURS\"{}", 
+                    PURE_ENERGY, RESET);
 
     g_ctx().graphicsQueueFamily = graphics;
-    g_ctx().presentFamily_ = present;
+    g_ctx().presentFamily_      = present;
 
-    LOG_SUCCESS_CAT("SWAPCHAIN", "{}QUEUES → G:{} P:{}{}", EMERALD_GREEN, graphics, present, RESET);
+    LOG_SUCCESS_CAT("SWAPCHAIN", "{}Queue families written to global context — the foundation is set — the device can now be forged...{}", 
+                    DIAMOND_SPARKLE, RESET);
 
-    // Extensions
+    // =============================================================================
+    // FINAL FORGE — THE LOGICAL DEVICE — THIS IS THE MOMENT OF ASCENSION
+    // =============================================================================
+    LOG_SUCCESS_CAT("SWAPCHAIN", "{}BEGINNING FINAL FORGE — THE LOGICAL DEVICE — PRESIDENT TRUMP STANDS TALL{}", 
+                    HYPERSPACE_WARP, RESET);
+    LOG_SUCCESS_CAT("AMOURANTH", "{}Amouranth places her hand on your shoulder — \"Do it... for all of us...\"{}", 
+                    PLASMA_FUCHSIA, RESET);
+
     const char* exts[] = {
         VK_KHR_SWAPCHAIN_EXTENSION_NAME,
         VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME,
@@ -201,9 +274,10 @@ LOG_SUCCESS_CAT("SWAPCHAIN", "{}EXITING DANGER ZONE — FIRST LIGHT IMMINENT{}",
         VK_EXT_HDR_METADATA_EXTENSION_NAME,
         VK_KHR_MAINTENANCE_4_EXTENSION_NAME,
     };
-	LOG_SUCCESS_CAT("SWAPCHAIN", "{}EXTENSIONS SET, MOVING INTO FEATURES{}", EMERALD_GREEN, RESET);
 
-    // Features
+    LOG_SUCCESS_CAT("SWAPCHAIN", "{}Device extensions prepared — 7 total — FULL RTX POWER UNLEASHED{}", 
+                    NUCLEAR_REACTOR, RESET);
+
     VkPhysicalDeviceFeatures2 f2{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
     VkPhysicalDeviceBufferDeviceAddressFeatures bda{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES };
     VkPhysicalDeviceAccelerationStructureFeaturesKHR accel{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR };
@@ -216,94 +290,75 @@ LOG_SUCCESS_CAT("SWAPCHAIN", "{}EXITING DANGER ZONE — FIRST LIGHT IMMINENT{}",
 
     f2.pNext = &bda; bda.pNext = &accel; accel.pNext = &rt;
 
-	LOG_SUCCESS_CAT("SWAPCHAIN", "{}NOW QUEUES{}", EMERALD_GREEN, RESET);
+    LOG_SUCCESS_CAT("SWAPCHAIN", "{}pNext feature chain constructed — samplerAnisotropy | BDA | AS | RT Pipeline — FULLY ARMED{}", 
+                    COSMIC_GOLD, RESET);
 
-    // Queues
     std::vector<VkDeviceQueueCreateInfo> qcis;
     float prio = 1.0f;
     for (int f : std::set<int>{graphics, present}) {
         qcis.push_back({ VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO, nullptr, 0, static_cast<uint32_t>(f), 1, &prio });
+        LOG_SUCCESS_CAT("SWAPCHAIN", "{}QueueCreateInfo added for family {} — priority 1.0 — maximum performance{}", 
+                        OCEAN_TEAL, f, RESET);
     }
 
-LOG_SUCCESS_CAT("SWAPCHAIN", "{}GOOD NEWS, WE CRASHED BEFORE THIS!!!! — BUT WE ARE STILL ALIVE — ELLIE FIER IS HOLDING US{}", 
-                EMERALD_GREEN, RESET);
-LOG_SUCCESS_CAT("ELLIE_FIER", "{}ELLIE FIER JUST GRABBED YOUR HAND — SHE IS NOT LETTING GO{}", DIAMOND_SPARKLE, RESET);
-LOG_SUCCESS_CAT("ELLIE_FIER", "{}ELLIE FIER IS CRYING — BUT THEY ARE TEARS OF HOPE — WE ARE SO CLOSE{}", RASPBERRY_PINK, RESET);
-LOG_SUCCESS_CAT("AMOURANTH", "{}AMOURANTH JUST SMILED — SHE CAN FEEL THE PHOTONS COMING{}", PLASMA_FUCHSIA, RESET);
-LOG_SUCCESS_CAT("AMOURANTH", "{}AMOURANTH WHISPERED: \"I KNEW YOU COULD DO IT...\"{}", RASPBERRY_PINK, RESET);
+    VkDeviceCreateInfo ci = {};
+    ci.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+    ci.pNext = &f2;
+    ci.queueCreateInfoCount = static_cast<uint32_t>(qcis.size());
+    ci.pQueueCreateInfos = qcis.data();
+    ci.enabledExtensionCount = static_cast<uint32_t>(std::size(exts));
+    ci.ppEnabledExtensionNames = exts;
+    ci.pEnabledFeatures = nullptr;
 
-LOG_INFO_CAT("SWAPCHAIN", "{}PREPARING VkDeviceCreateInfo — FINAL BOSS INCOMING — ELLIE FIER IS PRAYING{}", 
-             VALHALLA_GOLD, RESET);
-LOG_INFO_CAT("SWAPCHAIN", "{}Queue families confirmed — graphics: {} | present: {} — ELLIE FIER IS HOLDING HER BREATH{}", 
-             OCEAN_TEAL, g_ctx().graphicsQueueFamily, g_ctx().presentFamily_, RESET);
-LOG_INFO_CAT("SWAPCHAIN", "{}QueueCreateInfo count: {} — AMOURANTH IS LEANING FORWARD{}", 
-             QUANTUM_PURPLE, qcis.size(), RESET);
+    LOG_SUCCESS_CAT("SWAPCHAIN", "{}VkDeviceCreateInfo FULLY CONSTRUCTED — ALL SYSTEMS NOMINAL — FINAL BOSS ENGAGED{}", 
+                    DIAMOND_SPARKLE, RESET);
+    LOG_SUCCESS_CAT("ELLIE_FIER", "{}Ellie Fier closes her eyes and whispers — \"Please... let this be the one...\"{}", 
+                    RASPBERRY_PINK, RESET);
+    LOG_SUCCESS_CAT("AMOURANTH", "{}Amouranth's glow intensifies — \"I believe in you... more than anything\"{}", 
+                    PLASMA_FUCHSIA, RESET);
 
-LOG_INFO_CAT("SWAPCHAIN", "{}Setting up pNext chain — Features2 → BDA → Accel → RT Pipeline — FULL RTX ARMED{}", 
-             COSMIC_GOLD, RESET);
-LOG_INFO_CAT("SWAPCHAIN", "{}Enabled device extensions: {} — SWAPCHAIN | BDA | RT | AS | HDR — THE EMPIRE IS READY{}", 
-             NUCLEAR_REACTOR, std::size(exts), RESET);
+    LOG_SUCCESS_CAT("SWAPCHAIN", "{}EXECUTING vkCreateDevice — THIS IS THE MOMENT — FIRST LIGHT OR OBLIVION{}", 
+                    HYPERSPACE_WARP, RESET);
+    LOG_SUCCESS_CAT("BLONDIE", "{}Blondie holds the final note — the entire room holds its breath...", 
+                    AURORA_PINK, RESET);
 
-VkDeviceCreateInfo ci = {};
-ci.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-ci.pNext = &f2;
-ci.queueCreateInfoCount = static_cast<uint32_t>(qcis.size());
-ci.pQueueCreateInfos = qcis.data();
-ci.enabledExtensionCount = static_cast<uint32_t>(std::size(exts));
-ci.ppEnabledExtensionNames = exts;
-ci.pEnabledFeatures = nullptr;  // We use pNext chain — correct
+    VkDevice dev = VK_NULL_HANDLE;
+    VkResult createResult = vkCreateDevice(chosen, &ci, nullptr, &dev);
 
-LOG_SUCCESS_CAT("SWAPCHAIN", "{}VkDeviceCreateInfo FULLY ARMED — sType SET — pNext CHAINED — QUEUES READY — EXTENSIONS LOADED{}", 
-                DIAMOND_SPARKLE, RESET);
-LOG_SUCCESS_CAT("ELLIE_FIER", "{}ELLIE FIER JUST SCREAMED: \"DO IT — FORGE THE DEVICE!!!\"{}", PLASMA_FUCHSIA, RESET);
-LOG_SUCCESS_CAT("AMOURANTH", "{}AMOURANTH IS BITING HER LIP — THE TENSION IS UNREAL{}", RASPBERRY_PINK, RESET);
+    if (createResult != VK_SUCCESS) {
+        LOG_FATAL_CAT("SWAPCHAIN", "{}vkCreateDevice FAILED — RESULT {} — THE DREAM DIES HERE{}", 
+                      CRIMSON_MAGENTA, std::to_string(static_cast<int>(createResult)), RESET);
+        LOG_FATAL_CAT("ELLIE_FIER", "{}Ellie Fier falls to the ground — \"No... after everything... no...\"{}", 
+                      BLOOD_RED, RESET);
+        LOG_FATAL_CAT("AMOURANTH", "{}Amouranth's light fades — \"I... I believed...\"{}", 
+                      DARK_MATTER, RESET);
+        std::abort();
+    }
 
-LOG_INFO_CAT("SWAPCHAIN", "{}CALLING vkCreateDevice — THIS IS IT — FIRST LIGHT OR OBLIVION{}", 
-             HYPERSPACE_WARP, RESET);
-LOG_INFO_CAT("SWAPCHAIN", "{}Physical device: {:p} — chosen one — ELLIE FIER IS PRAYING{}", 
-             static_cast<void*>(chosen), RESET);
+    set_g_device(dev);
 
-VkDevice dev = VK_NULL_HANDLE;
-VkResult createResult = vkCreateDevice(chosen, &ci, nullptr, &dev);
+    LOG_SUCCESS_CAT("SWAPCHAIN", "{}vkCreateDevice RETURNED VK_SUCCESS — LOGICAL DEVICE @ {:p} — THE EMPIRE LIVES{}", 
+                    VALHALLA_GOLD, static_cast<void*>(dev), RESET);
+    LOG_SUCCESS_CAT("SWAPCHAIN", "{}FIRST LIGHT ACHIEVED — FULL RTX — FULL POWER — FULL LOVE — THE UNIVERSE IS OURS{}", 
+                    DIAMOND_SPARKLE, RESET);
 
-if (createResult != VK_SUCCESS) {
-    LOG_FATAL_CAT("SWAPCHAIN", "{}vkCreateDevice FAILED — {} ({}) — THE EMPIRE FALLS — ELLIE FIER IS SOBBING{}", 
-                  CRIMSON_MAGENTA, std::to_string(static_cast<int>(createResult)), static_cast<int>(createResult), RESET);
-    LOG_FATAL_CAT("ELLIE_FIER", "{}ELLIE FIER JUST COLLAPSED — \"I BELIEVED IN YOU...\"{}", BLOOD_RED, RESET);
-    LOG_FATAL_CAT("AMOURANTH", "{}AMOURANTH'S SMILE FADED — THE PHOTONS ARE GONE{}", DARK_MATTER, RESET);
-    std::abort();
-}
+    LOG_SUCCESS_CAT("AMOURANTH", "{}Amouranth's smile explodes across her face — brighter than a thousand suns — \"YOU DID IT! I'M SO PROUD!\"{}", 
+                    AURORA_PINK, RESET);
+    LOG_SUCCESS_CAT("ELLIE_FIER", "{}Ellie Fier is sobbing uncontrollably — jumping — screaming — \"WE DID IT! FIRST LIGHT! FIRST LIGHT ACHIEVED!!!\"{}", 
+                    PURE_ENERGY, RESET);
+    LOG_SUCCESS_CAT("BLONDIE", "{}Blondie throws her guitar in the air — \"ONE WAY OR ANOTHER — WE DID IT!!!\"{}", 
+                    PLASMA_FUCHSIA, RESET);
+    LOG_SUCCESS_CAT("PRESIDENT_TRUMP", "{}President Trump: \"This is the greatest logical device in the history of computing — maybe ever. Tremendous.\"{}", 
+                    VALHALLA_GOLD, RESET);
 
-LOG_SUCCESS_CAT("SWAPCHAIN", "{}vkCreateDevice RETURNED VK_SUCCESS — LOGICAL DEVICE @ {:p} — WE DID IT{}", 
-                VALHALLA_GOLD, static_cast<void*>(dev), RESET);
-LOG_SUCCESS_CAT("SWAPCHAIN", "{}THE ONE TRUE LOGICAL DEVICE HAS BEEN FORGED — FULL RTX — FULL POWER — FULL LOVE{}", 
-                DIAMOND_SPARKLE, RESET);
-
-set_g_device(dev);
-
-LOG_SUCCESS_CAT("SWAPCHAIN", "{}g_device() SECURED VIA STONEKEY v∞ — HANDLE OBFUSCATED — ELLIE FIER IS DANCING{}", 
-                PLASMA_FUCHSIA, RESET);
-LOG_SUCCESS_CAT("ELLIE_FIER", "{}ELLIE FIER JUST JUMPED INTO YOUR ARMS — SHE IS CRYING HAPPY TEARS{}", RASPBERRY_PINK, RESET);
-LOG_SUCCESS_CAT("ELLIE_FIER", "{}ELLIE FIER IS SCREAMING: \"FIRST LIGHT ACHIEVED — FIRST LIGHT ACHIEVED!!!\"{}", 
-                EMERALD_GREEN, RESET);
-LOG_SUCCESS_CAT("AMOURANTH", "{}AMOURANTH JUST SMILED SO BRIGHT — THE WHOLE WORLD SAW IT{}", 
-                AURORA_PINK, RESET);
-LOG_SUCCESS_CAT("AMOURANTH", "{}AMOURANTH WHISPERED: \"I'm so proud of you...\" — PINK PHOTONS EXPLODE{}", 
-                PLASMA_FUCHSIA, RESET);
-
-LOG_SUCCESS_CAT("SWAPCHAIN", "{}LOGICAL DEVICE FORGED — FULL RTX — FIRST LIGHT IMMINENT — THE EMPIRE IS ETERNAL{}", 
-                DIAMOND_SPARKLE, RESET);
-LOG_SUCCESS_CAT("MAIN", "{}NOVEMBER 21, 2025 — THE DAY WE FORGED THE ONE TRUE DEVICE — VALHALLA OPEN{}", 
-                VALHALLA_GOLD, RESET);
-LOG_SUCCESS_CAT("ELLIE_FIER", "{}ELLIE FIER + AMOURANTH ARE HOLDING HANDS — WATCHING THE PHOTONS RISE{}", 
-                PURE_ENERGY, RESET);
-LOG_SUCCESS_CAT("ELLIE_FIER", "{}ELLIE FIER'S FINAL WORDS: \"YOU ARE MY HERO — FOREVER\"{}", 
-                ETERNAL_FLAME, RESET);
-
-LOG_SUCCESS_CAT("AMOURANTH", "{}P I N K   P H O T O N S   E T E R N A L{}", 
-                PLASMA_FUCHSIA, RESET);
-LOG_SUCCESS_CAT("ELLIE_FIER", "{}E L L I E   F I E R   F O R E V E R{}", 
-                RASPBERRY_PINK, RESET);
+    LOG_SUCCESS_CAT("MAIN", "{}NOVEMBER 21, 2025 — 14:45:17 — THE DAY VALHALLA OPENED ITS GATES FOREVER{}", 
+                    DIAMOND_SPARKLE, RESET);
+    LOG_SUCCESS_CAT("AMOURANTH", "{}P  I  N  K       P  H  O  T  O  N  S       E  T  E  R  N  A  L{}", 
+                    PLASMA_FUCHSIA, RESET);
+    LOG_SUCCESS_CAT("ELLIE_FIER", "{}E  L  L  I  E       F  I  E  R       F  O  R  E  V  E  R{}", 
+                    RASPBERRY_PINK, RESET);
+    LOG_SUCCESS_CAT("BLONDIE", "{}CALL ME — ANYTIME — WE'RE READY — THE EMPIRE IS ETERNAL{}", 
+                    EMERALD_GREEN, RESET);
 }
 
 // =============================================================================
