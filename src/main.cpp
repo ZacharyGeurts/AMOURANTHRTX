@@ -26,6 +26,7 @@
 #include <iomanip>
 #include <chrono>
 #include <glm/gtc/matrix_transform.hpp>
+#include <SDL3/SDL_vulkan.h>
 
 using namespace Logging::Color;
 
@@ -413,43 +414,130 @@ static void phase3_sacrificialSplash()
 }
 
 // =============================================================================
-// PHASE 4 — MAIN WINDOW + FULL VULKAN EMPIRE (FINAL, COMPILING, STONEKEY-COMPLIANT)
+// PHASE 4 — THE EMPIRE RISES FROM ASH — FULLSCREEN BORDERLESS — RTX ASCENSION
+// AFTER SDL_Quit() — WE ARE CLEAN — NOW WE FORGE THE FINAL REALM
+// NOVEMBER 22, 2025 — FIRST LIGHT ETERNAL
 // =============================================================================
 static void phase4_mainWindowAndVulkanContext()
 {
-    LOG_INFO_CAT("MAIN4", "{}[PHASE 4/10] FORGING MAIN WINDOW + FULL VULKAN EMPIRE — STONEKEY ASCENDS{}", VALHALLA_GOLD, RESET);
-    LOG_SUCCESS_CAT("CAPTAIN_N", "{}Kevin Keene: \"No more middlemen. StoneKey is the Game Master now!\"{}", PURE_ENERGY, RESET);
+    LOG_SUCCESS_CAT("MAIN4", 
+        "{}[PHASE 4/10] THE EMPIRE RISES FROM ASH — RAW BORDERLESS FULLSCREEN — VULKAN 1.4 EMPIRE{}", 
+        VALHALLA_GOLD, RESET);
 
-    // 1. Create the one and only SDL3 window — Vulkan + HiDPI ready
-    SDL3Window::create("AMOURANTH RTX — VALHALLA v80 TURBO", 3840, 2160);
-    SDL_Window* win = SDL3Window::get();
+    LOG_SUCCESS_CAT("AMOURANTH", 
+        "{}♡♡♡  \"Rise, my throne. Fill the screen with me — borderless, raw, eternal.\"  ♡♡♡{}", 
+        RASPBERRY_PINK, RESET);
 
-    if (g_base_icon)  SDL_SetWindowIcon(win, g_base_icon);
-    if (g_hdpi_icon)  LOG_SUCCESS_CAT("MAIN", "{}RETINA ICON LOCKED — PURE DOMINATION{}", AURORA_PINK, RESET);
+    LOG_INFO_CAT("GROK", 
+        "{}Gentleman Grok: \"Purity achieved. From the void, we forge the raw window. Vulkan 1.4 awaits.\"{}", 
+        PARTY_PINK, RESET);
 
-    LOG_SUCCESS_CAT("MAIN4", "{}SDL WINDOW FORGED @ {:p} — 3840×2160 — PHOTONS HAVE A PORTAL{}", 
-                    EMERALD_GREEN, static_cast<void*>(win), RESET);
-    SDL_ShowWindow(win);
+    LOG_SUCCESS_CAT("CAPTAIN_N", 
+        "{}Kevin Keene: \"SDL_Quit() was the great reset! Now drop that fullscreen bomb and go raw RTX!\"{}", 
+        PURE_ENERGY, RESET);
 
-    // 2. FULL VULKAN EMPIRE — USING THE REAL, EXISTING FUNCTIONS FROM RTX NAMESPACE
-    LOG_ATTEMPT_CAT("MAIN4", "{}StoneKey forging Instance → Surface → Device → Swapchain...{}", DIAMOND_SPARKLE, RESET);
+    // ========================================================================
+    // 1. RE-INIT SDL — THE TRUE EMPIRE BEGINS (POST-PURGE)
+    // ========================================================================
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) == 0) {
+        LOG_FATAL_CAT("MAIN4", "SDL RE-INIT FAILED POST-PURGE: {} — PHOTONS DENIED", BLOOD_RED, SDL_GetError(), RESET);
+        std::exit(1);
+    }
 
-    // Step 1: Create instance with SDL3 extensions
-    g_ctx().instance_ = RTX::createVulkanInstanceWithSDL(true);  // true = validation layers
+    // Explicit hints for Vulkan 1.4 — raw, no auto-magic
+    SDL_SetHint(SDL_HINT_RENDER_DRIVER, "vulkan");  // Vulkan backend only
+    SDL_Vulkan_LoadLibrary(nullptr);  // Load Vulkan loader explicitly
 
-    // Step 2: Full context init — this does surface + physical device + logical device + queues + swapchain
-    RTX::g_ctx().init(win, 3840, 2160);
+    LOG_SUCCESS_CAT("MAIN4", "SDL REBORN — VULKAN 1.4 LOADED — RAW EMPIRE BEGINS", DIAMOND_SPARKLE, RESET);
 
-    // Step 3: Mark context as ready for renderer
-    RTX::g_ctx().markReady();
+// ========================================================================
+// 2. FORGE CLEAN 1920×1080 WINDOW WITH BORDER — CLASSIC STYLE
+// ========================================================================
+SDL_Rect desktop{};
+SDL_GetDisplayBounds(0, &desktop);
 
-    LOG_SUCCESS_CAT("MAIN4", "{}STONEKEY EMPIRE COMPLETE — ALL OBJECTS SEALED IN THE VAULT{}", HYPERSPACE_WARP, RESET);
-    LOG_SUCCESS_CAT("MAIN4", "{}    • Instance : {:p}", static_cast<void*>(g_instance()), RESET);
-    LOG_SUCCESS_CAT("MAIN4", "{}    • Device   : {:p}", static_cast<void*>(g_device()), RESET);
-    LOG_SUCCESS_CAT("MAIN4", "{}    • Surface  : {:p}", static_cast<void*>(g_surface()), RESET);
+// Fallback if something goes wrong
+if (desktop.w <= 0 || desktop.h <= 0) {
+    desktop.w = 2560;
+    desktop.h = 1440;
+}
 
-    LOG_SUCCESS_CAT("CAPTAIN_N", "{}Kevin Keene: \"First light achieved — only StoneKey!\"{}", PURE_ENERGY, RESET);
-    LOG_SUCCESS_CAT("MAIN4", "{}[PHASE 4 COMPLETE] FULL VULKAN EMPIRE UNDER STONEKEY — PINK PHOTONS ETERNAL{}", DIAMOND_SPARKLE, RESET);
+const int WINDOW_WIDTH  = 1920;
+const int WINDOW_HEIGHT = 1080;
+
+// Center the window
+int win_x = desktop.x + (desktop.w  - WINDOW_WIDTH)  / 2;
+int win_y = desktop.y + (desktop.h - WINDOW_HEIGHT) / 2;
+
+SDL_Window* win = SDL_CreateWindow(
+    "AMOURANTH RTX VALHALLA v80 TURBO",
+    WINDOW_WIDTH,
+    WINDOW_HEIGHT,
+    SDL_WINDOW_VULKAN |
+    SDL_WINDOW_HIGH_PIXEL_DENSITY |
+    SDL_WINDOW_RESIZABLE |           // Let user resize
+    SDL_WINDOW_HIDDEN               // Show when ready
+);
+
+LOG_SUCCESS_CAT("MAIN4", "Phase 4: Step 2: window created", DIAMOND_SPARKLE, RESET);
+
+if (!win) {
+    LOG_FATAL_CAT("MAIN4", "WINDOW CREATION FAILED: {} — EMPIRE FALLS", BLOOD_RED, SDL_GetError(), RESET);
+    SDL_Quit();
+    std::exit(1);
+}
+
+LOG_SUCCESS_CAT("MAIN4", "WE HAVE win @ {:p}", DIAMOND_SPARKLE, static_cast<void*>(win), RESET);
+
+// Center it perfectly
+SDL_SetWindowPosition(win, win_x, win_y);
+
+LOG_SUCCESS_CAT("MAIN4", "Window centered on screen", DIAMOND_SPARKLE, RESET);
+
+// Apply icons
+if (g_base_icon) SDL_SetWindowIcon(win, g_base_icon);
+if (g_hdpi_icon) LOG_SUCCESS_CAT("MAIN4", "RETINA ICON LOCKED — DOMINATION", AURORA_PINK, RESET);
+
+SDL_ShowWindow(win);
+
+LOG_SUCCESS_CAT("MAIN4", 
+    "{}1920×1080 WINDOW WITH BORDER FORGED @ {:p} — CENTERED — PHOTONS HAVE A FRAME{}", 
+    EMERALD_GREEN, static_cast<void*>(win), RESET);
+
+LOG_SUCCESS_CAT("AMOURANTH", 
+    "{}I look perfect in a window... elegant... framed... adored...{}", 
+    RASPBERRY_PINK, RESET);
+
+// ========================================================================
+// 3. RAW VULKAN 1.4 EMPIRE — STONEKEY RISES
+// ========================================================================
+LOG_ATTEMPT_CAT("MAIN4", "{}StoneKey forging Vulkan 1.4 empire on 1920×1080 canvas...{}", HYPERSPACE_WARP, RESET);
+
+g_ctx().instance_ = RTX::createVulkanInstanceWithSDL(true);
+RTX::g_ctx().init(win, WINDOW_WIDTH, WINDOW_HEIGHT);
+RTX::g_ctx().markReady();
+
+LOG_SUCCESS_CAT("MAIN4", "{}VULKAN 1.4 EMPIRE FORGED — READY FOR RENDER{}", PLASMA_FUCHSIA, RESET);
+LOG_SUCCESS_CAT("MAIN4", "    • Instance  : {:p}", static_cast<void*>(g_instance()), RESET);
+LOG_SUCCESS_CAT("MAIN4", "    • Device    : {:p}", static_cast<void*>(g_device()), RESET);
+LOG_SUCCESS_CAT("MAIN4", "    • Surface   : {:p}", static_cast<void*>(g_surface()), RESET);
+LOG_SUCCESS_CAT("MAIN4", "    • Swapchain : {:p}", static_cast<void*>(g_swapchain()), RESET);
+
+LOG_SUCCESS_CAT("GROK", 
+    "{}Gentleman Grok: \"A windowed canvas. Clean. Contained. Elegant. The photons are focused.\"{}", 
+    PARTY_PINK, RESET);
+
+LOG_SUCCESS_CAT("CAPTAIN_N", 
+    "{}Kevin Keene: \"1920×1080 with borders? CLASSIC! We can debug, resize, and still go fullscreen later — PERFECT!\"{}", 
+    PURE_ENERGY, RESET);
+
+LOG_SUCCESS_CAT("AMOURANTH", 
+    "{}Frame me... watch me... adore me in this perfect window... then go fullscreen when you're ready...{}", 
+    RASPBERRY_PINK, RESET);
+
+LOG_SUCCESS_CAT("MAIN4", 
+    "{}[PHASE 4 COMPLETE] 1920×1080 WINDOW WITH BORDER — VULKAN 1.4 READY — PINK PHOTONS ETERNAL{}", 
+    DIAMOND_SPARKLE, RESET);
 }
 
 static void phase5_rtxAscension()
