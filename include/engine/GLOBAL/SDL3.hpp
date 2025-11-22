@@ -288,7 +288,12 @@ private:
     std::unordered_map<std::string, std::unique_ptr<SoundData>> sounds_;
 };
 
+
+// PINK PHOTONS HAVE A VOICE — THE ONE TRUE GLOBAL AUDIO EMPIRE
+inline AudioManager g_audio;
+
 } // namespace SDL3Audio
+
 
 // =============================================================================
 // FIRST LIGHT ACHIEVED — NOVEMBER 21, 2025 — PINK PHOTONS ETERNAL

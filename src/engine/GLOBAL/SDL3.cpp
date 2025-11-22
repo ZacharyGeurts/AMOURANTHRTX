@@ -22,6 +22,8 @@
 
 #include <SDL3/SDL_vulkan.h>
 #include <vulkan/vulkan.h>
+#include <SDL3_image/SDL_image.h>
+#include <SDL3_mixer/SDL_mixer.h>
 
 #include <algorithm>
 #include <atomic>
@@ -413,7 +415,7 @@ void create(const char* title, int width, int height, Uint32 flags)
     appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
     appInfo.pEngineName = "VALHALLA TURBO";
     appInfo.engineVersion = VK_MAKE_VERSION(80, 0, 0);
-    appInfo.apiVersion = VK_API_VERSION_1_3;
+    appInfo.apiVersion = VK_API_VERSION_1_4;
 
     static const char* const validationLayers[] = { "VK_LAYER_KHRONOS_validation" };
 
@@ -428,7 +430,7 @@ void create(const char* title, int width, int height, Uint32 flags)
     createInfo.ppEnabledLayerNames = Options::Performance::ENABLE_VALIDATION_LAYERS ? validationLayers : nullptr;
 
     // Forge all variables — LOG EVERYTHING
-    LOG_INFO_CAT("SDL3", "{}FORGING INSTANCE — API: 1.3 | Extensions: {} | Layers: {}{}", VALHALLA_GOLD, extensions.size(), createInfo.enabledLayerCount, RESET);
+    LOG_INFO_CAT("SDL3", "{}FORGING INSTANCE — API: 1.4 | Extensions: {} | Layers: {}{}", VALHALLA_GOLD, extensions.size(), createInfo.enabledLayerCount, RESET);
     for (const auto& ext : extensions) {
         LOG_INFO_CAT("SDL3", "  Ext: {}{}", AURORA_PINK, ext, RESET);
     }
@@ -536,8 +538,30 @@ void destroy() noexcept
 } // namespace SDL3Window
 
 // =============================================================================
-// Namespace: SDL3Audio — FULLY SDL3 COMPATIBLE — PINK PHOTONS HAVE VOICE
+// SDL3Image — MODERN SDL3_image (2025+) — NO LEGACY FLAGS — PURE EMPIRE
 // =============================================================================
+namespace SDL3Image {
+
+[[nodiscard]] inline SDL_Surface* load(const char* path)
+{
+    SDL_Surface* surf = IMG_Load(path);
+    if (!surf) {
+        LOG_FATAL_CAT("SDL3IMG", "IMG_Load FAILED → {} | {}", CRIMSON_MAGENTA, path, SDL_GetError(), RESET);
+        throw std::runtime_error(std::string("Failed to load image: ") + path);
+    }
+
+    LOG_SUCCESS_CAT("SDL3IMG", "TEXTURE MANIFESTED → {} | {}x{} {}bpp", 
+                    RASPBERRY_PINK, path, surf->w, surf->h, SDL_BYTESPERPIXEL(surf->format), RESET);
+    return surf;
+}
+
+[[nodiscard]] inline SDL_Surface* load(const std::string& path)
+{
+    return load(path.c_str());
+}
+
+} // namespace SDL3Image
+
 namespace SDL3Audio {
 
 AudioManager::~AudioManager() {
