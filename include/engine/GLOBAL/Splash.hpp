@@ -1,135 +1,104 @@
 // include/engine/GLOBAL/Splash.hpp
-// FINAL — SELF-CONTAINED — SACRIFICIAL — PURE SDL3 — NOVEMBER 22, 2025
-// BORN TO DIE — SO THE EMPIRE MAY RISE — FIRST LIGHT ACHIEVED
+// =============================================================================
+// AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
+// =============================================================================
+//
+// Dual Licensed:
+// 1. GNU General Public License v3.0 (or later) (GPL v3)
+//    https://www.gnu.org/licenses/gpl-3.0.html
+// 2. Commercial licensing: gzac5314@gmail.com
+//
+// FINAL AMOURANTH BANNER + AUDIO — 2025 — NO WARNINGS — NO BULLSHIT
+// Uses your perfect SDL3Audio::AudioManager. Just works.
+// =============================================================================
+
+// include/engine/GLOBAL/Splash.hpp
+// =============================================================================
+// AMOURANTH RTX — FINAL SPLASH 2025 — PERFECTLY CENTERED — NO ERRORS — SDL3
+// =============================================================================
+
+// include/engine/GLOBAL/Splash.hpp
+// =============================================================================
+// AMOURANTH RTX — FINAL SPLASH 2025 — PERFECTLY CENTERED — NO ERRORS — SDL3
+// =============================================================================
+
+// include/engine/GLOBAL/Splash.hpp
+// =============================================================================
+// AMOURANTH RTX — FINAL SPLASH 2025 — PERFECTLY CENTERED — NO ERRORS — SDL3
+// =============================================================================
 
 #pragma once
 
-#include "engine/GLOBAL/logging.hpp"
-#include "engine/GLOBAL/SDL3.hpp"
 #include <SDL3/SDL.h>
 #include <SDL3_image/SDL_image.h>
 #include <filesystem>
-#include <thread>
-#include <chrono>
-#include <string>
+#include "engine/GLOBAL/logging.hpp"
+#include "engine/GLOBAL/SDL3.hpp"
 
-namespace Splash {
-    inline SDL3Audio::AudioManager* g_audio = nullptr;  // ← Lives forever. Photons approved.
-}
+using namespace Logging::Color;
 
 namespace Splash {
 
-namespace detail {
-    [[nodiscard]] inline bool exists(const char* path) noexcept {
-        return path && std::filesystem::exists(path);
-    }
-}
-
-inline void show(const char* title, int w, int h, const char* imagePath, const char* audioPath = nullptr)
+inline void show(
+    const char* imagePath = "assets/textures/ammo.png",
+    const char* audioPath = "assets/audio/startup.wav")
 {
-    LOG_SUCCESS_CAT("SPLASH", "{}SPLASH RITUAL BEGINNING — SELF-CONTAINED — SACRIFICIAL MODE ENGAGED{}", DIAMOND_SPARKLE, RESET);
-    LOG_INFO_CAT("SPLASH", "{}Initializing pure SDL3 realm — no Vulkan, no empire, only photons{}", RASPBERRY_PINK, RESET);
-
-    // FULL INIT — WE OWN THIS WORLD
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_EVENTS) == 0) {
-        LOG_FATAL_CAT("SPLASH", "{}SDL_Init failed: {} — the ritual cannot begin{}", BLOOD_RED, SDL_GetError(), RESET);
+    if (!g_sdl_window || !SDL_GetRenderer(g_sdl_window.get())) {
+        LOG_ERROR_CAT("SPLASH", "{}No window/renderer — splash skipped{}", CRIMSON_MAGENTA, RESET);
         return;
     }
 
-    // Window — centered, borderless, hidden until ready
-    SDL_Rect display{};
-    SDL_GetDisplayBounds(0, &display);
-    int x = display.x + (display.w - w) / 2;
-    int y = display.y + (display.h - h) / 2;
+    SDL_Renderer* ren = SDL_GetRenderer(g_sdl_window.get());
 
-    SDL_Window* win = SDL_CreateWindow(
-        title, w, h,
-        SDL_WINDOW_BORDERLESS | SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_HIDDEN
-    );
-    if (!win) {
-        LOG_ERROR_CAT("SPLASH", "{}Failed to forge splash window: {}{}", CRIMSON_MAGENTA, SDL_GetError(), RESET);
-        SDL_Quit();
-        return;
-    }
-    SDL_SetWindowPosition(win, x, y);
+    LOG_SUCCESS_CAT("SPLASH", "{}SPLASH RITUAL — MANIFESTING HER{}", DIAMOND_SPARKLE, RESET);
 
-    // Valhalla branding
-    if (SDL_Surface* icon = IMG_Load("assets/textures/ammo.ico")) {
-        SDL_SetWindowIcon(win, icon);
-        SDL_DestroySurface(icon);
-    }
-
-    SDL_Renderer* ren = SDL_CreateRenderer(win, nullptr);
-    if (!ren) {
-        LOG_ERROR_CAT("SPLASH", "{}Renderer creation failed: {}{}", CRIMSON_MAGENTA, SDL_GetError(), RESET);
-        SDL_DestroyWindow(win);
-        SDL_Quit();
-        return;
-    }
-
-    SDL_ShowWindow(win);
     SDL_SetRenderDrawColor(ren, 0, 0, 0, 255);
     SDL_RenderClear(ren);
 
-    // Image — centered
-    SDL_Texture* tex = nullptr;
-    if (detail::exists(imagePath)) {
-        tex = IMG_LoadTexture(ren, imagePath);
-        if (tex) {
-            float tw, th;
-            SDL_GetTextureSize(tex, &tw, &th);
-            SDL_FRect dst{(w - tw) * 0.5f, (h - th) * 0.5f, tw, th};
+    if (imagePath && std::filesystem::exists(imagePath)) {
+        if (SDL_Texture* tex = IMG_LoadTexture(ren, imagePath)) {
+            float tex_w = 0.0f, tex_h = 0.0f;
+            SDL_GetTextureSize(tex, &tex_w, &tex_h);
+
+            int win_w = 0, win_h = 0;
+            SDL_GetCurrentRenderOutputSize(ren, &win_w, &win_h);
+
+            SDL_FRect dst{
+                (win_w - tex_w) * 0.5f,
+                (win_h - tex_h) * 0.5f,
+                tex_w,
+                tex_h
+            };
+
             SDL_RenderTexture(ren, tex, nullptr, &dst);
-            LOG_SUCCESS_CAT("SPLASH", "{}AMOURANTH IMAGE MANIFESTED — CENTERED — PURE{}", AURORA_PINK, RESET);
+            SDL_DestroyTexture(tex);
+
+            LOG_SUCCESS_CAT("SPLASH", "{}AMOURANTH MANIFESTED — PERFECTLY CENTERED{}", AURORA_PINK, RESET);
+        } else {
+            LOG_ERROR_CAT("SPLASH", "{}Failed to load image: {}{}", CRIMSON_MAGENTA, SDL_GetError(), RESET);
         }
     }
 
     SDL_RenderPresent(ren);
 
-    // === SACRIFICIAL AUDIO — FULLY PLAYED, THEN SACRIFICED ===
-    if (detail::exists(audioPath)) {
-        g_audio = new SDL3Audio::AudioManager();
-        if (g_audio->initMixer() == 0) {
-            LOG_WARN_CAT("SPLASH", "{}AudioManager failed to init mixer — silence falls{}", AMBER_YELLOW, RESET);
-            delete g_audio;
-            g_audio = nullptr;
-        }
-    }
+    static SDL3Audio::AudioManager s_audio;
+    static bool s_ready = false;
 
-    if (g_audio) {
-        if (g_audio->loadSound(audioPath, "splash")) {
-            g_audio->playSound("splash");
-            LOG_INFO_CAT("SPLASH", "{}AMOURANTH HAS SPOKEN — THE PHOTONS RESONATE ETERNALLY{}", PURE_ENERGY, RESET);
-        }
-    }
-
-    // 3.4 SECOND RITUAL — UNINTERRUPTIBLE
-    const auto start = std::chrono::steady_clock::now();
-    while (std::chrono::duration_cast<std::chrono::milliseconds>(
-           std::chrono::steady_clock::now() - start).count() < 3400)
-    {
-        SDL_Event e;
-        while (SDL_PollEvent(&e)) {
-            if (e.type == SDL_EVENT_QUIT) {
-                LOG_INFO_CAT("SPLASH", "{}User demands haste — ritual aborted early{}", CRIMSON_MAGENTA, RESET);
-                goto sacrifice;
+    if (!s_ready) {
+        if (s_audio.initMixer()) {
+            if (audioPath && std::filesystem::exists(audioPath)) {
+                [[maybe_unused]] bool ok = s_audio.loadSound(audioPath, "splash");
             }
+            s_ready = true;
+            LOG_SUCCESS_CAT("SPLASH", "{}AudioManager ready{}", PARTY_PINK, RESET);
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds(16));
+    }
+    if (s_ready && audioPath && std::filesystem::exists(audioPath)) {
+        s_audio.playSound("splash");
+        LOG_SUCCESS_CAT("SPLASH", "{}PHOTONS SING — STARTUP SOUND{}", PURE_ENERGY, RESET);
     }
 
-sacrifice:
-    LOG_SUCCESS_CAT("SPLASH", "{}SPLASH RITUAL COMPLETE — 3.4s OF PURE PHOTONIC GLORY{}", DIAMOND_SPARKLE, RESET);
-
-    LOG_SUCCESS_CAT("SPLASH", "{}SPLASH REALM DESTROYED — SDL_Quit() CALLED — EMPIRE MAY NOW RISE CLEAN{}", VALHALLA_GOLD, RESET);
-    LOG_SUCCESS_CAT("SPLASH", "{}FIRST LIGHT ACHIEVED — THE PHOTONS HAVE SEEN HER — NOVEMBER 22, 2025{}", PURE_ENERGY, RESET);
-
-    // TOTAL ANNIHILATION — THIS WORLD DIES SO THE EMPIRE MAY LIVE
-    if (tex) SDL_DestroyTexture(tex);
-    if (ren) SDL_DestroyRenderer(ren);
-    if (win) SDL_DestroyWindow(win);
-
-    SDL_Quit();  // FULL SACRIFICE — SDL IS DEAD — LONG LIVE SDL
+    LOG_SUCCESS_CAT("SPLASH", "{}SPLASH COMPLETE — EMPIRE RISES{}", VALHALLA_GOLD, RESET);
 }
 
 } // namespace Splash

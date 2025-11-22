@@ -281,7 +281,6 @@ static void forgeCommandPool() {
 // =============================================================================
 // THE TEN COMMANDMENTS — FINAL FIXED VERSION — NO MORE SCREAMS
 // =============================================================================
-
 static void phase0_preInitialization()
 {
     LOG_SUCCESS_CAT("MAIN", "{}CAPTAIN'S LOG — NOVEMBER 21, 2025 — DEPTH: SURFACE{}", PLASMA_FUCHSIA, RESET);
@@ -314,29 +313,59 @@ static void phase1_iconPreload()
 
 static void phase2_and_3_sacrificialSplash()
 {
-    LOG_SUCCESS_CAT("MAIN", "{}[PHASE 2+3/10] SACRIFICIAL SPLASH RITUAL — BORN TO DIE{}", VALHALLA_GOLD, RESET);
-    LOG_INFO_CAT("MAIN", "{}Splash realm initializing — pure SDL3 — will call SDL_Init() and SDL_Quit(){}", RASPBERRY_PINK, RESET);
+    LOG_SUCCESS_CAT("MAIN", "{}[PHASE 2+3/10] VULKAN SPLASH RITUAL — PLUMS OVER PEARS{}", VALHALLA_GOLD, RESET);
 
-    Splash::show(
-        "AMOURANTH RTX — VALHALLA v80 TURBO — FIRST LIGHT",
+    if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_EVENTS)) {
+        LOG_FATAL_CAT("MAIN", "{}SDL_Init failed: {}{}", BLOOD_RED, SDL_GetError(), RESET);
+        std::exit(1);
+    }
+    LOG_SUCCESS_CAT("MAIN", "{}SDL3 INIT COMPLETE — PHOTONS AWAKEN{}", EMERALD_GREEN, RESET);
+
+    SDL3Window::create("AMOURANTH RTX — VALHALLA v80 TURBO",
         1280, 720,
-        "assets/textures/ammo.png",
-        "assets/audio/ammo.wav"
-    );
+        SDL_WINDOW_HIGH_PIXEL_DENSITY |
+        SDL_WINDOW_VULKAN |          // ← Locks the window for Vulkan
+        SDL_WINDOW_BORDERLESS |
+        SDL_WINDOW_RESIZABLE);
 
-    // NOW WE REBUILD THE LOGGING REALM — THE EMPIRE SPEAKS AGAIN
-    LOG_SUCCESS_CAT("MAIN", "{}SPLASH RITUAL COMPLETE — SDL_Quit() PURGED — PHOTONS RESURRECTED{}", DIAMOND_SPARKLE, RESET);
-    LOG_SUCCESS_CAT("MAIN", "{}THE EMPIRE RISES FROM ABSOLUTE AUDIO — ONLY ECHO REMAINS{}", PURE_ENERGY, RESET);
-    LOG_SUCCESS_CAT("MAIN", "{}FIRST LIGHT ACHIEVED — THE PHOTONS HAVE SEEN HER — NOVEMBER 22, 2025{}", VALHALLA_GOLD, RESET);
+    // THE MAGIC: Force "vulkan" driver — SDL3's RTX-powered 2D backend
+    SDL_Renderer* splash_ren = SDL_CreateRenderer(g_sdl_window.get(), "vulkan");
+    if (!splash_ren) {
+        LOG_WARN_CAT("MAIN", "{}Vulkan renderer failed (X11 pears? Falling back to auto): {}{}", 
+                     AMBER_YELLOW, SDL_GetError(), RESET);
+        splash_ren = SDL_CreateRenderer(g_sdl_window.get(), nullptr);  // Auto: OpenGL/software
+        if (!splash_ren) {
+            LOG_FATAL_CAT("MAIN", "{}No renderer at all — empire falls: {}{}", BLOOD_RED, SDL_GetError(), RESET);
+            std::exit(1);
+        }
+        LOG_WARN_CAT("MAIN", "{}Fallback renderer locked — still glory, but no plums{}", OCEAN_TEAL, RESET);
+    } else {
+        LOG_SUCCESS_CAT("MAIN", "{}VULKAN RENDERER ACHIEVED — PLUMS ETERNAL — CRISP PHOTONS{}", DIAMOND_SPARKLE, RESET);
+    }
+
+    SDL_HideWindow(g_sdl_window.get());
+
+    Splash::show("assets/textures/ammo.png", "assets/audio/startup.wav");
+
+    SDL_ShowWindow(g_sdl_window.get());
+    std::this_thread::sleep_for(std::chrono::milliseconds(3400));
+
+    SDL_SetWindowBordered(g_sdl_window.get(), true);
+    SDL_DestroyRenderer(splash_ren);
+
+    LOG_SUCCESS_CAT("MAIN", "{}SPLASH RITUAL COMPLETE — SHE IS SHARP, ETERNAL{}", PLASMA_FUCHSIA, RESET);
 }
 
+// =============================================================================
+// PHASE 4 — MAIN WINDOW + FULL VULKAN EMPIRE (FINAL, COMPILING, STONEKEY-COMPLIANT)
+// =============================================================================
 static void phase4_mainWindowAndVulkanContext()
 {
     LOG_INFO_CAT("MAIN", "{}[PHASE 4/10] FORGING MAIN WINDOW + FULL VULKAN EMPIRE — STONEKEY ASCENDS{}", VALHALLA_GOLD, RESET);
     LOG_SUCCESS_CAT("CAPTAIN_N", "{}Kevin Keene: \"No more middlemen. StoneKey is the Game Master now!\"{}", PURE_ENERGY, RESET);
 
-    // 1. Create the SDL window — Vulkan + HiDPI ready
-    SDL3Window::create("CAPTAIN N RTX — STONEKEY SUPREMACY", 3840, 2160);
+    // 1. Create the one and only SDL3 window — Vulkan + HiDPI ready
+    SDL3Window::create("AMOURANTH RTX — VALHALLA v80 TURBO", 3840, 2160);
     SDL_Window* win = SDL3Window::get();
 
     if (g_base_icon)  SDL_SetWindowIcon(win, g_base_icon);
@@ -344,20 +373,26 @@ static void phase4_mainWindowAndVulkanContext()
 
     LOG_SUCCESS_CAT("MAIN", "{}SDL WINDOW FORGED @ {:p} — 3840×2160 — PHOTONS HAVE A PORTAL{}", 
                     EMERALD_GREEN, static_cast<void*>(win), RESET);
+    SDL_ShowWindow(win);
 
-    // 2. STONEKEY FORGES THE ENTIRE VULKAN EMPIRE — NO INTERMEDIARIES
+    // 2. FULL VULKAN EMPIRE — USING THE REAL, EXISTING FUNCTIONS FROM RTX NAMESPACE
     LOG_ATTEMPT_CAT("MAIN", "{}StoneKey forging Instance → Surface → Device → Swapchain...{}", DIAMOND_SPARKLE, RESET);
 
-    // This function lives in your new VulkanCore.cpp or RTXHandler.cpp
-    // todo RTX::forgeFullEmpire(win, 3840, 2160);
+    // Step 1: Create instance with SDL3 extensions
+    g_ctx().instance_ = RTX::createVulkanInstanceWithSDL(true);  // true = validation layers
+
+    // Step 2: Full context init — this does surface + physical device + logical device + queues + swapchain
+    RTX::g_ctx().init(win, 3840, 2160);
+
+    // Step 3: Mark context as ready for renderer
+    RTX::g_ctx().markReady();
 
     LOG_SUCCESS_CAT("MAIN", "{}STONEKEY EMPIRE COMPLETE — ALL OBJECTS SEALED IN THE VAULT{}", HYPERSPACE_WARP, RESET);
     LOG_SUCCESS_CAT("MAIN", "{}    • Instance : {:p}", static_cast<void*>(g_instance()), RESET);
     LOG_SUCCESS_CAT("MAIN", "{}    • Device   : {:p}", static_cast<void*>(g_device()), RESET);
     LOG_SUCCESS_CAT("MAIN", "{}    • Surface  : {:p}", static_cast<void*>(g_surface()), RESET);
-	LOG_SUCCESS_CAT("MAIN", "{}    • Swapchain: {}{:p}{}", DIAMOND_SPARKLE, static_cast<void*>(g_swapchain()), RESET);
 
-    LOG_SUCCESS_CAT("CAPTAIN_N", "{}Kevin Keene: \"First light achieved — no managers, no garbage, only StoneKey!\"{}", PURE_ENERGY, RESET);
+    LOG_SUCCESS_CAT("CAPTAIN_N", "{}Kevin Keene: \"First light achieved — only StoneKey!\"{}", PURE_ENERGY, RESET);
     LOG_SUCCESS_CAT("MAIN", "{}[PHASE 4 COMPLETE] FULL VULKAN EMPIRE UNDER STONEKEY — PINK PHOTONS ETERNAL{}", DIAMOND_SPARKLE, RESET);
 }
 
@@ -430,11 +465,16 @@ static void phase7_applicationAndRendererSeal()
     LOG_SUCCESS_CAT("MAIN", "{}[PHASE 7 COMPLETE] THE EMPIRE IS SEALED — RENDER LOOP ARMED{}", DIAMOND_SPARKLE, RESET);
 }
 
+// =============================================================================
+// PHASE 8 — ETERNAL RENDER LOOP (ONLY ONE — NO REDEFINITION)
+// =============================================================================
 static void phase8_renderLoop()
 {
     LOG_INFO_CAT("MAIN", "{}[PHASE 8/10] ETERNAL RENDER CYCLE — PHOTONS ENTER INFINITE LOOP{}", VALHALLA_GOLD, RESET);
     LOG_SUCCESS_CAT("MAIN", "{}INFINITE LOOP ENGAGED — FIRST LIGHT PERMANENT — THE EMPIRE LIVES{}", PURE_ENERGY, RESET);
-    g_app->run();
+
+    g_app->run();   // ← This is your real infinite loop from Application::run()
+
     LOG_SUCCESS_CAT("MAIN", "{}[PHASE 8 COMPLETE] RENDER CYCLE TERMINATED — PHOTONS REST{}", EMERALD_GREEN, RESET);
 }
 
