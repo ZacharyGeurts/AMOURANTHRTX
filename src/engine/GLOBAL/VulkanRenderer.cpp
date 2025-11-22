@@ -25,7 +25,6 @@
 #include "engine/GLOBAL/SwapchainManager.hpp"
 #include "engine/GLOBAL/OptionsMenu.hpp"
 #include "engine/GLOBAL/camera.hpp"
-#include "engine/SDL3/SDL3_window.hpp"
 #include "engine/GLOBAL/StoneKey.hpp"  // Full include — .cpp only
 #include "stb/stb_image.h"
 
