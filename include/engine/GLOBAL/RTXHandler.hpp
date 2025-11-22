@@ -581,7 +581,7 @@ namespace RTX {
     };
 
     // =============================================================================
-    // GLOBAL SWAPCHAIN + LAS
+    // GLOBAL g_swapchain() + LAS
     // =============================================================================
     Handle<VkSwapchainKHR>& swapchain();
     std::vector<VkImage>& swapchainImages();

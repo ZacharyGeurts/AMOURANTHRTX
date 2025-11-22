@@ -35,13 +35,14 @@
 #include "engine/GLOBAL/OptionsMenu.hpp"
 #include "engine/GLOBAL/RTXHandler.hpp"
 #include "engine/GLOBAL/LAS.hpp"
-#include "engine/GLOBAL/SwapchainManager.hpp"
+#include "engine/GLOBAL/SDL3.hpp"
 #include "engine/GLOBAL/VulkanCore.hpp"
 #include "engine/GLOBAL/PipelineManager.hpp"
 
 // Forward declarations
 struct Camera;
 class Application;                  // ← For ImGui console access (`~` key)
+
 
 static constexpr uint32_t MAX_DESCRIPTOR_SETS = 1024;
 static constexpr VkSampleCountFlagBits MSAA_SAMPLES = VK_SAMPLE_COUNT_1_BIT;
@@ -114,8 +115,6 @@ public:
     void updateAutoExposure(VkCommandBuffer cmd, VkImage finalColorImage) noexcept;
     void applyTonemap(VkCommandBuffer cmd) noexcept;
 
-    [[nodiscard]] VkRenderPass renderPass() const noexcept { return SWAPCHAIN.renderPass(); }
-
     void setTonemap(bool enabled) noexcept;
     void setOverlay(bool show) noexcept;
     void setRenderMode(int mode) noexcept;
@@ -127,8 +126,6 @@ public:
     [[nodiscard]] VkQueue          graphicsQueue()   const noexcept { return g_ctx().graphicsQueue(); }
     [[nodiscard]] VkQueue          presentQueue()    const noexcept { return g_ctx().presentQueue(); }
 
-    [[nodiscard]] int              width()           const noexcept { return width_; }
-    [[nodiscard]] int              height()          const noexcept { return height_; }
     [[nodiscard]] bool             hypertraceEnabled()     const noexcept { return hypertraceEnabled_; }
     [[nodiscard]] bool             denoisingEnabled()      const noexcept { return denoisingEnabled_; }
     [[nodiscard]] bool             adaptiveSamplingEnabled() const noexcept { return adaptiveSamplingEnabled_; }
@@ -320,6 +317,8 @@ private:
     void downloadFromBuffer(RTX::Handle<VkBuffer>& buffer, void* data, VkDeviceSize size) noexcept;
     VkImage getCurrentHDRColorImage() noexcept;
 };
+
+
 
 // =============================================================================
 // BASTION LAW — FINAL WORD

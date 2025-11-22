@@ -1067,29 +1067,6 @@ uint64_t VulkanRTX::alignUp(uint64_t value, uint64_t alignment) const noexcept {
 
 namespace RTX {
 
-bool createSurface(SDL_Window* window, VkInstance instance)
-{
-    if (!window || !instance) {
-        LOG_ERROR_CAT("VULKAN", "createSurface: null window or instance");
-        return false;
-    }
-
-    VkSurfaceKHR surface = VK_NULL_HANDLE;
-
-    // SDL3 API in 2025: allocator is now a parameter
-    if (SDL_Vulkan_CreateSurface(window, instance, nullptr, &surface) == false) {
-        LOG_ERROR_CAT("VULKAN", "SDL_Vulkan_CreateSurface failed: {}", SDL_GetError());
-        return false;
-    }
-
-    // FULL STONEKEY v∞ INTEGRATION — IMMEDIATE OBFUSCATION + RAW CACHE
-
-    LOG_SUCCESS_CAT("VULKAN", "Vulkan surface created — STONEKEY v∞ ACTIVE");
-    LOG_SUCCESS_CAT("VULKAN", "FIRST LIGHT ACHIEVED — PINK PHOTONS IMMINENT");
-
-    return true;
-}
-
 // =============================================================================
 // 3. Physical Device Selection — STONEKEY v∞ DELAYED ACTIVATION (CRITICAL)
 // =============================================================================

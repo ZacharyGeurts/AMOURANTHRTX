@@ -6,10 +6,10 @@
 //    https://www.gnu.org/licenses/gpl-3.0.html
 // 2. Commercial licensing: gzac5314@gmail.com
 //
-// TRUE CONSTEXPR STONEKEY v∞ — NOVEMBER 21, 2025 — APOCALYPSE FINAL v10.3
-// FIRST LIGHT ACHIEVED — PINK PHOTONS ETERNAL — VALHALLA TURBO v80
-// FULLY COMPATIBLE WITH VALIDATION SUITE — getBLASStruct() ADDED
-// NOW WITH SMART LOGGING + PFN NULL GUARD AWARENESS
+// TRUE CONSTEXPR STONEKEY v∞ — NOVEMBER 22, 2025 — FIRST LIGHT ETERNAL
+// LAS — NOW HOSTED BY THE ONE AND ONLY DREW CAREY
+// "Welcome to the LAS, where the photons are pink and the points don't matter!"
+// We love you Drew. You're the king of Cleveland and the king of our hearts.
 // =============================================================================
 
 #pragma once
@@ -25,7 +25,12 @@
 #include "engine/GLOBAL/logging.hpp"
 
 // =============================================================================
-// AccelGeometry — The one true geometry description
+// DREW CAREY IS IN THE BUILDING — LAS EDITION
+// "Everything's made up and the points don't matter — but the pink photons DO!"
+// 
+// Every log line now has a Drew Carey punchline because we love him and he deserves it.
+// Yeah boi.
+//
 // =============================================================================
 
 struct AccelGeometry
@@ -41,10 +46,6 @@ struct AccelGeometry
     VkDeviceOrHostAddressConstKHR    indexData      {};
     VkDeviceOrHostAddressConstKHR    transformData  {};
 };
-
-// =============================================================================
-// VulkanAccel — THE ONE TRUE ACCELERATION ENGINE — v6.1 FINAL
-// =============================================================================
 
 class VulkanAccel
 {
@@ -90,10 +91,6 @@ public:
     void destroy(TLAS& tlas);
 };
 
-// =============================================================================
-// ONE-TIME COMMAND HELPERS — IMMORTAL — NEVER DROPPED BY LTO
-// =============================================================================
-
 [[nodiscard]] inline VkCommandBuffer beginOneTime(VkCommandPool pool)
 {
     VkCommandBuffer cmd;
@@ -109,7 +106,7 @@ public:
     beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     VK_CHECK(vkBeginCommandBuffer(cmd, &beginInfo), "Failed to begin one-time command buffer");
 
-    LOG_DEBUG_CAT("RTX", "One-time command buffer allocated and begun: 0x{:016X}", reinterpret_cast<uint64_t>(cmd));
+    LOG_DEBUG_CAT("LAS", "{}Drew Carey says: \"Let's make it a good one — command buffer ready!{}", AURORA_PINK, RESET);
     return cmd;
 }
 
@@ -126,11 +123,10 @@ inline void endOneTime(VkCommandBuffer cmd, VkQueue queue, VkCommandPool pool = 
 
     if (pool != VK_NULL_HANDLE) {
         vkFreeCommandBuffers(g_ctx().device(), pool, 1, &cmd);
-        LOG_DEBUG_CAT("RTX", "One-time command buffer freed after sync submit");
+        LOG_DEBUG_CAT("LAS", "{}Drew Carey: \"Come on down! ...Oh wait, wrong show. Command buffer freed.\"{}", PARTY_PINK, RESET);
     }
 }
 
-// THE ONE TRUE ASYNC END — PINK PHOTONS APPROVED — NOW WITH LOGGING
 static inline void endSingleTimeCommandsAsync(
     VkCommandBuffer cmd,
     VkQueue queue,
@@ -138,8 +134,7 @@ static inline void endSingleTimeCommandsAsync(
     VkFence fence = VK_NULL_HANDLE) noexcept
 {
     if (cmd == VK_NULL_HANDLE || queue == VK_NULL_HANDLE || pool == VK_NULL_HANDLE) {
-        LOG_ERROR_CAT("RTX", "endSingleTimeCommandsAsync: invalid handle (cmd=0x{:016X}, queue=0x{:016X}, pool=0x{:016X})",
-                      reinterpret_cast<uint64_t>(cmd), reinterpret_cast<uint64_t>(queue), reinterpret_cast<uint64_t>(pool));
+        LOG_ERROR_CAT("LAS", "{}Drew Carey: \"Oh no, something's wrong with the command! ...but the points don't matter!\"{}", CRIMSON_MAGENTA, RESET);
         return;
     }
 
@@ -151,7 +146,7 @@ static inline void endSingleTimeCommandsAsync(
     if (ownsFence) {
         VkFenceCreateInfo fi{ .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
         VK_CHECK(vkCreateFence(dev, &fi, nullptr, &fence), "Failed to create transient fence");
-        LOG_DEBUG_CAT("RTX", "Transient fence created for async one-time submit: 0x{:016X}", reinterpret_cast<uint64_t>(fence));
+        LOG_DEBUG_CAT("LAS", "{}Drew Carey: \"The price is RIGHT — fence created!\"{}", VALHALLA_GOLD, RESET);
     } else {
         VK_CHECK(vkResetFences(dev, 1, &fence), "Failed to reset caller fence");
     }
@@ -168,43 +163,35 @@ static inline void endSingleTimeCommandsAsync(
         constexpr uint64_t timeout_ns = 15'000'000'000ULL;
         VkResult r = vkWaitForFences(dev, 1, &fence, VK_TRUE, timeout_ns);
         if (r != VK_SUCCESS) {
-            LOG_FATAL_CAT("RTX", "One-time command timeout ({}), forcing device idle", static_cast<int32_t>(r));
+            LOG_FATAL_CAT("LAS", "{}Drew Carey: \"The price is WRONG, bitch!\" — timeout, forcing idle{}", BLOOD_RED, RESET);
             vkDeviceWaitIdle(dev);
         }
         vkFreeCommandBuffers(dev, pool, 1, &cmd);
         vkDestroyFence(dev, fence, nullptr);
-        LOG_DEBUG_CAT("RTX", "Async one-time command completed and cleaned up");
+        LOG_DEBUG_CAT("LAS", "{}Drew Carey: \"Survey says... we're done!\"{}", EMERALD_GREEN, RESET);
     }
 }
-
-// =============================================================================
-// LAS — THE ONE TRUE GLOBAL ACCELERATION SYSTEM — FINAL v10.4 + SMART LOGGING
-// =============================================================================
 
 class LAS
 {
 public:
     static LAS& get() noexcept { static LAS instance; return instance; }
 
-    // EXPLICIT CONTEXT FORGING — GUARANTEES RTX PFNS ARE LOADED
     void forgeAccelContext()
     {
         if (accel_) {
-            LOG_WARN_CAT("LAS", "Acceleration context already forged — skipping");
+            LOG_WARN_CAT("LAS", "{}Drew Carey: \"We've already got a show running!\" — skipping re-forge{}", OCEAN_TEAL, RESET);
             return;
         }
 
-        LOG_INFO_CAT("LAS", "FORGING ACCELERATION CONTEXT — ENSURING ALL KHR_acceleration_structure PFNS ARE ACTIVE");
+        LOG_ATTEMPT_CAT("LAS", "{}Drew Carey takes the stage — FORGING ACCELERATION CONTEXT — let's make it a good one!{}", VALHALLA_GOLD, RESET);
 
         accel_ = std::make_unique<VulkanAccel>(g_ctx().device());
 
-        // CRITICAL: VALIDATE THAT THE MOST IMPORTANT PFN IS NOT NULL
         if (!g_ctx().vkGetAccelerationStructureBuildSizesKHR()) {
-            LOG_FATAL_CAT("LAS", "VK_KHR_acceleration_structure PFN IS NULL — EXTENSION NOT ENABLED OR LOADED!");
-            LOG_FATAL_CAT("LAS", "→ Check device extensions: VK_KHR_acceleration_structure must be enabled!");
-            LOG_FATAL_CAT("LAS", "→ Check that device function pointers were loaded after vkCreateDevice!");
+            LOG_FATAL_CAT("LAS", "{}Drew Carey: \"The survey says... NOPE! PFN is NULL!\" — extension not loaded!{}", BLOOD_RED, RESET);
         } else {
-            LOG_SUCCESS_CAT("LAS", "VULKANACCEL FORGED — ALL RTX PFNS CONFIRMED VALID — PINK PHOTONS IMMINENT");
+            LOG_SUCCESS_CAT("LAS", "{}Drew Carey: \"Come on down! All RTX PFNs loaded — you're the next contestant on Pink Photons Are Right!\"{}", EMERALD_GREEN, RESET);
         }
     }
 
@@ -218,12 +205,10 @@ public:
     void buildTLAS(VkCommandPool pool,
                    const std::vector<std::pair<VkAccelerationStructureKHR, glm::mat4>>& instances);
 
-    // Legacy: raw handle access
     [[nodiscard]] VkAccelerationStructureKHR getBLAS() const noexcept { return blas_.as; }
     [[nodiscard]] VkAccelerationStructureKHR getTLAS() const noexcept { return tlas_.as; }
     [[nodiscard]] VkDeviceAddress           getTLASAddress() const noexcept { return tlas_.address; }
 
-    // NEW: FULL STRUCT ACCESS — REQUIRED FOR VALIDATION LAYERS
     [[nodiscard]] const VulkanAccel::BLAS& getBLASStruct() const noexcept { return blas_; }
     [[nodiscard]] const VulkanAccel::TLAS& getTLASStruct() const noexcept { return tlas_; }
 
@@ -235,18 +220,20 @@ public:
                tlas_.isValid(); 
     }
 
-    void invalidate() noexcept { ++generation_; LOG_DEBUG_CAT("LAS", "Acceleration structures invalidated — generation {}", generation_); }
+    void invalidate() noexcept { 
+        ++generation_; 
+        LOG_DEBUG_CAT("LAS", "{}Drew Carey: \"Points don't matter! Generation {} invalidated — new scene change!\"{}", RASPBERRY_PINK, generation_, RESET);
+    }
 
 private:
     LAS()  = default;
     ~LAS() = default;
 
-    std::unique_ptr<VulkanAccel> accel_;   // Created via forgeAccelContext()
+    std::unique_ptr<VulkanAccel> accel_;
 
     VulkanAccel::BLAS blas_{};
     VulkanAccel::TLAS tlas_{};
     uint32_t          generation_ = 0;
 };
 
-// Global shortcut — PINK PHOTON APPROVED
 inline LAS& las() noexcept { return LAS::get(); }

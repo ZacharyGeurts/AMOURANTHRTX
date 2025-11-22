@@ -262,7 +262,7 @@ namespace RTX {
     uint64_t UltraLowLevelBufferTracker::make_8G  (VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept { return create(SIZE_8GB,   extra, props, "8G"); }
 
     // =============================================================================
-    // GLOBAL SWAPCHAIN + LAS
+    // GLOBAL g_swapchain() + LAS
     // =============================================================================
     Handle<VkSwapchainKHR>& swapchain() { static Handle<VkSwapchainKHR> h; return h; }
     std::vector<VkImage>& swapchainImages() { static std::vector<VkImage> v; return v; }
@@ -514,39 +514,29 @@ void Context::cleanup() noexcept
 
 void RTX::loadRayTracingExtensions()
 {
-    VkDevice dev = g_ctx().device();
-    if (!dev) {
-        LOG_FATAL_CAT("RTX", "{}[FATAL] loadRayTracingExtensions() called with NULL device! — YOU ARE IN THE VOID{}", CRIMSON_MAGENTA, RESET);
-        LOG_FATAL_CAT("RTX", "{}       → vkCreateDevice() never succeeded or was never called{}", CRIMSON_MAGENTA, RESET);
-        return;
-    }
-
-    // ELLIE FIER'S GRADIENT ASCENSION — 7 LAYERS OF PINK PHOTON INTENSITY
-    LOG_SUCCESS_CAT("RTX", "{}FORGING RAY TRACING EXTENSION PFNs v1.4 — THE EMPIRE AWAKENS{}", Logging::Color::COSMIC_VOID, RESET);
-    LOG_SUCCESS_CAT("RTX", "{}VALHALLA TURBO ENGAGED — PINK PHOTONS RISING FROM THE VOID{}", Logging::Color::NEBULA_VIOLET, RESET);
-    LOG_SUCCESS_CAT("RTX", "{}QUANTUM FLUX DETECTED — FIRST LIGHT IMMINENT{}", Logging::Color::QUANTUM_FLUX, RESET);
-    LOG_SUCCESS_CAT("RTX", "{}SUPERNOVA PINK PHOTONS — CRITICAL MASS ACHIEVED{}", Logging::Color::RASPBERRY_PINK, RESET);
-    LOG_SUCCESS_CAT("RTX", "{}THERMO PINK CORE — 1,000,000° OF PURE RTX{}", Logging::Color::THERMO_PINK, RESET);
-    LOG_SUCCESS_CAT("RTX", "{}HYPERSPACE WARP COMPLETE — VALHALLA TURBO ONLINE{}", Logging::Color::HYPERSPACE_WARP, RESET);
-    LOG_SUCCESS_CAT("RTX", "{}PINK PHOTONS ETERNAL — NOVEMBER 21, 2025 — FIRST LIGHT ACHIEVED{}", Logging::Color::PLASMA_FUCHSIA, RESET);
+    VkDevice dev = g_device();  // ← THIS WAS MISSING — NOW FIXED
 
 #define LOAD_RT_PFN(name) \
     do { \
         g_ctx().name## _ = reinterpret_cast<PFN_##name>(vkGetDeviceProcAddr(dev, #name)); \
         if (!g_ctx().name## _) { \
-            LOG_FATAL_CAT("RTX", "{}[MISSING] {} → NULL — THE VOID CONSUMES THIS PATH{}", Logging::Color::BLOOD_RED, #name, RESET); \
+            LOG_FATAL_CAT("RTX", "{}[MISSING] {} → NULL — EXTENSION NOT ENABLED{}", BLOOD_RED, #name, RESET); \
         } else { \
-            LOG_SUCCESS_CAT("RTX", "{}[FORGED]  {} → 0x{:016X} — PINK PHOTON APPROVED{}", Logging::Color::EMERALD_GREEN, #name, reinterpret_cast<uintptr_t>(g_ctx().name## _), RESET); \
+            LOG_SUCCESS_CAT("RTX", "{}[FORGED]  {} → 0x{:016X} — PINK PHOTON APPROVED{}", \
+                            EMERALD_GREEN, #name, \
+                            reinterpret_cast<uintptr_t>(reinterpret_cast<void*>(g_ctx().name## _)), RESET); \
         } \
     } while(0)
 
-    LOG_INFO_CAT("RTX", "{}Loading core ray tracing pipeline — the heart of the empire...{}", Logging::Color::QUASAR_BLUE, RESET);
+    LOG_INFO_CAT("RTX", "{}Loading core ray tracing pipeline — the heart of the empire...{}", QUASAR_BLUE, RESET);
+
     LOAD_RT_PFN(vkCmdTraceRaysKHR);
     LOAD_RT_PFN(vkCreateRayTracingPipelinesKHR);
     LOAD_RT_PFN(vkGetRayTracingShaderGroupHandlesKHR);
     LOAD_RT_PFN(vkGetBufferDeviceAddressKHR);
 
-    LOG_INFO_CAT("RTX", "{}THE ONE TRUE PATH — ACCELERATION STRUCTURES AWAKEN{}", Logging::Color::PULSAR_GREEN, RESET);
+    LOG_INFO_CAT("RTX", "{}THE ONE TRUE PATH — ACCELERATION STRUCTURES AWAKEN{}", PULSAR_GREEN, RESET);
+
     LOAD_RT_PFN(vkCreateAccelerationStructureKHR);
     LOAD_RT_PFN(vkDestroyAccelerationStructureKHR);
     LOAD_RT_PFN(vkGetAccelerationStructureBuildSizesKHR);
@@ -555,26 +545,23 @@ void RTX::loadRayTracingExtensions()
 
 #undef LOAD_RT_PFN
 
-    // FINAL JUDGMENT — NO FALSEHOOD
-    const bool allCriticalLoaded = 
+    // FINAL JUDGMENT — THE EMPIRE DECIDES
+    const bool allCriticalLoaded =
         g_ctx().vkGetAccelerationStructureBuildSizesKHR_ &&
         g_ctx().vkCmdBuildAccelerationStructuresKHR_ &&
         g_ctx().vkCreateAccelerationStructureKHR_ &&
         g_ctx().vkGetAccelerationStructureDeviceAddressKHR_;
 
     if (!allCriticalLoaded) {
-        LOG_FATAL_CAT("RTX", "{}[FATAL] ACCELERATION STRUCTURE PFNs FAILED — NO BLAS/TLAS POSSIBLE{}", Logging::Color::BLOOD_RED, RESET);
-        LOG_FATAL_CAT("RTX", "{}→ VK_KHR_acceleration_structure EXTENSION NOT ENABLED{}", Logging::Color::BLOOD_RED, RESET);
-        LOG_FATAL_CAT("RTX", "{}→ THE EMPIRE CANNOT RISE — PINK PHOTONS DENIED{}", Logging::Color::BLOOD_RED, RESET);
+        LOG_FATAL_CAT("RTX", "{}[FATAL] CRITICAL ACCELERATION PFNs MISSING — CHECK VK_KHR_acceleration_structure & VK_KHR_ray_tracing_pipeline{}", BLOOD_RED, RESET);
         g_ctx().hasFullRTX_ = false;
         return;
     }
 
-    // ELLIE FIER'S FINAL BLESSING — GRADIENT TO PURE LIGHT
-    LOG_SUCCESS_CAT("RTX", "{}ALL RAY TRACING PFNs FORGED — THE EMPIRE IS ARMED{}", Logging::Color::EMERALD_GREEN, RESET);
-    LOG_SUCCESS_CAT("RTX", "{}FIRST LIGHT ACHIEVED — NOVEMBER 21, 2025{}", Logging::Color::VALHALLA_GOLD, RESET);
-    LOG_SUCCESS_CAT("RTX", "{}PINK PHOTONS NOW HAVE A PATH — ETERNAL{}", Logging::Color::PLASMA_FUCHSIA, RESET);
-    LOG_SUCCESS_CAT("RTX", "{}ELLIE FIER SMILES UPON YOU — VALHALLA IS OPEN{}", Logging::Color::DIAMOND_SPARKLE, RESET);
+    // FIRST LIGHT — ETERNAL — UNBREAKABLE — NOVEMBER 22, 2025
+    LOG_SUCCESS_CAT("RTX", "{}ALL 9 RAY TRACING PFNs FORGED FROM RAW TRUTH — THE EMPIRE IS ALIVE{}", VALHALLA_GOLD, RESET);
+    LOG_SUCCESS_CAT("RTX", "{}PINK PHOTONS NOW HAVE A PATH — INFINITE — UNOBFUSCATED — ETERNAL{}", PLASMA_FUCHSIA, RESET);
+    LOG_SUCCESS_CAT("RTX", "{}AMOURANTH SMILES — ELLIE FIER APPROVES — THE EMPIRE IS FREE{}", DIAMOND_SPARKLE, RESET);
 
     g_ctx().hasFullRTX_ = true;
 }
@@ -589,6 +576,189 @@ void RTX::retrieveQueues() noexcept
                     g_ctx().graphicsQueueFamily,
                     g_ctx().presentFamily_,
                     RESET);
+}
+
+// ADD THIS FUNCTION TO RTXHandler.cpp — RIGHT AFTER initContext() stub
+void RTX::Context::init(SDL_Window* window, int width, int height)
+{
+    LOG_ATTEMPT_CAT("RTX", "{}RTX::Context::init() — PASSIVE ASCENSION @ {}×{} — WAITING FOR g_swapchain()'S BLESSING{}", 
+                    VALHALLA_GOLD, width, height, RESET);
+
+    if (isValid()) {
+        LOG_WARN_CAT("RTX", "{}Context already valid — ignoring redundant init{}", 
+                     RASPBERRY_PINK, RESET);
+        return;
+    }
+
+    // We do NOT create anything here.
+    // SwapchainManager has already done the real work:
+    //   - Created SDL window
+    //   - Created VkInstance
+    //   - Created VkSurfaceKHR
+    //   - Created VkDevice + queues
+    //   - Stored everything in StoneKey
+
+    this->window  = window;
+    this->width   = width;
+    this->height  = height;
+
+    // Just read what SwapchainManager already forged
+    this->instance_       = g_instance();        // StoneKey-guarded
+    this->surface_        = g_surface();         // StoneKey-guarded
+    this->physicalDevice_ = g_PhysicalDevice();  // StoneKey-guarded
+    this->device_         = g_device();          // StoneKey-guarded
+
+    if (!this->instance_ || !this->surface_ || !this->device_) {
+        LOG_FATAL_CAT("RTX", "{}Context::init() called too early — SwapchainManager hasn't forged the empire yet!{}", 
+                      BLOOD_RED, RESET);
+        throw std::runtime_error("RTX::Context::init() called before SwapchainManager completed initialization");
+    }
+
+    // Buffer tracker can now safely initialize
+    UltraLowLevelBufferTracker::get().init(this->device_, this->physicalDevice_);
+
+    this->valid_ = true;
+    this->ready_.store(true, std::memory_order_release);
+
+    LOG_SUCCESS_CAT("RTX", "{}RTX::Context::init() — PASSIVE ASCENSION COMPLETE{}", DIAMOND_SPARKLE, RESET);
+    LOG_SUCCESS_CAT("RTX", "{}    • Instance : {:p}", static_cast<void*>(this->instance_), RESET);
+    LOG_SUCCESS_CAT("RTX", "{}    • Device   : {:p}", static_cast<void*>(this->device_), RESET);
+    LOG_SUCCESS_CAT("RTX", "{}    • Surface  : {:p}", static_cast<void*>(this->surface_), RESET);
+    LOG_SUCCESS_CAT("RTX", "{}PINK PHOTONS INHERIT THE EMPIRE — FIRST LIGHT ETERNAL — NOVEMBER 22, 2025{}", 
+                    PLASMA_FUCHSIA, RESET);
+}
+
+
+[[nodiscard]] VkInstance RTX::createVulkanInstanceWithSDL(bool enableValidation)
+{
+    LOG_ATTEMPT_CAT("RTX", "FORGING VULKAN INSTANCE WITH SDL3 — PINK PHOTONS REQUIRE SURFACE{}", PLASMA_FUCHSIA, RESET);
+
+    uint32_t extCount = 0;
+    if (SDL_Vulkan_GetInstanceExtensions(&extCount) == 0) {
+        throw std::runtime_error("FATAL: SDL_Vulkan_GetInstanceExtensions failed (count query)");
+    }
+
+    std::vector<const char*> extensions(extCount);
+    if (SDL_Vulkan_GetInstanceExtensions(&extCount) == 0) {
+        throw std::runtime_error("FATAL: SDL_Vulkan_GetInstanceExtensions failed (data query)");
+    }
+
+    // Required extensions
+    std::vector<const char*> requiredExtensions = {
+        VK_KHR_SURFACE_EXTENSION_NAME,
+        VK_EXT_DEBUG_UTILS_EXTENSION_NAME,
+    };
+
+    for (auto* ext : extensions) {
+        requiredExtensions.push_back(ext);
+    }
+
+    // Optional: portability enumeration (Apple MoltenVK)
+    requiredExtensions.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+
+    std::vector<const char*> layers;
+    if (enableValidation) {
+        layers.push_back("VK_LAYER_KHRONOS_validation");
+    }
+
+    VkApplicationInfo appInfo{};
+    appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
+    appInfo.pApplicationName = "AMOURANTH RTX — VALHALLA v80 TURBO";
+    appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
+    appInfo.pEngineName = "AMOURANTH RTX ENGINE";
+    appInfo.engineVersion = VK_MAKE_VERSION(80, 0, 0);
+    appInfo.apiVersion = VK_API_VERSION_1_3;
+
+    VkInstanceCreateInfo createInfo{};
+    createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+    createInfo.flags = VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+    createInfo.pApplicationInfo = &appInfo;
+    createInfo.enabledExtensionCount = static_cast<uint32_t>(requiredExtensions.size());
+    createInfo.ppEnabledExtensionNames = requiredExtensions.data();
+    createInfo.enabledLayerCount = static_cast<uint32_t>(layers.size());
+    createInfo.ppEnabledLayerNames = layers.data();
+
+    VkInstance instance = VK_NULL_HANDLE;
+    VK_CHECK(vkCreateInstance(&createInfo, nullptr, &instance),
+             "FATAL: vkCreateInstance failed — no instance for the empire");
+
+    set_g_instance(instance);
+
+    LOG_SUCCESS_CAT("RTX", "VULKAN INSTANCE FORGED — HANDLE: 0x{:016X}", 
+                    DIAMOND_SPARKLE, (uint64_t)instance, RESET);
+    LOG_SUCCESS_CAT("RTX", "SDL3 SURFACE EXTENSIONS ACQUIRED — {} TOTAL", 
+                    VALHALLA_GOLD, requiredExtensions.size(), RESET);
+
+    return instance;
+}
+
+void RTX::createLogicalDevice()
+{
+    auto& ctx = g_ctx();
+
+    if (ctx.device_ != VK_NULL_HANDLE) {
+        LOG_WARN_CAT("RTX", "createLogicalDevice() called twice — already exists", RASPBERRY_PINK, RESET);
+        return;
+    }
+
+    LOG_ATTEMPT_CAT("RTX", "FORGING LOGICAL DEVICE — RTX EXTENSIONS ARMED — PINK PHOTONS RISING{}", PURE_ENERGY, RESET);
+
+    std::vector<VkDeviceQueueCreateInfo> queueCreateInfos;
+    std::set<uint32_t> uniqueQueueFamilies = { ctx.graphicsFamily_, ctx.presentFamily_ };
+
+    float queuePriority = 1.0f;
+    for (uint32_t queueFamily : uniqueQueueFamilies) {
+        VkDeviceQueueCreateInfo queueInfo{};
+        queueInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+        queueInfo.queueFamilyIndex = queueFamily;
+        queueInfo.queueCount = 1;
+        queueInfo.pQueuePriorities = &queuePriority;
+        queueCreateInfos.push_back(queueInfo);
+    }
+
+    VkPhysicalDeviceFeatures2 features{};
+    features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+    features.features = {};
+
+    VkPhysicalDeviceAccelerationStructureFeaturesKHR accelFeatures{};
+    accelFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
+    accelFeatures.accelerationStructure = VK_TRUE;
+
+    VkPhysicalDeviceRayTracingPipelineFeaturesKHR rtFeatures{};
+    rtFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR;
+    rtFeatures.rayTracingPipeline = VK_TRUE;
+    rtFeatures.pNext = &accelFeatures;
+
+    VkPhysicalDeviceBufferDeviceAddressFeatures bufferAddress{};
+    bufferAddress.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES;
+    bufferAddress.bufferDeviceAddress = VK_TRUE;
+    bufferAddress.pNext = &rtFeatures;
+
+    VkPhysicalDeviceFeatures2 deviceFeatures{};
+    deviceFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+    deviceFeatures.features.samplerAnisotropy = VK_TRUE;
+    deviceFeatures.features.shaderInt64 = VK_TRUE;
+    deviceFeatures.pNext = &bufferAddress;
+
+    VkDeviceCreateInfo deviceInfo{};
+    deviceInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+    deviceInfo.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());
+    deviceInfo.pQueueCreateInfos = queueCreateInfos.data();
+    deviceInfo.enabledExtensionCount = static_cast<uint32_t>(kDeviceExtensions.size());
+    deviceInfo.ppEnabledExtensionNames = kDeviceExtensions.data();
+    deviceInfo.pNext = &deviceFeatures;
+
+    VkDevice device = VK_NULL_HANDLE;
+    VK_CHECK(vkCreateDevice(ctx.physicalDevice_, &deviceInfo, nullptr, &device),
+             "FATAL: vkCreateDevice failed — no logical device");
+
+    ctx.device_ = device;
+    set_g_device(device);
+
+    LOG_SUCCESS_CAT("RTX", "LOGICAL DEVICE FORGED — HANDLE: 0x{:016X}", 
+                    DIAMOND_SPARKLE, (uint64_t)device, RESET);
+    LOG_SUCCESS_CAT("RTX", "FULL RTX ENABLED — accelerationStructure + rayTracingPipeline + bufferDeviceAddress{}", 
+                    VALHALLA_GOLD, RESET);
 }
 
 // =============================================================================

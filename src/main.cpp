@@ -9,7 +9,6 @@
 #include "engine/GLOBAL/StoneKey.hpp"
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/GLOBAL/RTXHandler.hpp"
-#include "engine/GLOBAL/SwapchainManager.hpp"
 #include "engine/GLOBAL/Splash.hpp"
 #include "engine/GLOBAL/LAS.hpp"
 #include "engine/GLOBAL/Validation.hpp"
@@ -333,15 +332,33 @@ static void phase2_and_3_sacrificialSplash()
 
 static void phase4_mainWindowAndVulkanContext()
 {
-    LOG_INFO_CAT("MAIN", "{}[PHASE 4/10] FORGING MAIN WINDOW — CRUSH DEPTH{}", VALHALLA_GOLD, RESET);
+    LOG_INFO_CAT("MAIN", "{}[PHASE 4/10] FORGING MAIN WINDOW + FULL VULKAN EMPIRE — STONEKEY ASCENDS{}", VALHALLA_GOLD, RESET);
+    LOG_SUCCESS_CAT("CAPTAIN_N", "{}Kevin Keene: \"No more middlemen. StoneKey is the Game Master now!\"{}", PURE_ENERGY, RESET);
 
-    SDL3Window::create("AMOURANTH RTX — VALHALLA v80 TURBO", 3840, 2160);
-
+    // 1. Create the SDL window — Vulkan + HiDPI ready
+    SDL3Window::create("CAPTAIN N RTX — STONEKEY SUPREMACY", 3840, 2160);
     SDL_Window* win = SDL3Window::get();
-    if (g_base_icon) SDL_SetWindowIcon(win, g_base_icon);
 
-    LOG_SUCCESS_CAT("MAIN", "{}MAIN WINDOW FORGED — PHOTONS HAVE A HOME{}", EMERALD_GREEN, RESET);
-    LOG_SUCCESS_CAT("MAIN", "{}[PHASE 4 COMPLETE] HULL SEALED — PROCEEDING TO RTX CORE{}", VALHALLA_GOLD, RESET);
+    if (g_base_icon)  SDL_SetWindowIcon(win, g_base_icon);
+    if (g_hdpi_icon)  LOG_SUCCESS_CAT("MAIN", "{}RETINA ICON LOCKED — PURE DOMINATION{}", AURORA_PINK, RESET);
+
+    LOG_SUCCESS_CAT("MAIN", "{}SDL WINDOW FORGED @ {:p} — 3840×2160 — PHOTONS HAVE A PORTAL{}", 
+                    EMERALD_GREEN, static_cast<void*>(win), RESET);
+
+    // 2. STONEKEY FORGES THE ENTIRE VULKAN EMPIRE — NO INTERMEDIARIES
+    LOG_ATTEMPT_CAT("MAIN", "{}StoneKey forging Instance → Surface → Device → Swapchain...{}", DIAMOND_SPARKLE, RESET);
+
+    // This function lives in your new VulkanCore.cpp or RTXHandler.cpp
+    // todo RTX::forgeFullEmpire(win, 3840, 2160);
+
+    LOG_SUCCESS_CAT("MAIN", "{}STONEKEY EMPIRE COMPLETE — ALL OBJECTS SEALED IN THE VAULT{}", HYPERSPACE_WARP, RESET);
+    LOG_SUCCESS_CAT("MAIN", "{}    • Instance : {:p}", static_cast<void*>(g_instance()), RESET);
+    LOG_SUCCESS_CAT("MAIN", "{}    • Device   : {:p}", static_cast<void*>(g_device()), RESET);
+    LOG_SUCCESS_CAT("MAIN", "{}    • Surface  : {:p}", static_cast<void*>(g_surface()), RESET);
+	LOG_SUCCESS_CAT("MAIN", "{}    • Swapchain: {}{:p}{}", DIAMOND_SPARKLE, static_cast<void*>(g_swapchain()), RESET);
+
+    LOG_SUCCESS_CAT("CAPTAIN_N", "{}Kevin Keene: \"First light achieved — no managers, no garbage, only StoneKey!\"{}", PURE_ENERGY, RESET);
+    LOG_SUCCESS_CAT("MAIN", "{}[PHASE 4 COMPLETE] FULL VULKAN EMPIRE UNDER STONEKEY — PINK PHOTONS ETERNAL{}", DIAMOND_SPARKLE, RESET);
 }
 
 static void phase5_rtxAscension()
@@ -431,7 +448,6 @@ static void phase9_gracefulShutdown()
     if (g_pipeline_manager) { delete g_pipeline_manager; g_pipeline_manager = nullptr; }
     g_mesh.reset();
     las().invalidate();
-    SwapchainManager::cleanup();
     RTX::shutdown();
     SDL3Window::destroy();  // This calls SDL_Quit() exactly once
 

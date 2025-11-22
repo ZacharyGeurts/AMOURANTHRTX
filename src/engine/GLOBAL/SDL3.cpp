@@ -1,4 +1,4 @@
-// source/engine/GLOBAL/SDL3.cpp
+// src/engine/GLOBAL/SDL3.cpp
 // =============================================================================
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
@@ -345,7 +345,7 @@ void SDL3Input::handleGamepadConnection(const SDL_GamepadDeviceEvent& e)
 } // namespace SDL3Initializer
 
 // =============================================================================
-// Namespace: SDL3Window — The One True Forge
+// Namespace: SDL3Window — The One True Forge — INTEGRATED WITH STONEKEY LOVE
 // =============================================================================
 namespace SDL3Window {
 
@@ -369,7 +369,7 @@ void create(const char* title, int width, int height, Uint32 flags)
             throw std::runtime_error("SDL_Init failed");
         }
     }
-    LOG_SUCCESS_CAT("SDL3", "{}SDL3 subsystems ONLINE — B-A-N-A-N-A-S{}", EMERALD_GREEN, RESET);
+    LOG_SUCCESS_CAT("SDL3", "{}SDL3 REACHES FRUITION — B-A-N-A-N-A-S{}", EMERALD_GREEN, RESET);
 
     if (SDL_Vulkan_LoadLibrary(nullptr) == 0) {
         LOG_FATAL_CAT("SDL3", "{}SDL_Vulkan_LoadLibrary FAILED: {} — Check Vulkan installation!{}", BLOOD_RED, SDL_GetError(), RESET);
@@ -388,13 +388,13 @@ void create(const char* title, int width, int height, Uint32 flags)
 
     uint32_t extCount = 0;
     if (SDL_Vulkan_GetInstanceExtensions(&extCount) == 0) {
-        LOG_FATAL_CAT("VULKAN", "{}SDL_Vulkan_GetInstanceExtensions(count) failed: {}{}", CRIMSON_MAGENTA, SDL_GetError(), RESET);
+        LOG_FATAL_CAT("SDL3", "{}SDL_Vulkan_GetInstanceExtensions(count) failed: {}{}", CRIMSON_MAGENTA, SDL_GetError(), RESET);
         throw std::runtime_error("Vulkan extensions count failed");
     }
 
     const char* const* sdlExts = SDL_Vulkan_GetInstanceExtensions(&extCount);
     if (!sdlExts || extCount == 0) {
-        LOG_FATAL_CAT("VULKAN", "{}SDL returned NULL or zero extensions{}", BLOOD_RED, RESET);
+        LOG_FATAL_CAT("SDL3", "{}SDL returned NULL or zero extensions{}", BLOOD_RED, RESET);
         throw std::runtime_error("Vulkan extensions failed");
     }
 
@@ -402,7 +402,7 @@ void create(const char* title, int width, int height, Uint32 flags)
     if (Options::Performance::ENABLE_VALIDATION_LAYERS) {
         extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
         extensions.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);  // Vulkan 1.4 portability for macOS/moltenVK
-        LOG_SUCCESS_CAT("VULKAN", "{}Validation + Portability enabled for Vulkan 1.4{}", VALHALLA_GOLD, RESET);
+        LOG_SUCCESS_CAT("SDL3", "{}Validation + Portability enabled for Vulkan 1.4{}", VALHALLA_GOLD, RESET);
     }
 
     // Zero-init + explicit pNext = nullptr for Vulkan 1.4 strictness
@@ -428,47 +428,46 @@ void create(const char* title, int width, int height, Uint32 flags)
     createInfo.ppEnabledLayerNames = Options::Performance::ENABLE_VALIDATION_LAYERS ? validationLayers : nullptr;
 
     // Forge all variables — LOG EVERYTHING
-    LOG_INFO_CAT("VULKAN", "{}FORGING INSTANCE — API: 1.3 | Extensions: {} | Layers: {}{}", VALHALLA_GOLD, extensions.size(), createInfo.enabledLayerCount, RESET);
+    LOG_INFO_CAT("SDL3", "{}FORGING INSTANCE — API: 1.3 | Extensions: {} | Layers: {}{}", VALHALLA_GOLD, extensions.size(), createInfo.enabledLayerCount, RESET);
     for (const auto& ext : extensions) {
-        LOG_INFO_CAT("VULKAN", "  Ext: {}{}", AURORA_PINK, ext, RESET);
+        LOG_INFO_CAT("SDL3", "  Ext: {}{}", AURORA_PINK, ext, RESET);
     }
     if (createInfo.enabledLayerCount > 0) {
-        LOG_INFO_CAT("VULKAN", "  Layer: {}{}", PLASMA_FUCHSIA, validationLayers[0], RESET);
+        LOG_INFO_CAT("SDL3", "  Layer: {}{}", PLASMA_FUCHSIA, validationLayers[0], RESET);
     }
-    LOG_INFO_CAT("VULKAN", "{}pNext: nullptr | flags: 0x{:x}{}", EMERALD_GREEN, createInfo.flags, RESET);
+    LOG_INFO_CAT("SDL3", "{}pNext: nullptr | flags: 0x{:x}{}", EMERALD_GREEN, createInfo.flags, RESET);
 
     VkInstance instance = VK_NULL_HANDLE;
     VkResult result = vkCreateInstance(&createInfo, nullptr, &instance);
     if (result != VK_SUCCESS) {
-        LOG_FATAL_CAT("VULKAN", "{}vkCreateInstance FAILED: {} — Check Vulkan drivers!{}", BLOOD_RED, result, RESET);
+        LOG_FATAL_CAT("SDL3", "{}vkCreateInstance FAILED: {} — Check Vulkan drivers!{}", BLOOD_RED, result, RESET);
         throw std::runtime_error("Vulkan instance creation failed");
     }
 
-    LOG_SUCCESS_CAT("VULKAN", "{}INSTANCE FORGED @ {:p} — PINK PHOTONS ASCEND{}", DIAMOND_SPARKLE, static_cast<void*>(instance), RESET);
+    LOG_SUCCESS_CAT("SDL3", "{}INSTANCE FORGED @ {:p} — PINK PHOTONS ASCEND{}", DIAMOND_SPARKLE, static_cast<void*>(instance), RESET);
+    set_g_instance(instance);  // StoneKey love
 
     VkSurfaceKHR surface = VK_NULL_HANDLE;
-    if (!SDL_Vulkan_CreateSurface(win, instance, nullptr, &surface)) {
-        LOG_FATAL_CAT("VULKAN", "{}SDL_Vulkan_CreateSurface FAILED: {}{}", CRIMSON_MAGENTA, SDL_GetError(), RESET);
+    if (SDL_Vulkan_CreateSurface(win, instance, nullptr, &surface) == 0) {
+        LOG_FATAL_CAT("SDL3", "{}SDL_Vulkan_CreateSurface FAILED: {}{}", CRIMSON_MAGENTA, SDL_GetError(), RESET);
         throw std::runtime_error("Vulkan surface failed");
     }
-    LOG_SUCCESS_CAT("VULKAN", "{}SURFACE FORGED @ {:p} — PATH OPEN{}", AURORA_PINK, static_cast<void*>(surface), RESET);
-
-    // ZAPPER EASTER EGG — UNCHANGED
-    for (int i = 0; i < 10; i++) LOG_INFO_CAT("ZAPPER", "{}*PEW* {}{}", RASPBERRY_PINK, "ZAPPER FIRES PINK PHOTON #" + std::to_string(i+1), RESET);
+    LOG_SUCCESS_CAT("SDL3", "{}SURFACE FORGED @ {:p} — PATH OPEN{}", AURORA_PINK, static_cast<void*>(surface), RESET);
+    set_g_surface(surface);  // StoneKey love
 
     // Show the window — ensure visible, no close right away
     SDL_ShowWindow(win);
-    LOG_SUCCESS_CAT("MAIN", "{}WINDOW SHOWN — PINK PHOTONS FILL THE SCREEN{}", EMERALD_GREEN, RESET);
+    LOG_SUCCESS_CAT("SDL3", "{}WINDOW SHOWN — PINK PHOTONS FILL THE SCREEN{}", EMERALD_GREEN, RESET);
 
     // Optional: Hold window open for 5 seconds (for testing — remove in production)
-    // SDL_Delay(5000);
+    // SDL_Delay(5000); // this worked
 }
 
 std::vector<std::string> getVulkanExtensions(SDL_Window* window)
 {
     if (!window) window = get();
     uint32_t count = 0;
-    if (!SDL_Vulkan_GetInstanceExtensions(&count)) return {};
+    if (SDL_Vulkan_GetInstanceExtensions(&count) == 0) return {};
 
     const char* const* exts = SDL_Vulkan_GetInstanceExtensions(&count);
     return exts ? std::vector<std::string>(exts, exts + count) : std::vector<std::string>{};
@@ -524,10 +523,10 @@ void toggleFullscreen() noexcept
 
 void destroy() noexcept
 {
-    LOG_INFO_CAT("VULKAN", "{}Returning photons to the void...{}", SAPPHIRE_BLUE, RESET);
+    LOG_INFO_CAT("SDL3", "{}Returning photons to the void...{}", SAPPHIRE_BLUE, RESET);
     g_vulkanRenderer.reset();
     RTX::cleanupAll();
-    LOG_SUCCESS_CAT("VULKAN", "{}Vulkan shutdown complete — Ellie Fier smiles{}", EMERALD_GREEN, RESET);
+    LOG_SUCCESS_CAT("SDL3", "{}Vulkan shutdown complete — Amouranth smiles{}", EMERALD_GREEN, RESET);
 
     g_sdl_window.reset();
     SDL_Quit();

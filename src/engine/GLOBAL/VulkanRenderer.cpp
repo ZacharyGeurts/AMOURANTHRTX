@@ -22,7 +22,7 @@
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/GLOBAL/RTXHandler.hpp"
 #include "engine/GLOBAL/LAS.hpp"
-#include "engine/GLOBAL/SwapchainManager.hpp"
+#include "engine/GLOBAL/SDL3.hpp"
 #include "engine/GLOBAL/OptionsMenu.hpp"
 #include "engine/GLOBAL/camera.hpp"
 #include "engine/GLOBAL/StoneKey.hpp"  // Full include — .cpp only
@@ -145,9 +145,6 @@ void VulkanRenderer::cleanup() noexcept {
 
     // ── FRAMEBUFFERS: Destroy first (prevents dangling references) ───────────
     cleanupFramebuffers();
-
-    // ── SWAPCHAIN: Destroy swapchain + render pass + image views ─────────────
-    SWAPCHAIN.cleanup();
 
     // ── Free All Descriptor Sets BEFORE destroying images/views/pools ───────
     LOG_TRACE_CAT("RENDERER", "cleanup — Freeing descriptor sets");
@@ -404,11 +401,11 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, bool o
     LOG_TRACE_CAT("RENDERER", "Step 7.5 COMPLETE — PipelineManager armed (dev=0x{:x}, phys=0x{:x})", reinterpret_cast<uintptr_t>(g_device()), reinterpret_cast<uintptr_t>(g_PhysicalDevice()));
 
     LOG_SUCCESS_CAT("RENDERER", "Swapchain FORGED — {} images @ {}x{} — PINK PHOTONS READY", 
-                    SWAPCHAIN.imageCount(), SWAPCHAIN.extent().width, SWAPCHAIN.extent().height);
+                    ([](){ uint32_t cnt; vkGetSwapchainImagesKHR(g_device(), g_swapchain(), &cnt, nullptr); return cnt; }()), VkExtent2D{3840, 2160}.width, VkExtent2D{3840, 2160}.height);
     LOG_TRACE_CAT("RENDERER", "Step 8 COMPLETE — Swapchain validated and armed");
     
     // =============================================================================
-    // STEP 9 — HDR + RT RENDER TARGETS (POST-SWAPCHAIN, POST-PIPELINEMANAGER)
+    // STEP 9 — HDR + RT RENDER TARGETS (POST-g_swapchain(), POST-PIPELINEMANAGER)
     // =============================================================================
     LOG_TRACE_CAT("RENDERER", "=== STACK BUILD ORDER STEP 9: Create HDR & RT Targets ===");
     if (Options::Environment::ENABLE_ENV_MAP) createEnvironmentMap();
@@ -631,7 +628,7 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, bool o
     const bool fpsUnlocked = !Options::Display::ENABLE_VSYNC;
     LOG_SUCCESS_CAT("RENDERER", 
         "{}VULKAN RENDERER FULLY INITIALIZED — {}x{} — TRIPLE BUFFERING — HDR — TONEMAP READY — PRESENT MODE: {} — FPS {} — AWAITING TLAS FOR FIRST RAYS — PINK PHOTONS ETERNAL{}", 
-        EMERALD_GREEN, width, height, SWAPCHAIN.presentModeName(), fpsUnlocked ? "UNLOCKED" : "LOCKED", RESET);
+        EMERALD_GREEN, width, height, std::string("VK_PRESENT_MODE_MAILBOX_KHR"), fpsUnlocked ? "UNLOCKED" : "LOCKED", RESET);
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -1234,7 +1231,7 @@ void VulkanRenderer::recordRayTracingCommandBuffer(VkCommandBuffer cmd) noexcept
     const VkStridedDeviceAddressRegionKHR* callable = pipelineManager_.getCallableSbtRegion();
 
     // ── FIRE THE RAYS — FULL RESOLUTION — MAXIMUM THROUGHPUT
-    const VkExtent2D extent = SWAPCHAIN.extent();
+    const VkExtent2D extent = VkExtent2D{3840, 2160};
 
     pipelineManager_.vkCmdTraceRaysKHR_(cmd,
         raygen,
@@ -1266,7 +1263,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     uint32_t imageIndex = 0;
     VkResult acquireResult = vkAcquireNextImageKHR(
         g_device(),
-        SWAPCHAIN.swapchain(),
+        g_swapchain(),
         1'000'000'000ULL,  // 1 second timeout
         imageAvailableSemaphores_[frameIdx],
         VK_NULL_HANDLE,
@@ -1279,7 +1276,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
         acquireResult == VK_ERROR_SURFACE_LOST_KHR)
     {
         LOG_WARN_CAT("RENDER", "Swapchain out-of-date/surface lost on acquire — recreating (frame {})", frameNumber_);
-        SWAPCHAIN.recreate(width_, height_);
+        recreateSwapchain(width_, height_);
         currentFrame_ = (currentFrame_ + 1) % Options::Performance::MAX_FRAMES_IN_FLIGHT;
         return;
     }
@@ -1304,7 +1301,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
         barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
         barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        barrier.image = SWAPCHAIN.image(imageIndex);
+        barrier.image = g_swapchain_images()[imageIndex];
         barrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
         barrier.srcAccessMask = 0;
         barrier.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
@@ -1359,7 +1356,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
         ? *denoiserView_
         : *rtOutputViews_[frameIdx % rtOutputViews_.size()];
 
-    updateTonemapDescriptor(frameIdx, tonemapInput, SWAPCHAIN.imageView(imageIndex));
+    updateTonemapDescriptor(frameIdx, tonemapInput, g_swapchain_image_views()[imageIndex]);
 
     if (denoisingEnabled_) performDenoisingPass(cmd);
     performTonemapPass(cmd, frameIdx, imageIndex);
@@ -1371,7 +1368,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
         b.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
         b.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
         b.dstAccessMask = 0;
-        b.image = SWAPCHAIN.image(imageIndex);
+        b.image = g_swapchain_images()[imageIndex];
         b.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
 
         vkCmdPipelineBarrier(cmd,
@@ -1398,14 +1395,14 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     present.waitSemaphoreCount = 1;
     present.pWaitSemaphores = &renderFinishedSemaphores_[frameIdx];
     present.swapchainCount = 1;
-    VkSwapchainKHR swapchain = SWAPCHAIN.swapchain();
+    VkSwapchainKHR swapchain = g_swapchain();
     present.pSwapchains = &swapchain;
     present.pImageIndices = &imageIndex;
 
     VkResult presentResult = vkQueuePresentKHR(ctx.presentQueue(), &present);
 
     if (presentResult == VK_ERROR_OUT_OF_DATE_KHR || presentResult == VK_SUBOPTIMAL_KHR) {
-        SWAPCHAIN.recreate(width_, height_);
+        recreateSwapchain(width_, height_);
     } else if (presentResult != VK_SUCCESS) {
         LOG_ERROR_CAT("RENDER", "vkQueuePresentKHR failed: {}", (int)presentResult);
     }
@@ -1466,7 +1463,7 @@ void VulkanRenderer::initializeAllBufferData(uint32_t frames, VkDeviceSize unifo
 
 void VulkanRenderer::createCommandBuffers() noexcept {
     LOG_TRACE_CAT("RENDERER", "createCommandBuffers — START");
-    size_t numImages = SWAPCHAIN.imageCount();
+    size_t numImages = ([](){ uint32_t cnt; vkGetSwapchainImagesKHR(g_device(), g_swapchain(), &cnt, nullptr); return cnt; }());
     if (numImages == 0) {
         LOG_ERROR_CAT("RENDERER", "Invalid swapchain: 0 images — cannot create command buffers");
         LOG_FATAL_CAT("RENDERER", "Fatal error in noexcept function"); std::abort();
@@ -1681,7 +1678,7 @@ void VulkanRenderer::performTonemapPass(VkCommandBuffer cmd, uint32_t frameIdx, 
 
     vkCmdPushConstants(cmd, *tonemapLayout_, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push), &push);
 
-    VkExtent2D ext = SWAPCHAIN.extent();
+    VkExtent2D ext = VkExtent2D{3840, 2160};
     uint32_t wgX = (ext.width + 15) / 16;
     uint32_t wgY = (ext.height + 15) / 16;
     vkCmdDispatch(cmd, wgX, wgY, 1);
@@ -1907,18 +1904,18 @@ void VulkanRenderer::setRenderMode(int mode) noexcept {
 void VulkanRenderer::createFramebuffers() noexcept {
     // FIXED: Idle post-framebuffer recreate to flush stale maps (prevents fragmented staging post-resize)
     vkDeviceWaitIdle(g_device());
-    framebuffers_.resize(SWAPCHAIN.imageCount());
+    framebuffers_.resize(([](){ uint32_t cnt; vkGetSwapchainImagesKHR(g_device(), g_swapchain(), &cnt, nullptr); return cnt; }()));
 
-    for (size_t i = 0; i < SWAPCHAIN.imageCount(); ++i) {
-        VkImageView attachment = SWAPCHAIN.imageView(i);
+    for (size_t i = 0; i < ([](){ uint32_t cnt; vkGetSwapchainImagesKHR(g_device(), g_swapchain(), &cnt, nullptr); return cnt; }()); ++i) {
+        VkImageView attachment = g_swapchain_image_views()[i];
 
         VkFramebufferCreateInfo fbInfo = {};  // Zero-init
         fbInfo.sType           = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-        fbInfo.renderPass      = SWAPCHAIN.renderPass();
+        fbInfo.renderPass = g_render_pass();
         fbInfo.attachmentCount = 1;
         fbInfo.pAttachments    = &attachment;
-        fbInfo.width           = SWAPCHAIN.extent().width;
-        fbInfo.height          = SWAPCHAIN.extent().height;
+        fbInfo.width = 3840;
+        fbInfo.height = 2160;
         fbInfo.layers          = 1;
 
         VK_CHECK(vkCreateFramebuffer(g_device(), &fbInfo, nullptr, &framebuffers_[i]),
@@ -2148,7 +2145,7 @@ void VulkanRenderer::onWindowResize(uint32_t w, uint32_t h) noexcept
     firstSwapchainAcquire_ = true;
 
     // ===================================================================
-    // 2. ANNIHILATE — BUT PRESERVE SWAPCHAIN UNTIL AFTER PRESENT
+    // 2. ANNIHILATE — BUT PRESERVE g_swapchain() UNTIL AFTER PRESENT
     // ===================================================================
     cleanupFramebuffers();
     destroyRTOutputImages();
@@ -2167,8 +2164,8 @@ void VulkanRenderer::onWindowResize(uint32_t w, uint32_t h) noexcept
     // ===================================================================
     // 3. REBIRTH — BUT ONLY AFTER FULL GPU IDLE (STONEKEY LAW)
     // ===================================================================
-    // This is the fix: SWAPCHAIN.recreate() AFTER full idle — no more ghost handles
-    SWAPCHAIN.recreate(w, h);
+    // This is the fix: recreateSwapchain() AFTER full idle — no more ghost handles
+    recreateSwapchain(w, h);
 
     createRTOutputImages();
     createAccumulationImages();
@@ -2197,7 +2194,7 @@ void VulkanRenderer::onWindowResize(uint32_t w, uint32_t h) noexcept
                  "Tonemap sets failed — but StoneKey protects us");
     }
 
-    LOG_SUCCESS_CAT("RENDERER", "{}STONEKEY RESIZE COMPLETE — {}×{} — SWAPCHAIN REBORN — GHOSTS EXORCISED — PINK PHOTONS ETERNAL{}", 
+    LOG_SUCCESS_CAT("RENDERER", "{}STONEKEY RESIZE COMPLETE — {}×{} — g_swapchain() REBORN — GHOSTS EXORCISED — PINK PHOTONS ETERNAL{}", 
                     COSMIC_GOLD, w, h, RESET);
 }
 

@@ -9,7 +9,7 @@
 // 2. Commercial licensing: gzac5314@gmail.com
 //
 // TRUE CONSTEXPR STONEKEY v∞ — NOVEMBER 19, 2025 — APOCALYPSE FINAL v1.5
-// MAIN — SWAPCHAIN FORGED AT DAWN — PINK PHOTONS ETERNAL — VALHALLA UNBREACHABLE
+// MAIN — g_swapchain() FORGED AT DAWN — PINK PHOTONS ETERNAL — VALHALLA UNBREACHABLE
 // =============================================================================
 
 #pragma once
