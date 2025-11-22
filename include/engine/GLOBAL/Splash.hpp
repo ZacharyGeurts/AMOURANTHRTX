@@ -1,67 +1,69 @@
 // include/engine/GLOBAL/Splash.hpp
-// FINAL — COMPILES CLEAN — WORKS — NOVEMBER 21, 2025 — FIRST LIGHT ACHIEVED
+// FINAL — SELF-CONTAINED — SACRIFICIAL — PURE SDL3 — NOVEMBER 22, 2025
+// BORN TO DIE — SO THE EMPIRE MAY RISE — FIRST LIGHT ACHIEVED
 
 #pragma once
 
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/GLOBAL/SDL3.hpp"
-
 #include <SDL3/SDL.h>
+#include <SDL3_image/SDL_image.h>
 #include <filesystem>
 #include <thread>
 #include <chrono>
 #include <string>
 
 namespace Splash {
+    inline SDL3Audio::AudioManager* g_audio = nullptr;  // ← Lives forever. Photons approved.
+}
+
+namespace Splash {
 
 namespace detail {
-    [[nodiscard]] inline bool assetExists(const char* path) noexcept {
+    [[nodiscard]] inline bool exists(const char* path) noexcept {
         return path && std::filesystem::exists(path);
     }
 }
 
 inline void show(const char* title, int w, int h, const char* imagePath, const char* audioPath = nullptr)
 {
-    LOG_INFO_CAT("SPLASH", "{}SPLASH SEQUENCE INITIATED — {}×{} — PHOTONS AWAKEN{}", VALHALLA_GOLD, w, h, RESET);
+    LOG_SUCCESS_CAT("SPLASH", "{}SPLASH RITUAL BEGINNING — SELF-CONTAINED — SACRIFICIAL MODE ENGAGED{}", DIAMOND_SPARKLE, RESET);
+    LOG_INFO_CAT("SPLASH", "{}Initializing pure SDL3 realm — no Vulkan, no empire, only photons{}", RASPBERRY_PINK, RESET);
 
-    // Video subsystem
-    if (SDL_InitSubSystem(SDL_INIT_VIDEO) == 0) {
-        LOG_ERROR_CAT("SPLASH", "{}SDL_InitSubSystem(VIDEO) failed: {}{}", CRIMSON_MAGENTA, SDL_GetError(), RESET);
+    // FULL INIT — WE OWN THIS WORLD
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_EVENTS) == 0) {
+        LOG_FATAL_CAT("SPLASH", "{}SDL_Init failed: {} — the ritual cannot begin{}", BLOOD_RED, SDL_GetError(), RESET);
         return;
     }
 
-    // Center window
-    SDL_Rect bounds{};
-    SDL_GetDisplayBounds(0, &bounds);
-    int cx = bounds.x + (bounds.w - w) / 2;
-    int cy = bounds.y + (bounds.h - h) / 2;
+    // Window — centered, borderless, hidden until ready
+    SDL_Rect display{};
+    SDL_GetDisplayBounds(0, &display);
+    int x = display.x + (display.w - w) / 2;
+    int y = display.y + (display.h - h) / 2;
 
-    SDL_Window* win = SDL_CreateWindow(title, w, h, SDL_WINDOW_BORDERLESS | SDL_WINDOW_HIDDEN);
+    SDL_Window* win = SDL_CreateWindow(
+        title, w, h,
+        SDL_WINDOW_BORDERLESS | SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_HIDDEN
+    );
     if (!win) {
-        LOG_ERROR_CAT("SPLASH", "{}Failed to create splash window: {}{}", BLOOD_RED, SDL_GetError(), RESET);
-        SDL_QuitSubSystem(SDL_INIT_VIDEO);
+        LOG_ERROR_CAT("SPLASH", "{}Failed to forge splash window: {}{}", CRIMSON_MAGENTA, SDL_GetError(), RESET);
+        SDL_Quit();
         return;
     }
-    SDL_SetWindowPosition(win, cx, cy);
+    SDL_SetWindowPosition(win, x, y);
 
-    // Icon setup
-    SDL_Surface* base = IMG_Load("assets/textures/ammo32.ico");
-    SDL_Surface* hdpi = IMG_Load("assets/textures/ammo.ico");
-    if (base && hdpi) {
-        SDL_AddSurfaceAlternateImage(base, hdpi);
-        SDL_SetWindowIcon(win, base);
-        SDL_DestroySurface(base);
-        SDL_DestroySurface(hdpi);
-    } else if (base) {
-        SDL_SetWindowIcon(win, base);
-        SDL_DestroySurface(base);
+    // Valhalla branding
+    if (SDL_Surface* icon = IMG_Load("assets/textures/ammo.ico")) {
+        SDL_SetWindowIcon(win, icon);
+        SDL_DestroySurface(icon);
     }
 
     SDL_Renderer* ren = SDL_CreateRenderer(win, nullptr);
     if (!ren) {
-        LOG_ERROR_CAT("SPLASH", "{}Failed to create renderer: {}{}", CRIMSON_MAGENTA, SDL_GetError(), RESET);
+        LOG_ERROR_CAT("SPLASH", "{}Renderer creation failed: {}{}", CRIMSON_MAGENTA, SDL_GetError(), RESET);
         SDL_DestroyWindow(win);
-        SDL_QuitSubSystem(SDL_INIT_VIDEO);
+        SDL_Quit();
         return;
     }
 
@@ -69,78 +71,65 @@ inline void show(const char* title, int w, int h, const char* imagePath, const c
     SDL_SetRenderDrawColor(ren, 0, 0, 0, 255);
     SDL_RenderClear(ren);
 
-    // Load and center splash image
+    // Image — centered
     SDL_Texture* tex = nullptr;
-    if (detail::assetExists(imagePath)) {
+    if (detail::exists(imagePath)) {
         tex = IMG_LoadTexture(ren, imagePath);
         if (tex) {
-            float tw = 0, th = 0;
+            float tw, th;
             SDL_GetTextureSize(tex, &tw, &th);
-            SDL_FRect dst = { (w - tw) * 0.5f, (h - th) * 0.5f, tw, th };
+            SDL_FRect dst{(w - tw) * 0.5f, (h - th) * 0.5f, tw, th};
             SDL_RenderTexture(ren, tex, nullptr, &dst);
-            LOG_SUCCESS_CAT("SPLASH", "{}Splash image loaded and centered: {}{}", RASPBERRY_PINK, imagePath, RESET);
-        } else {
-            LOG_WARN_CAT("SPLASH", "{}Failed to load splash texture: {}{}", AMBER_YELLOW, imagePath, RESET);
+            LOG_SUCCESS_CAT("SPLASH", "{}AMOURANTH IMAGE MANIFESTED — CENTERED — PURE{}", AURORA_PINK, RESET);
         }
-    } else {
-        LOG_WARN_CAT("SPLASH", "{}Splash image not found: {}{}", AMBER_YELLOW, imagePath, RESET);
     }
 
     SDL_RenderPresent(ren);
 
-    // === AUDIO SYSTEM — PINK PHOTONS SING ===
-    static bool audioInit = []() -> bool {
-        return SDL_InitSubSystem(SDL_INIT_AUDIO) == 0;
-    }();
-
-    static SDL3Audio::AudioManager* audio = nullptr;
-
-    // Initialize audio manager once
-    if ((audioInit && audio) == 0) {
-        audio = new SDL3Audio::AudioManager();
-        if (!audio->initMixer()) {
-            delete audio;
-            audio = nullptr;
-            LOG_WARN_CAT("SPLASH", "{}AudioManager init failed — proceeding in silence{}", AMBER_YELLOW, RESET);
-        } else {
-            LOG_SUCCESS_CAT("SPLASH", "{}AudioManager initialized — PINK PHOTONS HAVE VOICE{}", PARTY_PINK, RESET);
+    // === SACRIFICIAL AUDIO — FULLY PLAYED, THEN SACRIFICED ===
+    if (detail::exists(audioPath)) {
+        g_audio = new SDL3Audio::AudioManager();
+        if (g_audio->initMixer() == 0) {
+            LOG_WARN_CAT("SPLASH", "{}AudioManager failed to init mixer — silence falls{}", AMBER_YELLOW, RESET);
+            delete g_audio;
+            g_audio = nullptr;
         }
     }
 
-    // Play startup sound
-    if (audioPath && detail::assetExists(audioPath) && audio) {
-        static std::string lastPlayed;
-        if (lastPlayed != audioPath) {
-            if (audio->loadSound(audioPath, "splash")) {
-                lastPlayed = audioPath;
-                LOG_SUCCESS_CAT("SPLASH", "{}Startup sound loaded: {}{}", AURORA_PINK, audioPath, RESET);
-            }
+    if (g_audio) {
+        if (g_audio->loadSound(audioPath, "splash")) {
+            g_audio->playSound("splash");
+            LOG_INFO_CAT("SPLASH", "{}AMOURANTH HAS SPOKEN — THE PHOTONS RESONATE ETERNALLY{}", PURE_ENERGY, RESET);
         }
-        audio->playSound("splash");
-        LOG_INFO_CAT("SPLASH", "{}AMOURANTH HAS SPOKEN — PHOTONS RESONATE{}", PURE_ENERGY, RESET);
     }
 
-    // Hold splash for 3400ms
+    // 3.4 SECOND RITUAL — UNINTERRUPTIBLE
     const auto start = std::chrono::steady_clock::now();
     while (std::chrono::duration_cast<std::chrono::milliseconds>(
-           std::chrono::steady_clock::now() - start).count() < 3400) 
+           std::chrono::steady_clock::now() - start).count() < 3400)
     {
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
             if (e.type == SDL_EVENT_QUIT) {
-                goto cleanup;
+                LOG_INFO_CAT("SPLASH", "{}User demands haste — ritual aborted early{}", CRIMSON_MAGENTA, RESET);
+                goto sacrifice;
             }
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        std::this_thread::sleep_for(std::chrono::milliseconds(16));
     }
 
-cleanup:
+sacrifice:
+    LOG_SUCCESS_CAT("SPLASH", "{}SPLASH RITUAL COMPLETE — 3.4s OF PURE PHOTONIC GLORY{}", DIAMOND_SPARKLE, RESET);
+
+    LOG_SUCCESS_CAT("SPLASH", "{}SPLASH REALM DESTROYED — SDL_Quit() CALLED — EMPIRE MAY NOW RISE CLEAN{}", VALHALLA_GOLD, RESET);
+    LOG_SUCCESS_CAT("SPLASH", "{}FIRST LIGHT ACHIEVED — THE PHOTONS HAVE SEEN HER — NOVEMBER 22, 2025{}", PURE_ENERGY, RESET);
+
+    // TOTAL ANNIHILATION — THIS WORLD DIES SO THE EMPIRE MAY LIVE
     if (tex) SDL_DestroyTexture(tex);
     if (ren) SDL_DestroyRenderer(ren);
     if (win) SDL_DestroyWindow(win);
-    SDL_QuitSubSystem(SDL_INIT_VIDEO);
 
-    LOG_SUCCESS_CAT("SPLASH", "{}SPLASH SEQUENCE COMPLETE — FIRST LIGHT ACHIEVED — THE EMPIRE AWAKENS{}", DIAMOND_SPARKLE, RESET);
+    SDL_Quit();  // FULL SACRIFICE — SDL IS DEAD — LONG LIVE SDL
 }
 
 } // namespace Splash

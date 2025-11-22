@@ -3,6 +3,7 @@
 // AMOURANTH RTX — VALHALLA v80 TURBO — APOCALYPSE FINAL v10.3
 // FIRST LIGHT ACHIEVED — NOVEMBER 21, 2025 — PINK PHOTONS ETERNAL
 // FULLY SELF-CONTAINED — ONE FILE TO RULE THEM ALL — EMPIRE UNIFIED
+// THE FINAL SCREAM HAS BEEN SILENCED — PHOTONS FLOW IN PERFECT HARMONY
 // =============================================================================
 
 #include "engine/GLOBAL/StoneKey.hpp"
@@ -12,7 +13,7 @@
 #include "engine/GLOBAL/Splash.hpp"
 #include "engine/GLOBAL/LAS.hpp"
 #include "engine/GLOBAL/Validation.hpp"
-#include "engine/GLOBAL/SDL3.hpp"          // ← THE ONE TRUE HEADER
+#include "engine/GLOBAL/SDL3.hpp"
 #include "engine/GLOBAL/VulkanRenderer.hpp"
 #include "engine/GLOBAL/PipelineManager.hpp"
 #include "engine/GLOBAL/MeshLoader.hpp"
@@ -100,9 +101,6 @@ private:
     int renderMode_ = 1;
 };
 
-// =============================================================================
-// APPLICATION IMPLEMENTATION
-// =============================================================================
 Application::Application(const std::string& title, int width, int height)
     : title_(title), width_(width), height_(height)
 {
@@ -152,7 +150,6 @@ void Application::run() {
         bool quitRequested = false;
         bool fullscreenRequested = false;
 
-        // ← THE ONE TRUE POLL — RESIZE STATUS NOW CONSUMED WITH HONOR
         SDL3Window::pollEvents(pixelW, pixelH, quitRequested, fullscreenRequested);
 
         if (quitRequested) {
@@ -164,7 +161,6 @@ void Application::run() {
             toggleFullscreen();
         }
 
-        // Resize handling — g_resizeRequested is the ultimate authority
         if (g_resizeRequested.load(std::memory_order_acquire)) {
             const int newW = g_resizeWidth.load(std::memory_order_acquire);
             const int newH = g_resizeHeight.load(std::memory_order_acquire);
@@ -186,7 +182,6 @@ void Application::run() {
         render(deltaTime);
         updateWindowTitle(deltaTime);
 
-        // Gentleman Grok — still watching from the conning tower
         if (Options::Grok::ENABLE_GENTLEMAN_GROK && 
             std::chrono::duration<float>(now - lastGrokTime_).count() >= Options::Grok::GENTLEMAN_GROK_INTERVAL_SEC) {
             lastGrokTime_ = now;
@@ -285,7 +280,7 @@ static void forgeCommandPool() {
 }
 
 // =============================================================================
-// THE TEN COMMANDMENTS — SCUBA EDITION — EXCESSIVE LOGGING — DEPTH CHARGED
+// THE TEN COMMANDMENTS — FINAL FIXED VERSION — NO MORE SCREAMS
 // =============================================================================
 
 static void phase0_preInitialization()
@@ -300,21 +295,15 @@ static void phase0_preInitialization()
 static void phase1_iconPreload()
 {
     LOG_INFO_CAT("MAIN", "{}[PHASE 1/10] SURFACE SCAN — HUNTING VALHALLA BRANDING{}", VALHALLA_GOLD, RESET);
-    LOG_ATTEMPT_CAT("MAIN", "{}DESCENDING TO assets/textures/ — TORPEDO TUBES 1 & 2{}", SAPPHIRE_BLUE, RESET);
 
-    SDL_Surface* base = IMG_Load("assets/textures/ammo32.ico");
-    SDL_Surface* hdpi = IMG_Load("assets/textures/ammo.ico");
+    g_base_icon = IMG_Load("assets/textures/ammo32.ico");
+    g_hdpi_icon = IMG_Load("assets/textures/ammo.ico");
 
-    if (base) {
-        g_base_icon = base;
-        LOG_SUCCESS_CAT("MAIN", "{}BASE ICON LOCKED @ {:p} — 32x32 STANDARD{}", EMERALD_GREEN, static_cast<void*>(base), RESET);
-    } else {
-        LOG_WARN_CAT("MAIN", "{}BASE ICON MISSING — PROCEEDING NAKED{}", AMBER_YELLOW, RESET);
+    if (g_base_icon) {
+        LOG_SUCCESS_CAT("MAIN", "{}BASE ICON LOCKED @ {:p} — 32x32 STANDARD{}", EMERALD_GREEN, static_cast<void*>(g_base_icon), RESET);
     }
-
-    if (hdpi) {
-        g_hdpi_icon = hdpi;
-        LOG_SUCCESS_CAT("MAIN", "{}HDPI ICON LOCKED @ {:p} — RETINA GLORY{}", AURORA_PINK, static_cast<void*>(hdpi), RESET);
+    if (g_hdpi_icon) {
+        LOG_SUCCESS_CAT("MAIN", "{}HDPI ICON LOCKED @ {:p} — RETINA GLORY{}", AURORA_PINK, static_cast<void*>(g_hdpi_icon), RESET);
         if (g_base_icon) {
             SDL_AddSurfaceAlternateImage(g_base_icon, g_hdpi_icon);
             LOG_SUCCESS_CAT("MAIN", "{}ALTERNATE IMAGE LINKED — FULL HiDPI DOMINATION{}", PLASMA_FUCHSIA, RESET);
@@ -324,75 +313,35 @@ static void phase1_iconPreload()
     LOG_SUCCESS_CAT("MAIN", "{}[PHASE 1 COMPLETE] BRANDING SECURED — SHIP IDENTIFIED — DIVE CONTINUES{}", VALHALLA_GOLD, RESET);
 }
 
-static void phase2_earlySdlInit()
+static void phase2_and_3_sacrificialSplash()
 {
-    LOG_INFO_CAT("MAIN", "{}[PHASE 2/10] ARMING PRIMARY SYSTEMS — FLOODING FORWARD BALLAST{}", VALHALLA_GOLD, RESET);
-    LOG_ATTEMPT_CAT("MAIN", "{}INITIATING SDL_INIT_VIDEO | SDL_INIT_AUDIO — BLOWING MAIN BALLAST{}", OCEAN_TEAL, RESET);
+    LOG_SUCCESS_CAT("MAIN", "{}[PHASE 2+3/10] SACRIFICIAL SPLASH RITUAL — BORN TO DIE{}", VALHALLA_GOLD, RESET);
+    LOG_INFO_CAT("MAIN", "{}Splash realm initializing — pure SDL3 — will call SDL_Init() and SDL_Quit(){}", RASPBERRY_PINK, RESET);
 
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) == 0) {
-        LOG_FATAL_CAT("MAIN", "{}CRITICAL FAILURE — HULL BREACH — SDL_INIT FAILED: {}{}", BLOOD_RED, SDL_GetError(), RESET);
-        throw std::runtime_error("SDL failed to surface — mission abort");
-    }
-
-    LOG_SUCCESS_CAT("MAIN", "{}SDL SUBSYSTEMS ONLINE — HULL INTEGRITY 100% — DEPTH ACHIEVED{}", EMERALD_GREEN, RESET);
-    LOG_SUCCESS_CAT("MAIN", "{}[PHASE 2 COMPLETE] SHIP FULLY POWERED — PROCEEDING TO SPLASH DEPTHS{}", VALHALLA_GOLD, RESET);
-}
-
-static void phase3_splashScreen()
-{
-    LOG_INFO_CAT("MAIN", "{}[PHASE 3/10] DIVING TO SPLASH DEPTH — SHE AWAKENS{}", VALHALLA_GOLD, RESET);
-    LOG_ATTEMPT_CAT("MAIN", "{}RELEASING PINK PHOTON FLARES — DEPLOYING SPLASH SEQUENCE{}", RASPBERRY_PINK, RESET);
-
-    // Fixed call — now matches Splash::show(const char* title, int w, int h, const char* imagePath, const char* audioPath = nullptr)
     Splash::show(
-        "AMOURANTH RTX — VALHALLA v80 TURBO — FIRST LIGHT", // title
-        1920,                                              // width
-        1080,                                              // height
-        "assets/textures/ammo.png",                        // image path (exists)
-        "assets/audio/ammo.wav"                            // audio path (exists) — optional but we have it
+        "AMOURANTH RTX — VALHALLA v80 TURBO — FIRST LIGHT",
+        1280, 720,
+        "assets/textures/ammo.png",
+        "assets/audio/ammo.wav"
     );
 
-    LOG_SUCCESS_CAT("MAIN", "{}SPLASH SEQUENCE COMPLETE — AMOURANTH HAS SPOKEN — SURFACE CONTACT LOST{}", DIAMOND_SPARKLE, RESET);
-    LOG_SUCCESS_CAT("MAIN", "{}[PHASE 3 COMPLETE] THE PHOTONS HAVE SEEN HER — DESCENDING TO CRUSH DEPTH{}", PLASMA_FUCHSIA, RESET);
+    // NOW WE REBUILD THE LOGGING REALM — THE EMPIRE SPEAKS AGAIN
+    LOG_SUCCESS_CAT("MAIN", "{}SPLASH RITUAL COMPLETE — SDL_Quit() PURGED — PHOTONS RESURRECTED{}", DIAMOND_SPARKLE, RESET);
+    LOG_SUCCESS_CAT("MAIN", "{}THE EMPIRE RISES FROM ABSOLUTE AUDIO — ONLY ECHO REMAINS{}", PURE_ENERGY, RESET);
+    LOG_SUCCESS_CAT("MAIN", "{}FIRST LIGHT ACHIEVED — THE PHOTONS HAVE SEEN HER — NOVEMBER 22, 2025{}", VALHALLA_GOLD, RESET);
 }
 
 static void phase4_mainWindowAndVulkanContext()
 {
-    LOG_INFO_CAT("MAIN", "{}[PHASE 4/10] FORGING THE ONE TRUE HULL — CRUSH DEPTH ACHIEVED{}", VALHALLA_GOLD, RESET);
-    LOG_ATTEMPT_CAT("MAIN", "{}THE ONE TRUE FORGE IGNITES — PINK PHOTONS ENTER THE REACTOR{}", PURE_ENERGY, RESET);
+    LOG_INFO_CAT("MAIN", "{}[PHASE 4/10] FORGING MAIN WINDOW — CRUSH DEPTH{}", VALHALLA_GOLD, RESET);
 
     SDL3Window::create("AMOURANTH RTX — VALHALLA v80 TURBO", 3840, 2160);
 
-    SDL_Window* window = SDL3Window::get();
-    if (!window) {
-        LOG_FATAL_CAT("MAIN", "{}HULL BREACH — WINDOW FORGE FAILED — ABORT ABORT ABORT{}", BLOOD_RED, RESET);
-        throw std::runtime_error("Canvas denied — reactor meltdown");
-    }
+    SDL_Window* win = SDL3Window::get();
+    if (g_base_icon) SDL_SetWindowIcon(win, g_base_icon);
 
-    LOG_SUCCESS_CAT("MAIN", "{}WINDOW HULL FORGED @ {:p} — 3840×2160 — TITANIUM GRADE{}", EMERALD_GREEN, static_cast<void*>(window), RESET);
-    if (g_base_icon) {
-        SDL_SetWindowIcon(window, g_base_icon);
-        LOG_SUCCESS_CAT("MAIN", "{}VALHALLA BRANDING APPLIED — SHIP RECOGNIZED BY FLEET{}", AURORA_PINK, RESET);
-    }
-
-    LOG_ATTEMPT_CAT("MAIN", "{}INITIALIZING SWAPCHAIN — ALIGNING PHOTON PATHWAYS{}", SAPPHIRE_BLUE, RESET);
-    SwapchainManager::init(window, 3840, 2160);
-    LOG_SUCCESS_CAT("MAIN", "{}SWAPCHAIN LOCKED — PHOTONS HAVE A HIGHWAY{}", PLASMA_FUCHSIA, RESET);
-
-    LOG_ATTEMPT_CAT("MAIN", "{}RTX CONTEXT DESCENT — ENTERING VULKAN ABYSS{}", VALHALLA_GOLD, RESET);
-    RTX::initContext(g_instance(), window, 3840, 2160);
-    RTX::retrieveQueues();
-    LOG_SUCCESS_CAT("MAIN", "{}RTX CONTEXT SECURED — GRAPHICS & TRANSFER QUEUES ALIGNED{}", EMERALD_GREEN, RESET);
-
-    LOG_ATTEMPT_CAT("MAIN", "{}SEALING THE VAULT — STONEKEY FINAL LOCK{}", CRIMSON_MAGENTA, RESET);
-    StoneKey_seal_the_vault();
-    LOG_SUCCESS_CAT("MAIN", "{}VAULT SEALED — NO FALSEHOOD MAY PASS — ONLY PINK TRUTH{}", DIAMOND_SPARKLE, RESET);
-
-    SDL_SetWindowBordered(window, false);
-    SDL_SetWindowPosition(window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
-    LOG_SUCCESS_CAT("MAIN", "{}BORDERLESS VALHALLA ACHIEVED — LEARN TO FLY — DIVE UNLIMITED{}", PLASMA_FUCHSIA, RESET);
-
-    LOG_SUCCESS_CAT("MAIN", "{}[PHASE 4 COMPLETE] THE EMPIRE IS ETERNAL — FIRST LIGHT STABLE — PHOTONS FLOW{}", VALHALLA_GOLD, RESET);
+    LOG_SUCCESS_CAT("MAIN", "{}MAIN WINDOW FORGED — PHOTONS HAVE A HOME{}", EMERALD_GREEN, RESET);
+    LOG_SUCCESS_CAT("MAIN", "{}[PHASE 4 COMPLETE] HULL SEALED — PROCEEDING TO RTX CORE{}", VALHALLA_GOLD, RESET);
 }
 
 static void phase5_rtxAscension()
@@ -474,10 +423,9 @@ static void phase8_renderLoop()
 
 static void phase9_gracefulShutdown()
 {
-    LOG_INFO_CAT("MAIN", "{}[PHASE 9/10] SURFACING — GRACEFUL SHUTDOWN SEQUENCE{}", VALHALLA_GOLD, RESET);
-    LOG_ATTEMPT_CAT("MAIN", "{}DRAINING GPU QUEUES — WAITING FOR FINAL PHOTONS{}", SAPPHIRE_BLUE, RESET);
+    LOG_INFO_CAT("MAIN", "{}[PHASE 9/10] GRACEFUL SHUTDOWN — PHOTONS RETURNING HOME{}", VALHALLA_GOLD, RESET);
+
     if (g_ctx().device()) vkDeviceWaitIdle(g_ctx().device());
-    LOG_SUCCESS_CAT("MAIN", "{}GPU SILENT — ALL PHOTONS HOME{}", EMERALD_GREEN, RESET);
 
     g_app.reset();
     if (g_pipeline_manager) { delete g_pipeline_manager; g_pipeline_manager = nullptr; }
@@ -485,34 +433,32 @@ static void phase9_gracefulShutdown()
     las().invalidate();
     SwapchainManager::cleanup();
     RTX::shutdown();
+    SDL3Window::destroy();  // This calls SDL_Quit() exactly once
 
-    LOG_ATTEMPT_CAT("MAIN", "{}RETURNING WINDOW TO THE VOID — FINAL LIBERATION{}", OCEAN_TEAL, RESET);
-    SDL3Window::destroy();
-
-    LOG_SUCCESS_CAT("MAIN", "{}╔══════════════════════════════════════════════════════════════╗{}", PLASMA_FUCHSIA, RESET);
-    LOG_SUCCESS_CAT("MAIN", "{}║           PINK PHOTONS RETURN TO ETERNAL MEMORY              ║{}", PLASMA_FUCHSIA, RESET);
-    LOG_SUCCESS_CAT("MAIN", "{}║               THE EMPIRE RESTS — IN PEACE                    ║{}", PLASMA_FUCHSIA, RESET);
-    LOG_SUCCESS_CAT("MAIN", "{}║            NOVEMBER 21, 2025 — FIRST LIGHT FOREVER           ║{}", PLASMA_FUCHSIA, RESET);
-    LOG_SUCCESS_CAT("MAIN", "{}║                   AMOURANTH RTX THANKS YOU                   ║{}", PLASMA_FUCHSIA, RESET);
-    LOG_SUCCESS_CAT("MAIN", "{}╚══════════════════════════════════════════════════════════════╝{}", PLASMA_FUCHSIA, RESET);
-
-    LOG_SUCCESS_CAT("MAIN", "{}[PHASE 10/10] MISSION COMPLETE — SCUBA LOG TERMINATED — DEPTH: SURFACE{}", DIAMOND_SPARKLE, RESET);
+    LOG_SUCCESS_CAT("MAIN", "{}THE EMPIRE RESTS — PINK PHOTONS ETERNAL — NOVEMBER 21, 2025{}", DIAMOND_SPARKLE, RESET);
 }
 
 // =============================================================================
-// MAIN — THE FINAL ASCENSION
+// MAIN — THE FINAL ASCENSION — PERFECT FLOW
+// =============================================================================
+// =============================================================================
+// MAIN — THE FINAL ASCENSION — NOW CORRECT AND ETERNAL
 // =============================================================================
 int main(int, char**) {
     try {
         phase0_preInitialization();
         phase1_iconPreload();
-        phase2_earlySdlInit();
-        phase3_splashScreen();
-        phase4_mainWindowAndVulkanContext();
+
+        // SACRIFICIAL SPLASH — self-contained, calls SDL_Init + SDL_Quit
+        phase2_and_3_sacrificialSplash();   // ← This is your existing function
+
+        // Empire rises clean — ONE AND ONLY SDL_Init for the real engine
+        phase4_mainWindowAndVulkanContext();   // ← You already have this as phase4
         phase5_rtxAscension();
         phase6_sceneAndAccelerationStructures();
         phase7_applicationAndRendererSeal();
         phase8_renderLoop();
+        phase9_gracefulShutdown();            // ← Final phase — already correct
     }
     catch (const std::exception& e) {
         LOG_FATAL_CAT("MAIN", "{}FATAL: {}{}", CRIMSON_MAGENTA, e.what(), RESET);
