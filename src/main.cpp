@@ -57,13 +57,13 @@ static void forgeCommandPool()
     poolInfo.sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
     poolInfo.flags            = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT |
                                 VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-    poolInfo.queueFamilyIndex = RTX::g_ctx().graphicsFamily();
+    poolInfo.queueFamilyIndex = g_ctx().graphicsFamily();
 
     VkCommandPool pool = VK_NULL_HANDLE;
     VK_CHECK(vkCreateCommandPool(g_ctx().device(), &poolInfo, nullptr, &pool),
              "Failed to create transient command pool");
 
-    RTX::g_ctx().commandPool_ = pool;
+    g_ctx().commandPool_ = pool;
     LOG_SUCCESS_CAT("MAIN", "{}COMMAND POOL FORGED — HANDLE: 0x{:016X}{}", PLASMA_FUCHSIA, (uint64_t)pool, RESET);
 }
 
@@ -216,7 +216,7 @@ static void phase6_sceneAndAccelerationStructures()
                  VALHALLA_GOLD, vertexBufferObf, indexBufferObf, RESET);
 
     las().buildBLAS(
-        RTX::g_ctx().commandPool_,
+        g_ctx().commandPool_,
         vertexBufferObf,
         indexBufferObf,
         static_cast<uint32_t>(g_mesh->vertices.size()),
@@ -229,7 +229,7 @@ static void phase6_sceneAndAccelerationStructures()
                     EMERALD_GREEN, las().getBLASStruct().address, RESET);
 
     LOG_INFO_CAT("MAIN", "{}BUILDING TLAS{}", VALHALLA_GOLD, RESET);
-    las().buildTLAS(RTX::g_ctx().commandPool_, {{las().getBLAS(), glm::mat4(1.0f)}});
+    las().buildTLAS(g_ctx().commandPool_, {{las().getBLAS(), glm::mat4(1.0f)}});
 
     LOG_SUCCESS_CAT("MAIN", "{}TLAS ASCENDED — ADDR 0x{:016X}{}", 
                     EMERALD_GREEN, las().getTLASAddress(), RESET);

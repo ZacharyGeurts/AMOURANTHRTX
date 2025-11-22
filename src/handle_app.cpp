@@ -78,10 +78,10 @@ void Application::run()
         if (fullscreenRequested)   toggleFullscreen();
 
         // ONLY UPDATE FROM THE DEBOUNCED RESIZE PATH — THIS IS THE ONE TRUE SOURCE
-        if (SDL3Window::g_resizeRequested.load(std::memory_order_acquire)) {
-            const int newLogicalW = SDL3Window::g_resizeWidth.load(std::memory_order_acquire);
-            const int newLogicalH = SDL3Window::g_resizeHeight.load(std::memory_order_acquire);
-            SDL3Window::g_resizeRequested.store(false, std::memory_order_release);
+        if (g_resizeRequested.load(std::memory_order_acquire)) {
+            const int newLogicalW = g_resizeWidth.load(std::memory_order_acquire);
+            const int newLogicalH = g_resizeHeight.load(std::memory_order_acquire);
+            g_resizeRequested.store(false, std::memory_order_release);
 
             width_  = newLogicalW;
             height_ = newLogicalH;

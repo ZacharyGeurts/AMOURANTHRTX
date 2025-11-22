@@ -65,13 +65,13 @@ void create(const char* title, int width, int height, Uint32 flags)
 
     flags |= SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE;
 
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) != 0) {
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) == 0) {
         LOG_FATAL_CAT("SDL3", "{}SDL_Init FAILED: {}{}", CRIMSON_MAGENTA, SDL_GetError(), RESET);
         throw std::runtime_error("SDL_Init failed");
     }
     LOG_SUCCESS_CAT("SDL3", "{}SDL3 subsystems ONLINE — B-A-N-A-N-A-S{}", EMERALD_GREEN, RESET);
 
-    if (SDL_Vulkan_LoadLibrary(nullptr) != 0) {
+    if (SDL_Vulkan_LoadLibrary(nullptr) == 0) {
         LOG_WARNING_CAT("SDL3", "{}Vulkan library already loaded or not needed{}", AMBER_YELLOW, RESET);
     } else {
         LOG_SUCCESS_CAT("SDL3", "{}Vulkan library loaded via SDL3{}", VALHALLA_GOLD, RESET);
@@ -94,7 +94,7 @@ void create(const char* title, int width, int height, Uint32 flags)
     }
 
     const char* const* sdlExts = SDL_Vulkan_GetInstanceExtensions(&extCount);
-    if (!sdlExts && extCount > 0) {
+    if ((sdlExts && extCount) == 0) {
         LOG_FATAL_CAT("VULKAN", "{}SDL returned NULL extension array{}", BLOOD_RED, RESET);
         std::abort();
     }

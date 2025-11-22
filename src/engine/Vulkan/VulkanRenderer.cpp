@@ -235,16 +235,16 @@ void VulkanRenderer::cleanup() noexcept {
     tonemapUniformEncs_.clear();
 
     // ── Shared Staging Buffer ───────────────────────────────────────────────
-    if (RTX::g_ctx().sharedStagingEnc_ != 0) {
-        RTX::UltraLowLevelBufferTracker::get().destroy(RTX::g_ctx().sharedStagingEnc_);
-        RTX::g_ctx().sharedStagingEnc_ = 0;
+    if (g_ctx().sharedStagingEnc_ != 0) {
+        RTX::UltraLowLevelBufferTracker::get().destroy(g_ctx().sharedStagingEnc_);
+        g_ctx().sharedStagingEnc_ = 0;
     }
 
     // ── PipelineManager Cleanup ─────────────────────────────────────────────
     pipelineManager_ = RTX::PipelineManager();  // Reset to dummy
 
     // ── FINAL PHASE: Command Buffers & Pool (NOW 100% SAFE) ─────────────────
-    VkCommandPool pool = RTX::g_ctx().commandPool();
+    VkCommandPool pool = g_ctx().commandPool();
     if (pool != VK_NULL_HANDLE) {
         if (!commandBuffers_.empty()) {
             vkFreeCommandBuffers(dev, pool, static_cast<uint32_t>(commandBuffers_.size()), commandBuffers_.data());
@@ -298,7 +298,7 @@ void VulkanRenderer::destroyRTOutputImages() noexcept {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Constructor — FIXED: const auto& c = RTX::g_ctx() (ref); Early PipelineManager after step 7; Default ctor for dummy
+// Constructor — FIXED: const auto& c = g_ctx() (ref); Early PipelineManager after step 7; Default ctor for dummy
 // ──────────────────────────────────────────────────────────────────────────────
 VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, bool overclockFromMain)
     : window_(window), width_(width), height_(height), overclockMode_(overclockFromMain)
@@ -418,7 +418,7 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, bool o
     createRTOutputImages();                        // HDR ray tracing output
     if (Options::RTX::ENABLE_DENOISING) createDenoiserImage();
     if (Options::RTX::ENABLE_ADAPTIVE_SAMPLING)
-        if (Options::RTX::ENABLE_ADAPTIVE_SAMPLING) createNexusScoreImage(RTX::g_ctx().commandPool(), RTX::g_ctx().graphicsQueue());
+        if (Options::RTX::ENABLE_ADAPTIVE_SAMPLING) createNexusScoreImage(g_ctx().commandPool(), g_ctx().graphicsQueue());
     createTonemapSampler();  // ← NEW: For tonemap input sampling
     LOG_SUCCESS_CAT("RENDERER", "Step 9 COMPLETE — HDR pipeline targets created");
 
@@ -438,7 +438,7 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, bool o
 
     // FIXED: Create shared staging buffer for UBO updates (missing before, caused skipped updates)
     VkDeviceSize stagingSize = 512;  // Enough for UBO + tonemap
-    RTX::g_ctx().sharedStagingEnc_ = RTX::UltraLowLevelBufferTracker::get().create(stagingSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, "SharedStagingUBO");
+    g_ctx().sharedStagingEnc_ = RTX::UltraLowLevelBufferTracker::get().create(stagingSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, "SharedStagingUBO");
 
     // =============================================================================
     // STEP 12 — Command Buffers
@@ -452,7 +452,7 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, bool o
     // =============================================================================
     LOG_TRACE_CAT("RENDERER", "=== STACK BUILD ORDER STEP 13: Ray Tracing Pipeline via PipelineManager ===");
     pipelineManager_.createRayTracingPipeline(finalShaderPaths);              // ← Uses internal loadShader, zero-init, UNUSED_KHR, etc.
-    pipelineManager_.createShaderBindingTable(RTX::g_ctx().commandPool(), RTX::g_ctx().graphicsQueue());  // ← Uses internal begin/endSingleTimeCommands, DEVICE_ADDRESS_BIT
+    pipelineManager_.createShaderBindingTable(g_ctx().commandPool(), g_ctx().graphicsQueue());  // ← Uses internal begin/endSingleTimeCommands, DEVICE_ADDRESS_BIT
     LOG_TRACE_CAT("RENDERER", "Step 13 COMPLETE — PipelineManager fully armed ({} groups, SBT @ 0x{:x})", 
                   pipelineManager_.raygenGroupCount() + pipelineManager_.missGroupCount() + pipelineManager_.hitGroupCount(), pipelineManager_.sbtAddress());
 
@@ -678,7 +678,7 @@ void VulkanRenderer::createRTOutputImages() noexcept {
     rtOutputViews_.reserve(Options::Performance::MAX_FRAMES_IN_FLIGHT);
 
     const uint32_t framesInFlight = Options::Performance::MAX_FRAMES_IN_FLIGHT;
-    const auto& ctx = RTX::g_ctx();  // ← FIXED: const ref to avoid dangling
+    const auto& ctx = g_ctx();  // ← FIXED: const ref to avoid dangling
     VkCommandPool cmdPool = ctx.commandPool();
     VkQueue queue = ctx.graphicsQueue();
 
@@ -937,7 +937,7 @@ void VulkanRenderer::createEnvironmentMap() noexcept {
     stbi_image_free(pixels);
     LOG_TRACE_CAT("RENDERER", "Envmap staging uploaded: {} bytes", imageSize);
 
-    const auto& ctx = RTX::g_ctx();  // ← FIXED: const ref
+    const auto& ctx = g_ctx();  // ← FIXED: const ref
     VkCommandPool cmdPool = ctx.commandPool();
     VkQueue queue = ctx.graphicsQueue();
 
@@ -1260,7 +1260,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     }
 
     const uint32_t frameIdx = currentFrame_ % Options::Performance::MAX_FRAMES_IN_FLIGHT;
-    const auto& ctx = RTX::g_ctx();
+    const auto& ctx = g_ctx();
 
     vkWaitForFences(g_device(), 1, &inFlightFences_[frameIdx], VK_TRUE, UINT64_MAX);
     vkResetFences(g_device(), 1, &inFlightFences_[frameIdx]);
@@ -1477,7 +1477,7 @@ void VulkanRenderer::createCommandBuffers() noexcept {
     commandBuffers_.resize(numImages);
     VkCommandBufferAllocateInfo allocInfo = {};  // Zero-init (fixes garbage)
     allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    const auto& ctx = RTX::g_ctx();  // const ref
+    const auto& ctx = g_ctx();  // const ref
     allocInfo.commandPool = ctx.commandPool();
     allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     allocInfo.commandBufferCount = static_cast<uint32_t>(commandBuffers_.size());
@@ -1691,14 +1691,14 @@ void VulkanRenderer::performTonemapPass(VkCommandBuffer cmd, uint32_t frameIdx, 
 
 void VulkanRenderer::updateUniformBuffer(uint32_t frame, const Camera& camera, float jitter) noexcept
 {
-    if (uniformBufferEncs_.empty() || RTX::g_ctx().sharedStagingEnc_ == 0) {
+    if (uniformBufferEncs_.empty() || g_ctx().sharedStagingEnc_ == 0) {
         return;
     }
 
     // NEW: After StoneKey transition, we can no longer allocate command buffers
     const bool useTransientCmd = !stonekey_active_;  // only frames 0–3
 
-    const auto& ctx = RTX::g_ctx();
+    const auto& ctx = g_ctx();
     VkCommandBuffer cmd = VK_NULL_HANDLE;
 
     // ------------------------------------------------------------------
@@ -1706,16 +1706,16 @@ void VulkanRenderer::updateUniformBuffer(uint32_t frame, const Camera& camera, f
     // ------------------------------------------------------------------
     void* data = nullptr;
     VkResult r = vkMapMemory(g_device(),
-                             BUFFER_MEMORY(RTX::g_ctx().sharedStagingEnc_),
+                             BUFFER_MEMORY(g_ctx().sharedStagingEnc_),
                              0, VK_WHOLE_SIZE, 0, &data);
 
     if (r != VK_SUCCESS || data == nullptr) {
         // recovery path unchanged — still safe
-        vkUnmapMemory(g_device(), BUFFER_MEMORY(RTX::g_ctx().sharedStagingEnc_));
+        vkUnmapMemory(g_device(), BUFFER_MEMORY(g_ctx().sharedStagingEnc_));
         VkMappedMemoryRange range{VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE, nullptr,
-                                  BUFFER_MEMORY(RTX::g_ctx().sharedStagingEnc_), 0, VK_WHOLE_SIZE};
+                                  BUFFER_MEMORY(g_ctx().sharedStagingEnc_), 0, VK_WHOLE_SIZE};
         vkInvalidateMappedMemoryRanges(g_device(), 1, &range);
-        r = vkMapMemory(g_device(), BUFFER_MEMORY(RTX::g_ctx().sharedStagingEnc_), 0, VK_WHOLE_SIZE, 0, &data);
+        r = vkMapMemory(g_device(), BUFFER_MEMORY(g_ctx().sharedStagingEnc_), 0, VK_WHOLE_SIZE, 0, &data);
         if (r != VK_SUCCESS || data == nullptr) {
             LOG_FATAL_CAT("RENDERER", "vkMapMemory failed permanently — frame {} lost", frameNumber_);
             return;
@@ -1745,7 +1745,7 @@ void VulkanRenderer::updateUniformBuffer(uint32_t frame, const Camera& camera, f
     ubo.spp       = currentSpp_;
 
     std::memcpy(data, &ubo, sizeof(ubo));
-    vkUnmapMemory(g_device(), BUFFER_MEMORY(RTX::g_ctx().sharedStagingEnc_));
+    vkUnmapMemory(g_device(), BUFFER_MEMORY(g_ctx().sharedStagingEnc_));
 
     // ------------------------------------------------------------------
     // 2. Copy staging → device-local UBO
@@ -1759,7 +1759,7 @@ void VulkanRenderer::updateUniformBuffer(uint32_t frame, const Camera& camera, f
     }
 
     if (cmd != VK_NULL_HANDLE) {
-        VkBuffer src = RTX::UltraLowLevelBufferTracker::get().getData(RTX::g_ctx().sharedStagingEnc_)->buffer;
+        VkBuffer src = RTX::UltraLowLevelBufferTracker::get().getData(g_ctx().sharedStagingEnc_)->buffer;
         VkBuffer dst = RAW_BUFFER(uniformBufferEncs_[frame]);
 
         VkBufferCopy copyRegion{};
@@ -1789,18 +1789,18 @@ void VulkanRenderer::updateUniformBuffer(uint32_t frame, const Camera& camera, f
 
 void VulkanRenderer::updateTonemapUniform(uint32_t frame) noexcept {
 
-    if (tonemapUniformEncs_.empty() || RTX::g_ctx().sharedStagingEnc_ == 0) {
+    if (tonemapUniformEncs_.empty() || g_ctx().sharedStagingEnc_ == 0) {
         return;
     }
 
     // FIXED: Explicit null-guard on staging memory Handle (post-resize ghost prevention)
-    if (BUFFER_MEMORY(RTX::g_ctx().sharedStagingEnc_) == VK_NULL_HANDLE) {
+    if (BUFFER_MEMORY(g_ctx().sharedStagingEnc_) == VK_NULL_HANDLE) {
         LOG_WARN_CAT("RENDERER", "Shared staging memory null for tonemap UBO — skipping update (recreate needed?)");
         return;
     }
 
     void* data = nullptr;
-    VkResult mapRes = vkMapMemory(g_device(), BUFFER_MEMORY(RTX::g_ctx().sharedStagingEnc_), 0, VK_WHOLE_SIZE, 0, &data);
+    VkResult mapRes = vkMapMemory(g_device(), BUFFER_MEMORY(g_ctx().sharedStagingEnc_), 0, VK_WHOLE_SIZE, 0, &data);
     if (mapRes != VK_SUCCESS || data == nullptr) {
         LOG_WARN_CAT("RENDERER", "Tonemap UBO map failed: {} or null for frame {} (OOM post-resize?) — skipping memcpy.", static_cast<int>(mapRes), frame);
         return;
@@ -1826,7 +1826,7 @@ void VulkanRenderer::updateTonemapUniform(uint32_t frame) noexcept {
     ubo.spp = currentSpp_;  // FIXED: Match your naming (from logs)
 
     std::memcpy(data, &ubo, sizeof(ubo));
-    vkUnmapMemory(g_device(), BUFFER_MEMORY(RTX::g_ctx().sharedStagingEnc_));
+    vkUnmapMemory(g_device(), BUFFER_MEMORY(g_ctx().sharedStagingEnc_));
 
     // FIXED: Guard copyCmd on valid device UBO (post-resize index/Handle poison)
     VkBuffer deviceBuf = RAW_BUFFER(tonemapUniformEncs_[frame]);
@@ -1836,13 +1836,13 @@ void VulkanRenderer::updateTonemapUniform(uint32_t frame) noexcept {
     }
 
     // FIXED: Copy staging to device UBO (similar to updateUniformBuffer)
-    const auto& ctx = RTX::g_ctx();
+    const auto& ctx = g_ctx();
     VkCommandPool cmdPool = ctx.commandPool();
     VkQueue queue = ctx.graphicsQueue();
     VkCommandBuffer copyCmd = pipelineManager_.beginSingleTimeCommands(cmdPool);
     if (copyCmd != VK_NULL_HANDLE) {
         VkBufferCopy copyRegion = {0, 0, sizeof(ubo)};
-        VkBuffer stagingBuf = RTX::UltraLowLevelBufferTracker::get().getData(RTX::g_ctx().sharedStagingEnc_)->buffer;
+        VkBuffer stagingBuf = RTX::UltraLowLevelBufferTracker::get().getData(g_ctx().sharedStagingEnc_)->buffer;
         if (stagingBuf == VK_NULL_HANDLE) {
             LOG_WARN_CAT("RENDERER", "Staging buffer null — aborting copy for frame {}", frame);
         } else {
@@ -2093,10 +2093,10 @@ bool VulkanRenderer::recreateTonemapUBOs() noexcept {
 }
 
 void VulkanRenderer::destroySharedStaging() noexcept {
-    if (RTX::g_ctx().sharedStagingEnc_ != 0) {
-        RTX::UltraLowLevelBufferTracker::get().destroy(RTX::g_ctx().sharedStagingEnc_);
+    if (g_ctx().sharedStagingEnc_ != 0) {
+        RTX::UltraLowLevelBufferTracker::get().destroy(g_ctx().sharedStagingEnc_);
         // FIXED: Reset via tracker; no pointer
-        RTX::g_ctx().sharedStagingEnc_ = 0;
+        g_ctx().sharedStagingEnc_ = 0;
         LOG_DEBUG_CAT("Renderer", "Shared staging destroyed");
     }
 }
@@ -2111,11 +2111,11 @@ bool VulkanRenderer::createSharedStaging() noexcept {
         LOG_ERROR_CAT("Renderer", "Shared staging forge FAILED");
         return false;
     }
-    RTX::g_ctx().sharedStagingEnc_ = enc;
+    g_ctx().sharedStagingEnc_ = enc;
 
     
     // FIXED: Bound via tracker
-    LOG_DEBUG_CAT("Renderer", "Shared staging recreated: enc=0x{:x}", RTX::g_ctx().sharedStagingEnc_);
+    LOG_DEBUG_CAT("Renderer", "Shared staging recreated: enc=0x{:x}", g_ctx().sharedStagingEnc_);
     return true;
 }
 
@@ -2137,12 +2137,12 @@ void VulkanRenderer::onWindowResize(uint32_t w, uint32_t h) noexcept
     // 1. NUCLEAR SHUTDOWN — STONEKEY DEMANDS TOTAL SILENCE
     // ===================================================================
     waitForAllFences();
-    vkQueueWaitIdle(RTX::g_ctx().graphicsQueue());
-    vkQueueWaitIdle(RTX::g_ctx().presentQueue());
+    vkQueueWaitIdle(g_ctx().graphicsQueue());
+    vkQueueWaitIdle(g_ctx().presentQueue());
     vkDeviceWaitIdle(g_device());
 
     // Reset the one true command pool — all command buffers are now dust
-    vkResetCommandPool(g_device(), RTX::g_ctx().commandPool(), VK_COMMAND_POOL_RESET_RELEASE_RESOURCES_BIT);
+    vkResetCommandPool(g_device(), g_ctx().commandPool(), VK_COMMAND_POOL_RESET_RELEASE_RESOURCES_BIT);
 
     width_  = static_cast<int>(w);
     height_ = static_cast<int>(h);
@@ -2176,7 +2176,7 @@ void VulkanRenderer::onWindowResize(uint32_t w, uint32_t h) noexcept
     createAccumulationImages();
     if (Options::RTX::ENABLE_DENOISING) createDenoiserImage();
     if (Options::RTX::ENABLE_ADAPTIVE_SAMPLING)
-        createNexusScoreImage(RTX::g_ctx().commandPool(), RTX::g_ctx().graphicsQueue());
+        createNexusScoreImage(g_ctx().commandPool(), g_ctx().graphicsQueue());
 
     createFramebuffers();
     commandBuffers_.clear();
@@ -2267,7 +2267,7 @@ void VulkanRenderer::createImage(RTX::Handle<VkImage>& image,
     view   = RTX::Handle<VkImageView>(rawView, g_device(), vkDestroyImageView, 0, name + "_View");
 
     // Transition to GENERAL
-    VkCommandBuffer cmd = pipelineManager_.beginSingleTimeCommands(RTX::g_ctx().commandPool());
+    VkCommandBuffer cmd = pipelineManager_.beginSingleTimeCommands(g_ctx().commandPool());
 
     VkImageMemoryBarrier barrier = {};
     barrier.sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -2281,7 +2281,7 @@ void VulkanRenderer::createImage(RTX::Handle<VkImage>& image,
         VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
         0, 0, nullptr, 0, nullptr, 1, &barrier);
 
-    pipelineManager_.endSingleTimeCommands(RTX::g_ctx().commandPool(), RTX::g_ctx().graphicsQueue(), cmd);
+    pipelineManager_.endSingleTimeCommands(g_ctx().commandPool(), g_ctx().graphicsQueue(), cmd);
 }
 
 void VulkanRenderer::createImageArray(std::vector<RTX::Handle<VkImage>>& images,

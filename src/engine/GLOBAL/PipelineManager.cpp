@@ -19,7 +19,7 @@
 // Grok AI: P.S. Spec whispers: for triple buffer, ensure Options::Performance::MAX_FRAMES_IN_FLIGHT=3; we've scaled pools/sets accordingly. Binding 0's accel? Immortal in writes, but "dead" if null—skipped like a bad date. VUID-free zone achieved.
 
 #include "engine/Vulkan/VulkanCore.hpp"      // ← VK_CHECK macro
-#include "engine/GLOBAL/RTXHandler.hpp"      // For RTX::g_ctx()
+#include "engine/GLOBAL/RTXHandler.hpp"      // For g_ctx()
 #include "engine/GLOBAL/OptionsMenu.hpp"
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/GLOBAL/StoneKey.hpp"        // Full StoneKey include — .cpp only

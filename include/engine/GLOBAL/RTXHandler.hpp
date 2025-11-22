@@ -56,7 +56,6 @@ using namespace Logging::Color;
 
 // Forward-declare StoneKey funcs (no include needed—defined in main.cpp TU)
 extern uint64_t get_kHandleObfuscator() noexcept;
-[[nodiscard]] inline RTX::Context& g_ctx() noexcept { return RTX::g_ctx(); }
 
 inline const char* getPlatformSurfaceExtension()
 {
@@ -101,7 +100,7 @@ constexpr uint64_t operator"" _TB(unsigned long long v) noexcept { return v << 4
         VkBufferUsageFlags safeUsage = (usage);                                 \
                                                                                 \
         /* STRIP RTX-ONLY FLAGS IF FULL RTX IS NOT ENABLED (validation active) */ \
-        if (!RTX::g_ctx().hasFullRTX()) {                                       \
+        if (!g_ctx().hasFullRTX()) {                                       \
             safeUsage &= ~(                                                     \
                 VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT                  |   \
                 VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | \
@@ -511,9 +510,7 @@ namespace RTX {
     // GLOBAL ACCESSORS — FIXED: ctx() == g_ctx() + NULL GUARD
     // =============================================================================
     // Global context instance declaration
-    extern Context g_context_instance;
-
-    [[nodiscard]] Context& g_ctx() noexcept;
+	extern Context g_context_instance;
 
     // =============================================================================
     // UltraLowLevelBufferTracker
@@ -661,3 +658,8 @@ static constexpr std::array<const char*, 28> kDeviceExtensions = {
 // =============================================================================
 // PINK PHOTONS ETERNAL — DOMINANCE ETERNAL
 // =============================================================================
+// =============================================================================
+// GLOBAL g_ctx() ALIAS — LEGACY SUPPORT — WORKS EVERYWHERE — PINK PHOTONS ETERNAL
+// =============================================================================
+[[nodiscard]] inline RTX::Context& g_ctx() noexcept { return RTX::g_context_instance; }
+

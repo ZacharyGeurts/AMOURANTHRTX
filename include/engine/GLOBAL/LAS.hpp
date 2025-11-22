@@ -102,7 +102,7 @@ public:
     allocInfo.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     allocInfo.commandBufferCount = 1;
 
-    VK_CHECK(vkAllocateCommandBuffers(RTX::g_ctx().device(), &allocInfo, &cmd),
+    VK_CHECK(vkAllocateCommandBuffers(g_ctx().device(), &allocInfo, &cmd),
              "Failed to allocate one-time command buffer");
 
     VkCommandBufferBeginInfo beginInfo{ .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
@@ -125,7 +125,7 @@ inline void endOneTime(VkCommandBuffer cmd, VkQueue queue, VkCommandPool pool = 
     VK_CHECK(vkQueueWaitIdle(queue), "Queue wait idle failed after one-time submit");
 
     if (pool != VK_NULL_HANDLE) {
-        vkFreeCommandBuffers(RTX::g_ctx().device(), pool, 1, &cmd);
+        vkFreeCommandBuffers(g_ctx().device(), pool, 1, &cmd);
         LOG_DEBUG_CAT("RTX", "One-time command buffer freed after sync submit");
     }
 }
@@ -145,7 +145,7 @@ static inline void endSingleTimeCommandsAsync(
 
     VK_CHECK(vkEndCommandBuffer(cmd), "Failed to end one-time command buffer");
 
-    VkDevice dev = RTX::g_ctx().device();
+    VkDevice dev = g_ctx().device();
     bool ownsFence = (fence == VK_NULL_HANDLE);
 
     if (ownsFence) {
@@ -196,7 +196,7 @@ public:
 
         LOG_INFO_CAT("LAS", "FORGING ACCELERATION CONTEXT — ENSURING ALL KHR_acceleration_structure PFNS ARE ACTIVE");
 
-        accel_ = std::make_unique<VulkanAccel>(RTX::g_ctx().device());
+        accel_ = std::make_unique<VulkanAccel>(g_ctx().device());
 
         // CRITICAL: VALIDATE THAT THE MOST IMPORTANT PFN IS NOT NULL
         if (!g_ctx().vkGetAccelerationStructureBuildSizesKHR()) {

@@ -28,7 +28,7 @@ RenderMode6::RenderMode6(VulkanRTX& rtx, uint32_t width, uint32_t height)
 
 RenderMode6::~RenderMode6()
 {
-    vkDeviceWaitIdle(RTX::g_ctx().device());
+    vkDeviceWaitIdle(g_ctx().device());
 
     rtx_.updateRTXDescriptors(0, VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,
                               VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,
@@ -39,7 +39,7 @@ RenderMode6::~RenderMode6()
 
 void RenderMode6::initResources()
 {
-    auto& ctx = RTX::g_ctx();
+    auto& ctx = g_ctx();
     VkDevice device = ctx.device();
 
     VkImageCreateInfo imgInfo{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
@@ -108,7 +108,7 @@ void RenderMode6::clearWithFrameNumber(VkCommandBuffer cmd)
 
 void RenderMode6::onResize(uint32_t width, uint32_t height)
 {
-    vkDeviceWaitIdle(RTX::g_ctx().device());
+    vkDeviceWaitIdle(g_ctx().device());
 
     rtx_.updateRTXDescriptors(0, VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,
                               VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,

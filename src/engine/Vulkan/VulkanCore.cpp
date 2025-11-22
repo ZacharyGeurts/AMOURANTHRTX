@@ -39,6 +39,9 @@
 using namespace Logging::Color;
 using namespace RTX;
 
+namespace RTX {
+}
+
 // =============================================================================
 // VulkanCore.cpp — Persistent staging globals — ONLY ONE DEFINITION
 // =============================================================================
@@ -200,21 +203,21 @@ VulkanRTX::VulkanRTX(int w, int h, RTX::PipelineManager* mgr)
     RTX::AmouranthAI::get().onPhotonDispatch(w, h);
 
     device_ = g_device();
-    LOG_DEBUG_CAT("RTX", "RTX::g_ctx().device() returned: 0x{:x}", reinterpret_cast<uintptr_t>(device_));
+    LOG_DEBUG_CAT("RTX", "g_ctx().device() returned: 0x{:x}", reinterpret_cast<uintptr_t>(device_));
     if (!device_) {
-        LOG_ERROR_CAT("RTX", "device_ is null from RTX::g_ctx().device() — THROWING runtime_error!");
+        LOG_ERROR_CAT("RTX", "device_ is null from g_ctx().device() — THROWING runtime_error!");
         throw std::runtime_error("Invalid Vulkan device");
     }
     LOG_SUCCESS_CAT("RTX", "Device fetched successfully: 0x{:x}", reinterpret_cast<uintptr_t>(device_));
 
     // -----------------------------------------------------------------
-    // LOAD ALL RT FUNCTION POINTERS FROM RTX::g_ctx()
+    // LOAD ALL RT FUNCTION POINTERS FROM g_ctx()
     // -----------------------------------------------------------------
-    LOG_TRACE_CAT("RTX", "Loading RT function pointers from RTX::g_ctx()");
-    vkGetBufferDeviceAddressKHR              = RTX::g_ctx().vkGetBufferDeviceAddressKHR();
-    vkCmdTraceRaysKHR                        = RTX::g_ctx().vkCmdTraceRaysKHR();
-    vkGetRayTracingShaderGroupHandlesKHR     = RTX::g_ctx().vkGetRayTracingShaderGroupHandlesKHR();
-    vkGetAccelerationStructureDeviceAddressKHR = RTX::g_ctx().vkGetAccelerationStructureDeviceAddressKHR();
+    LOG_TRACE_CAT("RTX", "Loading RT function pointers from g_ctx()");
+    vkGetBufferDeviceAddressKHR              = g_ctx().vkGetBufferDeviceAddressKHR();
+    vkCmdTraceRaysKHR                        = g_ctx().vkCmdTraceRaysKHR();
+    vkGetRayTracingShaderGroupHandlesKHR     = g_ctx().vkGetRayTracingShaderGroupHandlesKHR();
+    vkGetAccelerationStructureDeviceAddressKHR = g_ctx().vkGetAccelerationStructureDeviceAddressKHR();
 
     LOG_INFO_CAT("RTX", "Function pointers loaded — vkCmdTraceRaysKHR @ 0x{:x} | vkGetBufferDeviceAddressKHR @ 0x{:x} | vkGetRayTracingShaderGroupHandlesKHR @ 0x{:x} | vkGetAccelerationStructureDeviceAddressKHR @ 0x{:x}",
                  reinterpret_cast<uintptr_t>(vkCmdTraceRaysKHR),
@@ -249,7 +252,7 @@ VkCommandBuffer VulkanRTX::beginSingleTimeCommands(VkCommandPool pool) noexcept
     allocInfo.commandBufferCount = 1;
 
     VkCommandBuffer cmd;
-    VK_CHECK(vkAllocateCommandBuffers(RTX::g_ctx().device(), &allocInfo, &cmd),
+    VK_CHECK(vkAllocateCommandBuffers(g_ctx().device(), &allocInfo, &cmd),
              "Failed to allocate transient command buffer");
 
     VkCommandBufferBeginInfo beginInfo{ .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
@@ -286,7 +289,7 @@ void VulkanRTX::endSingleTimeCommands(VkCommandBuffer cmd, VkQueue queue, VkComm
     // 2. Create dedicated fence (unsignaled, non-signaled reset for reuse if needed)
     VkFence fence = VK_NULL_HANDLE;
     VkFenceCreateInfo fenceInfo{ .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, .flags = 0 };
-    VK_CHECK(vkCreateFence(RTX::g_ctx().device(), &fenceInfo, nullptr, &fence),
+    VK_CHECK(vkCreateFence(g_ctx().device(), &fenceInfo, nullptr, &fence),
              "Failed to create transient fence");
 
     // 3. Submit with fence
@@ -299,7 +302,7 @@ void VulkanRTX::endSingleTimeCommands(VkCommandBuffer cmd, VkQueue queue, VkComm
 
     // 4. Wait with timeout & error resilience — Amazing Fences: Detect & mitigate DEVICE_LOST
     const uint64_t timeout_ns = 5'000'000'000ULL;  // 5s timeout (tighter for perf, adjustable)
-    VkResult waitResult = vkWaitForFences(RTX::g_ctx().device(), 1, &fence, VK_TRUE, timeout_ns);
+    VkResult waitResult = vkWaitForFences(g_ctx().device(), 1, &fence, VK_TRUE, timeout_ns);
 
     switch (waitResult) {
         case VK_SUCCESS:
@@ -308,25 +311,25 @@ void VulkanRTX::endSingleTimeCommands(VkCommandBuffer cmd, VkQueue queue, VkComm
         case VK_TIMEOUT:
             LOG_FATAL_CAT("RTX", "Transient fence TIMED OUT after 5s — GPU potential hang");
             // Aggressive recovery: Reset fence & wait idle as last resort
-            vkResetFences(RTX::g_ctx().device(), 1, &fence);
-            vkDeviceWaitIdle(RTX::g_ctx().device());
+            vkResetFences(g_ctx().device(), 1, &fence);
+            vkDeviceWaitIdle(g_ctx().device());
             break;
         case VK_ERROR_DEVICE_LOST:  // -4: Handle imminent loss gracefully
             LOG_FATAL_CAT("RTX", "vkWaitForFences: DEVICE LOST (-4) — Triggering recovery");
             // Do NOT destroy fence here; leak-prevent but prioritize recovery
-            vkDeviceWaitIdle(RTX::g_ctx().device());  // Sync device state
+            vkDeviceWaitIdle(g_ctx().device());  // Sync device state
             // Optional: Notify app to recreate swapchain/device if recurrent
             break;
         default:
             LOG_FATAL_CAT("RTX", "vkWaitForFences unexpected error: {} ({}) — Falling back to idle",
                           static_cast<int>(waitResult), waitResult);
-            vkDeviceWaitIdle(RTX::g_ctx().device());
+            vkDeviceWaitIdle(g_ctx().device());
             break;
     }
 
     // 5. Cleanup: Destroy fence & free buffer (safe post-wait/error)
-    vkDestroyFence(RTX::g_ctx().device(), fence, nullptr);
-    vkFreeCommandBuffers(RTX::g_ctx().device(), pool, 1, &cmd);
+    vkDestroyFence(g_ctx().device(), fence, nullptr);
+    vkFreeCommandBuffers(g_ctx().device(), pool, 1, &cmd);
 
     LOG_TRACE_CAT("RTX", "endSingleTimeCommands — COMPLETE (resilient fence sync)");
 }
@@ -336,14 +339,14 @@ void VulkanRTX::endSingleTimeCommands(VkCommandBuffer cmd, VkQueue queue, VkComm
 bool VulkanRTX::pollAsyncFence(VkFence fence, uint64_t timeout_ns) noexcept {
     if (fence == VK_NULL_HANDLE) return true;  // Already done
 
-    VkResult result = vkWaitForFences(RTX::g_ctx().device(), 1, &fence, VK_TRUE, timeout_ns);
+    VkResult result = vkWaitForFences(g_ctx().device(), 1, &fence, VK_TRUE, timeout_ns);
     if (result == VK_SUCCESS) {
         return true;  // Signaled
     } else if (result == VK_TIMEOUT) {
         return false;  // Keep polling
     } else {
         LOG_ERROR_CAT("RTX", "Async fence poll error: {} — Resetting", result);
-        vkResetFences(RTX::g_ctx().device(), 1, &fence);
+        vkResetFences(g_ctx().device(), 1, &fence);
         return true;  // Treat as done, but log for debugging
     }
 }
@@ -357,14 +360,14 @@ void VulkanRTX::setRayTracingPipeline(VkPipeline p, VkPipelineLayout l) noexcept
     RTX::AmouranthAI::get().onMemoryEvent("RTPipelineLayout", sizeof(VkPipelineLayout));
 
     LOG_INFO_CAT("RTX", "HANDLE_CREATE: {} | Tag: {}", "rtPipeline", "RTPipeline");
-    rtPipeline_ = RTX::Handle<VkPipeline>(p, RTX::g_ctx().device(),
+    rtPipeline_ = RTX::Handle<VkPipeline>(p, g_ctx().device(),
         [](VkDevice d, VkPipeline pp, const VkAllocationCallbacks*) {
             LOG_TRACE_CAT("RTX", "Destroying RTPipeline: 0x{:x}", reinterpret_cast<uintptr_t>(pp));
             vkDestroyPipeline(d, pp, nullptr);
         }, 0, "RTPipeline");
 
     LOG_INFO_CAT("RTX", "HANDLE_CREATE: {} | Tag: {}", "rtPipelineLayout", "RTPipelineLayout");
-    rtPipelineLayout_ = RTX::Handle<VkPipelineLayout>(l, RTX::g_ctx().device(),
+    rtPipelineLayout_ = RTX::Handle<VkPipelineLayout>(l, g_ctx().device(),
         [](VkDevice d, VkPipelineLayout pl, const VkAllocationCallbacks*) {
             LOG_TRACE_CAT("RTX", "Destroying RTPipelineLayout: 0x{:x}", reinterpret_cast<uintptr_t>(pl));
             vkDestroyPipelineLayout(d, pl, nullptr);
@@ -430,7 +433,7 @@ void VulkanRTX::buildAccelerationStructures()
                   VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "amouranth_index_buffer");
 
     // === SAFE UPLOAD USING PERSISTENT STAGING ===
-    VkCommandBuffer cmd = beginSingleTimeCommands(RTX::g_ctx().commandPool());
+    VkCommandBuffer cmd = beginSingleTimeCommands(g_ctx().commandPool());
 
     VkDeviceSize vOffset = g_mappedOffset.fetch_add(vertices.size() * sizeof(glm::vec3) + 256, std::memory_order_relaxed);
     VkDeviceSize iOffset = g_mappedOffset.fetch_add(indices.size()  * sizeof(uint32_t)  + 256, std::memory_order_relaxed);
@@ -454,13 +457,13 @@ void VulkanRTX::buildAccelerationStructures()
         VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
         0, 1, &barrier, 0, nullptr, 0, nullptr);
 
-    endSingleTimeCommands(cmd, RTX::g_ctx().graphicsQueue(), RTX::g_ctx().commandPool());
+    endSingleTimeCommands(cmd, g_ctx().graphicsQueue(), g_ctx().commandPool());
 
     LOG_SUCCESS_CAT("RTX", "Geometry uploaded — building BLAS/TLAS via global LAS");
 
     // === BUILD VIA GLOBAL LAS — PASS OBFUSCATED HANDLES DIRECTLY ===
     las().buildBLAS(
-        RTX::g_ctx().commandPool(),
+        g_ctx().commandPool(),
         vbuf,      // ← obfuscated uint64_t — CORRECT
         ibuf,      // ← obfuscated uint64_t — CORRECT
         static_cast<uint32_t>(vertices.size()),
@@ -471,7 +474,7 @@ void VulkanRTX::buildAccelerationStructures()
     std::vector<std::pair<VkAccelerationStructureKHR, glm::mat4>> instances{
         { las().getBLAS(), glm::mat4(1.0f) }
     };
-    las().buildTLAS(RTX::g_ctx().commandPool(), instances);
+    las().buildTLAS(g_ctx().commandPool(), instances);
 
     LOG_SUCCESS_CAT("RTX",
         "{}GLOBAL_LAS ONLINE — BLAS: 0x{:016X} | TLAS: 0x{:016X} — PINK PHOTONS ETERNAL{}",
@@ -489,7 +492,7 @@ void VulkanRTX::uploadBatch(
 {
     if (batch.empty()) return;
 
-    VkDevice dev = RTX::g_ctx().device();
+    VkDevice dev = g_ctx().device();
     VkDeviceSize totalSize = 0;
     for (const auto& [src, size, dst, name] : batch)
         if (src && size > 0) totalSize += size;
@@ -686,7 +689,7 @@ void VulkanRTX::initDescriptorPoolAndSets() {
 void VulkanRTX::initShaderBindingTable(VkPhysicalDevice pd) {
     LOG_TRACE_CAT("RTX", "initShaderBindingTable — START — pd=0x{:x}", reinterpret_cast<uintptr_t>(pd));
     const uint32_t groupCount = 25;
-    const auto& props = RTX::g_ctx().rayTracingProps();
+    const auto& props = g_ctx().rayTracingProps();
     const VkDeviceSize handleSize = props.shaderGroupHandleSize;
     const VkDeviceSize baseAlignment = props.shaderGroupBaseAlignment;
     const VkDeviceSize alignedSize = alignUp(handleSize, baseAlignment);
@@ -721,7 +724,7 @@ void VulkanRTX::initShaderBindingTable(VkPhysicalDevice pd) {
 
     std::vector<uint8_t> handles(groupCount * handleSize);
     LOG_TRACE_CAT("RTX", "Fetching {} shader group handles", groupCount);
-    VK_CHECK(RTX::g_ctx().vkGetRayTracingShaderGroupHandlesKHR()(device_,
+    VK_CHECK(g_ctx().vkGetRayTracingShaderGroupHandlesKHR()(device_,
                                                             HANDLE_GET(rtPipeline_),
                                                             0, groupCount,
                                                             handles.size(), handles.data()),
@@ -808,7 +811,7 @@ void VulkanRTX::initBlackFallbackImage() {
                   memReqs.size, memReqs.alignment, memReqs.memoryTypeBits);
 
     uint32_t memType = RTX::UltraLowLevelBufferTracker::findMemoryType(
-        RTX::g_ctx().physicalDevice(), memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        g_ctx().physicalDevice(), memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
     if (memType == UINT32_MAX) {
         LOG_FATAL_CAT("RTX", "No suitable memory type for black fallback image");
         BUFFER_DESTROY(staging);
@@ -832,7 +835,7 @@ void VulkanRTX::initBlackFallbackImage() {
     blackFallbackMemory_.size = memReqs.size;
 
     // --- COPY STAGING → IMAGE (async variant for speed) ---
-    VkCommandBuffer cmd = beginSingleTimeCommands(RTX::g_ctx().commandPool());
+    VkCommandBuffer cmd = beginSingleTimeCommands(g_ctx().commandPool());
     LOG_DEBUG_CAT("RTX", "One-time cmd for black image upload: 0x{:x}", reinterpret_cast<uintptr_t>(cmd));
 
     // Transition: UNDEFINED → TRANSFER_DST
@@ -869,7 +872,7 @@ void VulkanRTX::initBlackFallbackImage() {
     vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
                          0, 0, nullptr, 0, nullptr, 1, &barrier);
 
-    endSingleTimeCommandsAsync(cmd, RTX::g_ctx().graphicsQueue(), RTX::g_ctx().commandPool());  // Async for speed
+    endSingleTimeCommandsAsync(cmd, g_ctx().graphicsQueue(), g_ctx().commandPool());  // Async for speed
 
     // --- CLEANUP STAGING ---
     BUFFER_DESTROY(staging);
@@ -997,7 +1000,7 @@ void VulkanRTX::updateRTXDescriptors(uint32_t frameIdx,
             VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, envSampler);
 
     // === Blue noise ===
-    VkImageView blueNoise = RTX::g_ctx().blueNoiseView_.valid() ? RTX::g_ctx().blueNoiseView_.get() : HANDLE_GET(blackFallbackView_);
+    VkImageView blueNoise = g_ctx().blueNoiseView_.valid() ? g_ctx().blueNoiseView_.get() : HANDLE_GET(blackFallbackView_);
     bindImg(Bindings::RTX::BLUE_NOISE, blueNoise, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE);
 
     // === Reserved ===
@@ -1040,7 +1043,7 @@ void VulkanRTX::recordRayTrace(VkCommandBuffer cmd, VkExtent2D extent,
     LOG_DEBUG_CAT("RTX", "Descriptor sets bound for frame {}", 0);
 
     LOG_TRACE_CAT("RTX", "Dispatching vkCmdTraceRaysKHR — — extent: {}x{}", extent.width, extent.height);
-    RTX::g_ctx().vkCmdTraceRaysKHR()(cmd, &sbt_.raygen, &sbt_.miss, &sbt_.hit, &sbt_.callable,
+    g_ctx().vkCmdTraceRaysKHR()(cmd, &sbt_.raygen, &sbt_.miss, &sbt_.hit, &sbt_.callable,
                                      extent.width, extent.height, 1);
     LOG_DEBUG_CAT("RTX", "Ray trace dispatched successfully");
 

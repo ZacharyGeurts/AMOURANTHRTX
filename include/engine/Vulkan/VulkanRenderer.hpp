@@ -121,11 +121,11 @@ public:
     void setRenderMode(int mode) noexcept;
     void cleanup() noexcept;
 
-    [[nodiscard]] VkDevice         device()          const noexcept { return RTX::g_ctx().device(); }
-    [[nodiscard]] VkPhysicalDevice physicalDevice()  const noexcept { return RTX::g_ctx().physicalDevice(); }
-    [[nodiscard]] VkCommandPool    commandPool()     const noexcept { return RTX::g_ctx().commandPool(); }
-    [[nodiscard]] VkQueue          graphicsQueue()   const noexcept { return RTX::g_ctx().graphicsQueue(); }
-    [[nodiscard]] VkQueue          presentQueue()    const noexcept { return RTX::g_ctx().presentQueue(); }
+    [[nodiscard]] VkDevice         device()          const noexcept { return g_ctx().device(); }
+    [[nodiscard]] VkPhysicalDevice physicalDevice()  const noexcept { return g_ctx().physicalDevice(); }
+    [[nodiscard]] VkCommandPool    commandPool()     const noexcept { return g_ctx().commandPool(); }
+    [[nodiscard]] VkQueue          graphicsQueue()   const noexcept { return g_ctx().graphicsQueue(); }
+    [[nodiscard]] VkQueue          presentQueue()    const noexcept { return g_ctx().presentQueue(); }
 
     [[nodiscard]] int              width()           const noexcept { return width_; }
     [[nodiscard]] int              height()          const noexcept { return height_; }

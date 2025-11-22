@@ -94,12 +94,12 @@ static void uploadBuffer(const void* data, VkDeviceSize size, VkBufferUsageFlags
     LOG_INFO_CAT("MeshLoader", "Copying staging → final: 0x{:016X} → 0x{:016X}", staging, outHandle);
 
     // NOW USING beginOneTime / endSingleTimeCommandsAsync FROM LAS.hpp
-    VkCommandBuffer cmd = beginOneTime(RTX::g_ctx().commandPool_);
+    VkCommandBuffer cmd = beginOneTime(g_ctx().commandPool_);
 
     VkBufferCopy copy{ .size = size };
     vkCmdCopyBuffer(cmd, RAW_BUFFER(staging), RAW_BUFFER(outHandle), 1, &copy);
 
-    endSingleTimeCommandsAsync(cmd, RTX::g_ctx().graphicsQueue_, RTX::g_ctx().commandPool_);
+    endSingleTimeCommandsAsync(cmd, g_ctx().graphicsQueue_, g_ctx().commandPool_);
 
     BUFFER_DESTROY(staging);
 
