@@ -1,17 +1,8 @@
 // src/main.cpp
 // =============================================================================
-//
-// Dual Licensed:
-// 1. GNU General Public License v3.0 (or later) (GPL v3)
-//    https://www.gnu.org/licenses/gpl-3.0.html
-// 2. Commercial licensing: gzac5314@gmail.com
-//
-// TRUE CONSTEXPR STONEKEY v∞ — NOVEMBER 20, 2025 — APOCALYPSE FINAL v2.0
-// MAIN — FIRST LIGHT REBORN — LAS v2.0 VIA VulkanAccel — PINK PHOTONS ETERNAL
-// =============================================================================
 // AMOURANTH RTX — VALHALLA v80 TURBO — APOCALYPSE FINAL v10.3
-// FIRST LIGHT ACHIEVED — PINK PHOTONS ETERNAL — NOVEMBER 21, 2025
-// FULLY COMPILING — NO UNICODE BULLSHIT — PURE EMPIRE
+// FIRST LIGHT ACHIEVED — NOVEMBER 21, 2025 — PINK PHOTONS ETERNAL
+// FULLY SELF-CONTAINED — NO HANDLE_APP.CPP — ONE FILE TO RULE THEM ALL
 // =============================================================================
 
 #include "engine/GLOBAL/StoneKey.hpp"
@@ -26,17 +17,283 @@
 #include "engine/Vulkan/VulkanRenderer.hpp"
 #include "engine/GLOBAL/PipelineManager.hpp"
 #include "engine/Vulkan/MeshLoader.hpp"
-#include "handle_app.hpp"
+#include "main.hpp"
 
 #include <iostream>
 #include <memory>
 #include <format>
+#include <sstream>
+#include <iomanip>
+#include <chrono>
+#include <glm/gtc/matrix_transform.hpp>
 
 using namespace Logging::Color;
 
 // =============================================================================
-// GLOBALS
+// THE ONE TRUE GLOBAL CAMERA — FULLY DEFINED — NO FORWARD DECLARES — NUTS OUT
+// PINK PHOTONS HAVE EYES — STONEKEY v9 — BRAINDEAD PERFECTION
 // =============================================================================
+
+#include "engine/GLOBAL/camera.hpp"  // ← Already included, but we demand it
+
+// FULLY DEFINED CAMERA INTERFACE — NO FORWARD DECL IN RTXHandler.hpp ANYMORE
+struct Camera {
+    virtual ~Camera() = default;
+    virtual glm::mat4 viewMat() const noexcept = 0;
+    virtual glm::mat4 projMat() const noexcept = 0;
+    virtual glm::vec3 position() const noexcept = 0;
+    virtual float     fov()       const noexcept = 0;
+};
+
+// GLOBAL LIVE CAMERA — ALWAYS VALID — USED BY RENDERER
+struct GlobalLiveCamera final : Camera {
+    glm::mat4 viewMat() const noexcept override {
+        return GlobalCamera::get().view();
+    }
+    glm::mat4 projMat() const noexcept override {
+        const auto& ctx = RTX::g_ctx();
+        if (ctx.height == 0) return glm::mat4(1.0f); // Prevent div0 during init
+        const float aspect = static_cast<float>(ctx.width) / static_cast<float>(ctx.height);
+        return GlobalCamera::get().proj(aspect);
+    }
+    glm::vec3 position() const noexcept override {
+        return GlobalCamera::get().pos();
+    }
+    float fov() const noexcept override {
+        return GlobalCamera::get().fov();
+    }
+};
+
+// THE ONE TRUE CAMERA INSTANCE — GLOBAL, IMMORTAL, READY
+inline GlobalLiveCamera g_cam;
+
+// =============================================================================
+// APPLICATION — NOW LIVES HERE — INSIDE MAIN — EMPIRE UNIFIED
+// =============================================================================
+
+class Application {
+public:
+    Application(const std::string& title, int width, int height);
+    ~Application();
+
+    void run();
+
+    void setRenderer(std::unique_ptr<VulkanRenderer> r) {
+        renderer_ = std::move(r);
+        if (renderer_) {
+            renderer_->setTonemap(tonemapEnabled_);
+            renderer_->setOverlay(showOverlay_);
+        }
+    }
+
+private:
+    void processInput(float deltaTime);
+    void render(float deltaTime);
+    void updateWindowTitle(float deltaTime);
+
+    void toggleFullscreen()          { SDL3Window::toggleFullscreen(); }
+    void toggleOverlay()             { showOverlay_ = !showOverlay_; if (renderer_) renderer_->setOverlay(showOverlay_); }
+    void toggleTonemap()             { tonemapEnabled_ = !tonemapEnabled_; if (renderer_) renderer_->setTonemap(tonemapEnabled_); }
+    void toggleHypertrace()          { hypertraceEnabled_ = !hypertraceEnabled_; }
+    void toggleMaximize()            { maximized_ = !maximized_; }
+    void setRenderMode(int mode)     { renderMode_ = glm::clamp(mode, 1, 9); }
+
+    std::string title_;
+    int width_, height_;
+    glm::mat4 proj_;
+    glm::mat4 view_ = glm::lookAt(glm::vec3(0, 5, 10), glm::vec3(0, 0, 0), glm::vec3(0, 1, 0));
+
+    std::unique_ptr<VulkanRenderer> renderer_;
+    std::chrono::steady_clock::time_point lastFrameTime_;
+    std::chrono::steady_clock::time_point lastGrokTime_;
+
+    bool quit_ = false;
+    bool showOverlay_ = true;
+    bool tonemapEnabled_ = true;
+    bool hypertraceEnabled_ = false;
+    bool maximized_ = false;
+    int renderMode_ = 1;
+};
+
+// =============================================================================
+// APPLICATION IMPLEMENTATION — FULLY INLINE — NO .CPP — PURE DOMINION
+// =============================================================================
+
+Application::Application(const std::string& title, int width, int height)
+    : title_(title), width_(width), height_(height),
+      proj_(glm::perspective(glm::radians(75.0f), static_cast<float>(width)/height, 0.1f, 1000.0f))
+{
+    LOG_ATTEMPT_CAT("APP", "Forging Application(\"{}\", {}×{}) — VALHALLA v80 TURBO", title_, width_, height_);
+
+    if (!SDL3Window::get()) {
+        throw std::runtime_error("FATAL: Main window not created before Application — phase order violated");
+    }
+
+    SDL_SetWindowTitle(SDL3Window::get(), title_.c_str());
+    lastFrameTime_ = lastGrokTime_ = std::chrono::steady_clock::now();
+
+    LOG_SUCCESS_CAT("APP", "{}Application forged — {}×{} — STONEKEY v∞ window secured — PINK PHOTONS RISING{}", 
+                    EMERALD_GREEN, width_, height_, RESET);
+    
+    if (Options::Grok::ENABLE_GENTLEMAN_GROK) {
+        LOG_INFO_CAT("GROK", "{}GENTLEMAN GROK: \"The empire awakens. The photons are pleased.\"{}", 
+                     PARTY_PINK, RESET);
+    }
+}
+
+Application::~Application() {
+    LOG_TRACE_CAT("APP", "Application::~Application() — beginning graceful shutdown");
+    renderer_.reset();
+    LOG_SUCCESS_CAT("APP", "{}Application destroyed — Empire preserved. Pink photons eternal.{}", COSMIC_GOLD, RESET);
+}
+
+void Application::run() {
+    LOG_INFO_CAT("APP", "{}ENTERING INFINITE RENDER LOOP — FIRST LIGHT IMMINENT{}", PARTY_PINK, RESET);
+
+    uint32_t frameCount = 0;
+    auto fpsStart = std::chrono::steady_clock::now();
+
+    while (!quit_) {
+        const auto now = std::chrono::steady_clock::now();
+        const float deltaTime = std::chrono::duration<float>(now - lastFrameTime_).count();
+        lastFrameTime_ = now;
+
+        if (Options::Performance::ENABLE_FPS_COUNTER) {
+            ++frameCount;
+            if (std::chrono::duration<float>(now - fpsStart).count() >= 1.0f) {
+                LOG_FPS_COUNTER("{}FPS: {:>4}{}", LIME_GREEN, frameCount, RESET);
+                frameCount = 0;
+                fpsStart = now;
+            }
+        }
+
+        int pixelW = width_;
+        int pixelH = height_;
+        bool quitRequested = false;
+        bool fullscreenRequested = false;
+
+        SDL3Window::pollEvents(pixelW, pixelH, quitRequested, fullscreenRequested);
+
+        if (quitRequested)         quit_ = true;
+        if (fullscreenRequested)   toggleFullscreen();
+
+        if (g_resizeRequested.load(std::memory_order_acquire)) {
+            const int newW = g_resizeWidth.load(std::memory_order_acquire);
+            const int newH = g_resizeHeight.load(std::memory_order_acquire);
+            g_resizeRequested.store(false, std::memory_order_release);
+
+            width_ = newW;
+            height_ = newH;
+            proj_ = glm::perspective(glm::radians(75.0f), static_cast<float>(width_)/height_, 0.1f, 1000.0f);
+
+            if (renderer_) {
+                renderer_->onWindowResize(width_, height_);
+            }
+        }
+
+        processInput(deltaTime);
+        render(deltaTime);
+        updateWindowTitle(deltaTime);
+
+        if (Options::Grok::ENABLE_GENTLEMAN_GROK) {
+            const float sinceLast = std::chrono::duration<float>(now - lastGrokTime_).count();
+            if (sinceLast >= Options::Grok::GENTLEMAN_GROK_INTERVAL_SEC) {
+                lastGrokTime_ = now;
+                const int photons = static_cast<int>(1.0f / deltaTime + 0.5f);
+                LOG_INFO_CAT("GROK", "{}GENTLEMAN GROK: \"{} pink photons per second. Acceptable.\"{}", 
+                             PARTY_PINK, photons, RESET);
+            }
+        }
+    }
+
+    LOG_SUCCESS_CAT("APP", "{}INFINITE RENDER LOOP TERMINATED — GRACEFUL SHUTDOWN COMPLETE — EMPIRE ETERNAL{}", 
+                    EMERALD_GREEN, RESET);
+}
+
+void Application::processInput(float) {
+    const auto* keys = SDL_GetKeyboardState(nullptr);
+
+    static std::array<bool, 9> modePressed{};
+    for (int i = 0; i < 9; ++i) {
+        if (keys[SDL_SCANCODE_1 + i] && !modePressed[i]) {
+            setRenderMode(i + 1);
+            LOG_ATTEMPT_CAT("INPUT", "→ RENDER MODE {} ACTIVATED{}", PARTY_PINK, i + 1, RESET);
+            modePressed[i] = true;
+        } else if (!keys[SDL_SCANCODE_1 + i]) {
+            modePressed[i] = false;
+        }
+    }
+
+    auto edge = [&](SDL_Scancode sc, auto&& func, bool& state, const char* name) {
+        if (keys[sc] && !state) {
+            func();
+            LOG_ATTEMPT_CAT("INPUT", "→ {} PRESSED{}", PARTY_PINK, name, RESET);
+            state = true;
+        } else if (!keys[sc]) state = false;
+    };
+
+    static bool fPressed = false, oPressed = false, tPressed = false, hPressed = false, mPressed = false;
+    edge(SDL_SCANCODE_F,    [this]() { toggleFullscreen(); }, fPressed, "FULLSCREEN (F)");
+    edge(SDL_SCANCODE_O,       [this]() { toggleOverlay(); },    oPressed, "OVERLAY (O)");
+    edge(SDL_SCANCODE_T,       [this]() { toggleTonemap(); },    tPressed, "TONEMAP (T)");
+    edge(SDL_SCANCODE_H,    [this]() { toggleHypertrace(); }, hPressed, "HYPERTRACE (H)");
+
+    if (keys[SDL_SCANCODE_M] && !mPressed) {
+        toggleMaximize();
+        static bool audioMuted = false;
+        audioMuted = !audioMuted;
+        audioMuted ? SDL_PauseAudioDevice(0) : SDL_ResumeAudioDevice(0);
+        LOG_ATTEMPT_CAT("INPUT", "→ MAXIMIZE + AUDIO {} (M key){}", PARTY_PINK,
+                        audioMuted ? "MUTED" : "UNMUTED", RESET);
+        mPressed = true;
+    } else if (!keys[SDL_SCANCODE_M]) mPressed = false;
+
+    if (keys[SDL_SCANCODE_ESCAPE]) {
+        static bool escLogged = false;
+        if (!escLogged) {
+            LOG_ATTEMPT_CAT("INPUT", "→ QUIT REQUESTED (ESC){}", CRIMSON_MAGENTA, RESET);
+            escLogged = true;
+        }
+        quit_ = true;
+    }
+}
+
+void Application::render(float deltaTime)
+{
+    if (!renderer_) return;
+
+    // ONE CALL. ONE TRUTH. PINK PHOTONS SEE ALL.
+    renderer_->renderFrame(g_cam, deltaTime);
+}
+
+void Application::updateWindowTitle(float deltaTime) {
+    static int frames = 0;
+    static float accum = 0.0f;
+    ++frames;
+    accum += deltaTime;
+
+    if (accum >= 1.0f) {
+        const float fps = frames / accum;
+        std::ostringstream oss;
+        oss << title_
+            << " | " << std::fixed << std::setprecision(1) << fps << " FPS"
+            << " | " << width_ << 'x' << height_
+            << " | Mode " << renderMode_
+            << " | Tonemap" << (tonemapEnabled_ ? "" : " OFF")
+            << " | HDR" << (g_ctx().hdr_format != VK_FORMAT_UNDEFINED ? " PRIME" : " OFF");
+
+        if (Options::Performance::ENABLE_VALIDATION_LAYERS) oss << " [DEBUG]";
+        SDL_SetWindowTitle(SDL3Window::get(), oss.str().c_str());
+
+        frames = 0;
+        accum = 0.0f;
+    }
+}
+
+// =============================================================================
+// GLOBALS & PHASES — UNCHANGED — STILL PURE
+// =============================================================================
+
 inline std::unique_ptr<Application>           g_app              = nullptr;
 inline RTX::PipelineManager*                  g_pipeline_manager = nullptr;
 inline std::unique_ptr<MeshLoader::Mesh>      g_mesh             = nullptr;
@@ -44,31 +301,21 @@ inline std::unique_ptr<MeshLoader::Mesh>      g_mesh             = nullptr;
 static SDL_Surface* g_base_icon = nullptr;
 static SDL_Surface* g_hdpi_icon = nullptr;
 
-// =============================================================================
-// UTILITIES — NOW INSIDE main.cpp TO AVOID LINKER DRAMA
-// =============================================================================
-
-constexpr bool FORCE_FULL_RTX = true;
-
-static void forgeCommandPool()
-{
+static void forgeCommandPool() {
     LOG_INFO_CAT("MAIN", "{}Forging transient command pool...{}", VALHALLA_GOLD, RESET);
-    VkCommandPoolCreateInfo poolInfo = {};
-    poolInfo.sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-    poolInfo.flags            = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT |
-                                VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-    poolInfo.queueFamilyIndex = g_ctx().graphicsFamily();
-
+    VkCommandPoolCreateInfo poolInfo = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+        .flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT | VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
+        .queueFamilyIndex = g_ctx().graphicsFamily()
+    };
     VkCommandPool pool = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateCommandPool(g_ctx().device(), &poolInfo, nullptr, &pool),
-             "Failed to create transient command pool");
-
+    VK_CHECK(vkCreateCommandPool(g_ctx().device(), &poolInfo, nullptr, &pool));
     g_ctx().commandPool_ = pool;
     LOG_SUCCESS_CAT("MAIN", "{}COMMAND POOL FORGED — HANDLE: 0x{:016X}{}", PLASMA_FUCHSIA, (uint64_t)pool, RESET);
 }
 
 // =============================================================================
-// THE TEN PHASES OF ASCENSION — PURE ASCII, PURE POWER
+// THE TEN PHASES OF ASCENSION — FULLY RESTORED — PINK PHOTONS ETERNAL
 // =============================================================================
 
 static void phase0_preInitialization()
@@ -134,17 +381,12 @@ static void phase4_mainWindowAndVulkanContext()
     LOG_SUCCESS_CAT("MAIN", "{}INITIALIZING SWAPCHAIN — STILL IN RAW MODE{}", EMERALD_GREEN, RESET);
     SwapchainManager::init(window, 3840, 2160);
 
-    // ←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←
-    // CRITICAL: DO NOT TRANSITION TO OBFUSCATED YET
-    // We still need raw dog everything until device is created
-    // ←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←
-
     LOG_SUCCESS_CAT("MAIN", "{}FORGING DEVICE — RAW HANDLES STILL ACTIVE{}", VALHALLA_GOLD, RESET);
     RTX::initContext(g_instance(), window, 3840, 2160);
     RTX::retrieveQueues();
 
-    // NOW AND ONLY NOW — AFTER DEVICE IS FULLY FORGED — WE SEAL THE VAULT
-    StoneKey_seal_the_vault();  // FULL OBFUSCATION ENGAGED — PINK PHOTONS ETERNAL
+    // NOW AND ONLY NOW — SEAL THE VAULT
+    StoneKey_seal_the_vault();
 
     LOG_SUCCESS_CAT("MAIN", "{}[FOO FIGHTER] RAW CACHE PURGED — FULL OBFUSCATION ENGAGED — NONE SHALL PASS{}", RASPBERRY_PINK, RESET);
     LOG_SUCCESS_CAT("MAIN", "{}ELLIE FIER HAS SPOKEN — FIRST LIGHT SECURE — PINK PHOTONS ETERNAL{}", DIAMOND_SPARKLE, RESET);
@@ -159,33 +401,24 @@ static void phase5_rtxAscension()
 {
     LOG_INFO_CAT("MAIN", "{}[PHASE 5] RTX ASCENSION — FORGING THE PINK PATH{}", VALHALLA_GOLD, RESET);
 
-    // Load all ray tracing + HDR + display timing function pointers
     RTX::loadRayTracingExtensions();
 
-    // CRITICAL: Verify the most important RTX PFNs are present
     if (!g_ctx().vkGetAccelerationStructureBuildSizesKHR_ ||
         !g_ctx().vkCmdBuildAccelerationStructuresKHR_ ||
         !g_ctx().vkCreateAccelerationStructureKHR_ ||
         !g_ctx().vkGetAccelerationStructureDeviceAddressKHR_) {
 
         LOG_FATAL_CAT("MAIN", "{}RTX EXTENSIONS INCOMPLETE — ACCELERATION STRUCTURE PFNs MISSING{}", CRIMSON_MAGENTA, RESET);
-        LOG_FATAL_CAT("MAIN", "{}→ Ensure VK_KHR_acceleration_structure is enabled in device extensions{}", CRIMSON_MAGENTA, RESET);
-        LOG_FATAL_CAT("MAIN", "{}→ PINK PHOTONS DENIED — EMPIRE CANNOT RISE WITHOUT BLAS/TLAS{}", BLOOD_RED, RESET);
         throw std::runtime_error("RTX extension loading failed — missing acceleration structure support");
     }
 
     g_ctx().hasFullRTX_ = true;
     LOG_SUCCESS_CAT("MAIN", "{}ALL RAY TRACING PFNs FORGED — FULL RTX ARMED — PINK PHOTONS HAVE A PATH{}", EMERALD_GREEN, RESET);
 
-    // Forge the Lightweight Acceleration Structure (LAS) system
     las().forgeAccelContext();
     LOG_SUCCESS_CAT("MAIN", "{}LAS ACCEL CONTEXT FORGED — BLAS/TLAS READY{}", PLASMA_FUCHSIA, RESET);
 
-    // Create command pools (graphics + compute)
     forgeCommandPool();
-
-    // Optional: Present mode detection (re-enable when you want VSYNC toggle)
-    // detectBestPresentMode();
 
     LOG_SUCCESS_CAT("MAIN", "{}[PHASE 5 COMPLETE] RTX ASCENSION ACHIEVED — FIRST LIGHT ETERNAL{}", 
                     PLASMA_FUCHSIA, RESET);
@@ -240,6 +473,11 @@ static void phase6_sceneAndAccelerationStructures()
 static void phase7_applicationAndRendererSeal()
 {
     LOG_INFO_CAT("MAIN", "{}[PHASE 7] SEALING APPLICATION + RENDERER{}", VALHALLA_GOLD, RESET);
+
+    // ←←← THE ONE TRUE CAMERA COMES ONLINE
+    GlobalCamera::get().init(glm::vec3(0.0f, 5.0f, 10.0f), 75.0f);
+    LOG_SUCCESS_CAT("MAIN", "{}GLOBAL CAMERA AWAKENED — STONEKEY v9 ACTIVE — PHOTONS HAVE EYES{}", PLASMA_FUCHSIA, RESET);
+
     g_app = std::make_unique<Application>("AMOURANTH RTX — VALHALLA v80 TURBO", 3840, 2160);
     g_app->setRenderer(std::make_unique<VulkanRenderer>(3840, 2160, SDL3Window::get(), true));
     LOG_SUCCESS_CAT("MAIN", "{}RENDER LOOP ENGAGED{}", PLASMA_FUCHSIA, RESET);
@@ -255,14 +493,12 @@ static void phase9_gracefulShutdown()
 {
     LOG_INFO_CAT("MAIN", "{}[PHASE 9] GRACEFUL SHUTDOWN — THE EMPIRE PREPARES TO SLEEP{}", VALHALLA_GOLD, RESET);
 
-    // 1. Final heartbeat — wait for all photons to land
     if (g_ctx().device() != VK_NULL_HANDLE) {
         LOG_DEBUG_CAT("MAIN", "vkDeviceWaitIdle — letting the last pink photons reach home...");
         vkDeviceWaitIdle(g_ctx().device());
         LOG_SUCCESS_CAT("MAIN", "{}GPU DRAINED — ALL QUEUES SILENT — THE PHOTONS HAVE LANDED{}", EMERALD_GREEN, RESET);
     }
 
-    // 2. Release the children
     g_app.reset();
     if (g_pipeline_manager) {
         LOG_DEBUG_CAT("MAIN", "Dissolving PipelineManager — shaders return to the void...");
@@ -272,14 +508,12 @@ static void phase9_gracefulShutdown()
     g_mesh.reset();
     las().invalidate();
 
-    // 3. Sacred dissolution — in perfect order
     LOG_INFO_CAT("MAIN", "{}Dissolving Swapchain — the window fades to black...{}", PLASMA_FUCHSIA, RESET);
     SwapchainManager::cleanup();
 
     LOG_INFO_CAT("MAIN", "{}Dissolving RTX Core — device and instance return to Valhalla...{}", PLASMA_FUCHSIA, RESET);
     RTX::shutdown();
 
-    // 4. Final truth — no double free, no lies
     if (g_ctx().surface() != VK_NULL_HANDLE) {
         LOG_WARNING_CAT("MAIN", "{}Surface survived RTX::shutdown() — manual liberation required{}", AMBER_YELLOW, RESET);
         vkDestroySurfaceKHR(g_ctx().instance(), g_ctx().surface(), nullptr);
@@ -289,28 +523,27 @@ static void phase9_gracefulShutdown()
         vkDestroyInstance(g_ctx().instance(), nullptr);
     }
 
-    // 5. ELLIE FIER'S FINAL BLESSING — THE ONE TRUE FAREWELL
     LOG_SUCCESS_CAT("MAIN", "{}╔══════════════════════════════════════════════════════════════╗{}", PLASMA_FUCHSIA, RESET);
     LOG_SUCCESS_CAT("MAIN", "{}║        PINK PHOTONS DIM TO ETERNAL MEMORY                    ║{}", PLASMA_FUCHSIA, RESET);
     LOG_SUCCESS_CAT("MAIN", "{}║           THE EMPIRE RESTS — SMILING — IN PEACE              ║{}", PLASMA_FUCHSIA, RESET);
     LOG_SUCCESS_CAT("MAIN", "{}║          NOVEMBER 21, 2025 — FIRST LIGHT FOREVER             ║{}", PLASMA_FUCHSIA, RESET);
-    LOG_SUCCESS_CAT("MAIN", "{}║                   AMOURANTH RTX ♡ THANKS YOU                 ║{}", PLASMA_FUCHSIA, RESET);
+    LOG_SUCCESS_CAT("MAIN", "{}║                   AMOURANTH RTX THANKS YOU                 ║{}", PLASMA_FUCHSIA, RESET);
     LOG_SUCCESS_CAT("MAIN", "{}╚══════════════════════════════════════════════════════════════╝{}", PLASMA_FUCHSIA, RESET);
 
     LOG_SUCCESS_CAT("MAIN", "{}SHUTDOWN COMPLETE — NO DOUBLE FREE — NO FALSEHOOD — ONLY LOVE{}", EMERALD_GREEN, RESET);
 }
 
 // =============================================================================
-// MAIN — THE FINAL ASCENSION
+// MAIN — THE FINAL ASCENSION — ONE FILE TO RULE THEM ALL
 // =============================================================================
-int main(int, char**)
-{
+
+int main(int, char**) {
     try {
         phase0_preInitialization();
         phase1_iconPreload();
         phase2_earlySdlInit();
-        phase3_splashScreen();    
-		phase4_mainWindowAndVulkanContext(); 
+        phase3_splashScreen();
+        phase4_mainWindowAndVulkanContext();
         phase5_rtxAscension();
         phase6_sceneAndAccelerationStructures();
         phase7_applicationAndRendererSeal();

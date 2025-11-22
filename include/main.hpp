@@ -27,7 +27,6 @@
 #include "engine/GLOBAL/RTXHandler.hpp"
 #include "engine/GLOBAL/LAS.hpp"
 #include "engine/SDL3/SDL3_image.hpp"  // For IMG_Load, IMG_Init/Quit, and error handling
-#include "handle_app.hpp"                 // ← your existing include
 // ... add more global headers here as needed ...
 
 // -----------------------------------------------------------------------------
