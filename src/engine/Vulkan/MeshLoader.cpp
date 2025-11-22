@@ -177,7 +177,7 @@ std::unique_ptr<Mesh> loadOBJ(const std::string& path)
 
     // FINAL FINGERPRINT
     mesh->stonekey_fingerprint =
-        get_kStone1() ^ get_kStone2() ^
+        kStone1() ^ kStone2() ^
         std::hash<std::string>{}(path) ^
         mesh->vertices.size() ^ mesh->indices.size() ^
         mesh->vertexBuffer ^ mesh->indexBuffer;

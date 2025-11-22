@@ -12,8 +12,8 @@
 #include <mutex>
 #include <atomic>
 
-extern uint64_t get_kStone1() noexcept;
-extern uint64_t get_kStone2() noexcept;
+extern uint64_t kStone1() noexcept;
+extern uint64_t kStone2() noexcept;
 
 // =============================================================================
 // GLOBAL CAMERA — SINGLETON — BRAINDEAD EASY
@@ -90,12 +90,12 @@ public:
 
     // --- OBFUSCATE / DEOBFUSCATE ---
     static uint64_t obfuscate(uint64_t h) noexcept {
-        uint64_t k = get_kStone1() ^ get_kStone2();
+        uint64_t k = kStone1() ^ kStone2();
         return h ^ k;
     }
 
     static uint64_t deobfuscate(uint64_t h) noexcept {
-        uint64_t k = get_kStone1() ^ get_kStone2();
+        uint64_t k = kStone1() ^ kStone2();
         return h ^ k;
     }
 
@@ -142,8 +142,8 @@ private:
         uint32_t x = std::bit_cast<uint32_t>(v.x);
         uint32_t y = std::bit_cast<uint32_t>(v.y);
         uint32_t z = std::bit_cast<uint32_t>(v.z);
-        uint64_t a = (uint64_t(x) << 32) ^ get_kStone1() ^ g;
-        uint64_t b = (uint64_t(y) << 16) ^ get_kStone2() ^ g;
+        uint64_t a = (uint64_t(x) << 32) ^ kStone1() ^ g;
+        uint64_t b = (uint64_t(y) << 16) ^ kStone2() ^ g;
         uint64_t c = uint64_t(z) ^ 0xDEADBEEFULL ^ g;
         return std::rotl(a ^ b ^ c, 23) ^ g;
     }
@@ -154,7 +154,7 @@ private:
             uint32_t f = std::bit_cast<uint32_t>(m[i/4][i%4]);
             h ^= std::rotl(uint64_t(f) ^ g, i);
         }
-        return h ^ get_kStone1() ^ get_kStone2() ^ 0xBEEFBABEULL;
+        return h ^ kStone1() ^ kStone2() ^ 0xBEEFBABEULL;
     }
 };
 

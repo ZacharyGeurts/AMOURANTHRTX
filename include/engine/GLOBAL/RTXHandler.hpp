@@ -55,7 +55,7 @@ struct Camera;
 using namespace Logging::Color;
 
 // Forward-declare StoneKey funcs (no include needed—defined in main.cpp TU)
-extern uint64_t get_kHandleObfuscator() noexcept;
+extern uint64_t kObfuscator() noexcept;
 
 inline const char* getPlatformSurfaceExtension()
 {

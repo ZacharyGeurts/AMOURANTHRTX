@@ -193,8 +193,8 @@ namespace std {
 } // namespace std
 
 // Forward declarations
-extern uint64_t get_kStone1() noexcept;
-extern uint64_t get_kStone2() noexcept;
+extern uint64_t kStone1() noexcept;
+extern uint64_t kStone2() noexcept;
 
 // ========================================================================
 // 0. CONFIGURATION

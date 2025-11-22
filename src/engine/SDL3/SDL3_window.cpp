@@ -114,12 +114,16 @@ void create(const char* title, int width, int height, Uint32 flags)
     appInfo.engineVersion       = VK_MAKE_VERSION(80, 0, 0);
     appInfo.apiVersion          = VK_API_VERSION_1_3;
 
+	LOG_SUCCESS_CAT("VULKAN", "{}MINE HAS 2: {}{}", PLASMA_FUCHSIA, extensions.size(), RESET);
+
     VkInstanceCreateInfo createInfo{VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
     createInfo.pApplicationInfo        = &appInfo;
     createInfo.enabledExtensionCount   = static_cast<uint32_t>(extensions.size());
     createInfo.ppEnabledExtensionNames = extensions.data();
     createInfo.enabledLayerCount       = Options::Performance::ENABLE_VALIDATION_LAYERS ? 1u : 0u;
     createInfo.ppEnabledLayerNames     = createInfo.enabledLayerCount ? std::array{"VK_LAYER_KHRONOS_validation"}.data() : nullptr;
+
+    LOG_SUCCESS_CAT("VULKAN", "{}Same as the other two because I want a log here but too lazy to change it. Wait, that was a long message. I could have just changed it.: {}{}", PLASMA_FUCHSIA, extensions.size(), RESET);
 
     VkInstance instance = VK_NULL_HANDLE;
     VK_CHECK(vkCreateInstance(&createInfo, nullptr, &instance), "vkCreateInstance failed");
@@ -141,7 +145,7 @@ void create(const char* title, int width, int height, Uint32 flags)
     for(int i=0;i<10;i++)LOG_INFO_CAT("ZAPPER","{}*PEW* {}{}",RASPBERRY_PINK,"ZAPPER FIRES PINK PHOTON #" + std::to_string(i+1),RESET); // *
 
     std::atomic_thread_fence(std::memory_order_release);
-    StoneKey::Raw::obfuscated_mode.store(false, std::memory_order_release);
+    StoneKey::Raw::sealed.store(false, std::memory_order_release);
 
     LOG_SUCCESS_CAT("MAIN", "{}WINDOW + INSTANCE + SURFACE READY — FIRST LIGHT IMMINENT — NOVEMBER 21, 2025{}", DIAMOND_SPARKLE, RESET);
     LOG_SUCCESS_CAT("MAIN", "{}ELLIE FIER: \"THE PHOTONS... THEY'RE HERE...\"{}", PURE_ENERGY, RESET);

@@ -143,7 +143,7 @@ inline constexpr void dispatchRenderMode(
         LOG_WARNING_CAT("Renderer", "{}Invalid render mode {} at {}:{} – Falling back to Mode 1 – Destroyed: {} – StoneKey FP: 0x{:016X}{}",
                         ELECTRIC_BLUE, renderMode, loc.file_name(), loc.line(),
                         g_destructionCounter,
-                        (get_kStone1() ^ get_kStone2()),
+                        (kStone1() ^ kStone2()),
                         RESET);
         renderMode1(imageIndex, commandBuffer, pipelineLayout, descriptorSet, pipeline, deltaTime, context);
     }
@@ -166,7 +166,7 @@ inline VulkanPipelineManager* getPipelineManager() {
     if (!mgr) {
         LOG_ERROR_CAT("Core", "{}getPipelineManager() returned nullptr – call RTX::createCore() first – StoneKey FP: 0x{:016X} – Destroyed: {}{}",
                       RASPBERRY_PINK,
-                      (get_kStone1() ^ get_kStone2()),
+                      (kStone1() ^ kStone2()),
                       g_destructionCounter, RESET);
     }
     return mgr;
