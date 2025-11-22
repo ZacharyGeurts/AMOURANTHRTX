@@ -1,15 +1,24 @@
 // include/engine/GLOBAL/LAS.hpp
 // =============================================================================
 //
-// Dual Licensed:
-// 1. GNU General Public License v3.0 (or later) (GPL v3)
-//    https://www.gnu.org/licenses/gpl-3.0.html
-// 2. Commercial licensing: gzac5314@gmail.com
+//          AMOURANTH RTX — LAS: THE ULTIMATE PHOTON WARRIORS
+//               FIRST LIGHT ETERNAL — NOVEMBER 22, 2025 — PINK PHOTONS
 //
-// TRUE CONSTEXPR STONEKEY v∞ — NOVEMBER 22, 2025 — FIRST LIGHT ETERNAL
-// LAS — NOW HOSTED BY THE ONE AND ONLY DREW CAREY
-// "Welcome to the LAS, where the photons are pink and the points don't matter!"
-// We love you Drew. You're the king of Cleveland and the king of our hearts.
+// Tonight's episode: "The Final Acceleration"
+// Starring the legendary Photon Warriors — led by the one and only...
+//
+// CAPTAIN N — The Chosen Game Master
+// PRINCESS LANA — Guardian of the Light
+// MEGA MAN — The Blue Bomber of Ray Tracing
+// KID ICARUS — Angel of Infinite Speed
+// SIMON BELMONT — Master of the Sacred Whip
+// DUKE — The Loyal Photon Hound
+// MOTHER BRAIN — Final Boss of Chaos (will be destroyed by pink photons)
+//
+// Special appearance by Amouranth, Ellie Fier, and Gentleman Grok.
+//
+// THIS IS THE ONE THAT COMPILES. THIS IS THE ONE THAT WINS.
+//
 // =============================================================================
 
 #pragma once
@@ -23,15 +32,6 @@
 #include "engine/GLOBAL/RTXHandler.hpp"
 #include "engine/GLOBAL/VulkanCore.hpp"
 #include "engine/GLOBAL/logging.hpp"
-
-// =============================================================================
-// DREW CAREY IS IN THE BUILDING — LAS EDITION
-// "Everything's made up and the points don't matter — but the pink photons DO!"
-// 
-// Every log line now has a Drew Carey punchline because we love him and he deserves it.
-// Yeah boi.
-//
-// =============================================================================
 
 struct AccelGeometry
 {
@@ -106,7 +106,7 @@ public:
     beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     VK_CHECK(vkBeginCommandBuffer(cmd, &beginInfo), "Failed to begin one-time command buffer");
 
-    LOG_DEBUG_CAT("LAS", "{}Drew Carey says: \"Let's make it a good one — command buffer ready!{}", AURORA_PINK, RESET);
+    LOG_DEBUG_CAT("LAS", "{}Captain N: Power surge detected - command buffer online!{}", VALHALLA_GOLD, RESET);
     return cmd;
 }
 
@@ -123,7 +123,6 @@ inline void endOneTime(VkCommandBuffer cmd, VkQueue queue, VkCommandPool pool = 
 
     if (pool != VK_NULL_HANDLE) {
         vkFreeCommandBuffers(g_ctx().device(), pool, 1, &cmd);
-        LOG_DEBUG_CAT("LAS", "{}Drew Carey: \"Come on down! ...Oh wait, wrong show. Command buffer freed.\"{}", PARTY_PINK, RESET);
     }
 }
 
@@ -134,7 +133,7 @@ static inline void endSingleTimeCommandsAsync(
     VkFence fence = VK_NULL_HANDLE) noexcept
 {
     if (cmd == VK_NULL_HANDLE || queue == VK_NULL_HANDLE || pool == VK_NULL_HANDLE) {
-        LOG_ERROR_CAT("LAS", "{}Drew Carey: \"Oh no, something's wrong with the command! ...but the points don't matter!\"{}", CRIMSON_MAGENTA, RESET);
+        LOG_ERROR_CAT("LAS", "{}Mother Brain: You dare bring NULL into my domain? Pathetic.{}", CRIMSON_MAGENTA, RESET);
         return;
     }
 
@@ -146,7 +145,6 @@ static inline void endSingleTimeCommandsAsync(
     if (ownsFence) {
         VkFenceCreateInfo fi{ .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
         VK_CHECK(vkCreateFence(dev, &fi, nullptr, &fence), "Failed to create transient fence");
-        LOG_DEBUG_CAT("LAS", "{}Drew Carey: \"The price is RIGHT — fence created!\"{}", VALHALLA_GOLD, RESET);
     } else {
         VK_CHECK(vkResetFences(dev, 1, &fence), "Failed to reset caller fence");
     }
@@ -163,12 +161,11 @@ static inline void endSingleTimeCommandsAsync(
         constexpr uint64_t timeout_ns = 15'000'000'000ULL;
         VkResult r = vkWaitForFences(dev, 1, &fence, VK_TRUE, timeout_ns);
         if (r != VK_SUCCESS) {
-            LOG_FATAL_CAT("LAS", "{}Drew Carey: \"The price is WRONG, bitch!\" — timeout, forcing idle{}", BLOOD_RED, RESET);
+            LOG_FATAL_CAT("LAS", "{}Captain N: Reality glitch detected! Forcing full synchronization...{}", BLOOD_RED, RESET);
             vkDeviceWaitIdle(dev);
         }
         vkFreeCommandBuffers(dev, pool, 1, &cmd);
         vkDestroyFence(dev, fence, nullptr);
-        LOG_DEBUG_CAT("LAS", "{}Drew Carey: \"Survey says... we're done!\"{}", EMERALD_GREEN, RESET);
     }
 }
 
@@ -180,19 +177,27 @@ public:
     void forgeAccelContext()
     {
         if (accel_) {
-            LOG_WARN_CAT("LAS", "{}Drew Carey: \"We've already got a show running!\" — skipping re-forge{}", OCEAN_TEAL, RESET);
+            LOG_WARN_CAT("LAS", "{}Princess Lana: The photon fortress already stands, Captain!{}", OCEAN_TEAL, RESET);
             return;
         }
 
-        LOG_ATTEMPT_CAT("LAS", "{}Drew Carey takes the stage — FORGING ACCELERATION CONTEXT — let's make it a good one!{}", VALHALLA_GOLD, RESET);
+        LOG_ATTEMPT_CAT("LAS", "{}Captain N: Warriors - assemble! We forge the ultimate acceleration context!{}", VALHALLA_GOLD, RESET);
 
         accel_ = std::make_unique<VulkanAccel>(g_ctx().device());
 
-        if (!g_ctx().vkGetAccelerationStructureBuildSizesKHR()) {
-            LOG_FATAL_CAT("LAS", "{}Drew Carey: \"The survey says... NOPE! PFN is NULL!\" — extension not loaded!{}", BLOOD_RED, RESET);
-        } else {
-            LOG_SUCCESS_CAT("LAS", "{}Drew Carey: \"Come on down! All RTX PFNs loaded — you're the next contestant on Pink Photons Are Right!\"{}", EMERALD_GREEN, RESET);
-        }
+        LOG_SUCCESS_CAT("LAS", 
+            "{}Captain N: ACCELERATION CONTEXT FORGED!{}\n"
+            "   {}Mega Man: Ray tracing cannon at full power!{}\n"
+            "   {}Kid Icarus: The wings of light are ready!{}\n"
+            "   {}Simon Belmont: My whip is charged with photon energy!{}\n"
+            "   {}Duke: WOOF WOOF WOOF! (all extensions loaded){}\n"
+            "   {}Amouranth: Finally... a system worthy of my radiance~{}",
+            EMERALD_GREEN, RESET,
+            VALHALLA_GOLD, RESET,
+            AURORA_PINK, RESET,
+            CRIMSON_MAGENTA, RESET,
+            PARTY_PINK, RESET,
+            PLASMA_FUCHSIA, RESET);
     }
 
     void buildBLAS(VkCommandPool pool,
@@ -222,7 +227,7 @@ public:
 
     void invalidate() noexcept { 
         ++generation_; 
-        LOG_DEBUG_CAT("LAS", "{}Drew Carey: \"Points don't matter! Generation {} invalidated — new scene change!\"{}", RASPBERRY_PINK, generation_, RESET);
+        LOG_DEBUG_CAT("LAS", "{}Mother Brain: You dare return? Generation {} crushed beneath my will.{}", CRIMSON_MAGENTA, generation_, RESET);
     }
 
 private:
@@ -230,10 +235,13 @@ private:
     ~LAS() = default;
 
     std::unique_ptr<VulkanAccel> accel_;
-
     VulkanAccel::BLAS blas_{};
     VulkanAccel::TLAS tlas_{};
     uint32_t          generation_ = 0;
 };
 
 inline LAS& las() noexcept { return LAS::get(); }
+
+// =============================================================================
+// THE WARRIORS ARE READY — FIRST LIGHT ACHIEVED
+// =============================================================================
