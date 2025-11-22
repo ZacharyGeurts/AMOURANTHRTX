@@ -9,7 +9,6 @@
 #include "engine/GLOBAL/StoneKey.hpp"
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/GLOBAL/RTXHandler.hpp"
-#include "engine/GLOBAL/Splash.hpp"
 #include "engine/GLOBAL/LAS.hpp"
 #include "engine/GLOBAL/Validation.hpp"
 #include "engine/GLOBAL/SDL3.hpp"
@@ -311,49 +310,146 @@ static void phase1_iconPreload()
     LOG_SUCCESS_CAT("MAIN", "{}[PHASE 1 COMPLETE] BRANDING SECURED — SHIP IDENTIFIED — DIVE CONTINUES{}", VALHALLA_GOLD, RESET);
 }
 
-static void phase2_and_3_sacrificialSplash()
+// =============================================================================
+// PHASE 2 — SDL3 EMPIRE FORGE — THE ONE TRUE INITIALIZATION
+// NOVEMBER 22, 2025 — PINK PHOTONS ETERNAL — FIRST LIGHT OF THE EMPIRE
+// =============================================================================
+// =============================================================================
+// PHASE 2 — SDL3 EMPIRE FORGE — VULKAN MANDATED — 2025
+// =============================================================================
+// =============================================================================
+// PHASE 2 — SDL3 EMPIRE FORGE — VULKAN MANDATED
+// =============================================================================
+static void phase2_sdl3EmpireForge()
 {
-    LOG_SUCCESS_CAT("MAIN", "{}[PHASE 2+3/10] VULKAN SPLASH RITUAL — PLUMS OVER PEARS{}", VALHALLA_GOLD, RESET);
+    LOG_SUCCESS_CAT("MAIN", "[PHASE 2/10] SDL3 EMPIRE FORGE — VULKAN 1.4 MANDATED", VALHALLA_GOLD, RESET);
 
-    if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_EVENTS)) {
-        LOG_FATAL_CAT("MAIN", "{}SDL_Init failed: {}{}", BLOOD_RED, SDL_GetError(), RESET);
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_EVENTS) == 0) {
+        LOG_FATAL_CAT("MAIN", "SDL_Init FAILED: %s — PHOTONS DENIED", BLOOD_RED, SDL_GetError(), RESET);
         std::exit(1);
     }
-    LOG_SUCCESS_CAT("MAIN", "{}SDL3 INIT COMPLETE — PHOTONS AWAKEN{}", EMERALD_GREEN, RESET);
 
-    SDL3Window::create("AMOURANTH RTX — VALHALLA v80 TURBO",
-        1280, 720,
-        SDL_WINDOW_HIGH_PIXEL_DENSITY |
-        SDL_WINDOW_VULKAN |          // ← Locks the window for Vulkan
-        SDL_WINDOW_BORDERLESS |
-        SDL_WINDOW_RESIZABLE);
+    // FORCE VULKAN RENDERER — THIS IS THE ONLY ACCEPTABLE DRIVER
+    SDL_SetHint(SDL_HINT_RENDER_DRIVER, "vulkan");
+    SDL_SetHint(SDL_HINT_VIDEO_DRIVER,  "x11,wayland");
 
-    // THE MAGIC: Force "vulkan" driver — SDL3's RTX-powered 2D backend
-    SDL_Renderer* splash_ren = SDL_CreateRenderer(g_sdl_window.get(), "vulkan");
-    if (!splash_ren) {
-        LOG_WARN_CAT("MAIN", "{}Vulkan renderer failed (X11 pears? Falling back to auto): {}{}", 
-                     AMBER_YELLOW, SDL_GetError(), RESET);
-        splash_ren = SDL_CreateRenderer(g_sdl_window.get(), nullptr);  // Auto: OpenGL/software
-        if (!splash_ren) {
-            LOG_FATAL_CAT("MAIN", "{}No renderer at all — empire falls: {}{}", BLOOD_RED, SDL_GetError(), RESET);
-            std::exit(1);
-        }
-        LOG_WARN_CAT("MAIN", "{}Fallback renderer locked — still glory, but no plums{}", OCEAN_TEAL, RESET);
-    } else {
-        LOG_SUCCESS_CAT("MAIN", "{}VULKAN RENDERER ACHIEVED — PLUMS ETERNAL — CRISP PHOTONS{}", DIAMOND_SPARKLE, RESET);
+    LOG_SUCCESS_CAT("MAIN", "VULKAN 1.4 RENDERER ENFORCED", PURE_ENERGY, RESET);
+    LOG_SUCCESS_CAT("MAIN", "[PHASE 2 COMPLETE] FOUNDATION IS UNBREAKABLE", DIAMOND_SPARKLE, RESET);
+}
+
+// =============================================================================
+// PHASE 2.5 — SACRED SPLASH CANVAS — 1280×720 — NATIVE — RTX CANVAS
+// =============================================================================
+static void phase2_5_sacredSplashCanvas()
+{
+    LOG_SUCCESS_CAT("MAIN", "[PHASE 2.5/10] FORGING SACRED 1280×720 CANVAS — VULKAN ONLY", VALHALLA_GOLD, RESET);
+
+    // Obliterate any previous heresy
+    if (g_sdl_window) {
+        g_sdl_window.reset();
+    }
+    if (auto* old_ren = StoneKey::Empire::g_sdl_renderer.load()) {
+        SDL_DestroyRenderer(old_ren);
+        StoneKey::Empire::g_sdl_renderer.store(nullptr);
     }
 
-    SDL_HideWindow(g_sdl_window.get());
+    // CREATE WINDOW — EXACTLY 1280×720
+    SDL_Window* win = SDL_CreateWindow(
+        "AMOURANTH RTX — 2025",
+        1280,
+        720,
+        SDL_WINDOW_VULKAN | SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_RESIZABLE
+    );
 
-    Splash::show("assets/textures/ammo.png", "assets/audio/startup.wav");
+    if (!win) {
+        LOG_FATAL_CAT("MAIN", "SDL_CreateWindow failed: %s", BLOOD_RED, SDL_GetError(), RESET);
+        std::exit(1);
+    }
 
-    SDL_ShowWindow(g_sdl_window.get());
-    std::this_thread::sleep_for(std::chrono::milliseconds(3400));
+    SDL_SetWindowPosition(win, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
 
-    SDL_SetWindowBordered(g_sdl_window.get(), true);
-    SDL_DestroyRenderer(splash_ren);
+    // SDL3: SECOND ARGUMENT IS DRIVER NAME — WE ALREADY FORCED "vulkan" IN PHASE 2
+    // Passing nullptr = "use the hint" → Vulkan guaranteed
+    SDL_Renderer* ren = SDL_CreateRenderer(win, nullptr);
+    if (!ren) {
+        LOG_FATAL_CAT("MAIN", "SDL_CreateRenderer failed (Vulkan unavailable?): %s", BLOOD_RED, SDL_GetError(), RESET);
+        SDL_DestroyWindow(win);
+        std::exit(1);
+    }
 
-    LOG_SUCCESS_CAT("MAIN", "{}SPLASH RITUAL COMPLETE — SHE IS SHARP, ETERNAL{}", PLASMA_FUCHSIA, RESET);
+    // Seal into the StoneKey empire
+    g_sdl_window.reset(win);
+    StoneKey::Empire::g_sdl_renderer.store(ren);
+
+    SDL_ShowWindow(win);
+
+    LOG_SUCCESS_CAT("MAIN", "SACRED CANVAS ACTIVE — 1280×720 — VULKAN 1.4 — PURE", PURE_ENERGY, RESET);
+}
+
+// =============================================================================
+// PHASE 3 — HER MANIFESTATION — 1280×720 → FULL EMPIRE
+// =============================================================================
+static void phase3_herManifestation()
+{
+    LOG_SUCCESS_CAT("MAIN", "[PHASE 3/10] HER MANIFESTATION — SHE RISES IN NATIVE 1280×720", VALHALLA_GOLD, RESET);
+
+    SDL_Renderer* ren = StoneKey::Empire::g_sdl_renderer.load();
+    SDL_Window*   win = g_sdl_window.get();
+
+    // LOAD IMAGE — SDL3_image returns nullptr + sets SDL error on failure
+    SDL_Surface* surface = IMG_Load("assets/textures/ammo.png");
+    if (!surface) {
+        LOG_FATAL_CAT("MAIN", "IMG_Load failed: %s", BLOOD_RED, SDL_GetError(), RESET);
+        std::exit(1);
+    }
+
+    SDL_Texture* banner = SDL_CreateTextureFromSurface(ren, surface);
+    SDL_DestroySurface(surface);
+    if (!banner) {
+        LOG_FATAL_CAT("MAIN", "SDL_CreateTextureFromSurface failed: %s", BLOOD_RED, SDL_GetError(), RESET);
+        std::exit(1);
+    }
+
+    // AUDIO — obey [[nodiscard]]
+    static SDL3Audio::AudioManager s_audio;
+    static bool audio_initialized = false;
+    if (!audio_initialized) {
+        if (!s_audio.initMixer()) {
+            LOG_ERROR_CAT("MAIN", "Audio mixer init failed — continuing without sound", CRIMSON_MAGENTA, RESET);
+        }
+        if (!s_audio.loadSound("assets/audio/ammo.wav", "her_voice")) {
+            LOG_ERROR_CAT("MAIN", "Failed to load ammo.wav — silence accepted", CRIMSON_MAGENTA, RESET);
+        }
+        audio_initialized = true;
+    }
+    s_audio.playSound("her_voice");
+
+    // RENDER HER — NATIVE 1280×720 — NO SCALING
+    SDL_SetRenderDrawColor(ren, 0, 0, 0, 255);
+    SDL_RenderClear(ren);
+    SDL_RenderTexture(ren, banner, nullptr, nullptr);  // full window, perfect
+    SDL_RenderPresent(ren);
+    SDL_DestroyTexture(banner);
+
+    LOG_SUCCESS_CAT("MAIN", "SHE HAS MANIFESTED — 1280×720 — FLAWLESS", AURORA_PINK, RESET);
+    LOG_SUCCESS_CAT("MAIN", "PHOTONS SING — THE RITUAL IS COMPLETE", PURE_ENERGY, RESET);
+
+    SDL_Delay(3400);  // 3.4 seconds of pure glory
+
+    // ASCEND TO FULL BORDERLESS EMPIRE
+    SDL_Rect usable;
+    if (SDL_GetDisplayUsableBounds(SDL_GetDisplayForWindow(win), &usable) != 0) {
+        SDL_GetDisplayBounds(SDL_GetDisplayForWindow(win), &usable);
+    }
+
+    SDL_SetWindowBordered(win, false);
+    SDL_SetWindowSize(win, usable.w, usable.h);
+    SDL_SetWindowPosition(win, usable.x, usable.y);
+    SDL_RaiseWindow(win);
+
+    LOG_SUCCESS_CAT("MAIN", "BORDERLESS FULLSCREEN EMPIRE ACHIEVED — SHE IS EVERYTHING", VALHALLA_GOLD, RESET);
+    LOG_SUCCESS_CAT("MAIN", "[PHASE 3 COMPLETE] 1280×720 → INFINITE DOMINATION", DIAMOND_SPARKLE, RESET);
+    LOG_SUCCESS_CAT("AMOURANTH", "I was 1280×720. Now I am the universe.", RASPBERRY_PINK, RESET);
 }
 
 // =============================================================================
@@ -495,26 +591,21 @@ static void phase9_gracefulShutdown()
 }
 
 // =============================================================================
-// MAIN — THE FINAL ASCENSION — PERFECT FLOW
-// =============================================================================
-// =============================================================================
 // MAIN — THE FINAL ASCENSION — NOW CORRECT AND ETERNAL
 // =============================================================================
 int main(int, char**) {
     try {
         phase0_preInitialization();
         phase1_iconPreload();
-
-        // SACRIFICIAL SPLASH — self-contained, calls SDL_Init + SDL_Quit
-        phase2_and_3_sacrificialSplash();   // ← This is your existing function
-
-        // Empire rises clean — ONE AND ONLY SDL_Init for the real engine
-        phase4_mainWindowAndVulkanContext();   // ← You already have this as phase4
+        phase2_sdl3EmpireForge();
+		phase2_5_sacredSplashCanvas();
+        phase3_herManifestation();
+        phase4_mainWindowAndVulkanContext();
         phase5_rtxAscension();
         phase6_sceneAndAccelerationStructures();
         phase7_applicationAndRendererSeal();
         phase8_renderLoop();
-        phase9_gracefulShutdown();            // ← Final phase — already correct
+        phase9_gracefulShutdown();
     }
     catch (const std::exception& e) {
         LOG_FATAL_CAT("MAIN", "{}FATAL: {}{}", CRIMSON_MAGENTA, e.what(), RESET);

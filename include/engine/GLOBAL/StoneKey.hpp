@@ -98,6 +98,7 @@ namespace StoneKey::Empire {
     inline std::atomic<VkDevice>         device{VK_NULL_HANDLE};
     inline std::atomic<VkPhysicalDevice> physicalDevice{VK_NULL_HANDLE};
     inline std::atomic<VkSurfaceKHR>     surface{VK_NULL_HANDLE};
+	inline std::atomic<SDL_Renderer*>    g_sdl_renderer{nullptr};
     inline std::atomic<VkSwapchainKHR>   swapchain{VK_NULL_HANDLE};
 
     // SWAPCHAIN TREASURES — OWNED BY THE EMPIRE
@@ -118,6 +119,7 @@ namespace StoneKey::Empire {
 [[nodiscard]] inline VkDevice         g_device()         noexcept { return StoneKey::Empire::device.load(); }
 [[nodiscard]] inline VkPhysicalDevice g_PhysicalDevice() noexcept { return StoneKey::Empire::physicalDevice.load(); }
 [[nodiscard]] inline VkSurfaceKHR     g_surface()        noexcept { return StoneKey::Empire::surface.load(); }
+[[nodiscard]] inline SDL_Renderer*    g_sdl_renderer()   noexcept { return StoneKey::Empire::g_sdl_renderer.load(); }
 [[nodiscard]] inline VkSwapchainKHR   g_swapchain()      noexcept { return StoneKey::Empire::swapchain.load(); }
 
 [[nodiscard]] inline auto&       g_swapchain_images()      noexcept { return StoneKey::Empire::swapchain_images; }
