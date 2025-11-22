@@ -8,7 +8,7 @@
 // =============================================================================
 
 #include "engine/GLOBAL/LAS.hpp"
-#include "engine/Vulkan/VulkanCore.hpp"
+#include "engine/GLOBAL/VulkanCore.hpp"
 #include "engine/GLOBAL/RTXHandler.hpp"
 
 using namespace RTX;

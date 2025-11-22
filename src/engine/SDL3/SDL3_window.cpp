@@ -18,8 +18,8 @@
 #include "engine/GLOBAL/OptionsMenu.hpp"
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/GLOBAL/RTXHandler.hpp"
-#include "engine/Vulkan/VulkanCore.hpp"
-#include "engine/Vulkan/VulkanRenderer.hpp"
+#include "engine/GLOBAL/VulkanCore.hpp"
+#include "engine/GLOBAL/VulkanRenderer.hpp"
 
 #include <SDL3/SDL_vulkan.h>
 #include <vulkan/vulkan.h>

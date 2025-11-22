@@ -5,7 +5,7 @@
 // =============================================================================
 
 #pragma once
-#include "engine/Vulkan/MeshLoader.hpp"
+#include "engine/GLOBAL/MeshLoader.hpp"
 #include "engine/GLOBAL/LAS.hpp"
 #include "engine/GLOBAL/logging.hpp"
 #include <glm/glm.hpp>

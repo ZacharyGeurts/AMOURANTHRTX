@@ -14,9 +14,9 @@
 #include "engine/GLOBAL/Validation.hpp"
 #include "engine/SDL3/SDL3_window.hpp"
 #include "engine/SDL3/SDL3_image.hpp"
-#include "engine/Vulkan/VulkanRenderer.hpp"
+#include "engine/GLOBAL/VulkanRenderer.hpp"
 #include "engine/GLOBAL/PipelineManager.hpp"
-#include "engine/Vulkan/MeshLoader.hpp"
+#include "engine/GLOBAL/MeshLoader.hpp"
 #include "main.hpp"
 
 #include <iostream>

@@ -14,7 +14,7 @@
 #include "modes/RenderMode7.hpp"
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/GLOBAL/RTXHandler.hpp"
-#include "engine/Vulkan/VulkanCore.hpp"
+#include "engine/GLOBAL/VulkanCore.hpp"
 #include <cmath>
 
 using namespace Engine;

@@ -15,9 +15,9 @@
 
 #pragma once
 
-#include "engine/camera.hpp"
-#include "engine/Vulkan/VulkanCore.hpp"
-#include "engine/Vulkan/VulkanRenderer.hpp"
+#include "engine/GLOBAL/camera.hpp"
+#include "engine/GLOBAL/VulkanCore.hpp"
+#include "engine/GLOBAL/VulkanRenderer.hpp"
 #include "engine/core.hpp"  // Application
 #include <cmath>
 #include <source_location>

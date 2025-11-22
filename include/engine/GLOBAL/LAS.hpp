@@ -21,7 +21,7 @@
 #include <memory>
 #include <glm/glm.hpp>
 #include "engine/GLOBAL/RTXHandler.hpp"
-#include "engine/Vulkan/VulkanCore.hpp"
+#include "engine/GLOBAL/VulkanCore.hpp"
 #include "engine/GLOBAL/logging.hpp"
 
 // =============================================================================

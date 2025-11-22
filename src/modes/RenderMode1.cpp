@@ -7,7 +7,7 @@
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/GLOBAL/camera.hpp"
 #include "engine/GLOBAL/StoneKey.hpp"
-#include "engine/Vulkan/VulkanCore.hpp"
+#include "engine/GLOBAL/VulkanCore.hpp"
 
 #include <tiny_obj_loader.h>
 #include <filesystem>
