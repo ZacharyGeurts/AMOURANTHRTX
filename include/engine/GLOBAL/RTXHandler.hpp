@@ -56,6 +56,7 @@ using namespace Logging::Color;
 
 // Forward-declare StoneKey funcs (no include needed—defined in main.cpp TU)
 extern uint64_t get_kHandleObfuscator() noexcept;
+[[nodiscard]] inline RTX::Context& g_ctx() noexcept { return RTX::g_ctx(); }
 
 inline const char* getPlatformSurfaceExtension()
 {

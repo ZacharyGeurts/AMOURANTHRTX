@@ -20,7 +20,7 @@
 
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_beta.h>
-#include <engine/SDL3/SDL3_vulkan.hpp>
+#include "engine/SDL3/SDL3_window.hpp"
 
 #include <array>
 #include <memory>
