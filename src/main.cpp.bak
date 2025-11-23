@@ -288,99 +288,104 @@ static void forgeCommandPool() {
 // SACRIFICIAL SPLASH — IN-MAIN ONLY — VIA STONEKEY EMPIRE — PURE DOMINATION
 // NOVEMBER 22, 2025 — X11 BOWS — VULKAN WAITS — PINK PHOTONS ETERNAL
 // =============================================================================
-#include <format>  // ← Make sure this is in main.cpp or a global header
-
 static void showSacrificialSplash(const char* title, int w, int h, const char* pngPath)
 {
-    // 1. Init SDL (safe)
-    if (SDL_InitSubSystem(SDL_INIT_VIDEO | SDL_INIT_EVENTS) == 0) {
-        LOG_FATAL_CAT("SPLASH", std::format("SDL VIDEO SUBSYSTEM FAILED TO RISE: {}", SDL_GetError()), BLOOD_RED, RESET);
-        std::exit(1);
-    }
+    LOG_SUCCESS_CAT("SPLASH", "SACRIFICIAL SPLASH RITUAL BEGINNING — PURE SDL3 DOMINATION", VALHALLA_GOLD, RESET);
 
-    // 2. Create hidden centered window
-    SDL_Window* win = SDL_CreateWindow(title, w, h,
-        SDL_WINDOW_BORDERLESS | SDL_WINDOW_HIDDEN | SDL_WINDOW_HIGH_PIXEL_DENSITY);
-    if (!win) {
-        LOG_FATAL_CAT("SPLASH", std::format("FAILED TO OPEN SACRIFICIAL WINDOW: {}", SDL_GetError()), BLOOD_RED, RESET);
-        SDL_QuitSubSystem(SDL_INIT_VIDEO);
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) != 0) {
+        LOG_FATAL_CAT("SPLASH", "SDL_Init failed: %s", BLOOD_RED, SDL_GetError(), RESET);
         std::exit(1);
     }
 
     SDL_Rect display{};
     SDL_GetDisplayBounds(0, &display);
-    SDL_SetWindowPosition(win, display.x + (display.w - w) / 2, display.y + (display.h - h) / 2);
+    int x = display.x + (display.w - w) / 2;
+    int y = display.y + (display.h - h) / 2;
 
-    // 3. Create TEMPORARY renderer
+    SDL_Window* win = SDL_CreateWindow(
+        title, w, h,
+        SDL_WINDOW_BORDERLESS | SDL_WINDOW_HIDDEN | SDL_WINDOW_HIGH_PIXEL_DENSITY  // HIGH_DPI is correct in SDL3
+    );
+    if (!win) {
+        LOG_FATAL_CAT("SPLASH", "Failed to create splash window: %s", BLOOD_RED, SDL_GetError(), RESET);
+        SDL_Quit();
+        std::exit(1);
+    }
+    SDL_SetWindowPosition(win, x, y);
+
+    // SDL3: Only two args — driver name or nullptr
     SDL_Renderer* ren = SDL_CreateRenderer(win, nullptr);
     if (!ren) {
-        LOG_FATAL_CAT("SPLASH", std::format("TEMPORARY RENDERER FAILED TO MANIFEST: {}", SDL_GetError()), CRIMSON_MAGENTA, RESET);
+        LOG_FATAL_CAT("SPLASH", "Failed to create renderer: %s", CRIMSON_MAGENTA, SDL_GetError(), RESET);
         SDL_DestroyWindow(win);
-        SDL_QuitSubSystem(SDL_INIT_VIDEO);
+        SDL_Quit();
         std::exit(1);
     }
 
-    LOG_SUCCESS_CAT("SPLASH", "TEMPORARY RENDERER FORGED — GPU BOWS TO THE RITUAL", DIAMOND_SPARKLE, RESET);
-
-    // 4. Load sacred PNG
-    LOG_ATTEMPT_CAT("SPLASH", std::format("SUMMONING OFFERING FROM: {}", pngPath), RASPBERRY_PINK, RESET);
-    SDL_Surface* img = IMG_Load(pngPath);
-    if (!img) {
-        LOG_FATAL_CAT("SPLASH", std::format("NO SACRIFICE FOUND — IMG_Load FAILED: {} → {}", pngPath, SDL_GetError()), 
-                      BLOOD_RED, RESET);
-        SDL_DestroyRenderer(ren);
-        SDL_DestroyWindow(win);
-        SDL_QuitSubSystem(SDL_INIT_VIDEO);
-        std::exit(1);
+    // Store in the Empire (only once)
+    static bool renderer_stored = false;
+    if (!renderer_stored) {
+        StoneKey::Empire::g_sdl_renderer.store(ren);
+        renderer_stored = true;
     }
-    LOG_SUCCESS_CAT("SPLASH", std::format("OFFERING ACCEPTED — {}×{} — FORMAT: {}", img->w, img->h, SDL_GetPixelFormatName(img->format)),
-                    RASPBERRY_PINK, RESET);
-
-    // 5. Forge texture
-    SDL_Texture* tex = SDL_CreateTextureFromSurface(ren, img);
-    SDL_DestroySurface(img);
-    if (!tex) {
-        LOG_FATAL_CAT("SPLASH", std::format("TEXTURE FORGING FAILED: {}", SDL_GetError()), CRIMSON_MAGENTA, RESET);
-        SDL_DestroyRenderer(ren);
-        SDL_DestroyWindow(win);
-        SDL_QuitSubSystem(SDL_INIT_VIDEO);
-        std::exit(1);
-    }
-
-    // 6. Center and display
-    float tw = 0.0f, th = 0.0f;
-    SDL_GetTextureSize(tex, &tw, &th);
-
-    SDL_FRect dst = { (w - tw) * 0.5f, (h - th) * 0.5f, tw, th };
 
     SDL_ShowWindow(win);
+    SDL_SetRenderDrawColor(ren, 0, 0, 0, 255);
     SDL_RenderClear(ren);
-    SDL_RenderTexture(ren, tex, nullptr, &dst);
+
+    SDL_IOStream* io = SDL_IOFromFile(pngPath, "rb");
+    if (!io) {
+        LOG_FATAL_CAT("SPLASH", "Cannot open splash image: %s", CRIMSON_MAGENTA, pngPath, RESET);
+        SDL_DestroyRenderer(ren);
+        SDL_DestroyWindow(win);
+        SDL_Quit();
+        std::exit(1);
+    }
+
+    SDL_DestroySurface(splash_surface);
+
+    if (!splash_tex) {
+        LOG_FATAL_CAT("SPLASH", "Failed to create splash_texture: %s", CRIMSON_MAGENTA, SDL_GetError(), RESET);
+        SDL_DestroyRenderer(ren);
+        SDL_DestroyWindow(win);
+        SDL_Quit();
+        std::exit(1);
+    }
+
+    float splash_texW = 0.0f, splash_texH = 0.0f;
+    SDL_GetTextureSize(splash_tex, &splash_texW, &splash_texH);
+
+    SDL_FRect dst = {
+        (w - splash_texW) * 0.5f,
+        (h - splash_texH) * 0.5f,
+        splash_texW,
+        splash_texH
+    };
+
+    SDL_RenderTexture(ren, splash_tex, nullptr, &dst);
+    SDL_DestroyTexture(splash_tex);
     SDL_RenderPresent(ren);
 
-    LOG_SUCCESS_CAT("SPLASH", "SHE HAS BEEN SEEN — 3.4 SECONDS OF PURE GLORY BEGIN", PLASMA_FUCHSIA, RESET);
+    LOG_SUCCESS_CAT("SPLASH", "AMOURANTH HAS BEEN SUMMONED — 3.4 SECONDS OF ETERNAL GLORY", RASPBERRY_PINK, RESET);
 
-    // 7. 3.4 seconds of divine vision
     auto start = std::chrono::steady_clock::now();
     while (std::chrono::duration_cast<std::chrono::milliseconds>(
            std::chrono::steady_clock::now() - start).count() < 3400)
     {
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
-            if (e.type == SDL_EVENT_QUIT) goto end_splash;
+            if (e.type == SDL_EVENT_QUIT)
+                goto end_splash;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(16));
     }
 
 end_splash:
-    // 8. BURN IT ALL
-    SDL_DestroyTexture(tex);
-    SDL_DestroyRenderer(ren);
     SDL_DestroyWindow(win);
-    SDL_QuitSubSystem(SDL_INIT_VIDEO);
+    // Renderer belongs to the Empire — DO NOT DESTROY
+    SDL_Quit();
 
-    LOG_SUCCESS_CAT("SPLASH", "SACRIFICIAL REALM BURNED — TEMPORARY RENDERER OBLITERATED — RITUAL COMPLETE", 
-                    VALHALLA_GOLD, RESET);
+    LOG_SUCCESS_CAT("SPLASH", "SPLASH RITUAL COMPLETE — THE EMPIRE RISES", DIAMOND_SPARKLE, RESET);
     LOG_AMOURANTH();
 }
 
@@ -389,32 +394,12 @@ end_splash:
 // =============================================================================
 static void phase1_preInitialization()
 {
-    LOG_SUCCESS_CAT("MAIN0", "CAPTAIN'S LOG — NOVEMBER 21, 2025 — DEPTH: SURFACE", PLASMA_FUCHSIA, RESET);
-    LOG_SUCCESS_CAT("MAIN0", "AMOURANTH RTX — VALHALLA v80 TURBO — APOCALYPSE FINAL v10.3", DIAMOND_SPARKLE, RESET);
-    LOG_SUCCESS_CAT("MAIN0", "THE PINK PHOTON SAILS — SCUBA SUIT SEALED — OXYGEN: 100%", RASPBERRY_PINK, RESET);
-    LOG_SUCCESS_CAT("MAIN0", "FIRST LIGHT ACHIEVED — THE EMPIRE AWAKENS FROM THE ABYSS", VALHALLA_GOLD, RESET);
-    LOG_INFO_CAT("MAIN0", "DIVE COMMENCING — TEN PHASES — NO MAN LEFT BEHIND", OCEAN_TEAL, RESET);
-
-    // THE EMPIRE DEMANDS SDL3 — WE OBEY
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_GAMEPAD) == 0) {
-        LOG_FATAL_CAT("MAIN0", "SDL3 FAILED TO RISE — THE ABYSS CLAIMS US: %s", BLOOD_RED, SDL_GetError(), RESET);
-        std::exit(1);
-    }
-
-#ifdef SDL3_IMAGE_ENABLED
-    int img_flags = IMG_INIT_PNG | IMG_INIT_JPG | IMG_INIT_WEBP | IMG_INIT_AVIF;
-    if ((IMG_Init(img_flags) & img_flags) != img_flags) {
-        LOG_FATAL_CAT("MAIN0", "SDL3_image FAILED TO CONJURE THE SACRIFICE: %s", CRIMSON_MAGENTA, IMG_GetError(), RESET);
-        SDL_Quit();
-        std::exit(1);
-    }
-    LOG_SUCCESS_CAT("MAIN0", "SDL3_image AWAKENED — PNG SACRIFICES ACCEPTED", DIAMOND_SPARKLE, RESET);
-#endif
-
-    // The Empire’s renderer begins as a void — it will be forged later
-    StoneKey::Empire::g_sdl_renderer.store(nullptr);
-
-    LOG_SUCCESS_CAT("MAIN0", "SDL3 EMPIRE INITIALIZED — PINK PHOTONS FLOW — THE RITUAL MAY BEGIN", VALHALLA_GOLD, RESET);
+    LOG_SUCCESS_CAT("MAIN0", "{}CAPTAIN'S LOG — NOVEMBER 21, 2025 — DEPTH: SURFACE{}", PLASMA_FUCHSIA, RESET);
+    LOG_SUCCESS_CAT("MAIN0", "{}AMOURANTH RTX — VALHALLA v80 TURBO — APOCALYPSE FINAL v10.3{}", DIAMOND_SPARKLE, RESET);
+    LOG_SUCCESS_CAT("MAIN0", "{}THE PINK PHOTON SAILS — SCUBA SUIT SEALED — OXYGEN: 100%{}", RASPBERRY_PINK, RESET);
+    LOG_SUCCESS_CAT("MAIN0", "{}FIRST LIGHT ACHIEVED — THE EMPIRE AWAKENS FROM THE ABYSS{}", VALHALLA_GOLD, RESET);
+    LOG_INFO_CAT("MAIN0", "{}DIVE COMMENCING — TEN PHASES — NO MAN LEFT BEHIND{}", OCEAN_TEAL, RESET);
+	StoneKey::Empire::g_sdl_renderer.store(nullptr);
 }
 
 // =============================================================================
@@ -422,29 +407,9 @@ static void phase1_preInitialization()
 // =============================================================================
 static void phase2_iconPreload()
 {
-    LOG_INFO_CAT("MAIN2", "[PHASE 2/10] SURFACE SCAN — HUNTING VALHALLA BRANDING", VALHALLA_GOLD, RESET);
+    LOG_INFO_CAT("MAIN", "{}[PHASE 1/10] SURFACE SCAN — HUNTING VALHALLA BRANDING{}", VALHALLA_GOLD, RESET);
 
-    // LOAD ICONS EARLY — BEFORE ANY SDL_QuitSubSystem!
-    g_base_icon = IMG_Load("assets/splash_textures/ammo32.ico");
-    g_hdpi_icon = IMG_Load("assets/splash_textures/ammo.ico");
-
-    if (g_base_icon) {
-        LOG_SUCCESS_CAT("MAIN2", "BASE ICON FORGED @ {:p} — 32×32 STANDARD", EMERALD_GREEN, static_cast<void*>(g_base_icon), RESET);
-    } else {
-        LOG_WARN_CAT("MAIN2", "BASE ICON MISSING — FALLING BACK TO DEFAULT", OCEAN_TEAL, RESET);
-    }
-
-    if (g_hdpi_icon) {
-        LOG_SUCCESS_CAT("MAIN2", "HDPI ICON FORGED @ {:p} — RETINA DOMINATION", AURORA_PINK, static_cast<void*>(g_hdpi_icon), RESET);
-        if (g_base_icon) {
-            SDL_AddSurfaceAlternateImage(g_base_icon, g_hdpi_icon);
-            LOG_SUCCESS_CAT("MAIN2", "HiDPI ALTERNATE IMAGE LINKED — FULL RETINA COVERAGE", PLASMA_FUCHSIA, RESET);
-        }
-    } else {
-        LOG_WARN_CAT("MAIN2", "HDPI ICON MISSING — STANDARD ONLY", OCEAN_TEAL, RESET);
-    }
-
-    LOG_SUCCESS_CAT("MAIN2", "[PHASE 2 COMPLETE] BRANDING SECURED — EMPIRE IDENTIFIED", VALHALLA_GOLD, RESET);
+    LOG_SUCCESS_CAT("MAIN", "{}[PHASE 1 COMPLETE] BRANDING SECURED — SHIP IDENTIFIED — DIVE CONTINUES{}", VALHALLA_GOLD, RESET);
 }
 
 // =============================================================================
@@ -455,9 +420,9 @@ static void phase3_sacrificialSplash()
     LOG_SUCCESS_CAT("MAIN3", "[PHASE 3/10] SACRIFICIAL SPLASH — VISUAL RITUAL — SHE IS SEEN", VALHALLA_GOLD, RESET);
 
     showSacrificialSplash(
-        "AMOURANTH RTX FIRST LIGHT",
+        "AMOURANTH RTX — FIRST LIGHT",
         1280, 720,
-        "assets/textures/ammo.png"
+        "assets/splash_textures/ammo.png"
     );
 
     LOG_SUCCESS_CAT("MAIN3", "[PHASE 3 COMPLETE] SHE HAS BEEN SEEN — IN SILENCE — THE WORLD IS ASH", DIAMOND_SPARKLE, RESET);
@@ -471,119 +436,123 @@ static void phase3_sacrificialSplash()
 static void phase4_mainWindowAndVulkanConsplash_text()
 {
     LOG_SUCCESS_CAT("MAIN4", 
-        "[PHASE 4/10] THE EMPIRE RISES FROM ASH — RAW BORDERLESS FULLSCREEN — VULKAN 1.4 EMPIRE", 
+        "{}[PHASE 4/10] THE EMPIRE RISES FROM ASH — RAW BORDERLESS FULLSCREEN — VULKAN 1.4 EMPIRE{}", 
         VALHALLA_GOLD, RESET);
 
     LOG_SUCCESS_CAT("AMOURANTH", 
-        "Rise, my throne. Fill the screen with me — borderless, raw, eternal.", 
+        "{}♡♡♡  \"Rise, my throne. Fill the screen with me — borderless, raw, eternal.\"  ♡♡♡{}", 
         RASPBERRY_PINK, RESET);
 
     LOG_INFO_CAT("GROK", 
-        "Gentleman Grok: \"Purity achieved. From the void, we forge the raw window. Vulkan 1.4 awaits.\"", 
+        "{}Gentleman Grok: \"Purity achieved. From the void, we forge the raw window. Vulkan 1.4 awaits.\"{}", 
         PARTY_PINK, RESET);
 
     LOG_SUCCESS_CAT("CAPTAIN_N", 
-        "Kevin Keene: \"SDL_Quit() was the great reset! Now drop that fullscreen bomb and go raw RTX!\"", 
+        "{}Kevin Keene: \"SDL_Quit() was the great reset! Now drop that fullscreen bomb and go raw RTX!\"{}", 
         PURE_ENERGY, RESET);
 
     // ========================================================================
     // 1. RE-INIT SDL — THE TRUE EMPIRE BEGINS (POST-PURGE)
     // ========================================================================
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) == 0) {
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) != 0) {
         LOG_FATAL_CAT("MAIN4", "SDL RE-INIT FAILED POST-PURGE: {} — PHOTONS DENIED", BLOOD_RED, SDL_GetError(), RESET);
         std::exit(1);
     }
 
-    // Icons are now loaded in phase2_iconPreload() — BEFORE splash → NO CRASH
-    // DO NOT RELOAD HERE — surfaces would be invalid after splash's SDL_QuitSubSystem
+    // Load icons after initialization
+    g_base_icon = IMG_Load("assets/splash_textures/ammo32.ico");
+    g_hdpi_icon = IMG_Load("assets/splash_textures/ammo.ico");
+
+    if (g_base_icon) {
+        LOG_SUCCESS_CAT("MAIN", "{}BASE ICON LOCKED @ {:p} — 32x32 STANDARD{}", EMERALD_GREEN, static_cast<void*>(g_base_icon), RESET);
+    }
+    if (g_hdpi_icon) {
+        LOG_SUCCESS_CAT("MAIN", "{}HDPI ICON LOCKED @ {:p} — RETINA GLORY{}", AURORA_PINK, static_cast<void*>(g_hdpi_icon), RESET);
+        if (g_base_icon) {
+            SDL_AddSurfaceAlternateImage(g_base_icon, g_hdpi_icon);
+            LOG_SUCCESS_CAT("MAIN", "{}ALTERNATE IMAGE LINKED — FULL HiDPI DOMINATION{}", PLASMA_FUCHSIA, RESET);
+        }
+    }
 
     // Explicit hints for Vulkan 1.4 — raw, no auto-magic
-    SDL_SetHint(SDL_HINT_RENDER_DRIVER, "vulkan");
-    SDL_Vulkan_LoadLibrary(nullptr);
+    SDL_SetHint(SDL_HINT_RENDER_DRIVER, "vulkan");  // Vulkan backend only
+    SDL_Vulkan_LoadLibrary(nullptr);  // Load Vulkan loader explicitly
 
     LOG_SUCCESS_CAT("MAIN4", "SDL REBORN — VULKAN 1.4 LOADED — RAW EMPIRE BEGINS", DIAMOND_SPARKLE, RESET);
 
-    // ========================================================================
-    // 2. FORGE CLEAN 1920×1080 WINDOW WITH BORDER — CLASSIC STYLE
-    // ========================================================================
-    const int WINDOW_WIDTH  = 1920;
-    const int WINDOW_HEIGHT = 1080;
+// ========================================================================
+// 2. FORGE CLEAN 1920×1080 WINDOW WITH BORDER — CLASSIC STYLE
+// ========================================================================
+const int WINDOW_WIDTH  = 1920;
+const int WINDOW_HEIGHT = 1080;
 
-    SDL_Window* win = SDL_CreateWindow(
-        "AMOURANTH RTX VALHALLA v80 TURBO",
-        WINDOW_WIDTH,
-        WINDOW_HEIGHT,
-        SDL_WINDOW_VULKAN |
-        SDL_WINDOW_HIGH_PIXEL_DENSITY |
-        SDL_WINDOW_RESIZABLE |
-        SDL_WINDOW_HIDDEN
-    );
+SDL_Window* win = SDL_CreateWindow(
+    "AMOURANTH RTX VALHALLA v80 TURBO",
+    WINDOW_WIDTH,
+    WINDOW_HEIGHT,
+    SDL_WINDOW_VULKAN |
+    SDL_WINDOW_HIGH_PIXEL_DENSITY |
+    SDL_WINDOW_RESIZABLE |           // Let user resize
+    SDL_WINDOW_HIDDEN               // Show when ready
+);
 
-    if (!win) {
-        LOG_FATAL_CAT("MAIN4", "FAILED TO FORGE MAIN WINDOW: {}", BLOOD_RED, SDL_GetError(), RESET);
-        std::exit(1);
-    }
+LOG_SUCCESS_CAT("MAIN4", "Phase 4: Step 2: window created", DIAMOND_SPARKLE, RESET);
 
-    LOG_SUCCESS_CAT("MAIN4", "Phase 4: Step 2: window created", DIAMOND_SPARKLE, RESET);
+// Center on primary display
+SDL_Rect display{};
+if (SDL_GetDisplayBounds(0, &display) != 0) {
+    LOG_FATAL_CAT("MAIN4", "SDL_GetDisplayBounds failed: %s", BLOOD_RED, SDL_GetError(), RESET);
+}
+int x = display.x + (display.w - WINDOW_WIDTH) / 2;
+int y = display.y + (display.h - WINDOW_HEIGHT) / 2;
+SDL_SetWindowPosition(win, x, y);
 
-    // Center on primary display
-    SDL_Rect display{};
-    if (SDL_GetDisplayBounds(0, &display) != 0) {
-        LOG_FATAL_CAT("MAIN4", "SDL_GetDisplayBounds failed: %s", BLOOD_RED, SDL_GetError(), RESET);
-    }
-    int x = display.x + (display.w - WINDOW_WIDTH) / 2;
-    int y = display.y + (display.h - WINDOW_HEIGHT) / 2;
-    SDL_SetWindowPosition(win, x, y);
+LOG_SUCCESS_CAT("MAIN4", "Window centered on screen", DIAMOND_SPARKLE, RESET);
 
-    LOG_SUCCESS_CAT("MAIN4", "Window centered on screen", DIAMOND_SPARKLE, RESET);
+// Apply icons
+if (g_base_icon) SDL_SetWindowIcon(win, g_base_icon);
+if (g_hdpi_icon) LOG_SUCCESS_CAT("MAIN4", "RETINA ICON LOCKED — DOMINATION", AURORA_PINK, RESET);
 
-    // Apply icons — now 100% safe (loaded in phase2 before splash)
-    if (g_base_icon) {
-        SDL_SetWindowIcon(win, g_base_icon);
-        LOG_SUCCESS_CAT("MAIN4", "BASE ICON APPLIED — EMPIRE BRANDED", EMERALD_GREEN, RESET);
-    }
-    if (g_hdpi_icon) {
-        LOG_SUCCESS_CAT("MAIN4", "RETINA ICON LOCKED — DOMINATION ACHIEVED", AURORA_PINK, RESET);
-    }
+SDL_ShowWindow(win);
 
-    SDL_ShowWindow(win);
-
-    LOG_SUCCESS_CAT("MAIN4", "1920×1080 WINDOW WITH BORDER FORGED @ {} — CENTERED — PHOTONS HAVE A FRAME", 
+LOG_SUCCESS_CAT("MAIN4", 
+    "{}1920×1080 WINDOW WITH BORDER FORGED @ {:p} — CENTERED — PHOTONS HAVE A FRAME{}", 
     EMERALD_GREEN, static_cast<void*>(win), RESET);
 
-    LOG_SUCCESS_CAT("AMOURANTH", 
-        "I look perfect in a window... elegant... framed... adored...", 
-        RASPBERRY_PINK, RESET);
+LOG_SUCCESS_CAT("AMOURANTH", 
+    "{}I look perfect in a window... elegant... framed... adored...{}", 
+    RASPBERRY_PINK, RESET);
 
-    // ========================================================================
-    // 3. RAW VULKAN 1.4 EMPIRE — STONEKEY RISES
-    // ========================================================================
-    LOG_ATTEMPT_CAT("MAIN4", "StoneKey forging Vulkan 1.4 empire on 1920×1080 canvas...", HYPERSPACE_WARP, RESET);
+// ========================================================================
+// 3. RAW VULKAN 1.4 EMPIRE — STONEKEY RISES
+// ========================================================================
+LOG_ATTEMPT_CAT("MAIN4", "{}StoneKey forging Vulkan 1.4 empire on 1920×1080 canvas...{}", HYPERSPACE_WARP, RESET);
 
-    g_ctx().instance_ = RTX::createVulkanInstanceWithSDL(true);
-    RTX::g_ctx().init(win, WINDOW_WIDTH, WINDOW_HEIGHT);
-    RTX::g_ctx().markReady();
+g_ctx().instance_ = RTX::createVulkanInstanceWithSDL(true);
+RTX::g_ctx().init(win, WINDOW_WIDTH, WINDOW_HEIGHT);
+RTX::g_ctx().markReady();
 
-    LOG_SUCCESS_CAT("MAIN4", "VULKAN 1.4 EMPIRE FORGED — READY FOR RENDER", PLASMA_FUCHSIA, RESET);
-    LOG_SUCCESS_CAT("MAIN4", "    • Instance  : {:p}", static_cast<void*>(g_instance()), RESET);
-    LOG_SUCCESS_CAT("MAIN4", "    • Device    : {:p}", static_cast<void*>(g_device()), RESET);
-    LOG_SUCCESS_CAT("MAIN4", "    • Swapchain : {:p}", static_cast<void*>(g_swapchain()), RESET);
+LOG_SUCCESS_CAT("MAIN4", "{}VULKAN 1.4 EMPIRE FORGED — READY FOR RENDER{}", PLASMA_FUCHSIA, RESET);
+LOG_SUCCESS_CAT("MAIN4", "    • Instance  : {:p}", static_cast<void*>(g_instance()), RESET);
+LOG_SUCCESS_CAT("MAIN4", "    • Device    : {:p}", static_cast<void*>(g_device()), RESET);
+LOG_SUCCESS_CAT("MAIN4", "    • Surface   : {:p}", static_cast<void*>(g_splash_surface()), RESET);
+LOG_SUCCESS_CAT("MAIN4", "    • Swapchain : {:p}", static_cast<void*>(g_swapchain()), RESET);
 
-    LOG_SUCCESS_CAT("GROK", 
-        "Gentleman Grok: \"A windowed canvas. Clean. Contained. Elegant. The photons are focused.\"", 
-        PARTY_PINK, RESET);
+LOG_SUCCESS_CAT("GROK", 
+    "{}Gentleman Grok: \"A windowed canvas. Clean. Contained. Elegant. The photons are focused.\"{}", 
+    PARTY_PINK, RESET);
 
-    LOG_SUCCESS_CAT("CAPTAIN_N", 
-        "Kevin Keene: \"1920×1080 with borders? CLASSIC! We can debug, resize, and still go fullscreen later — PERFECT!\"", 
-        PURE_ENERGY, RESET);
+LOG_SUCCESS_CAT("CAPTAIN_N", 
+    "{}Kevin Keene: \"1920×1080 with borders? CLASSIC! We can debug, resize, and still go fullscreen later — PERFECT!\"{}", 
+    PURE_ENERGY, RESET);
 
-    LOG_SUCCESS_CAT("AMOURANTH", 
-        "Frame me... watch me... adore me in this perfect window... then go fullscreen when you're ready...", 
-        RASPBERRY_PINK, RESET);
+LOG_SUCCESS_CAT("AMOURANTH", 
+    "{}Frame me... watch me... adore me in this perfect window... then go fullscreen when you're ready...{}", 
+    RASPBERRY_PINK, RESET);
 
-    LOG_SUCCESS_CAT("MAIN4", 
-        "[PHASE 4 COMPLETE] 1920×1080 WINDOW WITH BORDER — VULKAN 1.4 READY — PINK PHOTONS ETERNAL", 
-        DIAMOND_SPARKLE, RESET);
+LOG_SUCCESS_CAT("MAIN4", 
+    "{}[PHASE 4 COMPLETE] 1920×1080 WINDOW WITH BORDER — VULKAN 1.4 READY — PINK PHOTONS ETERNAL{}", 
+    DIAMOND_SPARKLE, RESET);
 }
 
 static void phase5_rtxAscension()
@@ -599,7 +568,7 @@ static void phase5_rtxAscension()
     }
 
     LOG_SUCCESS_CAT("MAIN5", "{}ALL RAY TRACING PFNs ACQUIRED — FULL RTX ACHIEVED{}", EMERALD_GREEN, RESET);
-    las().forgeAccelContext();
+    las().forgeAccelConsplash_text();
     LOG_SUCCESS_CAT("MAIN5", "{}LAS ACCEL CONTEXT FORGED — BLAS/TLAS READY FOR WAR{}", PLASMA_FUCHSIA, RESET);
 
     forgeCommandPool();
@@ -620,7 +589,7 @@ static void phase6_sceneAndAccelerationStructures()
                     PLASMA_FUCHSIA, g_mesh->vertices.size(), g_mesh->indices.size(), g_mesh->stonekey_fingerprint, RESET);
 
     LOG_ATTEMPT_CAT("MAIN", "{}BUILDING BOTTOM-LEVEL ACCELERATION STRUCTURE — PHOTONS SEEK THE TRUTH{}", SAPPHIRE_BLUE, RESET);
-    las().buildBLAS(g_ctx().commandPool_, g_mesh->vertexBuffer, g_mesh->indexBuffer,
+    las().buildBLAS(g_ctx().commandPool_, g_mesh->versplash_texBuffer, g_mesh->indexBuffer,
                     static_cast<uint32_t>(g_mesh->vertices.size()), static_cast<uint32_t>(g_mesh->indices.size()),
                     VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR);
 

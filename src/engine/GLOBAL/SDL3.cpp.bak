@@ -697,78 +697,14 @@ namespace AmouranthRTX::ImageLoader {
     SDL_Surface* surf = nullptr;
 
     // Try PNG first (works if SDL3 was built with PNG support)
-#ifdef SDL3_IMAGE_ENABLED
-    if (SDL_Surface* surf = IMG_Load(path)) {
-        LOG_SUCCESS_CAT("IMG", "SDL3_image loaded {} ({}x{})", PLASMA_FUCHSIA, path, surf->w, surf->h, RESET);
+    surf = SDL_LoadPNG_IO(io, true);  // true = auto-close io
+    if (surf) {
+        LOG_SUCCESS_CAT("IMG", "Core SDL3 + libpng loaded PNG: {}", DIAMOND_SPARKLE, path, RESET);
         return surf;
     }
-#endif
 
-    LOG_FATAL_CAT("IMG", "IMAGE RITUAL FAILED — SDL3_image missing or file corrupt: {}", BLOOD_RED, path, RESET);
-    return nullptr;
-#ifdef SDL3_IMAGE_ENABLED
-    if (SDL_Surface* surf = IMG_Load(path)) {
-        LOG_SUCCESS_CAT("IMG", "SDL3_image loaded {} ({}x{})", PLASMA_FUCHSIA, path, surf->w, surf->h, RESET);
-        return surf;
-    }
-#endif
-
-    LOG_FATAL_CAT("IMG", "IMAGE RITUAL FAILED — SDL3_image missing or file corrupt: {}", BLOOD_RED, path, RESET);
-    return nullptr;
-#ifdef SDL3_IMAGE_ENABLED
-    if (SDL_Surface* surf = IMG_Load(path)) {
-        LOG_SUCCESS_CAT("IMG", "SDL3_image loaded {} ({}x{})", PLASMA_FUCHSIA, path, surf->w, surf->h, RESET);
-        return surf;
-    }
-#endif
-
-    LOG_FATAL_CAT("IMG", "IMAGE RITUAL FAILED — SDL3_image missing or file corrupt: {}", BLOOD_RED, path, RESET);
-    return nullptr;
-#ifdef SDL3_IMAGE_ENABLED
-    if (SDL_Surface* surf = IMG_Load(path)) {
-        LOG_SUCCESS_CAT("IMG", "SDL3_image loaded {} ({}x{})", PLASMA_FUCHSIA, path, surf->w, surf->h, RESET);
-        return surf;
-    }
-#endif
-
-    LOG_FATAL_CAT("IMG", "IMAGE RITUAL FAILED — SDL3_image missing or file corrupt: {}", BLOOD_RED, path, RESET);
-    return nullptr;
-#ifdef SDL3_IMAGE_ENABLED
-    if (SDL_Surface* surf = IMG_Load(path)) {
-        LOG_SUCCESS_CAT("IMG", "SDL3_image loaded {} ({}x{})", PLASMA_FUCHSIA, path, surf->w, surf->h, RESET);
-        return surf;
-    }
-#endif
-
-    LOG_FATAL_CAT("IMG", "IMAGE RITUAL FAILED — SDL3_image missing or file corrupt: {}", BLOOD_RED, path, RESET);
-    return nullptr;
-#ifdef SDL3_IMAGE_ENABLED
-    if (SDL_Surface* surf = IMG_Load(path)) {
-        LOG_SUCCESS_CAT("IMG", "SDL3_image loaded {} ({}x{})", PLASMA_FUCHSIA, path, surf->w, surf->h, RESET);
-        return surf;
-    }
-#endif
-
-    LOG_FATAL_CAT("IMG", "IMAGE RITUAL FAILED — SDL3_image missing or file corrupt: {}", BLOOD_RED, path, RESET);
-    return nullptr;
-#ifdef SDL3_IMAGE_ENABLED
-    if (SDL_Surface* surf = IMG_Load(path)) {
-        LOG_SUCCESS_CAT("IMG", "SDL3_image loaded {} ({}x{})", PLASMA_FUCHSIA, path, surf->w, surf->h, RESET);
-        return surf;
-    }
-#endif
-
-    LOG_FATAL_CAT("IMG", "IMAGE RITUAL FAILED — SDL3_image missing or file corrupt: {}", BLOOD_RED, path, RESET);
-    return nullptr;
-#ifdef SDL3_IMAGE_ENABLED
-    if (SDL_Surface* surf = IMG_Load(path)) {
-        LOG_SUCCESS_CAT("IMG", "SDL3_image loaded {} ({}x{})", PLASMA_FUCHSIA, path, surf->w, surf->h, RESET);
-        return surf;
-    }
-#endif
-
-    LOG_FATAL_CAT("IMG", "IMAGE RITUAL FAILED — SDL3_image missing or file corrupt: {}", BLOOD_RED, path, RESET);
-    return nullptr;
+    // Reset IO and try BMP (always works)
+    SDL_IOSeek(io, 0, SDL_IO_SEEK_SET);
     surf = SDL_LoadBMP_IO(io, true);  // true = auto-close
     if (surf) {
         LOG_SUCCESS_CAT("IMG", "Core SDL3 loaded BMP: {}", SAPPHIRE_BLUE, path, RESET);
