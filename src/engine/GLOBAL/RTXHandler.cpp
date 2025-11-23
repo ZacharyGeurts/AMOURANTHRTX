@@ -835,70 +835,86 @@ void RTX::Context::forgeSwapchain(SDL_Window* window, int width, int height)
 
 void RTX::Context::createLogicalDevice()
 {
-    // THIS IS A MEMBER FUNCTION → use 'this' or g_ctx()
-    auto& ctx = *this;  // or: auto& ctx = g_ctx();
+    auto& ctx = *this;
 
     if (ctx.device_ != VK_NULL_HANDLE) {
-        LOG_WARN_CAT("RTX", "createLogicalDevice() called twice — already exists", RASPBERRY_PINK, RESET);
+        LOG_WARN_CAT("RTX", "createLogicalDevice() called twice — already forged");
         return;
     }
 
     if (!ctx.physicalDevice_) {
-        LOG_FATAL_CAT("RTX", "createLogicalDevice() called before physical device selected!", BLOOD_RED, RESET);
-        std::exit(1);
+        LOG_FATAL_CAT("RTX", "NO PHYSICAL DEVICE — THE EMPIRE HAS NO BODY");
+        std::abort();
     }
 
     if (!ctx.graphicsFamily_.has_value() || !ctx.presentFamily_.has_value()) {
-        LOG_FATAL_CAT("RTX", "Queue families not set — pickPhysicalDevice() must be called first!", BLOOD_RED, RESET);
-        std::exit(1);
+        LOG_FATAL_CAT("RTX", "QUEUE FAMILIES UNKNOWN — pickPhysicalDevice() FIRST");
+        std::abort();
     }
 
-    LOG_ATTEMPT_CAT("RTX", "FORGING LOGICAL DEVICE — RTX EXTENSIONS ARMED — PINK PHOTONS RISING", PURE_ENERGY, RESET);
+    LOG_ATTEMPT_CAT("RTX", "{}FORGING LOGICAL DEVICE — RTX EXTENSIONS ARMED — PINK PHOTONS RISING{}", PURE_ENERGY, RESET);
 
-    std::vector<VkDeviceQueueCreateInfo> queueCreateInfos;
     std::set<uint32_t> uniqueQueueFamilies = { 
         ctx.graphicsFamily_.value(), 
         ctx.presentFamily_.value() 
     };
 
+    std::vector<VkDeviceQueueCreateInfo> queueCreateInfos;
     float queuePriority = 1.0f;
-    for (uint32_t queueFamily : uniqueQueueFamilies) {
-        VkDeviceQueueCreateInfo queueInfo{};
-        queueInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-        queueInfo.queueFamilyIndex = queueFamily;
-        queueInfo.queueCount = 1;
-        queueInfo.pQueuePriorities = &queuePriority;
+    for (uint32_t family : uniqueQueueFamilies) {
+        VkDeviceQueueCreateInfo queueInfo{
+            .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
+            .queueFamilyIndex = family,
+            .queueCount = 1,
+            .pQueuePriorities = &queuePriority
+        };
         queueCreateInfos.push_back(queueInfo);
     }
 
-    // === RTX FEATURE CHAIN — PERFECT ORDER ===
-    VkPhysicalDeviceBufferDeviceAddressFeatures bufferAddress{};
-    bufferAddress.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES;
-    bufferAddress.bufferDeviceAddress = VK_TRUE;
+    // THE SACRED CHAIN — EXACTLY CORRECT ORDER — VULKAN 1.4+ PERFECTION
+    VkPhysicalDeviceBufferDeviceAddressFeatures bufferAddress{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES,
+        .bufferDeviceAddress = VK_TRUE
+    };
 
-    VkPhysicalDeviceAccelerationStructureFeaturesKHR accelFeatures{};
-    accelFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
-    accelFeatures.accelerationStructure = VK_TRUE;
-    accelFeatures.pNext = &bufferAddress;
+    VkPhysicalDeviceAccelerationStructureFeaturesKHR accelFeatures{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR,
+        .pNext = &bufferAddress,
+        .accelerationStructure = VK_TRUE
+    };
 
-    VkPhysicalDeviceRayTracingPipelineFeaturesKHR rtFeatures{};
-    rtFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR;
-    rtFeatures.rayTracingPipeline = VK_TRUE;
-    rtFeatures.pNext = &accelFeatures;
+    VkPhysicalDeviceRayTracingPipelineFeaturesKHR rtFeatures{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR,
+        .pNext = &accelFeatures,
+        .rayTracingPipeline = VK_TRUE
+    };
 
-    VkPhysicalDeviceFeatures2 deviceFeatures{};
-    deviceFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-    deviceFeatures.features.samplerAnisotropy = VK_TRUE;
-    deviceFeatures.features.shaderInt64 = VK_TRUE;
-    deviceFeatures.pNext = &rtFeatures;
+    VkPhysicalDeviceFeatures2 deviceFeatures{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
+        .pNext = &rtFeatures,
+        .features = {
+            .samplerAnisotropy = VK_TRUE,
+            .shaderInt64 = VK_TRUE
+        }
+    };
 
-    VkDeviceCreateInfo deviceInfo{};
-    deviceInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-    deviceInfo.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());
-    deviceInfo.pQueueCreateInfos = queueCreateInfos.data();
-    deviceInfo.enabledExtensionCount = static_cast<uint32_t>(kDeviceExtensions.size());
-    deviceInfo.ppEnabledExtensionNames = kDeviceExtensions.data();
-    deviceInfo.pNext = &deviceFeatures;
+    // REQUIRED DEVICE EXTENSIONS — kDeviceExtensions must contain:
+    static const char* const kDeviceExtensions[] = {
+        VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+        VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME,
+        VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
+        VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME,
+        VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME
+    };
+
+    VkDeviceCreateInfo deviceInfo{
+        .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
+        .pNext = &deviceFeatures,
+        .queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size()),
+        .pQueueCreateInfos = queueCreateInfos.data(),
+        .enabledExtensionCount = std::size(kDeviceExtensions),
+        .ppEnabledExtensionNames = kDeviceExtensions
+    };
 
     VkDevice device = VK_NULL_HANDLE;
     VK_CHECK(vkCreateDevice(ctx.physicalDevice_, &deviceInfo, nullptr, &device));
@@ -906,17 +922,13 @@ void RTX::Context::createLogicalDevice()
     ctx.device_ = device;
     set_g_device(device);
 
-    // Retrieve queues
     vkGetDeviceQueue(device, ctx.graphicsFamily_.value(), 0, &ctx.graphicsQueue_);
     vkGetDeviceQueue(device, ctx.presentFamily_.value(),  0, &ctx.presentQueue_);
 
-    LOG_SUCCESS_CAT("RTX", "LOGICAL DEVICE FORGED @ {:#x} — FULL RTX ENABLED", 
+    LOG_SUCCESS_CAT("RTX", "{}LOGICAL DEVICE FORGED @ {:#x} — FULL RTX ASCENDED{}", 
                     VALHALLA_GOLD, reinterpret_cast<uintptr_t>(device), RESET);
-    LOG_SUCCESS_CAT("RTX", "    • Graphics Queue Family : {}", ctx.graphicsFamily_.value(), RESET);
-    LOG_SUCCESS_CAT("RTX", "    • Present Queue Family  : {}", ctx.presentFamily_.value(), RESET);
-    LOG_SUCCESS_CAT("RTX", "    • bufferDeviceAddress   : ENABLED", RESET);
-    LOG_SUCCESS_CAT("RTX", "    • accelerationStructure : ENABLED", RESET);
-    LOG_SUCCESS_CAT("RTX", "    • rayTracingPipeline    : ENABLED", RESET);
+    LOG_SUCCESS_CAT("RTX", "{}bufferDeviceAddress • accelerationStructure • rayTracingPipeline — ALL ENABLED{}", 
+                    PLASMA_FUCHSIA, RESET);
     LOG_AMOURANTH();
 }
 
