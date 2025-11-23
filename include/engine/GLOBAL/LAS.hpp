@@ -106,7 +106,7 @@ public:
     beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     VK_CHECK(vkBeginCommandBuffer(cmd, &beginInfo), "Failed to begin one-time command buffer");
 
-    LOG_DEBUG_CAT("LAS", "{}Captain N: Power surge detected - command buffer online!{}", VALHALLA_GOLD, RESET);
+    LOG_DEBUG_CAT("LAS", "{}Amouranth: Power surge detected - command buffer online!{}", VALHALLA_GOLD, RESET);
     return cmd;
 }
 
@@ -126,54 +126,79 @@ inline void endOneTime(VkCommandBuffer cmd, VkQueue queue, VkCommandPool pool = 
     }
 }
 
+// LAS.hpp
 static inline void endSingleTimeCommandsAsync(
     VkCommandBuffer cmd,
     VkQueue queue,
     VkCommandPool pool,
     VkFence fence = VK_NULL_HANDLE) noexcept
 {
-    if (cmd == VK_NULL_HANDLE || queue == VK_NULL_HANDLE || pool == VK_NULL_HANDLE) {
-        LOG_ERROR_CAT("LAS", "Mother Brain: NULL command submitted. Pathetic.");
+    if (cmd == VK_NULL_HANDLE) {
+        LOG_ERROR_CAT("LAS", "Amouranth: Attempted to submit NULL command buffer — ABORTING");
         return;
     }
 
-    VK_CHECK(vkEndCommandBuffer(cmd), "Failed to end command buffer");
+    VK_CHECK(vkEndCommandBuffer(cmd));
 
     VkDevice dev = g_ctx().device();
     bool ownsFence = (fence == VK_NULL_HANDLE);
 
     if (ownsFence) {
-        VkFenceCreateInfo fi{ .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
-        VK_CHECK(vkCreateFence(dev, &fi, nullptr, &fence), "Failed to create transient fence");
-    } else {
-        VK_CHECK(vkResetFences(dev, 1, &fence), "Failed to reset caller fence");
+        VkFenceCreateInfo fi{
+            .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+            .flags = 0
+        };
+        VK_CHECK(vkCreateFence(dev, &fi, nullptr, &fence));
+        LOG_DEBUG_CAT("LAS", "Amouranth: One-time fence forged → 0x{:016X}", reinterpret_cast<uint64_t>(fence));
     }
 
     VkSubmitInfo submit{
         .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        . pNext = nullptr,
+        .waitSemaphoreCount = 0,
+        .pWaitSemaphores = nullptr,
+        .pWaitDstStageMask = nullptr,
         .commandBufferCount = 1,
-        .pCommandBuffers = &cmd
+        .pCommandBuffers = &cmd,
+        .signalSemaphoreCount = 0,
+        .pSignalSemaphores = nullptr
     };
 
-    VK_CHECK(vkQueueSubmit(queue, 1, &submit, fence), "vkQueueSubmit failed — DEVICE LOST IMMINENT");
+    LOG_DEBUG_CAT("LAS", "Amouranth: SUBMITTING ONE-TIME COMMAND BUFFER → Queue 0x{:016X} | Cmd 0x{:016X} | Fence 0x{:016X}",
+                  reinterpret_cast<uint64_t>(queue),
+                  reinterpret_cast<uint64_t>(cmd),
+                  reinterpret_cast<uint64_t>(fence));
 
-    // === THE CRITICAL FIX: WAIT ON FENCE BEFORE FREEING ANYTHING ===
+    VkResult submitResult = vkQueueSubmit(queue, 1, &submit, fence);
+    if (submitResult != VK_SUCCESS) {
+        LOG_FATAL_CAT("LAS", "vkQueueSubmit FAILED → {} — DEVICE LOST IMMINENT", string_VkResult(submitResult));
+        VK_CHECK(submitResult);
+    }
+
+    // THE SACRED WAIT — GPU MUST FINISH BEFORE ANYTHING DIES
     if (ownsFence) {
-        constexpr uint64_t timeout_ns = 10'000'000'000ULL; // 10 seconds
-        VkResult r = vkWaitForFences(dev, 1, &fence, VK_TRUE, timeout_ns);
-        if (r == VK_TIMEOUT) {
-            LOG_FATAL_CAT("LAS", "Captain N: GPU hung during acceleration build! Forcing device wait...");
+        LOG_DEBUG_CAT("LAS", "Amouranth: Awaiting GPU completion — fence 0x{:016X}...", reinterpret_cast<uint64_t>(fence));
+
+        constexpr uint64_t timeout_ns = 15'000'000'000ULL;  // 15 seconds — generous but safe
+        VkResult waitResult = vkWaitForFences(dev, 1, &fence, VK_TRUE, timeout_ns);
+
+        if (waitResult == VK_SUCCESS) {
+            LOG_DEBUG_CAT("LAS", "Amouranth: GPU work complete — fence signaled");
+        } else if (waitResult == VK_TIMEOUT) {
+            LOG_FATAL_CAT("LAS", "GPU TIMEOUT — FORCING vkDeviceWaitIdle() — THIS IS BAD");
             vkDeviceWaitIdle(dev);
-        } else if (r != VK_SUCCESS) {
-            LOG_FATAL_CAT("LAS", "vkWaitForFences failed: {}", static_cast<int>(r));
-            vkDeviceWaitIdle(dev);
+        } else {
+            LOG_FATAL_CAT("LAS", "vkWaitForFences FAILED → {} — DEVICE LOST", string_VkResult(waitResult));
+            VK_CHECK(waitResult);
         }
 
-        // NOW IT IS SAFE TO FREE
-        vkFreeCommandBuffers(dev, pool, 1, &cmd);
         vkDestroyFence(dev, fence, nullptr);
+        LOG_DEBUG_CAT("LAS", "Amouranth: One-time fence destroyed");
     }
-    // If caller owns fence, they must wait + free themselves
+
+    // NOW IT IS SAFE TO FREE THE COMMAND BUFFER
+    vkFreeCommandBuffers(dev, pool, 1, &cmd);
+    LOG_DEBUG_CAT("LAS", "Amouranth: One-time command buffer FREED — GPU work 100% complete — PHOTONS SAFE");
 }
 
 class LAS
@@ -188,12 +213,12 @@ public:
             return;
         }
 
-        LOG_ATTEMPT_CAT("LAS", "{}Captain N: Warriors - assemble! We forge the ultimate acceleration context!{}", VALHALLA_GOLD, RESET);
+        LOG_ATTEMPT_CAT("LAS", "{}Amouranth: Warriors - assemble! We forge the ultimate acceleration context!{}", VALHALLA_GOLD, RESET);
 
         accel_ = std::make_unique<VulkanAccel>(g_ctx().device());
 
         LOG_SUCCESS_CAT("LAS", 
-            "{}Captain N: ACCELERATION CONTEXT FORGED!{}\n"
+            "{}Amouranth: ACCELERATION CONTEXT FORGED!{}\n"
             "   {}Mega Man: Ray tracing cannon at full power!{}\n"
             "   {}Kid Icarus: The wings of light are ready!{}\n"
             "   {}Simon Belmont: My whip is charged with photon energy!{}\n"

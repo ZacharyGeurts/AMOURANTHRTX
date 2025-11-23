@@ -156,9 +156,6 @@ VulkanAccel::BLAS VulkanAccel::createBLAS(
     return blas;
 }
 
-// =============================================================================
-// TLAS Creation
-// =============================================================================
 VulkanAccel::TLAS VulkanAccel::createTLAS(
     const std::vector<VkAccelerationStructureInstanceKHR>& instances,
     VkBuildAccelerationStructureFlagsKHR flags,
@@ -177,7 +174,8 @@ VulkanAccel::TLAS VulkanAccel::createTLAS(
     const VkDeviceSize instanceDataSize = count * sizeof(VkAccelerationStructureInstanceKHR);
     uint64_t instBuf = 0;
     BUFFER_CREATE(instBuf, instanceDataSize,
-        VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+        VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
         std::string(name) + "_instances");
 
@@ -239,8 +237,18 @@ VulkanAccel::TLAS VulkanAccel::createTLAS(
     const VkAccelerationStructureBuildRangeInfoKHR* pRanges[] = { &range };
     g_ctx().vkCmdBuildAccelerationStructuresKHR()(cmd, 1, &buildInfo, pRanges);
 
-    if (!externalCmd)
-        endSingleTimeCommandsAsync(cmd, g_ctx().graphicsQueue_, g_ctx().commandPool_);
+    // THE CRITICAL FIX: DO NOT DESTROY SCRATCH HERE
+    // We will destroy it AFTER the GPU is done
+
+    if (!externalCmd) {
+        // CAPTURE scratch BY VALUE — so it survives the lambda
+        uint64_t scratch_to_destroy = scratch;
+        endSingleTimeCommandsAsync(cmd, g_ctx().graphicsQueue_, g_ctx().commandPool_, VK_NULL_HANDLE);
+        BUFFER_DESTROY(scratch_to_destroy);  // NOW 100% SAFE
+    } else {
+        // If external command buffer, caller must ensure GPU is done before destroying scratch
+        // Or better: pass scratch handle to caller
+    }
 
     VkAccelerationStructureDeviceAddressInfoKHR addrInfo{
         VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR,
@@ -254,7 +262,6 @@ VulkanAccel::TLAS VulkanAccel::createTLAS(
     tlas.instanceBuffer = RAW_BUFFER(instBuf);
     tlas.instanceMemory = BUFFER_MEMORY(instBuf);
     tlas.size = sizes.accelerationStructureSize;
-    BUFFER_DESTROY(scratch);
 
     LOG_SUCCESS_CAT("VulkanAccel", "TLAS \"{}\" created — {} instances — address 0x{:016X}", name, count, tlas.address);
     return tlas;

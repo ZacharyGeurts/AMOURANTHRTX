@@ -53,6 +53,20 @@ inline static VKAPI_ATTR VkBool32 VKAPI_CALL VulkanDebugCallback(
     return VK_FALSE;
 }
 
+[[nodiscard]] inline const char* string_VkResult(VkResult result) noexcept
+{
+    switch (result) {
+        case VK_SUCCESS: return "VK_SUCCESS";
+        case VK_ERROR_DEVICE_LOST: return "VK_ERROR_DEVICE_LOST";
+        case VK_ERROR_OUT_OF_HOST_MEMORY: return "VK_ERROR_OUT_OF_HOST_MEMORY";
+        case VK_ERROR_OUT_OF_DEVICE_MEMORY: return "VK_ERROR_OUT_OF_DEVICE_MEMORY";
+        case VK_TIMEOUT: return "VK_TIMEOUT";
+        case VK_ERROR_INITIALIZATION_FAILED: return "VK_ERROR_INITIALIZATION_FAILED";
+        case VK_ERROR_EXTENSION_NOT_PRESENT: return "VK_ERROR_EXTENSION_NOT_PRESENT";
+        default: return "UNKNOWN_VK_RESULT";
+    }
+}
+
 // =============================================================================
 // std::formatter for VkPhysicalDeviceType
 // =============================================================================

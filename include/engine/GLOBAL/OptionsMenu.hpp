@@ -33,7 +33,6 @@ namespace Performance {
     constexpr uint32_t GPU_TIMESTAMP_QUERY_COUNT   = 128;
     constexpr bool     ENABLE_FRAME_TIME_LOGGING   = false;
     constexpr float    FRAME_TIME_LOG_THRESHOLD_MS = 16.666f;
-    static inline constexpr bool ENABLE_VALIDATION_LAYERS = false;
     constexpr bool START_FULLSCREEN = false;
 
     // ADDED: Required by SDL3_input.cpp, SDL3_font.cpp, SDL3_init.cpp, SDL3_window.cpp
@@ -118,7 +117,8 @@ namespace Debug {
     constexpr bool     ENABLE_WIREFRAME            = false;
     constexpr bool     ENABLE_DEBUG_VISUALIZATION  = false;
     constexpr uint32_t DEBUG_VISUALIZATION_MODE    = 0;
-	constexpr bool     ENABLE_CELEBRATION_MODE     = true;   // PINK FLASH ON FRAME 5
+	constexpr bool     ENABLE_CELEBRATION_MODE     = true;
+    static inline constexpr bool ENABLE_VALIDATION_LAYERS = false;
 }
 
 // ── TONEMAPPING & COLOR GRADING ───────────────────────────────────────────────
