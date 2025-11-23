@@ -133,7 +133,7 @@ namespace Tonemap {
 
 // ── DISPLAY & HDR SETTINGS ────────────────────────────────────────────────────
 namespace Display {
-    constexpr bool ENABLE_HDR              = true;   // ← SET TO true FOR TRUE HDR + 64-bit TONEMAPPING
+    constexpr bool ENABLE_HDR              = false;   // ← SET TO true FOR TRUE HDR + 64-bit TONEMAPPING
     constexpr bool ENABLE_VSYNC            = false;   // Controlled globally, but exposed here
     constexpr float TARGET_BRIGHTNESS_NITS = 1000.0f; // For future auto-exposure
 }
@@ -171,8 +171,8 @@ namespace Shader {
 
 // ── APPLICATION & WINDOW ──────────────────────────────────────────────────────
 namespace Window {
-    constexpr uint32_t DEFAULT_WIDTH               = 1920;
-    constexpr uint32_t DEFAULT_HEIGHT              = 1080;
+    constexpr uint32_t DEFAULT_WIDTH               = 3840;
+    constexpr uint32_t DEFAULT_HEIGHT              = 2160;
     constexpr bool     START_FULLSCREEN            = false;
     constexpr bool     VSYNC                       = false;
     constexpr bool     ALLOW_RESIZE                = true;

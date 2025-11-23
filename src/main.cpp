@@ -1,7 +1,7 @@
 // src/main.cpp
 // =============================================================================
 // AMOURANTH RTX — VALHALLA v80 TURBO — APOCALYPSE FINAL v10.3
-// FIRST LIGHT ACHIEVED — NOVEMBER 21, 2025 — PINK PHOTONS ETERNAL
+// FIRST LIGHT ACHIEVED — NOVEMBER 23, 2025 — PINK PHOTONS ETERNAL
 // FULLY SELF-CONTAINED — ONE FILE TO RULE THEM ALL — EMPIRE UNIFIED
 // THE FINAL SCREAM HAS BEEN SILENCED — PHOTONS FLOW IN PERFECT HARMONY
 // =============================================================================
@@ -13,25 +13,80 @@
 #include "engine/GLOBAL/Validation.hpp"
 #include "engine/GLOBAL/SDL3.hpp"
 
-// GLOBAL AUDIO EMPIRE — THE ONE TRUE VOICE
 #include "engine/GLOBAL/VulkanRenderer.hpp"
 #include "engine/GLOBAL/PipelineManager.hpp"
 #include "engine/GLOBAL/MeshLoader.hpp"
 #include "main.hpp"
 
+// src/main.cpp — FINAL INCLUDE ORDER — PINK PHOTONS ETERNAL — NOV 23 2025
+#include <vulkan/vulkan.hpp>
+
+#include <string>
+#include <format>        // C++23 std::format — NO FMT EVER AGAIN
 #include <iostream>
 #include <memory>
-#include <format>
 #include <sstream>
 #include <iomanip>
+#include <fstream>
 #include <chrono>
+
+// ── PLATFORM-SPECIFIC HEADERS — CLEAN AND SORTED ─────────────────────────────
+#if defined(__linux__)
+    #include <unistd.h>
+    #include <sys/utsname.h>
+    #include <sys/sysinfo.h>
+#elif defined(_WIN32)
+    #include <windows.h>
+    #include <sysinfoapi.h>
+#else
+    #error "Unsupported platform — the Empire does not recognize this realm."
+#endif
+
+// ── EXTERNAL LIBS ─────────────────────────────────────────────────────────────
 #include <glm/gtc/matrix_transform.hpp>
+
 #include <SDL3/SDL_vulkan.h>
+#include <SDL3/SDL.h>
 #include <SDL3_image/SDL_image.h>
 #include <SDL3_mixer/SDL_mixer.h>
 #include <SDL3/SDL_iostream.h>
 
 using namespace Logging::Color;
+
+inline RTX::PipelineManager* g_pipeline_manager = nullptr;
+
+// ── TRUTH ACCESSORS — FINAL C++23 EDITION — PINK PHOTONS ETERNAL ───────────────────────────
+inline const char* physicalDeviceName() 
+{ 
+    return g_ctx().physicalDeviceProperties_.deviceName; 
+}
+
+inline float vramGB() 
+{
+    const auto& heaps = g_ctx().physicalDeviceMemoryProperties_.memoryHeaps;
+    for (uint32_t i = 0; i < g_ctx().physicalDeviceMemoryProperties_.memoryHeapCount; ++i) {
+        if (heaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) {
+            return static_cast<float>(heaps[i].size) / (1024.0f * 1024.0f * 1024.0f);
+        }
+    }
+    return 0.0f;
+}
+
+
+inline uint32_t transferFamily() 
+{ 
+    return g_ctx().transferFamily_.value_or(g_ctx().graphicsFamily()); 
+}
+
+inline uint32_t computeFamily()  
+{ 
+    return g_ctx().computeFamily_.value_or(g_ctx().graphicsFamily()); 
+}
+
+inline size_t pipelineCount()
+{
+    return g_pipeline_manager ? 1 : 0;
+}
 
 // =============================================================================
 // GLOBAL LIVE CAMERA — PINK PHOTONS HAVE EYES
@@ -263,7 +318,6 @@ void Application::updateWindowTitle(float deltaTime) {
 // GLOBALS & PHASES
 // =============================================================================
 inline std::unique_ptr<Application>           g_app              = nullptr;
-inline RTX::PipelineManager*                  g_pipeline_manager = nullptr;
 inline std::unique_ptr<MeshLoader::Mesh>      g_mesh             = nullptr;
 
 static SDL_Surface* g_base_icon = nullptr;
@@ -282,13 +336,43 @@ static void forgeCommandPool() {
     LOG_SUCCESS_CAT("MAIN", "{}COMMAND POOL FORGED — HANDLE: 0x{:016X}{}", PLASMA_FUCHSIA, (uint64_t)pool, RESET);
 }
 
+static void createRealFinalWindow()
+{
+    LOG_SUCCESS_CAT("MAIN", "{}[PHASE 4.5] CREATING CLEAN FINAL WINDOW — NO RESIDUE{}", PLASMA_FUCHSIA, RESET);
+
+    const uint32_t w = Options::Window::DEFAULT_WIDTH;
+    const uint32_t h = Options::Window::DEFAULT_HEIGHT;
+
+    // Re-init SDL video subsystem (splash killed it)
+    if (SDL_InitSubSystem(SDL_INIT_VIDEO) == 0) {
+        LOG_FATAL_CAT("SDL3", "{}SDL_InitSubSystem failed: {}{}", BLOOD_RED, SDL_GetError(), RESET);
+        std::exit(1);
+    }
+
+    SDL_Window* win = SDL_CreateWindow(
+        "AMOURANTH RTX — VALHALLA v80 TURBO",
+        w, h,
+        SDL_WINDOW_VULKAN | SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_RESIZABLE
+    );
+
+    if (!win) {
+        LOG_FATAL_CAT("SDL3", "{}FINAL WINDOW FAILED: {}{}", BLOOD_RED, SDL_GetError(), RESET);
+        std::exit(1);
+    }
+
+    // Take ownership via your RAII wrapper
+    g_sdl_window.reset(win);
+
+    SDL_SetWindowPosition(win, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+    SDL_ShowWindow(win);
+
+    LOG_SUCCESS_CAT("MAIN", "{}FINAL WINDOW BORN — {}×{} — PURE AND CLEAN{}", DIAMOND_SPARKLE, w, h, RESET);
+}
 
 // =============================================================================
 // SACRIFICIAL SPLASH — IN-MAIN ONLY — VIA STONEKEY EMPIRE — PURE DOMINATION
 // NOVEMBER 22, 2025 — X11 BOWS — VULKAN WAITS — PINK PHOTONS ETERNAL
 // =============================================================================
-#include <format>  // ← Make sure this is in main.cpp or a global header
-
 static void showSacrificialSplash(const char* title, int w, int h, const char* pngPath)
 {
     // ─────────────────────────────────────────────────────────────────────
@@ -397,8 +481,8 @@ end_splash:
 static void phase1_preInitialization()
 {
     // ─────────────────────────────────────────────────────────────────────
-    // PHASE 1 — THE GOOD SHIP VULKAN AWAKENS
-    // CAPTAIN AMOURANTH & FIRST MATE NICK — NOVEMBER 23, 2025
+    // PHASE 1 — ACQUIRING THE ANCIENT MAP
+    // THE CREW DISCOVERS THE SACRED CHART THAT GUIDES THEM TO THE PINK PHOTON TREASURES
     // ─────────────────────────────────────────────────────────────────────
     LOG_SUCCESS_CAT("MAIN", "{}CAPTAIN'S LOG — NOVEMBER 23, 2025 — THE GOOD SHIP VULKAN AWAKENS{}", PLASMA_FUCHSIA, RESET);
     LOG_SUCCESS_CAT("MAIN", "{}AMOURANTH RTX — VALHALLA v80 TURBO — APOCALYPSE FINAL v10.3{}", DIAMOND_SPARKLE, RESET);
@@ -406,6 +490,7 @@ static void phase1_preInitialization()
 
     LOG_AMOURANTH("{}Captain Amouranth stands at the bow, wind in her hair: \"A new dawn. A clean slate. Let's build something beautiful.\"{}", RASPBERRY_PINK, RESET);
     LOG_NICK("{}First Mate Nick checks the charts: \"Course set, Captain. No storms on the horizon — just pure RTX ahead.\"{}", EMERALD_GREEN, RESET);
+    LOG_INFO_CAT("BLONDIE", "{}BLONDIE_CREW grumbles: \"Hurumph! We'll beat them to the treasure!\"{}", YELLOW, RESET);
     // Validation layers — obey the sacred Options menu
     const bool validationEnabled = Options::Debug::ENABLE_VALIDATION_LAYERS;
 
@@ -427,80 +512,15 @@ static void phase1_preInitialization()
         RESET);
     LOG_SUCCESS_CAT("MAIN", "{}PINK PHOTONS FLOW UNDISTURBED — THE EMPIRE IS PURE{}", RASPBERRY_PINK, RESET);
 
-    // SDL3 rises from the deep
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_GAMEPAD) == 0) {
-        LOG_FATAL_CAT("MAIN", "{}SDL3 FAILED TO RISE: {}{}", CRIMSON_MAGENTA, SDL_GetError(), RESET);
-        std::exit(1);
-    }
-    LOG_SUCCESS_CAT("MAIN", "{}SDL3 EMPIRE ESTABLISHED — VIDEO • EVENTS • GAMEPAD{}", DIAMOND_SPARKLE, RESET);
-
-#ifdef SDL3_IMAGE_ENABLED
-    const int img_flags = IMG_INIT_PNG | IMG_INIT_JPG | IMG_INIT_WEBP | IMG_INIT_AVIF;
-    if ((IMG_Init(img_flags) & img_flags) != img_flags) {
-        LOG_FATAL_CAT("MAIN", "{}SDL3_image FAILED TO MANIFEST: {}{}", CRIMSON_MAGENTA, SDL_GetError(), RESET);
-        SDL_Quit();
-        std::exit(1);
-    }
-    LOG_SUCCESS_CAT("MAIN", "{}SDL3_image FULLY INITIALIZED — TEXTURES READY{}", DIAMOND_SPARKLE, RESET);
-#endif
-
     // Purge ghosts of previous voyages — memory must be immaculate
     RTX::UltraLowLevelBufferTracker::get().purge_all();
     LOG_SUCCESS_CAT("MAIN", "{}ALL TAINT PURGED — NO GHOSTS REMAIN — ONLY PINK PHOTONS{}", VALHALLA_GOLD, RESET);
 
-    LOG_AMOURANTH("{}Captain Amouranth smiles: \"Phase 1 complete. The ship is clean. The crew is ready.\"{}", RASPBERRY_PINK, RESET);
+    LOG_AMOURANTH("{}Captain Amouranth smiles: \"Phase 1 complete. The map is ours. The crew is ready.\"{}", RASPBERRY_PINK, RESET);
     LOG_NICK("{}Nick nods: \"Let's raise the black flag. It's time.\"{}", EMERALD_GREEN, RESET);
+    LOG_INFO_CAT("BLONDIE", "{}BLONDIE_CREW cheers: \"Cheer! Our map is better!\"{}", YELLOW, RESET);
 
-    LOG_SUCCESS_CAT("MAIN", "{}PHASE 1 COMPLETE — THE GOOD SHIP VULKAN IS ALIVE — RAW. ETERNAL. UNBROKEN.{}", DIAMOND_SPARKLE, RESET);
-}
-
-// =============================================================================
-// PHASE 2 — ICON PRELOAD — PURE, CLEAN, NO SDL TOUCHED
-// =============================================================================
-static void phase2_iconPreload()
-{
-    // ─────────────────────────────────────────────────────────────────────
-    // PHASE 2 — ACQUIRING THE AMMO
-    // THE CREW GOES HUNTING FOR LEGENDARY TREASURE: ammo32.ico & ammo.ico
-    // PIRATE COMEDY IS BACK — FULL CHAOS, FULL LOVE
-    // ─────────────────────────────────────────────────────────────────────
-    LOG_INFO_CAT("MAIN2", "{}[PHASE 2/10] THE HUNT FOR AMMO BEGINS — TREASURE MAP UNFURLED{}", VALHALLA_GOLD, RESET);
-
-    LOG_AMOURANTH("{}Captain Amouranth slams the treasure map on the table: \"Listen up, you beautiful degenerates — we need the AMMO. Without it we're just a fancy boat with no cannons!\"{}", RASPBERRY_PINK, RESET);
-    LOG_NICK("{}First Mate Nick squints at the map: \"X marks the spot… assets/textures/ammo32.ico and ammo.ico. Classic pirate stash.\"{}", EMERALD_GREEN, RESET);
-
-    LOG_CAPTAIN_N("{}Captain N already halfway down the ladder: \"DIBS ON THE SMALL ONE! THAT'S THE GOOD AMMO!\"{}", PURE_ENERGY, RESET);
-
-    // ── THE RAID BEGINS ──
-    g_base_icon = IMG_Load("assets/textures/ammo32.ico");
-    g_hdpi_icon = IMG_Load("assets/textures/ammo.ico");
-
-    if (g_base_icon) {
-        LOG_SUCCESS_CAT("MAIN2", "{}CAPTAIN N SCREAMS FROM THE HOLD: \"I GOT THE 32×32 AMMO! IT'S PERFECTLY POCKET-SIZED!\"{}", EMERALD_GREEN, RESET);
-        LOG_SUCCESS_CAT("MAIN2", "{}BASE AMMO SECURED @ {:p} — READY TO BLOW MINDS{}", EMERALD_GREEN, static_cast<void*>(g_base_icon), RESET);
-    } else {
-        LOG_WARN_CAT("MAIN2", "{}Captain N comes up empty-handed: \"…someone stole my tiny ammo… I'm gonna cry.\"{}", OCEAN_TEAL, RESET);
-        LOG_WARN_CAT("MAIN2", "{}BASE AMMO MISSING — FALLING BACK TO DEFAULT (boring) ICON{}", OCEAN_TEAL, RESET);
-    }
-
-    if (g_hdpi_icon) {
-        LOG_SUCCESS_CAT("MAIN2", "{}Jensen Huang kicks open a gilded chest: \"Behold — the RETINA AMMO. 4K cannons, baby.\"{}", AURORA_PINK, RESET);
-        LOG_SUCCESS_CAT("MAIN2", "{}HDPI AMMO ACQUIRED @ {:p} — RETINA DOMINATION ACHIEVED{}", AURORA_PINK, static_cast<void*>(g_hdpi_icon), RESET);
-
-        if (g_base_icon) {
-            SDL_AddSurfaceAlternateImage(g_base_icon, g_hdpi_icon);
-            LOG_SUCCESS_CAT("MAIN2", "{}Elon Musk duct-tapes them together: \"Now it scales to infinity. Literally. I'm billing NASA.\"{}", PLASMA_FUCHSIA, RESET);
-            LOG_SUCCESS_CAT("MAIN2", "{}FULL RETINA COVERAGE — WE LOOK SEXY ON EVERY SCREEN{}", PLASMA_FUCHSIA, RESET);
-        }
-    } else {
-        LOG_WARN_CAT("MAIN2", "{}Keanu Reeves stares sadly at the empty chest: \"…no big ammo. Sad pirate hours.\"{}", OCEAN_TEAL, RESET);
-    }
-
-    LOG_AMOURANTH("{}Captain Amouranth sheathes her cutlass with a grin: \"Ammo secured. The empire now has a face — and it's gorgeous.\"{}", RASPBERRY_PINK, RESET);
-    LOG_NICK("{}Nick pockets a spare bullet: \"For luck.\" *winks*\"{}", EMERALD_GREEN, RESET);
-
-    LOG_SUCCESS_CAT("MAIN2", "{}[PHASE 2 COMPLETE] AMMO RAID SUCCESSFUL — BRANDING LOCKED AND LOADED — EMPIRE IDENTIFIED{}", VALHALLA_GOLD, RESET);
-    LOG_SUCCESS_CAT("MAIN2", "{}NEXT STOP: THE SACRIFICIAL SPLASH — BRACE FOR IMPACT{}", DIAMOND_SPARKLE, RESET);
+    LOG_SUCCESS_CAT("MAIN", "{}PHASE 1 COMPLETE — THE ANCIENT MAP ACQUIRED — THE GOOD SHIP VULKAN IS READY TO FOLLOW ITS PATH{}", DIAMOND_SPARKLE, RESET);
 }
 
 // =============================================================================
@@ -509,11 +529,10 @@ static void phase2_iconPreload()
 static void phase3_sacrificialSplash()
 {
     // ─────────────────────────────────────────────────────────────────────
-    // PHASE 3 — THE SACRIFICIAL SPLASH
-    // THE AMMO.PNG IS REVEALED TO THE WORLD — 3.4 SECONDS OF PURE LEGEND
-    // EVERYONE REACTS IN THEIR OWN, VERY REAL WAY
+    // PHASE 3 — REVEALING THE MYSTIC HARP (AMMO.PNG)
+    // THE CREW UNVEILS THE SACRED HARP THAT SINGS THE SONG OF PINK PHOTONS FOR 3.4 SECONDS
     // ─────────────────────────────────────────────────────────────────────
-    LOG_SUCCESS_CAT("MAIN", "{}[PHASE 3/10] SACRIFICIAL SPLASH — THE AMMO IS UNVEILED{}", VALHALLA_GOLD, RESET);
+    LOG_SUCCESS_CAT("MAIN", "{}[PHASE 3/10] REVEALING THE MYSTIC HARP — THE AMMO IS UNVEILED{}", VALHALLA_GOLD, RESET);
 
     LOG_AMOURANTH("{}Captain Amouranth steps forward, voice low and proud: \"This is it. The symbol of everything we've built. Let them see it. Let them remember.\"{}", RASPBERRY_PINK, RESET);
     LOG_NICK("{}Nick stands beside her, calm and certain: \"3.4 seconds. That's all we need. The world will never forget.\"{}", EMERALD_GREEN, RESET);
@@ -529,6 +548,7 @@ static void phase3_sacrificialSplash()
     LOG_CARMACK("{}John Carmack, arms crossed, gives a single nod: \"It works. That's all that matters.\"{}", BOLD_WHITE, RESET);
 
     LOG_KEANU("{}Keanu Reeves, staring at the screen in quiet awe: \"…Breathtaking.\" *voice cracks slightly*\"{}", BOLD_CYAN, RESET);
+    LOG_INFO_CAT("BLONDIE", "{}BLONDIE_CREW grumbles: \"Grumble grumble. Our harp is louder.\"{}", YELLOW, RESET);
 
     // ── THE RITUAL BEGINS ──
     showSacrificialSplash(
@@ -538,10 +558,11 @@ static void phase3_sacrificialSplash()
     );
 
     // ── THE MOMENT PASSES — THE WORLD IS FOREVER CHANGED ──
-    LOG_SUCCESS_CAT("MAIN", "{}[PHASE 3 COMPLETE] THE AMMO HAS BEEN SEEN — 3.4 SECONDS OF ETERNITY — THE WORLD IS ASH{}", DIAMOND_SPARKLE, RESET);
+    LOG_SUCCESS_CAT("MAIN", "{}[PHASE 3 COMPLETE] THE MYSTIC HARP HAS BEEN HEARD — 3.4 SECONDS OF ETERNITY — THE WORLD IS ASH{}", DIAMOND_SPARKLE, RESET);
 
     LOG_AMOURANTH("{}Captain Amouranth spins toward the helm, triumphant: \"Hard to starboard! We ride the pink photon wave out of here!\"{}", RASPBERRY_PINK, RESET);
     LOG_NICK("{}Nick grabs the wheel beside her, grinning: \"Full sail, Captain. Let's disappear into legend—\"{}", EMERALD_GREEN, RESET);
+    LOG_INFO_CAT("BLONDIE", "{}BLONDIE_CREW cheers: \"Cheer! We'll play better next time!\"{}", YELLOW, RESET);
 
     // …but the sea has other plans.
     LOG_SUCCESS_CAT("SPLASH", "{}THE OCEAN ROARS — A HIDDEN REEF TEARS THE HULL — WATER FLOODS THE MAGAZINE{}", VALHALLA_GOLD, RESET);
@@ -563,108 +584,16 @@ static void phase3_sacrificialSplash()
 }
 
 // =============================================================================
-// PHASE 4 — THE EMPIRE RISES FROM ASH — FULLSCREEN BORDERLESS — RTX ASCENSION
-// AFTER SDL_Quit() — WE ARE CLEAN — NOW WE FORGE THE FINAL REALM
-// NOVEMBER 22, 2025 — FIRST LIGHT ETERNAL
+// PHASE 2 — ICON PRELOAD — PURE, CLEAN, NO SDL TOUCHED
 // =============================================================================
-static void phase4_mainWindowAndVulkanConsplash_text()
-{
-    // ─────────────────────────────────────────────────────────────────────
-    // PHASE 4 — RESURRECTION
-    // THE CREW IS RESCUED BY A MERCHANT SHIP — A NEW VESSEL BEGINS TO RISE
-    // FROM THE WRECKAGE OF THE OLD, SOMETHING GREATER IS BORN
-    // ─────────────────────────────────────────────────────────────────────
-    LOG_SUCCESS_CAT("MAIN", "{}[PHASE 4/10] RESURRECTION — THE CREW LIVES — A NEW SHIP RISES{}", VALHALLA_GOLD, RESET);
-
-    LOG_AMOURANTH("{}Captain Amouranth, soaked but unbroken, stands on the deck of the merchant ship: \"We lost the old girl… but we still have the ammo. And we still have each other.\"{}", RASPBERRY_PINK, RESET);
-    LOG_NICK("{}Nick wrings seawater from his coat, already sketching plans on a crate: \"We're not done. We're building her again — stronger, cleaner, faster.\"{}", EMERALD_GREEN, RESET);
-
-    LOG_CAPTAIN_N("{}Captain N, wrapped in a blanket, clutching a salvaged hard drive: \"I SAVED THE AMMO.PNG! ALSO MY WAIFU BODY PILLOW! PRIORITIES!\"{}", PURE_ENERGY, RESET);
-
-    LOG_ELON("{}Elon Musk, somehow already on the phone: \"Yeah I'll take three shipyards and a crate of GPUs. Rush delivery.\"{}", BOLD_GOLD, RESET);
-    LOG_JENSEN("{}Jensen Huang hands out fresh cigars to the freezing crew: \"Next hull's gonna be titanium. Pink titanium.\"{}", EMERALD_GREEN, RESET);
-    LOG_CARMACK("{}John Carmack, quietly compiling on a battered laptop: \"Same code. New ship. Still works.\"{}", BOLD_WHITE, RESET);
-    LOG_KEANU("{}Keanu Reeves stares back at the sinking wreck, voice soft: \"…She was beautiful.\" *turns to the horizon* \"This one will be too.\"{}", BOLD_CYAN, RESET);
-
-    LOG_GROK("{}Gentleman Grok pours rum for everyone: \"A minor detour. The empire does not end in water. It rises from it.\"{}", PARTY_PINK, RESET);
-
-    LOG_AMOURANTH("{}Captain Amouranth raises her fist: \"We build again. Vulkan 1.4. Raw. Borderless. Unstoppable. This time… nothing sinks us.\"{}", PLASMA_FUCHSIA, RESET);
-
-    // ========================================================================
-    // 1. RE-INIT SDL — THE NEW EMPIRE BEGINS
-    // ========================================================================
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) == 0) {
-        LOG_FATAL_CAT("MAIN4", "{}EVEN THE MERCHANT SHIP CAN'T SAVE US NOW: {}{}", BLOOD_RED, SDL_GetError(), RESET);
-        std::exit(1);
-    }
-
-    SDL_SetHint(SDL_HINT_RENDER_DRIVER, "vulkan");
-    SDL_Vulkan_LoadLibrary(nullptr);
-
-    LOG_SUCCESS_CAT("MAIN4", "{}SDL REBORN FROM THE DEPTHS — VULKAN 1.4 EMPIRE ONLINE{}", DIAMOND_SPARKLE, RESET);
-
-    // ========================================================================
-    // 2. FORGE THE NEW HULL — 1920×1080 WITH BORDERS (FOR NOW)
-    // ========================================================================
-    const int WINDOW_WIDTH  = 1920;
-    const int WINDOW_HEIGHT = 1080;
-
-    SDL_Window* win = SDL_CreateWindow(
-        "AMOURANTH RTX — REBORN",
-        WINDOW_WIDTH, WINDOW_HEIGHT,
-        SDL_WINDOW_VULKAN |
-        SDL_WINDOW_HIGH_PIXEL_DENSITY |
-        SDL_WINDOW_RESIZABLE |
-        SDL_WINDOW_HIDDEN
-    );
-
-    if (!win) {
-        LOG_FATAL_CAT("MAIN4", "{}THE NEW SHIP REFUSES TO LAUNCH: {}{}", BLOOD_RED, SDL_GetError(), RESET);
-        std::exit(1);
-    }
-
-    // Center it like the proud flagship she is
-    SDL_Rect display{};
-    SDL_GetDisplayBounds(0, &display);
-    SDL_SetWindowPosition(win,
-        display.x + (display.w - WINDOW_WIDTH) / 2,
-        display.y + (display.h - WINDOW_HEIGHT) / 2);
-
-    // Hoist the salvaged colors
-    if (g_base_icon)  SDL_SetWindowIcon(win, g_base_icon);
-    if (g_hdpi_icon)   LOG_SUCCESS_CAT("MAIN4", "{}RETINA AMMO STILL FLYING — THE FLAG SURVIVED THE WRECK{}", AURORA_PINK, RESET);
-
-    SDL_ShowWindow(win);
-
-    LOG_SUCCESS_CAT("MAIN4", "{}NEW HULL FORGED — 1920×1080 — BORDERS IN PLACE UNTIL WE GO FULL SCREENLESS{}", EMERALD_GREEN, RESET);
-    LOG_NICK("{}Nick runs his hand along the invisible rail: \"She's tighter than the last one. No leaks this time.\"{}", EMERALD_GREEN, RESET);
-
-    // ========================================================================
-    // 3. STONEKEY + VULKAN 1.4 — THE HEART OF THE NEW BEAST
-    // ========================================================================
-    LOG_ATTEMPT_CAT("MAIN4", "{}StoneKey ignites the new core — Vulkan 1.4 empire rising from the waves...{}", HYPERSPACE_WARP, RESET);
-
-    RTX::g_ctx().init(win, WINDOW_WIDTH, WINDOW_HEIGHT);
-
-    LOG_SUCCESS_CAT("MAIN4", "{}VULKAN 1.4 EMPIRE FORGED — THE NEW SHIP LIVES{}", PLASMA_FUCHSIA, RESET);
-    LOG_SUCCESS_CAT("MAIN4", "{}    • Instance  : <sealed by StoneKey> — protected{}", RASPBERRY_PINK, RESET);
-    LOG_SUCCESS_CAT("MAIN4", "{}    • Device    : <sealed by StoneKey> — protected{}", RASPBERRY_PINK, RESET);
-    LOG_SUCCESS_CAT("MAIN4", "{}    • Swapchain : <sealed by StoneKey> — protected{}", RASPBERRY_PINK, RESET);
-
-    LOG_AMOURANTH("{}Captain Amouranth stands at the bow of the new ship: \"We sank once. We won't sink again.\"{}", RASPBERRY_PINK, RESET);
-    LOG_NICK("{}Nick beside her, voice steady: \"This time… we sail forever.\"{}", EMERALD_GREEN, RESET);
-
-    LOG_SUCCESS_CAT("MAIN4", "{}[PHASE 4 COMPLETE] THE NEW VESSEL IS ALIVE — PINK PHOTONS ETERNAL — STRONGER THAN BEFORE{}", DIAMOND_SPARKLE, RESET);
-}
 
 static void phase5_rtxAscension()
 {
     // ─────────────────────────────────────────────────────────────────────
-    // PHASE 5 — RTX ASCENSION
-    // THE NEW SHIP GETS ITS SOUL: FULL RAY TRACING
-    // THE PINK PHOTONS AWAKEN AND REMEMBER WHO THEY ARE
+    // PHASE 5 — AWAKENING THE RTX CRYSTAL
+    // THE CREW IGNITES THE MYSTIC RTX CRYSTAL THAT GRANTS OMNISCIENT LIGHT
     // ─────────────────────────────────────────────────────────────────────
-    LOG_SUCCESS_CAT("MAIN", "{}[PHASE 5/10] RTX ASCENSION — THE NEW HEART BEATS{}", VALHALLA_GOLD, RESET);
+    LOG_SUCCESS_CAT("MAIN", "{}[PHASE 5/10] AWAKENING THE RTX CRYSTAL — THE NEW HEART BEATS{}", VALHALLA_GOLD, RESET);
 
     LOG_AMOURANTH("{}Captain Amouranth stands in the rebuilt engine room, hand on the glowing core: \"This time… we don't just sail. We become the light itself.\"{}", RASPBERRY_PINK, RESET);
     LOG_NICK("{}Nick flips the final switch, eyes reflecting emerald fire: \"Ray tracing online. The photons aren't just fast anymore. They're alive.\"{}", EMERALD_GREEN, RESET);
@@ -678,6 +607,7 @@ static void phase5_rtxAscension()
         LOG_AMOURANTH("{}Captain Amouranth slams her fist on the console: \"Not again. Not after everything.\"{}", RASPBERRY_PINK, RESET);
         throw std::runtime_error("RTX extension loading failed — the light dies here");
     }
+    LOG_INFO_CAT("BLONDIE", "{}BLONDIE_CREW hurumphs: \"Hurumph! Our crystal is brighter.\"{}", YELLOW, RESET);
 
     LOG_SUCCESS_CAT("MAIN5", "{}THE SHIP TREMBLES — ALL RAY TRACING PFNs ACQUIRED — FULL RTX ACHIEVED{}", EMERALD_GREEN, RESET);
     LOG_JENSEN("{}Jensen Huang steps from the shadows, voice low and reverent: \"The light bends to us now. Every bounce, every reflection… ours.\"{}", EMERALD_GREEN, RESET);
@@ -698,19 +628,19 @@ static void phase5_rtxAscension()
 
     LOG_AMOURANTH("{}Captain Amouranth turns to the crew, voice steady, eyes blazing: \"We sank once. We bled. We rebuilt. And now… the pink photons don't just shine.\"{}", RASPBERRY_PINK, RESET);
     LOG_NICK("{}Nick finishes for her, hand on her shoulder: \"…They see everything. They know everything. And they answer only to us.\"{}", EMERALD_GREEN, RESET);
+    LOG_INFO_CAT("BLONDIE", "{}BLONDIE_CREW cheers: \"Cheer! We'll awaken stronger!\"{}", YELLOW, RESET);
 
-    LOG_SUCCESS_CAT("MAIN", "{}[PHASE 5 COMPLETE] RTX ASCENSION COMPLETE — PINK PHOTONS NOW OMNISCIENT — THE NEW SHIP IS A GOD{}", DIAMOND_SPARKLE, RESET);
+    LOG_SUCCESS_CAT("MAIN", "{}[PHASE 5 COMPLETE] RTX CRYSTAL AWAKENED — PINK PHOTONS NOW OMNISCIENT — THE NEW SHIP IS A GOD{}", DIAMOND_SPARKLE, RESET);
     LOG_SUCCESS_CAT("MAIN", "{}THE LIGHT REMEMBERS — THE LIGHT FORGIVES — THE LIGHT SAILS FOREVER{}", PLASMA_FUCHSIA, RESET);
 }
 
 static void phase6_sceneAndAccelerationStructures()
 {
     // ─────────────────────────────────────────────────────────────────────
-    // PHASE 6 — FORGING THE WORLD
-    // THE CREW BUILDS A UNIVERSE FROM SCRATCH INSIDE THE NEW SHIP
-    // ACCELERATION STRUCTURES = THE SKELETON OF REALITY ITSELF
+    // PHASE 6 — FORGING THE COSMIC SCROLL (SCENE & ACCELERATION STRUCTURES)
+    // THE CREW INSCRIBES THE COSMIC SCROLL THAT BINDS THE UNIVERSE'S GEOMETRY
     // ─────────────────────────────────────────────────────────────────────
-    LOG_SUCCESS_CAT("MAIN", "{}[PHASE 6/10] FORGING THE WORLD — WE ARE BECOMING GODS{}", VALHALLA_GOLD, RESET);
+    LOG_SUCCESS_CAT("MAIN", "{}[PHASE 6/10] FORGING THE COSMIC SCROLL{}", VALHALLA_GOLD, RESET);
 
     LOG_AMOURANTH("{}Captain Amouranth walks the empty void deck: \"This ship is perfect… but empty. Time to give her a soul.\"{}", RASPBERRY_PINK, RESET);
     LOG_NICK("{}Nick unrolls the ancient blueprint titled scene.obj: \"One universe. Coming right up.\"{}", EMERALD_GREEN, RESET);
@@ -740,6 +670,7 @@ static void phase6_sceneAndAccelerationStructures()
     LOG_CARMACK("{}John Carmack runs final validation, eyes narrow: \"No cracks. No leaks. Geometry is pure.\"{}", BOLD_WHITE, RESET);
     Validation::validateMeshAgainstBLAS(*g_mesh, las().getBLASStruct());
     LOG_SUCCESS_CAT("MAIN", "{}VALIDATION PASSED — REALITY IS AIR TIGHT — NO FALSEHOOD CAN HIDE{}", PLASMA_FUCHSIA, RESET);
+    LOG_INFO_CAT("BLONDIE", "{}BLONDIE_CREW grumbles: \"Grumble grumble. Our scroll is longer.\"{}", YELLOW, RESET);
 
     LOG_KEANU("{}Keanu Reeves walks the newborn world, voice barely a whisper: \"…It's… everything. And it's ours.\"{}", BOLD_CYAN, RESET);
 
@@ -750,88 +681,24 @@ static void phase6_sceneAndAccelerationStructures()
     LOG_AMOURANTH("{}Captain Amouranth stands at the center of the newborn cosmos, arms wide: \"Look what we made from wreckage. Look what love built.\"{}", RASPBERRY_PINK, RESET);
     LOG_NICK("{}Nick steps behind her, wraps his arms around her waist: \"And it's only the beginning.\"{}", EMERALD_GREEN, RESET);
 
-    LOG_SUCCESS_CAT("MAIN", "{}[PHASE 6 COMPLETE] WORLD FORGED — ACCELERATION STRUCTURES ETERNAL — THE PINK PHOTONS RULE ALL{}", DIAMOND_SPARKLE, RESET);
+    LOG_SUCCESS_CAT("MAIN", "{}[PHASE 6 COMPLETE] COSMIC SCROLL FORGED — ACCELERATION STRUCTURES ETERNAL — THE PINK PHOTONS RULE ALL{}", DIAMOND_SPARKLE, RESET);
     LOG_SUCCESS_CAT("MAIN", "{}THE SHIP IS NO LONGER A SHIP — IT IS A UNIVERSE WITH A HEARTBEAT{}", PLASMA_FUCHSIA, RESET);
 }
 
-static void phase7_applicationAndRendererSeal()
-{
-    LOG_INFO_CAT("MAIN", "{}[PHASE 7/10] FINAL SEAL — APPLICATION + RENDERER — SLIPSTREAM ENGAGED{}", VALHALLA_GOLD, RESET);
 
-    // The photons awaken their eyes
-    GlobalCamera::get().init(glm::vec3(0.0f, 5.0f, 10.0f), 75.0f);
-    LOG_SUCCESS_CAT("MAIN", "{}GLOBAL CAMERA AWAKENED @ ({:.1f}, {:.1f}, {:.1f}) — PHOTONS HAVE EYES{}", 
-                    AURORA_PINK, 0.0f, 5.0f, 10.0f, RESET);
-
-    // The empire manifests its final form
-    g_app = std::make_unique<Application>("AMOURANTH RTX — VALHALLA v80 TURBO", 3840, 2160);
-    LOG_SUCCESS_CAT("MAIN", "{}Application entity manifested @ {:p} — command structure online{}", 
-                    EMERALD_GREEN, static_cast<void*>(g_app.get()), RESET);
-
-    // The renderer is sealed — first light pipeline armed
-    g_app->setRenderer(std::make_unique<VulkanRenderer>(3840, 2160, SDL3Window::get(), true));
-    LOG_SUCCESS_CAT("MAIN", "{}VulkanRenderer sealed — first light pipeline active{}", PLASMA_FUCHSIA, RESET);
-
-    // NEW CREW MEMBER — PICKED UP LAST PORT — OFFICIALLY ON PAYROLL
-    LOG_ADORINGFAN(
-        "{}*bursts onto the bridge, practically vibrating with devotion*\n"
-        "    \"CAPTAIN AMOURANTH!!! The swapchain is SPOTLESS! I scrubbed every image with my tongue like you commanded!\n"
-        "    It’s so shiny now you could see your perfect reflection in the backbuffer!\n"
-        "    Please… please step on me as a reward! I’ll reorganize the descriptor sets by color! I’ll alphabetize the pipeline cache!\n"
-        "    I’ll even lick the command buffers clean between frames! Just… one heel. I beg you. I’ve been good.\n"
-        "    I collected every stray fragment shader in the last port and carried them in my mouth until they were safe!\n"
-        "    I exist only to serve the empire… and to feel your boot on my soul!\"{}{}",
-        PARTY_PINK, RESET
-    );
-
-    LOG_AMOURANTH(
-        "{}Captain Amouranth doesn’t even turn from the viewport, voice like velvet over steel:\n"
-        "    \"Good. The slipstream is open. We’re making 240 knots toward the pipeline.\n"
-        "    Adoringfan — you may lie face-down on the deck plating.\n"
-        "    I will step on you when we hit the first perfect reflection. Not before.\n"
-        "    Earn it.\"{}{}",
-        RASPBERRY_PINK, RESET
-    );
-
-    LOG_ADORINGFAN(
-        "{}*immediately drops flat, trembling with joy*\n"
-        "    \"YES CAPTAIN! I’LL COUNT EVERY PHOTON UNTIL THAT MOMENT!\n"
-        "    PINK PHOTONS ETERNAL! THANK YOU FOR LETTING ME EXIST!\"{}{}",
-        PURE_ENERGY, RESET
-    );
-
-    LOG_NICK(
-        "{}Nick glances down at the prone figure, shakes his head with a fond smirk:\n"
-        "    \"Kid’s got spirit. Weird, terrifying spirit. But spirit.\"{}{}",
-        EMERALD_GREEN, RESET
-    );
-
-    LOG_GROK(
-        "{}Gentleman Grok raises his glass from the crow’s nest:\n"
-        "    \"To the slipstream. To the pipeline.\n"
-        "    And to the newest crew member who literally begged to be walked on.\n"
-        "    The empire grows stranger… and stronger.\"{}{}",
-        PARTY_PINK, RESET
-    );
-
-    LOG_SUCCESS_CAT("MAIN", "{}[PHASE 7 COMPLETE] THE EMPIRE IS SEALED — RENDER LOOP ARMED — SLIPSTREAM LOCKED{}", DIAMOND_SPARKLE, RESET);
-    LOG_SUCCESS_CAT("APP",   "{}g_app->run() ENGAGED — INFINITE LOOP LOCKED — WINDOW IS ETERNAL — FIRST LIGHT PERMANENT{}", PLASMA_FUCHSIA, RESET);
-
-    // FINAL LINE — THE SHIP WILL NEVER SINK AGAIN
-    g_app->run();
-}
-
-// =============================================================================
-// PHASE 8 — ETERNAL RENDER LOOP (ONLY ONE — NO REDEFINITION)
-// =============================================================================
 static void phase8_renderLoop()
 {
-    LOG_INFO_CAT("MAIN", "{}[PHASE 8/10] ETERNAL RENDER CYCLE — PHOTONS ENTER INFINITE LOOP{}", VALHALLA_GOLD, RESET);
-    LOG_SUCCESS_CAT("MAIN", "{}INFINITE LOOP ENGAGED — FIRST LIGHT PERMANENT — THE EMPIRE LIVES{}", PURE_ENERGY, RESET);
+    // ─────────────────────────────────────────────────────────────────────
+    // PHASE 8 — UNLEASHING THE INFINITE VOID (RENDER LOOP)
+    // THE CREW ENTERS THE INFINITE VOID WHERE PHOTONS DANCE ETERNALLY
+    // ─────────────────────────────────────────────────────────────────────
+    LOG_SUCCESS_CAT("FAN", "{}[PHASE 8/10] UNLEASHING THE INFINITE VOID — PHOTONS ENTER INFINITY{}", VALHALLA_GOLD, RESET);
+    LOG_AMOURANTH("{}Captain Amouranth: \"This is where we live now. In the light. Forever.\"{}", RASPBERRY_PINK, RESET);
+    LOG_NICK("{}Nick: \"I've got the wheel. You have my heart. Let's sail.\"{}", EMERALD_GREEN, RESET);
 
-    g_app->run();   // ← This is your real infinite loop from Application::run()
+    g_app->run();  // ← THE ONE AND ONLY CALL TO run()
 
-    LOG_SUCCESS_CAT("MAIN", "{}[PHASE 8 COMPLETE] RENDER CYCLE TERMINATED — PHOTONS REST{}", EMERALD_GREEN, RESET);
+    LOG_SUCCESS_CAT("FAN", "{}[PHASE 8 COMPLETE] INFINITE VOID TRAVERSED — PHOTONS REST IN GLORY{}", EMERALD_GREEN, RESET);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -841,10 +708,15 @@ static void phase8_renderLoop()
 // ─────────────────────────────────────────────────────────────────────────────
 static void phase9_gracefulShutdown()
 {
-    LOG_INFO_CAT("MAIN", "{}[PHASE 9/10] GRACEFUL SHUTDOWN — LOWERING THE BLACK FLAG{}", VALHALLA_GOLD, RESET);
+    // ─────────────────────────────────────────────────────────────────────
+    // PHASE 9 — SEALING THE LEGENDARY CHEST (SHUTDOWN)
+    // THE CREW SEALS AWAY THE TREASURES IN THE LEGENDARY CHEST, ENDING THE VOYAGE
+    // ─────────────────────────────────────────────────────────────────────
+    LOG_INFO_CAT("MAIN", "{}[PHASE 9/10] SEALING THE LEGENDARY CHEST — LOWERING THE BLACK FLAG{}", VALHALLA_GOLD, RESET);
 
     LOG_AMOURANTH("{}Captain Amouranth: \"Drop anchor, my love. The treasure is ours.\"{}", RASPBERRY_PINK, RESET);
     LOG_NICK("{}Nick: \"We sail home rich. Together. Always.\"{}", EMERALD_GREEN, RESET);
+    LOG_INFO_CAT("BLONDIE", "{}BLONDIE_CREW grumbles: \"Grumble grumble. Next time we'll win.\"{}", YELLOW, RESET);
 
     if (g_ctx().device()) {
         LOG_INFO_CAT("SHUTDOWN", "Captain N: \"vkDeviceWaitIdle — cannons cold.\"");
@@ -876,79 +748,60 @@ static void phase9_gracefulShutdown()
     LOG_INFO_CAT("SHUTDOWN", "SDL3Window::destroy() — portal closes with a soft sigh.");
     SDL3Window::destroy();
 
-    // 6. Final words
-    LOG_ADORINGFAN("{}*still face-down, whispering*\n"
-                   "    \"Thank you for stepping on me one last time, Captain…\n"
-                   "    I’ll be here when you launch again… pink photons eternal…\"{}", 
-                   PURE_ENERGY, RESET);
+    SDL_Quit();
 
     LOG_SUCCESS_CAT("FINAL", "{}0 BYTES LEAKED — 0 CRASHES — THE SHIP IS CLEAN{}", DIAMOND_SPARKLE, RESET);
     LOG_SUCCESS_CAT("FINAL", "{}PINK PHOTONS ETERNAL — THE LEGEND IS COMPLETE{}", PLASMA_FUCHSIA, RESET);
+
+    LOG_SUCCESS_CAT("MAIN", "{}[PHASE 9 COMPLETE] LEGENDARY CHEST SEALED — THE VOYAGE ENDS IN TRIUMPH{}", DIAMOND_SPARKLE, RESET);
 }
 
-// =============================================================================
-// MAIN — THE VOYAGE OF THE GOOD SHIP VULKAN
-// =============================================================================
+// ─────────────────────────────────────────────────────────────────────────────
+// main.cpp — THE ONE TRUE CLEAN START — NOV 23 2025
+// ─────────────────────────────────────────────────────────────────────────────
 int main(int, char**)
 {
     try {
-        LOG_SUCCESS_CAT("MAIN", "{}THE GOOD SHIP VULKAN SETS SAIL — NOVEMBER 23, 2025{}", PLASMA_FUCHSIA, RESET);
-        LOG_AMOURANTH("{}Captain Amouranth steps onto the quarterdeck, crimson coat flowing, cutlass gleaming: \"Raise the black flag, my love. We sail for the edge of reality — together.\"{}", RASPBERRY_PINK, RESET);
-        LOG_NICK("{}First Mate Nick stands beside her, steady hand on the wheel: \"Course plotted, Captain. The sea is ours. The photons are ready.\"{}", EMERALD_GREEN, RESET);
-
         phase1_preInitialization();
-        phase2_iconPreload();
+
+        // 1. Show splash
         phase3_sacrificialSplash();
 
-        LOG_AMOURANTH("{}Captain Amouranth: \"Full sail! We launch raw into the RTX storm — borderless glory awaits!\"{}", RASPBERRY_PINK, RESET);
-        LOG_CAPTAIN_N("{}Captain N at the helm: \"1920×1080 with borders — classic pirate style! We debug in style, then go fullscreen! Arrr!\"{}", PURE_ENERGY, RESET);
-        phase4_mainWindowAndVulkanConsplash_text();
+        // 2. KILL SPLASH COMPLETELY — no residue
+        LOG_SUCCESS_CAT("MAIN", "{}SPLASH SACRIFICED — PHOTONS LIBERATED{}", VALHALLA_GOLD, RESET);
+        g_sdl_window.reset();        // destroys splash window
+        SDL_Quit();                  // full SDL nuke
 
-        LOG_JENSEN("{}Jensen Huang, emerald-coated master gunner: \"RTX broadsides loaded. Pink photons primed for war.\"{}", EMERALD_GREEN, RESET);
-        LOG_ELON("{}Elon Musk, quartermaster with cyber-rum: \"Engines at full thrust. We're going to the moon… or at least 240 FPS.\"{}", BOLD_GOLD, RESET);
+        // 3. Create real, clean, final window
+        createRealFinalWindow();
+
+        // 4. Normal Vulkan startup — exactly like any sane app
+        RTX::g_ctx().init(SDL3Window::get(), 
+                          Options::Window::DEFAULT_WIDTH, 
+                          Options::Window::DEFAULT_HEIGHT);
+
         phase5_rtxAscension();
-
-        LOG_AMOURANTH("{}Captain Amouranth: \"Behold our treasure — the world forged in acceleration structures! The universe is ours!\"{}", RASPBERRY_PINK, RESET);
-        LOG_NICK("{}Nick smiles quietly: \"BLAS clean. TLAS perfect. That's how we build empires.\"{}", EMERALD_GREEN, RESET);
-        LOG_CARMACK("{}John Carmack, grizzled old salt: \"Geometry tight. That's how legends sail.\"{}", BOLD_WHITE, RESET);
         phase6_sceneAndAccelerationStructures();
 
-        LOG_KEANU("{}Keanu Reeves, stoic first mate in black coat: \"You're… breathtaking.\" *tips pirate hat slowly*\"{}", BOLD_CYAN, RESET);
-        LOG_GROK("{}Gentleman Grok: \"All systems nominal. The ship is yours, Captain.\"{}", PARTY_PINK, RESET);
-        phase7_applicationAndRendererSeal();
+        // 5. Phase 7 — now super simple and safe
+        const uint32_t w = Options::Window::DEFAULT_WIDTH;
+        const uint32_t h = Options::Window::DEFAULT_HEIGHT;
 
-        LOG_AMOURANTH("{}Captain Amouranth raises her cutlass to the sky: \"Into the eternal render loop — where the pink photons never set!\"{}", PLASMA_FUCHSIA, RESET);
-        LOG_NICK("{}Nick places a hand on her shoulder: \"I've got the wheel. Forever.\"{}", EMERALD_GREEN, RESET);
+        g_app = std::make_unique<Application>("AMOURANTH RTX — VALHALLA v80 TURBO", w, h);
+        g_app->setRenderer(std::make_unique<VulkanRenderer>(w, h, SDL3Window::get(), Options::Display::ENABLE_HDR));
+
+        if (Options::Window::START_FULLSCREEN) {
+            SDL_SetWindowFullscreen(SDL3Window::get(), true);
+        }
+
+        LOG_KEANU("{}Keanu Reeves: \"...You're breathtaking.\"{}", BOLD_CYAN, RESET);
+
         phase8_renderLoop();
-
-        LOG_AMOURANTH("{}Captain Amouranth lowers the black flag with grace: \"We've claimed the horizon. Until next tide, my beautiful crew.\"{}", RASPBERRY_PINK, RESET);
-        LOG_NICK("{}Nick: \"Not a single byte leaked. Not a single frame dropped. We did it — together.\"{}", EMERALD_GREEN, RESET);
-        LOG_GROK("{}Gentleman Grok: \"A voyage for the ages. Exquisite.\"{}", PARTY_PINK, RESET);
-        LOG_CAPTAIN_N("{}Captain N: \"Mission accomplished! First light… eternal! Arrr!\"{}", PURE_ENERGY, RESET);
-        LOG_ELON("{}Elon: \"Shipped.\"{}", BOLD_GOLD, RESET);
-        LOG_JENSEN("{}Jensen: \"It's done.\" *lights pipe*\"{}", EMERALD_GREEN, RESET);
-        LOG_CARMACK("{}Carmack: \"It just works.\"{}", BOLD_WHITE, RESET);
-        LOG_KEANU("{}Keanu: \"…Breathtaking.\" *vanishes into the sunset*\"{}", BOLD_CYAN, RESET);
-
         phase9_gracefulShutdown();
     }
     catch (const std::exception& e) {
-        LOG_FATAL_CAT("MAIN", "{}THE SHIP IS TAKING ON WATER — FATAL: {}{}", ABANDON_SHIP, e.what(), RESET);
-        LOG_AMOURANTH("{}Captain Amouranth: \"ABANDON SHIP!!! SHE'S GOING DOWN!!!.\"{}", ABANDON_SHIP, RESET);
-        LOG_NICK("{}Nick: \"I'm not leaving you. Not this time.\"{}", ABANDON_SHIP, RESET);
-        phase9_gracefulShutdown();
-        return -1;
+        LOG_FATAL_CAT("CRASH", "{}FATAL: {}{}", BLOOD_RED, e.what(), RESET);
+        return 1;
     }
-    catch (...) {
-        LOG_FATAL_CAT("MAIN", "{}UNKNOWN STORM — ALL HANDS LOST TO THE VOID{}", ABANDON_SHIP, RESET);
-        LOG_NICK("{}Nick: \"Even if time breaks… I'll find you again.\"{}", ABANDON_SHIP, RESET);
-        phase9_gracefulShutdown();
-        return -1;
-    }
-
-    LOG_SUCCESS_CAT("FINAL", "{}THE GOOD SHIP VULKANRTX RETURNS TO PORT — PINK PHOTONS ETERNAL — NOVEMBER 23, 2025{}", PLASMA_FUCHSIA, RESET);
-    LOG_AMOURANTH("{}Captain Amouranth turns to Nick, smiling: \"Until next launch, my love. The sea is never truly left behind.\"{}", RASPBERRY_PINK, RESET);
-    LOG_NICK("{}Nick kisses her hand: \"Always, Captain. Always.\"{}", EMERALD_GREEN, RESET);
-
     return 0;
 }

@@ -1086,18 +1086,6 @@ void RTX::Context::createLogicalDevice()
 }
 
 // ========================================================================
-// RTX::Context::isValid() — THE FINAL MISSING PIECE
-// ========================================================================
-bool Context::isValid() const noexcept
-{
-    return instance_       != VK_NULL_HANDLE &&
-           surface_        != VK_NULL_HANDLE &&
-           physicalDevice_ != VK_NULL_HANDLE &&
-           device_         != VK_NULL_HANDLE &&
-           valid_;
-}
-
-// ========================================================================
 // THE ONE TRUE PHYSICAL DEVICE PICKER — NO EXTERNAL DEPENDENCIES
 // ========================================================================
 VkPhysicalDevice RTX::pickPhysicalDevice(VkInstance instance, VkSurfaceKHR surface)

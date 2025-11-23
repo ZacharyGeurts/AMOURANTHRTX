@@ -26,7 +26,7 @@
 #define LOG_CARMACK(...)     LOG_INFO_CAT("CARMACK",        __VA_ARGS__)
 #define LOG_KEANU(...)       LOG_INFO_CAT("KEANU",          __VA_ARGS__)
 #define LOG_NICK(...)        LOG_ATTEMPT_CAT("NICK",        __VA_ARGS__)
-#define LOG_ADORINGFAN(...)  LOG_TRACE_CAT("ADORING_FAN",   __VA_ARGS__)
+#define LOG_BLONDIE(...)     LOG_INFO_CAT("BLONDIE_CREW",   __VA_ARGS__)
 
 #pragma once
 
