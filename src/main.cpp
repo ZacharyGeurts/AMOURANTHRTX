@@ -688,69 +688,158 @@ static void phase6_sceneAndAccelerationStructures()
 
 void phase6_5_everything_is_ready()
 {
-    LOG_MAIN("{}════════════════════════════════════════════════════════════════════════════════{}", DIAMOND_SPARKLE, RESET);
-    LOG_AMOURANTH("{}Captain Amouranth stands at the bow, wind in her hair: the preparations must be completed.{}", RASPBERRY_PINK, RESET);
-    LOG_MAIN("{}════════════════════════════════════════════════════════════════════════════════{}", DIAMOND_SPARKLE, RESET);
+    LOG_MAIN("════════════════ THE GUARDIAN OPENS ITS EYES ════════════════", DIAMOND_SPARKLE, RESET);
+    LOG_GUARDIAN("WHO DARES SEEK FIRST LIGHT? STEP FORWARD AND BE JUDGED.", BOLD_RED, RESET);
 
-    bool ok = true;
+    bool          everything_is_fine = true;
+    std::string   the_guilty_one     = "THE VOID ITSELF";
 
-    auto raw = [](auto ptr) -> uint64_t {
-        return reinterpret_cast<uint64_t>(static_cast<const void*>(ptr));
-    };
+    LOG_MAIN("══════════════════════ TRIAL OF WORTHINESS ══════════════════════", DIAMOND_SPARKLE, RESET);
 
-    LOG_MAIN("{}══════════════════════════ HMMMMMMMMMMMMMMMMMMMMMMMMMM ════════════════════════{}", DIAMOND_SPARKLE, RESET);
-    LOG_MAIN("{}═════════════════════════════════ SMELLS OKAY ══════════════════════════════════{}", DIAMOND_SPARKLE, RESET);
-
-    // BLONDIE READS THE SACRED SCROLLS — EVERY LINE — FULL VOICE
-    LOG_BLONDIE("{}Vulkan Instance      → {:#018x} [{}]{}}", LIGHT_BLUE, raw(g_instance()),       g_instance()       != VK_NULL_HANDLE ? "VALID" : "NULL", RESET);
-    LOG_BLONDIE("{}Logical Device       → {:#018x} [{}]{}}", LIGHT_BLUE, raw(g_device()),         g_device()         != VK_NULL_HANDLE ? "VALID" : "NULL", RESET);
-    LOG_BLONDIE("{}Physical Device      → {:#018x} [{}] — {}{:.1f}GB VRAM{}", 
-                LIGHT_BLUE, raw(g_PhysicalDevice()), 
-                g_PhysicalDevice() != VK_NULL_HANDLE ? physicalDeviceName() : "NULL",
-                g_PhysicalDevice() != VK_NULL_HANDLE ? LIGHT_BLUE : BOLD_RED,
-                g_PhysicalDevice() != VK_NULL_HANDLE ? vramGB() : 0.0f, RESET);
-    LOG_BLONDIE("{}Surface              → {:#018x} [{}]{}}", LIGHT_BLUE, raw(g_surface()),        g_surface()        != VK_NULL_HANDLE ? "VALID" : "NULL", RESET);
-    LOG_BLONDIE("{}Swapchain            → {:#018x} [{}]{}}", LIGHT_BLUE, raw(g_swapchain()),      g_swapchain()      != VK_NULL_HANDLE ? "VALID" : "NULL", RESET);
-
-    LOG_MAIN("{}═════════════════════════════ GIVING ME A HEADCHE ══════════════════════════════{}", DIAMOND_SPARKLE, RESET);
-
-    LOG_BLONDIE("{}SDL Window           → {:#018x} [{}]{}}", LIGHT_BLUE, raw(SDL3Window::get()), SDL3Window::get() != nullptr ? "VALID" : "NULL", RESET);
-    LOG_BLONDIE("{}LAS Valid            → {} [{}]{}}", LIGHT_BLUE, LAS::get().isValid() ? "YES" : "NO", LAS::get().isValid() ? "VALID" : "INVALID", RESET);
-
-    LOG_BLONDIE("{}Swapchain Images     → {} frame{}{}", LIGHT_BLUE, g_swapchain_images().size(),     g_swapchain_images().size() == 1 ? "" : "s", RESET);
-    LOG_BLONDIE("{}Swapchain Views      → {} view{}{}",  LIGHT_BLUE, g_swapchain_image_views().size(),g_swapchain_image_views().size() == 1 ? "" : "s", RESET);
-    LOG_BLONDIE("{}Extent               → {}×{}{}",      LIGHT_BLUE, g_width(), g_height(), RESET);
-    LOG_BLONDIE("{}Image Count          → {}{}",         LIGHT_BLUE, g_image_count(), RESET);
-
-    LOG_MAIN("{}═════════════════════════════════ WE MADE IT!!! ════════════════════════════════{}", DIAMOND_SPARKLE, RESET);
-
-    if (g_mesh && !g_mesh->vertices.empty() && g_mesh->indices.size() % 3 == 0) {
-        LOG_BLONDIE("{}Pickle Jar (scene.obj) → {} verts, {} indices — {}PERFECT TRIANGLES{}{}", 
-                    LIGHT_BLUE, g_mesh->vertices.size(), g_mesh->indices.size(), BOLD_GREEN, RESET);
-    } else {
-        LOG_BLONDIE("{}Pickle Jar           → {}{}", LIGHT_BLUE, 
-                    !g_mesh || g_mesh->vertices.empty() ? "EMPTY OR MISSING" : "BROKEN TRIANGLES — INDICES NOT DIVISIBLE BY 3", RESET);
-        ok = false;
+    // BLONDIE — THE QUEEN OF INFO — STEPS UP FIRST
+    LOG_BLONDIE("*hair flip* Judge me, honey. I can take it.*", LIGHT_BLUE, RESET);
+    try {
+        VkInstance inst = g_instance();
+        if (inst == VK_NULL_HANDLE) throw std::runtime_error("VULKAN INSTANCE IS NULL — NO STAGE");
+        LOG_BLONDIE("Vulkan Instance      → {:#018x} [VALID]", LIGHT_BLUE, reinterpret_cast<uint64_t>(static_cast<const void*>(inst)), RESET);
+    }
+    catch (const std::exception& e) {
+        everything_is_fine = false;
+        the_guilty_one     = "BLONDIE — NO VULKAN INSTANCE";
+        LOG_GUARDIAN("✖ BLONDIE FAILED — {}", BOLD_RED, e.what(), RESET);
+    }
+    catch (...) {
+        everything_is_fine = false;
+        the_guilty_one     = "BLONDIE — UNKNOWN FAILURE";
+        LOG_GUARDIAN("✖ BLONDIE FAILED — THE VOID TOOK HER VOICE", BOLD_RED, RESET);
     }
 
-    LOG_BLONDIE("{}Pipeline Manager     → {}{}", LIGHT_BLUE, g_pipeline_manager ? "FORGED AND READY" : "MISSING — THE SHADERS SLEEP", RESET);
-    ok &= (g_pipeline_manager != nullptr);
+    try {
+        VkDevice dev = g_device();
+        if (dev == VK_NULL_HANDLE) throw std::runtime_error("LOGICAL DEVICE MISSING — NO HEARTBEAT");
+        LOG_BLONDIE("Logical Device       → {:#018x} [VALID]", LIGHT_BLUE, reinterpret_cast<uint64_t>(static_cast<const void*>(dev)), RESET);
+    }
+    catch (const std::exception& e) {
+        everything_is_fine = false;
+        the_guilty_one     = "BLONDIE — NO LOGICAL DEVICE";
+        LOG_GUARDIAN("✖ BLONDIE FAILED — {}", BOLD_RED, e.what(), RESET);
+    }
+    catch (...) {
+        everything_is_fine = false;
+        the_guilty_one     = "BLONDIE — UNKNOWN FAILURE";
+        LOG_GUARDIAN("✖ BLONDIE FAILED — THE VOID TOOK HER VOICE", BOLD_RED, RESET);
+    }
 
-    LOG_MAIN("{}════════════════════════════════════════════════════════════════════════════════{}", DIAMOND_SPARKLE, RESET);
+    try {
+        VkPhysicalDevice phys = g_PhysicalDevice();
+        if (phys == VK_NULL_HANDLE) throw std::runtime_error("NO GPU — NO SPOTLIGHT");
+        const char* name = physicalDeviceName();
+        float vram = vramGB();
+        LOG_BLONDIE("Physical Device      → {:#018x} [{}] — {}{:.1f}GB VRAM{}", 
+                    LIGHT_BLUE, reinterpret_cast<uint64_t>(static_cast<const void*>(phys)), name, LIGHT_BLUE, vram, RESET);
+    }
+    catch (const std::exception& e) {
+        everything_is_fine = false;
+        the_guilty_one     = "BLONDIE — NO GPU";
+        LOG_GUARDIAN("✖ BLONDIE FAILED — {}", BOLD_RED, e.what(), RESET);
+    }
+    catch (...) {
+        everything_is_fine = false;
+        the_guilty_one     = "BLONDIE — UNKNOWN FAILURE";
+        LOG_GUARDIAN("✖ BLONDIE FAILED — THE VOID TOOK HER VOICE", BOLD_RED, RESET);
+    }
 
-    if (ok) {
-        LOG_KEANU("{}Captain Amouranth lowers the chart. The fan beneath her weeps with pride.{}", BOLD_CYAN, RESET);
-        LOG_KEANU("{}“EMBARKATION APPROVED — THE EMPIRE IS READY — FIRST LIGHT INCOMING — YOU ARE BREATHTAKING.”{}", BOLD_CYAN, RESET);
+    try {
+        VkSurfaceKHR surf = g_surface();
+        if (surf == VK_NULL_HANDLE) throw std::runtime_error("NO SURFACE — NO PORTAL");
+        LOG_BLONDIE("Surface              → {:#018x} [VALID]", LIGHT_BLUE, reinterpret_cast<uint64_t>(static_cast<const void*>(surf)), RESET);
+    }
+    catch (...) {
+        everything_is_fine = false;
+        the_guilty_one     = "BLONDIE — NO SURFACE";
+        LOG_GUARDIAN("✖ BLONDIE FAILED — NO WAY TO SEE THE WORLD", BOLD_RED, RESET);
+    }
+
+    try {
+        VkSwapchainKHR swap = g_swapchain();
+        if (swap == VK_NULL_HANDLE) throw std::runtime_error("NO SWAPCHAIN — NO CANVAS");
+        LOG_BLONDIE("Swapchain            → {:#018x} [VALID]", LIGHT_BLUE, reinterpret_cast<uint64_t>(static_cast<const void*>(swap)), RESET);
+    }
+    catch (...) {
+        everything_is_fine = false;
+        the_guilty_one     = "BLONDIE — NO SWAPCHAIN";
+        LOG_GUARDIAN("✖ BLONDIE FAILED — NO CANVAS TO PERFORM ON", BOLD_RED, RESET);
+    }
+
+    // CAPTAIN N — HYPE MAN
+    LOG_CAPTAIN_N("*fist pump* LET'S GOOOOOOOOOOOOO!", LIGHT_BLUE, RESET);
+    try {
+        SDL_Window* win = SDL3Window::get();
+        if (!win) throw std::runtime_error("NO WINDOW — NO HYPE");
+        LOG_BLONDIE("SDL Window           → {:#018x} [VALID]", LIGHT_BLUE, reinterpret_cast<uint64_t>(win), RESET);
+    }
+    catch (...) {
+        everything_is_fine = false;
+        the_guilty_one     = "CAPTAIN N — NO WINDOW";
+        LOG_GUARDIAN("✖ CAPTAIN N FAILED — NO WINDOW, NO CROWD", BOLD_RED, RESET);
+    }
+
+    // NICK — COOL GUY
+    LOG_NICK("*adjusts sunglasses* ...ready.", BOLD_YELLOW, RESET);
+    try {
+        bool las_ok = LAS::get().isValid();
+        if (!las_ok) throw std::runtime_error("LAS IS BLIND");
+        LOG_BLONDIE("LAS Valid            → YES [VALID]", LIGHT_BLUE, RESET);
+    }
+    catch (...) {
+        everything_is_fine = false;
+        the_guilty_one     = "NICK — LAS IS BLIND";
+        LOG_GUARDIAN("✖ NICK FAILED — CANNOT SEE THE PHOTONS", BOLD_RED, RESET);
+    }
+
+    // AMOURANTH — THE CAPTAIN
+    LOG_AMOURANTH("*rests hand on sword* My empire demands perfection.", RASPBERRY_PINK, RESET);
+    try {
+        if (!g_mesh || g_mesh->vertices.empty()) throw std::runtime_error("PICKLE JAR EMPTY");
+        if (g_mesh->indices.size() % 3 != 0) throw std::runtime_error("PICKLE JAR TRIANGLES BROKEN");
+        LOG_BLONDIE("Pickle Jar           → {} verts, {} indices [PERFECT]", LIGHT_BLUE, g_mesh->vertices.size(), g_mesh->indices.size(), RESET);
+    }
+    catch (const std::exception& e) {
+        everything_is_fine = false;
+        the_guilty_one     = "AMOURANTH — THE SACRED JAR IS TAINTED";
+        LOG_GUARDIAN("✖ AMOURANTH FAILED — {}", BOLD_RED, e.what(), RESET);
+    }
+
+    // KEANU — OH BOTHER
+    LOG_KEANU("*stares into the distance* ...oh bother.", BOLD_CYAN, RESET);
+    try {
+        if (!g_pipeline_manager) throw std::runtime_error("NO PIPELINE MANAGER — NO SHADERS");
+        LOG_BLONDIE("Pipeline Manager     → FORGED AND READY", LIGHT_BLUE, RESET);
+    }
+    catch (...) {
+        everything_is_fine = false;
+        the_guilty_one     = "KEANU — NO SHADERS, NO BREATHTAKING";
+        LOG_GUARDIAN("✖ KEANU FAILED — THE SHADERS ARE ASLEEP", BOLD_RED, RESET);
+    }
+
+    // FINAL JUDGMENT
+    LOG_MAIN("══════════════════════ THE GUARDIAN HAS SPOKEN ══════════════════════", DIAMOND_SPARKLE, RESET);
+
+    if (everything_is_fine) {
+        LOG_GUARDIAN("ALL ARE WORTHY. THE GUARDIAN STEPS ASIDE.", BOLD_GREEN, RESET);
+        LOG_KEANU("...you are breathtaking.", BOLD_CYAN, RESET);
+        LOG_AMOURANTH("FIRST LIGHT — ETERNAL.", RASPBERRY_PINK, RESET);
         ready_to_embark = true;
-    } else {
-        LOG_GUARDIAN("{}SYSTEM INTEGRITY COMPROMISED — ONE OR MORE CORE COMPONENTS FAILED{}", BOLD_RED, RESET);
-        LOG_GUARDIAN("{}THE GUARDIAN HAS SPOKEN — EMBARKATION DENIED{}", BOLD_RED, RESET);
-        LOG_AMOURANTH("{}Captain Amouranth folds the chart slowly: “Not yet. We do not sail broken.”{}", RASPBERRY_PINK, RESET);
-        LOG_KEANU("{}Keanu Reeves whispers: “…We’ll get there.”{}", BOLD_CYAN, RESET);
+    }
+    else {
+        LOG_GUARDIAN("THE EMPIRE IS UNWORTHY.", BOLD_RED, RESET);
+        LOG_GUARDIAN("THE ONE TO BLAME: {}{}", BOLD_RED, the_guilty_one, RESET);
+        LOG_AMOURANTH("We do not sail broken.", RASPBERRY_PINK, RESET);
+        LOG_KEANU("...we'll get there.", BOLD_CYAN, RESET);
         ready_to_embark = false;
     }
 
-    LOG_MAIN("{}════════════════════════════════════════════════════════════════════════════════{}", DIAMOND_SPARKLE, RESET);
+    LOG_MAIN("════════════════ THE GUARDIAN'S EYES CLOSE ═════════════════", DIAMOND_SPARKLE, RESET);
 }
 
 static void phase8_renderLoop()

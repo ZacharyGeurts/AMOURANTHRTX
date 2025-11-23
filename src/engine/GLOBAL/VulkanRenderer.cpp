@@ -403,7 +403,7 @@ LOG_SUCCESS_CAT("RENDERER", "Step 5 COMPLETE — {} full sync sets forged — TR
     LOG_TRACE_CAT("RENDERER", "Step 7.5 COMPLETE — PipelineManager armed (dev=0x{:x}, phys=0x{:x})", reinterpret_cast<uintptr_t>(g_device()), reinterpret_cast<uintptr_t>(g_PhysicalDevice()));
 
     LOG_SUCCESS_CAT("RENDERER", "Swapchain FORGED — {} images @ {}x{} — PINK PHOTONS READY", 
-                    ([](){ uint32_t cnt; vkGetSwapchainImagesKHR(g_device(), g_swapchain(), &cnt, nullptr); return cnt; }()), VkExtent2D{3840, 2160}.width, VkExtent2D{3840, 2160}.height);
+                    ([](){ uint32_t cnt; vkGetSwapchainImagesKHR(g_device(), g_swapchain(), &cnt, nullptr); return cnt; }()), currentExtent().width, currentExtent().height);
     LOG_TRACE_CAT("RENDERER", "Step 8 COMPLETE — Swapchain validated and armed");
     
     // =============================================================================
@@ -1233,7 +1233,7 @@ void VulkanRenderer::recordRayTracingCommandBuffer(VkCommandBuffer cmd) noexcept
     const VkStridedDeviceAddressRegionKHR* callable = pipelineManager_.getCallableSbtRegion();
 
     // ── FIRE THE RAYS — FULL RESOLUTION — MAXIMUM THROUGHPUT
-    const VkExtent2D extent = VkExtent2D{3840, 2160};
+    const VkExtent2D extent = currentExtent();
 
     pipelineManager_.vkCmdTraceRaysKHR_(cmd,
         raygen,
@@ -1680,7 +1680,7 @@ void VulkanRenderer::performTonemapPass(VkCommandBuffer cmd, uint32_t frameIdx, 
 
     vkCmdPushConstants(cmd, *tonemapLayout_, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push), &push);
 
-    VkExtent2D ext = VkExtent2D{3840, 2160};
+    VkExtent2D ext = currentExtent();
     uint32_t wgX = (ext.width + 15) / 16;
     uint32_t wgY = (ext.height + 15) / 16;
     vkCmdDispatch(cmd, wgX, wgY, 1);
@@ -1916,8 +1916,8 @@ void VulkanRenderer::createFramebuffers() noexcept {
         fbInfo.renderPass = g_render_pass();
         fbInfo.attachmentCount = 1;
         fbInfo.pAttachments    = &attachment;
-        fbInfo.width = 3840;
-        fbInfo.height = 2160;
+        fbInfo.width = currentExtent().width;
+        fbInfo.height = currentExtent().height;
         fbInfo.layers          = 1;
 
         VK_CHECK(vkCreateFramebuffer(g_device(), &fbInfo, nullptr, &framebuffers_[i]),

@@ -267,7 +267,7 @@ private:
     void cleanupFramebuffers() noexcept;
     bool recreateTonemapUBOs() noexcept;
     void destroySharedStaging() noexcept;
-    bool createSharedStaging() noexcept;
+	bool createSharedStaging() noexcept;
     void createAutoExposureResources() noexcept;
     void createTonemapPipeline() noexcept;
     void createTonemapSampler() noexcept;
@@ -315,7 +315,8 @@ private:
     void uploadToBuffer(RTX::Handle<VkBuffer>& buffer, const void* data, VkDeviceSize size) noexcept;
     void uploadToBufferImmediate(RTX::Handle<VkBuffer>& buffer, const void* data, VkDeviceSize size) noexcept;
     void downloadFromBuffer(RTX::Handle<VkBuffer>& buffer, void* data, VkDeviceSize size) noexcept;
-    VkImage getCurrentHDRColorImage() noexcept;
+    [[nodiscard]] constexpr VkExtent2D currentExtent() const noexcept { return VkExtent2D{ static_cast<uint32_t>(width_), static_cast<uint32_t>(height_) }; }
+	VkImage getCurrentHDRColorImage() noexcept;
 };
 
 
