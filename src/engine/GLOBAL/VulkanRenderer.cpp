@@ -335,8 +335,6 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, bool o
     }
     LOG_TRACE_CAT("RENDERER", "Step 2 COMPLETE");
 
-    const uint32_t framesInFlight = Options::Performance::MAX_FRAMES_IN_FLIGHT; // 3 triple buffer
-
 	LOG_TRACE_CAT("RENDERER", "Step 3 WINS");
     LOG_TRACE_CAT("RENDERER", "Step 3 COMPLETE");
 
@@ -344,19 +342,19 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, bool o
     // STEP 5 — CREATE SYNCHRONIZATION OBJECTS (TRIPLE BUFFERING + ASYNC COMPUTE)
     // =============================================================================
     LOG_TRACE_CAT("RENDERER", "=== STACK BUILD ORDER STEP 5: Create Synchronization Objects ===");
-    LOG_TRACE_CAT("RENDERER", "Target in-flight frames: {} — TRUE TRIPLE BUFFERING ACTIVE", framesInFlight);
+    LOG_TRACE_CAT("RENDERER", "Target in-flight frames: {} — TRUE TRIPLE BUFFERING ACTIVE", MAX_FRAMES_IN_FLIGHT);
 
-    imageAvailableSemaphores_.resize(framesInFlight);
-    renderFinishedSemaphores_.resize(framesInFlight);
-    inFlightFences_.resize(framesInFlight);
-    computeFinishedSemaphores_.resize(framesInFlight);
-    computeToGraphicsSemaphores_.resize(framesInFlight);
+    imageAvailableSemaphores_.resize(MAX_FRAMES_IN_FLIGHT);
+    renderFinishedSemaphores_.resize(MAX_FRAMES_IN_FLIGHT);
+    inFlightFences_.resize(MAX_FRAMES_IN_FLIGHT);
+    computeFinishedSemaphores_.resize(MAX_FRAMES_IN_FLIGHT);
+    computeToGraphicsSemaphores_.resize(MAX_FRAMES_IN_FLIGHT);
 
     VkSemaphoreCreateInfo semInfo{ .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
     VkFenceCreateInfo fenceInfo{ .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, .flags = VK_FENCE_CREATE_SIGNALED_BIT };
 
-    for (uint32_t i = 0; i < framesInFlight; ++i) {
-        LOG_TRACE_CAT("RENDERER", "Creating sync objects for frame {} / {}", i, framesInFlight - 1);
+    for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
+        LOG_TRACE_CAT("RENDERER", "Creating sync objects for frame {} / {}", i, MAX_FRAMES_IN_FLIGHT);
 
         VK_CHECK(vkCreateSemaphore(g_device(), &semInfo, nullptr, &imageAvailableSemaphores_[i]), "imageAvailable");
         VK_CHECK(vkCreateSemaphore(g_device(), &semInfo, nullptr, &renderFinishedSemaphores_[i]), "renderFinished");
@@ -364,7 +362,7 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, bool o
         VK_CHECK(vkCreateSemaphore(g_device(), &semInfo, nullptr, &computeToGraphicsSemaphores_[i]), "compute→graphics");
         VK_CHECK(vkCreateFence(g_device(), &fenceInfo, nullptr, &inFlightFences_[i]), "inFlightFence");
     }
-    LOG_SUCCESS_CAT("RENDERER", "Step 5 COMPLETE — {} full sync sets created", framesInFlight);
+    LOG_SUCCESS_CAT("RENDERER", "Step 5 COMPLETE — {} full sync sets created", MAX_FRAMES_IN_FLIGHT);
 
     // =============================================================================
     // STEP 6 — GPU Timestamp Query Pool
@@ -373,7 +371,7 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, bool o
     if (Options::Performance::ENABLE_GPU_TIMESTAMPS || Options::Debug::SHOW_GPU_TIMESTAMPS) {
         VkQueryPoolCreateInfo qpInfo{ .sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO };
         qpInfo.queryType = VK_QUERY_TYPE_TIMESTAMP;
-        qpInfo.queryCount = framesInFlight * 2;
+        qpInfo.queryCount = MAX_FRAMES_IN_FLIGHT * 2;
         VK_CHECK(vkCreateQueryPool(g_device(), &qpInfo, nullptr, &timestampQueryPool_), "Timestamp pool");
     }
     LOG_TRACE_CAT("RENDERER", "Step 6 COMPLETE");
@@ -428,7 +426,7 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, bool o
     // STEP 11 — Per-Frame Buffers
     // =============================================================================
     LOG_TRACE_CAT("RENDERER", "=== STACK BUILD ORDER STEP 11: Initialize Per-Frame Buffers ===");
-    initializeAllBufferData(framesInFlight, 64_MB, 16_MB);
+    initializeAllBufferData(MAX_FRAMES_IN_FLIGHT, 64_MB, 16_MB);
     LOG_TRACE_CAT("RENDERER", "Step 11 COMPLETE");
 
     // FIXED: Create shared staging buffer for UBO updates (missing before, caused skipped updates)
@@ -585,16 +583,16 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, bool o
     // ──────────────────────────────
     VkDescriptorPoolSize poolSizes[3] = {};  // Zero-init, 3 types
     poolSizes[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    poolSizes[0].descriptorCount = framesInFlight * 1;  // Binding 0 x N
+    poolSizes[0].descriptorCount = MAX_FRAMES_IN_FLIGHT * 1;  // Binding 0 x N
     poolSizes[1].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-    poolSizes[1].descriptorCount = framesInFlight * 1;  // Binding 1 x N (output to swapchain)
+    poolSizes[1].descriptorCount = MAX_FRAMES_IN_FLIGHT * 1;  // Binding 1 x N (output to swapchain)
     poolSizes[2].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    poolSizes[2].descriptorCount = framesInFlight * 1;  // Binding 2 x N
+    poolSizes[2].descriptorCount = MAX_FRAMES_IN_FLIGHT * 1;  // Binding 2 x N
 
     VkDescriptorPoolCreateInfo poolInfo = {};  // Zero-init
     poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     poolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-    poolInfo.maxSets = framesInFlight;
+    poolInfo.maxSets = MAX_FRAMES_IN_FLIGHT;
     poolInfo.poolSizeCount = 3;
     poolInfo.pPoolSizes = poolSizes;
 
@@ -608,13 +606,13 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, bool o
         0, "TonemapCompPool"
     );
 
-    std::vector<VkDescriptorSetLayout> setLayouts(framesInFlight, tonemapSetLayout);
-    tonemapSets_.resize(framesInFlight);
+    std::vector<VkDescriptorSetLayout> setLayouts(MAX_FRAMES_IN_FLIGHT, tonemapSetLayout);
+    tonemapSets_.resize(MAX_FRAMES_IN_FLIGHT);
 
     VkDescriptorSetAllocateInfo allocInfo = {};  // Zero-init
     allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
     allocInfo.descriptorPool = rawPool;
-    allocInfo.descriptorSetCount = framesInFlight;
+    allocInfo.descriptorSetCount = MAX_FRAMES_IN_FLIGHT;
     allocInfo.pSetLayouts = setLayouts.data();
 
     VK_CHECK(vkAllocateDescriptorSets(g_device(), &allocInfo, tonemapSets_.data()),

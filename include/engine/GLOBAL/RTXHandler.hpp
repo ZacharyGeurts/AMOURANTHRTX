@@ -319,6 +319,9 @@ public:
     std::optional<uint32_t> computeFamily_;
     std::optional<uint32_t> transferFamily_;
 
+	bool bufferDeviceAddressEnabled_ = false;          // ← THE ONE TRUE FLAG
+    bool bufferDeviceAddressExtensionPresent_ = false; // For diagnostics
+
     // PHYSICAL DEVICE PROPERTIES — THE MAGIC SCROLL'S HOLY TRINITY
     VkPhysicalDeviceProperties               physicalDeviceProperties_{};
     VkPhysicalDeviceFeatures                 physicalDeviceFeatures_{};
@@ -387,6 +390,16 @@ public:
             }
         }
         return 0.0f;
+    }
+
+    [[nodiscard]] constexpr bool bufferDeviceAddressEnabled() const noexcept 
+    { 
+        return bufferDeviceAddressEnabled_; 
+    }
+
+    [[nodiscard]] constexpr bool bufferDeviceAddressExtPresent() const noexcept 
+    { 
+        return bufferDeviceAddressExtensionPresent_; 
     }
 
     [[nodiscard]] std::string vendorName() const 

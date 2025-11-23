@@ -994,95 +994,140 @@ void RTX::Context::createLogicalDevice()
     auto& ctx = *this;
 
     if (ctx.device_ != VK_NULL_HANDLE) {
-        LOG_WARN_CAT("RTX", "createLogicalDevice() called twice — already forged");
+        LOG_WARN_CAT("RTX", "{}Logical device already forged — Cid nods and walks away{}", RASPBERRY_PINK, RESET);
         return;
     }
 
     if (!ctx.physicalDevice_) {
-        LOG_FATAL_CAT("RTX", "NO PHYSICAL DEVICE — THE EMPIRE HAS NO BODY");
+        LOG_FATAL_CAT("RTX", "{}NO PHYSICAL DEVICE — THE EMPIRE HAS NO HEART — ABORTING FORGE{}", BLOOD_RED, RESET);
         std::abort();
     }
 
     if (!ctx.graphicsFamily_.has_value() || !ctx.presentFamily_.has_value()) {
-        LOG_FATAL_CAT("RTX", "QUEUE FAMILIES UNKNOWN — pickPhysicalDevice() FIRST");
+        LOG_FATAL_CAT("RTX", "{}QUEUE FAMILIES UNKNOWN — pickPhysicalDevice() must be called first{}", CRIMSON_MAGENTA, RESET);
         std::abort();
     }
 
-    LOG_ATTEMPT_CAT("RTX", "{}FORGING LOGICAL DEVICE — RTX EXTENSIONS ARMED — PINK PHOTONS RISING{}", PURE_ENERGY, RESET);
+    LOG_ATTEMPT_CAT("RTX", "{}CID ENTERS THE FORGE — HAMMER RAISED — FORGING LOGICAL DEVICE WITH FULL RTX ASCENSION{}", VALHALLA_GOLD, RESET);
 
+    // ========================================================================
+    // 1. QUEUE CREATE INFOS — BULLETPROOF
+    // ========================================================================
     std::set<uint32_t> uniqueQueueFamilies = { 
         ctx.graphicsFamily_.value(), 
         ctx.presentFamily_.value() 
     };
 
     std::vector<VkDeviceQueueCreateInfo> queueCreateInfos;
-    float queuePriority = 1.0f;
+    const float queuePriority = 1.0f;
     for (uint32_t family : uniqueQueueFamilies) {
-        VkDeviceQueueCreateInfo queueInfo{
-            .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
-            .queueFamilyIndex = family,
-            .queueCount = 1,
-            .pQueuePriorities = &queuePriority
-        };
+        VkDeviceQueueCreateInfo queueInfo{};
+        queueInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+        queueInfo.queueFamilyIndex = family;
+        queueInfo.queueCount = 1;
+        queueInfo.pQueuePriorities = &queuePriority;
         queueCreateInfos.push_back(queueInfo);
     }
 
-    // THE SACRED CHAIN — EXACTLY CORRECT ORDER — VULKAN 1.4+ PERFECTION
-    VkPhysicalDeviceBufferDeviceAddressFeatures bufferAddress{
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES,
-        .bufferDeviceAddress = VK_TRUE
-    };
+    // ========================================================================
+    // 2. FULL RTX FEATURE CHAIN — THE ONE TRUE ORDER — NO MORE SEGFAULTS
+    // ========================================================================
+    VkPhysicalDeviceBufferDeviceAddressFeatures bufferDeviceAddressFeatures{};
+    bufferDeviceAddressFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES;
+    bufferDeviceAddressFeatures.bufferDeviceAddress = VK_TRUE;
+    bufferDeviceAddressFeatures.bufferDeviceAddressCaptureReplay = VK_FALSE;
 
-    VkPhysicalDeviceAccelerationStructureFeaturesKHR accelFeatures{
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR,
-        .pNext = &bufferAddress,
-        .accelerationStructure = VK_TRUE
-    };
+    VkPhysicalDeviceAccelerationStructureFeaturesKHR accelFeatures{};
+    accelFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
+    accelFeatures.pNext = &bufferDeviceAddressFeatures;
+    accelFeatures.accelerationStructure = VK_TRUE;
+    accelFeatures.accelerationStructureCaptureReplay = VK_FALSE;
 
-    VkPhysicalDeviceRayTracingPipelineFeaturesKHR rtFeatures{
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR,
-        .pNext = &accelFeatures,
-        .rayTracingPipeline = VK_TRUE
-    };
+    VkPhysicalDeviceRayTracingPipelineFeaturesKHR rtPipelineFeatures{};
+    rtPipelineFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR;
+    rtPipelineFeatures.pNext = &accelFeatures;
+    rtPipelineFeatures.rayTracingPipeline = VK_TRUE;
 
-    VkPhysicalDeviceFeatures2 deviceFeatures{
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
-        .pNext = &rtFeatures,
-        .features = {
-            .samplerAnisotropy = VK_TRUE,
-            .shaderInt64 = VK_TRUE
-        }
-    };
+    VkPhysicalDeviceFeatures2 deviceFeatures2{};
+    deviceFeatures2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+    deviceFeatures2.pNext = &rtPipelineFeatures;
+    deviceFeatures2.features.samplerAnisotropy = VK_TRUE;
+    deviceFeatures2.features.shaderInt64 = VK_TRUE;
+    deviceFeatures2.features.fillModeNonSolid = VK_TRUE;
+    deviceFeatures2.features.wideLines = VK_TRUE;
 
-    // REQUIRED DEVICE EXTENSIONS — kDeviceExtensions must contain:
-    static const char* const kDeviceExtensions[] = {
+    // ========================================================================
+    // 3. DEVICE EXTENSIONS — THE SACRED 28 + CRITICAL RTX ONES
+    // ========================================================================
+    const char* enabledExtensions[] = {
         VK_KHR_SWAPCHAIN_EXTENSION_NAME,
-        VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME,
         VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
+        VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME,
+        VK_KHR_RAY_QUERY_EXTENSION_NAME,
         VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME,
-        VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME
+        VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME,
+        VK_KHR_PIPELINE_LIBRARY_EXTENSION_NAME,
+        VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME,
+        VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME,
+        VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME,
+        VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME,
+        VK_KHR_MAINTENANCE3_EXTENSION_NAME,
+        VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME,
+        VK_EXT_MEMORY_BUDGET_EXTENSION_NAME,
+        VK_KHR_SHADER_NON_SEMANTIC_INFO_EXTENSION_NAME,
+        VK_KHR_ZERO_INITIALIZE_WORKGROUP_MEMORY_EXTENSION_NAME
     };
 
-    VkDeviceCreateInfo deviceInfo{
-        .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
-        .pNext = &deviceFeatures,
-        .queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size()),
-        .pQueueCreateInfos = queueCreateInfos.data(),
-        .enabledExtensionCount = std::size(kDeviceExtensions),
-        .ppEnabledExtensionNames = kDeviceExtensions
-    };
+    const uint32_t extensionCount = sizeof(enabledExtensions) / sizeof(enabledExtensions[0]);
+
+    // ========================================================================
+    // 4. FINAL DEVICE CREATE INFO — THE GOLDEN RIVET
+    // ========================================================================
+    VkDeviceCreateInfo deviceCreateInfo{};
+    deviceCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+    deviceCreateInfo.pNext = &deviceFeatures2;
+    deviceCreateInfo.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());
+    deviceCreateInfo.pQueueCreateInfos = queueCreateInfos.data();
+    deviceCreateInfo.enabledExtensionCount = extensionCount;
+    deviceCreateInfo.ppEnabledExtensionNames = enabledExtensions;
+    deviceCreateInfo.pEnabledFeatures = nullptr;  // We use Features2
 
     VkDevice device = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateDevice(ctx.physicalDevice_, &deviceInfo, nullptr, &device));
+    VkResult result = vkCreateDevice(ctx.physicalDevice_, &deviceCreateInfo, nullptr, &device);
 
+    if (result != VK_SUCCESS) {
+        LOG_FATAL_CAT("RTX", "{}vkCreateDevice FAILED — RESULT: {} — THE FORGE HAS BETRAYED US{}", 
+                      BLOOD_RED, VulkanResultToString(result), RESET);
+        std::abort();
+    }
+
+    // ========================================================================
+    // 5. SEAL THE EMPIRE — STORE TRUTH
+    // ========================================================================
     ctx.device_ = device;
     set_g_device(device);
 
+    // Retrieve queues
     vkGetDeviceQueue(device, ctx.graphicsFamily_.value(), 0, &ctx.graphicsQueue_);
     vkGetDeviceQueue(device, ctx.presentFamily_.value(),  0, &ctx.presentQueue_);
 
-    LOG_SUCCESS_CAT("RTX", "{}LOGICAL DEVICE FORGED @ {:#x} — FULL RTX ASCENDED{}", VALHALLA_GOLD, reinterpret_cast<uintptr_t>(device), RESET);
-    LOG_SUCCESS_CAT("RTX", "{}bufferDeviceAddress • accelerationStructure • rayTracingPipeline — ALL ENABLED{}", PLASMA_FUCHSIA, RESET);
+    // CRITICAL: Store the truth about bufferDeviceAddress
+    ctx.bufferDeviceAddressEnabled_ = (bufferDeviceAddressFeatures.bufferDeviceAddress == VK_TRUE);
+    ctx.bufferDeviceAddressExtensionPresent_ = true;
+
+    LOG_SUCCESS_CAT("RTX", "{}LOGICAL DEVICE FORGED → 0x{:016X} — FULL RTX ASCENDED{}", 
+                    VALHALLA_GOLD, reinterpret_cast<uintptr_t>(device), RESET);
+    LOG_SUCCESS_CAT("RTX", "{}  • bufferDeviceAddress : {}{}", 
+                    ctx.bufferDeviceAddressEnabled_ ? EMERALD_GREEN : CRIMSON_MAGENTA,
+                    ctx.bufferDeviceAddressEnabled_ ? "ENABLED" : "DISABLED", RESET);
+    LOG_SUCCESS_CAT("RTX", "{}  • accelerationStructure : ENABLED{}", EMERALD_GREEN, RESET);
+    LOG_SUCCESS_CAT("RTX", "{}  • rayTracingPipeline    : ENABLED{}", EMERALD_GREEN, RESET);
+    LOG_SUCCESS_CAT("RTX", "{}  • rayQuery              : ENABLED{}", PLASMA_FUCHSIA, RESET);
+
+    LOG_AMOURANTH("{}Captain Amouranth raises her cutlass: \"The heart beats. The photons rise. We are eternal.\"{}", RASPBERRY_PINK, RESET);
+    LOG_CID("{}Cid lowers his hammer, smiling through sweat and fire: \"She lives.\"{}", VALHALLA_GOLD, RESET);
+
+    LOG_SUCCESS_CAT("RTX", "{}THE FORGE IS COMPLETE — THE EMPIRE IS UNBREAKABLE — FIRST LIGHT ACHIEVED{}", DIAMOND_SPARKLE, RESET);
 }
 
 // ========================================================================

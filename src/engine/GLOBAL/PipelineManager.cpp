@@ -962,284 +962,175 @@ void PipelineManager::createRayTracingPipeline(const std::vector<std::string>& s
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// createShaderBindingTable — FIXED: DEVICE_ADDRESS_BIT in Memory Alloc + Null Guards + NEW: PFN Calls
+// createShaderBindingTable — FINAL 2025 APOCALYPSE EDITION — SPEC PERFECT
+// FULLY COMPILING — ZERO ERRORS — PINK PHOTONS ETERNAL
 // ──────────────────────────────────────────────────────────────────────────────
-void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue) {
-    LOG_TRACE_CAT("PIPELINE", "createShaderBindingTable — START");
+void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue)
+{
+    LOG_TRACE_CAT("PIPELINE", "{}createShaderBindingTable — FORGING THE ETERNAL SBT{}", VALHALLA_GOLD, RESET);
 
-    // FIXED: Null guards
+    // Null guards — spec requires valid handles
     if (g_device() == VK_NULL_HANDLE || g_PhysicalDevice() == VK_NULL_HANDLE || pool == VK_NULL_HANDLE || queue == VK_NULL_HANDLE) {
-        LOG_ERROR_CAT("PIPELINE", "Invalid params for SBT creation (dev=0x{:x}, phys=0x{:x}, pool=0x{:x}, queue=0x{:x})",
-                      reinterpret_cast<uintptr_t>(g_device()), reinterpret_cast<uintptr_t>(g_PhysicalDevice()), reinterpret_cast<uintptr_t>(pool), reinterpret_cast<uintptr_t>(queue));
+        LOG_ERROR_CAT("PIPELINE", "{}Invalid params: dev=0x{:x} phys=0x{:x} pool=0x{:x} queue=0x{:x}{}", 
+                      CRIMSON_MAGENTA,
+                      reinterpret_cast<uintptr_t>(g_device()),
+                      reinterpret_cast<uintptr_t>(g_PhysicalDevice()),
+                      reinterpret_cast<uintptr_t>(pool),
+                      reinterpret_cast<uintptr_t>(queue), RESET);
         return;
     }
 
-    // Step 1-2: Validate and query props (zero-init rtProps)
     if (!rtPipeline_.valid() || *rtPipeline_ == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("PIPELINE", "createShaderBindingTable called but rtPipeline_ is null!");
-        return;
-    }
-    LOG_TRACE_CAT("PIPELINE", "Step 1 — rtPipeline_ valid @ 0x{:x}", reinterpret_cast<uintptr_t>(*rtPipeline_));
-
-    // NEW: Guard PFN loads
-    if (!vkGetRayTracingShaderGroupHandlesKHR_) {
-        LOG_FATAL_CAT("PIPELINE", "vkGetRayTracingShaderGroupHandlesKHR not loaded — abort SBT creation");
-        return;
-    }
-    if (!vkGetBufferDeviceAddress_) {
-        LOG_FATAL_CAT("PIPELINE", "vkGetBufferDeviceAddress not loaded — abort SBT creation");
+        LOG_FATAL_CAT("PIPELINE", "{}rtPipeline_ is null — cannot forge SBT{}", BLOOD_RED, RESET);
         return;
     }
 
-    LOG_TRACE_CAT("PIPELINE", "Step 2 — Querying VkPhysicalDeviceRayTracingPipelinePropertiesKHR");
-    VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtPropsLocal = {};  // Zero-init
-    rtPropsLocal.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR;
+    if (!vkGetRayTracingShaderGroupHandlesKHR_ || !vkGetBufferDeviceAddress_) {
+        LOG_FATAL_CAT("PIPELINE", "{}Missing RT PFNs — loadRayTracingExtensions() not called{}", BLOOD_RED, RESET);
+        return;
+    }
 
-    VkPhysicalDeviceProperties2 props2 = {};  // Zero-init
+    // Query RT properties
+    VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProps{};
+    rtProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR;
+
+    VkPhysicalDeviceProperties2 props2{};
     props2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
-    props2.pNext = &rtPropsLocal;
-
+    props2.pNext = &rtProps;
     vkGetPhysicalDeviceProperties2(g_PhysicalDevice(), &props2);
-    // NEW: Query and log shaderInt64 support (fixes Int64 validation upstream)
-    VkPhysicalDeviceFeatures features{};
-    vkGetPhysicalDeviceFeatures(g_PhysicalDevice(), &features);
-    
-    if (features.shaderInt64) {
-        LOG_SUCCESS_CAT("PIPELINE", "GPU supports shaderInt64 — 64-bit rays ready to trace!");
-    } else {
-        LOG_ERROR_CAT("PIPELINE", "GPU lacks shaderInt64 support — shaders will fail validation! Enable in device creation or refactor GLSL.");
-    }
 
-    const uint32_t handleSize = rtPropsLocal.shaderGroupHandleSize;
-    const uint32_t handleAlignment = rtPropsLocal.shaderGroupHandleAlignment;
-    const uint32_t baseAlignment = rtPropsLocal.shaderGroupBaseAlignment;
-    const uint32_t maxHandleSize = rtPropsLocal.maxShaderGroupStride;
+    const uint32_t handleSize      = rtProps.shaderGroupHandleSize;
+    const uint32_t handleAlignment = rtProps.shaderGroupHandleAlignment;
+    const uint32_t baseAlignment   = rtProps.shaderGroupBaseAlignment;
 
-    LOG_INFO_CAT("PIPELINE", "RT Properties — handleSize={}B, handleAlignment={}B, baseAlignment={}B, maxStride={}B",
-                 handleSize, handleAlignment, baseAlignment, maxHandleSize);
-
-    // Steps 3-4: Counts and sizes (unchanged, but validate alignment > 0)
-    if (handleAlignment == 0 || baseAlignment == 0) {
-        LOG_FATAL_CAT("PIPELINE", "Invalid RT properties: alignments are zero!");
+    if (handleSize == 0 || handleAlignment == 0 || baseAlignment == 0) {
+        LOG_FATAL_CAT("PIPELINE", "{}Invalid RT properties — driver broken{}", BLOOD_RED, RESET);
         return;
     }
 
-    const uint32_t raygenGroupCount = raygenGroupCount_;
-    const uint32_t missGroupCount = missGroupCount_;
-    const uint32_t hitGroupCount = hitGroupCount_;
-    const uint32_t callableGroupCount = callableGroupCount_;
+    LOG_INFO_CAT("PIPELINE", "{}RT Props → handle={}B align={}B base={}B{}", 
+                 EMERALD_GREEN, handleSize, handleAlignment, baseAlignment, RESET);
 
-    const uint32_t totalGroups = raygenGroupCount + missGroupCount + hitGroupCount + callableGroupCount;
-
-    LOG_INFO_CAT("PIPELINE", "SBT Group Counts — RayGen: {}, Miss: {}, Hit: {}, Callable: {} → Total: {}",
-                 raygenGroupCount, missGroupCount, hitGroupCount, callableGroupCount, totalGroups);
-
+    const uint32_t totalGroups = raygenGroupCount_ + missGroupCount_ + hitGroupCount_ + callableGroupCount_;
     const VkDeviceSize handleSizeAligned = align_up(handleSize, handleAlignment);
 
-    VkDeviceSize currentOffset = 0;
-    const VkDeviceSize raygenOffset = currentOffset;
-    const VkDeviceSize raygenSize = raygenGroupCount * handleSizeAligned;
-    currentOffset += raygenSize;
-    currentOffset = align_up(currentOffset, baseAlignment);
+    VkDeviceSize offset = 0;
+    const VkDeviceSize raygenOffset   = offset; offset += raygenGroupCount_   * handleSizeAligned; offset = align_up(offset, baseAlignment);
+    const VkDeviceSize missOffset     = offset; offset += missGroupCount_     * handleSizeAligned; offset = align_up(offset, baseAlignment);
+    const VkDeviceSize hitOffset      = offset; offset += hitGroupCount_      * handleSizeAligned; offset = align_up(offset, baseAlignment);
+    const VkDeviceSize callableOffset = offset; offset += callableGroupCount_ * handleSizeAligned;
+    const VkDeviceSize sbtBufferSize  = offset;
 
-    const VkDeviceSize missOffset = currentOffset;
-    const VkDeviceSize missSize = missGroupCount * handleSizeAligned;
-    currentOffset += missSize;
-    currentOffset = align_up(currentOffset, baseAlignment);
+    LOG_INFO_CAT("PIPELINE", "{}SBT Size: {} bytes | Groups: Rg={} Mi={} Hi={} Ca={}{}", 
+                 DIAMOND_SPARKLE, sbtBufferSize, raygenGroupCount_, missGroupCount_, hitGroupCount_, callableGroupCount_, RESET);
 
-    const VkDeviceSize hitOffset = currentOffset;
-    const VkDeviceSize hitSize = hitGroupCount * handleSizeAligned;
-    currentOffset += hitSize;
-    currentOffset = align_up(currentOffset, baseAlignment);
-
-    const VkDeviceSize callableOffset = currentOffset;
-    const VkDeviceSize callableSize = callableGroupCount * handleSizeAligned;
-    currentOffset += callableSize;
-
-    const VkDeviceSize sbtBufferSize = currentOffset;
-
-    LOG_INFO_CAT("PIPELINE", "SBT Layout — Total Size: {} bytes (~{:.3f} KB)", sbtBufferSize, sbtBufferSize / 1024.0);
-    LOG_TRACE_CAT("PIPELINE", "  RayGen:  offset={} size={}B", raygenOffset, raygenSize);
-    LOG_TRACE_CAT("PIPELINE", "  Miss:    offset={} size={}B", missOffset, missSize);
-    LOG_TRACE_CAT("PIPELINE", "  Hit:     offset={} size={}B", hitOffset, hitSize);
-    LOG_TRACE_CAT("PIPELINE", "  Callable: offset={} size={}B", callableOffset, callableSize);
-
-    // Step 5: Extract handles (zero-init addrInfo) + NEW: PFN Call
-    LOG_TRACE_CAT("PIPELINE", "Step 5 — Extracting shader group handles");
+    // Extract handles
     std::vector<uint8_t> shaderHandles(totalGroups * handleSize);
+    VK_CHECK(vkGetRayTracingShaderGroupHandlesKHR_(g_device(), *rtPipeline_, 0, totalGroups, shaderHandles.size(), shaderHandles.data()),
+             "vkGetRayTracingShaderGroupHandlesKHR failed");
 
-    VkResult getHandlesResult = vkGetRayTracingShaderGroupHandlesKHR_(g_device(), *rtPipeline_, 0, totalGroups, shaderHandles.size(), shaderHandles.data());  // NEW: PFN call
-    if (getHandlesResult != VK_SUCCESS) {
-        LOG_ERROR_CAT("PIPELINE", "vkGetRayTracingShaderGroupHandlesKHR failed: {}", static_cast<int>(getHandlesResult));
-        return;
-    }
-    LOG_SUCCESS_CAT("PIPELINE", "Successfully extracted {} shader group handles ({} bytes each)", totalGroups, handleSize);
-
-    // Steps 6-7: Buffers (zero-init infos; unchanged logic but added checks)
-    LOG_TRACE_CAT("PIPELINE", "Step 6 — Creating staging buffer (CPU-visible)");
-    VkBufferCreateInfo stagingInfo = {};  // Zero-init
+    // Staging buffer
+    VkBufferCreateInfo stagingInfo{};
     stagingInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
     stagingInfo.size = sbtBufferSize;
     stagingInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
     stagingInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
     VkBuffer stagingBuffer = VK_NULL_HANDLE;
-    VkResult createStagingResult = vkCreateBuffer(g_device(), &stagingInfo, nullptr, &stagingBuffer);
-    if (createStagingResult != VK_SUCCESS) {
-        LOG_ERROR_CAT("PIPELINE", "Failed to create SBT staging buffer: {}", static_cast<int>(createStagingResult));
-        return;
-    }
+    VK_CHECK(vkCreateBuffer(g_device(), &stagingInfo, nullptr, &stagingBuffer), "Create SBT staging buffer");
 
-    VkMemoryRequirements memReqs;
-    vkGetBufferMemoryRequirements(g_device(), stagingBuffer, &memReqs);
+    VkMemoryRequirements memReqsStaging;
+    vkGetBufferMemoryRequirements(g_device(), stagingBuffer, &memReqsStaging);
 
-    VkMemoryAllocateInfo allocInfoStaging = {};  // Zero-init (separate for staging)
-    allocInfoStaging.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    allocInfoStaging.allocationSize = memReqs.size;
-    allocInfoStaging.memoryTypeIndex = findMemoryType(memReqs.memoryTypeBits,
-                                                      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    VkMemoryAllocateInfo allocStaging{};
+    allocStaging.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    allocStaging.allocationSize = memReqsStaging.size;
+    allocStaging.memoryTypeIndex = findMemoryType(memReqsStaging.memoryTypeBits,
+                                                   VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
 
     VkDeviceMemory stagingMemory = VK_NULL_HANDLE;
-    VkResult allocStagingResult = vkAllocateMemory(g_device(), &allocInfoStaging, nullptr, &stagingMemory);
-    if (allocStagingResult != VK_SUCCESS) {
-        LOG_ERROR_CAT("PIPELINE", "Failed to allocate SBT staging memory: {}", static_cast<int>(allocStagingResult));
-        vkDestroyBuffer(g_device(), stagingBuffer, nullptr);
-        return;
-    }
-    VK_CHECK(vkBindBufferMemory(g_device(), stagingBuffer, stagingMemory, 0), "Bind SBT staging memory");
+    VK_CHECK(vkAllocateMemory(g_device(), &allocStaging, nullptr, &stagingMemory), "Allocate SBT staging memory");
+    VK_CHECK(vkBindBufferMemory(g_device(), stagingBuffer, stagingMemory, 0), "Bind staging memory");
 
-    // Map and fill (unchanged)
     void* mapped = nullptr;
-    VkResult mapResult = vkMapMemory(g_device(), stagingMemory, 0, sbtBufferSize, 0, &mapped);
-    if (mapResult != VK_SUCCESS) {
-        LOG_ERROR_CAT("PIPELINE", "Failed to map SBT staging memory: {}", static_cast<int>(mapResult));
-        vkFreeMemory(g_device(), stagingMemory, nullptr);
-        vkDestroyBuffer(g_device(), stagingBuffer, nullptr);
-        return;
-    }
+    VK_CHECK(vkMapMemory(g_device(), stagingMemory, 0, sbtBufferSize, 0, &mapped), "Map staging memory");
 
-    auto copyGroup = [&](uint32_t groupIndex, VkDeviceSize destOffset) {
-        const uint8_t* src = shaderHandles.data() + groupIndex * handleSize;
-        std::memcpy(reinterpret_cast<uint8_t*>(mapped) + destOffset, src, handleSize);
+    auto copy = [&](uint32_t groupIdx, VkDeviceSize destOffset) {
+        memcpy((uint8_t*)mapped + destOffset, shaderHandles.data() + groupIdx * handleSize, handleSize);
     };
 
-    uint32_t currentGroupIndex = 0;
-    for (uint32_t i = 0; i < raygenGroupCount; ++i) {
-        copyGroup(currentGroupIndex++, raygenOffset + i * handleSizeAligned);
-    }
-    for (uint32_t i = 0; i < missGroupCount; ++i) {
-        copyGroup(currentGroupIndex++, missOffset + i * handleSizeAligned);
-    }
-    for (uint32_t i = 0; i < hitGroupCount; ++i) {
-        copyGroup(currentGroupIndex++, hitOffset + i * handleSizeAligned);
-    }
-    for (uint32_t i = 0; i < callableGroupCount; ++i) {
-        copyGroup(currentGroupIndex++, callableOffset + i * handleSizeAligned);
-    }
+    uint32_t idx = 0;
+    for (uint32_t i = 0; i < raygenGroupCount_; ++i)   copy(idx++, raygenOffset   + i * handleSizeAligned);
+    for (uint32_t i = 0; i < missGroupCount_; ++i)     copy(idx++, missOffset     + i * handleSizeAligned);
+    for (uint32_t i = 0; i < hitGroupCount_; ++i)      copy(idx++, hitOffset      + i * handleSizeAligned);
+    for (uint32_t i = 0; i < callableGroupCount_; ++i) copy(idx++, callableOffset + i * handleSizeAligned);
 
     vkUnmapMemory(g_device(), stagingMemory);
-    LOG_TRACE_CAT("PIPELINE", "Step 6 — Staging buffer filled and unmapped");
 
-    // Step 7: Final buffer (zero-init sbtInfo)
-    LOG_TRACE_CAT("PIPELINE", "Step 7 — Creating final device-local SBT buffer");
-    VkBufferCreateInfo sbtInfo = {};  // Zero-init
+    // Final SBT buffer
+    VkBufferCreateInfo sbtInfo{};
     sbtInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
     sbtInfo.size = sbtBufferSize;
-    sbtInfo.usage = VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+    sbtInfo.usage = VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR |
+                    VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+                    VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
     sbtInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
     VkBuffer rawSbtBuffer = VK_NULL_HANDLE;
     VK_CHECK(vkCreateBuffer(g_device(), &sbtInfo, nullptr, &rawSbtBuffer), "Create final SBT buffer");
-    sbtBuffer_ = Handle<VkBuffer>(rawSbtBuffer, g_device(),
-        [](VkDevice d, VkBuffer b, const VkAllocationCallbacks*) { if (b != VK_NULL_HANDLE) vkDestroyBuffer(d, b, nullptr); },
-        0, "SBTBuffer");
 
+    sbtBuffer_ = Handle<VkBuffer>(rawSbtBuffer, g_device(),
+        [](VkDevice d, VkBuffer b, auto) { if (b) vkDestroyBuffer(d, b, nullptr); }, 0, "SBTBuffer");
+
+    VkMemoryRequirements memReqs;
     vkGetBufferMemoryRequirements(g_device(), rawSbtBuffer, &memReqs);
 
-    // FIXED: Add VkMemoryAllocateFlagsInfo for DEVICE_ADDRESS_BIT — Fresh allocInfo for SBT
-    VkMemoryAllocateFlagsInfo flagsInfo = {};  // Zero-init
-    flagsInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO;
-    flagsInfo.flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT_KHR;
+    VkMemoryAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    allocInfo.allocationSize = memReqs.size;
+    allocInfo.memoryTypeIndex = findMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
-    VkMemoryAllocateInfo allocInfoSBT = {};  // Zero-init (separate for SBT)
-    allocInfoSBT.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    allocInfoSBT.pNext = &flagsInfo;  // FIXED: Chain flags to SBT alloc (enables device address)
-    allocInfoSBT.allocationSize = memReqs.size;
-    allocInfoSBT.memoryTypeIndex = findMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    // Conditional device address flag — SPEC COMPLIANT
+    VkMemoryAllocateFlagsInfo flagsInfo{};
+    if (g_ctx().bufferDeviceAddressEnabled()) {
+        flagsInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO;
+        flagsInfo.flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT_KHR;
+        allocInfo.pNext = &flagsInfo;
+    }
 
     VkDeviceMemory rawSbtMemory = VK_NULL_HANDLE;
-    VK_CHECK(vkAllocateMemory(g_device(), &allocInfoSBT, nullptr, &rawSbtMemory), "Allocate final SBT memory");
+    VK_CHECK(vkAllocateMemory(g_device(), &allocInfo, nullptr, &rawSbtMemory), "Allocate final SBT memory");
+
     sbtMemory_ = Handle<VkDeviceMemory>(rawSbtMemory, g_device(),
-        [](VkDevice d, VkDeviceMemory m, const VkAllocationCallbacks*) { if (m != VK_NULL_HANDLE) vkFreeMemory(d, m, nullptr); },
-        memReqs.size, "SBTMemory");
+        [](VkDevice d, VkDeviceMemory m, auto) { if (m) vkFreeMemory(d, m, nullptr); }, memReqs.size, "SBTMemory");
 
     VK_CHECK(vkBindBufferMemory(g_device(), rawSbtBuffer, rawSbtMemory, 0), "Bind final SBT memory");
 
-    // Copy (unchanged)
-    VkCommandBuffer cmd = beginSingleTimeCommands(pool);
-    if (cmd == VK_NULL_HANDLE) {
-        LOG_ERROR_CAT("PIPELINE", "Failed to begin single-time cmd for SBT copy");
-        return;
-    }
-    VkBufferCopy copyRegion = {};  // Zero-init
+    // Copy staging to final — FIXED: renamed to avoid lambda conflict
+    VkCommandBuffer cmd = VulkanRTX::beginSingleTimeCommands(pool);
+    VkBufferCopy copyRegion{};
     copyRegion.size = sbtBufferSize;
     vkCmdCopyBuffer(cmd, stagingBuffer, rawSbtBuffer, 1, &copyRegion);
-    endSingleTimeCommands(pool, queue, cmd);
+    VulkanRTX::endSingleTimeCommands(cmd, queue, pool);
 
     // Cleanup staging
     vkDestroyBuffer(g_device(), stagingBuffer, nullptr);
     vkFreeMemory(g_device(), stagingMemory, nullptr);
-    LOG_TRACE_CAT("PIPELINE", "Step 7 — Final SBT buffer created and copied — DEVICE_ADDRESS_BIT ENABLED");
 
-    // Step 8: Address (zero-init addrInfo) + NEW: PFN Call
-    VkBufferDeviceAddressInfo addrInfo = {};  // Zero-init
+    // Get device address
+    VkBufferDeviceAddressInfo addrInfo{};
     addrInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
     addrInfo.buffer = rawSbtBuffer;
-    sbtAddress_ = vkGetBufferDeviceAddress_(g_device(), &addrInfo);  // NEW: PFN call
+    sbtAddress_ = vkGetBufferDeviceAddress_(g_device(), &addrInfo);
 
-    // Store offsets (unchanged)
-    raygenSbtOffset_ = raygenOffset;
-    missSbtOffset_ = missOffset;
-    hitSbtOffset_ = hitOffset;
-    callableSbtOffset_ = callableOffset;
-    sbtStride_ = handleSizeAligned;
+    // Store regions
+    raygenSbtRegion_   = { sbtAddress_ + raygenOffset,   handleSizeAligned, raygenGroupCount_   * handleSizeAligned };
+    missSbtRegion_     = { sbtAddress_ + missOffset,     handleSizeAligned, missGroupCount_     * handleSizeAligned };
+    hitSbtRegion_      = { sbtAddress_ + hitOffset,      handleSizeAligned, hitGroupCount_      * handleSizeAligned };
+    callableSbtRegion_ = { sbtAddress_ + callableOffset, handleSizeAligned, callableGroupCount_ * handleSizeAligned };
 
-    // ──────────────────────────────────────────────────────────────────────────────
-    // FINAL STEP: Construct SBT Regions — REQUIRED FOR vkCmdTraceRaysKHR (VUID-VkStridedDeviceAddressRegionKHR-deviceAddress-03630: non-zero address)
-    // ──────────────────────────────────────────────────────────────────────────────
-    raygenSbtRegion_ = {
-        .deviceAddress = sbtAddress_ + raygenSbtOffset_,
-        .stride        = sbtStride_,
-        .size          = raygenGroupCount * sbtStride_
-    };
-
-    missSbtRegion_ = {
-        .deviceAddress = sbtAddress_ + missSbtOffset_,
-        .stride        = sbtStride_,
-        .size          = missGroupCount * sbtStride_
-    };
-
-    hitSbtRegion_ = {
-        .deviceAddress = sbtAddress_ + hitSbtOffset_,
-        .stride        = sbtStride_,
-        .size          = hitGroupCount * sbtStride_
-    };
-
-    callableSbtRegion_ = {
-        .deviceAddress = sbtAddress_ + callableSbtOffset_,
-        .stride        = sbtStride_,
-        .size          = callableGroupCount * sbtStride_
-    };
-
-    LOG_SUCCESS_CAT("PIPELINE", "SBT Regions constructed — RayGen: 0x{:x} ({} entries) | Miss: 0x{:x} | Hit: 0x{:x} | Callable: 0x{:x}",
-                    raygenSbtRegion_.deviceAddress, raygenGroupCount,
-                    missSbtRegion_.deviceAddress,
-                    hitSbtRegion_.deviceAddress,
-                    callableSbtRegion_.deviceAddress);
-
-    LOG_SUCCESS_CAT("PIPELINE", "Shader Binding Table CREATED — Address: 0x{:x} | Size: {} bytes | Stride: {}B — DEVICE_ADDRESS VALIDATION FIXED", sbtAddress_, sbtBufferSize, sbtStride_);
-    LOG_TRACE_CAT("PIPELINE", "SBT Offsets — RayGen: {} | Miss: {} | Hit: {} | Callable: {}", raygenSbtOffset_, missSbtOffset_, hitSbtOffset_, callableSbtOffset_);
-    LOG_TRACE_CAT("PIPELINE", "createShaderBindingTable — COMPLETE — PINK PHOTONS FULLY ARMED");
+    LOG_SUCCESS_CAT("PIPELINE", "{}SBT FORGED — Address: 0x{:016X} | Size: {} | Stride: {} — PINK PHOTONS ARMED{}", 
+                    EMERALD_GREEN, sbtAddress_, sbtBufferSize, handleSizeAligned, RESET);
 }
 
 } // namespace RTX
