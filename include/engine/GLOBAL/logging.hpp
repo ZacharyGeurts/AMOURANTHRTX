@@ -22,6 +22,7 @@
 #define LOG_CAPTAIN_N(...)   LOG_ATTEMPT_CAT("CAPTAIN N",   __VA_ARGS__)
 #define LOG_ELON(...)        LOG_SUCCESS_CAT("ELON",        __VA_ARGS__)
 #define LOG_JENSEN(...)      LOG_SUCCESS_CAT("JENSEN",      __VA_ARGS__)
+#define LOG_CID(...)         LOG_SUCCESS_CAT("CID",      __VA_ARGS__)
 #define LOG_CARMACK(...)     LOG_INFO_CAT("CARMACK",        __VA_ARGS__)
 #define LOG_KEANU(...)       LOG_INFO_CAT("KEANU",          __VA_ARGS__)
 #define LOG_NICK(...)        LOG_ATTEMPT_CAT("NICK",        __VA_ARGS__)
@@ -212,13 +213,13 @@ extern uint64_t kStone2() noexcept;
 // ========================================================================
 // 0. CONFIGURATION
 // ========================================================================
-constexpr bool ENABLE_TRACE   = false;
+constexpr bool ENABLE_TRACE   = true;
 constexpr bool ENABLE_DEBUG   = true;
-constexpr bool ENABLE_INFO    = false;
+constexpr bool ENABLE_INFO    = true;
 constexpr bool ENABLE_WARNING = true;
 constexpr bool ENABLE_ERROR   = true;
 constexpr bool ENABLE_FAILURE = true;
-constexpr bool ENABLE_FATAL   = false;
+constexpr bool ENABLE_FATAL   = true;
 constexpr bool ENABLE_SUCCESS = true;
 constexpr bool ENABLE_ATTEMPT = true;
 constexpr bool ENABLE_PERF    = true;
@@ -349,6 +350,7 @@ namespace Color {
     inline constexpr std::string_view RADIANT_ROSE              = "\033[1;38;5;211m";
     inline constexpr std::string_view ELECTRO_PURPLE            = "\033[1;38;5;165m";
     inline constexpr std::string_view CRIMSON_RED               = "\033[38;5;9m";
+	inline constexpr std::string_view ABANDON_SHIP              = "\033[1;5;91m";
 
     // ── STANDARD 16 COLORS (YOU ALREADY KNOW THESE) ─────────────────────────────
     inline constexpr std::string_view BLACK       = "\033[38;5;0m";

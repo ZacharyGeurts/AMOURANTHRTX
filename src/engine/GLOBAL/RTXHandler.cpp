@@ -606,7 +606,7 @@ void RTX::Context::init(SDL_Window* window, int width, int height)
     // IN THE HARBOR OF THE CITY, THE FINAL RIVET IS DRIVEN BY A LEGEND
     // CID — MASTER OF OAK, STEEL, AND RTX — HAMMERS THE LAST NAIL
     // ─────────────────────────────────────────────────────────────────────
-    LOG_ATTEMPT_CAT("RTX", "{}RTX::Context::init() — FINAL ASCENSION @ {}×{} — CID THE SHIPBUILDER ENTERS THE DOCKS{}", 
+    LOG_ATTEMPT_CAT("RTX", "{}RTX::Context::init() — FINAL ASCENSION @ {}x{} — CID THE SHIPBUILDER ENTERS THE DOCKS{}", 
                     VALHALLA_GOLD, width, height, RESET);
 
     if (isValid()) {
@@ -614,7 +614,7 @@ void RTX::Context::init(SDL_Window* window, int width, int height)
         return;
     }
 
-    LOG_INFO_CAT("RTX", "{}Phase 0: Cid surveys the harbor — window @ {:p} → {}×{}", 
+    LOG_INFO_CAT("RTX", "{}Phase 0: Cid surveys the harbor — window @ {:p} → {}x{}", 
                  EMERALD_GREEN, static_cast<void*>(window), width, height, RESET);
 
     this->window  = window;
@@ -672,7 +672,7 @@ void RTX::Context::init(SDL_Window* window, int width, int height)
         // CID HIMSELF PULLS THE QUEUES FROM THE FIRE
         retrieveQueues();
 
-        LOG_SUCCESS_CAT("RTX", "{}CID’S FINAL BLOW — LOGICAL DEVICE FORGED → 0x{:016X}{}", 
+        LOG_SUCCESS_CAT("RTX", "{}CID'S FINAL BLOW — LOGICAL DEVICE FORGED → 0x{:016X}{}", 
                         VALHALLA_GOLD, reinterpret_cast<uint64_t>(device_), RESET);
         LOG_SUCCESS_CAT("RTX", "{}    • Graphics Family : {}    • Present Family : {}    • Compute Family : {}{}", 
                         AURORA_PINK,
@@ -691,7 +691,7 @@ void RTX::Context::init(SDL_Window* window, int width, int height)
     // ========================================================================
     // 4. SWAPCHAIN — CID RAISES THE PINK SAILS
     // ========================================================================
-    LOG_ATTEMPT_CAT("RTX", "{}Cid climbs the mast — Raising the pink sails of the swapchain @ {}×{}", 
+    LOG_ATTEMPT_CAT("RTX", "{}Cid climbs the mast — Raising the pink sails of the swapchain @ {}x{}", 
                     RASPBERRY_PINK, width, height, RESET);
     
     forgeSwapchain(window, width, height);
@@ -728,13 +728,13 @@ void RTX::Context::init(SDL_Window* window, int width, int height)
     LOG_SUCCESS_CAT("RTX", "{}    • Logical Dev   : 0x{:016X}", AURORA_PINK, reinterpret_cast<uint64_t>(device_), RESET);
     LOG_SUCCESS_CAT("RTX", "{}    • Images        : {}", AURORA_PINK, g_image_count(), RESET);
 
-    LOG_SUCCESS_CAT("RTX", "{}PINK PHOTONS ETERNAL — NOVEMBER 23, 2025 — CID’S MASTERPIECE SETS SAIL{}", 
+    LOG_SUCCESS_CAT("RTX", "{}PINK PHOTONS ETERNAL — NOVEMBER 23, 2025 — CID'S MASTERPIECE SETS SAIL{}", 
                     DIAMOND_SPARKLE, RESET);
 
-    LOG_AMOURANTH("{}Captain Amouranth steps aboard, eyes shining: \"Cid… she’s perfect.\"{}", RASPBERRY_PINK, RESET);
+    LOG_AMOURANTH("{}Captain Amouranth steps aboard, eyes shining: \"Cid… she's perfect.\"{}", RASPBERRY_PINK, RESET);
     LOG_NICK("{}Nick salutes the old shipbuilder: \"A legend built our legend.\"{}", EMERALD_GREEN, RESET);
 
-    LOG_SUCCESS_CAT("CID", "{}Cid wipes sweat from his brow, hammer resting on his shoulder: \"She’ll never sink. Not while pink photons burn.\"{}", 
+    LOG_SUCCESS_CAT("CID", "{}Cid wipes sweat from his brow, hammer resting on his shoulder: \"She'll never sink. Not while pink photons burn.\"{}", 
                     VALHALLA_GOLD, RESET);
 
     LOG_SUCCESS_CAT("RTX", "{}THE GOLDEN RIVET IS SET — THE SHIP IS UNSINKABLE — THE VOYAGE BEGINS{}", 
@@ -831,24 +831,32 @@ LOG_SUCCESS_CAT("RTX",
 
 void RTX::Context::forgeSwapchain(SDL_Window* window, int width, int height)
 {
-    LOG_ATTEMPT_CAT("RTX", "FORGING SWAPCHAIN @ {}×{} — PINK PHOTONS CLAIM THE CANVAS", 
+    LOG_ATTEMPT_CAT("RTX", "FORGING SWAPCHAIN @ {}x{} — PINK PHOTONS CLAIM THE CANVAS", 
                     VALHALLA_GOLD, width, height, RESET);
 
+    LOG_AMOURANTH("Captain Amouranth climbs to the bow, wind in her hair: \"This is where we place her. The soul of the ship. My soul. Carve it true.\"", RASPBERRY_PINK, RESET);
+    LOG_NICK("Nick steadies the chisel: \"She'll cut through any storm. Through any darkness. She leads us.\"", EMERALD_GREEN, RESET);
+    LOG_CID("Cid, master shipwright, wipes sweat from his brow: \"This figurehead… she's not wood. She's legend.\"", VALHALLA_GOLD, RESET);
+
     if (!instance_ || !physicalDevice_ || !device_) {
-        LOG_FATAL_CAT("RTX", "forgeSwapchain() CALLED BEFORE INSTANCE/DEVICE — ORDER VIOLATED", BLOOD_RED, RESET);
+        LOG_FATAL_CAT("RTX", "forgeSwapchain() CALLED BEFORE INSTANCE/DEVICE — THE BOW IS EMPTY — NO FIGUREHEAD CAN STAND", BLOOD_RED, RESET);
         std::exit(1);
     }
 
-    // 1. Create surface
+	LOG_CID("Cid, master shipwright, wipes sweat from his brow", VALHALLA_GOLD, RESET);
+
+    // 1. THE PROW IS CARVED — SURFACE BORN
     VkSurfaceKHR surface = VK_NULL_HANDLE;
     if (!SDL_Vulkan_CreateSurface(window, instance_, nullptr, &surface)) {
-        LOG_FATAL_CAT("RTX", "SDL_Vulkan_CreateSurface FAILED: {}", BLOOD_RED, SDL_GetError(), RESET);
+        LOG_FATAL_CAT("RTX", "THE SEA REJECTS OUR PROW — SDL_Vulkan_CreateSurface FAILED: {}", BLOOD_RED, SDL_GetError(), RESET);
         std::exit(1);
     }
     set_g_surface(surface);
-    LOG_SUCCESS_CAT("RTX", "VkSurfaceKHR FORGED @ {:#x}", reinterpret_cast<uintptr_t>(surface), RESET);
+    LOG_SUCCESS_CAT("RTX", "PROW CARVED — VkSurfaceKHR FORGED @ {:#x} — THE SHIP NOW HAS A FACE", DIAMOND_SPARKLE, reinterpret_cast<uintptr_t>(surface), RESET);
 
-    // 2. Query surface capabilities
+    LOG_CID("Cid, master shipwright, wipes sweat from his brow", VALHALLA_GOLD, RESET);
+
+    // 2. THE EYES ARE SET — CAPABILITIES READ
     VkSurfaceCapabilitiesKHR caps{};
     VK_CHECK(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice_, surface, &caps));
 
@@ -858,21 +866,26 @@ void RTX::Context::forgeSwapchain(SDL_Window* window, int width, int height)
         extent.height = std::clamp(static_cast<uint32_t>(height), caps.minImageExtent.height, caps.maxImageExtent.height);
     }
 
-    // 3. Choose surface format (fallback to first available)
+    // 3. THE SKIN IS PAINTED — FORMAT CHOSEN
     uint32_t formatCount = 0;
     VK_CHECK(vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice_, surface, &formatCount, nullptr));
     std::vector<VkSurfaceFormatKHR> formats(formatCount);
     VK_CHECK(vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice_, surface, &formatCount, formats.data()));
 
+	LOG_CID("Cid, master shipwright, wipes sweat from his brow", VALHALLA_GOLD, RESET);
+
     VkSurfaceFormatKHR chosenFormat = formats[0];
     for (const auto& f : formats) {
         if (f.format == VK_FORMAT_B8G8R8A8_SRGB && f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
             chosenFormat = f;
+            LOG_SUCCESS_CAT("RTX", "PERFECT SKIN ACHIEVED — B8G8R8A8_SRGB — SHE GLOWS", PLASMA_FUCHSIA, RESET);
             break;
         }
     }
 
-    // 4. Choose present mode
+	LOG_CID("Cid, master shipwright, wipes sweat from his face", VALHALLA_GOLD, RESET);
+
+    // 4. THE HEARTBEAT — PRESENT MODE
     uint32_t presentModeCount = 0;
     VK_CHECK(vkGetPhysicalDeviceSurfacePresentModesKHR(physicalDevice_, surface, &presentModeCount, nullptr));
     std::vector<VkPresentModeKHR> presentModes(presentModeCount);
@@ -882,15 +895,18 @@ void RTX::Context::forgeSwapchain(SDL_Window* window, int width, int height)
     for (const auto& mode : presentModes) {
         if (mode == VK_PRESENT_MODE_MAILBOX_KHR) {
             presentMode = mode;
+            LOG_SUCCESS_CAT("RTX", "TRIPLE-BUFFERED HEART — MAILBOX MODE — SHE BREATHES FAST AND CLEAN", EMERALD_GREEN, RESET);
             break;
         }
     }
 
-    // 5. Create swapchain
+	LOG_CID("Cid, master shipwright, wipes sweat from his armpit", VALHALLA_GOLD, RESET);
+
+    // 5. THE SPINE IS LAID — SWAPCHAIN BORN
     VkSwapchainCreateInfoKHR swapInfo{};
     swapInfo.sType            = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
     swapInfo.surface          = surface;
-    swapInfo.minImageCount    = std::min(3u, caps.maxImageCount ? caps.maxImageCount : 3u);
+    swapInfo.minImageCount    = std::min(3u, caps.maxImageCount ? caps.maxImageExtent.width : 3u);
     if (swapInfo.minImageCount < caps.minImageCount) swapInfo.minImageCount = caps.minImageCount;
     swapInfo.imageFormat      = chosenFormat.format;
     swapInfo.imageColorSpace  = chosenFormat.colorSpace;
@@ -903,30 +919,56 @@ void RTX::Context::forgeSwapchain(SDL_Window* window, int width, int height)
     swapInfo.clipped          = VK_TRUE;
     swapInfo.oldSwapchain     = VK_NULL_HANDLE;
 
-    VkSwapchainKHR swapchain = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateSwapchainKHR(device_, &swapInfo, nullptr, &swapchain));
+    VkSwapchainKHR rawSwapchain = VK_NULL_HANDLE;
+    VK_CHECK(vkCreateSwapchainKHR(device_, &swapInfo, nullptr, &rawSwapchain));
 
-	set_g_swapchain(swapchain);
+    // THE FIGUREHEAD IS MOUNTED — AMOURANTH HERSELF LEADS THE SHIP
+    LOG_AMOURANTH("Captain Amouranth steps forward, places her hand on the carving: \"This is me. This is us. This is forever.\"", RASPBERRY_PINK, RESET);
+    LOG_SUCCESS_CAT("RTX", "FIGUREHEAD MOUNTED — AMOURANTH STANDS PROUD ON THE BOW — CUTLASS RAISED — BREASTS DEFLECTING THE WIND", PLASMA_FUCHSIA, RESET);
 
-    // 6. Retrieve images
+    RTX::swapchain() = RTX::Handle<VkSwapchainKHR>(
+        rawSwapchain,
+        device_,
+        [](VkDevice d, VkSwapchainKHR s, const VkAllocationCallbacks*) { vkDestroySwapchainKHR(d, s, nullptr); },
+        0,
+        "FigureheadSwapchain_AmouranthEternal"
+    );
+
+    LOG_CID("Cid, master shipwright, wipes brow from his sweat", VALHALLA_GOLD, RESET);
+
+    // 6. THE EYES OPEN — IMAGES RETRIEVED
     uint32_t imageCount = 0;
-    VK_CHECK(vkGetSwapchainImagesKHR(device_, swapchain, &imageCount, nullptr));
+    VK_CHECK(vkGetSwapchainImagesKHR(device_, rawSwapchain, &imageCount, nullptr));
     std::vector<VkImage> images(imageCount);
-    VK_CHECK(vkGetSwapchainImagesKHR(device_, swapchain, &imageCount, images.data()));
+    VK_CHECK(vkGetSwapchainImagesKHR(device_, rawSwapchain, &imageCount, images.data()));
 
-    // 7. Store in StoneKey Empire
-    set_g_swapchain(swapchain);
+	LOG_CID("Cid, master shipwright", VALHALLA_GOLD, RESET);
+
+    // 7. THE SOUL IS BOUND — STONEKEY EMPIRE ACCEPTS THE OFFERING
     StoneKey::Empire::swapchain_images = std::move(images);
-    StoneKey::Empire::surface_format = chosenFormat;
-    StoneKey::Empire::extent = extent;
-    StoneKey::Empire::image_count = imageCount;
+    StoneKey::Empire::surface_format   = chosenFormat;
+    StoneKey::Empire::extent           = extent;
+    StoneKey::Empire::image_count      = imageCount;
 
-    LOG_SUCCESS_CAT("RTX", std::format("SWAPCHAIN FORGED — {} IMAGES — {}×{} — FORMAT: {}", 
-                    imageCount, extent.width, extent.height, static_cast<int>(chosenFormat.format)),
-                    DIAMOND_SPARKLE, RESET);
-    LOG_SUCCESS_CAT("RTX", std::format("    • Swapchain : {:#x}", reinterpret_cast<uintptr_t>(swapchain)), RESET);
-    LOG_SUCCESS_CAT("RTX", std::format("    • Surface    : {:#x}", reinterpret_cast<uintptr_t>(surface)), RESET);
-    LOG_SUCCESS_CAT("RTX", "    • PresentMode: {}", presentMode == VK_PRESENT_MODE_MAILBOX_KHR ? "MAILBOX (TRIPLE BUFFER)" : "FIFO", RESET);
+	LOG_CID("Cid, ", VALHALLA_GOLD, RESET);
+
+    // FINAL TOUCH — WAKE THE SPIRITS
+    (void)RTX::swapchain();
+    (void)RTX::swapchainImages();
+    (void)RTX::swapchainImageViews();
+    (void)RTX::swapchainFormat();
+    (void)RTX::swapchainExtent();
+
+    LOG_SUCCESS_CAT("RTX", "SWAPCHAIN FORGED — {} CANVASES — {}x{} — THE PINK PHOTONS HAVE A HOME", 
+                    imageCount, extent.width, extent.height, DIAMOND_SPARKLE, RESET);
+    LOG_SUCCESS_CAT("RTX", "FIGUREHEAD SECURE — AMOURANTH LEADS US INTO THE STORM — PINK PHOTONS ETERNAL", PLASMA_FUCHSIA, RESET);
+
+    LOG_AMOURANTH("She turns to the crew, voice strong: \"Look at her. Look at us. We are unsinkable.\"", RASPBERRY_PINK, RESET);
+    LOG_NICK("Nick smiles: \"And she's beautiful.\"", EMERALD_GREEN, RESET);
+    LOG_CID("Cid steps back, hammer lowered: \"Best figurehead I ever carved.\"", VALHALLA_GOLD, RESET);
+	LOG_CID("Cid walks back home through knee deep sweaty floodwaters.", VALHALLA_GOLD, RESET);
+
+    LOG_SUCCESS_CAT("RTX", "THE GOOD SHIP VULKANRTX NOW HAS A FACE — AND IT IS GLORIOUS", DIAMOND_SPARKLE, RESET);
 }
 
 void RTX::Context::createLogicalDevice()

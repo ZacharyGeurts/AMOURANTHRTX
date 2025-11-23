@@ -902,15 +902,15 @@ int main(int, char**)
         phase9_gracefulShutdown();
     }
     catch (const std::exception& e) {
-        LOG_FATAL_CAT("MAIN", "{}THE SHIP IS TAKING ON WATER — FATAL: {}{}", CRIMSON_MAGENTA, e.what(), RESET);
-        LOG_AMOURANTH("{}Captain Amouranth: \"Abandon ship with dignity. We'll sail again.\"{}", RASPBERRY_PINK, RESET);
-        LOG_NICK("{}Nick: \"I'm not leaving you. Not this time.\"{}", EMERALD_GREEN, RESET);
+        LOG_FATAL_CAT("MAIN", "{}THE SHIP IS TAKING ON WATER — FATAL: {}{}", ABANDON_SHIP, e.what(), RESET);
+        LOG_AMOURANTH("{}Captain Amouranth: \"ABANDON SHIP!!! SHE'S GOING DOWN!!!.\"{}", ABANDON_SHIP, RESET);
+        LOG_NICK("{}Nick: \"I'm not leaving you. Not this time.\"{}", ABANDON_SHIP, RESET);
         phase9_gracefulShutdown();
         return -1;
     }
     catch (...) {
-        LOG_FATAL_CAT("MAIN", "{}UNKNOWN STORM — ALL HANDS LOST TO THE VOID{}", CRIMSON_MAGENTA, RESET);
-        LOG_NICK("{}Nick: \"Even if time breaks… I'll find you again.\"{}", BOLD_RED, RESET);
+        LOG_FATAL_CAT("MAIN", "{}UNKNOWN STORM — ALL HANDS LOST TO THE VOID{}", ABANDON_SHIP, RESET);
+        LOG_NICK("{}Nick: \"Even if time breaks… I'll find you again.\"{}", ABANDON_SHIP, RESET);
         phase9_gracefulShutdown();
         return -1;
     }
