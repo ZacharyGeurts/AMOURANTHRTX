@@ -150,7 +150,7 @@ private:
     // Extension function pointers — loaded once, never stored raw
     PFN_vkCreateRayTracingPipelinesKHR       vkCreateRayTracingPipelinesKHR_{nullptr};
     PFN_vkGetRayTracingShaderGroupHandlesKHR vkGetRayTracingShaderGroupHandlesKHR_{nullptr};
-    PFN_vkGetBufferDeviceAddressKHR          vkGetBufferDeviceAddressKHR_{nullptr};
+    PFN_vkGetBufferDeviceAddress          vkGetBufferDeviceAddress_{nullptr};
     PFN_vkCmdTraceRaysKHR                    vkCmdTraceRaysKHR_{nullptr};
 
     // Private methods — 100% StoneKey compliant

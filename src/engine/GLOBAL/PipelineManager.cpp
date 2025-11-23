@@ -346,13 +346,13 @@ void PipelineManager::loadExtensions() {
     }
     LOG_TRACE_CAT("PIPELINE", "Loaded vkGetRayTracingShaderGroupHandlesKHR @ 0x{:x}", reinterpret_cast<uintptr_t>(vkGetRayTracingShaderGroupHandlesKHR_));
 
-    vkGetBufferDeviceAddressKHR_ = reinterpret_cast<PFN_vkGetBufferDeviceAddressKHR>(
-        vkGetDeviceProcAddr(g_device(), "vkGetBufferDeviceAddressKHR"));
-    if (!vkGetBufferDeviceAddressKHR_) {
-        LOG_FATAL_CAT("PIPELINE", "Failed to load vkGetBufferDeviceAddressKHR — Ensure VK_KHR_buffer_device_address enabled");
+    vkGetBufferDeviceAddress_ = reinterpret_cast<PFN_vkGetBufferDeviceAddress>(
+        vkGetDeviceProcAddr(g_device(), "vkGetBufferDeviceAddress"));
+    if (!vkGetBufferDeviceAddress_) {
+        LOG_FATAL_CAT("PIPELINE", "Failed to load vkGetBufferDeviceAddress — Ensure VK_KHR_buffer_device_address enabled");
         return;
     }
-    LOG_TRACE_CAT("PIPELINE", "Loaded vkGetBufferDeviceAddressKHR @ 0x{:x}", reinterpret_cast<uintptr_t>(vkGetBufferDeviceAddressKHR_));
+    LOG_TRACE_CAT("PIPELINE", "Loaded vkGetBufferDeviceAddress @ 0x{:x}", reinterpret_cast<uintptr_t>(vkGetBufferDeviceAddress_));
 
     vkCmdTraceRaysKHR_ = reinterpret_cast<PFN_vkCmdTraceRaysKHR>(
         vkGetDeviceProcAddr(g_device(), "vkCmdTraceRaysKHR"));
@@ -986,8 +986,8 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
         LOG_FATAL_CAT("PIPELINE", "vkGetRayTracingShaderGroupHandlesKHR not loaded — abort SBT creation");
         return;
     }
-    if (!vkGetBufferDeviceAddressKHR_) {
-        LOG_FATAL_CAT("PIPELINE", "vkGetBufferDeviceAddressKHR not loaded — abort SBT creation");
+    if (!vkGetBufferDeviceAddress_) {
+        LOG_FATAL_CAT("PIPELINE", "vkGetBufferDeviceAddress not loaded — abort SBT creation");
         return;
     }
 
@@ -1195,7 +1195,7 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
     VkBufferDeviceAddressInfo addrInfo = {};  // Zero-init
     addrInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
     addrInfo.buffer = rawSbtBuffer;
-    sbtAddress_ = vkGetBufferDeviceAddressKHR_(g_device(), &addrInfo);  // NEW: PFN call
+    sbtAddress_ = vkGetBufferDeviceAddress_(g_device(), &addrInfo);  // NEW: PFN call
 
     // Store offsets (unchanged)
     raygenSbtOffset_ = raygenOffset;

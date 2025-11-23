@@ -180,8 +180,8 @@ namespace RTX {
     void logAndTrackDestruction(const char* type, void* ptr, int line, size_t size);
 
     // Internal sub-functions for stepwise initialization (declared here for modularity; defined in RTXHandler.cpp)
-    void pickPhysicalDevice();
-    void createLogicalDevice();
+    [[nodiscard]] VkPhysicalDevice pickPhysicalDevice(VkInstance instance, VkSurfaceKHR surface);
+    [[nodiscard]] VkDevice         createLogicalDevice(VkPhysicalDevice physicalDevice, VkSurfaceKHR surface);
     void createCommandPool();
     void loadRayTracingExtensions();
     void retrieveQueues() noexcept;
@@ -281,231 +281,115 @@ namespace RTX {
     #define HANDLE_GET(var) ((var).get())
     #define HANDLE_RESET(var) do { LOG_INFO_CAT("RTX", "HANDLE_RESET: {}", #var); (var).reset(); } while(0)
 
-    // =============================================================================
-    // Context — AAAAA V1.4: Async Compute + Ready Flag + Full Cleanup + Safe Accessors + renderPass + physProps for alignment
-    // =============================================================================
-    struct Context {
-    public:
-        // Core Vulkan Handles (raw for local use; access via secure getters)
-        VkInstance       instance_       = VK_NULL_HANDLE;
-        VkSurfaceKHR     surface_        = VK_NULL_HANDLE;
-        VkPhysicalDevice physicalDevice_ = VK_NULL_HANDLE;
-        VkDevice         device_         = VK_NULL_HANDLE;
-        VkQueue          graphicsQueue_  = VK_NULL_HANDLE;
-        VkQueue          presentQueue_   = VK_NULL_HANDLE;
-        VkCommandPool    commandPool_    = VK_NULL_HANDLE;
-        VkPipelineCache  pipelineCache_  = VK_NULL_HANDLE;
-        VkDebugUtilsMessengerEXT debugMessenger_ = VK_NULL_HANDLE;
-        VkFormat        hdr_format       = VK_FORMAT_UNDEFINED;
-        VkColorSpaceKHR hdr_color_space  = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+// =============================================================================
+// Context — Async Compute + Ready Flag + Full Cleanup + Safe Accessors + renderPass + physProps for alignment
+// =============================================================================
+struct Context {
+public:
+    // CORE HANDLES
+    VkInstance       instance_       = VK_NULL_HANDLE;
+    VkSurfaceKHR     surface_        = VK_NULL_HANDLE;
+    VkPhysicalDevice physicalDevice_ = VK_NULL_HANDLE;
+    VkDevice         device_         = VK_NULL_HANDLE;
 
-        // Device Properties for Alignment (NEW: Fixes driver min size warnings)
-        VkPhysicalDeviceProperties physProps_{};
-		uint32_t graphicsQueueFamily = static_cast<uint32_t>(-1);  // ← ADD THIS LINE
+    VkQueue          graphicsQueue_  = VK_NULL_HANDLE;
+    VkQueue          presentQueue_   = VK_NULL_HANDLE;
+    VkQueue          computeQueue_   = VK_NULL_HANDLE;
 
-		bool             hasFullRTX_     = false;
+    VkCommandPool    commandPool_       = VK_NULL_HANDLE;
+    VkCommandPool    computeCommandPool_= VK_NULL_HANDLE;
+    VkPipelineCache  pipelineCache_     = VK_NULL_HANDLE;
 
-        // Window and Dimensions
-        SDL_Window*      window   = nullptr;
-        int              width    = 0;
-        int              height   = 0;
+    // QUEUE FAMILIES
+    std::optional<uint32_t> graphicsFamily_;
+    std::optional<uint32_t> presentFamily_;
+    std::optional<uint32_t> computeFamily_;
 
-        // Validity and Readiness Flags
-        bool             valid_   = false;  // For ctx() guard during init
-
-        mutable std::atomic<bool> ready_{false};  // Thread-safe for renderer
-
-        // Async Compute Support
-        uint32_t         computeFamily_      = UINT32_MAX;
-        VkQueue          computeQueue_       = VK_NULL_HANDLE;
-        VkCommandPool    computeCommandPool_ = VK_NULL_HANDLE;
-
-        uint32_t         graphicsFamily_    = UINT32_MAX;
-        uint32_t         presentFamily_     = UINT32_MAX;
-
-        // Ray Tracing Extensions (Function Pointers) — Public for direct access in LAS.hpp et al.
-        PFN_vkGetBufferDeviceAddressKHR               vkGetBufferDeviceAddressKHR_               = nullptr;
-        PFN_vkCmdTraceRaysKHR                         vkCmdTraceRaysKHR_                         = nullptr;
-        PFN_vkGetRayTracingShaderGroupHandlesKHR      vkGetRayTracingShaderGroupHandlesKHR_      = nullptr;
-        PFN_vkCreateAccelerationStructureKHR          vkCreateAccelerationStructureKHR_          = nullptr;
-        PFN_vkDestroyAccelerationStructureKHR         vkDestroyAccelerationStructureKHR_         = nullptr;
-        PFN_vkGetAccelerationStructureBuildSizesKHR  vkGetAccelerationStructureBuildSizesKHR_  = nullptr;
-        PFN_vkCmdBuildAccelerationStructuresKHR       vkCmdBuildAccelerationStructuresKHR_       = nullptr;
-        PFN_vkGetAccelerationStructureDeviceAddressKHR vkGetAccelerationStructureDeviceAddressKHR_ = nullptr;
-        PFN_vkCreateRayTracingPipelinesKHR            vkCreateRayTracingPipelinesKHR_            = nullptr;
-
-        VkPhysicalDeviceRayTracingPipelinePropertiesKHR rayTracingProps_{
-            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR
-        };
-
-        // Display Timing Extensions (GOOGLE) — For jitter recovery & frame prediction in swapchain/RTX pacing
-        PFN_vkGetPastPresentationTimingGOOGLE         vkGetPastPresentationTimingGOOGLE_         = nullptr;
-        PFN_vkGetRefreshCycleDurationGOOGLE           vkGetRefreshCycleDurationGOOGLE_           = nullptr;
-
-        // HDR & Swapchain Extensions (EXT) — For metadata injection & advanced present
-        PFN_vkSetHdrMetadataEXT                       vkSetHdrMetadataEXT_                       = nullptr;
-        PFN_vkAcquireNextImage2KHR                    vkAcquireNextImage2KHR_                    = nullptr;  // For extended acquire with semaphores
-
-        // Synchronization Primitives (Core 1.2+ — no KHR suffixes needed)
-        PFN_vkGetSemaphoreFdKHR                        vkGetSemaphoreFdKHR_                        = nullptr;  // Optional CPU-GPU handoff
-        PFN_vkImportSemaphoreFdKHR                    vkImportSemaphoreFdKHR_                    = nullptr;
-
-        // Dynamic Rendering (KHR) — Framebufferless for resize-proof RT compositing
-        PFN_vkCmdBeginRenderingKHR                    vkCmdBeginRenderingKHR_                    = nullptr;
-        PFN_vkCmdEndRenderingKHR                      vkCmdEndRenderingKHR_                     = nullptr;
-
-        // Mesh Shaders (EXT) — For procedural geo in RT scenes (correct Draw, not Dispatch)
-        PFN_vkCmdDrawMeshTasksEXT                     vkCmdDrawMeshTasksEXT_                     = nullptr;
-        PFN_vkCmdDrawMeshTasksIndirectEXT             vkCmdDrawMeshTasksIndirectEXT_             = nullptr;
-
-        // Variable Rate Shading (KHR) — Perf optimization for RT viewport shading rates
-        PFN_vkCmdSetFragmentShadingRateKHR            vkCmdSetFragmentShadingRateKHR_            = nullptr;
-
-        // Descriptor Management (KHR) — Bindless textures/buffers for massive RT scenes
-        PFN_vkCmdPushDescriptorSetKHR                 vkCmdPushDescriptorSetKHR_                 = nullptr;
-
-        // Push Constants & Inline Uniforms (KHR) — Dynamic params without descriptor updates
-        PFN_vkCmdPushConstants2KHR                    vkCmdPushConstants2KHR_                    = nullptr;  // For multi-stage pipelines
-        PFN_vkCmdPushDescriptorSet2KHR                vkCmdPushDescriptorSet2KHR_                = nullptr;
-
-        // Debug & Validation (EXT) — Instance/device level, but device procs for markers
-        PFN_vkCmdBeginDebugUtilsLabelEXT              vkCmdBeginDebugUtilsLabelEXT_              = nullptr;
-        PFN_vkCmdEndDebugUtilsLabelEXT                vkCmdEndDebugUtilsLabelEXT_                = nullptr;
-        PFN_vkCmdInsertDebugUtilsLabelEXT             vkCmdInsertDebugUtilsLabelEXT_             = nullptr;
-
-        // Custom Buffers/Views (Wrapped Handles)
-        Handle<VkImageView> blueNoiseView_;
-        Handle<VkBuffer>    reservoirBuffer_;
-        Handle<VkBuffer>    frameDataBuffer_;
-        Handle<VkBuffer>    debugVisBuffer_;
-        Handle<VkRenderPass> renderPass_;  // FIXED: Added renderPass_ member
-
-        // STONEKEY v∞ — THE ONE TRUE SHARED STAGING BUFFER
-        uint64_t sharedStagingEnc_ = 0;   // Obfuscated handle — eternal, protected, unbreakable
-
-        // Initialization and Cleanup
-        void init(SDL_Window* window, int width, int height);
-		void forgeSwapchain(SDL_Window* window, int width, int height);
-		[[nodiscard]] bool isReady() const noexcept { return ready_.load(std::memory_order_acquire); }
-        void cleanup() noexcept;
-
-		bool hasFullRTX() const noexcept { return hasFullRTX_; }
-
-        // Validity and Readiness Accessors
-        [[nodiscard]] bool isValid() const noexcept {
-            // Flag enables during init; full check enforces handles post-setup
-            return valid_ &&
-                   instance_ != VK_NULL_HANDLE &&
-                   surface_ != VK_NULL_HANDLE &&
-                   physicalDevice_ != VK_NULL_HANDLE &&
-                   device_ != VK_NULL_HANDLE;
-        }
-        void markReady() noexcept { ready_.store(true, std::memory_order_release); }
-        void setValid(bool v) noexcept { valid_ = v; }
-
-        // NEW: Buffer Alignment Helper (for UltraLowLevelBufferTracker::create to fix min size warnings)
-        [[nodiscard]] VkDeviceSize getBufferAlignment(VkBufferUsageFlags usage) const noexcept {
-            VkDeviceSize alignment = physProps_.limits.nonCoherentAtomSize;
-            if (usage & VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT) {
-                alignment = physProps_.limits.minUniformBufferOffsetAlignment;
-            } else if (usage & VK_BUFFER_USAGE_STORAGE_BUFFER_BIT) {
-                alignment = physProps_.limits.minStorageBufferOffsetAlignment;
-            }
-            // For AS storage, treat as storage buffer
-            if (usage & VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR) {
-                alignment = physProps_.limits.minStorageBufferOffsetAlignment;
-            }
-            return alignment;
-        }
-
-        // Core Vulkan Accessors — FIXED: DIRECT RAW ACCESS — STONEKEY NEVER TOUCHES DRIVER OBJECTS
-        [[nodiscard]] VkDevice          device()         const noexcept { return device_; }
-        [[nodiscard]] VkPhysicalDevice  physicalDevice() const noexcept { return physicalDevice_; }
-        [[nodiscard]] VkInstance        instance()       const noexcept { return instance_; }
-        [[nodiscard]] VkSurfaceKHR      surface()        const noexcept { return surface_; }
-
-        // FIXED: Added renderPass() accessor
-        [[nodiscard]] VkRenderPass renderPass() const noexcept { return renderPass_.valid() ? renderPass_.get() : VK_NULL_HANDLE; }
-
-        // Legacy Aliases
-        [[nodiscard]] VkDevice         vkDevice() const noexcept { return device(); }
-        [[nodiscard]] VkPhysicalDevice vkPhysicalDevice() const noexcept { return physicalDevice(); }
-        [[nodiscard]] VkSurfaceKHR     vkSurface() const noexcept { return surface(); }
-
-        // Queue Family Accessors
-        [[nodiscard]] uint32_t         graphicsFamily() const noexcept { return graphicsFamily_; }
-        [[nodiscard]] uint32_t         presentFamily()  const noexcept { return presentFamily_; }
-        [[nodiscard]] uint32_t         computeFamily()  const noexcept { return computeFamily_; }
-
-        // Command Pool Accessors
-        [[nodiscard]] VkCommandPool    commandPool()       const noexcept { return commandPool_; }
-        [[nodiscard]] VkCommandPool    computeCommandPool()const noexcept { return computeCommandPool_; }
-
-        // Queue Accessors
-        [[nodiscard]] VkQueue          graphicsQueue() const noexcept { return graphicsQueue_; }
-        [[nodiscard]] VkQueue          presentQueue()  const noexcept { return presentQueue_; }
-        [[nodiscard]] VkQueue          computeQueue()   const noexcept { return computeQueue_; }
-
-        // Pipeline Cache
-        [[nodiscard]] VkPipelineCache  pipelineCacheHandle() const noexcept { return pipelineCache_; }
-
-        // Ray Tracing Function Pointer Accessors (Direct access via members; accessors for consistency)
-        [[nodiscard]] PFN_vkCmdTraceRaysKHR                         vkCmdTraceRaysKHR() const noexcept { return vkCmdTraceRaysKHR_; }
-        [[nodiscard]] PFN_vkGetRayTracingShaderGroupHandlesKHR      vkGetRayTracingShaderGroupHandlesKHR() const noexcept { return vkGetRayTracingShaderGroupHandlesKHR_; }
-        [[nodiscard]] PFN_vkCreateAccelerationStructureKHR          vkCreateAccelerationStructureKHR() const noexcept { return vkCreateAccelerationStructureKHR_; }
-        [[nodiscard]] PFN_vkGetAccelerationStructureDeviceAddressKHR vkGetAccelerationStructureDeviceAddressKHR() const noexcept { return vkGetAccelerationStructureDeviceAddressKHR_; }
-        [[nodiscard]] PFN_vkCreateRayTracingPipelinesKHR            vkCreateRayTracingPipelinesKHR() const noexcept { return vkCreateRayTracingPipelinesKHR_; }
-        [[nodiscard]] PFN_vkGetBufferDeviceAddressKHR               vkGetBufferDeviceAddressKHR() const noexcept { return vkGetBufferDeviceAddressKHR_; }
-        [[nodiscard]] PFN_vkGetAccelerationStructureBuildSizesKHR   vkGetAccelerationStructureBuildSizesKHR() const noexcept { return vkGetAccelerationStructureBuildSizesKHR_; }
-        [[nodiscard]] PFN_vkCmdBuildAccelerationStructuresKHR       vkCmdBuildAccelerationStructuresKHR() const noexcept { return vkCmdBuildAccelerationStructuresKHR_; }
-        [[nodiscard]] PFN_vkDestroyAccelerationStructureKHR         vkDestroyAccelerationStructureKHR() const noexcept { return vkDestroyAccelerationStructureKHR_; }
-
-        // Display Timing Accessors
-        [[nodiscard]] PFN_vkGetPastPresentationTimingGOOGLE         vkGetPastPresentationTimingGOOGLE() const noexcept { return vkGetPastPresentationTimingGOOGLE_; }
-        [[nodiscard]] PFN_vkGetRefreshCycleDurationGOOGLE           vkGetRefreshCycleDurationGOOGLE() const noexcept { return vkGetRefreshCycleDurationGOOGLE_; }
-
-        // HDR & Swapchain Accessors
-        [[nodiscard]] PFN_vkSetHdrMetadataEXT                       vkSetHdrMetadataEXT() const noexcept { return vkSetHdrMetadataEXT_; }
-        [[nodiscard]] PFN_vkAcquireNextImage2KHR                    vkAcquireNextImage2KHR() const noexcept { return vkAcquireNextImage2KHR_; }
-
-        // Synchronization Accessors
-        [[nodiscard]] PFN_vkGetSemaphoreFdKHR                        vkGetSemaphoreFdKHR() const noexcept { return vkGetSemaphoreFdKHR_; }
-        [[nodiscard]] PFN_vkImportSemaphoreFdKHR                     vkImportSemaphoreFdKHR() const noexcept { return vkImportSemaphoreFdKHR_; }
-
-        // Dynamic Rendering Accessors
-        [[nodiscard]] PFN_vkCmdBeginRenderingKHR                    vkCmdBeginRenderingKHR() const noexcept { return vkCmdBeginRenderingKHR_; }
-        [[nodiscard]] PFN_vkCmdEndRenderingKHR                      vkCmdEndRenderingKHR() const noexcept { return vkCmdEndRenderingKHR_; }
-
-        // Mesh Shaders Accessors
-        [[nodiscard]] PFN_vkCmdDrawMeshTasksEXT                     vkCmdDrawMeshTasksEXT() const noexcept { return vkCmdDrawMeshTasksEXT_; }
-        [[nodiscard]] PFN_vkCmdDrawMeshTasksIndirectEXT             vkCmdDrawMeshTasksIndirectEXT() const noexcept { return vkCmdDrawMeshTasksIndirectEXT_; }
-
-        // Variable Rate Shading Accessors
-        [[nodiscard]] PFN_vkCmdSetFragmentShadingRateKHR            vkCmdSetFragmentShadingRateKHR() const noexcept { return vkCmdSetFragmentShadingRateKHR_; }
-
-        // Descriptor Management Accessors
-        [[nodiscard]] PFN_vkCmdPushDescriptorSetKHR                 vkCmdPushDescriptorSetKHR() const noexcept { return vkCmdPushDescriptorSetKHR_; }
-
-        // Push Constants & Inline Uniforms Accessors
-        [[nodiscard]] PFN_vkCmdPushConstants2KHR                    vkCmdPushConstants2KHR() const noexcept { return vkCmdPushConstants2KHR_; }
-        [[nodiscard]] PFN_vkCmdPushDescriptorSet2KHR                vkCmdPushDescriptorSet2KHR() const noexcept { return vkCmdPushDescriptorSet2KHR_; }
-
-        // Debug Accessors
-        [[nodiscard]] PFN_vkCmdBeginDebugUtilsLabelEXT              vkCmdBeginDebugUtilsLabelEXT() const noexcept { return vkCmdBeginDebugUtilsLabelEXT_; }
-        [[nodiscard]] PFN_vkCmdEndDebugUtilsLabelEXT                vkCmdEndDebugUtilsLabelEXT() const noexcept { return vkCmdEndDebugUtilsLabelEXT_; }
-        [[nodiscard]] PFN_vkCmdInsertDebugUtilsLabelEXT             vkCmdInsertDebugUtilsLabelEXT() const noexcept { return vkCmdInsertDebugUtilsLabelEXT_; }
-
-        [[nodiscard]] const VkPhysicalDeviceRayTracingPipelinePropertiesKHR& rayTracingProps() const noexcept { return rayTracingProps_; }
-
-        // Custom Buffer/View Accessors
-        [[nodiscard]] VkImageView blueNoiseView() const noexcept { return blueNoiseView_ ? *blueNoiseView_ : VK_NULL_HANDLE; }
-        [[nodiscard]] VkBuffer    reservoirBuffer() const noexcept { return reservoirBuffer_ ? *reservoirBuffer_ : VK_NULL_HANDLE; }
-        [[nodiscard]] VkBuffer    frameDataBuffer() const noexcept { return frameDataBuffer_ ? *frameDataBuffer_ : VK_NULL_HANDLE; }
-        [[nodiscard]] VkBuffer    debugVisBuffer() const noexcept { return debugVisBuffer_ ? *debugVisBuffer_ : VK_NULL_HANDLE; }
-
-        // Utility
-        [[nodiscard]] uint32_t currentFrame() const noexcept { return 0; }  // Placeholder
+    // RTX STATE
+    bool hasFullRTX_ = false;
+    VkPhysicalDeviceRayTracingPipelinePropertiesKHR rayTracingProps_{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR
     };
+
+    // WINDOW & FLAGS
+    SDL_Window* window = nullptr;
+    int         width  = 0;
+    int         height = 0;
+    bool        valid_ = false;
+    mutable std::atomic<bool> ready_{false};
+
+	VkFormat         hdr_format      = VK_FORMAT_UNDEFINED;
+    VkColorSpaceKHR  hdr_color_space = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+
+    // THESE MUST BE INSIDE THE STRUCT — NOT AS FREE FUNCTIONS
+    [[nodiscard]] bool hdrEnabled() const noexcept { return hdr_format != VK_FORMAT_UNDEFINED; }
+    [[nodiscard]] VkFormat hdrFormat() const noexcept { return hdr_format; }
+    [[nodiscard]] VkColorSpaceKHR hdrColorSpace() const noexcept { return hdr_color_space; }
+
+    // === STILL EXTENSION — MUST KEEP PFNS (Ray Tracing Pipeline KHR) ===
+    PFN_vkCmdTraceRaysKHR                    vkCmdTraceRaysKHR_                    = nullptr;
+    PFN_vkCreateRayTracingPipelinesKHR       vkCreateRayTracingPipelinesKHR_       = nullptr;
+    PFN_vkGetRayTracingShaderGroupHandlesKHR vkGetRayTracingShaderGroupHandlesKHR_ = nullptr;
+
+    PFN_vkCreateAccelerationStructureKHR     vkCreateAccelerationStructureKHR_     = nullptr;
+    PFN_vkDestroyAccelerationStructureKHR    vkDestroyAccelerationStructureKHR_    = nullptr;
+    PFN_vkGetAccelerationStructureBuildSizesKHR vkGetAccelerationStructureBuildSizesKHR_ = nullptr;
+    PFN_vkCmdBuildAccelerationStructuresKHR  vkCmdBuildAccelerationStructuresKHR_  = nullptr;
+    PFN_vkGetAccelerationStructureDeviceAddressKHR vkGetAccelerationStructureDeviceAddressKHR_ = nullptr;
+
+    // === STILL EXTENSION — OPTIONAL MODERN FEATURES ===
+    PFN_vkCmdDrawMeshTasksEXT                vkCmdDrawMeshTasksEXT_                = nullptr;
+    PFN_vkCmdPushDescriptorSetKHR            vkCmdPushDescriptorSetKHR_            = nullptr;
+
+    // === CUSTOM HANDLES ===
+    Handle<VkImageView>  blueNoiseView_;
+    Handle<VkRenderPass> renderPass_;
+    uint64_t             sharedStagingEnc_ = 0;
+
+    // === PUBLIC ACCESSORS ===
+    [[nodiscard]] VkCommandPool commandPool() const noexcept { return commandPool_; }
+    [[nodiscard]] uint32_t graphicsFamily() const noexcept { return graphicsFamily_.value(); }
+    [[nodiscard]] uint32_t presentFamily()  const noexcept { return presentFamily_.value(); }
+
+    [[nodiscard]] uint32_t graphicsQueueFamily() const noexcept { return graphicsFamily(); }
+    [[nodiscard]] uint32_t presentQueueFamily()  const noexcept { return presentFamily(); }
+
+    [[nodiscard]] VkQueue graphicsQueue() const noexcept { return graphicsQueue_; }
+    [[nodiscard]] VkQueue presentQueue()  const noexcept { return presentQueue_; }
+
+    [[nodiscard]] VkDevice device() const noexcept { return device_; }
+    [[nodiscard]] VkPhysicalDevice physicalDevice() const noexcept { return physicalDevice_; }
+
+    [[nodiscard]] VkRenderPass renderPass() const noexcept { return renderPass_.valid() ? renderPass_.get() : VK_NULL_HANDLE; }
+    [[nodiscard]] VkImageView blueNoiseView() const noexcept { return blueNoiseView_.valid() ? blueNoiseView_.get() : VK_NULL_HANDLE; }
+
+    [[nodiscard]] const auto& rayTracingProps() const noexcept { return rayTracingProps_; }
+
+    // === PFN ACCESSORS — ONLY FOR EXTENSION FUNCTIONS ===
+    [[nodiscard]] auto vkCmdTraceRaysKHR() const noexcept                    { return vkCmdTraceRaysKHR_; }
+    [[nodiscard]] auto vkCreateRayTracingPipelinesKHR() const noexcept       { return vkCreateRayTracingPipelinesKHR_; }
+    [[nodiscard]] auto vkGetRayTracingShaderGroupHandlesKHR() const noexcept { return vkGetRayTracingShaderGroupHandlesKHR_; }
+
+    [[nodiscard]] auto vkCreateAccelerationStructureKHR() const noexcept     { return vkCreateAccelerationStructureKHR_; }
+    [[nodiscard]] auto vkDestroyAccelerationStructureKHR() const noexcept    { return vkDestroyAccelerationStructureKHR_; }
+    [[nodiscard]] auto vkGetAccelerationStructureBuildSizesKHR() const noexcept { return vkGetAccelerationStructureBuildSizesKHR_; }
+    [[nodiscard]] auto vkCmdBuildAccelerationStructuresKHR() const noexcept  { return vkCmdBuildAccelerationStructuresKHR_; }
+    [[nodiscard]] auto vkGetAccelerationStructureDeviceAddressKHR() const noexcept { return vkGetAccelerationStructureDeviceAddressKHR_; }
+
+    [[nodiscard]] auto vkCmdDrawMeshTasksEXT() const noexcept                { return vkCmdDrawMeshTasksEXT_; }
+    [[nodiscard]] auto vkCmdPushDescriptorSetKHR() const noexcept            { return vkCmdPushDescriptorSetKHR_; }
+
+    // === MEMBER FUNCTIONS ===
+    void createLogicalDevice();
+    void init(SDL_Window* window, int width, int height);
+    void forgeSwapchain(SDL_Window* window, int width, int height);
+    void cleanup() noexcept;
+
+    [[nodiscard]] bool isValid() const noexcept;
+    [[nodiscard]] bool isReady() const noexcept { return ready_.load(); }
+    void markReady() noexcept { ready_.store(true); }
+    bool hasFullRTX() const noexcept { return hasFullRTX_; }
+};
 
     // =============================================================================
     // GLOBAL ACCESSORS — FIXED: ctx() == g_ctx() + NULL GUARD

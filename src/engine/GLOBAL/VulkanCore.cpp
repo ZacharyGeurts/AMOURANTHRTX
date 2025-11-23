@@ -203,41 +203,37 @@ VulkanRTX::VulkanRTX(int w, int h, RTX::PipelineManager* mgr)
     RTX::AmouranthAI::get().onPhotonDispatch(w, h);
 
     device_ = g_device();
-    LOG_DEBUG_CAT("RTX", "g_ctx().device() returned: 0x{:x}", reinterpret_cast<uintptr_t>(device_));
     if (!device_) {
-        LOG_ERROR_CAT("RTX", "device_ is null from g_ctx().device() — THROWING runtime_error!");
+        LOG_ERROR_CAT("RTX", "FATAL: device_ is null — THE PHOTONS ARE DENIED");
         throw std::runtime_error("Invalid Vulkan device");
     }
-    LOG_SUCCESS_CAT("RTX", "Device fetched successfully: 0x{:x}", reinterpret_cast<uintptr_t>(device_));
+    LOG_SUCCESS_CAT("RTX", "Device locked: 0x{:x} — PHOTONS HAVE A VOICE", reinterpret_cast<uintptr_t>(device_));
 
     // -----------------------------------------------------------------
-    // LOAD ALL RT FUNCTION POINTERS FROM g_ctx()
+    // NO MORE PFN LOADING — VULKAN 1.4+ CORE + ONLY TRUE EXTENSIONS
     // -----------------------------------------------------------------
-    LOG_TRACE_CAT("RTX", "Loading RT function pointers from g_ctx()");
-    vkGetBufferDeviceAddressKHR              = g_ctx().vkGetBufferDeviceAddressKHR();
-    vkCmdTraceRaysKHR                        = g_ctx().vkCmdTraceRaysKHR();
-    vkGetRayTracingShaderGroupHandlesKHR     = g_ctx().vkGetRayTracingShaderGroupHandlesKHR();
+    LOG_TRACE_CAT("RTX", "Vulkan 1.4+ CORE ACTIVE — vkGetBufferDeviceAddress is now direct");
+    LOG_TRACE_CAT("RTX", "Ray Tracing Pipeline KHR still extension — loading PFNs from g_ctx()");
+
+    // ONLY THE TRUE EXTENSION PFNs — THE REST ARE CORE
+    vkCmdTraceRaysKHR                    = g_ctx().vkCmdTraceRaysKHR();
+    vkGetRayTracingShaderGroupHandlesKHR = g_ctx().vkGetRayTracingShaderGroupHandlesKHR();
     vkGetAccelerationStructureDeviceAddressKHR = g_ctx().vkGetAccelerationStructureDeviceAddressKHR();
 
-    LOG_INFO_CAT("RTX", "Function pointers loaded — vkCmdTraceRaysKHR @ 0x{:x} | vkGetBufferDeviceAddressKHR @ 0x{:x} | vkGetRayTracingShaderGroupHandlesKHR @ 0x{:x} | vkGetAccelerationStructureDeviceAddressKHR @ 0x{:x}",
+    LOG_INFO_CAT("RTX", "Extension PFNs loaded — vkCmdTraceRaysKHR @ 0x{:x} | vkGetRayTracingShaderGroupHandlesKHR @ 0x{:x} | vkGetAccelerationStructureDeviceAddressKHR @ 0x{:x}",
                  reinterpret_cast<uintptr_t>(vkCmdTraceRaysKHR),
-                 reinterpret_cast<uintptr_t>(vkGetBufferDeviceAddressKHR),
                  reinterpret_cast<uintptr_t>(vkGetRayTracingShaderGroupHandlesKHR),
                  reinterpret_cast<uintptr_t>(vkGetAccelerationStructureDeviceAddressKHR));
 
     LOG_SUCCESS_CAT("RTX",
-        "{}AMOURANTH RTX CORE v80 TURBO — {}×{} — g_rtx() ONLINE — STONEKEY v∞ ACTIVE{}",
+        "{}AMOURANTH RTX CORE v80 TURBO — {}×{} — VULKAN 1.4+ ASCENDED — NO MORE DEAD PFNs — PURE PHOTON FLOW{}",
         PLASMA_FUCHSIA, w, h, RESET);
 
-    LOG_TRACE_CAT("RTX", "Calling buildAccelerationStructures()");
     buildAccelerationStructures();
-    LOG_TRACE_CAT("RTX", "buildAccelerationStructures() returned");
-
-    LOG_TRACE_CAT("RTX", "Calling initBlackFallbackImage()");
     initBlackFallbackImage();
-    LOG_TRACE_CAT("RTX", "initBlackFallbackImage() returned");
 
-    LOG_SUCCESS_CAT("RTX", "{}VulkanRTX initialization complete — TITAN DOMINANCE ETERNAL{}", PLASMA_FUCHSIA, RESET);
+    LOG_SUCCESS_CAT("RTX", "{}VULKANRTX FORGED — FIRST LIGHT IMMINENT — TITAN DOMINANCE ETERNAL{}", 
+                    DIAMOND_SPARKLE, RESET);
 }
 
 // =============================================================================
@@ -1168,7 +1164,7 @@ void createCommandPool()
     VkCommandPoolCreateInfo info{
         .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
         .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
-        .queueFamilyIndex = g_context_instance.graphicsFamily_
+        .queueFamilyIndex = g_ctx().graphicsFamily()
     };
 
     VK_CHECK(vkCreateCommandPool(g_context_instance.device_, &info, nullptr, &g_context_instance.commandPool_),

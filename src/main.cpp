@@ -252,7 +252,7 @@ void Application::updateWindowTitle(float deltaTime) {
             << " | " << width_ << 'x' << height_
             << " | Mode " << renderMode_
             << " | Tonemap" << (tonemapEnabled_ ? "" : " OFF")
-            << " | HDR" << (g_ctx().hdr_format != VK_FORMAT_UNDEFINED ? " PRIME" : " OFF");
+            << " | HDR" << (g_ctx().hdrEnabled() ? " PRIME" : " OFF");
         if (Options::Performance::ENABLE_VALIDATION_LAYERS) oss << " [DEBUG]";
 
         SDL_SetWindowTitle(SDL3Window::get(), oss.str().c_str());
@@ -561,7 +561,7 @@ static void phase4_mainWindowAndVulkanConsplash_text()
     LOG_ATTEMPT_CAT("MAIN4", "StoneKey forging Vulkan 1.4 empire on 1920×1080 canvas...", HYPERSPACE_WARP, RESET);
 
     // ONE CALL TO RULE THEM ALL — FULL EMPIRE INHERITED
-    //RTX::g_ctx().init(win, WINDOW_WIDTH, WINDOW_HEIGHT);
+    RTX::g_ctx().init(win, WINDOW_WIDTH, WINDOW_HEIGHT);
 
     LOG_SUCCESS_CAT("MAIN4", "VULKAN 1.4 EMPIRE FORGED — READY FOR RENDER", PLASMA_FUCHSIA, RESET);
     LOG_SUCCESS_CAT("MAIN4", std::format("    • Instance  : {:#x}", reinterpret_cast<uintptr_t>(g_instance())), RESET);

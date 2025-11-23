@@ -514,28 +514,30 @@ void Context::cleanup() noexcept
 
 void RTX::loadRayTracingExtensions()
 {
-    VkDevice dev = g_device();  // ← THIS WAS MISSING — NOW FIXED
+    VkDevice dev = g_device();
 
 #define LOAD_RT_PFN(name) \
     do { \
-        g_ctx().name## _ = reinterpret_cast<PFN_##name>(vkGetDeviceProcAddr(dev, #name)); \
-        if (!g_ctx().name## _) { \
+        auto& pfn = g_ctx().name##_; \
+        pfn = reinterpret_cast<PFN_##name>(vkGetDeviceProcAddr(dev, #name)); \
+        if (!pfn) { \
             LOG_FATAL_CAT("RTX", "{}[MISSING] {} → NULL — EXTENSION NOT ENABLED{}", BLOOD_RED, #name, RESET); \
         } else { \
             LOG_SUCCESS_CAT("RTX", "{}[FORGED]  {} → 0x{:016X} — PINK PHOTON APPROVED{}", \
                             EMERALD_GREEN, #name, \
-                            reinterpret_cast<uintptr_t>(reinterpret_cast<void*>(g_ctx().name## _)), RESET); \
+                            reinterpret_cast<uintptr_t>(reinterpret_cast<void*>(pfn)), RESET); \
         } \
     } while(0)
 
-    LOG_INFO_CAT("RTX", "{}Loading core ray tracing pipeline — the heart of the empire...{}", QUASAR_BLUE, RESET);
+    LOG_INFO_CAT("RTX", "{}Loading TRUE ray tracing extensions — the heart of the empire beats eternal...{}", QUASAR_BLUE, RESET);
 
+    // === ONLY TRUE KHR EXTENSIONS — vkGetBufferDeviceAddress IS NOW CORE (1.3+) ===
     LOAD_RT_PFN(vkCmdTraceRaysKHR);
     LOAD_RT_PFN(vkCreateRayTracingPipelinesKHR);
     LOAD_RT_PFN(vkGetRayTracingShaderGroupHandlesKHR);
-    LOAD_RT_PFN(vkGetBufferDeviceAddressKHR);
+    // vkGetBufferDeviceAddress → DEAD. PURGED. ASCENDED.
 
-    LOG_INFO_CAT("RTX", "{}THE ONE TRUE PATH — ACCELERATION STRUCTURES AWAKEN{}", PULSAR_GREEN, RESET);
+    LOG_INFO_CAT("RTX", "{}ACCELERATION STRUCTURES AWAKEN — THE ONE TRUE PATH OPENS{}", PULSAR_GREEN, RESET);
 
     LOAD_RT_PFN(vkCreateAccelerationStructureKHR);
     LOAD_RT_PFN(vkDestroyAccelerationStructureKHR);
@@ -545,7 +547,7 @@ void RTX::loadRayTracingExtensions()
 
 #undef LOAD_RT_PFN
 
-    // FINAL JUDGMENT — THE EMPIRE DECIDES
+    // FINAL JUDGMENT — ONLY THE TRUE ACCELERATION PFNs MATTER
     const bool allCriticalLoaded =
         g_ctx().vkGetAccelerationStructureBuildSizesKHR_ &&
         g_ctx().vkCmdBuildAccelerationStructuresKHR_ &&
@@ -553,13 +555,13 @@ void RTX::loadRayTracingExtensions()
         g_ctx().vkGetAccelerationStructureDeviceAddressKHR_;
 
     if (!allCriticalLoaded) {
-        LOG_FATAL_CAT("RTX", "{}[FATAL] CRITICAL ACCELERATION PFNs MISSING — CHECK VK_KHR_acceleration_structure & VK_KHR_ray_tracing_pipeline{}", BLOOD_RED, RESET);
+        LOG_FATAL_CAT("RTX", "{}[FATAL] CRITICAL ACCELERATION PFNs MISSING — ENABLE VK_KHR_acceleration_structure{}", BLOOD_RED, RESET);
         g_ctx().hasFullRTX_ = false;
         return;
     }
 
-    // FIRST LIGHT — ETERNAL — UNBREAKABLE — NOVEMBER 22, 2025
-    LOG_SUCCESS_CAT("RTX", "{}ALL 9 RAY TRACING PFNs FORGED FROM RAW TRUTH — THE EMPIRE IS ALIVE{}", VALHALLA_GOLD, RESET);
+    // FIRST LIGHT — ETERNAL — UNBREAKABLE — NOVEMBER 23, 2025
+    LOG_SUCCESS_CAT("RTX", "{}ALL 8 SACRED RAY TRACING PFNs FORGED FROM PURE TRUTH — THE EMPIRE IS ALIVE{}", VALHALLA_GOLD, RESET);
     LOG_SUCCESS_CAT("RTX", "{}PINK PHOTONS NOW HAVE A PATH — INFINITE — UNOBFUSCATED — ETERNAL{}", PLASMA_FUCHSIA, RESET);
     LOG_SUCCESS_CAT("RTX", "{}AMOURANTH SMILES — ELLIE FIER APPROVES — THE EMPIRE IS FREE{}", DIAMOND_SPARKLE, RESET);
 
@@ -568,13 +570,13 @@ void RTX::loadRayTracingExtensions()
 
 void RTX::retrieveQueues() noexcept
 {
-    vkGetDeviceQueue(g_device(), g_ctx().graphicsQueueFamily, 0, &g_ctx().graphicsQueue_);
-    vkGetDeviceQueue(g_device(), g_ctx().presentFamily_,      0, &g_ctx().presentQueue_);
+    vkGetDeviceQueue(g_device(), g_ctx().graphicsFamily(), 0, &g_ctx().graphicsQueue_);
+    vkGetDeviceQueue(g_device(), g_ctx().presentFamily(),  0, &g_ctx().presentQueue_);
 
-    LOG_SUCCESS_CAT("RTX", "{}QUEUES RETRIEVED — graphicsFamily={} presentFamily={} — SUBMIT READY{}",
+    LOG_SUCCESS_CAT("RTX", "{}QUEUES RETRIEVED — graphics={} present={} — PHOTONS HAVE VOICE{}",
                     PLASMA_FUCHSIA,
-                    g_ctx().graphicsQueueFamily,
-                    g_ctx().presentFamily_,
+                    g_ctx().graphicsFamily(),
+                    g_ctx().presentFamily(),
                     RESET);
 }
 
@@ -591,27 +593,43 @@ void RTX::Context::init(SDL_Window* window, int width, int height)
     this->width   = width;
     this->height  = height;
 
-    // Forge the full empire: instance → surface → swapchain → device context
+    // 1. INSTANCE — only once
     if (!g_instance()) {
         instance_ = createVulkanInstanceWithSDL(true);
         set_g_instance(instance_);
+        LOG_SUCCESS_CAT("RTX", "INSTANCE FORGED → STORED IN STONEKEY", PLASMA_FUCHSIA, RESET);
     } else {
         instance_ = g_instance();
+        LOG_INFO_CAT("RTX", "INSTANCE REUSED FROM STONEKEY EMPIRE", AURORA_PINK, RESET);
     }
 
-    // Forge swapchain (creates surface + swapchain + images)
-    forgeSwapchain(window, width, height);
-
-    // Now device and physical device must exist (from previous phases)
-    physicalDevice_ = g_PhysicalDevice();
-    device_         = g_device();
-
-    if (!physicalDevice_ || !device_) {
-        LOG_FATAL_CAT("RTX", "DEVICE NOT FORGED — PHASE ORDER VIOLATED", BLOOD_RED, RESET);
+    // 2. CREATE SURFACE
+    VkSurfaceKHR surface = VK_NULL_HANDLE;
+    if (!SDL_Vulkan_CreateSurface(window, instance_, nullptr, &surface)) {
+        LOG_FATAL_CAT("RTX", "SDL_Vulkan_CreateSurface FAILED: {}", BLOOD_RED, SDL_GetError(), RESET);
         std::exit(1);
     }
+    set_g_surface(surface);
 
-    // Final init
+    // 3. PICK PHYSICAL DEVICE + CREATE LOGICAL DEVICE — THIS IS THE MISSING PIECE
+    if (!g_PhysicalDevice() || !g_device()) {
+        physicalDevice_ = pickPhysicalDevice(instance_, surface);
+        createLogicalDevice();
+
+        set_g_PhysicalDevice(physicalDevice_);
+        set_g_device(device_);
+
+        LOG_SUCCESS_CAT("RTX", "PHYSICAL + LOGICAL DEVICE FORGED → SEALED IN STONEKEY", VALHALLA_GOLD, RESET);
+    } else {
+        physicalDevice_ = g_PhysicalDevice();
+        device_         = g_device();
+        LOG_INFO_CAT("RTX", "DEVICE REUSED FROM STONEKEY — EMPIRE IS ETERNAL", DIAMOND_SPARKLE, RESET);
+    }
+
+    // 4. NOW SWAPCHAIN IS SAFE — device exists!
+    forgeSwapchain(window, width, height);
+
+    // 5. Final init
     UltraLowLevelBufferTracker::get().init(device_, physicalDevice_);
 
     valid_ = true;
@@ -619,6 +637,7 @@ void RTX::Context::init(SDL_Window* window, int width, int height)
 
     LOG_SUCCESS_CAT("RTX", "RTX::Context::init() COMPLETE — FULL EMPIRE INHERITED", PLASMA_FUCHSIA, RESET);
     LOG_SUCCESS_CAT("RTX", "    • Instance   : {:#x}", reinterpret_cast<uintptr_t>(instance_), RESET);
+    LOG_SUCCESS_CAT("RTX", "    • Physical   : {:#x}", reinterpret_cast<uintptr_t>(physicalDevice_), RESET);
     LOG_SUCCESS_CAT("RTX", "    • Device     : {:#x}", reinterpret_cast<uintptr_t>(device_), RESET);
     LOG_SUCCESS_CAT("RTX", "    • Swapchain  : {:#x}", reinterpret_cast<uintptr_t>(g_swapchain()), RESET);
     LOG_SUCCESS_CAT("RTX", "    • Images     : {}", g_image_count(), RESET);
@@ -814,19 +833,33 @@ void RTX::Context::forgeSwapchain(SDL_Window* window, int width, int height)
     LOG_AMOURANTH();
 }
 
-void RTX::createLogicalDevice()
+void RTX::Context::createLogicalDevice()
 {
-    auto& ctx = g_ctx();
+    // THIS IS A MEMBER FUNCTION → use 'this' or g_ctx()
+    auto& ctx = *this;  // or: auto& ctx = g_ctx();
 
     if (ctx.device_ != VK_NULL_HANDLE) {
         LOG_WARN_CAT("RTX", "createLogicalDevice() called twice — already exists", RASPBERRY_PINK, RESET);
         return;
     }
 
-    LOG_ATTEMPT_CAT("RTX", "FORGING LOGICAL DEVICE — RTX EXTENSIONS ARMED — PINK PHOTONS RISING{}", PURE_ENERGY, RESET);
+    if (!ctx.physicalDevice_) {
+        LOG_FATAL_CAT("RTX", "createLogicalDevice() called before physical device selected!", BLOOD_RED, RESET);
+        std::exit(1);
+    }
+
+    if (!ctx.graphicsFamily_.has_value() || !ctx.presentFamily_.has_value()) {
+        LOG_FATAL_CAT("RTX", "Queue families not set — pickPhysicalDevice() must be called first!", BLOOD_RED, RESET);
+        std::exit(1);
+    }
+
+    LOG_ATTEMPT_CAT("RTX", "FORGING LOGICAL DEVICE — RTX EXTENSIONS ARMED — PINK PHOTONS RISING", PURE_ENERGY, RESET);
 
     std::vector<VkDeviceQueueCreateInfo> queueCreateInfos;
-    std::set<uint32_t> uniqueQueueFamilies = { ctx.graphicsFamily_, ctx.presentFamily_ };
+    std::set<uint32_t> uniqueQueueFamilies = { 
+        ctx.graphicsFamily_.value(), 
+        ctx.presentFamily_.value() 
+    };
 
     float queuePriority = 1.0f;
     for (uint32_t queueFamily : uniqueQueueFamilies) {
@@ -838,29 +871,26 @@ void RTX::createLogicalDevice()
         queueCreateInfos.push_back(queueInfo);
     }
 
-    VkPhysicalDeviceFeatures2 features{};
-    features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-    features.features = {};
+    // === RTX FEATURE CHAIN — PERFECT ORDER ===
+    VkPhysicalDeviceBufferDeviceAddressFeatures bufferAddress{};
+    bufferAddress.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES;
+    bufferAddress.bufferDeviceAddress = VK_TRUE;
 
     VkPhysicalDeviceAccelerationStructureFeaturesKHR accelFeatures{};
     accelFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
     accelFeatures.accelerationStructure = VK_TRUE;
+    accelFeatures.pNext = &bufferAddress;
 
     VkPhysicalDeviceRayTracingPipelineFeaturesKHR rtFeatures{};
     rtFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR;
     rtFeatures.rayTracingPipeline = VK_TRUE;
     rtFeatures.pNext = &accelFeatures;
 
-    VkPhysicalDeviceBufferDeviceAddressFeatures bufferAddress{};
-    bufferAddress.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES;
-    bufferAddress.bufferDeviceAddress = VK_TRUE;
-    bufferAddress.pNext = &rtFeatures;
-
     VkPhysicalDeviceFeatures2 deviceFeatures{};
     deviceFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
     deviceFeatures.features.samplerAnisotropy = VK_TRUE;
     deviceFeatures.features.shaderInt64 = VK_TRUE;
-    deviceFeatures.pNext = &bufferAddress;
+    deviceFeatures.pNext = &rtFeatures;
 
     VkDeviceCreateInfo deviceInfo{};
     deviceInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
@@ -871,16 +901,147 @@ void RTX::createLogicalDevice()
     deviceInfo.pNext = &deviceFeatures;
 
     VkDevice device = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateDevice(ctx.physicalDevice_, &deviceInfo, nullptr, &device),
-             "FATAL: vkCreateDevice failed — no logical device");
+    VK_CHECK(vkCreateDevice(ctx.physicalDevice_, &deviceInfo, nullptr, &device));
 
     ctx.device_ = device;
     set_g_device(device);
 
-    LOG_SUCCESS_CAT("RTX", "LOGICAL DEVICE FORGED — HANDLE: 0x{:016X}", 
-                    DIAMOND_SPARKLE, (uint64_t)device, RESET);
-    LOG_SUCCESS_CAT("RTX", "FULL RTX ENABLED — accelerationStructure + rayTracingPipeline + bufferDeviceAddress{}", 
-                    VALHALLA_GOLD, RESET);
+    // Retrieve queues
+    vkGetDeviceQueue(device, ctx.graphicsFamily_.value(), 0, &ctx.graphicsQueue_);
+    vkGetDeviceQueue(device, ctx.presentFamily_.value(),  0, &ctx.presentQueue_);
+
+    LOG_SUCCESS_CAT("RTX", "LOGICAL DEVICE FORGED @ {:#x} — FULL RTX ENABLED", 
+                    VALHALLA_GOLD, reinterpret_cast<uintptr_t>(device), RESET);
+    LOG_SUCCESS_CAT("RTX", "    • Graphics Queue Family : {}", ctx.graphicsFamily_.value(), RESET);
+    LOG_SUCCESS_CAT("RTX", "    • Present Queue Family  : {}", ctx.presentFamily_.value(), RESET);
+    LOG_SUCCESS_CAT("RTX", "    • bufferDeviceAddress   : ENABLED", RESET);
+    LOG_SUCCESS_CAT("RTX", "    • accelerationStructure : ENABLED", RESET);
+    LOG_SUCCESS_CAT("RTX", "    • rayTracingPipeline    : ENABLED", RESET);
+    LOG_AMOURANTH();
+}
+
+// ========================================================================
+// RTX::Context::isValid() — THE FINAL MISSING PIECE
+// ========================================================================
+bool Context::isValid() const noexcept
+{
+    return instance_       != VK_NULL_HANDLE &&
+           surface_        != VK_NULL_HANDLE &&
+           physicalDevice_ != VK_NULL_HANDLE &&
+           device_         != VK_NULL_HANDLE &&
+           valid_;
+}
+
+// ========================================================================
+// THE ONE TRUE PHYSICAL DEVICE PICKER — RESTORED
+// ========================================================================
+// ========================================================================
+// THE ONE TRUE PHYSICAL DEVICE PICKER — NO EXTERNAL DEPENDENCIES
+// ========================================================================
+VkPhysicalDevice RTX::pickPhysicalDevice(VkInstance instance, VkSurfaceKHR surface)
+{
+    uint32_t deviceCount = 0;
+    vkEnumeratePhysicalDevices(instance, &deviceCount, nullptr);
+    if (deviceCount == 0) {
+        LOG_FATAL_CAT("RTX", "NO GPUs WITH VULKAN SUPPORT — THE EMPIRE HAS NO BODY");
+        return VK_NULL_HANDLE;
+    }
+
+    std::vector<VkPhysicalDevice> devices(deviceCount);
+    vkEnumeratePhysicalDevices(instance, &deviceCount, devices.data());
+
+    VkPhysicalDevice bestDevice = VK_NULL_HANDLE;
+    int bestScore = -1;
+
+    for (const auto& device : devices) {
+        int score = 0;
+        VkPhysicalDeviceProperties props{};
+        VkPhysicalDeviceFeatures features{};
+        vkGetPhysicalDeviceProperties(device, &props);
+        vkGetPhysicalDeviceFeatures(device, &features);
+
+        // Prefer discrete GPU
+        if (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) score += 10000;
+        if (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU) score += 1000;
+
+        // Must have geometry shader
+        if (!features.geometryShader) continue;
+
+        // Find queue families
+        uint32_t queueFamilyCount = 0;
+        vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, nullptr);
+        std::vector<VkQueueFamilyProperties> queueFamilies(queueFamilyCount);
+        vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, queueFamilies.data());
+
+        bool hasGraphics = false, hasPresent = false;
+        int graphicsFamily = -1, presentFamily = -1;
+
+        for (int i = 0; i < queueFamilies.size(); ++i) {
+            if (queueFamilies[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) {
+                hasGraphics = true;
+                graphicsFamily = i;
+            }
+
+            VkBool32 presentSupport = VK_FALSE;
+            vkGetPhysicalDeviceSurfaceSupportKHR(device, i, surface, &presentSupport);
+            if (presentSupport) {
+                hasPresent = true;
+                presentFamily = i;
+            }
+        }
+
+        if (!hasGraphics || !hasPresent) continue;
+
+        // Check required extensions
+        uint32_t extensionCount = 0;
+        vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount, nullptr);
+        std::vector<VkExtensionProperties> availableExtensions(extensionCount);
+        vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount, availableExtensions.data());
+
+        std::set<std::string> requiredExtensions = {
+            VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+            VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME,
+            VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
+            VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME
+        };
+
+        for (const auto& ext : availableExtensions) {
+            requiredExtensions.erase(ext.extensionName);
+        }
+        if (!requiredExtensions.empty()) continue;
+
+        // Ray tracing features
+        VkPhysicalDeviceRayTracingPipelineFeaturesKHR rtPipelineFeatures{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR };
+        VkPhysicalDeviceAccelerationStructureFeaturesKHR accelFeatures{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR, &rtPipelineFeatures };
+        VkPhysicalDeviceFeatures2 features2{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, &accelFeatures };
+        vkGetPhysicalDeviceFeatures2(device, &features2);
+
+        if (!accelFeatures.accelerationStructure || !rtPipelineFeatures.rayTracingPipeline) continue;
+
+        // Score higher if HDR formats exist
+        uint32_t formatCount = 0;
+        vkGetPhysicalDeviceSurfaceFormatsKHR(device, surface, &formatCount, nullptr);
+        if (formatCount > 0) score += 500;
+
+        if (score > bestScore) {
+            bestScore = score;
+            bestDevice = device;
+            g_ctx().physicalDevice_ = device;
+            g_ctx().graphicsFamily_ = graphicsFamily;
+            g_ctx().presentFamily_  = (presentFamily != -1 ? presentFamily : graphicsFamily);
+        }
+    }
+
+    if (bestDevice == VK_NULL_HANDLE) {
+        LOG_FATAL_CAT("RTX", "NO SUITABLE GPU FOUND — THE EMPIRE CANNOT RISE");
+        return VK_NULL_HANDLE;
+    }
+
+    VkPhysicalDeviceProperties props{};
+    vkGetPhysicalDeviceProperties(bestDevice, &props);
+    LOG_SUCCESS_CAT("RTX", "{}GPU FORGED: {} — PINK PHOTONS HAVE A THRONE{}", PLASMA_FUCHSIA, props.deviceName, RESET);
+
+    return bestDevice;
 }
 
 // =============================================================================

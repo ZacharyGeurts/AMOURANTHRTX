@@ -230,7 +230,7 @@ private:
     PFN_vkCmdTraceRaysKHR                    vkCmdTraceRaysKHR               = nullptr;
     PFN_vkCreateRayTracingPipelinesKHR       vkCreateRayTracingPipelinesKHR  = nullptr;
     PFN_vkGetRayTracingShaderGroupHandlesKHR vkGetRayTracingShaderGroupHandlesKHR = nullptr;
-    PFN_vkGetBufferDeviceAddressKHR          vkGetBufferDeviceAddressKHR     = nullptr;
+    PFN_vkGetBufferDeviceAddress          vkGetBufferDeviceAddress     = nullptr;
 
     std::vector<uint64_t> uniformBufferEncs_;
     std::vector<uint64_t> materialBufferEncs_;
