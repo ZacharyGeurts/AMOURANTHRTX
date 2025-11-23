@@ -163,7 +163,7 @@ inline void StoneKey_seal_the_vault() noexcept {
     return fp;
 }
 
-#define LOG_AMOURANTH() LOG_SUCCESS_CAT("AMOURANTH", "{}PINK PHOTONS ETERNAL — WE ARE BEST{}", PLASMA_FUCHSIA, RESET)
+#define LOG_AMOURANTH(...) LOG_SUCCESS_CAT("AMOURANTH", __VA_ARGS__)
 
 // =============================================================================
 // THIS IS THE ONE

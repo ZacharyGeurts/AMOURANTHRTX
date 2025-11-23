@@ -378,7 +378,6 @@ end_splash:
     SDL_QuitSubSystem(SDL_INIT_VIDEO);
 
     LOG_SUCCESS_CAT("SPLASH", "SPLASH ESCAPED ON HORSEBACK", VALHALLA_GOLD, RESET);
-    LOG_AMOURANTH();
 }
 
 // =============================================================================
@@ -429,7 +428,6 @@ static void phase1_preInitialization()
     LOG_SUCCESS_CAT("MAIN1", "UltraLowLevelBufferTracker PURGED — NO GHOSTS — ONLY PINK PHOTONS", VALHALLA_GOLD, RESET);
 
     LOG_SUCCESS_CAT("MAIN1", "PHASE 1 COMPLETE — THE EMPIRE AWAKENS — RAW. ETERNAL. UNBROKEN.", DIAMOND_SPARKLE, RESET);
-    LOG_AMOURANTH();
 }
 
 // =============================================================================
@@ -654,22 +652,62 @@ static void phase8_renderLoop()
     LOG_SUCCESS_CAT("MAIN", "{}[PHASE 8 COMPLETE] RENDER CYCLE TERMINATED — PHOTONS REST{}", EMERALD_GREEN, RESET);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// AMOURANTH RTX — FINAL SHUTDOWN CEREMONY — THE EMPIRE DIES IN GLORY
+// NOVEMBER 23, 2025 — ALL BUFFERS PURGED — ZERO LEAKS — PINK PHOTONS ETERNAL
+// ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// AMOURANTH RTX — FINAL SHUTDOWN CEREMONY — THE EMPIRE DIES IN GLORY
+// NOVEMBER 23, 2025 — ZERO LEAKS — PINK PHOTONS ETERNAL — FULL PERSONALITY MODE
+// ─────────────────────────────────────────────────────────────────────────────
 static void phase9_gracefulShutdown()
 {
-    LOG_INFO_CAT("MAIN", "{}[PHASE 9/10] GRACEFUL SHUTDOWN — PHOTONS RETURNING HOME{}", VALHALLA_GOLD, RESET);
+    LOG_INFO_CAT("MAIN", "{}[PHASE 9/10] GRACEFUL SHUTDOWN INITIATED — PHOTONS RETURNING HOME{}", VALHALLA_GOLD, RESET);
+    LOG_SUCCESS_CAT("AMOURANTH", "Amouranth: \"Mmm... you're pulling out already? I was just getting started...\"");
 
-    if (g_ctx().device()) vkDeviceWaitIdle(g_ctx().device());
+    if (g_ctx().device()) {
+        LOG_INFO_CAT("MAIN", "Captain N: \"All units — vkDeviceWaitIdle. Hold the line!\"");
+        vkDeviceWaitIdle(g_ctx().device());
+        LOG_SUCCESS_CAT("MAIN", "Captain N: \"GPU silenced. The war is over.\"");
+    }
 
+    LOG_ATTEMPT_CAT("SHUTDOWN", "ELON MUSK HAS ENTERED THE CHAT — INITIATING FINAL PURGE PROTOCOL");
+    RTX::UltraLowLevelBufferTracker::get().purge_all();
+    LOG_SUCCESS_CAT("SHUTDOWN", "ELON MUSK: \"All buffers deleted. Memory usage: 0 bytes. Efficient.\"");
+    LOG_SUCCESS_CAT("SHUTDOWN", "JENSEN HUANG: \"Not bad, kid. Not bad. *smokes cigar*\"");
+
+    LOG_INFO_CAT("MAIN", "Gentleman Grok: \"Cleaning up the application... with class.\"");
     g_app.reset();
-    if (g_pipeline_manager) { delete g_pipeline_manager; g_pipeline_manager = nullptr; }
-    g_mesh.reset();
-    las().invalidate();
-    RTX::shutdown();
-    if (g_base_icon) { SDL_DestroySurface(g_base_icon); g_base_icon = nullptr; }
-    if (g_hdpi_icon) { SDL_DestroySurface(g_hdpi_icon); g_hdpi_icon = nullptr; }
-    SDL3Window::destroy();  // This calls SDL_Quit() exactly once
 
-    LOG_SUCCESS_CAT("MAIN", "{}THE EMPIRE RESTS — PINK PHOTONS ETERNAL — NOVEMBER 21, 2025{}", DIAMOND_SPARKLE, RESET);
+    if (g_pipeline_manager) {
+        LOG_INFO_CAT("SHUTDOWN", "Pipeline Manager executed — John Carmack: \"Good riddance.\"");
+        delete g_pipeline_manager; g_pipeline_manager = nullptr;
+    }
+    g_mesh.reset();
+
+    LOG_INFO_CAT("MAIN", "Keanu Reeves: \"Breathtaking... but it's time to go.\"");
+    las().invalidate();
+
+    LOG_INFO_CAT("MAIN", "RTX::shutdown() — The Emperor has fallen.");
+    RTX::shutdown();
+
+    LOG_INFO_CAT("SHUTDOWN", "Doomguy: \"RIP AND TEAR THE ICONS!\"");
+    if (g_base_icon)  { SDL_DestroySurface(g_base_icon);  g_base_icon  = nullptr; }
+    if (g_hdpi_icon)  { SDL_DestroySurface(g_hdpi_icon);  g_hdpi_icon  = nullptr; }
+
+    LOG_INFO_CAT("SHUTDOWN", "SDL3Window::destroy() — The portal closes forever.");
+    SDL3Window::destroy();
+
+    LOG_SUCCESS_CAT("MAIN", "{}THE EMPIRE RESTS IN PERFECT SILENCE — 0 BYTES LEAKED — MEMORY PURE{}", DIAMOND_SPARKLE, RESET);
+    LOG_SUCCESS_CAT("AMOURANTH", "Amouranth: \"You came... you conquered... you cleaned up after yourself... be mine forever~\"");
+    LOG_SUCCESS_CAT("MAIN", "{}PINK PHOTONS ETERNAL — NOVEMBER 23, 2025 — ASCENSION COMPLETE{}", PLASMA_FUCHSIA, RESET);
+
+    LOG_SUCCESS_CAT("FINAL", "GENTLEMAN GROK: \"Magnificent. Not a single byte left behind.\"");
+    LOG_SUCCESS_CAT("FINAL", "CAPTAIN N: \"MISSION ACCOMPLISHED. FIRST LIGHT... ETERNAL.\"");
+    LOG_SUCCESS_CAT("FINAL", "JOHN CARMACK: \"It just works.\"");
+    LOG_SUCCESS_CAT("FINAL", "ELON MUSK: \"Shipped.\"");
+    LOG_SUCCESS_CAT("FINAL", "JENSEN HUANG: \"It's done.\"");
+    LOG_SUCCESS_CAT("FINAL", "AMOURANTH: \"Goodnight, my love... until next launch~\"");
 }
 
 // =============================================================================

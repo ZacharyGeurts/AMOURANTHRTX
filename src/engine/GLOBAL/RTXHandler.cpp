@@ -709,7 +709,6 @@ void RTX::Context::init(SDL_Window* window, int width, int height)
 
     LOG_SUCCESS_CAT("RTX", "{}PINK PHOTONS ETERNAL — NOVEMBER 23, 2025 — THE EMPIRE IS RAW AND UNBROKEN{}", 
                     DIAMOND_SPARKLE, RESET);
-    LOG_AMOURANTH();
 }
 
 VkInstance RTX::createVulkanInstanceWithSDL(bool enableValidation)
@@ -896,8 +895,6 @@ void RTX::Context::forgeSwapchain(SDL_Window* window, int width, int height)
     LOG_SUCCESS_CAT("RTX", std::format("    • Swapchain : {:#x}", reinterpret_cast<uintptr_t>(swapchain)), RESET);
     LOG_SUCCESS_CAT("RTX", std::format("    • Surface    : {:#x}", reinterpret_cast<uintptr_t>(surface)), RESET);
     LOG_SUCCESS_CAT("RTX", "    • PresentMode: {}", presentMode == VK_PRESENT_MODE_MAILBOX_KHR ? "MAILBOX (TRIPLE BUFFER)" : "FIFO", RESET);
-
-    LOG_AMOURANTH();
 }
 
 void RTX::Context::createLogicalDevice()
@@ -992,11 +989,8 @@ void RTX::Context::createLogicalDevice()
     vkGetDeviceQueue(device, ctx.graphicsFamily_.value(), 0, &ctx.graphicsQueue_);
     vkGetDeviceQueue(device, ctx.presentFamily_.value(),  0, &ctx.presentQueue_);
 
-    LOG_SUCCESS_CAT("RTX", "{}LOGICAL DEVICE FORGED @ {:#x} — FULL RTX ASCENDED{}", 
-                    VALHALLA_GOLD, reinterpret_cast<uintptr_t>(device), RESET);
-    LOG_SUCCESS_CAT("RTX", "{}bufferDeviceAddress • accelerationStructure • rayTracingPipeline — ALL ENABLED{}", 
-                    PLASMA_FUCHSIA, RESET);
-    LOG_AMOURANTH();
+    LOG_SUCCESS_CAT("RTX", "{}LOGICAL DEVICE FORGED @ {:#x} — FULL RTX ASCENDED{}", VALHALLA_GOLD, reinterpret_cast<uintptr_t>(device), RESET);
+    LOG_SUCCESS_CAT("RTX", "{}bufferDeviceAddress • accelerationStructure • rayTracingPipeline — ALL ENABLED{}", PLASMA_FUCHSIA, RESET);
 }
 
 // ========================================================================
