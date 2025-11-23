@@ -582,68 +582,135 @@ void RTX::retrieveQueues() noexcept
 
 void RTX::Context::init(SDL_Window* window, int width, int height)
 {
-    LOG_ATTEMPT_CAT("RTX", "RTX::Context::init() — FINAL ASCENSION @ {}×{}", VALHALLA_GOLD, width, height, RESET);
+    LOG_ATTEMPT_CAT("RTX", "{}RTX::Context::init() — FINAL ASCENSION @ {}×{} — RAW RTX EMPIRE RISING{}", 
+                    VALHALLA_GOLD, width, height, RESET);
 
     if (isValid()) {
-        LOG_WARN_CAT("RTX", "Context already initialized — ignoring", RASPBERRY_PINK, RESET);
+        LOG_WARN_CAT("RTX", "{}Context already forged — ignoring duplicate ascension{}", RASPBERRY_PINK, RESET);
         return;
     }
+
+    LOG_INFO_CAT("RTX", "{}Phase 0: Capturing window @ {:p} → {}×{}", 
+                 EMERALD_GREEN, static_cast<void*>(window), width, height, RESET);
 
     this->window  = window;
     this->width   = width;
     this->height  = height;
 
-    // 1. INSTANCE — only once
+    // ========================================================================
+    // 1. INSTANCE — THE FIRST BREATH OF THE EMPIRE
+    // ========================================================================
     if (!g_instance()) {
-        instance_ = createVulkanInstanceWithSDL(true);
+        LOG_ATTEMPT_CAT("RTX", "{}Forging Vulkan Instance — StoneKey Empire demands purity{}", PLASMA_FUCHSIA, RESET);
+        instance_ = createVulkanInstanceWithSDL(false);  // ← VALIDATION LAYERS ETERNALLY EXILED
         set_g_instance(instance_);
-        LOG_SUCCESS_CAT("RTX", "INSTANCE FORGED → STORED IN STONEKEY", PLASMA_FUCHSIA, RESET);
+
+        LOG_SUCCESS_CAT("RTX", "{}VULKAN INSTANCE BORN → 0x{:016X} — STORED IN STONEKEY{}", 
+                        DIAMOND_SPARKLE, reinterpret_cast<uint64_t>(instance_), RESET);
+        LOG_SUCCESS_CAT("RTX", "{}    • API Version : {}.{}.{}", 
+                        AURORA_PINK, VK_API_VERSION_MAJOR(VK_HEADER_VERSION_COMPLETE),
+                        VK_API_VERSION_MINOR(VK_HEADER_VERSION_COMPLETE),
+                        VK_API_VERSION_PATCH(VK_HEADER_VERSION_COMPLETE), RESET);
     } else {
         instance_ = g_instance();
-        LOG_INFO_CAT("RTX", "INSTANCE REUSED FROM STONEKEY EMPIRE", AURORA_PINK, RESET);
+        LOG_INFO_CAT("RTX", "{}Vulkan Instance reused from StoneKey → 0x{:016X}", 
+                     OCEAN_TEAL, reinterpret_cast<uint64_t>(instance_), RESET);
     }
 
-    // 2. CREATE SURFACE
+    // ========================================================================
+    // 2. SURFACE — THE EYE INTO THE VOID
+    // ========================================================================
+    LOG_ATTEMPT_CAT("RTX", "{}Creating VkSurfaceKHR via SDL_Vulkan_CreateSurface{}", SAPPHIRE_BLUE, RESET);
     VkSurfaceKHR surface = VK_NULL_HANDLE;
     if (!SDL_Vulkan_CreateSurface(window, instance_, nullptr, &surface)) {
-        LOG_FATAL_CAT("RTX", "SDL_Vulkan_CreateSurface FAILED: {}", BLOOD_RED, SDL_GetError(), RESET);
+        LOG_FATAL_CAT("RTX", "{}SDL_Vulkan_CreateSurface FAILED: {} — THE VOID REJECTS US{}", 
+                      BLOOD_RED, SDL_GetError(), RESET);
         std::exit(1);
     }
-    set_g_surface(surface);
+    surface_ = surface;
+    set_g_surface(surface_);
 
-    // 3. PICK PHYSICAL DEVICE + CREATE LOGICAL DEVICE — THIS IS THE MISSING PIECE
+    LOG_SUCCESS_CAT("RTX", "{}SURFACE FORGED → 0x{:016X} — THE EMPIRE HAS A WINDOW INTO REALITY{}", 
+                    PLASMA_FUCHSIA, reinterpret_cast<uint64_t>(surface_), RESET);
+
+    // ========================================================================
+    // 3. PHYSICAL + LOGICAL DEVICE — THE HEART AND BRAIN
+    // ========================================================================
     if (!g_PhysicalDevice() || !g_device()) {
-        physicalDevice_ = pickPhysicalDevice(instance_, surface);
-        createLogicalDevice();
+        LOG_ATTEMPT_CAT("RTX", "{}Picking Physical Device + Forging Logical Device — RTX ASCENSION{}", 
+                        HYPERSPACE_WARP, RESET);
+
+        physicalDevice_ = pickPhysicalDevice(instance_, surface_);
+        LOG_SUCCESS_CAT("RTX", "{}Physical Device selected → {}", 
+                        EMERALD_GREEN, getDeviceName(physicalDevice_), RESET);
+
+        createLogicalDevice();  // ← Queues, extensions, RTX features activated here
 
         set_g_PhysicalDevice(physicalDevice_);
         set_g_device(device_);
 
-        LOG_SUCCESS_CAT("RTX", "PHYSICAL + LOGICAL DEVICE FORGED → SEALED IN STONEKEY", VALHALLA_GOLD, RESET);
+        LOG_SUCCESS_CAT("RTX", "{}LOGICAL DEVICE FORGED → 0x{:016X}", 
+                        VALHALLA_GOLD, reinterpret_cast<uint64_t>(device_), RESET);
+        LOG_SUCCESS_CAT("RTX", "{}    • Graphics Queue Family : {}", 
+                        AURORA_PINK, graphicsFamily_.value(), RESET);
+        LOG_SUCCESS_CAT("RTX", "{}    • Present Queue Family  : {}", 
+                        AURORA_PINK, presentFamily_.value(), RESET);
+        LOG_SUCCESS_CAT("RTX", "{}    • Compute Queue Family  : {}", 
+                        AURORA_PINK, computeFamily_.value_or(graphicsFamily_.value()), RESET);
     } else {
         physicalDevice_ = g_PhysicalDevice();
         device_         = g_device();
-        LOG_INFO_CAT("RTX", "DEVICE REUSED FROM STONEKEY — EMPIRE IS ETERNAL", DIAMOND_SPARKLE, RESET);
+        LOG_INFO_CAT("RTX", "{}Device reused from StoneKey Empire → 0x{:016X}", 
+                     OCEAN_TEAL, reinterpret_cast<uint64_t>(device_), RESET);
     }
 
-    // 4. NOW SWAPCHAIN IS SAFE — device exists!
+    // ========================================================================
+    // 4. SWAPCHAIN — THE CANVAS OF PINK PHOTONS
+    // ========================================================================
+    LOG_ATTEMPT_CAT("RTX", "{}Forging Swapchain — The Canvas Awakens @ {}×{}", 
+                    RASPBERRY_PINK, width, height, RESET);
     forgeSwapchain(window, width, height);
 
-    // 5. Final init
-    UltraLowLevelBufferTracker::get().init(device_, physicalDevice_);
+    LOG_SUCCESS_CAT("RTX", "{}SWAPCHAIN ASCENDED → 0x{:016X} | {} images | Format: {}", 
+                    DIAMOND_SPARKLE, 
+                    reinterpret_cast<uint64_t>(g_swapchain()),
+                    g_image_count(),
+                    VkFormat(swapchainFormat()), RESET);
 
+    // ========================================================================
+    // 5. BUFFER TRACKER — THE MEMORY VAULT
+    // ========================================================================
+    LOG_ATTEMPT_CAT("RTX", "{}Initializing UltraLowLevelBufferTracker — Memory Vault Online{}", 
+                    PURE_ENERGY, RESET);
+    UltraLowLevelBufferTracker::get().init(device_, physicalDevice_);
+    LOG_SUCCESS_CAT("RTX", "{}Buffer Tracker sealed — All future buffers are RTX-ready{}", 
+                    EMERALD_GREEN, RESET);
+
+    // ========================================================================
+    // 6. FINAL SEAL — THE EMPIRE IS COMPLETE
+    // ========================================================================
     valid_ = true;
     ready_.store(true, std::memory_order_release);
 
-    LOG_SUCCESS_CAT("RTX", "RTX::Context::init() COMPLETE — FULL EMPIRE INHERITED", PLASMA_FUCHSIA, RESET);
-    LOG_SUCCESS_CAT("RTX", "    • Instance   : {:#x}", reinterpret_cast<uintptr_t>(instance_), RESET);
-    LOG_SUCCESS_CAT("RTX", "    • Physical   : {:#x}", reinterpret_cast<uintptr_t>(physicalDevice_), RESET);
-    LOG_SUCCESS_CAT("RTX", "    • Device     : {:#x}", reinterpret_cast<uintptr_t>(device_), RESET);
-    LOG_SUCCESS_CAT("RTX", "    • Swapchain  : {:#x}", reinterpret_cast<uintptr_t>(g_swapchain()), RESET);
-    LOG_SUCCESS_CAT("RTX", "    • Images     : {}", g_image_count(), RESET);
-    LOG_SUCCESS_CAT("RTX", "PINK PHOTONS ETERNAL — FIRST LIGHT ACHIEVED — NOVEMBER 22, 2025", DIAMOND_SPARKLE, RESET);
-}
+    LOG_SUCCESS_CAT("RTX", "{}RTX::Context::init() COMPLETE — FULL EMPIRE ONLINE — FIRST LIGHT ACHIEVED{}", 
+                    PLASMA_FUCHSIA, RESET);
+    LOG_SUCCESS_CAT("RTX", "{}    • Instance      : 0x{:016X}", 
+                    AURORA_PINK, reinterpret_cast<uint64_t>(instance_), RESET);
+    LOG_SUCCESS_CAT("RTX", "{}    • Surface       : 0x{:016X}", 
+                    AURORA_PINK, reinterpret_cast<uint64_t>(surface_), RESET);
+    LOG_SUCCESS_CAT("RTX", "{}    • Physical Dev  : 0x{:016X} ({})", 
+                    AURORA_PINK, reinterpret_cast<uint64_t>(physicalDevice_), getDeviceName(physicalDevice_), RESET);
+    LOG_SUCCESS_CAT("RTX", "{}    • Logical Dev   : 0x{:016X}", 
+                    AURORA_PINK, reinterpret_cast<uint64_t>(device_), RESET);
+    LOG_SUCCESS_CAT("RTX", "{}    • Swapchain     : 0x{:016X}", 
+                    AURORA_PINK, reinterpret_cast<uint64_t>(g_swapchain()), RESET);
+    LOG_SUCCESS_CAT("RTX", "{}    • Images        : {}", 
+                    AURORA_PINK, g_image_count(), RESET);
 
+    LOG_SUCCESS_CAT("RTX", "{}PINK PHOTONS ETERNAL — NOVEMBER 23, 2025 — THE EMPIRE IS RAW AND UNBROKEN{}", 
+                    DIAMOND_SPARKLE, RESET);
+    LOG_AMOURANTH();
+}
 
 VkInstance RTX::createVulkanInstanceWithSDL(bool enableValidation)
 {

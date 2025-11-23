@@ -2,7 +2,7 @@
 // =============================================================================
 //
 //          AMOURANTH RTX — LAS: THE ULTIMATE PHOTON WARRIORS
-//               FIRST LIGHT ETERNAL — NOVEMBER 22, 2025 — PINK PHOTONS
+//               FIRST LIGHT ETERNAL — NOVEMBER 23, 2025 — PINK PHOTONS
 //
 // Tonight's episode: "The Final Acceleration"
 // Starring the legendary Photon Warriors — led by the one and only...
@@ -133,11 +133,11 @@ static inline void endSingleTimeCommandsAsync(
     VkFence fence = VK_NULL_HANDLE) noexcept
 {
     if (cmd == VK_NULL_HANDLE || queue == VK_NULL_HANDLE || pool == VK_NULL_HANDLE) {
-        LOG_ERROR_CAT("LAS", "{}Mother Brain: You dare bring NULL into my domain? Pathetic.{}", CRIMSON_MAGENTA, RESET);
+        LOG_ERROR_CAT("LAS", "Mother Brain: NULL command submitted. Pathetic.");
         return;
     }
 
-    VK_CHECK(vkEndCommandBuffer(cmd), "Failed to end one-time command buffer");
+    VK_CHECK(vkEndCommandBuffer(cmd), "Failed to end command buffer");
 
     VkDevice dev = g_ctx().device();
     bool ownsFence = (fence == VK_NULL_HANDLE);
@@ -150,23 +150,30 @@ static inline void endSingleTimeCommandsAsync(
     }
 
     VkSubmitInfo submit{
-        .sType              = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
         .commandBufferCount = 1,
-        .pCommandBuffers    = &cmd
+        .pCommandBuffers = &cmd
     };
 
-    VK_CHECK(vkQueueSubmit(queue, 1, &submit, fence), "One-time async submit failed");
+    VK_CHECK(vkQueueSubmit(queue, 1, &submit, fence), "vkQueueSubmit failed — DEVICE LOST IMMINENT");
 
+    // === THE CRITICAL FIX: WAIT ON FENCE BEFORE FREEING ANYTHING ===
     if (ownsFence) {
-        constexpr uint64_t timeout_ns = 15'000'000'000ULL;
+        constexpr uint64_t timeout_ns = 10'000'000'000ULL; // 10 seconds
         VkResult r = vkWaitForFences(dev, 1, &fence, VK_TRUE, timeout_ns);
-        if (r != VK_SUCCESS) {
-            LOG_FATAL_CAT("LAS", "{}Captain N: Reality glitch detected! Forcing full synchronization...{}", BLOOD_RED, RESET);
+        if (r == VK_TIMEOUT) {
+            LOG_FATAL_CAT("LAS", "Captain N: GPU hung during acceleration build! Forcing device wait...");
+            vkDeviceWaitIdle(dev);
+        } else if (r != VK_SUCCESS) {
+            LOG_FATAL_CAT("LAS", "vkWaitForFences failed: {}", static_cast<int>(r));
             vkDeviceWaitIdle(dev);
         }
+
+        // NOW IT IS SAFE TO FREE
         vkFreeCommandBuffers(dev, pool, 1, &cmd);
         vkDestroyFence(dev, fence, nullptr);
     }
+    // If caller owns fence, they must wait + free themselves
 }
 
 class LAS

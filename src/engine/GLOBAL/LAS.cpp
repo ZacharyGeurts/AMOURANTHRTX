@@ -7,7 +7,7 @@
 //  • Commercial license available — contact gzac5314@gmail.com
 //
 // AMOURANTH RTX — Acceleration Structure Manager
-// FIRST LIGHT ETERNAL — NOVEMBER 22, 2025
+// FIRST LIGHT ETERNAL — NOVEMBER 23, 2025
 // =============================================================================
 
 #include "engine/GLOBAL/LAS.hpp"
@@ -19,7 +19,7 @@ using namespace RTX;
 // =============================================================================
 // VulkanAccel — Constructor
 // =============================================================================
-VulkanAccel::VulkanAccel(VkDevice)
+VulkanAccel::VulkanAccel(VkDevice device)
 {
     LOG_SUCCESS_CAT("VulkanAccel", "RTX Acceleration System initialized — ready for BLAS/TLAS construction");
 }

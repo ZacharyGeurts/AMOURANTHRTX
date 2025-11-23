@@ -89,6 +89,14 @@ constexpr uint64_t operator"" _TB(unsigned long long v) noexcept { return v << 4
 
 #define BUFFER(handle) uint64_t handle = 0ULL
 
+
+[[nodiscard]] inline std::string getDeviceName(VkPhysicalDevice dev)
+{
+    VkPhysicalDeviceProperties props{};
+    vkGetPhysicalDeviceProperties(dev, &props);
+    return std::string(props.deviceName);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // BUFFER_CREATE — THE SACRED ONE (AUTOMATICALLY STRIPS RTX FLAGS WHEN UNSAFE)
 // ─────────────────────────────────────────────────────────────────────────────
