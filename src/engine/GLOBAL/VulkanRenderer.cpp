@@ -338,31 +338,35 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, bool o
 	LOG_TRACE_CAT("RENDERER", "Step 3 WINS");
     LOG_TRACE_CAT("RENDERER", "Step 3 COMPLETE");
 
-    // =============================================================================
-    // STEP 5 — CREATE SYNCHRONIZATION OBJECTS (TRIPLE BUFFERING + ASYNC COMPUTE)
-    // =============================================================================
-    LOG_TRACE_CAT("RENDERER", "=== STACK BUILD ORDER STEP 5: Create Synchronization Objects ===");
-    LOG_TRACE_CAT("RENDERER", "Target in-flight frames: {} — TRUE TRIPLE BUFFERING ACTIVE", MAX_FRAMES_IN_FLIGHT);
+// =============================================================================
+// STEP 5 — CREATE SYNCHRONIZATION OBJECTS — THE ONE TRUE WAY
+// =============================================================================
+LOG_TRACE_CAT("RENDERER", "=== STACK BUILD ORDER STEP 5: Create Synchronization Objects ===");
 
-    imageAvailableSemaphores_.resize(MAX_FRAMES_IN_FLIGHT);
-    renderFinishedSemaphores_.resize(MAX_FRAMES_IN_FLIGHT);
-    inFlightFences_.resize(MAX_FRAMES_IN_FLIGHT);
-    computeFinishedSemaphores_.resize(MAX_FRAMES_IN_FLIGHT);
-    computeToGraphicsSemaphores_.resize(MAX_FRAMES_IN_FLIGHT);
+imageAvailableSemaphores_.resize(MAX_FRAMES_IN_FLIGHT);
+renderFinishedSemaphores_.resize(MAX_FRAMES_IN_FLIGHT);
+computeFinishedSemaphores_.resize(MAX_FRAMES_IN_FLIGHT);
+computeToGraphicsSemaphores_.resize(MAX_FRAMES_IN_FLIGHT);
+inFlightFences_.resize(MAX_FRAMES_IN_FLIGHT);
 
-    VkSemaphoreCreateInfo semInfo{ .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
-    VkFenceCreateInfo fenceInfo{ .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, .flags = VK_FENCE_CREATE_SIGNALED_BIT };
+// Zero-init create infos — NEVER trust stack garbage
+VkSemaphoreCreateInfo semInfo{ .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
+VkFenceCreateInfo fenceInfo{ .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, .flags = VK_FENCE_CREATE_SIGNALED_BIT };
 
-    for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
-        LOG_TRACE_CAT("RENDERER", "Creating sync objects for frame {} / {}", i, MAX_FRAMES_IN_FLIGHT);
+for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
+    LOG_TRACE_CAT("RENDERER", "Forging sync objects for frame {} / {}", i, MAX_FRAMES_IN_FLIGHT);
 
-        VK_CHECK(vkCreateSemaphore(g_device(), &semInfo, nullptr, &imageAvailableSemaphores_[i]), "imageAvailable");
-        VK_CHECK(vkCreateSemaphore(g_device(), &semInfo, nullptr, &renderFinishedSemaphores_[i]), "renderFinished");
-        VK_CHECK(vkCreateSemaphore(g_device(), &semInfo, nullptr, &computeFinishedSemaphores_[i]), "computeFinished");
-        VK_CHECK(vkCreateSemaphore(g_device(), &semInfo, nullptr, &computeToGraphicsSemaphores_[i]), "compute→graphics");
-        VK_CHECK(vkCreateFence(g_device(), &fenceInfo, nullptr, &inFlightFences_[i]), "inFlightFence");
-    }
-    LOG_SUCCESS_CAT("RENDERER", "Step 5 COMPLETE — {} full sync sets created", MAX_FRAMES_IN_FLIGHT);
+    VK_CHECK(vkCreateSemaphore(g_device(), &semInfo, nullptr, &imageAvailableSemaphores_[i]),       "imageAvailable");
+    VK_CHECK(vkCreateSemaphore(g_device(), &semInfo, nullptr, &renderFinishedSemaphores_[i]),       "renderFinished");
+    VK_CHECK(vkCreateSemaphore(g_device(), &semInfo, nullptr, &computeFinishedSemaphores_[i]),      "computeFinished");
+    VK_CHECK(vkCreateSemaphore(g_device(), &semInfo, nullptr, &computeToGraphicsSemaphores_[i]),   "compute→graphics");
+
+    VK_CHECK(vkCreateFence(g_device(), &fenceInfo, nullptr, &inFlightFences_[i]),                 "inFlightFence");
+
+    LOG_TRACE_CAT("RENDERER", "Frame {} armed — PINK PHOTONS READY", i);
+}
+
+LOG_SUCCESS_CAT("RENDERER", "Step 5 COMPLETE — {} full sync sets forged — TRIPLE BUFFERING ETERNAL", MAX_FRAMES_IN_FLIGHT);
 
     // =============================================================================
     // STEP 6 — GPU Timestamp Query Pool

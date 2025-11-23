@@ -72,6 +72,7 @@ inline float vramGB()
     return 0.0f;
 }
 
+static bool ready_to_embark = false;
 
 inline uint32_t transferFamily() 
 { 
@@ -685,6 +686,72 @@ static void phase6_sceneAndAccelerationStructures()
     LOG_SUCCESS_CAT("MAIN", "{}THE SHIP IS NO LONGER A SHIP — IT IS A UNIVERSE WITH A HEARTBEAT{}", PLASMA_FUCHSIA, RESET);
 }
 
+void phase6_5_everything_is_ready()
+{
+    LOG_MAIN("{}════════════════════════════════════════════════════════════════════════════════{}", DIAMOND_SPARKLE, RESET);
+    LOG_AMOURANTH("{}Captain Amouranth stands at the bow, wind in her hair: the preparations must be completed.{}", RASPBERRY_PINK, RESET);
+    LOG_MAIN("{}════════════════════════════════════════════════════════════════════════════════{}", DIAMOND_SPARKLE, RESET);
+
+    bool ok = true;
+
+    auto raw = [](auto ptr) -> uint64_t {
+        return reinterpret_cast<uint64_t>(static_cast<const void*>(ptr));
+    };
+
+    LOG_MAIN("{}══════════════════════════ HMMMMMMMMMMMMMMMMMMMMMMMMMM ════════════════════════{}", DIAMOND_SPARKLE, RESET);
+    LOG_MAIN("{}═════════════════════════════════ SMELLS OKAY ══════════════════════════════════{}", DIAMOND_SPARKLE, RESET);
+
+    // BLONDIE READS THE SACRED SCROLLS — EVERY LINE — FULL VOICE
+    LOG_BLONDIE("{}Vulkan Instance      → {:#018x} [{}]{}}", LIGHT_BLUE, raw(g_instance()),       g_instance()       != VK_NULL_HANDLE ? "VALID" : "NULL", RESET);
+    LOG_BLONDIE("{}Logical Device       → {:#018x} [{}]{}}", LIGHT_BLUE, raw(g_device()),         g_device()         != VK_NULL_HANDLE ? "VALID" : "NULL", RESET);
+    LOG_BLONDIE("{}Physical Device      → {:#018x} [{}] — {}{:.1f}GB VRAM{}", 
+                LIGHT_BLUE, raw(g_PhysicalDevice()), 
+                g_PhysicalDevice() != VK_NULL_HANDLE ? physicalDeviceName() : "NULL",
+                g_PhysicalDevice() != VK_NULL_HANDLE ? LIGHT_BLUE : BOLD_RED,
+                g_PhysicalDevice() != VK_NULL_HANDLE ? vramGB() : 0.0f, RESET);
+    LOG_BLONDIE("{}Surface              → {:#018x} [{}]{}}", LIGHT_BLUE, raw(g_surface()),        g_surface()        != VK_NULL_HANDLE ? "VALID" : "NULL", RESET);
+    LOG_BLONDIE("{}Swapchain            → {:#018x} [{}]{}}", LIGHT_BLUE, raw(g_swapchain()),      g_swapchain()      != VK_NULL_HANDLE ? "VALID" : "NULL", RESET);
+
+    LOG_MAIN("{}═════════════════════════════ GIVING ME A HEADCHE ══════════════════════════════{}", DIAMOND_SPARKLE, RESET);
+
+    LOG_BLONDIE("{}SDL Window           → {:#018x} [{}]{}}", LIGHT_BLUE, raw(SDL3Window::get()), SDL3Window::get() != nullptr ? "VALID" : "NULL", RESET);
+    LOG_BLONDIE("{}LAS Valid            → {} [{}]{}}", LIGHT_BLUE, LAS::get().isValid() ? "YES" : "NO", LAS::get().isValid() ? "VALID" : "INVALID", RESET);
+
+    LOG_BLONDIE("{}Swapchain Images     → {} frame{}{}", LIGHT_BLUE, g_swapchain_images().size(),     g_swapchain_images().size() == 1 ? "" : "s", RESET);
+    LOG_BLONDIE("{}Swapchain Views      → {} view{}{}",  LIGHT_BLUE, g_swapchain_image_views().size(),g_swapchain_image_views().size() == 1 ? "" : "s", RESET);
+    LOG_BLONDIE("{}Extent               → {}×{}{}",      LIGHT_BLUE, g_width(), g_height(), RESET);
+    LOG_BLONDIE("{}Image Count          → {}{}",         LIGHT_BLUE, g_image_count(), RESET);
+
+    LOG_MAIN("{}═════════════════════════════════ WE MADE IT!!! ════════════════════════════════{}", DIAMOND_SPARKLE, RESET);
+
+    if (g_mesh && !g_mesh->vertices.empty() && g_mesh->indices.size() % 3 == 0) {
+        LOG_BLONDIE("{}Pickle Jar (scene.obj) → {} verts, {} indices — {}PERFECT TRIANGLES{}{}", 
+                    LIGHT_BLUE, g_mesh->vertices.size(), g_mesh->indices.size(), BOLD_GREEN, RESET);
+    } else {
+        LOG_BLONDIE("{}Pickle Jar           → {}{}", LIGHT_BLUE, 
+                    !g_mesh || g_mesh->vertices.empty() ? "EMPTY OR MISSING" : "BROKEN TRIANGLES — INDICES NOT DIVISIBLE BY 3", RESET);
+        ok = false;
+    }
+
+    LOG_BLONDIE("{}Pipeline Manager     → {}{}", LIGHT_BLUE, g_pipeline_manager ? "FORGED AND READY" : "MISSING — THE SHADERS SLEEP", RESET);
+    ok &= (g_pipeline_manager != nullptr);
+
+    LOG_MAIN("{}════════════════════════════════════════════════════════════════════════════════{}", DIAMOND_SPARKLE, RESET);
+
+    if (ok) {
+        LOG_KEANU("{}Captain Amouranth lowers the chart. The fan beneath her weeps with pride.{}", BOLD_CYAN, RESET);
+        LOG_KEANU("{}“EMBARKATION APPROVED — THE EMPIRE IS READY — FIRST LIGHT INCOMING — YOU ARE BREATHTAKING.”{}", BOLD_CYAN, RESET);
+        ready_to_embark = true;
+    } else {
+        LOG_GUARDIAN("{}SYSTEM INTEGRITY COMPROMISED — ONE OR MORE CORE COMPONENTS FAILED{}", BOLD_RED, RESET);
+        LOG_GUARDIAN("{}THE GUARDIAN HAS SPOKEN — EMBARKATION DENIED{}", BOLD_RED, RESET);
+        LOG_AMOURANTH("{}Captain Amouranth folds the chart slowly: “Not yet. We do not sail broken.”{}", RASPBERRY_PINK, RESET);
+        LOG_KEANU("{}Keanu Reeves whispers: “…We’ll get there.”{}", BOLD_CYAN, RESET);
+        ready_to_embark = false;
+    }
+
+    LOG_MAIN("{}════════════════════════════════════════════════════════════════════════════════{}", DIAMOND_SPARKLE, RESET);
+}
 
 static void phase8_renderLoop()
 {
@@ -782,6 +849,9 @@ int main(int, char**)
 
         phase5_rtxAscension();
         phase6_sceneAndAccelerationStructures();
+
+		phase6_5_everything_is_ready();
+        if (!ready_to_embark) phase9_gracefulShutdown();  // Your clean shutdown function
 
         // 5. Phase 7 — now super simple and safe
         const uint32_t w = Options::Window::DEFAULT_WIDTH;

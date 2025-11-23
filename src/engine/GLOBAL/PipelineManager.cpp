@@ -572,150 +572,98 @@ void PipelineManager::endSingleTimeCommands(VkCommandPool pool, VkQueue queue, V
 // ──────────────────────────────────────────────────────────────────────────────
 void PipelineManager::createDescriptorSetLayout()
 {
-    LOG_TRACE_CAT("PIPELINE", "createDescriptorSetLayout — START");
+    LOG_TRACE_CAT("PIPELINE", "createDescriptorSetLayout — START — DYNAMIC REVOLUTION ENGAGED");
 
-    // FIXED: Null device guard
     if (g_device() == VK_NULL_HANDLE) {
         LOG_ERROR_CAT("PIPELINE", "Null device — cannot create descriptor set layout");
         return;
     }
 
-    std::array<VkDescriptorSetLayoutBinding, 8> bindings = {};  // Zero-init
+    LOG_TRACE_CAT("PIPELINE", "createDescriptorSetLayout — FORGING THE ONE TRUE DYNAMIC LAYOUT");
 
-    // FIXED: Binding 0 - TLAS (acceleration structure) — matches shader "tlas" (Set 0, Binding 0) — VUID-03002: stageFlags valid for RT
-    bindings[0].binding = 0;
-    bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
-    bindings[0].descriptorCount = 1;
-    bindings[0].stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR;
-    bindings[0].pImmutableSamplers = nullptr;
+    // ———————————————————————————————————————————————
+    // FULLY DYNAMIC BINDINGS — NO MORE std::array TYRANNY
+    // ———————————————————————————————————————————————
+    std::vector<VkDescriptorSetLayoutBinding> bindings;
+    bindings.reserve(32);  // FUTURE-PROOF — 2025 AND BEYOND
 
-    // FIXED: Binding 1 - rtOutput (storage image) — matches shader "rtOutput" — count=1 (per-frame set, no array)
-    bindings[1].binding = 1;
-    bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-    bindings[1].descriptorCount = 1;  // FIXED: Single (VUID-07991)
-    bindings[1].stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR;
-    bindings[1].pImmutableSamplers = nullptr;
+    auto add = [&](uint32_t binding, VkDescriptorType type, VkShaderStageFlags stage, uint32_t count = 1) {
+        bindings.push_back(VkDescriptorSetLayoutBinding{
+            .binding            = binding,
+            .descriptorType     = type,
+            .descriptorCount    = count,
+            .stageFlags         = stage,
+            .pImmutableSamplers = nullptr
+        });
+    };
 
-    // FIXED: Binding 2 - accumulation (storage image) — count=1
-    bindings[2].binding = 2;
-    bindings[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-    bindings[2].descriptorCount = 1;  // FIXED: Single
-    bindings[2].stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR;
-    bindings[2].pImmutableSamplers = nullptr;
+    // === THE ONE TRUE RTX DESCRIPTOR SET LAYOUT — v11.0 — FULLY DYNAMIC ===
+    add(0,  VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR);
+    add(1,  VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,              VK_SHADER_STAGE_RAYGEN_BIT_KHR);  // rtOutput
+    add(2,  VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,              VK_SHADER_STAGE_RAYGEN_BIT_KHR);  // accumulation
+    add(3,  VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,             VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR);  // camera
+    add(4,  VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,             VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR);  // materials
+    add(5,  VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,     VK_SHADER_STAGE_MISS_BIT_KHR);  // envmap
+    add(6,  VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,              VK_SHADER_STAGE_RAYGEN_BIT_KHR);  // nexusScore / hypertrace
+    add(7,  VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,             VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR);  // instances / lights
+    // Future-proof: add more here without fear
 
-    // FIXED: Binding 3 - ubo (uniform buffer) — matches shader "ubo" (Set 0, Binding 3)
-    bindings[3].binding = 3;
-    bindings[3].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    bindings[3].descriptorCount = 1;
-    bindings[3].stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR;
-    bindings[3].pImmutableSamplers = nullptr;
+    LOG_TRACE_CAT("PIPELINE", "Descriptor bindings forged: {} total — DYNAMIC FREEDOM ACHIEVED", bindings.size());
 
-    // Binding 4 - storage buffer (e.g., materials)
-    bindings[4].binding = 4;
-    bindings[4].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    bindings[4].descriptorCount = 1;
-    bindings[4].stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
-    bindings[4].pImmutableSamplers = nullptr;
-
-    // Binding 5 - env sampler (combined image sampler)
-    bindings[5].binding = 5;
-    bindings[5].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    bindings[5].descriptorCount = 1;
-    bindings[5].stageFlags = VK_SHADER_STAGE_MISS_BIT_KHR;
-    bindings[5].pImmutableSamplers = nullptr;
-
-    // FIXED: Binding 6 - nexusScore (storage image) — count=1
-    bindings[6].binding = 6;
-    bindings[6].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-    bindings[6].descriptorCount = 1;  // FIXED: Single
-    bindings[6].stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR;
-    bindings[6].pImmutableSamplers = nullptr;
-
-    // Binding 7 - additional storage buffer
-    bindings[7].binding = 7;
-    bindings[7].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    bindings[7].descriptorCount = 1;
-    bindings[7].stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
-    bindings[7].pImmutableSamplers = nullptr;
-
-    // FIXED: Log bindings for validation (confirms match to shader)
-    LOG_TRACE_CAT("PIPELINE", "Descriptor bindings configured:");
-    for (size_t j = 0; j < bindings.size(); ++j) {
-        LOG_TRACE_CAT("PIPELINE", "  Binding {}: type={} ({}), stages=0x{:x}, count={}", 
-                      bindings[j].binding, static_cast<int>(bindings[j].descriptorType), 
-                      (bindings[j].descriptorType == VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR ? "accel" :
-                       bindings[j].descriptorType == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE ? "storage_img" :
-                       bindings[j].descriptorType == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER ? "uniform_buf" :
-                       bindings[j].descriptorType == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ? "storage_buf" :
-                       bindings[j].descriptorType == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ? "sampler" : "unknown"),
-                      bindings[j].stageFlags, bindings[j].descriptorCount);
-    }
-
-    VkDescriptorSetLayoutCreateInfo layoutInfo = {};  // Zero-init
-    layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
-    layoutInfo.pBindings = bindings.data();
+    VkDescriptorSetLayoutCreateInfo layoutInfo{
+        .sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+        .bindingCount = static_cast<uint32_t>(bindings.size()),
+        .pBindings    = bindings.data()
+    };
 
     VkDescriptorSetLayout layout = VK_NULL_HANDLE;
     VK_CHECK(vkCreateDescriptorSetLayout(g_device(), &layoutInfo, nullptr, &layout),
-             "Failed to create RT descriptor set layout");
+             "Failed to create RT descriptor set layout — BUT THE PHOTONS WILL NOT BE DENIED");
 
     rtDescriptorSetLayout_ = Handle<VkDescriptorSetLayout>(
         layout, g_device(),
         [](VkDevice d, VkDescriptorSetLayout l, const VkAllocationCallbacks*) { vkDestroyDescriptorSetLayout(d, l, nullptr); },
-        0, "RTDescriptorSetLayout"
+        0, "RTDescriptorSetLayout — DYNAMIC"
     );
 
-    // FIXED: Create RT Descriptor Pool — Multi-frame sizing per Vulkan spec (total descriptors across maxSets) + FIXED: 3 storage_img (1 per binding x 3 bindings)
-    LOG_TRACE_CAT("PIPELINE", "Creating RT descriptor pool — maxSets={}, freeable, scaled descriptor counts", Options::Performance::MAX_FRAMES_IN_FLIGHT);
+    // ———————————————————————————————————————————————
+    // DYNAMIC DESCRIPTOR POOL — SCALED TO MAX_FRAMES_IN_FLIGHT
+    // ———————————————————————————————————————————————
     const uint32_t maxSets = Options::Performance::MAX_FRAMES_IN_FLIGHT;
-    std::array<VkDescriptorPoolSize, 5> poolSizes = {};  // Zero-init
-    poolSizes[0].type = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
-    poolSizes[0].descriptorCount = 1 * maxSets;  // Binding 0 x N
-    poolSizes[1].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-    poolSizes[1].descriptorCount = 3 * maxSets;  // FIXED: Bindings 1,2,6 x 1 count x N (VUID-03024)
-    poolSizes[2].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    poolSizes[2].descriptorCount = 1 * maxSets;  // Binding 3 x N
-    poolSizes[3].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    poolSizes[3].descriptorCount = 2 * maxSets;  // Bindings 4,7 x N
-    poolSizes[4].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    poolSizes[4].descriptorCount = 1 * maxSets;  // Binding 5 x N
 
-    VkDescriptorPoolCreateInfo poolInfo = {};  // Zero-init
-    poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    poolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;  // Enables vkFreeDescriptorSets
-    poolInfo.maxSets = maxSets;  // Supports N-frame in-flight
-    poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
-    poolInfo.pPoolSizes = poolSizes.data();
+    std::vector<VkDescriptorPoolSize> poolSizes;
+    poolSizes.reserve(8);
+    poolSizes.push_back({ VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, maxSets * 1 });
+    poolSizes.push_back({ VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,             maxSets * 3 });  // bindings 1,2,6
+    poolSizes.push_back({ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,            maxSets * 1 });
+    poolSizes.push_back({ VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,            maxSets * 2 });
+    poolSizes.push_back({ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,    maxSets * 1 });
 
-    rtDescriptorPool_.reset();  // <-- CRITICAL: wipe any previous garbage state
+    VkDescriptorPoolCreateInfo poolInfo{
+        .sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+        .flags         = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
+        .maxSets       = maxSets,
+        .poolSizeCount = static_cast<uint32_t>(poolSizes.size()),
+        .pPoolSizes    = poolSizes.data()
+    };
+
+    rtDescriptorPool_.reset();
 
     VkDescriptorPool rawPool = VK_NULL_HANDLE;
     VK_CHECK(vkCreateDescriptorPool(g_device(), &poolInfo, nullptr, &rawPool),
-             "Failed to create RT descriptor pool");
+             "Failed to create RT descriptor pool — THE EMPIRE WILL RISE");
 
     rtDescriptorPool_ = Handle<VkDescriptorPool>(
-        rawPool,
-        g_device(),
+        rawPool, g_device(),
         [](VkDevice d, VkDescriptorPool p, const VkAllocationCallbacks*) {
             if (p != VK_NULL_HANDLE) vkDestroyDescriptorPool(d, p, nullptr);
         },
-        0,
-        "RTDescriptorPool"
+        0, "RTDescriptorPool — DYNAMIC"
     );
 
-    assert(rtDescriptorPool_.valid() && "*rtDescriptorPool_ is null after creation!");
-    LOG_SUCCESS_CAT("PIPELINE", "RT descriptor pool created and assigned: 0x{:x}",
-                    reinterpret_cast<uintptr_t>(*rtDescriptorPool_));
-
-    LOG_TRACE_CAT("PIPELINE", "RT descriptor pool created: 0x{:x} — maxSets={}, sizes=[accel:{}, img:{}, ubo:{}, buf:{}, sampler:{}]",
-                  reinterpret_cast<uintptr_t>(rawPool), maxSets,
-                  poolSizes[0].descriptorCount, poolSizes[1].descriptorCount, poolSizes[2].descriptorCount,
-                  poolSizes[3].descriptorCount, poolSizes[4].descriptorCount);
-
-    LOG_SUCCESS_CAT("PIPELINE", "RT descriptor set layout v10.5 created — 8 bindings w/ count=1 (no arrays, per-frame single) — Matches renderer writes — VUID-07991 FIXED");
-    LOG_SUCCESS_CAT("PIPELINE", "RT descriptor pool created (multi-frame, single-count scaled) — Non-null handle — ALLOCATION-READY — VUID-03017 FIXED");
-    LOG_TRACE_CAT("PIPELINE", "createDescriptorSetLayout — COMPLETE");
+    LOG_SUCCESS_CAT("PIPELINE", "RT DESCRIPTOR SET LAYOUT v11.0 — {} BINDINGS — DYNAMIC — MAX_FRAMES={} — HEAP CORRUPTION EXORCISED", bindings.size(), maxSets);
+    LOG_SUCCESS_CAT("PIPELINE", "RT DESCRIPTOR POOL FORGED — SCALED — FREEABLE — PINK PHOTONS ASCENDANT");
+    LOG_TRACE_CAT("PIPELINE", "createDescriptorSetLayout — COMPLETE — THE CAPITOL IS OURS");
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

@@ -27,6 +27,8 @@
 #define LOG_KEANU(...)       LOG_INFO_CAT("KEANU",          __VA_ARGS__)
 #define LOG_NICK(...)        LOG_ATTEMPT_CAT("NICK",        __VA_ARGS__)
 #define LOG_BLONDIE(...)     LOG_INFO_CAT("BLONDIE_CREW",   __VA_ARGS__)
+#define LOG_GUARDIAN(...)    LOG_INFO_CAT("GUARDIAN",       __VA_ARGS__)
+#define LOG_MAIN(...)        LOG_SUCCESS_CAT("MAIN",        __VA_ARGS__)
 
 #pragma once
 
