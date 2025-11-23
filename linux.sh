@@ -34,13 +34,13 @@ show_help() {
     valhalla_banner
     echo -e "${W}AMOURANTH RTX BUILD DOCTRINE — ACCEPTED COMMANDS (any order):${N}"
     echo
-    echo -e "  ${G}./linux.sh${N}                    → Build Debug (default) with Make + all cores"
-    echo -e "  ${G}./linux.sh release${N}             → Build Release (O3 + LTO)"
+    echo -e "  ${G}./linux.sh${N}                     → Build Incremental with Make + all cores"
+    echo -e "  ${G}./linux.sh run${N}                 → Build Incremental + launch instantly = DO THIS"
+	echo -e "  ${G}./linux.sh release${N}             → Build Release (O3 + LTO)"
     echo -e "  ${G}./linux.sh ninja${N}               → Use Ninja instead of Make"
     echo -e "  ${G}./linux.sh single${N}              → Compile with -j1 (debugging templates/shaders)${N}"
     echo -e "  ${G}./linux.sh release ninja${N}       → Release + Ninja"
-    echo -e "  ${G}./linux.sh run${N}                 → Build Debug + launch instantly"
-    echo -e "  ${G}./linux.sh clean${N}               → Nuclear wipe + fresh start"
+    echo -e "  ${G}./linux.sh clean${N}               → Wipe if files are added or removed"
     echo -e "  ${G}./linux.sh clear${N}               → Same as clean"
     echo -e "  ${G}./linux.sh --help${N}              → This banner"
     echo
