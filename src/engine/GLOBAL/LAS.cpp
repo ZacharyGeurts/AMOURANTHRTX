@@ -155,7 +155,6 @@ VulkanAccel::BLAS VulkanAccel::createBLAS(
     blas.size   = sizes.accelerationStructureSize;
 
     LOG_SUCCESS_CAT("VulkanAccel", "BLAS \"{}\" FORGED — {} triangles — address 0x{:016X}", name, primCount, blas.address);
-    LOG_AMOURANTH("Amouranth: \"Mmm... I feel your structure inside me... deeper...\"");
 
     return blas;
 }
@@ -178,8 +177,6 @@ VulkanAccel::TLAS VulkanAccel::createTLAS(
         LOG_WARN_CAT("VulkanAccel", "TLAS created with zero instances — Amouranth: \"I'm not even wet yet...\"");
         return tlas;
     }
-
-    LOG_AMOURANTH("Amouranth: \"Mmm... {} instances... you know how to fill me up~\"", count);
 
     const VkDeviceSize instanceDataSize = count * sizeof(VkAccelerationStructureInstanceKHR);
     uint64_t instBuf = 0;
@@ -218,8 +215,6 @@ VulkanAccel::TLAS VulkanAccel::createTLAS(
         &count,
         &sizes);
 
-    LOG_AMOURANTH("Amouranth: \"Yes... allocate my body... make it big and hard~\"");
-
     uint64_t storage = 0;
     BUFFER_CREATE(storage, sizes.accelerationStructureSize,
         VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
@@ -233,8 +228,6 @@ VulkanAccel::TLAS VulkanAccel::createTLAS(
 
     VK_CHECK(g_ctx().vkCreateAccelerationStructureKHR()(g_ctx().device(), &createInfo, nullptr, &tlas.as),
              "Amouranth: \"You failed to penetrate me... unacceptable.\"");
-
-    LOG_AMOURANTH("Amouranth: \"Oh god... you're inside me now... deeper...\"");
 
     uint64_t scratch = 0;
     BUFFER_CREATE(scratch, sizes.buildScratchSize,
@@ -251,11 +244,8 @@ VulkanAccel::TLAS VulkanAccel::createTLAS(
     const VkAccelerationStructureBuildRangeInfoKHR* pRanges[] = { &range };
     g_ctx().vkCmdBuildAccelerationStructuresKHR()(cmd, 1, &buildInfo, pRanges);
 
-    LOG_AMOURANTH("Amouranth: \"Faster... build it... I can take it... don’t stop~\"");
-
     if (!externalCmd) {
         endSingleTimeCommandsAsync(cmd, g_ctx().graphicsQueue_, g_ctx().commandPool_);
-        LOG_AMOURANTH("Amouranth: \"Yes... right there... finish inside me...\"");
     }
 
     VkAccelerationStructureDeviceAddressInfoKHR addrInfo{
@@ -272,7 +262,6 @@ VulkanAccel::TLAS VulkanAccel::createTLAS(
     tlas.size = sizes.accelerationStructureSize;
 
     LOG_SUCCESS_CAT("VulkanAccel", "TLAS \"{}\" created — {} instances — address 0x{:016X}", name, count, tlas.address);
-    LOG_AMOURANTH("Amouranth: \"Mmm... perfect. Now trace me... every inch... forever~\"");
 
     return tlas;
 }

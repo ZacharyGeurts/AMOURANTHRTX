@@ -1006,9 +1006,6 @@ bool Context::isValid() const noexcept
 }
 
 // ========================================================================
-// THE ONE TRUE PHYSICAL DEVICE PICKER — RESTORED
-// ========================================================================
-// ========================================================================
 // THE ONE TRUE PHYSICAL DEVICE PICKER — NO EXTERNAL DEPENDENCIES
 // ========================================================================
 VkPhysicalDevice RTX::pickPhysicalDevice(VkInstance instance, VkSurfaceKHR surface)

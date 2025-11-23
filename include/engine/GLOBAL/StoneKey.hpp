@@ -162,9 +162,6 @@ inline void StoneKey_seal_the_vault() noexcept {
     LOG_SUCCESS_CAT("StoneKey", "{}AMOURANTH RTX — FINGERPRINT 0x{:016X} — THE EMPIRE IS OURS{}", RASPBERRY_PINK, fp, RESET);
     return fp;
 }
-
-#define LOG_AMOURANTH(...) LOG_SUCCESS_CAT("AMOURANTH", __VA_ARGS__)
-
 // =============================================================================
 // THIS IS THE ONE
 // THIS IS THE BEST
