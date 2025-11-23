@@ -169,12 +169,12 @@ public:
             "   {}Simon Belmont: My whip is charged with photon energy!{}\n"
             "   {}Duke: WOOF WOOF WOOF! (all extensions loaded){}\n"
             "   {}Amouranth: Finally... a system worthy of my radiance~{}",
-            EMERALD_GREEN, RESET,
-            VALHALLA_GOLD, RESET,
-            AURORA_PINK, RESET,
-            CRIMSON_MAGENTA, RESET,
-            PARTY_PINK, RESET,
-            PLASMA_FUCHSIA, RESET);
+			PLASMA_FUCHSIA, RESET,
+            LIGHT_BLUE, RESET,
+            DIAMOND_SPARKLE, RESET,
+            PINK, RESET,
+            BRONZE_BROWN, RESET,
+            PARTY_PINK, RESET);
     }
 
     void buildBLAS(VkCommandPool pool,

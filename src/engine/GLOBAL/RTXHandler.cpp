@@ -835,8 +835,8 @@ void RTX::Context::forgeSwapchain(SDL_Window* window, int width, int height)
                     VALHALLA_GOLD, width, height, RESET);
 
     LOG_AMOURANTH("{}Captain Amouranth climbs to the bow, wind in her hair: \"This is where we place her. The soul of the ship. My soul. Carve it true.\"{}", RASPBERRY_PINK, RESET);
-    LOG_NICK("{}Nick steadies the chisel: \"She’ll cut through any storm. Through any darkness. She leads us.\"{}", EMERALD_GREEN, RESET);
-    LOG_CID("{}Cid, master shipwright, wipes sweat from his brow: \"This figurehead… she’s not wood. She’s legend.\"{}", VALHALLA_GOLD, RESET);
+    LOG_NICK("{}Nick steadies the chisel: \"She'll cut through any storm. Through any darkness. She leads us.\"{}", EMERALD_GREEN, RESET);
+    LOG_CID("{}Cid, master shipwright, wipes sweat from his brow: \"This figurehead… she's not wood. She's legend.\"{}", VALHALLA_GOLD, RESET);
 
     if (!instance_ || !physicalDevice_ || !device_) {
         LOG_FATAL_CAT("RTX", "{}forgeSwapchain() CALLED BEFORE INSTANCE/DEVICE — THE BOW IS EMPTY — NO FIGUREHEAD CAN STAND{}", BLOOD_RED, RESET);
@@ -845,9 +845,9 @@ void RTX::Context::forgeSwapchain(SDL_Window* window, int width, int height)
 
     LOG_CID("{}Cid, master shipwright, wipes sweat from his brow{}", VALHALLA_GOLD, RESET);
 
-    // 1. THE PROW IS CARVED — SURFACE BORN
+    // 1. THE PROW IS CARVED — SURFACE BORN (X11-safe)
     VkSurfaceKHR surface = VK_NULL_HANDLE;
-    if (!SDL_Vulkan_CreateSurface(window, instance_, nullptr, &surface)) {
+    if (!SDL_Vulkan_CreateSurface(window, instance_, nullptr, &surface) || surface == VK_NULL_HANDLE) {
         LOG_FATAL_CAT("RTX", "{}THE SEA REJECTS OUR PROW — SDL_Vulkan_CreateSurface FAILED: {}{}", BLOOD_RED, SDL_GetError(), RESET);
         std::exit(1);
     }
@@ -856,19 +856,25 @@ void RTX::Context::forgeSwapchain(SDL_Window* window, int width, int height)
 
     LOG_CID("{}Cid, master shipwright, wipes sweat from his brow{}", VALHALLA_GOLD, RESET);
 
-    // 2. CAPABILITIES & EXTENT
+    // 2. CAPABILITIES & EXTENT — BULLETPROOF
     VkSurfaceCapabilitiesKHR caps{};
     VK_CHECK(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice_, surface, &caps));
 
     VkExtent2D extent = caps.currentExtent;
-    if (extent.width == UINT32_MAX) {
+    if (extent.width == UINT32_MAX || extent.height == UINT32_MAX) {
         extent.width  = std::clamp(static_cast<uint32_t>(width),  caps.minImageExtent.width,  caps.maxImageExtent.width);
         extent.height = std::clamp(static_cast<uint32_t>(height), caps.minImageExtent.height, caps.maxImageExtent.height);
     }
 
+    // SAFETY: If surface is temporarily invalid (X11), clamp to minimum
+    if (extent.width < caps.minImageExtent.width)  extent.width  = caps.minImageExtent.width;
+    if (extent.height < caps.minImageExtent.height) extent.height = caps.minImageExtent.height;
+    if (caps.maxImageExtent.width > 0 && extent.width > caps.maxImageExtent.width)   extent.width  = caps.maxImageExtent.width;
+    if (caps.maxImageExtent.height > 0 && extent.height > caps.maxImageExtent.height) extent.height = caps.maxImageExtent.height;
+
     LOG_CID("{}Cid, master shipwright, wipes sweat from his brow{}", VALHALLA_GOLD, RESET);
 
-    // 3. SURFACE FORMAT
+    // 3. SURFACE FORMAT — RTX-OPTIMAL
     uint32_t formatCount = 0;
     VK_CHECK(vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice_, surface, &formatCount, nullptr));
     std::vector<VkSurfaceFormatKHR> formats(formatCount);
@@ -885,7 +891,7 @@ void RTX::Context::forgeSwapchain(SDL_Window* window, int width, int height)
 
     LOG_CID("{}Cid, master shipwright, wipes sweat from his face{}", VALHALLA_GOLD, RESET);
 
-    // 4. PRESENT MODE
+    // 4. PRESENT MODE — MAILBOX FOR RTX SMOOTHNESS
     uint32_t presentModeCount = 0;
     VK_CHECK(vkGetPhysicalDeviceSurfacePresentModesKHR(physicalDevice_, surface, &presentModeCount, nullptr));
     std::vector<VkPresentModeKHR> presentModes(presentModeCount);
@@ -902,25 +908,39 @@ void RTX::Context::forgeSwapchain(SDL_Window* window, int width, int height)
 
     LOG_CID("{}Cid, master shipwright, wipes sweat from his chest{}", VALHALLA_GOLD, RESET);
 
-    // 5. SWAPCHAIN CREATION
-    VkSwapchainCreateInfoKHR swapInfo{};
+    // 5. SWAPCHAIN CREATION — FINAL RTX-READY CONFIGURATION
+    VkSwapchainCreateInfoKHR swapInfo = {};
     swapInfo.sType            = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
     swapInfo.surface          = surface;
-    swapInfo.minImageCount    = std::min(3u, caps.maxImageCount ? caps.maxImageCount : 3u);
-    if (swapInfo.minImageCount < caps.minImageCount) swapInfo.minImageCount = caps.minImageCount;
     swapInfo.imageFormat      = chosenFormat.format;
     swapInfo.imageColorSpace  = chosenFormat.colorSpace;
     swapInfo.imageExtent      = extent;
     swapInfo.imageArrayLayers = 1;
-    swapInfo.imageUsage       = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    swapInfo.imageUsage       = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                                VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                                VK_IMAGE_USAGE_TRANSFER_SRC_BIT;  // REQUIRED when RT extensions are enabled
     swapInfo.preTransform     = caps.currentTransform;
     swapInfo.compositeAlpha   = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
     swapInfo.presentMode      = presentMode;
     swapInfo.clipped          = VK_TRUE;
     swapInfo.oldSwapchain     = VK_NULL_HANDLE;
 
+    // BULLETPROOF IMAGE COUNT — NEVER TRIGGERS DRIVER SEGFAULT
+    uint32_t imageCount = 3;
+    if (caps.maxImageCount > 0) {
+        imageCount = std::min(imageCount, caps.maxImageCount);
+    }
+    imageCount = std::max(imageCount, caps.minImageCount);
+    swapInfo.minImageCount = imageCount;
+
     VkSwapchainKHR rawSwapchain = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateSwapchainKHR(device_, &swapInfo, nullptr, &rawSwapchain));
+    VkResult createResult = vkCreateSwapchainKHR(device_, &swapInfo, nullptr, &rawSwapchain);
+
+    if (createResult != VK_SUCCESS) {
+        LOG_FATAL_CAT("RTX", "{}SWAPCHAIN CREATION FAILED — RESULT: {} — THE PHOTONS ARE DENIED{}", 
+                      ABANDON_SHIP, static_cast<int>(createResult), RESET);
+        std::abort();
+    }
 
     LOG_AMOURANTH("{}Captain Amouranth steps forward, places her hand on the carving: \"This is me. This is us. This is forever.\"{}", RASPBERRY_PINK, RESET);
     LOG_SUCCESS_CAT("RTX", "{}FIGUREHEAD MOUNTED — AMOURANTH STANDS PROUD ON THE BOW — CUTLASS RAISED — BREASTS DEFLECTING THE WIND{}", PLASMA_FUCHSIA, RESET);
@@ -928,22 +948,21 @@ void RTX::Context::forgeSwapchain(SDL_Window* window, int width, int height)
     RTX::swapchain() = RTX::Handle<VkSwapchainKHR>(
         rawSwapchain,
         device_,
-        [](VkDevice d, VkSwapchainKHR s, const VkAllocationCallbacks*) { vkDestroySwapchainKHR(d, s, nullptr); },
+        [](VkDevice d, VkSwapchainKHR s, const VkAllocationCallbacks* = nullptr) { vkDestroySwapchainKHR(d, s, nullptr); },
         0,
         "FigureheadSwapchain_AmouranthEternal"
     );
 
     LOG_CID("{}Cid, master shipwright, wipes brow from his sweat{}", VALHALLA_GOLD, RESET);
 
-    // 6. RETRIEVE IMAGES
-    uint32_t imageCount = 0;
+    // 6. RETRIEVE IMAGES — REUSE imageCount (no redeclaration)
     VK_CHECK(vkGetSwapchainImagesKHR(device_, rawSwapchain, &imageCount, nullptr));
     std::vector<VkImage> images(imageCount);
     VK_CHECK(vkGetSwapchainImagesKHR(device_, rawSwapchain, &imageCount, images.data()));
 
     LOG_CID("{}Cid, master shipwright{}", VALHALLA_GOLD, RESET);
 
-    // 7. BIND TO STONEKEY
+    // 7. BIND TO STONEKEY EMPIRE
     StoneKey::Empire::swapchain_images = std::move(images);
     StoneKey::Empire::surface_format   = chosenFormat;
     StoneKey::Empire::extent           = extent;
@@ -963,7 +982,7 @@ void RTX::Context::forgeSwapchain(SDL_Window* window, int width, int height)
     LOG_SUCCESS_CAT("RTX", "{}FIGUREHEAD SECURE — AMOURANTH LEADS US INTO THE STORM — PINK PHOTONS ETERNAL{}", PLASMA_FUCHSIA, RESET);
 
     LOG_AMOURANTH("{}She turns to the crew, voice strong: \"Look at her. Look at us. We are unsinkable.\"{}", RASPBERRY_PINK, RESET);
-    LOG_NICK("{}Nick smiles: \"And she’s beautiful.\"{}", EMERALD_GREEN, RESET);
+    LOG_NICK("{}Nick smiles: \"And she's beautiful.\"{}", EMERALD_GREEN, RESET);
     LOG_CID("{}Cid steps back, hammer lowered: \"Best figurehead I ever carved.\"{}", VALHALLA_GOLD, RESET);
     LOG_CID("{}Cid stands with hands on hips within knee-deep sweat. Beard soaked. Job done.\"{}", VALHALLA_GOLD, RESET);
 

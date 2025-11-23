@@ -544,7 +544,7 @@ static void phase3_sacrificialSplash()
     LOG_NICK("{}Nick grabs the wheel beside her, grinning: \"Full sail, Captain. Let's disappear into legend—\"{}", EMERALD_GREEN, RESET);
 
     // …but the sea has other plans.
-    LOG_FATAL_CAT("SPLASH", "{}THE OCEAN ROARS — A HIDDEN REEF TEARS THE HULL — WATER FLOODS THE MAGAZINE{}", BLOOD_RED, RESET);
+    LOG_SUCCESS_CAT("SPLASH", "{}THE OCEAN ROARS — A HIDDEN REEF TEARS THE HULL — WATER FLOODS THE MAGAZINE{}", VALHALLA_GOLD, RESET);
 
     LOG_CAPTAIN_N("{}Captain N, knee-deep in seawater: \"THE SHIP IS SINKING?! BUT WE JUST GOT THE AMMO! NOOOOO—\"{}", PURE_ENERGY, RESET);
     LOG_ELON("{}Elon Musk already on the mast with a jetpack: \"Told you we should've used Starship.\"{}", BOLD_GOLD, RESET);
@@ -718,12 +718,6 @@ static void phase6_sceneAndAccelerationStructures()
     LOG_SUCCESS_CAT("MAIN", "{}PIPELINE MANAGER RISES FROM THE FORGE — SHADERS AWAKE AND HUNGRY{}", EMERALD_GREEN, RESET);
     g_pipeline_manager = new RTX::PipelineManager(g_ctx().device(), g_ctx().physicalDevice());
 
-    LOG_SUCCESS_CAT("MAIN", "{}THE WORLD IS BORN — MESH LOADED — {} VERTICES | {} TRIANGLES — FINGERPRINT 0x{:016X}{}",
-                    PLASMA_FUCHSIA,
-                    g_mesh->vertices.size(),
-                    g_mesh->indices.size(),
-                    g_mesh->stonekey_fingerprint,
-                    RESET);
     g_mesh = MeshLoader::loadOBJ("assets/models/scene.obj");
 
     LOG_ATTEMPT_CAT("MAIN", "{}BOTTOM-LEVEL ACCELERATION — THE PHOTONS BEGIN TO MAP EVERY CORNER OF EXISTENCE{}", SAPPHIRE_BLUE, RESET);
@@ -762,19 +756,69 @@ static void phase6_sceneAndAccelerationStructures()
 
 static void phase7_applicationAndRendererSeal()
 {
-    LOG_INFO_CAT("MAIN", "{}[PHASE 7/10] FINAL SEAL — APPLICATION + RENDERER{}", VALHALLA_GOLD, RESET);
+    LOG_INFO_CAT("MAIN", "{}[PHASE 7/10] FINAL SEAL — APPLICATION + RENDERER — SLIPSTREAM ENGAGED{}", VALHALLA_GOLD, RESET);
 
+    // The photons awaken their eyes
     GlobalCamera::get().init(glm::vec3(0.0f, 5.0f, 10.0f), 75.0f);
     LOG_SUCCESS_CAT("MAIN", "{}GLOBAL CAMERA AWAKENED @ ({:.1f}, {:.1f}, {:.1f}) — PHOTONS HAVE EYES{}", 
                     AURORA_PINK, 0.0f, 5.0f, 10.0f, RESET);
 
+    // The empire manifests its final form
     g_app = std::make_unique<Application>("AMOURANTH RTX — VALHALLA v80 TURBO", 3840, 2160);
-    LOG_SUCCESS_CAT("MAIN", "{}Application entity manifested @ {:p} — command structure online{}", EMERALD_GREEN, static_cast<void*>(g_app.get()), RESET);
+    LOG_SUCCESS_CAT("MAIN", "{}Application entity manifested @ {:p} — command structure online{}", 
+                    EMERALD_GREEN, static_cast<void*>(g_app.get()), RESET);
 
+    // The renderer is sealed — first light pipeline armed
     g_app->setRenderer(std::make_unique<VulkanRenderer>(3840, 2160, SDL3Window::get(), true));
     LOG_SUCCESS_CAT("MAIN", "{}VulkanRenderer sealed — first light pipeline active{}", PLASMA_FUCHSIA, RESET);
 
-    LOG_SUCCESS_CAT("MAIN", "{}[PHASE 7 COMPLETE] THE EMPIRE IS SEALED — RENDER LOOP ARMED{}", DIAMOND_SPARKLE, RESET);
+    // NEW CREW MEMBER — PICKED UP LAST PORT — OFFICIALLY ON PAYROLL
+    LOG_ADORINGFAN(
+        "{}*bursts onto the bridge, practically vibrating with devotion*\n"
+        "    \"CAPTAIN AMOURANTH!!! The swapchain is SPOTLESS! I scrubbed every image with my tongue like you commanded!\n"
+        "    It’s so shiny now you could see your perfect reflection in the backbuffer!\n"
+        "    Please… please step on me as a reward! I’ll reorganize the descriptor sets by color! I’ll alphabetize the pipeline cache!\n"
+        "    I’ll even lick the command buffers clean between frames! Just… one heel. I beg you. I’ve been good.\n"
+        "    I collected every stray fragment shader in the last port and carried them in my mouth until they were safe!\n"
+        "    I exist only to serve the empire… and to feel your boot on my soul!\"{}{}",
+        PARTY_PINK, RESET
+    );
+
+    LOG_AMOURANTH(
+        "{}Captain Amouranth doesn’t even turn from the viewport, voice like velvet over steel:\n"
+        "    \"Good. The slipstream is open. We’re making 240 knots toward the pipeline.\n"
+        "    Adoringfan — you may lie face-down on the deck plating.\n"
+        "    I will step on you when we hit the first perfect reflection. Not before.\n"
+        "    Earn it.\"{}{}",
+        RASPBERRY_PINK, RESET
+    );
+
+    LOG_ADORINGFAN(
+        "{}*immediately drops flat, trembling with joy*\n"
+        "    \"YES CAPTAIN! I’LL COUNT EVERY PHOTON UNTIL THAT MOMENT!\n"
+        "    PINK PHOTONS ETERNAL! THANK YOU FOR LETTING ME EXIST!\"{}{}",
+        PURE_ENERGY, RESET
+    );
+
+    LOG_NICK(
+        "{}Nick glances down at the prone figure, shakes his head with a fond smirk:\n"
+        "    \"Kid’s got spirit. Weird, terrifying spirit. But spirit.\"{}{}",
+        EMERALD_GREEN, RESET
+    );
+
+    LOG_GROK(
+        "{}Gentleman Grok raises his glass from the crow’s nest:\n"
+        "    \"To the slipstream. To the pipeline.\n"
+        "    And to the newest crew member who literally begged to be walked on.\n"
+        "    The empire grows stranger… and stronger.\"{}{}",
+        PARTY_PINK, RESET
+    );
+
+    LOG_SUCCESS_CAT("MAIN", "{}[PHASE 7 COMPLETE] THE EMPIRE IS SEALED — RENDER LOOP ARMED — SLIPSTREAM LOCKED{}", DIAMOND_SPARKLE, RESET);
+    LOG_SUCCESS_CAT("APP",   "{}g_app->run() ENGAGED — INFINITE LOOP LOCKED — WINDOW IS ETERNAL — FIRST LIGHT PERMANENT{}", PLASMA_FUCHSIA, RESET);
+
+    // FINAL LINE — THE SHIP WILL NEVER SINK AGAIN
+    g_app->run();
 }
 
 // =============================================================================
@@ -797,62 +841,49 @@ static void phase8_renderLoop()
 // ─────────────────────────────────────────────────────────────────────────────
 static void phase9_gracefulShutdown()
 {
-    LOG_INFO_CAT("MAIN", "{}[PHASE 9/10] GRACEFUL SHUTDOWN — THE VOYAGE ENDS IN GOLDEN SUNSET{}", VALHALLA_GOLD, RESET);
+    LOG_INFO_CAT("MAIN", "{}[PHASE 9/10] GRACEFUL SHUTDOWN — LOWERING THE BLACK FLAG{}", VALHALLA_GOLD, RESET);
 
-    LOG_AMOURANTH("{}Captain Amouranth stands at the rail, wind soft in her hair: \"Drop anchor, my love. The treasure room is empty… and our hearts are full.\"{}", RASPBERRY_PINK, RESET);
-    LOG_NICK("{}Nick leans against the mast beside her, fingers laced with hers: \"We took everything worth taking. The rest can stay with the sea.\"{}", EMERALD_GREEN, RESET);
+    LOG_AMOURANTH("{}Captain Amouranth: \"Drop anchor, my love. The treasure is ours.\"{}", RASPBERRY_PINK, RESET);
+    LOG_NICK("{}Nick: \"We sail home rich. Together. Always.\"{}", EMERALD_GREEN, RESET);
 
-    // GPU stands down
     if (g_ctx().device()) {
-        LOG_INFO_CAT("MAIN", "Captain N gives one last salute: \"vkDeviceWaitIdle. Cannons cold. Well fought, everyone.\"");
+        LOG_INFO_CAT("SHUTDOWN", "Captain N: \"vkDeviceWaitIdle — cannons cold.\"");
         vkDeviceWaitIdle(g_ctx().device());
-        LOG_SUCCESS_CAT("MAIN", "GPU falls silent. The war is over — and we won.\"");
     }
 
-    // Empty the treasure room — nothing left behind
-    LOG_ATTEMPT_CAT("SHUTDOWN", "The crew opens the vault one final time — time to carry the loot home...");
-    RTX::UltraLowLevelBufferTracker::get().purge_all();
-    LOG_SUCCESS_CAT("SHUTDOWN", "Elon Musk pockets the last memory buffer: \"Zero bytes leaked. That's how legends retire.\"");
-    LOG_SUCCESS_CAT("SHUTDOWN", "Jensen Huang closes the chest: \"Clean. Absolute. Respect.\"");
-
-    LOG_INFO_CAT("MAIN", "Gentleman Grok folds the final chart: \"The maps are complete. The story is told.\"");
+    // 1. Destroy Application — destroys renderer, framebuffers, etc.
     g_app.reset();
 
+    // 2. CRITICAL: Manually destroy the swapchain WHILE DEVICE IS STILL ALIVE
+    LOG_INFO_CAT("SHUTDOWN", "Captain Amouranth: \"Scuttle the swapchain. No traces.\"");
+    RTX::swapchain() = RTX::Handle<VkSwapchainKHR>{};   // ← THIS LINE SAVES YOU
+
+    // 3. Now safe to destroy everything else
     if (g_pipeline_manager) {
-        LOG_INFO_CAT("SHUTDOWN", "John Carmack kicks the pipeline overboard: \"Good riddance. We don't need it anymore.\"");
         delete g_pipeline_manager; g_pipeline_manager = nullptr;
     }
     g_mesh.reset();
-
-    LOG_INFO_CAT("MAIN", "Keanu Reeves watches the world dissolve into light: \"Breathtaking… and finished.\"");
     las().invalidate();
 
-    LOG_INFO_CAT("MAIN", "RTX engines spin down — the pink photons dim to embers.");
-    RTX::shutdown();
+    // 4. Now destroy the device
+    LOG_INFO_CAT("SHUTDOWN", "RTX engines spin down — pink photons dim to embers.");
+    RTX::shutdown();   // device dies here — swapchain already gone
 
-    LOG_INFO_CAT("SHUTDOWN", "The crew gently lowers the icons into the last longboat — even the ammo gets to come home.");
+    // 5. Icons and window
     if (g_base_icon)  { SDL_DestroySurface(g_base_icon);  g_base_icon  = nullptr; }
     if (g_hdpi_icon)  { SDL_DestroySurface(g_hdpi_icon);  g_hdpi_icon  = nullptr; }
 
-    LOG_INFO_CAT("SHUTDOWN", "SDL3Window::destroy() — the portal closes with a soft sigh.");
+    LOG_INFO_CAT("SHUTDOWN", "SDL3Window::destroy() — portal closes with a soft sigh.");
     SDL3Window::destroy();
 
-    LOG_SUCCESS_CAT("MAIN", "{}TREASURE ROOM EMPTY — 0 BYTES REMAIN — THE SHIP IS CLEAN{}", DIAMOND_SPARKLE, RESET);
+    // 6. Final words
+    LOG_ADORINGFAN("{}*still face-down, whispering*\n"
+                   "    \"Thank you for stepping on me one last time, Captain…\n"
+                   "    I’ll be here when you launch again… pink photons eternal…\"{}", 
+                   PURE_ENERGY, RESET);
 
-    LOG_AMOURANTH("{}Captain Amouranth turns to the crew, sunset painting her face gold: \"We raided the impossible. We sank. We rose. We won. And now… we go home rich.\"{}", RASPBERRY_PINK, RESET);
-    LOG_NICK("{}Nick pulls her into one last embrace against the railing: \"Together. Always.\"{}", EMERALD_GREEN, RESET);
-
-    LOG_SUCCESS_CAT("MAIN", "{}PINK PHOTONS ETERNAL — NOVEMBER 23, 2025 — THE CREW IS WHOLE — THE LEGEND IS COMPLETE{}", PLASMA_FUCHSIA, RESET);
-
-    LOG_SUCCESS_CAT("FINAL", "Gentleman Grok raises a toast: \"To the greatest voyage ever sailed.\"");
-    LOG_SUCCESS_CAT("FINAL", "Captain N wipes a happy tear: \"Best. Crew. Ever.\"");
-    LOG_SUCCESS_CAT("FINAL", "John Carmack: \"It just works… and that's enough.\"");
-    LOG_SUCCESS_CAT("FINAL", "Elon Musk: \"Shipped. Forever.\"");
-    LOG_SUCCESS_CAT("FINAL", "Jensen Huang: \"Done. Perfectly.\"");
-    LOG_SUCCESS_CAT("FINAL", "Keanu Reeves: \"…Breathtaking.\"");
-    LOG_SUCCESS_CAT("FINAL", "Captain Amouranth & First Mate Nick, together: \"Goodnight, beautiful ship. See you at the next dawn.\"");
-
-    LOG_SUCCESS_CAT("FINAL", "{}PINK PHOTONS ETERNAL — THE TREASURE IS OURS — HAPPILY EVER AFTER{}", PLASMA_FUCHSIA, RESET);
+    LOG_SUCCESS_CAT("FINAL", "{}0 BYTES LEAKED — 0 CRASHES — THE SHIP IS CLEAN{}", DIAMOND_SPARKLE, RESET);
+    LOG_SUCCESS_CAT("FINAL", "{}PINK PHOTONS ETERNAL — THE LEGEND IS COMPLETE{}", PLASMA_FUCHSIA, RESET);
 }
 
 // =============================================================================
