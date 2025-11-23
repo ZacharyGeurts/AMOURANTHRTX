@@ -514,7 +514,20 @@ void Context::cleanup() noexcept
 
 void RTX::loadRayTracingExtensions()
 {
+    // ──────────────────────────────────────────────────────────────
+    // THE FEAST OF THE PINK PHOTONS — RTX ASCENSION CEREMONY
+    // NO MORE CRASHES — NO FUNCTION POINTERS IN LOGS
+    // ──────────────────────────────────────────────────────────────
+    LOG_INFO_CAT("RTX", "{}THE FEAST BEGINS — LOADING SACRED RAY TRACING EXTENSIONS{}", VALHALLA_GOLD, RESET);
+
     VkDevice dev = g_device();
+    if (!dev) {
+        LOG_FATAL_CAT("RTX", "{}VkDevice IS NULL — THE CAPTAIN HAS NO SHIP — RTX DENIED{}", BLOOD_RED, RESET);
+        g_ctx().hasFullRTX_ = false;
+        return;
+    }
+
+    LOG_SUCCESS_CAT("RTX", "{}DEVICE VALID → 0x{:016X} — THE TABLE IS SET{}", EMERALD_GREEN, reinterpret_cast<uint64_t>(dev), RESET);
 
 #define LOAD_RT_PFN(name) \
     do { \
@@ -529,16 +542,18 @@ void RTX::loadRayTracingExtensions()
         } \
     } while(0)
 
-    LOG_INFO_CAT("RTX", "{}Loading TRUE ray tracing extensions — the heart of the empire beats eternal...{}", QUASAR_BLUE, RESET);
+    LOG_AMOURANTH("{}Captain Amouranth raises her cutlass: \"Bring forth the extensions! The photons hunger!\"{}", RASPBERRY_PINK, RESET);
 
-    // === ONLY TRUE KHR EXTENSIONS — vkGetBufferDeviceAddress IS NOW CORE (1.3+) ===
+    // === RAY TRACING PIPELINE EXTENSIONS ===
     LOAD_RT_PFN(vkCmdTraceRaysKHR);
     LOAD_RT_PFN(vkCreateRayTracingPipelinesKHR);
     LOAD_RT_PFN(vkGetRayTracingShaderGroupHandlesKHR);
-    // vkGetBufferDeviceAddress → DEAD. PURGED. ASCENDED.
 
-    LOG_INFO_CAT("RTX", "{}ACCELERATION STRUCTURES AWAKEN — THE ONE TRUE PATH OPENS{}", PULSAR_GREEN, RESET);
+    LOG_SUCCESS_CAT("RTX", "{}PIPELINE PFNs SECURED — THE HEART BEATS{}", PLASMA_FUCHSIA, RESET);
 
+    LOG_JENSEN("{}Jensen Huang slams a platter: \"ACCELERATION STRUCTURES — NOW!\"{}", EMERALD_GREEN, RESET);
+
+    // === ACCELERATION STRUCTURE EXTENSIONS ===
     LOAD_RT_PFN(vkCreateAccelerationStructureKHR);
     LOAD_RT_PFN(vkDestroyAccelerationStructureKHR);
     LOAD_RT_PFN(vkGetAccelerationStructureBuildSizesKHR);
@@ -547,7 +562,7 @@ void RTX::loadRayTracingExtensions()
 
 #undef LOAD_RT_PFN
 
-    // FINAL JUDGMENT — ONLY THE TRUE ACCELERATION PFNs MATTER
+    // FINAL ROLL CALL
     const bool allCriticalLoaded =
         g_ctx().vkGetAccelerationStructureBuildSizesKHR_ &&
         g_ctx().vkCmdBuildAccelerationStructuresKHR_ &&
@@ -555,17 +570,21 @@ void RTX::loadRayTracingExtensions()
         g_ctx().vkGetAccelerationStructureDeviceAddressKHR_;
 
     if (!allCriticalLoaded) {
-        LOG_FATAL_CAT("RTX", "{}[FATAL] CRITICAL ACCELERATION PFNs MISSING — ENABLE VK_KHR_acceleration_structure{}", BLOOD_RED, RESET);
+        LOG_FATAL_CAT("RTX", "{}THE FEAST IS RUINED — VK_KHR_acceleration_structure NOT PRESENT{}", BLOOD_RED, RESET);
         g_ctx().hasFullRTX_ = false;
         return;
     }
 
-    // FIRST LIGHT — ETERNAL — UNBREAKABLE — NOVEMBER 23, 2025
-    LOG_SUCCESS_CAT("RTX", "{}ALL 8 SACRED RAY TRACING PFNs FORGED FROM PURE TRUTH — THE EMPIRE IS ALIVE{}", VALHALLA_GOLD, RESET);
-    LOG_SUCCESS_CAT("RTX", "{}PINK PHOTONS NOW HAVE A PATH — INFINITE — UNOBFUSCATED — ETERNAL{}", PLASMA_FUCHSIA, RESET);
-    LOG_SUCCESS_CAT("RTX", "{}AMOURANTH SMILES — ELLIE FIER APPROVES — THE EMPIRE IS FREE{}", DIAMOND_SPARKLE, RESET);
+    // FEAST COMPLETE — FIRST LIGHT ACHIEVED
+    LOG_SUCCESS_CAT("RTX", "{}ALL 8 SACRED EXTENSIONS FORGED — THE EMPIRE IS ALIVE{}", VALHALLA_GOLD, RESET);
+    LOG_SUCCESS_CAT("RTX", "{}PINK PHOTONS NOW FEAST ETERNALLY — INFINITE BOUNCES — INFINITE GLORY{}", PLASMA_FUCHSIA, RESET);
+
+    LOG_AMOURANTH("{}Captain Amouranth stands, drunk on victory: \"To the light that never fades! To the crew that never breaks!\"{}", RASPBERRY_PINK, RESET);
+    LOG_NICK("{}Nick raises his glass beside her: \"To forever.\"{}", EMERALD_GREEN, RESET);
 
     g_ctx().hasFullRTX_ = true;
+
+    LOG_SUCCESS_CAT("RTX", "{}RTX ASCENSION COMPLETE — NOVEMBER 23, 2025 — THE FEAST IS ETERNAL{}", DIAMOND_SPARKLE, RESET);
 }
 
 void RTX::retrieveQueues() noexcept
@@ -583,19 +602,19 @@ void RTX::retrieveQueues() noexcept
 void RTX::Context::init(SDL_Window* window, int width, int height)
 {
     // ─────────────────────────────────────────────────────────────────────
-    // PHASE 4 FINALE — FINALIZING THE GOOD SHIP VULKANRTX
-    // THE CREW HAMMERS THE LAST NAIL — THE NEW VESSEL IS BORN
-    // CAPTAIN AMOURANTH & FIRST MATE NICK SEAL THE HULL
+    // PHASE 4 — THE SHIPBUILDER CID DELIVERS THE GOOD SHIP VULKANRTX
+    // IN THE HARBOR OF THE CITY, THE FINAL RIVET IS DRIVEN BY A LEGEND
+    // CID — MASTER OF OAK, STEEL, AND RTX — HAMMERS THE LAST NAIL
     // ─────────────────────────────────────────────────────────────────────
-    LOG_ATTEMPT_CAT("RTX", "{}RTX::Context::init() — FINAL ASCENSION @ {}×{} — THE NEW SHIP COMES ALIVE{}", 
+    LOG_ATTEMPT_CAT("RTX", "{}RTX::Context::init() — FINAL ASCENSION @ {}×{} — CID THE SHIPBUILDER ENTERS THE DOCKS{}", 
                     VALHALLA_GOLD, width, height, RESET);
 
     if (isValid()) {
-        LOG_WARN_CAT("RTX", "{}Context already forged — the ship sails steady{}", RASPBERRY_PINK, RESET);
+        LOG_WARN_CAT("RTX", "{}The ship already sails — Cid nods and walks away, hammer on shoulder{}", RASPBERRY_PINK, RESET);
         return;
     }
 
-    LOG_INFO_CAT("RTX", "{}Phase 0: Capturing window @ {:p} — the hull takes shape → {}×{}", 
+    LOG_INFO_CAT("RTX", "{}Phase 0: Cid surveys the harbor — window @ {:p} → {}×{}", 
                  EMERALD_GREEN, static_cast<void*>(window), width, height, RESET);
 
     this->window  = window;
@@ -603,107 +622,123 @@ void RTX::Context::init(SDL_Window* window, int width, int height)
     this->height  = height;
 
     // ========================================================================
-    // 1. INSTANCE — THE FIRST BREATH OF THE EMPIRE
+    // 1. INSTANCE — CID LAYS THE KEEL
     // ========================================================================
     if (!g_instance()) {
-        LOG_ATTEMPT_CAT("RTX", "{}Forging Vulkan Instance — the ship’s first breath of life{}", PLASMA_FUCHSIA, RESET);
+        LOG_ATTEMPT_CAT("RTX", "{}Cid strikes the first anvil — Forging Vulkan Instance{}", PLASMA_FUCHSIA, RESET);
         instance_ = createVulkanInstanceWithSDL(Options::Debug::ENABLE_VALIDATION_LAYERS);
         set_g_instance(instance_);
 
-        LOG_SUCCESS_CAT("RTX", "{}VULKAN INSTANCE BORN → 0x{:016X} — THE SHIP HAS LUNGS{}", 
+        LOG_SUCCESS_CAT("RTX", "{}VULKAN INSTANCE BORN → 0x{:016X} — CID APPROVES THE FRAME{}", 
                         DIAMOND_SPARKLE, reinterpret_cast<uint64_t>(instance_), RESET);
-        LOG_SUCCESS_CAT("RTX", "{}    • API Version : {}.{}.{}", 
-                        AURORA_PINK, VK_API_VERSION_MAJOR(VK_HEADER_VERSION_COMPLETE),
-                        VK_API_VERSION_MINOR(VK_HEADER_VERSION_COMPLETE),
-                        VK_API_VERSION_PATCH(VK_HEADER_VERSION_COMPLETE), RESET);
     } else {
         instance_ = g_instance();
-        LOG_INFO_CAT("RTX", "{}Vulkan Instance reused from StoneKey — the ship remembers its soul → 0x{:016X}", 
+        LOG_INFO_CAT("RTX", "{}Cid finds an old keel still strong — reusing instance → 0x{:016X}", 
                      OCEAN_TEAL, reinterpret_cast<uint64_t>(instance_), RESET);
     }
 
     // ========================================================================
-    // 2. SURFACE — THE EYE INTO THE VOID
+    // 2. SURFACE — CID CUTS THE EYES
     // ========================================================================
-    LOG_ATTEMPT_CAT("RTX", "{}Creating VkSurfaceKHR — the ship’s window to the sea{}", SAPPHIRE_BLUE, RESET);
+    LOG_ATTEMPT_CAT("RTX", "{}Cid carves the eyes into the prow — Creating VkSurfaceKHR{}", SAPPHIRE_BLUE, RESET);
     VkSurfaceKHR surface = VK_NULL_HANDLE;
     if (!SDL_Vulkan_CreateSurface(window, instance_, nullptr, &surface)) {
-        LOG_FATAL_CAT("RTX", "{}SDL_Vulkan_CreateSurface FAILED: {} — THE VOID REJECTS OUR SHIP{}", 
+        LOG_FATAL_CAT("RTX", "{}Cid drops his chisel — SDL_Vulkan_CreateSurface FAILED: {} — THE SEA WILL NOT SEE US{}", 
                       BLOOD_RED, SDL_GetError(), RESET);
         std::exit(1);
     }
     surface_ = surface;
     set_g_surface(surface_);
 
-    LOG_SUCCESS_CAT("RTX", "{}SURFACE FORGED → 0x{:016X} — THE SHIP SEES THE HORIZON{}", 
+    LOG_SUCCESS_CAT("RTX", "{}SURFACE FORGED → 0x{:016X} — THE SHIP NOW HAS EYES{}", 
                     PLASMA_FUCHSIA, reinterpret_cast<uint64_t>(surface_), RESET);
 
     // ========================================================================
-    // 3. PHYSICAL + LOGICAL DEVICE — THE HEART AND BRAIN
+    // 3. PHYSICAL + LOGICAL DEVICE — CID FORGES THE HEART AND BRAIN
     // ========================================================================
     if (!g_PhysicalDevice() || !g_device()) {
-        LOG_ATTEMPT_CAT("RTX", "{}Picking Physical Device + Forging Logical Device — the ship’s heart beats{}", 
+        LOG_ATTEMPT_CAT("RTX", "{}Cid enters the forge — Picking GPU and hammering the Logical Device{}", 
                         HYPERSPACE_WARP, RESET);
 
         physicalDevice_ = pickPhysicalDevice(instance_, surface_);
-        LOG_SUCCESS_CAT("RTX", "{}Physical Device selected → {} — the ship has a soul{}", 
+        LOG_SUCCESS_CAT("RTX", "{}Cid chooses the finest steel → {} — THE SHIP HAS A SOUL{}", 
                         EMERALD_GREEN, getDeviceName(physicalDevice_), RESET);
 
-        createLogicalDevice();  // Queues, extensions, RTX features activated here
+        createLogicalDevice();  // The hammer falls — RTX features are born
 
         set_g_PhysicalDevice(physicalDevice_);
         set_g_device(device_);
 
-        LOG_SUCCESS_CAT("RTX", "{}LOGICAL DEVICE FORGED → 0x{:016X} — THE SHIP HAS A BRAIN{}", 
+        // CID HIMSELF PULLS THE QUEUES FROM THE FIRE
+        retrieveQueues();
+
+        LOG_SUCCESS_CAT("RTX", "{}CID’S FINAL BLOW — LOGICAL DEVICE FORGED → 0x{:016X}{}", 
                         VALHALLA_GOLD, reinterpret_cast<uint64_t>(device_), RESET);
-        LOG_SUCCESS_CAT("RTX", "{}    • Graphics Queue Family : {}", 
-                        AURORA_PINK, graphicsFamily_.value(), RESET);
-        LOG_SUCCESS_CAT("RTX", "{}    • Present Queue Family  : {}", 
-                        AURORA_PINK, presentFamily_.value(), RESET);
-        LOG_SUCCESS_CAT("RTX", "{}    • Compute Queue Family  : {}", 
-                        AURORA_PINK, computeFamily_.value_or(graphicsFamily_.value()), RESET);
+        LOG_SUCCESS_CAT("RTX", "{}    • Graphics Family : {}    • Present Family : {}    • Compute Family : {}{}", 
+                        AURORA_PINK,
+                        graphicsFamily_.value(),
+                        presentFamily_.value(),
+                        computeFamily_.value_or(graphicsFamily_.value()),
+                        RESET);
     } else {
         physicalDevice_ = g_PhysicalDevice();
         device_         = g_device();
-        LOG_INFO_CAT("RTX", "{}Device reused from StoneKey Empire — the ship remembers its power → 0x{:016X}", 
+        retrieveQueues();
+        LOG_INFO_CAT("RTX", "{}Cid finds a sister ship already built — reusing device → 0x{:016X}", 
                      OCEAN_TEAL, reinterpret_cast<uint64_t>(device_), RESET);
     }
 
     // ========================================================================
-    // 4. SWAPCHAIN — THE CANVAS OF PINK PHOTONS
+    // 4. SWAPCHAIN — CID RAISES THE PINK SAILS
     // ========================================================================
-    LOG_ATTEMPT_CAT("RTX", "{}Forging Swapchain — the ship’s sails unfurl @ {}×{}", RASPBERRY_PINK, width, height, RESET);
-	
-	forgeSwapchain(window, width, height);
-
-    LOG_SUCCESS_CAT("RTX", "{}SWAPCHAIN ASCENDED → 0x{:016X} | {} images | Format: {}", DIAMOND_SPARKLE, reinterpret_cast<uint64_t>(g_swapchain()), g_image_count(), VkFormat(swapchainFormat()), RESET);
-
-    // ========================================================================
-    // 5. BUFFER TRACKER — THE MEMORY VAULT
-    // ========================================================================
-    LOG_ATTEMPT_CAT("RTX", "{}Initializing UltraLowLevelBufferTracker — the ship’s treasure vault opens{}", PURE_ENERGY, RESET);
+    LOG_ATTEMPT_CAT("RTX", "{}Cid climbs the mast — Raising the pink sails of the swapchain @ {}×{}", 
+                    RASPBERRY_PINK, width, height, RESET);
     
-	UltraLowLevelBufferTracker::get().init(device_, physicalDevice_);
-    
-	LOG_SUCCESS_CAT("RTX", "{}Buffer Tracker sealed — All future treasures are RTX-ready{}", EMERALD_GREEN, RESET);
+    forgeSwapchain(window, width, height);
+
+    LOG_SUCCESS_CAT("RTX", "{}PINK SAILS UNFURL → 0x{:016X} | {} images | Format: {}{}", 
+                    DIAMOND_SPARKLE, 
+                    reinterpret_cast<uint64_t>(g_swapchain()), 
+                    g_image_count(), 
+                    VkFormat(swapchainFormat()), 
+                    RESET);
 
     // ========================================================================
-    // 6. FINAL SEAL — THE EMPIRE IS COMPLETE
+    // 5. MEMORY VAULT — CID SEALS THE TREASURE HOLD
+    // ========================================================================
+    LOG_ATTEMPT_CAT("RTX", "{}Cid locks the treasure vault — Initializing UltraLowLevelBufferTracker{}", 
+                    PURE_ENERGY, RESET);
+    
+    UltraLowLevelBufferTracker::get().init(device_, physicalDevice_);
+    
+    LOG_SUCCESS_CAT("RTX", "{}Vault sealed — All future gold is RTX-ready — Cid nods in approval{}", 
+                    EMERALD_GREEN, RESET);
+
+    // ========================================================================
+    // 6. FINAL SEAL — CID DRIVES THE GOLDEN RIVET
     // ========================================================================
     valid_ = true;
     ready_.store(true, std::memory_order_release);
 
-    LOG_SUCCESS_CAT("RTX", "{}RTX::Context::init() COMPLETE — THE GOOD SHIP VULKANRTX IS BORN — FIRST LIGHT ACHIEVED{}", PLASMA_FUCHSIA, RESET);
+    LOG_SUCCESS_CAT("RTX", "{}CID DRIVES THE GOLDEN RIVET — THE GOOD SHIP VULKANRTX IS BORN — FIRST LIGHT ACHIEVED{}", 
+                    PLASMA_FUCHSIA, RESET);
     LOG_SUCCESS_CAT("RTX", "{}    • Instance      : 0x{:016X}", AURORA_PINK, reinterpret_cast<uint64_t>(instance_), RESET);
     LOG_SUCCESS_CAT("RTX", "{}    • Surface       : 0x{:016X}", AURORA_PINK, reinterpret_cast<uint64_t>(surface_), RESET);
     LOG_SUCCESS_CAT("RTX", "{}    • Physical Dev  : 0x{:016X} ({})", AURORA_PINK, reinterpret_cast<uint64_t>(physicalDevice_), getDeviceName(physicalDevice_), RESET);
     LOG_SUCCESS_CAT("RTX", "{}    • Logical Dev   : 0x{:016X}", AURORA_PINK, reinterpret_cast<uint64_t>(device_), RESET);
     LOG_SUCCESS_CAT("RTX", "{}    • Images        : {}", AURORA_PINK, g_image_count(), RESET);
 
-    LOG_SUCCESS_CAT("RTX", "{}PINK PHOTONS ETERNAL — NOVEMBER 23, 2025 — THE EMPIRE IS RAW AND UNBROKEN{}", DIAMOND_SPARKLE, RESET);
+    LOG_SUCCESS_CAT("RTX", "{}PINK PHOTONS ETERNAL — NOVEMBER 23, 2025 — CID’S MASTERPIECE SETS SAIL{}", 
+                    DIAMOND_SPARKLE, RESET);
 
-    LOG_AMOURANTH("{}Captain Amouranth stands at the bow of the new ship, wind in her hair: \"We sank. We rose. And now… we sail forever.\"{}", RASPBERRY_PINK, RESET);
-    LOG_NICK("{}Nick beside her, voice steady: \"This time, the sea can’t touch us.\"{}", EMERALD_GREEN, RESET);
+    LOG_AMOURANTH("{}Captain Amouranth steps aboard, eyes shining: \"Cid… she’s perfect.\"{}", RASPBERRY_PINK, RESET);
+    LOG_NICK("{}Nick salutes the old shipbuilder: \"A legend built our legend.\"{}", EMERALD_GREEN, RESET);
+
+    LOG_SUCCESS_CAT("CID", "{}Cid wipes sweat from his brow, hammer resting on his shoulder: \"She’ll never sink. Not while pink photons burn.\"{}", 
+                    VALHALLA_GOLD, RESET);
+
+    LOG_SUCCESS_CAT("RTX", "{}THE GOLDEN RIVET IS SET — THE SHIP IS UNSINKABLE — THE VOYAGE BEGINS{}", 
+                    DIAMOND_SPARKLE, RESET);
 }
 
 VkInstance RTX::createVulkanInstanceWithSDL(bool enableValidation)
@@ -870,6 +905,8 @@ void RTX::Context::forgeSwapchain(SDL_Window* window, int width, int height)
 
     VkSwapchainKHR swapchain = VK_NULL_HANDLE;
     VK_CHECK(vkCreateSwapchainKHR(device_, &swapInfo, nullptr, &swapchain));
+
+	set_g_swapchain(swapchain);
 
     // 6. Retrieve images
     uint32_t imageCount = 0;
