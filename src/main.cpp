@@ -548,26 +548,26 @@ static void phase4_mainWindowAndVulkanConsplash_text()
 
     SDL_ShowWindow(win);
 
-    LOG_SUCCESS_CAT("MAIN4", "1920×1080 WINDOW WITH BORDER FORGED @ {} — CENTERED — PHOTONS HAVE A FRAME", 
-    EMERALD_GREEN, static_cast<void*>(win), RESET);
+    LOG_SUCCESS_CAT("MAIN4", std::format("1920×1080 WINDOW WITH BORDER FORGED @ {:#x} — CENTERED — PHOTONS HAVE A FRAME", 
+                    reinterpret_cast<uintptr_t>(win)), EMERALD_GREEN, RESET);
 
     LOG_SUCCESS_CAT("AMOURANTH", 
         "I look perfect in a window... elegant... framed... adored...", 
         RASPBERRY_PINK, RESET);
 
     // ========================================================================
-    // 3. RAW VULKAN 1.4 EMPIRE — STONEKEY RISES
+    // 3. RAW VULKAN 1.4 EMPIRE — STONEKEY RISES — FULL ASCENSION
     // ========================================================================
     LOG_ATTEMPT_CAT("MAIN4", "StoneKey forging Vulkan 1.4 empire on 1920×1080 canvas...", HYPERSPACE_WARP, RESET);
 
-    g_ctx().instance_ = RTX::createVulkanInstanceWithSDL(true);
-    RTX::g_ctx().init(win, WINDOW_WIDTH, WINDOW_HEIGHT);
-    RTX::g_ctx().markReady();
+    // ONE CALL TO RULE THEM ALL — FULL EMPIRE INHERITED
+    //RTX::g_ctx().init(win, WINDOW_WIDTH, WINDOW_HEIGHT);
 
     LOG_SUCCESS_CAT("MAIN4", "VULKAN 1.4 EMPIRE FORGED — READY FOR RENDER", PLASMA_FUCHSIA, RESET);
-    LOG_SUCCESS_CAT("MAIN4", "    • Instance  : {:p}", static_cast<void*>(g_instance()), RESET);
-    LOG_SUCCESS_CAT("MAIN4", "    • Device    : {:p}", static_cast<void*>(g_device()), RESET);
-    LOG_SUCCESS_CAT("MAIN4", "    • Swapchain : {:p}", static_cast<void*>(g_swapchain()), RESET);
+    LOG_SUCCESS_CAT("MAIN4", std::format("    • Instance  : {:#x}", reinterpret_cast<uintptr_t>(g_instance())), RESET);
+    LOG_SUCCESS_CAT("MAIN4", std::format("    • Device    : {:#x}", reinterpret_cast<uintptr_t>(g_device())), RESET);
+    LOG_SUCCESS_CAT("MAIN4", std::format("    • Swapchain : {:#x}", reinterpret_cast<uintptr_t>(g_swapchain())), RESET);
+    LOG_SUCCESS_CAT("MAIN4", std::format("    • Images    : {}", g_image_count()), RESET);
 
     LOG_SUCCESS_CAT("GROK", 
         "Gentleman Grok: \"A windowed canvas. Clean. Contained. Elegant. The photons are focused.\"", 

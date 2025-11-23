@@ -385,6 +385,8 @@ namespace RTX {
 
         // Initialization and Cleanup
         void init(SDL_Window* window, int width, int height);
+		void forgeSwapchain(SDL_Window* window, int width, int height);
+		[[nodiscard]] bool isReady() const noexcept { return ready_.load(std::memory_order_acquire); }
         void cleanup() noexcept;
 
 		bool hasFullRTX() const noexcept { return hasFullRTX_; }
@@ -398,7 +400,6 @@ namespace RTX {
                    physicalDevice_ != VK_NULL_HANDLE &&
                    device_ != VK_NULL_HANDLE;
         }
-        [[nodiscard]] bool isReady() const noexcept { return ready_.load(std::memory_order_acquire); }
         void markReady() noexcept { ready_.store(true, std::memory_order_release); }
         void setValid(bool v) noexcept { valid_ = v; }
 

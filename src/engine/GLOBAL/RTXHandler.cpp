@@ -578,118 +578,240 @@ void RTX::retrieveQueues() noexcept
                     RESET);
 }
 
-// ADD THIS FUNCTION TO RTXHandler.cpp — RIGHT AFTER initContext() stub
 void RTX::Context::init(SDL_Window* window, int width, int height)
 {
-    LOG_ATTEMPT_CAT("RTX", "{}RTX::Context::init() — PASSIVE ASCENSION @ {}×{} — WAITING FOR g_swapchain()'S BLESSING{}", 
-                    VALHALLA_GOLD, width, height, RESET);
+    LOG_ATTEMPT_CAT("RTX", "RTX::Context::init() — FINAL ASCENSION @ {}×{}", VALHALLA_GOLD, width, height, RESET);
 
     if (isValid()) {
-        LOG_WARN_CAT("RTX", "{}Context already valid — ignoring redundant init{}", 
-                     RASPBERRY_PINK, RESET);
+        LOG_WARN_CAT("RTX", "Context already initialized — ignoring", RASPBERRY_PINK, RESET);
         return;
     }
-
-    // We do NOT create anything here.
-    // SwapchainManager has already done the real work:
-    //   - Created SDL window
-    //   - Created VkInstance
-    //   - Created VkSurfaceKHR
-    //   - Created VkDevice + queues
-    //   - Stored everything in StoneKey
 
     this->window  = window;
     this->width   = width;
     this->height  = height;
 
-    // Just read what SwapchainManager already forged
-    this->instance_       = g_instance();        // StoneKey-guarded
-    this->surface_        = g_surface();         // StoneKey-guarded
-    this->physicalDevice_ = g_PhysicalDevice();  // StoneKey-guarded
-    this->device_         = g_device();          // StoneKey-guarded
-
-    if (!this->instance_ || !this->surface_ || !this->device_) {
-        LOG_FATAL_CAT("RTX", "{}Context::init() called too early — SwapchainManager hasn't forged the empire yet!{}", 
-                      BLOOD_RED, RESET);
-        throw std::runtime_error("RTX::Context::init() called before SwapchainManager completed initialization");
+    // Forge the full empire: instance → surface → swapchain → device context
+    if (!g_instance()) {
+        instance_ = createVulkanInstanceWithSDL(true);
+        set_g_instance(instance_);
+    } else {
+        instance_ = g_instance();
     }
 
-    // Buffer tracker can now safely initialize
-    UltraLowLevelBufferTracker::get().init(this->device_, this->physicalDevice_);
+    // Forge swapchain (creates surface + swapchain + images)
+    forgeSwapchain(window, width, height);
 
-    this->valid_ = true;
-    this->ready_.store(true, std::memory_order_release);
+    // Now device and physical device must exist (from previous phases)
+    physicalDevice_ = g_PhysicalDevice();
+    device_         = g_device();
 
-    LOG_SUCCESS_CAT("RTX", "{}RTX::Context::init() — PASSIVE ASCENSION COMPLETE{}", DIAMOND_SPARKLE, RESET);
-    LOG_SUCCESS_CAT("RTX", "{}    • Instance : {:p}", static_cast<void*>(this->instance_), RESET);
-    LOG_SUCCESS_CAT("RTX", "{}    • Device   : {:p}", static_cast<void*>(this->device_), RESET);
-    LOG_SUCCESS_CAT("RTX", "{}    • Surface  : {:p}", static_cast<void*>(this->surface_), RESET);
-    LOG_SUCCESS_CAT("RTX", "{}PINK PHOTONS INHERIT THE EMPIRE — FIRST LIGHT ETERNAL — NOVEMBER 22, 2025{}", 
-                    PLASMA_FUCHSIA, RESET);
+    if (!physicalDevice_ || !device_) {
+        LOG_FATAL_CAT("RTX", "DEVICE NOT FORGED — PHASE ORDER VIOLATED", BLOOD_RED, RESET);
+        std::exit(1);
+    }
+
+    // Final init
+    UltraLowLevelBufferTracker::get().init(device_, physicalDevice_);
+
+    valid_ = true;
+    ready_.store(true, std::memory_order_release);
+
+    LOG_SUCCESS_CAT("RTX", "RTX::Context::init() COMPLETE — FULL EMPIRE INHERITED", PLASMA_FUCHSIA, RESET);
+    LOG_SUCCESS_CAT("RTX", "    • Instance   : {:#x}", reinterpret_cast<uintptr_t>(instance_), RESET);
+    LOG_SUCCESS_CAT("RTX", "    • Device     : {:#x}", reinterpret_cast<uintptr_t>(device_), RESET);
+    LOG_SUCCESS_CAT("RTX", "    • Swapchain  : {:#x}", reinterpret_cast<uintptr_t>(g_swapchain()), RESET);
+    LOG_SUCCESS_CAT("RTX", "    • Images     : {}", g_image_count(), RESET);
+    LOG_SUCCESS_CAT("RTX", "PINK PHOTONS ETERNAL — FIRST LIGHT ACHIEVED — NOVEMBER 22, 2025", DIAMOND_SPARKLE, RESET);
 }
 
 
-[[nodiscard]] VkInstance RTX::createVulkanInstanceWithSDL(bool enableValidation)
+VkInstance RTX::createVulkanInstanceWithSDL(bool enableValidation)
 {
-    LOG_ATTEMPT_CAT("RTX", "FORGING VULKAN INSTANCE WITH SDL3 — PINK PHOTONS REQUIRE SURFACE{}", PLASMA_FUCHSIA, RESET);
+    LOG_ATTEMPT_CAT("RTX", "FORGING VULKAN 1.4 INSTANCE WITH SDL3 — PINK PHOTONS REQUIRE A SURFACE", HYPERSPACE_WARP, RESET);
 
-    uint32_t extCount = 0;
-    if (SDL_Vulkan_GetInstanceExtensions(&extCount) == 0) {
-        throw std::runtime_error("FATAL: SDL_Vulkan_GetInstanceExtensions failed (count query)");
-    }
-
-    std::vector<const char*> extensions(extCount);
-    if (SDL_Vulkan_GetInstanceExtensions(&extCount) == 0) {
-        throw std::runtime_error("FATAL: SDL_Vulkan_GetInstanceExtensions failed (data query)");
-    }
-
-    // Required extensions
-    std::vector<const char*> requiredExtensions = {
-        VK_KHR_SURFACE_EXTENSION_NAME,
-        VK_EXT_DEBUG_UTILS_EXTENSION_NAME,
-    };
-
-    for (auto* ext : extensions) {
-        requiredExtensions.push_back(ext);
-    }
-
-    // Optional: portability enumeration (Apple MoltenVK)
-    requiredExtensions.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
-
-    std::vector<const char*> layers;
-    if (enableValidation) {
-        layers.push_back("VK_LAYER_KHRONOS_validation");
-    }
-
+    // 1. Application info
     VkApplicationInfo appInfo{};
     appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
     appInfo.pApplicationName = "AMOURANTH RTX — VALHALLA v80 TURBO";
     appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
     appInfo.pEngineName = "AMOURANTH RTX ENGINE";
     appInfo.engineVersion = VK_MAKE_VERSION(80, 0, 0);
-    appInfo.apiVersion = VK_API_VERSION_1_3;
+    appInfo.apiVersion = VK_API_VERSION_1_4;
 
+    // 2. Get SDL3 extensions — SDL3 changed the API!
+    uint32_t sdlExtCount = 0;
+    const char* const* sdlExtensions = SDL_Vulkan_GetInstanceExtensions(&sdlExtCount);
+    if (!sdlExtensions) {
+        LOG_FATAL_CAT("RTX", "SDL_Vulkan_GetInstanceExtensions FAILED: {}", BLOOD_RED, SDL_GetError(), RESET);
+        std::exit(1);
+    }
+
+    LOG_SUCCESS_CAT("RTX", "SDL3 PROVIDED {} VULKAN INSTANCE EXTENSIONS", PLASMA_FUCHSIA, sdlExtCount);
+
+    // 3. Build final extension list
+    std::vector<const char*> extensions;
+
+    // Add all SDL3 extensions first
+    for (uint32_t i = 0; i < sdlExtCount; ++i) {
+        extensions.push_back(sdlExtensions[i]);
+    }
+
+    // Add debug utils if validation enabled
+    if (enableValidation) {
+        extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+    }
+
+    // Optional: portability (macOS)
+    bool hasPortability = false;
+    uint32_t extCount = 0;
+    vkEnumerateInstanceExtensionProperties(nullptr, &extCount, nullptr);
+    std::vector<VkExtensionProperties> available(extCount);
+    vkEnumerateInstanceExtensionProperties(nullptr, &extCount, available.data());
+
+    for (const auto& ext : available) {
+        if (strcmp(ext.extensionName, VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME) == 0) {
+            extensions.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+            hasPortability = true;
+            break;
+        }
+    }
+
+    // 4. Layers
+    std::vector<const char*> layers;
+    if (enableValidation) {
+        layers.push_back("VK_LAYER_KHRONOS_validation");
+    }
+
+    // 5. Create info
     VkInstanceCreateInfo createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
-    createInfo.flags = VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
     createInfo.pApplicationInfo = &appInfo;
-    createInfo.enabledExtensionCount = static_cast<uint32_t>(requiredExtensions.size());
-    createInfo.ppEnabledExtensionNames = requiredExtensions.data();
+    createInfo.enabledExtensionCount = static_cast<uint32_t>(extensions.size());
+    createInfo.ppEnabledExtensionNames = extensions.data();
     createInfo.enabledLayerCount = static_cast<uint32_t>(layers.size());
     createInfo.ppEnabledLayerNames = layers.data();
 
+    if (hasPortability) {
+        createInfo.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+        LOG_SUCCESS_CAT("RTX", "VK_KHR_portability_enumeration ENABLED — MACOS READY", PLASMA_FUCHSIA, RESET);
+    }
+
+    // 6. Create instance
     VkInstance instance = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateInstance(&createInfo, nullptr, &instance),
-             "FATAL: vkCreateInstance failed — no instance for the empire");
+    VkResult result = vkCreateInstance(&createInfo, nullptr, &instance);
 
-    set_g_instance(instance);
+    if (result != VK_SUCCESS) {
+        LOG_FATAL_CAT("RTX", "vkCreateInstance FAILED — RESULT: {} — PHOTONS DENIED", BLOOD_RED, VkResult(result), RESET);
+        std::exit(1);
+    }
 
-    LOG_SUCCESS_CAT("RTX", "VULKAN INSTANCE FORGED — HANDLE: 0x{:016X}", 
-                    DIAMOND_SPARKLE, (uint64_t)instance, RESET);
-    LOG_SUCCESS_CAT("RTX", "SDL3 SURFACE EXTENSIONS ACQUIRED — {} TOTAL", 
-                    VALHALLA_GOLD, requiredExtensions.size(), RESET);
+LOG_SUCCESS_CAT("RTX", 
+    std::format("VULKAN 1.4 INSTANCE FORGED @ {:#x} — {} EXTENSIONS — FIRST LIGHT ACHIEVED",
+                reinterpret_cast<uintptr_t>(instance), extensions.size()),
+    VALHALLA_GOLD, RESET);
 
     return instance;
+}
+
+void RTX::Context::forgeSwapchain(SDL_Window* window, int width, int height)
+{
+    LOG_ATTEMPT_CAT("RTX", "FORGING SWAPCHAIN @ {}×{} — PINK PHOTONS CLAIM THE CANVAS", 
+                    VALHALLA_GOLD, width, height, RESET);
+
+    if (!instance_ || !physicalDevice_ || !device_) {
+        LOG_FATAL_CAT("RTX", "forgeSwapchain() CALLED BEFORE INSTANCE/DEVICE — ORDER VIOLATED", BLOOD_RED, RESET);
+        std::exit(1);
+    }
+
+    // 1. Create surface
+    VkSurfaceKHR surface = VK_NULL_HANDLE;
+    if (!SDL_Vulkan_CreateSurface(window, instance_, nullptr, &surface)) {
+        LOG_FATAL_CAT("RTX", "SDL_Vulkan_CreateSurface FAILED: {}", BLOOD_RED, SDL_GetError(), RESET);
+        std::exit(1);
+    }
+    set_g_surface(surface);
+    LOG_SUCCESS_CAT("RTX", "VkSurfaceKHR FORGED @ {:#x}", reinterpret_cast<uintptr_t>(surface), RESET);
+
+    // 2. Query surface capabilities
+    VkSurfaceCapabilitiesKHR caps{};
+    VK_CHECK(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice_, surface, &caps));
+
+    VkExtent2D extent = caps.currentExtent;
+    if (extent.width == UINT32_MAX) {
+        extent.width  = std::clamp(static_cast<uint32_t>(width),  caps.minImageExtent.width,  caps.maxImageExtent.width);
+        extent.height = std::clamp(static_cast<uint32_t>(height), caps.minImageExtent.height, caps.maxImageExtent.height);
+    }
+
+    // 3. Choose surface format (fallback to first available)
+    uint32_t formatCount = 0;
+    VK_CHECK(vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice_, surface, &formatCount, nullptr));
+    std::vector<VkSurfaceFormatKHR> formats(formatCount);
+    VK_CHECK(vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice_, surface, &formatCount, formats.data()));
+
+    VkSurfaceFormatKHR chosenFormat = formats[0];
+    for (const auto& f : formats) {
+        if (f.format == VK_FORMAT_B8G8R8A8_SRGB && f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
+            chosenFormat = f;
+            break;
+        }
+    }
+
+    // 4. Choose present mode
+    uint32_t presentModeCount = 0;
+    VK_CHECK(vkGetPhysicalDeviceSurfacePresentModesKHR(physicalDevice_, surface, &presentModeCount, nullptr));
+    std::vector<VkPresentModeKHR> presentModes(presentModeCount);
+    VK_CHECK(vkGetPhysicalDeviceSurfacePresentModesKHR(physicalDevice_, surface, &presentModeCount, presentModes.data()));
+
+    VkPresentModeKHR presentMode = VK_PRESENT_MODE_FIFO_KHR;
+    for (const auto& mode : presentModes) {
+        if (mode == VK_PRESENT_MODE_MAILBOX_KHR) {
+            presentMode = mode;
+            break;
+        }
+    }
+
+    // 5. Create swapchain
+    VkSwapchainCreateInfoKHR swapInfo{};
+    swapInfo.sType            = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
+    swapInfo.surface          = surface;
+    swapInfo.minImageCount    = std::min(3u, caps.maxImageCount ? caps.maxImageCount : 3u);
+    if (swapInfo.minImageCount < caps.minImageCount) swapInfo.minImageCount = caps.minImageCount;
+    swapInfo.imageFormat      = chosenFormat.format;
+    swapInfo.imageColorSpace  = chosenFormat.colorSpace;
+    swapInfo.imageExtent      = extent;
+    swapInfo.imageArrayLayers = 1;
+    swapInfo.imageUsage       = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    swapInfo.preTransform     = caps.currentTransform;
+    swapInfo.compositeAlpha   = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+    swapInfo.presentMode      = presentMode;
+    swapInfo.clipped          = VK_TRUE;
+    swapInfo.oldSwapchain     = VK_NULL_HANDLE;
+
+    VkSwapchainKHR swapchain = VK_NULL_HANDLE;
+    VK_CHECK(vkCreateSwapchainKHR(device_, &swapInfo, nullptr, &swapchain));
+
+    // 6. Retrieve images
+    uint32_t imageCount = 0;
+    VK_CHECK(vkGetSwapchainImagesKHR(device_, swapchain, &imageCount, nullptr));
+    std::vector<VkImage> images(imageCount);
+    VK_CHECK(vkGetSwapchainImagesKHR(device_, swapchain, &imageCount, images.data()));
+
+    // 7. Store in StoneKey Empire
+    set_g_swapchain(swapchain);
+    StoneKey::Empire::swapchain_images = std::move(images);
+    StoneKey::Empire::surface_format = chosenFormat;
+    StoneKey::Empire::extent = extent;
+    StoneKey::Empire::image_count = imageCount;
+
+    LOG_SUCCESS_CAT("RTX", std::format("SWAPCHAIN FORGED — {} IMAGES — {}×{} — FORMAT: {}", 
+                    imageCount, extent.width, extent.height, static_cast<int>(chosenFormat.format)),
+                    DIAMOND_SPARKLE, RESET);
+    LOG_SUCCESS_CAT("RTX", std::format("    • Swapchain : {:#x}", reinterpret_cast<uintptr_t>(swapchain)), RESET);
+    LOG_SUCCESS_CAT("RTX", std::format("    • Surface    : {:#x}", reinterpret_cast<uintptr_t>(surface)), RESET);
+    LOG_SUCCESS_CAT("RTX", "    • PresentMode: {}", presentMode == VK_PRESENT_MODE_MAILBOX_KHR ? "MAILBOX (TRIPLE BUFFER)" : "FIFO", RESET);
+
+    LOG_AMOURANTH();
 }
 
 void RTX::createLogicalDevice()
