@@ -335,6 +335,52 @@ namespace Color {
     inline constexpr std::string_view VANTA_BLACK               = "\033[48;5;16m\033[38;5;232m";
     inline constexpr std::string_view RADIANT_ROSE              = "\033[1;38;5;211m";
     inline constexpr std::string_view ELECTRO_PURPLE            = "\033[1;38;5;165m";
+    inline constexpr std::string_view CRIMSON_RED               = "\033[38;5;9m";
+
+    // ── STANDARD 16 COLORS (YOU ALREADY KNOW THESE) ─────────────────────────────
+    inline constexpr std::string_view BLACK       = "\033[38;5;0m";
+    inline constexpr std::string_view RED         = "\033[38;5;1m";
+    inline constexpr std::string_view GREEN       = "\033[38;5;2m";
+    inline constexpr std::string_view YELLOW      = "\033[38;5;3m";
+    inline constexpr std::string_view BLUE        = "\033[38;5;4m";
+    inline constexpr std::string_view MAGENTA     = "\033[38;5;5m";
+    inline constexpr std::string_view CYAN        = "\033[38;5;6m";
+    inline constexpr std::string_view WHITE       = "\033[38;5;7m";
+
+    // ── BRIGHT / LIGHT VERSIONS (STILL OBVIOUS) ─────────────────────────────────
+    inline constexpr std::string_view LIGHT_RED    = "\033[38;5;9m";
+    inline constexpr std::string_view LIGHT_GREEN  = "\033[38;5;10m";
+    inline constexpr std::string_view LIGHT_YELLOW = "\033[38;5;11m";
+    inline constexpr std::string_view LIGHT_BLUE   = "\033[38;5;12m";
+    inline constexpr std::string_view LIGHT_MAGENTA= "\033[38;5;13m";
+    inline constexpr std::string_view LIGHT_CYAN   = "\033[38;5;14m";
+    inline constexpr std::string_view BRIGHT_WHITE = "\033[38;5;15m";
+
+    // ── EXTENDED 256-COLOR PALETTE — COMMON, GUESSABLE NAMES ONLY ───────────────
+    inline constexpr std::string_view ORANGE       = "\033[38;5;208m";
+    inline constexpr std::string_view PINK         = "\033[38;5;213m";
+    inline constexpr std::string_view PURPLE       = "\033[38;5;129m";
+    inline constexpr std::string_view LIME         = "\033[38;5;118m";
+    inline constexpr std::string_view TEAL         = "\033[38;5;45m";
+    inline constexpr std::string_view GOLD         = "\033[38;5;220m";
+    inline constexpr std::string_view GRAY         = "\033[38;5;244m";
+    inline constexpr std::string_view DARK_GRAY    = "\033[38;5;235m";
+
+    // ── BOLD + BRIGHT / EXTENDED (FOR HEADERS, SUCCESS, ETC) ────────────────────
+    inline constexpr std::string_view BOLD_RED         = "\033[1;38;5;9m";
+    inline constexpr std::string_view BOLD_GREEN       = "\033[1;38;5;10m";
+    inline constexpr std::string_view BOLD_YELLOW      = "\033[1;38;5;11m";
+    inline constexpr std::string_view BOLD_BLUE        = "\033[1;38;5;12m";
+    inline constexpr std::string_view BOLD_MAGENTA     = "\033[1;38;5;13m";
+    inline constexpr std::string_view BOLD_CYAN        = "\033[1;38;5;14m";
+    inline constexpr std::string_view BOLD_WHITE       = "\033[1;38;5;15m";
+
+    inline constexpr std::string_view BOLD_ORANGE      = "\033[1;38;5;208m";
+    inline constexpr std::string_view BOLD_PINK        = "\033[1;38;5;213m";
+    inline constexpr std::string_view BOLD_PURPLE      = "\033[1;38;5;129m";
+    inline constexpr std::string_view BOLD_LIME        = "\033[1;38;5;118m";
+    inline constexpr std::string_view BOLD_TEAL        = "\033[1;38;5;45m";
+    inline constexpr std::string_view BOLD_GOLD        = "\033[1;38;5;220m";
     inline constexpr std::string_view FROSTFIRE_BLUE            = "\033[1;38;5;39m";
     inline constexpr std::string_view NUCLEAR_GREEN             = "\033[1;38;5;82m";
     inline constexpr std::string_view HYPER_VIOLET              = "\033[1;38;5;141m";

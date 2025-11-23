@@ -401,7 +401,7 @@ void create(const char* title, int width, int height, Uint32 flags)
     }
 
     std::vector<const char*> extensions(sdlExts, sdlExts + extCount);
-    if (Options::Performance::ENABLE_VALIDATION_LAYERS) {
+    if (Options::Debug::ENABLE_VALIDATION_LAYERS) {
         extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
         extensions.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);  // Vulkan 1.4 portability for macOS/moltenVK
         LOG_SUCCESS_CAT("SDL3", "{}Validation + Portability enabled for Vulkan 1.4{}", VALHALLA_GOLD, RESET);
@@ -422,12 +422,12 @@ void create(const char* title, int width, int height, Uint32 flags)
     VkInstanceCreateInfo createInfo = {};
     createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
     createInfo.pNext = nullptr;
-    createInfo.flags = Options::Performance::ENABLE_VALIDATION_LAYERS ? VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR : 0;
+    createInfo.flags = Options::Debug::ENABLE_VALIDATION_LAYERS ? VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR : 0;
     createInfo.pApplicationInfo = &appInfo;
     createInfo.enabledExtensionCount = static_cast<uint32_t>(extensions.size());
     createInfo.ppEnabledExtensionNames = extensions.data();
-    createInfo.enabledLayerCount = Options::Performance::ENABLE_VALIDATION_LAYERS ? 1 : 0;
-    createInfo.ppEnabledLayerNames = Options::Performance::ENABLE_VALIDATION_LAYERS ? validationLayers : nullptr;
+    createInfo.enabledLayerCount = Options::Debug::ENABLE_VALIDATION_LAYERS ? 1 : 0;
+    createInfo.ppEnabledLayerNames = Options::Debug::ENABLE_VALIDATION_LAYERS ? validationLayers : nullptr;
 
     // Forge all variables — LOG EVERYTHING
     LOG_INFO_CAT("SDL3", "{}FORGING INSTANCE — API: 1.4 | Extensions: {} | Layers: {}{}", VALHALLA_GOLD, extensions.size(), createInfo.enabledLayerCount, RESET);
