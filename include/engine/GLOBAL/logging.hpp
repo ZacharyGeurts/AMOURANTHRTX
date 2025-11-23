@@ -13,6 +13,19 @@
 // FULLY COMPILING — PURE EMPIRE
 // =============================================================================
 
+// =============================================================================
+// THE LEGENDARY CREW OF THE GOOD SHIP VULKAN
+// ALL IN FULL PIRATE REGALIA — BLACK LEATHER, PINK SILK, AND RTX STEEL
+// =============================================================================
+#define LOG_AMOURANTH(...)   LOG_SUCCESS_CAT("AMOURANTH",   __VA_ARGS__)
+#define LOG_GROK(...)        LOG_INFO_CAT("GROK",           __VA_ARGS__)
+#define LOG_CAPTAIN_N(...)   LOG_ATTEMPT_CAT("CAPTAIN N",   __VA_ARGS__)
+#define LOG_ELON(...)        LOG_SUCCESS_CAT("ELON",        __VA_ARGS__)
+#define LOG_JENSEN(...)      LOG_SUCCESS_CAT("JENSEN",      __VA_ARGS__)
+#define LOG_CARMACK(...)     LOG_INFO_CAT("CARMACK",        __VA_ARGS__)
+#define LOG_KEANU(...)       LOG_INFO_CAT("KEANU",          __VA_ARGS__)
+#define LOG_NICK(...)        LOG_ATTEMPT_CAT("NICK",        __VA_ARGS__)
+
 #pragma once
 
 #include <string_view>
@@ -595,7 +608,10 @@ private:
             {"ATTEMPT", QUANTUM_PURPLE}, {"VOID", COSMIC_VOID}, {"SPLASH", LILAC_LAVENDER},
             {"MARKER", DIAMOND_SPARKLE}, {"SDL3_window", SAPPHIRE_BLUE}, {"SDL3_audio", SAPPHIRE_BLUE},
             {"SDL3_font", SAPPHIRE_BLUE}, {"SDL3_image", SAPPHIRE_BLUE}, {"SDL3_init", SAPPHIRE_BLUE},
-            {"SDL3_input", SAPPHIRE_BLUE}, {"SDL3_vulkan", SAPPHIRE_BLUE}, {"PIPELINE", SPEARMINT_MINT}
+            {"SDL3_input", SAPPHIRE_BLUE}, {"SDL3_vulkan", SAPPHIRE_BLUE}, {"PIPELINE", SPEARMINT_MINT},
+			{"MAIN1", VALHALLA_GOLD},{"MAIN2", VALHALLA_GOLD},{"MAIN3", VALHALLA_GOLD},{"MAIN4", VALHALLA_GOLD},
+			{"MAIN5", VALHALLA_GOLD},{"MAIN6", VALHALLA_GOLD},{"MAIN7", VALHALLA_GOLD},{"MAIN8", VALHALLA_GOLD},
+			{"MAIN9", VALHALLA_GOLD}
         };
         if (auto it = map.find(cat); it != map.end()) [[likely]]
             return it->second;

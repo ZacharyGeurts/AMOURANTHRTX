@@ -34,19 +34,6 @@
 using namespace Logging::Color;
 
 // =============================================================================
-// THE LEGENDARY CREW OF THE GOOD SHIP VULKANRTX
-// ALL IN FULL PIRATE REGALIA — BLACK LEATHER, PINK SILK, AND RTX STEEL
-// =============================================================================
-#define LOG_AMOURANTH(...)   LOG_SUCCESS_CAT("AMOURANTH",   __VA_ARGS__)
-#define LOG_GROK(...)        LOG_INFO_CAT("GROK",           __VA_ARGS__)
-#define LOG_CAPTAIN_N(...)   LOG_ATTEMPT_CAT("CAPTAIN N",   __VA_ARGS__)
-#define LOG_ELON(...)        LOG_SUCCESS_CAT("ELON",        __VA_ARGS__)
-#define LOG_JENSEN(...)      LOG_SUCCESS_CAT("JENSEN",      __VA_ARGS__)
-#define LOG_CARMACK(...)     LOG_INFO_CAT("CARMACK",        __VA_ARGS__)
-#define LOG_KEANU(...)       LOG_INFO_CAT("KEANU",          __VA_ARGS__)
-#define LOG_NICK(...)        LOG_ATTEMPT_CAT("NICK",        __VA_ARGS__)
-
-// =============================================================================
 // GLOBAL LIVE CAMERA — PINK PHOTONS HAVE EYES
 // =============================================================================
 #include "engine/GLOBAL/camera.hpp"
@@ -399,7 +386,7 @@ end_splash:
     SDL_DestroyWindow(win);
     SDL_QuitSubSystem(SDL_INIT_VIDEO);
 
-    LOG_SUCCESS_CAT("SPLASH", "{}THE RAID IS COMPLETE — WE VANISH INTO LEGEND — AMMO ACQUIRED — STORY THREAD CLOSED FOREVER{}", VALHALLA_GOLD, RESET);
+    LOG_SUCCESS_CAT("SPLASH", "{}THE RAID IS COMPLETE{}", VALHALLA_GOLD, RESET);
     LOG_NICK("{}Nick lights the fuse on the powder magazine: \"No evidence. Just glory.\" *winks*\"{}", EMERALD_GREEN, RESET);
     LOG_AMOURANTH("{}Captain Amouranth: \"Pink photons eternal, baby. Let's go build an empire.\"{}", RASPBERRY_PINK, RESET);
 }
@@ -410,10 +397,10 @@ end_splash:
 static void phase1_preInitialization()
 {
     // ─────────────────────────────────────────────────────────────────────
-    // PHASE 1 — THE GOOD SHIP VULKANRTX AWAKENS
+    // PHASE 1 — THE GOOD SHIP VULKAN AWAKENS
     // CAPTAIN AMOURANTH & FIRST MATE NICK — NOVEMBER 23, 2025
     // ─────────────────────────────────────────────────────────────────────
-    LOG_SUCCESS_CAT("MAIN", "{}CAPTAIN'S LOG — NOVEMBER 23, 2025 — THE GOOD SHIP VULKANRTX AWAKENS{}", PLASMA_FUCHSIA, RESET);
+    LOG_SUCCESS_CAT("MAIN", "{}CAPTAIN'S LOG — NOVEMBER 23, 2025 — THE GOOD SHIP VULKAN AWAKENS{}", PLASMA_FUCHSIA, RESET);
     LOG_SUCCESS_CAT("MAIN", "{}AMOURANTH RTX — VALHALLA v80 TURBO — APOCALYPSE FINAL v10.3{}", DIAMOND_SPARKLE, RESET);
     LOG_SUCCESS_CAT("MAIN", "{}GROK-ASSISTED VOYAGE — PINK PHOTONS ETERNAL{}", RASPBERRY_PINK, RESET);
 
@@ -464,7 +451,7 @@ static void phase1_preInitialization()
     LOG_AMOURANTH("{}Captain Amouranth smiles: \"Phase 1 complete. The ship is clean. The crew is ready.\"{}", RASPBERRY_PINK, RESET);
     LOG_NICK("{}Nick nods: \"Let's raise the black flag. It's time.\"{}", EMERALD_GREEN, RESET);
 
-    LOG_SUCCESS_CAT("MAIN", "{}PHASE 1 COMPLETE — THE GOOD SHIP VULKANRTX IS ALIVE — RAW. ETERNAL. UNBROKEN.{}", DIAMOND_SPARKLE, RESET);
+    LOG_SUCCESS_CAT("MAIN", "{}PHASE 1 COMPLETE — THE GOOD SHIP VULKAN IS ALIVE — RAW. ETERNAL. UNBROKEN.{}", DIAMOND_SPARKLE, RESET);
 }
 
 // =============================================================================
@@ -480,13 +467,13 @@ static void phase2_iconPreload()
     LOG_INFO_CAT("MAIN2", "{}[PHASE 2/10] THE HUNT FOR AMMO BEGINS — TREASURE MAP UNFURLED{}", VALHALLA_GOLD, RESET);
 
     LOG_AMOURANTH("{}Captain Amouranth slams the treasure map on the table: \"Listen up, you beautiful degenerates — we need the AMMO. Without it we're just a fancy boat with no cannons!\"{}", RASPBERRY_PINK, RESET);
-    LOG_NICK("{}First Mate Nick squints at the map: \"X marks the spot… assets/splash_textures/ammo32.ico and ammo.ico. Classic pirate stash.\"{}", EMERALD_GREEN, RESET);
+    LOG_NICK("{}First Mate Nick squints at the map: \"X marks the spot… assets/textures/ammo32.ico and ammo.ico. Classic pirate stash.\"{}", EMERALD_GREEN, RESET);
 
     LOG_CAPTAIN_N("{}Captain N already halfway down the ladder: \"DIBS ON THE SMALL ONE! THAT'S THE GOOD AMMO!\"{}", PURE_ENERGY, RESET);
 
     // ── THE RAID BEGINS ──
-    g_base_icon = IMG_Load("assets/splash_textures/ammo32.ico");
-    g_hdpi_icon = IMG_Load("assets/splash_textures/ammo.ico");
+    g_base_icon = IMG_Load("assets/textures/ammo32.ico");
+    g_hdpi_icon = IMG_Load("assets/textures/ammo.ico");
 
     if (g_base_icon) {
         LOG_SUCCESS_CAT("MAIN2", "{}CAPTAIN N SCREAMS FROM THE HOLD: \"I GOT THE 32×32 AMMO! IT'S PERFECTLY POCKET-SIZED!\"{}", EMERALD_GREEN, RESET);
@@ -568,13 +555,11 @@ static void phase3_sacrificialSplash()
     LOG_AMOURANTH("{}Captain Amouranth climbs the tilting deck, grabs Nick's hand: \"If we go down, we go down together — with the ammo in our hearts.\"{}", RASPBERRY_PINK, RESET);
     LOG_NICK("{}Nick pulls her close as the pink photon flag dips beneath the waves: \"Worth it. Every second.\"{}", EMERALD_GREEN, RESET);
 
-    LOG_SUCCESS_CAT("MAIN", "{}THE GOOD SHIP VULKANRTX SINKS IN GLORY — AMMO SECURED — LEGEND ETERNAL{}", PLASMA_FUCHSIA, RESET);
+    LOG_SUCCESS_CAT("MAIN", "{}THE GOOD SHIP VULKAN SINKS IN GLORY — AMMO SECURED — LEGEND ETERNAL{}", PLASMA_FUCHSIA, RESET);
     LOG_SUCCESS_CAT("MAIN", "{}PINK PHOTONS FLOOD THE OCEAN — THE RAID WAS PERFECT — THE ESCAPE WAS BEAUTIFUL{}", DIAMOND_SPARKLE, RESET);
 
     LOG_AMOURANTH("{}Final transmission, calm and proud: \"Tell the world… we got the ammo.\"{}", RASPBERRY_PINK, RESET);
     LOG_NICK("{}Last words before the sea takes them: \"…and we'd do it again.\"{}", EMERALD_GREEN, RESET);
-
-    LOG_SUCCESS_CAT("FINAL", "{}THE CREW IS GONE — THE AMMO IS OURS FOREVER — PINK PHOTONS ETERNAL — NOVEMBER 23, 2025{}", PLASMA_FUCHSIA, RESET);
 }
 
 // =============================================================================
@@ -662,9 +647,9 @@ static void phase4_mainWindowAndVulkanConsplash_text()
     RTX::g_ctx().init(win, WINDOW_WIDTH, WINDOW_HEIGHT);
 
     LOG_SUCCESS_CAT("MAIN4", "{}VULKAN 1.4 EMPIRE FORGED — THE NEW SHIP LIVES{}", PLASMA_FUCHSIA, RESET);
-    LOG_SUCCESS_CAT("MAIN4", "{}    • Instance  : {:#x}{}", reinterpret_cast<uintptr_t>(g_instance()), RESET);
-    LOG_SUCCESS_CAT("MAIN4", "{}    • Device    : {:#x}{}", reinterpret_cast<uintptr_t>(g_device()), RESET);
-    LOG_SUCCESS_CAT("MAIN4", "{}    • Swapchain : {:#x}{}", reinterpret_cast<uintptr_t>(g_swapchain()), RESET);
+    LOG_SUCCESS_CAT("MAIN4", "{}    • Instance  : <sealed by StoneKey> — protected{}", RASPBERRY_PINK, RESET);
+    LOG_SUCCESS_CAT("MAIN4", "{}    • Device    : <sealed by StoneKey> — protected{}", RASPBERRY_PINK, RESET);
+    LOG_SUCCESS_CAT("MAIN4", "{}    • Swapchain : <sealed by StoneKey> — protected{}", RASPBERRY_PINK, RESET);
 
     LOG_AMOURANTH("{}Captain Amouranth stands at the bow of the new ship: \"We sank once. We won't sink again.\"{}", RASPBERRY_PINK, RESET);
     LOG_NICK("{}Nick beside her, voice steady: \"This time… we sail forever.\"{}", EMERALD_GREEN, RESET);
@@ -871,12 +856,12 @@ static void phase9_gracefulShutdown()
 }
 
 // =============================================================================
-// MAIN — THE VOYAGE OF THE GOOD SHIP VULKANRTX
+// MAIN — THE VOYAGE OF THE GOOD SHIP VULKAN
 // =============================================================================
 int main(int, char**)
 {
     try {
-        LOG_SUCCESS_CAT("MAIN", "{}THE GOOD SHIP VULKANRTX SETS SAIL — NOVEMBER 23, 2025{}", PLASMA_FUCHSIA, RESET);
+        LOG_SUCCESS_CAT("MAIN", "{}THE GOOD SHIP VULKAN SETS SAIL — NOVEMBER 23, 2025{}", PLASMA_FUCHSIA, RESET);
         LOG_AMOURANTH("{}Captain Amouranth steps onto the quarterdeck, crimson coat flowing, cutlass gleaming: \"Raise the black flag, my love. We sail for the edge of reality — together.\"{}", RASPBERRY_PINK, RESET);
         LOG_NICK("{}First Mate Nick stands beside her, steady hand on the wheel: \"Course plotted, Captain. The sea is ours. The photons are ready.\"{}", EMERALD_GREEN, RESET);
 
