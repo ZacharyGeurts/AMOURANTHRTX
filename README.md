@@ -1,8 +1,9 @@
 ```
+# CAUTION: WE WILL CLEAR YOUR TERMINAL SCREEN
 git clone https://github.com/ZacharyGeurts/AMOURANTHRTX
 cd AMOURANTHRTX
 chmod +x linux.sh
-./linux.sh --help # incremental build system
+./linux.sh --help
 ```
 Currently compiles and reaches render loop. Much more work needed yet.  
 Working prototype expected Christmas 2025.  
