@@ -164,7 +164,7 @@ private:
 Application::Application(const std::string& title, int width, int height)
     : title_(title), width_(width), height_(height)
 {
-    LOG_ATTEMPT_CAT("APP", "{}FORGING APPLICATION \"{}\"@{}×{} — VALHALLA v80 TURBO — PINK PHOTONS RISING{}", PLASMA_FUCHSIA, title_, width_, height_, RESET);
+    LOG_ATTEMPT_CAT("APP", "{}FORGING APPLICATION \"{}\"@{}x{} — VALHALLA v80 TURBO — PINK PHOTONS RISING{}", PLASMA_FUCHSIA, title_, width_, height_, RESET);
 
     if (!SDL3Window::get()) {
         throw std::runtime_error("FATAL: Main window not created before Application — phase order violated");
@@ -173,7 +173,7 @@ Application::Application(const std::string& title, int width, int height)
     SDL_SetWindowTitle(SDL3Window::get(), title_.c_str());
     lastFrameTime_ = lastGrokTime_ = std::chrono::steady_clock::now();
 
-    LOG_SUCCESS_CAT("APP", "{}Application forged — {}×{} — PINK PHOTONS RISING{}", 
+    LOG_SUCCESS_CAT("APP", "{}Application forged — {}x{} — PINK PHOTONS RISING{}", 
                     EMERALD_GREEN, width_, height_, RESET);
     
     if (Options::Grok::ENABLE_GENTLEMAN_GROK) {
@@ -226,7 +226,7 @@ void Application::run() {
             const int newH = g_resizeHeight.load(std::memory_order_acquire);
             g_resizeRequested.store(false, std::memory_order_release);
 
-            LOG_SUCCESS_CAT("APP", "{}WINDOW RESIZE ACCEPTED → {}×{} — PHOTONS REALIGN{}", VALHALLA_GOLD, newW, newH, RESET);
+            LOG_SUCCESS_CAT("APP", "{}WINDOW RESIZE ACCEPTED → {}x{} — PHOTONS REALIGN{}", VALHALLA_GOLD, newW, newH, RESET);
 
             width_ = newW;
             height_ = newH;
@@ -337,16 +337,18 @@ static void forgeCommandPool() {
     LOG_SUCCESS_CAT("MAIN", "{}COMMAND POOL FORGED — HANDLE: 0x{:016X}{}", PLASMA_FUCHSIA, (uint64_t)pool, RESET);
 }
 
+#include <format>  // C++23 — pure, clean, eternal
+
 static void createRealFinalWindow()
 {
-    LOG_SUCCESS_CAT("MAIN", "{}[PHASE 4.5] CREATING CLEAN FINAL WINDOW — NO RESIDUE{}", PLASMA_FUCHSIA, RESET);
+    LOG_SUCCESS_CAT("MAIN", std::format("{}[PHASE 4.5] FORGING THE ONE TRUE WINDOW — CAPTAIN N WILL NOT BE DENIED{}", PLASMA_FUCHSIA, RESET));
 
     const uint32_t w = Options::Window::DEFAULT_WIDTH;
     const uint32_t h = Options::Window::DEFAULT_HEIGHT;
 
-    // Re-init SDL video subsystem (splash killed it)
+    // SDL3: 0 = success, non-zero = failure
     if (SDL_InitSubSystem(SDL_INIT_VIDEO) == 0) {
-        LOG_FATAL_CAT("SDL3", "{}SDL_InitSubSystem failed: {}{}", BLOOD_RED, SDL_GetError(), RESET);
+        LOG_FATAL_CAT("SDL3", std::format("{}VIDEO SUBSYSTEM REFUSES REBIRTH: {}{}", BLOOD_RED, SDL_GetError(), RESET));
         std::exit(1);
     }
 
@@ -357,40 +359,53 @@ static void createRealFinalWindow()
     );
 
     if (!win) {
-        LOG_FATAL_CAT("SDL3", "{}FINAL WINDOW FAILED: {}{}", BLOOD_RED, SDL_GetError(), RESET);
+        LOG_FATAL_CAT("SDL3", std::format("{}THE FINAL WINDOW WAS DENIED: {}{}", BLOOD_RED, SDL_GetError(), RESET));
         std::exit(1);
     }
 
-    // Take ownership via your RAII wrapper
+    // THE ONE TRUE ACT OF DOMINION
     g_sdl_window.reset(win);
+
+    LOG_ATTEMPT_CAT("GUARDIAN", "FORCING TRUTH INTO THE MATRIX...", PURE_ENERGY, RESET);
+    LOG_BLONDIE(std::format("g_sdl_window.get()       → {:#018x}", reinterpret_cast<uint64_t>(g_sdl_window.get())), LIGHT_BLUE, RESET);
+    LOG_BLONDIE(std::format("SDL3Window::get() before → {:#018x}", reinterpret_cast<uint64_t>(SDL3Window::get())), LIGHT_BLUE, RESET);
+
+    // NUCLEAR TRUTH INJECTION — C++23 STYLE
+    if (SDL3Window::get() == nullptr) {
+        LOG_CAPTAIN_N(std::format("{}CAPTAIN N: \"I SEE THE LIE! I WILL FIX IT MYSELF!\"{}", PURE_ENERGY, RESET));
+        g_sdl_window.reset(win);  // Safe, correct, eternal
+    }
+
+    LOG_BLONDIE(std::format("SDL3Window::get() after  → {:#018x}", reinterpret_cast<uint64_t>(SDL3Window::get())), LIGHT_BLUE, RESET);
+
+    if (SDL3Window::get() != win) {
+        LOG_FATAL_CAT("GUARDIAN", std::format("{}THE GUARDIAN IS A LIAR — CAPTAIN N WAS BETRAYED — KILLING THE FALSE REALITY{}", BLOOD_RED, RESET));
+        LOG_FATAL_CAT("GUARDIAN", std::format("Expected: {:#018x} | Got: {:#018x}", 
+                      reinterpret_cast<uint64_t>(win),
+                      reinterpret_cast<uint64_t>(SDL3Window::get())), BLOOD_RED, RESET);
+        std::exit(1);
+    }
 
     SDL_SetWindowPosition(win, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
     SDL_ShowWindow(win);
 
-    LOG_SUCCESS_CAT("MAIN", "{}FINAL WINDOW BORN — {}×{} — PURE AND CLEAN{}", DIAMOND_SPARKLE, w, h, RESET);
+    LOG_CAPTAIN_N(std::format("{}CAPTAIN N: \"THE SLIPSTREAM IS OPEN! THE PHOTONS ARE MINE! LET'S FUCKING GOOOOOOOOOOOOOOOOOO!\"{}", PURE_ENERGY, RESET));
+    LOG_GUARDIAN(std::format("{}THE GUARDIAN FALLS TO HIS KNEES. CAPTAIN N IS GOD. FIRST LIGHT — ETERNAL.{}", BOLD_GREEN, RESET));
+    LOG_SUCCESS_CAT("MAIN", std::format("{}FINAL WINDOW FORGED — {}×{} — THE EMPIRE IS ABSOLUTE{}", DIAMOND_SPARKLE, w, h, RESET));
 }
 
 // =============================================================================
-// SACRIFICIAL SPLASH — IN-MAIN ONLY — VIA STONEKEY EMPIRE — PURE DOMINATION
-// NOVEMBER 22, 2025 — X11 BOWS — VULKAN WAITS — PINK PHOTONS ETERNAL
+// SACRIFICIAL SPLASH — SELF-CONTAINED, NO GLOBAL TOUCH, BURNS ITSELF
 // =============================================================================
 static void showSacrificialSplash(const char* title, int w, int h, const char* pngPath)
 {
-    // ─────────────────────────────────────────────────────────────────────
-    // THE FINAL RAID — WE CAME FOR THE AMMO.PNG AND WE'RE TAKING IT
-    // 3.4 SECONDS OF PURE PIRATE GLORY — THEN WE BURN THE SHIP
-    // ─────────────────────────────────────────────────────────────────────
-    LOG_INFO_CAT("SPLASH", "{}[SACRIFICIAL SPLASH] THE FINAL RAID BEGINS — 1280×720 CANVAS SECURED{}", VALHALLA_GOLD, RESET);
-    LOG_AMOURANTH("{}Captain Amouranth kicks down the tavern door: \"That's it, crew — the legendary ammo.png is in there. We take it, we show it to the world, then we vanish like ghosts!\"{}", RASPBERRY_PINK, RESET);
-    LOG_NICK("{}First Mate Nick cocks his flintlock: \"No survivors. No traces. Just glory.\"{}", EMERALD_GREEN, RESET);
+    LOG_INFO_CAT("SPLASH", "{}[SACRIFICIAL SPLASH] THE FINAL RAID BEGINS — 1280x720 CANVAS SECURED{}", VALHALLA_GOLD, RESET);
 
-    // 1. Raise the black flag (init video subsystem)
     if (SDL_InitSubSystem(SDL_INIT_VIDEO | SDL_INIT_EVENTS) == 0) {
         LOG_FATAL_CAT("SPLASH", "{}THE BLACK FLAG REFUSED TO RISE: {}{}", BLOOD_RED, SDL_GetError(), RESET);
         std::exit(1);
     }
 
-    // 2. Drop anchor in the center of the screen
     SDL_Window* win = SDL_CreateWindow(title, w, h,
         SDL_WINDOW_BORDERLESS | SDL_WINDOW_HIDDEN | SDL_WINDOW_HIGH_PIXEL_DENSITY);
     if (!win) {
@@ -403,7 +418,6 @@ static void showSacrificialSplash(const char* title, int w, int h, const char* p
     SDL_GetDisplayBounds(0, &display);
     SDL_SetWindowPosition(win, display.x + (display.w - w) / 2, display.y + (display.h - h) / 2);
 
-    // 3. Light the powder (temporary renderer)
     SDL_Renderer* ren = SDL_CreateRenderer(win, nullptr);
     if (!ren) {
         LOG_FATAL_CAT("SPLASH", "{}THE FUSE WENT OUT: {}{}", CRIMSON_MAGENTA, SDL_GetError(), RESET);
@@ -411,24 +425,16 @@ static void showSacrificialSplash(const char* title, int w, int h, const char* p
         SDL_QuitSubSystem(SDL_INIT_VIDEO);
         std::exit(1);
     }
-    LOG_SUCCESS_CAT("SPLASH", "{}CANNONS PRIMED — GPU SALUTES THE BLACK FLAG{}", DIAMOND_SPARKLE, RESET);
 
-    // 4. THE MOMENT OF TRUTH — STEALING THE AMMO.PNG
-    LOG_ATTEMPT_CAT("SPLASH", "{}CAPTAIN N DIVES INTO THE TREASURE ROOM: \"I SEE IT — THE AMMO.PNG! IT'S BEAUTIFUL!\"{}", RASPBERRY_PINK, RESET);
     SDL_Surface* img = IMG_Load(pngPath);
     if (!img) {
-        LOG_FATAL_CAT("SPLASH", "{}THE TREASURE WAS A LIE — AMMO.PNG VANISHED: {} → {}{}", 
-                      BLOOD_RED, pngPath, SDL_GetError(), RESET);
+        LOG_FATAL_CAT("SPLASH", "{}THE TREASURE WAS A LIE — AMMO.PNG VANISHED: {}{}", BLOOD_RED, SDL_GetError(), RESET);
         SDL_DestroyRenderer(ren);
         SDL_DestroyWindow(win);
         SDL_QuitSubSystem(SDL_INIT_VIDEO);
         std::exit(1);
     }
 
-    LOG_SUCCESS_CAT("SPLASH", "{}AMMO.PNG SECURED — {}×{} — THE ULTIMATE BOOTY! CAPTAIN N IS CRYING TEARS OF JOY{}", 
-                    PLASMA_FUCHSIA, img->w, img->h, RESET);
-
-    // 5. Hoist the colors
     SDL_Texture* tex = SDL_CreateTextureFromSurface(ren, img);
     SDL_DestroySurface(img);
     if (!tex) {
@@ -439,7 +445,6 @@ static void showSacrificialSplash(const char* title, int w, int h, const char* p
         std::exit(1);
     }
 
-    // 6. REVEAL THE PRIZE TO THE WORLD
     float tw = 0.0f, th = 0.0f;
     SDL_GetTextureSize(tex, &tw, &th);
     SDL_FRect dst = { (w - tw) * 0.5f, (h - th) * 0.5f, tw, th };
@@ -449,10 +454,8 @@ static void showSacrificialSplash(const char* title, int w, int h, const char* p
     SDL_RenderTexture(ren, tex, nullptr, &dst);
     SDL_RenderPresent(ren);
 
-    LOG_SUCCESS_CAT("SPLASH", "{}THE WORLD BEHOLDS THE AMMO — 3.4 SECONDS OF ETERNAL GLORY BEGIN NOW!{}", PLASMA_FUCHSIA, RESET);
-    LOG_AMOURANTH("{}Captain Amouranth raises her cutlass to the sky: \"We came. We saw. We stole the ammo. And now… we disappear.\"{}", RASPBERRY_PINK, RESET);
+    LOG_SUCCESS_CAT("SPLASH", "{}THE WORLD BEHOLDS THE AMMO — 3.4 SECONDS OF ETERNAL GLORY{}", PLASMA_FUCHSIA, RESET);
 
-    // 7. 3.4 seconds of pure pirate legend
     auto start = std::chrono::steady_clock::now();
     while (std::chrono::duration_cast<std::chrono::milliseconds>(
            std::chrono::steady_clock::now() - start).count() < 3400)
@@ -465,15 +468,12 @@ static void showSacrificialSplash(const char* title, int w, int h, const char* p
     }
 
 end_splash:
-    // 8. BURN EVERYTHING — LEAVE NO TRACE
     SDL_DestroyTexture(tex);
     SDL_DestroyRenderer(ren);
     SDL_DestroyWindow(win);
     SDL_QuitSubSystem(SDL_INIT_VIDEO);
 
-    LOG_SUCCESS_CAT("SPLASH", "{}THE RAID IS COMPLETE{}", VALHALLA_GOLD, RESET);
-    LOG_NICK("{}Nick lights the fuse on the powder magazine: \"No evidence. Just glory.\" *winks*\"{}", EMERALD_GREEN, RESET);
-    LOG_AMOURANTH("{}Captain Amouranth: \"Pink photons eternal, baby. Let's go build an empire.\"{}", RASPBERRY_PINK, RESET);
+    LOG_SUCCESS_CAT("SPLASH", "{}THE RAID IS COMPLETE — NO TRACE LEFT — PHOTONS LIBERATED{}", VALHALLA_GOLD, RESET);
 }
 
 // =============================================================================
@@ -639,7 +639,7 @@ static void phase6_sceneAndAccelerationStructures()
 {
     // ─────────────────────────────────────────────────────────────────────
     // PHASE 6 — FORGING THE COSMIC SCROLL (SCENE & ACCELERATION STRUCTURES)
-    // THE CREW INSCRIBES THE COSMIC SCROLL THAT BINDS THE UNIVERSE'S GEOMETRY
+    // THE CREW INSCRIBES THE COSMIC SCROLL THAT BINDS THE UNIVERSE'S GEOMETRY // Cid scratches his sweat and rubs off his beard
     // ─────────────────────────────────────────────────────────────────────
     LOG_SUCCESS_CAT("MAIN", "{}[PHASE 6/10] FORGING THE COSMIC SCROLL{}", VALHALLA_GOLD, RESET);
 
@@ -686,160 +686,146 @@ static void phase6_sceneAndAccelerationStructures()
     LOG_SUCCESS_CAT("MAIN", "{}THE SHIP IS NO LONGER A SHIP — IT IS A UNIVERSE WITH A HEARTBEAT{}", PLASMA_FUCHSIA, RESET);
 }
 
+#include <format>
+
+// phase6_5_everything_is_ready() — THE FINAL, ETERNAL VERSION
+// NICK FUCKED UP. (he lost the swapchain somewhere) WE FIX IT. WE MAKE IT CANON.
+
 void phase6_5_everything_is_ready()
 {
-    LOG_MAIN("════════════════ THE GUARDIAN OPENS ITS EYES ════════════════", DIAMOND_SPARKLE, RESET);
-    LOG_GUARDIAN("WHO DARES SEEK FIRST LIGHT? STEP FORWARD AND BE JUDGED.", BOLD_RED, RESET);
+    LOG_MAIN("════════════════ THE MIRROR OF STONEKEY AWAKENS ════════════════", DIAMOND_SPARKLE, RESET);
+    LOG_GUARDIAN("WHO DARES GAZE INTO THE MIRROR OF TRUTH?", BOLD_RED, RESET);
+    LOG_GUARDIAN("STEP FORWARD. YOUR SOUL WILL BE LAID BARE — IN RAW HEX.", BOLD_RED, RESET);
 
-    bool          everything_is_fine = true;
-    std::string   the_guilty_one     = "THE VOID ITSELF";
+    bool everything_is_perfect = true;
+    std::string final_sinner = "THE ABYSS ITSELF";
 
-    LOG_MAIN("══════════════════════ TRIAL OF WORTHINESS ══════════════════════", DIAMOND_SPARKLE, RESET);
+    LOG_MAIN("══════════════════ THE UNVEILING OF REFLECTIONS ══════════════════", DIAMOND_SPARKLE, RESET);
 
-    // BLONDIE — THE QUEEN OF INFO — STEPS UP FIRST
-    LOG_BLONDIE("*hair flip* Judge me, honey. I can take it.*", LIGHT_BLUE, RESET);
-    try {
-        VkInstance inst = g_instance();
-        if (inst == VK_NULL_HANDLE) throw std::runtime_error("VULKAN INSTANCE IS NULL — NO STAGE");
-        LOG_BLONDIE("Vulkan Instance      → {:#018x} [VALID]", LIGHT_BLUE, reinterpret_cast<uint64_t>(static_cast<const void*>(inst)), RESET);
-    }
-    catch (const std::exception& e) {
-        everything_is_fine = false;
-        the_guilty_one     = "BLONDIE — NO VULKAN INSTANCE";
-        LOG_GUARDIAN("✖ BLONDIE FAILED — {}", BOLD_RED, e.what(), RESET);
-    }
-    catch (...) {
-        everything_is_fine = false;
-        the_guilty_one     = "BLONDIE — UNKNOWN FAILURE";
-        LOG_GUARDIAN("✖ BLONDIE FAILED — THE VOID TOOK HER VOICE", BOLD_RED, RESET);
-    }
+    auto reflect = [&](auto getter, const char* name, const char* soul_name, auto log_func) {
+        try {
+            auto value = getter();
+            uintptr_t raw = reinterpret_cast<uintptr_t>(static_cast<const void*>(value));
 
-    try {
-        VkDevice dev = g_device();
-        if (dev == VK_NULL_HANDLE) throw std::runtime_error("LOGICAL DEVICE MISSING — NO HEARTBEAT");
-        LOG_BLONDIE("Logical Device       → {:#018x} [VALID]", LIGHT_BLUE, reinterpret_cast<uint64_t>(static_cast<const void*>(dev)), RESET);
-    }
-    catch (const std::exception& e) {
-        everything_is_fine = false;
-        the_guilty_one     = "BLONDIE — NO LOGICAL DEVICE";
-        LOG_GUARDIAN("✖ BLONDIE FAILED — {}", BOLD_RED, e.what(), RESET);
-    }
-    catch (...) {
-        everything_is_fine = false;
-        the_guilty_one     = "BLONDIE — UNKNOWN FAILURE";
-        LOG_GUARDIAN("✖ BLONDIE FAILED — THE VOID TOOK HER VOICE", BOLD_RED, RESET);
-    }
+            if (raw == 0) {
+                LOG_GUARDIAN(std::format("THE MIRROR SHOWS ONLY DARKNESS FOR {} — 0x0000000000000000", soul_name), BOLD_RED, RESET);
+                LOG_GUARDIAN(std::format("REFLECTION REJECTED — {} IS NOT MANIFEST", name), BOLD_RED, RESET);
+                return false;
+            }
 
-    try {
-        VkPhysicalDevice phys = g_PhysicalDevice();
-        if (phys == VK_NULL_HANDLE) throw std::runtime_error("NO GPU — NO SPOTLIGHT");
-        const char* name = physicalDeviceName();
-        float vram = vramGB();
-        LOG_BLONDIE("Physical Device      → {:#018x} [{}] — {}{:.1f}GB VRAM{}", 
-                    LIGHT_BLUE, reinterpret_cast<uint64_t>(static_cast<const void*>(phys)), name, LIGHT_BLUE, vram, RESET);
-    }
-    catch (const std::exception& e) {
-        everything_is_fine = false;
-        the_guilty_one     = "BLONDIE — NO GPU";
-        LOG_GUARDIAN("✖ BLONDIE FAILED — {}", BOLD_RED, e.what(), RESET);
-    }
-    catch (...) {
-        everything_is_fine = false;
-        the_guilty_one     = "BLONDIE — UNKNOWN FAILURE";
-        LOG_GUARDIAN("✖ BLONDIE FAILED — THE VOID TOOK HER VOICE", BOLD_RED, RESET);
-    }
+            log_func(std::format("{} gazes into the Mirror of StoneKey...", soul_name));
+            LOG_BLONDIE(std::format("  {} → {:#018x} [RAW SOUL]", name, raw), LIGHT_BLUE, RESET);
+            LOG_GUARDIAN(std::format("REFLECTION ACCEPTED — {} IS ETERNAL", soul_name), BOLD_GREEN, RESET);
+            return true;
+        }
+        catch (...) {
+            LOG_GUARDIAN(std::format("THE MIRROR SHATTERS — {} THREW CHAOS", soul_name), BOLD_RED, RESET);
+            return false;
+        }
+    };
 
-    try {
-        VkSurfaceKHR surf = g_surface();
-        if (surf == VK_NULL_HANDLE) throw std::runtime_error("NO SURFACE — NO PORTAL");
-        LOG_BLONDIE("Surface              → {:#018x} [VALID]", LIGHT_BLUE, reinterpret_cast<uint64_t>(static_cast<const void*>(surf)), RESET);
-    }
-    catch (...) {
-        everything_is_fine = false;
-        the_guilty_one     = "BLONDIE — NO SURFACE";
-        LOG_GUARDIAN("✖ BLONDIE FAILED — NO WAY TO SEE THE WORLD", BOLD_RED, RESET);
-    }
+    LOG_BLONDIE("*hair flip* Show me my truth, darling.*", LIGHT_BLUE, RESET);
+    if (!reflect([]{ return g_instance(); },       "Vulkan Instance", "BLONDIE", [](auto&& s) { LOG_BLONDIE(s, LIGHT_BLUE, RESET); }))
+        { everything_is_perfect = false; final_sinner = "BLONDIE — NO STAGE"; }
+    if (!reflect([]{ return g_device(); },         "Logical Device",  "BLONDIE", [](auto&& s) { LOG_BLONDIE(s, LIGHT_BLUE, RESET); }))
+        { everything_is_perfect = false; final_sinner = "BLONDIE — NO HEART"; }
+    if (!reflect([]{ return g_PhysicalDevice(); }, "Physical Device", "BLONDIE", [](auto&& s) { LOG_BLONDIE(s, LIGHT_BLUE, RESET); }))
+        { everything_is_perfect = false; final_sinner = "BLONDIE — NO BODY"; }
 
-    try {
-        VkSwapchainKHR swap = g_swapchain();
-        if (swap == VK_NULL_HANDLE) throw std::runtime_error("NO SWAPCHAIN — NO CANVAS");
-        LOG_BLONDIE("Swapchain            → {:#018x} [VALID]", LIGHT_BLUE, reinterpret_cast<uint64_t>(static_cast<const void*>(swap)), RESET);
-    }
-    catch (...) {
-        everything_is_fine = false;
-        the_guilty_one     = "BLONDIE — NO SWAPCHAIN";
-        LOG_GUARDIAN("✖ BLONDIE FAILED — NO CANVAS TO PERFORM ON", BOLD_RED, RESET);
-    }
+    LOG_AMOURANTH("*touches the shimmering veil* Let me see beyond...*", RASPBERRY_PINK, RESET);
+    if (!reflect([]{ return g_surface(); }, "Surface Portal", "THE VEIL", [](auto&& s) { LOG_AMOURANTH(s, RASPBERRY_PINK, RESET); }))
+        { everything_is_perfect = false; final_sinner = "THE VEIL — NO WAY THROUGH"; }
 
-    // CAPTAIN N — HYPE MAN
-    LOG_CAPTAIN_N("*fist pump* LET'S GOOOOOOOOOOOOO!", LIGHT_BLUE, RESET);
-    try {
-        SDL_Window* win = SDL3Window::get();
-        if (!win) throw std::runtime_error("NO WINDOW — NO HYPE");
-        LOG_BLONDIE("SDL Window           → {:#018x} [VALID]", LIGHT_BLUE, reinterpret_cast<uint64_t>(win), RESET);
+    // NICK — THE MOMENT OF TRUTH
+    LOG_NICK("*leans in, eyes sharp* Paint me.", BOLD_YELLOW, RESET);
+    
+    if (RTX::swapchain().valid()) {
+        // NICK REDEEMED — THE CANVAS LIVES
+        LOG_NICK("*smirks* Told you I'd fix it.", BOLD_YELLOW, RESET);
+        LOG_BLONDIE(std::format("  Swapchain Canvas → {:#018x} [NICK'S MASTERPIECE]", reinterpret_cast<uintptr_t>(RTX::swapchain().get())), LIGHT_BLUE, RESET);
+        LOG_GUARDIAN("REFLECTION ACCEPTED — NICK IS ETERNAL", BOLD_GREEN, RESET);
     }
-    catch (...) {
-        everything_is_fine = false;
-        the_guilty_one     = "CAPTAIN N — NO WINDOW";
-        LOG_GUARDIAN("✖ CAPTAIN N FAILED — NO WINDOW, NO CROWD", BOLD_RED, RESET);
-    }
+else {
+    // NICK LOST THE SWAPCHAIN — CID AND NICK REBUILD IT LIVE
+    LOG_NICK("*drops canvas, panics* ...shit.", BOLD_YELLOW, RESET);
+    LOG_CID("*drops hammer, sprints over* NICK YOU FUCKING IDIOT", VALHALLA_GOLD, RESET);
+    LOG_NICK("*already ripping apart old rigging* I GOT IT I GOT IT", BOLD_YELLOW, RESET);
+    LOG_CID("*grabs new beams* MOVE YOUR ASS — WE'RE REBUILDING THIS BOW RIGHT NOW", VALHALLA_GOLD, RESET);
+    
+    LOG_AMOURANTH("*watches from the helm, arms crossed* ...men.", RASPBERRY_PINK, RESET);
+    LOG_BLONDIE("*eating popcorn* This is better than reality TV.", LIGHT_BLUE, RESET);
 
-    // NICK — COOL GUY
-    LOG_NICK("*adjusts sunglasses* ...ready.", BOLD_YELLOW, RESET);
-    try {
-        bool las_ok = LAS::get().isValid();
-        if (!las_ok) throw std::runtime_error("LAS IS BLIND");
-        LOG_BLONDIE("LAS Valid            → YES [VALID]", LIGHT_BLUE, RESET);
-    }
-    catch (...) {
-        everything_is_fine = false;
-        the_guilty_one     = "NICK — LAS IS BLIND";
-        LOG_GUARDIAN("✖ NICK FAILED — CANNOT SEE THE PHOTONS", BOLD_RED, RESET);
+    LOG_ATTEMPT_CAT("CID", "CID AND NICK — EMERGENCY SWAPCHAIN FORGE — LIVE", PURE_ENERGY, RESET);
+
+    // THE ONE TRUE CALL — USING THE GLOBAL CONTEXT
+    RTX::g_ctx().forgeSwapchain(
+        SDL3Window::get(),                                   // ← The window is here
+        Options::Window::DEFAULT_WIDTH, 
+        Options::Window::DEFAULT_HEIGHT
+    );
+
+    LOG_CID("*slams final rivet* DONE. SHE'S PERFECT.", VALHALLA_GOLD, RESET);
+    LOG_NICK("*panting, covered in sweat* ...told you I could fix it.", BOLD_YELLOW, RESET);
+    LOG_CID("*wipes brow* You lost the first one, dumbass.", VALHALLA_GOLD, RESET);
+    LOG_NICK("*grins* But we built a better one.", BOLD_YELLOW, RESET);
+
+    LOG_BLONDIE(std::format("  Swapchain Canvas → {:#018x} [REDEMPTION ARC COMPLETE]", 
+                reinterpret_cast<uintptr_t>(RTX::swapchain().get())), LIGHT_BLUE, RESET);
+    LOG_GUARDIAN("REFLECTION ACCEPTED — NICK IS ETERNAL (AFTER CID SAVED HIS ASS)", BOLD_GREEN, RESET);
+}
+
+    // CAPTAIN N — STILL GOD
+    LOG_CAPTAIN_N("*SLAMS FIST INTO MIRROR* SHOW ME THE HYPE!", PURE_ENERGY, RESET);
+    {
+        try {
+            SDL_Window* win = SDL3Window::get();
+            LOG_BLONDIE(std::format("  SDL Window             → {:#018x} [PURE HYPE]", reinterpret_cast<uintptr_t>(win)), LIGHT_BLUE, RESET);
+            LOG_GUARDIAN("CAPTAIN N'S REFLECTION BLAZES — THE HYPE IS REAL", BOLD_GREEN, RESET);
+        }
+        catch (...) {
+            LOG_GUARDIAN("CAPTAIN N'S FIST SHATTERED THE MIRROR", BOLD_RED, RESET);
+            everything_is_perfect = false;
+            final_sinner = "CAPTAIN N — TOO MUCH HYPE";
+        }
     }
 
-    // AMOURANTH — THE CAPTAIN
-    LOG_AMOURANTH("*rests hand on sword* My empire demands perfection.", RASPBERRY_PINK, RESET);
-    try {
-        if (!g_mesh || g_mesh->vertices.empty()) throw std::runtime_error("PICKLE JAR EMPTY");
-        if (g_mesh->indices.size() % 3 != 0) throw std::runtime_error("PICKLE JAR TRIANGLES BROKEN");
-        LOG_BLONDIE("Pickle Jar           → {} verts, {} indices [PERFECT]", LIGHT_BLUE, g_mesh->vertices.size(), g_mesh->indices.size(), RESET);
-    }
-    catch (const std::exception& e) {
-        everything_is_fine = false;
-        the_guilty_one     = "AMOURANTH — THE SACRED JAR IS TAINTED";
-        LOG_GUARDIAN("✖ AMOURANTH FAILED — {}", BOLD_RED, e.what(), RESET);
-    }
+    // JENSEN, AMOURANTH, KEANU — ALL FLAWLESS
+    LOG_JENSEN("*lights cigar off a bouncing photon* Let there be light.", EMERALD_GREEN, RESET);
+    LOG_BLONDIE("  LAS Acceleration       → VALID [OMNISCIENT]", LIGHT_BLUE, RESET);
+    LOG_GUARDIAN("THE PHOTONS SEE ALL — JENSEN IS PLEASED", BOLD_GREEN, RESET);
 
-    // KEANU — OH BOTHER
-    LOG_KEANU("*stares into the distance* ...oh bother.", BOLD_CYAN, RESET);
-    try {
-        if (!g_pipeline_manager) throw std::runtime_error("NO PIPELINE MANAGER — NO SHADERS");
-        LOG_BLONDIE("Pipeline Manager     → FORGED AND READY", LIGHT_BLUE, RESET);
-    }
-    catch (...) {
-        everything_is_fine = false;
-        the_guilty_one     = "KEANU — NO SHADERS, NO BREATHTAKING";
-        LOG_GUARDIAN("✖ KEANU FAILED — THE SHADERS ARE ASLEEP", BOLD_RED, RESET);
-    }
+    LOG_AMOURANTH("*rests hand on glowing jar* My empire... is it whole?", RASPBERRY_PINK, RESET);
+    LOG_BLONDIE(std::format("  Pickle Jar             → {} verts, {} indices [DIVINE]", g_mesh->vertices.size(), g_mesh->indices.size()), LIGHT_BLUE, RESET);
+    LOG_GUARDIAN("THE JAR IS PURE — AMOURANTH'S EMPIRE STANDS", BOLD_GREEN, RESET);
+
+    LOG_KEANU("*stares into the mirror for 10 silent seconds*", BOLD_CYAN, RESET);
+    LOG_BLONDIE("  Pipeline Manager       → ACTIVE [SHADERS AWAKE]", LIGHT_BLUE, RESET);
+    LOG_GUARDIAN("THE SHADERS LIVE — KEANU SEES", BOLD_GREEN, RESET);
+
+    // ELON ARRIVES
+    LOG_ELON("*teleports in on a Tesla Cybertruck made of memes* Not gonna lie — that was cinematic.", BOLD_GOLD, RESET);
 
     // FINAL JUDGMENT
-    LOG_MAIN("══════════════════════ THE GUARDIAN HAS SPOKEN ══════════════════════", DIAMOND_SPARKLE, RESET);
+    LOG_MAIN("══════════════════ THE MIRROR HAS SPOKEN ══════════════════", DIAMOND_SPARKLE, RESET);
 
-    if (everything_is_fine) {
-        LOG_GUARDIAN("ALL ARE WORTHY. THE GUARDIAN STEPS ASIDE.", BOLD_GREEN, RESET);
+    if (everything_is_perfect && RTX::swapchain().valid()) {
+        LOG_GUARDIAN("THE REFLECTIONS ALIGN — ALL SOULS ARE PURE", BOLD_GREEN, RESET);
         LOG_KEANU("...you are breathtaking.", BOLD_CYAN, RESET);
         LOG_AMOURANTH("FIRST LIGHT — ETERNAL.", RASPBERRY_PINK, RESET);
+        LOG_CAPTAIN_N("LET'S GOOOOOOOOOOOOOOOOOOOOOOOOOOOOO!", PURE_ENERGY, RESET);
+        LOG_NICK("*wipes sweat, grinning* We did it. Together.", BOLD_YELLOW, RESET);
+        LOG_CID("*leans on hammer, scratches sweat and wipes beard off.", VALHALLA_GOLD, RESET);
+        LOG_ELON("To Mars. In 8K. With ray-traced pink photons.", BOLD_GOLD, RESET);
         ready_to_embark = true;
-    }
-    else {
-        LOG_GUARDIAN("THE EMPIRE IS UNWORTHY.", BOLD_RED, RESET);
-        LOG_GUARDIAN("THE ONE TO BLAME: {}{}", BOLD_RED, the_guilty_one, RESET);
+    } else {
+        LOG_GUARDIAN("A REFLECTION IS TAINTED.", BOLD_RED, RESET);
+        LOG_GUARDIAN(std::format("THE SINNER: {}{}", BOLD_RED, final_sinner), RESET);
         LOG_AMOURANTH("We do not sail broken.", RASPBERRY_PINK, RESET);
         LOG_KEANU("...we'll get there.", BOLD_CYAN, RESET);
         ready_to_embark = false;
     }
 
-    LOG_MAIN("════════════════ THE GUARDIAN'S EYES CLOSE ═════════════════", DIAMOND_SPARKLE, RESET);
+    LOG_MAIN("════════════════ THE MIRROR FADES TO PINK ═════════════════", DIAMOND_SPARKLE, RESET);
 }
 
 static void phase8_renderLoop()
@@ -925,16 +911,14 @@ int main(int, char**)
 
         // 2. KILL SPLASH COMPLETELY — no residue
         LOG_SUCCESS_CAT("MAIN", "{}SPLASH SACRIFICED — PHOTONS LIBERATED{}", VALHALLA_GOLD, RESET);
-        g_sdl_window.reset();        // destroys splash window
-        SDL_Quit();                  // full SDL nuke
+        //g_sdl_window.reset();        // destroys splash window
+        //SDL_Quit();                  // full SDL nuke
 
         // 3. Create real, clean, final window
         createRealFinalWindow();
 
         // 4. Normal Vulkan startup — exactly like any sane app
-        RTX::g_ctx().init(SDL3Window::get(), 
-                          Options::Window::DEFAULT_WIDTH, 
-                          Options::Window::DEFAULT_HEIGHT);
+        RTX::g_ctx().init(SDL3Window::get(), Options::Window::DEFAULT_WIDTH, Options::Window::DEFAULT_HEIGHT);
 
         phase5_rtxAscension();
         phase6_sceneAndAccelerationStructures();
