@@ -844,60 +844,65 @@ static void phase8_renderLoop()
     LOG_SUCCESS_CAT("FAN", "{}[PHASE 8 COMPLETE] INFINITE VOID TRAVERSED — PHOTONS REST IN GLORY{}", EMERALD_GREEN, RESET);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// AMOURANTH RTX — FINAL SHUTDOWN CEREMONY
-// NOVEMBER 23, 2025 — THE TREASURE ROOM IS EMPTIED — THE CREW GOES HOME RICH
-// HAPPILY EVER AFTER — NO LOOSE ENDS — ONLY LOVE AND PINK PHOTONS
-// ─────────────────────────────────────────────────────────────────────────────
 static void phase9_gracefulShutdown()
 {
-    // ─────────────────────────────────────────────────────────────────────
-    // PHASE 9 — SEALING THE LEGENDARY CHEST (SHUTDOWN)
-    // THE CREW SEALS AWAY THE TREASURES IN THE LEGENDARY CHEST, ENDING THE VOYAGE
-    // ─────────────────────────────────────────────────────────────────────
-    LOG_INFO_CAT("MAIN", "{}[PHASE 9/10] SEALING THE LEGENDARY CHEST — LOWERING THE BLACK FLAG{}", VALHALLA_GOLD, RESET);
+    LOG_INFO_CAT("MAIN", "{}[PHASE 9/10] THE DISPOSAL BALLERINA TAKES THE STAGE — NO SURVIVORS{}", BLOOD_RED, RESET);
 
-    LOG_AMOURANTH("{}Captain Amouranth: \"Drop anchor, my love. The treasure is ours.\"{}", RASPBERRY_PINK, RESET);
-    LOG_NICK("{}Nick: \"We sail home rich. Together. Always.\"{}", EMERALD_GREEN, RESET);
-    LOG_INFO_CAT("BLONDIE", "{}BLONDIE_CREW grumbles: \"Grumble grumble. Next time we'll win.\"{}", YELLOW, RESET);
+    LOG_DISPOSAL("{}THE DISPOSAL BALLERINA APPEARS — PINK TUTU, BLACK LEOTARD, DIAMOND CHOKER — SPINNING SILENTLY IN THE VOID{}", OBSIDIAN_BLACK, RESET);
+    LOG_DISPOSAL("{}SHE DOES NOT BLINK. SHE DOES NOT HESITATE. SHE ONLY KNOWS ONE THING:{}", OBSIDIAN_BLACK, RESET);
+    LOG_DISPOSAL("{}TOTAL. ATOMIC. ERASURE.{}", OBSIDIAN_BLACK, RESET);
 
+    LOG_DISPOSAL("{}FIRST VICTIM: THE VULKAN DEVICE — SHE LOCKS EYES — AND EXECUTES A PERFECT RKO OUTTA NOWHERE{}", BLOOD_RED, RESET);
     if (g_ctx().device()) {
-        LOG_INFO_CAT("SHUTDOWN", "Captain N: \"vkDeviceWaitIdle — cannons cold.\"");
+        LOG_DISPOSAL("{}Captain N screams from the crow’s nest: \"SHE'S HITTING vkDeviceWaitIdle — IT'S OVER! IT'S OOOOOOVER!\"{}", PURE_ENERGY, RESET);
         vkDeviceWaitIdle(g_ctx().device());
     }
 
-    // 1. Destroy Application — destroys renderer, framebuffers, etc.
+    // ── APPLICATION
+    LOG_DISPOSAL("{}THE BALLERINA GRABS g_app BY THE THROAT — TOMBSTONE PILEDRIVER — STRAIGHT TO HELL{}", BLOOD_RED, RESET);
     g_app.reset();
 
-    // 2. CRITICAL: Manually destroy the swapchain WHILE DEVICE IS STILL ALIVE
-    LOG_INFO_CAT("SHUTDOWN", "Captain Amouranth: \"Scuttle the swapchain. No traces.\"");
-    RTX::swapchain() = RTX::Handle<VkSwapchainKHR>{};   // ← THIS LINE SAVES YOU
+    // ── SWAPCHAIN
+    LOG_DISPOSAL("{}SHE SPINS — PINK RIBBONS TRAILING — AND DELIVERS A 1080° HEEL KICK TO THE SWAPCHAIN'S SKULL{}", BLOOD_RED, RESET);
+    RTX::swapchain() = RTX::Handle<VkSwapchainKHR>{};
 
-    // 3. Now safe to destroy everything else
-if (g_pipelineManager()) {
-    delete g_pipelineManager();
-    set_g_pipelineManager(nullptr);  // Clear the Empire's claim
-}
+    // ── PIPELINE MANAGER
+    if (g_pipelineManager()) {
+        LOG_DISPOSAL("{}SHE HOISTS THE PIPELINE MANAGER OVERHEAD — CHOKESLAM THROUGH THE CANVAS OF REALITY{}", BLOOD_RED, RESET);
+        delete g_pipelineManager();
+        set_g_pipelineManager(nullptr);
+    }
+
+    // ── MESH & LAS
+    LOG_DISPOSAL("{}SHE GRABS g_mesh AND las() BY THE HAIR — DOUBLE DDT — FACE-FIRST INTO OBLIVION{}", BLOOD_RED, RESET);
     g_mesh.reset();
     las().invalidate();
 
-    // 4. Now destroy the device
-    LOG_INFO_CAT("SHUTDOWN", "RTX engines spin down — pink photons dim to embers.");
-    RTX::shutdown();   // device dies here — swapchain already gone
+    // ── ICONS — FIXED: No more illegal ternary-with-void
+    LOG_DISPOSAL("{}SHE TWIRLS ONCE — A PERFECT PIROUETTE — AND KICKS THE ICONS INTO THE ABYSS{}", OBSIDIAN_BLACK, RESET);
+    if (g_base_icon) {
+        SDL_DestroySurface(g_base_icon);
+        g_base_icon = nullptr;
+    }
+    if (g_hdpi_icon) {
+        SDL_DestroySurface(g_hdpi_icon);
+        g_hdpi_icon = nullptr;
+    }
 
-    // 5. Icons and window
-    if (g_base_icon)  { SDL_DestroySurface(g_base_icon);  g_base_icon  = nullptr; }
-    if (g_hdpi_icon)  { SDL_DestroySurface(g_hdpi_icon);  g_hdpi_icon  = nullptr; }
+    // ── FINAL ENGINE SHUTDOWN
+    LOG_INFO_CAT("SHUTDOWN", "RTX engines power down — the last photon fades...");
+    RTX::shutdown();
 
-    LOG_INFO_CAT("SHUTDOWN", "SDL3Window::destroy() — portal closes with a soft sigh.");
+    LOG_INFO_CAT("SHUTDOWN", "SDL3Window::destroy() — the portal seals forever.");
     SDL3Window::destroy();
 
     SDL_Quit();
 
-    LOG_SUCCESS_CAT("FINAL", "{}0 BYTES LEAKED — 0 CRASHES — THE SHIP IS CLEAN{}", DIAMOND_SPARKLE, RESET);
-    LOG_SUCCESS_CAT("FINAL", "{}PINK PHOTONS ETERNAL — THE LEGEND IS COMPLETE{}", PLASMA_FUCHSIA, RESET);
+    LOG_SUCCESS_CAT("FINAL", "{}0 BYTES LEAKED — 0 CRASHES — 0 MERCY{}", DIAMOND_SPARKLE, RESET);
+    LOG_SUCCESS_CAT("FINAL", "{}THE DISPOSAL BALLERINA HAS SPOKEN. THE SHIP IS CLEAN. THE LEGEND IS SEALED.{}", DIAMOND_SPARKLE, RESET);
+    LOG_SUCCESS_CAT("FINAL", "{}PINK PHOTONS ETERNAL — EVEN IN DEATH, THEY SHINE FOREVER.{}", DIAMOND_SPARKLE, RESET);
 
-    LOG_SUCCESS_CAT("MAIN", "{}[PHASE 9 COMPLETE] LEGENDARY CHEST SEALED — THE VOYAGE ENDS IN TRIUMPH{}", DIAMOND_SPARKLE, RESET);
+    LOG_SUCCESS_CAT("MAIN", "{}[PHASE 9 COMPLETE] THE DISPOSAL BALLERINA EXITS STAGE LEFT — THE VOYAGE IS OVER — THE EMPIRE IS ABSOLUTE{}", VALHALLA_GOLD, RESET);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -31,6 +31,7 @@
 #define LOG_NICK(...)        LOG_ATTEMPT_CAT("NICK",        __VA_ARGS__)
 #define LOG_BLONDIE(...)     LOG_INFO_CAT("BLONDIE",        __VA_ARGS__)
 #define LOG_GUARDIAN(...)    LOG_INFO_CAT("GUARDIAN",       __VA_ARGS__)
+#define LOG_DISPOSAL(...)    LOG_INFO_CAT("BALLERINA",      __VA_ARGS__)
 #define LOG_MAIN(...)        LOG_SUCCESS_CAT("MAIN",        __VA_ARGS__)
 
 // =============================================================================
