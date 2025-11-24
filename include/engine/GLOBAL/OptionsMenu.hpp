@@ -118,7 +118,7 @@ namespace Debug {
     constexpr bool     ENABLE_DEBUG_VISUALIZATION  = false;
     constexpr uint32_t DEBUG_VISUALIZATION_MODE    = 0;
 	constexpr bool     ENABLE_CELEBRATION_MODE     = true;
-    static inline constexpr bool ENABLE_VALIDATION_LAYERS = false; // always never turn this off/on (debug no rtx on x11)
+    static inline constexpr bool ENABLE_VALIDATION_LAYERS = true; // always never turn this off/on (debug no rtx on x11)
 }
 
 // ── TONEMAPPING & COLOR GRADING ───────────────────────────────────────────────

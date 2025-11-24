@@ -6,7 +6,7 @@
 #pragma once
 
 #include "engine/GLOBAL/RTXHandler.hpp"   // ← Brings in RTX::Handle + g_ctx()
-#include "engine/GLOBAL/StoneKey.hpp"     // ← g_device(), g_instance(), etc.
+#include "engine/GLOBAL/StoneKey.hpp"     // ← stone_device(), stone_instance(), etc.
 #include <vulkan/vulkan.h>
 #include <glm/glm.hpp>
 #include <chrono>

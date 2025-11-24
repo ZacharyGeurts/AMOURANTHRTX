@@ -29,7 +29,7 @@ RenderMode9::RenderMode9(VulkanRTX& rtx, uint32_t width, uint32_t height)
 
 RenderMode9::~RenderMode9()
 {
-    vkDeviceWaitIdle(g_ctx().device());
+    vkDeviceWaitIdle(stone_device());
 
     rtx_.updateRTXDescriptors(0,
         VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,
@@ -127,7 +127,7 @@ void RenderMode9::onResize(uint32_t width, uint32_t height)
 {
     LOG_INFO_CAT("RenderMode9", "onResize() {}x{} — Re-ascending...", width, height);
 
-    vkDeviceWaitIdle(g_ctx().device());
+    vkDeviceWaitIdle(stone_device());
 
     rtx_.updateRTXDescriptors(0, VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,
                               VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,

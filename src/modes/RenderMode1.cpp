@@ -100,40 +100,40 @@ void RenderMode1::initResources() {
     // Accum Image
     imgInfo.format = VK_FORMAT_R32G32B32A32_SFLOAT;
     imgInfo.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
-    VkImage rawImg; vkCreateImage(g_device(), &imgInfo, nullptr, &rawImg);
-    accumImage_ = RTX::Handle<VkImage>(rawImg, g_device(), vkDestroyImage, 0, "AccumImg");
+    VkImage rawImg; vkCreateImage(stone_device(), &imgInfo, nullptr, &rawImg);
+    accumImage_ = RTX::Handle<VkImage>(rawImg, stone_device(), vkDestroyImage, 0, "AccumImg");
 
-    VkMemoryRequirements memReqs; vkGetImageMemoryRequirements(g_device(), rawImg, &memReqs);
-    uint32_t memType = g_pipelineManager()->findMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    VkMemoryRequirements memReqs; vkGetImageMemoryRequirements(stone_device(), rawImg, &memReqs);
+    uint32_t memType = stone_pipeline()->findMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
     VkMemoryAllocateInfo alloc{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, nullptr, memReqs.size, memType};
-    VkDeviceMemory mem; vkAllocateMemory(g_device(), &alloc, nullptr, &mem);
-    vkBindImageMemory(g_device(), rawImg, mem, 0);
-    accumMem_ = RTX::Handle<VkDeviceMemory>(mem, g_device(), vkFreeMemory, memReqs.size, "AccumMem");
+    VkDeviceMemory mem; vkAllocateMemory(stone_device(), &alloc, nullptr, &mem);
+    vkBindImageMemory(stone_device(), rawImg, mem, 0);
+    accumMem_ = RTX::Handle<VkDeviceMemory>(mem, stone_device(), vkFreeMemory, memReqs.size, "AccumMem");
 
     VkImageViewCreateInfo viewInfo{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
     viewInfo.image = rawImg;
     viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
     viewInfo.format = imgInfo.format;
     viewInfo.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-    VkImageView view; vkCreateImageView(g_device(), &viewInfo, nullptr, &view);
-    accumView_ = RTX::Handle<VkImageView>(view, g_device(), vkDestroyImageView, 0, "AccumView");
+    VkImageView view; vkCreateImageView(stone_device(), &viewInfo, nullptr, &view);
+    accumView_ = RTX::Handle<VkImageView>(view, stone_device(), vkDestroyImageView, 0, "AccumView");
 
     // Output Image
     imgInfo.format = VK_FORMAT_R8G8B8A8_UNORM;
     imgInfo.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-    vkCreateImage(g_device(), &imgInfo, nullptr, &rawImg);
-    outputImage_ = RTX::Handle<VkImage>(rawImg, g_device(), vkDestroyImage, 0, "OutputImg");
+    vkCreateImage(stone_device(), &imgInfo, nullptr, &rawImg);
+    outputImage_ = RTX::Handle<VkImage>(rawImg, stone_device(), vkDestroyImage, 0, "OutputImg");
 
-    vkGetImageMemoryRequirements(g_device(), rawImg, &memReqs);
+    vkGetImageMemoryRequirements(stone_device(), rawImg, &memReqs);
     alloc.allocationSize = memReqs.size;
-    vkAllocateMemory(g_device(), &alloc, nullptr, &mem);
-    vkBindImageMemory(g_device(), rawImg, mem, 0);
-    outputMem_ = RTX::Handle<VkDeviceMemory>(mem, g_device(), vkFreeMemory, memReqs.size, "OutputMem");
+    vkAllocateMemory(stone_device(), &alloc, nullptr, &mem);
+    vkBindImageMemory(stone_device(), rawImg, mem, 0);
+    outputMem_ = RTX::Handle<VkDeviceMemory>(mem, stone_device(), vkFreeMemory, memReqs.size, "OutputMem");
 
     viewInfo.image = rawImg;
     viewInfo.format = imgInfo.format;
-    vkCreateImageView(g_device(), &viewInfo, nullptr, &view);
-    outputView_ = RTX::Handle<VkImageView>(view, g_device(), vkDestroyImageView, 0, "OutputView");
+    vkCreateImageView(stone_device(), &viewInfo, nullptr, &view);
+    outputView_ = RTX::Handle<VkImageView>(view, stone_device(), vkDestroyImageView, 0, "OutputView");
 
     // Transition
     VkCommandBuffer cmd = VulkanRTX::beginSingleTimeCommands(g_ctx().commandPool());
@@ -148,7 +148,7 @@ void RenderMode1::initResources() {
     barrier.image = outputImage_.get();
     vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
 
-    g_pipelineManager()->endSingleTimeCommands(g_ctx().commandPool(), g_ctx().graphicsQueue(), cmd);
+    stone_pipeline()->endSingleTimeCommands(g_ctx().commandPool(), g_ctx().graphicsQueue(), cmd);
 
     g_rtx().updateRTXDescriptors(0,
         RAW_BUFFER(uniformBuf_), RAW_BUFFER(accumulationBuf_), VK_NULL_HANDLE,
@@ -157,7 +157,7 @@ void RenderMode1::initResources() {
 }
 
 void RenderMode1::cleanupResources() {
-    vkDeviceWaitIdle(g_device());
+    vkDeviceWaitIdle(stone_device());
     g_rtx().updateRTXDescriptors(0, VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,
                                  VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,
                                  VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE);

@@ -448,7 +448,6 @@ void create(const char* title, int width, int height, Uint32 flags)
     }
 
     LOG_SUCCESS_CAT("SDL3", "{}INSTANCE FORGED @ {:p} — PINK PHOTONS ASCEND{}", DIAMOND_SPARKLE, static_cast<void*>(instance), RESET);
-    set_g_instance(instance);  // StoneKey love
 
     VkSurfaceKHR surface = VK_NULL_HANDLE;
     if (SDL_Vulkan_CreateSurface(win, instance, nullptr, &surface) == 0) {
@@ -456,7 +455,6 @@ void create(const char* title, int width, int height, Uint32 flags)
         LOG_FATAL_CAT("FATAL", "Vulkan surface failed"); return;
     }
     LOG_SUCCESS_CAT("SDL3", "{}SURFACE FORGED @ {:p} — PATH OPEN{}", AURORA_PINK, static_cast<void*>(surface), RESET);
-    set_g_surface(surface);  // StoneKey love
 
     // Show the window — ensure visible, no close right away
     SDL_ShowWindow(win);

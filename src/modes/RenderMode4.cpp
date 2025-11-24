@@ -7,7 +7,7 @@
 #include "modes/RenderMode4.hpp"
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/GLOBAL/camera.hpp"     // CAM macro
-#include "engine/GLOBAL/StoneKey.hpp"   // g_device()
+#include "engine/GLOBAL/StoneKey.hpp"   // stone_device()
 
 using namespace Engine;
 using namespace Logging::Color;
@@ -29,7 +29,7 @@ void RenderMode4::initResources()
 {
     cleanupResources();
 
-    VkDevice device = g_device();
+    VkDevice device = stone_device();
 
     VkImageCreateInfo imgInfo{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
     imgInfo.imageType = VK_IMAGE_TYPE_2D;
@@ -47,7 +47,7 @@ void RenderMode4::initResources()
 
     VkMemoryRequirements memReqs;
     vkGetImageMemoryRequirements(device, rawImg, &memReqs);
-    uint32_t memType = g_pipelineManager()->findMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    uint32_t memType = stone_pipeline()->findMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
     VkMemoryAllocateInfo alloc{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
     alloc.allocationSize = memReqs.size;
@@ -73,7 +73,7 @@ void RenderMode4::initResources()
 
 void RenderMode4::cleanupResources()
 {
-    vkDeviceWaitIdle(g_device());
+    vkDeviceWaitIdle(stone_device());
 
     outputView_.reset();
     outputImage_.reset();

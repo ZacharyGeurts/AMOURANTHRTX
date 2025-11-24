@@ -30,7 +30,7 @@ RenderMode7::RenderMode7(VulkanRTX& rtx, uint32_t width, uint32_t height)
 
 RenderMode7::~RenderMode7()
 {
-    vkDeviceWaitIdle(g_ctx().device());
+    vkDeviceWaitIdle(stone_device());
 
     rtx_.updateRTXDescriptors(0, VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,
                               VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,
@@ -131,7 +131,7 @@ void RenderMode7::clearVortex(VkCommandBuffer cmd)
 
 void RenderMode7::onResize(uint32_t width, uint32_t height)
 {
-    vkDeviceWaitIdle(g_ctx().device());
+    vkDeviceWaitIdle(stone_device());
 
     rtx_.updateRTXDescriptors(0, VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,
                               VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,

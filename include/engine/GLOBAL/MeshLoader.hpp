@@ -21,6 +21,9 @@
 #include <cstdint>
 #include <cstring>
 
+using namespace Logging::Color;
+using namespace StoneKey;
+
 namespace MeshLoader {
 
 struct Mesh {

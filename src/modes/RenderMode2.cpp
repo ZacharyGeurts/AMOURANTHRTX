@@ -29,7 +29,7 @@ RenderMode2::RenderMode2(VulkanRTX& rtx, uint32_t width, uint32_t height)
 RenderMode2::~RenderMode2() {
     LOG_INFO_CAT("RenderMode2", "Destructor invoked — Safe cleanup");
 
-    vkDeviceWaitIdle(g_ctx().device());
+    vkDeviceWaitIdle(stone_device());
 
     rtx_.updateRTXDescriptors(0,
         VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,

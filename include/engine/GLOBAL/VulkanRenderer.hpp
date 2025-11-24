@@ -43,6 +43,8 @@
 struct Camera;
 class Application;                  // ← For ImGui console access (`~` key)
 
+using namespace Logging::Color;
+using namespace StoneKey;
 
 static constexpr uint32_t MAX_DESCRIPTOR_SETS = 1024;
 static constexpr VkSampleCountFlagBits MSAA_SAMPLES = VK_SAMPLE_COUNT_1_BIT;
@@ -120,8 +122,8 @@ public:
     void setRenderMode(int mode) noexcept;
     void cleanup() noexcept;
 
-    [[nodiscard]] VkDevice         device()          const noexcept { return g_ctx().device(); }
-    [[nodiscard]] VkPhysicalDevice physicalDevice()  const noexcept { return g_ctx().physicalDevice(); }
+    [[nodiscard]] VkDevice         device()          const noexcept { return stone_device(); }
+    [[nodiscard]] VkPhysicalDevice physicalDevice()  const noexcept { return stone_physical(); }
     [[nodiscard]] VkCommandPool    commandPool()     const noexcept { return g_ctx().commandPool(); }
     [[nodiscard]] VkQueue          graphicsQueue()   const noexcept { return g_ctx().graphicsQueue(); }
     [[nodiscard]] VkQueue          presentQueue()    const noexcept { return g_ctx().presentQueue(); }
@@ -227,9 +229,9 @@ private:
     RTX::Handle<VkDescriptorPool> rtDescriptorPool_;
     RTX::Handle<VkDescriptorPool> tonemapDescriptorPool_;
 
-    PFN_vkCmdTraceRaysKHR                    vkCmdTraceRaysKHR               = nullptr;
+    PFN_vkCmdTraceRaysKHR                    rtCmdTraceRaysKHR               = nullptr;
     PFN_vkCreateRayTracingPipelinesKHR       vkCreateRayTracingPipelinesKHR  = nullptr;
-    PFN_vkGetRayTracingShaderGroupHandlesKHR vkGetRayTracingShaderGroupHandlesKHR = nullptr;
+    PFN_vkGetRayTracingShaderGroupHandlesKHR rtGetRayTracingShaderGroupHandlesKHR = nullptr;
     PFN_vkGetBufferDeviceAddress          vkGetBufferDeviceAddress     = nullptr;
 
     std::vector<uint64_t> uniformBufferEncs_;

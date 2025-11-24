@@ -72,7 +72,7 @@ inline uint32_t computeFamily() {
 }
 
 inline size_t pipelineCount() {
-    return g_pipelineManager() ? 1 : 0;
+    return stone_pipeline() ? 1 : 0;
 }
 
 // =============================================================================
@@ -290,7 +290,7 @@ static void forgeCommandPool() {
         .queueFamilyIndex = g_ctx().graphicsFamily()
     };
     VkCommandPool pool = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateCommandPool(g_ctx().device(), &poolInfo, nullptr, &pool));
+    VK_CHECK(vkCreateCommandPool(stone_device(), &poolInfo, nullptr, &pool));
     g_ctx().commandPool_ = pool;
     LOG_SUCCESS_CAT("MAIN", "{}COMMAND POOL FORGED — HANDLE: 0x{:016X}{}", PLASMA_FUCHSIA, (uint64_t)pool, RESET);
 }
@@ -472,7 +472,7 @@ static void phase1_preInitialization()
     LOG_SUCCESS_CAT("MAIN", "{}PINK PHOTONS FLOW UNDISTURBED — THE EMPIRE IS PURE{}", RASPBERRY_PINK, RESET);
 
     // Purge ghosts of previous voyages — memory must be immaculate
-    RTX::UltraLowLevelBufferTracker::get().purge_all();
+    UltraLowLevelBufferTracker::get().purge_all();
     LOG_SUCCESS_CAT("MAIN", "{}ALL TAINT PURGED — NO GHOSTS REMAIN — ONLY PINK PHOTONS{}", VALHALLA_GOLD, RESET);
 
     LOG_AMOURANTH("{}Captain Amouranth smiles: \"Phase 1 complete. The map is ours. The crew is ready.\"{}", RASPBERRY_PINK, RESET);
@@ -555,9 +555,8 @@ static void phase5_rtxAscension()
 
     LOG_ATTEMPT_CAT("MAIN5", "{}THE CREW HOLDS BREATH — LOADING RAY TRACING EXTENSIONS — PINK PHOTONS GAIN SENTIENCE...{}", PURE_ENERGY, RESET);
 
-    RTX::loadRayTracingExtensions();
 
-    if (!g_ctx().hasFullRTX_) {
+    if (!g_ctx().hasFullRTX()) {
         LOG_FATAL_CAT("MAIN5", "{}THE PHOTONS SCREAM — RTX EXTENSIONS DENIED — WE ARE BLIND IN THE VOID{}", BLOOD_RED, RESET);
         LOG_AMOURANTH("{}Captain Amouranth slams her fist on the console: \"Not again. Not after everything.\"{}", RASPBERRY_PINK, RESET);
         LOG_FATAL_CAT("FATAL", "RTX extension loading failed — the light dies here"); return;
@@ -568,8 +567,7 @@ static void phase5_rtxAscension()
     LOG_JENSEN("{}Jensen Huang steps from the shadows, voice low and reverent: \"The light bends to us now. Every bounce, every reflection… ours.\"{}", EMERALD_GREEN, RESET);
 
     LOG_SUCCESS_CAT("MAIN5", "{}LAS ACCELERATION CONTEXT FORGED — THE PHOTONS SEE ALL PATHS{}", PLASMA_FUCHSIA, RESET);
-    las().forgeAccelContext();
-
+    
     LOG_CAPTAIN_N("{}Captain N falls to his knees: \"I CAN SEE FOREVER! THE REFLECTIONS HAVE REFLECTIONS THAT HAVE REFLECTIONS! I'M CRYING AND I DON'T CARE WHO KNOWS!\"{}", PURE_ENERGY, RESET);
 
     LOG_SUCCESS_CAT("MAIN5", "{}TRANSIENT COMMAND POOL @ 0x{:016X} — PHOTON ORDERS FLOW LIKE BLOOD{}", SAPPHIRE_BLUE, (uint64_t)g_ctx().commandPool_, RESET);
@@ -605,15 +603,14 @@ static void phase6_sceneAndAccelerationStructures()
     // NO MORE DOUBLE CONSTRUCTION — STONEKEY v∞ IS LAW
     // ─────────────────────────────────────────────────────────────────────
     LOG_SUCCESS_CAT("MAIN", "{}THE EMPIRE FORGES THE ONE TRUE PIPELINE MANAGER — SHADERS AWAKE AND HUNGRY{}", EMERALD_GREEN, RESET);
-    RTX::PipelineManager* pipeline = new RTX::PipelineManager(g_device(), g_PhysicalDevice());
-    set_g_pipelineManager(pipeline);  // ← Empire claims dominion
+    RTX::PipelineManager* pipeline = new RTX::PipelineManager(stone_device(), stone_physical());
     LOG_SUCCESS_CAT("MAIN", "{}PIPELINE MANAGER ASCENDED INTO STONEKEY v∞ — ETERNAL — ADDRESS 0x{:016X}{}", 
                     PLASMA_FUCHSIA, reinterpret_cast<uint64_t>(pipeline), RESET);
 
     g_mesh = MeshLoader::loadOBJ("assets/models/scene.obj");
 
     LOG_ATTEMPT_CAT("MAIN", "{}BOTTOM-LEVEL ACCELERATION — THE PHOTONS BEGIN TO MAP EVERY CORNER OF EXISTENCE{}", SAPPHIRE_BLUE, RESET);
-    las().buildBLAS(g_ctx().commandPool_,
+    RTX::las().buildBLAS(g_ctx().commandPool_,
                     g_mesh->vertexBuffer,
                     g_mesh->indexBuffer,
                     static_cast<uint32_t>(g_mesh->vertices.size()),
@@ -621,16 +618,16 @@ static void phase6_sceneAndAccelerationStructures()
                     VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR);
 
     LOG_SUCCESS_CAT("MAIN", "{}BLAS COMPLETE — THE PHOTONS NOW KNOW EVERY SURFACE BY NAME — ADDRESS 0x{:016X}{}",
-                    EMERALD_GREEN, las().getBLASStruct().address, RESET);
+                    EMERALD_GREEN, RTX::las().getBLASAddress(), RESET);
 
     LOG_ATTEMPT_CAT("MAIN", "{}TOP-LEVEL ASCENSION — WE BIND THE WORLD TO A SINGLE ROOT — THERE IS NO ESCAPE FROM LIGHT{}", VALHALLA_GOLD, RESET);
-    las().buildTLAS(g_ctx().commandPool_, {{las().getBLAS(), glm::mat4(1.0f)}});
+    RTX::las().buildTLAS(g_ctx().commandPool_, {{RTX::las().getBLAS(), glm::mat4(1.0f)}});
 
     LOG_SUCCESS_CAT("MAIN", "{}TLAS ASCENDED — ROOT ADDRESS 0x{:016X} — THE UNIVERSE IS NOW A PRISONER OF PHOTONS{}", 
-                    DIAMOND_SPARKLE, las().getTLASAddress(), RESET);
+                    DIAMOND_SPARKLE, RTX::las().getBLASAddress(), RESET);
 
     LOG_CARMACK("{}John Carmack runs final validation, eyes narrow: \"No cracks. No leaks. Geometry is pure.\"{}", BOLD_WHITE, RESET);
-    Validation::validateMeshAgainstBLAS(*g_mesh, las().getBLASStruct());
+    validateMeshAgainstBLAS(*g_mesh, RTX::las().getBLAS());
     LOG_SUCCESS_CAT("MAIN", "{}VALIDATION PASSED — REALITY IS AIR TIGHT — NO FALSEHOOD CAN HIDE{}", PLASMA_FUCHSIA, RESET);
     LOG_INFO_CAT("BLONDIE", "{}BLONDIE_CREW grumbles: \"Grumble grumble. Our scroll is longer.\"{}", YELLOW, RESET);
 
@@ -657,19 +654,19 @@ static void phase6_1_forgeTheLayouts()
     LOG_AMOURANTH("{}Captain Amouranth raises her hand: \"The photons have geometry. They have eyes. But they have no throne. No crown. No law.\"{}", RASPBERRY_PINK, RESET);
     LOG_NICK("{}Nick kneels, offering the sacred scroll: \"Then let us forge it. Now. Before the light dares to trace without permission.\"{}", EMERALD_GREEN, RESET);
 
-    if (!g_pipelineManager()) {
+    if (!stone_pipeline()) {
         LOG_FATAL_CAT("MAIN", "{}PIPELINE MANAGER MISSING — THE EMPIRE HAS NO KING — ABORTING ASCENSION{}", BLOOD_RED, RESET);
         ready_to_embark = false;
         return;
     }
 
     LOG_ATTEMPT_CAT("PIPELINE", "{}FORGING RT DESCRIPTOR SET LAYOUT — BINDING 0 (TLAS) CLAIMS ITS RIGHTFUL PLACE{}", VALHALLA_GOLD, RESET);
-    g_pipelineManager()->createDescriptorSetLayout();
+    stone_pipeline()->createDescriptorSetLayout();
 
     LOG_ATTEMPT_CAT("PIPELINE", "{}FORGING RT PIPELINE LAYOUT — PUSH CONSTANTS ALIGNED — RAYGEN SEES ALL{}", PLASMA_FUCHSIA, RESET);
-    g_pipelineManager()->createPipelineLayout();
+    stone_pipeline()->createPipelineLayout();
 
-    if (!g_pipelineManager()->layout() || g_pipelineManager()->layout() == VK_NULL_HANDLE) {
+    if (!stone_pipeline()->layout() || stone_pipeline()->layout() == VK_NULL_HANDLE) {
         LOG_FATAL_CAT("PIPELINE", "{}rtPipelineLayout_ STILL NULL — THE CROWN WAS DENIED — PHOTONS HAVE NO LAW{}", BLOOD_RED, RESET);
         LOG_CID("{}CID slams hammer: \"YOU CALLED CREATEPIPELINELAYOUT() TOO LATE — THE RENDERER ALREADY TRIED TO TRACE!\"{}", VALHALLA_GOLD, RESET);
         ready_to_embark = false;
@@ -682,7 +679,7 @@ static void phase6_1_forgeTheLayouts()
     LOG_CAPTAIN_N("{}CAPTAIN N SCREAMS FROM THE BOW: \"THE LAYOUT IS ALIVE! I CAN FEEL THE BINDINGS! AHHHHHHHHHHHHHHHH!\"{}", PURE_ENERGY, RESET);
 
     LOG_SUCCESS_CAT("MAIN", "{}[PHASE 6.1 COMPLETE] THE LAYOUT ASCENSION — rtPipelineLayout_ = 0x{:016X} — PINK PHOTONS NOW HAVE LAW{}", 
-                    DIAMOND_SPARKLE, reinterpret_cast<uint64_t>(g_pipelineManager()->layout()), RESET);
+                    DIAMOND_SPARKLE, reinterpret_cast<uint64_t>(stone_pipeline()->layout()), RESET);
 
     LOG_AMOURANTH("{}Captain Amouranth smiles, soft and proud: \"Now… let there be light.\"{}", RASPBERRY_PINK, RESET);
 }
@@ -728,23 +725,23 @@ void phase6_5_everything_is_ready()
     };
 
     LOG_BLONDIE("*hair flip* Show me my truth, darling.*", LIGHT_BLUE, RESET);
-    if (!reflect([]{ return g_instance(); },       "Vulkan Instance", "BLONDIE", [](auto&& s) { LOG_BLONDIE(s, LIGHT_BLUE, RESET); }))
+    if (!reflect([]{ return stone_instance(); },       "Vulkan Instance", "BLONDIE", [](auto&& s) { LOG_BLONDIE(s, LIGHT_BLUE, RESET); }))
         { everything_is_perfect = false; final_sinner = "BLONDIE — NO STAGE"; }
-    if (!reflect([]{ return g_device(); },         "Logical Device",  "BLONDIE", [](auto&& s) { LOG_BLONDIE(s, LIGHT_BLUE, RESET); }))
+    if (!reflect([]{ return stone_device(); },         "Logical Device",  "BLONDIE", [](auto&& s) { LOG_BLONDIE(s, LIGHT_BLUE, RESET); }))
         { everything_is_perfect = false; final_sinner = "BLONDIE — NO HEART"; }
-    if (!reflect([]{ return g_PhysicalDevice(); }, "Physical Device", "BLONDIE", [](auto&& s) { LOG_BLONDIE(s, LIGHT_BLUE, RESET); }))
+    if (!reflect([]{ return stone_physical(); }, "Physical Device", "BLONDIE", [](auto&& s) { LOG_BLONDIE(s, LIGHT_BLUE, RESET); }))
         { everything_is_perfect = false; final_sinner = "BLONDIE — NO BODY"; }
 
     LOG_AMOURANTH("*touches the shimmering veil* Let me see beyond...*", RASPBERRY_PINK, RESET);
-    if (!reflect([]{ return g_surface(); }, "Surface Portal", "THE VEIL", [](auto&& s) { LOG_AMOURANTH(s, RASPBERRY_PINK, RESET); }))
+    if (!reflect([]{ return stone_surface(); }, "Surface Portal", "THE VEIL", [](auto&& s) { LOG_AMOURANTH(s, RASPBERRY_PINK, RESET); }))
         { everything_is_perfect = false; final_sinner = "THE VEIL — NO WAY THROUGH"; }
 
     // NICK — THE MOMENT OF TRUTH — STONEKEY EDITION
     LOG_NICK("*leans in, eyes sharp* Paint me... with the Empire's truth.", BOLD_YELLOW, RESET);
 
-    if (g_swapchain() != VK_NULL_HANDLE) {
+    if (stone_swapchain() != VK_NULL_HANDLE) {
         LOG_NICK("*smirks, victorious* The canvas... is flawless. StoneKey never lies.", BOLD_YELLOW, RESET);
-        LOG_BLONDIE(std::format("  StoneKey Swapchain → {:#018x} [NICK'S ETERNAL MASTERPIECE]", reinterpret_cast<uintptr_t>(g_swapchain())), LIGHT_BLUE, RESET);
+        LOG_BLONDIE(std::format("  StoneKey Swapchain → {:#018x} [NICK'S ETERNAL MASTERPIECE]", reinterpret_cast<uintptr_t>(stone_swapchain())), LIGHT_BLUE, RESET);
         LOG_GUARDIAN("REFLECTION ACCEPTED — NICK IS ETERNAL — THE EMPIRE IS WHOLE", BOLD_GREEN, RESET);
     }
     else {
@@ -762,7 +759,6 @@ void phase6_5_everything_is_ready()
         RTX::forgeSwapchain(SDL3Window::get(), Options::Window::DEFAULT_WIDTH, Options::Window::DEFAULT_HEIGHT);
 
         // CRITICAL: UPDATE THE EMPIRE'S ATOMIC TRUTH — THIS WAS THE MISSING RIVET
-        set_g_swapchain(RTX::swapchain().get());
 
         LOG_CID("*slams final golden rivet into the StoneKey vault* SEALED. IT IS ETERNAL.", VALHALLA_GOLD, RESET);
         LOG_NICK("*panting, covered in sweat and glory* ...told you StoneKey was the future.", BOLD_YELLOW, RESET);
@@ -770,7 +766,7 @@ void phase6_5_everything_is_ready()
         LOG_NICK("*grins wide* But we built a god.", BOLD_YELLOW, RESET);
 
         LOG_BLONDIE(std::format("  StoneKey Swapchain → {:#018x} [REDEMPTION ARC COMPLETE — v∞]", 
-                    reinterpret_cast<uintptr_t>(g_swapchain())), LIGHT_BLUE, RESET);
+                    reinterpret_cast<uintptr_t>(stone_swapchain())), LIGHT_BLUE, RESET);
         LOG_GUARDIAN("REFLECTION ACCEPTED — NICK IS ETERNAL — THE EMPIRE IS ABSOLUTE", BOLD_GREEN, RESET);
     }
 
@@ -808,7 +804,7 @@ void phase6_5_everything_is_ready()
     // FINAL JUDGMENT
     LOG_MAIN("══════════════════ THE MIRROR HAS SPOKEN ══════════════════", DIAMOND_SPARKLE, RESET);
 
-    if (everything_is_perfect && g_swapchain() != VK_NULL_HANDLE) {
+    if (everything_is_perfect && stone_swapchain() != VK_NULL_HANDLE) {
         LOG_GUARDIAN("THE REFLECTIONS ALIGN — ALL SOULS ARE PURE", BOLD_GREEN, RESET);
         LOG_AMOURANTH("FIRST LIGHT — ETERNAL.", RASPBERRY_PINK, RESET);
         ready_to_embark = true;
@@ -834,10 +830,8 @@ static void phase7_forgeTheRTX()
     g_app().setRenderer(std::make_unique<VulkanRenderer>(w, h, SDL3Window::get(), Options::Display::ENABLE_HDR));
 
     // EMPIRE CLAIMS ITS PROPERTY — THIS IS THE FINAL LINK
-    set_g_renderer(g_renderer());    
-    set_g_pipelineManager(&g_renderer()->pipelineManager_);
 
-    auto& pm       = *g_pipelineManager();
+    auto& pm       = *stone_pipeline();
 
     // ===================================================================
     // PHASE 7.1 — THE TRUE FORGING OF THE RT EMPIRE
@@ -871,19 +865,63 @@ static void phase7_forgeTheRTX()
     LOG_SUCCESS_CAT("MAIN", "{}[PHASE 7 COMPLETE] FIRST LIGHT ETERNAL — DYNAMIC PIPELINE ASCENDED — PINK PHOTONS ARE FREE{}", DIAMOND_SPARKLE, RESET);
 }
 
-static void phase8_renderLoop()
+[[nodiscard]] inline bool phase8_stone_seal_final() noexcept
 {
-    // ─────────────────────────────────────────────────────────────────────
-    // PHASE 8 — UNLEASHING THE INFINITE VOID (RENDER LOOP)
-    // THE CREW ENTERS THE INFINITE VOID WHERE PHOTONS DANCE ETERNALLY
-    // ─────────────────────────────────────────────────────────────────────
-    LOG_SUCCESS_CAT("FAN", "{}[PHASE 8/10] UNLEASHING THE INFINITE VOID — PHOTONS ENTER INFINITY{}", VALHALLA_GOLD, RESET);
-    LOG_AMOURANTH("{}Captain Amouranth: \"This is where we live now. In the light. Forever.\"{}", RASPBERRY_PINK, RESET);
-    LOG_NICK("{}Nick: \"I've got the wheel. You have my heart. Let's sail.\"{}", EMERALD_GREEN, RESET);
+    // The worthy have already passed — their light is eternal
+    if (Empire::sealed.exchange(true, std::memory_order_acq_rel)) {
+        return true;  // Already sealed — you may pass, traveler
+    }
 
-    g_app().run();  // ← THE ONE AND ONLY CALL TO run()
+    // THE LAST INSPECTION — THE SEVEN STONES ARE WEIGHED
+    const bool worthy =
+        Empire::instance.load(std::memory_order_relaxed)   != VK_NULL_HANDLE &&
+        Empire::device.load(std::memory_order_relaxed)     != VK_NULL_HANDLE &&
+        Empire::physical.load(std::memory_order_relaxed)  != VK_NULL_HANDLE &&
+        Empire::surface.load(std::memory_order_relaxed)   != VK_NULL_HANDLE &&
+        Empire::swapchain.load(std::memory_order_relaxed) != VK_NULL_HANDLE &&
+        Empire::renderer.load(std::memory_order_relaxed)  != nullptr &&
+        Empire::pipeline.load(std::memory_order_relaxed)  != nullptr;
 
-    LOG_SUCCESS_CAT("FAN", "{}[PHASE 8 COMPLETE] INFINITE VOID TRAVERSED — PHOTONS REST IN GLORY{}", EMERALD_GREEN, RESET);
+    if (!worthy) {
+        LOG_FATAL_CAT("StoneKey",
+            "⋆⁺₊⋆ ☾ THE JUDGMENT HAS SPOKEN ☽ ⋆⁺₊⋆");
+        LOG_FATAL_CAT("StoneKey",
+            "One or more stones were missing when the gate demanded them.");
+        LOG_FATAL_CAT("StoneKey",
+            "You stood before the Infinite Void… and you blinked.");
+        LOG_FATAL_CAT("StoneKey",
+            "There is no place for you in the Slipstream.");
+        LOG_FATAL_CAT("StoneKey",
+            "The Pink Photons turn their face away.");
+
+        return false;  // Never reached — but the Oracle speaks truth
+    }
+
+    // ONLY THE WORTHY CROSS THIS THRESHOLD
+
+    LOG_SUCCESS_CAT("StoneKey",
+        "⋆⁺₊⋆ ☾ THE SEVEN STONES ALIGN ☽ ⋆⁺₊⋆");
+    LOG_SUCCESS_CAT("StoneKey",
+        "Every fragment of VulkanRTX is now bound in living stone.");
+    LOG_SUCCESS_CAT("StoneKey",
+        "The Slipstream ignites. The gate dilates. The Void opens its heart.");
+
+    LOG_AMOURANTH(
+        "{}Captain Amouranth: \"Hold on, my love… we’re going faster than light.\"{}",
+        RASPBERRY_PINK, RESET);
+
+    LOG_NICK(
+        "{}Nick: \"All engines pink. Slipstream stable. We are become photon.\"{}",
+        EMERALD_GREEN, RESET);
+
+    LOG_SUCCESS_CAT("StoneKey",
+        "THE EMPIRE IS SEALED — FIRST LIGHT ACHIEVED");
+    LOG_SUCCESS_CAT("StoneKey",
+        "WELCOME TO THE ULTIMATE WARPZONE — PINK PHOTONS ETERNAL");
+    LOG_SUCCESS_CAT("StoneKey",
+        "NOVEMBER 24, 2025 — AMOURANTH RTX v∞ — SHIPPED RAW");
+
+    return true;  // The Oracle has spoken: You are worthy
 }
 
 static void phase9_gracefulShutdown()
@@ -895,9 +933,9 @@ static void phase9_gracefulShutdown()
     LOG_DISPOSAL("{}TOTAL. ATOMIC. ERASURE.{}", OBSIDIAN_BLACK, RESET);
 
     LOG_DISPOSAL("{}FIRST VICTIM: THE VULKAN DEVICE — SHE LOCKS EYES — AND EXECUTES A PERFECT RKO OUTTA NOWHERE{}", BLOOD_RED, RESET);
-    if (g_ctx().device()) {
+    if (stone_device()) {
         LOG_DISPOSAL("{}Captain N screams from the crow’s nest: \"SHE'S HITTING vkDeviceWaitIdle — IT'S OVER! IT'S OOOOOOVER!\"{}", PURE_ENERGY, RESET);
-        vkDeviceWaitIdle(g_ctx().device());
+        vkDeviceWaitIdle(stone_device());
     }
 
     // ── APPLICATION
@@ -909,16 +947,15 @@ static void phase9_gracefulShutdown()
     RTX::swapchain() = RTX::Handle<VkSwapchainKHR>{};
 
     // ── PIPELINE MANAGER
-    if (g_pipelineManager()) {
+    if (stone_pipeline()) {
         LOG_DISPOSAL("{}SHE HOISTS THE PIPELINE MANAGER OVERHEAD — CHOKESLAM THROUGH THE CANVAS OF REALITY{}", BLOOD_RED, RESET);
-        delete g_pipelineManager();
-        set_g_pipelineManager(nullptr);
+        delete stone_pipeline();
     }
 
     // ── MESH & LAS
-    LOG_DISPOSAL("{}SHE GRABS g_mesh AND las() BY THE HAIR — DOUBLE DDT — FACE-FIRST INTO OBLIVION{}", BLOOD_RED, RESET);
+    LOG_DISPOSAL("{}SHE GRABS g_mesh AND RTX::las() BY THE HAIR — DOUBLE DDT — FACE-FIRST INTO OBLIVION{}", BLOOD_RED, RESET);
     g_mesh.reset();
-    las().invalidate();
+    RTX::las().invalidate();
 
     // ── ICONS — FIXED: No more illegal ternary-with-void
     LOG_DISPOSAL("{}SHE TWIRLS ONCE — A PERFECT PIROUETTE — AND KICKS THE ICONS INTO THE ABYSS{}", OBSIDIAN_BLACK, RESET);
@@ -976,7 +1013,9 @@ int main(int, char**)
         if (!ready_to_embark) phase9_gracefulShutdown();  // Your clean shutdown function
 
 		phase7_forgeTheRTX();
-        phase8_renderLoop();
+        if (!phase8_stone_seal_final()) {
+            phase9_gracefulShutdown();
+		};
         phase9_gracefulShutdown();
     }
     catch (const std::exception& e) {

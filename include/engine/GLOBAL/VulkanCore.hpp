@@ -21,6 +21,7 @@
 #include "engine/GLOBAL/LAS.hpp"
 
 #include <vulkan/vulkan.h>
+#include <vulkan/vulkan_core.h>
 #include <vulkan/vulkan_beta.h>
 
 #include <array>
@@ -35,6 +36,12 @@
 #include <cstdlib>
 #include <set>
 #include <atomic>
+
+using StoneKey::stone_device;
+using StoneKey::stone_physical;
+using StoneKey::stone_pipeline;
+using StoneKey::stone_instance;
+using StoneKey::stone_surface;
 
 // =============================================================================
 // GLOBAL FRAME COUNT
@@ -82,19 +89,9 @@ struct std::formatter<VkPhysicalDeviceType> : std::formatter<std::string_view> {
 // =============================================================================
 // GLOBAL ACCESSORS — STONEKEY v∞
 // =============================================================================
-[[nodiscard]] inline VkInstance               g_instance() noexcept;
-[[nodiscard]] inline VkPhysicalDevice         g_PhysicalDevice() noexcept;
-[[nodiscard]] inline VkDevice                 g_device() noexcept;
 [[nodiscard]] inline VkQueue                  g_graphicsQueue() noexcept;
 [[nodiscard]] inline VkQueue                  g_presentQueue() noexcept;
-[[nodiscard]] inline VkSurfaceKHR             g_surface() noexcept;
 [[nodiscard]] inline VkCommandPool            g_commandPool() noexcept;
-
-[[nodiscard]] inline RTX::PipelineManager*    g_pipelineManager() noexcept;
-inline void                                   set_g_pipelineManager(RTX::PipelineManager*) noexcept;
-
-[[nodiscard]] inline VkPhysicalDevice         g_phys() noexcept { return g_PhysicalDevice(); }
-[[nodiscard]] inline VkDevice                 g_dev()  noexcept { return g_device(); }
 
 // =============================================================================
 // Forward Declarations
@@ -163,7 +160,7 @@ public:
         VkImageView gDepth = VK_NULL_HANDLE,
         VkImageView gNormal = VK_NULL_HANDLE);
 
-    void recordRayTrace(VkCommandBuffer cmd, VkExtent2D extent, VkImage outputImage, VkImageView outputView);
+    void recordRayTrace(VkCommandBuffer cmd, VkExtent2D extent, VkImage outputImage, VkImageView outputView) noexcept;
     void recordRayTraceAdaptive(VkCommandBuffer cmd, VkExtent2D extent, VkImage outputImage, VkImageView outputView, float nexusScore);
     void traceRays(VkCommandBuffer cmd,
                    const VkStridedDeviceAddressRegionKHR* raygen,
@@ -214,9 +211,9 @@ private:
     RTX::Handle<VkImageView> blackFallbackView_;
 
     PFN_vkGetBufferDeviceAddress vkGetBufferDeviceAddress = nullptr;
-    PFN_vkCmdTraceRaysKHR vkCmdTraceRaysKHR = nullptr;
-    PFN_vkGetRayTracingShaderGroupHandlesKHR vkGetRayTracingShaderGroupHandlesKHR = nullptr;
-    PFN_vkGetAccelerationStructureDeviceAddressKHR vkGetAccelerationStructureDeviceAddressKHR = nullptr;
+    PFN_vkCmdTraceRaysKHR rtCmdTraceRaysKHR = nullptr;
+    PFN_vkGetRayTracingShaderGroupHandlesKHR rtGetRayTracingShaderGroupHandlesKHR = nullptr;
+    PFN_vkGetAccelerationStructureDeviceAddressKHR rtGetAccelerationStructureDeviceAddressKHR = nullptr;
 
     [[nodiscard]] VkDeviceSize alignUp(VkDeviceSize value, VkDeviceSize alignment) const noexcept;
 };
@@ -235,7 +232,7 @@ inline VulkanRTX g_rtx_dummy(1, 1, nullptr);
 {
     if (!g_rtx_instance) {
         static bool warned_once = false;
-        if (!warned_once && g_device() != VK_NULL_HANDLE) {
+        if (!warned_once && stone_device() != VK_NULL_HANDLE) {
             warned_once = true;
             LOG_WARN_CAT("RTX", 
                 "{}g_rtx() called before forge — safe dummy active (pre-Phase 7){}", 

@@ -34,28 +34,41 @@
 #define LOG_DISPOSAL(...)    LOG_INFO_CAT("BALLERINA",      __VA_ARGS__)
 #define LOG_MAIN(...)        LOG_SUCCESS_CAT("MAIN",        __VA_ARGS__)
 
-// =============================================================================
-// VK_CHECK — THE UNBREAKABLE 2025 EDITION
-// =============================================================================
-inline const char* vk_result_string(VkResult result) noexcept {
-    switch (result) {
-#define CASE(x) case x: return #x
-        CASE(VK_SUCCESS); CASE(VK_NOT_READY); CASE(VK_TIMEOUT); CASE(VK_EVENT_SET);
-        CASE(VK_EVENT_RESET); CASE(VK_INCOMPLETE); CASE(VK_ERROR_OUT_OF_HOST_MEMORY);
-        CASE(VK_ERROR_OUT_OF_DEVICE_MEMORY); CASE(VK_ERROR_INITIALIZATION_FAILED);
-        CASE(VK_ERROR_DEVICE_LOST); CASE(VK_ERROR_MEMORY_MAP_FAILED);
-        CASE(VK_ERROR_LAYER_NOT_PRESENT); CASE(VK_ERROR_EXTENSION_NOT_PRESENT);
-        CASE(VK_ERROR_FEATURE_NOT_PRESENT); CASE(VK_ERROR_INCOMPATIBLE_DRIVER);
-        CASE(VK_ERROR_TOO_MANY_OBJECTS); CASE(VK_ERROR_FORMAT_NOT_SUPPORTED);
-        CASE(VK_ERROR_FRAGMENTED_POOL); CASE(VK_ERROR_SURFACE_LOST_KHR);
-        CASE(VK_ERROR_NATIVE_WINDOW_IN_USE_KHR); CASE(VK_ERROR_OUT_OF_DATE_KHR);
-        CASE(VK_ERROR_INCOMPATIBLE_DISPLAY_KHR); CASE(VK_ERROR_VALIDATION_FAILED_EXT);
-        CASE(VK_ERROR_INVALID_SHADER_NV); CASE(VK_ERROR_FRAGMENTATION_EXT);
-        CASE(VK_ERROR_NOT_PERMITTED_EXT);
-#undef CASE
-        default: return "VK_UNKNOWN_ERROR";
+[[nodiscard]] constexpr const char* vk_result_string(VkResult r) noexcept
+{
+    switch (r) {
+#define X(a,b,c) case a: case b: case c: return #a " / " #b " / " #c
+#define Y(a,b)   case a: case b: return #a " / " #b
+
+        X(VK_SUCCESS,                          VK_NOT_READY,                     VK_TIMEOUT);
+        X(VK_EVENT_SET,                        VK_EVENT_RESET,                   VK_INCOMPLETE);
+        X(VK_ERROR_OUT_OF_HOST_MEMORY,         VK_ERROR_OUT_OF_DEVICE_MEMORY,    VK_ERROR_INITIALIZATION_FAILED);
+        X(VK_ERROR_DEVICE_LOST,                VK_ERROR_MEMORY_MAP_FAILED,       VK_ERROR_LAYER_NOT_PRESENT);
+        X(VK_ERROR_EXTENSION_NOT_PRESENT,      VK_ERROR_FEATURE_NOT_PRESENT,     VK_ERROR_INCOMPATIBLE_DRIVER);
+        X(VK_ERROR_TOO_MANY_OBJECTS,           VK_ERROR_FORMAT_NOT_SUPPORTED,    VK_ERROR_FRAGMENTED_POOL);
+        X(VK_ERROR_OUT_OF_POOL_MEMORY,         VK_ERROR_INVALID_EXTERNAL_HANDLE, VK_ERROR_FRAGMENTATION);
+        X(VK_ERROR_INVALID_OPAQUE_CAPTURE_ADDRESS, VK_ERROR_SURFACE_LOST_KHR,   VK_ERROR_NATIVE_WINDOW_IN_USE_KHR);
+        X(VK_SUBOPTIMAL_KHR,                   VK_ERROR_OUT_OF_DATE_KHR,         VK_ERROR_INCOMPATIBLE_DISPLAY_KHR);
+        X(VK_ERROR_VALIDATION_FAILED_EXT,      VK_ERROR_INVALID_SHADER_NV,       VK_ERROR_NOT_PERMITTED_EXT);
+        X(VK_ERROR_FULL_SCREEN_EXCLUSIVE_MODE_LOST_EXT, VK_THREAD_IDLE_KHR,      VK_THREAD_DONE_KHR);
+        Y(VK_OPERATION_DEFERRED_KHR,           VK_OPERATION_NOT_DEFERRED_KHR);
+        Y(VK_PIPELINE_COMPILE_REQUIRED_EXT,    VK_ERROR_IMAGE_USAGE_NOT_SUPPORTED_KHR);
+
+#undef X
+#undef Y
+        default:
+            break;
     }
+
+    // Unknown result → still beautiful, still thread-safe, still zero-allocation
+    static thread_local char buf[32] = {};
+    snprintf(buf, sizeof(buf), "VK_UNKNOWN_%d", static_cast<int>(r));
+    return buf;
 }
+
+// THE SECRET HANDSHAKE — TWO NAMES, ONE SOUL, ZERO COST
+[[nodiscard]] inline const char* VulkanResultToString(VkResult r) noexcept
+    { return vk_result_string(r); }
 
 #define VK_CHECK(...) GET_VK_CHECK_OVERLOAD(__VA_ARGS__)(__VA_ARGS__)
 #define GET_VK_CHECK_OVERLOAD(...) GET_VK_CHECK_OVERLOAD_(__VA_ARGS__, 4, 3, 2, 1, )
@@ -78,6 +91,16 @@ inline const char* vk_result_string(VkResult result) noexcept {
     } } while(0)
 
 #define VK_CHECK_NOMSG(call) VK_CHECK_1(call)
+
+    // Helper — inlined, fast, pure
+[[maybe_unused]] static uint32_t findMemoryType(VkPhysicalDevice phys, uint32_t filter, VkMemoryPropertyFlags flags) noexcept {
+    VkPhysicalDeviceMemoryProperties memProps{};
+    vkGetPhysicalDeviceMemoryProperties(phys, &memProps);
+    for (uint32_t i = 0; i < memProps.memoryTypeCount; ++i)
+        if ((filter & (1u << i)) && (memProps.memoryTypes[i].propertyFlags & flags) == flags)
+            return i;
+    return UINT32_MAX;
+}
 
 #pragma once
 

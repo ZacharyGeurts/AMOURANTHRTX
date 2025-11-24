@@ -30,20 +30,18 @@ namespace RTX {
 // STONEKEY EMPIRE — FORWARD DECLARED ONLY
 // -----------------------------------------------------------------------------
 namespace StoneKey {
-    [[nodiscard]] VulkanRenderer*       g_renderer() noexcept;
-    [[nodiscard]] RTX::PipelineManager* g_pipelineManager() noexcept;
+    [[nodiscard]] VulkanRenderer*       stone_renderer() noexcept;
+    [[nodiscard]] RTX::PipelineManager* stone_pipeline() noexcept;
     [[nodiscard]] bool                  g_renderer_ready() noexcept;
 
-    void set_g_renderer(VulkanRenderer* r) noexcept;
-    void set_g_pipelineManager(RTX::PipelineManager* pm) noexcept;
 
-    [[nodiscard]] VkInstance       g_instance() noexcept;
-    [[nodiscard]] VkDevice         g_device() noexcept;
-    [[nodiscard]] VkPhysicalDevice g_PhysicalDevice() noexcept;
-    [[nodiscard]] VkSwapchainKHR   g_swapchain() noexcept;
-    [[nodiscard]] VkExtent2D       g_extent() noexcept;
-    [[nodiscard]] uint32_t         g_width() noexcept;
-    [[nodiscard]] uint32_t         g_height() noexcept;
+    [[nodiscard]] VkInstance       stone_instance() noexcept;
+    [[nodiscard]] VkDevice         stone_device() noexcept;
+    [[nodiscard]] VkPhysicalDevice stone_physical() noexcept;
+    [[nodiscard]] VkSwapchainKHR   stone_swapchain() noexcept;
+    [[nodiscard]] VkExtent2D       stone_extent() noexcept;
+    [[nodiscard]] uint32_t         stone_width() noexcept;
+    [[nodiscard]] uint32_t         stone_height() noexcept;
 }
 
 // -----------------------------------------------------------------------------
@@ -73,5 +71,5 @@ extern std::unique_ptr<Application> g_app_ptr;
 // CONVENIENCE — FULLY QUALIFIED TO AVOID SHADOWING
 // -----------------------------------------------------------------------------
 inline float aspect() noexcept {
-    return float(StoneKey::g_width()) / float(StoneKey::g_height());
+    return float(StoneKey::stone_width()) / float(StoneKey::stone_height());
 }

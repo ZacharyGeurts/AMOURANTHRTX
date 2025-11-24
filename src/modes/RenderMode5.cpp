@@ -29,7 +29,7 @@ RenderMode5::RenderMode5(VulkanRTX& rtx, uint32_t width, uint32_t height)
 
 RenderMode5::~RenderMode5()
 {
-    vkDeviceWaitIdle(g_ctx().device());
+    vkDeviceWaitIdle(stone_device());
 
     rtx_.updateRTXDescriptors(0, VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,
                               VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,
@@ -119,7 +119,7 @@ void RenderMode5::clearPlasma(VkCommandBuffer cmd)
 
 void RenderMode5::onResize(uint32_t width, uint32_t height)
 {
-    vkDeviceWaitIdle(g_ctx().device());
+    vkDeviceWaitIdle(stone_device());
 
     rtx_.updateRTXDescriptors(0, VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,
                               VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,

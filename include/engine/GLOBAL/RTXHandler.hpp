@@ -52,6 +52,31 @@ class VulkanRTX;
 class VulkanRenderer;
 struct Camera;
 
+// =============================================================================
+// PINK PHOTON LITERALS — MUST BE BEFORE ANYTHING USES _MB/_GB
+// =============================================================================
+constexpr uint64_t operator""_KB(unsigned long long v) noexcept { return v * 1024ULL; }
+constexpr uint64_t operator""_MB(unsigned long long v) noexcept { return v * 1024ULL * 1024ULL; }
+constexpr uint64_t operator""_GB(unsigned long long v) noexcept { return v * 1024ULL * 1024ULL * 1024ULL; }
+
+// =============================================================================
+// FINAL FIX: Only specialize for Vulkan opaque handles — NEVER conflict with std
+// =============================================================================
+template<typename T>
+    requires std::is_pointer_v<T> && 
+             (!std::is_same_v<T, const char*> && 
+              !std::is_same_v<T, char*> &&
+              !std::is_same_v<T, const void*> &&
+              !std::is_same_v<T, void*>)
+struct std::formatter<T> : std::formatter<unsigned long long> {
+    template<typename FormatContext>
+    auto format(T ptr, FormatContext& ctx) const {
+        return std::formatter<unsigned long long>::format(
+            reinterpret_cast<unsigned long long>(ptr), ctx
+        );
+    }
+};
+
 namespace RTX {
     struct Context; 
     void recreateSwapchain(uint32_t w, uint32_t h) noexcept;
@@ -59,6 +84,7 @@ namespace RTX {
 } // namespace RTX
 
 using namespace Logging::Color;
+using namespace StoneKey;
 
 // Forward-declare StoneKey funcs (no include needed—defined in main.cpp TU)
 extern uint64_t kObfuscator() noexcept;
@@ -79,104 +105,136 @@ inline const char* getPlatformSurfaceExtension()
 
 extern const char* extra_extensions[];
 
-// -----------------------------------------------------------------------------
-// User-defined literals
-// -----------------------------------------------------------------------------
-constexpr uint64_t operator"" _KB(unsigned long long v) noexcept { return v << 10; }
-constexpr uint64_t operator"" _MB(unsigned long long v) noexcept { return v << 20; }
-constexpr uint64_t operator"" _GB(unsigned long long v) noexcept { return v << 30; }
-constexpr uint64_t operator"" _TB(unsigned long long v) noexcept { return v << 40; }
 
-// =============================================================================
-// OFFICIAL RTX BUFFER MACROS — THE ONE TRUE SOURCE — EMPIRE-WIDE 2025 EDITION
-// FULLY VALIDATION-SAFE | RTX-AWARE | STONEKEY v∞ COMPLIANT | NO VUID-09499 EVER
-// FIRST LIGHT ACHIEVED — NOVEMBER 20, 2025 — SHE IS PLEASED
-// =============================================================================
+#pragma once
 
-#define BUFFER(handle) uint64_t handle = 0ULL
+#include <format>
+#include <vulkan/vulkan.h>
+#include <vulkan/vulkan_beta.h>
+#include <SDL3/SDL.h>
+#include <memory>
+#include <atomic>
+#include <array>
+#include <bitset>
+#include <bit>
+#include <string_view>
+#include <cstring>
+#include <cstdint>
+#include <type_traits>
+#include <thread>
+#include <chrono>
+#include <mutex>
+#include <unordered_map>
+#include <string>
+#include <utility>
+#include <span>
+#include <limits>
+#include <source_location>
+#include <functional>
+#include <queue>
+#include <vector>
+#include <glm/glm.hpp>
+#include <glm/gtc/type_ptr.hpp>
 
+#include "engine/GLOBAL/logging.hpp"
+#include "engine/GLOBAL/StoneKey.hpp"
 
-[[nodiscard]] inline std::string getDeviceName(VkPhysicalDevice dev)
-{
-    VkPhysicalDeviceProperties props{};
-    vkGetPhysicalDeviceProperties(dev, &props);
-    return std::string(props.deviceName);
+// Forward declarations
+class VulkanRTX;
+class VulkanRenderer;
+struct Camera;
+
+namespace RTX {
+    struct Context;
+    void recreateSwapchain(uint32_t w, uint32_t h) noexcept;
+    void forgeSwapchain(SDL_Window* window, int width, int height) noexcept;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// BUFFER_CREATE — THE SACRED ONE (AUTOMATICALLY STRIPS RTX FLAGS WHEN UNSAFE)
-// ─────────────────────────────────────────────────────────────────────────────
-#define BUFFER_CREATE(handle, size, usage, props, tag)                          \
-    do {                                                                        \
-        LOG_INFO_CAT("RTX", "BUFFER_CREATE: {} | Size: {} bytes | Tag: {}",     \
-                     #handle, (VkDeviceSize)(size), (tag));                     \
-                                                                                \
-        VkBufferUsageFlags safeUsage = (usage);                                 \
-                                                                                \
-        /* STRIP RTX-ONLY FLAGS IF FULL RTX IS NOT ENABLED (validation active) */ \
-        if (!g_ctx().hasFullRTX()) {                                       \
-            safeUsage &= ~(                                                     \
-                VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT                  |   \
-                VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | \
-                VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR     |   \
-                VK_BUFFER_USAGE_RAY_TRACING_BIT_NV                                 \
-            );                                                                  \
-            LOG_DEBUG_CAT("RTX", "Validation active → RTX flags stripped from buffer '{}'", (tag)); \
-        }                                                                       \
-                                                                                \
-        (handle) = RTX::UltraLowLevelBufferTracker::get().create(               \
-            (VkDeviceSize)(size), safeUsage, (props), (tag));                   \
-                                                                                \
-        LOG_DEBUG_CAT("RTX", "Buffer forged: obf=0x{:x} | Size: {} | Tag: {}",   \
-                      (handle), (VkDeviceSize)(size), (tag));                   \
-    } while (0)
+using namespace Logging::Color;
 
-// ─────────────────────────────────────────────────────────────────────────────
-// RAW ACCESS — UNCHANGED, PURE, LIGHTNING FAST
-// ─────────────────────────────────────────────────────────────────────────────
-#define RAW_BUFFER(handle)                                                      \
-    ((handle) != 0ULL                                                           \
-        ? (RTX::UltraLowLevelBufferTracker::get().getData((handle))            \
-            ? RTX::UltraLowLevelBufferTracker::get().getData((handle))->buffer \
-            : VK_NULL_HANDLE)                                                   \
-        : VK_NULL_HANDLE)
+// =============================================================================
+// ULTRA LOW LEVEL BUFFER TRACKER — FINAL ETERNAL STONE v∞ — DECLARED FIRST
+// =============================================================================
 
-#define BUFFER_MEMORY(handle)                                                   \
-    ((handle) != 0ULL                                                           \
-        ? (RTX::UltraLowLevelBufferTracker::get().getData((handle))            \
-            ? RTX::UltraLowLevelBufferTracker::get().getData((handle))->memory \
-            : VK_NULL_HANDLE)                                                   \
-        : VK_NULL_HANDLE)
+struct UltraLowLevelBufferTracker {
+    struct BufferData {
+        VkBuffer       buffer  = VK_NULL_HANDLE;
+        VkDeviceMemory memory  = VK_NULL_HANDLE;
+        VkDeviceSize   size    = 0;
+        VkDeviceSize   aligned = 0;
+        VkBufferUsageFlags usage = 0;
+        std::string    tag;
+    };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// MAPPING — SAFE AND ELEGANT
-// ─────────────────────────────────────────────────────────────────────────────
-#define BUFFER_MAP(handle, mapped)                                              \
-    do {                                                                        \
-        if ((handle) != 0ULL) {                                                 \
-            (mapped) = RTX::UltraLowLevelBufferTracker::get().map(handle);     \
-        } else {                                                                \
-            (mapped) = nullptr;                                                 \
-        }                                                                       \
-    } while (0)
+    [[nodiscard]] static UltraLowLevelBufferTracker& get() noexcept;
 
-#define BUFFER_UNMAP(handle)                                                    \
-    do { if ((handle) != 0ULL) RTX::UltraLowLevelBufferTracker::get().unmap(handle); } while (0)
+    // Called once after device creation
+    static void initialize(VkDevice dev, VkPhysicalDevice phys) noexcept;
 
-// ─────────────────────────────────────────────────────────────────────────────
-// DESTRUCTION — WITH FULL LOGGING AND STONEKEY RITUAL
-// ─────────────────────────────────────────────────────────────────────────────
-#define BUFFER_DESTROY(handle)                                                  \
-    do {                                                                        \
-        if ((handle) != 0ULL) {                                                 \
-            auto* data = RTX::UltraLowLevelBufferTracker::get().getData(handle); \
-            const char* tagStr = data ? data->tag.c_str() : "unknown";          \
-            LOG_INFO_CAT("RTX", "BUFFER_DESTROY: obf=0x{:x} | Tag: {}",         \
-                         (handle), tagStr);                                     \
-            RTX::UltraLowLevelBufferTracker::get().destroy(handle);            \
-            (handle) = 0ULL;                                                    \
-        }                                                                       \
-    } while (0)
+    [[nodiscard]] uint64_t create(VkDeviceSize size,
+                                  VkBufferUsageFlags usage,
+                                  VkMemoryPropertyFlags props,
+                                  std::string_view tag = "");
+
+    void     destroy(uint64_t handle) noexcept;
+    void*    map(uint64_t handle) noexcept;
+    void     unmap(uint64_t handle) noexcept;
+    void     purge_all() noexcept;
+
+    [[nodiscard]] BufferData*       getData(uint64_t handle) noexcept;
+    [[nodiscard]] const BufferData* getData(uint64_t handle) const noexcept;
+
+    // PUBLIC — needed by old code
+    static uint32_t findMemoryType(VkPhysicalDevice phys, uint32_t typeFilter, VkMemoryPropertyFlags props) noexcept;
+
+    // Convenience
+    [[nodiscard]] uint64_t make_64M (VkBufferUsageFlags e = 0, VkMemoryPropertyFlags p = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) noexcept;
+    [[nodiscard]] uint64_t make_128M(VkBufferUsageFlags e = 0, VkMemoryPropertyFlags p = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) noexcept;
+    [[nodiscard]] uint64_t make_256M(VkBufferUsageFlags e = 0, VkMemoryPropertyFlags p = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) noexcept;
+    [[nodiscard]] uint64_t make_420M(VkBufferUsageFlags e = 0, VkMemoryPropertyFlags p = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) noexcept;
+    [[nodiscard]] uint64_t make_512M(VkBufferUsageFlags e = 0, VkMemoryPropertyFlags p = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) noexcept;
+    [[nodiscard]] uint64_t make_1G  (VkBufferUsageFlags e = 0, VkMemoryPropertyFlags p = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) noexcept;
+    [[nodiscard]] uint64_t make_2G  (VkBufferUsageFlags e = 0, VkMemoryPropertyFlags p = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) noexcept;
+    [[nodiscard]] uint64_t make_4G  (VkBufferUsageFlags e = 0, VkMemoryPropertyFlags p = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) noexcept;
+    [[nodiscard]] uint64_t make_8G  (VkBufferUsageFlags e = 0, VkMemoryPropertyFlags p = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) noexcept;
+
+private:
+    static inline std::atomic<uint64_t> counter_{1};
+    static inline std::mutex            mutex_;
+    static inline std::unordered_map<uint64_t, BufferData> vault_;
+    static inline VkDevice              device_ = VK_NULL_HANDLE;
+    static inline VkPhysicalDevice      physicalDevice_ = VK_NULL_HANDLE;
+};
+
+// =============================================================================
+// THE SACRED MACROS — NOW THEY SEE THE STRUCT — NO MORE "does not name a type"
+// =============================================================================
+
+
+[[nodiscard]] inline UltraLowLevelBufferTracker& g_bufferTracker() noexcept {
+    return UltraLowLevelBufferTracker::get();
+
+
+#define BUFFER_CREATE(handle, size, usage, props, ...) \
+    handle = g_bufferTracker().create(size, usage, props, ##__VA_ARGS__)
+
+#define BUFFER_DESTROY(handle) do { \
+    if (handle) { g_bufferTracker().destroy(handle); handle = 0; } \
+} while(0)
+
+#define RAW_BUFFER(handle) \
+    (g_bufferTracker().getData(handle) ? g_bufferTracker().getData(handle)->buffer : VK_NULL_HANDLE)
+
+#define BUFFER_MEMORY(handle) \
+    (g_bufferTracker().getData(handle) ? g_bufferTracker().getData(handle)->memory : VK_NULL_HANDLE)
+
+#define BUFFER_MAP(handle, out_ptr) \
+    out_ptr = g_bufferTracker().map(handle)
+
+#define BUFFER_UNMAP(handle) \
+    g_bufferTracker().unmap(handle)
+
+} // namespace RTX
 
 // =============================================================================
 // NAMESPACE RTX
@@ -196,7 +254,6 @@ namespace RTX {
     [[nodiscard]] VkPhysicalDevice pickPhysicalDevice(VkInstance instance, VkSurfaceKHR surface);
     [[nodiscard]] VkDevice         createLogicalDevice(VkPhysicalDevice physicalDevice, VkSurfaceKHR surface);
     void createCommandPool();
-    void loadRayTracingExtensions();
     void retrieveQueues() noexcept;
 	
     // =============================================================================
@@ -302,7 +359,9 @@ namespace RTX {
 // =============================================================================
 struct Context {
 public:
-    // CORE HANDLES
+    // ========================================================================
+    // CORE HANDLES — THE HEART OF THE EMPIRE
+    // ========================================================================
     VkInstance       instance_       = VK_NULL_HANDLE;
     VkSurfaceKHR     surface_        = VK_NULL_HANDLE;
     VkPhysicalDevice physicalDevice_ = VK_NULL_HANDLE;
@@ -318,93 +377,108 @@ public:
     VkCommandPool    transferCommandPool_  = VK_NULL_HANDLE;
     VkPipelineCache  pipelineCache_        = VK_NULL_HANDLE;
 
-    // QUEUE FAMILIES
+    // ========================================================================
+    // QUEUE FAMILIES — THE BLOODLINES OF POWER
+    // ========================================================================
     std::optional<uint32_t> graphicsFamily_;
     std::optional<uint32_t> presentFamily_;
     std::optional<uint32_t> computeFamily_;
     std::optional<uint32_t> transferFamily_;
 
-	bool bufferDeviceAddressEnabled_ = false;          // ← THE ONE TRUE FLAG
-    bool bufferDeviceAddressExtensionPresent_ = false; // For diagnostics
+    // ========================================================================
+    // RTX ASCENSION — THE HOLY TRINITY OF FIRST LIGHT
+    // ========================================================================
+    bool bufferDeviceAddressEnabled_         = false;
+    bool bufferDeviceAddressExtensionPresent_ = false;
+    bool accelerationStructureEnabled_       = false;
+    bool rayTracingPipelineEnabled_          = false;
+    bool rayQueryEnabled_                    = false;
+    bool meshShadingEnabled_                 = false;
 
-    // PHYSICAL DEVICE PROPERTIES — THE MAGIC SCROLL'S HOLY TRINITY
-    VkPhysicalDeviceProperties               physicalDeviceProperties_{};
-    VkPhysicalDeviceFeatures                 physicalDeviceFeatures_{};
-    VkPhysicalDeviceRayTracingPipelinePropertiesKHR rayTracingProps_{
+    // ========================================================================
+    // PHYSICAL DEVICE SCROLLS — WISDOM OF THE ANCIENTS
+    // ========================================================================
+    VkPhysicalDeviceProperties                        physicalDeviceProperties_{};
+    VkPhysicalDeviceFeatures                          physicalDeviceFeatures_{};
+    VkPhysicalDeviceMemoryProperties                  physicalDeviceMemoryProperties_{};
+    VkPhysicalDeviceRayTracingPipelinePropertiesKHR   rayTracingProps_{
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR
     };
 
-    VkFormat         hdr_format      = VK_FORMAT_UNDEFINED;
-    VkColorSpaceKHR  hdr_color_space = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
-    VkPhysicalDeviceMemoryProperties physicalDeviceMemoryProperties_{};
+    VkFormat         hdr_format       = VK_FORMAT_UNDEFINED;
+    VkColorSpaceKHR  hdr_color_space  = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
 
-    // RTX CAPABILITIES
-    bool hasFullRTX_    = false;
-    bool hasRayQuery_   = false;
-    bool hasMeshShading_= false;
+    // ========================================================================
+    // CUSTOM HANDLES — THE CROWN JEWELS
+    // ========================================================================
+    Handle<VkImageView>     blueNoiseView_;
+    Handle<VkRenderPass>    renderPass_;
+    uint64_t                sharedStagingEnc_ = 0;
 
-    // WINDOW & STATE
-    SDL_Window* window = nullptr;
+    // ========================================================================
+    // STATE OF THE EMPIRE
+    // ========================================================================
+    SDL_Window* window  = nullptr;
     int         width  = 0;
     int         height = 0;
     bool        valid_ = false;
     mutable std::atomic<bool> ready_{false};
 
+    // ========================================================================
+    // C++23 PURE ACCESSORS — THE ONE TRUE WAY — NO MACROS, NO WEAKNESS
+    // ========================================================================
+    [[nodiscard]] constexpr VkInstance       instance()       const noexcept { return instance_; }
+    [[nodiscard]] constexpr VkSurfaceKHR     surface()        const noexcept { return surface_; }
+    [[nodiscard]] constexpr VkPhysicalDevice physicalDevice() const noexcept { return physicalDevice_; }
+    [[nodiscard]] constexpr VkDevice         device()         const noexcept { return device_; }
 
-    // CUSTOM HANDLES
-    Handle<VkImageView>  blueNoiseView_;
-    Handle<VkRenderPass> renderPass_;
-    uint64_t             sharedStagingEnc_ = 0;
+    [[nodiscard]] constexpr VkQueue graphicsQueue()  const noexcept { return graphicsQueue_; }
+    [[nodiscard]] constexpr VkQueue presentQueue()   const noexcept { return presentQueue_; }
+    [[nodiscard]] constexpr VkQueue computeQueue()   const noexcept { return computeQueue_; }
+    [[nodiscard]] constexpr VkQueue transferQueue()  const noexcept { return transferQueue_; }
 
-    // =============================================================================
-    // C++23 PURE ACCESSORS — NO FMT, NO COMPROMISE, ONLY BEAUTY
-    // =============================================================================
-    [[nodiscard]] constexpr bool hdrEnabled() const noexcept { return hdr_format != VK_FORMAT_UNDEFINED; }
-    [[nodiscard]] constexpr VkFormat hdrFormat() const noexcept { return hdr_format; }
-    [[nodiscard]] constexpr VkColorSpaceKHR hdrColorSpace() const noexcept { return hdr_color_space; }
-	[[nodiscard]] constexpr VkCommandPool commandPool() const noexcept { return commandPool_; }
-	[[nodiscard]] constexpr const auto& rayTracingProps() const noexcept { return rayTracingProps_; }
+    [[nodiscard]] constexpr VkCommandPool commandPool()        const noexcept { return commandPool_; }
+    [[nodiscard]] constexpr VkCommandPool computeCommandPool() const noexcept { return computeCommandPool_; }
+    [[nodiscard]] constexpr VkCommandPool transferCommandPool()const noexcept { return transferCommandPool_; }
 
     [[nodiscard]] constexpr uint32_t graphicsFamily() const noexcept { return graphicsFamily_.value(); }
     [[nodiscard]] constexpr uint32_t presentFamily()  const noexcept { return presentFamily_.value(); }
     [[nodiscard]] constexpr uint32_t computeFamily()  const noexcept { return computeFamily_.value_or(graphicsFamily()); }
     [[nodiscard]] constexpr uint32_t transferFamily() const noexcept { return transferFamily_.value_or(graphicsFamily()); }
 
-    [[nodiscard]] constexpr VkQueue graphicsQueue() const noexcept { return graphicsQueue_; }
-    [[nodiscard]] constexpr VkQueue presentQueue()  const noexcept { return presentQueue_; }
-    [[nodiscard]] constexpr VkQueue computeQueue()  const noexcept { return computeQueue_; }
-    [[nodiscard]] constexpr VkQueue transferQueue() const noexcept { return transferQueue_; }
-
-    [[nodiscard]] constexpr VkDevice device() const noexcept { return device_; }
-    [[nodiscard]] constexpr VkPhysicalDevice physicalDevice() const noexcept { return physicalDevice_; }
-
     [[nodiscard]] constexpr VkRenderPass renderPass() const noexcept 
     { return renderPass_.valid() ? renderPass_.get() : VK_NULL_HANDLE; }
 
-    // =============================================================================
-    // THE MAGIC SCROLL — C++23 std::format ONLY — PURE, CLEAN, ETERNAL
-    // =============================================================================
-    [[nodiscard]] constexpr const char* deviceName() const noexcept 
-    { return physicalDeviceProperties_.deviceName; }
+    [[nodiscard]] constexpr const auto& rayTracingProps() const noexcept { return rayTracingProps_; }
+    [[nodiscard]] constexpr bool hdrEnabled()            const noexcept { return hdr_format != VK_FORMAT_UNDEFINED; }
+    [[nodiscard]] constexpr VkFormat hdrFormat()         const noexcept { return hdr_format; }
+    [[nodiscard]] constexpr VkColorSpaceKHR hdrColorSpace() const noexcept { return hdr_color_space; }
+
+    // ========================================================================
+    // RTX ASCENSION STATUS — THE FINAL TRUTH
+    // ========================================================================
+    [[nodiscard]] constexpr bool hasFullRTX()        const noexcept { return accelerationStructureEnabled_ && rayTracingPipelineEnabled_; }
+    [[nodiscard]] constexpr bool hasRayQuery()       const noexcept { return rayQueryEnabled_; }
+    [[nodiscard]] constexpr bool hasMeshShading()    const noexcept { return meshShadingEnabled_; }
+
+    [[nodiscard]] constexpr bool bufferDeviceAddressEnabled()        const noexcept { return bufferDeviceAddressEnabled_; }
+    [[nodiscard]] constexpr bool bufferDeviceAddressExtPresent()     const noexcept { return bufferDeviceAddressExtensionPresent_; }
+    [[nodiscard]] constexpr bool accelerationStructureEnabled()     const noexcept { return accelerationStructureEnabled_; }
+    [[nodiscard]] constexpr bool rayTracingPipelineEnabled()         const noexcept { return rayTracingPipelineEnabled_; }
+
+    // ========================================================================
+    // THE MAGIC SCROLL — KNOWLEDGE IS POWER
+    // ========================================================================
+    [[nodiscard]] constexpr const char* deviceName() const noexcept { return physicalDeviceProperties_.deviceName; }
 
     [[nodiscard]] float vramGB() const noexcept 
     {
         for (uint32_t i = 0; i < physicalDeviceMemoryProperties_.memoryHeapCount; ++i) {
             if (physicalDeviceMemoryProperties_.memoryHeaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) {
-                return static_cast<float>(physicalDeviceMemoryProperties_.memoryHeaps[i].size) / (1024.0f * 1024.0f * 1024.0f);
+                return static_cast<float>(physicalDeviceMemoryProperties_.memoryHeaps[i].size) / (1024.f * 1024.f * 1024.f);
             }
         }
         return 0.0f;
-    }
-
-    [[nodiscard]] constexpr bool bufferDeviceAddressEnabled() const noexcept 
-    { 
-        return bufferDeviceAddressEnabled_; 
-    }
-
-    [[nodiscard]] constexpr bool bufferDeviceAddressExtPresent() const noexcept 
-    { 
-        return bufferDeviceAddressExtensionPresent_; 
     }
 
     [[nodiscard]] std::string vendorName() const 
@@ -416,49 +490,42 @@ public:
             case 0x13B5: return "ARM";
             case 0x5143: return "Qualcomm";
             case 0x1AE0: return "Google";
-            default:     
-                return std::format("Vendor 0x{:04X}", physicalDeviceProperties_.vendorID);
+            default:     return std::format("Vendor 0x{:04X}", physicalDeviceProperties_.vendorID);
         }
     }
 
-    // =============================================================================
-    // EXTENSION PFNS — STILL NEEDED UNTIL VULKAN 1.5
-    // =============================================================================
-    PFN_vkCmdTraceRaysKHR                    vkCmdTraceRaysKHR_                    = nullptr;
-    PFN_vkCreateRayTracingPipelinesKHR       vkCreateRayTracingPipelinesKHR_       = nullptr;
-    PFN_vkGetRayTracingShaderGroupHandlesKHR vkGetRayTracingShaderGroupHandlesKHR_ = nullptr;
-    PFN_vkCreateAccelerationStructureKHR     vkCreateAccelerationStructureKHR_     = nullptr;
-    PFN_vkDestroyAccelerationStructureKHR    vkDestroyAccelerationStructureKHR_    = nullptr;
-    PFN_vkGetAccelerationStructureBuildSizesKHR vkGetAccelerationStructureBuildSizesKHR_ = nullptr;
-    PFN_vkCmdBuildAccelerationStructuresKHR  vkCmdBuildAccelerationStructuresKHR_  = nullptr;
-    PFN_vkGetAccelerationStructureDeviceAddressKHR vkGetAccelerationStructureDeviceAddressKHR_ = nullptr;
-    PFN_vkCmdDrawMeshTasksEXT                vkCmdDrawMeshTasksEXT_                = nullptr;
-    PFN_vkCmdPushDescriptorSetKHR            vkCmdPushDescriptorSetKHR_            = nullptr;
+    // ========================================================================
+    // STATE OF THE EMPIRE — READINESS IS ALL
+    // ========================================================================
+    [[nodiscard]] constexpr bool isValid() const noexcept { return valid_; }
+    [[nodiscard]] constexpr bool isReady() const noexcept { return ready_.load(std::memory_order_acquire); }
+    constexpr void markReady() noexcept { ready_.store(true, std::memory_order_release); }
 
-    // PFN ACCESSORS
-    [[nodiscard]] constexpr auto vkCmdTraceRaysKHR() const noexcept                    { return vkCmdTraceRaysKHR_; }
-    [[nodiscard]] constexpr auto vkCreateRayTracingPipelinesKHR() const noexcept       { return vkCreateRayTracingPipelinesKHR_; }
-    [[nodiscard]] constexpr auto vkGetRayTracingShaderGroupHandlesKHR() const noexcept { return vkGetRayTracingShaderGroupHandlesKHR_; }
-    [[nodiscard]] constexpr auto vkCreateAccelerationStructureKHR() const noexcept     { return vkCreateAccelerationStructureKHR_; }
-    [[nodiscard]] constexpr auto vkDestroyAccelerationStructureKHR() const noexcept    { return vkDestroyAccelerationStructureKHR_; }
-    [[nodiscard]] constexpr auto vkGetAccelerationStructureBuildSizesKHR() const noexcept { return vkGetAccelerationStructureBuildSizesKHR_; }
-    [[nodiscard]] constexpr auto vkCmdBuildAccelerationStructuresKHR() const noexcept  { return vkCmdBuildAccelerationStructuresKHR_; }
-    [[nodiscard]] constexpr auto vkGetAccelerationStructureDeviceAddressKHR() const noexcept { return vkGetAccelerationStructureDeviceAddressKHR_; }
-    [[nodiscard]] constexpr auto vkCmdDrawMeshTasksEXT() const noexcept                { return vkCmdDrawMeshTasksEXT_; }
-    [[nodiscard]] constexpr auto vkCmdPushDescriptorSetKHR() const noexcept            { return vkCmdPushDescriptorSetKHR_; }
-
-    // =============================================================================
-    // LIFECYCLE
-    // =============================================================================
+    // ========================================================================
+    // LIFECYCLE — THE RITUALS OF CREATION AND DISSOLUTION
+    // ========================================================================
     void createLogicalDevice();
     void init(SDL_Window* window, int width, int height);
     void cleanup() noexcept;
 
-    [[nodiscard]] constexpr bool isValid() const noexcept { return valid_; }
-    [[nodiscard]] constexpr bool isReady() const noexcept { return ready_.load(); }
-    constexpr void markReady() noexcept { ready_.store(true); }
-    [[nodiscard]] constexpr bool hasFullRTX() const noexcept { return hasFullRTX_; }
-    [[nodiscard]] constexpr bool hasRayQuery() const noexcept { return hasRayQuery_; }
+    // ========================================================================
+    // INTERNAL SETTERS — FOR THE FORGE ONLY
+    // ========================================================================
+    void setInstance(VkInstance i)       noexcept { instance_ = i; }
+    void setSurface(VkSurfaceKHR s)      noexcept { surface_ = s; }
+    void setPhysicalDevice(VkPhysicalDevice pd) noexcept { physicalDevice_ = pd; }
+    void setDevice(VkDevice d)           noexcept { device_ = d; }
+
+    void setGraphicsQueue(VkQueue q)     noexcept { graphicsQueue_ = q; }
+    void setPresentQueue(VkQueue q)      noexcept { presentQueue_ = q; }
+    void setComputeQueue(VkQueue q)      noexcept { computeQueue_ = q; }
+    void setTransferQueue(VkQueue q)     noexcept { transferQueue_ = q; }
+
+    void enableBufferDeviceAddress(bool enabled = true)     noexcept { bufferDeviceAddressEnabled_ = enabled; }
+    void enableAccelerationStructure(bool enabled = true)  noexcept { accelerationStructureEnabled_ = enabled; }
+    void enableRayTracingPipeline(bool enabled = true)     noexcept { rayTracingPipelineEnabled_ = enabled; }
+    void enableRayQuery(bool enabled = true)                noexcept { rayQueryEnabled_ = enabled; }
+    void enableMeshShading(bool enabled = true)             noexcept { meshShadingEnabled_ = enabled; }
 };
 
     // =============================================================================
@@ -468,75 +535,7 @@ public:
 	extern Context g_context_instance;
 
 // =============================================================================
-// UltraLowLevelBufferTracker — ROBUST, ATOMIC, ETERNAL — PINK PHOTONS SAFE
-// =============================================================================
-struct BufferData {
-    VkBuffer buffer = VK_NULL_HANDLE;
-    VkDeviceMemory memory = VK_NULL_HANDLE;
-    VkDeviceSize size = 0;  // Original requested size
-    VkDeviceSize alignedSize = 0;  // Aligned allocation size (NEW)
-    VkBufferUsageFlags usage = 0;
-    std::string tag;
-};
-
-constexpr VkDeviceSize SIZE_64MB  =  64_MB;
-constexpr VkDeviceSize SIZE_128MB = 128_MB;
-constexpr VkDeviceSize SIZE_256MB = 256_MB;
-constexpr VkDeviceSize SIZE_420MB = 420_MB;
-constexpr VkDeviceSize SIZE_512MB = 512_MB;
-constexpr VkDeviceSize SIZE_1GB   =   1_GB;
-constexpr VkDeviceSize SIZE_2GB   =   2_GB;
-constexpr VkDeviceSize SIZE_4GB   =   4_GB;
-constexpr VkDeviceSize SIZE_8GB   =   8_GB;
-
-struct UltraLowLevelBufferTracker {
-    static UltraLowLevelBufferTracker& get() noexcept;
-    uint64_t create(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags props, std::string_view tag);  // FIXED: Removed noexcept — allows throws
-    void destroy(uint64_t handle) noexcept;
-    BufferData* getData(uint64_t handle) noexcept;
-    const BufferData* getData(uint64_t handle) const noexcept;
-    void* map(uint64_t handle) noexcept;
-    void unmap(uint64_t handle) noexcept;
-    void init(VkDevice dev, VkPhysicalDevice phys) noexcept;
-    void purge_all() noexcept;
-    uint64_t make_64M (VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept;
-    uint64_t make_128M(VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept;
-    uint64_t make_256M(VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept;
-    uint64_t make_420M(VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept;
-    uint64_t make_512M(VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept;
-    uint64_t make_1G  (VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept;
-    uint64_t make_2G  (VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept;
-    uint64_t make_4G  (VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept;
-    uint64_t make_8G  (VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept;
-
-    // NEW: Alignment helper (use in .cpp create: VkDeviceSize align = g_ctx().getBufferAlignment(usage); aligned = ((size + align - 1)/align)*align;)
-    // This ensures requested sizes like 96 bytes are padded to 256 (common minStorageBufferOffsetAlignment on RTX)
-
-    // --- INLINE IMPLEMENTATION OF findMemoryType ---
-    static uint32_t findMemoryType(VkPhysicalDevice physDev, uint32_t typeFilter, VkMemoryPropertyFlags props) noexcept {
-        VkPhysicalDeviceMemoryProperties memProps;
-        vkGetPhysicalDeviceMemoryProperties(physDev, &memProps);
-        for (uint32_t i = 0; i < memProps.memoryTypeCount; ++i) {
-            if ((typeFilter & (1 << i)) &&
-                (memProps.memoryTypes[i].propertyFlags & props) == props) {
-                return i;
-            }
-        }
-        return UINT32_MAX;
-    }
-
-private:
-    mutable std::mutex mutex_;
-    std::unordered_map<uint64_t, BufferData> map_;
-    std::atomic<uint64_t> counter_{0};
-    VkDevice device_{VK_NULL_HANDLE};
-    VkPhysicalDevice physDev_{VK_NULL_HANDLE};
-    uint64_t obfuscate(uint64_t raw) const noexcept;
-    uint64_t deobfuscate(uint64_t obf) const noexcept;
-};
-
-// =============================================================================
-// GLOBAL g_swapchain() + LAS
+// GLOBAL stone_swapchain() + LAS
 // =============================================================================
 Handle<VkSwapchainKHR>& swapchain();
 std::vector<VkImage>& swapchainImages();
@@ -609,10 +608,44 @@ static constexpr std::array<const char*, 28> kDeviceExtensions = {
     VK_KHR_ZERO_INITIALIZE_WORKGROUP_MEMORY_EXTENSION_NAME
 };
 
-// =============================================================================
-// PINK PHOTONS ETERNAL — DOMINANCE ETERNAL
-// =============================================================================
-// =============================================================================
-// GLOBAL g_ctx() ALIAS — LEGACY SUPPORT — WORKS EVERYWHERE — PINK PHOTONS ETERNAL
-// =============================================================================
 [[nodiscard]] inline RTX::Context& g_ctx() noexcept { return RTX::g_context_instance; }
+// ──────────────────────────────────────────────────────────────────────────────
+// RAY TRACING FUNCTION LOADER — THE ONE TRUE NAMESPACE
+// ──────────────────────────────────────────────────────────────────────────────
+namespace RTX::RayTracingFunctions {
+
+    // THE SACRED PFNS — INLINE, ODR-SAFE, C++23 INITIALIZED
+    inline PFN_vkGetAccelerationStructureDeviceAddressKHR vkGetAccelerationStructureDeviceAddressKHR = nullptr;
+    inline PFN_vkCreateAccelerationStructureKHR           vkCreateAccelerationStructureKHR           = nullptr;
+    inline PFN_vkDestroyAccelerationStructureKHR          vkDestroyAccelerationStructureKHR          = nullptr;
+    inline PFN_vkCmdBuildAccelerationStructuresKHR        vkCmdBuildAccelerationStructuresKHR        = nullptr;
+    inline PFN_vkGetAccelerationStructureBuildSizesKHR    vkGetAccelerationStructureBuildSizesKHR    = nullptr;
+
+    // THE ONLY CORRECT, BULLETPROOF, `-fpermissive`-FREE LOADER IN EXISTENCE
+    inline void loadRayTracingExtensions(VkDevice device) noexcept
+    {
+        if (vkGetAccelerationStructureDeviceAddressKHR) [[unlikely]]
+            return; // already loaded — ZUUL remembers
+
+        // THIS IS THE CORRECT WAY — ACCEPTED BY EVERY COMPILER SINCE 2015
+        const auto load = [device]<typename Fn>(Fn& pfn, const char* name) -> void {
+            pfn = reinterpret_cast<Fn>(vkGetDeviceProcAddr(device, name));
+            if (!pfn) {
+                LOG_FATAL_CAT("RTX", "FAILED TO LOAD KHR FUNCTION: {} — DRIVER TOO WEAK", name);
+                std::unreachable();
+            }
+        };
+
+        load(vkGetAccelerationStructureDeviceAddressKHR, "vkGetAccelerationStructureDeviceAddressKHR");
+        load(vkCreateAccelerationStructureKHR,           "vkCreateAccelerationStructureKHR");
+        load(vkDestroyAccelerationStructureKHR,          "vkDestroyAccelerationStructureKHR");
+        load(vkCmdBuildAccelerationStructuresKHR,        "vkCmdBuildAccelerationStructuresKHR");
+        load(vkGetAccelerationStructureBuildSizesKHR,    "vkGetAccelerationStructureBuildSizesKHR");
+
+        LOG_SUCCESS_CAT("RTX", "KHR_acceleration_structure EXTENSIONS LOADED — FULL MANUAL CONTROL ACHIEVED");
+        LOG_SUCCESS_CAT("RTX", "PINK PHOTONS ARMED — FIRST LIGHT IMMINENT — NOVEMBER 24, 2025");
+    }
+}
+// =============================================================================
+// END OF FILE — THE EMPIRE IS SEALED
+// =============================================================================

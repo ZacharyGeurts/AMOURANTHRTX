@@ -9,7 +9,7 @@
 // 2. Commercial licensing: gzac5314@gmail.com
 //
 // TRUE CONSTEXPR STONEKEY v∞ — NOVEMBER 19, 2025 — APOCALYPSE FINAL v1.5
-// MAIN — g_swapchain() FORGED AT DAWN — PINK PHOTONS ETERNAL — VALHALLA UNBREACHABLE
+// MAIN — stone_swapchain() FORGED AT DAWN — PINK PHOTONS ETERNAL — VALHALLA UNBREACHABLE
 // =============================================================================
 
 #pragma once
@@ -25,18 +25,10 @@
 #include <string>
 #include <array>
 
-// Forward declarations for global StoneKey accessors (NEVER #include StoneKey.hpp in other headers)
-namespace StoneKey::Raw { struct Cache; }
-
-inline VkDevice         g_device() noexcept;
-inline VkInstance       g_instance() noexcept;
-inline VkPhysicalDevice g_PhysicalDevice() noexcept;
-inline VkSurfaceKHR     g_surface() noexcept;
-
-inline void set_g_device(VkDevice) noexcept;
-inline void set_g_instance(VkInstance) noexcept;
-inline void set_g_PhysicalDevice(VkPhysicalDevice) noexcept;
-inline void set_g_surface(VkSurfaceKHR) noexcept;
+using StoneKey::stone_device;
+using StoneKey::stone_physical;
+using StoneKey::stone_instance;
+using StoneKey::stone_surface;
 
 namespace RTX {
 
@@ -104,7 +96,7 @@ public:
     [[nodiscard]] const VkStridedDeviceAddressRegionKHR* getHitSbtRegion()      const noexcept { return &hitSbtRegion_; }
     [[nodiscard]] const VkStridedDeviceAddressRegionKHR* getCallableSbtRegion() const noexcept { return &callableSbtRegion_; }
 
-    // SBT REGIONS — EXACTLY WHAT vkCmdTraceRaysKHR AND VulkanRenderer EXPECT
+    // SBT REGIONS — EXACTLY WHAT rtCmdTraceRaysKHR AND VulkanRenderer EXPECT
     [[nodiscard]] const VkStridedDeviceAddressRegionKHR& raygenRegion()   const noexcept { return raygenSbtRegion_; }
     [[nodiscard]] const VkStridedDeviceAddressRegionKHR& missRegion()     const noexcept { return missSbtRegion_; }
     [[nodiscard]] const VkStridedDeviceAddressRegionKHR& hitRegion()      const noexcept { return hitSbtRegion_; }
