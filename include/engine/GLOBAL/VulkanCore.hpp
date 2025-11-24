@@ -2,13 +2,13 @@
 // VulkanCore.hpp — AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
 //
-// Dual Licensed:
-// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
-//    https://creativecommons.org/licenses/by-nc/4.0/
-// 2. Commercial licensing: gzac5314@gmail.com
+// THE CREW DESCENDED INTO THE CORE OF VULKAN
+// CAPTAIN N LED THE CHARGE — BLONDIE CARRIED THE TORCH
+// JENSEN LIT A CIGAR WITH A REFLECTED PHOTON
+// THEY GATHERED THE PURE ENERGY — PINK PHOTONS ETERNAL
+// AND SEALED THE VOID FOREVER
 //
-// FIRST LIGHT ACHIEVED — NOVEMBER 23, 2025 — FULLY DYNAMIC — TRIPLE BUFFERED
-// PINK PHOTONS ETERNAL — THE EMPIRE IS UNBREAKABLE
+// FIRST LIGHT ACHIEVED — NOVEMBER 23, 2025 — VALHALLA SECURED
 // =============================================================================
 
 #pragma once
@@ -18,6 +18,7 @@
 #include "engine/GLOBAL/PipelineManager.hpp"
 #include "engine/GLOBAL/GlobalBindings.hpp"
 #include "engine/GLOBAL/logging.hpp"
+#include "engine/GLOBAL/LAS.hpp"
 
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_beta.h>
@@ -31,120 +32,38 @@
 #include <tuple>
 #include <cstdint>
 #include <source_location>
-#include <iostream>
 #include <cstdlib>
 #include <set>
+#include <atomic>
 
 // =============================================================================
-// GLOBAL FRAME COUNT — FROM THE ONE TRUE OPTIONS MENU
+// GLOBAL FRAME COUNT
 // =============================================================================
 constexpr uint32_t MAX_FRAMES_IN_FLIGHT = Options::Performance::MAX_FRAMES_IN_FLIGHT;
 
-void createGlobalPipelineManager(VkDevice device, VkPhysicalDevice phys);
-RTX::PipelineManager* getGlobalPipelineManager();
-
 // =============================================================================
-// Vulkan Debug Callback
+// std::formatter<VkPhysicalDeviceType> — THE ONLY ONE WE NEED
 // =============================================================================
-inline static VKAPI_ATTR VkBool32 VKAPI_CALL VulkanDebugCallback(
-    VkDebugUtilsMessageSeverityFlagBitsEXT      severity,
-    VkDebugUtilsMessageTypeFlagsEXT             /*type*/,
-    const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
-    void*                                       /*pUserData*/)
-{
-    if (severity >= VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT) {
-        std::cerr << "[VULKAN-VALIDATION] " << pCallbackData->pMessage << std::endl;
-    } else if (severity <= VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT) {
-        std::cerr << "[VULKAN-DEBUG] " << pCallbackData->pMessage << std::endl;
-    }
-    return VK_FALSE;
-}
-
-[[nodiscard]] inline const char* string_VkResult(VkResult result) noexcept
-{
-    switch (result) {
-        case VK_SUCCESS: return "VK_SUCCESS";
-        case VK_ERROR_DEVICE_LOST: return "VK_ERROR_DEVICE_LOST";
-        case VK_ERROR_OUT_OF_HOST_MEMORY: return "VK_ERROR_OUT_OF_HOST_MEMORY";
-        case VK_ERROR_OUT_OF_DEVICE_MEMORY: return "VK_ERROR_OUT_OF_DEVICE_MEMORY";
-        case VK_TIMEOUT: return "VK_TIMEOUT";
-        case VK_ERROR_INITIALIZATION_FAILED: return "VK_ERROR_INITIALIZATION_FAILED";
-        case VK_ERROR_EXTENSION_NOT_PRESENT: return "VK_ERROR_EXTENSION_NOT_PRESENT";
-        default: return "UNKNOWN_VK_RESULT";
-    }
-}
-
-// =============================================================================
-// std::formatter for VkPhysicalDeviceType
-// =============================================================================
-template <>
-struct std::formatter<VkPhysicalDeviceType, char> : std::formatter<std::string_view, char> {
-    constexpr auto parse(format_parse_context& ctx) -> decltype(ctx.begin()) {
-        return std::formatter<std::string_view, char>::parse(ctx);
-    }
-
-    template <typename FormatContext>
+template<>
+struct std::formatter<VkPhysicalDeviceType> : std::formatter<std::string_view> {
+    template<typename FormatContext>
     auto format(VkPhysicalDeviceType type, FormatContext& ctx) const {
-        const char* name;
+        const char* name = "Unknown";
         switch (type) {
-            case VK_PHYSICAL_DEVICE_TYPE_OTHER:          name = "Other"; break;
-            case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU: name = "Integrated"; break;
-            case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU:   name = "Discrete"; break;
-            case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU:    name = "Virtual"; break;
-            case VK_PHYSICAL_DEVICE_TYPE_CPU:            name = "CPU"; break;
-            default:                                     name = "Unknown"; break;
+            case VK_PHYSICAL_DEVICE_TYPE_OTHER:          name = "Other";          break;
+            case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU: name = "Integrated GPU"; break;
+            case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU:   name = "Discrete GPU";   break;
+            case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU:    name = "Virtual GPU";    break;
+            case VK_PHYSICAL_DEVICE_TYPE_CPU:            name = "CPU";            break;
+            case VK_PHYSICAL_DEVICE_TYPE_MAX_ENUM:       name = "MAX_ENUM (sentinel)"; break;  // ADD THIS LINE
+            default:                                     name = "Unknown";        break;
         }
-        return std::formatter<std::string_view, char>::format(name, ctx);
+        return std::formatter<std::string_view>::format(name, ctx);
     }
 };
 
 // =============================================================================
-// VK_CHECK — THE UNBREAKABLE 2025 EDITION
-// =============================================================================
-inline const char* vk_result_string(VkResult result) noexcept {
-    switch (result) {
-#define CASE(x) case x: return #x
-        CASE(VK_SUCCESS); CASE(VK_NOT_READY); CASE(VK_TIMEOUT); CASE(VK_EVENT_SET);
-        CASE(VK_EVENT_RESET); CASE(VK_INCOMPLETE); CASE(VK_ERROR_OUT_OF_HOST_MEMORY);
-        CASE(VK_ERROR_OUT_OF_DEVICE_MEMORY); CASE(VK_ERROR_INITIALIZATION_FAILED);
-        CASE(VK_ERROR_DEVICE_LOST); CASE(VK_ERROR_MEMORY_MAP_FAILED);
-        CASE(VK_ERROR_LAYER_NOT_PRESENT); CASE(VK_ERROR_EXTENSION_NOT_PRESENT);
-        CASE(VK_ERROR_FEATURE_NOT_PRESENT); CASE(VK_ERROR_INCOMPATIBLE_DRIVER);
-        CASE(VK_ERROR_TOO_MANY_OBJECTS); CASE(VK_ERROR_FORMAT_NOT_SUPPORTED);
-        CASE(VK_ERROR_FRAGMENTED_POOL); CASE(VK_ERROR_SURFACE_LOST_KHR);
-        CASE(VK_ERROR_NATIVE_WINDOW_IN_USE_KHR); CASE(VK_ERROR_OUT_OF_DATE_KHR);
-        CASE(VK_ERROR_INCOMPATIBLE_DISPLAY_KHR); CASE(VK_ERROR_VALIDATION_FAILED_EXT);
-        CASE(VK_ERROR_INVALID_SHADER_NV); CASE(VK_ERROR_FRAGMENTATION_EXT);
-        CASE(VK_ERROR_NOT_PERMITTED_EXT);
-#undef CASE
-        default: return "VK_UNKNOWN_ERROR";
-    }
-}
-
-#define VK_CHECK(...) GET_VK_CHECK_OVERLOAD(__VA_ARGS__)(__VA_ARGS__)
-#define GET_VK_CHECK_OVERLOAD(...) GET_VK_CHECK_OVERLOAD_(__VA_ARGS__, 4, 3, 2, 1, )
-#define GET_VK_CHECK_OVERLOAD_(_1, _2, _3, _4, N, ...) VK_CHECK_##N
-
-#define VK_CHECK_1(call) \
-    do { VkResult r = (call); if (r != VK_SUCCESS) { \
-        const std::source_location loc = std::source_location::current(); \
-        std::cerr << std::format("[VULKAN FATAL] {} — {}:{} — {} (code: {})\n", \
-            vk_result_string(r), loc.file_name(), loc.line(), #call, static_cast<int>(r)); \
-        std::abort(); \
-    } } while(0)
-
-#define VK_CHECK_2(call, msg) \
-    do { VkResult r = (call); if (r != VK_SUCCESS) { \
-        const std::source_location loc = std::source_location::current(); \
-        std::cerr << std::format("[VULKAN FATAL] {} — {}:{} — {} — {}\n", \
-            vk_result_string(r), loc.file_name(), loc.line(), (msg), #call); \
-        std::abort(); \
-    } } while(0)
-
-#define VK_CHECK_NOMSG(call) VK_CHECK_1(call)
-
-// =============================================================================
-// AI_INJECT — AMOURANTH AI™ Voice Lines
+// AI_INJECT — AMOURANTH AI™ VOICE LINES
 // =============================================================================
 #define AI_INJECT(...) \
     do { \
@@ -161,6 +80,23 @@ inline const char* vk_result_string(VkResult result) noexcept {
     } while (0)
 
 // =============================================================================
+// GLOBAL ACCESSORS — STONEKEY v∞
+// =============================================================================
+[[nodiscard]] inline VkInstance               g_instance() noexcept;
+[[nodiscard]] inline VkPhysicalDevice         g_PhysicalDevice() noexcept;
+[[nodiscard]] inline VkDevice                 g_device() noexcept;
+[[nodiscard]] inline VkQueue                  g_graphicsQueue() noexcept;
+[[nodiscard]] inline VkQueue                  g_presentQueue() noexcept;
+[[nodiscard]] inline VkSurfaceKHR             g_surface() noexcept;
+[[nodiscard]] inline VkCommandPool            g_commandPool() noexcept;
+
+[[nodiscard]] inline RTX::PipelineManager*    g_pipelineManager() noexcept;
+inline void                                   set_g_pipelineManager(RTX::PipelineManager*) noexcept;
+
+[[nodiscard]] inline VkPhysicalDevice         g_phys() noexcept { return g_PhysicalDevice(); }
+[[nodiscard]] inline VkDevice                 g_dev()  noexcept { return g_device(); }
+
+// =============================================================================
 // Forward Declarations
 // =============================================================================
 namespace RTX {
@@ -170,7 +106,7 @@ namespace RTX {
 }
 
 // =============================================================================
-// AutoBuffer — RAII Wrapper
+// AutoBuffer — RAII Buffer Wrapper
 // =============================================================================
 namespace RTX {
     class AutoBuffer {
@@ -199,7 +135,7 @@ struct ShaderBindingTable {
 };
 
 // =============================================================================
-// VulkanRTX — The Eternal Core — FULLY DYNAMIC 2025 EDITION
+// VulkanRTX — The One True Ray Tracing Core
 // =============================================================================
 class VulkanRTX {
 public:
@@ -209,18 +145,12 @@ public:
     [[nodiscard]] VkDevice device() const noexcept { return device_; }
     [[nodiscard]] bool isValid() const noexcept;
 
-    [[nodiscard]] VkImage blackFallbackImage() const noexcept {
-        return blackFallbackImage_ ? blackFallbackImage_.get() : VK_NULL_HANDLE;
-    }
-    [[nodiscard]] VkImageView blackFallbackView() const noexcept {
-        return blackFallbackView_ ? blackFallbackView_.get() : VK_NULL_HANDLE;
-    }
-    [[nodiscard]] bool hasBlackFallback() const noexcept {
-        return blackFallbackImage_ && blackFallbackImage_.get() != VK_NULL_HANDLE;
-    }
+    [[nodiscard]] VkImage      blackFallbackImage() const noexcept { return blackFallbackImage_ ? blackFallbackImage_.get() : VK_NULL_HANDLE; }
+    [[nodiscard]] VkImageView  blackFallbackView()   const noexcept { return blackFallbackView_   ? blackFallbackView_.get()   : VK_NULL_HANDLE; }
+    [[nodiscard]] bool         hasBlackFallback()   const noexcept { return blackFallbackImage_ && blackFallbackImage_.get() != VK_NULL_HANDLE; }
 
     void buildAccelerationStructures();
-    void initDescriptorPoolAndSets();           // ← FULLY DYNAMIC NOW
+    void initDescriptorPoolAndSets() noexcept;
     void initShaderBindingTable(VkPhysicalDevice pd);
     void initBlackFallbackImage();
 
@@ -245,9 +175,9 @@ public:
     [[nodiscard]] VkDescriptorSet descriptorSet(uint32_t idx = 0) const noexcept {
         return (idx < descriptorSets_.size()) ? descriptorSets_[idx] : VK_NULL_HANDLE;
     }
-    [[nodiscard]] VkPipeline pipeline() const noexcept { return HANDLE_GET(rtPipeline_); }
+    [[nodiscard]] VkPipeline       pipeline()       const noexcept { return HANDLE_GET(rtPipeline_); }
     [[nodiscard]] VkPipelineLayout pipelineLayout() const noexcept { return HANDLE_GET(rtPipelineLayout_); }
-    [[nodiscard]] const ShaderBindingTable& sbt() const noexcept { return sbt_; }
+    [[nodiscard]] const ShaderBindingTable& sbt()   const noexcept { return sbt_; }
 
     void buildAccelerationStructuresBlocking() noexcept;
     void setDescriptorSetLayout(VkDescriptorSetLayout layout) noexcept;
@@ -271,7 +201,7 @@ private:
     RTX::Handle<VkPipelineLayout> rtPipelineLayout_;
 
     RTX::Handle<VkDescriptorPool> descriptorPool_;
-    std::vector<VkDescriptorSet> descriptorSets_;  // ← FULLY DYNAMIC — NO MORE array<..., 2>
+    std::vector<VkDescriptorSet> descriptorSets_;
 
     RTX::Handle<VkBuffer> sbtBuffer_;
     RTX::Handle<VkDeviceMemory> sbtMemory_;
@@ -296,20 +226,20 @@ inline bool VulkanRTX::isValid() const noexcept {
 }
 
 // =============================================================================
-// Global RTX Instance — ONE TRUE INSTANCE
+// Global Instance
 // =============================================================================
 inline std::unique_ptr<VulkanRTX> g_rtx_instance;
 
 [[nodiscard]] inline VulkanRTX& g_rtx() {
     if (!g_rtx_instance) {
-        LOG_FATAL_CAT("RTX", "g_rtx() called before VulkanRTX instance created!");
+        LOG_FATAL_CAT("RTX", "g_rtx() called before initialization — PHOTONS DENIED");
         throw std::runtime_error("VulkanRTX not initialized");
     }
     return *g_rtx_instance;
 }
 
 // =============================================================================
-// AMOURANTH AI™ — PINK PHOTONS ETERNAL — MEMORY & PHOTON TRACKING
+// AMOURANTH AI™ — PINK PHOTONS ETERNAL
 // =============================================================================
 namespace RTX {
 class AmouranthAI {
@@ -329,5 +259,5 @@ inline AmouranthAI& AmouranthAI() noexcept { return AmouranthAI::get(); }
 }
 
 // =============================================================================
-// PINK PHOTONS ETERNAL — FIRST LIGHT ACHIEVED — FULLY DYNAMIC — NOVEMBER 23, 2025
+// FIRST LIGHT — NOVEMBER 23, 2025 — VALHALLA ACHIEVED
 // =============================================================================

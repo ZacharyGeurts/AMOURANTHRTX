@@ -23,15 +23,16 @@
 
 #pragma once
 
+#include "engine/GLOBAL/logging.hpp"
+#include "engine/GLOBAL/RTXHandler.hpp"
+#include "engine/GLOBAL/VulkanCore.hpp"
+
 #include <vulkan/vulkan.h>
 #include <vector>
 #include <string>
 #include <string_view>
 #include <memory>
 #include <glm/glm.hpp>
-#include "engine/GLOBAL/RTXHandler.hpp"
-#include "engine/GLOBAL/VulkanCore.hpp"
-#include "engine/GLOBAL/logging.hpp"
 
 struct AccelGeometry
 {

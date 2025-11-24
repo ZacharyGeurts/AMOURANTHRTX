@@ -1,4 +1,4 @@
-// src/engine/Vulkan/VulkanRenderer.cpp
+// src/engine/GLOBAL/VulkanRenderer.cpp
 // =============================================================================
 // AMOURANTH RTX Engine (C) 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
@@ -236,7 +236,6 @@ void VulkanRenderer::cleanup() noexcept {
     }
 
     // ── PipelineManager Cleanup ─────────────────────────────────────────────
-    pipelineManager_ = RTX::PipelineManager();  // Reset to dummy
 
     // ── FINAL PHASE: Command Buffers & Pool (NOW 100% SAFE) ─────────────────
     VkCommandPool pool = g_ctx().commandPool();
@@ -354,7 +353,7 @@ VkSemaphoreCreateInfo semInfo{ .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO 
 VkFenceCreateInfo fenceInfo{ .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, .flags = VK_FENCE_CREATE_SIGNALED_BIT };
 
 for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
-    LOG_TRACE_CAT("RENDERER", "Forging sync objects for frame {} / {}", i, MAX_FRAMES_IN_FLIGHT);
+    LOG_TRACE_CAT("RENDERER", "Forging sync objects for frame {} / {}", i+1, MAX_FRAMES_IN_FLIGHT);
 
     VK_CHECK(vkCreateSemaphore(g_device(), &semInfo, nullptr, &imageAvailableSemaphores_[i]),       "imageAvailable");
     VK_CHECK(vkCreateSemaphore(g_device(), &semInfo, nullptr, &renderFinishedSemaphores_[i]),       "renderFinished");
@@ -399,8 +398,6 @@ LOG_SUCCESS_CAT("RENDERER", "Step 5 COMPLETE — {} full sync sets forged — TR
         LOG_FATAL_CAT("RENDERER", "Invalid context for PipelineManager — dev=0x{:x}, phys=0x{:x}", reinterpret_cast<uintptr_t>(g_device()), reinterpret_cast<uintptr_t>(g_PhysicalDevice()));
         LOG_FATAL_CAT("RENDERER", "Fatal error in noexcept function"); std::abort();
     }
-    pipelineManager_ = RTX::PipelineManager(g_device(), g_PhysicalDevice());  // ← FIXED: Move-assign valid instance early
-    LOG_TRACE_CAT("RENDERER", "Step 7.5 COMPLETE — PipelineManager armed (dev=0x{:x}, phys=0x{:x})", reinterpret_cast<uintptr_t>(g_device()), reinterpret_cast<uintptr_t>(g_PhysicalDevice()));
 
     LOG_SUCCESS_CAT("RENDERER", "Swapchain FORGED — {} images @ {}x{} — PINK PHOTONS READY", 
                     ([](){ uint32_t cnt; vkGetSwapchainImagesKHR(g_device(), g_swapchain(), &cnt, nullptr); return cnt; }()), currentExtent().width, currentExtent().height);
@@ -1227,10 +1224,10 @@ void VulkanRenderer::recordRayTracingCommandBuffer(VkCommandBuffer cmd) noexcept
         0, sizeof(push), &push);
 
     // ── SBT Regions — USING YOUR ACTUAL PipelineManager API
-    const VkStridedDeviceAddressRegionKHR* raygen   = pipelineManager_.getRaygenSbtRegion();
-    const VkStridedDeviceAddressRegionKHR* miss     = pipelineManager_.getMissSbtRegion();
-    const VkStridedDeviceAddressRegionKHR* hit      = pipelineManager_.getHitSbtRegion();
-    const VkStridedDeviceAddressRegionKHR* callable = pipelineManager_.getCallableSbtRegion();
+    const VkStridedDeviceAddressRegionKHR* raygen   = &pipelineManager_.raygenRegion();
+    const VkStridedDeviceAddressRegionKHR* miss     = &pipelineManager_.missRegion();
+    const VkStridedDeviceAddressRegionKHR* hit      = &pipelineManager_.hitRegion();
+    const VkStridedDeviceAddressRegionKHR* callable = &pipelineManager_.callableRegion();
 
     // ── FIRE THE RAYS — FULL RESOLUTION — MAXIMUM THROUGHPUT
     const VkExtent2D extent = currentExtent();
@@ -1528,7 +1525,7 @@ void VulkanRenderer::updateNexusDescriptors() noexcept {
 
 void VulkanRenderer::updateRTXDescriptors(uint32_t frame) noexcept
 {
-    RTX::RTDescriptorUpdate updateInfo = {};  // Zero-init all
+    RTDescriptorUpdate updateInfo = {};  // Zero-init all
     updateInfo.tlas = LAS::get().getTLAS();
 
     // FIXED: Use raw handles from Handle<T> only if valid

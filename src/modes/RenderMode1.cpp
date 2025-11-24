@@ -14,7 +14,6 @@
 
 using namespace Logging::Color;
 
-extern RTX::PipelineManager* g_pipeline_manager;  // ← Exists in your engine
 
 static std::string findAsset(const std::string& rel) {
     std::vector<std::string> paths = {
@@ -105,7 +104,7 @@ void RenderMode1::initResources() {
     accumImage_ = RTX::Handle<VkImage>(rawImg, g_device(), vkDestroyImage, 0, "AccumImg");
 
     VkMemoryRequirements memReqs; vkGetImageMemoryRequirements(g_device(), rawImg, &memReqs);
-    uint32_t memType = g_pipeline_manager->findMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    uint32_t memType = g_pipelineManager()->findMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
     VkMemoryAllocateInfo alloc{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, nullptr, memReqs.size, memType};
     VkDeviceMemory mem; vkAllocateMemory(g_device(), &alloc, nullptr, &mem);
     vkBindImageMemory(g_device(), rawImg, mem, 0);
@@ -149,7 +148,7 @@ void RenderMode1::initResources() {
     barrier.image = outputImage_.get();
     vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
 
-    g_pipeline_manager->endSingleTimeCommands(g_ctx().commandPool(), g_ctx().graphicsQueue(), cmd);
+    g_pipelineManager()->endSingleTimeCommands(g_ctx().commandPool(), g_ctx().graphicsQueue(), cmd);
 
     g_rtx().updateRTXDescriptors(0,
         RAW_BUFFER(uniformBuf_), RAW_BUFFER(accumulationBuf_), VK_NULL_HANDLE,

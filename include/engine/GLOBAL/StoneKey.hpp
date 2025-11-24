@@ -24,6 +24,9 @@
 #include <unistd.h>
 #include "engine/GLOBAL/logging.hpp"
 
+// Forward declare — PipelineManager lives elsewhere
+namespace RTX { class PipelineManager; }
+
 static_assert(sizeof(uintptr_t) >= 8, "64-bit only");
 static_assert(__cplusplus >= 202302L, "C++23 required");
 
@@ -91,15 +94,18 @@ inline uint64_t kObfuscator() noexcept { static uint64_t k = kStone1() ^ kStone2
 [[nodiscard]] inline uint64_t deobfuscate(uint64_t h) noexcept { return h ^ kObfuscator(); }
 
 // -----------------------------------------------------------------------------
-// 4. THE FULL EMPIRE — RAW CACHE + SWAPCHAIN TREASURES — ALL IN ONE PLACE
+// 4. THE FULL EMPIRE — NOW WITH THE ONE TRUE PIPELINE MANAGER
 // -----------------------------------------------------------------------------
 namespace StoneKey::Empire {
     inline std::atomic<VkInstance>       instance{VK_NULL_HANDLE};
     inline std::atomic<VkDevice>         device{VK_NULL_HANDLE};
     inline std::atomic<VkPhysicalDevice> physicalDevice{VK_NULL_HANDLE};
     inline std::atomic<VkSurfaceKHR>     surface{VK_NULL_HANDLE};
-	inline std::atomic<SDL_Renderer*>    g_sdl_renderer{nullptr};
+    inline std::atomic<SDL_Renderer*>    g_sdl_renderer{nullptr};
     inline std::atomic<VkSwapchainKHR>   swapchain{VK_NULL_HANDLE};
+
+    // THE ONE TRUE PIPELINE MANAGER — FORGED ONCE, USED BY ALL
+    inline std::atomic<RTX::PipelineManager*> pipelineManager{nullptr};
 
     // SWAPCHAIN TREASURES — OWNED BY THE EMPIRE
     inline std::vector<VkImage>        swapchain_images;
@@ -122,6 +128,12 @@ namespace StoneKey::Empire {
 [[nodiscard]] inline SDL_Renderer*    g_sdl_renderer()   noexcept { return StoneKey::Empire::g_sdl_renderer.load(); }
 [[nodiscard]] inline VkSwapchainKHR   g_swapchain()      noexcept { return StoneKey::Empire::swapchain.load(); }
 
+// THE ONE TRUE PIPELINE ACCESSOR
+[[nodiscard]] inline RTX::PipelineManager* g_pipelineManager() noexcept 
+{ 
+    return StoneKey::Empire::pipelineManager.load(); 
+}
+
 [[nodiscard]] inline auto&       g_swapchain_images()      noexcept { return StoneKey::Empire::swapchain_images; }
 [[nodiscard]] inline auto&       g_swapchain_image_views() noexcept { return StoneKey::Empire::swapchain_image_views; }
 [[nodiscard]] inline VkRenderPass g_render_pass()          noexcept { return StoneKey::Empire::render_pass; }
@@ -139,6 +151,12 @@ inline void set_g_device(VkDevice h)           noexcept { StoneKey::Empire::devi
 inline void set_g_PhysicalDevice(VkPhysicalDevice h) noexcept { StoneKey::Empire::physicalDevice.store(h); }
 inline void set_g_surface(VkSurfaceKHR h)      noexcept { StoneKey::Empire::surface.store(h); }
 inline void set_g_swapchain(VkSwapchainKHR h)  noexcept { StoneKey::Empire::swapchain.store(h); }
+
+// THE ONE TRUE SETTER
+inline void set_g_pipelineManager(RTX::PipelineManager* pm) noexcept 
+{ 
+    StoneKey::Empire::pipelineManager.store(pm); 
+}
 
 inline void set_g_render_pass(VkRenderPass rp)          noexcept { StoneKey::Empire::render_pass = rp; }
 inline void set_g_surface_format(VkSurfaceFormatKHR fmt) noexcept { StoneKey::Empire::surface_format = fmt; }

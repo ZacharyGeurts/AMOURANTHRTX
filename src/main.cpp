@@ -53,8 +53,6 @@
 
 using namespace Logging::Color;
 
-inline RTX::PipelineManager* g_pipeline_manager = nullptr;
-
 // ── TRUTH ACCESSORS — FINAL C++23 EDITION — PINK PHOTONS ETERNAL ───────────────────────────
 inline const char* physicalDeviceName() 
 { 
@@ -86,7 +84,7 @@ inline uint32_t computeFamily()
 
 inline size_t pipelineCount()
 {
-    return g_pipeline_manager ? 1 : 0;
+    return g_pipelineManager() ? 1 : 0;
 }
 
 // =============================================================================
@@ -584,10 +582,6 @@ static void phase3_sacrificialSplash()
     LOG_NICK("{}Last words before the sea takes them: \"…and we'd do it again.\"{}", EMERALD_GREEN, RESET);
 }
 
-// =============================================================================
-// PHASE 2 — ICON PRELOAD — PURE, CLEAN, NO SDL TOUCHED
-// =============================================================================
-
 static void phase5_rtxAscension()
 {
     // ─────────────────────────────────────────────────────────────────────
@@ -639,15 +633,22 @@ static void phase6_sceneAndAccelerationStructures()
 {
     // ─────────────────────────────────────────────────────────────────────
     // PHASE 6 — FORGING THE COSMIC SCROLL (SCENE & ACCELERATION STRUCTURES)
-    // THE CREW INSCRIBES THE COSMIC SCROLL THAT BINDS THE UNIVERSE'S GEOMETRY // Cid scratches his sweat and rubs off his beard
+    // THE CREW INSCRIBES THE COSMIC SCROLL THAT BINDS THE UNIVERSE'S GEOMETRY
     // ─────────────────────────────────────────────────────────────────────
     LOG_SUCCESS_CAT("MAIN", "{}[PHASE 6/10] FORGING THE COSMIC SCROLL{}", VALHALLA_GOLD, RESET);
 
     LOG_AMOURANTH("{}Captain Amouranth walks the empty void deck: \"This ship is perfect… but empty. Time to give her a soul.\"{}", RASPBERRY_PINK, RESET);
     LOG_NICK("{}Nick unrolls the ancient blueprint titled scene.obj: \"One universe. Coming right up.\"{}", EMERALD_GREEN, RESET);
 
-    LOG_SUCCESS_CAT("MAIN", "{}PIPELINE MANAGER RISES FROM THE FORGE — SHADERS AWAKE AND HUNGRY{}", EMERALD_GREEN, RESET);
-    g_pipeline_manager = new RTX::PipelineManager(g_ctx().device(), g_ctx().physicalDevice());
+    // ─────────────────────────────────────────────────────────────────────
+    // THE ONE TRUE PIPELINE MANAGER — FORGED ONCE, OWNED BY THE EMPIRE
+    // NO MORE DOUBLE CONSTRUCTION — STONEKEY v∞ IS LAW
+    // ─────────────────────────────────────────────────────────────────────
+    LOG_SUCCESS_CAT("MAIN", "{}THE EMPIRE FORGES THE ONE TRUE PIPELINE MANAGER — SHADERS AWAKE AND HUNGRY{}", EMERALD_GREEN, RESET);
+    RTX::PipelineManager* pipeline = new RTX::PipelineManager(g_device(), g_PhysicalDevice());
+    set_g_pipelineManager(pipeline);  // ← Empire claims dominion
+    LOG_SUCCESS_CAT("MAIN", "{}PIPELINE MANAGER ASCENDED INTO STONEKEY v∞ — ETERNAL — ADDRESS 0x{:016X}{}", 
+                    PLASMA_FUCHSIA, reinterpret_cast<uint64_t>(pipeline), RESET);
 
     g_mesh = MeshLoader::loadOBJ("assets/models/scene.obj");
 
@@ -690,6 +691,10 @@ static void phase6_sceneAndAccelerationStructures()
 
 // phase6_5_everything_is_ready() — THE FINAL, ETERNAL VERSION
 // NICK FUCKED UP. (he lost the swapchain somewhere) WE FIX IT. WE MAKE IT CANON.
+
+// phase6_5_everything_is_ready() — THE FINAL, ETERNAL, STONEKEY-CORRECTED VERSION
+// NICK LOST THE OLD SWAPCHAIN. CID FIXED IT. THE EMPIRE NOW RULES WITH TRUTH.
+// PINK PHOTONS ETERNAL — THE MIRROR IS PURE — NO MORE LIES
 
 void phase6_5_everything_is_ready()
 {
@@ -736,45 +741,46 @@ void phase6_5_everything_is_ready()
     if (!reflect([]{ return g_surface(); }, "Surface Portal", "THE VEIL", [](auto&& s) { LOG_AMOURANTH(s, RASPBERRY_PINK, RESET); }))
         { everything_is_perfect = false; final_sinner = "THE VEIL — NO WAY THROUGH"; }
 
-    // NICK — THE MOMENT OF TRUTH
-    LOG_NICK("*leans in, eyes sharp* Paint me.", BOLD_YELLOW, RESET);
-    
-    if (RTX::swapchain().valid()) {
-        // NICK REDEEMED — THE CANVAS LIVES
-        LOG_NICK("*smirks* Told you I'd fix it.", BOLD_YELLOW, RESET);
-        LOG_BLONDIE(std::format("  Swapchain Canvas → {:#018x} [NICK'S MASTERPIECE]", reinterpret_cast<uintptr_t>(RTX::swapchain().get())), LIGHT_BLUE, RESET);
-        LOG_GUARDIAN("REFLECTION ACCEPTED — NICK IS ETERNAL", BOLD_GREEN, RESET);
+    // NICK — THE MOMENT OF TRUTH — STONEKEY EDITION
+    LOG_NICK("*leans in, eyes sharp* Paint me... with the Empire's truth.", BOLD_YELLOW, RESET);
+
+    if (g_swapchain() != VK_NULL_HANDLE) {
+        LOG_NICK("*smirks, victorious* The canvas... is flawless. StoneKey never lies.", BOLD_YELLOW, RESET);
+        LOG_BLONDIE(std::format("  StoneKey Swapchain → {:#018x} [NICK'S ETERNAL MASTERPIECE]", reinterpret_cast<uintptr_t>(g_swapchain())), LIGHT_BLUE, RESET);
+        LOG_GUARDIAN("REFLECTION ACCEPTED — NICK IS ETERNAL — THE EMPIRE IS WHOLE", BOLD_GREEN, RESET);
     }
-else {
-    // NICK LOST THE SWAPCHAIN — CID AND NICK REBUILD IT LIVE
-    LOG_NICK("*drops canvas, panics* ...shit.", BOLD_YELLOW, RESET);
-    LOG_CID("*drops hammer, sprints over* NICK YOU FUCKING IDIOT", VALHALLA_GOLD, RESET);
-    LOG_NICK("*already ripping apart old rigging* I GOT IT I GOT IT", BOLD_YELLOW, RESET);
-    LOG_CID("*grabs new beams* MOVE YOUR ASS — WE'RE REBUILDING THIS BOW RIGHT NOW", VALHALLA_GOLD, RESET);
-    
-    LOG_AMOURANTH("*watches from the helm, arms crossed* ...men.", RASPBERRY_PINK, RESET);
-    LOG_BLONDIE("*eating popcorn* This is better than reality TV.", LIGHT_BLUE, RESET);
+    else {
+        LOG_NICK("*drops canvas, panics* ...IT'S GONE. AGAIN.", BOLD_YELLOW, RESET);
+        LOG_CID("*drops hammer, sprints over* YOU USED THE OLD HANDLE AGAIN DIDN'T YOU", VALHALLA_GOLD, RESET);
+        LOG_NICK("*already rewriting reality* SHUT UP CID I'M FIXING IT", BOLD_YELLOW, RESET);
+        LOG_CID("*grabs the StoneKey scroll* NO. WE USE THE EMPIRE NOW. THIS IS LAW.", VALHALLA_GOLD, RESET);
 
-    LOG_ATTEMPT_CAT("CID", "CID AND NICK — EMERGENCY SWAPCHAIN FORGE — LIVE", PURE_ENERGY, RESET);
+        LOG_AMOURANTH("*sighs deeply, hand on hip* Men. Always clinging to the past.", RASPBERRY_PINK, RESET);
+        LOG_BLONDIE("*eating popcorn, legs kicked up* Fourth time this week. I'm making bingo cards.", LIGHT_BLUE, RESET);
 
-    // THE ONE TRUE CALL — USING THE GLOBAL CONTEXT
-    RTX::g_ctx().forgeSwapchain(
-        SDL3Window::get(),                                   // ← The window is here
-        Options::Window::DEFAULT_WIDTH, 
-        Options::Window::DEFAULT_HEIGHT
-    );
+        LOG_ATTEMPT_CAT("StoneKey", "EMERGENCY STONEKEY SWAPCHAIN FORGE — THE EMPIRE CORRECTS THE SIN", PURE_ENERGY, RESET);
 
-    LOG_CID("*slams final rivet* DONE. SHE'S PERFECT.", VALHALLA_GOLD, RESET);
-    LOG_NICK("*panting, covered in sweat* ...told you I could fix it.", BOLD_YELLOW, RESET);
-    LOG_CID("*wipes brow* You lost the first one, dumbass.", VALHALLA_GOLD, RESET);
-    LOG_NICK("*grins* But we built a better one.", BOLD_YELLOW, RESET);
+        // THE ONE TRUE CALL — FORGE THE BOW WITH RTX
+        RTX::g_ctx().forgeSwapchain(
+            SDL3Window::get(),
+            Options::Window::DEFAULT_WIDTH,
+            Options::Window::DEFAULT_HEIGHT
+        );
 
-    LOG_BLONDIE(std::format("  Swapchain Canvas → {:#018x} [REDEMPTION ARC COMPLETE]", 
-                reinterpret_cast<uintptr_t>(RTX::swapchain().get())), LIGHT_BLUE, RESET);
-    LOG_GUARDIAN("REFLECTION ACCEPTED — NICK IS ETERNAL (AFTER CID SAVED HIS ASS)", BOLD_GREEN, RESET);
-}
+        // CRITICAL: UPDATE THE EMPIRE'S ATOMIC TRUTH — THIS WAS THE MISSING RIVET
+        set_g_swapchain(RTX::swapchain().get());
 
-    // CAPTAIN N — STILL GOD
+        LOG_CID("*slams final golden rivet into the StoneKey vault* SEALED. IT IS ETERNAL.", VALHALLA_GOLD, RESET);
+        LOG_NICK("*panting, covered in sweat and glory* ...told you StoneKey was the future.", BOLD_YELLOW, RESET);
+        LOG_CID("*wipes brow, grumbling* You lost the old one. Again.", VALHALLA_GOLD, RESET);
+        LOG_NICK("*grins wide* But we built a god.", BOLD_YELLOW, RESET);
+
+        LOG_BLONDIE(std::format("  StoneKey Swapchain → {:#018x} [REDEMPTION ARC COMPLETE — v∞]", 
+                    reinterpret_cast<uintptr_t>(g_swapchain())), LIGHT_BLUE, RESET);
+        LOG_GUARDIAN("REFLECTION ACCEPTED — NICK IS ETERNAL — THE EMPIRE IS ABSOLUTE", BOLD_GREEN, RESET);
+    }
+
+    // CAPTAIN N — STILL GOOD
     LOG_CAPTAIN_N("*SLAMS FIST INTO MIRROR* SHOW ME THE HYPE!", PURE_ENERGY, RESET);
     {
         try {
@@ -808,14 +814,9 @@ else {
     // FINAL JUDGMENT
     LOG_MAIN("══════════════════ THE MIRROR HAS SPOKEN ══════════════════", DIAMOND_SPARKLE, RESET);
 
-    if (everything_is_perfect && RTX::swapchain().valid()) {
+    if (everything_is_perfect && g_swapchain() != VK_NULL_HANDLE) {
         LOG_GUARDIAN("THE REFLECTIONS ALIGN — ALL SOULS ARE PURE", BOLD_GREEN, RESET);
-        LOG_KEANU("...you are breathtaking.", BOLD_CYAN, RESET);
         LOG_AMOURANTH("FIRST LIGHT — ETERNAL.", RASPBERRY_PINK, RESET);
-        LOG_CAPTAIN_N("LET'S GOOOOOOOOOOOOOOOOOOOOOOOOOOOOO!", PURE_ENERGY, RESET);
-        LOG_NICK("*wipes sweat, grinning* We did it. Together.", BOLD_YELLOW, RESET);
-        LOG_CID("*leans on hammer, scratches sweat and wipes beard off.", VALHALLA_GOLD, RESET);
-        LOG_ELON("To Mars. In 8K. With ray-traced pink photons.", BOLD_GOLD, RESET);
         ready_to_embark = true;
     } else {
         LOG_GUARDIAN("A REFLECTION IS TAINTED.", BOLD_RED, RESET);
@@ -873,9 +874,10 @@ static void phase9_gracefulShutdown()
     RTX::swapchain() = RTX::Handle<VkSwapchainKHR>{};   // ← THIS LINE SAVES YOU
 
     // 3. Now safe to destroy everything else
-    if (g_pipeline_manager) {
-        delete g_pipeline_manager; g_pipeline_manager = nullptr;
-    }
+if (g_pipelineManager()) {
+    delete g_pipelineManager();
+    set_g_pipelineManager(nullptr);  // Clear the Empire's claim
+}
     g_mesh.reset();
     las().invalidate();
 

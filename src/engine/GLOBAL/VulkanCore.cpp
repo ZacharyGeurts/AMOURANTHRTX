@@ -67,8 +67,6 @@ using VulkanRTXDetail::g_mappedBase;
 using VulkanRTXDetail::g_mappedOffset;
 using VulkanRTXDetail::STAGING_POOL_SIZE;
 
-static std::unique_ptr<RTX::PipelineManager> g_pipelineManager = nullptr;
-
 // =============================================================================
 // AMOURANTH RTX — ETERNAL EXTENSION MANIFEST — v80 VALHALLA TURBO (2025+)
 // PINK PHOTONS DEMAND MAXIMUM FUTURE-PROOFING — COMPILABLE EDITION
@@ -590,108 +588,109 @@ void VulkanRTX::uploadBatch(
 // Descriptor Pool + Sets
 // =============================================================================
 
-void VulkanRTX::initDescriptorPoolAndSets()
+void VulkanRTX::initDescriptorPoolAndSets() noexcept
 {
     constexpr uint32_t frames = Options::Performance::MAX_FRAMES_IN_FLIGHT;
 
-    LOG_TRACE_CAT("RTX", "{}initDescriptorPoolAndSets — START — {} frames in flight (DYNAMIC MODE){}",
+    LOG_TRACE_CAT("RTX", "{}initDescriptorPoolAndSets — DYNAMIC BINDINGS — {} frames — SLIPSTREAM FINAL{}", 
                   VALHALLA_GOLD, frames, RESET);
 
-    // Step 1: Create descriptor pool — scaled perfectly to frame count
-    std::array<VkDescriptorPoolSize, 10> poolSizes{};
-    poolSizes[0] = { VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, frames * 1 };
-    poolSizes[1] = { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,             frames * 5 };   // output, accum, debug, etc.
-    poolSizes[2] = { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,            frames * 3 };
-    poolSizes[3] = { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,            frames * 8 };   // materials, instances, reservoirs
-    poolSizes[4] = { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,    frames * 4 };   // envmap, albedo, normal, etc.
-    poolSizes[5] = { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,             frames * 2 };
-    poolSizes[6] = { VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT,          frames * 2 };
-    poolSizes[7] = { VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER,      frames * 1 };
-    poolSizes[8] = { VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER,      frames * 1 };
-    poolSizes[9] = { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,    frames * 2 };
+    // ── STEP 1: POOL — CONSTEXPR ARRAY, DESIGNATED INITIALIZERS (C++20+ safe)
+    constexpr auto poolSizes = std::to_array<VkDescriptorPoolSize>({
+        { .type = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, .descriptorCount = frames * 1 },
+        { .type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,             .descriptorCount = frames * 6 },
+        { .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,            .descriptorCount = frames * 4 },
+        { .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,            .descriptorCount = frames * 10 },
+        { .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,    .descriptorCount = frames * 5 },
+        { .type = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,             .descriptorCount = frames * 3 },
+        { .type = VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT,          .descriptorCount = frames * 2 },
+        { .type = VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER,      .descriptorCount = frames * 2 },
+        { .type = VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER,      .descriptorCount = frames * 2 },
+        { .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,    .descriptorCount = frames * 3 }
+    });
 
-    VkDescriptorPoolCreateInfo poolInfo{};
-    poolInfo.sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    poolInfo.flags         = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-    poolInfo.maxSets       = frames * 15;  // Generous headroom
-    poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
-    poolInfo.pPoolSizes    = poolSizes.data();
+    VkDescriptorPoolCreateInfo poolInfo{
+        .sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+        .flags         = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
+        .maxSets       = frames * 20,
+        .poolSizeCount = static_cast<uint32_t>(poolSizes.size()),
+        .pPoolSizes    = poolSizes.data()
+    };
 
     VkDescriptorPool rawPool = VK_NULL_HANDLE;
     VK_CHECK(vkCreateDescriptorPool(device_, &poolInfo, nullptr, &rawPool), "RTX Descriptor Pool");
 
-    descriptorPool_ = Handle<VkDescriptorPool>(rawPool, device_,
-        [](VkDevice d, VkDescriptorPool p, const VkAllocationCallbacks*) {
+    // Use assignment — Handle has operator= or copy ctor (no emplace)
+    descriptorPool_ = Handle<VkDescriptorPool>(
+        rawPool, device_,
+        [](VkDevice d, VkDescriptorPool p, const VkAllocationCallbacks*) noexcept {
             if (p) vkDestroyDescriptorPool(d, p, nullptr);
-        }, 0, "RTXDescriptorPool");
+        },
+        0, "RTXDescriptorPool — SLIPSTREAM"
+    );
 
-    LOG_SUCCESS_CAT("RTX", "{}Descriptor pool forged — {} max sets — DYNAMIC ALLOCATION ACTIVE{}",
-                    EMERALD_GREEN, poolInfo.maxSets, RESET);
+    LOG_SUCCESS_CAT("RTX", "{}Descriptor pool forged — {} sets — DYNAMIC MODE{}", EMERALD_GREEN, poolInfo.maxSets, RESET);
 
-    // Step 2: Use existing layout or create full-featured fallback
-    VkDescriptorSetLayout targetLayout = VK_NULL_HANDLE;
+    // ── STEP 2: LAYOUT
+    VkDescriptorSetLayout targetLayout = [this]() -> VkDescriptorSetLayout {
+        if (rtDescriptorSetLayout_.valid() && *rtDescriptorSetLayout_) [[likely]] {
+            return *rtDescriptorSetLayout_;
+        }
 
-    if (rtDescriptorSetLayout_.valid() && (targetLayout = *rtDescriptorSetLayout_) != VK_NULL_HANDLE) {
-        LOG_DEBUG_CAT("RTX", "Using existing RT descriptor set layout: 0x{:x}", reinterpret_cast<uintptr_t>(targetLayout));
-    } else {
-        LOG_WARN_CAT("RTX", "{}No valid RT layout — forging FULL 12-BINDING emergency fallback{}", BLOOD_RED, RESET);
+        LOG_WARN_CAT("RTX", "{}EMERGENCY LAYOUT — 12 BINDINGS — WARP CORE{}", BLOOD_RED, RESET);
 
-        std::array<VkDescriptorSetLayoutBinding, 12> bindings{};
-        bindings[0]  = { 0,  VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1, VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR, nullptr };
-        bindings[1]  = { 1,  VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,              1, VK_SHADER_STAGE_RAYGEN_BIT_KHR, nullptr }; // output
-        bindings[2]  = { 2,  VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,              1, VK_SHADER_STAGE_RAYGEN_BIT_KHR, nullptr }; // accumulation
-        bindings[3]  = { 3,  VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,             1, VK_SHADER_STAGE_RAYGEN_BIT_KHR, nullptr }; // camera
-        bindings[4]  = { 4,  VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,             1, VK_SHADER_STAGE_RAYGEN_BIT_KHR, nullptr }; // materials
-        bindings[5]  = { 5,  VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,             1, VK_SHADER_STAGE_RAYGEN_BIT_KHR, nullptr }; // instances
-        bindings[6]  = { 6,  VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,    1, VK_SHADER_STAGE_RAYGEN_BIT_KHR, nullptr }; // envmap
-        bindings[7]  = { 7,  VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,             1, VK_SHADER_STAGE_RAYGEN_BIT_KHR, nullptr }; // reservoirs
-        bindings[8]  = { 8,  VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,              1, VK_SHADER_STAGE_RAYGEN_BIT_KHR, nullptr }; // debug
-        bindings[9]  = { 9,  VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,     1, VK_SHADER_STAGE_RAYGEN_BIT_KHR, nullptr }; // frame data
-        bindings[10] = { 10, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,             1, VK_SHADER_STAGE_RAYGEN_BIT_KHR, nullptr }; // light buffer
-        bindings[11] = { 11, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,              1, VK_SHADER_STAGE_RAYGEN_BIT_KHR, nullptr }; // nexus buffer
+        constexpr auto bindings = std::to_array<VkDescriptorSetLayoutBinding>({
+            { .binding = 0,  .descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, .descriptorCount = 1, .stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR },
+            { .binding = 1,  .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,              .descriptorCount = 1, .stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR },
+            { .binding = 2,  .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,              .descriptorCount = 1, .stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR },
+            { .binding = 3,  .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,             .descriptorCount = 1, .stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR },
+            { .binding = 4,  .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,             .descriptorCount = 1, .stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR },
+            { .binding = 5,  .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,             .descriptorCount = 1, .stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR },
+            { .binding = 6,  .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,    .descriptorCount = 1, .stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR },
+            { .binding = 7,  .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,             .descriptorCount = 1, .stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR },
+            { .binding = 8,  .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,              .descriptorCount = 1, .stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR },
+            { .binding = 9,  .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,     .descriptorCount = 1, .stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR },
+            { .binding = 10, .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,             .descriptorCount = 1, .stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR },
+            { .binding = 11, .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,              .descriptorCount = 1, .stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR }
+        });
 
-        VkDescriptorSetLayoutCreateInfo layoutInfo{};
-        layoutInfo.sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-        layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
-        layoutInfo.pBindings    = bindings.data();
+        VkDescriptorSetLayoutCreateInfo layoutInfo{
+            .sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+            .bindingCount = static_cast<uint32_t>(bindings.size()),
+            .pBindings    = bindings.data()
+        };
 
-        VK_CHECK(vkCreateDescriptorSetLayout(device_, &layoutInfo, nullptr, &targetLayout),
-                 "Full emergency RT descriptor set layout");
+        VkDescriptorSetLayout layout = VK_NULL_HANDLE;
+        VK_CHECK(vkCreateDescriptorSetLayout(device_, &layoutInfo, nullptr, &layout), "Emergency layout");
+        return layout;
+    }();
 
-        LOG_SUCCESS_CAT("RTX", "{}12-binding emergency RT layout forged: 0x{:x}{}", PLASMA_FUCHSIA, reinterpret_cast<uintptr_t>(targetLayout), RESET);
+    if (!targetLayout) [[unlikely]] {
+        LOG_FATAL_CAT("RTX", "NO LAYOUT — ABORT");
+        std::abort();
     }
 
-    if (targetLayout == VK_NULL_HANDLE) {
-        throw std::runtime_error("FATAL: No valid descriptor set layout — cannot initialize RTX");
-    }
+    // ── STEP 3: DYNAMIC BINDINGS — ZERO HEAP, STACK ONLY
+    descriptorSets_.assign(frames, VK_NULL_HANDLE);
 
-    // Step 3: FULLY DYNAMIC — NO HARD CODED ARRAYS
-    descriptorSets_.clear();
-    descriptorSets_.resize(frames, VK_NULL_HANDLE);
+    alignas(VkDescriptorSetLayout) static VkDescriptorSetLayout stackLayouts[Options::Performance::MAX_FRAMES_IN_FLIGHT];
+    std::fill_n(stackLayouts, frames, targetLayout);
 
-    std::vector<VkDescriptorSetLayout> layouts(frames, targetLayout);
-
-    VkDescriptorSetAllocateInfo allocInfo{};
-    allocInfo.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    allocInfo.descriptorPool      = *descriptorPool_;
-    allocInfo.descriptorSetCount  = frames;
-    allocInfo.pSetLayouts         = layouts.data();
+    VkDescriptorSetAllocateInfo allocInfo{
+        .sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+        .descriptorPool     = *descriptorPool_,
+        .descriptorSetCount = frames,
+        .pSetLayouts        = stackLayouts
+    };
 
     VK_CHECK(vkAllocateDescriptorSets(device_, &allocInfo, descriptorSets_.data()),
-             "DYNAMIC allocation of per-frame RTX descriptor sets");
+             "DYNAMIC ALLOCATION — SUCCESS");
 
-    LOG_SUCCESS_CAT("RTX", "{}DYNAMIC SUCCESS: {} RTX descriptor sets allocated — TRIPLE BUFFERING FULLY ACTIVE{}",
-                    PLASMA_FUCHSIA, frames, RESET);
-
-    for (uint32_t i = 0; i < frames; ++i) {
-        LOG_TRACE_CAT("RTX", "  Frame {} → DescriptorSet 0x{:x}", i, reinterpret_cast<uintptr_t>(descriptorSets_[i]));
-    }
-
-    RTX::AmouranthAI::get().onMemoryEvent("RTX Descriptor Sets (Dynamic)", 
-        static_cast<VkDeviceSize>(frames * sizeof(VkDescriptorSet)));
-
-    LOG_SUCCESS_CAT("RTX", "{}initDescriptorPoolAndSets — COMPLETE — FULLY DYNAMIC — {} FRAMES — FIRST LIGHT IMMINENT{}",
+    LOG_SUCCESS_CAT("RTX", "{}DYNAMIC BINDINGS ACHIEVED — {} sets — ZERO ALLOCATION — SLIPSTREAM COMPLETE{}",
                     DIAMOND_SPARKLE, frames, RESET);
+
+    LOG_SUCCESS_CAT("RTX", "{}initDescriptorPoolAndSets — COMPLETE — FIRST LIGHT IMMINENT{}", 
+                    PULSAR_GREEN, RESET);
 }
 
 // =============================================================================
@@ -1231,17 +1230,11 @@ void createCommandPool()
 }
 
 // GLOBAL IMMORTAL PIPELINE MANAGER — PINK PHOTONS ETERNAL
-static std::unique_ptr<PipelineManager> g_pipelineManager = nullptr;
 
 void createGlobalPipelineManager(VkDevice device, VkPhysicalDevice phys)
 {
-    g_pipelineManager = std::make_unique<PipelineManager>(device, phys);
 }
 
-PipelineManager* getGlobalPipelineManager()
-{
-    return g_pipelineManager.get();
-}
 
 } // RTX
 // VulkanCore.cpp — FINAL, SDL3-CORRECT, BULLETPROOF FORMAT — NO BULLSHIT

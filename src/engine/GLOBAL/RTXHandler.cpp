@@ -845,14 +845,29 @@ void RTX::Context::forgeSwapchain(SDL_Window* window, int width, int height)
 
     LOG_CID("{}Cid, master shipwright, wipes sweat from his brow{}", VALHALLA_GOLD, RESET);
 
-    // 1. THE PROW IS CARVED — SURFACE BORN (X11-safe)
+    // ── THE X11 KRAKEN AWAKENS — BUT WE HAVE THE BLADE OF VALIDATION ──
+    if (Options::Debug::ENABLE_VALIDATION_LAYERS) {
+        LOG_CID("{}Cid spits on the deck: \"X11. The ancient beast. I know its weakness.\"{}", VALHALLA_GOLD, RESET);
+        LOG_NICK("{}Nick grimaces: \"Validation layers make it worse. They feed on timing.\"{}", BOLD_YELLOW, RESET);
+        LOG_AMOURANTH("{}Amouranth raises her cutlass: \"Then we strike first. We give it no time to breathe.\"{}", RASPBERRY_PINK, RESET);
+
+        LOG_WARN_CAT("RTX", "{}X11 + VALIDATION DETECTED — EXECUTING THE SACRIFICIAL 150MS DELAY — THE KRAKEN SLEEPS{}", CRIMSON_MAGENTA, RESET);
+        LOG_CID("{}Cid slams his hammer: \"150 milliseconds of shame. But the ship will live.\"{}", VALHALLA_GOLD, RESET);
+        LOG_NICK("{}Nick turns away: \"Just… don’t tell anyone.\"{}", BOLD_YELLOW, RESET);
+
+        SDL_Delay(150);  // ← THE BLADE. THE FINAL BLOW. THE KRAKEN DIES.
+    }
+
+    // 1. THE PROW IS CARVED — X11-SAFE, KRAKEN-SLAYING SURFACE
     VkSurfaceKHR surface = VK_NULL_HANDLE;
     if (!SDL_Vulkan_CreateSurface(window, instance_, nullptr, &surface) || surface == VK_NULL_HANDLE) {
         LOG_FATAL_CAT("RTX", "{}THE SEA REJECTS OUR PROW — SDL_Vulkan_CreateSurface FAILED: {}{}", BLOOD_RED, SDL_GetError(), RESET);
+        LOG_CID("{}Cid: \"Even the Kraken couldn't stop this... something is deeply wrong.\"{}", VALHALLA_GOLD, RESET);
         std::exit(1);
     }
     set_g_surface(surface);
-    LOG_SUCCESS_CAT("RTX", "{}PROW CARVED — VkSurfaceKHR FORGED @ {:#x} — THE SHIP NOW HAS A FACE{}", DIAMOND_SPARKLE, reinterpret_cast<uintptr_t>(surface), RESET);
+    LOG_SUCCESS_CAT("RTX", "{}PROW CARVED — VkSurfaceKHR FORGED @ {:#018x} — THE SHIP NOW HAS A FACE{}", 
+                    DIAMOND_SPARKLE, reinterpret_cast<uintptr_t>(surface), RESET);
 
     LOG_CID("{}Cid, master shipwright, wipes sweat from his brow{}", VALHALLA_GOLD, RESET);
 
@@ -866,10 +881,10 @@ void RTX::Context::forgeSwapchain(SDL_Window* window, int width, int height)
         extent.height = std::clamp(static_cast<uint32_t>(height), caps.minImageExtent.height, caps.maxImageExtent.height);
     }
 
-    // SAFETY: If surface is temporarily invalid (X11), clamp to minimum
-    if (extent.width < caps.minImageExtent.width)  extent.width  = caps.minImageExtent.width;
+    // X11 SAFETY CLAMP — NEVER TRUST THE KRAKEN'S WHISPERS
+    if (extent.width < caps.minImageExtent.width)   extent.width  = caps.minImageExtent.width;
     if (extent.height < caps.minImageExtent.height) extent.height = caps.minImageExtent.height;
-    if (caps.maxImageExtent.width > 0 && extent.width > caps.maxImageExtent.width)   extent.width  = caps.maxImageExtent.width;
+    if (caps.maxImageExtent.width > 0  && extent.width > caps.maxImageExtent.width)   extent.width  = caps.maxImageExtent.width;
     if (caps.maxImageExtent.height > 0 && extent.height > caps.maxImageExtent.height) extent.height = caps.maxImageExtent.height;
 
     LOG_CID("{}Cid, master shipwright, wipes sweat from his brow{}", VALHALLA_GOLD, RESET);
@@ -908,37 +923,39 @@ void RTX::Context::forgeSwapchain(SDL_Window* window, int width, int height)
 
     LOG_CID("{}Cid, master shipwright, wipes sweat from his chest{}", VALHALLA_GOLD, RESET);
 
-    // 5. SWAPCHAIN CREATION — FINAL RTX-READY CONFIGURATION
-    VkSwapchainCreateInfoKHR swapInfo = {};
-    swapInfo.sType            = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
-    swapInfo.surface          = surface;
-    swapInfo.imageFormat      = chosenFormat.format;
-    swapInfo.imageColorSpace  = chosenFormat.colorSpace;
-    swapInfo.imageExtent      = extent;
-    swapInfo.imageArrayLayers = 1;
-    swapInfo.imageUsage       = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
-                                VK_IMAGE_USAGE_TRANSFER_DST_BIT |
-                                VK_IMAGE_USAGE_TRANSFER_SRC_BIT;  // REQUIRED when RT extensions are enabled
-    swapInfo.preTransform     = caps.currentTransform;
-    swapInfo.compositeAlpha   = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
-    swapInfo.presentMode      = presentMode;
-    swapInfo.clipped          = VK_TRUE;
-    swapInfo.oldSwapchain     = VK_NULL_HANDLE;
+    // 5. SWAPCHAIN CREATION — FINAL RTX-READY, KRAKEN-PROOF CONFIGURATION
+    uint32_t queueFamilyIndices[] = { g_ctx().graphicsFamily(), g_ctx().presentFamily() };
 
-    // BULLETPROOF IMAGE COUNT — NEVER TRIGGERS DRIVER SEGFAULT
-    uint32_t imageCount = 3;
-    if (caps.maxImageCount > 0) {
-        imageCount = std::min(imageCount, caps.maxImageCount);
-    }
-    imageCount = std::max(imageCount, caps.minImageCount);
-    swapInfo.minImageCount = imageCount;
+    VkSwapchainCreateInfoKHR swapInfo = {
+        .sType                  = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
+        .surface                = surface,
+        .minImageCount          = std::max(2u, std::min(3u, caps.maxImageCount > 0 ? caps.maxImageCount : 3u)),
+        .imageFormat            = chosenFormat.format,
+        .imageColorSpace        = chosenFormat.colorSpace,
+        .imageExtent            = extent,
+        .imageArrayLayers       = 1,
+        .imageUsage             = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                                  VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                                  VK_IMAGE_USAGE_STORAGE_BIT,  // RTX demands this
+        .imageSharingMode       = (g_ctx().graphicsFamily() != g_ctx().presentFamily()) ? VK_SHARING_MODE_CONCURRENT : VK_SHARING_MODE_EXCLUSIVE,
+        .queueFamilyIndexCount  = (g_ctx().graphicsFamily() != g_ctx().presentFamily()) ? 2u : 0u,
+        .pQueueFamilyIndices    = (g_ctx().graphicsFamily() != g_ctx().presentFamily()) ? queueFamilyIndices : nullptr,
+        .preTransform           = caps.currentTransform,
+        .compositeAlpha         = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
+        .presentMode            = presentMode,
+        .clipped                = VK_TRUE,
+        .oldSwapchain           = VK_NULL_HANDLE
+    };
 
     VkSwapchainKHR rawSwapchain = VK_NULL_HANDLE;
     VkResult createResult = vkCreateSwapchainKHR(device_, &swapInfo, nullptr, &rawSwapchain);
 
     if (createResult != VK_SUCCESS) {
-        LOG_FATAL_CAT("RTX", "{}SWAPCHAIN CREATION FAILED — RESULT: {} — THE PHOTONS ARE DENIED{}", 
-                      ABANDON_SHIP, static_cast<int>(createResult), RESET);
+        LOG_FATAL_CAT("RTX", "{}SWAPCHAIN FORGE FAILED — RESULT: {} — EVEN THE KRAKEN COULDN'T STOP THIS{}", 
+                      BLOOD_RED, VulkanResultToString(createResult), RESET);
+        LOG_CID("{}Cid drops his hammer: \"The beast is dead… but something worse rises.\"{}", VALHALLA_GOLD, RESET);
+        LOG_NICK("{}Nick: \"We did everything right…\"{}", BOLD_YELLOW, RESET);
+        LOG_AMOURANTH("{}Amouranth: \"Then we fight harder.\"{}", RASPBERRY_PINK, RESET);
         std::abort();
     }
 
@@ -953,9 +970,13 @@ void RTX::Context::forgeSwapchain(SDL_Window* window, int width, int height)
         "FigureheadSwapchain_AmouranthEternal"
     );
 
+    // UPDATE STONEKEY EMPIRE — THE TRUTH MUST FLOW
+    set_g_swapchain(rawSwapchain);
+
     LOG_CID("{}Cid, master shipwright, wipes brow from his sweat{}", VALHALLA_GOLD, RESET);
 
-    // 6. RETRIEVE IMAGES — REUSE imageCount (no redeclaration)
+    // 6. RETRIEVE IMAGES
+    uint32_t imageCount = 0;
     VK_CHECK(vkGetSwapchainImagesKHR(device_, rawSwapchain, &imageCount, nullptr));
     std::vector<VkImage> images(imageCount);
     VK_CHECK(vkGetSwapchainImagesKHR(device_, rawSwapchain, &imageCount, images.data()));
@@ -987,6 +1008,8 @@ void RTX::Context::forgeSwapchain(SDL_Window* window, int width, int height)
     LOG_CID("{}Cid stands with hands on hips within knee-deep sweat. Beard soaked. Job done.\"{}", VALHALLA_GOLD, RESET);
 
     LOG_SUCCESS_CAT("RTX", "{}THE GOOD SHIP VULKANRTX NOW HAS A FACE — AND IT IS GLORIOUS{}", DIAMOND_SPARKLE, RESET);
+    LOG_SUCCESS_CAT("RTX", "{}THE X11 KRAKEN IS DEAD — SLAIN BY 150MS OF SHAME — THE BLADE OF VALIDATION IS VICTORIOUS{}", PURE_ENERGY, RESET);
+    LOG_AMOURANTH("{}Captain Amouranth sheathes her cutlass: \"We sail. Now. And forever.\"{}", RASPBERRY_PINK, RESET);
 }
 
 void RTX::Context::createLogicalDevice()

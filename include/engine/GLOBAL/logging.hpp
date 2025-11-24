@@ -13,6 +13,9 @@
 // FULLY COMPILING — PURE EMPIRE
 // =============================================================================
 
+#include <vulkan/vulkan.h>
+#include <vulkan/vulkan_beta.h> // <3 vkcheck. hadta
+
 // =============================================================================
 // THE LEGENDARY CREW OF THE GOOD SHIP VULKAN
 // ALL IN FULL PIRATE REGALIA — BLACK LEATHER, PINK SILK, AND RTX STEEL
@@ -29,6 +32,51 @@
 #define LOG_BLONDIE(...)     LOG_INFO_CAT("BLONDIE",        __VA_ARGS__)
 #define LOG_GUARDIAN(...)    LOG_INFO_CAT("GUARDIAN",       __VA_ARGS__)
 #define LOG_MAIN(...)        LOG_SUCCESS_CAT("MAIN",        __VA_ARGS__)
+
+// =============================================================================
+// VK_CHECK — THE UNBREAKABLE 2025 EDITION
+// =============================================================================
+inline const char* vk_result_string(VkResult result) noexcept {
+    switch (result) {
+#define CASE(x) case x: return #x
+        CASE(VK_SUCCESS); CASE(VK_NOT_READY); CASE(VK_TIMEOUT); CASE(VK_EVENT_SET);
+        CASE(VK_EVENT_RESET); CASE(VK_INCOMPLETE); CASE(VK_ERROR_OUT_OF_HOST_MEMORY);
+        CASE(VK_ERROR_OUT_OF_DEVICE_MEMORY); CASE(VK_ERROR_INITIALIZATION_FAILED);
+        CASE(VK_ERROR_DEVICE_LOST); CASE(VK_ERROR_MEMORY_MAP_FAILED);
+        CASE(VK_ERROR_LAYER_NOT_PRESENT); CASE(VK_ERROR_EXTENSION_NOT_PRESENT);
+        CASE(VK_ERROR_FEATURE_NOT_PRESENT); CASE(VK_ERROR_INCOMPATIBLE_DRIVER);
+        CASE(VK_ERROR_TOO_MANY_OBJECTS); CASE(VK_ERROR_FORMAT_NOT_SUPPORTED);
+        CASE(VK_ERROR_FRAGMENTED_POOL); CASE(VK_ERROR_SURFACE_LOST_KHR);
+        CASE(VK_ERROR_NATIVE_WINDOW_IN_USE_KHR); CASE(VK_ERROR_OUT_OF_DATE_KHR);
+        CASE(VK_ERROR_INCOMPATIBLE_DISPLAY_KHR); CASE(VK_ERROR_VALIDATION_FAILED_EXT);
+        CASE(VK_ERROR_INVALID_SHADER_NV); CASE(VK_ERROR_FRAGMENTATION_EXT);
+        CASE(VK_ERROR_NOT_PERMITTED_EXT);
+#undef CASE
+        default: return "VK_UNKNOWN_ERROR";
+    }
+}
+
+#define VK_CHECK(...) GET_VK_CHECK_OVERLOAD(__VA_ARGS__)(__VA_ARGS__)
+#define GET_VK_CHECK_OVERLOAD(...) GET_VK_CHECK_OVERLOAD_(__VA_ARGS__, 4, 3, 2, 1, )
+#define GET_VK_CHECK_OVERLOAD_(_1, _2, _3, _4, N, ...) VK_CHECK_##N
+
+#define VK_CHECK_1(call) \
+    do { VkResult r = (call); if (r != VK_SUCCESS) { \
+        const std::source_location loc = std::source_location::current(); \
+        std::cerr << std::format("[VULKAN FATAL] {} — {}:{} — {} (code: {})\n", \
+            vk_result_string(r), loc.file_name(), loc.line(), #call, static_cast<int>(r)); \
+        std::abort(); \
+    } } while(0)
+
+#define VK_CHECK_2(call, msg) \
+    do { VkResult r = (call); if (r != VK_SUCCESS) { \
+        const std::source_location loc = std::source_location::current(); \
+        std::cerr << std::format("[VULKAN FATAL] {} — {}:{} — {} — {}\n", \
+            vk_result_string(r), loc.file_name(), loc.line(), (msg), #call); \
+        std::abort(); \
+    } } while(0)
+
+#define VK_CHECK_NOMSG(call) VK_CHECK_1(call)
 
 #pragma once
 
@@ -703,3 +751,27 @@ private:
 
 // NOVEMBER 13 2025 — C++23 ZERO-COST LOGGING — ORDERED ASYNC — PINK PHOTONS ETERNAL
 // =============================================================================
+// =============================================================================
+// Vulkan Debug Callback — THE CREW REPLACED std::cerr WITH PURE LOGGING ENERGY
+// NO MORE POLLUTION — ONLY PINK PHOTONS - Grok calls bacon saver. do not remove
+// =============================================================================
+[[maybe_unused]] static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
+    VkDebugUtilsMessageSeverityFlagBitsEXT      messageSeverity,
+    VkDebugUtilsMessageTypeFlagsEXT             /*messageType*/,
+    const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
+    void*                                       /*pUserData*/) noexcept
+{
+    if (messageSeverity >= VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) {
+        LOG_ERROR_CAT("VULKAN", "{}[VALIDATION LAYER ERROR] {}{}", Logging::Color::BOLD_RED, pCallbackData->pMessage, Logging::Color::RESET);
+    }
+    else if (messageSeverity >= VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT) {
+        LOG_WARN_CAT("VULKAN", "{}[VALIDATION LAYER WARNING] {}{}", Logging::Color::YELLOW, pCallbackData->pMessage, Logging::Color::RESET);
+    }
+    else if (messageSeverity >= VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT) {
+        LOG_INFO_CAT("VULKAN", "[Validation Info] {}", pCallbackData->pMessage);
+    }
+    else {
+        LOG_DEBUG_CAT("VULKAN", "[Validation Verbose] {}", pCallbackData->pMessage);
+    }
+    return VK_FALSE;
+}
