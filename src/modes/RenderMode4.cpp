@@ -1,130 +1,135 @@
+// =============================================================================
 // src/modes/RenderMode4.cpp
-// =============================================================================
-// AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
-// =============================================================================
-//
-// Dual Licensed:
-// 1. GNU General Public License v3.0 (or later) (GPL v3)
-//    https://www.gnu.org/licenses/gpl-3.0.html
-// 2. Commercial licensing: gzac5314@gmail.com
-//
+// AMOURANTH RTX © 2025 — Camera-Tinted Clear — Based on RenderMode1
+// PINK PHOTONS ETERNAL — FIRST LIGHT ACHIEVED
 // =============================================================================
 
 #include "modes/RenderMode4.hpp"
 #include "engine/GLOBAL/logging.hpp"
-#include "engine/GLOBAL/StoneKey.hpp"
-#include "engine/GLOBAL/RTXHandler.hpp"
-#include "engine/GLOBAL/VulkanCore.hpp"
+#include "engine/GLOBAL/camera.hpp"     // CAM macro
+#include "engine/GLOBAL/StoneKey.hpp"   // g_device()
 
 using namespace Engine;
 using namespace Logging::Color;
 
-RenderMode4::RenderMode4(VulkanRTX& rtx, uint32_t width, uint32_t height)
-    : rtx_(rtx), width_(width), height_(height) {
-    LOG_INFO_CAT("RenderMode4", "VALHALLA MODE 4 INIT — {}×{} — CAMERA TINT ENGAGED", PLASMA_FUCHSIA, width, height, RESET);
+RenderMode4::RenderMode4(uint32_t width, uint32_t height)
+    : width_(width), height_(height)
+{
+    LOG_SUCCESS_CAT("RenderMode4", "Camera-Tinted Clear Mode ACTIVE — {}×{}", width, height);
     initResources();
-    LOG_SUCCESS_CAT("RenderMode4", "Mode 4 Initialized — {}×{} — Position-Based Tint", ELECTRIC_BLUE, width, height, RESET);
 }
 
-RenderMode4::~RenderMode4() {
-    LOG_INFO_CAT("RenderMode4", "Destructor invoked — Safe cleanup");
-
-    vkDeviceWaitIdle(g_ctx().device());
-
-    rtx_.updateRTXDescriptors(0,
-        VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,
-        VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,
-        VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE);
-
-    LOG_SUCCESS_CAT("RenderMode4", "Mode 4 destroyed — CAMERA PHOTONS ETERNAL");
+RenderMode4::~RenderMode4()
+{
+    LOG_INFO_CAT("RenderMode4", "Destructor — cleaning up");
+    cleanupResources();
 }
 
-void RenderMode4::initResources() {
-    LOG_INFO_CAT("RenderMode4", "initResources() — Creating output image only");
-    auto& ctx = g_ctx();
-    VkDevice device = ctx.device();
+void RenderMode4::initResources()
+{
+    cleanupResources();
+
+    VkDevice device = g_device();
 
     VkImageCreateInfo imgInfo{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
     imgInfo.imageType = VK_IMAGE_TYPE_2D;
     imgInfo.format = VK_FORMAT_R8G8B8A8_UNORM;
     imgInfo.extent = {width_, height_, 1};
-    imgInfo.mipLevels = 1;
-    imgInfo.arrayLayers = 1;
+    imgInfo.mipLevels = imgInfo.arrayLayers = 1;
     imgInfo.samples = VK_SAMPLE_COUNT_1_BIT;
     imgInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-    imgInfo.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    imgInfo.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
     imgInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
     VkImage rawImg;
-    LOG_INFO_CAT("RenderMode4", "Creating output image: {}×{} | Format: R8G8B8A8_UNORM", width_, height_);
-    VK_CHECK(vkCreateImage(device, &imgInfo, nullptr, &rawImg), "Output image creation");
-    outputImage_ = RTX::Handle<VkImage>(rawImg, device, vkDestroyImage, 0, "OutputImage");
+    VK_CHECK(vkCreateImage(device, &imgInfo, nullptr, &rawImg));
+    outputImage_ = RTX::Handle<VkImage>(rawImg, device, vkDestroyImage, 0, "Mode4_OutputImage");
+
+    VkMemoryRequirements memReqs;
+    vkGetImageMemoryRequirements(device, rawImg, &memReqs);
+    uint32_t memType = g_pipelineManager()->findMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+    VkMemoryAllocateInfo alloc{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+    alloc.allocationSize = memReqs.size;
+    alloc.memoryTypeIndex = memType;
+
+    VkDeviceMemory mem;
+    VK_CHECK(vkAllocateMemory(device, &alloc, nullptr, &mem));
+    vkBindImageMemory(device, rawImg, mem, 0);
+    outputMem_ = RTX::Handle<VkDeviceMemory>(mem, device, vkFreeMemory, memReqs.size, "Mode4_OutputMem");
 
     VkImageViewCreateInfo viewInfo{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
     viewInfo.image = rawImg;
     viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
     viewInfo.format = imgInfo.format;
     viewInfo.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+
     VkImageView rawView;
-    VK_CHECK(vkCreateImageView(device, &viewInfo, nullptr, &rawView), "Output view creation");
-    outputView_ = RTX::Handle<VkImageView>(rawView, device, vkDestroyImageView, 0, "OutputView");
+    VK_CHECK(vkCreateImageView(device, &viewInfo, nullptr, &rawView));
+    outputView_ = RTX::Handle<VkImageView>(rawView, device, vkDestroyImageView, 0, "Mode4_OutputView");
 
-    LOG_INFO_CAT("RenderMode4", "Updating RTX descriptors for frame 0 (output only)");
-    rtx_.updateRTXDescriptors(0, VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,
-                              VK_NULL_HANDLE, *outputView_, VK_NULL_HANDLE, VK_NULL_HANDLE,
-                              VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE);
-    LOG_SUCCESS_CAT("RenderMode4", "initResources complete — Ready for camera-tinted clears");
+    LOG_SUCCESS_CAT("RenderMode4", "Resources initialized — ready for camera-tinted clears");
 }
 
-void RenderMode4::renderFrame(VkCommandBuffer cmd, float deltaTime) {
-    LOG_DEBUG_CAT("RenderMode4", "renderFrame() — Delta: {:.3f}ms", deltaTime * 1000.0f);
-    clearCameraTinted(cmd);
+void RenderMode4::cleanupResources()
+{
+    vkDeviceWaitIdle(g_device());
+
+    outputView_.reset();
+    outputImage_.reset();
+    outputMem_.reset();
 }
 
-glm::vec3 RenderMode4::normalizePosition(const glm::vec3& pos) {
+void RenderMode4::onResize(uint32_t width, uint32_t height)
+{
+    if (width == width_ && height == height_) return;
+
+    LOG_INFO_CAT("RenderMode4", "Resize → {}×{}", width, height);
+    width_ = width;
+    height_ = height;
+
+    cleanupResources();
+    initResources();
+}
+
+glm::vec3 RenderMode4::normalizePosition(glm::vec3 pos) const
+{
     const float offset = 10.0f;
     const float scale  = 20.0f;
     return glm::clamp((pos + glm::vec3(offset)) / scale, 0.0f, 1.0f);
 }
 
-void RenderMode4::clearCameraTinted(VkCommandBuffer cmd) {
-    glm::vec3 camPos = g_lazyCam.pos();
-    glm::vec3 tint   = normalizePosition(camPos);
-
-    LOG_DEBUG_CAT("RenderMode4", "Clear color: R={:.3f} G={:.3f} B={:.3f} | CamPos: ({:.1f}, {:.1f}, {:.1f})",
-                  tint.x, tint.y, tint.z, camPos.x, camPos.y, camPos.z);
+void RenderMode4::clearCameraTinted(VkCommandBuffer cmd)
+{
+    glm::vec3 pos = CAM.pos();
+    glm::vec3 tint = normalizePosition(pos);
 
     VkImageMemoryBarrier barrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
-    barrier.image = *outputImage_;
-    barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
     barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+    barrier.srcQueueFamilyIndex = barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.image = outputImage_.get();
+    barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
     barrier.srcAccessMask = 0;
     barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+
     vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
                          0, 0, nullptr, 0, nullptr, 1, &barrier);
 
-    VkClearColorValue color{{tint.x, tint.y, tint.z, 1.0f}};
-    vkCmdClearColorImage(cmd, *outputImage_, VK_IMAGE_LAYOUT_GENERAL, &color, 1, &barrier.subresourceRange);
+    VkClearColorValue clearColor{{tint.r, tint.g, tint.b, 1.0f}};
+    vkCmdClearColorImage(cmd, outputImage_.get(), VK_IMAGE_LAYOUT_GENERAL, &clearColor, 1, &barrier.subresourceRange);
+
+    // Back to shader read
+    barrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+    barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                         0, 0, nullptr, 0, nullptr, 1, &barrier);
 }
 
-void RenderMode4::onResize(uint32_t width, uint32_t height) {
-    LOG_INFO_CAT("RenderMode4", "onResize() — New: {}×{} (old: {}×{})", width, height, width_, height_);
-
-    auto& ctx = g_ctx();
-    VkDevice device = ctx.device();
-    VK_CHECK(vkDeviceWaitIdle(device), "vkDeviceWaitIdle failed in onResize");
-
-    rtx_.updateRTXDescriptors(0, VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,
-                              VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,
-                              VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE);
-
-    outputImage_.reset();
-    outputView_.reset();
-
-    width_  = width;
-    height_ = height;
-
-    initResources();
-    LOG_SUCCESS_CAT("RenderMode4", "Resize complete — Camera tint will adapt");
+void RenderMode4::renderFrame(VkCommandBuffer cmd, float)
+{
+    clearCameraTinted(cmd);
 }

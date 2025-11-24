@@ -173,7 +173,7 @@ void RenderMode1::updateUniforms(float) {
     BUFFER_MAP(uniformBuf_, data);
     if (data) {
         float aspect = float(width_) / height_;
-        glm::mat4 vp = GlobalCamera::get().proj(aspect) * GlobalCamera::get().view();
+        glm::mat4 vp = Camera::get().proj(aspect) * Camera::get().view();
         float t = std::chrono::duration<float>(std::chrono::steady_clock::now() - lastFrame_).count();
         memcpy(data, glm::value_ptr(vp), sizeof(vp));
         memcpy((char*)data + sizeof(vp), &t, sizeof(t));

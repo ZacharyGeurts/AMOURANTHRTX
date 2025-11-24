@@ -117,6 +117,7 @@ public:
     void endSingleTimeCommands(VkCommandPool pool, VkQueue queue, VkCommandBuffer cmd) const;
 
     friend class ::VulkanRenderer;
+	Handle<VkPipeline>            rtPipeline_;
 
 private:
     // ZERO RAW HANDLES STORED — ALL OBFUSCATED VIA Handle<T>
@@ -128,7 +129,6 @@ private:
 
     Handle<VkDescriptorSetLayout> rtDescriptorSetLayout_;
     Handle<VkPipelineLayout>      rtPipelineLayout_;
-    Handle<VkPipeline>            rtPipeline_;
     Handle<VkDescriptorPool>      rtDescriptorPool_;
 
     std::vector<VkDescriptorSet> rtDescriptorSets_;  // Per-frame sets (raw, recreated every resize)

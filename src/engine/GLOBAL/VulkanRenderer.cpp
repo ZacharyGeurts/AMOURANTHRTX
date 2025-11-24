@@ -419,9 +419,7 @@ LOG_SUCCESS_CAT("RENDERER", "Step 5 COMPLETE — {} full sync sets forged — TR
     // =============================================================================
     // STEP 10 — Descriptor System (Uses Global VulkanRTX Instance)
     // =============================================================================
-    LOG_TRACE_CAT("RENDERER", "=== STACK BUILD ORDER STEP 10: Descriptor System ===");
-    g_rtx().initDescriptorPoolAndSets();
-    LOG_SUCCESS_CAT("RENDERER", "Step 10 COMPLETE — {} descriptor sets forged", Options::Performance::MAX_FRAMES_IN_FLIGHT);
+    // Moved to g_rtx() in phase 7 main.cpp
 
     // =============================================================================
     // STEP 11 — Per-Frame Buffers
@@ -430,46 +428,28 @@ LOG_SUCCESS_CAT("RENDERER", "Step 5 COMPLETE — {} full sync sets forged — TR
     initializeAllBufferData(MAX_FRAMES_IN_FLIGHT, 64_MB, 16_MB);
     LOG_TRACE_CAT("RENDERER", "Step 11 COMPLETE");
 
-    // FIXED: Create shared staging buffer for UBO updates (missing before, caused skipped updates)
-    VkDeviceSize stagingSize = 512;  // Enough for UBO + tonemap
-    g_ctx().sharedStagingEnc_ = RTX::UltraLowLevelBufferTracker::get().create(stagingSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, "SharedStagingUBO");
-
+// FIXED: Create shared staging buffer for UBO updates (missing before, caused skipped updates)
+VkDeviceSize stagingSize = 512;  // Enough for UBO + tonemap
+if (g_ctx().device() == VK_NULL_HANDLE) {
+    LOG_WARN_CAT("RENDERER", "Shared staging skipped — invalid device (pre-Phase 7)");
+    g_ctx().sharedStagingEnc_ = 0;
+} else {
+    g_ctx().sharedStagingEnc_ = RTX::UltraLowLevelBufferTracker::get().create(stagingSize, 
+        VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, 
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, 
+        "SharedStagingUBO");
+    if (g_ctx().sharedStagingEnc_ == 0) {
+        LOG_WARN_CAT("RENDERER", "Shared staging creation failed — UBO updates will be skipped");
+    } else {
+        LOG_TRACE_CAT("RENDERER", "Shared staging forged — enc=0x{:x}", g_ctx().sharedStagingEnc_);
+    }
+}
     // =============================================================================
     // STEP 12 — Command Buffers
     // =============================================================================
     LOG_TRACE_CAT("RENDERER", "=== STACK BUILD ORDER STEP 12: Allocate Command Buffers ===");
     createCommandBuffers();
     LOG_TRACE_CAT("RENDERER", "Step 12 COMPLETE");
-
-    // =============================================================================
-    // STEP 13 — RT Pipeline + SBT via PipelineManager (Now Early — Step 7.5)
-    // =============================================================================
-    LOG_TRACE_CAT("RENDERER", "=== STACK BUILD ORDER STEP 13: Ray Tracing Pipeline via PipelineManager ===");
-    pipelineManager_.createRayTracingPipeline(finalShaderPaths);              // ← Uses internal loadShader, zero-init, UNUSED_KHR, etc.
-    pipelineManager_.createShaderBindingTable(g_ctx().commandPool(), g_ctx().graphicsQueue());  // ← Uses internal begin/endSingleTimeCommands, DEVICE_ADDRESS_BIT
-    LOG_TRACE_CAT("RENDERER", "Step 13 COMPLETE — PipelineManager fully armed ({} groups, SBT @ 0x{:x})", 
-                  pipelineManager_.raygenGroupCount() + pipelineManager_.missGroupCount() + pipelineManager_.hitGroupCount(), pipelineManager_.sbtAddress());
-
-    // =============================================================================
-    // REPAIRED: STEP 13.5 — Allocate RT Descriptor Sets (POST-Pipeline/SBT, PRE-Updates)
-    // =============================================================================
-    // • NEW: Explicit allocation using PipelineManager's layout/pool — ensures rtDescriptorSets_ valid
-    // • GUARD: Post-alloc validation — fatal log + abort if empty (prevents render warnings)
-    // =============================================================================
-    LOG_TRACE_CAT("RENDERER", "=== STACK BUILD ORDER STEP 13.5: Allocate RT Descriptor Sets via PipelineManager ===");
-    pipelineManager_.allocateDescriptorSets();  // ← REPAIRED: Explicit call here — populates rtDescriptorSets_ w/ framesInFlight sets
-    rtDescriptorSets_ = pipelineManager_.rtDescriptorSets_;  // Assign from PipelineManager
-    if (rtDescriptorSets_.empty()) {
-        LOG_FATAL_CAT("RENDERER", "CRITICAL: RT descriptor sets allocation failed — empty post-allocateDescriptorSets() — ABORTING INIT");
-        LOG_FATAL_CAT("RENDERER", "Fatal error in noexcept function"); std::abort();
-    }
-    LOG_TRACE_CAT("RENDERER", "RT sets validated: {} non-empty sets (first=0x{:x})", rtDescriptorSets_.size(), reinterpret_cast<uintptr_t>(rtDescriptorSets_[0]));
-    LOG_SUCCESS_CAT("RENDERER", "Step 13.5 COMPLETE — RT descriptors allocated & validated — NO MORE INVALID STATE WARNINGS");
-    LOG_TRACE_CAT("RENDERER", "Pre-update RT state check: sets={}, pipeline_valid={}, sbt=0x{:x}, output_valid={}",
-                  rtDescriptorSets_.size(),
-                  pipelineManager_.rtPipeline_.valid() ? "YES" : "NO",
-                  pipelineManager_.sbtAddress(),
-                  rtOutputImages_.empty() ? "NO" : (rtOutputImages_[0].valid() ? "YES" : "NO"));
 
     // =============================================================================
     // STEP 14 — Final Descriptor Updates (SAFE ORDER)
@@ -1726,7 +1706,7 @@ void VulkanRenderer::updateUniformBuffer(uint32_t frame, const Camera& camera, f
         float _pad[3];
     } ubo{};
 
-    const auto& cam = GlobalCamera::get();
+    const auto& cam = Camera::get();
     ubo.view      = cam.view();
     ubo.proj      = cam.proj(width_ / float(height_));
     ubo.viewProj  = ubo.proj * ubo.view;

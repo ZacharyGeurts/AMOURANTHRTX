@@ -24,7 +24,7 @@
 #include <unistd.h>
 #include "engine/GLOBAL/logging.hpp"
 
-// Forward declare — PipelineManager lives elsewhere
+class VulkanRenderer;
 namespace RTX { class PipelineManager; }
 
 static_assert(sizeof(uintptr_t) >= 8, "64-bit only");
@@ -33,7 +33,7 @@ static_assert(__cplusplus >= 202302L, "C++23 required");
 using namespace Logging::Color;
 
 // -----------------------------------------------------------------------------
-// 1. THE ORIGINAL GENIUS ENTROPY — UNTOUCHED, UNBROKEN
+// 1. CONSTEXPR ENTROPY — UNTOUCHED, UNBROKEN
 // -----------------------------------------------------------------------------
 [[nodiscard]] constexpr uint64_t fnv1a_fold(const char* data) noexcept {
     uint64_t h = 0xCBF29CE484222325ULL;
@@ -69,7 +69,7 @@ static_assert(stone_key1_base() != stone_key2_base());
 static_assert(stone_key1_base() && stone_key2_base());
 
 // -----------------------------------------------------------------------------
-// 2. RUNTIME ENTROPY — THE ONE THAT WORKED
+// 2. RUNTIME ENTROPY
 // -----------------------------------------------------------------------------
 [[nodiscard]] inline uint64_t runtime_entropy() noexcept {
     uint64_t val; unsigned char ok;
@@ -88,13 +88,13 @@ inline uint64_t kStone2()     noexcept { static uint64_t k = stone_key2_base() ^
 inline uint64_t kObfuscator() noexcept { static uint64_t k = kStone1() ^ kStone2() ^ 0x1337C0DE69F00D42ULL; return k; }
 
 // -----------------------------------------------------------------------------
-// 3. OBFUSCATION — THE ONE THAT WORKED
+// 3. OBFUSCATION
 // -----------------------------------------------------------------------------
 [[nodiscard]] inline uint64_t obfuscate(uint64_t h)  noexcept { return h ^ kObfuscator(); }
 [[nodiscard]] inline uint64_t deobfuscate(uint64_t h) noexcept { return h ^ kObfuscator(); }
 
 // -----------------------------------------------------------------------------
-// 4. THE FULL EMPIRE — NOW WITH THE ONE TRUE PIPELINE MANAGER
+// 4. THE EMPIRE — NOW OWNS RENDERER + PIPELINEMANAGER
 // -----------------------------------------------------------------------------
 namespace StoneKey::Empire {
     inline std::atomic<VkInstance>       instance{VK_NULL_HANDLE};
@@ -104,10 +104,12 @@ namespace StoneKey::Empire {
     inline std::atomic<SDL_Renderer*>    g_sdl_renderer{nullptr};
     inline std::atomic<VkSwapchainKHR>   swapchain{VK_NULL_HANDLE};
 
-    // THE ONE TRUE PIPELINE MANAGER — FORGED ONCE, USED BY ALL
+    // THE ONE TRUE RENDERER & PIPELINE MANAGER
+    inline std::atomic<VulkanRenderer*>       renderer{nullptr};
     inline std::atomic<RTX::PipelineManager*> pipelineManager{nullptr};
+    inline std::atomic<bool>                  renderer_ready{false};
 
-    // SWAPCHAIN TREASURES — OWNED BY THE EMPIRE
+    // SWAPCHAIN STATE
     inline std::vector<VkImage>        swapchain_images;
     inline std::vector<VkImageView>    swapchain_image_views;
     inline VkRenderPass                  render_pass{VK_NULL_HANDLE};
@@ -119,7 +121,7 @@ namespace StoneKey::Empire {
 }
 
 // -----------------------------------------------------------------------------
-// 5. GLOBAL ACCESSORS — PURE, CLEAN, BEST
+// 5. GLOBAL ACCESSORS — PURE AND ETERNAL
 // -----------------------------------------------------------------------------
 [[nodiscard]] inline VkInstance       g_instance()       noexcept { return StoneKey::Empire::instance.load(); }
 [[nodiscard]] inline VkDevice         g_device()         noexcept { return StoneKey::Empire::device.load(); }
@@ -128,43 +130,52 @@ namespace StoneKey::Empire {
 [[nodiscard]] inline SDL_Renderer*    g_sdl_renderer()   noexcept { return StoneKey::Empire::g_sdl_renderer.load(); }
 [[nodiscard]] inline VkSwapchainKHR   g_swapchain()      noexcept { return StoneKey::Empire::swapchain.load(); }
 
-// THE ONE TRUE PIPELINE ACCESSOR
-[[nodiscard]] inline RTX::PipelineManager* g_pipelineManager() noexcept 
-{ 
-    return StoneKey::Empire::pipelineManager.load(); 
+[[nodiscard]] inline VulkanRenderer*       g_renderer() noexcept {
+    auto* r = StoneKey::Empire::renderer.load();
+    if (!r) [[unlikely]] { LOG_FATAL_CAT("STONEKEY", "g_renderer() before first light"); std::abort(); }
+    return r;
 }
+[[nodiscard]] inline RTX::PipelineManager* g_pipelineManager() noexcept {
+    auto* pm = StoneKey::Empire::pipelineManager.load();
+    if (!pm) [[unlikely]] { LOG_FATAL_CAT("STONEKEY", "g_pipelineManager() before first light"); std::abort(); }
+    return pm;
+}
+[[nodiscard]] inline bool g_renderer_ready() noexcept { return StoneKey::Empire::renderer_ready.load(); }
 
-[[nodiscard]] inline auto&       g_swapchain_images()      noexcept { return StoneKey::Empire::swapchain_images; }
-[[nodiscard]] inline auto&       g_swapchain_image_views() noexcept { return StoneKey::Empire::swapchain_image_views; }
-[[nodiscard]] inline VkRenderPass g_render_pass()          noexcept { return StoneKey::Empire::render_pass; }
-[[nodiscard]] inline auto&       g_surface_format()        noexcept { return StoneKey::Empire::surface_format; }
-[[nodiscard]] inline VkExtent2D  g_extent()                noexcept { return StoneKey::Empire::extent; }
-[[nodiscard]] inline uint32_t    g_image_count()           noexcept { return StoneKey::Empire::image_count; }
-[[nodiscard]] inline uint32_t    g_width()                 noexcept { return g_extent().width; }
-[[nodiscard]] inline uint32_t    g_height()                noexcept { return g_extent().height; }
+[[nodiscard]] inline auto& g_swapchain_images()      noexcept { return StoneKey::Empire::swapchain_images; }
+[[nodiscard]] inline auto& g_swapchain_image_views() noexcept { return StoneKey::Empire::swapchain_image_views; }
+[[nodiscard]] inline VkRenderPass g_render_pass()    noexcept { return StoneKey::Empire::render_pass; }
+[[nodiscard]] inline auto& g_surface_format()        noexcept { return StoneKey::Empire::surface_format; }
+[[nodiscard]] inline VkExtent2D  g_extent()          noexcept { return StoneKey::Empire::extent; }
+[[nodiscard]] inline uint32_t    g_image_count()     noexcept { return StoneKey::Empire::image_count; }
+[[nodiscard]] inline uint32_t    g_width()           noexcept { return g_extent().width; }
+[[nodiscard]] inline uint32_t    g_height()          noexcept { return g_extent().height; }
 
 // -----------------------------------------------------------------------------
-// 6. SETTERS — ONLY THE FORGE MAY TOUCH
+// 6. SETTERS — ONLY main.cpp MAY CALL THESE
 // -----------------------------------------------------------------------------
-inline void set_g_instance(VkInstance h)       noexcept { StoneKey::Empire::instance.store(h); }
-inline void set_g_device(VkDevice h)           noexcept { StoneKey::Empire::device.store(h); }
+inline void set_g_instance(VkInstance h)           noexcept { StoneKey::Empire::instance.store(h); }
+inline void set_g_device(VkDevice h)               noexcept { StoneKey::Empire::device.store(h); }
 inline void set_g_PhysicalDevice(VkPhysicalDevice h) noexcept { StoneKey::Empire::physicalDevice.store(h); }
-inline void set_g_surface(VkSurfaceKHR h)      noexcept { StoneKey::Empire::surface.store(h); }
-inline void set_g_swapchain(VkSwapchainKHR h)  noexcept { StoneKey::Empire::swapchain.store(h); }
+inline void set_g_surface(VkSurfaceKHR h)          noexcept { StoneKey::Empire::surface.store(h); }
+inline void set_g_swapchain(VkSwapchainKHR h)      noexcept { StoneKey::Empire::swapchain.store(h); }
 
-// THE ONE TRUE SETTER
-inline void set_g_pipelineManager(RTX::PipelineManager* pm) noexcept 
-{ 
-    StoneKey::Empire::pipelineManager.store(pm); 
+inline void set_g_renderer(VulkanRenderer* r) noexcept {
+    if (StoneKey::Empire::renderer.exchange(r) != nullptr) {
+        LOG_FATAL_CAT("STONEKEY", "DOUBLE RENDERER FORGE"); std::abort();
+    }
+    StoneKey::Empire::renderer_ready.store(true);
+    LOG_SUCCESS_CAT("StoneKey", "{}g_renderer() SEALED — FIRST LIGHT ACHIEVED{}", DIAMOND_SPARKLE, RESET);
 }
 
-inline void set_g_render_pass(VkRenderPass rp)          noexcept { StoneKey::Empire::render_pass = rp; }
-inline void set_g_surface_format(VkSurfaceFormatKHR fmt) noexcept { StoneKey::Empire::surface_format = fmt; }
-inline void set_g_extent(VkExtent2D ext)                noexcept { StoneKey::Empire::extent = ext; }
-inline void set_g_image_count(uint32_t count)           noexcept { StoneKey::Empire::image_count = count; }
+inline void set_g_pipelineManager(RTX::PipelineManager* pm) noexcept {
+    if (StoneKey::Empire::pipelineManager.exchange(pm) != nullptr) {
+        LOG_FATAL_CAT("STONEKEY", "DOUBLE PIPELINEMANAGER FORGE"); std::abort();
+    }
+}
 
 // -----------------------------------------------------------------------------
-// 7. FINAL SEAL — CALL ONCE
+// 7. FINAL SEAL
 // -----------------------------------------------------------------------------
 inline void StoneKey_seal_the_vault() noexcept {
     if (StoneKey::Empire::sealed.exchange(true)) return;
@@ -172,12 +183,12 @@ inline void StoneKey_seal_the_vault() noexcept {
 }
 
 // -----------------------------------------------------------------------------
-// 8. FINGERPRINT — THE MARK OF AMOURANTH
+// 8. FINGERPRINT
 // -----------------------------------------------------------------------------
 [[nodiscard]] inline uint64_t stone_fingerprint() noexcept {
     uint64_t fp = kStone1() ^ kStone2();
     fp ^= fp >> 33; fp *= 0xFF51AFD7ED558CCDULL; fp ^= fp >> 33;
-    LOG_SUCCESS_CAT("StoneKey", "{}AMOURANTH RTX — FINGERPRINT 0x{:016X} — THE EMPIRE IS OURS{}", RASPBERRY_PINK, fp, RESET);
+    LOG_SUCCESS_CAT("StoneKey", "{}AMOURANTH RTX — FINGERPRINT 0x{:016X}{}", RASPBERRY_PINK, fp, RESET);
     return fp;
 }
 // =============================================================================

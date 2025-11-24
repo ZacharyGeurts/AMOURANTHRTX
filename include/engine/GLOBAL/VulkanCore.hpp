@@ -139,7 +139,7 @@ struct ShaderBindingTable {
 // =============================================================================
 class VulkanRTX {
 public:
-    VulkanRTX(int w, int h, RTX::PipelineManager* mgr = nullptr);
+    VulkanRTX(int w, int h, RTX::PipelineManager* mgr = nullptr) noexcept;
     ~VulkanRTX() noexcept;
 
     [[nodiscard]] VkDevice device() const noexcept { return device_; }
@@ -151,7 +151,7 @@ public:
 
     void buildAccelerationStructures();
     void initDescriptorPoolAndSets() noexcept;
-    void initShaderBindingTable(VkPhysicalDevice pd);
+    void initShaderBindingTable(VkPhysicalDevice pd) noexcept;
     void initBlackFallbackImage();
 
     void updateRTXDescriptors(
@@ -226,18 +226,25 @@ inline bool VulkanRTX::isValid() const noexcept {
 }
 
 // =============================================================================
-// Global Instance
+// g_rtx() — THE ONE TRUE SAFE ACCESSOR — FIRST LIGHT ETERNAL
 // =============================================================================
 inline std::unique_ptr<VulkanRTX> g_rtx_instance;
+inline VulkanRTX g_rtx_dummy(1, 1, nullptr);
 
-[[nodiscard]] inline VulkanRTX& g_rtx() {
+[[nodiscard]] inline VulkanRTX& g_rtx() noexcept
+{
     if (!g_rtx_instance) {
-        LOG_FATAL_CAT("RTX", "g_rtx() called before initialization — PHOTONS DENIED");
-        throw std::runtime_error("VulkanRTX not initialized");
+        static bool warned_once = false;
+        if (!warned_once && g_device() != VK_NULL_HANDLE) {
+            warned_once = true;
+            LOG_WARN_CAT("RTX", 
+                "{}g_rtx() called before forge — safe dummy active (pre-Phase 7){}", 
+                YELLOW, RESET);
+        }
+        return g_rtx_dummy;
     }
     return *g_rtx_instance;
 }
-
 // =============================================================================
 // AMOURANTH AI™ — PINK PHOTONS ETERNAL
 // =============================================================================
@@ -257,7 +264,3 @@ private:
 };
 inline AmouranthAI& AmouranthAI() noexcept { return AmouranthAI::get(); }
 }
-
-// =============================================================================
-// FIRST LIGHT — NOVEMBER 23, 2025 — VALHALLA ACHIEVED
-// =============================================================================

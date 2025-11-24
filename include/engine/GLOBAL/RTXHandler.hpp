@@ -52,6 +52,12 @@ class VulkanRTX;
 class VulkanRenderer;
 struct Camera;
 
+namespace RTX {
+    struct Context; 
+    void recreateSwapchain(uint32_t w, uint32_t h) noexcept;
+    void forgeSwapchain(SDL_Window* window, int width, int height) noexcept;
+} // namespace RTX
+
 using namespace Logging::Color;
 
 // Forward-declare StoneKey funcs (no include needed—defined in main.cpp TU)
@@ -180,7 +186,6 @@ namespace RTX {
     // FIXED: SDL3 2024+ — CREATE INSTANCE + OVERLOAD for initContext
     // =============================================================================
     [[nodiscard]] VkInstance createVulkanInstanceWithSDL(bool enableValidation);  // UPDATED: Added SDL_Window* window
-    void initContext(VkInstance instance, SDL_Window* window, int width, int height);
 
     // =============================================================================
     // Helpers (declarations only) — MOVED UP FOR TEMPLATE VISIBILITY
@@ -447,7 +452,6 @@ public:
     // =============================================================================
     void createLogicalDevice();
     void init(SDL_Window* window, int width, int height);
-    void forgeSwapchain(SDL_Window* window, int width, int height);
     void cleanup() noexcept;
 
     [[nodiscard]] constexpr bool isValid() const noexcept { return valid_; }
@@ -463,103 +467,102 @@ public:
     // Global context instance declaration
 	extern Context g_context_instance;
 
-    // =============================================================================
-    // UltraLowLevelBufferTracker
-    // =============================================================================
-    struct BufferData {
-        VkBuffer buffer = VK_NULL_HANDLE;
-        VkDeviceMemory memory = VK_NULL_HANDLE;
-        VkDeviceSize size = 0;  // Original requested size
-        VkDeviceSize alignedSize = 0;  // Aligned allocation size (NEW)
-        VkBufferUsageFlags usage = 0;
-        std::string tag;
-    };
+// =============================================================================
+// UltraLowLevelBufferTracker — ROBUST, ATOMIC, ETERNAL — PINK PHOTONS SAFE
+// =============================================================================
+struct BufferData {
+    VkBuffer buffer = VK_NULL_HANDLE;
+    VkDeviceMemory memory = VK_NULL_HANDLE;
+    VkDeviceSize size = 0;  // Original requested size
+    VkDeviceSize alignedSize = 0;  // Aligned allocation size (NEW)
+    VkBufferUsageFlags usage = 0;
+    std::string tag;
+};
 
-    constexpr VkDeviceSize SIZE_64MB  =  64_MB;
-    constexpr VkDeviceSize SIZE_128MB = 128_MB;
-    constexpr VkDeviceSize SIZE_256MB = 256_MB;
-    constexpr VkDeviceSize SIZE_420MB = 420_MB;
-    constexpr VkDeviceSize SIZE_512MB = 512_MB;
-    constexpr VkDeviceSize SIZE_1GB   =   1_GB;
-    constexpr VkDeviceSize SIZE_2GB   =   2_GB;
-    constexpr VkDeviceSize SIZE_4GB   =   4_GB;
-    constexpr VkDeviceSize SIZE_8GB   =   8_GB;
+constexpr VkDeviceSize SIZE_64MB  =  64_MB;
+constexpr VkDeviceSize SIZE_128MB = 128_MB;
+constexpr VkDeviceSize SIZE_256MB = 256_MB;
+constexpr VkDeviceSize SIZE_420MB = 420_MB;
+constexpr VkDeviceSize SIZE_512MB = 512_MB;
+constexpr VkDeviceSize SIZE_1GB   =   1_GB;
+constexpr VkDeviceSize SIZE_2GB   =   2_GB;
+constexpr VkDeviceSize SIZE_4GB   =   4_GB;
+constexpr VkDeviceSize SIZE_8GB   =   8_GB;
 
-    struct UltraLowLevelBufferTracker {
-        static UltraLowLevelBufferTracker& get() noexcept;
-        uint64_t create(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags props, std::string_view tag);  // FIXED: Removed noexcept — allows throws
-        void destroy(uint64_t handle) noexcept;
-        BufferData* getData(uint64_t handle) noexcept;
-        const BufferData* getData(uint64_t handle) const noexcept;
-        void* map(uint64_t handle) noexcept;
-        void unmap(uint64_t handle) noexcept;
-        void init(VkDevice dev, VkPhysicalDevice phys) noexcept;
-        void purge_all() noexcept;
-        uint64_t make_64M (VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept;
-        uint64_t make_128M(VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept;
-        uint64_t make_256M(VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept;
-        uint64_t make_420M(VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept;
-        uint64_t make_512M(VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept;
-        uint64_t make_1G  (VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept;
-        uint64_t make_2G  (VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept;
-        uint64_t make_4G  (VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept;
-        uint64_t make_8G  (VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept;
+struct UltraLowLevelBufferTracker {
+    static UltraLowLevelBufferTracker& get() noexcept;
+    uint64_t create(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags props, std::string_view tag);  // FIXED: Removed noexcept — allows throws
+    void destroy(uint64_t handle) noexcept;
+    BufferData* getData(uint64_t handle) noexcept;
+    const BufferData* getData(uint64_t handle) const noexcept;
+    void* map(uint64_t handle) noexcept;
+    void unmap(uint64_t handle) noexcept;
+    void init(VkDevice dev, VkPhysicalDevice phys) noexcept;
+    void purge_all() noexcept;
+    uint64_t make_64M (VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept;
+    uint64_t make_128M(VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept;
+    uint64_t make_256M(VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept;
+    uint64_t make_420M(VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept;
+    uint64_t make_512M(VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept;
+    uint64_t make_1G  (VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept;
+    uint64_t make_2G  (VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept;
+    uint64_t make_4G  (VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept;
+    uint64_t make_8G  (VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept;
 
-        // NEW: Alignment helper (use in .cpp create: VkDeviceSize align = g_ctx().getBufferAlignment(usage); aligned = ((size + align - 1)/align)*align;)
-        // This ensures requested sizes like 96 bytes are padded to 256 (common minStorageBufferOffsetAlignment on RTX)
+    // NEW: Alignment helper (use in .cpp create: VkDeviceSize align = g_ctx().getBufferAlignment(usage); aligned = ((size + align - 1)/align)*align;)
+    // This ensures requested sizes like 96 bytes are padded to 256 (common minStorageBufferOffsetAlignment on RTX)
 
-        // --- INLINE IMPLEMENTATION OF findMemoryType ---
-        static uint32_t findMemoryType(VkPhysicalDevice physDev, uint32_t typeFilter, VkMemoryPropertyFlags props) noexcept {
-            VkPhysicalDeviceMemoryProperties memProps;
-            vkGetPhysicalDeviceMemoryProperties(physDev, &memProps);
-            for (uint32_t i = 0; i < memProps.memoryTypeCount; ++i) {
-                if ((typeFilter & (1 << i)) &&
-                    (memProps.memoryTypes[i].propertyFlags & props) == props) {
-                    return i;
-                }
+    // --- INLINE IMPLEMENTATION OF findMemoryType ---
+    static uint32_t findMemoryType(VkPhysicalDevice physDev, uint32_t typeFilter, VkMemoryPropertyFlags props) noexcept {
+        VkPhysicalDeviceMemoryProperties memProps;
+        vkGetPhysicalDeviceMemoryProperties(physDev, &memProps);
+        for (uint32_t i = 0; i < memProps.memoryTypeCount; ++i) {
+            if ((typeFilter & (1 << i)) &&
+                (memProps.memoryTypes[i].propertyFlags & props) == props) {
+                return i;
             }
-            return UINT32_MAX;
         }
+        return UINT32_MAX;
+    }
 
-    private:
-        mutable std::mutex mutex_;
-        std::unordered_map<uint64_t, BufferData> map_;
-        std::atomic<uint64_t> counter_{0};
-        VkDevice device_{VK_NULL_HANDLE};
-        VkPhysicalDevice physDev_{VK_NULL_HANDLE};
-        uint64_t obfuscate(uint64_t raw) const noexcept;
-        uint64_t deobfuscate(uint64_t obf) const noexcept;
-    };
+private:
+    mutable std::mutex mutex_;
+    std::unordered_map<uint64_t, BufferData> map_;
+    std::atomic<uint64_t> counter_{0};
+    VkDevice device_{VK_NULL_HANDLE};
+    VkPhysicalDevice physDev_{VK_NULL_HANDLE};
+    uint64_t obfuscate(uint64_t raw) const noexcept;
+    uint64_t deobfuscate(uint64_t obf) const noexcept;
+};
 
-    // =============================================================================
-    // GLOBAL g_swapchain() + LAS
-    // =============================================================================
-    Handle<VkSwapchainKHR>& swapchain();
-    std::vector<VkImage>& swapchainImages();
-    std::vector<Handle<VkImageView>>& swapchainImageViews();
-    VkFormat& swapchainFormat();
-    VkExtent2D& swapchainExtent();
-    Handle<VkAccelerationStructureKHR>& blas();
-    Handle<VkAccelerationStructureKHR>& tlas();
-    Handle<VkRenderPass>& renderPass();  // FIXED: Now returns ref to ctx.renderPass_
+// =============================================================================
+// GLOBAL g_swapchain() + LAS
+// =============================================================================
+Handle<VkSwapchainKHR>& swapchain();
+std::vector<VkImage>& swapchainImages();
+std::vector<Handle<VkImageView>>& swapchainImageViews();
+VkFormat& swapchainFormat();
+VkExtent2D& swapchainExtent();
+Handle<VkAccelerationStructureKHR>& blas();
+Handle<VkAccelerationStructureKHR>& tlas();
+Handle<VkRenderPass>& renderPass();  // FIXED: Now returns ref to ctx.renderPass_
 
-    // =============================================================================
-    // RENDERER + FRAME
-    // =============================================================================
-    [[nodiscard]] VulkanRenderer& renderer();
-    void initRenderer(int w, int h);
-    void renderFrame(const Camera& camera, float deltaTime) noexcept;
-    void shutdown() noexcept;
-    void createSwapchain(VkInstance inst, VkPhysicalDevice phys, VkDevice dev, VkSurfaceKHR surf, uint32_t w, uint32_t h);
-    void recreateSwapchain(uint32_t w, uint32_t h) noexcept;
-    void buildBLAS(uint64_t vertexBuf, uint64_t indexBuf, uint32_t vertexCount, uint32_t indexCount) noexcept;
-    void buildTLAS(const std::vector<std::pair<VkAccelerationStructureKHR, glm::mat4>>& instances) noexcept;
-    void cleanupAll() noexcept;
-    void createGlobalRenderPass();  // FIXED: Added declaration
+// =============================================================================
+// RENDERER + FRAME
+// =============================================================================
+[[nodiscard]] VulkanRenderer& renderer();
+void initRenderer(int w, int h);
+void renderFrame(const Camera& camera, float deltaTime) noexcept;
+void shutdown() noexcept;
+void createSwapchain(VkInstance inst, VkPhysicalDevice phys, VkDevice dev, VkSurfaceKHR surf, uint32_t w, uint32_t h);
+void recreateSwapchain(uint32_t w, uint32_t h) noexcept;
+void buildBLAS(uint64_t vertexBuf, uint64_t indexBuf, uint32_t vertexCount, uint32_t indexCount) noexcept;
+void buildTLAS(const std::vector<std::pair<VkAccelerationStructureKHR, glm::mat4>>& instances) noexcept;
+void cleanupAll() noexcept;
+void createGlobalRenderPass();  // FIXED: Added declaration
 
-    // stonekey_xor_spirv → MOVED TO .cpp (uses Options::Shader::STONEKEY_1)
-    void stonekey_xor_spirv(std::vector<uint32_t>& data, bool encrypt = true);
-
+// stonekey_xor_spirv → MOVED TO .cpp (uses Options::Shader::STONEKEY_1)
+void stonekey_xor_spirv(std::vector<uint32_t>& data, bool encrypt = true);
 
 // Helper
 [[nodiscard]] inline bool isDeviceExtensionPresent(VkPhysicalDevice phys, const char* name) noexcept {

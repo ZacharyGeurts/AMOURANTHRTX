@@ -37,7 +37,6 @@
 #endif
 
 using namespace Logging::Color;
-using namespace RTX;
 
 const char* VulkanResultToString(VkResult result) {
     switch (result) {
@@ -67,199 +66,195 @@ namespace RTX {
     // FIXED: Definition of the extern global (zero-init for safety)
     Context g_context_instance{};
 
-    [[nodiscard]] Context& g_ctx() noexcept { return g_context_instance; }
-
     void logAndTrackDestruction(const char* type, void* ptr, int line, size_t size) {
         if (ENABLE_DEBUG) {
             LOG_DEBUG_CAT("RTX", "{}Destroyed: {} @ 0x{:p} (line {}, size: {}B)", SAPPHIRE_BLUE, type, ptr, line, size);
         }
     }
 
-    UltraLowLevelBufferTracker& UltraLowLevelBufferTracker::get() noexcept {
-        static UltraLowLevelBufferTracker instance;
-        return instance;
+// =============================================================================
+// UltraLowLevelBufferTracker IMPLEMENTATION — NO STRUCT REDEFINITION
+// =============================================================================
+
+UltraLowLevelBufferTracker& UltraLowLevelBufferTracker::get() noexcept {
+    static UltraLowLevelBufferTracker instance;
+    return instance;
+}
+
+uint64_t UltraLowLevelBufferTracker::create(VkDeviceSize size,
+                                        VkBufferUsageFlags usage,
+                                        VkMemoryPropertyFlags props,
+                                        std::string_view tag) 
+{
+    if (size == 0) {
+        LOG_ERROR_CAT("RTX", "Attempted to create zero-sized buffer: {}", tag);
+        return 0;
     }
 
-    uint64_t UltraLowLevelBufferTracker::create(VkDeviceSize size,
-                                            VkBufferUsageFlags usage,
-                                            VkMemoryPropertyFlags props,
-                                            std::string_view tag) 
+    if (device_ == VK_NULL_HANDLE) {
+        LOG_FATAL_CAT("RTX", "vkCreateBuffer aborted: Invalid device (null handle) — call RTX::initContext() first");
+        return 0;
+    }
+
+    if (physDev_ == VK_NULL_HANDLE) {
+        LOG_WARN_CAT("RTX", "Physical device null during buffer creation — aborting");
+        return 0;
+    }
+
+    VkBuffer buffer = VK_NULL_HANDLE;
+    VkBufferCreateInfo bufInfo{};
+    bufInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    bufInfo.size = size;
+    bufInfo.usage = usage;
+    bufInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    VkResult result = vkCreateBuffer(device_, &bufInfo, nullptr, &buffer);
+    if (result != VK_SUCCESS) {
+        LOG_FATAL_CAT("RTX", "vkCreateBuffer failed ({}): {}", static_cast<uint32_t>(result), VulkanResultToString(result));
+        return 0;
+    }
+
+    VkMemoryRequirements memReq{};
+    vkGetBufferMemoryRequirements(device_, buffer, &memReq);
+
+    if (memReq.size == 0 || memReq.alignment == 0) {
+        vkDestroyBuffer(device_, buffer, nullptr);
+        LOG_FATAL_CAT("RTX", "Invalid memory requirements after buffer creation");
+        return 0;
+    }
+
+    if (memReq.size > size) {
+        LOG_WARN_CAT("RTX", "Driver requires {} bytes (requested {}) — alignment {}", memReq.size, size, memReq.alignment);
+    }
+
+    VkMemoryAllocateFlagsInfo flagsInfo{};
+    flagsInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO;
+    flagsInfo.flags = (usage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) ? VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT_KHR : 0u;
+
+    uint32_t memTypeIndex = findMemoryType(physDev_, memReq.memoryTypeBits, props);
+    if (memTypeIndex == UINT32_MAX) {
+        LOG_FATAL_CAT("RTX", "No compatible memory type found for buffer | Tag: {}", tag);
+        vkDestroyBuffer(device_, buffer, nullptr);
+        return 0;
+    }
+
+    VkMemoryAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    allocInfo.pNext = (usage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) ? &flagsInfo : nullptr;
+    allocInfo.allocationSize = memReq.size;
+    allocInfo.memoryTypeIndex = memTypeIndex;
+
+    VkDeviceMemory memory = VK_NULL_HANDLE;
+    result = vkAllocateMemory(device_, &allocInfo, nullptr, &memory);
+    if (result != VK_SUCCESS) {
+        LOG_FATAL_CAT("RTX", "vkAllocateMemory failed: {} | Tag: {}", result, tag);
+        vkDestroyBuffer(device_, buffer, nullptr);
+        return 0;
+    }
+
+    result = vkBindBufferMemory(device_, buffer, memory, 0);
+    if (result != VK_SUCCESS) {
+        LOG_FATAL_CAT("RTX", "vkBindBufferMemory failed: {} | Tag: {}", result, tag);
+        vkFreeMemory(device_, memory, nullptr);
+        vkDestroyBuffer(device_, buffer, nullptr);
+        return 0;
+    }
+
+    const uint64_t raw = ++counter_;
+    const uint64_t obf = ::obfuscate(raw);
+
     {
-        if (size == 0) {
-            LOG_ERROR_CAT("RTX", "{}Attempted to create zero-sized buffer: {}{}", CRIMSON_MAGENTA, tag, RESET);
-            return 0;
-        }
-
-        if (device_ == VK_NULL_HANDLE) {
-            LOG_FATAL_CAT("RTX", "{}vkCreateBuffer aborted: Invalid device (null handle) — call RTX::initContext() first{}", CRIMSON_MAGENTA, RESET);
-            throw std::runtime_error(std::format("Buffer creation failed: Invalid Vulkan device (null) — ensure RTX::initContext called"));
-        }
-
-        VkBuffer buffer = VK_NULL_HANDLE;
-        VkBufferCreateInfo bufInfo{};
-        bufInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        bufInfo.size = size;
-        bufInfo.usage = usage;
-        bufInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-        VkResult result = vkCreateBuffer(device_, &bufInfo, nullptr, &buffer);
-        if (result != VK_SUCCESS) {
-            LOG_FATAL_CAT("RTX", "{}vkCreateBuffer failed (result=0x{:08X}): {}{}", CRIMSON_MAGENTA, static_cast<uint32_t>(result), VulkanResultToString(result), RESET);
-            throw std::runtime_error(std::format("vkCreateBuffer failed: {}", VulkanResultToString(result)));
-        }
-
-        VkMemoryRequirements memReq{};
-        vkGetBufferMemoryRequirements(device_, buffer, &memReq);
-
-        if (memReq.size == 0 || memReq.alignment == 0) {
-            LOG_FATAL_CAT("RTX", "{}Invalid memReq after create (size={} align={}): UB, destroying buffer{}", CRIMSON_MAGENTA, memReq.size, memReq.alignment, RESET);
-            vkDestroyBuffer(device_, buffer, nullptr);
-            throw std::runtime_error(std::format("Invalid memory requirements for buffer: {}", tag));
-        }
-
-        if (memReq.size > size) {
-            LOG_WARN_CAT("RTX", "{}Requested {} bytes, driver requires {} bytes (align: {})", SAPPHIRE_BLUE, size, memReq.size, memReq.alignment, RESET);
-        }
-
-        VkMemoryAllocateFlagsInfo flagsInfo{};
-        flagsInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO;
-        flagsInfo.flags = (usage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) ? VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT_KHR : 0u;
-
-        uint32_t memTypeIndex = findMemoryType(physDev_, memReq.memoryTypeBits, props);
-        if (memTypeIndex == UINT32_MAX) {
-            LOG_FATAL_CAT("RTX", "{}No compatible memory type found for buffer | Tag: {}{}", CRIMSON_MAGENTA, tag, RESET);
-            vkDestroyBuffer(device_, buffer, nullptr);
-            return 0;
-        }
-
-        VkMemoryAllocateInfo allocInfo{};
-        allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-        allocInfo.pNext = (usage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) ? &flagsInfo : nullptr;
-        allocInfo.allocationSize = memReq.size;
-        allocInfo.memoryTypeIndex = memTypeIndex;
-
-        VkDeviceMemory memory = VK_NULL_HANDLE;
-        result = vkAllocateMemory(device_, &allocInfo, nullptr, &memory);
-        if (result != VK_SUCCESS) {
-            LOG_FATAL_CAT("RTX", "{}vkAllocateMemory failed: {} | Tag: {}{}", CRIMSON_MAGENTA, result, tag, RESET);
-            vkDestroyBuffer(device_, buffer, nullptr);
-            return 0;
-        }
-
-        result = vkBindBufferMemory(device_, buffer, memory, 0);
-        if (result != VK_SUCCESS) {
-            LOG_FATAL_CAT("RTX", "{}vkBindBufferMemory failed: {} | Tag: {}{}", CRIMSON_MAGENTA, result, tag, RESET);
-            vkFreeMemory(device_, memory, nullptr);
-            vkDestroyBuffer(device_, buffer, nullptr);
-            return 0;
-        }
-
-        const uint64_t raw = ++counter_;
-        const uint64_t obf = ::obfuscate(raw);
-
-        {
-            std::lock_guard<std::mutex> lk(mutex_);
-            map_.emplace(raw, BufferData{buffer, memory, size, memReq.size, usage, std::string(tag)});
-        }
-
-        LOG_DEBUG_CAT("RTX", "{}Buffer forged: raw=0x{:x} → obf=0x{:x} | Size: {}B | Tag: {}{}", SAPPHIRE_BLUE, raw, obf, size, tag, RESET);
-        return obf;
+        std::lock_guard<std::mutex> lk(mutex_);
+        map_.emplace(raw, BufferData{buffer, memory, size, memReq.size, usage, std::string(tag)});
     }
 
-    void* UltraLowLevelBufferTracker::map(uint64_t handle) noexcept {
-        if (handle == 0) return nullptr;
-        const uint64_t raw = ::deobfuscate(handle);
-        std::lock_guard<std::mutex> lk(mutex_);
-        auto it = map_.find(raw);
-        if (it == map_.end()) {
-            LOG_ERROR_CAT("RTX", "{}map: Invalid handle 0x{:x} (raw 0x{:x}){}", CRIMSON_MAGENTA, handle, raw, RESET);
-            return nullptr;
-        }
-        if (it->second.memory == VK_NULL_HANDLE) {
-            LOG_FATAL_CAT("RTX", "Buffer map aborted: memory null for handle 0x{:x}", handle);
-            return nullptr;
-        }
-        void* ptr = nullptr;
-        VkResult res = vkMapMemory(device_, it->second.memory, 0, VK_WHOLE_SIZE, 0, &ptr);
-        if (res != VK_SUCCESS) {
-            LOG_ERROR_CAT("RTX", "{}vkMapMemory failed: {} for handle 0x{:x}{}", CRIMSON_MAGENTA, res, handle, RESET);
-            return nullptr;
-        }
-        return ptr;
-    }
+    LOG_DEBUG_CAT("RTX", "Buffer forged: raw=0x{:x} → obf=0x{:x} | {}B | {}", raw, obf, size, tag);
+    return obf;
+}
 
-    void UltraLowLevelBufferTracker::unmap(uint64_t handle) noexcept {
-        if (handle == 0) return;
-        const uint64_t raw = ::deobfuscate(handle);
-        std::lock_guard<std::mutex> lk(mutex_);
-        auto it = map_.find(raw);
-        if (it != map_.end()) {
-            vkUnmapMemory(device_, it->second.memory);
-        }
-    }
+void* UltraLowLevelBufferTracker::map(uint64_t handle) noexcept {
+    if (handle == 0) return nullptr;
+    const uint64_t raw = ::deobfuscate(handle);
+    std::lock_guard<std::mutex> lk(mutex_);
+    auto it = map_.find(raw);
+    if (it == map_.end() || it->second.memory == VK_NULL_HANDLE) return nullptr;
+    void* ptr = nullptr;
+    vkMapMemory(device_, it->second.memory, 0, VK_WHOLE_SIZE, 0, &ptr);
+    return ptr;
+}
 
-    void UltraLowLevelBufferTracker::destroy(uint64_t handle) noexcept {
-        if (handle == 0) {
-            LOG_WARN_CAT("RTX", "{}Invalid zero handle passed to destroy{}", SAPPHIRE_BLUE, RESET);
-            return;
-        }
-        const uint64_t raw = ::deobfuscate(handle);
-        std::lock_guard<std::mutex> lk(mutex_);
-        auto it = map_.find(raw);
-        if (it == map_.end()) {
-            LOG_WARN_CAT("RTX", "{}Buffer not found: raw 0x{:x}{}", SAPPHIRE_BLUE, raw, RESET);
-            return;
-        }
+void UltraLowLevelBufferTracker::unmap(uint64_t handle) noexcept {
+    if (handle == 0) return;
+    const uint64_t raw = ::deobfuscate(handle);
+    std::lock_guard<std::mutex> lk(mutex_);
+    auto it = map_.find(raw);
+    if (it != map_.end()) vkUnmapMemory(device_, it->second.memory);
+}
+
+void UltraLowLevelBufferTracker::destroy(uint64_t handle) noexcept {
+    if (handle == 0) return;
+    const uint64_t raw = ::deobfuscate(handle);
+    std::lock_guard<std::mutex> lk(mutex_);
+    auto it = map_.find(raw);
+    if (it == map_.end()) return;
+
+    BufferData d = std::move(it->second);
+    map_.erase(it);
+
+    if (d.buffer) vkDestroyBuffer(device_, d.buffer, nullptr);
+    if (d.memory) vkFreeMemory(device_, d.memory, nullptr);
+
+    LOG_DEBUG_CAT("RTX", "Buffer destroyed: raw=0x{:x} | {}B | {}", raw, d.size, d.tag);
+}
+
+BufferData* UltraLowLevelBufferTracker::getData(uint64_t handle) noexcept {
+    if (handle == 0) return nullptr;
+    const uint64_t raw = ::deobfuscate(handle);
+    std::lock_guard<std::mutex> lk(mutex_);
+    auto it = map_.find(raw);
+    return it == map_.end() ? nullptr : &it->second;
+}
+
+const BufferData* UltraLowLevelBufferTracker::getData(uint64_t handle) const noexcept {
+    return const_cast<UltraLowLevelBufferTracker*>(this)->getData(handle);
+}
+
+void UltraLowLevelBufferTracker::init(VkDevice dev, VkPhysicalDevice phys) noexcept {
+    if (device_ != VK_NULL_HANDLE) {
+        LOG_WARN_CAT("RTX", "Buffer tracker already initialized — ignoring duplicate call");
+        return;
+    }
+    if (dev == VK_NULL_HANDLE || phys == VK_NULL_HANDLE) {
+        LOG_FATAL_CAT("RTX", "Buffer tracker init with null device/phys — aborting");
+        std::abort();
+    }
+    device_ = dev;
+    physDev_ = phys;
+    LOG_DEBUG_CAT("RTX", "UltraLowLevelBufferTracker initialized — device=0x{:x}", reinterpret_cast<uintptr_t>(dev));
+}
+
+void UltraLowLevelBufferTracker::purge_all() noexcept {
+    std::lock_guard<std::mutex> lk(mutex_);
+    for (auto it = map_.begin(); it != map_.end(); ) {
         BufferData d = std::move(it->second);
-        map_.erase(it);
         if (d.buffer) vkDestroyBuffer(device_, d.buffer, nullptr);
         if (d.memory) vkFreeMemory(device_, d.memory, nullptr);
-        LOG_DEBUG_CAT("RTX", "{}Buffer destroyed: raw=0x{:x} | Size: {}B | Tag: {}{}", SAPPHIRE_BLUE, raw, d.size, d.tag, RESET);
+        it = map_.erase(it);
     }
+    map_.clear();
+    LOG_DEBUG_CAT("RTX", "All tracked buffers purged");
+}
 
-    BufferData* UltraLowLevelBufferTracker::getData(uint64_t handle) noexcept {
-        if (handle == 0) return nullptr;
-        const uint64_t raw = ::deobfuscate(handle);
-        std::lock_guard<std::mutex> lk(mutex_);
-        auto it = map_.find(raw);
-        return it == map_.end() ? nullptr : &it->second;
-    }
-
-    const BufferData* UltraLowLevelBufferTracker::getData(uint64_t handle) const noexcept {
-        if (handle == 0) return nullptr;
-        const uint64_t raw = ::deobfuscate(handle);
-        std::lock_guard<std::mutex> lk(mutex_);
-        auto it = map_.find(raw);
-        return it == map_.end() ? nullptr : &it->second;
-    }
-
-    void UltraLowLevelBufferTracker::init(VkDevice dev, VkPhysicalDevice phys) noexcept {
-        device_ = dev;
-        physDev_ = phys;
-        LOG_DEBUG_CAT("RTX", "{}BufferTracker initialized — StoneKey obfuscation active{}", SAPPHIRE_BLUE, RESET);
-    }
-
-    void UltraLowLevelBufferTracker::purge_all() noexcept {
-        std::lock_guard<std::mutex> lk(mutex_);
-        for (auto it = map_.begin(); it != map_.end(); ) {
-            BufferData d = std::move(it->second);
-            if (d.buffer) vkDestroyBuffer(device_, d.buffer, nullptr);
-            if (d.memory) vkFreeMemory(device_, d.memory, nullptr);
-            it = map_.erase(it);
-        }
-        map_.clear();
-        LOG_DEBUG_CAT("RTX", "{}All buffers purged — trackers cleared{}", SAPPHIRE_BLUE, RESET);
-    }
-
-    uint64_t UltraLowLevelBufferTracker::make_64M (VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept { return create(SIZE_64MB,  extra, props, "64M"); }
-    uint64_t UltraLowLevelBufferTracker::make_128M(VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept { return create(SIZE_128MB, extra, props, "128M"); }
-    uint64_t UltraLowLevelBufferTracker::make_256M(VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept { return create(SIZE_256MB, extra, props, "256M"); }
-    uint64_t UltraLowLevelBufferTracker::make_420M(VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept { return create(SIZE_420MB, extra, props, "420M"); }
-    uint64_t UltraLowLevelBufferTracker::make_512M(VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept { return create(SIZE_512MB, extra, props, "512M"); }
-    uint64_t UltraLowLevelBufferTracker::make_1G  (VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept { return create(SIZE_1GB,   extra, props, "1G"); }
-    uint64_t UltraLowLevelBufferTracker::make_2G  (VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept { return create(SIZE_2GB,   extra, props, "2G"); }
-    uint64_t UltraLowLevelBufferTracker::make_4G  (VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept { return create(SIZE_4GB,   extra, props, "4G"); }
-    uint64_t UltraLowLevelBufferTracker::make_8G  (VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept { return create(SIZE_8GB,   extra, props, "8G"); }
+// Convenience allocators
+uint64_t UltraLowLevelBufferTracker::make_64M (VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept { return create(SIZE_64MB,  extra, props, "64M");  }
+uint64_t UltraLowLevelBufferTracker::make_128M(VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept { return create(SIZE_128MB, extra, props, "128M"); }
+uint64_t UltraLowLevelBufferTracker::make_256M(VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept { return create(SIZE_256MB, extra, props, "256M"); }
+uint64_t UltraLowLevelBufferTracker::make_420M(VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept { return create(SIZE_420MB, extra, props, "420M"); }
+uint64_t UltraLowLevelBufferTracker::make_512M(VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept { return create(SIZE_512MB, extra, props, "512M"); }
+uint64_t UltraLowLevelBufferTracker::make_1G  (VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept { return create(SIZE_1GB,   extra, props, "1G");   }
+uint64_t UltraLowLevelBufferTracker::make_2G  (VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept { return create(SIZE_2GB,   extra, props, "2G");   }
+uint64_t UltraLowLevelBufferTracker::make_4G  (VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept { return create(SIZE_4GB,   extra, props, "4G");   }
+uint64_t UltraLowLevelBufferTracker::make_8G  (VkBufferUsageFlags extra, VkMemoryPropertyFlags props) noexcept { return create(SIZE_8GB,   extra, props, "8G");   }
 
     // =============================================================================
     // GLOBAL g_swapchain() + LAS
@@ -398,51 +393,9 @@ void shutdown() noexcept
                     EMERALD_GREEN, RESET);
 }
     void createSwapchain(VkInstance, VkPhysicalDevice, VkDevice, VkSurfaceKHR, uint32_t, uint32_t) {}
-    void recreateSwapchain(uint32_t, uint32_t) noexcept {}
     void buildBLAS(uint64_t, uint64_t, uint32_t, uint32_t) noexcept {}
     void buildTLAS(const std::vector<std::pair<VkAccelerationStructureKHR, glm::mat4>>&) noexcept {}
     void cleanupAll() noexcept {}
-
-void initContext(VkInstance instance, SDL_Window* window, int width, int height)
-{
-    auto& ctx = g_ctx();
-
-    // Guard against double init
-    if (ctx.isValid()) {
-        LOG_WARN_CAT("RTX", "{}RTX::initContext() called twice — already initialized. Ignoring.{}", 
-                     PLASMA_FUCHSIA, RESET);
-        return;
-    }
-
-    LOG_INFO_CAT("RTX", "{}RTX::initContext() — SEALING THE EMPIRE @ {}x{} — PINK PHOTONS RISING{}", 
-                 PLASMA_FUCHSIA, width, height, RESET);
-
-    ctx.instance_  = instance;
-    ctx.window     = window;
-    ctx.width      = width;
-    ctx.height     = height;
-    ctx.surface_   = g_surface();           // Already created in main.cpp
-    ctx.device_    = g_device();            // Already created by SwapchainManager::init()
-    ctx.physicalDevice_ = g_PhysicalDevice(); // Already selected
-
-    if (!ctx.device_ || !ctx.physicalDevice_ || !ctx.surface_) {
-        LOG_FATAL_CAT("RTX", "{}FATAL: SwapchainManager::init() did not create device/surface before initContext()!{}", 
-                      CRIMSON_MAGENTA, RESET);
-        std::abort();
-    }
-
-    // Just init the buffer tracker — that's ALL we need here
-    UltraLowLevelBufferTracker::get().init(ctx.device_, ctx.physicalDevice_);
-
-    // Optional: pull queue handles if SwapchainManager exposed them, or re-query
-    // For now, assume they're already in g_ctx() via SwapchainManager
-
-    ctx.valid_ = true;
-    ctx.ready_.store(true, std::memory_order_release);
-
-    LOG_SUCCESS_CAT("RTX", "{}RTX CONTEXT SEALED — FULL RTX ARMED — DEVICE 0x{:x} — FIRST LIGHT ETERNAL{}", 
-                    EMERALD_GREEN, reinterpret_cast<uint64_t>(ctx.device_), RESET);
-}
 
 void Context::cleanup() noexcept
 {
@@ -587,7 +540,7 @@ void RTX::loadRayTracingExtensions()
     LOG_SUCCESS_CAT("RTX", "{}RTX ASCENSION COMPLETE — NOVEMBER 23, 2025 — THE FEAST IS ETERNAL{}", DIAMOND_SPARKLE, RESET);
 }
 
-void RTX::retrieveQueues() noexcept
+void retrieveQueues() noexcept
 {
     vkGetDeviceQueue(g_device(), g_ctx().graphicsFamily(), 0, &g_ctx().graphicsQueue_);
     vkGetDeviceQueue(g_device(), g_ctx().presentFamily(),  0, &g_ctx().presentQueue_);
@@ -741,7 +694,7 @@ void RTX::Context::init(SDL_Window* window, int width, int height)
                     DIAMOND_SPARKLE, RESET);
 }
 
-VkInstance RTX::createVulkanInstanceWithSDL(bool enableValidation)
+VkInstance createVulkanInstanceWithSDL(bool enableValidation)
 {
     LOG_ATTEMPT_CAT("RTX", "FORGING VULKAN 1.4 INSTANCE WITH SDL3 — PINK PHOTONS REQUIRE A SURFACE", HYPERSPACE_WARP, RESET);
 
@@ -829,187 +782,191 @@ LOG_SUCCESS_CAT("RTX",
     return instance;
 }
 
-void RTX::Context::forgeSwapchain(SDL_Window* window, int width, int height)
+void RTX::recreateSwapchain(uint32_t w, uint32_t h) noexcept
 {
-    LOG_ATTEMPT_CAT("RTX", "{}FORGING SWAPCHAIN @ {}×{} — PINK PHOTONS CLAIM THE CANVAS{}", 
+    auto& ctx = g_ctx();
+    vkDeviceWaitIdle(ctx.device_);
+
+    LOG_INFO_CAT("RTX", "STONEKEY RESIZE APOCALYPSE — {}x{} → {}x{}", 
+                 ctx.width, ctx.height, w, h);
+
+    ctx.width = w;
+    ctx.height = h;
+
+    forgeSwapchain(ctx.window, w, h);
+}
+
+// RTXHandler.cpp — FINAL WORKING VERSION — NOVEMBER 24, 2025
+void RTX::forgeSwapchain(SDL_Window* window, int width, int height) noexcept
+{
+    LOG_ATTEMPT_CAT("RTX", "{}FORGING SWAPCHAIN @ {}x{} — SLAUGHTERING THE KRAKEN ETERNALLY{}", 
                     VALHALLA_GOLD, width, height, RESET);
 
-    LOG_AMOURANTH("{}Captain Amouranth climbs to the bow, wind in her hair: \"This is where we place her. The soul of the ship. My soul. Carve it true.\"{}", RASPBERRY_PINK, RESET);
-    LOG_NICK("{}Nick steadies the chisel: \"She'll cut through any storm. Through any darkness. She leads us.\"{}", EMERALD_GREEN, RESET);
-    LOG_CID("{}Cid, master shipwright, wipes sweat from his brow: \"This figurehead… she's not wood. She's legend.\"{}", VALHALLA_GOLD, RESET);
+    auto& ctx = g_ctx();
 
-    if (!instance_ || !physicalDevice_ || !device_) {
-        LOG_FATAL_CAT("RTX", "{}forgeSwapchain() CALLED BEFORE INSTANCE/DEVICE — THE BOW IS EMPTY — NO FIGUREHEAD CAN STAND{}", BLOOD_RED, RESET);
-        std::exit(1);
-    }
-
-    LOG_CID("{}Cid, master shipwright, wipes sweat from his brow{}", VALHALLA_GOLD, RESET);
-
-    // ── THE X11 KRAKEN AWAKENS — BUT WE HAVE THE BLADE OF VALIDATION ──
+    // === 1. KRAKEN-SLAYING LOOP — NO DELAY, ONLY VICTORY ===
     if (Options::Debug::ENABLE_VALIDATION_LAYERS) {
-        LOG_CID("{}Cid spits on the deck: \"X11. The ancient beast. I know its weakness.\"{}", VALHALLA_GOLD, RESET);
-        LOG_NICK("{}Nick grimaces: \"Validation layers make it worse. They feed on timing.\"{}", BOLD_YELLOW, RESET);
-        LOG_AMOURANTH("{}Amouranth raises her cutlass: \"Then we strike first. We give it no time to breathe.\"{}", RASPBERRY_PINK, RESET);
+        LOG_INFO_CAT("RTX", "{}X11 + VALIDATION DETECTED — ENTERING KRAKEN HUNT MODE{}", PLASMA_FUCHSIA, RESET);
 
-        LOG_WARN_CAT("RTX", "{}X11 + VALIDATION DETECTED — EXECUTING THE SACRIFICIAL 150MS DELAY — THE KRAKEN SLEEPS{}", CRIMSON_MAGENTA, RESET);
-        LOG_CID("{}Cid slams his hammer: \"150 milliseconds of shame. But the ship will live.\"{}", VALHALLA_GOLD, RESET);
-        LOG_NICK("{}Nick turns away: \"Just… don’t tell anyone.\"{}", BOLD_YELLOW, RESET);
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        bool surfaceReady = false;
 
-        SDL_Delay(150);  // ← THE BLADE. THE FINAL BLOW. THE KRAKEN DIES.
+        while (!surfaceReady && std::chrono::steady_clock::now() < deadline) {
+            VkSurfaceKHR testSurface = VK_NULL_HANDLE;
+            if (SDL_Vulkan_CreateSurface(window, ctx.instance_, nullptr, &testSurface)) {
+                if (testSurface != VK_NULL_HANDLE) {
+                    vkDestroySurfaceKHR(ctx.instance_, testSurface, nullptr);
+                    surfaceReady = true;
+                }
+            }
+            if (!surfaceReady) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            }
+        }
+
+        if (!surfaceReady) {
+            LOG_FATAL_CAT("RTX", "{}KRAKEN TOO STRONG — SURFACE NEVER READY — ABORTING MISSION{}", BLOOD_RED, RESET);
+            std::abort();
+        }
+
+        LOG_SUCCESS_CAT("RTX", "{}KRAKEN SLAIN — SURFACE READY — NO DELAY REQUIRED{}", EMERALD_GREEN, RESET);
     }
 
-    // 1. THE PROW IS CARVED — X11-SAFE, KRAKEN-SLAYING SURFACE
-    VkSurfaceKHR surface = VK_NULL_HANDLE;
-    if (!SDL_Vulkan_CreateSurface(window, instance_, nullptr, &surface) || surface == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("RTX", "{}THE SEA REJECTS OUR PROW — SDL_Vulkan_CreateSurface FAILED: {}{}", BLOOD_RED, SDL_GetError(), RESET);
-        LOG_CID("{}Cid: \"Even the Kraken couldn't stop this... something is deeply wrong.\"{}", VALHALLA_GOLD, RESET);
-        std::exit(1);
+    // === 2. SURFACE RECREATION (NOW SAFE) ===
+    VkSurfaceKHR newSurface = VK_NULL_HANDLE;
+    if (!SDL_Vulkan_CreateSurface(window, ctx.instance_, nullptr, &newSurface) || newSurface == VK_NULL_HANDLE) {
+        LOG_FATAL_CAT("RTX", "SDL_Vulkan_CreateSurface failed: {}", SDL_GetError());
+        std::abort();
     }
-    set_g_surface(surface);
-    LOG_SUCCESS_CAT("RTX", "{}PROW CARVED — VkSurfaceKHR FORGED @ {:#018x} — THE SHIP NOW HAS A FACE{}", 
-                    DIAMOND_SPARKLE, reinterpret_cast<uintptr_t>(surface), RESET);
+    if (ctx.surface_ && ctx.surface_ != newSurface) {
+        vkDestroySurfaceKHR(ctx.instance_, ctx.surface_, nullptr);
+    }
+    ctx.surface_ = newSurface;
+    set_g_surface(newSurface);
 
-    LOG_CID("{}Cid, master shipwright, wipes sweat from his brow{}", VALHALLA_GOLD, RESET);
-
-    // 2. CAPABILITIES & EXTENT — BULLETPROOF
+    // === 3. CAPABILITIES & FORMAT SELECTION ===
     VkSurfaceCapabilitiesKHR caps{};
-    VK_CHECK(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice_, surface, &caps));
+    VK_CHECK(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(ctx.physicalDevice_, ctx.surface_, &caps));
 
     VkExtent2D extent = caps.currentExtent;
-    if (extent.width == UINT32_MAX || extent.height == UINT32_MAX) {
+    if (extent.width == UINT32_MAX) {
         extent.width  = std::clamp(static_cast<uint32_t>(width),  caps.minImageExtent.width,  caps.maxImageExtent.width);
         extent.height = std::clamp(static_cast<uint32_t>(height), caps.minImageExtent.height, caps.maxImageExtent.height);
     }
 
-    // X11 SAFETY CLAMP — NEVER TRUST THE KRAKEN'S WHISPERS
-    if (extent.width < caps.minImageExtent.width)   extent.width  = caps.minImageExtent.width;
-    if (extent.height < caps.minImageExtent.height) extent.height = caps.minImageExtent.height;
-    if (caps.maxImageExtent.width > 0  && extent.width > caps.maxImageExtent.width)   extent.width  = caps.maxImageExtent.width;
-    if (caps.maxImageExtent.height > 0 && extent.height > caps.maxImageExtent.height) extent.height = caps.maxImageExtent.height;
-
-    LOG_CID("{}Cid, master shipwright, wipes sweat from his brow{}", VALHALLA_GOLD, RESET);
-
-    // 3. SURFACE FORMAT — RTX-OPTIMAL
     uint32_t formatCount = 0;
-    VK_CHECK(vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice_, surface, &formatCount, nullptr));
+    VK_CHECK(vkGetPhysicalDeviceSurfaceFormatsKHR(ctx.physicalDevice_, ctx.surface_, &formatCount, nullptr));
     std::vector<VkSurfaceFormatKHR> formats(formatCount);
-    VK_CHECK(vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice_, surface, &formatCount, formats.data()));
+    VK_CHECK(vkGetPhysicalDeviceSurfaceFormatsKHR(ctx.physicalDevice_, ctx.surface_, &formatCount, formats.data()));
 
+    // Choose best format: prefer UNORM for storage compatibility fallback
     VkSurfaceFormatKHR chosenFormat = formats[0];
     for (const auto& f : formats) {
+        if (f.format == VK_FORMAT_B8G8R8A8_UNORM && f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
+            chosenFormat = f;
+            LOG_SUCCESS_CAT("RTX", "{}USING UNORM FOR STORAGE COMPATIBILITY — VALIDATION CLEAN{}", EMERALD_GREEN, RESET);
+            break;
+        }
         if (f.format == VK_FORMAT_B8G8R8A8_SRGB && f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
             chosenFormat = f;
-            LOG_SUCCESS_CAT("RTX", "{}PERFECT SKIN ACHIEVED — B8G8R8A8_SRGB — SHE GLOWS{}", PLASMA_FUCHSIA, RESET);
-            break;
         }
     }
 
-    LOG_CID("{}Cid, master shipwright, wipes sweat from his face{}", VALHALLA_GOLD, RESET);
-
-    // 4. PRESENT MODE — MAILBOX FOR RTX SMOOTHNESS
+    // === 4. PRESENT MODE ===
     uint32_t presentModeCount = 0;
-    VK_CHECK(vkGetPhysicalDeviceSurfacePresentModesKHR(physicalDevice_, surface, &presentModeCount, nullptr));
+    VK_CHECK(vkGetPhysicalDeviceSurfacePresentModesKHR(ctx.physicalDevice_, ctx.surface_, &presentModeCount, nullptr));
     std::vector<VkPresentModeKHR> presentModes(presentModeCount);
-    VK_CHECK(vkGetPhysicalDeviceSurfacePresentModesKHR(physicalDevice_, surface, &presentModeCount, presentModes.data()));
+    VK_CHECK(vkGetPhysicalDeviceSurfacePresentModesKHR(ctx.physicalDevice_, ctx.surface_, &presentModeCount, presentModes.data()));
 
     VkPresentModeKHR presentMode = VK_PRESENT_MODE_FIFO_KHR;
     for (const auto& mode : presentModes) {
         if (mode == VK_PRESENT_MODE_MAILBOX_KHR) {
             presentMode = mode;
-            LOG_SUCCESS_CAT("RTX", "{}TRIPLE-BUFFERED HEART — MAILBOX MODE — SHE BREATHES FAST AND CLEAN{}", EMERALD_GREEN, RESET);
             break;
         }
     }
 
-    LOG_CID("{}Cid, master shipwright, wipes sweat from his chest{}", VALHALLA_GOLD, RESET);
+    // === 5. IMAGE COUNT & USAGE (FIXED: NO STORAGE_BIT ON SWAPCHAIN IMAGES) ===
+    uint32_t imageCount = std::max(2u, caps.minImageCount);
+    if (caps.maxImageCount > 0) imageCount = std::min(imageCount, caps.maxImageCount);
 
-    // 5. SWAPCHAIN CREATION — FINAL RTX-READY, KRAKEN-PROOF CONFIGURATION
-    uint32_t queueFamilyIndices[] = { g_ctx().graphicsFamily(), g_ctx().presentFamily() };
+    std::vector<uint32_t> queueFamilies = { ctx.graphicsFamily_.value() };
+    if (ctx.graphicsFamily_ != ctx.presentFamily_) queueFamilies.push_back(ctx.presentFamily_.value());
 
-    VkSwapchainCreateInfoKHR swapInfo = {
-        .sType                  = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
-        .surface                = surface,
-        .minImageCount          = std::max(2u, std::min(3u, caps.maxImageCount > 0 ? caps.maxImageCount : 3u)),
-        .imageFormat            = chosenFormat.format,
-        .imageColorSpace        = chosenFormat.colorSpace,
-        .imageExtent            = extent,
-        .imageArrayLayers       = 1,
-        .imageUsage             = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
-                                  VK_IMAGE_USAGE_TRANSFER_DST_BIT |
-                                  VK_IMAGE_USAGE_STORAGE_BIT,  // RTX demands this
-        .imageSharingMode       = (g_ctx().graphicsFamily() != g_ctx().presentFamily()) ? VK_SHARING_MODE_CONCURRENT : VK_SHARING_MODE_EXCLUSIVE,
-        .queueFamilyIndexCount  = (g_ctx().graphicsFamily() != g_ctx().presentFamily()) ? 2u : 0u,
-        .pQueueFamilyIndices    = (g_ctx().graphicsFamily() != g_ctx().presentFamily()) ? queueFamilyIndices : nullptr,
-        .preTransform           = caps.currentTransform,
-        .compositeAlpha         = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
-        .presentMode            = presentMode,
-        .clipped                = VK_TRUE,
-        .oldSwapchain           = VK_NULL_HANDLE
-    };
+    VkSwapchainCreateInfoKHR createInfo{};
+    createInfo.sType                 = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
+    createInfo.surface               = ctx.surface_;
+    createInfo.minImageCount         = imageCount;
+    createInfo.imageFormat           = chosenFormat.format;
+    createInfo.imageColorSpace       = chosenFormat.colorSpace;
+    createInfo.imageExtent           = extent;
+    createInfo.imageArrayLayers      = 1;
+    createInfo.imageUsage            = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | 
+                                       VK_IMAGE_USAGE_TRANSFER_DST_BIT;  // REMOVED STORAGE_BIT
+    createInfo.imageSharingMode      = queueFamilies.size() > 1 ? VK_SHARING_MODE_CONCURRENT : VK_SHARING_MODE_EXCLUSIVE;
+    createInfo.queueFamilyIndexCount = static_cast<uint32_t>(queueFamilies.size());
+    createInfo.pQueueFamilyIndices   = queueFamilies.data();
+    createInfo.preTransform          = caps.currentTransform;
+    createInfo.compositeAlpha        = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+    createInfo.presentMode           = presentMode;
+    createInfo.clipped               = VK_TRUE;
+    createInfo.oldSwapchain          = swapchain().valid() ? *swapchain() : VK_NULL_HANDLE;
 
-    VkSwapchainKHR rawSwapchain = VK_NULL_HANDLE;
-    VkResult createResult = vkCreateSwapchainKHR(device_, &swapInfo, nullptr, &rawSwapchain);
-
-    if (createResult != VK_SUCCESS) {
-        LOG_FATAL_CAT("RTX", "{}SWAPCHAIN FORGE FAILED — RESULT: {} — EVEN THE KRAKEN COULDN'T STOP THIS{}", 
-                      BLOOD_RED, VulkanResultToString(createResult), RESET);
-        LOG_CID("{}Cid drops his hammer: \"The beast is dead… but something worse rises.\"{}", VALHALLA_GOLD, RESET);
-        LOG_NICK("{}Nick: \"We did everything right…\"{}", BOLD_YELLOW, RESET);
-        LOG_AMOURANTH("{}Amouranth: \"Then we fight harder.\"{}", RASPBERRY_PINK, RESET);
+    // === 6. CREATE SWAPCHAIN ===
+    VkSwapchainKHR newRaw = VK_NULL_HANDLE;
+    VkResult result = vkCreateSwapchainKHR(ctx.device_, &createInfo, nullptr, &newRaw);
+    if (result != VK_SUCCESS || newRaw == VK_NULL_HANDLE) {
+        LOG_FATAL_CAT("RTX", "SWAPCHAIN CREATION FAILED: {}", VulkanResultToString(result));
         std::abort();
     }
 
-    LOG_AMOURANTH("{}Captain Amouranth steps forward, places her hand on the carving: \"This is me. This is us. This is forever.\"{}", RASPBERRY_PINK, RESET);
-    LOG_SUCCESS_CAT("RTX", "{}FIGUREHEAD MOUNTED — AMOURANTH STANDS PROUD ON THE BOW — CUTLASS RAISED — BREASTS DEFLECTING THE WIND{}", PLASMA_FUCHSIA, RESET);
+    // === 7. DESTROY OLD ===
+    if (swapchain().valid() && *swapchain() != newRaw) {
+        vkDestroySwapchainKHR(ctx.device_, *swapchain(), nullptr);
+    }
 
-    RTX::swapchain() = RTX::Handle<VkSwapchainKHR>(
-        rawSwapchain,
-        device_,
-        [](VkDevice d, VkSwapchainKHR s, const VkAllocationCallbacks* = nullptr) { vkDestroySwapchainKHR(d, s, nullptr); },
-        0,
-        "FigureheadSwapchain_AmouranthEternal"
+    // === 8. ASCEND INTO HANDLE EMPIRE ===
+    swapchain() = Handle<VkSwapchainKHR>(
+        newRaw, ctx.device_,
+        [](VkDevice d, VkSwapchainKHR s, const VkAllocationCallbacks* = nullptr) {
+            vkDestroySwapchainKHR(d, s, nullptr);
+        },
+        0, "FigureheadSwapchain_AmouranthEternal"
     );
 
-    // UPDATE STONEKEY EMPIRE — THE TRUTH MUST FLOW
-    set_g_swapchain(rawSwapchain);
+    set_g_swapchain(newRaw);
+    swapchainFormat() = chosenFormat.format;
+    swapchainExtent() = extent;
 
-    LOG_CID("{}Cid, master shipwright, wipes brow from his sweat{}", VALHALLA_GOLD, RESET);
+    // === 9. IMAGES & VIEWS (NOW VALIDATION CLEAN) ===
+    uint32_t imgCount = 0;
+    VK_CHECK(vkGetSwapchainImagesKHR(ctx.device_, newRaw, &imgCount, nullptr));
+    swapchainImages().resize(imgCount);
+    VK_CHECK(vkGetSwapchainImagesKHR(ctx.device_, newRaw, &imgCount, swapchainImages().data()));
 
-    // 6. RETRIEVE IMAGES
-    uint32_t imageCount = 0;
-    VK_CHECK(vkGetSwapchainImagesKHR(device_, rawSwapchain, &imageCount, nullptr));
-    std::vector<VkImage> images(imageCount);
-    VK_CHECK(vkGetSwapchainImagesKHR(device_, rawSwapchain, &imageCount, images.data()));
+    for (auto& v : swapchainImageViews()) v.reset();
+    swapchainImageViews().clear();
+    swapchainImageViews().reserve(imgCount);
 
-    LOG_CID("{}Cid, master shipwright{}", VALHALLA_GOLD, RESET);
+    for (VkImage img : swapchainImages()) {
+        VkImageViewCreateInfo viewInfo{};
+        viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        viewInfo.image = img;
+        viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        viewInfo.format = chosenFormat.format;
+        viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        viewInfo.subresourceRange.levelCount = 1;
+        viewInfo.subresourceRange.layerCount = 1;
 
-    // 7. BIND TO STONEKEY EMPIRE
-    StoneKey::Empire::swapchain_images = std::move(images);
-    StoneKey::Empire::surface_format   = chosenFormat;
-    StoneKey::Empire::extent           = extent;
-    StoneKey::Empire::image_count      = imageCount;
+        VkImageView view = VK_NULL_HANDLE;
+        VK_CHECK(vkCreateImageView(ctx.device_, &viewInfo, nullptr, &view));
+        swapchainImageViews().emplace_back(view, ctx.device_, vkDestroyImageView, 0, "SwapView");
+    }
 
-    LOG_CID("{}Cid, {}", VALHALLA_GOLD, RESET);
+    LOG_SUCCESS_CAT("RTX", "{}SWAPCHAIN REBORN — {}x{} — {} IMAGES — KRAKEN DEAD — VALIDATION SILENT{}", 
+                    extent.width, extent.height, imgCount, DIAMOND_SPARKLE, RESET);
 
-    // WAKE THE SPIRITS
-    (void)RTX::swapchain();
-    (void)RTX::swapchainImages();
-    (void)RTX::swapchainImageViews();
-    (void)RTX::swapchainFormat();
-    (void)RTX::swapchainExtent();
-
-    LOG_SUCCESS_CAT("RTX", "{}SWAPCHAIN FORGED — {} CANVASES — {}×{} — THE PINK PHOTONS HAVE A HOME{}", 
-                    imageCount, extent.width, extent.height, DIAMOND_SPARKLE, RESET);
-    LOG_SUCCESS_CAT("RTX", "{}FIGUREHEAD SECURE — AMOURANTH LEADS US INTO THE STORM — PINK PHOTONS ETERNAL{}", PLASMA_FUCHSIA, RESET);
-
-    LOG_AMOURANTH("{}She turns to the crew, voice strong: \"Look at her. Look at us. We are unsinkable.\"{}", RASPBERRY_PINK, RESET);
-    LOG_NICK("{}Nick smiles: \"And she's beautiful.\"{}", EMERALD_GREEN, RESET);
-    LOG_CID("{}Cid steps back, hammer lowered: \"Best figurehead I ever carved.\"{}", VALHALLA_GOLD, RESET);
-    LOG_CID("{}Cid stands with hands on hips within knee-deep sweat. Beard soaked. Job done.\"{}", VALHALLA_GOLD, RESET);
-
-    LOG_SUCCESS_CAT("RTX", "{}THE GOOD SHIP VULKANRTX NOW HAS A FACE — AND IT IS GLORIOUS{}", DIAMOND_SPARKLE, RESET);
-    LOG_SUCCESS_CAT("RTX", "{}THE X11 KRAKEN IS DEAD — SLAIN BY 150MS OF SHAME — THE BLADE OF VALIDATION IS VICTORIOUS{}", PURE_ENERGY, RESET);
-    LOG_AMOURANTH("{}Captain Amouranth sheathes her cutlass: \"We sail. Now. And forever.\"{}", RASPBERRY_PINK, RESET);
+    LOG_AMOURANTH("{}Captain Amouranth raises her cutlass: \"The Kraken is dead. The sea is ours. Forever.\"{}", RASPBERRY_PINK, RESET);
 }
 
 void RTX::Context::createLogicalDevice()
@@ -1156,7 +1113,7 @@ void RTX::Context::createLogicalDevice()
 // ========================================================================
 // THE ONE TRUE PHYSICAL DEVICE PICKER — NO EXTERNAL DEPENDENCIES
 // ========================================================================
-VkPhysicalDevice RTX::pickPhysicalDevice(VkInstance instance, VkSurfaceKHR surface)
+VkPhysicalDevice pickPhysicalDevice(VkInstance instance, VkSurfaceKHR surface)
 {
     uint32_t deviceCount = 0;
     vkEnumeratePhysicalDevices(instance, &deviceCount, nullptr);
@@ -1260,6 +1217,183 @@ VkPhysicalDevice RTX::pickPhysicalDevice(VkInstance instance, VkSurfaceKHR surfa
     LOG_SUCCESS_CAT("RTX", "{}GPU FORGED: {} — PINK PHOTONS HAVE A THRONE{}", PLASMA_FUCHSIA, props.deviceName, RESET);
 
     return bestDevice;
+}
+
+VkInstance RTX::createVulkanInstanceWithSDL(bool enableValidation)
+{
+    LOG_ATTEMPT_CAT("RTX", "FORGING VULKAN 1.4 INSTANCE WITH SDL3 — PINK PHOTONS REQUIRE A SURFACE", HYPERSPACE_WARP, RESET);
+
+    VkApplicationInfo appInfo{};
+    appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
+    appInfo.pApplicationName = "AMOURANTH RTX — VALHALLA v80 TURBO";
+    appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
+    appInfo.pEngineName = "AMOURANTH RTX ENGINE";
+    appInfo.engineVersion = VK_MAKE_VERSION(80, 0, 0);
+    appInfo.apiVersion = VK_API_VERSION_1_4;
+
+    uint32_t sdlExtCount = 0;
+    const char* const* sdlExtensions = SDL_Vulkan_GetInstanceExtensions(&sdlExtCount);
+    if (!sdlExtensions) {
+        LOG_FATAL_CAT("RTX", "SDL_Vulkan_GetInstanceExtensions FAILED: {}", BLOOD_RED, SDL_GetError(), RESET);
+        std::exit(1);
+    }
+
+    std::vector<const char*> extensions;
+    for (uint32_t i = 0; i < sdlExtCount; ++i)
+        extensions.push_back(sdlExtensions[i]);
+
+    if (enableValidation)
+        extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+
+    // Portability (macOS MoltenVK)
+    uint32_t extCount = 0;
+    vkEnumerateInstanceExtensionProperties(nullptr, &extCount, nullptr);
+    std::vector<VkExtensionProperties> available(extCount);
+    vkEnumerateInstanceExtensionProperties(nullptr, &extCount, available.data());
+
+    bool hasPortability = false;
+    for (const auto& ext : available) {
+        if (strcmp(ext.extensionName, VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME) == 0) {
+            extensions.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+            hasPortability = true;
+            break;
+        }
+    }
+
+    std::vector<const char*> layers;
+    if (enableValidation)
+        layers.push_back("VK_LAYER_KHRONOS_validation");
+
+    VkInstanceCreateInfo createInfo{};
+    createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+    createInfo.pApplicationInfo = &appInfo;
+    createInfo.enabledExtensionCount = static_cast<uint32_t>(extensions.size());
+    createInfo.ppEnabledExtensionNames = extensions.data();
+    createInfo.enabledLayerCount = static_cast<uint32_t>(layers.size());
+    createInfo.ppEnabledLayerNames = layers.data();
+
+    if (hasPortability) {
+        createInfo.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+        LOG_SUCCESS_CAT("RTX", "VK_KHR_portability_enumeration ENABLED — MACOS READY", PLASMA_FUCHSIA, RESET);
+    }
+
+    VkInstance instance = VK_NULL_HANDLE;
+    VkResult result = vkCreateInstance(&createInfo, nullptr, &instance);
+    if (result != VK_SUCCESS) {
+        LOG_FATAL_CAT("RTX", "vkCreateInstance FAILED — RESULT: {} — PHOTONS DENIED", BLOOD_RED, VulkanResultToString(result), RESET);
+        std::exit(1);
+    }
+
+    LOG_SUCCESS_CAT("RTX", "VULKAN 1.4 INSTANCE FORGED @ {:#016x} — {} EXTENSIONS — FIRST LIGHT ACHIEVED",
+                    reinterpret_cast<uintptr_t>(instance), extensions.size(), VALHALLA_GOLD, RESET);
+
+    return instance;
+}
+
+VkPhysicalDevice RTX::pickPhysicalDevice(VkInstance instance, VkSurfaceKHR surface)
+{
+    uint32_t deviceCount = 0;
+    vkEnumeratePhysicalDevices(instance, &deviceCount, nullptr);
+    if (deviceCount == 0) {
+        LOG_FATAL_CAT("RTX", "NO GPUs WITH VULKAN SUPPORT — THE EMPIRE HAS NO BODY");
+        return VK_NULL_HANDLE;
+    }
+
+    std::vector<VkPhysicalDevice> devices(deviceCount);
+    vkEnumeratePhysicalDevices(instance, &deviceCount, devices.data());
+
+    VkPhysicalDevice bestDevice = VK_NULL_HANDLE;
+    int bestScore = -1;
+
+    for (const auto& device : devices) {
+        VkPhysicalDeviceProperties props{};
+        VkPhysicalDeviceFeatures features{};
+        vkGetPhysicalDeviceProperties(device, &props);
+        vkGetPhysicalDeviceFeatures(device, &features);
+
+        int score = 0;
+        if (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) score += 10000;
+        if (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU) score += 1000;
+        if (!features.geometryShader) continue;
+
+        uint32_t queueFamilyCount = 0;
+        vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, nullptr);
+        std::vector<VkQueueFamilyProperties> queueFamilies(queueFamilyCount);
+        vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, queueFamilies.data());
+
+        int graphicsFamily = -1, presentFamily = -1;
+        for (int i = 0; i < static_cast<int>(queueFamilies.size()); ++i) {
+            if (queueFamilies[i].queueFlags & VK_QUEUE_GRAPHICS_BIT)
+                graphicsFamily = i;
+
+            VkBool32 presentSupport = VK_FALSE;
+            vkGetPhysicalDeviceSurfaceSupportKHR(device, i, surface, &presentSupport);
+            if (presentSupport)
+                presentFamily = i;
+        }
+
+        if (graphicsFamily == -1 || presentFamily == -1) continue;
+
+        uint32_t extCount = 0;
+        vkEnumerateDeviceExtensionProperties(device, nullptr, &extCount, nullptr);
+        std::vector<VkExtensionProperties> available(extCount);
+        vkEnumerateDeviceExtensionProperties(device, nullptr, &extCount, available.data());
+
+        const std::set<std::string> required = {
+            VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+            VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME,
+            VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
+            VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME
+        };
+        std::set<std::string> missing = required;
+        for (const auto& e : available)
+            missing.erase(e.extensionName);
+        if (!missing.empty()) continue;
+
+        VkPhysicalDeviceRayTracingPipelineFeaturesKHR rtPipe{};
+        VkPhysicalDeviceAccelerationStructureFeaturesKHR accel{};
+        accel.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
+        accel.pNext = &rtPipe;
+        rtPipe.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR;
+
+        VkPhysicalDeviceFeatures2 feats2{};
+        feats2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+        feats2.pNext = &accel;
+        vkGetPhysicalDeviceFeatures2(device, &feats2);
+
+        if (!accel.accelerationStructure || !rtPipe.rayTracingPipeline) continue;
+
+        if (score > bestScore) {
+            bestScore = score;
+            bestDevice = device;
+            g_ctx().physicalDevice_ = device;
+            g_ctx().graphicsFamily_ = graphicsFamily;
+            g_ctx().presentFamily_  = (presentFamily != -1 ? presentFamily : graphicsFamily);
+        }
+    }
+
+    if (!bestDevice) {
+        LOG_FATAL_CAT("RTX", "NO SUITABLE GPU FOUND — THE EMPIRE CANNOT RISE");
+        return VK_NULL_HANDLE;
+    }
+
+    VkPhysicalDeviceProperties props{};
+    vkGetPhysicalDeviceProperties(bestDevice, &props);
+    LOG_SUCCESS_CAT("RTX", "GPU FORGED: {} — PINK PHOTONS HAVE A THRONE", PLASMA_FUCHSIA, props.deviceName, RESET);
+    return bestDevice;
+}
+
+void RTX::retrieveQueues() noexcept
+{
+    auto& ctx = g_ctx();
+    vkGetDeviceQueue(g_device(), ctx.graphicsFamily(), 0, &ctx.graphicsQueue_);
+    vkGetDeviceQueue(g_device(), ctx.presentFamily(),  0, &ctx.presentQueue_);
+
+    LOG_SUCCESS_CAT("RTX", "QUEUES RETRIEVED — graphics={} present={} — PHOTONS HAVE VOICE",
+                    PLASMA_FUCHSIA,
+                    ctx.graphicsFamily(),
+                    ctx.presentFamily(),
+                    RESET);
 }
 
 // =============================================================================

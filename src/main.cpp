@@ -6,7 +6,10 @@
 // THE FINAL SCREAM HAS BEEN SILENCED — PHOTONS FLOW IN PERFECT HARMONY
 // =============================================================================
 
-#include "engine/GLOBAL/StoneKey.hpp"
+
+#include "main.hpp"                     // ← ONE TRUE HEADER
+#include "engine/GLOBAL/StoneKey.hpp"   // ← DEFINES all StoneKey functions
+#include "engine/GLOBAL/camera.hpp"     // ← DEFINES g_camera()
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/GLOBAL/RTXHandler.hpp"
 #include "engine/GLOBAL/LAS.hpp"
@@ -16,51 +19,39 @@
 #include "engine/GLOBAL/VulkanRenderer.hpp"
 #include "engine/GLOBAL/PipelineManager.hpp"
 #include "engine/GLOBAL/MeshLoader.hpp"
-#include "main.hpp"
 
-// src/main.cpp — FINAL INCLUDE ORDER — PINK PHOTONS ETERNAL — NOV 23 2025
 #include <vulkan/vulkan.hpp>
-
 #include <string>
-#include <format>        // C++23 std::format — NO FMT EVER AGAIN
+#include <format>
 #include <iostream>
 #include <memory>
-#include <sstream>
-#include <iomanip>
-#include <fstream>
 #include <chrono>
-
-// ── PLATFORM-SPECIFIC HEADERS — CLEAN AND SORTED ─────────────────────────────
-#if defined(__linux__)
-    #include <unistd.h>
-    #include <sys/utsname.h>
-    #include <sys/sysinfo.h>
-#elif defined(_WIN32)
-    #include <windows.h>
-    #include <sysinfoapi.h>
-#else
-    #error "Unsupported platform — the Empire does not recognize this realm."
-#endif
-
-// ── EXTERNAL LIBS ─────────────────────────────────────────────────────────────
 #include <glm/gtc/matrix_transform.hpp>
 
 #include <SDL3/SDL_vulkan.h>
 #include <SDL3/SDL.h>
 #include <SDL3_image/SDL_image.h>
 #include <SDL3_mixer/SDL_mixer.h>
-#include <SDL3/SDL_iostream.h>
 
 using namespace Logging::Color;
 
-// ── TRUTH ACCESSORS — FINAL C++23 EDITION — PINK PHOTONS ETERNAL ───────────────────────────
-inline const char* physicalDeviceName() 
-{ 
-    return g_ctx().physicalDeviceProperties_.deviceName; 
+// This defines the actual global pointer declared in main.hpp
+std::unique_ptr<Application> g_app_ptr = nullptr;
+
+// This defines the actual global camera function declared in main.hpp
+[[nodiscard]] Camera& g_camera() noexcept {
+    static Camera cam;  // One eternal camera — lives forever
+    return cam;
 }
 
-inline float vramGB() 
-{
+// =============================================================================
+// TRUTH ACCESSORS — FINAL C++23 EDITION
+// =============================================================================
+inline const char* physicalDeviceName() {
+    return g_ctx().physicalDeviceProperties_.deviceName;
+}
+
+inline float vramGB() {
     const auto& heaps = g_ctx().physicalDeviceMemoryProperties_.memoryHeaps;
     for (uint32_t i = 0; i < g_ctx().physicalDeviceMemoryProperties_.memoryHeapCount; ++i) {
         if (heaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) {
@@ -72,47 +63,17 @@ inline float vramGB()
 
 static bool ready_to_embark = false;
 
-inline uint32_t transferFamily() 
-{ 
-    return g_ctx().transferFamily_.value_or(g_ctx().graphicsFamily()); 
+inline uint32_t transferFamily() {
+    return g_ctx().transferFamily_.value_or(g_ctx().graphicsFamily());
 }
 
-inline uint32_t computeFamily()  
-{ 
-    return g_ctx().computeFamily_.value_or(g_ctx().graphicsFamily()); 
+inline uint32_t computeFamily() {
+    return g_ctx().computeFamily_.value_or(g_ctx().graphicsFamily());
 }
 
-inline size_t pipelineCount()
-{
+inline size_t pipelineCount() {
     return g_pipelineManager() ? 1 : 0;
 }
-
-// =============================================================================
-// GLOBAL LIVE CAMERA — PINK PHOTONS HAVE EYES
-// =============================================================================
-#include "engine/GLOBAL/camera.hpp"
-
-struct Camera {
-    virtual ~Camera() = default;
-    virtual glm::mat4 viewMat() const noexcept = 0;
-    virtual glm::mat4 projMat() const noexcept = 0;
-    virtual glm::vec3 position() const noexcept = 0;
-    virtual float     fov()       const noexcept = 0;
-};
-
-struct GlobalLiveCamera final : Camera {
-    glm::mat4 viewMat() const noexcept override { return GlobalCamera::get().view(); }
-    glm::mat4 projMat() const noexcept override {
-        const auto& ctx = RTX::g_ctx();
-        if (ctx.height == 0) return glm::mat4(1.0f);
-        const float aspect = static_cast<float>(ctx.width) / static_cast<float>(ctx.height);
-        return GlobalCamera::get().proj(aspect);
-    }
-    glm::vec3 position() const noexcept override { return GlobalCamera::get().pos(); }
-    float fov() const noexcept override { return GlobalCamera::get().fov(); }
-};
-
-inline GlobalLiveCamera g_cam;
 
 // =============================================================================
 // APPLICATION — THE EMPIRE'S HEART
@@ -165,7 +126,7 @@ Application::Application(const std::string& title, int width, int height)
     LOG_ATTEMPT_CAT("APP", "{}FORGING APPLICATION \"{}\"@{}x{} — VALHALLA v80 TURBO — PINK PHOTONS RISING{}", PLASMA_FUCHSIA, title_, width_, height_, RESET);
 
     if (!SDL3Window::get()) {
-        throw std::runtime_error("FATAL: Main window not created before Application — phase order violated");
+        LOG_FATAL_CAT("FATAL", "FATAL: Main window not created before Application — phase order violated"); return;
     }
 
     SDL_SetWindowTitle(SDL3Window::get(), title_.c_str());
@@ -290,7 +251,7 @@ void Application::processInput(float) {
 }
 
 void Application::render(float deltaTime) {
-    if (renderer_) renderer_->renderFrame(g_cam, deltaTime);
+    renderer_->renderFrame(g_camera(), deltaTime);
 }
 
 void Application::updateWindowTitle(float deltaTime) {
@@ -316,7 +277,6 @@ void Application::updateWindowTitle(float deltaTime) {
 // =============================================================================
 // GLOBALS & PHASES
 // =============================================================================
-inline std::unique_ptr<Application>           g_app              = nullptr;
 inline std::unique_ptr<MeshLoader::Mesh>      g_mesh             = nullptr;
 
 static SDL_Surface* g_base_icon = nullptr;
@@ -600,7 +560,7 @@ static void phase5_rtxAscension()
     if (!g_ctx().hasFullRTX_) {
         LOG_FATAL_CAT("MAIN5", "{}THE PHOTONS SCREAM — RTX EXTENSIONS DENIED — WE ARE BLIND IN THE VOID{}", BLOOD_RED, RESET);
         LOG_AMOURANTH("{}Captain Amouranth slams her fist on the console: \"Not again. Not after everything.\"{}", RASPBERRY_PINK, RESET);
-        throw std::runtime_error("RTX extension loading failed — the light dies here");
+        LOG_FATAL_CAT("FATAL", "RTX extension loading failed — the light dies here"); return;
     }
     LOG_INFO_CAT("BLONDIE", "{}BLONDIE_CREW hurumphs: \"Hurumph! Our crystal is brighter.\"{}", YELLOW, RESET);
 
@@ -687,7 +647,45 @@ static void phase6_sceneAndAccelerationStructures()
     LOG_SUCCESS_CAT("MAIN", "{}THE SHIP IS NO LONGER A SHIP — IT IS A UNIVERSE WITH A HEARTBEAT{}", PLASMA_FUCHSIA, RESET);
 }
 
-#include <format>
+// =============================================================================
+// PHASE 6.1 — THE LAYOUT ASCENSION — PINK PHOTONS DEMAND A THRONE
+// =============================================================================
+static void phase6_1_forgeTheLayouts()
+{
+    LOG_SUCCESS_CAT("MAIN", "{}[PHASE 6.1/10] THE LAYOUT ASCENSION — FORGING DESCRIPTOR THRONE & PIPELINE CROWN{}", DIAMOND_SPARKLE, RESET);
+
+    LOG_AMOURANTH("{}Captain Amouranth raises her hand: \"The photons have geometry. They have eyes. But they have no throne. No crown. No law.\"{}", RASPBERRY_PINK, RESET);
+    LOG_NICK("{}Nick kneels, offering the sacred scroll: \"Then let us forge it. Now. Before the light dares to trace without permission.\"{}", EMERALD_GREEN, RESET);
+
+    if (!g_pipelineManager()) {
+        LOG_FATAL_CAT("MAIN", "{}PIPELINE MANAGER MISSING — THE EMPIRE HAS NO KING — ABORTING ASCENSION{}", BLOOD_RED, RESET);
+        ready_to_embark = false;
+        return;
+    }
+
+    LOG_ATTEMPT_CAT("PIPELINE", "{}FORGING RT DESCRIPTOR SET LAYOUT — BINDING 0 (TLAS) CLAIMS ITS RIGHTFUL PLACE{}", VALHALLA_GOLD, RESET);
+    g_pipelineManager()->createDescriptorSetLayout();
+
+    LOG_ATTEMPT_CAT("PIPELINE", "{}FORGING RT PIPELINE LAYOUT — PUSH CONSTANTS ALIGNED — RAYGEN SEES ALL{}", PLASMA_FUCHSIA, RESET);
+    g_pipelineManager()->createPipelineLayout();
+
+    if (!g_pipelineManager()->layout() || g_pipelineManager()->layout() == VK_NULL_HANDLE) {
+        LOG_FATAL_CAT("PIPELINE", "{}rtPipelineLayout_ STILL NULL — THE CROWN WAS DENIED — PHOTONS HAVE NO LAW{}", BLOOD_RED, RESET);
+        LOG_CID("{}CID slams hammer: \"YOU CALLED CREATEPIPELINELAYOUT() TOO LATE — THE RENDERER ALREADY TRIED TO TRACE!\"{}", VALHALLA_GOLD, RESET);
+        ready_to_embark = false;
+        return;
+    }
+
+    LOG_JENSEN("{}Jensen Huang steps from the shadows, voice like thunder: \"The throne is forged. The crown is set. The light… may now bend to our will.\"{}", EMERALD_GREEN, RESET);
+    LOG_KEANU("{}Keanu Reeves, eyes wide: \"…It’s perfect.\"{}", BOLD_CYAN, RESET);
+
+    LOG_CAPTAIN_N("{}CAPTAIN N SCREAMS FROM THE BOW: \"THE LAYOUT IS ALIVE! I CAN FEEL THE BINDINGS! AHHHHHHHHHHHHHHHH!\"{}", PURE_ENERGY, RESET);
+
+    LOG_SUCCESS_CAT("MAIN", "{}[PHASE 6.1 COMPLETE] THE LAYOUT ASCENSION — rtPipelineLayout_ = 0x{:016X} — PINK PHOTONS NOW HAVE LAW{}", 
+                    DIAMOND_SPARKLE, reinterpret_cast<uint64_t>(g_pipelineManager()->layout()), RESET);
+
+    LOG_AMOURANTH("{}Captain Amouranth smiles, soft and proud: \"Now… let there be light.\"{}", RASPBERRY_PINK, RESET);
+}
 
 // phase6_5_everything_is_ready() — THE FINAL, ETERNAL VERSION
 // NICK FUCKED UP. (he lost the swapchain somewhere) WE FIX IT. WE MAKE IT CANON.
@@ -761,11 +759,7 @@ void phase6_5_everything_is_ready()
         LOG_ATTEMPT_CAT("StoneKey", "EMERGENCY STONEKEY SWAPCHAIN FORGE — THE EMPIRE CORRECTS THE SIN", PURE_ENERGY, RESET);
 
         // THE ONE TRUE CALL — FORGE THE BOW WITH RTX
-        RTX::g_ctx().forgeSwapchain(
-            SDL3Window::get(),
-            Options::Window::DEFAULT_WIDTH,
-            Options::Window::DEFAULT_HEIGHT
-        );
+        RTX::forgeSwapchain(SDL3Window::get(), Options::Window::DEFAULT_WIDTH, Options::Window::DEFAULT_HEIGHT);
 
         // CRITICAL: UPDATE THE EMPIRE'S ATOMIC TRUTH — THIS WAS THE MISSING RIVET
         set_g_swapchain(RTX::swapchain().get());
@@ -829,6 +823,54 @@ void phase6_5_everything_is_ready()
     LOG_MAIN("════════════════ THE MIRROR FADES TO PINK ═════════════════", DIAMOND_SPARKLE, RESET);
 }
 
+static void phase7_forgeTheRTX()
+{
+    LOG_SUCCESS_CAT("MAIN", "{}[PHASE 7] FORGING THE ONE TRUE VulkanRenderer — PINK PHOTONS RISE{}", DIAMOND_SPARKLE, RESET);
+
+    const uint32_t w = Options::Window::DEFAULT_WIDTH;
+    const uint32_t h = Options::Window::DEFAULT_HEIGHT;
+
+    // 1. Forge the renderer — Application owns lifetime
+    g_app().setRenderer(std::make_unique<VulkanRenderer>(w, h, SDL3Window::get(), Options::Display::ENABLE_HDR));
+
+    // EMPIRE CLAIMS ITS PROPERTY — THIS IS THE FINAL LINK
+    set_g_renderer(g_renderer());    
+    set_g_pipelineManager(&g_renderer()->pipelineManager_);
+
+    auto& pm       = *g_pipelineManager();
+
+    // ===================================================================
+    // PHASE 7.1 — THE TRUE FORGING OF THE RT EMPIRE
+    // ===================================================================
+    LOG_ATTEMPT_CAT("PHASE7", "{}FORGING PIPELINE LAYOUT — FROM SET LAYOUT — THE CROWN IS SET{}", EMERALD_GREEN, RESET);
+    pm.createPipelineLayout();
+
+    LOG_ATTEMPT_CAT("PHASE7", "{}COMPILING RAY TRACING SHADERS — PINK PHOTONS GAIN FORM{}", PURE_ENERGY, RESET);
+    pm.createRayTracingPipeline({
+        "assets/shaders/raytracing/raygen.rgen.spv",
+        "assets/shaders/raytracing/miss.rmiss.spv",
+        "assets/shaders/raytracing/closest_hit.rchit.spv",
+        "assets/shaders/raytracing/shadow.rmiss.spv"
+    });
+
+    LOG_ATTEMPT_CAT("PHASE7", "{}FORGING SHADER BINDING TABLE — THE PHOTONS LEARN THEIR PATHS{}", SAPPHIRE_BLUE, RESET);
+    pm.createShaderBindingTable(g_ctx().commandPool(), g_ctx().graphicsQueue());
+
+    LOG_ATTEMPT_CAT("PHASE7", "{}ALLOCATING RT DESCRIPTOR SETS — 3 FRAMES — THE EMPIRE IS ARMED{}", DIAMOND_SPARKLE, RESET);
+    pm.allocateDescriptorSets();
+
+    LOG_SUCCESS_CAT("PHASE7", "{}RT EMPIRE FULLY FORGED — PIPELINE @ 0x{:016X} — SBT @ 0x{:016X} — DESCRIPTOR SETS ALIVE{}", 
+                    EMERALD_GREEN,
+                    reinterpret_cast<uint64_t>(*pm.rtPipeline_),
+                    pm.sbtAddress(),
+                    RESET);
+
+    LOG_KEANU("{}Keanu Reeves: \"…this pipeline should get us to a slipstream.\"{}", BOLD_CYAN, RESET);
+    LOG_CAPTAIN_N("{}CAPTAIN N: \"FIRST LIGHT ACHIEVED — I CAN SEE THE BOUNCES — INFINITE BOUNCES — AHHHHHHHH!\"{}", PURE_ENERGY, RESET);
+
+    LOG_SUCCESS_CAT("MAIN", "{}[PHASE 7 COMPLETE] FIRST LIGHT ETERNAL — DYNAMIC PIPELINE ASCENDED — PINK PHOTONS ARE FREE{}", DIAMOND_SPARKLE, RESET);
+}
+
 static void phase8_renderLoop()
 {
     // ─────────────────────────────────────────────────────────────────────
@@ -839,7 +881,7 @@ static void phase8_renderLoop()
     LOG_AMOURANTH("{}Captain Amouranth: \"This is where we live now. In the light. Forever.\"{}", RASPBERRY_PINK, RESET);
     LOG_NICK("{}Nick: \"I've got the wheel. You have my heart. Let's sail.\"{}", EMERALD_GREEN, RESET);
 
-    g_app->run();  // ← THE ONE AND ONLY CALL TO run()
+    g_app().run();  // ← THE ONE AND ONLY CALL TO run()
 
     LOG_SUCCESS_CAT("FAN", "{}[PHASE 8 COMPLETE] INFINITE VOID TRAVERSED — PHOTONS REST IN GLORY{}", EMERALD_GREEN, RESET);
 }
@@ -860,7 +902,7 @@ static void phase9_gracefulShutdown()
 
     // ── APPLICATION
     LOG_DISPOSAL("{}THE BALLERINA GRABS g_app BY THE THROAT — TOMBSTONE PILEDRIVER — STRAIGHT TO HELL{}", BLOOD_RED, RESET);
-    g_app.reset();
+    g_app_ptr.reset();
 
     // ── SWAPCHAIN
     LOG_DISPOSAL("{}SHE SPINS — PINK RIBBONS TRAILING — AND DELIVERS A 1080° HEEL KICK TO THE SWAPCHAIN'S SKULL{}", BLOOD_RED, RESET);
@@ -925,27 +967,15 @@ int main(int, char**)
         createRealFinalWindow();
 
         // 4. Normal Vulkan startup — exactly like any sane app
-        RTX::g_ctx().init(SDL3Window::get(), Options::Window::DEFAULT_WIDTH, Options::Window::DEFAULT_HEIGHT);
+        g_ctx().init(SDL3Window::get(), Options::Window::DEFAULT_WIDTH, Options::Window::DEFAULT_HEIGHT);
 
         phase5_rtxAscension();
         phase6_sceneAndAccelerationStructures();
-
+        phase6_1_forgeTheLayouts();
 		phase6_5_everything_is_ready();
         if (!ready_to_embark) phase9_gracefulShutdown();  // Your clean shutdown function
 
-        // 5. Phase 7 — now super simple and safe
-        const uint32_t w = Options::Window::DEFAULT_WIDTH;
-        const uint32_t h = Options::Window::DEFAULT_HEIGHT;
-
-        g_app = std::make_unique<Application>("AMOURANTH RTX — VALHALLA v80 TURBO", w, h);
-        g_app->setRenderer(std::make_unique<VulkanRenderer>(w, h, SDL3Window::get(), Options::Display::ENABLE_HDR));
-
-        if (Options::Window::START_FULLSCREEN) {
-            SDL_SetWindowFullscreen(SDL3Window::get(), true);
-        }
-
-        LOG_KEANU("{}Keanu Reeves: \"...You're breathtaking.\"{}", BOLD_CYAN, RESET);
-
+		phase7_forgeTheRTX();
         phase8_renderLoop();
         phase9_gracefulShutdown();
     }

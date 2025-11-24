@@ -190,11 +190,20 @@ VulkanRTX::~VulkanRTX() noexcept {
     LOG_SUCCESS_CAT("RTX", "{}VulkanRTX destroyed — all resources returned to Valhalla{}", PLASMA_FUCHSIA, RESET);
     LOG_TRACE_CAT("RTX", "VulkanRTX destructor — COMPLETE");
 }
-
-VulkanRTX::VulkanRTX(int w, int h, RTX::PipelineManager* mgr)
-    : extent_({static_cast<uint32_t>(w), static_cast<uint32_t>(h)})
+VulkanRTX::VulkanRTX(int w, int h, RTX::PipelineManager* mgr) noexcept
+    : extent_{1, 1}
     , pipelineMgr_(mgr)
+    , device_(VK_NULL_HANDLE)
 {
+    // EARLY SAFETY CHECK — dummy mode before Vulkan exists
+    if (!g_device() || g_device() == VK_NULL_HANDLE || w <= 0 || h <= 0) {
+        return;  // Stay in safe dummy state
+    }
+
+    // REAL INITIALIZATION — First Light begins
+    device_ = g_device();
+    extent_ = { static_cast<uint32_t>(w), static_cast<uint32_t>(h) };
+
     LOG_TRACE_CAT("RTX", "VulkanRTX constructor — {}×{} — [LINE {}]", w, h, __LINE__);
     LOG_DEBUG_CAT("RTX", "Constructor params: width={}, height={}, pipelineMgr={}", w, h, mgr ? "valid" : "null");
     RTX::AmouranthAI::get().onMemoryEvent("VulkanRTX Instance", sizeof(VulkanRTX));
@@ -203,7 +212,7 @@ VulkanRTX::VulkanRTX(int w, int h, RTX::PipelineManager* mgr)
     device_ = g_device();
     if (!device_) {
         LOG_ERROR_CAT("RTX", "FATAL: device_ is null — THE PHOTONS ARE DENIED");
-        throw std::runtime_error("Invalid Vulkan device");
+    LOG_FATAL_CAT("RTX", "{}VulkanRTX constructed with invalid device — dummy path active — safe!{}", BOLD_RED, RESET); device_ = VK_NULL_HANDLE; return;
     }
     LOG_SUCCESS_CAT("RTX", "Device locked: 0x{:x} — PHOTONS HAVE A VOICE", reinterpret_cast<uintptr_t>(device_));
 
@@ -697,8 +706,16 @@ void VulkanRTX::initDescriptorPoolAndSets() noexcept
 // Shader Binding Table — 64 MB Titan
 // =============================================================================
 
-void VulkanRTX::initShaderBindingTable(VkPhysicalDevice pd) {
+void VulkanRTX::initShaderBindingTable(VkPhysicalDevice pd) noexcept
+{
     LOG_TRACE_CAT("RTX", "initShaderBindingTable — START — pd=0x{:x}", reinterpret_cast<uintptr_t>(pd));
+
+    // GUARD — EARLY RETURN IF PIPELINE NOT READY (THIS IS THE FIX)
+    if (!rtPipeline_.valid() || *rtPipeline_ == VK_NULL_HANDLE) {
+        LOG_WARN_CAT("RTX", "Pipeline not ready — SBT init skipped (call after setRayTracingPipeline)");
+        return;
+    }
+
     const uint32_t groupCount = 25;
     const auto& props = g_ctx().rayTracingProps();
     const VkDeviceSize handleSize = props.shaderGroupHandleSize;

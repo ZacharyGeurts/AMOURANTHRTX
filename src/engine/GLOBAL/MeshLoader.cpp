@@ -86,25 +86,31 @@ static void uploadBuffer(const void* data, VkDeviceSize size, VkBufferUsageFlags
     tracker.unmap(staging);
     LOG_SUCCESS_CAT("MeshLoader", "Staging buffer filled — {} bytes copied", size);
 
+    // FIXED: Added required flag for acceleration structure builds
+    VkBufferUsageFlags finalUsage = usage |
+                                    VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+                                    VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                                    VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
+
+    const char* finalTag = (usage & VK_BUFFER_USAGE_VERTEX_BUFFER_BIT)
+        ? "Mesh_Vertex_Final"
+        : "Mesh_Index_Final";
+
     BUFFER_CREATE(outHandle, size,
-                  VK_BUFFER_USAGE_TRANSFER_DST_BIT | usage | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                  finalUsage,
                   VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-                  (usage & VK_BUFFER_USAGE_VERTEX_BUFFER_BIT) ? "Mesh_Vertex_Final" : "Mesh_Index_Final");
+                  finalTag);
 
     LOG_INFO_CAT("MeshLoader", "Copying staging → final: 0x{:016X} → 0x{:016X}", staging, outHandle);
 
-    // NOW USING beginOneTime / endSingleTimeCommandsAsync FROM LAS.hpp
     VkCommandBuffer cmd = beginOneTime(g_ctx().commandPool_);
-
     VkBufferCopy copy{ .size = size };
     vkCmdCopyBuffer(cmd, RAW_BUFFER(staging), RAW_BUFFER(outHandle), 1, &copy);
-
     endSingleTimeCommandsAsync(cmd, g_ctx().graphicsQueue_, g_ctx().commandPool_);
 
     BUFFER_DESTROY(staging);
 
-    LOG_SUCCESS_CAT("MeshLoader", "uploadBuffer() COMPLETE — final handle: 0x{:016X} → raw buffer: 0x{:016X}",
-                    outHandle, (uint64_t)RAW_BUFFER(outHandle));
+    LOG_SUCCESS_CAT("MeshLoader", "uploadBuffer() COMPLETE — final handle: 0x{:016X}", outHandle);
 }
 
 // =============================================================================
@@ -120,7 +126,7 @@ std::unique_ptr<Mesh> loadOBJ(const std::string& path)
     std::string warn, err;
 
     if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, path.c_str(), "assets/models/")) {
-        if (!err.empty()) throw std::runtime_error("TinyObjLoader: " + err);
+        if (!err.empty()) { LOG_FATAL_CAT("FATAL", "TinyObjLoader: {}", err.c_str()); return nullptr; }
         if (!warn.empty()) LOG_WARNING_CAT("MeshLoader", "TinyObj warning: {}", warn);
     }
 

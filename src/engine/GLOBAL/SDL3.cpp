@@ -88,8 +88,9 @@ void SDL3Input::initialize()
 
     if (platform != "Linux" && platform != "Windows") {
         LOG_ERROR_CAT("Input", "{}Unsupported platform: {} | {}{}", 
-                      OCEAN_TEAL, platform, loc, RESET);
-        throw std::runtime_error(std::format("Unsupported platform: {}", platform));
+                  OCEAN_TEAL, platform, loc, RESET);
+        LOG_FATAL_CAT("FATAL", "Unsupported platform: {}", platform);
+        return;
     }
 
     LOG_SUCCESS_CAT("Input", "{}Initializing SDL3Input | {}{}", OCEAN_TEAL, loc, RESET);
@@ -368,21 +369,21 @@ void create(const char* title, int width, int height, Uint32 flags)
     if (SDL_WasInit(SDL_INIT_VIDEO) == 0) {
         if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) == 0) {
             LOG_FATAL_CAT("SDL3", "{}SDL_Init FAILED: {}{}", CRIMSON_MAGENTA, SDL_GetError(), RESET);
-            throw std::runtime_error("SDL_Init failed");
+            LOG_FATAL_CAT("FATAL", "SDL_Init failed"); return;
         }
     }
     LOG_SUCCESS_CAT("SDL3", "{}SDL3 REACHES FRUITION — B-A-N-A-N-A-S{}", EMERALD_GREEN, RESET);
 
     if (SDL_Vulkan_LoadLibrary(nullptr) == 0) {
         LOG_FATAL_CAT("SDL3", "{}SDL_Vulkan_LoadLibrary FAILED: {} — Check Vulkan installation!{}", BLOOD_RED, SDL_GetError(), RESET);
-        throw std::runtime_error("Vulkan load failed — driver missing or corrupted");
+        LOG_FATAL_CAT("FATAL", "Vulkan load failed — driver missing or corrupted"); return;
     }
     LOG_SUCCESS_CAT("SDL3", "{}Vulkan library loaded successfully via SDL3{}", VALHALLA_GOLD, RESET);
 
     SDL_Window* win = SDL_CreateWindow(title, width, height, flags);
     if (!win) {
         LOG_FATAL_CAT("SDL3", "{}SDL_CreateWindow FAILED: {}{}", BLOOD_RED, SDL_GetError(), RESET);
-        throw std::runtime_error("Window creation failed");
+        LOG_FATAL_CAT("FATAL", "Window creation failed"); return;
     }
 
     g_sdl_window.reset(win);
@@ -391,13 +392,13 @@ void create(const char* title, int width, int height, Uint32 flags)
     uint32_t extCount = 0;
     if (SDL_Vulkan_GetInstanceExtensions(&extCount) == 0) {
         LOG_FATAL_CAT("SDL3", "{}SDL_Vulkan_GetInstanceExtensions(count) failed: {}{}", CRIMSON_MAGENTA, SDL_GetError(), RESET);
-        throw std::runtime_error("Vulkan extensions count failed");
+        LOG_FATAL_CAT("FATAL", "Vulkan extensions count failed"); return;
     }
 
     const char* const* sdlExts = SDL_Vulkan_GetInstanceExtensions(&extCount);
     if (!sdlExts || extCount == 0) {
         LOG_FATAL_CAT("SDL3", "{}SDL returned NULL or zero extensions{}", BLOOD_RED, RESET);
-        throw std::runtime_error("Vulkan extensions failed");
+        LOG_FATAL_CAT("FATAL", "Vulkan extensions failed"); return;
     }
 
     std::vector<const char*> extensions(sdlExts, sdlExts + extCount);
@@ -443,7 +444,7 @@ void create(const char* title, int width, int height, Uint32 flags)
     VkResult result = vkCreateInstance(&createInfo, nullptr, &instance);
     if (result != VK_SUCCESS) {
         LOG_FATAL_CAT("SDL3", "{}vkCreateInstance FAILED: {} — Check Vulkan drivers!{}", BLOOD_RED, result, RESET);
-        throw std::runtime_error("Vulkan instance creation failed");
+        LOG_FATAL_CAT("FATAL", "Vulkan instance creation failed"); return;
     }
 
     LOG_SUCCESS_CAT("SDL3", "{}INSTANCE FORGED @ {:p} — PINK PHOTONS ASCEND{}", DIAMOND_SPARKLE, static_cast<void*>(instance), RESET);
@@ -452,7 +453,7 @@ void create(const char* title, int width, int height, Uint32 flags)
     VkSurfaceKHR surface = VK_NULL_HANDLE;
     if (SDL_Vulkan_CreateSurface(win, instance, nullptr, &surface) == 0) {
         LOG_FATAL_CAT("SDL3", "{}SDL_Vulkan_CreateSurface FAILED: {}{}", CRIMSON_MAGENTA, SDL_GetError(), RESET);
-        throw std::runtime_error("Vulkan surface failed");
+        LOG_FATAL_CAT("FATAL", "Vulkan surface failed"); return;
     }
     LOG_SUCCESS_CAT("SDL3", "{}SURFACE FORGED @ {:p} — PATH OPEN{}", AURORA_PINK, static_cast<void*>(surface), RESET);
     set_g_surface(surface);  // StoneKey love
@@ -546,8 +547,9 @@ namespace SDL3Image {
 {
     SDL_Surface* surf = IMG_Load(path);
     if (!surf) {
-        LOG_FATAL_CAT("SDL3IMG", "IMG_Load FAILED → {} | {}", CRIMSON_MAGENTA, path, SDL_GetError(), RESET);
-        throw std::runtime_error(std::string("Failed to load image: ") + path);
+        LOG_FATAL_CAT("SDL3IMG", "IMG_Load FAILED → {} | {}{}", CRIMSON_MAGENTA, path, SDL_GetError(), RESET);
+        LOG_FATAL_CAT("FATAL", "Failed to load image: {}", path);
+        return nullptr;
     }
 
     LOG_SUCCESS_CAT("SDL3IMG", "TEXTURE MANIFESTED → {} | {}x{} {}bpp", 

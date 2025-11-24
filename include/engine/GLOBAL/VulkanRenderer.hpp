@@ -143,6 +143,9 @@ public:
     uint64_t getFrameNumber() const noexcept { return frameNumber_; }
     void onWindowResize(uint32_t w, uint32_t h) noexcept;
 
+	RTX::PipelineManager pipelineManager_;
+    std::vector<VkDescriptorSet> rtDescriptorSets_;
+
 private:
     bool minimized_ = false;
     bool stonekey_active_ = false;
@@ -223,9 +226,6 @@ private:
     RTX::Handle<VkDescriptorPool> descriptorPool_;
     RTX::Handle<VkDescriptorPool> rtDescriptorPool_;
     RTX::Handle<VkDescriptorPool> tonemapDescriptorPool_;
-
-    RTX::PipelineManager pipelineManager_;
-    std::vector<VkDescriptorSet> rtDescriptorSets_;
 
     PFN_vkCmdTraceRaysKHR                    vkCmdTraceRaysKHR               = nullptr;
     PFN_vkCreateRayTracingPipelinesKHR       vkCreateRayTracingPipelinesKHR  = nullptr;
