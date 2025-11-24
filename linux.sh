@@ -39,6 +39,7 @@ show_help() {
 	echo -e "  ${G}./linux.sh release${N}             → Build Release (O3 + LTO)"
     echo -e "  ${G}./linux.sh ninja${N}               → Use Ninja instead of Make"
     echo -e "  ${G}./linux.sh single${N}              → Compile with -j1 (debugging templates/shaders)${N}"
+	echo -e "  ${G}./linux.sh gdb${N}                 → Compile with debugging${N}"
     echo -e "  ${G}./linux.sh release ninja${N}       → Release + Ninja"
     echo -e "  ${G}./linux.sh clean${N}               → Wipe if files are added or removed"
     echo -e "  ${G}./linux.sh clear${N}               → Same as clean"
@@ -63,7 +64,8 @@ nuke_empire() {
 BUILD_TYPE="Debug"
 USE_NINJA="no"
 RUN_AFTER="no"
-SINGLE_THREAD="no"   # ← NEW: ./linux.sh single → -j1
+GDB_MODE="no"           # ← NEW: ./linux.sh gdb
+SINGLE_THREAD="no"
 
 for arg in "$@"; do
     case "${arg,,}" in
@@ -72,16 +74,34 @@ for arg in "$@"; do
         release)       BUILD_TYPE="Release" ;;
         ninja)         USE_NINJA="yes" ;;
         run)           RUN_AFTER="yes" ;;
+        gdb)           GDB_MODE="yes" ;;
         single)        SINGLE_THREAD="yes" ;;
     esac
 done
 
-if [ "$RUN_AFTER" = "yes" ]; then
+# If run or gdb → build first, then launch
+if [[ "$RUN_AFTER" = "yes" || "$GDB_MODE" = "yes" ]]; then
     valhalla_banner
     echo -e "${Y}Building $BUILD_TYPE + launching...${N}"
-    "$0" "${@:1:$#-1}"
-    echo -e "${M}FIRST LIGHT — ENTERING VALHALLA${N}"
-    "./$BIN_DIR/$BINARY" "${@: -1}"
+
+    # Rebuild without the run/gdb flag
+    BUILD_ARGS=()
+    for arg in "$@"; do
+        [[ "${arg,,}" != "run" && "${arg,,}" != "gdb" ]] && BUILD_ARGS+=("$arg")
+    done
+
+    "$0" "${BUILD_ARGS[@]}"
+    [[ $? -ne 0 ]] && exit 1
+
+    CMD="./$BIN_DIR/$BINARY"
+
+    if [[ "$GDB_MODE" = "yes" ]]; then
+        echo -e "${C}GDB ENGAGED — PINK PHOTONS UNDER ARREST${N}"
+        gdb -q --args "$CMD" "${@: -1}"
+    else
+        echo -e "${M}FIRST LIGHT — ENTERING VALHALLA${N}"
+        "$CMD" "${@: -1}"
+    fi
     exit $?
 fi
 
