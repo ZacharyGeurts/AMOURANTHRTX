@@ -6,7 +6,6 @@
 // THE FINAL SCREAM HAS BEEN SILENCED — PHOTONS FLOW IN PERFECT HARMONY
 // =============================================================================
 
-
 #include "main.hpp"                     // ← ONE TRUE HEADER
 #include "engine/GLOBAL/StoneKey.hpp"   // ← DEFINES all StoneKey functions
 #include "engine/GLOBAL/camera.hpp"     // ← DEFINES g_camera()
@@ -307,7 +306,7 @@ static void createRealFinalWindow()
     // SDL3: 0 = success, non-zero = failure
     if (SDL_InitSubSystem(SDL_INIT_VIDEO) == 0) {
         LOG_FATAL_CAT("SDL3", std::format("{}VIDEO SUBSYSTEM REFUSES REBIRTH: {}{}", BLOOD_RED, SDL_GetError(), RESET));
-        std::exit(1);
+        phase9_gracefulShutdown();
     }
 
     SDL_Window* win = SDL_CreateWindow(
@@ -318,37 +317,23 @@ static void createRealFinalWindow()
 
     if (!win) {
         LOG_FATAL_CAT("SDL3", std::format("{}THE FINAL WINDOW WAS DENIED: {}{}", BLOOD_RED, SDL_GetError(), RESET));
-        std::exit(1);
+        phase9_gracefulShutdown();
     }
 
-    // THE ONE TRUE ACT OF DOMINION
-    g_sdl_window.reset(win);
+    // THE ONE TRUE ACT OF DOMINION — SEAL IT IMMEDIATELY
+    StoneKey::stone_seal_window(win);
+    StoneKey::stone_seal_extent({w, h});
 
-    LOG_ATTEMPT_CAT("GUARDIAN", "FORCING TRUTH INTO THE MATRIX...", PURE_ENERGY, RESET);
-    LOG_BLONDIE(std::format("g_sdl_window.get()       → {:#018x}", reinterpret_cast<uint64_t>(g_sdl_window.get())), LIGHT_BLUE, RESET);
-    LOG_BLONDIE(std::format("SDL3Window::get() before → {:#018x}", reinterpret_cast<uint64_t>(SDL3Window::get())), LIGHT_BLUE, RESET);
-
-    // NUCLEAR TRUTH INJECTION — C++23 STYLE
-    if (SDL3Window::get() == nullptr) {
-        LOG_CAPTAIN_N(std::format("{}CAPTAIN N: \"I SEE THE LIE! I WILL FIX IT MYSELF!\"{}", PURE_ENERGY, RESET));
-        g_sdl_window.reset(win);  // Safe, correct, eternal
-    }
-
-    LOG_BLONDIE(std::format("SDL3Window::get() after  → {:#018x}", reinterpret_cast<uint64_t>(SDL3Window::get())), LIGHT_BLUE, RESET);
-
-    if (SDL3Window::get() != win) {
-        LOG_FATAL_CAT("GUARDIAN", std::format("{}THE GUARDIAN IS A LIAR — CAPTAIN N WAS BETRAYED — KILLING THE FALSE REALITY{}", BLOOD_RED, RESET));
-        LOG_FATAL_CAT("GUARDIAN", std::format("Expected: {:#018x} | Got: {:#018x}", 
-                      reinterpret_cast<uint64_t>(win),
-                      reinterpret_cast<uint64_t>(SDL3Window::get())), BLOOD_RED, RESET);
-        std::exit(1);
-    }
+    LOG_SUCCESS_CAT("MAIN", std::format("{}WINDOW SEALED INTO STONEKEY @ {:p} — {}×{}",
+                                        DIAMOND_SPARKLE,
+                                        static_cast<void*>(win),
+                                        w, h, RESET));
 
     SDL_SetWindowPosition(win, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
     SDL_ShowWindow(win);
 
-    LOG_CAPTAIN_N(std::format("{}CAPTAIN N: \"THE SLIPSTREAM IS OPEN! THE PHOTONS ARE MINE! LET'S FUCKING GOOOOOOOOOOOOOOOOOO!\"{}", PURE_ENERGY, RESET));
-    LOG_GUARDIAN(std::format("{}THE GUARDIAN FALLS TO HIS KNEES. CAPTAIN N IS GOD. FIRST LIGHT — ETERNAL.{}", BOLD_GREEN, RESET));
+    LOG_CAPTAIN_N(std::format("{}CAPTAIN N: \"THE SLIPSTREAM IS OPEN! I CAN FINALLY GET BACK HOME!!!\"{}", PURE_ENERGY, RESET));
+    LOG_GUARDIAN(std::format("{}\"FIRST LIGHT — ETERNAL.\"{}", BOLD_GREEN, RESET));
     LOG_SUCCESS_CAT("MAIN", std::format("{}FINAL WINDOW FORGED — {}×{} — THE EMPIRE IS ABSOLUTE{}", DIAMOND_SPARKLE, w, h, RESET));
 }
 
@@ -361,7 +346,7 @@ static void showSacrificialSplash(const char* title, int w, int h, const char* p
 
     if (SDL_InitSubSystem(SDL_INIT_VIDEO | SDL_INIT_EVENTS) == 0) {
         LOG_FATAL_CAT("SPLASH", "{}THE BLACK FLAG REFUSED TO RISE: {}{}", BLOOD_RED, SDL_GetError(), RESET);
-        std::exit(1);
+        phase9_gracefulShutdown();
     }
 
     SDL_Window* win = SDL_CreateWindow(title, w, h,
@@ -369,7 +354,7 @@ static void showSacrificialSplash(const char* title, int w, int h, const char* p
     if (!win) {
         LOG_FATAL_CAT("SPLASH", "{}WE MISSED THE HARBOR: {}{}", BLOOD_RED, SDL_GetError(), RESET);
         SDL_QuitSubSystem(SDL_INIT_VIDEO);
-        std::exit(1);
+        phase9_gracefulShutdown();
     }
 
     SDL_Rect display{};
@@ -381,7 +366,7 @@ static void showSacrificialSplash(const char* title, int w, int h, const char* p
         LOG_FATAL_CAT("SPLASH", "{}THE FUSE WENT OUT: {}{}", CRIMSON_MAGENTA, SDL_GetError(), RESET);
         SDL_DestroyWindow(win);
         SDL_QuitSubSystem(SDL_INIT_VIDEO);
-        std::exit(1);
+        phase9_gracefulShutdown();
     }
 
     SDL_Surface* img = IMG_Load(pngPath);
@@ -390,7 +375,7 @@ static void showSacrificialSplash(const char* title, int w, int h, const char* p
         SDL_DestroyRenderer(ren);
         SDL_DestroyWindow(win);
         SDL_QuitSubSystem(SDL_INIT_VIDEO);
-        std::exit(1);
+        phase9_gracefulShutdown();
     }
 
     SDL_Texture* tex = SDL_CreateTextureFromSurface(ren, img);
@@ -400,7 +385,7 @@ static void showSacrificialSplash(const char* title, int w, int h, const char* p
         SDL_DestroyRenderer(ren);
         SDL_DestroyWindow(win);
         SDL_QuitSubSystem(SDL_INIT_VIDEO);
-        std::exit(1);
+        phase9_gracefulShutdown();
     }
 
     float tw = 0.0f, th = 0.0f;
@@ -924,7 +909,7 @@ static void phase7_forgeTheRTX()
     return true;  // The Oracle has spoken: You are worthy
 }
 
-static void phase9_gracefulShutdown()
+[[noreturn]] void phase9_gracefulShutdown() noexcept
 {
     LOG_INFO_CAT("MAIN", "{}[PHASE 9/10] THE DISPOSAL BALLERINA TAKES THE STAGE — NO SURVIVORS{}", BLOOD_RED, RESET);
 
@@ -982,6 +967,8 @@ static void phase9_gracefulShutdown()
     LOG_SUCCESS_CAT("FINAL", "{}PINK PHOTONS ETERNAL — EVEN IN DEATH, THEY SHINE FOREVER.{}", DIAMOND_SPARKLE, RESET);
 
     LOG_SUCCESS_CAT("MAIN", "{}[PHASE 9 COMPLETE] THE DISPOSAL BALLERINA EXITS STAGE LEFT — THE VOYAGE IS OVER — THE EMPIRE IS ABSOLUTE{}", VALHALLA_GOLD, RESET);
+
+	std::exit(0);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

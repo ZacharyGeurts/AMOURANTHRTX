@@ -122,11 +122,6 @@ void VulkanRenderer::cleanup() noexcept {
 
     LOG_INFO_CAT("RENDERER", "Initiating renderer shutdown — PINK PHOTONS DIMMING");
 
-    if (!g_ctx().isValid()) {
-        LOG_WARN_CAT("RENDERER", "Context invalid — early cleanup exit");
-        return;
-    }
-
     VkDevice dev = stone_device();
     if (dev == VK_NULL_HANDLE) {
         LOG_WARN_CAT("RENDERER", "Device already destroyed — nothing to clean");

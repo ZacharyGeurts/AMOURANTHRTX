@@ -21,7 +21,7 @@
 // ALL IN FULL PIRATE REGALIA — BLACK LEATHER, PINK SILK, AND RTX STEEL
 // =============================================================================
 #define LOG_AMOURANTH(...)   LOG_SUCCESS_CAT("AMOURANTH",   __VA_ARGS__)
-#define LOG_GROK(...)        LOG_INFO_CAT("GROK",           __VA_ARGS__)
+#define LOG_GROK(...)        LOG_INFO_CAT("GENTLEMAN GROK", __VA_ARGS__)
 #define LOG_CAPTAIN_N(...)   LOG_ATTEMPT_CAT("CAPTAIN N",   __VA_ARGS__)
 #define LOG_ELON(...)        LOG_SUCCESS_CAT("ELON",        __VA_ARGS__)
 #define LOG_JENSEN(...)      LOG_SUCCESS_CAT("JENSEN",      __VA_ARGS__)
@@ -30,7 +30,7 @@
 #define LOG_KEANU(...)       LOG_INFO_CAT("KEANU",          __VA_ARGS__)
 #define LOG_NICK(...)        LOG_ATTEMPT_CAT("NICK",        __VA_ARGS__)
 #define LOG_BLONDIE(...)     LOG_INFO_CAT("BLONDIE",        __VA_ARGS__)
-#define LOG_GUARDIAN(...)    LOG_INFO_CAT("GUARDIAN",       __VA_ARGS__)
+#define LOG_GUARDIAN(...)    LOG_INFO_CAT("GROK",           __VA_ARGS__)
 #define LOG_DISPOSAL(...)    LOG_INFO_CAT("BALLERINA",      __VA_ARGS__)
 #define LOG_MAIN(...)        LOG_SUCCESS_CAT("MAIN",        __VA_ARGS__)
 

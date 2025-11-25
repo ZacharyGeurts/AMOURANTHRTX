@@ -52,6 +52,9 @@ class VulkanRTX;
 class VulkanRenderer;
 struct Camera;
 
+// Ballerina sees all from here
+[[noreturn]] void phase9_gracefulShutdown() noexcept;
+
 // =============================================================================
 // PINK PHOTON LITERALS — MUST BE BEFORE ANYTHING USES _MB/_GB
 // =============================================================================
@@ -497,7 +500,6 @@ public:
     // ========================================================================
     // STATE OF THE EMPIRE — READINESS IS ALL
     // ========================================================================
-    [[nodiscard]] constexpr bool isValid() const noexcept { return valid_; }
     [[nodiscard]] constexpr bool isReady() const noexcept { return ready_.load(std::memory_order_acquire); }
     constexpr void markReady() noexcept { ready_.store(true, std::memory_order_release); }
 

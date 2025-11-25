@@ -140,7 +140,6 @@ public:
     ~VulkanRTX() noexcept;
 
     [[nodiscard]] VkDevice device() const noexcept { return device_; }
-    [[nodiscard]] bool isValid() const noexcept;
 
     [[nodiscard]] VkImage      blackFallbackImage() const noexcept { return blackFallbackImage_ ? blackFallbackImage_.get() : VK_NULL_HANDLE; }
     [[nodiscard]] VkImageView  blackFallbackView()   const noexcept { return blackFallbackView_   ? blackFallbackView_.get()   : VK_NULL_HANDLE; }
@@ -217,10 +216,6 @@ private:
 
     [[nodiscard]] VkDeviceSize alignUp(VkDeviceSize value, VkDeviceSize alignment) const noexcept;
 };
-
-inline bool VulkanRTX::isValid() const noexcept {
-    return device_ != VK_NULL_HANDLE && hasBlackFallback();
-}
 
 // =============================================================================
 // g_rtx() — THE ONE TRUE SAFE ACCESSOR — FIRST LIGHT ETERNAL
