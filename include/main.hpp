@@ -23,7 +23,6 @@ class Camera;
 namespace RTX {
     class PipelineManager;
     struct Context;
-    Context& g_ctx();
 }
 
 // -----------------------------------------------------------------------------

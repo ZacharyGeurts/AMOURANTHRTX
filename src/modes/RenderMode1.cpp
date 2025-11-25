@@ -8,6 +8,7 @@
 #include "engine/GLOBAL/camera.hpp"
 #include "engine/GLOBAL/StoneKey.hpp"
 #include "engine/GLOBAL/VulkanCore.hpp"
+#include "engine/GLOBAL/BufferManager.hpp"
 
 #include <tiny_obj_loader.h>
 #include <filesystem>
@@ -136,7 +137,7 @@ void RenderMode1::initResources() {
     outputView_ = RTX::Handle<VkImageView>(view, stone_device(), vkDestroyImageView, 0, "OutputView");
 
     // Transition
-    VkCommandBuffer cmd = VulkanRTX::beginSingleTimeCommands(g_ctx().commandPool());
+    VkCommandBuffer cmd = VulkanRTX::beginSingleTimeCommands(g_ctx().commandPool_);
     VkImageMemoryBarrier barrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
     barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
@@ -148,7 +149,7 @@ void RenderMode1::initResources() {
     barrier.image = outputImage_.get();
     vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
 
-    stone_pipeline()->endSingleTimeCommands(g_ctx().commandPool(), g_ctx().graphicsQueue(), cmd);
+    stone_pipeline()->endSingleTimeCommands(g_ctx().commandPool_, g_ctx().graphicsQueue(), cmd);
 
     g_rtx().updateRTXDescriptors(0,
         RAW_BUFFER(uniformBuf_), RAW_BUFFER(accumulationBuf_), VK_NULL_HANDLE,

@@ -124,9 +124,9 @@ public:
 
     [[nodiscard]] VkDevice         device()          const noexcept { return stone_device(); }
     [[nodiscard]] VkPhysicalDevice physicalDevice()  const noexcept { return stone_physical(); }
-    [[nodiscard]] VkCommandPool    commandPool()     const noexcept { return g_ctx().commandPool(); }
-    [[nodiscard]] VkQueue          graphicsQueue()   const noexcept { return g_ctx().graphicsQueue(); }
-    [[nodiscard]] VkQueue          presentQueue()    const noexcept { return g_ctx().presentQueue(); }
+    [[nodiscard]] VkCommandPool    commandPool()     const noexcept { return RTX::g_ctx().commandPool_; }
+    [[nodiscard]] VkQueue          graphicsQueue()   const noexcept { return RTX::g_ctx().graphicsQueue(); }
+    [[nodiscard]] VkQueue          presentQueue()    const noexcept { return RTX::g_ctx().presentQueue(); }
 
     [[nodiscard]] bool             hypertraceEnabled()     const noexcept { return hypertraceEnabled_; }
     [[nodiscard]] bool             denoisingEnabled()      const noexcept { return denoisingEnabled_; }

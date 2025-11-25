@@ -15,6 +15,7 @@
 // =============================================================================
 
 #include "engine/GLOBAL/StoneKey.hpp"
+#include "engine/GLOBAL/BufferManager.hpp"    // ← NEW ETERNAL VAULT
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/GLOBAL/RTXHandler.hpp"
 #include "engine/GLOBAL/OptionsMenu.hpp"
@@ -87,7 +88,7 @@ namespace RTX {
     Handle<VkAccelerationStructureKHR>& blas() { static Handle<VkAccelerationStructureKHR> h; return h; }
     Handle<VkAccelerationStructureKHR>& tlas() { static Handle<VkAccelerationStructureKHR> h; return h; }
 
-    Handle<VkRenderPass>& renderPass() { return g_ctx().renderPass_; }
+    Handle<VkRenderPass>& renderPass() { return RTX::g_ctx().renderPass_; }
 
     // =============================================================================
     // VALIDATION-CLEAN DESCRIPTOR UPDATE HELPERS (THE FIX)
@@ -159,7 +160,7 @@ namespace RTX {
     
 void shutdown() noexcept
 {
-    auto& ctx = g_ctx();
+    auto& ctx = RTX::g_ctx();
 
     LOG_SUCCESS_CAT("RTX", "{}RTX::shutdown() initiated — beginning graceful dissolution of the empire...{}", 
                     PLASMA_FUCHSIA, RESET);
@@ -169,9 +170,6 @@ void shutdown() noexcept
         LOG_SUCCESS_CAT("RTX", "vkDeviceWaitIdle — waiting for all queues to drain...");
         vkDeviceWaitIdle(ctx.device_);
     }
-
-    // 2. Purge all tracked buffers FIRST (SBT, mesh, staging, etc.)
-    UltraLowLevelBufferTracker::get().purge_all();
 
     // 3. Destroy command pools
     if (ctx.computeCommandPool_ != VK_NULL_HANDLE) {
@@ -224,7 +222,7 @@ void Context::cleanup() noexcept
 }
 
     void createGlobalRenderPass() {
-        auto& ctx = g_ctx();
+        auto& ctx = RTX::g_ctx();
         VkDevice device = ctx.device_ ;
 
         if (ctx.renderPass_.valid()) {
@@ -282,13 +280,13 @@ void Context::cleanup() noexcept
 
 void retrieveQueues() noexcept
 {
-    vkGetDeviceQueue(stone_device(), g_ctx().graphicsFamily(), 0, &g_ctx().graphicsQueue_);
-    vkGetDeviceQueue(stone_device(), g_ctx().presentFamily(),  0, &g_ctx().presentQueue_);
+    vkGetDeviceQueue(stone_device(), RTX::g_ctx().graphicsFamily(), 0, &RTX::g_ctx().graphicsQueue_);
+    vkGetDeviceQueue(stone_device(), RTX::g_ctx().presentFamily(),  0, &RTX::g_ctx().presentQueue_);
 
     LOG_SUCCESS_CAT("RTX", "{}QUEUES RETRIEVED — graphics={} present={} — PHOTONS HAVE VOICE{}",
                     PLASMA_FUCHSIA,
-                    g_ctx().graphicsFamily(),
-                    g_ctx().presentFamily(),
+                    RTX::g_ctx().graphicsFamily(),
+                    RTX::g_ctx().presentFamily(),
                     RESET);
 }
 
@@ -321,7 +319,7 @@ void RTX::Context::init(SDL_Window* window, int width, int height)
     if (!stone_surface()) {
         LOG_ATTEMPT_CAT("RTX", "Cid carves the eyes into the prow — Creating VkSurfaceKHR");
         VkSurfaceKHR surface = VK_NULL_HANDLE;
-        if (SDL_Vulkan_CreateSurface(stone_window(), stone_instance(), nullptr, &surface) == 0) {
+        if (!SDL_Vulkan_CreateSurface(window, instance_, nullptr, &surface)) {
             LOG_FATAL_CAT("RTX", "Cid drops his chisel — SDL_Vulkan_CreateSurface FAILED: {} — THE SEA WILL NOT SEE US", 
                           BLOOD_RED, SDL_GetError());
             phase9_gracefulShutdown();
@@ -458,10 +456,10 @@ void RTX::Context::init(SDL_Window* window, int width, int height)
             if (score > bestScore) {
                 bestScore = score;
                 chosen = dev;
-                g_ctx().physicalDevice_ = dev;
-                g_ctx().graphicsFamily_ = graphics.value();
-                g_ctx().presentFamily_  = present.value();
-                g_ctx().computeFamily_  = graphics.value();
+                RTX::g_ctx().physicalDevice_ = dev;
+                RTX::g_ctx().graphicsFamily_ = graphics.value();
+                RTX::g_ctx().presentFamily_  = present.value();
+                RTX::g_ctx().computeFamily_  = graphics.value();
             }
         }
 
@@ -500,11 +498,6 @@ void RTX::Context::init(SDL_Window* window, int width, int height)
     LOG_ATTEMPT_CAT("RTX", "Cid climbs the mast — Raising the pink sails of the swapchain @ {}x{}", 
                     RASPBERRY_PINK, width, height);
     forgeSwapchain(window, width, height);
-
-    // ========================================================================
-    // 5. MEMORY VAULT — CID SEALS THE TREASURE HOLD
-    // ========================================================================
-    UltraLowLevelBufferTracker::initialize(stone_device(), stone_physical());
 
     // ========================================================================
     // 6. FINAL SEAL — CID DRIVES THE GOLDEN RIVET
@@ -661,7 +654,7 @@ void RTX::forgeSwapchain(SDL_Window* window, int width, int height) noexcept
     LOG_ATTEMPT_CAT("RTX", "{}FORGING SWAPCHAIN @ {}x{} — SLAUGHTERING THE KRAKEN ETERNALLY{}", 
                     VALHALLA_GOLD, width, height, RESET);
 
-    auto& ctx = g_ctx();
+    auto& ctx = RTX::g_ctx();
 
     // === 1. KRAKEN-SLAYING LOOP — NO DELAY, ONLY VICTORY ===
     if (Options::Debug::ENABLE_VALIDATION_LAYERS) {
@@ -839,7 +832,7 @@ void RTX::Context::createLogicalDevice()
         return;
     }
 
-    VkPhysicalDevice phys = g_ctx().physicalDevice_;
+    VkPhysicalDevice phys = RTX::g_ctx().physicalDevice_;
     if (phys == VK_NULL_HANDLE) {
         LOG_FATAL_CAT("RTX", "NO WHEEL. NO 1.4. THE VOID CONSUMES US.");
         phase9_gracefulShutdown();
@@ -852,7 +845,7 @@ void RTX::Context::createLogicalDevice()
     // ========================================================================
     // 1. QUEUE BLOODLINES — SIMPLE AS 1.4
     // ========================================================================
-    std::set<uint32_t> queues = { g_ctx().graphicsFamily_.value(), g_ctx().presentFamily_.value() };
+    std::set<uint32_t> queues = { RTX::g_ctx().graphicsFamily_.value(), RTX::g_ctx().presentFamily_.value() };
     std::vector<VkDeviceQueueCreateInfo> queueInfos;
     const float priority = 1.0f;
     for (uint32_t q : queues) {
@@ -921,8 +914,8 @@ void RTX::Context::createLogicalDevice()
     // ========================================================================
     // 5. CLAIM QUEUES + PFN RITUAL
     // ========================================================================
-    vkGetDeviceQueue(logical, g_ctx().graphicsFamily_.value(), 0, &graphicsQueue_);
-    vkGetDeviceQueue(logical, g_ctx().presentFamily_.value(),  0, &presentQueue_);
+    vkGetDeviceQueue(logical, RTX::g_ctx().graphicsFamily_.value(), 0, &graphicsQueue_);
+    vkGetDeviceQueue(logical, RTX::g_ctx().presentFamily_.value(),  0, &presentQueue_);
 
     enableBufferDeviceAddress(true);
     enableAccelerationStructure(true);
@@ -941,189 +934,11 @@ void RTX::Context::createLogicalDevice()
     LOG_SUCCESS_CAT("RTX", "…1.4 was always the endgame.");
 }
 
-// =============================================================================
-// ULTRA LOW LEVEL BUFFER TRACKER — FULL IMPLEMENTATION — NO NEW FILE — ETERNAL
-// =============================================================================
-
-UltraLowLevelBufferTracker& UltraLowLevelBufferTracker::get() noexcept {
-    static UltraLowLevelBufferTracker instance;
-    return instance;
-}
-
-void UltraLowLevelBufferTracker::initialize(VkDevice dev, VkPhysicalDevice phys) noexcept {
-    auto& self = get();
-    std::lock_guard<std::mutex> lock(self.mutex_);
-    self.device_ = dev;
-    self.physicalDevice_ = phys;
-}
-
-uint64_t UltraLowLevelBufferTracker::create(VkDeviceSize size,
-                                            VkBufferUsageFlags usage,
-                                            VkMemoryPropertyFlags props,
-                                            std::string_view tag) {
-    auto& self = get();
-    std::lock_guard<std::mutex> lock(self.mutex_);
-
-    VkBufferCreateInfo bufferInfo{
-        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-        .size = size,
-        .usage = usage,
-        .sharingMode = VK_SHARING_MODE_EXCLUSIVE
-    };
-
-    VkBuffer buffer;
-    VK_CHECK(vkCreateBuffer(self.device_, &bufferInfo, nullptr, &buffer));
-
-    VkMemoryRequirements memReqs;
-    vkGetBufferMemoryRequirements(self.device_, buffer, &memReqs);
-
-    uint32_t memType = findMemoryType(self.physicalDevice_, memReqs.memoryTypeBits, props);
-    if (memType == UINT32_MAX) LOG_FATAL_CAT("RTX", "No memory type for buffer!");
-
-    VkMemoryAllocateInfo allocInfo{
-        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-        .allocationSize = memReqs.size,
-        .memoryTypeIndex = memType
-    };
-
-    VkDeviceMemory memory;
-    VK_CHECK(vkAllocateMemory(self.device_, &allocInfo, nullptr, &memory));
-    VK_CHECK(vkBindBufferMemory(self.device_, buffer, memory, 0));
-
-    uint64_t handle = counter_++;
-    self.vault_[handle] = {
-        .buffer = buffer,
-        .memory = memory,
-        .size = size,
-        .aligned = memReqs.size,
-        .usage = usage,
-        .tag = std::string(tag)
-    };
-
-    return handle;
-}
-
-void UltraLowLevelBufferTracker::destroy(uint64_t handle) noexcept {
-    auto& self = get();
-    std::lock_guard<std::mutex> lock(self.mutex_);
-    auto it = self.vault_.find(handle);
-    if (it != self.vault_.end()) {
-        if (it->second.buffer)  vkDestroyBuffer(self.device_, it->second.buffer, nullptr);
-        if (it->second.memory)  vkFreeMemory(self.device_, it->second.memory, nullptr);
-        self.vault_.erase(it);
-    }
-}
-
-void* UltraLowLevelBufferTracker::map(uint64_t handle) noexcept {
-    auto& self = get();
-    auto it = self.vault_.find(handle);
-    if (it == self.vault_.end()) return nullptr;
-    void* data;
-    vkMapMemory(self.device_, it->second.memory, 0, it->second.size, 0, &data);
-    return data;
-}
-
-void UltraLowLevelBufferTracker::unmap(uint64_t handle) noexcept {
-    auto& self = get();
-    auto it = self.vault_.find(handle);
-    if (it != self.vault_.end()) {
-        vkUnmapMemory(self.device_, it->second.memory);
-    }
-}
-
-void UltraLowLevelBufferTracker::purge_all() noexcept {
-    auto& self = get();
-    std::lock_guard<std::mutex> lock(self.mutex_);
-    for (auto& [h, data] : self.vault_) {
-        if (data.buffer)  vkDestroyBuffer(self.device_, data.buffer, nullptr);
-        if (data.memory)  vkFreeMemory(self.device_, data.memory, nullptr);
-    }
-    self.vault_.clear();
-}
-
-UltraLowLevelBufferTracker::BufferData* UltraLowLevelBufferTracker::getData(uint64_t handle) noexcept {
-    auto& self = get();
-    auto it = self.vault_.find(handle);
-    return it != self.vault_.end() ? &it->second : nullptr;
-}
-
-const UltraLowLevelBufferTracker::BufferData* UltraLowLevelBufferTracker::getData(uint64_t handle) const noexcept {
-    auto it = vault_.find(handle);
-    return it != vault_.end() ? &it->second : nullptr;
-}
-
-uint32_t UltraLowLevelBufferTracker::findMemoryType(VkPhysicalDevice phys,
-                                                    uint32_t typeFilter,
-                                                    VkMemoryPropertyFlags props) noexcept {
-    VkPhysicalDeviceMemoryProperties memProps{};
-    vkGetPhysicalDeviceMemoryProperties(phys, &memProps);
-    for (uint32_t i = 0; i < memProps.memoryTypeCount; ++i) {
-        if ((typeFilter & (1u << i)) && (memProps.memoryTypes[i].propertyFlags & props) == props) {
-            return i;
-        }
-    }
-    return UINT32_MAX;
-}
-
-#define MAKE(name, sz) \
-    uint64_t UltraLowLevelBufferTracker::name(VkBufferUsageFlags e, VkMemoryPropertyFlags p) noexcept { \
-        return create(sz, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | e, p, #name); \
-    }
-
-MAKE(make_64M,  64_MB)
-MAKE(make_128M, 128_MB)
-MAKE(make_256M, 256_MB)
-MAKE(make_420M, 420_MB)
-MAKE(make_512M, 512_MB)
-MAKE(make_1G,   1_GB)
-MAKE(make_2G,   2_GB)
-MAKE(make_4G,   4_GB)
-MAKE(make_8G,   8_GB)
-
-#undef MAKE
-
-// =============================================================================
-// ONLY THE 3 MISSING SYMBOLS THAT ACTUALLY DON'T EXIST ANYWHERE ELSE
-// =============================================================================
-
-// 1. kStone1 / kStone2 — your eternal 4GB stones
-uint64_t kStone1() noexcept {
-    static uint64_t handle = UltraLowLevelBufferTracker::get().make_4G();
-    return handle;
-}
-
-uint64_t kStone2() noexcept {
-    static uint64_t handle = UltraLowLevelBufferTracker::get().make_4G();
-    return handle;
-}
-
-// 2. RTX::LAS::buildTLAS — stub that matches the noexcept declaration exactly
-void RTX::LAS::buildTLAS(VkCommandPool pool, VkQueue queue,
-                         std::span<const std::pair<VkAccelerationStructureKHR, glm::mat4>> instances) noexcept
-{
-    // TODO: implement real TLAS build
-    // For now: silence linker and prevent crash
-    (void)pool; (void)queue; (void)instances;
-}
-
-// =============================================================================
-// FINAL 5 MISSING SYMBOLS — NO CONFLICTS — LINKER HAPPY — ETERNAL STONE
-// =============================================================================
-
 namespace RTX {
-
-// 1. Global context accessor — you already have a header version, but linker wants this one
-Context& g_ctx() noexcept {
-    static Context ctx;
-    return ctx;
-}
-
-// 2. Vulkan instance creation with SDL
-// earlier createVulkanInstanceWithSDL
 
 // 4. Retrieve queues (assume single queue family)
 void retrieveQueues() noexcept {
-    auto& ctx = g_ctx();
+    auto& ctx = RTX::g_ctx();
     uint32_t family = 0;
     vkGetDeviceQueue(ctx.device_, family, 0, &ctx.graphicsQueue_);
     ctx.computeQueue_ = ctx.transferQueue_ = ctx.graphicsQueue_;

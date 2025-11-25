@@ -21,6 +21,7 @@
 #include "engine/GLOBAL/PipelineManager.hpp"
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/GLOBAL/RTXHandler.hpp"
+#include "engine/GLOBAL/BufferManager.hpp"
 #include "engine/GLOBAL/LAS.hpp"
 #include "engine/GLOBAL/SDL3.hpp"
 #include "engine/GLOBAL/OptionsMenu.hpp"
@@ -220,20 +221,20 @@ void VulkanRenderer::cleanup() noexcept {
 
     // ── Uniform Buffers (tonemap UBOs) ──────────────────────────────────────
     for (auto& enc : tonemapUniformEncs_) {
-        if (enc != 0) UltraLowLevelBufferTracker::get().destroy(enc);
+        if (enc != 0) BufferManager::destroy(enc);
     }
     tonemapUniformEncs_.clear();
 
     // ── Shared Staging Buffer ───────────────────────────────────────────────
     if (g_ctx().sharedStagingEnc_ != 0) {
-        UltraLowLevelBufferTracker::get().destroy(g_ctx().sharedStagingEnc_);
+        BufferManager::destroy(g_ctx().sharedStagingEnc_);
         g_ctx().sharedStagingEnc_ = 0;
     }
 
     // ── PipelineManager Cleanup ─────────────────────────────────────────────
 
     // ── FINAL PHASE: Command Buffers & Pool (NOW 100% SAFE) ─────────────────
-    VkCommandPool pool = g_ctx().commandPool();
+    VkCommandPool pool = g_ctx().commandPool_;
     if (pool != VK_NULL_HANDLE) {
         if (!commandBuffers_.empty()) {
             vkFreeCommandBuffers(dev, pool, static_cast<uint32_t>(commandBuffers_.size()), commandBuffers_.data());
@@ -407,7 +408,7 @@ LOG_SUCCESS_CAT("RENDERER", "Step 5 COMPLETE — {} full sync sets forged — TR
     createRTOutputImages();                        // HDR ray tracing output
     if (Options::RTX::ENABLE_DENOISING) createDenoiserImage();
     if (Options::RTX::ENABLE_ADAPTIVE_SAMPLING)
-        if (Options::RTX::ENABLE_ADAPTIVE_SAMPLING) createNexusScoreImage(g_ctx().commandPool(), g_ctx().graphicsQueue());
+        if (Options::RTX::ENABLE_ADAPTIVE_SAMPLING) createNexusScoreImage(g_ctx().commandPool_, g_ctx().graphicsQueue());
     createTonemapSampler();  // ← NEW: For tonemap input sampling
     LOG_SUCCESS_CAT("RENDERER", "Step 9 COMPLETE — HDR pipeline targets created");
 
@@ -429,7 +430,7 @@ if (stone_device() == VK_NULL_HANDLE) {
     LOG_WARN_CAT("RENDERER", "Shared staging skipped — invalid device (pre-Phase 7)");
     g_ctx().sharedStagingEnc_ = 0;
 } else {
-    g_ctx().sharedStagingEnc_ = UltraLowLevelBufferTracker::get().create(stagingSize, 
+    g_ctx().sharedStagingEnc_ = BufferManager::create(stagingSize, 
         VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, 
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, 
         "SharedStagingUBO");
@@ -648,7 +649,7 @@ void VulkanRenderer::createRTOutputImages() noexcept {
 
     const uint32_t framesInFlight = Options::Performance::MAX_FRAMES_IN_FLIGHT;
     const auto& ctx = g_ctx();  // ← FIXED: const ref to avoid dangling
-    VkCommandPool cmdPool = ctx.commandPool();
+    VkCommandPool cmdPool = ctx.commandPool_;
     VkQueue queue = ctx.graphicsQueue();
 
     // Harden: Pre-wait to ensure clean state
@@ -907,7 +908,7 @@ void VulkanRenderer::createEnvironmentMap() noexcept {
     LOG_TRACE_CAT("RENDERER", "Envmap staging uploaded: {} bytes", imageSize);
 
     const auto& ctx = g_ctx();  // ← FIXED: const ref
-    VkCommandPool cmdPool = ctx.commandPool();
+    VkCommandPool cmdPool = ctx.commandPool_;
     VkQueue queue = ctx.graphicsQueue();
 
     // Create device-local image (2D for equirectangular envmap)
@@ -1447,7 +1448,7 @@ void VulkanRenderer::createCommandBuffers() noexcept {
     VkCommandBufferAllocateInfo allocInfo = {};  // Zero-init (fixes garbage)
     allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
     const auto& ctx = g_ctx();  // const ref
-    allocInfo.commandPool = ctx.commandPool();
+    allocInfo.commandPool = ctx.commandPool_;
     allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     allocInfo.commandBufferCount = static_cast<uint32_t>(commandBuffers_.size());
     LOG_TRACE_CAT("RENDERER", "Alloc info — pool=0x{:x}, level={}, count={}", reinterpret_cast<uintptr_t>(allocInfo.commandPool), static_cast<int>(allocInfo.level), allocInfo.commandBufferCount);
@@ -1721,14 +1722,14 @@ void VulkanRenderer::updateUniformBuffer(uint32_t frame, const Camera& camera, f
     // ------------------------------------------------------------------
     if (useTransientCmd) {
         // Frames 0–3 only — safe to allocate a one-time command buffer
-        cmd = pipelineManager_.beginSingleTimeCommands(ctx.commandPool());
+        cmd = pipelineManager_.beginSingleTimeCommands(ctx.commandPool_);
     } else {
         // Frame 4+ — use the per-frame command buffer that is already recording
         cmd = commandBuffers_[frame];
     }
 
     if (cmd != VK_NULL_HANDLE) {
-        VkBuffer src = UltraLowLevelBufferTracker::get().getData(g_ctx().sharedStagingEnc_)->buffer;
+        VkBuffer src = BufferManager::get(g_ctx().sharedStagingEnc_)->buffer;
         VkBuffer dst = RAW_BUFFER(uniformBufferEncs_[frame]);
 
         VkBufferCopy copyRegion{};
@@ -1751,7 +1752,7 @@ void VulkanRenderer::updateUniformBuffer(uint32_t frame, const Camera& camera, f
     // 3. Submit transient command buffer only if we allocated one
     // ------------------------------------------------------------------
     if (useTransientCmd && cmd != VK_NULL_HANDLE) {
-        pipelineManager_.endSingleTimeCommands(ctx.commandPool(), ctx.graphicsQueue(), cmd);
+        pipelineManager_.endSingleTimeCommands(ctx.commandPool_, ctx.graphicsQueue(), cmd);
     }
     // else: barriers already recorded into the main per-frame cmd → nothing to do
 }
@@ -1806,12 +1807,12 @@ void VulkanRenderer::updateTonemapUniform(uint32_t frame) noexcept {
 
     // FIXED: Copy staging to device UBO (similar to updateUniformBuffer)
     const auto& ctx = g_ctx();
-    VkCommandPool cmdPool = ctx.commandPool();
+    VkCommandPool cmdPool = ctx.commandPool_;
     VkQueue queue = ctx.graphicsQueue();
     VkCommandBuffer copyCmd = pipelineManager_.beginSingleTimeCommands(cmdPool);
     if (copyCmd != VK_NULL_HANDLE) {
         VkBufferCopy copyRegion = {0, 0, sizeof(ubo)};
-        VkBuffer stagingBuf = UltraLowLevelBufferTracker::get().getData(g_ctx().sharedStagingEnc_)->buffer;
+        VkBuffer stagingBuf = BufferManager::get(g_ctx().sharedStagingEnc_)->buffer;
         if (stagingBuf == VK_NULL_HANDLE) {
             LOG_WARN_CAT("RENDERER", "Staging buffer null — aborting copy for frame {}", frame);
         } else {
@@ -2029,7 +2030,7 @@ bool VulkanRenderer::recreateTonemapUBOs() noexcept {
     for (size_t i = 0; i < tonemapUniformEncs_.size(); ++i) {
         auto enc = tonemapUniformEncs_[i];
         if (enc != 0) {
-            UltraLowLevelBufferTracker::get().destroy(enc);
+            BufferManager::destroy(enc);
             tonemapUniformEncs_[i] = 0;
         }
     }
@@ -2045,7 +2046,7 @@ bool VulkanRenderer::recreateTonemapUBOs() noexcept {
 
     bool allGood = true;
     for (uint32_t i = 0; i < framesInFlight; ++i) {  // FIXED: uint32_t
-        auto handle = UltraLowLevelBufferTracker::get().create(uboSize, usage, props, std::format("TonemapUBO[{}]", i));
+        auto handle = BufferManager::create(uboSize, usage, props, std::format("TonemapUBO[{}]", i));
         if (handle == 0) {
             LOG_ERROR_CAT("Renderer", "Tonemap UBO forge FAILED for frame {}", i);
             allGood = false;
@@ -2063,7 +2064,7 @@ bool VulkanRenderer::recreateTonemapUBOs() noexcept {
 
 void VulkanRenderer::destroySharedStaging() noexcept {
     if (g_ctx().sharedStagingEnc_ != 0) {
-        UltraLowLevelBufferTracker::get().destroy(g_ctx().sharedStagingEnc_);
+        BufferManager::destroy(g_ctx().sharedStagingEnc_);
         // FIXED: Reset via tracker; no pointer
         g_ctx().sharedStagingEnc_ = 0;
         LOG_DEBUG_CAT("Renderer", "Shared staging destroyed");
@@ -2075,7 +2076,7 @@ bool VulkanRenderer::createSharedStaging() noexcept {
     VkBufferUsageFlags usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
     VkMemoryPropertyFlags props = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
 
-    auto enc = UltraLowLevelBufferTracker::get().create(size, usage, props, "SharedStagingUBO");
+    auto enc = BufferManager::create(size, usage, props, "SharedStagingUBO");
     if (enc == 0) {
         LOG_ERROR_CAT("Renderer", "Shared staging forge FAILED");
         return false;
@@ -2111,7 +2112,7 @@ void VulkanRenderer::onWindowResize(uint32_t w, uint32_t h) noexcept
     vkDeviceWaitIdle(stone_device());
 
     // Reset the one true command pool — all command buffers are now dust
-    vkResetCommandPool(stone_device(), g_ctx().commandPool(), VK_COMMAND_POOL_RESET_RELEASE_RESOURCES_BIT);
+    vkResetCommandPool(stone_device(), g_ctx().commandPool_, VK_COMMAND_POOL_RESET_RELEASE_RESOURCES_BIT);
 
     width_  = static_cast<int>(w);
     height_ = static_cast<int>(h);
@@ -2145,7 +2146,7 @@ void VulkanRenderer::onWindowResize(uint32_t w, uint32_t h) noexcept
     createAccumulationImages();
     if (Options::RTX::ENABLE_DENOISING) createDenoiserImage();
     if (Options::RTX::ENABLE_ADAPTIVE_SAMPLING)
-        createNexusScoreImage(g_ctx().commandPool(), g_ctx().graphicsQueue());
+        createNexusScoreImage(g_ctx().commandPool_, g_ctx().graphicsQueue());
 
     createFramebuffers();
     commandBuffers_.clear();
@@ -2236,7 +2237,7 @@ void VulkanRenderer::createImage(RTX::Handle<VkImage>& image,
     view   = RTX::Handle<VkImageView>(rawView, stone_device(), vkDestroyImageView, 0, name + "_View");
 
     // Transition to GENERAL
-    VkCommandBuffer cmd = pipelineManager_.beginSingleTimeCommands(g_ctx().commandPool());
+    VkCommandBuffer cmd = pipelineManager_.beginSingleTimeCommands(g_ctx().commandPool_);
 
     VkImageMemoryBarrier barrier = {};
     barrier.sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -2250,7 +2251,7 @@ void VulkanRenderer::createImage(RTX::Handle<VkImage>& image,
         VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
         0, 0, nullptr, 0, nullptr, 1, &barrier);
 
-    pipelineManager_.endSingleTimeCommands(g_ctx().commandPool(), g_ctx().graphicsQueue(), cmd);
+    pipelineManager_.endSingleTimeCommands(g_ctx().commandPool_, g_ctx().graphicsQueue(), cmd);
 }
 
 void VulkanRenderer::createImageArray(std::vector<RTX::Handle<VkImage>>& images,

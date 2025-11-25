@@ -1120,7 +1120,7 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
 
     // Conditional device address flag — SPEC COMPLIANT
     VkMemoryAllocateFlagsInfo flagsInfo{};
-    if (g_ctx().bufferDeviceAddressEnabled()) {
+    if (g_ctx().bufferDeviceAddressEnabled_) {
         flagsInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO;
         flagsInfo.flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT_KHR;
         allocInfo.pNext = &flagsInfo;

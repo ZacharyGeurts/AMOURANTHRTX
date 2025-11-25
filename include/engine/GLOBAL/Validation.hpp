@@ -14,6 +14,7 @@
 
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_beta.h>
+#include "engine/GLOBAL/BufferManager.hpp"
 
 using namespace Logging::Color;
 using namespace StoneKey;
@@ -27,7 +28,7 @@ using namespace StoneKey;
 {
     if (handle == 0ULL) [[unlikely]]
         return VK_NULL_HANDLE;
-    auto* data = UltraLowLevelBufferTracker::get().getData(handle);
+    auto* data = BufferManager::get(handle);
     return data ? data->buffer : VK_NULL_HANDLE;
 }
 

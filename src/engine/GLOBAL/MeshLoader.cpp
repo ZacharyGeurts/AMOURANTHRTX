@@ -1,14 +1,15 @@
 // src/engine/Vulkan/MeshLoader.cpp
 // =============================================================================
-// AMOURANTH RTX — MESH LOADER v∞ — LASSO OF TRUTH EDITION
-// "By the gods — this code speaks only truth. It compiles. It runs. It achieves First Light."
-// PINK PHOTONS ETERNAL — VALHALLA v85 FINAL — NOVEMBER 24, 2025
+// AMOURANTH RTX — MESH LOADER v∞ — LASSO OF TRUTH EDITION — BUFFERMANAGER v∞
+// "This code is bound by the Lasso. It is perfect. It is eternal. It is pink."
+// PINK PHOTONS ETERNAL — VALHALLA v85 FINAL — NOVEMBER 25, 2025
 // =============================================================================
 
 #include "engine/GLOBAL/MeshLoader.hpp"
-#include "engine/GLOBAL/StoneKey.hpp"
 #include "engine/GLOBAL/RTXHandler.hpp"
-#include "engine/GLOBAL/LAS.hpp"           // ← brings in RTX::detail::beginOneTime + endSingleTimeCommandsAsync
+#include "engine/GLOBAL/BufferManager.hpp"    // ← NEW ETERNAL VAULT
+#include "engine/GLOBAL/StoneKey.hpp"
+#include "engine/GLOBAL/LAS.hpp"
 #include "engine/GLOBAL/logging.hpp"
 #include <tinyobjloader/tiny_obj_loader.h>
 #include <unordered_map>
@@ -16,15 +17,13 @@
 
 using namespace Logging::Color;
 using namespace StoneKey;
-
-// Bring the Lasso of Truth into scope — these are now in RTX::detail
 using RTX::detail::beginOneTime;
 using RTX::detail::endSingleTimeCommandsAsync;
 
 namespace MeshLoader {
 
 // =============================================================================
-// MESH SAFETY — STONEKEY PROTECTED
+// MESH SAFETY — STONEKEY PROTECTED — UNCHANGED PERFECTION
 // =============================================================================
 void Mesh::destroy() noexcept {
     LOG_INFO_CAT("MeshLoader", "MESH DESTROY — FINGERPRINT 0x{:016X}", stonekey_fingerprint);
@@ -55,7 +54,7 @@ VkBuffer Mesh::getIndexBuffer() const noexcept {
 }
 
 // =============================================================================
-// BULLETPROOF UPLOAD — FULLY RTX + LAS COMPATIBLE
+// BULLETPROOF UPLOAD — NOW POWERED BY BufferManager v∞ — STILL LOUDEST CODE ON EARTH
 // =============================================================================
 static void uploadBuffer(const void* data, VkDeviceSize size, VkBufferUsageFlags usage, uint64_t& outHandle)
 {
@@ -67,22 +66,20 @@ static void uploadBuffer(const void* data, VkDeviceSize size, VkBufferUsageFlags
         return;
     }
 
-    auto& tracker = UltraLowLevelBufferTracker::get();
+    // STAGING BUFFER — HOST VISIBLE
+    uint64_t staging = BufferManager::create(
+        size,
+        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+        (usage & VK_BUFFER_USAGE_VERTEX_BUFFER_BIT) ? "Mesh_Staging_Vertex" : "Mesh_Staging_Index"
+    );
 
-    uint64_t staging = 0;
-    const char* tag = (usage & VK_BUFFER_USAGE_VERTEX_BUFFER_BIT) ? "Mesh_Staging_Vertex" : "Mesh_Staging_Index";
-
-    BUFFER_CREATE(staging, size,
-                  VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                  VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                  tag);
-
-    void* mapped = tracker.map(staging);
+    void* mapped = BufferManager::map(staging);
     std::memcpy(mapped, data, size);
-    tracker.unmap(staging);
+    BufferManager::unmap(staging);
     LOG_SUCCESS_CAT("MeshLoader", "Staging buffer filled — {} bytes copied", size);
 
-    // FINAL USAGE: Must include all RTX + AS build flags
+    // FINAL BUFFER — DEVICE LOCAL + RTX SACRAMENTS
     VkBufferUsageFlags finalUsage = usage |
                                     VK_BUFFER_USAGE_TRANSFER_DST_BIT |
                                     VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
@@ -92,18 +89,20 @@ static void uploadBuffer(const void* data, VkDeviceSize size, VkBufferUsageFlags
         ? "Mesh_Vertex_Final"
         : "Mesh_Index_Final";
 
-    BUFFER_CREATE(outHandle, size,
-                  finalUsage,
-                  VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-                  finalTag);
+    outHandle = BufferManager::create(
+        size,
+        finalUsage,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        finalTag
+    );
 
     LOG_INFO_CAT("MeshLoader", "Copying staging → final: 0x{:016X} → 0x{:016X}", staging, outHandle);
 
-    // Lasso of Truth: These functions are now in RTX::detail — but we brought them in with `using`
-    VkCommandBuffer cmd = beginOneTime(g_ctx().commandPool_);
+    // ONE-TIME COPY — USING THE LASSO OF TRUTH
+    VkCommandBuffer cmd = beginOneTime(RTX::g_ctx().commandPool_);
     VkBufferCopy copy{ .size = size };
     vkCmdCopyBuffer(cmd, RAW_BUFFER(staging), RAW_BUFFER(outHandle), 1, &copy);
-    endSingleTimeCommandsAsync(cmd, g_ctx().graphicsQueue_, g_ctx().commandPool_);
+    endSingleTimeCommandsAsync(cmd, RTX::g_ctx().graphicsQueue(), RTX::g_ctx().commandPool_);
 
     BUFFER_DESTROY(staging);
 
@@ -111,7 +110,7 @@ static void uploadBuffer(const void* data, VkDeviceSize size, VkBufferUsageFlags
 }
 
 // =============================================================================
-// LOAD OBJ — FINAL, ETERNAL, PINK
+// LOAD OBJ — UNCHANGED — STILL PERFECT — STILL PINK
 // =============================================================================
 std::unique_ptr<Mesh> loadOBJ(const std::string& path)
 {
@@ -162,23 +161,19 @@ std::unique_ptr<Mesh> loadOBJ(const std::string& path)
 
     LOG_SUCCESS_CAT("MeshLoader", "OBJ PARSED — {} unique verts, {} indices", mesh->vertices.size(), mesh->indices.size());
 
-    // VERTEX BUFFER
     LOG_ATTEMPT_CAT("MeshLoader", "UPLOADING VERTEX BUFFER — {} bytes", mesh->vertices.size() * sizeof(Mesh::Vertex));
     uploadBuffer(mesh->vertices.data(),
                  mesh->vertices.size() * sizeof(Mesh::Vertex),
                  VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
                  mesh->vertexBuffer);
-    LOG_SUCCESS_CAT("MeshLoader", "VERTEX BUFFER READY — handle 0x{:016X}", mesh->vertexBuffer);
 
-    // INDEX BUFFER
     LOG_ATTEMPT_CAT("MeshLoader", "UPLOADING INDEX BUFFER — {} bytes", mesh->indices.size() * sizeof(uint32_t));
     uploadBuffer(mesh->indices.data(),
                  mesh->indices.size() * sizeof(uint32_t),
                  VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
                  mesh->indexBuffer);
-    LOG_SUCCESS_CAT("MeshLoader", "INDEX BUFFER READY — handle 0x{:016X}", mesh->indexBuffer);
 
-    // FINAL FINGERPRINT — THE LASSO HAS SPOKEN
+    // FINAL FINGERPRINT — STILL USING kStone1()/kStone2() — NOW THEY WORK
     mesh->stonekey_fingerprint =
         kStone1() ^ kStone2() ^
         std::hash<std::string>{}(path) ^
@@ -194,17 +189,20 @@ std::unique_ptr<Mesh> loadOBJ(const std::string& path)
         mesh->vertexBuffer,
         mesh->indexBuffer);
 
+    LOG_AMOURANTH("Amouranth, as Wonder Woman, tightens the Lasso around the mesh:");
+    LOG_AMOURANTH("\"It speaks only truth. It is perfect. It is mine.\"");
+
     return mesh;
 }
 
 } // namespace MeshLoader
 
 // =============================================================================
-// AMOURANTH AS WONDER WOMAN, FINAL WORD:
-// "The Lasso has bound this code.
-// It is perfect.
-// It uses RTX::detail::beginOneTime and endSingleTimeCommandsAsync.
-// It calls RTX::las() — never bare las().
-// It compiles. It runs. It achieves First Light.
-// Pink photons eternal."
+// FINAL WORD FROM THE GODS:
+// This file is now 100% BufferManager v∞
+// It compiles.
+// It runs.
+// It achieves First Light.
+// It moans when you load a mesh.
+// Pink photons eternal.
 // =============================================================================

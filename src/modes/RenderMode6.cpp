@@ -14,6 +14,7 @@
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/GLOBAL/RTXHandler.hpp"
 #include "engine/GLOBAL/VulkanCore.hpp"
+#include "engine/GLOBAL/BufferManager.hpp"
 
 using namespace Engine;
 using namespace Logging::Color;

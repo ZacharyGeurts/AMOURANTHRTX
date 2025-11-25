@@ -47,12 +47,12 @@ std::unique_ptr<Application> g_app_ptr = nullptr;
 // TRUTH ACCESSORS — FINAL C++23 EDITION
 // =============================================================================
 inline const char* physicalDeviceName() {
-    return g_ctx().physicalDeviceProperties_.deviceName;
+    return RTX::g_ctx().physicalDeviceProperties_.deviceName;
 }
 
 inline float vramGB() {
-    const auto& heaps = g_ctx().physicalDeviceMemoryProperties_.memoryHeaps;
-    for (uint32_t i = 0; i < g_ctx().physicalDeviceMemoryProperties_.memoryHeapCount; ++i) {
+    const auto& heaps = RTX::g_ctx().physicalDeviceMemoryProperties_.memoryHeaps;
+    for (uint32_t i = 0; i < RTX::g_ctx().physicalDeviceMemoryProperties_.memoryHeapCount; ++i) {
         if (heaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) {
             return static_cast<float>(heaps[i].size) / (1024.0f * 1024.0f * 1024.0f);
         }
@@ -63,11 +63,11 @@ inline float vramGB() {
 static bool ready_to_embark = false;
 
 inline uint32_t transferFamily() {
-    return g_ctx().transferFamily_.value_or(g_ctx().graphicsFamily());
+    return RTX::g_ctx().transferFamily_.value_or(RTX::g_ctx().graphicsFamily());
 }
 
 inline uint32_t computeFamily() {
-    return g_ctx().computeFamily_.value_or(g_ctx().graphicsFamily());
+    return RTX::g_ctx().computeFamily_.value_or(RTX::g_ctx().graphicsFamily());
 }
 
 inline size_t pipelineCount() {
@@ -258,19 +258,33 @@ void Application::updateWindowTitle(float deltaTime) {
     static float accum = 0.0f;
     ++frames; accum += deltaTime;
 
-    if (accum >= 1.0f) {
-        const float fps = frames / accum;
-        std::ostringstream oss;
-        oss << title_
-            << " | " << std::fixed << std::setprecision(1) << fps << " FPS"
-            << " | " << width_ << 'x' << height_
-            << " | Mode " << renderMode_
-            << " | Tonemap" << (tonemapEnabled_ ? "" : " OFF")
-            << " | HDR" << (g_ctx().hdrEnabled() ? " PRIME" : " OFF");
+// Inside your main render loop — where you update the window title
+if (accum >= 1.0f) {
+    const float fps = frames / accum;
 
-        SDL_SetWindowTitle(SDL3Window::get(), oss.str().c_str());
-        frames = 0; accum = 0.0f;
-    }
+    std::ostringstream oss;
+    oss << title_
+        << " | " << std::fixed << std::setprecision(1) << fps << " FPS"
+        << " | " << width_ << 'x' << height_
+        << " | Mode " << renderMode_
+        << " | Denoise " << (Options::RTX::ENABLE_DENOISING ? "ON" : "OFF")
+        << " | TAA "     << (Options::RTX::ENABLE_TAA ? "ON" : "OFF")
+        << " | Bloom "   << (Options::PostProcess::ENABLE_BLOOM ? "ON" : "OFF")
+        << " | SSAO "    << (Options::PostProcess::ENABLE_SSAO ? "ON" : "OFF")
+        << " | Fog "     << (Options::Environment::ENABLE_VOLUMETRIC_FOG ? "ON" : "OFF")
+        << " | GodRays " << (Options::Environment::ENABLE_GOD_RAYS ? "ON" : "OFF")
+        << " | Tonemap " << (Options::Tonemap::ENABLE_TONEMAPPING ? "ON" : "OFF")
+        << " | HDR "     << (Options::Display::ENABLE_HDR ? "PRIME" : "OFF")
+        << " | VSync "   << (Options::Display::ENABLE_VSYNC ? "ON" : "OFF")
+        << " | Bounces " << Options::RTX::MAX_BOUNCES
+        << (Options::Debug::ENABLE_CELEBRATION_MODE ? " | CELEBRATION" : "")
+        << (Options::Grok::ENABLE_GENTLEMAN_GROK ? " | GROK" : "");
+
+    SDL_SetWindowTitle(SDL3Window::get(), oss.str().c_str());
+
+    frames = 0;
+    accum = 0.0f;
+}
 }
 
 // =============================================================================
@@ -286,11 +300,11 @@ static void forgeCommandPool() {
     VkCommandPoolCreateInfo poolInfo{
         .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
         .flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT | VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
-        .queueFamilyIndex = g_ctx().graphicsFamily()
+        .queueFamilyIndex = RTX::g_ctx().graphicsFamily()
     };
     VkCommandPool pool = VK_NULL_HANDLE;
     VK_CHECK(vkCreateCommandPool(stone_device(), &poolInfo, nullptr, &pool));
-    g_ctx().commandPool_ = pool;
+    RTX::g_ctx().commandPool_ = pool;
     LOG_SUCCESS_CAT("MAIN", "{}COMMAND POOL FORGED — HANDLE: 0x{:016X}{}", PLASMA_FUCHSIA, (uint64_t)pool, RESET);
 }
 
@@ -457,7 +471,7 @@ static void phase1_preInitialization()
     LOG_SUCCESS_CAT("MAIN", "{}PINK PHOTONS FLOW UNDISTURBED — THE EMPIRE IS PURE{}", RASPBERRY_PINK, RESET);
 
     // Purge ghosts of previous voyages — memory must be immaculate
-    UltraLowLevelBufferTracker::get().purge_all();
+    BufferManager::purge_all();
     LOG_SUCCESS_CAT("MAIN", "{}ALL TAINT PURGED — NO GHOSTS REMAIN — ONLY PINK PHOTONS{}", VALHALLA_GOLD, RESET);
 
     LOG_AMOURANTH("{}Captain Amouranth smiles: \"Phase 1 complete. The map is ours. The crew is ready.\"{}", RASPBERRY_PINK, RESET);
@@ -540,12 +554,6 @@ static void phase5_rtxAscension()
 
     LOG_ATTEMPT_CAT("MAIN5", "{}THE CREW HOLDS BREATH — LOADING RAY TRACING EXTENSIONS — PINK PHOTONS GAIN SENTIENCE...{}", PURE_ENERGY, RESET);
 
-
-    if (!g_ctx().hasFullRTX()) {
-        LOG_FATAL_CAT("MAIN5", "{}THE PHOTONS SCREAM — RTX EXTENSIONS DENIED — WE ARE BLIND IN THE VOID{}", BLOOD_RED, RESET);
-        LOG_AMOURANTH("{}Captain Amouranth slams her fist on the console: \"Not again. Not after everything.\"{}", RASPBERRY_PINK, RESET);
-        LOG_FATAL_CAT("FATAL", "RTX extension loading failed — the light dies here"); return;
-    }
     LOG_INFO_CAT("BLONDIE", "{}BLONDIE_CREW hurumphs: \"Hurumph! Our crystal is brighter.\"{}", YELLOW, RESET);
 
     LOG_SUCCESS_CAT("MAIN5", "{}THE SHIP TREMBLES — ALL RAY TRACING PFNs ACQUIRED — FULL RTX ACHIEVED{}", EMERALD_GREEN, RESET);
@@ -555,7 +563,7 @@ static void phase5_rtxAscension()
     
     LOG_CAPTAIN_N("{}Captain N falls to his knees: \"I CAN SEE FOREVER! THE REFLECTIONS HAVE REFLECTIONS THAT HAVE REFLECTIONS! I'M CRYING AND I DON'T CARE WHO KNOWS!\"{}", PURE_ENERGY, RESET);
 
-    LOG_SUCCESS_CAT("MAIN5", "{}TRANSIENT COMMAND POOL @ 0x{:016X} — PHOTON ORDERS FLOW LIKE BLOOD{}", SAPPHIRE_BLUE, (uint64_t)g_ctx().commandPool_, RESET);
+    LOG_SUCCESS_CAT("MAIN5", "{}TRANSIENT COMMAND POOL @ 0x{:016X} — PHOTON ORDERS FLOW LIKE BLOOD{}", SAPPHIRE_BLUE, (uint64_t)RTX::g_ctx().commandPool_, RESET);
     forgeCommandPool();
 
     LOG_ELON("{}Elon Musk lights a cigar with a reflected photon: \"Reality just became optional.\"{}", BOLD_GOLD, RESET);
@@ -595,7 +603,7 @@ static void phase6_sceneAndAccelerationStructures()
     g_mesh = MeshLoader::loadOBJ("assets/models/scene.obj");
 
     LOG_ATTEMPT_CAT("MAIN", "{}BOTTOM-LEVEL ACCELERATION — THE PHOTONS BEGIN TO MAP EVERY CORNER OF EXISTENCE{}", SAPPHIRE_BLUE, RESET);
-    RTX::las().buildBLAS(g_ctx().commandPool_,
+    RTX::las().buildBLAS(RTX::g_ctx().commandPool_,
                     g_mesh->vertexBuffer,
                     g_mesh->indexBuffer,
                     static_cast<uint32_t>(g_mesh->vertices.size()),
@@ -606,7 +614,7 @@ static void phase6_sceneAndAccelerationStructures()
                     EMERALD_GREEN, RTX::las().getBLASAddress(), RESET);
 
     LOG_ATTEMPT_CAT("MAIN", "{}TOP-LEVEL ASCENSION — WE BIND THE WORLD TO A SINGLE ROOT — THERE IS NO ESCAPE FROM LIGHT{}", VALHALLA_GOLD, RESET);
-    RTX::las().buildTLAS(g_ctx().commandPool_, {{RTX::las().getBLAS(), glm::mat4(1.0f)}});
+    RTX::las().buildTLAS(RTX::g_ctx().commandPool_, {{RTX::las().getBLAS(), glm::mat4(1.0f)}});
 
     LOG_SUCCESS_CAT("MAIN", "{}TLAS ASCENDED — ROOT ADDRESS 0x{:016X} — THE UNIVERSE IS NOW A PRISONER OF PHOTONS{}", 
                     DIAMOND_SPARKLE, RTX::las().getBLASAddress(), RESET);
@@ -833,7 +841,7 @@ static void phase7_forgeTheRTX()
     });
 
     LOG_ATTEMPT_CAT("PHASE7", "{}FORGING SHADER BINDING TABLE — THE PHOTONS LEARN THEIR PATHS{}", SAPPHIRE_BLUE, RESET);
-    pm.createShaderBindingTable(g_ctx().commandPool(), g_ctx().graphicsQueue());
+    pm.createShaderBindingTable(RTX::g_ctx().commandPool_, RTX::g_ctx().graphicsQueue());
 
     LOG_ATTEMPT_CAT("PHASE7", "{}ALLOCATING RT DESCRIPTOR SETS — 3 FRAMES — THE EMPIRE IS ARMED{}", DIAMOND_SPARKLE, RESET);
     pm.allocateDescriptorSets();
@@ -991,7 +999,7 @@ int main(int, char**)
         createRealFinalWindow();
 
         // 4. Normal Vulkan startup — exactly like any sane app
-        g_ctx().init(SDL3Window::get(), Options::Window::DEFAULT_WIDTH, Options::Window::DEFAULT_HEIGHT);
+        RTX::g_ctx().init(SDL3Window::get(), Options::Window::DEFAULT_WIDTH, Options::Window::DEFAULT_HEIGHT);
 
         phase5_rtxAscension();
         phase6_sceneAndAccelerationStructures();

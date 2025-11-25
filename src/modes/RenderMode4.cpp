@@ -8,6 +8,7 @@
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/GLOBAL/camera.hpp"     // CAM macro
 #include "engine/GLOBAL/StoneKey.hpp"   // stone_device()
+#include "engine/GLOBAL/BufferManager.hpp"
 
 using namespace Engine;
 using namespace Logging::Color;

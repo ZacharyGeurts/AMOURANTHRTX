@@ -15,6 +15,7 @@
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/GLOBAL/RTXHandler.hpp"
 #include "engine/GLOBAL/VulkanCore.hpp"
+#include "engine/GLOBAL/BufferManager.hpp"
 #include <cmath>
 
 using namespace Engine;
