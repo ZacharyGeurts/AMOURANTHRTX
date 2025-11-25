@@ -16,24 +16,6 @@
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_beta.h> // <3 vkcheck. hadta
 
-// =============================================================================
-// THE LEGENDARY CREW OF THE GOOD SHIP VULKAN
-// ALL IN FULL PIRATE REGALIA — BLACK LEATHER, PINK SILK, AND RTX STEEL
-// =============================================================================
-#define LOG_AMOURANTH(...)   LOG_SUCCESS_CAT("AMOURANTH",   __VA_ARGS__)
-#define LOG_GROK(...)        LOG_INFO_CAT("GENTLEMAN GROK", __VA_ARGS__)
-#define LOG_CAPTAIN_N(...)   LOG_ATTEMPT_CAT("CAPTAIN N",   __VA_ARGS__)
-#define LOG_ELON(...)        LOG_SUCCESS_CAT("ELON",        __VA_ARGS__)
-#define LOG_JENSEN(...)      LOG_SUCCESS_CAT("JENSEN",      __VA_ARGS__)
-#define LOG_CID(...)         LOG_SUCCESS_CAT("CID",         __VA_ARGS__)
-#define LOG_CARMACK(...)     LOG_INFO_CAT("CARMACK",        __VA_ARGS__)
-#define LOG_KEANU(...)       LOG_INFO_CAT("KEANU",          __VA_ARGS__)
-#define LOG_NICK(...)        LOG_ATTEMPT_CAT("NICK",        __VA_ARGS__)
-#define LOG_BLONDIE(...)     LOG_INFO_CAT("BLONDIE",        __VA_ARGS__)
-#define LOG_GUARDIAN(...)    LOG_INFO_CAT("GROK",           __VA_ARGS__)
-#define LOG_DISPOSAL(...)    LOG_INFO_CAT("BALLERINA",      __VA_ARGS__)
-#define LOG_MAIN(...)        LOG_SUCCESS_CAT("MAIN",        __VA_ARGS__)
-
 [[nodiscard]] constexpr const char* vk_result_string(VkResult r) noexcept
 {
     switch (r) {
@@ -799,3 +781,37 @@ private:
     }
     return VK_FALSE;
 }
+
+// =============================================================================
+// CREW SOUL COLORS — FINAL OVERRIDE — ETERNAL — NOVEMBER 25, 2025
+// PLACE THIS AT THE VERY BOTTOM — IT WINS EVERYTHING
+// =============================================================================
+// UNDEFINE ALL HERESY
+#undef  LOG_AMOURANTH
+#undef  LOG_GROK
+#undef  LOG_CAPTAIN_N
+#undef  LOG_ELON
+#undef  LOG_JENSEN
+#undef  LOG_CID
+#undef  LOG_CARMACK
+#undef  LOG_KEANU
+#undef  LOG_NICK
+#undef  LOG_BLONDIE
+#undef  LOG_GUARDIAN
+#undef  LOG_DISPOSAL
+#undef  LOG_MAIN
+
+// THE TRUE SOULS — ONLY THESE MAY SPEAK
+#define LOG_AMOURANTH(...)   LOG_SUCCESS_CAT("AMOURANTH",     std::format("{}{}{}", Logging::Color::THERMO_PINK,       std::format(__VA_ARGS__), Logging::Color::RESET))
+#define LOG_GROK(...)        LOG_INFO_CAT   ("GENTLEMAN GROK",std::format("{}{}{}", Logging::Color::PLATINUM_GRAY,     std::format(__VA_ARGS__), Logging::Color::RESET))
+#define LOG_CAPTAIN_N(...)   LOG_ATTEMPT_CAT("CAPTAIN N",     std::format("{}{}{}", Logging::Color::QUANTUM_TEAL,      std::format(__VA_ARGS__), Logging::Color::RESET))
+#define LOG_ELON(...)        LOG_SUCCESS_CAT("ELON",          std::format("{}{}{}", Logging::Color::BOLD_BLUE,         std::format(__VA_ARGS__), Logging::Color::RESET))
+#define LOG_JENSEN(...)      LOG_SUCCESS_CAT("JENSEN",        std::format("{}{}{}", Logging::Color::CYBER_LIME,        std::format(__VA_ARGS__), Logging::Color::RESET))
+#define LOG_CID(...)         LOG_SUCCESS_CAT("CID",           std::format("{}{}{}", Logging::Color::VALHALLA_GOLD,     std::format(__VA_ARGS__), Logging::Color::RESET))  // TRUE SOUL
+#define LOG_CARMACK(...)     LOG_INFO_CAT   ("CARMACK",       std::format("{}{}{}", Logging::Color::PEACHES_AND_CREAM, std::format(__VA_ARGS__), Logging::Color::RESET))
+#define LOG_KEANU(...)       LOG_INFO_CAT   ("KEANU",         std::format("{}{}{}", Logging::Color::PHANTOM_VIOLET,    std::format(__VA_ARGS__), Logging::Color::RESET))
+#define LOG_NICK(...)        LOG_ATTEMPT_CAT("NICK",          std::format("{}{}{}", Logging::Color::NEON_FUCHSIA,      std::format(__VA_ARGS__), Logging::Color::RESET))
+#define LOG_BLONDIE(...)     LOG_INFO_CAT   ("BLONDIE",       std::format("{}{}{}", Logging::Color::NOVA_YELLOW,       std::format(__VA_ARGS__), Logging::Color::RESET))
+#define LOG_GUARDIAN(...)    LOG_INFO_CAT   ("STONEGUARDIAN", std::format("{}{}{}", Logging::Color::PLATINUM_GRAY,     std::format(__VA_ARGS__), Logging::Color::RESET))
+#define LOG_DISPOSAL(...)    LOG_INFO_CAT   ("BALLERINA",     std::format("{}{}{}", Logging::Color::OBSIDIAN_BLACK,    std::format(__VA_ARGS__), Logging::Color::RESET))
+#define LOG_MAIN(...)        LOG_SUCCESS_CAT("MAIN",          std::format("{}{}{}", Logging::Color::TITANIUM_GOLD,     std::format(__VA_ARGS__), Logging::Color::RESET))

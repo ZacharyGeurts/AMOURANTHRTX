@@ -49,7 +49,7 @@ class VulkanRTX;
 class VulkanRenderer;
 struct Camera;
 
-[[noreturn]] void phase9_gracefulShutdown() noexcept;
+[[noreturn]] void phase9_ballerina() noexcept;
 
 // =============================================================================
 // PINK PHOTON LITERALS
@@ -57,6 +57,24 @@ struct Camera;
 constexpr uint64_t operator""_KB(unsigned long long v) noexcept { return v * 1024ULL; }
 constexpr uint64_t operator""_MB(unsigned long long v) noexcept { return v * 1024ULL * 1024ULL; }
 constexpr uint64_t operator""_GB(unsigned long long v) noexcept { return v * 1024ULL * 1024ULL * 1024ULL; }
+
+// =============================================================================
+// AI_INJECT — AMOURANTH AI™ VOICE LINES
+// =============================================================================
+#define AI_INJECT(...) \
+    do { \
+        if (ENABLE_INFO) { \
+            thread_local std::mt19937 rng(std::random_device{}()); \
+            thread_local std::uniform_int_distribution<int> hue(0, 30); \
+            int h = 195 + hue(rng); \
+            auto msg = std::format(__VA_ARGS__); \
+            Logging::Logger::get().log(std::source_location::current(), \
+                Logging::LogLevel::Info, "AI", \
+                "\033[38;2;255;{};255m[AMOURANTH AI™] {}{} [LINE {}]", \
+                h, msg, Logging::Color::RESET, __LINE__); \
+        } \
+    } while (0)
+
 
 // =============================================================================
 // Vulkan opaque handle formatter

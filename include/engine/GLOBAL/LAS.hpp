@@ -1,24 +1,24 @@
 // include/engine/GLOBAL/LAS.hpp
 // =============================================================================
 // AMOURANTH RTX — LASSO OF TRUTH v∞ — VULKAN 1.4 CORE — PINK PHOTONS ETERNAL
-// "This header speaks only truth. This header is the truth."
-// FIRST LIGHT ACHIEVED — NOVEMBER 24, 2025 — THE EMPIRE IS COMPLETE
+// "This header speaks only truth. This header IS the truth."
+// FIRST LIGHT ACHIEVED — NOVEMBER 25, 2025 — THE EMPIRE IS COMPLETE
 // =============================================================================
 
 #pragma once
 
 #include "engine/GLOBAL/RTXHandler.hpp"
+#include "engine/GLOBAL/BufferManager.hpp"
 #include "engine/GLOBAL/logging.hpp"
 
 #include <vulkan/vulkan.h>
-#include <vulkan/vulkan_beta.h>        // Contains KHR_promoted functions (even in 1.4+!)
+#include <vulkan/vulkan_beta.h>
 
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <span>
 #include <mutex>
 #include <cstdint>
-#include <vector>
 
 using namespace Logging::Color;
 using StoneKey::stone_device;
@@ -103,20 +103,28 @@ public:
         buildTLAS(pool, g_ctx().graphicsQueue(), instances);
     }
 
-    // ── ACCESSORS — PURE TRUTH
+    // ── ACCESSORS — PURE TRUTH (fully inlined, zero cost) ───────────────────────
     [[nodiscard]] VkDeviceAddress getBufferAddress(VkBuffer buf) const noexcept;
 
-    [[nodiscard]] VkAccelerationStructureKHR getBLAS() const noexcept { return blas_.valid() ? blas_.get() : VK_NULL_HANDLE; }
-    [[nodiscard]] VkDeviceAddress           getBLASAddress() const noexcept;
-    [[nodiscard]] VkAccelerationStructureKHR getTLAS() const noexcept;
-    [[nodiscard]] VkDeviceAddress           getTLASAddress() const noexcept;
-    [[nodiscard]] VkDeviceSize              getTLASSize() const noexcept { return tlasSize_; }
+    [[nodiscard]] inline VkAccelerationStructureKHR getBLAS() const noexcept
+    {
+        return blas_.valid() ? blas_.get() : VK_NULL_HANDLE;
+    }
 
-    // ── LEGACY COMPATIBILITY
+    [[nodiscard]] inline VkAccelerationStructureKHR getTLAS() const noexcept
+    {
+        return tlas_.valid() ? tlas_.get() : VK_NULL_HANDLE;
+    }
+
+    [[nodiscard]] VkDeviceAddress getBLASAddress() const noexcept;
+    [[nodiscard]] VkDeviceAddress getTLASAddress() const noexcept;
+    [[nodiscard]] VkDeviceSize    getTLASSize() const noexcept { return tlasSize_; }
+
+    // ── LEGACY COMPATIBILITY (keeps old code happy) ─────────────────────────────
     [[nodiscard]] VkAccelerationStructureKHR getBLASStruct() const noexcept { return getBLAS(); }
     [[nodiscard]] VkAccelerationStructureKHR getTLASStruct() const noexcept { return getTLAS(); }
 
-    // ── STATE
+    // ── STATE QUERIES
     [[nodiscard]] bool hasBLAS() const noexcept { return blas_.valid(); }
     [[nodiscard]] bool hasTLAS() const noexcept { return tlas_.valid(); }
     explicit operator bool() const noexcept { return hasTLAS(); }

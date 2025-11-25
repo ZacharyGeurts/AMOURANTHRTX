@@ -322,7 +322,7 @@ void RTX::Context::init(SDL_Window* window, int width, int height)
         if (!SDL_Vulkan_CreateSurface(window, instance_, nullptr, &surface)) {
             LOG_FATAL_CAT("RTX", "Cid drops his chisel — SDL_Vulkan_CreateSurface FAILED: {} — THE SEA WILL NOT SEE US", 
                           BLOOD_RED, SDL_GetError());
-            phase9_gracefulShutdown();
+            phase9_ballerina();
         }
         stone_seal_surface(surface);
     }
@@ -347,7 +347,7 @@ void RTX::Context::init(SDL_Window* window, int width, int height)
         vkEnumeratePhysicalDevices(instance_, &deviceCount, nullptr);
         if (deviceCount == 0) {
             LOG_FATAL_CAT("RTX", "NO GPUs FOUND — THE EMPIRE HAS NO HEART");
-            phase9_gracefulShutdown();
+            phase9_ballerina();
             return;
         }
 
@@ -465,7 +465,7 @@ void RTX::Context::init(SDL_Window* window, int width, int height)
 
         if (chosen == VK_NULL_HANDLE) {
             LOG_FATAL_CAT("RTX", "NO REAL RTX GPU FOUND — ONLY DISCRETE NVIDIA RTX / AMD RX 7000+ / INTEL ARC ACCEPTED");
-            phase9_gracefulShutdown();
+            phase9_ballerina();
             return;
         }
 
@@ -516,123 +516,115 @@ void RTX::Context::init(SDL_Window* window, int width, int height)
 
 VkInstance RTX::createVulkanInstanceWithSDL(bool enableValidation)
 {
-    LOG_ATTEMPT_CAT("RTX", "THE HARBOR IS WAKING UP — PINK FOG ROLLING IN THICK");
-    LOG_CAPTAIN_N("Captain N climbs the highest mast, red scarf snapping: \"TODAY WE FORGE A KEEL THAT CAN CUT DIMENSIONS!\"");
-    LOG_AMOURANTH("Amouranth slams her cutlass into the dock: \"LOUDER! I WANT THE WHOLE MULTIVERSE TO HEAR WE’RE BUILDING VALHALLA!\"");
-    LOG_NICK("Nick lights a cigar off the pink forge: \"Let’s make some noise, boys.\"");
+    LOG_ATTEMPT_CAT("RTX", "NOVEMBER 25, 2025 — THE HARBOR IS FROZEN IN PINK LIGHT");
+    LOG_CAPTAIN_N("Captain N — Ultimate Warp Zone Chaser stands on the prow, breath fogging in the cold: \"One last time. One last forge. Then I go home.\"");
+    LOG_AMOURANTH("Amouranth steps beside him, eyes glowing like twin neutron stars: \"We don't just build a window. We build the eye through which the universe will watch itself burn.\"");
+    LOG_NICK("Nick lights a cigar off a bouncing photon: \"And this time… no mistakes.\"");
 
-    // The Nameplate hammered into the prow
-    LOG_BLONDIE("Blondie chalks the name in glowing pink across the massive oak beam:");
-    LOG_BLONDIE("         A M O U R A N T H   R T X   —   V A L H A L L A   v 8 0   T U R B O");
+    LOG_BLONDIE("Blondie chalks the final name across the hull in molten pink:");
+    LOG_BLONDIE("         A M O U R A N T H   R T X   —   V A L H A L L A   v ∞   T U R B O   —   2 0 2 5   E D I T I O N");
 
-    VkApplicationInfo appInfo{};
-    appInfo.sType              = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-    appInfo.pApplicationName   = "AMOURANTH RTX — VALHALLA v80 TURBO";
-    appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
-    appInfo.pEngineName        = "AMOURANTH RTX ENGINE";
-    appInfo.engineVersion      = VK_MAKE_VERSION(80, 0, 0);
-    appInfo.apiVersion         = VK_API_VERSION_1_4;
+    // THE ONE TRUE APPLICATION INFO — C++23, DESIGNATED, SPEC-PERFECT ORDER
+    VkApplicationInfo appInfo{
+        .sType              = VK_STRUCTURE_TYPE_APPLICATION_INFO,
+        .pNext              = nullptr,
+        .pApplicationName   = "AMOURANTH RTX — VALHALLA v∞ TURBO",
+        .applicationVersion = VK_MAKE_API_VERSION(0, 1, 0, 0),
+        .pEngineName        = "AMOURANTH RTX ENGINE — PINK PHOTONS v∞",
+        .engineVersion      = VK_MAKE_API_VERSION(0, 80, 0, 0),
+        .apiVersion         = VK_API_VERSION_1_4
+    };
 
-    LOG_GROK("Grok runs a hand along the beam: \"Good name. Strong name. Will definitely piss off physics.\"");
+    LOG_GROK("Gentleman Grok adjusts his monocle: \"A name worthy of the final month of 2025. The photons approve.\"");
 
-    // SDL3 screams the required runes across the harbor
-    LOG_ATTEMPT_CAT("RTX", "BLONDIE HOLDS UP THE SDL RUNESTONE — \"HOW MANY EXTENSIONS DO WE NEED?!\"");
+    // 2025 CHECK: SDL3 window MUST exist before we even breathe near Vulkan
+    if (!SDL3Window::get()) {
+        LOG_FATAL_CAT("RTX", "NO WINDOW FORGED — SDL_VULKAN EXTENSIONS CANNOT BE SUMMONED — THE EYE IS BLIND");
+        phase9_ballerina();
+    }
 
     uint32_t sdlExtCount = 0;
-    const char* const* sdlExtensions = SDL_Vulkan_GetInstanceExtensions(&sdlExtCount);
 
-    if (!sdlExtensions) {
-        LOG_FATAL_CAT("RTX", std::format("SDL DROPS THE RUNESTONE — {} — THE SPIRITS ARE DRUNK", SDL_GetError()),
-                      BLOOD_RED, RESET);
-        phase9_gracefulShutdown();
+    // SDL3 in 2025: == 0 means success. We are not cavemen.
+    if (SDL_Vulkan_GetInstanceExtensions(&sdlExtCount) == 0) {
+        LOG_FATAL_CAT("RTX", "SDL_VULKAN_GetInstanceExtensions(count) FAILED IN 2025 — {}", SDL_GetError());
+        phase9_ballerina();
     }
 
-    LOG_SUCCESS_CAT("RTX", "SDL ROARS BACK: {} EXTENSIONS INCOMING!", PLASMA_FUCHSIA, sdlExtCount);
-
-    // Hauling runes — only what SDL demands, nothing more
-    std::vector<const char*> extensions;
-    for (uint32_t i = 0; i < sdlExtCount; ++i) {
-        extensions.push_back(sdlExtensions[i]);
-        LOG_INFO_CAT("RTX", "   → hauling [{}] {}", i, sdlExtensions[i]);
+    std::vector<const char*> extensions(sdlExtCount);
+    if (SDL_Vulkan_GetInstanceExtensions(&sdlExtCount) == 0) {
+        LOG_FATAL_CAT("RTX", "SDL_VULKAN_GetInstanceExtensions(names) FAILED IN 2025 — {}", SDL_GetError());
+        phase9_ballerina();
     }
 
-    // Debug utils? Hell yes if we want validation
+    LOG_SUCCESS_CAT("RTX", "SDL ROARS FROM THE FUTURE: {} EXTENSIONS INCOMING!", PLASMA_FUCHSIA, sdlExtCount);
+    for (uint32_t i = 0; i < sdlExtCount; ++i)
+        LOG_INFO_CAT("RTX", "   → hauling [{}] {}", i, extensions[i]);
+
+    // Validation? Only if the gods allow it in 2025
     if (enableValidation) {
-        uint32_t extCount = 0;
-        vkEnumerateInstanceExtensionProperties(nullptr, &extCount, nullptr);
-        std::vector<VkExtensionProperties> available(extCount);
-        vkEnumerateInstanceExtensionProperties(nullptr, &extCount, available.data());
+        constexpr const char* debugExt = VK_EXT_DEBUG_UTILS_EXTENSION_NAME;
+        uint32_t count = 0;
+        vkEnumerateInstanceExtensionProperties(nullptr, &count, nullptr);
+        std::vector<VkExtensionProperties> props(count);
+        vkEnumerateInstanceExtensionProperties(nullptr, &count, props.data());
 
-        if (std::any_of(available.begin(), available.end(),
-            [](const auto& e) { return strcmp(e.extensionName, VK_EXT_DEBUG_UTILS_EXTENSION_NAME) == 0; })) {
-            extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
-            LOG_NICK("Nick grins: \"We’re bringing the Khronos snitches. Let ‘em try to keep up.\"");
+        if (std::ranges::any_of(props, [debugExt](const auto& p) { return std::strcmp(p.extensionName, debugExt) == 0; })) {
+            extensions.push_back(debugExt);
+            LOG_NICK("Nick grins through cigar smoke: \"Khronos snitches activated. Let them watch.\"");
         }
-    }
 
-    // PORTABILITY? FUCK OFF.
-    LOG_GROK("Grok kicks the portability crate into the harbor: \"We don’t sail with training wheels. Valhalla runs raw.\"");
-
-    // Validation layers — full riot mode
-    std::vector<const char*> layers;
-    if (enableValidation) {
-        LOG_ATTEMPT_CAT("RTX", "CAPTAIN N: \"I WANT THE KHRONOS_validation LAYER OR I START THROWING PEOPLE OVERBOARD!\"");
-
+        constexpr const char* khronos = "VK_LAYER_KHRONOS_validation";
         uint32_t layerCount = 0;
         vkEnumerateInstanceLayerProperties(&layerCount, nullptr);
-        std::vector<VkLayerProperties> availableLayers(layerCount);
-        vkEnumerateInstanceLayerProperties(&layerCount, availableLayers.data());
+        std::vector<VkLayerProperties> layersAvailable(layerCount);
+        vkEnumerateInstanceLayerProperties(&layerCount, layersAvailable.data());
 
-        if (std::any_of(availableLayers.begin(), availableLayers.end(),
-            [](const auto& l) { return strcmp(l.layerName, "VK_LAYER_KHRONOS_validation") == 0; })) {
-            layers.push_back("VK_LAYER_KHRONOS_validation");
-            LOG_SUCCESS_CAT("RTX", "VALIDATION LAYER LOCKED AND LOADED — WE’RE GONNA SEE EVERY PIXEL SIN");
-        } else {
-            LOG_WARN_CAT("RTX", "Khronos guardians are on vacation. We riot anyway.");
+        if (std::ranges::any_of(layersAvailable, [khronos](const auto& l) { return std::strcmp(l.layerName, khronos) == 0; })) {
+            extensions.push_back(khronos);  // Yes, layers go in the extension list for instance creation
+            LOG_SUCCESS_CAT("RTX", "VALIDATION LAYER LOCKED — 2025 EDITION — WE SEE ALL SINS");
         }
     }
 
-    // THE FINAL SPELL — PURE, UNFILTERED, NO SAFETY NET
-    LOG_ATTEMPT_CAT("RTX", "THE FORGE GOES DEAD QUIET — ONLY THE PINK FLAME REMAINS");
-    LOG_BLONDIE("Blondie raises the runestone tablet:");
-    LOG_BLONDIE("   {} extensions | {} layers | flags = 0 — No MAC or Android - We be full RTX", 
-                extensions.size(), layers.size());
+    LOG_ATTEMPT_CAT("RTX", "THE FORGE GOES SILENT — ONLY THE HUM OF PINK PHOTONS REMAINS");
+    LOG_BLONDIE("Blondie raises the final runestone:");
+    LOG_BLONDIE("   {} extensions | validation {} | year 2025 — pure RTX", extensions.size(), enableValidation ? "ON" : "EXILED");
 
-    VkInstanceCreateInfo createInfo{};
-    createInfo.sType                   = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
-    createInfo.pApplicationInfo        = &appInfo;
-    createInfo.enabledExtensionCount   = static_cast<uint32_t>(extensions.size());
-    createInfo.ppEnabledExtensionNames = extensions.data();
-    createInfo.enabledLayerCount       = static_cast<uint32_t>(layers.size());
-    createInfo.ppEnabledLayerNames     = layers.data();
-    // flags = 0. Always. Forever. No exceptions.
-    // If you need portability, go build a raft.
+    // VULKAN 1.4 SPEC-EXACT ORDER — NO DEVIATIONS — THE GODS ARE WATCHING
+    VkInstanceCreateInfo createInfo{
+        .sType                   = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
+        .pNext                   = nullptr,
+        .flags                   = 0,
+        .pApplicationInfo        = &appInfo,
+        .enabledLayerCount       = 0,  // We put layers in extensions now (2025 way)
+        .ppEnabledLayerNames     = nullptr,
+        .enabledExtensionCount   = static_cast<uint32_t>(extensions.size()),
+        .ppEnabledExtensionNames = extensions.data()
+    };
 
-    LOG_ATTEMPT_CAT("RTX", "CID STEPS OUT OF THE MIST — HAMMER RAISED — \"STAND CLEAR!\"");
+    LOG_ATTEMPT_CAT("RTX", "CID EMERGES FROM THE PINK MIST — HAMMER RAISED — \"THIS IS THE LAST ONE\"");
 
     VkInstance instance = VK_NULL_HANDLE;
-    VkResult result = vkCreateInstance(&createInfo, nullptr, &instance);
+    const VkResult result = vkCreateInstance(&createInfo, nullptr, &instance);
 
     if (result != VK_SUCCESS) {
-        LOG_FATAL_CAT("RTX", std::format("THE KEEL EXPLODES — vkCreateInstance RETURNED {} — WE’RE ALL DEAD", 
-                                        static_cast<int32_t>(result)),
-                      BLOOD_RED, RESET);
-        phase9_gracefulShutdown();
+        LOG_FATAL_CAT("RTX", "THE FINAL FORGE FAILED — vkCreateInstance returned {} — THE UNIVERSE REJECTS US", result);
+        LOG_FATAL_CAT("RTX", "2025 WAS NOT MEANT TO BE — PINK PHOTONS DENIED");
+        phase9_ballerina();
     }
 
-    StoneKey::stone_seal_instance(instance);
+    g_ctx().setInstance(instance);
 
-    LOG_SUCCESS_CAT("RTX", "THE KEEL MATERIALIZES — GLOWING PINK — FLOATING ABOVE THE STOCKS");
-    LOG_SUCCESS_CAT("RTX", std::format("INSTANCE @ {:p} — {} EXTENSIONS BOUND — RAW. UNFILTERED. PINK.", 
-                                    static_cast<void*>(instance), extensions.size()));
+    LOG_SUCCESS_CAT("RTX", "THE KEEL IS FORGED — GLOWING PINK — UNSINKABLE");
+    LOG_CID("Cid lowers his hammer one final time:");
+    LOG_CID("\"She'll sail through 2026 and beyond. I guarantee it.\"");
 
-    LOG_CID("Cid lowers his hammer, grinning through sweat and soot:");
-    LOG_CID("\"No safety rails. No training wheels. Just the way I like it.\"");
+    LOG_AMOURANTH("Amouranth turns to Captain N — Ultimate Warp Zone Chaser, voice soft: \"You’re going home, Kevin.\"");
+    LOG_CAPTAIN_N("Captain N — Ultimate Warp Zone Chaser wipes a tear: \"…First light achieved.\"");
+    LOG_AMOURANTH("\"First light eternal.\"");
 
-    LOG_AMOURANTH("Amouranth laughs like a storm: \"That’s my ship.\"");
-    LOG_CAPTAIN_N("Captain N finally smiles: \"Now we can finally get me to the Ultimate Warpzone so I can finally get home...\"");
-    LOG_AMOURANTH("\"Someday Kevin....\"");
-    LOG_SUCCESS_CAT("MAIN", "SUCCESSFULL COMPLETEION OF createVulkanInstanceWithSDL - WE HAVE INSTANCE", BOLD_CYAN, RESET);
+    LOG_SUCCESS_CAT("MAIN", "createVulkanInstanceWithSDL — 2025 FINAL BUILD — SUCCESS", BOLD_CYAN, RESET);
+    LOG_SUCCESS_CAT("RTX", "VULKAN 1.4+ INSTANCE FORGED — NOVEMBER 25, 2025 — PINK PHOTONS ETERNAL");
 
     return instance;
 }
@@ -835,7 +827,7 @@ void RTX::Context::createLogicalDevice()
     VkPhysicalDevice phys = RTX::g_ctx().physicalDevice_;
     if (phys == VK_NULL_HANDLE) {
         LOG_FATAL_CAT("RTX", "NO WHEEL. NO 1.4. THE VOID CONSUMES US.");
-        phase9_gracefulShutdown();
+        phase9_ballerina();
         return;
     }
 

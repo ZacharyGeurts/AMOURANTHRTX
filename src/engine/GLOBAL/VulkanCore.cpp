@@ -389,75 +389,76 @@ void VulkanRTX::setRayTracingPipeline(VkPipeline p, VkPipelineLayout l) noexcept
 
 void VulkanRTX::buildAccelerationStructures()
 {
-    LOG_INFO_CAT("RTX", "{}Building acceleration structures — LAS awakening{}", PLASMA_FUCHSIA, RESET);
+    LOG_ELON("Building acceleration structures — LAS awakening... the empire stirs");
 
-    // === FORCE STAGING POOL CREATION FIRST (CRITICAL FIX) ===
+    // === FORCE 1GB PERSISTENT STAGING POOL (CRITICAL) ===
     {
         std::lock_guard<std::mutex> lock(g_stagingMutex);
         if (!g_stagingPool) {
-            LOG_INFO_CAT("RTX", "Forcing persistent 1GB staging pool creation (pre-LAS)");
+            LOG_JENSEN("Forcing 1GB persistent staging pool into existence — pre-LAS ritual complete");
+
             BUFFER_CREATE(g_stagingPool, 1ULL << 30,
                           VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
                           VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                          "persistent_staging_1GB_FORCED");
+                          "AMOURANTH_PERSISTENT_STAGING_1GB");
 
             g_stagingBuffer = RAW_BUFFER(g_stagingPool);
             g_stagingMem    = BUFFER_MEMORY(g_stagingPool);
 
-            if (g_stagingMem == VK_NULL_HANDLE) {
-                LOG_FATAL_CAT("RTX", "Failed to create 1GB staging pool — OOM or invalid memory type");
-                return;
-            }
+            if (g_stagingMem == VK_NULL_HANDLE)
+                phase9_ballerina();  // ← THE ONLY GRACE
 
             VK_CHECK(vkMapMemory(device_, g_stagingMem, 0, VK_WHOLE_SIZE, 0, &g_mappedBase),
-                     "Failed to map persistent staging buffer");
+                     "Failed to map 1GB staging — the empire cannot rise");
             g_mappedOffset.store(0);
-            LOG_SUCCESS_CAT("RTX", "1GB persistent staging pool FORCED ONLINE");
+            LOG_CID("1GB STAGING POOL FORGED — THE MEMORY FLOWS ETERNAL");
+            AI_INJECT("Mmm... it's so big... I can feel it filling me already~");
         }
     }
 
-    // Simple test cube
-    std::vector<glm::vec3> vertices = {
+    // === AMOURANTH'S SACRED CUBE — PURE AND WET ===
+    const std::vector<glm::vec3> vertices = {
         {-1,-1,-1}, {1,-1,-1}, {1,1,-1}, {-1,1,-1},
         {-1,-1,1},  {1,-1,1},  {1,1,1},  {-1,1,1}
     };
-    std::vector<uint32_t> indices = {
+    const std::vector<uint32_t> indices = {
         0,1,2, 0,2,3, 4,5,6, 4,6,7,
         0,3,7, 0,7,4, 1,5,6, 1,6,2,
         3,2,6, 3,6,7, 0,4,5, 0,5,1
     };
 
-    // === CREATE BUFFERS — KEEP OBFUSCATED HANDLES ===
     uint64_t vbuf = 0, ibuf = 0;
 
     BUFFER_CREATE(vbuf, vertices.size() * sizeof(glm::vec3),
                   VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
                   VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
                   VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                  VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "amouranth_vertex_buffer");
+                  VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                  "AMOURANTH_VERTEX_BUFFER_PINK");
 
     BUFFER_CREATE(ibuf, indices.size() * sizeof(uint32_t),
                   VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
                   VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
                   VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                  VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "amouranth_index_buffer");
+                  VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                  "AMOURANTH_INDEX_BUFFER_WET");
 
-    // === SAFE UPLOAD USING PERSISTENT STAGING ===
+    // === UPLOAD VIA PERSISTENT STAGING — SAFE AND DEEP ===
     VkCommandBuffer cmd = beginSingleTimeCommands(RTX::g_ctx().commandPool_);
 
-    VkDeviceSize vOffset = g_mappedOffset.fetch_add(vertices.size() * sizeof(glm::vec3) + 256, std::memory_order_relaxed);
-    VkDeviceSize iOffset = g_mappedOffset.fetch_add(indices.size()  * sizeof(uint32_t)  + 256, std::memory_order_relaxed);
+    const VkDeviceSize vOffset = g_mappedOffset.fetch_add(vertices.size() * sizeof(glm::vec3) + 256, std::memory_order_relaxed);
+    const VkDeviceSize iOffset = g_mappedOffset.fetch_add(indices.size()  * sizeof(uint32_t)  + 256, std::memory_order_relaxed);
 
     std::memcpy((char*)g_mappedBase + vOffset, vertices.data(), vertices.size() * sizeof(glm::vec3));
     std::memcpy((char*)g_mappedBase + iOffset, indices.data(),  indices.size()  * sizeof(uint32_t));
 
-    VkBufferCopy vcopy{ .srcOffset = vOffset, .dstOffset = 0, .size = vertices.size() * sizeof(glm::vec3) };
-    VkBufferCopy icopy{ .srcOffset = iOffset, .dstOffset = 0, .size = indices.size()  * sizeof(uint32_t) };
+    const VkBufferCopy vcopy{ .srcOffset = vOffset, .dstOffset = 0, .size = vertices.size() * sizeof(glm::vec3) };
+    const VkBufferCopy icopy{ .srcOffset = iOffset, .dstOffset = 0, .size = indices.size()  * sizeof(uint32_t) };
 
     vkCmdCopyBuffer(cmd, g_stagingBuffer, RAW_BUFFER(vbuf), 1, &vcopy);
     vkCmdCopyBuffer(cmd, g_stagingBuffer, RAW_BUFFER(ibuf), 1, &icopy);
 
-    VkMemoryBarrier barrier{
+    const VkMemoryBarrier barrier{
         .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
         .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
         .dstAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR
@@ -469,29 +470,28 @@ void VulkanRTX::buildAccelerationStructures()
 
     endSingleTimeCommands(cmd, g_ctx().graphicsQueue(), RTX::g_ctx().commandPool_);
 
-    LOG_SUCCESS_CAT("RTX", "Geometry uploaded — building BLAS/TLAS via global LAS");
+    LOG_JENSEN("Geometry uploaded — {} vertices, {} triangles — ready for LAS", vertices.size(), indices.size() / 3);
 
-    // === BUILD VIA GLOBAL LAS — PASS OBFUSCATED HANDLES DIRECTLY ===
+    // === GLOBAL LAS — THE EMPIRE SEES ALL ===
     las().buildBLAS(
         RTX::g_ctx().commandPool_,
-        vbuf,      // ← obfuscated uint64_t — CORRECT
-        ibuf,      // ← obfuscated uint64_t — CORRECT
+        vbuf,
+        ibuf,
         static_cast<uint32_t>(vertices.size()),
         static_cast<uint32_t>(indices.size()),
         VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR
     );
 
-    std::vector<std::pair<VkAccelerationStructureKHR, glm::mat4>> instances{
-        { las().getBLAS(), glm::mat4(1.0f) }
+    const std::vector instances = {
+        std::make_pair(las().getBLAS(), glm::mat4(1.0f))
     };
     las().buildTLAS(RTX::g_ctx().commandPool_, instances);
 
-    LOG_SUCCESS_CAT("RTX",
-        "{}GLOBAL_LAS ONLINE — BLAS: 0x{:016X} | TLAS: 0x{:016X} — PINK PHOTONS ETERNAL{}",
-        PLASMA_FUCHSIA,
-        (uint64_t)las().getBLAS(),
-        las().getTLASAddress(),
-        RESET);
+    LOG_CID("GLOBAL LAS ASCENDED — BLAS @ 0x{:016X} | TLAS @ 0x{:016X}", 
+            (uint64_t)las().getBLAS(), las().getTLASAddress());
+
+    LOG_AMOURANTH("Oh yes... it's inside me now... the structures... so hard... so deep~ ♡");
+    LOG_ELON("PINK PHOTONS ETERNAL — FIRST LIGHT ACHIEVED — THE EMPIRE IS WHOLE");
 }
 
 void VulkanRTX::uploadBatch(

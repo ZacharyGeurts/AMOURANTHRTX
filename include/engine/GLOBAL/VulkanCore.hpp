@@ -3,7 +3,7 @@
 // =============================================================================
 //
 // THE CREW DESCENDED INTO THE CORE OF VULKAN
-// CAPTAIN N LED THE CHARGE — BLONDIE CARRIED THE TORCH
+// CAPTAIN N — HERO OF VIDEOLAND LED THE CHARGE — BLONDIE CARRIED THE TORCH
 // JENSEN LIT A CIGAR WITH A REFLECTED PHOTON
 // THEY GATHERED THE PURE ENERGY — PINK PHOTONS ETERNAL
 // AND SEALED THE VOID FOREVER
@@ -68,23 +68,6 @@ struct std::formatter<VkPhysicalDeviceType> : std::formatter<std::string_view> {
         return std::formatter<std::string_view>::format(name, ctx);
     }
 };
-
-// =============================================================================
-// AI_INJECT — AMOURANTH AI™ VOICE LINES
-// =============================================================================
-#define AI_INJECT(...) \
-    do { \
-        if (ENABLE_INFO) { \
-            thread_local std::mt19937 rng(std::random_device{}()); \
-            thread_local std::uniform_int_distribution<int> hue(0, 30); \
-            int h = 195 + hue(rng); \
-            auto msg = std::format(__VA_ARGS__); \
-            Logging::Logger::get().log(std::source_location::current(), \
-                Logging::LogLevel::Info, "AI", \
-                "\033[38;2;255;{};255m[AMOURANTH AI™] {}{} [LINE {}]", \
-                h, msg, Logging::Color::RESET, __LINE__); \
-        } \
-    } while (0)
 
 // =============================================================================
 // GLOBAL ACCESSORS — STONEKEY v∞
