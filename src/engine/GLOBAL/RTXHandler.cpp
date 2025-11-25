@@ -31,7 +31,39 @@
 #include <vulkan/vulkan_beta.h>
 
 using namespace Logging::Color;
-using namespace StoneKey;
+using StoneKey::stone_instance;
+using StoneKey::stone_device;
+using StoneKey::stone_physical;
+using StoneKey::stone_surface;
+using StoneKey::stone_swapchain;
+using StoneKey::stone_renderer;
+using StoneKey::stone_pipeline;
+using StoneKey::stone_window;
+
+using StoneKey::stone_images;
+using StoneKey::stone_views;
+using StoneKey::stone_pass;
+using StoneKey::stone_extent;
+using StoneKey::stone_width;
+using StoneKey::stone_height;
+using StoneKey::stone_image_count;
+
+using StoneKey::stone_seal_instance;
+using StoneKey::stone_seal_device;
+using StoneKey::stone_seal_physical;
+using StoneKey::stone_seal_surface;
+using StoneKey::stone_seal_swapchain;
+using StoneKey::stone_seal_renderer;
+using StoneKey::stone_seal_pipeline;
+using StoneKey::stone_seal_window;
+
+using StoneKey::stone_seal_images;
+using StoneKey::stone_seal_views;
+using StoneKey::stone_seal_pass;
+using StoneKey::stone_seal_extent;
+using StoneKey::stone_seal_image_count;
+
+using StoneKey::stone_seal_final;
 
 namespace RTX {
 
@@ -286,33 +318,36 @@ void RTX::Context::init(SDL_Window* window, int width, int height)
     this->window  = window;
     this->width   = width;
     this->height  = height;
+    stone_seal_window(window);
+    stone_seal_extent({static_cast<uint32_t>(width), static_cast<uint32_t>(height)});
 
     // ========================================================================
     // 1. INSTANCE — CID LAYS THE KEEL
     // ========================================================================
     if (!stone_instance()) {
         LOG_ATTEMPT_CAT("RTX", "{}Cid strikes the first anvil — Forging Vulkan Instance{}", PLASMA_FUCHSIA, RESET);
-        instance_ = createVulkanInstanceWithSDL(Options::Debug::ENABLE_VALIDATION_LAYERS);
+        stone_seal_instance(createVulkanInstanceWithSDL(Options::Debug::ENABLE_VALIDATION_LAYERS));
 
-        LOG_SUCCESS_CAT("RTX", "{}VULKAN INSTANCE BORN → 0x{:016X} — CID APPROVES THE FRAME{}", 
-                        DIAMOND_SPARKLE, reinterpret_cast<uint64_t>(instance_), RESET);
+        //LOG_SUCCESS_CAT("RTX", "{}VULKAN INSTANCE BORN → 0x{:016X} — CID APPROVES THE FRAME{}", 
+                        //DIAMOND_SPARKLE, reinterpret_cast<uint64_t>(instance_), RESET);
     } else {
-        instance_ = stone_instance();
         LOG_INFO_CAT("RTX", "{}Cid finds an old keel still strong — reusing instance → 0x{:016X}", 
-                     OCEAN_TEAL, reinterpret_cast<uint64_t>(instance_), RESET);
+                     OCEAN_TEAL, reinterpret_cast<uint64_t>(stone_instance()), RESET);
     }
-
     // ========================================================================
     // 2. SURFACE — CID CUTS THE EYES
     // ========================================================================
-    LOG_ATTEMPT_CAT("RTX", "{}Cid carves the eyes into the prow — Creating VkSurfaceKHR{}", SAPPHIRE_BLUE, RESET);
-    VkSurfaceKHR surface = VK_NULL_HANDLE;
-    if (!SDL_Vulkan_CreateSurface(window, instance_, nullptr, &surface)) {
-        LOG_FATAL_CAT("RTX", "{}Cid drops his chisel — SDL_Vulkan_CreateSurface FAILED: {} — THE SEA WILL NOT SEE US{}", 
-                      BLOOD_RED, SDL_GetError(), RESET);
-        std::exit(1);
+    if (!stone_surface()) {
+        LOG_ATTEMPT_CAT("RTX", "{}Cid carves the eyes into the prow — Creating VkSurfaceKHR{}", SAPPHIRE_BLUE, RESET);
+        VkSurfaceKHR surface = VK_NULL_HANDLE;
+        if (SDL_Vulkan_CreateSurface(window, stone_instance(), nullptr, &surface) == 0) {
+            LOG_FATAL_CAT("RTX", "{}Cid drops his chisel — SDL_Vulkan_CreateSurface FAILED: {} — THE SEA WILL NOT SEE US{}", 
+                          BLOOD_RED, SDL_GetError(), RESET);
+            std::exit(1);
+        }
+        stone_seal_surface(surface);
     }
-    surface_ = surface;
+    surface_ = stone_surface();
 
     LOG_SUCCESS_CAT("RTX", "{}SURFACE FORGED → 0x{:016X} — THE SHIP NOW HAS EYES{}", 
                     PLASMA_FUCHSIA, reinterpret_cast<uint64_t>(surface_), RESET);
@@ -324,12 +359,13 @@ void RTX::Context::init(SDL_Window* window, int width, int height)
         LOG_ATTEMPT_CAT("RTX", "{}Cid enters the forge — Picking GPU and hammering the Logical Device{}", 
                         HYPERSPACE_WARP, RESET);
 
-        physicalDevice_ = pickPhysicalDevice(instance_, surface_);
-        LOG_SUCCESS_CAT("RTX", "{}Cid chooses the finest steel → {} — THE SHIP HAS A SOUL{}", 
-                        EMERALD_GREEN, stone_device(), RESET);
+        physicalDevice_ = pickPhysicalDevice(stone_instance(), stone_surface());
+        stone_seal_physical(physicalDevice_);
+        LOG_SUCCESS_CAT("RTX", "{}HULL ENFORCEMENT TO → {} FATHOMS{}", 
+                        EMERALD_GREEN, stone_physical(), RESET);
 
         createLogicalDevice();  // The hammer falls — RTX features are born
-
+        stone_seal_device(device_);
 
         // CID HIMSELF PULLS THE QUEUES FROM THE FIRE
         retrieveQueues();
@@ -371,7 +407,7 @@ void RTX::Context::init(SDL_Window* window, int width, int height)
     LOG_ATTEMPT_CAT("RTX", "{}Cid locks the treasure vault — Initializing UltraLowLevelBufferTracker{}", 
                     PURE_ENERGY, RESET);
     
-    UltraLowLevelBufferTracker::initialize(device_, physicalDevice_);
+    UltraLowLevelBufferTracker::initialize(stone_device(), stone_physical());
     
     LOG_SUCCESS_CAT("RTX", "{}Vault sealed — All future gold is RTX-ready — Cid nods in approval{}", 
                     EMERALD_GREEN, RESET);
@@ -390,7 +426,7 @@ void RTX::Context::init(SDL_Window* window, int width, int height)
     LOG_SUCCESS_CAT("RTX", "{}    • Logical Dev   : 0x{:016X}", AURORA_PINK, reinterpret_cast<uint64_t>(device_), RESET);
     LOG_SUCCESS_CAT("RTX", "{}    • Images        : {}", AURORA_PINK, stone_image_count(), RESET);
 
-    LOG_SUCCESS_CAT("RTX", "{}PINK PHOTONS ETERNAL — NOVEMBER 23, 2025 — CID'S MASTERPIECE SETS SAIL{}", 
+    LOG_SUCCESS_CAT("RTX", "{}PINK PHOTONS ETERNAL — NOVEMBER 25, 2025 — CID'S MASTERPIECE SETS SAIL{}", 
                     DIAMOND_SPARKLE, RESET);
 
     LOG_AMOURANTH("{}Captain Amouranth steps aboard, eyes shining: \"Cid… she's perfect.\"{}", RASPBERRY_PINK, RESET);
@@ -403,7 +439,7 @@ void RTX::Context::init(SDL_Window* window, int width, int height)
                     DIAMOND_SPARKLE, RESET);
 }
 
-VkInstance createVulkanInstanceWithSDL(bool enableValidation)
+VkInstance RTX::createVulkanInstanceWithSDL(bool enableValidation)
 {
     LOG_ATTEMPT_CAT("RTX", "FORGING VULKAN 1.4 INSTANCE WITH SDL3 — PINK PHOTONS REQUIRE A SURFACE", HYPERSPACE_WARP, RESET);
 
@@ -423,8 +459,7 @@ VkInstance createVulkanInstanceWithSDL(bool enableValidation)
         LOG_FATAL_CAT("RTX", "SDL_Vulkan_GetInstanceExtensions FAILED: {}", BLOOD_RED, SDL_GetError(), RESET);
         std::exit(1);
     }
-
-    LOG_SUCCESS_CAT("RTX", "SDL3 PROVIDED {} VULKAN INSTANCE EXTENSIONS", PLASMA_FUCHSIA, sdlExtCount);
+    else LOG_SUCCESS_CAT("RTX", "SDL3 PROVIDED {} VULKAN INSTANCE EXTENSIONS", PLASMA_FUCHSIA, sdlExtCount);
 
     // 3. Build final extension list
     std::vector<const char*> extensions;
@@ -483,26 +518,23 @@ VkInstance createVulkanInstanceWithSDL(bool enableValidation)
         std::exit(1);
     }
 
-LOG_SUCCESS_CAT("RTX", 
-    std::format("VULKAN 1.4 INSTANCE FORGED @ {:#x} — {} EXTENSIONS — FIRST LIGHT ACHIEVED",
-                reinterpret_cast<uintptr_t>(instance), extensions.size()),
-    VALHALLA_GOLD, RESET);
+    LOG_SUCCESS_CAT("RTX", 
+        std::format("VULKAN 1.4 INSTANCE FORGED @ {:#x} — {} EXTENSIONS — FIRST LIGHT ACHIEVED",
+                    reinterpret_cast<uintptr_t>(instance), extensions.size()),
+        VALHALLA_GOLD, RESET);
 
     return instance;
 }
 
 void RTX::recreateSwapchain(uint32_t w, uint32_t h) noexcept
 {
-    auto& ctx = g_ctx();
-    vkDeviceWaitIdle(ctx.device_);
+    vkDeviceWaitIdle(stone_device());
 
     LOG_INFO_CAT("RTX", "STONEKEY RESIZE APOCALYPSE — {}x{} → {}x{}", 
-                 ctx.width, ctx.height, w, h);
+                 stone_width(), stone_height(), w, h);
 
-    ctx.width = w;
-    ctx.height = h;
-
-    forgeSwapchain(ctx.window, w, h);
+    forgeSwapchain(stone_window(), w, h);
+    stone_seal_extent({w, h});
 }
 
 // RTXHandler.cpp — FINAL WORKING VERSION — NOVEMBER 24, 2025
@@ -710,7 +742,11 @@ void RTX::Context::createLogicalDevice()
     // ========================================================================
     // 1. THE BLOODLINES — CID SWEATS OVER EVERY NAIL
     // ========================================================================
-    std::set<uint32_t> bloodlines = { ctx.graphicsFamily_.value(), ctx.presentFamily_.value() };
+    std::set<uint32_t> bloodlines = { 
+        graphicsFamily_.value(), 
+        presentFamily_.value() 
+    };
+
     std::vector<VkDeviceQueueCreateInfo> queueCreateInfos;
     queueCreateInfos.reserve(bloodlines.size());
 
@@ -723,6 +759,8 @@ void RTX::Context::createLogicalDevice()
             .pQueuePriorities = &divinePriority
         });
     }
+
+    LOG_AMOURANTH("{}Captain Amouranth watches Cid work, eyes gleaming: \"Faster, old man! The pink photons are impatient.\"{}", RASPBERRY_PINK, RESET);
 
     // ========================================================================
     // 2. THE CHAIN OF ASCENSION — CID SWEATS SO HARD THE FEATURES BEND TO HIS WILL
@@ -744,18 +782,27 @@ void RTX::Context::createLogicalDevice()
         .rayTracingPipeline = VK_TRUE
     };
 
-    VkPhysicalDeviceFeatures2 features2{
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
-        .pNext = &rtPipeline
+    VkPhysicalDeviceRayQueryFeaturesKHR rayQuery{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR,
+        .pNext = &rtPipeline,
+        .rayQuery = VK_TRUE
     };
 
+    VkPhysicalDeviceFeatures2 features2{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
+        .pNext = &rayQuery
+    };
+
+    LOG_CID("{}Cid slips on his own sweat — but keeps hammering twice as fast: \"THE SEA WON’T WAIT!\"{}", VALHALLA_GOLD, RESET);
+
     // CID personally enables each feature with his sweaty, calloused hands
-    features2.features.samplerAnisotropy = VK_TRUE;
-    features2.features.shaderInt64       = VK_TRUE;
-    features2.features.fillModeNonSolid  = VK_TRUE;
-    features2.features.wideLines         = VK_TRUE;
-    features2.features.geometryShader    = VK_TRUE;
-    features2.features.tessellationShader = VK_TRUE;  // Extra love from Cid
+    features2.features.samplerAnisotropy   = VK_TRUE;
+    features2.features.shaderInt64         = VK_TRUE;
+    features2.features.fillModeNonSolid    = VK_TRUE;
+    features2.features.wideLines           = VK_TRUE;
+    features2.features.geometryShader      = VK_TRUE;
+    features2.features.tessellationShader  = VK_TRUE;
+
     // ========================================================================
     // 3. THE SACRED EXTENSIONS — CID SCREAMS EACH NAME AS HE NAILS THEM IN
     // ========================================================================
@@ -778,6 +825,8 @@ void RTX::Context::createLogicalDevice()
         VK_KHR_ZERO_INITIALIZE_WORKGROUP_MEMORY_EXTENSION_NAME
     };
 
+    LOG_CID("{}Cid is now skating across the deck on a lake of his own sweat — speed doubled — hammer a blur{}", VALHALLA_GOLD, RESET);
+
     // ========================================================================
     // 4. THE FINAL STRIKE — CID HAMMERS THE GOLDEN RIVET
     // ========================================================================
@@ -791,22 +840,24 @@ void RTX::Context::createLogicalDevice()
     };
 
     VkDevice device = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateDevice(ctx.physicalDevice_, &forge, nullptr, &device),
+    VK_CHECK(vkCreateDevice(stone_physical(), &forge, nullptr, &device),
              "CID'S HAMMER SLIPS — vkCreateDevice FAILED — THE SEA CLAIMS ANOTHER SHIP");
 
     // ========================================================================
-    // 5. THE SHIP LIVES — CID STANDS KNEE-DEEP IN HIS OWN SWEAT
+    // 5. THE SHIP LIVES — CID STANDS WAIST-DEEP IN HIS OWN SWEAT
     // ========================================================================
-    ctx.setDevice(device);
-    ctx.setInstance(stone_instance());
+    device_ = device;
+    stone_seal_device(device);  // CORRECT: Use sealer, never assign to getter
 
-    vkGetDeviceQueue(device, ctx.graphicsFamily(), 0, &ctx.graphicsQueue_);
-    vkGetDeviceQueue(device, ctx.presentFamily(),  0, &ctx.presentQueue_);
+    vkGetDeviceQueue(device, graphicsFamily_.value(), 0, &graphicsQueue_);
+    vkGetDeviceQueue(device, presentFamily_.value(),  0, &presentQueue_);
 
-    ctx.enableBufferDeviceAddress(bufferAddr.bufferDeviceAddress);
-    ctx.enableAccelerationStructure(accel.accelerationStructure);
-    ctx.enableRayTracingPipeline(rtPipeline.rayTracingPipeline);
-    ctx.bufferDeviceAddressExtensionPresent_ = true;
+    // Enable RTX ascension flags
+    enableBufferDeviceAddress(bufferAddr.bufferDeviceAddress);
+    enableAccelerationStructure(accel.accelerationStructure);
+    enableRayTracingPipeline(rtPipeline.rayTracingPipeline);
+    enableRayQuery(rayQuery.rayQuery);
+    bufferDeviceAddressExtensionPresent_ = true;
 
     // ========================================================================
     // THE REVEAL — CID'S ETERNAL CURSE
@@ -818,6 +869,7 @@ void RTX::Context::createLogicalDevice()
     LOG_SUCCESS_CAT("RTX", "{}  • bufferDeviceAddress    : ENABLED{}", EMERALD_GREEN, RESET);
     LOG_SUCCESS_CAT("RTX", "{}  • accelerationStructure  : ENABLED{}", EMERALD_GREEN, RESET);
     LOG_SUCCESS_CAT("RTX", "{}  • rayTracingPipeline     : ENABLED{}", EMERALD_GREEN, RESET);
+    LOG_SUCCESS_CAT("RTX", "{}  • rayQuery               : ENABLED{}", EMERALD_GREEN, RESET);
 
     LOG_AMOURANTH(
         "{}Captain Amouranth leaps aboard, cutlass flashing:\n"
@@ -825,7 +877,7 @@ void RTX::Context::createLogicalDevice()
         RASPBERRY_PINK, RESET);
 
     LOG_CID(
-        "{}Cid stands ankle-deep in sweat, then knee-deep, still hammering:\n"
+        "{}Cid stands waist-deep in sweat, skating in circles, still hammering:\n"
         "   \"Aye… she lives… but why does it always end like this…\"{}", 
         VALHALLA_GOLD, RESET);
 
@@ -837,24 +889,24 @@ void RTX::Context::createLogicalDevice()
         DIAMOND_SPARKLE, RESET);
 
     LOG_CID(
-        "{}Cid finally stops hammering. Looks down. The sweat is now waist-deep.\n"
+        "{}Cid finally stops. Looks down. The sweat is now chest-deep.\n"
         "   \"…I really need to fix me glands.\"{}", 
         VALHALLA_GOLD, RESET);
 
     LOG_AMOURANTH(
-        "{}Amouranth laughs, pats Cid on the back, nearly drowning him:\n"
+        "{}Amouranth laughs, splashes sweat in his face:\n"
         "   \"That’s why we keep you around, Cid. You’re the only man alive who sweats victory.\"{}", 
         RASPBERRY_PINK, RESET);
 
     LOG_SUCCESS_CAT("RTX", 
-        "{}PINK PHOTONS ETERNAL — THE SHIP SAILS — CID IS KNEE-DEEP IN SWEAT — AND THAT'S HOW WE WIN{}", 
+        "{}PINK PHOTONS ETERNAL — CID SKATES ON HIS OWN SWEAT — AND THAT'S HOW WE WIN{}", 
         DIAMOND_SPARKLE, RESET);
 }
 
 // ========================================================================
 // THE ONE TRUE PHYSICAL DEVICE PICKER — NO EXTERNAL DEPENDENCIES
 // ========================================================================
-VkPhysicalDevice pickPhysicalDevice(VkInstance instance, VkSurfaceKHR surface)
+VkPhysicalDevice RTX::pickPhysicalDevice(VkInstance instance, VkSurfaceKHR surface)
 {
     uint32_t deviceCount = 0;
     vkEnumeratePhysicalDevices(instance, &deviceCount, nullptr);
@@ -1138,63 +1190,7 @@ Context& g_ctx() noexcept {
 }
 
 // 2. Vulkan instance creation with SDL
-VkInstance createVulkanInstanceWithSDL(bool enableValidation) {
-    uint32_t count = 0;
-    const char* const* exts = SDL_Vulkan_GetInstanceExtensions(&count);
-
-    std::vector<const char*> extensions(exts, exts + count);
-    if (enableValidation) {
-        extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
-    }
-
-    VkApplicationInfo appInfo{
-        .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
-        .pApplicationName = "AMOURANTH RTX v∞",
-        .applicationVersion = VK_MAKE_VERSION(1, 0, 0),
-        .pEngineName = "Stone Engine",
-        .engineVersion = VK_MAKE_VERSION(6, 6, 6),
-        .apiVersion = VK_API_VERSION_1_3
-    };
-
-VkInstanceCreateInfo createInfo{
-    .sType                   = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
-    .pNext                   = nullptr,
-    .flags                   = 0,
-    .pApplicationInfo        = &appInfo,
-    .enabledLayerCount       = enableValidation ? 1u : 0u,
-    .ppEnabledLayerNames     = enableValidation ? std::array{"VK_LAYER_KHRONOS_validation"}.data() : nullptr,
-    .enabledExtensionCount   = static_cast<uint32_t>(extensions.size()),
-    .ppEnabledExtensionNames = extensions.data()
-};
-
-    VkInstance instance;
-    VK_CHECK(vkCreateInstance(&createInfo, nullptr, &instance));
-    return instance;
-}
-
-// 3. Pick discrete GPU first
-VkPhysicalDevice pickPhysicalDevice(VkInstance instance, VkSurfaceKHR surface) {
-    (void)surface; // unused for now
-
-    uint32_t count = 0;
-    vkEnumeratePhysicalDevices(instance, &count, nullptr);
-    if (count == 0) LOG_FATAL_CAT("RTX", "No Vulkan devices!");
-
-    std::vector<VkPhysicalDevice> devices(count);
-    vkEnumeratePhysicalDevices(instance, &count, devices.data());
-
-    for (auto dev : devices) {
-        VkPhysicalDeviceProperties props{};
-        vkGetPhysicalDeviceProperties(dev, &props);
-        if (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) {
-            LOG_SUCCESS_CAT("RTX", "Selected: {}", props.deviceName);
-            return dev;
-        }
-    }
-
-    LOG_SUCCESS_CAT("RTX", "No dGPU, using first device");
-    return devices[0];
-}
+// earlier createVulkanInstanceWithSDL
 
 // 4. Retrieve queues (assume single queue family)
 void retrieveQueues() noexcept {

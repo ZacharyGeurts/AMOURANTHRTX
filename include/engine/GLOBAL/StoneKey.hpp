@@ -1,5 +1,21 @@
+// =============================================================================
+// AMOURANTH RTX Engine (C) 2025 by Zachary Geurts <gzac5314@gmail.com>
+// =============================================================================
+//
+// Dual Licensed:
+// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
+//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
+// 2. Commercial licensing: gzac5314@gmail.com
+//
+// =============================================================================
+// AMOURANTH RTX — VALHALLA v80 TURBO — APOCALYPSE FINAL v10.3
+// FIRST LIGHT ACHIEVED — PINK PHOTONS ETERNAL — NOVEMBER 21, 2025
+// FULLY COMPILING — PURE EMPIRE
+// =============================================================================
+
 #pragma once
 #include <vulkan/vulkan.h>
+#include <SDL3/SDL.h>  // Added for SDL_Window
 #include <atomic>
 #include <vector>
 #include <cstdio>
@@ -22,11 +38,14 @@ namespace StoneKey {
         static inline std::atomic<VulkanRenderer*>       renderer{ nullptr };
         static inline std::atomic<RTX::PipelineManager*> pipeline{ nullptr };
 
+        // SDL Window
+        static inline std::atomic<SDL_Window*> window{ nullptr };
+
         // Swapchain state
         static inline std::vector<VkImage>     images;
         static inline std::vector<VkImageView> views;
         static inline VkRenderPass             pass{ VK_NULL_HANDLE };
-        static inline VkExtent2D               extent{ 3840, 2160 };
+        static inline VkExtent2D               extent{ 0, 0 };  // Fixed: Initialize to 0; set dynamically
         static inline uint32_t                 image_count{ 0 };
 
         // One-time seal
@@ -44,14 +63,29 @@ namespace StoneKey {
 
     [[nodiscard]] inline VulkanRenderer* stone_renderer() noexcept {
         auto* r = Empire::renderer.load(std::memory_order_acquire);
-        if (!r) std::abort();  // or throw, but abort is faster
+        if (!r) {
+            LOG_ERROR("StoneKey", "Renderer is null - aborting");
+            std::abort();  // Retained abort for speed; consider throwing in non-performance-critical builds
+        }
         return r;
     }
 
     [[nodiscard]] inline RTX::PipelineManager* stone_pipeline() noexcept {
         auto* p = Empire::pipeline.load(std::memory_order_acquire);
-        if (!p) std::abort();
+        if (!p) {
+            LOG_ERROR("StoneKey", "Pipeline manager is null - aborting");
+            std::abort();
+        }
         return p;
+    }
+
+    [[nodiscard]] inline SDL_Window* stone_window() noexcept {
+        auto* w = Empire::window.load(std::memory_order_acquire);
+        if (!w) {
+            LOG_ERROR("StoneKey", "Window is null - aborting");
+            std::abort();
+        }
+        return w;
     }
 
     [[nodiscard]] inline auto& stone_images()  noexcept { return Empire::images; }
@@ -70,8 +104,16 @@ namespace StoneKey {
     inline void stone_seal_physical(VkPhysicalDevice p) noexcept { Empire::physical.store(p, std::memory_order_release); }
     inline void stone_seal_surface(VkSurfaceKHR s)      noexcept { Empire::surface.store(s, std::memory_order_release); }
     inline void stone_seal_swapchain(VkSwapchainKHR sc) noexcept { Empire::swapchain.store(sc, std::memory_order_release); }
-    inline void stone_seal_renderer(VulkanRenderer* r) noexcept { Empire::renderer.store(r, std::memory_order_release); }
+    inline void stone_seal_renderer(VulkanRenderer* r)  noexcept { Empire::renderer.store(r, std::memory_order_release); }
     inline void stone_seal_pipeline(RTX::PipelineManager* p) noexcept { Empire::pipeline.store(p, std::memory_order_release); }
+    inline void stone_seal_window(SDL_Window* w) noexcept { Empire::window.store(w, std::memory_order_release); }
+
+    // Additional sealers for non-atomic members (assuming single-threaded setup phase)
+    inline void stone_seal_images(std::vector<VkImage>&& imgs) noexcept { Empire::images = std::move(imgs); }
+    inline void stone_seal_views(std::vector<VkImageView>&& vws) noexcept { Empire::views = std::move(vws); }
+    inline void stone_seal_pass(VkRenderPass p) noexcept { Empire::pass = p; }
+    inline void stone_seal_extent(VkExtent2D ext) noexcept { Empire::extent = ext; }
+    inline void stone_seal_image_count(uint32_t cnt) noexcept { Empire::image_count = cnt; }
 
     // ========================================================================
     // FINAL SEAL — safe to call 1 or 1000 times
@@ -79,6 +121,16 @@ namespace StoneKey {
     inline void stone_seal_final() noexcept {
         const bool was_sealed = Empire::sealed.exchange(true, std::memory_order_acq_rel);
         if (was_sealed) return;  // already sealed — do nothing
+
+        // Fixed: Add basic validation before sealing
+        if (stone_instance() == VK_NULL_HANDLE || stone_device() == VK_NULL_HANDLE ||
+            stone_physical() == VK_NULL_HANDLE || stone_surface() == VK_NULL_HANDLE ||
+            stone_swapchain() == VK_NULL_HANDLE || stone_renderer() == nullptr ||
+            stone_pipeline() == nullptr || stone_window() == nullptr ||
+            stone_image_count() == 0 || stone_width() == 0 || stone_height() == 0) {
+            LOG_ERROR("StoneKey", "Attempted to seal with incomplete state");
+            std::abort();
+        }
 
         LOG_SUCCESS_CAT("StoneKey",
             "THE EMPIRE IS SEALED — FIRST LIGHT ACHIEVED — PINK PHOTONS ETERNAL");
@@ -89,13 +141,13 @@ namespace StoneKey {
     // ========================================================================
     [[nodiscard]] inline VkDevice   g_device()   noexcept { return stone_device(); }
     [[nodiscard]] inline VkInstance g_instance() noexcept { return stone_instance(); }
-    [[nodiscard]] inline auto&     g_swapchain_images() noexcept { return stone_images(); }
+    [[nodiscard]] inline auto&      g_swapchain_images() noexcept { return stone_images(); }
     inline void set_g_device(VkDevice d) noexcept { stone_seal_device(d); }
-    // etc...
+    // etc... (add more as needed)
 };
 
 // =============================================================================
 // DONE. NO TEMPLATES. NO CONCEPTS. NO MACRO HELL.
 // JUST WORKS. COMPILES. RUNS. FAST.
-// PINK PHOTONS ETERNAL — NOVEMBER 24, 2025
+// PINK PHOTONS ETERNAL — NOVEMBER 25, 2025
 // =============================================================================
