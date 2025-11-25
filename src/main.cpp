@@ -289,7 +289,7 @@ static void createRealFinalWindow() {
     const uint32_t w = Options::Window::DEFAULT_WIDTH;
     const uint32_t h = Options::Window::DEFAULT_HEIGHT;
 
-    if (SDL_InitSubSystem(SDL_INIT_VIDEO) != 0) {
+    if (SDL_InitSubSystem(SDL_INIT_VIDEO) == 0) {
         LOG_FATAL_CAT("SDL3", "VIDEO SUBSYSTEM REFUSES REBIRTH: {}", SDL_GetError());
         phase9_ballerina();
     }
