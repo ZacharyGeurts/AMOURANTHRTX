@@ -33,7 +33,7 @@ namespace Performance {
     constexpr uint32_t GPU_TIMESTAMP_QUERY_COUNT   = 128;
     constexpr bool     ENABLE_FRAME_TIME_LOGGING   = false;
     constexpr float    FRAME_TIME_LOG_THRESHOLD_MS = 16.666f;
-    constexpr bool START_FULLSCREEN = false;
+    constexpr bool     START_FULLSCREEN = false;
 
     // ADDED: Required by SDL3_input.cpp, SDL3_font.cpp, SDL3_init.cpp, SDL3_window.cpp
     constexpr bool     ENABLE_CONSOLE_LOG          = true;
@@ -43,6 +43,16 @@ namespace Performance {
 
     // ADDED: For swapchain present mode selection (immediate present for low-latency non-VSYNC)
     constexpr bool     ENABLE_IMMEDIATE_PRESENT    = false; // Set to true for VK_PRESENT_MODE_IMMEDIATE_KHR (tearing possible)
+}
+
+// ── APPLICATION & WINDOW ──────────────────────────────────────────────────────
+namespace Window {
+    constexpr uint32_t DEFAULT_WIDTH               = 3840;
+    constexpr uint32_t DEFAULT_HEIGHT              = 2160;
+    constexpr bool     START_FULLSCREEN            = false;
+    constexpr bool     VSYNC                       = false;
+    constexpr bool     ALLOW_RESIZE                = true;
+	constexpr bool     HIGH_DPI                    = true;
 }
 
 // ── AUDIO (NEW NAMESPACE) ─────────────────────────────────────────────────────
@@ -167,15 +177,6 @@ namespace Shader {
     constexpr bool     ENABLE_SHADER_HOT_RELOAD    = true;
     constexpr uint64_t STONEKEY_1                  = 0x9E3779B97F4A7C15ULL;
     constexpr uint64_t STONEKEY_2                  = 0x7F4A7C158E3779B9ULL;
-}
-
-// ── APPLICATION & WINDOW ──────────────────────────────────────────────────────
-namespace Window {
-    constexpr uint32_t DEFAULT_WIDTH               = 3840;
-    constexpr uint32_t DEFAULT_HEIGHT              = 2160;
-    constexpr bool     START_FULLSCREEN            = false;
-    constexpr bool     VSYNC                       = false;
-    constexpr bool     ALLOW_RESIZE                = true;
 }
 
 // ── INPUT & CAMERA ────────────────────────────────────────────────────────────

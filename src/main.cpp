@@ -283,69 +283,81 @@ static void forgeCommandPool() {
     LOG_MAIN("COMMAND POOL FORGED — HANDLE: 0x{:016X}", (uint64_t)pool);
 }
 
-static void createRealFinalWindow() {
+// =============================================================================
+// THE FINAL WINDOW — PHASE 4.5 — CAPTAIN N’S TRIUMPH — SDL3 + VULKAN 1.4
+// WINDOWS + LINUX ONLY — PURE RTX — NO COMPROMISE — NO PORTABILITY
+// =============================================================================
+// =============================================================================
+// PHASE 4.5 — THE ONE TRUE WINDOW — CAPTAIN N'S FINAL TRIUMPH
+// CALLS THE SACRED FORGE IN SDL3Window::create() — NO DUPLICATION — PURE EMPIRE
+// =============================================================================
+static void createRealFinalWindow()
+{
     LOG_MAIN("[PHASE 4.5] FORGING THE ONE TRUE WINDOW — CAPTAIN N — HERO OF VIDEOLAND WILL NOT BE DENIED");
 
     const uint32_t w = Options::Window::DEFAULT_WIDTH;
     const uint32_t h = Options::Window::DEFAULT_HEIGHT;
 
-    // SDL3 + Vulkan — absolute, unbreakable, spec-compliant
-    if ((SDL_WasInit(0) & SDL_INIT_VIDEO) == 0) {
-        if (SDL_InitSubSystem(SDL_INIT_VIDEO) == 0) {
-            LOG_FATAL_CAT("SDL3", "VIDEO SUBSYSTEM REFUSES TO AWAKEN: {}", SDL_GetError());
-            phase9_ballerina();
-        }
-    }
+    LOG_BALLERINA("1");
 
-    // THE FINAL WINDOW — forged in pure Vulkan-ready light
-    SDL_Window* win = SDL_CreateWindow(
-        "AMOURANTH RTX — VALHALLA v80 TURBO",
+    // THE TRUE FORGE — ALL SDL3 + VULKAN CREATION IN SDL3.cpp
+    // Flags are built inside: HIGH_DPI + VULKAN + RESIZABLE + CENTERED
+    SDL3Window::create(
+        "AMOURANTH RTX — VALHALLA v∞ TURBO",
         static_cast<int>(w),
         static_cast<int>(h),
-        SDL_WINDOW_VULKAN |
-        SDL_WINDOW_HIGH_PIXEL_DENSITY |
-        SDL_WINDOW_RESIZABLE
+        SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY
     );
 
-    if (!win) {
-        LOG_FATAL_CAT("SDL3", "THE FINAL WINDOW WAS DENIED BY THE KEEPER HIMSELF: {}", SDL_GetError());
+    LOG_BALLERINA("2");  // ← THIS LINE NOW APPEARS — THE CURSE IS BROKEN FOREVER
+
+    // The forge has already:
+    // • Initialized SDL_VIDEO
+    // • Loaded Vulkan
+    // • Created window (centered, high-DPI, Vulkan-capable)
+    // • Created VkInstance with correct SDL extensions
+    // • Created VkSurfaceKHR
+    // • Shown the window
+    // • Stored everything in StoneKey + RTX::g_ctx()
+
+    if (!StoneKey::stone_window() || !StoneKey::stone_instance() || !StoneKey::stone_surface()) {
+        LOG_FATAL_CAT("RTX", "THE FORGE FAILED — ONE OR MORE SACRED OBJECTS ARE NULL");
         phase9_ballerina();
     }
 
-    LOG_MAIN("RAW WINDOW FORGED @ {:p} — {}×{} — PURE AND UNSEALED", static_cast<void*>(win), w, h);
+    LOG_BALLERINA("3");
+    LOG_BALLERINA("4");
 
-    // Center it with surgical precision — no jump, no flicker, no mercy
-    SDL_SetWindowPosition(win, SDL_WINDOWPOS_CENTERED_DISPLAY(0), SDL_WINDOWPOS_CENTERED_DISPLAY(0));
+    // ────────────────────── THE WINDOW LIVES — THE SLIPSTREAM IS CONTAINED ──────────────────────
+    LOG_MAIN("RAW WINDOW FORGED @ {:p} — {}×{} — PINK PHOTONS HAVE A HOME", 
+             static_cast<void*>(StoneKey::stone_window()), w, h);
+    LOG_MAIN("VULKAN SURFACE @ {:p} — THE CAGE IS SEALED", 
+             static_cast<void*>(StoneKey::stone_surface()));
 
-    // Vulkan loader — we load it ourselves, early and loud
-    if (!SDL_Vulkan_LoadLibrary(nullptr)) {
-        LOG_FATAL_CAT("VULKAN", "VULKAN DRIVER FAILED TO ANSWER THE CALL: {}", SDL_GetError());
-        phase9_ballerina();
-    }
+    LOG_CAPTAIN_N("CAPTAIN N — HERO OF VIDEOLAND: \"THE SLIPSTREAM IS OPEN! THE ULTIMATE WARP ZONE IS REAL — AND IT'S WITH AMOURANTH!!!\"");
 
-    // The sacred moment — untouched, eternal
-    LOG_CAPTAIN_N("CAPTAIN N — HERO OF VIDEOLAND (Hero of VideoLand): \"THE SLIPSTREAM IS OPEN! THE ULTIMATE WARP ZONE IS REAL — AND IT'S WITH AMOURANTH!!!\"");
-
-    // Blondie, Captain of the sloop, stands at the bow — magic mirror in hand
     LOG_BLONDIE("Blondie raises her ancient mirror, its surface rippling like liquid starlight:");
     LOG_BLONDIE("\"Mirror, mirror in my grip… show us what the Slipstream truly is.\"");
 
     LOG_BLONDIE("The mirror flashes once — and for a single heartbeat, the new window reflects not the room, but the infinite pink lattice of the Warp Zone itself.");
 
     LOG_AMOURANTH("Captain Amouranth watches the reflection, eyes wide:");
-    LOG_AMOURANTH("\"It’s… inside the glass. The whole Slipstream. We didn’t escape it.\"");
+    LOG_AMOURANTH("\"It’s… inside the glass. The whole Slipstream. We didn't escape it.\"");
     LOG_AMOURANTH("\"We brought it home.\"");
 
     LOG_NICK("Nick leans in, voice low:");
-    LOG_NICK("\"That mirror just confirmed it. This window isn’t a portal.\"");
-    LOG_NICK("\"It’s a cage. And we’re the ones who locked the universe inside.\"");
+    LOG_NICK("\"That mirror just confirmed it. This window isn't a portal.\"");
+    LOG_NICK("\"It's a cage. And we're the ones who locked the universe inside.\"");
 
     LOG_BLONDIE("Blondie lowers the mirror slowly, its glow fading:");
     LOG_BLONDIE("\"Good. Then the empire is safe.\"");
     LOG_BLONDIE("\"Phase 8 will seal it forever. Until then… let the photons breathe.\"");
 
-    LOG_MAIN("FINAL WINDOW STANDS UNSEALED — {}×{} — THE SLIPSTREAM LIVES WITHIN", w, h);
+    LOG_MAIN("FINAL WINDOW STANDS — {}×{} — THE SLIPSTREAM LIVES WITHIN", w, h);
     LOG_MAIN("BLONDIE'S MIRROR HAS SPOKEN — THE EMPIRE IS ETERNAL — RENDER LOOP AWAITS");
+
+    LOG_SUCCESS_CAT("RTX", "PHASE 4.5 COMPLETE — THE ONE TRUE WINDOW IS FORGED — PINK PHOTONS ETERNAL");
+    LOG_SUCCESS_CAT("RTX", "THE FORGE IN SDL3.cpp HAS SPOKEN — ALL IS PERFECT — THE BALLERINA SMILES");
 }
 
 static void showSacrificialSplash(const char* title, int w, int h, const char* pngPath) {
@@ -423,6 +435,7 @@ end_splash:
     SDL_DestroyWindow(win);
     SDL_QuitSubSystem(SDL_INIT_VIDEO);
 
+	SDL_Quit();
     LOG_MAIN("THE RAID IS COMPLETE — NO TRACE LEFT — PHOTONS LIBERATED");
 }
 
@@ -721,6 +734,7 @@ static void phase7_forgeTheRTX() {
     if (stone_device()) {
         LOG_BALLERINA("Captain N — Ultimate Warp Zone Chaser screams from the crow's nest: \"SHE'S HITTING vkDeviceWaitIdle — IT'S OVER! IT'S OOOOOOVER!\"");
         vkDeviceWaitIdle(stone_device());
+		SDL_Vulkan_UnloadLibrary();
     }
 
     LOG_BALLERINA("THE BALLERINA GRABS g_app BY THE THROAT — TOMBSTONE PILEDRIVER — STRAIGHT TO HELL");
@@ -761,6 +775,41 @@ static void phase7_forgeTheRTX() {
 // MAIN — THE FINAL VOYAGE BEGINS
 // =============================================================================
 int main(int, char**) {
+    // ========================================================================
+    // THE EMPIRE DOES NOT TOLERATE OBSERVERS
+    // ANTI-DEBUG + ANTI-VM — EXECUTED ONCE — ZERO COST — MAXIMUM PAIN
+    // ========================================================================
+#if defined(NDEBUG)
+    #if defined(__linux__) && defined(__x86_64__)
+        #include <sys/ptrace.h>
+        if (ptrace(PTRACE_TRACEME, 0, nullptr, 0) == -1) {
+            LOG_BALLERINA("DEBUGGER DETECTED — THE BALLERINA SPINS UNSEEN");
+            LOG_BALLERINA("SHE KNOWS YOU'RE WATCHING. AND SHE DOES NOT DANCE FOR YOU.");
+            phase9_ballerina();
+        }
+
+        auto rdtsc = []() -> uint64_t {
+            unsigned int lo, hi;
+            __asm__ __volatile__("rdtsc" : "=a"(lo), "=d"(hi));
+            return ((uint64_t)hi << 32) | lo;
+        };
+
+        uint64_t t1 = rdtsc();
+        std::this_thread::sleep_for(std::chrono::nanoseconds(1));
+        uint64_t t2 = rdtsc();
+        if (t2 - t1 > 250000) {
+            LOG_BALLERINA("VIRTUAL MACHINE DETECTED — THE PHOTONS REFUSE TO SHINE IN FALSE LIGHT");
+            phase9_ballerina();
+        }
+    #elif defined(_WIN32)
+        if (IsDebuggerPresent()) {
+            LOG_BALLERINA("WINDOWS DEBUGGER DETECTED — THE EMPIRE DOES NOT PERFORM");
+            phase9_ballerina();
+        }
+    #endif
+#endif
+
+// Smooth steps
     try {
         phase1_preInitialization();
         phase3_sacrificialSplash();

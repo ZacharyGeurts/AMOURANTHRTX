@@ -295,7 +295,7 @@ inline constexpr struct NullFeatureChainTerminator {
     // =============================================================================
     // Core Vulkan Creation Functions
     // =============================================================================
-    [[nodiscard]] VkInstance createVulkanInstanceWithSDL(bool enableValidation);
+    [[nodiscard]] VkInstance createVulkanInstanceWithSDL(bool enableValidation) noexcept;
     [[nodiscard]] VkDevice createLogicalDevice(VkPhysicalDevice physicalDevice, VkSurfaceKHR surface) noexcept;
 
     void createCommandPool();

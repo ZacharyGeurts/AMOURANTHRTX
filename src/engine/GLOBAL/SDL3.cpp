@@ -364,7 +364,7 @@ void create(const char* title, int width, int height, Uint32 flags)
 {
     LOG_SUCCESS_CAT("MAIN", "{}[PHASE 4] FORGING WINDOW + VULKAN CONTEXT — PINK PHOTONS RISING{}", VALHALLA_GOLD, RESET);
 
-    flags |= SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIDDEN;  // Add HIDDEN to control show timing
+    flags |= SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE;
 
     if (SDL_WasInit(SDL_INIT_VIDEO) == 0) {
         if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) == 0) {
@@ -404,9 +404,10 @@ void create(const char* title, int width, int height, Uint32 flags)
     std::vector<const char*> extensions(sdlExts, sdlExts + extCount);
     if (Options::Debug::ENABLE_VALIDATION_LAYERS) {
         extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
-        extensions.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);  // Vulkan 1.4 portability for macOS/moltenVK
-        LOG_SUCCESS_CAT("SDL3", "{}Validation + Portability enabled for Vulkan 1.4{}", VALHALLA_GOLD, RESET);
+        LOG_SUCCESS_CAT("SDL3", "{}Validation enabled for Vulkan 1.4{}", VALHALLA_GOLD, RESET);
     }
+
+	LOG_SUCCESS_CAT("SDL3", "{}PORTABILITY WAS CRUSHED - Goodbye Mac and Droid{}", VALHALLA_GOLD, RESET);
 
     // Zero-init + explicit pNext = nullptr for Vulkan 1.4 strictness
     VkApplicationInfo appInfo = {};

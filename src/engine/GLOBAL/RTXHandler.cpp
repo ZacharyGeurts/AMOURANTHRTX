@@ -60,9 +60,10 @@ void UpdateGlobalRayTracingDescriptors(VkDescriptorSet set)
 }
 
 // =============================================================================
-// Vulkan Instance — The Handler’s only spoken words
+// Vulkan Instance — THE ONE TRUE FORGING — WINDOWS + LINUX — PURE RTX ONLY
+// NOVEMBER 25, 2025 — FIRST LIGHT — THE EMPIRE IS ETERNAL
 // =============================================================================
-VkInstance createVulkanInstanceWithSDL(bool enableValidation)
+[[nodiscard]] VkInstance createVulkanInstanceWithSDL(bool enableValidation) noexcept
 {
     LOG_ATTEMPT_CAT("RTX", "NOVEMBER 25, 2025 — THE HARBOR FREEZES");
     LOG_AMOURANTH("A single voice cuts through the frost:");
@@ -70,6 +71,7 @@ VkInstance createVulkanInstanceWithSDL(bool enableValidation)
 
     VkApplicationInfo appInfo{
         .sType              = VK_STRUCTURE_TYPE_APPLICATION_INFO,
+        .pNext              = nullptr,
         .pApplicationName   = "AMOURANTH RTX — VALHALLA v∞ TURBO",
         .applicationVersion = VK_MAKE_API_VERSION(0, 1, 0, 0),
         .pEngineName        = "PINK PHOTONS v∞",
@@ -77,36 +79,76 @@ VkInstance createVulkanInstanceWithSDL(bool enableValidation)
         .apiVersion         = VK_API_VERSION_1_4
     };
 
-    uint32_t sdlExtCount = 0;
-    if (SDL_Vulkan_GetInstanceExtensions(&sdlExtCount) != 0 || sdlExtCount == 0) {
-        LOG_FATAL_CAT("RTX", "SDL failed to provide instance extensions — the eye is blind");
+    // ────────────────────── SDL3 EXTENSIONS — MANDATORY FIRST ──────────────────────
+    unsigned int sdlExtCount = 0;
+
+    // First call: get count only
+    if (SDL_Vulkan_GetInstanceExtensions(&sdlExtCount) == 0) {
+        LOG_FATAL_CAT("SDL3", "SDL_Vulkan_GetInstanceExtensions() failed to return count — {} — THE EYE IS BLIND", SDL_GetError());
+        phase9_ballerina();
+    }
+
+    if (sdlExtCount == 0) {
+        LOG_FATAL_CAT("SDL3", "SDL returned 0 instance extensions — this should never happen on Windows/Linux with Vulkan");
         phase9_ballerina();
     }
 
     std::vector<const char*> extensions(sdlExtCount);
+    
+    // Second call: fill the vector
     if (SDL_Vulkan_GetInstanceExtensions(&sdlExtCount) == 0) {
-        LOG_FATAL_CAT("RTX", "SDL extension names failed — the veil tears");
+        LOG_FATAL_CAT("SDL3", "SDL_Vulkan_GetInstanceExtensions() failed to fill extensions — {} — THE VEIL TEARS", SDL_GetError());
         phase9_ballerina();
     }
 
+    LOG_MAIN("SDL3 demands {} pure Vulkan instance extensions:", sdlExtCount);
+    for (const auto* ext : extensions)
+        LOG_MAIN("  • {}", ext);
+
+    // ────────────────────── EMPIRE EXTENSIONS — PURE RTX ONLY ──────────────────────
     if (enableValidation) {
         extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+        LOG_MAIN("• VK_EXT_debug_utils — VALIDATION LAYERS ENGAGED — THE HANDLER WATCHES");
     }
 
+    // NO PORTABILITY. NO MOLTENVK. NO MACOS. PURE RTX. WINDOWS + LINUX ONLY.
+    // We do not bow to Apple. We do not kneel to Metal.
+    // The Slipstream runs on raw silicon.
+
+    // ────────────────────── VALIDATION LAYERS (optional) ──────────────────────
+    const std::vector<const char*> layers = enableValidation
+        ? std::vector<const char*>{"VK_LAYER_KHRONOS_validation"}
+        : std::vector<const char*>{};
+
+    // ────────────────────── FINAL CREATE INFO — THE FORGING ──────────────────────
     VkInstanceCreateInfo createInfo{
         .sType                   = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
+        .pNext                   = nullptr,
+        .flags                   = 0,  // No VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR — we reject weakness
         .pApplicationInfo        = &appInfo,
+        .enabledLayerCount       = static_cast<uint32_t>(layers.size()),
+        .ppEnabledLayerNames     = layers.empty() ? nullptr : layers.data(),
         .enabledExtensionCount   = static_cast<uint32_t>(extensions.size()),
         .ppEnabledExtensionNames = extensions.data()
     };
 
     VkInstance instance = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateInstance(&createInfo, nullptr, &instance));
+    VkResult result = vkCreateInstance(&createInfo, nullptr, &instance);
+
+    if (result != VK_SUCCESS) {
+        LOG_FATAL_CAT("Vulkan", "vkCreateInstance FAILED — Result {} — THE PHOTONS DENIED ENTRY", static_cast<int>(result));
+        phase9_ballerina();
+    }
 
     g_ctx().setInstance(instance);
 
-    LOG_SUCCESS_CAT("RTX", "INSTANCE FORGED — THE HANDLER HAS SPOKEN");
-    LOG_SUCCESS_CAT("RTX", "PINK PHOTONS ETERNAL");
+    LOG_SUCCESS_CAT("RTX", "VULKAN 1.4 INSTANCE FORGED — {} SDL EXTENSIONS INJECTED — PURE RTX PATH", sdlExtCount);
+    LOG_SUCCESS_CAT("RTX", "NO PORTABILITY. NO COMPROMISE. WINDOWS + LINUX ONLY.");
+    LOG_SUCCESS_CAT("RTX", "PINK PHOTONS ETERNAL — THE EMPIRE IS COMPLETE");
+
+    LOG_BLONDIE("Blondie smiles in the dark, mirror glowing faintly:");
+    LOG_BLONDIE("\"No more chains. No more cages.\"");
+    LOG_BLONDIE("\"Only light.\"");
 
     return instance;
 }
