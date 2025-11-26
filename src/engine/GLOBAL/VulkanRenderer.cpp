@@ -22,6 +22,7 @@
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/GLOBAL/RTXHandler.hpp"
 #include "engine/GLOBAL/BufferManager.hpp"
+#include "engine/GLOBAL/SwapchainManager.hpp"
 #include "engine/GLOBAL/LAS.hpp"
 #include "engine/GLOBAL/SDL3.hpp"
 #include "engine/GLOBAL/OptionsMenu.hpp"
@@ -39,12 +40,22 @@
 #include <format>
 #include <random>
 #include <cstring>
+#include <ranges>
 #include <iomanip>
 #include <sstream>
 #include <thread>
 #include <print>
 
 using namespace Logging::Color;
+
+using StoneKey::stone_swapchain;
+using StoneKey::stone_images;
+using StoneKey::stone_views;
+using StoneKey::stone_pass;
+using StoneKey::stone_width;
+using StoneKey::stone_height;
+using StoneKey::stone_swapchain_image_count;
+
 using namespace RTX;
 
 // =============================================================================
@@ -92,10 +103,6 @@ void VulkanRenderer::toggleDenoising() noexcept {
 void VulkanRenderer::toggleAdaptiveSampling() noexcept {
     adaptiveSamplingEnabled_ = !adaptiveSamplingEnabled_;
     resetAccumulation_ = true;
-}
-
-void VulkanRenderer::setTonemapType(TonemapType type) noexcept {
-    tonemapType_ = type;
 }
 
 void VulkanRenderer::setOverclockMode(bool enabled) noexcept {
@@ -501,7 +508,7 @@ if (stone_device() == VK_NULL_HANDLE) {
     VK_CHECK(vkCreateDescriptorSetLayout(stone_device(), &layoutInfo, nullptr, &tonemapSetLayout),
              "Tonemap compute descriptor set layout");
 
-    tonemapDescriptorSetLayout_ = RTX::Handle<VkDescriptorSetLayout>(
+    tonemapDescriptorSetLayout_ = Handle<VkDescriptorSetLayout>(
         tonemapSetLayout, stone_device(),
         [](VkDevice d, VkDescriptorSetLayout l, const VkAllocationCallbacks*) { vkDestroyDescriptorSetLayout(d, l, nullptr); },
         0, "TonemapCompSetLayout"
@@ -526,7 +533,7 @@ if (stone_device() == VK_NULL_HANDLE) {
     VK_CHECK(vkCreatePipelineLayout(stone_device(), &pipelineLayoutInfo, nullptr, &tonemapPipeLayout),
              "Tonemap compute pipeline layout");
 
-    tonemapLayout_ = RTX::Handle<VkPipelineLayout>(
+    tonemapLayout_ = Handle<VkPipelineLayout>(
         tonemapPipeLayout, stone_device(),
         [](VkDevice d, VkPipelineLayout l, const VkAllocationCallbacks*) { vkDestroyPipelineLayout(d, l, nullptr); },
         0, "TonemapCompLayout"
@@ -1251,7 +1258,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
         acquireResult == VK_ERROR_SURFACE_LOST_KHR)
     {
         LOG_WARN_CAT("RENDER", "Swapchain out-of-date/surface lost on acquire — recreating (frame {})", frameNumber_);
-        recreateSwapchain(width_, height_);
+        RTX::SwapchainManager::recreate(width_, height_);
         currentFrame_ = (currentFrame_ + 1) % Options::Performance::MAX_FRAMES_IN_FLIGHT;
         return;
     }
@@ -1377,7 +1384,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     VkResult presentResult = vkQueuePresentKHR(ctx.presentQueue(), &present);
 
     if (presentResult == VK_ERROR_OUT_OF_DATE_KHR || presentResult == VK_SUBOPTIMAL_KHR) {
-        recreateSwapchain(width_, height_);
+        RTX::SwapchainManager::recreate(width_, height_);
     } else if (presentResult != VK_SUCCESS) {
         LOG_ERROR_CAT("RENDER", "vkQueuePresentKHR failed: {}", (int)presentResult);
     }
@@ -1665,10 +1672,6 @@ void VulkanRenderer::updateUniformBuffer(uint32_t frame, const Camera& camera, f
         return;
     }
 
-    // NEW: After StoneKey transition, we can no longer allocate command buffers
-    const bool useTransientCmd = !stonekey_active_;  // only frames 0–3
-
-    const auto& ctx = g_ctx();
     VkCommandBuffer cmd = VK_NULL_HANDLE;
 
     // ------------------------------------------------------------------
@@ -1720,13 +1723,9 @@ void VulkanRenderer::updateUniformBuffer(uint32_t frame, const Camera& camera, f
     // ------------------------------------------------------------------
     // 2. Copy staging → device-local UBO
     // ------------------------------------------------------------------
-    if (useTransientCmd) {
-        // Frames 0–3 only — safe to allocate a one-time command buffer
-        cmd = pipelineManager_.beginSingleTimeCommands(ctx.commandPool_);
-    } else {
+
         // Frame 4+ — use the per-frame command buffer that is already recording
         cmd = commandBuffers_[frame];
-    }
 
     if (cmd != VK_NULL_HANDLE) {
         VkBuffer src = BufferManager::get(g_ctx().sharedStagingEnc_)->buffer;
@@ -1747,14 +1746,6 @@ void VulkanRenderer::updateUniformBuffer(uint32_t frame, const Camera& camera, f
             VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
             0, 1, &barrier, 0, nullptr, 0, nullptr);
     }
-
-    // ------------------------------------------------------------------
-    // 3. Submit transient command buffer only if we allocated one
-    // ------------------------------------------------------------------
-    if (useTransientCmd && cmd != VK_NULL_HANDLE) {
-        pipelineManager_.endSingleTimeCommands(ctx.commandPool_, ctx.graphicsQueue(), cmd);
-    }
-    // else: barriers already recorded into the main per-frame cmd → nothing to do
 }
 
 void VulkanRenderer::updateTonemapUniform(uint32_t frame) noexcept {
@@ -2089,88 +2080,44 @@ bool VulkanRenderer::createSharedStaging() noexcept {
     return true;
 }
 
-void VulkanRenderer::onWindowResize(uint32_t w, uint32_t h) noexcept
+void VulkanRenderer::onWindowResize(uint32_t width, uint32_t height) noexcept
 {
-    if (w == 0 || h == 0) {
-        minimized_ = true;
-        return;
-    }
-    minimized_ = false;
+    LOG_MAIN("The sea shifts. Resize accepted: {}x{}", width, height);
 
-    if (width_ == static_cast<int>(w) && height_ == static_cast<int>(h))
-        return;
+    vkDeviceWaitIdle(g_ctx().device_);
 
-    LOG_INFO_CAT("RENDERER", "{}STONEKEY RESIZE APOCALYPSE: {}×{} → {}×{} — FULL OBFUSCATED PURGE{}", 
-                 PULSAR_GREEN, width_, height_, w, h, RESET);
+    // Reset accumulation — new geometry, new history
+    accumulationFrame_ = 0;
 
-    // ===================================================================
-    // 1. NUCLEAR SHUTDOWN — STONEKEY DEMANDS TOTAL SILENCE
-    // ===================================================================
-    waitForAllFences();
-    vkQueueWaitIdle(g_ctx().graphicsQueue());
-    vkQueueWaitIdle(g_ctx().presentQueue());
-    vkDeviceWaitIdle(stone_device());
-
-    // Reset the one true command pool — all command buffers are now dust
-    vkResetCommandPool(stone_device(), g_ctx().commandPool_, VK_COMMAND_POOL_RESET_RELEASE_RESOURCES_BIT);
-
-    width_  = static_cast<int>(w);
-    height_ = static_cast<int>(h);
-    resetAccumulation_ = true;
-    firstSwapchainAcquire_ = true;
-
-    // ===================================================================
-    // 2. ANNIHILATE — BUT PRESERVE stone_swapchain() UNTIL AFTER PRESENT
-    // ===================================================================
+    // Full rebuild — the empire does not half-measure
     cleanupFramebuffers();
-    destroyRTOutputImages();
-    destroyAccumulationImages();
-    destroyDenoiserImage();
-    destroyNexusScoreImage();
+    destroyRenderPass();
+    RTX::SwapchainManager::recreate(width_, height_);
 
-    LAS::get().invalidate();
-
-    if (tonemapDescriptorPool_.valid() && *tonemapDescriptorPool_) {
-        vkFreeDescriptorSets(stone_device(), *tonemapDescriptorPool_,
-                             static_cast<uint32_t>(tonemapSets_.size()), tonemapSets_.data());
-    }
-    tonemapSets_.clear();
-
-    // ===================================================================
-    // 3. REBIRTH — BUT ONLY AFTER FULL GPU IDLE (STONEKEY LAW)
-    // ===================================================================
-    // This is the fix: recreateSwapchain() AFTER full idle — no more ghost handles
-    recreateSwapchain(w, h);
-
-    createRTOutputImages();
-    createAccumulationImages();
-    if (Options::RTX::ENABLE_DENOISING) createDenoiserImage();
-    if (Options::RTX::ENABLE_ADAPTIVE_SAMPLING)
-        createNexusScoreImage(g_ctx().commandPool_, g_ctx().graphicsQueue());
-
+    createRenderPass();
     createFramebuffers();
-    commandBuffers_.clear();
+
+    // Adaptive sampling needs fresh score images
+    if (Options::RTX::ENABLE_ADAPTIVE_SAMPLING) {
+        createNexusScoreImage(g_ctx().commandPool_, g_ctx().graphicsQueue_);
+    }
+
+    // Command buffers must be reborn
+    if (!commandBuffers_.empty()) {
+        vkFreeCommandBuffers(g_ctx().device_, g_ctx().commandPool_, 
+                           static_cast<uint32_t>(commandBuffers_.size()), commandBuffers_.data());
+        commandBuffers_.clear();
+    }
     createCommandBuffers();
 
-    // Re-allocate tonemap sets — fresh and pure
-    if (tonemapDescriptorPool_.valid() && *tonemapDescriptorPool_) {
-        std::vector<VkDescriptorSetLayout> layouts(Options::Performance::MAX_FRAMES_IN_FLIGHT,
-                                                   *tonemapDescriptorSetLayout_);
-        tonemapSets_.resize(Options::Performance::MAX_FRAMES_IN_FLIGHT);
-
-        VkDescriptorSetAllocateInfo allocInfo{
-            .sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
-            .descriptorPool     = *tonemapDescriptorPool_,
-            .descriptorSetCount = Options::Performance::MAX_FRAMES_IN_FLIGHT,
-            .pSetLayouts        = layouts.data()
-        };
-
-        VK_CHECK(vkAllocateDescriptorSets(stone_device(), &allocInfo, tonemapSets_.data()),
-                 "Tonemap sets failed — but StoneKey protects us");
+    // Record fresh commands for every swapchain image
+    for (uint32_t i = 0; i < stone_swapchain_image_count(); ++i) {
+        recordRayTracingCommandBuffer(commandBuffers_[i]);
     }
 
-    LOG_SUCCESS_CAT("RENDERER", "{}STONEKEY RESIZE COMPLETE — {}×{} — stone_swapchain() REBORN — GHOSTS EXORCISED — PINK PHOTONS ETERNAL{}", 
-                    COSMIC_GOLD, w, h, RESET);
+    LOG_AMOURANTH("Rebirth complete. Not a single photon was harmed.");
+    LOG_NICK("Zero flicker. Zero stutter. That’s how legends resize.");
+    LOG_BLONDIE("No one will ever know we moved.");
 }
 
 void VulkanRenderer::waitForAllFences() const noexcept
@@ -2277,6 +2224,43 @@ void VulkanRenderer::createImageArray(std::vector<RTX::Handle<VkImage>>& images,
         memories.emplace_back(std::move(mem));
         views.emplace_back(std::move(view));
     }
+}
+
+void VulkanRenderer::destroyRenderPass() noexcept {
+    if (renderPass_) {
+        vkDestroyRenderPass(stone_device(), renderPass_, nullptr);
+        renderPass_ = VK_NULL_HANDLE;
+    }
+}
+
+void VulkanRenderer::createRenderPass() noexcept {
+    VkAttachmentDescription colorAttachment{};
+    colorAttachment.format = SwapchainManager::format();
+    colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+    colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    colorAttachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+
+    VkAttachmentReference colorAttachmentRef{};
+    colorAttachmentRef.attachment = 0;
+    colorAttachmentRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+    VkSubpassDescription subpass{};
+    subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    subpass.colorAttachmentCount = 1;
+    subpass.pColorAttachments = &colorAttachmentRef;
+
+    VkRenderPassCreateInfo renderPassInfo{};
+    renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+    renderPassInfo.attachmentCount = 1;
+    renderPassInfo.pAttachments = &colorAttachment;
+    renderPassInfo.subpassCount = 1;
+    renderPassInfo.pSubpasses = &subpass;
+
+    VK_CHECK(vkCreateRenderPass(stone_device(), &renderPassInfo, nullptr, &renderPass_), "render pass");
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

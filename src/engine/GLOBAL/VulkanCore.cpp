@@ -43,9 +43,6 @@ using StoneKey::stone_device;
 
 using namespace RTX;
 
-namespace RTX {
-}
-
 // =============================================================================
 // VulkanCore.cpp — Persistent staging globals — ONLY ONE DEFINITION
 // =============================================================================
@@ -121,7 +118,7 @@ void initVulkanCoreGlobals() {
 
 VulkanRTX::~VulkanRTX() noexcept {
     LOG_TRACE_CAT("RTX", "VulkanRTX destructor — START");
-    RTX::AmouranthAI::get().onMemoryEvent("VulkanRTX", sizeof(VulkanRTX));
+    AmouranthAI::get().onMemoryEvent("VulkanRTX", sizeof(VulkanRTX));
 
     // OPT: Unmap persistent staging if active
     if (g_mappedBase) {
@@ -194,7 +191,7 @@ VulkanRTX::~VulkanRTX() noexcept {
     LOG_SUCCESS_CAT("RTX", "{}VulkanRTX destroyed — all resources returned to Valhalla{}", PLASMA_FUCHSIA, RESET);
     LOG_TRACE_CAT("RTX", "VulkanRTX destructor — COMPLETE");
 }
-VulkanRTX::VulkanRTX(int w, int h, RTX::PipelineManager* mgr) noexcept
+VulkanRTX::VulkanRTX(int w, int h, PipelineManager* mgr) noexcept
     : extent_{1, 1}
     , pipelineMgr_(mgr)
     , device_(VK_NULL_HANDLE)
@@ -211,8 +208,8 @@ VulkanRTX::VulkanRTX(int w, int h, RTX::PipelineManager* mgr) noexcept
 
     LOG_TRACE_CAT("RTX", "VulkanRTX constructor — {}×{} — LINE {}", w, h, __LINE__);
     LOG_DEBUG_CAT("RTX", "Constructor params: width={}, height={}, pipelineMgr={}", w, h, mgr ? "valid" : "null");
-    RTX::AmouranthAI::get().onMemoryEvent("VulkanRTX Instance", sizeof(VulkanRTX));
-    RTX::AmouranthAI::get().onPhotonDispatch(w, h);
+    AmouranthAI::get().onMemoryEvent("VulkanRTX Instance", sizeof(VulkanRTX));
+    AmouranthAI::get().onPhotonDispatch(w, h);
 
     if (!device_) {
         LOG_FATAL_CAT("RTX", "{}FATAL: device_ is null — THE PHOTONS ARE DENIED — ABORTING CONSTRUCTION{}", BOLD_RED, RESET);
@@ -366,18 +363,18 @@ bool VulkanRTX::pollAsyncFence(VkFence fence, uint64_t timeout_ns) noexcept {
 // =============================================================================
 void VulkanRTX::setRayTracingPipeline(VkPipeline p, VkPipelineLayout l) noexcept {
     LOG_TRACE_CAT("RTX", "setRayTracingPipeline — START — pipeline: 0x{:x}, layout: 0x{:x}", reinterpret_cast<uintptr_t>(p), reinterpret_cast<uintptr_t>(l));
-    RTX::AmouranthAI::get().onMemoryEvent("RTPipeline", sizeof(VkPipeline));
-    RTX::AmouranthAI::get().onMemoryEvent("RTPipelineLayout", sizeof(VkPipelineLayout));
+    AmouranthAI::get().onMemoryEvent("RTPipeline", sizeof(VkPipeline));
+    AmouranthAI::get().onMemoryEvent("RTPipelineLayout", sizeof(VkPipelineLayout));
 
     LOG_INFO_CAT("RTX", "HANDLE_CREATE: {} | Tag: {}", "rtPipeline", "RTPipeline");
-    rtPipeline_ = RTX::Handle<VkPipeline>(p, stone_device(),
+    rtPipeline_ = Handle<VkPipeline>(p, stone_device(),
         [](VkDevice d, VkPipeline pp, const VkAllocationCallbacks*) {
             LOG_TRACE_CAT("RTX", "Destroying RTPipeline: 0x{:x}", reinterpret_cast<uintptr_t>(pp));
             vkDestroyPipeline(d, pp, nullptr);
         }, 0, "RTPipeline");
 
     LOG_INFO_CAT("RTX", "HANDLE_CREATE: {} | Tag: {}", "rtPipelineLayout", "RTPipelineLayout");
-    rtPipelineLayout_ = RTX::Handle<VkPipelineLayout>(l, stone_device(),
+    rtPipelineLayout_ = Handle<VkPipelineLayout>(l, stone_device(),
         [](VkDevice d, VkPipelineLayout pl, const VkAllocationCallbacks*) {
             LOG_TRACE_CAT("RTX", "Destroying RTPipelineLayout: 0x{:x}", reinterpret_cast<uintptr_t>(pl));
             vkDestroyPipelineLayout(d, pl, nullptr);
@@ -444,7 +441,7 @@ void VulkanRTX::buildAccelerationStructures()
                   "AMOURANTH_INDEX_BUFFER_WET");
 
     // === UPLOAD VIA PERSISTENT STAGING — SAFE AND DEEP ===
-    VkCommandBuffer cmd = beginSingleTimeCommands(RTX::g_ctx().commandPool_);
+    VkCommandBuffer cmd = beginSingleTimeCommands(g_ctx().commandPool_);
 
     const VkDeviceSize vOffset = g_mappedOffset.fetch_add(vertices.size() * sizeof(glm::vec3) + 256, std::memory_order_relaxed);
     const VkDeviceSize iOffset = g_mappedOffset.fetch_add(indices.size()  * sizeof(uint32_t)  + 256, std::memory_order_relaxed);
@@ -468,13 +465,13 @@ void VulkanRTX::buildAccelerationStructures()
         VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
         0, 1, &barrier, 0, nullptr, 0, nullptr);
 
-    endSingleTimeCommands(cmd, g_ctx().graphicsQueue(), RTX::g_ctx().commandPool_);
+    endSingleTimeCommands(cmd, g_ctx().graphicsQueue(), g_ctx().commandPool_);
 
     LOG_JENSEN("Geometry uploaded — {} vertices, {} triangles — ready for LAS", vertices.size(), indices.size() / 3);
 
     // === GLOBAL LAS — THE EMPIRE SEES ALL ===
     las().buildBLAS(
-        RTX::g_ctx().commandPool_,
+        g_ctx().commandPool_,
         vbuf,
         ibuf,
         static_cast<uint32_t>(vertices.size()),
@@ -485,7 +482,7 @@ void VulkanRTX::buildAccelerationStructures()
     const std::vector instances = {
         std::make_pair(las().getBLAS(), glm::mat4(1.0f))
     };
-    las().buildTLAS(RTX::g_ctx().commandPool_, instances);
+    las().buildTLAS(g_ctx().commandPool_, instances);
 
     LOG_CID("GLOBAL LAS ASCENDED — BLAS @ 0x{:016X} | TLAS @ 0x{:016X}", 
             (uint64_t)las().getBLAS(), las().getTLASAddress());
@@ -824,7 +821,7 @@ void VulkanRTX::initBlackFallbackImage() {
 
     VkImage rawImg = VK_NULL_HANDLE;
     VK_CHECK(vkCreateImage(device_, &imgInfo, nullptr, &rawImg));
-    blackFallbackImage_ = RTX::MakeHandle(rawImg, device_, 
+    blackFallbackImage_ = MakeHandle(rawImg, device_, 
         [](VkDevice d, VkImage i, const VkAllocationCallbacks*) { vkDestroyImage(d, i, nullptr); });
     blackFallbackImage_.tag = "BlackFallbackImage";
 
@@ -833,7 +830,7 @@ void VulkanRTX::initBlackFallbackImage() {
     vkGetImageMemoryRequirements(device_, rawImg, &memReqs);
 
     uint32_t memType = BufferManager::findMemoryType(
-        RTX::g_ctx().physicalDevice(),
+        g_ctx().physicalDevice(),
         memReqs.memoryTypeBits,
         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
     );
@@ -854,7 +851,7 @@ void VulkanRTX::initBlackFallbackImage() {
     VK_CHECK(vkAllocateMemory(device_, &allocInfo, nullptr, &rawMem));
     VK_CHECK(vkBindImageMemory(device_, rawImg, rawMem, 0));
 
-    blackFallbackMemory_ = RTX::MakeHandle(rawMem, device_,
+    blackFallbackMemory_ = MakeHandle(rawMem, device_,
         [](VkDevice d, VkDeviceMemory m, const VkAllocationCallbacks*) { vkFreeMemory(d, m, nullptr); });
     blackFallbackMemory_.tag = "BlackFallbackMemory";
     blackFallbackMemory_.size = memReqs.size;
@@ -863,7 +860,7 @@ void VulkanRTX::initBlackFallbackImage() {
                     memReqs.size >> 10, memType);
 
     // --- UPLOAD THE DARKNESS (async, because even black deserves speed) ---
-    VkCommandBuffer cmd = beginOneTime(RTX::g_ctx().commandPool_);
+    VkCommandBuffer cmd = beginOneTime(g_ctx().commandPool_);
 
     // UNDEFINED → TRANSFER_DST_OPTIMAL
     VkImageMemoryBarrier barrier{
@@ -899,7 +896,7 @@ void VulkanRTX::initBlackFallbackImage() {
     vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
                          0, 0, nullptr, 0, nullptr, 1, &barrier);
 
-    endSingleTimeCommandsAsync(cmd, RTX::g_ctx().graphicsQueue(), RTX::g_ctx().commandPool_);
+    endSingleTimeCommandsAsync(cmd, g_ctx().graphicsQueue(), g_ctx().commandPool_);
 
     BUFFER_DESTROY(staging);
     LOG_SUCCESS_CAT("RTX", "Black pixel uploaded — the abyss stares back");
@@ -917,14 +914,14 @@ void VulkanRTX::initBlackFallbackImage() {
 
     VkImageView rawView = VK_NULL_HANDLE;
     VK_CHECK(vkCreateImageView(device_, &viewInfo, nullptr, &rawView));
-    blackFallbackView_ = RTX::MakeHandle(rawView, device_,
+    blackFallbackView_ = MakeHandle(rawView, device_,
         [](VkDevice d, VkImageView v, const VkAllocationCallbacks*) { vkDestroyImageView(d, v, nullptr); });
     blackFallbackView_.tag = "BlackFallbackView";
 
     LOG_SUCCESS_CAT("RTX", "{}BLACK FALLBACK IMAGE READY — SAFETY NET OF THE VOID ACTIVE{}", PLASMA_FUCHSIA, RESET);
     LOG_AMOURANTH("Amouranth whispers: \"Even darkness needs a home... and I just gave it one.\"");
 
-    RTX::AmouranthAI::get().onMemoryEvent("Black Fallback Image", memReqs.size);
+    AmouranthAI::get().onMemoryEvent("Black Fallback Image", memReqs.size);
     LOG_TRACE_CAT("RTX", "initBlackFallbackImage — COMPLETE — FIRST LIGHT PROTECTED");
 }
 
@@ -1105,97 +1102,6 @@ uint64_t VulkanRTX::alignUp(uint64_t value, uint64_t alignment) const noexcept {
 }
 
 namespace RTX {
-
-// =============================================================================
-// 3. Physical Device Selection — STONEKEY v∞ DELAYED ACTIVATION (CRITICAL)
-// =============================================================================
-void pickPhysicalDevice()
-{
-    LOG_TRACE_CAT("VULKAN", "→ Entering RTX::pickPhysicalDevice() — scanning for physical devices");
-
-    // CRITICAL: Use RAW instance — StoneKey is NOT active yet!
-    VkInstance rawInstance = g_context_instance.instance_;
-    LOG_TRACE_CAT("VULKAN", "    • Using RAW instance for enumeration: 0x{:016x}", reinterpret_cast<uintptr_t>(rawInstance));
-
-    uint32_t deviceCount = 0;
-    LOG_TRACE_CAT("VULKAN", "    • Enumerating physical device count (first pass)");
-    VK_CHECK_NOMSG(vkEnumeratePhysicalDevices(rawInstance, &deviceCount, nullptr));
-    LOG_TRACE_CAT("VULKAN", "    • Device count queried: {}", deviceCount);
-
-    if (deviceCount == 0) {
-        LOG_FATAL_CAT("VULKAN", "No Vulkan physical devices found — cannot continue");
-        std::terminate();
-    }
-
-    std::vector<VkPhysicalDevice> devices(deviceCount);
-    LOG_TRACE_CAT("VULKAN", "    • Enumerating physical devices (second pass)");
-    VK_CHECK_NOMSG(vkEnumeratePhysicalDevices(rawInstance, &deviceCount, devices.data()));
-    LOG_TRACE_CAT("VULKAN", "    • Enumeration complete — {} devices populated", deviceCount);
-
-    LOG_TRACE_CAT("VULKAN", "    • Scanning {} devices for discrete GPU preference", deviceCount);
-
-    VkPhysicalDevice selected = VK_NULL_HANDLE;
-
-    for (size_t i = 0; i < devices.size(); ++i) {
-        const auto& device = devices[i];
-        VkPhysicalDeviceProperties props{};
-        vkGetPhysicalDeviceProperties(device, &props);
-
-        LOG_TRACE_CAT("VULKAN", "      • Device {}: '{}' — Type: {} — Vendor: 0x{:x} — API: {}.{}.{}",
-                      i, props.deviceName, props.deviceType,
-                      props.vendorID,
-                      VK_VERSION_MAJOR(props.apiVersion),
-                      VK_VERSION_MINOR(props.apiVersion),
-                      VK_VERSION_PATCH(props.apiVersion));
-
-        if (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) {
-            LOG_TRACE_CAT("VULKAN", "        • DISCRETE GPU FOUND — claiming throne");
-            selected = device;
-            g_ctx().physicalDevice_ = selected;
-
-            LOG_SUCCESS_CAT("VULKAN", "{}DISCRETE GPU CLAIMED{} — {} (API: {}.{}.{})",
-                            PLASMA_FUCHSIA, RESET,
-                            props.deviceName,
-                            VK_VERSION_MAJOR(props.apiVersion),
-                            VK_VERSION_MINOR(props.apiVersion),
-                            VK_VERSION_PATCH(props.apiVersion));
-
-            AI_INJECT("I have claimed the discrete throne: {}", props.deviceName);
-            break;
-        }
-    }
-
-    // Fallback if no discrete GPU
-    if (selected == VK_NULL_HANDLE) {
-        selected = devices[0];
-        g_ctx().physicalDevice_ = selected;
-
-        VkPhysicalDeviceProperties props{};
-        vkGetPhysicalDeviceProperties(selected, &props);
-
-        LOG_SUCCESS_CAT("VULKAN", "{}FALLBACK GPU SELECTED{} — {} ({})",
-                        EMERALD_GREEN, RESET,
-                        props.deviceName,
-                        [t = props.deviceType]() -> const char* {
-                            switch (t) {
-                                case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU: return "Integrated";
-                                case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU:   return "Virtual";
-                                case VK_PHYSICAL_DEVICE_TYPE_CPU:            return "CPU";
-                                default:                                     return "Other";
-                            }
-                        }());
-
-        AI_INJECT("I will make do with what is given: {}", props.deviceName);
-    }
-
-    // CRITICAL: NOW — AND ONLY NOW — ENGAGE STONEKEY ON THE INSTANCE
-    // All vkEnumeratePhysicalDevices() calls are done. Safe to obfuscate.
-
-    LOG_SUCCESS_CAT("VULKAN", "{}STONEKEY v∞ ENGAGED ON VkInstance — FULL OBFUSCATION ACTIVE — APOCALYPSE v3.2 ARMED{}",
-                    LILAC_LAVENDER, RESET);
-
-    LOG_TRACE_CAT("VULKAN", "← Exiting RTX::pickPhysicalDevice() — GPU selected, StoneKey armed");
-}
 
 // =============================================================================
 // 5. Command Pool

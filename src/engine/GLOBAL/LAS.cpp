@@ -9,6 +9,7 @@
 #include "engine/GLOBAL/LAS.hpp"
 #include "engine/GLOBAL/RTXHandler.hpp"
 #include "engine/GLOBAL/BufferManager.hpp"
+#include "engine/GLOBAL/SwapchainManager.hpp"
 
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_core.h>

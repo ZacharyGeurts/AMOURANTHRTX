@@ -15,7 +15,7 @@
 
 #pragma once
 #include <vulkan/vulkan.h>
-#include <SDL3/SDL.h>  // Added for SDL_Window
+#include <SDL3/SDL.h>
 #include <atomic>
 #include <vector>
 #include <cstdio>
@@ -41,11 +41,11 @@ namespace StoneKey {
         // SDL Window
         static inline std::atomic<SDL_Window*> window{ nullptr };
 
-        // Swapchain state
+        // Swapchain state – non-atomic, only touched during init / resize (single-threaded)
         static inline std::vector<VkImage>     images;
         static inline std::vector<VkImageView> views;
         static inline VkRenderPass             pass{ VK_NULL_HANDLE };
-        static inline VkExtent2D               extent{ 0, 0 };  // Fixed: Initialize to 0; set dynamically
+        static inline VkExtent2D               extent{ 0, 0 };
         static inline uint32_t                 image_count{ 0 };
 
         // One-time seal
@@ -63,28 +63,19 @@ namespace StoneKey {
 
     [[nodiscard]] inline VulkanRenderer* stone_renderer() noexcept {
         auto* r = Empire::renderer.load(std::memory_order_acquire);
-        if (!r) {
-            LOG_ERROR("StoneKey", "Renderer is null - aborting");
-            std::abort();  // Retained abort for speed; consider throwing in non-performance-critical builds
-        }
+        if (!r) { LOG_ERROR("StoneKey", "Renderer is null"); std::abort(); }
         return r;
     }
 
     [[nodiscard]] inline RTX::PipelineManager* stone_pipeline() noexcept {
         auto* p = Empire::pipeline.load(std::memory_order_acquire);
-        if (!p) {
-            LOG_ERROR("StoneKey", "Pipeline manager is null - aborting");
-            std::abort();
-        }
+        if (!p) { LOG_ERROR("StoneKey", "Pipeline manager is null"); std::abort(); }
         return p;
     }
 
     [[nodiscard]] inline SDL_Window* stone_window() noexcept {
         auto* w = Empire::window.load(std::memory_order_acquire);
-        if (!w) {
-            LOG_ERROR("StoneKey", "Window is null - aborting");
-            std::abort();
-        }
+        if (!w) { LOG_ERROR("StoneKey", "Window is null"); std::abort(); }
         return w;
     }
 
@@ -94,10 +85,21 @@ namespace StoneKey {
     [[nodiscard]] inline VkExtent2D    stone_extent() noexcept { return Empire::extent; }
     [[nodiscard]] inline uint32_t      stone_width()  noexcept { return Empire::extent.width; }
     [[nodiscard]] inline uint32_t      stone_height() noexcept { return Empire::extent.height; }
-    [[nodiscard]] inline uint32_t      stone_image_count() noexcept { return Empire::image_count; }
+
+    // NEW — the two helpers that killed the last two errors
+    [[nodiscard]] inline uint32_t stone_swapchain_image_count() noexcept {
+        uint32_t cnt = 0;
+        vkGetSwapchainImagesKHR(stone_device(), stone_swapchain(), &cnt, nullptr);
+        return cnt;
+    }
+
+    // Optional convenience – exact same behaviour as stone_swapchain_image_count()
+    [[nodiscard]] inline uint32_t stone_image_count() noexcept {
+        return Empire::image_count;
+    }
 
     // ========================================================================
-    // SEALERS — call as many times as you want
+    // SEALERS
     // ========================================================================
     inline void stone_seal_instance(VkInstance i)       noexcept { Empire::instance.store(i, std::memory_order_release); }
     inline void stone_seal_device(VkDevice d)           noexcept { Empire::device.store(d, std::memory_order_release); }
@@ -108,7 +110,6 @@ namespace StoneKey {
     inline void stone_seal_pipeline(RTX::PipelineManager* p) noexcept { Empire::pipeline.store(p, std::memory_order_release); }
     inline void stone_seal_window(SDL_Window* w) noexcept { Empire::window.store(w, std::memory_order_release); }
 
-    // Additional sealers for non-atomic members (assuming single-threaded setup phase)
     inline void stone_seal_images(std::vector<VkImage>&& imgs) noexcept { Empire::images = std::move(imgs); }
     inline void stone_seal_views(std::vector<VkImageView>&& vws) noexcept { Empire::views = std::move(vws); }
     inline void stone_seal_pass(VkRenderPass p) noexcept { Empire::pass = p; }
@@ -116,13 +117,12 @@ namespace StoneKey {
     inline void stone_seal_image_count(uint32_t cnt) noexcept { Empire::image_count = cnt; }
 
     // ========================================================================
-    // FINAL SEAL — safe to call 1 or 1000 times
+    // FINAL SEAL
     // ========================================================================
     inline void stone_seal_final() noexcept {
         const bool was_sealed = Empire::sealed.exchange(true, std::memory_order_acq_rel);
-        if (was_sealed) return;  // already sealed — do nothing
+        if (was_sealed) return;
 
-        // Fixed: Add basic validation before sealing
         if (stone_instance() == VK_NULL_HANDLE || stone_device() == VK_NULL_HANDLE ||
             stone_physical() == VK_NULL_HANDLE || stone_surface() == VK_NULL_HANDLE ||
             stone_swapchain() == VK_NULL_HANDLE || stone_renderer() == nullptr ||
@@ -137,13 +137,11 @@ namespace StoneKey {
     }
 
     // ========================================================================
-    // LEGACY SUPPORT — g_*() still works (optional)
+    // LEGACY SUPPORT (optional)
     // ========================================================================
     [[nodiscard]] inline VkDevice   g_device()   noexcept { return stone_device(); }
     [[nodiscard]] inline VkInstance g_instance() noexcept { return stone_instance(); }
-    [[nodiscard]] inline auto&      g_swapchain_images() noexcept { return stone_images(); }
     inline void set_g_device(VkDevice d) noexcept { stone_seal_device(d); }
-    // etc... (add more as needed)
 };
 
 // =============================================================================

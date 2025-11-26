@@ -1,4 +1,4 @@
-// src/engine/Vulkan/VulkanPipelineManager.cpp
+// src/engine/GLOBAL/PipelineManager.cpp
 // =============================================================================
 // AMOURANTH RTX Engine (C) 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================

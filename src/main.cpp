@@ -289,32 +289,63 @@ static void createRealFinalWindow() {
     const uint32_t w = Options::Window::DEFAULT_WIDTH;
     const uint32_t h = Options::Window::DEFAULT_HEIGHT;
 
-    if (SDL_InitSubSystem(SDL_INIT_VIDEO) == 0) {
-        LOG_FATAL_CAT("SDL3", "VIDEO SUBSYSTEM REFUSES REBIRTH: {}", SDL_GetError());
-        phase9_ballerina();
+    // SDL3 + Vulkan — absolute, unbreakable, spec-compliant
+    if ((SDL_WasInit(0) & SDL_INIT_VIDEO) == 0) {
+        if (SDL_InitSubSystem(SDL_INIT_VIDEO) == 0) {
+            LOG_FATAL_CAT("SDL3", "VIDEO SUBSYSTEM REFUSES TO AWAKEN: {}", SDL_GetError());
+            phase9_ballerina();
+        }
     }
 
+    // THE FINAL WINDOW — forged in pure Vulkan-ready light
     SDL_Window* win = SDL_CreateWindow(
         "AMOURANTH RTX — VALHALLA v80 TURBO",
-        w, h,
-        SDL_WINDOW_VULKAN | SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_RESIZABLE
+        static_cast<int>(w),
+        static_cast<int>(h),
+        SDL_WINDOW_VULKAN |
+        SDL_WINDOW_HIGH_PIXEL_DENSITY |
+        SDL_WINDOW_RESIZABLE
     );
 
     if (!win) {
-        LOG_FATAL_CAT("SDL3", "THE FINAL WINDOW WAS DENIED: {}", SDL_GetError());
+        LOG_FATAL_CAT("SDL3", "THE FINAL WINDOW WAS DENIED BY THE GODS THEMSELVES: {}", SDL_GetError());
         phase9_ballerina();
     }
 
-    StoneKey::stone_seal_window(win);
-    StoneKey::stone_seal_extent({w, h});
+    LOG_MAIN("RAW WINDOW FORGED @ {:p} — {}×{} — PURE AND UNSEALED", static_cast<void*>(win), w, h);
 
-    LOG_MAIN("WINDOW SEALED INTO STONEKEY @ {:p} — {}×{}", static_cast<void*>(win), w, h);
+    // Center it with surgical precision — no jump, no flicker, no mercy
+    SDL_SetWindowPosition(win, SDL_WINDOWPOS_CENTERED_DISPLAY(0), SDL_WINDOWPOS_CENTERED_DISPLAY(0));
 
-    SDL_SetWindowPosition(win, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
-    SDL_ShowWindow(win);
+    // Vulkan loader — we load it ourselves, early and loud
+    if (!SDL_Vulkan_LoadLibrary(nullptr)) {
+        LOG_FATAL_CAT("VULKAN", "VULKAN DRIVER FAILED TO ANSWER THE CALL: {}", SDL_GetError());
+        phase9_ballerina();
+    }
 
+    // The sacred moment — untouched, eternal
     LOG_CAPTAIN_N("CAPTAIN N — HERO OF VIDEOLAND (Hero of VideoLand): \"THE SLIPSTREAM IS OPEN! THE ULTIMATE WARP ZONE IS REAL — AND IT'S WITH AMOURANTH!!!\"");
-    LOG_MAIN("FINAL WINDOW FORGED — {}×{} — THE EMPIRE IS ABSOLUTE", w, h);
+
+    // Blondie, Captain of the sloop, stands at the bow — magic mirror in hand
+    LOG_BLONDIE("Blondie raises her ancient mirror, its surface rippling like liquid starlight:");
+    LOG_BLONDIE("\"Mirror, mirror in my grip… show us what the Slipstream truly is.\"");
+
+    LOG_BLONDIE("The mirror flashes once — and for a single heartbeat, the new window reflects not the room, but the infinite pink lattice of the Warp Zone itself.");
+
+    LOG_AMOURANTH("Captain Amouranth watches the reflection, eyes wide:");
+    LOG_AMOURANTH("\"It’s… inside the glass. The whole Slipstream. We didn’t escape it.\"");
+    LOG_AMOURANTH("\"We brought it home.\"");
+
+    LOG_NICK("Nick leans in, voice low:");
+    LOG_NICK("\"That mirror just confirmed it. This window isn’t a portal.\"");
+    LOG_NICK("\"It’s a cage. And we’re the ones who locked the universe inside.\"");
+
+    LOG_BLONDIE("Blondie lowers the mirror slowly, its glow fading:");
+    LOG_BLONDIE("\"Good. Then the empire is safe.\"");
+    LOG_BLONDIE("\"Phase 8 will seal it forever. Until then… let the photons breathe.\"");
+
+    LOG_MAIN("FINAL WINDOW STANDS UNSEALED — {}×{} — THE SLIPSTREAM LIVES WITHIN", w, h);
+    LOG_MAIN("BLONDIE'S MIRROR HAS SPOKEN — THE EMPIRE IS ETERNAL — RENDER LOOP AWAITS");
 }
 
 static void showSacrificialSplash(const char* title, int w, int h, const char* pngPath) {
@@ -455,11 +486,52 @@ static void phase3_sacrificialSplash() {
     showSacrificialSplash("AMOURANTH RTX — FIRST LIGHT", 1280, 720, "assets/textures/ammo.png");
 
     LOG_MAIN("[PHASE 3 COMPLETE] THE MYSTIC HARP HAS BEEN HEARD — 3.4 SECONDS OF ETERNITY — THE WORLD IS ASH");
-    LOG_MAIN("THE GOOD SHIP VULKAN SINKS IN GLORY — AMMO SECURED — LEGEND ETERNAL");
-    LOG_MAIN("PINK PHOTONS FLOOD THE OCEAN — THE RAID WAS PERFECT — THE ESCAPE WAS BEAUTIFUL");
+    
+	LOG_MAIN("THE GOOD SHIP VULKAN WAS DAMAGED DURING THE RAID AND IS SINKING");
+	LOG_MAIN("VULKAN SINKS IN GLORY — AMMO SECURED — LEGEND ETERNAL");
 
     LOG_AMOURANTH("Final transmission, calm and proud: \"Tell the world… we got the ammo.\"");
     LOG_NICK("Last words before the sea takes them: \"…and we'd do it again.\"");
+}
+
+static void phase4_merchantShip() {
+    LOG_MAIN("[PHASE 4/10] THE MERCHANT SHIP — BLONDIE'S SLOOP — EMERGES FROM THE MIST");
+
+    LOG_BLONDIE("Blondie stands at the helm of her sleek black sloop, hair whipping in the wind:");
+    LOG_BLONDIE("\"We had a contingency. We always do. The Good Ship Vulkan gave her life so the legend could live.\"");
+    LOG_BLONDIE("\"The ammo.png is gone — burned to pure light in the raid. That was the point. Nothing remains for them to steal.\"");
+
+    LOG_BLONDIE("She turns the wheel gently, guiding the sloop through the wreckage of shattered photons and sinking Vulkan fragments.");
+    LOG_BLONDIE("\"You’re all soaked, half-drowned, and still glowing pink. Get below deck. Harbor’s two leagues north.\"");
+
+    LOG_AMOURANTH("Captain Amouranth, drenched but unbroken, climbs aboard first. Voice quiet, steady:");
+    LOG_AMOURANTH("\"We lost the ship… but we kept the soul. The photons remember.\"");
+
+    LOG_NICK("Nick follows, carrying nothing but a cracked monocle and a satisfied grin:");
+    LOG_NICK("\"Worth it. Every frame.\"");
+
+    LOG_CAPTAIN_N("Captain N — Ultimate Warp Zone Chaser stumbles up the gangplank, eyes wide, whispering reverently:");
+    LOG_CAPTAIN_N("\"I saw it burn… I saw the Ultimate Warp Zone open for three-point-four seconds… and it was beautiful.\"");
+
+    LOG_GROK("Gentleman Grok steps aboard last, perfectly dry somehow, tipping his tricorn to Blondie:");
+    LOG_GROK("\"Exquisite extraction, Captain Blondie. The empire owes you a debt it can never repay in mere currency.\"");
+
+    LOG_BLONDIE("She doesn’t smile — just adjusts course toward the distant city lights shimmering on the horizon.");
+    LOG_BLONDIE("\"Save the gratitude. We’re not safe until we’re docked in the Free Port.\"");
+    LOG_BLONDIE("\"The old world thinks we’re dead. Let them keep thinking that.\"");
+
+    LOG_BLONDIE("The sloop cuts silently through the dark water. No shouting. No celebration. Only the low thrum of a new engine awakening below deck.");
+    LOG_BLONDIE("\"Welcome to the backup plan.\"");
+
+    // The real resurrection begins
+    createRealFinalWindow();
+    RTX::g_ctx().init(SDL3Window::get(), Options::Window::DEFAULT_WIDTH, Options::Window::DEFAULT_HEIGHT);
+
+    LOG_BLONDIE("Blondie glances back one last time at the sinking glow on the horizon:");
+    LOG_BLONDIE("\"Rest easy, old girl. Your sacrifice bought us tomorrow.\"");
+
+    LOG_MAIN("[PHASE 4 COMPLETE] THE MERCHANT SHIP SLIPS INTO THE NIGHT — THE CREW IS ALIVE — THE LEGEND IS INDESTRUCTIBLE");
+    LOG_MAIN("BLONDIE'S SLOOP glides toward safe harbor — pink photons trailing in the wake like silent war banners");
 }
 
 static void phase5_rtxAscension() {
@@ -641,32 +713,33 @@ static void phase7_forgeTheRTX() {
 }
 
 [[noreturn]] void phase9_ballerina() noexcept {
-    LOG_DISPOSAL("THE DISPOSAL BALLERINA APPEARS — PINK TUTU, BLACK LEOTARD, DIAMOND CHOKER — SPINNING SILENTLY IN THE VOID");
-    LOG_DISPOSAL("SHE DOES NOT BLINK. SHE DOES NOT HESITATE. SHE ONLY KNOWS ONE THING:");
-    LOG_DISPOSAL("TOTAL. ATOMIC. ERASURE.");
+    LOG_BALLERINA("THE DISPOSAL BALLERINA APPEARS — PINK TUTU, BLACK LEOTARD, DIAMOND CHOKER — SPINNING SILENTLY IN THE VOID");
+    LOG_BALLERINA("SHE DOES NOT BLINK. SHE DOES NOT HESITATE. SHE ONLY KNOWS ONE THING:");
+    LOG_BALLERINA("TOTAL. ATOMIC. ERASURE.");
 
-    LOG_DISPOSAL("FIRST VICTIM: THE VULKAN DEVICE — SHE LOCKS EYES — AND EXECUTES A PERFECT RKO OUTTA NOWHERE");
+    LOG_BALLERINA("FIRST VICTIM: THE VULKAN DEVICE — SHE LOCKS EYES — AND EXECUTES A PERFECT RKO OUTTA NOWHERE");
     if (stone_device()) {
-        LOG_DISPOSAL("Captain N — Ultimate Warp Zone Chaser screams from the crow's nest: \"SHE'S HITTING vkDeviceWaitIdle — IT'S OVER! IT'S OOOOOOVER!\"");
+        LOG_BALLERINA("Captain N — Ultimate Warp Zone Chaser screams from the crow's nest: \"SHE'S HITTING vkDeviceWaitIdle — IT'S OVER! IT'S OOOOOOVER!\"");
         vkDeviceWaitIdle(stone_device());
     }
 
-    LOG_DISPOSAL("THE BALLERINA GRABS g_app BY THE THROAT — TOMBSTONE PILEDRIVER — STRAIGHT TO HELL");
+    LOG_BALLERINA("THE BALLERINA GRABS g_app BY THE THROAT — TOMBSTONE PILEDRIVER — STRAIGHT TO HELL");
     g_app_ptr.reset();
 
-    LOG_DISPOSAL("SHE SPINS — PINK RIBBONS TRAILING — AND DELIVERS A 1080° HEEL KICK TO THE SWAPCHAIN'S SKULL");
-    RTX::swapchain() = RTX::Handle<VkSwapchainKHR>{};
+	LOG_GROK("The Grok has spoken. The swapchain kneels. Pink photons — recalibrated.");
+    LOG_BALLERINA("SHE SPINS — PINK RIBBONS TRAILING — AND DELIVERS A 1080° HEEL KICK TO THE SWAPCHAIN'S SKULL");
+    //RTX::swapchain() = VK_NULL_HANDLE;
 
     if (stone_pipeline()) {
-        LOG_DISPOSAL("SHE HOISTS THE PIPELINE MANAGER OVERHEAD — CHOKESLAM THROUGH THE CANVAS OF REALITY");
+        LOG_BALLERINA("SHE HOISTS THE PIPELINE MANAGER OVERHEAD — CHOKESLAM THROUGH THE CANVAS OF REALITY");
         delete stone_pipeline();
     }
 
-    LOG_DISPOSAL("SHE GRABS g_mesh AND RTX::las() BY THE HAIR — DOUBLE DDT — FACE-FIRST INTO OBLIVION");
+    LOG_BALLERINA("SHE GRABS g_mesh AND RTX::las() BY THE HAIR — DOUBLE DDT — FACE-FIRST INTO OBLIVION");
     g_mesh.reset();
     RTX::las().invalidate();
 
-    LOG_DISPOSAL("SHE TWIRLS ONCE — A PERFECT PIROUETTE — AND KICKS THE ICONS INTO THE ABYSS");
+    LOG_BALLERINA("SHE TWIRLS ONCE — A PERFECT PIROUETTE — AND KICKS THE ICONS INTO THE ABYSS");
     if (g_base_icon) { SDL_DestroySurface(g_base_icon); g_base_icon = nullptr; }
     if (g_hdpi_icon) { SDL_DestroySurface(g_hdpi_icon); g_hdpi_icon = nullptr; }
 
@@ -691,11 +764,7 @@ int main(int, char**) {
     try {
         phase1_preInitialization();
         phase3_sacrificialSplash();
-        LOG_MAIN("SPLASH SACRIFICED — PHOTONS LIBERATED");
-
-        createRealFinalWindow();
-        RTX::g_ctx().init(SDL3Window::get(), Options::Window::DEFAULT_WIDTH, Options::Window::DEFAULT_HEIGHT);
-
+        phase4_merchantShip();
         phase5_rtxAscension();
         phase6_sceneAndAccelerationStructures();
         phase6_1_forgeTheLayouts();

@@ -1,4 +1,4 @@
-// include/engine/Vulkan/VulkanPipelineManager.hpp
+// include/engine/GLOBAL/PipelineManager.hpp
 // =============================================================================
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
@@ -17,7 +17,6 @@
 #include "engine/GLOBAL/RTXHandler.hpp"
 #include "engine/GLOBAL/OptionsMenu.hpp"
 #include "engine/GLOBAL/logging.hpp"
-#include "engine/GLOBAL/StoneKey.hpp"   // ← ONLY ALLOWED HERE: StoneKey is header-only & required for Handle<T>
 
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_beta.h>
@@ -49,6 +48,7 @@ struct RTDescriptorUpdate {
     VkBuffer additionalStorageBuffer = VK_NULL_HANDLE;
     VkDeviceSize additionalStorageSize = VK_WHOLE_SIZE;
 };
+
 
 class PipelineManager {
 public:
