@@ -248,7 +248,7 @@ inline VkFormat swapchainFormat() noexcept
 
     // Priority list — the empire's demands, in order
     const std::array desired = {
-        // 1. FP16 — GOD TIER — true HDR, infinite headroom
+        // 1. FP16 — KEEPER TIER — true HDR, infinite headroom
         VkSurfaceFormatKHR{ VK_FORMAT_R16G16B16A16_SFLOAT, VK_COLOR_SPACE_HDR10_ST2084_EXT },
         VkSurfaceFormatKHR{ VK_FORMAT_R16G16B16A16_SFLOAT, VK_COLOR_SPACE_DOLBYVISION_EXT },
         VkSurfaceFormatKHR{ VK_FORMAT_R16G16B16A16_SFLOAT, VK_COLOR_SPACE_BT2020_LINEAR_EXT },

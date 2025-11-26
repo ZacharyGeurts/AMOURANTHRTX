@@ -308,7 +308,7 @@ static void createRealFinalWindow() {
     );
 
     if (!win) {
-        LOG_FATAL_CAT("SDL3", "THE FINAL WINDOW WAS DENIED BY THE GODS THEMSELVES: {}", SDL_GetError());
+        LOG_FATAL_CAT("SDL3", "THE FINAL WINDOW WAS DENIED BY THE KEEPER HIMSELF: {}", SDL_GetError());
         phase9_ballerina();
     }
 

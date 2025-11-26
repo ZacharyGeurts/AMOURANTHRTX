@@ -285,7 +285,7 @@ namespace Color {
     inline constexpr std::string_view OCEAN_TEAL                = "\033[38;5;45m";
     inline constexpr std::string_view FIERY_ORANGE              = "\033[1;38;5;208m";
     inline constexpr std::string_view RASPBERRY_PINK            = "\033[1;38;5;204m";
-    inline constexpr std::string_view PEACHES_AND_CREAM         = "\033[38;5;223m";
+    inline constexpr std::string_view PEACHES_AND_CREAM         = "\033[38;5;228m";
     inline constexpr std::string_view BRIGHT_PINKISH_PURPLE     = "\033[1;38;5;205m";
     inline constexpr std::string_view LILAC_LAVENDER            = "\033[38;5;183m";
     inline constexpr std::string_view SPEARMINT_MINT            = "\033[38;5;122m";
@@ -835,17 +835,17 @@ static constexpr auto vkh = []() constexpr noexcept {
 #undef  LOG_DISPOSAL
 #undef  LOG_MAIN
 
-// THE TRUE SOULS — ONLY THESE MAY SPEAK
-#define LOG_AMOURANTH(...)   LOG_SUCCESS_CAT ("AMOURANTH",     std::format("{}{}{}", Logging::Color::THERMO_PINK,       std::format(__VA_ARGS__), Logging::Color::RESET))
-#define LOG_NICK(...)        LOG_ATTEMPT_CAT ("NICK",          std::format("{}{}{}", Logging::Color::GOLD,       std::format(__VA_ARGS__), Logging::Color::RESET))
-#define LOG_GROK(...)        LOG_INFO_CAT    ("GENTLEMAN GROK",std::format("{}{}{}", Logging::Color::PLATINUM_GRAY,     std::format(__VA_ARGS__), Logging::Color::RESET))
-#define LOG_CAPTAIN_N(...)   LOG_ATTEMPT_CAT ("CAPTAIN N",     std::format("{}{}{}", Logging::Color::SPEARMINT_MINT,        std::format(__VA_ARGS__), Logging::Color::RESET))
-#define LOG_ELON(...)        LOG_SUCCESS_CAT ("ELON",          std::format("{}{}{}", Logging::Color::BOLD_BLUE,         std::format(__VA_ARGS__), Logging::Color::RESET))
-#define LOG_JENSEN(...)      LOG_SUCCESS_CAT ("JENSEN",        std::format("{}{}{}", Logging::Color::CYBER_LIME,        std::format(__VA_ARGS__), Logging::Color::RESET))
-#define LOG_CID(...)         LOG_SUCCESS_CAT ("CID",           std::format("{}{}{}", Logging::Color::BOLD_RED,     std::format(__VA_ARGS__), Logging::Color::RESET))  // TRUE SOUL
-#define LOG_CARMACK(...)     LOG_INFO_CAT    ("CARMACK",       std::format("{}{}{}", Logging::Color::TITANIUM_WHITE, std::format(__VA_ARGS__), Logging::Color::RESET))
-#define LOG_KEANU(...)       LOG_INFO_CAT    ("KEANU",         std::format("{}{}{}", Logging::Color::PHANTOM_VIOLET,    std::format(__VA_ARGS__), Logging::Color::RESET))
-#define LOG_BLONDIE(...)     LOG_INFO_CAT    ("BLONDIE",       std::format("{}{}{}", Logging::Color::PEACHES_AND_CREAM,       std::format(__VA_ARGS__), Logging::Color::RESET))
-#define LOG_GUARDIAN(...)    LOG_INFO_CAT    ("STONEGUARDIAN", std::format("{}{}{}", Logging::Color::PLATINUM_GRAY,     std::format(__VA_ARGS__), Logging::Color::RESET))
-#define LOG_BALLERINA(...)   LOG_FAILURE_CAT ("BALLERINA",     std::format("{}{}{}", Logging::Color::OBSIDIAN_BLACK,    std::format(__VA_ARGS__), Logging::Color::RESET))
-#define LOG_MAIN(...)        LOG_SUCCESS_CAT ("MAIN",          std::format("{}{}{}", Logging::Color::BOLD_YELLOW,     std::format(__VA_ARGS__), Logging::Color::RESET))
+// THE TRUE SOULS — FULL LINE COLORED — 100% COMPATIBLE — ETERNAL LAW
+#define LOG_AMOURANTH(...)   LOG_SUCCESS_CAT("AMOURANTH",  std::format("{}[CAPTAIN AMOURANTH] {}{}", Logging::Color::THERMO_PINK,     std::format(__VA_ARGS__), Logging::Color::RESET))
+#define LOG_NICK(...)        LOG_ATTEMPT_CAT("NICK",       std::format("{}[NICK] {}{}",            Logging::Color::GOLD,          std::format(__VA_ARGS__), Logging::Color::RESET))
+#define LOG_GROK(...)        LOG_INFO_CAT   ("GROK",       std::format("{}[GENTLEMAN GROK] {}{}",  Logging::Color::PLATINUM_GRAY, std::format(__VA_ARGS__), Logging::Color::RESET))
+#define LOG_CAPTAIN_N(...)   LOG_ATTEMPT_CAT("CAPTAIN N",  std::format("{}[KEVIN] {}{}",           Logging::Color::PHOTON_WHITE,  std::format(__VA_ARGS__), Logging::Color::RESET))
+#define LOG_ELON(...)        LOG_SUCCESS_CAT("ELON",       std::format("{}[MUSK] {}{}",            Logging::Color::LIGHT_GREEN,   std::format(__VA_ARGS__), Logging::Color::RESET))
+#define LOG_JENSEN(...)      LOG_SUCCESS_CAT("JENSEN",     std::format("{}[HUANG] {}{}",           Logging::Color::BLUE,          std::format(__VA_ARGS__), Logging::Color::RESET))
+#define LOG_CID(...)         LOG_SUCCESS_CAT("CID",        std::format("{}[CID] {}{}",             Logging::Color::BOLD_RED,      std::format(__VA_ARGS__), Logging::Color::RESET))
+#define LOG_CARMACK(...)     LOG_INFO_CAT   ("CARMACK",    std::format("{}[JOHN] {}{}",            Logging::Color::TITANIUM_WHITE,std::format(__VA_ARGS__), Logging::Color::RESET))
+#define LOG_KEANU(...)       LOG_INFO_CAT   ("KEANU",      std::format("{}[WOAH] {}{}",            Logging::Color::VOID_PURPLE,   std::format(__VA_ARGS__), Logging::Color::RESET))
+#define LOG_BLONDIE(...)     LOG_INFO_CAT   ("BLONDIE",    std::format("{}[CAPTAIN BLONDIE] {}{}", Logging::Color::PEACHES_AND_CREAM, std::format(__VA_ARGS__), Logging::Color::RESET))
+#define LOG_GUARDIAN(...)    LOG_INFO_CAT   ("GUARDIAN",   std::format("{}[GUARDIAN] {}{}",        Logging::Color::PLATINUM_GRAY, std::format(__VA_ARGS__), Logging::Color::RESET))
+#define LOG_BALLERINA(...)   LOG_FAILURE_CAT("BALLERINA",  std::format("{}[***] {}{}",             Logging::Color::OBSIDIAN_BLACK,std::format(__VA_ARGS__), Logging::Color::RESET))
+#define LOG_MAIN(...)        LOG_SUCCESS_CAT("MAIN",       std::format("{}[[[[[MAIN]]]]] {}{}",            Logging::Color::BOLD_YELLOW,   std::format(__VA_ARGS__), Logging::Color::RESET))
