@@ -170,54 +170,109 @@ static VkImageView createImageView(VkImage image, VkFormat format, VkImageAspect
     return view;
 }
 
-void SwapchainManager::createSwapchain(SDL_Window*, uint32_t w, uint32_t h,
-                                       VkSwapchainKHR old) noexcept
+void SwapchainManager::createSwapchain(SDL_Window* window, uint32_t w, uint32_t h, VkSwapchainKHR old) noexcept
 {
     auto& ctx = g_ctx();
+
     VkSurfaceCapabilitiesKHR caps{};
-    vkGetPhysicalDeviceSurfaceCapabilitiesKHR(ctx.physicalDevice_, ctx.surface_, &caps);
+    VK_CHECK(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(ctx.physicalDevice_, ctx.surface_, &caps));
 
+    // Choose extent
     VkExtent2D extent = chooseSwapExtent(caps, w, h);
-    uint32_t count = caps.minImageCount + 1;
-    if (caps.maxImageCount) count = std::min(count, caps.maxImageCount);
 
-    QueueFamilyIndices qf = findQueueFamilies(ctx.physicalDevice_, ctx.surface_);
+    // Query supported formats and present modes
+    uint32_t formatCount = 0;
+    VK_CHECK(vkGetPhysicalDeviceSurfaceFormatsKHR(ctx.physicalDevice_, ctx.surface_, &formatCount, nullptr));
+    std::vector<VkSurfaceFormatKHR> formats(formatCount);
+    VK_CHECK(vkGetPhysicalDeviceSurfaceFormatsKHR(ctx.physicalDevice_, ctx.surface_, &formatCount, formats.data()));
 
-    VkSwapchainCreateInfoKHR ci{
-        .sType            = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
-        .surface          = ctx.surface_,
-        .minImageCount    = count,
-        .imageFormat      = swapchainFormat_,
-        .imageColorSpace  = currentColorSpace_,
-        .imageExtent      = extent,
-        .imageArrayLayers = 1,
-        .imageUsage       = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
-        .preTransform     = caps.currentTransform,
-        .compositeAlpha   = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
-        .presentMode      = currentPresentMode_,
-        .clipped          = VK_TRUE,
-        .oldSwapchain     = old
+    uint32_t presentModeCount = 0;
+    VK_CHECK(vkGetPhysicalDeviceSurfacePresentModesKHR(ctx.physicalDevice_, ctx.surface_, &presentModeCount, nullptr));
+    std::vector<VkPresentModeKHR> presentModes(presentModeCount);
+    VK_CHECK(vkGetPhysicalDeviceSurfacePresentModesKHR(ctx.physicalDevice_, ctx.surface_, &presentModeCount, presentModes.data()));
+
+    // Choose best format
+    VkSurfaceFormatKHR chosenFormat = formats[0];
+    for (const auto& f : formats) {
+        if (f.format == VK_FORMAT_B8G8R8A8_SRGB && f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
+            chosenFormat = f;
+            break;
+        }
+    }
+
+    // Choose best present mode: Mailbox > Immediate > FIFO
+    VkPresentModeKHR chosenPresentMode = VK_PRESENT_MODE_FIFO_KHR;
+    for (const auto& mode : presentModes) {
+        if (mode == VK_PRESENT_MODE_MAILBOX_KHR) {
+            chosenPresentMode = mode;
+            break;
+        }
+        if (mode == VK_PRESENT_MODE_IMMEDIATE_KHR) {
+            chosenPresentMode = mode;
+        }
+    }
+
+    // Image count
+    uint32_t imageCount = caps.minImageCount + 1;
+    if (caps.maxImageCount > 0) {
+        imageCount = std::min(imageCount, caps.maxImageCount);
+    }
+
+    // Queue families
+    QueueFamilyIndices indices = findQueueFamilies(ctx.physicalDevice_, ctx.surface_);
+    uint32_t queueFamilyIndices[] = { indices.graphicsFamily.value(), indices.presentFamily.value() };
+
+    VkSwapchainCreateInfoKHR ci = {
+        .sType                 = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
+        .surface               = ctx.surface_,
+        .minImageCount         = imageCount,
+        .imageFormat           = chosenFormat.format,
+        .imageColorSpace       = chosenFormat.colorSpace,
+        .imageExtent           = extent,
+        .imageArrayLayers      = 1,
+        .imageUsage            = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+        .preTransform          = caps.currentTransform,
+        .compositeAlpha        = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
+        .presentMode           = chosenPresentMode,
+        .clipped               = VK_TRUE,
+        .oldSwapchain          = old
     };
 
-    uint32_t qfi[] = { qf.graphicsFamily.value(), qf.presentFamily.value() };
-    if (qf.graphicsFamily != qf.presentFamily) {
-        ci.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
+    if (indices.graphicsFamily != indices.presentFamily) {
+        ci.imageSharingMode      = VK_SHARING_MODE_CONCURRENT;
         ci.queueFamilyIndexCount = 2;
-        ci.pQueueFamilyIndices = qfi;
+        ci.pQueueFamilyIndices   = queueFamilyIndices;
     } else {
-        ci.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        ci.imageSharingMode      = VK_SHARING_MODE_EXCLUSIVE;
     }
 
     VkSwapchainKHR raw = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateSwapchainKHR(ctx.device_, &ci, nullptr, &raw));
-    if (old) vkDestroySwapchainKHR(ctx.device_, old, nullptr);
+    VkResult result = vkCreateSwapchainKHR(ctx.device_, &ci, nullptr, &raw);
+    if (result != VK_SUCCESS) {
+        LOG_FATAL("SWAPCHAIN CREATION FAILED: {}", string_VkResult(result));
+        std::abort();
+    }
+
+    // Clean up old
+    if (old != VK_NULL_HANDLE) {
+        vkDestroySwapchainKHR(ctx.device_, old, nullptr);
+    }
 
     swapchain_ = Handle<VkSwapchainKHR>(raw, ctx.device_);
     swapchainExtent_ = extent;
+    swapchainFormat_ = chosenFormat.format;
+    currentColorSpace_ = chosenFormat.colorSpace;
+    currentPresentMode_ = chosenPresentMode;
 
-    vkGetSwapchainImagesKHR(ctx.device_, raw, &count, nullptr);
+    // Retrieve images
+    uint32_t count = 0;
+    VK_CHECK(vkGetSwapchainImagesKHR(ctx.device_, raw, &count, nullptr));
     swapchainImages_.resize(count);
-    vkGetSwapchainImagesKHR(ctx.device_, raw, &count, swapchainImages_.data());
+    VK_CHECK(vkGetSwapchainImagesKHR(ctx.device_, raw, &count, swapchainImages_.data()));
+
+    LOG_SUCCESS_CAT("RTX", "Swapchain reborn — {}x{} | {} images | {} | {}",
+                    extent.width, extent.height, count,
+                    string_VkFormat(swapchainFormat_), string_VkPresentModeKHR(chosenPresentMode));
 }
 
 void SwapchainManager::createImageViews() noexcept

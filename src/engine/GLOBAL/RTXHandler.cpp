@@ -9,6 +9,7 @@
 #include "engine/GLOBAL/VulkanRenderer.hpp"
 #include <SDL3/SDL_vulkan.h>
 #include <algorithm>
+#include <unordered_set>
 #include <set>
 
 using namespace Logging::Color;
@@ -305,37 +306,115 @@ void cleanupAll() noexcept {
 // -----------------------------------------------------------------------------
 // THE ONE TRUE FUNCTION — createLogicalDevice + retrieveQueues in perfect union
 // -----------------------------------------------------------------------------
-// =============================================================================
-// THE ONE TRUE FUNCTION — GPU + DEVICE + QUEUES + FEATURES — ALL IN ONE
-// =============================================================================
 [[nodiscard]] VkDevice createLogicalDeviceAndSelectGPU(VkInstance instance, VkSurfaceKHR surface) noexcept
 {
-    LOG_MAIN("THE ONE TRUE FORGING BEGINS — GPU + DEVICE + QUEUES — PINK PHOTONS ETERNAL");
-
     uint32_t deviceCount = 0;
-    VK_CHECK_NOMSG(vkEnumeratePhysicalDevices(instance, &deviceCount, nullptr));
-    if (deviceCount == 0) {
-        LOG_BALLERINA("NO ENGINES. THE EMPIRE FALLS INTO THE VOID.");
-        std::exit(666);
+    if (vkEnumeratePhysicalDevices(instance, &deviceCount, nullptr) != VK_SUCCESS || deviceCount == 0) {
+        return VK_NULL_HANDLE;
     }
 
     std::vector<VkPhysicalDevice> devices(deviceCount);
-    VK_CHECK_NOMSG(vkEnumeratePhysicalDevices(instance, &deviceCount, devices.data()));
+    if (vkEnumeratePhysicalDevices(instance, &deviceCount, devices.data()) != VK_SUCCESS) {
+        return VK_NULL_HANDLE;
+    }
 
     VkPhysicalDevice chosen = VK_NULL_HANDLE;
     QueueFamilyIndices bestIndices;
+    int bestScore = -1;
 
     for (const auto& dev : devices) {
         VkPhysicalDeviceProperties props{};
-        VkPhysicalDeviceFeatures features{};
         vkGetPhysicalDeviceProperties(dev, &props);
-        vkGetPhysicalDeviceFeatures(dev, &features);
 
-        if (!features.geometryShader) continue;
+        if (VK_VERSION_MAJOR(props.apiVersion) < 1 || 
+            (VK_VERSION_MAJOR(props.apiVersion) == 1 && VK_VERSION_MINOR(props.apiVersion) < 4)) {
+            continue;
+        }
 
         QueueFamilyIndices indices = findQueueFamilies(dev, surface);
-        if (!indices.graphicsFamily || !indices.presentFamily) continue;
+        if (!indices.graphicsFamily.has_value() || !indices.presentFamily.has_value()) {
+            continue;
+        }
 
+        // Check required extensions
+        std::vector<const char*> requiredExtensions = {
+            VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+            VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
+            VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME,
+            VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME
+        };
+
+        uint32_t extCount = 0;
+        vkEnumerateDeviceExtensionProperties(dev, nullptr, &extCount, nullptr);
+        std::vector<VkExtensionProperties> availableExtensions(extCount);
+        vkEnumerateDeviceExtensionProperties(dev, nullptr, &extCount, availableExtensions.data());
+
+        std::unordered_set<std::string> availableExtSet;
+        for (const auto& ext : availableExtensions) {
+            availableExtSet.insert(ext.extensionName);
+        }
+
+        bool allExtensionsSupported = true;
+        for (const auto* req : requiredExtensions) {
+            if (availableExtSet.find(req) == availableExtSet.end()) {
+                allExtensionsSupported = false;
+                break;
+            }
+        }
+        if (!allExtensionsSupported) {
+            continue;
+        }
+
+        // Build feature chain for query
+        VkPhysicalDeviceVulkan12Features v12{
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
+            .pNext = nullptr,
+            .bufferDeviceAddress = VK_FALSE  // Will be set by query
+        };
+
+        VkPhysicalDeviceRayTracingPipelineFeaturesKHR rt{
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR,
+            .pNext = &v12,
+            .rayTracingPipeline = VK_FALSE
+        };
+
+        VkPhysicalDeviceAccelerationStructureFeaturesKHR as{
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR,
+            .pNext = &rt,
+            .accelerationStructure = VK_FALSE
+        };
+
+        VkPhysicalDeviceVulkan13Features v13{
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
+            .pNext = &as,
+            .synchronization2 = VK_FALSE,
+            .dynamicRendering = VK_FALSE
+        };
+
+        VkPhysicalDeviceVulkan14Features v14{
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES,
+            .pNext = &v13
+            // No specific 1.4 features enabled here; add if needed
+        };
+
+        VkPhysicalDeviceFeatures2 features2{
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
+            .pNext = &v14
+        };
+
+        vkGetPhysicalDeviceFeatures2(dev, &features2);
+
+        // Check required features
+        if (!features2.features.geometryShader ||
+            !v12.bufferDeviceAddress ||
+            !rt.rayTracingPipeline ||
+            !as.accelerationStructure ||
+            !v13.synchronization2 ||
+            !v13.dynamicRendering) {
+            continue;
+        }
+
+        // Compute score
         int score = 0;
         if (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) {
             score += 10000 + static_cast<int>(props.limits.maxImageDimension2D);
@@ -344,22 +423,20 @@ void cleanupAll() noexcept {
             score += 5000;
         }
 
-        if (score > 10000) {
+        if (score > bestScore) {
+            bestScore = score;
             chosen = dev;
-            bestIndices = std::move(indices);
-            LOG_SUCCESS_CAT("VULKAN", "ENGINE ACQUIRED → {} | Score: {}", props.deviceName, score);
-            break;
+            bestIndices = indices;
         }
     }
 
-    if (!chosen) {
-        LOG_BALLERINA("NO VIABLE ENGINE. THE SHIP IS DEAD.");
-        std::exit(666);
+    if (chosen == VK_NULL_HANDLE) {
+        return VK_NULL_HANDLE;
     }
 
     g_ctx().setPhysicalDevice(chosen);
 
-    // ────────────────────── QUEUE SETUP ──────────────────────
+    // Set up queues
     std::set<uint32_t> uniqueQueues = {
         bestIndices.graphicsFamily.value(),
         bestIndices.presentFamily.value()
@@ -381,15 +458,16 @@ void cleanupAll() noexcept {
         });
     }
 
-    // ────────────────────── FEATURE CHAIN — PERFECT ORDER ──────────────────────
-    VkPhysicalDeviceBufferDeviceAddressFeatures bda{
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES,
+    // Feature chain for creation (set enabled)
+    VkPhysicalDeviceVulkan12Features v12{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
+        .pNext = nullptr,
         .bufferDeviceAddress = VK_TRUE
     };
 
     VkPhysicalDeviceRayTracingPipelineFeaturesKHR rt{
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR,
-        .pNext = &bda,
+        .pNext = &v12,
         .rayTracingPipeline = VK_TRUE
     };
 
@@ -406,21 +484,24 @@ void cleanupAll() noexcept {
         .dynamicRendering = VK_TRUE
     };
 
-    // ────────────────────── EXTENSIONS ──────────────────────
+    VkPhysicalDeviceVulkan14Features v14{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES,
+        .pNext = &v13
+        // No specific 1.4 features enabled; add if needed, e.g., .hostImageCopy = VK_TRUE
+    };
+
+    // Extensions (removed promoted ones)
     const char* extensions[] = {
         VK_KHR_SWAPCHAIN_EXTENSION_NAME,
         VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
         VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME,
-        VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME,
-        VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME,
-        VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME,
-        VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME
+        VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME
     };
 
-    // ────────────────────── DEVICE CREATE INFO ──────────────────────
+    // Device create info
     VkDeviceCreateInfo createInfo{
         .sType                   = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
-        .pNext                   = &v13,
+        .pNext                   = &v14,
         .queueCreateInfoCount    = static_cast<uint32_t>(queueInfos.size()),
         .pQueueCreateInfos       = queueInfos.data(),
         .enabledExtensionCount   = std::size(extensions),
@@ -428,17 +509,20 @@ void cleanupAll() noexcept {
     };
 
     VkDevice device = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateDevice(chosen, &createInfo, nullptr, &device),
-             "LOGICAL DEVICE FORGING FAILED — THE HANDLER IS DISPLEASED");
+    if (vkCreateDevice(chosen, &createInfo, nullptr, &device) != VK_SUCCESS) {
+        return VK_NULL_HANDLE;
+    }
 
-    // ────────────────────── CLAIM QUEUES ──────────────────────
+    // Retrieve queues
     vkGetDeviceQueue(device, bestIndices.graphicsFamily.value(), 0, &g_ctx().graphicsQueue_);
-    vkGetDeviceQueue(device, bestIndices.presentFamily.value(),  0, &g_ctx().presentQueue_);
-    g_ctx().transferQueue_ = bestIndices.transferFamily.has_value()
-        ? vkGetDeviceQueue(device, bestIndices.transferFamily.value(), 0, nullptr), g_ctx().transferQueue_
-        : g_ctx().graphicsQueue_;
+    vkGetDeviceQueue(device, bestIndices.presentFamily.value(), 0, &g_ctx().presentQueue_);
+    if (bestIndices.transferFamily.has_value()) {
+        vkGetDeviceQueue(device, bestIndices.transferFamily.value(), 0, &g_ctx().transferQueue_);
+    } else {
+        g_ctx().transferQueue_ = g_ctx().graphicsQueue_;
+    }
 
-    // ────────────────────── STORE IN CONTEXT ──────────────────────
+    // Store in context
     g_ctx().setDevice(device);
     g_ctx().graphicsFamily_ = bestIndices.graphicsFamily.value();
     g_ctx().presentFamily_  = bestIndices.presentFamily.value();
@@ -451,10 +535,6 @@ void cleanupAll() noexcept {
     g_ctx().enableRayTracingPipeline();
     g_ctx().enableDynamicRendering();
     g_ctx().enableSynchronization2();
-
-    LOG_SUCCESS_CAT("RTX", "LOGICAL DEVICE FORGED — {} queues claimed", uniqueQueues.size());
-    LOG_BLONDIE("The empire is whole. The chain is perfect. The photons are pink.");
-    LOG_AMOURANTH("Captain Amouranth: \"First light... achieved.\"");
 
     return device;
 }
