@@ -106,7 +106,7 @@ void initVulkanCoreGlobals() {
     initialized = true;
 
     LOG_TRACE_CAT("VulkanCore", "Global definitions initialized — g_PhysicalDevice: 0x{:x} | g_rtx_instance: {}", 
-                  reinterpret_cast<uintptr_t>(::stone_physical()),  // StoneKey secured
+                  reinterpret_cast<uintptr_t>(::RTX::g_ctx().physicalDevice_),  // StoneKey secured
                   g_rtx_instance ? "present" : "null");
 
     LOG_SUCCESS_CAT("VulkanCore", "initVulkanCoreGlobals() — COMPLETE — Globals locked");
@@ -197,13 +197,13 @@ VulkanRTX::VulkanRTX(int w, int h, PipelineManager* mgr) noexcept
     , device_(VK_NULL_HANDLE)
 {
     // EARLY SAFETY CHECK — dummy mode before Vulkan exists
-    if (!stone_device() || stone_device() == VK_NULL_HANDLE || w <= 0 || h <= 0) {
+    if (!RTX::g_ctx().device_ || RTX::g_ctx().device_ == VK_NULL_HANDLE || w <= 0 || h <= 0) {
         LOG_WARN_CAT("RTX", "VulkanRTX constructed in dummy mode — Vulkan not ready or invalid size {}x{}", w, h);
         return;
     }
 
     // REAL INITIALIZATION — First Light begins
-    device_ = stone_device();
+    device_ = RTX::g_ctx().device_;
     extent_ = { static_cast<uint32_t>(w), static_cast<uint32_t>(h) };
 
     LOG_TRACE_CAT("RTX", "VulkanRTX constructor — {}×{} — LINE {}", w, h, __LINE__);
@@ -259,7 +259,7 @@ VkCommandBuffer VulkanRTX::beginSingleTimeCommands(VkCommandPool pool) noexcept
     allocInfo.commandBufferCount = 1;
 
     VkCommandBuffer cmd;
-    VK_CHECK(vkAllocateCommandBuffers(stone_device(), &allocInfo, &cmd),
+    VK_CHECK(vkAllocateCommandBuffers(RTX::g_ctx().device_, &allocInfo, &cmd),
              "Failed to allocate transient command buffer");
 
     VkCommandBufferBeginInfo beginInfo{ .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
@@ -296,7 +296,7 @@ void VulkanRTX::endSingleTimeCommands(VkCommandBuffer cmd, VkQueue queue, VkComm
     // 2. Create dedicated fence (unsignaled, non-signaled reset for reuse if needed)
     VkFence fence = VK_NULL_HANDLE;
     VkFenceCreateInfo fenceInfo{ .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, .flags = 0 };
-    VK_CHECK(vkCreateFence(stone_device(), &fenceInfo, nullptr, &fence),
+    VK_CHECK(vkCreateFence(RTX::g_ctx().device_, &fenceInfo, nullptr, &fence),
              "Failed to create transient fence");
 
     // 3. Submit with fence
@@ -309,7 +309,7 @@ void VulkanRTX::endSingleTimeCommands(VkCommandBuffer cmd, VkQueue queue, VkComm
 
     // 4. Wait with timeout & error resilience — Amazing Fences: Detect & mitigate DEVICE_LOST
     const uint64_t timeout_ns = 5'000'000'000ULL;  // 5s timeout (tighter for perf, adjustable)
-    VkResult waitResult = vkWaitForFences(stone_device(), 1, &fence, VK_TRUE, timeout_ns);
+    VkResult waitResult = vkWaitForFences(RTX::g_ctx().device_, 1, &fence, VK_TRUE, timeout_ns);
 
     switch (waitResult) {
         case VK_SUCCESS:
@@ -318,25 +318,25 @@ void VulkanRTX::endSingleTimeCommands(VkCommandBuffer cmd, VkQueue queue, VkComm
         case VK_TIMEOUT:
             LOG_FATAL_CAT("RTX", "Transient fence TIMED OUT after 5s — GPU potential hang");
             // Aggressive recovery: Reset fence & wait idle as last resort
-            vkResetFences(stone_device(), 1, &fence);
-            vkDeviceWaitIdle(stone_device());
+            vkResetFences(RTX::g_ctx().device_, 1, &fence);
+            vkDeviceWaitIdle(RTX::g_ctx().device_);
             break;
         case VK_ERROR_DEVICE_LOST:  // -4: Handle imminent loss gracefully
             LOG_FATAL_CAT("RTX", "vkWaitForFences: DEVICE LOST (-4) — Triggering recovery");
             // Do NOT destroy fence here; leak-prevent but prioritize recovery
-            vkDeviceWaitIdle(stone_device());  // Sync device state
+            vkDeviceWaitIdle(RTX::g_ctx().device_);  // Sync device state
             // Optional: Notify app to recreate swapchain/device if recurrent
             break;
         default:
             LOG_FATAL_CAT("RTX", "vkWaitForFences unexpected error: {} ({}) — Falling back to idle",
                           static_cast<int>(waitResult), waitResult);
-            vkDeviceWaitIdle(stone_device());
+            vkDeviceWaitIdle(RTX::g_ctx().device_);
             break;
     }
 
     // 5. Cleanup: Destroy fence & free buffer (safe post-wait/error)
-    vkDestroyFence(stone_device(), fence, nullptr);
-    vkFreeCommandBuffers(stone_device(), pool, 1, &cmd);
+    vkDestroyFence(RTX::g_ctx().device_, fence, nullptr);
+    vkFreeCommandBuffers(RTX::g_ctx().device_, pool, 1, &cmd);
 
     LOG_TRACE_CAT("RTX", "endSingleTimeCommands — COMPLETE (resilient fence sync)");
 }
@@ -346,14 +346,14 @@ void VulkanRTX::endSingleTimeCommands(VkCommandBuffer cmd, VkQueue queue, VkComm
 bool VulkanRTX::pollAsyncFence(VkFence fence, uint64_t timeout_ns) noexcept {
     if (fence == VK_NULL_HANDLE) return true;  // Already done
 
-    VkResult result = vkWaitForFences(stone_device(), 1, &fence, VK_TRUE, timeout_ns);
+    VkResult result = vkWaitForFences(RTX::g_ctx().device_, 1, &fence, VK_TRUE, timeout_ns);
     if (result == VK_SUCCESS) {
         return true;  // Signaled
     } else if (result == VK_TIMEOUT) {
         return false;  // Keep polling
     } else {
         LOG_ERROR_CAT("RTX", "Async fence poll error: {} — Resetting", result);
-        vkResetFences(stone_device(), 1, &fence);
+        vkResetFences(RTX::g_ctx().device_, 1, &fence);
         return true;  // Treat as done, but log for debugging
     }
 }
@@ -367,14 +367,14 @@ void VulkanRTX::setRayTracingPipeline(VkPipeline p, VkPipelineLayout l) noexcept
     AmouranthAI::get().onMemoryEvent("RTPipelineLayout", sizeof(VkPipelineLayout));
 
     LOG_INFO_CAT("RTX", "HANDLE_CREATE: {} | Tag: {}", "rtPipeline", "RTPipeline");
-    rtPipeline_ = Handle<VkPipeline>(p, stone_device(),
+    rtPipeline_ = Handle<VkPipeline>(p, RTX::g_ctx().device_,
         [](VkDevice d, VkPipeline pp, const VkAllocationCallbacks*) {
             LOG_TRACE_CAT("RTX", "Destroying RTPipeline: 0x{:x}", reinterpret_cast<uintptr_t>(pp));
             vkDestroyPipeline(d, pp, nullptr);
         }, 0, "RTPipeline");
 
     LOG_INFO_CAT("RTX", "HANDLE_CREATE: {} | Tag: {}", "rtPipelineLayout", "RTPipelineLayout");
-    rtPipelineLayout_ = Handle<VkPipelineLayout>(l, stone_device(),
+    rtPipelineLayout_ = Handle<VkPipelineLayout>(l, RTX::g_ctx().device_,
         [](VkDevice d, VkPipelineLayout pl, const VkAllocationCallbacks*) {
             LOG_TRACE_CAT("RTX", "Destroying RTPipelineLayout: 0x{:x}", reinterpret_cast<uintptr_t>(pl));
             vkDestroyPipelineLayout(d, pl, nullptr);
@@ -499,7 +499,7 @@ void VulkanRTX::uploadBatch(
 {
     if (batch.empty()) return;
 
-    VkDevice dev = stone_device();
+    VkDevice dev = RTX::g_ctx().device_;
     VkDeviceSize totalSize = 0;
     for (const auto& [src, size, dst, name] : batch)
         if (src && size > 0) totalSize += size;

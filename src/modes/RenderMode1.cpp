@@ -101,40 +101,40 @@ void RenderMode1::initResources() {
     // Accum Image
     imgInfo.format = VK_FORMAT_R32G32B32A32_SFLOAT;
     imgInfo.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
-    VkImage rawImg; vkCreateImage(stone_device(), &imgInfo, nullptr, &rawImg);
-    accumImage_ = RTX::Handle<VkImage>(rawImg, stone_device(), vkDestroyImage, 0, "AccumImg");
+    VkImage rawImg; vkCreateImage(RTX::g_ctx().device_, &imgInfo, nullptr, &rawImg);
+    accumImage_ = RTX::Handle<VkImage>(rawImg, RTX::g_ctx().device_, vkDestroyImage, 0, "AccumImg");
 
-    VkMemoryRequirements memReqs; vkGetImageMemoryRequirements(stone_device(), rawImg, &memReqs);
+    VkMemoryRequirements memReqs; vkGetImageMemoryRequirements(RTX::g_ctx().device_, rawImg, &memReqs);
     uint32_t memType = stone_pipeline()->findMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
     VkMemoryAllocateInfo alloc{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, nullptr, memReqs.size, memType};
-    VkDeviceMemory mem; vkAllocateMemory(stone_device(), &alloc, nullptr, &mem);
-    vkBindImageMemory(stone_device(), rawImg, mem, 0);
-    accumMem_ = RTX::Handle<VkDeviceMemory>(mem, stone_device(), vkFreeMemory, memReqs.size, "AccumMem");
+    VkDeviceMemory mem; vkAllocateMemory(RTX::g_ctx().device_, &alloc, nullptr, &mem);
+    vkBindImageMemory(RTX::g_ctx().device_, rawImg, mem, 0);
+    accumMem_ = RTX::Handle<VkDeviceMemory>(mem, RTX::g_ctx().device_, vkFreeMemory, memReqs.size, "AccumMem");
 
     VkImageViewCreateInfo viewInfo{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
     viewInfo.image = rawImg;
     viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
     viewInfo.format = imgInfo.format;
     viewInfo.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-    VkImageView view; vkCreateImageView(stone_device(), &viewInfo, nullptr, &view);
-    accumView_ = RTX::Handle<VkImageView>(view, stone_device(), vkDestroyImageView, 0, "AccumView");
+    VkImageView view; vkCreateImageView(RTX::g_ctx().device_, &viewInfo, nullptr, &view);
+    accumView_ = RTX::Handle<VkImageView>(view, RTX::g_ctx().device_, vkDestroyImageView, 0, "AccumView");
 
     // Output Image
     imgInfo.format = VK_FORMAT_R8G8B8A8_UNORM;
     imgInfo.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-    vkCreateImage(stone_device(), &imgInfo, nullptr, &rawImg);
-    outputImage_ = RTX::Handle<VkImage>(rawImg, stone_device(), vkDestroyImage, 0, "OutputImg");
+    vkCreateImage(RTX::g_ctx().device_, &imgInfo, nullptr, &rawImg);
+    outputImage_ = RTX::Handle<VkImage>(rawImg, RTX::g_ctx().device_, vkDestroyImage, 0, "OutputImg");
 
-    vkGetImageMemoryRequirements(stone_device(), rawImg, &memReqs);
+    vkGetImageMemoryRequirements(RTX::g_ctx().device_, rawImg, &memReqs);
     alloc.allocationSize = memReqs.size;
-    vkAllocateMemory(stone_device(), &alloc, nullptr, &mem);
-    vkBindImageMemory(stone_device(), rawImg, mem, 0);
-    outputMem_ = RTX::Handle<VkDeviceMemory>(mem, stone_device(), vkFreeMemory, memReqs.size, "OutputMem");
+    vkAllocateMemory(RTX::g_ctx().device_, &alloc, nullptr, &mem);
+    vkBindImageMemory(RTX::g_ctx().device_, rawImg, mem, 0);
+    outputMem_ = RTX::Handle<VkDeviceMemory>(mem, RTX::g_ctx().device_, vkFreeMemory, memReqs.size, "OutputMem");
 
     viewInfo.image = rawImg;
     viewInfo.format = imgInfo.format;
-    vkCreateImageView(stone_device(), &viewInfo, nullptr, &view);
-    outputView_ = RTX::Handle<VkImageView>(view, stone_device(), vkDestroyImageView, 0, "OutputView");
+    vkCreateImageView(RTX::g_ctx().device_, &viewInfo, nullptr, &view);
+    outputView_ = RTX::Handle<VkImageView>(view, RTX::g_ctx().device_, vkDestroyImageView, 0, "OutputView");
 
     // Transition
     VkCommandBuffer cmd = VulkanRTX::beginSingleTimeCommands(g_ctx().commandPool_);
@@ -158,7 +158,7 @@ void RenderMode1::initResources() {
 }
 
 void RenderMode1::cleanupResources() {
-    vkDeviceWaitIdle(stone_device());
+    vkDeviceWaitIdle(RTX::g_ctx().device_);
     g_rtx().updateRTXDescriptors(0, VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,
                                  VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,
                                  VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE);

@@ -48,6 +48,7 @@
 // Forward declarations
 class VulkanRTX;
 class VulkanRenderer;
+
 struct Camera;
 
 [[noreturn]] void phase9_ballerina() noexcept;
@@ -102,6 +103,7 @@ using namespace Logging::Color;
 namespace RTX {
 
 	void logAndTrackDestruction(const char* type, void* ptr, int line, size_t size);
+	[[nodiscard]] VkDevice createLogicalDeviceAndSelectGPU(VkInstance instance, VkSurfaceKHR surface) noexcept;
 
 	// =============================================================================
     // Handle<T> — RAII + THE SACRED MACROS — ETERNAL
@@ -244,7 +246,7 @@ inline constexpr struct NullFeatureChainTerminator {
         [[nodiscard]] constexpr VkPhysicalDevice physicalDevice() const noexcept { return physicalDevice_; }
         [[nodiscard]] constexpr VkDevice         device()         const noexcept { return device_; }
         [[nodiscard]] static    VkPhysicalDevice pickPhysicalDevice(VkInstance instance, VkSurfaceKHR surface, bool enablePortableSubset = false) noexcept;
-
+        
         [[nodiscard]] constexpr VkQueue graphicsQueue()  const noexcept { return graphicsQueue_; }
         [[nodiscard]] constexpr VkQueue presentQueue()   const noexcept { return presentQueue_; }
         [[nodiscard]] constexpr VkQueue computeQueue()   const noexcept { return computeQueue_; }
@@ -296,7 +298,6 @@ inline constexpr struct NullFeatureChainTerminator {
     // Core Vulkan Creation Functions
     // =============================================================================
     [[nodiscard]] VkInstance createVulkanInstanceWithSDL(bool enableValidation) noexcept;
-    [[nodiscard]] VkDevice createLogicalDevice(VkPhysicalDevice physicalDevice, VkSurfaceKHR surface) noexcept;
 
     void createCommandPool();
     void retrieveQueues() noexcept = delete; // NO LONGER NEEDED — done in createLogicalDevice
@@ -304,8 +305,6 @@ inline constexpr struct NullFeatureChainTerminator {
     // =============================================================================
     // Global Empire Resources
     // =============================================================================
-    Handle<VkAccelerationStructureKHR>& blas();
-    Handle<VkAccelerationStructureKHR>& tlas();
     Handle<VkRenderPass>& renderPass();
 
     [[nodiscard]] VulkanRenderer& renderer();

@@ -43,7 +43,7 @@ PipelineManager::PipelineManager(VkDevice device, VkPhysicalDevice phys)
     LOG_ATTEMPT_CAT("PIPELINE", "{}[STONEKEY v∞ APOCALYPSE FINAL] Constructing PipelineManager — Securing handles...{}", RASPBERRY_PINK, RESET);
 
 
-    if (stone_device() == VK_NULL_HANDLE || stone_physical() == VK_NULL_HANDLE) {
+    if (RTX::g_ctx().device_ == VK_NULL_HANDLE || RTX::g_ctx().physicalDevice_ == VK_NULL_HANDLE) {
         LOG_WARN_CAT("PIPELINE", "Null device/physicalDevice passed — dummy mode activated");
         return;
     }
@@ -96,7 +96,7 @@ void PipelineManager::allocateDescriptorSets() {
     }
     allocInfo.pSetLayouts = layouts.data();
 
-    VkResult res = vkAllocateDescriptorSets(stone_device(), &allocInfo, rtDescriptorSets_.data());
+    VkResult res = vkAllocateDescriptorSets(RTX::g_ctx().device_, &allocInfo, rtDescriptorSets_.data());
     VK_CHECK(res, std::format("Failed to allocate {} RT descriptor sets", maxSets).c_str());
 
     LOG_SUCCESS_CAT("PIPELINE", "Allocated {} RT descriptor sets — Ready for vkUpdateDescriptorSets (VUID-08114 FIXED)", maxSets);
@@ -272,7 +272,7 @@ void PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDescrip
 
     // FIXED: Perform update only if writes non-empty — All valid, no nulls (VUID-08114: update before use)
     if (!writes.empty()) {
-        vkUpdateDescriptorSets(stone_device(), static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
+        vkUpdateDescriptorSets(RTX::g_ctx().device_, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
         LOG_SUCCESS_CAT("PIPELINE", "Updated RT descriptor set {} — {} valid writes (no nulls) — READY FOR TRACING", frameIndex, writes.size());
     } else {
         LOG_WARN_CAT("PIPELINE", "No valid descriptors to update for frame {} — TLAS/images/buffers missing?", frameIndex);
@@ -288,9 +288,9 @@ PipelineManager::~PipelineManager() {
     LOG_ATTEMPT_CAT("PIPELINE", "Destructing PipelineManager — PINK PHOTONS DIMMING");
 
     // NEW: Free allocated descriptor sets before pool destroy (leverages FREE_DESCRIPTOR_SET_BIT)
-    if (stone_device() != VK_NULL_HANDLE && !rtDescriptorSets_.empty()) {
+    if (RTX::g_ctx().device_ != VK_NULL_HANDLE && !rtDescriptorSets_.empty()) {
         LOG_TRACE_CAT("PIPELINE", "vkFreeDescriptorSets — Releasing {} sets", rtDescriptorSets_.size());
-        VkResult freeRes = vkFreeDescriptorSets(stone_device(), *rtDescriptorPool_, static_cast<uint32_t>(rtDescriptorSets_.size()), rtDescriptorSets_.data());
+        VkResult freeRes = vkFreeDescriptorSets(RTX::g_ctx().device_, *rtDescriptorPool_, static_cast<uint32_t>(rtDescriptorSets_.size()), rtDescriptorSets_.data());
         if (freeRes == VK_SUCCESS) {
             LOG_TRACE_CAT("PIPELINE", "Descriptor sets freed successfully");
         } else {
@@ -301,9 +301,9 @@ PipelineManager::~PipelineManager() {
 
     // FIXED: Wait for device idle — Ensures all submitted cmds complete before destroying pipelines/buffers/pools
     //        (Resolves vkDestroyPipeline in-use validation error: VUID-vkDestroyPipeline-pipeline-00765)
-    if (stone_device() != VK_NULL_HANDLE) {
+    if (RTX::g_ctx().device_ != VK_NULL_HANDLE) {
         LOG_TRACE_CAT("PIPELINE", "vkDeviceWaitIdle — Waiting for queues to drain (shutdown safety)");
-        VkResult idleResult = vkDeviceWaitIdle(stone_device());
+        VkResult idleResult = vkDeviceWaitIdle(RTX::g_ctx().device_);
         if (idleResult == VK_SUCCESS) {
             LOG_TRACE_CAT("PIPELINE", "vkDeviceWaitIdle — SUCCESS: All cmds complete, resources safe to destroy");
         } else {
@@ -327,7 +327,7 @@ void PipelineManager::loadExtensions() {
         VALHALLA_GOLD, RESET);
 
     // The ship must have a heart
-    if (stone_device() == VK_NULL_HANDLE) {
+    if (RTX::g_ctx().device_ == VK_NULL_HANDLE) {
         LOG_WARN_CAT("PIPELINE", "{}Cid wipes brow — \"No device? I can't arm ghosts, Amouranth...\"{}", 
                      RASPBERRY_PINK, RESET);
         return;
@@ -359,7 +359,7 @@ void PipelineManager::loadExtensions() {
     // CID LOADS THE WEAPONS — ONE BY ONE — WITH SHAKING, SWEATY HANDS
     auto load = [&](auto& pfn, const char* name, const char* weapon) {
         pfn = reinterpret_cast<std::remove_reference_t<decltype(pfn)>>(
-            vkGetDeviceProcAddr(stone_device(), name));  // CORE FUNCTION — NO LIES
+            vkGetDeviceProcAddr(RTX::g_ctx().device_, name));  // CORE FUNCTION — NO LIES
 
         if (!pfn) {
             LOG_FATAL_CAT("PIPELINE", 
@@ -408,14 +408,14 @@ void PipelineManager::cacheDeviceProperties() {
         "{}CID ENTERS THE GPU TEMPLE — SWEAT DRIPPING ON SACRED SILICON — \"I must know her limits...\"{}", 
         VALHALLA_GOLD, RESET);
 
-    if (stone_physical() == VK_NULL_HANDLE) {
+    if (RTX::g_ctx().physicalDevice_ == VK_NULL_HANDLE) {
         LOG_FATAL_CAT("PIPELINE", "{}NO PHYSICAL DEVICE — CID SCREAMS INTO THE VOID — \"WHO AM I EVEN SERVING?!\"{}", 
                       BLOOD_RED, RESET);
         return;
     }
 
     VkPhysicalDeviceProperties props{};
-    vkGetPhysicalDeviceProperties(stone_physical(), &props);
+    vkGetPhysicalDeviceProperties(RTX::g_ctx().physicalDevice_, &props);
 
     timestampPeriod_ = props.limits.timestampPeriod / 1e6f;
 
@@ -443,10 +443,10 @@ void PipelineManager::cacheDeviceProperties() {
         .pNext = &asProps_ 
     };
 
-    vkGetPhysicalDeviceProperties2(stone_physical(), &props2);
+    vkGetPhysicalDeviceProperties2(RTX::g_ctx().physicalDevice_, &props2);
 
     VkPhysicalDeviceFeatures features{};
-    vkGetPhysicalDeviceFeatures(stone_physical(), &features);
+    vkGetPhysicalDeviceFeatures(RTX::g_ctx().physicalDevice_, &features);
 
     if (features.shaderInt64) {
         LOG_SUCCESS_CAT("PIPELINE", 
@@ -494,7 +494,7 @@ VkShaderModule PipelineManager::loadShader(const std::string& path) const {
     LOG_TRACE_CAT("PIPELINE", "loadShader — START — path='{}'", path);
 
     // FIXED: Null device guard
-    if (stone_device() == VK_NULL_HANDLE) {
+    if (RTX::g_ctx().device_ == VK_NULL_HANDLE) {
         LOG_ERROR_CAT("PIPELINE", "Null device — cannot load shader");
         return VK_NULL_HANDLE;
     }
@@ -522,7 +522,7 @@ VkShaderModule PipelineManager::loadShader(const std::string& path) const {
 
     VkShaderModule shaderModule;
     // FIXED: Use VK_CHECK for consistent error handling (logs + aborts on failure)
-    VK_CHECK(vkCreateShaderModule(stone_device(), &createInfo, nullptr, &shaderModule),
+    VK_CHECK(vkCreateShaderModule(RTX::g_ctx().device_, &createInfo, nullptr, &shaderModule),
              std::format("Failed to create shader module from {}", path).c_str());
 
     LOG_TRACE_CAT("PIPELINE", "Shader module created successfully");
@@ -537,7 +537,7 @@ uint32_t PipelineManager::findMemoryType(uint32_t typeFilter, VkMemoryPropertyFl
     LOG_TRACE_CAT("PIPELINE", "findMemoryType — START — typeFilter=0x{:x}, properties=0x{:x}", typeFilter, properties);
 
     // FIXED: Null phys guard — use class member if param null (fallback)
-    VkPhysicalDevice phys = stone_physical();
+    VkPhysicalDevice phys = RTX::g_ctx().physicalDevice_;
     if (phys == VK_NULL_HANDLE) {
         LOG_WARN_CAT("PIPELINE", "Null physicalDevice — fallback to 0");
         return 0;
@@ -569,7 +569,7 @@ VkCommandBuffer PipelineManager::beginSingleTimeCommands(VkCommandPool pool) con
     LOG_TRACE_CAT("PIPELINE", "beginSingleTimeCommands — START");
 
     // FIXED: Null guards
-    if (stone_device() == VK_NULL_HANDLE || pool == VK_NULL_HANDLE) {
+    if (RTX::g_ctx().device_ == VK_NULL_HANDLE || pool == VK_NULL_HANDLE) {
         LOG_ERROR_CAT("PIPELINE", "Null device or pool — cannot begin single-time commands");
         return VK_NULL_HANDLE;
     }
@@ -581,7 +581,7 @@ VkCommandBuffer PipelineManager::beginSingleTimeCommands(VkCommandPool pool) con
     allocInfo.commandBufferCount = 1;
 
     VkCommandBuffer cmd;
-    VkResult result = vkAllocateCommandBuffers(stone_device(), &allocInfo, &cmd);
+    VkResult result = vkAllocateCommandBuffers(RTX::g_ctx().device_, &allocInfo, &cmd);
     if (result != VK_SUCCESS) {
         LOG_ERROR_CAT("PIPELINE", "vkAllocateCommandBuffers failed: {}", static_cast<int>(result));
         return VK_NULL_HANDLE;  // Early return on failure
@@ -593,7 +593,7 @@ VkCommandBuffer PipelineManager::beginSingleTimeCommands(VkCommandPool pool) con
     result = vkBeginCommandBuffer(cmd, &beginInfo);
     if (result != VK_SUCCESS) {
         LOG_ERROR_CAT("PIPELINE", "vkBeginCommandBuffer failed: {}", static_cast<int>(result));
-        vkFreeCommandBuffers(stone_device(), pool, 1, &cmd);
+        vkFreeCommandBuffers(RTX::g_ctx().device_, pool, 1, &cmd);
         return VK_NULL_HANDLE;
     }
 
@@ -604,9 +604,9 @@ VkCommandBuffer PipelineManager::beginSingleTimeCommands(VkCommandPool pool) con
 
 void PipelineManager::endSingleTimeCommands(VkCommandPool pool, VkQueue queue, VkCommandBuffer cmd) const {
     // FIXED: Null guards
-    if (cmd == VK_NULL_HANDLE || pool == VK_NULL_HANDLE || queue == VK_NULL_HANDLE || stone_device() == VK_NULL_HANDLE) {
+    if (cmd == VK_NULL_HANDLE || pool == VK_NULL_HANDLE || queue == VK_NULL_HANDLE || RTX::g_ctx().device_ == VK_NULL_HANDLE) {
         LOG_ERROR_CAT("PIPELINE", "endSingleTimeCommands called with invalid params (cmd=0x{:x}, pool=0x{:x}, queue=0x{:x}, dev=0x{:x})",
-                      reinterpret_cast<uintptr_t>(cmd), reinterpret_cast<uintptr_t>(pool), reinterpret_cast<uintptr_t>(queue), reinterpret_cast<uintptr_t>(stone_device()));
+                      reinterpret_cast<uintptr_t>(cmd), reinterpret_cast<uintptr_t>(pool), reinterpret_cast<uintptr_t>(queue), reinterpret_cast<uintptr_t>(RTX::g_ctx().device_));
         return;
     }
 
@@ -638,11 +638,11 @@ void PipelineManager::endSingleTimeCommands(VkCommandPool pool, VkQueue queue, V
     LOG_TRACE_CAT("PIPELINE", "vkQueueWaitIdle result: {}", static_cast<int>(r));
     if (r != VK_SUCCESS) {
         LOG_FATAL_CAT("PIPELINE", "vkQueueWaitIdle failed: {} — possible device lost", static_cast<int>(r));
-        if (stone_device() != VK_NULL_HANDLE) vkDeviceWaitIdle(stone_device());
+        if (RTX::g_ctx().device_ != VK_NULL_HANDLE) vkDeviceWaitIdle(RTX::g_ctx().device_);
     }
 
     // 4. Cleanup
-    vkFreeCommandBuffers(stone_device(), pool, 1, &cmd);
+    vkFreeCommandBuffers(RTX::g_ctx().device_, pool, 1, &cmd);
 
     LOG_TRACE_CAT("PIPELINE", "endSingleTimeCommands — COMPLETE (safe, no device lost)");
 }
@@ -654,7 +654,7 @@ void PipelineManager::createDescriptorSetLayout()
 {
     LOG_TRACE_CAT("PIPELINE", "createDescriptorSetLayout — START — DYNAMIC REVOLUTION ENGAGED");
 
-    if (stone_device() == VK_NULL_HANDLE) {
+    if (RTX::g_ctx().device_ == VK_NULL_HANDLE) {
         LOG_ERROR_CAT("PIPELINE", "Null device — cannot create descriptor set layout");
         return;
     }
@@ -697,11 +697,11 @@ void PipelineManager::createDescriptorSetLayout()
     };
 
     VkDescriptorSetLayout layout = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateDescriptorSetLayout(stone_device(), &layoutInfo, nullptr, &layout),
+    VK_CHECK(vkCreateDescriptorSetLayout(RTX::g_ctx().device_, &layoutInfo, nullptr, &layout),
              "Failed to create RT descriptor set layout — BUT THE PHOTONS WILL NOT BE DENIED");
 
     rtDescriptorSetLayout_ = Handle<VkDescriptorSetLayout>(
-        layout, stone_device(),
+        layout, RTX::g_ctx().device_,
         [](VkDevice d, VkDescriptorSetLayout l, const VkAllocationCallbacks*) { vkDestroyDescriptorSetLayout(d, l, nullptr); },
         0, "RTDescriptorSetLayout — DYNAMIC"
     );
@@ -730,11 +730,11 @@ void PipelineManager::createDescriptorSetLayout()
     rtDescriptorPool_.reset();
 
     VkDescriptorPool rawPool = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateDescriptorPool(stone_device(), &poolInfo, nullptr, &rawPool),
+    VK_CHECK(vkCreateDescriptorPool(RTX::g_ctx().device_, &poolInfo, nullptr, &rawPool),
              "Failed to create RT descriptor pool — THE EMPIRE WILL RISE");
 
     rtDescriptorPool_ = Handle<VkDescriptorPool>(
-        rawPool, stone_device(),
+        rawPool, RTX::g_ctx().device_,
         [](VkDevice d, VkDescriptorPool p, const VkAllocationCallbacks*) {
             if (p != VK_NULL_HANDLE) vkDestroyDescriptorPool(d, p, nullptr);
         },
@@ -753,7 +753,7 @@ void PipelineManager::createPipelineLayout() {
     LOG_TRACE_CAT("PIPELINE", "createPipelineLayout — START");
 
     // FIXED: Null guards
-    if (stone_device() == VK_NULL_HANDLE) {
+    if (RTX::g_ctx().device_ == VK_NULL_HANDLE) {
         LOG_ERROR_CAT("PIPELINE", "Null device — cannot create pipeline layout");
         return;
     }
@@ -778,10 +778,10 @@ void PipelineManager::createPipelineLayout() {
     layoutInfo.pPushConstantRanges = &pushConstant;
 
     VkPipelineLayout rawLayout = VK_NULL_HANDLE;
-    VK_CHECK(vkCreatePipelineLayout(stone_device(), &layoutInfo, nullptr, &rawLayout),
+    VK_CHECK(vkCreatePipelineLayout(RTX::g_ctx().device_, &layoutInfo, nullptr, &rawLayout),
              "Failed to create ray tracing pipeline layout");
 
-    rtPipelineLayout_ = Handle<VkPipelineLayout>(rawLayout, stone_device(),
+    rtPipelineLayout_ = Handle<VkPipelineLayout>(rawLayout, RTX::g_ctx().device_,
         [](VkDevice d, VkPipelineLayout l, const VkAllocationCallbacks*) { vkDestroyPipelineLayout(d, l, nullptr); },
         0, "RTPipelineLayout");
 
@@ -796,11 +796,11 @@ void PipelineManager::createRayTracingPipeline(const std::vector<std::string>& s
     LOG_TRACE_CAT("PIPELINE", "createRayTracingPipeline — START — {} shaders provided", shaderPaths.size());
 
     // FIXED: Null guards
-    if (stone_device() == VK_NULL_HANDLE) {
+    if (RTX::g_ctx().device_ == VK_NULL_HANDLE) {
         LOG_ERROR_CAT("PIPELINE", "Null device — cannot create RT pipeline");
         return;
     }
-    LOG_DEBUG_CAT("PIPELINE", "Retrieved device: 0x{:x}", reinterpret_cast<uintptr_t>(stone_device()));
+    LOG_DEBUG_CAT("PIPELINE", "Retrieved device: 0x{:x}", reinterpret_cast<uintptr_t>(RTX::g_ctx().device_));
 
     // FIXED: Guard layout validity before proceeding
     if (!rtPipelineLayout_.valid() || *rtPipelineLayout_ == VK_NULL_HANDLE) {
@@ -854,13 +854,13 @@ void PipelineManager::createRayTracingPipeline(const std::vector<std::string>& s
     }
 
     // Store modules in Handle for auto-cleanup
-    shaderModules_.emplace_back(raygenModule, stone_device(), [](VkDevice d, VkShaderModule m, const VkAllocationCallbacks*) { vkDestroyShaderModule(d, m, nullptr); }, 0, "RaygenShader");
-    shaderModules_.emplace_back(missModule, stone_device(), [](VkDevice d, VkShaderModule m, const VkAllocationCallbacks*) { vkDestroyShaderModule(d, m, nullptr); }, 0, "MissShader");
+    shaderModules_.emplace_back(raygenModule, RTX::g_ctx().device_, [](VkDevice d, VkShaderModule m, const VkAllocationCallbacks*) { vkDestroyShaderModule(d, m, nullptr); }, 0, "RaygenShader");
+    shaderModules_.emplace_back(missModule, RTX::g_ctx().device_, [](VkDevice d, VkShaderModule m, const VkAllocationCallbacks*) { vkDestroyShaderModule(d, m, nullptr); }, 0, "MissShader");
     if (hasClosestHit) {
-        shaderModules_.emplace_back(closestHitModule, stone_device(), [](VkDevice d, VkShaderModule m, const VkAllocationCallbacks*) { vkDestroyShaderModule(d, m, nullptr); }, 0, "ClosestHitShader");
+        shaderModules_.emplace_back(closestHitModule, RTX::g_ctx().device_, [](VkDevice d, VkShaderModule m, const VkAllocationCallbacks*) { vkDestroyShaderModule(d, m, nullptr); }, 0, "ClosestHitShader");
     }
     if (hasShadowMiss) {
-        shaderModules_.emplace_back(shadowMissModule, stone_device(), [](VkDevice d, VkShaderModule m, const VkAllocationCallbacks*) { vkDestroyShaderModule(d, m, nullptr); }, 0, "ShadowMissShader");
+        shaderModules_.emplace_back(shadowMissModule, RTX::g_ctx().device_, [](VkDevice d, VkShaderModule m, const VkAllocationCallbacks*) { vkDestroyShaderModule(d, m, nullptr); }, 0, "ShadowMissShader");
     }
 
     // ---------------------------------------------------------------------
@@ -970,7 +970,7 @@ void PipelineManager::createRayTracingPipeline(const std::vector<std::string>& s
     pipelineInfo.layout = *rtPipelineLayout_;  // FIXED: Valid layout with descriptors/push (matches shader bindings/stages)
 
     VkPipeline pipeline = VK_NULL_HANDLE;
-    VkResult pipeResult = vkCreateRayTracingPipelinesKHR_(stone_device(), VK_NULL_HANDLE, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &pipeline);  // NEW: PFN call
+    VkResult pipeResult = vkCreateRayTracingPipelinesKHR_(RTX::g_ctx().device_, VK_NULL_HANDLE, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &pipeline);  // NEW: PFN call
     LOG_DEBUG_CAT("PIPELINE", "vkCreateRayTracingPipelinesKHR returned: {}", static_cast<int>(pipeResult));
     if (pipeResult != VK_SUCCESS) {
         LOG_ERROR_CAT("PIPELINE", "Failed to create ray tracing pipeline: {}", static_cast<int>(pipeResult));
@@ -979,7 +979,7 @@ void PipelineManager::createRayTracingPipeline(const std::vector<std::string>& s
     VK_CHECK(pipeResult, "Create RT pipeline");  // Your macro
 
     // 5. Store and cleanup (unchanged)
-    rtPipeline_ = Handle<VkPipeline>(pipeline, stone_device(),
+    rtPipeline_ = Handle<VkPipeline>(pipeline, RTX::g_ctx().device_,
         [](VkDevice d, VkPipeline p, const VkAllocationCallbacks*) { vkDestroyPipeline(d, p, nullptr); },
         0, "RTPipeline");
 
@@ -998,11 +998,11 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
     LOG_TRACE_CAT("PIPELINE", "{}createShaderBindingTable — FORGING THE ETERNAL SBT{}", VALHALLA_GOLD, RESET);
 
     // Null guards — spec requires valid handles
-    if (stone_device() == VK_NULL_HANDLE || stone_physical() == VK_NULL_HANDLE || pool == VK_NULL_HANDLE || queue == VK_NULL_HANDLE) {
+    if (RTX::g_ctx().device_ == VK_NULL_HANDLE || RTX::g_ctx().physicalDevice_ == VK_NULL_HANDLE || pool == VK_NULL_HANDLE || queue == VK_NULL_HANDLE) {
         LOG_ERROR_CAT("PIPELINE", "{}Invalid params: dev=0x{:x} phys=0x{:x} pool=0x{:x} queue=0x{:x}{}", 
                       CRIMSON_MAGENTA,
-                      reinterpret_cast<uintptr_t>(stone_device()),
-                      reinterpret_cast<uintptr_t>(stone_physical()),
+                      reinterpret_cast<uintptr_t>(RTX::g_ctx().device_),
+                      reinterpret_cast<uintptr_t>(RTX::g_ctx().physicalDevice_),
                       reinterpret_cast<uintptr_t>(pool),
                       reinterpret_cast<uintptr_t>(queue), RESET);
         return;
@@ -1025,7 +1025,7 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
     VkPhysicalDeviceProperties2 props2{};
     props2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
     props2.pNext = &rtProps;
-    vkGetPhysicalDeviceProperties2(stone_physical(), &props2);
+    vkGetPhysicalDeviceProperties2(RTX::g_ctx().physicalDevice_, &props2);
 
     const uint32_t handleSize      = rtProps.shaderGroupHandleSize;
     const uint32_t handleAlignment = rtProps.shaderGroupHandleAlignment;
@@ -1054,7 +1054,7 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
 
     // Extract handles
     std::vector<uint8_t> shaderHandles(totalGroups * handleSize);
-    VK_CHECK(vkGetRayTracingShaderGroupHandlesKHR_(stone_device(), *rtPipeline_, 0, totalGroups, shaderHandles.size(), shaderHandles.data()),
+    VK_CHECK(vkGetRayTracingShaderGroupHandlesKHR_(RTX::g_ctx().device_, *rtPipeline_, 0, totalGroups, shaderHandles.size(), shaderHandles.data()),
              "rtGetRayTracingShaderGroupHandlesKHR failed");
 
     // Staging buffer
@@ -1065,10 +1065,10 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
     stagingInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
     VkBuffer stagingBuffer = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateBuffer(stone_device(), &stagingInfo, nullptr, &stagingBuffer), "Create SBT staging buffer");
+    VK_CHECK(vkCreateBuffer(RTX::g_ctx().device_, &stagingInfo, nullptr, &stagingBuffer), "Create SBT staging buffer");
 
     VkMemoryRequirements memReqsStaging;
-    vkGetBufferMemoryRequirements(stone_device(), stagingBuffer, &memReqsStaging);
+    vkGetBufferMemoryRequirements(RTX::g_ctx().device_, stagingBuffer, &memReqsStaging);
 
     VkMemoryAllocateInfo allocStaging{};
     allocStaging.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
@@ -1077,11 +1077,11 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
                                                    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
 
     VkDeviceMemory stagingMemory = VK_NULL_HANDLE;
-    VK_CHECK(vkAllocateMemory(stone_device(), &allocStaging, nullptr, &stagingMemory), "Allocate SBT staging memory");
-    VK_CHECK(vkBindBufferMemory(stone_device(), stagingBuffer, stagingMemory, 0), "Bind staging memory");
+    VK_CHECK(vkAllocateMemory(RTX::g_ctx().device_, &allocStaging, nullptr, &stagingMemory), "Allocate SBT staging memory");
+    VK_CHECK(vkBindBufferMemory(RTX::g_ctx().device_, stagingBuffer, stagingMemory, 0), "Bind staging memory");
 
     void* mapped = nullptr;
-    VK_CHECK(vkMapMemory(stone_device(), stagingMemory, 0, sbtBufferSize, 0, &mapped), "Map staging memory");
+    VK_CHECK(vkMapMemory(RTX::g_ctx().device_, stagingMemory, 0, sbtBufferSize, 0, &mapped), "Map staging memory");
 
     auto copy = [&](uint32_t groupIdx, VkDeviceSize destOffset) {
         memcpy((uint8_t*)mapped + destOffset, shaderHandles.data() + groupIdx * handleSize, handleSize);
@@ -1093,7 +1093,7 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
     for (uint32_t i = 0; i < hitGroupCount_; ++i)      copy(idx++, hitOffset      + i * handleSizeAligned);
     for (uint32_t i = 0; i < callableGroupCount_; ++i) copy(idx++, callableOffset + i * handleSizeAligned);
 
-    vkUnmapMemory(stone_device(), stagingMemory);
+    vkUnmapMemory(RTX::g_ctx().device_, stagingMemory);
 
     // Final SBT buffer
     VkBufferCreateInfo sbtInfo{};
@@ -1105,13 +1105,13 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
     sbtInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
     VkBuffer rawSbtBuffer = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateBuffer(stone_device(), &sbtInfo, nullptr, &rawSbtBuffer), "Create final SBT buffer");
+    VK_CHECK(vkCreateBuffer(RTX::g_ctx().device_, &sbtInfo, nullptr, &rawSbtBuffer), "Create final SBT buffer");
 
-    sbtBuffer_ = Handle<VkBuffer>(rawSbtBuffer, stone_device(),
+    sbtBuffer_ = Handle<VkBuffer>(rawSbtBuffer, RTX::g_ctx().device_,
         [](VkDevice d, VkBuffer b, auto) { if (b) vkDestroyBuffer(d, b, nullptr); }, 0, "SBTBuffer");
 
     VkMemoryRequirements memReqs;
-    vkGetBufferMemoryRequirements(stone_device(), rawSbtBuffer, &memReqs);
+    vkGetBufferMemoryRequirements(RTX::g_ctx().device_, rawSbtBuffer, &memReqs);
 
     VkMemoryAllocateInfo allocInfo{};
     allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
@@ -1127,12 +1127,12 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
     }
 
     VkDeviceMemory rawSbtMemory = VK_NULL_HANDLE;
-    VK_CHECK(vkAllocateMemory(stone_device(), &allocInfo, nullptr, &rawSbtMemory), "Allocate final SBT memory");
+    VK_CHECK(vkAllocateMemory(RTX::g_ctx().device_, &allocInfo, nullptr, &rawSbtMemory), "Allocate final SBT memory");
 
-    sbtMemory_ = Handle<VkDeviceMemory>(rawSbtMemory, stone_device(),
+    sbtMemory_ = Handle<VkDeviceMemory>(rawSbtMemory, RTX::g_ctx().device_,
         [](VkDevice d, VkDeviceMemory m, auto) { if (m) vkFreeMemory(d, m, nullptr); }, memReqs.size, "SBTMemory");
 
-    VK_CHECK(vkBindBufferMemory(stone_device(), rawSbtBuffer, rawSbtMemory, 0), "Bind final SBT memory");
+    VK_CHECK(vkBindBufferMemory(RTX::g_ctx().device_, rawSbtBuffer, rawSbtMemory, 0), "Bind final SBT memory");
 
     // Copy staging to final — FIXED: renamed to avoid lambda conflict
     VkCommandBuffer cmd = VulkanRTX::beginSingleTimeCommands(pool);
@@ -1142,14 +1142,14 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
     VulkanRTX::endSingleTimeCommands(cmd, queue, pool);
 
     // Cleanup staging
-    vkDestroyBuffer(stone_device(), stagingBuffer, nullptr);
-    vkFreeMemory(stone_device(), stagingMemory, nullptr);
+    vkDestroyBuffer(RTX::g_ctx().device_, stagingBuffer, nullptr);
+    vkFreeMemory(RTX::g_ctx().device_, stagingMemory, nullptr);
 
     // Get device address
     VkBufferDeviceAddressInfo addrInfo{};
     addrInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
     addrInfo.buffer = rawSbtBuffer;
-    sbtAddress_ = vkGetBufferDeviceAddress_(stone_device(), &addrInfo);
+    sbtAddress_ = vkGetBufferDeviceAddress_(RTX::g_ctx().device_, &addrInfo);
 
     // Store regions
     raygenSbtRegion_   = { sbtAddress_ + raygenOffset,   handleSizeAligned, raygenGroupCount_   * handleSizeAligned };

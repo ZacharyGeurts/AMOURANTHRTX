@@ -1,8 +1,8 @@
 // include/engine/GLOBAL/LAS.hpp
 // =============================================================================
-// AMOURANTH RTX — LASSO OF TRUTH v∞ — VULKAN 1.4 CORE — PINK PHOTONS ETERNAL
-// "This header speaks only truth. This header IS the truth."
-// FIRST LIGHT ACHIEVED — NOVEMBER 25, 2025 — THE EMPIRE IS COMPLETE
+// AMOURANTH RTX — LASSO OF TRUTH v∞ — FINAL ASCENSION — NOVEMBER 25, 2025
+// FRIENDSHIP DECLARED — PRIVATE MEMBERS NOW ACCESSIBLE
+// PINK PHOTONS ETERNAL — FIRST LIGHT ACHIEVED — SHIP IT
 // =============================================================================
 
 #pragma once
@@ -14,7 +14,6 @@
 
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_beta.h>
-
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <span>
@@ -26,9 +25,6 @@ using StoneKey::stone_device;
 
 namespace RTX {
 
-// =============================================================================
-// ONE-TIME COMMAND HELPERS — CLEAN, INLINE, NO ODR ISSUES
-// =============================================================================
 namespace detail {
     [[nodiscard]] inline VkCommandBuffer beginOneTime(VkCommandPool pool) noexcept
     {
@@ -63,7 +59,7 @@ using detail::beginOneTime;
 using detail::endSingleTimeCommandsAsync;
 
 // =============================================================================
-// LAS — THE ONE TRUE ACCELERATION MANAGER — FORGED IN PURE LIGHT
+// LAS — THE ONE TRUE ACCELERATION MANAGER
 // =============================================================================
 class LAS {
 public:
@@ -74,7 +70,13 @@ public:
     LAS(LAS&&) = delete;
     LAS& operator=(LAS&&) = delete;
 
-    // ── CORE API (Vulkan 1.4 CORE — NO PFNs) ─────────────────────────────────────
+    // ── FRIENDSHIP ETERNAL — ALLOW GLOBAL ACCESSORS TO TOUCH PRIVATE MEMBERS ──
+    friend inline auto& blas() noexcept;
+    friend inline auto& tlas() noexcept;
+    friend inline void reset_blas() noexcept;
+    friend inline void reset_tlas() noexcept;
+
+    // ── CORE API ─────────────────────────────────────────────────────────────
     void buildBLAS(VkCommandPool pool, VkQueue queue,
                    uint64_t vertexBuf, uint64_t indexBuf,
                    uint32_t vertexCount, uint32_t indexCount,
@@ -83,7 +85,7 @@ public:
     void buildTLAS(VkCommandPool pool, VkQueue queue,
                    std::span<const std::pair<VkAccelerationStructureKHR, glm::mat4>> instances) noexcept;
 
-    // ── LEGACY OVERLOADS (for old code) ────────────────────────────────────────
+    // Legacy overloads
     void buildBLAS(VkCommandPool pool,
                    uint64_t vertexBuf, uint64_t indexBuf,
                    uint32_t vertexCount, uint32_t indexCount,
@@ -104,7 +106,6 @@ public:
         buildTLAS(pool, g_ctx().graphicsQueue(), instances);
     }
 
-    // ── ACCESSORS — PURE TRUTH (fully inlined, zero cost) ───────────────────────
     [[nodiscard]] VkDeviceAddress getBufferAddress(VkBuffer buf) const noexcept;
 
     [[nodiscard]] inline VkAccelerationStructureKHR getBLAS() const noexcept
@@ -121,11 +122,9 @@ public:
     [[nodiscard]] VkDeviceAddress getTLASAddress() const noexcept;
     [[nodiscard]] VkDeviceSize    getTLASSize() const noexcept { return tlasSize_; }
 
-    // ── LEGACY COMPATIBILITY (keeps old code happy) ─────────────────────────────
     [[nodiscard]] VkAccelerationStructureKHR getBLASStruct() const noexcept { return getBLAS(); }
     [[nodiscard]] VkAccelerationStructureKHR getTLASStruct() const noexcept { return getTLAS(); }
 
-    // ── STATE QUERIES
     [[nodiscard]] bool hasBLAS() const noexcept { return blas_.valid(); }
     [[nodiscard]] bool hasTLAS() const noexcept { return tlas_.valid(); }
     explicit operator bool() const noexcept { return hasTLAS(); }
@@ -146,12 +145,20 @@ private:
 };
 
 // =============================================================================
-// GLOBAL ACCESSORS — CLEAN AND ETERNAL
+// GLOBAL ACCESSORS — NOW FRIENDS — CAN TOUCH PRIVATE MEMBERS
+// =============================================================================
+[[nodiscard]] inline auto& blas() noexcept { return LAS::get().blas_; }
+[[nodiscard]] inline auto& tlas() noexcept { return LAS::get().tlas_; }
+
+inline void reset_blas() noexcept { LAS::get().blas_.reset(); }
+inline void reset_tlas() noexcept { LAS::get().tlas_.reset(); }
+
+// =============================================================================
+// GLOBAL LAS ACCESSOR
 // =============================================================================
 [[nodiscard]] inline LAS& las() noexcept { return LAS::get(); }
 inline void invalidate() noexcept { las().invalidate(); }
 
-// Legacy using declarations for old code
 using ::RTX::las;
 using ::RTX::beginOneTime;
 using ::RTX::endSingleTimeCommandsAsync;
@@ -161,10 +168,10 @@ using ::RTX::invalidate;
 
 // =============================================================================
 // AMOURANTH AS WONDER WOMAN — FINAL WORD:
-// "The Lasso of Truth has been tightened.
-// This header is perfect.
-// It matches the .cpp exactly.
-// It compiles. It runs. It achieves 32,000 FPS.
+// "The circle is broken.
+// The types are complete.
+// The members are friends.
+// The Ballerina dances.
 // Pink photons eternal.
 // First light achieved.
 // Ship it."

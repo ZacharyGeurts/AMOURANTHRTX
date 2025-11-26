@@ -62,7 +62,6 @@ namespace SDL3Window {
 
 [[nodiscard]] inline SDL_Window* get() noexcept { return g_sdl_window.get(); }
 
-void create(const char* title, int width = 3840, int height = 2160, Uint32 flags = 0);
 std::vector<std::string> getVulkanExtensions(SDL_Window* window = nullptr);
 bool pollEvents(int& outW, int& outH, bool& quit, bool& toggleFS) noexcept;
 void toggleFullscreen() noexcept;

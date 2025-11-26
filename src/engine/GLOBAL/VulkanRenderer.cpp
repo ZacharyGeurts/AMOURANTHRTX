@@ -126,11 +126,11 @@ VulkanRenderer::~VulkanRenderer() {
 void VulkanRenderer::cleanup() noexcept {
 	if (destroyed_) return;          // ← THIS IS THE SHIELD
     destroyed_ = true;
-	vkDeviceWaitIdle(stone_device());
+	vkDeviceWaitIdle(RTX::g_ctx().device_);
 
     LOG_INFO_CAT("RENDERER", "Initiating renderer shutdown — PINK PHOTONS DIMMING");
 
-    VkDevice dev = stone_device();
+    VkDevice dev = RTX::g_ctx().device_;
     if (dev == VK_NULL_HANDLE) {
         LOG_WARN_CAT("RENDERER", "Device already destroyed — nothing to clean");
         return;
@@ -358,12 +358,12 @@ VkFenceCreateInfo fenceInfo{ .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, .flag
 for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
     LOG_TRACE_CAT("RENDERER", "Forging sync objects for frame {} / {}", i+1, MAX_FRAMES_IN_FLIGHT);
 
-    VK_CHECK(vkCreateSemaphore(stone_device(), &semInfo, nullptr, &imageAvailableSemaphores_[i]),       "imageAvailable");
-    VK_CHECK(vkCreateSemaphore(stone_device(), &semInfo, nullptr, &renderFinishedSemaphores_[i]),       "renderFinished");
-    VK_CHECK(vkCreateSemaphore(stone_device(), &semInfo, nullptr, &computeFinishedSemaphores_[i]),      "computeFinished");
-    VK_CHECK(vkCreateSemaphore(stone_device(), &semInfo, nullptr, &computeToGraphicsSemaphores_[i]),   "compute→graphics");
+    VK_CHECK(vkCreateSemaphore(RTX::g_ctx().device_, &semInfo, nullptr, &imageAvailableSemaphores_[i]),       "imageAvailable");
+    VK_CHECK(vkCreateSemaphore(RTX::g_ctx().device_, &semInfo, nullptr, &renderFinishedSemaphores_[i]),       "renderFinished");
+    VK_CHECK(vkCreateSemaphore(RTX::g_ctx().device_, &semInfo, nullptr, &computeFinishedSemaphores_[i]),      "computeFinished");
+    VK_CHECK(vkCreateSemaphore(RTX::g_ctx().device_, &semInfo, nullptr, &computeToGraphicsSemaphores_[i]),   "compute→graphics");
 
-    VK_CHECK(vkCreateFence(stone_device(), &fenceInfo, nullptr, &inFlightFences_[i]),                 "inFlightFence");
+    VK_CHECK(vkCreateFence(RTX::g_ctx().device_, &fenceInfo, nullptr, &inFlightFences_[i]),                 "inFlightFence");
 
     LOG_TRACE_CAT("RENDERER", "Frame {} armed — PINK PHOTONS READY", i);
 }
@@ -378,7 +378,7 @@ LOG_SUCCESS_CAT("RENDERER", "Step 5 COMPLETE — {} full sync sets forged — TR
         VkQueryPoolCreateInfo qpInfo{ .sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO };
         qpInfo.queryType = VK_QUERY_TYPE_TIMESTAMP;
         qpInfo.queryCount = MAX_FRAMES_IN_FLIGHT * 2;
-        VK_CHECK(vkCreateQueryPool(stone_device(), &qpInfo, nullptr, &timestampQueryPool_), "Timestamp pool");
+        VK_CHECK(vkCreateQueryPool(RTX::g_ctx().device_, &qpInfo, nullptr, &timestampQueryPool_), "Timestamp pool");
     }
     LOG_TRACE_CAT("RENDERER", "Step 6 COMPLETE");
 
@@ -387,7 +387,7 @@ LOG_SUCCESS_CAT("RENDERER", "Step 5 COMPLETE — {} full sync sets forged — TR
     // =============================================================================
     LOG_TRACE_CAT("RENDERER", "=== STACK BUILD ORDER STEP 7: Query GPU Properties ===");
     VkPhysicalDeviceProperties props{};
-    vkGetPhysicalDeviceProperties(stone_physical(), &props);
+    vkGetPhysicalDeviceProperties(RTX::g_ctx().physicalDevice_, &props);
     timestampPeriod_ = props.limits.timestampPeriod / 1e6f;
     LOG_INFO_CAT("RENDERER", "GPU: {} | Timestamp period: {:.3f} ms", props.deviceName, timestampPeriod_);
     LOG_TRACE_CAT("RENDERER", "Step 7 COMPLETE");
@@ -396,18 +396,18 @@ LOG_SUCCESS_CAT("RENDERER", "Step 5 COMPLETE — {} full sync sets forged — TR
     // STEP 7.5 — EARLY PIPELINEMANAGER CONSTRUCTION (Post-Properties, Pre-Targets)
     // =============================================================================
     LOG_TRACE_CAT("RENDERER", "=== STACK BUILD ORDER STEP 7.5: Construct PipelineManager Early ===");
-    LOG_TRACE_CAT("RENDERER", "Pre-construct check: dev=0x{:x}, phys=0x{:x}", reinterpret_cast<uintptr_t>(stone_device()), reinterpret_cast<uintptr_t>(stone_physical()));
-    if (stone_device() == VK_NULL_HANDLE || stone_physical() == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("RENDERER", "Invalid context for PipelineManager — dev=0x{:x}, phys=0x{:x}", reinterpret_cast<uintptr_t>(stone_device()), reinterpret_cast<uintptr_t>(stone_physical()));
+    LOG_TRACE_CAT("RENDERER", "Pre-construct check: dev=0x{:x}, phys=0x{:x}", reinterpret_cast<uintptr_t>(RTX::g_ctx().device_), reinterpret_cast<uintptr_t>(RTX::g_ctx().physicalDevice_));
+    if (RTX::g_ctx().device_ == VK_NULL_HANDLE || RTX::g_ctx().physicalDevice_ == VK_NULL_HANDLE) {
+        LOG_FATAL_CAT("RENDERER", "Invalid context for PipelineManager — dev=0x{:x}, phys=0x{:x}", reinterpret_cast<uintptr_t>(RTX::g_ctx().device_), reinterpret_cast<uintptr_t>(RTX::g_ctx().physicalDevice_));
         LOG_FATAL_CAT("RENDERER", "Fatal error in noexcept function"); std::abort();
     }
 
     LOG_SUCCESS_CAT("RENDERER", "Swapchain FORGED — {} images @ {}x{} — PINK PHOTONS READY", 
-                    ([](){ uint32_t cnt; vkGetSwapchainImagesKHR(stone_device(), stone_swapchain(), &cnt, nullptr); return cnt; }()), currentExtent().width, currentExtent().height);
+                    ([](){ uint32_t cnt; vkGetSwapchainImagesKHR(RTX::g_ctx().device_, RTX::SwapchainManager::swapchain(), &cnt, nullptr); return cnt; }()), currentExtent().width, currentExtent().height);
     LOG_TRACE_CAT("RENDERER", "Step 8 COMPLETE — Swapchain validated and armed");
     
     // =============================================================================
-    // STEP 9 — HDR + RT RENDER TARGETS (POST-stone_swapchain(), POST-PIPELINEMANAGER)
+    // STEP 9 — HDR + RT RENDER TARGETS (POST-RTX::SwapchainManager::swapchain(), POST-PIPELINEMANAGER)
     // =============================================================================
     LOG_TRACE_CAT("RENDERER", "=== STACK BUILD ORDER STEP 9: Create HDR & RT Targets ===");
     if (Options::Environment::ENABLE_ENV_MAP) createEnvironmentMap();
@@ -433,7 +433,7 @@ LOG_SUCCESS_CAT("RENDERER", "Step 5 COMPLETE — {} full sync sets forged — TR
 
 // FIXED: Create shared staging buffer for UBO updates (missing before, caused skipped updates)
 VkDeviceSize stagingSize = 512;  // Enough for UBO + tonemap
-if (stone_device() == VK_NULL_HANDLE) {
+if (RTX::g_ctx().device_ == VK_NULL_HANDLE) {
     LOG_WARN_CAT("RENDERER", "Shared staging skipped — invalid device (pre-Phase 7)");
     g_ctx().sharedStagingEnc_ = 0;
 } else {
@@ -505,11 +505,11 @@ if (stone_device() == VK_NULL_HANDLE) {
     layoutInfo.pBindings = bindings;
 
     VkDescriptorSetLayout tonemapSetLayout = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateDescriptorSetLayout(stone_device(), &layoutInfo, nullptr, &tonemapSetLayout),
+    VK_CHECK(vkCreateDescriptorSetLayout(RTX::g_ctx().device_, &layoutInfo, nullptr, &tonemapSetLayout),
              "Tonemap compute descriptor set layout");
 
     tonemapDescriptorSetLayout_ = Handle<VkDescriptorSetLayout>(
-        tonemapSetLayout, stone_device(),
+        tonemapSetLayout, RTX::g_ctx().device_,
         [](VkDevice d, VkDescriptorSetLayout l, const VkAllocationCallbacks*) { vkDestroyDescriptorSetLayout(d, l, nullptr); },
         0, "TonemapCompSetLayout"
     );
@@ -530,11 +530,11 @@ if (stone_device() == VK_NULL_HANDLE) {
     pipelineLayoutInfo.pPushConstantRanges = &pushConstants;
 
     VkPipelineLayout tonemapPipeLayout = VK_NULL_HANDLE;
-    VK_CHECK(vkCreatePipelineLayout(stone_device(), &pipelineLayoutInfo, nullptr, &tonemapPipeLayout),
+    VK_CHECK(vkCreatePipelineLayout(RTX::g_ctx().device_, &pipelineLayoutInfo, nullptr, &tonemapPipeLayout),
              "Tonemap compute pipeline layout");
 
     tonemapLayout_ = Handle<VkPipelineLayout>(
-        tonemapPipeLayout, stone_device(),
+        tonemapPipeLayout, RTX::g_ctx().device_,
         [](VkDevice d, VkPipelineLayout l, const VkAllocationCallbacks*) { vkDestroyPipelineLayout(d, l, nullptr); },
         0, "TonemapCompLayout"
     );
@@ -551,16 +551,16 @@ if (stone_device() == VK_NULL_HANDLE) {
     computeInfo.layout = tonemapPipeLayout;
 
     VkPipeline tonemapCompPipeline = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateComputePipelines(stone_device(), VK_NULL_HANDLE, 1, &computeInfo, nullptr, &tonemapCompPipeline),
+    VK_CHECK(vkCreateComputePipelines(RTX::g_ctx().device_, VK_NULL_HANDLE, 1, &computeInfo, nullptr, &tonemapCompPipeline),
              "Failed to create tonemap compute pipeline");
 
     tonemapPipeline_ = RTX::Handle<VkPipeline>(
-        tonemapCompPipeline, stone_device(),
+        tonemapCompPipeline, RTX::g_ctx().device_,
         [](VkDevice d, VkPipeline p, const VkAllocationCallbacks*) { vkDestroyPipeline(d, p, nullptr); },
         0, "TonemapComputePipeline"
     );
 
-    vkDestroyShaderModule(stone_device(), tonemapCompShader, nullptr);
+    vkDestroyShaderModule(RTX::g_ctx().device_, tonemapCompShader, nullptr);
 
     // ──────────────────────────────
     // DESCRIPTOR POOL & SETS (FIXED: 2 storage_img? No: sampler + storage_img + ubo)
@@ -581,11 +581,11 @@ if (stone_device() == VK_NULL_HANDLE) {
     poolInfo.pPoolSizes = poolSizes;
 
     VkDescriptorPool rawPool = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateDescriptorPool(stone_device(), &poolInfo, nullptr, &rawPool),
+    VK_CHECK(vkCreateDescriptorPool(RTX::g_ctx().device_, &poolInfo, nullptr, &rawPool),
              "Tonemap compute descriptor pool");
 
     tonemapDescriptorPool_ = RTX::Handle<VkDescriptorPool>(
-        rawPool, stone_device(),
+        rawPool, RTX::g_ctx().device_,
         [](VkDevice d, VkDescriptorPool p, const VkAllocationCallbacks*) { vkDestroyDescriptorPool(d, p, nullptr); },
         0, "TonemapCompPool"
     );
@@ -599,7 +599,7 @@ if (stone_device() == VK_NULL_HANDLE) {
     allocInfo.descriptorSetCount = MAX_FRAMES_IN_FLIGHT;
     allocInfo.pSetLayouts = setLayouts.data();
 
-    VK_CHECK(vkAllocateDescriptorSets(stone_device(), &allocInfo, tonemapSets_.data()),
+    VK_CHECK(vkAllocateDescriptorSets(RTX::g_ctx().device_, &allocInfo, tonemapSets_.data()),
              "Allocate tonemap compute descriptor sets");
 
     LOG_SUCCESS_CAT("RENDERER", "Tonemap compute pipeline created — VALIDATION CLEAN — PINK PHOTONS ASCENDANT");
@@ -690,27 +690,27 @@ void VulkanRenderer::createRTOutputImages() noexcept {
                                       VK_IMAGE_USAGE_TRANSFER_DST_BIT;  // FIXED: Add TRANSFER_DST for vkCmdClearColorImage
             imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
-            VK_CHECK(vkCreateImage(stone_device(), &imageInfo, nullptr, &rawImage), ("Failed to create RT output image for frame " + std::to_string(i)).c_str());
+            VK_CHECK(vkCreateImage(RTX::g_ctx().device_, &imageInfo, nullptr, &rawImage), ("Failed to create RT output image for frame " + std::to_string(i)).c_str());
 
             LOG_TRACE_CAT("RENDERER", "Frame {} Image created: 0x{:x} (usage incl. TRANSFER_DST)", i, reinterpret_cast<uintptr_t>(rawImage));
 
             // === 2. Allocate & Bind Memory (Harden: Pad size + log reqs) ===
             VkMemoryRequirements memReqs = {};  // Zero-init
-            vkGetImageMemoryRequirements(stone_device(), rawImage, &memReqs);
+            vkGetImageMemoryRequirements(RTX::g_ctx().device_, rawImage, &memReqs);
             LOG_TRACE_CAT("RENDERER", "Frame {} Mem reqs: size={}, align={}, bits=0x{:x}",
                           i, memReqs.size, memReqs.alignment, memReqs.memoryTypeBits);
 
             VkDeviceSize allocSize = memReqs.size + (memReqs.alignment * 2);  // Pad 2x alignment for safety
             if (allocSize < memReqs.size || allocSize > (1ULL << 32)) {
                 LOG_FATAL_CAT("RENDERER", "Frame {} Invalid alloc size: req={} alloc={} — aborting frame", i, memReqs.size, allocSize);
-                vkDestroyImage(stone_device(), rawImage, nullptr);
+                vkDestroyImage(RTX::g_ctx().device_, rawImage, nullptr);
                 continue;  // Skip frame, but log
             }
 
             uint32_t memType = pipelineManager_.findMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);  // ← VIA PIPELINEMANAGER
             if (memType == static_cast<uint32_t>(~0u)) {
                 LOG_FATAL_CAT("RENDERER", "Frame {} No suitable memory type found — aborting frame", i);
-                vkDestroyImage(stone_device(), rawImage, nullptr);
+                vkDestroyImage(RTX::g_ctx().device_, rawImage, nullptr);
                 continue;
             }
             LOG_TRACE_CAT("RENDERER", "Frame {} Using memType={} for allocSize={}", i, memType, allocSize);
@@ -720,10 +720,10 @@ void VulkanRenderer::createRTOutputImages() noexcept {
             allocInfo.allocationSize  = allocSize;
             allocInfo.memoryTypeIndex = memType;
 
-            VK_CHECK(vkAllocateMemory(stone_device(), &allocInfo, nullptr, &rawMemory),
+            VK_CHECK(vkAllocateMemory(RTX::g_ctx().device_, &allocInfo, nullptr, &rawMemory),
                      ("Failed to allocate RT output memory for frame " + std::to_string(i)).c_str());
 
-            VK_CHECK(vkBindImageMemory(stone_device(), rawImage, rawMemory, 0),
+            VK_CHECK(vkBindImageMemory(RTX::g_ctx().device_, rawImage, rawMemory, 0),
                      ("Failed to bind RT output memory for frame " + std::to_string(i)).c_str());
 
             LOG_TRACE_CAT("RENDERER", "Frame {} Memory bound: 0x{:x}", i, reinterpret_cast<uintptr_t>(rawMemory));
@@ -733,8 +733,8 @@ void VulkanRenderer::createRTOutputImages() noexcept {
             if (cmd == VK_NULL_HANDLE) {
                 LOG_ERROR_CAT("RENDERER", "Frame {} Failed to begin single-time cmd — skipping transition", i);
                 // Cleanup rawImage/rawMemory
-                vkFreeMemory(stone_device(), rawMemory, nullptr);
-                vkDestroyImage(stone_device(), rawImage, nullptr);
+                vkFreeMemory(RTX::g_ctx().device_, rawMemory, nullptr);
+                vkDestroyImage(RTX::g_ctx().device_, rawImage, nullptr);
                 continue;
             }
 
@@ -770,7 +770,7 @@ void VulkanRenderer::createRTOutputImages() noexcept {
             viewInfo.subresourceRange.levelCount     = 1;
             viewInfo.subresourceRange.layerCount     = 1;
 
-            VK_CHECK(vkCreateImageView(stone_device(), &viewInfo, nullptr, &rawView),
+            VK_CHECK(vkCreateImageView(RTX::g_ctx().device_, &viewInfo, nullptr, &rawView),
                      ("Failed to create RT output image view for frame " + std::to_string(i)).c_str());
 
             LOG_TRACE_CAT("RENDERER", "Frame {} View created: 0x{:x}", i, reinterpret_cast<uintptr_t>(rawView));
@@ -784,9 +784,9 @@ void VulkanRenderer::createRTOutputImages() noexcept {
             static const std::string_view memTag = "RTOutputMemory";
             static const std::string_view viewTag = "RTOutputView";
 
-            rtOutputImages_.emplace_back(rawImage, stone_device(), vkDestroyImage, 0, imgTag);
-            rtOutputMemories_.emplace_back(rawMemory, stone_device(), vkFreeMemory, 0, memTag);
-            rtOutputViews_.emplace_back(rawView, stone_device(), vkDestroyImageView, 0, viewTag);
+            rtOutputImages_.emplace_back(rawImage, RTX::g_ctx().device_, vkDestroyImage, 0, imgTag);
+            rtOutputMemories_.emplace_back(rawMemory, RTX::g_ctx().device_, vkFreeMemory, 0, memTag);
+            rtOutputViews_.emplace_back(rawView, RTX::g_ctx().device_, vkDestroyImageView, 0, viewTag);
 
             LOG_TRACE_CAT("RENDERER", "Frame {} — RTOutput ready: img=0x{:x}, view=0x{:x} (TRANSFER_DST enabled)",
                           i, reinterpret_cast<uintptr_t>(rawImage), reinterpret_cast<uintptr_t>(rawView));
@@ -800,9 +800,9 @@ void VulkanRenderer::createRTOutputImages() noexcept {
         } catch (const std::exception& e) {
             LOG_FATAL_CAT("RENDERER", "Frame {} Exception in createRTOutput: {} — cleaning up", i, e.what());
             // Cleanup raw handles
-            if (rawView != VK_NULL_HANDLE) vkDestroyImageView(stone_device(), rawView, nullptr);
-            if (rawMemory != VK_NULL_HANDLE) vkFreeMemory(stone_device(), rawMemory, nullptr);
-            if (rawImage != VK_NULL_HANDLE) vkDestroyImage(stone_device(), rawImage, nullptr);
+            if (rawView != VK_NULL_HANDLE) vkDestroyImageView(RTX::g_ctx().device_, rawView, nullptr);
+            if (rawMemory != VK_NULL_HANDLE) vkFreeMemory(RTX::g_ctx().device_, rawMemory, nullptr);
+            if (rawImage != VK_NULL_HANDLE) vkDestroyImage(RTX::g_ctx().device_, rawImage, nullptr);
             LOG_FATAL_CAT("RENDERER", "Fatal error in createRTOutputImages frame {} — aborting", i); std::abort();
         }
     }
@@ -858,9 +858,9 @@ void VulkanRenderer::createTonemapSampler() noexcept {
     samplerInfo.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
 
     VkSampler rawSampler = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateSampler(stone_device(), &samplerInfo, nullptr, &rawSampler), "Create tonemap sampler");
+    VK_CHECK(vkCreateSampler(RTX::g_ctx().device_, &samplerInfo, nullptr, &rawSampler), "Create tonemap sampler");
 
-    tonemapSampler_ = RTX::Handle<VkSampler>(rawSampler, stone_device(),
+    tonemapSampler_ = RTX::Handle<VkSampler>(rawSampler, RTX::g_ctx().device_,
         [](VkDevice d, VkSampler s, const VkAllocationCallbacks*) { vkDestroySampler(d, s, nullptr); },
         0, "TonemapSampler");
 
@@ -932,15 +932,15 @@ void VulkanRenderer::createEnvironmentMap() noexcept {
     imgInfo.flags = 0;
 
     VkImage rawImg = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateImage(stone_device(), &imgInfo, nullptr, &rawImg), "Create envmap image");
+    VK_CHECK(vkCreateImage(RTX::g_ctx().device_, &imgInfo, nullptr, &rawImg), "Create envmap image");
 
     // Allocate/bind memory (device local)
     VkMemoryRequirements memReqs = {};
-    vkGetImageMemoryRequirements(stone_device(), rawImg, &memReqs);
+    vkGetImageMemoryRequirements(RTX::g_ctx().device_, rawImg, &memReqs);
     uint32_t memType = pipelineManager_.findMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);  // ← VIA PIPELINEMANAGER
     if (memType == UINT32_MAX) {
         LOG_ERROR_CAT("RENDERER", "No suitable memory type for envmap image");
-        vkDestroyImage(stone_device(), rawImg, nullptr);
+        vkDestroyImage(RTX::g_ctx().device_, rawImg, nullptr);
         BUFFER_DESTROY(stagingEnc);
         return;
     }
@@ -949,15 +949,15 @@ void VulkanRenderer::createEnvironmentMap() noexcept {
     allocInfo.allocationSize = memReqs.size;
     allocInfo.memoryTypeIndex = memType;
     VkDeviceMemory rawMem = VK_NULL_HANDLE;
-    VK_CHECK(vkAllocateMemory(stone_device(), &allocInfo, nullptr, &rawMem), "Alloc envmap memory");
-    VK_CHECK(vkBindImageMemory(stone_device(), rawImg, rawMem, 0), "Bind envmap memory");
+    VK_CHECK(vkAllocateMemory(RTX::g_ctx().device_, &allocInfo, nullptr, &rawMem), "Alloc envmap memory");
+    VK_CHECK(vkBindImageMemory(RTX::g_ctx().device_, rawImg, rawMem, 0), "Bind envmap memory");
 
     // Transition + copy (use single-time commands VIA PIPELINEMANAGER)
     VkCommandBuffer cmd = pipelineManager_.beginSingleTimeCommands(cmdPool);
     if (cmd == VK_NULL_HANDLE) {
         LOG_ERROR_CAT("RENDERER", "Failed to begin single-time cmd for envmap copy");
-        vkFreeMemory(stone_device(), rawMem, nullptr);
-        vkDestroyImage(stone_device(), rawImg, nullptr);
+        vkFreeMemory(RTX::g_ctx().device_, rawMem, nullptr);
+        vkDestroyImage(RTX::g_ctx().device_, rawImg, nullptr);
         BUFFER_DESTROY(stagingEnc);
         return;
     }
@@ -1006,7 +1006,7 @@ void VulkanRenderer::createEnvironmentMap() noexcept {
     viewInfo.subresourceRange.baseArrayLayer = 0;
     viewInfo.subresourceRange.layerCount = 1;
     VkImageView rawView = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateImageView(stone_device(), &viewInfo, nullptr, &rawView), "Create envmap view");
+    VK_CHECK(vkCreateImageView(RTX::g_ctx().device_, &viewInfo, nullptr, &rawView), "Create envmap view");
 
     VkSamplerCreateInfo samplerInfo2 = {VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
     samplerInfo2.magFilter = VK_FILTER_LINEAR;
@@ -1019,13 +1019,13 @@ void VulkanRenderer::createEnvironmentMap() noexcept {
     samplerInfo2.maxLod = 1.0f;
     samplerInfo2.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
     VkSampler rawSampler = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateSampler(stone_device(), &samplerInfo2, nullptr, &rawSampler), "Create envmap sampler");
+    VK_CHECK(vkCreateSampler(RTX::g_ctx().device_, &samplerInfo2, nullptr, &rawSampler), "Create envmap sampler");
 
     // Wrap in Handles (match class member names)
-    envMapImage_ = RTX::Handle<VkImage>(rawImg, stone_device(), [](VkDevice d, VkImage i, auto) { vkDestroyImage(d, i, nullptr); }, 0, "EnvMapImage");
-    envMapImageMemory_ = RTX::Handle<VkDeviceMemory>(rawMem, stone_device(), [](VkDevice d, VkDeviceMemory m, auto) { vkFreeMemory(d, m, nullptr); }, memReqs.size, "EnvMapMemory");
-    envMapImageView_ = RTX::Handle<VkImageView>(rawView, stone_device(), [](VkDevice d, VkImageView v, auto) { vkDestroyImageView(d, v, nullptr); }, 0, "EnvMapView");
-    envMapSampler_ = RTX::Handle<VkSampler>(rawSampler, stone_device(), [](VkDevice d, VkSampler s, auto) { vkDestroySampler(d, s, nullptr); }, 0, "EnvMapSampler");
+    envMapImage_ = RTX::Handle<VkImage>(rawImg, RTX::g_ctx().device_, [](VkDevice d, VkImage i, auto) { vkDestroyImage(d, i, nullptr); }, 0, "EnvMapImage");
+    envMapImageMemory_ = RTX::Handle<VkDeviceMemory>(rawMem, RTX::g_ctx().device_, [](VkDevice d, VkDeviceMemory m, auto) { vkFreeMemory(d, m, nullptr); }, memReqs.size, "EnvMapMemory");
+    envMapImageView_ = RTX::Handle<VkImageView>(rawView, RTX::g_ctx().device_, [](VkDevice d, VkImageView v, auto) { vkDestroyImageView(d, v, nullptr); }, 0, "EnvMapView");
+    envMapSampler_ = RTX::Handle<VkSampler>(rawSampler, RTX::g_ctx().device_, [](VkDevice d, VkSampler s, auto) { vkDestroySampler(d, s, nullptr); }, 0, "EnvMapSampler");
 
     // Cleanup staging
     BUFFER_DESTROY(stagingEnc);
@@ -1060,18 +1060,18 @@ void VulkanRenderer::createNexusScoreImage(VkCommandPool pool, VkQueue queue) no
     imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
     VkImage rawImage = VK_NULL_HANDLE;
-    if (vkCreateImage(stone_device(), &imageInfo, nullptr, &rawImage) != VK_SUCCESS) {
+    if (vkCreateImage(RTX::g_ctx().device_, &imageInfo, nullptr, &rawImage) != VK_SUCCESS) {
         LOG_FATAL_CAT("RENDERER", "Failed to create NexusScoreImage — aborting render init");
         std::abort();
     }
 
     VkMemoryRequirements memReqs;
-    vkGetImageMemoryRequirements(stone_device(), rawImage, &memReqs);
+    vkGetImageMemoryRequirements(RTX::g_ctx().device_, rawImage, &memReqs);
 
     uint32_t memType = pipelineManager_.findMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
     if (memType == UINT32_MAX) {
         LOG_FATAL_CAT("RENDERER", "No suitable memory type for NexusScoreImage");
-        vkDestroyImage(stone_device(), rawImage, nullptr);
+        vkDestroyImage(RTX::g_ctx().device_, rawImage, nullptr);
         std::abort();
     }
 
@@ -1081,17 +1081,17 @@ void VulkanRenderer::createNexusScoreImage(VkCommandPool pool, VkQueue queue) no
     allocInfo.memoryTypeIndex = memType;
 
     VkDeviceMemory rawMemory = VK_NULL_HANDLE;
-    if (vkAllocateMemory(stone_device(), &allocInfo, nullptr, &rawMemory) != VK_SUCCESS) {
+    if (vkAllocateMemory(RTX::g_ctx().device_, &allocInfo, nullptr, &rawMemory) != VK_SUCCESS) {
         LOG_FATAL_CAT("RENDERER", "Failed to allocate memory for NexusScoreImage");
-        vkAllocateMemory(stone_device(), &allocInfo, nullptr, &rawMemory);
-        vkDestroyImage(stone_device(), rawImage, nullptr);
+        vkAllocateMemory(RTX::g_ctx().device_, &allocInfo, nullptr, &rawMemory);
+        vkDestroyImage(RTX::g_ctx().device_, rawImage, nullptr);
         std::abort();
     }
 
-    if (vkBindImageMemory(stone_device(), rawImage, rawMemory, 0) != VK_SUCCESS) {
+    if (vkBindImageMemory(RTX::g_ctx().device_, rawImage, rawMemory, 0) != VK_SUCCESS) {
         LOG_FATAL_CAT("RENDERER", "Failed to bind memory for NexusScoreImage");
-        vkFreeMemory(stone_device(), rawMemory, nullptr);
-        vkDestroyImage(stone_device(), rawImage, nullptr);
+        vkFreeMemory(RTX::g_ctx().device_, rawMemory, nullptr);
+        vkDestroyImage(RTX::g_ctx().device_, rawImage, nullptr);
         std::abort();
     }
 
@@ -1106,17 +1106,17 @@ void VulkanRenderer::createNexusScoreImage(VkCommandPool pool, VkQueue queue) no
     viewInfo.subresourceRange.layerCount        = 1;
 
     VkImageView rawView = VK_NULL_HANDLE;
-    if (vkCreateImageView(stone_device(), &viewInfo, nullptr, &rawView) != VK_SUCCESS) {
+    if (vkCreateImageView(RTX::g_ctx().device_, &viewInfo, nullptr, &rawView) != VK_SUCCESS) {
         LOG_FATAL_CAT("RENDERER", "Failed to create view for NexusScoreImage");
-        vkFreeMemory(stone_device(), rawMemory, nullptr);
-        vkDestroyImage(stone_device(), rawImage, nullptr);
+        vkFreeMemory(RTX::g_ctx().device_, rawMemory, nullptr);
+        vkDestroyImage(RTX::g_ctx().device_, rawImage, nullptr);
         std::abort();
     }
 
     // === Wrap in RAII Handles ===
-    hypertraceScoreImage_   = RTX::Handle<VkImage>(rawImage,   stone_device(), vkDestroyImage,     0,                    "NexusScoreImage");
-    hypertraceScoreMemory_  = RTX::Handle<VkDeviceMemory>(rawMemory,  stone_device(), vkFreeMemory,       memReqs.size,         "NexusScoreMemory");
-    hypertraceScoreView_    = RTX::Handle<VkImageView>(rawView, stone_device(), vkDestroyImageView, 0,                    "NexusScoreView");
+    hypertraceScoreImage_   = RTX::Handle<VkImage>(rawImage,   RTX::g_ctx().device_, vkDestroyImage,     0,                    "NexusScoreImage");
+    hypertraceScoreMemory_  = RTX::Handle<VkDeviceMemory>(rawMemory,  RTX::g_ctx().device_, vkFreeMemory,       memReqs.size,         "NexusScoreMemory");
+    hypertraceScoreView_    = RTX::Handle<VkImageView>(rawView, RTX::g_ctx().device_, vkDestroyImageView, 0,                    "NexusScoreView");
 
     // === Clear image to zero using staging buffer ===
     VkDeviceSize stagingSize = static_cast<VkDeviceSize>(width_) * height_ * 16; // 4 × float32
@@ -1239,13 +1239,13 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     const uint32_t frameIdx = currentFrame_ % Options::Performance::MAX_FRAMES_IN_FLIGHT;
     const auto& ctx = g_ctx();
 
-    vkWaitForFences(stone_device(), 1, &inFlightFences_[frameIdx], VK_TRUE, UINT64_MAX);
-    vkResetFences(stone_device(), 1, &inFlightFences_[frameIdx]);
+    vkWaitForFences(RTX::g_ctx().device_, 1, &inFlightFences_[frameIdx], VK_TRUE, UINT64_MAX);
+    vkResetFences(RTX::g_ctx().device_, 1, &inFlightFences_[frameIdx]);
 
     uint32_t imageIndex = 0;
     VkResult acquireResult = vkAcquireNextImageKHR(
-        stone_device(),
-        stone_swapchain(),
+        RTX::g_ctx().device_,
+        RTX::SwapchainManager::swapchain(),
         1'000'000'000ULL,  // 1 second timeout
         imageAvailableSemaphores_[frameIdx],
         VK_NULL_HANDLE,
@@ -1377,7 +1377,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     present.waitSemaphoreCount = 1;
     present.pWaitSemaphores = &renderFinishedSemaphores_[frameIdx];
     present.swapchainCount = 1;
-    VkSwapchainKHR swapchain = stone_swapchain();
+    VkSwapchainKHR swapchain = RTX::SwapchainManager::swapchain();
     present.pSwapchains = &swapchain;
     present.pImageIndices = &imageIndex;
 
@@ -1445,7 +1445,7 @@ void VulkanRenderer::initializeAllBufferData(uint32_t frames, VkDeviceSize unifo
 
 void VulkanRenderer::createCommandBuffers() noexcept {
     LOG_TRACE_CAT("RENDERER", "createCommandBuffers — START");
-    size_t numImages = ([](){ uint32_t cnt; vkGetSwapchainImagesKHR(stone_device(), stone_swapchain(), &cnt, nullptr); return cnt; }());
+    size_t numImages = ([](){ uint32_t cnt; vkGetSwapchainImagesKHR(RTX::g_ctx().device_, RTX::SwapchainManager::swapchain(), &cnt, nullptr); return cnt; }());
     if (numImages == 0) {
         LOG_ERROR_CAT("RENDERER", "Invalid swapchain: 0 images — cannot create command buffers");
         LOG_FATAL_CAT("RENDERER", "Fatal error in noexcept function"); std::abort();
@@ -1459,7 +1459,7 @@ void VulkanRenderer::createCommandBuffers() noexcept {
     allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     allocInfo.commandBufferCount = static_cast<uint32_t>(commandBuffers_.size());
     LOG_TRACE_CAT("RENDERER", "Alloc info — pool=0x{:x}, level={}, count={}", reinterpret_cast<uintptr_t>(allocInfo.commandPool), static_cast<int>(allocInfo.level), allocInfo.commandBufferCount);
-    VkResult result = vkAllocateCommandBuffers(stone_device(), &allocInfo, commandBuffers_.data());
+    VkResult result = vkAllocateCommandBuffers(RTX::g_ctx().device_, &allocInfo, commandBuffers_.data());
     if (result != VK_SUCCESS) {
         LOG_ERROR_CAT("RENDERER", "vkAllocateCommandBuffers failed: {}", static_cast<int>(result));
         LOG_FATAL_CAT("RENDERER", "Fatal error in noexcept function"); std::abort();
@@ -1500,7 +1500,7 @@ void VulkanRenderer::updateNexusDescriptors() noexcept {
     write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
     write.pImageInfo = &nexusInfo;
 
-    vkUpdateDescriptorSets(stone_device(), 1, &write, 0, nullptr);
+    vkUpdateDescriptorSets(RTX::g_ctx().device_, 1, &write, 0, nullptr);
     LOG_TRACE_CAT("RENDERER", "Nexus score descriptor bound → binding 6 (null if disabled)");
 
     LOG_TRACE_CAT("RENDERER", "updateNexusDescriptors — COMPLETE");
@@ -1602,7 +1602,7 @@ void VulkanRenderer::updateDenoiserDescriptors() noexcept {
     writes[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
     writes[1].pImageInfo = &infos[1];
 
-    vkUpdateDescriptorSets(stone_device(), static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
+    vkUpdateDescriptorSets(RTX::g_ctx().device_, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
     //LOG_TRACE_CAT("RENDERER", "updateDenoiserDescriptors — COMPLETE");
 }
 
@@ -1675,20 +1675,20 @@ void VulkanRenderer::updateUniformBuffer(uint32_t frame, const Camera& camera, f
     VkCommandBuffer cmd = VK_NULL_HANDLE;
 
     // ------------------------------------------------------------------
-    // 1. Map + fill staging buffer (this is safe — uses stone_device() only for memory)
+    // 1. Map + fill staging buffer (this is safe — uses RTX::g_ctx().device_ only for memory)
     // ------------------------------------------------------------------
     void* data = nullptr;
-    VkResult r = vkMapMemory(stone_device(),
+    VkResult r = vkMapMemory(RTX::g_ctx().device_,
                              BUFFER_MEMORY(g_ctx().sharedStagingEnc_),
                              0, VK_WHOLE_SIZE, 0, &data);
 
     if (r != VK_SUCCESS || data == nullptr) {
         // recovery path unchanged — still safe
-        vkUnmapMemory(stone_device(), BUFFER_MEMORY(g_ctx().sharedStagingEnc_));
+        vkUnmapMemory(RTX::g_ctx().device_, BUFFER_MEMORY(g_ctx().sharedStagingEnc_));
         VkMappedMemoryRange range{VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE, nullptr,
                                   BUFFER_MEMORY(g_ctx().sharedStagingEnc_), 0, VK_WHOLE_SIZE};
-        vkInvalidateMappedMemoryRanges(stone_device(), 1, &range);
-        r = vkMapMemory(stone_device(), BUFFER_MEMORY(g_ctx().sharedStagingEnc_), 0, VK_WHOLE_SIZE, 0, &data);
+        vkInvalidateMappedMemoryRanges(RTX::g_ctx().device_, 1, &range);
+        r = vkMapMemory(RTX::g_ctx().device_, BUFFER_MEMORY(g_ctx().sharedStagingEnc_), 0, VK_WHOLE_SIZE, 0, &data);
         if (r != VK_SUCCESS || data == nullptr) {
             LOG_FATAL_CAT("RENDERER", "vkMapMemory failed permanently — frame {} lost", frameNumber_);
             return;
@@ -1718,7 +1718,7 @@ void VulkanRenderer::updateUniformBuffer(uint32_t frame, const Camera& camera, f
     ubo.spp       = currentSpp_;
 
     std::memcpy(data, &ubo, sizeof(ubo));
-    vkUnmapMemory(stone_device(), BUFFER_MEMORY(g_ctx().sharedStagingEnc_));
+    vkUnmapMemory(RTX::g_ctx().device_, BUFFER_MEMORY(g_ctx().sharedStagingEnc_));
 
     // ------------------------------------------------------------------
     // 2. Copy staging → device-local UBO
@@ -1761,7 +1761,7 @@ void VulkanRenderer::updateTonemapUniform(uint32_t frame) noexcept {
     }
 
     void* data = nullptr;
-    VkResult mapRes = vkMapMemory(stone_device(), BUFFER_MEMORY(g_ctx().sharedStagingEnc_), 0, VK_WHOLE_SIZE, 0, &data);
+    VkResult mapRes = vkMapMemory(RTX::g_ctx().device_, BUFFER_MEMORY(g_ctx().sharedStagingEnc_), 0, VK_WHOLE_SIZE, 0, &data);
     if (mapRes != VK_SUCCESS || data == nullptr) {
         LOG_WARN_CAT("RENDERER", "Tonemap UBO map failed: {} or null for frame {} (OOM post-resize?) — skipping memcpy.", static_cast<int>(mapRes), frame);
         return;
@@ -1787,7 +1787,7 @@ void VulkanRenderer::updateTonemapUniform(uint32_t frame) noexcept {
     ubo.spp = currentSpp_;  // FIXED: Match your naming (from logs)
 
     std::memcpy(data, &ubo, sizeof(ubo));
-    vkUnmapMemory(stone_device(), BUFFER_MEMORY(g_ctx().sharedStagingEnc_));
+    vkUnmapMemory(RTX::g_ctx().device_, BUFFER_MEMORY(g_ctx().sharedStagingEnc_));
 
     // FIXED: Guard copyCmd on valid device UBO (post-resize index/Handle poison)
     VkBuffer deviceBuf = RAW_BUFFER(tonemapUniformEncs_[frame]);
@@ -1869,10 +1869,10 @@ void VulkanRenderer::setRenderMode(int mode) noexcept {
 
 void VulkanRenderer::createFramebuffers() noexcept {
     // FIXED: Idle post-framebuffer recreate to flush stale maps (prevents fragmented staging post-resize)
-    vkDeviceWaitIdle(stone_device());
-    framebuffers_.resize(([](){ uint32_t cnt; vkGetSwapchainImagesKHR(stone_device(), stone_swapchain(), &cnt, nullptr); return cnt; }()));
+    vkDeviceWaitIdle(RTX::g_ctx().device_);
+    framebuffers_.resize(([](){ uint32_t cnt; vkGetSwapchainImagesKHR(RTX::g_ctx().device_, RTX::SwapchainManager::swapchain(), &cnt, nullptr); return cnt; }()));
 
-    for (size_t i = 0; i < ([](){ uint32_t cnt; vkGetSwapchainImagesKHR(stone_device(), stone_swapchain(), &cnt, nullptr); return cnt; }()); ++i) {
+    for (size_t i = 0; i < ([](){ uint32_t cnt; vkGetSwapchainImagesKHR(RTX::g_ctx().device_, RTX::SwapchainManager::swapchain(), &cnt, nullptr); return cnt; }()); ++i) {
         VkImageView attachment = stone_views()[i];
 
         VkFramebufferCreateInfo fbInfo = {};  // Zero-init
@@ -1884,17 +1884,17 @@ void VulkanRenderer::createFramebuffers() noexcept {
         fbInfo.height = currentExtent().height;
         fbInfo.layers          = 1;
 
-        VK_CHECK(vkCreateFramebuffer(stone_device(), &fbInfo, nullptr, &framebuffers_[i]),
+        VK_CHECK(vkCreateFramebuffer(RTX::g_ctx().device_, &fbInfo, nullptr, &framebuffers_[i]),
                  "Failed to create framebuffer!");
     }
 
     LOG_SUCCESS_CAT("RENDERER", "Framebuffers recreated — {} total", framebuffers_.size());
     // FIXED: Idle post-framebuffer recreate to flush maps (prevents fragmented staging post-resize)
-    vkDeviceWaitIdle(stone_device());
+    vkDeviceWaitIdle(RTX::g_ctx().device_);
 }
 
 void VulkanRenderer::cleanupFramebuffers() noexcept {
-    VkDevice dev = stone_device();
+    VkDevice dev = RTX::g_ctx().device_;
     for (auto fb : framebuffers_) {
         if (fb && dev != VK_NULL_HANDLE) vkDestroyFramebuffer(dev, fb, nullptr);
     }
@@ -1945,7 +1945,7 @@ VkShaderModule VulkanRenderer::loadShader(const std::string& filename) const
     };
 
     VkShaderModule module = VK_NULL_HANDLE;
-    VkResult r = vkCreateShaderModule(stone_device(), &createInfo, nullptr, &module);
+    VkResult r = vkCreateShaderModule(RTX::g_ctx().device_, &createInfo, nullptr, &module);
 
     if (r != VK_SUCCESS) {
         LOG_FATAL_CAT("RENDERER", "vkCreateShaderModule FAILED: {} — SHADER REJECTED", static_cast<int>(r));
@@ -2004,7 +2004,7 @@ void VulkanRenderer::updateTonemapDescriptor(uint32_t frameIdx, VkImageView inpu
           .pBufferInfo = &uboInfo }
     }};
 
-    vkUpdateDescriptorSets(stone_device(), writes.size(), writes.data(), 0, nullptr);
+    vkUpdateDescriptorSets(RTX::g_ctx().device_, writes.size(), writes.data(), 0, nullptr);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2123,8 +2123,8 @@ void VulkanRenderer::onWindowResize(uint32_t width, uint32_t height) noexcept
 void VulkanRenderer::waitForAllFences() const noexcept
 {
     if (!inFlightFences_.empty()) {
-        vkWaitForFences(stone_device(), inFlightFences_.size(), inFlightFences_.data(), VK_TRUE, UINT64_MAX);
-        vkResetFences(stone_device(), inFlightFences_.size(), inFlightFences_.data());
+        vkWaitForFences(RTX::g_ctx().device_, inFlightFences_.size(), inFlightFences_.data(), VK_TRUE, UINT64_MAX);
+        vkResetFences(RTX::g_ctx().device_, inFlightFences_.size(), inFlightFences_.data());
     }
 }
 
@@ -2150,10 +2150,10 @@ void VulkanRenderer::createImage(RTX::Handle<VkImage>& image,
     info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
     VkImage rawImg = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateImage(stone_device(), &info, nullptr, &rawImg), name.c_str());
+    VK_CHECK(vkCreateImage(RTX::g_ctx().device_, &info, nullptr, &rawImg), name.c_str());
 
     VkMemoryRequirements reqs;
-    vkGetImageMemoryRequirements(stone_device(), rawImg, &reqs);
+    vkGetImageMemoryRequirements(RTX::g_ctx().device_, rawImg, &reqs);
 
     uint32_t memType = pipelineManager_.findMemoryType(reqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
@@ -2163,9 +2163,9 @@ void VulkanRenderer::createImage(RTX::Handle<VkImage>& image,
     alloc.memoryTypeIndex    = memType;
 
     VkDeviceMemory rawMem = VK_NULL_HANDLE;
-    VK_CHECK(vkAllocateMemory(stone_device(), &alloc, nullptr, &rawMem), name.c_str());
+    VK_CHECK(vkAllocateMemory(RTX::g_ctx().device_, &alloc, nullptr, &rawMem), name.c_str());
 
-    vkBindImageMemory(stone_device(), rawImg, rawMem, 0);
+    vkBindImageMemory(RTX::g_ctx().device_, rawImg, rawMem, 0);
 
     VkImageViewCreateInfo vinfo = {};
     vinfo.sType                           = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
@@ -2177,11 +2177,11 @@ void VulkanRenderer::createImage(RTX::Handle<VkImage>& image,
     vinfo.subresourceRange.layerCount     = 1;
 
     VkImageView rawView = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateImageView(stone_device(), &vinfo, nullptr, &rawView), name.c_str());
+    VK_CHECK(vkCreateImageView(RTX::g_ctx().device_, &vinfo, nullptr, &rawView), name.c_str());
 
-    image  = RTX::Handle<VkImage>(rawImg, stone_device(), vkDestroyImage, 0, name + "_Img");
-    memory = RTX::Handle<VkDeviceMemory>(rawMem, stone_device(), vkFreeMemory, reqs.size, name + "_Mem");
-    view   = RTX::Handle<VkImageView>(rawView, stone_device(), vkDestroyImageView, 0, name + "_View");
+    image  = RTX::Handle<VkImage>(rawImg, RTX::g_ctx().device_, vkDestroyImage, 0, name + "_Img");
+    memory = RTX::Handle<VkDeviceMemory>(rawMem, RTX::g_ctx().device_, vkFreeMemory, reqs.size, name + "_Mem");
+    view   = RTX::Handle<VkImageView>(rawView, RTX::g_ctx().device_, vkDestroyImageView, 0, name + "_View");
 
     // Transition to GENERAL
     VkCommandBuffer cmd = pipelineManager_.beginSingleTimeCommands(g_ctx().commandPool_);
@@ -2228,7 +2228,7 @@ void VulkanRenderer::createImageArray(std::vector<RTX::Handle<VkImage>>& images,
 
 void VulkanRenderer::destroyRenderPass() noexcept {
     if (renderPass_) {
-        vkDestroyRenderPass(stone_device(), renderPass_, nullptr);
+        vkDestroyRenderPass(RTX::g_ctx().device_, renderPass_, nullptr);
         renderPass_ = VK_NULL_HANDLE;
     }
 }
@@ -2260,7 +2260,7 @@ void VulkanRenderer::createRenderPass() noexcept {
     renderPassInfo.subpassCount = 1;
     renderPassInfo.pSubpasses = &subpass;
 
-    VK_CHECK(vkCreateRenderPass(stone_device(), &renderPassInfo, nullptr, &renderPass_), "render pass");
+    VK_CHECK(vkCreateRenderPass(RTX::g_ctx().device_, &renderPassInfo, nullptr, &renderPass_), "render pass");
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

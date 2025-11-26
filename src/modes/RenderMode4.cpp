@@ -7,7 +7,7 @@
 #include "modes/RenderMode4.hpp"
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/GLOBAL/camera.hpp"     // CAM macro
-#include "engine/GLOBAL/StoneKey.hpp"   // stone_device()
+#include "engine/GLOBAL/StoneKey.hpp"   // RTX::g_ctx().device_
 #include "engine/GLOBAL/BufferManager.hpp"
 
 using namespace Engine;
@@ -30,7 +30,7 @@ void RenderMode4::initResources()
 {
     cleanupResources();
 
-    VkDevice device = stone_device();
+    VkDevice device = RTX::g_ctx().device_;
 
     VkImageCreateInfo imgInfo{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
     imgInfo.imageType = VK_IMAGE_TYPE_2D;
@@ -74,7 +74,7 @@ void RenderMode4::initResources()
 
 void RenderMode4::cleanupResources()
 {
-    vkDeviceWaitIdle(stone_device());
+    vkDeviceWaitIdle(RTX::g_ctx().device_);
 
     outputView_.reset();
     outputImage_.reset();

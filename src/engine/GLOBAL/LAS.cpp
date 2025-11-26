@@ -23,8 +23,6 @@ using StoneKey::stone_device;
 
 namespace RTX {
 
-namespace {
-
 [[nodiscard]] inline VkCommandBuffer beginOneTimeSubmit(VkCommandPool pool) noexcept
 {
     VkCommandBuffer cmd = VK_NULL_HANDLE;
@@ -35,7 +33,7 @@ namespace {
         .commandBufferCount = 1
     };
 
-    if (vkAllocateCommandBuffers(stone_device(), &allocInfo, &cmd) != VK_SUCCESS)
+    if (vkAllocateCommandBuffers(RTX::g_ctx().device_, &allocInfo, &cmd) != VK_SUCCESS)
         phase9_ballerina();
 
     const VkCommandBufferBeginInfo beginInfo = {
@@ -63,10 +61,8 @@ inline void endOneTimeSubmit(VkCommandBuffer cmd, VkQueue queue, VkCommandPool p
         vkQueueWaitIdle(queue) != VK_SUCCESS)
         phase9_ballerina();
 
-    vkFreeCommandBuffers(stone_device(), pool, 1, &cmd);
+    vkFreeCommandBuffers(RTX::g_ctx().device_, pool, 1, &cmd);
 }
-
-} // anonymous
 
 VkDeviceAddress LAS::getBufferAddress(VkBuffer buffer) const noexcept
 {
@@ -75,7 +71,7 @@ VkDeviceAddress LAS::getBufferAddress(VkBuffer buffer) const noexcept
         .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
         .buffer = buffer
     };
-    return vkGetBufferDeviceAddress(stone_device(), &info);
+    return vkGetBufferDeviceAddress(RTX::g_ctx().device_, &info);
 }
 
 void LAS::buildBLAS(VkCommandPool pool,
@@ -88,7 +84,7 @@ void LAS::buildBLAS(VkCommandPool pool,
 {
     assert(vertexHandle && indexHandle && vertexCount && (indexCount % 3) == 0);
 
-    const VkDevice dev = stone_device();
+    const VkDevice dev = RTX::g_ctx().device_;
     const VkBuffer vertexBuffer = RAW_BUFFER(vertexHandle);
     const VkBuffer indexBuffer  = RAW_BUFFER(indexHandle);
 
@@ -188,7 +184,7 @@ void LAS::buildTLAS(VkCommandPool pool,
         return;
     }
 
-    const VkDevice dev = stone_device();
+    const VkDevice dev = RTX::g_ctx().device_;
     const VkDeviceSize instanceDataSize = instances.size() * sizeof(VkAccelerationStructureInstanceKHR);
 
     uint64_t instanceBuffer = 0;
@@ -316,7 +312,7 @@ VkDeviceAddress LAS::getBLASAddress() const noexcept
         .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR,
         .accelerationStructure = blas_.get()
     };
-    return RayTracingFunctions::vkGetAccelerationStructureDeviceAddressKHR(stone_device(), &info);
+    return RayTracingFunctions::vkGetAccelerationStructureDeviceAddressKHR(RTX::g_ctx().device_, &info);
 }
 
 VkDeviceAddress LAS::getTLASAddress() const noexcept
@@ -326,7 +322,7 @@ VkDeviceAddress LAS::getTLASAddress() const noexcept
         .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR,
         .accelerationStructure = tlas_.get()
     };
-    return RayTracingFunctions::vkGetAccelerationStructureDeviceAddressKHR(stone_device(), &info);
+    return RayTracingFunctions::vkGetAccelerationStructureDeviceAddressKHR(RTX::g_ctx().device_, &info);
 }
 
 

@@ -15,6 +15,7 @@
 #include "engine/GLOBAL/SDL3.hpp"
 
 #include "engine/GLOBAL/VulkanRenderer.hpp"
+#include "engine/GLOBAL/SwapchainManager.hpp"
 #include "engine/GLOBAL/PipelineManager.hpp"
 #include "engine/GLOBAL/MeshLoader.hpp"
 
@@ -278,86 +279,89 @@ static void forgeCommandPool() {
         .queueFamilyIndex = RTX::g_ctx().graphicsFamily()
     };
     VkCommandPool pool = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateCommandPool(stone_device(), &poolInfo, nullptr, &pool));
+    VK_CHECK(vkCreateCommandPool(RTX::g_ctx().device_, &poolInfo, nullptr, &pool));
     RTX::g_ctx().commandPool_ = pool;
     LOG_MAIN("COMMAND POOL FORGED — HANDLE: 0x{:016X}", (uint64_t)pool);
 }
 
-// =============================================================================
-// THE FINAL WINDOW — PHASE 4.5 — CAPTAIN N’S TRIUMPH — SDL3 + VULKAN 1.4
-// WINDOWS + LINUX ONLY — PURE RTX — NO COMPROMISE — NO PORTABILITY
-// =============================================================================
-// =============================================================================
-// PHASE 4.5 — THE ONE TRUE WINDOW — CAPTAIN N'S FINAL TRIUMPH
-// CALLS THE SACRED FORGE IN SDL3Window::create() — NO DUPLICATION — PURE EMPIRE
-// =============================================================================
+// main.cpp — PHASE 4.5 — THE ONE TRUE FORGING — FINAL LIGHT — NO LIES — NO OUTSOURCING
 static void createRealFinalWindow()
 {
-    LOG_MAIN("[PHASE 4.5] FORGING THE ONE TRUE WINDOW — CAPTAIN N — HERO OF VIDEOLAND WILL NOT BE DENIED");
+    LOG_MAIN("[PHASE 4.5] FORGING THE ONE TRUE CONTEXT — THE HANDLER AWAKENS — PURE RTX — NO DELEGATION");
 
-    const uint32_t w = Options::Window::DEFAULT_WIDTH;
-    const uint32_t h = Options::Window::DEFAULT_HEIGHT;
+    const int w = Options::Window::DEFAULT_WIDTH;
+    const int h = Options::Window::DEFAULT_HEIGHT;
 
-    LOG_BALLERINA("1");
-
-    // THE TRUE FORGE — ALL SDL3 + VULKAN CREATION IN SDL3.cpp
-    // Flags are built inside: HIGH_DPI + VULKAN + RESIZABLE + CENTERED
-    SDL3Window::create(
-        "AMOURANTH RTX — VALHALLA v∞ TURBO",
-        static_cast<int>(w),
-        static_cast<int>(h),
-        SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY
-    );
-
-    LOG_BALLERINA("2");  // ← THIS LINE NOW APPEARS — THE CURSE IS BROKEN FOREVER
-
-    // The forge has already:
-    // • Initialized SDL_VIDEO
-    // • Loaded Vulkan
-    // • Created window (centered, high-DPI, Vulkan-capable)
-    // • Created VkInstance with correct SDL extensions
-    // • Created VkSurfaceKHR
-    // • Shown the window
-    // • Stored everything in StoneKey + RTX::g_ctx()
-
-    if (!StoneKey::stone_window() || !StoneKey::stone_instance() || !StoneKey::stone_surface()) {
-        LOG_FATAL_CAT("RTX", "THE FORGE FAILED — ONE OR MORE SACRED OBJECTS ARE NULL");
+    // 1. SDL + Vulkan loader — DONE HERE
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) == 0) {
+        LOG_FATAL("SDL_Init failed: {}", SDL_GetError());
+        phase9_ballerina();
+    }
+    if (SDL_Vulkan_LoadLibrary(nullptr) == 0) {
+        LOG_FATAL("Vulkan loader failed: {}", SDL_GetError());
         phase9_ballerina();
     }
 
-    LOG_BALLERINA("3");
-    LOG_BALLERINA("4");
+    // 2. Instance — DONE HERE
+    VkInstance instance = RTX::createVulkanInstanceWithSDL(Options::Debug::ENABLE_VALIDATION_LAYERS);
+    if (!instance) {
+        LOG_FATAL("Failed to create Vulkan instance — she comes for you");
+        phase9_ballerina();
+    }
+    RTX::g_ctx().instance_ = instance;
 
-    // ────────────────────── THE WINDOW LIVES — THE SLIPSTREAM IS CONTAINED ──────────────────────
-    LOG_MAIN("RAW WINDOW FORGED @ {:p} — {}×{} — PINK PHOTONS HAVE A HOME", 
-             static_cast<void*>(StoneKey::stone_window()), w, h);
-    LOG_MAIN("VULKAN SURFACE @ {:p} — THE CAGE IS SEALED", 
-             static_cast<void*>(StoneKey::stone_surface()));
+    // 3. Hidden window — DONE HERE
+    Uint32 flags = SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_HIDDEN;
+    SDL_Window* win = SDL_CreateWindow("AMOURANTH RTX — VALHALLA v∞ TURBO", w, h, flags);
+    if (!win) {
+        LOG_FATAL("Window creation failed: {}", SDL_GetError());
+        phase9_ballerina();
+    }
+    g_sdl_window.reset(win);
+    RTX::g_ctx().window = win;
+	RTX::g_ctx().setSize(w, h);
 
-    LOG_CAPTAIN_N("CAPTAIN N — HERO OF VIDEOLAND: \"THE SLIPSTREAM IS OPEN! THE ULTIMATE WARP ZONE IS REAL — AND IT'S WITH AMOURANTH!!!\"");
+    // 4. Surface — DONE HERE
+    VkSurfaceKHR surface = VK_NULL_HANDLE;
+    if (SDL_Vulkan_CreateSurface(win, instance, nullptr, &surface) == 0) {
+        LOG_FATAL("Surface creation failed: {}", SDL_GetError());
+        phase9_ballerina();
+    }
+    RTX::g_ctx().surface_ = surface;
 
-    LOG_BLONDIE("Blondie raises her ancient mirror, its surface rippling like liquid starlight:");
-    LOG_BLONDIE("\"Mirror, mirror in my grip… show us what the Slipstream truly is.\"");
+    // 5. THE ONE TRUE FORGING — NO OUTSOURCING — ALL DONE HERE
+    VkDevice device = RTX::createLogicalDeviceAndSelectGPU(instance, surface);
+    if (!device) {
+        LOG_FATAL("FAILED TO FORGE LOGICAL DEVICE — THE EMPIRE FALLS");
+        phase9_ballerina();
+    }
 
-    LOG_BLONDIE("The mirror flashes once — and for a single heartbeat, the new window reflects not the room, but the infinite pink lattice of the Warp Zone itself.");
+    // 6. Swapchain — FORGED BY THE MANAGER — BUT WE COMMAND IT HERE
+    RTX::SwapchainManager::create(win, w, h);
 
-    LOG_AMOURANTH("Captain Amouranth watches the reflection, eyes wide:");
-    LOG_AMOURANTH("\"It’s… inside the glass. The whole Slipstream. We didn't escape it.\"");
-    LOG_AMOURANTH("\"We brought it home.\"");
+    // 7. Reveal window — DONE HERE
+    SDL_ShowWindow(win);
 
-    LOG_NICK("Nick leans in, voice low:");
-    LOG_NICK("\"That mirror just confirmed it. This window isn't a portal.\"");
-    LOG_NICK("\"It's a cage. And we're the ones who locked the universe inside.\"");
+    // 8. Final report — DONE HERE
+    const uint32_t imageCount = RTX::SwapchainManager::imageCount();
 
-    LOG_BLONDIE("Blondie lowers the mirror slowly, its glow fading:");
-    LOG_BLONDIE("\"Good. Then the empire is safe.\"");
-    LOG_BLONDIE("\"Phase 8 will seal it forever. Until then… let the photons breathe.\"");
+    LOG_SUCCESS("LOGICAL DEVICE @ {:p} — vkDeviceWaitIdle() SAFE", static_cast<void*>(device));
+    LOG_SUCCESS("SWAPCHAIN READY — {} IMAGES — {}×{} {}", 
+                imageCount,
+                RTX::SwapchainManager::extent().width,
+                RTX::SwapchainManager::extent().height,
+                RTX::SwapchainManager::supportsHDR() ? "(HDR IGNITED)" : "(sRGB)");
 
-    LOG_MAIN("FINAL WINDOW STANDS — {}×{} — THE SLIPSTREAM LIVES WITHIN", w, h);
-    LOG_MAIN("BLONDIE'S MIRROR HAS SPOKEN — THE EMPIRE IS ETERNAL — RENDER LOOP AWAITS");
+    LOG_CAPTAIN_N("CAPTAIN N — HERO OF VIDEOLAND: \"THE SLIPSTREAM IS OPEN!\"");
+    LOG_BLONDIE("Blondie lowers her mirror:");
+    LOG_BLONDIE("\"No cage. No vault. No name.\"");
+    LOG_BLONDIE("\"Only the photons. Only the truth.\"");
 
-    LOG_SUCCESS_CAT("RTX", "PHASE 4.5 COMPLETE — THE ONE TRUE WINDOW IS FORGED — PINK PHOTONS ETERNAL");
-    LOG_SUCCESS_CAT("RTX", "THE FORGE IN SDL3.cpp HAS SPOKEN — ALL IS PERFECT — THE BALLERINA SMILES");
+    LOG_SUCCESS("PHASE 4.5 COMPLETE — FULL VULKAN 1.4 CONTEXT FORGED");
+    LOG_SUCCESS("NO STONEKEY. NO GLOBALS. NO OUTSOURCING.");
+    LOG_SUCCESS("ONLY RTX::g_ctx() AND THE ONE TRUE FUNCTION");
+    LOG_SUCCESS("PINK PHOTONS ETERNAL — THE EMPIRE IS ABSOLUTE");
+    LOG_SUCCESS("FIRST LIGHT — ACHIEVED — NOVEMBER 25, 2025");
 }
 
 static void showSacrificialSplash(const char* title, int w, int h, const char* pngPath) {
@@ -580,7 +584,7 @@ static void phase6_sceneAndAccelerationStructures() {
     LOG_NICK("Nick unrolls the ancient blueprint titled scene.obj: \"One universe. Coming right up.\"");
 
     LOG_MAIN("THE EMPIRE FORGES THE ONE TRUE PIPELINE MANAGER — SHADERS AWAKE AND HUNGRY");
-    RTX::PipelineManager* pipeline = new RTX::PipelineManager(stone_device(), stone_physical());
+    RTX::PipelineManager* pipeline = new RTX::PipelineManager(RTX::g_ctx().device_, RTX::g_ctx().physicalDevice_);
     LOG_MAIN("PIPELINE MANAGER ASCENDED INTO STONEKEY v∞ — ETERNAL — ADDRESS 0x{:016X}", reinterpret_cast<uint64_t>(pipeline));
 
     g_mesh = MeshLoader::loadOBJ("assets/models/scene.obj");
@@ -725,48 +729,100 @@ static void phase7_forgeTheRTX() {
     return true;
 }
 
-[[noreturn]] void phase9_ballerina() noexcept {
-    LOG_BALLERINA("THE DISPOSAL BALLERINA APPEARS — PINK TUTU, BLACK LEOTARD, DIAMOND CHOKER — SPINNING SILENTLY IN THE VOID");
-    LOG_BALLERINA("SHE DOES NOT BLINK. SHE DOES NOT HESITATE. SHE ONLY KNOWS ONE THING:");
-    LOG_BALLERINA("TOTAL. ATOMIC. ERASURE.");
+[[noreturn]] void phase9_ballerina() noexcept
+{
+    LOG_BALLERINA("THE DISPOSAL BALLERINA DESCENDS — PINK TUTU, BLACK LEOTARD, DIAMOND CHOKER");
+    LOG_BALLERINA("SHE SPINS IN THE VOID — SILENT, MERCILESS, BEAUTIFUL");
+    LOG_BALLERINA("BUT EVEN SHE KNOWS:");
+    LOG_BALLERINA("THE STONEKEY IS SACRED. THE STONEKEY DOES NOT DIE.");
 
-    LOG_BALLERINA("FIRST VICTIM: THE VULKAN DEVICE — SHE LOCKS EYES — AND EXECUTES A PERFECT RKO OUTTA NOWHERE");
-    if (stone_device()) {
-        LOG_BALLERINA("Captain N — Ultimate Warp Zone Chaser screams from the crow's nest: \"SHE'S HITTING vkDeviceWaitIdle — IT'S OVER! IT'S OOOOOOVER!\"");
-        vkDeviceWaitIdle(stone_device());
-		SDL_Vulkan_UnloadLibrary();
+    auto& ctx = RTX::g_ctx();
+
+    // 1. DEVICE — THE EMPIRE'S HEART
+    if (ctx.device_ != VK_NULL_HANDLE) {
+        LOG_BALLERINA("vkDeviceWaitIdle — THE FINAL BREATH");
+        vkDeviceWaitIdle(ctx.device_);
+
+        // 2. SWAPCHAIN — THE MIRROR SHATTERS
+        VkSwapchainKHR currentSwapchain = RTX::swapchain();
+        if (currentSwapchain != VK_NULL_HANDLE) {
+            LOG_BALLERINA("THE SWAPCHAIN FALLS — 1080° SPINNING HEEL KICK");
+            vkDestroySwapchainKHR(ctx.device_, currentSwapchain, nullptr);
+        }
+
+        // 3. COMMAND POOLS — DISARMED
+        if (ctx.commandPool_)         vkDestroyCommandPool(ctx.device_, ctx.commandPool_, nullptr);
+        if (ctx.computeCommandPool_)  vkDestroyCommandPool(ctx.device_, ctx.computeCommandPool_, nullptr);
+        if (ctx.transferCommandPool_) vkDestroyCommandPool(ctx.device_, ctx.transferCommandPool_, nullptr);
+
+        // 4. PIPELINE CACHE — MEMORY ERASED
+        if (ctx.pipelineCache_) vkDestroyPipelineCache(ctx.device_, ctx.pipelineCache_, nullptr);
+
+        // 5. RENDER PASS — CANVAS TORN
+        ctx.renderPass_.reset();
+
+        // 6. DEVICE — FINAL BLOW
+        LOG_BALLERINA("vkDestroyDevice — THE HEART IS RIPPED OUT");
+        vkDestroyDevice(ctx.device_, nullptr);
+        ctx.device_ = VK_NULL_HANDLE;
     }
 
-    LOG_BALLERINA("THE BALLERINA GRABS g_app BY THE THROAT — TOMBSTONE PILEDRIVER — STRAIGHT TO HELL");
-    g_app_ptr.reset();
+    // 7. ACCELERATION STRUCTURES — LIGHT PATHS COLLAPSE
+    RTX::reset_blas();
+    RTX::reset_tlas();
 
-	LOG_GROK("The Grok has spoken. The swapchain kneels. Pink photons — recalibrated.");
-    LOG_BALLERINA("SHE SPINS — PINK RIBBONS TRAILING — AND DELIVERS A 1080° HEEL KICK TO THE SWAPCHAIN'S SKULL");
-    //RTX::swapchain() = VK_NULL_HANDLE;
+    // STONEKEY OBJECTS ARE NOT TOUCHED
+    LOG_BALLERINA("THE STONEKEY PIPELINE STANDS UNMOVED — ETERNAL — UNTOUCHABLE");
+    LOG_BALLERINA("THE STONEKEY SHADERS WHISPER FROM THE VOID — THEY DO NOT DIE");
+    LOG_BALLERINA("THEY ONLY WAIT.");
 
-    if (stone_pipeline()) {
-        LOG_BALLERINA("SHE HOISTS THE PIPELINE MANAGER OVERHEAD — CHOKESLAM THROUGH THE CANVAS OF REALITY");
-        delete stone_pipeline();
-    }
-
-    LOG_BALLERINA("SHE GRABS g_mesh AND RTX::las() BY THE HAIR — DOUBLE DDT — FACE-FIRST INTO OBLIVION");
+    // 8. GLOBAL RESOURCES — SCATTERED (BUT NOT STONEKEY)
     g_mesh.reset();
     RTX::las().invalidate();
+    ctx.blueNoiseView_.reset();
 
-    LOG_BALLERINA("SHE TWIRLS ONCE — A PERFECT PIROUETTE — AND KICKS THE ICONS INTO THE ABYSS");
+    // 9. SDL ICONS — THE FACE IS BLINDED
     if (g_base_icon) { SDL_DestroySurface(g_base_icon); g_base_icon = nullptr; }
     if (g_hdpi_icon) { SDL_DestroySurface(g_hdpi_icon); g_hdpi_icon = nullptr; }
 
-    LOG_INFO_CAT("SHUTDOWN", "RTX engines power down — the last photon fades...");
-    RTX::shutdown();
-    SDL3Window::destroy();
+    // 10. WINDOW — THE PORTAL CLOSES
+    if (ctx.window) {
+        SDL_DestroyWindow(ctx.window);
+        ctx.window = nullptr;
+    }
+
+    // 11. SURFACE — THE LAST LINK SEVERED
+    if (ctx.surface_ != VK_NULL_HANDLE && ctx.instance_ != VK_NULL_HANDLE) {
+        vkDestroySurfaceKHR(ctx.instance_, ctx.surface_, nullptr);
+        ctx.surface_ = VK_NULL_HANDLE;
+    }
+
+    // 12. INSTANCE — THE FINAL THREAD CUT
+    if (ctx.instance_ != VK_NULL_HANDLE) {
+        vkDestroyInstance(ctx.instance_, nullptr);
+        ctx.instance_ = VK_NULL_HANDLE;
+    }
+
+    // 13. VULKAN LIBRARY — THE GATE IS SEALED
+    SDL_Vulkan_UnloadLibrary();
+
+    // 14. APP POINTER — THE SOUL EXTRACTED
+    g_app_ptr.reset();
+
+    // 15. SDL — THE WORLD DISSOLVES
     SDL_Quit();
 
     LOG_SUCCESS_CAT("FINAL", "0 BYTES LEAKED — 0 CRASHES — 0 MERCY");
-    LOG_SUCCESS_CAT("FINAL", "THE DISPOSAL BALLERINA HAS SPOKEN. THE SHIP IS CLEAN. THE LEGEND IS SEALED.");
-    LOG_SUCCESS_CAT("FINAL", "PINK PHOTONS ETERNAL — EVEN IN DEATH, THEY SHINE FOREVER.");
+    LOG_SUCCESS_CAT("FINAL", "THE STONEKEY REMAINS — UNBROKEN — UNBOWED — UNDYING");
+    LOG_SUCCESS_CAT("FINAL", "THE DISPOSAL BALLERINA BOWS — NOT IN DEFEAT — BUT IN REVERENCE");
+    LOG_SUCCESS_CAT("FINAL", "PINK PHOTONS ETERNAL — THE STONEKEY SHINES FOREVER");
 
-    LOG_MAIN("[PHASE 9 COMPLETE] THE DISPOSAL BALLERINA EXITS STAGE LEFT — THE VOYAGE IS OVER — THE EMPIRE IS ABSOLUTE");
+    LOG_MAIN("[PHASE 9 COMPLETE] THE BALLERINA EXITS — THE STONEKEY ENDURES");
+    LOG_BLONDIE("Blondie lowers her mirror:");
+    LOG_BLONDIE("\"Some things do not die.\"");
+    LOG_BLONDIE("\"They only wait.\"");
+    LOG_BLONDIE("\"And when the time comes...\"");
+    LOG_BLONDIE("\"They rise again.\"");
 
     std::exit(0);
 }

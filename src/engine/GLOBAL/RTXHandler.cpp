@@ -80,30 +80,35 @@ void UpdateGlobalRayTracingDescriptors(VkDescriptorSet set)
     };
 
     // ────────────────────── SDL3 EXTENSIONS — MANDATORY FIRST ──────────────────────
-    unsigned int sdlExtCount = 0;
+uint32_t sdlExtCount = 0;
 
-    // First call: get count only
-    if (SDL_Vulkan_GetInstanceExtensions(&sdlExtCount) == 0) {
-        LOG_FATAL_CAT("SDL3", "SDL_Vulkan_GetInstanceExtensions() failed to return count — {} — THE EYE IS BLIND", SDL_GetError());
-        phase9_ballerina();
-    }
+// First call: get count
+if (!SDL_Vulkan_GetInstanceExtensions(&sdlExtCount)) {
+    LOG_FATAL_CAT("SDL3", "{}SDL_Vulkan_GetInstanceExtensions(count) failed: {}{}", 
+                  BLOOD_RED, SDL_GetError(), RESET);
+    phase9_ballerina();
+}
 
-    if (sdlExtCount == 0) {
-        LOG_FATAL_CAT("SDL3", "SDL returned 0 instance extensions — this should never happen on Windows/Linux with Vulkan");
-        phase9_ballerina();
-    }
+LOG_INFO_CAT("MAIN", "{}SDL3 demands {} pure Vulkan instance extensions:{}", VALHALLA_GOLD, sdlExtCount, RESET);
 
-    std::vector<const char*> extensions(sdlExtCount);
-    
-    // Second call: fill the vector
-    if (SDL_Vulkan_GetInstanceExtensions(&sdlExtCount) == 0) {
-        LOG_FATAL_CAT("SDL3", "SDL_Vulkan_GetInstanceExtensions() failed to fill extensions — {} — THE VEIL TEARS", SDL_GetError());
-        phase9_ballerina();
-    }
+// Second call: get the actual array
+const char* const* sdlExtensions = SDL_Vulkan_GetInstanceExtensions(&sdlExtCount);
+if (!sdlExtensions) {
+    LOG_FATAL_CAT("SDL3", "{}SDL_Vulkan_GetInstanceExtensions() returned NULL array — driver broken{}", 
+                  CRIMSON_MAGENTA, RESET);
+    phase9_ballerina();
+}
 
-    LOG_MAIN("SDL3 demands {} pure Vulkan instance extensions:", sdlExtCount);
-    for (const auto* ext : extensions)
-        LOG_MAIN("  • {}", ext);
+// Safe copy into vector
+std::vector<const char*> extensions(sdlExtensions, sdlExtensions + sdlExtCount);
+
+// Empire-approved, null-safe logging
+for (const char* ext : extensions) {
+    LOG_INFO_CAT("MAIN", "  {}• {}{}", 
+                 AURORA_PINK,
+                 ext ? std::string_view(ext) : std::string_view("(null)"),
+                 RESET);
+}
 
     // ────────────────────── EMPIRE EXTENSIONS — PURE RTX ONLY ──────────────────────
     if (enableValidation) {
@@ -156,18 +161,22 @@ void UpdateGlobalRayTracingDescriptors(VkDescriptorSet set)
 // =============================================================================
 // Core initialization — The Handler watches. Ballerina waits.
 // =============================================================================
+// =============================================================================
+// Context::init — THE ONE TRUE INITIALIZATION — FINAL CUT — NOVEMBER 25, 2025
+// COMPATIBILITY PRESERVED — TRUTH ACHIEVED — PINK PHOTONS ETERNAL
+// =============================================================================
 void Context::init(SDL_Window* window, int width, int height)
 {
     this->window  = window;
     this->width   = width;
     this->height  = height;
 
-    // Instance
+    // 1. Instance — only once
     if (!g_ctx().instance_) {
         g_ctx().setInstance(createVulkanInstanceWithSDL(Options::Debug::ENABLE_VALIDATION_LAYERS));
     }
 
-    // Surface
+    // 2. Surface — only once
     if (!g_ctx().surface_) {
         VkSurfaceKHR surface;
         if (!SDL_Vulkan_CreateSurface(window, g_ctx().instance_, nullptr, &surface)) {
@@ -177,22 +186,28 @@ void Context::init(SDL_Window* window, int width, int height)
         g_ctx().setSurface(surface);
     }
 
-    // Physical + Logical device (only once)
+    // 3. THE ONE TRUE FORGING — GPU + DEVICE + QUEUES — ONLY ONCE
     if (!g_ctx().device_) {
-        // Pick best discrete RTX GPU — same logic, quieter
-        // (kept minimal but functional — Handler does not repeat himself)
-        VkPhysicalDevice chosen = pickPhysicalDevice(g_ctx().instance_, g_ctx().surface_);
-        g_ctx().setPhysicalDevice(chosen);
-        g_ctx().setDevice(createLogicalDevice(chosen, g_ctx().surface_));
+        // THIS IS THE ONLY LINE THAT MATTERS
+        g_ctx().setDevice(createLogicalDeviceAndSelectGPU(g_ctx().instance_, g_ctx().surface_));
+        
+        if (!g_ctx().device_) {
+            LOG_FATAL("THE ONE TRUE FORGING FAILED — THE EMPIRE CANNOT RISE");
+            phase9_ballerina();
+        }
     }
 
-    // Swapchain — now belongs to the Manager
+    // 4. Swapchain — belongs to the Manager
     SwapchainManager::create(window, width, height);
 
     valid_ = true;
     ready_.store(true, std::memory_order_release);
 
     LOG_SUCCESS_CAT("RTX", "THE GOOD SHIP VULKANRTX IS READY — FIRST LIGHT ETERNAL");
+    LOG_SUCCESS_CAT("RTX", "ONE TRUE PATH — createLogicalDeviceAndSelectGPU() — THE EMPIRE IS WHOLE");
+    LOG_AMOURANTH("Captain Amouranth smiles:");
+    LOG_AMOURANTH("\"We don't need two paths. We have one.\"");
+    LOG_AMOURANTH("\"And it's perfect.\"");
 }
 
 // =============================================================================
@@ -236,100 +251,7 @@ void cleanupAll() noexcept {
     LOG_GROK("RTX subsystem annihilated. The void is clean.");
 }
 
-// -----------------------------------------------------------------------------
-// THE ONE TRUE FUNCTION — createLogicalDevice + retrieveQueues in perfect union
-// -----------------------------------------------------------------------------
-VkDevice createLogicalDevice(VkPhysicalDevice physical, VkSurfaceKHR surface) noexcept
-{
-    QueueFamilyIndices indices = findQueueFamilies(physical, surface);
-    if (!indices.isComplete()) {
-        LOG_FATAL("RTX", "Missing required queue families — the empire cannot rise");
-        phase9_ballerina();
-    }
-
-    std::set<uint32_t> uniqueQueueFamilies = {
-        indices.graphicsFamily.value(),
-        indices.presentFamily.value(),
-        indices.computeFamily.value()
-    };
-
-    float queuePriority = 1.0f;
-    std::vector<VkDeviceQueueCreateInfo> queueCreateInfos;
-    queueCreateInfos.reserve(uniqueQueueFamilies.size());
-    for (uint32_t family : uniqueQueueFamilies) {
-        queueCreateInfos.push_back(VkDeviceQueueCreateInfo{
-            .sType            = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
-            .queueFamilyIndex = family,
-            .queueCount       = 1,
-            .pQueuePriorities = &queuePriority
-        });
-    }
-
-    // ────────────────────── STEP 1: DEFINE ACCELERATION STRUCTURE FIRST ──────────────────────
-    VkPhysicalDeviceBufferDeviceAddressFeatures bufferDeviceAddress = {};
-    bufferDeviceAddress.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES;
-    bufferDeviceAddress.bufferDeviceAddress = VK_TRUE;
-
-    VkPhysicalDeviceRayTracingPipelineFeaturesKHR rayTracingPipeline = {};
-    rayTracingPipeline.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR;
-    rayTracingPipeline.pNext = &bufferDeviceAddress;
-    rayTracingPipeline.rayTracingPipeline = VK_TRUE;
-
-    VkPhysicalDeviceAccelerationStructureFeaturesKHR accelerationStructure = {};
-    accelerationStructure.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
-    accelerationStructure.pNext = &rayTracingPipeline;
-    accelerationStructure.accelerationStructure = VK_TRUE;
-
-    // ────────────────────── STEP 2: NOW DECLARE VULKAN13 FIRST — AND PATCH IT ──────────────────────
-    VkPhysicalDeviceVulkan13Features vulkan13 = {};
-    vulkan13.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
-    vulkan13.pNext = &accelerationStructure;        // ← DEFINED ABOVE — SAFE
-    vulkan13.dynamicRendering = VK_TRUE;
-    vulkan13.synchronization2 = VK_TRUE;
-
-    // ────────────────────── EXTENSIONS — THE SACRED 7 ──────────────────────
-    const char* const deviceExtensions[] = {
-        VK_KHR_SWAPCHAIN_EXTENSION_NAME,
-        VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
-        VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME,
-        VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME,
-        VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME,
-        VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME,
-        VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME
-    };
-
-    VkDeviceCreateInfo createInfo = {};
-    createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-    createInfo.pNext = &vulkan13;
-    createInfo.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());
-    createInfo.pQueueCreateInfos = queueCreateInfos.data();
-    createInfo.enabledExtensionCount = std::size(deviceExtensions);
-    createInfo.ppEnabledExtensionNames = deviceExtensions;
-
-    VkDevice device = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateDevice(physical, &createInfo, nullptr, &device),
-             "Failed to create logical device — the Handler is displeased");
-
-    vkGetDeviceQueue(device, indices.graphicsFamily.value(), 0, &g_ctx().graphicsQueue_);
-    vkGetDeviceQueue(device, indices.presentFamily.value(),  0, &g_ctx().presentQueue_);
-    vkGetDeviceQueue(device, indices.computeFamily.value(),  0, &g_ctx().computeQueue_);
-
-    LOG_SUCCESS_CAT("RTX", "LOGICAL DEVICE FORGED — {} QUEUES CLAIMED", uniqueQueueFamilies.size());
-    LOG_AMOURANTH("Vulkan13 declared first.");
-    LOG_AMOURANTH("accelerationStructure defined first.");
-    LOG_AMOURANTH("Designated initializer order respected.");
-    LOG_AMOURANTH("The compiler is silenced.");
-    LOG_BALLERINA("SUCCESS!!! THE EMPIRE IS WHOLE!!! PINK PHOTONS — PURE AND ETERNAL!!!");
-
-    return device;
-}
-
-// =============================================================================
-// findQueueFamilies — THE EMPIRE'S EYE — PERFECT, LETHAL, ETERNAL
-// Finds Graphics + Present + (optional) Transfer — PINK PHOTONS APPROVED
-// =============================================================================
-[[nodiscard]] QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device,
-                                                          VkSurfaceKHR surface = VK_NULL_HANDLE) noexcept
+[[nodiscard]] QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device, VkSurfaceKHR surface) noexcept
 {
     QueueFamilyIndices indices;
 
@@ -342,30 +264,29 @@ VkDevice createLogicalDevice(VkPhysicalDevice physical, VkSurfaceKHR surface) no
     for (uint32_t i = 0; i < queueFamilies.size(); ++i) {
         const auto& props = queueFamilies[i];
 
-        // Graphics + Compute (we want both)
+        // Graphics + Compute
         if (props.queueFlags & VK_QUEUE_GRAPHICS_BIT) {
             indices.graphicsFamily = i;
         }
 
-        // Dedicated Transfer queue (preferred for uploads)
-        if (props.queueFlags & VK_QUEUE_TRANSFER_BIT) {
-            if (!(props.queueFlags & VK_QUEUE_GRAPHICS_BIT) && !indices.transferFamily.has_value()) {
-                indices.transferFamily = i;  // Dedicated transfer = best
-            } else if (!indices.transferFamily.has_value()) {
-                indices.transferFamily = i;  // Fallback: any transfer
-            }
-        }
-
-        // Present support (only if surface provided)
+        // Present support
         if (surface != VK_NULL_HANDLE) {
             VkBool32 presentSupport = VK_FALSE;
-            VK_CHECK_NOMSG(vkGetPhysicalDeviceSurfaceSupportKHR(device, i, surface, &presentSupport));
+            vkGetPhysicalDeviceSurfaceSupportKHR(device, i, surface, &presentSupport);
             if (presentSupport) {
                 indices.presentFamily = i;
             }
         }
 
-        // Early exit if we have everything
+        // Dedicated transfer (preferred)
+        if (props.queueFlags & VK_QUEUE_TRANSFER_BIT) {
+            if (!(props.queueFlags & VK_QUEUE_GRAPHICS_BIT) && !indices.transferFamily.has_value()) {
+                indices.transferFamily = i;
+            } else if (!indices.transferFamily.has_value()) {
+                indices.transferFamily = i;
+            }
+        }
+
         if (indices.graphicsFamily.has_value() &&
             indices.presentFamily.has_value() &&
             indices.transferFamily.has_value()) {
@@ -373,38 +294,36 @@ VkDevice createLogicalDevice(VkPhysicalDevice physical, VkSurfaceKHR surface) no
         }
     }
 
-    // Fallback: if no dedicated transfer, use graphics (always has transfer bit)
+    // Fallback: graphics queue always supports transfer
     if (!indices.transferFamily.has_value() && indices.graphicsFamily.has_value()) {
         indices.transferFamily = indices.graphicsFamily;
     }
 
-    LOG_BLONDIE("Queue Families — Graphics: {} | Present: {} | Transfer: {}",
-        indices.graphicsFamily.value_or(~0u),
-        indices.presentFamily.value_or(~0u),
-        indices.transferFamily.value_or(~0u));
-
     return indices;
 }
 
-[[nodiscard]] VkPhysicalDevice RTX::Context::pickPhysicalDevice(VkInstance instance, VkSurfaceKHR surface, bool enablePortableSubset) noexcept
+// -----------------------------------------------------------------------------
+// THE ONE TRUE FUNCTION — createLogicalDevice + retrieveQueues in perfect union
+// -----------------------------------------------------------------------------
+// =============================================================================
+// THE ONE TRUE FUNCTION — GPU + DEVICE + QUEUES + FEATURES — ALL IN ONE
+// =============================================================================
+[[nodiscard]] VkDevice createLogicalDeviceAndSelectGPU(VkInstance instance, VkSurfaceKHR surface) noexcept
 {
-    LOG_MAIN("→ RTX::Context::pickPhysicalDevice() — The Handler awakens");
+    LOG_MAIN("THE ONE TRUE FORGING BEGINS — GPU + DEVICE + QUEUES — PINK PHOTONS ETERNAL");
 
     uint32_t deviceCount = 0;
     VK_CHECK_NOMSG(vkEnumeratePhysicalDevices(instance, &deviceCount, nullptr));
-
     if (deviceCount == 0) {
-        LOG_FATAL_CAT("VULKAN", "No physical devices found — the empire has no throne");
-        return VK_NULL_HANDLE;
+        LOG_BALLERINA("NO ENGINES. THE EMPIRE FALLS INTO THE VOID.");
+        std::exit(666);
     }
 
     std::vector<VkPhysicalDevice> devices(deviceCount);
     VK_CHECK_NOMSG(vkEnumeratePhysicalDevices(instance, &deviceCount, devices.data()));
 
-    LOG_TRACE_CAT("VULKAN", "Scanning {} physical device(s)", deviceCount);
-
-    VkPhysicalDevice selected = VK_NULL_HANDLE;
-    int bestScore = -1;
+    VkPhysicalDevice chosen = VK_NULL_HANDLE;
+    QueueFamilyIndices bestIndices;
 
     for (const auto& dev : devices) {
         VkPhysicalDeviceProperties props{};
@@ -412,75 +331,133 @@ VkDevice createLogicalDevice(VkPhysicalDevice physical, VkSurfaceKHR surface) no
         vkGetPhysicalDeviceProperties(dev, &props);
         vkGetPhysicalDeviceFeatures(dev, &features);
 
-        // Must support geometry shaders (required by your engine)
-        if (!features.geometryShader) {
-            continue;
-        }
+        if (!features.geometryShader) continue;
 
-        // Score system — discrete > integrated > others
+        QueueFamilyIndices indices = findQueueFamilies(dev, surface);
+        if (!indices.graphicsFamily || !indices.presentFamily) continue;
+
         int score = 0;
         if (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) {
-            score += 10000;
-            score += static_cast<int>(props.limits.maxImageDimension2D);
-        } else if (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU) {
-            score += 5000;
-        } else {
-            score += 1000;
+            score += 10000 + static_cast<int>(props.limits.maxImageDimension2D);
         }
-
-        // Prefer RTX / NVIDIA
         if (strstr(props.deviceName, "RTX") || strstr(props.deviceName, "GeForce")) {
             score += 5000;
         }
 
-        // Must support presentation if surface exists
-        if (surface != VK_NULL_HANDLE) {
-            QueueFamilyIndices indices = findQueueFamilies(dev, surface);
-            if (!indices.graphicsFamily.has_value() || !indices.presentFamily.has_value()) {
-                continue;
-            }
+        if (score > 10000) {
+            chosen = dev;
+            bestIndices = std::move(indices);
+            LOG_SUCCESS_CAT("VULKAN", "ENGINE ACQUIRED → {} | Score: {}", props.deviceName, score);
+            break;
         }
-
-        if (score > bestScore) {
-            bestScore = score;
-            selected = dev;
-        }
-
-        LOG_TRACE_CAT("VULKAN", "  • {} | Score: {} | Type: {}", props.deviceName, score,
-                      props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU ? "DISCRETE" :
-                      props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU ? "INTEGRATED" : "OTHER");
     }
 
-    if (selected == VK_NULL_HANDLE) {
-        LOG_WARN_CAT("VULKAN", "No suitable GPU found — falling back to first device");
-        selected = devices[0];
+    if (!chosen) {
+        LOG_BALLERINA("NO VIABLE ENGINE. THE SHIP IS DEAD.");
+        std::exit(666);
     }
 
-    // Final selection
-    {
-        VkPhysicalDeviceProperties props{};
-        vkGetPhysicalDeviceProperties(selected, &props);
+    g_ctx().setPhysicalDevice(chosen);
 
-        g_ctx().physicalDevice_ = selected;
-
-        LOG_SUCCESS_CAT("VULKAN", "{}GPU SELECTED{} → {} (API {}.{}.{})",
-                        PLASMA_FUCHSIA, RESET,
-                        props.deviceName,
-                        VK_VERSION_MAJOR(props.apiVersion),
-                        VK_VERSION_MINOR(props.apiVersion),
-                        VK_VERSION_PATCH(props.apiVersion));
-
-        AI_INJECT("I have chosen my weapon: {}", props.deviceName);
+    // ────────────────────── QUEUE SETUP ──────────────────────
+    std::set<uint32_t> uniqueQueues = {
+        bestIndices.graphicsFamily.value(),
+        bestIndices.presentFamily.value()
+    };
+    if (bestIndices.transferFamily.has_value() &&
+        bestIndices.transferFamily.value() != bestIndices.graphicsFamily.value()) {
+        uniqueQueues.insert(bestIndices.transferFamily.value());
     }
 
-    LOG_SUCCESS_CAT("VULKAN", "{}STONEKEY v∞ ENGAGED — FULL OBFUSCATION ACTIVE — APOCALYPSE v3.2 ARMED{}", 
-                    LILAC_LAVENDER, RESET);
+    float priority = 1.0f;
+    std::vector<VkDeviceQueueCreateInfo> queueInfos;
+    queueInfos.reserve(uniqueQueues.size());
+    for (uint32_t family : uniqueQueues) {
+        queueInfos.push_back(VkDeviceQueueCreateInfo{
+            .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
+            .queueFamilyIndex = family,
+            .queueCount = 1,
+            .pQueuePriorities = &priority
+        });
+    }
 
-    LOG_MAIN("← RTX::Context::pickPhysicalDevice() — Throne claimed");
+    // ────────────────────── FEATURE CHAIN — PERFECT ORDER ──────────────────────
+    VkPhysicalDeviceBufferDeviceAddressFeatures bda{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES,
+        .bufferDeviceAddress = VK_TRUE
+    };
 
-    return selected;  // ALWAYS RETURNS
+    VkPhysicalDeviceRayTracingPipelineFeaturesKHR rt{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR,
+        .pNext = &bda,
+        .rayTracingPipeline = VK_TRUE
+    };
+
+    VkPhysicalDeviceAccelerationStructureFeaturesKHR as{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR,
+        .pNext = &rt,
+        .accelerationStructure = VK_TRUE
+    };
+
+    VkPhysicalDeviceVulkan13Features v13{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
+        .pNext = &as,
+        .synchronization2 = VK_TRUE,
+        .dynamicRendering = VK_TRUE
+    };
+
+    // ────────────────────── EXTENSIONS ──────────────────────
+    const char* extensions[] = {
+        VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+        VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
+        VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME,
+        VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME,
+        VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME,
+        VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME,
+        VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME
+    };
+
+    // ────────────────────── DEVICE CREATE INFO ──────────────────────
+    VkDeviceCreateInfo createInfo{
+        .sType                   = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
+        .pNext                   = &v13,
+        .queueCreateInfoCount    = static_cast<uint32_t>(queueInfos.size()),
+        .pQueueCreateInfos       = queueInfos.data(),
+        .enabledExtensionCount   = std::size(extensions),
+        .ppEnabledExtensionNames = extensions
+    };
+
+    VkDevice device = VK_NULL_HANDLE;
+    VK_CHECK(vkCreateDevice(chosen, &createInfo, nullptr, &device),
+             "LOGICAL DEVICE FORGING FAILED — THE HANDLER IS DISPLEASED");
+
+    // ────────────────────── CLAIM QUEUES ──────────────────────
+    vkGetDeviceQueue(device, bestIndices.graphicsFamily.value(), 0, &g_ctx().graphicsQueue_);
+    vkGetDeviceQueue(device, bestIndices.presentFamily.value(),  0, &g_ctx().presentQueue_);
+    g_ctx().transferQueue_ = bestIndices.transferFamily.has_value()
+        ? vkGetDeviceQueue(device, bestIndices.transferFamily.value(), 0, nullptr), g_ctx().transferQueue_
+        : g_ctx().graphicsQueue_;
+
+    // ────────────────────── STORE IN CONTEXT ──────────────────────
+    g_ctx().setDevice(device);
+    g_ctx().graphicsFamily_ = bestIndices.graphicsFamily.value();
+    g_ctx().presentFamily_  = bestIndices.presentFamily.value();
+    if (bestIndices.transferFamily.has_value()) {
+        g_ctx().transferFamily_ = bestIndices.transferFamily.value();
+    }
+
+    g_ctx().enableBufferDeviceAddress();
+    g_ctx().enableAccelerationStructure();
+    g_ctx().enableRayTracingPipeline();
+    g_ctx().enableDynamicRendering();
+    g_ctx().enableSynchronization2();
+
+    LOG_SUCCESS_CAT("RTX", "LOGICAL DEVICE FORGED — {} queues claimed", uniqueQueues.size());
+    LOG_BLONDIE("The empire is whole. The chain is perfect. The photons are pink.");
+    LOG_AMOURANTH("Captain Amouranth: \"First light... achieved.\"");
+
+    return device;
 }
-
 } // namespace RTX
 
 // =============================================================================

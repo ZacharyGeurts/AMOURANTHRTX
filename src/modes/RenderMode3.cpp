@@ -32,7 +32,7 @@ RenderMode3::RenderMode3(VulkanRTX& rtx, uint32_t width, uint32_t height)
 
 RenderMode3::~RenderMode3() {
     LOG_INFO_CAT("RenderMode3", "Destructor invoked — Safe cleanup");
-    vkDeviceWaitIdle(stone_device());
+    vkDeviceWaitIdle(RTX::g_ctx().device_);
 
     rtx_.updateRTXDescriptors(0,
         VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,
@@ -105,7 +105,7 @@ void RenderMode3::clearRandom(VkCommandBuffer cmd) {
 void RenderMode3::onResize(uint32_t width, uint32_t height) {
     LOG_INFO_CAT("RenderMode3", "onResize() — New: {}×{} → Re-seeding chaos", width, height);
 
-    vkDeviceWaitIdle(stone_device());
+    vkDeviceWaitIdle(RTX::g_ctx().device_);
 
     rtx_.updateRTXDescriptors(0, VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,
                               VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,
