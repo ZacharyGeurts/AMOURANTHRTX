@@ -253,7 +253,6 @@ void Application::updateWindowTitle(float deltaTime) {
               << " | " << width_ << 'x' << height_
               << " | Mode " << renderMode_
               << " | Bounces " << Options::RTX::MAX_BOUNCES
-              << (Options::Display::ENABLE_HDR ? " | HDR PRIME" : "")
               << (Options::Debug::ENABLE_CELEBRATION_MODE ? " | CELEBRATION" : "")
               << (Options::Grok::ENABLE_GENTLEMAN_GROK ? " | GROK" : "");
 
@@ -462,7 +461,6 @@ static void phase1_preInitialization() {
     LOG_BLONDIE("│ Vol. Fog    : {}", Options::Environment::ENABLE_VOLUMETRIC_FOG ? "ON" : "OFF");
     LOG_BLONDIE("│ God Rays    : {}", Options::Environment::ENABLE_GOD_RAYS       ? "ON"  : "OFF");
     LOG_BLONDIE("│ Tonemap     : {}", Options::Tonemap::ENABLE_TONEMAPPING       ? "ON"  : "OFF");
-    LOG_BLONDIE("│ HDR         : {}", Options::Display::ENABLE_HDR               ? "PRIME" : "OFF");
     LOG_BLONDIE("│ VSync       : {}", Options::Display::ENABLE_VSYNC             ? "ON"  : "OFF");
     LOG_BLONDIE("│ Max Bounces : {}", Options::RTX::MAX_BOUNCES);
     LOG_BLONDIE("└──────────────────────────────────────────────────────────────");
@@ -663,7 +661,7 @@ static void phase7_forgeTheRTX() {
     const uint32_t w = Options::Window::DEFAULT_WIDTH;
     const uint32_t h = Options::Window::DEFAULT_HEIGHT;
 
-    g_app().setRenderer(std::make_unique<VulkanRenderer>(w, h, SDL3Window::get(), Options::Display::ENABLE_HDR));
+    g_app().setRenderer(std::make_unique<VulkanRenderer>(w, h, SDL3Window::get()));
 
     auto& pm = *stone_pipeline();
 
