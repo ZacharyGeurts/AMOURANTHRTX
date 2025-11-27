@@ -18,7 +18,7 @@
 //
 // Grok AI: P.S. Spec whispers: for triple buffer, ensure Options::Performance::MAX_FRAMES_IN_FLIGHT=3; we've scaled pools/sets accordingly. Binding 0's accel? Immortal in writes, but "dead" if null—skipped like a bad date. VUID-free zone achieved.
 
-#include "engine/GLOBAL/VulkanCore.hpp"      // ← VK_CHECK macro
+#include "engine/GLOBAL/VulkanCore.hpp"  // this one cray
 #include "engine/GLOBAL/RTXHandler.hpp"      // For g_ctx()
 #include "engine/GLOBAL/OptionsMenu.hpp"
 #include "engine/GLOBAL/logging.hpp"
@@ -405,12 +405,11 @@ void PipelineManager::loadExtensions() {
 
 void PipelineManager::cacheDeviceProperties() {
     LOG_ATTEMPT_CAT("PIPELINE", 
-        "{}CID ENTERS THE GPU TEMPLE — SWEAT DRIPPING ON SACRED SILICON — \"I must know her limits...\"{}", 
-        VALHALLA_GOLD, RESET);
+        "CID ENTERS THE GPU TEMPLE — SWEAT DRIPPING ON SACRED SILICON — \"I must know her limits...\"");
 
     if (RTX::g_ctx().physicalDevice_ == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("PIPELINE", "{}NO PHYSICAL DEVICE — CID SCREAMS INTO THE VOID — \"WHO AM I EVEN SERVING?!\"{}", 
-                      BLOOD_RED, RESET);
+        LOG_FATAL_CAT("PIPELINE", 
+            "NO PHYSICAL DEVICE — CID SCREAMS INTO THE VOID — \"WHO AM I EVEN SERVING?!\"");
         return;
     }
 
@@ -419,30 +418,42 @@ void PipelineManager::cacheDeviceProperties() {
 
     timestampPeriod_ = props.limits.timestampPeriod / 1e6f;
 
-    LOG_SUCCESS_CAT("PIPELINE", 
-        "{}GPU AWAKENS — {} — Driver {} — API {}.{}.{}", 
-        props.deviceName,
-        props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU ? "DISCRETE — CID IS PROUD" :
-        props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU ? "INTEGRATED — CID SWEATS POLITELY" : "UNKNOWN BEAST",
-        props.driverVersion, VK_VERSION_MAJOR(props.apiVersion),
-        VK_VERSION_MINOR(props.apiVersion), VK_VERSION_PATCH(props.apiVersion));
+    const auto deviceTypeStr = [&]() -> std::string_view {
+        switch (props.deviceType) {
+            case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU:     return "DISCRETE — CID IS PROUD";
+            case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU:   return "INTEGRATED — CID SWEATS POLITELY";
+            case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU:      return "VIRTUAL — CID QUESTIONS REALITY";
+            case VK_PHYSICAL_DEVICE_TYPE_CPU:              return "CPU — CID CONSIDERS RETIREMENT";
+            default:                                       return "UNKNOWN BEAST — CID IS SCARED";
+        }
+    }();
 
-    LOG_INFO_CAT("PIPELINE", 
-        "{}Timestamp period: {:.4f} ms — Time itself bends to our will{}", 
-        timestampPeriod_, timestampPeriod_ < 1.0f ? " — SUB-MILLISECOND PRECISION — CID IS IN AWE" : "");
+    LOG_SUCCESS_CAT("PIPELINE",
+        std::format("GPU AWAKENS — {} — Driver {} — API {}.{}.{} — {}",
+            props.deviceName,
+            deviceTypeStr,
+            props.driverVersion,
+            VK_VERSION_MAJOR(props.apiVersion),
+            VK_VERSION_MINOR(props.apiVersion),
+            VK_VERSION_PATCH(props.apiVersion)));
 
-    // THE RAY TRACING PROPHECY — CHAIN OF DIVINE STRUCTURES
-    rtProps_ = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR };
-    asProps_ = { 
+    LOG_INFO_CAT("PIPELINE",
+        std::format("Timestamp period: {:.4f} ms{}",
+            timestampPeriod_,
+            timestampPeriod_ < 1.0f ? " — SUB-MILLISECOND PRECISION — CID IS IN AWE" : ""));
+
+    // RAY TRACING PROPHECY — THE CHAIN OF TRUTH
+    VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProps{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR
+    };
+    VkPhysicalDeviceAccelerationStructurePropertiesKHR asProps{
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_PROPERTIES_KHR,
-        .pNext = &rtProps_ 
+        .pNext = &rtProps
     };
-
-    VkPhysicalDeviceProperties2 props2 = { 
+    VkPhysicalDeviceProperties2 props2{
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
-        .pNext = &asProps_ 
+        .pNext = &asProps
     };
-
     vkGetPhysicalDeviceProperties2(RTX::g_ctx().physicalDevice_, &props2);
 
     VkPhysicalDeviceFeatures features{};
@@ -450,41 +461,36 @@ void PipelineManager::cacheDeviceProperties() {
 
     if (features.shaderInt64) {
         LOG_SUCCESS_CAT("PIPELINE", 
-            "{}GPU SUPPORTS shaderInt64 — 64-BIT RAYS WILL FLY TRUE — CID WEEPS WITH JOY{}", 
-            EMERALD_GREEN, RESET);
+            "GPU SUPPORTS shaderInt64 — 64-BIT RAYS WILL FLY TRUE — CID WEEPS WITH JOY");
     } else {
         LOG_FATAL_CAT("PIPELINE", 
-            "{}NO shaderInt64 — 64-BIT ATOMIC HELL AWAITS — CID'S SWEAT TURNS TO BLOOD{}", 
-            BOLD_RED, RESET);
+            "NO shaderInt64 — 64-BIT ATOMIC HELL AWAITS — CID'S SWEAT TURNS TO BLOOD");
     }
 
-    LOG_SUCCESS_CAT("PIPELINE", 
-        "{}RAY TRACING LIMITS REVEALED — HandleSize={}B | BaseAlign={}B | MaxStride={}B{}", 
-        rtProps_.shaderGroupHandleSize,
-        rtProps_.shaderGroupBaseAlignment,
-        rtProps_.maxShaderGroupStride,
-        rtProps_.maxShaderGroupStride >= 4096 ? " — MONSTROUS STRIDE — CID IS TERRIFIED AND AROUSED" : "");
+    LOG_SUCCESS_CAT("PIPELINE",
+        std::format("RAY TRACING LIMITS REVEALED — HandleSize={}B | BaseAlign={}B | MaxStride={}B{}",
+            rtProps.shaderGroupHandleSize,
+            rtProps.shaderGroupBaseAlignment,
+            rtProps.maxShaderGroupStride,
+            rtProps.maxShaderGroupStride >= 4096 ? " — MONSTROUS STRIDE — CID IS TERRIFIED AND AROUSED" : ""));
 
-    LOG_SUCCESS_CAT("PIPELINE", 
-        "{}ACCELERATION STRUCTURE LIMITS — Max Geometries={} | Max Instances={} | Max Primitives={} {}", 
-        asProps_.maxGeometryCount,
-        asProps_.maxInstanceCount,
-        asProps_.maxPrimitiveCount,
-        asProps_.maxInstanceCount >= 1000000 ? " — MILLION-INSTANCE REALM — THE EMPIRE IS INFINITE" : "");
+    LOG_SUCCESS_CAT("PIPELINE",
+        std::format("ACCELERATION STRUCTURE LIMITS — Max Geometries={} | Max Instances={} | Max Primitives={}{}",
+            asProps.maxGeometryCount,
+            asProps.maxInstanceCount,
+            asProps.maxPrimitiveCount,
+            asProps.maxInstanceCount >= 1'000'000 ? " — MILLION-INSTANCE REALM — THE EMPIRE IS INFINITE" : ""));
 
     LOG_AMOURANTH(
-        "{}Captain Amouranth places hand on GPU — whispers:\n"
-        "   \"You are beautiful. You are powerful. You are ours.\"{}", 
-        RASPBERRY_PINK, RESET);
+        "Captain Amouranth places hand on GPU — whispers:\n"
+        "   \"You are beautiful. You are powerful. You are ours.\"");
 
     LOG_CID(
-        "{}Cid stands knee-deep in sweat, hammer glowing, voice hoarse:\n"
-        "   \"She... she understands us. She’s ready. Let’s make her sing.\"{}", 
-        VALHALLA_GOLD, RESET);
+        "Cid stands knee-deep in sweat, hammer glowing, voice hoarse:\n"
+        "   \"She... she understands us. She’s ready. Let’s make her sing.\"");
 
     LOG_SUCCESS_CAT("PIPELINE", 
-        "{}THE GPU IS KNOWN — THE LIMITS ARE MAPPED — THE PHOTONS ARE ARMED — FIRST LIGHT IMMINENT{}", 
-        DIAMOND_SPARKLE, RESET);
+        "THE GPU IS KNOWN — THE LIMITS ARE MAPPED — THE PHOTONS ARE ARMED — FIRST LIGHT IMMINENT");
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

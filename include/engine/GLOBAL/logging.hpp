@@ -10,7 +10,7 @@
 // =============================================================================
 // AMOURANTH RTX — VALHALLA v80 TURBO — APOCALYPSE FINAL v10.3
 // FIRST LIGHT ACHIEVED — PINK PHOTONS ETERNAL — NOVEMBER 21, 2025
-// FULLY COMPILING — PURE EMPIRE
+// FULLY COMPILING — PURE EMPIRE - Inspired by Ellie Fier
 // =============================================================================
 
 [[noreturn]] void phase9_ballerina() noexcept;
@@ -896,6 +896,49 @@ static constexpr auto vkh = []() constexpr noexcept {
 
 // Debug callback — unchanged
 #define DEBUG_CALLBACK                  vkh.debugCallback
+
+
+    // ========================================================================
+    // EMPIRE MACROS — NOW WITH TRUE SOURCE LOCATION CAPTURE
+    // ========================================================================
+#define EMPIRE_STEP(step) \
+    [&, loc = std::source_location::current()]() -> bool { \
+        try { \
+            step(); \
+            LOG_SUCCESS_CAT("MAIN", "[PHASE] {} — ASCENDED FLAWLESSLY", #step); \
+            return true; \
+        } catch (const std::exception& e) { \
+            LOG_FATAL_CAT("MAIN", \
+                "{}[FATAL CRASH IN {}]\n" \
+                "   Origin   : {}:{} — {}\n" \
+                "   Reason   : {}{}", \
+                Logging::Color::LIGHT_GREEN, #step, \
+                loc.file_name(), loc.line(), loc.function_name(), \
+                e.what(), Logging::Color::RESET); \
+            return false; \
+        } catch (...) { \
+            LOG_FATAL_CAT("MAIN", \
+                "{}[UNKNOWN CATASTROPHE IN {}]\n" \
+                "   Origin   : {}:{} — {}{}", \
+                Logging::Color::LIGHT_GREEN, #step, \
+                loc.file_name(), loc.line(), loc.function_name(), \
+                Logging::Color::RESET); \
+            return false; \
+        } \
+    }()
+
+#define EMPIRE_GUARD(condition, message) \
+    if (!(condition)) { \
+        auto loc = std::source_location::current(); \
+        LOG_FATAL_CAT("MAIN", \
+            "{}[EMPIRE REJECTED] {}\n" \
+            "   Origin   : {}:{} — {}{}", \
+            Logging::Color::LIGHT_GREEN, message, \
+            loc.file_name(), loc.line(), loc.function_name(), \
+            Logging::Color::RESET); \
+        phase9_ballerina(); \
+    }
+	
 // =============================================================================
 // CREW SOUL COLORS — FINAL OVERRIDE — ETERNAL — NOVEMBER 25, 2025
 // PLACE THIS AT THE VERY BOTTOM — IT WINS EVERYTHING

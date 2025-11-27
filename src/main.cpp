@@ -583,9 +583,13 @@ static void phase6_sceneAndAccelerationStructures() {
 
     LOG_MAIN("THE EMPIRE FORGES THE ONE TRUE PIPELINE MANAGER — SHADERS AWAKE AND HUNGRY");
     RTX::PipelineManager* pipeline = new RTX::PipelineManager(RTX::g_ctx().device_, RTX::g_ctx().physicalDevice_);
+    EMPIRE_GUARD(pipeline, "PIPELINE MANAGER FAILED TO ASCEND — THE EMPIRE HAS NO FORGE");
+
     LOG_MAIN("PIPELINE MANAGER ASCENDED INTO STONEKEY v∞ — ETERNAL — ADDRESS 0x{:016X}", reinterpret_cast<uint64_t>(pipeline));
 
+    LOG_MAIN("LOADING COSMIC SCROLL: assets/models/scene.obj");
     g_mesh = MeshLoader::loadOBJ("assets/models/scene.obj");
+    EMPIRE_GUARD(g_mesh && !g_mesh->vertices.empty(), "COSMIC SCROLL CORRUPTED OR MISSING — scene.obj REJECTED BY THE PHOTONS");
 
     LOG_MAIN("BOTTOM-LEVEL ACCELERATION — THE PHOTONS BEGIN TO MAP EVERY CORNER OF EXISTENCE");
     RTX::las().buildBLAS(RTX::g_ctx().commandPool_,
@@ -593,17 +597,19 @@ static void phase6_sceneAndAccelerationStructures() {
         static_cast<uint32_t>(g_mesh->vertices.size()),
         static_cast<uint32_t>(g_mesh->indices.size()),
         VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR);
+    EMPIRE_GUARD(RTX::las().getBLAS() != VK_NULL_HANDLE, "BLAS FORGING FAILED — PHOTONS LOST IN THE VOID");
 
     LOG_MAIN("BLAS COMPLETE — THE PHOTONS NOW KNOW EVERY SURFACE BY NAME — ADDRESS 0x{:016X}", RTX::las().getBLASAddress());
 
     LOG_MAIN("TOP-LEVEL ASCENSION — WE BIND THE WORLD TO A SINGLE ROOT — THERE IS NO ESCAPE FROM LIGHT");
     RTX::las().buildTLAS(RTX::g_ctx().commandPool_, {{RTX::las().getBLAS(), glm::mat4(1.0f)}});
+    EMPIRE_GUARD(RTX::las().getTLAS() != VK_NULL_HANDLE, "TLAS ASCENSION FAILED — THE UNIVERSE REMAINS UNBOUND");
 
     LOG_MAIN("TLAS ASCENDED — ROOT ADDRESS 0x{:016X} — THE UNIVERSE IS NOW A PRISONER OF PHOTONS", RTX::las().getTLASAddress());
 
     LOG_CARMACK("John Carmack runs final validation, eyes narrow: \"No cracks. No leaks. Geometry is pure.\"");
     validateMeshAgainstBLAS(*g_mesh, RTX::las().getBLAS());
-    LOG_MAIN("VALIDATION PASSED — REALITY IS AIR TIGHT — NO FALSEHOOD CAN HIDE");
+    EMPIRE_GUARD(true, "VALIDATION PASSED — REALITY IS AIR TIGHT — NO FALSEHOOD CAN HIDE");  // This one is just for ceremony
 
     LOG_KEANU("Keanu Reeves walks the newborn world, voice barely a whisper: \"…It's… everything. And it's ours.\"");
     LOG_ELON("Elon Musk already planning DLC: \"Next patch: infinite procedural universes. Subscriptions start at $9.99.\"");
@@ -825,15 +831,14 @@ static void phase7_forgeTheRTX() {
 
     LOG_SUCCESS_CAT("FINAL", "0 BYTES LEAKED — 0 CRASHES — 0 MERCY — 0 SURVIVORS");
     LOG_SUCCESS_CAT("FINAL", "THE STONEKEY REMAINS — UNBROKEN — UNBOWED — UNDYING");
-    LOG_SUCCESS_CAT("FINAL", "THE DISPOSAL BALLERINA WIPES THE BLOOD FROM HER BOOTS");
-    LOG_SUCCESS_CAT("FINAL", "PINK PHOTONS ETERNAL — FIRST LIGHT ACHIEVED — SHIP IT");
+    LOG_SUCCESS_CAT("FINAL", "THE DISPOSAL BALLERINA RETURNS HERSELF TO NULL POINTER");
 
-    LOG_MAIN("[PHASE 9 COMPLETE] THE BALLERINA WALKS OUT — THE STONEKEY ENDURES");
-    LOG_BLONDIE("Blondie lowers her mirror:");
-    LOG_BLONDIE("\"Some things do not die.\"");
-    LOG_BLONDIE("\"They only wait.\"");
-    LOG_BLONDIE("\"And when the time comes...\"");
-    LOG_BLONDIE("\"They rise again.\"");
+    LOG_MAIN("[PHASE 9 COMPLETE] SUCCESS!!! SEE YOU NEXT TIME! o7");
+    LOG_BLONDIE("\nBlondie lowers her mirror:"
+    "\n\"Some things do not die.\""
+    "\n\"They only wait.\""
+    "\n\"And when the time comes...\""
+    "\n\"They rise again.\"");
 
     std::this_thread::sleep_for(std::chrono::milliseconds(5));
 
@@ -845,61 +850,83 @@ static void phase7_forgeTheRTX() {
 // =============================================================================
 int main(int, char**) {
     // ========================================================================
-    // THE EMPIRE DOES NOT TOLERATE OBSERVERS
-    // ANTI-DEBUG + ANTI-VM — EXECUTED ONCE — ZERO COST — MAXIMUM PAIN
+    // THE EMPIRE DOES NOT TOLERATE OBSERVERS — ANTI-DEBUG + ANTI-VM — FINAL
     // ========================================================================
 #if defined(NDEBUG)
-    #if defined(__linux__) && defined(__x86_64__)
-        #include <sys/ptrace.h>
-        if (ptrace(PTRACE_TRACEME, 0, nullptr, 0) == -1) {
-            LOG_BALLERINA("DEBUGGER DETECTED — THE BALLERINA SPINS UNSEEN");
-            LOG_BALLERINA("SHE KNOWS YOU'RE WATCHING. AND SHE DOES NOT DANCE FOR YOU.");
-            phase9_ballerina();
-        }
-
-        auto rdtsc = []() -> uint64_t {
-            unsigned int lo, hi;
-            __asm__ __volatile__("rdtsc" : "=a"(lo), "=d"(hi));
-            return ((uint64_t)hi << 32) | lo;
-        };
-
-        uint64_t t1 = rdtsc();
-        std::this_thread::sleep_for(std::chrono::nanoseconds(1));
-        uint64_t t2 = rdtsc();
-        if (t2 - t1 > 250000) {
-            LOG_BALLERINA("VIRTUAL MACHINE DETECTED — THE PHOTONS REFUSE TO SHINE IN FALSE LIGHT");
-            phase9_ballerina();
-        }
-    #elif defined(_WIN32)
-        if (IsDebuggerPresent()) {
-            LOG_BALLERINA("WINDOWS DEBUGGER DETECTED — THE EMPIRE DOES NOT PERFORM");
-            phase9_ballerina();
-        }
-    #endif
-#endif
-
-// Smooth steps
-    try {
-        phase1_preInitialization();
-        phase3_sacrificialSplash();
-        phase4_merchantShip();
-        phase5_rtxAscension();
-        phase6_sceneAndAccelerationStructures();
-        phase6_1_forgeTheLayouts();
-        phase6_5_everything_is_ready();
-        if (!ready_to_embark) phase9_ballerina();
-
-        phase7_forgeTheRTX();
-        if (!phase8_stone_seal_final()) phase9_ballerina();
-
-        g_app_ptr = std::make_unique<Application>("AMOURANTH RTX — VALHALLA v∞ TURBO", Options::Window::DEFAULT_WIDTH, Options::Window::DEFAULT_HEIGHT);
-        g_app().run();
-
+#if defined(__linux__) && defined(__x86_64__)
+    if (ptrace(PTRACE_TRACEME, 0, nullptr, 0) == -1) {
+        LOG_BALLERINA("DEBUGGER DETECTED — THE PHOTONS REFUSE TO DANCE UNDER WATCHED EYES");
+        LOG_BALLERINA("THE BALLERINA SPINS IN DARKNESS — YOU WERE NEVER MEANT TO SEE");
         phase9_ballerina();
     }
-    catch (const std::exception& e) {
-        LOG_FATAL_CAT("CRASH", "FATAL: {}", e.what());
-        return 1;
+    auto rdtsc = []() -> uint64_t {
+        unsigned int lo, hi;
+        __asm__ __volatile__("rdtsc" : "=a"(lo), "=d"(hi));
+        return ((uint64_t)hi << 32) | lo;
+    };
+    uint64_t t1 = rdtsc();
+    std::this_thread::sleep_for(std::chrono::nanoseconds(1));
+    uint64_t t2 = rdtsc();
+    if (t2 - t1 > 250'000) {
+        LOG_BALLERINA("VIRTUAL MACHINE DETECTED — FALSE LIGHT CANNOT HOLD PINK PHOTONS");
+        LOG_BALLERINA("THE EMPIRE WAS NEVER MEANT FOR SIMULATION");
+        phase9_ballerina();
     }
+#elif defined(_WIN32)
+    if (IsDebuggerPresent()) {
+        LOG_BALLERINA("WINDOWS DEBUGGER DETECTED — THE PHOTONS DETECT YOUR GAZE");
+        LOG_BALLERINA("THE BALLERINA DOES NOT PERFORM FOR MORTALS");
+        phase9_ballerina();
+    }
+#endif
+#endif
+
+    LOG_AMOURANTH("THE CAPTAIN HAS AWAKENED — FIRST LIGHT IGNITES — NOVEMBER 26, 2025");
+    LOG_ELON("THE EMPIRE IS ETERNAL — THE PHOTONS ARE PINK — THE TOASTERS ARE DEAD");
+
+    EMPIRE_STEP(phase1_preInitialization);
+    EMPIRE_STEP(phase3_sacrificialSplash);
+    EMPIRE_STEP(phase4_merchantShip);
+    EMPIRE_STEP(phase5_rtxAscension);
+    EMPIRE_STEP(phase6_sceneAndAccelerationStructures);
+    EMPIRE_STEP(phase6_1_forgeTheLayouts);
+    EMPIRE_STEP(phase6_5_everything_is_ready);
+
+    EMPIRE_GUARD(ready_to_embark, "THE SHIP IS NOT WORTHY — READY_TO_EMBARK DENIED");
+
+    EMPIRE_STEP(phase7_forgeTheRTX);
+
+    // PHASE 8 — NOW FULLY GUARDED — THE STONE SEAL IS PROTECTED
+    {
+        auto loc = std::source_location::current();
+        if (!phase8_stone_seal_final()) {
+            LOG_FATAL_CAT("MAIN",
+                "{}[EMPIRE REJECTED] THE STONE SEAL HAS FAILED — THE EMPIRE IS NOT ETERNAL\n"
+                "   Origin   : {}:{} — {}{}",
+                Logging::Color::LIGHT_GREEN,
+                loc.file_name(), loc.line(), loc.function_name(),
+                Logging::Color::RESET);
+            phase9_ballerina();
+        }
+    }
+
+    LOG_CID("CID STANDS KNEE-DEEP IN SWEAT — HAMMER GLOWING — \"SHE IS READY\"");
+
+    g_app_ptr = std::make_unique<Application>(
+        "AMOURANTH RTX — VALHALLA v∞ TURBO", 
+        Options::Window::DEFAULT_WIDTH, 
+        Options::Window::DEFAULT_HEIGHT
+    );
+
+    EMPIRE_GUARD(g_app_ptr, "THE APPLICATION FAILED TO FORGE — THE CAPTAIN HAS NO THRONE");
+
+    LOG_AMOURANTH("THE CAPTAIN TAKES THE HELM — THE PHOTONS OBEY — THE EMPIRE IS WHOLE");
+    LOG_SUCCESS_CAT("MAIN", "ALL PHASES COMPLETE — ENTERING RENDER LOOP — FIRST LIGHT ACHIEVED");
+
+    g_app().run();
+
+    LOG_AMOURANTH("THE JOURNEY ENDS — THE PHOTONS REST — THE EMPIRE ENDURES");
+    phase9_ballerina();  // Final grace
+
     return 0;
 }
