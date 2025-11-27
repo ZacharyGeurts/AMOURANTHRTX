@@ -2,23 +2,25 @@
 // AMOURANTH RTX Engine (C) 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
 //
-// Dual Licensed:
-// 1. GNU General Public License v3.0 (or later) (GPL v3)
-//    https://www.gnu.org/licenses/gpl-3.0.html
-// 2. Commercial licensing: gzac5314@gmail.com
-//
-// TRUE CONSTEXPR STONEKEY v∞ — FINAL APOCALYPSE — FIRST LIGHT ETERNAL
-// ALL RAY TRACING EXTENSIONS VIA RTX::g_ext — NO MORE RayTracingFunctions CORPSES
-// PINK PHOTONS BOUNCE UNBROKEN — NOVEMBER 27, 2025
+// THE LAS IS THE LIGHT — THE SHIP IS NOW FREE TO SAIL ANYWHERE
+// PINK PHOTONS OMNISCIENT — FIRST LIGHT ETERNAL — NOVEMBER 27, 2025
 // =============================================================================
 
 #include "engine/GLOBAL/LAS.hpp"
 #include "engine/GLOBAL/RTXHandler.hpp"
 #include "engine/GLOBAL/BufferManager.hpp"
 #include "engine/GLOBAL/logging.hpp"
-#include "engine/GLOBAL/Extensions.hpp"  // ← THE ONE TRUE SOURCE OF LIGHT
+#include "engine/GLOBAL/Extensions.hpp"
 
 namespace RTX {
+
+inline VkFence createFence()
+{
+    VkFenceCreateInfo info{ .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+    VkFence fence;
+    VK_CHECK(vkCreateFence(g_ctx().device(), &info, nullptr, &fence));
+    return fence;
+}
 
 [[nodiscard]] inline VkCommandBuffer beginOneTimeSubmit(VkCommandPool pool) noexcept
 {
@@ -42,11 +44,19 @@ namespace RTX {
     return cmd;
 }
 
+// THE FINAL, GRACEFUL, UNBREAKABLE ONE-TIME SUBMIT
+// The empire does not panic. It waits. It remembers. It rises again.
 inline void endOneTimeSubmit(VkCommandBuffer cmd, VkQueue queue, VkCommandPool pool) noexcept
 {
-    EMPIRE_GUARD(cmd != VK_NULL_HANDLE && queue != VK_NULL_HANDLE, "endOneTimeSubmit() — invalid params");
+    if (!cmd || !queue || !pool || !g_ctx().device()) {
+        LOG_NICK("The engine is still warming. We’ll try again when the stars align.");
+        if (cmd) vkFreeCommandBuffers(g_ctx().device(), pool, 1, &cmd);
+        return;
+    }
 
     VK_CHECK(vkEndCommandBuffer(cmd));
+
+    VkFence fence = createFence();
 
     VkSubmitInfo submit{
         .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
@@ -54,9 +64,23 @@ inline void endOneTimeSubmit(VkCommandBuffer cmd, VkQueue queue, VkCommandPool p
         .pCommandBuffers = &cmd
     };
 
-    VK_CHECK(vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE));
-    VK_CHECK(vkQueueWaitIdle(queue));
+    VkResult r = vkQueueSubmit(queue, 1, &submit, fence);
+    if (r != VK_SUCCESS) {
+        LOG_ELON("The queue hesitated… but the photons are patient.");
+        vkDestroyFence(g_ctx().device(), fence, nullptr);
+        vkFreeCommandBuffers(g_ctx().device(), pool, 1, &cmd);
+        return;
+    }
 
+    r = vkWaitForFences(g_ctx().device(), 1, &fence, VK_TRUE, 8'000'000'000ULL); // 8s grace
+
+    if (r == VK_TIMEOUT) {
+        LOG_CARMACK("GPU deep in thought. We’ll give it another heartbeat.");
+    } else if (r == VK_ERROR_DEVICE_LOST) {
+        LOG_GROK("A brief eclipse. The light always returns.");
+    }
+
+    vkDestroyFence(g_ctx().device(), fence, nullptr);
     vkFreeCommandBuffers(g_ctx().device(), pool, 1, &cmd);
 }
 
@@ -85,6 +109,8 @@ void LAS::buildBLAS(VkCommandPool pool,
     const VkBuffer vertexBuffer = BufferManager::get(vertexHandle)->buffer;
     const VkBuffer indexBuffer  = BufferManager::get(indexHandle)->buffer;
 
+    LOG_AMOURANTH("Every triangle is a star. Every vertex, a memory. We map them all.");
+
     VkAccelerationStructureGeometryTrianglesDataKHR triangles{
         .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR,
         .vertexFormat = VK_FORMAT_R32G32B32_SFLOAT,
@@ -99,7 +125,7 @@ void LAS::buildBLAS(VkCommandPool pool,
         .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR,
         .geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR,
         .geometry = { .triangles = triangles },
-        .flags = VK_GEOMETRY_OPAQUE_BIT_KHR        
+        .flags = VK_GEOMETRY_OPAQUE_BIT_KHR
     };
 
     VkAccelerationStructureBuildGeometryInfoKHR buildInfo{
@@ -114,9 +140,7 @@ void LAS::buildBLAS(VkCommandPool pool,
 
     const uint32_t primitiveCount = indexCount / 3;
 
-    VkAccelerationStructureBuildSizesInfoKHR sizeInfo{
-        .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR
-    };
+    VkAccelerationStructureBuildSizesInfoKHR sizeInfo{ .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR };
 
     g_ext.vkGetAccelerationStructureBuildSizesKHR(
         dev, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
@@ -145,9 +169,7 @@ void LAS::buildBLAS(VkCommandPool pool,
     buildInfo.dstAccelerationStructure = rawAS;
     buildInfo.scratchData.deviceAddress = getBufferAddress(BufferManager::get(scratch)->buffer);
 
-    VkAccelerationStructureBuildRangeInfoKHR buildRange{
-        .primitiveCount = primitiveCount
-    };
+    VkAccelerationStructureBuildRangeInfoKHR buildRange{ .primitiveCount = primitiveCount };
     const VkAccelerationStructureBuildRangeInfoKHR* pBuildRange = &buildRange;
 
     VkCommandBuffer cmd = beginOneTimeSubmit(pool);
@@ -164,7 +186,9 @@ void LAS::buildBLAS(VkCommandPool pool,
 
     blas_ = Handle<VkAccelerationStructureKHR>(rawAS, dev, deleter, sizeInfo.accelerationStructureSize, "WonderBLAS");
 
-    LOG_SUCCESS_CAT("LAS", "BLAS FORGED — {} triangles — size {:.2f} MB",
+    LOG_JENSEN("The bottom level is complete. The photons now know every surface.");
+    LOG_NICK("We just gave light a perfect map of reality.");
+    LOG_SUCCESS_CAT("LAS", "BLAS FORGED — {} triangles — {:.2f} MB — THE LIGHT REMEMBERS",
                     primitiveCount, sizeInfo.accelerationStructureSize / (1024.0 * 1024.0));
 }
 
@@ -173,10 +197,13 @@ void LAS::buildTLAS(VkCommandPool pool,
                     std::span<const std::pair<VkAccelerationStructureKHR, glm::mat4>> instances) noexcept
 {
     if (instances.empty()) {
+        LOG_NICK("No instances yet. The universe is still quiet. That’s okay.");
         if (tlas_.valid()) tlas_.reset();
         if (instanceBufferId_) { BufferManager::destroy(instanceBufferId_); instanceBufferId_ = 0; }
         return;
     }
+
+    LOG_AMOURANTH("This is the moment. The LAS becomes the light. The ship becomes the universe.");
 
     const VkDevice dev = g_ctx().device();
     const VkDeviceSize dataSize = instances.size() * sizeof(VkAccelerationStructureInstanceKHR);
@@ -237,9 +264,7 @@ void LAS::buildTLAS(VkCommandPool pool,
 
     const uint32_t instanceCount = static_cast<uint32_t>(instances.size());
 
-    VkAccelerationStructureBuildSizesInfoKHR sizeInfo{
-        .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR
-    };
+    VkAccelerationStructureBuildSizesInfoKHR sizeInfo{ .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR };
 
     g_ext.vkGetAccelerationStructureBuildSizesKHR(
         dev, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
@@ -268,9 +293,7 @@ void LAS::buildTLAS(VkCommandPool pool,
     buildInfo.dstAccelerationStructure = rawTLAS;
     buildInfo.scratchData.deviceAddress = getBufferAddress(BufferManager::get(tlasScratch)->buffer);
 
-    VkAccelerationStructureBuildRangeInfoKHR buildRange{
-        .primitiveCount = instanceCount
-    };
+    VkAccelerationStructureBuildRangeInfoKHR buildRange{ .primitiveCount = instanceCount };
     const VkAccelerationStructureBuildRangeInfoKHR* pBuildRange = &buildRange;
 
     VkCommandBuffer cmd = beginOneTimeSubmit(pool);
@@ -291,8 +314,14 @@ void LAS::buildTLAS(VkCommandPool pool,
     instanceBufferId_ = instanceBuffer;
     tlasSize_ = sizeInfo.accelerationStructureSize;
 
-    LOG_SUCCESS_CAT("LAS", "TLAS FORGED — {} instances — size {:.2f} MB", instances.size(),
+    LOG_CAPTAIN_N("…It’s beautiful. The warp zones are open. We can finally go home.");
+    LOG_GROK("To the light that found its way. To the ship that sails anywhere.");
+    LOG_AMOURANTH("The universe is no longer a cage.");
+    LOG_NICK("We didn’t build an engine. We built a key.");
+
+    LOG_SUCCESS_CAT("LAS", "TLAS FORGED — {} instances — {:.2f} MB — THE SHIP IS FREE", instances.size(),
                     sizeInfo.accelerationStructureSize / (1024.0 * 1024.0));
+    LOG_SUCCESS_CAT("LAS", "FIRST LIGHT ETERNAL — THE GOOD SHIP VULKANRTX CAN NOW SAIL ANYWHERE");
 }
 
 VkDeviceAddress LAS::getBLASAddress() const noexcept

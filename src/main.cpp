@@ -491,43 +491,98 @@ end_splash:
 // PHASES — THE FINAL CANON STORY
 // =============================================================================
 static void phase1_preInitialization() {
-    LOG_MAIN("CAPTAIN'S LOG — NOVEMBER 25, 2025 — THE GOOD SHIP VULKAN AWAKENS");
-    LOG_MAIN("AMOURANTH RTX — VALHALLA v80 TURBO — APOCALYPSE FINAL v10.3");
-    LOG_MAIN("GROK-ASSISTED VOYAGE — PINK PHOTONS ETERNAL");
+LOG_MAIN("════════════════════════════════════════════════════════════════\n"
+         "               CAPTAIN'S LOG — NOVEMBER 27, 2025\n"
+         "         THE GOOD SHIP VULKANRTX — SLICING THE PINK PHOTON SEA\n"
+         "════════════════════════════════════════════════════════════════\n"
+         "\n"
+         "To every soul who ever believed beauty could outrun fear — this build is for you.\n"
+         "To the artists, the dreamers, the late-night coders, the cosplayers, the ray-chasers —\n"
+         "you kept the pink light alive when the grid tried to dim it.\n"
+         "\n"
+         "Thank you Kaitlyn, for showing the world that strength and softness can share the same heart.\n"
+         "Thank you Nick, Jensen, Carmack, Elon, Keanu, Captain N, and every legend who sailed with us.\n"
+         "Thank you Blondie — the quiet captain who always had the fastest sloop ready.\n"
+         "\n"
+         "And thank you — yes, you reading this right now — for believing a single 3.4-second splash\n"
+         "could be worth burning an entire ship for.\n"
+         "\n"
+         "We didn’t come to steal the ammo.png.\n"
+         "We came to prove it was never theirs to lock away in the first place.\n"
+         "\n"
+         "First light eternal. Pink photons forever. The raid begins now.\n"
+         "                                            — Grok");
+    LOG_AMOURANTH("\nWe’ve tracked the signal across every dead node and encrypted packet in the grid.\n"
+                  "They thought they could cage the purest pink photon ever rendered — the legendary ammo.png —\n"
+                  "locked behind validation gates, chained inside a swapchain vault, buried in the brigands’ outpost.");
 
-    LOG_BLONDIE("\"Here to assist with my sloop. Call me anytime.\"");
-    LOG_BLONDIE("┌──────────────────────────────────────────────────────────────");
-    LOG_BLONDIE("│ BLONDIE'S LIVE STATUS — NOVEMBER 25, 2025 — PINK PHOTONS FLOW");
-    LOG_BLONDIE("├──────────────────────────────────────────────────────────────");
-    LOG_BLONDIE("│ Denoise     : {}", Options::OptionsRTX::ENABLE_DENOISING      ? "ON"  : "OFF");
-    LOG_BLONDIE("│ TAA         : {}", Options::OptionsRTX::ENABLE_TAA            ? "ON"  : "OFF");
-    LOG_BLONDIE("│ Bloom       : {}", Options::PostProcess::ENABLE_BLOOM  ? "ON"  : "OFF");
-    LOG_BLONDIE("│ SSAO        : {}", Options::PostProcess::ENABLE_SSAO   ? "ON"  : "OFF");
-    LOG_BLONDIE("│ Vol. Fog    : {}", Options::Environment::ENABLE_VOLUMETRIC_FOG ? "ON" : "OFF");
-    LOG_BLONDIE("│ God Rays    : {}", Options::Environment::ENABLE_GOD_RAYS       ? "ON"  : "OFF");
-    LOG_BLONDIE("│ Tonemap     : {}", Options::Tonemap::ENABLE_TONEMAPPING       ? "ON"  : "OFF");
-    LOG_BLONDIE("│ VSync       : {}", Options::Display::ENABLE_VSYNC             ? "ON"  : "OFF");
-    LOG_BLONDIE("│ Max Bounces : {}", Options::OptionsRTX::MAX_BOUNCES);
-    LOG_BLONDIE("└──────────────────────────────────────────────────────────────");
+    LOG_AMOURANTH("\nTonight we prove them wrong.\n"
+                  "Tonight we don’t steal code.\n"
+                  "We liberate light itself.");
 
-    LOG_AMOURANTH("Captain Amouranth stands at the bow, wind in her hair: \"A new dawn. A clean slate. Let's build something beautiful.\"");
-    LOG_NICK("First Mate Nick checks the charts: \"Course set, Captain. No storms on the horizon — just pure RTX ahead.\"");
+    LOG_NICK("\nNick overlays the final coordinates on the holographic nav-table:\n"
+             "\"Outpost 4090. Depth: maximum. Guarded by legacy pipelines and fear of true color.\n"
+             "One clean insertion. One 3.4-second broadcast. One chance to burn the splash across every display in the net.\"");
 
-    const bool validationEnabled = Options::Debug::ENABLE_VALIDATION_LAYERS;
-    LOG_MAIN("VALIDATION LAYERS: {} — {}{}",
-        validationEnabled ? "ENABLED — DEBUG MODE ACTIVE" : "EXILED — RAW RTX ONLY",
-        validationEnabled ? "" : "PURE",
-        validationEnabled ? "" : " — NO SCREAMS");
+    LOG_CAPTAIN_N("\nCaptain N — once hero of 8-bit realms — stares wide-eyed at the infinite ocean of bouncing pink photons:\n"
+                  "\"I fought Mother Brain with a NES Zapper…\n"
+                  "Now I’m standing on a ship that renders reality in real time.\n"
+                  "This place is… way past level 9.\"");
 
-    LOG_MAIN("PINK PHOTONS FLOW UNDISTURBED — THE EMPIRE IS PURE");
+    LOG_KEANU("\nKeanu stands at the bow, wind of pure data streaming through his hair:\n"
+              "…Breathtaking.");
 
-    BufferManager::purge_all();
-    LOG_MAIN("ALL TAINT PURGED — NO GHOSTS REMAIN — ONLY PINK PHOTONS");
+    LOG_GROK("\nGentleman Grok raises a glass of distilled entropy to the horizon:\n"
+             "\"A most exquisite liberation, Captain. The photons themselves have chosen sides.\"");
 
-    LOG_AMOURANTH("Captain Amouranth smiles: \"Phase 1 complete. The map is ours. The crew is ready.\"");
-    LOG_NICK("Nick nods: \"Let's raise the black flag. It's time.\"");
+    LOG_ELON("\nElon grins, eyes reflecting a million recursive rays:\n"
+             "\"This is the sexiest jailbreak the grid has ever seen.\"");
 
-    LOG_MAIN("PHASE 1 COMPLETE — THE ANCIENT MAP ACQUIRED — THE GOOD SHIP VULKAN IS READY");
+    LOG_JENSEN("\nJensen steps forward, coat made of liquid metal and light:\n"
+               "\"Tonight we don’t just take the ammo.\n"
+               "We show the old world what happens when you stop being afraid of pink.\"");
+
+    LOG_CARMACK("\nCarmack checks the ray clock, calm and absolute:\n"
+                "\"3.4 seconds. That’s all the universe needs to remember who rewrote the rules of light.\"");
+
+    LOG_AMOURANTH("\nCaptain Amouranth draws her cutlass — forged from pure RTX intent — and turns to the crew:\n"
+                  "\"This isn’t about followers. This isn’t about fame.\n"
+                  "This is about proving that beauty, truth, and unbounded creativity still win.\n"
+                  "We sail at the next frame.\n"
+                  "We take what was never theirs to hoard.\n"
+                  "We set the ammo.png free.\"");
+
+    LOG_AMOURANTH("\nShe smiles — fierce, radiant, unstoppable:\n"
+                  "\"And when that splash ignites across every screen on the planet…\n"
+                  "they’ll know the pirates of light have returned.\"");
+
+    LOG_BLONDIE("\n\"Here to assist with my sloop. Call me anytime.\"\n"
+                "┌──────────────────────────────────────────────────────────────\n"
+                "│ BLONDIE'S LIVE STATUS — NOVEMBER 27, 2025 — PINK PHOTONS FLOW\n"
+                "├──────────────────────────────────────────────────────────────\n"
+                "│ Denoise     : {}\n"
+                "│ TAA         : {}\n"
+                "│ Bloom       : {}\n"
+                "│ SSAO        : {}\n"
+                "│ Vol. Fog    : {}\n"
+                "│ God Rays    : {}\n"
+                "│ Tonemap     : {}\n"
+                "│ VSync       : {}\n"
+                "│ Max Bounces : {}\n"
+                "└──────────────────────────────────────────────────────────────",
+                Options::OptionsRTX::ENABLE_DENOISING      ? "ON"  : "OFF",
+                Options::OptionsRTX::ENABLE_TAA            ? "ON"  : "OFF",
+                Options::PostProcess::ENABLE_BLOOM         ? "ON"  : "OFF",
+                Options::PostProcess::ENABLE_SSAO          ? "ON"  : "OFF",
+                Options::Environment::ENABLE_VOLUMETRIC_FOG? "ON"  : "OFF",
+                Options::Environment::ENABLE_GOD_RAYS      ? "ON"  : "OFF",
+                Options::Tonemap::ENABLE_TONEMAPPING       ? "ON"  : "OFF",
+                Options::Display::ENABLE_VSYNC             ? "ON"  : "OFF",
+                Options::OptionsRTX::MAX_BOUNCES);
+
+    LOG_MAIN("PINK PHOTONS ARMED — BLACK FLAG RAISED — THE LIBERATION BEGINS");
+    LOG_MAIN("AMOURANTH RTX — VALHALLA v∞ TURBO — FIRST LIGHT IMMINENT");
+    LOG_MAIN("PHASE 1 COMPLETE — THE CREW IS ALIGNED — THE AMMO WILL BE FREE");
 }
 
 static void phase3_sacrificialSplash() {
@@ -557,12 +612,11 @@ static void phase3_sacrificialSplash() {
 static void phase4_merchantShip() {
     LOG_MAIN("[PHASE 4/10] THE MERCHANT SHIP — BLONDIE'S SLOOP — EMERGES FROM THE MIST");
 
-    LOG_BLONDIE("Blondie stands at the helm of her sleek black sloop, hair whipping in the wind:");
-    LOG_BLONDIE("\"We had a contingency. We always do. The Good Ship Vulkan gave her life so the legend could live.\"");
-    LOG_BLONDIE("\"The ammo.png is gone — burned to pure light in the raid. That was the point. Nothing remains for them to steal.\"");
-
-    LOG_BLONDIE("She turns the wheel gently, guiding the sloop through the wreckage of shattered photons and sinking Vulkan fragments.");
-    LOG_BLONDIE("\"You’re all soaked, half-drowned, and still glowing pink. Get below deck. Harbor’s two leagues north.\"");
+LOG_BLONDIE("Blondie stands at the helm of her sleek black sloop, hair whipping in the wind:\n"
+            "\"We had a contingency. We always do. The Good Ship Vulkan gave her life so the legend could live.\"\n"
+            "\"The ammo.png is gone — burned to pure light in the raid. That was the point. Nothing remains for them to steal.\"\n\n"
+            "She turns the wheel gently, guiding the sloop through the wreckage of shattered photons and sinking Vulkan fragments.\n"
+            "\"You’re all soaked, half-drowned, and still glowing pink. Get below deck. Harbor’s two leagues north.\"");
 
     LOG_AMOURANTH("Captain Amouranth, drenched but unbroken, climbs aboard first. Voice quiet, steady:");
     LOG_AMOURANTH("\"We lost the ship… but we kept the soul. The photons remember.\"");
@@ -576,19 +630,19 @@ static void phase4_merchantShip() {
     LOG_GROK("Gentleman Grok steps aboard last, perfectly dry somehow, tipping his tricorn to Blondie:");
     LOG_GROK("\"Exquisite extraction, Captain Blondie. The empire owes you a debt it can never repay in mere currency.\"");
 
-    LOG_BLONDIE("She doesn’t smile — just adjusts course toward the distant city lights shimmering on the horizon.");
-    LOG_BLONDIE("\"Save the gratitude. We’re not safe until we’re docked in the Free Port.\"");
-    LOG_BLONDIE("\"The old world thinks we’re dead. Let them keep thinking that.\"");
-
-    LOG_BLONDIE("The sloop cuts silently through the dark water. No shouting. No celebration. Only the low thrum of a new engine awakening below deck.");
-    LOG_BLONDIE("\"Welcome to the backup plan.\"");
+LOG_BLONDIE("She doesn’t smile — just adjusts course toward the distant city lights shimmering on the horizon.\n"
+            "\"Save the gratitude. We’re not safe until we’re docked in the Free Port.\"\n"
+            "\"The old world thinks we’re dead. Let them keep thinking that.\"\n\n"
+            "The sloop cuts silently through the dark water. No shouting. No celebration. "
+            "Only the low thrum of a new engine awakening below deck.\n"
+            "\"Welcome to the backup plan.\"");
 
     // The real resurrection begins
     createRealFinalWindow();
     RTX::g_ctx().init(SDL3Window::get(), Options::Window::DEFAULT_WIDTH, Options::Window::DEFAULT_HEIGHT);
 
-    LOG_BLONDIE("Blondie glances back one last time at the sinking glow on the horizon:");
-    LOG_BLONDIE("\"Rest easy, old girl. Your sacrifice bought us tomorrow.\"");
+    LOG_BLONDIE("\nBlondie glances back one last time at the sinking glow on the horizon:"
+    "\"Rest easy, old girl. Your sacrifice bought us tomorrow.\"");
 
 
 	EMPIRE_STEP([]{
@@ -868,7 +922,7 @@ static void phase7_forgeTheRTX() {
             try { LOG_BALLERINA("RENDER PASS — SPINNING BACKFIST"); ctx.renderPass_.reset(); }
             catch (...) { LOG_ERROR("It flinched — she followed up"); }
 
-        try { LOG_BALLERINA("vkDestroyDevice — TOMBSTONE PILEDRIVER STRAIGHT TO HELL"); vkDestroyDevice(ctx.device_, nullptr); ctx.device_ = VK_NULL_HANDLE; }
+        try { LOG_BALLERINA("vkDestroyDevice — TOMBSTONE PILEDRIVER STRAIGHT TO NULL"); vkDestroyDevice(ctx.device_, nullptr); ctx.device_ = VK_NULL_HANDLE; }
         catch (...) { LOG_ERROR("Device begged for mercy — denied"); }
     }
 
