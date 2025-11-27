@@ -333,7 +333,7 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, bool o
     LOG_TRACE_CAT("RENDERER", "=== STACK BUILD ORDER STEP 2: Security Validation (StoneKey) ===");
     if (kStone1() == 0 || kStone2() == 0) {
         LOG_ERROR_CAT("SECURITY", "StoneKey validation failed — aborting");
-        LOG_FATAL_CAT("RENDERER", "Fatal error in noexcept function"); std::abort();
+        LOG_FATAL_CAT("RENDERER", "Fatal error in noexcept function"); phase9_ballerina();
     }
     LOG_TRACE_CAT("RENDERER", "Step 2 COMPLETE");
 
@@ -399,7 +399,7 @@ LOG_SUCCESS_CAT("RENDERER", "Step 5 COMPLETE — {} full sync sets forged — TR
     LOG_TRACE_CAT("RENDERER", "Pre-construct check: dev=0x{:x}, phys=0x{:x}", reinterpret_cast<uintptr_t>(RTX::g_ctx().device_), reinterpret_cast<uintptr_t>(RTX::g_ctx().physicalDevice_));
     if (RTX::g_ctx().device_ == VK_NULL_HANDLE || RTX::g_ctx().physicalDevice_ == VK_NULL_HANDLE) {
         LOG_FATAL_CAT("RENDERER", "Invalid context for PipelineManager — dev=0x{:x}, phys=0x{:x}", reinterpret_cast<uintptr_t>(RTX::g_ctx().device_), reinterpret_cast<uintptr_t>(RTX::g_ctx().physicalDevice_));
-        LOG_FATAL_CAT("RENDERER", "Fatal error in noexcept function"); std::abort();
+        LOG_FATAL_CAT("RENDERER", "Fatal error in noexcept function"); phase9_ballerina();
     }
 
     LOG_SUCCESS_CAT("RENDERER", "Swapchain FORGED — {} images @ {}x{} — PINK PHOTONS READY", 
@@ -476,7 +476,7 @@ if (RTX::g_ctx().device_ == VK_NULL_HANDLE) {
     VkShaderModule tonemapCompShader = loadShader("assets/shaders/compute/tonemap.spv");
     if (tonemapCompShader == VK_NULL_HANDLE) {
         LOG_FATAL_CAT("RENDERER", "Failed to load tonemap.spv — aborting");
-        LOG_FATAL_CAT("RENDERER", "Fatal error in noexcept function"); std::abort();
+        LOG_FATAL_CAT("RENDERER", "Fatal error in noexcept function"); phase9_ballerina();
     }
 
     // ──────────────────────────────
@@ -803,7 +803,7 @@ void VulkanRenderer::createRTOutputImages() noexcept {
             if (rawView != VK_NULL_HANDLE) vkDestroyImageView(RTX::g_ctx().device_, rawView, nullptr);
             if (rawMemory != VK_NULL_HANDLE) vkFreeMemory(RTX::g_ctx().device_, rawMemory, nullptr);
             if (rawImage != VK_NULL_HANDLE) vkDestroyImage(RTX::g_ctx().device_, rawImage, nullptr);
-            LOG_FATAL_CAT("RENDERER", "Fatal error in createRTOutputImages frame {} — aborting", i); std::abort();
+            LOG_FATAL_CAT("RENDERER", "Fatal error in createRTOutputImages frame {} — aborting", i); phase9_ballerina();
         }
     }
 
@@ -813,7 +813,7 @@ void VulkanRenderer::createRTOutputImages() noexcept {
 
     if (rtOutputImages_.size() != framesInFlight) {
         LOG_FATAL_CAT("RENDERER", "Incomplete RT outputs: expected={}, got={} — device issue?", framesInFlight, rtOutputImages_.size());
-        LOG_FATAL_CAT("RENDERER", "Fatal error in noexcept function"); std::abort();
+        LOG_FATAL_CAT("RENDERER", "Fatal error in noexcept function"); phase9_ballerina();
     }
 
     LOG_SUCCESS_CAT("RENDERER", "RT output images created — {} frames in GENERAL layout (TRANSFER_DST enabled for clears)", framesInFlight);
@@ -1062,7 +1062,7 @@ void VulkanRenderer::createNexusScoreImage(VkCommandPool pool, VkQueue queue) no
     VkImage rawImage = VK_NULL_HANDLE;
     if (vkCreateImage(RTX::g_ctx().device_, &imageInfo, nullptr, &rawImage) != VK_SUCCESS) {
         LOG_FATAL_CAT("RENDERER", "Failed to create NexusScoreImage — aborting render init");
-        std::abort();
+        phase9_ballerina();
     }
 
     VkMemoryRequirements memReqs;
@@ -1072,7 +1072,7 @@ void VulkanRenderer::createNexusScoreImage(VkCommandPool pool, VkQueue queue) no
     if (memType == UINT32_MAX) {
         LOG_FATAL_CAT("RENDERER", "No suitable memory type for NexusScoreImage");
         vkDestroyImage(RTX::g_ctx().device_, rawImage, nullptr);
-        std::abort();
+        phase9_ballerina();
     }
 
     VkMemoryAllocateInfo allocInfo = {};
@@ -1085,14 +1085,14 @@ void VulkanRenderer::createNexusScoreImage(VkCommandPool pool, VkQueue queue) no
         LOG_FATAL_CAT("RENDERER", "Failed to allocate memory for NexusScoreImage");
         vkAllocateMemory(RTX::g_ctx().device_, &allocInfo, nullptr, &rawMemory);
         vkDestroyImage(RTX::g_ctx().device_, rawImage, nullptr);
-        std::abort();
+        phase9_ballerina();
     }
 
     if (vkBindImageMemory(RTX::g_ctx().device_, rawImage, rawMemory, 0) != VK_SUCCESS) {
         LOG_FATAL_CAT("RENDERER", "Failed to bind memory for NexusScoreImage");
         vkFreeMemory(RTX::g_ctx().device_, rawMemory, nullptr);
         vkDestroyImage(RTX::g_ctx().device_, rawImage, nullptr);
-        std::abort();
+        phase9_ballerina();
     }
 
     // Create view
@@ -1110,7 +1110,7 @@ void VulkanRenderer::createNexusScoreImage(VkCommandPool pool, VkQueue queue) no
         LOG_FATAL_CAT("RENDERER", "Failed to create view for NexusScoreImage");
         vkFreeMemory(RTX::g_ctx().device_, rawMemory, nullptr);
         vkDestroyImage(RTX::g_ctx().device_, rawImage, nullptr);
-        std::abort();
+        phase9_ballerina();
     }
 
     // === Wrap in RAII Handles ===
@@ -1448,7 +1448,7 @@ void VulkanRenderer::createCommandBuffers() noexcept {
     size_t numImages = ([](){ uint32_t cnt; vkGetSwapchainImagesKHR(RTX::g_ctx().device_, RTX::SwapchainManager::swapchain(), &cnt, nullptr); return cnt; }());
     if (numImages == 0) {
         LOG_ERROR_CAT("RENDERER", "Invalid swapchain: 0 images — cannot create command buffers");
-        LOG_FATAL_CAT("RENDERER", "Fatal error in noexcept function"); std::abort();
+        LOG_FATAL_CAT("RENDERER", "Fatal error in noexcept function"); phase9_ballerina();
     }
     LOG_INFO_CAT("RENDERER", "Allocating {} command buffers", numImages);
     commandBuffers_.resize(numImages);
@@ -1462,13 +1462,13 @@ void VulkanRenderer::createCommandBuffers() noexcept {
     VkResult result = vkAllocateCommandBuffers(RTX::g_ctx().device_, &allocInfo, commandBuffers_.data());
     if (result != VK_SUCCESS) {
         LOG_ERROR_CAT("RENDERER", "vkAllocateCommandBuffers failed: {}", static_cast<int>(result));
-        LOG_FATAL_CAT("RENDERER", "Fatal error in noexcept function"); std::abort();
+        LOG_FATAL_CAT("RENDERER", "Fatal error in noexcept function"); phase9_ballerina();
     }
     LOG_TRACE_CAT("RENDERER", "Allocated command buffers — data=0x{:x}", reinterpret_cast<uintptr_t>(commandBuffers_.data()));
     for (size_t i = 0; i < commandBuffers_.size(); ++i) {
         if (commandBuffers_[i] == VK_NULL_HANDLE) {
             LOG_ERROR_CAT("RENDERER", "Invalid command buffer at index {}", i);
-            LOG_FATAL_CAT("RENDERER", "Fatal error in noexcept function"); std::abort();
+            LOG_FATAL_CAT("RENDERER", "Fatal error in noexcept function"); phase9_ballerina();
         }
         LOG_TRACE_CAT("RENDERER", "commandBuffers_[{}]: 0x{:x}", i, reinterpret_cast<uint64_t>(commandBuffers_[i]));
     }

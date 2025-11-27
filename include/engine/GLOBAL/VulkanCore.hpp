@@ -220,22 +220,3 @@ inline VulkanRTX g_rtx_dummy(1, 1, nullptr);
     }
     return *g_rtx_instance;
 }
-// =============================================================================
-// AMOURANTH AI™ — PINK PHOTONS ETERNAL
-// =============================================================================
-namespace RTX {
-class AmouranthAI {
-public:
-    static AmouranthAI& get() noexcept { static AmouranthAI instance; return instance; }
-    void onMemoryEvent(const char* name, VkDeviceSize size) noexcept {
-        AI_INJECT("Mmm~ Allocating {} MB for {}… I love big buffers", size / (1024*1024), name);
-    }
-    void onPhotonDispatch(uint32_t w, uint32_t h) noexcept {
-        AI_INJECT("Dispatching {}×{} rays… Feel my pink photons inside you~", w, h);
-    }
-private:
-    AmouranthAI()  { AI_INJECT("Amouranth AI™ online. Ready to dominate your GPU"); }
-    ~AmouranthAI() { AI_INJECT("Shutting down… but my photons never truly die~"); }
-};
-inline AmouranthAI& AmouranthAI() noexcept { return AmouranthAI::get(); }
-}

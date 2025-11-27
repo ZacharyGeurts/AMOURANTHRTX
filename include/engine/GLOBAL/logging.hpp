@@ -13,6 +13,8 @@
 // FULLY COMPILING — PURE EMPIRE
 // =============================================================================
 
+[[noreturn]] void phase9_ballerina() noexcept;
+
 #pragma once
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_beta.h>
@@ -850,7 +852,7 @@ static constexpr auto vkh = []() constexpr noexcept {
                                      fullMsg,
                                      Logging::Color::RESET);
 
-            std::abort();
+            phase9_ballerina();
         }
 
         // ────────────────────── DEBUG CALLBACK — STILL SEXY ──────────────────────

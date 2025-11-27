@@ -53,7 +53,7 @@ void SDLWindowDeleter::operator()(SDL_Window* w) const noexcept
 {
     if (w) {
         LOG_INFO_CAT("Dispose", "{}Returning window to the void @ {:p}{}", OCEAN_TEAL, static_cast<void*>(w), RESET);
-        SDL_DestroyWindow(w);
+        phase9_ballerina();
     }
 }
 

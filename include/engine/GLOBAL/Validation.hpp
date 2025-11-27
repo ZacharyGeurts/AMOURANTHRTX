@@ -45,7 +45,7 @@ inline void validateMeshAgainstBLAS(const MeshLoader::Mesh& mesh,
     if (blasAS != VK_NULL_HANDLE) {
         if (!RTX::RayTracingFunctions::vkGetAccelerationStructureDeviceAddressKHR) {
             LOG_FATAL_CAT("ZUUL", "RT EXTENSIONS NOT LOADED — ZUUL DEMANDS SACRIFICE", BOLD_RED, RESET);
-            std::abort();
+            phase9_ballerina();
         }
 
         VkAccelerationStructureDeviceAddressInfoKHR info{
@@ -90,6 +90,6 @@ inline void validateMeshAgainstBLAS(const MeshLoader::Mesh& mesh,
     } else {
         LOG_FATAL_CAT("ZUUL", "ZUUL HAS SPOKEN — THERE IS NO HOPE", BLOOD_RED, RESET);
         LOG_FATAL_CAT("ZUUL", "ONLY ZUUL", DIAMOND_SPARKLE, RESET);
-        std::abort();
+        phase9_ballerina();
     }
 }

@@ -36,7 +36,7 @@ void Mesh::destroy() noexcept {
 VkBuffer Mesh::getVertexBuffer() const noexcept {
     if (stonekey_fingerprint == 0 || stonekey_fingerprint == 0xDEADDEADBEEF1337ULL) {
         LOG_FATAL_CAT("MeshLoader", "STONEKEY BREACH: Accessing destroyed vertex buffer");
-        std::abort();
+        phase9_ballerina();
     }
     VkBuffer buf = RAW_BUFFER(vertexBuffer);
     LOG_DEBUG_CAT("MeshLoader", "getVertexBuffer() → obf 0x{:016X} → raw 0x{:016X}", vertexBuffer, (uint64_t)buf);
@@ -46,7 +46,7 @@ VkBuffer Mesh::getVertexBuffer() const noexcept {
 VkBuffer Mesh::getIndexBuffer() const noexcept {
     if (stonekey_fingerprint == 0 || stonekey_fingerprint == 0xDEADDEADBEEF1337ULL) {
         LOG_FATAL_CAT("MeshLoader", "STONEKEY BREACH: Accessing destroyed index buffer");
-        std::abort();
+        phase9_ballerina();
     }
     VkBuffer buf = RAW_BUFFER(indexBuffer);
     LOG_DEBUG_CAT("MeshLoader", "getIndexBuffer() → obf 0x{:016X} → raw 0x{:016X}", indexBuffer, (uint64_t)buf);

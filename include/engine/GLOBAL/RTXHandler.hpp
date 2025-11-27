@@ -51,8 +51,6 @@ class VulkanRenderer;
 
 struct Camera;
 
-[[noreturn]] void phase9_ballerina() noexcept;
-
 // =============================================================================
 // PINK PHOTON LITERALS
 // =============================================================================

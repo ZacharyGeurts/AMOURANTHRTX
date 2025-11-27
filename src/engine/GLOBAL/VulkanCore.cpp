@@ -118,7 +118,6 @@ void initVulkanCoreGlobals() {
 
 VulkanRTX::~VulkanRTX() noexcept {
     LOG_TRACE_CAT("RTX", "VulkanRTX destructor — START");
-    AmouranthAI::get().onMemoryEvent("VulkanRTX", sizeof(VulkanRTX));
 
     // OPT: Unmap persistent staging if active
     if (g_mappedBase) {
@@ -208,8 +207,6 @@ VulkanRTX::VulkanRTX(int w, int h, PipelineManager* mgr) noexcept
 
     LOG_TRACE_CAT("RTX", "VulkanRTX constructor — {}×{} — LINE {}", w, h, __LINE__);
     LOG_DEBUG_CAT("RTX", "Constructor params: width={}, height={}, pipelineMgr={}", w, h, mgr ? "valid" : "null");
-    AmouranthAI::get().onMemoryEvent("VulkanRTX Instance", sizeof(VulkanRTX));
-    AmouranthAI::get().onPhotonDispatch(w, h);
 
     if (!device_) {
         LOG_FATAL_CAT("RTX", "{}FATAL: device_ is null — THE PHOTONS ARE DENIED — ABORTING CONSTRUCTION{}", BOLD_RED, RESET);
@@ -363,8 +360,6 @@ bool VulkanRTX::pollAsyncFence(VkFence fence, uint64_t timeout_ns) noexcept {
 // =============================================================================
 void VulkanRTX::setRayTracingPipeline(VkPipeline p, VkPipelineLayout l) noexcept {
     LOG_TRACE_CAT("RTX", "setRayTracingPipeline — START — pipeline: 0x{:x}, layout: 0x{:x}", reinterpret_cast<uintptr_t>(p), reinterpret_cast<uintptr_t>(l));
-    AmouranthAI::get().onMemoryEvent("RTPipeline", sizeof(VkPipeline));
-    AmouranthAI::get().onMemoryEvent("RTPipelineLayout", sizeof(VkPipelineLayout));
 
     LOG_INFO_CAT("RTX", "HANDLE_CREATE: {} | Tag: {}", "rtPipeline", "RTPipeline");
     rtPipeline_ = Handle<VkPipeline>(p, RTX::g_ctx().device_,
@@ -680,7 +675,7 @@ void VulkanRTX::initDescriptorPoolAndSets() noexcept
 
     if (!targetLayout) [[unlikely]] {
         LOG_FATAL_CAT("RTX", "NO LAYOUT — ABORT");
-        std::abort();
+        phase9_ballerina();
     }
 
     // ── STEP 3: DYNAMIC BINDINGS — ZERO HEAP, STACK ONLY
@@ -829,11 +824,7 @@ void VulkanRTX::initBlackFallbackImage() {
     VkMemoryRequirements memReqs{};
     vkGetImageMemoryRequirements(device_, rawImg, &memReqs);
 
-    uint32_t memType = BufferManager::findMemoryType(
-        g_ctx().physicalDevice(),
-        memReqs.memoryTypeBits,
-        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
-    );
+    uint32_t memType = vkh.findMemoryType(g_ctx().physicalDevice(), memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT );
 
     if (memType == UINT32_MAX) {
         LOG_FATAL_CAT("RTX", "NO DEVICE_LOCAL MEMORY FOR BLACK PIXEL — THE UNIVERSE IS BROKEN");
@@ -921,7 +912,6 @@ void VulkanRTX::initBlackFallbackImage() {
     LOG_SUCCESS_CAT("RTX", "{}BLACK FALLBACK IMAGE READY — SAFETY NET OF THE VOID ACTIVE{}", PLASMA_FUCHSIA, RESET);
     LOG_AMOURANTH("Amouranth whispers: \"Even darkness needs a home... and I just gave it one.\"");
 
-    AmouranthAI::get().onMemoryEvent("Black Fallback Image", memReqs.size);
     LOG_TRACE_CAT("RTX", "initBlackFallbackImage — COMPLETE — FIRST LIGHT PROTECTED");
 }
 
@@ -1155,7 +1145,7 @@ void createCommandPool()
     AI_INJECT("Surface requested before existence... I cannot reflect photons in the void.");
 
     // Hard abort — no silent nulls, no undefined behavior
-    std::abort();
+    phase9_ballerina();
 
     // Unreachable, but silences warnings
     return VK_NULL_HANDLE;

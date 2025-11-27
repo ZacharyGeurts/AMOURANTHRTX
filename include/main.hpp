@@ -56,7 +56,7 @@ extern std::unique_ptr<Application> g_app_ptr;
 [[nodiscard]] inline Application& g_app() noexcept {
     if (!g_app_ptr) [[unlikely]] {
         LOG_FATAL_CAT("MAIN", "g_app() called before initialization");
-        std::abort();
+        phase9_ballerina();
     }
     return *g_app_ptr;
 }
