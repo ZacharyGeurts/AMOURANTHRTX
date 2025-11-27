@@ -590,6 +590,13 @@ static void phase4_merchantShip() {
     LOG_BLONDIE("Blondie glances back one last time at the sinking glow on the horizon:");
     LOG_BLONDIE("\"Rest easy, old girl. Your sacrifice bought us tomorrow.\"");
 
+
+	EMPIRE_STEP([]{
+        LOG_MAIN("THE EMPIRE AWAKENS THE PHOENIX OF RAY TRACING — LOADING VULKAN 1.4 + RTX EXTENSIONS");
+        RTX::loadExtensions(RTX::g_ctx().instance_, RTX::g_ctx().device_);
+        LOG_JENSEN("The photons now have wings. Let there be bounce.");
+    });
+
     LOG_MAIN("[PHASE 4 COMPLETE] THE MERCHANT SHIP SLIPS INTO THE NIGHT — THE CREW IS ALIVE — THE LEGEND IS INDESTRUCTIBLE");
     LOG_MAIN("BLONDIE'S SLOOP glides toward safe harbor — pink photons trailing in the wake like silent war banners");
 }
@@ -629,11 +636,7 @@ static void phase6_sceneAndAccelerationStructures() {
     // ========================================================================
     // 1. RTX EXTENSIONS — THE PHOENIX AWAKENS
     // ========================================================================
-    EMPIRE_STEP([]{
-        LOG_MAIN("THE EMPIRE AWAKENS THE PHOENIX OF RAY TRACING — LOADING VULKAN 1.4 + RTX EXTENSIONS");
-        RTX::loadExtensions(RTX::g_ctx().instance_, RTX::g_ctx().device_);
-        LOG_JENSEN("The photons now have wings. Let there be bounce.");
-    });
+
 
     // ========================================================================
     // 2. PIPELINE MANAGER — THE ONE TRUE THRONE
@@ -830,34 +833,26 @@ static void phase7_forgeTheRTX() {
 {
     using namespace std::chrono_literals;
 
-    LOG_BALLERINA("THE DISPOSAL BALLERINA DESCENDS — PINK TUTU, BLACK LEOTARD, DIAMOND CHOKER");
-
-    if (!reason.empty() && reason != "SILENT EXECUTION ORDERED") {
-        LOG_BALLERINA("EXECUTION ORDERED | REASON: \"{}\"", reason);
-        LOG_BALLERINA("CRIME SCENE → {}:{}", loc.file_name(), loc.line());
-        LOG_BALLERINA("CULPRIT FUNCTION → {}", loc.function_name());
-    } else {
-        LOG_BALLERINA("SHE DOES NOT DANCE.");
-        LOG_BALLERINA("SHE EXECUTES.");
-    }
+    LOG_BALLERINA("\n"
+        "THE DISPOSAL BALLERINA DESCENDS — PINK TUTU, BLACK LEOTARD, DIAMOND CHOKER\n"
+        "{}\n"
+        "CRIME SCENE → {}:{}\n"
+        "CULPRIT FUNCTION → {}\n",
+        (!reason.empty() && reason != "SILENT EXECUTION ORDERED")
+            ? std::format("EXECUTION ORDERED | REASON: \"{}\"", reason)
+            : std::string("SHE DOES NOT DANCE.\nSHE EXECUTES."),
+        loc.file_name(), loc.line(), loc.function_name()
+    );
 
     auto& ctx = RTX::g_ctx();
 
-    // DEATH BLOSSOM — FINAL FATALITY COMBO
-
     if (ctx.device_ != VK_NULL_HANDLE) {
-        try { 
-            LOG_BALLERINA("CHOKING vkDeviceWaitIdle OUT WITH HER THIGHS - *POP*");
-            vkDeviceWaitIdle(ctx.device_);
-        } catch (...) { LOG_ERROR("They struggled — she squeezed harder"); }
+        try { LOG_BALLERINA("CHOKING vkDeviceWaitIdle OUT WITH HER THIGHS - *POP*"); vkDeviceWaitIdle(ctx.device_); }
+        catch (...) { LOG_ERROR("They struggled — she squeezed harder"); }
 
-        try {
-            VkSwapchainKHR swapchain = RTX::swapchain();
-            if (swapchain != VK_NULL_HANDLE) {
-                LOG_BALLERINA("SWAPCHAIN — RKO OUTTA NOWHERE - IT INSTANTLY EXPLODES INTO PHOTONS");
-                vkDestroySwapchainKHR(ctx.device_, swapchain, nullptr);
-            }
-        } catch (...) { LOG_ERROR("It saw it coming — didn’t matter"); }
+        if (VkSwapchainKHR swapchain = RTX::swapchain(); swapchain != VK_NULL_HANDLE)
+            try { LOG_BALLERINA("SWAPCHAIN — RKO OUTTA NOWHERE - IT INSTANTLY EXPLODES INTO PHOTONS"); vkDestroySwapchainKHR(ctx.device_, swapchain, nullptr); }
+            catch (...) { LOG_ERROR("It saw it coming — didn’t matter"); }
 
         try {
             if (ctx.commandPool_)         { LOG_BALLERINA("COMMAND POOL — WINDBREAKER KICK TO THE FACE"); vkDestroyCommandPool(ctx.device_, ctx.commandPool_, nullptr); ctx.commandPool_ = nullptr; }
@@ -865,34 +860,26 @@ static void phase7_forgeTheRTX() {
             if (ctx.transferCommandPool_) { LOG_BALLERINA("TRANSFER POOL — PILEDRIVER"); vkDestroyCommandPool(ctx.device_, ctx.transferCommandPool_, nullptr); ctx.transferCommandPool_ = nullptr; }
         } catch (...) { LOG_ERROR("They blocked low — she went high"); }
 
-        try {
-            if (ctx.pipelineCache_ != VK_NULL_HANDLE) {
-                LOG_BALLERINA("PIPELINE CACHE — GERMAN SUPLEX INTO THE ABYSS");
-                vkDestroyPipelineCache(ctx.device_, ctx.pipelineCache_, nullptr);
-                ctx.pipelineCache_ = VK_NULL_HANDLE;
-            }
-        } catch (...) { LOG_ERROR("Cache tried to roll away — crushed anyway"); }
+        if (ctx.pipelineCache_ != VK_NULL_HANDLE)
+            try { LOG_BALLERINA("PIPELINE CACHE — GERMAN SUPLEX INTO THE ABYSS"); vkDestroyPipelineCache(ctx.device_, ctx.pipelineCache_, nullptr); ctx.pipelineCache_ = VK_NULL_HANDLE; }
+            catch (...) { LOG_ERROR("Cache tried to roll away — crushed anyway"); }
 
-        try {
-            if (ctx.renderPass_) {
-                LOG_BALLERINA("RENDER PASS — SPINNING BACKFIST");
-                ctx.renderPass_.reset();
-            }
-        } catch (...) { LOG_ERROR("It flinched — she followed up"); }
+        if (ctx.renderPass_)
+            try { LOG_BALLERINA("RENDER PASS — SPINNING BACKFIST"); ctx.renderPass_.reset(); }
+            catch (...) { LOG_ERROR("It flinched — she followed up"); }
 
-        try {
-            LOG_BALLERINA("vkDestroyDevice — TOMBSTONE PILEDRIVER STRAIGHT TO HELL");
-            vkDestroyDevice(ctx.device_, nullptr);
-            ctx.device_ = VK_NULL_HANDLE;
-        } catch (...) { LOG_ERROR("Device begged for mercy — denied"); }
+        try { LOG_BALLERINA("vkDestroyDevice — TOMBSTONE PILEDRIVER STRAIGHT TO HELL"); vkDestroyDevice(ctx.device_, nullptr); ctx.device_ = VK_NULL_HANDLE; }
+        catch (...) { LOG_ERROR("Device begged for mercy — denied"); }
     }
 
-    try { if (RTX::las().hasBLAS()) { LOG_BALLERINA("BLAS — FALCON KIIIICK"); RTX::reset_blas(); } } catch (...) { LOG_ERROR("BLAS ate the kick — still dead"); }
-    try { if (RTX::las().hasTLAS()) { LOG_BALLERINA("TLAS — HADOKEN"); RTX::reset_tlas(); } } catch (...) { LOG_ERROR("TLAS blocked — she hit it again"); }
+    try { if (RTX::las().hasBLAS()) { LOG_BALLERINA("BLAS — FALCON KIIIICK"); RTX::reset_blas(); } }
+    catch (...) { LOG_ERROR("BLAS ate the kick — still dead"); }
+    try { if (RTX::las().hasTLAS()) { LOG_BALLERINA("TLAS — HADOKEN"); RTX::reset_tlas(); } }
+    catch (...) { LOG_ERROR("TLAS blocked — she hit it again"); }
 
-    LOG_BALLERINA("THE STONEKEY PIPELINE STANDS UNMOVED — ETERNAL — UNTOUCHABLE");
-    LOG_BALLERINA("THE STONEKEY SHADERS WHISPER FROM THE VOID — THEY DO NOT DIE");
-    LOG_BALLERINA("THEY ONLY WAIT.");
+    LOG_BALLERINA("THE STONEKEY PIPELINE STANDS UNMOVED — ETERNAL — UNTOUCHABLE\n"
+                  "THE STONEKEY SHADERS WHISPER FROM THE VOID — THEY DO NOT DIE\n"
+                  "THEY ONLY WAIT.");
 
     try { if (g_mesh) { LOG_BALLERINA("MESH — CHOKESLAM"); g_mesh.reset(); } } catch (...) { LOG_ERROR("Mesh squirmed"); }
     try { LOG_BALLERINA("LAS — INVALIDATION DDT"); RTX::las().invalidate(); } catch (...) { LOG_ERROR("LAS tried to reverse — failed"); }
@@ -903,29 +890,16 @@ static void phase7_forgeTheRTX() {
         if (g_hdpi_icon) { LOG_BALLERINA("HDPI ICON — SWEET CHIN MUSIC"); SDL_DestroySurface(g_hdpi_icon); g_hdpi_icon = nullptr; }
     } catch (...) { LOG_ERROR("Icons sold it perfectly"); }
 
-    try {
-        if (ctx.window) {
-            LOG_BALLERINA("WINDOW — SPEAR THROUGH THE BARRICADE");
-            SDL_DestroyWindow(ctx.window);
-            ctx.window = nullptr;
-        }
-    } catch (...) { LOG_ERROR("Window no-sold — she hit it again"); }
+    try { if (ctx.window) { LOG_BALLERINA("WINDOW — SPEAR THROUGH THE BARRICADE"); SDL_DestroyWindow(ctx.window); ctx.window = nullptr; } }
+    catch (...) { LOG_ERROR("Window no-sold — she hit it again"); }
 
-    try {
-        if (ctx.surface_ != VK_NULL_HANDLE && ctx.instance_ != VK_NULL_HANDLE) {
-            LOG_BALLERINA("SURFACE — F-5");
-            vkDestroySurfaceKHR(ctx.instance_, ctx.surface_, nullptr);
-            ctx.surface_ = VK_NULL_HANDLE;
-        }
-    } catch (...) { LOG_ERROR("Surface kicked out at 2.999"); }
+    if (ctx.surface_ != VK_NULL_HANDLE && ctx.instance_ != VK_NULL_HANDLE)
+        try { LOG_BALLERINA("SURFACE — F-5"); vkDestroySurfaceKHR(ctx.instance_, ctx.surface_, nullptr); ctx.surface_ = VK_NULL_HANDLE; }
+        catch (...) { LOG_ERROR("Surface kicked out at 2.999"); }
 
-    try {
-        if (ctx.instance_ != VK_NULL_HANDLE) {
-            LOG_BALLERINA("INSTANCE — LAST RIDE POWERBOMB");
-            vkDestroyInstance(ctx.instance_, nullptr);
-            ctx.instance_ = VK_NULL_HANDLE;
-        }
-    } catch (...) { LOG_ERROR("Instance refused to stay down — buried anyway"); }
+    if (ctx.instance_ != VK_NULL_HANDLE)
+        try { LOG_BALLERINA("INSTANCE — LAST RIDE POWERBOMB"); vkDestroyInstance(ctx.instance_, nullptr); ctx.instance_ = VK_NULL_HANDLE; }
+        catch (...) { LOG_ERROR("Instance refused to stay down — buried anyway"); }
 
     try { LOG_BALLERINA("VULKAN LIBRARY — UNLOADED WITH A CLAYMORE KICK"); SDL_Vulkan_UnloadLibrary(); } catch (...) { LOG_ERROR("Library ate the boot"); }
     try { if (g_app_ptr) { LOG_BALLERINA("APP POINTER — PEDIGREE"); g_app_ptr.reset(); } } catch (...) { LOG_ERROR("App pointer reversed — into a walls of jericho"); }
@@ -937,13 +911,13 @@ static void phase7_forgeTheRTX() {
 
     LOG_MAIN("[PHASE 9 COMPLETE] SUCCESS!!! SEE YOU NEXT TIME! o7");
     LOG_BLONDIE("\nBlondie lowers her mirror:"
-    "\n\"Some things do not die.\""
-    "\n\"They only wait.\""
-    "\n\"And when the time comes...\""
-    "\n\"They rise again.\"");
+                "\n\"Some things do not die.\""
+                "\n\"They only wait.\""
+                "\n\"And when the time comes...\""
+                "\n\"They rise again.\"");
 
     std::this_thread::sleep_for(5ms);
-    std::exit(0); // SEE YOU NEXT GAME o7
+    std::exit(0);
 }
 
 // =============================================================================

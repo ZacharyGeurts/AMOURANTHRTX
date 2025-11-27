@@ -154,7 +154,6 @@ private:
 
     // Private methods — 100% StoneKey compliant
     void cacheDeviceProperties();
-    void loadExtensions();
     [[nodiscard]] VkShaderModule loadShader(const std::string& path) const;
 
     static constexpr VkDeviceSize align_up(VkDeviceSize size, VkDeviceSize alignment) noexcept {

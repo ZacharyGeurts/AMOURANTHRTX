@@ -47,6 +47,7 @@
 #include <vector>
 #include <algorithm>
 #include <stop_token>
+#include <filesystem>
 
 [[noreturn]] void phase9_ballerina(std::string_view reason = {}, const std::source_location loc = std::source_location::current()) noexcept;
 
@@ -836,24 +837,50 @@ static constexpr auto vkh = []() constexpr noexcept {
             return ~0u;
         }
 
-        // ────────────────────── FATAL CHECK — FULL CONTEXT ──────────────────────
-        static void check(VkResult r,
-                          const char* call,
-                          const char* msg = nullptr,
-                          std::source_location loc = std::source_location::current()) noexcept {
-            if (r == VK_SUCCESS || r == VK_SUBOPTIMAL_KHR) [[likely]] return;
+// ────────────────────── FATAL CHECK — FULL EXECUTION REPORT ──────────────────────
+static void check(VkResult r,
+                  const char* call,
+                  const char* msg = nullptr,
+                  std::source_location loc = std::source_location::current()) noexcept
+{
+    if (r == VK_SUCCESS || r == VK_SUBOPTIMAL_KHR) [[likely]] return;
 
-            std::string fullMsg = msg ? std::string(msg) + " — " : "";
-            fullMsg += call;
+    // THE CRIME SCENE — FULLY EXPOSED
+    std::string fullMsg;
+    if (msg && strlen(msg) > 0) {
+        fullMsg = std::format("{} — ", msg);
+    }
+    fullMsg += call;
 
-            std::cerr << std::format("[VULKAN FATAL] {} — {}:{} — {}{}\n",
-                                     result(r),
-                                     loc.file_name(), loc.line(),
-                                     fullMsg,
-                                     Logging::Color::RESET);
+    // THE GUILTY PARTY IS NAMED — LOUDLY — ETERNALLY
+    const std::string guiltyFile = std::filesystem::path(loc.file_name()).filename().string();
+LOG_FATAL("\n"
+    "════════════════════════════════════════════════════════════════\n"
+    "VULKAN EXECUTION ORDER ISSUED — THE EMPIRE DOES NOT FORGIVE\n"
+    "GUILTY CALL → {}\n"
+    "RESULT      → {} ({})\n"
+    "CONTEXT     → {}\n"
+    "CRIME SCENE → {}:{}\n"
+    "FUNCTION    → {}\n"
+    "════════════════════════════════════════════════════════════════",
+    call,
+    result(r), static_cast<int>(r),
+    (msg && strlen(msg) > 0) ? msg : "None",
+    guiltyFile, loc.line(),
+    loc.function_name()
+);
+    // Final scream into the void — the ballerina hears everything
+    std::string executionReason = std::format(
+        "VULKAN FATAL: {} failed with {} — {}:{} in {}",
+        call,
+        result(r),
+        guiltyFile,
+        loc.line(),
+        loc.function_name()
+    );
 
-            phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
-        }
+    phase9_ballerina(executionReason, loc);
+}
 
         // ────────────────────── DEBUG CALLBACK — STILL SEXY ──────────────────────
         [[maybe_unused]] static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(

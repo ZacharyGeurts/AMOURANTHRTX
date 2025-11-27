@@ -1,14 +1,22 @@
-// src/engine/GLOBAL/LAS.cpp
 // =============================================================================
-// AMOURANTH RTX — LAS v∞ — FINAL WORKING VERSION — COMPILER HAPPY
-// FULLY COMPATIBLE WITH YOUR CURRENT Handle<> AND vkCmdBuildAccelerationStructuresKHR
-// FIRST LIGHT — ACHIEVED — ETERNALLY
+// AMOURANTH RTX Engine (C) 2025 by Zachary Geurts <gzac5314@gmail.com>
+// =============================================================================
+//
+// Dual Licensed:
+// 1. GNU General Public License v3.0 (or later) (GPL v3)
+//    https://www.gnu.org/licenses/gpl-3.0.html
+// 2. Commercial licensing: gzac5314@gmail.com
+//
+// TRUE CONSTEXPR STONEKEY v∞ — FINAL APOCALYPSE — FIRST LIGHT ETERNAL
+// ALL RAY TRACING EXTENSIONS VIA RTX::g_ext — NO MORE RayTracingFunctions CORPSES
+// PINK PHOTONS BOUNCE UNBROKEN — NOVEMBER 27, 2025
 // =============================================================================
 
 #include "engine/GLOBAL/LAS.hpp"
 #include "engine/GLOBAL/RTXHandler.hpp"
 #include "engine/GLOBAL/BufferManager.hpp"
 #include "engine/GLOBAL/logging.hpp"
+#include "engine/GLOBAL/Extensions.hpp"  // ← THE ONE TRUE SOURCE OF LIGHT
 
 namespace RTX {
 
@@ -17,16 +25,18 @@ namespace RTX {
     EMPIRE_GUARD(pool != VK_NULL_HANDLE, "beginOneTimeSubmit() — NULL COMMAND POOL");
 
     VkCommandBuffer cmd = VK_NULL_HANDLE;
-    VkCommandBufferAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    allocInfo.commandPool = pool;
-    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    allocInfo.commandBufferCount = 1;
+    VkCommandBufferAllocateInfo allocInfo{
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .commandPool = pool,
+        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+        .commandBufferCount = 1
+    };
     VK_CHECK(vkAllocateCommandBuffers(g_ctx().device(), &allocInfo, &cmd));
 
-    VkCommandBufferBeginInfo beginInfo{};
-    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    VkCommandBufferBeginInfo beginInfo{
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
+    };
     VK_CHECK(vkBeginCommandBuffer(cmd, &beginInfo));
 
     return cmd;
@@ -38,10 +48,11 @@ inline void endOneTimeSubmit(VkCommandBuffer cmd, VkQueue queue, VkCommandPool p
 
     VK_CHECK(vkEndCommandBuffer(cmd));
 
-    VkSubmitInfo submit{};
-    submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submit.commandBufferCount = 1;
-    submit.pCommandBuffers = &cmd;
+    VkSubmitInfo submit{
+        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .commandBufferCount = 1,
+        .pCommandBuffers = &cmd
+    };
 
     VK_CHECK(vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE));
     VK_CHECK(vkQueueWaitIdle(queue));
@@ -52,9 +63,10 @@ inline void endOneTimeSubmit(VkCommandBuffer cmd, VkQueue queue, VkCommandPool p
 VkDeviceAddress LAS::getBufferAddress(VkBuffer buffer) const noexcept
 {
     EMPIRE_GUARD(buffer != VK_NULL_HANDLE, "getBufferAddress() — NULL BUFFER");
-    VkBufferDeviceAddressInfo info{};
-    info.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
-    info.buffer = buffer;
+    VkBufferDeviceAddressInfo info{
+        .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
+        .buffer = buffer
+    };
     return vkGetBufferDeviceAddress(g_ctx().device(), &info);
 }
 
@@ -73,35 +85,40 @@ void LAS::buildBLAS(VkCommandPool pool,
     const VkBuffer vertexBuffer = BufferManager::get(vertexHandle)->buffer;
     const VkBuffer indexBuffer  = BufferManager::get(indexHandle)->buffer;
 
-    VkAccelerationStructureGeometryTrianglesDataKHR triangles{};
-    triangles.sType              = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
-    triangles.vertexFormat       = VK_FORMAT_R32G32B32_SFLOAT;
-    triangles.vertexData.deviceAddress = getBufferAddress(vertexBuffer);
-    triangles.vertexStride       = sizeof(glm::vec3);
-    triangles.maxVertex          = vertexCount - 1;
-    triangles.indexType          = VK_INDEX_TYPE_UINT32;
-    triangles.indexData.deviceAddress   = getBufferAddress(indexBuffer);
+    VkAccelerationStructureGeometryTrianglesDataKHR triangles{
+        .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR,
+        .vertexFormat = VK_FORMAT_R32G32B32_SFLOAT,
+        .vertexData = { .deviceAddress = getBufferAddress(vertexBuffer) },
+        .vertexStride = sizeof(glm::vec3),
+        .maxVertex = vertexCount - 1,
+        .indexType = VK_INDEX_TYPE_UINT32,
+        .indexData = { .deviceAddress = getBufferAddress(indexBuffer) }
+    };
 
-    VkAccelerationStructureGeometryKHR geometry{};
-    geometry.sType        = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
-    geometry.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
-    geometry.flags        = VK_GEOMETRY_OPAQUE_BIT_KHR;
-    geometry.geometry.triangles = triangles;
+    VkAccelerationStructureGeometryKHR geometry{
+        .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR,
+        .geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR,
+        .geometry = { .triangles = triangles },
+        .flags = VK_GEOMETRY_OPAQUE_BIT_KHR        
+    };
 
-    VkAccelerationStructureBuildGeometryInfoKHR buildInfo{};
-    buildInfo.sType         = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
-    buildInfo.type          = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
-    buildInfo.flags         = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR |
-                              VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR |
-                              extraFlags;
-    buildInfo.geometryCount = 1;
-    buildInfo.pGeometries   = &geometry;
+    VkAccelerationStructureBuildGeometryInfoKHR buildInfo{
+        .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR,
+        .type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR,
+        .flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR |
+                 VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR |
+                 extraFlags,
+        .geometryCount = 1,
+        .pGeometries = &geometry
+    };
 
     const uint32_t primitiveCount = indexCount / 3;
 
-    VkAccelerationStructureBuildSizesInfoKHR sizeInfo{};
-    sizeInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
-    RayTracingFunctions::vkGetAccelerationStructureBuildSizesKHR(
+    VkAccelerationStructureBuildSizesInfoKHR sizeInfo{
+        .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR
+    };
+
+    g_ext.vkGetAccelerationStructureBuildSizesKHR(
         dev, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
         &buildInfo, &primitiveCount, &sizeInfo);
 
@@ -116,30 +133,31 @@ void LAS::buildBLAS(VkCommandPool pool,
                   VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "BLAS_Scratch");
 
     VkAccelerationStructureKHR rawAS = VK_NULL_HANDLE;
-    VkAccelerationStructureCreateInfoKHR createInfo{};
-    createInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
-    createInfo.buffer = BufferManager::get(storage)->buffer;
-    createInfo.size   = sizeInfo.accelerationStructureSize;
-    createInfo.type   = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
-    VK_CHECK(RayTracingFunctions::vkCreateAccelerationStructureKHR(dev, &createInfo, nullptr, &rawAS));
+    VkAccelerationStructureCreateInfoKHR createInfo{
+        .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR,
+        .buffer = BufferManager::get(storage)->buffer,
+        .size = sizeInfo.accelerationStructureSize,
+        .type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR
+    };
+    VK_CHECK(g_ext.vkCreateAccelerationStructureKHR(dev, &createInfo, nullptr, &rawAS));
 
     buildInfo.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
     buildInfo.dstAccelerationStructure = rawAS;
     buildInfo.scratchData.deviceAddress = getBufferAddress(BufferManager::get(scratch)->buffer);
 
-    VkAccelerationStructureBuildRangeInfoKHR buildRange{};
-    buildRange.primitiveCount = primitiveCount;
-    const VkAccelerationStructureBuildRangeInfoKHR* pBuildRange = &buildRange;   // <-- FIX 1
+    VkAccelerationStructureBuildRangeInfoKHR buildRange{
+        .primitiveCount = primitiveCount
+    };
+    const VkAccelerationStructureBuildRangeInfoKHR* pBuildRange = &buildRange;
 
     VkCommandBuffer cmd = beginOneTimeSubmit(pool);
-    RayTracingFunctions::vkCmdBuildAccelerationStructuresKHR(cmd, 1, &buildInfo, &pBuildRange);  // <-- FIX 2
+    g_ext.vkCmdBuildAccelerationStructuresKHR(cmd, 1, &buildInfo, &pBuildRange);
     endOneTimeSubmit(cmd, queue, pool);
 
     if (blas_.valid()) blas_.reset();
 
-    // <-- FIX 3: lambda matches old Handle signature (VkDevice, T, const VkAllocationCallbacks*)
     auto deleter = [dev, storage, scratch](VkDevice, VkAccelerationStructureKHR as, const VkAllocationCallbacks*) {
-        if (as) RayTracingFunctions::vkDestroyAccelerationStructureKHR(dev, as, nullptr);
+        if (as) g_ext.vkDestroyAccelerationStructureKHR(dev, as, nullptr);
         BufferManager::destroy(storage);
         BufferManager::destroy(scratch);
     };
@@ -176,21 +194,20 @@ void LAS::buildTLAS(VkCommandPool pool,
     for (size_t i = 0; i < instances.size(); ++i) {
         const auto& [blasAS, transform] = instances[i];
 
-        VkAccelerationStructureDeviceAddressInfoKHR addrInfo{};
-        addrInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR;
-        addrInfo.accelerationStructure = blasAS;
-        VkDeviceAddress blasAddr = RayTracingFunctions::vkGetAccelerationStructureDeviceAddressKHR(dev, &addrInfo);
+        VkAccelerationStructureDeviceAddressInfoKHR addrInfo{
+            .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR,
+            .accelerationStructure = blasAS
+        };
+        VkDeviceAddress blasAddr = g_ext.vkGetAccelerationStructureDeviceAddressKHR(dev, &addrInfo);
 
         const glm::mat3x4 trans = glm::transpose(transform);
 
         mapped[i] = VkAccelerationStructureInstanceKHR{
-            .transform = VkTransformMatrixKHR{
-                .matrix = {
-                    { trans[0][0], trans[0][1], trans[0][2], trans[0][3] },
-                    { trans[1][0], trans[1][1], trans[1][2], trans[1][3] },
-                    { trans[2][0], trans[2][1], trans[2][2], trans[2][3] }
-                }
-            },
+            .transform = VkTransformMatrixKHR{ .matrix = {
+                { trans[0][0], trans[0][1], trans[0][2], trans[0][3] },
+                { trans[1][0], trans[1][1], trans[1][2], trans[1][3] },
+                { trans[2][0], trans[2][1], trans[2][2], trans[2][3] }
+            }},
             .instanceCustomIndex = static_cast<uint32_t>(i),
             .mask = 0xFF,
             .flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR,
@@ -199,27 +216,32 @@ void LAS::buildTLAS(VkCommandPool pool,
     }
     BufferManager::unmap(instanceBuffer);
 
-    VkAccelerationStructureGeometryInstancesDataKHR instancesData{};
-    instancesData.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR;
-    instancesData.data.deviceAddress = getBufferAddress(BufferManager::get(instanceBuffer)->buffer);
+    VkAccelerationStructureGeometryInstancesDataKHR instancesData{
+        .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR,
+        .data = { .deviceAddress = getBufferAddress(BufferManager::get(instanceBuffer)->buffer) }
+    };
 
-    VkAccelerationStructureGeometryKHR geometry{};
-    geometry.sType        = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
-    geometry.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
-    geometry.geometry.instances = instancesData;
+    VkAccelerationStructureGeometryKHR geometry{
+        .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR,
+        .geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR,
+        .geometry = { .instances = instancesData }
+    };
 
-    VkAccelerationStructureBuildGeometryInfoKHR buildInfo{};
-    buildInfo.sType         = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
-    buildInfo.type          = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
-    buildInfo.flags         = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
-    buildInfo.geometryCount = 1;
-    buildInfo.pGeometries   = &geometry;
+    VkAccelerationStructureBuildGeometryInfoKHR buildInfo{
+        .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR,
+        .type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR,
+        .flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR,
+        .geometryCount = 1,
+        .pGeometries = &geometry
+    };
 
     const uint32_t instanceCount = static_cast<uint32_t>(instances.size());
 
-    VkAccelerationStructureBuildSizesInfoKHR sizeInfo{};
-    sizeInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
-    RayTracingFunctions::vkGetAccelerationStructureBuildSizesKHR(
+    VkAccelerationStructureBuildSizesInfoKHR sizeInfo{
+        .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR
+    };
+
+    g_ext.vkGetAccelerationStructureBuildSizesKHR(
         dev, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
         &buildInfo, &instanceCount, &sizeInfo);
 
@@ -234,30 +256,32 @@ void LAS::buildTLAS(VkCommandPool pool,
                   VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "TLAS_Scratch");
 
     VkAccelerationStructureKHR rawTLAS = VK_NULL_HANDLE;
-    VkAccelerationStructureCreateInfoKHR createInfo{};
-    createInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
-    createInfo.buffer = BufferManager::get(tlasStorage)->buffer;
-    createInfo.size   = sizeInfo.accelerationStructureSize;
-    createInfo.type   = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
-    VK_CHECK(RayTracingFunctions::vkCreateAccelerationStructureKHR(dev, &createInfo, nullptr, &rawTLAS));
+    VkAccelerationStructureCreateInfoKHR createInfo{
+        .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR,
+        .buffer = BufferManager::get(tlasStorage)->buffer,
+        .size = sizeInfo.accelerationStructureSize,
+        .type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR
+    };
+    VK_CHECK(g_ext.vkCreateAccelerationStructureKHR(dev, &createInfo, nullptr, &rawTLAS));
 
     buildInfo.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
     buildInfo.dstAccelerationStructure = rawTLAS;
     buildInfo.scratchData.deviceAddress = getBufferAddress(BufferManager::get(tlasScratch)->buffer);
 
-    VkAccelerationStructureBuildRangeInfoKHR buildRange{};
-    buildRange.primitiveCount = instanceCount;
+    VkAccelerationStructureBuildRangeInfoKHR buildRange{
+        .primitiveCount = instanceCount
+    };
     const VkAccelerationStructureBuildRangeInfoKHR* pBuildRange = &buildRange;
 
     VkCommandBuffer cmd = beginOneTimeSubmit(pool);
-    RayTracingFunctions::vkCmdBuildAccelerationStructuresKHR(cmd, 1, &buildInfo, &pBuildRange);
+    g_ext.vkCmdBuildAccelerationStructuresKHR(cmd, 1, &buildInfo, &pBuildRange);
     endOneTimeSubmit(cmd, queue, pool);
 
     if (tlas_.valid()) tlas_.reset();
     if (instanceBufferId_) BufferManager::destroy(instanceBufferId_);
 
     auto deleter = [dev, tlasStorage, tlasScratch, instanceBuffer](VkDevice, VkAccelerationStructureKHR as, const VkAllocationCallbacks*) {
-        if (as) RayTracingFunctions::vkDestroyAccelerationStructureKHR(dev, as, nullptr);
+        if (as) g_ext.vkDestroyAccelerationStructureKHR(dev, as, nullptr);
         BufferManager::destroy(tlasStorage);
         BufferManager::destroy(tlasScratch);
         BufferManager::destroy(instanceBuffer);
@@ -274,19 +298,21 @@ void LAS::buildTLAS(VkCommandPool pool,
 VkDeviceAddress LAS::getBLASAddress() const noexcept
 {
     if (!blas_.valid()) return 0;
-    VkAccelerationStructureDeviceAddressInfoKHR info{};
-    info.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR;
-    info.accelerationStructure = blas_.get();
-    return RayTracingFunctions::vkGetAccelerationStructureDeviceAddressKHR(g_ctx().device(), &info);
+    VkAccelerationStructureDeviceAddressInfoKHR info{
+        .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR,
+        .accelerationStructure = blas_.get()
+    };
+    return g_ext.vkGetAccelerationStructureDeviceAddressKHR(g_ctx().device(), &info);
 }
 
 VkDeviceAddress LAS::getTLASAddress() const noexcept
 {
     if (!tlas_.valid()) return 0;
-    VkAccelerationStructureDeviceAddressInfoKHR info{};
-    info.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR;
-    info.accelerationStructure = tlas_.get();
-    return RayTracingFunctions::vkGetAccelerationStructureDeviceAddressKHR(g_ctx().device(), &info);
+    VkAccelerationStructureDeviceAddressInfoKHR info{
+        .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR,
+        .accelerationStructure = tlas_.get()
+    };
+    return g_ext.vkGetAccelerationStructureDeviceAddressKHR(g_ctx().device(), &info);
 }
 
 } // namespace RTX
