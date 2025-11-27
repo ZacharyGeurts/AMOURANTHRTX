@@ -938,7 +938,7 @@ static constexpr auto vkh = []() constexpr noexcept {
             Logging::Color::RESET); \
         phase9_ballerina(); \
     }
-	
+
 // =============================================================================
 // CREW SOUL COLORS — FINAL OVERRIDE — ETERNAL — NOVEMBER 25, 2025
 // PLACE THIS AT THE VERY BOTTOM — IT WINS EVERYTHING
@@ -965,7 +965,7 @@ static constexpr auto vkh = []() constexpr noexcept {
 #define LOG_CAPTAIN_N(...)   LOG_ATTEMPT_CAT("CAPTAIN N",  std::format("{}[KEVIN] {}{}",             Logging::Color::PHOTON_WHITE,      std::format(__VA_ARGS__),     Logging::Color::RESET))
 #define LOG_ELON(...)        LOG_SUCCESS_CAT("ELON",       std::format("{}[MUSK] {}{}",              Logging::Color::LIGHT_GREEN,       std::format(__VA_ARGS__),     Logging::Color::RESET))
 #define LOG_JENSEN(...)      LOG_SUCCESS_CAT("JENSEN",     std::format("{}[HUANG] {}{}",             Logging::Color::BLUE,              std::format(__VA_ARGS__),     Logging::Color::RESET))
-#define LOG_CID(...)         LOG_SUCCESS_CAT("CID",        std::format("{}[CID] {}{}",               Logging::Color::BOLD_RED,          std::format(__VA_ARGS__),     Logging::Color::RESET))
+#define LOG_CID(...)         LOG_SUCCESS_CAT("CID",        std::format("{}\n[CID] {}{}",               Logging::Color::BOLD_RED,          std::format(__VA_ARGS__),     Logging::Color::RESET))
 #define LOG_CARMACK(...)     LOG_INFO_CAT   ("CARMACK",    std::format("{}[JOHN] {}{}",              Logging::Color::TITANIUM_WHITE,    std::format(__VA_ARGS__),     Logging::Color::RESET))
 #define LOG_KEANU(...)       LOG_INFO_CAT   ("KEANU",      std::format("{}[WOAH] {}{}",              Logging::Color::VOID_PURPLE,       std::format(__VA_ARGS__),     Logging::Color::RESET))
 #define LOG_BLONDIE(...)     LOG_INFO_CAT   ("BLONDIE",    std::format("{}[CAPTAIN BLONDIE] {}{}",   Logging::Color::PEACHES_AND_CREAM, std::format(__VA_ARGS__),     Logging::Color::RESET))

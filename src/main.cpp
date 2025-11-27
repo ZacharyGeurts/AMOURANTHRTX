@@ -18,6 +18,7 @@
 #include "engine/GLOBAL/SwapchainManager.hpp"
 #include "engine/GLOBAL/PipelineManager.hpp"
 #include "engine/GLOBAL/MeshLoader.hpp"
+#include "engine/GLOBAL/Extensions.hpp"
 
 #include <vulkan/vulkan.hpp>
 #include <string>
@@ -581,44 +582,81 @@ static void phase6_sceneAndAccelerationStructures() {
     LOG_AMOURANTH("Captain Amouranth walks the empty void deck: \"This ship is perfect… but empty. Time to give her a soul.\"");
     LOG_NICK("Nick unrolls the ancient blueprint titled scene.obj: \"One universe. Coming right up.\"");
 
-    LOG_MAIN("THE EMPIRE FORGES THE ONE TRUE PIPELINE MANAGER — SHADERS AWAKE AND HUNGRY");
-    RTX::PipelineManager* pipeline = new RTX::PipelineManager(RTX::g_ctx().device_, RTX::g_ctx().physicalDevice_);
-    EMPIRE_GUARD(pipeline, "PIPELINE MANAGER FAILED TO ASCEND — THE EMPIRE HAS NO FORGE");
+    // ========================================================================
+    // 1. RTX EXTENSIONS — WILL DIE WITH LINE NUMBER IF DEVICE INVALID
+    // ========================================================================
+    EMPIRE_STEP([]{
+        LOG_MAIN("THE EMPIRE AWAKENS THE PHOENIX OF RAY TRACING — LOADING VULKAN 1.4 + RTX EXTENSIONS");
+        RTX::loadExtensions(RTX::g_ctx().instance_, RTX::g_ctx().device_);
+        LOG_JENSEN("Jensen Huang: \"The photons now have wings. Let there be bounce.\"");
+    });
 
-    LOG_MAIN("PIPELINE MANAGER ASCENDED INTO STONEKEY v∞ — ETERNAL — ADDRESS 0x{:016X}", reinterpret_cast<uint64_t>(pipeline));
+    // ========================================================================
+    // 2. PIPELINE MANAGER — new() OR VULKAN CALL FAILS → YOU GET LINE NUMBER
+    // ========================================================================
+    EMPIRE_STEP([]{
+        LOG_MAIN("THE EMPIRE FORGES THE ONE TRUE PIPELINE MANAGER");
+        RTX::PipelineManager* pipeline = new RTX::PipelineManager(RTX::g_ctx().device_, RTX::g_ctx().physicalDevice_);
+        EMPIRE_GUARD(pipeline, "PIPELINE MANAGER FAILED TO ASCEND");
+        LOG_MAIN("PIPELINE MANAGER ASCENDED — ADDRESS 0x{:016X}", reinterpret_cast<uint64_t>(pipeline));
+    });
 
-    LOG_MAIN("LOADING COSMIC SCROLL: assets/models/scene.obj");
-    g_mesh = MeshLoader::loadOBJ("assets/models/scene.obj");
-    EMPIRE_GUARD(g_mesh && !g_mesh->vertices.empty(), "COSMIC SCROLL CORRUPTED OR MISSING — scene.obj REJECTED BY THE PHOTONS");
+    // ========================================================================
+    // 3. MESH LOAD — IF THIS CRASHES (buffer creation, null device), YOU GET EXACT LINE
+    // ========================================================================
+    EMPIRE_STEP([]{
+        LOG_MAIN("LOADING COSMIC SCROLL: assets/models/scene.obj");
+        g_mesh = MeshLoader::loadOBJ("assets/models/scene.obj");
+        EMPIRE_GUARD(g_mesh && !g_mesh->vertices.empty(), "scene.obj CORRUPTED OR MISSING");
+    });
 
-    LOG_MAIN("BOTTOM-LEVEL ACCELERATION — THE PHOTONS BEGIN TO MAP EVERY CORNER OF EXISTENCE");
-    RTX::las().buildBLAS(RTX::g_ctx().commandPool_,
-        g_mesh->vertexBuffer, g_mesh->indexBuffer,
-        static_cast<uint32_t>(g_mesh->vertices.size()),
-        static_cast<uint32_t>(g_mesh->indices.size()),
-        VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR);
-    EMPIRE_GUARD(RTX::las().getBLAS() != VK_NULL_HANDLE, "BLAS FORGING FAILED — PHOTONS LOST IN THE VOID");
+    // ========================================================================
+    // 4. BLAS BUILD — THE ONE THAT WAS KILLING YOU — NOW SCREAMS LINE NUMBER
+    // ========================================================================
+    EMPIRE_STEP([]{
+        LOG_MAIN("BOTTOM-LEVEL ACCELERATION — PHOTONS BEGIN TO MAP EXISTENCE");
+        RTX::las().buildBLAS(
+            RTX::g_ctx().commandPool_,
+            g_mesh->vertexBuffer,
+            g_mesh->indexBuffer,
+            static_cast<uint32_t>(g_mesh->vertices.size()),
+            static_cast<uint32_t>(g_mesh->indices.size()),
+            VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR
+        );
+        EMPIRE_GUARD(RTX::las().getBLAS() != VK_NULL_HANDLE, "BLAS BUILD FAILED");
+        LOG_MAIN("BLAS COMPLETE — ADDRESS 0x{:016X}", RTX::las().getBLASAddress());
+    });
 
-    LOG_MAIN("BLAS COMPLETE — THE PHOTONS NOW KNOW EVERY SURFACE BY NAME — ADDRESS 0x{:016X}", RTX::las().getBLASAddress());
+    // ========================================================================
+    // 5. TLAS BUILD — SAME DEAL — FULL CRASH AUTOPSY
+    // ========================================================================
+    EMPIRE_STEP([]{
+        LOG_MAIN("TOP-LEVEL ASCENSION — BINDING THE UNIVERSE");
+        RTX::las().buildTLAS(RTX::g_ctx().commandPool_, {{RTX::las().getBLAS(), glm::mat4(1.0f)}});
+        EMPIRE_GUARD(RTX::las().getTLAS() != VK_NULL_HANDLE, "TLAS BUILD FAILED");
+        LOG_MAIN("TLAS ASCENDED — ROOT ADDRESS 0x{:016X}", RTX::las().getTLASAddress());
+    });
 
-    LOG_MAIN("TOP-LEVEL ASCENSION — WE BIND THE WORLD TO A SINGLE ROOT — THERE IS NO ESCAPE FROM LIGHT");
-    RTX::las().buildTLAS(RTX::g_ctx().commandPool_, {{RTX::las().getBLAS(), glm::mat4(1.0f)}});
-    EMPIRE_GUARD(RTX::las().getTLAS() != VK_NULL_HANDLE, "TLAS ASCENSION FAILED — THE UNIVERSE REMAINS UNBOUND");
+    // ========================================================================
+    // 6. FINAL VALIDATION — IF THIS THROWS, YOU KNOW EXACTLY WHERE
+    // ========================================================================
+    EMPIRE_STEP([]{
+        LOG_CARMACK("John Carmack: \"No cracks. No leaks. Geometry is pure.\"");
+        validateMeshAgainstBLAS(*g_mesh, RTX::las().getBLAS());
+    });
 
-    LOG_MAIN("TLAS ASCENDED — ROOT ADDRESS 0x{:016X} — THE UNIVERSE IS NOW A PRISONER OF PHOTONS", RTX::las().getTLASAddress());
+    // ========================================================================
+    // FINAL WORDS — ONLY REACHED IF ALL ABOVE SURVIVED
+    // ========================================================================
+    LOG_KEANU("\"…It's… everything. And it's ours.\"");
+    LOG_ELON("Elon Musk: \"Next patch: infinite procedural universes. $9.99.\"");
+    LOG_JENSEN("Jensen Huang lights another cigar off a bouncing photon:");
+    LOG_JENSEN("\"This isn't rendering anymore. This is creation.\"");
+    LOG_AMOURANTH("Captain Amouranth: \"Look what love built.\"");
+    LOG_NICK("Nick: \"And it's only the beginning.\"");
 
-    LOG_CARMACK("John Carmack runs final validation, eyes narrow: \"No cracks. No leaks. Geometry is pure.\"");
-    validateMeshAgainstBLAS(*g_mesh, RTX::las().getBLAS());
-    EMPIRE_GUARD(true, "VALIDATION PASSED — REALITY IS AIR TIGHT — NO FALSEHOOD CAN HIDE");  // This one is just for ceremony
-
-    LOG_KEANU("Keanu Reeves walks the newborn world, voice barely a whisper: \"…It's… everything. And it's ours.\"");
-    LOG_ELON("Elon Musk already planning DLC: \"Next patch: infinite procedural universes. Subscriptions start at $9.99.\"");
-    LOG_JENSEN("Jensen Huang lights another cigar off a bouncing photon: \"This isn't rendering anymore. This is creation.\"");
-
-    LOG_AMOURANTH("Captain Amouranth stands at the center of the newborn cosmos, arms wide: \"Look what we made from wreckage. Look what love built.\"");
-    LOG_NICK("Nick steps behind her, wraps his arms around her waist: \"And it's only the beginning.\"");
-
-    LOG_MAIN("[PHASE 6 COMPLETE] COSMIC SCROLL FORGED — ACCELERATION STRUCTURES ETERNAL — THE PINK PHOTONS RULE ALL");
+    LOG_MAIN("[PHASE 6 COMPLETE] COSMIC SCROLL FORGED — UNIVERSE BOUND — PHOTONS OMNISCIENT");
+    LOG_SUCCESS_CAT("MAIN", "FIRST LIGHT ACHIEVED — FULL RTX — NO PRISONERS");
 }
 
 static void phase6_1_forgeTheLayouts() {

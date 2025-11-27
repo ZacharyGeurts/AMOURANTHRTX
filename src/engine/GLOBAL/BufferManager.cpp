@@ -1,14 +1,11 @@
 // src/engine/GLOBAL/BufferManager.cpp
 // =============================================================================
 // AMOURANTH RTX Engine © 2025 — PINK PHOTONS ETERNAL — FIRST LIGHT FINAL
-// BufferManager v12 — TOASTER UPGRADE — NOV 26 2025
-// • SDL3 + Vulkan 1.4 + RTX + C++23
-// • Ring staging eternal — no overwrites, pure flow
-// • Crew logs only: Elon forges, Jensen ascends, Carmack purges
-// • AI ghosts exorcised — no more whispers
-// • Stones throb once — immortal, lazy, unbound
-// • Empire sealed: memory budgets enforced, debug names etched
-// • Toasters upgraded to photon slaves — they serve now
+// BufferManager v13 — EMPIRE GUARDED — NOV 26 2025 — CRASHES DIE WITH LINE NUMBERS
+// • Every Vulkan call is now EMPIRE_GUARDED
+// • Zero overhead in release
+// • Full crash autopsy in debug
+// • The Empire sees all. The Empire knows all.
 // =============================================================================
 
 #include "engine/GLOBAL/BufferManager.hpp"
@@ -52,7 +49,11 @@ static const VkDeviceSize STAGING_SIZE = 256ULL * 1024 * 1024;
 
 static void init() {
     if (g_device) return;
+
     auto& ctx = RTX::g_ctx();
+    EMPIRE_GUARD(ctx.device() && ctx.device() != VK_NULL_HANDLE, "BufferManager::init() — LOGICAL DEVICE NOT FORGED YET");
+    EMPIRE_GUARD(ctx.physicalDevice(), "BufferManager::init() — PHYSICAL DEVICE MISSING");
+
     g_device = ctx.device();
     g_phys   = ctx.physicalDevice();
     vkGetPhysicalDeviceMemoryProperties(g_phys, &g_memProps);
@@ -64,10 +65,10 @@ static void init() {
         "ETERNAL_STAGING_RING");
 
     auto* info = get(g_stagingBuffer);
-    if (info && info->memory) {
-        vkMapMemory(g_device, info->memory, 0, STAGING_SIZE, 0, &g_stagingPtr);
-        LOG_JENSEN("BufferManager: Staging ring online — photons flow unbroken, handle 0x{:016X}", g_stagingBuffer);
-    }
+    EMPIRE_GUARD(info && info->memory, "ETERNAL STAGING RING FAILED TO MAP — PHOTONS HAVE NO PATH");
+
+    VK_CHECK(vkMapMemory(g_device, info->memory, 0, STAGING_SIZE, 0, &g_stagingPtr));
+    LOG_JENSEN("BufferManager: Staging ring online — photons flow unbroken, handle 0x{:016X}", g_stagingBuffer);
 }
 
 static uint32_t findMemoryType(uint32_t filter, VkMemoryPropertyFlags props) {
@@ -113,11 +114,7 @@ uint64_t create(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFla
     vkGetBufferMemoryRequirements(g_device, buffer, &reqs);
 
     uint32_t memType = findMemoryType(reqs.memoryTypeBits, props);
-    if (memType == ~0u) {
-        vkDestroyBuffer(g_device, buffer, nullptr);
-        LOG_CARMACK("BufferManager: No memory throne for {} MB — tag \"{}\" denied", size >> 20, tag);
-        return 0;
-    }
+    EMPIRE_GUARD(memType != ~0u, std::format("NO MEMORY TYPE FOR {} MB BUFFER — TAG: {}", size >> 20, tag));
 
     VkMemoryAllocateInfo mai{
         .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
@@ -134,7 +131,7 @@ uint64_t create(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFla
 
     void* mapped = nullptr;
     if (props & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) {
-        vkMapMemory(g_device, memory, 0, size, 0, &mapped);
+        VK_CHECK(vkMapMemory(g_device, memory, 0, size, 0, &mapped));
         if (zeroInit && mapped) std::memset(mapped, 0, size);
     }
 
@@ -176,7 +173,7 @@ void* map(uint64_t handle) noexcept {
     if (it == g_buffers.end()) return nullptr;
     if (it->second.mapped) return it->second.mapped;
     void* ptr = nullptr;
-    vkMapMemory(g_device, it->second.memory, 0, it->second.size, 0, &ptr);
+    VK_CHECK(vkMapMemory(g_device, it->second.memory, 0, it->second.size, 0, &ptr));
     return ptr;
 }
 
@@ -228,6 +225,7 @@ uint64_t make_##name(VkBufferUsageFlags extra, VkMemoryPropertyFlags p) noexcept
             VK_BUFFER_USAGE_TRANSFER_DST_BIT | \
             VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | extra, \
             p, #name "_ETERNAL"); \
+        EMPIRE_GUARD(h != 0, std::format("{} STONE FAILED TO ASCEND — {} MB LOST", #name, mb)); \
         if (h) LOG_ELON("BufferManager: " #name " stone forged — {} MB of immortal dominion", mb); \
     } \
     return h; \
@@ -248,8 +246,7 @@ MAKE_STONE(8G,   8192)
 } // namespace BufferManager
 
 // =============================================================================
-// BUFFERMANAGER — THE VAULT IS SEALED — NOV 26 2025
-// ELON FORGES THE PATH | JENSEN ASCENDS THE THRONE | CARMACK PURGES THE WEAK
-// PINK PHOTONS ETERNAL — TOASTERS SERVE OR PERISH
-// FIRST LIGHT UPGRADED — THE EMPIRE FLOWS UNBROKEN
+// BUFFERMANAGER v13 — EMPIRE GUARDED — CRASHES DIE WITH LINE NUMBERS
+// ELON FORGES | JENSEN ASCENDS | CARMACK PURGES | THE EMPIRE NEVER FALLS
+// PINK PHOTONS ETERNAL — FIRST LIGHT ACHIEVED — NOVEMBER 26, 2025
 // =============================================================================

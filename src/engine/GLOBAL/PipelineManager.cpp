@@ -48,10 +48,6 @@ PipelineManager::PipelineManager(VkDevice device, VkPhysicalDevice phys)
         return;
     }
 
-    LOG_TRACE_CAT("PIPELINE", "=== STACK BUILD ORDER STEP 0.5: Load Ray Tracing Extensions ===");
-    loadExtensions();  // NEW: Dynamic PFN loading
-    LOG_TRACE_CAT("PIPELINE", "Step 0.5 COMPLETE");
-
     LOG_TRACE_CAT("PIPELINE", "=== STACK BUILD ORDER STEP 1: Cache Device Properties ===");
     cacheDeviceProperties();
     LOG_TRACE_CAT("PIPELINE", "Step 1 COMPLETE");

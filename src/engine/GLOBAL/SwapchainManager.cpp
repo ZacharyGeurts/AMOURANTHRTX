@@ -416,10 +416,11 @@ void SwapchainManager::setShadingRate(float scaleFactor) noexcept {
     LOG_NICK("Shading rate scaled to %.2f — FPS eternal.", scaleFactor);
 }
 
-// Feature 9: Direct Display
+// Feature 9: Direct Display — C++23 PERFECTION
 void SwapchainManager::enableDirectDisplay(bool enable) noexcept {
     directDisplayMode = enable;
-    LOG_WARN("Direct display %s.", enable ? "enabled" : "disabled");
+    constexpr std::string_view msg = "Direct display {}.";    
+    LOG_WARN(std::format(msg, directDisplayMode ? "ENABLED" : "DISABLED"));
 }
 
 // Feature 10: Quantum Prediction
