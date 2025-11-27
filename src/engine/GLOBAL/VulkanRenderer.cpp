@@ -413,9 +413,9 @@ LOG_SUCCESS_CAT("RENDERER", "Step 5 COMPLETE — {} full sync sets forged — TR
     if (Options::Environment::ENABLE_ENV_MAP) createEnvironmentMap();
     createAccumulationImages();                    // HDR accumulation
     createRTOutputImages();                        // HDR ray tracing output
-    if (Options::RTX::ENABLE_DENOISING) createDenoiserImage();
-    if (Options::RTX::ENABLE_ADAPTIVE_SAMPLING)
-        if (Options::RTX::ENABLE_ADAPTIVE_SAMPLING) createNexusScoreImage(g_ctx().commandPool_, g_ctx().graphicsQueue());
+    if (Options::OptionsRTX::ENABLE_DENOISING) createDenoiserImage();
+    if (Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING)
+        if (Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING) createNexusScoreImage(g_ctx().commandPool_, g_ctx().graphicsQueue());
     createTonemapSampler();  // ← NEW: For tonemap input sampling
     LOG_SUCCESS_CAT("RENDERER", "Step 9 COMPLETE — HDR pipeline targets created");
 
@@ -822,7 +822,7 @@ void VulkanRenderer::createRTOutputImages() noexcept {
 
 void VulkanRenderer::createAccumulationImages() noexcept {
     LOG_TRACE_CAT("RENDERER", "createAccumulationImages — START");
-    if (!Options::RTX::ENABLE_ACCUMULATION) {
+    if (!Options::OptionsRTX::ENABLE_ACCUMULATION) {
         LOG_INFO_CAT("RENDERER", "Accumulation disabled via options");
         LOG_TRACE_CAT("RENDERER", "createAccumulationImages — COMPLETE (disabled)");
         return;
@@ -834,7 +834,7 @@ void VulkanRenderer::createAccumulationImages() noexcept {
 
 void VulkanRenderer::createDenoiserImage() noexcept {
     LOG_TRACE_CAT("RENDERER", "createDenoiserImage — START");
-    if (!Options::RTX::ENABLE_DENOISING) {
+    if (!Options::OptionsRTX::ENABLE_DENOISING) {
         LOG_INFO_CAT("RENDERER", "Denoiser disabled via options");
         LOG_TRACE_CAT("RENDERER", "createDenoiserImage — COMPLETE (disabled)");
         return;
@@ -1037,7 +1037,7 @@ void VulkanRenderer::createEnvironmentMap() noexcept {
 void VulkanRenderer::createNexusScoreImage(VkCommandPool pool, VkQueue queue) noexcept
 {
     // Early out if disabled
-    if (!Options::RTX::ENABLE_ADAPTIVE_SAMPLING) {
+    if (!Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING) {
         return;
     }
 
@@ -1304,8 +1304,8 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
         };
 
         for (auto& h : rtOutputImages_) clearImg(*h);
-        if (Options::RTX::ENABLE_ACCUMULATION) for (auto& h : accumImages_) clearImg(*h);
-        if (Options::RTX::ENABLE_ADAPTIVE_SAMPLING && hypertraceScoreImage_.valid()) clearImg(*hypertraceScoreImage_);
+        if (Options::OptionsRTX::ENABLE_ACCUMULATION) for (auto& h : accumImages_) clearImg(*h);
+        if (Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING && hypertraceScoreImage_.valid()) clearImg(*hypertraceScoreImage_);
 
         resetAccumulation_ = false;
     }
@@ -1314,7 +1314,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     updateTonemapUniform(frameIdx);
 
     pipelineManager_.updateRTDescriptorSet(frameIdx, {.tlas = LAS::get().getTLAS()});
-    if (Options::RTX::ENABLE_ADAPTIVE_SAMPLING) updateNexusDescriptors();
+    if (Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING) updateNexusDescriptors();
 
     recordRayTracingCommandBuffer(cmd);
 
@@ -1518,7 +1518,7 @@ void VulkanRenderer::updateRTXDescriptors(uint32_t frame) noexcept
         updateInfo.rtOutputViews[0] = VK_NULL_HANDLE;
     }
 
-    if (Options::RTX::ENABLE_ACCUMULATION && !accumViews_.empty() && accumViews_[frame % accumViews_.size()].valid()) {
+    if (Options::OptionsRTX::ENABLE_ACCUMULATION && !accumViews_.empty() && accumViews_[frame % accumViews_.size()].valid()) {
         updateInfo.accumulationViews[0] = *accumViews_[frame % accumViews_.size()];
     } else {
         updateInfo.accumulationViews[0] = VK_NULL_HANDLE;
@@ -1550,7 +1550,7 @@ void VulkanRenderer::updateRTXDescriptors(uint32_t frame) noexcept
     }
 
     // Nexus score
-    if (Options::RTX::ENABLE_ADAPTIVE_SAMPLING && hypertraceScoreView_.valid()) {
+    if (Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING && hypertraceScoreView_.valid()) {
         updateInfo.nexusScoreViews[0] = *hypertraceScoreView_;
     } else {
         updateInfo.nexusScoreViews[0] = VK_NULL_HANDLE;
@@ -2098,7 +2098,7 @@ void VulkanRenderer::onWindowResize(uint32_t width, uint32_t height) noexcept
     createFramebuffers();
 
     // Adaptive sampling needs fresh score images
-    if (Options::RTX::ENABLE_ADAPTIVE_SAMPLING) {
+    if (Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING) {
         createNexusScoreImage(g_ctx().commandPool_, g_ctx().graphicsQueue_);
     }
 

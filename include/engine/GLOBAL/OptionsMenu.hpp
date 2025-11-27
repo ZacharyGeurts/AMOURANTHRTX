@@ -70,7 +70,7 @@ namespace Audio {
 }
 
 // ── RTX CORE SETTINGS ─────────────────────────────────────────────────────────
-namespace RTX {
+namespace OptionsRTX {
     constexpr bool     ENABLE_ACCUMULATION         = true;
     constexpr bool     ENABLE_DENOISING            = true;
     constexpr bool     ENABLE_ADAPTIVE_SAMPLING    = true;

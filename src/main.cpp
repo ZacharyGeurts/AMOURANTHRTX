@@ -252,7 +252,7 @@ void Application::updateWindowTitle(float deltaTime) {
               << " | " << std::fixed << std::setprecision(1) << fps << " FPS"
               << " | " << width_ << 'x' << height_
               << " | Mode " << renderMode_
-              << " | Bounces " << Options::RTX::MAX_BOUNCES
+              << " | Bounces " << Options::OptionsRTX::MAX_BOUNCES
               << (Options::Debug::ENABLE_CELEBRATION_MODE ? " | CELEBRATION" : "")
               << (Options::Grok::ENABLE_GENTLEMAN_GROK ? " | GROK" : "");
 
@@ -454,15 +454,15 @@ static void phase1_preInitialization() {
     LOG_BLONDIE("┌──────────────────────────────────────────────────────────────");
     LOG_BLONDIE("│ BLONDIE'S LIVE STATUS — NOVEMBER 25, 2025 — PINK PHOTONS FLOW");
     LOG_BLONDIE("├──────────────────────────────────────────────────────────────");
-    LOG_BLONDIE("│ Denoise     : {}", Options::RTX::ENABLE_DENOISING      ? "ON"  : "OFF");
-    LOG_BLONDIE("│ TAA         : {}", Options::RTX::ENABLE_TAA            ? "ON"  : "OFF");
+    LOG_BLONDIE("│ Denoise     : {}", Options::OptionsRTX::ENABLE_DENOISING      ? "ON"  : "OFF");
+    LOG_BLONDIE("│ TAA         : {}", Options::OptionsRTX::ENABLE_TAA            ? "ON"  : "OFF");
     LOG_BLONDIE("│ Bloom       : {}", Options::PostProcess::ENABLE_BLOOM  ? "ON"  : "OFF");
     LOG_BLONDIE("│ SSAO        : {}", Options::PostProcess::ENABLE_SSAO   ? "ON"  : "OFF");
     LOG_BLONDIE("│ Vol. Fog    : {}", Options::Environment::ENABLE_VOLUMETRIC_FOG ? "ON" : "OFF");
     LOG_BLONDIE("│ God Rays    : {}", Options::Environment::ENABLE_GOD_RAYS       ? "ON"  : "OFF");
     LOG_BLONDIE("│ Tonemap     : {}", Options::Tonemap::ENABLE_TONEMAPPING       ? "ON"  : "OFF");
     LOG_BLONDIE("│ VSync       : {}", Options::Display::ENABLE_VSYNC             ? "ON"  : "OFF");
-    LOG_BLONDIE("│ Max Bounces : {}", Options::RTX::MAX_BOUNCES);
+    LOG_BLONDIE("│ Max Bounces : {}", Options::OptionsRTX::MAX_BOUNCES);
     LOG_BLONDIE("└──────────────────────────────────────────────────────────────");
 
     LOG_AMOURANTH("Captain Amouranth stands at the bow, wind in her hair: \"A new dawn. A clean slate. Let's build something beautiful.\"");

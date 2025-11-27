@@ -93,9 +93,9 @@ private:
     bool     firstSwapchainAcquire_ = true;
 
     // Runtime toggles
-    bool hypertraceEnabled_     = Options::RTX::ENABLE_ADAPTIVE_SAMPLING;
-    bool denoisingEnabled_      = Options::RTX::ENABLE_DENOISING;
-    bool adaptiveSamplingEnabled_ = Options::RTX::ENABLE_ADAPTIVE_SAMPLING;
+    bool hypertraceEnabled_     = Options::OptionsRTX ::ENABLE_ADAPTIVE_SAMPLING;
+    bool denoisingEnabled_      = Options::OptionsRTX::ENABLE_DENOISING;
+    bool adaptiveSamplingEnabled_ = Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING;
     bool overclockMode_         = false;
     bool tonemapEnabled_        = true;
     bool showOverlay_           = true;

@@ -6,7 +6,8 @@
 #include "engine/GLOBAL/RTXHandler.hpp"
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/GLOBAL/VkSafeSTypes.hpp"
-#include "engine/GLOBAL/VulkanRenderer.hpp"
+#include "engine/GLOBAL/OptionsMenu.hpp"
+#include "engine/GLOBAL/StoneKey.hpp"
 #include <SDL3/SDL_vulkan.h>
 #include <algorithm>
 #include <unordered_set>
@@ -28,6 +29,9 @@ void logAndTrackDestruction(const char* type, void* ptr, int line, size_t size) 
 // =============================================================================
 // Descriptor helpers — validation-clean, eternal
 // =============================================================================
+static constinit const VkStructureType kVkWriteDescriptorSetSType = VkStructureType(0x000000013);
+static constinit const VkStructureType kVkWriteDescriptorSetSType_ACCELERATION_STRUCTURE_KHR = VkStructureType(1000268001);
+
 void WriteAccelerationStructureDescriptor(VkDescriptorSet dstSet, uint32_t dstBinding,
                                          uint32_t dstArrayElement, VkAccelerationStructureKHR accelStruct)
 {
@@ -48,16 +52,6 @@ void WriteAccelerationStructureDescriptor(VkDescriptorSet dstSet, uint32_t dstBi
     };
 
     vkUpdateDescriptorSets(g_ctx().device_, 1, &write, 0, nullptr);
-}
-
-void UpdateGlobalRayTracingDescriptors(VkDescriptorSet set)
-{
-    if (!tlas().valid()) {
-        LOG_WARN_CAT("RTX", "{}TLAS not ready — descriptor update deferred{}", RASPBERRY_PINK, RESET);
-        return;
-    }
-    WriteAccelerationStructureDescriptor(set, 0, 0, tlas().get());
-    LOG_SUCCESS_CAT("RTX", "{}Global RT descriptors bound — silence achieved{}", EMERALD_GREEN, RESET);
 }
 
 // =============================================================================
@@ -198,8 +192,7 @@ void Context::init(SDL_Window* window, int width, int height)
         }
     }
 
-    // 4. Swapchain — belongs to the Manager
-    SwapchainManager::create(window, width, height);
+    // 4. Swapchain — belongs to the Main
 
     valid_ = true;
     ready_.store(true, std::memory_order_release);
@@ -216,30 +209,7 @@ void Context::init(SDL_Window* window, int width, int height)
 // =============================================================================
 void shutdown() noexcept
 {
-    auto& ctx = g_ctx();
-
-    LOG_SUCCESS_CAT("RTX", "{}RTX::shutdown() — The Handler lowers his gaze{}", PLASMA_FUCHSIA, RESET);
-
-    vkDeviceWaitIdle(ctx.device_);
-
-    SwapchainManager::cleanup();
-
-    if (ctx.computeCommandPool_) vkDestroyCommandPool(ctx.device_, ctx.computeCommandPool_, nullptr);
-    if (ctx.commandPool_)        vkDestroyCommandPool(ctx.device_, ctx.commandPool_, nullptr);
-
-    ctx.renderPass_.reset();
-
-    if (ctx.device_) {
-        vkDestroyDevice(ctx.device_, nullptr);
-        ctx.device_ = VK_NULL_HANDLE;
-    }
-
-    ctx.valid_ = false;
-    ctx.ready_.store(false);
-
-    LOG_SUCCESS_CAT("RTX", "{}Empire dissolved. Pink photons return to the void.{}", EMERALD_GREEN, RESET);
-    LOG_AMOURANTH("A whisper on the wind:");
-    LOG_AMOURANTH("\"Until the next dawn calls us again.\"");
+    phase9_ballerina();
 }
 
 void cleanupAll() noexcept {

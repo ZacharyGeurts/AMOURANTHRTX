@@ -43,7 +43,8 @@
 #include <glm/gtc/type_ptr.hpp>
 
 #include "engine/GLOBAL/logging.hpp"
-#include "engine/GLOBAL/StoneKey.hpp"
+#include "engine/GLOBAL/OptionsMenu.hpp"
+#include "engine/GLOBAL/StoneKey.hpp" // THE one header that gets it.
 
 // Forward declarations
 class VulkanRTX;
@@ -179,115 +180,116 @@ inline constexpr struct NullFeatureChainTerminator {
     [[nodiscard]] QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device,
                                                        VkSurfaceKHR surface) noexcept;
 
-    // =============================================================================
-    // Context — The One True Empire State — EVERY GETTER & SETTER DREAMED OF
-    // =============================================================================
-    struct Context {
-    public:
-        // Core Vulkan objects
-        VkInstance       instance_       = VK_NULL_HANDLE;
-        VkSurfaceKHR     surface_        = VK_NULL_HANDLE;
-        VkPhysicalDevice physicalDevice_ = VK_NULL_HANDLE;
-        VkDevice         device_         = VK_NULL_HANDLE;
+struct Context {
+public:
+    // Core Vulkan objects
+    VkInstance       instance_       = VK_NULL_HANDLE;
+    VkSurfaceKHR surface_        = VK_NULL_HANDLE;
+    VkPhysicalDevice physicalDevice_ = VK_NULL_HANDLE;
+    VkDevice         device_         = VK_NULL_HANDLE;
 
-        // Queues
-        VkQueue graphicsQueue_  = VK_NULL_HANDLE;
-        VkQueue presentQueue_   = VK_NULL_HANDLE;
-        VkQueue computeQueue_   = VK_NULL_HANDLE;
-        VkQueue transferQueue_  = VK_NULL_HANDLE;
+    // Queues
+    VkQueue graphicsQueue_  = VK_NULL_HANDLE;
+    VkQueue presentQueue_   = VK_NULL_HANDLE;
+    VkQueue computeQueue_   = VK_NULL_HANDLE;
+    VkQueue transferQueue_  = VK_NULL_HANDLE;
 
-        // Command pools
-        VkCommandPool commandPool_         = VK_NULL_HANDLE;
-        VkCommandPool computeCommandPool_  = VK_NULL_HANDLE;
-        VkCommandPool transferCommandPool_= VK_NULL_HANDLE;
-        VkPipelineCache pipelineCache_     = VK_NULL_HANDLE;
+    // Command pools
+    VkCommandPool commandPool_         = VK_NULL_HANDLE;
+    VkCommandPool computeCommandPool_  = VK_NULL_HANDLE;
+    VkCommandPool transferCommandPool_ = VK_NULL_HANDLE;
+    VkPipelineCache pipelineCache_     = VK_NULL_HANDLE;
 
-        // Queue family indices
-        std::optional<uint32_t> graphicsFamily_;
-        std::optional<uint32_t> presentFamily_;
-        std::optional<uint32_t> computeFamily_;
-        std::optional<uint32_t> transferFamily_;
+    // Queue family indices
+    std::optional<uint32_t> graphicsFamily_;
+    std::optional<uint32_t> presentFamily_;
+    std::optional<uint32_t> computeFamily_;
+    std::optional<uint32_t> transferFamily_;
 
-        // Feature flags
-        bool bufferDeviceAddressEnabled_         = false;
-        bool accelerationStructureEnabled_       = false;
-        bool rayTracingPipelineEnabled_          = false;
-        bool rayQueryEnabled_                    = false;
-        bool dynamicRenderingEnabled_            = false;
-        bool synchronization2Enabled_            = false;
+    // Feature flags — THE EMPIRE DECIDES
+    bool bufferDeviceAddressEnabled_     = false;
+    bool accelerationStructureEnabled_   = false;
+    bool rayTracingPipelineEnabled_      = false;
+    bool rayQueryEnabled_                = false;
+    bool dynamicRenderingEnabled_        = false;
+    bool synchronization2Enabled_        = false;
+    bool debugUtilsEnabled_              = false;  // ← THE MISSING TRUTH
 
-        // Device properties
-        VkPhysicalDeviceProperties                        physicalDeviceProperties_{};
-        VkPhysicalDeviceFeatures                          physicalDeviceFeatures_{};
-        VkPhysicalDeviceMemoryProperties                  physicalDeviceMemoryProperties_{};
-        VkPhysicalDeviceRayTracingPipelinePropertiesKHR   rayTracingProps_{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR };
+    // Device properties
+    VkPhysicalDeviceProperties                        physicalDeviceProperties_{};
+    VkPhysicalDeviceFeatures                          physicalDeviceFeatures_{};
+    VkPhysicalDeviceMemoryProperties                  physicalDeviceMemoryProperties_{};
+    VkPhysicalDeviceRayTracingPipelinePropertiesKHR   rayTracingProps_{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR };
 
-        // HDR
-        VkFormat         hdr_format      = VK_FORMAT_UNDEFINED;
-        VkColorSpaceKHR  hdr_color_space = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+    // HDR
+    VkFormat         hdr_format      = VK_FORMAT_UNDEFINED;
+    VkColorSpaceKHR  hdr_color_space = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
 
-        // Global resources
-        Handle<VkImageView>  blueNoiseView_;
-        Handle<VkRenderPass> renderPass_;
-        uint64_t             sharedStagingEnc_ = 0;
+    // Global resources
+    Handle<VkImageView>  blueNoiseView_;
+    Handle<VkRenderPass> renderPass_;
+    uint64_t             sharedStagingEnc_ = 0;
 
-        // Window
-        SDL_Window* window  = nullptr;
-        int         width   = 0;
-        int         height  = 0;
-        bool        valid_  = false;
-        mutable std::atomic<bool> ready_{false};
+    // Window
+    SDL_Window* window  = nullptr;
+    int         width   = 0;
+    int         height  = 0;
+    bool        valid_  = false;
+    mutable std::atomic<bool> ready_{false};
 
-        // ────────────────────── GETTERS ──────────────────────
-        [[nodiscard]] constexpr VkInstance       instance()       const noexcept { return instance_; }
-        [[nodiscard]] constexpr VkSurfaceKHR     surface()        const noexcept { return surface_; }
-        [[nodiscard]] constexpr VkPhysicalDevice physicalDevice() const noexcept { return physicalDevice_; }
-        [[nodiscard]] constexpr VkDevice         device()         const noexcept { return device_; }
-        [[nodiscard]] static    VkPhysicalDevice pickPhysicalDevice(VkInstance instance, VkSurfaceKHR surface, bool enablePortableSubset = false) noexcept;
-        
-        [[nodiscard]] constexpr VkQueue graphicsQueue()  const noexcept { return graphicsQueue_; }
-        [[nodiscard]] constexpr VkQueue presentQueue()   const noexcept { return presentQueue_; }
-        [[nodiscard]] constexpr VkQueue computeQueue()   const noexcept { return computeQueue_; }
-        [[nodiscard]] constexpr VkQueue transferQueue()  const noexcept { return transferQueue_; }
+    // ────────────────────── GETTERS ──────────────────────
+    [[nodiscard]] constexpr VkInstance       instance()       const noexcept { return instance_; }
+    [[nodiscard]] constexpr VkSurfaceKHR     surface()        const noexcept { return surface_; }
+    [[nodiscard]] constexpr VkPhysicalDevice physicalDevice() const noexcept { return physicalDevice_; }
+    [[nodiscard]] constexpr VkDevice         device()         const noexcept { return device_; }
 
-        [[nodiscard]] constexpr uint32_t graphicsFamily() const noexcept { return graphicsFamily_.value(); }
-        [[nodiscard]] constexpr uint32_t presentFamily()  const noexcept { return presentFamily_.value(); }
-        [[nodiscard]] constexpr uint32_t computeFamily()  const noexcept { return computeFamily_.value_or(graphicsFamily()); }
-        [[nodiscard]] constexpr uint32_t transferFamily() const noexcept { return transferFamily_.value_or(graphicsFamily()); }
+    [[nodiscard]] constexpr VkQueue graphicsQueue()  const noexcept { return graphicsQueue_; }
+    [[nodiscard]] constexpr VkQueue presentQueue()   const noexcept { return presentQueue_; }
+    [[nodiscard]] constexpr VkQueue computeQueue()   const noexcept { return computeQueue_; }
+    [[nodiscard]] constexpr VkQueue transferQueue()  const noexcept { return transferQueue_; }
 
-        [[nodiscard]] constexpr VkRenderPass renderPass() const noexcept { return renderPass_.valid() ? renderPass_.get() : VK_NULL_HANDLE; }
-        [[nodiscard]] constexpr const auto& rayTracingProps() const noexcept { return rayTracingProps_; }
-        [[nodiscard]] constexpr bool isReady() const noexcept { return ready_.load(std::memory_order_acquire); }
+    [[nodiscard]] constexpr uint32_t graphicsFamily() const noexcept { return graphicsFamily_.value(); }
+    [[nodiscard]] constexpr uint32_t presentFamily()  const noexcept { return presentFamily_.value(); }
+    [[nodiscard]] constexpr uint32_t computeFamily()  const noexcept { return computeFamily_.value_or(graphicsFamily()); }
+    [[nodiscard]] constexpr uint32_t transferFamily() const noexcept { return transferFamily_.value_or(graphicsFamily()); }
 
-        // ────────────────────── SETTERS ──────────────────────
-        void setInstance(VkInstance i) noexcept       { instance_ = i; }
-        void setSurface(VkSurfaceKHR s) noexcept      { surface_ = s; }
-        void setPhysicalDevice(VkPhysicalDevice pd) noexcept { physicalDevice_ = pd; }
-        void setDevice(VkDevice d) noexcept           { device_ = d; }
+    [[nodiscard]] constexpr VkRenderPass renderPass() const noexcept { return renderPass_.valid() ? renderPass_.get() : VK_NULL_HANDLE; }
+    [[nodiscard]] constexpr const auto& rayTracingProps() const noexcept { return rayTracingProps_; }
+    [[nodiscard]] constexpr bool isReady() const noexcept { return ready_.load(std::memory_order_acquire); }
 
-        void setGraphicsQueue(VkQueue q) noexcept     { graphicsQueue_ = q; }
-        void setPresentQueue(VkQueue q) noexcept      { presentQueue_ = q; }
-        void setComputeQueue(VkQueue q) noexcept      { computeQueue_ = q; }
-        void setTransferQueue(VkQueue q) noexcept     { transferQueue_ = q; }
+    // THE RETURN OF THE KING
+    [[nodiscard]] constexpr bool debugUtilsSupported() const noexcept { return debugUtilsEnabled_; }
 
-        void setWindow(SDL_Window* w) noexcept        { window = w; }
-        void setSize(int w, int h) noexcept           { width = w; height = h; }
+    // ────────────────────── SETTERS ──────────────────────
+    void setInstance(VkInstance i) noexcept       { instance_ = i; }
+    void setSurface(VkSurfaceKHR s) noexcept      { surface_ = s; }
+    void setPhysicalDevice(VkPhysicalDevice pd) noexcept { physicalDevice_ = pd; }
+    void setDevice(VkDevice d) noexcept           { device_ = d; }
 
-        void markReady() noexcept                     { ready_.store(true, std::memory_order_release); }
-        void markInvalid() noexcept                   { valid_ = false; }
+    void setGraphicsQueue(VkQueue q) noexcept     { graphicsQueue_ = q; }
+    void setPresentQueue(VkQueue q) noexcept      { presentQueue_ = q; }
+    void setComputeQueue(VkQueue q) noexcept      { computeQueue_ = q; }
+    void setTransferQueue(VkQueue q) noexcept     { transferQueue_ = q; }
 
-        // Feature enables
-        void enableBufferDeviceAddress(bool e = true) noexcept       { bufferDeviceAddressEnabled_ = e; }
-        void enableAccelerationStructure(bool e = true) noexcept     { accelerationStructureEnabled_ = e; }
-        void enableRayTracingPipeline(bool e = true) noexcept        { rayTracingPipelineEnabled_ = e; }
-        void enableRayQuery(bool e = true) noexcept                  { rayQueryEnabled_ = e; }
-        void enableDynamicRendering(bool e = true) noexcept          { dynamicRenderingEnabled_ = e; }
-        void enableSynchronization2(bool e = true) noexcept          { synchronization2Enabled_ = e; }
+    void setWindow(SDL_Window* w) noexcept        { window = w; }
+    void setSize(int w, int h) noexcept           { width = w; height = h; }
 
-        // Core lifecycle
-        void init(SDL_Window* window, int width, int height);
-        void cleanup() noexcept;
-    };
+    void markReady() noexcept                     { ready_.store(true, std::memory_order_release); }
+    void markInvalid() noexcept                   { valid_ = false; }
+
+    // Feature enables — the empire speaks
+    void enableBufferDeviceAddress(bool e = true) noexcept     { bufferDeviceAddressEnabled_ = e; }
+    void enableAccelerationStructure(bool e = true) noexcept   { accelerationStructureEnabled_ = e; }
+    void enableRayTracingPipeline(bool e = true) noexcept      { rayTracingPipelineEnabled_ = e; }
+    void enableRayQuery(bool e = true) noexcept                { rayQueryEnabled_ = e; }
+    void enableDynamicRendering(bool e = true) noexcept        { dynamicRenderingEnabled_ = e; }
+    void enableSynchronization2(bool e = true) noexcept        { synchronization2Enabled_ = e; }
+    void enableDebugUtils(bool e = true) noexcept              { debugUtilsEnabled_ = e; }  // ← RESTORED
+
+    // Core lifecycle
+    void init(SDL_Window* window, int width, int height);
+    void cleanup() noexcept;
+};
 
     extern Context g_context_instance;
     [[nodiscard]] inline Context& g_ctx() noexcept { return g_context_instance; }
