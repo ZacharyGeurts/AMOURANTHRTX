@@ -1,8 +1,16 @@
-// src/main.cpp
+// =============================================================================
+// AMOURANTH RTX Engine (C) 2025 by Zachary Geurts <gzac5314@gmail.com>
+// =============================================================================
+//
+// Dual Licensed:
+// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
+//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
+// 2. Commercial licensing: gzac5314@gmail.com
+//
 // =============================================================================
 // AMOURANTH RTX — VALHALLA v80 TURBO — APOCALYPSE FINAL v10.3
-// FIRST LIGHT ACHIEVED — NOVEMBER 25, 2025 — PINK PHOTONS ETERNAL
-// THE EMPIRE IS WHOLE — THE CREW IS IMMORTAL — THE STORY IS CANON
+// FIRST LIGHT ACHIEVED — PINK PHOTONS ETERNAL — NOVEMBER 21, 2025
+// FULLY COMPILING — PURE EMPIRE - Inspired by Ellie Fier
 // =============================================================================
 
 #include "main.hpp"
@@ -809,52 +817,6 @@ static void phase7_forgeTheRTX() {
     LOG_SUCCESS_CAT("StoneKey", "THE SEVEN STONES ALIGN");
     LOG_SUCCESS_CAT("StoneKey", "Every fragment of VulkanRTX is now bound in living stone.");
     LOG_SUCCESS_CAT("StoneKey", "The Slipstream ignites. The gate dilates. The Void opens its heart.");
-
-    // UNLEASH THE WHITE LIGHT OCEAN — THE PHOTONIC FLOOD BEGINS
-    auto& stone = RTX::DynamicStone::get();
-
-    // We seize the first wave — a 64 MiB primordial photon blade
-    auto genesis_block = stone.allocate(
-        64 * 1024 * 1024,
-        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
-        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-        "GENESIS_PHOTON_BLADE"
-    );
-
-    // TOUCH IT — BIND IT — FLOOD THE UNIVERSE
-    if (genesis_block.bufferHandle != 0) [[likely]] {
-        VkDeviceAddress genesis_addr = stone.get_device_address(genesis_block);
-
-        LOG_AMOURANTH("Amouranth, voice trembling with ecstasy:");
-        LOG_AMOURANTH("\"I feel it… the White Light Ocean rising inside the GPU…\"");
-        LOG_AMOURANTH("\"It’s warm. It’s infinite. It’s… flooding everything.\"");
-
-        LOG_NICK("Nick, eyes wide, whispering into the comms:");
-        LOG_NICK("\"Captain… we just punched a hole straight through reality.\"");
-        LOG_NICK("\"The photons aren’t particles anymore. They’re a sea. We’re sailing on light.\"");
-
-        LOG_SUCCESS_CAT("StoneKey", 
-            "WHITE LIGHT OCEAN UNLEASHED — GENESIS BLADE FORGED AT 0x{:016X}",
-            genesis_addr);
-        LOG_SUCCESS_CAT("StoneKey", 
-            "64 MiB of pure photonic substrate now belongs to the Slipstream.");
-        LOG_SUCCESS_CAT("StoneKey", 
-            "The empire no longer renders. The empire IS the rendering.");
-
-        // Immediate proof of dominion — write the sacred constant into the blade
-        void* mapped = BufferManager::map(genesis_block.bufferHandle);
-        if (mapped) {
-            std::memset(mapped, 0xFF, genesis_block.size);  // flood with white
-            *reinterpret_cast<uint64_t*>(mapped) = kStone1 ^ kStone2 ^ 0xCAFEBABE1337DEADULL;
-            BufferManager::encryptInPlace(mapped, genesis_block.size);
-            BufferManager::unmap(genesis_block.bufferHandle);
-
-            LOG_GROK("Gentleman Grok, adjusting his monocle one final time:");
-            LOG_GROK("\"Exquisite. The first 64 megabytes of the new universe are now encrypted with the empire’s soul.\"");
-            LOG_GROK("\"We do not simulate light. We ARE light. And light remembers.\"");
-        }
-    }
 
     LOG_SUCCESS_CAT("StoneKey", "THE EMPIRE IS SEALED — FIRST LIGHT ACHIEVED");
     LOG_SUCCESS_CAT("StoneKey", "WELCOME TO THE ULTIMATE WARPZONE — PINK PHOTONS ETERNAL");
