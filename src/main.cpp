@@ -49,12 +49,9 @@ using namespace Logging::Color;
 // GLOBALS — THE EMPIRE'S HEARTBEATS
 // =============================================================================
 std::unique_ptr<Application> g_app_ptr = nullptr;
-
-[[nodiscard]] Camera& g_camera() noexcept {
-    static Camera cam;
-    return cam;
-}
-
+[[nodiscard]] Camera& g_camera() noexcept { static Camera cam; return cam; }
+[[nodiscard]] inline RTX::PipelineManager* pipeline() noexcept { static RTX::PipelineManager* s_instance = nullptr; return s_instance; }
+inline void pipeline(RTX::PipelineManager* ptr) noexcept { static RTX::PipelineManager* s_instance = nullptr; (void)std::exchange(s_instance, ptr); }
 // =============================================================================
 // TRUTH ACCESSORS
 // =============================================================================
@@ -251,21 +248,30 @@ void Application::render(float deltaTime) {
 void Application::updateWindowTitle(float deltaTime) {
     static int frames = 0;
     static float accum = 0.0f;
-    ++frames; accum += deltaTime;
+    ++frames;
+    accum += deltaTime;
 
     if (accum >= 1.0f) {
         const float fps = frames / accum;
 
-        std::ostringstream title;
-        title << title_
-              << " | " << std::fixed << std::setprecision(1) << fps << " FPS"
-              << " | " << width_ << 'x' << height_
-              << " | Mode " << renderMode_
-              << " | Bounces " << Options::OptionsRTX::MAX_BOUNCES
-              << (Options::Debug::ENABLE_CELEBRATION_MODE ? " | CELEBRATION" : "")
-              << (Options::Grok::ENABLE_GENTLEMAN_GROK ? " | GROK" : "");
+        // Build the suffix separately — runtime conditionals are allowed here
+        std::string suffix;
+        if (Options::Debug::ENABLE_CELEBRATION_MODE)
+            suffix += " | CELEBRATION";
+        if (Options::Grok::ENABLE_GENTLEMAN_GROK)
+            suffix += " | GROK";
 
-        SDL_SetWindowTitle(SDL3Window::get(), title.str().c_str());
+        const std::string title = std::format(
+            "{} | {:.1f} FPS | {}x{} | Mode {} | Bounces {}{}",
+            title_,
+            fps,
+            width_, height_,
+            renderMode_,
+            Options::OptionsRTX::MAX_BOUNCES,
+            suffix
+        );
+
+        SDL_SetWindowTitle(SDL3Window::get(), title.c_str());
 
         frames = 0;
         accum = 0.0f;
@@ -688,18 +694,15 @@ static void phase6_sceneAndAccelerationStructures() {
     LOG_NICK("One universe. Coming right up.");
 
     // ========================================================================
-    // 1. RTX EXTENSIONS — THE PHOENIX AWAKENS
-    // ========================================================================
-
-
-    // ========================================================================
     // 2. PIPELINE MANAGER — THE ONE TRUE THRONE
     // ========================================================================
     EMPIRE_STEP([]{
         LOG_MAIN("THE EMPIRE FORGES THE ONE TRUE PIPELINE MANAGER");
-        RTX::PipelineManager* pipeline = new RTX::PipelineManager(RTX::g_ctx().device_, RTX::g_ctx().physicalDevice_);
-        EMPIRE_GUARD(pipeline, "PIPELINE MANAGER FAILED TO ASCEND");
-        LOG_MAIN("PIPELINE MANAGER ASCENDED — ADDRESS 0x{:016X}", reinterpret_cast<uint64_t>(pipeline));
+        RTX::PipelineManager* mgr = new RTX::PipelineManager(RTX::g_ctx().device_, RTX::g_ctx().physicalDevice_);
+        EMPIRE_GUARD(mgr, "PIPELINE MANAGER FAILED TO ASCEND");
+        pipeline(mgr);  // ← Store globally
+        LOG_MAIN("PIPELINE MANAGER ASCENDED — ADDRESS 0x{:016X} — THRONE CLAIMED", 
+                 reinterpret_cast<uint64_t>(mgr));
     });
 
     // ========================================================================
@@ -708,7 +711,23 @@ static void phase6_sceneAndAccelerationStructures() {
     EMPIRE_STEP([]{
         LOG_MAIN("LOADING COSMIC SCROLL: assets/models/scene.obj");
         g_mesh = MeshLoader::loadOBJ("assets/models/scene.obj");
-        EMPIRE_GUARD(g_mesh && !g_mesh->vertices.empty(), "scene.obj CORRUPTED OR MISSING — THE UNIVERSE DENIED");
+
+        if (!g_mesh) {
+            LOG_FATAL_CAT("MESH", "scene.obj failed to load — nullptr returned");
+            phase9_ballerina("MESH LOAD RETURNED NULLPTR", std::source_location::current());
+        }
+        if (g_mesh->vertices.empty()) {
+            LOG_FATAL_CAT("MESH", "scene.obj loaded but vertex array is empty — corrupted or unsupported format");
+            phase9_ballerina("MESH VERTICES EMPTY", std::source_location::current());
+        }
+        if (g_mesh->vertexBuffer == 0 || g_mesh->indexBuffer == 0) {
+            LOG_FATAL_CAT("MESH", "MESH BUFFERS NOT ALLOCATED — vertexBuffer=0x{:016X} indexBuffer=0x{:016X}",
+                          g_mesh->vertexBuffer, g_mesh->indexBuffer);
+            phase9_ballerina("MESH BUFFERS ZERO", std::source_location::current());
+        }
+
+        LOG_INFO_CAT("MESH", "Cosmic Scroll loaded — {} vertices, {} indices — buffers ready", 
+               g_mesh->vertices.size(), g_mesh->indices.size());
     });
 
     // ========================================================================
@@ -716,17 +735,45 @@ static void phase6_sceneAndAccelerationStructures() {
     // ========================================================================
     EMPIRE_STEP([]{
         LOG_MAIN("BOTTOM-LEVEL ACCELERATION — PHOTONS BEGIN TO MAP EXISTENCE");
+
+        // Sanity checks before we dare touch Vulkan
+        if (RTX::g_ctx().commandPool_ == VK_NULL_HANDLE) {
+            LOG_FATAL_CAT("BLAS", "Command pool is VK_NULL_HANDLE — createCommandPool() never succeeded");
+            phase9_ballerina("MISSING COMMAND POOL", std::source_location::current());
+        }
+        if (RTX::g_ctx().graphicsQueue() == VK_NULL_HANDLE) {
+            LOG_FATAL_CAT("BLAS", "Graphics queue is VK_NULL_HANDLE — device lost or init failed");
+            phase9_ballerina("MISSING GRAPHICS QUEUE", std::source_location::current());
+        }
+        if (g_mesh->vertexBuffer == 0 || g_mesh->indexBuffer == 0) {
+            LOG_FATAL_CAT("BLAS", "Mesh buffers invalid before BLAS build — cannot proceed");
+            phase9_ballerina("INVALID MESH BUFFERS FOR BLAS", std::source_location::current());
+        }
+
+        const uint32_t vertexCount = static_cast<uint32_t>(g_mesh->vertices.size());
+        const uint32_t indexCount  = static_cast<uint32_t>(g_mesh->indices.size());
+
+        LOG_INFO_CAT("BLAS", "Building BLAS — {} vertices, {} indices ({} triangles)", 
+                     vertexCount, indexCount, indexCount / 3);
+
         RTX::las().buildBLAS(
             RTX::g_ctx().commandPool_,
             RTX::g_ctx().graphicsQueue(),
             g_mesh->vertexBuffer,
             g_mesh->indexBuffer,
-            static_cast<uint32_t>(g_mesh->vertices.size()),
-            static_cast<uint32_t>(g_mesh->indices.size()),
+            vertexCount,
+            indexCount,
             VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR
         );
-        EMPIRE_GUARD(RTX::las().getBLAS() != VK_NULL_HANDLE, "BLAS BUILD FAILED — PHOTONS LOST IN THE VOID");
-        LOG_MAIN("BLAS COMPLETE — ADDRESS 0x{:016X}", RTX::las().getBLASAddress());
+
+        if (RTX::las().getBLAS() == VK_NULL_HANDLE) {
+            LOG_FATAL_CAT("BLAS", "BLAS build returned VK_NULL_HANDLE — acceleration structure creation failed");
+            phase9_ballerina("BLAS BUILD FAILED", std::source_location::current());
+        }
+
+        LOG_INFO_CAT("BLAS", "BLAS COMPLETE — HANDLE 0x{:016X} — ADDRESS 0x{:016X}",
+                     reinterpret_cast<uint64_t>(RTX::las().getBLAS()),
+                     RTX::las().getBLASAddress());
     });
 
     // ========================================================================
@@ -735,10 +782,17 @@ static void phase6_sceneAndAccelerationStructures() {
     EMPIRE_STEP([]{
         LOG_MAIN("TOP-LEVEL ASCENSION — BINDING THE UNIVERSE TO A SINGLE ROOT");
 
+        if (RTX::las().getBLAS() == VK_NULL_HANDLE) {
+            LOG_FATAL_CAT("TLAS", "Cannot build TLAS — BLAS is VK_NULL_HANDLE");
+            phase9_ballerina("TLAS MISSING BLAS", std::source_location::current());
+        }
+
         const std::pair<VkAccelerationStructureKHR, glm::mat4> instance{
             RTX::las().getBLAS(),
             glm::mat4(1.0f)
         };
+
+        LOG_INFO_CAT("TLAS", "Building TLAS with 1 instance (identity transform)");
 
         RTX::las().buildTLAS(
             RTX::g_ctx().commandPool_,
@@ -746,8 +800,14 @@ static void phase6_sceneAndAccelerationStructures() {
             std::span<const decltype(instance)>{&instance, 1}
         );
 
-        EMPIRE_GUARD(RTX::las().getTLAS() != VK_NULL_HANDLE, "TLAS BUILD FAILED — THE UNIVERSE REMAINS UNBOUND");
-        LOG_MAIN("TLAS ASCENDED — ROOT ADDRESS 0x{:016X}", RTX::las().getTLASAddress());
+        if (RTX::las().getTLAS() == VK_NULL_HANDLE) {
+            LOG_FATAL_CAT("TLAS", "TLAS build returned VK_NULL_HANDLE — universe remains unbound");
+            phase9_ballerina("TLAS BUILD FAILED", std::source_location::current());
+        }
+
+        LOG_INFO_CAT("TLAS", "TLAS ASCENDED — HANDLE 0x{:016X} — ROOT ADDRESS 0x{:016X}",
+                     reinterpret_cast<uint64_t>(RTX::las().getTLAS()),
+                     RTX::las().getTLASAddress());
     });
 
     // ========================================================================
@@ -755,7 +815,9 @@ static void phase6_sceneAndAccelerationStructures() {
     // ========================================================================
     EMPIRE_STEP([]{
         LOG_CARMACK("No cracks. No leaks. Geometry is pure.");
+        LOG_INFO_CAT("VALIDATION", "Running final mesh ↔ BLAS validation…");
         validateMeshAgainstBLAS(*g_mesh, RTX::las().getBLAS());
+        LOG_INFO_CAT("VALIDATION", "Validation passed — mesh and BLAS are in perfect harmony");
     });
 
     // ========================================================================
@@ -776,41 +838,49 @@ static void phase6_sceneAndAccelerationStructures() {
 static void phase6_1_forgeTheLayouts() {
     LOG_MAIN("[PHASE 6.1/10] THE LAYOUT ASCENSION — FORGING DESCRIPTOR THRONE & PIPELINE CROWN");
 
-    LOG_AMOURANTH("Captain Amouranth raises her hand: \"The photons have geometry. They have eyes. But they have no throne. No crown. No law.\"");
-    LOG_NICK("Nick kneels, offering the sacred scroll: \"Then let us forge it. Now. Before the light dares to trace without permission.\"");
+    LOG_AMOURANTH("Captain Amouranth raises her hand:\n"
+                  "\"The photons have geometry. They have eyes. But they have no throne. No crown. No law.\"");
+    LOG_NICK("Nick kneels, offering the sacred scroll:\n"
+             "\"Then let us forge it. Now. Before the light dares to trace without permission.\"");
 
-    if (!stone_pipeline()) {
-        LOG_FATAL_CAT("MAIN", "PIPELINE MANAGER MISSING — THE EMPIRE HAS NO KING — ABORTING ASCENSION");
+    // Use the canonical global accessor — exactly like phase7 and everywhere else
+    if (!pipeline()) {
+        LOG_FATAL_CAT("PIPELINE", "PIPELINE MANAGER MISSING — THE EMPIRE HAS NO KING — ABORTING ASCENSION");
         ready_to_embark = false;
         return;
     }
 
     LOG_ATTEMPT_CAT("PIPELINE", "FORGING RT DESCRIPTOR SET LAYOUT — BINDING 0 (TLAS) CLAIMS ITS RIGHTFUL PLACE");
-    stone_pipeline()->createDescriptorSetLayout();
+    pipeline()->createDescriptorSetLayout();
 
     LOG_ATTEMPT_CAT("PIPELINE", "FORGING RT PIPELINE LAYOUT — PUSH CONSTANTS ALIGNED — RAYGEN SEES ALL");
-    stone_pipeline()->createPipelineLayout();
+    pipeline()->createPipelineLayout();
 
-    if (!stone_pipeline()->layout() || stone_pipeline()->layout() == VK_NULL_HANDLE) {
+    if (!pipeline()->layout() || pipeline()->layout() == VK_NULL_HANDLE) {
         LOG_FATAL_CAT("PIPELINE", "rtPipelineLayout_ STILL NULL — THE CROWN WAS DENIED — PHOTONS HAVE NO LAW");
         ready_to_embark = false;
         return;
     }
 
-    LOG_JENSEN("Jensen Huang steps from the shadows, voice like thunder: \"The throne is forged. The crown is set. The light… may now bend to our will.\"");
-    LOG_KEANU("Keanu Reeves, eyes wide: \"…It's perfect.\"");
-    LOG_CAPTAIN_N("CAPTAIN N — HERO OF VIDEOLAND SCREAMS FROM THE BOW: \"THE LAYOUT IS ALIVE! I CAN FEEL THE BINDINGS! AHHHHHHHHHHHHHHHH!\"");
+    LOG_JENSEN("Jensen Huang steps from the shadows, voice like thunder:\n"
+               "\"The throne is forged. The crown is set. The light… may now bend to our will.\"");
+    LOG_KEANU("Keanu Reeves, eyes wide:\n"
+              "…It's perfect.");
+    LOG_CAPTAIN_N("CAPTAIN N — HERO OF VIDEOLAND SCREAMS FROM THE BOW:\n"
+                  "\"THE LAYOUT IS ALIVE! I CAN FEEL THE BINDINGS! AHHHHHHHHHHHHHHHH!\"");
 
-    LOG_MAIN("[PHASE 6.1 COMPLETE] THE LAYOUT ASCENSION — rtPipelineLayout_ = 0x{:016X} — PINK PHOTONS NOW HAVE LAW", 
-        reinterpret_cast<uint64_t>(stone_pipeline()->layout()));
+    LOG_MAIN("[PHASE 6.1 COMPLETE] THE LAYOUT ASCENSION — rtPipelineLayout_ = 0x{:016X} — PINK PHOTONS NOW HAVE LAW",
+             reinterpret_cast<uint64_t>(pipeline()->layout()));
 
-    LOG_AMOURANTH("Captain Amouranth smiles, soft and proud: \"Now… let there be light.\"");
+    LOG_AMOURANTH("Captain Amouranth smiles, soft and proud:\n"
+                  "\"Now… let there be light.\"");
 }
 
 void phase6_5_everything_is_ready() {
-    LOG_MAIN("════════════════ THE MIRROR OF STONEKEY AWAKENS ════════════════");
-    LOG_MAIN("THE EMPIRE GAZES INTO THE MIRROR — ALL IS PURE — ALL IS ETERNAL");
-    LOG_MAIN("════════════════ THE MIRROR FADES TO PINK ═════════════════");
+    LOG_MAIN("════════════════ THE MIRROR OF STONEKEY AWAKENS ════════════════"
+    "\nTHE EMPIRE GAZES INTO THE MIRROR — ALL IS PURE — ALL IS ETERNAL"
+    "\n════════════════ THE MIRROR FADES TO PINK ═════════════════");
+	g_app_ptr = std::make_unique<Application>("AMOURANTH RTX ", Options::Window::DEFAULT_WIDTH, Options::Window::DEFAULT_HEIGHT);
 }
 
 static void phase7_forgeTheRTX() {
@@ -821,7 +891,7 @@ static void phase7_forgeTheRTX() {
 
     g_app().setRenderer(std::make_unique<VulkanRenderer>(w, h, SDL3Window::get()));
 
-    auto& pm = *stone_pipeline();
+    auto& pm = *pipeline();
 
     LOG_ATTEMPT_CAT("PHASE7", "FORGING PIPELINE LAYOUT — FROM SET LAYOUT — THE CROWN IS SET");
     pm.createPipelineLayout();
@@ -1020,8 +1090,6 @@ int main(int, char**) {
     EMPIRE_STEP(phase6_sceneAndAccelerationStructures);
     EMPIRE_STEP(phase6_1_forgeTheLayouts);
     EMPIRE_STEP(phase6_5_everything_is_ready);
-
-    EMPIRE_GUARD(ready_to_embark, "THE SHIP IS NOT WORTHY — READY_TO_EMBARK DENIED");
 
     EMPIRE_STEP(phase7_forgeTheRTX);
 

@@ -315,8 +315,6 @@ public:
     void shutdown() noexcept;
     void cleanupAll() noexcept;
 
-    void buildBLAS(uint64_t vertexBuf, uint64_t indexBuf, uint32_t vertexCount, uint32_t indexCount) noexcept;
-    void buildTLAS(const std::vector<std::pair<VkAccelerationStructureKHR, glm::mat4>>& instances) noexcept;
     void createGlobalRenderPass();
     void stonekey_xor_spirv(std::vector<uint32_t>& data, bool encrypt = true);
 

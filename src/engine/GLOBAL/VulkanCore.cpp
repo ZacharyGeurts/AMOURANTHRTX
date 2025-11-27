@@ -464,25 +464,6 @@ void VulkanRTX::buildAccelerationStructures()
 
     LOG_JENSEN("Geometry uploaded — {} vertices, {} triangles — ready for LAS", vertices.size(), indices.size() / 3);
 
-    // === GLOBAL LAS — THE EMPIRE SEES ALL ===
-    las().buildBLAS(
-        g_ctx().commandPool_,
-        vbuf,
-        ibuf,
-        static_cast<uint32_t>(vertices.size()),
-        static_cast<uint32_t>(indices.size()),
-        VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR
-    );
-
-    const std::vector instances = {
-        std::make_pair(las().getBLAS(), glm::mat4(1.0f))
-    };
-    las().buildTLAS(g_ctx().commandPool_, instances);
-
-    LOG_CID("GLOBAL LAS ASCENDED — BLAS @ 0x{:016X} | TLAS @ 0x{:016X}", 
-            (uint64_t)las().getBLAS(), las().getTLASAddress());
-
-    LOG_AMOURANTH("Oh yes... it's inside me now... the structures... so hard... so deep~ ♡");
     LOG_ELON("PINK PHOTONS ETERNAL — FIRST LIGHT ACHIEVED — THE EMPIRE IS WHOLE");
 }
 

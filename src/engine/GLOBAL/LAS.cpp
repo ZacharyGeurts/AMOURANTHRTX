@@ -197,7 +197,7 @@ void LAS::buildTLAS(VkCommandPool pool,
                     std::span<const std::pair<VkAccelerationStructureKHR, glm::mat4>> instances) noexcept
 {
     if (instances.empty()) {
-        LOG_NICK("No instances yet. The universe is still quiet. That’s okay.");
+        LOG_FAILURE("LAS", "No instances yet. TRY AFTER INSTANCE OR DIE - Ballerina");
         if (tlas_.valid()) tlas_.reset();
         if (instanceBufferId_) { BufferManager::destroy(instanceBufferId_); instanceBufferId_ = 0; }
         return;
