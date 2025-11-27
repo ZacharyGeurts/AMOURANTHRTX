@@ -1001,4 +1001,4 @@ inline constexpr auto EMPIRE_STEP = []<typename F>(F&& phase, const std::source_
 #define LOG_BLONDIE(...)     LOG_INFO_CAT   ("BLONDIE",    std::format("{}\n[CAPTAIN BLONDIE] {}{}",   Logging::Color::PEACHES_AND_CREAM, std::format(__VA_ARGS__),     Logging::Color::RESET))
 #define LOG_GUARDIAN(...)    LOG_INFO_CAT   ("GUARDIAN",   std::format("{}\n[GUARDIAN] {}{}",          Logging::Color::PLATINUM_GRAY,     std::format(__VA_ARGS__),     Logging::Color::RESET))
 #define LOG_BALLERINA(...)   LOG_FAILURE_CAT("BALLERINA",  std::format("{}\n[***] {}{}",               Logging::Color::OBSIDIAN_BLACK,    std::format(__VA_ARGS__),     Logging::Color::RESET))
-#define LOG_MAIN(...)        LOG_SUCCESS_CAT("MAIN",       std::format("{}\n[[[[[MAIN]]]]] {}{}",      Logging::Color::BOLD_YELLOW,       std::format(__VA_ARGS__),     Logging::Color::RESET))
+#define LOG_MAIN(...)        LOG_SUCCESS_CAT("MAIN",       std::format("{}\n[[[[[MAIN]]]]]\n {}{}",      Logging::Color::BOLD_YELLOW,       std::format(__VA_ARGS__),     Logging::Color::RESET))

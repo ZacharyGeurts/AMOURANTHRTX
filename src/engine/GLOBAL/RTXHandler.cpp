@@ -15,6 +15,8 @@
 
 using namespace Logging::Color;
 using StoneKey::stone_device;
+using StoneKey::stone_seal_device;
+using StoneKey::stone_seal_physical;
 
 namespace RTX {
 
@@ -280,54 +282,87 @@ VkShaderModule RTX::Context::loadShader(const std::string& filename) const
 
     if (stone_device() == VK_NULL_HANDLE) {
         LOG_WARN_CAT("SHADER", "loadShader early call (device not ready) → {}", filename);
-        return VK_NULL_HANDLE;
+        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
     }
 
     LOG_ATTEMPT_CAT("SHADER", "FORGING KEYED SHADER → {}", filename);
 
+    // ── CARMACK DESCENDS — ONE LINE PER TRUTH — NO MERCY
+    LOG_CARMACK("Loading encrypted SPV → {} | cwd: {} | expected: ./assets/shaders/.../.spv", 
+                filename, std::filesystem::current_path().string());
+
     FILE* f = std::fopen(filename.c_str(), "rb");
     if (!f) {
+        LOG_CARMACK("fopen() FAILED — FILE NOT FOUND | likely chance: wrong cwd or .spv not deployed | run from bin/Linux/");
         LOG_FATAL_CAT("SHADER", "MISSING → {}", filename);
-        return VK_NULL_HANDLE;
+        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
     }
 
     std::fseek(f, 0, SEEK_END);
     const size_t size = std::ftell(f);
     std::rewind(f);
 
-    if (size < 128 || size % 4 != 0) {
+    LOG_CARMACK("File opened — size {} bytes ({} KiB) | {}aligned to 4", 
+                size, size/1024, (size%4==0 ? "" : "NOT "));
+
+    if (size < 128) {
+        LOG_CARMACK("File <128 bytes → NOT SPIR-V | you shipped .comp source or glslc failed");
         std::fclose(f);
-        LOG_FATAL_CAT("SHADER", "CORRUPT SIZE {} → {}", size, filename);
-        return VK_NULL_HANDLE;
+        LOG_FATAL_CAT("SHADER", "TOO SMALL {} bytes → {}", size, filename);
+        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
+    }
+    if (size % 4 != 0) {
+        LOG_CARMACK("Size not 4-byte aligned → corrupted/truncated during encryption or write");
+        std::fclose(f);
+        LOG_FATAL_CAT("SHADER", "UNALIGNED SIZE {} → {}", size, filename);
+        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
     }
 
     std::vector<uint32_t> encrypted(size / 4);
-    if (std::fread(encrypted.data(), 1, size, f) != size) {
-        std::fclose(f);
-        LOG_FATAL_CAT("SHADER", "READ ERROR → {}", filename);
-        return VK_NULL_HANDLE;
-    }
+    const size_t read = std::fread(encrypted.data(), 1, size, f);
     std::fclose(f);
 
-    // ── STONEKEY v∞ DECRYPTION — USING REAL GLOBAL kStone1 & kStone2
+    if (read != size) {
+        LOG_CARMACK("CARMACK: fread() read {} of {} bytes → disk corruption or race condition", read, size);
+        LOG_FATAL_CAT("SHADER", "PARTIAL READ {} < {} → {}", read, size, filename);
+        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
+    }
+
+    // ── HASH THE RAW ENCRYPTED DATA — CRACK ITS BALLS
+    uint64_t rawHash = 0xCBF29CE484222325ULL;
+    for (auto word : encrypted) rawHash = (rawHash ^ word) * 0x517cc1b727220a95ULL;
+    LOG_CARMACK("CARMACK: Encrypted hash = 0x{:016X} | size {} bytes", rawHash, size);
+
+    // ── STONEKEY v∞ DECRYPTION — THE FINAL RITUAL
     {
         uint64_t state = kStone1 ^ kStone2 ^ size;
+        LOG_CARMACK("CARMACK: Decryption seed = kStone1 ^ kStone2 ^ size = 0x{:016X}", state);
 
         for (size_t i = 0; i < encrypted.size(); ++i) {
             state = state * 0x517cc1b727220a95ULL + 0x8532b8c73f92e64bULL;
             uint64_t key = state ^ kStone1 ^ (i * 0x9e3779b97f4a7c15ULL);
             encrypted[i] ^= static_cast<uint32_t>(key) ^ static_cast<uint32_t>(key >> 32);
         }
+
+        LOG_CARMACK("CARMACK: Decryption complete — validating SPIR-V magic...");
     }
+
+    // ── POST-DECRYPT HASH — WE OWN THIS SHADER NOW
+    uint64_t decryptedHash = 0xCBF29CE484222325ULL;
+    for (auto word : encrypted) decryptedHash = (decryptedHash ^ word) * 0x517cc1b727220a95ULL;
 
     if (encrypted[0] != 0x07230203u) {
-        LOG_FATAL_CAT("SHADER", "DECRYPT FAILED — BAD MAGIC 0x{:08x} → {}", encrypted[0], filename);
-        return VK_NULL_HANDLE;
+        LOG_CARMACK("CARMACK: DECRYPTION FAILED — magic 0x{:08X} (want 0x07230203)", encrypted[0]);
+        LOG_CARMACK("CARMACK: Keys out of sync | .spv encrypted with old kStone1/kStone2 | or loading unencrypted SPV");
+        LOG_CARMACK("CARMACK: Encrypted hash: 0x{:016X} | Decrypted hash: 0x{:016X}", rawHash, decryptedHash);
+        LOG_FATAL_CAT("SHADER", "BAD MAGIC 0x{:08X} → {}", encrypted[0], filename);
+        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
     }
 
-    LOG_SUCCESS_CAT("SHADER", "DECRYPTED → {} ({} KiB)", filename, size / 1024);
+    LOG_CARMACK("CARMACK: Magic 0x07230203 CONFIRMED — decryption perfect | hash 0x{:016X}", decryptedHash);
+    LOG_SUCCESS_CAT("SHADER", "DECRYPTED → {} ({} KiB) | hash 0x{:016X}", filename, size/1024, decryptedHash);
 
-    VkShaderModuleCreateInfo createInfo = {
+    VkShaderModuleCreateInfo createInfo{
         .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
         .codeSize = size,
         .pCode = encrypted.data()
@@ -337,11 +372,16 @@ VkShaderModule RTX::Context::loadShader(const std::string& filename) const
     VkResult result = vkCreateShaderModule(stone_device(), &createInfo, nullptr, &module);
 
     if (result != VK_SUCCESS) {
-        LOG_FATAL_CAT("SHADER", "vkCreateShaderModule FAILED ({}) → {}", static_cast<int>(result), filename);
-        return VK_NULL_HANDLE;
+        LOG_CARMACK("CARMACK: vkCreateShaderModule FAILED — VkResult {} ({})", static_cast<int32_t>(result), string_VkResult(result));
+        LOG_CARMACK("CARMACK: Likely: out of VRAM | validation layer error | unsupported SPIR-V capability");
+        LOG_CARMACK("CARMACK: Run: spirv-val {} --target-env vulkan1.3", filename);
+        LOG_FATAL_CAT("SHADER", "CREATE FAILED {} → {}", static_cast<int32_t>(result), filename);
+        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
     }
 
+    LOG_CARMACK("CARMACK: Shader module 0x{:016X} forged — PINK PHOTONS ARMED AND DANGEROUS", reinterpret_cast<uint64_t>(module));
     LOG_SUCCESS_CAT("SHADER", "MODULE FORGED → {} — PINK PHOTONS ARMED", filename);
+
     return module;
 }
 
@@ -554,6 +594,12 @@ VkShaderModule RTX::Context::loadShader(const std::string& filename) const
     if (vkCreateDevice(chosen, &createInfo, nullptr, &device) != VK_SUCCESS) {
         return VK_NULL_HANDLE;
     }
+
+	stone_seal_physical(chosen);
+    stone_seal_device(device);  // THIS IS THE FINAL KEY
+
+    LOG_AMOURANTH("Device SEALED into StoneKey — stone_device() now valid — shaders may load");
+    LOG_SUCCESS_CAT("VULKAN", "Logical device created and eternally bound to StoneKey");
 
     // Retrieve queues
     vkGetDeviceQueue(device, bestIndices.graphicsFamily.value(), 0, &g_ctx().graphicsQueue_);

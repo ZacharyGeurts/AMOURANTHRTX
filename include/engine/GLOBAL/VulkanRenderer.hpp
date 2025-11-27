@@ -66,6 +66,7 @@ public:
     void setTonemap(bool enabled) noexcept;
     void setOverlay(bool show) noexcept;
     void setRenderMode(int mode) noexcept;
+	void loadCriticalShaders() noexcept;
 
     // State queries — getters for empire status
     [[nodiscard]] uint32_t  accumulationFrame() const noexcept { return accumulationFrame_; }
@@ -165,6 +166,7 @@ private:
     RTX::Handle<VkPipelineLayout>       tonemapLayout_;
     RTX::Handle<VkPipeline>             tonemapPipeline_;
     std::vector<VkDescriptorSet>        tonemapSets_;
+    VkShaderModule tonemapCompShader_ = VK_NULL_HANDLE; 
 
     // Denoiser
     RTX::Handle<VkPipeline>       denoiserPipeline_;

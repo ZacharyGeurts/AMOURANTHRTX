@@ -473,12 +473,6 @@ if (RTX::g_ctx().device_ == VK_NULL_HANDLE) {
     // =============================================================================
     LOG_TRACE_CAT("RENDERER", "=== STEP 14.5: Creating Tonemap Compute Pipeline (tonemap.spv) ===");
 
-    VkShaderModule tonemapCompShader = loadShader("assets/shaders/compute/tonemap.spv");
-    if (tonemapCompShader == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("RENDERER", "Failed to load tonemap.spv — aborting");
-        LOG_FATAL_CAT("RENDERER", "Fatal error in noexcept function"); phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
-    }
-
     // ──────────────────────────────
     // DESCRIPTOR SET LAYOUT — MUST MATCH SHADER EXACTLY (FIXED: Binding 0 COMBINED_IMAGE_SAMPLER for input)
     // ──────────────────────────────
@@ -546,7 +540,7 @@ if (RTX::g_ctx().device_ == VK_NULL_HANDLE) {
     computeInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
     computeInfo.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     computeInfo.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-    computeInfo.stage.module = tonemapCompShader;
+    computeInfo.stage.module = tonemapCompShader_;
     computeInfo.stage.pName = "main";
     computeInfo.layout = tonemapPipeLayout;
 
@@ -560,7 +554,7 @@ if (RTX::g_ctx().device_ == VK_NULL_HANDLE) {
         0, "TonemapComputePipeline"
     );
 
-    vkDestroyShaderModule(RTX::g_ctx().device_, tonemapCompShader, nullptr);
+    vkDestroyShaderModule(RTX::g_ctx().device_, tonemapCompShader_, nullptr);
 
     // ──────────────────────────────
     // DESCRIPTOR POOL & SETS (FIXED: 2 storage_img? No: sampler + storage_img + ubo)
@@ -2206,6 +2200,22 @@ void VulkanRenderer::createRenderPass() noexcept {
     renderPassInfo.pSubpasses = &subpass;
 
     VK_CHECK(vkCreateRenderPass(RTX::g_ctx().device_, &renderPassInfo, nullptr, &renderPass_), "render pass");
+
+}
+
+void VulkanRenderer::loadCriticalShaders() noexcept
+{
+    LOG_ATTEMPT_CAT("RENDERER", "Loading critical shaders post-device creation — CARMACK APPROVES");
+
+    tonemapCompShader_ = RTX::loadShader("assets/shaders/compute/tonemap.spv");
+    if (tonemapCompShader_ == VK_NULL_HANDLE) {
+        LOG_FATAL_CAT("RENDERER", "FAILED TO LOAD tonemap.spv — cannot create compute pipeline");
+        std::abort();
+    }
+
+    LOG_CARMACK("tonemap.spv loaded and owned by VulkanRenderer — handle 0x{:016X}", 
+                reinterpret_cast<uint64_t>(tonemapCompShader_));
+    LOG_SUCCESS_CAT("RENDERER", "Critical shaders loaded — compute pipeline can now be forged");
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

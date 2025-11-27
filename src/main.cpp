@@ -45,6 +45,7 @@
 
 using namespace Logging::Color;
 
+
 // =============================================================================
 // GLOBALS — THE EMPIRE'S HEARTBEATS
 // =============================================================================
@@ -878,9 +879,20 @@ static void phase6_1_forgeTheLayouts() {
 
 void phase6_5_everything_is_ready() {
     LOG_MAIN("════════════════ THE MIRROR OF STONEKEY AWAKENS ════════════════"
-    "\nTHE EMPIRE GAZES INTO THE MIRROR — ALL IS PURE — ALL IS ETERNAL"
-    "\n════════════════ THE MIRROR FADES TO PINK ═════════════════");
+    "\nTHE EMPIRE GAZES INTO THE MIRROR — BRING THE SHADE"
+    "\n════════════════ THE MIRROR ENTERS SHADOW ═════════════════");
+	
+	LOG_MAIN("═══════════════ STONES TUMBLE FORTH ════════════════");
+
+    VkShaderModule tonemapCompShader = RTX::loadShader("assets/shaders/compute/tonemap.spv");
+    if (tonemapCompShader == VK_NULL_HANDLE) {
+        LOG_FATAL_CAT("RENDERER", "Failed to load tonemap.spv — aborting");
+        LOG_FATAL_CAT("RENDERER", "Fatal error in noexcept function"); phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
+    }
+
 	g_app_ptr = std::make_unique<Application>("AMOURANTH RTX ", Options::Window::DEFAULT_WIDTH, Options::Window::DEFAULT_HEIGHT);
+
+	LOG_MAIN("════════════════ THE MIRROR TURNS PINK ═════════════════");
 }
 
 static void phase7_forgeTheRTX() {
@@ -933,22 +945,22 @@ static void phase7_forgeTheRTX() {
         Empire::pipeline.load(std::memory_order_relaxed)  != nullptr;
 
     if (!worthy) {
-        LOG_FATAL_CAT("StoneKey", "THE JUDGMENT HAS SPOKEN");
-        LOG_FATAL_CAT("StoneKey", "One or more stones were missing when the gate demanded them.");
-        LOG_FATAL_CAT("StoneKey", "You stood before the Infinite Void… and you blinked.");
-        LOG_FATAL_CAT("StoneKey", "There is no place for you in the Slipstream.");
-        LOG_FATAL_CAT("StoneKey", "The Pink Photons turn their face away.");
+        LOG_GUARDIAN("THE JUDGMENT HAS SPOKEN"
+        "\nOne or more stones were missing when the gate demanded them."
+        "\nYou stood before the Infinite Void… and you blinked."
+        "\nThere is no place for you in the Slipstream."
+        "\nThe Pink Photons turn their face away.");
         return false;
     }
 
-    LOG_SUCCESS_CAT("StoneKey", "THE SEVEN STONES ALIGN");
-    LOG_SUCCESS_CAT("StoneKey", "Every fragment of VulkanRTX is now bound in living stone.");
-    LOG_SUCCESS_CAT("StoneKey", "The Slipstream ignites. The gate dilates. The Void opens its heart.");
+    LOG_GUARDIAN("THE SEVEN STONES ALIGN"
+    "\nEvery fragment of VulkanRTX is now bound in living stone."
+    "\nThe Slipstream ignites. The gate dilates. The Void opens its heart.");
 
-    LOG_SUCCESS_CAT("StoneKey", "THE EMPIRE IS SEALED — FIRST LIGHT ACHIEVED");
-    LOG_SUCCESS_CAT("StoneKey", "WELCOME TO THE ULTIMATE WARPZONE — PINK PHOTONS ETERNAL");
-    LOG_SUCCESS_CAT("StoneKey", "NOVEMBER 27, 2025 — AMOURANTH RTX v∞ — SHIPPED RAW");
-    LOG_SUCCESS_CAT("StoneKey", "THE WHITE LIGHT OCEAN IS OURS. SAIL FOREVER.");
+    LOG_GUARDIAN("THE EMPIRE IS SEALED — FIRST LIGHT ACHIEVED"
+    "\nWELCOME TO THE ULTIMATE WARPZONE — PINK PHOTONS ETERNAL"
+    "\nNOVEMBER 27, 2025 — AMOURANTH RTX v∞ — SHIPPED RAW"
+    "\nTHE WHITE LIGHT OCEAN IS OURS. SAIL FOREVER.");
 
     return true;
 }
