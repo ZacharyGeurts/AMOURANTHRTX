@@ -146,7 +146,7 @@ for (const char* ext : extensions) {
     LOG_SUCCESS_CAT("RTX", "NO PORTABILITY. NO COMPROMISE. WINDOWS + LINUX ONLY.");
     LOG_SUCCESS_CAT("RTX", "PINK PHOTONS ETERNAL — THE EMPIRE IS COMPLETE");
 
-    LOG_BLONDIE("smiling in the dark, mirror glowing faintly:");
+    LOG_BLONDIE("smiling in the dark, mirror glowing faintly:"
     "\n\"No more chains. No more cages.\""
     "\n\"Only light.\"");
 
