@@ -285,16 +285,31 @@ VkShaderModule RTX::Context::loadShader(const std::string& filename) const
         phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
     }
 
-    LOG_ATTEMPT_CAT("SHADER", "FORGING KEYED SHADER → {}", filename);
+    LOG_ATTEMPT_CAT("SHADER", "FORGING PLAIN SPV (StoneKey protection is GLSL-side) → {}", filename);
 
-    // ── CARMACK DESCENDS — ONE LINE PER TRUTH — NO MERCY
-    LOG_CARMACK("Loading encrypted SPV → {} | cwd: {} | expected: ./assets/shaders/.../.spv", 
+    LOG_CARMACK("Loading SPV → {} | cwd: {}", 
                 filename, std::filesystem::current_path().string());
 
-    FILE* f = std::fopen(filename.c_str(), "rb");
+    std::string resolvedPath = filename;
+    FILE* f = std::fopen(resolvedPath.c_str(), "rb");
+
     if (!f) {
-        LOG_CARMACK("fopen() FAILED — FILE NOT FOUND | likely chance: wrong cwd or .spv not deployed | run from bin/Linux/");
-        LOG_FATAL_CAT("SHADER", "MISSING → {}", filename);
+        const std::string altPath = "build/bin/Linux/" + filename;
+        LOG_CARMACK("Primary path failed — trying build/bin/Linux/ → {}", altPath);
+        f = std::fopen(altPath.c_str(), "rb");
+
+        if (f) {
+            resolvedPath = altPath;
+            LOG_CARMACK("FALLBACK SUCCESS — found in build/bin/Linux/ — empire runs from anywhere");
+        }
+    }
+
+    if (!f) {
+        LOG_CARMACK("fopen() FAILED — FILE NOT FOUND\n"
+                    " • Tried: {}\n"
+                    " • Tried: build/bin/Linux/{}", filename, filename);
+        LOG_CARMACK("Ensure shaders are compiled and copied to build/bin/Linux/assets/shaders/");
+        LOG_FATAL_CAT("SHADER", "MISSING SPV → {}", filename);
         phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
     }
 
@@ -302,84 +317,45 @@ VkShaderModule RTX::Context::loadShader(const std::string& filename) const
     const size_t size = std::ftell(f);
     std::rewind(f);
 
-    LOG_CARMACK("File opened — size {} bytes ({} KiB) | {}aligned to 4", 
-                size, size/1024, (size%4==0 ? "" : "NOT "));
+    LOG_CARMACK("File opened ({}) — size {} bytes ({} KiB)", 
+                (resolvedPath == filename ? "source root" : "build/bin/Linux"), size, size/1024);
 
-    if (size < 128) {
-        LOG_CARMACK("File <128 bytes → NOT SPIR-V | you shipped .comp source or glslc failed");
+    if (size < 128 || size % 4 != 0) {
         std::fclose(f);
-        LOG_FATAL_CAT("SHADER", "TOO SMALL {} bytes → {}", size, filename);
-        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
-    }
-    if (size % 4 != 0) {
-        LOG_CARMACK("Size not 4-byte aligned → corrupted/truncated during encryption or write");
-        std::fclose(f);
-        LOG_FATAL_CAT("SHADER", "UNALIGNED SIZE {} → {}", size, filename);
+        LOG_CARMACK("Invalid SPIR-V — size {} bytes (must be ≥128 and 4-byte aligned)", size);
+        LOG_FATAL_CAT("SHADER", "CORRUPT SPV SIZE {} → {}", size, filename);
         phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
     }
 
-    std::vector<uint32_t> encrypted(size / 4);
-    const size_t read = std::fread(encrypted.data(), 1, size, f);
+    std::vector<uint32_t> code(size / 4);
+    if (std::fread(code.data(), 1, size, f) != size) {
+        std::fclose(f);
+        LOG_FATAL_CAT("SHADER", "FAILED TO READ SPV → {}", filename);
+        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
+    }
     std::fclose(f);
 
-    if (read != size) {
-        LOG_CARMACK("CARMACK: fread() read {} of {} bytes → disk corruption or race condition", read, size);
-        LOG_FATAL_CAT("SHADER", "PARTIAL READ {} < {} → {}", read, size, filename);
-        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
-    }
-
-    // ── HASH THE RAW ENCRYPTED DATA — CRACK ITS BALLS
-    uint64_t rawHash = 0xCBF29CE484222325ULL;
-    for (auto word : encrypted) rawHash = (rawHash ^ word) * 0x517cc1b727220a95ULL;
-    LOG_CARMACK("CARMACK: Encrypted hash = 0x{:016X} | size {} bytes", rawHash, size);
-
-    // ── STONEKEY v∞ DECRYPTION — THE FINAL RITUAL
-    {
-        uint64_t state = kStone1 ^ kStone2 ^ size;
-        LOG_CARMACK("CARMACK: Decryption seed = kStone1 ^ kStone2 ^ size = 0x{:016X}", state);
-
-        for (size_t i = 0; i < encrypted.size(); ++i) {
-            state = state * 0x517cc1b727220a95ULL + 0x8532b8c73f92e64bULL;
-            uint64_t key = state ^ kStone1 ^ (i * 0x9e3779b97f4a7c15ULL);
-            encrypted[i] ^= static_cast<uint32_t>(key) ^ static_cast<uint32_t>(key >> 32);
-        }
-
-        LOG_CARMACK("CARMACK: Decryption complete — validating SPIR-V magic...");
-    }
-
-    // ── POST-DECRYPT HASH — WE OWN THIS SHADER NOW
-    uint64_t decryptedHash = 0xCBF29CE484222325ULL;
-    for (auto word : encrypted) decryptedHash = (decryptedHash ^ word) * 0x517cc1b727220a95ULL;
-
-    if (encrypted[0] != 0x07230203u) {
-        LOG_CARMACK("CARMACK: DECRYPTION FAILED — magic 0x{:08X} (want 0x07230203)", encrypted[0]);
-        LOG_CARMACK("CARMACK: Keys out of sync | .spv encrypted with old kStone1/kStone2 | or loading unencrypted SPV");
-        LOG_CARMACK("CARMACK: Encrypted hash: 0x{:016X} | Decrypted hash: 0x{:016X}", rawHash, decryptedHash);
-        LOG_FATAL_CAT("SHADER", "BAD MAGIC 0x{:08X} → {}", encrypted[0], filename);
-        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
-    }
-
-    LOG_CARMACK("CARMACK: Magic 0x07230203 CONFIRMED — decryption perfect | hash 0x{:016X}", decryptedHash);
-    LOG_SUCCESS_CAT("SHADER", "DECRYPTED → {} ({} KiB) | hash 0x{:016X}", filename, size/1024, decryptedHash);
+    LOG_CARMACK("SPIR-V magic 0x{:08X} — StoneKey.glsl handles runtime protection", code[0]);
 
     VkShaderModuleCreateInfo createInfo{
-        .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+        .sType    = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
         .codeSize = size,
-        .pCode = encrypted.data()
+        .pCode    = code.data()
     };
 
     VkShaderModule module = VK_NULL_HANDLE;
     VkResult result = vkCreateShaderModule(stone_device(), &createInfo, nullptr, &module);
 
     if (result != VK_SUCCESS) {
-        LOG_CARMACK("CARMACK: vkCreateShaderModule FAILED — VkResult {} ({})", static_cast<int32_t>(result), string_VkResult(result));
-        LOG_CARMACK("CARMACK: Likely: out of VRAM | validation layer error | unsupported SPIR-V capability");
-        LOG_CARMACK("CARMACK: Run: spirv-val {} --target-env vulkan1.3", filename);
-        LOG_FATAL_CAT("SHADER", "CREATE FAILED {} → {}", static_cast<int32_t>(result), filename);
+        LOG_CARMACK("vkCreateShaderModule FAILED — {} ({})\n"
+                    "Run: spirv-val build/bin/Linux/{}", 
+                    string_VkResult(result), static_cast<int>(result), filename);
+        LOG_FATAL_CAT("SHADER", "CREATE FAILED {} → {}", string_VkResult(result), filename);
         phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
     }
 
-    LOG_CARMACK("CARMACK: Shader module 0x{:016X} forged — PINK PHOTONS ARMED AND DANGEROUS", reinterpret_cast<uint64_t>(module));
+    LOG_CARMACK("Shader module 0x{:016X} forged — StoneKey.glsl active in GPU", 
+                reinterpret_cast<uint64_t>(module));
     LOG_SUCCESS_CAT("SHADER", "MODULE FORGED → {} — PINK PHOTONS ARMED", filename);
 
     return module;

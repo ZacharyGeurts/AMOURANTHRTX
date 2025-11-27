@@ -17,5 +17,5 @@
 #include <ctime>
 #include <unistd.h> 
 
-uint64_t kStone1 = 0x517F3D6A9B8C4E2FULL ^ __builtin_ia32_rdtsc() ^ reinterpret_cast<uintptr_t>(&kStone1);
-uint64_t kStone2 = 0xA1B2C3D4E5F60789ULL ^ getpid() ^ (uint64_t)time(nullptr);
+uint64_t kStone1 = 0x9E37AF18C64D8A17UL ^ __builtin_ia32_rdtsc() ^ reinterpret_cast<uintptr_t>(&kStone1);
+uint64_t kStone2 = 0xE4F8B29D71A3C56CUL ^ getpid() ^ (uint64_t)time(nullptr);
