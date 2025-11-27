@@ -910,7 +910,6 @@ static constexpr auto vkh = []() constexpr noexcept {
 #undef  LOG_NICK
 #undef  LOG_BLONDIE
 #undef  LOG_GUARDIAN
-#undef  LOG_KEEPER
 #undef  LOG_BALLERINA
 #undef  LOG_MAIN
 
@@ -926,6 +925,5 @@ static constexpr auto vkh = []() constexpr noexcept {
 #define LOG_KEANU(...)       LOG_INFO_CAT   ("KEANU",      std::format("{}[WOAH] {}{}",              Logging::Color::VOID_PURPLE,       std::format(__VA_ARGS__),     Logging::Color::RESET))
 #define LOG_BLONDIE(...)     LOG_INFO_CAT   ("BLONDIE",    std::format("{}[CAPTAIN BLONDIE] {}{}",   Logging::Color::PEACHES_AND_CREAM, std::format(__VA_ARGS__),     Logging::Color::RESET))
 #define LOG_GUARDIAN(...)    LOG_INFO_CAT   ("GUARDIAN",   std::format("{}[GUARDIAN] {}{}",          Logging::Color::PLATINUM_GRAY,     std::format(__VA_ARGS__),     Logging::Color::RESET))
-#define LOG_KEEPER(...)      LOG_INFO_CAT   ("KEEPER",     std::format("{}[KEEPER] {}{}",            Logging::Color::DIAMOND_WHITE,     std::format(__VA_ARGS__),     Logging::Color::RESET))
 #define LOG_BALLERINA(...)   LOG_FAILURE_CAT("BALLERINA",  std::format("{}[***] {}{}",               Logging::Color::OBSIDIAN_BLACK,    std::format(__VA_ARGS__),     Logging::Color::RESET))
 #define LOG_MAIN(...)        LOG_SUCCESS_CAT("MAIN",       std::format("{}[[[[[MAIN]]]]] {}{}",      Logging::Color::BOLD_YELLOW,       std::format(__VA_ARGS__),     Logging::Color::RESET))

@@ -247,10 +247,11 @@ void SwapchainManager::createSwapchain(SDL_Window* window, uint32_t w, uint32_t 
 
     // THE EMPIRE DOES NOT CREATE TWICE
     if (swapchain_.valid()) {
-        LOG_FATAL_CAT("SWAPCHAIN", 
-            "Swapchain already exists ({}x{}, {} images). "
-            "Destroy first if you wish to create another. "
-            "This is not a suggestion. This is law.",
+        LOG_WARN_CAT("SWAPCHAIN", 
+            "\nSwapchain already exists ({}x{}, {} images). "
+            "\nBilly Corgan says \"Destroy first if you wish to create another.\" "
+			"\n\"Do not call swapchain more than once, friend.\" "
+            "\nRun two executables or something more stupid. - Zac",
             swapchainExtent_.width, swapchainExtent_.height, imageCount());
         return;
     }
