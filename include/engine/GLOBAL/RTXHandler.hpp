@@ -195,10 +195,12 @@ public:
     VkQueue transferQueue_  = VK_NULL_HANDLE;
 
     // Command pools
-    VkCommandPool commandPool_         = VK_NULL_HANDLE;
+    VkCommandPool commandPool_ = VK_NULL_HANDLE;
     VkCommandPool computeCommandPool_  = VK_NULL_HANDLE;
     VkCommandPool transferCommandPool_ = VK_NULL_HANDLE;
     VkPipelineCache pipelineCache_     = VK_NULL_HANDLE;
+    VkCommandPool commandPool() const noexcept { return commandPool_; }
+    VkCommandPool& commandPool() noexcept { return commandPool_; }
 
     // Queue family indices
     std::optional<uint32_t> graphicsFamily_;

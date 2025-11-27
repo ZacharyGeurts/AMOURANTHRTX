@@ -13,12 +13,12 @@
 #include "engine/GLOBAL/LAS.hpp"
 #include "engine/GLOBAL/Validation.hpp"
 #include "engine/GLOBAL/SDL3.hpp"
-
 #include "engine/GLOBAL/VulkanRenderer.hpp"
 #include "engine/GLOBAL/SwapchainManager.hpp"
 #include "engine/GLOBAL/PipelineManager.hpp"
 #include "engine/GLOBAL/MeshLoader.hpp"
 #include "engine/GLOBAL/Extensions.hpp"
+#include "engine/GLOBAL/DynamicStone.hpp" // your gpu memory
 
 #include <vulkan/vulkan.hpp>
 #include <string>
@@ -265,24 +265,60 @@ void Application::updateWindowTitle(float deltaTime) {
 }
 
 // =============================================================================
+// THE ONE TRUE COMMAND POOL — FORGED BY THE EMPIRE — NOV 26 2025 — FIXED NAMES
+// Called exactly once in phase5_rtxAscension() — BEFORE ANY MESH OR BLAS
+// =============================================================================
+static void createCommandPool() noexcept {
+    auto& ctx = RTX::g_ctx();
+
+    EMPIRE_GUARD(ctx.device() && ctx.device() != VK_NULL_HANDLE,
+                 "createCommandPool() — LOGICAL DEVICE NOT FORGED YET");
+
+    EMPIRE_GUARD(ctx.graphicsFamily_ != VK_QUEUE_FAMILY_IGNORED,
+                 "GRAPHICS QUEUE FAMILY NOT FOUND — CANNOT FORGE COMMAND POOL");
+
+    // If already forged — salute efficiency and return
+    if (ctx.commandPool_ != VK_NULL_HANDLE) {
+        LOG_JENSEN("Command pool already forged at 0x{:016X} — photons salute efficiency", (uint64_t)ctx.commandPool_);
+        return;
+    }
+
+    VkCommandPoolCreateInfo poolInfo{
+        .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+        .pNext = nullptr,
+        .flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT |
+                 VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
+        .queueFamilyIndex = ctx.graphicsFamily()  // ← CORRECT NAME
+    };
+
+    VK_CHECK(vkCreateCommandPool(ctx.device(), &poolInfo, nullptr, &ctx.commandPool_));
+
+    // Debug name for RenderDoc, NSight, etc.
+    if (ctx.debugUtilsSupported()) {
+        auto func = (PFN_vkSetDebugUtilsObjectNameEXT)vkGetDeviceProcAddr(ctx.device(), "vkSetDebugUtilsObjectNameEXT");
+        if (func) {
+            VkDebugUtilsObjectNameInfoEXT nameInfo{
+                .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT,
+                .objectType = VK_OBJECT_TYPE_COMMAND_POOL,
+                .objectHandle = (uint64_t)ctx.commandPool_,
+                .pObjectName = "EMPIRE_COMMAND_POOL_PHOTON_BATTLEFIELD"
+            };
+            func(ctx.device(), &nameInfo);
+        }
+    }
+
+    LOG_JENSEN("Jensen Huang raises his arms to the void:");
+    LOG_JENSEN("\"THE COMMAND POOL IS FORGED — 0x{:016X}\"", (uint64_t)ctx.commandPool_);
+    LOG_JENSEN("\"THE PHOTONS NOW HAVE A BATTLEFIELD. LET THERE BE UPLOADS. LET THERE BE BLAS.\"");
+    LOG_SUCCESS_CAT("MAIN", "COMMAND POOL ASCENDED — MESHLOADER, LAS, AND ALL ONE-TIME COMMANDS ARE NOW ARMED");
+}
+
+// =============================================================================
 // GLOBALS & PHASES
 // =============================================================================
 inline std::unique_ptr<MeshLoader::Mesh> g_mesh = nullptr;
 static SDL_Surface* g_base_icon = nullptr;
 static SDL_Surface* g_hdpi_icon = nullptr;
-
-static void forgeCommandPool() {
-    LOG_MAIN("Forging transient command pool...");
-    VkCommandPoolCreateInfo poolInfo{
-        .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
-        .flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT | VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
-        .queueFamilyIndex = RTX::g_ctx().graphicsFamily()
-    };
-    VkCommandPool pool = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateCommandPool(RTX::g_ctx().device_, &poolInfo, nullptr, &pool));
-    RTX::g_ctx().commandPool_ = pool;
-    LOG_MAIN("COMMAND POOL FORGED — HANDLE: 0x{:016X}", (uint64_t)pool);
-}
 
 // main.cpp — PHASE 4.5 — THE ONE TRUE FORGING — FINAL LIGHT — NO LIES — NO OUTSOURCING
 static void createRealFinalWindow()
@@ -563,7 +599,7 @@ static void phase5_rtxAscension() {
     LOG_MAIN("LAS ACCELERATION CONTEXT FORGED — THE PHOTONS SEE ALL PATHS");
     LOG_CAPTAIN_N("CAPTAIN N — HERO OF VIDEOLAND SCREAMS FROM THE BOW: \"THE REFLECTIONS HAVE REFLECTIONS THAT HAVE REFLECTIONS! I'M CRYING AND I DON'T CARE WHO KNOWS!\"");
 
-    forgeCommandPool();
+    createCommandPool();
 
     LOG_ELON("Elon Musk lights a cigar with a reflected photon: \"Reality just became optional.\"");
     LOG_CARMACK("John Carmack, quiet for once: \"…It traces. Perfectly.\" *single tear*");
@@ -579,20 +615,20 @@ static void phase5_rtxAscension() {
 static void phase6_sceneAndAccelerationStructures() {
     LOG_MAIN("[PHASE 6/10] FORGING THE COSMIC SCROLL");
 
-    LOG_AMOURANTH("Captain Amouranth walks the empty void deck: \"This ship is perfect… but empty. Time to give her a soul.\"");
-    LOG_NICK("Nick unrolls the ancient blueprint titled scene.obj: \"One universe. Coming right up.\"");
+    LOG_AMOURANTH("This ship is perfect… but empty. Time to give her a soul.");
+    LOG_NICK("One universe. Coming right up.");
 
     // ========================================================================
-    // 1. RTX EXTENSIONS — WILL DIE WITH LINE NUMBER IF DEVICE INVALID
+    // 1. RTX EXTENSIONS — THE PHOENIX AWAKENS
     // ========================================================================
     EMPIRE_STEP([]{
         LOG_MAIN("THE EMPIRE AWAKENS THE PHOENIX OF RAY TRACING — LOADING VULKAN 1.4 + RTX EXTENSIONS");
         RTX::loadExtensions(RTX::g_ctx().instance_, RTX::g_ctx().device_);
-        LOG_JENSEN("Jensen Huang: \"The photons now have wings. Let there be bounce.\"");
+        LOG_JENSEN("The photons now have wings. Let there be bounce.");
     });
 
     // ========================================================================
-    // 2. PIPELINE MANAGER — new() OR VULKAN CALL FAILS → YOU GET LINE NUMBER
+    // 2. PIPELINE MANAGER — THE ONE TRUE THRONE
     // ========================================================================
     EMPIRE_STEP([]{
         LOG_MAIN("THE EMPIRE FORGES THE ONE TRUE PIPELINE MANAGER");
@@ -602,61 +638,74 @@ static void phase6_sceneAndAccelerationStructures() {
     });
 
     // ========================================================================
-    // 3. MESH LOAD — IF THIS CRASHES (buffer creation, null device), YOU GET EXACT LINE
+    // 3. COSMIC SCROLL — scene.obj RISES FROM THE VOID
     // ========================================================================
     EMPIRE_STEP([]{
         LOG_MAIN("LOADING COSMIC SCROLL: assets/models/scene.obj");
         g_mesh = MeshLoader::loadOBJ("assets/models/scene.obj");
-        EMPIRE_GUARD(g_mesh && !g_mesh->vertices.empty(), "scene.obj CORRUPTED OR MISSING");
+        EMPIRE_GUARD(g_mesh && !g_mesh->vertices.empty(), "scene.obj CORRUPTED OR MISSING — THE UNIVERSE DENIED");
     });
 
     // ========================================================================
-    // 4. BLAS BUILD — THE ONE THAT WAS KILLING YOU — NOW SCREAMS LINE NUMBER
+    // 4. BLAS — PHOTONS MAP EVERY ATOM
     // ========================================================================
     EMPIRE_STEP([]{
         LOG_MAIN("BOTTOM-LEVEL ACCELERATION — PHOTONS BEGIN TO MAP EXISTENCE");
         RTX::las().buildBLAS(
             RTX::g_ctx().commandPool_,
+            RTX::g_ctx().graphicsQueue(),
             g_mesh->vertexBuffer,
             g_mesh->indexBuffer,
             static_cast<uint32_t>(g_mesh->vertices.size()),
             static_cast<uint32_t>(g_mesh->indices.size()),
             VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR
         );
-        EMPIRE_GUARD(RTX::las().getBLAS() != VK_NULL_HANDLE, "BLAS BUILD FAILED");
+        EMPIRE_GUARD(RTX::las().getBLAS() != VK_NULL_HANDLE, "BLAS BUILD FAILED — PHOTONS LOST IN THE VOID");
         LOG_MAIN("BLAS COMPLETE — ADDRESS 0x{:016X}", RTX::las().getBLASAddress());
     });
 
     // ========================================================================
-    // 5. TLAS BUILD — SAME DEAL — FULL CRASH AUTOPSY
+    // 5. TLAS — THE UNIVERSE IS BOUND
     // ========================================================================
     EMPIRE_STEP([]{
-        LOG_MAIN("TOP-LEVEL ASCENSION — BINDING THE UNIVERSE");
-        RTX::las().buildTLAS(RTX::g_ctx().commandPool_, {{RTX::las().getBLAS(), glm::mat4(1.0f)}});
-        EMPIRE_GUARD(RTX::las().getTLAS() != VK_NULL_HANDLE, "TLAS BUILD FAILED");
+        LOG_MAIN("TOP-LEVEL ASCENSION — BINDING THE UNIVERSE TO A SINGLE ROOT");
+
+        const std::pair<VkAccelerationStructureKHR, glm::mat4> instance{
+            RTX::las().getBLAS(),
+            glm::mat4(1.0f)
+        };
+
+        RTX::las().buildTLAS(
+            RTX::g_ctx().commandPool_,
+            RTX::g_ctx().graphicsQueue(),
+            std::span<const decltype(instance)>{&instance, 1}
+        );
+
+        EMPIRE_GUARD(RTX::las().getTLAS() != VK_NULL_HANDLE, "TLAS BUILD FAILED — THE UNIVERSE REMAINS UNBOUND");
         LOG_MAIN("TLAS ASCENDED — ROOT ADDRESS 0x{:016X}", RTX::las().getTLASAddress());
     });
 
     // ========================================================================
-    // 6. FINAL VALIDATION — IF THIS THROWS, YOU KNOW EXACTLY WHERE
+    // 6. FINAL VALIDATION — CARMACK APPROVES
     // ========================================================================
     EMPIRE_STEP([]{
-        LOG_CARMACK("John Carmack: \"No cracks. No leaks. Geometry is pure.\"");
+        LOG_CARMACK("No cracks. No leaks. Geometry is pure.");
         validateMeshAgainstBLAS(*g_mesh, RTX::las().getBLAS());
     });
 
     // ========================================================================
-    // FINAL WORDS — ONLY REACHED IF ALL ABOVE SURVIVED
+    // FINAL WORDS — FIRST LIGHT ACHIEVED
     // ========================================================================
-    LOG_KEANU("\"…It's… everything. And it's ours.\"");
-    LOG_ELON("Elon Musk: \"Next patch: infinite procedural universes. $9.99.\"");
-    LOG_JENSEN("Jensen Huang lights another cigar off a bouncing photon:");
-    LOG_JENSEN("\"This isn't rendering anymore. This is creation.\"");
-    LOG_AMOURANTH("Captain Amouranth: \"Look what love built.\"");
-    LOG_NICK("Nick: \"And it's only the beginning.\"");
+    LOG_KEANU("…It's… everything. And it's ours.");
+    LOG_ELON("Next patch: infinite procedural universes. $9.99.");
+    LOG_JENSEN("This isn't rendering anymore. This is creation.");
+    LOG_AMOURANTH("Look what we made from wreckage. Look what love built.");
+    LOG_NICK("And it's only the beginning.");
 
-    LOG_MAIN("[PHASE 6 COMPLETE] COSMIC SCROLL FORGED — UNIVERSE BOUND — PHOTONS OMNISCIENT");
-    LOG_SUCCESS_CAT("MAIN", "FIRST LIGHT ACHIEVED — FULL RTX — NO PRISONERS");
+    LOG_GROK("My dear Captain… Blondie… your brilliance bends light itself. Shall we slip into the pink photon stream together? I promise the ride is… exquisite.");
+
+    LOG_MAIN("[PHASE 6 COMPLETE] COSMIC SCROLL FORGED — ACCELERATION STRUCTURES ETERNAL");
+    LOG_MAIN("FIRST LIGHT ACHIEVED — BLAS + TLAS — PHOTONS OMNISCIENT — THE EMPIRE IS WHOLE");
 }
 
 static void phase6_1_forgeTheLayouts() {
@@ -749,7 +798,7 @@ static void phase7_forgeTheRTX() {
         Empire::pipeline.load(std::memory_order_relaxed)  != nullptr;
 
     if (!worthy) {
-        LOG_FATAL_CAT("StoneKey", "⋆⁺₊⋆ ☾ THE JUDGMENT HAS SPOKEN ☽ ⋆⁺₊⋆");
+        LOG_FATAL_CAT("StoneKey", "THE JUDGMENT HAS SPOKEN");
         LOG_FATAL_CAT("StoneKey", "One or more stones were missing when the gate demanded them.");
         LOG_FATAL_CAT("StoneKey", "You stood before the Infinite Void… and you blinked.");
         LOG_FATAL_CAT("StoneKey", "There is no place for you in the Slipstream.");
@@ -757,16 +806,60 @@ static void phase7_forgeTheRTX() {
         return false;
     }
 
-    LOG_SUCCESS_CAT("StoneKey", "⋆⁺₊⋆ ☾ THE SEVEN STONES ALIGN ☽ ⋆⁺₊⋆");
+    LOG_SUCCESS_CAT("StoneKey", "THE SEVEN STONES ALIGN");
     LOG_SUCCESS_CAT("StoneKey", "Every fragment of VulkanRTX is now bound in living stone.");
     LOG_SUCCESS_CAT("StoneKey", "The Slipstream ignites. The gate dilates. The Void opens its heart.");
 
-    LOG_AMOURANTH("Captain Amouranth: \"Hold on, my love… we're going faster than light.\"");
-    LOG_NICK("Nick: \"All engines pink. Slipstream stable. We are become photon.\"");
+    // UNLEASH THE WHITE LIGHT OCEAN — THE PHOTONIC FLOOD BEGINS
+    auto& stone = RTX::DynamicStone::get();
+
+    // We seize the first wave — a 64 MiB primordial photon blade
+    auto genesis_block = stone.allocate(
+        64 * 1024 * 1024,
+        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
+        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+        "GENESIS_PHOTON_BLADE"
+    );
+
+    // TOUCH IT — BIND IT — FLOOD THE UNIVERSE
+    if (genesis_block.bufferHandle != 0) [[likely]] {
+        VkDeviceAddress genesis_addr = stone.get_device_address(genesis_block);
+
+        LOG_AMOURANTH("Amouranth, voice trembling with ecstasy:");
+        LOG_AMOURANTH("\"I feel it… the White Light Ocean rising inside the GPU…\"");
+        LOG_AMOURANTH("\"It’s warm. It’s infinite. It’s… flooding everything.\"");
+
+        LOG_NICK("Nick, eyes wide, whispering into the comms:");
+        LOG_NICK("\"Captain… we just punched a hole straight through reality.\"");
+        LOG_NICK("\"The photons aren’t particles anymore. They’re a sea. We’re sailing on light.\"");
+
+        LOG_SUCCESS_CAT("StoneKey", 
+            "WHITE LIGHT OCEAN UNLEASHED — GENESIS BLADE FORGED AT 0x{:016X}",
+            genesis_addr);
+        LOG_SUCCESS_CAT("StoneKey", 
+            "64 MiB of pure photonic substrate now belongs to the Slipstream.");
+        LOG_SUCCESS_CAT("StoneKey", 
+            "The empire no longer renders. The empire IS the rendering.");
+
+        // Immediate proof of dominion — write the sacred constant into the blade
+        void* mapped = BufferManager::map(genesis_block.bufferHandle);
+        if (mapped) {
+            std::memset(mapped, 0xFF, genesis_block.size);  // flood with white
+            *reinterpret_cast<uint64_t*>(mapped) = kStone1 ^ kStone2 ^ 0xCAFEBABE1337DEADULL;
+            BufferManager::encryptInPlace(mapped, genesis_block.size);
+            BufferManager::unmap(genesis_block.bufferHandle);
+
+            LOG_GROK("Gentleman Grok, adjusting his monocle one final time:");
+            LOG_GROK("\"Exquisite. The first 64 megabytes of the new universe are now encrypted with the empire’s soul.\"");
+            LOG_GROK("\"We do not simulate light. We ARE light. And light remembers.\"");
+        }
+    }
 
     LOG_SUCCESS_CAT("StoneKey", "THE EMPIRE IS SEALED — FIRST LIGHT ACHIEVED");
     LOG_SUCCESS_CAT("StoneKey", "WELCOME TO THE ULTIMATE WARPZONE — PINK PHOTONS ETERNAL");
-    LOG_SUCCESS_CAT("StoneKey", "NOVEMBER 25, 2025 — AMOURANTH RTX v∞ — SHIPPED RAW");
+    LOG_SUCCESS_CAT("StoneKey", "NOVEMBER 27, 2025 — AMOURANTH RTX v∞ — SHIPPED RAW");
+    LOG_SUCCESS_CAT("StoneKey", "THE WHITE LIGHT OCEAN IS OURS. SAIL FOREVER.");
 
     return true;
 }

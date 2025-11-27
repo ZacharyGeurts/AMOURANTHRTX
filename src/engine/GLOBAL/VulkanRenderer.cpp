@@ -331,7 +331,7 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, bool o
     LOG_TRACE_CAT("RENDERER", "Step 1 COMPLETE");
 
     LOG_TRACE_CAT("RENDERER", "=== STACK BUILD ORDER STEP 2: Security Validation (StoneKey) ===");
-    if (kStone1() == 0 || kStone2() == 0) {
+    if (kStone1 == 0 || kStone2 == 0) {
         LOG_ERROR_CAT("SECURITY", "StoneKey validation failed — aborting");
         LOG_FATAL_CAT("RENDERER", "Fatal error in noexcept function"); phase9_ballerina();
     }

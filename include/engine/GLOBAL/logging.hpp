@@ -197,8 +197,8 @@ namespace std {
 } // namespace std
 
 // Forward declarations
-extern uint64_t kStone1() noexcept;
-extern uint64_t kStone2() noexcept;
+extern uint64_t kStone1;
+extern uint64_t kStone2;
 
 // ========================================================================
 // 0. CONFIGURATION
@@ -898,34 +898,37 @@ static constexpr auto vkh = []() constexpr noexcept {
 #define DEBUG_CALLBACK                  vkh.debugCallback
 
 
-    // ========================================================================
-    // EMPIRE MACROS — NOW WITH TRUE SOURCE LOCATION CAPTURE
-    // ========================================================================
-#define EMPIRE_STEP(step) \
-    [&, loc = std::source_location::current()]() -> bool { \
-        try { \
-            step(); \
-            LOG_SUCCESS_CAT("MAIN", "[PHASE] {} — ASCENDED FLAWLESSLY", #step); \
-            return true; \
-        } catch (const std::exception& e) { \
-            LOG_FATAL_CAT("MAIN", \
-                "{}[FATAL CRASH IN {}]\n" \
-                "   Origin   : {}:{} — {}\n" \
-                "   Reason   : {}{}", \
-                Logging::Color::LIGHT_GREEN, #step, \
-                loc.file_name(), loc.line(), loc.function_name(), \
-                e.what(), Logging::Color::RESET); \
-            return false; \
-        } catch (...) { \
-            LOG_FATAL_CAT("MAIN", \
-                "{}[UNKNOWN CATASTROPHE IN {}]\n" \
-                "   Origin   : {}:{} — {}{}", \
-                Logging::Color::LIGHT_GREEN, #step, \
-                loc.file_name(), loc.line(), loc.function_name(), \
-                Logging::Color::RESET); \
-            return false; \
-        } \
-    }()
+// =============================================================================
+// EMPIRE_STEP — FINAL VERSION — WORKS WITH FUNCTIONS AND BLOCKS — C++23 PURE
+// NOVEMBER 27, 2025 — PINK PHOTONS ETERNAL — THE EMPIRE IS LAW
+// =============================================================================
+// =============================================================================
+// EMPIRE_STEP — PURE C++23 — NO MACROS — INFINITE POWER — ETERNAL
+// =============================================================================
+inline constexpr auto EMPIRE_STEP = []<typename F>(F&& phase, const std::source_location loc = std::source_location::current()) {
+    try {
+        std::forward<F>(phase)();
+        LOG_SUCCESS_CAT("MAIN", "[PHASE] ASCENDED FLAWLESSLY");
+        return true;
+    } catch (const std::exception& e) {
+        LOG_FATAL_CAT("MAIN",
+            "{}[FATAL CRASH]\n"
+            "   Origin   : {}:{} — {}\n"
+            "   Reason   : {}{}",
+            Logging::Color::LIGHT_GREEN,
+            loc.file_name(), loc.line(), loc.function_name(),
+            e.what(), Logging::Color::RESET);
+        return false;
+    } catch (...) {
+        LOG_FATAL_CAT("MAIN",
+            "{}[UNKNOWN CATASTROPHE]\n"
+            "   Origin   : {}:{} — {}{}",
+            Logging::Color::LIGHT_GREEN,
+            loc.file_name(), loc.line(), loc.function_name(),
+            Logging::Color::RESET);
+        return false;
+    }
+};
 
 #define EMPIRE_GUARD(condition, message) \
     if (!(condition)) { \
