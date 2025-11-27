@@ -7,7 +7,6 @@ chmod +x linux.sh
 ```
 Currently compiles and reaches render loop. Much more work needed yet.  
 Working prototype expected Christmas 2025.  
-Current and archived content subject to license.  
 Please do not code farm. Swapchain goes with THIS project.  
 Expect no output on a given day. I go for milestones and not all include visuals.  
 Updates are fast and furious at this stage and the renderer could be up or down any minute.  
@@ -68,7 +67,8 @@ If you make money it will probably be around 3 cents on the dollar or 3%. Not ab
 If they do not like my using their brand, they can come to Michigan and stream the firing.  
 https://www.twitch.tv/AMOURANTH  
 If you need help with your project, it's Grok, not me.  
-There should be a wiki coming soonish.  
+
+Current and archived content subject to license.  
 
 **Other work**  
 And you have not reached real RTX until God shows up.  
