@@ -81,7 +81,7 @@ uint32_t sdlExtCount = 0;
 if (!SDL_Vulkan_GetInstanceExtensions(&sdlExtCount)) {
     LOG_FATAL_CAT("SDL3", "{}SDL_Vulkan_GetInstanceExtensions(count) failed: {}{}", 
                   BLOOD_RED, SDL_GetError(), RESET);
-    phase9_ballerina();
+    phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
 }
 
 LOG_INFO_CAT("MAIN", "{}SDL3 demands {} pure Vulkan instance extensions:{}", VALHALLA_GOLD, sdlExtCount, RESET);
@@ -91,7 +91,7 @@ const char* const* sdlExtensions = SDL_Vulkan_GetInstanceExtensions(&sdlExtCount
 if (!sdlExtensions) {
     LOG_FATAL_CAT("SDL3", "{}SDL_Vulkan_GetInstanceExtensions() returned NULL array — driver broken{}", 
                   CRIMSON_MAGENTA, RESET);
-    phase9_ballerina();
+    phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
 }
 
 // Safe copy into vector
@@ -137,7 +137,7 @@ for (const char* ext : extensions) {
 
     if (result != VK_SUCCESS) {
         LOG_FATAL_CAT("Vulkan", "vkCreateInstance FAILED — Result {} — THE PHOTONS DENIED ENTRY", static_cast<int>(result));
-        phase9_ballerina();
+        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
     }
 
     g_ctx().setInstance(instance);
@@ -176,7 +176,7 @@ void Context::init(SDL_Window* window, int width, int height)
         VkSurfaceKHR surface;
         if (!SDL_Vulkan_CreateSurface(window, g_ctx().instance_, nullptr, &surface)) {
             LOG_FATAL_CAT("RTX", "Surface creation failed — {}", SDL_GetError());
-            phase9_ballerina();
+            phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
         }
         g_ctx().setSurface(surface);
     }
@@ -188,7 +188,7 @@ void Context::init(SDL_Window* window, int width, int height)
         
         if (!g_ctx().device_) {
             LOG_FATAL("THE ONE TRUE FORGING FAILED — THE EMPIRE CANNOT RISE");
-            phase9_ballerina();
+            phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
         }
     }
 
@@ -209,7 +209,7 @@ void Context::init(SDL_Window* window, int width, int height)
 // =============================================================================
 void shutdown() noexcept
 {
-    phase9_ballerina();
+    phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
 }
 
 void cleanupAll() noexcept {

@@ -24,8 +24,6 @@
 class VulkanRenderer;
 namespace RTX { class PipelineManager; }
 
-[[noreturn]] void phase9_ballerina() noexcept;
-
 namespace StoneKey {
 
     struct Empire final {
@@ -114,7 +112,7 @@ namespace StoneKey {
             stone_pipeline() == nullptr || stone_window() == nullptr ||
             stone_image_count() == 0 || stone_width() == 0 || stone_height() == 0) {
             LOG_FATAL_CAT("StoneKey", "EMPIRE SEAL FAILED — INCOMPLETE STATE — THE PHOTONS DENIED ETERNITY");
-            phase9_ballerina();
+            phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
         }
 
         LOG_SUCCESS_CAT("StoneKey",

@@ -13,8 +13,6 @@
 // FULLY COMPILING — PURE EMPIRE - Inspired by Ellie Fier
 // =============================================================================
 
-[[noreturn]] void phase9_ballerina() noexcept;
-
 #pragma once
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_beta.h>
@@ -49,6 +47,8 @@
 #include <vector>
 #include <algorithm>
 #include <stop_token>
+
+[[noreturn]] void phase9_ballerina(std::string_view reason = {}, const std::source_location loc = std::source_location::current()) noexcept;
 
 // =============================================================================
 // AMOURANTH RTX — DELTA TIME TRACKING v∞ — NOV 13 2025
@@ -852,7 +852,7 @@ static constexpr auto vkh = []() constexpr noexcept {
                                      fullMsg,
                                      Logging::Color::RESET);
 
-            phase9_ballerina();
+            phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
         }
 
         // ────────────────────── DEBUG CALLBACK — STILL SEXY ──────────────────────
@@ -939,7 +939,7 @@ inline constexpr auto EMPIRE_STEP = []<typename F>(F&& phase, const std::source_
             Logging::Color::LIGHT_GREEN, message, \
             loc.file_name(), loc.line(), loc.function_name(), \
             Logging::Color::RESET); \
-        phase9_ballerina(); \
+        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current()); \
     }
 
 // =============================================================================

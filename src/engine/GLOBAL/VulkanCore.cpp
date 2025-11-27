@@ -398,7 +398,7 @@ void VulkanRTX::buildAccelerationStructures()
             g_stagingMem    = BUFFER_MEMORY(g_stagingPool);
 
             if (g_stagingMem == VK_NULL_HANDLE)
-                phase9_ballerina();  // ← THE ONLY GRACE
+                phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());  // ← THE ONLY GRACE
 
             VK_CHECK(vkMapMemory(device_, g_stagingMem, 0, VK_WHOLE_SIZE, 0, &g_mappedBase),
                      "Failed to map 1GB staging — the empire cannot rise");
@@ -675,7 +675,7 @@ void VulkanRTX::initDescriptorPoolAndSets() noexcept
 
     if (!targetLayout) [[unlikely]] {
         LOG_FATAL_CAT("RTX", "NO LAYOUT — ABORT");
-        phase9_ballerina();
+        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
     }
 
     // ── STEP 3: DYNAMIC BINDINGS — ZERO HEAP, STACK ONLY
@@ -1145,7 +1145,7 @@ void createCommandPool()
     AI_INJECT("Surface requested before existence... I cannot reflect photons in the void.");
 
     // Hard abort — no silent nulls, no undefined behavior
-    phase9_ballerina();
+    phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
 
     // Unreachable, but silences warnings
     return VK_NULL_HANDLE;

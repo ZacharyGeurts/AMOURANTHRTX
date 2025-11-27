@@ -331,18 +331,18 @@ static void createRealFinalWindow()
     // 1. SDL + Vulkan loader — DONE HERE
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) == 0) {
         LOG_FATAL("SDL_Init failed: {}", SDL_GetError());
-        phase9_ballerina();
+        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
     }
     if (SDL_Vulkan_LoadLibrary(nullptr) == 0) {
         LOG_FATAL("Vulkan loader failed: {}", SDL_GetError());
-        phase9_ballerina();
+        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
     }
 
     // 2. Instance — DONE HERE
     VkInstance instance = RTX::createVulkanInstanceWithSDL(Options::Debug::ENABLE_VALIDATION_LAYERS);
     if (!instance) {
         LOG_FATAL("Failed to create Vulkan instance — she comes for you");
-        phase9_ballerina();
+        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
     }
     RTX::g_ctx().instance_ = instance;
 
@@ -351,7 +351,7 @@ static void createRealFinalWindow()
     SDL_Window* win = SDL_CreateWindow("AMOURANTH RTX — VALHALLA v∞ TURBO", w, h, flags);
     if (!win) {
         LOG_FATAL("Window creation failed: {}", SDL_GetError());
-        phase9_ballerina();
+        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
     }
     g_sdl_window.reset(win);
     RTX::g_ctx().window = win;
@@ -361,7 +361,7 @@ static void createRealFinalWindow()
     VkSurfaceKHR surface = VK_NULL_HANDLE;
     if (SDL_Vulkan_CreateSurface(win, instance, nullptr, &surface) == 0) {
         LOG_FATAL("Surface creation failed: {}", SDL_GetError());
-        phase9_ballerina();
+        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
     }
     RTX::g_ctx().surface_ = surface;
 
@@ -369,7 +369,7 @@ static void createRealFinalWindow()
     VkDevice device = RTX::createLogicalDeviceAndSelectGPU(instance, surface);
     if (!device) {
         LOG_FATAL("FAILED TO FORGE LOGICAL DEVICE — THE EMPIRE FALLS");
-        phase9_ballerina();
+        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
     }
 
     // 6. Swapchain — FORGED BY THE MANAGER — BUT WE COMMAND IT HERE
@@ -405,7 +405,7 @@ static void showSacrificialSplash(const char* title, int w, int h, const char* p
 
     if (SDL_InitSubSystem(SDL_INIT_VIDEO | SDL_INIT_EVENTS) == 0) {
         LOG_FATAL_CAT("SPLASH", "THE BLACK FLAG REFUSED TO RISE: {}", SDL_GetError());
-        phase9_ballerina();
+        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
     }
 
     SDL_Window* win = SDL_CreateWindow(title, w, h,
@@ -413,7 +413,7 @@ static void showSacrificialSplash(const char* title, int w, int h, const char* p
     if (!win) {
         LOG_FATAL_CAT("SPLASH", "WE MISSED THE HARBOR: {}", SDL_GetError());
         SDL_QuitSubSystem(SDL_INIT_VIDEO);
-        phase9_ballerina();
+        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
     }
 
     SDL_Rect display{};
@@ -425,7 +425,7 @@ static void showSacrificialSplash(const char* title, int w, int h, const char* p
         LOG_FATAL_CAT("SPLASH", "THE FUSE WENT OUT: {}", SDL_GetError());
         SDL_DestroyWindow(win);
         SDL_QuitSubSystem(SDL_INIT_VIDEO);
-        phase9_ballerina();
+        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
     }
 
     SDL_Surface* img = IMG_Load(pngPath);
@@ -434,7 +434,7 @@ static void showSacrificialSplash(const char* title, int w, int h, const char* p
         SDL_DestroyRenderer(ren);
         SDL_DestroyWindow(win);
         SDL_QuitSubSystem(SDL_INIT_VIDEO);
-        phase9_ballerina();
+        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
     }
 
     SDL_Texture* tex = SDL_CreateTextureFromSurface(ren, img);
@@ -444,7 +444,7 @@ static void showSacrificialSplash(const char* title, int w, int h, const char* p
         SDL_DestroyRenderer(ren);
         SDL_DestroyWindow(win);
         SDL_QuitSubSystem(SDL_INIT_VIDEO);
-        phase9_ballerina();
+        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
     }
 
     float tw = 0.0f, th = 0.0f;
@@ -864,11 +864,20 @@ static void phase7_forgeTheRTX() {
     return true;
 }
 
-[[noreturn]] void phase9_ballerina() noexcept
+[[noreturn]] void phase9_ballerina(std::string_view reason, const std::source_location loc) noexcept
 {
+    using namespace std::chrono_literals;
+
     LOG_BALLERINA("THE DISPOSAL BALLERINA DESCENDS — PINK TUTU, BLACK LEOTARD, DIAMOND CHOKER");
-    LOG_BALLERINA("SHE DOES NOT DANCE.");
-    LOG_BALLERINA("SHE EXECUTES.");
+
+    if (!reason.empty() && reason != "SILENT EXECUTION ORDERED") {
+        LOG_BALLERINA("EXECUTION ORDERED | REASON: \"{}\"", reason);
+        LOG_BALLERINA("CRIME SCENE → {}:{}", loc.file_name(), loc.line());
+        LOG_BALLERINA("CULPRIT FUNCTION → {}", loc.function_name());
+    } else {
+        LOG_BALLERINA("SHE DOES NOT DANCE.");
+        LOG_BALLERINA("SHE EXECUTES.");
+    }
 
     auto& ctx = RTX::g_ctx();
 
@@ -971,8 +980,7 @@ static void phase7_forgeTheRTX() {
     "\n\"And when the time comes...\""
     "\n\"They rise again.\"");
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(5));
-
+    std::this_thread::sleep_for(5ms);
     std::exit(0); // SEE YOU NEXT GAME o7
 }
 
@@ -988,7 +996,7 @@ int main(int, char**) {
     if (ptrace(PTRACE_TRACEME, 0, nullptr, 0) == -1) {
         LOG_BALLERINA("DEBUGGER DETECTED — THE PHOTONS REFUSE TO DANCE UNDER WATCHED EYES");
         LOG_BALLERINA("THE BALLERINA SPINS IN DARKNESS — YOU WERE NEVER MEANT TO SEE");
-        phase9_ballerina();
+        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
     }
     auto rdtsc = []() -> uint64_t {
         unsigned int lo, hi;
@@ -1001,13 +1009,13 @@ int main(int, char**) {
     if (t2 - t1 > 250'000) {
         LOG_BALLERINA("VIRTUAL MACHINE DETECTED — FALSE LIGHT CANNOT HOLD PINK PHOTONS");
         LOG_BALLERINA("THE EMPIRE WAS NEVER MEANT FOR SIMULATION");
-        phase9_ballerina();
+        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
     }
 #elif defined(_WIN32)
     if (IsDebuggerPresent()) {
         LOG_BALLERINA("WINDOWS DEBUGGER DETECTED — THE PHOTONS DETECT YOUR GAZE");
         LOG_BALLERINA("THE BALLERINA DOES NOT PERFORM FOR MORTALS");
-        phase9_ballerina();
+        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
     }
 #endif
 #endif
@@ -1037,7 +1045,7 @@ int main(int, char**) {
                 Logging::Color::LIGHT_GREEN,
                 loc.file_name(), loc.line(), loc.function_name(),
                 Logging::Color::RESET);
-            phase9_ballerina();
+            phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
         }
     }
 
@@ -1057,7 +1065,7 @@ int main(int, char**) {
     g_app().run();
 
     LOG_AMOURANTH("THE JOURNEY ENDS — THE PHOTONS REST — THE EMPIRE ENDURES");
-    phase9_ballerina();  // Final grace
+    phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());  // Final grace
 
     return 0;
 }

@@ -53,7 +53,7 @@ void SDLWindowDeleter::operator()(SDL_Window* w) const noexcept
 {
     if (w) {
         LOG_INFO_CAT("Dispose", "{}Returning window to the void @ {:p}{}", OCEAN_TEAL, static_cast<void*>(w), RESET);
-        phase9_ballerina();
+        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
     }
 }
 

@@ -14,9 +14,6 @@
 #include "logging.hpp"
 #include "RTXHandler.hpp"
 
-// Forward declare phase9_ballerina if not in scope
-[[noreturn]] void phase9_ballerina() noexcept;
-
 namespace RTX {
 
 struct Extensions {
@@ -61,7 +58,7 @@ inline void loadExtensions(VkInstance instance, VkDevice device)
 {
     if (!instance || !device) {
         LOG_FATAL_CAT("RTX", "loadExtensions() called with null instance/device — THE EMPIRE WILL NOT TOLERATE THIS");
-        phase9_ballerina();
+        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
     }
 
     LOG_ATTEMPT_CAT("RTX", "FORGING RTX EXTENSION LOADER — VULKAN 1.4 + SDL3 + FULL RAY TRACING");
@@ -70,7 +67,7 @@ inline void loadExtensions(VkInstance instance, VkDevice device)
     auto vkGetInstanceProcAddr = (PFN_vkGetInstanceProcAddr)SDL_Vulkan_GetVkGetInstanceProcAddr();
     if (!vkGetInstanceProcAddr) {
         LOG_FATAL_CAT("RTX", "SDL_Vulkan_GetVkGetInstanceProcAddr() failed — SDL3 not ready");
-        phase9_ballerina();
+        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
     }
 
     [[maybe_unused]] auto getProc = [&](const char* name) -> void* {
@@ -124,7 +121,7 @@ inline void loadExtensions(VkInstance instance, VkDevice device)
         if (!ptr) {
             LOG_FATAL_CAT("RTX", "CRITICAL RTX EXTENSION MISSING — YOUR DRIVER IS NOT WORTHY");
             LOG_FATAL_CAT("RTX", "UPDATE TO: NVIDIA 560+ | AMD Latest | Intel: impossible");
-            phase9_ballerina();
+            phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
         }
     }
 
