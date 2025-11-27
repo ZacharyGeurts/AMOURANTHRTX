@@ -212,7 +212,6 @@ private:
     void updateUniformBuffer(uint32_t frame, const Camera& camera, float jitter) noexcept;
     void updateTonemapUniform(uint32_t frame) noexcept;
 
-    VkShaderModule loadShader(const std::string& filename) const;
     VkDeviceAddress getShaderGroupHandle(uint32_t group) noexcept;
 
     void createImage(RTX::Handle<VkImage>& image,

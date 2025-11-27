@@ -137,6 +137,35 @@ namespace BufferManager {
     #define BUFFER_DEVICE_ADDRESS(h)        BufferManager::get_device_address(h)
     #define BUFFER_ENCRYPT(h)               do { auto* p = BufferManager::map(h); if(p) { BufferManager::encryptInPlace(p, BufferManager::get(h)->size); BufferManager::unmap(h); } } while(0)
 
+// =============================================================================
+// ETERNAL STONE TRACKING — REQUIRED BY DynamicStone.cpp — EMPIRE LAW
+// =============================================================================
+[[nodiscard]] static inline VkDeviceSize get_used_bytes(uint64_t handle) noexcept {
+    const auto* info = get(handle);
+    if (!info) return 0;
+    // We track "used" as a running counter stored in the tag field (yes, it's a hack — but it's OUR hack)
+    // Format: "ETERNAL_STONE_X_USED:123456789"
+    if (info->tag.find("ETERNAL_STONE_") != 0) return 0;
+    size_t pos = info->tag.find("_USED:");
+    if (pos == std::string::npos) return 0;
+    return std::stoull(info->tag.substr(pos + 6));
+}
+
+static inline void add_used_bytes(uint64_t handle, VkDeviceSize bytes) noexcept {
+    auto* info = const_cast<BufferInfo*>(get(handle));
+    if (!info || info->tag.find("ETERNAL_STONE_") != 0) return;
+
+    VkDeviceSize current = get_used_bytes(handle);
+    VkDeviceSize total   = current + bytes;
+
+    size_t pos = info->tag.find("_USED:");
+    if (pos != std::string::npos) {
+        info->tag = info->tag.substr(0, pos + 6) + std::to_string(total);
+    } else {
+        info->tag += "_USED:" + std::to_string(total);
+    }
+}
+
 } // namespace BufferManager
 
 // =============================================================================

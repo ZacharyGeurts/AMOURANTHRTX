@@ -231,6 +231,7 @@ public:
     Handle<VkImageView>  blueNoiseView_;
     Handle<VkRenderPass> renderPass_;
     uint64_t             sharedStagingEnc_ = 0;
+	[[nodiscard]] VkShaderModule loadShader(const std::string& filename) const;
 
     // Window
     SDL_Window* window  = nullptr;
@@ -244,7 +245,7 @@ public:
     [[nodiscard]] constexpr VkSurfaceKHR     surface()        const noexcept { return surface_; }
     [[nodiscard]] constexpr VkPhysicalDevice physicalDevice() const noexcept { return physicalDevice_; }
     [[nodiscard]] constexpr VkDevice         device()         const noexcept { return device_; }
-
+	
     [[nodiscard]] constexpr VkQueue graphicsQueue()  const noexcept { return graphicsQueue_; }
     [[nodiscard]] constexpr VkQueue presentQueue()   const noexcept { return presentQueue_; }
     [[nodiscard]] constexpr VkQueue computeQueue()   const noexcept { return computeQueue_; }
@@ -295,6 +296,7 @@ public:
 
     extern Context g_context_instance;
     [[nodiscard]] inline Context& g_ctx() noexcept { return g_context_instance; }
+    [[nodiscard]] inline VkShaderModule loadShader(const std::string& filename) { return g_ctx().loadShader(filename); }
 
     // =============================================================================
     // Core Vulkan Creation Functions

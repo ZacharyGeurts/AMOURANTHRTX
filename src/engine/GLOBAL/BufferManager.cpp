@@ -101,15 +101,15 @@ uint64_t create(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFla
 
     std::lock_guard<std::mutex> lock(g_mutex);
 
-    // ALL BUFFERS GET FULL RTX + ENCRYPTION FLAGS
+    // ALL BUFFERS GET FULL RTX + ENCRYPTION FLAGS — THIS IS LAW
     VkBufferUsageFlags fullUsage = usage |
         VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR |
         VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
 
     VkBufferCreateInfo bci{
-        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-        .size = size,
-        .usage = fullUsage,
+        .sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+        .size        = size,
+        .usage       = fullUsage,
         .sharingMode = VK_SHARING_MODE_EXCLUSIVE
     };
 
@@ -123,8 +123,8 @@ uint64_t create(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFla
     EMPIRE_GUARD(memType != ~0u, std::format("NO MEMORY TYPE FOR {} MB BUFFER — TAG: {}", size >> 20, tag));
 
     VkMemoryAllocateInfo mai{
-        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-        .allocationSize = reqs.size,
+        .sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+        .allocationSize  = reqs.size,
         .memoryTypeIndex = memType
     };
 
@@ -133,28 +133,66 @@ uint64_t create(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFla
     VK_CHECK(vkBindBufferMemory(g_device, buffer, memory, 0));
 
     uint64_t handle = g_nextHandle++;
+
+    // Zero-init for uniforms and debug builds
     bool zeroInit = Memory::ENABLE_ZERO_INIT || tag.find("UNIFORM") != std::string::npos;
 
     void* mapped = nullptr;
     if (props & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) {
         VK_CHECK(vkMapMemory(g_device, memory, 0, size, 0, &mapped));
-        if (zeroInit && mapped) std::memset(mapped, 0, size);
+        if (zeroInit && mapped) {
+            std::memset(mapped, 0, size);
+        }
     }
 
+    // Final tag — with used-bytes tracking for eternal stones
     std::string fullTag = tag.empty() ? "unnamed" : std::string(tag);
+    if (fullTag.find("ETERNAL_STONE_") == 0 || fullTag.find("TITAN") != std::string::npos) {
+        fullTag += "_USED:0";
+    }
+
     g_buffers[handle] = { buffer, memory, size, reqs.size, fullUsage, fullTag, mapped };
     g_totalAllocated += reqs.size;
 
     setDebugName(buffer, "BUF_" + fullTag);
 
-    LOG_JENSEN("BufferManager: Forged {} MB | {} | total {:.2f} GB | handle 0x{:016X}",
-               size >> 20, fullTag, g_totalAllocated / (1024.0*1024*1024), handle);
+    // =====================================================================
+    // JOHN CARMACK HAS ENTERED THE CHAT — HE APPROVES THIS ALLOCATION
+    // =====================================================================
+    LOG_CARMACK("BufferManager: Forged {} MiB buffer | alignment {} | handle 0x{:016X} | tag \"{}\"",
+                size >> 20, reqs.alignment, handle, fullTag);
 
-    if (Performance::ENABLE_MEMORY_BUDGET_WARNINGS && g_totalAllocated > 8ULL*1024*1024*1024)
-        LOG_ELON("BufferManager: Empire exceeds 8 GB — toasters kneel or perish");
+    LOG_CARMACK("BufferManager: Memory type {} | total allocated {:.3f} GiB | {} buffers alive",
+                memType, g_totalAllocated / (1024.0 * 1024 * 1024), g_buffers.size());
 
-    if (tag.find("STONE") != std::string::npos || tag.find("TITAN") != std::string::npos)
-        LOG_JENSEN("BufferManager: {} stone ascends — photons claim their encrypted throne", fullTag);
+    if (fullTag.find("ETERNAL_STONE_") == 0) {
+        LOG_CARMACK("CARMACK: A new ETERNAL STONE rises — {} GiB of pure device dominion allocated", size >> 30);
+        LOG_CARMACK("CARMACK: This stone will outlive nations. Encrypt it. Guard it. Never free it.");
+    }
+
+    if (fullTag.find("TITAN") != std::string::npos) {
+        LOG_CARMACK("CARMACK: TITAN STONE DETECTED — 8+ GiB single allocation");
+        LOG_CARMACK("CARMACK: You are not allocating memory. You are claiming territory.");
+    }
+
+    if (g_totalAllocated > 8ULL * 1024 * 1024 * 1024) {
+        LOG_CARMACK("CARMACK: 8 GiB breached. Most engines would crash. Yours laughs.");
+        LOG_CARMACK("CARMACK: Keep going. The GPU can take it.");
+    }
+
+    if (g_totalAllocated > 16ULL * 1024 * 1024 * 1024) {
+        LOG_CARMACK("CARMACK: 16 GiB. You are no longer rendering. You are simulating a small universe.");
+        LOG_CARMACK("CARMACK: Respect. Absolute respect.");
+    }
+
+    if (g_totalAllocated > 24ULL * 1024 * 1024 * 1024) {
+        LOG_CARMACK("CARMACK: 24 GiB. At this point, the GPU is just a very expensive space heater.");
+        LOG_CARMACK("CARMACK: But it's YOUR space heater. And it's rendering 16K path-traced pink photons.");
+        LOG_CARMACK("CARMACK: I am not mad. I am impressed.");
+    }
+
+    LOG_JENSEN("BufferManager: Allocation complete — {} MiB | total {:.3f} GiB | handle 0x{:016X}",
+               size >> 20, g_totalAllocated / (1024.0 * 1024 * 1024), handle);
 
     return handle;
 }

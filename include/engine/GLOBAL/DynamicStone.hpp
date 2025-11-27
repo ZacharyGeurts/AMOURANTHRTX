@@ -1,3 +1,4 @@
+// engine/GLOBAL/DynamicStone.hpp
 // =============================================================================
 // AMOURANTH RTX Engine (C) 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
@@ -17,6 +18,7 @@
 
 #include <vulkan/vulkan.h>
 #include <cstdint>
+#include "engine/GLOBAL/logging.hpp" // the stones
 
 namespace RTX {
 

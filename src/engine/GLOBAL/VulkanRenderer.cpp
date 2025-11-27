@@ -1901,61 +1901,6 @@ void VulkanRenderer::cleanupFramebuffers() noexcept {
     framebuffers_.clear();
 }
 
-VkShaderModule VulkanRenderer::loadShader(const std::string& filename) const
-{
-    std::string fullPath = "assets/shaders/compute/" + filename;
-
-    LOG_FATAL_CAT("RENDERER", "LOADING SHADER → {}", fullPath);
-
-    FILE* file = fopen(fullPath.c_str(), "rb");
-    if (!file) {
-        LOG_FATAL_CAT("RENDERER", "SHADER NOT FOUND: {}", fullPath);
-        return VK_NULL_HANDLE;
-    }
-
-    fseek(file, 0, SEEK_END);
-    size_t size = ftell(file);
-    fseek(file, 0, SEEK_SET);
-
-    if (size == 0 || (size % 4) != 0) {
-        LOG_FATAL_CAT("RENDERER", "INVALID SPIR-V SIZE: {} bytes", size);
-        fclose(file);
-        return VK_NULL_HANDLE;
-    }
-
-    std::vector<uint32_t> code(size / 4);
-    if (fread(code.data(), 1, size, file) != size) {
-        LOG_FATAL_CAT("RENDERER", "FAILED TO READ SHADER");
-        fclose(file);
-        return VK_NULL_HANDLE;
-    }
-    fclose(file);
-
-    if (code[0] != 0x07230203u) {
-        LOG_FATAL_CAT("RENDERER", "BAD SPIR-V MAGIC: 0x{:08x} — FILE CORRUPTED OR ENCRYPTED", code[0]);
-        return VK_NULL_HANDLE;
-    }
-
-    LOG_SUCCESS_CAT("RENDERER", "SPIR-V VALID → {} bytes", size);
-
-    VkShaderModuleCreateInfo createInfo = {
-        .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
-        .codeSize = size,
-        .pCode = code.data()
-    };
-
-    VkShaderModule module = VK_NULL_HANDLE;
-    VkResult r = vkCreateShaderModule(RTX::g_ctx().device_, &createInfo, nullptr, &module);
-
-    if (r != VK_SUCCESS) {
-        LOG_FATAL_CAT("RENDERER", "vkCreateShaderModule FAILED: {} — SHADER REJECTED", static_cast<int>(r));
-        return VK_NULL_HANDLE;
-    }
-
-    LOG_SUCCESS_CAT("RENDERER", "SHADER LOADED → {} — {} bytes — PINK PHOTONS ARMED", filename, size);
-    return module;
-}
-
 // ──────────────────────────────────────────────────────────────────────────────
 // Add this helper — called from renderFrame after acquire
 // ──────────────────────────────────────────────────────────────────────────────

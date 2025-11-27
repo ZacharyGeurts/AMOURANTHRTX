@@ -14,6 +14,7 @@
 #include <set>
 
 using namespace Logging::Color;
+using StoneKey::stone_device;
 
 namespace RTX {
 
@@ -271,6 +272,77 @@ void cleanupAll() noexcept {
     }
 
     return indices;
+}
+
+VkShaderModule RTX::Context::loadShader(const std::string& filename) const
+{
+    using namespace StoneKey;
+
+    if (stone_device() == VK_NULL_HANDLE) {
+        LOG_WARN_CAT("SHADER", "loadShader early call (device not ready) → {}", filename);
+        return VK_NULL_HANDLE;
+    }
+
+    LOG_ATTEMPT_CAT("SHADER", "FORGING KEYED SHADER → {}", filename);
+
+    FILE* f = std::fopen(filename.c_str(), "rb");
+    if (!f) {
+        LOG_FATAL_CAT("SHADER", "MISSING → {}", filename);
+        return VK_NULL_HANDLE;
+    }
+
+    std::fseek(f, 0, SEEK_END);
+    const size_t size = std::ftell(f);
+    std::rewind(f);
+
+    if (size < 128 || size % 4 != 0) {
+        std::fclose(f);
+        LOG_FATAL_CAT("SHADER", "CORRUPT SIZE {} → {}", size, filename);
+        return VK_NULL_HANDLE;
+    }
+
+    std::vector<uint32_t> encrypted(size / 4);
+    if (std::fread(encrypted.data(), 1, size, f) != size) {
+        std::fclose(f);
+        LOG_FATAL_CAT("SHADER", "READ ERROR → {}", filename);
+        return VK_NULL_HANDLE;
+    }
+    std::fclose(f);
+
+    // ── STONEKEY v∞ DECRYPTION — USING REAL GLOBAL kStone1 & kStone2
+    {
+        uint64_t state = kStone1 ^ kStone2 ^ size;
+
+        for (size_t i = 0; i < encrypted.size(); ++i) {
+            state = state * 0x517cc1b727220a95ULL + 0x8532b8c73f92e64bULL;
+            uint64_t key = state ^ kStone1 ^ (i * 0x9e3779b97f4a7c15ULL);
+            encrypted[i] ^= static_cast<uint32_t>(key) ^ static_cast<uint32_t>(key >> 32);
+        }
+    }
+
+    if (encrypted[0] != 0x07230203u) {
+        LOG_FATAL_CAT("SHADER", "DECRYPT FAILED — BAD MAGIC 0x{:08x} → {}", encrypted[0], filename);
+        return VK_NULL_HANDLE;
+    }
+
+    LOG_SUCCESS_CAT("SHADER", "DECRYPTED → {} ({} KiB)", filename, size / 1024);
+
+    VkShaderModuleCreateInfo createInfo = {
+        .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+        .codeSize = size,
+        .pCode = encrypted.data()
+    };
+
+    VkShaderModule module = VK_NULL_HANDLE;
+    VkResult result = vkCreateShaderModule(stone_device(), &createInfo, nullptr, &module);
+
+    if (result != VK_SUCCESS) {
+        LOG_FATAL_CAT("SHADER", "vkCreateShaderModule FAILED ({}) → {}", static_cast<int>(result), filename);
+        return VK_NULL_HANDLE;
+    }
+
+    LOG_SUCCESS_CAT("SHADER", "MODULE FORGED → {} — PINK PHOTONS ARMED", filename);
+    return module;
 }
 
 // -----------------------------------------------------------------------------
