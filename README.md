@@ -7,7 +7,7 @@ chmod +x linux.sh
 ```
 Currently compiles and reaches render loop. Much more work needed yet.  
 Working prototype expected Christmas 2025.  
-1000s of Grok requests, rebuilt, re-edited, re-microed, assembled  and tested to work.  
+Current and archived content subject to license.  
 Please do not code farm. Swapchain goes with THIS project.  
 Expect no output on a given day. I go for milestones and not all include visuals.  
 Updates are fast and furious at this stage and the renderer could be up or down any minute.  
