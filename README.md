@@ -54,6 +54,8 @@ sudo apt update && sudo apt install gcc-14 g++-14
 
 Made with Grok sized files for AI updates.  
 
+Errors and bad code will not be tolerated.
+<img width="1300" alt="StoneKey" src="https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/media/Untitled.png" />  
 <img width="1300" alt="StoneKey" src="https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/media/Screenshot%20from%202025-11-08%2012-01-46.png" />  
 <img width="1300" alt="Hypertrace" src="https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/media/nexus.png" />  
 <img width="1300" alt="Renderer" src="https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/media/Screenshot%20from%202025-11-04%2008-26-37.png" />  
