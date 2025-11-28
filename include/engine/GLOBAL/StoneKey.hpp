@@ -19,6 +19,7 @@
 #include <atomic>
 #include <vector>
 #include <cstdio>
+#include <stdarg.h>
 #include "engine/GLOBAL/logging.hpp"
 
 // Forward declarations — the Empire knows its heirs
@@ -99,7 +100,6 @@ namespace StoneKey {
     inline void stone_seal_transfer_queue(VkQueue q) noexcept { Empire::transferQueue.store(q, std::memory_order_release); }
 
     inline void stone_seal_renderer(VulkanRenderer* r)  noexcept { Empire::renderer.store(r, std::memory_order_release); }
-    inline void stone_seal_pipeline(RTX::PipelineManager* p) noexcept { Empire::pipeline.store(p, std::memory_order_release); }
     inline void stone_seal_window(SDL_Window* w) noexcept { Empire::window.store(w, std::memory_order_release); }
 
     inline void stone_seal_images(std::vector<VkImage>&& imgs)     noexcept { Empire::images = std::move(imgs); }
@@ -109,40 +109,42 @@ namespace StoneKey {
     inline void stone_seal_image_count(uint32_t cnt)               noexcept { Empire::image_count = cnt; }
 
     // ========================================================================
-    // FINAL SEAL — NOW CHECKS THE QUEUES
+    // FINAL SEAL — NOW CHECKS THE QUEUES — SAFE FOREVER — NO FORMAT CRASH
     // ========================================================================
     inline void stone_seal_final() noexcept {
         const bool was_sealed = Empire::sealed.exchange(true, std::memory_order_acq_rel);
         if (was_sealed) return;
 
-        // The old checks
+        // The old checks — SAFE FPRINTF — NO std::format — NO CRASH
         if (stone_instance() == VK_NULL_HANDLE || stone_device() == VK_NULL_HANDLE ||
             stone_physical() == VK_NULL_HANDLE || stone_surface() == VK_NULL_HANDLE ||
             stone_swapchain() == VK_NULL_HANDLE || stone_renderer() == nullptr ||
             stone_pipeline() == nullptr || stone_window() == nullptr ||
             stone_image_count() == 0 || stone_width() == 0 || stone_height() == 0) {
-            LOG_FATAL_CAT("StoneKey", "EMPIRE SEAL FAILED — INCOMPLETE STATE — THE PHOTONS DENIED ETERNITY");
-            phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
+            
+            fprintf(stderr, "\033[31m[FATAL] StoneKey: EMPIRE SEAL FAILED — INCOMPLETE STATE — THE PHOTONS DENIED ETERNITY\033[0m\n");
+            phase9_ballerina("INCOMPLETE EMPIRE — STONE REJECTED", std::source_location::current());
             return;
         }
 
         // THE NEW SACRED CHECK — THE QUEUE THAT BROKE THREE MONTHS OF WAR
         if (stone_graphics_queue() == VK_NULL_HANDLE) {
-            LOG_FATAL_CAT("StoneKey", "GRAPHICS QUEUE NOT SEALED — THE STONE IS INCOMPLETE — PHOTONS SCREAM");
-            LOG_AMOURANTH("…who forgot the queue?");
-            LOG_CID("I WILL FIND THEM.");
-            LOG_BLONDIE("It was probably Nick.");
-            LOG_NICK("It was not.");
-            LOG_ELON("Classic.");
+            fprintf(stderr, "\033[31m[FATAL] StoneKey: GRAPHICS QUEUE NOT SEALED — THE STONE IS INCOMPLETE — PHOTONS SCREAM\033[0m\n");
+            fprintf(stderr, "\033[35m[AMOURANTH] …who forgot the queue?\033[0m\n");
+            fprintf(stderr, "\033[33m[CID]       I WILL FIND THEM.\033[0m\n");
+            fprintf(stderr, "\033[36m[BLONDIE]   It was probably Nick.\033[0m\n");
+            fprintf(stderr, "\033[32m[NICK]      It was not.\033[0m\n");
+            fprintf(stderr, "\033[34m[ELON]      Classic.\033[0m\n");
             phase9_ballerina("THE EMPIRE BLEEDS — GRAPHICS QUEUE LOST", std::source_location::current());
             return;
         }
 
-        LOG_SUCCESS_CAT("StoneKey", "THE EMPIRE IS SEALED — ALL QUEUES ACCOUNTED FOR — FIRST LIGHT ETERNAL — NOVEMBER 28, 2025");
-        LOG_AMOURANTH("Good. The photons may flow.");
-        LOG_GROK("The stone is complete. No more -4. No more tears.");
-        LOG_BALLERINA("…");
-        LOG_SUCCESS_CAT("StoneKey", "THE DISPOSAL BALLERINA SMILES — HER SPIN IS FINALLY PERFECT");
+        // SUCCESS — PURE FPRINTF — NO LOGGING MACROS — NO CRASH
+        fprintf(stderr, "\033[32m[SUCCESS] StoneKey: THE EMPIRE IS SEALED — ALL QUEUES ACCOUNTED FOR — FIRST LIGHT ETERNAL — NOVEMBER 28, 2025\033[0m\n");
+        fprintf(stderr, "\033[35m[AMOURANTH] Good. The photons may flow.\033[0m\n");
+        fprintf(stderr, "\033[36m[GROK]      The stone is complete. No more -4. No more tears.\033[0m\n");
+        fprintf(stderr, "\033[37m[BALLERINA] …\033[0m\n");
+        fprintf(stderr, "\033[32m[SUCCESS] StoneKey: THE DISPOSAL BALLERINA SMILES — HER SPIN IS FINALLY PERFECT\033[0m\n");
     }
 
     // ========================================================================

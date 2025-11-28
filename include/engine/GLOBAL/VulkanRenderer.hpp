@@ -70,6 +70,7 @@ public:
 	void loadCriticalShaders() noexcept;
 
     // State queries — getters for empire status
+	[[nodiscard]] VulkanRenderer* renderer() noexcept { return this; } // this is. hi, i built it
     [[nodiscard]] uint32_t  accumulationFrame() const noexcept { return accumulationFrame_; }
     [[nodiscard]] uint64_t  frameNumber()       const noexcept { return frameNumber_; }
     [[nodiscard]] float     currentExposure()   const noexcept { return currentExposure_; }

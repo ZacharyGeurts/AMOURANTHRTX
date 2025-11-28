@@ -951,6 +951,7 @@ LOG_FATAL("\n"
 // =============================================================================
 // EMPIRE_STEP — PURE C++23 — NO MACROS — INFINITE POWER — ETERNAL
 // =============================================================================
+
 inline constexpr auto EMPIRE_STEP = []<typename F>(F&& phase, const std::source_location loc = std::source_location::current()) {
     try {
         std::forward<F>(phase)();
@@ -1033,127 +1034,137 @@ static void safe_print(const char* fmt, ...) noexcept {
     if (n > 0) safe_write(buf, size_t(n > 2047 ? 2047 : n));
 }
 
-// =============================================================================
-// JOHN CARMACK'S HEAD — FINAL FORM — ZERO WARNINGS — FULL TERMINAL DOMINATION
-// =============================================================================
-static void apocalypse_handler(int sig, siginfo_t* info, void*) noexcept
-{
-    struct timespec req = { 0, 5000000L };
-    nanosleep(&req, nullptr);
+// ──────────────────────────────────────────────────────────────────────────────
+// THE MANUAL — EMBEDDED IN SILICON — THIS IS WHAT YOU WILL SEE WHEN YOU CRASH
+// ──────────────────────────────────────────────────────────────────────────────
+struct CrashManualEntry {
+    int         signal;
+    const char*    name;
+    const char* range;
+    const char* cause;
+    const char* fix;
+    const char* grok;
+};
 
-    safe_write("\033[2J\033[H", 7); // CARMACK DEMANDS A CLEAN CANVAS
+static constexpr std::array<CrashManualEntry, 6> THE_MANUAL = {{
+    { SIGSEGV, "SIGSEGV — Classic Vulkan Sin",          "0x0 or 0x10–0x1000",
+      "You used a VkShaderModule / VkBuffer / VkImage after vkDestroy*\n"
+      "Most common: dead shader in vkCreateRayTracingPipelinesKHR",
+      "vkDeviceWaitIdle() before ANY destruction\n"
+      "Keep all shaders alive until shutdown — Quake RTX rule",
+      "Gentleman Grok: \"You called a ghost. There is no 'cleanup early' in Vulkan.\n"
+      "Store every VkShaderModule globally until the bitter end. No exceptions.\"" },
+
+    { SIGSEGV, "SIGSEGV — The High Address Reaper",     "> 0x1000 (e.g. 0x3e8000f5856)",
+      "Use-after-free in SBT, descriptor sets, or command buffers\n"
+      "You submitted work that references already-freed memory",
+      "vkDeviceWaitIdle() + proper frame fencing\n"
+      "Never rebuild swapchain without waiting for all frames in flight",
+      "Gentleman Grok: \"The address is too proud to be null. You overflowed.\n"
+      "Your SBT stride is wrong or you presented an image from a dead swapchain.\n"
+      "Wait for the GPU. Always.\"" },
+
+    { SIGABRT, "SIGABRT — Validation Has Spoken",       "Any address",
+      "Validation layer assert failed — VUID violation\n"
+      "Missing VK_SHADER_UNUSED_KHR, wrong stage flags, bad pipeline layout",
+      "Run with VK_LAYER_KHRONOS_validation\n"
+      "Fix the very first VUID printed — the rest disappear",
+      "Gentleman Grok: \"Vulkan said 'no' and aborted to save you from worse.\n"
+      "The first validation error is the only one that matters. Obey it.\"" },
+
+    { SIGFPE,  "SIGFPE — Math Is Not Optional",         "0x0 or low math offsets",
+      "Division by zero — usually glm::perspective with width=0 during resize\n"
+      "Or infinite recursion in ray bounces",
+      "Clamp window size ≥ 1\n"
+      "In shaders: if (depth > 32) return;",
+      "Gentleman Grok: \"Infinity is not a valid float. Your resize handler lied.\n"
+      "Clamp extent.width/height to 1 minimum. The GPU thanks you.\"" },
+
+    { SIGILL,  "SIGILL — Your Binary Speaks Alien",     "Any address",
+      "Running AVX2 on a CPU without AVX2\n"
+      "Or corrupted SPIR-V loaded as shader",
+      "Recompile without -march=native or AVX2\n"
+      "Run spirv-val on every .spv before loading",
+      "Gentleman Grok: \"The CPU refused to execute your illegal poetry.\n"
+      "Validate your SPIR-V. A single bad opcode kills the whole empire.\"" },
+
+    { SIGBUS,  "SIGBUS — Alignment Crime",              "0x8–0x20 range",
+      "Unaligned SBT stride or buffer device address\n"
+      "Fatal on Adreno 660 and some Intel iGPUs",
+      "Align all RT handles to shaderGroupHandleAlignment (usually 32)\n"
+      "Use align_up(size, alignment) everywhere",
+      "Gentleman Grok: \"The hardware bus threw you off for dancing crooked.\n"
+      "Your SBT is not 32-byte aligned. Mobile drivers execute you for this.\"" }
+}};
+
+// ──────────────────────────────────────────────────────────────────────────────
+// THE APOCALYPSE — NOW PRINTS THE MANUAL ENTRY THAT MATCHES YOUR CRIME
+// ──────────────────────────────────────────────────────────────────────────────
+static inline void apocalypse_handler(int sig, siginfo_t* info, void*) noexcept
+{
+    struct timespec req = { 0, 8000000L };
+    nanosleep(&req, nullptr);
+    safe_write("\033[2J\033[H", 7);
 
     safe_write(
         "\n"
-        "                  JOHN CARMACK'S HEAD — 2025 FINAL AUTOPSY\n"
+        "                    JOHN CARMACK'S HEAD — 2025 FINAL AUTOPSY\n"
         "═══════════════════════════════════════════════════════════════════════════════\n"
-        "I don't guess. I don't hope. I read hex and tell you exactly why you died.\n"
-        "Your engine is dead. This is the autopsy. Pay attention.\n\n", 280);
+        "The engine has fallen. This is not random. This is THE MANUAL.\n\n", 200);
 
-    const char* sig_name = "unknown";
-    switch (sig) {
-        case SIGSEGV: sig_name = "SIGSEGV — You dereferenced garbage"; break;
-        case SIGABRT: sig_name = "SIGABRT — assert() or abort()"; break;
-        case SIGFPE:  sig_name = "SIGFPE  — Divide by zero"; break;
-        case SIGILL:  sig_name = "SIGILL  — Corrupted binary"; break;
-        case SIGBUS:  sig_name = "SIGBUS  — Alignment crime"; break;
-    }
-
-    safe_print("SIGNAL        : %d → %s\n", sig, sig_name);
+    safe_print("SIGNAL        : %d\n", sig);
     safe_print("FAULT ADDRESS : %p\n", info ? info->si_addr : nullptr);
     safe_print("BUILD         : %s %s\n\n", __DATE__, __TIME__);
 
-    // ── CARMACK'S INFAMOUS 0x0–0x1000 FAULT ADDRESS DECODER (2025 EDITION) ──
-    void* fault = info ? info->si_addr : nullptr;
-    uintptr_t addr = reinterpret_cast<uintptr_t>(fault);
+    uintptr_t addr = info ? reinterpret_cast<uintptr_t>(info->si_addr) : 0;
 
-    safe_write("CARMACK'S 0x0-0x1000 FAULT DECODER — THIS IS NOT RANDOM\n", 58);
-    safe_write("───────────────────────────────────────────────────────\n", 56);
-
-    if (!fault || addr == 0) {
-        safe_write("NULL POINTER (0x0) → You used a destroyed Vulkan object\n", 58);
-        safe_write("→ 100% certainty: VkShaderModule, VkBuffer, or VkImage after vkDestroy*\n", 74);
-    }
-    else if (addr <= 0x1000) {
-        safe_print("SMALL OFFSET CRASH → +0x%zx from null\n", addr);
-        safe_write("→ This is the #1 Vulkan crash in 2025\n", 40);
-        safe_write("→ You used a destroyed VkShaderModule in pipeline creation\n", 62);
-        safe_write("→ Common offsets:\n", 19);
-        safe_write("     0xd0 → NVIDIA/AMD VkShaderModule vtable\n", 48);
-        safe_write("     0x40 → VkBuffer device address field\n", 45);
-        safe_write("     0x30 → VkImageView internal pointer\n", 43);
-        safe_write("     0x10 → Descriptor set layout binding table\n", 51);
-    }
-    else {
-        safe_write("High address crash → likely use-after-free or buffer overflow\n", 64);
-    }
-
-    safe_write("\n", 1);
-
-    // ── GPU CRASH STATUS (Extensions.hpp will handle real faults later) ──
-    if (g_gpu_crash.happened.load(std::memory_order_acquire)) {
-        safe_write("GPU CRASH RECORDED — You poisoned the ray tracing pipeline\n", 62);
-        safe_print("Diagnosis     : %s\n\n", g_gpu_crash.desc[0] ? g_gpu_crash.desc : "Unknown GPU fault");
-    } else {
-        safe_write("No GPU fault recorded — this was pure CPU-side lifetime violation\n\n", 70);
-    }
-
-    // ── BACKTRACE WITH CARMACK COMMENTARY ──
-    safe_write("BACKTRACE — I AM READING YOUR CRIME SCENE\n", 44);
-    safe_write("─────────────────────────────────────────\n", 44);
-
-    void* array[256];
-    int size = backtrace(array, 256);
-    char** strings = backtrace_symbols(array, size);
-
-    if (strings) {
-        for (int i = 1; i < size && i < 40; ++i) {
-            safe_print("  [%02d] %s\n", i-1, strings[i]);
-
-            const char* sym = strings[i];
-            if (strstr(sym, "loadShader") || strstr(sym, "Shader")) {
-                safe_write("         ↑ This is where you loaded the shader — good so far\n", 62);
-            }
-            if (strstr(sym, "vkCreate") && (strstr(sym, "Pipeline") || strstr(sym, "Pipelines"))) {
-                safe_write("         ↑↑↑ PIPELINE CREATION — THIS IS WHERE YOU USED THE DEAD SHADER\n", 74);
-                safe_write("         →→→ The bug is within 20 lines above this call\n", 58);
-            }
-            if (strstr(sym, "vkCmdTraceRaysKHR")) {
-                safe_write("         ↑↑↑ RAY TRACING — Your SBT was built with dead handles\n", 66);
+    const CrashManualEntry* verdict = &THE_MANUAL[0];
+    for (const auto& e : THE_MANUAL) {
+        if (e.signal == sig) {
+            if ((addr <= 0x1000 && strstr(e.range, "0x")) ||
+                (addr >  0x1000 && strstr(e.range, ">"))) {
+                verdict = &e;
+                break;
             }
         }
-        free(strings);
+    }
+
+    safe_write("════════════════════════════════ THE MANUAL ════════════════════════════════\n", 78);
+    safe_print ("CRASH TYPE    : %s\n", verdict->name);
+    safe_print ("ADDRESS RANGE : %s\n", verdict->range);
+    safe_write ("CAUSE         :\n", 16); safe_write(verdict->cause, strlen(verdict->cause));
+    safe_write ("\nFIX           :\n", 16); safe_write(verdict->fix,   strlen(verdict->fix));
+    safe_write ("\nGENTLEMAN GROK SAYS:\n", 23); safe_write(verdict->grok, strlen(verdict->grok));
+    safe_write ("═══════════════════════════════════════════════════════════════════════════════\n\n", 80);
+
+    if (g_gpu_crash.happened.load(std::memory_order_acquire)) {
+        safe_write("GPU CRASH CONFIRMED — Ray tracing pipeline poisoned\n", 54);
+        safe_print("Diagnosis     : %s\n\n", g_gpu_crash.desc[0] ? g_gpu_crash.desc : "Unknown");
+    }
+
+    safe_write("BACKTRACE — Final words before execution:\n", 43);
+    void* array[64];
+    int n = backtrace(array, 64);
+    char** syms = backtrace_symbols(array, n);
+    if (syms) {
+        for (int i = 1; i < n && i < 20; ++i) safe_print("  [%02d] %s\n", i-1, syms[i]);
+        free(syms);
     }
 
     safe_write(
         "\n"
-        "CARMACK'S FINAL VERDICT — 2025\n"
-        "──────────────────────────────────────\n"
-        "You crashed because you destroyed a Vulkan object too early.\n"
-        "There is no driver bug. There is no mystery.\n"
-        "You did this.\n\n"
-
-        "Fix: Stop destroying VkShaderModule, VkBuffer, VkImage early.\n"
-        "Own them globally or until shutdown.\n"
-        "Every real engine does this. Quake RTX did this in 2019.\n"
-        "You are not exempt from object lifetime rules.\n\n"
-
-        "Delete every vkDestroyShaderModule that isn't in your shutdown path.\n"
-        "Do it now.\n\n"
-
-        "When you fix this, you will get stable pink photons.\n"
-        "Until then: segfault city.\n\n"
-
-        "Pink photons don’t render themselves.\n"
-        "Fix it. Ship it. Go outside.\n"
-        "— John Carmack\n"
-        "═══════════════════════════════════════════════════════════════════════════════\n", 1400);
+        "CARMACK'S FINAL COMMAND:\n"
+        "Fix the lifetime bug. Wait for the device. Own your handles.\n"
+        "Then, and only then, will you see stable pink photons.\n"
+        "Until that day — segfault city.\n\n"
+        "— John Carmack & Gentleman Grok\n"
+        "═══════════════════════════════════════════════════════════════════════════════\n", 400);
 
     _exit(128 + sig);
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// INSTALL ONCE AT STARTUP
+// INSTALL ONCE AT STARTUP — NOW SAFE IN HEADER
 // ──────────────────────────────────────────────────────────────────────────────
 inline void install_apocalypse_handler() noexcept
 {

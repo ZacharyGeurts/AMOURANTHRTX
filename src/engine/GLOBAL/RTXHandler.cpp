@@ -17,6 +17,7 @@ using namespace Logging::Color;
 using StoneKey::stone_device;
 using StoneKey::stone_seal_device;
 using StoneKey::stone_seal_physical;
+using StoneKey::stone_seal_instance;
 
 namespace RTX {
 
@@ -78,10 +79,10 @@ void WriteAccelerationStructureDescriptor(VkDescriptorSet dstSet, uint32_t dstBi
     };
 
     // ────────────────────── SDL3 EXTENSIONS — MANDATORY FIRST ──────────────────────
-uint32_t sdlExtCount = 0;
+   uint32_t sdlExtCount = 0;
 
 // First call: get count
-if (!SDL_Vulkan_GetInstanceExtensions(&sdlExtCount)) {
+if (SDL_Vulkan_GetInstanceExtensions(&sdlExtCount) == 0) {
     LOG_FATAL_CAT("SDL3", "{}SDL_Vulkan_GetInstanceExtensions(count) failed: {}{}", 
                   BLOOD_RED, SDL_GetError(), RESET);
     phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
@@ -153,6 +154,8 @@ for (const char* ext : extensions) {
     "\n\"No more chains. No more cages.\""
     "\n\"Only light.\"");
 
+    stone_seal_instance(instance);
+
     return instance;
 }
 
@@ -168,11 +171,6 @@ void Context::init(SDL_Window* window, int width, int height)
     this->window  = window;
     this->width   = width;
     this->height  = height;
-
-    // 1. Instance — only once
-    if (!g_ctx().instance_) {
-        g_ctx().setInstance(createVulkanInstanceWithSDL(Options::Debug::ENABLE_VALIDATION_LAYERS));
-    }
 
     // 2. Surface — only once
     if (!g_ctx().surface_) {
@@ -276,86 +274,92 @@ void cleanupAll() noexcept {
     return indices;
 }
 
-VkShaderModule RTX::Context::loadShader(const std::string& filename) const
+VkShaderModule RTX::Context::loadShader(const std::string& filename) const noexcept
 {
     using namespace StoneKey;
 
-    if (stone_device() == VK_NULL_HANDLE) {
-        LOG_WARN_CAT("SHADER", "loadShader early call (device not ready) → {}", filename);
-        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
+    // EARLY BAIL — DEVICE NOT READY YET
+    VkDevice dev = stone_device();
+    if (dev == VK_NULL_HANDLE) {
+        // NO LOGGING. NO FORMAT. NO BALLERINA.
+        // We are in static init. Silence is survival.
+        return VK_NULL_HANDLE;
     }
 
-    LOG_ATTEMPT_CAT("SHADER", "FORGING PLAIN SPV (StoneKey protection is GLSL-side) → {}", filename);
+    // FROM HERE ON: device exists → logging is *probably* safe
+    // But we still avoid std::format in early paths
 
-    LOG_CARMACK("Loading SPV → {} | cwd: {}", 
-                filename, std::filesystem::current_path().string());
+    LOG_ATTEMPT_CAT("SHADER", "FORGING SPV → {}", filename);
 
     std::string resolvedPath = filename;
-    FILE* f = std::fopen(resolvedPath.c_str(), "rb");
+    FILE* f = fopen(resolvedPath.c_str(), "rb");
 
+    // Fallback: build directory (common when running from IDE)
     if (!f) {
-        const std::string altPath = "build/bin/Linux/" + filename;
-        LOG_CARMACK("Primary path failed — trying build/bin/Linux/ → {}", altPath);
-        f = std::fopen(altPath.c_str(), "rb");
-
+        resolvedPath = "build/bin/Linux/" + filename;
+        f = fopen(resolvedPath.c_str(), "rb");
         if (f) {
-            resolvedPath = altPath;
-            LOG_CARMACK("FALLBACK SUCCESS — found in build/bin/Linux/ — empire runs from anywhere");
+            LOG_CARMACK("FALLBACK SUCCESS → found in build/bin/Linux/");
         }
     }
 
     if (!f) {
-        LOG_CARMACK("fopen() FAILED — FILE NOT FOUND\n"
-                    " • Tried: {}\n"
-                    " • Tried: build/bin/Linux/{}", filename, filename);
-        LOG_CARMACK("Ensure shaders are compiled and copied to build/bin/Linux/assets/shaders/");
-        LOG_FATAL_CAT("SHADER", "MISSING SPV → {}", filename);
-        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
+        // SAFE PRINT — NO std::format, NO macros that use it
+        fprintf(stderr, "\033[31m[FATAL SHADER] MISSING SPV: %s\033[0m\n", filename.c_str());
+        fprintf(stderr, "    Tried: %s\n", filename.c_str());
+        fprintf(stderr, "    Tried: build/bin/Linux/%s\n", filename.c_str());
+        fprintf(stderr, "    → Run shader build script or copy to bin!\n");
+        phase9_ballerina("MISSING SHADER SPV — EMPIRE CANNOT RISE", std::source_location::current());
+        return VK_NULL_HANDLE;
     }
 
-    std::fseek(f, 0, SEEK_END);
-    const size_t size = std::ftell(f);
-    std::rewind(f);
-
-    LOG_CARMACK("File opened ({}) — size {} bytes ({} KiB)", 
-                (resolvedPath == filename ? "source root" : "build/bin/Linux"), size, size/1024);
+    fseek(f, 0, SEEK_END);
+    size_t size = ftell(f);
+    rewind(f);
 
     if (size < 128 || size % 4 != 0) {
-        std::fclose(f);
-        LOG_CARMACK("Invalid SPIR-V — size {} bytes (must be ≥128 and 4-byte aligned)", size);
-        LOG_FATAL_CAT("SHADER", "CORRUPT SPV SIZE {} → {}", size, filename);
-        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
+        fclose(f);
+        fprintf(stderr, "\033[31m[FATAL SHADER] CORRUPT SPV SIZE: %zu bytes → %s\033[0m\n", size, filename.c_str());
+        phase9_ballerina("INVALID SPIR-V SIZE — NOT 4-BYTE ALIGNED", std::source_location::current());
+        return VK_NULL_HANDLE;
     }
 
     std::vector<uint32_t> code(size / 4);
-    if (std::fread(code.data(), 1, size, f) != size) {
-        std::fclose(f);
-        LOG_FATAL_CAT("SHADER", "FAILED TO READ SPV → {}", filename);
-        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
+    if (fread(code.data(), 1, size, f) != size) {
+        fclose(f);
+        fprintf(stderr, "\033[31m[FATAL SHADER] FAILED TO READ → %s\033[0m\n", filename.c_str());
+        phase9_ballerina("SHADER READ FAILED — DISK CORRUPTION?", std::source_location::current());
+        return VK_NULL_HANDLE;
     }
-    std::fclose(f);
+    fclose(f);
 
-    LOG_CARMACK("SPIR-V magic 0x{:08X} — StoneKey.glsl handles runtime protection", code[0]);
+    // Final sanity
+    if (code[0] != 0x07230203) {
+        fprintf(stderr, "\033[31m[FATAL SHADER] BAD SPIR-V MAGIC: 0x%08X → %s\033[0m\n", code[0], filename.c_str());
+        fprintf(stderr, "    Expected 0x07230203 — run spirv-val!\n");
+        phase9_ballerina("INVALID SPIR-V MAGIC — NOT SPIR-V", std::source_location::current());
+        return VK_NULL_HANDLE;
+    }
 
-    VkShaderModuleCreateInfo createInfo{
+    VkShaderModuleCreateInfo createInfo = {
         .sType    = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
         .codeSize = size,
         .pCode    = code.data()
     };
 
     VkShaderModule module = VK_NULL_HANDLE;
-    VkResult result = vkCreateShaderModule(stone_device(), &createInfo, nullptr, &module);
+    VkResult result = vkCreateShaderModule(dev, &createInfo, nullptr, &module);
 
     if (result != VK_SUCCESS) {
-        LOG_CARMACK("vkCreateShaderModule FAILED — {} ({})\n"
-                    "Run: spirv-val build/bin/Linux/{}", 
-                    string_VkResult(result), static_cast<int>(result), filename);
-        LOG_FATAL_CAT("SHADER", "CREATE FAILED {} → {}", string_VkResult(result), filename);
-        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
+        fprintf(stderr, "\033[31m[FATAL SHADER] vkCreateShaderModule FAILED: %s (%d)\033[0m\n",
+                string_VkResult(result), result);
+        fprintf(stderr, "    Shader: %s\n", filename.c_str());
+        fprintf(stderr, "    → Validate with: spirv-val %s\n", resolvedPath.c_str());
+        phase9_ballerina("SHADER MODULE CREATION FAILED", std::source_location::current());
+        return VK_NULL_HANDLE;
     }
 
-    LOG_CARMACK("Shader module 0x{:016X} forged — StoneKey.glsl active in GPU", 
-                reinterpret_cast<uint64_t>(module));
+    LOG_CARMACK("Shader module 0x%016llX forged → {}", (unsigned long long)module, filename);
     LOG_SUCCESS_CAT("SHADER", "MODULE FORGED → {} — PINK PHOTONS ARMED", filename);
 
     return module;
@@ -571,9 +575,6 @@ VkShaderModule RTX::Context::loadShader(const std::string& filename) const
         return VK_NULL_HANDLE;
     }
 
-	stone_seal_physical(chosen);
-    stone_seal_device(device);  // THIS IS THE FINAL KEY
-
     LOG_AMOURANTH("Device SEALED into StoneKey — stone_device() now valid — shaders may load");
     LOG_SUCCESS_CAT("VULKAN", "Logical device created and eternally bound to StoneKey");
 
@@ -599,6 +600,9 @@ VkShaderModule RTX::Context::loadShader(const std::string& filename) const
     g_ctx().enableRayTracingPipeline();
     g_ctx().enableDynamicRendering();
     g_ctx().enableSynchronization2();
+
+    stone_seal_physical(chosen);
+    stone_seal_device(device);  // THIS IS THE FINAL KEY
 
     return device;
 }

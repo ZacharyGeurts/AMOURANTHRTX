@@ -55,113 +55,110 @@ std::vector<VkDescriptorSet> g_tonemapSets;
 VkDescriptorPool             g_tonemapPool = VK_NULL_HANDLE;
 
 // ──────────────────────────────────────────────────────────────────────────────
-// CONVERT YOUR Binding → VkDescriptorSetLayoutBinding (C++23 style)
-// ──────────────────────────────────────────────────────────────────────────────
-static VkDescriptorSetLayout createLayout(VkDevice device, std::span<const Binding> bindings)
-{
-    std::vector<VkDescriptorSetLayoutBinding> vkBindings;
-    vkBindings.reserve(bindings.size());
-
-    for (const auto& b : bindings) {
-        vkBindings.push_back(VkDescriptorSetLayoutBinding{
-            .binding         = b.binding,
-            .descriptorType  = b.type,
-            .descriptorCount = b.count,
-            .stageFlags      = b.stage,
-            .pImmutableSamplers = nullptr
-        });
-    }
-
-    const VkDescriptorSetLayoutCreateInfo info{
-        .sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-        .bindingCount = static_cast<uint32_t>(vkBindings.size()),
-        .pBindings    = vkBindings.data()
-    };
-
-    VkDescriptorSetLayout layout;
-    VK_CHECK(vkCreateDescriptorSetLayout(device, &info, nullptr, &layout));
-    return layout;
-}
-
-// ──────────────────────────────────────────────────────────────────────────────
-// INITIALIZE — C++23 — NO ASSERT — NO .get() — PURE
+// INITIALIZE — VULKAN 1.4 — C++23 — NO ASSERT — STONEKEY v∞ — BINDING 31
 // ──────────────────────────────────────────────────────────────────────────────
 void initialize(VkDevice device)
 {
     if (!device) device = stone_device();
     if (device == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("BINDINGS", "stone_device() is null — the empire has no throne");
+        LOG_FATAL_CAT("BINDINGS", "stone_device() is null — the empire has no throne — CARMACK IS DISAPPOINTED");
         return;
     }
 
-    g_rtLayout       = createLayout(device, RT_PIPELINE_BINDINGS);
-    g_tonemapLayout  = createLayout(device, TONEMAP_PIPELINE_BINDINGS);
-    g_denoiserLayout = createLayout(device, DENOISER_PIPELINE_BINDINGS);
+    // ── THE ONE TRUE LAYOUTS — FORGED FROM THE SACRED ARRAYS — GAPS ARE WISDOM
+    g_rtLayout       = createDescriptorSetLayout(device, RT_PIPELINE_BINDINGS);        // 11 bindings — 0–9 + 31 immortal
+    g_tonemapLayout  = createDescriptorSetLayout(device, TONEMAP_PIPELINE_BINDINGS);   // 4 bindings — includes 31
+    g_denoiserLayout = createDescriptorSetLayout(device, DENOISER_PIPELINE_BINDINGS);  // 3 bindings — includes 31
 
-    // Pipeline layout
-    const VkPushConstantRange push{ VK_SHADER_STAGE_COMPUTE_BIT, 0, 16 };
-    const VkPipelineLayoutCreateInfo plInfo{
+    LOG_SUCCESS_CAT("BINDINGS", 
+        "DESCRIPTOR LAYOUTS FORGED — RT: {} bindings (0-9 + 31 SACRED) | Tonemap: {} | Denoiser: {}", 
+        RT_PIPELINE_BINDINGS.size(), TONEMAP_PIPELINE_BINDINGS.size(), DENOISER_PIPELINE_BINDINGS.size());
+
+    // ── TONEMAP PIPELINE LAYOUT — PUSH CONSTANTS + SET 1
+    const VkPushConstantRange push{
+        .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+        .offset     = 0,
+        .size       = 16
+    };
+
+    const VkPipelineLayoutCreateInfo tonemapLayoutInfo{
         .sType                  = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
         .setLayoutCount         = 1,
         .pSetLayouts            = &g_tonemapLayout,
         .pushConstantRangeCount = 1,
         .pPushConstantRanges    = &push
     };
-    VK_CHECK(vkCreatePipelineLayout(device, &plInfo, nullptr, &g_tonemapPipelineLayout));
 
-    // Tonemap shader + pipeline
-    VkShaderModule shader = RTX::loadShader("assets/shaders/compute/tonemap.spv");
-    if (!shader) {
-        LOG_FATAL_CAT("BINDINGS", "tonemap.spv not found — the photons are lost");
+    VK_CHECK(vkCreatePipelineLayout(device, &tonemapLayoutInfo, nullptr, &g_tonemapPipelineLayout),
+             "Failed to forge tonemap pipeline layout — the photons dim");
+
+    // ── TONEMAP SHADER & COMPUTE PIPELINE
+    VkShaderModule tonemapShader = RTX::loadShader("assets/shaders/compute/tonemap.spv");
+    if (tonemapShader == VK_NULL_HANDLE) {
+        LOG_FATAL_CAT("BINDINGS", "tonemap.spv missing — the empire has no light — CARMACK WEEPS");
         return;
     }
 
-    const VkPipelineShaderStageCreateInfo stage{
+    const VkPipelineShaderStageCreateInfo tonemapStage{
         .sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
         .stage  = VK_SHADER_STAGE_COMPUTE_BIT,
-        .module = shader,
+        .module = tonemapShader,
         .pName  = "main"
     };
 
-    const VkComputePipelineCreateInfo pipeInfo{
+    const VkComputePipelineCreateInfo tonemapPipeInfo{
         .sType  = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
-        .stage  = stage,
+        .stage  = tonemapStage,
         .layout = g_tonemapPipelineLayout
     };
 
-    VK_CHECK(vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipeInfo, nullptr, &g_tonemapPipeline));
-    vkDestroyShaderModule(device, shader, nullptr);
+    VK_CHECK(vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &tonemapPipeInfo, nullptr, &g_tonemapPipeline),
+             "Failed to forge tonemap compute pipeline — the HDR dies here");
 
-    // Descriptor pool + sets
+    // Shader module no longer needed — destroy immediately (safe: pipeline owns it now)
+    vkDestroyShaderModule(device, tonemapShader, nullptr);
+
+    // ── TONEMAP DESCRIPTOR POOL — SCALED TO TRIPLE BUFFERING
     const uint32_t frames = Options::Performance::MAX_FRAMES_IN_FLIGHT;
 
-    const VkDescriptorPoolSize poolSizes[] = {
+    const VkDescriptorPoolSize tonemapPoolSizes[] = {
         { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, frames },
         { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,         frames },
-        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,        2 * frames }
+        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,        2 * frames }  // TonemapParams + StoneKeyRuntimeBlock
     };
 
-    const VkDescriptorPoolCreateInfo poolInfo{
+    const VkDescriptorPoolCreateInfo tonemapPoolInfo{
         .sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
         .flags         = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
         .maxSets       = frames,
         .poolSizeCount = 3,
-        .pPoolSizes    = poolSizes
+        .pPoolSizes    = tonemapPoolSizes
     };
-    VK_CHECK(vkCreateDescriptorPool(device, &poolInfo, nullptr, &g_tonemapPool));
 
+    VK_CHECK(vkCreateDescriptorPool(device, &tonemapPoolInfo, nullptr, &g_tonemapPool),
+             "Failed to forge tonemap descriptor pool — the sets are lost");
+
+    // ── ALLOCATE TONEMAP DESCRIPTOR SETS
     g_tonemapSets.resize(frames);
-    std::vector<VkDescriptorSetLayout> layouts(frames, g_tonemapLayout);
+    std::vector<VkDescriptorSetLayout> tonemapLayouts(frames, g_tonemapLayout);
 
-    const VkDescriptorSetAllocateInfo allocInfo{
+    const VkDescriptorSetAllocateInfo tonemapAllocInfo{
         .sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
         .descriptorPool     = g_tonemapPool,
         .descriptorSetCount = frames,
-        .pSetLayouts        = layouts.data()
+        .pSetLayouts        = tonemapLayouts.data()
     };
-    VK_CHECK(vkAllocateDescriptorSets(device, &allocInfo, g_tonemapSets.data()));
 
-    LOG_SUCCESS_CAT("BINDINGS", "VULKAN 1.4 — C++23 — NO ASSERT — FIRST LIGHT ACHIEVED — PINK PHOTONS ETERNAL");
+    VK_CHECK(vkAllocateDescriptorSets(device, &tonemapAllocInfo, g_tonemapSets.data()),
+             "Failed to allocate tonemap descriptor sets — the frames are blind");
+
+    LOG_SUCCESS_CAT("BINDINGS", 
+        "TONEMAP PIPELINE READY — {} frames — Binding 31 (StoneKey) SECURE — HDR → LDR ACTIVE");
+
+    // ── FINAL LOG — THE EMPIRE IS ALIVE
+    LOG_SUCCESS_CAT("BINDINGS", 
+        "{}VULKAN 1.4 — C++23 — NO ASSERT — FIRST LIGHT ACHIEVED — PINK PHOTONS ETERNAL — BINDING 31 IS GOD{}", 
+        EMERALD_GREEN, RESET);
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -171,6 +168,34 @@ void shutdown(VkDevice device)
 {
     // she greets you with a bow then drags shutdown to phase9 main.cpp
     phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
+}
+
+VkDescriptorSetLayout createDescriptorSetLayout(VkDevice device, std::span<const Binding> bindings)
+{
+    std::vector<VkDescriptorSetLayoutBinding> vkBindings;
+    vkBindings.reserve(bindings.size());
+
+    for (const auto& b : bindings) {
+        vkBindings.push_back({
+            .binding         = b.binding,
+            .descriptorType  = b.type,
+            .descriptorCount = b.count,
+            .stageFlags      = b.stage,
+            .pImmutableSamplers = nullptr
+        });
+    }
+
+    VkDescriptorSetLayoutCreateInfo info = {
+        .sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+        .bindingCount = static_cast<uint32_t>(vkBindings.size()),
+        .pBindings    = vkBindings.data()
+    };
+
+    VkDescriptorSetLayout layout = VK_NULL_HANDLE;
+    VK_CHECK(vkCreateDescriptorSetLayout(device, &info, nullptr, &layout),
+             "Failed to create descriptor set layout — BUT STONEKEY WILL NOT YIELD");
+
+    return layout;
 }
 
 } // namespace RTX::Bindings

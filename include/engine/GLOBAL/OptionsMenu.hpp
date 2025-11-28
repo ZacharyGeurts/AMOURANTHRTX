@@ -24,6 +24,20 @@
 
 namespace Options {
 
+// ── SPLASH  ───────────────────────────────────────────────────
+namespace Splash {
+    // Master switch — completely disable the splash if desired
+    constexpr bool     ENABLE_SACRIFICIAL_SPLASH   = true;
+    constexpr float    SPLASH_DURATION_SECONDS     = 3.4f;
+    // Nuclear override — skips everything, even the image draw
+    // Useful for benchmarking, CI, or when you just want to get to the photons
+    constexpr bool     SKIP_SPLASH_ENTIRELY        = false;
+    constexpr float    FADE_IN_DURATION            = 0.35f;
+    constexpr float    FADE_OUT_DURATION           = 0.30f;
+    // Allow user to quit during splash with ESC or window close
+    constexpr bool     ALLOW_EARLY_EXIT            = true;
+}
+
 // ── PERFORMANCE ───────────────────────────────────────────────────────────────
 namespace Performance {
     constexpr uint32_t MAX_FRAMES_IN_FLIGHT        = 3;     // Triple buffering
@@ -117,7 +131,7 @@ namespace Environment {
 }
 
 // ── LAS (Lightweight Acceleration Structure) ─────────────────────────────────
-namespace LAS {
+namespace OptionsLAS {
     constexpr bool     REBUILD_EVERY_FRAME         = false;
     constexpr bool     UPDATE_EVERY_FRAME          = true;
     constexpr bool     COMPACT_TLAS                = true;
@@ -204,12 +218,6 @@ namespace Input {
 namespace RenderMode {
     constexpr uint32_t DEFAULT_MODE                = 5;
     constexpr bool     ENABLE_MODE_SWITCHING       = true;
-}
-
-// ── GROK AI INTEGRATION ───────────────────────────────────────────────────────
-namespace Grok {
-    constexpr bool     ENABLE_GENTLEMAN_GROK       = true;
-    constexpr float    GENTLEMAN_GROK_INTERVAL_SEC = 3600.0f;
 }
 
 } // namespace Options

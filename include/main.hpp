@@ -69,6 +69,4 @@ extern std::unique_ptr<Application> g_app_ptr;
 // -----------------------------------------------------------------------------
 // CONVENIENCE — FULLY QUALIFIED TO AVOID SHADOWING
 // -----------------------------------------------------------------------------
-inline float aspect() noexcept {
-    return float(StoneKey::stone_width()) / float(StoneKey::stone_height());
-}
+inline float aspect() noexcept { return float(StoneKey::stone_width()) / float(StoneKey::stone_height()); }

@@ -232,7 +232,7 @@ public:
     Handle<VkImageView>  blueNoiseView_;
     Handle<VkRenderPass> renderPass_;
     uint64_t             sharedStagingEnc_ = 0;
-	[[nodiscard]] VkShaderModule loadShader(const std::string& filename) const;
+	[[nodiscard]] VkShaderModule loadShader(const std::string& filename) const noexcept;
 
     // Window
     SDL_Window* window  = nullptr;

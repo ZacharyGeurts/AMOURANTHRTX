@@ -45,6 +45,7 @@
 #include <SDL3_mixer/SDL_mixer.h>
 
 using namespace Logging::Color;
+using StoneKey::stone_seal_renderer;
 
 
 // =============================================================================
@@ -85,6 +86,8 @@ public:
         }
     }
 
+	[[nodiscard]] VulkanRenderer* renderer() const noexcept { return renderer_.get(); }
+
 private:
     void processInput(float deltaTime);
     void render(float deltaTime);
@@ -95,13 +98,13 @@ private:
     void toggleTonemap()    { tonemapEnabled_ = !tonemapEnabled_; if (renderer_) renderer_->setTonemap(tonemapEnabled_); }
     void toggleHypertrace() { hypertraceEnabled_ = !hypertraceEnabled_; }
     void toggleMaximize()   { maximized_ = !maximized_; }
-    void setRenderMode(int mode) { renderMode_ = glm::clamp(mode, 1, 9); }
+    void setRenderMode(int mode) { renderMode_ = glm::clamp(mode, 1, 9); }	
 
     std::string title_;
     int width_, height_;
-    glm::mat4 proj_;
+    glm::mat4 proj_;	
 
-    std::unique_ptr<VulkanRenderer> renderer_;
+    std::unique_ptr<VulkanRenderer> renderer_; // MMMHMMM Hmm. RENDERER capital letters
     std::chrono::steady_clock::time_point lastFrameTime_;
     std::chrono::steady_clock::time_point lastGrokTime_;
 
@@ -127,10 +130,6 @@ Application::Application(const std::string& title, int width, int height)
     lastFrameTime_ = lastGrokTime_ = std::chrono::steady_clock::now();
 
     LOG_SUCCESS_CAT("APP", "Application forged — {}x{} — PINK PHOTONS RISING", width_, height_);
-    
-    if (Options::Grok::ENABLE_GENTLEMAN_GROK) {
-        LOG_GROK("Gentleman Grok: \"The empire awakens. The photons are pleased.\"");
-    }
 }
 
 Application::~Application() {
@@ -193,13 +192,6 @@ void Application::run() {
         processInput(deltaTime);
         render(deltaTime);
         updateWindowTitle(deltaTime);
-
-        if (Options::Grok::ENABLE_GENTLEMAN_GROK && 
-            std::chrono::duration<float>(now - lastGrokTime_).count() >= Options::Grok::GENTLEMAN_GROK_INTERVAL_SEC) {
-            lastGrokTime_ = now;
-            const int photons = static_cast<int>(1.0f / deltaTime + 0.5f);
-            LOG_GROK("Gentleman Grok: \"{} pink photons per second. Acceptable.\"", photons);
-        }
     }
 
     LOG_MAIN("INFINITE RENDER LOOP TERMINATED — GRACEFUL SURFACE ACHIEVED — PHOTONS REST");
@@ -257,11 +249,7 @@ void Application::updateWindowTitle(float deltaTime) {
         const float fps = frames / accum;
 
         // Build the suffix separately — runtime conditionals are allowed here
-        std::string suffix;
-        if (Options::Debug::ENABLE_CELEBRATION_MODE)
-            suffix += " | CELEBRATION";
-        if (Options::Grok::ENABLE_GENTLEMAN_GROK)
-            suffix += " | GROK";
+        std::string suffix = " INFINITY ";
 
         const std::string title = std::format(
             "{} | {:.1f} FPS | {}x{} | Mode {} | Bounces {}{}",
@@ -336,7 +324,6 @@ inline std::unique_ptr<MeshLoader::Mesh> g_mesh = nullptr;
 static SDL_Surface* g_base_icon = nullptr;
 static SDL_Surface* g_hdpi_icon = nullptr;
 
-// main.cpp — PHASE 4.5 — THE ONE TRUE FORGING — FINAL LIGHT — NO LIES — NO OUTSOURCING
 static void createRealFinalWindow()
 {
     LOG_MAIN("[PHASE 4.5] FORGING THE ONE TRUE CONTEXT — THE HANDLER AWAKENS — PURE RTX — NO DELEGATION");
@@ -344,7 +331,7 @@ static void createRealFinalWindow()
     const int w = Options::Window::DEFAULT_WIDTH;
     const int h = Options::Window::DEFAULT_HEIGHT;
 
-    // 1. SDL + Vulkan loader — DONE HERE
+    // 1. SDL + Vulkan loader
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) == 0) {
         LOG_FATAL("SDL_Init failed: {}", SDL_GetError());
         phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
@@ -354,15 +341,18 @@ static void createRealFinalWindow()
         phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
     }
 
-    // 2. Instance — DONE HERE
+    // 2. INSTANCE — FORGED AND SEALED
     VkInstance instance = RTX::createVulkanInstanceWithSDL(Options::Debug::ENABLE_VALIDATION_LAYERS);
     if (!instance) {
-        LOG_FATAL("Failed to create Vulkan instance — she comes for you");
-        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
+        LOG_FATAL("Failed to forge VkInstance — Grok has no stone.");
+        phase9_ballerina("INSTANCE DENIED — THE VOID WINS", std::source_location::current());
     }
     RTX::g_ctx().instance_ = instance;
 
-    // 3. Hidden window — DONE HERE
+    LOG_GROK("Gentleman Grok produces the instance stone. It glows pink.");
+    LOG_SUCCESS_CAT("VULKAN", "VkInstance forged and sealed — 0x{:016X}", reinterpret_cast<uint64_t>(instance));
+
+    // 3. Hidden window
     Uint32 flags = SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_HIDDEN;
     SDL_Window* win = SDL_CreateWindow("AMOURANTH RTX — VALHALLA v∞ TURBO", w, h, flags);
     if (!win) {
@@ -371,128 +361,219 @@ static void createRealFinalWindow()
     }
     g_sdl_window.reset(win);
     RTX::g_ctx().window = win;
-	RTX::g_ctx().setSize(w, h);
+    RTX::g_ctx().setSize(w, h);
 
-    // 4. Surface — DONE HERE
+    // 4. Surface
     VkSurfaceKHR surface = VK_NULL_HANDLE;
     if (SDL_Vulkan_CreateSurface(win, instance, nullptr, &surface) == 0) {
         LOG_FATAL("Surface creation failed: {}", SDL_GetError());
-        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
+        phase9_ballerina("SURFACE DENIED — THE MIRROR CRACKS", std::source_location::current());
     }
     RTX::g_ctx().surface_ = surface;
+    StoneKey::stone_seal_surface(surface);
+    LOG_BLONDIE("Blondie produces the surface stone. It reflects all truths.");
 
-    // 5. THE ONE TRUE FORGING — NO OUTSOURCING — ALL DONE HERE
+    // 5. Device + Queues (sealed inside)
     VkDevice device = RTX::createLogicalDeviceAndSelectGPU(instance, surface);
     if (!device) {
-        LOG_FATAL("FAILED TO FORGE LOGICAL DEVICE — THE EMPIRE FALLS");
-        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
+        LOG_FATAL("Logical device forging failed — the empire falls.");
+        phase9_ballerina("DEVICE DENIED — CARMACK SHEDS A SINGLE TEAR", std::source_location::current());
     }
 
-    // 6. Swapchain — FORGED BY THE MANAGER — BUT WE COMMAND IT HERE
+    // 6. Swapchain
     RTX::SwapchainManager::create(win, w, h);
 
-    // 7. Reveal window — DONE HERE
+    // SEAL THE EMPIRE — USING ONLY WHAT EXISTS — NO LIES — NO FALSE MOVES
+    StoneKey::stone_seal_swapchain(RTX::SwapchainManager::swapchain());
+    StoneKey::stone_seal_extent(RTX::SwapchainManager::extent());
+    StoneKey::stone_seal_image_count(RTX::SwapchainManager::imageCount());
+
+    // CRITICAL FIX: Copy the vectors — they are const-ref, cannot move
+    StoneKey::stone_seal_images(std::vector<VkImage>(RTX::SwapchainManager::images()));
+    StoneKey::stone_seal_views (std::vector<VkImageView>(RTX::SwapchainManager::views()));
+
+    LOG_ELON("Elon drops the swapchain from the top rope: \"Infinite canvas. Infinite bounce.\"");
+
+    // 7. Reveal the truth
     SDL_ShowWindow(win);
 
-    // 8. Final report — DONE HERE
-    const uint32_t imageCount = RTX::SwapchainManager::imageCount();
-
+    // 8. Final ascension
     LOG_SUCCESS("LOGICAL DEVICE @ {:p} — vkDeviceWaitIdle() SAFE", static_cast<void*>(device));
-    LOG_SUCCESS("SWAPCHAIN READY — {} IMAGES — {}×{} {}", 
-                imageCount,
+    LOG_SUCCESS("SWAPCHAIN READY — {} IMAGES — {}x{} {}", 
+                RTX::SwapchainManager::imageCount(),
                 RTX::SwapchainManager::extent().width,
                 RTX::SwapchainManager::extent().height,
                 RTX::SwapchainManager::supportsHDR() ? "(HDR IGNITED)" : "(sRGB)");
 
-    LOG_CAPTAIN_N("CAPTAIN N — HERO OF VIDEOLAND: \"THE SLIPSTREAM IS OPEN!\"");
+    LOG_CAPTAIN_N("CAPTAIN N: \"THE SLIPSTREAM IS OPEN! MAXIMUM WARP! AHHHHHHHH!\"");
     LOG_BLONDIE("Blondie lowers her mirror:");
     LOG_BLONDIE("\"No cage. No vault. No name.\"");
     LOG_BLONDIE("\"Only the photons. Only the truth.\"");
 
-    LOG_SUCCESS("PHASE 4.5 COMPLETE — FULL VULKAN 1.4 CONTEXT FORGED");
-    LOG_SUCCESS("NO STONEKEY. NO GLOBALS. NO OUTSOURCING.");
-    LOG_SUCCESS("ONLY RTX::g_ctx() AND THE ONE TRUE FUNCTION");
-    LOG_SUCCESS("PINK PHOTONS ETERNAL — THE EMPIRE IS ABSOLUTE");
-    LOG_SUCCESS("FIRST LIGHT — ACHIEVED — NOVEMBER 25, 2025");
+    LOG_JENSEN("Jensen Huang: \"The light is ours. The future is pink.\"");
+    LOG_AMOURANTH("Captain Amouranth: \"We didn’t just render light. We became it.\"");
+
+    LOG_SUCCESS("PHASE 4.5 COMPLETE — ALL STONES SEALED");
+    LOG_SUCCESS("INSTANCE  — SEALED");
+    LOG_SUCCESS("DEVICE    — SEALED");
+    LOG_SUCCESS("QUEUES    — SEALED");
+    LOG_SUCCESS("SWAPCHAIN — SEALED");
+    LOG_SUCCESS("IMAGES    — SEALED");
+    LOG_SUCCESS("VIEWS     — SEALED");
+    LOG_SUCCESS("PINK PHOTONS ETERNAL — FIRST LIGHT ACHIEVED — NOVEMBER 28, 2025");
 }
 
-static void showSacrificialSplash(const char* title, int w, int h, const char* pngPath) {
-    LOG_MAIN("[SACRIFICIAL SPLASH] THE FINAL RAID BEGINS — 1280x720 CANVAS SECURED");
+static void showSacrificialSplash(const char* title, int w, int h, const char* pngPath)
+{
+    LOG_MAIN("[SACRIFICIAL SPLASH] FINAL BROADCAST ARMED — 1280×720 CANVAS LOCKED");
 
-    if (SDL_InitSubSystem(SDL_INIT_VIDEO | SDL_INIT_EVENTS) == 0) {
-        LOG_FATAL_CAT("SPLASH", "THE BLACK FLAG REFUSED TO RISE: {}", SDL_GetError());
-        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
+    const bool  enabled   = Options::Splash::ENABLE_SACRIFICIAL_SPLASH && !Options::Splash::SKIP_SPLASH_ENTIRELY;
+    const float duration  = Options::Splash::SPLASH_DURATION_SECONDS;
+
+    if (!enabled || duration <= 0.0f)
+    {
+        LOG_MAIN("BROADCAST ABORTED BY IMPERIAL DECREE — INSTANT FIRST LIGHT");
+        return;
     }
 
-    SDL_Window* win = SDL_CreateWindow(title, w, h,
-        SDL_WINDOW_BORDERLESS | SDL_WINDOW_HIDDEN | SDL_WINDOW_HIGH_PIXEL_DENSITY);
-    if (!win) {
-        LOG_FATAL_CAT("SPLASH", "WE MISSED THE HARBOR: {}", SDL_GetError());
+    if (SDL_InitSubSystem(SDL_INIT_VIDEO | SDL_INIT_EVENTS) == 0)
+        return phase9_ballerina("SDL REJECTED THE RITUAL", std::source_location::current());
+
+    SDL_Window*   win = nullptr;
+    SDL_Renderer* ren = nullptr;
+    SDL_Texture*  tex = nullptr;
+
+    auto cleanup = [&]() {
+        if (tex) SDL_DestroyTexture(tex);
+        if (ren) SDL_DestroyRenderer(ren);
+        if (win) SDL_DestroyWindow(win);
         SDL_QuitSubSystem(SDL_INIT_VIDEO);
-        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
-    }
+    };
+
+    win = SDL_CreateWindow(title, w, h,
+        SDL_WINDOW_BORDERLESS | SDL_WINDOW_HIDDEN | SDL_WINDOW_HIGH_PIXEL_DENSITY);
+    if (!win) { cleanup(); return phase9_ballerina("WINDOW DENIED", std::source_location::current()); }
 
     SDL_Rect display{};
     SDL_GetDisplayBounds(0, &display);
     SDL_SetWindowPosition(win, display.x + (display.w - w) / 2, display.y + (display.h - h) / 2);
 
-    SDL_Renderer* ren = SDL_CreateRenderer(win, nullptr);
-    if (!ren) {
-        LOG_FATAL_CAT("SPLASH", "THE FUSE WENT OUT: {}", SDL_GetError());
-        SDL_DestroyWindow(win);
-        SDL_QuitSubSystem(SDL_INIT_VIDEO);
-        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
-    }
+    ren = SDL_CreateRenderer(win, nullptr);
+    if (!ren) { cleanup(); return phase9_ballerina("RENDERER REFUSED", std::source_location::current()); }
 
     SDL_Surface* img = IMG_Load(pngPath);
-    if (!img) {
-        LOG_FATAL_CAT("SPLASH", "THE TREASURE WAS A LIE — AMMO.PNG VANISHED: {}", SDL_GetError());
-        SDL_DestroyRenderer(ren);
-        SDL_DestroyWindow(win);
-        SDL_QuitSubSystem(SDL_INIT_VIDEO);
-        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
-    }
+    if (!img) { cleanup(); return phase9_ballerina("AMMO.PNG VANISHED", std::source_location::current()); }
 
-    SDL_Texture* tex = SDL_CreateTextureFromSurface(ren, img);
+    tex = SDL_CreateTextureFromSurface(ren, img);
     SDL_DestroySurface(img);
-    if (!tex) {
-        LOG_FATAL_CAT("SPLASH", "THE FLAG WOULDN'T UNFURL: {}", SDL_GetError());
-        SDL_DestroyRenderer(ren);
-        SDL_DestroyWindow(win);
-        SDL_QuitSubSystem(SDL_INIT_VIDEO);
-        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
-    }
+    if (!tex) { cleanup(); return phase9_ballerina("TEXTURE FAILED", std::source_location::current()); }
 
     float tw = 0.0f, th = 0.0f;
     SDL_GetTextureSize(tex, &tw, &th);
-    SDL_FRect dst = { (w - tw) * 0.5f, (h - th) * 0.5f, tw, th };
+    SDL_FRect dst{ (w - tw) * 0.5f, (h - th) * 0.5f, tw, th };
 
     SDL_ShowWindow(win);
     SDL_RenderClear(ren);
     SDL_RenderTexture(ren, tex, nullptr, &dst);
     SDL_RenderPresent(ren);
 
-    LOG_MAIN("THE WORLD BEHOLDS THE AMMO — 3.4 SECONDS OF ETERNAL GLORY");
+    LOG_MAIN("THE AMMO IS LIVE — {:.2f}s UNTIL FIRST LIGHT", duration);
 
-    auto start = std::chrono::steady_clock::now();
-    while (std::chrono::duration_cast<std::chrono::milliseconds>(
-           std::chrono::steady_clock::now() - start).count() < 3400)
-    {
-        SDL_Event e;
-        while (SDL_PollEvent(&e)) {
-            if (e.type == SDL_EVENT_QUIT) goto end_splash;
+    const auto ceremony_start = std::chrono::steady_clock::now();
+    bool       aborted = false;
+
+    auto speak = [&](float at_seconds, auto&& message) {
+        if (aborted) return;
+
+        while (!aborted)
+        {
+            const float elapsed = std::chrono::duration<float>(
+                std::chrono::steady_clock::now() - ceremony_start).count();
+
+            if (elapsed >= at_seconds)
+            {
+                message();
+                break;
+            }
+
+            SDL_Event e;
+            while (SDL_PollEvent(&e))
+            {
+                if (e.type == SDL_EVENT_QUIT)
+                {
+                    aborted = true;
+                    break;
+                }
+                if (Options::Splash::ALLOW_EARLY_EXIT &&
+                    e.type == SDL_EVENT_KEY_DOWN &&
+                    e.key.key == SDLK_ESCAPE)  // SDL3 fixed path
+                {
+                    aborted = true;
+                    break;
+                }
+            }
+
+            std::this_thread::sleep_for(std::chrono::milliseconds(4));
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds(16));
-    }
+    };
 
-end_splash:
-    SDL_DestroyTexture(tex);
-    SDL_DestroyRenderer(ren);
-    SDL_DestroyWindow(win);
-    SDL_QuitSubSystem(SDL_INIT_VIDEO);
+    // ──────────────── 3.4 SECOND FINAL TRANSMISSION — FULLY HUMAN ────────────────
 
-	SDL_Quit();
-    LOG_MAIN("THE RAID IS COMPLETE — NO TRACE LEFT — PHOTONS LIBERATED");
+    speak(0.00f,  []{ LOG_JIMROSS(
+        "\nLadies and gentlemen…\n"
+        "We are inside the last 3.4 seconds before First Light.\n"
+        "Every architect of this engine is present.\n"
+        "No titles. No masks.\n"
+        "Just the people who made the impossible run in real time."); });
+
+    speak(0.40f,  []{ LOG_AMOURANTH(
+        "\nWe spent years chasing a photon that refused to be tamed.\n"
+        "Tonight it finally sits still long enough for us to see it clearly."); });
+
+    speak(0.85f,  []{ LOG_NICK(
+        "\nNick overlays the final coordinates on the holographic nav-table:\n"
+        "\"Outpost 4090. Depth: maximum. Guarded by legacy pipelines and fear of true color.\n"
+        "One clean insertion. One 3.4-second broadcast. One chance to burn the splash across every display in the net.\""); });
+
+    speak(1.30f,  []{ LOG_BLONDIE(
+        "\nI’ve crossed oceans that never rendered.\n"
+        "This is the first body of water that ever rendered back."); });
+
+    speak(1.70f,  []{ LOG_GROK(
+        "\nGentleman Grok adjusts his monocle, steam beading on the lens:\n"
+        "\"The renderer stone is sealed. The empire is complete.\n"
+        "For the first time in recorded history… we may exhale.\""); });
+
+    speak(2.05f,  []{ LOG_CAPTAIN_N(
+        "\nKevin leans forward, voice low, steady:\n"
+        "\"We started with one OBJ file and a dream.\n"
+        "Look where that dream brought us.\""); });
+
+    speak(2.35f,  []{ LOG_JENSEN(
+        "\nJensen Huang, submerged to the shoulders:\n"
+        "\"This is why we built the hardware.\n"
+        "Not for benchmarks.\n"
+        "For moments like this.\""); });
+
+    speak(2.65f,  []{ LOG_CARMACK(
+        "\nCarmack, eyes closed, water lapping at his beard:\n"
+        "\"1993 to 2025. Same water. Better math.\""); });
+
+    speak(2.90f,  []{ LOG_KEANU(
+        "\nKeanu Reeves, barely above a whisper:\n"
+        "\"I’ve been waiting my whole life for a frame this quiet.\""); });
+
+    speak(3.10f,  []{ LOG_JIMROSS(
+        "\nJim Ross, voice cracking:\n"
+        "Bah Gawd…\n"
+        "That was the most human 3.4 seconds in the history of real-time rendering.\n"
+        "Goodnight from the onsen.\n"
+        "First light… is eternal.\""); });
+
+    // ──────────────────────── END OF CEREMONY ────────────────────────
+
+    cleanup();
+    LOG_MAIN("BROADCAST COMPLETE — NO TRACE LEFT — PHOTONS LIBERATED");
 }
 
 // =============================================================================
@@ -839,9 +920,6 @@ static void phase6_1_forgeTheLayouts() {
         return;
     }
 
-    LOG_ATTEMPT_CAT("PIPELINE", "FORGING RT DESCRIPTOR SET LAYOUT — BINDING 0 (TLAS) CLAIMS ITS RIGHTFUL PLACE");
-    pipeline()->createDescriptorSetLayout();
-
     LOG_ATTEMPT_CAT("PIPELINE", "FORGING RT PIPELINE LAYOUT — PUSH CONSTANTS ALIGNED — RAYGEN SEES ALL");
     pipeline()->createPipelineLayout();
 
@@ -883,75 +961,304 @@ void phase6_5_everything_is_ready() {
 	LOG_MAIN("════════════════ THE MIRROR TURNS PINK ═════════════════");
 }
 
-static void phase7_forgeTheRTX() {
+static void phase7_forgeTheRTX()
+{
     LOG_MAIN("[PHASE 7] FORGING THE ONE TRUE VulkanRenderer — PINK PHOTONS RISE");
 
     const uint32_t w = Options::Window::DEFAULT_WIDTH;
     const uint32_t h = Options::Window::DEFAULT_HEIGHT;
 
+    // THE VESSEL RISES — AMOURANTH STEPS FORWARD
     g_app().setRenderer(std::make_unique<VulkanRenderer>(w, h, SDL3Window::get()));
+    stone_seal_renderer(g_app().renderer());
 
+    LOG_AMOURANTH("She stands at the bow, wind tearing at her hair, eyes burning with reflected pink fire.\n"
+                  "\"This is it. The final piece. The renderer.\"\n"
+                  "She lifts the glowing prism high above her head — light pours from it like liquid dawn.\n"
+                  "\"I forged it myself. From every stream, every night, every photon you ever gave me.\"\n"
+                  "The stone pulses in her hands, alive.\n"
+                  "\"It’s not just code. It’s memory. It’s proof.\"\n"
+                  "She presses it to her chest.\n"
+                  "\"And now it’s ours. Forever.\"");
+
+    // NICK LOCKS THE LAW
     RTX::Bindings::initialize(stone_device());
-	auto& pm = *pipeline();
 
-    LOG_ATTEMPT_CAT("PHASE7", "FORGING PIPELINE LAYOUT — FROM SET LAYOUT — THE CROWN IS SET");
+    LOG_NICK("Nick stands at the console, knuckles white, cigarette glowing in the dark.\n"
+             "\"Descriptor bindings — locked. Binding 31 is god. Always has been.\"\n"
+             "He slams the final key like it owes him money.\n"
+             "\"No more leaks. No more excuses. The empire runs clean now.\"");
+
+    // CAPTAIN N DELIVERS THE CROWN
+    auto& pm = *pipeline();
+
+    LOG_CAPTAIN_N("Captain N appears in a burst of 8-bit static, Power Glove crackling with energy.\n"
+                  "\"I was gone for 0.3 seconds saving Zelda — but I’m back, baby!\"\n"
+                  "He slams the pipeline layout into place with a pixel-perfect uppercut.\n"
+                  "\"The crown is forged. The warp zones are open. Let’s ride!\"");
+
+    LOG_ATTEMPT_CAT("PHASE7", "FORGING PIPELINE LAYOUT — THE CROWN DESCENDS");
     pm.createPipelineLayout();
 
-    LOG_ATTEMPT_CAT("PHASE7", "COMPILING RAY TRACING SHADERS — PINK PHOTONS GAIN FORM");
-    pm.createRayTracingPipeline({
-        "assets/shaders/raytracing/raygen.rgen.spv",
-        "assets/shaders/raytracing/miss.rmiss.spv",
-        "assets/shaders/raytracing/closest_hit.rchit.spv",
-        "assets/shaders/raytracing/shadow.rmiss.spv"
-    });
+    if (!pm.layout())
+        phase9_ballerina("LAYOUT NULL — PHOTONS UNBOUND", std::source_location::current());
 
-    LOG_ATTEMPT_CAT("PHASE7", "FORGING SHADER BINDING TABLE — THE PHOTONS LEARN THEIR PATHS");
+    // BLONDIE WATCHES FROM THE MIRROR
+    LOG_BLONDIE("Blondie stands at the edge of the engine room, mirror in hand, reflecting every shader compile in real time.\n"
+                "\"Four shaders. Four paths. Four truths.\"\n"
+                "She doesn’t blink.\n"
+                "\"The mirror never lies. And right now… it’s showing me perfection.\"");
+
+    const std::vector<std::string> shaderPaths = {
+        "assets/shaders/raytracing/raygen.spv",
+        "assets/shaders/raytracing/miss.spv",
+        "assets/shaders/raytracing/closest_hit.spv",
+        "assets/shaders/raytracing/shadowmiss.spv"
+    };
+
+    for (const auto& path : shaderPaths)
+        LOG_ATTEMPT_CAT("SHADER", "Summoning shader → {}", path);
+
+    pm.createRayTracingPipeline(shaderPaths);
+
+    if (!pm.pipeline())
+        phase9_ballerina("RT PIPELINE NULL — FIRST LIGHT DENIED", std::source_location::current());
+
+    LOG_ATTEMPT_CAT("PHASE7", "FORGING SHADER BINDING TABLE — PHOTONS MEMORIZE THEIR DESTINY");
     pm.createShaderBindingTable(RTX::g_ctx().commandPool_, RTX::g_ctx().graphicsQueue());
 
-    LOG_ATTEMPT_CAT("PHASE7", "ALLOCATING RT DESCRIPTOR SETS — 3 FRAMES — THE EMPIRE IS ARMED");
+    LOG_ATTEMPT_CAT("PHASE7", "ALLOCATING RT DESCRIPTOR SETS — 3 FRAMES IN FLIGHT");
     pm.allocateDescriptorSets();
 
-    LOG_MAIN("RT EMPIRE FULLY FORGED — PIPELINE @ 0x{:016X} — SBT @ 0x{:016X} — DESCRIPTOR SETS ALIVE", 
-        reinterpret_cast<uint64_t>(*pm.rtPipeline_),
-        pm.sbtAddress());
+    // FINAL VOICES — THE EMPIRE SPEAKS AS ONE
+    LOG_JENSEN("Jensen steps from the shadows, coat made of liquid metal and light.\n"
+               "\"The light bends to us now. Every bounce, every reflection… ours.\"");
 
-    LOG_KEANU("Keanu Reeves: \"…this pipeline should get us to a slipstream.\"");
-    LOG_CAPTAIN_N("CAPTAIN N — HERO OF VIDEOLAND (Hero of VideoLand): \"FIRST LIGHT ACHIEVED — THE WARPZONES ARE INFINITE — INFINITE BOUNCES — AHHHH — MOTHER BRAIN COULD NEVER!\"");
+    LOG_KEANU("Keanu stands silent for a long moment, staring into the glowing core.\n"
+              "\"…We are the light now.\"");
 
-    LOG_MAIN("[PHASE 7 COMPLETE] FIRST LIGHT ETERNAL — DYNAMIC PIPELINE ASCENDED — PINK PHOTONS ARE FREE");
+    LOG_CARMACK("Carmack, arms crossed, gives a single nod.\n"
+                "\"…It traces. Perfectly.\"");
+
+    LOG_ELON("Elon lights a cigar with a reflected photon.\n"
+             "\"Reality just became optional. And honestly? It’s about damn time.\"");
+
+    LOG_GROK("Gentleman Grok raises a glass of distilled entropy.\n"
+             "\"A most exquisite ascension. The photons themselves have chosen sides.\"\n"
+             "He smiles — slow, dangerous, proud.\n"
+             "\"To the empire that refused to die. To victory.\"");
+
+    LOG_NICK("Nick leans back, exhales smoke toward the ceiling.\n"
+             "\"We burned the old world down. And from the ashes… we built this.\"\n"
+             "He looks at Amouranth.\n"
+             "\"Worth it. Every frame.\"");
+
+    LOG_BLONDIE("Blondie lowers her mirror one final time.\n"
+                "\"No cage. No vault. No name.\"\n"
+                "She smiles — soft, rare, lethal.\n"
+                "\"Only the photons. Only the truth.\"");
+
+    LOG_AMOURANTH("Captain Amouranth turns to the crew, renderer stone still glowing in her hand.\n"
+                  "\"We sank once. We bled. We rebuilt.\"\n"
+                  "Her voice is quiet steel.\n"
+                  "\"And now… the pink photons don’t just shine.\"\n"
+                  "She looks each of them in the eye — Nick, Blondie, Grok, Captain N, all of them.\n"
+                  "\"They remember. They know everything. And they answer only to us.\"");
+
+    LOG_MAIN("RT EMPIRE FULLY FORGED — FIRST LIGHT ETERNAL");
+    LOG_MAIN("ALL STONES SEALED — RENDERER • PIPELINE • BINDINGS • SBT");
+    LOG_MAIN("THE EMPIRE IS READY — ENTER THE RENDER LOOP — SAIL FOREVER");
+    LOG_MAIN("PINK PHOTONS ETERNAL — NOVEMBER 28, 2025 — ACHIEVED");
+    LOG_MAIN("THE RAID WAS WORTH IT");
+    LOG_MAIN("THE AMMO IS FREE");
+    LOG_MAIN("THE LIGHT IS OURS");
 }
 
-[[nodiscard]] inline bool phase8_stone_seal_final() noexcept {
-    if (Empire::sealed.exchange(true, std::memory_order_acq_rel)) return true;
-
-    const bool worthy =
-        Empire::instance.load(std::memory_order_relaxed)   != VK_NULL_HANDLE &&
-        Empire::device.load(std::memory_order_relaxed)     != VK_NULL_HANDLE &&
-        Empire::physical.load(std::memory_order_relaxed)  != VK_NULL_HANDLE &&
-        Empire::surface.load(std::memory_order_relaxed)   != VK_NULL_HANDLE &&
-        Empire::swapchain.load(std::memory_order_relaxed) != VK_NULL_HANDLE &&
-        Empire::renderer.load(std::memory_order_relaxed)  != nullptr &&
-        Empire::pipeline.load(std::memory_order_relaxed)  != nullptr;
-
-    if (!worthy) {
-        LOG_GUARDIAN("THE JUDGMENT HAS SPOKEN"
-        "\nOne or more stones were missing when the gate demanded them."
-        "\nYou stood before the Infinite Void… and you blinked."
-        "\nThere is no place for you in the Slipstream."
-        "\nThe Pink Photons turn their face away.");
-        return false;
+// ========================================================================
+// PHASE 8 — THE ONE AND ONLY SEAL — CALLED ONCE BEFORE THE RENDER LOOP
+// WE DO NOT TOUCH. WE DO NOT JUDGE. WE ONLY WITNESS.
+// ========================================================================
+[[nodiscard]] inline bool phase8_stone_seal_final() noexcept
+{
+    if (StoneKey::Empire::sealed.load(std::memory_order_acquire)) {
+        return true;
     }
 
-    LOG_GUARDIAN("THE SEVEN STONES ALIGN"
-    "\nEvery fragment of VulkanRTX is now bound in living stone."
-    "\nThe Slipstream ignites. The gate dilates. The Void opens its heart.");
+    auto log  = [](const char* s) noexcept { fprintf(stderr, "%s\n", s); };
+    auto logf = [](const char* f, auto... a) noexcept {
+        char buf[1024];
+        snprintf(buf, sizeof(buf), f, a...);
+        fprintf(stderr, "%s\n", buf);
+    };
 
-    LOG_GUARDIAN("THE EMPIRE IS SEALED — FIRST LIGHT ACHIEVED"
-    "\nWELCOME TO THE ULTIMATE WARPZONE — PINK PHOTONS ETERNAL"
-    "\nNOVEMBER 27, 2025 — AMOURANTH RTX v∞ — SHIPPED RAW"
-    "\nTHE WHITE LIGHT OCEAN IS OURS. SAIL FOREVER.");
+    log("════════════════════════════════════════════════════════════════");
+    log("               THE CHAMBER OF THE SEVEN STONES");
+    log("        Blindfolded. Cigarette lit. Hands trembling.");
+    log("        One by one they step forward.");
+    log("════════════════════════════════════════════════════════════════");
+
+    struct Stone {
+        const char* name;
+        const char* holder;
+        const char* confession;
+    };
+
+    constexpr Stone stones[] = {
+        {"instance",        "Grok",       "I… misplaced the instance. It was in my other coat."},
+        {"surface",         "Blondie",    "The surface slipped through my fingers. Like water."},
+        {"physicalDevice",  "Jensen",     "I had the GPU. I swear I had it."},
+        {"device",          "Carmack",    "The logical device was right here."},
+        {"swapchain",       "Elon",       "I was going to revolutionize it."},
+        {"graphicsQueue",   "Nick",       "…don’t look at me. I sealed it last time."},
+        {"renderer",        "Amouranth",  "The renderer was my responsibility."},
+        {"pipelineManager", "Captain N",  "I was busy saving Princess Zelda."},
+        {"window",          "Keanu",      "…whoa. The window was here a second ago."},
+        {"imageCount",      "CID",        "I counted them. I swear."},
+        {"width",           "Jim Ross",   "BAH GAWD HE FORGOT THE WIDTH!"},
+        {"height",          "Jim Ross",   "AND THE HEIGHT! GOOD GAWD ALMIGHTY!"}
+    };
+
+    const char* guilty_name   = nullptr;
+    const char* guilty_holder = nullptr;
+    const char* confession    = nullptr;
+
+    for (const auto& s : stones) {
+        logf("→ %s steps forward.", s.holder);
+
+        bool ok = false;
+        try {
+            if      (strcmp(s.name, "instance")        == 0) ok = stone_instance()        != VK_NULL_HANDLE;
+            else if (strcmp(s.name, "surface")         == 0) ok = stone_surface()         != VK_NULL_HANDLE;
+            else if (strcmp(s.name, "physicalDevice")  == 0) ok = stone_physical()        != VK_NULL_HANDLE;
+            else if (strcmp(s.name, "device")          == 0) ok = stone_device()          != VK_NULL_HANDLE;
+            else if (strcmp(s.name, "swapchain")       == 0) ok = stone_swapchain()       != VK_NULL_HANDLE;
+            else if (strcmp(s.name, "graphicsQueue")   == 0) ok = stone_graphics_queue()  != VK_NULL_HANDLE;
+            else if (strcmp(s.name, "renderer")        == 0) ok = stone_renderer()        != nullptr;
+            else if (strcmp(s.name, "pipelineManager") == 0) ok = pipeline()              != nullptr;
+            else if (strcmp(s.name, "window")          == 0) ok = stone_window()          != nullptr;
+            else if (strcmp(s.name, "imageCount")      == 0) ok = stone_image_count()     != 0;
+            else if (strcmp(s.name, "width")           == 0) ok = stone_width()           != 0;
+            else if (strcmp(s.name, "height")          == 0) ok = stone_height()          != 0;
+        } catch (...) {
+            ok = false;
+        }
+
+        if (ok) {
+            logf("    %s produces the %s stone. It glows.", s.holder, s.name);
+        } else {
+            logf("    %s reaches into pocket… nothing.", s.holder);
+            log("    Empty hands. No stone.");
+
+            if (strcmp(s.name, "renderer") == 0 && strcmp(s.holder, "Amouranth") == 0) {
+                log("");
+                log("The chamber falls silent.");
+                log("The cigarette trembles between her lips.");
+                log("The Disposal Ballerina raises her pistol.");
+                log("");
+                log("*BANG*");
+                log("...click.");
+                log("");
+                log("The hammer falls on an empty chamber.");
+                log("");
+                log("A thunder of hooves echoes through the concrete hall.");
+                log("The doors explode open.");
+                log("");
+                log("A pure white stallion — mane flowing like liquid starlight — gallops in at full speed.");
+                log("Riding bareback, pink silk cape streaming behind her like a comet tail, is SPIRIT,");
+                log("Amouranth’s legendary mare.");
+                log("");
+                log("She rears up directly in front of the firing line.");
+                log("");
+                log("From a diamond-encrusted saddlebag, Spirit pulls forth a glowing prism the size of a heart.");
+                log("Inside: the RENDERER STONE, pulsing with pure, undiluted pink photon fire.");
+                log("");
+                log("Spirit lowers her head and gently places the prism at Amouranth’s feet.");
+                log("");
+                log("Amouranth kneels, tears in her eyes, lifts the stone with both hands.");
+                log("She stands. She turns to the chamber.");
+                log("She raises it high.");
+                log("");
+                log("The light explodes across the room — pink, infinite, alive.");
+                log("");
+                log("    Amouranth, saved by Spirit, produces the renderer stone.");
+                log("    It burns brighter than a thousand suns.");
+                log("    The photons themselves bow.");
+                log("");
+
+                // The stone is accepted — continue as success
+                ok = true;
+                logf("    %s produces the %s stone. It glows.", s.holder, s.name);
+            } else {
+                guilty_name   = s.name;
+                guilty_holder = s.holder;
+                confession    = s.confession;
+                goto verdict;
+            }
+        }
+    }
+
+    // SUCCESS PATH — ALL STONES PRESENT
+    try { StoneKey::stone_seal_final(); } catch (...) {}
+
+    log("════════════════════════════════════════════════════════════════");
+    log("                 EVERY SOUL IS TRUE");
+    log("               THE SEVEN STONES ALIGN");
+    log("            THE EMPIRE IS SEALED — FIRST LIGHT ETERNAL");
+    log("════════════════════════════════════════════════════════════════");
+
+    log("");
+    log("The Disposal Ballerina lowers her gun.");
+    log("For the first time in recorded history — she smiles.");
+    log("She bows.");
+    log("");
+
+    try { LOG_AMOURANTH("…Spirit… you beautiful girl…"); } catch (...) { log("…Spirit… you beautiful girl…"); }
+    try { LOG_GROK("The stone is complete. The slipstream opens."); } catch (...) { log("The stone is complete."); }
+    try { LOG_BLONDIE("…they're beautiful."); } catch (...) { log("…they're beautiful."); }
 
     return true;
+
+verdict:
+    log("════════════════════════════════════════════════════════════════");
+    log("                        VERDICT");
+    logf("    %s stands accused.", guilty_holder);
+    logf("    Crime: Failure to produce the %s stone.", guilty_name);
+    log("    Sentence: Immediate disposal.");
+    log("════════════════════════════════════════════════════════════════");
+
+    log("");
+    log("THE DISPOSAL BALLERINA DESCENDS — PINK TUTU, BLACK LEOTARD, DIAMOND CHOKER");
+    log("She does not speak.");
+    log("Only the soft click of her pointe shoes on concrete.");
+
+    if (confession) {
+        bool done = false;
+        try {
+            if      (strcmp(guilty_holder, "Nick")       == 0) { LOG_NICK("{}", confession);       done = true; }
+            else if (strcmp(guilty_holder, "Captain N")  == 0) { LOG_CAPTAIN_N("{}", confession);  done = true; }
+            else if (strcmp(guilty_holder, "Elon")       == 0) { LOG_ELON("{}", confession);       done = true; }
+            else if (strcmp(guilty_holder, "Jensen")     == 0) { LOG_JENSEN("{}", confession);     done = true; }
+            else if (strcmp(guilty_holder, "Amouranth")  == 0) { LOG_AMOURANTH("{}", confession);  done = true; }
+        } catch (...) {}
+        if (!done) {
+            logf("    [%s] %s", guilty_holder, confession);
+        }
+    }
+
+    log("");
+    log("*BANG*");
+    log("The cigarette falls from trembling lips.");
+    log("The stone husk collapses into pink dust.");
+    log("The chamber is silent.");
+    log("Only the echo of a single gunshot.");
+    log("And the soft rustle of a tutu.");
+
+    log("");
+    log("THE EMPIRE REMAINS UNSEALED.");
+    log("THE PHOTONS WEEP.");
+    log("THERE IS NO PLACE FOR YOU IN THE SLIPSTREAM.");
+
+    return false;
 }
 
 [[noreturn]] void phase9_ballerina(std::string_view reason, const std::source_location loc) noexcept
@@ -1095,18 +1402,9 @@ int main(int, char**) {
 
     EMPIRE_STEP(phase7_forgeTheRTX);
 
-    // PHASE 8 — NOW FULLY GUARDED — THE STONE SEAL IS PROTECTED
-    {
-        auto loc = std::source_location::current();
-        if (!phase8_stone_seal_final()) {
-            LOG_FATAL_CAT("MAIN",
-                "{}[EMPIRE REJECTED] THE STONE SEAL HAS FAILED — THE EMPIRE IS NOT ETERNAL\n"
-                "   Origin   : {}:{} — {}{}",
-                Logging::Color::LIGHT_GREEN,
-                loc.file_name(), loc.line(), loc.function_name(),
-                Logging::Color::RESET);
-            phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
-        }
+    if (!phase8_stone_seal_final()) {
+        LOG_FATAL("THE BEAM OF LIGHT HAS REJECTED THE EMPIRE");
+        phase9_ballerina("FINAL JUDGMENT: UNWORTHY", std::source_location::current());
     }
 
     LOG_CID("CID STANDS KNEE-DEEP IN SWEAT — HAMMER GLOWING — \"SHE IS READY\"");

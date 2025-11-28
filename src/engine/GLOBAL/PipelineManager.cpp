@@ -43,37 +43,18 @@ namespace RTX {
 // ──────────────────────────────────────────────────────────────────────────────
 PipelineManager::PipelineManager(VkDevice device, VkPhysicalDevice phys)
 {
-    LOG_ATTEMPT_CAT("PIPELINE", "{}[STONEKEY v∞ APOCALYPSE FINAL] Constructing PipelineManager — Securing handles...{}", RASPBERRY_PINK, RESET);
-
     stone_seal_device(device);
     stone_seal_physical(phys);
 
-    if (stone_device() == VK_NULL_HANDLE || stone_physical() == VK_NULL_HANDLE) {
-        LOG_WARN_CAT("PIPELINE", "Null device/physicalDevice passed — dummy mode activated");
-        return;
-    }
+    if (stone_device() == VK_NULL_HANDLE) return;
 
-    LOG_TRACE_CAT("PIPELINE", "=== STACK BUILD ORDER STEP 1: Cache Device Properties ===");
     cacheDeviceProperties();
-    LOG_TRACE_CAT("PIPELINE", "Step 1 COMPLETE");
+    createPipelineLayout();  // still valid — uses g_rtLayout from Bindings
+    // allocateDescriptorSets() still called later from renderer
 
-    LOG_TRACE_CAT("PIPELINE", "=== STACK BUILD ORDER STEP 2: Create Descriptor Set Layout & Pool ===");
-    createDescriptorSetLayout();
-    // DEFERRED: allocateDescriptorSets();  // FIXED: Moved to VulkanRenderer init — Prevents duplicate allocation from same pool (resolves VK_ERROR_OUT_OF_POOL_MEMORY -1000069000)
-    LOG_TRACE_CAT("PIPELINE", "Step 2 COMPLETE");
-
-    LOG_TRACE_CAT("PIPELINE", "=== STACK BUILD ORDER STEP 3: Create Pipeline Layout ===");
-    createPipelineLayout();
-    LOG_TRACE_CAT("PIPELINE", "Step 3 COMPLETE");
-
-    LOG_SUCCESS_CAT("PIPELINE", 
-        "{}PIPELINE MANAGER FULLY INITIALIZED — RT PROPERTIES CACHED — DESCRIPTORS & LAYOUTS FORGED — POOL READY FOR RENDERER ALLOC — PINK PHOTONS ARMED{}", 
-        EMERALD_GREEN, RESET);
+    LOG_SUCCESS_CAT("PIPELINE", "PipelineManager initialized — Layouts owned by Bindings:: — CLEAN EMPIRE");
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// NEW: Allocate Frame Descriptor Sets — Ensures Sets Are Ready for Updates (Prevents "Never Updated" Errors) — CALL FROM RENDERER
-// ──────────────────────────────────────────────────────────────────────────────
 void PipelineManager::allocateDescriptorSets() {
     LOG_TRACE_CAT("PIPELINE", "allocateDescriptorSets — START — maxSets={}", Options::Performance::MAX_FRAMES_IN_FLIGHT);
 
@@ -90,19 +71,14 @@ void PipelineManager::allocateDescriptorSets() {
     allocInfo.descriptorPool = *rtDescriptorPool_;
     allocInfo.descriptorSetCount = maxSets;
 
-    // All sets use the same layout
-    std::vector<VkDescriptorSetLayout> layouts(maxSets, *rtDescriptorSetLayout_);
+    // NOW USING GLOBAL FROM BINDINGS — rtDescriptorSetLayout_ IS GONE
+    std::vector<VkDescriptorSetLayout> layouts(maxSets, Bindings::g_rtLayout);
     allocInfo.pSetLayouts = layouts.data();
 
     VkResult res = vkAllocateDescriptorSets(stone_device(), &allocInfo, rtDescriptorSets_.data());
     VK_CHECK(res, std::format("Failed to allocate {} RT descriptor sets", maxSets).c_str());
 
-    LOG_SUCCESS_CAT("PIPELINE", "Allocated {} RT descriptor sets — Ready for vkUpdateDescriptorSets (VUID-08114 FIXED)", maxSets);
-    for (uint32_t i = 0; i < maxSets; ++i) {
-        LOG_TRACE_CAT("PIPELINE", "  Frame {} set: 0x{:x}", i, reinterpret_cast<uintptr_t>(rtDescriptorSets_[i]));
-    }
-
-    LOG_TRACE_CAT("PIPELINE", "allocateDescriptorSets — COMPLETE");
+    LOG_SUCCESS_CAT("PIPELINE", "Allocated {} RT descriptor sets — USING Bindings::g_rtLayout — BINDING 31 PROTECTED", maxSets);
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -484,137 +460,32 @@ uint32_t PipelineManager::findMemoryType(uint32_t typeFilter, VkMemoryPropertyFl
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Descriptor Set Layout — FIXED: count=1 (No Array, Per-Frame Single) + Null Device Guard + Pool Sizing Adjusted
-// ──────────────────────────────────────────────────────────────────────────────
-void PipelineManager::createDescriptorSetLayout()
-{
-    LOG_TRACE_CAT("PIPELINE", "createDescriptorSetLayout — START — DYNAMIC REVOLUTION ENGAGED");
-
-    if (stone_device() == VK_NULL_HANDLE) {
-        LOG_ERROR_CAT("PIPELINE", "Null device — cannot create descriptor set layout");
-        return;
-    }
-
-    LOG_TRACE_CAT("PIPELINE", "createDescriptorSetLayout — FORGING THE ONE TRUE DYNAMIC LAYOUT");
-
-    // ———————————————————————————————————————————————
-    // FULLY DYNAMIC BINDINGS — NO MORE std::array TYRANNY
-    // ———————————————————————————————————————————————
-    std::vector<VkDescriptorSetLayoutBinding> bindings;
-    bindings.reserve(RTX::Bindings::RT_PIPELINE_BINDINGS.size());
-
-    for (const auto& b : RTX::Bindings::RT_PIPELINE_BINDINGS) {
-        bindings.push_back(VkDescriptorSetLayoutBinding{
-            .binding            = b.binding,
-            .descriptorType     = b.type,
-            .descriptorCount    = b.count,
-            .stageFlags         = b.stage,
-            .pImmutableSamplers = nullptr
-        });
-    }
-
-    LOG_TRACE_CAT("PIPELINE", "Descriptor bindings forged: {} total — DYNAMIC FREEDOM ACHIEVED", bindings.size());
-
-    VkDescriptorSetLayoutCreateInfo layoutInfo{
-        .sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-        .bindingCount = static_cast<uint32_t>(bindings.size()),
-        .pBindings    = bindings.data()
-    };
-
-    VkDescriptorSetLayout layout = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateDescriptorSetLayout(stone_device(), &layoutInfo, nullptr, &layout),
-             "Failed to create RT descriptor set layout — BUT THE PHOTONS WILL NOT BE DENIED");
-
-    rtDescriptorSetLayout_ = Handle<VkDescriptorSetLayout>(
-        layout, stone_device(),
-        [](VkDevice d, VkDescriptorSetLayout l, const VkAllocationCallbacks*) { vkDestroyDescriptorSetLayout(d, l, nullptr); },
-        0, "RTDescriptorSetLayout — DYNAMIC"
-    );
-
-    // ———————————————————————————————————————————————
-    // DYNAMIC DESCRIPTOR POOL — SCALED TO MAX_FRAMES_IN_FLIGHT
-    // ———————————————————————————————————————————————
-    const uint32_t maxSets = Options::Performance::MAX_FRAMES_IN_FLIGHT;
-
-    std::unordered_map<VkDescriptorType, uint32_t> typeCounts;
-    for (const auto& b : RTX::Bindings::RT_PIPELINE_BINDINGS) {
-        typeCounts[b.type] += b.count * maxSets;
-    }
-
-    std::vector<VkDescriptorPoolSize> poolSizes;
-    poolSizes.reserve(typeCounts.size());
-    for (const auto& [type, count] : typeCounts) {
-        poolSizes.push_back({type, count});
-    }
-
-    VkDescriptorPoolCreateInfo poolInfo{
-        .sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-        .flags         = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
-        .maxSets       = maxSets,
-        .poolSizeCount = static_cast<uint32_t>(poolSizes.size()),
-        .pPoolSizes    = poolSizes.data()
-    };
-
-    rtDescriptorPool_.reset();
-
-    VkDescriptorPool rawPool = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateDescriptorPool(stone_device(), &poolInfo, nullptr, &rawPool),
-             "Failed to create RT descriptor pool — THE EMPIRE WILL RISE");
-
-    rtDescriptorPool_ = Handle<VkDescriptorPool>(
-        rawPool, stone_device(),
-        [](VkDevice d, VkDescriptorPool p, const VkAllocationCallbacks*) {
-            if (p != VK_NULL_HANDLE) vkDestroyDescriptorPool(d, p, nullptr);
-        },
-        0, "RTDescriptorPool — DYNAMIC"
-    );
-
-    LOG_SUCCESS_CAT("PIPELINE", "RT DESCRIPTOR SET LAYOUT v11.0 — {} BINDINGS — DYNAMIC — MAX_FRAMES={} — HEAP CORRUPTION EXORCISED", bindings.size(), maxSets);
-    LOG_SUCCESS_CAT("PIPELINE", "RT DESCRIPTOR POOL FORGED — SCALED — FREEABLE — PINK PHOTONS ASCENDANT");
-    LOG_TRACE_CAT("PIPELINE", "createDescriptorSetLayout — COMPLETE — THE CAPITOL IS OURS");
-}
-
-// ──────────────────────────────────────────────────────────────────────────────
 // Pipeline Layout — FIXED: Valid pSetLayouts + Push Constants Matching Stages + Null Guards + FIXED: size=16 for vec4
 // ──────────────────────────────────────────────────────────────────────────────
-void PipelineManager::createPipelineLayout() {
-    LOG_TRACE_CAT("PIPELINE", "createPipelineLayout — START");
-
-    // FIXED: Null guards
-    if (stone_device() == VK_NULL_HANDLE) {
-        LOG_ERROR_CAT("PIPELINE", "Null device — cannot create pipeline layout");
-        return;
-    }
-    if (!rtDescriptorSetLayout_.valid() || *rtDescriptorSetLayout_ == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("PIPELINE", "rtDescriptorSetLayout_ null — abort layout create");
+void PipelineManager::createPipelineLayout()
+{
+    if (stone_device() == VK_NULL_HANDLE || RTX::Bindings::g_rtLayout == VK_NULL_HANDLE) {
+        LOG_FATAL_CAT("PIPELINE", "Cannot create pipeline layout — missing device or RTX::Bindings::g_rtLayout");
         return;
     }
 
-    VkDescriptorSetLayout layout = *rtDescriptorSetLayout_;  // FIXED: Local lvalue (valid handle)
+    VkPushConstantRange push{};
+    push.stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
+    push.size = 16;
 
-    // FIXED: Push constant stages (includes raygen for VUID-07987) + FIXED: size=16 (matches vkCmdPushConstants size=16)
-    VkPushConstantRange pushConstant = {};  // Zero-init
-    pushConstant.stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
-    pushConstant.offset = 0;
-    pushConstant.size = 16;  // FIXED: sizeof(vec4) = 16 bytes — matches shader push constant usage
+    VkPipelineLayoutCreateInfo info{};
+    info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    info.setLayoutCount = 1;
+    info.pSetLayouts = &RTX::Bindings::g_rtLayout;  // ← NOW FROM BINDINGS
+    info.pushConstantRangeCount = 1;
+    info.pPushConstantRanges = &push;
 
-    VkPipelineLayoutCreateInfo layoutInfo = {};  // Zero-init
-    layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    layoutInfo.setLayoutCount = 1;
-    layoutInfo.pSetLayouts = &layout;  // FIXED: Points to valid local (non-null)
-    layoutInfo.pushConstantRangeCount = 1;
-    layoutInfo.pPushConstantRanges = &pushConstant;
+    VkPipelineLayout layout;
+    VK_CHECK(vkCreatePipelineLayout(stone_device(), &info, nullptr, &layout));
 
-    VkPipelineLayout rawLayout = VK_NULL_HANDLE;
-    VK_CHECK(vkCreatePipelineLayout(stone_device(), &layoutInfo, nullptr, &rawLayout),
-             "Failed to create ray tracing pipeline layout");
-
-    rtPipelineLayout_ = Handle<VkPipelineLayout>(rawLayout, stone_device(),
-        [](VkDevice d, VkPipelineLayout l, const VkAllocationCallbacks*) { vkDestroyPipelineLayout(d, l, nullptr); },
+    rtPipelineLayout_ = Handle<VkPipelineLayout>(layout, stone_device(),
+        [](VkDevice d, VkPipelineLayout l, auto*) { vkDestroyPipelineLayout(d, l, nullptr); },
         0, "RTPipelineLayout");
-
-    LOG_SUCCESS_CAT("PIPELINE", "Pipeline layout created — non-null pSetLayouts + raygen stages + size=16 — VUID-01795 FIXED");
-    LOG_TRACE_CAT("PIPELINE", "createPipelineLayout — COMPLETE");
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
