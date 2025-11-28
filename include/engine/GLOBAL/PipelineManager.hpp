@@ -106,8 +106,6 @@ public:
 
     // Helpers — Now 100% StoneKey compliant (use global accessors)
     uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) const noexcept;
-    VkCommandBuffer beginSingleTimeCommands(VkCommandPool pool) const;
-    void endSingleTimeCommands(VkCommandPool pool, VkQueue queue, VkCommandBuffer cmd) const;
 
     friend class ::VulkanRenderer;
 	Handle<VkPipeline>            rtPipeline_;

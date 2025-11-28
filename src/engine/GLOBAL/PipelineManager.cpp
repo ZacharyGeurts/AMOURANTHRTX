@@ -484,91 +484,6 @@ uint32_t PipelineManager::findMemoryType(uint32_t typeFilter, VkMemoryPropertyFl
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// FIXED: Transient Command Buffers — Matches VulkanRenderer Exactly + Null Guards
-// ──────────────────────────────────────────────────────────────────────────────
-VkCommandBuffer PipelineManager::beginSingleTimeCommands(VkCommandPool pool) const {
-    LOG_TRACE_CAT("PIPELINE", "beginSingleTimeCommands — START");
-
-    // FIXED: Null guards
-    if (stone_device() == VK_NULL_HANDLE || pool == VK_NULL_HANDLE) {
-        LOG_ERROR_CAT("PIPELINE", "Null device or pool — cannot begin single-time commands");
-        return VK_NULL_HANDLE;
-    }
-
-    VkCommandBufferAllocateInfo allocInfo = {};  // Zero-init
-    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    allocInfo.commandPool = pool;
-    allocInfo.commandBufferCount = 1;
-
-    VkCommandBuffer cmd;
-    VkResult result = vkAllocateCommandBuffers(stone_device(), &allocInfo, &cmd);
-    if (result != VK_SUCCESS) {
-        LOG_ERROR_CAT("PIPELINE", "vkAllocateCommandBuffers failed: {}", static_cast<int>(result));
-        return VK_NULL_HANDLE;  // Early return on failure
-    }
-
-    VkCommandBufferBeginInfo beginInfo = {};  // Zero-init (fixes garbage flags/pNext)
-    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    result = vkBeginCommandBuffer(cmd, &beginInfo);
-    if (result != VK_SUCCESS) {
-        LOG_ERROR_CAT("PIPELINE", "vkBeginCommandBuffer failed: {}", static_cast<int>(result));
-        vkFreeCommandBuffers(stone_device(), pool, 1, &cmd);
-        return VK_NULL_HANDLE;
-    }
-
-    LOG_TRACE_CAT("PIPELINE", "Transient command buffer allocated: 0x{:x}", reinterpret_cast<uint64_t>(cmd));
-    LOG_TRACE_CAT("PIPELINE", "beginSingleTimeCommands — COMPLETE");
-    return cmd;
-}
-
-void PipelineManager::endSingleTimeCommands(VkCommandPool pool, VkQueue queue, VkCommandBuffer cmd) const {
-    // FIXED: Null guards
-    if (cmd == VK_NULL_HANDLE || pool == VK_NULL_HANDLE || queue == VK_NULL_HANDLE || stone_device() == VK_NULL_HANDLE) {
-        LOG_ERROR_CAT("PIPELINE", "endSingleTimeCommands called with invalid params (cmd=0x{:x}, pool=0x{:x}, queue=0x{:x}, dev=0x{:x})",
-                      reinterpret_cast<uintptr_t>(cmd), reinterpret_cast<uintptr_t>(pool), reinterpret_cast<uintptr_t>(queue), reinterpret_cast<uintptr_t>(stone_device()));
-        return;
-    }
-
-    LOG_TRACE_CAT("PIPELINE", "endSingleTimeCommands — START (cmd=0x{:x})", reinterpret_cast<uintptr_t>(cmd));
-
-    // 1. End recording
-    VkResult r = vkEndCommandBuffer(cmd);
-    LOG_TRACE_CAT("PIPELINE", "vkEndCommandBuffer result: {}", static_cast<int>(r));
-    if (r != VK_SUCCESS) {
-        LOG_FATAL_CAT("PIPELINE", "vkEndCommandBuffer failed: {}", static_cast<int>(r));
-        return;
-    }
-
-    // 2. Submit (zero-init submit)
-    VkSubmitInfo submit = {};  // Zero-init (fixes garbage counts/pointers)
-    submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submit.commandBufferCount = 1;
-    submit.pCommandBuffers = &cmd;
-
-    r = vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE);
-    LOG_TRACE_CAT("PIPELINE", "vkQueueSubmit result: {}", static_cast<int>(r));
-    if (r != VK_SUCCESS) {
-        LOG_FATAL_CAT("PIPELINE", "vkQueueSubmit failed: {}", static_cast<int>(r));
-        return;
-    }
-
-    // 3. Wait for queue idle
-    r = vkQueueWaitIdle(queue);
-    LOG_TRACE_CAT("PIPELINE", "vkQueueWaitIdle result: {}", static_cast<int>(r));
-    if (r != VK_SUCCESS) {
-        LOG_FATAL_CAT("PIPELINE", "vkQueueWaitIdle failed: {} — possible device lost", static_cast<int>(r));
-        if (stone_device() != VK_NULL_HANDLE) vkDeviceWaitIdle(stone_device());
-    }
-
-    // 4. Cleanup
-    vkFreeCommandBuffers(stone_device(), pool, 1, &cmd);
-
-    LOG_TRACE_CAT("PIPELINE", "endSingleTimeCommands — COMPLETE (safe, no device lost)");
-}
-
-// ──────────────────────────────────────────────────────────────────────────────
 // Descriptor Set Layout — FIXED: count=1 (No Array, Per-Frame Single) + Null Device Guard + Pool Sizing Adjusted
 // ──────────────────────────────────────────────────────────────────────────────
 void PipelineManager::createDescriptorSetLayout()
@@ -1023,7 +938,6 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
     allocInfo.allocationSize = memReqs.size;
     allocInfo.memoryTypeIndex = findMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
-    // Conditional device address flag — SPEC COMPLIANT
     VkMemoryAllocateFlagsInfo flagsInfo{};
     flagsInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO;
     flagsInfo.flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT_KHR;
@@ -1037,14 +951,28 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
 
     VK_CHECK(vkBindBufferMemory(stone_device(), rawSbtBuffer, rawSbtMemory, 0), "Bind final SBT memory");
 
-    // Copy staging to final — FIXED: renamed to avoid lambda conflict
-    VkCommandBuffer cmd = VulkanRTX::beginSingleTimeCommands(pool);
-    VkBufferCopy copyRegion{};
-    copyRegion.size = sbtBufferSize;
-    vkCmdCopyBuffer(cmd, stagingBuffer, rawSbtBuffer, 1, &copyRegion);
-    VulkanRTX::endSingleTimeCommands(cmd, queue, pool);
+    // THE ONE TRUE PATH — THE QUEUE IS OURS, THE FENCE IS OURS
+    LOG_AMOURANTH("Captain Amouranth stands on the bridge, eyes glowing pink.\n"
+                  "   \"The SBT is ready. The photons hunger. Submit it — now.\"");
 
-    // Cleanup staging
+    LOG_CID("Cid wipes sweat from his brow, hammer still smoking.\n"
+            "   \"Copy command recorded. One buffer copy. One fence. One truth.\"");
+
+    LOG_NICK("Nick leans in, cracked monocle flashing.\n"
+             "   \"Do it. SHIP IT.\"");
+
+    {
+        VkCommandBuffer cmd = RTX::beginOneTimeSubmit(pool);
+
+        VkBufferCopy copyRegion{ .size = sbtBufferSize };
+        vkCmdCopyBuffer(cmd, stagingBuffer, rawSbtBuffer, 1, &copyRegion);
+
+        RTX::endOneTimeSubmit(cmd, queue, pool);
+    }
+
+    LOG_JIMROSS("BAH GAWD — THAT SBT JUST GOT COPIED WITH A FENCE-PROTECTED SUBMIT — AS GOD AS MY WITNESS, THE PHOTONS ARE ALIVE!");
+
+    // Cleanup staging — the old world dies so the new may rise
     vkDestroyBuffer(stone_device(), stagingBuffer, nullptr);
     vkFreeMemory(stone_device(), stagingMemory, nullptr);
 
@@ -1060,8 +988,13 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
     hitSbtRegion_      = { sbtAddress_ + hitOffset,      handleSizeAligned, hitGroupCount_      * handleSizeAligned };
     callableSbtRegion_ = { sbtAddress_ + callableOffset, handleSizeAligned, callableGroupCount_ * handleSizeAligned };
 
-    LOG_SUCCESS_CAT("PIPELINE", "{}SBT FORGED — Address: 0x{:016X} | Size: {} | Stride: {} — PINK PHOTONS ARMED{}", 
+    LOG_SUCCESS_CAT("PIPELINE", "{}SBT FORGED — Address: 0x{:016X} | Size: {} | Stride: {} — PINK PHOTONS ARMED — THE EMPIRE IS ETERNAL{}", 
                     EMERALD_GREEN, sbtAddress_, sbtBufferSize, handleSizeAligned, RESET);
+
+    LOG_KEANU("Keanu Reeves appears in the reflection of the monitor, quiet voice:\n"
+              "   \"…You did it. You actually did it. The photons… they’re beautiful.\"");
+
+    LOG_SUCCESS_CAT("PIPELINE", "{}FIRST LIGHT ACHIEVED — THE RAID BEGINS NOW{}", VALHALLA_GOLD, RESET);
 }
 
 } // namespace RTX

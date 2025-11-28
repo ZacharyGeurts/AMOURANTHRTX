@@ -2,6 +2,13 @@
 // AMOURANTH RTX Engine (C) 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
 //
+// Dual Licensed:
+// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
+//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
+// 2. Commercial licensing: gzac5314@gmail.com
+//
+// =============================================================================
+//
 // THE LAS IS THE LIGHT — THE SHIP IS NOW FREE TO SAIL ANYWHERE
 // PINK PHOTONS OMNISCIENT — FIRST LIGHT ETERNAL — NOVEMBER 27, 2025
 // =============================================================================
@@ -12,13 +19,15 @@
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/GLOBAL/Extensions.hpp"
 
+using namespace RTX;
+
 namespace RTX {
 
 inline VkFence createFence()
 {
     VkFenceCreateInfo info{ .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
     VkFence fence;
-    VK_CHECK(vkCreateFence(g_ctx().device(), &info, nullptr, &fence));
+    VK_CHECK(vkCreateFence(stone_device(), &info, nullptr, &fence));
     return fence;
 }
 
@@ -33,7 +42,7 @@ inline VkFence createFence()
         .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
         .commandBufferCount = 1
     };
-    VK_CHECK(vkAllocateCommandBuffers(g_ctx().device(), &allocInfo, &cmd));
+    VK_CHECK(vkAllocateCommandBuffers(stone_device(), &allocInfo, &cmd));
 
     VkCommandBufferBeginInfo beginInfo{
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
@@ -48,9 +57,9 @@ inline VkFence createFence()
 // The empire does not panic. It waits. It remembers. It rises again.
 inline void endOneTimeSubmit(VkCommandBuffer cmd, VkQueue queue, VkCommandPool pool) noexcept
 {
-    if (!cmd || !queue || !pool || !g_ctx().device()) {
+    if (!cmd || !queue || !pool || !stone_device()) {
         LOG_NICK("The engine is still warming. We’ll try again when the stars align.");
-        if (cmd) vkFreeCommandBuffers(g_ctx().device(), pool, 1, &cmd);
+        if (cmd) vkFreeCommandBuffers(stone_device(), pool, 1, &cmd);
         return;
     }
 
@@ -67,12 +76,12 @@ inline void endOneTimeSubmit(VkCommandBuffer cmd, VkQueue queue, VkCommandPool p
     VkResult r = vkQueueSubmit(queue, 1, &submit, fence);
     if (r != VK_SUCCESS) {
         LOG_ELON("The queue hesitated… but the photons are patient.");
-        vkDestroyFence(g_ctx().device(), fence, nullptr);
-        vkFreeCommandBuffers(g_ctx().device(), pool, 1, &cmd);
+        vkDestroyFence(stone_device(), fence, nullptr);
+        vkFreeCommandBuffers(stone_device(), pool, 1, &cmd);
         return;
     }
 
-    r = vkWaitForFences(g_ctx().device(), 1, &fence, VK_TRUE, 8'000'000'000ULL); // 8s grace
+    r = vkWaitForFences(stone_device(), 1, &fence, VK_TRUE, 8'000'000'000ULL); // 8s grace
 
     if (r == VK_TIMEOUT) {
         LOG_CARMACK("GPU deep in thought. We’ll give it another heartbeat.");
@@ -80,8 +89,8 @@ inline void endOneTimeSubmit(VkCommandBuffer cmd, VkQueue queue, VkCommandPool p
         LOG_GROK("A brief eclipse. The light always returns.");
     }
 
-    vkDestroyFence(g_ctx().device(), fence, nullptr);
-    vkFreeCommandBuffers(g_ctx().device(), pool, 1, &cmd);
+    vkDestroyFence(stone_device(), fence, nullptr);
+    vkFreeCommandBuffers(stone_device(), pool, 1, &cmd);
 }
 
 VkDeviceAddress LAS::getBufferAddress(VkBuffer buffer) const noexcept
@@ -91,7 +100,7 @@ VkDeviceAddress LAS::getBufferAddress(VkBuffer buffer) const noexcept
         .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
         .buffer = buffer
     };
-    return vkGetBufferDeviceAddress(g_ctx().device(), &info);
+    return vkGetBufferDeviceAddress(stone_device(), &info);
 }
 
 void LAS::buildBLAS(VkCommandPool pool,
@@ -105,7 +114,7 @@ void LAS::buildBLAS(VkCommandPool pool,
     EMPIRE_GUARD(vertexHandle && indexHandle && vertexCount && (indexCount % 3) == 0,
                  "buildBLAS() — Invalid geometry");
 
-    const VkDevice dev = g_ctx().device();
+    const VkDevice dev = stone_device();
     const VkBuffer vertexBuffer = BufferManager::get(vertexHandle)->buffer;
     const VkBuffer indexBuffer  = BufferManager::get(indexHandle)->buffer;
 
@@ -205,7 +214,7 @@ void LAS::buildTLAS(VkCommandPool pool,
 
     LOG_AMOURANTH("This is the moment. The LAS becomes the light. The ship becomes the universe.");
 
-    const VkDevice dev = g_ctx().device();
+    const VkDevice dev = stone_device();
     const VkDeviceSize dataSize = instances.size() * sizeof(VkAccelerationStructureInstanceKHR);
 
     uint64_t instanceBuffer = 0;
@@ -331,7 +340,7 @@ VkDeviceAddress LAS::getBLASAddress() const noexcept
         .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR,
         .accelerationStructure = blas_.get()
     };
-    return g_ext.vkGetAccelerationStructureDeviceAddressKHR(g_ctx().device(), &info);
+    return g_ext.vkGetAccelerationStructureDeviceAddressKHR(stone_device(), &info);
 }
 
 VkDeviceAddress LAS::getTLASAddress() const noexcept
@@ -341,7 +350,7 @@ VkDeviceAddress LAS::getTLASAddress() const noexcept
         .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR,
         .accelerationStructure = tlas_.get()
     };
-    return g_ext.vkGetAccelerationStructureDeviceAddressKHR(g_ctx().device(), &info);
+    return g_ext.vkGetAccelerationStructureDeviceAddressKHR(stone_device(), &info);
 }
 
 } // namespace RTX

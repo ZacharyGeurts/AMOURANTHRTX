@@ -1,5 +1,12 @@
 // src/modes/RenderMode1.cpp
 // =============================================================================
+//
+// Dual Licensed:
+// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
+//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
+// 2. Commercial licensing: gzac5314@gmail.com
+//
+// =============================================================================
 // AMOURANTH RTX Engine © 2025 — GLOBAL MONSOON — PURE RTX — scene.obj LOADED
 // =============================================================================
 
@@ -9,6 +16,7 @@
 #include "engine/GLOBAL/StoneKey.hpp"
 #include "engine/GLOBAL/VulkanCore.hpp"
 #include "engine/GLOBAL/BufferManager.hpp"
+#include "engine/GLOBAL/LAS.hpp"
 
 #include <tiny_obj_loader.h>
 #include <filesystem>
@@ -137,7 +145,7 @@ void RenderMode1::initResources() {
     outputView_ = RTX::Handle<VkImageView>(view, RTX::g_ctx().device_, vkDestroyImageView, 0, "OutputView");
 
     // Transition
-    VkCommandBuffer cmd = VulkanRTX::beginSingleTimeCommands(g_ctx().commandPool_);
+    VkCommandBuffer cmd = beginOneTimeSubmit(g_ctx().commandPool_);
     VkImageMemoryBarrier barrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
     barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
@@ -149,7 +157,7 @@ void RenderMode1::initResources() {
     barrier.image = outputImage_.get();
     vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
 
-    stone_pipeline()->endSingleTimeCommands(g_ctx().commandPool_, g_ctx().graphicsQueue(), cmd);
+    endOneTimeSubmit(cmd, g_ctx().graphicsQueue(), g_ctx().commandPool_);
 
     g_rtx().updateRTXDescriptors(0,
         RAW_BUFFER(uniformBuf_), RAW_BUFFER(accumulationBuf_), VK_NULL_HANDLE,

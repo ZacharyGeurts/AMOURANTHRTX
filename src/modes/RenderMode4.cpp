@@ -1,4 +1,11 @@
 // =============================================================================
+//
+// Dual Licensed:
+// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
+//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
+// 2. Commercial licensing: gzac5314@gmail.com
+//
+// =============================================================================
 // src/modes/RenderMode4.cpp
 // AMOURANTH RTX © 2025 — Camera-Tinted Clear — Based on RenderMode1
 // PINK PHOTONS ETERNAL — FIRST LIGHT ACHIEVED

@@ -269,6 +269,8 @@ enum class LogLevel { Trace, Debug, Info, Success, Attempt, Perf, Warning, Error
 // 1. HYPER-VIVID ANSI COLORS
 // ========================================================================
 namespace Color {
+	inline constexpr const char* OKLAHOMA_RED                   = "\033[38;2;153;0;0m";
+    inline constexpr const char* OKLAHOMA_RED_BOLD              = "\033[1;38;2;153;0;0;48;2;255;255;255m";
     inline constexpr std::string_view RESET                     = "\033[0m";
     inline constexpr std::string_view BOLD                      = "\033[1m";
     inline constexpr std::string_view PARTY_PINK                = "\033[1;38;5;213m";
@@ -1007,4 +1009,4 @@ inline constexpr auto EMPIRE_STEP = []<typename F>(F&& phase, const std::source_
 #define LOG_GUARDIAN(...)    LOG_INFO_CAT   ("GUARDIAN",   std::format("{}\n[GUARDIAN] {}{}",          Logging::Color::PLATINUM_GRAY,     std::format(__VA_ARGS__),     Logging::Color::RESET))
 #define LOG_BALLERINA(...)   LOG_FAILURE_CAT("BALLERINA",  std::format("{}\n[***] {}{}",               Logging::Color::OBSIDIAN_BLACK,    std::format(__VA_ARGS__),     Logging::Color::RESET))
 #define LOG_MAIN(...)        LOG_SUCCESS_CAT("MAIN",       std::format("{}\n[[[[[MAIN]]]]]\n {}{}",    Logging::Color::BOLD_YELLOW,       std::format(__VA_ARGS__),     Logging::Color::RESET))
-#define LOG_JIMROSS(...)     LOG_SUCCESS_CAT("J.R.",       std::format("{}\n[Mr. Ross] {}{}",          Logging::Color::INVIS_BLACK,       std::format(__VA_ARGS__),     Logging::Color::RESET))
+#define LOG_JIMROSS(...)     LOG_SUCCESS_CAT("J.R.",       std::format("{}\n[Mr. Ross] {}{}",          Logging::Color::OKLAHOMA_RED_BOLD,       std::format(__VA_ARGS__),     Logging::Color::RESET))

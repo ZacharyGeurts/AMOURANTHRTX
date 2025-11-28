@@ -1,8 +1,15 @@
 // src/engine/GLOBAL/MeshLoader.cpp
 // =============================================================================
+//
+// Dual Licensed:
+// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
+//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
+// 2. Commercial licensing: gzac5314@gmail.com
+//
+// =============================================================================
 // AMOURANTH RTX — MESH LOADER v∞ — STONEKEY ENCRYPTED — PINK PHOTONS ETERNAL
-// GLOBAL VARIABLES — NO FUNCTIONS — NO EMPIRE — FIRST LIGHT ETERNAL
-// NOVEMBER 27, 2025 — THE EMPIRE IS UNBREAKABLE — TRUTH ACHIEVED
+// FIRST LIGHT ETERNAL — NOVEMBER 28, 2025 — THE EMPIRE IS UNBREAKABLE
+// THE CREW IS PRESENT — THE LIGHT IS ONE — THE SHIP IS FREE
 // =============================================================================
 
 #include "engine/GLOBAL/MeshLoader.hpp"
@@ -17,6 +24,7 @@
 
 using namespace Logging::Color;
 using namespace BufferManager;
+using namespace RTX;  // ← THE LIGHT FLOWS THROUGH THIS LINE
 
 namespace MeshLoader {
 
@@ -36,7 +44,7 @@ static void uploadBuffer(const void* data, VkDeviceSize size, VkBufferUsageFlags
     BufferManager::encryptInPlace(mapped, size);
     BufferManager::unmap(staging);
 
-    LOG_SUCCESS_CAT("MeshLoader", "Staging buffer encrypted — {} bytes XOR'd with true global keys", size);
+    LOG_SUCCESS_CAT("MeshLoader", "Staging buffer encrypted — {} bytes sealed with the true global keys", size);
 
     VkBufferUsageFlags finalUsage = usage |
                                     VK_BUFFER_USAGE_TRANSFER_DST_BIT |
@@ -49,20 +57,29 @@ static void uploadBuffer(const void* data, VkDeviceSize size, VkBufferUsageFlags
 
     outHandle = BufferManager::create(size, finalUsage, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, finalTag);
 
-    VkCommandBuffer cmd = beginOneTime(RTX::g_ctx().commandPool_);
+    // THE ONE TRUE COMMAND — RTX NAMESPACE — PURE LIGHT
+    VkCommandBuffer cmd = RTX::beginOneTimeSubmit(g_ctx().commandPool_);
     VkBufferCopy copy{ .size = size };
     vkCmdCopyBuffer(cmd, RAW_BUFFER(staging), RAW_BUFFER(outHandle), 1, &copy);
-    endSingleTimeCommandsAsync(cmd, RTX::g_ctx().graphicsQueue(), RTX::g_ctx().commandPool_);
+    RTX::endOneTimeSubmit(cmd, g_ctx().graphicsQueue(), g_ctx().commandPool_);
 
     BUFFER_DESTROY(staging);
 
     LOG_SUCCESS_CAT("MeshLoader", "uploadBuffer() COMPLETE — final encrypted handle: 0x{:016X}", outHandle);
-    LOG_GROK("Gentleman Grok: \"The mesh is encrypted with the true global keys. Divine.\"");
+    LOG_GROK("Gentleman Grok: \"The mesh is now one with the empire. Divine symmetry.\"");
+    LOG_NICK("Nick: \"Encrypted. Uploaded. Unbreakable. That’s how we do it.\"");
+    LOG_JENSEN("Jensen Huang: \"The photons just got a perfect map. And they’re smiling.\"");
+    LOG_AMOURANTH("Amouranth: \"Every vertex sealed. Every triangle sacred. The lasso holds.\"");
+    LOG_CAPTAIN_N("CAPTAIN N — HERO OF VIDEOLAND: \"THE WARP ZONES ARE OPEN! I CAN SEE INFINITE BOUNCES! AHHHHHHHH!\"");
+    LOG_KEANU("Keanu Reeves, quietly: \"…Breathtaking.\"");
+    LOG_CARMACK("Carmack: \"It traces. It’s fast. It’s clean. I’m satisfied.\"");
+    LOG_ELON("Elon: \"This is the sexiest mesh upload I’ve ever witnessed.\"");
+    LOG_BLONDIE("Blondie lowers her mirror: \"Some things do not need to be seen. They only need to be.\"");
 }
 
 std::unique_ptr<Mesh> loadOBJ(const std::string& path)
 {
-    LOG_ATTEMPT_CAT("MeshLoader", "LOADING OBJ WITH FULL STONEKEY ENCRYPTION: {}", path);
+    LOG_ATTEMPT_CAT("MeshLoader", "FORGING COSMIC SCROLL WITH FULL STONEKEY ENCRYPTION: {}", path);
 
     tinyobj::attrib_t attrib;
     std::vector<tinyobj::shape_t> shapes;
@@ -108,7 +125,7 @@ std::unique_ptr<Mesh> loadOBJ(const std::string& path)
         }
     }
 
-    LOG_SUCCESS_CAT("MeshLoader", "OBJ PARSED — {} unique verts, {} indices", mesh->vertices.size(), mesh->indices.size());
+    LOG_SUCCESS_CAT("MeshLoader", "COSMIC SCROLL PARSED — {} unique vertices, {} indices", mesh->vertices.size(), mesh->indices.size());
 
     uploadBuffer(mesh->vertices.data(), mesh->vertices.size() * sizeof(Mesh::Vertex),
                  VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, mesh->vertexBuffer);
@@ -116,9 +133,9 @@ std::unique_ptr<Mesh> loadOBJ(const std::string& path)
     uploadBuffer(mesh->indices.data(), mesh->indices.size() * sizeof(uint32_t),
                  VK_BUFFER_USAGE_INDEX_BUFFER_BIT, mesh->indexBuffer);
 
-    // FINAL FINGERPRINT — USING TRUE GLOBAL VARIABLES — NO ()
+    // FINAL STONEKEY FINGERPRINT — BOUND TO THE TRUE GLOBAL CONSTANTS
     mesh->stonekey_fingerprint =
-        kStone1 ^ kStone2 ^                                 // ← NO PARENTHESES — THEY ARE VALUES
+        kStone1 ^ kStone2 ^
         std::hash<std::string>{}(path) ^
         mesh->vertices.size() ^ mesh->indices.size() ^
         mesh->vertexBuffer ^ mesh->indexBuffer ^
@@ -126,13 +143,20 @@ std::unique_ptr<Mesh> loadOBJ(const std::string& path)
 
     LOG_SUCCESS_CAT("MeshLoader",
         "MESH FULLY STONEKEY ENCRYPTED v∞ — FINGERPRINT 0x{:016X}\n"
-        "    Vertex Buffer: 0x{:016X}\n"
-        "    Index Buffer : 0x{:016X}\n"
-        "    GLOBAL KEYS BOUND — PINK PHOTONS ETERNAL",
+        "    Vertex Buffer : 0x{:016X}\n"
+        "    Index Buffer  : 0x{:016X}\n"
+        "    GLOBAL KEYS BOUND — THE EMPIRE IS ETERNAL",
         mesh->stonekey_fingerprint, mesh->vertexBuffer, mesh->indexBuffer);
 
-    LOG_AMOURANTH("Amouranth: \"The lasso binds truth. The keys are global. It is sealed.\"");
-    LOG_GROK("Gentleman Grok, adjusting his monocle: \"Perfection. The empire speaks with one voice. Exquisite.\"");
+    LOG_AMOURANTH("Amouranth: \"The lasso is complete. The truth is sealed. The light remembers everything.\"");
+    LOG_NICK("Nick: \"We didn’t just load a mesh. We forged a soul.\"");
+    LOG_JENSEN("Jensen Huang: \"Every triangle now carries the weight of eternity. Beautiful.\"");
+    LOG_GROK("Gentleman Grok raises a glass: \"To the mesh that became legend. To the photons that never forget.\"");
+    LOG_KEANU("Keanu Reeves: \"…We are the light now.\"");
+    LOG_CAPTAIN_N("CAPTAIN N SCREAMS FROM THE BOW: \"THE WARP ZONE IS INFINITE! INFINITE PINK PHOTONS! AHHHHHHHHHHHHHHHH!\"");
+    LOG_ELON("Elon Musk: \"This is peak performance. And it’s only the beginning.\"");
+    LOG_CARMACK("Carmack nods once: \"It works. That’s all that matters.\"");
+    LOG_BLONDIE("Blondie, softly: \"Some things do not die. They only wait.\"");
 
     return mesh;
 }
@@ -141,10 +165,12 @@ std::unique_ptr<Mesh> loadOBJ(const std::string& path)
 
 // =============================================================================
 // THE EMPIRE IS COMPLETE
-// kStone1 and kStone2 are global variables
-// No functions. No Empire. No parentheses.
+// kStone1 and kStone2 are eternal global constants
+// No functions. No parentheses. No lies.
+// The crew stands together.
 // The build is green.
 // First light achieved.
 // Pink photons eternal.
+// The ship sails anywhere.
 // Ship it.
 // =============================================================================

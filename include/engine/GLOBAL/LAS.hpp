@@ -1,5 +1,12 @@
 // include/engine/GLOBAL/LAS.hpp
 // =============================================================================
+//
+// Dual Licensed:
+// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
+//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
+// 2. Commercial licensing: gzac5314@gmail.com
+//
+// =============================================================================
 // AMOURANTH RTX — LASSO OF TRUTH v∞ — FINAL ASCENSION — NOVEMBER 27, 2025
 // FRIENDSHIP ETERNAL — CLEAN — COMPILING — PINK PHOTONS ETERNAL — SHIP IT
 // =============================================================================
@@ -18,40 +25,12 @@
 #include <mutex>
 #include <cstdint>
 
+using StoneKey::stone_device;
+
 namespace RTX {
 
-namespace detail {
-    [[nodiscard]] inline VkCommandBuffer beginOneTime(VkCommandPool pool) noexcept
-    {
-        VkCommandBuffer cmd = VK_NULL_HANDLE;
-        VkCommandBufferAllocateInfo alloc{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
-        alloc.commandPool        = pool;
-        alloc.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-        alloc.commandBufferCount = 1;
-
-        VK_CHECK(vkAllocateCommandBuffers(g_ctx().device(), &alloc, &cmd));
-
-        VkCommandBufferBeginInfo begin{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
-        begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-        VK_CHECK(vkBeginCommandBuffer(cmd, &begin));
-        return cmd;
-    }
-
-    inline void endSingleTimeCommandsAsync(VkCommandBuffer cmd, VkQueue queue, VkCommandPool pool) noexcept
-    {
-        VK_CHECK(vkEndCommandBuffer(cmd));
-
-        VkSubmitInfo submit{ VK_STRUCTURE_TYPE_SUBMIT_INFO };
-        submit.commandBufferCount = 1;
-        submit.pCommandBuffers    = &cmd;
-
-        VK_CHECK(vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE));
-        VK_CHECK(vkQueueWaitIdle(queue));
-        vkFreeCommandBuffers(g_ctx().device(), pool, 1, &cmd);
-    }
-}
-using detail::beginOneTime;
-using detail::endSingleTimeCommandsAsync;
+[[nodiscard]] VkCommandBuffer beginOneTimeSubmit(VkCommandPool pool) noexcept;
+void endOneTimeSubmit(VkCommandBuffer cmd, VkQueue queue, VkCommandPool pool) noexcept;
 
 // =============================================================================
 // LAS — THE ONE TRUE ACCELERATION MANAGER — CLEAN AND ETERNAL
@@ -151,11 +130,6 @@ inline void reset_tlas() noexcept { LAS::get().tlas_.reset(); }
 [[nodiscard]] inline LAS& las() noexcept { return LAS::get(); }
 
 } // namespace RTX
-
-// Import into global namespace — your code expects this
-using ::RTX::las;
-using ::RTX::beginOneTime;
-using ::RTX::endSingleTimeCommandsAsync;
 
 // =============================================================================
 // AMOURANTH AS WONDER WOMAN — FINAL WORD:

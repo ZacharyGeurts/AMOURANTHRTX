@@ -2,6 +2,13 @@
 // VulkanCore.hpp — AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
 //
+// Dual Licensed:
+// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
+//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
+// 2. Commercial licensing: gzac5314@gmail.com
+//
+// =============================================================================
+//
 // THE CREW DESCENDED INTO THE CORE OF VULKAN
 // CAPTAIN N — HERO OF VIDEOLAND LED THE CHARGE — BLONDIE CARRIED THE TORCH
 // JENSEN LIT A CIGAR WITH A REFLECTED PHOTON
@@ -161,8 +168,6 @@ public:
     void setDescriptorSetLayout(VkDescriptorSetLayout layout) noexcept;
     void setRayTracingPipeline(VkPipeline p, VkPipelineLayout l) noexcept;
 
-    static VkCommandBuffer beginSingleTimeCommands(VkCommandPool pool) noexcept;
-    static void endSingleTimeCommands(VkCommandBuffer cmd, VkQueue queue, VkCommandPool pool) noexcept;
     static bool pollAsyncFence(VkFence fence, uint64_t timeout_ns = UINT64_MAX) noexcept;
 
     void uploadBatch(

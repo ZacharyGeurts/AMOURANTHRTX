@@ -511,14 +511,14 @@ VkDeviceAddress VulkanRenderer::getShaderGroupHandle(uint32_t group) noexcept {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Image Creation — Options-Driven (Unchanged)
+// RT Output Images — Per-Frame Forging — THE EMPIRE IS ETERNAL
 // ──────────────────────────────────────────────────────────────────────────────
-void VulkanRenderer::createRTOutputImages() noexcept {
-    LOG_INFO_CAT("RENDERER", "Creating ray tracing output images (per-frame)");
-    LOG_TRACE_CAT("RENDERER", "createRTOutputImages — START — frames={}, width={}, height={}",
+void VulkanRenderer::createRTOutputImages() noexcept
+{
+    LOG_INFO_CAT("RENDERER", "Forging ray tracing output images — per-frame canvas creation");
+    LOG_TRACE_CAT("RENDERER", "createRTOutputImages — START — frames={} | {}×{}", 
                   Options::Performance::MAX_FRAMES_IN_FLIGHT, width_, height_);
 
-    // Harden: Clear + reserve to prevent realloc moves/invalidation
     rtOutputImages_.clear();
     rtOutputMemories_.clear();
     rtOutputViews_.clear();
@@ -527,170 +527,128 @@ void VulkanRenderer::createRTOutputImages() noexcept {
     rtOutputMemories_.reserve(Options::Performance::MAX_FRAMES_IN_FLIGHT);
     rtOutputViews_.reserve(Options::Performance::MAX_FRAMES_IN_FLIGHT);
 
+    const auto& ctx = g_ctx();
+    const VkCommandPool cmdPool = ctx.commandPool_;
+    const VkQueue queue = ctx.graphicsQueue();
+
+    vkQueueWaitIdle(queue);  // Clean slate — the empire demands purity
+
     const uint32_t framesInFlight = Options::Performance::MAX_FRAMES_IN_FLIGHT;
-    const auto& ctx = g_ctx();  // ← FIXED: const ref to avoid dangling
-    VkCommandPool cmdPool = ctx.commandPool_;
-    VkQueue queue = ctx.graphicsQueue();
 
-    // Harden: Pre-wait to ensure clean state
-    VkResult idleR = vkQueueWaitIdle(queue);
-    if (idleR != VK_SUCCESS) {
-        LOG_WARN_CAT("RENDERER", "Pre-create idle failed: {} — continuing cautiously", static_cast<int>(idleR));
-    }
+    for (uint32_t i = 0; i < framesInFlight; ++i)
+    {
+        LOG_TRACE_CAT("RENDERER", "Frame {} — Forging RT output image", i);
 
-    for (uint32_t i = 0; i < framesInFlight; ++i) {
-        LOG_TRACE_CAT("RENDERER", "Frame {} — Creating RTOutput", i);
-
-        // Raw handles to work with Vulkan API
         VkImage rawImage = VK_NULL_HANDLE;
         VkDeviceMemory rawMemory = VK_NULL_HANDLE;
         VkImageView rawView = VK_NULL_HANDLE;
 
+        VkCommandBuffer cmd = RTX::beginOneTimeSubmit(cmdPool);
+        if (cmd == VK_NULL_HANDLE) {
+            LOG_FATAL_CAT("RENDERER", "Frame {} — Failed to allocate one-time command buffer", i);
+            continue;
+        }
+
         try {
-            // === 1. Create Image ===
-            VkImageCreateInfo imageInfo = {};  // Zero-init
-            imageInfo.sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-            imageInfo.imageType     = VK_IMAGE_TYPE_2D;
-            imageInfo.format        = VK_FORMAT_R32G32B32A32_SFLOAT;
-            imageInfo.extent        = { static_cast<uint32_t>(width_), static_cast<uint32_t>(height_), 1 };
-            imageInfo.mipLevels     = 1;
-            imageInfo.arrayLayers   = 1;
-            imageInfo.samples       = VK_SAMPLE_COUNT_1_BIT;
-            imageInfo.tiling        = VK_IMAGE_TILING_OPTIMAL;
-            imageInfo.usage         = VK_IMAGE_USAGE_STORAGE_BIT |
-                                      VK_IMAGE_USAGE_SAMPLED_BIT |
-                                      VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
-                                      VK_IMAGE_USAGE_TRANSFER_DST_BIT;  // FIXED: Add TRANSFER_DST for vkCmdClearColorImage
-            imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+            // === 1. CREATE IMAGE ===
+            VkImageCreateInfo imageInfo{
+                .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+                .imageType = VK_IMAGE_TYPE_2D,
+                .format = VK_FORMAT_R32G32B32A32_SFLOAT,
+                .extent = { static_cast<uint32_t>(width_), static_cast<uint32_t>(height_), 1 },
+                .mipLevels = 1,
+                .arrayLayers = 1,
+                .samples = VK_SAMPLE_COUNT_1_BIT,
+                .tiling = VK_IMAGE_TILING_OPTIMAL,
+                .usage = VK_IMAGE_USAGE_STORAGE_BIT |
+                         VK_IMAGE_USAGE_SAMPLED_BIT |
+                         VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                         VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+                .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
+            };
 
-            VK_CHECK(vkCreateImage(stone_device(), &imageInfo, nullptr, &rawImage), ("Failed to create RT output image for frame " + std::to_string(i)).c_str());
+            VK_CHECK(vkCreateImage(stone_device(), &imageInfo, nullptr, &rawImage));
 
-            LOG_TRACE_CAT("RENDERER", "Frame {} Image created: 0x{:x} (usage incl. TRANSFER_DST)", i, reinterpret_cast<uintptr_t>(rawImage));
-
-            // === 2. Allocate & Bind Memory (Harden: Pad size + log reqs) ===
-            VkMemoryRequirements memReqs = {};  // Zero-init
+            // === 2. MEMORY ===
+            VkMemoryRequirements memReqs{};
             vkGetImageMemoryRequirements(stone_device(), rawImage, &memReqs);
-            LOG_TRACE_CAT("RENDERER", "Frame {} Mem reqs: size={}, align={}, bits=0x{:x}",
-                          i, memReqs.size, memReqs.alignment, memReqs.memoryTypeBits);
 
-            VkDeviceSize allocSize = memReqs.size + (memReqs.alignment * 2);  // Pad 2x alignment for safety
-            if (allocSize < memReqs.size || allocSize > (1ULL << 32)) {
-                LOG_FATAL_CAT("RENDERER", "Frame {} Invalid alloc size: req={} alloc={} — aborting frame", i, memReqs.size, allocSize);
-                vkDestroyImage(stone_device(), rawImage, nullptr);
-                continue;  // Skip frame, but log
-            }
+            uint32_t memType = pipelineManager_.findMemoryType(
+                memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
-            uint32_t memType = pipelineManager_.findMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);  // ← VIA PIPELINEMANAGER
-            if (memType == static_cast<uint32_t>(~0u)) {
-                LOG_FATAL_CAT("RENDERER", "Frame {} No suitable memory type found — aborting frame", i);
-                vkDestroyImage(stone_device(), rawImage, nullptr);
-                continue;
-            }
-            LOG_TRACE_CAT("RENDERER", "Frame {} Using memType={} for allocSize={}", i, memType, allocSize);
+            VkMemoryAllocateInfo allocInfo{
+                .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+                .allocationSize = memReqs.size,
+                .memoryTypeIndex = memType
+            };
 
-            VkMemoryAllocateInfo allocInfo = {};  // Zero-init
-            allocInfo.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-            allocInfo.allocationSize  = allocSize;
-            allocInfo.memoryTypeIndex = memType;
+            VK_CHECK(vkAllocateMemory(stone_device(), &allocInfo, nullptr, &rawMemory));
+            VK_CHECK(vkBindImageMemory(stone_device(), rawImage, rawMemory, 0));
 
-            VK_CHECK(vkAllocateMemory(stone_device(), &allocInfo, nullptr, &rawMemory),
-                     ("Failed to allocate RT output memory for frame " + std::to_string(i)).c_str());
-
-            VK_CHECK(vkBindImageMemory(stone_device(), rawImage, rawMemory, 0),
-                     ("Failed to bind RT output memory for frame " + std::to_string(i)).c_str());
-
-            LOG_TRACE_CAT("RENDERER", "Frame {} Memory bound: 0x{:x}", i, reinterpret_cast<uintptr_t>(rawMemory));
-
-            // === 3. Transition to GENERAL (per-frame cmd for isolation) ===
-            VkCommandBuffer cmd = pipelineManager_.beginSingleTimeCommands(cmdPool);  // ← VIA PIPELINEMANAGER
-            if (cmd == VK_NULL_HANDLE) {
-                LOG_ERROR_CAT("RENDERER", "Frame {} Failed to begin single-time cmd — skipping transition", i);
-                // Cleanup rawImage/rawMemory
-                vkFreeMemory(stone_device(), rawMemory, nullptr);
-                vkDestroyImage(stone_device(), rawImage, nullptr);
-                continue;
-            }
-
-            VkImageMemoryBarrier barrier = {};  // Zero-init
-            barrier.sType                       = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-            barrier.oldLayout                   = VK_IMAGE_LAYOUT_UNDEFINED;
-            barrier.newLayout                   = VK_IMAGE_LAYOUT_GENERAL;
-            barrier.srcQueueFamilyIndex         = VK_QUEUE_FAMILY_IGNORED;
-            barrier.dstQueueFamilyIndex         = VK_QUEUE_FAMILY_IGNORED;
-            barrier.image                       = rawImage;
-            barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-            barrier.subresourceRange.levelCount = 1;
-            barrier.subresourceRange.layerCount = 1;
+            // === 3. TRANSITION TO GENERAL ===
+            VkImageMemoryBarrier barrier{
+                .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+                .newLayout = VK_IMAGE_LAYOUT_GENERAL,
+                .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                .image = rawImage,
+                .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
+            };
 
             vkCmdPipelineBarrier(cmd,
                 VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
                 VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
                 0, 0, nullptr, 0, nullptr, 1, &barrier);
 
-            pipelineManager_.endSingleTimeCommands(cmdPool, queue, cmd);  // ← VIA PIPELINEMANAGER
-            LOG_TRACE_CAT("RENDERER", "Frame {} Transition to GENERAL complete", i);
+            RTX::endOneTimeSubmit(cmd, queue, cmdPool);
 
-            // Per-frame wait to flush GPU before next alloc
-            vkQueueWaitIdle(queue);
+            // === 4. VIEW ===
+            VkImageViewCreateInfo viewInfo{
+                .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+                .image = rawImage,
+                .viewType = VK_IMAGE_VIEW_TYPE_2D,
+                .format = VK_FORMAT_R32G32B32A32_SFLOAT,
+                .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
+            };
 
-            // === 4. Create Image View ===
-            VkImageViewCreateInfo viewInfo = {};  // Zero-init
-            viewInfo.sType                           = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-            viewInfo.image                           = rawImage;
-            viewInfo.viewType                        = VK_IMAGE_VIEW_TYPE_2D;
-            viewInfo.format                          = VK_FORMAT_R32G32B32A32_SFLOAT;
-            viewInfo.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
-            viewInfo.subresourceRange.levelCount     = 1;
-            viewInfo.subresourceRange.layerCount     = 1;
+            VK_CHECK(vkCreateImageView(stone_device(), &viewInfo, nullptr, &rawView));
 
-            VK_CHECK(vkCreateImageView(stone_device(), &viewInfo, nullptr, &rawView),
-                     ("Failed to create RT output image view for frame " + std::to_string(i)).c_str());
+            // === 5. HANDLES ===
+            rtOutputImages_.emplace_back(rawImage, stone_device(), vkDestroyImage, 0, "RTOutputImage");
+            rtOutputMemories_.emplace_back(rawMemory, stone_device(), vkFreeMemory, memReqs.size, "RTOutputMemory");
+            rtOutputViews_.emplace_back(rawView, stone_device(), vkDestroyImageView, 0, "RTOutputView");
 
-            LOG_TRACE_CAT("RENDERER", "Frame {} View created: 0x{:x}", i, reinterpret_cast<uintptr_t>(rawView));
+            LOG_SUCCESS_CAT("RENDERER", "Frame {} — RT canvas forged — image=0x{:016X} view=0x{:016X}", i,
+                            reinterpret_cast<uintptr_t>(rawImage), reinterpret_cast<uintptr_t>(rawView));
 
-            // === 5. Wrap in Handle<T> (Harden: Log before/after emplace) ===
-            LOG_TRACE_CAT("RENDERER", "Frame {} Creating Handles — img=0x{:x}, mem=0x{:x}, view=0x{:x}",
-                          i, reinterpret_cast<uintptr_t>(rawImage), reinterpret_cast<uintptr_t>(rawMemory), reinterpret_cast<uintptr_t>(rawView));
-
-            // Assume RTX::Handle ctor: (T h, device, destroyFn, size_t (unused?), tag) — pass raw directly (VkImage, not &)
-            static const std::string_view imgTag = "RTOutputImage";
-            static const std::string_view memTag = "RTOutputMemory";
-            static const std::string_view viewTag = "RTOutputView";
-
-            rtOutputImages_.emplace_back(rawImage, stone_device(), vkDestroyImage, 0, imgTag);
-            rtOutputMemories_.emplace_back(rawMemory, stone_device(), vkFreeMemory, 0, memTag);
-            rtOutputViews_.emplace_back(rawView, stone_device(), vkDestroyImageView, 0, viewTag);
-
-            LOG_TRACE_CAT("RENDERER", "Frame {} — RTOutput ready: img=0x{:x}, view=0x{:x} (TRANSFER_DST enabled)",
-                          i, reinterpret_cast<uintptr_t>(rawImage), reinterpret_cast<uintptr_t>(rawView));
-
-            // Harden: Validate post-emplace sizes
-            if (rtOutputImages_.size() != i + 1 || rtOutputMemories_.size() != i + 1 || rtOutputViews_.size() != i + 1) {
-                LOG_ERROR_CAT("RENDERER", "Frame {} Vector emplace failed — sizes mismatch", i);
-                // Rollback? Complex; log and continue
-            }
-
-        } catch (const std::exception& e) {
-            LOG_FATAL_CAT("RENDERER", "Frame {} Exception in createRTOutput: {} — cleaning up", i, e.what());
-            // Cleanup raw handles
-            if (rawView != VK_NULL_HANDLE) vkDestroyImageView(stone_device(), rawView, nullptr);
-            if (rawMemory != VK_NULL_HANDLE) vkFreeMemory(stone_device(), rawMemory, nullptr);
-            if (rawImage != VK_NULL_HANDLE) vkDestroyImage(stone_device(), rawImage, nullptr);
-            LOG_FATAL_CAT("RENDERER", "Fatal error in createRTOutputImages frame {} — aborting", i); phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
+        } catch (...) {
+            LOG_FATAL_CAT("RENDERER", "Frame {} — Catastrophic failure during RT output creation", i);
+            RTX::endOneTimeSubmit(cmd, queue, cmdPool);
+            if (rawView) vkDestroyImageView(stone_device(), rawView, nullptr);
+            if (rawMemory) vkFreeMemory(stone_device(), rawMemory, nullptr);
+            if (rawImage) vkDestroyImage(stone_device(), rawImage, nullptr);
+            phase9_ballerina("RT OUTPUT FORGING FAILED", std::source_location::current());
         }
     }
 
-    // Harden: Post-loop idle + validate all created
     vkQueueWaitIdle(queue);
-    LOG_TRACE_CAT("RENDERER", "Post-loop idle complete");
 
     if (rtOutputImages_.size() != framesInFlight) {
-        LOG_FATAL_CAT("RENDERER", "Incomplete RT outputs: expected={}, got={} — device issue?", framesInFlight, rtOutputImages_.size());
-        LOG_FATAL_CAT("RENDERER", "Fatal error in noexcept function"); phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
+        LOG_FATAL_CAT("RENDERER", "Not all RT output images created — expected {} got {}", framesInFlight, rtOutputImages_.size());
+        phase9_ballerina("INCOMPLETE RT OUTPUT FORGE", std::source_location::current());
     }
 
-    LOG_SUCCESS_CAT("RENDERER", "RT output images created — {} frames in GENERAL layout (TRANSFER_DST enabled for clears)", framesInFlight);
-    LOG_TRACE_CAT("RENDERER", "createRTOutputImages — COMPLETE");
+    LOG_SUCCESS_CAT("RENDERER", "RT output images created — {} frames in GENERAL layout (TRANSFER_DST enabled)", framesInFlight);
+    LOG_TRACE_CAT("RENDERER", "createRTOutputImages — COMPLETE — FIRST LIGHT SECURE");
+
+    LOG_AMOURANTH("Amouranth: \"Every frame now has its own universe to paint in.\"");
+    LOG_NICK("Nick: \"We just built {} private art galleries for the photons. Elegant.\"", framesInFlight);
+    LOG_JENSEN("Jensen Huang: \"R32G32B32A32_SFLOAT per frame? This is how you do ray tracing.\"");
+    LOG_KEANU("Keanu Reeves: \"…Infinite beauty in finite memory.\"");
+    LOG_CAPTAIN_N("CAPTAIN N: \"THE CANVASES ARE ALIIIIIIVE! INFINITE BOUNCES INCOMING! AHHHHHHH!\"");
+    LOG_GROK("Gentleman Grok: \"Perfection. The empire grows. One frame at a time.\"");
+    LOG_BLONDIE("Blondie: \"Some images are born in darkness. Ours are born in pink.\"");
 }
 
 void VulkanRenderer::createAccumulationImages() noexcept {
@@ -741,310 +699,275 @@ void VulkanRenderer::createTonemapSampler() noexcept {
     LOG_TRACE_CAT("RENDERER", "createTonemapSampler — COMPLETE");
 }
 
-void VulkanRenderer::createEnvironmentMap() noexcept {
-    LOG_TRACE_CAT("RENDERER", "createEnvironmentMap — START");
+void VulkanRenderer::createEnvironmentMap() noexcept
+{
+    LOG_INFO_CAT("RENDERER", "Forging environment map — pink photons demand a sky");
+
     if (!Options::Environment::ENABLE_ENV_MAP) {
-        LOG_TRACE_CAT("RENDERER", "Environment map disabled via options");
-        LOG_TRACE_CAT("RENDERER", "createEnvironmentMap — COMPLETE (disabled)");
+        LOG_TRACE_CAT("RENDERER", "Envmap disabled in options — the void remains dark");
         return;
     }
 
-    // Load HDR file (use stb_image or similar; assume assets/textures/envmap.hdr)
-    int width, height, channels;
-    float* pixels = stbi_loadf("assets/textures/envmap.hdr", &width, &height, &channels, 4);  // RGBA float
-    if (!pixels) {
-        LOG_ERROR_CAT("RENDERER", "Failed to load envmap.hdr: {}", stbi_failure_reason());
-        LOG_TRACE_CAT("RENDERER", "createEnvironmentMap — COMPLETE (load failed)");
-        return;
-    }
-    LOG_INFO_CAT("RENDERER", "Loaded HDR envmap: {}x{} ({} channels)", width, height, channels);
-    VkDeviceSize imageSize = static_cast<VkDeviceSize>(width) * height * sizeof(float) * 4;
-
-    // Create staging buffer + upload (similar to your buffer macros)
-    uint64_t stagingEnc = 0;
-    BUFFER_CREATE(stagingEnc, imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, "EnvMapStaging");
-    void* data = nullptr;
-
-    // FIXED: Null guard before staging buffer map in renderer (VUID-vkMapMemory-memory-parameter)
-    {
-        VkDeviceMemory stagingMem = BUFFER_MEMORY(stagingEnc);  // Assume macro expands
-        if (stagingMem == VK_NULL_HANDLE) {
-            LOG_FATAL_CAT("RENDERER", "Envmap staging alloc failed: memory null (OOM?). Aborting upload.");
-            stbi_image_free(pixels);
-            BUFFER_DESTROY(stagingEnc);
-            return;
-        }
-    }
-    BUFFER_MAP(stagingEnc, data);
-    if (data == nullptr) {
-        LOG_WARN_CAT("RENDERER", "Envmap staging map returned null (OOM/fragmented?) — skipping upload.");
-        stbi_image_free(pixels);
-        BUFFER_DESTROY(stagingEnc);
-        return;
-    }
-    std::memcpy(data, pixels, imageSize);
-    BUFFER_UNMAP(stagingEnc);
-    stbi_image_free(pixels);
-    LOG_TRACE_CAT("RENDERER", "Envmap staging uploaded: {} bytes", imageSize);
-
-    const auto& ctx = g_ctx();  // ← FIXED: const ref
-    VkCommandPool cmdPool = ctx.commandPool_;
-    VkQueue queue = ctx.graphicsQueue();
-
-    // Create device-local image (2D for equirectangular envmap)
-    VkImageCreateInfo imgInfo = {VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
-    imgInfo.imageType = VK_IMAGE_TYPE_2D;
-    imgInfo.format = VK_FORMAT_R32G32B32A32_SFLOAT;  // HDR float
-    imgInfo.extent = {static_cast<uint32_t>(width), static_cast<uint32_t>(height), 1};
-    imgInfo.mipLevels = 1;  // Add mipgen for better sampling if needed
-    imgInfo.arrayLayers = 1;
-    imgInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-    imgInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-    imgInfo.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-    imgInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    imgInfo.flags = 0;
-
-    VkImage rawImg = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateImage(stone_device(), &imgInfo, nullptr, &rawImg), "Create envmap image");
-
-    // Allocate/bind memory (device local)
-    VkMemoryRequirements memReqs = {};
-    vkGetImageMemoryRequirements(stone_device(), rawImg, &memReqs);
-    uint32_t memType = pipelineManager_.findMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);  // ← VIA PIPELINEMANAGER
-    if (memType == UINT32_MAX) {
-        LOG_ERROR_CAT("RENDERER", "No suitable memory type for envmap image");
-        vkDestroyImage(stone_device(), rawImg, nullptr);
-        BUFFER_DESTROY(stagingEnc);
+    int w, h, n;
+    float* data = stbi_loadf("assets/textures/envmap.hdr", &w, &h, &n, 4);
+    if (!data) {
+        LOG_ERROR_CAT("RENDERER", "Failed to load envmap.hdr — the sky stays black");
         return;
     }
 
-    VkMemoryAllocateInfo allocInfo = {VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
-    allocInfo.allocationSize = memReqs.size;
-    allocInfo.memoryTypeIndex = memType;
-    VkDeviceMemory rawMem = VK_NULL_HANDLE;
-    VK_CHECK(vkAllocateMemory(stone_device(), &allocInfo, nullptr, &rawMem), "Alloc envmap memory");
-    VK_CHECK(vkBindImageMemory(stone_device(), rawImg, rawMem, 0), "Bind envmap memory");
+    VkDeviceSize size = static_cast<VkDeviceSize>(w) * h * 4 * sizeof(float);
 
-    // Transition + copy (use single-time commands VIA PIPELINEMANAGER)
-    VkCommandBuffer cmd = pipelineManager_.beginSingleTimeCommands(cmdPool);
-    if (cmd == VK_NULL_HANDLE) {
-        LOG_ERROR_CAT("RENDERER", "Failed to begin single-time cmd for envmap copy");
-        vkFreeMemory(stone_device(), rawMem, nullptr);
-        vkDestroyImage(stone_device(), rawImg, nullptr);
-        BUFFER_DESTROY(stagingEnc);
+    uint64_t staging = 0;
+    BUFFER_CREATE(staging, size,
+                  VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                  VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                  "EnvMap_Staging");
+
+    void* mapped = BufferManager::map(staging);
+    std::memcpy(mapped, data, size);
+    BufferManager::unmap(staging);
+    stbi_image_free(data);
+
+    const auto& ctx = g_ctx();
+    VkCommandBuffer cmd = RTX::beginOneTimeSubmit(ctx.commandPool_);
+    if (!cmd) {
+        LOG_FATAL_CAT("RENDERER", "Failed to begin one-time command for envmap upload");
+        BUFFER_DESTROY(staging);
         return;
     }
 
-    VkImageMemoryBarrier barrier = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
-    barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    barrier.image = rawImg;
-    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    barrier.subresourceRange.baseMipLevel = 0;
-    barrier.subresourceRange.levelCount = 1;
-    barrier.subresourceRange.baseArrayLayer = 0;
-    barrier.subresourceRange.layerCount = 1;
+    VkImageCreateInfo imgInfo{
+        .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .imageType = VK_IMAGE_TYPE_2D,
+        .format = VK_FORMAT_R32G32B32A32_SFLOAT,
+        .extent = { static_cast<uint32_t>(w), static_cast<uint32_t>(h), 1 },
+        .mipLevels = 1,
+        .arrayLayers = 1,
+        .samples = VK_SAMPLE_COUNT_1_BIT,
+        .tiling = VK_IMAGE_TILING_OPTIMAL,
+        .usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
+    };
+
+    VkImage img = VK_NULL_HANDLE;
+    VK_CHECK(vkCreateImage(stone_device(), &imgInfo, nullptr, &img));
+
+    VkMemoryRequirements memReqs{};
+    vkGetImageMemoryRequirements(stone_device(), img, &memReqs);
+    uint32_t memType = pipelineManager_.findMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+    VkMemoryAllocateInfo allocInfo{
+        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+        .allocationSize = memReqs.size,
+        .memoryTypeIndex = memType
+    };
+    VkDeviceMemory mem = VK_NULL_HANDLE;
+    VK_CHECK(vkAllocateMemory(stone_device(), &allocInfo, nullptr, &mem));
+    VK_CHECK(vkBindImageMemory(stone_device(), img, mem, 0));
+
+    // Transition + Copy
+    VkImageMemoryBarrier barrier{
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+        .newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        .image = img,
+        .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
+    };
     vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
 
-    VkBufferImageCopy region = {};  // Zero-init
-    region.bufferRowLength = 0;
-    region.bufferImageHeight = 0;
-    region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    region.imageSubresource.mipLevel = 0;
-    region.imageSubresource.baseArrayLayer = 0;
-    region.imageSubresource.layerCount = 1;
-    region.imageOffset = {0, 0, 0};
-    region.imageExtent = {static_cast<uint32_t>(width), static_cast<uint32_t>(height), 1};
-    VkBuffer stagingBuf = RAW_BUFFER(stagingEnc);
-    vkCmdCopyBufferToImage(cmd, stagingBuf, rawImg, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+    VkBufferImageCopy copy{
+        .imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
+        .imageExtent = { static_cast<uint32_t>(w), static_cast<uint32_t>(h), 1 }
+    };
+    vkCmdCopyBufferToImage(cmd, RAW_BUFFER(staging), img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
 
-    // Transition back to sampled
     barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
     barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
     barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
     vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
-    pipelineManager_.endSingleTimeCommands(cmdPool, queue, cmd);
 
-    // Create view + sampler
-    VkImageViewCreateInfo viewInfo = {VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
-    viewInfo.image = rawImg;
-    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    viewInfo.format = VK_FORMAT_R32G32B32A32_SFLOAT;
-    viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    viewInfo.subresourceRange.baseMipLevel = 0;
-    viewInfo.subresourceRange.levelCount = 1;
-    viewInfo.subresourceRange.baseArrayLayer = 0;
-    viewInfo.subresourceRange.layerCount = 1;
-    VkImageView rawView = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateImageView(stone_device(), &viewInfo, nullptr, &rawView), "Create envmap view");
+    RTX::endOneTimeSubmit(cmd, ctx.graphicsQueue(), ctx.commandPool_);
+    BUFFER_DESTROY(staging);
 
-    VkSamplerCreateInfo samplerInfo2 = {VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
-    samplerInfo2.magFilter = VK_FILTER_LINEAR;
-    samplerInfo2.minFilter = VK_FILTER_LINEAR;
-    samplerInfo2.addressModeU = samplerInfo2.addressModeV = samplerInfo2.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo2.unnormalizedCoordinates = VK_FALSE;
-    samplerInfo2.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
-    samplerInfo2.mipLodBias = 0.0f;
-    samplerInfo2.minLod = 0.0f;
-    samplerInfo2.maxLod = 1.0f;
-    samplerInfo2.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
-    VkSampler rawSampler = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateSampler(stone_device(), &samplerInfo2, nullptr, &rawSampler), "Create envmap sampler");
+    VkImageViewCreateInfo viewInfo{
+        .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+        .image = img,
+        .viewType = VK_IMAGE_VIEW_TYPE_2D,
+        .format = VK_FORMAT_R32G32B32A32_SFLOAT,
+        .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
+    };
+    VkImageView view = VK_NULL_HANDLE;
+    VK_CHECK(vkCreateImageView(stone_device(), &viewInfo, nullptr, &view));
 
-    // Wrap in Handles (match class member names)
-    envMapImage_ = RTX::Handle<VkImage>(rawImg, stone_device(), [](VkDevice d, VkImage i, auto) { vkDestroyImage(d, i, nullptr); }, 0, "EnvMapImage");
-    envMapImageMemory_ = RTX::Handle<VkDeviceMemory>(rawMem, stone_device(), [](VkDevice d, VkDeviceMemory m, auto) { vkFreeMemory(d, m, nullptr); }, memReqs.size, "EnvMapMemory");
-    envMapImageView_ = RTX::Handle<VkImageView>(rawView, stone_device(), [](VkDevice d, VkImageView v, auto) { vkDestroyImageView(d, v, nullptr); }, 0, "EnvMapView");
-    envMapSampler_ = RTX::Handle<VkSampler>(rawSampler, stone_device(), [](VkDevice d, VkSampler s, auto) { vkDestroySampler(d, s, nullptr); }, 0, "EnvMapSampler");
+    VkSamplerCreateInfo samplerInfo{
+        .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+        .magFilter = VK_FILTER_LINEAR,
+        .minFilter = VK_FILTER_LINEAR,
+        .mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR,
+        .addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+        .addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+        .addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+        .maxLod = 1.0f
+    };
+    VkSampler sampler = VK_NULL_HANDLE;
+    VK_CHECK(vkCreateSampler(stone_device(), &samplerInfo, nullptr, &sampler));
 
-    // Cleanup staging
-    BUFFER_DESTROY(stagingEnc);
+    envMapImage_        = MakeHandle(img, stone_device(), vkDestroyImage, 0, "EnvMapImage");
+    envMapImageMemory_  = MakeHandle(mem, stone_device(), vkFreeMemory, memReqs.size, "EnvMapMemory");
+    envMapImageView_    = MakeHandle(view, stone_device(), vkDestroyImageView, 0, "EnvMapView");
+    envMapSampler_      = MakeHandle(sampler, stone_device(), vkDestroySampler, 0, "EnvMapSampler");
 
-    LOG_SUCCESS_CAT("RENDERER", "HDR envmap loaded & uploaded — {}x{} float RGBA", width, height);
-    LOG_TRACE_CAT("RENDERER", "createEnvironmentMap — COMPLETE");
+    LOG_SUCCESS_CAT("RENDERER", "Environment map forged — {}×{} HDR sky active", w, h);
+    LOG_AMOURANTH("The sky remembers every photon that ever touched it.");
+    LOG_NICK("Nick: \"We just gave the universe a mirror. Classy.\"");
+    LOG_JENSEN("Jensen Huang: \"HDR float envmap? Now we're talking real light.\"");
+    LOG_KEANU("Keanu: \"…whoa. The sky is breathing.\"");
 }
 
 void VulkanRenderer::createNexusScoreImage(VkCommandPool pool, VkQueue queue) noexcept
 {
     // Early out if disabled
     if (!Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING) {
+        LOG_TRACE_CAT("RENDERER", "Adaptive sampling disabled — NexusScoreImage not created");
         return;
     }
+
+    LOG_INFO_CAT("RENDERER", "Forging NexusScoreImage — the photons will be judged");
 
     // Destroy old one first
     destroyNexusScoreImage();
 
     VkFormat format = VK_FORMAT_R32G32B32A32_SFLOAT;
 
-    VkImageCreateInfo imageInfo = {};
-    imageInfo.sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    imageInfo.imageType     = VK_IMAGE_TYPE_2D;
-    imageInfo.format        = format;
-    imageInfo.extent        = { static_cast<uint32_t>(width_), static_cast<uint32_t>(height_), 1 };
-    imageInfo.mipLevels     = 1;
-    imageInfo.arrayLayers   = 1;
-    imageInfo.samples       = VK_SAMPLE_COUNT_1_BIT;
-    ;
-    imageInfo.tiling        = VK_IMAGE_TILING_OPTIMAL;
-    imageInfo.usage         = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    VkImageCreateInfo imageInfo{
+        .sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .imageType     = VK_IMAGE_TYPE_2D,
+        .format        = format,
+        .extent        = { static_cast<uint32_t>(width_), static_cast<uint32_t>(height_), 1 },
+        .mipLevels     = 1,
+        .arrayLayers   = 1,
+        .samples       = VK_SAMPLE_COUNT_1_BIT,
+        .tiling        = VK_IMAGE_TILING_OPTIMAL,
+        .usage         = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
+    };
 
     VkImage rawImage = VK_NULL_HANDLE;
-    if (vkCreateImage(stone_device(), &imageInfo, nullptr, &rawImage) != VK_SUCCESS) {
-        LOG_FATAL_CAT("RENDERER", "Failed to create NexusScoreImage — aborting render init");
-        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
-    }
+    VK_CHECK(vkCreateImage(stone_device(), &imageInfo, nullptr, &rawImage));
 
-    VkMemoryRequirements memReqs;
+    VkMemoryRequirements memReqs{};
     vkGetImageMemoryRequirements(stone_device(), rawImage, &memReqs);
 
     uint32_t memType = pipelineManager_.findMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
     if (memType == UINT32_MAX) {
         LOG_FATAL_CAT("RENDERER", "No suitable memory type for NexusScoreImage");
         vkDestroyImage(stone_device(), rawImage, nullptr);
-        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
+        phase9_ballerina("NO MEMORY TYPE FOR NEXUS", std::source_location::current());
     }
 
-    VkMemoryAllocateInfo allocInfo = {};
-    allocInfo.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    allocInfo.allocationSize  = memReqs.size;
-    allocInfo.memoryTypeIndex = memType;
+    VkMemoryAllocateInfo allocInfo{
+        .sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+        .allocationSize  = memReqs.size,
+        .memoryTypeIndex = memType
+    };
 
     VkDeviceMemory rawMemory = VK_NULL_HANDLE;
-    if (vkAllocateMemory(stone_device(), &allocInfo, nullptr, &rawMemory) != VK_SUCCESS) {
-        LOG_FATAL_CAT("RENDERER", "Failed to allocate memory for NexusScoreImage");
-        vkAllocateMemory(stone_device(), &allocInfo, nullptr, &rawMemory);
-        vkDestroyImage(stone_device(), rawImage, nullptr);
-        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
-    }
+    VK_CHECK(vkAllocateMemory(stone_device(), &allocInfo, nullptr, &rawMemory));
+    VK_CHECK(vkBindImageMemory(stone_device(), rawImage, rawMemory, 0));
 
-    if (vkBindImageMemory(stone_device(), rawImage, rawMemory, 0) != VK_SUCCESS) {
-        LOG_FATAL_CAT("RENDERER", "Failed to bind memory for NexusScoreImage");
-        vkFreeMemory(stone_device(), rawMemory, nullptr);
-        vkDestroyImage(stone_device(), rawImage, nullptr);
-        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
-    }
-
-    // Create view
-    VkImageViewCreateInfo viewInfo = {};
-    viewInfo.sType                           = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    viewInfo.image                           = rawImage;
-    viewInfo.viewType                        = VK_IMAGE_VIEW_TYPE_2D;
-    viewInfo.format                          = format;
-    viewInfo.subresourceRange.aspectMask      = VK_IMAGE_ASPECT_COLOR_BIT;
-    viewInfo.subresourceRange.levelCount      = 1;
-    viewInfo.subresourceRange.layerCount        = 1;
+    VkImageViewCreateInfo viewInfo{
+        .sType                        = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+        .image                        = rawImage,
+        .viewType                     = VK_IMAGE_VIEW_TYPE_2D,
+        .format                       = format,
+        .subresourceRange             = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
+    };
 
     VkImageView rawView = VK_NULL_HANDLE;
-    if (vkCreateImageView(stone_device(), &viewInfo, nullptr, &rawView) != VK_SUCCESS) {
-        LOG_FATAL_CAT("RENDERER", "Failed to create view for NexusScoreImage");
-        vkFreeMemory(stone_device(), rawMemory, nullptr);
-        vkDestroyImage(stone_device(), rawImage, nullptr);
-        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
+    VK_CHECK(vkCreateImageView(stone_device(), &viewInfo, nullptr, &rawView));
+
+    // Wrap in RAII handles
+    hypertraceScoreImage_   = MakeHandle(rawImage,  stone_device(), vkDestroyImage,     0,           "NexusScoreImage");
+    hypertraceScoreMemory_  = MakeHandle(rawMemory, stone_device(), vkFreeMemory,       memReqs.size,"NexusScoreMemory");
+    hypertraceScoreView_    = MakeHandle(rawView,   stone_device(), vkDestroyImageView, 0,           "NexusScoreView");
+
+    // ONE-TIME COMMAND BUFFER — THE PHOTONS DEMAND A CLEAN SLATE
+    VkCommandBuffer cmd = RTX::beginOneTimeSubmit(pool);
+    if (cmd == VK_NULL_HANDLE) {
+        LOG_FATAL_CAT("RENDERER", "Failed to begin one-time command buffer for NexusScoreImage clear");
+        phase9_ballerina("NO CMD FOR NEXUS", std::source_location::current());
     }
 
-    // === Wrap in RAII Handles ===
-    hypertraceScoreImage_   = RTX::Handle<VkImage>(rawImage,   stone_device(), vkDestroyImage,     0,                    "NexusScoreImage");
-    hypertraceScoreMemory_  = RTX::Handle<VkDeviceMemory>(rawMemory,  stone_device(), vkFreeMemory,       memReqs.size,         "NexusScoreMemory");
-    hypertraceScoreView_    = RTX::Handle<VkImageView>(rawView, stone_device(), vkDestroyImageView, 0,                    "NexusScoreView");
-
-    // === Clear image to zero using staging buffer ===
-    VkDeviceSize stagingSize = static_cast<VkDeviceSize>(width_) * height_ * 16; // 4 × float32
+    // Staging buffer to clear image to zero
+    VkDeviceSize stagingSize = static_cast<VkDeviceSize>(width_) * height_ * 16; // R32G32B32A32
 
     uint64_t stagingEnc = 0;
-    BUFFER_CREATE(stagingEnc, stagingSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, "NexusClearStaging");
+    BUFFER_CREATE(stagingEnc, stagingSize,
+                  VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                  VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                  "NexusClearStaging");
 
     void* map = nullptr;
     BUFFER_MAP(stagingEnc, map);
     std::memset(map, 0, stagingSize);
     BUFFER_UNMAP(stagingEnc);
 
-    VkCommandBuffer cmd = pipelineManager_.beginSingleTimeCommands(pool);
+   // Transition to TRANSFER_DST_OPTIMAL
+    VkImageMemoryBarrier toTransfer{
+        .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .pNext               = nullptr,
+        .srcAccessMask       = 0,
+        .dstAccessMask       = VK_ACCESS_TRANSFER_WRITE_BIT,
+        .oldLayout           = VK_IMAGE_LAYOUT_UNDEFINED,
+        .newLayout           = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .image               = rawImage,
+        .subresourceRange    = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
+    };
 
-    // Transition to TRANSFER_DST
-    VkImageMemoryBarrier toTransfer = {};
-    toTransfer.sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    toTransfer.oldLayout           = VK_IMAGE_LAYOUT_UNDEFINED;
-    toTransfer.newLayout           = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-    toTransfer.image               = rawImage;
-    toTransfer.subresourceRange     = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-    toTransfer.srcAccessMask       = 0;
-    toTransfer.dstAccessMask       = VK_ACCESS_TRANSFER_WRITE_BIT;
+    vkCmdPipelineBarrier(cmd,
+        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+        0, 0, nullptr, 0, nullptr, 1, &toTransfer);
 
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0,
-                         0, nullptr, 0, nullptr, 1, &toTransfer);
-
-    VkBufferImageCopy region = {};
-    region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    region.imageSubresource.layerCount = 1;
-    region.imageExtent = { static_cast<uint32_t>(width_), static_cast<uint32_t>(height_), 1 };
+    VkBufferImageCopy region{
+        .imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
+        .imageExtent      = { static_cast<uint32_t>(width_), static_cast<uint32_t>(height_), 1 }
+    };
 
     vkCmdCopyBufferToImage(cmd, RAW_BUFFER(stagingEnc), rawImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
 
-    // Transition to GENERAL for ray tracing
-    VkImageMemoryBarrier toGeneral = {};
-    toGeneral.sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    toGeneral.oldLayout           = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-    toGeneral.newLayout           = VK_IMAGE_LAYOUT_GENERAL;
-    toGeneral.image               = rawImage;
-    toGeneral.subresourceRange     = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-    toGeneral.srcAccessMask       = VK_ACCESS_TRANSFER_WRITE_BIT;
-    toGeneral.dstAccessMask       = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+    // Transition to GENERAL
+    VkImageMemoryBarrier toGeneral{
+        .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .pNext               = nullptr,
+        .srcAccessMask       = VK_ACCESS_TRANSFER_WRITE_BIT,
+        .dstAccessMask       = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+        .oldLayout           = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        .newLayout           = VK_IMAGE_LAYOUT_GENERAL,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .image               = rawImage,
+        .subresourceRange    = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
+    };
 
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, 0,
-                         0, nullptr, 0, nullptr, 1, &toGeneral);
+    vkCmdPipelineBarrier(cmd,
+        VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
+        0, 0, nullptr, 0, nullptr, 1, &toGeneral);
 
-    pipelineManager_.endSingleTimeCommands(pool, queue, cmd);
-
-    // Destroy staging immediately
+    RTX::endOneTimeSubmit(cmd, queue, pool);
     BUFFER_DESTROY(stagingEnc);
 
-    LOG_SUCCESS_CAT("RENDERER", "{}Nexus Score Image forged — {}×{} — R32G32B32A32_SFLOAT — PINK PHOTONS READY FOR SCORING{}", 
-                    LIME_GREEN, width_, height_, RESET);
+    LOG_SUCCESS_CAT("RENDERER", "NexusScoreImage forged and cleared — {}×{} — the photons will now be judged", width_, height_);
+
+    LOG_AMOURANTH("Amouranth: \"Every photon will be scored. None escape judgment.\"");
+    LOG_NICK("Nick: \"We just built a courtroom for light itself.\"");
+    LOG_JENSEN("Jensen Huang: \"R32G32B32A32 storage image? Adaptive sampling just got real.\"");
+    LOG_KEANU("Keanu Reeves: \"…they're being watched. All of them.\"");
+    LOG_CAPTAIN_N("CAPTAIN N: \"THE NEXUS IS ALIVE! THE PHOTONS ARE BEING GRADED! AHHHHHHHH!\"");
+    LOG_GROK("Gentleman Grok: \"A most exquisite tribunal. The empire demands perfection.\"");
+    LOG_BLONDIE("Blondie: \"Some photons pass. Others… don’t.\"");
 }
 
 void VulkanRenderer::recordRayTracingCommandBuffer(VkCommandBuffer cmd) noexcept {
@@ -1615,22 +1538,18 @@ void VulkanRenderer::updateUniformBuffer(uint32_t frame, const Camera& camera, f
     }
 }
 
-void VulkanRenderer::updateTonemapUniform(uint32_t frame) noexcept {
+void VulkanRenderer::updateTonemapUniform(uint32_t frame) noexcept
+{
+    if (tonemapUniformEncs_.empty() || g_ctx().sharedStagingEnc_ == 0) return;
 
-    if (tonemapUniformEncs_.empty() || g_ctx().sharedStagingEnc_ == 0) {
-        return;
-    }
-
-    // FIXED: Explicit null-guard on staging memory Handle (post-resize ghost prevention)
     if (BUFFER_MEMORY(g_ctx().sharedStagingEnc_) == VK_NULL_HANDLE) {
-        LOG_WARN_CAT("RENDERER", "Shared staging memory null for tonemap UBO — skipping update (recreate needed?)");
+        LOG_WARN_CAT("RENDERER", "Shared staging memory null — skipping tonemap update");
         return;
     }
 
     void* data = nullptr;
-    VkResult mapRes = vkMapMemory(stone_device(), BUFFER_MEMORY(g_ctx().sharedStagingEnc_), 0, VK_WHOLE_SIZE, 0, &data);
-    if (mapRes != VK_SUCCESS || data == nullptr) {
-        LOG_WARN_CAT("RENDERER", "Tonemap UBO map failed: {} or null for frame {} (OOM post-resize?) — skipping memcpy.", static_cast<int>(mapRes), frame);
+    if (vkMapMemory(stone_device(), BUFFER_MEMORY(g_ctx().sharedStagingEnc_), 0, VK_WHOLE_SIZE, 0, &data) != VK_SUCCESS || !data) {
+        LOG_WARN_CAT("RENDERER", "Failed to map tonemap staging — frame {}", frame);
         return;
     }
 
@@ -1642,55 +1561,45 @@ void VulkanRenderer::updateTonemapUniform(uint32_t frame) noexcept {
         uint32_t frame;
         uint32_t spp;
         float _pad[2];
-    } ubo = {};  // Zero-init
+    } ubo{};
 
-    // FIXED: Set exposure from member (add float exposure_ = 1.0f; to class if missing)
-    ubo.exposure = currentExposure_;  // Assume member
-
+    ubo.exposure = currentExposure_;
     ubo.type = static_cast<uint32_t>(tonemapType_);
     ubo.enabled = tonemapEnabled_ ? 1u : 0u;
     ubo.nexusScore = currentNexusScore_;
     ubo.frame = frameNumber_;
-    ubo.spp = currentSpp_;  // FIXED: Match your naming (from logs)
+    ubo.spp = currentSpp_;
 
     std::memcpy(data, &ubo, sizeof(ubo));
     vkUnmapMemory(stone_device(), BUFFER_MEMORY(g_ctx().sharedStagingEnc_));
 
-    // FIXED: Guard copyCmd on valid device UBO (post-resize index/Handle poison)
     VkBuffer deviceBuf = RAW_BUFFER(tonemapUniformEncs_[frame]);
     if (deviceBuf == VK_NULL_HANDLE) {
-        LOG_WARN_CAT("RENDERER", "Tonemap device UBO null for frame {} — skipping staging-to-device copy", frame);
+        LOG_WARN_CAT("RENDERER", "Tonemap device UBO null — frame {} skipped", frame);
         return;
     }
 
-    // FIXED: Copy staging to device UBO (similar to updateUniformBuffer)
     const auto& ctx = g_ctx();
-    VkCommandPool cmdPool = ctx.commandPool_;
-    VkQueue queue = ctx.graphicsQueue();
-    VkCommandBuffer copyCmd = pipelineManager_.beginSingleTimeCommands(cmdPool);
-    if (copyCmd != VK_NULL_HANDLE) {
-        VkBufferCopy copyRegion = {0, 0, sizeof(ubo)};
-        VkBuffer stagingBuf = BufferManager::get(g_ctx().sharedStagingEnc_)->buffer;
-        if (stagingBuf == VK_NULL_HANDLE) {
-            LOG_WARN_CAT("RENDERER", "Staging buffer null — aborting copy for frame {}", frame);
-        } else {
-            vkCmdCopyBuffer(copyCmd, stagingBuf, deviceBuf, 1, &copyRegion);
-            
-            VkMemoryBarrier barrier = {VK_STRUCTURE_TYPE_MEMORY_BARRIER};
-            barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-            barrier.dstAccessMask = VK_ACCESS_UNIFORM_READ_BIT;
-            vkCmdPipelineBarrier(copyCmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &barrier, 0, nullptr, 0, nullptr);
-        }
-        
-        pipelineManager_.endSingleTimeCommands(cmdPool, queue, copyCmd);
-    } else {
-        LOG_WARN_CAT("RENDERER", "Failed to begin single-time cmds for tonemap copy — frame {} skipped", frame);
+    VkCommandBuffer copyCmd = RTX::beginOneTimeSubmit(ctx.commandPool_);
+    if (copyCmd == VK_NULL_HANDLE) {
+        LOG_WARN_CAT("RENDERER", "Failed to begin copy command for tonemap — frame {}", frame);
+        return;
     }
+
+    VkBuffer stagingBuf = BufferManager::get(g_ctx().sharedStagingEnc_)->buffer;
+    if (stagingBuf != VK_NULL_HANDLE) {
+        VkBufferCopy copyRegion{ .size = sizeof(ubo) };
+        vkCmdCopyBuffer(copyCmd, stagingBuf, deviceBuf, 1, &copyRegion);
+
+        VkMemoryBarrier barrier{ .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER };
+        barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        barrier.dstAccessMask = VK_ACCESS_UNIFORM_READ_BIT;
+        vkCmdPipelineBarrier(copyCmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &barrier, 0, nullptr, 0, nullptr);
+    }
+
+    RTX::endOneTimeSubmit(copyCmd, ctx.graphicsQueue(), ctx.commandPool_);
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Application Interface — Synchronized with handle_app.hpp
-// ──────────────────────────────────────────────────────────────────────────────
 void VulkanRenderer::setTonemap(bool enabled) noexcept {
     LOG_TRACE_CAT("RENDERER", "setTonemap — START — enabled={}", enabled);
     if (tonemapEnabled_ == enabled) {
@@ -1948,74 +1857,86 @@ void VulkanRenderer::waitForAllFences() const noexcept
 // ──────────────────────────────────────────────────────────────────────────────
 // FINAL & CORRECT — createImage + createImageArray
 // ──────────────────────────────────────────────────────────────────────────────
-
 void VulkanRenderer::createImage(RTX::Handle<VkImage>& image,
                                  RTX::Handle<VkDeviceMemory>& memory,
                                  RTX::Handle<VkImageView>& view,
                                  const std::string& name) noexcept
 {
-    VkImageCreateInfo info = {};
-    info.sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    info.imageType     = VK_IMAGE_TYPE_2D;
-    info.format        = VK_FORMAT_R32G32B32A32_SFLOAT;
-    info.extent        = { static_cast<uint32_t>(width_), static_cast<uint32_t>(height_), 1 };
-    info.mipLevels     = 1;
-    info.arrayLayers   = 1;
-    info.samples       = VK_SAMPLE_COUNT_1_BIT;
-    info.tiling        = VK_IMAGE_TILING_OPTIMAL;
-    info.usage         = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-    info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    LOG_TRACE_CAT("RENDERER", "Forging image \"{}\" — {}×{}", name, width_, height_);
+
+    VkImageCreateInfo info{
+        .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .imageType = VK_IMAGE_TYPE_2D,
+        .format = VK_FORMAT_R32G32B32A32_SFLOAT,
+        .extent = { static_cast<uint32_t>(width_), static_cast<uint32_t>(height_), 1 },
+        .mipLevels = 1,
+        .arrayLayers = 1,
+        .samples = VK_SAMPLE_COUNT_1_BIT,
+        .tiling = VK_IMAGE_TILING_OPTIMAL,
+        .usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
+    };
 
     VkImage rawImg = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateImage(stone_device(), &info, nullptr, &rawImg), name.c_str());
+    VK_CHECK(vkCreateImage(stone_device(), &info, nullptr, &rawImg));
 
-    VkMemoryRequirements reqs;
+    VkMemoryRequirements reqs{};
     vkGetImageMemoryRequirements(stone_device(), rawImg, &reqs);
 
     uint32_t memType = pipelineManager_.findMemoryType(reqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
-    VkMemoryAllocateInfo alloc = {};
-    alloc.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    alloc.allocationSize     = reqs.size;
-    alloc.memoryTypeIndex    = memType;
+    VkMemoryAllocateInfo alloc{
+        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+        .allocationSize = reqs.size,
+        .memoryTypeIndex = memType
+    };
 
     VkDeviceMemory rawMem = VK_NULL_HANDLE;
-    VK_CHECK(vkAllocateMemory(stone_device(), &alloc, nullptr, &rawMem), name.c_str());
+    VK_CHECK(vkAllocateMemory(stone_device(), &alloc, nullptr, &rawMem));
+    VK_CHECK(vkBindImageMemory(stone_device(), rawImg, rawMem, 0));
 
-    vkBindImageMemory(stone_device(), rawImg, rawMem, 0);
-
-    VkImageViewCreateInfo vinfo = {};
-    vinfo.sType                           = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    vinfo.image                           = rawImg;
-    vinfo.viewType                        = VK_IMAGE_VIEW_TYPE_2D;
-    vinfo.format                          = info.format;
-    vinfo.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
-    vinfo.subresourceRange.levelCount     = 1;
-    vinfo.subresourceRange.layerCount     = 1;
+    VkImageViewCreateInfo vinfo{
+        .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+        .image = rawImg,
+        .viewType = VK_IMAGE_VIEW_TYPE_2D,
+        .format = info.format,
+        .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
+    };
 
     VkImageView rawView = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateImageView(stone_device(), &vinfo, nullptr, &rawView), name.c_str());
+    VK_CHECK(vkCreateImageView(stone_device(), &vinfo, nullptr, &rawView));
 
-    image  = RTX::Handle<VkImage>(rawImg, stone_device(), vkDestroyImage, 0, name + "_Img");
-    memory = RTX::Handle<VkDeviceMemory>(rawMem, stone_device(), vkFreeMemory, reqs.size, name + "_Mem");
-    view   = RTX::Handle<VkImageView>(rawView, stone_device(), vkDestroyImageView, 0, name + "_View");
+    // Wrap in RAII handles
+    image  = MakeHandle(rawImg, stone_device(), vkDestroyImage, 0, name + "_Img");
+    memory = MakeHandle(rawMem, stone_device(), vkFreeMemory, reqs.size, name + "_Mem");
+    view   = MakeHandle(rawView, stone_device(), vkDestroyImageView, 0, name + "_View");
 
-    // Transition to GENERAL
-    VkCommandBuffer cmd = pipelineManager_.beginSingleTimeCommands(g_ctx().commandPool_);
+    // ONE-TIME COMMAND BUFFER — THE EMPIRE DEMANDS TRANSITION
+    const auto& ctx = g_ctx();
+    VkCommandBuffer cmd = RTX::beginOneTimeSubmit(ctx.commandPool_);
+    if (cmd == VK_NULL_HANDLE) {
+        LOG_FATAL_CAT("RENDERER", "Failed to begin one-time command for image transition: {}", name);
+        return;
+    }
 
-    VkImageMemoryBarrier barrier = {};
-    barrier.sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    barrier.oldLayout           = VK_IMAGE_LAYOUT_UNDEFINED;
-    barrier.newLayout           = VK_IMAGE_LAYOUT_GENERAL;
-    barrier.image               = rawImg;
-    barrier.subresourceRange     = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+    VkImageMemoryBarrier barrier{
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+        .newLayout = VK_IMAGE_LAYOUT_GENERAL,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .image = rawImg,
+        .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
+    };
 
     vkCmdPipelineBarrier(cmd,
         VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
         VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
         0, 0, nullptr, 0, nullptr, 1, &barrier);
 
-    pipelineManager_.endSingleTimeCommands(g_ctx().commandPool_, g_ctx().graphicsQueue(), cmd);
+    RTX::endOneTimeSubmit(cmd, ctx.graphicsQueue(), ctx.commandPool_);
+
+    LOG_SUCCESS_CAT("RENDERER", "Image \"{}\" forged and transitioned to GENERAL — ready for pink photons", name);
 }
 
 void VulkanRenderer::createImageArray(std::vector<RTX::Handle<VkImage>>& images,

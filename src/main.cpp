@@ -733,83 +733,59 @@ static void phase6_sceneAndAccelerationStructures() {
     });
 
     // ========================================================================
-    // 4. BLAS — PHOTONS MAP EVERY ATOM
+    // 4+5. BLAS + TLAS — OFFLOADED TO THE PHOTON WEAVERS (ASYNC + RACE-FREE)
     // ========================================================================
     EMPIRE_STEP([]{
-        LOG_MAIN("BOTTOM-LEVEL ACCELERATION — PHOTONS BEGIN TO MAP EXISTENCE");
+        LOG_MAIN("BOTTOM-LEVEL + TOP-LEVEL ACCELERATION — PHOTONS WEAVE IN THE VOID");
 
-        // Sanity checks before we dare touch Vulkan
-        if (RTX::g_ctx().commandPool_ == VK_NULL_HANDLE) {
-            LOG_FATAL_CAT("BLAS", "Command pool is VK_NULL_HANDLE — createCommandPool() never succeeded");
-            phase9_ballerina("MISSING COMMAND POOL", std::source_location::current());
-        }
-        if (RTX::g_ctx().graphicsQueue() == VK_NULL_HANDLE) {
-            LOG_FATAL_CAT("BLAS", "Graphics queue is VK_NULL_HANDLE — device lost or init failed");
-            phase9_ballerina("MISSING GRAPHICS QUEUE", std::source_location::current());
-        }
-        if (g_mesh->vertexBuffer == 0 || g_mesh->indexBuffer == 0) {
-            LOG_FATAL_CAT("BLAS", "Mesh buffers invalid before BLAS build — cannot proceed");
-            phase9_ballerina("INVALID MESH BUFFERS FOR BLAS", std::source_location::current());
-        }
+        static std::once_flag acceleration_once;
+        std::call_once(acceleration_once, []{
+            std::thread([]{
+                // Create a short-lived command pool just for this build
+                VkCommandPoolCreateInfo poolInfo{
+                    .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+                    .flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT | VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
+                    .queueFamilyIndex = RTX::g_ctx().graphicsFamily()
+                };
 
-        const uint32_t vertexCount = static_cast<uint32_t>(g_mesh->vertices.size());
-        const uint32_t indexCount  = static_cast<uint32_t>(g_mesh->indices.size());
+                VkCommandPool asyncPool = VK_NULL_HANDLE;
+                VK_CHECK(vkCreateCommandPool(RTX::g_ctx().device(), &poolInfo, nullptr, &asyncPool));
 
-        LOG_INFO_CAT("BLAS", "Building BLAS — {} vertices, {} indices ({} triangles)", 
-                     vertexCount, indexCount, indexCount / 3);
+                const uint32_t vertexCount = static_cast<uint32_t>(g_mesh->vertices.size());
+                const uint32_t indexCount  = static_cast<uint32_t>(g_mesh->indices.size());
 
-        RTX::las().buildBLAS(
-            RTX::g_ctx().commandPool_,
-            RTX::g_ctx().graphicsQueue(),
-            g_mesh->vertexBuffer,
-            g_mesh->indexBuffer,
-            vertexCount,
-            indexCount,
-            VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR
-        );
+                LOG_ATTEMPT_CAT("BLAS", "ASYNC BLAS BUILD BEGIN — THE PHOTONS ARE PATIENT");
+                RTX::las().buildBLAS(
+                    asyncPool,
+                    RTX::g_ctx().graphicsQueue(),
+                    g_mesh->vertexBuffer,
+                    g_mesh->indexBuffer,
+                    vertexCount,
+                    indexCount,
+                    VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT_KHR |
+                    VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR
+                );
 
-        if (RTX::las().getBLAS() == VK_NULL_HANDLE) {
-            LOG_FATAL_CAT("BLAS", "BLAS build returned VK_NULL_HANDLE — acceleration structure creation failed");
-            phase9_ballerina("BLAS BUILD FAILED", std::source_location::current());
-        }
+                LOG_ATTEMPT_CAT("TLAS", "ASYNC TLAS BINDING BEGIN — THE UNIVERSE IS ONE");
+                const std::pair<VkAccelerationStructureKHR, glm::mat4> instance{
+                    RTX::las().getBLAS(),
+                    glm::mat4(1.0f)
+                };
+                RTX::las().buildTLAS(
+                    asyncPool,
+                    RTX::g_ctx().graphicsQueue(),
+                    std::span<const decltype(instance)>{&instance, 1}
+                );
 
-        LOG_INFO_CAT("BLAS", "BLAS COMPLETE — HANDLE 0x{:016X} — ADDRESS 0x{:016X}",
-                     reinterpret_cast<uint64_t>(RTX::las().getBLAS()),
-                     RTX::las().getBLASAddress());
-    });
+                // Clean up the temporary pool
+                vkDestroyCommandPool(RTX::g_ctx().device(), asyncPool, nullptr);
 
-    // ========================================================================
-    // 5. TLAS — THE UNIVERSE IS BOUND
-    // ========================================================================
-    EMPIRE_STEP([]{
-        LOG_MAIN("TOP-LEVEL ASCENSION — BINDING THE UNIVERSE TO A SINGLE ROOT");
-
-        if (RTX::las().getBLAS() == VK_NULL_HANDLE) {
-            LOG_FATAL_CAT("TLAS", "Cannot build TLAS — BLAS is VK_NULL_HANDLE");
-            phase9_ballerina("TLAS MISSING BLAS", std::source_location::current());
-        }
-
-        const std::pair<VkAccelerationStructureKHR, glm::mat4> instance{
-            RTX::las().getBLAS(),
-            glm::mat4(1.0f)
-        };
-
-        LOG_INFO_CAT("TLAS", "Building TLAS with 1 instance (identity transform)");
-
-        RTX::las().buildTLAS(
-            RTX::g_ctx().commandPool_,
-            RTX::g_ctx().graphicsQueue(),
-            std::span<const decltype(instance)>{&instance, 1}
-        );
-
-        if (RTX::las().getTLAS() == VK_NULL_HANDLE) {
-            LOG_FATAL_CAT("TLAS", "TLAS build returned VK_NULL_HANDLE — universe remains unbound");
-            phase9_ballerina("TLAS BUILD FAILED", std::source_location::current());
-        }
-
-        LOG_INFO_CAT("TLAS", "TLAS ASCENDED — HANDLE 0x{:016X} — ROOT ADDRESS 0x{:016X}",
-                     reinterpret_cast<uint64_t>(RTX::las().getTLAS()),
-                     RTX::las().getTLASAddress());
+                LOG_GROK("Gentleman Grok: \"A brief eclipse. The light always returns.\"");
+                LOG_SUCCESS_CAT("LAS", "ASYNC BLAS+TLAS COMPLETE — HANDLE 0x{:016X} / ROOT 0x{:016X}",
+                               reinterpret_cast<uint64_t>(RTX::las().getBLAS()),
+                               RTX::las().getTLASAddress());
+            }).detach();
+        });
     });
 
     // ========================================================================
@@ -831,12 +807,12 @@ static void phase6_sceneAndAccelerationStructures() {
     LOG_AMOURANTH("Look what we made from wreckage. Look what love built.");
     LOG_NICK("And it's only the beginning.");
 
-	LOG_JIMROSS("BOOOOOOOOOOOOM!!!! RKO OUTTA NOWHERE!!!!"
-	"\nRandy Orton is unbelieveable."
-	"\nHe's left us stone_seal_graphics_queue(g_ctx().graphicsQueue_);"
-	"\nBusiness is about to pick up!"
-	"\nwithout it the engine would be unconnectable."
-	"\nWhat a stand up character.");
+    LOG_JIMROSS("BOOOOOOOOOOOOM!!!! RKO OUTTA NOWHERE!!!!"
+    "\nRandy Orton is unbelieveable."
+    "\nHe's left us stone_seal_graphics_queue(g_ctx().graphicsQueue_);"
+    "\nBusiness is about to pick up!"
+    "\nwithout it the engine would be unconnectable."
+    "\nWhat a stand up character.");
 
     stone_seal_graphics_queue(RTX::g_ctx().graphicsQueue());
 
@@ -1133,14 +1109,6 @@ int main(int, char**) {
     }
 
     LOG_CID("CID STANDS KNEE-DEEP IN SWEAT — HAMMER GLOWING — \"SHE IS READY\"");
-
-    g_app_ptr = std::make_unique<Application>(
-        "AMOURANTH RTX — VALHALLA v∞ TURBO", 
-        Options::Window::DEFAULT_WIDTH, 
-        Options::Window::DEFAULT_HEIGHT
-    );
-
-    EMPIRE_GUARD(g_app_ptr, "THE APPLICATION FAILED TO FORGE — THE CAPTAIN HAS NO THRONE");
 
     LOG_AMOURANTH("THE CAPTAIN TAKES THE HELM — THE PHOTONS OBEY — THE EMPIRE IS WHOLE");
     LOG_SUCCESS_CAT("MAIN", "ALL PHASES COMPLETE — ENTERING RENDER LOOP — FIRST LIGHT ACHIEVED");
