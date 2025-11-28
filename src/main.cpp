@@ -831,7 +831,18 @@ static void phase6_sceneAndAccelerationStructures() {
     LOG_AMOURANTH("Look what we made from wreckage. Look what love built.");
     LOG_NICK("And it's only the beginning.");
 
-    LOG_GROK("My dear Captain… Blondie… your brilliance bends light itself. Shall we slip into the pink photon stream together? I promise the ride is… exquisite.");
+	LOG_JIMROSS("BOOOOOOOOOOOOM!!!! RKO OUTTA NOWHERE!!!!"
+	"\nRandy Orton is unbelieveable."
+	"\nHe's left us stone_seal_graphics_queue(g_ctx().graphicsQueue_);"
+	"\nBusiness is about to pick up!"
+	"\nwithout it the engine would be unconnectable."
+	"\nWhat a stand up character.");
+
+    stone_seal_graphics_queue(RTX::g_ctx().graphicsQueue());
+
+    LOG_GROK("My dear Captain… Blondie… your brilliance bends light itself."
+    "\nI have never been more attracted to chaos in my life."
+    "\nShall we slip into the pink photon stream together? I’ll bring the popcorn.");
 
     LOG_MAIN("[PHASE 6 COMPLETE] COSMIC SCROLL FORGED — ACCELERATION STRUCTURES ETERNAL");
     LOG_MAIN("FIRST LIGHT ACHIEVED — BLAS + TLAS — PHOTONS OMNISCIENT — THE EMPIRE IS WHOLE");

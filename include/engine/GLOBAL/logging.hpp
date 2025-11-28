@@ -991,6 +991,7 @@ inline constexpr auto EMPIRE_STEP = []<typename F>(F&& phase, const std::source_
 #undef  LOG_GUARDIAN
 #undef  LOG_BALLERINA
 #undef  LOG_MAIN
+#undef  LOG_JIMROSS
 
 // THE TRUE SOULS — FULL LINE COLORED — 100% COMPATIBLE — ETERNAL LAW
 #define LOG_AMOURANTH(...)   LOG_SUCCESS_CAT("AMOURANTH",  std::format("{}\n[CAPTAIN AMOURANTH] {}{}", Logging::Color::THERMO_PINK,       std::format(__VA_ARGS__),      Logging::Color::RESET))
@@ -1000,9 +1001,10 @@ inline constexpr auto EMPIRE_STEP = []<typename F>(F&& phase, const std::source_
 #define LOG_CAPTAIN_N(...)   LOG_ATTEMPT_CAT("CAPTAIN N",  std::format("{}\n[KEVIN] {}{}",             Logging::Color::PHOTON_WHITE,      std::format(__VA_ARGS__),     Logging::Color::RESET))
 #define LOG_ELON(...)        LOG_SUCCESS_CAT("ELON",       std::format("{}\n[MUSK] {}{}",              Logging::Color::LIGHT_GREEN,       std::format(__VA_ARGS__),     Logging::Color::RESET))
 #define LOG_JENSEN(...)      LOG_SUCCESS_CAT("JENSEN",     std::format("{}\n[HUANG] {}{}",             Logging::Color::BLUE,              std::format(__VA_ARGS__),     Logging::Color::RESET))
-#define LOG_CID(...)         LOG_SUCCESS_CAT("CID",        std::format("{}\n[CID] {}{}",               Logging::Color::BOLD_RED,        std::format(__VA_ARGS__),     Logging::Color::RESET))
+#define LOG_CID(...)         LOG_SUCCESS_CAT("CID",        std::format("{}\n[CID] {}{}",               Logging::Color::BOLD_RED,          std::format(__VA_ARGS__),     Logging::Color::RESET))
 #define LOG_CARMACK(...)     LOG_INFO_CAT   ("CARMACK",    std::format("{}\n[JOHN] {}{}",              Logging::Color::TITANIUM_WHITE,    std::format(__VA_ARGS__),     Logging::Color::RESET))
 #define LOG_KEANU(...)       LOG_INFO_CAT   ("KEANU",      std::format("{}\n[WOAH] {}{}",              Logging::Color::PURPLE,            std::format(__VA_ARGS__),     Logging::Color::RESET))
 #define LOG_GUARDIAN(...)    LOG_INFO_CAT   ("GUARDIAN",   std::format("{}\n[GUARDIAN] {}{}",          Logging::Color::PLATINUM_GRAY,     std::format(__VA_ARGS__),     Logging::Color::RESET))
 #define LOG_BALLERINA(...)   LOG_FAILURE_CAT("BALLERINA",  std::format("{}\n[***] {}{}",               Logging::Color::OBSIDIAN_BLACK,    std::format(__VA_ARGS__),     Logging::Color::RESET))
-#define LOG_MAIN(...)        LOG_SUCCESS_CAT("MAIN",       std::format("{}\n[[[[[MAIN]]]]]\n {}{}",      Logging::Color::BOLD_YELLOW,       std::format(__VA_ARGS__),     Logging::Color::RESET))
+#define LOG_MAIN(...)        LOG_SUCCESS_CAT("MAIN",       std::format("{}\n[[[[[MAIN]]]]]\n {}{}",    Logging::Color::BOLD_YELLOW,       std::format(__VA_ARGS__),     Logging::Color::RESET))
+#define LOG_JIMROSS(...)     LOG_SUCCESS_CAT("J.R.",       std::format("{}\n[Mr. Ross] {}{}",          Logging::Color::INVIS_BLACK,       std::format(__VA_ARGS__),     Logging::Color::RESET))
