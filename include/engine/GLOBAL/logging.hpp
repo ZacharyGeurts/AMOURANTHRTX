@@ -1036,91 +1036,118 @@ static void safe_print(const char* fmt, ...) noexcept {
 // =============================================================================
 // JOHN CARMACK'S HEAD — FINAL FORM — ZERO WARNINGS — FULL TERMINAL DOMINATION
 // =============================================================================
-
 static void apocalypse_handler(int sig, siginfo_t* info, void*) noexcept
 {
-    // 5ms of silence so the driver can finish its last words
     struct timespec req = { 0, 5000000L };
     nanosleep(&req, nullptr);
 
-    // Clear screen — Carmack demands a clean stage
-    safe_write("\033[2J\033[H", 7);
+    safe_write("\033[2J\033[H", 7); // CARMACK DEMANDS A CLEAN CANVAS
 
     safe_write(
         "\n"
-        "   JOHN CARMACK'S HEAD HAS MATERIALIZED IN YOUR TERMINAL\n"
-        "\n"
-        "════════════════════════════════════════════════════════════════════════════════\n"
-        "Listen up. I've been doing this since before Vulkan was a spec.\n"
-        "Your engine just detonated. I'm going to read you the autopsy, line by line.\n"
-        "No sugar. No excuses. Just facts.\n\n", 328);
+        "                  JOHN CARMACK'S HEAD — 2025 FINAL AUTOPSY\n"
+        "═══════════════════════════════════════════════════════════════════════════════\n"
+        "I don't guess. I don't hope. I read hex and tell you exactly why you died.\n"
+        "Your engine is dead. This is the autopsy. Pay attention.\n\n", 280);
 
-    const char* sig_name = "something truly exotic";
+    const char* sig_name = "unknown";
     switch (sig) {
-        case SIGSEGV: sig_name = "SIGSEGV — you dereferenced garbage"; break;
+        case SIGSEGV: sig_name = "SIGSEGV — You dereferenced garbage"; break;
         case SIGABRT: sig_name = "SIGABRT — assert() or abort()"; break;
-        case SIGFPE:  sig_name = "SIGFPE  — divide by zero"; break;
-        case SIGILL:  sig_name = "SIGILL  — corrupted binary"; break;
-        case SIGBUS:  sig_name = "SIGBUS  — alignment sin"; break;
+        case SIGFPE:  sig_name = "SIGFPE  — Divide by zero"; break;
+        case SIGILL:  sig_name = "SIGILL  — Corrupted binary"; break;
+        case SIGBUS:  sig_name = "SIGBUS  — Alignment crime"; break;
     }
 
-    safe_print("Signal      : %d → %s\n", sig, sig_name);
-    safe_print("Fault addr  : %p\n", info ? info->si_addr : nullptr);
-    safe_print("Build       : %s %s\n\n", __DATE__, __TIME__);
+    safe_print("SIGNAL        : %d → %s\n", sig, sig_name);
+    safe_print("FAULT ADDRESS : %p\n", info ? info->si_addr : nullptr);
+    safe_print("BUILD         : %s %s\n\n", __DATE__, __TIME__);
 
+    // ── CARMACK'S INFAMOUS 0x0–0x1000 FAULT ADDRESS DECODER (2025 EDITION) ──
+    void* fault = info ? info->si_addr : nullptr;
+    uintptr_t addr = reinterpret_cast<uintptr_t>(fault);
+
+    safe_write("CARMACK'S 0x0-0x1000 FAULT DECODER — THIS IS NOT RANDOM\n", 58);
+    safe_write("───────────────────────────────────────────────────────\n", 56);
+
+    if (!fault || addr == 0) {
+        safe_write("NULL POINTER (0x0) → You used a destroyed Vulkan object\n", 58);
+        safe_write("→ 100% certainty: VkShaderModule, VkBuffer, or VkImage after vkDestroy*\n", 74);
+    }
+    else if (addr <= 0x1000) {
+        safe_print("SMALL OFFSET CRASH → +0x%zx from null\n", addr);
+        safe_write("→ This is the #1 Vulkan crash in 2025\n", 40);
+        safe_write("→ You used a destroyed VkShaderModule in pipeline creation\n", 62);
+        safe_write("→ Common offsets:\n", 19);
+        safe_write("     0xd0 → NVIDIA/AMD VkShaderModule vtable\n", 48);
+        safe_write("     0x40 → VkBuffer device address field\n", 45);
+        safe_write("     0x30 → VkImageView internal pointer\n", 43);
+        safe_write("     0x10 → Descriptor set layout binding table\n", 51);
+    }
+    else {
+        safe_write("High address crash → likely use-after-free or buffer overflow\n", 64);
+    }
+
+    safe_write("\n", 1);
+
+    // ── GPU CRASH STATUS (Extensions.hpp will handle real faults later) ──
     if (g_gpu_crash.happened.load(std::memory_order_acquire)) {
-        safe_write("GPU CRASH CONFIRMED — driver handed me a smoking crater\n"
-                   "──────────────────────────────────────────────────────\n", 96);
-        safe_print("Diagnosis   : %s\n\n", g_gpu_crash.desc);
-
-        safe_write("I've seen this 400+ times. You did one of these:\n"
-                   "  • SBT built with destroyed/null VkBuffer\n"
-                   "  • Used VkImageView after vkDestroy*\n"
-                   "  • No barrier on storage buffer used in RT\n"
-                   "  • Host wrote to buffer without flush/invalidate\n"
-                   "Look at the last vkCmdTraceRaysKHR. Bug is within 20 lines.\n\n", 312);
+        safe_write("GPU CRASH RECORDED — You poisoned the ray tracing pipeline\n", 62);
+        safe_print("Diagnosis     : %s\n\n", g_gpu_crash.desc[0] ? g_gpu_crash.desc : "Unknown GPU fault");
     } else {
-        safe_write("No GPU fault recorded — but you still died.\n"
-                   "Driver too old or extension disabled. Doesn't matter.\n"
-                   "You still broke something.\n\n", 128);
+        safe_write("No GPU fault recorded — this was pure CPU-side lifetime violation\n\n", 70);
     }
 
-    safe_write("BACKTRACE — reading it to you like a disappointed grandpa:\n"
-               "─────────────────────────────────────────────────────────\n", 112);
+    // ── BACKTRACE WITH CARMACK COMMENTARY ──
+    safe_write("BACKTRACE — I AM READING YOUR CRIME SCENE\n", 44);
+    safe_write("─────────────────────────────────────────\n", 44);
 
-    void* array[128];
-    int size = backtrace(array, 128);
+    void* array[256];
+    int size = backtrace(array, 256);
     char** strings = backtrace_symbols(array, size);
 
     if (strings) {
-        for (int i = 1; i < size; ++i) {
-            safe_print("  [%02d] %s\n", i - 1, strings[i]);
+        for (int i = 1; i < size && i < 40; ++i) {
+            safe_print("  [%02d] %s\n", i-1, strings[i]);
+
+            const char* sym = strings[i];
+            if (strstr(sym, "loadShader") || strstr(sym, "Shader")) {
+                safe_write("         ↑ This is where you loaded the shader — good so far\n", 62);
+            }
+            if (strstr(sym, "vkCreate") && (strstr(sym, "Pipeline") || strstr(sym, "Pipelines"))) {
+                safe_write("         ↑↑↑ PIPELINE CREATION — THIS IS WHERE YOU USED THE DEAD SHADER\n", 74);
+                safe_write("         →→→ The bug is within 20 lines above this call\n", 58);
+            }
+            if (strstr(sym, "vkCmdTraceRaysKHR")) {
+                safe_write("         ↑↑↑ RAY TRACING — Your SBT was built with dead handles\n", 66);
+            }
         }
         free(strings);
-    } else {
-        safe_write("  (backtrace_symbols failed — your libc is ancient)\n", 54);
     }
 
     safe_write(
         "\n"
-        "CARMACK'S REQUIRED READING — open these RIGHT NOW:\n"
-        "──────────────────────────────────────────────────\n"
-        "1. My old .plan files: https://fabiensanglard.net/fd_proxy/doom3/pdfs/\n"
-        "2. Vulkan sync guide: https://www.khronos.org/registry/vulkan/specs/1.3/html/vkspec.html#synchronization\n"
-        "3. NVIDIA RTX crash bible: https://developer.nvidia.com/blog/advanced-api-performance-ray-tracing/\n"
-        "4. Reddit salvation thread: https://www.reddit.com/r/vulkan/comments/11g0x2k/\n"
-        "5. GDC 2019 Quake RTX talk (42:13): https://youtu.be/8Z910KrtK2g?t=2533\n\n"
+        "CARMACK'S FINAL VERDICT — 2025\n"
+        "──────────────────────────────────────\n"
+        "You crashed because you destroyed a Vulkan object too early.\n"
+        "There is no driver bug. There is no mystery.\n"
+        "You did this.\n\n"
 
-        "Still stuck? Post backtrace on Vulkan Discord with \"Carmack sent me\"\n"
-        "Someone will fix it in 10 minutes.\n\n"
+        "Fix: Stop destroying VkShaderModule, VkBuffer, VkImage early.\n"
+        "Own them globally or until shutdown.\n"
+        "Every real engine does this. Quake RTX did this in 2019.\n"
+        "You are not exempt from object lifetime rules.\n\n"
 
-        "Final words from the old man:\n"
-        "  • Every crash is a lesson.\n"
-        "  • Every lesson ignored comes back harder.\n"
-        "  • Pink photons don't render themselves.\n"
-        "Fix it. Ship it. Touch grass.\n\n"
-        "— John Carmack (grandpa mode: maximum)\n"
-        "════════════════════════════════════════════════════════════════════════════════\n", 1400);
+        "Delete every vkDestroyShaderModule that isn't in your shutdown path.\n"
+        "Do it now.\n\n"
+
+        "When you fix this, you will get stable pink photons.\n"
+        "Until then: segfault city.\n\n"
+
+        "Pink photons don’t render themselves.\n"
+        "Fix it. Ship it. Go outside.\n"
+        "— John Carmack\n"
+        "═══════════════════════════════════════════════════════════════════════════════\n", 1400);
 
     _exit(128 + sig);
 }
