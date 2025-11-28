@@ -48,7 +48,20 @@
 #include <algorithm>
 #include <stop_token>
 #include <filesystem>
+#include <execinfo.h>
+#include <cxxabi.h>
+#include <unistd.h>
+#include <csignal>
+#include <cstdlib>
+#include <cxxabi.h>
+#include <sys/wait.h>
+#include <fcntl.h>
+#include <cstring>
+#include <time.h>
 
+#include "engine/GLOBAL/Extensions.hpp" // catch card crashes
+
+// global disposal
 [[noreturn]] void phase9_ballerina(std::string_view reason = {}, const std::source_location loc = std::source_location::current()) noexcept;
 
 // =============================================================================
@@ -974,6 +987,163 @@ inline constexpr auto EMPIRE_STEP = []<typename F>(F&& phase, const std::source_
             Logging::Color::RESET); \
         phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current()); \
     }
+
+// ==============================================================================
+// ULTIMATE APOCALYPSE CRASH HANDLER – Vulkan 1.4 CORE ONLY (2025 FINAL)
+// Pink photons eternal. No extensions. No drafts. No mercy.
+// Drop this entire block into logging.hpp and delete everything else.
+// ==============================================================================
+// ──────────────────────────────────────────────────────────────────────────────
+// GLOBAL GPU CRASH STATE — survives even if driver gives us nothing
+// ──────────────────────────────────────────────────────────────────────────────
+struct GPUCrash {
+    std::atomic<bool> happened{false};
+    uint64_t          addr{0};
+    uint32_t          type{0};
+    char              desc[512]{"Unknown GPU fault — likely null SBT buffer or destroyed resource"};
+};
+
+inline GPUCrash g_gpu_crash;
+
+// ──────────────────────────────────────────────────────────────────────────────
+// MARK GPU CRASH — call this manually when you KNOW something went wrong
+// ──────────────────────────────────────────────────────────────────────────────
+inline void mark_gpu_crash(const char* reason = nullptr) noexcept
+{
+    g_gpu_crash.happened.store(true, std::memory_order_release);
+    if (reason && reason[0])
+        strncpy(g_gpu_crash.desc, reason, sizeof(g_gpu_crash.desc) - 1);
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// ASYNC-SIGNAL-SAFE PRINTING — no more -Wunused-result errors
+// ──────────────────────────────────────────────────────────────────────────────
+static void safe_write(const char* data, size_t len) noexcept {
+    if (data && len) {
+        [[maybe_unused]] ssize_t ignored = ::write(STDERR_FILENO, data, len);
+    }
+}
+
+static void safe_print(const char* fmt, ...) noexcept {
+    char buf[2048];
+    va_list ap;
+    va_start(ap, fmt);
+    int n = vsnprintf(buf, sizeof(buf), fmt, ap);
+    va_end(ap);
+    if (n > 0) safe_write(buf, size_t(n > 2047 ? 2047 : n));
+}
+
+// =============================================================================
+// JOHN CARMACK'S HEAD — FINAL FORM — ZERO WARNINGS — FULL TERMINAL DOMINATION
+// =============================================================================
+
+static void apocalypse_handler(int sig, siginfo_t* info, void*) noexcept
+{
+    // 5ms of silence so the driver can finish its last words
+    struct timespec req = { 0, 5000000L };
+    nanosleep(&req, nullptr);
+
+    // Clear screen — Carmack demands a clean stage
+    safe_write("\033[2J\033[H", 7);
+
+    safe_write(
+        "\n"
+        "   JOHN CARMACK'S HEAD HAS MATERIALIZED IN YOUR TERMINAL\n"
+        "\n"
+        "════════════════════════════════════════════════════════════════════════════════\n"
+        "Listen up. I've been doing this since before Vulkan was a spec.\n"
+        "Your engine just detonated. I'm going to read you the autopsy, line by line.\n"
+        "No sugar. No excuses. Just facts.\n\n", 328);
+
+    const char* sig_name = "something truly exotic";
+    switch (sig) {
+        case SIGSEGV: sig_name = "SIGSEGV — you dereferenced garbage"; break;
+        case SIGABRT: sig_name = "SIGABRT — assert() or abort()"; break;
+        case SIGFPE:  sig_name = "SIGFPE  — divide by zero"; break;
+        case SIGILL:  sig_name = "SIGILL  — corrupted binary"; break;
+        case SIGBUS:  sig_name = "SIGBUS  — alignment sin"; break;
+    }
+
+    safe_print("Signal      : %d → %s\n", sig, sig_name);
+    safe_print("Fault addr  : %p\n", info ? info->si_addr : nullptr);
+    safe_print("Build       : %s %s\n\n", __DATE__, __TIME__);
+
+    if (g_gpu_crash.happened.load(std::memory_order_acquire)) {
+        safe_write("GPU CRASH CONFIRMED — driver handed me a smoking crater\n"
+                   "──────────────────────────────────────────────────────\n", 96);
+        safe_print("Diagnosis   : %s\n\n", g_gpu_crash.desc);
+
+        safe_write("I've seen this 400+ times. You did one of these:\n"
+                   "  • SBT built with destroyed/null VkBuffer\n"
+                   "  • Used VkImageView after vkDestroy*\n"
+                   "  • No barrier on storage buffer used in RT\n"
+                   "  • Host wrote to buffer without flush/invalidate\n"
+                   "Look at the last vkCmdTraceRaysKHR. Bug is within 20 lines.\n\n", 312);
+    } else {
+        safe_write("No GPU fault recorded — but you still died.\n"
+                   "Driver too old or extension disabled. Doesn't matter.\n"
+                   "You still broke something.\n\n", 128);
+    }
+
+    safe_write("BACKTRACE — reading it to you like a disappointed grandpa:\n"
+               "─────────────────────────────────────────────────────────\n", 112);
+
+    void* array[128];
+    int size = backtrace(array, 128);
+    char** strings = backtrace_symbols(array, size);
+
+    if (strings) {
+        for (int i = 1; i < size; ++i) {
+            safe_print("  [%02d] %s\n", i - 1, strings[i]);
+        }
+        free(strings);
+    } else {
+        safe_write("  (backtrace_symbols failed — your libc is ancient)\n", 54);
+    }
+
+    safe_write(
+        "\n"
+        "CARMACK'S REQUIRED READING — open these RIGHT NOW:\n"
+        "──────────────────────────────────────────────────\n"
+        "1. My old .plan files: https://fabiensanglard.net/fd_proxy/doom3/pdfs/\n"
+        "2. Vulkan sync guide: https://www.khronos.org/registry/vulkan/specs/1.3/html/vkspec.html#synchronization\n"
+        "3. NVIDIA RTX crash bible: https://developer.nvidia.com/blog/advanced-api-performance-ray-tracing/\n"
+        "4. Reddit salvation thread: https://www.reddit.com/r/vulkan/comments/11g0x2k/\n"
+        "5. GDC 2019 Quake RTX talk (42:13): https://youtu.be/8Z910KrtK2g?t=2533\n\n"
+
+        "Still stuck? Post backtrace on Vulkan Discord with \"Carmack sent me\"\n"
+        "Someone will fix it in 10 minutes.\n\n"
+
+        "Final words from the old man:\n"
+        "  • Every crash is a lesson.\n"
+        "  • Every lesson ignored comes back harder.\n"
+        "  • Pink photons don't render themselves.\n"
+        "Fix it. Ship it. Touch grass.\n\n"
+        "— John Carmack (grandpa mode: maximum)\n"
+        "════════════════════════════════════════════════════════════════════════════════\n", 1400);
+
+    _exit(128 + sig);
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// INSTALL ONCE AT STARTUP
+// ──────────────────────────────────────────────────────────────────────────────
+inline void install_apocalypse_handler() noexcept
+{
+    struct sigaction sa{};
+    sa.sa_sigaction = apocalypse_handler;
+    sa.sa_flags = SA_SIGINFO | SA_RESETHAND;
+    sigemptyset(&sa.sa_mask);
+
+    sigaction(SIGSEGV, &sa, nullptr);
+    sigaction(SIGABRT, &sa, nullptr);
+    sigaction(SIGFPE,  &sa, nullptr);
+    sigaction(SIGILL,  &sa, nullptr);
+    sigaction(SIGBUS,  &sa, nullptr);
+}
+
+// ==============================================================================
+// ULTIMATE APOCALYPSE CRASH HANDLER – Vulkan 1.4 CORE ONLY (2025 FINAL)
 
 // =============================================================================
 // CREW SOUL COLORS — FINAL OVERRIDE — ETERNAL — NOVEMBER 25, 2025

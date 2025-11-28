@@ -1049,6 +1049,7 @@ static void phase7_forgeTheRTX() {
 // MAIN — THE FINAL VOYAGE BEGINS
 // =============================================================================
 int main(int, char**) {
+	 install_apocalypse_handler(); // catch segfaults
     // ========================================================================
     // THE EMPIRE DOES NOT TOLERATE OBSERVERS — ANTI-DEBUG + ANTI-VM — FINAL
     // ========================================================================

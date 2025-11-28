@@ -1,16 +1,6 @@
 // =============================================================================
+// Extensions.hpp — PURE, UNIVERSAL, ETERNAL — NO DEPENDENCIES ON YOUR CODEBASE
 // AMOURANTH RTX Engine (C) 2025 by Zachary Geurts <gzac5314@gmail.com>
-// =============================================================================
-//
-// Dual Licensed:
-// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
-//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
-// 2. Commercial licensing: gzac5314@gmail.com
-//
-// =============================================================================
-// AMOURANTH RTX — VALHALLA v80 TURBO — APOCALYPSE FINAL v10.3
-// FIRST LIGHT ACHIEVED — PINK PHOTONS ETERNAL — NOVEMBER 21, 2025
-// FULLY COMPILING — PURE EMPIRE - Inspired by Ellie Fier
 // =============================================================================
 
 #pragma once
@@ -19,12 +9,28 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
 #include <array>
+#include <vector>
+#include <cstring>
+#include <cstdio>
+#include <atomic>
 
-#include "logging.hpp"
-#include "RTXHandler.hpp"
+// Forward declare the global GPU crash state — defined in exactly ONE .cpp file
+namespace RTX {
+    struct GPUCrashInfo {
+        std::atomic<bool> happened{false};
+        VkDeviceAddress   addr{0};
+        VkDeviceFaultAddressTypeEXT type{VK_DEVICE_FAULT_ADDRESS_TYPE_NONE_EXT};
+        VkDeviceSize      precision{0};
+        char              desc[VK_MAX_DESCRIPTION_SIZE]{};
+    };
+    extern GPUCrashInfo g_gpu_crash;
+}
 
 namespace RTX {
 
+// ─────────────────────────────────────────────────────────────────────────────
+// EXTENSION FUNCTION POINTERS — THE EMPIRE'S ARSENAL
+// ─────────────────────────────────────────────────────────────────────────────
 struct Extensions {
     // Vulkan 1.3+
     PFN_vkCmdBeginRendering                     vkCmdBeginRendering                     = nullptr;
@@ -55,67 +61,58 @@ struct Extensions {
 
     // Debug Utils
     PFN_vkSetDebugUtilsObjectNameEXT            vkSetDebugUtilsObjectNameEXT            = nullptr;
+
+    // VK_EXT_device_fault — THE GPU WILL CONFESS ITS SINS
+    PFN_vkGetDeviceFaultInfoEXT                 vkGetDeviceFaultInfoEXT                 = nullptr;
 };
 
-// Global — initialized once
+// Global — forged once
 inline Extensions g_ext;
 
 // =============================================================================
-// THE ONE TRUE EXTENSION LOADER — CALL ONCE AFTER DEVICE CREATION
+// THE ONE TRUE EXTENSION LOADER — CALL ONCE AFTER VkDevice CREATION
 // =============================================================================
 inline void loadExtensions(VkInstance instance, VkDevice device)
 {
     if (!instance || !device) {
-        LOG_FATAL_CAT("RTX", "loadExtensions() called with null instance/device — THE EMPIRE WILL NOT TOLERATE THIS");
-        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
+        std::fprintf(stderr, "[FATAL RTX] loadExtensions(): null instance or device\n");
+        std::abort();
     }
 
-    LOG_ATTEMPT_CAT("RTX", "FORGING RTX EXTENSION LOADER — VULKAN 1.4 + SDL3 + FULL RAY TRACING");
-
-    // SDL3 gives us vkGetInstanceProcAddr directly
     auto vkGetInstanceProcAddr = (PFN_vkGetInstanceProcAddr)SDL_Vulkan_GetVkGetInstanceProcAddr();
     if (!vkGetInstanceProcAddr) {
-        LOG_FATAL_CAT("RTX", "SDL_Vulkan_GetVkGetInstanceProcAddr() failed — SDL3 not ready");
-        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
+        std::fprintf(stderr, "[FATAL RTX] SDL_Vulkan_GetVkGetInstanceProcAddr() failed\n");
+        std::abort();
     }
 
-    [[maybe_unused]] auto getProc = [&](const char* name) -> void* {
-        return reinterpret_cast<void*>(vkGetInstanceProcAddr(instance, name));
-    };
+    // Load everything
+    g_ext.vkCmdBeginRendering    = (PFN_vkCmdBeginRendering)vkGetInstanceProcAddr(instance, "vkCmdBeginRendering");
+    g_ext.vkCmdEndRendering      = (PFN_vkCmdEndRendering)vkGetInstanceProcAddr(instance, "vkCmdEndRendering");
+    g_ext.vkGetDescriptorEXT     = (PFN_vkGetDescriptorEXT)vkGetInstanceProcAddr(instance, "vkGetDescriptorEXT");
 
+    g_ext.vkCmdPipelineBarrier2  = (PFN_vkCmdPipelineBarrier2)vkGetInstanceProcAddr(instance, "vkCmdPipelineBarrier2");
+    g_ext.vkCmdWriteTimestamp2   = (PFN_vkCmdWriteTimestamp2)vkGetInstanceProcAddr(instance, "vkCmdWriteTimestamp2");
+    g_ext.vkQueueSubmit2         = (PFN_vkQueueSubmit2)vkGetInstanceProcAddr(instance, "vkQueueSubmit2");
 
-    // Vulkan 1.3+
-    g_ext.vkCmdBeginRendering    = (PFN_vkCmdBeginRendering)    reinterpret_cast<void*>(vkGetInstanceProcAddr(instance, "vkCmdBeginRendering"));
-    g_ext.vkCmdEndRendering      = (PFN_vkCmdEndRendering)      reinterpret_cast<void*>(vkGetInstanceProcAddr(instance, "vkCmdEndRendering"));
-    g_ext.vkGetDescriptorEXT     = (PFN_vkGetDescriptorEXT)     reinterpret_cast<void*>(vkGetInstanceProcAddr(instance, "vkGetDescriptorEXT"));
+    g_ext.vkCreateRayTracingPipelinesKHR        = (PFN_vkCreateRayTracingPipelinesKHR)vkGetInstanceProcAddr(instance, "vkCreateRayTracingPipelinesKHR");
+    g_ext.vkGetRayTracingShaderGroupHandlesKHR = (PFN_vkGetRayTracingShaderGroupHandlesKHR)vkGetInstanceProcAddr(instance, "vkGetRayTracingShaderGroupHandlesKHR");
+    g_ext.vkCmdTraceRaysKHR                     = (PFN_vkCmdTraceRaysKHR)vkGetInstanceProcAddr(instance, "vkCmdTraceRaysKHR");
 
-    // Vulkan 1.4
-    g_ext.vkCmdPipelineBarrier2  = (PFN_vkCmdPipelineBarrier2)  reinterpret_cast<void*>(vkGetInstanceProcAddr(instance, "vkCmdPipelineBarrier2"));
-    g_ext.vkCmdWriteTimestamp2   = (PFN_vkCmdWriteTimestamp2)   reinterpret_cast<void*>(vkGetInstanceProcAddr(instance, "vkCmdWriteTimestamp2"));
-    g_ext.vkQueueSubmit2         = (PFN_vkQueueSubmit2)         reinterpret_cast<void*>(vkGetInstanceProcAddr(instance, "vkQueueSubmit2"));
+    g_ext.vkGetAccelerationStructureBuildSizesKHR    = (PFN_vkGetAccelerationStructureBuildSizesKHR)vkGetInstanceProcAddr(instance, "vkGetAccelerationStructureBuildSizesKHR");
+    g_ext.vkCmdBuildAccelerationStructuresKHR        = (PFN_vkCmdBuildAccelerationStructuresKHR)vkGetInstanceProcAddr(instance, "vkCmdBuildAccelerationStructuresKHR");
+    g_ext.vkCreateAccelerationStructureKHR           = (PFN_vkCreateAccelerationStructureKHR)vkGetInstanceProcAddr(instance, "vkCreateAccelerationStructureKHR");
+    g_ext.vkDestroyAccelerationStructureKHR          = (PFN_vkDestroyAccelerationStructureKHR)vkGetInstanceProcAddr(instance, "vkDestroyAccelerationStructureKHR");
+    g_ext.vkGetAccelerationStructureDeviceAddressKHR = (PFN_vkGetAccelerationStructureDeviceAddressKHR)vkGetInstanceProcAddr(instance, "vkGetAccelerationStructureDeviceAddressKHR");
 
-    // Ray Tracing
-    g_ext.vkCreateRayTracingPipelinesKHR        = (PFN_vkCreateRayTracingPipelinesKHR)        reinterpret_cast<void*>(vkGetInstanceProcAddr(instance, "vkCreateRayTracingPipelinesKHR"));
-    g_ext.vkGetRayTracingShaderGroupHandlesKHR = (PFN_vkGetRayTracingShaderGroupHandlesKHR) reinterpret_cast<void*>(vkGetInstanceProcAddr(instance, "vkGetRayTracingShaderGroupHandlesKHR"));
-    g_ext.vkCmdTraceRaysKHR                     = (PFN_vkCmdTraceRaysKHR)                     reinterpret_cast<void*>(vkGetInstanceProcAddr(instance, "vkCmdTraceRaysKHR"));
+    g_ext.vkCmdSetEvent2   = (PFN_vkCmdSetEvent2)vkGetInstanceProcAddr(instance, "vkCmdSetEvent2");
+    g_ext.vkCmdResetEvent2 = (PFN_vkCmdResetEvent2)vkGetInstanceProcAddr(instance, "vkCmdResetEvent2");
+    g_ext.vkCmdWaitEvents2 = (PFN_vkCmdWaitEvents2)vkGetInstanceProcAddr(instance, "vkCmdWaitEvents2");
 
-    // Acceleration Structures
-    g_ext.vkGetAccelerationStructureBuildSizesKHR    = (PFN_vkGetAccelerationStructureBuildSizesKHR)    reinterpret_cast<void*>(vkGetInstanceProcAddr(instance, "vkGetAccelerationStructureBuildSizesKHR"));
-    g_ext.vkCmdBuildAccelerationStructuresKHR        = (PFN_vkCmdBuildAccelerationStructuresKHR)        reinterpret_cast<void*>(vkGetInstanceProcAddr(instance, "vkCmdBuildAccelerationStructuresKHR"));
-    g_ext.vkCreateAccelerationStructureKHR           = (PFN_vkCreateAccelerationStructureKHR)           reinterpret_cast<void*>(vkGetInstanceProcAddr(instance, "vkCreateAccelerationStructureKHR"));
-    g_ext.vkDestroyAccelerationStructureKHR          = (PFN_vkDestroyAccelerationStructureKHR)          reinterpret_cast<void*>(vkGetInstanceProcAddr(instance, "vkDestroyAccelerationStructureKHR"));
-    g_ext.vkGetAccelerationStructureDeviceAddressKHR = (PFN_vkGetAccelerationStructureDeviceAddressKHR) reinterpret_cast<void*>(vkGetInstanceProcAddr(instance, "vkGetAccelerationStructureDeviceAddressKHR"));
+    g_ext.vkSetDebugUtilsObjectNameEXT = (PFN_vkSetDebugUtilsObjectNameEXT)vkGetInstanceProcAddr(instance, "vkSetDebugUtilsObjectNameEXT");
+    g_ext.vkGetDeviceFaultInfoEXT      = (PFN_vkGetDeviceFaultInfoEXT)vkGetInstanceProcAddr(instance, "vkGetDeviceFaultInfoEXT");
 
-    // Sync2
-    g_ext.vkCmdSetEvent2   = (PFN_vkCmdSetEvent2)   reinterpret_cast<void*>(vkGetInstanceProcAddr(instance, "vkCmdSetEvent2"));
-    g_ext.vkCmdResetEvent2 = (PFN_vkCmdResetEvent2) reinterpret_cast<void*>(vkGetInstanceProcAddr(instance, "vkCmdResetEvent2"));
-    g_ext.vkCmdWaitEvents2 = (PFN_vkCmdWaitEvents2) reinterpret_cast<void*>(vkGetInstanceProcAddr(instance, "vkCmdWaitEvents2"));
-
-    // Debug
-    g_ext.vkSetDebugUtilsObjectNameEXT = (PFN_vkSetDebugUtilsObjectNameEXT)reinterpret_cast<void*>(vkGetInstanceProcAddr(instance, "vkSetDebugUtilsObjectNameEXT"));
-
-    // CRITICAL VALIDATION — THE EMPIRE DOES NOT FORGIVE
-    const std::array<void*, 8> critical = {
+    // Critical check
+    const std::array<void*, 9> critical = {
         reinterpret_cast<void*>(g_ext.vkCmdTraceRaysKHR),
         reinterpret_cast<void*>(g_ext.vkCreateRayTracingPipelinesKHR),
         reinterpret_cast<void*>(g_ext.vkGetRayTracingShaderGroupHandlesKHR),
@@ -123,20 +120,18 @@ inline void loadExtensions(VkInstance instance, VkDevice device)
         reinterpret_cast<void*>(g_ext.vkCreateAccelerationStructureKHR),
         reinterpret_cast<void*>(g_ext.vkGetAccelerationStructureDeviceAddressKHR),
         reinterpret_cast<void*>(g_ext.vkCmdPipelineBarrier2),
-        reinterpret_cast<void*>(g_ext.vkQueueSubmit2)
+        reinterpret_cast<void*>(g_ext.vkQueueSubmit2),
+        reinterpret_cast<void*>(g_ext.vkGetDeviceFaultInfoEXT)
     };
 
-    for (auto ptr : critical) {
+    for (auto* ptr : critical) {
         if (!ptr) {
-            LOG_FATAL_CAT("RTX", "CRITICAL RTX EXTENSION MISSING — YOUR DRIVER IS NOT WORTHY");
-            LOG_FATAL_CAT("RTX", "UPDATE TO: NVIDIA 560+ | AMD Latest | Intel: impossible");
-            phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
+            std::fprintf(stderr, "[FATAL RTX] Missing critical extension — driver unworthy (NVIDIA 560+ required)\n");
+            std::abort();
         }
     }
 
-    LOG_SUCCESS_CAT("RTX", "ALL RTX EXTENSIONS LOADED — VULKAN 1.4 + SDL3 + FULL RAY TRACING ACTIVE");
-    LOG_JENSEN("Jensen Huang exhales smoke shaped like a bouncing photon:");
-    LOG_JENSEN("\"The light is ours. The future is pink.\"");
+    std::fprintf(stderr, "[RTX] All extensions loaded successfully — RTX + VK_EXT_device_fault ACTIVE\n");
 }
 
 // Public accessor
@@ -149,5 +144,60 @@ inline const Extensions& ext() noexcept { return g_ext; }
 #define VK_BUILD_ACCELERATION_STRUCTURES(...)    g_ext.vkCmdBuildAccelerationStructuresKHR(__VA_ARGS__)
 #define VK_CREATE_ACCELERATION_STRUCTURE(...)   g_ext.vkCreateAccelerationStructureKHR(__VA_ARGS__)
 #define VK_GET_AS_DEVICE_ADDRESS(...)            g_ext.vkGetAccelerationStructureDeviceAddressKHR(__VA_ARGS__)
+
+// =============================================================================
+// GPU AUTOPSY — PURE, NO DEPENDENCIES, PRINTS DIRECTLY TO STDERR
+// =============================================================================
+inline void record_gpu_fault(VkDevice device) noexcept
+{
+    if (!device || !g_ext.vkGetDeviceFaultInfoEXT) return;
+
+    VkDeviceFaultCountsEXT counts{};
+    counts.sType = VK_STRUCTURE_TYPE_DEVICE_FAULT_COUNTS_EXT;
+
+    if (g_ext.vkGetDeviceFaultInfoEXT(device, &counts, nullptr) != VK_SUCCESS)
+        return;
+
+    if (counts.addressInfoCount == 0 && counts.vendorInfoCount == 0 && counts.vendorBinarySize == 0)
+        return;
+
+    std::vector<VkDeviceFaultAddressInfoEXT> addrInfos(counts.addressInfoCount);
+    std::vector<VkDeviceFaultVendorInfoEXT>  vendorInfos(counts.vendorInfoCount);
+    std::vector<uint8_t>                     vendorBinary(counts.vendorBinarySize);
+
+    VkDeviceFaultInfoEXT info{};
+    info.sType             = VK_STRUCTURE_TYPE_DEVICE_FAULT_INFO_EXT;
+    info.pAddressInfos     = addrInfos.data();
+    info.pVendorInfos      = vendorInfos.data();
+    info.pVendorBinaryData = vendorBinary.data();
+
+    if (g_ext.vkGetDeviceFaultInfoEXT(device, &counts, &info) != VK_SUCCESS)
+        return;
+
+    if (counts.addressInfoCount > 0 && info.pAddressInfos) {
+        const auto& a = info.pAddressInfos[0];
+        g_gpu_crash.addr      = a.reportedAddress;
+        g_gpu_crash.type      = a.addressType;
+        g_gpu_crash.precision = a.addressPrecision;
+    }
+
+    if (info.description[0] != '\0') {
+        std::strncpy(g_gpu_crash.desc, info.description, sizeof(g_gpu_crash.desc) - 1);
+        g_gpu_crash.desc[sizeof(g_gpu_crash.desc) - 1] = '\0';
+    }
+
+    g_gpu_crash.happened.store(true, std::memory_order_release);
+
+    std::fprintf(stderr, "\n");
+    std::fprintf(stderr, "==================================================\n");
+    std::fprintf(stderr, "           GPU PAGE FAULT — AUTOPSY COMPLETE       \n");
+    std::fprintf(stderr, "==================================================\n");
+    std::fprintf(stderr, "  Address     : 0x%llX\n", (unsigned long long)g_gpu_crash.addr);
+    std::fprintf(stderr, "  Type        : %d\n", (int)g_gpu_crash.type);
+    std::fprintf(stderr, "  Precision   : %llu bytes\n", (unsigned long long)g_gpu_crash.precision);
+    std::fprintf(stderr, "  Message     : %s\n", g_gpu_crash.desc[0] ? g_gpu_crash.desc : "(no message)");
+    std::fprintf(stderr, "==================================================\n");
+    std::fflush(stderr);
+}
 
 } // namespace RTX

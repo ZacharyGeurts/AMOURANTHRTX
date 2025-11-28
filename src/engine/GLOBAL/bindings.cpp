@@ -1,5 +1,6 @@
 // src/engine/GLOBAL/bindings.cpp
-// FIRST LIGHT ACHIEVED — C++23 — NO ASSERT — PURE EMPIRE
+// AMOURANTH RTX Engine © 2025 — FIRST LIGHT ACHIEVED — VULKAN 1.4 — C++23 — NO ASSERT — PURE EMPIRE
+// License: Proprietary - All rights reserved. Unauthorized copying, modification, or distribution is prohibited.
 
 #include "engine/GLOBAL/bindings.hpp"
 #include "engine/GLOBAL/RTXHandler.hpp"
@@ -13,7 +14,7 @@ namespace RTX::Bindings {
 // ──────────────────────────────────────────────────────────────────────────────
 // YOUR NAMED BINDINGS — PRESERVED FOR GLORY
 // ──────────────────────────────────────────────────────────────────────────────
-const std::array<Binding, 10> RT_PIPELINE_BINDINGS = {{
+const std::array<Binding, 11> RT_PIPELINE_BINDINGS = {{
     {0, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1, VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR, "TLAS"},
     {1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,              1, VK_SHADER_STAGE_RAYGEN_BIT_KHR,                                           "RT_Output"},
     {2, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,              1, VK_SHADER_STAGE_RAYGEN_BIT_KHR,                                           "Accumulation"},
@@ -24,17 +25,20 @@ const std::array<Binding, 10> RT_PIPELINE_BINDINGS = {{
     {7, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,             1, VK_SHADER_STAGE_RAYGEN_BIT_KHR,                                           "Dimensions"},
     {8, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,     1, VK_SHADER_STAGE_RAYGEN_BIT_KHR,                                           "BlueNoise"},
     {9, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,     1, VK_SHADER_STAGE_RAYGEN_BIT_KHR,                                           "DensityVolume"},
+    {31, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,            1, VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR, "StoneKeyRuntimeBlock"},
 }};
 
-const std::array<Binding, 3> TONEMAP_PIPELINE_BINDINGS = {{
+const std::array<Binding, 4> TONEMAP_PIPELINE_BINDINGS = {{
     {0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_COMPUTE_BIT, "InputHDR"},
     {1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,          1, VK_SHADER_STAGE_COMPUTE_BIT, "OutputLDR"},
     {2, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,         1, VK_SHADER_STAGE_COMPUTE_BIT, "TonemapParams"},
+    {31, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,        1, VK_SHADER_STAGE_COMPUTE_BIT, "StoneKeyRuntimeBlock"},
 }};
 
-const std::array<Binding, 2> DENOISER_PIPELINE_BINDINGS = {{
+const std::array<Binding, 3> DENOISER_PIPELINE_BINDINGS = {{
     {0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, "NoisyInput"},
     {1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, "CleanOutput"},
+    {31, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT, "StoneKeyRuntimeBlock"},
 }};
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -134,7 +138,7 @@ void initialize(VkDevice device)
     const VkDescriptorPoolSize poolSizes[] = {
         { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, frames },
         { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,         frames },
-        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,        frames }
+        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,        2 * frames }
     };
 
     const VkDescriptorPoolCreateInfo poolInfo{
@@ -157,7 +161,7 @@ void initialize(VkDevice device)
     };
     VK_CHECK(vkAllocateDescriptorSets(device, &allocInfo, g_tonemapSets.data()));
 
-    LOG_SUCCESS_CAT("BINDINGS", "C++23 — NO ASSERT — FIRST LIGHT ACHIEVED — PINK PHOTONS ETERNAL");
+    LOG_SUCCESS_CAT("BINDINGS", "VULKAN 1.4 — C++23 — NO ASSERT — FIRST LIGHT ACHIEVED — PINK PHOTONS ETERNAL");
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -165,23 +169,8 @@ void initialize(VkDevice device)
 // ──────────────────────────────────────────────────────────────────────────────
 void shutdown(VkDevice device)
 {
-    if (!device) device = stone_device();
-    if (!device) return;
-
-    if (g_tonemapPipeline)       vkDestroyPipeline(device, g_tonemapPipeline, nullptr);
-    if (g_tonemapPipelineLayout) vkDestroyPipelineLayout(device, g_tonemapPipelineLayout, nullptr);
-    if (g_tonemapPool)           vkDestroyDescriptorPool(device, g_tonemapPool, nullptr);
-
-    if (g_rtLayout)       vkDestroyDescriptorSetLayout(device, g_rtLayout, nullptr);
-    if (g_tonemapLayout)  vkDestroyDescriptorSetLayout(device, g_tonemapLayout, nullptr);
-    if (g_denoiserLayout) vkDestroyDescriptorSetLayout(device, g_denoiserLayout, nullptr);
-
-    // FIXED: Separate assignments — no more layout → pipeline crime
-    g_tonemapPipeline       = VK_NULL_HANDLE;
-    g_tonemapPipelineLayout = VK_NULL_HANDLE;
-    g_rtLayout = g_tonemapLayout = g_denoiserLayout = VK_NULL_HANDLE;
-    g_tonemapPool = VK_NULL_HANDLE;
-    g_tonemapSets.clear();
+    // she greets you with a bow then drags shutdown to phase9 main.cpp
+    phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
 }
 
 } // namespace RTX::Bindings
