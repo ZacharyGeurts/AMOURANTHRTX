@@ -8,9 +8,20 @@
 
 #include "engine/GLOBAL/SwapchainManager.hpp"
 #include "engine/GLOBAL/logging.hpp"
+#include "engine/GLOBAL/StoneKey.hpp"
 #include "engine/GLOBAL/RTXHandler.hpp"
 
 using namespace Logging::Color;
+using StoneKey::stone_swapchain;
+using StoneKey::stone_width;
+using StoneKey::stone_height;
+using StoneKey::stone_image_count;
+
+using StoneKey::stone_seal_swapchain;
+using StoneKey::stone_seal_images;
+using StoneKey::stone_seal_views;
+using StoneKey::stone_seal_extent;
+using StoneKey::stone_seal_image_count;
 
 namespace RTX {
 
@@ -241,6 +252,7 @@ void SwapchainManager::createImageViews() noexcept
 
 // ────────────────────── THE ONE TRUE SWAPCHAIN CREATOR ──────────────────────
 // ────────────────────── THE ONE TRUE SWAPCHAIN CREATOR — FINAL LAW ──────────────────────
+// ────────────────────── THE ONE TRUE SWAPCHAIN CREATOR — FINAL LAW ──────────────────────
 void SwapchainManager::createSwapchain(SDL_Window* window, uint32_t w, uint32_t h, VkSwapchainKHR old) noexcept
 {
     auto& ctx = g_ctx();
@@ -250,7 +262,7 @@ void SwapchainManager::createSwapchain(SDL_Window* window, uint32_t w, uint32_t 
         LOG_WARN_CAT("SWAPCHAIN", 
             "\nSwapchain already exists ({}x{}, {} images). "
             "\nBilly Corgan says \"Destroy first if you wish to create another.\" "
-			"\n\"Do not call swapchain more than once, friend.\" "
+            "\n\"Do not call swapchain more than once, friend.\" "
             "\nRun two executables or something more stupid. - Zac",
             swapchainExtent_.width, swapchainExtent_.height, imageCount());
         return;
@@ -339,6 +351,7 @@ void SwapchainManager::createSwapchain(SDL_Window* window, uint32_t w, uint32_t 
 
     if (old) vkDestroySwapchainKHR(ctx.device_, old, nullptr);
 
+    // Store in our RAII handle
     swapchain_ = Handle<VkSwapchainKHR>(raw, ctx.device_);
     swapchainExtent_ = extent;
     swapchainFormat_ = chosenFormat.format;
@@ -346,14 +359,45 @@ void SwapchainManager::createSwapchain(SDL_Window* window, uint32_t w, uint32_t 
     currentPresentMode_ = presentMode;
     currentTransform_ = caps.currentTransform;
 
+    // ────────────────────── GET SWAPCHAIN IMAGES ──────────────────────
     uint32_t count = 0;
     VK_CHECK(vkGetSwapchainImagesKHR(ctx.device_, raw, &count, nullptr));
-    swapchainImages_.resize(count);
-    VK_CHECK(vkGetSwapchainImagesKHR(ctx.device_, raw, &count, swapchainImages_.data()));
+
+    std::vector<VkImage>     images(count);
+    std::vector<VkImageView> views(count);
+
+    VK_CHECK(vkGetSwapchainImagesKHR(ctx.device_, raw, &count, images.data()));
+
+    // Create image views immediately — this is the empire demands it
+    for (uint32_t i = 0; i < count; ++i) {
+        VkImageViewCreateInfo viewCI = {
+            .sType            = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+            .image            = images[i],
+            .viewType         = VK_IMAGE_VIEW_TYPE_2D,
+            .format           = swapchainFormat_,
+            .components       = { VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY,
+                                  VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY },
+            .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
+        };
+        VK_CHECK(vkCreateImageView(ctx.device_, &viewCI, nullptr, &views[i]));
+    }
+
+    // Store locally for SwapchainManager
+    swapchainImages_      = images;
+    swapchainImageViews_  = views;
 
     LOG_AMOURANTH("Swapchain created — {}x{} | {} images | HDR {}",
                   extent.width, extent.height, count,
                   supportsHDR() ? "IGNITED" : "dormant");
+
+    // ────────────────────── SEAL INTO STONEKEY — FINAL CANON ──────────────────────
+    stone_seal_swapchain(raw);
+    stone_seal_images(std::move(images));     // rvalue → move (fast)
+    stone_seal_views(std::move(views));       // rvalue → move (fast)
+    stone_seal_extent(extent);
+    stone_seal_image_count(count);
+
+    LOG_SUCCESS_CAT("StoneKey", "Swapchain sealed — images & views transferred to Empire. Pink photons flow.");
 }
 
 // Feature 4: Present with ID and Wait

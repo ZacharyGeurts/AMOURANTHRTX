@@ -95,8 +95,7 @@ set(SOURCE_DIRS
     assets/fonts assets/textures assets/models assets/materials assets/scenes
     assets/audio assets/scripts
     shaders/raytracing shaders/rasterization shaders/compute shaders/graphics
-    src/engine/SDL3 src/engine/Vulkan include/engine
-    src/modes include/modes
+    include/engine src/modes include/modes
 )
 foreach(D ${SOURCE_DIRS})
     file(MAKE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/${D}")
@@ -390,6 +389,16 @@ foreach(MAP ${ASSET_MAP})
         )
     endif()
 endforeach()
+
+set(STONEKEY_SRC "${SHADER_SOURCE_DIR}/StoneKey.glsl")
+set(STONEKEY_DST "${SHADER_BINARY_DIR}/StoneKey.glsl")
+
+add_custom_command(
+    OUTPUT ${STONEKEY_DST}
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${STONEKEY_SRC} ${STONEKEY_DST}
+    DEPENDS ${STONEKEY_SRC}
+    COMMENT "Deploying StoneKey.glsl (include-only)"
+)
 
 # =============================================================================
 # LEGENDARY BANNER — NOVEMBER 17 2025 — FINAL FIXED EDITION

@@ -22,6 +22,7 @@
 #include "engine/GLOBAL/RTXHandler.hpp"      // For g_ctx()
 #include "engine/GLOBAL/OptionsMenu.hpp"
 #include "engine/GLOBAL/logging.hpp"
+#include "engine/GLOBAL/bindings.hpp"
 #include "engine/GLOBAL/StoneKey.hpp"        // Full StoneKey include — .cpp only
 #include <fstream>
 #include <algorithm>
@@ -555,11 +556,11 @@ void PipelineManager::endSingleTimeCommands(VkCommandPool pool, VkQueue queue, V
     LOG_TRACE_CAT("PIPELINE", "vkQueueWaitIdle result: {}", static_cast<int>(r));
     if (r != VK_SUCCESS) {
         LOG_FATAL_CAT("PIPELINE", "vkQueueWaitIdle failed: {} — possible device lost", static_cast<int>(r));
-        if (RTX::g_ctx().device_ != VK_NULL_HANDLE) vkDeviceWaitIdle(RTX::g_ctx().device_);
+        if (stone_device() != VK_NULL_HANDLE) vkDeviceWaitIdle(stone_device());
     }
 
     // 4. Cleanup
-    vkFreeCommandBuffers(RTX::g_ctx().device_, pool, 1, &cmd);
+    vkFreeCommandBuffers(stone_device(), pool, 1, &cmd);
 
     LOG_TRACE_CAT("PIPELINE", "endSingleTimeCommands — COMPLETE (safe, no device lost)");
 }

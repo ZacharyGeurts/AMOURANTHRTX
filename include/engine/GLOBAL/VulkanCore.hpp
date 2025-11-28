@@ -16,7 +16,6 @@
 #include "engine/GLOBAL/OptionsMenu.hpp"
 #include "engine/GLOBAL/RTXHandler.hpp"
 #include "engine/GLOBAL/PipelineManager.hpp"
-#include "engine/GLOBAL/GlobalBindings.hpp"
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/GLOBAL/LAS.hpp"
 

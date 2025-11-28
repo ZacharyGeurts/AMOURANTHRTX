@@ -215,7 +215,8 @@ public:
     bool rayQueryEnabled_                = false;
     bool dynamicRenderingEnabled_        = false;
     bool synchronization2Enabled_        = false;
-    bool debugUtilsEnabled_              = false;  // ← THE MISSING TRUTH
+    bool debugUtilsEnabled_              = false;
+	bool pendingSharedStaging_          = false;
 
     // Device properties
     VkPhysicalDeviceProperties                        physicalDeviceProperties_{};

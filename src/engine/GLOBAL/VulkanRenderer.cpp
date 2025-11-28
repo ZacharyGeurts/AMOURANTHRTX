@@ -27,13 +27,13 @@
 #include "engine/GLOBAL/SDL3.hpp"
 #include "engine/GLOBAL/OptionsMenu.hpp"
 #include "engine/GLOBAL/camera.hpp"
+#include "engine/GLOBAL/bindings.hpp"
 #include "engine/GLOBAL/StoneKey.hpp"  // Full include — .cpp only
 #include "stb/stb_image.h"
 
 #include <glm/gtc/matrix_inverse.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
-#include <chrono>
 #include <vector>
 #include <cmath>
 #include <algorithm>
@@ -45,16 +45,16 @@
 #include <sstream>
 #include <thread>
 #include <print>
+#include <chrono>
 
 using namespace Logging::Color;
 
 using StoneKey::stone_swapchain;
-using StoneKey::stone_images;
-using StoneKey::stone_views;
 using StoneKey::stone_pass;
 using StoneKey::stone_width;
 using StoneKey::stone_height;
-using StoneKey::stone_swapchain_image_count;
+using StoneKey::stone_device;
+using StoneKey::stone_image_count;
 
 using namespace RTX;
 
@@ -431,29 +431,6 @@ LOG_SUCCESS_CAT("RENDERER", "Step 5 COMPLETE — {} full sync sets forged — TR
     initializeAllBufferData(MAX_FRAMES_IN_FLIGHT, 64_MB, 16_MB);
     LOG_TRACE_CAT("RENDERER", "Step 11 COMPLETE");
 
-// FIXED: Create shared staging buffer for UBO updates (missing before, caused skipped updates)
-VkDeviceSize stagingSize = 512;  // Enough for UBO + tonemap
-if (RTX::g_ctx().device_ == VK_NULL_HANDLE) {
-    LOG_WARN_CAT("RENDERER", "Shared staging skipped — invalid device (pre-Phase 7)");
-    g_ctx().sharedStagingEnc_ = 0;
-} else {
-    g_ctx().sharedStagingEnc_ = BufferManager::create(stagingSize, 
-        VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, 
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, 
-        "SharedStagingUBO");
-    if (g_ctx().sharedStagingEnc_ == 0) {
-        LOG_WARN_CAT("RENDERER", "Shared staging creation failed — UBO updates will be skipped");
-    } else {
-        LOG_TRACE_CAT("RENDERER", "Shared staging forged — enc=0x{:x}", g_ctx().sharedStagingEnc_);
-    }
-}
-    // =============================================================================
-    // STEP 12 — Command Buffers
-    // =============================================================================
-    LOG_TRACE_CAT("RENDERER", "=== STACK BUILD ORDER STEP 12: Allocate Command Buffers ===");
-    createCommandBuffers();
-    LOG_TRACE_CAT("RENDERER", "Step 12 COMPLETE");
-
     // =============================================================================
     // STEP 14 — Final Descriptor Updates (SAFE ORDER)
     // =============================================================================
@@ -471,140 +448,137 @@ if (RTX::g_ctx().device_ == VK_NULL_HANDLE) {
     // =============================================================================
     // STEP 14.5 — CREATE TONEMAP COMPUTE PIPELINE (FULLY VALIDATION-CLEAN)
     // =============================================================================
-    LOG_TRACE_CAT("RENDERER", "=== STEP 14.5: Creating Tonemap Compute Pipeline (tonemap.spv) ===");
+    LOG_TRACE_CAT("RENDERER", "DESCRIPTOR SET LAYOUT — MUST MATCH SHADER EXACTLY");
 
     // ──────────────────────────────
     // DESCRIPTOR SET LAYOUT — MUST MATCH SHADER EXACTLY (FIXED: Binding 0 COMBINED_IMAGE_SAMPLER for input)
     // ──────────────────────────────
-    VkDescriptorSetLayoutBinding bindings[3] = {};  // Zero-init
-    // Binding 0: hdrInput (combined image sampler for read)
-    bindings[0].binding = 0;
-    bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;  // FIXED: Sampler for input
-    bindings[0].descriptorCount = 1;
-    bindings[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-    // Binding 1: ldrOutput (storage image for write to swapchain — assume STORAGE_BIT in swapchain)
-    bindings[1].binding = 1;
-    bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-    bindings[1].descriptorCount = 1;
-    bindings[1].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-    // Binding 2: params (uniform buffer)
-    bindings[2].binding = 2;
-    bindings[2].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    bindings[2].descriptorCount = 1;
-    bindings[2].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
 
-    VkDescriptorSetLayoutCreateInfo layoutInfo = {};  // Zero-init
-    layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    layoutInfo.bindingCount = 3;
-    layoutInfo.pBindings = bindings;
+LOG_AMOURANTH("TONEMAP PIPELINE INITIALIZATION — HDR → LDR — PINK PHOTONS ASCENDANT");
 
-    VkDescriptorSetLayout tonemapSetLayout = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateDescriptorSetLayout(RTX::g_ctx().device_, &layoutInfo, nullptr, &tonemapSetLayout),
-             "Tonemap compute descriptor set layout");
+LOG_NICK("Creating descriptor set layout — binding 0: COMBINED_IMAGE_SAMPLER | binding 1: STORAGE_IMAGE | binding 2: scalar UBO");
 
-    tonemapDescriptorSetLayout_ = Handle<VkDescriptorSetLayout>(
-        tonemapSetLayout, RTX::g_ctx().device_,
-        [](VkDevice d, VkDescriptorSetLayout l, const VkAllocationCallbacks*) { vkDestroyDescriptorSetLayout(d, l, nullptr); },
-        0, "TonemapCompSetLayout"
-    );
+VkDescriptorSetLayoutBinding bindings[3] = {};
 
-    // ──────────────────────────────
-    // PUSH CONSTANTS (FIXED: COMPUTE stages)
-    // ──────────────────────────────
-    VkPushConstantRange pushConstants = {};  // Zero-init
-    pushConstants.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-    pushConstants.offset = 0;
-    pushConstants.size = 32;
+bindings[0] = { .binding = 0, .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .descriptorCount = 1, .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT };
+bindings[1] = { .binding = 1, .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,        .descriptorCount = 1, .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT };
+bindings[2] = { .binding = 2, .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,       .descriptorCount = 1, .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT };
 
-    VkPipelineLayoutCreateInfo pipelineLayoutInfo = {};  // Zero-init
-    pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    pipelineLayoutInfo.setLayoutCount = 1;
-    pipelineLayoutInfo.pSetLayouts = &tonemapSetLayout;
-    pipelineLayoutInfo.pushConstantRangeCount = 1;
-    pipelineLayoutInfo.pPushConstantRanges = &pushConstants;
+VkDescriptorSetLayoutCreateInfo layoutInfo{
+    .sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+    .bindingCount = 3,
+    .pBindings    = bindings
+};
 
-    VkPipelineLayout tonemapPipeLayout = VK_NULL_HANDLE;
-    VK_CHECK(vkCreatePipelineLayout(RTX::g_ctx().device_, &pipelineLayoutInfo, nullptr, &tonemapPipeLayout),
-             "Tonemap compute pipeline layout");
+VkDescriptorSetLayout tonemapSetLayout = VK_NULL_HANDLE;
+VK_CHECK(vkCreateDescriptorSetLayout(stone_device(), &layoutInfo, nullptr, &tonemapSetLayout));
 
-    tonemapLayout_ = Handle<VkPipelineLayout>(
-        tonemapPipeLayout, RTX::g_ctx().device_,
-        [](VkDevice d, VkPipelineLayout l, const VkAllocationCallbacks*) { vkDestroyPipelineLayout(d, l, nullptr); },
-        0, "TonemapCompLayout"
-    );
+tonemapDescriptorSetLayout_ = Handle<VkDescriptorSetLayout>(
+    tonemapSetLayout, stone_device(), vkDestroyDescriptorSetLayout, 0, "TonemapSetLayout"
+);
 
-    // ──────────────────────────────
-    // COMPUTE PIPELINE
-    // ──────────────────────────────
-    VkComputePipelineCreateInfo computeInfo = {};  // Zero-init
-    computeInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-    computeInfo.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    computeInfo.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-    computeInfo.stage.module = tonemapCompShader_;
-    computeInfo.stage.pName = "main";
-    computeInfo.layout = tonemapPipeLayout;
+LOG_BLONDIE("Descriptor set layout forged — validation clean — ballerina approved");
 
-    VkPipeline tonemapCompPipeline = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateComputePipelines(RTX::g_ctx().device_, VK_NULL_HANDLE, 1, &computeInfo, nullptr, &tonemapCompPipeline),
-             "Failed to create tonemap compute pipeline");
+// ──────────────────────────────
+// PUSH CONSTANTS — RESERVED FOR FUTURE ASCENSION
+// ──────────────────────────────
+LOG_GROK("Reserving 16-byte push constant block — future-proof for frame counter");
 
-    tonemapPipeline_ = RTX::Handle<VkPipeline>(
-        tonemapCompPipeline, RTX::g_ctx().device_,
-        [](VkDevice d, VkPipeline p, const VkAllocationCallbacks*) { vkDestroyPipeline(d, p, nullptr); },
-        0, "TonemapComputePipeline"
-    );
+VkPushConstantRange pushConstants{
+    .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+    .offset     = 0,
+    .size       = 16
+};
 
-    vkDestroyShaderModule(RTX::g_ctx().device_, tonemapCompShader_, nullptr);
+VkPipelineLayoutCreateInfo pipelineLayoutInfo{
+    .sType                  = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+    .setLayoutCount         = 1,
+    .pSetLayouts            = &tonemapSetLayout,
+    .pushConstantRangeCount = 1,
+    .pPushConstantRanges    = &pushConstants
+};
 
-    // ──────────────────────────────
-    // DESCRIPTOR POOL & SETS (FIXED: 2 storage_img? No: sampler + storage_img + ubo)
-    // ──────────────────────────────
-    VkDescriptorPoolSize poolSizes[3] = {};  // Zero-init, 3 types
-    poolSizes[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    poolSizes[0].descriptorCount = MAX_FRAMES_IN_FLIGHT * 1;  // Binding 0 x N
-    poolSizes[1].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-    poolSizes[1].descriptorCount = MAX_FRAMES_IN_FLIGHT * 1;  // Binding 1 x N (output to swapchain)
-    poolSizes[2].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    poolSizes[2].descriptorCount = MAX_FRAMES_IN_FLIGHT * 1;  // Binding 2 x N
+VkPipelineLayout tonemapPipeLayout = VK_NULL_HANDLE;
+VK_CHECK(vkCreatePipelineLayout(g_ctx().device(), &pipelineLayoutInfo, nullptr, &tonemapPipeLayout));
 
-    VkDescriptorPoolCreateInfo poolInfo = {};  // Zero-init
-    poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    poolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-    poolInfo.maxSets = MAX_FRAMES_IN_FLIGHT;
-    poolInfo.poolSizeCount = 3;
-    poolInfo.pPoolSizes = poolSizes;
+tonemapLayout_ = Handle<VkPipelineLayout>(
+    tonemapPipeLayout, stone_device(), vkDestroyPipelineLayout, 0, "TonemapPipeLayout"
+);
 
-    VkDescriptorPool rawPool = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateDescriptorPool(RTX::g_ctx().device_, &poolInfo, nullptr, &rawPool),
-             "Tonemap compute descriptor pool");
+LOG_CAPTAIN_N("Pipeline layout sealed — push constants armed");
 
-    tonemapDescriptorPool_ = RTX::Handle<VkDescriptorPool>(
-        rawPool, RTX::g_ctx().device_,
-        [](VkDevice d, VkDescriptorPool p, const VkAllocationCallbacks*) { vkDestroyDescriptorPool(d, p, nullptr); },
-        0, "TonemapCompPool"
-    );
+// ──────────────────────────────
+// COMPUTE PIPELINE — THE FINAL FORGE
+// ──────────────────────────────
+LOG_ELON("Forging compute pipeline — tonemap.comp → main()");
 
-    std::vector<VkDescriptorSetLayout> setLayouts(MAX_FRAMES_IN_FLIGHT, tonemapSetLayout);
-    tonemapSets_.resize(MAX_FRAMES_IN_FLIGHT);
+VkPipelineShaderStageCreateInfo stageInfo{
+    .sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+    .stage  = VK_SHADER_STAGE_COMPUTE_BIT,
+    .module = tonemapCompShader_,
+    .pName  = "main"
+};
 
-    VkDescriptorSetAllocateInfo allocInfo = {};  // Zero-init
-    allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    allocInfo.descriptorPool = rawPool;
-    allocInfo.descriptorSetCount = MAX_FRAMES_IN_FLIGHT;
-    allocInfo.pSetLayouts = setLayouts.data();
+VkComputePipelineCreateInfo computeInfo{
+    .sType  = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
+    .stage  = stageInfo,
+    .layout = tonemapPipeLayout
+};
 
-    VK_CHECK(vkAllocateDescriptorSets(RTX::g_ctx().device_, &allocInfo, tonemapSets_.data()),
-             "Allocate tonemap compute descriptor sets");
+VkPipeline tonemapPipeline = VK_NULL_HANDLE;
+VK_CHECK(vkCreateComputePipelines(stone_device(), VK_NULL_HANDLE, 1, &computeInfo, nullptr, &tonemapPipeline));
 
-    LOG_SUCCESS_CAT("RENDERER", "Tonemap compute pipeline created — VALIDATION CLEAN — PINK PHOTONS ASCENDANT");
+tonemapPipeline_ = Handle<VkPipeline>(
+    tonemapPipeline, stone_device(), vkDestroyPipeline, 0, "TonemapPipeline"
+);
 
-    // =============================================================================
-    // STEP 15 — FINAL: FIRST LIGHT ACHIEVED (TLAS STILL PENDING)
-    // =============================================================================
-    const bool fpsUnlocked = !Options::Display::ENABLE_VSYNC;
-    LOG_SUCCESS_CAT("RENDERER", 
-        "{}VULKAN RENDERER FULLY INITIALIZED — {}x{} — TRIPLE BUFFERING — HDR — TONEMAP READY — PRESENT MODE: {} — FPS {} — AWAITING TLAS FOR FIRST RAYS — PINK PHOTONS ETERNAL{}", 
-        EMERALD_GREEN, width, height, std::string("VK_PRESENT_MODE_MAILBOX_KHR"), fpsUnlocked ? "UNLOCKED" : "LOCKED", RESET);
+LOG_JENSEN("COMPUTE PIPELINE FORGED — 16x16 WORKGROUPS — BRANCHLESS TONEMAPPERS — PINK PHOTONS AT FULL POWER");
+
+// ──────────────────────────────
+// DESCRIPTOR POOL & SETS — TRIPLE BUFFERED
+// ──────────────────────────────
+LOG_CID("Allocating descriptor pool — {} frames in flight — COMBINED_SAMPLER + STORAGE_IMAGE + UBO", MAX_FRAMES_IN_FLIGHT);
+
+VkDescriptorPoolSize poolSizes[3] = {
+    { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, MAX_FRAMES_IN_FLIGHT },
+    { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,         MAX_FRAMES_IN_FLIGHT },
+    { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,        MAX_FRAMES_IN_FLIGHT }
+};
+
+VkDescriptorPoolCreateInfo poolInfo{
+    .sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+    .flags         = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
+    .maxSets       = MAX_FRAMES_IN_FLIGHT,
+    .poolSizeCount = 3,
+    .pPoolSizes    = poolSizes
+};
+
+VkDescriptorPool pool = VK_NULL_HANDLE;
+VK_CHECK(vkCreateDescriptorPool(stone_device(), &poolInfo, nullptr, &pool));
+
+tonemapDescriptorPool_ = Handle<VkDescriptorPool>(
+    pool, stone_device(), vkDestroyDescriptorPool, 0, "TonemapPool"
+);
+
+std::vector<VkDescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, tonemapSetLayout);
+tonemapSets_.resize(MAX_FRAMES_IN_FLIGHT);
+
+VkDescriptorSetAllocateInfo allocInfo{
+    .sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+    .descriptorPool     = pool,
+    .descriptorSetCount = MAX_FRAMES_IN_FLIGHT,
+    .pSetLayouts        = layouts.data()
+};
+
+VK_CHECK(vkAllocateDescriptorSets(stone_device(), &allocInfo, tonemapSets_.data()));
+
+LOG_KEANU("WOAH — descriptor sets allocated — triple buffered — the matrix is ready");
+
+// =============================================================================
+// FIRST LIGHT ACHIEVED — TONEMAP ONLINE — HDR PIPELINE ACTIVE
+// =============================================================================
+LOG_AMOURANTH("TONEMAP PIPELINE FULLY ONLINE — HDR INPUT → LDR OUTPUT — BRANCHLESS — FASTEST POSSIBLE");
+LOG_AMOURANTH("VULKAN RENDERER ASCENDED — {}x{} — PINK PHOTONS ETERNAL — THE BALLERINA DANCES", width_, height_);
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -1169,7 +1143,6 @@ void VulkanRenderer::createNexusScoreImage(VkCommandPool pool, VkQueue queue) no
 }
 
 void VulkanRenderer::recordRayTracingCommandBuffer(VkCommandBuffer cmd) noexcept {
-    // REMOVED: Temporal Accumulation Reset — moved to renderFrame outside RP (VUID-vkCmdClearColorImage-renderpass)
 
     // ── Bind RT Pipeline
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, *pipelineManager_.rtPipeline_);
@@ -1225,167 +1198,162 @@ void VulkanRenderer::recordRayTracingCommandBuffer(VkCommandBuffer cmd) noexcept
 // ──────────────────────────────────────────────────────────────────────────────
 void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
 {
-    if (minimized_) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    if (minimized_) [[unlikely]] {
+        SDL_Delay(100);
         return;
     }
 
-    const uint32_t frameIdx = currentFrame_ % Options::Performance::MAX_FRAMES_IN_FLIGHT;
-    const auto& ctx = g_ctx();
+    const uint32_t f = currentFrame_++ % MAX_FRAMES_IN_FLIGHT;
 
-    vkWaitForFences(RTX::g_ctx().device_, 1, &inFlightFences_[frameIdx], VK_TRUE, UINT64_MAX);
-    vkResetFences(RTX::g_ctx().device_, 1, &inFlightFences_[frameIdx]);
+    // FENCE — WE OWN THE GPU
+    vkWaitForFences(stone_device(), 1, &inFlightFences_[f], VK_TRUE, UINT64_MAX);
+    vkResetFences(stone_device(), 1, &inFlightFences_[f]);
 
+    // ACQUIRE — WE OWN THE SWAPCHAIN
     uint32_t imageIndex = 0;
-    VkResult acquireResult = vkAcquireNextImageKHR(
-        RTX::g_ctx().device_,
-        RTX::SwapchainManager::swapchain(),
-        1'000'000'000ULL,  // 1 second timeout
-        imageAvailableSemaphores_[frameIdx],
+    vkAcquireNextImageKHR(
+        stone_device(),
+        stone_swapchain(),
+        UINT64_MAX,
+        imageAvailableSemaphores_[f],
         VK_NULL_HANDLE,
         &imageIndex
     );
 
-    // Handle out-of-date swapchain gracefully
-    if (acquireResult == VK_ERROR_OUT_OF_DATE_KHR ||
-        acquireResult == VK_SUBOPTIMAL_KHR ||
-        acquireResult == VK_ERROR_SURFACE_LOST_KHR)
-    {
-        LOG_WARN_CAT("RENDER", "Swapchain out-of-date/surface lost on acquire — recreating (frame {})", frameNumber_);
-        RTX::SwapchainManager::recreate(width_, height_);
-        currentFrame_ = (currentFrame_ + 1) % Options::Performance::MAX_FRAMES_IN_FLIGHT;
-        return;
-    }
-
-    if (acquireResult != VK_SUCCESS) {
-        LOG_ERROR_CAT("RENDER", "vkAcquireNextImageKHR failed: {} — skipping frame", (int)acquireResult);
-        currentFrame_ = (currentFrame_ + 1) % Options::Performance::MAX_FRAMES_IN_FLIGHT;
-        return;
-    }
-
-    VkCommandBuffer cmd = commandBuffers_[frameIdx];
+    VkCommandBuffer cmd = commandBuffers_[f];
     vkResetCommandBuffer(cmd, 0);
 
-    VkCommandBufferBeginInfo beginInfo = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
-    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    const VkCommandBufferBeginInfo beginInfo{
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .pNext = nullptr,
+        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+        .pInheritanceInfo = nullptr
+    };
     vkBeginCommandBuffer(cmd, &beginInfo);
 
-    // Swapchain image: UNDEFINED/PRESENT → GENERAL
-    {
-        VkImageMemoryBarrier barrier = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
-        barrier.oldLayout = firstSwapchainAcquire_ ? VK_IMAGE_LAYOUT_UNDEFINED : VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-        barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
-        barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        barrier.image = stone_images()[imageIndex];
-        barrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-        barrier.srcAccessMask = 0;
-        barrier.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    // SWAPCHAIN → GENERAL
+    const VkImageMemoryBarrier acquireBarrier{
+        .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .pNext               = nullptr,
+        .srcAccessMask       = 0,
+        .dstAccessMask       = VK_ACCESS_SHADER_WRITE_BIT,
+        .oldLayout           = firstSwapchainAcquire_ ? VK_IMAGE_LAYOUT_UNDEFINED : VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+        .newLayout           = VK_IMAGE_LAYOUT_GENERAL,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .image               = StoneKey::stone_images()[imageIndex],
+        .subresourceRange    = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
+    };
+    vkCmdPipelineBarrier(cmd,
+        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
+        0, 0, nullptr, 0, nullptr, 1, &acquireBarrier);
 
-        vkCmdPipelineBarrier(cmd,
-            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
-            0, 0, nullptr, 0, nullptr, 1, &barrier);
-    }
     firstSwapchainAcquire_ = false;
 
-    // Clear accumulation buffers when required
-    if (resetAccumulation_) {
-        VkClearColorValue clear{{0,0,0,0}};
-        VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-        auto clearImg = [&](VkImage img) {
-            if (img) vkCmdClearColorImage(cmd, img, VK_IMAGE_LAYOUT_GENERAL, &clear, 1, &range);
+    // ACCUMULATION CLEAR — ONLY IF WE ORDERED IT
+    if (resetAccumulation_) [[unlikely]] {
+        const VkClearColorValue clear{0.0f, 0.0f, 0.0f, 0.0f};
+        const VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+
+        const auto clearImg = [&](VkImage img) {
+            vkCmdClearColorImage(cmd, img, VK_IMAGE_LAYOUT_GENERAL, &clear, 1, &range);
         };
 
-        for (auto& h : rtOutputImages_) clearImg(*h);
-        if (Options::OptionsRTX::ENABLE_ACCUMULATION) for (auto& h : accumImages_) clearImg(*h);
-        if (Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING && hypertraceScoreImage_.valid()) clearImg(*hypertraceScoreImage_);
+        for (const auto& h : rtOutputImages_) clearImg(*h);
+        if (Options::OptionsRTX::ENABLE_ACCUMULATION)
+            for (const auto& h : accumImages_) clearImg(*h);
+        if (Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING && hypertraceScoreImage_.valid())
+            clearImg(*hypertraceScoreImage_);
 
         resetAccumulation_ = false;
     }
 
-    updateUniformBuffer(frameIdx, camera, getJitter());
-    updateTonemapUniform(frameIdx);
+    updateUniformBuffer(f, camera, getJitter());
+    updateTonemapUniform(f);
 
-    pipelineManager_.updateRTDescriptorSet(frameIdx, {.tlas = LAS::get().getTLAS()});
-    if (Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING) updateNexusDescriptors();
+    pipelineManager_.updateRTDescriptorSet(f, {.tlas = LAS::get().getTLAS()});
+    if (Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING)
+        updateNexusDescriptors();
 
     recordRayTracingCommandBuffer(cmd);
 
-    // Transition RT output for tonemap sampling
-    {
-        VkImageMemoryBarrier b = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
-        b.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
-        b.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        b.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-        b.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-        b.image = *rtOutputImages_[frameIdx % rtOutputImages_.size()];
-        b.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-
-        vkCmdPipelineBarrier(cmd,
-            VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
-            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-            0, 0, nullptr, 0, nullptr, 1, &b);
-    }
+    // RT OUTPUT → SHADER READ ONLY
+    const VkImageMemoryBarrier rtReadBarrier{
+        .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .pNext               = nullptr,
+        .srcAccessMask       = VK_ACCESS_SHADER_WRITE_BIT,
+        .dstAccessMask       = VK_ACCESS_SHADER_READ_BIT,
+        .oldLayout           = VK_IMAGE_LAYOUT_GENERAL,
+        .newLayout           = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .image               = *rtOutputImages_[f],
+        .subresourceRange    = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
+    };
+    vkCmdPipelineBarrier(cmd,
+        VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
+        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+        0, 0, nullptr, 0, nullptr, 1, &rtReadBarrier);
 
     VkImageView tonemapInput = denoisingEnabled_ && denoiserView_.valid()
         ? *denoiserView_
-        : *rtOutputViews_[frameIdx % rtOutputViews_.size()];
+        : *rtOutputViews_[f];
 
-    updateTonemapDescriptor(frameIdx, tonemapInput, stone_views()[imageIndex]);
+    updateTonemapDescriptor(f, tonemapInput, StoneKey::stone_views()[imageIndex]);
 
     if (denoisingEnabled_) performDenoisingPass(cmd);
-    performTonemapPass(cmd, frameIdx, imageIndex);
+    performTonemapPass(cmd, f, imageIndex);
 
-    // Swapchain image → PRESENT
-    {
-        VkImageMemoryBarrier b = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
-        b.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
-        b.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-        b.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-        b.dstAccessMask = 0;
-        b.image = stone_images()[imageIndex];
-        b.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-
-        vkCmdPipelineBarrier(cmd,
-            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-            VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
-            0, 0, nullptr, 0, nullptr, 1, &b);
-    }
+    // SWAPCHAIN → PRESENT
+    const VkImageMemoryBarrier presentBarrier{
+        .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .pNext               = nullptr,
+        .srcAccessMask       = VK_ACCESS_SHADER_WRITE_BIT,
+        .dstAccessMask       = 0,
+        .oldLayout           = VK_IMAGE_LAYOUT_GENERAL,
+        .newLayout           = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .image               = StoneKey::stone_images()[imageIndex],
+        .subresourceRange    = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
+    };
+    vkCmdPipelineBarrier(cmd,
+        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+        VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+        0, 0, nullptr, 0, nullptr, 1, &presentBarrier);
 
     vkEndCommandBuffer(cmd);
 
-    VkSubmitInfo submit = { VK_STRUCTURE_TYPE_SUBMIT_INFO };
-    VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    submit.waitSemaphoreCount = 1;
-    submit.pWaitSemaphores = &imageAvailableSemaphores_[frameIdx];
-    submit.pWaitDstStageMask = &waitStage;
-    submit.commandBufferCount = 1;
-    submit.pCommandBuffers = &cmd;
-    submit.signalSemaphoreCount = 1;
-    submit.pSignalSemaphores = &renderFinishedSemaphores_[frameIdx];
+    // SUBMIT
+    const VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    const VkSubmitInfo submitInfo{
+        .sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .pNext                = nullptr,
+        .waitSemaphoreCount   = 1,
+        .pWaitSemaphores      = &imageAvailableSemaphores_[f],
+        .pWaitDstStageMask    = &waitStage,
+        .commandBufferCount   = 1,
+        .pCommandBuffers          = &cmd,
+        .signalSemaphoreCount = 1,
+        .pSignalSemaphores    = &renderFinishedSemaphores_[f]
+    };
+    vkQueueSubmit(g_ctx().graphicsQueue(), 1, &submitInfo, inFlightFences_[f]);
 
-    VK_CHECK(vkQueueSubmit(ctx.graphicsQueue(), 1, &submit, inFlightFences_[frameIdx]), "Queue submit");
+    // PRESENT
+    const VkSwapchainKHR swapchain = stone_swapchain();
+    const VkPresentInfoKHR presentInfo{
+        .sType              = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+        .pNext              = nullptr,
+        .waitSemaphoreCount = 1,
+        .pWaitSemaphores    = &renderFinishedSemaphores_[f],
+        .swapchainCount     = 1,
+        .pSwapchains        = &swapchain,
+        .pImageIndices      = &imageIndex,
+        .pResults           = nullptr
+    };
+    vkQueuePresentKHR(g_ctx().presentQueue(), &presentInfo);
 
-    VkPresentInfoKHR present = { VK_STRUCTURE_TYPE_PRESENT_INFO_KHR };
-    present.waitSemaphoreCount = 1;
-    present.pWaitSemaphores = &renderFinishedSemaphores_[frameIdx];
-    present.swapchainCount = 1;
-    VkSwapchainKHR swapchain = RTX::SwapchainManager::swapchain();
-    present.pSwapchains = &swapchain;
-    present.pImageIndices = &imageIndex;
-
-    VkResult presentResult = vkQueuePresentKHR(ctx.presentQueue(), &present);
-
-    if (presentResult == VK_ERROR_OUT_OF_DATE_KHR || presentResult == VK_SUBOPTIMAL_KHR) {
-        RTX::SwapchainManager::recreate(width_, height_);
-    } else if (presentResult != VK_SUCCESS) {
-        LOG_ERROR_CAT("RENDER", "vkQueuePresentKHR failed: {}", (int)presentResult);
-    }
-
-    // ImGui fully purged — no more overlay, no more debug console, no more bloat
-
-    currentFrame_ = (currentFrame_ + 1) % Options::Performance::MAX_FRAMES_IN_FLIGHT;
     frameNumber_++;
 }
 
@@ -1861,34 +1829,39 @@ void VulkanRenderer::setRenderMode(int mode) noexcept {
     LOG_TRACE_CAT("RENDERER", "setRenderMode — COMPLETE");
 }
 
-void VulkanRenderer::createFramebuffers() noexcept {
-    // FIXED: Idle post-framebuffer recreate to flush stale maps (prevents fragmented staging post-resize)
-    vkDeviceWaitIdle(RTX::g_ctx().device_);
-    framebuffers_.resize(([](){ uint32_t cnt; vkGetSwapchainImagesKHR(RTX::g_ctx().device_, RTX::SwapchainManager::swapchain(), &cnt, nullptr); return cnt; }()));
+void VulkanRenderer::createFramebuffers() noexcept
+{
+    vkDeviceWaitIdle(stone_device());
 
-    for (size_t i = 0; i < ([](){ uint32_t cnt; vkGetSwapchainImagesKHR(RTX::g_ctx().device_, RTX::SwapchainManager::swapchain(), &cnt, nullptr); return cnt; }()); ++i) {
-        VkImageView attachment = stone_views()[i];
+    // Get swapchain image count from StoneKey — CANON LAW
+    const uint32_t imageCount = StoneKey::stone_image_count();
+    framebuffers_.resize(imageCount);
 
-        VkFramebufferCreateInfo fbInfo = {};  // Zero-init
-        fbInfo.sType           = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-        fbInfo.renderPass = stone_pass();
-        fbInfo.attachmentCount = 1;
-        fbInfo.pAttachments    = &attachment;
-        fbInfo.width = currentExtent().width;
-        fbInfo.height = currentExtent().height;
-        fbInfo.layers          = 1;
+    // Cache views once — no repeated function calls
+    const auto& swapchainViews = StoneKey::stone_views();
 
-        VK_CHECK(vkCreateFramebuffer(RTX::g_ctx().device_, &fbInfo, nullptr, &framebuffers_[i]),
-                 "Failed to create framebuffer!");
+    for (uint32_t i = 0; i < imageCount; ++i) {
+        VkImageView attachment = swapchainViews[i];
+
+        VkFramebufferCreateInfo fbInfo = {
+            .sType           = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
+            .renderPass      = StoneKey::stone_pass(),
+            .attachmentCount = 1,
+            .pAttachments    = &attachment,
+            .width           = StoneKey::stone_width(),
+            .height          = StoneKey::stone_height(),
+            .layers          = 1
+        };
+
+        VK_CHECK(vkCreateFramebuffer(RTX::g_ctx().device_, &fbInfo, nullptr, &framebuffers_[i]), "Failed to create framebuffer!");
     }
 
     LOG_SUCCESS_CAT("RENDERER", "Framebuffers recreated — {} total", framebuffers_.size());
-    // FIXED: Idle post-framebuffer recreate to flush maps (prevents fragmented staging post-resize)
-    vkDeviceWaitIdle(RTX::g_ctx().device_);
+    vkDeviceWaitIdle(stone_device());
 }
 
 void VulkanRenderer::cleanupFramebuffers() noexcept {
-    VkDevice dev = RTX::g_ctx().device_;
+    VkDevice dev = stone_device();
     for (auto fb : framebuffers_) {
         if (fb && dev != VK_NULL_HANDLE) vkDestroyFramebuffer(dev, fb, nullptr);
     }
@@ -2050,7 +2023,7 @@ void VulkanRenderer::onWindowResize(uint32_t width, uint32_t height) noexcept
     createCommandBuffers();
 
     // Record fresh commands for every swapchain image
-    for (uint32_t i = 0; i < stone_swapchain_image_count(); ++i) {
+    for (uint32_t i = 0; i < StoneKey::stone_image_count(); ++i) {
         recordRayTracingCommandBuffer(commandBuffers_[i]);
     }
 
