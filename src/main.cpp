@@ -17,6 +17,7 @@
 #include "engine/GLOBAL/StoneKey.hpp"
 #include "engine/GLOBAL/camera.hpp"
 #include "engine/GLOBAL/logging.hpp"
+#include "engine/GLOBAL/bindings.hpp"
 #include "engine/GLOBAL/RTXHandler.hpp"
 #include "engine/GLOBAL/LAS.hpp"
 #include "engine/GLOBAL/Validation.hpp"
@@ -903,7 +904,8 @@ static void phase7_forgeTheRTX() {
 
     g_app().setRenderer(std::make_unique<VulkanRenderer>(w, h, SDL3Window::get()));
 
-    auto& pm = *pipeline();
+    RTX::Bindings::initialize(stone_device());
+	auto& pm = *pipeline();
 
     LOG_ATTEMPT_CAT("PHASE7", "FORGING PIPELINE LAYOUT — FROM SET LAYOUT — THE CROWN IS SET");
     pm.createPipelineLayout();

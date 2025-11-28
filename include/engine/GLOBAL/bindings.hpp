@@ -1,13 +1,13 @@
 // src/engine/GLOBAL/bindings.hpp
 // =============================================================================
-// AMOURANTH RTX — CENTRAL BINDING AUTHORITY — v∞ APOCALYPSE — 2025
-// ONE FILE TO RULE THEM ALL
+// AMOURANTH RTX Engine (C) 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
-
+// ... your full license and glory ...
 #pragma once
 #include <vulkan/vulkan.h>
 #include <array>
 #include <string_view>
+#include <vector>
 
 namespace RTX::Bindings {
 
@@ -16,34 +16,40 @@ struct Binding {
     VkDescriptorType     type;
     uint32_t             count;
     VkShaderStageFlags   stage;
-    std::string_view    name;
+    std::string_view     name;
 };
 
 // ──────────────────────────────────────────────────────────────────────────────
-// GLOBAL SETS — THE EMPIRE'S DESCRIPTOR SET INDEXES
+// GLOBAL SET INDICES
 // ──────────────────────────────────────────────────────────────────────────────
 inline constexpr uint32_t SET_RAY_TRACING  = 0;
-inline constexpr uint32_t SET_TONEMAP      = 1;
+inline constexpr uint32_t SET_TONEM    = 1;
 inline constexpr uint32_t SET_DENOISER     = 2;
-inline constexpr uint32_t SET_POSTPROCESS  = 3;
-inline constexpr uint32_t SET_UI           = 4;
 
 // ──────────────────────────────────────────────────────────────────────────────
-// COMPILE-TIME BINDING TABLES
+// COMPILE-TIME BINDING TABLES — WITH NAMES FOR DEBUG
 // ──────────────────────────────────────────────────────────────────────────────
 extern const std::array<Binding, 10> RT_PIPELINE_BINDINGS;
 extern const std::array<Binding, 3>  TONEMAP_PIPELINE_BINDINGS;
 extern const std::array<Binding, 2>  DENOISER_PIPELINE_BINDINGS;
 
 // ──────────────────────────────────────────────────────────────────────────────
-// CENTRAL LAYOUT CREATION — CALL ONCE AT STARTUP
+// GLOBAL HANDLES
 // ──────────────────────────────────────────────────────────────────────────────
-void initialize(VkDevice device);
-void shutdown(VkDevice device);
-
-// Global layouts — accessible everywhere
 extern VkDescriptorSetLayout g_rtLayout;
 extern VkDescriptorSetLayout g_tonemapLayout;
 extern VkDescriptorSetLayout g_denoiserLayout;
+
+extern VkPipelineLayout      g_tonemapPipelineLayout;
+extern VkPipeline            g_tonemapPipeline;
+
+extern std::vector<VkDescriptorSet> g_tonemapSets;
+extern VkDescriptorPool             g_tonemapPool;
+
+// ──────────────────────────────────────────────────────────────────────────────
+// CENTRAL AUTHORITY
+// ──────────────────────────────────────────────────────────────────────────────
+void initialize(VkDevice device = nullptr);
+void shutdown(VkDevice device = nullptr);
 
 } // namespace RTX::Bindings

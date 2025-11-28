@@ -1,24 +1,17 @@
 // src/engine/GLOBAL/bindings.cpp
-// =============================================================================
-// AMOURANTH RTX — BINDING CENTRAL COMMAND — v∞ APOCALYPSE — 2025
-// ALL DESCRIPTOR SET LAYOUTS ARE BORN HERE AND DIE HERE
-// =============================================================================
+// FIRST LIGHT ACHIEVED — C++23 — NO ASSERT — PURE EMPIRE
 
-#include "bindings.hpp"
-#include "core/Context.hpp"
-#include "utils/Logging.hpp"
+#include "engine/GLOBAL/bindings.hpp"
+#include "engine/GLOBAL/RTXHandler.hpp"
+#include "engine/GLOBAL/VulkanCore.hpp"
+#include "engine/GLOBAL/OptionsMenu.hpp"
+#include "engine/GLOBAL/logging.hpp"
+#include "engine/GLOBAL/StoneKey.hpp"
 
 namespace RTX::Bindings {
 
 // ──────────────────────────────────────────────────────────────────────────────
-// GLOBAL LAYOUT HANDLES
-// ──────────────────────────────────────────────────────────────────────────────
-VkDescriptorSetLayout g_rtLayout       = VK_NULL_HANDLE;
-VkDescriptorSetLayout g_tonemapLayout  = VK_NULL_HANDLE;
-VkDescriptorSetLayout g_denoiserLayout = VK_NULL_HANDLE;
-
-// ──────────────────────────────────────────────────────────────────────────────
-// RAY TRACING SET 0 — FINAL ORDER (matches your shader)
+// YOUR NAMED BINDINGS — PRESERVED FOR GLORY
 // ──────────────────────────────────────────────────────────────────────────────
 const std::array<Binding, 10> RT_PIPELINE_BINDINGS = {{
     {0, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1, VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR, "TLAS"},
@@ -33,32 +26,52 @@ const std::array<Binding, 10> RT_PIPELINE_BINDINGS = {{
     {9, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,     1, VK_SHADER_STAGE_RAYGEN_BIT_KHR,                                           "DensityVolume"},
 }};
 
-// ──────────────────────────────────────────────────────────────────────────────
-// TONEMAP SET 1
-// ──────────────────────────────────────────────────────────────────────────────
 const std::array<Binding, 3> TONEMAP_PIPELINE_BINDINGS = {{
     {0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_COMPUTE_BIT, "InputHDR"},
     {1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,          1, VK_SHADER_STAGE_COMPUTE_BIT, "OutputLDR"},
     {2, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,         1, VK_SHADER_STAGE_COMPUTE_BIT, "TonemapParams"},
 }};
 
-// ──────────────────────────────────────────────────────────────────────────────
-// DENOISER SET 2
-// ──────────────────────────────────────────────────────────────────────────────
 const std::array<Binding, 2> DENOISER_PIPELINE_BINDINGS = {{
     {0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, "NoisyInput"},
     {1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, "CleanOutput"},
 }};
 
 // ──────────────────────────────────────────────────────────────────────────────
-// HELPER: Create layout from table
+// GLOBALS — THE EMPIRE'S CROWN JEWELS
 // ──────────────────────────────────────────────────────────────────────────────
-static VkDescriptorSetLayout createLayout(VkDevice device, const auto& table)
+VkDescriptorSetLayout g_rtLayout           = VK_NULL_HANDLE;
+VkDescriptorSetLayout g_tonemapLayout      = VK_NULL_HANDLE;
+VkDescriptorSetLayout g_denoiserLayout     = VK_NULL_HANDLE;
+
+VkPipelineLayout      g_tonemapPipelineLayout = VK_NULL_HANDLE;
+VkPipeline            g_tonemapPipeline       = VK_NULL_HANDLE;
+
+std::vector<VkDescriptorSet> g_tonemapSets;
+VkDescriptorPool             g_tonemapPool = VK_NULL_HANDLE;
+
+// ──────────────────────────────────────────────────────────────────────────────
+// CONVERT YOUR Binding → VkDescriptorSetLayoutBinding (C++23 style)
+// ──────────────────────────────────────────────────────────────────────────────
+static VkDescriptorSetLayout createLayout(VkDevice device, std::span<const Binding> bindings)
 {
-    VkDescriptorSetLayoutCreateInfo info = {
+    std::vector<VkDescriptorSetLayoutBinding> vkBindings;
+    vkBindings.reserve(bindings.size());
+
+    for (const auto& b : bindings) {
+        vkBindings.push_back(VkDescriptorSetLayoutBinding{
+            .binding         = b.binding,
+            .descriptorType  = b.type,
+            .descriptorCount = b.count,
+            .stageFlags      = b.stage,
+            .pImmutableSamplers = nullptr
+        });
+    }
+
+    const VkDescriptorSetLayoutCreateInfo info{
         .sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-        .bindingCount = static_cast<uint32_t>(table.size()),
-        .pBindings    = table.data()
+        .bindingCount = static_cast<uint32_t>(vkBindings.size()),
+        .pBindings    = vkBindings.data()
     };
 
     VkDescriptorSetLayout layout;
@@ -67,100 +80,108 @@ static VkDescriptorSetLayout createLayout(VkDevice device, const auto& table)
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// INITIALIZATION — CALL ONCE AFTER DEVICE CREATION
+// INITIALIZE — C++23 — NO ASSERT — NO .get() — PURE
 // ──────────────────────────────────────────────────────────────────────────────
 void initialize(VkDevice device)
 {
-    ASSERT(device != VK_NULL_HANDLE, "Cannot initialize bindings with null device");
+    if (!device) device = stone_device();
+    if (device == VK_NULL_HANDLE) {
+        LOG_FATAL_CAT("BINDINGS", "stone_device() is null — the empire has no throne");
+        return;
+    }
 
     g_rtLayout       = createLayout(device, RT_PIPELINE_BINDINGS);
     g_tonemapLayout  = createLayout(device, TONEMAP_PIPELINE_BINDINGS);
     g_denoiserLayout = createLayout(device, DENOISER_PIPELINE_BINDINGS);
 
-    LOG_INFO_CAT("Bindings", "Central descriptor set layouts created — Empire is aligned");
+    // Pipeline layout
+    const VkPushConstantRange push{ VK_SHADER_STAGE_COMPUTE_BIT, 0, 16 };
+    const VkPipelineLayoutCreateInfo plInfo{
+        .sType                  = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+        .setLayoutCount         = 1,
+        .pSetLayouts            = &g_tonemapLayout,
+        .pushConstantRangeCount = 1,
+        .pPushConstantRanges    = &push
+    };
+    VK_CHECK(vkCreatePipelineLayout(device, &plInfo, nullptr, &g_tonemapPipelineLayout));
+
+    // Tonemap shader + pipeline
+    VkShaderModule shader = RTX::loadShader("assets/shaders/compute/tonemap.spv");
+    if (!shader) {
+        LOG_FATAL_CAT("BINDINGS", "tonemap.spv not found — the photons are lost");
+        return;
+    }
+
+    const VkPipelineShaderStageCreateInfo stage{
+        .sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+        .stage  = VK_SHADER_STAGE_COMPUTE_BIT,
+        .module = shader,
+        .pName  = "main"
+    };
+
+    const VkComputePipelineCreateInfo pipeInfo{
+        .sType  = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
+        .stage  = stage,
+        .layout = g_tonemapPipelineLayout
+    };
+
+    VK_CHECK(vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipeInfo, nullptr, &g_tonemapPipeline));
+    vkDestroyShaderModule(device, shader, nullptr);
+
+    // Descriptor pool + sets
+    const uint32_t frames = Options::Performance::MAX_FRAMES_IN_FLIGHT;
+
+    const VkDescriptorPoolSize poolSizes[] = {
+        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, frames },
+        { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,         frames },
+        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,        frames }
+    };
+
+    const VkDescriptorPoolCreateInfo poolInfo{
+        .sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+        .flags         = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
+        .maxSets       = frames,
+        .poolSizeCount = 3,
+        .pPoolSizes    = poolSizes
+    };
+    VK_CHECK(vkCreateDescriptorPool(device, &poolInfo, nullptr, &g_tonemapPool));
+
+    g_tonemapSets.resize(frames);
+    std::vector<VkDescriptorSetLayout> layouts(frames, g_tonemapLayout);
+
+    const VkDescriptorSetAllocateInfo allocInfo{
+        .sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+        .descriptorPool     = g_tonemapPool,
+        .descriptorSetCount = frames,
+        .pSetLayouts        = layouts.data()
+    };
+    VK_CHECK(vkAllocateDescriptorSets(device, &allocInfo, g_tonemapSets.data()));
+
+    LOG_SUCCESS_CAT("BINDINGS", "C++23 — NO ASSERT — FIRST LIGHT ACHIEVED — PINK PHOTONS ETERNAL");
 }
 
+// ──────────────────────────────────────────────────────────────────────────────
+// SHUTDOWN — FIXED ASSIGNMENT HELL
+// ──────────────────────────────────────────────────────────────────────────────
 void shutdown(VkDevice device)
 {
+    if (!device) device = stone_device();
+    if (!device) return;
+
+    if (g_tonemapPipeline)       vkDestroyPipeline(device, g_tonemapPipeline, nullptr);
+    if (g_tonemapPipelineLayout) vkDestroyPipelineLayout(device, g_tonemapPipelineLayout, nullptr);
+    if (g_tonemapPool)           vkDestroyDescriptorPool(device, g_tonemapPool, nullptr);
+
     if (g_rtLayout)       vkDestroyDescriptorSetLayout(device, g_rtLayout, nullptr);
     if (g_tonemapLayout)  vkDestroyDescriptorSetLayout(device, g_tonemapLayout, nullptr);
     if (g_denoiserLayout) vkDestroyDescriptorSetLayout(device, g_denoiserLayout, nullptr);
 
+    // FIXED: Separate assignments — no more layout → pipeline crime
+    g_tonemapPipeline       = VK_NULL_HANDLE;
+    g_tonemapPipelineLayout = VK_NULL_HANDLE;
     g_rtLayout = g_tonemapLayout = g_denoiserLayout = VK_NULL_HANDLE;
+    g_tonemapPool = VK_NULL_HANDLE;
+    g_tonemapSets.clear();
 }
-
-// VulkanRTX.cpp — recordRayTrace — FINAL, ETERNAL, BINDINGS-COMPLIANT EDITION
-void VulkanRTX::recordRayTrace(VkCommandBuffer cmd,
-                               VkExtent2D extent,
-                               VkImage outputImage,
-                               VkImageView /*outputView*/) noexcept
-{
-    LOG_TRACE_CAT("RTX", "recordRayTrace — {}x{} — cmd=0x{:x}", extent.width, extent.height, reinterpret_cast<uintptr_t>(cmd));
-
-    // ──────────────────────────────────────────────────────────────────────────────
-    // 1. Transition output image → GENERAL (ray tracing write target)
-    // ──────────────────────────────────────────────────────────────────────────────
-    VkImageMemoryBarrier toGeneral = {
-        .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-        .srcAccessMask       = 0,
-        .dstAccessMask       = VK_ACCESS_SHADER_WRITE_BIT,
-        .oldLayout           = VK_IMAGE_LAYOUT_UNDEFINED,
-        .newLayout           = VK_IMAGE_LAYOUT_GENERAL,
-        .image               = outputImage,
-        .subresourceRange    = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
-    };
-
-    vkCmdPipelineBarrier(cmd,
-        VK_PIPELINE_STAGE_TOP899_OF_PIPE_BIT,
-        VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
-        0, 0, nullptr, 0, nullptr, 1, &toGeneral);
-
-    // ──────────────────────────────────────────────────────────────────────────────
-    // 2. BIND THE ETERNAL PIPELINE + DESCRIPTOR SET (from centralized bindings)
-    // ──────────────────────────────────────────────────────────────────────────────
-    using namespace RTX::Bindings;
-
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, rtPipeline_.get());
-
-    // Set 0 = RT set — from global layout in bindings.cpp
-    const VkDescriptorSet rtSet = descriptorSets_[currentFrame_];
-    vkCmdBindDescriptorSets(cmd,
-        VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
-        rtPipelineLayout_.get(),
-        SET_RAY_TRACING,        // ← NOW FROM BINDINGS
-        1, &rtSet,
-        0, nullptr);
-
-    // ──────────────────────────────────────────────────────────────────────────────
-    // 3. TRACE RAYS — THE PHOTONS OBEY
-    // ──────────────────────────────────────────────────────────────────────────────
-    rtCmdTraceRaysKHR(cmd,
-        &sbt_.raygen,
-        &sbt_.miss,
-        &sbt_.hit,
-        &sbt_.callable,
-        extent.width,
-        extent.height,
-        1);
-
-    // ──────────────────────────────────────────────────────────────────────────────
-    // 4. Transition back → PRESENT_SRC (or whatever consumer wants)
-    // ──────────────────────────────────────────────────────────────────────────────
-    VkImageMemoryBarrier toPresent = toGeneral;
-    toPresent.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-    toPresent.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
-    toPresent.oldLayout     = VK_IMAGE_LAYOUT_GENERAL;
-    toPresent.newLayout     = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-
-    vkCmdPipelineBarrier(cmd,
-        VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
-        VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
-        0, 0, nullptr, 0, nullptr, 1, &toPresent);
-
-    LOG_SUCCESS_CAT("RTX", "Ray trace complete — {}x{} — {} SPP — PHOTONS CONVERGED", 
-                    extent.width, extent.height, currentSpp_);
-}
-
-
 
 } // namespace RTX::Bindings
