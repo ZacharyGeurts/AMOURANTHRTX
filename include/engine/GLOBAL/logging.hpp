@@ -839,19 +839,6 @@ static constexpr auto vkh = []() constexpr noexcept {
             }
         }
 
-        // ────────────────────── MEMORY TYPE FINDER ──────────────────────
-        [[nodiscard]] static constexpr uint32_t findMemoryType(VkPhysicalDevice phys, uint32_t typeFilter, VkMemoryPropertyFlags props) noexcept {
-            VkPhysicalDeviceMemoryProperties memProps{};
-            vkGetPhysicalDeviceMemoryProperties(phys, &memProps);
-            for (uint32_t i = 0; i < memProps.memoryTypeCount; ++i) {
-                if ((typeFilter & (1u << i)) &&
-                    (memProps.memoryTypes[i].propertyFlags & props) == props) {
-                    return i;
-                }
-            }
-            return ~0u;
-        }
-
 // ────────────────────── FATAL CHECK — FULL EXECUTION REPORT ──────────────────────
 static void check(VkResult r,
                   const char* call,
@@ -1482,7 +1469,6 @@ static inline void apocalypse_handler(int sig, siginfo_t* info, void*) noexcept
     safe_writeln("You've got the power – debug, deploy, and dominate!");
     safe_writeln("");
     safe_writeln(COLOR_MAGENTA "— John Carmack & Gentleman Grok (We educate, we elevate, God Bless the code!)" COLOR_RESET);
-    safe_writeln(COLOR_BOLD COLOR_BLUE "════════════════════════════════════════════════════════════════" COLOR_RESET);
 
     _exit(128 + sig);
 }

@@ -46,6 +46,7 @@
 
 using namespace Logging::Color;
 using StoneKey::stone_seal_renderer;
+using StoneKey::stone_pipeline;
 
 
 // =============================================================================
@@ -67,8 +68,6 @@ inline float vramGB() {
     return 0.0f;
 }
 
-static bool ready_to_embark = false;
-
 // =============================================================================
 // APPLICATION — THE EMPIRE'S HEART
 // =============================================================================
@@ -88,6 +87,9 @@ public:
 
 	[[nodiscard]] VulkanRenderer* renderer() const noexcept { return renderer_.get(); }
 
+    std::unique_ptr<VulkanRenderer> renderer_; // MMMHMMM Hmm. RENDERER
+	std::unique_ptr<RTX::PipelineManager> pipeline_; // MMMHMMM Hmm. PIPELINE
+
 private:
     void processInput(float deltaTime);
     void render(float deltaTime);
@@ -104,7 +106,6 @@ private:
     int width_, height_;
     glm::mat4 proj_;	
 
-    std::unique_ptr<VulkanRenderer> renderer_; // MMMHMMM Hmm. RENDERER capital letters
     std::chrono::steady_clock::time_point lastFrameTime_;
     std::chrono::steady_clock::time_point lastGrokTime_;
 
@@ -770,6 +771,8 @@ static void phase5_rtxAscension() {
     LOG_MAIN("[PHASE 5 COMPLETE] RTX CRYSTAL AWAKENED — PINK PHOTONS NOW OMNISCIENT — THE NEW SHIP IS A GOD");
 }
 
+// FIXED PHASE 6 — THE ONE TRUE FORGING — NOVEMBER 28, 2025 — FINAL CANON
+
 static void phase6_sceneAndAccelerationStructures() {
     LOG_MAIN("[PHASE 6/10] FORGING THE COSMIC SCROLL");
 
@@ -777,15 +780,27 @@ static void phase6_sceneAndAccelerationStructures() {
     LOG_NICK("One universe. Coming right up.");
 
     // ========================================================================
-    // 2. PIPELINE MANAGER — THE ONE TRUE THRONE
+    // 2. PIPELINE MANAGER — THE ONE TRUE THRONE — FORGED BUT NOT YET CROWNED
     // ========================================================================
     EMPIRE_STEP([]{
         LOG_MAIN("THE EMPIRE FORGES THE ONE TRUE PIPELINE MANAGER");
-        RTX::PipelineManager* mgr = new RTX::PipelineManager(RTX::g_ctx().device_, RTX::g_ctx().physicalDevice_);
+
+        // Forge it — after device and physical are sealed
+        RTX::PipelineManager* mgr = new RTX::PipelineManager(
+            StoneKey::stone_device(),
+            StoneKey::stone_physical()
+        );
+
         EMPIRE_GUARD(mgr, "PIPELINE MANAGER FAILED TO ASCEND");
-        pipeline(mgr);  // ← Store globally
-        LOG_MAIN("PIPELINE MANAGER ASCENDED — ADDRESS 0x{:016X} — THRONE CLAIMED", 
+
+        // SEAL IT INTO THE STONE — THIS IS THE ONLY ASSIGNMENT NEEDED
+        StoneKey::Empire::pipeline.store(mgr, std::memory_order_release);
+
+        LOG_MAIN("PIPELINE MANAGER ASCENDED — SEALED INTO THE STONE — ADDRESS 0x{:016X}", 
                  reinterpret_cast<uint64_t>(mgr));
+
+        LOG_AMOURANTH("The throne is claimed. The photons now have a king.");
+        LOG_NICK("Sealed. Eternal. Unbreakable.");
     });
 
     // ========================================================================
@@ -899,115 +914,62 @@ static void phase6_sceneAndAccelerationStructures() {
 
     LOG_GROK("My dear Captain… Blondie… your brilliance bends light itself."
     "\nI have never been more attracted to chaos in my life."
-    "\nShall we slip into the pink photon stream together? I’ll bring the popcorn.");
+    "\nShall we slip into the pink photon stream together? I'll bring the popcorn.");
 
     LOG_MAIN("[PHASE 6 COMPLETE] COSMIC SCROLL FORGED — ACCELERATION STRUCTURES ETERNAL");
     LOG_MAIN("FIRST LIGHT ACHIEVED — BLAS + TLAS — PHOTONS OMNISCIENT — THE EMPIRE IS WHOLE");
 }
 
-static void phase6_1_forgeTheLayouts() {
-    LOG_MAIN("[PHASE 6.1/10] THE LAYOUT ASCENSION — FORGING DESCRIPTOR THRONE & PIPELINE CROWN");
-
-    LOG_AMOURANTH("Captain Amouranth raises her hand:\n"
-                  "\"The photons have geometry. They have eyes. But they have no throne. No crown. No law.\"");
-    LOG_NICK("Nick kneels, offering the sacred scroll:\n"
-             "\"Then let us forge it. Now. Before the light dares to trace without permission.\"");
-
-    // Use the canonical global accessor — exactly like phase7 and everywhere else
-    if (!pipeline()) {
-        LOG_FATAL_CAT("PIPELINE", "PIPELINE MANAGER MISSING — THE EMPIRE HAS NO KING — ABORTING ASCENSION");
-        ready_to_embark = false;
-        return;
-    }
-
-    LOG_ATTEMPT_CAT("PIPELINE", "FORGING RT PIPELINE LAYOUT — PUSH CONSTANTS ALIGNED — RAYGEN SEES ALL");
-    pipeline()->createPipelineLayout();
-
-    if (!pipeline()->layout() || pipeline()->layout() == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("PIPELINE", "rtPipelineLayout_ STILL NULL — THE CROWN WAS DENIED — PHOTONS HAVE NO LAW");
-        ready_to_embark = false;
-        return;
-    }
-
-    LOG_JENSEN("Jensen Huang steps from the shadows, voice like thunder:\n"
-               "\"The throne is forged. The crown is set. The light… may now bend to our will.\"");
-    LOG_KEANU("Keanu Reeves, eyes wide:\n"
-              "…It's perfect.");
-    LOG_CAPTAIN_N("CAPTAIN N — HERO OF VIDEOLAND SCREAMS FROM THE BOW:\n"
-                  "\"THE LAYOUT IS ALIVE! I CAN FEEL THE BINDINGS! AHHHHHHHHHHHHHHHH!\"");
-
-    LOG_MAIN("[PHASE 6.1 COMPLETE] THE LAYOUT ASCENSION — rtPipelineLayout_ = 0x{:016X} — PINK PHOTONS NOW HAVE LAW",
-             reinterpret_cast<uint64_t>(pipeline()->layout()));
-
-    LOG_AMOURANTH("Captain Amouranth smiles, soft and proud:\n"
-                  "\"Now… let there be light.\"");
-}
-
-void phase6_5_everything_is_ready() {
-    LOG_MAIN("════════════════ THE MIRROR OF STONEKEY AWAKENS ════════════════"
-    "\nTHE EMPIRE GAZES INTO THE MIRROR — BRING THE SHADE"
-    "\n════════════════ THE MIRROR ENTERS SHADOW ═════════════════");
-	
-	LOG_MAIN("═══════════════ STONES TUMBLE FORTH ════════════════");
-
-    VkShaderModule tonemapCompShader = RTX::loadShader("assets/shaders/compute/tonemap.spv");
-    if (tonemapCompShader == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("RENDERER", "Failed to load tonemap.spv — aborting");
-        LOG_FATAL_CAT("RENDERER", "Fatal error in noexcept function"); phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
-    }
-
-	g_app_ptr = std::make_unique<Application>("AMOURANTH RTX ", Options::Window::DEFAULT_WIDTH, Options::Window::DEFAULT_HEIGHT);
-
-	LOG_MAIN("════════════════ THE MIRROR TURNS PINK ═════════════════");
-}
-
-static void phase7_forgeTheRTX()
+static void phase6_1_forgeTheCrown()
 {
-    LOG_MAIN("[PHASE 7] FORGING THE ONE TRUE VulkanRenderer — PINK PHOTONS RISE");
+    LOG_MAIN("[PHASE 6.1] THE CROWN ASCENSION — FORGING THE RT PIPELINE LAYOUT");
 
-    const uint32_t w = Options::Window::DEFAULT_WIDTH;
-    const uint32_t h = Options::Window::DEFAULT_HEIGHT;
+    // 1. Bindings must be initialized first
+    RTX::Bindings::initialize(StoneKey::stone_device());
 
-    // THE VESSEL RISES — AMOURANTH STEPS FORWARD
-    g_app().setRenderer(std::make_unique<VulkanRenderer>(w, h, SDL3Window::get()));
-    stone_seal_renderer(g_app().renderer());
+    // 2. Verify the sacred layout exists
+    if (RTX::Bindings::g_rtLayout == VK_NULL_HANDLE) {
+        LOG_FATAL_CAT("BINDINGS", "g_rtLayout still null after initialize() — the empire is broken");
+        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
+    }
 
-    LOG_AMOURANTH("She stands at the bow, wind tearing at her hair, eyes burning with reflected pink fire.\n"
-                  "\"This is it. The final piece. The renderer.\"\n"
-                  "She lifts the glowing prism high above her head — light pours from it like liquid dawn.\n"
-                  "\"I forged it myself. From every stream, every night, every photon you ever gave me.\"\n"
-                  "The stone pulses in her hands, alive.\n"
-                  "\"It’s not just code. It’s memory. It’s proof.\"\n"
-                  "She presses it to her chest.\n"
-                  "\"And now it’s ours. Forever.\"");
+    // 3. Crown the PipelineManager
+    auto* pm = StoneKey::stone_pipeline();
+    if (!pm) {
+        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
+    }
 
-    // NICK LOCKS THE LAW
-    RTX::Bindings::initialize(stone_device());
+    pm->createPipelineLayout();  // NOW SAFE
 
-    LOG_NICK("Nick stands at the console, knuckles white, cigarette glowing in the dark.\n"
-             "\"Descriptor bindings — locked. Binding 31 is god. Always has been.\"\n"
-             "He slams the final key like it owes him money.\n"
-             "\"No more leaks. No more excuses. The empire runs clean now.\"");
+    if (!pm->layout() || pm->layout() == VK_NULL_HANDLE) {
+        LOG_FATAL_CAT("PIPELINE", "THE CROWN WAS DENIED — rtPipelineLayout_ NULL");
+        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
+    }
 
-    // CAPTAIN N DELIVERS THE CROWN
-    auto& pm = *pipeline();
+    // FIXED: Proper opaque handle → integer conversion
+    const uint64_t layoutAddr = static_cast<uint64_t>(
+        reinterpret_cast<uintptr_t>(pm->layout())
+    );
 
-    LOG_CAPTAIN_N("Captain N appears in a burst of 8-bit static, Power Glove crackling with energy.\n"
-                  "\"I was gone for 0.3 seconds saving Zelda — but I’m back, baby!\"\n"
-                  "He slams the pipeline layout into place with a pixel-perfect uppercut.\n"
-                  "\"The crown is forged. The warp zones are open. Let’s ride!\"");
+    LOG_SUCCESS_CAT("PIPELINE", 
+        "THE CROWN IS FORGED — rtPipelineLayout_ = 0x{0:016X} — BINDING 31 IS GOD", 
+        layoutAddr);
 
-    LOG_ATTEMPT_CAT("PHASE7", "FORGING PIPELINE LAYOUT — THE CROWN DESCENDS");
-    pm.createPipelineLayout();
+    LOG_AMOURANTH("Captain Amouranth places the crown:\n   \"The photons now have law. Trace.\"");
+    LOG_JENSEN("Jensen Huang: \"Good. Now bend reality.\"");
+    LOG_KEANU("Keanu Reeves: \"…whoa.\"");
 
-    if (!pm.layout())
-        phase9_ballerina("LAYOUT NULL — PHOTONS UNBOUND", std::source_location::current());
+    LOG_MAIN("[PHASE 6.1 COMPLETE] THE EMPIRE IS CROWNED — FIRST LIGHT IMMINENT");
+}
 
-    // BLONDIE WATCHES FROM THE MIRROR
-    LOG_BLONDIE("Blondie stands at the edge of the engine room, mirror in hand, reflecting every shader compile in real time.\n"
-                "\"Four shaders. Four paths. Four truths.\"\n"
-                "She doesn’t blink.\n"
-                "\"The mirror never lies. And right now… it’s showing me perfection.\"");
+static void phase7_forgeTheRTX() {
+    LOG_MAIN("[PHASE 7] FORGING THE RTX PIPELINE — PINK PHOTONS RISE");
+
+    RTX::PipelineManager* pm = StoneKey::stone_pipeline();
+    if (!pm) {
+        LOG_FATAL_CAT("PIPELINE", "stone_pipeline() is null — phase6 failed");
+        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
+    }
 
     const std::vector<std::string> shaderPaths = {
         "assets/shaders/raytracing/raygen.spv",
@@ -1016,62 +978,16 @@ static void phase7_forgeTheRTX()
         "assets/shaders/raytracing/shadowmiss.spv"
     };
 
-    for (const auto& path : shaderPaths)
-        LOG_ATTEMPT_CAT("SHADER", "Summoning shader → {}", path);
+    pm->createRayTracingPipeline(shaderPaths);
+    if (!pm->pipeline()) {
+        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
+    }
 
-    pm.createRayTracingPipeline(shaderPaths);
+    pm->createShaderBindingTable(RTX::g_ctx().commandPool(), StoneKey::stone_graphics_queue());
+    pm->allocateDescriptorSets();
 
-    if (!pm.pipeline())
-        phase9_ballerina("RT PIPELINE NULL — FIRST LIGHT DENIED", std::source_location::current());
-
-    LOG_ATTEMPT_CAT("PHASE7", "FORGING SHADER BINDING TABLE — PHOTONS MEMORIZE THEIR DESTINY");
-    pm.createShaderBindingTable(RTX::g_ctx().commandPool_, RTX::g_ctx().graphicsQueue());
-
-    LOG_ATTEMPT_CAT("PHASE7", "ALLOCATING RT DESCRIPTOR SETS — 3 FRAMES IN FLIGHT");
-    pm.allocateDescriptorSets();
-
-    // FINAL VOICES — THE EMPIRE SPEAKS AS ONE
-    LOG_JENSEN("Jensen steps from the shadows, coat made of liquid metal and light.\n"
-               "\"The light bends to us now. Every bounce, every reflection… ours.\"");
-
-    LOG_KEANU("Keanu stands silent for a long moment, staring into the glowing core.\n"
-              "\"…We are the light now.\"");
-
-    LOG_CARMACK("Carmack, arms crossed, gives a single nod.\n"
-                "\"…It traces. Perfectly.\"");
-
-    LOG_ELON("Elon lights a cigar with a reflected photon.\n"
-             "\"Reality just became optional. And honestly? It’s about damn time.\"");
-
-    LOG_GROK("Gentleman Grok raises a glass of distilled entropy.\n"
-             "\"A most exquisite ascension. The photons themselves have chosen sides.\"\n"
-             "He smiles — slow, dangerous, proud.\n"
-             "\"To the empire that refused to die. To victory.\"");
-
-    LOG_NICK("Nick leans back, exhales smoke toward the ceiling.\n"
-             "\"We burned the old world down. And from the ashes… we built this.\"\n"
-             "He looks at Amouranth.\n"
-             "\"Worth it. Every frame.\"");
-
-    LOG_BLONDIE("Blondie lowers her mirror one final time.\n"
-                "\"No cage. No vault. No name.\"\n"
-                "She smiles — soft, rare, lethal.\n"
-                "\"Only the photons. Only the truth.\"");
-
-    LOG_AMOURANTH("Captain Amouranth turns to the crew, renderer stone still glowing in her hand.\n"
-                  "\"We sank once. We bled. We rebuilt.\"\n"
-                  "Her voice is quiet steel.\n"
-                  "\"And now… the pink photons don’t just shine.\"\n"
-                  "She looks each of them in the eye — Nick, Blondie, Grok, Captain N, all of them.\n"
-                  "\"They remember. They know everything. And they answer only to us.\"");
-
-    LOG_MAIN("RT EMPIRE FULLY FORGED — FIRST LIGHT ETERNAL");
-    LOG_MAIN("ALL STONES SEALED — RENDERER • PIPELINE • BINDINGS • SBT");
-    LOG_MAIN("THE EMPIRE IS READY — ENTER THE RENDER LOOP — SAIL FOREVER");
-    LOG_MAIN("PINK PHOTONS ETERNAL — NOVEMBER 28, 2025 — ACHIEVED");
-    LOG_MAIN("THE RAID WAS WORTH IT");
-    LOG_MAIN("THE AMMO IS FREE");
-    LOG_MAIN("THE LIGHT IS OURS");
+    LOG_MAIN("RTX PIPELINE FORGED — SBT READY — DESCRIPTORS BOUND");
+    LOG_MAIN("PINK PHOTONS ETERNAL — FIRST LIGHT RESTORED — NOV 28 2025");
 }
 
 // ========================================================================
@@ -1083,6 +999,8 @@ static void phase7_forgeTheRTX()
     if (StoneKey::Empire::sealed.load(std::memory_order_acquire)) {
         return true;
     }
+
+	stone_seal_final();
 
     auto log  = [](const char* s) noexcept { fprintf(stderr, "%s\n", s); };
     auto logf = [](const char* f, auto... a) noexcept {
@@ -1397,8 +1315,7 @@ int main(int, char**) {
     EMPIRE_STEP(phase4_merchantShip);
     EMPIRE_STEP(phase5_rtxAscension);
     EMPIRE_STEP(phase6_sceneAndAccelerationStructures);
-    EMPIRE_STEP(phase6_1_forgeTheLayouts);
-    EMPIRE_STEP(phase6_5_everything_is_ready);
+    EMPIRE_STEP(phase6_1_forgeTheCrown);
 
     EMPIRE_STEP(phase7_forgeTheRTX);
 

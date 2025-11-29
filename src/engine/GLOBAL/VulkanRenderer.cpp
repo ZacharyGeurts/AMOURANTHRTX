@@ -573,8 +573,7 @@ void VulkanRenderer::createRTOutputImages() noexcept
             VkMemoryRequirements memReqs{};
             vkGetImageMemoryRequirements(stone_device(), rawImage, &memReqs);
 
-            uint32_t memType = pipelineManager_.findMemoryType(
-                memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+            uint32_t memType = findMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
             VkMemoryAllocateInfo allocInfo{
                 .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
@@ -754,7 +753,7 @@ void VulkanRenderer::createEnvironmentMap() noexcept
 
     VkMemoryRequirements memReqs{};
     vkGetImageMemoryRequirements(stone_device(), img, &memReqs);
-    uint32_t memType = pipelineManager_.findMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    uint32_t memType = findMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
     VkMemoryAllocateInfo allocInfo{
         .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
@@ -859,7 +858,7 @@ void VulkanRenderer::createNexusScoreImage(VkCommandPool pool, VkQueue queue) no
     VkMemoryRequirements memReqs{};
     vkGetImageMemoryRequirements(stone_device(), rawImage, &memReqs);
 
-    uint32_t memType = pipelineManager_.findMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    uint32_t memType = findMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
     if (memType == UINT32_MAX) {
         LOG_FATAL_CAT("RENDERER", "No suitable memory type for NexusScoreImage");
         vkDestroyImage(stone_device(), rawImage, nullptr);
@@ -1883,7 +1882,7 @@ void VulkanRenderer::createImage(RTX::Handle<VkImage>& image,
     VkMemoryRequirements reqs{};
     vkGetImageMemoryRequirements(stone_device(), rawImg, &reqs);
 
-    uint32_t memType = pipelineManager_.findMemoryType(reqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    uint32_t memType = findMemoryType(reqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
     VkMemoryAllocateInfo alloc{
         .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,

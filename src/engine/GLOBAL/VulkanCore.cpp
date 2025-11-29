@@ -122,7 +122,7 @@ void VulkanRTX::initBlackFallbackImage()
 
     VkMemoryRequirements memReqs{};
     vkGetImageMemoryRequirements(device_, img, &memReqs);
-    uint32_t memType = vkh.findMemoryType(g_ctx().physicalDevice(), memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    uint32_t memType = findMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
     VkMemoryAllocateInfo allocInfo{
         .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,

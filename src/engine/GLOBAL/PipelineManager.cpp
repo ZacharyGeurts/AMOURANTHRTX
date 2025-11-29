@@ -18,7 +18,9 @@
 //
 // Grok AI: P.S. Spec whispers: for triple buffer, ensure Options::Performance::MAX_FRAMES_IN_FLIGHT=3; we've scaled pools/sets accordingly. Binding 0's accel? Immortal in writes, but "dead" if null—skipped like a bad date. VUID-free zone achieved.
 
-#include "engine/GLOBAL/VulkanCore.hpp"  // this one cray
+#include "engine/GLOBAL/PipelineManager.hpp"
+#include "engine/GLOBAL/BufferManager.hpp"
+#include "engine/GLOBAL/LAS.hpp"
 #include "engine/GLOBAL/OptionsMenu.hpp"
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/GLOBAL/bindings.hpp"
@@ -39,20 +41,23 @@ using StoneKey::stone_seal_physical;
 namespace RTX {
 
 // ──────────────────────────────────────────────────────────────────────────────
-// PipelineManager Constructor — Matches VulkanRenderer Style + FIXED: Null Guard Early Exit + DEFERRED: Allocation to Renderer (Prevents Duplicate Alloc + VK_ERROR_OUT_OF_POOL_MEMORY)
+// PipelineManager Constructor — ONLY cache properties — LAYOUT DEFERRED
 // ──────────────────────────────────────────────────────────────────────────────
 PipelineManager::PipelineManager(VkDevice device, VkPhysicalDevice phys)
 {
     stone_seal_device(device);
     stone_seal_physical(phys);
 
-    if (stone_device() == VK_NULL_HANDLE) return;
+    if (stone_device() == VK_NULL_HANDLE) {
+        LOG_FATAL_CAT("PIPELINE", "NO DEVICE — THE KING IS BORN WITHOUT A HEART");
+        return;
+    }
 
+    // ONLY cache device properties here — layout creation moved to phase6.1
     cacheDeviceProperties();
-    createPipelineLayout();  // still valid — uses g_rtLayout from Bindings
-    // allocateDescriptorSets() still called later from renderer
 
-    LOG_SUCCESS_CAT("PIPELINE", "PipelineManager initialized — Layouts owned by Bindings:: — CLEAN EMPIRE");
+    LOG_SUCCESS_CAT("PIPELINE", 
+        "PipelineManager forged — Properties cached — AWAITING CROWN (createPipelineLayout deferred to phase6.1)");
 }
 
 void PipelineManager::allocateDescriptorSets() {
@@ -428,64 +433,47 @@ VkShaderModule PipelineManager::loadShader(const std::string& path) const {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// findMemoryType — Matches VulkanRenderer Exactly + Null Phys Guard
-// ──────────────────────────────────────────────────────────────────────────────
-uint32_t PipelineManager::findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) const noexcept {
-    LOG_TRACE_CAT("PIPELINE", "findMemoryType — START — typeFilter=0x{:x}, properties=0x{:x}", typeFilter, properties);
-
-    // FIXED: Null phys guard — use class member if param null (fallback)
-    VkPhysicalDevice phys = stone_physical();
-    if (phys == VK_NULL_HANDLE) {
-        LOG_WARN_CAT("PIPELINE", "Null physicalDevice — fallback to 0");
-        return 0;
-    }
-
-    VkPhysicalDeviceMemoryProperties memProps;
-    vkGetPhysicalDeviceMemoryProperties(phys, &memProps);
-    LOG_TRACE_CAT("PIPELINE", "Memory properties — memoryTypeCount={}", memProps.memoryTypeCount);
-    for (uint32_t i = 0; i < memProps.memoryTypeCount; ++i) {
-        LOG_TRACE_CAT("PIPELINE", "Checking memory type {} — filterMatch={}, propMatch=0x{:x}", i, (typeFilter & (1 << i)) != 0, memProps.memoryTypes[i].propertyFlags);
-        if ((typeFilter & (1 << i)) && (memProps.memoryTypes[i].propertyFlags & properties) == properties) {
-            LOG_TRACE_CAT("PIPELINE", "Suitable memory type found: {}", i);
-            LOG_TRACE_CAT("PIPELINE", "findMemoryType — COMPLETE — return={}", i);
-            return i;
-        }
-    }
-    if (Options::Performance::ENABLE_MEMORY_BUDGET_WARNINGS) {
-        LOG_WARNING_CAT("PIPELINE", "No suitable memory type found — using fallback");
-    }
-    LOG_TRACE_CAT("PIPELINE", "No suitable type — fallback to 0");
-    LOG_TRACE_CAT("PIPELINE", "findMemoryType — COMPLETE — return=0 (fallback)");
-    return 0;
-}
-
-// ──────────────────────────────────────────────────────────────────────────────
 // Pipeline Layout — FIXED: Valid pSetLayouts + Push Constants Matching Stages + Null Guards + FIXED: size=16 for vec4
 // ──────────────────────────────────────────────────────────────────────────────
 void PipelineManager::createPipelineLayout()
 {
-    if (stone_device() == VK_NULL_HANDLE || RTX::Bindings::g_rtLayout == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("PIPELINE", "Cannot create pipeline layout — missing device or RTX::Bindings::g_rtLayout");
+    if (stone_device() == VK_NULL_HANDLE) {
+        LOG_FATAL_CAT("PIPELINE", "Cannot create pipeline layout — device is null");
+        return;
+    }
+
+    if (RTX::Bindings::g_rtLayout == VK_NULL_HANDLE) {
+        LOG_FATAL_CAT("PIPELINE", 
+            "Cannot create pipeline layout — RTX::Bindings::g_rtLayout is VK_NULL_HANDLE\n"
+            "       → This means Bindings::init() was not called yet!\n"
+            "       → Call PipelineManager::createPipelineLayout() only from phase6.1 or later!");
         return;
     }
 
     VkPushConstantRange push{};
-    push.stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
-    push.size = 16;
+    push.stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR | 
+                      VK_SHADER_STAGE_MISS_BIT_KHR | 
+                      VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
+    push.offset = 0;
+    push.size   = 16;  // vec4 — matches shader push constants
 
     VkPipelineLayoutCreateInfo info{};
     info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     info.setLayoutCount = 1;
-    info.pSetLayouts = &RTX::Bindings::g_rtLayout;  // ← NOW FROM BINDINGS
+    info.pSetLayouts    = &RTX::Bindings::g_rtLayout;
     info.pushConstantRangeCount = 1;
-    info.pPushConstantRanges = &push;
+    info.pPushConstantRanges    = &push;
 
-    VkPipelineLayout layout;
+    VkPipelineLayout layout = VK_NULL_HANDLE;
     VK_CHECK(vkCreatePipelineLayout(stone_device(), &info, nullptr, &layout));
 
     rtPipelineLayout_ = Handle<VkPipelineLayout>(layout, stone_device(),
         [](VkDevice d, VkPipelineLayout l, auto*) { vkDestroyPipelineLayout(d, l, nullptr); },
         0, "RTPipelineLayout");
+
+    LOG_SUCCESS_CAT("PIPELINE", 
+        "THE CROWN IS FORGED — rtPipelineLayout_ = 0x{:016X} — PHOTONS NOW HAVE LAW", 
+        reinterpret_cast<uint64_t>(layout));
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -838,7 +826,7 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
         VkBufferCopy copyRegion{ .size = sbtBufferSize };
         vkCmdCopyBuffer(cmd, stagingBuffer, rawSbtBuffer, 1, &copyRegion);
 
-        RTX::endOneTimeSubmit(cmd, queue, pool);
+        endOneTimeSubmit(cmd, queue, pool);
     }
 
     LOG_JIMROSS("BAH GAWD — THAT SBT JUST GOT COPIED WITH A FENCE-PROTECTED SUBMIT — AS GOD AS MY WITNESS, THE PHOTONS ARE ALIVE!");

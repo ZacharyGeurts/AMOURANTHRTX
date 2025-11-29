@@ -44,7 +44,7 @@
 
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/GLOBAL/OptionsMenu.hpp"
-#include "engine/GLOBAL/StoneKey.hpp" // THE one header that gets it.
+#include "engine/GLOBAL/StoneKey.hpp" // the one header that gets stonekey(include RTXHandler.hpp with all files).
 
 // Forward declarations
 class VulkanRTX;
