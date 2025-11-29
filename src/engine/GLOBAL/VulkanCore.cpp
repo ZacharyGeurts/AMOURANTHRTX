@@ -63,25 +63,7 @@ VulkanRTX::VulkanRTX(int w, int h, PipelineManager*) noexcept
 
 VulkanRTX::~VulkanRTX() noexcept
 {
-    LOG_TRACE_CAT("RTX", "VulkanRTX destructor — cleansing the void");
-
-    if (g_mappedBase) {
-        vkUnmapMemory(device_, g_stagingMem);
-        g_mappedBase = nullptr;
-        g_mappedOffset.store(0);
-    }
-    if (g_stagingPool) {
-        BUFFER_DESTROY(g_stagingPool);
-        g_stagingPool = 0;
-        g_stagingMem = VK_NULL_HANDLE;
-        g_stagingBuffer = VK_NULL_HANDLE;
-    }
-
-    blackFallbackView_.reset();
-    blackFallbackMemory_.reset();
-    blackFallbackImage_.reset();
-
-    LOG_SUCCESS_CAT("RTX", "VulkanRTX destroyed — pure and clean");
+    phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
 }
 
 // =============================================================================

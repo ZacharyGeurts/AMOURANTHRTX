@@ -329,7 +329,7 @@ namespace Color {
     inline constexpr std::string_view LIME_YELLOW               = "\033[38;5;190m";
     inline constexpr std::string_view FUCHSIA_MAGENTA           = "\033[38;5;205m";
 	inline constexpr std::string_view INVIS_BLACK               = "\033[1;38;5;0m";
-	inline constexpr std::string_view BLOOD_RED                 = "\033[1;38;5;196m";
+	inline constexpr std::string_view BLOOD_RED                 = "\033[1;38;5;198m";;
     inline constexpr std::string_view BLOOD_ORANGE              = "\033[1;38;5;202m";
     inline constexpr std::string_view CYBER_LIME                = "\033[1;38;5;118m";
     inline constexpr std::string_view TOXIC_NEON                = "\033[1;38;5;154m";
@@ -360,7 +360,7 @@ namespace Color {
 
     // ── STANDARD 16 COLORS (YOU ALREADY KNOW THESE) ─────────────────────────────
     inline constexpr std::string_view BLACK       = "\033[38;5;0m";
-    inline constexpr std::string_view RED         = "\033[38;5;1m";
+    inline constexpr std::string_view RED         = "\033[1;38;5;198m";;
     inline constexpr std::string_view GREEN       = "\033[38;5;2m";
     inline constexpr std::string_view YELLOW      = "\033[38;5;3m";
     inline constexpr std::string_view BLUE        = "\033[38;5;4m";
@@ -1523,7 +1523,7 @@ inline void install_apocalypse_handler() noexcept
 #define LOG_JENSEN(...)      LOG_SUCCESS_CAT("JENSEN",     std::format("{}\n[HUANG] {}{}",             Logging::Color::BLUE,              std::format(__VA_ARGS__),     Logging::Color::RESET))
 #define LOG_CID(...)         LOG_SUCCESS_CAT("CID",        std::format("{}\n[CID] {}{}",               Logging::Color::BOLD_RED,          std::format(__VA_ARGS__),     Logging::Color::RESET))
 #define LOG_CARMACK(...)     LOG_INFO_CAT   ("CARMACK",    std::format("{}\n[JOHN] {}{}",              Logging::Color::TITANIUM_WHITE,    std::format(__VA_ARGS__),     Logging::Color::RESET))
-#define LOG_KEANU(...)       LOG_INFO_CAT   ("KEANU",      std::format("{}\n[WOAH] {}{}",              Logging::Color::PURPLE,            std::format(__VA_ARGS__),     Logging::Color::RESET))
+#define LOG_KEANU(...)       LOG_INFO_CAT   ("KEANU",      std::format("{}\n[WOAH] {}{}",              Logging::Color::BRIGHT_PINKISH_PURPLE,            std::format(__VA_ARGS__),     Logging::Color::RESET))
 #define LOG_GUARDIAN(...)    LOG_INFO_CAT   ("GUARDIAN",   std::format("{}\n[GUARDIAN] {}{}",          Logging::Color::PLATINUM_GRAY,     std::format(__VA_ARGS__),     Logging::Color::RESET))
 #define LOG_BALLERINA(...)   LOG_FAILURE_CAT("BALLERINA",  std::format("{}\n[***] {}{}",               Logging::Color::OBSIDIAN_BLACK,    std::format(__VA_ARGS__),     Logging::Color::RESET))
 #define LOG_MAIN(...)        LOG_SUCCESS_CAT("MAIN",       std::format("{}\n[[[[[MAIN]]]]]\n {}{}",    Logging::Color::BOLD_YELLOW,       std::format(__VA_ARGS__),     Logging::Color::RESET))

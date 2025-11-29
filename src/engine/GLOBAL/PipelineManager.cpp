@@ -33,6 +33,7 @@
 
 using namespace Logging::Color;
 using StoneKey::stone_device;
+using StoneKey::stone_instance;
 using StoneKey::stone_physical;
 using StoneKey::stone_seal_device;
 using StoneKey::stone_seal_physical;
@@ -135,24 +136,6 @@ PipelineManager::PipelineManager(VkDevice device, VkPhysicalDevice phys)
 
     LOG_SUCCESS_CAT("PIPELINE", 
         "PipelineManager forged — Properties cached + Extensions loaded — AWAITING CROWN (createPipelineLayout deferred to phase6.1)");
-}
-
-void PipelineManager::loadRayTracingExtensions() {
-    LOG_ATTEMPT_CAT("PIPELINE", "loadRayTracingExtensions — CID SWEATS BUCKETS ENTERING THE PFN VAULT — \"These functions better be here or I'm done for!\"");
-
-    vkCreateRayTracingPipelinesKHR_ = reinterpret_cast<PFN_vkCreateRayTracingPipelinesKHR>(vkGetDeviceProcAddr(stone_device(), "vkCreateRayTracingPipelinesKHR"));
-    vkGetRayTracingShaderGroupHandlesKHR_ = reinterpret_cast<PFN_vkGetRayTracingShaderGroupHandlesKHR>(vkGetDeviceProcAddr(stone_device(), "vkGetRayTracingShaderGroupHandlesKHR"));
-    vkGetBufferDeviceAddress_ = reinterpret_cast<PFN_vkGetBufferDeviceAddress>(vkGetDeviceProcAddr(stone_device(), "vkGetBufferDeviceAddress"));
-    vkCmdTraceRaysKHR_ = reinterpret_cast<PFN_vkCmdTraceRaysKHR>(vkGetDeviceProcAddr(stone_device(), "vkCmdTraceRaysKHR"));
-
-    if (!vkCreateRayTracingPipelinesKHR_ || !vkGetRayTracingShaderGroupHandlesKHR_ || !vkGetBufferDeviceAddress_ || !vkCmdTraceRaysKHR_) {
-        LOG_FATAL_CAT("PIPELINE", "Failed to load essential RT PFNs — CID DROWNS IN HIS OWN SWEAT — \"The empire falls without these!\"");
-        return;
-    }
-
-    LOG_CID("CID collapses in a sweaty heap, gasping — \"PFNs loaded... but at what cost? My shirt is soaked through!\"");
-
-    LOG_SUCCESS_CAT("PIPELINE", "Ray tracing extensions loaded — PFNs armed — READY FOR INFINITY");
 }
 
 void PipelineManager::allocateDescriptorSets() 
@@ -439,55 +422,7 @@ void PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDescrip
 // NEW: Full Pipeline Initialization — The Empire Awakens
 // ──────────────────────────────────────────────────────────────────────────────
 void PipelineManager::initializePipeline(const std::vector<std::string>& shaderPaths, VkCommandPool pool, VkQueue queue) {
-    LOG_TRACE_CAT("PIPELINE", "{}INITIALIZING THE FULL PIPELINE — FROM BINDINGS TO SBT — PINK PHOTONS AWAKEN{}", VALHALLA_GOLD, RESET);
-
-    LOG_CID("CID rallies the forge masters — \"Full init sequence: pool, allocate, layout, shaders, pipeline, SBT... no stone unturned!\"");
-
-    // Step 1: Forge the pipeline layout
-    createPipelineLayout();
-
-    if (!rtPipelineLayout_.valid()) {
-        LOG_FATAL_CAT("PIPELINE", "Failed to create pipeline layout — init aborted");
-        return;
-    }
-
-    // Step 2: Forge the descriptor pool
-    createDescriptorPool();
-
-    if (!rtDescriptorPool_.valid()) {
-        LOG_FATAL_CAT("PIPELINE", "Failed to create descriptor pool — init aborted");
-        return;
-    }
-
-    // Step 3: Allocate descriptor sets
-    allocateDescriptorSets();
-
-    if (rtDescriptorSets_.empty()) {
-        LOG_FATAL_CAT("PIPELINE", "Failed to allocate descriptor sets — init aborted");
-        return;
-    }
-
-    // Step 4: Forge the ray tracing pipeline
-    createRayTracingPipeline(shaderPaths);
-
-    if (!rtPipeline_.valid()) {
-        LOG_FATAL_CAT("PIPELINE", "Failed to create RT pipeline — init aborted");
-        return;
-    }
-
-    // Step 5: Crown with SBT
-    createShaderBindingTable(pool, queue);
-
-    if (!sbtBuffer_.valid()) {
-        LOG_FATAL_CAT("PIPELINE", "Failed to create SBT — init aborted");
-        return;
-    }
-
-    LOG_SUCCESS_CAT("PIPELINE", "{}FULL PIPELINE INITIALIZED — LAYOUT, PIPELINE, SBT, SETS — EMPIRE READY FOR TRACING{}", EMERALD_GREEN, RESET);
-
-    LOG_AMOURANTH("[CAPTAIN AMOURANTH] The pipeline lives. The rays will dance.");
-    LOG_CID("CID falls to knees, tears mixing with sweat — \"It's... complete. The sequence... flawless.\"");
-    LOG_KEANU("[KEANU] ...Whoa. The light... it's everywhere.");
+	// main handles phase7
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -572,7 +507,7 @@ void PipelineManager::cacheDeviceProperties() {
 
     LOG_CID("CID's sweat forms rivers down his back — \"Timestamps precise... but my nerves are frayed!\"");
 
-    // RAY TRACING PROPHECY — THE CHAIN OF TRUTH
+    // ── RAY TRACING PROPHECY — THE CHAIN OF TRUTH — FIXED FOR ZERO SIZES
     VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProps{
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR
     };
@@ -588,6 +523,13 @@ void PipelineManager::cacheDeviceProperties() {
 
     rtProps_ = rtProps;
 
+    // ── ZERO SIZE DETECTION — THE EMPIRE DOES NOT TOLERATE LIES
+    if (rtProps_.shaderGroupHandleSize == 0) {
+        LOG_FATAL_CAT("PIPELINE", "{}RAY TRACING NOT SUPPORTED — HandleSize=0B — GPU UNWORTHY OF THE CROWN{}", BLOOD_RED, RESET);
+        LOG_CID("CID falls to knees — \"The GPU... it lies. No ray tracing. No empire.\"");
+        return;
+    }
+
     VkPhysicalDeviceFeatures features{};
     vkGetPhysicalDeviceFeatures(stone_physical(), &features);
 
@@ -601,10 +543,10 @@ void PipelineManager::cacheDeviceProperties() {
 
     LOG_SUCCESS_CAT("PIPELINE",
         std::format("RAY TRACING LIMITS REVEALED — HandleSize={}B | BaseAlign={}B | MaxStride={}B{}",
-            rtProps.shaderGroupHandleSize,
-            rtProps.shaderGroupBaseAlignment,
-            rtProps.maxShaderGroupStride,
-            rtProps.maxShaderGroupStride >= 4096 ? " — MONSTROUS STRIDE — CID IS TERRIFIED AND AROUSED" : ""));
+            rtProps_.shaderGroupHandleSize,
+            rtProps_.shaderGroupBaseAlignment,
+            rtProps_.maxShaderGroupStride,
+            rtProps_.maxShaderGroupStride >= 4096 ? " — MONSTROUS STRIDE — CID IS TERRIFIED AND AROUSED" : ""));
 
     LOG_SUCCESS_CAT("PIPELINE",
         std::format("ACCELERATION STRUCTURE LIMITS — Max Geometries={} | Max Instances={} | Max Primitives={}{}",
@@ -619,7 +561,7 @@ void PipelineManager::cacheDeviceProperties() {
 
     LOG_CID(
         "Cid stands knee-deep in sweat, hammer glowing, voice hoarse:\n"
-        "   \"She... she understands us. She’s ready. Let’s make her sing.\"");
+        "   \"She... she understands us. She's ready. Let's make her sing.\"");
 
     LOG_SUCCESS_CAT("PIPELINE", 
         "THE GPU IS KNOWN — THE LIMITS ARE MAPPED — THE PHOTONS ARE ARMED — FIRST LIGHT IMMINENT");
@@ -933,137 +875,156 @@ void PipelineManager::createRayTracingPipeline(const std::vector<std::string>& s
 // ──────────────────────────────────────────────────────────────────────────────
 void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue)
 {
-    LOG_TRACE_CAT("PIPELINE", "{}FORGING THE ETERNAL SBT — PINK PHOTONS RISE — g_ext ACTIVE — NO VMA — PURE EMPIRE{}", VALHALLA_GOLD, RESET);
-    LOG_CID("CID stands tall, shirt dry for once — \"The extensions... they're already loaded. I don't have to sweat. I can just... forge.\"");
+    LOG_TRACE_CAT("PIPELINE", "{}FORGING THE SBT — FULL DIAGNOSTIC MODE — NO MORE SILENT DEATH{}", VALHALLA_GOLD, RESET);
 
-    // ── EMPIRE GUARDS — NULLS ARE NOT TOLERATED
-    if (!stone_device() || pool == VK_NULL_HANDLE || queue == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("PIPELINE", "{}SBT FORGE ABORTED — NULL EMPIRE COMPONENTS{}", CRIMSON_MAGENTA, RESET);
-        return;
+    // ── STEP 1: DEVICE VALID?
+    if (!stone_device() || stone_device() == VK_NULL_HANDLE) {
+        LOG_FATAL_CAT("PIPELINE", "{}FATAL: stone_device() is NULL or invalid — Vulkan device lost or never created{}", BLOOD_RED, RESET);
+        LOG_CID("CID screams — \"THE DEVICE IS DEAD! WE HAVE NO THRONE!\"");
+        std::abort();
+    }
+	
+    // ── STEP 2: RAY TRACING EXTENSIONS LOADED?
+    if (!vkCreateRayTracingPipelinesKHR_ || !vkGetRayTracingShaderGroupHandlesKHR_) {
+        LOG_FATAL_CAT("PIPELINE", "{}FATAL: Ray tracing function pointers NULL — extensions not loaded{}", BLOOD_RED, RESET);
+        LOG_CID("CID collapses — \"g_ext failed us... the crown was never possible...\"");
+        std::abort();
     }
 
-    // ── THE NEW LAW: IF PIPELINE IS DEAD → WE FORGE IT NOW
+    // ── STEP 3: PIPELINE VALID?
     if (!rtPipeline_.valid() || *rtPipeline_ == VK_NULL_HANDLE) {
-        LOG_WARN_CAT("PIPELINE", "{}RT PIPELINE NOT FORGED — THE CROWN IS MISSING — FORGING ON DEMAND{}", CRIMSON_MAGENTA, RESET);
-        LOG_CID("CID drops everything, sweat barely forming — \"PIPELINE MISSING?! EMERGENCY FORGE PROTOCOL ENGAGED — BUT I TRUST g_ext.\"");
-
-        const std::vector<std::string> emergencyShaders = {
-            "assets/shaders/raytracing/raygen.spv",
-            "assets/shaders/raytracing/miss.spv",
-            "assets/shaders/raytracing/closesthit.spv",
-            "assets/shaders/raytracing/shadow.spv"
-        };
-
-        initializePipeline(emergencyShaders, pool, queue);
-
-        if (!rtPipeline_.valid() || *rtPipeline_ == VK_NULL_HANDLE) {
-            LOG_FATAL_CAT("PIPELINE", "{}EMERGENCY PIPELINE FORGE FAILED — THE EMPIRE CANNOT RISE WITHOUT ITS CROWN{}", CRIMSON_MAGENTA, RESET);
-            LOG_CID("CID remains calm — \"The crown failed... but g_ext is still here. We tried.\"");
-            return;
-        }
-
-        LOG_SUCCESS_CAT("PIPELINE", "{}EMERGENCY PIPELINE FORGED — THE CROWN LIVES — SBT FORGE RESUMES{}", EMERALD_GREEN, RESET);
-        LOG_KEANU("[KEANU] ...Whoa. It built itself. The pipeline... it chose to live.");
+        LOG_FATAL_CAT("PIPELINE", "{}FATAL: rtPipeline_ is NULL — createRayTracingPipeline() never ran or failed{}", BLOOD_RED, RESET);
+        LOG_CID("CID whispers — \"There is no pipeline... only darkness...\"");
+        std::abort();
     }
 
-    // ── NO MORE PFN CHECKS. EVER.
-    // g_ext was loaded once in loadExtensions() — it is law
-    // vkGetRayTracingShaderGroupHandlesKHR_ → EXILED
-    // vkGetBufferDeviceAddress_ → EXILED
-    // THE EMPIRE TRUSTS g_ext
-
+    // ── STEP 4: RAY TRACING PROPERTIES — THE MOMENT OF TRUTH
     const auto& props = rtProps_;
+    LOG_INFO_CAT("PIPELINE", "{}RT PROPS → HandleSize={}B | HandleAlign={} | BaseAlign={} | MaxRecursion={}{}", 
+                 DIAMOND_SPARKLE,
+                 props.shaderGroupHandleSize,
+                 props.shaderGroupHandleAlignment,
+                 props.shaderGroupBaseAlignment,
+                 props.maxRayRecursionDepth,
+                 RESET);
+
+    if (props.shaderGroupHandleSize == 0) {
+        LOG_FATAL_CAT("PIPELINE", "{}FATAL: shaderGroupHandleSize = 0 — THIS GPU OR DRIVER DOES NOT SUPPORT RAY TRACING{}", BLOOD_RED, RESET);
+        LOG_CID("CID falls to knees — \"The silicon is false. We were lied to.\"");
+        LOG_JENSEN("[JENSEN] *quietly* ...we failed you.");
+        LOG_KEANU("[KEANU] ...whoa.");
+        std::abort();
+    }
+
+    // ── STEP 5: HARD TRUTH — YOUR SHADERS
+    constexpr uint32_t RG = 1;
+    constexpr uint32_t MI = 2;
+    constexpr uint32_t HG = 1;
+    constexpr uint32_t CA = 0;
+    const uint32_t totalGroups = RG + MI + HG + CA;
+
     const uint32_t handleSize        = props.shaderGroupHandleSize;
     const uint32_t handleAlign       = props.shaderGroupHandleAlignment;
     const uint32_t baseAlign         = props.shaderGroupBaseAlignment;
     const uint32_t handleSizeAligned = align_up(handleSize, handleAlign);
 
-    const uint32_t totalGroups = raygenGroupCount_ + missGroupCount_ + hitGroupCount_ + callableGroupCount_;
-    if (totalGroups == 0) {
-        LOG_FATAL_CAT("PIPELINE", "{}ZERO SHADER GROUPS — WHAT ARE WE EVEN BINDING?{}", CRIMSON_MAGENTA, RESET);
-        return;
-    }
-
-    // ── REGION LAYOUT — SPEC-PERFECT
     VkDeviceSize offset = 0;
-    VkDeviceSize raygenOffset   = offset; offset += raygenGroupCount_   * handleSizeAligned; offset = align_up(offset, baseAlign);
-    VkDeviceSize missOffset     = offset; offset += missGroupCount_     * handleSizeAligned; offset = align_up(offset, baseAlign);
-    VkDeviceSize hitOffset      = offset; offset += hitGroupCount_      * handleSizeAligned; offset = align_up(offset, baseAlign);
-    VkDeviceSize callableOffset = offset; offset += callableGroupCount_ * handleSizeAligned;
+    VkDeviceSize raygenOffset   = offset; offset += RG * handleSizeAligned; offset = align_up(offset, baseAlign);
+    VkDeviceSize missOffset     = offset; offset += MI * handleSizeAligned; offset = align_up(offset, baseAlign);
+    VkDeviceSize hitOffset      = offset; offset += HG * handleSizeAligned; offset = align_up(offset, baseAlign);
+    VkDeviceSize callableOffset = offset; offset += CA * handleSizeAligned;
     VkDeviceSize sbtSize = offset;
 
-    LOG_INFO_CAT("PIPELINE", "{}SBT → {} bytes | Handle {}→{}B | RG:{} MI:{} HG:{} CA:{} {}",
-                 DIAMOND_SPARKLE, sbtSize, handleSize, handleSizeAligned,
-                 raygenGroupCount_, missGroupCount_, hitGroupCount_, callableGroupCount_, RESET);
+    LOG_INFO_CAT("PIPELINE", "{}SBT CALC → {} bytes | Handle {}→{}B | RG:{} MI:{} HG:{} CA:{} — MATH IS SOUND{}", 
+                 DIAMOND_SPARKLE, sbtSize, handleSize, handleSizeAligned, RG, MI, HG, CA, RESET);
 
-    // ── EXTRACT HANDLES — USING THE ONE TRUE g_ext
+    if (sbtSize == 0) {
+        LOG_FATAL_CAT("PIPELINE", "{}FATAL: SBT size calculated as 0 — alignment math failed or driver lying{}", BLOOD_RED, RESET);
+        std::abort();
+    }
+
+    // ── STEP 6: EXTRACT HANDLES — THIS IS WHERE NVIDIA/AMD/INTEL CAN LIE
     std::vector<uint8_t> handles(totalGroups * handleSize);
-    VK_CHECK(VK_GET_RT_GROUP_HANDLES(stone_device(), *rtPipeline_, 0, totalGroups,
-                                     handles.size(), handles.data()),
-             "Failed to extract shader group handles — the photons weep");
+    VkResult handleRes = VK_GET_RT_GROUP_HANDLES(
+        stone_device(), *rtPipeline_, 0, totalGroups,
+        handles.size(), handles.data()
+    );
 
-    // ── FORGE SBT VIA BUFFERMANAGER — PURE EMPIRE
-    uint64_t sbtHandle = BufferManager::create(
-        sbtSize,
+    if (handleRes != VK_SUCCESS) {
+        LOG_FATAL_CAT("PIPELINE", "{}FATAL: vkGetRayTracingShaderGroupHandlesKHR failed: {} — DRIVER REJECTED THE CROWN{}", 
+                      BLOOD_RED, string_VkResult(handleRes), RESET);
+        LOG_CID("CID screams — \"THE HANDLES ARE GONE! THE DRIVER TOOK THEM!\"");
+        std::abort();
+    }
+
+    LOG_SUCCESS_CAT("PIPELINE", "{}HANDLES EXTRACTED — {} groups × {}B = {}B — THE CROWN HAS SUBSTANCE{}", 
+                    EMERALD_GREEN, totalGroups, handleSize, handles.size(), RESET);
+
+    // ── STEP 7: FORGE THE BUFFER
+    uint64_t sbtHandle = BufferManager::create(sbtSize,
         VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR |
         VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
         VK_BUFFER_USAGE_TRANSFER_DST_BIT,
         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-        "SBT_CROWN_OF_AMOURANTH"
-    );
+        "SBT_CROWN_OF_AMOURANTH");
 
-    VkBuffer sbtBuffer = RAW_BUFFER(sbtHandle);
-    if (!sbtBuffer) {
-        LOG_FATAL_CAT("PIPELINE", "{}FAILED TO FORGE SBT BUFFER — THE EMPIRE FALLS{}", BLOOD_RED, RESET);
-        return;
+    if (!sbtHandle) {
+        LOG_FATAL_CAT("PIPELINE", "{}FATAL: BufferManager failed to allocate SBT — out of VRAM or driver hate{}", BLOOD_RED, RESET);
+        std::abort();
     }
 
-    // ── MAP + FILL HANDLES
     void* data = BufferManager::map(sbtHandle);
     if (!data) {
-        LOG_FATAL_CAT("PIPELINE", "{}FAILED TO MAP SBT — PHOTONS CANNOT SEE THE CROWN{}", BLOOD_RED, RESET);
         BufferManager::destroy(sbtHandle);
-        return;
+        LOG_FATAL_CAT("PIPELINE", "{}FATAL: Failed to map SBT buffer — driver or memory corruption{}", BLOOD_RED, RESET);
+        std::abort();
     }
 
+    // ── WRITE THE TRUTH
     auto write = [&](uint32_t idx, VkDeviceSize regionOffset) {
         memcpy((uint8_t*)data + regionOffset + idx * handleSizeAligned,
                handles.data() + idx * handleSize, handleSize);
     };
 
     uint32_t idx = 0;
-    for (uint32_t i = 0; i < raygenGroupCount_;   ++i) write(idx++, raygenOffset);
-    for (uint32_t i = 0; i < missGroupCount_;     ++i) write(idx++, missOffset);
-    for (uint32_t i = 0; i < hitGroupCount_;      ++i) write(idx++, hitOffset);
-    for (uint32_t i = 0; i < callableGroupCount_; ++i) write(idx++, callableOffset);
+    for (uint32_t i = 0; i < RG; ++i) write(idx++, raygenOffset);
+    for (uint32_t i = 0; i < MI; ++i) write(idx++, missOffset);
+    for (uint32_t i = 0; i < HG; ++i) write(idx++, hitOffset);
+    for (uint32_t i = 0; i < CA; ++i) write(idx++, callableOffset);
 
     BufferManager::unmap(sbtHandle);
-
     VkDeviceAddress addr = BufferManager::get_device_address(sbtHandle);
 
-    // ── STORE REGIONS — USING g_ext MACROS FOR CONSISTENCY
-    raygenSbtRegion_   = { addr + raygenOffset,   handleSizeAligned, raygenGroupCount_   * handleSizeAligned };
-    missSbtRegion_     = { addr + missOffset,     handleSizeAligned, missGroupCount_     * handleSizeAligned };
-    hitSbtRegion_      = { addr + hitOffset,      handleSizeAligned, hitGroupCount_      * handleSizeAligned };
-    callableSbtRegion_ = { addr + callableOffset, handleSizeAligned, callableGroupCount_ * handleSizeAligned };
+    if (addr == 0) {
+        LOG_FATAL_CAT("PIPELINE", "{}FATAL: SBT device address is 0 — buffer_device_address extension broken{}", BLOOD_RED, RESET);
+        std::abort();
+    }
 
-    // ── STORE THE CROWN
-    sbtBuffer_   = Handle<VkBuffer>(sbtBuffer, stone_device(),
-        [](VkDevice d, VkBuffer b, auto) { vkDestroyBuffer(d, b, nullptr); });
-    sbtMemory_   = Handle<VkDeviceMemory>(BUFFER_MEMORY(sbtHandle), stone_device(),
-        [](VkDevice d, VkDeviceMemory m, auto) { vkFreeMemory(d, m, nullptr); });
+    // ── DESTROY OLD, SEAL NEW
+    if (sbtHandle_ != 0) BufferManager::destroy(sbtHandle_);
+
+    sbtBuffer_   = Handle<VkBuffer>(RAW_BUFFER(sbtHandle), stone_device(), vkDestroyBuffer);
+    sbtMemory_   = Handle<VkDeviceMemory>(BUFFER_MEMORY(sbtHandle), stone_device(), vkFreeMemory);
     sbtHandle_   = sbtHandle;
     sbtAddress_  = addr;
     sbtSize_     = sbtSize;
 
-    LOG_SUCCESS_CAT("PIPELINE", "{}SBT FORGED IN PURE EMPIRE — Address: 0x{:016X} | Size: {} bytes — g_ext ACTIVE — PINK PHOTONS CROWNED{}", 
-                    EMERALD_GREEN, addr, sbtSize, RESET);
+    raygenSbtRegion_   = { addr + raygenOffset,   handleSizeAligned, RG * handleSizeAligned };
+    missSbtRegion_     = { addr + missOffset,     handleSizeAligned, MI * handleSizeAligned };
+    hitSbtRegion_      = { addr + hitOffset,      handleSizeAligned, HG * handleSizeAligned };
+    callableSbtRegion_ = { addr + callableOffset, handleSizeAligned, CA * handleSizeAligned };
 
-    LOG_AMOURANTH("[CAPTAIN AMOURANTH] The final binding is complete. The photons kneel.");
-    LOG_CID("CID collapses — not from sweat, but from pure joy — \"g_ext... it was always there... I never had to load it... I am free...\"");
-    LOG_KEANU("[KEANU] ...Whoa. The binding... it was always meant to be pure.");
+    // ── FINAL VICTORY
+    LOG_SUCCESS_CAT("PIPELINE", "{}SBT CROWN FORGED — {} bytes @ 0x{:016X} — FIRST LIGHT ACHIEVED{}", 
+                    EMERALD_GREEN, sbtSize, addr, RESET);
 
-    LOG_SUCCESS_CAT("PIPELINE", "{}FIRST LIGHT ACHIEVED — NOVEMBER 29 2025 — g_ext REIGNS — VMA EXILED — THE EMPIRE IS SEALED IN CREAM{}", VALHALLA_GOLD, RESET);
+    LOG_KEANU("[KEANU] ...Whoa. It's real.");
+    LOG_AMOURANTH("[CAPTAIN AMOURANTH] The photons... they have mass.");
+    LOG_JENSEN("[JENSEN] *smiles* Beautiful.");
+    LOG_CID("[CID] *crying, no sweat* I CAN SEE THE BYTES. THEY'RE REAL. THE CROWN LIVES.");
+    LOG_GROK("[GENTLEMAN GROK] *voice cracking* ...we did it. Against all odds. The empire is whole.");
+
+    LOG_SUCCESS_CAT("PIPELINE", "{}NOVEMBER 29 2025 — PINK PHOTONS ETERNAL — SBT VALID — RTX ASCENDED{}", VALHALLA_GOLD, RESET);
 }
 
 } // namespace RTX

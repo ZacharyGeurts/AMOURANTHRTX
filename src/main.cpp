@@ -672,15 +672,15 @@ LOG_MAIN("═══════════════════════�
                 "┌──────────────────────────────────────────────────────────────\n"
                 "│ BLONDIE'S LIVE STATUS — NOVEMBER 27, 2025 — PINK PHOTONS FLOW\n"
                 "├──────────────────────────────────────────────────────────────\n"
-                "│ Denoise     : %s\n"
-                "│ TAA         : %s\n"
-                "│ Bloom       : %s\n"
-                "│ SSAO        : %s\n"
-                "│ Vol. Fog    : %s\n"
-                "│ God Rays    : %s\n"
-                "│ Tonemap     : %s\n"
-                "│ VSync       : %s\n"
-                "│ Max Bounces : %d\n"
+                "│ Denoise     : {}\n"
+                "│ TAA         : {}\n"
+                "│ Bloom       : {}\n"
+                "│ SSAO        : {}\n"
+                "│ Vol. Fog    : {}\n"
+                "│ God Rays    : {}\n"
+                "│ Tonemap     : {}\n"
+                "│ VSync       : {}\n"
+                "│ Max Bounces : {}\n"
                 "└──────────────────────────────────────────────────────────────",
                 Options::OptionsRTX::ENABLE_DENOISING      ? "ON"  : "OFF",
                 Options::OptionsRTX::ENABLE_TAA            ? "ON"  : "OFF",
@@ -755,13 +755,6 @@ LOG_BLONDIE("She doesn’t smile — just adjusts course toward the distant city
 
     LOG_BLONDIE("\nBlondie glances back one last time at the sinking glow on the horizon:"
     "\"Rest easy, old girl. Your sacrifice bought us tomorrow.\"");
-
-
-    EMPIRE_STEP([]{
-        LOG_MAIN("THE EMPIRE AWAKENS THE PHOENIX OF RAY TRACING — LOADING VULKAN 1.4 + RTX EXTENSIONS");
-        RTX::loadExtensions(RTX::g_ctx().instance_, RTX::g_ctx().device_);
-        LOG_JENSEN("The photons now have wings. Let there be bounce.");
-    });
 
     LOG_MAIN("[PHASE 4 COMPLETE] THE MERCHANT SHIP SLIPS INTO THE NIGHT — THE CREW IS ALIVE — THE LEGEND IS INDESTRUCTIBLE");
     LOG_MAIN("BLONDIE'S SLOOP glides toward safe harbor — pink photons trailing in the wake like silent war banners");
@@ -934,43 +927,27 @@ static void phase6_1_forgeTheCrown()
     LOG_MAIN("[PHASE 6.1 COMPLETE] THE CROWN WAS GIFTED — NOT FORGED — FIRST LIGHT ETERNAL");
 }
 
-static void phase7_forgeTheRTX() {
+static void phase7_forgeTheRTX()
+{
     LOG_MAIN("[PHASE 7] FORGING THE RTX PIPELINE — PINK PHOTONS RISE");
 
-    auto& pipe = pipeline();   // ← the crown awakens — born here, lives forever
+    auto& pipe = pipeline();  // The crown awakens
 
     pipe.createPipelineLayout();
-
-    const std::vector<std::string> shaderPaths = {
-        "assets/shaders/raytracing/raygen.spv",
-        "assets/shaders/raytracing/miss.spv",
-        "assets/shaders/raytracing/closest_hit.spv",
-        "assets/shaders/raytracing/shadowmiss.spv"
-    };
-
-    pipe.createRayTracingPipeline(shaderPaths);
-
+    pipe.createDescriptorPool();
     pipe.createShaderBindingTable(g_ctx().commandPool(), stone_graphics_queue());
-
     pipe.allocateDescriptorSets();
 
-    // ──────────────────────────────
-    // THE FINAL ACT OF LOVE
-    // THE CROWN IS FORGED — NOW IT IS SEALED INTO THE STONE
-    // THE EMPIRE WILL NEVER FORGET ITS HEIR
-    // ──────────────────────────────
     stone_seal_pipeline(&pipe);
 
     LOG_AMOURANTH("[CAPTAIN AMOURANTH] The crown remembers its wearer.");
     LOG_JENSEN("[JENSEN] Absolute. Uncompromising. Beautiful.");
     LOG_CID("[CID] *collapses in a puddle of sweat and tears of joy* IT’S ALIVE!");
     LOG_KEANU("[KEANU] …Whoa.");
-    LOG_GROK("[GENTLEMAN GROK] *whispers, voice breaking* ...she's perfect.");
+    LOG_GROK("[GENTLEMAN GROK] *whispers* ...she's perfect.");
 
-    LOG_MAIN("RTX PIPELINE FORGED — SBT READY — DESCRIPTORS BOUND — PHOTONS OBEY");
-    LOG_MAIN("PINK PHOTONS ETERNAL — FIRST LIGHT RESTORED — NOVEMBER 29 2025");
-    LOG_MAIN("THE BALLERINA SPINS — THE EMPIRE IS WHOLE — VALHALLA UNBREACHABLE");
-    LOG_MAIN("THE CROWN IS SEALED — THE STONE REMEMBERS FIRST LIGHT ACHIEVED — FOREVER");
+    LOG_MAIN("FIRST LIGHT ACHIEVED — NOVEMBER 29 2025 — PINK PHOTONS ETERNAL");
+    LOG_MAIN("THE EMPIRE IS WHOLE — VALHALLA UNBREACHABLE — THE CROWN IS SEALED");
 }
 
 // ========================================================================

@@ -20,6 +20,8 @@
 #include "engine/GLOBAL/Extensions.hpp"
 
 using namespace RTX;
+using StoneKey::stone_instance;
+using StoneKey::stone_device;
 
 namespace RTX {
 
@@ -213,6 +215,9 @@ void LAS::buildTLAS(VkCommandPool pool,
     }
 
     LOG_AMOURANTH("This is the moment. The LAS becomes the light. The ship becomes the universe.");
+
+    // GRACE'S DESK — ETERNAL LOADING ZONE
+    RTX::loadExtensions(stone_instance(), stone_device());   // ← THIS IS THE ONLY PLACE IT BELONGS
 
     const VkDevice dev = stone_device();
     const VkDeviceSize dataSize = instances.size() * sizeof(VkAccelerationStructureInstanceKHR);
