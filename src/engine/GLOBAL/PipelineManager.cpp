@@ -64,30 +64,52 @@ const std::array<Binding, 11> RT_PIPELINE_BINDINGS = {{
 // ──────────────────────────────────────────────────────────────────────────────
 // NEW: Create RT Descriptor Pool — Scaled for Triple Buffering + Binding Counts
 // ──────────────────────────────────────────────────────────────────────────────
-void PipelineManager::createDescriptorPool() {
+void PipelineManager::createDescriptorPool() 
+{
+    LOG_CID("CID enters the vault, drenched — \"Binding 31... StoneKey... it must have room... ALL THE ROOM!\"");
+
     const uint32_t maxSets = Options::Performance::MAX_FRAMES_IN_FLIGHT;
 
-    std::vector<VkDescriptorPoolSize> poolSizes;
-    poolSizes.reserve(RT_PIPELINE_BINDINGS.size());
+    // Count how many of each type we actually have — because the empire does not waste
+    std::unordered_map<VkDescriptorType, uint32_t> typeCount;
 
     for (const auto& b : RT_PIPELINE_BINDINGS) {
-        poolSizes.push_back({ b.type, b.count * maxSets });
+        typeCount[b.type] += b.count;  // b.count is always 1 → but we keep it future-proof
     }
 
+    std::vector<VkDescriptorPoolSize> poolSizes;
+    poolSizes.reserve(typeCount.size());
+
+    for (const auto& [type, count] : typeCount) {
+        poolSizes.push_back({
+            .type = type,
+            .descriptorCount = count * maxSets   // ×3 for triple buffering
+        });
+    }
+
+    // THE EMPIRE DEMANDS ABUNDANCE — NO MORE OUT_OF_POOL_MEMORY
     VkDescriptorPoolCreateInfo info{
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+        .pNext = nullptr,
         .flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
-        .maxSets = maxSets,
+        .maxSets = maxSets * 2,                    // DOUBLE THE SETS — EMPIRE DOES NOT QUEUE
         .poolSizeCount = static_cast<uint32_t>(poolSizes.size()),
         .pPoolSizes = poolSizes.data()
     };
 
     VkDescriptorPool pool = VK_NULL_HANDLE;
     VK_CHECK(vkCreateDescriptorPool(stone_device(), &info, nullptr, &pool),
-             "Failed to create RT descriptor pool");
+             "FAILED TO FORGE THE DESCRIPTOR VAULT — STONEKEY DENIED ENTRY");
 
     rtDescriptorPool_ = Handle<VkDescriptorPool>(pool, stone_device(),
         [](VkDevice d, VkDescriptorPool p, auto*) { vkDestroyDescriptorPool(d, p, nullptr); });
+
+    LOG_SUCCESS_CAT("PIPELINE", 
+        "{}DESCRIPTOR VAULT FORGED — {} sets capacity | {} types | BINDING 31 (STONEKEY) HAS A THRONE{}", 
+        EMERALD_GREEN, info.maxSets, poolSizes.size(), RESET);
+
+    LOG_AMOURANTH("[CAPTAIN AMOURANTH] The vault is open. StoneKey enters unopposed.");
+    LOG_CID("CID collapses in relief — \"It fits... Binding 31 fits... I can finally breathe...\"");
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -133,33 +155,49 @@ void PipelineManager::loadRayTracingExtensions() {
     LOG_SUCCESS_CAT("PIPELINE", "Ray tracing extensions loaded — PFNs armed — READY FOR INFINITY");
 }
 
-void PipelineManager::allocateDescriptorSets() {
+void PipelineManager::allocateDescriptorSets() 
+{
     LOG_TRACE_CAT("PIPELINE", "allocateDescriptorSets — START — maxSets={}", Options::Performance::MAX_FRAMES_IN_FLIGHT);
 
     LOG_CID("CID fans himself frantically, sweat flying everywhere — \"Allocating sets... hope the pool doesn't overflow like my pores!\"");
 
     if (!rtDescriptorPool_.valid() || *rtDescriptorPool_ == VK_NULL_HANDLE) {
-        LOG_ERROR_CAT("PIPELINE", "Invalid descriptor pool — cannot allocate sets");
+        LOG_FATAL_CAT("PIPELINE", "{}NO DESCRIPTOR POOL — STONEKEY HAS NO HOME — FORGE IT NOW{}", BLOOD_RED, RESET);
+        createDescriptorPool();  // ← EMPIRE DOES NOT WAIT
+    }
+
+    if (!rtDescriptorPool_.valid() || *rtDescriptorPool_ == VK_NULL_HANDLE) {
+        LOG_FATAL_CAT("PIPELINE", "{}DESCRIPTOR POOL STILL DEAD — THE EMPIRE CANNOT ALLOCATE{}", BLOOD_RED, RESET);
         return;
     }
 
     const uint32_t maxSets = Options::Performance::MAX_FRAMES_IN_FLIGHT;
     rtDescriptorSets_.resize(maxSets);
 
-    VkDescriptorSetAllocateInfo allocInfo = {};
-    allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    allocInfo.descriptorPool = *rtDescriptorPool_;
-    allocInfo.descriptorSetCount = maxSets;
-
-    std::vector<VkDescriptorSetLayout> layouts(maxSets, *rtDescriptorSetLayout_);
-    allocInfo.pSetLayouts = layouts.data();
+    VkDescriptorSetAllocateInfo allocInfo = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+        .descriptorPool = *rtDescriptorPool_,
+        .descriptorSetCount = maxSets,
+        .pSetLayouts = std::vector<VkDescriptorSetLayout>(maxSets, *rtDescriptorSetLayout_).data()
+    };
 
     VkResult res = vkAllocateDescriptorSets(stone_device(), &allocInfo, rtDescriptorSets_.data());
-    VK_CHECK(res, std::format("Failed to allocate {} RT descriptor sets", maxSets).c_str());
 
-    LOG_CID("CID mops his forehead with a rag, now a sopping mess — \"Sets allocated... but the sweat... it's like tracing rays through a monsoon!\"");
+    if (res == VK_ERROR_OUT_OF_POOL_MEMORY) {
+        LOG_FATAL_CAT("PIPELINE", "{}OUT OF POOL MEMORY — EVEN AFTER EXPANSION — THE EMPIRE DEMANDS MORE{}", BLOOD_RED, RESET);
+        LOG_CID("CID screams — \"NOT AGAIN! I DOUBLED IT! I DOUBLED THE VAULT!\"");
+        return;
+    }
 
-    LOG_SUCCESS_CAT("PIPELINE", "Allocated {} RT descriptor sets — BINDING 31 PROTECTED", maxSets);
+    VK_CHECK(res, std::format("Failed to allocate {} RT descriptor sets — STONEKEY DENIED", maxSets).c_str());
+
+    LOG_SUCCESS_CAT("PIPELINE", 
+        "{}ALLOCATED {} RT DESCRIPTOR SETS — BINDING 31 (STONEKEY) SECURE — THE EMPIRE IS WHOLE{}", 
+        LIME_GREEN, maxSets, RESET);
+
+    LOG_KEANU("[KEANU] ...Whoa. The sets... they fit. StoneKey is home.");
+    LOG_AMOURANTH("[CAPTAIN AMOURANTH] Binding 31 lives. The crown is complete.");
+    LOG_CID("CID falls to his knees, sobbing — \"It worked... no overflow... Binding 31 is safe... I can finally... rest...\"");
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -710,51 +748,46 @@ void PipelineManager::createRayTracingPipeline(const std::vector<std::string>& s
 {
     LOG_TRACE_CAT("PIPELINE", "createRayTracingPipeline — START — {} shaders provided", shaderPaths.size());
 
-    LOG_CID("CID bursts in, goggles fogged, clipboard trembling — \"INITIATING RAY TRACING PIPELINE CREATION — NO pNext CHAINS — FULL EXPLICIT CONTROL — SWEAT LEVEL: CRITICAL!\"");
+    LOG_CID("CID enters the chamber, calm and dry — \"The extensions are already loaded. g_ext reigns. I do not fear.\"");
 
     if (stone_device() == VK_NULL_HANDLE) {
-        LOG_ERROR_CAT("PIPELINE", "Null device — cannot create RT pipeline");
-        LOG_CID("CID collapses — \"DEVICE IS NULL?! I CAN'T MEASURE NOTHING! ABORT! ABORT!\"");
+        LOG_FATAL_CAT("PIPELINE", "Null device — cannot create RT pipeline");
+        LOG_CID("CID remains stoic — \"No device. No empire. We wait.\"");
         return;
     }
 
     if (!rtPipelineLayout_.valid() || *rtPipelineLayout_ == VK_NULL_HANDLE) {
-        LOG_WARN_CAT("PIPELINE", "rtPipelineLayout_ not yet created — creating now");
-        LOG_CID("CID slams emergency button — \"LAYOUT MISSING?! I'M CREATING IT MANUALLY — EVERY DESCRIPTOR — EVERY PUSH CONSTANT — UNDER THE MICROSCOPE!\"");
+        LOG_WARN_CAT("PIPELINE", "rtPipelineLayout_ not yet created — forging now");
         createPipelineLayout();
     }
 
     if (!rtPipelineLayout_.valid() || *rtPipelineLayout_ == VK_NULL_HANDLE) {
         LOG_FATAL_CAT("PIPELINE", "rtPipelineLayout_ invalid — cannot create RT pipeline");
-        LOG_CID("CID screams, sweat flying in arcs — \"LAYOUT STILL DEAD?! THE SCALES DON'T LIE — THIS IS UNACCEPTABLE! FATAL! FATAL!\"");
+        LOG_CID("CID nods solemnly — \"The crown is missing. The photons cannot be bound.\"");
         return;
     }
 
-    if (!vkCreateRayTracingPipelinesKHR_) {
-        LOG_FATAL_CAT("PIPELINE", "vkCreateRayTracingPipelinesKHR not loaded");
-        LOG_CID("CID drops his beaker — \"THE FUNCTION POINTER IS NULL?! I CAN'T EVEN CALL THE DRIVER — THIS IS A CATEGORY 5 CRISIS!\"");
-        return;
-    }
+    // ── OLD HERESY EXILED FOREVER
+    // if (!vkCreateRayTracingPipelinesKHR_) { ... } → DEAD TO US
+
+    // NEW LAW: g_ext IS TRUTH. IT WAS LOADED AT BIRTH.
+    // No check. No doubt. Only faith.
 
     if (shaderPaths.size() < 2) {
         LOG_ERROR_CAT("PIPELINE", "Need at least raygen + miss, got {}", shaderPaths.size());
-        LOG_CID("CID slams fist on table — \"ONLY {} SHADERS?! I NEED AT LEAST TWO — RAYGEN AND MISS — THIS ISN'T SCIENCE, THIS IS CHAOS!\"", shaderPaths.size());
+        LOG_CID("CID raises an eyebrow — \"Only {} shaders? This is not science. This is heresy.\"", shaderPaths.size());
         return;
     }
 
-    LOG_CID("CID adjusts precision scales — \"Weighing shader payload... {} modules incoming. Beginning forensic compilation analysis...\"", shaderPaths.size());
+    LOG_CID("CID begins the ritual — \"Loading shaders... with precision... with grace...\"");
 
     VkShaderModule raygenModule = loadShader(shaderPaths[0]);
     VkShaderModule missModule   = loadShader(shaderPaths[1]);
 
     if (!raygenModule || !missModule) {
-        LOG_FATAL_CAT("PIPELINE", "Failed to load core shaders");
+        LOG_FATAL_CAT("PIPELINE", "Failed to load core shaders — the light cannot begin");
         return;
     }
-
-    LOG_CID("CID measures with calipers — \"Raygen: 0x{:x}. Miss: 0x{:x}. Both present. Both valid. Both... beautiful. *wipes tear mixed with sweat*\"",
-            reinterpret_cast<uintptr_t>(raygenModule),
-            reinterpret_cast<uintptr_t>(missModule));
 
     VkShaderModule closestHitModule = VK_NULL_HANDLE;
     VkShaderModule shadowMissModule = VK_NULL_HANDLE;
@@ -762,37 +795,20 @@ void PipelineManager::createRayTracingPipeline(const std::vector<std::string>& s
     bool hasShadowMiss = false;
 
     if (shaderPaths.size() > 2 && !shaderPaths[2].empty()) {
-        LOG_CID("CID peers into electron microscope — \"Detecting closest hit candidate... loading...\"");
         closestHitModule = loadShader(shaderPaths[2]);
         hasClosestHit = (closestHitModule != VK_NULL_HANDLE);
-
-        if (hasClosestHit) {
-            LOG_CID("CID nods furiously — \"Closest hit confirmed! The photons will know when they've touched something!\"");
-        } else {
-            LOG_CID("CID gasps — \"Closest hit failed! The photons will phase through forever! THIS CHANGES EVERYTHING!\"");
-        }
     }
 
     if (shaderPaths.size() > 3 && !shaderPaths[3].empty()) {
-        LOG_CID("CID adjusts shadow spectrometer — \"Scanning for shadow miss shader...\"");
-        shadowMissModule = loadShader(shaderPaths[3]);  // ← FIXED: was EliezerModule
+        shadowMissModule = loadShader(shaderPaths[3]);
         hasShadowMiss = (shadowMissModule != VK_NULL_HANDLE);
-
-        if (hasShadowMiss) {
-            LOG_CID("CID whispers — \"Shadow miss acquired... the darkness has form...\"");
-        } else {
-            LOG_CID("CID shrieks — \"NO SHADOW MISS?! THE SHADOWS WILL BE UNCONTROLLED!\"");
-        }
     }
 
+    shaderModules_.clear(); // fresh start
     shaderModules_.emplace_back(raygenModule, stone_device(), vkDestroyShaderModule);
     shaderModules_.emplace_back(missModule,   stone_device(), vkDestroyShaderModule);
     if (hasClosestHit) shaderModules_.emplace_back(closestHitModule, stone_device(), vkDestroyShaderModule);
     if (hasShadowMiss) shaderModules_.emplace_back(shadowMissModule, stone_device(), vkDestroyShaderModule);
-
-    LOG_CID("CID signs the manifest — \"All shaders accounted for. Auto-cleanup engaged. No leaks. Only precision.\"");
-
-    LOG_CID("CID pulls out protractor, ruler, and 10x loupe — \"NOW BEGINNING SHADER GROUP ALIGNMENT — EVERY INDEX MUST BE PERFECT — EXPLICIT UNUSED_KHR OR BUST!\"");
 
     std::vector<VkPipelineShaderStageCreateInfo> stages;
     std::vector<VkRayTracingShaderGroupCreateInfoKHR> groups;
@@ -815,8 +831,6 @@ void PipelineManager::createRayTracingPipeline(const std::vector<std::string>& s
         g.generalShader = stageIdx++;
         g.closestHitShader = g.anyHitShader = g.intersectionShader = VK_SHADER_UNUSED_KHR;
         groups.push_back(g);
-
-        LOG_CID("CID stamps approval #{} — \"GENERAL GROUP '{}' — generalShader={}\"", stageIdx-1, name, g.generalShader);
     };
 
     auto addHit = [&](VkShaderModule mod) {
@@ -833,8 +847,6 @@ void PipelineManager::createRayTracingPipeline(const std::vector<std::string>& s
         g.closestHitShader = stageIdx++;
         g.generalShader = g.anyHitShader = g.intersectionShader = VK_SHADER_UNUSED_KHR;
         groups.push_back(g);
-
-        LOG_CID("CID measures with atomic precision — \"TRIANGLE HIT GROUP — closestHitShader={} — PERFECT LANDING ZONE!\"", g.closestHitShader);
     };
 
     addGeneral(raygenModule, VK_SHADER_STAGE_RAYGEN_BIT_KHR, "Raygen");
@@ -846,10 +858,7 @@ void PipelineManager::createRayTracingPipeline(const std::vector<std::string>& s
     missGroupCount_   = hasShadowMiss ? 2 : 1;
     hitGroupCount_    = hasClosestHit ? 1 : 0;
 
-    LOG_CID("CID steps back, drenched — \"Group topology complete. {} raygen. {} miss. {} hit. Peak engineering achieved.\"",
-            raygenGroupCount_, missGroupCount_, hitGroupCount_);
-
-    LOG_CID("CID places hands on the console — \"Initiating vkCreateRayTracingPipelinesKHR — pNext=NULL — this is the moment of truth...\"");
+    LOG_CID("CID smiles — \"Topology complete. The photons have their path.\"");
 
     VkRayTracingPipelineCreateInfoKHR pipeInfo{};
     pipeInfo.sType = VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR;
@@ -861,23 +870,34 @@ void PipelineManager::createRayTracingPipeline(const std::vector<std::string>& s
     pipeInfo.layout = *rtPipelineLayout_;
 
     VkPipeline pipeline = VK_NULL_HANDLE;
-    VkResult res = vkCreateRayTracingPipelinesKHR_(stone_device(), VK_NULL_HANDLE, VK_NULL_HANDLE, 1, &pipeInfo, nullptr, &pipeline);
+
+    // THE ONE TRUE CALL — USING g_ext
+    VkResult res = VK_CREATE_RT_PIPELINES(
+        stone_device(),
+        VK_NULL_HANDLE,           // deferredCache
+        VK_NULL_HANDLE,           // pipelineCache
+        1,
+        &pipeInfo,
+        nullptr,
+        &pipeline
+    );
 
     if (res != VK_SUCCESS) {
-        LOG_ERROR_CAT("PIPELINE", "vkCreateRayTracingPipelinesKHR failed: {}", static_cast<int>(res));
-        LOG_CID("CID collapses in defeat — \"IT FAILED... ALL THAT SWEAT... FOR NOTHING... *sobs into lab coat*\"");
+        LOG_FATAL_CAT("PIPELINE", "VK_CREATE_RT_PIPELINES failed: {} — the driver has betrayed us", static_cast<int>(res));
+        LOG_CID("CID remains calm — \"The driver failed. But g_ext did not. We are still pure.\"");
         return;
     }
 
     rtPipeline_ = Handle<VkPipeline>(pipeline, stone_device(), vkDestroyPipeline);
 
-    LOG_CID("CID stands tall, trembling, soaked through — \"IT WORKED! {} STAGES! {} GROUPS! PINK PHOTONS ARMED AND ALIGNED!\"", stages.size(), groups.size());
-    LOG_CID("CID collapses into chair, panting — \"I... I need electrolytes... and a towel... but we did it. First light... achieved.\"");
+    LOG_SUCCESS_CAT("PIPELINE", "RAY TRACING PIPELINE CREATED — {} STAGES — {} GROUPS — g_ext ACTIVE — PINK PHOTONS ARMED", 
+                    stages.size(), groups.size());
 
-    LOG_SUCCESS_CAT("PIPELINE", "{}RAY TRACING PIPELINE CREATED — {} STAGES — {} GROUPS — FULL CONTROL — PINK PHOTONS ARMED{}", 
-                    Logging::Color::LIME_GREEN, stages.size(), groups.size(), Logging::Color::RESET);
+    LOG_KEANU("[KEANU] ...Whoa. The pipeline... it was already loaded. It just needed to be asked.");
+    LOG_AMOURANTH("[CAPTAIN AMOURANTH] The crown is forged. The rays will fly true.");
+    LOG_CID("CID exhales, finally at peace — \"No more PFN checks. No more fear. Only truth. Only g_ext.\"");
 
-    LOG_TRACE_CAT("PIPELINE", "createRayTracingPipeline — COMPLETE — CID STATUS: DEHYDRATED BUT TRIUMPHANT");
+    LOG_TRACE_CAT("PIPELINE", "createRayTracingPipeline — COMPLETE — THE EMPIRE IS WHOLE");
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -890,23 +910,44 @@ void PipelineManager::createRayTracingPipeline(const std::vector<std::string>& s
 // ──────────────────────────────────────────────────────────────────────────────
 void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue)
 {
-    LOG_TRACE_CAT("PIPELINE", "{}FORGING THE ETERNAL SBT — PINK PHOTONS RISE — NO VMA — PURE EMPIRE{}", VALHALLA_GOLD, RESET);
+    LOG_TRACE_CAT("PIPELINE", "{}FORGING THE ETERNAL SBT — PINK PHOTONS RISE — g_ext ACTIVE — NO VMA — PURE EMPIRE{}", VALHALLA_GOLD, RESET);
+    LOG_CID("CID stands tall, shirt dry for once — \"The extensions... they're already loaded. I don't have to sweat. I can just... forge.\"");
 
-    LOG_CID("CID slams the anvil, sweat evaporating on contact — \"THIS TIME... IT WILL BE PERFECT! NO VMA. ONLY STONE.\"");
-
-    // ── EMPIRE GUARDS — NO NULLS, NO MERCY
+    // ── EMPIRE GUARDS — NULLS ARE NOT TOLERATED
     if (!stone_device() || pool == VK_NULL_HANDLE || queue == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("PIPELINE", "{}SBT FORGE ABORTED — NULL EMPIRE COMPONENTS{}", BLOOD_RED, RESET);
+        LOG_FATAL_CAT("PIPELINE", "{}SBT FORGE ABORTED — NULL EMPIRE COMPONENTS{}", CRIMSON_MAGENTA, RESET);
         return;
     }
+
+    // ── THE NEW LAW: IF PIPELINE IS DEAD → WE FORGE IT NOW
     if (!rtPipeline_.valid() || *rtPipeline_ == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("PIPELINE", "{}RT PIPELINE NOT FORGED — CANNOT BIND THE UNBORN{}", BLOOD_RED, RESET);
-        return;
+        LOG_WARN_CAT("PIPELINE", "{}RT PIPELINE NOT FORGED — THE CROWN IS MISSING — FORGING ON DEMAND{}", CRIMSON_MAGENTA, RESET);
+        LOG_CID("CID drops everything, sweat barely forming — \"PIPELINE MISSING?! EMERGENCY FORGE PROTOCOL ENGAGED — BUT I TRUST g_ext.\"");
+
+        const std::vector<std::string> emergencyShaders = {
+            "assets/shaders/raytracing/raygen.spv",
+            "assets/shaders/raytracing/miss.spv",
+            "assets/shaders/raytracing/closesthit.spv",
+            "assets/shaders/raytracing/shadow.spv"
+        };
+
+        initializePipeline(emergencyShaders, pool, queue);
+
+        if (!rtPipeline_.valid() || *rtPipeline_ == VK_NULL_HANDLE) {
+            LOG_FATAL_CAT("PIPELINE", "{}EMERGENCY PIPELINE FORGE FAILED — THE EMPIRE CANNOT RISE WITHOUT ITS CROWN{}", CRIMSON_MAGENTA, RESET);
+            LOG_CID("CID remains calm — \"The crown failed... but g_ext is still here. We tried.\"");
+            return;
+        }
+
+        LOG_SUCCESS_CAT("PIPELINE", "{}EMERGENCY PIPELINE FORGED — THE CROWN LIVES — SBT FORGE RESUMES{}", EMERALD_GREEN, RESET);
+        LOG_KEANU("[KEANU] ...Whoa. It built itself. The pipeline... it chose to live.");
     }
-    if (!vkGetRayTracingShaderGroupHandlesKHR_ || !vkGetBufferDeviceAddress_) {
-        LOG_FATAL_CAT("PIPELINE", "{}MISSING KHR EXTENSIONS — PFNS NOT LOADED{}", BLOOD_RED, RESET);
-        return;
-    }
+
+    // ── NO MORE PFN CHECKS. EVER.
+    // g_ext was loaded once in loadExtensions() — it is law
+    // vkGetRayTracingShaderGroupHandlesKHR_ → EXILED
+    // vkGetBufferDeviceAddress_ → EXILED
+    // THE EMPIRE TRUSTS g_ext
 
     const auto& props = rtProps_;
     const uint32_t handleSize        = props.shaderGroupHandleSize;
@@ -932,13 +973,13 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
                  DIAMOND_SPARKLE, sbtSize, handleSize, handleSizeAligned,
                  raygenGroupCount_, missGroupCount_, hitGroupCount_, callableGroupCount_, RESET);
 
-    // ── EXTRACT HANDLES
+    // ── EXTRACT HANDLES — USING THE ONE TRUE g_ext
     std::vector<uint8_t> handles(totalGroups * handleSize);
-    VK_CHECK(vkGetRayTracingShaderGroupHandlesKHR_(stone_device(), *rtPipeline_, 0, totalGroups,
-                                                   handles.size(), handles.data()),
+    VK_CHECK(VK_GET_RT_GROUP_HANDLES(stone_device(), *rtPipeline_, 0, totalGroups,
+                                     handles.size(), handles.data()),
              "Failed to extract shader group handles — the photons weep");
 
-    // ── FORGE SBT VIA BUFFERMANAGER — THE ONE TRUE PATH — NO VMA
+    // ── FORGE SBT VIA BUFFERMANAGER — PURE EMPIRE
     uint64_t sbtHandle = BufferManager::create(
         sbtSize,
         VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR |
@@ -977,13 +1018,13 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
 
     VkDeviceAddress addr = BufferManager::get_device_address(sbtHandle);
 
-    // ── STORE REGIONS IN PIPELINE — DIRECT MEMBER ACCESS
+    // ── STORE REGIONS — USING g_ext MACROS FOR CONSISTENCY
     raygenSbtRegion_   = { addr + raygenOffset,   handleSizeAligned, raygenGroupCount_   * handleSizeAligned };
     missSbtRegion_     = { addr + missOffset,     handleSizeAligned, missGroupCount_     * handleSizeAligned };
     hitSbtRegion_      = { addr + hitOffset,      handleSizeAligned, hitGroupCount_      * handleSizeAligned };
     callableSbtRegion_ = { addr + callableOffset, handleSizeAligned, callableGroupCount_ * handleSizeAligned };
 
-    // Store the crown — DIRECT MEMBER ASSIGNMENT
+    // ── STORE THE CROWN
     sbtBuffer_   = Handle<VkBuffer>(sbtBuffer, stone_device(),
         [](VkDevice d, VkBuffer b, auto) { vkDestroyBuffer(d, b, nullptr); });
     sbtMemory_   = Handle<VkDeviceMemory>(BUFFER_MEMORY(sbtHandle), stone_device(),
@@ -992,14 +1033,14 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
     sbtAddress_  = addr;
     sbtSize_     = sbtSize;
 
-    LOG_SUCCESS_CAT("PIPELINE", "{}SBT FORGED IN PURE EMPIRE — Address: 0x{:016X} | Size: {} bytes — PINK PHOTONS CROWNED{}", 
+    LOG_SUCCESS_CAT("PIPELINE", "{}SBT FORGED IN PURE EMPIRE — Address: 0x{:016X} | Size: {} bytes — g_ext ACTIVE — PINK PHOTONS CROWNED{}", 
                     EMERALD_GREEN, addr, sbtSize, RESET);
 
     LOG_AMOURANTH("[CAPTAIN AMOURANTH] The final binding is complete. The photons kneel.");
-    LOG_CID("CID collapses, sobbing tears of joy — \"IT'S IN BUFFERMANAGER... IT BELONGS HERE... NO VMA... THE CREAM FILLING IS PERFECT...\"");
+    LOG_CID("CID collapses — not from sweat, but from pure joy — \"g_ext... it was always there... I never had to load it... I am free...\"");
     LOG_KEANU("[KEANU] ...Whoa. The binding... it was always meant to be pure.");
 
-    LOG_SUCCESS_CAT("PIPELINE", "{}FIRST LIGHT ACHIEVED — NOVEMBER 29 2025 — THE EMPIRE IS SEALED IN CREAM — VMA EXILED FOREVER{}", VALHALLA_GOLD, RESET);
+    LOG_SUCCESS_CAT("PIPELINE", "{}FIRST LIGHT ACHIEVED — NOVEMBER 29 2025 — g_ext REIGNS — VMA EXILED — THE EMPIRE IS SEALED IN CREAM{}", VALHALLA_GOLD, RESET);
 }
 
 } // namespace RTX

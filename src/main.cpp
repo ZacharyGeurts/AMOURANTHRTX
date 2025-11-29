@@ -390,7 +390,7 @@ static void createRealFinalWindow()
     LOG_SUCCESS_CAT("VULKAN", "VkInstance forged and sealed — 0x%016llX", reinterpret_cast<uint64_t>(instance));
 
     // 3. Hidden window
-    Uint32 flags = SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_HIDDEN;
+    Uint32 flags = SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
     SDL_Window* win = SDL_CreateWindow("AMOURANTH RTX — VALHALLA v∞ TURBO", w, h, flags);
     if (!win) {
         LOG_FATAL("Window creation failed: %s", SDL_GetError());
