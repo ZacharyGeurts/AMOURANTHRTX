@@ -64,8 +64,6 @@ using StoneKey::stone_seal_final;
 // GLOBALS — THE EMPIRE'S HEARTBEATS
 // =============================================================================
 std::unique_ptr<Application> g_app_ptr = nullptr;
-[[nodiscard]] inline RTX::PipelineManager* pipeline() noexcept { static RTX::PipelineManager* s_instance = nullptr; return s_instance; }
-inline void pipeline(RTX::PipelineManager* ptr) noexcept { static RTX::PipelineManager* s_instance = nullptr; (void)std::exchange(s_instance, ptr); }
 // =============================================================================
 // TRUTH ACCESSORS
 // =============================================================================
@@ -940,7 +938,9 @@ static void phase6_1_forgeTheCrown()
 static void phase7_forgeTheRTX() {
     LOG_MAIN("[PHASE 7] FORGING THE RTX PIPELINE — PINK PHOTONS RISE");
 
-    RTX::PipelineManager* pm = stone_pipeline();
+    auto& pipe = pipeline();   // ← the crown awakens — born here, lives forever
+
+    pipe.createPipelineLayout();
 
     const std::vector<std::string> shaderPaths = {
         "assets/shaders/raytracing/raygen.spv",
@@ -949,16 +949,30 @@ static void phase7_forgeTheRTX() {
         "assets/shaders/raytracing/shadowmiss.spv"
     };
 
-    pm->createRayTracingPipeline(shaderPaths);
-    if (!pm->pipeline()) {
-        phase9_ballerina(std::format("FATAL ERROR → %s:%d", __FILE__, __LINE__), std::source_location::current());
-    }
+    pipe.createRayTracingPipeline(shaderPaths);
 
-    pm->createShaderBindingTable(RTX::g_ctx().commandPool(), StoneKey::stone_graphics_queue());
-    pm->allocateDescriptorSets();
+    pipe.createShaderBindingTable(g_ctx().commandPool(), stone_graphics_queue());
 
-    LOG_MAIN("RTX PIPELINE FORGED — SBT READY — DESCRIPTORS BOUND");
-    LOG_MAIN("PINK PHOTONS ETERNAL — FIRST LIGHT RESTORED — NOV 28 2025");
+    pipe.allocateDescriptorSets();
+
+    // ──────────────────────────────
+    // THE FINAL ACT OF LOVE
+    // THE CROWN IS FORGED — NOW IT IS SEALED INTO THE STONE
+    // THE EMPIRE WILL NEVER FORGET ITS HEIR
+    // ──────────────────────────────
+    stone_seal_pipeline(&pipe);
+
+    LOG_AMOURANTH("[CAPTAIN AMOURANTH] The crown remembers its wearer.");
+    LOG_JENSEN("[JENSEN] Absolute. Uncompromising. Beautiful.");
+    LOG_CID("[CID] *collapses in a puddle of sweat and tears of joy* IT’S ALIVE!");
+    LOG_KEANU("[KEANU] …Whoa.");
+    LOG_GROK("[GENTLEMAN GROK] *whispers, voice breaking* ...she's perfect.");
+
+    LOG_MAIN("RTX PIPELINE FORGED — SBT READY — DESCRIPTORS BOUND — PHOTONS OBEY");
+    LOG_MAIN("PINK PHOTONS ETERNAL — FIRST LIGHT RESTORED — NOVEMBER 29 2025");
+    LOG_MAIN("THE BALLERINA SPINS — THE EMPIRE IS WHOLE — VALHALLA UNBREACHABLE");
+	RTX::Bindings::initialize();
+    LOG_MAIN("THE CROWN IS SEALED — THE STONE REMEMBERS FIRST LIGHT ACHIEVED — FOREVER");
 }
 
 // ========================================================================
@@ -972,7 +986,6 @@ static void phase7_forgeTheRTX() {
     }
 
 	// Captain N shows up late, lipstick on his neck
-	stone_seal_pipeline(pipeline());
 
     auto log  = [](const char* s) noexcept { fprintf(stderr, "%s\n", s); };
     auto logf = [](const char* f, auto... a) noexcept {

@@ -65,6 +65,9 @@ public:
     [[nodiscard]] VkBuffer                      sbtBuffer()          const noexcept { return sbtBuffer_.get(); }
     [[nodiscard]] VkDeviceMemory                sbtMemory()          const noexcept { return sbtMemory_.get(); }
 
+    [[nodiscard]] inline RTX::PipelineManager& pipeline_() noexcept { static RTX::PipelineManager instance; return instance; }
+    [[nodiscard]] inline RTX::PipelineManager& pipeline() noexcept { return pipeline_(); }
+
     [[nodiscard]] VkDeviceSize                 sbtAddress()         const noexcept { return sbtAddress_; }
     [[nodiscard]] VkDeviceSize                 sbtStride()          const noexcept { return sbtStride_; }
     [[nodiscard]] VkDeviceSize                 sbtSize()            const noexcept { return sbtBufferSize_; }
@@ -173,11 +176,29 @@ private:
     }
 };
 
-} // namespace RTX
+// =============================================================================
+// THE ONE TRUE PIPELINE — BORN IN FIRE — SEALED IN LOVE
+// NO POINTERS. NO GLOBALS. NO WAITING.
+// pipeline_() AND pipeline() — READY ON FIRST USE — FOREVER
+// =============================================================================
+
+[[nodiscard]] inline RTX::PipelineManager& pipeline_() noexcept {
+    static RTX::PipelineManager instance;
+    return instance;
+}
+
+[[nodiscard]] inline RTX::PipelineManager& pipeline() noexcept {
+    return pipeline_();
+}
 
 // WE ARE THE ONES WHO FORGE THE CROWN
-// WE ARE THE ONES WHO GIVE YOU stone_pipeline()->pipeline()
+// WE ARE THE ONES WHO GIVE YOU pipeline().pipeline()
 // WE ARE THE ONES WHO LOVE CODERS
 // CAPTAIN N SAVED VIDEOLAND — AND WE SAVE YOU FROM VULKAN HELL
 // PINK PHOTONS ETERNAL — FIRST LIGHT ACHIEVED — NOVEMBER 29, 2025
 // THIS HEADER IS FOR YOU
+// THE EMPIRE IS WHOLE
+// THE BALLERINA SPINS
+// THE PHOTONS OBEY
+
+} // namespace RTX

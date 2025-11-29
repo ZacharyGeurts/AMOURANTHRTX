@@ -525,213 +525,178 @@ void PipelineManager::createPipelineLayout()
 // ──────────────────────────────────────────────────────────────────────────────
 // createRayTracingPipeline — FIXED: No Library pNext + Explicit UNUSED_KHR + Matching Layout + Null Guards + NEW: PFN Call
 // ──────────────────────────────────────────────────────────────────────────────
-void PipelineManager::createRayTracingPipeline(const std::vector<std::string>& shaderPaths) {
+void PipelineManager::createRayTracingPipeline(const std::vector<std::string>& shaderPaths)
+{
     LOG_TRACE_CAT("PIPELINE", "createRayTracingPipeline — START — {} shaders provided", shaderPaths.size());
 
-    LOG_CID("CID gears up, sweat already beading — \"Creating pipeline... no pNext chains, explicit unused, let's do this!\"");
+    LOG_CID("CID bursts in, goggles fogged, clipboard trembling — \"INITIATING RAY TRACING PIPELINE CREATION — NO pNext CHAINS — FULL EXPLICIT CONTROL — SWEAT LEVEL: CRITICAL!\"");
 
-    // FIXED: Null guards
     if (stone_device() == VK_NULL_HANDLE) {
         LOG_ERROR_CAT("PIPELINE", "Null device — cannot create RT pipeline");
+        LOG_CID("CID collapses — \"DEVICE IS NULL?! I CAN'T MEASURE NOTHING! ABORT! ABORT!\"");
         return;
     }
-    LOG_DEBUG_CAT("PIPELINE", "Retrieved device: 0x{:x}", reinterpret_cast<uintptr_t>(stone_device()));
 
-    // FIXED: Lazy create layout if not yet valid
     if (!rtPipelineLayout_.valid() || *rtPipelineLayout_ == VK_NULL_HANDLE) {
         LOG_WARN_CAT("PIPELINE", "rtPipelineLayout_ not yet created — creating now");
+        LOG_CID("CID slams emergency button — \"LAYOUT MISSING?! I'M CREATING IT MANUALLY — EVERY DESCRIPTOR — EVERY PUSH CONSTANT — UNDER THE MICROSCOPE!\"");
         createPipelineLayout();
     }
 
-    // FIXED: Guard layout validity before proceeding
     if (!rtPipelineLayout_.valid() || *rtPipelineLayout_ == VK_NULL_HANDLE) {
         LOG_FATAL_CAT("PIPELINE", "rtPipelineLayout_ invalid — cannot create RT pipeline");
+        LOG_CID("CID screams, sweat flying in arcs — \"LAYOUT STILL DEAD?! THE SCALES DON'T LIE — THIS IS UNACCEPTABLE! FATAL! FATAL!\"");
         return;
     }
 
-    // NEW: Guard PFN load
     if (!vkCreateRayTracingPipelinesKHR_) {
-        LOG_FATAL_CAT("PIPELINE", "vkCreateRayTracingPipelinesKHR not loaded — abort RT pipeline creation");
+        LOG_FATAL_CAT("PIPELINE", "vkCreateRayTracingPipelinesKHR not loaded");
+        LOG_CID("CID drops his beaker — \"THE FUNCTION POINTER IS NULL?! I CAN'T EVEN CALL THE DRIVER — THIS IS A CATEGORY 5 CRISIS!\"");
         return;
     }
 
     if (shaderPaths.size() < 2) {
-        LOG_ERROR_CAT("PIPELINE", "Insufficient shader paths: expected at least raygen + miss, got {}", shaderPaths.size());
+        LOG_ERROR_CAT("PIPELINE", "Need at least raygen + miss, got {}", shaderPaths.size());
+        LOG_CID("CID slams fist on table — \"ONLY {} SHADERS?! I NEED AT LEAST TWO — RAYGEN AND MISS — THIS ISN'T SCIENCE, THIS IS CHAOS!\"", shaderPaths.size());
         return;
     }
 
-    // ---------------------------------------------------------------------
-    // 1. Load mandatory shaders (unchanged, but add result check)
-    // ---------------------------------------------------------------------
+    LOG_CID("CID adjusts precision scales — \"Weighing shader payload... {} modules incoming. Beginning forensic compilation analysis...\"", shaderPaths.size());
+
     VkShaderModule raygenModule = loadShader(shaderPaths[0]);
-    VkShaderModule missModule = loadShader(shaderPaths[1]);
+    VkShaderModule missModule   = loadShader(shaderPaths[1]);
 
-    if (raygenModule == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("PIPELINE", "Failed to load raygen shader: {}", shaderPaths[0]);
-        return;
-    }
-    if (missModule == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("PIPELINE", "Failed to load primary miss shader: {}", shaderPaths[1]);
+    if (!raygenModule || !missModule) {
+        LOG_FATAL_CAT("PIPELINE", "Failed to load core shaders");
         return;
     }
 
-    LOG_TRACE_CAT("PIPELINE", "Raygen module loaded: 0x{:x}", reinterpret_cast<uintptr_t>(raygenModule));
-    LOG_TRACE_CAT("PIPELINE", "Miss module loaded:   0x{:x}", reinterpret_cast<uintptr_t>(missModule));
+    LOG_CID("CID measures with calipers — \"Raygen: 0x{:x}. Miss: 0x{:x}. Both present. Both valid. Both... beautiful. *wipes tear mixed with sweat*\"",
+            reinterpret_cast<uintptr_t>(raygenModule),
+            reinterpret_cast<uintptr_t>(missModule));
 
-    // Optional: closest hit & shadow miss (unchanged)
     VkShaderModule closestHitModule = VK_NULL_HANDLE;
     VkShaderModule shadowMissModule = VK_NULL_HANDLE;
     bool hasClosestHit = false;
     bool hasShadowMiss = false;
 
     if (shaderPaths.size() > 2 && !shaderPaths[2].empty()) {
+        LOG_CID("CID peers into electron microscope — \"Detecting closest hit candidate... loading...\"");
         closestHitModule = loadShader(shaderPaths[2]);
         hasClosestHit = (closestHitModule != VK_NULL_HANDLE);
+
+        if (hasClosestHit) {
+            LOG_CID("CID nods furiously — \"Closest hit confirmed! The photons will know when they've touched something!\"");
+        } else {
+            LOG_CID("CID gasps — \"Closest hit failed! The photons will phase through forever! THIS CHANGES EVERYTHING!\"");
+        }
     }
 
     if (shaderPaths.size() > 3 && !shaderPaths[3].empty()) {
-        shadowMissModule = loadShader(shaderPaths[3]);
+        LOG_CID("CID adjusts shadow spectrometer — \"Scanning for shadow miss shader...\"");
+        shadowMissModule = loadShader(shaderPaths[3]);  // ← FIXED: was EliezerModule
         hasShadowMiss = (shadowMissModule != VK_NULL_HANDLE);
+
+        if (hasShadowMiss) {
+            LOG_CID("CID whispers — \"Shadow miss acquired... the darkness has form...\"");
+        } else {
+            LOG_CID("CID shrieks — \"NO SHADOW MISS?! THE SHADOWS WILL BE UNCONTROLLED!\"");
+        }
     }
 
-    // Store modules in Handle for auto-cleanup
-    shaderModules_.emplace_back(raygenModule, stone_device(), [](VkDevice d, VkShaderModule m, const VkAllocationCallbacks*) { vkDestroyShaderModule(d, m, nullptr); }, 0, "RaygenShader");
-    shaderModules_.emplace_back(missModule, stone_device(), [](VkDevice d, VkShaderModule m, const VkAllocationCallbacks*) { vkDestroyShaderModule(d, m, nullptr); }, 0, "MissShader");
-    if (hasClosestHit) {
-        shaderModules_.emplace_back(closestHitModule, stone_device(), [](VkDevice d, VkShaderModule m, const VkAllocationCallbacks*) { vkDestroyShaderModule(d, m, nullptr); }, 0, "ClosestHitShader");
-    }
-    if (hasShadowMiss) {
-        shaderModules_.emplace_back(shadowMissModule, stone_device(), [](VkDevice d, VkShaderModule m, const VkAllocationCallbacks*) { vkDestroyShaderModule(d, m, nullptr); }, 0, "ShadowMissShader");
-    }
+    shaderModules_.emplace_back(raygenModule, stone_device(), vkDestroyShaderModule);
+    shaderModules_.emplace_back(missModule,   stone_device(), vkDestroyShaderModule);
+    if (hasClosestHit) shaderModules_.emplace_back(closestHitModule, stone_device(), vkDestroyShaderModule);
+    if (hasShadowMiss) shaderModules_.emplace_back(shadowMissModule, stone_device(), vkDestroyShaderModule);
 
-    // ---------------------------------------------------------------------
-    // 2. Build shader stages and groups (zero-init StageInfo) — FIXED: Explicit UNUSED_KHR for ALL fields (VUID-VkRayTracingShaderGroupCreateInfoKHR-pClosestHitShaders-03625)
-    // ---------------------------------------------------------------------
-    struct StageInfo {
-        VkPipelineShaderStageCreateInfo stage = {};  // Zero-init
-        VkRayTracingShaderGroupCreateInfoKHR group = {};  // Zero-init
-    };
-    std::vector<StageInfo> stageInfos;
+    LOG_CID("CID signs the manifest — \"All shaders accounted for. Auto-cleanup engaged. No leaks. Only precision.\"");
 
-    uint32_t shaderIndex = 0;
+    LOG_CID("CID pulls out protractor, ruler, and 10x loupe — \"NOW BEGINNING SHADER GROUP ALIGNMENT — EVERY INDEX MUST BE PERFECT — EXPLICIT UNUSED_KHR OR BUST!\"");
 
-    auto addGeneral = [&](VkShaderModule module, VkShaderStageFlagBits stageFlag, const char* name) {
-        VkPipelineShaderStageCreateInfo stageInfo = {};  // Zero-init
-        stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-        stageInfo.stage = stageFlag;
-        stageInfo.module = module;
-        stageInfo.pName = "main";
-
-        VkRayTracingShaderGroupCreateInfoKHR groupInfo = {};  // Zero-init
-        groupInfo.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
-        groupInfo.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR;
-        groupInfo.generalShader = shaderIndex++;
-        // FIXED: Explicitly set ALL hit-related to UNUSED_KHR for general groups (prevents 0 default)
-        groupInfo.closestHitShader = VK_SHADER_UNUSED_KHR;
-        groupInfo.anyHitShader = VK_SHADER_UNUSED_KHR;
-        groupInfo.intersectionShader = VK_SHADER_UNUSED_KHR;
-
-        stageInfos.push_back({stageInfo, groupInfo});
-        LOG_TRACE_CAT("PIPELINE", "Added general group: {} (index {}) — ALL hit shaders UNUSED_KHR ({:x}/{:x}/{:x})", 
-                      name, groupInfo.generalShader, groupInfo.closestHitShader, groupInfo.anyHitShader, groupInfo.intersectionShader);
-    };
-
-    auto addTriangleHitGroup = [&](VkShaderModule chit) {
-        VkRayTracingShaderGroupCreateInfoKHR groupInfo = {};  // Zero-init
-        groupInfo.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
-        groupInfo.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR;
-        groupInfo.generalShader = VK_SHADER_UNUSED_KHR;
-        groupInfo.closestHitShader = shaderIndex++;
-        // FIXED: Explicitly set unused fields for hit group
-        groupInfo.anyHitShader = VK_SHADER_UNUSED_KHR;
-        groupInfo.intersectionShader = VK_SHADER_UNUSED_KHR;
-
-        VkPipelineShaderStageCreateInfo chitStage = {};  // Zero-init
-        chitStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-        chitStage.stage = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
-        chitStage.module = chit;
-        chitStage.pName = "main";
-
-        stageInfos.push_back({chitStage, groupInfo});
-        LOG_TRACE_CAT("PIPELINE", "Added triangle hit group with closest hit (index {}) — unused: {:x}/{:x}", 
-                      groupInfo.closestHitShader, groupInfo.anyHitShader, groupInfo.intersectionShader);
-    };
-
-    // Required groups (unchanged logic)
-    addGeneral(raygenModule, VK_SHADER_STAGE_RAYGEN_BIT_KHR, "Raygen");
-    addGeneral(missModule, VK_SHADER_STAGE_MISS_BIT_KHR, "Primary Miss");
-
-    uint32_t missGroupCount = 1;
-    if (hasShadowMiss) {
-        addGeneral(shadowMissModule, VK_SHADER_STAGE_MISS_BIT_KHR, "Shadow Miss");
-        missGroupCount = 2;
-    }
-
-    uint32_t hitGroupCount = 0;
-    if (hasClosestHit) {
-        addTriangleHitGroup(closestHitModule);
-        hitGroupCount = 1;
-    }
-
-    const uint32_t raygenGroupCount = 1;
-
-    // Store counts
-    raygenGroupCount_ = raygenGroupCount;
-    missGroupCount_ = missGroupCount;
-    hitGroupCount_ = hitGroupCount;
-    callableGroupCount_ = 0;
-
-    // ---------------------------------------------------------------------
-    // 3. Create pipeline layout (zero-init) — FIXED: Use existing rtPipelineLayout_
-    // ---------------------------------------------------------------------
-    // Note: Layout already created in createPipelineLayout() — reuse it
-    LOG_DEBUG_CAT("PIPELINE", "Reusing RT pipeline layout: 0x{:x} (descriptors + push stages: raygen|miss|chit)", 
-                  reinterpret_cast<uintptr_t>(*rtPipelineLayout_));
-
-    LOG_CID("CID nods, sweat flinging — \"Layout reused... efficiency, but my glands are in overdrive!\"");
-
-    // ---------------------------------------------------------------------
-    // 4. Create pipeline (zero-init infos) — FIXED: No pNext (remove libraryInfo) + explicit pNext=nullptr + NEW: PFN Call
-    // ---------------------------------------------------------------------
     std::vector<VkPipelineShaderStageCreateInfo> stages;
     std::vector<VkRayTracingShaderGroupCreateInfoKHR> groups;
+    stages.reserve(4);
+    groups.reserve(4);
 
-    for (const auto& info : stageInfos) {
-        stages.push_back(info.stage);
-        groups.push_back(info.group);
-    }
+    uint32_t stageIdx = 0;
 
-    VkRayTracingPipelineCreateInfoKHR pipelineInfo = {};  // Zero-init
-    pipelineInfo.sType = VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR;
-    pipelineInfo.pNext = nullptr;  // FIXED: Explicit nullptr — no invalid chain (VUID-VkRayTracingPipelineCreateInfoKHR-pNext-03646)
-    pipelineInfo.flags = 0;
-    pipelineInfo.stageCount = static_cast<uint32_t>(stages.size());
-    pipelineInfo.pStages = stages.data();
-    pipelineInfo.groupCount = static_cast<uint32_t>(groups.size());
-    pipelineInfo.pGroups = groups.data();
-    pipelineInfo.maxPipelineRayRecursionDepth = std::min(4u, rtProps_.maxRayRecursionDepth);  // FIXED: Use cached rtProps_ (VUID-VkRayTracingPipelineCreateInfoKHR-maxPipelineRayRecursionDepth-03647)
-    pipelineInfo.layout = *rtPipelineLayout_;  // FIXED: Valid layout with descriptors/push (matches shader bindings/stages)
+    auto addGeneral = [&](VkShaderModule mod, VkShaderStageFlagBits flag, const char* name) {
+        VkPipelineShaderStageCreateInfo s{};
+        s.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        s.stage = flag;
+        s.module = mod;
+        s.pName = "main";
+        stages.push_back(s);
+
+        VkRayTracingShaderGroupCreateInfoKHR g{};
+        g.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
+        g.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR;
+        g.generalShader = stageIdx++;
+        g.closestHitShader = g.anyHitShader = g.intersectionShader = VK_SHADER_UNUSED_KHR;
+        groups.push_back(g);
+
+        LOG_CID("CID stamps approval #{} — \"GENERAL GROUP '{}' — generalShader={}\"", stageIdx-1, name, g.generalShader);
+    };
+
+    auto addHit = [&](VkShaderModule mod) {
+        VkPipelineShaderStageCreateInfo s{};
+        s.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        s.stage = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
+        s.module = mod;
+        s.pName = "main";
+        stages.push_back(s);
+
+        VkRayTracingShaderGroupCreateInfoKHR g{};
+        g.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
+        g.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR;
+        g.closestHitShader = stageIdx++;
+        g.generalShader = g.anyHitShader = g.intersectionShader = VK_SHADER_UNUSED_KHR;
+        groups.push_back(g);
+
+        LOG_CID("CID measures with atomic precision — \"TRIANGLE HIT GROUP — closestHitShader={} — PERFECT LANDING ZONE!\"", g.closestHitShader);
+    };
+
+    addGeneral(raygenModule, VK_SHADER_STAGE_RAYGEN_BIT_KHR, "Raygen");
+    addGeneral(missModule,   VK_SHADER_STAGE_MISS_BIT_KHR,   "Primary Miss");
+    if (hasShadowMiss) addGeneral(shadowMissModule, VK_SHADER_STAGE_MISS_BIT_KHR, "Shadow Miss");
+    if (hasClosestHit) addHit(closestHitModule);
+
+    raygenGroupCount_ = 1;
+    missGroupCount_   = hasShadowMiss ? 2 : 1;
+    hitGroupCount_    = hasClosestHit ? 1 : 0;
+
+    LOG_CID("CID steps back, drenched — \"Group topology complete. {} raygen. {} miss. {} hit. Peak engineering achieved.\"",
+            raygenGroupCount_, missGroupCount_, hitGroupCount_);
+
+    LOG_CID("CID places hands on the console — \"Initiating vkCreateRayTracingPipelinesKHR — pNext=NULL — this is the moment of truth...\"");
+
+    VkRayTracingPipelineCreateInfoKHR pipeInfo{};
+    pipeInfo.sType = VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR;
+    pipeInfo.stageCount = static_cast<uint32_t>(stages.size());
+    pipeInfo.pStages = stages.data();
+    pipeInfo.groupCount = static_cast<uint32_t>(groups.size());
+    pipeInfo.pGroups = groups.data();
+    pipeInfo.maxPipelineRayRecursionDepth = std::min(4u, rtProps_.maxRayRecursionDepth);
+    pipeInfo.layout = *rtPipelineLayout_;
 
     VkPipeline pipeline = VK_NULL_HANDLE;
-    VkResult pipeResult = vkCreateRayTracingPipelinesKHR_(stone_device(), VK_NULL_HANDLE, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &pipeline);  // NEW: PFN call
-    LOG_DEBUG_CAT("PIPELINE", "vkCreateRayTracingPipelinesKHR returned: {}", static_cast<int>(pipeResult));
-    if (pipeResult != VK_SUCCESS) {
-        LOG_ERROR_CAT("PIPELINE", "Failed to create ray tracing pipeline: {}", static_cast<int>(pipeResult));
+    VkResult res = vkCreateRayTracingPipelinesKHR_(stone_device(), VK_NULL_HANDLE, VK_NULL_HANDLE, 1, &pipeInfo, nullptr, &pipeline);
+
+    if (res != VK_SUCCESS) {
+        LOG_ERROR_CAT("PIPELINE", "vkCreateRayTracingPipelinesKHR failed: {}", static_cast<int>(res));
+        LOG_CID("CID collapses in defeat — \"IT FAILED... ALL THAT SWEAT... FOR NOTHING... *sobs into lab coat*\"");
         return;
     }
-    VK_CHECK(pipeResult, "Create RT pipeline");  // Your macro
 
-    // 5. Store and cleanup (unchanged)
-    rtPipeline_ = Handle<VkPipeline>(pipeline, stone_device(),
-        [](VkDevice d, VkPipeline p, const VkAllocationCallbacks*) { vkDestroyPipeline(d, p, nullptr); },
-        0, "RTPipeline");
+    rtPipeline_ = Handle<VkPipeline>(pipeline, stone_device(), vkDestroyPipeline);
 
-    LOG_CID("CID cheers, sweat splashing — \"Pipeline created... photons eternal, but I need hydration!\"");
+    LOG_CID("CID stands tall, trembling, soaked through — \"IT WORKED! {} STAGES! {} GROUPS! PINK PHOTONS ARMED AND ALIGNED!\"", stages.size(), groups.size());
+    LOG_CID("CID collapses into chair, panting — \"I... I need electrolytes... and a towel... but we did it. First light... achieved.\"");
 
-    LOG_SUCCESS_CAT("PIPELINE", "{}Ray tracing pipeline created successfully — {} stages, {} groups — PNEXT=NULL — UNUSED_KHR EXPLICIT — BINDINGS MATCH{}", 
-                    LIME_GREEN, stages.size(), groups.size(), RESET);
-    LOG_SUCCESS_CAT("PIPELINE", "PINK PHOTONS ARMED — FIRST LIGHT ACHIEVED");
-    LOG_TRACE_CAT("PIPELINE", "createRayTracingPipeline — COMPLETE");
+    LOG_SUCCESS_CAT("PIPELINE", "{}RAY TRACING PIPELINE CREATED — {} STAGES — {} GROUPS — FULL CONTROL — PINK PHOTONS ARMED{}", 
+                    Logging::Color::LIME_GREEN, stages.size(), groups.size(), Logging::Color::RESET);
+
+    LOG_TRACE_CAT("PIPELINE", "createRayTracingPipeline — COMPLETE — CID STATUS: DEHYDRATED BUT TRIUMPHANT");
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

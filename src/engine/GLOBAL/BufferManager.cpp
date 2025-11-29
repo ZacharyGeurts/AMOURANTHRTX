@@ -12,6 +12,9 @@
 // FIRST LIGHT ACHIEVED — PINK PHOTONS ETERNAL — NOVEMBER 28, 2025
 // THE DISPOSAL BALLERINA HAS COMPLETED HER FINAL SPIN — THE EMPIRE IS SEALED
 // =============================================================================
+// =============================================================================
+// AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
+// =============================================================================
 
 #include "engine/GLOBAL/BufferManager.hpp"
 #include "engine/GLOBAL/VulkanCore.hpp"
@@ -74,7 +77,7 @@ static void init() noexcept {
     EMPIRE_GUARD(info && info->memory, "ETERNAL STAGING RING FAILED — THE PHOTONS HAVE NO PATH");
 
     VK_CHECK(vkMapMemory(g_device, info->memory, 0, STAGING_SIZE, 0, &g_stagingPtr));
-    LOG_JENSEN("BufferManager: Staging ring online — handle 0x%016llX — photons flow unbroken", g_stagingBuffer);
+    LOG_JENSEN("BufferManager: Staging ring online — handle 0x{:016x} — photons flow unbroken", g_stagingBuffer);
 }
 
 static void setDebugName(VkBuffer buf, const std::string& name) noexcept {
@@ -153,10 +156,11 @@ uint64_t create(VkDeviceSize size,
 
     setDebugName(buffer, "BUF_" + fullTag);
 
-    LOG_CARMACK("BufferManager: Forged %zu MiB | handle 0x%016llX | tag \"%s\"",
-                size >> 20, handle, fullTag.c_str());
+    LOG_CARMACK("BufferManager: Forged {} MiB | handle 0x{:016x} | tag \"{}\"",
+                size >> 20, handle, fullTag);
 
-    LOG_JENSEN("BufferManager: Total VRAM dominion — {} GiB", g_totalAllocated / (1024.0*1024*1024));
+    LOG_JENSEN("BufferManager: Total VRAM dominion — {:.3f} GiB", 
+               static_cast<double>(g_totalAllocated) / (1024.0 * 1024 * 1024));
 
     return handle;
 }
@@ -196,7 +200,7 @@ const BufferInfo* get(uint64_t handle) noexcept {
 
 void copyBuffer(VkBuffer src, VkBuffer dst, VkDeviceSize size, VkQueue queue, VkCommandPool pool) noexcept
 {
-    init(); // Make sure device is ready
+    init();
 
     LOG_CID("CID slams a fresh towel on his neck, eyes wild — \"ULTRA FAST COPY INCOMING! THE PHOTONS WILL NOT WAIT!\"");
 
@@ -207,6 +211,8 @@ void copyBuffer(VkBuffer src, VkBuffer dst, VkDeviceSize size, VkQueue queue, Vk
     vkCmdCopyBuffer(cmd, src, dst, 1, &copyRegion);
 
     RTX::endOneTimeSubmit(cmd, queue, pool);
+
+    LOG_CID("CID wipes sweat, panting — \"Copy complete. Photons transferred at relativistic speed. No casualties.\"");
 }
 
 void purge_all() noexcept {
@@ -219,13 +225,19 @@ void purge_all() noexcept {
     }
     g_buffers.clear();
     g_totalAllocated = 0;
+
     LOG_CARMACK("BufferManager: All mortal buffers purged — the void is clean");
+    LOG_CID("CID stands in the ashes, lab coat smoldering — \"THE SLATE IS WIPED. ONLY THE STAGING RING REMAINS ETERNAL\"");
 }
 
 uint64_t stagingBuffer() noexcept { init(); return g_stagingBuffer; }
 void*    stagingPtr()    noexcept { init(); return g_stagingPtr; }
 void advanceStagingOffset(VkDeviceSize b) noexcept { init(); g_stagingOffset = (g_stagingOffset + b) % STAGING_SIZE; }
 void* stagingPtrAtOffset(VkDeviceSize o) noexcept { init(); return static_cast<uint8_t*>(g_stagingPtr) + (g_stagingOffset + o) % STAGING_SIZE; }
+
+// =============================================================================
+// ETERNAL STONES — YOUR ORIGINAL, PERFECT MACRO — RESTORED
+// =============================================================================
 
 #define MAKE_STONE(name, mb) \
 uint64_t make_##name(VkBufferUsageFlags extra, VkMemoryPropertyFlags p) noexcept { \
