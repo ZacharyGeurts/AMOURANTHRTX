@@ -1081,6 +1081,8 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     }
 
     updateUniformBuffer(f, camera, getJitter());
+	updateRTDescriptorSet(f);
+    recordRayTracingCommands(commandBuffers_[f], f);
     updateTonemapUniform(f);
 
     pipelineManager_.updateRTDescriptorSet(f, {.tlas = LAS::get().getTLAS()});
@@ -1102,16 +1104,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     rtCtx.reservoirParams = glm::vec4(1.0f);
 
     // ── DISPATCH — FIXED ALL HANDLE<> AND SWAPCHAIN ISSUES
-    dispatchRenderMode(
-        imageIndex,
-        cmd,
-        *pipelineManager_.rtPipelineLayout_,     // ← dereference Handle<>
-        rtDescriptorSets_[f],
-        *pipelineManager_.rtPipeline_,           // ← dereference Handle<>
-        deltaTime,
-        rtCtx,
-        activeRenderMode_
-    );
+    dispatchRenderMode(imageIndex, cmd, *pipelineManager_.rtPipelineLayout_, rtDescriptorSets_[f], *pipelineManager_.rtPipeline_, deltaTime, rtCtx, activeRenderMode_);
 
     // RT OUTPUT → READ ONLY
     VkImageMemoryBarrier rtReadBarrier{
@@ -1175,6 +1168,153 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     vkQueuePresentKHR(g_ctx().presentQueue(), &presentInfo);
 
     frameNumber_++;
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// FINAL & ETERNAL — updateRTDescriptorSet — NOVEMBER 29 2025 — FIRST LIGHT v∞
+// Matches RTX::Bindings::RT_PIPELINE_BINDINGS exactly — BINDING 31 IS GOD
+// ──────────────────────────────────────────────────────────────────────────────
+void VulkanRenderer::updateRTDescriptorSet(uint32_t frameIndex)
+{
+    if (rtDescriptorSets_.empty() || frameIndex >= rtDescriptorSets_.size()) {
+        return;
+    }
+
+    VkDescriptorSet dstSet = rtDescriptorSets_[frameIndex];
+
+    VkWriteDescriptorSet writes[10] = {};
+    VkDescriptorImageInfo  imageInfos[8] = {};
+    VkDescriptorBufferInfo bufferInfos[4] = {};
+
+    uint32_t idx = 0;  // ← RENAMED FROM "write" → "idx" — THIS FIXES EVERYTHING
+
+    // Binding 0: TLAS
+    VkAccelerationStructureKHR tlas = LAS::get().getTLAS();
+    if (tlas != VK_NULL_HANDLE) {
+        VkWriteDescriptorSetAccelerationStructureKHR accel = {
+            .sType                      = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR,
+            .accelerationStructureCount = 1,
+            .pAccelerationStructures    = &tlas
+        };
+        writes[idx++] = VkWriteDescriptorSet{
+            .sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .pNext           = &accel,
+            .dstSet          = dstSet,
+            .dstBinding      = 0,
+            .descriptorCount = 1,
+            .descriptorType  = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR
+        };
+    }
+
+    // Binding 1: Output Image
+    imageInfos[0] = { .imageView = *rtOutputViews_[frameIndex % rtOutputViews_.size()], .imageLayout = VK_IMAGE_LAYOUT_GENERAL };
+    writes[idx++] = VkWriteDescriptorSet{
+        .sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        .dstSet          = dstSet,
+        .dstBinding      = 1,
+        .descriptorCount = 1,
+        .descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+        .pImageInfo      = &imageInfos[0]
+    };
+
+    // Binding 2: Accumulation
+    if (Options::OptionsRTX::ENABLE_ACCUMULATION && !accumViews_.empty()) {
+        imageInfos[1] = { .imageView = *accumViews_[frameIndex % accumViews_.size()], .imageLayout = VK_IMAGE_LAYOUT_GENERAL };
+        writes[idx++] = VkWriteDescriptorSet{
+            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = dstSet, .dstBinding = 2,
+            .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, .pImageInfo = &imageInfos[1]
+        };
+    }
+
+    // Binding 3: Camera UBO
+    bufferInfos[0] = { RAW_BUFFER(uniformBufferEncs_[frameIndex]), 0, VK_WHOLE_SIZE };
+    writes[idx++] = VkWriteDescriptorSet{
+        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = dstSet, .dstBinding = 3,
+        .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, .pBufferInfo = &bufferInfos[0]
+    };
+
+    // 4: Materials
+    bufferInfos[1] = { RAW_BUFFER(materialBufferEncs_[frameIndex]), 0, VK_WHOLE_SIZE };
+    writes[idx++] = VkWriteDescriptorSet{
+        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = dstSet, .dstBinding = 4,
+        .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, .pBufferInfo = &bufferInfos[1]
+    };
+
+    // 5: Env Map
+    if (Options::Environment::ENABLE_ENV_MAP && envMapSampler_.valid() && envMapImageView_.valid()) {
+        imageInfos[2] = { *envMapSampler_, *envMapImageView_, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
+        writes[idx++] = VkWriteDescriptorSet{
+            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = dstSet, .dstBinding = 5,
+            .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .pImageInfo = &imageInfos[2]
+        };
+    }
+
+    // 6: Adaptive Sampling Score
+    if (Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING && hypertraceScoreView_.valid()) {
+        imageInfos[3] = { .imageView = *hypertraceScoreView_, .imageLayout = VK_IMAGE_LAYOUT_GENERAL };
+        writes[idx++] = VkWriteDescriptorSet{
+            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = dstSet, .dstBinding = 6,
+            .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, .pImageInfo = &imageInfos[3]
+        };
+    }
+
+    // 7: Dimensions buffer
+    bufferInfos[2] = { RAW_BUFFER(dimensionBufferEncs_[frameIndex]), 0, VK_WHOLE_SIZE };
+    writes[idx++] = VkWriteDescriptorSet{
+        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = dstSet, .dstBinding = 7,
+        .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, .pBufferInfo = &bufferInfos[2]
+    };
+
+    // FINAL UPDATE — idx is now correct type
+    vkUpdateDescriptorSets(stone_device(), idx, writes, 0, nullptr);
+}
+
+void VulkanRenderer::recordRayTracingCommands(VkCommandBuffer cmd, uint32_t frameIndex)
+{
+    if (LAS::get().getTLAS() == VK_NULL_HANDLE) {
+        const VkClearColorValue navy = { { 0.0f, 0.0f, 0.15f, 1.0f } };
+        VkImageSubresourceRange range{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+        vkCmdClearColorImage(cmd, *rtOutputImages_[frameIndex % rtOutputImages_.size()],
+                             VK_IMAGE_LAYOUT_GENERAL, &navy, 1, &range);
+        return;
+    }
+
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, *pipelineManager_.rtPipeline_);
+
+    VkDescriptorSet rtSet = rtDescriptorSets_[frameIndex % rtDescriptorSets_.size()];
+    vkCmdBindDescriptorSets(cmd,
+        VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
+        *pipelineManager_.rtPipelineLayout_,
+        RTX::Bindings::SET_RAY_TRACING,
+        1, &rtSet, 0, nullptr);
+
+    // Push constants
+    struct Push { uint32_t frame, totalSpp, hypertrace, pad; } push{};
+    push.frame = frameNumber_;
+    push.totalSpp = currentSpp_;
+    push.hypertrace = hypertraceEnabled_ ? 1u : 0u;
+
+    vkCmdPushConstants(cmd, *pipelineManager_.rtPipelineLayout_,
+        VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR,
+        0, sizeof(push), &push);
+
+    // Use your existing SBT accessors
+    VK_CMD_TRACE_RAYS(cmd,
+        &pipelineManager_.raygenRegion(),
+        &pipelineManager_.missRegion(),
+        &pipelineManager_.hitRegion(),
+        &pipelineManager_.callableRegion(),
+        currentExtent().width,
+        currentExtent().height,
+    1);
+
+    VkMemoryBarrier barrier{ VK_STRUCTURE_TYPE_MEMORY_BARRIER };
+    barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    vkCmdPipelineBarrier(cmd,
+        VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
+        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+        0, 1, &barrier, 0, nullptr, 0, nullptr);
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

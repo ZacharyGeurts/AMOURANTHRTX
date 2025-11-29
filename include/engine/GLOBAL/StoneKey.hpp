@@ -97,6 +97,7 @@ namespace StoneKey {
     inline void stone_seal_transfer_queue(VkQueue q) noexcept { Empire::transferQueue.store(q, std::memory_order_release); }
 
     inline void stone_seal_renderer(VulkanRenderer* r)  noexcept { Empire::renderer.store(r, std::memory_order_release); }
+	inline void stone_seal_pipeline(RTX::PipelineManager* p) noexcept { Empire::pipeline.store(p, std::memory_order_release); }
     inline void stone_seal_window(SDL_Window* w) noexcept { Empire::window.store(w, std::memory_order_release); }
 
     inline void stone_seal_images(std::vector<VkImage>&& imgs)     noexcept { Empire::images = std::move(imgs); }

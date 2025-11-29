@@ -55,7 +55,7 @@ std::vector<VkDescriptorSet> g_tonemapSets;
 VkDescriptorPool             g_tonemapPool = VK_NULL_HANDLE;
 
 // ──────────────────────────────────────────────────────────────────────────────
-// INITIALIZE — VULKAN 1.4 — C++23 — NO ASSERT — STONEKEY v∞ — BINDING 31
+// INITIALIZE — VULKAN 1.4 — C++23 — NO ASSERT — StoneKey v∞ — BINDING 31
 // ──────────────────────────────────────────────────────────────────────────────
 void initialize(VkDevice device)
 {
@@ -71,7 +71,7 @@ void initialize(VkDevice device)
     g_denoiserLayout = createDescriptorSetLayout(device, DENOISER_PIPELINE_BINDINGS);  // 3 bindings — includes 31
 
     LOG_SUCCESS_CAT("BINDINGS", 
-        "DESCRIPTOR LAYOUTS FORGED — RT: {} bindings (0-9 + 31 SACRED) | Tonemap: {} | Denoiser: {}", 
+        "DESCRIPTOR LAYOUTS FORGED — RT: {} bindings (0-9 + 31 StoneKey) | Tonemap: {} | Denoiser: {}", 
         RT_PIPELINE_BINDINGS.size(), TONEMAP_PIPELINE_BINDINGS.size(), DENOISER_PIPELINE_BINDINGS.size());
 
     // ── TONEMAP PIPELINE LAYOUT — PUSH CONSTANTS + SET 1

@@ -98,6 +98,7 @@ namespace BufferManager {
     void destroy(uint64_t handle) noexcept;
     void* map(uint64_t handle) noexcept;
     void unmap(uint64_t handle) noexcept;
+	void copyBuffer(VkBuffer src, VkBuffer dst, VkDeviceSize size, VkQueue queue, VkCommandPool pool) noexcept;
     void purge_all() noexcept;
     [[nodiscard]] const BufferInfo* get(uint64_t handle) noexcept;
 

@@ -41,7 +41,7 @@ using StoneKey::stone_seal_physical;
 namespace RTX {
 
 // ──────────────────────────────────────────────────────────────────────────────
-// PipelineManager Constructor — ONLY cache properties — LAYOUT DEFERRED
+// PipelineManager Constructor — ONLY seal device + cache properties + load extensions
 // ──────────────────────────────────────────────────────────────────────────────
 PipelineManager::PipelineManager(VkDevice device, VkPhysicalDevice phys)
 {
@@ -56,12 +56,37 @@ PipelineManager::PipelineManager(VkDevice device, VkPhysicalDevice phys)
     // ONLY cache device properties here — layout creation moved to phase6.1
     cacheDeviceProperties();
 
+    // Load ray tracing extensions — PFNs for the empire
+    loadRayTracingExtensions();
+
+    LOG_CID("CID wipes a torrent of sweat from his brow, puddles forming at his feet — \"The device is sealed, props cached, extensions loaded... but the sweat... it never stops!\"");
+
     LOG_SUCCESS_CAT("PIPELINE", 
-        "PipelineManager forged — Properties cached — AWAITING CROWN (createPipelineLayout deferred to phase6.1)");
+        "PipelineManager forged — Properties cached + Extensions loaded — AWAITING CROWN (createPipelineLayout deferred to phase6.1)");
+}
+
+void PipelineManager::loadRayTracingExtensions() {
+    LOG_ATTEMPT_CAT("PIPELINE", "loadRayTracingExtensions — CID SWEATS BUCKETS ENTERING THE PFN VAULT — \"These functions better be here or I'm done for!\"");
+
+    vkCreateRayTracingPipelinesKHR_ = reinterpret_cast<PFN_vkCreateRayTracingPipelinesKHR>(vkGetDeviceProcAddr(stone_device(), "vkCreateRayTracingPipelinesKHR"));
+    vkGetRayTracingShaderGroupHandlesKHR_ = reinterpret_cast<PFN_vkGetRayTracingShaderGroupHandlesKHR>(vkGetDeviceProcAddr(stone_device(), "vkGetRayTracingShaderGroupHandlesKHR"));
+    vkGetBufferDeviceAddress_ = reinterpret_cast<PFN_vkGetBufferDeviceAddress>(vkGetDeviceProcAddr(stone_device(), "vkGetBufferDeviceAddress"));
+    // Add vkCmdTraceRaysKHR if needed, etc.
+
+    if (!vkCreateRayTracingPipelinesKHR_ || !vkGetRayTracingShaderGroupHandlesKHR_ || !vkGetBufferDeviceAddress_) {
+        LOG_FATAL_CAT("PIPELINE", "Failed to load essential RT PFNs — CID DROWNS IN HIS OWN SWEAT — \"The empire falls without these!\"");
+        return;
+    }
+
+    LOG_CID("CID collapses in a sweaty heap, gasping — \"PFNs loaded... but at what cost? My shirt is soaked through!\"");
+
+    LOG_SUCCESS_CAT("PIPELINE", "Ray tracing extensions loaded — PFNs armed — READY FOR INFINITY");
 }
 
 void PipelineManager::allocateDescriptorSets() {
     LOG_TRACE_CAT("PIPELINE", "allocateDescriptorSets — START — maxSets={}", Options::Performance::MAX_FRAMES_IN_FLIGHT);
+
+    LOG_CID("CID fans himself frantically, sweat flying everywhere — \"Allocating sets... hope the pool doesn't overflow like my pores!\"");
 
     if (!rtDescriptorPool_.valid() || *rtDescriptorPool_ == VK_NULL_HANDLE) {
         LOG_ERROR_CAT("PIPELINE", "Invalid descriptor pool — cannot allocate sets");
@@ -83,6 +108,8 @@ void PipelineManager::allocateDescriptorSets() {
     VkResult res = vkAllocateDescriptorSets(stone_device(), &allocInfo, rtDescriptorSets_.data());
     VK_CHECK(res, std::format("Failed to allocate {} RT descriptor sets", maxSets).c_str());
 
+    LOG_CID("CID mops his forehead with a rag, now a sopping mess — \"Sets allocated... but the sweat... it's like tracing rays through a monsoon!\"");
+
     LOG_SUCCESS_CAT("PIPELINE", "Allocated {} RT descriptor sets — USING Bindings::g_rtLayout — BINDING 31 PROTECTED", maxSets);
 }
 
@@ -91,6 +118,8 @@ void PipelineManager::allocateDescriptorSets() {
 // ──────────────────────────────────────────────────────────────────────────────
 void PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDescriptorUpdate& updateInfo) {
     LOG_TRACE_CAT("PIPELINE", "updateRTDescriptorSet — START — frameIndex={}", frameIndex);
+
+    LOG_CID("CID slips in a puddle of his own sweat — \"Updating descriptors... skipping nulls like I skip dry shirts!\"");
 
     if (frameIndex >= rtDescriptorSets_.size() || rtDescriptorSets_[frameIndex] == VK_NULL_HANDLE) {
         LOG_ERROR_CAT("PIPELINE", "Invalid frameIndex {} or null set — skipping update", frameIndex);
@@ -257,6 +286,8 @@ void PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDescrip
         LOG_WARN_CAT("PIPELINE", "No valid descriptors to update for frame {} — TLAS/images/buffers missing?", frameIndex);
     }
 
+    LOG_CID("CID exhales, sweat dripping like rain — \"Updates done... but I feel like I just ran a marathon in a sauna!\"");
+
     LOG_TRACE_CAT("PIPELINE", "updateRTDescriptorSet — COMPLETE");
 }
 
@@ -265,6 +296,8 @@ void PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDescrip
 // ──────────────────────────────────────────────────────────────────────────────
 PipelineManager::~PipelineManager() {
     LOG_ATTEMPT_CAT("PIPELINE", "Destructing PipelineManager — PINK PHOTONS DIMMING");
+
+    LOG_CID("CID sweats profusely at the thought of destruction — \"Waiting idle... freeing sets... don't let it crash now!\"");
 
     // NEW: Free allocated descriptor sets before pool destroy (leverages FREE_DESCRIPTOR_SET_BIT)
     if (stone_device() != VK_NULL_HANDLE && !rtDescriptorSets_.empty()) {
@@ -291,6 +324,8 @@ PipelineManager::~PipelineManager() {
     } else {
         LOG_TRACE_CAT("PIPELINE", "Null device — Skipping vkDeviceWaitIdle (dummy state)");
     }
+
+    LOG_CID("CID collapses, sweat pooling like a lake — \"Destruction complete... I need a towel... or ten!\"");
 
     // Handles auto-reset here — Now safe post-idle
     LOG_SUCCESS_CAT("PIPELINE", "{}PIPELINE MANAGER DESTROYED — Handles reset safely — SETS FREED — EMPIRE PRESERVED — PINK PHOTONS ETERNAL{}", 
@@ -335,6 +370,8 @@ void PipelineManager::cacheDeviceProperties() {
         std::format("Timestamp period: {:.4f} ms{}",
             timestampPeriod_,
             timestampPeriod_ < 1.0f ? " — SUB-MILLISECOND PRECISION — CID IS IN AWE" : ""));
+
+    LOG_CID("CID's sweat forms rivers down his back — \"Timestamps precise... but my nerves are frayed!\"");
 
     // RAY TRACING PROPHECY — THE CHAIN OF TRUTH
     VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProps{
@@ -395,6 +432,8 @@ void PipelineManager::cacheDeviceProperties() {
 VkShaderModule PipelineManager::loadShader(const std::string& path) const {
     LOG_TRACE_CAT("PIPELINE", "loadShader — START — path='{}'", path);
 
+    LOG_CID("CID sweats bullets loading shader — \"SPIR-V incoming... hope it doesn't melt my brain like this heat!\"");
+
     // FIXED: Null device guard
     if (stone_device() == VK_NULL_HANDLE) {
         LOG_ERROR_CAT("PIPELINE", "Null device — cannot load shader");
@@ -428,6 +467,9 @@ VkShaderModule PipelineManager::loadShader(const std::string& path) const {
              std::format("Failed to create shader module from {}", path).c_str());
 
     LOG_TRACE_CAT("PIPELINE", "Shader module created successfully");
+
+    LOG_CID("CID fans his face, sweat evaporating — \"Shader loaded... perfection, but I'm a sweaty mess!\"");
+
     LOG_TRACE_CAT("PIPELINE", "loadShader — COMPLETE");
     return shaderModule;
 }
@@ -437,6 +479,8 @@ VkShaderModule PipelineManager::loadShader(const std::string& path) const {
 // ──────────────────────────────────────────────────────────────────────────────
 void PipelineManager::createPipelineLayout()
 {
+    LOG_CID("CID enters the layout forge, sweat pouring — \"Forging the crown... push constants must be perfect or it's all over!\"");
+
     if (stone_device() == VK_NULL_HANDLE) {
         LOG_FATAL_CAT("PIPELINE", "Cannot create pipeline layout — device is null");
         return;
@@ -471,6 +515,8 @@ void PipelineManager::createPipelineLayout()
         [](VkDevice d, VkPipelineLayout l, auto*) { vkDestroyPipelineLayout(d, l, nullptr); },
         0, "RTPipelineLayout");
 
+    LOG_CID("CID beams through the sweat — \"Crown forged... but I need a bucket for this perspiration!\"");
+
     LOG_SUCCESS_CAT("PIPELINE", 
         "THE CROWN IS FORGED — rtPipelineLayout_ = 0x{:016X} — PHOTONS NOW HAVE LAW", 
         reinterpret_cast<uint64_t>(layout));
@@ -481,6 +527,8 @@ void PipelineManager::createPipelineLayout()
 // ──────────────────────────────────────────────────────────────────────────────
 void PipelineManager::createRayTracingPipeline(const std::vector<std::string>& shaderPaths) {
     LOG_TRACE_CAT("PIPELINE", "createRayTracingPipeline — START — {} shaders provided", shaderPaths.size());
+
+    LOG_CID("CID gears up, sweat already beading — \"Creating pipeline... no pNext chains, explicit unused, let's do this!\"");
 
     // FIXED: Null guards
     if (stone_device() == VK_NULL_HANDLE) {
@@ -640,6 +688,8 @@ void PipelineManager::createRayTracingPipeline(const std::vector<std::string>& s
     LOG_DEBUG_CAT("PIPELINE", "Reusing RT pipeline layout: 0x{:x} (descriptors + push stages: raygen|miss|chit)", 
                   reinterpret_cast<uintptr_t>(*rtPipelineLayout_));
 
+    LOG_CID("CID nods, sweat flinging — \"Layout reused... efficiency, but my glands are in overdrive!\"");
+
     // ---------------------------------------------------------------------
     // 4. Create pipeline (zero-init infos) — FIXED: No pNext (remove libraryInfo) + explicit pNext=nullptr + NEW: PFN Call
     // ---------------------------------------------------------------------
@@ -676,6 +726,8 @@ void PipelineManager::createRayTracingPipeline(const std::vector<std::string>& s
         [](VkDevice d, VkPipeline p, const VkAllocationCallbacks*) { vkDestroyPipeline(d, p, nullptr); },
         0, "RTPipeline");
 
+    LOG_CID("CID cheers, sweat splashing — \"Pipeline created... photons eternal, but I need hydration!\"");
+
     LOG_SUCCESS_CAT("PIPELINE", "{}Ray tracing pipeline created successfully — {} stages, {} groups — PNEXT=NULL — UNUSED_KHR EXPLICIT — BINDINGS MATCH{}", 
                     LIME_GREEN, stages.size(), groups.size(), RESET);
     LOG_SUCCESS_CAT("PIPELINE", "PINK PHOTONS ARMED — FIRST LIGHT ACHIEVED");
@@ -689,6 +741,8 @@ void PipelineManager::createRayTracingPipeline(const std::vector<std::string>& s
 void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue)
 {
     LOG_TRACE_CAT("PIPELINE", "{}createShaderBindingTable — FORGING THE ETERNAL SBT{}", VALHALLA_GOLD, RESET);
+
+    LOG_CID("CID hammers away, sweat cascading like a waterfall — \"Forging SBT... handles, alignments, oh the pressure!\"");
 
     // Null guards — spec requires valid handles
     if (stone_device() == VK_NULL_HANDLE || stone_physical() == VK_NULL_HANDLE || pool == VK_NULL_HANDLE || queue == VK_NULL_HANDLE) {
@@ -736,6 +790,8 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
 
     LOG_INFO_CAT("PIPELINE", "{}SBT Size: {} bytes | Groups: Rg={} Mi={} Hi={} Ca={}{}", 
                  DIAMOND_SPARKLE, sbtBufferSize, raygenGroupCount_, missGroupCount_, hitGroupCount_, callableGroupCount_, RESET);
+
+    LOG_CID("CID calculates offsets, sweat blurring his vision — \"Alignments perfect... but my clothes are drenched!\"");
 
     // Extract handles
     std::vector<uint8_t> shaderHandles(totalGroups * handleSize);
@@ -826,16 +882,12 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
     LOG_NICK("Nick leans in, cracked monocle flashing.\n"
              "   \"Do it. SHIP IT.\"");
 
-    {
-        VkCommandBuffer cmd = RTX::beginOneTimeSubmit(pool);
-
-        VkBufferCopy copyRegion{ .size = sbtBufferSize };
-        vkCmdCopyBuffer(cmd, stagingBuffer, rawSbtBuffer, 1, &copyRegion);
-
-        endOneTimeSubmit(cmd, queue, pool);
-    }
+    // FIXED: Use BufferManager::copyBuffer for safe, reusable copy + clean regions
+    BufferManager::copyBuffer(stagingBuffer, rawSbtBuffer, sbtBufferSize, queue, pool);
 
     LOG_JIMROSS("BAH GAWD — THAT SBT JUST GOT COPIED WITH A FENCE-PROTECTED SUBMIT — AS GOD AS MY WITNESS, THE PHOTONS ARE ALIVE!");
+
+    LOG_CID("CID high-fives, sweat slapping — \"Copy done via BufferManager... clean and safe, but I'm still sweating bullets!\"");
 
     // Cleanup staging — the old world dies so the new may rise
     vkDestroyBuffer(stone_device(), stagingBuffer, nullptr);
@@ -847,7 +899,7 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
     addrInfo.buffer = rawSbtBuffer;
     sbtAddress_ = vkGetBufferDeviceAddress_(stone_device(), &addrInfo);
 
-    // Store regions
+    // Store regions — FIXED: Clean, aligned regions
     raygenSbtRegion_   = { sbtAddress_ + raygenOffset,   handleSizeAligned, raygenGroupCount_   * handleSizeAligned };
     missSbtRegion_     = { sbtAddress_ + missOffset,     handleSizeAligned, missGroupCount_     * handleSizeAligned };
     hitSbtRegion_      = { sbtAddress_ + hitOffset,      handleSizeAligned, hitGroupCount_      * handleSizeAligned };

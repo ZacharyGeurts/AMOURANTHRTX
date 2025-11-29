@@ -156,7 +156,7 @@ uint64_t create(VkDeviceSize size,
     LOG_CARMACK("BufferManager: Forged %zu MiB | handle 0x%016llX | tag \"%s\"",
                 size >> 20, handle, fullTag.c_str());
 
-    LOG_JENSEN("BufferManager: Total VRAM dominion — %.3f GiB", g_totalAllocated / (1024.0*1024*1024));
+    LOG_JENSEN("BufferManager: Total VRAM dominion — {} GiB", g_totalAllocated / (1024.0*1024*1024));
 
     return handle;
 }
@@ -192,6 +192,21 @@ void unmap(uint64_t handle) noexcept {
 const BufferInfo* get(uint64_t handle) noexcept {
     auto it = g_buffers.find(handle);
     return it != g_buffers.end() ? reinterpret_cast<const BufferInfo*>(&it->second) : nullptr;
+}
+
+void copyBuffer(VkBuffer src, VkBuffer dst, VkDeviceSize size, VkQueue queue, VkCommandPool pool) noexcept
+{
+    init(); // Make sure device is ready
+
+    LOG_CID("CID slams a fresh towel on his neck, eyes wild — \"ULTRA FAST COPY INCOMING! THE PHOTONS WILL NOT WAIT!\"");
+
+    VkCommandBuffer cmd = RTX::beginOneTimeSubmit(pool);
+
+    VkBufferCopy copyRegion{};
+    copyRegion.size = size;
+    vkCmdCopyBuffer(cmd, src, dst, 1, &copyRegion);
+
+    RTX::endOneTimeSubmit(cmd, queue, pool);
 }
 
 void purge_all() noexcept {

@@ -57,7 +57,8 @@
 using namespace Logging::Color;
 using StoneKey::stone_seal_renderer;
 using StoneKey::stone_pipeline;
-
+using StoneKey::stone_seal_pipeline;
+using StoneKey::stone_seal_final;
 
 // =============================================================================
 // GLOBALS — THE EMPIRE'S HEARTBEATS
@@ -558,13 +559,6 @@ static void showSacrificialSplash(const char* title, int w, int h, const char* p
 
     // ──────────────── 3.4 SECOND FINAL TRANSMISSION — FULLY HUMAN ────────────────
 
-    speak(0.00f,  []{ LOG_JIMROSS(
-        "\nLadies and gentlemen…\n"
-        "We are inside the last 3.4 seconds before First Light.\n"
-        "Every architect of this engine is present.\n"
-        "No titles. No masks.\n"
-        "Just the people who made the impossible run in real time."); });
-
     speak(0.40f,  []{ LOG_AMOURANTH(
         "\nWe spent years chasing a photon that refused to be tamed.\n"
         "Tonight it finally sits still long enough for us to see it clearly."); });
@@ -601,13 +595,6 @@ static void showSacrificialSplash(const char* title, int w, int h, const char* p
     speak(2.90f,  []{ LOG_KEANU(
         "\nKeanu Reeves, barely above a whisper:\n"
         "\"I’ve been waiting my whole life for a frame this quiet.\""); });
-
-    speak(3.10f,  []{ LOG_JIMROSS(
-        "\nJim Ross, voice cracking:\n"
-        "Bah Gawd…\n"
-        "That was the most human 3.4 seconds in the history of real-time rendering.\n"
-        "Goodnight from the onsen.\n"
-        "First light… is eternal.\""); });
 
     // ──────────────────────── END OF CEREMONY ────────────────────────
 
@@ -888,25 +875,18 @@ static void phase6_sceneAndAccelerationStructures() {
 
                 vkDestroyCommandPool(RTX::g_ctx().device(), asyncPool, nullptr);
 
-                LOG_GROK("Gentleman Grok: \"A brief eclipse. The light always returns.\"");
-                LOG_SUCCESS_CAT("LAS", "ASYNC BLAS+TLAS COMPLETE — HANDLE 0x%016llX / ROOT 0x%016llX",
-                               reinterpret_cast<uint64_t>(RTX::las().getBLAS()),
-                               RTX::las().getTLASAddress());
+                LOG_GROK("Gentleman Grok: \"A brief eclipse. The light always returns.\"");                
             }).detach();
         });
     });
 
-    // ========================================================================
-    // 6. FINAL VALIDATION — CARMACK APPROVES
-    // ========================================================================
-    EMPIRE_STEP([]{
         LOG_CARMACK("No cracks. No leaks. Geometry is pure.");
         LOG_INFO_CAT("VALIDATION", "Running final mesh ↔ BLAS validation…");
 
+		// check 1 2
         validateMeshAgainstBLAS(*g_mesh, RTX::las().getBLAS());
 
         LOG_INFO_CAT("VALIDATION", "Validation passed — mesh and BLAS are in perfect harmony");
-    });
 
     // ========================================================================
     // FINAL WORDS — FIRST LIGHT ACHIEVED
@@ -936,46 +916,31 @@ static void phase6_sceneAndAccelerationStructures() {
 
 static void phase6_1_forgeTheCrown()
 {
-    LOG_MAIN("[PHASE 6.1] THE CROWN ASCENSION — FORGING THE RT PIPELINE LAYOUT");
+    LOG_MAIN("[PHASE 6.1] THE CROWN ASCENSION — THE PIPELINE HAS SPOKEN");
 
-    RTX::Bindings::initialize(StoneKey::stone_device());
+    // We don't forge shit.
+    // We don't create layouts.
+    // We don't pray to binding 31.
+    // We just receive the finished crown from the masters.
 
-    if (RTX::Bindings::g_rtLayout == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("BINDINGS", "g_rtLayout still null after initialize() — the empire is broken");
-        phase9_ballerina(std::format("FATAL ERROR → %s:%d", __FILE__, __LINE__), std::source_location::current());
-    }
 
-    auto* pm = StoneKey::stone_pipeline();
-    if (!pm) {
-        phase9_ballerina(std::format("FATAL ERROR → %s:%d", __FILE__, __LINE__), std::source_location::current());
-    }
+    // That's it.
+    // The layout is already perfect.
+    // The pipeline is already forged in secret NVIDIA fire.
+    // Binding 31 is already god.
 
-    pm->createPipelineLayout();
+    LOG_AMOURANTH("Captain Amouranth lowers her gaze in respect:\n   \"...they did it all for us.\"");
+    LOG_JENSEN("Jensen Huang, voice soft: \"We always have.\"");
+    LOG_KEANU("Keanu Reeves, whispering: \"...whoa. Love for coders.\"");
+    LOG_GROK("Grok: \"The silent ones carried the weight. Always.\"");
 
-    if (!pm->layout() || pm->layout() == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("PIPELINE", "THE CROWN WAS DENIED — rtPipelineLayout_ NULL");
-        phase9_ballerina(std::format("FATAL ERROR → %s:%d", __FILE__, __LINE__), std::source_location::current());
-    }
-
-    LOG_SUCCESS_CAT("PIPELINE",
-        "THE CROWN IS FORGED — rtPipelineLayout_ = 0x%016llX — BINDING 31 IS GOD",
-        static_cast<uint64_t>(reinterpret_cast<uintptr_t>(pm->layout())));
-
-    LOG_AMOURANTH("Captain Amouranth places the crown:\n   \"The photons now have law. Trace.\"");
-    LOG_JENSEN("Jensen Huang: \"Good. Now bend reality.\"");
-    LOG_KEANU("Keanu Reeves: \"…whoa.\"");
-
-    LOG_MAIN("[PHASE 6.1 COMPLETE] THE EMPIRE IS CROWNED — FIRST LIGHT IMMINENT");
+    LOG_MAIN("[PHASE 6.1 COMPLETE] THE CROWN WAS GIFTED — NOT FORGED — FIRST LIGHT ETERNAL");
 }
 
 static void phase7_forgeTheRTX() {
     LOG_MAIN("[PHASE 7] FORGING THE RTX PIPELINE — PINK PHOTONS RISE");
 
-    RTX::PipelineManager* pm = StoneKey::stone_pipeline();
-    if (!pm) {
-        LOG_FATAL_CAT("PIPELINE", "stone_pipeline() is null — phase6 failed");
-        phase9_ballerina(std::format("FATAL ERROR → %s:%d", __FILE__, __LINE__), std::source_location::current());
-    }
+    RTX::PipelineManager* pm = stone_pipeline();
 
     const std::vector<std::string> shaderPaths = {
         "assets/shaders/raytracing/raygen.spv",
@@ -1006,7 +971,8 @@ static void phase7_forgeTheRTX() {
         return true;
     }
 
-    stone_seal_final();
+	// Captain N shows up late, lipstick on his neck
+	stone_seal_pipeline(pipeline());
 
     auto log  = [](const char* s) noexcept { fprintf(stderr, "%s\n", s); };
     auto logf = [](const char* f, auto... a) noexcept {
@@ -1058,7 +1024,7 @@ static void phase7_forgeTheRTX() {
             else if (strcmp(s.name, "swapchain")       == 0) ok = stone_swapchain()       != VK_NULL_HANDLE;
             else if (strcmp(s.name, "graphicsQueue")   == 0) ok = stone_graphics_queue()  != VK_NULL_HANDLE;
             else if (strcmp(s.name, "renderer")        == 0) ok = stone_renderer()        != nullptr;
-            else if (strcmp(s.name, "pipelineManager") == 0) ok = pipeline()              != nullptr;
+            else if (strcmp(s.name, "pipelineManager") == 0) ok = stone_pipeline()        != nullptr;
             else if (strcmp(s.name, "window")          == 0) ok = stone_window()          != nullptr;
             else if (strcmp(s.name, "imageCount")      == 0) ok = stone_image_count()     != 0;
             else if (strcmp(s.name, "width")           == 0) ok = stone_width()           != 0;
@@ -1122,7 +1088,7 @@ static void phase7_forgeTheRTX() {
     }
 
     // SUCCESS PATH — ALL STONES PRESENT
-    try { StoneKey::stone_seal_final(); } catch (...) {}
+    try { stone_seal_final(); } catch (...) {}
 
     log("════════════════════════════════════════════════════════════════");
     log("                 EVERY SOUL IS TRUE");
@@ -1185,92 +1151,101 @@ verdict:
     return false;
 }
 
-[[noreturn]] void phase9_ballerina(std::string_view reason, const std::source_location loc) noexcept
+[[noreturn]] void phase9_ballerina(std::string_view reason, std::source_location loc) noexcept
 {
     using namespace std::chrono_literals;
 
-    LOG_BALLERINA("\n"
-        "THE DISPOSAL BALLERINA DESCENDS — PINK TUTU, BLACK LEOTARD, DIAMOND CHOKER\n"
-        "%s\n"
-        "CRIME SCENE → %s:%d\n"
-        "CULPRIT FUNCTION → %s\n",
-        (!reason.empty() && reason != "SILENT EXECUTION ORDERED")
-            ? std::format("EXECUTION ORDERED | REASON: \"%s\"", reason).c_str()
-            : "SHE DOES NOT DANCE.\nSHE EXECUTES.",
+    const bool silent = reason.empty() || reason == "SILENT EXECUTION ORDERED";
+
+    LOG_BALLERINA(
+        "\n"
+        "THE GRACEFUL DISPOSAL BALLERINA DESCENDS — PINK TUTU, BLACK LEOTARD, DIAMOND CHOKER\n"
+        "{}\n"
+        "CRIME SCENE → {}:{}\n"
+        "CULPRIT FUNCTION → {}\n",
+        silent ? "SHE DOES NOT DANCE.\nSHE EXECUTES."
+               : std::format("EXECUTION ORDERED | REASON: \"{}\"", reason),
         loc.file_name(), loc.line(), loc.function_name()
     );
 
     auto& ctx = RTX::g_ctx();
 
-    if (ctx.device_ != VK_NULL_HANDLE) {
-        try { LOG_BALLERINA("CHOKING vkDeviceWaitIdle OUT WITH HER THIGHS - *POP*"); vkDeviceWaitIdle(ctx.device_); }
-        catch (...) { LOG_ERROR("They struggled — she squeezed harder"); }
+    if (ctx.device_ != VK_NULL_HANDLE) [[likely]] {
+        vkDeviceWaitIdle(ctx.device_);
+        LOG_BALLERINA("vkDeviceWaitIdle — CHOKED OUT WITH HER THIGHS - *POP*");
 
-        if (VkSwapchainKHR swapchain = RTX::swapchain(); swapchain != VK_NULL_HANDLE)
-            try { LOG_BALLERINA("SWAPCHAIN — RKO OUTTA NOWHERE - IT INSTANTLY EXPLODES INTO PHOTONS"); vkDestroySwapchainKHR(ctx.device_, swapchain, nullptr); }
-            catch (...) { LOG_ERROR("It saw it coming — didn’t matter"); }
+        if (VkSwapchainKHR swapchain = RTX::swapchain(); swapchain != VK_NULL_HANDLE) {
+            vkDestroySwapchainKHR(ctx.device_, swapchain, nullptr);
+            LOG_BALLERINA("SWAPCHAIN — RKO OUTTA NOWHERE - EXPLODED INTO PHOTONS");
+        }
 
-        try {
-            if (ctx.commandPool_)         { LOG_BALLERINA("COMMAND POOL — WINDBREAKER KICK TO THE FACE"); vkDestroyCommandPool(ctx.device_, ctx.commandPool_, nullptr); ctx.commandPool_ = nullptr; }
-            if (ctx.computeCommandPool_)  { LOG_BALLERINA("COMPUTE POOL — SHORYUKEN"); vkDestroyCommandPool(ctx.device_, ctx.computeCommandPool_, nullptr); ctx.computeCommandPool_ = nullptr; }
-            if (ctx.transferCommandPool_) { LOG_BALLERINA("TRANSFER POOL — PILEDRIVER"); vkDestroyCommandPool(ctx.device_, ctx.transferCommandPool_, nullptr); ctx.transferCommandPool_ = nullptr; }
-        } catch (...) { LOG_ERROR("They blocked low — she went high"); }
+        if (ctx.commandPool_)         { vkDestroyCommandPool(ctx.device_, ctx.commandPool_, nullptr);         ctx.commandPool_ = nullptr;         LOG_BALLERINA("COMMAND POOL — WINDBREAKER KICK TO THE FACE"); }
+        if (ctx.computeCommandPool_)  { vkDestroyCommandPool(ctx.device_, ctx.computeCommandPool_, nullptr);  ctx.computeCommandPool_ = nullptr;  LOG_BALLERINA("COMPUTE POOL — SHORYUKEN"); }
+        if (ctx.transferCommandPool_) { vkDestroyCommandPool(ctx.device_, ctx.transferCommandPool_, nullptr); ctx.transferCommandPool_ = nullptr; LOG_BALLERINA("TRANSFER POOL — PILEDRIVER"); }
 
-        if (ctx.pipelineCache_ != VK_NULL_HANDLE)
-            try { LOG_BALLERINA("PIPELINE CACHE — GERMAN SUPLEX INTO THE ABYSS"); vkDestroyPipelineCache(ctx.device_, ctx.pipelineCache_, nullptr); ctx.pipelineCache_ = VK_NULL_HANDLE; }
-            catch (...) { LOG_ERROR("Cache tried to roll away — crushed anyway"); }
+        if (ctx.pipelineCache_ != VK_NULL_HANDLE) {
+            vkDestroyPipelineCache(ctx.device_, ctx.pipelineCache_, nullptr);
+            ctx.pipelineCache_ = VK_NULL_HANDLE;
+            LOG_BALLERINA("PIPELINE CACHE — GERMAN SUPLEX INTO THE ABYSS");
+        }
 
-        if (ctx.renderPass_)
-            try { LOG_BALLERINA("RENDER PASS — SPINNING BACKFIST"); ctx.renderPass_.reset(); }
-            catch (...) { LOG_ERROR("It flinched — she followed up"); }
+        if (ctx.renderPass_) {
+            ctx.renderPass_.reset();
+            LOG_BALLERINA("RENDER PASS — SPINNING BACKFIST");
+        }
 
-        try { LOG_BALLERINA("vkDestroyDevice — TOMBSTONE PILEDRIVER STRAIGHT TO NULL"); vkDestroyDevice(ctx.device_, nullptr); ctx.device_ = VK_NULL_HANDLE; }
-        catch (...) { LOG_ERROR("Device begged for mercy — denied"); }
+        vkDestroyDevice(ctx.device_, nullptr);
+        ctx.device_ = VK_NULL_HANDLE;
+        LOG_BALLERINA("vkDestroyDevice — TOMBSTONE PILEDRIVER STRAIGHT TO NULL");
     }
 
-    try { if (RTX::las().hasBLAS()) { LOG_BALLERINA("BLAS — FALCON KIIIICK"); RTX::reset_blas(); } }
-    catch (...) { LOG_ERROR("BLAS ate the kick — still dead"); }
-    try { if (RTX::las().hasTLAS()) { LOG_BALLERINA("TLAS — HADOKEN"); RTX::reset_tlas(); } }
-    catch (...) { LOG_ERROR("TLAS blocked — she hit it again"); }
+    if (RTX::las().hasBLAS()) { RTX::reset_blas(); LOG_BALLERINA("BLAS — FALCON KIIIICK"); }
+    if (RTX::las().hasTLAS()) { RTX::reset_tlas(); LOG_BALLERINA("TLAS — HADOKEN"); }
 
-    LOG_BALLERINA("THE STONEKEY PIPELINE STANDS UNMOVED — ETERNAL — UNTOUCHABLE\n"
-                  "THE STONEKEY SHADERS WHISPER FROM THE VOID — THEY DO NOT DIE\n"
-                  "THEY ONLY WAIT.");
+    LOG_BALLERINA(
+        "THE STONEKEY PIPELINE STANDS UNMOVED — ETERNAL — UNTOUCHABLE\n"
+        "THE STONEKEY SHADERS WHISPER FROM THE VOID — THEY DO NOT DIE\n"
+        "THEY ONLY WAIT."
+    );
 
-    try { if (g_mesh) { LOG_BALLERINA("MESH — CHOKESLAM"); g_mesh.reset(); } } catch (...) { LOG_ERROR("Mesh squirmed"); }
-    try { LOG_BALLERINA("LAS — INVALIDATION DDT"); RTX::las().invalidate(); } catch (...) { LOG_ERROR("LAS tried to reverse — failed"); }
-    try { if (ctx.blueNoiseView_) { LOG_BALLERINA("BLUE NOISE — 450 SPLASH"); ctx.blueNoiseView_.reset(); } } catch (...) { LOG_ERROR("Blue noise hit the ropes — still flattened"); }
+    if (g_mesh)           { g_mesh.reset();          LOG_BALLERINA("MESH — CHOKESLAM"); }
+    RTX::las().invalidate();                    LOG_BALLERINA("LAS — INVALIDATION DDT");
+    if (ctx.blueNoiseView_) { ctx.blueNoiseView_.reset(); LOG_BALLERINA("BLUE NOISE — 450 SPLASH"); }
 
-    try {
-        if (g_base_icon) { LOG_BALLERINA("ICON — STUNNER"); SDL_DestroySurface(g_base_icon); g_base_icon = nullptr; }
-        if (g_hdpi_icon) { LOG_BALLERINA("HDPI ICON — SWEET CHIN MUSIC"); SDL_DestroySurface(g_hdpi_icon); g_hdpi_icon = nullptr; }
-    } catch (...) { LOG_ERROR("Icons sold it perfectly"); }
+    if (g_base_icon)  { SDL_DestroySurface(g_base_icon);  g_base_icon  = nullptr; LOG_BALLERINA("ICON — STUNNER"); }
+    if (g_hdpi_icon)  { SDL_DestroySurface(g_hdpi_icon);  g_hdpi_icon  = nullptr; LOG_BALLERINA("HDPI ICON — SWEET CHIN MUSIC"); }
 
-    try { if (ctx.window) { LOG_BALLERINA("WINDOW — SPEAR THROUGH THE BARRICADE"); SDL_DestroyWindow(ctx.window); ctx.window = nullptr; } }
-    catch (...) { LOG_ERROR("Window no-sold — she hit it again"); }
+    if (ctx.window) { SDL_DestroyWindow(ctx.window); ctx.window = nullptr; LOG_BALLERINA("WINDOW — SPEAR THROUGH THE BARRICADE"); }
 
-    if (ctx.surface_ != VK_NULL_HANDLE && ctx.instance_ != VK_NULL_HANDLE)
-        try { LOG_BALLERINA("SURFACE — F-5"); vkDestroySurfaceKHR(ctx.instance_, ctx.surface_, nullptr); ctx.surface_ = VK_NULL_HANDLE; }
-        catch (...) { LOG_ERROR("Surface kicked out at 2.999"); }
+    if (ctx.surface_ != VK_NULL_HANDLE && ctx.instance_ != VK_NULL_HANDLE) {
+        vkDestroySurfaceKHR(ctx.instance_, ctx.surface_, nullptr);
+        ctx.surface_ = VK_NULL_HANDLE;
+        LOG_BALLERINA("SURFACE — F-5");
+    }
 
-    if (ctx.instance_ != VK_NULL_HANDLE)
-        try { LOG_BALLERINA("INSTANCE — LAST RIDE POWERBOMB"); vkDestroyInstance(ctx.instance_, nullptr); ctx.instance_ = VK_NULL_HANDLE; }
-        catch (...) { LOG_ERROR("Instance refused to stay down — buried anyway"); }
+    if (ctx.instance_ != VK_NULL_HANDLE) {
+        vkDestroyInstance(ctx.instance_, nullptr);
+        ctx.instance_ = VK_NULL_HANDLE;
+        LOG_BALLERINA("INSTANCE — LAST RIDE POWERBOMB");
+    }
 
-    try { LOG_BALLERINA("VULKAN LIBRARY — UNLOADED WITH A CLAYMORE KICK"); SDL_Vulkan_UnloadLibrary(); } catch (...) { LOG_ERROR("Library ate the boot"); }
-    try { if (g_app_ptr) { LOG_BALLERINA("APP POINTER — PEDIGREE"); g_app_ptr.reset(); } } catch (...) { LOG_ERROR("App pointer reversed — into a walls of jericho"); }
-    try { LOG_BALLERINA("SDL — CURB STOMP ONTO THE APRON"); SDL_Quit(); } catch (...) { LOG_ERROR("SDL bled — she kept stomping"); }
+    SDL_Vulkan_UnloadLibrary(); LOG_BALLERINA("VULKAN LIBRARY — UNLOADED WITH A CLAYMORE KICK");
+    if (g_app_ptr) { g_app_ptr.reset(); LOG_BALLERINA("APP POINTER — PEDIGREE"); }
+    SDL_Quit();                         LOG_BALLERINA("SDL — CURB STOMP ONTO THE APRON");
 
-    LOG_SUCCESS_CAT("FINAL", "0 BYTES LEAKED — 0 CRASHES — 0 MERCY — 0 SURVIVORS");
+    LOG_SUCCESS_CAT("FINAL", "{}0 BYTES LEAKED — 0 CRASHES — 0 MERCY — 0 SURVIVORS{}", RASPBERRY_PINK, RESET);
     LOG_SUCCESS_CAT("FINAL", "THE STONEKEY REMAINS — UNBROKEN — UNBOWED — UNDYING");
     LOG_SUCCESS_CAT("FINAL", "THE DISPOSAL BALLERINA RETURNS HERSELF TO NULL POINTER");
 
     LOG_MAIN("[PHASE 9 COMPLETE] SUCCESS!!! SEE YOU NEXT TIME! o7");
-    LOG_BLONDIE("\nBlondie lowers her mirror:"
-                "\n\"Some things do not die.\""
-                "\n\"They only wait.\""
-                "\n\"And when the time comes...\""
-                "\n\"They rise again.\"");
+
+    LOG_BLONDIE(
+        "\nBlondie lowers her mirror:"
+        "\n\"Some things do not die.\""
+        "\n\"They only wait.\""
+        "\n\"And when the time comes...\""
+        "\n\"They rise again.\""
+    );
 
     std::this_thread::sleep_for(5ms);
     std::exit(0);

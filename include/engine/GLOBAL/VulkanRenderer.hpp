@@ -67,6 +67,8 @@ public:
     void requestAccumulationReset() noexcept { resetAccumulation_ = true; resetAccumNextFrame_ = true; }
 
     void updateAllRTXDescriptors() noexcept;
+	void updateRTDescriptorSet(uint32_t frameIndex);
+    void recordRayTracingCommands(VkCommandBuffer cmd, uint32_t frameIndex);
     void setTonemap(bool enabled) noexcept;
     void setOverlay(bool show) noexcept;
     void setRenderMode(int mode) noexcept;                    // ← THIS IS THE ONE

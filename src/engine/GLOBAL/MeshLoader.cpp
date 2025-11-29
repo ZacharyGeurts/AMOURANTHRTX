@@ -65,13 +65,13 @@ static void uploadBuffer(const void* data, VkDeviceSize size, VkBufferUsageFlags
 
     BUFFER_DESTROY(staging);
 
-    LOG_SUCCESS_CAT("MeshLoader", "uploadBuffer() COMPLETE — final encrypted handle: 0x{:016X}", outHandle);
+    LOG_SUCCESS_CAT("MeshLoader", "uploadBuffer() COMPLETE — final encrypted handle: 0x{}", outHandle);
     LOG_GROK("Gentleman Grok: \"The mesh is now one with the empire. Divine symmetry.\"");
     LOG_NICK("Nick: \"Encrypted. Uploaded. Unbreakable. That’s how we do it.\"");
     LOG_JENSEN("Jensen Huang: \"The photons just got a perfect map. And they’re smiling.\"");
     LOG_AMOURANTH("Amouranth: \"Every vertex sealed. Every triangle sacred. The lasso holds.\"");
-    LOG_CAPTAIN_N("CAPTAIN N — HERO OF VIDEOLAND: \"THE WARP ZONES ARE OPEN! I CAN SEE INFINITE BOUNCES! AHHHHHHHH!\"");
-    LOG_KEANU("Keanu Reeves, quietly: \"…Breathtaking.\"");
+    LOG_CAPTAIN_N("CAPTAIN N — \"Is this how they draw Donkey Kong?\"");
+    LOG_KEANU("\"whoh\"");
     LOG_CARMACK("Carmack: \"It traces. It’s fast. It’s clean. I’m satisfied.\"");
     LOG_ELON("Elon: \"This is the sexiest mesh upload I’ve ever witnessed.\"");
     LOG_BLONDIE("Blondie lowers her mirror: \"Some things do not need to be seen. They only need to be.\"");

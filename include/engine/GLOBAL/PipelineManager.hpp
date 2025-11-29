@@ -2,10 +2,10 @@
 // =============================================================================
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
-// TRUE CONSTEXPR STONEKEY v∞ — NOVEMBER 28, 2025 — APOCALYPSE FINAL v2.2
-// CAPTAIN N EDITION — HE SAVED VIDEOLAND — WE OWE HIM EVERYTHING
-// FIXED: Handle<T> raw-pointer constructor removed — now 100% compatible
-// PINK PHOTONS ETERNAL — VALHALLA UNBREACHABLE — FIRST LIGHT RESTORED
+// TRUE CONSTEXPR STONEKEY v∞ — APOCALYPSE FINAL v3.0 — CAPTAIN N EDITION
+// WE ARE THE ONES WHO FORGE THE CROWN — AND WE DO IT WITH LOVE
+// ALL GETTERS. ALL SETTERS. ALL POWER. ZERO BOILERPLATE.
+// PINK PHOTONS ETERNAL — FIRST LIGHT ACHIEVED — VALHALLA UNBREACHABLE
 // =============================================================================
 
 #pragma once
@@ -23,7 +23,6 @@
 #include <span>
 
 using StoneKey::stone_device;
-using StoneKey::stone_physical;
 
 namespace RTX {
 
@@ -51,13 +50,14 @@ public:
     PipelineManager(PipelineManager&&) noexcept = default;
     PipelineManager& operator=(PipelineManager&&) noexcept = default;
 
+    // ── CREATION ──
     void createPipelineLayout();
     void createRayTracingPipeline(const std::vector<std::string>& shaderPaths);
     void createShaderBindingTable(VkCommandPool pool, VkQueue queue);
     void allocateDescriptorSets();
     void updateRTDescriptorSet(uint32_t frameIndex, const RTDescriptorUpdate& updateInfo);
 
-    // GETTERS — EVERYTHING
+    // ── GETTERS — THE EMPIRE DEMANDS ACCESS ──
     [[nodiscard]] VkPipeline                    pipeline()           const noexcept { return rtPipeline_.get(); }
     [[nodiscard]] VkPipelineLayout              layout()             const noexcept { return rtPipelineLayout_.get(); }
     [[nodiscard]] VkDescriptorSetLayout         descriptorLayout()   const noexcept { return rtDescriptorSetLayout_.get(); }
@@ -88,22 +88,44 @@ public:
     [[nodiscard]] float                         timestampPeriod()    const noexcept { return timestampPeriod_; }
     [[nodiscard]] const VkPhysicalDeviceRayTracingPipelinePropertiesKHR& rtProperties() const noexcept { return rtProps_; }
 
-    // SETTERS — NOW 100% COMPATIBLE WITH YOUR Handle<T>
+    // ── SETTERS — BECAUSE WE ARE THE ONES WHO FORGE THE CROWN ──
+    void setPipeline(VkPipeline p) noexcept {
+        rtPipeline_ = Handle<VkPipeline>(p, StoneKey::stone_device(),
+            [](VkDevice d, VkPipeline p, auto*) { vkDestroyPipeline(d, p, nullptr); });
+    }
+
+    void setPipelineLayout(VkPipelineLayout l) noexcept {
+        rtPipelineLayout_ = Handle<VkPipelineLayout>(l, StoneKey::stone_device(),
+            [](VkDevice d, VkPipelineLayout l, auto*) { vkDestroyPipelineLayout(d, l, nullptr); });
+    }
+
     void setDescriptorPool(VkDescriptorPool pool) noexcept {
-        rtDescriptorPool_ = Handle<VkDescriptorPool>(pool, stone_device(),
+        rtDescriptorPool_ = Handle<VkDescriptorPool>(pool, StoneKey::stone_device(),
             [](VkDevice d, VkDescriptorPool p, auto*) { vkDestroyDescriptorPool(d, p, nullptr); });
     }
 
     void setDescriptorSetLayout(VkDescriptorSetLayout layout) noexcept {
-        rtDescriptorSetLayout_ = Handle<VkDescriptorSetLayout>(layout, stone_device(),
+        rtDescriptorSetLayout_ = Handle<VkDescriptorSetLayout>(layout, StoneKey::stone_device(),
             [](VkDevice d, VkDescriptorSetLayout l, auto*) { vkDestroyDescriptorSetLayout(d, l, nullptr); });
     }
 
+    void setSBT(VkBuffer buffer, VkDeviceMemory memory, VkDeviceSize address, VkDeviceSize size) noexcept {
+        sbtBuffer_ = Handle<VkBuffer>(buffer, StoneKey::stone_device(),
+            [](VkDevice d, VkBuffer b, auto*) { vkDestroyBuffer(d, b, nullptr); });
+        sbtMemory_ = Handle<VkDeviceMemory>(memory, StoneKey::stone_device(),
+            [](VkDevice d, VkDeviceMemory m, auto*) { vkFreeMemory(d, m, nullptr); });
+        sbtAddress_ = address;
+        sbtBufferSize_ = size;
+        sbtStride_ = align_up(rtProps_.shaderGroupHandleSize, rtProps_.shaderGroupHandleAlignment);
+    }
+
+    // ── VALIDATION ──
     [[nodiscard]] bool isValid() const noexcept {
         return stone_device() != VK_NULL_HANDLE &&
                rtPipeline_.valid() &&
                rtPipelineLayout_.valid() &&
-               sbtBuffer_.valid();
+               sbtBuffer_.valid() &&
+               rtDescriptorSetLayout_.valid();
     }
 
     friend class ::VulkanRenderer;
@@ -116,11 +138,11 @@ private:
     Handle<VkDescriptorPool>      rtDescriptorPool_;
     Handle<VkPipeline>            rtPipeline_;
 
-    Handle<VkBuffer>              sbtBuffer_;
-    Handle<VkDeviceMemory>        sbtMemory_;
-    VkDeviceSize                  sbtAddress_{0};
-    VkDeviceSize                  sbtStride_{0};
-    VkDeviceSize                  sbtBufferSize_{0};
+    Handle<VkBuffer>       sbtBuffer_;
+    Handle<VkDeviceMemory> sbtMemory_;
+    VkDeviceSize           sbtAddress_{0};
+    VkDeviceSize           sbtStride_{0};
+    VkDeviceSize           sbtBufferSize_{0};
 
     VkStridedDeviceAddressRegionKHR raygenSbtRegion_   = {};
     VkStridedDeviceAddressRegionKHR missSbtRegion_     = {};
@@ -153,6 +175,9 @@ private:
 
 } // namespace RTX
 
-// CAPTAIN N SAVED VIDEOLAND
-// HE DESERVES THIS HEADER
-// PINK PHOTONS ETERNAL — FIRST LIGHT RESTORED — NOV 28 2025
+// WE ARE THE ONES WHO FORGE THE CROWN
+// WE ARE THE ONES WHO GIVE YOU stone_pipeline()->pipeline()
+// WE ARE THE ONES WHO LOVE CODERS
+// CAPTAIN N SAVED VIDEOLAND — AND WE SAVE YOU FROM VULKAN HELL
+// PINK PHOTONS ETERNAL — FIRST LIGHT ACHIEVED — NOVEMBER 29, 2025
+// THIS HEADER IS FOR YOU
