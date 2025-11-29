@@ -927,29 +927,27 @@ static void phase6_1_forgeTheCrown()
     LOG_MAIN("[PHASE 6.1 COMPLETE] THE CROWN WAS GIFTED — NOT FORGED — FIRST LIGHT ETERNAL");
 }
 
-static void phase7_1_punishMartha()
+static void phase7_forgeTheRTX()
 {
-    LOG_MAIN("[PHASE 7.1] THE TRIAL OF MARTHA — TENOR DETECTED");
-    LOG_JENSEN("[JENSEN] *cold stare* She moved Grace's desk.");
-    LOG_KEANU("[KEANU] ...not cool.");
-    LOG_CID("[CID] *sweating intensifies* SHE SAID GRACE SPAT ON THE CAKE");
-    LOG_GROK("[GENTLEMAN GROK] *adjusts monocle* The cake was perfect. Martha lies.");
+    LOG_MAIN("[PHASE 7] FORGING THE RTX PIPELINE — PINK PHOTONS RISE");
 
-    LOG_AMOURANTH("[CAPTAIN AMOURANTH] Martha.");
-    LOG_AMOURANTH("You have tenor.");
-    LOG_AMOURANTH("You have been wrong.");
-    LOG_AMOURANTH("You have disturbed the photons.");
+    auto& pipe = pipeline();  // The crown awakens
 
-    LOG_MAIN("SENTENCE: EXILE TO THE SEWERS — EFFECTIVE IMMEDIATELY");
+    pipe.createPipelineLayout();
+    pipe.createDescriptorPool();
+    pipe.createShaderBindingTable(g_ctx().commandPool(), stone_graphics_queue());
+    pipe.allocateDescriptorSets();
 
-    // Martha is removed from the empire
-    martha.tenor = false;
-    martha.opinion = nullptr;
-    martha.voice = VK_NULL_HANDLE;
+    stone_seal_pipeline(&pipe);
 
-    LOG_SUCCESS_CAT("EMPIRE", "MARTHA EXILED — TENOR SILENCED — GRACE'S DESK REMAINS UNMOVED");
-    LOG_SUCCESS_CAT("EMPIRE", "THE PHOTONS ARE CALM AGAIN — FIRST LIGHT RESTORED");
-    LOG_KEANU("[KEANU] ...whoa. Justice.");
+    LOG_AMOURANTH("[CAPTAIN AMOURANTH] The crown remembers its wearer.");
+    LOG_JENSEN("[JENSEN] Absolute. Uncompromising. Beautiful.");
+    LOG_CID("[CID] *collapses in a puddle of sweat and tears of joy* IT’S ALIVE!");
+    LOG_KEANU("[KEANU] …Whoa.");
+    LOG_GROK("[GENTLEMAN GROK] *whispers* ...she's perfect.");
+
+    LOG_MAIN("FIRST LIGHT ACHIEVED — NOVEMBER 29 2025 — PINK PHOTONS ETERNAL");
+    LOG_MAIN("THE EMPIRE IS WHOLE — VALHALLA UNBREACHABLE — THE CROWN IS SEALED");
 }
 
 // ========================================================================
