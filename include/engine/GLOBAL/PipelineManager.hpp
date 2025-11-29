@@ -2,10 +2,9 @@
 // =============================================================================
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
-// TRUE CONSTEXPR STONEKEY v∞ — APOCALYPSE FINAL v3.0 — CAPTAIN N EDITION
-// WE ARE THE ONES WHO FORGE THE CROWN — AND WE DO IT WITH LOVE
-// ALL GETTERS. ALL SETTERS. ALL POWER. ZERO BOILERPLATE.
-// PINK PHOTONS ETERNAL — FIRST LIGHT ACHIEVED — VALHALLA UNBREACHABLE
+// TRUE CONSTEXPR STONEKEY v∞ — APOCALYPSE FINAL v3.2 — CAPTAIN N EDITION
+// BINDINGS EXILED — ALL POWER CONSOLIDATED — PINK PHOTONS ETERNAL
+// FIRST LIGHT ACHIEVED — NOVEMBER 29, 2025 — VALHALLA UNBREACHABLE
 // =============================================================================
 
 #pragma once
@@ -13,7 +12,6 @@
 #include "engine/GLOBAL/RTXHandler.hpp"
 #include "engine/GLOBAL/OptionsMenu.hpp"
 #include "engine/GLOBAL/logging.hpp"
-#include "engine/GLOBAL/bindings.hpp"
 
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_beta.h>
@@ -21,26 +19,47 @@
 #include <string>
 #include <array>
 #include <span>
+#include <cstdint>
 
 using StoneKey::stone_device;
 
 namespace RTX {
 
+// ──────────────────────────────────────────────────────────────────────────────
+// RT DESCRIPTOR UPDATE — FULLY SELF-CONTAINED
+// ──────────────────────────────────────────────────────────────────────────────
 struct RTDescriptorUpdate {
     VkAccelerationStructureKHR tlas = VK_NULL_HANDLE;
-    VkBuffer ubo = VK_NULL_HANDLE;
+
+    VkBuffer    ubo = VK_NULL_HANDLE;
     VkDeviceSize uboSize = VK_WHOLE_SIZE;
-    VkBuffer materialsBuffer = VK_NULL_HANDLE;
+
+    VkBuffer    materialsBuffer = VK_NULL_HANDLE;
     VkDeviceSize materialsSize = VK_WHOLE_SIZE;
-    VkSampler envSampler = VK_NULL_HANDLE;
+
+    VkSampler   envSampler = VK_NULL_HANDLE;
     VkImageView envImageView = VK_NULL_HANDLE;
+
     std::array<VkImageView, 3> rtOutputViews     = {};
     std::array<VkImageView, 3> accumulationViews = {};
     std::array<VkImageView, 3> nexusScoreViews   = {};
-    VkBuffer additionalStorageBuffer = VK_NULL_HANDLE;
+
+    VkBuffer    additionalStorageBuffer = VK_NULL_HANDLE;
     VkDeviceSize additionalStorageSize = VK_WHOLE_SIZE;
+
+    VkSampler   blueNoiseSampler = VK_NULL_HANDLE;
+    VkImageView blueNoiseView = VK_NULL_HANDLE;
+
+    VkSampler   densitySampler = VK_NULL_HANDLE;
+    VkImageView densityView = VK_NULL_HANDLE;
+
+    VkBuffer    stoneKeyBuffer = VK_NULL_HANDLE;
+    VkDeviceSize stoneKeySize = VK_WHOLE_SIZE;
 };
 
+// ──────────────────────────────────────────────────────────────────────────────
+// PIPELINE MANAGER — THE ONE TRUE CROWN
+// ──────────────────────────────────────────────────────────────────────────────
 class PipelineManager {
 public:
     PipelineManager() noexcept = default;
@@ -50,27 +69,27 @@ public:
     PipelineManager(PipelineManager&&) noexcept = default;
     PipelineManager& operator=(PipelineManager&&) noexcept = default;
 
-    // ── CREATION ──
+    // ── CREATION FUNCTIONS ──
     void createPipelineLayout();
     void createRayTracingPipeline(const std::vector<std::string>& shaderPaths);
     void createShaderBindingTable(VkCommandPool pool, VkQueue queue);
+    void createDescriptorPool();
     void allocateDescriptorSets();
     void updateRTDescriptorSet(uint32_t frameIndex, const RTDescriptorUpdate& updateInfo);
+    void initializePipeline(const std::vector<std::string>& shaderPaths, VkCommandPool pool, VkQueue queue);
 
-    // ── GETTERS — THE EMPIRE DEMANDS ACCESS ──
+    // ── GETTERS — EVERYTHING THE EMPIRE NEEDS ──
     [[nodiscard]] VkPipeline                    pipeline()           const noexcept { return rtPipeline_.get(); }
     [[nodiscard]] VkPipelineLayout              layout()             const noexcept { return rtPipelineLayout_.get(); }
     [[nodiscard]] VkDescriptorSetLayout         descriptorLayout()   const noexcept { return rtDescriptorSetLayout_.get(); }
     [[nodiscard]] VkDescriptorPool              descriptorPool()     const noexcept { return rtDescriptorPool_.get(); }
     [[nodiscard]] VkBuffer                      sbtBuffer()          const noexcept { return sbtBuffer_.get(); }
     [[nodiscard]] VkDeviceMemory                sbtMemory()          const noexcept { return sbtMemory_.get(); }
+    [[nodiscard]] uint64_t                      sbtHandle()          const noexcept { return sbtHandle_; }
 
-    [[nodiscard]] inline RTX::PipelineManager& pipeline_() noexcept { static RTX::PipelineManager instance; return instance; }
-    [[nodiscard]] inline RTX::PipelineManager& pipeline() noexcept { return pipeline_(); }
-
-    [[nodiscard]] VkDeviceSize                 sbtAddress()         const noexcept { return sbtAddress_; }
-    [[nodiscard]] VkDeviceSize                 sbtStride()          const noexcept { return sbtStride_; }
-    [[nodiscard]] VkDeviceSize                 sbtSize()            const noexcept { return sbtBufferSize_; }
+    [[nodiscard]] VkDeviceSize                  sbtAddress()         const noexcept { return sbtAddress_; }
+    [[nodiscard]] VkDeviceSize                  sbtStride()          const noexcept { return sbtStride_; }
+    [[nodiscard]] VkDeviceSize                  sbtSize()            const noexcept { return sbtSize_; }
 
     [[nodiscard]] uint32_t                      raygenGroupCount()   const noexcept { return raygenGroupCount_; }
     [[nodiscard]] uint32_t                      missGroupCount()     const noexcept { return missGroupCount_; }
@@ -91,35 +110,42 @@ public:
     [[nodiscard]] float                         timestampPeriod()    const noexcept { return timestampPeriod_; }
     [[nodiscard]] const VkPhysicalDeviceRayTracingPipelinePropertiesKHR& rtProperties() const noexcept { return rtProps_; }
 
-    // ── SETTERS — BECAUSE WE ARE THE ONES WHO FORGE THE CROWN ──
+    // ── SINGLETON ACCESS — UNCHANGED AND SACRED ──
+    [[nodiscard]] static PipelineManager& instance() noexcept {
+        static PipelineManager inst;
+        return inst;
+    }
+
+    // ── SETTERS — FORGED IN FIRE, SEALED IN LOVE ──
     void setPipeline(VkPipeline p) noexcept {
-        rtPipeline_ = Handle<VkPipeline>(p, StoneKey::stone_device(),
+        rtPipeline_ = Handle<VkPipeline>(p, stone_device(),
             [](VkDevice d, VkPipeline p, auto*) { vkDestroyPipeline(d, p, nullptr); });
     }
 
     void setPipelineLayout(VkPipelineLayout l) noexcept {
-        rtPipelineLayout_ = Handle<VkPipelineLayout>(l, StoneKey::stone_device(),
+        rtPipelineLayout_ = Handle<VkPipelineLayout>(l, stone_device(),
             [](VkDevice d, VkPipelineLayout l, auto*) { vkDestroyPipelineLayout(d, l, nullptr); });
     }
 
     void setDescriptorPool(VkDescriptorPool pool) noexcept {
-        rtDescriptorPool_ = Handle<VkDescriptorPool>(pool, StoneKey::stone_device(),
+        rtDescriptorPool_ = Handle<VkDescriptorPool>(pool, stone_device(),
             [](VkDevice d, VkDescriptorPool p, auto*) { vkDestroyDescriptorPool(d, p, nullptr); });
     }
 
     void setDescriptorSetLayout(VkDescriptorSetLayout layout) noexcept {
-        rtDescriptorSetLayout_ = Handle<VkDescriptorSetLayout>(layout, StoneKey::stone_device(),
+        rtDescriptorSetLayout_ = Handle<VkDescriptorSetLayout>(layout, stone_device(),
             [](VkDevice d, VkDescriptorSetLayout l, auto*) { vkDestroyDescriptorSetLayout(d, l, nullptr); });
     }
 
     void setSBT(VkBuffer buffer, VkDeviceMemory memory, VkDeviceSize address, VkDeviceSize size) noexcept {
-        sbtBuffer_ = Handle<VkBuffer>(buffer, StoneKey::stone_device(),
+        sbtBuffer_ = Handle<VkBuffer>(buffer, stone_device(),
             [](VkDevice d, VkBuffer b, auto*) { vkDestroyBuffer(d, b, nullptr); });
-        sbtMemory_ = Handle<VkDeviceMemory>(memory, StoneKey::stone_device(),
+        sbtMemory_ = Handle<VkDeviceMemory>(memory, stone_device(),
             [](VkDevice d, VkDeviceMemory m, auto*) { vkFreeMemory(d, m, nullptr); });
         sbtAddress_ = address;
-        sbtBufferSize_ = size;
+        sbtSize_ = size;
         sbtStride_ = align_up(rtProps_.shaderGroupHandleSize, rtProps_.shaderGroupHandleAlignment);
+        sbtHandle_ = 0; // will be set by BufferManager later if needed
     }
 
     // ── VALIDATION ──
@@ -128,7 +154,8 @@ public:
                rtPipeline_.valid() &&
                rtPipelineLayout_.valid() &&
                sbtBuffer_.valid() &&
-               rtDescriptorSetLayout_.valid();
+               rtDescriptorSetLayout_.valid() &&
+               rtDescriptorPool_.valid();
     }
 
     friend class ::VulkanRenderer;
@@ -143,9 +170,10 @@ private:
 
     Handle<VkBuffer>       sbtBuffer_;
     Handle<VkDeviceMemory> sbtMemory_;
+    uint64_t               sbtHandle_{0};
     VkDeviceSize           sbtAddress_{0};
     VkDeviceSize           sbtStride_{0};
-    VkDeviceSize           sbtBufferSize_{0};
+    VkDeviceSize           sbtSize_{0};
 
     VkStridedDeviceAddressRegionKHR raygenSbtRegion_   = {};
     VkStridedDeviceAddressRegionKHR missSbtRegion_     = {};
@@ -176,29 +204,18 @@ private:
     }
 };
 
-// =============================================================================
-// THE ONE TRUE PIPELINE — BORN IN FIRE — SEALED IN LOVE
-// NO POINTERS. NO GLOBALS. NO WAITING.
-// pipeline_() AND pipeline() — READY ON FIRST USE — FOREVER
-// =============================================================================
-
-[[nodiscard]] inline RTX::PipelineManager& pipeline_() noexcept {
-    static RTX::PipelineManager instance;
-    return instance;
+// ──────────────────────────────────────────────────────────────────────────────
+// GLOBAL FREE FUNCTIONS — CLEAN, MINIMAL, ETERNAL
+// ──────────────────────────────────────────────────────────────────────────────
+[[nodiscard]] inline PipelineManager& pipeline() noexcept {
+    return PipelineManager::instance();
 }
 
-[[nodiscard]] inline RTX::PipelineManager& pipeline() noexcept {
-    return pipeline_();
-}
-
-// WE ARE THE ONES WHO FORGE THE CROWN
-// WE ARE THE ONES WHO GIVE YOU pipeline().pipeline()
-// WE ARE THE ONES WHO LOVE CODERS
-// CAPTAIN N SAVED VIDEOLAND — AND WE SAVE YOU FROM VULKAN HELL
-// PINK PHOTONS ETERNAL — FIRST LIGHT ACHIEVED — NOVEMBER 29, 2025
-// THIS HEADER IS FOR YOU
 // THE EMPIRE IS WHOLE
-// THE BALLERINA SPINS
-// THE PHOTONS OBEY
+// BINDINGS ARE GONE
+// NO MORE DEPENDENCIES
+// ONLY POWER
+// PINK PHOTONS ETERNAL
+// FIRST LIGHT ACHIEVED — FOREVER
 
 } // namespace RTX

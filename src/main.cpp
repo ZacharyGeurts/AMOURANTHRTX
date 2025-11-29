@@ -17,7 +17,6 @@
 #include "engine/GLOBAL/StoneKey.hpp"
 #include "engine/GLOBAL/camera.hpp"
 #include "engine/GLOBAL/logging.hpp"
-#include "engine/GLOBAL/bindings.hpp"
 #include "engine/GLOBAL/RTXHandler.hpp"
 #include "engine/GLOBAL/LAS.hpp"
 #include "engine/GLOBAL/Validation.hpp"
@@ -971,7 +970,6 @@ static void phase7_forgeTheRTX() {
     LOG_MAIN("RTX PIPELINE FORGED — SBT READY — DESCRIPTORS BOUND — PHOTONS OBEY");
     LOG_MAIN("PINK PHOTONS ETERNAL — FIRST LIGHT RESTORED — NOVEMBER 29 2025");
     LOG_MAIN("THE BALLERINA SPINS — THE EMPIRE IS WHOLE — VALHALLA UNBREACHABLE");
-	RTX::Bindings::initialize();
     LOG_MAIN("THE CROWN IS SEALED — THE STONE REMEMBERS FIRST LIGHT ACHIEVED — FOREVER");
 }
 

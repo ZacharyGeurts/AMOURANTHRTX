@@ -31,7 +31,6 @@
 #include "engine/GLOBAL/PipelineManager.hpp"
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/GLOBAL/StoneKey.hpp"
-#include "engine/GLOBAL/bindings.hpp"
 
 struct Camera;
 

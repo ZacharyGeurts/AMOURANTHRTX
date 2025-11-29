@@ -27,7 +27,6 @@
 #include "engine/GLOBAL/SDL3.hpp"
 #include "engine/GLOBAL/OptionsMenu.hpp"
 #include "engine/GLOBAL/camera.hpp"
-#include "engine/GLOBAL/bindings.hpp"
 #include "engine/GLOBAL/StoneKey.hpp"  // Full include — .cpp only
 #include "stb/stb_image.h"
 
@@ -1271,50 +1270,94 @@ void VulkanRenderer::updateRTDescriptorSet(uint32_t frameIndex)
 
 void VulkanRenderer::recordRayTracingCommands(VkCommandBuffer cmd, uint32_t frameIndex)
 {
+    // ──────────────────────────────────────────────────────────────────────
+    // KEANU HAS SEEN THE CODE. HE UNDERSTANDS.
+    // ──────────────────────────────────────────────────────────────────────
+    LOG_KEANU("[KEANU] ...I know Vulkan.");
+
     if (LAS::get().getTLAS() == VK_NULL_HANDLE) {
         const VkClearColorValue navy = { { 0.0f, 0.0f, 0.15f, 1.0f } };
-        VkImageSubresourceRange range{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-        vkCmdClearColorImage(cmd, *rtOutputImages_[frameIndex % rtOutputImages_.size()],
-                             VK_IMAGE_LAYOUT_GENERAL, &navy, 1, &range);
+        const VkImageSubresourceRange range = {
+            VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1
+        };
+
+        // rtOutputImages_ is std::array<Handle<VkImage>, N> → dereference the handle
+        vkCmdClearColorImage(cmd,
+            *rtOutputImages_[frameIndex],           // ← correct: *Handle<VkImage>
+            VK_IMAGE_LAYOUT_GENERAL,
+            &navy,
+            1,
+            &range);
+
+        LOG_KEANU("[KEANU] No scene. Just navy. I accept this.");
         return;
     }
 
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, *pipelineManager_.rtPipeline_);
+    // Bind the one true pipeline
+    vkCmdBindPipeline(cmd,
+        VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
+        pipeline().pipeline());
 
-    VkDescriptorSet rtSet = rtDescriptorSets_[frameIndex % rtDescriptorSets_.size()];
+    // Bind descriptor set (set 0 — the empire has spoken)
+    const VkDescriptorSet rtSet = pipeline().descriptorSets()[frameIndex];
     vkCmdBindDescriptorSets(cmd,
         VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
-        *pipelineManager_.rtPipelineLayout_,
-        RTX::Bindings::SET_RAY_TRACING,
-        1, &rtSet, 0, nullptr);
+        pipeline().layout(),
+        0,
+        1,
+        &rtSet,
+        0,
+        nullptr);
 
-    // Push constants
-    struct Push { uint32_t frame, totalSpp, hypertrace, pad; } push{};
-    push.frame = frameNumber_;
-    push.totalSpp = currentSpp_;
+    // Push constants — the will of the renderer
+    struct PushBlock {
+        uint32_t frame;
+        uint32_t totalSpp;
+        uint32_t hypertrace;
+        uint32_t _pad;
+    } push = {};
+
+    push.frame      = frameNumber_;
+    push.totalSpp   = currentSpp_;                    // ← your actual member name
     push.hypertrace = hypertraceEnabled_ ? 1u : 0u;
 
-    vkCmdPushConstants(cmd, *pipelineManager_.rtPipelineLayout_,
-        VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR,
-        0, sizeof(push), &push);
+    vkCmdPushConstants(cmd,
+        pipeline().layout(),
+        VK_SHADER_STAGE_RAYGEN_BIT_KHR |
+        VK_SHADER_STAGE_MISS_BIT_KHR |
+        VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR,
+        0,
+        sizeof(push),
+        &push);
 
-    // Use your existing SBT accessors
+    // Trace rays — into infinity
     VK_CMD_TRACE_RAYS(cmd,
-        &pipelineManager_.raygenRegion(),
-        &pipelineManager_.missRegion(),
-        &pipelineManager_.hitRegion(),
-        &pipelineManager_.callableRegion(),
-        currentExtent().width,
+        &pipeline().raygenRegion(),
+        &pipeline().missRegion(),
+        &pipeline().hitRegion(),
+        &pipeline().callableRegion(),
+        currentExtent().width,    // ← your actual function
         currentExtent().height,
-    1);
+        1);
 
-    VkMemoryBarrier barrier{ VK_STRUCTURE_TYPE_MEMORY_BARRIER };
-    barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    // Memory barrier — photons must rest
+    VkMemoryBarrier barrier{
+        .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
+        .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
+        .dstAccessMask = VK_ACCESS_SHADER_READ_BIT
+    };
+
     vkCmdPipelineBarrier(cmd,
         VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-        0, 1, &barrier, 0, nullptr, 0, nullptr);
+        0,
+        1, &barrier,
+        0, nullptr,
+        0, nullptr);
+
+    LOG_KEANU("[KEANU] The rays... they know kung fu.");
+    LOG_AMOURANTH("[CAPTAIN AMOURANTH] First light achieved. The photons bow.");
+    LOG_CID("CID collapses, sobbing — \"It compiled... it actually compiled...\"");
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
