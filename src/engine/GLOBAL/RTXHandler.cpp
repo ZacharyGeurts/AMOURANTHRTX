@@ -536,9 +536,6 @@ VkShaderModule RTX::Context::loadShader(const std::string& filename) const noexc
 
     stone_seal_device(device);
 
-    // GRACE'S DESK — ETERNAL LOADING ZONE — NOW PURE
-    RTX::loadExtensions(stone_instance(), stone_device());
-
     LOG_AMOURANTH("Device SEALED into StoneKey — stone_device() now valid — shaders may load");
     LOG_SUCCESS_CAT("VULKAN", "Logical device Grace created and eternally bound to StoneKey");
 

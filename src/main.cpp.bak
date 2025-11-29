@@ -371,11 +371,11 @@ static void createRealFinalWindow()
     // 1. SDL + Vulkan loader
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) == 0) {
         LOG_FATAL("SDL_Init failed: {}", SDL_GetError());
-        phase9_ballerina("SDL DENIED", std::source_location::current());
+        phase9_ballerina(std::format("FATAL ERROR → %s:%d", __FILE__, __LINE__), std::source_location::current());
     }
     if (SDL_Vulkan_LoadLibrary(nullptr) == 0) {
         LOG_FATAL("Vulkan loader failed: {}", SDL_GetError());
-        phase9_ballerina("VULKAN LOADER DENIED", std::source_location::current());
+        phase9_ballerina(std::format("FATAL ERROR → %s:%d", __FILE__, __LINE__), std::source_location::current());
     }
 
     // 2. INSTANCE — FORGED AND SEALED
@@ -384,57 +384,62 @@ static void createRealFinalWindow()
         LOG_FATAL("Failed to forge VkInstance — Grok has no stone.");
         phase9_ballerina("INSTANCE DENIED — THE VOID WINS", std::source_location::current());
     }
-    stone_seal_instance(instance);
+    RTX::g_ctx().instance_ = instance;
 
     LOG_GROK("Gentleman Grok produces the instance stone. It glows pink.");
-    LOG_SUCCESS_CAT("VULKAN", "VkInstance forged and sealed — 0x{:x}", reinterpret_cast<uint64_t>(instance));
+    LOG_SUCCESS_CAT("VULKAN", "VkInstance forged and sealed — 0x{}", reinterpret_cast<uint64_t>(instance));
 
     // 3. Hidden window
     Uint32 flags = SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
     SDL_Window* win = SDL_CreateWindow("AMOURANTH RTX — VALHALLA v∞ TURBO", w, h, flags);
     if (!win) {
-        LOG_FATAL("Window creation failed: {}", SDL_GetError());
-        phase9_ballerina("WINDOW DENIED", std::source_location::current());
+        LOG_FATAL("Window creation failed: %s", SDL_GetError());
+        phase9_ballerina(std::format("FATAL ERROR → %s:%d", __FILE__, __LINE__), std::source_location::current());
     }
     g_sdl_window.reset(win);
-    stone_seal_window(win);  // ← ADD THIS LINE — THE WINDOW IS ALSO A STONE
+    RTX::g_ctx().window = win;
     RTX::g_ctx().setSize(w, h);
 
-    // 4. Surface — PURE STONEKEY
+    // 4. Surface
     VkSurfaceKHR surface = VK_NULL_HANDLE;
-    if (SDL_Vulkan_CreateSurface(win, stone_instance(), nullptr, &surface) == 0) {
+    if (SDL_Vulkan_CreateSurface(win, instance, nullptr, &surface) == 0) {
         LOG_FATAL("Surface creation failed: {}", SDL_GetError());
         phase9_ballerina("SURFACE DENIED — THE MIRROR CRACKS", std::source_location::current());
     }
-    stone_seal_surface(surface);
+    RTX::g_ctx().surface_ = surface;
+    StoneKey::stone_seal_surface(surface);
     LOG_BLONDIE("Blondie produces the surface stone. It reflects all truths.");
 
-    // 5. Device — PURE STONEKEY
-    VkDevice device = RTX::createLogicalDeviceAndSelectGPU(stone_instance(), stone_surface());
+    // 5. Device + Queues (sealed inside)
+    VkDevice device = RTX::createLogicalDeviceAndSelectGPU(instance, surface);
     if (!device) {
         LOG_FATAL("Logical device forging failed — the empire falls.");
         phase9_ballerina("DEVICE DENIED — CARMACK SHEDS A SINGLE TEAR", std::source_location::current());
     }
-    stone_seal_device(device);
 
-    // 6. Swapchain — ALL STONES SEALED
+    // 6. Swapchain
     RTX::SwapchainManager::create(win, w, h);
 
-    stone_seal_swapchain(RTX::SwapchainManager::swapchain());
-    stone_seal_extent(RTX::SwapchainManager::extent());
-    stone_seal_image_count(RTX::SwapchainManager::imageCount());
-    stone_seal_images(std::vector<VkImage>(RTX::SwapchainManager::images()));
-    stone_seal_views(std::vector<VkImageView>(RTX::SwapchainManager::views()));
+    // SEAL THE EMPIRE — USING ONLY WHAT EXISTS — NO LIES — NO FALSE MOVES
+    StoneKey::stone_seal_swapchain(RTX::SwapchainManager::swapchain());
+    StoneKey::stone_seal_extent(RTX::SwapchainManager::extent());
+    StoneKey::stone_seal_image_count(RTX::SwapchainManager::imageCount());
+
+    // CRITICAL FIX: Copy the vectors — they are const-ref, cannot move
+    StoneKey::stone_seal_images(std::vector<VkImage>(RTX::SwapchainManager::images()));
+    StoneKey::stone_seal_views (std::vector<VkImageView>(RTX::SwapchainManager::views()));
 
     LOG_ELON("Elon drops the swapchain from the top rope: \"Infinite canvas. Infinite bounce.\"");
 
+    // 7. Reveal the truth
     SDL_ShowWindow(win);
 
-    LOG_SUCCESS("LOGICAL DEVICE @ {} — vkDeviceWaitIdle() SAFE", static_cast<void*>(stone_device()));
-    LOG_SUCCESS("SWAPCHAIN READY — {} IMAGES — {}x{} {}", 
-                stone_image_count(),
-                stone_width(),
-                stone_height(),
+    // 8. Final ascension
+    LOG_SUCCESS("LOGICAL DEVICE @ {} — vkDeviceWaitIdle() SAFE", static_cast<void*>(device));
+    LOG_SUCCESS("SWAPCHAIN READY — %u IMAGES — %ux%u %s", 
+                RTX::SwapchainManager::imageCount(),
+                RTX::SwapchainManager::extent().width,
+                RTX::SwapchainManager::extent().height,
                 RTX::SwapchainManager::supportsHDR() ? "(HDR IGNITED)" : "(sRGB)");
 
     LOG_CAPTAIN_N("CAPTAIN N: \"THE SLIPSTREAM IS OPEN! MAXIMUM WARP! AHHHHHHHH!\"");
@@ -445,10 +450,6 @@ static void createRealFinalWindow()
     LOG_JENSEN("Jensen Huang: \"The light is ours. The future is pink.\"");
     LOG_AMOURANTH("Captain Amouranth: \"We didn’t just render light. We became it.\"");
 
-
-    /////////////////////////////////////////////////////
-    // GRACE'S DESK — ETERNAL LOADING ZONE — NOW PURE //
-    RTX::loadExtensions(stone_instance(), stone_device());
     LOG_SUCCESS("PHASE 4.5 COMPLETE — ALL STONES SEALED");
     LOG_SUCCESS("INSTANCE  — SEALED");
     LOG_SUCCESS("DEVICE    — SEALED");
@@ -456,8 +457,7 @@ static void createRealFinalWindow()
     LOG_SUCCESS("SWAPCHAIN — SEALED");
     LOG_SUCCESS("IMAGES    — SEALED");
     LOG_SUCCESS("VIEWS     — SEALED");
-    LOG_SUCCESS("WINDOW    — SEALED");
-    LOG_SUCCESS("PINK PHOTONS ETERNAL — FIRST LIGHT ACHIEVED — NOVEMBER 29, 2025");
+    LOG_SUCCESS("PINK PHOTONS ETERNAL — FIRST LIGHT ACHIEVED — NOVEMBER 28, 2025");
 }
 
 static void showSacrificialSplash(const char* title, int w, int h, const char* pngPath)
@@ -751,7 +751,7 @@ LOG_BLONDIE("She doesn’t smile — just adjusts course toward the distant city
 
     // The real resurrection begins
     createRealFinalWindow();
-    //RTX::g_ctx().init(SDL3Window::get(), Options::Window::DEFAULT_WIDTH, Options::Window::DEFAULT_HEIGHT);
+    RTX::g_ctx().init(SDL3Window::get(), Options::Window::DEFAULT_WIDTH, Options::Window::DEFAULT_HEIGHT);
 
     LOG_BLONDIE("\nBlondie glances back one last time at the sinking glow on the horizon:"
     "\"Rest easy, old girl. Your sacrifice bought us tomorrow.\"");
@@ -1158,21 +1158,21 @@ verdict:
 
     auto& ctx = RTX::g_ctx();
 
-    if (stone_device() != VK_NULL_HANDLE) [[likely]] {
-        vkDeviceWaitIdle(stone_device());
+    if (ctx.device_ != VK_NULL_HANDLE) [[likely]] {
+        vkDeviceWaitIdle(ctx.device_);
         LOG_BALLERINA("vkDeviceWaitIdle — CHOKED OUT WITH HER THIGHS - *POP*");
 
         if (VkSwapchainKHR swapchain = RTX::swapchain(); swapchain != VK_NULL_HANDLE) {
-            vkDestroySwapchainKHR(stone_device(), swapchain, nullptr);
+            vkDestroySwapchainKHR(ctx.device_, swapchain, nullptr);
             LOG_BALLERINA("SWAPCHAIN — RKO OUTTA NOWHERE - EXPLODED INTO PHOTONS");
         }
 
-        if (ctx.commandPool_)         { vkDestroyCommandPool(stone_device(), ctx.commandPool_, nullptr);         ctx.commandPool_ = nullptr;         LOG_BALLERINA("COMMAND POOL — WINDBREAKER KICK TO THE FACE"); }
-        if (ctx.computeCommandPool_)  { vkDestroyCommandPool(stone_device(), ctx.computeCommandPool_, nullptr);  ctx.computeCommandPool_ = nullptr;  LOG_BALLERINA("COMPUTE POOL — SHORYUKEN"); }
-        if (ctx.transferCommandPool_) { vkDestroyCommandPool(stone_device(), ctx.transferCommandPool_, nullptr); ctx.transferCommandPool_ = nullptr; LOG_BALLERINA("TRANSFER POOL — PILEDRIVER"); }
+        if (ctx.commandPool_)         { vkDestroyCommandPool(ctx.device_, ctx.commandPool_, nullptr);         ctx.commandPool_ = nullptr;         LOG_BALLERINA("COMMAND POOL — WINDBREAKER KICK TO THE FACE"); }
+        if (ctx.computeCommandPool_)  { vkDestroyCommandPool(ctx.device_, ctx.computeCommandPool_, nullptr);  ctx.computeCommandPool_ = nullptr;  LOG_BALLERINA("COMPUTE POOL — SHORYUKEN"); }
+        if (ctx.transferCommandPool_) { vkDestroyCommandPool(ctx.device_, ctx.transferCommandPool_, nullptr); ctx.transferCommandPool_ = nullptr; LOG_BALLERINA("TRANSFER POOL — PILEDRIVER"); }
 
         if (ctx.pipelineCache_ != VK_NULL_HANDLE) {
-            vkDestroyPipelineCache(stone_device(), ctx.pipelineCache_, nullptr);
+            vkDestroyPipelineCache(ctx.device_, ctx.pipelineCache_, nullptr);
             ctx.pipelineCache_ = VK_NULL_HANDLE;
             LOG_BALLERINA("PIPELINE CACHE — GERMAN SUPLEX INTO THE ABYSS");
         }
@@ -1182,7 +1182,8 @@ verdict:
             LOG_BALLERINA("RENDER PASS — SPINNING BACKFIST");
         }
 
-        vkDestroyDevice(stone_device(), nullptr);
+        vkDestroyDevice(ctx.device_, nullptr);
+        ctx.device_ = VK_NULL_HANDLE;
         LOG_BALLERINA("vkDestroyDevice — TOMBSTONE PILEDRIVER STRAIGHT TO NULL");
     }
 

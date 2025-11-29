@@ -118,24 +118,7 @@ void PipelineManager::createDescriptorPool()
 // ──────────────────────────────────────────────────────────────────────────────
 PipelineManager::PipelineManager(VkDevice device, VkPhysicalDevice phys)
 {
-    stone_seal_device(device);
-    stone_seal_physical(phys);
-
-    if (stone_device() == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("PIPELINE", "NO DEVICE — THE KING IS BORN WITHOUT A HEART");
-        return;
-    }
-
-    // ONLY cache device properties here — layout creation moved to phase6.1
-    cacheDeviceProperties();
-
-    // Load ray tracing extensions — PFNs for the empire
-    loadRayTracingExtensions();
-
-    LOG_CID("CID wipes a torrent of sweat from his brow, puddles forming at his feet — \"The device is sealed, props cached, extensions loaded... but the sweat... it never stops!\"");
-
-    LOG_SUCCESS_CAT("PIPELINE", 
-        "PipelineManager forged — Properties cached + Extensions loaded — AWAITING CROWN (createPipelineLayout deferred to phase6.1)");
+   // ballerina looks around
 }
 
 void PipelineManager::allocateDescriptorSets() 
