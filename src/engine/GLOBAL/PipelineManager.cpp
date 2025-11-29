@@ -628,48 +628,71 @@ void PipelineManager::cacheDeviceProperties() {
 // ──────────────────────────────────────────────────────────────────────────────
 // loadShader — Matches VulkanRenderer::loadShader Exactly + Null Device Guard + FIXED: VK_CHECK for Create
 // ──────────────────────────────────────────────────────────────────────────────
-VkShaderModule PipelineManager::loadShader(const std::string& path) const {
-    LOG_TRACE_CAT("PIPELINE", "loadShader — START — path='{}'", path);
+VkShaderModule PipelineManager::loadShader(const std::string& relativePath) const
+{
+    LOG_TRACE_CAT("PIPELINE", "loadShader — START — relativePath='{}'", relativePath);
 
-    LOG_CID("CID sweats bullets loading shader — \"SPIR-V incoming... hope it doesn't melt my brain like this heat!\"");
+    LOG_CID("CID wipes sweat, adjusts goggles — \"Locating shader in the empire's vault... build/bin/Linux...\"");
 
-    // FIXED: Null device guard
     if (stone_device() == VK_NULL_HANDLE) {
         LOG_ERROR_CAT("PIPELINE", "Null device — cannot load shader");
         return VK_NULL_HANDLE;
     }
 
-    // Read SPIR-V binary from file
-    std::ifstream file(path, std::ios::ate | std::ios::binary);
+    // ── THE ONE TRUE BASE PATH — ETCHED IN STONE
+    static const std::string BASE_PATH = []() {
+        // This runs once at first call — safe, fast, eternal
+        char* cwd = getcwd(nullptr, 0);
+        std::string path = cwd ? std::string(cwd) + "/" : "";
+        free(cwd);
+
+        // If we're already in build/bin/Linux, don't double it
+        if (path.ends_with("/build/bin/Linux/") || path.ends_with("/build/bin/Linux")) {
+            return path;
+        }
+
+        // Otherwise: assume project root → append the truth
+        return path + "build/bin/Linux/";
+    }();
+
+    const std::string fullPath = BASE_PATH + relativePath;
+
+    LOG_TRACE_CAT("PIPELINE", "Resolved full shader path: '{}'", fullPath);
+
+    std::ifstream file(fullPath, std::ios::ate | std::ios::binary);
     if (!file.is_open()) {
-        LOG_ERROR_CAT("PIPELINE", "Failed to open shader file: {}", path);
+        LOG_ERROR_CAT("PIPELINE", "Failed to open shader file: '{}'", fullPath);
+        LOG_CID("CID panics — \"SHADER NOT FOUND AT '{}' — DID SOMEONE MOVE THE VAULT?!\"", fullPath);
         return VK_NULL_HANDLE;
     }
 
     size_t fileSize = static_cast<size_t>(file.tellg());
+    if (fileSize == 0 || fileSize % 4 != 0) {
+        LOG_ERROR_CAT("PIPELINE", "Invalid SPIR-V file size: {} bytes — must be non-zero and 4-byte aligned", fileSize);
+        return VK_NULL_HANDLE;
+    }
+
     std::vector<char> shaderCode(fileSize);
     file.seekg(0);
     file.read(shaderCode.data(), fileSize);
     file.close();
 
-    LOG_TRACE_CAT("PIPELINE", "Loaded {} bytes from shader file", fileSize);
+    LOG_TRACE_CAT("PIPELINE", "Loaded {} bytes from '{}'", fileSize, relativePath);
 
-    // Create VkShaderModule
-    VkShaderModuleCreateInfo createInfo{};
-    createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-    createInfo.codeSize = fileSize;
-    createInfo.pCode = reinterpret_cast<const uint32_t*>(shaderCode.data());
+    VkShaderModuleCreateInfo createInfo = {
+        .sType    = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+        .codeSize = fileSize,
+        .pCode    = reinterpret_cast<const uint32_t*>(shaderCode.data())
+    };
 
-    VkShaderModule shaderModule;
-    // FIXED: Use VK_CHECK for consistent error handling (logs + aborts on failure)
+    VkShaderModule shaderModule = VK_NULL_HANDLE;
     VK_CHECK(vkCreateShaderModule(stone_device(), &createInfo, nullptr, &shaderModule),
-             std::format("Failed to create shader module from {}", path).c_str());
+             std::format("Failed to create shader module from '{}'", relativePath).c_str());
 
-    LOG_TRACE_CAT("PIPELINE", "Shader module created successfully");
+    LOG_SUCCESS_CAT("PIPELINE", "Shader loaded — '{}' → {} bytes — PINK PHOTONS APPROVED", relativePath, fileSize);
+    LOG_CID("CID exhales in relief — \"Shader secured. The photons have their instructions. I can rest... for 3 seconds.\"");
 
-    LOG_CID("CID fans his face, sweat evaporating — \"Shader loaded... perfection, but I'm a sweaty mess!\"");
-
-    LOG_TRACE_CAT("PIPELINE", "loadShader — COMPLETE");
+    LOG_TRACE_CAT("PIPELINE", "loadShader — COMPLETE — '{}'", relativePath);
     return shaderModule;
 }
 
