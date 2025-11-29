@@ -304,7 +304,6 @@ public:
     // =============================================================================
     [[nodiscard]] VkInstance createVulkanInstanceWithSDL(bool enableValidation) noexcept;
 
-    void createCommandPool();
     void retrieveQueues() noexcept = delete; // NO LONGER NEEDED — done in createLogicalDevice
 
     // =============================================================================

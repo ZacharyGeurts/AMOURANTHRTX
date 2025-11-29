@@ -325,11 +325,11 @@ void PipelineManager::cacheDeviceProperties() {
     LOG_SUCCESS_CAT("PIPELINE",
         std::format("GPU AWAKENS — {} — Driver {} — API {}.{}.{} — {}",
             props.deviceName,
-            deviceTypeStr,
             props.driverVersion,
             VK_VERSION_MAJOR(props.apiVersion),
             VK_VERSION_MINOR(props.apiVersion),
-            VK_VERSION_PATCH(props.apiVersion)));
+            VK_VERSION_PATCH(props.apiVersion),
+            deviceTypeStr));
 
     LOG_INFO_CAT("PIPELINE",
         std::format("Timestamp period: {:.4f} ms{}",
@@ -488,6 +488,12 @@ void PipelineManager::createRayTracingPipeline(const std::vector<std::string>& s
         return;
     }
     LOG_DEBUG_CAT("PIPELINE", "Retrieved device: 0x{:x}", reinterpret_cast<uintptr_t>(stone_device()));
+
+    // FIXED: Lazy create layout if not yet valid
+    if (!rtPipelineLayout_.valid() || *rtPipelineLayout_ == VK_NULL_HANDLE) {
+        LOG_WARN_CAT("PIPELINE", "rtPipelineLayout_ not yet created — creating now");
+        createPipelineLayout();
+    }
 
     // FIXED: Guard layout validity before proceeding
     if (!rtPipelineLayout_.valid() || *rtPipelineLayout_ == VK_NULL_HANDLE) {

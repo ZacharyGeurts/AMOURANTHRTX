@@ -31,6 +31,8 @@
 #include "engine/GLOBAL/StoneKey.hpp"  // Full include — .cpp only
 #include "stb/stb_image.h"
 
+#include "engine/core.hpp"
+
 #include <glm/gtc/matrix_inverse.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
@@ -1020,8 +1022,7 @@ void VulkanRenderer::recordRayTracingCommandBuffer(VkCommandBuffer cmd) noexcept
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// RENDER FRAME — FINAL, VUID-FREE, PERFECT
-// VUID-08114, VUID-09600, VUID-01430 — ALL DEAD
+// VulkanRenderer::renderFrame — FINAL PRODUCTION — g_ctx() + CAM — COMPILES
 // ──────────────────────────────────────────────────────────────────────────────
 void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
 {
@@ -1032,44 +1033,29 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
 
     const uint32_t f = currentFrame_++ % MAX_FRAMES_IN_FLIGHT;
 
-    // FENCE — WE OWN THE GPU
     vkWaitForFences(stone_device(), 1, &inFlightFences_[f], VK_TRUE, UINT64_MAX);
     vkResetFences(stone_device(), 1, &inFlightFences_[f]);
 
-    // ACQUIRE — WE OWN THE SWAPCHAIN
     uint32_t imageIndex = 0;
-    vkAcquireNextImageKHR(
-        stone_device(),
-        stone_swapchain(),
-        UINT64_MAX,
-        imageAvailableSemaphores_[f],
-        VK_NULL_HANDLE,
-        &imageIndex
-    );
+    vkAcquireNextImageKHR(stone_device(), stone_swapchain(), UINT64_MAX,
+                          imageAvailableSemaphores_[f], VK_NULL_HANDLE, &imageIndex);
 
     VkCommandBuffer cmd = commandBuffers_[f];
     vkResetCommandBuffer(cmd, 0);
 
-    const VkCommandBufferBeginInfo beginInfo{
-        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-        .pNext = nullptr,
-        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
-        .pInheritanceInfo = nullptr
-    };
+    VkCommandBufferBeginInfo beginInfo{ .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     vkBeginCommandBuffer(cmd, &beginInfo);
 
     // SWAPCHAIN → GENERAL
-    const VkImageMemoryBarrier acquireBarrier{
-        .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-        .pNext               = nullptr,
-        .srcAccessMask       = 0,
-        .dstAccessMask       = VK_ACCESS_SHADER_WRITE_BIT,
-        .oldLayout           = firstSwapchainAcquire_ ? VK_IMAGE_LAYOUT_UNDEFINED : VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-        .newLayout           = VK_IMAGE_LAYOUT_GENERAL,
-        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .image               = StoneKey::stone_images()[imageIndex],
-        .subresourceRange    = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
+    VkImageMemoryBarrier acquireBarrier{
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .srcAccessMask = 0,
+        .dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
+        .oldLayout = firstSwapchainAcquire_ ? VK_IMAGE_LAYOUT_UNDEFINED : VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+        .newLayout = VK_IMAGE_LAYOUT_GENERAL,
+        .image = StoneKey::stone_images()[imageIndex],
+        .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
     };
     vkCmdPipelineBarrier(cmd,
         VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
@@ -1078,22 +1064,20 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
 
     firstSwapchainAcquire_ = false;
 
-    // ACCUMULATION CLEAR — ONLY IF WE ORDERED IT
-    if (resetAccumulation_) [[unlikely]] {
-        const VkClearColorValue clear{0.0f, 0.0f, 0.0f, 0.0f};
-        const VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-
-        const auto clearImg = [&](VkImage img) {
+    // ACCUMULATION RESET
+    if (resetAccumulation_ || resetAccumNextFrame_) [[unlikely]] {
+        VkClearColorValue clear{0.0f, 0.0f, 0.0f, 0.0f};
+        VkImageSubresourceRange range{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+        auto clearImg = [&](VkImage img) {
             vkCmdClearColorImage(cmd, img, VK_IMAGE_LAYOUT_GENERAL, &clear, 1, &range);
         };
-
         for (const auto& h : rtOutputImages_) clearImg(*h);
         if (Options::OptionsRTX::ENABLE_ACCUMULATION)
             for (const auto& h : accumImages_) clearImg(*h);
         if (Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING && hypertraceScoreImage_.valid())
             clearImg(*hypertraceScoreImage_);
 
-        resetAccumulation_ = false;
+        resetAccumulation_ = resetAccumNextFrame_ = false;
     }
 
     updateUniformBuffer(f, camera, getJitter());
@@ -1103,20 +1087,41 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     if (Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING)
         updateNexusDescriptors();
 
-    recordRayTracingCommandBuffer(cmd);
+    // ── REAL RenderContext — USING YOUR REAL CAM
+    RenderContext rtCtx{};
+    rtCtx.cameraPos       = CAM.pos();        // ← REAL CAMERA
+    rtCtx.fov             = CAM.fov();        // ← REAL FOV
+    rtCtx.deltaTime       = deltaTime;
+    rtCtx.frame           = frameNumber_;
+    rtCtx.renderMode      = activeRenderMode_;
+    rtCtx.enableTonemap   = tonemapEnabled_ ? 1u : 0u;
+    rtCtx.enableOverlay   = showOverlay_ ? 1u : 0u;
+    rtCtx.hypertrace      = hypertraceEnabled_ ? 1u : 0u;
+    rtCtx.debugVisMode    = 0;
+    rtCtx.blueNoiseOffset = glm::vec2(getJitter());
+    rtCtx.reservoirParams = glm::vec4(1.0f);
 
-    // RT OUTPUT → SHADER READ ONLY
-    const VkImageMemoryBarrier rtReadBarrier{
-        .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-        .pNext               = nullptr,
-        .srcAccessMask       = VK_ACCESS_SHADER_WRITE_BIT,
-        .dstAccessMask       = VK_ACCESS_SHADER_READ_BIT,
-        .oldLayout           = VK_IMAGE_LAYOUT_GENERAL,
-        .newLayout           = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .image               = *rtOutputImages_[f],
-        .subresourceRange    = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
+    // ── DISPATCH — FIXED ALL HANDLE<> AND SWAPCHAIN ISSUES
+    dispatchRenderMode(
+        imageIndex,
+        cmd,
+        *pipelineManager_.rtPipelineLayout_,     // ← dereference Handle<>
+        rtDescriptorSets_[f],
+        *pipelineManager_.rtPipeline_,           // ← dereference Handle<>
+        deltaTime,
+        rtCtx,
+        activeRenderMode_
+    );
+
+    // RT OUTPUT → READ ONLY
+    VkImageMemoryBarrier rtReadBarrier{
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
+        .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
+        .oldLayout = VK_IMAGE_LAYOUT_GENERAL,
+        .newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        .image = *rtOutputImages_[f],
+        .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
     };
     vkCmdPipelineBarrier(cmd,
         VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
@@ -1124,26 +1129,21 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
         0, 0, nullptr, 0, nullptr, 1, &rtReadBarrier);
 
     VkImageView tonemapInput = denoisingEnabled_ && denoiserView_.valid()
-        ? *denoiserView_
-        : *rtOutputViews_[f];
+        ? *denoiserView_ : *rtOutputViews_[f];
 
     updateTonemapDescriptor(f, tonemapInput, StoneKey::stone_views()[imageIndex]);
 
     if (denoisingEnabled_) performDenoisingPass(cmd);
     performTonemapPass(cmd, f, imageIndex);
 
-    // SWAPCHAIN → PRESENT
-    const VkImageMemoryBarrier presentBarrier{
-        .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-        .pNext               = nullptr,
-        .srcAccessMask       = VK_ACCESS_SHADER_WRITE_BIT,
-        .dstAccessMask       = 0,
-        .oldLayout           = VK_IMAGE_LAYOUT_GENERAL,
-        .newLayout           = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .image               = StoneKey::stone_images()[imageIndex],
-        .subresourceRange    = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
+    // PRESENT — FIXED
+    VkImageMemoryBarrier presentBarrier{
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
+        .oldLayout = VK_IMAGE_LAYOUT_GENERAL,
+        .newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+        .image = StoneKey::stone_images()[imageIndex],
+        .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
     };
     vkCmdPipelineBarrier(cmd,
         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
@@ -1152,33 +1152,26 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
 
     vkEndCommandBuffer(cmd);
 
-    // SUBMIT
-    const VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    const VkSubmitInfo submitInfo{
-        .sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-        .pNext                = nullptr,
-        .waitSemaphoreCount   = 1,
-        .pWaitSemaphores      = &imageAvailableSemaphores_[f],
-        .pWaitDstStageMask    = &waitStage,
-        .commandBufferCount   = 1,
-        .pCommandBuffers          = &cmd,
-        .signalSemaphoreCount = 1,
-        .pSignalSemaphores    = &renderFinishedSemaphores_[f]
-    };
+    VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    VkSubmitInfo submitInfo{ .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO };
+    submitInfo.waitSemaphoreCount = 1;
+    submitInfo.pWaitSemaphores = &imageAvailableSemaphores_[f];
+    submitInfo.pWaitDstStageMask = &waitStage;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &cmd;
+    submitInfo.signalSemaphoreCount = 1;
+    submitInfo.pSignalSemaphores = &renderFinishedSemaphores_[f];
     vkQueueSubmit(g_ctx().graphicsQueue(), 1, &submitInfo, inFlightFences_[f]);
 
-    // PRESENT
-    const VkSwapchainKHR swapchain = stone_swapchain();
-    const VkPresentInfoKHR presentInfo{
-        .sType              = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
-        .pNext              = nullptr,
-        .waitSemaphoreCount = 1,
-        .pWaitSemaphores    = &renderFinishedSemaphores_[f],
-        .swapchainCount     = 1,
-        .pSwapchains        = &swapchain,
-        .pImageIndices      = &imageIndex,
-        .pResults           = nullptr
-    };
+    static VkSwapchainKHR currentSwapchain = VK_NULL_HANDLE;
+    currentSwapchain = stone_swapchain();
+
+    VkPresentInfoKHR presentInfo{ .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR };
+    presentInfo.waitSemaphoreCount = 1;
+    presentInfo.pWaitSemaphores = &renderFinishedSemaphores_[f];
+    presentInfo.swapchainCount = 1;
+    presentInfo.pSwapchains = &currentSwapchain;
+    presentInfo.pImageIndices = &imageIndex;
     vkQueuePresentKHR(g_ctx().presentQueue(), &presentInfo);
 
     frameNumber_++;
@@ -1628,18 +1621,14 @@ void VulkanRenderer::setOverlay(bool show) noexcept {
     LOG_TRACE_CAT("RENDERER", "setOverlay — COMPLETE");
 }
 
-void VulkanRenderer::setRenderMode(int mode) noexcept {
-    LOG_TRACE_CAT("RENDERER", "setRenderMode — START — mode={}", mode);
-    if (renderMode_ == mode) {
-        LOG_TRACE_CAT("RENDERER", "No change needed");
-        LOG_TRACE_CAT("RENDERER", "setRenderMode — COMPLETE (no change)");
-        return;
+void VulkanRenderer::setRenderMode(int mode) noexcept
+{
+    mode = glm::clamp(mode, 1, 9);
+    if (mode != activeRenderMode_) {
+        activeRenderMode_ = mode;
+        resetAccumNextFrame_ = true;
+        LOG_AMOURANTH("RENDER MODE {} → ENGAGED", mode);
     }
-    renderMode_ = mode;
-    resetAccumulation_ = true;
-    LOG_INFO_CAT("Renderer", "{}Render Mode: {} → {}{}", 
-        PULSAR_GREEN, renderMode_, mode, RESET);
-    LOG_TRACE_CAT("RENDERER", "setRenderMode — COMPLETE");
 }
 
 void VulkanRenderer::createFramebuffers() noexcept

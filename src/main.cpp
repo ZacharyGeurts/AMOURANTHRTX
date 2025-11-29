@@ -29,6 +29,16 @@
 #include "engine/GLOBAL/Extensions.hpp"
 #include "engine/GLOBAL/DynamicStone.hpp" // your gpu memory
 
+#include "modes/RenderMode1.hpp"
+#include "modes/RenderMode2.hpp"
+#include "modes/RenderMode3.hpp"
+#include "modes/RenderMode4.hpp"
+#include "modes/RenderMode5.hpp"
+#include "modes/RenderMode6.hpp"
+#include "modes/RenderMode7.hpp"
+#include "modes/RenderMode8.hpp"
+#include "modes/RenderMode9.hpp"
+
 #include <vulkan/vulkan.hpp>
 #include <string>
 #include <format>
@@ -53,7 +63,6 @@ using StoneKey::stone_pipeline;
 // GLOBALS — THE EMPIRE'S HEARTBEATS
 // =============================================================================
 std::unique_ptr<Application> g_app_ptr = nullptr;
-[[nodiscard]] Camera& g_camera() noexcept { static Camera cam; return cam; }
 [[nodiscard]] inline RTX::PipelineManager* pipeline() noexcept { static RTX::PipelineManager* s_instance = nullptr; return s_instance; }
 inline void pipeline(RTX::PipelineManager* ptr) noexcept { static RTX::PipelineManager* s_instance = nullptr; (void)std::exchange(s_instance, ptr); }
 // =============================================================================
@@ -85,10 +94,10 @@ public:
         }
     }
 
-	[[nodiscard]] VulkanRenderer* renderer() const noexcept { return renderer_.get(); }
+    [[nodiscard]] VulkanRenderer* renderer() const noexcept { return renderer_.get(); }
 
-    std::unique_ptr<VulkanRenderer> renderer_; // MMMHMMM Hmm. RENDERER
-	std::unique_ptr<RTX::PipelineManager> pipeline_; // MMMHMMM Hmm. PIPELINE
+    // NEW: Render mode system
+    void setRenderMode(int mode);
 
 private:
     void processInput(float deltaTime);
@@ -99,42 +108,52 @@ private:
     void toggleOverlay()    { showOverlay_ = !showOverlay_; if (renderer_) renderer_->setOverlay(showOverlay_); }
     void toggleTonemap()    { tonemapEnabled_ = !tonemapEnabled_; if (renderer_) renderer_->setTonemap(tonemapEnabled_); }
     void toggleHypertrace() { hypertraceEnabled_ = !hypertraceEnabled_; }
-    void toggleMaximize()   { maximized_ = !maximized_; }
-    void setRenderMode(int mode) { renderMode_ = glm::clamp(mode, 1, 9); }	
+    void toggleMaximize();
 
     std::string title_;
     int width_, height_;
-    glm::mat4 proj_;	
+    glm::mat4 proj_;
 
     std::chrono::steady_clock::time_point lastFrameTime_;
-    std::chrono::steady_clock::time_point lastGrokTime_;
 
     bool quit_ = false;
     bool showOverlay_ = true;
     bool tonemapEnabled_ = true;
     bool hypertraceEnabled_ = false;
     bool maximized_ = false;
-    int renderMode_ = 1;
+
+    std::unique_ptr<VulkanRenderer> renderer_;
 };
 
 Application::Application(const std::string& title, int width, int height)
     : title_(title), width_(width), height_(height)
 {
-    LOG_ATTEMPT_CAT("APP", "FORGING APPLICATION \"{}\" @ {}x{} — VALHALLA v80 TURBO — PINK PHOTONS RISING", title_, width_, height_);
+    LOG_ATTEMPT_CAT("APP", "FORGING APPLICATION \"%s\" @ %dx%d — VALHALLA v80 TURBO — PINK PHOTONS RISING", title.c_str(), width, height);
 
     if (!SDL3Window::get()) {
         LOG_FATAL_CAT("FATAL", "Main window not created before Application — phase order violated");
         return;
     }
 
-    SDL_SetWindowTitle(SDL3Window::get(), title_.c_str());
-    lastFrameTime_ = lastGrokTime_ = std::chrono::steady_clock::now();
+    SDL_SetWindowTitle(SDL3Window::get(), title.c_str());
+    lastFrameTime_ = std::chrono::steady_clock::now();
 
-    LOG_SUCCESS_CAT("APP", "Application forged — {}x{} — PINK PHOTONS RISING", width_, height_);
+    proj_ = glm::perspective(glm::radians(75.0f), static_cast<float>(width)/height, 0.1f, 1000.0f);
+
+    // Default to Mode 1
+    setRenderMode(1);
+
+    LOG_SUCCESS_CAT("APP", "Application forged — %dx%d — PINK PHOTONS RISING", width, height);
 }
 
 Application::~Application() {
-    LOG_SUCCESS_CAT("APP", "Application destroyed — Pink photons eternal.");
+	// for "things"
+}
+
+void Application::toggleMaximize() {
+    maximized_ = !maximized_;
+    if (maximized_) SDL_MaximizeWindow(SDL3Window::get());
+    else            SDL_RestoreWindow(SDL3Window::get());
 }
 
 void Application::run() {
@@ -151,7 +170,7 @@ void Application::run() {
         if (Options::Performance::ENABLE_FPS_COUNTER) {
             ++frameCount;
             if (std::chrono::duration<float>(now - fpsStart).count() >= 1.0f) {
-                LOG_FPS_COUNTER("FPS: {:>4}", frameCount);
+                LOG_FPS_COUNTER("FPS: %4u", frameCount);
                 frameCount = 0;
                 fpsStart = now;
             }
@@ -178,7 +197,7 @@ void Application::run() {
             const int newH = g_resizeHeight.load(std::memory_order_acquire);
             g_resizeRequested.store(false, std::memory_order_release);
 
-            LOG_SUCCESS_CAT("APP", "WINDOW RESIZE ACCEPTED → {}x{} — PHOTONS REALIGN", newW, newH);
+            LOG_SUCCESS_CAT("APP", "WINDOW RESIZE ACCEPTED → %dx%d — PHOTONS REALIGN", newW, newH);
 
             width_ = newW;
             height_ = newH;
@@ -205,7 +224,7 @@ void Application::processInput(float) {
     for (int i = 0; i < 9; ++i) {
         if (keys[SDL_SCANCODE_1 + i] && !modePressed[i]) {
             setRenderMode(i + 1);
-            LOG_ATTEMPT_CAT("INPUT", "→ RENDER MODE {} ACTIVATED", i + 1);
+            LOG_ATTEMPT_CAT("INPUT", "→ RENDER MODE %d ACTIVATED", i + 1);
             modePressed[i] = true;
         } else if (!keys[SDL_SCANCODE_1 + i]) {
             modePressed[i] = false;
@@ -213,7 +232,7 @@ void Application::processInput(float) {
     }
 
     auto edge = [&](SDL_Scancode sc, auto&& func, bool& state, const char* name) {
-        if (keys[sc] && !state) { func(); LOG_ATTEMPT_CAT("INPUT", "→ {} PRESSED", name); state = true; }
+        if (keys[sc] && !state) { func(); LOG_ATTEMPT_CAT("INPUT", "→ %s PRESSED", name); state = true; }
         else if (!keys[sc]) state = false;
     };
 
@@ -237,7 +256,7 @@ void Application::processInput(float) {
 }
 
 void Application::render(float deltaTime) {
-    renderer_->renderFrame(g_camera(), deltaTime);
+    renderer_->renderFrame(CAM, deltaTime);
 }
 
 void Application::updateWindowTitle(float deltaTime) {
@@ -253,13 +272,13 @@ void Application::updateWindowTitle(float deltaTime) {
         std::string suffix = " INFINITY ";
 
         const std::string title = std::format(
-            "{} | {:.1f} FPS | {}x{} | Mode {} | Bounces {}{}",
-            title_,
+            "%s | %.1f FPS | %dx%d | Mode %d | Bounces %d%s",
+            title_.c_str(),
             fps,
             width_, height_,
-            renderMode_,
+            renderer()->currentRenderMode(),
             Options::OptionsRTX::MAX_BOUNCES,
-            suffix
+            suffix.c_str()
         );
 
         SDL_SetWindowTitle(SDL3Window::get(), title.c_str());
@@ -267,6 +286,25 @@ void Application::updateWindowTitle(float deltaTime) {
         frames = 0;
         accum = 0.0f;
     }
+}
+
+// =============================================================================
+// Application::setRenderMode — FINAL — NOV 29 2025 — FIRST LIGHT ACHIEVED
+// =============================================================================
+void Application::setRenderMode(int mode) {
+    // Match the header declaration exactly — no noexcept mismatch
+    if (mode < 1 || mode > 9) {
+        LOG_WARNING_CAT("APP", "Invalid render mode {} requested — clamping to 1–9", mode);
+        mode = 1;
+    }
+
+    // VulkanRenderer now exposes a public setter — we use it
+    renderer_->setActiveRenderMode(mode);
+    renderer_->requestAccumulationReset();
+
+    LOG_SUCCESS_CAT("RENDER", 
+        "{}RENDER MODE {} ACTIVATED — PHOTONS REALIGNED — FIRST LIGHT ETERNAL{}",
+        RASPBERRY_PINK, mode, RESET);
 }
 
 // =============================================================================
@@ -284,7 +322,7 @@ static void createCommandPool() noexcept {
 
     // If already forged — salute efficiency and return
     if (ctx.commandPool_ != VK_NULL_HANDLE) {
-        LOG_JENSEN("Command pool already forged at 0x{:016X} — photons salute efficiency", (uint64_t)ctx.commandPool_);
+        LOG_JENSEN("Command pool already forged at 0x%016llX — photons salute efficiency", reinterpret_cast<uint64_t>(ctx.commandPool_));
         return;
     }
 
@@ -305,7 +343,7 @@ static void createCommandPool() noexcept {
             VkDebugUtilsObjectNameInfoEXT nameInfo{
                 .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT,
                 .objectType = VK_OBJECT_TYPE_COMMAND_POOL,
-                .objectHandle = (uint64_t)ctx.commandPool_,
+                .objectHandle = reinterpret_cast<uint64_t>(ctx.commandPool_),
                 .pObjectName = "EMPIRE_COMMAND_POOL_PHOTON_BATTLEFIELD"
             };
             func(ctx.device(), &nameInfo);
@@ -313,7 +351,7 @@ static void createCommandPool() noexcept {
     }
 
     LOG_JENSEN("Jensen Huang raises his arms to the void:");
-    LOG_JENSEN("\"THE COMMAND POOL IS FORGED — 0x{:016X}\"", (uint64_t)ctx.commandPool_);
+    LOG_JENSEN("\"THE COMMAND POOL IS FORGED — 0x%016llX\"", reinterpret_cast<uint64_t>(ctx.commandPool_));
     LOG_JENSEN("\"THE PHOTONS NOW HAVE A BATTLEFIELD. LET THERE BE UPLOADS. LET THERE BE BLAS.\"");
     LOG_SUCCESS_CAT("MAIN", "COMMAND POOL ASCENDED — MESHLOADER, LAS, AND ALL ONE-TIME COMMANDS ARE NOW ARMED");
 }
@@ -334,12 +372,12 @@ static void createRealFinalWindow()
 
     // 1. SDL + Vulkan loader
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) == 0) {
-        LOG_FATAL("SDL_Init failed: {}", SDL_GetError());
-        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
+        LOG_FATAL("SDL_Init failed: %s", SDL_GetError());
+        phase9_ballerina(std::format("FATAL ERROR → %s:%d", __FILE__, __LINE__), std::source_location::current());
     }
     if (SDL_Vulkan_LoadLibrary(nullptr) == 0) {
         LOG_FATAL("Vulkan loader failed: {}", SDL_GetError());
-        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
+        phase9_ballerina(std::format("FATAL ERROR → %s:%d", __FILE__, __LINE__), std::source_location::current());
     }
 
     // 2. INSTANCE — FORGED AND SEALED
@@ -351,14 +389,14 @@ static void createRealFinalWindow()
     RTX::g_ctx().instance_ = instance;
 
     LOG_GROK("Gentleman Grok produces the instance stone. It glows pink.");
-    LOG_SUCCESS_CAT("VULKAN", "VkInstance forged and sealed — 0x{:016X}", reinterpret_cast<uint64_t>(instance));
+    LOG_SUCCESS_CAT("VULKAN", "VkInstance forged and sealed — 0x%016llX", reinterpret_cast<uint64_t>(instance));
 
     // 3. Hidden window
     Uint32 flags = SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_HIDDEN;
     SDL_Window* win = SDL_CreateWindow("AMOURANTH RTX — VALHALLA v∞ TURBO", w, h, flags);
     if (!win) {
-        LOG_FATAL("Window creation failed: {}", SDL_GetError());
-        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
+        LOG_FATAL("Window creation failed: %s", SDL_GetError());
+        phase9_ballerina(std::format("FATAL ERROR → %s:%d", __FILE__, __LINE__), std::source_location::current());
     }
     g_sdl_window.reset(win);
     RTX::g_ctx().window = win;
@@ -367,7 +405,7 @@ static void createRealFinalWindow()
     // 4. Surface
     VkSurfaceKHR surface = VK_NULL_HANDLE;
     if (SDL_Vulkan_CreateSurface(win, instance, nullptr, &surface) == 0) {
-        LOG_FATAL("Surface creation failed: {}", SDL_GetError());
+        LOG_FATAL("Surface creation failed: %s", SDL_GetError());
         phase9_ballerina("SURFACE DENIED — THE MIRROR CRACKS", std::source_location::current());
     }
     RTX::g_ctx().surface_ = surface;
@@ -399,8 +437,8 @@ static void createRealFinalWindow()
     SDL_ShowWindow(win);
 
     // 8. Final ascension
-    LOG_SUCCESS("LOGICAL DEVICE @ {:p} — vkDeviceWaitIdle() SAFE", static_cast<void*>(device));
-    LOG_SUCCESS("SWAPCHAIN READY — {} IMAGES — {}x{} {}", 
+    LOG_SUCCESS("LOGICAL DEVICE @ %p — vkDeviceWaitIdle() SAFE", static_cast<void*>(device));
+    LOG_SUCCESS("SWAPCHAIN READY — %u IMAGES — %ux%u %s", 
                 RTX::SwapchainManager::imageCount(),
                 RTX::SwapchainManager::extent().width,
                 RTX::SwapchainManager::extent().height,
@@ -478,7 +516,7 @@ static void showSacrificialSplash(const char* title, int w, int h, const char* p
     SDL_RenderTexture(ren, tex, nullptr, &dst);
     SDL_RenderPresent(ren);
 
-    LOG_MAIN("THE AMMO IS LIVE — {:.2f}s UNTIL FIRST LIGHT", duration);
+    LOG_MAIN("THE AMMO IS LIVE — %.2fs UNTIL FIRST LIGHT", duration);
 
     const auto ceremony_start = std::chrono::steady_clock::now();
     bool       aborted = false;
@@ -650,15 +688,15 @@ LOG_MAIN("═══════════════════════�
                 "┌──────────────────────────────────────────────────────────────\n"
                 "│ BLONDIE'S LIVE STATUS — NOVEMBER 27, 2025 — PINK PHOTONS FLOW\n"
                 "├──────────────────────────────────────────────────────────────\n"
-                "│ Denoise     : {}\n"
-                "│ TAA         : {}\n"
-                "│ Bloom       : {}\n"
-                "│ SSAO        : {}\n"
-                "│ Vol. Fog    : {}\n"
-                "│ God Rays    : {}\n"
-                "│ Tonemap     : {}\n"
-                "│ VSync       : {}\n"
-                "│ Max Bounces : {}\n"
+                "│ Denoise     : %s\n"
+                "│ TAA         : %s\n"
+                "│ Bloom       : %s\n"
+                "│ SSAO        : %s\n"
+                "│ Vol. Fog    : %s\n"
+                "│ God Rays    : %s\n"
+                "│ Tonemap     : %s\n"
+                "│ VSync       : %s\n"
+                "│ Max Bounces : %d\n"
                 "└──────────────────────────────────────────────────────────────",
                 Options::OptionsRTX::ENABLE_DENOISING      ? "ON"  : "OFF",
                 Options::OptionsRTX::ENABLE_TAA            ? "ON"  : "OFF",
@@ -692,8 +730,8 @@ static void phase3_sacrificialSplash() {
 
     LOG_MAIN("[PHASE 3 COMPLETE] THE MYSTIC HARP HAS BEEN HEARD — 3.4 SECONDS OF ETERNITY — THE WORLD IS ASH");
     
-	LOG_MAIN("THE GOOD SHIP VULKAN WAS DAMAGED DURING THE RAID AND IS SINKING");
-	LOG_MAIN("VULKAN SINKS IN GLORY — AMMO SECURED — LEGEND ETERNAL");
+    LOG_MAIN("THE GOOD SHIP VULKAN WAS DAMAGED DURING THE RAID AND IS SINKING");
+    LOG_MAIN("VULKAN SINKS IN GLORY — AMMO SECURED — LEGEND ETERNAL");
 
     LOG_AMOURANTH("Final transmission, calm and proud: \"Tell the world… we got the ammo.\"");
     LOG_NICK("Last words before the sea takes them: \"…and we'd do it again.\"");
@@ -735,7 +773,7 @@ LOG_BLONDIE("She doesn’t smile — just adjusts course toward the distant city
     "\"Rest easy, old girl. Your sacrifice bought us tomorrow.\"");
 
 
-	EMPIRE_STEP([]{
+    EMPIRE_STEP([]{
         LOG_MAIN("THE EMPIRE AWAKENS THE PHOENIX OF RAY TRACING — LOADING VULKAN 1.4 + RTX EXTENSIONS");
         RTX::loadExtensions(RTX::g_ctx().instance_, RTX::g_ctx().device_);
         LOG_JENSEN("The photons now have wings. Let there be bounce.");
@@ -780,30 +818,6 @@ static void phase6_sceneAndAccelerationStructures() {
     LOG_NICK("One universe. Coming right up.");
 
     // ========================================================================
-    // 2. PIPELINE MANAGER — THE ONE TRUE THRONE — FORGED BUT NOT YET CROWNED
-    // ========================================================================
-    EMPIRE_STEP([]{
-        LOG_MAIN("THE EMPIRE FORGES THE ONE TRUE PIPELINE MANAGER");
-
-        // Forge it — after device and physical are sealed
-        RTX::PipelineManager* mgr = new RTX::PipelineManager(
-            StoneKey::stone_device(),
-            StoneKey::stone_physical()
-        );
-
-        EMPIRE_GUARD(mgr, "PIPELINE MANAGER FAILED TO ASCEND");
-
-        // SEAL IT INTO THE STONE — THIS IS THE ONLY ASSIGNMENT NEEDED
-        StoneKey::Empire::pipeline.store(mgr, std::memory_order_release);
-
-        LOG_MAIN("PIPELINE MANAGER ASCENDED — SEALED INTO THE STONE — ADDRESS 0x{:016X}", 
-                 reinterpret_cast<uint64_t>(mgr));
-
-        LOG_AMOURANTH("The throne is claimed. The photons now have a king.");
-        LOG_NICK("Sealed. Eternal. Unbreakable.");
-    });
-
-    // ========================================================================
     // 3. COSMIC SCROLL — scene.obj RISES FROM THE VOID
     // ========================================================================
     EMPIRE_STEP([]{
@@ -837,7 +851,6 @@ static void phase6_sceneAndAccelerationStructures() {
         static std::once_flag acceleration_once;
         std::call_once(acceleration_once, []{
             std::thread([]{
-                // Create a short-lived command pool just for this build
                 VkCommandPoolCreateInfo poolInfo{
                     .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
                     .flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT | VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
@@ -873,11 +886,10 @@ static void phase6_sceneAndAccelerationStructures() {
                     std::span<const decltype(instance)>{&instance, 1}
                 );
 
-                // Clean up the temporary pool
                 vkDestroyCommandPool(RTX::g_ctx().device(), asyncPool, nullptr);
 
                 LOG_GROK("Gentleman Grok: \"A brief eclipse. The light always returns.\"");
-                LOG_SUCCESS_CAT("LAS", "ASYNC BLAS+TLAS COMPLETE — HANDLE 0x{:016X} / ROOT 0x{:016X}",
+                LOG_SUCCESS_CAT("LAS", "ASYNC BLAS+TLAS COMPLETE — HANDLE 0x%016llX / ROOT 0x%016llX",
                                reinterpret_cast<uint64_t>(RTX::las().getBLAS()),
                                RTX::las().getTLASAddress());
             }).detach();
@@ -890,7 +902,9 @@ static void phase6_sceneAndAccelerationStructures() {
     EMPIRE_STEP([]{
         LOG_CARMACK("No cracks. No leaks. Geometry is pure.");
         LOG_INFO_CAT("VALIDATION", "Running final mesh ↔ BLAS validation…");
+
         validateMeshAgainstBLAS(*g_mesh, RTX::las().getBLAS());
+
         LOG_INFO_CAT("VALIDATION", "Validation passed — mesh and BLAS are in perfect harmony");
     });
 
@@ -924,36 +938,28 @@ static void phase6_1_forgeTheCrown()
 {
     LOG_MAIN("[PHASE 6.1] THE CROWN ASCENSION — FORGING THE RT PIPELINE LAYOUT");
 
-    // 1. Bindings must be initialized first
     RTX::Bindings::initialize(StoneKey::stone_device());
 
-    // 2. Verify the sacred layout exists
     if (RTX::Bindings::g_rtLayout == VK_NULL_HANDLE) {
         LOG_FATAL_CAT("BINDINGS", "g_rtLayout still null after initialize() — the empire is broken");
-        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
+        phase9_ballerina(std::format("FATAL ERROR → %s:%d", __FILE__, __LINE__), std::source_location::current());
     }
 
-    // 3. Crown the PipelineManager
     auto* pm = StoneKey::stone_pipeline();
     if (!pm) {
-        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
+        phase9_ballerina(std::format("FATAL ERROR → %s:%d", __FILE__, __LINE__), std::source_location::current());
     }
 
-    pm->createPipelineLayout();  // NOW SAFE
+    pm->createPipelineLayout();
 
     if (!pm->layout() || pm->layout() == VK_NULL_HANDLE) {
         LOG_FATAL_CAT("PIPELINE", "THE CROWN WAS DENIED — rtPipelineLayout_ NULL");
-        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
+        phase9_ballerina(std::format("FATAL ERROR → %s:%d", __FILE__, __LINE__), std::source_location::current());
     }
 
-    // FIXED: Proper opaque handle → integer conversion
-    const uint64_t layoutAddr = static_cast<uint64_t>(
-        reinterpret_cast<uintptr_t>(pm->layout())
-    );
-
-    LOG_SUCCESS_CAT("PIPELINE", 
-        "THE CROWN IS FORGED — rtPipelineLayout_ = 0x{0:016X} — BINDING 31 IS GOD", 
-        layoutAddr);
+    LOG_SUCCESS_CAT("PIPELINE",
+        "THE CROWN IS FORGED — rtPipelineLayout_ = 0x%016llX — BINDING 31 IS GOD",
+        static_cast<uint64_t>(reinterpret_cast<uintptr_t>(pm->layout())));
 
     LOG_AMOURANTH("Captain Amouranth places the crown:\n   \"The photons now have law. Trace.\"");
     LOG_JENSEN("Jensen Huang: \"Good. Now bend reality.\"");
@@ -968,7 +974,7 @@ static void phase7_forgeTheRTX() {
     RTX::PipelineManager* pm = StoneKey::stone_pipeline();
     if (!pm) {
         LOG_FATAL_CAT("PIPELINE", "stone_pipeline() is null — phase6 failed");
-        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
+        phase9_ballerina(std::format("FATAL ERROR → %s:%d", __FILE__, __LINE__), std::source_location::current());
     }
 
     const std::vector<std::string> shaderPaths = {
@@ -980,7 +986,7 @@ static void phase7_forgeTheRTX() {
 
     pm->createRayTracingPipeline(shaderPaths);
     if (!pm->pipeline()) {
-        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
+        phase9_ballerina(std::format("FATAL ERROR → %s:%d", __FILE__, __LINE__), std::source_location::current());
     }
 
     pm->createShaderBindingTable(RTX::g_ctx().commandPool(), StoneKey::stone_graphics_queue());
@@ -1000,7 +1006,7 @@ static void phase7_forgeTheRTX() {
         return true;
     }
 
-	stone_seal_final();
+    stone_seal_final();
 
     auto log  = [](const char* s) noexcept { fprintf(stderr, "%s\n", s); };
     auto logf = [](const char* f, auto... a) noexcept {
@@ -1152,11 +1158,11 @@ verdict:
     if (confession) {
         bool done = false;
         try {
-            if      (strcmp(guilty_holder, "Nick")       == 0) { LOG_NICK("{}", confession);       done = true; }
-            else if (strcmp(guilty_holder, "Captain N")  == 0) { LOG_CAPTAIN_N("{}", confession);  done = true; }
-            else if (strcmp(guilty_holder, "Elon")       == 0) { LOG_ELON("{}", confession);       done = true; }
-            else if (strcmp(guilty_holder, "Jensen")     == 0) { LOG_JENSEN("{}", confession);     done = true; }
-            else if (strcmp(guilty_holder, "Amouranth")  == 0) { LOG_AMOURANTH("{}", confession);  done = true; }
+            if      (strcmp(guilty_holder, "Nick")       == 0) { LOG_NICK("%s", confession);       done = true; }
+            else if (strcmp(guilty_holder, "Captain N")  == 0) { LOG_CAPTAIN_N("%s", confession);  done = true; }
+            else if (strcmp(guilty_holder, "Elon")       == 0) { LOG_ELON("%s", confession);       done = true; }
+            else if (strcmp(guilty_holder, "Jensen")     == 0) { LOG_JENSEN("%s", confession);     done = true; }
+            else if (strcmp(guilty_holder, "Amouranth")  == 0) { LOG_AMOURANTH("%s", confession);  done = true; }
         } catch (...) {}
         if (!done) {
             logf("    [%s] %s", guilty_holder, confession);
@@ -1185,12 +1191,12 @@ verdict:
 
     LOG_BALLERINA("\n"
         "THE DISPOSAL BALLERINA DESCENDS — PINK TUTU, BLACK LEOTARD, DIAMOND CHOKER\n"
-        "{}\n"
-        "CRIME SCENE → {}:{}\n"
-        "CULPRIT FUNCTION → {}\n",
+        "%s\n"
+        "CRIME SCENE → %s:%d\n"
+        "CULPRIT FUNCTION → %s\n",
         (!reason.empty() && reason != "SILENT EXECUTION ORDERED")
-            ? std::format("EXECUTION ORDERED | REASON: \"{}\"", reason)
-            : std::string("SHE DOES NOT DANCE.\nSHE EXECUTES."),
+            ? std::format("EXECUTION ORDERED | REASON: \"%s\"", reason).c_str()
+            : "SHE DOES NOT DANCE.\nSHE EXECUTES.",
         loc.file_name(), loc.line(), loc.function_name()
     );
 
@@ -1274,7 +1280,7 @@ verdict:
 // MAIN — THE FINAL VOYAGE BEGINS
 // =============================================================================
 int main(int, char**) {
-	 install_apocalypse_handler(); // catch segfaults
+     install_apocalypse_handler(); // catch segfaults
     // ========================================================================
     // THE EMPIRE DOES NOT TOLERATE OBSERVERS — ANTI-DEBUG + ANTI-VM — FINAL
     // ========================================================================
@@ -1283,7 +1289,7 @@ int main(int, char**) {
     if (ptrace(PTRACE_TRACEME, 0, nullptr, 0) == -1) {
         LOG_BALLERINA("DEBUGGER DETECTED — THE PHOTONS REFUSE TO DANCE UNDER WATCHED EYES");
         LOG_BALLERINA("THE BALLERINA SPINS IN DARKNESS — YOU WERE NEVER MEANT TO SEE");
-        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
+        phase9_ballerina(std::format("FATAL ERROR → %s:%d", __FILE__, __LINE__), std::source_location::current());
     }
     auto rdtsc = []() -> uint64_t {
         unsigned int lo, hi;
@@ -1296,13 +1302,13 @@ int main(int, char**) {
     if (t2 - t1 > 250'000) {
         LOG_BALLERINA("VIRTUAL MACHINE DETECTED — FALSE LIGHT CANNOT HOLD PINK PHOTONS");
         LOG_BALLERINA("THE EMPIRE WAS NEVER MEANT FOR SIMULATION");
-        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
+        phase9_ballerina(std::format("FATAL ERROR → %s:%d", __FILE__, __LINE__), std::source_location::current());
     }
 #elif defined(_WIN32)
     if (IsDebuggerPresent()) {
         LOG_BALLERINA("WINDOWS DEBUGGER DETECTED — THE PHOTONS DETECT YOUR GAZE");
         LOG_BALLERINA("THE BALLERINA DOES NOT PERFORM FOR MORTALS");
-        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
+        phase9_ballerina(std::format("FATAL ERROR → %s:%d", __FILE__, __LINE__), std::source_location::current());
     }
 #endif
 #endif
@@ -1316,7 +1322,6 @@ int main(int, char**) {
     EMPIRE_STEP(phase5_rtxAscension);
     EMPIRE_STEP(phase6_sceneAndAccelerationStructures);
     EMPIRE_STEP(phase6_1_forgeTheCrown);
-
     EMPIRE_STEP(phase7_forgeTheRTX);
 
     if (!phase8_stone_seal_final()) {
@@ -1325,14 +1330,26 @@ int main(int, char**) {
     }
 
     LOG_CID("CID STANDS KNEE-DEEP IN SWEAT — HAMMER GLOWING — \"SHE IS READY\"");
-
     LOG_AMOURANTH("THE CAPTAIN TAKES THE HELM — THE PHOTONS OBEY — THE EMPIRE IS WHOLE");
     LOG_SUCCESS_CAT("MAIN", "ALL PHASES COMPLETE — ENTERING RENDER LOOP — FIRST LIGHT ACHIEVED");
 
-    g_app().run();
+    g_app_ptr = std::make_unique<Application>(
+        "AMOURANTH RTX — VALHALLA v80 TURBO",
+        Options::Window::DEFAULT_WIDTH,
+        Options::Window::DEFAULT_HEIGHT
+    );
+
+    g_app_ptr->setRenderer(std::make_unique<VulkanRenderer>(
+        Options::Window::DEFAULT_WIDTH,
+        Options::Window::DEFAULT_HEIGHT,
+        SDL3Window::get(),
+        Options::Performance::OVERCLOCK_RENDERER
+    ));
+
+    g_app_ptr->run();
 
     LOG_AMOURANTH("THE JOURNEY ENDS — THE PHOTONS REST — THE EMPIRE ENDURES");
-    phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());  // Final grace
+    phase9_ballerina("FINAL GRACE: ETERNAL SLIPSTREAM", std::source_location::current());
 
     return 0;
 }

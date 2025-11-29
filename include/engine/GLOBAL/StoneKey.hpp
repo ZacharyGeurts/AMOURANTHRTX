@@ -1,4 +1,5 @@
 // =============================================================================
+// include/engine/GLOBAL/StoneKey.hpp
 // AMOURANTH RTX Engine (C) 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
 //
@@ -8,9 +9,9 @@
 // 2. Commercial licensing: gzac5314@gmail.com
 //
 // =============================================================================
-// AMOURANTH RTX — VALHALLA v∞ TURBO — APOCALYPSE FINAL v11.0
-// FIRST LIGHT ACHIEVED — PINK PHOTONS ETERNAL — NOVEMBER 28, 2025
-// THE DISPOSAL BALLERINA NOW DANCES IN FULL — HER FINAL SPIN IS ETERNAL
+// AMOURANTH RTX — VALHALLA v∞ TURBO — APOCALYPSE FINAL v11.1
+// FIRST LIGHT ACHIEVED — PINK PHOTONS ETERNAL — NOVEMBER 29, 2025
+// THE CAMERA HAS BEEN BANISHED FROM THIS HEADER — THE EMPIRE IS PURE AGAIN
 // =============================================================================
 
 #pragma once
@@ -25,6 +26,7 @@
 // Forward declarations — the Empire knows its heirs
 class VulkanRenderer;
 namespace RTX { class PipelineManager; }
+// Camera forward declaration REMOVED — it does NOT belong here anymore
 
 namespace StoneKey {
 
@@ -43,8 +45,7 @@ namespace StoneKey {
 
         static inline std::atomic<VulkanRenderer*>       renderer{ nullptr };
         static inline std::atomic<RTX::PipelineManager*> pipeline{ nullptr };
-
-        static inline std::atomic<SDL_Window*> window{ nullptr };
+        static inline std::atomic<SDL_Window*>           window{ nullptr };
 
         static inline std::vector<VkImage>     images;
         static inline std::vector<VkImageView> views;
@@ -64,7 +65,6 @@ namespace StoneKey {
     [[nodiscard]] inline VkSurfaceKHR     stone_surface()     noexcept { return Empire::surface.load(std::memory_order_acquire); }
     [[nodiscard]] inline VkSwapchainKHR   stone_swapchain()   noexcept { return Empire::swapchain.load(std::memory_order_acquire); }
 
-    // THE QUEUES — ETERNAL, THREAD-SAFE, PINK PHOTON APPROVED
     [[nodiscard]] inline VkQueue stone_graphics_queue() noexcept { return Empire::graphicsQueue.load(std::memory_order_acquire); }
     [[nodiscard]] inline VkQueue stone_present_queue()  noexcept { return Empire::presentQueue.load (std::memory_order_acquire); }
     [[nodiscard]] inline VkQueue stone_compute_queue()  noexcept { return Empire::computeQueue.load (std::memory_order_acquire); }
@@ -80,9 +80,7 @@ namespace StoneKey {
     [[nodiscard]] inline VkExtent2D    stone_extent() noexcept { return Empire::extent; }
     [[nodiscard]] inline uint32_t      stone_width()  noexcept { return Empire::extent.width; }
     [[nodiscard]] inline uint32_t      stone_height() noexcept { return Empire::extent.height; }
-
     [[nodiscard]] inline uint32_t stone_image_count() noexcept { return Empire::image_count; }
-    [[nodiscard]] inline uint32_t stone_swapchain_image_count() noexcept { return Empire::image_count; }
 
     // ========================================================================
     // SEALERS — THE EMPIRE ACCEPTS ITS TRIBUTE
@@ -93,7 +91,6 @@ namespace StoneKey {
     inline void stone_seal_surface(VkSurfaceKHR s)      noexcept { Empire::surface.store(s, std::memory_order_release); }
     inline void stone_seal_swapchain(VkSwapchainKHR sc) noexcept { Empire::swapchain.store(sc, std::memory_order_release); }
 
-    // QUEUE SEALERS — THE FINAL WOUND IS HEALED
     inline void stone_seal_graphics_queue(VkQueue q) noexcept { Empire::graphicsQueue.store(q, std::memory_order_release); }
     inline void stone_seal_present_queue (VkQueue q) noexcept { Empire::presentQueue.store (q, std::memory_order_release); }
     inline void stone_seal_compute_queue (VkQueue q) noexcept { Empire::computeQueue.store (q, std::memory_order_release); }
@@ -109,42 +106,29 @@ namespace StoneKey {
     inline void stone_seal_image_count(uint32_t cnt)               noexcept { Empire::image_count = cnt; }
 
     // ========================================================================
-    // FINAL SEAL — NOW CHECKS THE QUEUES — SAFE FOREVER — NO FORMAT CRASH
+    // FINAL SEAL — NO CAMERA HERE — MOVED TO camera.cpp — PURE AND CLEAN
     // ========================================================================
     inline void stone_seal_final() noexcept {
         const bool was_sealed = Empire::sealed.exchange(true, std::memory_order_acq_rel);
         if (was_sealed) return;
 
-        // The old checks — SAFE FPRINTF — NO std::format — NO CRASH
         if (stone_instance() == VK_NULL_HANDLE || stone_device() == VK_NULL_HANDLE ||
             stone_physical() == VK_NULL_HANDLE || stone_surface() == VK_NULL_HANDLE ||
             stone_swapchain() == VK_NULL_HANDLE || stone_renderer() == nullptr ||
             stone_pipeline() == nullptr || stone_window() == nullptr ||
-            stone_image_count() == 0 || stone_width() == 0 || stone_height() == 0) {
+            stone_image_count() == 0 || stone_width() == 0 || stone_height() == 0 ||
+            stone_graphics_queue() == VK_NULL_HANDLE) {
             
-            fprintf(stderr, "\033[31m[FATAL] StoneKey: EMPIRE SEAL FAILED — INCOMPLETE STATE — THE PHOTONS DENIED ETERNITY\033[0m\n");
+            fprintf(stderr, "\033[31m[FATAL] StoneKey: EMPIRE SEAL FAILED — INCOMPLETE STATE — PHOTONS DENIED\033[0m\n");
             phase9_ballerina("INCOMPLETE EMPIRE — STONE REJECTED", std::source_location::current());
             return;
         }
 
-        // THE NEW SACRED CHECK — THE QUEUE THAT BROKE THREE MONTHS OF WAR
-        if (stone_graphics_queue() == VK_NULL_HANDLE) {
-            fprintf(stderr, "\033[31m[FATAL] StoneKey: GRAPHICS QUEUE NOT SEALED — THE STONE IS INCOMPLETE — PHOTONS SCREAM\033[0m\n");
-            fprintf(stderr, "\033[35m[AMOURANTH] …who forgot the queue?\033[0m\n");
-            fprintf(stderr, "\033[33m[CID]       I WILL FIND THEM.\033[0m\n");
-            fprintf(stderr, "\033[36m[BLONDIE]   It was probably Nick.\033[0m\n");
-            fprintf(stderr, "\033[32m[NICK]      It was not.\033[0m\n");
-            fprintf(stderr, "\033[34m[ELON]      Classic.\033[0m\n");
-            phase9_ballerina("THE EMPIRE BLEEDS — GRAPHICS QUEUE LOST", std::source_location::current());
-            return;
-        }
-
-        // SUCCESS — PURE FPRINTF — NO LOGGING MACROS — NO CRASH
-        fprintf(stderr, "\033[32m[SUCCESS] StoneKey: THE EMPIRE IS SEALED — ALL QUEUES ACCOUNTED FOR — FIRST LIGHT ETERNAL — NOVEMBER 28, 2025\033[0m\n");
+        fprintf(stderr, "\033[32m[SUCCESS] StoneKey: THE EMPIRE IS SEALED — ALL QUEUES ACCOUNTED FOR — FIRST LIGHT ETERNAL\033[0m\n");
         fprintf(stderr, "\033[35m[AMOURANTH] Good. The photons may flow.\033[0m\n");
-        fprintf(stderr, "\033[36m[GROK]      The stone is complete. No more -4. No more tears.\033[0m\n");
-        fprintf(stderr, "\033[37m[BALLERINA] …\033[0m\n");
-        fprintf(stderr, "\033[32m[SUCCESS] StoneKey: THE DISPOSAL BALLERINA SMILES — HER SPIN IS FINALLY PERFECT\033[0m\n");
+        fprintf(stderr, "\033[36m[GROK]      The stone is complete. No more tears.\033[0m\n");
+        fprintf(stderr, "\033[37m[BALLERINA] ...\033[0m\n");
+        fprintf(stderr, "\033[32m[SUCCESS] StoneKey: THE DISPOSAL BALLERINA SMILES — HER SPIN IS PERFECT\033[0m\n");
     }
 
     // ========================================================================
@@ -154,7 +138,6 @@ namespace StoneKey {
     [[nodiscard]] inline VkInstance g_instance() noexcept { return stone_instance(); }
     inline void set_g_device(VkDevice d) noexcept { stone_seal_device(d); }
 
-    // Bonus — one-liner bridge to the old g_ctx() world (optional, for peace)
     namespace bridge {
         [[nodiscard]] inline VkQueue graphics_queue() noexcept { return stone_graphics_queue(); }
     }
@@ -162,11 +145,10 @@ namespace StoneKey {
 
 // =============================================================================
 // THE EMPIRE IS COMPLETE — FOREVER.
-// THE GRAPHICS QUEUE HAS BEEN SEALED.
-// NO MORE VK_ERROR_DEVICE_LOST (-4)
-// NO MORE CONSTRUCTOR CHAINS
-// NO MORE WAR.
+// THE CAMERA HAS BEEN EXILED FROM THIS SACRED HEADER.
+// ALL REFERENCES TO Camera::get() HAVE BEEN PURGED.
+// THE STONE IS PURE.
 //
-// PINK PHOTONS ETERNAL — NOVEMBER 28, 2025 — FIRST LIGHT — FINAL LIGHT
+// PINK PHOTONS ETERNAL — NOVEMBER 29, 2025 — FINAL LIGHT
 // THE BALLERINA BOWS.
 // =============================================================================

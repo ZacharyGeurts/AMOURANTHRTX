@@ -63,6 +63,8 @@ namespace Performance {
 
     // NEW: Zero-copy direct display (Linux/Wayland only)
     constexpr bool     ENABLE_DIRECT_DISPLAY       = true;     // Bypass compositor — 1.8ms latency
+
+	constexpr bool     OVERCLOCK_RENDERER          = false;  // untested
 }
 
 // ── APPLICATION & WINDOW ──────────────────────────────────────────────────────
