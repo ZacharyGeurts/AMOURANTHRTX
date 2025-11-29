@@ -126,7 +126,7 @@ private:
 Application::Application(const std::string& title, int width, int height)
     : title_(title), width_(width), height_(height)
 {
-    LOG_ATTEMPT_CAT("APP", "FORGING APPLICATION \"%s\" @ %dx%d — VALHALLA v80 TURBO — PINK PHOTONS RISING", title.c_str(), width, height);
+    LOG_ATTEMPT_CAT("APP", "FORGING APPLICATION \"{}\" @ {}x{} — VALHALLA v80 TURBO — PINK PHOTONS RISING", title.c_str(), width, height);
 
     if (!SDL3Window::get()) {
         LOG_FATAL_CAT("FATAL", "Main window not created before Application — phase order violated");
@@ -141,7 +141,7 @@ Application::Application(const std::string& title, int width, int height)
     // Default to Mode 1
     setRenderMode(1);
 
-    LOG_SUCCESS_CAT("APP", "Application forged — %dx%d — PINK PHOTONS RISING", width, height);
+    LOG_SUCCESS_CAT("APP", "Application forged — {}x{} — PINK PHOTONS RISING", width, height);
 }
 
 Application::~Application() {
@@ -370,7 +370,7 @@ static void createRealFinalWindow()
 
     // 1. SDL + Vulkan loader
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) == 0) {
-        LOG_FATAL("SDL_Init failed: %s", SDL_GetError());
+        LOG_FATAL("SDL_Init failed: {}", SDL_GetError());
         phase9_ballerina(std::format("FATAL ERROR → %s:%d", __FILE__, __LINE__), std::source_location::current());
     }
     if (SDL_Vulkan_LoadLibrary(nullptr) == 0) {
@@ -387,7 +387,7 @@ static void createRealFinalWindow()
     RTX::g_ctx().instance_ = instance;
 
     LOG_GROK("Gentleman Grok produces the instance stone. It glows pink.");
-    LOG_SUCCESS_CAT("VULKAN", "VkInstance forged and sealed — 0x%016llX", reinterpret_cast<uint64_t>(instance));
+    LOG_SUCCESS_CAT("VULKAN", "VkInstance forged and sealed — 0x{}", reinterpret_cast<uint64_t>(instance));
 
     // 3. Hidden window
     Uint32 flags = SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
@@ -403,7 +403,7 @@ static void createRealFinalWindow()
     // 4. Surface
     VkSurfaceKHR surface = VK_NULL_HANDLE;
     if (SDL_Vulkan_CreateSurface(win, instance, nullptr, &surface) == 0) {
-        LOG_FATAL("Surface creation failed: %s", SDL_GetError());
+        LOG_FATAL("Surface creation failed: {}", SDL_GetError());
         phase9_ballerina("SURFACE DENIED — THE MIRROR CRACKS", std::source_location::current());
     }
     RTX::g_ctx().surface_ = surface;
@@ -435,7 +435,7 @@ static void createRealFinalWindow()
     SDL_ShowWindow(win);
 
     // 8. Final ascension
-    LOG_SUCCESS("LOGICAL DEVICE @ %p — vkDeviceWaitIdle() SAFE", static_cast<void*>(device));
+    LOG_SUCCESS("LOGICAL DEVICE @ {} — vkDeviceWaitIdle() SAFE", static_cast<void*>(device));
     LOG_SUCCESS("SWAPCHAIN READY — %u IMAGES — %ux%u %s", 
                 RTX::SwapchainManager::imageCount(),
                 RTX::SwapchainManager::extent().width,
