@@ -35,6 +35,7 @@
 
 using namespace Logging::Color;
 using namespace std::chrono;
+using StoneKey::stone_window;
 
 // =============================================================================
 // Global state
@@ -51,8 +52,8 @@ std::atomic<bool> g_resizeRequested{false};
 // =============================================================================
 void SDLWindowDeleter::operator()(SDL_Window* w) const noexcept
 {
-    if (w) {
-        LOG_INFO_CAT("Dispose", "{}Returning window to the void @ {:p}{}", OCEAN_TEAL, static_cast<void*>(w), RESET);
+    if (stone_window()) {
+        LOG_INFO_CAT("Dispose", "{}Returning window to the void @ {}{}", OCEAN_TEAL, static_cast<void*>(w), RESET);
     }
 }
 

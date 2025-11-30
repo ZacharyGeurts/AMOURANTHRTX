@@ -55,7 +55,7 @@ VulkanRTX::VulkanRTX(int w, int h, PipelineManager*) noexcept
         return;
     }
 
-    LOG_SUCCESS_CAT("RTX", "VulkanRTX forged — {}×{} — device 0x{:016X}", w, h, reinterpret_cast<uintptr_t>(device_));
+    LOG_SUCCESS_CAT("RTX", "VulkanRTX forged — {}x{} — device 0x{}", w, h, reinterpret_cast<uintptr_t>(stone_device()));
     initBlackFallbackImage();
 
     LOG_SUCCESS_CAT("RTX", "VULKANRTX ASCENDED — LAS WILL BUILD THE UNIVERSE — FIRST LIGHT ETERNAL");

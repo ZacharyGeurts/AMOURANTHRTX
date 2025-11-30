@@ -177,8 +177,7 @@ inline constexpr struct NullFeatureChainTerminator {
         }
     };
 
-    [[nodiscard]] QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device,
-                                                       VkSurfaceKHR surface) noexcept;
+    [[nodiscard]] QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device, VkSurfaceKHR surface) noexcept;
 
 struct Context {
 public:
@@ -291,14 +290,14 @@ public:
     void enableDebugUtils(bool e = true) noexcept              { debugUtilsEnabled_ = e; }  // ← RESTORED
 
     // Core lifecycle
-    void init(SDL_Window* window, int width, int height);
+    void init();
     void cleanup() noexcept;
 };
 
     extern Context g_context_instance;
     [[nodiscard]] inline Context& g_ctx() noexcept { return g_context_instance; }
     [[nodiscard]] inline VkShaderModule loadShader(const std::string& filename) { return g_ctx().loadShader(filename); }
-
+	
     // =============================================================================
     // Core Vulkan Creation Functions
     // =============================================================================

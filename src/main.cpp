@@ -40,6 +40,7 @@
 
 #include <vulkan/vulkan.hpp>
 #include <string>
+#include <string_view>
 #include <format>
 #include <iostream>
 #include <memory>
@@ -56,6 +57,7 @@
 using namespace Logging::Color;
 using StoneKey::stone_seal_renderer;
 using StoneKey::stone_pipeline;
+using StoneKey::stone_graphics_family;
 using StoneKey::stone_seal_pipeline;
 using StoneKey::stone_seal_width;
 using StoneKey::stone_seal_height;
@@ -258,33 +260,31 @@ void Application::processInput(float) {
 void Application::render(float deltaTime) {
     renderer_->renderFrame(CAM, deltaTime);
 }
+void Application::updateWindowTitle(float deltaTime)
+{
+    static int   frames = 0;
+    static float accum  = 0.0f;
 
-void Application::updateWindowTitle(float deltaTime) {
-    static int frames = 0;
-    static float accum = 0.0f;
     ++frames;
     accum += deltaTime;
 
-    if (accum >= 1.0f) {
+    if (accum >= 1.0f)
+    {
         const float fps = frames / accum;
 
-        // Build the suffix separately — runtime conditionals are allowed here
-        std::string suffix = " INFINITY ";
-
         const std::string title = std::format(
-            "%s | %.1f FPS | %dx%d | Mode %d | Bounces %d%s",
-            title_.c_str(),
+            "{} | {:.1f} FPS | {}x{} | Mode {} | Bounces {} INFINITY ",
+            title_,
             fps,
-            width_, height_,
+            stone_width(), stone_height(),
             renderer()->currentRenderMode(),
-            Options::OptionsRTX::MAX_BOUNCES,
-            suffix.c_str()
+            Options::OptionsRTX::MAX_BOUNCES
         );
 
         SDL_SetWindowTitle(SDL3Window::get(), title.c_str());
 
         frames = 0;
-        accum = 0.0f;
+        accum  = 0.0f;
     }
 }
 
@@ -302,9 +302,7 @@ void Application::setRenderMode(int mode) {
     renderer_->setActiveRenderMode(mode);
     renderer_->requestAccumulationReset();
 
-    LOG_SUCCESS_CAT("RENDER", 
-        "{}RENDER MODE {} ACTIVATED — PHOTONS REALIGNED — FIRST LIGHT ETERNAL{}",
-        RASPBERRY_PINK, mode, RESET);
+    LOG_SUCCESS_CAT("RENDER", "{}RENDER MODE {} ACTIVATED — PHOTONS REALIGNED — FIRST LIGHT ETERNAL{}", RASPBERRY_PINK, mode, RESET);
 }
 
 // =============================================================================
@@ -312,17 +310,16 @@ void Application::setRenderMode(int mode) {
 // Called exactly once in phase5_rtxAscension() — BEFORE ANY MESH OR BLAS
 // =============================================================================
 static void createCommandPool() noexcept {
-    auto& ctx = RTX::g_ctx();
 
-    EMPIRE_GUARD(ctx.device() && ctx.device() != VK_NULL_HANDLE,
-                 "createCommandPool() — LOGICAL DEVICE NOT FORGED YET");
+    EMPIRE_GUARD(stone_device() != VK_NULL_HANDLE,
+                 "createCommandPool() — LOGICAL DEVICE GRACE NOT FORGED YET");
 
-    EMPIRE_GUARD(ctx.graphicsFamily_ != VK_QUEUE_FAMILY_IGNORED,
-                 "GRAPHICS QUEUE FAMILY NOT FOUND — CANNOT FORGE COMMAND POOL");
+    EMPIRE_GUARD(stone_graphics_family() != VK_QUEUE_FAMILY_IGNORED,
+                 "GRAPHICS QUEUE FAMILY NOT FOUND — CANNOT FORGE COMMAND POOL FROM GRACE'S FAMILY");
 
     // If already forged — salute efficiency and return
-    if (ctx.commandPool_ != VK_NULL_HANDLE) {
-        LOG_JENSEN("Command pool already forged at 0x%016llX — photons salute efficiency", reinterpret_cast<uint64_t>(ctx.commandPool_));
+    if (g_ctx().commandPool_ != VK_NULL_HANDLE) {
+        LOG_JENSEN("Command pool already forged at 0x{} — photons salute efficiency", reinterpret_cast<uint64_t>(g_ctx().commandPool_));
         return;
     }
 
@@ -331,27 +328,27 @@ static void createCommandPool() noexcept {
         .pNext = nullptr,
         .flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT |
                  VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
-        .queueFamilyIndex = ctx.graphicsFamily()  // ← CORRECT NAME
+        .queueFamilyIndex = stone_graphics_family()
     };
 
-    VK_CHECK(vkCreateCommandPool(ctx.device(), &poolInfo, nullptr, &ctx.commandPool_));
+    VK_CHECK(vkCreateCommandPool(stone_device(), &poolInfo, nullptr, &g_ctx().commandPool_));
 
     // Debug name for RenderDoc, NSight, etc.
-    if (ctx.debugUtilsSupported()) {
-        auto func = (PFN_vkSetDebugUtilsObjectNameEXT)vkGetDeviceProcAddr(ctx.device(), "vkSetDebugUtilsObjectNameEXT");
+    if (g_ctx().debugUtilsSupported()) {
+        auto func = (PFN_vkSetDebugUtilsObjectNameEXT)vkGetDeviceProcAddr(stone_device(), "vkSetDebugUtilsObjectNameEXT");
         if (func) {
             VkDebugUtilsObjectNameInfoEXT nameInfo{
                 .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT,
                 .objectType = VK_OBJECT_TYPE_COMMAND_POOL,
-                .objectHandle = reinterpret_cast<uint64_t>(ctx.commandPool_),
+                .objectHandle = reinterpret_cast<uint64_t>(g_ctx().commandPool_),
                 .pObjectName = "EMPIRE_COMMAND_POOL_PHOTON_BATTLEFIELD"
             };
-            func(ctx.device(), &nameInfo);
+            func(stone_device(), &nameInfo);
         }
     }
 
     LOG_JENSEN("Jensen Huang raises his arms to the void:");
-    LOG_JENSEN("\"THE COMMAND POOL IS FORGED — 0x%016llX\"", reinterpret_cast<uint64_t>(ctx.commandPool_));
+    LOG_JENSEN("\"THE COMMAND POOL IS FORGED — 0x{}\"", reinterpret_cast<uint64_t>(g_ctx().commandPool_));
     LOG_JENSEN("\"THE PHOTONS NOW HAVE A BATTLEFIELD. LET THERE BE UPLOADS. LET THERE BE BLAS.\"");
     LOG_SUCCESS_CAT("MAIN", "COMMAND POOL ASCENDED — MESHLOADER, LAS, AND ALL ONE-TIME COMMANDS ARE NOW ARMED");
 }
@@ -432,7 +429,7 @@ static void createRealFinalWindow()
 
     LOG_ELON("Elon drops the swapchain from the top rope: \"Infinite canvas. Infinite bounce.\"");
 
-    LOG_SUCCESS("LOGICAL DEVICE @ {} — vkDeviceWaitIdle() SAFE", static_cast<void*>(stone_device()));
+    LOG_SUCCESS("LOGICAL DEVICE GRACE @ {} — vkDeviceWaitIdle() SAFE", static_cast<void*>(stone_device()));
     LOG_SUCCESS("SWAPCHAIN READY — {} IMAGES — {}x{} {}", 
                 stone_image_count(),
                 stone_width(),
@@ -448,9 +445,11 @@ static void createRealFinalWindow()
     LOG_AMOURANTH("Captain Amouranth: \"We didn’t just render light. She became it.\"");
 
 
-    /////////////////////////////////////////////////////
-    // GRACE'S DESK — ETERNAL LOADING ZONE — NOW PURE //
+    LOG_SUCCESS("GRACE'S DESK //////////////////////////////////////////////////////////");
     RTX::loadExtensions(stone_instance(), stone_device());
+	LOG_SUCCESS("GRACE'S DESK ///////////// ETERNAL LOADING ZONE — NOW PURE ////////////");
+	LOG_SUCCESS("GRACE'S DESK //////////////////////////////////////////////////////////");
+    
     LOG_SUCCESS("PHASE 4.5 COMPLETE — ALL STONES SEALED");
     LOG_SUCCESS("INSTANCE  — SEALED");
     LOG_SUCCESS("DEVICE    — SEALED");
@@ -753,7 +752,7 @@ static void phase4_merchantShip() {
 
     // The real resurrection begins
     createRealFinalWindow();
-    RTX::g_ctx().init(SDL3Window::get(), Options::Window::DEFAULT_WIDTH, Options::Window::DEFAULT_HEIGHT);
+    RTX::g_ctx().init(); // RTXHandler.cpp, struct Context is hpp
 
     LOG_BLONDIE("\nBlondie glances back one last time at the sinking glow on the horizon:"
     "\"Rest easy, old girl. Your sacrifice bought us tomorrow.\"");
@@ -837,7 +836,7 @@ static void phase6_sceneAndAccelerationStructures() {
                 };
 
                 VkCommandPool asyncPool = VK_NULL_HANDLE;
-                VK_CHECK(vkCreateCommandPool(RTX::g_ctx().device(), &poolInfo, nullptr, &asyncPool));
+                VK_CHECK(vkCreateCommandPool(stone_device(), &poolInfo, nullptr, &asyncPool));
 
                 const uint32_t vertexCount = static_cast<uint32_t>(g_mesh->vertices.size());
                 const uint32_t indexCount  = static_cast<uint32_t>(g_mesh->indices.size());
@@ -865,7 +864,7 @@ static void phase6_sceneAndAccelerationStructures() {
                     std::span<const decltype(instance)>{&instance, 1}
                 );
 
-                vkDestroyCommandPool(RTX::g_ctx().device(), asyncPool, nullptr);
+                vkDestroyCommandPool(stone_device(), asyncPool, nullptr);
 
                 LOG_GROK("Gentleman Grok: \"A brief eclipse. The light always returns.\"");                
             }).detach();
@@ -1253,7 +1252,7 @@ int main(int, char**) {
     if (ptrace(PTRACE_TRACEME, 0, nullptr, 0) == -1) {
         LOG_BALLERINA("DEBUGGER DETECTED — THE PHOTONS REFUSE TO DANCE UNDER WATCHED EYES");
         LOG_BALLERINA("THE BALLERINA SPINS IN DARKNESS — YOU WERE NEVER MEANT TO SEE");
-        phase9_ballerina(std::format("FATAL ERROR → %s:%d", __FILE__, __LINE__), std::source_location::current());
+        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
     }
     auto rdtsc = []() -> uint64_t {
         unsigned int lo, hi;
@@ -1266,13 +1265,13 @@ int main(int, char**) {
     if (t2 - t1 > 250'000) {
         LOG_BALLERINA("VIRTUAL MACHINE DETECTED — FALSE LIGHT CANNOT HOLD PINK PHOTONS");
         LOG_BALLERINA("THE EMPIRE WAS NEVER MEANT FOR SIMULATION");
-        phase9_ballerina(std::format("FATAL ERROR → %s:%d", __FILE__, __LINE__), std::source_location::current());
+        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
     }
 #elif defined(_WIN32)
     if (IsDebuggerPresent()) {
         LOG_BALLERINA("WINDOWS DEBUGGER DETECTED — THE PHOTONS DETECT YOUR GAZE");
         LOG_BALLERINA("THE BALLERINA DOES NOT PERFORM FOR MORTALS");
-        phase9_ballerina(std::format("FATAL ERROR → %s:%d", __FILE__, __LINE__), std::source_location::current());
+        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
     }
 #endif
 #endif

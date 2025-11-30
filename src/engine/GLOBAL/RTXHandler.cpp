@@ -17,13 +17,18 @@
 using namespace Logging::Color;
 using StoneKey::stone_device;
 using StoneKey::stone_instance;
+using StoneKey::stone_window;
+using StoneKey::stone_height;
+using StoneKey::stone_width;
 using StoneKey::stone_seal_device;
 using StoneKey::stone_seal_physical;
 using StoneKey::stone_seal_instance;
 
 namespace RTX {
+    Context g_context_instance{};
+}
 
-Context g_context_instance{};
+namespace RTX {
 
 void logAndTrackDestruction(const char* type, void* ptr, int line, size_t size) {
     if (ENABLE_DEBUG) {
@@ -57,7 +62,7 @@ void WriteAccelerationStructureDescriptor(VkDescriptorSet dstSet, uint32_t dstBi
         .descriptorType   = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR
     };
 
-    vkUpdateDescriptorSets(g_ctx().device_, 1, &write, 0, nullptr);
+    vkUpdateDescriptorSets(stone_device(), 1, &write, 0, nullptr);
 }
 
 // =============================================================================
@@ -101,10 +106,7 @@ void WriteAccelerationStructureDescriptor(VkDescriptorSet dstSet, uint32_t dstBi
     std::vector<const char*> extensions(sdlExtensions, sdlExtensions + sdlExtCount);
 
     for (const char* ext : extensions) {
-        LOG_INFO_CAT("MAIN", "  {}• {}{}", 
-                     AURORA_PINK,
-                     ext ? std::string_view(ext) : std::string_view("(null)"),
-                     RESET);
+        LOG_INFO_CAT("MAIN", "  {}• {}{}", AURORA_PINK, ext ? std::string_view(ext) : std::string_view("(null)"), RESET);
     }
 
     if (enableValidation) {
@@ -143,21 +145,18 @@ void WriteAccelerationStructureDescriptor(VkDescriptorSet dstSet, uint32_t dstBi
                 "\n\"No more chains. No more cages.\""
                 "\n\"Only light.\"");
 
-    // THE RAW POINTER DIES HERE — IT MAY NEVER ESCAPE
-    stone_seal_instance(instance);
-
     // ONLY THE STONE MAY SPEAK THE TRUTH
-    return stone_instance();
+    return instance;
 }
 
 // =============================================================================
 // Core initialization — The Handler watches. Ballerina waits.
 // =============================================================================
-void Context::init(SDL_Window* window, int width, int height)
+void Context::init()
 {
-    this->window  = window;
-    this->width   = width;
-    this->height  = height;
+    this->window  = stone_window();
+    this->width   = stone_width();
+    this->height  = stone_width();
 
     valid_ = true;
     ready_.store(true, std::memory_order_release);
