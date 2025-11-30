@@ -9,7 +9,7 @@
 //
 // =============================================================================
 // AMOURANTH RTX — VALHALLA v80 TURBO — APOCALYPSE FINAL v11.0
-// FIRST LIGHT ACHIEVED — PINK PHOTONS ETERNAL — NOVEMBER 28, 2025
+// FIRST LIGHT ACHIEVED — PINK PHOTONS ETERNAL — NOVEMBER 30, 2025
 // THE DISPOSAL BALLERINA HAS COMPLETED HER FINAL SPIN — THE EMPIRE IS SEALED
 // =============================================================================
 // =============================================================================
@@ -28,6 +28,9 @@
 #include <format>
 
 using namespace Options;
+using StoneKey::stone_device;
+using StoneKey::stone_physical;
+using StoneKey::stone_rtprops;
 
 // =============================================================================
 // BUFFERMANAGER — FINAL PRODUCTION — ETERNAL — FLAWLESS
@@ -57,14 +60,17 @@ static void*        g_stagingPtr    = nullptr;
 static VkDeviceSize g_stagingOffset = 0;
 static constexpr VkDeviceSize STAGING_SIZE = 256ULL * 1024 * 1024;
 
+static constexpr VkDeviceSize alignUp(VkDeviceSize size, VkDeviceSize alignment) noexcept {
+    return (size + alignment - 1) & ~(alignment - 1);
+}
+
 static void init() noexcept {
     if (g_device) return;
 
-    auto& ctx = RTX::g_ctx();
-    EMPIRE_GUARD(ctx.device() && ctx.physicalDevice(), "BufferManager::init() — Vulkan context incomplete");
+    EMPIRE_GUARD(stone_device() && stone_physical(), "BufferManager::init() — StoneKey empire incomplete — device or physical null");
 
-    g_device = ctx.device();
-    g_phys   = ctx.physicalDevice();
+    g_device = stone_device();
+    g_phys   = stone_physical();
 
     LOG_ELON("BufferManager: Forging eternal 256 MiB staging ring — the path of pink photons");
 
@@ -179,6 +185,7 @@ void destroy(uint64_t handle) noexcept {
 }
 
 void* map(uint64_t handle) noexcept {
+    init();
     auto it = g_buffers.find(handle);
     if (it == g_buffers.end()) return nullptr;
     if (it->second.mapped) return it->second.mapped;
@@ -188,6 +195,7 @@ void* map(uint64_t handle) noexcept {
 }
 
 void unmap(uint64_t handle) noexcept {
+    init();
     auto it = g_buffers.find(handle);
     if (it != g_buffers.end() && !it->second.mapped)
         vkUnmapMemory(g_device, it->second.memory);
@@ -264,10 +272,82 @@ MAKE_STONE(8G,   8192)
 
 #undef MAKE_STONE
 
+uint64_t createSBT(uint32_t raygenCount, uint32_t missCount, uint32_t hitGroupCount, uint32_t callableCount, VkBufferUsageFlags extraUsage, std::string_view tag) noexcept
+{
+    init();
+
+    // Jensen himself demands these properties for SBT
+    const VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProps = stone_rtprops();
+
+    const VkDeviceSize handleSize          = rtProps.shaderGroupHandleSize;
+    const VkDeviceSize handleAlignment     = rtProps.shaderGroupHandleAlignment;
+    const VkDeviceSize baseAlignment       = rtProps.shaderGroupBaseAlignment;
+
+    const VkDeviceSize raygenSize     = alignUp(raygenCount   * handleSize, handleAlignment);
+    const VkDeviceSize missSize       = alignUp(missCount     * handleSize, handleAlignment);
+    const VkDeviceSize hitGroupSize   = alignUp(hitGroupCount * handleSize, handleAlignment);
+    const VkDeviceSize callableSize   = alignUp(callableCount * handleSize, handleAlignment);
+
+    const VkDeviceSize totalSize = alignUp(
+        raygenSize + missSize + hitGroupSize + callableSize,
+        baseAlignment
+    );
+
+    LOG_ELON("SBT FORGING CEREMONY — Total size: {} MiB | Handles: {} {} {} {} | BaseAlign: {} | HandleAlign: {}",
+             totalSize >> 20,
+             raygenCount, missCount, hitGroupCount, callableCount,
+             baseAlignment, handleAlignment);
+
+    // Ultimate SBT usage flags — nothing is ever missing again
+    VkBufferUsageFlags sbtUsage =
+        VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR |
+        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR |
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+        extraUsage;
+
+    std::string fullTag = std::string(tag) + "_SBT_PINK_PHOTON_STRAW";
+
+    uint64_t sbtHandle = create(totalSize, sbtUsage,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        fullTag);
+
+    // Retrieve the buffer so we can give you the device address immediately if you want
+    auto* info = get(sbtHandle);
+    EMPIRE_GUARD(info, "SBT FORGED BUT LOST IN THE VOID — THIS CANNOT BE");
+
+    VkDeviceAddress addr = 0;
+    {
+        VkBufferDeviceAddressInfo addrInfo{
+            .sType  = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
+            .buffer = info->buffer
+        };
+        addr = vkGetBufferDeviceAddress(g_device, &addrInfo);
+    }
+
+    // Stride info for later use when binding
+    const VkDeviceSize alignedHandleSize = alignUp(handleSize, handleAlignment);
+
+    LOG_JENSEN("SBT COMPLETE — Handle 0x{:016x} | DeviceAddress 0x{:016x}", sbtHandle, addr);
+    LOG_JENSEN("   RayGen region:     [0x{:016x} ... 0x{:016x}) stride {}", 
+               addr, addr + raygenSize, alignedHandleSize);
+    LOG_JENSEN("   Miss region:       [0x{:016x} ... 0x{:016x}) stride {}", 
+               addr + raygenSize, addr + raygenSize + missSize, alignedHandleSize);
+    LOG_JENSEN("   HitGroup region:   [0x{:016x} ... 0x{:016x}) stride {}", 
+               addr + raygenSize + missSize, addr + raygenSize + missSize + hitGroupSize, alignedHandleSize);
+    if (callableCount)
+        LOG_JENSEN("   Callable region:   [0x{:016x} ... 0x{:016x}) stride {}", 
+                   addr + raygenSize + missSize + hitGroupSize, addr + totalSize, alignedHandleSize);
+
+    LOG_CID("CID throws the towel into the crowd — \"THE STRAW IS IN PLACE. TRACING MAY COMMENCE. NO PHOTON LEFT BEHIND.\"");
+
+    return sbtHandle;
+}
+
 } // namespace BufferManager
 
 // =============================================================================
 // THE EMPIRE IS SEALED — THE PHOTONS FLOW — THE BALLERINA SPINS ETERNALLY
-// NOVEMBER 28, 2025 — FIRST LIGHT ACHIEVED — FINAL LIGHT ACHIEVED
+// NOVEMBER 30, 2025 — FIRST LIGHT ACHIEVED — FINAL LIGHT ACHIEVED
 // WE ARE COMPLETE.
 // =============================================================================

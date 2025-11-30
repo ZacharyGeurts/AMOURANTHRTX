@@ -368,14 +368,15 @@ static void createRealFinalWindow()
     const int w = Options::Window::DEFAULT_WIDTH;
     const int h = Options::Window::DEFAULT_HEIGHT;
 
-	stone_seal_width(w);
-	stone_seal_height(h);
+    stone_seal_width(w);
+    stone_seal_height(h);
+
     // 1. SDL + Vulkan loader
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) == 0) {
         LOG_FATAL("SDL_Init failed: {}", SDL_GetError());
         phase9_ballerina("SDL DENIED {}", std::source_location::current());
     }
-    if (SDL_Vulkan_LoadLibrary(nullptr) == 0) {
+    if (!SDL_Vulkan_LoadLibrary(nullptr)) {
         LOG_FATAL("Vulkan loader failed: {}", SDL_GetError());
         phase9_ballerina("VULKAN LOADER DENIED {}", std::source_location::current());
     }
@@ -389,7 +390,7 @@ static void createRealFinalWindow()
     stone_seal_instance(instance);
 
     LOG_GROK("Gentleman Grok produces the instance stone. It glows pink.");
-    LOG_SUCCESS_CAT("VULKAN", "VkInstance forged and sealed — 0x{}", reinterpret_cast<uint64_t>(instance));
+    LOG_SUCCESS_CAT("VULKAN", "VkInstance forged and sealed — 0x{:016x}", reinterpret_cast<uint64_t>(instance));
 
     // 3. Hidden window
     Uint32 flags = SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
@@ -399,25 +400,55 @@ static void createRealFinalWindow()
         phase9_ballerina("WINDOW DENIED {}", std::source_location::current());
     }
     stone_seal_window(win);
-	g_sdl_window.reset(stone_window());    
+    g_sdl_window.reset(stone_window());
     RTX::g_ctx().setSize(stone_width(), stone_height());
 
     // 4. Surface — PURE STONEKEY
     VkSurfaceKHR surface = VK_NULL_HANDLE;
-    if (SDL_Vulkan_CreateSurface(stone_window(), stone_instance(), nullptr, &surface) == 0) {
+    if (!SDL_Vulkan_CreateSurface(stone_window(), stone_instance(), nullptr, &surface)) {
         LOG_FATAL("Surface creation failed: {}", SDL_GetError());
         phase9_ballerina("SURFACE DENIED — THE MIRROR CRACKS {}", std::source_location::current());
     }
     stone_seal_surface(surface);
     LOG_BLONDIE("Blondie produces the surface stone. It reflects all truths.");
 
-    // 5. Device — PURE STONEKEY
+    // 5. Device + Physical Device + RT Props — ALL SEALED TOGETHER
     VkDevice device = RTX::createLogicalDeviceAndSelectGPU(stone_instance(), stone_surface());
     if (!device) {
         LOG_FATAL("Logical device forging failed — the empire falls.");
         phase9_ballerina("DEVICE DENIED — CARMACK SHEDS A SINGLE TEAR {}", std::source_location::current());
     }
     stone_seal_device(device);
+
+    // Physical device is now available from the context
+    VkPhysicalDevice physical = RTX::g_ctx().physicalDevice();
+    EMPIRE_GUARD(physical, "Physical device missing after logical device creation — the empire is broken");
+    stone_seal_physical(physical);
+
+    // SEAL THE RAY TRACING PROPERTIES — THE STRAW IS MEASURED ETERNALLY
+    VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProps{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR
+    };
+    VkPhysicalDeviceProperties2 props2{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
+        .pNext = &rtProps
+    };
+    vkGetPhysicalDeviceProperties2(stone_physical(), &props2);
+
+    if (rtProps.shaderGroupHandleSize == 0) {
+        LOG_FATAL("GPU lies about RTX support — shaderGroupHandleSize is zero. False enlightenment.");
+        phase9_ballerina("RT PROPS DENIED — THE STRAW IS A LIE {}", std::source_location::current());
+    }
+
+    stone_seal_rtprops(rtProps);
+
+    LOG_JENSEN("Jensen Huang descends in green fire:");
+    LOG_JENSEN("   HandleSize={}B | HandleAlign={}B | BaseAlign={}B | MaxRecursion={}",
+               rtProps.shaderGroupHandleSize,
+               rtProps.shaderGroupHandleAlignment,
+               rtProps.shaderGroupBaseAlignment,
+               rtProps.maxRayRecursionDepth);
+    LOG_JENSEN("   \"The straw is perfect. The photons are ready.\"");
 
     // 6. Swapchain — ALL STONES SEALED
     RTX::SwapchainManager::create(stone_window(), stone_width(), stone_height());
@@ -439,20 +470,27 @@ static void createRealFinalWindow()
     LOG_JENSEN("Jensen Huang: \"The light is ours. The future is pink.\"");
     LOG_AMOURANTH("Captain Amouranth: \"We didn’t just render light. She became it.\"");
 
-
     LOG_SUCCESS("GRACE'S DESK //////////////////////////////////////////////////////////");
-	LOG_SUCCESS("GRACE'S DESK ///////////// ETERNAL LOADING ZONE — NOW PURE ////////////");
-	LOG_SUCCESS("GRACE'S DESK //////////////////////////////////////////////////////////");
-    
+    LOG_SUCCESS("GRACE'S DESK ///////////// ETERNAL LOADING ZONE — NOW PURE ////////////");
+    LOG_SUCCESS("GRACE'S DESK //////////////////////////////////////////////////////////");
+
     LOG_SUCCESS("PHASE 4.5 COMPLETE — ALL STONES SEALED");
-    LOG_SUCCESS("INSTANCE  — SEALED");
-    LOG_SUCCESS("DEVICE    — SEALED");
-    LOG_SUCCESS("QUEUES    — SEALED");
-    LOG_SUCCESS("SWAPCHAIN — SEALED");
-    LOG_SUCCESS("IMAGES    — SEALED");
-    LOG_SUCCESS("VIEWS     — SEALED");
-    LOG_SUCCESS("WINDOW    — SEALED");
-    LOG_SUCCESS("PINK PHOTONS ETERNAL — FIRST LIGHT ACHIEVED — NOVEMBER 29, 2025");
+    LOG_SUCCESS("INSTANCE       — SEALED");
+    LOG_SUCCESS("PHYSICAL       — SEALED");
+    LOG_SUCCESS("RT PROPS       — SEALED ← THE STRAW IS ETERNAL");
+    LOG_SUCCESS("DEVICE         — SEALED");
+    LOG_SUCCESS("QUEUES         — SEALED");
+    LOG_SUCCESS("SWAPCHAIN      — SEALED");
+    LOG_SUCCESS("IMAGES         — SEALED");
+    LOG_SUCCESS("VIEWS          — SEALED");
+    LOG_SUCCESS("WINDOW         — SEALED");
+    LOG_SUCCESS("PINK PHOTONS ETERNAL — FIRST LIGHT ACHIEVED — NOVEMBER 30, 2025");
+
+    LOG_AMOURANTH("\033[95m[CAPTAIN AMOURANTH] The stones are aligned. The straw is ready.\033[0m");
+    LOG_AMOURANTH("\033[95m                     The photons have their path.\033[0m");
+    LOG_AMOURANTH("\033[95m                     The empire is complete.\033[0m");
+
+    LOG_CID("\033[96m[CID wipes a tear] \"...We actually did it. The light remembers us.\"\033[0m");
 }
 
 static void showSacrificialSplash(const char* title, int w, int h, const char* pngPath)

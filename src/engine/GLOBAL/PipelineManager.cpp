@@ -618,7 +618,7 @@ VkShaderModule PipelineManager::loadShader(const std::string& relativePath) cons
              std::format("Failed to create shader module from '{}'", relativePath).c_str());
 
     LOG_SUCCESS_CAT("PIPELINE", "Shader loaded — '{}' → {} bytes — PINK PHOTONS APPROVED", relativePath, fileSize);
-    LOG_CID("CID exhales in relief — \"Shader secured. The photons have their instructions. I can rest... for 3 seconds.\"");
+    LOG_CID("CID exhales in relief — \"Shader secured. The photons have their instructions. I can rest... for 0.000000000... seconds.\"");
 
     LOG_TRACE_CAT("PIPELINE", "loadShader — COMPLETE — '{}'", relativePath);
     return shaderModule;
@@ -903,16 +903,8 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
         std::abort();
     }
 
-    // THE ONE TRUE 2025 WAY — USING STONEKEY'S PHYSICAL DEVICE
-    VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProps{
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR
-    };
-    VkPhysicalDeviceProperties2 props2{
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
-        .pNext = &rtProps
-    };
-
-    vkGetPhysicalDeviceProperties2(StoneKey::stone_physical(), &props2);
+    // THE ONE TRUE 2025 WAY — USING STONEKEY'S SEALED RT PROPS
+    const VkPhysicalDeviceRayTracingPipelinePropertiesKHR& rtProps = StoneKey::stone_rtprops();
 
     LOG_INFO_CAT("PIPELINE",
         "\033[92m[JENSEN'S ORACLE] 2025 RT PROPERTIES UNVEILED → HandleSize={}B | BaseAlign={}B | MaxRecursion={}\033[0m\n"
@@ -929,7 +921,7 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
     const uint32_t handleSize        = rtProps.shaderGroupHandleSize;
     const uint32_t handleAlign       = rtProps.shaderGroupHandleAlignment ? rtProps.shaderGroupHandleAlignment : 64;
     const uint32_t baseAlign         = rtProps.shaderGroupBaseAlignment;
-    const uint32_t handleSizeAligned = (handleSize + handleAlign - 1) & ~(handleAlign - 1);
+    const uint32_t stride            = (handleSize + handleAlign - 1) & ~(handleAlign - 1);
 
     const uint32_t RG = raygenGroupCount_;
     const uint32_t MI = missGroupCount_;
@@ -939,13 +931,13 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
 
     LOG_SUCCESS_CAT("PIPELINE",
         "\033[96m[CROWN BLUEPRINT] RG:{} | MISS:{} | HIT:{} | CALLABLE:{} → TOTAL {} GROUPS\033[0m\n"
-        "                  Handle: {}B → aligned {} → base aligned {}",
-        RG, MI, HG, CA, totalGroups, handleSize, handleSizeAligned, baseAlign);
+        "                  Handle: {}B → stride {} → base aligned {}",
+        RG, MI, HG, CA, totalGroups, handleSize, stride, baseAlign);
 
     VkDeviceSize offset = 0;
-    VkDeviceSize raygenOffset   = offset; offset += RG * handleSizeAligned; offset = (offset + baseAlign - 1) & ~(baseAlign - 1);
-    VkDeviceSize missOffset     = offset; offset += MI * handleSizeAligned; offset = (offset + baseAlign - 1) & ~(baseAlign - 1);
-    VkDeviceSize hitOffset      = offset; offset += HG * handleSizeAligned; offset = (offset + baseAlign - 1) & ~(baseAlign - 1);
+    VkDeviceSize raygenOffset   = offset; offset += static_cast<VkDeviceSize>(RG) * stride; offset = (offset + baseAlign - 1) & ~(static_cast<VkDeviceSize>(baseAlign) - 1);
+    VkDeviceSize missOffset     = offset; offset += static_cast<VkDeviceSize>(MI) * stride; offset = (offset + baseAlign - 1) & ~(static_cast<VkDeviceSize>(baseAlign) - 1);
+    VkDeviceSize hitOffset      = offset; offset += static_cast<VkDeviceSize>(HG) * stride; offset = (offset + baseAlign - 1) & ~(static_cast<VkDeviceSize>(baseAlign) - 1);
     VkDeviceSize callableOffset = offset;
     VkDeviceSize sbtSize        = offset;
 
@@ -964,12 +956,10 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
 
     LOG_SUCCESS_CAT("PIPELINE", "\033[92m[SUCCESS] {} SHADER HANDLES EXTRACTED — THE PHOTONS HAVE IDENTITY\033[0m", totalGroups);
 
-    uint64_t sbtHandle = BufferManager::create(
-        sbtSize,
-        VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR |
-        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+    // FORGE THE ETERNAL SBT CROWN USING THE PINK PHOTON STRAW
+    uint64_t sbtHandle = BufferManager::createSBT(
+        RG, MI, HG, CA,
         VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
         "SBT_AMOURANTH_CROWN_ETERNAL"
     );
 
@@ -978,45 +968,104 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
         std::abort();
     }
 
-    void* mapped = BufferManager::map(sbtHandle);
-    if (!mapped) {
-        BufferManager::destroy(sbtHandle);
-        LOG_FATAL_CAT("PIPELINE", "\033[91m[FATAL] FAILED TO MAP SBT — THE PHOTONS CANNOT ASCEND\033[0m");
-        std::abort();
+    const auto* sbtInfo = BufferManager::get(sbtHandle);
+    EMPIRE_GUARD(sbtInfo && sbtInfo->size >= sbtSize, "SBT FORGED BUT INSUFFICIENT SIZE — THE STRAW IS TOO SHORT");
+
+    VkBuffer sbtBuffer = sbtInfo->buffer;
+
+    VkDeviceAddress sbtAddress = 0;
+    {
+        VkBufferDeviceAddressInfo addrInfo{
+            .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
+            .buffer = sbtBuffer
+        };
+        sbtAddress = vkGetBufferDeviceAddress(stone_device(), &addrInfo);
     }
-
-    auto writeHandle = [&](uint32_t groupIndex, VkDeviceSize regionOffset) {
-        memcpy((uint8_t*)mapped + regionOffset,
-               shaderHandleStorage.data() + groupIndex * handleSize,
-               handleSize);
-    };
-
-    uint32_t handleIndex = 0;
-    for (uint32_t i = 0; i < RG; ++i) writeHandle(handleIndex++, raygenOffset);
-    for (uint32_t i = 0; i < MI; ++i) writeHandle(handleIndex++, missOffset);
-    for (uint32_t i = 0; i < HG; ++i) writeHandle(handleIndex++, hitOffset);
-    for (uint32_t i = 0; i < CA; ++i) writeHandle(handleIndex++, callableOffset);
-
-    BufferManager::unmap(sbtHandle);
-
-    VkDeviceAddress sbtAddress = BufferManager::get_device_address(sbtHandle);
     if (sbtAddress == 0) {
         LOG_FATAL_CAT("PIPELINE", "\033[91m[FATAL] SBT DEVICE ADDRESS IS ZERO — THE CROWN HAS NO HOME\033[0m");
         std::abort();
     }
 
+    // STAGE THE SACRED HANDLES — THE PHOTONS PREPARE THEIR ASCENT
+    VkDeviceSize handlesStagingSize = static_cast<VkDeviceSize>(totalGroups) * handleSize;
+    uint64_t handlesStagingHandle = BufferManager::create(
+        handlesStagingSize,
+        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+        "SBT_HANDLES_STAGING"
+    );
+
+    const auto* stagingInfo = BufferManager::get(handlesStagingHandle);
+    EMPIRE_GUARD(stagingInfo && stagingInfo->mapped, "HANDLES STAGING FAILED — THE PHOTONS HAVE NO BRIDGE");
+
+    std::memcpy(stagingInfo->mapped, shaderHandleStorage.data(), handlesStagingSize);
+
+    // TRANSFER THE HANDLES THROUGH THE VOID — CID'S RELATIVISTIC TOWEL SLAM
+    LOG_CID("CID slams a cosmic towel — \"HANDLES TO SBT: PHOTONS CROSSING THE EVENT HORIZON!\"");
+
+    VkCommandBuffer cmd = RTX::beginOneTimeSubmit(pool);
+
+    std::vector<VkBufferCopy> copies;
+    uint32_t handleIndex = 0;
+
+    // Raygen handles
+    for (uint32_t i = 0; i < RG; ++i) {
+        VkBufferCopy copy{};
+        copy.srcOffset = static_cast<VkDeviceSize>(handleIndex) * handleSize;
+        copy.dstOffset = raygenOffset + static_cast<VkDeviceSize>(i) * stride;
+        copy.size = handleSize;
+        copies.push_back(copy);
+        ++handleIndex;
+    }
+
+    // Miss handles
+    for (uint32_t i = 0; i < MI; ++i) {
+        VkBufferCopy copy{};
+        copy.srcOffset = static_cast<VkDeviceSize>(handleIndex) * handleSize;
+        copy.dstOffset = missOffset + static_cast<VkDeviceSize>(i) * stride;
+        copy.size = handleSize;
+        copies.push_back(copy);
+        ++handleIndex;
+    }
+
+    // Hit group handles
+    for (uint32_t i = 0; i < HG; ++i) {
+        VkBufferCopy copy{};
+        copy.srcOffset = static_cast<VkDeviceSize>(handleIndex) * handleSize;
+        copy.dstOffset = hitOffset + static_cast<VkDeviceSize>(i) * stride;
+        copy.size = handleSize;
+        copies.push_back(copy);
+        ++handleIndex;
+    }
+
+    // Callable handles (none)
+    // for (uint32_t i = 0; i < CA; ++i) { ... }
+
+    vkCmdCopyBuffer(cmd, stagingInfo->buffer, sbtBuffer, static_cast<uint32_t>(copies.size()), copies.data());
+
+    RTX::endOneTimeSubmit(cmd, queue, pool);
+
+    BufferManager::destroy(handlesStagingHandle);
+
+    LOG_CID("CID exhales — \"Handles transferred. The crown gleams with eternal pink light. No photons lost.\"");
+
     if (sbtHandle_ != 0) BufferManager::destroy(sbtHandle_);
 
-    sbtBuffer_   = Handle<VkBuffer>(RAW_BUFFER(sbtHandle), stone_device(), vkDestroyBuffer);
-    sbtMemory_   = Handle<VkDeviceMemory>(BUFFER_MEMORY(sbtHandle), stone_device(), vkFreeMemory);
+    sbtBuffer_   = Handle<VkBuffer>(sbtInfo->buffer, stone_device(), vkDestroyBuffer);
+    sbtMemory_   = Handle<VkDeviceMemory>(sbtInfo->memory, stone_device(), vkFreeMemory);
     sbtHandle_   = sbtHandle;
     sbtAddress_  = sbtAddress;
-    sbtSize_     = sbtSize;
+    sbtSize_     = sbtInfo->size;
 
-    raygenSbtRegion_   = { sbtAddress + raygenOffset,   handleSizeAligned, RG * handleSizeAligned };
-    missSbtRegion_     = { sbtAddress + missOffset,     handleSizeAligned, MI * handleSizeAligned };
-    hitSbtRegion_      = { sbtAddress + hitOffset,      handleSizeAligned, HG * handleSizeAligned };
-    callableSbtRegion_ = { sbtAddress + callableOffset, handleSizeAligned, CA * handleSizeAligned };
+    const VkDeviceSize raygenRegionSize   = static_cast<VkDeviceSize>(RG) * stride;
+    const VkDeviceSize missRegionSize     = static_cast<VkDeviceSize>(MI) * stride;
+    const VkDeviceSize hitRegionSize      = static_cast<VkDeviceSize>(HG) * stride;
+    const VkDeviceSize callableRegionSize = static_cast<VkDeviceSize>(CA) * stride;
+
+    raygenSbtRegion_   = { sbtAddress + raygenOffset,   static_cast<uint32_t>(stride), static_cast<uint32_t>(raygenRegionSize) };
+    missSbtRegion_     = { sbtAddress + missOffset,     static_cast<uint32_t>(stride), static_cast<uint32_t>(missRegionSize) };
+    hitSbtRegion_      = { sbtAddress + hitOffset,      static_cast<uint32_t>(stride), static_cast<uint32_t>(hitRegionSize) };
+    callableSbtRegion_ = { sbtAddress + callableOffset, static_cast<uint32_t>(stride), static_cast<uint32_t>(callableRegionSize) };
 
     LOG_SUCCESS_CAT("PIPELINE",
         "\n\033[38;2;255;215;0m══════════════════════════════════════════════════════════════════════\033[0m\n"

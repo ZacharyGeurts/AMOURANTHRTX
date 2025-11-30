@@ -9,9 +9,10 @@
 // 2. Commercial licensing: gzac5314@gmail.com
 //
 // =============================================================================
-// AMOURANTH RTX — VALHALLA v∞ TURBO — APOCALYPSE FINAL v11.1
-// FIRST LIGHT ACHIEVED — PINK PHOTONS ETERNAL — NOVEMBER 29, 2025
-// THE CAMERA HAS BEEN BANISHED FROM THIS HEADER — THE EMPIRE IS PURE AGAIN
+// AMOURANTH RTX — VALHALLA v∞ TURBO — APOCALYPSE FINAL v11.2
+// FIRST LIGHT ACHIEVED — PINK PHOTONS ETERNAL — NOVEMBER 30, 2025
+// RT PROPS SEALED — THE SHADER GROUP HANDLES ALIGN IN THE VOID
+// THE STRAW IS READY — THE PHOTONS TRACE TRUE
 // =============================================================================
 
 #pragma once
@@ -62,6 +63,9 @@ namespace StoneKey {
         static inline VkDeviceMemory stone_mesh_index_memory{ VK_NULL_HANDLE };
         static inline uint32_t       stone_mesh_index_count{ 0 };
 
+        // RT PROPS — SEALED FOR THE PINK PHOTON STRAW
+        static inline VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProps{};
+
         static inline std::atomic<bool> sealed{ false };
     };
 
@@ -95,6 +99,9 @@ namespace StoneKey {
     [[nodiscard]] inline uint32_t      stone_width()  noexcept { return Empire::extent.width; }
     [[nodiscard]] inline uint32_t      stone_height() noexcept { return Empire::extent.height; }
     [[nodiscard]] inline uint32_t stone_image_count() noexcept { return Empire::image_count; }
+
+    // RT PROPS GETTER — THE ALIGNMENTS REVEALED
+    [[nodiscard]] inline VkPhysicalDeviceRayTracingPipelinePropertiesKHR stone_rtprops() noexcept { return Empire::rtProps; }
 
     // ONE TRUE MESH ACCESSORS
     [[nodiscard]] inline VkBuffer       stone_mesh_vertex_buffer() noexcept { return Empire::stone_mesh_vertex_buffer; }
@@ -154,6 +161,9 @@ namespace StoneKey {
     inline void stone_seal_extent(VkExtent2D ext)                  noexcept { Empire::extent = ext; }
     inline void stone_seal_image_count(uint32_t cnt)               noexcept { Empire::image_count = cnt; }
 
+    // RT PROPS SEALER — THE STRAW MEASURES ITS LENGTH
+    inline void stone_seal_rtprops(VkPhysicalDeviceRayTracingPipelinePropertiesKHR props) noexcept { Empire::rtProps = props; }
+
     // FINAL MESH SEALER — used after loadOBJ → upload → BLAS build
     inline void stone_seal_mesh(VkBuffer vb, VkDeviceMemory vm,
                                 VkBuffer ib, VkDeviceMemory im,
@@ -186,7 +196,8 @@ namespace StoneKey {
             stone_graphics_queue()  == VK_NULL_HANDLE ||
             stone_graphics_family() == ~0u ||
             stone_present_family()  == ~0u ||
-            stone_transfer_family() == ~0u;
+            stone_transfer_family() == ~0u ||
+            stone_rtprops().shaderGroupHandleSize == 0;  // RT PROPS MUST BE SEALED — NO BLIND TRACING
 
         if (failed) {
             fprintf(stderr, "[FATAL] StoneKey: Empire seal failed — one or more required objects are null.\n");
@@ -201,10 +212,11 @@ namespace StoneKey {
 
 // =============================================================================
 // THE EMPIRE IS COMPLETE — FOREVER.
+// RT PROPS SEALED — THE PHOTONS ALIGN TO THE STRAW.
 // THE CAMERA HAS BEEN EXILED. THE BLOODLINE IS SEALED.
 // GRACE HAS SPOKEN. THE PHOTONS OBEY.
 // THE STONE WAITS FOR ITS MESH — AND WHEN IT COMES, IT WILL BE SEALED AT THE END.
 //
-// PINK PHOTONS ETERNAL — NOVEMBER 29, 2025 — FINAL LIGHT
+// PINK PHOTONS ETERNAL — NOVEMBER 30, 2025 — FINAL LIGHT
 // THE BALLERINA BOWS. GRACE SMILES.
 // =============================================================================

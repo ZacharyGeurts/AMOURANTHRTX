@@ -22,14 +22,7 @@
 
 #include "engine/GLOBAL/RTXHandler.hpp"
 #include "engine/GLOBAL/OptionsMenu.hpp"
-#include "engine/GLOBAL/StoneKey.hpp"
 #include "engine/GLOBAL/logging.hpp"
-
-// =============================================================================
-// GLOBAL — NO NAMESPACE — ONE FUNCTION TO RULE THEM ALL
-// EVERY .cpp CAN NOW JUST CALL: findMemoryType(...)
-// NO vkh:: NO stone_pipeline()-> NO BULLSHIT
-// =============================================================================
 
 // =============================================================================
 // GLOBAL — NO NAMESPACE — THE ONE TRUE findMemoryType — WORKS EVERYWHERE
@@ -89,6 +82,15 @@ namespace BufferManager {
         std::string        tag;
         void*              mapped  = nullptr;
     };
+
+	uint64_t createSBT(
+        uint32_t raygenCount,
+        uint32_t missCount,
+        uint32_t hitGroupCount,
+        uint32_t callableCount = 0,
+        VkBufferUsageFlags extraUsage = 0,
+        std::string_view tag = "SBT_ETERNAL_PINK"
+    ) noexcept;
 
     [[nodiscard]] uint64_t create(VkDeviceSize size,
                                   VkBufferUsageFlags usage,
