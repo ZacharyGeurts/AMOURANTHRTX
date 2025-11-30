@@ -895,8 +895,6 @@ static void phase6_sceneAndAccelerationStructures() {
     "\nwithout it the engine would be unconnectable."
     "\nWhat a stand up character.");
 
-    stone_seal_graphics_queue(RTX::g_ctx().graphicsQueue());
-
     LOG_GROK("My dear Captain… Blondie… your brilliance bends light itself."
     "\nI have never been more attracted to chaos in my life."
     "\nShall we slip into the pink photon stream together? I'll bring the popcorn.");
