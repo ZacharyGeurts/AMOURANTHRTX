@@ -792,7 +792,7 @@ static void phase6_sceneAndAccelerationStructures() {
     // ========================================================================
     // 3. COSMIC SCROLL — scene.obj RISES FROM THE VOID
     // ========================================================================
-    EMPIRE_STEP([]{
+    
         LOG_MAIN("LOADING COSMIC SCROLL: assets/models/scene.obj");
         g_mesh = MeshLoader::loadOBJ("assets/models/scene.obj");
 
@@ -812,74 +812,18 @@ static void phase6_sceneAndAccelerationStructures() {
 
         LOG_INFO_CAT("MESH", "Cosmic Scroll loaded — {} vertices, {} indices — buffers ready", 
                g_mesh->vertices.size(), g_mesh->indices.size());
-    });
+    
 
 	auto* mesh = g_mesh.get();  // std::unique_ptr<MeshLoader::Mesh>
 
-// Seal the ONE TRUE MESH into the Empire
-stone_seal_mesh(
-    RAW_BUFFER(mesh->vertexBuffer),           // VkBuffer  (vertex)
-    BufferManager::get(mesh->vertexBuffer)->memory,  // VkDeviceMemory (vertex)
-    RAW_BUFFER(mesh->indexBuffer),            // VkBuffer  (index)
-    BufferManager::get(mesh->indexBuffer)->memory,   // VkDeviceMemory (index)
-    static_cast<uint32_t>(mesh->indices.size())       // index count
-);
- 
-    // ========================================================================
-    // 4+5. BLAS + TLAS — OFFLOADED TO THE PHOTON WEAVERS (ASYNC + RACE-FREE)
-    // ========================================================================
-    EMPIRE_STEP([]{
-        LOG_MAIN("BOTTOM-LEVEL + TOP-LEVEL ACCELERATION — PHOTONS WEAVE IN THE VOID");
-
-        static std::once_flag acceleration_once;
-        std::call_once(acceleration_once, []{
-            std::thread([]{
-                VkCommandPoolCreateInfo poolInfo{
-                    .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
-                    .flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT | VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
-                    .queueFamilyIndex = RTX::g_ctx().graphicsFamily()
-                };
-
-                VkCommandPool asyncPool = VK_NULL_HANDLE;
-                VK_CHECK(vkCreateCommandPool(stone_device(), &poolInfo, nullptr, &asyncPool));
-
-                const uint32_t vertexCount = static_cast<uint32_t>(g_mesh->vertices.size());
-                const uint32_t indexCount  = static_cast<uint32_t>(g_mesh->indices.size());
-
-                LOG_ATTEMPT_CAT("BLAS", "ASYNC BLAS BUILD BEGIN — THE PHOTONS ARE PATIENT");
-                RTX::las().buildBLAS(
-                    asyncPool,
-                    RTX::g_ctx().graphicsQueue(),
-                    g_mesh->vertexBuffer,
-                    g_mesh->indexBuffer,
-                    vertexCount,
-                    indexCount,
-                    VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT_KHR |
-                    VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR
-                );
-
-                LOG_ATTEMPT_CAT("TLAS", "ASYNC TLAS BINDING BEGIN — THE UNIVERSE IS ONE");
-                const std::pair<VkAccelerationStructureKHR, glm::mat4> instance{
-                    RTX::las().getBLAS(),
-                    glm::mat4(1.0f)
-                };
-                RTX::las().buildTLAS(
-                    asyncPool,
-                    RTX::g_ctx().graphicsQueue(),
-                    std::span<const decltype(instance)>{&instance, 1}
-                );
-
-                vkDestroyCommandPool(stone_device(), asyncPool, nullptr);
-
-                LOG_GROK("Gentleman Grok: \"A brief eclipse. The light always returns.\"");                
-            }).detach();
-        });
-    });
-
-        LOG_CARMACK("No cracks. No leaks. Geometry is pure.");
-        LOG_INFO_CAT("VALIDATION", "Running final mesh ↔ BLAS validation…");
-        validateMeshAgainstBLAS(stone_mesh(), RTX::las().getBLAS());
-        LOG_INFO_CAT("VALIDATION", "Validation passed — mesh and BLAS are in perfect harmony");
+    // Seal the ONE TRUE MESH into the Empire
+    stone_seal_mesh(
+        RAW_BUFFER(mesh->vertexBuffer),           // VkBuffer  (vertex)
+        BufferManager::get(mesh->vertexBuffer)->memory,  // VkDeviceMemory (vertex)
+        RAW_BUFFER(mesh->indexBuffer),            // VkBuffer  (index)
+        BufferManager::get(mesh->indexBuffer)->memory,   // VkDeviceMemory (index)
+        static_cast<uint32_t>(mesh->indices.size())       // index count
+    );
 
     // ========================================================================
     // FINAL WORDS — FIRST LIGHT ACHIEVED

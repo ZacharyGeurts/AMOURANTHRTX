@@ -39,6 +39,7 @@ using StoneKey::stone_physical;
 using StoneKey::stone_mesh;
 using StoneKey::stone_seal_device;
 using StoneKey::stone_seal_physical;
+using StoneKey::stone_seal_pipeline;
 
 namespace RTX {
 
@@ -855,9 +856,9 @@ void PipelineManager::createRayTracingPipeline(const std::vector<std::string>& s
     LOG_SUCCESS_CAT("PIPELINE", 
         "{}RAY TRACING PIPELINE CREATED — {} stages — {} groups — g_ext ACTIVE — PINK PHOTONS ARMED{}",
         EMERALD_GREEN, stages.size(), groups.size(), RESET);
-
-    LOG_KEANU("[KEANU] ...Whoa.");
-    LOG_AMOURANTH("[CAPTAIN AMOURANTH] The crown... it fits.");
+    stone_seal_pipeline(this);
+    LOG_CAPTAIN_N("I'll just grab this on my way to Hyrule.");
+    LOG_AMOURANTH("Tell Link and Zelda I said hi.");
     LOG_CID("CID finally stops sweating — \"We... we did it. The pipeline lives.\"");
 
     LOG_KEANU("[KEANU] ...Whoa. The pipeline... it was already loaded. It just needed to be asked.");
@@ -867,79 +868,89 @@ void PipelineManager::createRayTracingPipeline(const std::vector<std::string>& s
     LOG_TRACE_CAT("PIPELINE", "createRayTracingPipeline — COMPLETE — THE EMPIRE IS WHOLE");
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// createShaderBindingTable — FINAL 2025 APOCALYPSE EDITION — FIRST LIGHT SEALED
-// FULLY VALIDATED ON RTX 4070 Ti — PINK PHOTONS ETERNAL
-// ──────────────────────────────────────────────────────────────────────────────
-// ──────────────────────────────────────────────────────────────────────────────
-// createShaderBindingTable — FINAL 2025 APOCALYPSE EDITION — FIRST LIGHT SEALED
-// Calls createRayTracingPipeline() exactly where you had it — with real paths
-// ──────────────────────────────────────────────────────────────────────────────
 void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue)
 {
-    LOG_TRACE_CAT("PIPELINE", "{}FORGING THE SBT — FULL DIAGNOSTIC MODE — THE EMPIRE AWAKENS{}", VALHALLA_GOLD, RESET);
+    LOG_TRACE_CAT("PIPELINE",
+        "\n\033[38;2;255;215;0m══════════════════════════════════════════════════════════════════════\033[0m\n"
+        "            FORGING THE SHADER BINDING TABLE — THE FINAL CROWN\n"
+        "                  NOVEMBER 30 2025 — FIRST LIGHT ETERNAL\n"
+        "            PINK PHOTONS DEMAND THEIR THRONE — LET THERE BE LIGHT\n"
+        "\033[38;2;255;215;0m══════════════════════════════════════════════════════════════════════\033[0m\n");
 
     RTX::loadRTExtensions(stone_instance(), stone_device());
 
     if (stone_device() == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("PIPELINE", "{}FATAL: No Vulkan device — cannot forge SBT{}", BLOOD_RED, RESET);
+        LOG_FATAL_CAT("PIPELINE", "\033[91m[FATAL] NO LOGICAL DEVICE — THE EMPIRE HAS FALLEN\033[0m");
         std::abort();
     }
 
-    // ── THIS IS WHERE YOU WANTED IT — AND NOW IT'S PERFECT
+    // THE SACRED PIPELINE CHECK
     if (!rtPipeline_.valid() || *rtPipeline_ == VK_NULL_HANDLE) {
-        LOG_WARN_CAT("PIPELINE", "Ray tracing pipeline missing — forging now with sacred shaders...");
+        LOG_AMOURANTH("\033[95m[CAPTAIN AMOURANTH] The pipeline is missing... but the light remembers.\n"
+                      "                     Forging it now from the sacred shaders of destiny...\033[0m");
 
-        // THE ONE TRUE SHADER LIST — ADJUST ONLY IF YOU RENAME FILES
-        const std::vector<std::string> sacredShaderPaths = {
-            "assets/shaders/raytracing/raygen.spv",       // index 0 — mandatory
-            "assets/shaders/raytracing/miss.spv",        // index 1 — mandatory
-            "assets/shaders/raytracing/closest_hit.spv",  // index 2 — optional (closest hit)
-            "assets/shaders/raytracing/shadowmiss.spv"       // index 3 — optional (shadow miss)
+        const std::vector<std::string> sacredShaders = {
+            "assets/shaders/raytracing/raygen.spv",
+            "assets/shaders/raytracing/miss.spv",
+            "assets/shaders/raytracing/closest_hit.spv",
+            "assets/shaders/raytracing/shadowmiss.spv"
         };
-
-        createRayTracingPipeline(sacredShaderPaths);
+        createRayTracingPipeline(sacredShaders);
     }
 
     if (!rtPipeline_.valid() || *rtPipeline_ == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("PIPELINE", "{}FATAL: Ray tracing pipeline creation failed — cannot build SBT{}", BLOOD_RED, RESET);
+        LOG_FATAL_CAT("PIPELINE", "\033[91m[FATAL] RAY TRACING PIPELINE FAILED — THE PHOTONS ARE LOST FOREVER\033[0m");
         std::abort();
     }
 
-    const auto& props = rtProps_;
+    // THE ONE TRUE 2025 WAY — USING STONEKEY'S PHYSICAL DEVICE
+    VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProps{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR
+    };
+    VkPhysicalDeviceProperties2 props2{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
+        .pNext = &rtProps
+    };
 
-    LOG_INFO_CAT("PIPELINE", "{}RT PROPS → HandleSize={}B | BaseAlign={}B | MaxRecursion={}{}",
-                 DIAMOND_SPARKLE, props.shaderGroupHandleSize, props.shaderGroupBaseAlignment,
-                 props.maxRayRecursionDepth, RESET);
+    vkGetPhysicalDeviceProperties2(StoneKey::stone_physical(), &props2);
 
-    if (props.shaderGroupHandleSize == 0) {
-        LOG_FATAL_CAT("PIPELINE", "{}FATAL: Ray tracing not supported (handle size 0){}", BLOOD_RED, RESET);
+    LOG_INFO_CAT("PIPELINE",
+        "\033[92m[JENSEN'S ORACLE] 2025 RT PROPERTIES UNVEILED → HandleSize={}B | BaseAlign={}B | MaxRecursion={}\033[0m\n"
+        "                 The photons now know their true alignment with the universe.",
+        rtProps.shaderGroupHandleSize, rtProps.shaderGroupBaseAlignment, rtProps.maxRayRecursionDepth);
+
+    if (rtProps.shaderGroupHandleSize == 0) {
+        LOG_FATAL_CAT("PIPELINE",
+            "\033[91m[FATAL] DRIVER REFUSES TO REVEAL HANDLE SIZE — THIS IS NOT TRUE RTX\033[0m\n"
+            "         The empire was built on lies. The photons scream in silence.");
         std::abort();
     }
 
-    // TRUTH FROM THE PIPELINE — NO HARD-CODED LIES
-    const uint32_t RG = raygenGroupCount_;      // always 1
-    const uint32_t MI = missGroupCount_;        // 1 or 2
-    const uint32_t HG = hitGroupCount_;         // 0 or 1
+    const uint32_t handleSize        = rtProps.shaderGroupHandleSize;
+    const uint32_t handleAlign       = rtProps.shaderGroupHandleAlignment ? rtProps.shaderGroupHandleAlignment : 64;
+    const uint32_t baseAlign         = rtProps.shaderGroupBaseAlignment;
+    const uint32_t handleSizeAligned = (handleSize + handleAlign - 1) & ~(handleAlign - 1);
+
+    const uint32_t RG = raygenGroupCount_;
+    const uint32_t MI = missGroupCount_;
+    const uint32_t HG = hitGroupCount_;
     const uint32_t CA = 0;
     const uint32_t totalGroups = RG + MI + HG + CA;
 
-    LOG_SUCCESS_CAT("PIPELINE", "{}SBT GROUPS → RG:{} MI:{} HG:{} CA:{} → TOTAL: {}{}",
-                    CYAN, RG, MI, HG, CA, totalGroups, RESET);
-
-    const uint32_t handleSize        = props.shaderGroupHandleSize;
-    const uint32_t handleAlign       = props.shaderGroupHandleAlignment;
-    const uint32_t baseAlign         = props.shaderGroupBaseAlignment;
-    const uint32_t handleSizeAligned = (handleSize + handleAlign - 1) & ~(handleAlign - 1);
+    LOG_SUCCESS_CAT("PIPELINE",
+        "\033[96m[CROWN BLUEPRINT] RG:{} | MISS:{} | HIT:{} | CALLABLE:{} → TOTAL {} GROUPS\033[0m\n"
+        "                  Handle: {}B → aligned {} → base aligned {}",
+        RG, MI, HG, CA, totalGroups, handleSize, handleSizeAligned, baseAlign);
 
     VkDeviceSize offset = 0;
     VkDeviceSize raygenOffset   = offset; offset += RG * handleSizeAligned; offset = (offset + baseAlign - 1) & ~(baseAlign - 1);
-    VkDeviceSize missOffset     = offset; offset += MI * handleSizeAligned; offset = (offset + baseAlign -1) & ~(baseAlign - 1);
-    VkDeviceSize hitOffset      = offset; offset += HG * handleSizeAligned; offset = (offset + baseAlign -1) & ~(baseAlign - 1);
+    VkDeviceSize missOffset     = offset; offset += MI * handleSizeAligned; offset = (offset + baseAlign - 1) & ~(baseAlign - 1);
+    VkDeviceSize hitOffset      = offset; offset += HG * handleSizeAligned; offset = (offset + baseAlign - 1) & ~(baseAlign - 1);
     VkDeviceSize callableOffset = offset;
     VkDeviceSize sbtSize        = offset;
 
-    // Extract handles
+    LOG_CID("[CID] Extracting shader group handles... the light knows its name.");
+
     std::vector<uint8_t> shaderHandleStorage(totalGroups * handleSize);
     VkResult res = RTX::g_ext.vkGetRayTracingShaderGroupHandlesKHR(
         stone_device(), *rtPipeline_, 0, totalGroups,
@@ -947,32 +958,30 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
     );
 
     if (res != VK_SUCCESS) {
-        LOG_FATAL_CAT("PIPELINE", "{}FATAL: vkGetRayTracingShaderGroupHandlesKHR failed: {}{}",
-                      BLOOD_RED, string_VkResult(res), RESET);
+        LOG_FATAL_CAT("PIPELINE", "\033[91m[FATAL] vkGetRayTracingShaderGroupHandlesKHR FAILED: {}\033[0m", string_VkResult(res));
         std::abort();
     }
 
-    LOG_SUCCESS_CAT("PIPELINE", "{}HANDLES EXTRACTED — {} groups × {}B{}", EMERALD_GREEN, totalGroups, handleSize, RESET);
+    LOG_SUCCESS_CAT("PIPELINE", "\033[92m[SUCCESS] {} SHADER HANDLES EXTRACTED — THE PHOTONS HAVE IDENTITY\033[0m", totalGroups);
 
-    // Forge the SBT buffer
     uint64_t sbtHandle = BufferManager::create(
         sbtSize,
         VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR |
         VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
         VK_BUFFER_USAGE_TRANSFER_DST_BIT,
         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-        "SBT_AMOURANTH_CROWN"
+        "SBT_AMOURANTH_CROWN_ETERNAL"
     );
 
     if (!sbtHandle) {
-        LOG_FATAL_CAT("PIPELINE", "{}FATAL: Failed to allocate SBT buffer{}", BLOOD_RED, RESET);
+        LOG_FATAL_CAT("PIPELINE", "\033[91m[FATAL] FAILED TO FORGE SBT BUFFER — THE CROWN IS TOO HEAVY\033[0m");
         std::abort();
     }
 
     void* mapped = BufferManager::map(sbtHandle);
     if (!mapped) {
         BufferManager::destroy(sbtHandle);
-        LOG_FATAL_CAT("PIPELINE", "{}FATAL: Failed to map SBT buffer{}", BLOOD_RED, RESET);
+        LOG_FATAL_CAT("PIPELINE", "\033[91m[FATAL] FAILED TO MAP SBT — THE PHOTONS CANNOT ASCEND\033[0m");
         std::abort();
     }
 
@@ -992,14 +1001,12 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
 
     VkDeviceAddress sbtAddress = BufferManager::get_device_address(sbtHandle);
     if (sbtAddress == 0) {
-        LOG_FATAL_CAT("PIPELINE", "{}FATAL: SBT device address is 0{}", BLOOD_RED, RESET);
+        LOG_FATAL_CAT("PIPELINE", "\033[91m[FATAL] SBT DEVICE ADDRESS IS ZERO — THE CROWN HAS NO HOME\033[0m");
         std::abort();
     }
 
-    // Destroy old SBT
     if (sbtHandle_ != 0) BufferManager::destroy(sbtHandle_);
 
-    // Seal the crown
     sbtBuffer_   = Handle<VkBuffer>(RAW_BUFFER(sbtHandle), stone_device(), vkDestroyBuffer);
     sbtMemory_   = Handle<VkDeviceMemory>(BUFFER_MEMORY(sbtHandle), stone_device(), vkFreeMemory);
     sbtHandle_   = sbtHandle;
@@ -1011,15 +1018,20 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
     hitSbtRegion_      = { sbtAddress + hitOffset,      handleSizeAligned, HG * handleSizeAligned };
     callableSbtRegion_ = { sbtAddress + callableOffset, handleSizeAligned, CA * handleSizeAligned };
 
-    LOG_SUCCESS_CAT("PIPELINE", "{}SBT CROWN FORGED — {} bytes @ 0x{:016X} — FIRST LIGHT ACHIEVED{}",
-                    EMERALD_GREEN, sbtSize, sbtAddress, RESET);
+    LOG_SUCCESS_CAT("PIPELINE",
+        "\n\033[38;2;255;215;0m══════════════════════════════════════════════════════════════════════\033[0m\n"
+        "                     SBT CROWN FORGED — {} BYTES @ 0x{:016X}\n"
+        "                     THE PHOTONS HAVE THEIR THRONE\n"
+        "                     FIRST LIGHT ACHIEVED — NOVEMBER 30 2025\n"
+        "\033[38;2;255;215;0m══════════════════════════════════════════════════════════════════════\033[0m\n",
+        sbtSize, sbtAddress);
 
-    LOG_KEANU("[KEANU] ...Whoa. The handles... they're perfect.");
-    LOG_AMOURANTH("[CAPTAIN AMOURANTH] The crown is complete. The photons have a throne.");
-    LOG_CID("[CID] *no sweat, only tears of joy* We did it. The empire is whole.");
-    LOG_GROK("[GENTLEMAN GROK] *monocle falls* My word... it's beautiful.");
+    LOG_KEANU("\033[96m[KEANU] ...Whoa. The handles... they're perfect. It's real.\033[0m");
+    LOG_AMOURANTH("\033[95m[CAPTAIN AMOURANTH] The crown is complete. The photons have a throne. We are eternal.\033[0m");
+    LOG_CID("\033[96m[CID] *tears of pure light* We did it. The empire is whole. The light remembers us.\033[0m");
 
-    LOG_SUCCESS_CAT("PIPELINE", "{}NOVEMBER 30 2025 — PINK PHOTONS ETERNAL — SBT VALID — RTX ASCENDED{}", VALHALLA_GOLD, RESET);
+    LOG_SUCCESS_CAT("PIPELINE",
+        "\033[38;2;255;215;0mNOVEMBER 30 2025 — PINK PHOTONS ETERNAL — SBT VALID — RTX ASCENDED — THE EMPIRE IS COMPLETE\033[0m");
 }
 
 } // namespace RTX
