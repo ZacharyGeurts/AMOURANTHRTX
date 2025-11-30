@@ -31,6 +31,7 @@
 #include "engine/GLOBAL/PipelineManager.hpp"
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/GLOBAL/StoneKey.hpp"
+#include "engine/GLOBAL/bindings.hpp"
 
 struct Camera;
 
@@ -62,20 +63,13 @@ public:
     void setTonemapType(int type) noexcept;
     void setOverclockMode(bool enabled) noexcept;
 
-	void updateUniformBinding31(const void* data, VkDeviceSize size) noexcept;
-	void setActiveRenderMode(int mode) noexcept { if (mode >= 1 && mode <= 9) { activeRenderMode_ = mode; } }
-    void requestAccumulationReset() noexcept { resetAccumulation_ = true; resetAccumNextFrame_ = true; }
-
     void updateAllRTXDescriptors() noexcept;
-	void updateRTDescriptorSet(uint32_t frameIndex);
-    void recordRayTracingCommands(VkCommandBuffer cmd, uint32_t frameIndex);
     void setTonemap(bool enabled) noexcept;
     void setOverlay(bool show) noexcept;
-    void setRenderMode(int mode) noexcept;                    // ← THIS IS THE ONE
-    void loadCriticalShaders() noexcept;
+    void setRenderMode(int mode) noexcept;
+	void loadCriticalShaders() noexcept;
 
     // State queries — getters for empire status
-    [[nodiscard]] VulkanRenderer* renderer() noexcept { return this; }
     [[nodiscard]] uint32_t  accumulationFrame() const noexcept { return accumulationFrame_; }
     [[nodiscard]] uint64_t  frameNumber()       const noexcept { return frameNumber_; }
     [[nodiscard]] float     currentExposure()   const noexcept { return currentExposure_; }
@@ -86,7 +80,6 @@ public:
     [[nodiscard]] int       tonemapType()       const noexcept { return tonemapType_; }
     [[nodiscard]] FpsTarget fpsTarget()         const noexcept { return fpsTarget_; }
     [[nodiscard]] bool      minimized()         const noexcept { return minimized_; }
-    [[nodiscard]] int       currentRenderMode() const noexcept { return activeRenderMode_; }  // ← NEW: public query
 
 private:
     // Core state
@@ -101,27 +94,22 @@ private:
     bool     resetAccumulation_ = true;
     bool     firstSwapchainAcquire_ = true;
 
-    // ────────────────────────────────
-    // RENDER MODE SYSTEM — EMPIRE EDITION
-    // ────────────────────────────────
-    int  activeRenderMode_ = 1;           // 1–9, current live mode
-    bool resetAccumNextFrame_ = true;     // triggers clear on mode switch + first frame 0
-		
     // Runtime toggles
-    bool hypertraceEnabled_     = Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING;
+    bool hypertraceEnabled_     = Options::OptionsRTX ::ENABLE_ADAPTIVE_SAMPLING;
     bool denoisingEnabled_      = Options::OptionsRTX::ENABLE_DENOISING;
     bool adaptiveSamplingEnabled_ = Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING;
     bool overclockMode_         = false;
     bool tonemapEnabled_        = true;
     bool showOverlay_           = true;
     int  tonemapType_           = 0;
+    int  renderMode_            = 0;
     FpsTarget fpsTarget_        = FpsTarget::FPS_120;
     float currentExposure_      = 1.0f;
     float currentNexusScore_    = 0.0f;
     uint32_t currentSpp_        = 0;
     float frameTime_            = 0.0f;
 
-    VkRenderPass renderPass_{ VK_NULL_HANDLE };
+	VkRenderPass renderPass_{ VK_NULL_HANDLE };
 
     // Sync objects
     std::vector<VkSemaphore> imageAvailableSemaphores_;
@@ -192,10 +180,10 @@ private:
     // RT descriptors
     std::vector<VkDescriptorSet> rtDescriptorSets_;
 
-    // Pipeline manager
+    // Pipeline manager — now fully visible
     RTX::PipelineManager pipelineManager_;
 
-    // ── PRIVATE HELPERS ─────────────────────────────────────
+    // Private helpers — exact signatures used in .cpp
     void createRenderPass() noexcept;
     void destroyRenderPass() noexcept;
     void createFramebuffers() noexcept;

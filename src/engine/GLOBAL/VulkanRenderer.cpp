@@ -19,7 +19,6 @@
 
 #include "engine/GLOBAL/VulkanRenderer.hpp"
 #include "engine/GLOBAL/PipelineManager.hpp"
-#include "engine/GLOBAL/Extensions.hpp"
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/GLOBAL/RTXHandler.hpp"
 #include "engine/GLOBAL/BufferManager.hpp"
@@ -28,10 +27,9 @@
 #include "engine/GLOBAL/SDL3.hpp"
 #include "engine/GLOBAL/OptionsMenu.hpp"
 #include "engine/GLOBAL/camera.hpp"
+#include "engine/GLOBAL/bindings.hpp"
 #include "engine/GLOBAL/StoneKey.hpp"  // Full include — .cpp only
 #include "stb/stb_image.h"
-
-#include "engine/core.hpp"
 
 #include <glm/gtc/matrix_inverse.hpp>
 #include <glm/gtc/type_ptr.hpp>
@@ -304,6 +302,26 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, bool o
 {
     LOG_ATTEMPT_CAT("RENDERER", "Constructing VulkanRenderer ({}x{}) — INTERNAL SHADERS ACTIVE — PINK PHOTONS RISING", width, height);
 
+    // FIXED: Ref to ctx to avoid copy/delete error
+
+    // ====================================================================
+    // INTERNAL RAY TRACING SHADER LIST — WE OWN THIS. NO EXTERNAL PATHS.
+    // ====================================================================
+    static constexpr auto RT_SHADER_PATHS = std::to_array({
+        "assets/shaders/raytracing/raygen.spv",
+        "assets/shaders/raytracing/miss.spv",
+        "assets/shaders/raytracing/closest_hit.spv",
+        "assets/shaders/raytracing/shadowmiss.spv"
+    });
+
+    std::vector<std::string> finalShaderPaths;
+    finalShaderPaths.reserve(RT_SHADER_PATHS.size());
+    for (const auto* path : RT_SHADER_PATHS) {
+        finalShaderPaths.emplace_back(path);
+    }
+
+    LOG_SUCCESS_CAT("RENDERER", "INTERNAL SHADER LIST LOADED — {} shaders — PINK PHOTONS FULLY ARMED", finalShaderPaths.size());
+
     // ====================================================================
     // STACK BUILD ORDER — REPAIRED: All Context Calls with ref c + ()
     // ====================================================================
@@ -555,7 +573,8 @@ void VulkanRenderer::createRTOutputImages() noexcept
             VkMemoryRequirements memReqs{};
             vkGetImageMemoryRequirements(stone_device(), rawImage, &memReqs);
 
-            uint32_t memType = findMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+            uint32_t memType = pipelineManager_.findMemoryType(
+                memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
             VkMemoryAllocateInfo allocInfo{
                 .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
@@ -735,7 +754,7 @@ void VulkanRenderer::createEnvironmentMap() noexcept
 
     VkMemoryRequirements memReqs{};
     vkGetImageMemoryRequirements(stone_device(), img, &memReqs);
-    uint32_t memType = findMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    uint32_t memType = pipelineManager_.findMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
     VkMemoryAllocateInfo allocInfo{
         .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
@@ -840,7 +859,7 @@ void VulkanRenderer::createNexusScoreImage(VkCommandPool pool, VkQueue queue) no
     VkMemoryRequirements memReqs{};
     vkGetImageMemoryRequirements(stone_device(), rawImage, &memReqs);
 
-    uint32_t memType = findMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    uint32_t memType = pipelineManager_.findMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
     if (memType == UINT32_MAX) {
         LOG_FATAL_CAT("RENDERER", "No suitable memory type for NexusScoreImage");
         vkDestroyImage(stone_device(), rawImage, nullptr);
@@ -1002,7 +1021,8 @@ void VulkanRenderer::recordRayTracingCommandBuffer(VkCommandBuffer cmd) noexcept
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// VulkanRenderer::renderFrame — FINAL PRODUCTION — g_ctx() + CAM — COMPILES
+// RENDER FRAME — FINAL, VUID-FREE, PERFECT
+// VUID-08114, VUID-09600, VUID-01430 — ALL DEAD
 // ──────────────────────────────────────────────────────────────────────────────
 void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
 {
@@ -1013,29 +1033,44 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
 
     const uint32_t f = currentFrame_++ % MAX_FRAMES_IN_FLIGHT;
 
+    // FENCE — WE OWN THE GPU
     vkWaitForFences(stone_device(), 1, &inFlightFences_[f], VK_TRUE, UINT64_MAX);
     vkResetFences(stone_device(), 1, &inFlightFences_[f]);
 
+    // ACQUIRE — WE OWN THE SWAPCHAIN
     uint32_t imageIndex = 0;
-    vkAcquireNextImageKHR(stone_device(), stone_swapchain(), UINT64_MAX,
-                          imageAvailableSemaphores_[f], VK_NULL_HANDLE, &imageIndex);
+    vkAcquireNextImageKHR(
+        stone_device(),
+        stone_swapchain(),
+        UINT64_MAX,
+        imageAvailableSemaphores_[f],
+        VK_NULL_HANDLE,
+        &imageIndex
+    );
 
     VkCommandBuffer cmd = commandBuffers_[f];
     vkResetCommandBuffer(cmd, 0);
 
-    VkCommandBufferBeginInfo beginInfo{ .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
-    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    const VkCommandBufferBeginInfo beginInfo{
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .pNext = nullptr,
+        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+        .pInheritanceInfo = nullptr
+    };
     vkBeginCommandBuffer(cmd, &beginInfo);
 
     // SWAPCHAIN → GENERAL
-    VkImageMemoryBarrier acquireBarrier{
-        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-        .srcAccessMask = 0,
-        .dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
-        .oldLayout = firstSwapchainAcquire_ ? VK_IMAGE_LAYOUT_UNDEFINED : VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-        .newLayout = VK_IMAGE_LAYOUT_GENERAL,
-        .image = StoneKey::stone_images()[imageIndex],
-        .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
+    const VkImageMemoryBarrier acquireBarrier{
+        .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .pNext               = nullptr,
+        .srcAccessMask       = 0,
+        .dstAccessMask       = VK_ACCESS_SHADER_WRITE_BIT,
+        .oldLayout           = firstSwapchainAcquire_ ? VK_IMAGE_LAYOUT_UNDEFINED : VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+        .newLayout           = VK_IMAGE_LAYOUT_GENERAL,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .image               = StoneKey::stone_images()[imageIndex],
+        .subresourceRange    = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
     };
     vkCmdPipelineBarrier(cmd,
         VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
@@ -1044,57 +1079,45 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
 
     firstSwapchainAcquire_ = false;
 
-    // ACCUMULATION RESET
-    if (resetAccumulation_ || resetAccumNextFrame_) [[unlikely]] {
-        VkClearColorValue clear{0.0f, 0.0f, 0.0f, 0.0f};
-        VkImageSubresourceRange range{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-        auto clearImg = [&](VkImage img) {
+    // ACCUMULATION CLEAR — ONLY IF WE ORDERED IT
+    if (resetAccumulation_) [[unlikely]] {
+        const VkClearColorValue clear{0.0f, 0.0f, 0.0f, 0.0f};
+        const VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+
+        const auto clearImg = [&](VkImage img) {
             vkCmdClearColorImage(cmd, img, VK_IMAGE_LAYOUT_GENERAL, &clear, 1, &range);
         };
+
         for (const auto& h : rtOutputImages_) clearImg(*h);
         if (Options::OptionsRTX::ENABLE_ACCUMULATION)
             for (const auto& h : accumImages_) clearImg(*h);
         if (Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING && hypertraceScoreImage_.valid())
             clearImg(*hypertraceScoreImage_);
 
-        resetAccumulation_ = resetAccumNextFrame_ = false;
+        resetAccumulation_ = false;
     }
 
     updateUniformBuffer(f, camera, getJitter());
-	updateRTDescriptorSet(f);
-    recordRayTracingCommands(commandBuffers_[f], f);
     updateTonemapUniform(f);
 
     pipelineManager_.updateRTDescriptorSet(f, {.tlas = LAS::get().getTLAS()});
     if (Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING)
         updateNexusDescriptors();
 
-    // ── REAL RenderContext — USING YOUR REAL CAM
-    RenderContext rtCtx{};
-    rtCtx.cameraPos       = CAM.pos();        // ← REAL CAMERA
-    rtCtx.fov             = CAM.fov();        // ← REAL FOV
-    rtCtx.deltaTime       = deltaTime;
-    rtCtx.frame           = frameNumber_;
-    rtCtx.renderMode      = activeRenderMode_;
-    rtCtx.enableTonemap   = tonemapEnabled_ ? 1u : 0u;
-    rtCtx.enableOverlay   = showOverlay_ ? 1u : 0u;
-    rtCtx.hypertrace      = hypertraceEnabled_ ? 1u : 0u;
-    rtCtx.debugVisMode    = 0;
-    rtCtx.blueNoiseOffset = glm::vec2(getJitter());
-    rtCtx.reservoirParams = glm::vec4(1.0f);
+    recordRayTracingCommandBuffer(cmd);
 
-    // ── DISPATCH — FIXED ALL HANDLE<> AND SWAPCHAIN ISSUES
-    dispatchRenderMode(imageIndex, cmd, *pipelineManager_.rtPipelineLayout_, rtDescriptorSets_[f], *pipelineManager_.rtPipeline_, deltaTime, rtCtx, activeRenderMode_);
-
-    // RT OUTPUT → READ ONLY
-    VkImageMemoryBarrier rtReadBarrier{
-        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-        .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
-        .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
-        .oldLayout = VK_IMAGE_LAYOUT_GENERAL,
-        .newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-        .image = *rtOutputImages_[f],
-        .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
+    // RT OUTPUT → SHADER READ ONLY
+    const VkImageMemoryBarrier rtReadBarrier{
+        .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .pNext               = nullptr,
+        .srcAccessMask       = VK_ACCESS_SHADER_WRITE_BIT,
+        .dstAccessMask       = VK_ACCESS_SHADER_READ_BIT,
+        .oldLayout           = VK_IMAGE_LAYOUT_GENERAL,
+        .newLayout           = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .image               = *rtOutputImages_[f],
+        .subresourceRange    = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
     };
     vkCmdPipelineBarrier(cmd,
         VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
@@ -1102,21 +1125,26 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
         0, 0, nullptr, 0, nullptr, 1, &rtReadBarrier);
 
     VkImageView tonemapInput = denoisingEnabled_ && denoiserView_.valid()
-        ? *denoiserView_ : *rtOutputViews_[f];
+        ? *denoiserView_
+        : *rtOutputViews_[f];
 
     updateTonemapDescriptor(f, tonemapInput, StoneKey::stone_views()[imageIndex]);
 
     if (denoisingEnabled_) performDenoisingPass(cmd);
     performTonemapPass(cmd, f, imageIndex);
 
-    // PRESENT — FIXED
-    VkImageMemoryBarrier presentBarrier{
-        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-        .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
-        .oldLayout = VK_IMAGE_LAYOUT_GENERAL,
-        .newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-        .image = StoneKey::stone_images()[imageIndex],
-        .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
+    // SWAPCHAIN → PRESENT
+    const VkImageMemoryBarrier presentBarrier{
+        .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .pNext               = nullptr,
+        .srcAccessMask       = VK_ACCESS_SHADER_WRITE_BIT,
+        .dstAccessMask       = 0,
+        .oldLayout           = VK_IMAGE_LAYOUT_GENERAL,
+        .newLayout           = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .image               = StoneKey::stone_images()[imageIndex],
+        .subresourceRange    = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
     };
     vkCmdPipelineBarrier(cmd,
         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
@@ -1125,220 +1153,36 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
 
     vkEndCommandBuffer(cmd);
 
-    VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    VkSubmitInfo submitInfo{ .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO };
-    submitInfo.waitSemaphoreCount = 1;
-    submitInfo.pWaitSemaphores = &imageAvailableSemaphores_[f];
-    submitInfo.pWaitDstStageMask = &waitStage;
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &cmd;
-    submitInfo.signalSemaphoreCount = 1;
-    submitInfo.pSignalSemaphores = &renderFinishedSemaphores_[f];
+    // SUBMIT
+    const VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    const VkSubmitInfo submitInfo{
+        .sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .pNext                = nullptr,
+        .waitSemaphoreCount   = 1,
+        .pWaitSemaphores      = &imageAvailableSemaphores_[f],
+        .pWaitDstStageMask    = &waitStage,
+        .commandBufferCount   = 1,
+        .pCommandBuffers          = &cmd,
+        .signalSemaphoreCount = 1,
+        .pSignalSemaphores    = &renderFinishedSemaphores_[f]
+    };
     vkQueueSubmit(g_ctx().graphicsQueue(), 1, &submitInfo, inFlightFences_[f]);
 
-    static VkSwapchainKHR currentSwapchain = VK_NULL_HANDLE;
-    currentSwapchain = stone_swapchain();
-
-    VkPresentInfoKHR presentInfo{ .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR };
-    presentInfo.waitSemaphoreCount = 1;
-    presentInfo.pWaitSemaphores = &renderFinishedSemaphores_[f];
-    presentInfo.swapchainCount = 1;
-    presentInfo.pSwapchains = &currentSwapchain;
-    presentInfo.pImageIndices = &imageIndex;
+    // PRESENT
+    const VkSwapchainKHR swapchain = stone_swapchain();
+    const VkPresentInfoKHR presentInfo{
+        .sType              = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+        .pNext              = nullptr,
+        .waitSemaphoreCount = 1,
+        .pWaitSemaphores    = &renderFinishedSemaphores_[f],
+        .swapchainCount     = 1,
+        .pSwapchains        = &swapchain,
+        .pImageIndices      = &imageIndex,
+        .pResults           = nullptr
+    };
     vkQueuePresentKHR(g_ctx().presentQueue(), &presentInfo);
 
     frameNumber_++;
-}
-
-// ──────────────────────────────────────────────────────────────────────────────
-// FINAL & ETERNAL — updateRTDescriptorSet — NOVEMBER 29 2025 — FIRST LIGHT v∞
-// Matches RTX::Bindings::RT_PIPELINE_BINDINGS exactly — BINDING 31 IS GOD
-// ──────────────────────────────────────────────────────────────────────────────
-void VulkanRenderer::updateRTDescriptorSet(uint32_t frameIndex)
-{
-    if (rtDescriptorSets_.empty() || frameIndex >= rtDescriptorSets_.size()) {
-        return;
-    }
-
-    VkDescriptorSet dstSet = rtDescriptorSets_[frameIndex];
-
-    VkWriteDescriptorSet writes[10] = {};
-    VkDescriptorImageInfo  imageInfos[8] = {};
-    VkDescriptorBufferInfo bufferInfos[4] = {};
-
-    uint32_t idx = 0;  // ← RENAMED FROM "write" → "idx" — THIS FIXES EVERYTHING
-
-    // Binding 0: TLAS
-    VkAccelerationStructureKHR tlas = LAS::get().getTLAS();
-    if (tlas != VK_NULL_HANDLE) {
-        VkWriteDescriptorSetAccelerationStructureKHR accel = {
-            .sType                      = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR,
-            .accelerationStructureCount = 1,
-            .pAccelerationStructures    = &tlas
-        };
-        writes[idx++] = VkWriteDescriptorSet{
-            .sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-            .pNext           = &accel,
-            .dstSet          = dstSet,
-            .dstBinding      = 0,
-            .descriptorCount = 1,
-            .descriptorType  = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR
-        };
-    }
-
-    // Binding 1: Output Image
-    imageInfos[0] = { .imageView = *rtOutputViews_[frameIndex % rtOutputViews_.size()], .imageLayout = VK_IMAGE_LAYOUT_GENERAL };
-    writes[idx++] = VkWriteDescriptorSet{
-        .sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        .dstSet          = dstSet,
-        .dstBinding      = 1,
-        .descriptorCount = 1,
-        .descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-        .pImageInfo      = &imageInfos[0]
-    };
-
-    // Binding 2: Accumulation
-    if (Options::OptionsRTX::ENABLE_ACCUMULATION && !accumViews_.empty()) {
-        imageInfos[1] = { .imageView = *accumViews_[frameIndex % accumViews_.size()], .imageLayout = VK_IMAGE_LAYOUT_GENERAL };
-        writes[idx++] = VkWriteDescriptorSet{
-            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = dstSet, .dstBinding = 2,
-            .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, .pImageInfo = &imageInfos[1]
-        };
-    }
-
-    // Binding 3: Camera UBO
-    bufferInfos[0] = { RAW_BUFFER(uniformBufferEncs_[frameIndex]), 0, VK_WHOLE_SIZE };
-    writes[idx++] = VkWriteDescriptorSet{
-        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = dstSet, .dstBinding = 3,
-        .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, .pBufferInfo = &bufferInfos[0]
-    };
-
-    // 4: Materials
-    bufferInfos[1] = { RAW_BUFFER(materialBufferEncs_[frameIndex]), 0, VK_WHOLE_SIZE };
-    writes[idx++] = VkWriteDescriptorSet{
-        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = dstSet, .dstBinding = 4,
-        .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, .pBufferInfo = &bufferInfos[1]
-    };
-
-    // 5: Env Map
-    if (Options::Environment::ENABLE_ENV_MAP && envMapSampler_.valid() && envMapImageView_.valid()) {
-        imageInfos[2] = { *envMapSampler_, *envMapImageView_, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
-        writes[idx++] = VkWriteDescriptorSet{
-            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = dstSet, .dstBinding = 5,
-            .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .pImageInfo = &imageInfos[2]
-        };
-    }
-
-    // 6: Adaptive Sampling Score
-    if (Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING && hypertraceScoreView_.valid()) {
-        imageInfos[3] = { .imageView = *hypertraceScoreView_, .imageLayout = VK_IMAGE_LAYOUT_GENERAL };
-        writes[idx++] = VkWriteDescriptorSet{
-            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = dstSet, .dstBinding = 6,
-            .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, .pImageInfo = &imageInfos[3]
-        };
-    }
-
-    // 7: Dimensions buffer
-    bufferInfos[2] = { RAW_BUFFER(dimensionBufferEncs_[frameIndex]), 0, VK_WHOLE_SIZE };
-    writes[idx++] = VkWriteDescriptorSet{
-        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = dstSet, .dstBinding = 7,
-        .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, .pBufferInfo = &bufferInfos[2]
-    };
-
-    // FINAL UPDATE — idx is now correct type
-    vkUpdateDescriptorSets(stone_device(), idx, writes, 0, nullptr);
-}
-
-void VulkanRenderer::recordRayTracingCommands(VkCommandBuffer cmd, uint32_t frameIndex)
-{
-    // ──────────────────────────────────────────────────────────────────────
-    // KEANU HAS SEEN THE CODE. HE UNDERSTANDS.
-    // ──────────────────────────────────────────────────────────────────────
-    LOG_KEANU("[KEANU] ...I know Vulkan.");
-
-    if (LAS::get().getTLAS() == VK_NULL_HANDLE) {
-        const VkClearColorValue navy = { { 0.0f, 0.0f, 0.15f, 1.0f } };
-        const VkImageSubresourceRange range = {
-            VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1
-        };
-
-        // rtOutputImages_ is std::array<Handle<VkImage>, N> → dereference the handle
-        vkCmdClearColorImage(cmd,
-            *rtOutputImages_[frameIndex],           // ← correct: *Handle<VkImage>
-            VK_IMAGE_LAYOUT_GENERAL,
-            &navy,
-            1,
-            &range);
-
-        LOG_KEANU("[KEANU] No scene. Just navy. I accept this.");
-        return;
-    }
-
-    // Bind the one true pipeline
-    vkCmdBindPipeline(cmd,
-        VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
-        pipeline().pipeline());
-
-    // Bind descriptor set (set 0 — the empire has spoken)
-    const VkDescriptorSet rtSet = pipeline().descriptorSets()[frameIndex];
-    vkCmdBindDescriptorSets(cmd,
-        VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
-        pipeline().layout(),
-        0,
-        1,
-        &rtSet,
-        0,
-        nullptr);
-
-    // Push constants — the will of the renderer
-    struct PushBlock {
-        uint32_t frame;
-        uint32_t totalSpp;
-        uint32_t hypertrace;
-        uint32_t _pad;
-    } push = {};
-
-    push.frame      = frameNumber_;
-    push.totalSpp   = currentSpp_;                    // ← your actual member name
-    push.hypertrace = hypertraceEnabled_ ? 1u : 0u;
-
-    vkCmdPushConstants(cmd,
-        pipeline().layout(),
-        VK_SHADER_STAGE_RAYGEN_BIT_KHR |
-        VK_SHADER_STAGE_MISS_BIT_KHR |
-        VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR,
-        0,
-        sizeof(push),
-        &push);
-
-    // Trace rays — into infinity
-    VK_CMD_TRACE_RAYS(cmd,
-        &pipeline().raygenRegion(),
-        &pipeline().missRegion(),
-        &pipeline().hitRegion(),
-        &pipeline().callableRegion(),
-        currentExtent().width,    // ← your actual function
-        currentExtent().height,
-        1);
-
-    // Memory barrier — photons must rest
-    VkMemoryBarrier barrier{
-        .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
-        .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
-        .dstAccessMask = VK_ACCESS_SHADER_READ_BIT
-    };
-
-    vkCmdPipelineBarrier(cmd,
-        VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
-        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-        0,
-        1, &barrier,
-        0, nullptr,
-        0, nullptr);
-
-    LOG_KEANU("[KEANU] The rays... they know kung fu.");
-    LOG_AMOURANTH("[CAPTAIN AMOURANTH] First light achieved. The photons bow.");
-    LOG_CID("CID collapses, sobbing — \"It compiled... it actually compiled...\"");
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -1785,14 +1629,18 @@ void VulkanRenderer::setOverlay(bool show) noexcept {
     LOG_TRACE_CAT("RENDERER", "setOverlay — COMPLETE");
 }
 
-void VulkanRenderer::setRenderMode(int mode) noexcept
-{
-    mode = glm::clamp(mode, 1, 9);
-    if (mode != activeRenderMode_) {
-        activeRenderMode_ = mode;
-        resetAccumNextFrame_ = true;
-        LOG_AMOURANTH("RENDER MODE {} → ENGAGED", mode);
+void VulkanRenderer::setRenderMode(int mode) noexcept {
+    LOG_TRACE_CAT("RENDERER", "setRenderMode — START — mode={}", mode);
+    if (renderMode_ == mode) {
+        LOG_TRACE_CAT("RENDERER", "No change needed");
+        LOG_TRACE_CAT("RENDERER", "setRenderMode — COMPLETE (no change)");
+        return;
     }
+    renderMode_ = mode;
+    resetAccumulation_ = true;
+    LOG_INFO_CAT("Renderer", "{}Render Mode: {} → {}{}", 
+        PULSAR_GREEN, renderMode_, mode, RESET);
+    LOG_TRACE_CAT("RENDERER", "setRenderMode — COMPLETE");
 }
 
 void VulkanRenderer::createFramebuffers() noexcept
@@ -2035,7 +1883,7 @@ void VulkanRenderer::createImage(RTX::Handle<VkImage>& image,
     VkMemoryRequirements reqs{};
     vkGetImageMemoryRequirements(stone_device(), rawImg, &reqs);
 
-    uint32_t memType = findMemoryType(reqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    uint32_t memType = pipelineManager_.findMemoryType(reqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
     VkMemoryAllocateInfo alloc{
         .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,

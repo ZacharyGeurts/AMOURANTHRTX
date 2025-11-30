@@ -44,7 +44,7 @@
 
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/GLOBAL/OptionsMenu.hpp"
-#include "engine/GLOBAL/StoneKey.hpp" // the one header that gets stonekey(include RTXHandler.hpp with all files).
+#include "engine/GLOBAL/StoneKey.hpp" // THE one header that gets it.
 
 // Forward declarations
 class VulkanRTX;
@@ -177,7 +177,8 @@ inline constexpr struct NullFeatureChainTerminator {
         }
     };
 
-    [[nodiscard]] QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device, VkSurfaceKHR surface) noexcept;
+    [[nodiscard]] QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device,
+                                                       VkSurfaceKHR surface) noexcept;
 
 struct Context {
 public:
@@ -231,7 +232,7 @@ public:
     Handle<VkImageView>  blueNoiseView_;
     Handle<VkRenderPass> renderPass_;
     uint64_t             sharedStagingEnc_ = 0;
-	[[nodiscard]] VkShaderModule loadShader(const std::string& filename) const noexcept;
+	[[nodiscard]] VkShaderModule loadShader(const std::string& filename) const;
 
     // Window
     SDL_Window* window  = nullptr;
@@ -290,19 +291,20 @@ public:
     void enableDebugUtils(bool e = true) noexcept              { debugUtilsEnabled_ = e; }  // ← RESTORED
 
     // Core lifecycle
-    void init();
+    void init(SDL_Window* window, int width, int height);
     void cleanup() noexcept;
 };
 
     extern Context g_context_instance;
     [[nodiscard]] inline Context& g_ctx() noexcept { return g_context_instance; }
     [[nodiscard]] inline VkShaderModule loadShader(const std::string& filename) { return g_ctx().loadShader(filename); }
-	
+
     // =============================================================================
     // Core Vulkan Creation Functions
     // =============================================================================
     [[nodiscard]] VkInstance createVulkanInstanceWithSDL(bool enableValidation) noexcept;
 
+    void createCommandPool();
     void retrieveQueues() noexcept = delete; // NO LONGER NEEDED — done in createLogicalDevice
 
     // =============================================================================

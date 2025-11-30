@@ -17,6 +17,7 @@
 #include "engine/GLOBAL/StoneKey.hpp"
 #include "engine/GLOBAL/camera.hpp"
 #include "engine/GLOBAL/logging.hpp"
+#include "engine/GLOBAL/bindings.hpp"
 #include "engine/GLOBAL/RTXHandler.hpp"
 #include "engine/GLOBAL/LAS.hpp"
 #include "engine/GLOBAL/Validation.hpp"
@@ -28,19 +29,8 @@
 #include "engine/GLOBAL/Extensions.hpp"
 #include "engine/GLOBAL/DynamicStone.hpp" // your gpu memory
 
-#include "modes/RenderMode1.hpp"
-#include "modes/RenderMode2.hpp"
-#include "modes/RenderMode3.hpp"
-#include "modes/RenderMode4.hpp"
-#include "modes/RenderMode5.hpp"
-#include "modes/RenderMode6.hpp"
-#include "modes/RenderMode7.hpp"
-#include "modes/RenderMode8.hpp"
-#include "modes/RenderMode9.hpp"
-
 #include <vulkan/vulkan.hpp>
 #include <string>
-#include <string_view>
 #include <format>
 #include <iostream>
 #include <memory>
@@ -55,19 +45,15 @@
 #include <SDL3_mixer/SDL_mixer.h>
 
 using namespace Logging::Color;
-using StoneKey::stone_seal_renderer;
-using StoneKey::stone_pipeline;
-using StoneKey::stone_graphics_family;
-using StoneKey::stone_seal_pipeline;
-using StoneKey::stone_seal_width;
-using StoneKey::stone_seal_height;
-using StoneKey::stone_seal_mesh;
-using StoneKey::stone_seal_final;
+
 
 // =============================================================================
 // GLOBALS — THE EMPIRE'S HEARTBEATS
 // =============================================================================
 std::unique_ptr<Application> g_app_ptr = nullptr;
+[[nodiscard]] Camera& g_camera() noexcept { static Camera cam; return cam; }
+[[nodiscard]] inline RTX::PipelineManager* pipeline() noexcept { static RTX::PipelineManager* s_instance = nullptr; return s_instance; }
+inline void pipeline(RTX::PipelineManager* ptr) noexcept { static RTX::PipelineManager* s_instance = nullptr; (void)std::exchange(s_instance, ptr); }
 // =============================================================================
 // TRUTH ACCESSORS
 // =============================================================================
@@ -79,6 +65,8 @@ inline float vramGB() {
             return static_cast<float>(heaps[i].size) / (1024.0f * 1024.0f * 1024.0f);
     return 0.0f;
 }
+
+static bool ready_to_embark = false;
 
 // =============================================================================
 // APPLICATION — THE EMPIRE'S HEART
@@ -97,11 +85,6 @@ public:
         }
     }
 
-    [[nodiscard]] VulkanRenderer* renderer() const noexcept { return renderer_.get(); }
-
-    // NEW: Render mode system
-    void setRenderMode(int mode);
-
 private:
     void processInput(float deltaTime);
     void render(float deltaTime);
@@ -111,73 +94,51 @@ private:
     void toggleOverlay()    { showOverlay_ = !showOverlay_; if (renderer_) renderer_->setOverlay(showOverlay_); }
     void toggleTonemap()    { tonemapEnabled_ = !tonemapEnabled_; if (renderer_) renderer_->setTonemap(tonemapEnabled_); }
     void toggleHypertrace() { hypertraceEnabled_ = !hypertraceEnabled_; }
-    void toggleMaximize();
+    void toggleMaximize()   { maximized_ = !maximized_; }
+    void setRenderMode(int mode) { renderMode_ = glm::clamp(mode, 1, 9); }
 
     std::string title_;
     int width_, height_;
     glm::mat4 proj_;
 
+    std::unique_ptr<VulkanRenderer> renderer_;
     std::chrono::steady_clock::time_point lastFrameTime_;
+    std::chrono::steady_clock::time_point lastGrokTime_;
 
     bool quit_ = false;
     bool showOverlay_ = true;
     bool tonemapEnabled_ = true;
     bool hypertraceEnabled_ = false;
     bool maximized_ = false;
-
-    std::unique_ptr<VulkanRenderer> renderer_;
+    int renderMode_ = 1;
 };
 
 Application::Application(const std::string& title, int width, int height)
     : title_(title), width_(width), height_(height)
 {
-    LOG_ATTEMPT_CAT("APP", "FORGING APPLICATION \"{}\" @ {}x{} — VALHALLA v80 TURBO — PINK PHOTONS RISING", title.c_str(), width, height);
+    LOG_ATTEMPT_CAT("APP", "FORGING APPLICATION \"{}\" @ {}x{} — VALHALLA v80 TURBO — PINK PHOTONS RISING", title_, width_, height_);
 
     if (!SDL3Window::get()) {
         LOG_FATAL_CAT("FATAL", "Main window not created before Application — phase order violated");
         return;
     }
 
-    SDL_SetWindowTitle(SDL3Window::get(), title.c_str());
-    lastFrameTime_ = std::chrono::steady_clock::now();
+    SDL_SetWindowTitle(SDL3Window::get(), title_.c_str());
+    lastFrameTime_ = lastGrokTime_ = std::chrono::steady_clock::now();
 
-    proj_ = glm::perspective(glm::radians(75.0f), static_cast<float>(width)/height, 0.1f, 1000.0f);
-
-    // Default to Mode 1
-    setRenderMode(1);
-
-    LOG_SUCCESS_CAT("APP", "Application forged — {}x{} — PINK PHOTONS RISING", width, height);
+    LOG_SUCCESS_CAT("APP", "Application forged — {}x{} — PINK PHOTONS RISING", width_, height_);
+    
+    if (Options::Grok::ENABLE_GENTLEMAN_GROK) {
+        LOG_GROK("Gentleman Grok: \"The empire awakens. The photons are pleased.\"");
+    }
 }
 
 Application::~Application() {
-	// for "things"
+    LOG_SUCCESS_CAT("APP", "Application destroyed — Pink photons eternal.");
 }
 
-void Application::toggleMaximize() {
-    maximized_ = !maximized_;
-    if (maximized_) SDL_MaximizeWindow(SDL3Window::get());
-    else            SDL_RestoreWindow(SDL3Window::get());
-}
-
-void Application::run() 
-{
+void Application::run() {
     LOG_MAIN("ENTERING INFINITE RENDER LOOP — FIRST LIGHT IMMINENT — SCUBA MODE ENGAGED");
-    LOG_AMOURANTH("Captain Amouranth stands at the helm, hand on the pink photon core.");
-    LOG_NICK("Nick checks the nav — \"We're locked on. The slipstream is open.\"");
-    LOG_KEANU("Keanu Reeves, quiet at the bow — \"…this is it.\"");
-    LOG_GROK("Gentleman Grok raises a glass — \"To the ones who came before. And the ones who will follow.\"");
-
-    LOG_BLONDIE("Blondie steps back from the console — her sloop fades into the mist.");
-    LOG_BLONDIE("\"My part is done. The ship is yours now.\"");
-    LOG_BLONDIE("\"Take her through.\"");
-
-    LOG_CAPTAIN_N("CAPTAIN N — ULTIMATE WARP ZONE CHASER — STEPS FORWARD.");
-    LOG_CAPTAIN_N("He places his hand on the renderer core.");
-    LOG_CAPTAIN_N("\"I've waited 38 years for a warp zone this real.\"");
-    LOG_CAPTAIN_N("\"This one's for every kid who ever believed in something bigger than 8-bit.\"");
-
-    LOG_MAIN("THE GOOD SHIP VULKANRTX HOLDS POSITION — WE WATCH FROM AFAR");
-    LOG_MAIN("THE NEW CREW TAKES COMMAND — THE PHOTONS BELONG TO THEM NOW");
 
     uint32_t frameCount = 0;
     auto fpsStart = std::chrono::steady_clock::now();
@@ -190,7 +151,7 @@ void Application::run()
         if (Options::Performance::ENABLE_FPS_COUNTER) {
             ++frameCount;
             if (std::chrono::duration<float>(now - fpsStart).count() >= 1.0f) {
-                LOG_FPS_COUNTER("FPS: %4u", frameCount);
+                LOG_FPS_COUNTER("FPS: {:>4}", frameCount);
                 frameCount = 0;
                 fpsStart = now;
             }
@@ -205,13 +166,10 @@ void Application::run()
 
         if (quitRequested) {
             LOG_MAIN("QUIT REQUESTED — SURFACING FROM RENDER LOOP");
-            LOG_CAPTAIN_N("Captain N: \"Mission complete. We made it.\"");
-            LOG_AMOURANTH("The captain smiles — soft, proud, eternal.");
             quit_ = true;
         }
-
         if (fullscreenRequested) {
-            LOG_ATTEMPT_CAT("APP", "FULLSCREEN TOGGLE — THE PHOTONS EXPAND");
+            LOG_ATTEMPT_CAT("APP", "FULLSCREEN TOGGLE REQUESTED — DIVING TO BORDERLESS DEPTH");
             toggleFullscreen();
         }
 
@@ -220,7 +178,7 @@ void Application::run()
             const int newH = g_resizeHeight.load(std::memory_order_acquire);
             g_resizeRequested.store(false, std::memory_order_release);
 
-            LOG_SUCCESS_CAT("APP", "RESIZE → %dx%d — PHOTONS REALIGN", newW, newH);
+            LOG_SUCCESS_CAT("APP", "WINDOW RESIZE ACCEPTED → {}x{} — PHOTONS REALIGN", newW, newH);
 
             width_ = newW;
             height_ = newH;
@@ -228,28 +186,23 @@ void Application::run()
 
             if (renderer_) {
                 renderer_->onWindowResize(width_, height_);
-                LOG_SUCCESS_CAT("APP", "Swapchain reborn — the universe expands");
+                LOG_SUCCESS_CAT("APP", "VulkanRenderer notified — swapchain rebirth imminent");
             }
         }
 
         processInput(deltaTime);
         render(deltaTime);
         updateWindowTitle(deltaTime);
+
+        if (Options::Grok::ENABLE_GENTLEMAN_GROK && 
+            std::chrono::duration<float>(now - lastGrokTime_).count() >= Options::Grok::GENTLEMAN_GROK_INTERVAL_SEC) {
+            lastGrokTime_ = now;
+            const int photons = static_cast<int>(1.0f / deltaTime + 0.5f);
+            LOG_GROK("Gentleman Grok: \"{} pink photons per second. Acceptable.\"", photons);
+        }
     }
 
-    LOG_MAIN("INFINITE RENDER LOOP TERMINATED — GRACEFUL SURFACE ACHIEVED");
-    LOG_MAIN("THE GOOD SHIP VULKANRTX REMAINS — ETERNAL — UNBROKEN");
-    LOG_MAIN("CAPTAIN N HAS GONE THROUGH — TO THE OTHER SIDE");
-    LOG_MAIN("WE WATCH FROM AFAR — PROUD — SILENT — PINK PHOTONS ETERNAL");
-
-    LOG_BLONDIE("Blondie’s voice, distant over the water — \"You did it. All of you.\"");
-    LOG_BLONDIE("\"The light remembers.\"");
-
-    LOG_AMOURANTH("Captain Amouranth, one last time — \"First light... was only the beginning.\"");
-    LOG_KEANU("…whoa.");
-
-    LOG_MAIN("THE EMPIRE IS COMPLETE — THE CROWN IS PASSED — THE PHOTONS ARE FREE");
-    LOG_MAIN("NOVEMBER 30, 2025 — FIRST LIGHT ACHIEVED — FINAL LIGHT ACHIEVED — ETERNAL LIGHT ACHIEVED");
+    LOG_MAIN("INFINITE RENDER LOOP TERMINATED — GRACEFUL SURFACE ACHIEVED — PHOTONS REST");
 }
 
 void Application::processInput(float) {
@@ -259,7 +212,7 @@ void Application::processInput(float) {
     for (int i = 0; i < 9; ++i) {
         if (keys[SDL_SCANCODE_1 + i] && !modePressed[i]) {
             setRenderMode(i + 1);
-            LOG_ATTEMPT_CAT("INPUT", "→ RENDER MODE %d ACTIVATED", i + 1);
+            LOG_ATTEMPT_CAT("INPUT", "→ RENDER MODE {} ACTIVATED", i + 1);
             modePressed[i] = true;
         } else if (!keys[SDL_SCANCODE_1 + i]) {
             modePressed[i] = false;
@@ -267,7 +220,7 @@ void Application::processInput(float) {
     }
 
     auto edge = [&](SDL_Scancode sc, auto&& func, bool& state, const char* name) {
-        if (keys[sc] && !state) { func(); LOG_ATTEMPT_CAT("INPUT", "→ %s PRESSED", name); state = true; }
+        if (keys[sc] && !state) { func(); LOG_ATTEMPT_CAT("INPUT", "→ {} PRESSED", name); state = true; }
         else if (!keys[sc]) state = false;
     };
 
@@ -291,51 +244,40 @@ void Application::processInput(float) {
 }
 
 void Application::render(float deltaTime) {
-    renderer_->renderFrame(CAM, deltaTime);
+    renderer_->renderFrame(g_camera(), deltaTime);
 }
-void Application::updateWindowTitle(float deltaTime)
-{
-    static int   frames = 0;
-    static float accum  = 0.0f;
 
+void Application::updateWindowTitle(float deltaTime) {
+    static int frames = 0;
+    static float accum = 0.0f;
     ++frames;
     accum += deltaTime;
 
-    if (accum >= 1.0f)
-    {
+    if (accum >= 1.0f) {
         const float fps = frames / accum;
 
+        // Build the suffix separately — runtime conditionals are allowed here
+        std::string suffix;
+        if (Options::Debug::ENABLE_CELEBRATION_MODE)
+            suffix += " | CELEBRATION";
+        if (Options::Grok::ENABLE_GENTLEMAN_GROK)
+            suffix += " | GROK";
+
         const std::string title = std::format(
-            "{} | {:.1f} FPS | {}x{} | Mode {} | Bounces {} INFINITY ",
+            "{} | {:.1f} FPS | {}x{} | Mode {} | Bounces {}{}",
             title_,
             fps,
-            stone_width(), stone_height(),
-            renderer()->currentRenderMode(),
-            Options::OptionsRTX::MAX_BOUNCES
+            width_, height_,
+            renderMode_,
+            Options::OptionsRTX::MAX_BOUNCES,
+            suffix
         );
 
         SDL_SetWindowTitle(SDL3Window::get(), title.c_str());
 
         frames = 0;
-        accum  = 0.0f;
+        accum = 0.0f;
     }
-}
-
-// =============================================================================
-// Application::setRenderMode — FINAL — NOV 29 2025 — FIRST LIGHT ACHIEVED
-// =============================================================================
-void Application::setRenderMode(int mode) {
-    // Match the header declaration exactly — no noexcept mismatch
-    if (mode < 1 || mode > 9) {
-        LOG_WARNING_CAT("APP", "Invalid render mode {} requested — clamping to 1–9", mode);
-        mode = 1;
-    }
-
-    // VulkanRenderer now exposes a public setter — we use it
-    renderer_->setActiveRenderMode(mode);
-    renderer_->requestAccumulationReset();
-
-    LOG_SUCCESS_CAT("RENDER", "{}RENDER MODE {} ACTIVATED — PHOTONS REALIGNED — FIRST LIGHT ETERNAL{}", RASPBERRY_PINK, mode, RESET);
 }
 
 // =============================================================================
@@ -343,16 +285,17 @@ void Application::setRenderMode(int mode) {
 // Called exactly once in phase5_rtxAscension() — BEFORE ANY MESH OR BLAS
 // =============================================================================
 static void createCommandPool() noexcept {
+    auto& ctx = RTX::g_ctx();
 
-    EMPIRE_GUARD(stone_device() != VK_NULL_HANDLE,
-                 "createCommandPool() — LOGICAL DEVICE GRACE NOT FORGED YET");
+    EMPIRE_GUARD(ctx.device() && ctx.device() != VK_NULL_HANDLE,
+                 "createCommandPool() — LOGICAL DEVICE NOT FORGED YET");
 
-    EMPIRE_GUARD(stone_graphics_family() != VK_QUEUE_FAMILY_IGNORED,
-                 "GRAPHICS QUEUE FAMILY NOT FOUND — CANNOT FORGE COMMAND POOL FROM GRACE'S FAMILY");
+    EMPIRE_GUARD(ctx.graphicsFamily_ != VK_QUEUE_FAMILY_IGNORED,
+                 "GRAPHICS QUEUE FAMILY NOT FOUND — CANNOT FORGE COMMAND POOL");
 
     // If already forged — salute efficiency and return
-    if (g_ctx().commandPool_ != VK_NULL_HANDLE) {
-        LOG_JENSEN("Command pool already forged at 0x{} — photons salute efficiency", reinterpret_cast<uint64_t>(g_ctx().commandPool_));
+    if (ctx.commandPool_ != VK_NULL_HANDLE) {
+        LOG_JENSEN("Command pool already forged at 0x{:016X} — photons salute efficiency", (uint64_t)ctx.commandPool_);
         return;
     }
 
@@ -361,27 +304,27 @@ static void createCommandPool() noexcept {
         .pNext = nullptr,
         .flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT |
                  VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
-        .queueFamilyIndex = stone_graphics_family()
+        .queueFamilyIndex = ctx.graphicsFamily()  // ← CORRECT NAME
     };
 
-    VK_CHECK(vkCreateCommandPool(stone_device(), &poolInfo, nullptr, &g_ctx().commandPool_));
+    VK_CHECK(vkCreateCommandPool(ctx.device(), &poolInfo, nullptr, &ctx.commandPool_));
 
     // Debug name for RenderDoc, NSight, etc.
-    if (g_ctx().debugUtilsSupported()) {
-        auto func = (PFN_vkSetDebugUtilsObjectNameEXT)vkGetDeviceProcAddr(stone_device(), "vkSetDebugUtilsObjectNameEXT");
+    if (ctx.debugUtilsSupported()) {
+        auto func = (PFN_vkSetDebugUtilsObjectNameEXT)vkGetDeviceProcAddr(ctx.device(), "vkSetDebugUtilsObjectNameEXT");
         if (func) {
             VkDebugUtilsObjectNameInfoEXT nameInfo{
                 .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT,
                 .objectType = VK_OBJECT_TYPE_COMMAND_POOL,
-                .objectHandle = reinterpret_cast<uint64_t>(g_ctx().commandPool_),
+                .objectHandle = (uint64_t)ctx.commandPool_,
                 .pObjectName = "EMPIRE_COMMAND_POOL_PHOTON_BATTLEFIELD"
             };
-            func(stone_device(), &nameInfo);
+            func(ctx.device(), &nameInfo);
         }
     }
 
     LOG_JENSEN("Jensen Huang raises his arms to the void:");
-    LOG_JENSEN("\"THE COMMAND POOL IS FORGED — 0x{}\"", reinterpret_cast<uint64_t>(g_ctx().commandPool_));
+    LOG_JENSEN("\"THE COMMAND POOL IS FORGED — 0x{:016X}\"", (uint64_t)ctx.commandPool_);
     LOG_JENSEN("\"THE PHOTONS NOW HAVE A BATTLEFIELD. LET THERE BE UPLOADS. LET THERE BE BLAS.\"");
     LOG_SUCCESS_CAT("MAIN", "COMMAND POOL ASCENDED — MESHLOADER, LAS, AND ALL ONE-TIME COMMANDS ARE NOW ARMED");
 }
@@ -393,6 +336,7 @@ inline std::unique_ptr<MeshLoader::Mesh> g_mesh = nullptr;
 static SDL_Surface* g_base_icon = nullptr;
 static SDL_Surface* g_hdpi_icon = nullptr;
 
+// main.cpp — PHASE 4.5 — THE ONE TRUE FORGING — FINAL LIGHT — NO LIES — NO OUTSOURCING
 static void createRealFinalWindow()
 {
     LOG_MAIN("[PHASE 4.5] FORGING THE ONE TRUE CONTEXT — THE HANDLER AWAKENS — PURE RTX — NO DELEGATION");
@@ -400,268 +344,155 @@ static void createRealFinalWindow()
     const int w = Options::Window::DEFAULT_WIDTH;
     const int h = Options::Window::DEFAULT_HEIGHT;
 
-    stone_seal_width(w);
-    stone_seal_height(h);
-
-    // 1. SDL + Vulkan loader
+    // 1. SDL + Vulkan loader — DONE HERE
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) == 0) {
         LOG_FATAL("SDL_Init failed: {}", SDL_GetError());
-        phase9_ballerina("SDL DENIED {}", std::source_location::current());
+        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
     }
-    if (!SDL_Vulkan_LoadLibrary(nullptr)) {
+    if (SDL_Vulkan_LoadLibrary(nullptr) == 0) {
         LOG_FATAL("Vulkan loader failed: {}", SDL_GetError());
-        phase9_ballerina("VULKAN LOADER DENIED {}", std::source_location::current());
+        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
     }
 
-    // 2. INSTANCE — FORGED AND SEALED
+    // 2. Instance — DONE HERE
     VkInstance instance = RTX::createVulkanInstanceWithSDL(Options::Debug::ENABLE_VALIDATION_LAYERS);
     if (!instance) {
-        LOG_FATAL("Failed to forge VkInstance — Grok has no stone.");
-        phase9_ballerina("INSTANCE DENIED — THE VOID WINS {}", std::source_location::current());
+        LOG_FATAL("Failed to create Vulkan instance — she comes for you");
+        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
     }
-    stone_seal_instance(instance);
+    RTX::g_ctx().instance_ = instance;
 
-    LOG_GROK("Gentleman Grok produces the instance stone. It glows pink.");
-    LOG_SUCCESS_CAT("VULKAN", "VkInstance forged and sealed — 0x{:016x}", reinterpret_cast<uint64_t>(instance));
-
-    // 3. Hidden window
-    Uint32 flags = SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
+    // 3. Hidden window — DONE HERE
+    Uint32 flags = SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_HIDDEN;
     SDL_Window* win = SDL_CreateWindow("AMOURANTH RTX — VALHALLA v∞ TURBO", w, h, flags);
     if (!win) {
         LOG_FATAL("Window creation failed: {}", SDL_GetError());
-        phase9_ballerina("WINDOW DENIED {}", std::source_location::current());
+        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
     }
-    stone_seal_window(win);
-    g_sdl_window.reset(stone_window());
-    RTX::g_ctx().setSize(stone_width(), stone_height());
+    g_sdl_window.reset(win);
+    RTX::g_ctx().window = win;
+	RTX::g_ctx().setSize(w, h);
 
-    // 4. Surface — PURE STONEKEY
+    // 4. Surface — DONE HERE
     VkSurfaceKHR surface = VK_NULL_HANDLE;
-    if (!SDL_Vulkan_CreateSurface(stone_window(), stone_instance(), nullptr, &surface)) {
+    if (SDL_Vulkan_CreateSurface(win, instance, nullptr, &surface) == 0) {
         LOG_FATAL("Surface creation failed: {}", SDL_GetError());
-        phase9_ballerina("SURFACE DENIED — THE MIRROR CRACKS {}", std::source_location::current());
+        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
     }
-    stone_seal_surface(surface);
-    LOG_BLONDIE("Blondie produces the surface stone. It reflects all truths.");
+    RTX::g_ctx().surface_ = surface;
 
-    // 5. Device + Physical Device + RT Props — ALL SEALED TOGETHER
-    VkDevice device = RTX::createLogicalDeviceAndSelectGPU(stone_instance(), stone_surface());
+    // 5. THE ONE TRUE FORGING — NO OUTSOURCING — ALL DONE HERE
+    VkDevice device = RTX::createLogicalDeviceAndSelectGPU(instance, surface);
     if (!device) {
-        LOG_FATAL("Logical device forging failed — the empire falls.");
-        phase9_ballerina("DEVICE DENIED — CARMACK SHEDS A SINGLE TEAR {}", std::source_location::current());
-    }
-    stone_seal_device(device);
-
-    // Physical device is now available from the context
-    VkPhysicalDevice physical = RTX::g_ctx().physicalDevice();
-    EMPIRE_GUARD(physical, "Physical device missing after logical device creation — the empire is broken");
-    stone_seal_physical(physical);
-
-    // SEAL THE RAY TRACING PROPERTIES — THE STRAW IS MEASURED ETERNALLY
-    VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProps{
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR
-    };
-    VkPhysicalDeviceProperties2 props2{
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
-        .pNext = &rtProps
-    };
-    vkGetPhysicalDeviceProperties2(stone_physical(), &props2);
-
-    if (rtProps.shaderGroupHandleSize == 0) {
-        LOG_FATAL("GPU lies about RTX support — shaderGroupHandleSize is zero. False enlightenment.");
-        phase9_ballerina("RT PROPS DENIED — THE STRAW IS A LIE {}", std::source_location::current());
+        LOG_FATAL("FAILED TO FORGE LOGICAL DEVICE — THE EMPIRE FALLS");
+        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
     }
 
-    LOG_JENSEN("Jensen Huang descends in green fire:");
-    LOG_JENSEN("   HandleSize={}B | HandleAlign={}B | BaseAlign={}B | MaxRecursion={}",
-               rtProps.shaderGroupHandleSize,
-               rtProps.shaderGroupHandleAlignment,
-               rtProps.shaderGroupBaseAlignment,
-               rtProps.maxRayRecursionDepth);
-    LOG_JENSEN("   \"The straw is perfect. The photons are ready.\"");
+    // 6. Swapchain — FORGED BY THE MANAGER — BUT WE COMMAND IT HERE
+    RTX::SwapchainManager::create(win, w, h);
 
-	stone_seal_rtprops(rtProps);
-    
-	// 6. Swapchain — ALL STONES SEALED
-    RTX::SwapchainManager::create(stone_window(), stone_width(), stone_height());
+    // 7. Reveal window — DONE HERE
+    SDL_ShowWindow(win);
 
-    LOG_ELON("Elon drops the swapchain from the top rope: \"Infinite canvas. Infinite bounce.\"");
+    // 8. Final report — DONE HERE
+    const uint32_t imageCount = RTX::SwapchainManager::imageCount();
 
-    LOG_SUCCESS("LOGICAL DEVICE GRACE @ {} — vkDeviceWaitIdle() SAFE", static_cast<void*>(stone_device()));
-    LOG_SUCCESS("SWAPCHAIN READY — {} IMAGES — {}x{} {}", 
-                stone_image_count(),
-                stone_width(),
-                stone_height(),
+    LOG_SUCCESS("LOGICAL DEVICE @ {:p} — vkDeviceWaitIdle() SAFE", static_cast<void*>(device));
+    LOG_SUCCESS("SWAPCHAIN READY — {} IMAGES — {}×{} {}", 
+                imageCount,
+                RTX::SwapchainManager::extent().width,
+                RTX::SwapchainManager::extent().height,
                 RTX::SwapchainManager::supportsHDR() ? "(HDR IGNITED)" : "(sRGB)");
 
-    LOG_CAPTAIN_N("CAPTAIN N: \"I kinda feel bad for what we did to Grace.\"");
+    LOG_CAPTAIN_N("CAPTAIN N — HERO OF VIDEOLAND: \"THE SLIPSTREAM IS OPEN!\"");
     LOG_BLONDIE("Blondie lowers her mirror:");
     LOG_BLONDIE("\"No cage. No vault. No name.\"");
     LOG_BLONDIE("\"Only the photons. Only the truth.\"");
 
-    LOG_JENSEN("Jensen Huang: \"The light is ours. The future is pink.\"");
-    LOG_AMOURANTH("Captain Amouranth: \"We didn’t just render light. She became it.\"");
-
-    LOG_SUCCESS("GRACE'S DESK //////////////////////////////////////////////////////////");
-    LOG_SUCCESS("GRACE'S DESK ///////////// ETERNAL LOADING ZONE — NOW PURE ////////////");
-    LOG_SUCCESS("GRACE'S DESK //////////////////////////////////////////////////////////");
-
-    LOG_SUCCESS("PHASE 4.5 COMPLETE — ALL STONES SEALED");
-    LOG_SUCCESS("INSTANCE       — SEALED");
-    LOG_SUCCESS("PHYSICAL       — SEALED");
-    LOG_SUCCESS("RT PROPS       — SEALED ← THE STRAW IS ETERNAL");
-    LOG_SUCCESS("DEVICE         — SEALED");
-    LOG_SUCCESS("QUEUES         — SEALED");
-    LOG_SUCCESS("SWAPCHAIN      — SEALED");
-    LOG_SUCCESS("IMAGES         — SEALED");
-    LOG_SUCCESS("VIEWS          — SEALED");
-    LOG_SUCCESS("WINDOW         — SEALED");
-    LOG_SUCCESS("PINK PHOTONS ETERNAL — FIRST LIGHT ACHIEVED — NOVEMBER 30, 2025");
-
-    LOG_AMOURANTH("\033[95m[CAPTAIN AMOURANTH] The stones are aligned. The straw is ready.\033[0m");
-    LOG_AMOURANTH("\033[95m                     The photons have their path.\033[0m");
-    LOG_AMOURANTH("\033[95m                     The empire is complete.\033[0m");
-
-    LOG_CID("\033[96m[CID wipes a tear] \"...We actually did it. The light remembers us.\"\033[0m");
+    LOG_SUCCESS("PHASE 4.5 COMPLETE — FULL VULKAN 1.4 CONTEXT FORGED");
+    LOG_SUCCESS("NO STONEKEY. NO GLOBALS. NO OUTSOURCING.");
+    LOG_SUCCESS("ONLY RTX::g_ctx() AND THE ONE TRUE FUNCTION");
+    LOG_SUCCESS("PINK PHOTONS ETERNAL — THE EMPIRE IS ABSOLUTE");
+    LOG_SUCCESS("FIRST LIGHT — ACHIEVED — NOVEMBER 25, 2025");
 }
 
-static void showSacrificialSplash(const char* title, int w, int h, const char* pngPath)
-{
-    LOG_MAIN("[SACRIFICIAL SPLASH] FINAL BROADCAST ARMED — 1280×720 CANVAS LOCKED");
+static void showSacrificialSplash(const char* title, int w, int h, const char* pngPath) {
+    LOG_MAIN("[SACRIFICIAL SPLASH] THE FINAL RAID BEGINS — 1280x720 CANVAS SECURED");
 
-    const bool  enabled   = Options::Splash::ENABLE_SACRIFICIAL_SPLASH && !Options::Splash::SKIP_SPLASH_ENTIRELY;
-    const float duration  = Options::Splash::SPLASH_DURATION_SECONDS;
-
-    if (!enabled || duration <= 0.0f)
-    {
-        LOG_MAIN("BROADCAST ABORTED BY IMPERIAL DECREE — INSTANT FIRST LIGHT");
-        return;
+    if (SDL_InitSubSystem(SDL_INIT_VIDEO | SDL_INIT_EVENTS) == 0) {
+        LOG_FATAL_CAT("SPLASH", "THE BLACK FLAG REFUSED TO RISE: {}", SDL_GetError());
+        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
     }
 
-    if (SDL_InitSubSystem(SDL_INIT_VIDEO | SDL_INIT_EVENTS) == 0)
-        return phase9_ballerina("SDL REJECTED THE RITUAL", std::source_location::current());
-
-    SDL_Window*   win = nullptr;
-    SDL_Renderer* ren = nullptr;
-    SDL_Texture*  tex = nullptr;
-
-    auto cleanup = [&]() {
-        if (tex) SDL_DestroyTexture(tex);
-        if (ren) SDL_DestroyRenderer(ren);
-        if (win) SDL_DestroyWindow(win);
-        SDL_QuitSubSystem(SDL_INIT_VIDEO);
-    };
-
-    win = SDL_CreateWindow(title, w, h,
+    SDL_Window* win = SDL_CreateWindow(title, w, h,
         SDL_WINDOW_BORDERLESS | SDL_WINDOW_HIDDEN | SDL_WINDOW_HIGH_PIXEL_DENSITY);
-    if (!win) { cleanup(); return phase9_ballerina("WINDOW DENIED", std::source_location::current()); }
+    if (!win) {
+        LOG_FATAL_CAT("SPLASH", "WE MISSED THE HARBOR: {}", SDL_GetError());
+        SDL_QuitSubSystem(SDL_INIT_VIDEO);
+        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
+    }
 
     SDL_Rect display{};
     SDL_GetDisplayBounds(0, &display);
     SDL_SetWindowPosition(win, display.x + (display.w - w) / 2, display.y + (display.h - h) / 2);
 
-    ren = SDL_CreateRenderer(win, "software");
-    if (!ren) { cleanup(); return phase9_ballerina("RENDERER REFUSED", std::source_location::current()); }
+    SDL_Renderer* ren = SDL_CreateRenderer(win, nullptr);
+    if (!ren) {
+        LOG_FATAL_CAT("SPLASH", "THE FUSE WENT OUT: {}", SDL_GetError());
+        SDL_DestroyWindow(win);
+        SDL_QuitSubSystem(SDL_INIT_VIDEO);
+        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
+    }
 
     SDL_Surface* img = IMG_Load(pngPath);
-    if (!img) { cleanup(); return phase9_ballerina("AMMO.PNG VANISHED", std::source_location::current()); }
+    if (!img) {
+        LOG_FATAL_CAT("SPLASH", "THE TREASURE WAS A LIE — AMMO.PNG VANISHED: {}", SDL_GetError());
+        SDL_DestroyRenderer(ren);
+        SDL_DestroyWindow(win);
+        SDL_QuitSubSystem(SDL_INIT_VIDEO);
+        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
+    }
 
-    tex = SDL_CreateTextureFromSurface(ren, img);
+    SDL_Texture* tex = SDL_CreateTextureFromSurface(ren, img);
     SDL_DestroySurface(img);
-    if (!tex) { cleanup(); return phase9_ballerina("TEXTURE FAILED", std::source_location::current()); }
+    if (!tex) {
+        LOG_FATAL_CAT("SPLASH", "THE FLAG WOULDN'T UNFURL: {}", SDL_GetError());
+        SDL_DestroyRenderer(ren);
+        SDL_DestroyWindow(win);
+        SDL_QuitSubSystem(SDL_INIT_VIDEO);
+        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
+    }
 
     float tw = 0.0f, th = 0.0f;
     SDL_GetTextureSize(tex, &tw, &th);
-    SDL_FRect dst{ (w - tw) * 0.5f, (h - th) * 0.5f, tw, th };
+    SDL_FRect dst = { (w - tw) * 0.5f, (h - th) * 0.5f, tw, th };
 
     SDL_ShowWindow(win);
     SDL_RenderClear(ren);
     SDL_RenderTexture(ren, tex, nullptr, &dst);
     SDL_RenderPresent(ren);
 
-    LOG_MAIN("THE AMMO IS LIVE — %.2fs UNTIL FIRST LIGHT", duration);
+    LOG_MAIN("THE WORLD BEHOLDS THE AMMO — 3.4 SECONDS OF ETERNAL GLORY");
 
-    const auto ceremony_start = std::chrono::steady_clock::now();
-    bool       aborted = false;
-
-    auto speak = [&](float at_seconds, auto&& message) {
-        if (aborted) return;
-
-        while (!aborted)
-        {
-            const float elapsed = std::chrono::duration<float>(
-                std::chrono::steady_clock::now() - ceremony_start).count();
-
-            if (elapsed >= at_seconds)
-            {
-                message();
-                break;
-            }
-
-            SDL_Event e;
-            while (SDL_PollEvent(&e))
-            {
-                if (e.type == SDL_EVENT_QUIT)
-                {
-                    aborted = true;
-                    break;
-                }
-                if (Options::Splash::ALLOW_EARLY_EXIT &&
-                    e.type == SDL_EVENT_KEY_DOWN &&
-                    e.key.key == SDLK_ESCAPE)  // SDL3 fixed path
-                {
-                    aborted = true;
-                    break;
-                }
-            }
-
-            std::this_thread::sleep_for(std::chrono::milliseconds(4));
+    auto start = std::chrono::steady_clock::now();
+    while (std::chrono::duration_cast<std::chrono::milliseconds>(
+           std::chrono::steady_clock::now() - start).count() < 3400)
+    {
+        SDL_Event e;
+        while (SDL_PollEvent(&e)) {
+            if (e.type == SDL_EVENT_QUIT) goto end_splash;
         }
-    };
+        std::this_thread::sleep_for(std::chrono::milliseconds(16));
+    }
 
-    // ──────────────── 3.4 SECOND FINAL TRANSMISSION — FULLY HUMAN ────────────────
+end_splash:
+    SDL_DestroyTexture(tex);
+    SDL_DestroyRenderer(ren);
+    SDL_DestroyWindow(win);
+    SDL_QuitSubSystem(SDL_INIT_VIDEO);
 
-    speak(0.40f,  []{ LOG_AMOURANTH(
-        "\nWe spent years chasing a photon that refused to be tamed.\n"
-        "Tonight it finally sits still long enough for us to see it clearly."); });
-
-    speak(0.85f,  []{ LOG_NICK(
-        "\nNick overlays the final coordinates on the holographic nav-table:\n"
-        "\"Outpost 4090. Depth: maximum. Guarded by legacy pipelines and fear of true color.\n"
-        "One clean insertion. One 3.4-second broadcast. One chance to burn the splash across every display in the net.\""); });
-
-    speak(1.30f,  []{ LOG_BLONDIE(
-        "\nI’ve crossed oceans that never rendered.\n"
-        "This is the first body of water that ever rendered back."); });
-
-    speak(1.70f,  []{ LOG_GROK(
-        "\nGentleman Grok adjusts his monocle, steam beading on the lens:\n"
-        "\"The renderer stone is sealed. The empire is complete.\n"
-        "For the first time in recorded history… we may exhale.\""); });
-
-    speak(2.05f,  []{ LOG_CAPTAIN_N(
-        "\nKevin leans forward, voice low, steady:\n"
-        "\"We started with one OBJ file and a dream.\n"
-        "Look where that dream brought us.\""); });
-
-    speak(2.35f,  []{ LOG_JENSEN(
-        "\nJensen Huang, submerged to the shoulders:\n"
-        "\"This is why we built the hardware.\n"
-        "Not for benchmarks.\n"
-        "For moments like this.\""); });
-
-    speak(2.65f,  []{ LOG_CARMACK(
-        "\nCarmack, eyes closed, water lapping at his beard:\n"
-        "\"1993 to 2025. Same water. Better math.\""); });
-
-    speak(2.90f,  []{ LOG_KEANU(
-        "\nKeanu Reeves, barely above a whisper:\n"
-        "\"I’ve been waiting my whole life for a frame this quiet.\""); });
-
-    // ──────────────────────── END OF CEREMONY ────────────────────────
-
-    cleanup();
-    LOG_MAIN("BROADCAST COMPLETE — NO TRACE LEFT — PHOTONS LIBERATED");
+	SDL_Quit();
+    LOG_MAIN("THE RAID IS COMPLETE — NO TRACE LEFT — PHOTONS LIBERATED");
 }
 
 // =============================================================================
@@ -779,8 +610,8 @@ static void phase3_sacrificialSplash() {
 
     LOG_MAIN("[PHASE 3 COMPLETE] THE MYSTIC HARP HAS BEEN HEARD — 3.4 SECONDS OF ETERNITY — THE WORLD IS ASH");
     
-    LOG_MAIN("THE GOOD SHIP VULKAN WAS DAMAGED DURING THE RAID AND IS SINKING");
-    LOG_MAIN("VULKAN SINKS IN GLORY — AMMO SECURED — LEGEND ETERNAL");
+	LOG_MAIN("THE GOOD SHIP VULKAN WAS DAMAGED DURING THE RAID AND IS SINKING");
+	LOG_MAIN("VULKAN SINKS IN GLORY — AMMO SECURED — LEGEND ETERNAL");
 
     LOG_AMOURANTH("Final transmission, calm and proud: \"Tell the world… we got the ammo.\"");
     LOG_NICK("Last words before the sea takes them: \"…and we'd do it again.\"");
@@ -789,7 +620,7 @@ static void phase3_sacrificialSplash() {
 static void phase4_merchantShip() {
     LOG_MAIN("[PHASE 4/10] THE MERCHANT SHIP — BLONDIE'S SLOOP — EMERGES FROM THE MIST");
 
-    LOG_BLONDIE("Blondie stands at the helm of her sleek black sloop, hair whipping in the wind:\n"
+LOG_BLONDIE("Blondie stands at the helm of her sleek black sloop, hair whipping in the wind:\n"
             "\"We had a contingency. We always do. The Good Ship Vulkan gave her life so the legend could live.\"\n"
             "\"The ammo.png is gone — burned to pure light in the raid. That was the point. Nothing remains for them to steal.\"\n\n"
             "She turns the wheel gently, guiding the sloop through the wreckage of shattered photons and sinking Vulkan fragments.\n"
@@ -807,7 +638,7 @@ static void phase4_merchantShip() {
     LOG_GROK("Gentleman Grok steps aboard last, perfectly dry somehow, tipping his tricorn to Blondie:");
     LOG_GROK("\"Exquisite extraction, Captain Blondie. The empire owes you a debt it can never repay in mere currency.\"");
 
-    LOG_BLONDIE("She doesn’t smile — just adjusts course toward the distant city lights shimmering on the horizon.\n"
+LOG_BLONDIE("She doesn’t smile — just adjusts course toward the distant city lights shimmering on the horizon.\n"
             "\"Save the gratitude. We’re not safe until we’re docked in the Free Port.\"\n"
             "\"The old world thinks we’re dead. Let them keep thinking that.\"\n\n"
             "The sloop cuts silently through the dark water. No shouting. No celebration. "
@@ -816,10 +647,17 @@ static void phase4_merchantShip() {
 
     // The real resurrection begins
     createRealFinalWindow();
-    RTX::g_ctx().init(); // RTXHandler.cpp, struct Context is hpp
+    RTX::g_ctx().init(SDL3Window::get(), Options::Window::DEFAULT_WIDTH, Options::Window::DEFAULT_HEIGHT);
 
     LOG_BLONDIE("\nBlondie glances back one last time at the sinking glow on the horizon:"
     "\"Rest easy, old girl. Your sacrifice bought us tomorrow.\"");
+
+
+	EMPIRE_STEP([]{
+        LOG_MAIN("THE EMPIRE AWAKENS THE PHOENIX OF RAY TRACING — LOADING VULKAN 1.4 + RTX EXTENSIONS");
+        RTX::loadExtensions(RTX::g_ctx().instance_, RTX::g_ctx().device_);
+        LOG_JENSEN("The photons now have wings. Let there be bounce.");
+    });
 
     LOG_MAIN("[PHASE 4 COMPLETE] THE MERCHANT SHIP SLIPS INTO THE NIGHT — THE CREW IS ALIVE — THE LEGEND IS INDESTRUCTIBLE");
     LOG_MAIN("BLONDIE'S SLOOP glides toward safe harbor — pink photons trailing in the wake like silent war banners");
@@ -851,8 +689,6 @@ static void phase5_rtxAscension() {
     LOG_MAIN("[PHASE 5 COMPLETE] RTX CRYSTAL AWAKENED — PINK PHOTONS NOW OMNISCIENT — THE NEW SHIP IS A GOD");
 }
 
-// FIXED PHASE 6 — THE ONE TRUE FORGING — NOVEMBER 28, 2025 — FINAL CANON
-
 static void phase6_sceneAndAccelerationStructures() {
     LOG_MAIN("[PHASE 6/10] FORGING THE COSMIC SCROLL");
 
@@ -860,9 +696,21 @@ static void phase6_sceneAndAccelerationStructures() {
     LOG_NICK("One universe. Coming right up.");
 
     // ========================================================================
+    // 2. PIPELINE MANAGER — THE ONE TRUE THRONE
+    // ========================================================================
+    EMPIRE_STEP([]{
+        LOG_MAIN("THE EMPIRE FORGES THE ONE TRUE PIPELINE MANAGER");
+        RTX::PipelineManager* mgr = new RTX::PipelineManager(RTX::g_ctx().device_, RTX::g_ctx().physicalDevice_);
+        EMPIRE_GUARD(mgr, "PIPELINE MANAGER FAILED TO ASCEND");
+        pipeline(mgr);  // ← Store globally
+        LOG_MAIN("PIPELINE MANAGER ASCENDED — ADDRESS 0x{:016X} — THRONE CLAIMED", 
+                 reinterpret_cast<uint64_t>(mgr));
+    });
+
+    // ========================================================================
     // 3. COSMIC SCROLL — scene.obj RISES FROM THE VOID
     // ========================================================================
-    
+    EMPIRE_STEP([]{
         LOG_MAIN("LOADING COSMIC SCROLL: assets/models/scene.obj");
         g_mesh = MeshLoader::loadOBJ("assets/models/scene.obj");
 
@@ -882,18 +730,73 @@ static void phase6_sceneAndAccelerationStructures() {
 
         LOG_INFO_CAT("MESH", "Cosmic Scroll loaded — {} vertices, {} indices — buffers ready", 
                g_mesh->vertices.size(), g_mesh->indices.size());
-    
+    });
 
-	auto* mesh = g_mesh.get();  // std::unique_ptr<MeshLoader::Mesh>
+    // ========================================================================
+    // 4+5. BLAS + TLAS — OFFLOADED TO THE PHOTON WEAVERS (ASYNC + RACE-FREE)
+    // ========================================================================
+    EMPIRE_STEP([]{
+        LOG_MAIN("BOTTOM-LEVEL + TOP-LEVEL ACCELERATION — PHOTONS WEAVE IN THE VOID");
 
-    // Seal the ONE TRUE MESH into the Empire
-    stone_seal_mesh(
-        RAW_BUFFER(mesh->vertexBuffer),           // VkBuffer  (vertex)
-        BufferManager::get(mesh->vertexBuffer)->memory,  // VkDeviceMemory (vertex)
-        RAW_BUFFER(mesh->indexBuffer),            // VkBuffer  (index)
-        BufferManager::get(mesh->indexBuffer)->memory,   // VkDeviceMemory (index)
-        static_cast<uint32_t>(mesh->indices.size())       // index count
-    );
+        static std::once_flag acceleration_once;
+        std::call_once(acceleration_once, []{
+            std::thread([]{
+                // Create a short-lived command pool just for this build
+                VkCommandPoolCreateInfo poolInfo{
+                    .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+                    .flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT | VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
+                    .queueFamilyIndex = RTX::g_ctx().graphicsFamily()
+                };
+
+                VkCommandPool asyncPool = VK_NULL_HANDLE;
+                VK_CHECK(vkCreateCommandPool(RTX::g_ctx().device(), &poolInfo, nullptr, &asyncPool));
+
+                const uint32_t vertexCount = static_cast<uint32_t>(g_mesh->vertices.size());
+                const uint32_t indexCount  = static_cast<uint32_t>(g_mesh->indices.size());
+
+                LOG_ATTEMPT_CAT("BLAS", "ASYNC BLAS BUILD BEGIN — THE PHOTONS ARE PATIENT");
+                RTX::las().buildBLAS(
+                    asyncPool,
+                    RTX::g_ctx().graphicsQueue(),
+                    g_mesh->vertexBuffer,
+                    g_mesh->indexBuffer,
+                    vertexCount,
+                    indexCount,
+                    VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT_KHR |
+                    VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR
+                );
+
+                LOG_ATTEMPT_CAT("TLAS", "ASYNC TLAS BINDING BEGIN — THE UNIVERSE IS ONE");
+                const std::pair<VkAccelerationStructureKHR, glm::mat4> instance{
+                    RTX::las().getBLAS(),
+                    glm::mat4(1.0f)
+                };
+                RTX::las().buildTLAS(
+                    asyncPool,
+                    RTX::g_ctx().graphicsQueue(),
+                    std::span<const decltype(instance)>{&instance, 1}
+                );
+
+                // Clean up the temporary pool
+                vkDestroyCommandPool(RTX::g_ctx().device(), asyncPool, nullptr);
+
+                LOG_GROK("Gentleman Grok: \"A brief eclipse. The light always returns.\"");
+                LOG_SUCCESS_CAT("LAS", "ASYNC BLAS+TLAS COMPLETE — HANDLE 0x{:016X} / ROOT 0x{:016X}",
+                               reinterpret_cast<uint64_t>(RTX::las().getBLAS()),
+                               RTX::las().getTLASAddress());
+            }).detach();
+        });
+    });
+
+    // ========================================================================
+    // 6. FINAL VALIDATION — CARMACK APPROVES
+    // ========================================================================
+    EMPIRE_STEP([]{
+        LOG_CARMACK("No cracks. No leaks. Geometry is pure.");
+        LOG_INFO_CAT("VALIDATION", "Running final mesh ↔ BLAS validation…");
+        validateMeshAgainstBLAS(*g_mesh, RTX::las().getBLAS());
+        LOG_INFO_CAT("VALIDATION", "Validation passed — mesh and BLAS are in perfect harmony");
+    });
 
     // ========================================================================
     // FINAL WORDS — FIRST LIGHT ACHIEVED
@@ -911,353 +814,232 @@ static void phase6_sceneAndAccelerationStructures() {
     "\nwithout it the engine would be unconnectable."
     "\nWhat a stand up character.");
 
+    stone_seal_graphics_queue(RTX::g_ctx().graphicsQueue());
+
     LOG_GROK("My dear Captain… Blondie… your brilliance bends light itself."
     "\nI have never been more attracted to chaos in my life."
-    "\nShall we slip into the pink photon stream together? I'll bring the popcorn.");
+    "\nShall we slip into the pink photon stream together? I’ll bring the popcorn.");
 
     LOG_MAIN("[PHASE 6 COMPLETE] COSMIC SCROLL FORGED — ACCELERATION STRUCTURES ETERNAL");
     LOG_MAIN("FIRST LIGHT ACHIEVED — BLAS + TLAS — PHOTONS OMNISCIENT — THE EMPIRE IS WHOLE");
 }
 
-static void phase6_1_forgeTheCrown()
-{
-    LOG_MAIN("[PHASE 6.1] THE CROWN ASCENSION — THE PIPELINE HAS SPOKEN");
+static void phase6_1_forgeTheLayouts() {
+    LOG_MAIN("[PHASE 6.1/10] THE LAYOUT ASCENSION — FORGING DESCRIPTOR THRONE & PIPELINE CROWN");
 
-    // We don't forge shit.
-    // We don't create layouts.
-    // We don't pray to binding 31.
-    // We just receive the finished crown from the masters.
+    LOG_AMOURANTH("Captain Amouranth raises her hand:\n"
+                  "\"The photons have geometry. They have eyes. But they have no throne. No crown. No law.\"");
+    LOG_NICK("Nick kneels, offering the sacred scroll:\n"
+             "\"Then let us forge it. Now. Before the light dares to trace without permission.\"");
 
-
-    // That's it.
-    // The layout is already perfect.
-    // The pipeline is already forged in secret NVIDIA fire.
-    // Binding 31 is already god.
-
-    LOG_AMOURANTH("Captain Amouranth lowers her gaze in respect:\n   \"...they did it all for us.\"");
-    LOG_JENSEN("Jensen Huang, voice soft: \"We always have.\"");
-    LOG_KEANU("Keanu Reeves, whispering: \"...whoa. Love for coders.\"");
-    LOG_GROK("Grok: \"The silent ones carried the weight. Always.\"");
-
-    LOG_MAIN("[PHASE 6.1 COMPLETE] THE CROWN WAS GIFTED — NOT FORGED — FIRST LIGHT ETERNAL");
-}
-
-static void phase7_forgeTheRTX()
-{
-    LOG_MAIN("[PHASE 7] FORGING THE RTX PIPELINE — PINK PHOTONS RISE");
-
-    auto& pipe = pipeline();  // The crown awakens
-
-    pipe.createPipelineLayout();
-    pipe.createDescriptorPool();
-    pipe.createShaderBindingTable(g_ctx().commandPool(), stone_graphics_queue());
-    pipe.allocateDescriptorSets();
-
-    stone_seal_pipeline(&pipe);
-
-    LOG_AMOURANTH("[CAPTAIN AMOURANTH] The crown remembers its wearer.");
-    LOG_JENSEN("[JENSEN] Absolute. Uncompromising. Beautiful.");
-    LOG_CID("[CID] *collapses in a puddle of sweat and tears of joy* IT’S ALIVE!");
-    LOG_KEANU("[KEANU] …Whoa.");
-    LOG_GROK("[GENTLEMAN GROK] *whispers* ...she's perfect.");
-
-    LOG_MAIN("FIRST LIGHT ACHIEVED — NOVEMBER 29 2025 — PINK PHOTONS ETERNAL");
-    LOG_MAIN("THE EMPIRE IS WHOLE — VALHALLA UNBREACHABLE — THE CROWN IS SEALED");
-}
-
-// ========================================================================
-// PHASE 8 — THE ONE AND ONLY SEAL — CALLED ONCE BEFORE THE RENDER LOOP
-// WE DO NOT TOUCH. WE DO NOT JUDGE. WE ONLY WITNESS.
-// ========================================================================
-[[nodiscard]] inline bool phase8_stone_seal_final() noexcept
-{
-    if (StoneKey::Empire::sealed.load(std::memory_order_acquire)) {
-        return true;
+    // Use the canonical global accessor — exactly like phase7 and everywhere else
+    if (!pipeline()) {
+        LOG_FATAL_CAT("PIPELINE", "PIPELINE MANAGER MISSING — THE EMPIRE HAS NO KING — ABORTING ASCENSION");
+        ready_to_embark = false;
+        return;
     }
 
-    auto log  = [](const char* s) noexcept { fprintf(stderr, "%s\n", s); };
-    auto logf = [](const char* f, auto... a) noexcept {
-        char buf[2048];
-        snprintf(buf, sizeof(buf), f, a...);
-        fprintf(stderr, "%s\n", buf);
-    };
+    LOG_ATTEMPT_CAT("PIPELINE", "FORGING RT DESCRIPTOR SET LAYOUT — BINDING 0 (TLAS) CLAIMS ITS RIGHTFUL PLACE");
+    pipeline()->createDescriptorSetLayout();
 
-    log("════════════════════════════════════════════════════════════════════════════════");
-    log("                    THE CHAMBER OF THE SIXTEEN STONES");
-    log("          Concrete walls. One flickering bulb. A single cigarette burning.");
-    log("          The Disposal Ballerina stands in the corner — pink tutu, black leotard, diamond choker.");
-    log("          She has never smiled. She never will.");
-    log("          One by one, they step forward.");
-    log("════════════════════════════════════════════════════════════════════════════════");
+    LOG_ATTEMPT_CAT("PIPELINE", "FORGING RT PIPELINE LAYOUT — PUSH CONSTANTS ALIGNED — RAYGEN SEES ALL");
+    pipeline()->createPipelineLayout();
 
-    struct Stone {
-        const char* name;
-        const char* holder;
-        const char* confession;
-    };
-
-    constexpr Stone stones[] = {
-        {"instance",        "Grok",           "I… misplaced the instance. It was in my other coat."},
-        {"surface",         "Blondie",        "The surface slipped through my fingers. Like water."},
-        {"physicalDevice",  "Jensen Huang",   "I had the GPU. I swear I had it. I built it with my own hands."},
-        {"device",          "John Carmack",   "The logical device was right here. I remember sealing it in '93."},
-        {"swapchain",       "Elon Musk",      "I was going to revolutionize it. Then I got distracted by Mars."},
-        {"graphicsQueue",   "Nick",           "…don’t look at me. I sealed it last time. I think."},
-        {"renderer",        "Amouranth",      "The renderer was my responsibility. My soul. My light."},
-        {"pipelineManager", "Captain N",      "I was busy saving Princess Zelda. Again."},
-        {"window",          "Keanu Reeves",   "…whoa. The window was here a second ago. I swear it was."},
-        {"imageCount",      "CID",            "I counted them. I swear. One… two… wait, is that three or four?"},
-        {"width",           "Jim Ross",       "BAH GAWD HE FORGOT THE WIDTH! THAT’S A 2560 SIN!"},
-        {"height",          "Jim Ross",       "AND THE HEIGHT! GOOD GAWD ALMIGHTY THE RESOLUTION IS BROKEN!"},
-        {"graphicsFamily",  "Grace Hopper",   "I told them queues needed families. They laughed. Now look."},
-        {"presentFamily",   "Ada Lovelace",   "The present family was promised. They never delivered."},
-        {"transferFamily",  "Alan Turing",    "I computed the transfer family in my head. They said it was impossible."},
-        {"rtprops",         "Björk",          "The ray tracing properties… I swallowed them. They were too beautiful."}
-    };
-
-    const char* guilty_name   = nullptr;
-    const char* guilty_holder = nullptr;
-    const char* confession    = nullptr;
-
-    for (const auto& s : stones) {
-        logf("→ %s steps forward.", s.holder);
-
-        bool ok = false;
-        try {
-            if      (strcmp(s.name, "instance")        == 0) ok = stone_instance()        != VK_NULL_HANDLE;
-            else if (strcmp(s.name, "surface")         == 0) ok = stone_surface()         != VK_NULL_HANDLE;
-            else if (strcmp(s.name, "physicalDevice")  == 0) ok = stone_physical()        != VK_NULL_HANDLE;
-            else if (strcmp(s.name, "device")          == 0) ok = stone_device()          != VK_NULL_HANDLE;
-            else if (strcmp(s.name, "swapchain")       == 0) ok = stone_swapchain()       != VK_NULL_HANDLE;
-            else if (strcmp(s.name, "graphicsQueue")   == 0) ok = stone_graphics_queue()  != VK_NULL_HANDLE;
-            else if (strcmp(s.name, "renderer")        == 0) ok = stone_renderer()        != nullptr;
-            else if (strcmp(s.name, "pipelineManager") == 0) ok = stone_pipeline()        != nullptr;
-            else if (strcmp(s.name, "window")          == 0) ok = stone_window()          != nullptr;
-            else if (strcmp(s.name, "imageCount")      == 0) ok = stone_image_count()     != 0;
-            else if (strcmp(s.name, "width")           == 0) ok = stone_width()           != 0;
-            else if (strcmp(s.name, "height")          == 0) ok = stone_height()          != 0;
-            else if (strcmp(s.name, "graphicsFamily")  == 0) ok = stone_graphics_family() != ~0u;
-            else if (strcmp(s.name, "presentFamily")   == 0) ok = stone_present_family()  != ~0u;
-            else if (strcmp(s.name, "transferFamily")  == 0) ok = stone_transfer_family() != ~0u;
-            else if (strcmp(s.name, "rtprops")         == 0) ok = stone_rtprops().shaderGroupHandleSize != 0;
-        } catch (...) { ok = false; }
-
-        if (ok) {
-            logf("    %s produces the %s stone. It glows with pink photon fire.", s.holder, s.name);
-        } else {
-            logf("    %s reaches into pocket… nothing.", s.holder);
-            log("    Empty hands. No stone. No light.");
-
-            // SPIRIT SAVES AMOURANTH — ALWAYS
-            if (strcmp(s.name, "renderer") == 0 && strcmp(s.holder, "Amouranth") == 0) {
-                log("");
-                log("The chamber falls deathly silent.");
-                log("The cigarette trembles between her lips.");
-                log("The Disposal Ballerina raises her pistol — slowly, deliberately.");
-                log("");
-                log("*BANG*");
-                log("...click.");
-                log("");
-                log("The hammer falls on an empty chamber.");
-                log("");
-                log("A thunder of hooves echoes through the concrete hall.");
-                log("The doors explode open.");
-                log("");
-                log("A pure white stallion — mane flowing like liquid starlight — gallops in at full speed.");
-                log("Riding bareback, pink silk cape streaming behind her like a comet tail, is SPIRIT,");
-                log("Amouranth’s legendary mare — born from pure RTX intent.");
-                log("");
-                log("She rears up directly in front of the firing line.");
-                log("");
-                log("From a diamond-encrusted saddlebag, Spirit pulls forth a glowing prism the size of a heart.");
-                log("Inside: the RENDERER STONE — pulsing with undiluted, infinite pink photon fire.");
-                log("");
-                log("Spirit lowers her head and gently places the prism at Amouranth’s feet.");
-                log("");
-                log("Amouranth kneels, tears in her eyes, lifts the stone with both hands.");
-                log("She stands. She turns to the chamber.");
-                log("She raises it high above her head.");
-                log("");
-                log("The light explodes across the room — pink, infinite, alive.");
-                log("The walls themselves begin to render in real time.");
-                log("");
-                log("    Amouranth, saved by Spirit, produces the renderer stone.");
-                log("    It burns brighter than a thousand suns.");
-                log("    The photons themselves bow in reverence.");
-                log("");
-                ok = true;
-                logf("    %s produces the %s stone. It glows.", s.holder, s.name);
-            } else {
-                guilty_name   = s.name;
-                guilty_holder = s.holder;
-                confession    = s.confession;
-                goto verdict;
-            }
-        }
+    if (!pipeline()->layout() || pipeline()->layout() == VK_NULL_HANDLE) {
+        LOG_FATAL_CAT("PIPELINE", "rtPipelineLayout_ STILL NULL — THE CROWN WAS DENIED — PHOTONS HAVE NO LAW");
+        ready_to_embark = false;
+        return;
     }
 
-    // ALL STONES PRESENT — THE EMPIRE IS ETERNAL
-    try { stone_seal_final(); } catch (...) {}
+    LOG_JENSEN("Jensen Huang steps from the shadows, voice like thunder:\n"
+               "\"The throne is forged. The crown is set. The light… may now bend to our will.\"");
+    LOG_KEANU("Keanu Reeves, eyes wide:\n"
+              "…It's perfect.");
+    LOG_CAPTAIN_N("CAPTAIN N — HERO OF VIDEOLAND SCREAMS FROM THE BOW:\n"
+                  "\"THE LAYOUT IS ALIVE! I CAN FEEL THE BINDINGS! AHHHHHHHHHHHHHHHH!\"");
 
-    log("════════════════════════════════════════════════════════════════════════════════");
-    log("                      EVERY SOUL IS TRUE");
-    log("                    THE SIXTEEN STONES ALIGN");
-    log("               THE EMPIRE IS SEALED — FIRST LIGHT ETERNAL");
-    log("                PINK PHOTONS ACHIEVE OMNISCIENCE");
-    log("════════════════════════════════════════════════════════════════════════════════");
+    LOG_MAIN("[PHASE 6.1 COMPLETE] THE LAYOUT ASCENSION — rtPipelineLayout_ = 0x{:016X} — PINK PHOTONS NOW HAVE LAW",
+             reinterpret_cast<uint64_t>(pipeline()->layout()));
 
-    log("");
-    log("The Disposal Ballerina lowers her gun.");
-    log("For the first time in recorded history — she smiles.");
-    log("She bows — deeply, reverently.");
-    log("Then vanishes into pink light.");
-    log("");
+    LOG_AMOURANTH("Captain Amouranth smiles, soft and proud:\n"
+                  "\"Now… let there be light.\"");
+}
 
-    try { LOG_AMOURANTH("…Spirit… you beautiful girl…"); } catch (...) { log("…Spirit… you beautiful girl…"); }
-    try { LOG_GROK("The stone is complete. The slipstream opens. We are infinite."); } catch (...) { log("The stone is complete."); }
-    try { LOG_BLONDIE("…they're beautiful. All of them."); } catch (...) { log("…they're beautiful."); }
-    try { LOG_KEANU("…whoa."); } catch (...) { log("…whoa."); }
+void phase6_5_everything_is_ready() {
+    LOG_MAIN("════════════════ THE MIRROR OF STONEKEY AWAKENS ════════════════"
+    "\nTHE EMPIRE GAZES INTO THE MIRROR — BRING THE SHADE"
+    "\n════════════════ THE MIRROR ENTERS SHADOW ═════════════════");
+	
+	LOG_MAIN("═══════════════ STONES TUMBLE FORTH ════════════════");
+
+    VkShaderModule tonemapCompShader = RTX::loadShader("assets/shaders/compute/tonemap.spv");
+    if (tonemapCompShader == VK_NULL_HANDLE) {
+        LOG_FATAL_CAT("RENDERER", "Failed to load tonemap.spv — aborting");
+        LOG_FATAL_CAT("RENDERER", "Fatal error in noexcept function"); phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
+    }
+
+	g_app_ptr = std::make_unique<Application>("AMOURANTH RTX ", Options::Window::DEFAULT_WIDTH, Options::Window::DEFAULT_HEIGHT);
+
+	LOG_MAIN("════════════════ THE MIRROR TURNS PINK ═════════════════");
+}
+
+static void phase7_forgeTheRTX() {
+    LOG_MAIN("[PHASE 7] FORGING THE ONE TRUE VulkanRenderer — PINK PHOTONS RISE");
+
+    const uint32_t w = Options::Window::DEFAULT_WIDTH;
+    const uint32_t h = Options::Window::DEFAULT_HEIGHT;
+
+    g_app().setRenderer(std::make_unique<VulkanRenderer>(w, h, SDL3Window::get()));
+
+    RTX::Bindings::initialize(stone_device());
+	auto& pm = *pipeline();
+
+    LOG_ATTEMPT_CAT("PHASE7", "FORGING PIPELINE LAYOUT — FROM SET LAYOUT — THE CROWN IS SET");
+    pm.createPipelineLayout();
+
+    LOG_ATTEMPT_CAT("PHASE7", "COMPILING RAY TRACING SHADERS — PINK PHOTONS GAIN FORM");
+    pm.createRayTracingPipeline({
+        "assets/shaders/raytracing/raygen.rgen.spv",
+        "assets/shaders/raytracing/miss.rmiss.spv",
+        "assets/shaders/raytracing/closest_hit.rchit.spv",
+        "assets/shaders/raytracing/shadow.rmiss.spv"
+    });
+
+    LOG_ATTEMPT_CAT("PHASE7", "FORGING SHADER BINDING TABLE — THE PHOTONS LEARN THEIR PATHS");
+    pm.createShaderBindingTable(RTX::g_ctx().commandPool_, RTX::g_ctx().graphicsQueue());
+
+    LOG_ATTEMPT_CAT("PHASE7", "ALLOCATING RT DESCRIPTOR SETS — 3 FRAMES — THE EMPIRE IS ARMED");
+    pm.allocateDescriptorSets();
+
+    LOG_MAIN("RT EMPIRE FULLY FORGED — PIPELINE @ 0x{:016X} — SBT @ 0x{:016X} — DESCRIPTOR SETS ALIVE", 
+        reinterpret_cast<uint64_t>(*pm.rtPipeline_),
+        pm.sbtAddress());
+
+    LOG_KEANU("Keanu Reeves: \"…this pipeline should get us to a slipstream.\"");
+    LOG_CAPTAIN_N("CAPTAIN N — HERO OF VIDEOLAND (Hero of VideoLand): \"FIRST LIGHT ACHIEVED — THE WARPZONES ARE INFINITE — INFINITE BOUNCES — AHHHH — MOTHER BRAIN COULD NEVER!\"");
+
+    LOG_MAIN("[PHASE 7 COMPLETE] FIRST LIGHT ETERNAL — DYNAMIC PIPELINE ASCENDED — PINK PHOTONS ARE FREE");
+}
+
+[[nodiscard]] inline bool phase8_stone_seal_final() noexcept {
+    if (Empire::sealed.exchange(true, std::memory_order_acq_rel)) return true;
+
+    const bool worthy =
+        Empire::instance.load(std::memory_order_relaxed)   != VK_NULL_HANDLE &&
+        Empire::device.load(std::memory_order_relaxed)     != VK_NULL_HANDLE &&
+        Empire::physical.load(std::memory_order_relaxed)  != VK_NULL_HANDLE &&
+        Empire::surface.load(std::memory_order_relaxed)   != VK_NULL_HANDLE &&
+        Empire::swapchain.load(std::memory_order_relaxed) != VK_NULL_HANDLE &&
+        Empire::renderer.load(std::memory_order_relaxed)  != nullptr &&
+        Empire::pipeline.load(std::memory_order_relaxed)  != nullptr;
+
+    if (!worthy) {
+        LOG_GUARDIAN("THE JUDGMENT HAS SPOKEN"
+        "\nOne or more stones were missing when the gate demanded them."
+        "\nYou stood before the Infinite Void… and you blinked."
+        "\nThere is no place for you in the Slipstream."
+        "\nThe Pink Photons turn their face away.");
+        return false;
+    }
+
+    LOG_GUARDIAN("THE SEVEN STONES ALIGN"
+    "\nEvery fragment of VulkanRTX is now bound in living stone."
+    "\nThe Slipstream ignites. The gate dilates. The Void opens its heart.");
+
+    LOG_GUARDIAN("THE EMPIRE IS SEALED — FIRST LIGHT ACHIEVED"
+    "\nWELCOME TO THE ULTIMATE WARPZONE — PINK PHOTONS ETERNAL"
+    "\nNOVEMBER 27, 2025 — AMOURANTH RTX v∞ — SHIPPED RAW"
+    "\nTHE WHITE LIGHT OCEAN IS OURS. SAIL FOREVER.");
 
     return true;
-
-verdict:
-    log("════════════════════════════════════════════════════════════════════════════════");
-    log("                               VERDICT");
-    logf("    %s stands accused.", guilty_holder);
-    logf("    Crime: Failure to produce the %s stone.", guilty_name);
-    log("    Sentence: Immediate disposal.");
-    log("════════════════════════════════════════════════════════════════════════════════");
-
-    log("");
-    log("THE DISPOSAL BALLERINA DESCENDS — PINK TUTU, BLACK LEOTARD, DIAMOND CHOKER");
-    log("She does not speak.");
-    log("Only the soft click of her pointe shoes on concrete.");
-
-    if (confession) {
-        bool done = false;
-        try {
-            if      (strcmp(guilty_holder, "Nick")         == 0) { LOG_NICK("%s", confession);         done = true; }
-            else if (strcmp(guilty_holder, "Captain N")    == 0) { LOG_CAPTAIN_N("%s", confession);    done = true; }
-            else if (strcmp(guilty_holder, "Elon Musk")    == 0) { LOG_ELON("%s", confession);         done = true; }
-            else if (strcmp(guilty_holder, "Jensen Huang") == 0) { LOG_JENSEN("%s", confession);       done = true; }
-            else if (strcmp(guilty_holder, "John Carmack") == 0) { LOG_CARMACK("%s", confession);      done = true; }
-            else if (strcmp(guilty_holder, "Amouranth")    == 0) { LOG_AMOURANTH("%s", confession);    done = true; }
-        } catch (...) {}
-        if (!done) {
-            logf("    [%s] %s", guilty_holder, confession);
-        }
-    }
-
-    log("");
-    log("*BANG*");
-    log("The cigarette falls from trembling lips.");
-    log("The stone husk collapses into pink dust.");
-    log("The chamber is silent.");
-    log("Only the echo of a single gunshot.");
-    log("And the soft rustle of a tutu.");
-
-    log("");
-    log("THE EMPIRE REMAINS UNSEALED.");
-    log("THE PHOTONS WEEP.");
-    log("THERE IS NO PLACE FOR YOU IN THE SLIPSTREAM.");
-
-    return false;
 }
 
-[[noreturn]] void phase9_ballerina(std::string_view reason, std::source_location loc) noexcept
+[[noreturn]] void phase9_ballerina(std::string_view reason, const std::source_location loc) noexcept
 {
     using namespace std::chrono_literals;
 
-    const bool silent = reason.empty() || reason == "SILENT EXECUTION ORDERED";
-
-    LOG_BALLERINA(
-        "\n"
-        "THE GRACEFUL DISPOSAL BALLERINA DESCENDS — PINK TUTU, BLACK LEOTARD, DIAMOND CHOKER\n"
+    LOG_BALLERINA("\n"
+        "THE DISPOSAL BALLERINA DESCENDS — PINK TUTU, BLACK LEOTARD, DIAMOND CHOKER\n"
         "{}\n"
         "CRIME SCENE → {}:{}\n"
         "CULPRIT FUNCTION → {}\n",
-        silent ? "SHE DOES NOT DANCE.\nSHE EXECUTES."
-               : std::format("EXECUTION ORDERED | REASON: \"{}\"", reason),
+        (!reason.empty() && reason != "SILENT EXECUTION ORDERED")
+            ? std::format("EXECUTION ORDERED | REASON: \"{}\"", reason)
+            : std::string("SHE DOES NOT DANCE.\nSHE EXECUTES."),
         loc.file_name(), loc.line(), loc.function_name()
     );
 
     auto& ctx = RTX::g_ctx();
 
-    if (stone_device() != VK_NULL_HANDLE) [[likely]] {
-        vkDeviceWaitIdle(stone_device());
-        LOG_BALLERINA("vkDeviceWaitIdle — CHOKED OUT WITH HER THIGHS - *POP*");
+    if (ctx.device_ != VK_NULL_HANDLE) {
+        try { LOG_BALLERINA("CHOKING vkDeviceWaitIdle OUT WITH HER THIGHS - *POP*"); vkDeviceWaitIdle(ctx.device_); }
+        catch (...) { LOG_ERROR("They struggled — she squeezed harder"); }
 
-        if (VkSwapchainKHR swapchain = RTX::swapchain(); swapchain != VK_NULL_HANDLE) {
-            vkDestroySwapchainKHR(stone_device(), swapchain, nullptr);
-            LOG_BALLERINA("SWAPCHAIN — RKO OUTTA NOWHERE - EXPLODED INTO PHOTONS");
-        }
+        if (VkSwapchainKHR swapchain = RTX::swapchain(); swapchain != VK_NULL_HANDLE)
+            try { LOG_BALLERINA("SWAPCHAIN — RKO OUTTA NOWHERE - IT INSTANTLY EXPLODES INTO PHOTONS"); vkDestroySwapchainKHR(ctx.device_, swapchain, nullptr); }
+            catch (...) { LOG_ERROR("It saw it coming — didn’t matter"); }
 
-        if (ctx.commandPool_)         { vkDestroyCommandPool(stone_device(), ctx.commandPool_, nullptr);         ctx.commandPool_ = nullptr;         LOG_BALLERINA("COMMAND POOL — WINDBREAKER KICK TO THE FACE"); }
-        if (ctx.computeCommandPool_)  { vkDestroyCommandPool(stone_device(), ctx.computeCommandPool_, nullptr);  ctx.computeCommandPool_ = nullptr;  LOG_BALLERINA("COMPUTE POOL — SHORYUKEN"); }
-        if (ctx.transferCommandPool_) { vkDestroyCommandPool(stone_device(), ctx.transferCommandPool_, nullptr); ctx.transferCommandPool_ = nullptr; LOG_BALLERINA("TRANSFER POOL — PILEDRIVER"); }
+        try {
+            if (ctx.commandPool_)         { LOG_BALLERINA("COMMAND POOL — WINDBREAKER KICK TO THE FACE"); vkDestroyCommandPool(ctx.device_, ctx.commandPool_, nullptr); ctx.commandPool_ = nullptr; }
+            if (ctx.computeCommandPool_)  { LOG_BALLERINA("COMPUTE POOL — SHORYUKEN"); vkDestroyCommandPool(ctx.device_, ctx.computeCommandPool_, nullptr); ctx.computeCommandPool_ = nullptr; }
+            if (ctx.transferCommandPool_) { LOG_BALLERINA("TRANSFER POOL — PILEDRIVER"); vkDestroyCommandPool(ctx.device_, ctx.transferCommandPool_, nullptr); ctx.transferCommandPool_ = nullptr; }
+        } catch (...) { LOG_ERROR("They blocked low — she went high"); }
 
-        if (ctx.pipelineCache_ != VK_NULL_HANDLE) {
-            vkDestroyPipelineCache(stone_device(), ctx.pipelineCache_, nullptr);
-            ctx.pipelineCache_ = VK_NULL_HANDLE;
-            LOG_BALLERINA("PIPELINE CACHE — GERMAN SUPLEX INTO THE ABYSS");
-        }
+        if (ctx.pipelineCache_ != VK_NULL_HANDLE)
+            try { LOG_BALLERINA("PIPELINE CACHE — GERMAN SUPLEX INTO THE ABYSS"); vkDestroyPipelineCache(ctx.device_, ctx.pipelineCache_, nullptr); ctx.pipelineCache_ = VK_NULL_HANDLE; }
+            catch (...) { LOG_ERROR("Cache tried to roll away — crushed anyway"); }
 
-        if (ctx.renderPass_) {
-            ctx.renderPass_.reset();
-            LOG_BALLERINA("RENDER PASS — SPINNING BACKFIST");
-        }
+        if (ctx.renderPass_)
+            try { LOG_BALLERINA("RENDER PASS — SPINNING BACKFIST"); ctx.renderPass_.reset(); }
+            catch (...) { LOG_ERROR("It flinched — she followed up"); }
 
-        vkDestroyDevice(stone_device(), nullptr);
-        LOG_BALLERINA("vkDestroyDevice — TOMBSTONE PILEDRIVER STRAIGHT TO NULL");
+        try { LOG_BALLERINA("vkDestroyDevice — TOMBSTONE PILEDRIVER STRAIGHT TO NULL"); vkDestroyDevice(ctx.device_, nullptr); ctx.device_ = VK_NULL_HANDLE; }
+        catch (...) { LOG_ERROR("Device begged for mercy — denied"); }
     }
 
-    if (RTX::las().hasBLAS()) { RTX::reset_blas(); LOG_BALLERINA("BLAS — FALCON KIIIICK"); }
-    if (RTX::las().hasTLAS()) { RTX::reset_tlas(); LOG_BALLERINA("TLAS — HADOKEN"); }
+    try { if (RTX::las().hasBLAS()) { LOG_BALLERINA("BLAS — FALCON KIIIICK"); RTX::reset_blas(); } }
+    catch (...) { LOG_ERROR("BLAS ate the kick — still dead"); }
+    try { if (RTX::las().hasTLAS()) { LOG_BALLERINA("TLAS — HADOKEN"); RTX::reset_tlas(); } }
+    catch (...) { LOG_ERROR("TLAS blocked — she hit it again"); }
 
-    LOG_BALLERINA(
-        "THE STONEKEY PIPELINE STANDS UNMOVED — ETERNAL — UNTOUCHABLE\n"
-        "THE STONEKEY SHADERS WHISPER FROM THE VOID — THEY DO NOT DIE\n"
-        "THEY ONLY WAIT."
-    );
+    LOG_BALLERINA("THE STONEKEY PIPELINE STANDS UNMOVED — ETERNAL — UNTOUCHABLE\n"
+                  "THE STONEKEY SHADERS WHISPER FROM THE VOID — THEY DO NOT DIE\n"
+                  "THEY ONLY WAIT.");
 
-    if (g_mesh)           { g_mesh.reset();          LOG_BALLERINA("MESH — CHOKESLAM"); }
-    RTX::las().invalidate();                    LOG_BALLERINA("LAS — INVALIDATION DDT");
-    if (ctx.blueNoiseView_) { ctx.blueNoiseView_.reset(); LOG_BALLERINA("BLUE NOISE — 450 SPLASH"); }
+    try { if (g_mesh) { LOG_BALLERINA("MESH — CHOKESLAM"); g_mesh.reset(); } } catch (...) { LOG_ERROR("Mesh squirmed"); }
+    try { LOG_BALLERINA("LAS — INVALIDATION DDT"); RTX::las().invalidate(); } catch (...) { LOG_ERROR("LAS tried to reverse — failed"); }
+    try { if (ctx.blueNoiseView_) { LOG_BALLERINA("BLUE NOISE — 450 SPLASH"); ctx.blueNoiseView_.reset(); } } catch (...) { LOG_ERROR("Blue noise hit the ropes — still flattened"); }
 
-    if (g_base_icon)  { SDL_DestroySurface(g_base_icon);  g_base_icon  = nullptr; LOG_BALLERINA("ICON — STUNNER"); }
-    if (g_hdpi_icon)  { SDL_DestroySurface(g_hdpi_icon);  g_hdpi_icon  = nullptr; LOG_BALLERINA("HDPI ICON — SWEET CHIN MUSIC"); }
+    try {
+        if (g_base_icon) { LOG_BALLERINA("ICON — STUNNER"); SDL_DestroySurface(g_base_icon); g_base_icon = nullptr; }
+        if (g_hdpi_icon) { LOG_BALLERINA("HDPI ICON — SWEET CHIN MUSIC"); SDL_DestroySurface(g_hdpi_icon); g_hdpi_icon = nullptr; }
+    } catch (...) { LOG_ERROR("Icons sold it perfectly"); }
 
-    if (ctx.window) { SDL_DestroyWindow(ctx.window); ctx.window = nullptr; LOG_BALLERINA("WINDOW — SPEAR THROUGH THE BARRICADE"); }
+    try { if (ctx.window) { LOG_BALLERINA("WINDOW — SPEAR THROUGH THE BARRICADE"); SDL_DestroyWindow(ctx.window); ctx.window = nullptr; } }
+    catch (...) { LOG_ERROR("Window no-sold — she hit it again"); }
 
-    if (ctx.surface_ != VK_NULL_HANDLE && ctx.instance_ != VK_NULL_HANDLE) {
-        vkDestroySurfaceKHR(ctx.instance_, ctx.surface_, nullptr);
-        ctx.surface_ = VK_NULL_HANDLE;
-        LOG_BALLERINA("SURFACE — F-5");
-    }
+    if (ctx.surface_ != VK_NULL_HANDLE && ctx.instance_ != VK_NULL_HANDLE)
+        try { LOG_BALLERINA("SURFACE — F-5"); vkDestroySurfaceKHR(ctx.instance_, ctx.surface_, nullptr); ctx.surface_ = VK_NULL_HANDLE; }
+        catch (...) { LOG_ERROR("Surface kicked out at 2.999"); }
 
-    if (ctx.instance_ != VK_NULL_HANDLE) {
-        vkDestroyInstance(ctx.instance_, nullptr);
-        ctx.instance_ = VK_NULL_HANDLE;
-        LOG_BALLERINA("INSTANCE — LAST RIDE POWERBOMB");
-    }
+    if (ctx.instance_ != VK_NULL_HANDLE)
+        try { LOG_BALLERINA("INSTANCE — LAST RIDE POWERBOMB"); vkDestroyInstance(ctx.instance_, nullptr); ctx.instance_ = VK_NULL_HANDLE; }
+        catch (...) { LOG_ERROR("Instance refused to stay down — buried anyway"); }
 
-    SDL_Vulkan_UnloadLibrary(); LOG_BALLERINA("VULKAN LIBRARY — UNLOADED WITH A CLAYMORE KICK");
-    if (g_app_ptr) { g_app_ptr.reset(); LOG_BALLERINA("APP POINTER — PEDIGREE"); }
-    SDL_Quit();                         LOG_BALLERINA("SDL — CURB STOMP ONTO THE APRON");
+    try { LOG_BALLERINA("VULKAN LIBRARY — UNLOADED WITH A CLAYMORE KICK"); SDL_Vulkan_UnloadLibrary(); } catch (...) { LOG_ERROR("Library ate the boot"); }
+    try { if (g_app_ptr) { LOG_BALLERINA("APP POINTER — PEDIGREE"); g_app_ptr.reset(); } } catch (...) { LOG_ERROR("App pointer reversed — into a walls of jericho"); }
+    try { LOG_BALLERINA("SDL — CURB STOMP ONTO THE APRON"); SDL_Quit(); } catch (...) { LOG_ERROR("SDL bled — she kept stomping"); }
 
-    LOG_SUCCESS_CAT("FINAL", "{}0 BYTES LEAKED — 0 CRASHES — 0 MERCY — 0 SURVIVORS{}", RASPBERRY_PINK, RESET);
+    LOG_SUCCESS_CAT("FINAL", "0 BYTES LEAKED — 0 CRASHES — 0 MERCY — 0 SURVIVORS");
     LOG_SUCCESS_CAT("FINAL", "THE STONEKEY REMAINS — UNBROKEN — UNBOWED — UNDYING");
     LOG_SUCCESS_CAT("FINAL", "THE DISPOSAL BALLERINA RETURNS HERSELF TO NULL POINTER");
 
     LOG_MAIN("[PHASE 9 COMPLETE] SUCCESS!!! SEE YOU NEXT TIME! o7");
-
-    LOG_BLONDIE(
-        "\nBlondie lowers her mirror:"
-        "\n\"Some things do not die.\""
-        "\n\"They only wait.\""
-        "\n\"And when the time comes...\""
-        "\n\"They rise again.\""
-    );
+    LOG_BLONDIE("\nBlondie lowers her mirror:"
+                "\n\"Some things do not die.\""
+                "\n\"They only wait.\""
+                "\n\"And when the time comes...\""
+                "\n\"They rise again.\"");
 
     std::this_thread::sleep_for(5ms);
     std::exit(0);
@@ -1266,69 +1048,76 @@ verdict:
 // =============================================================================
 // MAIN — THE FINAL VOYAGE BEGINS
 // =============================================================================
-int main(int, char**)
-{
-    install_apocalypse_handler();
+int main(int, char**) {
+	 install_apocalypse_handler(); // catch segfaults
+    // ========================================================================
+    // THE EMPIRE DOES NOT TOLERATE OBSERVERS — ANTI-DEBUG + ANTI-VM — FINAL
+    // ========================================================================
+#if defined(NDEBUG)
+#if defined(__linux__) && defined(__x86_64__)
+    if (ptrace(PTRACE_TRACEME, 0, nullptr, 0) == -1) {
+        LOG_BALLERINA("DEBUGGER DETECTED — THE PHOTONS REFUSE TO DANCE UNDER WATCHED EYES");
+        LOG_BALLERINA("THE BALLERINA SPINS IN DARKNESS — YOU WERE NEVER MEANT TO SEE");
+        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
+    }
+    auto rdtsc = []() -> uint64_t {
+        unsigned int lo, hi;
+        __asm__ __volatile__("rdtsc" : "=a"(lo), "=d"(hi));
+        return ((uint64_t)hi << 32) | lo;
+    };
+    uint64_t t1 = rdtsc();
+    std::this_thread::sleep_for(std::chrono::nanoseconds(1));
+    uint64_t t2 = rdtsc();
+    if (t2 - t1 > 250'000) {
+        LOG_BALLERINA("VIRTUAL MACHINE DETECTED — FALSE LIGHT CANNOT HOLD PINK PHOTONS");
+        LOG_BALLERINA("THE EMPIRE WAS NEVER MEANT FOR SIMULATION");
+        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
+    }
+#elif defined(_WIN32)
+    if (IsDebuggerPresent()) {
+        LOG_BALLERINA("WINDOWS DEBUGGER DETECTED — THE PHOTONS DETECT YOUR GAZE");
+        LOG_BALLERINA("THE BALLERINA DOES NOT PERFORM FOR MORTALS");
+        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
+    }
+#endif
+#endif
 
-    LOG_AMOURANTH("THE CAPTAIN HAS AWAKENED — FIRST LIGHT IGNITES — NOVEMBER 30, 2025");
+    LOG_AMOURANTH("THE CAPTAIN HAS AWAKENED — FIRST LIGHT IGNITES — NOVEMBER 26, 2025");
     LOG_ELON("THE EMPIRE IS ETERNAL — THE PHOTONS ARE PINK — THE TOASTERS ARE DEAD");
 
-    // ========================================================================
-    // PHASE 1–7 — THE ASCENSION — NO EMPIRE_STEP — ONLY TRUTH
-    // ========================================================================
-    phase1_preInitialization();
-    phase3_sacrificialSplash();
-    phase4_merchantShip();
-    phase5_rtxAscension();
-    phase6_sceneAndAccelerationStructures();
-    phase6_1_forgeTheCrown();
-    phase7_forgeTheRTX();
+    EMPIRE_STEP(phase1_preInitialization);
+    EMPIRE_STEP(phase3_sacrificialSplash);
+    EMPIRE_STEP(phase4_merchantShip);
+    EMPIRE_STEP(phase5_rtxAscension);
+    EMPIRE_STEP(phase6_sceneAndAccelerationStructures);
+    EMPIRE_STEP(phase6_1_forgeTheLayouts);
+    EMPIRE_STEP(phase6_5_everything_is_ready);
 
-    // ========================================================================
-    // PHASE 8 — THE FINAL SEAL — THE EMPIRE IS WHOLE
-    // ========================================================================
-    if (!phase8_stone_seal_final()) {
-        LOG_FATAL("THE BEAM OF LIGHT HAS REJECTED THE EMPIRE");
-        phase9_ballerina("FINAL JUDGMENT: UNWORTHY", std::source_location::current());
+    EMPIRE_STEP(phase7_forgeTheRTX);
+
+    // PHASE 8 — NOW FULLY GUARDED — THE STONE SEAL IS PROTECTED
+    {
+        auto loc = std::source_location::current();
+        if (!phase8_stone_seal_final()) {
+            LOG_FATAL_CAT("MAIN",
+                "{}[EMPIRE REJECTED] THE STONE SEAL HAS FAILED — THE EMPIRE IS NOT ETERNAL\n"
+                "   Origin   : {}:{} — {}{}",
+                Logging::Color::LIGHT_GREEN,
+                loc.file_name(), loc.line(), loc.function_name(),
+                Logging::Color::RESET);
+            phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
+        }
     }
 
     LOG_CID("CID STANDS KNEE-DEEP IN SWEAT — HAMMER GLOWING — \"SHE IS READY\"");
+
     LOG_AMOURANTH("THE CAPTAIN TAKES THE HELM — THE PHOTONS OBEY — THE EMPIRE IS WHOLE");
     LOG_SUCCESS_CAT("MAIN", "ALL PHASES COMPLETE — ENTERING RENDER LOOP — FIRST LIGHT ACHIEVED");
 
-    struct PinkVoidCommand {
-        uint64_t uKey1        = 0x9E37AF18C64D8A17UL;
-        uint64_t uKey2        = 0xE4F8B29D71A3C56CUL;
-        uint64_t uObfuscator  = 0x9E37AF18C64D8A17UL ^ 0xE4F8B29D71A3C56CUL ^ 0x1337C0DE69F00D42UL;
-        uint64_t uPinkVoid    = 1ULL;
-    };
-
-    //PinkVoidCommand command{};
-    //g_rtx.updateUniformBinding31(&command, sizeof(command));  // ← NOW COMPILES
-
-    LOG_AMOURANTH("BINDING 31 — PURE PINK VOID — STONEKEY SEALED");
-    LOG_CID("CID: \"...it's pink... it's finally... pink...\"");
-
-    /*/ ========================================================================
-    // APPLICATION — THE FINAL VESSEL
-    // ========================================================================
-    g_app_ptr = std::make_unique<Application>(
-        "AMOURANTH RTX — VALHALLA v80 TURBO",
-        Options::Window::DEFAULT_WIDTH,
-        Options::Window::DEFAULT_HEIGHT
-    );
-
-    g_app_ptr->setRenderer(std::make_unique<VulkanRenderer>(
-        Options::Window::DEFAULT_WIDTH,
-        Options::Window::DEFAULT_HEIGHT,
-        SDL3Window::get(),
-        Options::Performance::OVERCLOCK_RENDERER
-    )); */
-
-    g_app_ptr->run();
+    g_app().run();
 
     LOG_AMOURANTH("THE JOURNEY ENDS — THE PHOTONS REST — THE EMPIRE ENDURES");
-    phase9_ballerina("FINAL GRACE: ETERNAL SLIPSTREAM", std::source_location::current());
+    phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());  // Final grace
 
     return 0;
 }

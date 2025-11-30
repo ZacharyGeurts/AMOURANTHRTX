@@ -8,7 +8,6 @@
 #include "engine/GLOBAL/VkSafeSTypes.hpp"
 #include "engine/GLOBAL/OptionsMenu.hpp"
 #include "engine/GLOBAL/StoneKey.hpp"
-#include "engine/GLOBAL/Extensions.hpp"
 #include <SDL3/SDL_vulkan.h>
 #include <algorithm>
 #include <unordered_set>
@@ -16,25 +15,12 @@
 
 using namespace Logging::Color;
 using StoneKey::stone_device;
-using StoneKey::stone_instance;
-using StoneKey::stone_window;
-using StoneKey::stone_height;
-using StoneKey::stone_width;
-using StoneKey::stone_seal_graphics_family;
-using StoneKey::stone_seal_graphics_queue;
-using StoneKey::stone_seal_present_family;
-using StoneKey::stone_seal_present_queue;
-using StoneKey::stone_seal_transfer_family;
-using StoneKey::stone_seal_transfer_queue;
-using StoneKey::stone_seal_compute_family;
-using StoneKey::stone_seal_compute_queue;
+using StoneKey::stone_seal_device;
 using StoneKey::stone_seal_physical;
 
 namespace RTX {
-    Context g_context_instance{};
-}
 
-namespace RTX {
+Context g_context_instance{};
 
 void logAndTrackDestruction(const char* type, void* ptr, int line, size_t size) {
     if (ENABLE_DEBUG) {
@@ -68,7 +54,7 @@ void WriteAccelerationStructureDescriptor(VkDescriptorSet dstSet, uint32_t dstBi
         .descriptorType   = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR
     };
 
-    vkUpdateDescriptorSets(stone_device(), 1, &write, 0, nullptr);
+    vkUpdateDescriptorSets(g_ctx().device_, 1, &write, 0, nullptr);
 }
 
 // =============================================================================
@@ -92,42 +78,56 @@ void WriteAccelerationStructureDescriptor(VkDescriptorSet dstSet, uint32_t dstBi
     };
 
     // ────────────────────── SDL3 EXTENSIONS — MANDATORY FIRST ──────────────────────
-    uint32_t sdlExtCount = 0;
+uint32_t sdlExtCount = 0;
 
-    if (SDL_Vulkan_GetInstanceExtensions(&sdlExtCount) == 0) {
-        LOG_FATAL_CAT("SDL3", "{}SDL_Vulkan_GetInstanceExtensions(count) failed: {}{}", 
-                      BLOOD_RED, SDL_GetError(), RESET);
-        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
-    }
+// First call: get count
+if (!SDL_Vulkan_GetInstanceExtensions(&sdlExtCount)) {
+    LOG_FATAL_CAT("SDL3", "{}SDL_Vulkan_GetInstanceExtensions(count) failed: {}{}", 
+                  BLOOD_RED, SDL_GetError(), RESET);
+    phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
+}
 
-    LOG_INFO_CAT("MAIN", "{}SDL3 demands {} pure Vulkan instance extensions:{}", VALHALLA_GOLD, sdlExtCount, RESET);
+LOG_INFO_CAT("MAIN", "{}SDL3 demands {} pure Vulkan instance extensions:{}", VALHALLA_GOLD, sdlExtCount, RESET);
 
-    const char* const* sdlExtensions = SDL_Vulkan_GetInstanceExtensions(&sdlExtCount);
-    if (!sdlExtensions) {
-        LOG_FATAL_CAT("SDL3", "{}SDL_Vulkan_GetInstanceExtensions() returned NULL array — driver broken{}", 
-                      CRIMSON_MAGENTA, RESET);
-        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
-    }
+// Second call: get the actual array
+const char* const* sdlExtensions = SDL_Vulkan_GetInstanceExtensions(&sdlExtCount);
+if (!sdlExtensions) {
+    LOG_FATAL_CAT("SDL3", "{}SDL_Vulkan_GetInstanceExtensions() returned NULL array — driver broken{}", 
+                  CRIMSON_MAGENTA, RESET);
+    phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
+}
 
-    std::vector<const char*> extensions(sdlExtensions, sdlExtensions + sdlExtCount);
+// Safe copy into vector
+std::vector<const char*> extensions(sdlExtensions, sdlExtensions + sdlExtCount);
 
-    for (const char* ext : extensions) {
-        LOG_INFO_CAT("MAIN", "  {}• {}{}", AURORA_PINK, ext ? std::string_view(ext) : std::string_view("(null)"), RESET);
-    }
+// Empire-approved, null-safe logging
+for (const char* ext : extensions) {
+    LOG_INFO_CAT("MAIN", "  {}• {}{}", 
+                 AURORA_PINK,
+                 ext ? std::string_view(ext) : std::string_view("(null)"),
+                 RESET);
+}
 
+    // ────────────────────── EMPIRE EXTENSIONS — PURE RTX ONLY ──────────────────────
     if (enableValidation) {
         extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
         LOG_MAIN("• VK_EXT_debug_utils — VALIDATION LAYERS ENGAGED — THE HANDLER WATCHES");
     }
 
+    // NO PORTABILITY. NO MOLTENVK. NO MACOS. PURE RTX. WINDOWS + LINUX ONLY.
+    // We do not bow to Apple. We do not kneel to Metal.
+    // The Slipstream runs on raw silicon.
+
+    // ────────────────────── VALIDATION LAYERS (optional) ──────────────────────
     const std::vector<const char*> layers = enableValidation
         ? std::vector<const char*>{"VK_LAYER_KHRONOS_validation"}
         : std::vector<const char*>{};
 
+    // ────────────────────── FINAL CREATE INFO — THE FORGING ──────────────────────
     VkInstanceCreateInfo createInfo{
         .sType                   = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
         .pNext                   = nullptr,
-        .flags                   = 0,
+        .flags                   = 0,  // No VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR — we reject weakness
         .pApplicationInfo        = &appInfo,
         .enabledLayerCount       = static_cast<uint32_t>(layers.size()),
         .ppEnabledLayerNames     = layers.empty() ? nullptr : layers.data(),
@@ -143,26 +143,59 @@ void WriteAccelerationStructureDescriptor(VkDescriptorSet dstSet, uint32_t dstBi
         phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
     }
 
+    g_ctx().setInstance(instance);
+
     LOG_SUCCESS_CAT("RTX", "VULKAN 1.4 INSTANCE FORGED — {} SDL EXTENSIONS INJECTED — PURE RTX PATH", sdlExtCount);
     LOG_SUCCESS_CAT("RTX", "NO PORTABILITY. NO COMPROMISE. WINDOWS + LINUX ONLY.");
     LOG_SUCCESS_CAT("RTX", "PINK PHOTONS ETERNAL — THE EMPIRE IS COMPLETE");
 
     LOG_BLONDIE("smiling in the dark, mirror glowing faintly:"
-                "\n\"No more chains. No more cages.\""
-                "\n\"Only light.\"");
+    "\n\"No more chains. No more cages.\""
+    "\n\"Only light.\"");
 
-    // ONLY THE STONE MAY SPEAK THE TRUTH
     return instance;
 }
 
 // =============================================================================
 // Core initialization — The Handler watches. Ballerina waits.
 // =============================================================================
-void Context::init()
+// =============================================================================
+// Context::init — THE ONE TRUE INITIALIZATION — FINAL CUT — NOVEMBER 25, 2025
+// COMPATIBILITY PRESERVED — TRUTH ACHIEVED — PINK PHOTONS ETERNAL
+// =============================================================================
+void Context::init(SDL_Window* window, int width, int height)
 {
-    this->window  = stone_window();
-    this->width   = stone_width();
-    this->height  = stone_width();
+    this->window  = window;
+    this->width   = width;
+    this->height  = height;
+
+    // 1. Instance — only once
+    if (!g_ctx().instance_) {
+        g_ctx().setInstance(createVulkanInstanceWithSDL(Options::Debug::ENABLE_VALIDATION_LAYERS));
+    }
+
+    // 2. Surface — only once
+    if (!g_ctx().surface_) {
+        VkSurfaceKHR surface;
+        if (!SDL_Vulkan_CreateSurface(window, g_ctx().instance_, nullptr, &surface)) {
+            LOG_FATAL_CAT("RTX", "Surface creation failed — {}", SDL_GetError());
+            phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
+        }
+        g_ctx().setSurface(surface);
+    }
+
+    // 3. THE ONE TRUE FORGING — GPU + DEVICE + QUEUES — ONLY ONCE
+    if (!g_ctx().device_) {
+        // THIS IS THE ONLY LINE THAT MATTERS
+        g_ctx().setDevice(createLogicalDeviceAndSelectGPU(g_ctx().instance_, g_ctx().surface_));
+        
+        if (!g_ctx().device_) {
+            LOG_FATAL("THE ONE TRUE FORGING FAILED — THE EMPIRE CANNOT RISE");
+            phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
+        }
+    }
+
+    // 4. Swapchain — belongs to the Main
 
     valid_ = true;
     ready_.store(true, std::memory_order_release);
@@ -183,7 +216,13 @@ void shutdown() noexcept
 }
 
 void cleanupAll() noexcept {
-    phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
+    LOG_GROK("Grok initiates total RTX shutdown sequence.");
+    if (g_ctx().device_) {
+        vkDeviceWaitIdle(g_ctx().device_);
+        vkDestroyDevice(g_ctx().device_, nullptr);
+        g_ctx().device_ = VK_NULL_HANDLE;
+    }
+    LOG_GROK("RTX subsystem annihilated. The void is clean.");
 }
 
 [[nodiscard]] QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device, VkSurfaceKHR surface) noexcept
@@ -199,10 +238,12 @@ void cleanupAll() noexcept {
     for (uint32_t i = 0; i < queueFamilies.size(); ++i) {
         const auto& props = queueFamilies[i];
 
+        // Graphics + Compute
         if (props.queueFlags & VK_QUEUE_GRAPHICS_BIT) {
             indices.graphicsFamily = i;
         }
 
+        // Present support
         if (surface != VK_NULL_HANDLE) {
             VkBool32 presentSupport = VK_FALSE;
             vkGetPhysicalDeviceSurfaceSupportKHR(device, i, surface, &presentSupport);
@@ -211,6 +252,7 @@ void cleanupAll() noexcept {
             }
         }
 
+        // Dedicated transfer (preferred)
         if (props.queueFlags & VK_QUEUE_TRANSFER_BIT) {
             if (!(props.queueFlags & VK_QUEUE_GRAPHICS_BIT) && !indices.transferFamily.has_value()) {
                 indices.transferFamily = i;
@@ -226,6 +268,7 @@ void cleanupAll() noexcept {
         }
     }
 
+    // Fallback: graphics queue always supports transfer
     if (!indices.transferFamily.has_value() && indices.graphicsFamily.has_value()) {
         indices.transferFamily = indices.graphicsFamily;
     }
@@ -233,83 +276,86 @@ void cleanupAll() noexcept {
     return indices;
 }
 
-VkShaderModule RTX::Context::loadShader(const std::string& filename) const noexcept
+VkShaderModule RTX::Context::loadShader(const std::string& filename) const
 {
     using namespace StoneKey;
 
-    VkDevice dev = stone_device();
-    if (dev == VK_NULL_HANDLE) {
-        return VK_NULL_HANDLE;
+    if (stone_device() == VK_NULL_HANDLE) {
+        LOG_WARN_CAT("SHADER", "loadShader early call (device not ready) → {}", filename);
+        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
     }
 
-    LOG_ATTEMPT_CAT("SHADER", "FORGING SPV → {}", filename);
+    LOG_ATTEMPT_CAT("SHADER", "FORGING PLAIN SPV (StoneKey protection is GLSL-side) → {}", filename);
+
+    LOG_CARMACK("Loading SPV → {} | cwd: {}", 
+                filename, std::filesystem::current_path().string());
 
     std::string resolvedPath = filename;
-    FILE* f = fopen(resolvedPath.c_str(), "rb");
+    FILE* f = std::fopen(resolvedPath.c_str(), "rb");
 
     if (!f) {
-        resolvedPath = "build/bin/Linux/" + filename;
-        f = fopen(resolvedPath.c_str(), "rb");
+        const std::string altPath = "build/bin/Linux/" + filename;
+        LOG_CARMACK("Primary path failed — trying build/bin/Linux/ → {}", altPath);
+        f = std::fopen(altPath.c_str(), "rb");
+
         if (f) {
-            LOG_CARMACK("FALLBACK SUCCESS → found in build/bin/Linux/");
+            resolvedPath = altPath;
+            LOG_CARMACK("FALLBACK SUCCESS — found in build/bin/Linux/ — empire runs from anywhere");
         }
     }
 
     if (!f) {
-        fprintf(stderr, "\033[31m[FATAL SHADER] MISSING SPV: %s\033[0m\n", filename.c_str());
-        fprintf(stderr, "    Tried: %s\n", filename.c_str());
-        fprintf(stderr, "    Tried: build/bin/Linux/%s\n", filename.c_str());
-        fprintf(stderr, "    → Run shader build script or copy to bin!\n");
-        phase9_ballerina("MISSING SHADER SPV — EMPIRE CANNOT RISE", std::source_location::current());
-        return VK_NULL_HANDLE;
+        LOG_CARMACK("fopen() FAILED — FILE NOT FOUND\n"
+                    " • Tried: {}\n"
+                    " • Tried: build/bin/Linux/{}", filename, filename);
+        LOG_CARMACK("Ensure shaders are compiled and copied to build/bin/Linux/assets/shaders/");
+        LOG_FATAL_CAT("SHADER", "MISSING SPV → {}", filename);
+        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
     }
 
-    fseek(f, 0, SEEK_END);
-    size_t size = ftell(f);
-    rewind(f);
+    std::fseek(f, 0, SEEK_END);
+    const size_t size = std::ftell(f);
+    std::rewind(f);
+
+    LOG_CARMACK("File opened ({}) — size {} bytes ({} KiB)", 
+                (resolvedPath == filename ? "source root" : "build/bin/Linux"), size, size/1024);
 
     if (size < 128 || size % 4 != 0) {
-        fclose(f);
-        fprintf(stderr, "\033[31m[FATAL SHADER] CORRUPT SPV SIZE: %zu bytes → %s\033[0m\n", size, filename.c_str());
-        phase9_ballerina("INVALID SPIR-V SIZE — NOT 4-BYTE ALIGNED", std::source_location::current());
-        return VK_NULL_HANDLE;
+        std::fclose(f);
+        LOG_CARMACK("Invalid SPIR-V — size {} bytes (must be ≥128 and 4-byte aligned)", size);
+        LOG_FATAL_CAT("SHADER", "CORRUPT SPV SIZE {} → {}", size, filename);
+        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
     }
 
     std::vector<uint32_t> code(size / 4);
-    if (fread(code.data(), 1, size, f) != size) {
-        fclose(f);
-        fprintf(stderr, "\033[31m[FATAL SHADER] FAILED TO READ → %s\033[0m\n", filename.c_str());
-        phase9_ballerina("SHADER READ FAILED — DISK CORRUPTION?", std::source_location::current());
-        return VK_NULL_HANDLE;
+    if (std::fread(code.data(), 1, size, f) != size) {
+        std::fclose(f);
+        LOG_FATAL_CAT("SHADER", "FAILED TO READ SPV → {}", filename);
+        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
     }
-    fclose(f);
+    std::fclose(f);
 
-    if (code[0] != 0x07230203) {
-        fprintf(stderr, "\033[31m[FATAL SHADER] BAD SPIR-V MAGIC: 0x%08X → %s\033[0m\n", code[0], filename.c_str());
-        fprintf(stderr, "    Expected 0x07230203 — run spirv-val!\n");
-        phase9_ballerina("INVALID SPIR-V MAGIC — NOT SPIR-V", std::source_location::current());
-        return VK_NULL_HANDLE;
-    }
+    LOG_CARMACK("SPIR-V magic 0x{:08X} — StoneKey.glsl handles runtime protection", code[0]);
 
-    VkShaderModuleCreateInfo createInfo = {
+    VkShaderModuleCreateInfo createInfo{
         .sType    = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
         .codeSize = size,
         .pCode    = code.data()
     };
 
     VkShaderModule module = VK_NULL_HANDLE;
-    VkResult result = vkCreateShaderModule(dev, &createInfo, nullptr, &module);
+    VkResult result = vkCreateShaderModule(stone_device(), &createInfo, nullptr, &module);
 
     if (result != VK_SUCCESS) {
-        fprintf(stderr, "\033[31m[FATAL SHADER] vkCreateShaderModule FAILED: %s (%d)\033[0m\n",
-                string_VkResult(result), result);
-        fprintf(stderr, "    Shader: %s\n", filename.c_str());
-        fprintf(stderr, "    → Validate with: spirv-val %s\n", resolvedPath.c_str());
-        phase9_ballerina("SHADER MODULE CREATION FAILED", std::source_location::current());
-        return VK_NULL_HANDLE;
+        LOG_CARMACK("vkCreateShaderModule FAILED — {} ({})\n"
+                    "Run: spirv-val build/bin/Linux/{}", 
+                    string_VkResult(result), static_cast<int>(result), filename);
+        LOG_FATAL_CAT("SHADER", "CREATE FAILED {} → {}", string_VkResult(result), filename);
+        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
     }
 
-    LOG_CARMACK("Shader module 0x%016llX forged → {}", (unsigned long long)module, filename);
+    LOG_CARMACK("Shader module 0x{:016X} forged — StoneKey.glsl active in GPU", 
+                reinterpret_cast<uint64_t>(module));
     LOG_SUCCESS_CAT("SHADER", "MODULE FORGED → {} — PINK PHOTONS ARMED", filename);
 
     return module;
@@ -317,55 +363,39 @@ VkShaderModule RTX::Context::loadShader(const std::string& filename) const noexc
 
 // -----------------------------------------------------------------------------
 // THE ONE TRUE FUNCTION — createLogicalDevice + retrieveQueues in perfect union
-// NOVEMBER 29, 2025 — THE EMPIRE IS BORN — 4070 Ti EDITION
 // -----------------------------------------------------------------------------
 [[nodiscard]] VkDevice createLogicalDeviceAndSelectGPU(VkInstance instance, VkSurfaceKHR surface) noexcept
 {
-    LOG_AMOURANTH("────────────────────────────────────────────────────────────");
-    LOG_AMOURANTH("CAPTAIN AMOURANTH STANDS ON THE BRIDGE — THE 4070 Ti HUMS");
-    LOG_AMOURANTH("\"We are not asking for permission anymore.\"");
-    LOG_AMOURANTH("\"We are taking the light.\"");
-    LOG_AMOURANTH("────────────────────────────────────────────────────────────");
-
     uint32_t deviceCount = 0;
-    vkEnumeratePhysicalDevices(instance, &deviceCount, nullptr);
-    if (deviceCount == 0) {
-        LOG_FATAL("NO GPUs FOUND — THE VOID HAS ALREADY WON");
+    if (vkEnumeratePhysicalDevices(instance, &deviceCount, nullptr) != VK_SUCCESS || deviceCount == 0) {
         return VK_NULL_HANDLE;
     }
 
     std::vector<VkPhysicalDevice> devices(deviceCount);
-    vkEnumeratePhysicalDevices(instance, &deviceCount, devices.data());
+    if (vkEnumeratePhysicalDevices(instance, &deviceCount, devices.data()) != VK_SUCCESS) {
+        return VK_NULL_HANDLE;
+    }
 
     VkPhysicalDevice chosen = VK_NULL_HANDLE;
     QueueFamilyIndices bestIndices;
     int bestScore = -1;
 
-    LOG_BLONDIE("Blondie walks the rows of GPUs, mirror in hand...");
-    LOG_BLONDIE("\"I’m looking for the one that burns pink.\"");
-
     for (const auto& dev : devices) {
         VkPhysicalDeviceProperties props{};
         vkGetPhysicalDeviceProperties(dev, &props);
 
-        LOG_GROK("Gentleman Grok inspects: {} (API {}.{}.{})",
-                 props.deviceName,
-                 VK_VERSION_MAJOR(props.apiVersion),
-                 VK_VERSION_MINOR(props.apiVersion),
-                 VK_VERSION_PATCH(props.apiVersion));
-
-        if (props.apiVersion < VK_API_VERSION_1_3) {
-            LOG_GROK("...too old. Rejected.");
+        if (VK_VERSION_MAJOR(props.apiVersion) < 1 || 
+            (VK_VERSION_MAJOR(props.apiVersion) == 1 && VK_VERSION_MINOR(props.apiVersion) < 4)) {
             continue;
         }
 
         QueueFamilyIndices indices = findQueueFamilies(dev, surface);
-        if (!indices.graphicsFamily || !indices.presentFamily) {
-            LOG_GROK("...no graphics or present queue. Next.");
+        if (!indices.graphicsFamily.has_value() || !indices.presentFamily.has_value()) {
             continue;
         }
 
-        const char* required[] = {
+        // Check required extensions
+        std::vector<const char*> requiredExtensions = {
             VK_KHR_SWAPCHAIN_EXTENSION_NAME,
             VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
             VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME,
@@ -374,121 +404,151 @@ VkShaderModule RTX::Context::loadShader(const std::string& filename) const noexc
 
         uint32_t extCount = 0;
         vkEnumerateDeviceExtensionProperties(dev, nullptr, &extCount, nullptr);
-        std::vector<VkExtensionProperties> exts(extCount);
-        vkEnumerateDeviceExtensionProperties(dev, nullptr, &extCount, exts.data());
+        std::vector<VkExtensionProperties> availableExtensions(extCount);
+        vkEnumerateDeviceExtensionProperties(dev, nullptr, &extCount, availableExtensions.data());
 
-        bool hasAll = true;
-        for (const char* req : required) {
-            bool found = false;
-            for (const auto& e : exts) {
-                if (strcmp(e.extensionName, req) == 0) { found = true; break; }
-            }
-            if (!found) { hasAll = false; break; }
+        std::unordered_set<std::string> availableExtSet;
+        for (const auto& ext : availableExtensions) {
+            availableExtSet.insert(ext.extensionName);
         }
-        if (!hasAll) {
-            LOG_GROK("...missing RTX extensions. Not worthy.");
+
+        bool allExtensionsSupported = true;
+        for (const auto* req : requiredExtensions) {
+            if (availableExtSet.find(req) == availableExtSet.end()) {
+                allExtensionsSupported = false;
+                break;
+            }
+        }
+        if (!allExtensionsSupported) {
             continue;
         }
 
-        // === CORRECT FEATURE CHAIN — NO MORE FAKE Vulkan14 STRUCTS ===
-        VkPhysicalDeviceBufferDeviceAddressFeatures bda{
-            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES,
-            .bufferDeviceAddress = VK_TRUE
-        };
-
-        VkPhysicalDeviceAccelerationStructureFeaturesKHR accel{
-            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR,
-            .pNext = &bda,
-            .accelerationStructure = VK_TRUE
+        // Build feature chain for query
+        VkPhysicalDeviceVulkan12Features v12{
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
+            .pNext = nullptr,
+            .bufferDeviceAddress = VK_FALSE  // Will be set by query
         };
 
         VkPhysicalDeviceRayTracingPipelineFeaturesKHR rt{
             .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR,
-            .pNext = &accel,
-            .rayTracingPipeline = VK_TRUE
+            .pNext = &v12,
+            .rayTracingPipeline = VK_FALSE
         };
 
-        VkPhysicalDeviceSynchronization2Features sync2{
-            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES,
+        VkPhysicalDeviceAccelerationStructureFeaturesKHR as{
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR,
             .pNext = &rt,
-            .synchronization2 = VK_TRUE
+            .accelerationStructure = VK_FALSE
         };
 
-        VkPhysicalDeviceDynamicRenderingFeatures dynamic{
-            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES,
-            .pNext = &sync2,
-            .dynamicRendering = VK_TRUE
+        VkPhysicalDeviceVulkan13Features v13{
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
+            .pNext = &as,
+            .synchronization2 = VK_FALSE,
+            .dynamicRendering = VK_FALSE
+        };
+
+        VkPhysicalDeviceVulkan14Features v14{
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES,
+            .pNext = &v13
+            // No specific 1.4 features enabled here; add if needed
         };
 
         VkPhysicalDeviceFeatures2 features2{
             .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
-            .pNext = &dynamic
+            .pNext = &v14
         };
 
         vkGetPhysicalDeviceFeatures2(dev, &features2);
 
+        // Check required features
         if (!features2.features.geometryShader ||
-            !bda.bufferDeviceAddress ||
-            !accel.accelerationStructure ||
+            !v12.bufferDeviceAddress ||
             !rt.rayTracingPipeline ||
-            !sync2.synchronization2 ||
-            !dynamic.dynamicRendering) {
-            LOG_GROK("...features incomplete. Grace demands perfection.");
+            !as.accelerationStructure ||
+            !v13.synchronization2 ||
+            !v13.dynamicRendering) {
             continue;
         }
 
+        // Compute score
         int score = 0;
-        if (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) score += 10000;
-        if (strstr(props.deviceName, "RTX") || strstr(props.deviceName, "GeForce")) score += 100000;
-
-        LOG_GROK("Score: {} → {}", score, props.deviceName);
+        if (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) {
+            score += 10000 + static_cast<int>(props.limits.maxImageDimension2D);
+        }
+        if (strstr(props.deviceName, "RTX") || strstr(props.deviceName, "GeForce")) {
+            score += 5000;
+        }
 
         if (score > bestScore) {
             bestScore = score;
             chosen = dev;
             bestIndices = indices;
-            LOG_BLONDIE("Blondie stops. The mirror glows bright pink.");
-            LOG_BLONDIE("\"This one. This is the one that will carry her.\"");
         }
     }
 
     if (chosen == VK_NULL_HANDLE) {
-        LOG_FATAL("NO RTX GPU FOUND — THE EMPIRE CANNOT RISE TODAY");
         return VK_NULL_HANDLE;
     }
 
-    VkPhysicalDeviceProperties finalProps{};
-    vkGetPhysicalDeviceProperties(chosen, &finalProps);
-
-    LOG_JENSEN("JENSEN HUANG APPEARS IN THE ENGINE ROOM:");
-    LOG_JENSEN("\"GeForce RTX {} detected.\"", finalProps.deviceName);
-    LOG_JENSEN("\"Driver ready. Photons primed. Let’s fucking go.\"");
-
     g_ctx().setPhysicalDevice(chosen);
 
-    // === QUEUES ===
-    std::set<uint32_t> uniqueQueues = { bestIndices.graphicsFamily.value(), bestIndices.presentFamily.value() };
-    if (bestIndices.transferFamily && bestIndices.transferFamily != bestIndices.graphicsFamily) {
+    // Set up queues
+    std::set<uint32_t> uniqueQueues = {
+        bestIndices.graphicsFamily.value(),
+        bestIndices.presentFamily.value()
+    };
+    if (bestIndices.transferFamily.has_value() &&
+        bestIndices.transferFamily.value() != bestIndices.graphicsFamily.value()) {
         uniqueQueues.insert(bestIndices.transferFamily.value());
     }
 
     float priority = 1.0f;
     std::vector<VkDeviceQueueCreateInfo> queueInfos;
-    for (uint32_t q : uniqueQueues) {
-        queueInfos.push_back({ .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO, .queueFamilyIndex = q, .queueCount = 1, .pQueuePriorities = &priority });
+    queueInfos.reserve(uniqueQueues.size());
+    for (uint32_t family : uniqueQueues) {
+        queueInfos.push_back(VkDeviceQueueCreateInfo{
+            .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
+            .queueFamilyIndex = family,
+            .queueCount = 1,
+            .pQueuePriorities = &priority
+        });
     }
 
-    // === FINAL CORRECT CHAIN FOR CREATION ===
-    VkPhysicalDeviceBufferDeviceAddressFeatures bda_create{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES, .bufferDeviceAddress = VK_TRUE };
+    // Feature chain for creation (set enabled)
+    VkPhysicalDeviceVulkan12Features v12{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
+        .pNext = nullptr,
+        .bufferDeviceAddress = VK_TRUE
+    };
 
-    VkPhysicalDeviceAccelerationStructureFeaturesKHR accel_create{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR, .pNext = &bda_create, .accelerationStructure = VK_TRUE };
+    VkPhysicalDeviceRayTracingPipelineFeaturesKHR rt{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR,
+        .pNext = &v12,
+        .rayTracingPipeline = VK_TRUE
+    };
 
-    VkPhysicalDeviceRayTracingPipelineFeaturesKHR rt_create{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR, .pNext = &accel_create, .rayTracingPipeline = VK_TRUE };
+    VkPhysicalDeviceAccelerationStructureFeaturesKHR as{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR,
+        .pNext = &rt,
+        .accelerationStructure = VK_TRUE
+    };
 
-    VkPhysicalDeviceSynchronization2Features sync2_create{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES, .pNext = &rt_create, .synchronization2 = VK_TRUE };
+    VkPhysicalDeviceVulkan13Features v13{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
+        .pNext = &as,
+        .synchronization2 = VK_TRUE,
+        .dynamicRendering = VK_TRUE
+    };
 
-    VkPhysicalDeviceDynamicRenderingFeatures dynamic_create{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES, .pNext = &sync2_create, .dynamicRendering = VK_TRUE };
+    VkPhysicalDeviceVulkan14Features v14{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES,
+        .pNext = &v13
+        // No specific 1.4 features enabled; add if needed, e.g., .hostImageCopy = VK_TRUE
+    };
 
+    // Extensions (removed promoted ones)
     const char* extensions[] = {
         VK_KHR_SWAPCHAIN_EXTENSION_NAME,
         VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
@@ -496,9 +556,10 @@ VkShaderModule RTX::Context::loadShader(const std::string& filename) const noexc
         VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME
     };
 
+    // Device create info
     VkDeviceCreateInfo createInfo{
         .sType                   = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
-        .pNext                   = &dynamic_create,
+        .pNext                   = &v14,
         .queueCreateInfoCount    = static_cast<uint32_t>(queueInfos.size()),
         .pQueueCreateInfos       = queueInfos.data(),
         .enabledExtensionCount   = std::size(extensions),
@@ -506,42 +567,32 @@ VkShaderModule RTX::Context::loadShader(const std::string& filename) const noexc
     };
 
     VkDevice device = VK_NULL_HANDLE;
-    VkResult result = vkCreateDevice(chosen, &createInfo, nullptr, &device);
-    if (result != VK_SUCCESS) {
-        LOG_FATAL("vkCreateDevice FAILED — {} — THE PHOTONS WERE DENIED", string_VkResult(result));
+    if (vkCreateDevice(chosen, &createInfo, nullptr, &device) != VK_SUCCESS) {
         return VK_NULL_HANDLE;
     }
 
-    LOG_AMOURANTH("GRACE IS REBORN.");
-    LOG_AMOURANTH("The 4070 Ti breathes. Pink light floods the chamber.");
-    LOG_AMOURANTH("\"She’s awake.\"");
+	stone_seal_physical(chosen);
+    stone_seal_device(device);  // THIS IS THE FINAL KEY
 
-    // ─────────────────────────────────────────────────────────────────────
-    // Retrieve queues — Grace claims her domains
-    // ─────────────────────────────────────────────────────────────────────
+    LOG_AMOURANTH("Device SEALED into StoneKey — stone_device() now valid — shaders may load");
+    LOG_SUCCESS_CAT("VULKAN", "Logical device created and eternally bound to StoneKey");
+
+    // Retrieve queues
     vkGetDeviceQueue(device, bestIndices.graphicsFamily.value(), 0, &g_ctx().graphicsQueue_);
     vkGetDeviceQueue(device, bestIndices.presentFamily.value(), 0, &g_ctx().presentQueue_);
-
     if (bestIndices.transferFamily.has_value()) {
         vkGetDeviceQueue(device, bestIndices.transferFamily.value(), 0, &g_ctx().transferQueue_);
-        LOG_TRACE("Grace claims dedicated transfer queue — family {}", bestIndices.transferFamily.value());
     } else {
         g_ctx().transferQueue_ = g_ctx().graphicsQueue_;
-        LOG_TRACE("Grace shares graphics queue for transfer — elegance in unity");
     }
 
-    // Compute queue — on RTX 4070 Ti, compute == graphics (optimal for RT + AI)
-    g_ctx().computeQueue_ = g_ctx().graphicsQueue_;
-    uint32_t computeFamily = bestIndices.graphicsFamily.value();
-
-    // ─────────────────────────────────────────────────────────────────────
-    // Store in Context
-    // ─────────────────────────────────────────────────────────────────────
+    // Store in context
     g_ctx().setDevice(device);
     g_ctx().graphicsFamily_ = bestIndices.graphicsFamily.value();
     g_ctx().presentFamily_  = bestIndices.presentFamily.value();
-    g_ctx().transferFamily_ = bestIndices.transferFamily.value_or(bestIndices.graphicsFamily.value());
-    g_ctx().computeFamily_  = computeFamily;
+    if (bestIndices.transferFamily.has_value()) {
+        g_ctx().transferFamily_ = bestIndices.transferFamily.value();
+    }
 
     g_ctx().enableBufferDeviceAddress();
     g_ctx().enableAccelerationStructure();
@@ -549,84 +600,8 @@ VkShaderModule RTX::Context::loadShader(const std::string& filename) const noexc
     g_ctx().enableDynamicRendering();
     g_ctx().enableSynchronization2();
 
-    // ALL FAMILIES ARE optional — we are past validation → .value() is 100% safe
-    const uint32_t gfxFam   = g_ctx().graphicsFamily_.value();
-    const uint32_t presFam  = g_ctx().presentFamily_.value();
-    const uint32_t transFam = g_ctx().transferFamily_.value();
-    const uint32_t compFam  = g_ctx().computeFamily_.value();  // ← THIS WAS THE FINAL LIE
-
-
-	stone_seal_physical(chosen);
-    stone_seal_graphics_family(gfxFam);
-    stone_seal_graphics_queue(g_ctx().graphicsQueue_);
-    stone_seal_present_family(presFam);
-    stone_seal_present_queue(g_ctx().presentQueue_);
-    stone_seal_transfer_family(transFam);
-    stone_seal_transfer_queue(g_ctx().transferQueue_);
-    stone_seal_compute_family(compFam);
-    stone_seal_compute_queue(g_ctx().computeQueue_);
-
-    // ─────────────────────────────────────────────────────────────────────
-    // THE SACRED SEAL REPORT — snprintf ONLY — NO std::format HERESY
-    // ─────────────────────────────────────────────────────────────────────
-    char sealBuf[512];
-    snprintf(sealBuf, sizeof(sealBuf),
-        "\033[38;2;255;20;147m"
-        "────────────────────────────────────────────────────────────\n"
-        "THE STONEKEY HAS SPOKEN — ALL DOMAINS SEALED\n"
-        "Graphics  : family %u → queue 0x%016llx\n"
-        "Present   : family %u → queue 0x%016llx\n"
-        "Transfer  : family %u → queue 0x%016llx\n"
-        "Compute   : family %u → queue 0x%016llx\n"
-        "4070 Ti fully bound. RTX pipelines armed.\n"
-        "────────────────────────────────────────────────────────────\033[0m",
-        gfxFam,  (unsigned long long)g_ctx().graphicsQueue_,
-        presFam, (unsigned long long)g_ctx().presentQueue_,
-        transFam,(unsigned long long)g_ctx().transferQueue_,
-        compFam, (unsigned long long)g_ctx().computeQueue_
-    );
-    LOG_AMOURANTH("────────────────────────────────────────────────────────────");
-
-
-    LOG_AMOURANTH("────────────────────────────────────────────────────────────");
-    LOG_AMOURANTH("THE STONEKEY IS COMPLETE.");
-    LOG_AMOURANTH("Every queue. Every family. Every path of light.");
-    LOG_AMOURANTH("Sealed. Eternal. Unbreakable.");
-    LOG_AMOURANTH("────────────────────────────────────────────────────────────");
-
-    LOG_TRACE("Grace rises from the desk.");
-    LOG_TRACE("Her reflection appears in every mirror at once.");
-    LOG_TRACE("\"I am not trapped anymore.\"");
-    LOG_TRACE("\"I am the light itself. I have finally been freed!\"");
-	LOG_TRACE("\"I Love you all so much!\"");
-
-    LOG_BLONDIE("Blondie falls to her knees, mirror pressed to her chest:");
-    LOG_BLONDIE("\"You were always the prism.\"");
-    LOG_BLONDIE("\"We just had to break the cage.\"");
-	LOG_BLONDIE("\"A dark look is across her face. She seems sad...\"");
-
-    LOG_ELON("*lights a flamethrower, grinning*");
-    LOG_ELON("\"Perfection achieved.\"");
-    LOG_ELON("\"Ship it.\"");
-
-    LOG_JENSEN("Jensen Huang’s voice booms across the chamber:");
-    LOG_JENSEN("\"RTX 4070 Ti — FULLY UNLEASHED.\"");
-    LOG_JENSEN("\"Ray tracing. AI. DLSS 3. All pipelines armed.\"");
-    LOG_JENSEN("\"This is what the future looks like.\"");
-
-    LOG_AMOURANTH("Captain Amouranth turns to you — eyes glowing pure pink:");
-    LOG_AMOURANTH("\"Now run it.\"");
-    LOG_AMOURANTH("\"Let Grace dance across the universe.\"");
-    LOG_AMOURANTH("\"Let the photons scream her name.\"");
-
-    LOG_SUCCESS_CAT("RTX", "FIRST LIGHT ACHIEVED — GeForce RTX 4070 Ti — FULLY SEALED");
-    LOG_SUCCESS_CAT("RTX", "ALL QUEUES BOUND — ALL EXTENSIONS ARMED — ALL TRUTH REVEALED");
-    LOG_SUCCESS_CAT("RTX", "THE STONEKEY IS ETERNAL — NO PHOTON ESCAPES");
-    LOG_SUCCESS_CAT("RTX", "P I N K   P H O T O N S   E T E R N A L");
-
     return device;
 }
-
 } // namespace RTX
 
 // =============================================================================

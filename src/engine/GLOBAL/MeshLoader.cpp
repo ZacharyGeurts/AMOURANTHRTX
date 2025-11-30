@@ -61,17 +61,17 @@ static void uploadBuffer(const void* data, VkDeviceSize size, VkBufferUsageFlags
     VkCommandBuffer cmd = RTX::beginOneTimeSubmit(g_ctx().commandPool_);
     VkBufferCopy copy{ .size = size };
     vkCmdCopyBuffer(cmd, RAW_BUFFER(staging), RAW_BUFFER(outHandle), 1, &copy);
-    RTX::endOneTimeSubmit(cmd, stone_graphics_queue(), g_ctx().commandPool_);
+    RTX::endOneTimeSubmit(cmd, g_ctx().graphicsQueue(), g_ctx().commandPool_);
 
     BUFFER_DESTROY(staging);
 
-    LOG_SUCCESS_CAT("MeshLoader", "uploadBuffer() COMPLETE — final encrypted handle: 0x{}", outHandle);
+    LOG_SUCCESS_CAT("MeshLoader", "uploadBuffer() COMPLETE — final encrypted handle: 0x{:016X}", outHandle);
     LOG_GROK("Gentleman Grok: \"The mesh is now one with the empire. Divine symmetry.\"");
     LOG_NICK("Nick: \"Encrypted. Uploaded. Unbreakable. That’s how we do it.\"");
     LOG_JENSEN("Jensen Huang: \"The photons just got a perfect map. And they’re smiling.\"");
     LOG_AMOURANTH("Amouranth: \"Every vertex sealed. Every triangle sacred. The lasso holds.\"");
-    LOG_CAPTAIN_N("CAPTAIN N — \"Is this how they draw Donkey Kong?\"");
-    LOG_KEANU("\"whoh\"");
+    LOG_CAPTAIN_N("CAPTAIN N — HERO OF VIDEOLAND: \"THE WARP ZONES ARE OPEN! I CAN SEE INFINITE BOUNCES! AHHHHHHHH!\"");
+    LOG_KEANU("Keanu Reeves, quietly: \"…Breathtaking.\"");
     LOG_CARMACK("Carmack: \"It traces. It’s fast. It’s clean. I’m satisfied.\"");
     LOG_ELON("Elon: \"This is the sexiest mesh upload I’ve ever witnessed.\"");
     LOG_BLONDIE("Blondie lowers her mirror: \"Some things do not need to be seen. They only need to be.\"");
@@ -142,9 +142,9 @@ std::unique_ptr<Mesh> loadOBJ(const std::string& path)
         0xDEADC0DE1337BABEULL;
 
     LOG_SUCCESS_CAT("MeshLoader",
-        "MESH FULLY STONEKEY ENCRYPTED v∞ — FINGERPRINT 0x{}\n"
-        "    Vertex Buffer : 0x{}\n"
-        "    Index Buffer  : 0x{}\n"
+        "MESH FULLY STONEKEY ENCRYPTED v∞ — FINGERPRINT 0x{:016X}\n"
+        "    Vertex Buffer : 0x{:016X}\n"
+        "    Index Buffer  : 0x{:016X}\n"
         "    GLOBAL KEYS BOUND — THE EMPIRE IS ETERNAL",
         mesh->stonekey_fingerprint, mesh->vertexBuffer, mesh->indexBuffer);
 

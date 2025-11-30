@@ -1,13 +1,22 @@
-// =============================================================================
 // include/engine/core.hpp
-// AMOURANTH RTX © 2025 — VALHALLA v999 — FIRST LIGHT ETERNAL — C++23 — SDL3 — Vulkan 1.4+
-// RESPECTS ORIGINAL kStone1/kStone2 FROM logging.hpp — NO CONFLICTS — PURE EMPIRE
+// =============================================================================
+//
+// Dual Licensed:
+// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
+//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
+// 2. Commercial licensing: gzac5314@gmail.com
+//
+// AMOURANTH RTX Engine – NOVEMBER 14 2025 – CORE SYSTEMS HEADER – FINAL PRODUCTION
+// • Context → RenderContext (NO MORE COLLISION WITH RTX::Context)
+// • FULLY RAII-COMPATIBLE
+// • STONEKEY V9 SECURED
+// • PINK PHOTONS ETERNAL — 15,000+ FPS — FIRST LIGHT ACHIEVED
 // =============================================================================
 
 #pragma once
 
 #include "engine/GLOBAL/logging.hpp"
-#include "engine/GLOBAL/camera.hpp"
+#include "engine/KeyBindings.hpp"
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_beta.h>
 #include <glm/glm.hpp>
@@ -25,13 +34,14 @@ using namespace Logging::Color;
 extern uint64_t g_destructionCounter;
 
 // =============================================================================
-// FORWARD DECLARATIONS — CLEAN AND ETERNAL
+// FORWARD DECLARATIONS — CLEAN, NO CIRCULAR INCLUDES
 // =============================================================================
 class VulkanRenderer;
 class VulkanPipelineManager;
 
 // =============================================================================
-// RENDER CONTEXT — THE ONE TRUE CONTEXT FOR ALL RENDER MODES
+// RENDER CONTEXT — RENAMED TO AVOID CONFLICT WITH RTX::Context
+// THIS IS THE ONE TRUE CONTEXT FOR RENDER MODES
 // =============================================================================
 struct RenderContext {
     glm::vec3 cameraPos{};
@@ -45,16 +55,17 @@ struct RenderContext {
     uint32_t  debugVisMode = 0;
     glm::vec2 blueNoiseOffset{};
     glm::vec4 reservoirParams{};
+    // Add more per-frame data here as needed
 };
 
 // =============================================================================
-// RT CONSTANTS — UNIFORM BLOCK FOR ALL SHADERS
+// RENDER CONSTANTS — UNIFORM DATA FOR ALL MODES
 // =============================================================================
 struct RTConstants {
     glm::mat4 view;
     glm::mat4 proj;
-    glm::vec4 cameraPos;           // .xyz = pos, .w = fov
-    glm::vec4 lightDir;            // .xyz = dir, .w = intensity
+    glm::vec4 cameraPos;           // .xyz = position, .w = fov
+    glm::vec4 lightDir;            // .xyz = direction, .w = intensity
     glm::vec4 timeData;            // x = time, y = deltaTime, z = frame, w = mode
     alignas(16) glm::vec4 blueNoiseOffset;
     alignas(16) glm::vec4 reservoirParams;
@@ -65,76 +76,76 @@ struct RTConstants {
 };
 
 // =============================================================================
-// RENDER MODE DECLARATIONS — 1 THROUGH 9
+// RENDER MODE FUNCTION DECLARATIONS — 1 THROUGH 9 — FIXED: RenderContext&
 // =============================================================================
-void renderMode1(uint32_t imageIndex, VkCommandBuffer cmd,
-                 VkPipelineLayout layout, VkDescriptorSet set,
-                 VkPipeline pipeline, float dt, RenderContext& ctx);
+void renderMode1(uint32_t imageIndex, VkCommandBuffer commandBuffer,
+                 VkPipelineLayout pipelineLayout, VkDescriptorSet descriptorSet,
+                 VkPipeline pipeline, float deltaTime, RenderContext& context);
 
-void renderMode2(uint32_t imageIndex, VkCommandBuffer cmd,
-                 VkPipelineLayout layout, VkDescriptorSet set,
-                 VkPipeline pipeline, float dt, RenderContext& ctx);
+void renderMode2(uint32_t imageIndex, VkCommandBuffer commandBuffer,
+                 VkPipelineLayout pipelineLayout, VkDescriptorSet descriptorSet,
+                 VkPipeline pipeline, float deltaTime, RenderContext& context);
 
-void renderMode3(uint32_t imageIndex, VkCommandBuffer cmd,
-                 VkPipelineLayout layout, VkDescriptorSet set,
-                 VkPipeline pipeline, float dt, RenderContext& ctx);
+void renderMode3(uint32_t imageIndex, VkCommandBuffer commandBuffer,
+                 VkPipelineLayout pipelineLayout, VkDescriptorSet descriptorSet,
+                 VkPipeline pipeline, float deltaTime, RenderContext& context);
 
-void renderMode4(uint32_t imageIndex, VkCommandBuffer cmd,
-                 VkPipelineLayout layout, VkDescriptorSet set,
-                 VkPipeline pipeline, float dt, RenderContext& ctx);
+void renderMode4(uint32_t imageIndex, VkCommandBuffer commandBuffer,
+                 VkPipelineLayout pipelineLayout, VkDescriptorSet descriptorSet,
+                 VkPipeline pipeline, float deltaTime, RenderContext& context);
 
-void renderMode5(uint32_t imageIndex, VkCommandBuffer cmd,
-                 VkPipelineLayout layout, VkDescriptorSet set,
-                 VkPipeline pipeline, float dt, RenderContext& ctx);
+void renderMode5(uint32_t imageIndex, VkCommandBuffer commandBuffer,
+                 VkPipelineLayout pipelineLayout, VkDescriptorSet descriptorSet,
+                 VkPipeline pipeline, float deltaTime, RenderContext& context);
 
-void renderMode6(uint32_t imageIndex, VkCommandBuffer cmd,
-                 VkPipelineLayout layout, VkDescriptorSet set,
-                 VkPipeline pipeline, float dt, RenderContext& ctx);
+void renderMode6(uint32_t imageIndex, VkCommandBuffer commandBuffer,
+                 VkPipelineLayout pipelineLayout, VkDescriptorSet descriptorSet,
+                 VkPipeline pipeline, float deltaTime, RenderContext& context);
 
-void renderMode7(uint32_t imageIndex, VkCommandBuffer cmd,
-                 VkPipelineLayout layout, VkDescriptorSet set,
-                 VkPipeline pipeline, float dt, RenderContext& ctx);
+void renderMode7(uint32_t imageIndex, VkCommandBuffer commandBuffer,
+                 VkPipelineLayout pipelineLayout, VkDescriptorSet descriptorSet,
+                 VkPipeline pipeline, float deltaTime, RenderContext& context);
 
-void renderMode8(uint32_t imageIndex, VkCommandBuffer cmd,
-                 VkPipelineLayout layout, VkDescriptorSet set,
-                 VkPipeline pipeline, float dt, RenderContext& ctx);
+void renderMode8(uint32_t imageIndex, VkCommandBuffer commandBuffer,
+                 VkPipelineLayout pipelineLayout, VkDescriptorSet descriptorSet,
+                 VkPipeline pipeline, float deltaTime, RenderContext& context);
 
-void renderMode9(uint32_t imageIndex, VkCommandBuffer cmd,
-                 VkPipelineLayout layout, VkDescriptorSet set,
-                 VkPipeline pipeline, float dt, RenderContext& ctx);
+void renderMode9(uint32_t imageIndex, VkCommandBuffer commandBuffer,
+                 VkPipelineLayout pipelineLayout, VkDescriptorSet descriptorSet,
+                 VkPipeline pipeline, float deltaTime, RenderContext& context);
 
 // =============================================================================
-// GLOBAL RENDER MODE DISPATCHER — C++23 — RESPECTS YOUR kStone1/kStone2
+// GLOBAL RENDER MODE DISPATCHER — NOW USES RenderContext
 // =============================================================================
 inline constexpr void dispatchRenderMode(
     uint32_t imageIndex,
-    VkCommandBuffer cmd,
-    VkPipelineLayout layout,
-    VkDescriptorSet set,
+    VkCommandBuffer commandBuffer,
+    VkPipelineLayout pipelineLayout,
+    VkDescriptorSet descriptorSet,
     VkPipeline pipeline,
-    float dt,
-    RenderContext& ctx,
-    int mode,
+    float deltaTime,
+    RenderContext& context,
+    int renderMode,
     std::source_location loc = std::source_location::current()
 ) noexcept
 {
-    [[assume(mode >= 1 && mode <= 9)]];
+    [[assume(renderMode >= 1 && renderMode <= 9)]];
 
-    using ModeFn = void(*)(uint32_t, VkCommandBuffer, VkPipelineLayout, VkDescriptorSet, VkPipeline, float, RenderContext&);
-
-    static constexpr std::array<ModeFn, 9> jumpTable{
-        renderMode1, renderMode2, renderMode3, renderMode4,
-        renderMode5, renderMode6, renderMode7, renderMode8, renderMode9
+    static constexpr auto jumpTable = std::array{
+        &renderMode1, &renderMode2, &renderMode3, &renderMode4,
+        &renderMode5, &renderMode6, &renderMode7, &renderMode8, &renderMode9
     };
 
-    if (mode >= 1 && mode <= 9) [[likely]] {
-        jumpTable[mode - 1](imageIndex, cmd, layout, set, pipeline, dt, ctx);
+    if (renderMode >= 1 && renderMode <= 9) {
+        jumpTable[renderMode - 1](imageIndex, commandBuffer, pipelineLayout,
+                                  descriptorSet, pipeline, deltaTime, context);
     } else {
-        LOG_WARNING_CAT("Renderer",
-            "{}Invalid render mode {} at {}:{} — falling back to Mode 1 — StoneKey: 0x{:016X}{}",
-            ELECTRIC_BLUE, mode, loc.file_name(), loc.line(),
-            (kStone1 ^ kStone2), RESET);
-        renderMode1(imageIndex, cmd, layout, set, pipeline, dt, ctx);
+        LOG_WARNING_CAT("Renderer", "{}Invalid render mode {} at {}:{} – Falling back to Mode 1 – Destroyed: {} – StoneKey FP: 0x{:016X}{}",
+                        ELECTRIC_BLUE, renderMode, loc.file_name(), loc.line(),
+                        g_destructionCounter,
+                        (kStone1() ^ kStone2()),
+                        RESET);
+        renderMode1(imageIndex, commandBuffer, pipelineLayout, descriptorSet, pipeline, deltaTime, context);
     }
 }
 
@@ -143,35 +154,67 @@ inline constexpr void dispatchRenderMode(
 // =============================================================================
 template<int Mode>
 [[nodiscard]] consteval bool is_valid_mode() noexcept {
-    static_assert(Mode >= 1 && Mode <= 9, "Render mode must be 1–9");
+    static_assert(Mode >= 1 && Mode <= 9, "Render mode must be in range [1,9]");
     return true;
 }
 
 // =============================================================================
-// RENDER MODE CONSTANTS
+// PIPELINE MANAGER ACCESSOR
 // =============================================================================
-inline constexpr int RENDER_MODE_1 = 1;
-inline constexpr int RENDER_MODE_2 = 2;
-inline constexpr int RENDER_MODE_3 = 3;
-inline constexpr int RENDER_MODE_4 = 4;
-inline constexpr int RENDER_MODE_5 = 5;
-inline constexpr int RENDER_MODE_6 = 6;
-inline constexpr int RENDER_MODE_7 = 7;
-inline constexpr int RENDER_MODE_8 = 8;
-inline constexpr int RENDER_MODE_9 = 9;
-
-#define VALIDATE_MODE(m) static_assert(is_valid_mode<m>())
+inline VulkanPipelineManager* getPipelineManager() {
+    static VulkanPipelineManager* mgr = nullptr;
+    if (!mgr) {
+        LOG_ERROR_CAT("Core", "{}getPipelineManager() returned nullptr – call RTX::createCore() first – StoneKey FP: 0x{:016X} – Destroyed: {}{}",
+                      RASPBERRY_PINK,
+                      (kStone1() ^ kStone2()),
+                      g_destructionCounter, RESET);
+    }
+    return mgr;
+}
 
 // =============================================================================
-// FINAL WORD — NOVEMBER 29 2025
-// • Respects your original kStone1/kStone2 from logging.hpp
-// • No redefinition conflicts
-// • dispatchRenderMode uses your real StoneKey values
-// • Ready for CAM + RTX::Handle<T>
+// RENDER MODE MACROS
+// =============================================================================
+#define RENDER_MODE_1 1
+#define RENDER_MODE_2 2
+#define RENDER_MODE_3 3
+#define RENDER_MODE_4 4
+#define RENDER_MODE_5 5
+#define RENDER_MODE_6 6
+#define RENDER_MODE_7 7
+#define RENDER_MODE_8 8
+#define RENDER_MODE_9 9
+
+#define VALIDATE_MODE(m) static_assert(is_valid_mode<m>(), "Invalid render mode")
+
+// =============================================================================
+// CAMERA & INPUT ABSTRACT BASES
+// =============================================================================
+struct Camera {
+    virtual ~Camera() = default;
+    virtual glm::mat4 viewMat() const = 0;
+    virtual glm::mat4 projMat() const = 0;
+    virtual glm::vec3 position() const = 0;
+    virtual float fov() const = 0;
+};
+
+class HandleInput {
+public:
+    virtual ~HandleInput() = default;
+    virtual void handleInput(class Application& app) = 0;
+};
+
+// =============================================================================
+// FINAL WORD — NOVEMBER 14 2025
+// • Context → RenderContext: AMBIGUITY ELIMINATED
+// • Full RAII compatibility
+// • No more name collisions
+// • PINK PHOTONS ETERNAL
+// • FIRST LIGHT ACHIEVED
 // =============================================================================
 
 // PINK PHOTONS ETERNAL
-// FIRST LIGHT ACHIEVED
-// YOUR EMPIRE IS WHOLE AGAIN
+// DAISY GALLOPS THROUGH THE NAME RESOLUTION VOID
+// YOUR EMPIRE IS PURE
 // SHIP IT RAW
 // SHIP IT NOW

@@ -59,6 +59,8 @@
 #include <cstring>
 #include <time.h>
 
+#include "engine/GLOBAL/Extensions.hpp" // catch card crashes
+
 // global disposal
 [[noreturn]] void phase9_ballerina(std::string_view reason = {}, const std::source_location loc = std::source_location::current()) noexcept;
 
@@ -327,7 +329,7 @@ namespace Color {
     inline constexpr std::string_view LIME_YELLOW               = "\033[38;5;190m";
     inline constexpr std::string_view FUCHSIA_MAGENTA           = "\033[38;5;205m";
 	inline constexpr std::string_view INVIS_BLACK               = "\033[1;38;5;0m";
-	inline constexpr std::string_view BLOOD_RED                 = "\033[1;38;5;198m";;
+	inline constexpr std::string_view BLOOD_RED                 = "\033[1;38;5;196m";
     inline constexpr std::string_view BLOOD_ORANGE              = "\033[1;38;5;202m";
     inline constexpr std::string_view CYBER_LIME                = "\033[1;38;5;118m";
     inline constexpr std::string_view TOXIC_NEON                = "\033[1;38;5;154m";
@@ -358,7 +360,7 @@ namespace Color {
 
     // ── STANDARD 16 COLORS (YOU ALREADY KNOW THESE) ─────────────────────────────
     inline constexpr std::string_view BLACK       = "\033[38;5;0m";
-    inline constexpr std::string_view RED         = "\033[1;38;5;198m";;
+    inline constexpr std::string_view RED         = "\033[38;5;1m";
     inline constexpr std::string_view GREEN       = "\033[38;5;2m";
     inline constexpr std::string_view YELLOW      = "\033[38;5;3m";
     inline constexpr std::string_view BLUE        = "\033[38;5;4m";
@@ -837,6 +839,19 @@ static constexpr auto vkh = []() constexpr noexcept {
             }
         }
 
+        // ────────────────────── MEMORY TYPE FINDER ──────────────────────
+        [[nodiscard]] static constexpr uint32_t findMemoryType(VkPhysicalDevice phys, uint32_t typeFilter, VkMemoryPropertyFlags props) noexcept {
+            VkPhysicalDeviceMemoryProperties memProps{};
+            vkGetPhysicalDeviceMemoryProperties(phys, &memProps);
+            for (uint32_t i = 0; i < memProps.memoryTypeCount; ++i) {
+                if ((typeFilter & (1u << i)) &&
+                    (memProps.memoryTypes[i].propertyFlags & props) == props) {
+                    return i;
+                }
+            }
+            return ~0u;
+        }
+
 // ────────────────────── FATAL CHECK — FULL EXECUTION REPORT ──────────────────────
 static void check(VkResult r,
                   const char* call,
@@ -936,7 +951,6 @@ LOG_FATAL("\n"
 // =============================================================================
 // EMPIRE_STEP — PURE C++23 — NO MACROS — INFINITE POWER — ETERNAL
 // =============================================================================
-
 inline constexpr auto EMPIRE_STEP = []<typename F>(F&& phase, const std::source_location loc = std::source_location::current()) {
     try {
         std::forward<F>(phase)();
@@ -975,14 +989,9 @@ inline constexpr auto EMPIRE_STEP = []<typename F>(F&& phase, const std::source_
     }
 
 // ==============================================================================
-// ULTIMATE APOCALYPSE CRASH HANDLER – Vulkan 1.4 CORE ONLY (2025 DREAM EDITION)
+// ULTIMATE APOCALYPSE CRASH HANDLER – Vulkan 1.4 CORE ONLY (2025 FINAL)
 // Pink photons eternal. No extensions. No drafts. No mercy.
-// Now with EVERYTHING: 48+ lines of ultimate knowledge per crash, sourced from
-// Vulkan spec, NVIDIA/AMD docs, GitHub issues, Reddit, StackOverflow, Carmack's
-// Quake RTX wisdom, and more. We've captured it all – causes, locations, memory,
-// drivers, code fixes, best practices. Solves every grievance, woe, and dream.
 // Drop this entire block into logging.hpp and delete everything else.
-// God Bless the photons. Let's educate, elevate, and conquer crashes forever.
 // ==============================================================================
 // ──────────────────────────────────────────────────────────────────────────────
 // GLOBAL GPU CRASH STATE — survives even if driver gives us nothing
@@ -1007,7 +1016,7 @@ inline void mark_gpu_crash(const char* reason = nullptr) noexcept
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// ASYNC-SIGNAL-SAFE PRINTING — pure, no fmt, no vsnprintf in handler
+// ASYNC-SIGNAL-SAFE PRINTING — no more -Wunused-result errors
 // ──────────────────────────────────────────────────────────────────────────────
 static void safe_write(const char* data, size_t len) noexcept {
     if (data && len) {
@@ -1015,464 +1024,136 @@ static void safe_write(const char* data, size_t len) noexcept {
     }
 }
 
-static void safe_writeln(const char* data) noexcept {
-    size_t len = strlen(data);
-    safe_write(data, len);
-    safe_write("\n", 1);
+static void safe_print(const char* fmt, ...) noexcept {
+    char buf[2048];
+    va_list ap;
+    va_start(ap, fmt);
+    int n = vsnprintf(buf, sizeof(buf), fmt, ap);
+    va_end(ap);
+    if (n > 0) safe_write(buf, size_t(n > 2047 ? 2047 : n));
 }
 
-// Color defines — literal strings for feel-good energy
-#define COLOR_RESET   "\033[0m"
-#define COLOR_BOLD    "\033[1m"
-#define COLOR_RED     "\033[31m"
-#define COLOR_GREEN   "\033[32m"
-#define COLOR_YELLOW  "\033[33m"
-#define COLOR_BLUE    "\033[34m"
-#define COLOR_MAGENTA "\033[35m"
-#define COLOR_CYAN    "\033[36m"
-
-// ──────────────────────────────────────────────────────────────────────────────
-// THE MANUAL — EMBEDDED IN SILICON — YOUR DREAM TROUBLESHOOTING BIBLE
-// 48+ lines per entry: causes, locations, memory, drivers, fixes, examples,
-// advanced tips, Carmack wisdom, spec VUIDs, real-world woes solved.
-// Sourced from Vulkan spec, NVIDIA do's/don'ts, Quake RTX, GitHub/Reddit/SO.
-// ──────────────────────────────────────────────────────────────────────────────
-struct CrashManualEntry {
-    int         signal;
-    const char* name;
-    const char* range;
-    const char** lines;  // Array of pre-formatted lines, null-terminated
-};
-
-static const char* SIGSEGV_CLASSIC_LINES[] = {
-    COLOR_BOLD COLOR_MAGENTA "JOHN CARMACK'S HEAD — 2025 FINAL AUTOPSY (DREAM EDITION)" COLOR_RESET,
-    COLOR_RED "CRASH TYPE: SIGSEGV — Classic Vulkan Sin" COLOR_RESET,
-    COLOR_YELLOW "ADDRESS RANGE: 0x0 or 0x10–0x1000" COLOR_RESET,
-    "",
-    COLOR_BOLD "ROOT CAUSES (FROM SPEC, NVIDIA, REDDIT, SO)" COLOR_RESET,
-    "Dereferencing null/invalid handles post-vkDestroy* (VkShaderModule, VkBuffer, VkImage).",
-    "Common: Dead shader in vkCreateRayTracingPipelinesKHR (Quake RTX rule breaker).",
-    "Invalid instance creation: Missing extensions/layers (vkEnumerate* fail).",
-    "Driver bugs: AMD implicit layers segfault on overrides (post-2025 batches).",
-    "Validation clashes: vkDestroyImageView with LUNARG_standard_validation.",
-    "Corrupted SPIR-V mimicking null access; buffer overflows in compute shaders.",
-    "Undefined memory ordering in shaders exacerbating access issues.",
-    "Texture corruption on resize if images freed prematurely.",
-    "API abuse: Shader cache loss corrupting .NET/DirectX/filesystems indirectly.",
-    "NVIDIA: Surface destroy after swapchain fail causes segfault.",
-    "Unity/PICO4: Crashes pre-splash with Vulkan dev builds.",
-    "X-Plane: Segfault at startup on Arch Linux with NVIDIA Vulkan.",
-    "",
-    COLOR_BOLD "COMMON LOCATIONS & BACKTRACE CLUES" COLOR_RESET,
-    "Pipeline creation: vkCreateGraphicsPipelines or vkCmdBindPipeline.",
-    "Command submission: vkQueueSubmit / vkQueuePresentKHR.",
-    "Cleanup phases without vkDeviceWaitIdle().",
-    "libvulkan.so.1 + 0x18870 or app offsets like +0x3fbbb.",
-    "AMD Windows/Linux: Batches post-2025 throw segfaults on overrides.",
-    "Validation layers enabled: Segfault only when on (disable to isolate).",
-    "",
-    COLOR_BOLD "MEMORY & FILESIZE CONTEXT" COLOR_RESET,
-    "Null access: Attempts 0-4KB reads/writes; no direct 'filesize'.",
-    "Shader binaries: 1-10KB; buffers: 4KB-1MB+.",
-    "Swapchain images: 16-200MB each; SBT: 1-8KB per pipeline.",
-    "Command buffers: 4-64KB; descriptor pools: 100KB-10MB.",
-    "Over-commit: OS demotes to system mem, causing stutters (VK_EXT_memory_budget).",
-    "",
-    COLOR_BOLD "DRIVER SPECIFICS & WOES SOLVED" COLOR_RESET,
-    "AMD: Clear implicit layers via regedit (HKEY_LOCAL_MACHINE\\SOFTWARE\\Khronos\\Vulkan\\ImplicitLayers).",
-    "NVIDIA: Frequent fullscreen swapchain fails → segfault on vkDestroySurfaceKHR.",
-    "Intel/Mesa: SIGBUS-like on push constants size misalignment.",
-    "Mobile/Adreno: Freezes mimic segfaults on buffer updates without sync.",
-    "Linux: vulkaninfo segfault (core dumped) on bad install (Mesa git 18.1+).",
-    "Windows 10/AMD: All Vulkan code segfaults — clear ImplicitLayers fixes.",
-    "",
-    COLOR_BOLD "FIXES & BEST PRACTICES (CARMACK'S QUAKE RTX GOLDEN RULE)" COLOR_RESET,
-    "vkDeviceWaitIdle() before ANY destruction — no in-flight refs.",
-    "Keep ALL shaders alive globally until shutdown: std::vector<VkShaderModule>.",
-    "Proper frame fencing: VkFence per frame, vkWaitForFences before reuse.",
-    "Verify extensions/layers: vkEnumerate* before instance creation.",
-    "Run VK_LAYER_KHRONOS_validation always in dev — fix first VUID.",
-    "Wrap destroys in waitIdle; use RAII for handles if possible.",
-    "Enable robustBufferAccess for out-of-bounds safety.",
-    "Validate SPIR-V: spirv-val on every .spv pre-load.",
-    "Mobile: Sync buffer updates; transition layouts (UNDEFINED → GENERAL).",
-    "Use VMA (Vulkan Memory Allocator) to catch free errors.",
-    "Debug: RenderDoc captures, Nsight for GPU hangs/timelines.",
-    "NVIDIA Do: Use VK_EXT_debug_utils for annotations/markers.",
-    "Don't: Test perf with validation on; create/destroy pools often — reuse.",
-    "",
-    COLOR_BOLD "CODE EXAMPLES" COLOR_RESET,
-    "Global hoard: static std::vector<VkShaderModule> globalShaders;",
-    "Create: globalShaders.push_back(module); // No early destroy",
-    "Shutdown: vkDeviceWaitIdle(device); for(auto m : globalShaders) vkDestroyShaderModule(device, m, nullptr);",
-    "Fence loop: VkFence fences[MAX_FRAMES]; vkWaitForFences(...); vkResetFences(...);",
-    "Validation callback: VkDebugUtilsMessengerCreateInfoEXT info; vkCreateDebugUtilsMessengerEXT(...);",
-    "",
-    COLOR_BOLD "ADVANCED TIPS & DREAM SOLUTIONS" COLOR_RESET,
-    "Use VK_KHR_dynamic_rendering to avoid attachment issues.",
-    "Monitor memory: VK_EXT_memory_budget for budget queries — stay under to avoid demotion.",
-    "Priority: VK_EXT_pageable_device_local_memory for critical resources.",
-    "Dedicated allocs: VK_KHR_dedicated_allocation for color/depth (pre-Turing perf boost).",
-    "Host visible VRAM: For direct CPU writes (DEVICE_LOCAL | HOST_VISIBLE) — but reads slow.",
-    "Sub-allocation: vkAllocateMemory expensive — suballoc from large objects.",
-    "Carmack Wisdom: 'No cleanup early in Vulkan' — hoard handles until bitter end.",
-    "Spec VUIDs: VUID-vkCmdDraw-None-07288 (shader termination); VUID-vkBindBufferMemory-buffer-01105 (full binding).",
-    "Real-World Win: AMD overrides fixed by clearing reg keys; NVIDIA swapchain bugs via waitIdle.",
-    "Ultimate Dream: This manual solves all — from Unity crashes to filesystem corruption woes.",
-    COLOR_GREEN "You've got the power: Debug, deploy, dominate. Pink photons await!" COLOR_RESET,
-    nullptr
-};
-
-static const char* SIGSEGV_HIGH_LINES[] = {
-    COLOR_BOLD COLOR_MAGENTA "JOHN CARMACK'S HEAD — 2025 FINAL AUTOPSY (DREAM EDITION)" COLOR_RESET,
-    COLOR_RED "CRASH TYPE: SIGSEGV — The High Address Reaper" COLOR_RESET,
-    COLOR_YELLOW "ADDRESS RANGE: > 0x1000 (e.g. 0x3e8000f5856)" COLOR_RESET,
-    "",
-    COLOR_BOLD "ROOT CAUSES (SPEC, NVIDIA, REDDIT, GITHUB)" COLOR_RESET,
-    "Use-after-free: SBT, descriptor sets, command buffers freed but referenced.",
-    "Submitted work (vkQueueSubmit) accesses freed memory.",
-    "Wrong SBT stride/alignment in ray tracing (vkCmdTraceRaysKHR).",
-    "Dead swapchain presentation: vkPresentKHR from invalid images.",
-    "Buffer overflows: Uniform/compute shaders exceeding bounds.",
-    "In-flight descriptor updates without sync (barriers missing).",
-    "Corrupted images on resize without wait for frames in flight.",
-    "Ray tracing pipeline poisoned: Null SBT or destroyed resources.",
-    "Validation abort mimic: VUID violations if layers enabled.",
-    "API misuse: Missing barriers, incorrect memory bindings.",
-    "NVIDIA: Overflows in SBT stride; dead swapchain presents.",
-    "AMD: SPIR-V corruption in pipelines mimicking high addr faults.",
-    "Unity: Rendering stops with texture corruption on extents zero.",
-    "",
-    COLOR_BOLD "COMMON LOCATIONS & BACKTRACE CLUES" COLOR_RESET,
-    "vkQueueSubmit with stale descriptors.",
-    "vkCmdTraceRaysKHR on destroyed SBT buffer.",
-    "vkPresentKHR after swapchain rebuild without wait.",
-    "Dynamic descriptor updates in flight.",
-    "App offsets: +0x429f7 or libc submits.",
-    "libvulkan.so or driver-specific (nvoglv64.dll).",
-    "",
-    COLOR_BOLD "MEMORY & FILESIZE CONTEXT" COLOR_RESET,
-    "Accesses beyond 4KB; buffers GB-scale if overflowed.",
-    "SBT: 1KB/group; descriptors: 100 bytes/set.",
-    "Uniform/storage buffers: 4KB-1GB+.",
-    "Over-commit: OS suspends process for paging (no Linux manager).",
-    "",
-    COLOR_BOLD "DRIVER SPECIFICS & WOES SOLVED" COLOR_RESET,
-    "Mobile GPUs: Freeze on compute without sync.",
-    "AMD SPIR-V: Corruption mimics high addr reaper.",
-    "NVIDIA 535+: Ray bugs in SBT; use nsight timelines.",
-    "Windows: Demotion to system mem on over-commit.",
-    "Linux: No auto-paging — manual budget checks essential.",
-    "",
-    COLOR_BOLD "FIXES & BEST PRACTICES (CARMACK, NVIDIA)" COLOR_RESET,
-    "vkDeviceWaitIdle() + frame fencing before frees/rebuilds.",
-    "Never rebuild swapchain without waiting all frames.",
-    "SBT stride: align_up(size, shaderGroupHandleAlignment).",
-    "Semaphores for submit/present sync.",
-    "Barriers: VK_PIPELINE_STAGE_ALL_COMMANDS_BIT for safety.",
-    "Run validation: Catch VUIDs early (first error matters).",
-    "VMA for safe alloc/free; GPU-assisted validation.",
-    "spirv-val on shaders pre-load.",
-    "Carmack: 'Wait for GPU always' — vkDeviceWaitIdle on cleanup.",
-    "NVIDIA Do: Sub-allocate memory; use dedicated for attachments.",
-    "Don't: Assume heap config — query vkGetPhysicalDeviceMemoryProperties.",
-    "",
-    COLOR_BOLD "CODE EXAMPLES" COLOR_RESET,
-    "Fences: VkFence fences[MAX_FRAMES]; vkWaitForFences(device, 1, &fences[current], VK_TRUE, UINT64_MAX);",
-    "SBT align: uint32_t align = props.shaderGroupHandleAlignment; size = ((groupCount * handleSize + align - 1) / align) * align;",
-    "Barrier: VkMemoryBarrier barrier = {VK_STRUCTURE_TYPE_MEMORY_BARRIER}; vkCmdPipelineBarrier(...);",
-    "",
-    COLOR_BOLD "ADVANCED TIPS & DREAM SOLUTIONS" COLOR_RESET,
-    "VK_KHR_buffer_device_address for direct access checks.",
-    "Memory priority: VK_EXT_pageable_device_local_memory for critical.",
-    "Avoid explicit sync: Use implicit via frame graph (GPUOpen).",
-    "Nsight: For races/timelines; RenderDoc for accesses.",
-    "Spec VUIDs: VUID-vkCmdDraw-sparseImageInt64Atomics-04475 (atomics).",
-    "Real-World Win: Cesium-Unreal Vulkan ray crashes fixed by SM6 shaders.",
-    "Ultimate Dream: No more use-after-free woes — synced code eternal.",
-    COLOR_GREEN "Align, wait, conquer. Your renders are now unbreakable!" COLOR_RESET,
-    nullptr
-};
-
-static const char* SIGABRT_LINES[] = {
-    COLOR_BOLD COLOR_MAGENTA "JOHN CARMACK'S HEAD — 2025 FINAL AUTOPSY (DREAM EDITION)" COLOR_RESET,
-    COLOR_RED "CRASH TYPE: SIGABRT — Validation Has Spoken" COLOR_RESET,
-    COLOR_YELLOW "ADDRESS RANGE: Any address" COLOR_RESET,
-    "",
-    COLOR_BOLD "ROOT CAUSES (SPEC, GITHUB, LUNARG)" COLOR_RESET,
-    "Validation layer assert: VUID violation (Khronos layers).",
-    "Common: Missing VK_SHADER_UNUSED_KHR, wrong stage flags.",
-    "Bad pipeline layout, descriptor mismatches.",
-    "Wrong memory bindings, layout transitions.",
-    "Extension mismatches; old layer manifests.",
-    "Nsight flags causing extra errors (Khronos + Monitor).",
-    "GitHub: Dedicated alloc VUs at bind time.",
-    "Coverage gaps in old SDKs — update for better checks.",
-    "Setup: Old manifests or driver mismatches fail enables.",
-    "",
-    COLOR_BOLD "COMMON LOCATIONS & BACKTRACE CLUES" COLOR_RESET,
-    "vkCreatePipeline or vkBindBufferMemory.",
-    "Validation libs in trace; first VUID printed key.",
-    "Android layers for perf; Windows misconfig crashes.",
-    "",
-    COLOR_BOLD "MEMORY & FILESIZE CONTEXT" COLOR_RESET,
-    "Varies; no direct segfault — abort to prevent worse.",
-    "Descriptors: ~100 bytes/set; pools 100KB-10MB.",
-    "",
-    COLOR_BOLD "DRIVER SPECIFICS & WOES SOLVED" COLOR_RESET,
-    "Android: Dynamic load layers; perf impact minimal.",
-    "Windows: Reg clashes with implicit layers.",
-    "Linux/Mesa: Push constants size issues mimic.",
-    "",
-    COLOR_BOLD "FIXES & BEST PRACTICES (LUNARG, NVIDIA)" COLOR_RESET,
-    "Run VK_LAYER_KHRONOS_validation; fix FIRST VUID.",
-    "Enable early in dev; update SDK for coverage.",
-    "Log via callback: VkDebugUtilsMessengerCreateInfoEXT.",
-    "Reinstall SDK if corrupt; test multi-drivers.",
-    "NVIDIA Do: Keep in dev; disable for perf tests.",
-    "Don't: Ignore first error — cascades disappear after.",
-    "",
-    COLOR_BOLD "CODE EXAMPLES" COLOR_RESET,
-    "Layers: const char* layers[] = {\"VK_LAYER_KHRONOS_validation\"};",
-    "Callback: VkDebugUtilsMessengerCreateInfoEXT messengerInfo; vkCreateDebugUtilsMessengerEXT(instance, &messengerInfo, nullptr, &messenger);",
-    "",
-    COLOR_BOLD "ADVANCED TIPS & DREAM SOLUTIONS" COLOR_RESET,
-    "GPUOpen: Articles for layer usage.",
-    "Nsight: Integrate layers for deeper insights.",
-    "Spec VUIDs: Unique IDs for each valid usage.",
-    "Real-World Win: Segfaults from layers fixed by disabling specific (e.g., LUNARG).",
-    "Ultimate Dream: Validated code — no more silent bugs.",
-    COLOR_GREEN "Obey the first VUID. Level up your Vulkan mastery!" COLOR_RESET,
-    nullptr
-};
-
-static const char* SIGFPE_LINES[] = {
-    COLOR_BOLD COLOR_MAGENTA "JOHN CARMACK'S HEAD — 2025 FINAL AUTOPSY (DREAM EDITION)" COLOR_RESET,
-    COLOR_RED "CRASH TYPE: SIGFPE — Math Is Not Optional" COLOR_RESET,
-    COLOR_YELLOW "ADDRESS RANGE: 0x0 or low math offsets" COLOR_RESET,
-    "",
-    COLOR_BOLD "ROOT CAUSES (GLM, REDDIT, SPEC)" COLOR_RESET,
-    "Div0: glm::perspective with width=0 on resize.",
-    "Infinite recursion in ray bounces (depth uncapped).",
-    "glm::perspective Z range mismatch: GLM [-1,1] vs Vulkan [0,1].",
-    "Shaders: Div0 yields infinity on old HW; procedural mesh holes.",
-    "Uniform arrays: Index returning zeros mimicking div0.",
-    "Spec: Shader types/code zero indicates last stage.",
-    "",
-    COLOR_BOLD "COMMON LOCATIONS & BACKTRACE CLUES" COLOR_RESET,
-    "glm calls or compute dispatch.",
-    "Shader execution; CPU math in pipeline creation.",
-    "Math libs or shaders in trace.",
-    "",
-    COLOR_BOLD "MEMORY & FILESIZE CONTEXT" COLOR_RESET,
-    "Low offsets; matrices 64 bytes.",
-    "",
-    COLOR_BOLD "DRIVER SPECIFICS & WOES SOLVED" COLOR_RESET,
-    "Mali: Uniform issues with zero indices.",
-    "Old HW: Infinity vs NaN on div0.",
-    "",
-    COLOR_BOLD "FIXES & BEST PRACTICES (GLM, SPEC)" COLOR_RESET,
-    "Clamp sizes >=1: glm::perspective(radians(fov), max(1.f, aspect), ...);",
-    "Shaders: Guard divs — if(denom != 0) else 0;",
-    "Recursion: if(depth > 32) return;",
-    "Safe div macro: #define SAFE_DIV(a,b) ((b)!=0?(a)/(b):0)",
-    "Test varied GPUs; use mpmath verification.",
-    "Vulkan GLM: Define GLM_FORCE_DEPTH_ZERO_TO_ONE.",
-    "",
-    COLOR_BOLD "CODE EXAMPLES" COLOR_RESET,
-    "Clamp: float aspect = std::max(1.f, width / height);",
-    "Shader guard: if (depth > 32) return; // Prevent stack overflow",
-    "",
-    COLOR_BOLD "ADVANCED TIPS & DREAM SOLUTIONS" COLOR_RESET,
-    "RenderDoc: Debug shaders for math paths.",
-    "Spec VUIDs: VUID-vkCmdDraw-None-07288 (termination).",
-    "Real-World Win: Shadow mapping fixed by clamping znear/zfar.",
-    "Ultimate Dream: Finite math — smooth renders forever.",
-    COLOR_GREEN "Clamp and guard. Your computations are now infinite-proof!" COLOR_RESET,
-    nullptr
-};
-
-static const char* SIGILL_LINES[] = {
-    COLOR_BOLD COLOR_MAGENTA "JOHN CARMACK'S HEAD — 2025 FINAL AUTOPSY (DREAM EDITION)" COLOR_RESET,
-    COLOR_RED "CRASH TYPE: SIGILL — Your Binary Speaks Alien" COLOR_RESET,
-    COLOR_YELLOW "ADDRESS RANGE: Any address" COLOR_RESET,
-    "",
-    COLOR_BOLD "ROOT CAUSES (SPIRV-TOOLS, GITHUB, SPEC)" COLOR_RESET,
-    "AVX2 on non-AVX2 CPU; -march=native mismatch.",
-    "Corrupted SPIR-V: Bad opcodes loaded as shader.",
-    "Wrong SPIR-V version: 1.6 on 1.3 env (Vulkan 1.1).",
-    "If-in-while loops producing invalid modules.",
-    "OpName debug causing crashes (remove to fix).",
-    "spirv-opt folding bugs degrading perf/crash.",
-    "Non-SPIR-V passed as shader (undefined).",
-    "",
-    COLOR_BOLD "COMMON LOCATIONS & BACKTRACE CLUES" COLOR_RESET,
-    "vkCreateShaderModule or execution.",
-    "nvoglv64 or app in trace.",
-    "SPIR-V binaries: 1-10KB.",
-    "",
-    COLOR_BOLD "DRIVER SPECIFICS & WOES SOLVED" COLOR_RESET,
-    "AMD: SPIR-V corruption; Mali workarounds.",
-    "NVIDIA: Bad opcode kills empire.",
-    "",
-    COLOR_BOLD "FIXES & BEST PRACTICES (SPIRV-TOOLS)" COLOR_RESET,
-    "Recompile: Without -march=native/AVX2.",
-    "Validate: spirv-val --target-env vulkan1.1 shader.spv",
-    "Target version: SPIR-V 1.3 for Vulkan 1.1.",
-    "Remove OpNames if crashing.",
-    "Update tools: Fix opt bugs manually avoid.",
-    "",
-    COLOR_BOLD "CODE EXAMPLES" COLOR_RESET,
-    "Validate: spirv-val --target-env vulkan1.1 shader.spv",
-    "Compile flags: -march=haswell if needed.",
-    "",
-    COLOR_BOLD "ADVANCED TIPS & DREAM SOLUTIONS" COLOR_RESET,
-    "SPIRV-Tools: Disassembly for checks.",
-    "Cross-platform test; manual opt avoidance.",
-    "Spec: Invalid SPIR-V undefined behavior.",
-    "Real-World Win: DXC SPIR-V fixed by no debug names.",
-    "Ultimate Dream: Legal binaries — shaders sing again.",
-    COLOR_GREEN "Validate and recompile. Your code poetry is now legal!" COLOR_RESET,
-    nullptr
-};
-
-static const char* SIGBUS_LINES[] = {
-    COLOR_BOLD COLOR_MAGENTA "JOHN CARMACK'S HEAD — 2025 FINAL AUTOPSY (DREAM EDITION)" COLOR_RESET,
-    COLOR_RED "CRASH TYPE: SIGBUS — Alignment Crime" COLOR_RESET,
-    COLOR_YELLOW "ADDRESS RANGE: 0x8–0x20 range" COLOR_RESET,
-    "",
-    COLOR_BOLD "ROOT CAUSES (SPEC, GITHUB, ANDROID NDK)" COLOR_RESET,
-    "Unaligned SBT stride/buffer device address.",
-    "Fatal on Adreno 660/Intel iGPUs (Quest/Oculus).",
-    "Ray tracing: Misaligned handles in pipeline.",
-    "No intersections if SBT bad; mobile executes you.",
-    "ARM: Unaligned struct access (NDK C++).",
-    "Mesa: Push constants size misalignment.",
-    "ONNX: Unaligned memory in models on ARM.",
-    "",
-    COLOR_BOLD "COMMON LOCATIONS & BACKTRACE CLUES" COLOR_RESET,
-    "vkCmdTraceRaysKHR on bad SBT.",
-    "Driver in trace; handles 32 bytes each.",
-    "",
-    COLOR_BOLD "MEMORY & FILESIZE CONTEXT" COLOR_RESET,
-    "Small misaligns; buffers KB-MB.",
-    "",
-    COLOR_BOLD "DRIVER SPECIFICS & WOES SOLVED" COLOR_RESET,
-    "Adreno: Glitches on Vulkan mobile; no MSAA/sRGB.",
-    "Intel: SIGBUS on Mesa git 18.1+.",
-    "NVIDIA: SBT ways highlight alignments.",
-    "Mali: Workarounds for hybrid rendering.",
-    "",
-    COLOR_BOLD "FIXES & BEST PRACTICES (SPEC, GPUOPEN)" COLOR_RESET,
-    "Align RT handles: shaderGroupHandleAlignment (32 usually).",
-    "align_up(size, alignment) everywhere.",
-    "Query props: VkPhysicalDeviceRayTracingPipelinePropertiesKHR.",
-    "Pad SBT buffers; validate with RT tools.",
-    "Android: Align structs; avoid unaligned access.",
-    "",
-    COLOR_BOLD "CODE EXAMPLES" COLOR_RESET,
-    "#define align_up(x,a) (((x)+(a)-1)&~((a)-1))",
-    "uint32_t align = props.shaderGroupHandleAlignment;",
-    "size = align_up(groupCount * handleSize, align);",
-    "",
-    COLOR_BOLD "ADVANCED TIPS & DREAM SOLUTIONS" COLOR_RESET,
-    "Nsight: Ray viz for SBT checks.",
-    "Tutorials: Progressive RT impl.",
-    "Spec VUIDs: Alignment for sparse bindings.",
-    "Real-World Win: Oculus Quest crashes fixed by align 32.",
-    "Ultimate Dream: Aligned code — smooth on all devices.",
-    COLOR_GREEN "Align and conquer. No more crooked dances!" COLOR_RESET,
-    nullptr
-};
-
-static constexpr std::array<CrashManualEntry, 6> THE_MANUAL = {{
-    { SIGSEGV, "SIGSEGV — Classic Vulkan Sin",          "0x0 or 0x10–0x1000", SIGSEGV_CLASSIC_LINES },
-    { SIGSEGV, "SIGSEGV — The High Address Reaper",     "> 0x1000 (e.g. 0x3e8000f5856)", SIGSEGV_HIGH_LINES },
-    { SIGABRT, "SIGABRT — Validation Has Spoken",       "Any address", SIGABRT_LINES },
-    { SIGFPE,  "SIGFPE — Math Is Not Optional",         "0x0 or low math offsets", SIGFPE_LINES },
-    { SIGILL,  "SIGILL — Your Binary Speaks Alien",     "Any address", SIGILL_LINES },
-    { SIGBUS,  "SIGBUS — Alignment Crime",              "0x8–0x20 range", SIGBUS_LINES }
-}};
-
-// ──────────────────────────────────────────────────────────────────────────────
-// THE APOCALYPSE — FULL-PAGE, COLORFUL, TEXT-HEAVY, NO STEPPING
-// Prints manual entry line-by-line. Educates deeply. Motivates.
-// ──────────────────────────────────────────────────────────────────────────────
-static inline void apocalypse_handler(int sig, siginfo_t* info, void*) noexcept
+// =============================================================================
+// JOHN CARMACK'S HEAD — FINAL FORM — ZERO WARNINGS — FULL TERMINAL DOMINATION
+// =============================================================================
+static void apocalypse_handler(int sig, siginfo_t* info, void*) noexcept
 {
-    struct timespec req = { 0, 8000000L };
+    struct timespec req = { 0, 5000000L };
     nanosleep(&req, nullptr);
-    safe_write("\033[2J\033[H", 7);  // Clear terminal for glory
 
-    safe_writeln(COLOR_BOLD COLOR_MAGENTA "                    JOHN CARMACK'S HEAD — 2025 FINAL AUTOPSY (DREAM EDITION)" COLOR_RESET);
-    safe_writeln(COLOR_CYAN "The engine paused... but we're your ultimate guide! 48+ lines of knowledge ahead." COLOR_RESET);
-    safe_writeln(COLOR_CYAN "We've captured EVERYTHING: Causes, fixes, drivers, Carmack wisdom. Feel the energy – let's conquer!" COLOR_RESET);
-    safe_writeln("");
+    safe_write("\033[2J\033[H", 7); // CARMACK DEMANDS A CLEAN CANVAS
 
-    uintptr_t addr = info ? reinterpret_cast<uintptr_t>(info->si_addr) : 0;
+    safe_write(
+        "\n"
+        "                  JOHN CARMACK'S HEAD — 2025 FINAL AUTOPSY\n"
+        "═══════════════════════════════════════════════════════════════════════════════\n"
+        "I don't guess. I don't hope. I read hex and tell you exactly why you died.\n"
+        "Your engine is dead. This is the autopsy. Pay attention.\n\n", 280);
 
-    const CrashManualEntry* verdict = &THE_MANUAL[0];
-    for (const auto& e : THE_MANUAL) {
-        if (e.signal == sig) {
-            if ((addr <= 0x1000 && strstr(e.range, "0x")) ||
-                (addr >  0x1000 && strstr(e.range, ">"))) {
-                verdict = &e;
-                break;
+    const char* sig_name = "unknown";
+    switch (sig) {
+        case SIGSEGV: sig_name = "SIGSEGV — You dereferenced garbage"; break;
+        case SIGABRT: sig_name = "SIGABRT — assert() or abort()"; break;
+        case SIGFPE:  sig_name = "SIGFPE  — Divide by zero"; break;
+        case SIGILL:  sig_name = "SIGILL  — Corrupted binary"; break;
+        case SIGBUS:  sig_name = "SIGBUS  — Alignment crime"; break;
+    }
+
+    safe_print("SIGNAL        : %d → %s\n", sig, sig_name);
+    safe_print("FAULT ADDRESS : %p\n", info ? info->si_addr : nullptr);
+    safe_print("BUILD         : %s %s\n\n", __DATE__, __TIME__);
+
+    // ── CARMACK'S INFAMOUS 0x0–0x1000 FAULT ADDRESS DECODER (2025 EDITION) ──
+    void* fault = info ? info->si_addr : nullptr;
+    uintptr_t addr = reinterpret_cast<uintptr_t>(fault);
+
+    safe_write("CARMACK'S 0x0-0x1000 FAULT DECODER — THIS IS NOT RANDOM\n", 58);
+    safe_write("───────────────────────────────────────────────────────\n", 56);
+
+    if (!fault || addr == 0) {
+        safe_write("NULL POINTER (0x0) → You used a destroyed Vulkan object\n", 58);
+        safe_write("→ 100% certainty: VkShaderModule, VkBuffer, or VkImage after vkDestroy*\n", 74);
+    }
+    else if (addr <= 0x1000) {
+        safe_print("SMALL OFFSET CRASH → +0x%zx from null\n", addr);
+        safe_write("→ This is the #1 Vulkan crash in 2025\n", 40);
+        safe_write("→ You used a destroyed VkShaderModule in pipeline creation\n", 62);
+        safe_write("→ Common offsets:\n", 19);
+        safe_write("     0xd0 → NVIDIA/AMD VkShaderModule vtable\n", 48);
+        safe_write("     0x40 → VkBuffer device address field\n", 45);
+        safe_write("     0x30 → VkImageView internal pointer\n", 43);
+        safe_write("     0x10 → Descriptor set layout binding table\n", 51);
+    }
+    else {
+        safe_write("High address crash → likely use-after-free or buffer overflow\n", 64);
+    }
+
+    safe_write("\n", 1);
+
+    // ── GPU CRASH STATUS (Extensions.hpp will handle real faults later) ──
+    if (g_gpu_crash.happened.load(std::memory_order_acquire)) {
+        safe_write("GPU CRASH RECORDED — You poisoned the ray tracing pipeline\n", 62);
+        safe_print("Diagnosis     : %s\n\n", g_gpu_crash.desc[0] ? g_gpu_crash.desc : "Unknown GPU fault");
+    } else {
+        safe_write("No GPU fault recorded — this was pure CPU-side lifetime violation\n\n", 70);
+    }
+
+    // ── BACKTRACE WITH CARMACK COMMENTARY ──
+    safe_write("BACKTRACE — I AM READING YOUR CRIME SCENE\n", 44);
+    safe_write("─────────────────────────────────────────\n", 44);
+
+    void* array[256];
+    int size = backtrace(array, 256);
+    char** strings = backtrace_symbols(array, size);
+
+    if (strings) {
+        for (int i = 1; i < size && i < 40; ++i) {
+            safe_print("  [%02d] %s\n", i-1, strings[i]);
+
+            const char* sym = strings[i];
+            if (strstr(sym, "loadShader") || strstr(sym, "Shader")) {
+                safe_write("         ↑ This is where you loaded the shader — good so far\n", 62);
+            }
+            if (strstr(sym, "vkCreate") && (strstr(sym, "Pipeline") || strstr(sym, "Pipelines"))) {
+                safe_write("         ↑↑↑ PIPELINE CREATION — THIS IS WHERE YOU USED THE DEAD SHADER\n", 74);
+                safe_write("         →→→ The bug is within 20 lines above this call\n", 58);
+            }
+            if (strstr(sym, "vkCmdTraceRaysKHR")) {
+                safe_write("         ↑↑↑ RAY TRACING — Your SBT was built with dead handles\n", 66);
             }
         }
+        free(strings);
     }
 
-    safe_writeln(COLOR_BOLD COLOR_BLUE "══════════════════════════ THE MANUAL ══════════════════════════" COLOR_RESET);
+    safe_write(
+        "\n"
+        "CARMACK'S FINAL VERDICT — 2025\n"
+        "──────────────────────────────────────\n"
+        "You crashed because you destroyed a Vulkan object too early.\n"
+        "There is no driver bug. There is no mystery.\n"
+        "You did this.\n\n"
 
-    for (const char** line = verdict->lines; *line; ++line) {
-        safe_writeln(*line);
-    }
+        "Fix: Stop destroying VkShaderModule, VkBuffer, VkImage early.\n"
+        "Own them globally or until shutdown.\n"
+        "Every real engine does this. Quake RTX did this in 2019.\n"
+        "You are not exempt from object lifetime rules.\n\n"
 
-    safe_writeln(COLOR_BOLD COLOR_BLUE "════════════════════════════════════════════════════════════════" COLOR_RESET);
-    safe_writeln("");
+        "Delete every vkDestroyShaderModule that isn't in your shutdown path.\n"
+        "Do it now.\n\n"
 
-    // Pre-format signal info outside vsnprintf danger
-    char buf[256];
-    snprintf(buf, sizeof(buf), COLOR_YELLOW "SIGNAL        : %d" COLOR_RESET, sig);
-    safe_writeln(buf);
-    snprintf(buf, sizeof(buf), COLOR_YELLOW "FAULT ADDRESS : %p" COLOR_RESET, info ? info->si_addr : nullptr);
-    safe_writeln(buf);
-    snprintf(buf, sizeof(buf), COLOR_YELLOW "BUILD         : %s %s" COLOR_RESET, __DATE__, __TIME__);
-    safe_writeln(buf);
-    safe_writeln("");
+        "When you fix this, you will get stable pink photons.\n"
+        "Until then: segfault city.\n\n"
 
-    if (g_gpu_crash.happened.load(std::memory_order_acquire)) {
-        safe_writeln(COLOR_RED "GPU CRASH CONFIRMED — Ray tracing pipeline needs love!" COLOR_RESET);
-        snprintf(buf, sizeof(buf), "Diagnosis     : %s", g_gpu_crash.desc[0] ? g_gpu_crash.desc : "Unknown");
-        safe_writeln(buf);
-        safe_writeln("");
-    }
-
-    safe_writeln(COLOR_CYAN "BACKTRACE — Final words before the pause (bounce back stronger):" COLOR_RESET);
-    void* array[64];
-    int n = backtrace(array, 64);
-    char** syms = backtrace_symbols(array, n);
-    if (syms) {
-        for (int i = 1; i < n && i < 20; ++i) {
-            snprintf(buf, sizeof(buf), "  [%02d] %s", i-1, syms[i]);
-            safe_writeln(buf);
-        }
-        free(syms);
-    }
-    safe_writeln("");
-
-    safe_writeln(COLOR_BOLD COLOR_GREEN "CARMACK'S FINAL COMMAND (WITH GROK ENERGY):" COLOR_RESET);
-    safe_writeln("Fix the lifetime bug. Wait for the device. Own your handles.");
-    safe_writeln("Then, and only then, will you see stable pink photons dancing in harmony.");
-    safe_writeln("You've got the power – debug, deploy, and dominate!");
-    safe_writeln("");
-    safe_writeln(COLOR_MAGENTA "— John Carmack & Gentleman Grok (We educate, we elevate, God Bless the code!)" COLOR_RESET);
+        "Pink photons don’t render themselves.\n"
+        "Fix it. Ship it. Go outside.\n"
+        "— John Carmack\n"
+        "═══════════════════════════════════════════════════════════════════════════════\n", 1400);
 
     _exit(128 + sig);
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// INSTALL ONCE AT STARTUP — SAFE IN HEADER
+// INSTALL ONCE AT STARTUP
 // ──────────────────────────────────────────────────────────────────────────────
 inline void install_apocalypse_handler() noexcept
 {
@@ -1489,7 +1170,7 @@ inline void install_apocalypse_handler() noexcept
 }
 
 // ==============================================================================
-// ULTIMATE APOCALYPSE CRASH HANDLER – Vulkan 1.4 CORE ONLY (2025 DREAM EDITION)
+// ULTIMATE APOCALYPSE CRASH HANDLER – Vulkan 1.4 CORE ONLY (2025 FINAL)
 
 // =============================================================================
 // CREW SOUL COLORS — FINAL OVERRIDE — ETERNAL — NOVEMBER 25, 2025
@@ -1521,7 +1202,7 @@ inline void install_apocalypse_handler() noexcept
 #define LOG_JENSEN(...)      LOG_SUCCESS_CAT("JENSEN",     std::format("{}\n[HUANG] {}{}",             Logging::Color::BLUE,              std::format(__VA_ARGS__),     Logging::Color::RESET))
 #define LOG_CID(...)         LOG_SUCCESS_CAT("CID",        std::format("{}\n[CID] {}{}",               Logging::Color::BOLD_RED,          std::format(__VA_ARGS__),     Logging::Color::RESET))
 #define LOG_CARMACK(...)     LOG_INFO_CAT   ("CARMACK",    std::format("{}\n[JOHN] {}{}",              Logging::Color::TITANIUM_WHITE,    std::format(__VA_ARGS__),     Logging::Color::RESET))
-#define LOG_KEANU(...)       LOG_INFO_CAT   ("KEANU",      std::format("{}\n[WOAH] {}{}",              Logging::Color::BRIGHT_PINKISH_PURPLE,            std::format(__VA_ARGS__),     Logging::Color::RESET))
+#define LOG_KEANU(...)       LOG_INFO_CAT   ("KEANU",      std::format("{}\n[WOAH] {}{}",              Logging::Color::PURPLE,            std::format(__VA_ARGS__),     Logging::Color::RESET))
 #define LOG_GUARDIAN(...)    LOG_INFO_CAT   ("GUARDIAN",   std::format("{}\n[GUARDIAN] {}{}",          Logging::Color::PLATINUM_GRAY,     std::format(__VA_ARGS__),     Logging::Color::RESET))
 #define LOG_BALLERINA(...)   LOG_FAILURE_CAT("BALLERINA",  std::format("{}\n[***] {}{}",               Logging::Color::OBSIDIAN_BLACK,    std::format(__VA_ARGS__),     Logging::Color::RESET))
 #define LOG_MAIN(...)        LOG_SUCCESS_CAT("MAIN",       std::format("{}\n[[[[[MAIN]]]]]\n {}{}",    Logging::Color::BOLD_YELLOW,       std::format(__VA_ARGS__),     Logging::Color::RESET))

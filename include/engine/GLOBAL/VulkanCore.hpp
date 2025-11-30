@@ -86,6 +86,7 @@ struct std::formatter<VkPhysicalDeviceType> : std::formatter<std::string_view> {
 // Forward Declarations
 // =============================================================================
 namespace RTX {
+    void createCommandPool();
     bool createSurface(SDL_Window* window, VkInstance instance);
     void fixNvidiaValidationBugLocally() noexcept;
 }

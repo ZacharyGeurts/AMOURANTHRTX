@@ -59,6 +59,27 @@ public:
     void buildTLAS(VkCommandPool pool, VkQueue queue,
                    std::span<const std::pair<VkAccelerationStructureKHR, glm::mat4>> instances) noexcept;
 
+    // Legacy overloads — for old code
+    void buildBLAS(VkCommandPool pool,
+                   uint64_t vertexBuf, uint64_t indexBuf,
+                   uint32_t vertexCount, uint32_t indexCount,
+                   VkBuildAccelerationStructureFlagsKHR extraFlags = 0) noexcept
+    {
+        buildBLAS(pool, g_ctx().graphicsQueue(), vertexBuf, indexBuf, vertexCount, indexCount, extraFlags);
+    }
+
+    void buildTLAS(VkCommandPool pool,
+                   const std::vector<std::pair<VkAccelerationStructureKHR, glm::mat4>>& instances) noexcept
+    {
+        buildTLAS(pool, g_ctx().graphicsQueue(), std::span(instances));
+    }
+
+    void buildTLAS(VkCommandPool pool,
+                   std::span<const std::pair<VkAccelerationStructureKHR, glm::mat4>> instances) noexcept
+    {
+        buildTLAS(pool, g_ctx().graphicsQueue(), instances);
+    }
+
     [[nodiscard]] VkDeviceAddress getBufferAddress(VkBuffer buf) const noexcept;
 
     [[nodiscard]] inline VkAccelerationStructureKHR getBLAS() const noexcept

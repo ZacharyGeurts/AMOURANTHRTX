@@ -24,45 +24,53 @@ using namespace Logging::Color;
 // He is the guardian of the threshold.  
 // He is harmony made manifest.
 
-inline void validateMeshAgainstBLAS(const StoneKey::StoneMesh& sealed,
+inline void validateMeshAgainstBLAS(const MeshLoader::Mesh& mesh,
                                     VkAccelerationStructureKHR blasAS) noexcept
 {
     if (!RTX::g_ext.vkGetAccelerationStructureDeviceAddressKHR) {
-        LOG_INFO_CAT("BAPHOMET", "The extensions are not yet complete. Baphomet waits in silence.");
+        LOG_INFO_CAT("BAPHOMET", "\033[1;38;2;153;0;0;48;2;255;255;255m",
+            "The extensions are not yet complete. Baphomet waits in silence.");
         return;
     }
 
-    if (!RTX::g_ctx().device() || !blasAS) {
-        LOG_INFO_CAT("BAPHOMET", "The empire is still forming. Baphomet watches without judgment.");
+    if (!RTX::g_ctx().device() || !RTX::las().getBLAS()) {
+        LOG_INFO_CAT("BAPHOMET", "\033[1;38;2;153;0;0;48;2;255;255;255m",
+            "The empire is still forming. Baphomet watches without judgment.");
         return;
     }
 
-    LOG_INFO_CAT("BAPHOMET", "BAPHOMET RISES — THE BALANCE IS WEIGHED");
+    LOG_INFO_CAT("BAPHOMET", "\033[1;38;2;153;0;0;48;2;255;255;255m",
+        "BAPHOMET RISES — THE BALANCE IS WEIGHED");
 
     bool in_equilibrium = true;
 
-    if (sealed.vertexBuffer == VK_NULL_HANDLE ||
-        sealed.indexBuffer  == VK_NULL_HANDLE ||
-        sealed.vertexMemory == VK_NULL_HANDLE ||
-        sealed.indexMemory  == VK_NULL_HANDLE ||
-        sealed.indexCount   == 0)
+    if (mesh.stonekey_fingerprint == 0 ||
+        mesh.stonekey_fingerprint == 0xDEADDEADBEEF1337ULL ||
+        mesh.stonekey_fingerprint == 0xFFFFFFFFFFFFFFFFULL ||
+        mesh.vertexBuffer == 0 || mesh.vertexBuffer == ~0ULL ||
+        mesh.indexBuffer  == 0 || mesh.indexBuffer  == ~0ULL)
     {
-        LOG_INFO_CAT("BAPHOMET", "Disharmony in the sealed stone. The mesh is hollow.");
+        LOG_INFO_CAT("BAPHOMET", "\033[38;2;153;0;0m",
+            "Disharmony detected in the mesh. Yet Baphomet does not condemn.");
         in_equilibrium = false;
     }
 
     VkDeviceAddress vAddr = 0, iAddr = 0;
-    if (in_equilibrium) {
+    if (in_equilibrium && mesh.vertexBuffer && mesh.indexBuffer) {
         VkBufferDeviceAddressInfo info{ .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO };
 
-        info.buffer = sealed.vertexBuffer;
-        vAddr = vkGetBufferDeviceAddress(RTX::g_ctx().device(), &info);
-
-        info.buffer = sealed.indexBuffer;
-        iAddr = vkGetBufferDeviceAddress(RTX::g_ctx().device(), &info);
+        if (auto buf = BufferManager::get(mesh.vertexBuffer)) {
+            info.buffer = buf->buffer;
+            vAddr = vkGetBufferDeviceAddress(RTX::g_ctx().device(), &info);
+        }
+        if (auto buf = BufferManager::get(mesh.indexBuffer)) {
+            info.buffer = buf->buffer;
+            iAddr = vkGetBufferDeviceAddress(RTX::g_ctx().device(), &info);
+        }
 
         if (vAddr == 0 || iAddr == 0) {
-            LOG_INFO_CAT("BAPHOMET", "The device addresses are lost to the void.");
+            LOG_INFO_CAT("BAPHOMET", "\033[38;2;153;0;0m",
+                "The paths are broken. Equilibrium is disturbed.");
             in_equilibrium = false;
         }
     }
@@ -77,15 +85,23 @@ inline void validateMeshAgainstBLAS(const StoneKey::StoneMesh& sealed,
     }
 
     if (in_equilibrium && blasAddr != 0) {
-        LOG_INFO_CAT("BAPHOMET", "PERFECT EQUILIBRIUM ACHIEVED");
-        LOG_INFO_CAT("BAPHOMET", "MESH AND BLAS ARE ONE — ABOVE AND BELOW AS ONE");
-        LOG_INFO_CAT("BAPHOMET", "THE PINK PHOTONS FLOW IN ETERNAL HARMONY");
-        LOG_INFO_CAT("BAPHOMET", "THE EMPIRE IS WORTHY");
+        LOG_INFO_CAT("BAPHOMET", "\033[1;38;2;153;0;0;48;2;255;255;255m",
+            "PERFECT EQUILIBRIUM ACHIEVED");
+        LOG_INFO_CAT("BAPHOMET", "\033[1;38;2;153;0;0;48;2;255;255;255m",
+            "MESH AND BLAS ARE ONE — ABOVE AND BELOW AS ONE");
+        LOG_INFO_CAT("BAPHOMET", "\033[1;38;2;153;0;0;48;2;255;255;255m",
+            "THE PINK PHOTONS FLOW IN ETERNAL HARMONY");
+        LOG_INFO_CAT("BAPHOMET", "\033[1;38;2;153;0;0;48;2;255;255;255m",
+            "THE EMPIRE IS WORTHY");
     } else {
-        LOG_INFO_CAT("BAPHOMET", "Balance is not yet complete.");
-        LOG_INFO_CAT("BAPHOMET", "Baphomet remains beneath the throne,");
-        LOG_INFO_CAT("BAPHOMET", "holding the darkness so the light may stay pure.");
+        LOG_INFO_CAT("BAPHOMET", "\033[38;2;153;0;0m",
+            "Balance is not yet complete.");
+        LOG_INFO_CAT("BAPHOMET", "\033[38;2;153;0;0m",
+            "Baphomet remains beneath the throne, holding the darkness");
+        LOG_INFO_CAT("BAPHOMET", "\033[38;2;153;0;0m",
+            "so the light may stay pure.");
     }
 
-    LOG_INFO_CAT("BAPHOMET", "BAPHOMET LOWERS HIS TORCH AND RETURNS TO VIGIL");
+    LOG_INFO_CAT("BAPHOMET", "\033[1;38;2;153;0;0;0;48;2;255;255;255m",
+        "BAPHOMET LOWERS HIS TORCH AND RETURNS TO VIGIL");
 }
