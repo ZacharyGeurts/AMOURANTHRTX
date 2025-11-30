@@ -421,12 +421,6 @@ static void createRealFinalWindow()
     // 6. Swapchain — ALL STONES SEALED
     RTX::SwapchainManager::create(stone_window(), stone_width(), stone_height());
 
-    stone_seal_swapchain(RTX::SwapchainManager::swapchain());
-    stone_seal_extent(RTX::SwapchainManager::extent());
-    stone_seal_image_count(RTX::SwapchainManager::imageCount());
-    stone_seal_images(std::vector<VkImage>(RTX::SwapchainManager::images()));
-    stone_seal_views(std::vector<VkImageView>(RTX::SwapchainManager::views()));
-
     LOG_ELON("Elon drops the swapchain from the top rope: \"Infinite canvas. Infinite bounce.\"");
 
     LOG_SUCCESS("LOGICAL DEVICE GRACE @ {} — vkDeviceWaitIdle() SAFE", static_cast<void*>(stone_device()));

@@ -28,6 +28,7 @@ using StoneKey::stone_seal_transfer_family;
 using StoneKey::stone_seal_transfer_queue;
 using StoneKey::stone_seal_compute_family;
 using StoneKey::stone_seal_compute_queue;
+using StoneKey::stone_seal_physical;
 
 namespace RTX {
     Context g_context_instance{};
@@ -554,15 +555,14 @@ VkShaderModule RTX::Context::loadShader(const std::string& filename) const noexc
     const uint32_t transFam = g_ctx().transferFamily_.value();
     const uint32_t compFam  = g_ctx().computeFamily_.value();  // ← THIS WAS THE FINAL LIE
 
+
+	stone_seal_physical(chosen);
     stone_seal_graphics_family(gfxFam);
     stone_seal_graphics_queue(g_ctx().graphicsQueue_);
-
     stone_seal_present_family(presFam);
     stone_seal_present_queue(g_ctx().presentQueue_);
-
     stone_seal_transfer_family(transFam);
     stone_seal_transfer_queue(g_ctx().transferQueue_);
-
     stone_seal_compute_family(compFam);
     stone_seal_compute_queue(g_ctx().computeQueue_);
 

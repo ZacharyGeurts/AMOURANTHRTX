@@ -19,6 +19,11 @@ using StoneKey::stone_surface;
 using StoneKey::stone_window;
 using StoneKey::stone_width;
 using StoneKey::stone_height;
+using StoneKey::stone_seal_swapchain;
+using StoneKey::stone_seal_extent;
+using StoneKey::stone_seal_image_count;
+using StoneKey::stone_seal_images;
+using StoneKey::stone_seal_views;
 
 namespace RTX {
 
@@ -189,7 +194,7 @@ void SwapchainManager::recreate(uint32_t w, uint32_t h) noexcept
     swapchainImageViews_.clear();
 
     VkSwapchainKHR old = swapchain_.valid() ? *swapchain_ : VK_NULL_HANDLE;
-    createSwapchain(stone_window(), w, h, old);
+    createSwapchain(stone_window(), stone_width(), stone_height(), old);
     createImageViews();
 
     LOG_BLONDIE("Rebirth complete. Zero flicker. The empire never blinked.");
@@ -379,6 +384,12 @@ void SwapchainManager::createSwapchain(SDL_Window* window, uint32_t w, uint32_t 
     LOG_AMOURANTH("Swapchain created — {}x{} | {} images | HDR {}",
                   extent.width, extent.height, count,
                   supportsHDR() ? "IGNITED" : "dormant");
+	
+    stone_seal_swapchain(RTX::SwapchainManager::swapchain());
+    stone_seal_extent(RTX::SwapchainManager::extent());
+    stone_seal_image_count(RTX::SwapchainManager::imageCount());
+    stone_seal_images(std::vector<VkImage>(RTX::SwapchainManager::images()));
+    stone_seal_views(std::vector<VkImageView>(RTX::SwapchainManager::views()));
 
     LOG_SUCCESS_CAT("StoneKey", "Swapchain sealed — images & views transferred to Empire. Pink photons flow.");
 }
