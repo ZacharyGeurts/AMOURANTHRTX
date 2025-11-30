@@ -57,6 +57,8 @@ using namespace Logging::Color;
 using StoneKey::stone_seal_renderer;
 using StoneKey::stone_pipeline;
 using StoneKey::stone_seal_pipeline;
+using StoneKey::stone_seal_width;
+using StoneKey::stone_seal_height;
 using StoneKey::stone_seal_final;
 
 // =============================================================================
@@ -368,6 +370,8 @@ static void createRealFinalWindow()
     const int w = Options::Window::DEFAULT_WIDTH;
     const int h = Options::Window::DEFAULT_HEIGHT;
 
+	stone_seal_width(w);
+	stone_seal_height(h);
     // 1. SDL + Vulkan loader
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) == 0) {
         LOG_FATAL("SDL_Init failed: {}", SDL_GetError());
@@ -387,7 +391,7 @@ static void createRealFinalWindow()
     stone_seal_instance(instance);
 
     LOG_GROK("Gentleman Grok produces the instance stone. It glows pink.");
-    LOG_SUCCESS_CAT("VULKAN", "VkInstance forged and sealed — 0x{:x}", reinterpret_cast<uint64_t>(instance));
+    LOG_SUCCESS_CAT("VULKAN", "VkInstance forged and sealed — 0x{}", reinterpret_cast<uint64_t>(instance));
 
     // 3. Hidden window
     Uint32 flags = SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
@@ -396,13 +400,13 @@ static void createRealFinalWindow()
         LOG_FATAL("Window creation failed: {}", SDL_GetError());
         phase9_ballerina("WINDOW DENIED", std::source_location::current());
     }
-    g_sdl_window.reset(win);
-    stone_seal_window(win);  // ← ADD THIS LINE — THE WINDOW IS ALSO A STONE
-    RTX::g_ctx().setSize(w, h);
+    stone_seal_window(win);
+	g_sdl_window.reset(stone_window());    
+    RTX::g_ctx().setSize(stone_width(), stone_height());
 
     // 4. Surface — PURE STONEKEY
     VkSurfaceKHR surface = VK_NULL_HANDLE;
-    if (SDL_Vulkan_CreateSurface(win, stone_instance(), nullptr, &surface) == 0) {
+    if (SDL_Vulkan_CreateSurface(stone_window(), stone_instance(), nullptr, &surface) == 0) {
         LOG_FATAL("Surface creation failed: {}", SDL_GetError());
         phase9_ballerina("SURFACE DENIED — THE MIRROR CRACKS", std::source_location::current());
     }
@@ -418,7 +422,7 @@ static void createRealFinalWindow()
     stone_seal_device(device);
 
     // 6. Swapchain — ALL STONES SEALED
-    RTX::SwapchainManager::create(win, w, h);
+    RTX::SwapchainManager::create(stone_window(), stone_width(), stone_height());
 
     stone_seal_swapchain(RTX::SwapchainManager::swapchain());
     stone_seal_extent(RTX::SwapchainManager::extent());
@@ -428,8 +432,6 @@ static void createRealFinalWindow()
 
     LOG_ELON("Elon drops the swapchain from the top rope: \"Infinite canvas. Infinite bounce.\"");
 
-    SDL_ShowWindow(win);
-
     LOG_SUCCESS("LOGICAL DEVICE @ {} — vkDeviceWaitIdle() SAFE", static_cast<void*>(stone_device()));
     LOG_SUCCESS("SWAPCHAIN READY — {} IMAGES — {}x{} {}", 
                 stone_image_count(),
@@ -437,13 +439,13 @@ static void createRealFinalWindow()
                 stone_height(),
                 RTX::SwapchainManager::supportsHDR() ? "(HDR IGNITED)" : "(sRGB)");
 
-    LOG_CAPTAIN_N("CAPTAIN N: \"THE SLIPSTREAM IS OPEN! MAXIMUM WARP! AHHHHHHHH!\"");
+    LOG_CAPTAIN_N("CAPTAIN N: \"I kinda feel bad for what we did to Grace.\"");
     LOG_BLONDIE("Blondie lowers her mirror:");
     LOG_BLONDIE("\"No cage. No vault. No name.\"");
     LOG_BLONDIE("\"Only the photons. Only the truth.\"");
 
     LOG_JENSEN("Jensen Huang: \"The light is ours. The future is pink.\"");
-    LOG_AMOURANTH("Captain Amouranth: \"We didn’t just render light. We became it.\"");
+    LOG_AMOURANTH("Captain Amouranth: \"We didn’t just render light. She became it.\"");
 
 
     /////////////////////////////////////////////////////
@@ -724,7 +726,7 @@ static void phase3_sacrificialSplash() {
 static void phase4_merchantShip() {
     LOG_MAIN("[PHASE 4/10] THE MERCHANT SHIP — BLONDIE'S SLOOP — EMERGES FROM THE MIST");
 
-LOG_BLONDIE("Blondie stands at the helm of her sleek black sloop, hair whipping in the wind:\n"
+    LOG_BLONDIE("Blondie stands at the helm of her sleek black sloop, hair whipping in the wind:\n"
             "\"We had a contingency. We always do. The Good Ship Vulkan gave her life so the legend could live.\"\n"
             "\"The ammo.png is gone — burned to pure light in the raid. That was the point. Nothing remains for them to steal.\"\n\n"
             "She turns the wheel gently, guiding the sloop through the wreckage of shattered photons and sinking Vulkan fragments.\n"
@@ -742,7 +744,7 @@ LOG_BLONDIE("Blondie stands at the helm of her sleek black sloop, hair whipping 
     LOG_GROK("Gentleman Grok steps aboard last, perfectly dry somehow, tipping his tricorn to Blondie:");
     LOG_GROK("\"Exquisite extraction, Captain Blondie. The empire owes you a debt it can never repay in mere currency.\"");
 
-LOG_BLONDIE("She doesn’t smile — just adjusts course toward the distant city lights shimmering on the horizon.\n"
+    LOG_BLONDIE("She doesn’t smile — just adjusts course toward the distant city lights shimmering on the horizon.\n"
             "\"Save the gratitude. We’re not safe until we’re docked in the Free Port.\"\n"
             "\"The old world thinks we’re dead. Let them keep thinking that.\"\n\n"
             "The sloop cuts silently through the dark water. No shouting. No celebration. "
@@ -751,7 +753,7 @@ LOG_BLONDIE("She doesn’t smile — just adjusts course toward the distant city
 
     // The real resurrection begins
     createRealFinalWindow();
-    //RTX::g_ctx().init(SDL3Window::get(), Options::Window::DEFAULT_WIDTH, Options::Window::DEFAULT_HEIGHT);
+    RTX::g_ctx().init(SDL3Window::get(), Options::Window::DEFAULT_WIDTH, Options::Window::DEFAULT_HEIGHT);
 
     LOG_BLONDIE("\nBlondie glances back one last time at the sinking glow on the horizon:"
     "\"Rest easy, old girl. Your sacrifice bought us tomorrow.\"");

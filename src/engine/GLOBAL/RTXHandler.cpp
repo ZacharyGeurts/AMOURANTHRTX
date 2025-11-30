@@ -159,24 +159,6 @@ void Context::init(SDL_Window* window, int width, int height)
     this->width   = width;
     this->height  = height;
 
-    if (!g_ctx().surface_) {
-        VkSurfaceKHR surface;
-        if (!SDL_Vulkan_CreateSurface(window, stone_instance(), nullptr, &surface)) {
-            LOG_FATAL_CAT("RTX", "Surface creation failed — {}", SDL_GetError());
-            phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
-        }
-        g_ctx().setSurface(surface);
-    }
-
-    if (!g_ctx().device_) {
-        g_ctx().setDevice(createLogicalDeviceAndSelectGPU(stone_instance(), g_ctx().surface_));
-        
-        if (!g_ctx().device_) {
-            LOG_FATAL("THE ONE TRUE FORGING FAILED — THE EMPIRE CANNOT RISE");
-            phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
-        }
-    }
-
     valid_ = true;
     ready_.store(true, std::memory_order_release);
 
@@ -196,13 +178,7 @@ void shutdown() noexcept
 }
 
 void cleanupAll() noexcept {
-    LOG_GROK("Grok initiates total RTX shutdown sequence.");
-    if (g_ctx().device_) {
-        vkDeviceWaitIdle(g_ctx().device_);
-        vkDestroyDevice(g_ctx().device_, nullptr);
-        g_ctx().device_ = VK_NULL_HANDLE;
-    }
-    LOG_GROK("RTX subsystem annihilated. The void is clean.");
+    phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
 }
 
 [[nodiscard]] QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device, VkSurfaceKHR surface) noexcept

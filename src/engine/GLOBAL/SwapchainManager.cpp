@@ -10,18 +10,15 @@
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/GLOBAL/StoneKey.hpp"
 #include "engine/GLOBAL/RTXHandler.hpp"
+#include "engine/GLOBAL/StoneKey.hpp"
 
 using namespace Logging::Color;
-using StoneKey::stone_swapchain;
+using StoneKey::stone_device;
+using StoneKey::stone_physical;
+using StoneKey::stone_surface;
+using StoneKey::stone_window;
 using StoneKey::stone_width;
 using StoneKey::stone_height;
-using StoneKey::stone_image_count;
-
-using StoneKey::stone_seal_swapchain;
-using StoneKey::stone_seal_images;
-using StoneKey::stone_seal_views;
-using StoneKey::stone_seal_extent;
-using StoneKey::stone_seal_image_count;
 
 namespace RTX {
 
@@ -119,7 +116,7 @@ void SwapchainManager::injectHdrMetadata(VkCommandBuffer cmd, uint32_t imageInde
     if (currentColorSpace_ == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) return;
 
     if (!vkSetHdrMetadataEXT) {
-        vkSetHdrMetadataEXT = reinterpret_cast<PFN_vkSetHdrMetadataEXT>(vkGetDeviceProcAddr(g_ctx().device_, "vkSetHdrMetadataEXT"));
+        vkSetHdrMetadataEXT = reinterpret_cast<PFN_vkSetHdrMetadataEXT>(vkGetDeviceProcAddr(stone_device(), "vkSetHdrMetadataEXT"));
     }
 
     if (vkSetHdrMetadataEXT) {
@@ -135,7 +132,7 @@ void SwapchainManager::injectHdrMetadata(VkCommandBuffer cmd, uint32_t imageInde
             .maxFrameAverageLightLevel = 400.0f
         };
         VkSwapchainKHR sc = *swapchain_;
-        vkSetHdrMetadataEXT(g_ctx().device_, 1, &sc, &m);
+        vkSetHdrMetadataEXT(stone_device(), 1, &sc, &m);
         LOG_AMOURANTH("HDR metadata injected.");
     }
 }
@@ -143,19 +140,19 @@ void SwapchainManager::injectHdrMetadata(VkCommandBuffer cmd, uint32_t imageInde
 void SwapchainManager::setPresentMode(VkPresentModeKHR mode) noexcept
 {
     uint32_t cnt = 0;
-    vkGetPhysicalDeviceSurfacePresentModesKHR(g_ctx().physicalDevice_, g_ctx().surface_, &cnt, nullptr);
+    vkGetPhysicalDeviceSurfacePresentModesKHR(stone_physical(), stone_surface(), &cnt, nullptr);
     std::vector<VkPresentModeKHR> modes(cnt);
-    vkGetPhysicalDeviceSurfacePresentModesKHR(g_ctx().physicalDevice_, g_ctx().surface_, &cnt, modes.data());
+    vkGetPhysicalDeviceSurfacePresentModesKHR(stone_physical(), stone_surface(), &cnt, modes.data());
 
     currentPresentMode_ = std::find(modes.begin(), modes.end(), mode) != modes.end() ? mode : VK_PRESENT_MODE_FIFO_KHR;
-    LOG_NICK("Present mode set to %s.", currentPresentMode_ == VK_PRESENT_MODE_MAILBOX_KHR ? "Mailbox" : "FIFO");
+    LOG_NICK("Present mode set to {}.", currentPresentMode_ == VK_PRESENT_MODE_MAILBOX_KHR ? "Mailbox" : "FIFO");
     recreate(swapchainExtent_.width, swapchainExtent_.height);
 }
 
 void SwapchainManager::setMinImageCount(uint32_t count) noexcept
 {
     VkSurfaceCapabilitiesKHR caps{};
-    vkGetPhysicalDeviceSurfaceCapabilitiesKHR(g_ctx().physicalDevice_, g_ctx().surface_, &caps);
+    vkGetPhysicalDeviceSurfaceCapabilitiesKHR(stone_physical(), stone_surface(), &caps);
     if (count < caps.minImageCount || (caps.maxImageCount && count > caps.maxImageCount)) return;
     LOG_NICK("Min image count set to %u.", count);
     recreate(swapchainExtent_.width, swapchainExtent_.height);
@@ -164,13 +161,11 @@ void SwapchainManager::setMinImageCount(uint32_t count) noexcept
 void SwapchainManager::create(SDL_Window* window, uint32_t w, uint32_t h) noexcept
 {
     LOG_BLONDIE("New swapchain rising from the deep.");
-
-    g_ctx().window = window;
     autoEnableHDR();
     initializeFramePacing();
     enableDirectDisplay(true);
 
-    createSwapchain(window, w, h, VK_NULL_HANDLE);
+    createSwapchain(stone_window(), stone_width(), stone_height(), VK_NULL_HANDLE);
     createImageViews();
 }
 
@@ -183,18 +178,18 @@ void SwapchainManager::recreate(uint32_t w, uint32_t h) noexcept
     }
     minimized_ = false;
 
-    vkDeviceWaitIdle(g_ctx().device_);
+    vkDeviceWaitIdle(stone_device());
     LOG_MAIN("Resize → {}×{} — Rebirth begins.", w, h);
 
     releaseAcquiredImages();
 
     for (VkImageView view : swapchainImageViews_) {
-        if (view) vkDestroyImageView(g_ctx().device_, view, nullptr);
+        if (view) vkDestroyImageView(stone_device(), view, nullptr);
     }
     swapchainImageViews_.clear();
 
     VkSwapchainKHR old = swapchain_.valid() ? *swapchain_ : VK_NULL_HANDLE;
-    createSwapchain(g_ctx().window, w, h, old);
+    createSwapchain(stone_window(), w, h, old);
     createImageViews();
 
     LOG_BLONDIE("Rebirth complete. Zero flicker. The empire never blinked.");
@@ -202,22 +197,22 @@ void SwapchainManager::recreate(uint32_t w, uint32_t h) noexcept
 
 void SwapchainManager::cleanup() noexcept
 {
-    vkDeviceWaitIdle(g_ctx().device_);
+    vkDeviceWaitIdle(stone_device());
 
     releaseAcquiredImages();
 
     for (VkImageView view : swapchainImageViews_) {
-        if (view) vkDestroyImageView(g_ctx().device_, view, nullptr);
+        if (view) vkDestroyImageView(stone_device(), view, nullptr);
     }
     swapchainImageViews_.clear();
     swapchainImages_.clear();
 
     if (swapchain_.valid()) {
-        vkDestroySwapchainKHR(g_ctx().device_, *swapchain_, nullptr);
+        vkDestroySwapchainKHR(stone_device(), *swapchain_, nullptr);
         swapchain_.reset();
     }
 
-    if (predictedSwapchain) vkDestroySwapchainKHR(g_ctx().device_, predictedSwapchain, nullptr);
+    if (predictedSwapchain) vkDestroySwapchainKHR(stone_device(), predictedSwapchain, nullptr);
 
     LOG_GROK("Swapchain annihilated. Memory: pristine.");
 }
@@ -243,20 +238,15 @@ void SwapchainManager::createImageViews() noexcept
         };
 
         VkImageView view = VK_NULL_HANDLE;
-        VK_CHECK(vkCreateImageView(g_ctx().device_, &ci, nullptr, &view));
+        VK_CHECK(vkCreateImageView(stone_device(), &ci, nullptr, &view));
         swapchainImageViews_[i] = view;
     }
 
     LOG_SUCCESS_CAT("RTX", "Created {} swapchain image views.", swapchainImages_.size());
 }
 
-// ────────────────────── THE ONE TRUE SWAPCHAIN CREATOR ──────────────────────
-// ────────────────────── THE ONE TRUE SWAPCHAIN CREATOR — FINAL LAW ──────────────────────
-// ────────────────────── THE ONE TRUE SWAPCHAIN CREATOR — FINAL LAW ──────────────────────
 void SwapchainManager::createSwapchain(SDL_Window* window, uint32_t w, uint32_t h, VkSwapchainKHR old) noexcept
 {
-    auto& ctx = g_ctx();
-
     // THE EMPIRE DOES NOT CREATE TWICE
     if (swapchain_.valid()) {
         LOG_WARN_CAT("SWAPCHAIN", 
@@ -269,7 +259,7 @@ void SwapchainManager::createSwapchain(SDL_Window* window, uint32_t w, uint32_t 
     }
 
     VkSurfaceCapabilitiesKHR caps{};
-    VK_CHECK(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(ctx.physicalDevice_, ctx.surface_, &caps));
+    VK_CHECK(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(stone_physical(), stone_surface(), &caps));
 
     VkExtent2D extent = chooseSwapExtent(caps, w, h);
 
@@ -277,9 +267,9 @@ void SwapchainManager::createSwapchain(SDL_Window* window, uint32_t w, uint32_t 
     if (caps.maxImageCount > 0) imageCount = std::min(imageCount, caps.maxImageCount);
 
     uint32_t formatCount = 0;
-    VK_CHECK(vkGetPhysicalDeviceSurfaceFormatsKHR(ctx.physicalDevice_, ctx.surface_, &formatCount, nullptr));
+    VK_CHECK(vkGetPhysicalDeviceSurfaceFormatsKHR(stone_physical(), stone_surface(), &formatCount, nullptr));
     std::vector<VkSurfaceFormatKHR> formats(formatCount);
-    VK_CHECK(vkGetPhysicalDeviceSurfaceFormatsKHR(ctx.physicalDevice_, ctx.surface_, &formatCount, formats.data()));
+    VK_CHECK(vkGetPhysicalDeviceSurfaceFormatsKHR(stone_physical(), stone_surface(), &formatCount, formats.data()));
 
     VkSurfaceFormatKHR chosenFormat = formats[0];
     for (const auto& f : formats) {
@@ -290,9 +280,9 @@ void SwapchainManager::createSwapchain(SDL_Window* window, uint32_t w, uint32_t 
     }
 
     uint32_t pmCount = 0;
-    VK_CHECK(vkGetPhysicalDeviceSurfacePresentModesKHR(ctx.physicalDevice_, ctx.surface_, &pmCount, nullptr));
+    VK_CHECK(vkGetPhysicalDeviceSurfacePresentModesKHR(stone_physical(), stone_surface(), &pmCount, nullptr));
     std::vector<VkPresentModeKHR> presentModes(pmCount);
-    VK_CHECK(vkGetPhysicalDeviceSurfacePresentModesKHR(ctx.physicalDevice_, ctx.surface_, &pmCount, presentModes.data()));
+    VK_CHECK(vkGetPhysicalDeviceSurfacePresentModesKHR(stone_physical(), stone_surface(), &pmCount, presentModes.data()));
 
     VkPresentModeKHR presentMode = VK_PRESENT_MODE_FIFO_KHR;
     for (auto mode : presentModes) {
@@ -300,7 +290,7 @@ void SwapchainManager::createSwapchain(SDL_Window* window, uint32_t w, uint32_t 
         if (mode == VK_PRESENT_MODE_IMMEDIATE_KHR) presentMode = mode;
     }
 
-    QueueFamilyIndices indices = findQueueFamilies(ctx.physicalDevice_, ctx.surface_);
+    QueueFamilyIndices indices = findQueueFamilies(stone_physical(), stone_surface());
     uint32_t queueFamilyIndices[] = { indices.graphicsFamily.value(), indices.presentFamily.value() };
 
     // Feature 7: Mutable format chain
@@ -324,7 +314,7 @@ void SwapchainManager::createSwapchain(SDL_Window* window, uint32_t w, uint32_t 
     VkSwapchainCreateInfoKHR ci = {
         .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
         .pNext = &compressionControl,
-        .surface = ctx.surface_,
+        .surface = stone_surface(),
         .minImageCount = imageCount,
         .imageFormat = chosenFormat.format,
         .imageColorSpace = chosenFormat.colorSpace,
@@ -347,12 +337,12 @@ void SwapchainManager::createSwapchain(SDL_Window* window, uint32_t w, uint32_t 
     }
 
     VkSwapchainKHR raw = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateSwapchainKHR(ctx.device_, &ci, nullptr, &raw));
+    VK_CHECK(vkCreateSwapchainKHR(stone_device(), &ci, nullptr, &raw));
 
-    if (old) vkDestroySwapchainKHR(ctx.device_, old, nullptr);
+    if (old) vkDestroySwapchainKHR(stone_device(), old, nullptr);
 
     // Store in our RAII handle
-    swapchain_ = Handle<VkSwapchainKHR>(raw, ctx.device_);
+    swapchain_ = Handle<VkSwapchainKHR>(raw, stone_device());
     swapchainExtent_ = extent;
     swapchainFormat_ = chosenFormat.format;
     currentColorSpace_ = chosenFormat.colorSpace;
@@ -361,12 +351,12 @@ void SwapchainManager::createSwapchain(SDL_Window* window, uint32_t w, uint32_t 
 
     // ────────────────────── GET SWAPCHAIN IMAGES ──────────────────────
     uint32_t count = 0;
-    VK_CHECK(vkGetSwapchainImagesKHR(ctx.device_, raw, &count, nullptr));
+    VK_CHECK(vkGetSwapchainImagesKHR(stone_device(), raw, &count, nullptr));
 
     std::vector<VkImage>     images(count);
     std::vector<VkImageView> views(count);
 
-    VK_CHECK(vkGetSwapchainImagesKHR(ctx.device_, raw, &count, images.data()));
+    VK_CHECK(vkGetSwapchainImagesKHR(stone_device(), raw, &count, images.data()));
 
     // Create image views immediately — this is the empire demands it
     for (uint32_t i = 0; i < count; ++i) {
@@ -379,7 +369,7 @@ void SwapchainManager::createSwapchain(SDL_Window* window, uint32_t w, uint32_t 
                                   VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY },
             .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
         };
-        VK_CHECK(vkCreateImageView(ctx.device_, &viewCI, nullptr, &views[i]));
+        VK_CHECK(vkCreateImageView(stone_device(), &viewCI, nullptr, &views[i]));
     }
 
     // Store locally for SwapchainManager
@@ -389,13 +379,6 @@ void SwapchainManager::createSwapchain(SDL_Window* window, uint32_t w, uint32_t 
     LOG_AMOURANTH("Swapchain created — {}x{} | {} images | HDR {}",
                   extent.width, extent.height, count,
                   supportsHDR() ? "IGNITED" : "dormant");
-
-    // ────────────────────── SEAL INTO STONEKEY — FINAL CANON ──────────────────────
-    stone_seal_swapchain(raw);
-    stone_seal_images(std::move(images));     // rvalue → move (fast)
-    stone_seal_views(std::move(views));       // rvalue → move (fast)
-    stone_seal_extent(extent);
-    stone_seal_image_count(count);
 
     LOG_SUCCESS_CAT("StoneKey", "Swapchain sealed — images & views transferred to Empire. Pink photons flow.");
 }
@@ -423,28 +406,28 @@ void SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSemaph
     VK_CHECK(vkQueuePresentKHR(queue, &presentInfo));
 
     if (vkWaitForPresentKHR) {
-        VK_CHECK(vkWaitForPresentKHR(g_ctx().device_, sc, lastPresentId, UINT64_MAX));
+        VK_CHECK(vkWaitForPresentKHR(stone_device(), sc, lastPresentId, UINT64_MAX));
     }
 }
 
 // Feature 5: Frame Pacing
 void SwapchainManager::initializeFramePacing() noexcept {
-    vkGetRefreshCycleDurationGOOGLE = reinterpret_cast<PFN_vkGetRefreshCycleDurationGOOGLE>(vkGetDeviceProcAddr(g_ctx().device_, "vkGetRefreshCycleDurationGOOGLE"));
+    vkGetRefreshCycleDurationGOOGLE = reinterpret_cast<PFN_vkGetRefreshCycleDurationGOOGLE>(vkGetDeviceProcAddr(stone_device(), "vkGetRefreshCycleDurationGOOGLE"));
     if (vkGetRefreshCycleDurationGOOGLE) {
         VkSwapchainKHR sc = *swapchain_;
-        VK_CHECK(vkGetRefreshCycleDurationGOOGLE(g_ctx().device_, sc, &refreshDuration));
+        VK_CHECK(vkGetRefreshCycleDurationGOOGLE(stone_device(), sc, &refreshDuration));
     }
 
-    vkGetPastPresentationTimingGOOGLE = reinterpret_cast<PFN_vkGetPastPresentationTimingGOOGLE>(vkGetDeviceProcAddr(g_ctx().device_, "vkGetPastPresentationTimingGOOGLE"));
+    vkGetPastPresentationTimingGOOGLE = reinterpret_cast<PFN_vkGetPastPresentationTimingGOOGLE>(vkGetDeviceProcAddr(stone_device(), "vkGetPastPresentationTimingGOOGLE"));
 }
 
 uint64_t SwapchainManager::getNextPresentTime() noexcept {
     if (vkGetPastPresentationTimingGOOGLE) {
         uint32_t count = 0;
         VkSwapchainKHR sc = *swapchain_;
-        vkGetPastPresentationTimingGOOGLE(g_ctx().device_, sc, &count, nullptr);
+        vkGetPastPresentationTimingGOOGLE(stone_device(), sc, &count, nullptr);
         timingHistory.resize(count);
-        vkGetPastPresentationTimingGOOGLE(g_ctx().device_, sc, &count, timingHistory.data());
+        vkGetPastPresentationTimingGOOGLE(stone_device(), sc, &count, timingHistory.data());
 
         if (!timingHistory.empty()) {
             uint64_t lastPresent = timingHistory.back().actualPresentTime;
@@ -457,7 +440,7 @@ uint64_t SwapchainManager::getNextPresentTime() noexcept {
 // Feature 8: Shading Rate
 void SwapchainManager::setShadingRate(float scaleFactor) noexcept {
     // In render loop: vkCmdSetFragmentShadingRateKHR(cmd, {static_cast<uint32_t>(1.0f / scaleFactor), static_cast<uint32_t>(1.0f / scaleFactor)}, ...)
-    LOG_NICK("Shading rate scaled to %.2f — FPS eternal.", scaleFactor);
+    LOG_NICK("Shading rate scaled to {} — FPS eternal.", scaleFactor);
 }
 
 // Feature 9: Direct Display — C++23 PERFECTION
@@ -470,7 +453,7 @@ void SwapchainManager::enableDirectDisplay(bool enable) noexcept {
 // Feature 10: Quantum Prediction
 void SwapchainManager::predictResize(uint32_t predictedW, uint32_t predictedH) noexcept {
     VkSwapchainKHR oldPredicted = predictedSwapchain;
-    createSwapchain(g_ctx().window, predictedW, predictedH, oldPredicted);
+    createSwapchain(stone_window(), predictedW, predictedH, oldPredicted);
     predictedSwapchain = *swapchain_;
     LOG_AMOURANTH("Quantum pre-creation for %ux%u.", predictedW, predictedH);
 }
