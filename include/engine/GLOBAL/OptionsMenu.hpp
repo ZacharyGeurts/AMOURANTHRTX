@@ -100,6 +100,7 @@ namespace OptionsRTX {
     constexpr uint32_t DENOISER_HISTORY_LENGTH     = 8;
     constexpr bool     ENABLE_TAA                  = true;
     constexpr float    TAA_ALPHA                   = 0.1f;
+	constexpr uint32_t MAX_PIPELINE_RAY_RECURSION_DEPTH = 1;
 }
 
 // ── POST-PROCESSING ───────────────────────────────────────────────────────────

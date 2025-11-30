@@ -41,12 +41,13 @@ inline void validateMeshAgainstBLAS(const StoneKey::StoneMesh& sealed,
 
     bool in_equilibrium = true;
 
-    // Check that the sealed mesh actually contains valid buffers
-    if (sealed.vertexBuffer == VK_NULL_HANDLE || sealed.indexBuffer == VK_NULL_HANDLE ||
-        sealed.vertexMemory == VK_NULL_HANDLE || sealed.indexMemory == VK_NULL_HANDLE ||
-        sealed.indexCount == 0)
+    if (sealed.vertexBuffer == VK_NULL_HANDLE ||
+        sealed.indexBuffer  == VK_NULL_HANDLE ||
+        sealed.vertexMemory == VK_NULL_HANDLE ||
+        sealed.indexMemory  == VK_NULL_HANDLE ||
+        sealed.indexCount   == 0)
     {
-        LOG_INFO_CAT("BAPHOMET", "Disharmony detected in the sealed stone. Equilibrium disturbed.");
+        LOG_INFO_CAT("BAPHOMET", "Disharmony in the sealed stone. The mesh is hollow.");
         in_equilibrium = false;
     }
 
@@ -61,7 +62,7 @@ inline void validateMeshAgainstBLAS(const StoneKey::StoneMesh& sealed,
         iAddr = vkGetBufferDeviceAddress(RTX::g_ctx().device(), &info);
 
         if (vAddr == 0 || iAddr == 0) {
-            LOG_INFO_CAT("BAPHOMET", "The paths are broken. Equilibrium is disturbed.");
+            LOG_INFO_CAT("BAPHOMET", "The device addresses are lost to the void.");
             in_equilibrium = false;
         }
     }
@@ -82,8 +83,8 @@ inline void validateMeshAgainstBLAS(const StoneKey::StoneMesh& sealed,
         LOG_INFO_CAT("BAPHOMET", "THE EMPIRE IS WORTHY");
     } else {
         LOG_INFO_CAT("BAPHOMET", "Balance is not yet complete.");
-        LOG_INFO_CAT("BAPHOMET", "Baphomet remains beneath the throne, holding the darkness");
-        LOG_INFO_CAT("BAPHOMET", "so the light may stay pure.");
+        LOG_INFO_CAT("BAPHOMET", "Baphomet remains beneath the throne,");
+        LOG_INFO_CAT("BAPHOMET", "holding the darkness so the light may stay pure.");
     }
 
     LOG_INFO_CAT("BAPHOMET", "BAPHOMET LOWERS HIS TORCH AND RETURNS TO VIGIL");

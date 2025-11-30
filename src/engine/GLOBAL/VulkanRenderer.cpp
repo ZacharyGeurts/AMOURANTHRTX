@@ -19,6 +19,7 @@
 
 #include "engine/GLOBAL/VulkanRenderer.hpp"
 #include "engine/GLOBAL/PipelineManager.hpp"
+#include "engine/GLOBAL/Extensions.hpp"
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/GLOBAL/RTXHandler.hpp"
 #include "engine/GLOBAL/BufferManager.hpp"

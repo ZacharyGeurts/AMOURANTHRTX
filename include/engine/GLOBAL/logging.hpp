@@ -59,8 +59,6 @@
 #include <cstring>
 #include <time.h>
 
-#include "engine/GLOBAL/Extensions.hpp" // catch card crashes
-
 // global disposal
 [[noreturn]] void phase9_ballerina(std::string_view reason = {}, const std::source_location loc = std::source_location::current()) noexcept;
 
