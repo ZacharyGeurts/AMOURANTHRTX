@@ -304,26 +304,6 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, bool o
 {
     LOG_ATTEMPT_CAT("RENDERER", "Constructing VulkanRenderer ({}x{}) — INTERNAL SHADERS ACTIVE — PINK PHOTONS RISING", width, height);
 
-    // FIXED: Ref to ctx to avoid copy/delete error
-
-    // ====================================================================
-    // INTERNAL RAY TRACING SHADER LIST — WE OWN THIS. NO EXTERNAL PATHS.
-    // ====================================================================
-    static constexpr auto RT_SHADER_PATHS = std::to_array({
-        "assets/shaders/raytracing/raygen.spv",
-        "assets/shaders/raytracing/miss.spv",
-        "assets/shaders/raytracing/closest_hit.spv",
-        "assets/shaders/raytracing/shadowmiss.spv"
-    });
-
-    std::vector<std::string> finalShaderPaths;
-    finalShaderPaths.reserve(RT_SHADER_PATHS.size());
-    for (const auto* path : RT_SHADER_PATHS) {
-        finalShaderPaths.emplace_back(path);
-    }
-
-    LOG_SUCCESS_CAT("RENDERER", "INTERNAL SHADER LIST LOADED — {} shaders — PINK PHOTONS FULLY ARMED", finalShaderPaths.size());
-
     // ====================================================================
     // STACK BUILD ORDER — REPAIRED: All Context Calls with ref c + ()
     // ====================================================================

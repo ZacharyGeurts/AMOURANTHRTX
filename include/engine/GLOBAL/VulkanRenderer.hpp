@@ -62,6 +62,7 @@ public:
     void setTonemapType(int type) noexcept;
     void setOverclockMode(bool enabled) noexcept;
 
+	void updateUniformBinding31(const void* data, VkDeviceSize size) noexcept;
 	void setActiveRenderMode(int mode) noexcept { if (mode >= 1 && mode <= 9) { activeRenderMode_ = mode; } }
     void requestAccumulationReset() noexcept { resetAccumulation_ = true; resetAccumNextFrame_ = true; }
 

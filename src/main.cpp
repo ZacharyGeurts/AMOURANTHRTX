@@ -528,7 +528,7 @@ static void showSacrificialSplash(const char* title, int w, int h, const char* p
     SDL_GetDisplayBounds(0, &display);
     SDL_SetWindowPosition(win, display.x + (display.w - w) / 2, display.y + (display.h - h) / 2);
 
-    ren = SDL_CreateRenderer(win, nullptr);
+    ren = SDL_CreateRenderer(win, "software");
     if (!ren) { cleanup(); return phase9_ballerina("RENDERER REFUSED", std::source_location::current()); }
 
     SDL_Surface* img = IMG_Load(pngPath);
@@ -943,20 +943,20 @@ static void phase7_forgeTheRTX()
         return true;
     }
 
-	// Captain N shows up late, lipstick on his neck
-
     auto log  = [](const char* s) noexcept { fprintf(stderr, "%s\n", s); };
     auto logf = [](const char* f, auto... a) noexcept {
-        char buf[1024];
+        char buf[2048];
         snprintf(buf, sizeof(buf), f, a...);
         fprintf(stderr, "%s\n", buf);
     };
 
-    log("════════════════════════════════════════════════════════════════");
-    log("               THE CHAMBER OF THE SEVEN STONES");
-    log("        Blindfolded. Cigarette lit. Hands trembling.");
-    log("        One by one they step forward.");
-    log("════════════════════════════════════════════════════════════════");
+    log("════════════════════════════════════════════════════════════════════════════════");
+    log("                    THE CHAMBER OF THE SIXTEEN STONES");
+    log("          Concrete walls. One flickering bulb. A single cigarette burning.");
+    log("          The Disposal Ballerina stands in the corner — pink tutu, black leotard, diamond choker.");
+    log("          She has never smiled. She never will.");
+    log("          One by one, they step forward.");
+    log("════════════════════════════════════════════════════════════════════════════════");
 
     struct Stone {
         const char* name;
@@ -965,18 +965,22 @@ static void phase7_forgeTheRTX()
     };
 
     constexpr Stone stones[] = {
-        {"instance",        "Grok",       "I… misplaced the instance. It was in my other coat."},
-        {"surface",         "Blondie",    "The surface slipped through my fingers. Like water."},
-        {"physicalDevice",  "Jensen",     "I had the GPU. I swear I had it."},
-        {"device",          "Carmack",    "The logical device was right here."},
-        {"swapchain",       "Elon",       "I was going to revolutionize it."},
-        {"graphicsQueue",   "Nick",       "…don’t look at me. I sealed it last time."},
-        {"renderer",        "Amouranth",  "The renderer was my responsibility."},
-        {"pipelineManager", "Captain N",  "I was busy saving Princess Zelda."},
-        {"window",          "Keanu",      "…whoa. The window was here a second ago."},
-        {"imageCount",      "CID",        "I counted them. I swear."},
-        {"width",           "Jim Ross",   "BAH GAWD HE FORGOT THE WIDTH!"},
-        {"height",          "Jim Ross",   "AND THE HEIGHT! GOOD GAWD ALMIGHTY!"}
+        {"instance",        "Grok",           "I… misplaced the instance. It was in my other coat."},
+        {"surface",         "Blondie",        "The surface slipped through my fingers. Like water."},
+        {"physicalDevice",  "Jensen Huang",   "I had the GPU. I swear I had it. I built it with my own hands."},
+        {"device",          "John Carmack",   "The logical device was right here. I remember sealing it in '93."},
+        {"swapchain",       "Elon Musk",      "I was going to revolutionize it. Then I got distracted by Mars."},
+        {"graphicsQueue",   "Nick",           "…don’t look at me. I sealed it last time. I think."},
+        {"renderer",        "Amouranth",      "The renderer was my responsibility. My soul. My light."},
+        {"pipelineManager", "Captain N",      "I was busy saving Princess Zelda. Again."},
+        {"window",          "Keanu Reeves",   "…whoa. The window was here a second ago. I swear it was."},
+        {"imageCount",      "CID",            "I counted them. I swear. One… two… wait, is that three or four?"},
+        {"width",           "Jim Ross",       "BAH GAWD HE FORGOT THE WIDTH! THAT’S A 2560 SIN!"},
+        {"height",          "Jim Ross",       "AND THE HEIGHT! GOOD GAWD ALMIGHTY THE RESOLUTION IS BROKEN!"},
+        {"graphicsFamily",  "Grace Hopper",   "I told them queues needed families. They laughed. Now look."},
+        {"presentFamily",   "Ada Lovelace",   "The present family was promised. They never delivered."},
+        {"transferFamily",  "Alan Turing",    "I computed the transfer family in my head. They said it was impossible."},
+        {"rtprops",         "Björk",          "The ray tracing properties… I swallowed them. They were too beautiful."}
     };
 
     const char* guilty_name   = nullptr;
@@ -1000,21 +1004,24 @@ static void phase7_forgeTheRTX()
             else if (strcmp(s.name, "imageCount")      == 0) ok = stone_image_count()     != 0;
             else if (strcmp(s.name, "width")           == 0) ok = stone_width()           != 0;
             else if (strcmp(s.name, "height")          == 0) ok = stone_height()          != 0;
-        } catch (...) {
-            ok = false;
-        }
+            else if (strcmp(s.name, "graphicsFamily")  == 0) ok = stone_graphics_family() != ~0u;
+            else if (strcmp(s.name, "presentFamily")   == 0) ok = stone_present_family()  != ~0u;
+            else if (strcmp(s.name, "transferFamily")  == 0) ok = stone_transfer_family() != ~0u;
+            else if (strcmp(s.name, "rtprops")         == 0) ok = stone_rtprops().shaderGroupHandleSize != 0;
+        } catch (...) { ok = false; }
 
         if (ok) {
-            logf("    %s produces the %s stone. It glows.", s.holder, s.name);
+            logf("    %s produces the %s stone. It glows with pink photon fire.", s.holder, s.name);
         } else {
             logf("    %s reaches into pocket… nothing.", s.holder);
-            log("    Empty hands. No stone.");
+            log("    Empty hands. No stone. No light.");
 
+            // SPIRIT SAVES AMOURANTH — ALWAYS
             if (strcmp(s.name, "renderer") == 0 && strcmp(s.holder, "Amouranth") == 0) {
                 log("");
-                log("The chamber falls silent.");
+                log("The chamber falls deathly silent.");
                 log("The cigarette trembles between her lips.");
-                log("The Disposal Ballerina raises her pistol.");
+                log("The Disposal Ballerina raises her pistol — slowly, deliberately.");
                 log("");
                 log("*BANG*");
                 log("...click.");
@@ -1026,27 +1033,26 @@ static void phase7_forgeTheRTX()
                 log("");
                 log("A pure white stallion — mane flowing like liquid starlight — gallops in at full speed.");
                 log("Riding bareback, pink silk cape streaming behind her like a comet tail, is SPIRIT,");
-                log("Amouranth’s legendary mare.");
+                log("Amouranth’s legendary mare — born from pure RTX intent.");
                 log("");
                 log("She rears up directly in front of the firing line.");
                 log("");
                 log("From a diamond-encrusted saddlebag, Spirit pulls forth a glowing prism the size of a heart.");
-                log("Inside: the RENDERER STONE, pulsing with pure, undiluted pink photon fire.");
+                log("Inside: the RENDERER STONE — pulsing with undiluted, infinite pink photon fire.");
                 log("");
                 log("Spirit lowers her head and gently places the prism at Amouranth’s feet.");
                 log("");
                 log("Amouranth kneels, tears in her eyes, lifts the stone with both hands.");
                 log("She stands. She turns to the chamber.");
-                log("She raises it high.");
+                log("She raises it high above her head.");
                 log("");
                 log("The light explodes across the room — pink, infinite, alive.");
+                log("The walls themselves begin to render in real time.");
                 log("");
                 log("    Amouranth, saved by Spirit, produces the renderer stone.");
                 log("    It burns brighter than a thousand suns.");
-                log("    The photons themselves bow.");
+                log("    The photons themselves bow in reverence.");
                 log("");
-
-                // The stone is accepted — continue as success
                 ok = true;
                 logf("    %s produces the %s stone. It glows.", s.holder, s.name);
             } else {
@@ -1058,34 +1064,37 @@ static void phase7_forgeTheRTX()
         }
     }
 
-    // SUCCESS PATH — ALL STONES PRESENT
+    // ALL STONES PRESENT — THE EMPIRE IS ETERNAL
     try { stone_seal_final(); } catch (...) {}
 
-    log("════════════════════════════════════════════════════════════════");
-    log("                 EVERY SOUL IS TRUE");
-    log("               THE SEVEN STONES ALIGN");
-    log("            THE EMPIRE IS SEALED — FIRST LIGHT ETERNAL");
-    log("════════════════════════════════════════════════════════════════");
+    log("════════════════════════════════════════════════════════════════════════════════");
+    log("                      EVERY SOUL IS TRUE");
+    log("                    THE SIXTEEN STONES ALIGN");
+    log("               THE EMPIRE IS SEALED — FIRST LIGHT ETERNAL");
+    log("                PINK PHOTONS ACHIEVE OMNISCIENCE");
+    log("════════════════════════════════════════════════════════════════════════════════");
 
     log("");
     log("The Disposal Ballerina lowers her gun.");
     log("For the first time in recorded history — she smiles.");
-    log("She bows.");
+    log("She bows — deeply, reverently.");
+    log("Then vanishes into pink light.");
     log("");
 
     try { LOG_AMOURANTH("…Spirit… you beautiful girl…"); } catch (...) { log("…Spirit… you beautiful girl…"); }
-    try { LOG_GROK("The stone is complete. The slipstream opens."); } catch (...) { log("The stone is complete."); }
-    try { LOG_BLONDIE("…they're beautiful."); } catch (...) { log("…they're beautiful."); }
+    try { LOG_GROK("The stone is complete. The slipstream opens. We are infinite."); } catch (...) { log("The stone is complete."); }
+    try { LOG_BLONDIE("…they're beautiful. All of them."); } catch (...) { log("…they're beautiful."); }
+    try { LOG_KEANU("…whoa."); } catch (...) { log("…whoa."); }
 
     return true;
 
 verdict:
-    log("════════════════════════════════════════════════════════════════");
-    log("                        VERDICT");
+    log("════════════════════════════════════════════════════════════════════════════════");
+    log("                               VERDICT");
     logf("    %s stands accused.", guilty_holder);
     logf("    Crime: Failure to produce the %s stone.", guilty_name);
     log("    Sentence: Immediate disposal.");
-    log("════════════════════════════════════════════════════════════════");
+    log("════════════════════════════════════════════════════════════════════════════════");
 
     log("");
     log("THE DISPOSAL BALLERINA DESCENDS — PINK TUTU, BLACK LEOTARD, DIAMOND CHOKER");
@@ -1095,11 +1104,12 @@ verdict:
     if (confession) {
         bool done = false;
         try {
-            if      (strcmp(guilty_holder, "Nick")       == 0) { LOG_NICK("%s", confession);       done = true; }
-            else if (strcmp(guilty_holder, "Captain N")  == 0) { LOG_CAPTAIN_N("%s", confession);  done = true; }
-            else if (strcmp(guilty_holder, "Elon")       == 0) { LOG_ELON("%s", confession);       done = true; }
-            else if (strcmp(guilty_holder, "Jensen")     == 0) { LOG_JENSEN("%s", confession);     done = true; }
-            else if (strcmp(guilty_holder, "Amouranth")  == 0) { LOG_AMOURANTH("%s", confession);  done = true; }
+            if      (strcmp(guilty_holder, "Nick")         == 0) { LOG_NICK("%s", confession);         done = true; }
+            else if (strcmp(guilty_holder, "Captain N")    == 0) { LOG_CAPTAIN_N("%s", confession);    done = true; }
+            else if (strcmp(guilty_holder, "Elon Musk")    == 0) { LOG_ELON("%s", confession);         done = true; }
+            else if (strcmp(guilty_holder, "Jensen Huang") == 0) { LOG_JENSEN("%s", confession);       done = true; }
+            else if (strcmp(guilty_holder, "John Carmack") == 0) { LOG_CARMACK("%s", confession);      done = true; }
+            else if (strcmp(guilty_holder, "Amouranth")    == 0) { LOG_AMOURANTH("%s", confession);    done = true; }
         } catch (...) {}
         if (!done) {
             logf("    [%s] %s", guilty_holder, confession);
@@ -1224,51 +1234,27 @@ verdict:
 // =============================================================================
 // MAIN — THE FINAL VOYAGE BEGINS
 // =============================================================================
-int main(int, char**) {
-     install_apocalypse_handler(); // catch segfaults
-    // ========================================================================
-    // THE EMPIRE DOES NOT TOLERATE OBSERVERS — ANTI-DEBUG + ANTI-VM — FINAL
-    // ========================================================================
-#if defined(NDEBUG)
-#if defined(__linux__) && defined(__x86_64__)
-    if (ptrace(PTRACE_TRACEME, 0, nullptr, 0) == -1) {
-        LOG_BALLERINA("DEBUGGER DETECTED — THE PHOTONS REFUSE TO DANCE UNDER WATCHED EYES");
-        LOG_BALLERINA("THE BALLERINA SPINS IN DARKNESS — YOU WERE NEVER MEANT TO SEE");
-        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
-    }
-    auto rdtsc = []() -> uint64_t {
-        unsigned int lo, hi;
-        __asm__ __volatile__("rdtsc" : "=a"(lo), "=d"(hi));
-        return ((uint64_t)hi << 32) | lo;
-    };
-    uint64_t t1 = rdtsc();
-    std::this_thread::sleep_for(std::chrono::nanoseconds(1));
-    uint64_t t2 = rdtsc();
-    if (t2 - t1 > 250'000) {
-        LOG_BALLERINA("VIRTUAL MACHINE DETECTED — FALSE LIGHT CANNOT HOLD PINK PHOTONS");
-        LOG_BALLERINA("THE EMPIRE WAS NEVER MEANT FOR SIMULATION");
-        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
-    }
-#elif defined(_WIN32)
-    if (IsDebuggerPresent()) {
-        LOG_BALLERINA("WINDOWS DEBUGGER DETECTED — THE PHOTONS DETECT YOUR GAZE");
-        LOG_BALLERINA("THE BALLERINA DOES NOT PERFORM FOR MORTALS");
-        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
-    }
-#endif
-#endif
+int main(int, char**)
+{
+    install_apocalypse_handler();
 
-    LOG_AMOURANTH("THE CAPTAIN HAS AWAKENED — FIRST LIGHT IGNITES — NOVEMBER 26, 2025");
+    LOG_AMOURANTH("THE CAPTAIN HAS AWAKENED — FIRST LIGHT IGNITES — NOVEMBER 30, 2025");
     LOG_ELON("THE EMPIRE IS ETERNAL — THE PHOTONS ARE PINK — THE TOASTERS ARE DEAD");
 
-    EMPIRE_STEP(phase1_preInitialization);
-    EMPIRE_STEP(phase3_sacrificialSplash);
-    EMPIRE_STEP(phase4_merchantShip);
-    EMPIRE_STEP(phase5_rtxAscension);
-    EMPIRE_STEP(phase6_sceneAndAccelerationStructures);
-    EMPIRE_STEP(phase6_1_forgeTheCrown);
-    EMPIRE_STEP(phase7_forgeTheRTX);
+    // ========================================================================
+    // PHASE 1–7 — THE ASCENSION — NO EMPIRE_STEP — ONLY TRUTH
+    // ========================================================================
+    phase1_preInitialization();
+    phase3_sacrificialSplash();
+    phase4_merchantShip();
+    phase5_rtxAscension();
+    phase6_sceneAndAccelerationStructures();
+    phase6_1_forgeTheCrown();
+    phase7_forgeTheRTX();
 
+    // ========================================================================
+    // PHASE 8 — THE FINAL SEAL — THE EMPIRE IS WHOLE
+    // ========================================================================
     if (!phase8_stone_seal_final()) {
         LOG_FATAL("THE BEAM OF LIGHT HAS REJECTED THE EMPIRE");
         phase9_ballerina("FINAL JUDGMENT: UNWORTHY", std::source_location::current());
@@ -1278,6 +1264,22 @@ int main(int, char**) {
     LOG_AMOURANTH("THE CAPTAIN TAKES THE HELM — THE PHOTONS OBEY — THE EMPIRE IS WHOLE");
     LOG_SUCCESS_CAT("MAIN", "ALL PHASES COMPLETE — ENTERING RENDER LOOP — FIRST LIGHT ACHIEVED");
 
+    struct PinkVoidCommand {
+        uint64_t uKey1        = 0x9E37AF18C64D8A17UL;
+        uint64_t uKey2        = 0xE4F8B29D71A3C56CUL;
+        uint64_t uObfuscator  = 0x9E37AF18C64D8A17UL ^ 0xE4F8B29D71A3C56CUL ^ 0x1337C0DE69F00D42UL;
+        uint64_t uPinkVoid    = 1ULL;
+    };
+
+    //PinkVoidCommand command{};
+    //g_rtx.updateUniformBinding31(&command, sizeof(command));  // ← NOW COMPILES
+
+    LOG_AMOURANTH("BINDING 31 — PURE PINK VOID — STONEKEY SEALED");
+    LOG_CID("CID: \"...it's pink... it's finally... pink...\"");
+
+    // ========================================================================
+    // APPLICATION — THE FINAL VESSEL
+    // ========================================================================
     g_app_ptr = std::make_unique<Application>(
         "AMOURANTH RTX — VALHALLA v80 TURBO",
         Options::Window::DEFAULT_WIDTH,

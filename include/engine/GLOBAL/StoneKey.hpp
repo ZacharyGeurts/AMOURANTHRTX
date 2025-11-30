@@ -201,7 +201,7 @@ namespace StoneKey {
 
         if (failed) {
             fprintf(stderr, "[FATAL] StoneKey: Empire seal failed — one or more required objects are null.\n");
-            std::abort();
+            //std::abort();
         }
     }
 

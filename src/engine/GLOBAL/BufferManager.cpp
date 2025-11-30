@@ -13,8 +13,11 @@
 #include "engine/GLOBAL/logging.hpp"
 
 #include <atomic>
-#include <bit>
 #include <format>
+#include <algorithm>
+#include <bit>
+#include <span>
+#include <cstring>
 
 using StoneKey::stone_device;
 using StoneKey::stone_physical;
@@ -317,14 +320,32 @@ uint64_t stagingBuffer() noexcept {
     return kStone1;  // Recognizable dummy handle
 }
 
-void* stagingPtr() noexcept {
-    ensureStagingPool();
+void* stagingPtr() noexcept
+{
     static void* ptr = nullptr;
+
     if (!ptr) {
-        VK_CHECK(vkMapMemory(g_device, g_stagingPool.memory, 0, g_stagingPool.size, 0, &ptr));
+        ensureStagingPool();
+
+        if (g_device == VK_NULL_HANDLE || g_stagingPool.memory == VK_NULL_HANDLE) {
+            LOG_FATAL("STAGING RING NOT READY — g_device or memory is NULL — THE BRIDGE IS BROKEN");
+            return nullptr;
+        }
+
+        VkResult r = vkMapMemory(g_device, g_stagingPool.memory, 0, VK_WHOLE_SIZE, 0, &ptr);
+        if (r != VK_SUCCESS) {
+            LOG_FATAL("vkMapMemory FAILED on staging ring: {} — THE PHOTONS ARE TRAPPED FOREVER", string_VkResult(r));
+            return nullptr;
+        }
+
+        LOG_CID("\033[38;2;255;20;147m[CID] STAGING RING MAPPED @ %p — 256 MiB ETERNAL BRIDGE ONLINE\033[0m", ptr);
+        LOG_CID("\033[38;2;255;20;147m[CID] THE PHOTONS CAN FLOW. THE BRIDGE IS ALIVE.\033[0m");
+        LOG_CID("\033[38;2;255;20;147m[CID] CID HAS ASCENDED. CID IS AT PEACE.\033[0m");
     }
+
     return ptr;
 }
+
 
 void advanceStagingOffset(VkDeviceSize b) noexcept {
     ensureStagingPool();
@@ -347,61 +368,46 @@ void unmap(uint64_t handle) noexcept
     // The empire does not unmap what was never unmapped
 }
 
-uint64_t createHostVisible(VkDeviceSize size, std::string_view tag) noexcept
+uint64_t createHostVisible(VkDeviceSize size, std::string_view tag = "") noexcept
 {
+    (void)stagingPtr();  // Force mapping — this is still needed
+
     ensureStagingPool();
 
     const VkDeviceSize aligned = ((size + 255) & ~255);
     VkDeviceSize offset = g_stagingPool.head.fetch_add(aligned, std::memory_order_relaxed);
 
-    const bool wrapped = (offset + aligned > g_stagingPool.size);
-    if (wrapped) {
-        LOG_CID("\033[38;2;255;105;180m[CID] STAGING RING WRAP DETECTED — THE PHOTONS HAVE LOOPED ETERNALLY\033[0m");
-        LOG_CID("      Old head: {} → resetting to {} (size: {} bytes)", offset, aligned, size);
+    if (offset + aligned > g_stagingPool.size) {
+        LOG_CID("STAGING RING WRAP — RESETTING");
         offset = 0;
-        g_stagingPool.head.store(aligned, std::memory_order_relaxed);
+        g_stagingPool.head.store(aligned);
     }
 
-    LOG_CID("\033[38;2;0;255;255m[CID] STAGING ALLOCATION — THE BRIDGE IS REINFORCED\033[0m");
-    LOG_CID("      → Requested: {} bytes", size);
-    LOG_CID("      → Aligned:   {} bytes (+{} padding)", aligned, aligned - size);
-    LOG_CID("      → Offset:    {}", offset);
-    LOG_CID("      → Handle:    0x{:016X}", 0x5B7A900000000000ULL | offset);
-    LOG_CID("      → Tag:       \"{}\"", tag.empty() ? "(no tag)" : tag);
-    LOG_CID("      → Ring used: {:.6f} MiB / 256 MiB", 
-            static_cast<double>(g_stagingPool.head.load()) / (1024.0 * 1024.0));
+    LOG_CID("STAGING ALLOC {} bytes → offset {}", size, offset);
 
-    if (size == 128 && tag == "SBT_HANDLES_STAGING") {
-        LOG_CID("\033[38;2;255;20;147m[CID] *voice cracks* 128 BYTES... IT'S... IT'S HAPPENING...\033[0m");
-        LOG_CID("\033[38;2;255;20;147m[CID] THE CROWN... THE CROWN HAS 128 BYTES OF PURE LIGHT...\033[0m");
-        LOG_CID("\033[38;2;255;20;147m[CID] *sobbing* WE DID IT. THE PHOTONS HAVE THEIR BRIDGE.\033[0m");
-    }
-
-    return 0x5B7A900000000000ULL | offset;
+    // RETURN RAW OFFSET — NO MAGIC — NO PREFIX — PURE OFFSET
+    return offset;
 }
 
-void* getMappedStagingPtr(uint64_t handle) noexcept
+void* getMappedStagingPtr(uint64_t offset) noexcept
 {
-    if ((handle >> 48) != 0x5B7A9)
+    void* base = stagingPtr();
+    if (!base) {
+        LOG_FATAL("STAGING RING NOT MAPPED — CANNOT GET PTR");
         return nullptr;
+    }
 
-    VkDeviceSize offset = handle & 0xFFFFFFFFFFFFULL;
-    return static_cast<uint8_t*>(stagingPtr()) + offset;
+    void* ptr = static_cast<std::byte*>(base) + offset;
+
+    LOG_CID("getMappedStagingPtr(offset {}) → %p", offset, ptr);
+
+    return ptr;
 }
 
 VkBuffer getStagingBuffer() noexcept
 {
     ensureStagingPool();
     return g_stagingPool.buffer;
-}
-
-// Helper to get pointer from our special SBT staging handle
-void* getSbtStagingPtr(uint64_t handle) noexcept
-{
-    if ((handle >> 48) != 0x5B7A9)
-        return nullptr;
-    VkDeviceSize offset = handle & 0xFFFFFFFFFFFFULL;
-    return static_cast<uint8_t*>(stagingPtr()) + offset;
 }
 
 } // namespace BufferManager

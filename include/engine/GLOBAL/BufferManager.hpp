@@ -98,7 +98,6 @@ namespace BufferManager {
                                   std::string_view tag = "") noexcept;
 
     uint64_t createHostVisible(VkDeviceSize size, std::string_view tag) noexcept;
-    void*    getMappedStagingPtr(uint64_t handle) noexcept;
     VkBuffer getStagingBuffer() noexcept;
     void destroy(uint64_t handle) noexcept;
     void* map(uint64_t handle) noexcept;
@@ -106,6 +105,9 @@ namespace BufferManager {
 	void copyBuffer(VkBuffer src, VkBuffer dst, VkDeviceSize size, VkQueue queue, VkCommandPool pool) noexcept;
     void purge_all() noexcept;
     [[nodiscard]] const BufferInfo* get(uint64_t handle) noexcept;
+	void*    getMappedStagingPtr(uint64_t handle) noexcept;
+    VkBuffer getStagingBuffer() noexcept;
+    void*    stagingPtr() noexcept;
 
     [[nodiscard]] static inline VkDeviceAddress get_device_address(uint64_t handle) noexcept {
         if (!handle) return 0;

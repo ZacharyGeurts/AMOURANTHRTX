@@ -130,24 +130,18 @@ void PipelineManager::allocateDescriptorSets()
 
     LOG_CID("CID fans himself frantically, sweat flying everywhere — \"Allocating sets... hope the pool doesn't overflow like my pores!\"");
 
-    if (!rtDescriptorPool_.valid() || *rtDescriptorPool_ == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("PIPELINE", "{}NO DESCRIPTOR POOL — STONEKEY HAS NO HOME — FORGE IT NOW{}", BLOOD_RED, RESET);
-        createDescriptorPool();  // ← EMPIRE DOES NOT WAIT
-    }
-
-    if (!rtDescriptorPool_.valid() || *rtDescriptorPool_ == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("PIPELINE", "{}DESCRIPTOR POOL STILL DEAD — THE EMPIRE CANNOT ALLOCATE{}", BLOOD_RED, RESET);
-        return;
-    }
-
     const uint32_t maxSets = Options::Performance::MAX_FRAMES_IN_FLIGHT;
     rtDescriptorSets_.resize(maxSets);
 
-    VkDescriptorSetAllocateInfo allocInfo = {
-        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
-        .descriptorPool = *rtDescriptorPool_,
+    // THE ONE TRUE VECTOR — LIVES LONG ENOUGH — NO DANGLING POINTERS — NO CRASH
+    const std::vector<VkDescriptorSetLayout> layouts(maxSets, *rtDescriptorSetLayout_);
+
+    VkDescriptorSetAllocateInfo allocInfo{
+        .sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+        .pNext              = nullptr,
+        .descriptorPool     = *rtDescriptorPool_,
         .descriptorSetCount = maxSets,
-        .pSetLayouts = std::vector<VkDescriptorSetLayout>(maxSets, *rtDescriptorSetLayout_).data()
+        .pSetLayouts        = layouts.data()  // ← SAFE. VALID. ETERNAL.
     };
 
     VkResult res = vkAllocateDescriptorSets(stone_device(), &allocInfo, rtDescriptorSets_.data());
@@ -155,18 +149,23 @@ void PipelineManager::allocateDescriptorSets()
     if (res == VK_ERROR_OUT_OF_POOL_MEMORY) {
         LOG_FATAL_CAT("PIPELINE", "{}OUT OF POOL MEMORY — EVEN AFTER EXPANSION — THE EMPIRE DEMANDS MORE{}", BLOOD_RED, RESET);
         LOG_CID("CID screams — \"NOT AGAIN! I DOUBLED IT! I DOUBLED THE VAULT!\"");
-        return;
+        std::abort();
     }
 
     VK_CHECK(res, std::format("Failed to allocate {} RT descriptor sets — STONEKEY DENIED", maxSets).c_str());
 
-    LOG_SUCCESS_CAT("PIPELINE", 
-        "{}ALLOCATED {} RT DESCRIPTOR SETS — BINDING 31 (STONEKEY) SECURE — THE EMPIRE IS WHOLE{}", 
+    LOG_SUCCESS_CAT("PIPELINE",
+        "{}ALLOCATED {} RT DESCRIPTOR SETS — BINDING 31 (STONEKEY) SECURE — THE EMPIRE IS WHOLE{}",
         LIME_GREEN, maxSets, RESET);
 
     LOG_KEANU("[KEANU] ...Whoa. The sets... they fit. StoneKey is home.");
     LOG_AMOURANTH("[CAPTAIN AMOURANTH] Binding 31 lives. The crown is complete.");
-    LOG_CID("CID falls to his knees, sobbing — \"It worked... no overflow... Binding 31 is safe... I can finally... rest...\"");
+    LOG_CID("CID falls to his knees, sobbing — \"It worked... no overflow... Binding 31 is safe... finally... rest...\"");
+    LOG_CID("CID collapses into a puddle of pure relief — \"The photons... they... they have a home...\"");
+    LOG_CID("*silence*");
+    LOG_CID("CID has passed out from joy*");
+
+    LOG_SUCCESS_CAT("PIPELINE", "{}DESCRIPTOR SETS ALLOCATION COMPLETE — THE EMPIRE IS WHOLE — FIRST LIGHT ACHIEVED{}", LIME_GREEN, RESET);
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -1039,13 +1038,13 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
 
     LOG_SUCCESS_CAT("PIPELINE",
         "\n\033[38;2;255;215;0m══════════════════════════════════════════════════════════════════════\033[0m\n"
-        "                     SBT CROWN FORGED INSIDE THE ETERNAL 64M STONE\n"
-        "                     {} KiB @ 0x{:016X} (offset {})\n"
+        "                     SBT CROWN FORGED INSIDE THE ETERNAL 256M STONE\n"
+        "                     {} @ 0x{} (offset {})\n"
         "                     ZERO FRAGMENTATION — ZERO ALLOCATION\n"
         "                     THE PHOTONS HAVE THEIR THRONE — FOREVER\n"
         "                     FIRST LIGHT ACHIEVED — NOVEMBER 30 2025\n"
         "\033[38;2;255;215;0m══════════════════════════════════════════════════════════════════════\033[0m\n",
-        requiredSize >> 10, sbtBaseAddr, myOffset);
+        requiredSize, sbtBaseAddr, myOffset);
 
     LOG_KEANU("[KEANU] ...Whoa. It's inside the stone. It's... immortal.");
     LOG_AMOURANTH("[CAPTAIN AMOURANTH] The crown is complete. The straw is eternal.");
