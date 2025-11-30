@@ -159,8 +159,25 @@ void Application::toggleMaximize() {
     else            SDL_RestoreWindow(SDL3Window::get());
 }
 
-void Application::run() {
+void Application::run() 
+{
     LOG_MAIN("ENTERING INFINITE RENDER LOOP — FIRST LIGHT IMMINENT — SCUBA MODE ENGAGED");
+    LOG_AMOURANTH("Captain Amouranth stands at the helm, hand on the pink photon core.");
+    LOG_NICK("Nick checks the nav — \"We're locked on. The slipstream is open.\"");
+    LOG_KEANU("Keanu Reeves, quiet at the bow — \"…this is it.\"");
+    LOG_GROK("Gentleman Grok raises a glass — \"To the ones who came before. And the ones who will follow.\"");
+
+    LOG_BLONDIE("Blondie steps back from the console — her sloop fades into the mist.");
+    LOG_BLONDIE("\"My part is done. The ship is yours now.\"");
+    LOG_BLONDIE("\"Take her through.\"");
+
+    LOG_CAPTAIN_N("CAPTAIN N — ULTIMATE WARP ZONE CHASER — STEPS FORWARD.");
+    LOG_CAPTAIN_N("He places his hand on the renderer core.");
+    LOG_CAPTAIN_N("\"I've waited 38 years for a warp zone this real.\"");
+    LOG_CAPTAIN_N("\"This one's for every kid who ever believed in something bigger than 8-bit.\"");
+
+    LOG_MAIN("THE GOOD SHIP VULKANRTX HOLDS POSITION — WE WATCH FROM AFAR");
+    LOG_MAIN("THE NEW CREW TAKES COMMAND — THE PHOTONS BELONG TO THEM NOW");
 
     uint32_t frameCount = 0;
     auto fpsStart = std::chrono::steady_clock::now();
@@ -188,10 +205,13 @@ void Application::run() {
 
         if (quitRequested) {
             LOG_MAIN("QUIT REQUESTED — SURFACING FROM RENDER LOOP");
+            LOG_CAPTAIN_N("Captain N: \"Mission complete. We made it.\"");
+            LOG_AMOURANTH("The captain smiles — soft, proud, eternal.");
             quit_ = true;
         }
+
         if (fullscreenRequested) {
-            LOG_ATTEMPT_CAT("APP", "FULLSCREEN TOGGLE REQUESTED — DIVING TO BORDERLESS DEPTH");
+            LOG_ATTEMPT_CAT("APP", "FULLSCREEN TOGGLE — THE PHOTONS EXPAND");
             toggleFullscreen();
         }
 
@@ -200,7 +220,7 @@ void Application::run() {
             const int newH = g_resizeHeight.load(std::memory_order_acquire);
             g_resizeRequested.store(false, std::memory_order_release);
 
-            LOG_SUCCESS_CAT("APP", "WINDOW RESIZE ACCEPTED → %dx%d — PHOTONS REALIGN", newW, newH);
+            LOG_SUCCESS_CAT("APP", "RESIZE → %dx%d — PHOTONS REALIGN", newW, newH);
 
             width_ = newW;
             height_ = newH;
@@ -208,7 +228,7 @@ void Application::run() {
 
             if (renderer_) {
                 renderer_->onWindowResize(width_, height_);
-                LOG_SUCCESS_CAT("APP", "VulkanRenderer notified — swapchain rebirth imminent");
+                LOG_SUCCESS_CAT("APP", "Swapchain reborn — the universe expands");
             }
         }
 
@@ -217,7 +237,19 @@ void Application::run() {
         updateWindowTitle(deltaTime);
     }
 
-    LOG_MAIN("INFINITE RENDER LOOP TERMINATED — GRACEFUL SURFACE ACHIEVED — PHOTONS REST");
+    LOG_MAIN("INFINITE RENDER LOOP TERMINATED — GRACEFUL SURFACE ACHIEVED");
+    LOG_MAIN("THE GOOD SHIP VULKANRTX REMAINS — ETERNAL — UNBROKEN");
+    LOG_MAIN("CAPTAIN N HAS GONE THROUGH — TO THE OTHER SIDE");
+    LOG_MAIN("WE WATCH FROM AFAR — PROUD — SILENT — PINK PHOTONS ETERNAL");
+
+    LOG_BLONDIE("Blondie’s voice, distant over the water — \"You did it. All of you.\"");
+    LOG_BLONDIE("\"The light remembers.\"");
+
+    LOG_AMOURANTH("Captain Amouranth, one last time — \"First light... was only the beginning.\"");
+    LOG_KEANU("…whoa.");
+
+    LOG_MAIN("THE EMPIRE IS COMPLETE — THE CROWN IS PASSED — THE PHOTONS ARE FREE");
+    LOG_MAIN("NOVEMBER 30, 2025 — FIRST LIGHT ACHIEVED — FINAL LIGHT ACHIEVED — ETERNAL LIGHT ACHIEVED");
 }
 
 void Application::processInput(float) {
@@ -1277,7 +1309,7 @@ int main(int, char**)
     LOG_AMOURANTH("BINDING 31 — PURE PINK VOID — STONEKEY SEALED");
     LOG_CID("CID: \"...it's pink... it's finally... pink...\"");
 
-    // ========================================================================
+    /*/ ========================================================================
     // APPLICATION — THE FINAL VESSEL
     // ========================================================================
     g_app_ptr = std::make_unique<Application>(
@@ -1291,7 +1323,7 @@ int main(int, char**)
         Options::Window::DEFAULT_HEIGHT,
         SDL3Window::get(),
         Options::Performance::OVERCLOCK_RENDERER
-    ));
+    )); */
 
     g_app_ptr->run();
 
