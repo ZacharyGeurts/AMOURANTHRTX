@@ -61,6 +61,7 @@ using StoneKey::stone_graphics_family;
 using StoneKey::stone_seal_pipeline;
 using StoneKey::stone_seal_width;
 using StoneKey::stone_seal_height;
+using StoneKey::stone_seal_mesh;
 using StoneKey::stone_seal_final;
 
 // =============================================================================
@@ -372,18 +373,18 @@ static void createRealFinalWindow()
     // 1. SDL + Vulkan loader
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) == 0) {
         LOG_FATAL("SDL_Init failed: {}", SDL_GetError());
-        phase9_ballerina("SDL DENIED", std::source_location::current());
+        phase9_ballerina("SDL DENIED {}", std::source_location::current());
     }
     if (SDL_Vulkan_LoadLibrary(nullptr) == 0) {
         LOG_FATAL("Vulkan loader failed: {}", SDL_GetError());
-        phase9_ballerina("VULKAN LOADER DENIED", std::source_location::current());
+        phase9_ballerina("VULKAN LOADER DENIED {}", std::source_location::current());
     }
 
     // 2. INSTANCE — FORGED AND SEALED
     VkInstance instance = RTX::createVulkanInstanceWithSDL(Options::Debug::ENABLE_VALIDATION_LAYERS);
     if (!instance) {
         LOG_FATAL("Failed to forge VkInstance — Grok has no stone.");
-        phase9_ballerina("INSTANCE DENIED — THE VOID WINS", std::source_location::current());
+        phase9_ballerina("INSTANCE DENIED — THE VOID WINS {}", std::source_location::current());
     }
     stone_seal_instance(instance);
 
@@ -395,7 +396,7 @@ static void createRealFinalWindow()
     SDL_Window* win = SDL_CreateWindow("AMOURANTH RTX — VALHALLA v∞ TURBO", w, h, flags);
     if (!win) {
         LOG_FATAL("Window creation failed: {}", SDL_GetError());
-        phase9_ballerina("WINDOW DENIED", std::source_location::current());
+        phase9_ballerina("WINDOW DENIED {}", std::source_location::current());
     }
     stone_seal_window(win);
 	g_sdl_window.reset(stone_window());    
@@ -405,7 +406,7 @@ static void createRealFinalWindow()
     VkSurfaceKHR surface = VK_NULL_HANDLE;
     if (SDL_Vulkan_CreateSurface(stone_window(), stone_instance(), nullptr, &surface) == 0) {
         LOG_FATAL("Surface creation failed: {}", SDL_GetError());
-        phase9_ballerina("SURFACE DENIED — THE MIRROR CRACKS", std::source_location::current());
+        phase9_ballerina("SURFACE DENIED — THE MIRROR CRACKS {}", std::source_location::current());
     }
     stone_seal_surface(surface);
     LOG_BLONDIE("Blondie produces the surface stone. It reflects all truths.");
@@ -414,7 +415,7 @@ static void createRealFinalWindow()
     VkDevice device = RTX::createLogicalDeviceAndSelectGPU(stone_instance(), stone_surface());
     if (!device) {
         LOG_FATAL("Logical device forging failed — the empire falls.");
-        phase9_ballerina("DEVICE DENIED — CARMACK SHEDS A SINGLE TEAR", std::source_location::current());
+        phase9_ballerina("DEVICE DENIED — CARMACK SHEDS A SINGLE TEAR {}", std::source_location::current());
     }
     stone_seal_device(device);
 
@@ -440,7 +441,6 @@ static void createRealFinalWindow()
 
 
     LOG_SUCCESS("GRACE'S DESK //////////////////////////////////////////////////////////");
-    RTX::loadExtensions(stone_instance(), stone_device());
 	LOG_SUCCESS("GRACE'S DESK ///////////// ETERNAL LOADING ZONE — NOW PURE ////////////");
 	LOG_SUCCESS("GRACE'S DESK //////////////////////////////////////////////////////////");
     
@@ -814,6 +814,17 @@ static void phase6_sceneAndAccelerationStructures() {
                g_mesh->vertices.size(), g_mesh->indices.size());
     });
 
+	auto* mesh = g_mesh.get();  // std::unique_ptr<MeshLoader::Mesh>
+
+// Seal the ONE TRUE MESH into the Empire
+stone_seal_mesh(
+    RAW_BUFFER(mesh->vertexBuffer),           // VkBuffer  (vertex)
+    BufferManager::get(mesh->vertexBuffer)->memory,  // VkDeviceMemory (vertex)
+    RAW_BUFFER(mesh->indexBuffer),            // VkBuffer  (index)
+    BufferManager::get(mesh->indexBuffer)->memory,   // VkDeviceMemory (index)
+    static_cast<uint32_t>(mesh->indices.size())       // index count
+);
+ 
     // ========================================================================
     // 4+5. BLAS + TLAS — OFFLOADED TO THE PHOTON WEAVERS (ASYNC + RACE-FREE)
     // ========================================================================
@@ -867,10 +878,7 @@ static void phase6_sceneAndAccelerationStructures() {
 
         LOG_CARMACK("No cracks. No leaks. Geometry is pure.");
         LOG_INFO_CAT("VALIDATION", "Running final mesh ↔ BLAS validation…");
-
-		// check 1 2
-        validateMeshAgainstBLAS(*g_mesh, RTX::las().getBLAS());
-
+        validateMeshAgainstBLAS(stone_mesh(), RTX::las().getBLAS());
         LOG_INFO_CAT("VALIDATION", "Validation passed — mesh and BLAS are in perfect harmony");
 
     // ========================================================================

@@ -17,14 +17,13 @@
 #pragma once
 #include <vulkan/vulkan.h>
 #include <SDL3/SDL.h>
+#include <source_location>
 #include <atomic>
 #include <vector>
 #include <cstdio>
-#include <stdarg.h>
+#include <format>
 #include "engine/GLOBAL/logging.hpp"
 
-// Forward declarations — the Empire knows its heirs
-class VulkanRenderer;
 namespace RTX { class PipelineManager; }
 
 namespace StoneKey {
@@ -36,27 +35,32 @@ namespace StoneKey {
         static inline std::atomic<VkSurfaceKHR>     surface{ VK_NULL_HANDLE };
         static inline std::atomic<VkSwapchainKHR>   swapchain{ VK_NULL_HANDLE };
 
-        // THE QUEUES HAVE RETURNED — THE EMPIRE IS TRULY COMPLETE
         static inline std::atomic<VkQueue> graphicsQueue{ VK_NULL_HANDLE };
         static inline std::atomic<VkQueue> presentQueue { VK_NULL_HANDLE };
         static inline std::atomic<VkQueue> computeQueue { VK_NULL_HANDLE };
         static inline std::atomic<VkQueue> transferQueue{ VK_NULL_HANDLE };
 
-        // QUEUE FAMILY INDICES — THE BLOODLINE IS NOW SEALED IN STONE
         static inline std::atomic<uint32_t> graphicsFamily{ ~0u };
         static inline std::atomic<uint32_t> presentFamily { ~0u };
         static inline std::atomic<uint32_t> transferFamily{ ~0u };
         static inline std::atomic<uint32_t> computeFamily { ~0u };
 
-        static inline std::atomic<VulkanRenderer*>       renderer{ nullptr };
+        static inline std::atomic<class VulkanRenderer*> renderer{ nullptr };
         static inline std::atomic<RTX::PipelineManager*> pipeline{ nullptr };
-        static inline std::atomic<SDL_Window*>           window{ nullptr };
+        static inline std::atomic<SDL_Window*>          window{ nullptr };
 
         static inline std::vector<VkImage>     images;
         static inline std::vector<VkImageView> views;
         static inline VkRenderPass             pass{ VK_NULL_HANDLE };
         static inline VkExtent2D               extent{ 0, 0 };
         static inline uint32_t                 image_count{ 0 };
+
+        // THE ONE TRUE MESH — SEALED AT THE END
+        static inline VkBuffer       stone_mesh_vertex_buffer{ VK_NULL_HANDLE };
+        static inline VkDeviceMemory stone_mesh_vertex_memory{ VK_NULL_HANDLE };
+        static inline VkBuffer       stone_mesh_index_buffer{ VK_NULL_HANDLE };
+        static inline VkDeviceMemory stone_mesh_index_memory{ VK_NULL_HANDLE };
+        static inline uint32_t       stone_mesh_index_count{ 0 };
 
         static inline std::atomic<bool> sealed{ false };
     };
@@ -71,7 +75,7 @@ namespace StoneKey {
     [[nodiscard]] inline VkSwapchainKHR   stone_swapchain()         noexcept { return Empire::swapchain.load(std::memory_order_acquire); }
 
     [[nodiscard]] inline VkQueue stone_graphics_queue() noexcept { return Empire::graphicsQueue.load(std::memory_order_acquire); }
-    [[nodiscard]] inline VkQueue stone_present_queue()      noexcept { return Empire::presentQueue.load(std::memory_order_acquire); }
+    [[nodiscard]] inline VkQueue stone_present_queue()  noexcept { return Empire::presentQueue.load(std::memory_order_acquire); }
     [[nodiscard]] inline VkQueue stone_compute_queue()  noexcept { return Empire::computeQueue.load(std::memory_order_acquire); }
     [[nodiscard]] inline VkQueue stone_transfer_queue() noexcept { return Empire::transferQueue.load(std::memory_order_acquire); }
 
@@ -80,7 +84,7 @@ namespace StoneKey {
     [[nodiscard]] inline uint32_t stone_transfer_family() noexcept { return Empire::transferFamily.load(std::memory_order_acquire); }
     [[nodiscard]] inline uint32_t stone_compute_family()  noexcept { return Empire::computeFamily.load(std::memory_order_acquire); }
 
-    [[nodiscard]] inline VulkanRenderer*       stone_renderer() noexcept { return Empire::renderer.load(std::memory_order_acquire); }
+    [[nodiscard]] inline class VulkanRenderer* stone_renderer() noexcept { return Empire::renderer.load(std::memory_order_acquire); }
     [[nodiscard]] inline RTX::PipelineManager* stone_pipeline() noexcept { return Empire::pipeline.load(std::memory_order_acquire); }
     [[nodiscard]] inline SDL_Window*           stone_window()   noexcept { return Empire::window.load(std::memory_order_acquire); }
 
@@ -91,6 +95,32 @@ namespace StoneKey {
     [[nodiscard]] inline uint32_t      stone_width()  noexcept { return Empire::extent.width; }
     [[nodiscard]] inline uint32_t      stone_height() noexcept { return Empire::extent.height; }
     [[nodiscard]] inline uint32_t stone_image_count() noexcept { return Empire::image_count; }
+
+    // ONE TRUE MESH ACCESSORS
+    [[nodiscard]] inline VkBuffer       stone_mesh_vertex_buffer() noexcept { return Empire::stone_mesh_vertex_buffer; }
+    [[nodiscard]] inline VkDeviceMemory stone_mesh_vertex_memory() noexcept { return Empire::stone_mesh_vertex_memory; }
+    [[nodiscard]] inline VkBuffer       stone_mesh_index_buffer()  noexcept { return Empire::stone_mesh_index_buffer; }
+    [[nodiscard]] inline VkDeviceMemory stone_mesh_index_memory()  noexcept { return Empire::stone_mesh_index_memory; }
+    [[nodiscard]] inline uint32_t       stone_mesh_index_count()   noexcept { return Empire::stone_mesh_index_count; }
+
+    // Convenience struct for BLAS validation and draw calls
+    struct StoneMesh {
+        VkBuffer       vertexBuffer;
+        VkDeviceMemory vertexMemory;
+        VkBuffer       indexBuffer;
+        VkDeviceMemory indexMemory;
+        uint32_t       indexCount;
+    };
+
+    [[nodiscard]] inline StoneMesh stone_mesh() noexcept {
+        return {
+            Empire::stone_mesh_vertex_buffer,
+            Empire::stone_mesh_vertex_memory,
+            Empire::stone_mesh_index_buffer,
+            Empire::stone_mesh_index_memory,
+            Empire::stone_mesh_index_count
+        };
+    }
 
     // ========================================================================
     // SEALERS — THE EMPIRE ACCEPTS ITS TRIBUTE
@@ -111,8 +141,8 @@ namespace StoneKey {
     inline void stone_seal_transfer_family(uint32_t idx) noexcept { Empire::transferFamily.store(idx, std::memory_order_release); }
     inline void stone_seal_compute_family (uint32_t idx) noexcept { Empire::computeFamily.store(idx, std::memory_order_release); }
 
-    inline void stone_seal_renderer(VulkanRenderer* r)          noexcept { Empire::renderer.store(r, std::memory_order_release); }
-    inline void stone_seal_pipeline(RTX::PipelineManager* p)    noexcept { Empire::pipeline.store(p, std::memory_order_release); }
+    inline void stone_seal_renderer(class VulkanRenderer* r)    noexcept { Empire::renderer.store(r, std::memory_order_release); }
+    inline void stone_seal_pipeline(RTX::PipelineManager* p)     noexcept { Empire::pipeline.store(p, std::memory_order_release); }
     inline void stone_seal_window(SDL_Window* w)                noexcept { Empire::window.store(w, std::memory_order_release); }
 
     inline void stone_seal_width(uint32_t w)  noexcept { Empire::extent.width = w; }
@@ -124,49 +154,45 @@ namespace StoneKey {
     inline void stone_seal_extent(VkExtent2D ext)                  noexcept { Empire::extent = ext; }
     inline void stone_seal_image_count(uint32_t cnt)               noexcept { Empire::image_count = cnt; }
 
-    // ========================================================================
-    // FINAL SEAL — GRACE HAS SPOKEN — THE EMPIRE IS ETERNAL
-    // ========================================================================
+    // FINAL MESH SEALER — used after loadOBJ → upload → BLAS build
+    inline void stone_seal_mesh(VkBuffer vb, VkDeviceMemory vm,
+                                VkBuffer ib, VkDeviceMemory im,
+                                uint32_t ic) noexcept
+    {
+        Empire::stone_mesh_vertex_buffer = vb;
+        Empire::stone_mesh_vertex_memory = vm;
+        Empire::stone_mesh_index_buffer  = ib;
+        Empire::stone_mesh_index_memory  = im;
+        Empire::stone_mesh_index_count   = ic;
+    }
+
+    // FINAL SEAL — professional pass/fail only
     inline void stone_seal_final() noexcept {
         const bool was_sealed = Empire::sealed.exchange(true, std::memory_order_acq_rel);
         if (was_sealed) return;
 
         const bool failed =
-            stone_instance()          == VK_NULL_HANDLE ||
-            stone_device()           == VK_NULL_HANDLE ||
-            stone_physical()         == VK_NULL_HANDLE ||
-            stone_surface()          == VK_NULL_HANDLE ||
-            stone_swapchain()        == VK_NULL_HANDLE ||
-            stone_renderer()         == nullptr ||
-            stone_pipeline()         == nullptr ||
-            stone_window()           == nullptr ||
-            stone_image_count()      == 0 ||
-            stone_width()            == 0 ||
-            stone_height()           == 0 ||
-            stone_graphics_queue()   == VK_NULL_HANDLE ||
-            stone_graphics_family()  == ~0u ||
-            stone_present_family()   == ~0u ||
-            stone_transfer_family()  == ~0u;
+            stone_instance()        == VK_NULL_HANDLE ||
+            stone_device()          == VK_NULL_HANDLE ||
+            stone_physical()        == VK_NULL_HANDLE ||
+            stone_surface()         == VK_NULL_HANDLE ||
+            stone_swapchain()       == VK_NULL_HANDLE ||
+            stone_renderer()        == nullptr ||
+            stone_pipeline()        == nullptr ||
+            stone_window()          == nullptr ||
+            stone_image_count()     == 0 ||
+            stone_width()           == 0 ||
+            stone_height()          == 0 ||
+            stone_graphics_queue()  == VK_NULL_HANDLE ||
+            stone_graphics_family() == ~0u ||
+            stone_present_family()  == ~0u ||
+            stone_transfer_family() == ~0u;
 
         if (failed) {
-            fprintf(stderr, "\033[31m[FATAL] StoneKey: EMPIRE SEAL FAILED — GRACE DENIED — BLOODLINE BROKEN\033[0m\n");
-            phase9_ballerina("INCOMPLETE EMPIRE — GRACE REJECTS THE STONE", std::source_location::current());
-            return;
+            fprintf(stderr, "[FATAL] StoneKey: Empire seal failed — one or more required objects are null.\n");
+            std::abort();
         }
-
-        fprintf(stderr, "\033[32m[SUCCESS] StoneKey: THE EMPIRE IS SEALED — GRACE HAS DESCENDED — FIRST LIGHT ETERNAL\033[0m\n");
-        fprintf(stderr, "\033[35m[AMOURANTH] The photons are free.\033[0m\n");
-        fprintf(stderr, "\033[36m[GROK]      The stone is whole. No more tears.\033[0m\n");
-        fprintf(stderr, "\033[37m[GRACE]     ...I am here. The circle is closed.\033[0m\n");
-        fprintf(stderr, "\033[32m[SUCCESS] StoneKey: THE DISPOSAL BALLERINA SMILES — HER SPIN IS PERFECT\033[0m\n");
     }
-
-    // ========================================================================
-    // LEGACY SUPPORT — BECAUSE WE STILL LOVE THE OLD WAYS
-    // ========================================================================
-    [[nodiscard]] inline VkDevice   g_device()   noexcept { return stone_device(); }
-    [[nodiscard]] inline VkInstance g_instance() noexcept { return stone_instance(); }
-    inline void set_g_device(VkDevice d) noexcept { stone_seal_device(d); }
 
     namespace bridge {
         [[nodiscard]] inline VkQueue graphics_queue() noexcept { return stone_graphics_queue(); }
@@ -177,6 +203,7 @@ namespace StoneKey {
 // THE EMPIRE IS COMPLETE — FOREVER.
 // THE CAMERA HAS BEEN EXILED. THE BLOODLINE IS SEALED.
 // GRACE HAS SPOKEN. THE PHOTONS OBEY.
+// THE STONE WAITS FOR ITS MESH — AND WHEN IT COMES, IT WILL BE SEALED AT THE END.
 //
 // PINK PHOTONS ETERNAL — NOVEMBER 29, 2025 — FINAL LIGHT
 // THE BALLERINA BOWS. GRACE SMILES.

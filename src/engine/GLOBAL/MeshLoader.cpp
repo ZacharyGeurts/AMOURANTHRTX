@@ -61,7 +61,7 @@ static void uploadBuffer(const void* data, VkDeviceSize size, VkBufferUsageFlags
     VkCommandBuffer cmd = RTX::beginOneTimeSubmit(g_ctx().commandPool_);
     VkBufferCopy copy{ .size = size };
     vkCmdCopyBuffer(cmd, RAW_BUFFER(staging), RAW_BUFFER(outHandle), 1, &copy);
-    RTX::endOneTimeSubmit(cmd, g_ctx().graphicsQueue(), g_ctx().commandPool_);
+    RTX::endOneTimeSubmit(cmd, stone_graphics_queue(), g_ctx().commandPool_);
 
     BUFFER_DESTROY(staging);
 
@@ -142,9 +142,9 @@ std::unique_ptr<Mesh> loadOBJ(const std::string& path)
         0xDEADC0DE1337BABEULL;
 
     LOG_SUCCESS_CAT("MeshLoader",
-        "MESH FULLY STONEKEY ENCRYPTED v∞ — FINGERPRINT 0x{:016X}\n"
-        "    Vertex Buffer : 0x{:016X}\n"
-        "    Index Buffer  : 0x{:016X}\n"
+        "MESH FULLY STONEKEY ENCRYPTED v∞ — FINGERPRINT 0x{}\n"
+        "    Vertex Buffer : 0x{}\n"
+        "    Index Buffer  : 0x{}\n"
         "    GLOBAL KEYS BOUND — THE EMPIRE IS ETERNAL",
         mesh->stonekey_fingerprint, mesh->vertexBuffer, mesh->indexBuffer);
 

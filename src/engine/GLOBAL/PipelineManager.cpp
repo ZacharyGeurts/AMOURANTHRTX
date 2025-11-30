@@ -35,6 +35,7 @@ using namespace Logging::Color;
 using StoneKey::stone_device;
 using StoneKey::stone_instance;
 using StoneKey::stone_physical;
+using StoneKey::stone_mesh;
 using StoneKey::stone_seal_device;
 using StoneKey::stone_seal_physical;
 
@@ -858,6 +859,10 @@ void PipelineManager::createRayTracingPipeline(const std::vector<std::string>& s
 // ──────────────────────────────────────────────────────────────────────────────
 void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue)
 {
+	LOG_TRACE_CAT("PIPELINE", "{}--------------LOADING EXTENSIONS PipeLineManager.cpp----------------{}", VALHALLA_GOLD, RESET);
+	
+	RTX::loadExtensions(stone_instance(), stone_device());
+
     LOG_TRACE_CAT("PIPELINE", "{}FORGING THE SBT — FULL DIAGNOSTIC MODE — NO MORE SILENT DEATH{}", VALHALLA_GOLD, RESET);
 
     // ── STEP 1: DEVICE VALID?
