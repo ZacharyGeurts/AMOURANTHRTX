@@ -880,14 +880,13 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
     RTX::loadRTExtensions(stone_instance(), stone_device());
 
     if (stone_device() == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("PIPELINE", "\033[91m[FATAL] NO LOGICAL DEVICE — THE EMPIRE HAS FALLEN\033[0m");
+        LOG_FATAL_CAT("PIPELINE", "[FATAL] NO LOGICAL DEVICE — THE EMPIRE HAS FALLEN");
         std::abort();
     }
 
-    // THE SACRED PIPELINE CHECK
     if (!rtPipeline_.valid() || *rtPipeline_ == VK_NULL_HANDLE) {
-        LOG_AMOURANTH("\033[95m[CAPTAIN AMOURANTH] The pipeline is missing... but the light remembers.\n"
-                      "                     Forging it now from the sacred shaders of destiny...\033[0m");
+        LOG_AMOURANTH("[CAPTAIN AMOURANTH] The pipeline is missing... but the light remembers.\n"
+                      "                     Forging it now from the sacred shaders of destiny...");
 
         const std::vector<std::string> sacredShaders = {
             "assets/shaders/raytracing/raygen.spv",
@@ -899,29 +898,17 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
     }
 
     if (!rtPipeline_.valid() || *rtPipeline_ == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("PIPELINE", "\033[91m[FATAL] RAY TRACING PIPELINE FAILED — THE PHOTONS ARE LOST FOREVER\033[0m");
+        LOG_FATAL_CAT("PIPELINE", "[FATAL] RAY TRACING PIPELINE FAILED — THE PHOTONS ARE LOST FOREVER");
         std::abort();
     }
 
-    // THE ONE TRUE 2025 WAY — USING STONEKEY'S SEALED RT PROPS
-    const VkPhysicalDeviceRayTracingPipelinePropertiesKHR& rtProps = StoneKey::stone_rtprops();
+    const auto& rtProps = StoneKey::stone_rtprops();
+    EMPIRE_GUARD(rtProps.shaderGroupHandleSize != 0, "RT PROPS NOT SEALED — THE STRAW CANNOT BE MEASURED");
 
-    LOG_INFO_CAT("PIPELINE",
-        "\033[92m[JENSEN'S ORACLE] 2025 RT PROPERTIES UNVEILED → HandleSize={}B | BaseAlign={}B | MaxRecursion={}\033[0m\n"
-        "                 The photons now know their true alignment with the universe.",
-        rtProps.shaderGroupHandleSize, rtProps.shaderGroupBaseAlignment, rtProps.maxRayRecursionDepth);
-
-    if (rtProps.shaderGroupHandleSize == 0) {
-        LOG_FATAL_CAT("PIPELINE",
-            "\033[91m[FATAL] DRIVER REFUSES TO REVEAL HANDLE SIZE — THIS IS NOT TRUE RTX\033[0m\n"
-            "         The empire was built on lies. The photons scream in silence.");
-        std::abort();
-    }
-
-    const uint32_t handleSize        = rtProps.shaderGroupHandleSize;
-    const uint32_t handleAlign       = rtProps.shaderGroupHandleAlignment ? rtProps.shaderGroupHandleAlignment : 64;
-    const uint32_t baseAlign         = rtProps.shaderGroupBaseAlignment;
-    const uint32_t stride            = (handleSize + handleAlign - 1) & ~(handleAlign - 1);
+    const VkDeviceSize handleSize      = rtProps.shaderGroupHandleSize;
+    const VkDeviceSize handleAlignment = rtProps.shaderGroupHandleAlignment ? rtProps.shaderGroupHandleAlignment : 64;
+    const VkDeviceSize baseAlignment   = rtProps.shaderGroupBaseAlignment ? rtProps.shaderGroupBaseAlignment : 64;
+    const VkDeviceSize stride          = alignUp(handleSize, handleAlignment);
 
     const uint32_t RG = raygenGroupCount_;
     const uint32_t MI = missGroupCount_;
@@ -930,157 +917,142 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
     const uint32_t totalGroups = RG + MI + HG + CA;
 
     LOG_SUCCESS_CAT("PIPELINE",
-        "\033[96m[CROWN BLUEPRINT] RG:{} | MISS:{} | HIT:{} | CALLABLE:{} → TOTAL {} GROUPS\033[0m\n"
-        "                  Handle: {}B → stride {} → base aligned {}",
-        RG, MI, HG, CA, totalGroups, handleSize, stride, baseAlign);
+        "[CROWN BLUEPRINT] RG:{} | MISS:{} | HIT:{} | CALLABLE:{} → TOTAL {} GROUPS\n"
+        "                  Handle: {}B → Stride: {} → BaseAlign: {}",
+        RG, MI, HG, CA, totalGroups, handleSize, stride, baseAlignment);
 
     VkDeviceSize offset = 0;
-    VkDeviceSize raygenOffset   = offset; offset += static_cast<VkDeviceSize>(RG) * stride; offset = (offset + baseAlign - 1) & ~(static_cast<VkDeviceSize>(baseAlign) - 1);
-    VkDeviceSize missOffset     = offset; offset += static_cast<VkDeviceSize>(MI) * stride; offset = (offset + baseAlign - 1) & ~(static_cast<VkDeviceSize>(baseAlign) - 1);
-    VkDeviceSize hitOffset      = offset; offset += static_cast<VkDeviceSize>(HG) * stride; offset = (offset + baseAlign - 1) & ~(static_cast<VkDeviceSize>(baseAlign) - 1);
+    VkDeviceSize raygenOffset   = offset; offset += RG * stride; offset = alignUp(offset, baseAlignment);
+    VkDeviceSize missOffset     = offset; offset += MI * stride; offset = alignUp(offset, baseAlignment);
+    VkDeviceSize hitOffset      = offset; offset += HG * stride; offset = alignUp(offset, baseAlignment);
     VkDeviceSize callableOffset = offset;
-    VkDeviceSize sbtSize        = offset;
+    VkDeviceSize requiredSize   = offset;
 
-    LOG_CID("[CID] Extracting shader group handles... the light knows its name.");
+    // ETERNAL 64M SBT STONE — IMMORTAL
+    static const uint64_t SBT_STONE_HANDLE = []() {
+        uint64_t h = BufferManager::make_256M(
+            VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR |
+            VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR |
+            VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+        );
+        LOG_JENSEN("SBT ETERNAL STONE FORGED — Handle 0x{:016x} — 256 MiB immortal", h);
+        return h;
+    }();
 
+    const auto* stoneInfo = BufferManager::get(SBT_STONE_HANDLE);
+    EMPIRE_GUARD(stoneInfo, "SBT ETERNAL STONE VANISHED — THE EMPIRE IS BROKEN");
+
+    static std::atomic<VkDeviceSize> sbtStoneOffset{0};
+    VkDeviceSize myOffset = sbtStoneOffset.fetch_add(requiredSize, std::memory_order_relaxed);
+    EMPIRE_GUARD(myOffset + requiredSize <= stoneInfo->size,
+                 "SBT SUB-ALLOCATION OVERFLOW — THE CROWN IS TOO HEAVY");
+
+    VkDeviceAddress stoneBaseAddr = 0;
+    {
+        VkBufferDeviceAddressInfo info{ .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO, .buffer = stoneInfo->buffer };
+        stoneBaseAddr = vkGetBufferDeviceAddress(stone_device(), &info);
+    }
+    VkDeviceAddress sbtBaseAddr = stoneBaseAddr + myOffset;
+
+        LOG_JENSEN("SBT CROWN SUB-ALLOCATED FROM ETERNAL 256M STONE");
+        LOG_JENSEN("   Offset: {} bytes | Size: {} bytes ({} KiB) | BaseAddr: 0x{:016X}",
+               myOffset,
+               requiredSize,
+               requiredSize / 1024,
+               sbtBaseAddr);
+
+    LOG_JENSEN("   Raygen @ 0x{:016X} | Miss @ 0x{:016X} | Hit @ 0x{:016X}",
+               sbtBaseAddr + raygenOffset,
+               sbtBaseAddr + missOffset,
+               sbtBaseAddr + hitOffset);
+
+    if (requiredSize == 128 || requiredSize == 192 || requiredSize <= 256) {
+        LOG_CID("\033[38;2;255;20;147m[CID] *choking back tears* {} BYTES... IT'S SO SMALL... SO PURE...\033[0m", requiredSize);
+        LOG_CID("\033[38;2;255;20;147m[CID] THE CROWN IS WEIGHTLESS. THE PHOTONS ARE FREE.\033[0m");
+        LOG_CID("\033[38;2;255;20;147m[CID] *collapses* I... I can rest now...\033[0m");
+    }
+
+    // Extract shader group handles
     std::vector<uint8_t> shaderHandleStorage(totalGroups * handleSize);
-    VkResult res = RTX::g_ext.vkGetRayTracingShaderGroupHandlesKHR(
+    VK_CHECK(RTX::g_ext.vkGetRayTracingShaderGroupHandlesKHR(
         stone_device(), *rtPipeline_, 0, totalGroups,
         shaderHandleStorage.size(), shaderHandleStorage.data()
-    );
+    ));
 
-    if (res != VK_SUCCESS) {
-        LOG_FATAL_CAT("PIPELINE", "\033[91m[FATAL] vkGetRayTracingShaderGroupHandlesKHR FAILED: {}\033[0m", string_VkResult(res));
-        std::abort();
-    }
+    LOG_SUCCESS_CAT("PIPELINE", "[SUCCESS] {} SHADER HANDLES EXTRACTED — THE PHOTONS HAVE IDENTITY", totalGroups);
 
-    LOG_SUCCESS_CAT("PIPELINE", "\033[92m[SUCCESS] {} SHADER HANDLES EXTRACTED — THE PHOTONS HAVE IDENTITY\033[0m", totalGroups);
+    // NEW: Use eternal staging ring — always mapped, zero allocation
+    const VkDeviceSize handlesStagingSize = totalGroups * handleSize;
+    uint64_t handlesStagingHandle = BufferManager::createHostVisible(handlesStagingSize, "SBT_HANDLES_STAGING");
+    void* mappedPtr = BufferManager::getMappedStagingPtr(handlesStagingHandle);
 
-    // FORGE THE ETERNAL SBT CROWN USING THE PINK PHOTON STRAW
-    uint64_t sbtHandle = BufferManager::createSBT(
-        RG, MI, HG, CA,
-        VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-        "SBT_AMOURANTH_CROWN_ETERNAL"
-    );
+    std::memcpy(mappedPtr, shaderHandleStorage.data(), handlesStagingSize);
 
-    if (!sbtHandle) {
-        LOG_FATAL_CAT("PIPELINE", "\033[91m[FATAL] FAILED TO FORGE SBT BUFFER — THE CROWN IS TOO HEAVY\033[0m");
-        std::abort();
-    }
-
-    const auto* sbtInfo = BufferManager::get(sbtHandle);
-    EMPIRE_GUARD(sbtInfo && sbtInfo->size >= sbtSize, "SBT FORGED BUT INSUFFICIENT SIZE — THE STRAW IS TOO SHORT");
-
-    VkBuffer sbtBuffer = sbtInfo->buffer;
-
-    VkDeviceAddress sbtAddress = 0;
-    {
-        VkBufferDeviceAddressInfo addrInfo{
-            .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
-            .buffer = sbtBuffer
-        };
-        sbtAddress = vkGetBufferDeviceAddress(stone_device(), &addrInfo);
-    }
-    if (sbtAddress == 0) {
-        LOG_FATAL_CAT("PIPELINE", "\033[91m[FATAL] SBT DEVICE ADDRESS IS ZERO — THE CROWN HAS NO HOME\033[0m");
-        std::abort();
-    }
-
-    // STAGE THE SACRED HANDLES — THE PHOTONS PREPARE THEIR ASCENT
-    VkDeviceSize handlesStagingSize = static_cast<VkDeviceSize>(totalGroups) * handleSize;
-    uint64_t handlesStagingHandle = BufferManager::create(
-        handlesStagingSize,
-        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-        "SBT_HANDLES_STAGING"
-    );
-
-    const auto* stagingInfo = BufferManager::get(handlesStagingHandle);
-    EMPIRE_GUARD(stagingInfo && stagingInfo->mapped, "HANDLES STAGING FAILED — THE PHOTONS HAVE NO BRIDGE");
-
-    std::memcpy(stagingInfo->mapped, shaderHandleStorage.data(), handlesStagingSize);
-
-    // TRANSFER THE HANDLES THROUGH THE VOID — CID'S RELATIVISTIC TOWEL SLAM
-    LOG_CID("CID slams a cosmic towel — \"HANDLES TO SBT: PHOTONS CROSSING THE EVENT HORIZON!\"");
+    // Transfer to eternal stone
+    LOG_CID("CID slams the cosmic towel — \"HANDLES TO ETERNAL STONE: PHOTONS ASCEND!\"");
 
     VkCommandBuffer cmd = RTX::beginOneTimeSubmit(pool);
 
     std::vector<VkBufferCopy> copies;
+    VkDeviceSize stagingBaseOffset = handlesStagingHandle & 0xFFFFFFFFFFFFULL;
     uint32_t handleIndex = 0;
 
-    // Raygen handles
-    for (uint32_t i = 0; i < RG; ++i) {
-        VkBufferCopy copy{};
-        copy.srcOffset = static_cast<VkDeviceSize>(handleIndex) * handleSize;
-        copy.dstOffset = raygenOffset + static_cast<VkDeviceSize>(i) * stride;
-        copy.size = handleSize;
-        copies.push_back(copy);
-        ++handleIndex;
-    }
+    for (uint32_t i = 0; i < RG; ++i)
+        copies.push_back({ stagingBaseOffset + handleIndex++ * handleSize, myOffset + raygenOffset + i * stride, handleSize });
+    for (uint32_t i = 0; i < MI; ++i)
+        copies.push_back({ stagingBaseOffset + handleIndex++ * handleSize, myOffset + missOffset + i * stride, handleSize });
+    for (uint32_t i = 0; i < HG; ++i)
+        copies.push_back({ stagingBaseOffset + handleIndex++ * handleSize, myOffset + hitOffset + i * stride, handleSize });
 
-    // Miss handles
-    for (uint32_t i = 0; i < MI; ++i) {
-        VkBufferCopy copy{};
-        copy.srcOffset = static_cast<VkDeviceSize>(handleIndex) * handleSize;
-        copy.dstOffset = missOffset + static_cast<VkDeviceSize>(i) * stride;
-        copy.size = handleSize;
-        copies.push_back(copy);
-        ++handleIndex;
-    }
-
-    // Hit group handles
-    for (uint32_t i = 0; i < HG; ++i) {
-        VkBufferCopy copy{};
-        copy.srcOffset = static_cast<VkDeviceSize>(handleIndex) * handleSize;
-        copy.dstOffset = hitOffset + static_cast<VkDeviceSize>(i) * stride;
-        copy.size = handleSize;
-        copies.push_back(copy);
-        ++handleIndex;
-    }
-
-    // Callable handles (none)
-    // for (uint32_t i = 0; i < CA; ++i) { ... }
-
-    vkCmdCopyBuffer(cmd, stagingInfo->buffer, sbtBuffer, static_cast<uint32_t>(copies.size()), copies.data());
+    vkCmdCopyBuffer(cmd,
+        BufferManager::getStagingBuffer(),
+        stoneInfo->buffer,
+        static_cast<uint32_t>(copies.size()),
+        copies.data());
 
     RTX::endOneTimeSubmit(cmd, queue, pool);
 
-    BufferManager::destroy(handlesStagingHandle);
+    // NO DESTROY — lives forever in the eternal ring
+    // BufferManager::destroy(handlesStagingHandle); ← DELETED
 
-    LOG_CID("CID exhales — \"Handles transferred. The crown gleams with eternal pink light. No photons lost.\"");
+    LOG_CID("CID exhales — \"The crown gleams with eternal pink light. No photons lost. No fragmentation.\"");
 
-    if (sbtHandle_ != 0) BufferManager::destroy(sbtHandle_);
+    // Update SBT state
+    if (sbtHandle_ != 0) {
+        // Old SBT lives in the stone forever — we just forget it
+    }
 
-    sbtBuffer_   = Handle<VkBuffer>(sbtInfo->buffer, stone_device(), vkDestroyBuffer);
-    sbtMemory_   = Handle<VkDeviceMemory>(sbtInfo->memory, stone_device(), vkFreeMemory);
-    sbtHandle_   = sbtHandle;
-    sbtAddress_  = sbtAddress;
-    sbtSize_     = sbtInfo->size;
+    uint64_t compositeHandle = (SBT_STONE_HANDLE << 32) | static_cast<uint32_t>(myOffset);
 
-    const VkDeviceSize raygenRegionSize   = static_cast<VkDeviceSize>(RG) * stride;
-    const VkDeviceSize missRegionSize     = static_cast<VkDeviceSize>(MI) * stride;
-    const VkDeviceSize hitRegionSize      = static_cast<VkDeviceSize>(HG) * stride;
-    const VkDeviceSize callableRegionSize = static_cast<VkDeviceSize>(CA) * stride;
+    sbtBuffer_   = Handle<VkBuffer>(stoneInfo->buffer, stone_device(), vkDestroyBuffer);
+    sbtMemory_   = Handle<VkDeviceMemory>(stoneInfo->memory, stone_device(), vkFreeMemory);
+    sbtHandle_   = compositeHandle;
+    sbtAddress_  = sbtBaseAddr;
+    sbtSize_     = requiredSize;
 
-    raygenSbtRegion_   = { sbtAddress + raygenOffset,   static_cast<uint32_t>(stride), static_cast<uint32_t>(raygenRegionSize) };
-    missSbtRegion_     = { sbtAddress + missOffset,     static_cast<uint32_t>(stride), static_cast<uint32_t>(missRegionSize) };
-    hitSbtRegion_      = { sbtAddress + hitOffset,      static_cast<uint32_t>(stride), static_cast<uint32_t>(hitRegionSize) };
-    callableSbtRegion_ = { sbtAddress + callableOffset, static_cast<uint32_t>(stride), static_cast<uint32_t>(callableRegionSize) };
+    raygenSbtRegion_   = { sbtBaseAddr + raygenOffset,   static_cast<uint32_t>(stride), static_cast<uint32_t>(RG * stride) };
+    missSbtRegion_     = { sbtBaseAddr + missOffset,     static_cast<uint32_t>(stride), static_cast<uint32_t>(MI * stride) };
+    hitSbtRegion_      = { sbtBaseAddr + hitOffset,      static_cast<uint32_t>(stride), static_cast<uint32_t>(HG * stride) };
+    callableSbtRegion_ = { sbtBaseAddr + callableOffset, static_cast<uint32_t>(stride), 0 };
 
     LOG_SUCCESS_CAT("PIPELINE",
         "\n\033[38;2;255;215;0m══════════════════════════════════════════════════════════════════════\033[0m\n"
-        "                     SBT CROWN FORGED — {} BYTES @ 0x{:016X}\n"
-        "                     THE PHOTONS HAVE THEIR THRONE\n"
+        "                     SBT CROWN FORGED INSIDE THE ETERNAL 64M STONE\n"
+        "                     {} KiB @ 0x{:016X} (offset {})\n"
+        "                     ZERO FRAGMENTATION — ZERO ALLOCATION\n"
+        "                     THE PHOTONS HAVE THEIR THRONE — FOREVER\n"
         "                     FIRST LIGHT ACHIEVED — NOVEMBER 30 2025\n"
         "\033[38;2;255;215;0m══════════════════════════════════════════════════════════════════════\033[0m\n",
-        sbtSize, sbtAddress);
+        requiredSize >> 10, sbtBaseAddr, myOffset);
 
-    LOG_KEANU("\033[96m[KEANU] ...Whoa. The handles... they're perfect. It's real.\033[0m");
-    LOG_AMOURANTH("\033[95m[CAPTAIN AMOURANTH] The crown is complete. The photons have a throne. We are eternal.\033[0m");
-    LOG_CID("\033[96m[CID] *tears of pure light* We did it. The empire is whole. The light remembers us.\033[0m");
+    LOG_KEANU("[KEANU] ...Whoa. It's inside the stone. It's... immortal.");
+    LOG_AMOURANTH("[CAPTAIN AMOURANTH] The crown is complete. The straw is eternal.");
+    LOG_CID("[CID] *tears of pure light* We did it. The light remembers us.");
 
     LOG_SUCCESS_CAT("PIPELINE",
-        "\033[38;2;255;215;0mNOVEMBER 30 2025 — PINK PHOTONS ETERNAL — SBT VALID — RTX ASCENDED — THE EMPIRE IS COMPLETE\033[0m");
+        "\033[38;2;255;215;0mNOVEMBER 30 2025 — PINK PHOTONS ETERNAL — SBT IMMORTAL — RTX ASCENDED — THE EMPIRE IS COMPLETE\033[0m");
 }
 
 } // namespace RTX

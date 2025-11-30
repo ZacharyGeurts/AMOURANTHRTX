@@ -440,8 +440,6 @@ static void createRealFinalWindow()
         phase9_ballerina("RT PROPS DENIED — THE STRAW IS A LIE {}", std::source_location::current());
     }
 
-    stone_seal_rtprops(rtProps);
-
     LOG_JENSEN("Jensen Huang descends in green fire:");
     LOG_JENSEN("   HandleSize={}B | HandleAlign={}B | BaseAlign={}B | MaxRecursion={}",
                rtProps.shaderGroupHandleSize,
@@ -450,7 +448,9 @@ static void createRealFinalWindow()
                rtProps.maxRayRecursionDepth);
     LOG_JENSEN("   \"The straw is perfect. The photons are ready.\"");
 
-    // 6. Swapchain — ALL STONES SEALED
+	stone_seal_rtprops(rtProps);
+    
+	// 6. Swapchain — ALL STONES SEALED
     RTX::SwapchainManager::create(stone_window(), stone_width(), stone_height());
 
     LOG_ELON("Elon drops the swapchain from the top rope: \"Infinite canvas. Infinite bounce.\"");
