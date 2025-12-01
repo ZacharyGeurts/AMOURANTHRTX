@@ -5,7 +5,7 @@ cd AMOURANTHRTX
 chmod +x linux.sh
 ./linux.sh --help
 ```
-Currently compiles and reaches render loop. Much more work needed yet.  
+Stable RTX window.  
 Working prototype expected Christmas 2025.  
 Please do not code farm. Swapchain goes with THIS project.  
 Expect no output on a given day. I go for milestones and not all include visuals.  
