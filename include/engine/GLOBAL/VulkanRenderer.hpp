@@ -1,5 +1,12 @@
 // include/engine/GLOBAL/VulkanRenderer.hpp
 // =============================================================================
+//
+// Dual Licensed:
+// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
+//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
+// 2. Commercial licensing: gzac5314@gmail.com
+//
+// =============================================================================
 // AMOURANTH RTX Engine (C) 2025 — SLIPSTREAM v∞ — WARPZONE BREACH IMMINENT
 // The Good Ship VulkanRTX screams through the void — pink wake eternal
 // First light achieved. The renderer is alive. The photons obey.
@@ -51,6 +58,7 @@ public:
     void renderFrame(const Camera& camera, float deltaTime) noexcept;
     void onWindowResize(uint32_t w, uint32_t h) noexcept;
     void cleanup() noexcept;
+	void createCommandPool() noexcept;
 
     // Runtime controls
     void toggleHypertrace() noexcept;
@@ -61,7 +69,7 @@ public:
     void setOverclockMode(bool enabled) noexcept;
 
     void updateUniformBinding31(const void* data, VkDeviceSize size) noexcept;
-    void setActiveRenderMode(int mode) noexcept { if (mode >= 1 && mode <= 9) activeRenderMode_ = mode; }
+    void setRenderMode(int mode) noexcept;
     void requestAccumulationReset() noexcept { resetAccumulation_ = true; resetAccumNextFrame_ = true; }
 
     void updateAllRTXDescriptors() noexcept;
@@ -69,8 +77,13 @@ public:
     void recordRayTracingCommands(VkCommandBuffer cmd, uint32_t frameIndex);
     void setTonemap(bool enabled) noexcept;
     void setOverlay(bool show) noexcept;
-    void setRenderMode(int mode) noexcept;
     void loadCriticalShaders() noexcept;
+
+    // ========================================================================
+    // THE ONE TRUE SYNC + COMMAND BUFFER FORGE — CALLED ONCE AFTER CONSTRUCTION
+    // ========================================================================
+    void createCommandBuffers() noexcept;
+    void createSyncObjects() noexcept;
 
     // Getters
     [[nodiscard]] VulkanRenderer* renderer() noexcept { return this; }
@@ -85,7 +98,7 @@ public:
     [[nodiscard]] FpsTarget fpsTarget()         const noexcept { return fpsTarget_; }
     [[nodiscard]] bool      minimized()         const noexcept { return minimized_; }
     [[nodiscard]] int       currentRenderMode() const noexcept { return activeRenderMode_; }
-	void recordRayTrace(VkCommandBuffer cmd, const VkExtent2D& extent) noexcept;
+    void recordRayTrace(VkCommandBuffer cmd, const VkExtent2D& extent) noexcept;
 
 private:
     // Core state
@@ -99,9 +112,9 @@ private:
     uint32_t accumulationFrame_ = 0;
     bool     resetAccumulation_ = true;
     bool     firstSwapchainAcquire_ = true;
+    bool     resetAccumNextFrame_ = true;
 
-    int  activeRenderMode_ = 1;
-    bool resetAccumNextFrame_ = true;
+    int  activeRenderMode_ = 0;  // ← STARTS AT 0 (BLACK VOID) — SAFE — FULL FPS
 
     bool hypertraceEnabled_     = Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING;
     bool denoisingEnabled_      = Options::OptionsRTX::ENABLE_DENOISING;
@@ -118,14 +131,18 @@ private:
 
     VkRenderPass renderPass_{ VK_NULL_HANDLE };
 
-    // Sync objects
+    // ========================================================================
+    // SYNC OBJECTS — THE HEARTBEAT OF THE EMPIRE
+    // ========================================================================
     std::vector<VkSemaphore> imageAvailableSemaphores_;
     std::vector<VkSemaphore> renderFinishedSemaphores_;
     std::vector<VkSemaphore> computeFinishedSemaphores_;
     std::vector<VkSemaphore> computeToGraphicsSemaphores_;
     std::vector<VkFence>     inFlightFences_;
 
-    // Command buffers
+    // ========================================================================
+    // COMMAND BUFFERS — FORGED FROM THE ONE TRUE POOL
+    // ========================================================================
     std::vector<VkCommandBuffer> commandBuffers_;
     std::vector<VkCommandBuffer> computeCommandBuffers_;
 
@@ -195,7 +212,6 @@ private:
     void destroyRenderPass() noexcept;
     void createFramebuffers() noexcept;
     void cleanupFramebuffers() noexcept;
-    void createCommandBuffers() noexcept;
 
     void createRTOutputImages() noexcept;
     void createAccumulationImages() noexcept;
@@ -251,8 +267,6 @@ private:
 // =============================================================================
 [[nodiscard]] inline VulkanRenderer& g_rtx() noexcept
 {
-    // StoneKey::stone_renderer() returns StoneKey::VulkanRenderer* (a typedef)
-    // We know it's actually a VulkanRenderer*, so reinterpret_cast is safe and required
     auto* ptr = reinterpret_cast<VulkanRenderer*>(StoneKey::stone_renderer());
     if (!ptr) {
         LOG_FATAL_CAT("RTX", "g_rtx() called before renderer sealed — empire fallen");
@@ -260,7 +274,6 @@ private:
     }
     return *ptr;
 }
-
 
 // =============================================================================
 // SLIPSTREAM LOG — DECEMBER 01, 2025 — FIRST LIGHT ETERNAL

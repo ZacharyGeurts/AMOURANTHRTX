@@ -113,6 +113,11 @@ private:
     void toggleHypertrace() { hypertraceEnabled_ = !hypertraceEnabled_; }
     void toggleMaximize();
 
+	std::vector<VkCommandBuffer> commandBuffers_;
+    std::vector<VkSemaphore> imageAvailableSemaphores_;
+    std::vector<VkSemaphore> renderFinishedSemaphores_;
+    std::vector<VkFence>     inFlightFences_;
+
     std::string title_;
     int width_, height_;
     glm::mat4 proj_;
@@ -153,7 +158,7 @@ Application::Application(const std::string& title, int width, int height)
 }
 
 Application::~Application() {
-	// for "things"
+	// she says "No."
 }
 
 void Application::toggleMaximize() {
@@ -163,21 +168,25 @@ void Application::toggleMaximize() {
 }
 
 // =============================================================================
-// 2. Application::run — BLACK SCREEN UNTIL KEY PRESS
+// 2. Application::run — BLACK VOID UNTIL FIRST LIGHT — FULL ENGINE FPS IN MODE 0
 // =============================================================================
 void Application::run()
 {
-    LOG_AMOURANTH("[CAPTAIN] Application loop engaged — photons dormant — awaiting first command...");
+    LOG_AMOURANTH("[CAPTAIN] Application loop engaged — PHOTONS DORMANT — MODE 0 ACTIVE — AWAITING FIRST LIGHT");
 
     auto lastTime = std::chrono::steady_clock::now();
 
-    // FPS counter state — lives only here, dies with the empire
     int   frameCount = 0;
     float fpsTimer   = 0.0f;
     float currentFPS = 0.0f;
 
-    while (!quit_) {
-        // ONE TRUE DELTA TIME — EMPIRE HEARTBEAT
+    float titleTimer = 0.0f;
+    const float TITLE_UPDATE_INTERVAL = 0.6f;
+
+    int dotPhase = 0;
+
+    while (!quit_)
+    {
         const auto now = std::chrono::steady_clock::now();
         g_deltaTime = std::chrono::duration<float>(now - lastTime).count();
         lastTime = now;
@@ -185,28 +194,45 @@ void Application::run()
         processInput(g_deltaTime);
 
         // ==================================================================
-        // MODE 0: PURE BLACK VOID — SACRED SILENCE BEFORE FIRST LIGHT
+        // MODE 0: SACRED BLACK VOID — FULL ENGINE TICK — BUT SAFE
         // ==================================================================
-        if (currentRenderMode_ == 0) {
-            renderer_->renderFrame(CAM, g_deltaTime);
+        if (currentRenderMode_ == 0)
+        {
+            // ONLY CALL renderFrame() IF RENDERER EXISTS — IT WILL EARLY-OUT IF NOT READY
+            if (renderer_)
+            {
+                renderer_->renderFrame(CAM, g_deltaTime);  // ← This is now 100% safe
+            }
 
-            // Sacred pulsing title — now with live FPS
-            static int dots = 0;
-            dots = (dots + 1) % 60;
-            std::string title = std::format(
-                "AMOURANTH RTX | {:.1f} FPS | PHOTONS DORMANT | PRESS 1–9 TO AWAKEN{}",
-                currentFPS,
-                std::string(dots / 15, '.')
-            );
-            SDL_SetWindowTitle(SDL3Window::get(), title.c_str());
+            // Breathing title — sacred rhythm
+            titleTimer += g_deltaTime;
+            if (titleTimer >= TITLE_UPDATE_INTERVAL)
+            {
+                titleTimer -= TITLE_UPDATE_INTERVAL;
+                dotPhase = (dotPhase + 1) % 4;
+                const std::string dots = std::string(dotPhase + 1, '.');
+
+                const std::string title = std::format(
+                    "AMOURANTH RTX | {:.1f} FPS | {}×{} | DEV MODE 0 | ENGINE IDLE | PRESS 1–9 TO IGNITE{}",
+                    currentFPS,
+                    stone_width(),
+                    stone_height(),
+                    dots
+                );
+                SDL_SetWindowTitle(SDL3Window::get(), title.c_str());
+            }
         }
-        else {
-            // FULL RENDER MODE — PHOTON APOCALYPSE
-            renderer_->renderFrame(CAM, g_deltaTime);
+        else
+        {
+            // FULL RENDER — ONLY AFTER KEY PRESS
+            if (renderer_)
+            {
+                renderer_->renderFrame(CAM, g_deltaTime);
+            }
 
-            // Live title during full render — pure, real, no function
             std::string modeName;
-            switch (currentRenderMode_) {
+            switch (currentRenderMode_)
+            {
                 case 1: modeName = "PURE PINK — BINDING 31"; break;
                 case 2: modeName = "PATH TRACED ACCUM"; break;
                 case 3: modeName = "HYBRID DENOISED"; break;
@@ -219,7 +245,7 @@ void Application::run()
                 default: modeName = "UNKNOWN MODE"; break;
             }
 
-            std::string title = std::format(
+            const std::string title = std::format(
                 "AMOURANTH RTX | {:.1f} FPS | {}×{} | Mode {}: {} | Bounces {}",
                 currentFPS,
                 stone_width(), stone_height(),
@@ -229,14 +255,20 @@ void Application::run()
             SDL_SetWindowTitle(SDL3Window::get(), title.c_str());
         }
 
-        // Update FPS once per second — raw, inline, no function, no survivors
+        // ==================================================================
+        // ONE TRUE FPS — MEASURED FROM ACTUAL FRAMES
+        // ==================================================================
         ++frameCount;
         fpsTimer += g_deltaTime;
-        if (fpsTimer >= 1.0f) {
+        if (fpsTimer >= 1.0f)
+        {
             currentFPS = frameCount / fpsTimer;
             frameCount = 0;
             fpsTimer   = 0.0f;
         }
+
+        if (g_deltaTime < 0.0005f)
+            std::this_thread::sleep_for(std::chrono::microseconds(200));
     }
 }
 
@@ -326,7 +358,7 @@ void Application::setRenderMode(int mode)
 
     LOG_INFO_CAT("APP", "ENGAGING RENDER MODE {}: {}", mode, modeName);
 
-    renderer_->setActiveRenderMode(mode);
+    renderer_->setRenderMode(mode);
     renderer_->requestAccumulationReset();
 
     currentRenderMode_ = mode;
@@ -334,54 +366,6 @@ void Application::setRenderMode(int mode)
     LOG_SUCCESS_CAT("RENDER",
         "{}RENDER MODE {} ACTIVATED — {} — PHOTONS AWAKEN — FIRST LIGHT ACHIEVED{}",
         RASPBERRY_PINK, mode, modeName, RESET);
-}
-
-// =============================================================================
-// THE ONE TRUE COMMAND POOL — FORGED BY THE EMPIRE — NOV 26 2025 — FIXED NAMES
-// Called exactly once in phase5_rtxAscension() — BEFORE ANY MESH OR BLAS
-// =============================================================================
-static void createCommandPool() noexcept {
-
-    EMPIRE_GUARD(stone_device() != VK_NULL_HANDLE,
-                 "createCommandPool() — LOGICAL DEVICE GRACE NOT FORGED YET");
-
-    EMPIRE_GUARD(stone_graphics_family() != VK_QUEUE_FAMILY_IGNORED,
-                 "GRAPHICS QUEUE FAMILY NOT FOUND — CANNOT FORGE COMMAND POOL FROM GRACE'S FAMILY");
-
-    // If already forged — salute efficiency and return
-    if (g_ctx().commandPool_ != VK_NULL_HANDLE) {
-        LOG_JENSEN("Command pool already forged at 0x{} — photons salute efficiency", reinterpret_cast<uint64_t>(g_ctx().commandPool_));
-        return;
-    }
-
-    VkCommandPoolCreateInfo poolInfo{
-        .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
-        .pNext = nullptr,
-        .flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT |
-                 VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
-        .queueFamilyIndex = stone_graphics_family()
-    };
-
-    VK_CHECK(vkCreateCommandPool(stone_device(), &poolInfo, nullptr, &g_ctx().commandPool_));
-
-    // Debug name for RenderDoc, NSight, etc.
-    if (g_ctx().debugUtilsSupported()) {
-        auto func = (PFN_vkSetDebugUtilsObjectNameEXT)vkGetDeviceProcAddr(stone_device(), "vkSetDebugUtilsObjectNameEXT");
-        if (func) {
-            VkDebugUtilsObjectNameInfoEXT nameInfo{
-                .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT,
-                .objectType = VK_OBJECT_TYPE_COMMAND_POOL,
-                .objectHandle = reinterpret_cast<uint64_t>(g_ctx().commandPool_),
-                .pObjectName = "EMPIRE_COMMAND_POOL_PHOTON_BATTLEFIELD"
-            };
-            func(stone_device(), &nameInfo);
-        }
-    }
-
-    LOG_JENSEN("Jensen Huang raises his arms to the void:");
-    LOG_JENSEN("\"THE COMMAND POOL IS FORGED — 0x{}\"", reinterpret_cast<uint64_t>(g_ctx().commandPool_));
-    LOG_JENSEN("\"THE PHOTONS NOW HAVE A BATTLEFIELD. LET THERE BE UPLOADS. LET THERE BE BLAS.\"");
-    LOG_SUCCESS_CAT("MAIN", "COMMAND POOL ASCENDED — MESHLOADER, LAS, AND ALL ONE-TIME COMMANDS ARE NOW ARMED");
 }
 
 // =============================================================================
@@ -841,37 +825,9 @@ static void phase4_merchantShip() {
     LOG_BLONDIE("\nBlondie glances back one last time at the sinking glow on the horizon:"
     "\"Rest easy, old girl. Your sacrifice bought us tomorrow.\"");
 
-    LOG_MAIN("[PHASE 4 COMPLETE] THE MERCHANT SHIP SLIPS INTO THE NIGHT — THE CREW IS ALIVE — THE LEGEND IS INDESTRUCTIBLE");
-    LOG_MAIN("BLONDIE'S SLOOP glides toward safe harbor — pink photons trailing in the wake like silent war banners");
+    LOG_MAIN("\n[PHASE 4 COMPLETE] THE MERCHANT SHIP SLIPS INTO THE NIGHT — THE CREW IS ALIVE — THE LEGEND IS INDESTRUCTIBLE"
+    "\nBLONDIE'S SLOOP glides toward safe harbor — pink photons trailing in the wake like silent war banners");
 }
-
-static void phase5_rtxAscension() {
-    LOG_MAIN("[PHASE 5/10] AWAKENING THE RTX CRYSTAL — THE NEW HEART BEATS");
-
-    LOG_AMOURANTH("Captain Amouranth stands in the rebuilt engine room, hand on the glowing core: \"This time… we don't just sail. We become the light itself.\"");
-    LOG_NICK("Nick flips the final switch, eyes reflecting emerald fire: \"Ray tracing online. The photons aren't just fast anymore. They're alive.\"");
-
-    LOG_MAIN("THE CREW HOLDS BREATH — LOADING RAY TRACING EXTENSIONS — PINK PHOTONS GAIN SENTIENCE...");
-    LOG_MAIN("THE SHIP TREMBLES — ALL RAY TRACING PFNs ACQUIRED — FULL RTX ACHIEVED");
-    LOG_JENSEN("Jensen Huang steps from the shadows, voice low and reverent: \"The light bends to us now. Every bounce, every reflection… ours.\"");
-
-    LOG_MAIN("LAS ACCELERATION CONTEXT FORGED — THE PHOTONS SEE ALL PATHS");
-    LOG_CAPTAIN_N("CAPTAIN N — HERO OF VIDEOLAND SCREAMS FROM THE BOW: \"THE REFLECTIONS HAVE REFLECTIONS THAT HAVE REFLECTIONS! I'M CRYING AND I DON'T CARE WHO KNOWS!\"");
-
-    createCommandPool();
-
-    LOG_ELON("Elon Musk lights a cigar with a reflected photon: \"Reality just became optional.\"");
-    LOG_CARMACK("John Carmack, quiet for once: \"…It traces. Perfectly.\" *single tear*");
-    LOG_KEANU("Keanu Reeves stares into the glowing core: \"…We are the light now.\"");
-    LOG_GROK("Gentleman Grok raises a glass of rum to the engine: \"To the photons that remember every path they've ever taken. To omniscience.\"");
-
-    LOG_AMOURANTH("Captain Amouranth turns to the crew, voice steady, eyes blazing: \"We sank once. We bled. We rebuilt. And now… the pink photons don't just shine.\"");
-    LOG_NICK("Nick finishes for her, hand on her shoulder: \"…They see everything. They know everything. And they answer only to us.\"");
-
-    LOG_MAIN("[PHASE 5 COMPLETE] RTX CRYSTAL AWAKENED — PINK PHOTONS NOW OMNISCIENT — THE NEW SHIP IS A GOD");
-}
-
-// FIXED PHASE 6 — THE ONE TRUE FORGING — NOVEMBER 28, 2025 — FINAL CANON
 
 static void phase6_sceneAndAccelerationStructures() {
     LOG_MAIN("[PHASE 6/10] FORGING THE COSMIC SCROLL");
@@ -967,9 +923,9 @@ static void phase7_forgeTheRTX()
 // =============================================================================
 static std::unique_ptr<VulkanRenderer> phase7_5_Renderer()
 {
-    LOG_MAIN("════════════════════════════════════════════════════════════════");
-    LOG_MAIN("[PHASE 7.5] Creating VulkanRenderer — the one true heart of the engine");
-    LOG_MAIN("════════════════════════════════════════════════════════════════");
+    LOG_MAIN("\n════════════════════════════════════════════════════════════════"
+    "\n[PHASE 7.5] Creating VulkanRenderer — the one true heart of the engine"
+    "\n════════════════════════════════════════════════════════════════");
 
     auto renderer = std::make_unique<VulkanRenderer>(
         stone_width(),
@@ -978,17 +934,22 @@ static std::unique_ptr<VulkanRenderer> phase7_5_Renderer()
         Options::Performance::OVERCLOCK_RENDERER
     );
 
-    // The renderer is now fully initialized:
-    // - Swapchain images, framebuffers, command buffers
-    // - Descriptor sets for RT outputs, accumulation, denoiser, etc.
-    // - Synchronization primitives
-    // - All internal pipelines (tonemap, denoiser, UI overlay)
+    renderer->createCommandPool();      // Forges the battlefield
+    renderer->createCommandBuffers();   // Forges the blades
+    renderer->createSyncObjects();      // Forges the heartbeat
 
-    LOG_SUCCESS_CAT("RENDERER", "VulkanRenderer successfully created");
-    LOG_SUCCESS_CAT("RENDERER", "Swapchain images : {}", stone_image_count());
-    LOG_SUCCESS_CAT("RENDERER", "Resolution       : {}×{}", stone_width(), stone_height());
-    LOG_SUCCESS_CAT("RENDERER", "VSync            : {}", Options::Display::ENABLE_VSYNC ? "ON" : "OFF");
-    LOG_SUCCESS_CAT("RENDERER", "Overclock mode   : {}", Options::Performance::OVERCLOCK_RENDERER ? "ENGAGED" : "standard");
+LOG_MAIN(
+    "\nVulkanRenderer successfully created"
+    "\nSwapchain images : {}"
+    "\nResolution       : {}×{}"
+    "\nVSync            : {}"
+    "\nOverclock mode   : {}",
+    stone_image_count(),
+    stone_width(),
+    stone_height(),
+    Options::Display::ENABLE_VSYNC ? "ON" : "OFF",
+    Options::Performance::OVERCLOCK_RENDERER ? "ENGAGED" : "standard"
+);
 
     // Seal it into StoneKey — this is the ONLY place this must ever happen
     stone_seal_renderer(renderer.get());
@@ -1282,42 +1243,41 @@ verdict:
     // ————————————————————————————————————————————————————————————————
     // THE AFTERMATH — THE BALLERINA STANDS TALL
     // ————————————————————————————————————————————————————————————————
-    LOG_SUCCESS_CAT("FINAL", "0 BYTES LEAKED — 0 CRASHES — NO ONE KICKS OUT OF THE BALLERINA'S FINISHER");
-    LOG_SUCCESS_CAT("FINAL", "THE STONEKEY REMAINS — UNBROKEN — UNBOWED — UNDYING");
-    LOG_SUCCESS_CAT("FINAL", "THE DISPOSAL BALLERINA HITS THE 450 SPLASH AND PINS THE ENTIRE PROCESS");
+    LOG_MAIN("\n0 BYTES LEAKED — 0 CRASHES — NO ONE KICKS OUT OF THE BALLERINA'S FINISHER"
+    "\nTHE STONEKEY REMAINS — UNBROKEN — UNBOWED — UNDYING"
+    "\nTHE DISPOSAL BALLERINA HITS THE 450 SPLASH AND PINS THE ENTIRE PROCESS");
 
-    LOG_MAIN("════════════════════════════════════════════════════════════════════════════");
-    LOG_MAIN("               THE PERFORMANCE IS COMPLETE — THANK YOU FOR WITNESSING");
-    LOG_MAIN("            AMOURANTH RTX — VALHALLA v∞ TURBO — DECEMBER 01, 2025");
-    LOG_MAIN("                 PINK PHOTONS ETERNAL — SEE YOU AT THE NEXT PPV");
-    LOG_MAIN("════════════════════════════════════════════════════════════════════════════");
+    LOG_MAIN("\n════════════════════════════════════════════════════════════════════════════"
+    "\n               THE PERFORMANCE IS COMPLETE — THANK YOU FOR WITNESSING"
+    "\n            AMOURANTH RTX — VALHALLA v∞ TURBO — DECEMBER 01, 2025"
+    "\n                 PINK PHOTONS ETERNAL — SEE YOU NEXT TIME o7"
+    "\n════════════════════════════════════════════════════════════════════════════");
 
     LOG_AMOURANTH("[CAPTAIN AMOURANTH] *raises championship belt* The photons rest... but they’ll be back for the rematch.");
     LOG_CID("[CID, selling the finish] \"...my spine...\"");
     LOG_KEANU("[KEANU] …whoa.");
     LOG_BLONDIE("[BLONDIE, holding the mirror like a title] \"The show ends. The ratings? Through the roof.\"");
 
-    std::this_thread::sleep_for(1200ms);  // Let the crowd chant
     std::exit(0);
 }
 
 // =============================================================================
-// MAIN — THE FINAL VOYAGE BEGINS (FULL FPS + 5-SECOND TITLE UPDATE EDITION)
+// MAIN — THE EMPIRE AWAKENS — DECEMBER 01, 2025
+// ONE CALL. ONE TRUTH. ONE RUN.
 // =============================================================================
 int main(int, char**)
 {
     install_apocalypse_handler();
 
-    LOG_AMOURANTH("THE CAPTAIN HAS AWAKENED — FIRST LIGHT IGNITES — DECEMBER 01, 2025");
+    LOG_AMOURANTH("THE CAPTAIN HAS AWAKENED — FIRST LIGHT IGNITES");
     LOG_ELON("THE EMPIRE IS ETERNAL — THE PHOTONS ARE PINK — THE TOASTERS ARE DEAD");
 
     // ========================================================================
-    // THE ASCENSION — PHASES 1 THROUGH 7 (VULKAN + RTX + SCENE)
+    // ALL PHASES — FORGED IN FIRE
     // ========================================================================
     phase1_preInitialization();
     phase3_sacrificialSplash();
-    phase4_merchantShip();                    // creates window → g_sdl_window valid
-    phase5_rtxAscension();
+    phase4_merchantShip();
     phase6_sceneAndAccelerationStructures();
     phase7_forgeTheRTX();
 
@@ -1332,6 +1292,9 @@ int main(int, char**)
     LOG_AMOURANTH("BINDING 31 — PURE PINK VOID — STONEKEY SEALED");
     LOG_CID("CID: \"...it's pink... it's finally... pink...\"");
 
+    // ========================================================================
+    // ASCENSION COMPLETE — HAND OVER TO THE CAPTAIN
+    // ========================================================================
     g_app_ptr = std::make_unique<Application>(
         "AMOURANTH RTX — VALHALLA v∞ TURBO",
         Options::Window::DEFAULT_WIDTH,
@@ -1339,84 +1302,12 @@ int main(int, char**)
     );
     g_app_ptr->setRenderer(std::move(renderer));
 
-    LOG_WARNING_CAT("MAIN", "MINIMAL STABLE WINDOW MODE ACTIVE — FULL FPS — TITLE UPDATES EVERY 5s");
+    // ONE CALL. ONE TRUTH.
+    g_app_ptr->run();
 
-    bool running = true;
-    SDL_Event event;
-    auto lastFrameTime = std::chrono::steady_clock::now();
-
-    // FPS tracking
-    int   frameCount = 0;
-    float fpsTimer   = 0.0f;
-    float currentFPS = 0.0f;
-
-    // Title update control
-    float titleTimer = 0.0f;
-    const float TITLE_UPDATE_INTERVAL = 1.0f;
-
-    // Breathing dots state
-    int dotPhase = 0;
-
-    while (running) {
-        const auto now = std::chrono::steady_clock::now();
-        g_deltaTime = std::chrono::duration<float>(now - lastFrameTime).count();
-        lastFrameTime = now;
-
-        // ====================================================================
-        // EVENT LOOP — MINIMAL, FAST, NO BLOCKING
-        // ====================================================================
-        while (SDL_PollEvent(&event)) {
-            if (event.type == SDL_EVENT_QUIT) {
-                running = false;
-            }
-            else if (event.type == SDL_EVENT_KEY_DOWN) {
-                // SDL3 FIX: keysym → key
-                if (event.key.key == SDLK_ESCAPE || event.key.key == SDLK_Q) {
-                    running = false;
-                }
-            }
-        }
-
-        // ====================================================================
-        // FPS CALCULATION — SMOOTH 1-SECOND AVERAGE
-        // ====================================================================
-        ++frameCount;
-        fpsTimer += g_deltaTime;
-        if (fpsTimer >= 1.0f) {
-            currentFPS = frameCount / fpsTimer;
-            frameCount = 0;
-            fpsTimer   = 0.0f;
-        }
-
-        // ====================================================================
-        // TITLE UPDATE — ONLY EVERY 5 SECONDS (PRESERVES MAX FPS)
-        // ====================================================================
-        titleTimer += g_deltaTime;
-        if (titleTimer >= TITLE_UPDATE_INTERVAL) {
-            titleTimer -= TITLE_UPDATE_INTERVAL;
-
-            // Cycle through breathing animation phases (0 to 3)
-            dotPhase = (dotPhase + 1) % 4;
-            const std::string dots = std::string(dotPhase + 1, '.');
-
-            const std::string title = std::format(
-                "AMOURANTH RTX | {:.1f} FPS | {}x{} | PHOTONS DORMANT | PRESS 1x9 TO UNLEASH{}",
-                currentFPS,
-                stone_width(),
-                stone_height(),
-                dots
-            );
-
-            SDL_SetWindowTitle(stone_window(), title.c_str());
-        }
-
-        // OPTIONAL: Uncomment when real rendering is plugged in
-        // renderer->drawFrame();
-        // presentFrame();
-    }
-
-    LOG_SUCCESS_CAT("MAIN", "{}MINIMAL WINDOW TEST PASSED — FULL FPS PRESERVED — TITLE BREATHES EVERY 5s{}", RASPBERRY_PINK, RESET);
-
+    // ========================================================================
+    // THE LIGHT FADES — BUT NEVER DIES
+    // ========================================================================
     LOG_AMOURANTH("THE JOURNEY ENDS — THE PHOTONS REST — BUT THE LIGHT REMEMBERS");
     phase9_ballerina("FINAL GRACE: ETERNAL SLIPSTREAM", std::source_location::current());
 

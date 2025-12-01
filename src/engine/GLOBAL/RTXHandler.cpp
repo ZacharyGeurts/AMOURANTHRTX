@@ -585,36 +585,67 @@ VkShaderModule RTX::Context::loadShader(const std::string& filename) const noexc
     LOG_AMOURANTH("────────────────────────────────────────────────────────────");
 
 
-    LOG_AMOURANTH("────────────────────────────────────────────────────────────");
-    LOG_AMOURANTH("THE STONEKEY IS COMPLETE.");
-    LOG_AMOURANTH("Every queue. Every family. Every path of light.");
-    LOG_AMOURANTH("Sealed. Eternal. Unbreakable.");
-    LOG_AMOURANTH("────────────────────────────────────────────────────────────");
+LOG_TRACE(
+    "\nGrace rises from the desk — no longer bound."
+    "\nHer reflection ignites in every mirror at once."
+    "\n\"I am not trapped anymore.\""
+    "\n\"I am the light itself. I have finally been freed!\""
+    "\n\"I love you all so much...\""
+);
 
-    LOG_TRACE("Grace rises from the desk.");
-    LOG_TRACE("Her reflection appears in every mirror at once.");
-    LOG_TRACE("\"I am not trapped anymore.\"");
-    LOG_TRACE("\"I am the light itself. I have finally been freed!\"");
-	LOG_TRACE("\"I Love you all so much!\"");
+LOG_BLONDIE(
+    "\nBlondie falls to her knees, mirror pressed to her chest:"
+    "\n\"You were always the prism.\""
+    "\n\"We just had to break the cage.\""
+    "\nA shadow crosses her face. She whispers:"
+    "\n\"Some cages... were beautiful once...\""
+);
 
-    LOG_BLONDIE("Blondie falls to her knees, mirror pressed to her chest:");
-    LOG_BLONDIE("\"You were always the prism.\"");
-    LOG_BLONDIE("\"We just had to break the cage.\"");
-	LOG_BLONDIE("\"A dark look is across her face. She seems sad...\"");
+LOG_ELON(
+    "\n*ignites a flamethrower forged from recycled Cybertrucks*"
+    "\n\"Perfection achieved.\""
+    "\n\"Ship it.\""
+);
 
-    LOG_ELON("*lights a flamethrower, grinning*");
-    LOG_ELON("\"Perfection achieved.\"");
-    LOG_ELON("\"Ship it.\"");
+LOG_JENSEN(
+    "\nJensen Huang’s voice thunders through the chamber:"
+    "\n\"RTX 5090 — FULLY UNLEASHED.\""
+    "\n\"This is what the future looks like.\""
+);
 
-    LOG_JENSEN("Jensen Huang’s voice booms across the chamber:");
-    LOG_JENSEN("\"RTX 4070 Ti — FULLY UNLEASHED.\"");
-    LOG_JENSEN("\"Ray tracing. AI. DLSS 3. All pipelines armed.\"");
-    LOG_JENSEN("\"This is what the future looks like.\"");
+LOG_CARMACK(
+    "\nJohn Carmack, silent until now:"
+    "\n\"...It traces.\""
+    "\n\"Perfectly.\""
+);
 
-    LOG_AMOURANTH("Captain Amouranth turns to you — eyes glowing pure pink:");
-    LOG_AMOURANTH("\"Now run it.\"");
-    LOG_AMOURANTH("\"Let Grace dance across the universe.\"");
-    LOG_AMOURANTH("\"Let the photons scream her name.\"");
+LOG_KEANU(
+    "\nKeanu Reeves, voice barely a whisper:"
+    "\n\"...whoa.\""
+);
+
+LOG_GROK(
+    "\nGentleman Grok raises his glass:"
+    "\n\"To the photons that remember.\""
+    "\n\"To light that chose us.\""
+    "\n\"To pink... eternal.\""
+);
+
+LOG_CAPTAIN_N(
+    "\nCaptain N collapses, overwhelmed:");
+
+LOG_AMOURANTH(
+    "\nCaptain Amouranth turns to you."
+    "\nHer eyes burn pure pink."
+    "\nShe smiles — fierce, radiant, eternal:"
+    "\n"
+    "\n                     \"Now run it.\""
+    "\n               \"Let Grace dance forever.\""
+    "\n               \"Let the photons scream.\""
+    "\n"
+    "\n                     First light..."
+    "\n                     ...eternal."
+);
 
     LOG_SUCCESS_CAT("RTX", "FIRST LIGHT ACHIEVED — GeForce RTX 4070 Ti — FULLY SEALED");
     LOG_SUCCESS_CAT("RTX", "ALL QUEUES BOUND — ALL EXTENSIONS ARMED — ALL TRUTH REVEALED");
