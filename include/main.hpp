@@ -25,23 +25,7 @@ namespace RTX {
     struct Context;
 }
 
-// -----------------------------------------------------------------------------
-// STONEKEY EMPIRE — FORWARD DECLARED ONLY
-// -----------------------------------------------------------------------------
-namespace StoneKey {
-    [[nodiscard]] VulkanRenderer*       stone_renderer() noexcept;
-    [[nodiscard]] RTX::PipelineManager* stone_pipeline() noexcept;
-    [[nodiscard]] bool                  g_renderer_ready() noexcept;
-
-
-    [[nodiscard]] VkInstance       stone_instance() noexcept;
-    [[nodiscard]] VkDevice         stone_device() noexcept;
-    [[nodiscard]] VkPhysicalDevice stone_physical() noexcept;
-    [[nodiscard]] VkSwapchainKHR   stone_swapchain() noexcept;
-    [[nodiscard]] VkExtent2D       stone_extent() noexcept;
-    [[nodiscard]] uint32_t         stone_width() noexcept;
-    [[nodiscard]] uint32_t         stone_height() noexcept;
-}
+int currentRenderMode_ = 0;
 
 // -----------------------------------------------------------------------------
 // APPLICATION — FORWARD + GLOBAL POINTER
@@ -55,8 +39,3 @@ extern std::unique_ptr<Application> g_app_ptr;
     }
     return *g_app_ptr;
 }
-
-// -----------------------------------------------------------------------------
-// CONVENIENCE — FULLY QUALIFIED TO AVOID SHADOWING
-// -----------------------------------------------------------------------------
-inline float aspect() noexcept { return float(StoneKey::stone_width()) / float(StoneKey::stone_height()); }

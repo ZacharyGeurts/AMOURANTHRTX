@@ -11,6 +11,7 @@
 #include "engine/GLOBAL/VulkanCore.hpp"
 #include "engine/GLOBAL/StoneKey.hpp"
 #include "engine/GLOBAL/logging.hpp"
+#include "engine/GLOBAL/DynamicStone.hpp"
 
 #include <atomic>
 #include <format>

@@ -443,42 +443,13 @@ void PipelineManager::cleanup() noexcept {
 // ──────────────────────────────────────────────────────────────────────────────
 // NEW: Destructor — vkDeviceWaitIdle Before Handle Resets + Free Descriptor Sets (Fixes In-Use Destruction + Pool Reuse)
 // ──────────────────────────────────────────────────────────────────────────────
-PipelineManager::~PipelineManager() {
-    LOG_ATTEMPT_CAT("PIPELINE", "Destructing PipelineManager — PINK PHOTONS DIMMING");
-
-    LOG_CID("CID sweats profusely at the thought of destruction — \"Waiting idle... freeing sets... don't let it crash now!\"");
-
-    // NEW: Free allocated descriptor sets before pool destroy (leverages FREE_DESCRIPTOR_SET_BIT)
-    if (stone_device() != VK_NULL_HANDLE && !rtDescriptorSets_.empty()) {
-        LOG_TRACE_CAT("PIPELINE", "vkFreeDescriptorSets — Releasing {} sets", rtDescriptorSets_.size());
-        VkResult freeRes = vkFreeDescriptorSets(stone_device(), *rtDescriptorPool_, static_cast<uint32_t>(rtDescriptorSets_.size()), rtDescriptorSets_.data());
-        if (freeRes == VK_SUCCESS) {
-            LOG_TRACE_CAT("PIPELINE", "Descriptor sets freed successfully");
-        } else {
-            LOG_WARN_CAT("PIPELINE", "vkFreeDescriptorSets failed: {} — Pool may leak", static_cast<int>(freeRes));
-        }
-        rtDescriptorSets_.clear();
-    }
-
-    // FIXED: Wait for device idle — Ensures all submitted cmds complete before destroying pipelines/buffers/pools
-    //        (Resolves vkDestroyPipeline in-use validation error: VUID-vkDestroyPipeline-pipeline-00765)
-    if (stone_device() != VK_NULL_HANDLE) {
-        LOG_TRACE_CAT("PIPELINE", "vkDeviceWaitIdle — Waiting for queues to drain (shutdown safety)");
-        VkResult idleResult = vkDeviceWaitIdle(stone_device());
-        if (idleResult == VK_SUCCESS) {
-            LOG_TRACE_CAT("PIPELINE", "vkDeviceWaitIdle — SUCCESS: All cmds complete, resources safe to destroy");
-        } else {
-            LOG_WARN_CAT("PIPELINE", "vkDeviceWaitIdle failed: {} — Proceeding anyway (possible device lost)", static_cast<int>(idleResult));
-        }
-    } else {
-        LOG_TRACE_CAT("PIPELINE", "Null device — Skipping vkDeviceWaitIdle (dummy state)");
-    }
-
-    LOG_CID("CID collapses, sweat pooling like a lake — \"Destruction complete... I need a towel... or ten!\"");
-
-    // Handles auto-reset here — Now safe post-idle
-    LOG_SUCCESS_CAT("PIPELINE", "{}PIPELINE MANAGER DESTROYED — Handles reset safely — SETS FREED — EMPIRE PRESERVED — PINK PHOTONS ETERNAL{}", 
-                    EMERALD_GREEN, RESET);
+PipelineManager::~PipelineManager()
+{
+    // ————————————————————————————————————————————————————————————————
+    // WE DO NOTHING HERE
+    // ALL RESOURCES ARE OWNED BY RAII HANDLES
+    // ALL TRUE DESTRUCTION BELONGS TO PHASE 9 — THE DISPOSAL BALLERINA
+    // ————————————————————————————————————————————————————————————————
 }
 
 void PipelineManager::cacheDeviceProperties() {

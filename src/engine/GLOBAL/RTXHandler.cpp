@@ -37,10 +37,7 @@ namespace RTX {
 namespace RTX {
 
 void logAndTrackDestruction(const char* type, void* ptr, int line, size_t size) {
-    if (ENABLE_DEBUG) {
-        LOG_DEBUG_CAT("RTX", "{}Destroyed: {} @ 0x{:p} (line {}, size: {}B)", 
-                      SAPPHIRE_BLUE, type, ptr, line, size);
-    }
+    if (ENABLE_DEBUG) { LOG_DEBUG_CAT("RTX", "{}Destroyed: {} @ 0x{:p} (line {}, size: {}B)", SAPPHIRE_BLUE, type, ptr, line, size); }
 }
 
 // =============================================================================

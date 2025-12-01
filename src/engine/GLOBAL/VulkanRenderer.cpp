@@ -119,10 +119,13 @@ void VulkanRenderer::setOverclockMode(bool enabled) noexcept {
 // • ADDED: Guards for all vk* calls — safe even if called post-RTX::shutdown()
 // • Empire: Renderer resources cleaned BEFORE device nullify
 // ──────────────────────────────────────────────────────────────────────────────
-VulkanRenderer::~VulkanRenderer() {
-    LOG_TRACE_CAT("RENDERER", "Destructor — START (no explicit cleanup — handled in phase6)");
-    // NO cleanup() here — prevents duplicate dispose; RAII relies on explicit call in main
-    LOG_TRACE_CAT("RENDERER", "Destructor — COMPLETE");
+VulkanRenderer::~VulkanRenderer() 
+{
+    // ————————————————————————————————————————————————————————————————
+    // WE DO NOTHING HERE
+    // ALL RESOURCES ARE OWNED BY RAII HANDLES
+    // ALL TRUE DESTRUCTION BELONGS TO PHASE 9 — THE DISPOSAL BALLERINA
+    // ————————————————————————————————————————————————————————————————
 }
 
 void VulkanRenderer::cleanup() noexcept {
