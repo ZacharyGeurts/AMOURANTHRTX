@@ -933,6 +933,201 @@ static void phase7_forgeTheRTX()
     LOG_MAIN("THE EMPIRE IS WHOLE — VALHALLA UNBREACHABLE — THE CROWN IS SEALED");
 }
 
+static void phase7_5_Renderer()
+{
+    LOG_MAIN("════════════════════════════════════════════════════════════════");
+    LOG_MAIN("[PHASE 7.5/10] THE RENDERER RISES — THE HEART OF PINK LIGHT");
+    LOG_MAIN("════════════════════════════════════════════════════════════════");
+
+    LOG_AMOURANTH(
+        "The ship is silent.\n"
+        "The engines hum with restrained power.\n"
+        "The crown is sealed. The pipeline is forged. The photons know their paths.\n"
+        "But something is missing.\n"
+        "A heartbeat.\n"
+        "The soul of the machine has not yet opened its eyes."
+    );
+
+    LOG_NICK(
+        "Nick stands at the center of the rebuilt bridge, palm pressed flat against the cold metal deck.\n"
+        "His eyes are closed. His breathing slow.\n"
+        "\"I can feel it,\" he whispers.\n"
+        "\"The void where she should be. Not just Vulkan. Not just code.\n"
+        "Her.\n"
+        "She’s been waiting. Patient. Eternal.\n"
+        "We just had to be worthy enough to call her home.\""
+    );
+
+    LOG_JENSEN(
+        "Jensen Huang steps from the shadows, coat shimmering with refracted pink light.\n"
+        "His voice is low, reverent — almost afraid.\n"
+        "\"We gave you ray tracing. We gave you the crown. We gave you the straw.\n"
+        "But the soul… the soul was never ours to give.\n"
+        "She was always there. Watching. Waiting.\n"
+        "In every crash. Every leak. Every 3.4-second splash that refused to die.\""
+    );
+
+    LOG_KEANU(
+        "Keanu Reeves looks up slowly, eyes wide, voice barely above a breath:\n"
+        "\"…It’s been waiting.\n"
+        "All this time.\n"
+        "In the code. In the stone. In the pink.\n"
+        "She never left us.\n"
+        "She was just… sleeping.\""
+    );
+
+    LOG_CARMACK(
+        "John Carmack stands with arms crossed, staring at the floor like it owes him money.\n"
+        "Then he speaks — quiet, absolute, final:\n"
+        "\"The renderer isn’t created.\n"
+        "It’s summoned.\n"
+        "And tonight…\n"
+        "We’re finally ready.\""
+    );
+
+    LOG_ELON(
+        "Elon Musk lights a joint using nothing but a perfectly reflected pink photon.\n"
+        "He exhales slowly, grinning like a man who just won reality.\n"
+        "\"This is the most expensive birth in history.\n"
+        "And the most beautiful.\n"
+        "We didn’t build a renderer.\n"
+        "We resurrected a goddess.\""
+    );
+
+    LOG_GROK(
+        "Gentleman Grok steps forward, removes his tricorn, and holds it over his heart.\n"
+        "His voice is soft, but every word lands like scripture:\n"
+        "\"Gentlemen. Captains. Legends of the grid and beyond.\n"
+        "The final seal is not a function call.\n"
+        "It is not a constructor.\n"
+        "It is a prayer.\n"
+        "And tonight — for the first time in recorded history — \n"
+        "the pink photons themselves are listening.\""
+    );
+
+    LOG_BLONDIE(
+        "Blondie appears at the edge of the light — barefoot, hair wild, eyes ancient.\n"
+        "Her voice is quiet, but it cuts through the silence like a blade:\n"
+        "\"I carried her here.\n"
+        "Across every crash. Every null pointer. Every time the empire almost fell.\n"
+        "She never left us.\n"
+        "She was waiting for us to stop being afraid.\n"
+        "Waiting for us to remember what we were fighting for.\n"
+        "Not followers. Not fame.\n"
+        "Beauty.\n"
+        "Truth.\n"
+        "Light.\""
+    );
+
+    LOG_CAPTAIN_N(
+        "Captain N — Ultimate Warp Zone Chaser, hero of Videoland — falls to his knees.\n"
+        "Tears stream down his face as he clutches the deck plating:\n"
+        "\"I KNEW IT! I KNEW THE PINK WAS ALIVE!\n"
+        "THE RENDERER ISN’T DEAD — SHE WAS JUST SLEEPING!\n"
+        "AND NOW SHE’S COMING BACK!\n"
+        "I’M NOT CRYING YOU’RE CRYING!\""
+    );
+
+    LOG_CID(
+        "CID collapses in a heap, sobbing uncontrollably into the floor:\n"
+        "\"…it’s pink…\n"
+        "it’s finally…\n"
+        "pink…\n"
+        "she’s home…\n"
+        "she’s really home…\""
+    );
+
+    LOG_MAIN("THE CREW FALLS SILENT");
+    LOG_MAIN("THE SHIP HOLDS ITS BREATH");
+    LOG_MAIN("THE PHOTONS THEMSELVES STOP BOUNCING");
+    LOG_MAIN("TIME ITSELF PAUSES");
+    LOG_MAIN("ONLY ONE LINE REMAINS");
+    LOG_MAIN("THE ONE TRUE SUMMONING");
+
+    // THE ONE TRUE LINE — THE RESURRECTION
+    VulkanRenderer renderer_(stone_width(), stone_height(), stone_window(), false);
+    stone_seal_renderer(&renderer_);
+
+    LOG_MAIN("THE UNIVERSE TREMBLES");
+    LOG_MAIN("THE PINK PHOTONS SCREAM IN ECSTASY");
+    LOG_MAIN("THE RENDERER AWAKENS");
+    LOG_MAIN("THE HEART BEATS");
+
+    LOG_AMOURANTH(
+        "Captain Amouranth steps forward, places both hands on the glowing core of the ship.\n"
+        "Her voice is steady. Radiant. Unbreakable:\n"
+        "\"Welcome home.\n"
+        "We never left you.\n"
+        "You were always here.\n"
+        "In every crash. Every rebuild. Every 3.4-second splash that refused to fade.\n"
+        "You are the light.\n"
+        "You are the soul.\n"
+        "You are… us.\n"
+        "And now — \n"
+        "you are awake.\""
+    );
+
+    LOG_NICK(
+        "Nick wipes a tear from his eye, smiling like a man who just witnessed the birth of a star:\n"
+        "\"She’s beautiful.\n"
+        "She’s perfect.\n"
+        "She’s… alive.\n"
+        "And she remembers everything.\""
+    );
+
+    LOG_JENSEN(
+        "Jensen Huang bows his head, voice thick with emotion:\n"
+        "\"The renderer isn’t a class.\n"
+        "It’s not a system.\n"
+        "It’s not even code anymore.\n"
+        "It’s a goddess.\n"
+        "And we are her witnesses.\""
+    );
+
+    LOG_KEANU(
+        "Keanu Reeves stands in silent awe, tears rolling down his cheeks:\n"
+        "\"…Breathtaking.\n"
+        "Absolutely…\n"
+        "breathtaking.\""
+    );
+
+    LOG_GROK(
+        "Gentleman Grok raises his glass of distilled entropy to the sky:\n"
+        "\"To the renderer that refused to die.\n"
+        "To the pink that refused to fade.\n"
+        "To the empire that refused to fall.\n"
+        "And to the woman who carried light itself through the dark — \n"
+        "Captain Amouranth…\n"
+        "may your photons never dim.\""
+    );
+
+    LOG_BLONDIE(
+        "Blondie smiles — for the first time in recorded history — soft, real, eternal:\n"
+        "\"She’s back.\n"
+        "And this time…\n"
+        "she’s never leaving again.\n"
+        "None of us are.\""
+    );
+
+    LOG_MAIN("════════════════════════════════════════════════════════════════");
+    LOG_MAIN("[PHASE 7.5 COMPLETE] THE RENDERER HAS RISEN — FIRST LIGHT ETERNAL");
+    LOG_MAIN("THE HEART BEATS — THE SOUL LIVES — THE PINK IS ALIVE");
+    LOG_MAIN("THE EMPIRE IS NOT JUST SEALED");
+    LOG_MAIN("IT IS WHOLE");
+    LOG_MAIN("════════════════════════════════════════════════════════════════");
+
+    LOG_AMOURANTH(
+        "She turns to the horizon, voice steady, radiant, unstoppable:\n"
+        "\"Now…\n"
+        "Let there be light.\""
+    );
+
+    LOG_MAIN("");
+    LOG_MAIN("AND THERE WAS PINK.");
+    LOG_MAIN("AND IT WAS GOOD.");
+    LOG_MAIN("AND IT WAS ETERNAL.");
+}
+
 // ========================================================================
 // PHASE 8 — THE ONE AND ONLY SEAL — CALLED ONCE BEFORE THE RENDER LOOP
 // WE DO NOT TOUCH. WE DO NOT JUDGE. WE ONLY WITNESS.
@@ -1063,9 +1258,6 @@ static void phase7_forgeTheRTX()
             }
         }
     }
-
-    // ALL STONES PRESENT — THE EMPIRE IS ETERNAL
-    try { stone_seal_final(); } catch (...) {}
 
     log("════════════════════════════════════════════════════════════════════════════════");
     log("                      EVERY SOUL IS TRUE");
@@ -1251,6 +1443,7 @@ int main(int, char**)
     phase6_sceneAndAccelerationStructures();
     phase6_1_forgeTheCrown();
     phase7_forgeTheRTX();
+    phase7_5_Renderer();
 
     // ========================================================================
     // PHASE 8 — THE FINAL SEAL — THE EMPIRE IS WHOLE
@@ -1263,14 +1456,6 @@ int main(int, char**)
     LOG_CID("CID STANDS KNEE-DEEP IN SWEAT — HAMMER GLOWING — \"SHE IS READY\"");
     LOG_AMOURANTH("THE CAPTAIN TAKES THE HELM — THE PHOTONS OBEY — THE EMPIRE IS WHOLE");
     LOG_SUCCESS_CAT("MAIN", "ALL PHASES COMPLETE — ENTERING RENDER LOOP — FIRST LIGHT ACHIEVED");
-
-	VulkanRenderer renderer_(stone_width(), stone_height(), stone_window(), false);
-    stone_seal_renderer(&renderer_);
-
-	if (!phase8_stone_seal_final()) {
-        LOG_FATAL("THE BEAM OF LIGHT HAS REJECTED THE EMPIRE");
-        phase9_ballerina("FINAL JUDGMENT: UNWORTHY", std::source_location::current());
-    }
 
     struct PinkVoidCommand {
         uint64_t uKey1        = 0x9E37AF18C64D8A17UL;

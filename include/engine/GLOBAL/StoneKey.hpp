@@ -46,7 +46,7 @@ namespace StoneKey {
         static inline std::atomic<uint32_t> transferFamily{ ~0u };
         static inline std::atomic<uint32_t> computeFamily { ~0u };
 
-        static inline std::atomic<class VulkanRenderer*> renderer{ nullptr };
+        static inline std::atomic<class VulkanRenderer*> renderer_{ nullptr };
         static inline std::atomic<RTX::PipelineManager*> pipeline{ nullptr };
         static inline std::atomic<SDL_Window*>          window{ nullptr };
 
@@ -88,7 +88,7 @@ namespace StoneKey {
     [[nodiscard]] inline uint32_t stone_transfer_family() noexcept { return Empire::transferFamily.load(std::memory_order_acquire); }
     [[nodiscard]] inline uint32_t stone_compute_family()  noexcept { return Empire::computeFamily.load(std::memory_order_acquire); }
 
-    [[nodiscard]] inline class VulkanRenderer* stone_renderer() noexcept { return Empire::renderer.load(std::memory_order_acquire); }
+    [[nodiscard]] inline class VulkanRenderer* stone_renderer() noexcept { return Empire::renderer_.load(std::memory_order_acquire); }
     [[nodiscard]] inline RTX::PipelineManager* stone_pipeline() noexcept { return Empire::pipeline.load(std::memory_order_acquire); }
     [[nodiscard]] inline SDL_Window*           stone_window()   noexcept { return Empire::window.load(std::memory_order_acquire); }
 
@@ -148,7 +148,7 @@ namespace StoneKey {
     inline void stone_seal_transfer_family(uint32_t idx) noexcept { Empire::transferFamily.store(idx, std::memory_order_release); }
     inline void stone_seal_compute_family (uint32_t idx) noexcept { Empire::computeFamily.store(idx, std::memory_order_release); }
 
-    inline void stone_seal_renderer(class VulkanRenderer* r)    noexcept { Empire::renderer.store(r, std::memory_order_release); }
+    inline void stone_seal_renderer(class VulkanRenderer* r)    noexcept { Empire::renderer_.store(r, std::memory_order_release); }
     inline void stone_seal_pipeline(RTX::PipelineManager* p)     noexcept { Empire::pipeline.store(p, std::memory_order_release); }
     inline void stone_seal_window(SDL_Window* w)                noexcept { Empire::window.store(w, std::memory_order_release); }
 
@@ -177,33 +177,70 @@ namespace StoneKey {
     }
 
     // FINAL SEAL — professional pass/fail only
-    inline void stone_seal_final() noexcept {
-        const bool was_sealed = Empire::sealed.exchange(true, std::memory_order_acq_rel);
-        if (was_sealed) return;
-
-        const bool failed =
-            stone_instance()        == VK_NULL_HANDLE ||
-            stone_device()          == VK_NULL_HANDLE ||
-            stone_physical()        == VK_NULL_HANDLE ||
-            stone_surface()         == VK_NULL_HANDLE ||
-            stone_swapchain()       == VK_NULL_HANDLE ||
-            stone_renderer()        == nullptr ||
-            stone_pipeline()        == nullptr ||
-            stone_window()          == nullptr ||
-            stone_image_count()     == 0 ||
-            stone_width()           == 0 ||
-            stone_height()          == 0 ||
-            stone_graphics_queue()  == VK_NULL_HANDLE ||
-            stone_graphics_family() == ~0u ||
-            stone_present_family()  == ~0u ||
-            stone_transfer_family() == ~0u ||
-            stone_rtprops().shaderGroupHandleSize == 0;  // RT PROPS MUST BE SEALED — NO BLIND TRACING
-
-        if (failed) {
-            fprintf(stderr, "[FATAL] StoneKey: Empire seal failed — one or more required objects are null.\n");
-            //std::abort();
-        }
+inline void stone_seal_final() noexcept
+{
+    const bool was_sealed = Empire::sealed.exchange(true, std::memory_order_acq_rel);
+    if (was_sealed) {
+        LOG_INFO_CAT("EMPIRE", "Stone seal already complete — empire eternal.");
+        return;
     }
+
+    LOG_AMOURANTH("STONEKEY FINAL SEAL CEREMONY — VALIDATING THE EMPIRE");
+
+    bool all_good = true;
+
+    #define CHECK(ptr, name, format) \
+        do { \
+            const bool ok = (ptr format); \
+            if (ok) { \
+                LOG_SUCCESS_CAT("SEAL", "  [OK] " name ": 0x{}", (uint64_t)(uintptr_t)(ptr)); \
+            } else { \
+                LOG_FATAL_CAT("SEAL", "  [FAILED] " name ": NULL OR INVALID", (uint64_t)(uintptr_t)(ptr)); \
+                all_good = false; \
+            } \
+        } while (0)
+
+    CHECK(stone_instance(),        "VkInstance",        != VK_NULL_HANDLE);
+    CHECK(stone_device(),          "VkDevice",          != VK_NULL_HANDLE);
+    CHECK(stone_physical(),        "VkPhysicalDevice",  != VK_NULL_HANDLE);
+    CHECK(stone_surface(),         "VkSurfaceKHR",      != VK_NULL_HANDLE);
+    CHECK(stone_swapchain(),       "VkSwapchainKHR",    != VK_NULL_HANDLE);
+    CHECK(stone_renderer(),        "VulkanRenderer*",   != nullptr);
+    CHECK(stone_pipeline(),        "PipelineManager*",  != nullptr);
+    CHECK(stone_window(),          "SDL_Window*",       != nullptr);
+
+    CHECK(stone_image_count(),     "Swapchain Images",  != 0);
+    CHECK(stone_width(),           "Width",             != 0);
+    CHECK(stone_height(),          "Height",            != 0);
+
+    CHECK(stone_graphics_queue(),  "Graphics Queue",    != VK_NULL_HANDLE);
+    CHECK(stone_graphics_family(), "Graphics Family",  != ~0u);
+    CHECK(stone_present_family(),  "Present Family",    != ~0u);
+    CHECK(stone_transfer_family(), "Transfer Family",  != ~0u);
+
+    // Ray tracing readiness — sacred
+    const auto& rt = stone_rtprops();
+    if (rt.shaderGroupHandleSize != 0) {
+        LOG_SUCCESS_CAT("SEAL", "  [OK] Ray Tracing Ready — HandleSize: {} | MaxRecursion: {}",
+                        rt.shaderGroupHandleSize, rt.maxRayRecursionDepth);
+    } else {
+        LOG_FATAL_CAT("SEAL", "  [FAILED] Ray Tracing NOT READY — shaderGroupHandleSize == 0");
+        all_good = false;
+    }
+
+    #undef CHECK
+
+    if (all_good) {
+        LOG_AMOURANTH("STONEKEY SEAL SUCCESSFUL — ALL SYSTEMS NOMINAL");
+        LOG_AMOURANTH("THE EMPIRE IS SEALED — PINK PHOTONS MAY NOW FLOW ETERNALLY");
+        LOG_CID("CID: \"...it's sealed... it's finally... sealed...\"");
+    } else {
+        LOG_FATAL_CAT("EMPIRE", "STONEKEY SEAL FAILED — EMPIRE COMPROMISED");
+        LOG_FATAL_CAT("EMPIRE", "ABORTING — THE BALLERINA CANNOT DANCE IN A BROKEN REALM");
+        fprintf(stderr, "\n[FATAL] StoneKey seal failed — cannot continue.\n");
+        std::abort();
+    }
+}
 
     namespace bridge {
         [[nodiscard]] inline VkQueue graphics_queue() noexcept { return stone_graphics_queue(); }
