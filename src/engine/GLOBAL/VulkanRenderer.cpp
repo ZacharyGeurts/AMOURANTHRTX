@@ -31,8 +31,6 @@
 #include "engine/GLOBAL/StoneKey.hpp"  // Full include — .cpp only
 #include "stb/stb_image.h"
 
-#include "engine/core.hpp"
-
 #include <glm/gtc/matrix_inverse.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
@@ -57,7 +55,10 @@ using StoneKey::stone_width;
 using StoneKey::stone_height;
 using StoneKey::stone_device;
 using StoneKey::stone_image_count;
-
+using StoneKey::stone_graphics_queue;
+using StoneKey::stone_seal_width;
+using StoneKey::stone_seal_height;
+using StoneKey::stone_seal_extent;
 using namespace RTX;
 
 // =============================================================================
@@ -114,7 +115,6 @@ void VulkanRenderer::setOverclockMode(bool enabled) noexcept {
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Cleanup and Destruction — FIXED: Null Device Guards + No Dtor Cleanup Call — NOV 19 2025
-// ──────────────────────────────────────────────────────────────────────────────
 // • REMOVED: cleanup() call from ~VulkanRenderer() — avoids duplicate dispose (cleanup called explicitly in phase6_shutdown via app.reset())
 // • ADDED: Guards for all vk* calls — safe even if called post-RTX::shutdown()
 // • Empire: Renderer resources cleaned BEFORE device nullify
@@ -126,10 +126,8 @@ VulkanRenderer::~VulkanRenderer() {
 }
 
 void VulkanRenderer::cleanup() noexcept {
-	if (destroyed_) return;          // ← THIS IS THE SHIELD
+    if (destroyed_) return;          // ← THIS IS THE SHIELD
     destroyed_ = true;
-	vkDeviceWaitIdle(stone_device());
-
     LOG_INFO_CAT("RENDERER", "Initiating renderer shutdown — PINK PHOTONS DIMMING");
 
     VkDevice dev = stone_device();
@@ -241,6 +239,7 @@ void VulkanRenderer::cleanup() noexcept {
     }
 
     // ── PipelineManager Cleanup ─────────────────────────────────────────────
+    pipelineManager_.cleanup();
 
     // ── FINAL PHASE: Command Buffers & Pool (NOW 100% SAFE) ─────────────────
     VkCommandPool pool = g_ctx().commandPool_;
@@ -319,7 +318,7 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, bool o
     }
     LOG_TRACE_CAT("RENDERER", "Step 2 COMPLETE");
 
-	LOG_TRACE_CAT("RENDERER", "Step 3 WINS");
+    LOG_TRACE_CAT("RENDERER", "Step 3 WINS");
     LOG_TRACE_CAT("RENDERER", "Step 3 COMPLETE");
 
 // =============================================================================
@@ -350,7 +349,7 @@ for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
     LOG_TRACE_CAT("RENDERER", "Frame {} armed — PINK PHOTONS READY", i);
 }
 
-LOG_SUCCESS_CAT("RENDERER", "Step 5 COMPLETE — {} full sync sets forged — TRIPLE BUFFERING ETERNAL", MAX_FRAMES_IN_FLIGHT);
+    LOG_SUCCESS_CAT("RENDERER", "Step 5 COMPLETE — {} full sync sets forged — TRIPLE BUFFERING ETERNAL", MAX_FRAMES_IN_FLIGHT);
 
     // =============================================================================
     // STEP 6 — GPU Timestamp Query Pool
@@ -371,16 +370,16 @@ LOG_SUCCESS_CAT("RENDERER", "Step 5 COMPLETE — {} full sync sets forged — TR
     VkPhysicalDeviceProperties props{};
     vkGetPhysicalDeviceProperties(RTX::g_ctx().physicalDevice_, &props);
     timestampPeriod_ = props.limits.timestampPeriod / 1e6f;
-    LOG_INFO_CAT("RENDERER", "GPU: {} | Timestamp period: {:.3f} ms", props.deviceName, timestampPeriod_);
+    LOG_INFO_CAT("RENDERER", "GPU: {} | Timestamp period: {} ms", props.deviceName, timestampPeriod_);
     LOG_TRACE_CAT("RENDERER", "Step 7 COMPLETE");
 
     // =============================================================================
     // STEP 7.5 — EARLY PIPELINEMANAGER CONSTRUCTION (Post-Properties, Pre-Targets)
     // =============================================================================
     LOG_TRACE_CAT("RENDERER", "=== STACK BUILD ORDER STEP 7.5: Construct PipelineManager Early ===");
-    LOG_TRACE_CAT("RENDERER", "Pre-construct check: dev=0x{:x}, phys=0x{:x}", reinterpret_cast<uintptr_t>(stone_device()), reinterpret_cast<uintptr_t>(RTX::g_ctx().physicalDevice_));
+    LOG_TRACE_CAT("RENDERER", "Pre-construct check: dev=0x{}, phys=0x{}", reinterpret_cast<uintptr_t>(stone_device()), reinterpret_cast<uintptr_t>(RTX::g_ctx().physicalDevice_));
     if (stone_device() == VK_NULL_HANDLE || RTX::g_ctx().physicalDevice_ == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("RENDERER", "Invalid context for PipelineManager — dev=0x{:x}, phys=0x{:x}", reinterpret_cast<uintptr_t>(stone_device()), reinterpret_cast<uintptr_t>(RTX::g_ctx().physicalDevice_));
+        LOG_FATAL_CAT("RENDERER", "Invalid context for PipelineManager — dev=0x{}, phys=0x{}", reinterpret_cast<uintptr_t>(stone_device()), reinterpret_cast<uintptr_t>(RTX::g_ctx().physicalDevice_));
         LOG_FATAL_CAT("RENDERER", "Fatal error in noexcept function"); phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
     }
 
@@ -402,11 +401,6 @@ LOG_SUCCESS_CAT("RENDERER", "Step 5 COMPLETE — {} full sync sets forged — TR
     LOG_SUCCESS_CAT("RENDERER", "Step 9 COMPLETE — HDR pipeline targets created");
 
     // =============================================================================
-    // STEP 10 — Descriptor System (Uses Global VulkanRTX Instance)
-    // =============================================================================
-    // Moved to g_rtx() in phase 7 main.cpp
-
-    // =============================================================================
     // STEP 11 — Per-Frame Buffers
     // =============================================================================
     LOG_TRACE_CAT("RENDERER", "=== STACK BUILD ORDER STEP 11: Initialize Per-Frame Buffers ===");
@@ -422,50 +416,28 @@ LOG_SUCCESS_CAT("RENDERER", "Step 5 COMPLETE — {} full sync sets forged — TR
     updateNexusDescriptors();           // Nexus score (always safe)
     updateDenoiserDescriptors();        // Denoiser (no TLAS dependency)
 
-    // 2. DO NOT update RTX descriptors yet — TLAS not built!
-    //    updateRTXDescriptors(0u);  ← REMOVED — would crash validation
-
     LOG_TRACE_CAT("RENDERER", "Step 14 COMPLETE (partial — RTX descriptors deferred until TLAS ready)");
+    LOG_NICK("Creating descriptor set layout — binding 0: COMBINED_IMAGE_SAMPLER | binding 1: STORAGE_IMAGE | binding 2: scalar UBO");
 
-    // =============================================================================
-    // STEP 14.5 — CREATE TONEMAP COMPUTE PIPELINE (FULLY VALIDATION-CLEAN)
-    // =============================================================================
-    LOG_TRACE_CAT("RENDERER", "DESCRIPTOR SET LAYOUT — MUST MATCH SHADER EXACTLY");
+    VkDescriptorSetLayoutBinding bindings[3] = {};
 
-    // ──────────────────────────────
-    // DESCRIPTOR SET LAYOUT — MUST MATCH SHADER EXACTLY (FIXED: Binding 0 COMBINED_IMAGE_SAMPLER for input)
-    // ──────────────────────────────
+    bindings[0] = { .binding = 0, .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .descriptorCount = 1, .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT };
+    bindings[1] = { .binding = 1, .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,        .descriptorCount = 1, .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT };
+    bindings[2] = { .binding = 2, .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,       .descriptorCount = 1, .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT };
 
-LOG_AMOURANTH("TONEMAP PIPELINE INITIALIZATION — HDR → LDR — PINK PHOTONS ASCENDANT");
+    VkDescriptorSetLayoutCreateInfo layoutInfo{
+        .sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+        .bindingCount = 3,
+        .pBindings    = bindings
+    };
 
-LOG_NICK("Creating descriptor set layout — binding 0: COMBINED_IMAGE_SAMPLER | binding 1: STORAGE_IMAGE | binding 2: scalar UBO");
+    VkDescriptorSetLayout tonemapSetLayout = VK_NULL_HANDLE;
+    VK_CHECK(vkCreateDescriptorSetLayout(stone_device(), &layoutInfo, nullptr, &tonemapSetLayout));
 
-VkDescriptorSetLayoutBinding bindings[3] = {};
-
-bindings[0] = { .binding = 0, .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .descriptorCount = 1, .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT };
-bindings[1] = { .binding = 1, .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,        .descriptorCount = 1, .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT };
-bindings[2] = { .binding = 2, .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,       .descriptorCount = 1, .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT };
-
-VkDescriptorSetLayoutCreateInfo layoutInfo{
-    .sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-    .bindingCount = 3,
-    .pBindings    = bindings
-};
-
-VkDescriptorSetLayout tonemapSetLayout = VK_NULL_HANDLE;
-VK_CHECK(vkCreateDescriptorSetLayout(stone_device(), &layoutInfo, nullptr, &tonemapSetLayout));
-
-tonemapDescriptorSetLayout_ = Handle<VkDescriptorSetLayout>(
+    tonemapDescriptorSetLayout_ = Handle<VkDescriptorSetLayout>(
     tonemapSetLayout, stone_device(), vkDestroyDescriptorSetLayout, 0, "TonemapSetLayout"
 );
-
-LOG_BLONDIE("Descriptor set layout forged — validation clean — ballerina approved");
-
-// =============================================================================
-// FIRST LIGHT ACHIEVED — TONEMAP ONLINE — HDR PIPELINE ACTIVE
-// =============================================================================
-LOG_AMOURANTH("TONEMAP PIPELINE FULLY ONLINE — HDR INPUT → LDR OUTPUT — BRANCHLESS — FASTEST POSSIBLE");
-LOG_AMOURANTH("VULKAN RENDERER ASCENDED — {}x{} — PINK PHOTONS ETERNAL — THE BALLERINA DANCES", width_, height_);
+    LOG_AMOURANTH("VULKAN RENDERER ASCENDED — {}x{} — PINK PHOTONS ETERNAL — THE BALLERINA DANCES", width_, height_);
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -487,7 +459,7 @@ VkDeviceAddress VulkanRenderer::getShaderGroupHandle(uint32_t group) noexcept {
         LOG_WARN_CAT("RENDERER", "Invalid shader group index: {}", group);
         return 0;
     }
-    LOG_TRACE_CAT("RENDERER", "Group {} address: 0x{:x}", group, groupAddress);
+    LOG_TRACE_CAT("RENDERER", "Group {} address: 0x{}", group, groupAddress);
     LOG_TRACE_CAT("RENDERER", "getShaderGroupHandle — COMPLETE");
     return groupAddress;
 }
@@ -676,7 +648,7 @@ void VulkanRenderer::createTonemapSampler() noexcept {
         [](VkDevice d, VkSampler s, const VkAllocationCallbacks*) { vkDestroySampler(d, s, nullptr); },
         0, "TonemapSampler");
 
-    LOG_TRACE_CAT("RENDERER", "Tonemap sampler created: 0x{:x}", reinterpret_cast<uintptr_t>(rawSampler));
+    LOG_TRACE_CAT("RENDERER", "Tonemap sampler created: 0x{}", reinterpret_cast<uintptr_t>(rawSampler));
     LOG_TRACE_CAT("RENDERER", "createTonemapSampler — COMPLETE");
 }
 
@@ -768,7 +740,7 @@ void VulkanRenderer::createEnvironmentMap() noexcept
     barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
     vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
 
-    RTX::endOneTimeSubmit(cmd, ctx.graphicsQueue(), ctx.commandPool_);
+    RTX::endOneTimeSubmit(cmd, stone_graphics_queue(), ctx.commandPool_);
     BUFFER_DESTROY(staging);
 
     VkImageViewCreateInfo viewInfo{
@@ -1006,6 +978,8 @@ void VulkanRenderer::recordRayTracingCommandBuffer(VkCommandBuffer cmd) noexcept
 // ──────────────────────────────────────────────────────────────────────────────
 void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
 {
+    LOG_SUCCESS_CAT("FRAME", "TOP RENDER FRAME ------------------------------------------");
+
     if (minimized_) [[unlikely]] {
         SDL_Delay(100);
         return;
@@ -1061,30 +1035,13 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     }
 
     updateUniformBuffer(f, camera, getJitter());
-	updateRTDescriptorSet(f);
+    updateRTDescriptorSet(f);
     recordRayTracingCommands(commandBuffers_[f], f);
     updateTonemapUniform(f);
 
     pipelineManager_.updateRTDescriptorSet(f, {.tlas = LAS::get().getTLAS()});
     if (Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING)
         updateNexusDescriptors();
-
-    // ── REAL RenderContext — USING YOUR REAL CAM
-    RenderContext rtCtx{};
-    rtCtx.cameraPos       = CAM.pos();        // ← REAL CAMERA
-    rtCtx.fov             = CAM.fov();        // ← REAL FOV
-    rtCtx.deltaTime       = deltaTime;
-    rtCtx.frame           = frameNumber_;
-    rtCtx.renderMode      = activeRenderMode_;
-    rtCtx.enableTonemap   = tonemapEnabled_ ? 1u : 0u;
-    rtCtx.enableOverlay   = showOverlay_ ? 1u : 0u;
-    rtCtx.hypertrace      = hypertraceEnabled_ ? 1u : 0u;
-    rtCtx.debugVisMode    = 0;
-    rtCtx.blueNoiseOffset = glm::vec2(getJitter());
-    rtCtx.reservoirParams = glm::vec4(1.0f);
-
-    // ── DISPATCH — FIXED ALL HANDLE<> AND SWAPCHAIN ISSUES
-    dispatchRenderMode(imageIndex, cmd, *pipelineManager_.rtPipelineLayout_, rtDescriptorSets_[f], *pipelineManager_.rtPipeline_, deltaTime, rtCtx, activeRenderMode_);
 
     // RT OUTPUT → READ ONLY
     VkImageMemoryBarrier rtReadBarrier{
@@ -1148,6 +1105,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     vkQueuePresentKHR(g_ctx().presentQueue(), &presentInfo);
 
     frameNumber_++;
+    LOG_SUCCESS_CAT("FRAME", "BOTTOM RENDER FRAME ------------------------------------------");
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -1960,42 +1918,49 @@ bool VulkanRenderer::createSharedStaging() noexcept {
 
 void VulkanRenderer::onWindowResize(uint32_t width, uint32_t height) noexcept
 {
-    LOG_MAIN("The sea shifts. Resize accepted: {}x{}", width, height);
+    LOG_MAIN("The sea shifts — resize accepted: {}×{}", width, height);
 
-    vkDeviceWaitIdle(g_ctx().device_);
+    vkDeviceWaitIdle(stone_device());
 
-    // Reset accumulation — new geometry, new history
+    // Reset accumulation — new resolution invalidates history
     accumulationFrame_ = 0;
 
-    // Full rebuild — the empire does not half-measure
+    // Full empire rebirth
     cleanupFramebuffers();
     destroyRenderPass();
-    RTX::SwapchainManager::recreate(width_, height_);
+
+    // Recreate swapchain with new dimensions
+    RTX::SwapchainManager::recreate(width, height);
+
+    // ——— CRITICAL: THIS IS WHEN THE EMPIRE LEARNS THE NEW TRUTH ———
+    stone_seal_width(width);
+    stone_seal_height(height);
+    stone_seal_extent(VkExtent2D{ width, height });
 
     createRenderPass();
     createFramebuffers();
 
-    // Adaptive sampling needs fresh score images
+    // Adaptive sampling score image is resolution-dependent
     if (Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING) {
         createNexusScoreImage(g_ctx().commandPool_, g_ctx().graphicsQueue_);
     }
 
-    // Command buffers must be reborn
+    // Rebuild command buffers
     if (!commandBuffers_.empty()) {
-        vkFreeCommandBuffers(g_ctx().device_, g_ctx().commandPool_, 
-                           static_cast<uint32_t>(commandBuffers_.size()), commandBuffers_.data());
+        vkFreeCommandBuffers(g_ctx().device_, g_ctx().commandPool_,
+                             static_cast<uint32_t>(commandBuffers_.size()),
+                             commandBuffers_.data());
         commandBuffers_.clear();
     }
     createCommandBuffers();
 
-    // Record fresh commands for every swapchain image
-    for (uint32_t i = 0; i < StoneKey::stone_image_count(); ++i) {
+    // Re-record every frame’s commands with new resolution
+    for (uint32_t i = 0; i < stone_image_count(); ++i) {
         recordRayTracingCommandBuffer(commandBuffers_[i]);
     }
 
-    LOG_AMOURANTH("Rebirth complete. Not a single photon was harmed.");
-    LOG_NICK("Zero flicker. Zero stutter. That’s how legends resize.");
-    LOG_BLONDIE("No one will ever know we moved.");
+    LOG_SUCCESS_CAT("RENDERER", "Resize complete → {}×{} — Empire extent sealed", width, height);
+    LOG_SUCCESS_CAT("RENDERER", "Swapchain reborn — photons realigned — zero flicker");
 }
 
 void VulkanRenderer::waitForAllFences() const noexcept

@@ -128,7 +128,7 @@ void PipelineManager::allocateDescriptorSets()
 {
     LOG_TRACE_CAT("PIPELINE", "allocateDescriptorSets — START — maxSets={}", Options::Performance::MAX_FRAMES_IN_FLIGHT);
 
-    LOG_CID("CID fans himself frantically, sweat flying everywhere — \"Allocating sets... hope the pool doesn't overflow like my pores!\"");
+    LOG_CID("CID fans himself frantically, sweat flying — \"Allocating sets... hope the pool doesn't overflow like my pores!\"");
 
     const uint32_t maxSets = Options::Performance::MAX_FRAMES_IN_FLIGHT;
     rtDescriptorSets_.resize(maxSets);
@@ -161,7 +161,7 @@ void PipelineManager::allocateDescriptorSets()
     LOG_KEANU("[KEANU] ...Whoa. The sets... they fit. StoneKey is home.");
     LOG_AMOURANTH("[CAPTAIN AMOURANTH] Binding 31 lives. The crown is complete.");
     LOG_CID("CID falls to his knees, sobbing — \"It worked... no overflow... Binding 31 is safe... finally... rest...\"");
-    LOG_CID("CID collapses into a puddle of pure relief — \"The photons... they... they have a home...\"");
+    LOG_CID("CID collapses into a puddle of pure relief — \"The photons... they... they have a home... I can finally breathe...\"");
     LOG_CID("*silence*");
     LOG_CID("CID has passed out from joy*");
 
@@ -407,7 +407,37 @@ void PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDescrip
 // NEW: Full Pipeline Initialization — The Empire Awakens
 // ──────────────────────────────────────────────────────────────────────────────
 void PipelineManager::initializePipeline(const std::vector<std::string>& shaderPaths, VkCommandPool pool, VkQueue queue) {
-	// main handles phase7
+    // main handles phase7
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Cleanup function for PipelineManager
+// ──────────────────────────────────────────────────────────────────────────────
+void PipelineManager::cleanup() noexcept {
+    VkDevice dev = stone_device();
+    if (dev == VK_NULL_HANDLE) {
+        return;
+    }
+
+    if (!rtDescriptorSets_.empty()) {
+        vkFreeDescriptorSets(dev, *rtDescriptorPool_, static_cast<uint32_t>(rtDescriptorSets_.size()), rtDescriptorSets_.data());
+        rtDescriptorSets_.clear();
+    }
+
+    vkDeviceWaitIdle(dev);
+
+    rtDescriptorPool_.reset();
+    rtDescriptorSetLayout_.reset();
+    rtPipelineLayout_.reset();
+    rtPipeline_.reset();
+
+    for (auto& m : shaderModules_) {
+        m.reset();
+    }
+    shaderModules_.clear();
+
+    sbtBuffer_.reset();
+    sbtMemory_.reset();
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -453,7 +483,7 @@ PipelineManager::~PipelineManager() {
 
 void PipelineManager::cacheDeviceProperties() {
     LOG_ATTEMPT_CAT("PIPELINE", 
-        "CID ENTERS THE GPU TEMPLE — SWEAT DRIPPING ON SACRED SILICON — \"I must know her limits...\"");
+        "CID ENTERS THE GPU TEMPLE, SWEAT DRIPPING ON SACRED SILICON — \"I must know her limits...\"");
 
     if (stone_physical() == VK_NULL_HANDLE) {
         LOG_FATAL_CAT("PIPELINE", 
@@ -568,7 +598,7 @@ VkShaderModule PipelineManager::loadShader(const std::string& relativePath) cons
 
     // ── THE ONE TRUE BASE PATH — ETCHED IN STONE
     static const std::string BASE_PATH = []() {
-        // This runs once at first call — safe, fast, eternal
+        // This runs once at first call at first call — safe, fast, eternal
         char* cwd = getcwd(nullptr, 0);
         std::string path = cwd ? std::string(cwd) + "/" : "";
         free(cwd);
@@ -674,7 +704,7 @@ void PipelineManager::createPipelineLayout()
     VkPipelineLayoutCreateInfo info{};
     info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     info.setLayoutCount = 1;
-    info.pSetLayouts    = &layout;
+    info.pSetLayouts = &layout;
     info.pushConstantRangeCount = 1;
     info.pPushConstantRanges    = &push;
 
