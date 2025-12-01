@@ -5,7 +5,7 @@ cd AMOURANTHRTX
 chmod +x linux.sh
 ./linux.sh --help
 ```
-Stable RTX window.  
+Gets to the renderer but backend changes have it up and down.  
 Working prototype expected Christmas 2025.  
 Please do not code farm. Swapchain goes with THIS project.  
 Expect code, a black window, and miles of logging.    
