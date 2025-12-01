@@ -55,7 +55,7 @@ VulkanRTX::VulkanRTX(int w, int h, PipelineManager*) noexcept
         return;
     }
 
-    LOG_SUCCESS_CAT("RTX", "VulkanRTX forged — {}×{} — device 0x{:016X}", w, h, reinterpret_cast<uintptr_t>(device_));
+    LOG_SUCCESS_CAT("RTX", "VulkanRTX forged — {}x{} — device 0x{}", w, h, reinterpret_cast<uintptr_t>(stone_device()));
     initBlackFallbackImage();
 
     LOG_SUCCESS_CAT("RTX", "VULKANRTX ASCENDED — LAS WILL BUILD THE UNIVERSE — FIRST LIGHT ETERNAL");
@@ -63,25 +63,7 @@ VulkanRTX::VulkanRTX(int w, int h, PipelineManager*) noexcept
 
 VulkanRTX::~VulkanRTX() noexcept
 {
-    LOG_TRACE_CAT("RTX", "VulkanRTX destructor — cleansing the void");
-
-    if (g_mappedBase) {
-        vkUnmapMemory(device_, g_stagingMem);
-        g_mappedBase = nullptr;
-        g_mappedOffset.store(0);
-    }
-    if (g_stagingPool) {
-        BUFFER_DESTROY(g_stagingPool);
-        g_stagingPool = 0;
-        g_stagingMem = VK_NULL_HANDLE;
-        g_stagingBuffer = VK_NULL_HANDLE;
-    }
-
-    blackFallbackView_.reset();
-    blackFallbackMemory_.reset();
-    blackFallbackImage_.reset();
-
-    LOG_SUCCESS_CAT("RTX", "VulkanRTX destroyed — pure and clean");
+    phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
 }
 
 // =============================================================================
@@ -122,7 +104,7 @@ void VulkanRTX::initBlackFallbackImage()
 
     VkMemoryRequirements memReqs{};
     vkGetImageMemoryRequirements(device_, img, &memReqs);
-    uint32_t memType = vkh.findMemoryType(g_ctx().physicalDevice(), memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    uint32_t memType = findMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
     VkMemoryAllocateInfo allocInfo{
         .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,

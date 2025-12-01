@@ -44,11 +44,6 @@ namespace StoneKey {
 }
 
 // -----------------------------------------------------------------------------
-// GLOBAL CAMERA — FORWARD DECLARED ONLY
-// -----------------------------------------------------------------------------
-[[nodiscard]] Camera& g_camera() noexcept;
-
-// -----------------------------------------------------------------------------
 // APPLICATION — FORWARD + GLOBAL POINTER
 // -----------------------------------------------------------------------------
 extern std::unique_ptr<Application> g_app_ptr;
@@ -62,13 +57,6 @@ extern std::unique_ptr<Application> g_app_ptr;
 }
 
 // -----------------------------------------------------------------------------
-// THE ONE TRUE MACRO — BRAINDEAD, ETERNAL, PINK-PHOTON-APPROVED
-// -----------------------------------------------------------------------------
-#define CAM g_camera()
-
-// -----------------------------------------------------------------------------
 // CONVENIENCE — FULLY QUALIFIED TO AVOID SHADOWING
 // -----------------------------------------------------------------------------
-inline float aspect() noexcept {
-    return float(StoneKey::stone_width()) / float(StoneKey::stone_height());
-}
+inline float aspect() noexcept { return float(StoneKey::stone_width()) / float(StoneKey::stone_height()); }

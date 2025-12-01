@@ -113,7 +113,7 @@ void RenderMode1::initResources() {
     accumImage_ = RTX::Handle<VkImage>(rawImg, RTX::g_ctx().device_, vkDestroyImage, 0, "AccumImg");
 
     VkMemoryRequirements memReqs; vkGetImageMemoryRequirements(RTX::g_ctx().device_, rawImg, &memReqs);
-    uint32_t memType = stone_pipeline()->findMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    uint32_t memType = findMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
     VkMemoryAllocateInfo alloc{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, nullptr, memReqs.size, memType};
     VkDeviceMemory mem; vkAllocateMemory(RTX::g_ctx().device_, &alloc, nullptr, &mem);
     vkBindImageMemory(RTX::g_ctx().device_, rawImg, mem, 0);

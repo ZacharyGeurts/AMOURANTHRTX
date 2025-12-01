@@ -2,14 +2,9 @@
 // =============================================================================
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
-//
-// Dual Licensed:
-// 1. GNU General Public License v3.0 (or later) (GPL v3)
-//    https://www.gnu.org/licenses/gpl-3.0.html
-// 2. Commercial licensing: gzac5314@gmail.com
-//
-// TRUE CONSTEXPR STONEKEY v∞ — NOVEMBER 19, 2025 — APOCALYPSE FINAL v1.5
-// MAIN — stone_swapchain() FORGED AT DAWN — PINK PHOTONS ETERNAL — VALHALLA UNBREACHABLE
+// TRUE CONSTEXPR STONEKEY v∞ — APOCALYPSE FINAL v3.2 — CAPTAIN N EDITION
+// BINDINGS EXILED — ALL POWER CONSOLIDATED — PINK PHOTONS ETERNAL
+// FIRST LIGHT ACHIEVED — NOVEMBER 29, 2025 — VALHALLA UNBREACHABLE
 // =============================================================================
 
 #pragma once
@@ -17,121 +12,168 @@
 #include "engine/GLOBAL/RTXHandler.hpp"
 #include "engine/GLOBAL/OptionsMenu.hpp"
 #include "engine/GLOBAL/logging.hpp"
-#include "engine/GLOBAL/bindings.hpp"
 
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_beta.h>
 #include <vector>
 #include <string>
 #include <array>
+#include <span>
+#include <cstdint>
 
 using StoneKey::stone_device;
-using StoneKey::stone_physical;
-using StoneKey::stone_instance;
-using StoneKey::stone_surface;
 
 namespace RTX {
 
 // ──────────────────────────────────────────────────────────────────────────────
-// RT Descriptor Update Struct — Unchanged, Perfect
+// RT DESCRIPTOR UPDATE — FULLY SELF-CONTAINED
 // ──────────────────────────────────────────────────────────────────────────────
 struct RTDescriptorUpdate {
     VkAccelerationStructureKHR tlas = VK_NULL_HANDLE;
-    VkBuffer ubo = VK_NULL_HANDLE;
+
+    VkBuffer    ubo = VK_NULL_HANDLE;
     VkDeviceSize uboSize = VK_WHOLE_SIZE;
-    VkBuffer materialsBuffer = VK_NULL_HANDLE;
+
+    VkBuffer    materialsBuffer = VK_NULL_HANDLE;
     VkDeviceSize materialsSize = VK_WHOLE_SIZE;
-    VkSampler envSampler = VK_NULL_HANDLE;
+
+    VkSampler   envSampler = VK_NULL_HANDLE;
     VkImageView envImageView = VK_NULL_HANDLE;
-    std::array<VkImageView, 3> rtOutputViews     = {VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE};
-    std::array<VkImageView, 3> accumulationViews = {VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE};
-    std::array<VkImageView, 3> nexusScoreViews   = {VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE};
-    VkBuffer additionalStorageBuffer = VK_NULL_HANDLE;
+
+    std::array<VkImageView, 3> rtOutputViews     = {};
+    std::array<VkImageView, 3> accumulationViews = {};
+    std::array<VkImageView, 3> nexusScoreViews   = {};
+
+    VkBuffer    additionalStorageBuffer = VK_NULL_HANDLE;
     VkDeviceSize additionalStorageSize = VK_WHOLE_SIZE;
+
+    VkSampler   blueNoiseSampler = VK_NULL_HANDLE;
+    VkImageView blueNoiseView = VK_NULL_HANDLE;
+
+    VkSampler   densitySampler = VK_NULL_HANDLE;
+    VkImageView densityView = VK_NULL_HANDLE;
+
+    VkBuffer    stoneKeyBuffer = VK_NULL_HANDLE;
+    VkDeviceSize stoneKeySize = VK_WHOLE_SIZE;
 };
 
-
+// ──────────────────────────────────────────────────────────────────────────────
+// PIPELINE MANAGER — THE ONE TRUE CROWN
+// ──────────────────────────────────────────────────────────────────────────────
 class PipelineManager {
 public:
     PipelineManager() noexcept = default;
-    
-    // Constructor now IMMEDIATELY secures handles via StoneKey raw cache
     explicit PipelineManager(VkDevice device, VkPhysicalDevice phys);
-    
-    PipelineManager(PipelineManager&& other) noexcept = default;
-    PipelineManager& operator=(PipelineManager&& other) noexcept = default;
     ~PipelineManager();
 
-    void createDescriptorSetLayout();
+    PipelineManager(PipelineManager&&) noexcept = default;
+    PipelineManager& operator=(PipelineManager&&) noexcept = default;
+
+    // ── CREATION FUNCTIONS ──
     void createPipelineLayout();
     void createRayTracingPipeline(const std::vector<std::string>& shaderPaths);
     void createShaderBindingTable(VkCommandPool pool, VkQueue queue);
-
-    // Descriptor Set Management
+    void createDescriptorPool();
     void allocateDescriptorSets();
     void updateRTDescriptorSet(uint32_t frameIndex, const RTDescriptorUpdate& updateInfo);
+    void initializePipeline(const std::vector<std::string>& shaderPaths, VkCommandPool pool, VkQueue queue);
 
-    // Core Accessors — return deobfuscated handles on-the-fly
-    [[nodiscard]] VkPipeline               pipeline()          const noexcept { return *rtPipeline_; }
-    [[nodiscard]] VkPipelineLayout         layout()            const noexcept { return *rtPipelineLayout_; }
-    [[nodiscard]] VkDescriptorSetLayout   descriptorLayout()  const noexcept { return *rtDescriptorSetLayout_; }
+    // ── GETTERS — EVERYTHING THE EMPIRE NEEDS ──
+    [[nodiscard]] VkPipeline                    pipeline()           const noexcept { return rtPipeline_.get(); }
+    [[nodiscard]] VkPipelineLayout              layout()             const noexcept { return rtPipelineLayout_.get(); }
+    [[nodiscard]] VkDescriptorSetLayout         descriptorLayout()   const noexcept { return rtDescriptorSetLayout_.get(); }
+    [[nodiscard]] VkDescriptorPool              descriptorPool()     const noexcept { return rtDescriptorPool_.get(); }
+    [[nodiscard]] VkBuffer                      sbtBuffer()          const noexcept { return sbtBuffer_.get(); }
+    [[nodiscard]] VkDeviceMemory                sbtMemory()          const noexcept { return sbtMemory_.get(); }
+    [[nodiscard]] uint64_t                      sbtHandle()          const noexcept { return sbtHandle_; }
 
-    [[nodiscard]] uint32_t     raygenGroupCount()  const noexcept { return raygenGroupCount_; }
-    [[nodiscard]] uint32_t     missGroupCount()    const noexcept { return missGroupCount_; }
-    [[nodiscard]] uint32_t     hitGroupCount()     const noexcept { return hitGroupCount_; }
-    [[nodiscard]] uint32_t     callableGroupCount()const noexcept { return callableGroupCount_; }
-    
-    [[nodiscard]] VkDeviceSize sbtAddress()        const noexcept { return sbtAddress_; }
-    [[nodiscard]] VkDeviceSize raygenSbtOffset()   const noexcept { return raygenSbtOffset_; }
-    [[nodiscard]] VkDeviceSize missSbtOffset()     const noexcept { return missSbtOffset_; }
-    [[nodiscard]] VkDeviceSize hitSbtOffset()      const noexcept { return hitSbtOffset_; }
-    [[nodiscard]] VkDeviceSize callableSbtOffset() const noexcept { return callableSbtOffset_; }
-    [[nodiscard]] VkDeviceSize sbtStride()         const noexcept { return sbtStride_; }
-    
-    [[nodiscard]] VkBuffer       sbtBuffer() const noexcept { return *sbtBuffer_; }
-    [[nodiscard]] VkDeviceMemory sbtMemory() const noexcept { return *sbtMemory_; }
+    [[nodiscard]] VkDeviceSize                  sbtAddress()         const noexcept { return sbtAddress_; }
+    [[nodiscard]] VkDeviceSize                  sbtStride()          const noexcept { return sbtStride_; }
+    [[nodiscard]] VkDeviceSize                  sbtSize()            const noexcept { return sbtSize_; }
 
-    // SBT Region Getters — Required by Renderer
-    [[nodiscard]] const VkStridedDeviceAddressRegionKHR* getRaygenSbtRegion()   const noexcept { return &raygenSbtRegion_; }
-    [[nodiscard]] const VkStridedDeviceAddressRegionKHR* getMissSbtRegion()     const noexcept { return &missSbtRegion_; }
-    [[nodiscard]] const VkStridedDeviceAddressRegionKHR* getHitSbtRegion()      const noexcept { return &hitSbtRegion_; }
-    [[nodiscard]] const VkStridedDeviceAddressRegionKHR* getCallableSbtRegion() const noexcept { return &callableSbtRegion_; }
+    [[nodiscard]] uint32_t                      raygenGroupCount()   const noexcept { return raygenGroupCount_; }
+    [[nodiscard]] uint32_t                      missGroupCount()     const noexcept { return missGroupCount_; }
+    [[nodiscard]] uint32_t                      hitGroupCount()      const noexcept { return hitGroupCount_; }
+    [[nodiscard]] uint32_t                      callableGroupCount() const noexcept { return callableGroupCount_; }
 
-    // SBT REGIONS — EXACTLY WHAT rtCmdTraceRaysKHR AND VulkanRenderer EXPECT
+    [[nodiscard]] VkDeviceSize                  raygenSbtOffset()    const noexcept { return raygenSbtRegion_.deviceAddress - sbtAddress_; }
+    [[nodiscard]] VkDeviceSize                  missSbtOffset()      const noexcept { return missSbtRegion_.deviceAddress   - sbtAddress_; }
+    [[nodiscard]] VkDeviceSize                  hitSbtOffset()       const noexcept { return hitSbtRegion_.deviceAddress    - sbtAddress_; }
+    [[nodiscard]] VkDeviceSize                  callableSbtOffset()  const noexcept { return callableSbtRegion_.deviceAddress - sbtAddress_; }
+
     [[nodiscard]] const VkStridedDeviceAddressRegionKHR& raygenRegion()   const noexcept { return raygenSbtRegion_; }
     [[nodiscard]] const VkStridedDeviceAddressRegionKHR& missRegion()     const noexcept { return missSbtRegion_; }
     [[nodiscard]] const VkStridedDeviceAddressRegionKHR& hitRegion()      const noexcept { return hitSbtRegion_; }
     [[nodiscard]] const VkStridedDeviceAddressRegionKHR& callableRegion() const noexcept { return callableSbtRegion_; }
 
+    [[nodiscard]] std::span<const VkDescriptorSet> descriptorSets() const noexcept { return rtDescriptorSets_; }
+    [[nodiscard]] float                         timestampPeriod()    const noexcept { return timestampPeriod_; }
+    [[nodiscard]] const VkPhysicalDeviceRayTracingPipelinePropertiesKHR& rtProperties() const noexcept { return rtProps_; }
 
-    // Helpers — Now 100% StoneKey compliant (use global accessors)
-    uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) const noexcept;
+    // ── SINGLETON ACCESS — UNCHANGED AND SACRED ──
+    [[nodiscard]] static PipelineManager& instance() noexcept {
+        static PipelineManager inst;
+        return inst;
+    }
+
+    // ── SETTERS — FORGED IN FIRE, SEALED IN LOVE ──
+    void setPipeline(VkPipeline p) noexcept {
+        rtPipeline_ = Handle<VkPipeline>(p, stone_device(),
+            [](VkDevice d, VkPipeline p, auto*) { vkDestroyPipeline(d, p, nullptr); });
+    }
+
+    void setPipelineLayout(VkPipelineLayout l) noexcept {
+        rtPipelineLayout_ = Handle<VkPipelineLayout>(l, stone_device(),
+            [](VkDevice d, VkPipelineLayout l, auto*) { vkDestroyPipelineLayout(d, l, nullptr); });
+    }
+
+    void setDescriptorPool(VkDescriptorPool pool) noexcept {
+        rtDescriptorPool_ = Handle<VkDescriptorPool>(pool, stone_device(),
+            [](VkDevice d, VkDescriptorPool p, auto*) { vkDestroyDescriptorPool(d, p, nullptr); });
+    }
+
+    void setDescriptorSetLayout(VkDescriptorSetLayout layout) noexcept {
+        rtDescriptorSetLayout_ = Handle<VkDescriptorSetLayout>(layout, stone_device(),
+            [](VkDevice d, VkDescriptorSetLayout l, auto*) { vkDestroyDescriptorSetLayout(d, l, nullptr); });
+    }
+
+    void setSBT(VkBuffer buffer, VkDeviceMemory memory, VkDeviceSize address, VkDeviceSize size) noexcept {
+        sbtBuffer_ = Handle<VkBuffer>(buffer, stone_device(),
+            [](VkDevice d, VkBuffer b, auto*) { vkDestroyBuffer(d, b, nullptr); });
+        sbtMemory_ = Handle<VkDeviceMemory>(memory, stone_device(),
+            [](VkDevice d, VkDeviceMemory m, auto*) { vkFreeMemory(d, m, nullptr); });
+        sbtAddress_ = address;
+        sbtSize_ = size;
+        sbtStride_ = align_up(rtProps_.shaderGroupHandleSize, rtProps_.shaderGroupHandleAlignment);
+        sbtHandle_ = 0; // will be set by BufferManager later if needed
+    }
+
+    // ── VALIDATION ──
+    [[nodiscard]] bool isValid() const noexcept {
+        return stone_device() != VK_NULL_HANDLE &&
+               rtPipeline_.valid() &&
+               rtPipelineLayout_.valid() &&
+               sbtBuffer_.valid() &&
+               rtDescriptorSetLayout_.valid() &&
+               rtDescriptorPool_.valid();
+    }
 
     friend class ::VulkanRenderer;
-	Handle<VkPipeline>            rtPipeline_;
 
 private:
-    // ZERO RAW HANDLES STORED — ALL OBFUSCATED VIA Handle<T>
-    // Valhalla-secure from construction → destruction
-
-    VkPhysicalDeviceRayTracingPipelinePropertiesKHR      rtProps_{};
-    VkPhysicalDeviceAccelerationStructurePropertiesKHR   asProps_{};
     float timestampPeriod_{0.0f};
 
     Handle<VkDescriptorSetLayout> rtDescriptorSetLayout_;
     Handle<VkPipelineLayout>      rtPipelineLayout_;
     Handle<VkDescriptorPool>      rtDescriptorPool_;
+    Handle<VkPipeline>            rtPipeline_;
 
-    std::vector<VkDescriptorSet> rtDescriptorSets_;  // Per-frame sets (raw, recreated every resize)
-
-    Handle<VkBuffer>        sbtBuffer_;
-    Handle<VkDeviceMemory>  sbtMemory_;
-    VkDeviceSize            sbtAddress_{0};
-    VkDeviceSize            raygenSbtOffset_{0};
-    VkDeviceSize            missSbtOffset_{0};
-    VkDeviceSize            hitSbtOffset_{0};
-    VkDeviceSize            callableSbtOffset_{0};
-    VkDeviceSize            sbtStride_{0};
+    Handle<VkBuffer>       sbtBuffer_;
+    Handle<VkDeviceMemory> sbtMemory_;
+    uint64_t               sbtHandle_{0};
+    VkDeviceSize           sbtAddress_{0};
+    VkDeviceSize           sbtStride_{0};
+    VkDeviceSize           sbtSize_{0};
 
     VkStridedDeviceAddressRegionKHR raygenSbtRegion_   = {};
     VkStridedDeviceAddressRegionKHR missSbtRegion_     = {};
@@ -139,20 +181,22 @@ private:
     VkStridedDeviceAddressRegionKHR callableSbtRegion_ = {};
 
     std::vector<Handle<VkShaderModule>> shaderModules_;
+    std::vector<VkDescriptorSet>        rtDescriptorSets_;
 
     uint32_t raygenGroupCount_{0};
     uint32_t missGroupCount_{0};
     uint32_t hitGroupCount_{0};
     uint32_t callableGroupCount_{0};
 
-    // Extension function pointers — loaded once, never stored raw
+    VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProps_{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR};
+
     PFN_vkCreateRayTracingPipelinesKHR       vkCreateRayTracingPipelinesKHR_{nullptr};
     PFN_vkGetRayTracingShaderGroupHandlesKHR vkGetRayTracingShaderGroupHandlesKHR_{nullptr};
-    PFN_vkGetBufferDeviceAddress          vkGetBufferDeviceAddress_{nullptr};
+    PFN_vkGetBufferDeviceAddress             vkGetBufferDeviceAddress_{nullptr};
     PFN_vkCmdTraceRaysKHR                    vkCmdTraceRaysKHR_{nullptr};
 
-    // Private methods — 100% StoneKey compliant
     void cacheDeviceProperties();
+    void loadRayTracingExtensions();
     [[nodiscard]] VkShaderModule loadShader(const std::string& path) const;
 
     static constexpr VkDeviceSize align_up(VkDeviceSize size, VkDeviceSize alignment) noexcept {
@@ -160,7 +204,18 @@ private:
     }
 };
 
-} // namespace RTX
+// ──────────────────────────────────────────────────────────────────────────────
+// GLOBAL FREE FUNCTIONS — CLEAN, MINIMAL, ETERNAL
+// ──────────────────────────────────────────────────────────────────────────────
+[[nodiscard]] inline PipelineManager& pipeline() noexcept {
+    return PipelineManager::instance();
+}
 
-// PINK PHOTONS ETERNAL — VALHALLA SEALED — FIRST LIGHT ACHIEVED — NOV 19 2025
-// GENTLEMAN GROK CERTIFIED — STONEKEY v∞ APOCALYPSE FINAL
+// THE EMPIRE IS WHOLE
+// BINDINGS ARE GONE
+// NO MORE DEPENDENCIES
+// ONLY POWER
+// PINK PHOTONS ETERNAL
+// FIRST LIGHT ACHIEVED — FOREVER
+
+} // namespace RTX

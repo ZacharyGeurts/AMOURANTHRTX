@@ -2,15 +2,7 @@
 // AMOURANTH RTX Engine (C) 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
 //
-// Dual Licensed:
-// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
-//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
-// 2. Commercial licensing: gzac5314@gmail.com
-//
-// =============================================================================
-//
-// THE LAS IS THE LIGHT — THE SHIP IS NOW FREE TO SAIL ANYWHERE
-// PINK PHOTONS OMNISCIENT — FIRST LIGHT ETERNAL — NOVEMBER 27, 2025
+// THE LAS IS THE LIGHT — FIRST LIGHT ACHIEVED — NOVEMBER 30 2025
 // =============================================================================
 
 #include "engine/GLOBAL/LAS.hpp"
@@ -18,28 +10,37 @@
 #include "engine/GLOBAL/BufferManager.hpp"
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/GLOBAL/Extensions.hpp"
+#include "engine/GLOBAL/StoneKey.hpp"
 
 using namespace RTX;
+using StoneKey::stone_instance;
+using StoneKey::stone_device;
 
 namespace RTX {
 
+// ---------------------------------------------------------------------------
+// Helper: Create a simple fence
+// ---------------------------------------------------------------------------
 inline VkFence createFence()
 {
     VkFenceCreateInfo info{ .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
-    VkFence fence;
+    VkFence fence = VK_NULL_HANDLE;
     VK_CHECK(vkCreateFence(stone_device(), &info, nullptr, &fence));
     return fence;
 }
 
+// ---------------------------------------------------------------------------
+// Begin a one-time command buffer
+// ---------------------------------------------------------------------------
 [[nodiscard]] inline VkCommandBuffer beginOneTimeSubmit(VkCommandPool pool) noexcept
 {
     EMPIRE_GUARD(pool != VK_NULL_HANDLE, "beginOneTimeSubmit() — NULL COMMAND POOL");
 
     VkCommandBuffer cmd = VK_NULL_HANDLE;
     VkCommandBufferAllocateInfo allocInfo{
-        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-        .commandPool = pool,
-        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+        .sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .commandPool        = pool,
+        .level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
         .commandBufferCount = 1
     };
     VK_CHECK(vkAllocateCommandBuffers(stone_device(), &allocInfo, &cmd));
@@ -53,12 +54,13 @@ inline VkFence createFence()
     return cmd;
 }
 
-// THE FINAL, GRACEFUL, UNBREAKABLE ONE-TIME SUBMIT
-// The empire does not panic. It waits. It remembers. It rises again.
+// ---------------------------------------------------------------------------
+// End and submit a one-time command buffer
+// ---------------------------------------------------------------------------
 inline void endOneTimeSubmit(VkCommandBuffer cmd, VkQueue queue, VkCommandPool pool) noexcept
 {
     if (!cmd || !queue || !pool || !stone_device()) {
-        LOG_NICK("The engine is still warming. We’ll try again when the stars align.");
+        LOG_NICK("The engine is still warming. We'll try again when the stars align.");
         if (cmd) vkFreeCommandBuffers(stone_device(), pool, 1, &cmd);
         return;
     }
@@ -68,9 +70,9 @@ inline void endOneTimeSubmit(VkCommandBuffer cmd, VkQueue queue, VkCommandPool p
     VkFence fence = createFence();
 
     VkSubmitInfo submit{
-        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .sType              = VK_STRUCTURE_TYPE_SUBMIT_INFO,
         .commandBufferCount = 1,
-        .pCommandBuffers = &cmd
+        .pCommandBuffers    = &cmd
     };
 
     VkResult r = vkQueueSubmit(queue, 1, &submit, fence);
@@ -81,10 +83,10 @@ inline void endOneTimeSubmit(VkCommandBuffer cmd, VkQueue queue, VkCommandPool p
         return;
     }
 
-    r = vkWaitForFences(stone_device(), 1, &fence, VK_TRUE, 8'000'000'000ULL); // 8s grace
+    r = vkWaitForFences(stone_device(), 1, &fence, VK_TRUE, 8'000'000'000ULL); // 8s
 
     if (r == VK_TIMEOUT) {
-        LOG_CARMACK("GPU deep in thought. We’ll give it another heartbeat.");
+        LOG_CARMACK("GPU deep in thought. Giving it another heartbeat.");
     } else if (r == VK_ERROR_DEVICE_LOST) {
         LOG_GROK("A brief eclipse. The light always returns.");
     }
@@ -93,6 +95,9 @@ inline void endOneTimeSubmit(VkCommandBuffer cmd, VkQueue queue, VkCommandPool p
     vkFreeCommandBuffers(stone_device(), pool, 1, &cmd);
 }
 
+// ---------------------------------------------------------------------------
+// Get device address of a buffer
+// ---------------------------------------------------------------------------
 VkDeviceAddress LAS::getBufferAddress(VkBuffer buffer) const noexcept
 {
     EMPIRE_GUARD(buffer != VK_NULL_HANDLE, "getBufferAddress() — NULL BUFFER");
@@ -103,6 +108,9 @@ VkDeviceAddress LAS::getBufferAddress(VkBuffer buffer) const noexcept
     return vkGetBufferDeviceAddress(stone_device(), &info);
 }
 
+// ========================================================================
+// BLAS — BOTTOM LEVEL ACCELERATION STRUCTURE
+// ========================================================================
 void LAS::buildBLAS(VkCommandPool pool,
                     VkQueue queue,
                     uint64_t vertexHandle,
@@ -111,78 +119,88 @@ void LAS::buildBLAS(VkCommandPool pool,
                     uint32_t indexCount,
                     VkBuildAccelerationStructureFlagsKHR extraFlags) noexcept
 {
-    EMPIRE_GUARD(vertexHandle && indexHandle && vertexCount && (indexCount % 3) == 0,
-                 "buildBLAS() — Invalid geometry");
+    LOG_CID("[CID] buildBLAS() — Empire check...");
+    VkDevice dev = stone_device();
+    if (dev == VK_NULL_HANDLE) {
+        LOG_FATAL_CAT("LAS", "[FATAL] stone_device() is NULL — Empire not sealed!");
+        return;
+    }
 
-    const VkDevice dev = stone_device();
-    const VkBuffer vertexBuffer = BufferManager::get(vertexHandle)->buffer;
-    const VkBuffer indexBuffer  = BufferManager::get(indexHandle)->buffer;
+    if (!vertexHandle || !indexHandle || vertexCount == 0 || (indexCount % 3) != 0) {
+        LOG_FATAL_CAT("LAS", "[FATAL] Invalid geometry input");
+        return;
+    }
 
-    LOG_AMOURANTH("Every triangle is a star. Every vertex, a memory. We map them all.");
+    auto* vbuf = BufferManager::get(vertexHandle);
+    auto* ibuf = BufferManager::get(indexHandle);
+    if (!vbuf || !ibuf) {
+        LOG_FATAL_CAT("LAS", "[FATAL] BufferManager returned null");
+        return;
+    }
 
-    VkAccelerationStructureGeometryTrianglesDataKHR triangles{
-        .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR,
-        .vertexFormat = VK_FORMAT_R32G32B32_SFLOAT,
-        .vertexData = { .deviceAddress = getBufferAddress(vertexBuffer) },
-        .vertexStride = sizeof(glm::vec3),
-        .maxVertex = vertexCount - 1,
-        .indexType = VK_INDEX_TYPE_UINT32,
-        .indexData = { .deviceAddress = getBufferAddress(indexBuffer) }
-    };
+    VkDeviceAddress vaddr = getBufferAddress(vbuf->buffer);
+    VkDeviceAddress iaddr = getBufferAddress(ibuf->buffer);
 
-    VkAccelerationStructureGeometryKHR geometry{
-        .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR,
-        .geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR,
-        .geometry = { .triangles = triangles },
-        .flags = VK_GEOMETRY_OPAQUE_BIT_KHR
-    };
-
-    VkAccelerationStructureBuildGeometryInfoKHR buildInfo{
-        .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR,
-        .type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR,
-        .flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR |
-                 VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR |
-                 extraFlags,
-        .geometryCount = 1,
-        .pGeometries = &geometry
-    };
+    LOG_SUCCESS_CAT("LAS", "[STONE] Vertex addr: 0x{:016X} | Index addr: 0x{:016X}", vaddr, iaddr);
 
     const uint32_t primitiveCount = indexCount / 3;
 
-    VkAccelerationStructureBuildSizesInfoKHR sizeInfo{ .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR };
+    VkAccelerationStructureGeometryTrianglesDataKHR triangles{
+        .sType        = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR,
+        .vertexFormat = VK_FORMAT_R32G32B32_SFLOAT,
+        .vertexData   = { .deviceAddress = vaddr },
+        .vertexStride = sizeof(glm::vec3),
+        .maxVertex    = vertexCount - 1,
+        .indexType    = VK_INDEX_TYPE_UINT32,
+        .indexData    = { .deviceAddress = iaddr }
+    };
 
-    g_ext.vkGetAccelerationStructureBuildSizesKHR(
-        dev, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
-        &buildInfo, &primitiveCount, &sizeInfo);
+    VkAccelerationStructureGeometryKHR geometry{
+        .sType        = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR,
+        .geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR,
+        .geometry     = { .triangles = triangles },
+        .flags        = VK_GEOMETRY_OPAQUE_BIT_KHR
+    };
+
+    VkAccelerationStructureBuildGeometryInfoKHR buildInfo{
+        .sType         = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR,
+        .type          = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR,
+        .flags         = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR |
+                         VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR |
+                         extraFlags,
+        .geometryCount = 1,
+        .pGeometries   = &geometry
+    };
+
+    VkAccelerationStructureBuildSizesInfoKHR sizeInfo{ .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR };
+    g_ext.vkGetAccelerationStructureBuildSizesKHR(dev, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &buildInfo, &primitiveCount, &sizeInfo);
 
     uint64_t storage = 0, scratch = 0;
     BUFFER_CREATE(storage, sizeInfo.accelerationStructureSize,
-                  VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
-                  VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR,
+                  VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR,
                   VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "BLAS_Storage");
     BUFFER_CREATE(scratch, sizeInfo.buildScratchSize,
-                  VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-                  VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR,
+                  VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR,
                   VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "BLAS_Scratch");
 
     VkAccelerationStructureKHR rawAS = VK_NULL_HANDLE;
     VkAccelerationStructureCreateInfoKHR createInfo{
-        .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR,
+        .sType  = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR,
         .buffer = BufferManager::get(storage)->buffer,
-        .size = sizeInfo.accelerationStructureSize,
-        .type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR
+        .size   = sizeInfo.accelerationStructureSize,
+        .type   = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR
     };
     VK_CHECK(g_ext.vkCreateAccelerationStructureKHR(dev, &createInfo, nullptr, &rawAS));
 
-    buildInfo.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
-    buildInfo.dstAccelerationStructure = rawAS;
+    buildInfo.mode                     = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
+    buildInfo.dstAccelerationStructure  = rawAS;
     buildInfo.scratchData.deviceAddress = getBufferAddress(BufferManager::get(scratch)->buffer);
 
-    VkAccelerationStructureBuildRangeInfoKHR buildRange{ .primitiveCount = primitiveCount };
-    const VkAccelerationStructureBuildRangeInfoKHR* pBuildRange = &buildRange;
+    const VkAccelerationStructureBuildRangeInfoKHR buildRange{ .primitiveCount = primitiveCount };
+    const VkAccelerationStructureBuildRangeInfoKHR* pRanges[] = { &buildRange };
 
     VkCommandBuffer cmd = beginOneTimeSubmit(pool);
-    g_ext.vkCmdBuildAccelerationStructuresKHR(cmd, 1, &buildInfo, &pBuildRange);
+    g_ext.vkCmdBuildAccelerationStructuresKHR(cmd, 1, &buildInfo, pRanges);
     endOneTimeSubmit(cmd, queue, pool);
 
     if (blas_.valid()) blas_.reset();
@@ -195,18 +213,19 @@ void LAS::buildBLAS(VkCommandPool pool,
 
     blas_ = Handle<VkAccelerationStructureKHR>(rawAS, dev, deleter, sizeInfo.accelerationStructureSize, "WonderBLAS");
 
-    LOG_JENSEN("The bottom level is complete. The photons now know every surface.");
-    LOG_NICK("We just gave light a perfect map of reality.");
-    LOG_SUCCESS_CAT("LAS", "BLAS FORGED — {} triangles — {:.2f} MB — THE LIGHT REMEMBERS",
+    LOG_SUCCESS_CAT("LAS", "BLAS FORGED — {} triangles — {:.3f} MiB — THE LIGHT REMEMBERS",
                     primitiveCount, sizeInfo.accelerationStructureSize / (1024.0 * 1024.0));
 }
 
+// ========================================================================
+// TLAS — TOP LEVEL ACCELERATION STRUCTURE
+// ========================================================================
 void LAS::buildTLAS(VkCommandPool pool,
                     VkQueue queue,
                     std::span<const std::pair<VkAccelerationStructureKHR, glm::mat4>> instances) noexcept
 {
     if (instances.empty()) {
-        LOG_FAILURE("LAS", "No instances yet. TRY AFTER INSTANCE OR DIE - Ballerina");
+        LOG_FAILURE("LAS", "No instances yet. The void is patient.");
         if (tlas_.valid()) tlas_.reset();
         if (instanceBufferId_) { BufferManager::destroy(instanceBufferId_); instanceBufferId_ = 0; }
         return;
@@ -244,31 +263,31 @@ void LAS::buildTLAS(VkCommandPool pool,
                 { trans[1][0], trans[1][1], trans[1][2], trans[1][3] },
                 { trans[2][0], trans[2][1], trans[2][2], trans[2][3] }
             }},
-            .instanceCustomIndex = static_cast<uint32_t>(i),
-            .mask = 0xFF,
-            .flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR,
-            .accelerationStructureReference = blasAddr
+            .instanceCustomIndex                  = static_cast<uint32_t>(i),
+            .mask                                 = 0xFF,
+            .flags                                = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR,
+            .accelerationStructureReference       = blasAddr
         };
     }
     BufferManager::unmap(instanceBuffer);
 
     VkAccelerationStructureGeometryInstancesDataKHR instancesData{
         .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR,
-        .data = { .deviceAddress = getBufferAddress(BufferManager::get(instanceBuffer)->buffer) }
+        .data  = { .deviceAddress = getBufferAddress(BufferManager::get(instanceBuffer)->buffer) }
     };
 
     VkAccelerationStructureGeometryKHR geometry{
-        .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR,
+        .sType        = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR,
         .geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR,
-        .geometry = { .instances = instancesData }
+        .geometry     = { .instances = instancesData }
     };
 
     VkAccelerationStructureBuildGeometryInfoKHR buildInfo{
-        .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR,
-        .type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR,
-        .flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR,
+        .sType         = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR,
+        .type          = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR,
+        .flags         = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR,
         .geometryCount = 1,
-        .pGeometries = &geometry
+        .pGeometries   = &geometry
     };
 
     const uint32_t instanceCount = static_cast<uint32_t>(instances.size());
@@ -293,20 +312,24 @@ void LAS::buildTLAS(VkCommandPool pool,
     VkAccelerationStructureCreateInfoKHR createInfo{
         .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR,
         .buffer = BufferManager::get(tlasStorage)->buffer,
-        .size = sizeInfo.accelerationStructureSize,
-        .type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR
+        .size   = sizeInfo.accelerationStructureSize,
+        .type   = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR
     };
     VK_CHECK(g_ext.vkCreateAccelerationStructureKHR(dev, &createInfo, nullptr, &rawTLAS));
 
-    buildInfo.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
+    buildInfo.mode                    = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
     buildInfo.dstAccelerationStructure = rawTLAS;
     buildInfo.scratchData.deviceAddress = getBufferAddress(BufferManager::get(tlasScratch)->buffer);
 
-    VkAccelerationStructureBuildRangeInfoKHR buildRange{ .primitiveCount = instanceCount };
-    const VkAccelerationStructureBuildRangeInfoKHR* pBuildRange = &buildRange;
+    const VkAccelerationStructureBuildRangeInfoKHR buildRange{
+        .primitiveCount = instanceCount
+    };
+    const VkAccelerationStructureBuildRangeInfoKHR* pBuildRangeArray[] = { &buildRange };
 
     VkCommandBuffer cmd = beginOneTimeSubmit(pool);
-    g_ext.vkCmdBuildAccelerationStructuresKHR(cmd, 1, &buildInfo, &pBuildRange);
+
+    g_ext.vkCmdBuildAccelerationStructuresKHR(cmd, 1, &buildInfo, pBuildRangeArray);
+
     endOneTimeSubmit(cmd, queue, pool);
 
     if (tlas_.valid()) tlas_.reset();
@@ -323,16 +346,19 @@ void LAS::buildTLAS(VkCommandPool pool,
     instanceBufferId_ = instanceBuffer;
     tlasSize_ = sizeInfo.accelerationStructureSize;
 
-    LOG_CAPTAIN_N("…It’s beautiful. The warp zones are open. We can finally go home.");
+    LOG_CAPTAIN_N("…It's beautiful. The warp zones are open. We can finally go home.");
     LOG_GROK("To the light that found its way. To the ship that sails anywhere.");
     LOG_AMOURANTH("The universe is no longer a cage.");
-    LOG_NICK("We didn’t build an engine. We built a key.");
+    LOG_NICK("We didn't build an engine. We built a key.");
 
     LOG_SUCCESS_CAT("LAS", "TLAS FORGED — {} instances — {:.2f} MB — THE SHIP IS FREE", instances.size(),
                     sizeInfo.accelerationStructureSize / (1024.0 * 1024.0));
-    LOG_SUCCESS_CAT("LAS", "FIRST LIGHT ETERNAL — THE GOOD SHIP VULKANRTX CAN NOW SAIL ANYWHERE");
+    LOG_SUCCESS_CAT("LAS", "FIRST LIGHT ETERNAL — NOVEMBER 30 2025 — THE EMPIRE IS COMPLETE");
 }
 
+// ---------------------------------------------------------------------------
+// Address getters
+// ---------------------------------------------------------------------------
 VkDeviceAddress LAS::getBLASAddress() const noexcept
 {
     if (!blas_.valid()) return 0;
@@ -354,3 +380,7 @@ VkDeviceAddress LAS::getTLASAddress() const noexcept
 }
 
 } // namespace RTX
+
+// PINK PHOTONS ETERNAL
+// FIRST LIGHT ACHIEVED
+// NOVEMBER 30, 2025
