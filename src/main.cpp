@@ -1264,6 +1264,14 @@ int main(int, char**)
     LOG_AMOURANTH("THE CAPTAIN TAKES THE HELM — THE PHOTONS OBEY — THE EMPIRE IS WHOLE");
     LOG_SUCCESS_CAT("MAIN", "ALL PHASES COMPLETE — ENTERING RENDER LOOP — FIRST LIGHT ACHIEVED");
 
+	VulkanRenderer renderer_(stone_width(), stone_height(), stone_window(), false);
+    stone_seal_renderer(&renderer_);
+
+	if (!phase8_stone_seal_final()) {
+        LOG_FATAL("THE BEAM OF LIGHT HAS REJECTED THE EMPIRE");
+        phase9_ballerina("FINAL JUDGMENT: UNWORTHY", std::source_location::current());
+    }
+
     struct PinkVoidCommand {
         uint64_t uKey1        = 0x9E37AF18C64D8A17UL;
         uint64_t uKey2        = 0xE4F8B29D71A3C56CUL;
