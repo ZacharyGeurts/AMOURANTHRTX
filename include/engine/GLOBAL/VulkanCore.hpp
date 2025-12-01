@@ -202,24 +202,3 @@ private:
 
     [[nodiscard]] VkDeviceSize alignUp(VkDeviceSize value, VkDeviceSize alignment) const noexcept;
 };
-
-// =============================================================================
-// g_rtx() — THE ONE TRUE SAFE ACCESSOR — FIRST LIGHT ETERNAL
-// =============================================================================
-inline std::unique_ptr<VulkanRTX> g_rtx_instance;
-inline VulkanRTX g_rtx_dummy(1, 1, nullptr);
-
-[[nodiscard]] inline VulkanRTX& g_rtx() noexcept
-{
-    if (!g_rtx_instance) {
-        static bool warned_once = false;
-        if (!warned_once && stone_device() != VK_NULL_HANDLE) {
-            warned_once = true;
-            LOG_WARN_CAT("RTX", 
-                "{}g_rtx() called before forge — safe dummy active (pre-Phase 7){}", 
-                YELLOW, RESET);
-        }
-        return g_rtx_dummy;
-    }
-    return *g_rtx_instance;
-}

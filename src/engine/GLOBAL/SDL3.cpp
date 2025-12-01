@@ -73,8 +73,7 @@ SDL3Input::~SDL3Input()
 {
     const size_t count = m_gamepads.size();
     if (count > 0) {
-        LOG_INFO_CAT("Dispose", "{}SDL3Input destroyed — {} gamepad(s) auto-closed by RAII{}", 
-                     SAPPHIRE_BLUE, count, RESET);
+        LOG_INFO_CAT("Dispose", "{}SDL3Input destroyed — {} gamepad(s) auto-closed by RAII{}", SAPPHIRE_BLUE, count, RESET);
     } else {
         LOG_INFO_CAT("Dispose", "{}SDL3Input destroyed — no gamepads to close{}", SAPPHIRE_BLUE, RESET);
     }

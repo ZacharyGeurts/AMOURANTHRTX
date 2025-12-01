@@ -48,7 +48,6 @@
 
 // Forward declarations
 class VulkanRTX;
-class VulkanRenderer;
 
 struct Camera;
 
@@ -305,12 +304,6 @@ public:
 
     void retrieveQueues() noexcept = delete; // NO LONGER NEEDED — done in createLogicalDevice
 
-    // =============================================================================
-    // Global Empire Resources
-    // =============================================================================
-    Handle<VkRenderPass>& renderPass();
-
-    [[nodiscard]] VulkanRenderer& renderer();
     void initRenderer(int w, int h);
     void renderFrame(const Camera& camera, float deltaTime) noexcept;
     void shutdown() noexcept;

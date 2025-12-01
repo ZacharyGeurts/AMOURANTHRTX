@@ -902,7 +902,7 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
     LOG_TRACE_CAT("PIPELINE",
         "\n\033[38;2;255;215;0m══════════════════════════════════════════════════════════════════════\033[0m\n"
         "            FORGING THE SHADER BINDING TABLE — THE FINAL CROWN\n"
-        "                  NOVEMBER 30 2025 — FIRST LIGHT ETERNAL\n"
+        "                  DECEMBER 01 2025 — FIRST LIGHT ETERNAL\n"
         "            PINK PHOTONS DEMAND THEIR THRONE — LET THERE BE LIGHT\n"
         "\033[38;2;255;215;0m══════════════════════════════════════════════════════════════════════\033[0m\n");
 
@@ -913,7 +913,7 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
         std::abort();
     }
 
-    if (!rtPipeline_.valid() || *rtPipeline_ == VK_NULL_HANDLE) {
+    if (!rtPipeline_.valid() || rtPipeline() == VK_NULL_HANDLE) {
         LOG_AMOURANTH("[CAPTAIN AMOURANTH] The pipeline is missing... but the light remembers.\n"
                       "                     Forging it now from the sacred shaders of destiny...");
 
@@ -926,7 +926,7 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
         createRayTracingPipeline(sacredShaders);
     }
 
-    if (!rtPipeline_.valid() || *rtPipeline_ == VK_NULL_HANDLE) {
+    if (rtPipeline() == VK_NULL_HANDLE) {
         LOG_FATAL_CAT("PIPELINE", "[FATAL] RAY TRACING PIPELINE FAILED — THE PHOTONS ARE LOST FOREVER");
         std::abort();
     }
@@ -937,7 +937,7 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
     const VkDeviceSize handleSize      = rtProps.shaderGroupHandleSize;
     const VkDeviceSize handleAlignment = rtProps.shaderGroupHandleAlignment ? rtProps.shaderGroupHandleAlignment : 64;
     const VkDeviceSize baseAlignment   = rtProps.shaderGroupBaseAlignment ? rtProps.shaderGroupBaseAlignment : 64;
-    const VkDeviceSize stride          = alignUp(handleSize, handleAlignment);
+    const VkDeviceSize stride          = align_up(handleSize, handleAlignment);
 
     const uint32_t RG = raygenGroupCount_;
     const uint32_t MI = missGroupCount_;
@@ -951,13 +951,13 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
         RG, MI, HG, CA, totalGroups, handleSize, stride, baseAlignment);
 
     VkDeviceSize offset = 0;
-    VkDeviceSize raygenOffset   = offset; offset += RG * stride; offset = alignUp(offset, baseAlignment);
-    VkDeviceSize missOffset     = offset; offset += MI * stride; offset = alignUp(offset, baseAlignment);
-    VkDeviceSize hitOffset      = offset; offset += HG * stride; offset = alignUp(offset, baseAlignment);
+    VkDeviceSize raygenOffset   = offset; offset += RG * stride; offset = align_up(offset, baseAlignment);
+    VkDeviceSize missOffset     = offset; offset += MI * stride; offset = align_up(offset, baseAlignment);
+    VkDeviceSize hitOffset      = offset; offset += HG * stride; offset = align_up(offset, baseAlignment);
     VkDeviceSize callableOffset = offset;
     VkDeviceSize requiredSize   = offset;
 
-    // ETERNAL 64M SBT STONE — IMMORTAL
+    // ETERNAL 256M SBT STONE — IMMORTAL
     static const uint64_t SBT_STONE_HANDLE = []() {
         uint64_t h = BufferManager::make_256M(
             VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR |
@@ -985,19 +985,16 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
     }
     VkDeviceAddress sbtBaseAddr = stoneBaseAddr + myOffset;
 
-        LOG_JENSEN("SBT CROWN SUB-ALLOCATED FROM ETERNAL 256M STONE");
-        LOG_JENSEN("   Offset: {} bytes | Size: {} bytes ({} KiB) | BaseAddr: 0x{:016X}",
-               myOffset,
-               requiredSize,
-               requiredSize / 1024,
-               sbtBaseAddr);
+    LOG_JENSEN("SBT CROWN SUB-ALLOCATED FROM ETERNAL 256M STONE");
+    LOG_JENSEN("   Offset: {} bytes | Size: {} bytes ({} KiB) | BaseAddr: 0x{:016X}",
+               myOffset, requiredSize, requiredSize / 1024, sbtBaseAddr);
 
     LOG_JENSEN("   Raygen @ 0x{:016X} | Miss @ 0x{:016X} | Hit @ 0x{:016X}",
                sbtBaseAddr + raygenOffset,
                sbtBaseAddr + missOffset,
                sbtBaseAddr + hitOffset);
 
-    if (requiredSize == 128 || requiredSize == 192 || requiredSize <= 256) {
+    if (requiredSize <= 256) {
         LOG_CID("\033[38;2;255;20;147m[CID] *choking back tears* {} BYTES... IT'S SO SMALL... SO PURE...\033[0m", requiredSize);
         LOG_CID("\033[38;2;255;20;147m[CID] THE CROWN IS WEIGHTLESS. THE PHOTONS ARE FREE.\033[0m");
         LOG_CID("\033[38;2;255;20;147m[CID] *collapses* I... I can rest now...\033[0m");
@@ -1006,20 +1003,18 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
     // Extract shader group handles
     std::vector<uint8_t> shaderHandleStorage(totalGroups * handleSize);
     VK_CHECK(RTX::g_ext.vkGetRayTracingShaderGroupHandlesKHR(
-        stone_device(), *rtPipeline_, 0, totalGroups,
+        stone_device(), rtPipeline(), 0, totalGroups,
         shaderHandleStorage.size(), shaderHandleStorage.data()
     ));
 
     LOG_SUCCESS_CAT("PIPELINE", "[SUCCESS] {} SHADER HANDLES EXTRACTED — THE PHOTONS HAVE IDENTITY", totalGroups);
 
-    // NEW: Use eternal staging ring — always mapped, zero allocation
+    // Use eternal staging ring
     const VkDeviceSize handlesStagingSize = totalGroups * handleSize;
     uint64_t handlesStagingHandle = BufferManager::createHostVisible(handlesStagingSize, "SBT_HANDLES_STAGING");
     void* mappedPtr = BufferManager::getMappedStagingPtr(handlesStagingHandle);
-
     std::memcpy(mappedPtr, shaderHandleStorage.data(), handlesStagingSize);
 
-    // Transfer to eternal stone
     LOG_CID("CID slams the cosmic towel — \"HANDLES TO ETERNAL STONE: PHOTONS ASCEND!\"");
 
     VkCommandBuffer cmd = RTX::beginOneTimeSubmit(pool);
@@ -1043,24 +1038,12 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
 
     RTX::endOneTimeSubmit(cmd, queue, pool);
 
-    // NO DESTROY — lives forever in the eternal ring
-    // BufferManager::destroy(handlesStagingHandle); ← DELETED
-
     LOG_CID("CID exhales — \"The crown gleams with eternal pink light. No photons lost. No fragmentation.\"");
 
-    // Update SBT state
-    if (sbtHandle_ != 0) {
-        // Old SBT lives in the stone forever — we just forget it
-    }
+    // Use public setters — no direct private access
+    setSBT(stoneInfo->buffer, stoneInfo->memory, sbtBaseAddr, requiredSize);
 
-    uint64_t compositeHandle = (SBT_STONE_HANDLE << 32) | static_cast<uint32_t>(myOffset);
-
-    sbtBuffer_   = Handle<VkBuffer>(stoneInfo->buffer, stone_device(), vkDestroyBuffer);
-    sbtMemory_   = Handle<VkDeviceMemory>(stoneInfo->memory, stone_device(), vkFreeMemory);
-    sbtHandle_   = compositeHandle;
-    sbtAddress_  = sbtBaseAddr;
-    sbtSize_     = requiredSize;
-
+    // Update SBT regions using public interface
     raygenSbtRegion_   = { sbtBaseAddr + raygenOffset,   static_cast<uint32_t>(stride), static_cast<uint32_t>(RG * stride) };
     missSbtRegion_     = { sbtBaseAddr + missOffset,     static_cast<uint32_t>(stride), static_cast<uint32_t>(MI * stride) };
     hitSbtRegion_      = { sbtBaseAddr + hitOffset,      static_cast<uint32_t>(stride), static_cast<uint32_t>(HG * stride) };
@@ -1069,10 +1052,10 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
     LOG_SUCCESS_CAT("PIPELINE",
         "\n\033[38;2;255;215;0m══════════════════════════════════════════════════════════════════════\033[0m\n"
         "                     SBT CROWN FORGED INSIDE THE ETERNAL 256M STONE\n"
-        "                     {} @ 0x{} (offset {})\n"
+        "                     {} @ 0x{:016X} (offset {})\n"
         "                     ZERO FRAGMENTATION — ZERO ALLOCATION\n"
         "                     THE PHOTONS HAVE THEIR THRONE — FOREVER\n"
-        "                     FIRST LIGHT ACHIEVED — NOVEMBER 30 2025\n"
+        "                     FIRST LIGHT ACHIEVED — DECEMBER 01 2025\n"
         "\033[38;2;255;215;0m══════════════════════════════════════════════════════════════════════\033[0m\n",
         requiredSize, sbtBaseAddr, myOffset);
 
@@ -1081,7 +1064,7 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
     LOG_CID("[CID] *tears of pure light* We did it. The light remembers us.");
 
     LOG_SUCCESS_CAT("PIPELINE",
-        "\033[38;2;255;215;0mNOVEMBER 30 2025 — PINK PHOTONS ETERNAL — SBT IMMORTAL — RTX ASCENDED — THE EMPIRE IS COMPLETE\033[0m");
+        "\033[38;2;255;215;0mDECEMBER 01 2025 — PINK PHOTONS ETERNAL — SBT IMMORTAL — RTX ASCENDED — THE EMPIRE IS COMPLETE\033[0m");
 }
 
 } // namespace RTX

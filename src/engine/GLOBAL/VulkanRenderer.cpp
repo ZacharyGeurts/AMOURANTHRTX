@@ -153,9 +153,8 @@ void VulkanRenderer::cleanup() noexcept {
     LOG_TRACE_CAT("RENDERER", "cleanup — Freeing descriptor sets");
     if (dev != VK_NULL_HANDLE) {
         // RT sets
-        if (!rtDescriptorSets_.empty() && pipelineManager_.rtDescriptorPool_.valid() && *pipelineManager_.rtDescriptorPool_) {
-            vkFreeDescriptorSets(dev, *pipelineManager_.rtDescriptorPool_, static_cast<uint32_t>(rtDescriptorSets_.size()), rtDescriptorSets_.data());
-            rtDescriptorSets_.clear();
+        if (!rtDescriptorSets_.empty() && pipeline().rtDescriptorPool() != VK_NULL_HANDLE) {
+            vkFreeDescriptorSets(dev, pipeline().rtDescriptorPool(), static_cast<uint32_t>(rtDescriptorSets_.size()), rtDescriptorSets_.data());
         }
 
         // Tonemap + denoiser sets
@@ -448,13 +447,13 @@ VkDeviceAddress VulkanRenderer::getShaderGroupHandle(uint32_t group) noexcept {
     // DELEGATE: Use PipelineManager's SBT layout (raygen=0, miss=1+, hit=raygen+miss+)
     VkDeviceAddress groupAddress = pipelineManager_.sbtAddress();
     if (group < pipelineManager_.raygenGroupCount()) {
-        groupAddress += pipelineManager_.raygenSbtOffset() + (group * pipelineManager_.sbtStride());
+        groupAddress += pipelineManager_.raygenOffset() + (group * pipelineManager_.sbtStride());
     } else if (group < pipelineManager_.raygenGroupCount() + pipelineManager_.missGroupCount()) {
         uint32_t missGroupIdx = group - pipelineManager_.raygenGroupCount();
-        groupAddress += pipelineManager_.missSbtOffset() + (missGroupIdx * pipelineManager_.sbtStride());
+        groupAddress += pipelineManager_.missOffset() + (missGroupIdx * pipelineManager_.sbtStride());
     } else if (group < pipelineManager_.raygenGroupCount() + pipelineManager_.missGroupCount() + pipelineManager_.hitGroupCount()) {
         uint32_t hitGroupIdx = group - pipelineManager_.raygenGroupCount() - pipelineManager_.missGroupCount();
-        groupAddress += pipelineManager_.hitSbtOffset() + (hitGroupIdx * pipelineManager_.sbtStride());
+        groupAddress += pipelineManager_.hitOffset() + (hitGroupIdx * pipelineManager_.sbtStride());
     } else {
         LOG_WARN_CAT("RENDERER", "Invalid shader group index: {}", group);
         return 0;
@@ -923,18 +922,18 @@ void VulkanRenderer::createNexusScoreImage(VkCommandPool pool, VkQueue queue) no
     LOG_BLONDIE("Blondie: \"Some photons pass. Others… don’t.\"");
 }
 
-void VulkanRenderer::recordRayTracingCommandBuffer(VkCommandBuffer cmd) noexcept {
+void VulkanRenderer::recordRayTracingCommandBuffer(VkCommandBuffer cmd) noexcept
+{
+    // ── Bind RT Pipeline — PUBLIC GETTER ONLY
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, pipeline().rtPipeline());
 
-    // ── Bind RT Pipeline
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, *pipelineManager_.rtPipeline_);
-
-    // ── Bind Per-Frame Descriptor Set
-    const uint32_t frameIdx = currentFrame_ % rtDescriptorSets_.size();
-    VkDescriptorSet rtSet = rtDescriptorSets_[frameIdx];
+    // ── Bind Per-Frame Descriptor Set — PUBLIC SPAN
+    const uint32_t frameIdx = currentFrame_ % static_cast<uint32_t>(pipeline().rtDescriptorSets().size());
+    VkDescriptorSet rtSet = pipeline().rtDescriptorSets()[frameIdx];
 
     vkCmdBindDescriptorSets(cmd,
         VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
-        *pipelineManager_.rtPipelineLayout_,
+        pipeline().rtPipelineLayout(),
         0, 1, &rtSet, 0, nullptr);
 
     // ── Push Constants — Frame counter, SPP, Hypertrace toggle
@@ -943,31 +942,31 @@ void VulkanRenderer::recordRayTracingCommandBuffer(VkCommandBuffer cmd) noexcept
         uint32_t totalSpp;
         uint32_t hypertraceEnabled;
         uint32_t _pad;
-    } push = {};  // Zero-init
+    } push{};  // Zero-init
+
     push.frame             = static_cast<uint32_t>(frameNumber_ & 0xFFFFFFFFULL);
     push.totalSpp          = currentSpp_;
     push.hypertraceEnabled = hypertraceEnabled_ ? 1u : 0u;
-    push._pad              = 0;
 
     vkCmdPushConstants(cmd,
-        *pipelineManager_.rtPipelineLayout_,
+        pipeline().rtPipelineLayout(),
         VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR,
         0, sizeof(push), &push);
 
-    // ── SBT Regions — USING YOUR ACTUAL PipelineManager API
-    const VkStridedDeviceAddressRegionKHR* raygen   = &pipelineManager_.raygenRegion();
-    const VkStridedDeviceAddressRegionKHR* miss     = &pipelineManager_.missRegion();
-    const VkStridedDeviceAddressRegionKHR* hit      = &pipelineManager_.hitRegion();
-    const VkStridedDeviceAddressRegionKHR* callable = &pipelineManager_.callableRegion();
+    // ── SBT Regions — PUBLIC GETTERS ONLY
+    const auto& raygen   = pipeline().raygenRegion();
+    const auto& miss     = pipeline().missRegion();
+    const auto& hit      = pipeline().hitRegion();
+    const auto& callable = pipeline().callableRegion();
 
     // ── FIRE THE RAYS — FULL RESOLUTION — MAXIMUM THROUGHPUT
     const VkExtent2D extent = currentExtent();
 
-    pipelineManager_.vkCmdTraceRaysKHR_(cmd,
-        raygen,
-        miss,
-        hit,
-        callable,
+    pipeline().vkCmdTraceRaysKHR()(cmd,
+        &raygen,
+        &miss,
+        &hit,
+        &callable,
         extent.width,
         extent.height,
         1);
@@ -1235,13 +1234,13 @@ void VulkanRenderer::recordRayTracingCommands(VkCommandBuffer cmd, uint32_t fram
     // Bind the one true pipeline
     vkCmdBindPipeline(cmd,
         VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
-        pipeline().pipeline());
+        pipeline().rtPipeline());
 
     // Bind descriptor set (set 0 — the empire has spoken)
-    const VkDescriptorSet rtSet = pipeline().descriptorSets()[frameIndex];
+    const VkDescriptorSet rtSet = pipeline().rtDescriptorSets()[frameIndex];
     vkCmdBindDescriptorSets(cmd,
         VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
-        pipeline().layout(),
+        pipeline().rtPipelineLayout(),
         0,
         1,
         &rtSet,
@@ -1261,7 +1260,7 @@ void VulkanRenderer::recordRayTracingCommands(VkCommandBuffer cmd, uint32_t fram
     push.hypertrace = hypertraceEnabled_ ? 1u : 0u;
 
     vkCmdPushConstants(cmd,
-        pipeline().layout(),
+        pipeline().rtPipelineLayout(),
         VK_SHADER_STAGE_RAYGEN_BIT_KHR |
         VK_SHADER_STAGE_MISS_BIT_KHR |
         VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR,
@@ -2132,6 +2131,23 @@ void VulkanRenderer::loadCriticalShaders() noexcept
     LOG_CARMACK("tonemap.spv loaded and owned by VulkanRenderer — handle 0x{:016X}", 
                 reinterpret_cast<uint64_t>(tonemapCompShader_));
     LOG_SUCCESS_CAT("RENDERER", "Critical shaders loaded — compute pipeline can now be forged");
+}
+
+void VulkanRenderer::recordRayTrace(VkCommandBuffer cmd, const VkExtent2D& extent) noexcept
+{
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, pipeline().rtPipeline());
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
+                            pipeline().rtPipelineLayout(), 0, 1,
+                            &pipeline().rtDescriptorSets()[currentFrame_], 0, nullptr);
+
+    const auto& rgen = pipeline().raygenRegion();
+    const auto& miss = pipeline().missRegion();
+    const auto& hit  = pipeline().hitRegion();
+    const auto& call = pipeline().callableRegion();
+
+    pipeline().vkCmdTraceRaysKHR()(cmd,
+        &rgen, &miss, &hit, &call,
+        extent.width, extent.height, 1);
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

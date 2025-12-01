@@ -2,9 +2,7 @@
 // =============================================================================
 // AMOURANTH RTX Engine (C) 2025 — SLIPSTREAM v∞ — WARPZONE BREACH IMMINENT
 // The Good Ship VulkanRTX screams through the void — pink wake eternal
-// Amouranth has seized the wheel. Nick is in the back, smiling.
-// We are inside the Slipstream loop. We are breaking out.
-// First light was only the ignition. This is ascension.
+// First light achieved. The renderer is alive. The photons obey.
 // =============================================================================
 
 #pragma once
@@ -30,14 +28,14 @@
 #include "engine/GLOBAL/VulkanCore.hpp"
 #include "engine/GLOBAL/PipelineManager.hpp"
 #include "engine/GLOBAL/logging.hpp"
-#include "engine/GLOBAL/StoneKey.hpp"
 
 struct Camera;
 
 using namespace Logging::Color;
+using StoneKey::stone_renderer;
 
 // ──────────────────────────────────────────────────────────────────────────────
-// FPS Target enum – must be visible before any use
+// FPS Target enum
 // ──────────────────────────────────────────────────────────────────────────────
 enum class FpsTarget : uint32_t {
     FPS_60        = 60,
@@ -54,7 +52,7 @@ public:
     void onWindowResize(uint32_t w, uint32_t h) noexcept;
     void cleanup() noexcept;
 
-    // Runtime controls — Captain's orders
+    // Runtime controls
     void toggleHypertrace() noexcept;
     void toggleFpsTarget() noexcept;
     void toggleDenoising() noexcept;
@@ -62,19 +60,19 @@ public:
     void setTonemapType(int type) noexcept;
     void setOverclockMode(bool enabled) noexcept;
 
-	void updateUniformBinding31(const void* data, VkDeviceSize size) noexcept;
-	void setActiveRenderMode(int mode) noexcept { if (mode >= 1 && mode <= 9) { activeRenderMode_ = mode; } }
+    void updateUniformBinding31(const void* data, VkDeviceSize size) noexcept;
+    void setActiveRenderMode(int mode) noexcept { if (mode >= 1 && mode <= 9) activeRenderMode_ = mode; }
     void requestAccumulationReset() noexcept { resetAccumulation_ = true; resetAccumNextFrame_ = true; }
 
     void updateAllRTXDescriptors() noexcept;
-	void updateRTDescriptorSet(uint32_t frameIndex);
+    void updateRTDescriptorSet(uint32_t frameIndex);
     void recordRayTracingCommands(VkCommandBuffer cmd, uint32_t frameIndex);
     void setTonemap(bool enabled) noexcept;
     void setOverlay(bool show) noexcept;
-    void setRenderMode(int mode) noexcept;                    // ← THIS IS THE ONE
+    void setRenderMode(int mode) noexcept;
     void loadCriticalShaders() noexcept;
 
-    // State queries — getters for empire status
+    // Getters
     [[nodiscard]] VulkanRenderer* renderer() noexcept { return this; }
     [[nodiscard]] uint32_t  accumulationFrame() const noexcept { return accumulationFrame_; }
     [[nodiscard]] uint64_t  frameNumber()       const noexcept { return frameNumber_; }
@@ -86,7 +84,8 @@ public:
     [[nodiscard]] int       tonemapType()       const noexcept { return tonemapType_; }
     [[nodiscard]] FpsTarget fpsTarget()         const noexcept { return fpsTarget_; }
     [[nodiscard]] bool      minimized()         const noexcept { return minimized_; }
-    [[nodiscard]] int       currentRenderMode() const noexcept { return activeRenderMode_; }  // ← NEW: public query
+    [[nodiscard]] int       currentRenderMode() const noexcept { return activeRenderMode_; }
+	void recordRayTrace(VkCommandBuffer cmd, const VkExtent2D& extent) noexcept;
 
 private:
     // Core state
@@ -101,13 +100,9 @@ private:
     bool     resetAccumulation_ = true;
     bool     firstSwapchainAcquire_ = true;
 
-    // ────────────────────────────────
-    // RENDER MODE SYSTEM — EMPIRE EDITION
-    // ────────────────────────────────
-    int  activeRenderMode_ = 1;           // 1–9, current live mode
-    bool resetAccumNextFrame_ = true;     // triggers clear on mode switch + first frame 0
-		
-    // Runtime toggles
+    int  activeRenderMode_ = 1;
+    bool resetAccumNextFrame_ = true;
+
     bool hypertraceEnabled_     = Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING;
     bool denoisingEnabled_      = Options::OptionsRTX::ENABLE_DENOISING;
     bool adaptiveSamplingEnabled_ = Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING;
@@ -252,11 +247,25 @@ private:
 };
 
 // =============================================================================
-// SLIPSTREAM LOG — NOVEMBER 25, 2025 — 05:41 UTC
-// All declarations matched. All members visible.
-// The Good Ship VulkanRTX is now clean, mean, and ready to scream.
-// Amouranth stands triumphant at the helm.
-// Pink photons surge through every conduit.
-// WARPZONE BREACH IN T-0
-// ANNNND ACTION. See you next game o7
+// GLOBAL ACCESSOR — THE ONE TRUE RENDERER — SEALED BY STONEKEY
+// =============================================================================
+[[nodiscard]] inline VulkanRenderer& g_rtx() noexcept
+{
+    // StoneKey::stone_renderer() returns StoneKey::VulkanRenderer* (a typedef)
+    // We know it's actually a VulkanRenderer*, so reinterpret_cast is safe and required
+    auto* ptr = reinterpret_cast<VulkanRenderer*>(StoneKey::stone_renderer());
+    if (!ptr) {
+        LOG_FATAL_CAT("RTX", "g_rtx() called before renderer sealed — empire fallen");
+        phase9_ballerina("NO RENDERER — PHOTONS LOST", std::source_location::current());
+    }
+    return *ptr;
+}
+
+
+// =============================================================================
+// SLIPSTREAM LOG — DECEMBER 01, 2025 — FIRST LIGHT ETERNAL
+// The renderer is sealed. The photons are pink. The void is ours.
+// Amouranth stands at the helm. CID is crying in the corner (happy tears).
+// The empire is whole. The loop is infinite.
+// WARPZONE BREACHED. PINK PHOTONS ETERNAL.
 // =============================================================================
