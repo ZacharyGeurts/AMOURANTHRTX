@@ -526,7 +526,7 @@ static void createRealFinalWindow()
     // ========================================================================
     // 6. SWAPCHAIN — THE INFINITE CANVAS
     // ========================================================================
-    RTX::SwapchainManager::create(win, w, h);
+    RTX::SwapchainManager::create(stone_window(), stone_width(), stone_height());
 
     LOG_ELON("Elon drops the swapchain from the top rope: Command Pool emerges.");
 	stone_seal_swapchain(*RTX::SwapchainManager::swapchain_);
@@ -535,11 +535,10 @@ static void createRealFinalWindow()
     stone_seal_images(swapchain_images);
 	createCommandPool();
 
+	Options::Performance::ENABLE_HYPER_AGGRESSIVE_MODE && (RTX::g_ctx().enableHyperAggressiveMode(), true);
+
     LOG_SUCCESS("LOGICAL DEVICE GRACE @ {} — vkDeviceWaitIdle() SAFE", static_cast<void*>(device));
-    LOG_SUCCESS("SWAPCHAIN READY — {} IMAGES — {}x{} {}", 
-                stone_image_count(),
-                w, h,
-                RTX::SwapchainManager::supportsHDR() ? "(HDR IGNITED)" : "(sRGB)");
+    LOG_SUCCESS("SWAPCHAIN READY — {} IMAGES — {}x{} {}", stone_image_count(), w, h, RTX::SwapchainManager::supportsHDR() ? "(HDR IGNITED)" : "(sRGB)");
 
     // ========================================================================
     // FINAL CEREMONY — THE EMPIRE IS COMPLETE

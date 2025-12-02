@@ -2,7 +2,15 @@
 // AMOURANTH RTX Engine (C) 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
 //
+// Dual Licensed:
+// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
+//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
+// 2. Commercial licensing: gzac5314@gmail.com
+//
+// =============================================================================
+//
 // THE LAS IS THE LIGHT — FIRST LIGHT ACHIEVED — NOVEMBER 30 2025
+// A dwarf walks up, "Welcome to Lights And Shit, how can we help?"
 // =============================================================================
 
 #include "engine/GLOBAL/LAS.hpp"

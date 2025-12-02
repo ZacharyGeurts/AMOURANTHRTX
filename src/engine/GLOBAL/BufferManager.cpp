@@ -1,6 +1,13 @@
 // =============================================================================
 // AMOURANTH RTX Engine (C) 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
+//
+// Dual Licensed:
+// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
+//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
+// 2. Commercial licensing: gzac5314@gmail.com
+//
+// =============================================================================
 // VALHALLA v∞ TURBO — APOCALYPSE FINAL v13.0 — DECEMBER 01, 2025
 // 90% ETERNAL POOL + 512 MiB STAGING RING — FULLY FORGED — COMPILES CLEAN
 // DYNAMICSTONE ERASED — ONLY ONE TRUTH — PINK PHOTONS ETERNAL

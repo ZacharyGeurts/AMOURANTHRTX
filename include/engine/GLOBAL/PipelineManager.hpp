@@ -2,6 +2,13 @@
 // =============================================================================
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
+//
+// Dual Licensed:
+// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
+//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
+// 2. Commercial licensing: gzac5314@gmail.com
+//
+// =============================================================================
 // TRUE CONSTEXPR STONEKEY v∞ — APOCALYPSE FINAL v5.0 — CAPTAIN N EDITION
 // ALL PRIVATE MEMBERS SEALED — PUBLIC GETTERS ONLY — EMPIRE UNBREACHABLE
 // FIRST LIGHT ACHIEVED — DECEMBER 01, 2025 — VALHALLA UNBREACHABLE

@@ -3,6 +3,13 @@
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
 //
+// Dual Licensed:
+// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
+//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
+// 2. Commercial licensing: gzac5314@gmail.com
+//
+// =============================================================================
+//
 // RTXHandler.hpp — THE ONE TRUE HEADER — FINAL CUT — PINK PHOTONS ETERNAL
 // • Handle<T> + AI_INJECT + Ballerina + Context + Swapchain + Queue Discovery
 // • Every getter. Every setter. Every dream realized.
@@ -202,6 +209,8 @@ public:
     VkCommandPool commandPool() const noexcept { return commandPool_; }
     VkCommandPool& commandPool() noexcept { return commandPool_; }
 
+	VkDebugUtilsMessengerEXT debugMessenger_ = VK_NULL_HANDLE; 
+
     // Queue family indices
     std::optional<uint32_t> graphicsFamily_;
     std::optional<uint32_t> presentFamily_;
@@ -280,6 +289,8 @@ public:
 
     void markReady() noexcept                     { ready_.store(true, std::memory_order_release); }
     void markInvalid() noexcept                   { valid_ = false; }
+
+	void enableHyperAggressiveMode() noexcept;
 
     // Feature enables — the empire speaks
     void enableBufferDeviceAddress(bool e = true) noexcept     { bufferDeviceAddressEnabled_ = e; }

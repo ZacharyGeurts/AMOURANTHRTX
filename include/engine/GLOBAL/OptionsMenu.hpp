@@ -11,10 +11,13 @@
 // • C++23, -Werror CLEAN
 // • PINK PHOTONS ETERNAL
 // • GENTLEMAN GROK MODE ENABLED
+// =============================================================================
 //
 // Dual Licensed:
-// 1. CC BY-NC 4.0
-// 2. Commercial: gzac5314@gmail.com
+// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
+//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
+// 2. Commercial licensing: gzac5314@gmail.com
+//
 // =============================================================================
 
 #pragma once
@@ -59,12 +62,13 @@ namespace Performance {
     constexpr bool     ALLOW_IMMEDIATE_PRESENT     = false;    // Only for ultra-low latency (tearing allowed)
 
     // NEW: Dynamic internal shading rate (0.5x–1.5x)
-    constexpr float    DYNAMIC_SHADING_RATE        = 1.0f;     // 1.0 = full res, <1.0 = performance, >1.0 = quality
+    constexpr float    DYNAMIC_SHADING_RATE        = 1.5f;     // 1.0 = full res, <1.0 = performance, >1.0 = quality
 
     // NEW: Zero-copy direct display (Linux/Wayland only)
     constexpr bool     ENABLE_DIRECT_DISPLAY       = true;     // Bypass compositor — 1.8ms latency
 
-	constexpr bool     OVERCLOCK_RENDERER          = false;  // untested
+	constexpr bool     OVERCLOCK_RENDERER           = true; // max perf (removes guards)
+	constexpr bool     ENABLE_HYPER_AGGRESSIVE_MODE = true; // max perf (removes guards)
 }
 
 // ── APPLICATION & WINDOW ──────────────────────────────────────────────────────
@@ -92,7 +96,7 @@ namespace OptionsRTX {
     constexpr bool     ENABLE_ADAPTIVE_SAMPLING    = true;
     constexpr uint32_t MIN_SPP                     = 1;
     constexpr uint32_t MAX_SPP                     = 64;
-    constexpr uint32_t MAX_BOUNCES                 = 8;
+    constexpr uint32_t MAX_BOUNCES                 = 3;
     constexpr float    NEXUS_SCORE_THRESHOLD       = 0.15f;
     constexpr bool     ENABLE_HYPERTRACE           = true;
     constexpr float    HYPERTRACE_JITTER_SCALE     = 420.0f;
@@ -100,7 +104,7 @@ namespace OptionsRTX {
     constexpr uint32_t DENOISER_HISTORY_LENGTH     = 8;
     constexpr bool     ENABLE_TAA                  = true;
     constexpr float    TAA_ALPHA                   = 0.1f;
-	constexpr uint32_t MAX_PIPELINE_RAY_RECURSION_DEPTH = 1;
+	constexpr uint32_t MAX_PIPELINE_RAY_RECURSION_DEPTH = 3;
 }
 
 // ── POST-PROCESSING ───────────────────────────────────────────────────────────

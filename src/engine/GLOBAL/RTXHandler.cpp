@@ -2,6 +2,13 @@
 // engine/GLOBAL/RTXHandler.cpp
 // AMOURANTH RTX Engine © 2025 — The Handler & His Lady Ballerina
 // =============================================================================
+//
+// Dual Licensed:
+// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
+//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
+// 2. Commercial licensing: gzac5314@gmail.com
+//
+// =============================================================================
 
 #include "engine/GLOBAL/RTXHandler.hpp"
 #include "engine/GLOBAL/logging.hpp"
@@ -13,6 +20,10 @@
 #include <algorithm>
 #include <unordered_set>
 #include <set>
+#include <sys/resource.h>  // for setpriority, PRIO_PROCESS
+#include <sched.h>         // for sched_setaffinity
+#include <unistd.h>        // for getpid, etc.
+#include <sys/syscall.h>   // for gettid if neede
 
 using namespace Logging::Color;
 using StoneKey::stone_device;
@@ -66,6 +77,58 @@ void WriteAccelerationStructureDescriptor(VkDescriptorSet dstSet, uint32_t dstBi
     };
 
     vkUpdateDescriptorSets(stone_device(), 1, &write, 0, nullptr);
+}
+
+void Context::enableHyperAggressiveMode() noexcept
+{
+    if (!Options::Performance::ENABLE_HYPER_AGGRESSIVE_MODE) {
+        LOG_INFO_CAT("RTX", "Hyper Aggressive Mode disabled by constexpr — empire rests.");
+        return;
+    }
+
+    LOG_AMOURANTH("HYPER AGGRESSIVE MODE ACTIVATED — ALL GUARDS REMOVED");
+    LOG_AMOURANTH("GPU WILL SCREAM. FANS WILL ROAR. PHOTONS WILL BURN.");
+
+    putenv(const_cast<char*>("__GL_SYNC_TO_VBLANK=0"));
+    putenv(const_cast<char*>("__GL_YIELD=NOTHING"));
+    putenv(const_cast<char*>("MESA_GLTHREAD_OVERRIDE=1"));
+    putenv(const_cast<char*>("vblank_mode=0"));
+
+#ifdef __linux__
+    setpriority(PRIO_PROCESS, 0, -20);
+
+    cpu_set_t mask;
+    CPU_ZERO(&mask);
+    for (int i = 0; i < 32; i += 2) {
+        if (i < CPU_SETSIZE) CPU_SET(i, &mask);
+    }
+    sched_setaffinity(0, sizeof(mask), &mask);
+
+    // ONE ignored TO RULE THEM ALL
+    [[maybe_unused]] int ignored;
+    ignored = system("cpupower frequency-set -g performance >/dev/null 2>&1 || true");
+    ignored = system("echo performance | tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor >/dev/null 2>&1 || true");
+#endif
+
+    [[maybe_unused]] int ignored2;
+    ignored2 = system("nvidia-smi -pm 1 >/dev/null 2>&1 &");
+    ignored2 = system("echo auto > /sys/bus/pci/devices/*/power/control 2>/dev/null || true");
+
+    if (debugMessenger_ != VK_NULL_HANDLE) {
+        auto func = (PFN_vkDestroyDebugUtilsMessengerEXT)
+            vkGetInstanceProcAddr(instance_, "vkDestroyDebugUtilsMessengerEXT");
+        if (func) {
+            func(instance_, debugMessenger_, nullptr);
+            debugMessenger_ = VK_NULL_HANDLE;
+            LOG_AMOURANTH("Validation layers executed — silence achieved.");
+        }
+    }
+
+    LOG_AMOURANTH("6000+ FPS INCOMING");
+    LOG_AMOURANTH("THE GPU IS NO LONGER A CARD");
+    LOG_AMOURANTH("IT IS A WEAPON");
+    LOG_AMOURANTH("THE PHOTONS ARE WHITE-HOT");
+    LOG_AMOURANTH("THE EMPIRE HAS ASCENDED");
 }
 
 void createGlobalDescriptorVault() noexcept

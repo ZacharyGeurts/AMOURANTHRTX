@@ -1,5 +1,13 @@
 // =============================================================================
  // engine/GLOBAL/SwapchainManager.cpp
+ // =============================================================================
+//
+// Dual Licensed:
+// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
+//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
+// 2. Commercial licensing: gzac5314@gmail.com
+//
+// =============================================================================
 // AMOURANTH RTX — VALHALLA v80 TURBO — FINAL COMPILABLE CUT
 // First light eternal — November 26, 2025
 // The shortest, meanest, most feature-rich swapchain on the planet.
@@ -239,7 +247,7 @@ void SwapchainManager::cleanup() noexcept
 // ────────────────────── Private helpers ──────────────────────
 void SwapchainManager::releaseAcquiredImages() noexcept
 {
-    // Placeholder
+    // *lifts tablecloth and moves on after checking
 }
 
 void SwapchainManager::createImageViews() noexcept
@@ -261,16 +269,19 @@ void SwapchainManager::createImageViews() noexcept
     }
 
     // Seal into StoneKey — Empire demands it
+    stone_seal_images(swapchainImages_);
+    stone_seal_views(swapchainImageViews_);
+    stone_seal_image_count(static_cast<uint32_t>(swapchainImages_.size()));
+    stone_seal_extent(swapchainExtent_);
 
-
-    LOG_SUCCESS_CAT("RTX", "Created {} swapchain image views — Empire sealed.", swapchainImages_.size());
+    LOG_AMOURANTH("Created {} swapchain image views — sealed with global vault — Binding 31 breathes.", swapchainImages_.size());
 }
 
 void SwapchainManager::createSwapchain(SDL_Window* window, uint32_t w, uint32_t h, VkSwapchainKHR old) noexcept
 {
     if (swapchain_.valid()) return;  // Empire does not create twice
 
-    // Cached queries — compute once per app
+    // Cached queries — compute once per app lifetime
     static VkSurfaceCapabilitiesKHR caps = {};
     static std::vector<VkSurfaceFormatKHR> formats = {};
     static std::vector<VkPresentModeKHR> presentModes = {};
@@ -293,11 +304,18 @@ void SwapchainManager::createSwapchain(SDL_Window* window, uint32_t w, uint32_t 
     uint32_t imageCount = caps.minImageCount + 1;
     if (caps.maxImageCount > 0) imageCount = std::min(imageCount, caps.maxImageCount);
 
+    // HDR Auto-Ignition — The Empire Decides
+    autoEnableHDR();
     VkSurfaceFormatKHR chosenFormat = formats[0];
     for (const auto& f : formats) {
-        if (f.format == VK_FORMAT_B8G8R8A8_SRGB && f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
+        if (supportsHDR() && 
+            (f.colorSpace == VK_COLOR_SPACE_HDR10_ST2084_EXT || 
+             f.colorSpace == VK_COLOR_SPACE_HDR10_HLG_EXT)) {
             chosenFormat = f;
             break;
+        }
+        if (f.format == VK_FORMAT_B8G8R8A8_SRGB && f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
+            chosenFormat = f;
         }
     }
 
@@ -310,7 +328,7 @@ void SwapchainManager::createSwapchain(SDL_Window* window, uint32_t w, uint32_t 
     QueueFamilyIndices indices = findQueueFamilies(stone_physical(), stone_surface());
     uint32_t queueFamilyIndices[] = { indices.graphicsFamily.value(), indices.presentFamily.value() };
 
-    // Mutable formats + compression — pNext chain
+    // pNext chain — compression + mutable formats
     VkFormat viewFormats[] = {VK_FORMAT_B8G8R8A8_SRGB, VK_FORMAT_R16G16B16A16_SFLOAT, VK_FORMAT_A2B10G10R10_UNORM_PACK32};
     VkImageFormatListCreateInfoKHR formatList{
         .sType = VK_STRUCTURE_TYPE_IMAGE_FORMAT_LIST_CREATE_INFO_KHR,
@@ -336,7 +354,7 @@ void SwapchainManager::createSwapchain(SDL_Window* window, uint32_t w, uint32_t 
         .imageColorSpace = chosenFormat.colorSpace,
         .imageExtent = extent,
         .imageArrayLayers = 1,
-        .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+        .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
         .preTransform = caps.currentTransform,
         .compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
         .presentMode = presentMode,
@@ -364,16 +382,24 @@ void SwapchainManager::createSwapchain(SDL_Window* window, uint32_t w, uint32_t 
     currentPresentMode_ = presentMode;
     currentTransform_ = caps.currentTransform;
 
-    // Get images
+    // Retrieve swapchain images
     uint32_t count = 0;
     VK_CHECK(vkGetSwapchainImagesKHR(stone_device(), raw, &count, nullptr));
 
     std::vector<VkImage> images(count);
     VK_CHECK(vkGetSwapchainImagesKHR(stone_device(), raw, &count, images.data()));
 
-    swapchainImages_ = images;
+    swapchainImages_ = std::move(images);
 
-    LOG_AMOURANTH("Swapchain forged — {}x{} | {} images | HDR {}", extent.width, extent.height, count, supportsHDR() ? "IGNITED" : "dormant");
+    // SEAL THE EMPIRE — ALL STONES NOW ALIGN
+    stone_seal_swapchain(raw);
+    stone_seal_extent(extent);
+    stone_seal_image_count(count);
+    stone_seal_images(swapchainImages_);
+
+    LOG_AMOURANTH("SWAPCHAIN FORGED — {}x{} | {} images | HDR {} | GLOBAL VAULT ACTIVE | BINDING 31 REIGNS",
+                  extent.width, extent.height, count,
+                  supportsHDR() ? "IGNITED" : "dormant");
 }
 
 // Feature 4: Present with ID and Wait
