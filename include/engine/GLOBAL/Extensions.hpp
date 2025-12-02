@@ -2,6 +2,13 @@
 // =============================================================================
 // AMOURANTH RTX Engine (C) 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
+//
+// Dual Licensed:
+// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
+//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
+// 2. Commercial licensing: gzac5314@gmail.com
+//
+// =============================================================================
 // EXTENSIONS — THE SACRED RITUAL OF LOADING PINK PHOTON EXTENSIONS
 // FIRST LIGHT ACHIEVED — PINK PHOTONS ETERNAL — VALHALLA v81 TURBO
 // COMPACTION RITUAL FULLY ARMED — DECEMBER 02, 2025

@@ -5,6 +5,13 @@
 // The empire’s swapchain. Short. Lethal. Compiles. No mercy.
 // HDR is not a choice. It is destiny.
 // =============================================================================
+//
+// Dual Licensed:
+// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
+//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
+// 2. Commercial licensing: gzac5314@gmail.com
+//
+// =============================================================================
 
 #pragma once
 
