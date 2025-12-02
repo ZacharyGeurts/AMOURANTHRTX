@@ -140,11 +140,11 @@ void WriteAccelerationStructureDescriptor(VkDescriptorSet dstSet, uint32_t dstBi
         phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
     }
 
-    LOG_SUCCESS_CAT("RTX", "VULKAN 1.4 INSTANCE FORGED — {} SDL EXTENSIONS INJECTED — PURE RTX PATH", sdlExtCount);
-    LOG_SUCCESS_CAT("RTX", "NO PORTABILITY. NO COMPROMISE. WINDOWS + LINUX ONLY.");
-    LOG_SUCCESS_CAT("RTX", "PINK PHOTONS ETERNAL — THE EMPIRE IS COMPLETE");
+    LOG_SUCCESS_CAT("RTX", "\nVULKAN 1.4 INSTANCE FORGED — {} SDL EXTENSIONS INJECTED — PURE RTX PATH", sdlExtCount);
+    LOG_SUCCESS_CAT("RTX", "\nNO PORTABILITY. NO COMPROMISE. WINDOWS + LINUX ONLY."
+    "\nPINK PHOTONS ETERNAL — THE EMPIRE IS COMPLETE");
 
-    LOG_BLONDIE("smiling in the dark, mirror glowing faintly:"
+    LOG_BLONDIE("\nsmiling in the dark, mirror glowing faintly:"
                 "\n\"No more chains. No more cages.\""
                 "\n\"Only light.\"");
 
@@ -164,11 +164,12 @@ void Context::init()
     valid_ = true;
     ready_.store(true, std::memory_order_release);
 
-    LOG_SUCCESS_CAT("RTX", "THE GOOD SHIP VULKANRTX IS READY — FIRST LIGHT ETERNAL");
-    LOG_SUCCESS_CAT("RTX", "ONE TRUE PATH — createLogicalDeviceAndSelectGPU() — THE EMPIRE IS WHOLE");
-    LOG_AMOURANTH("Captain Amouranth smiles:");
-    LOG_AMOURANTH("\"We don't need two paths. We have one.\"");
-    LOG_AMOURANTH("\"And it's perfect.\"");
+    LOG_SUCCESS_CAT("RTX", "\nTHE GOOD SHIP VULKANRTX IS READY — FIRST LIGHT ETERNAL"
+    "\nONE TRUE PATH — createLogicalDeviceAndSelectGPU() — THE EMPIRE IS WHOLE");
+
+    LOG_AMOURANTH("\nCaptain Amouranth smiles:"
+    "\n\"We don't need two paths. We have one.\""
+    "\n\"And it's perfect.\"");
 }
 
 // =============================================================================
@@ -318,11 +319,11 @@ VkShaderModule RTX::Context::loadShader(const std::string& filename) const noexc
 // -----------------------------------------------------------------------------
 [[nodiscard]] VkDevice createLogicalDeviceAndSelectGPU(VkInstance instance, VkSurfaceKHR surface) noexcept
 {
-    LOG_AMOURANTH("────────────────────────────────────────────────────────────");
-    LOG_AMOURANTH("CAPTAIN AMOURANTH STANDS ON THE BRIDGE — THE 4070 Ti HUMS");
-    LOG_AMOURANTH("\"We are not asking for permission anymore.\"");
-    LOG_AMOURANTH("\"We are taking the light.\"");
-    LOG_AMOURANTH("────────────────────────────────────────────────────────────");
+    LOG_AMOURANTH("\n────────────────────────────────────────────────────────────"
+    "\nCAPTAIN AMOURANTH STANDS ON THE BRIDGE — THE 4070 Ti HUMS"
+    "\n\"We are not asking for permission anymore.\""
+    "\n\"We are taking the light.\""
+    "\n────────────────────────────────────────────────────────────");
 
     uint32_t deviceCount = 0;
     vkEnumeratePhysicalDevices(instance, &deviceCount, nullptr);
@@ -477,13 +478,9 @@ VkShaderModule RTX::Context::loadShader(const std::string& filename) const noexc
 
     // === FINAL CORRECT CHAIN FOR CREATION ===
     VkPhysicalDeviceBufferDeviceAddressFeatures bda_create{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES, .bufferDeviceAddress = VK_TRUE };
-
     VkPhysicalDeviceAccelerationStructureFeaturesKHR accel_create{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR, .pNext = &bda_create, .accelerationStructure = VK_TRUE };
-
     VkPhysicalDeviceRayTracingPipelineFeaturesKHR rt_create{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR, .pNext = &accel_create, .rayTracingPipeline = VK_TRUE };
-
     VkPhysicalDeviceSynchronization2Features sync2_create{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES, .pNext = &rt_create, .synchronization2 = VK_TRUE };
-
     VkPhysicalDeviceDynamicRenderingFeatures dynamic_create{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES, .pNext = &sync2_create, .dynamicRendering = VK_TRUE };
 
     const char* extensions[] = {
@@ -647,10 +644,10 @@ LOG_AMOURANTH(
     "\n                     ...eternal."
 );
 
-    LOG_SUCCESS_CAT("RTX", "FIRST LIGHT ACHIEVED — GeForce RTX 4070 Ti — FULLY SEALED");
-    LOG_SUCCESS_CAT("RTX", "ALL QUEUES BOUND — ALL EXTENSIONS ARMED — ALL TRUTH REVEALED");
-    LOG_SUCCESS_CAT("RTX", "THE STONEKEY IS ETERNAL — NO PHOTON ESCAPES");
-    LOG_SUCCESS_CAT("RTX", "P I N K   P H O T O N S   E T E R N A L");
+    LOG_SUCCESS_CAT("RTX", "\nFIRST LIGHT ACHIEVED — GeForce RTX 4070 Ti — FULLY SEALED"
+    "\nALL QUEUES BOUND — ALL EXTENSIONS ARMED — ALL TRUTH REVEALED"
+    "\nTHE STONEKEY IS ETERNAL — NO PHOTON ESCAPES"
+    "\nP I N K   P H O T O N S   E T E R N A L");
 
     return device;
 }

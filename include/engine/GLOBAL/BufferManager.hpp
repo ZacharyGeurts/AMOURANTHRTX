@@ -108,6 +108,7 @@ namespace BufferManager {
 	void*    getMappedStagingPtr(uint64_t handle) noexcept;
     VkBuffer getStagingBuffer() noexcept;
     void*    stagingPtr() noexcept;
+	void ensureMainPool() noexcept;
 
     [[nodiscard]] static inline VkDeviceAddress get_device_address(uint64_t handle) noexcept {
         if (!handle) return 0;

@@ -62,6 +62,8 @@
 // global disposal
 [[noreturn]] void phase9_ballerina(std::string_view reason = {}, const std::source_location loc = std::source_location::current()) noexcept;
 
+extern float g_deltaTime;
+
 // =============================================================================
 // AMOURANTH RTX — DELTA TIME TRACKING v∞ — NOV 13 2025
 // PINK PHOTONS ETERNAL — FRAME-ACCURATE DELTAS — ZERO OVERHEAD
@@ -661,9 +663,7 @@ private:
             return std::string(buf);
         }();
 
-        const std::string threadId = []() {
-            std::ostringstream oss; oss << std::this_thread::get_id(); return oss.str();
-        }();
+        const std::string threadId = std::format("{}ms", g_deltaTime * 1000.0f);
 
         const std::string fileLine = std::format("{}:{}:{}", loc.file_name(), loc.line(), loc.function_name());
 

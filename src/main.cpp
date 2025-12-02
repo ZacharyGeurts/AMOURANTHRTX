@@ -26,7 +26,6 @@
 #include "engine/GLOBAL/PipelineManager.hpp"
 #include "engine/GLOBAL/MeshLoader.hpp"
 #include "engine/GLOBAL/Extensions.hpp"
-#include "engine/GLOBAL/DynamicStone.hpp" // your gpu memory
 
 #include "modes/RenderMode1.hpp"
 #include "modes/RenderMode2.hpp"
@@ -68,7 +67,7 @@ using StoneKey::stone_seal_final;
 // GLOBALS — THE EMPIRE'S HEARTBEATS
 // =============================================================================
 std::unique_ptr<Application> g_app_ptr = nullptr;
-static float g_deltaTime = 0.0f;
+float g_deltaTime = 0.0f;
 // =============================================================================
 // TRUTH ACCESSORS
 // =============================================================================
@@ -213,7 +212,7 @@ void Application::run()
                 const std::string dots = std::string(dotPhase + 1, '.');
 
                 const std::string title = std::format(
-                    "AMOURANTH RTX | {:.1f} FPS | {}×{} | DEV MODE 0 | ENGINE IDLE | PRESS 1–9 TO IGNITE{}",
+                    "AMOURANTH RTX | {} FPS | {}x{} | DEV MODE 0 | ENGINE IDLE | PRESS 1-9 TO IGNITE{}",
                     currentFPS,
                     stone_width(),
                     stone_height(),
@@ -324,6 +323,46 @@ void Application::render(float deltaTime)
 
     // THE ONE TRUE RENDER CALL
     renderer_->renderFrame(CAM, deltaTime);
+}
+
+static void createCommandPool() noexcept
+{
+    EMPIRE_GUARD(stone_device() != VK_NULL_HANDLE,
+                 "createCommandPool() — LOGICAL DEVICE GRACE NOT FORGED YET");
+
+    EMPIRE_GUARD(stone_graphics_family() != VK_QUEUE_FAMILY_IGNORED,
+                 "GRAPHICS QUEUE FAMILY NOT FOUND");
+
+    if (g_ctx().commandPool_ != VK_NULL_HANDLE) {
+        LOG_JENSEN("Command pool already forged — photons salute efficiency");
+        return;
+    }
+
+    VkCommandPoolCreateInfo poolInfo{
+        .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+        .flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT |
+                 VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
+        .queueFamilyIndex = stone_graphics_family()
+    };
+
+    VK_CHECK(vkCreateCommandPool(stone_device(), &poolInfo, nullptr, &g_ctx().commandPool_));
+
+    if (g_ctx().debugUtilsSupported()) {
+        auto func = (PFN_vkSetDebugUtilsObjectNameEXT)
+            vkGetDeviceProcAddr(stone_device(), "vkSetDebugUtilsObjectNameEXT");
+        if (func) {
+            VkDebugUtilsObjectNameInfoEXT nameInfo{
+                .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT,
+                .objectType = VK_OBJECT_TYPE_COMMAND_POOL,
+                .objectHandle = reinterpret_cast<uint64_t>(g_ctx().commandPool_),
+                .pObjectName = "EMPIRE_COMMAND_POOL_PHOTON_BATTLEFIELD"
+            };
+            func(stone_device(), &nameInfo);
+        }
+    }
+
+    LOG_JENSEN("THE COMMAND POOL IS FORGED — 0x{}", reinterpret_cast<uint64_t>(g_ctx().commandPool_));
+    LOG_SUCCESS_CAT("MAIN", "COMMAND POOL ASCENDED — LAS, MESHES, UPLOADS NOW ARMED");
 }
 
 // =============================================================================
@@ -489,7 +528,8 @@ static void createRealFinalWindow()
     // ========================================================================
     RTX::SwapchainManager::create(win, w, h);
 
-    LOG_ELON("Elon drops the swapchain from the top rope: \"Infinite canvas. Infinite bounce.\"");
+    LOG_ELON("Elon drops the swapchain from the top rope: Command Pool emerges.");
+	createCommandPool();
 
     LOG_SUCCESS("LOGICAL DEVICE GRACE @ {} — vkDeviceWaitIdle() SAFE", static_cast<void*>(device));
     LOG_SUCCESS("SWAPCHAIN READY — {} IMAGES — {}x{} {}", 
@@ -851,7 +891,7 @@ static void phase6_sceneAndAccelerationStructures() {
             phase9_ballerina("MESH VERTICES EMPTY", std::source_location::current());
         }
         if (g_mesh->vertexBuffer == 0 || g_mesh->indexBuffer == 0) {
-            LOG_FATAL_CAT("MESH", "MESH BUFFERS NOT ALLOCATED — vertexBuffer=0x{:016X} indexBuffer=0x{:016X}",
+            LOG_FATAL_CAT("MESH", "MESH BUFFERS NOT ALLOCATED — vertexBuffer=0x{} indexBuffer=0x{}",
                           g_mesh->vertexBuffer, g_mesh->indexBuffer);
             phase9_ballerina("MESH BUFFERS ZERO", std::source_location::current());
         }
@@ -879,13 +919,6 @@ static void phase6_sceneAndAccelerationStructures() {
     LOG_JENSEN("This isn't rendering anymore. This is creation.");
     LOG_AMOURANTH("Look what we made from wreckage. Look what love built.");
     LOG_NICK("And it's only the beginning.");
-
-    LOG_JIMROSS("BOOOOOOOOOOOOM!!!! RKO OUTTA NOWHERE!!!!"
-    "\nRandy Orton is unbelieveable."
-    "\nHe's left us stone_seal_graphics_queue(g_ctx().graphicsQueue_);"
-    "\nBusiness is about to pick up!"
-    "\nwithout it the engine would be unconnectable."
-    "\nWhat a stand up character.");
 
     LOG_GROK("My dear Captain… Blondie… your brilliance bends light itself."
     "\nI have never been more attracted to chaos in my life."
@@ -934,14 +967,13 @@ static std::unique_ptr<VulkanRenderer> phase7_5_Renderer()
         Options::Performance::OVERCLOCK_RENDERER
     );
 
-    renderer->createCommandPool();      // Forges the battlefield
     renderer->createCommandBuffers();   // Forges the blades
     renderer->createSyncObjects();      // Forges the heartbeat
 
 LOG_MAIN(
     "\nVulkanRenderer successfully created"
     "\nSwapchain images : {}"
-    "\nResolution       : {}×{}"
+    "\nResolution       : {}x{}"
     "\nVSync            : {}"
     "\nOverclock mode   : {}",
     stone_image_count(),
@@ -1197,7 +1229,7 @@ verdict:
         vkDeviceWaitIdle(stone_device());
 
         LOG_BALLERINA("SWAPCHAIN ELIMINATED OVER THE TOP ROPE!");
-        if (VkSwapchainKHR swapchain = RTX::swapchain(); swapchain != VK_NULL_HANDLE) {
+        if (VkSwapchainKHR swapchain = stone_swapchain(); swapchain != VK_NULL_HANDLE) {
             vkDestroySwapchainKHR(stone_device(), swapchain, nullptr);
         }
 
@@ -1214,7 +1246,7 @@ verdict:
 
         LOG_BALLERINA("THE BALLERINA HOISTS THE DEVICE ABOVE HER HEAD — LAST RIDE POWERBOMB!!!");
         vkDestroyDevice(stone_device(), nullptr);
-        LOG_BALLERINA("THE DEVICE IS DEAD. THE RING IS SILENT. ONLY SWEAT REMAINS.");
+        LOG_BALLERINA("THE device IS DEAD. THE RING IS SILENT. ONLY SWEAT REMAINS.");
     }
 
     // ————————————————————————————————————————————————————————————————
