@@ -54,24 +54,27 @@ using RTX::Handle;
 // Runtime Toggles — Immediate Effect
 // ──────────────────────────────────────────────────────────────────────────────
 void VulkanRenderer::toggleHypertrace() noexcept {
+    if (!Options::OptionsRTX::ENABLE_HYPERTRACE) return;
     hypertraceEnabled_ = !hypertraceEnabled_;
     resetAccumulation_ = true;
 }
 
 void VulkanRenderer::toggleFpsTarget() noexcept {
     switch (fpsTarget_) {
-        case FpsTarget::FPS_60: fpsTarget_ = FpsTarget::FPS_120; break;
-        case FpsTarget::FPS_120: fpsTarget_ = FpsTarget::FPS_UNLIMITED; break;
+        case FpsTarget::FPS_60:     fpsTarget_ = FpsTarget::FPS_120; break;
+        case FpsTarget::FPS_120:    fpsTarget_ = FpsTarget::FPS_UNLIMITED; break;
         case FpsTarget::FPS_UNLIMITED: fpsTarget_ = FpsTarget::FPS_60; break;
     }
 }
 
 void VulkanRenderer::toggleDenoising() noexcept {
+    if (!Options::OptionsRTX::ENABLE_DENOISING) return;
     denoisingEnabled_ = !denoisingEnabled_;
     resetAccumulation_ = true;
 }
 
 void VulkanRenderer::toggleAdaptiveSampling() noexcept {
+    if (!Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING) return;
     adaptiveSamplingEnabled_ = !adaptiveSamplingEnabled_;
     resetAccumulation_ = true;
 }
@@ -253,117 +256,78 @@ void VulkanRenderer::destroyRTOutputImages() noexcept {
 VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, bool overclockFromMain)
     : window_(window), width_(width), height_(height), overclockMode_(overclockFromMain)
 {
-    LOG_ATTEMPT_CAT("RENDERER", "Constructing VulkanRenderer ({}x{}) — INTERNAL SHADERS ACTIVE — PINK PHOTONS RISING", width, height);
+    LOG_ATTEMPT_CAT("RENDERER", "Constructing VulkanRenderer ({}x{}) — PINK PHOTONS RISING", width, height);
 
-    // ====================================================================
-    // STACK BUILD ORDER — REPAIRED: All Context Calls with ref c + ()
-    // ====================================================================
-
-    LOG_TRACE_CAT("RENDERER", "=== STACK BUILD ORDER STEP 1: Set Overclock Mode ===");
     setOverclockMode(overclockFromMain);
-    LOG_TRACE_CAT("RENDERER", "Step 1 COMPLETE");
 
-    LOG_TRACE_CAT("RENDERER", "=== STACK BUILD ORDER STEP 2: Security Validation (StoneKey) ===");
+    // StoneKey validation
     if (kStone1 == 0 || kStone2 == 0) {
-        LOG_ERROR_CAT("SECURITY", "StoneKey validation failed — aborting");
-        LOG_FATAL_CAT("RENDERER", "Fatal error in noexcept function"); phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
+        LOG_FATAL_CAT("RENDERER", "StoneKey validation failed");
+        phase9_ballerina("STONEKEY CORRUPTED", std::source_location::current());
     }
-    LOG_TRACE_CAT("RENDERER", "Step 2 COMPLETE");
 
-// =============================================================================
-// STEP 5 — CREATE SYNCHRONIZATION OBJECTS — THE ONE TRUE WAY
-// =============================================================================
-LOG_TRACE_CAT("RENDERER", "=== STACK BUILD ORDER STEP 5: Create Synchronization Objects ===");
+    // Sync objects
+    imageAvailableSemaphores_.resize(MAX_FRAMES_IN_FLIGHT);
+    renderFinishedSemaphores_.resize(MAX_FRAMES_IN_FLIGHT);
+    inFlightFences_.resize(MAX_FRAMES_IN_FLIGHT);
 
-imageAvailableSemaphores_.resize(MAX_FRAMES_IN_FLIGHT);
-renderFinishedSemaphores_.resize(MAX_FRAMES_IN_FLIGHT);
-inFlightFences_.resize(MAX_FRAMES_IN_FLIGHT);
+    VkSemaphoreCreateInfo semInfo{ .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
+    VkFenceCreateInfo fenceInfo{ .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, .flags = VK_FENCE_CREATE_SIGNALED_BIT };
 
-// Zero-init create infos — NEVER trust stack garbage
-VkSemaphoreCreateInfo semInfo{ .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
-VkFenceCreateInfo fenceInfo{ .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, .flags = VK_FENCE_CREATE_SIGNALED_BIT };
+    for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
+        VK_CHECK(vkCreateSemaphore(StoneKey::stone_device(), &semInfo, nullptr, &imageAvailableSemaphores_[i]), "imageAvailable");
+        VK_CHECK(vkCreateSemaphore(StoneKey::stone_device(), &semInfo, nullptr, &renderFinishedSemaphores_[i]), "renderFinished");
+        VK_CHECK(vkCreateFence(StoneKey::stone_device(), &fenceInfo, nullptr, &inFlightFences_[i]), "inFlightFence");
+    }
 
-for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
-
-    VK_CHECK(vkCreateSemaphore(StoneKey::stone_device(), &semInfo, nullptr, &imageAvailableSemaphores_[i]),       "imageAvailable");
-    VK_CHECK(vkCreateSemaphore(StoneKey::stone_device(), &semInfo, nullptr, &renderFinishedSemaphores_[i]),       "renderFinished");
-
-    VK_CHECK(vkCreateFence(StoneKey::stone_device(), &fenceInfo, nullptr, &inFlightFences_[i]),                 "inFlightFence");
-
-}
-
-    LOG_SUCCESS_CAT("RENDERER", "Step 5 COMPLETE — {} full sync sets forged — TRIPLE BUFFERING ETERNAL", MAX_FRAMES_IN_FLIGHT);
-
-    // =============================================================================
-    // STEP 6 — GPU Timestamp Query Pool
-    // =============================================================================
-    LOG_TRACE_CAT("RENDERER", "=== STACK BUILD ORDER STEP 6: GPU Timestamp Queries ===");
+    // GPU Timestamps
     if (Options::Performance::ENABLE_GPU_TIMESTAMPS || Options::Debug::SHOW_GPU_TIMESTAMPS) {
         VkQueryPoolCreateInfo qpInfo{ .sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO };
         qpInfo.queryType = VK_QUERY_TYPE_TIMESTAMP;
         qpInfo.queryCount = MAX_FRAMES_IN_FLIGHT * 2;
         VK_CHECK(vkCreateQueryPool(StoneKey::stone_device(), &qpInfo, nullptr, &timestampQueryPool_), "Timestamp pool");
     }
-    LOG_TRACE_CAT("RENDERER", "Step 6 COMPLETE");
 
-    // =============================================================================
-    // STEP 7 — GPU Properties + Timestamp Period
-    // =============================================================================
-    LOG_TRACE_CAT("RENDERER", "=== STACK BUILD ORDER STEP 7: Query GPU Properties ===");
+    // GPU Properties
     VkPhysicalDeviceProperties props{};
     vkGetPhysicalDeviceProperties(StoneKey::stone_physical(), &props);
     timestampPeriod_ = props.limits.timestampPeriod / 1e6f;
-    LOG_INFO_CAT("RENDERER", "GPU: {} | Timestamp period: {} ms", props.deviceName, timestampPeriod_);
-    LOG_TRACE_CAT("RENDERER", "Step 7 COMPLETE");
-  
-    // =============================================================================
-    // STEP 9 — HDR + RT RENDER TARGETS (POST-RTX::SwapchainManager::swapchain(), POST-PIPELINEMANAGER)
-    // =============================================================================
-    LOG_TRACE_CAT("RENDERER", "=== STACK BUILD ORDER STEP 9: Create HDR & RT Targets ===");
+    LOG_INFO_CAT("RENDERER", "GPU: {} | Timestamp period: {:.3f} ms", props.deviceName, timestampPeriod_);
+
+    // Create command pool
+    createCommandPool();
+
+    // HDR & RT Targets
     if (Options::Environment::ENABLE_ENV_MAP) createEnvironmentMap();
-    createAccumulationImages();                    // HDR accumulation
-    createRTOutputImages();                        // HDR ray tracing output
+    createRTOutputImages();
+    if (Options::OptionsRTX::ENABLE_ACCUMULATION) createAccumulationImages();
     if (Options::OptionsRTX::ENABLE_DENOISING) createDenoiserImage();
     if (Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING) createNexusScoreImage(RTX::g_ctx().commandPool_, StoneKey::stone_graphics_queue());
-    createTonemapSampler();  // ← NEW: For tonemap input sampling
-    LOG_SUCCESS_CAT("RENDERER", "Step 9 COMPLETE — HDR pipeline targets created");
+    createTonemapSampler();
 
-    // =============================================================================
-    // STEP 11 — Per-Frame Buffers
-    // =============================================================================
-    LOG_TRACE_CAT("RENDERER", "=== STACK BUILD ORDER STEP 11: Initialize Per-Frame Buffers ===");
+    // Per-frame buffers
     initializeAllBufferData(MAX_FRAMES_IN_FLIGHT, 368, 16_MB);
-    LOG_TRACE_CAT("RENDERER", "Step 11 COMPLETE");
 
-    // =============================================================================
-    // STEP 14 — Final Descriptor Updates (SAFE ORDER)
-    // =============================================================================
-    LOG_TRACE_CAT("RENDERER", "=== STACK BUILD ORDER STEP 14: Update All Descriptors (TLAS-safe) ===");
+    // Tonemap Descriptor Set Layout (only if tonemapping is allowed)
+    if (Options::Tonemap::ENABLE_TONEMAPPING) {
+        VkDescriptorSetLayoutBinding bindings[3] = {
+            { .binding = 0, .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .descriptorCount = 1, .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT },
+            { .binding = 1, .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,        .descriptorCount = 1, .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT },
+            { .binding = 2, .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,       .descriptorCount = 1, .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT }
+        };
 
-    // 1. Update descriptors that are safe even without TLAS
-    updateNexusDescriptors();           // Nexus score (always safe)
-    updateDenoiserDescriptors();        // Denoiser (no TLAS dependency)
+        VkDescriptorSetLayoutCreateInfo layoutInfo{
+            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+            .bindingCount = 3,
+            .pBindings = bindings
+        };
 
-    LOG_TRACE_CAT("RENDERER", "Step 14 COMPLETE (partial — RTX descriptors deferred until TLAS ready)");
+        VkDescriptorSetLayout layout = VK_NULL_HANDLE;
+        VK_CHECK(vkCreateDescriptorSetLayout(StoneKey::stone_device(), &layoutInfo, nullptr, &layout));
+        tonemapDescriptorSetLayout_ = Handle<VkDescriptorSetLayout>(layout, StoneKey::stone_device(), vkDestroyDescriptorSetLayout, 0, "TonemapSetLayout");
+    }
 
-    VkDescriptorSetLayoutBinding bindings[3] = {};
-
-    bindings[0] = { .binding = 0, .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .descriptorCount = 1, .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT };
-    bindings[1] = { .binding = 1, .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,        .descriptorCount = 1, .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT };
-    bindings[2] = { .binding = 2, .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,       .descriptorCount = 1, .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT };
-
-    VkDescriptorSetLayoutCreateInfo layoutInfo{
-        .sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-        .bindingCount = 3,
-        .pBindings    = bindings
-    };
-
-    VkDescriptorSetLayout tonemapSetLayout = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateDescriptorSetLayout(StoneKey::stone_device(), &layoutInfo, nullptr, &tonemapSetLayout));
-
-    tonemapDescriptorSetLayout_ = Handle<VkDescriptorSetLayout>(
-    tonemapSetLayout, StoneKey::stone_device(), vkDestroyDescriptorSetLayout, 0, "TonemapSetLayout"
-);
+    LOG_SUCCESS_CAT("RENDERER", "VulkanRenderer constructed — PINK PHOTONS ETERNAL");
 }
 
 void VulkanRenderer::createCommandPool() noexcept
@@ -1227,19 +1191,27 @@ void VulkanRenderer::updateTonemapUniform(uint32_t frame) noexcept
     RTX::endOneTimeSubmit(copyCmd, ctx.graphicsQueue(), ctx.commandPool_);
 }
 
-void VulkanRenderer::setTonemap(bool enabled) noexcept {
-    LOG_TRACE_CAT("RENDERER", "setTonemap — START — enabled={}", enabled);
-    if (tonemapEnabled_ == enabled) {
-        LOG_TRACE_CAT("RENDERER", "No change needed");
-        LOG_TRACE_CAT("RENDERER", "setTonemap — COMPLETE (no change)");
+void VulkanRenderer::setTonemap(bool enabled) noexcept
+{
+    const bool allowed = Options::Tonemap::ENABLE_TONEMAPPING;
+
+    if (!allowed) {
+        if (enabled) {
+            LOG_INFO_CAT("Renderer", "{}TONEMAP REQUEST DENIED — Options::Tonemap::ENABLE_TONEMAPPING = false{}", CRIMSON_MAGENTA, RESET);
+        }
+        tonemapEnabled_ = false;
         return;
     }
+
+    if (tonemapEnabled_ == enabled) return;
+
     tonemapEnabled_ = enabled;
     resetAccumulation_ = true;
-    LOG_INFO_CAT("Renderer", "{}Tonemapping: {}{}", 
+
+    LOG_INFO_CAT("Renderer", "{}Tonemapping {}{}", 
         enabled ? LIME_GREEN : CRIMSON_MAGENTA,
-        enabled ? "ENABLED" : "DISABLED", RESET);
-    LOG_TRACE_CAT("RENDERER", "setTonemap — COMPLETE");
+        enabled ? "ENABLED" : "DISABLED", 
+        RESET);
 }
 
 void VulkanRenderer::setOverlay(bool show) noexcept {
