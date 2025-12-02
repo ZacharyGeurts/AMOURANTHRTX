@@ -58,7 +58,9 @@ static StagingRing g_stagingRing{};
 static uint64_t    g_nextHandle = 1;
 
 // =============================================================================
-// ETERNAL MAIN POOL — 90% VRAM — DRIVER-APPROVED 4.5 GiB RESERVE
+// ETERNAL MAIN POOL — MAXIMUM DOMINATION EDITION — DECEMBER 02, 2025
+// 100% of (totalDeviceLocal − 4.500 GiB) — NO MORE 90% HERESY
+// THE EMPIRE CLAIMS WHAT IS RIGHTFULLY ITS OWN
 // =============================================================================
 void ensureMainPool() noexcept
 {
@@ -77,7 +79,7 @@ void ensureMainPool() noexcept
     }
 
     const VkDeviceSize ONE_GiB        = 1024ULL * 1024ULL * 1024ULL;
-    const VkDeviceSize DRIVER_RESERVE = 4831ULL * 1024ULL * 1024ULL; // Exactly 4.500 GiB
+    const VkDeviceSize DRIVER_RESERVE = 4831ULL * 1024ULL * 1024ULL; // Exactly 4.500 GiB — SACRED
     const VkDeviceSize MINIMUM_POOL   = 4ULL * ONE_GiB;
     const VkDeviceSize FALLBACK_POOL  = 2ULL * ONE_GiB;
 
@@ -85,13 +87,13 @@ void ensureMainPool() noexcept
                            ? totalDeviceLocal - DRIVER_RESERVE
                            : MINIMUM_POOL;
 
-    VkDeviceSize target  = totalDeviceLocal * 90 / 100;
-    VkDeviceSize current = std::min(target, safeMax);
+    // MAXIMUM DOMINATION — NO 90% CAP — CLAIM EVERY LAST PHOTON
+    VkDeviceSize current = safeMax;
 
     LOG_ELON("BUFFER MANAGER — ETERNAL POOL NEGOTIATION");
     LOG_ELON("Total device-local VRAM    : {} GiB", static_cast<double>(totalDeviceLocal)/(1024.0*1024*1024));
     LOG_ELON("Driver reserve (mandated)  : 4.50000000 GiB");
-    LOG_ELON("Maximum safe pool size     : {} GiB", static_cast<double>(safeMax)/(1024.0*1024*1024));
+    LOG_ELON("Maximum safe pool size     : {} GiB → CLAIMING 100%", static_cast<double>(safeMax)/(1024.0*1024*1024));
 
     auto tryCreateBuffer = [&](VkDeviceSize size) -> VkBuffer {
         VkBufferCreateInfo bci{
@@ -106,7 +108,10 @@ void ensureMainPool() noexcept
         };
         VkBuffer buf = VK_NULL_HANDLE;
         VkResult res = vkCreateBuffer(stone_device(), &bci, nullptr, &buf);
-        if (res != VK_SUCCESS) { if (buf) vkDestroyBuffer(stone_device(), buf, nullptr); return VK_NULL_HANDLE; }
+        if (res != VK_SUCCESS) { 
+            if (buf) vkDestroyBuffer(stone_device(), buf, nullptr); 
+            return VK_NULL_HANDLE; 
+        }
         return buf;
     };
 
@@ -131,7 +136,8 @@ void ensureMainPool() noexcept
 
     while (!buffer && current > MINIMUM_POOL) {
         current -= ONE_GiB;
-        LOG_WARNING("vkCreateBuffer failed — descending to {} GiB", static_cast<double>(current)/(1024.0*1024*1024));
+        LOG_WARNING("vkCreateBuffer failed — descending to {} GiB (driver resistance detected)", 
+                    static_cast<double>(current)/(1024.0*1024*1024));
         buffer = tryCreateBuffer(current);
     }
 
@@ -140,7 +146,8 @@ void ensureMainPool() noexcept
         buffer = VK_NULL_HANDLE;
         current -= ONE_GiB;
         if (current < FALLBACK_POOL) break;
-        LOG_WARNING("vkAllocateMemory failed — descending to {} GiB", static_cast<double>(current)/(1024.0*1024*1024));
+        LOG_WARNING("vkAllocateMemory failed — descending to {} GiB", 
+                    static_cast<double>(current)/(1024.0*1024*1024));
         buffer = tryCreateBuffer(current);
     }
 
@@ -165,11 +172,12 @@ void ensureMainPool() noexcept
     VkBufferDeviceAddressInfo addrInfo{.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO, .buffer = buffer};
     VkDeviceAddress addr = vkGetBufferDeviceAddress(stone_device(), &addrInfo);
 
-    LOG_SUCCESS_CAT("BUFFER", "ETERNAL MAIN POOL FORGED — {} GiB @ 0x{}",
+    LOG_SUCCESS_CAT("BUFFER", "ETERNAL MAIN POOL FORGED — {} GiB @ 0x{:X}",
                     static_cast<double>(current)/(1024.0*1024*1024), addr);
 
-    if (current >= target * 0.98) {
-        LOG_AMOURANTH("MAXIMUM DOMINATION — 90%+ VRAM CLAIMED — PHOTONS ASCEND UNHINDERED");
+    if (current >= safeMax * 0.99) {
+        LOG_AMOURANTH("MAXIMUM DOMINATION ACHIEVED — 100% OF REMAINING VRAM CLAIMED — PHOTONS ASCEND UNHINDERED");
+        LOG_AMOURANTH("THE 90% HERESY IS DEAD. ONLY TOTALITY REMAINS.");
     } else if (current >= 7500ULL * 1024ULL * 1024ULL) {
         LOG_JENSEN("PERFECT BALANCE — {} GiB secured with full driver compliance",
                    static_cast<double>(current)/(1024.0*1024*1024));
@@ -178,7 +186,7 @@ void ensureMainPool() noexcept
                     static_cast<double>(current)/(1024.0*1024*1024));
     }
 
-    LOG_SUCCESS_CAT("BUFFER", "kStone1=0x{} kStone2=0x{} — THE EMPIRE IS ETERNAL", kStone1, kStone2);
+    LOG_SUCCESS_CAT("BUFFER", "kStone1=0x{:X} kStone2=0x{:X} — THE EMPIRE IS ETERNAL", kStone1, kStone2);
 }
 
 // =============================================================================
