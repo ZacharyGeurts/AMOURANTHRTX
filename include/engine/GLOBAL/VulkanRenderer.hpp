@@ -77,6 +77,8 @@ public:
     void createCommandBuffers() noexcept;
     void createSyncObjects() noexcept;
 
+	bool swapchainRecreated_ = false;
+
     [[nodiscard]] VulkanRenderer* renderer() noexcept { return this; }
     [[nodiscard]] uint32_t  accumulationFrame() const noexcept { return accumulationFrame_; }
     [[nodiscard]] uint64_t  frameNumber()       const noexcept { return frameNumber_; }

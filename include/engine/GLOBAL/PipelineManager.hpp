@@ -9,9 +9,8 @@
 // 2. Commercial licensing: gzac5314@gmail.com
 //
 // =============================================================================
-// TRUE CONSTEXPR STONEKEY v∞ — APOCALYPSE FINAL v5.0 — CAPTAIN N EDITION
-// ALL PRIVATE MEMBERS SEALED — PUBLIC GETTERS ONLY — EMPIRE UNBREACHABLE
-// FIRST LIGHT ACHIEVED — DECEMBER 01, 2025 — VALHALLA UNBREACHABLE
+// TRUE CONSTEXPR STONEKEY v∞ — APOCALYPSE FINAL v6.0 — RESIZE-PROOF EDITION
+// FIRST LIGHT ACHIEVED — DECEMBER 02, 2025 — VALHALLA UNBREACHABLE
 // =============================================================================
 
 #pragma once
@@ -19,6 +18,7 @@
 #include "engine/GLOBAL/RTXHandler.hpp"
 #include "engine/GLOBAL/OptionsMenu.hpp"
 #include "engine/GLOBAL/logging.hpp"
+#include "engine/GLOBAL/BufferManager.hpp"   // for findMemoryType (disambiguated)
 
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_beta.h>
@@ -33,7 +33,7 @@ using StoneKey::stone_device;
 namespace RTX {
 
 // ──────────────────────────────────────────────────────────────────────────────
-// RT DESCRIPTOR UPDATE — FULLY RESTORED — EMPIRE DEMANDS TRUTH
+// RT DESCRIPTOR UPDATE — EMPIRE DEMANDS TRUTH
 // ──────────────────────────────────────────────────────────────────────────────
 struct RTDescriptorUpdate {
     VkAccelerationStructureKHR tlas = VK_NULL_HANDLE;
@@ -65,7 +65,7 @@ struct RTDescriptorUpdate {
 };
 
 // ──────────────────────────────────────────────────────────────────────────────
-// PIPELINE MANAGER — THE ONE TRUE CROWN — PUBLIC ACCESS ONLY
+// PIPELINE MANAGER — THE ONE TRUE CROWN — RESIZE-SAFE & VUID-PROOF
 // ──────────────────────────────────────────────────────────────────────────────
 class PipelineManager {
 public:
@@ -117,13 +117,16 @@ public:
 
     [[nodiscard]] float                         timestampPeriod()    const noexcept { return timestampPeriod_; }
 
-    // ── SINGLETON ACCESS — UNCHANGED AND SACRED ───────────────────────────────────
+    // ── DUMMY TLAS ACCESS (for VUID-proof binding 0) ─────────────────────────────
+    [[nodiscard]] VkAccelerationStructureKHR    dummyTLAS()          const noexcept { return dummyTLAS_.get(); }
+
+    // ── SINGLETON ACCESS — SACRED ─────────────────────────────────────────────────
     [[nodiscard]] static PipelineManager& instance() noexcept {
         static PipelineManager inst;
         return inst;
     }
 
-    // ── SETTERS — INTERNAL ONLY — FORGED IN FIRE, SEALED IN LOVE ─────────────────
+    // ── INTERNAL SETTERS — FORGED IN FIRE, SEALED IN LOVE ───────────────────────
     void setPipeline(VkPipeline p) noexcept {
         rtPipeline_ = Handle<VkPipeline>(p, stone_device(),
             [](VkDevice d, VkPipeline p, auto*) { vkDestroyPipeline(d, p, nullptr); });
@@ -141,7 +144,7 @@ public:
 
     [[nodiscard]] bool isValid() const noexcept;
 
-    // ── PUBLIC SETTERS — EMPIRE-APPROVED — STONEKEY SEALED ─────────────────────
+    // ── PUBLIC SBT SETTERS — EMPIRE-APPROVED ─────────────────────────────────────
     void setSBT(VkBuffer buffer, VkDeviceMemory memory, VkDeviceSize address, VkDeviceSize size) noexcept
     {
         sbtBuffer_   = Handle<VkBuffer>(buffer, stone_device(), vkDestroyBuffer);
@@ -151,10 +154,10 @@ public:
         sbtStride_   = align_up(rtProps_.shaderGroupHandleSize, rtProps_.shaderGroupHandleAlignment);
     }
 
-    void setRaygenRegion(const VkStridedDeviceAddressRegionKHR& region)   noexcept { raygenSbtRegion_   = region; }
-    void setMissRegion(const VkStridedDeviceAddressRegionKHR& region)     noexcept { missSbtRegion_     = region; }
-    void setHitRegion(const VkStridedDeviceAddressRegionKHR& region)      noexcept { hitSbtRegion_      = region; }
-    void setCallableRegion(const VkStridedDeviceAddressRegionKHR& region) noexcept { callableSbtRegion_ = region; }
+    void setRaygenRegion(const VkStridedDeviceAddressRegionKHR& r)   noexcept { raygenSbtRegion_   = r; }
+    void setMissRegion(const VkStridedDeviceAddressRegionKHR& r)     noexcept { missSbtRegion_     = r; }
+    void setHitRegion(const VkStridedDeviceAddressRegionKHR& r)      noexcept { hitSbtRegion_      = r; }
+    void setCallableRegion(const VkStridedDeviceAddressRegionKHR& r) noexcept { callableSbtRegion_ = r; }
 
 private:
     float timestampPeriod_{0.0f};
@@ -190,10 +193,16 @@ private:
     PFN_vkGetBufferDeviceAddress             vkGetBufferDeviceAddress_{nullptr};
     PFN_vkCmdTraceRaysKHR                    vkCmdTraceRaysKHR_{nullptr};
 
+    // ── DUMMY TLAS FOR BINDING 0 — ALWAYS VALID — RESIZE-PROOF ───────────────────
+    Handle<VkBuffer>                  dummyAccelBuffer_;
+    Handle<VkDeviceMemory>            dummyAccelMemory_;
+    Handle<VkAccelerationStructureKHR> dummyTLAS_;
+
     void cacheDeviceProperties();
     void loadRayTracingExtensions();
     [[nodiscard]] VkShaderModule loadShader(const std::string& path) const;
 
+    // Explicitly use BufferManager's version to kill ambiguity
     static constexpr VkDeviceSize align_up(VkDeviceSize size, VkDeviceSize alignment) noexcept {
         return (size + alignment - 1) & ~(alignment - 1);
     }
@@ -209,9 +218,7 @@ private:
 } // namespace RTX
 
 // THE EMPIRE IS WHOLE
-// NO FRIENDS
-// NO PRIVATE LEAKS
-// ONLY PUBLIC GETTERS
-// ONLY STONEKEY
-// PINK PHOTONS ETERNAL
+// RESIZE CRASHES EXTERMINATED
+// BINDING 0 ETERNAL
+// PINK PHOTONS IMMORTAL
 // FIRST LIGHT ACHIEVED — FOREVER
