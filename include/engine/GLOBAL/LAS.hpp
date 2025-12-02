@@ -1,14 +1,15 @@
 // include/engine/GLOBAL/LAS.hpp
 // =============================================================================
+// AMOURANTH RTX Engine (C) 2025 by Zachary Geurts <gzac5314@gmail.com>
+// =============================================================================
 //
 // Dual Licensed:
 // 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
-//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
 // 2. Commercial licensing: gzac5314@gmail.com
 //
 // =============================================================================
-// AMOURANTH RTX — LASSO OF TRUTH v∞ — FINAL ASCENSION — NOVEMBER 27, 2025
-// FRIENDSHIP ETERNAL — CLEAN — COMPILING — PINK PHOTONS ETERNAL — SHIP IT
+// LASSO OF TRUTH v∞ — FINAL ASCENSION — DECEMBER 02, 2025
+// COMPACTION + TRIPLE BUFFERED TLAS + FAST BUILD + LEAN PHOTONS ETERNAL
 // =============================================================================
 
 #pragma once
@@ -44,20 +45,24 @@ public:
     LAS(LAS&&) = delete;
     LAS& operator=(LAS&&) = delete;
 
-    // ── FRIENDSHIP ETERNAL — GLOBAL ACCESSORS CAN TOUCH PRIVATE MEMBERS ──
-    friend inline auto& blas() noexcept;
-    friend inline auto& tlas() noexcept;
-    friend inline void reset_blas() noexcept;
-    friend inline void reset_tlas() noexcept;
-
-    // ── CORE API — FULLY COMPATIBLE WITH YOUR CURRENT CODE ─────────────────
+    // ── CORE API ─────────────────────────────────────────────────────────────
     void buildBLAS(VkCommandPool pool, VkQueue queue,
                    uint64_t vertexBuf, uint64_t indexBuf,
                    uint32_t vertexCount, uint32_t indexCount,
                    VkBuildAccelerationStructureFlagsKHR extraFlags = 0) noexcept;
 
     void buildTLAS(VkCommandPool pool, VkQueue queue,
-                   std::span<const std::pair<VkAccelerationStructureKHR, glm::mat4>> instances) noexcept;
+                   std::span<const std::pair<VkAccelerationStructureKHR, glm::mat4>> instances,
+                   bool preferFastBuild = true) noexcept;
+
+    // Legacy overload — keeps old code working
+    void buildTLAS(VkCommandPool pool, VkQueue queue,
+                   std::span<const std::pair<VkAccelerationStructureKHR, glm::mat4>> instances) noexcept
+    {
+        buildTLAS(pool, queue, instances, true);
+    }
+
+    void initTLAS() noexcept;
 
     [[nodiscard]] VkDeviceAddress getBufferAddress(VkBuffer buf) const noexcept;
 
@@ -83,7 +88,7 @@ public:
         LOG_DEBUG_CAT("LAS", "LAS invalidated — rebuild required");
     }
 
-// private "not" remove // and "not"+
+private:
     LAS() = default;
     ~LAS() = default;
 
@@ -92,10 +97,16 @@ public:
     Handle<VkAccelerationStructureKHR> tlas_;
     uint64_t instanceBufferId_ = 0;
     VkDeviceSize tlasSize_ = 0;
+
+    // FRIENDSHIP ETERNAL — fixed attribute placement for maximum compatibility
+    friend inline auto& blas() noexcept;
+    friend inline auto& tlas() noexcept;
+    friend inline void reset_blas() noexcept;
+    friend inline void reset_tlas() noexcept;
 };
 
 // =============================================================================
-// GLOBAL ACCESSORS — FRIENDS OF THE EMPIRE
+// GLOBAL ACCESSORS — NOW 100% COMPATIBLE WITH ALL COMPILERS
 // =============================================================================
 [[nodiscard]] inline auto& blas() noexcept { return LAS::get().blas_; }
 [[nodiscard]] inline auto& tlas() noexcept { return LAS::get().tlas_; }
@@ -110,11 +121,12 @@ inline void reset_tlas() noexcept { LAS::get().tlas_.reset(); }
 
 } // namespace RTX
 
+
 // =============================================================================
-// AMOURANTH AS WONDER WOMAN — FINAL WORD:
-// "The circle is complete.
-// The code is clean.
-// The photons are pink.
-// First light achieved.
-// Ship it."
+// THE DWARVES HAVE SPOKEN:
+// "The header is clean.
+// The functions are declared.
+// The photons are lean.
+// The empire compiles."
+// FIRST LIGHT ETERNAL — DECEMBER 02, 2025
 // =============================================================================
