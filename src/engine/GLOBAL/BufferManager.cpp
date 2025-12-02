@@ -251,7 +251,6 @@ uint64_t create(VkDeviceSize size, VkBufferUsageFlags, VkMemoryPropertyFlags, st
     }
 
     uint64_t handle = g_nextHandle++;
-    LOG_CARMACK("BufferManager: Sub-allocated {} KiB @ offset {} | tag \"{}\"", size >> 10, offset, tag);
     return handle;
 }
 

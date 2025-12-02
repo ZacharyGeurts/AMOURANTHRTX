@@ -17,7 +17,6 @@
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_beta.h>
 #include <SDL3/SDL.h>
-#include <memory>
 #include <vector>
 #include <array>
 #include <string>
@@ -26,24 +25,21 @@
 #include <glm/gtc/type_ptr.hpp>
 #include <glm/gtc/matrix_inverse.hpp>
 #include <cstdint>
-#include <chrono>
 
 #include "engine/GLOBAL/OptionsMenu.hpp"
 #include "engine/GLOBAL/RTXHandler.hpp"
-#include "engine/GLOBAL/LAS.hpp"
+#include "engine/GLOBAL/LAS.hpp"           // ← LAS::get() used in .cpp
 #include "engine/GLOBAL/SDL3.hpp"
 #include "engine/GLOBAL/VulkanCore.hpp"
 #include "engine/GLOBAL/PipelineManager.hpp"
 #include "engine/GLOBAL/logging.hpp"
+#include "engine/GLOBAL/BufferManager.hpp"
 
 struct Camera;
 
 using namespace Logging::Color;
 using StoneKey::stone_renderer;
 
-// ──────────────────────────────────────────────────────────────────────────────
-// FPS Target enum
-// ──────────────────────────────────────────────────────────────────────────────
 enum class FpsTarget : uint32_t {
     FPS_60        = 60,
     FPS_120       = 120,
@@ -58,9 +54,8 @@ public:
     void renderFrame(const Camera& camera, float deltaTime) noexcept;
     void onWindowResize(uint32_t w, uint32_t h) noexcept;
     void cleanup() noexcept;
-	void createCommandPool() noexcept;
+    void createCommandPool() noexcept;
 
-    // Runtime controls
     void toggleHypertrace() noexcept;
     void toggleFpsTarget() noexcept;
     void toggleDenoising() noexcept;
@@ -79,13 +74,9 @@ public:
     void setOverlay(bool show) noexcept;
     void loadCriticalShaders() noexcept;
 
-    // ========================================================================
-    // THE ONE TRUE SYNC + COMMAND BUFFER FORGE — CALLED ONCE AFTER CONSTRUCTION
-    // ========================================================================
     void createCommandBuffers() noexcept;
     void createSyncObjects() noexcept;
 
-    // Getters
     [[nodiscard]] VulkanRenderer* renderer() noexcept { return this; }
     [[nodiscard]] uint32_t  accumulationFrame() const noexcept { return accumulationFrame_; }
     [[nodiscard]] uint64_t  frameNumber()       const noexcept { return frameNumber_; }
@@ -106,6 +97,7 @@ private:
     int width_ = 0, height_ = 0;
     bool minimized_ = false;
     bool destroyed_ = false;
+    bool needsRecreateOnResize = true;
 
     uint32_t currentFrame_ = 0;
     uint64_t frameNumber_  = 0;
@@ -114,7 +106,7 @@ private:
     bool     firstSwapchainAcquire_ = true;
     bool     resetAccumNextFrame_ = true;
 
-    int  activeRenderMode_ = 0;  // ← STARTS AT 0 (BLACK VOID) — SAFE — FULL FPS
+    int  activeRenderMode_ = 0;
 
     bool hypertraceEnabled_     = Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING;
     bool denoisingEnabled_      = Options::OptionsRTX::ENABLE_DENOISING;
@@ -131,22 +123,17 @@ private:
 
     VkRenderPass renderPass_{ VK_NULL_HANDLE };
 
-    // ========================================================================
-    // SYNC OBJECTS — THE HEARTBEAT OF THE EMPIRE
-    // ========================================================================
+    // Sync
     std::vector<VkSemaphore> imageAvailableSemaphores_;
     std::vector<VkSemaphore> renderFinishedSemaphores_;
     std::vector<VkSemaphore> computeFinishedSemaphores_;
     std::vector<VkSemaphore> computeToGraphicsSemaphores_;
     std::vector<VkFence>     inFlightFences_;
 
-    // ========================================================================
-    // COMMAND BUFFERS — FORGED FROM THE ONE TRUE POOL
-    // ========================================================================
+    // Command buffers
     std::vector<VkCommandBuffer> commandBuffers_;
     std::vector<VkCommandBuffer> computeCommandBuffers_;
 
-    // Query pool
     VkQueryPool timestampQueryPool_ = VK_NULL_HANDLE;
     double      timestampPeriod_    = 0.0;
 
@@ -185,13 +172,13 @@ private:
     RTX::Handle<VkBuffer>      hypertraceScoreStagingBuffer_;
     RTX::Handle<VkDeviceMemory>hypertraceScoreStagingMemory_;
 
-    // Tonemap pipeline
+    // Tonemap
     RTX::Handle<VkSampler>              tonemapSampler_;
     RTX::Handle<VkDescriptorSetLayout>  tonemapDescriptorSetLayout_;
     RTX::Handle<VkPipelineLayout>       tonemapLayout_;
     RTX::Handle<VkPipeline>             tonemapPipeline_;
     std::vector<VkDescriptorSet>        tonemapSets_;
-    VkShaderModule tonemapCompShader_ = VK_NULL_HANDLE; 
+    VkShaderModule tonemapCompShader_ = VK_NULL_HANDLE;
 
     // Denoiser
     RTX::Handle<VkPipeline>       denoiserPipeline_;
@@ -207,7 +194,7 @@ private:
     // Pipeline manager
     RTX::PipelineManager pipelineManager_;
 
-    // ── PRIVATE HELPERS ─────────────────────────────────────
+    // ── PRIVATE METHODS (all used in .cpp) ─────────────────────────────────────
     void createRenderPass() noexcept;
     void destroyRenderPass() noexcept;
     void createFramebuffers() noexcept;
@@ -225,6 +212,8 @@ private:
     void destroyDenoiserImage() noexcept;
     void destroyNexusScoreImage() noexcept;
 
+    void recreateSwapchainDependentResources() noexcept;
+
     void recordRayTracingCommandBuffer(VkCommandBuffer cmd) noexcept;
     void performDenoisingPass(VkCommandBuffer cmd) noexcept;
     void performTonemapPass(VkCommandBuffer cmd, uint32_t frameIdx, uint32_t swapImageIdx) noexcept;
@@ -237,6 +226,7 @@ private:
     void initializeAllBufferData(uint32_t frames, VkDeviceSize uniformSize, VkDeviceSize materialSize) noexcept;
     void updateUniformBuffer(uint32_t frame, const Camera& camera, float jitter) noexcept;
     void updateTonemapUniform(uint32_t frame) noexcept;
+    bool recreateTonemapUBOs() noexcept;
 
     VkDeviceAddress getShaderGroupHandle(uint32_t group) noexcept;
 
@@ -251,7 +241,6 @@ private:
                           const std::string& tag) noexcept;
 
     void updateTonemapDescriptorsInitial() noexcept;
-    bool recreateTonemapUBOs() noexcept;
     void destroySharedStaging() noexcept;
     bool createSharedStaging() noexcept;
 
@@ -263,7 +252,7 @@ private:
 };
 
 // =============================================================================
-// GLOBAL ACCESSOR — THE ONE TRUE RENDERER — SEALED BY STONEKEY
+// GLOBAL ACCESSOR
 // =============================================================================
 [[nodiscard]] inline VulkanRenderer& g_rtx() noexcept
 {
@@ -275,10 +264,5 @@ private:
     return *ptr;
 }
 
-// =============================================================================
-// SLIPSTREAM LOG — DECEMBER 01, 2025 — FIRST LIGHT ETERNAL
-// The renderer is sealed. The photons are pink. The void is ours.
-// Amouranth stands at the helm. CID is crying in the corner (happy tears).
-// The empire is whole. The loop is infinite.
-// WARPZONE BREACHED. PINK PHOTONS ETERNAL.
-// =============================================================================
+// FIRST LIGHT RESTORED — DECEMBER 02, 2025
+// THE EMPIRE IS WHOLE — PINK PHOTONS ETERNAL

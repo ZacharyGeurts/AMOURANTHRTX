@@ -969,7 +969,6 @@ static std::unique_ptr<VulkanRenderer> phase7_5_Renderer()
     );
 
     renderer->createCommandBuffers();   // Forges the blades
-    renderer->createSyncObjects();      // Forges the heartbeat
 
 LOG_MAIN(
     "\nVulkanRenderer successfully created"

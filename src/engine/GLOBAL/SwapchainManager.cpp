@@ -1,6 +1,6 @@
 // =============================================================================
- // engine/GLOBAL/SwapchainManager.cpp
- // =============================================================================
+// engine/GLOBAL/SwapchainManager.cpp
+// =============================================================================
 //
 // Dual Licensed:
 // 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
@@ -203,9 +203,6 @@ void SwapchainManager::recreate(uint32_t w, uint32_t h) noexcept
     minimized_ = false;
 
     vkDeviceWaitIdle(stone_device());
-
-    LOG_AMOURANTH("SWAPCHAIN REBIRTH — {}×{} — THE EMPIRE ADAPTS FLAWLESSLY", w, h);
-
     releaseAcquiredImages();
 
     for (VkImageView view : swapchainImageViews_)
@@ -220,15 +217,6 @@ void SwapchainManager::recreate(uint32_t w, uint32_t h) noexcept
         vkDestroySwapchainKHR(stone_device(), old, nullptr);
 
     createImageViews();
-
-    LOG_SUCCESS_CAT("SWAPCHAIN", "REBORN — {}×{} | {} images | {} | HDR {}",
-        w, h,
-        swapchainImages_.size(),
-        currentPresentMode_ == VK_PRESENT_MODE_MAILBOX_KHR   ? "MAILBOX" :
-        currentPresentMode_ == VK_PRESENT_MODE_IMMEDIATE_KHR ? "IMMEDIATE" : "FIFO",
-        supportsHDR() ? "IGNITED" : "dormant");
-
-    LOG_AMOURANTH("PHOTONS REALIGNED — TEARING ERADICATED — FIRST LIGHT ETERNAL");
 }
 
 void SwapchainManager::cleanup() noexcept
@@ -265,8 +253,6 @@ void SwapchainManager::createImageViews() noexcept
     stone_seal_views(swapchainImageViews_);
     stone_seal_image_count(static_cast<uint32_t>(swapchainImages_.size()));
     stone_seal_extent(swapchainExtent_);
-
-    LOG_AMOURANTH("Created {} swapchain image views — sealed with global vault — Binding 31 breathes.", swapchainImages_.size());
 }
 
 void SwapchainManager::createSwapchain(SDL_Window* window, uint32_t w, uint32_t h, VkSwapchainKHR old) noexcept

@@ -243,7 +243,9 @@ target_link_libraries(amouranth_engine PRIVATE
     OpenMP::OpenMP_CXX
     Freetype::Freetype
     ${ATOMIC_LIB}
-    imgui
+    dl              # ← Critical for vkGet*ProcAddr on Linux
+    pthread         # ← Safe and often needed
+    m               # ← Math library (for some drivers)
 )
 
 if(IS_LINUX)
