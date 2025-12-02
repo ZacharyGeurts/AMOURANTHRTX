@@ -36,7 +36,6 @@ using StoneKey::stone_seal_views;
 namespace RTX {
 
 // Extension function pointers
-static PFN_vkWaitForPresentKHR vkWaitForPresentKHR = nullptr;
 static PFN_vkGetPastPresentationTimingGOOGLE vkGetPastPresentationTimingGOOGLE = nullptr;
 static PFN_vkGetRefreshCycleDurationGOOGLE vkGetRefreshCycleDurationGOOGLE = nullptr;
 
@@ -194,54 +193,84 @@ void SwapchainManager::create(SDL_Window* window, uint32_t w, uint32_t h) noexce
 
 void SwapchainManager::recreate(uint32_t w, uint32_t h) noexcept
 {
-    if (w == 0 || h == 0) {
+    // ==================================================================
+    // MINIMIZED → PHOTONS SLEEP. NO WORK.
+    // ==================================================================
+    if (w == 0 || h == 0)
+    {
         minimized_ = true;
+        LOG_AMOURANTH("WINDOW MINIMIZED — PHOTONS ENTER SLEEP MODE");
         return;
     }
+
     minimized_ = false;
 
-    // NO vkDeviceWaitIdle — only wait on present queue
-    if (vkWaitForPresentKHR) {
-        VK_CHECK(vkWaitForPresentKHR(stone_device(), *swapchain_, lastPresentId, 1'000'000ULL));
-    }
+    // ==================================================================
+    // THE EMPIRE WAITS FOR NO ONE — BUT THE GPU MUST FINISH ITS LAST DANCE
+    // ==================================================================
+    vkDeviceWaitIdle(stone_device());  // ← THIS IS NON-NEGOTIABLE IN 2025
 
-    LOG_MAIN("Resize → {}×{} — Empire adapts.", w, h);
+    LOG_AMOURANTH("THE SEA SHIFTS — RECREATING SWAPCHAIN {}×{} — THE EMPIRE REBORN", w, h);
 
+    // ==================================================================
+    // RELEASE ANY IMAGES STILL HELD BY THE PRESENTATION ENGINE
+    // ==================================================================
     releaseAcquiredImages();
 
-    // Batch destroy views
-    for (VkImageView view : swapchainImageViews_) {
-        if (view) vkDestroyImageView(stone_device(), view, nullptr);
+    // ==================================================================
+    // DESTROY OLD IMAGE VIEWS — BATCHED, BRUTAL, FINAL
+    // ==================================================================
+    for (VkImageView view : swapchainImageViews_)
+    {
+        if (view != VK_NULL_HANDLE)
+            vkDestroyImageView(stone_device(), view, nullptr);
     }
     swapchainImageViews_.clear();
 
-    VkSwapchainKHR old = swapchain_.valid() ? *swapchain_ : VK_NULL_HANDLE;
-    createSwapchain(stone_window(), w, h, old);
+    // ==================================================================
+    // PRESERVE THE OLD SWAPCHAIN — VK_KHR_swapchain REQUIRES IT FOR EFFICIENCY
+    // ==================================================================
+    VkSwapchainKHR oldSwapchain = swapchain_.valid() ? *swapchain_ : VK_NULL_HANDLE;
+
+    // ==================================================================
+    // THE REBIRTH — NEW SWAPCHAIN, SAME SOUL
+    // ==================================================================
+    createSwapchain(stone_window(), w, h, oldSwapchain);
+
+    // Destroy the old one *after* new one is created (driver loves this)
+    if (oldSwapchain != VK_NULL_HANDLE && oldSwapchain != *swapchain_)
+    {
+        vkDestroySwapchainKHR(stone_device(), oldSwapchain, nullptr);
+    }
+
+    // ==================================================================
+    // FORGE THE NEW VIEWS — ONE FOR EACH IMAGE
+    // ==================================================================
     createImageViews();
 
-    LOG_AMOURANTH("Rebirth complete — zero flicker — photons realigned.");
+    // ==================================================================
+    // THE EMPIRE HAS SPOKEN — ZERO FLICKER, ZERO TEARS
+    // ==================================================================
+    LOG_SUCCESS_CAT("SWAPCHAIN", "REBIRTH COMPLETE — {}×{} — {} IMAGES — {} PRESENT",
+        w, h,
+        swapchainImages_.size(),
+        [ ]() -> const char* {
+            switch (currentPresentMode_)
+            {
+                case VK_PRESENT_MODE_MAILBOX_KHR:   return "MAILBOX";
+                case VK_PRESENT_MODE_IMMEDIATE_KHR: return "IMMEDIATE";
+                case VK_PRESENT_MODE_FIFO_KHR:      return "FIFO";
+                default:                            return "UNKNOWN";
+            }
+        }());
+
+    LOG_AMOURANTH("PHOTONS REALIGNED — ZERO FLICKER — FIRST LIGHT ETERNAL");
+    LOG_BLONDIE("The mirror never cracked. The empire never blinked.");
 }
 
 void SwapchainManager::cleanup() noexcept
 {
-    vkDeviceWaitIdle(stone_device());
-
-    releaseAcquiredImages();
-
-    for (VkImageView view : swapchainImageViews_) {
-        if (view) vkDestroyImageView(stone_device(), view, nullptr);
-    }
-    swapchainImageViews_.clear();
-    swapchainImages_.clear();
-
-    if (swapchain_.valid()) {
-        vkDestroySwapchainKHR(stone_device(), *swapchain_, nullptr);
-        swapchain_.reset();
-    }
-
-    if (predictedSwapchain) vkDestroySwapchainKHR(stone_device(), predictedSwapchain, nullptr);
-
-    LOG_GROK("Swapchain annihilated. Memory: pristine.");
+    phase9_ballerina("FINAL GRACE: ETERNAL SLIPSTREAM", std::source_location::current());
 }
 
 // ────────────────────── Private helpers ──────────────────────

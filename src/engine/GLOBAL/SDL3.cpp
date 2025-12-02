@@ -52,9 +52,7 @@ std::atomic<bool> g_resizeRequested{false};
 // =============================================================================
 void SDLWindowDeleter::operator()(SDL_Window* w) const noexcept
 {
-    if (stone_window()) {
-        LOG_INFO_CAT("Dispose", "{}Returning window to the void @ {}{}", OCEAN_TEAL, static_cast<void*>(w), RESET);
-    }
+    phase9_ballerina("FINAL GRACE: ETERNAL SLIPSTREAM", std::source_location::current());
 }
 
 // =============================================================================

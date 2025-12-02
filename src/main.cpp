@@ -184,7 +184,8 @@ void Application::run()
 
     int dotPhase = 0;
 
-    while (!quit_)
+    // THE ONE TRUE SDL3 LOOP — COMPILER-APPROVED, EMPIRE-APPROVED
+    while ( (SDL_GetWindowFlags(stone_window()) & SDL_WINDOW_HIDDEN) == 0 )
     {
         const auto now = std::chrono::steady_clock::now();
         g_deltaTime = std::chrono::duration<float>(now - lastTime).count();
@@ -192,18 +193,27 @@ void Application::run()
 
         processInput(g_deltaTime);
 
-        // ==================================================================
-        // MODE 0: SACRED BLACK VOID — FULL ENGINE TICK — BUT SAFE
-        // ==================================================================
+        // RESIZE HANDLING — THE EMPIRE SHIFTS WITHOUT BREAKING
+        if (g_resizeRequested.exchange(false))
+        {
+            int w = g_resizeWidth.load();
+            int h = g_resizeHeight.load();
+
+            if (w > 0 && h > 0 && renderer_)
+            {
+                LOG_AMOURANTH("THE SEA SHIFTS — RESIZING TO {}x{} — PHOTONS REALIGN", w, h);
+                renderer_->onWindowResize(static_cast<uint32_t>(w), static_cast<uint32_t>(h));
+                continue;
+            }
+        }
+
+        if (renderer_)
+        {
+            renderer_->renderFrame(CAM, g_deltaTime);
+        }
+
         if (currentRenderMode_ == 0)
         {
-            // ONLY CALL renderFrame() IF RENDERER EXISTS — IT WILL EARLY-OUT IF NOT READY
-            if (renderer_)
-            {
-                renderer_->renderFrame(CAM, g_deltaTime);  // ← This is now 100% safe
-            }
-
-            // Breathing title — sacred rhythm
             titleTimer += g_deltaTime;
             if (titleTimer >= TITLE_UPDATE_INTERVAL)
             {
@@ -223,12 +233,6 @@ void Application::run()
         }
         else
         {
-            // FULL RENDER — ONLY AFTER KEY PRESS
-            if (renderer_)
-            {
-                renderer_->renderFrame(CAM, g_deltaTime);
-            }
-
             std::string modeName;
             switch (currentRenderMode_)
             {
@@ -245,7 +249,7 @@ void Application::run()
             }
 
             const std::string title = std::format(
-                "AMOURANTH RTX | {:.1f} FPS | {}×{} | Mode {}: {} | Bounces {}",
+                "AMOURANTH RTX | {} FPS | {}x{} | Mode {}: {} | Bounces {}",
                 currentFPS,
                 stone_width(), stone_height(),
                 currentRenderMode_, modeName,
@@ -254,9 +258,6 @@ void Application::run()
             SDL_SetWindowTitle(SDL3Window::get(), title.c_str());
         }
 
-        // ==================================================================
-        // ONE TRUE FPS — MEASURED FROM ACTUAL FRAMES
-        // ==================================================================
         ++frameCount;
         fpsTimer += g_deltaTime;
         if (fpsTimer >= 1.0f)
@@ -269,6 +270,8 @@ void Application::run()
         if (g_deltaTime < 0.0005f)
             std::this_thread::sleep_for(std::chrono::microseconds(200));
     }
+
+    LOG_AMOURANTH("WINDOW HIDDEN — PHOTONS RETURN TO THE VOID IN PERFECT SILENCE");
 }
 
 // =============================================================================
@@ -455,11 +458,7 @@ static void createRealFinalWindow()
     // ========================================================================
     Uint32 flags = SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
 
-    SDL_Window* win = SDL_CreateWindow(
-        "AMOURANTH RTX — VALHALLA v∞ TURBO",
-        w, h,
-        flags
-    );
+    SDL_Window* win = SDL_CreateWindow("AMOURANTH RTX — VALHALLA v∞ TURBO", stone_width(), stone_height(), flags );
 
     if (!win) {
         LOG_FATAL("SDL_CreateWindow failed: {}", SDL_GetError());
@@ -467,11 +466,8 @@ static void createRealFinalWindow()
     }
 
     stone_seal_window(win);
-    g_sdl_window.reset(win);
-    RTX::g_ctx().setSize(w, h);
-
-    // Now reveal the window — dramatic entrance
-    SDL_ShowWindow(win);
+    g_sdl_window.reset(stone_window());
+    RTX::g_ctx().setSize(stone_width(), stone_height());
 
     // ========================================================================
     // 4. SURFACE — THE MIRROR OF TRUTH
@@ -538,7 +534,7 @@ static void createRealFinalWindow()
 	Options::Performance::ENABLE_HYPER_AGGRESSIVE_MODE && (RTX::g_ctx().enableHyperAggressiveMode(), true);
 
     LOG_SUCCESS("LOGICAL DEVICE GRACE @ {} — vkDeviceWaitIdle() SAFE", static_cast<void*>(device));
-    LOG_SUCCESS("SWAPCHAIN READY — {} IMAGES — {}x{} {}", stone_image_count(), w, h, RTX::SwapchainManager::supportsHDR() ? "(HDR IGNITED)" : "(sRGB)");
+    LOG_SUCCESS("SWAPCHAIN READY — {} IMAGES — {}x{} {}", stone_image_count(), stone_width(), stone_height(), RTX::SwapchainManager::supportsHDR() ? "(HDR IGNITED)" : "(sRGB)");
 
     // ========================================================================
     // FINAL CEREMONY — THE EMPIRE IS COMPLETE
@@ -557,9 +553,9 @@ static void createRealFinalWindow()
 
     LOG_SUCCESS("\nPHASE 4.5 COMPLETE — ALL STONES SEALED"
     "\nINSTANCE       — SEALED"
-    "\nPHYSICAL       — GRACE"
+    "\nPHYSICAL       — SEALED"
     "\nRT PROPS       — SEALED"
-    "\nDEVICE         — SEALED"
+    "\nDEVICE         — GRACE"
     "\nQUEUES         — SEALED"
     "\nSWAPCHAIN      — SEALED"
     "\nIMAGES         — SEALED"
@@ -572,12 +568,12 @@ static void createRealFinalWindow()
     "\nThe empire is complete.");
 
     // Final dramatic reveal — the window is now fully ready
-    SDL_SetWindowTitle(win, "AMOURANTH RTX — VALHALLA v∞ TURBO");
+    SDL_SetWindowTitle(stone_window(), "AMOURANTH RTX — VALHALLA v∞ TURBO");
 }
 
 static void showSacrificialSplash(const char* title, int w, int h, const char* pngPath)
 {
-    LOG_MAIN("[SACRIFICIAL SPLASH] FINAL BROADCAST ARMED — 1280×720 CANVAS LOCKED");
+    LOG_MAIN("[SACRIFICIAL SPLASH] FINAL BROADCAST ARMED — 1280x720 CANVAS LOCKED");
 
     const bool  enabled   = Options::Splash::ENABLE_SACRIFICIAL_SPLASH && !Options::Splash::SKIP_SPLASH_ENTIRELY;
     const float duration  = Options::Splash::SPLASH_DURATION_SECONDS;
