@@ -1076,14 +1076,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     // ACQUIRE — ZERO TIMEOUT, NO MERCY
     // ==================================================================
     uint32_t imageIndex = 0;
-    VkResult acquireResult = vkAcquireNextImageKHR(
-        stone_device(),
-        RTX::SwapchainManager::swapchain(),
-        0,  // Zero timeout — we do not wait
-        imageAvailableSemaphores_[f],
-        VK_NULL_HANDLE,
-        &imageIndex
-    );
+    VkResult acquireResult = vkAcquireNextImageKHR( stone_device(), RTX::SwapchainManager::swapchain(), UINT64_MAX, imageAvailableSemaphores_[f], VK_NULL_HANDLE, &imageIndex);
 
     // Out of date or suboptimal → trigger rebuild and bail
     if (acquireResult == VK_ERROR_OUT_OF_DATE_KHR ||

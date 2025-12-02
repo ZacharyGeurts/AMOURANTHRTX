@@ -15,6 +15,7 @@
 // =============================================================================
 
 #include "engine/GLOBAL/SwapchainManager.hpp"
+#include "engine/GLOBAL/SDL3.hpp" 
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/GLOBAL/StoneKey.hpp"
 #include "engine/GLOBAL/RTXHandler.hpp"
@@ -40,7 +41,6 @@ static PFN_vkGetPastPresentationTimingGOOGLE vkGetPastPresentationTimingGOOGLE =
 static PFN_vkGetRefreshCycleDurationGOOGLE vkGetRefreshCycleDurationGOOGLE = nullptr;
 
 // Advanced state
-inline static uint64_t lastPresentId = 0;
 inline static std::vector<VkPastPresentationTimingGOOGLE> timingHistory;
 inline static VkRefreshCycleDurationGOOGLE refreshDuration = {};
 inline static bool directDisplayMode = false;
@@ -193,9 +193,6 @@ void SwapchainManager::create(SDL_Window* window, uint32_t w, uint32_t h) noexce
 
 void SwapchainManager::recreate(uint32_t w, uint32_t h) noexcept
 {
-    // ==================================================================
-    // MINIMIZED → PHOTONS SLEEP. NO WORK.
-    // ==================================================================
     if (w == 0 || h == 0)
     {
         minimized_ = true;
@@ -205,67 +202,33 @@ void SwapchainManager::recreate(uint32_t w, uint32_t h) noexcept
 
     minimized_ = false;
 
-    // ==================================================================
-    // THE EMPIRE WAITS FOR NO ONE — BUT THE GPU MUST FINISH ITS LAST DANCE
-    // ==================================================================
-    vkDeviceWaitIdle(stone_device());  // ← THIS IS NON-NEGOTIABLE IN 2025
+    vkDeviceWaitIdle(stone_device());
 
-    LOG_AMOURANTH("THE SEA SHIFTS — RECREATING SWAPCHAIN {}×{} — THE EMPIRE REBORN", w, h);
+    LOG_AMOURANTH("SWAPCHAIN REBIRTH — {}×{} — THE EMPIRE ADAPTS FLAWLESSLY", w, h);
 
-    // ==================================================================
-    // RELEASE ANY IMAGES STILL HELD BY THE PRESENTATION ENGINE
-    // ==================================================================
     releaseAcquiredImages();
 
-    // ==================================================================
-    // DESTROY OLD IMAGE VIEWS — BATCHED, BRUTAL, FINAL
-    // ==================================================================
     for (VkImageView view : swapchainImageViews_)
-    {
-        if (view != VK_NULL_HANDLE)
-            vkDestroyImageView(stone_device(), view, nullptr);
-    }
+        if (view) vkDestroyImageView(stone_device(), view, nullptr);
     swapchainImageViews_.clear();
 
-    // ==================================================================
-    // PRESERVE THE OLD SWAPCHAIN — VK_KHR_swapchain REQUIRES IT FOR EFFICIENCY
-    // ==================================================================
-    VkSwapchainKHR oldSwapchain = swapchain_.valid() ? *swapchain_ : VK_NULL_HANDLE;
+    VkSwapchainKHR old = swapchain_.valid() ? *swapchain_ : VK_NULL_HANDLE;
 
-    // ==================================================================
-    // THE REBIRTH — NEW SWAPCHAIN, SAME SOUL
-    // ==================================================================
-    createSwapchain(stone_window(), w, h, oldSwapchain);
+    createSwapchain(stone_window(), w, h, old);
 
-    // Destroy the old one *after* new one is created (driver loves this)
-    if (oldSwapchain != VK_NULL_HANDLE && oldSwapchain != *swapchain_)
-    {
-        vkDestroySwapchainKHR(stone_device(), oldSwapchain, nullptr);
-    }
+    if (old && old != *swapchain_)
+        vkDestroySwapchainKHR(stone_device(), old, nullptr);
 
-    // ==================================================================
-    // FORGE THE NEW VIEWS — ONE FOR EACH IMAGE
-    // ==================================================================
     createImageViews();
 
-    // ==================================================================
-    // THE EMPIRE HAS SPOKEN — ZERO FLICKER, ZERO TEARS
-    // ==================================================================
-    LOG_SUCCESS_CAT("SWAPCHAIN", "REBIRTH COMPLETE — {}×{} — {} IMAGES — {} PRESENT",
+    LOG_SUCCESS_CAT("SWAPCHAIN", "REBORN — {}×{} | {} images | {} | HDR {}",
         w, h,
         swapchainImages_.size(),
-        [ ]() -> const char* {
-            switch (currentPresentMode_)
-            {
-                case VK_PRESENT_MODE_MAILBOX_KHR:   return "MAILBOX";
-                case VK_PRESENT_MODE_IMMEDIATE_KHR: return "IMMEDIATE";
-                case VK_PRESENT_MODE_FIFO_KHR:      return "FIFO";
-                default:                            return "UNKNOWN";
-            }
-        }());
+        currentPresentMode_ == VK_PRESENT_MODE_MAILBOX_KHR   ? "MAILBOX" :
+        currentPresentMode_ == VK_PRESENT_MODE_IMMEDIATE_KHR ? "IMMEDIATE" : "FIFO",
+        supportsHDR() ? "IGNITED" : "dormant");
 
-    LOG_AMOURANTH("PHOTONS REALIGNED — ZERO FLICKER — FIRST LIGHT ETERNAL");
-    LOG_BLONDIE("The mirror never cracked. The empire never blinked.");
+    LOG_AMOURANTH("PHOTONS REALIGNED — TEARING ERADICATED — FIRST LIGHT ETERNAL");
 }
 
 void SwapchainManager::cleanup() noexcept
@@ -432,31 +395,33 @@ void SwapchainManager::createSwapchain(SDL_Window* window, uint32_t w, uint32_t 
 }
 
 // Feature 4: Present with ID and Wait
-void SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSemaphore waitSemaphore) noexcept {
+void SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSemaphore waitSemaphore) noexcept
+{
     VkSwapchainKHR sc = *swapchain_;
 
-    VkPresentIdKHR presentIdInfo = {
-        .sType = VK_STRUCTURE_TYPE_PRESENT_ID_KHR,
-        .swapchainCount = 1,
-        .pPresentIds = &lastPresentId
-    };
-
-    VkPresentInfoKHR presentInfo = {
-        .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
-        .pNext = &presentIdInfo,
+    VkPresentInfoKHR presentInfo{
+        .sType              = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
         .waitSemaphoreCount = 1,
-        .pWaitSemaphores = &waitSemaphore,
-        .swapchainCount = 1,
-        .pSwapchains = &sc,
-        .pImageIndices = &imageIndex
+        .pWaitSemaphores    = &waitSemaphore,
+        .swapchainCount     = 1,
+        .pSwapchains        = &sc,
+        .pImageIndices      = &imageIndex
     };
 
-    lastPresentId++;
+    VkResult result = vkQueuePresentKHR(queue, &presentInfo);
 
-    vkQueuePresentKHR(queue, &presentInfo);  // No check — assume success
-
-    // Optional 1µs wait — skip for max FPS
-    // if (vkWaitForPresentKHR) vkWaitForPresentKHR(stone_device(), sc, lastPresentId, 1'000ULL);
+    // CRITICAL: Handle both out-of-date and suboptimal → trigger safe resize
+    if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR)
+    {
+        LOG_MAIN("Present out-of-date/suboptimal → scheduling safe rebuild");
+        g_resizeRequested.store(true);
+        g_resizeWidth.store(swapchainExtent_.width);
+        g_resizeHeight.store(swapchainExtent_.height);
+    }
+    else if (result != VK_SUCCESS)
+    {
+        LOG_FATAL("vkQueuePresentKHR failed: {}", static_cast<int>(result));
+    }
 }
 
 // Feature 5: Frame Pacing
