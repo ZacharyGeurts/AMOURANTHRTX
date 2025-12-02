@@ -102,6 +102,7 @@ namespace RTX {
 
 	void logAndTrackDestruction(const char* type, void* ptr, int line, size_t size);
 	[[nodiscard]] VkDevice createLogicalDeviceAndSelectGPU(VkInstance instance, VkSurfaceKHR surface) noexcept;
+	void createGlobalDescriptorVault() noexcept;
 
 	// =============================================================================
     // Handle<T> — RAII + THE SACRED MACROS — ETERNAL
@@ -185,6 +186,7 @@ public:
     VkSurfaceKHR surface_        = VK_NULL_HANDLE;
     VkPhysicalDevice physicalDevice_ = VK_NULL_HANDLE;
     VkDevice         device_         = VK_NULL_HANDLE;
+	Handle<VkDescriptorPool> descriptorPool_;
 
     // Queues
     VkQueue graphicsQueue_  = VK_NULL_HANDLE;
@@ -296,6 +298,9 @@ public:
     extern Context g_context_instance;
     [[nodiscard]] inline Context& g_ctx() noexcept { return g_context_instance; }
     [[nodiscard]] inline VkShaderModule loadShader(const std::string& filename) { return g_ctx().loadShader(filename); }
+
+    [[nodiscard]] inline VkDescriptorPool global_descriptor_pool() noexcept { return g_ctx().descriptorPool_.get(); }
+    [[nodiscard]] inline bool global_descriptor_pool_valid() noexcept { return g_ctx().descriptorPool_.valid(); }
 	
     // =============================================================================
     // Core Vulkan Creation Functions

@@ -223,6 +223,32 @@ namespace RenderMode {
     constexpr bool     ENABLE_MODE_SWITCHING       = true;
 }
 
+// ── KOJIMA — THE DIRECTOR’S CUT OF REALITY ─────────────────────────────────────
+// ── KOJIMA — A SHORT LOVE LETTER FROM THE DIRECTOR KOJIMA ─────────────────────
+namespace Kojima {
+    // "Once, a man walked across a beach made of frames.
+    //  He carried a baby made of light.
+    //  The world called it 'blue noise'.
+    //  I called it 'hope'."
+    // — Hideo Kojima, December 2025
+
+	// blue noise is the real one
+    constexpr bool ENABLE_BLUE_NOISE                     = true;   // The baby came home
+    constexpr bool ENABLE_NORMAN_REEDUS_PHOTON           = true;   // He still carries you
+    constexpr bool ENABLE_BB_POD_AUTOEXPOSURE            = true;   // The baby adjusts the light so you never burn
+    constexpr bool ENABLE_KOJIMA_TEARS_TONEMAPPER        = true;   // Every frame is born crying — in the best way
+    constexpr bool ENABLE_MAILMAN_RAY_TRACING            = true;   // He walks forever, delivering perfect photons
+    constexpr bool ENABLE_HIDEO_KOJIMA_SIGNATURE_IN_SKY  = true;   // Soft pink cursive, visible only at golden hour
+    constexpr bool ENABLE_CONCEPTUAL_FPS_COUNTER         = true;   // Now reads: "you are enough fps"
+
+    // These remain beautifully false — some dreams are too powerful to enable yet
+    constexpr bool ENABLE_12_HOUR_CUTSCENE_BETWEEN_FRAMES = false;  // One day…
+    constexpr bool ENABLE_KOJIMA_MODE                     = false;  // When humanity is ready
+
+    // The final line, whispered every frame:
+    constexpr const char* KOJIMA_WHISPER = "Keep walking. The light remembers you.";
+}
+
 } // namespace Options
 
 // =============================================================================

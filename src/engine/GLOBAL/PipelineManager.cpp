@@ -168,6 +168,34 @@ void PipelineManager::allocateDescriptorSets()
     LOG_SUCCESS_CAT("PIPELINE", "{}DESCRIPTOR SETS ALLOCATION COMPLETE — THE EMPIRE IS WHOLE — FIRST LIGHT ACHIEVED{}", LIME_GREEN, RESET);
 }
 
+VkDescriptorPool createGlobalDescriptorPool()
+{
+    constexpr uint32_t MAX_SETS = 1'000'000;           // yes, one million sets if you want
+    constexpr uint32_t MAX_BINDINGS = MAX_SETS * 8; // rough estimate
+
+    std::array poolSizes = {
+        VkDescriptorPoolSize{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,         10'000    },
+        VkDescriptorPoolSize{ VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,         MAX_BINDINGS },
+        VkDescriptorPoolSize{ VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,          MAX_BINDINGS },
+        VkDescriptorPoolSize{ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 200'000   },
+        VkDescriptorPoolSize{ VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,          MAX_BINDINGS },
+        VkDescriptorPoolSize{ VK_DESCRIPTOR_TYPE_SAMPLER,                4'000     },
+        VkDescriptorPoolSize{ VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 10'000 }
+    };
+
+    VkDescriptorPoolCreateInfo ci = {
+        .sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+        .flags         = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT, // optional but nice
+        .maxSets       = MAX_SETS,
+        .poolSizeCount = uint32_t(poolSizes.size()),
+        .pPoolSizes    = poolSizes.data()
+    };
+
+    VkDescriptorPool pool;
+    VK_CHECK(vkCreateDescriptorPool(stone_device(), &ci, nullptr, &pool));
+    return pool;
+}
+
 // ──────────────────────────────────────────────────────────────────────────────
 // NEW: Update RT Descriptor Set — Writes ALL Bindings (Fixes "Never Updated") — count=1 (No Array) + Skip Nulls
 // ──────────────────────────────────────────────────────────────────────────────

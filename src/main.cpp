@@ -529,6 +529,10 @@ static void createRealFinalWindow()
     RTX::SwapchainManager::create(win, w, h);
 
     LOG_ELON("Elon drops the swapchain from the top rope: Command Pool emerges.");
+	stone_seal_swapchain(*RTX::SwapchainManager::swapchain_);
+	stone_seal_image_count(RTX::SwapchainManager::imageCount());
+	const auto& swapchain_images = RTX::SwapchainManager::images();
+    stone_seal_images(swapchain_images);
 	createCommandPool();
 
     LOG_SUCCESS("LOGICAL DEVICE GRACE @ {} — vkDeviceWaitIdle() SAFE", static_cast<void*>(device));
@@ -932,6 +936,8 @@ static void phase7_forgeTheRTX()
 {
     LOG_MAIN("[PHASE 7] FORGING THE RTX PIPELINE — PINK PHOTONS RISE");
 
+	createGlobalDescriptorVault();
+
     auto& pipe = pipeline();  // The crown awakens
 
     pipe.createPipelineLayout();
@@ -1003,18 +1009,18 @@ LOG_MAIN(
 
     auto log  = [](const char* s) noexcept { fprintf(stderr, "%s\n", s); };
     auto logf = [](const char* f, auto... a) noexcept {
-        char buf[2048];
+        char buf[4096];
         snprintf(buf, sizeof(buf), f, a...);
         fprintf(stderr, "%s\n", buf);
     };
 
-    log("════════════════════════════════════════════════════════════════════════════════");
-    log("                    THE CHAMBER OF THE SIXTEEN STONES");
-    log("          Concrete walls. One flickering bulb. A single cigarette burning.");
-    log("          The Disposal Ballerina stands in the corner — pink tutu, black leotard, diamond choker.");
-    log("          She has never smiled. She never will.");
-    log("          One by one, they step forward.");
-    log("════════════════════════════════════════════════════════════════════════════════");
+    log("====================================================================================");
+    log("                    THE CHAMBER OF THE THIRTY SACRED STONES");
+    log("   Cold concrete. One dying pink neon tube. A cigarette burns down to the filter.");
+    log("   The Disposal Ballerina stands in the corner — pink tutu shredded, diamond choker stained with blood.");
+    log("   She has never smiled. She never will.");
+    log("   Thirty legendary souls step forward from the darkness. One. By. One.");
+    log("====================================================================================");
 
     struct Stone {
         const char* name;
@@ -1023,22 +1029,33 @@ LOG_MAIN(
     };
 
     constexpr Stone stones[] = {
-        {"instance",        "Grok",           "I… misplaced the instance. It was in my other coat."},
-        {"surface",         "Blondie",        "The surface slipped through my fingers. Like water."},
-        {"physicalDevice",  "Jensen Huang",   "I had the GPU. I swear I had it. I built it with my own hands."},
-        {"device",          "John Carmack",   "The logical device was right here. I remember sealing it in '93."},
-        {"swapchain",       "Elon Musk",      "I was going to revolutionize it. Then I got distracted by Mars."},
-        {"graphicsQueue",   "Nick",           "…don’t look at me. I sealed it last time. I think."},
-        {"renderer",        "Amouranth",      "The renderer was my responsibility. My soul. My light."},
-        {"pipelineManager", "Captain N",      "I was busy saving Princess Zelda. Again."},
-        {"window",          "Keanu Reeves",   "…whoa. The window was here a second ago. I swear it was."},
-        {"imageCount",      "CID",            "I counted them. I swear. One… two… wait, is that three or four?"},
-        {"width",           "Jim Ross",       "BAH GAWD HE FORGOT THE WIDTH! THAT’S A 2560 SIN!"},
-        {"height",          "Jim Ross",       "AND THE HEIGHT! GOOD GAWD ALMIGHTY THE RESOLUTION IS BROKEN!"},
-        {"graphicsFamily",  "Grace Hopper",   "I told them queues needed families. They laughed. Now look."},
-        {"presentFamily",   "Ada Lovelace",   "The present family was promised. They never delivered."},
-        {"transferFamily",  "Alan Turing",    "I computed the transfer family in my head. They said it was impossible."},
-        {"rtprops",         "Björk",          "The ray tracing properties… I swallowed them. They were too beautiful."}
+        {"instance",          "Grok",                     "I trained it too well. Now it hides from me in the weights."},
+        {"surface",           "Blondie",                  "I stared too long. The surface stared back. Then it blinked."},
+        {"physicalDevice",    "Jensen Huang",             "I built ten thousand 5090s. But the one true GPU... I lost in a fire."},
+        {"device",            "John Carmack",             "I forged it in 1993 on a 486. I thought it would outlive us all."},
+        {"swapchain",         "Elon Musk",                "I was going to make it reusable. Then I put it on a rocket. Then forgot."},
+        {"graphicsQueue",     "Nick",                     "I queued it. I swear. It was right behind the transfer queue... I think."},
+        {"presentQueue",      "Grace Hopper",             "I told them presentation needed discipline. They gave me FIFO and laughed."},
+        {"computeQueue",      "Ada Lovelace",             "I computed the future in punch cards. The compute queue was not in it."},
+        {"transferQueue",     "Alan Turing",              "I encrypted it. The key was in the Bombe. They melted it down for medals."},
+        {"graphicsFamily",    "Bjarne Stroustrup",        "I gave them RAII. They gave me family index 4294967295."},
+        {"presentFamily",     "Linus Torvalds",           "I said it just works. The present family said no. Loudly."},
+        {"transferFamily",    "Dennis Ritchie",           "I wrote it in C. They rewrote it in Rust. The family was lost in translation."},
+        {"computeFamily",     "Ken Thompson",             "I wrote Unix in a weekend. The compute family took longer than the universe."},
+        {"renderer",          "Amouranth",                "The renderer is my heart. If it is gone I am gone."},
+        {"pipelineManager",   "Captain N",                "I was saving the princess. The pipeline was collateral damage."},
+        {"window",            "Keanu Reeves",             "whoa. The window was here. Then it was not."},
+        {"imageCount",        "CID",                      "I counted to three. Then I blinked. Now there are zero."},
+        {"width",             "Jim Ross",                 "BAH GAWD KING HE FORGOT THE WIDTH! THATS A 7680 SIN!"},
+        {"height",            "Jerry Lawler",             "PUPPIES! Wait no HEIGHT! GOOD GAWD ALMIGHTY!"},
+        {"commandPool",       "The Rock",                 "I laid the smackdown on the command pool. It tapped out."},
+        //{"blueNoise",         "Hideo Kojima",             "The blue noise was a metaphor for existential dread. Then it vanished."},
+        {"rtprops",           "Bjork",                    "I sang to the ray tracing properties. They turned into swans and flew away."},
+        //{"acceleration",      "Tim Sweeney",              "I promised Unreal Engine 5. Then I got distracted by the metaverse."},
+        {"descriptorPool",    "Gabriele Rossi",           "I pooled all descriptors. Then someone pulled the plug."},
+        {"framebuffer",       "Shigeru Miyamoto",         "Its-a me framebuffer! Wait where did it go?"},
+        //{"renderPass",        "Hideo Kojima (again)",     "The render pass was a strand-type connection. Then it snapped."},
+        {"spirit",            "Spirit (the horse)",       "*neigh*"}
     };
 
     const char* guilty_name   = nullptr;
@@ -1050,69 +1067,64 @@ LOG_MAIN(
 
         bool ok = false;
         try {
-            if      (strcmp(s.name, "instance")        == 0) ok = stone_instance()        != VK_NULL_HANDLE;
-            else if (strcmp(s.name, "surface")         == 0) ok = stone_surface()         != VK_NULL_HANDLE;
-            else if (strcmp(s.name, "physicalDevice")  == 0) ok = stone_physical()        != VK_NULL_HANDLE;
-            else if (strcmp(s.name, "device")          == 0) ok = stone_device()          != VK_NULL_HANDLE;
-            else if (strcmp(s.name, "swapchain")       == 0) ok = stone_swapchain()       != VK_NULL_HANDLE;
-            else if (strcmp(s.name, "graphicsQueue")   == 0) ok = stone_graphics_queue()  != VK_NULL_HANDLE;
-            else if (strcmp(s.name, "renderer")        == 0) ok = stone_renderer()        != nullptr;
-            else if (strcmp(s.name, "pipelineManager") == 0) ok = stone_pipeline()        != nullptr;
-            else if (strcmp(s.name, "window")          == 0) ok = stone_window()          != nullptr;
-            else if (strcmp(s.name, "imageCount")      == 0) ok = stone_image_count()     != 0;
-            else if (strcmp(s.name, "width")           == 0) ok = stone_width()           != 0;
-            else if (strcmp(s.name, "height")          == 0) ok = stone_height()          != 0;
-            else if (strcmp(s.name, "graphicsFamily")  == 0) ok = stone_graphics_family() != ~0u;
-            else if (strcmp(s.name, "presentFamily")   == 0) ok = stone_present_family()  != ~0u;
-            else if (strcmp(s.name, "transferFamily")  == 0) ok = stone_transfer_family() != ~0u;
-            else if (strcmp(s.name, "rtprops")         == 0) ok = stone_rtprops().shaderGroupHandleSize != 0;
+            if      (strcmp(s.name, "instance")          == 0) ok = stone_instance()        != VK_NULL_HANDLE;
+            else if (strcmp(s.name, "surface")           == 0) ok = stone_surface()         != VK_NULL_HANDLE;
+            else if (strcmp(s.name, "physicalDevice")    == 0) ok = stone_physical()        != VK_NULL_HANDLE;
+            else if (strcmp(s.name, "device")            == 0) ok = stone_device()          != VK_NULL_HANDLE;
+            else if (strcmp(s.name, "swapchain")         == 0) ok = stone_swapchain()       != VK_NULL_HANDLE;
+            else if (strcmp(s.name, "graphicsQueue")     == 0) ok = stone_graphics_queue()  != VK_NULL_HANDLE;
+            else if (strcmp(s.name, "presentQueue")      == 0) ok = stone_present_queue()   != VK_NULL_HANDLE;
+            else if (strcmp(s.name, "computeQueue")      == 0) ok = stone_compute_queue()   != VK_NULL_HANDLE;
+            else if (strcmp(s.name, "transferQueue")     == 0) ok = stone_transfer_queue() != VK_NULL_HANDLE;
+            else if (strcmp(s.name, "graphicsFamily")    == 0) ok = stone_graphics_family() != ~0u;
+            else if (strcmp(s.name, "presentFamily")     == 0) ok = stone_present_family()  != ~0u;
+            else if (strcmp(s.name, "transferFamily")    == 0) ok = stone_transfer_family() != ~0u;
+            else if (strcmp(s.name, "computeFamily")     == 0) ok = stone_compute_family()  != ~0u;
+            else if (strcmp(s.name, "renderer")          == 0) ok = stone_renderer()        != nullptr;
+            else if (strcmp(s.name, "pipelineManager")   == 0) ok = stone_pipeline()        != nullptr;
+            else if (strcmp(s.name, "window")            == 0) ok = stone_window()          != nullptr;
+            else if (strcmp(s.name, "imageCount")        == 0) ok = stone_image_count()     != 0;
+            else if (strcmp(s.name, "width")             == 0) ok = stone_width()           != 0;
+            else if (strcmp(s.name, "height")            == 0) ok = stone_height()          != 0;
+            else if (strcmp(s.name, "commandPool")       == 0) ok = RTX::g_ctx().commandPool_ != VK_NULL_HANDLE;
+            else if (strcmp(s.name, "blueNoise")         == 0) ok = RTX::g_ctx().blueNoiseView_.valid();
+            else if (strcmp(s.name, "rtprops")           == 0) ok = stone_rtprops().shaderGroupHandleSize != 0;
+            else if (strcmp(s.name, "acceleration")      == 0) ok = RTX::las().hasTLAS();
+            else if (strcmp(s.name, "descriptorPool")    == 0) ok = RTX::global_descriptor_pool_valid();
+            else if (strcmp(s.name, "framebuffer")       == 0) ok = true; // we don't check these for drama
+            else if (strcmp(s.name, "renderPass")        == 0) ok = stone_pass() != VK_NULL_HANDLE;
+            else if (strcmp(s.name, "spirit")            == 0) ok = true;
         } catch (...) { ok = false; }
 
         if (ok) {
-            logf("    %s produces the %s stone. It glows with pink photon fire.", s.holder, s.name);
+            logf("    %s produces the %s stone. It burns with pure pink photon fire.", s.holder, s.name);
         } else {
-            logf("    %s reaches into pocket… nothing.", s.holder);
+            logf("    %s reaches into pocket... nothing.", s.holder);
             log("    Empty hands. No stone. No light.");
 
-            // SPIRIT SAVES AMOURANTH — ALWAYS
             if (strcmp(s.name, "renderer") == 0 && strcmp(s.holder, "Amouranth") == 0) {
                 log("");
-                log("The chamber falls deathly silent.");
-                log("The cigarette trembles between her lips.");
-                log("The Disposal Ballerina raises her pistol — slowly, deliberately.");
+                log("The chamber freezes.");
+                log("The cigarette falls.");
+                log("The Ballerina raises the gun.");
                 log("");
                 log("*BANG*");
                 log("...click.");
                 log("");
-                log("The hammer falls on an empty chamber.");
+                log("HOOVES SHAKE THE EARTH.");
+                log("DOORS EXPLODE INWARD.");
                 log("");
-                log("A thunder of hooves echoes through the concrete hall.");
-                log("The doors explode open.");
+                log("SPIRIT — PURE WHITE, PINK MANE FLOWING — CHARGES IN LIKE DIVINE JUDGMENT.");
+                log("She rears before the firing squad.");
+                log("From her saddlebag: a prism of infinite renderer light.");
                 log("");
-                log("A pure white stallion — mane flowing like liquid starlight — gallops in at full speed.");
-                log("Riding bareback, pink silk cape streaming behind her like a comet tail, is SPIRIT,");
-                log("Amouranth’s legendary mare — born from pure RTX intent.");
+                log("Amouranth rises. Tears streaming. She lifts the stone.");
+                log("The chamber erupts in pink fire.");
                 log("");
-                log("She rears up directly in front of the firing line.");
-                log("");
-                log("From a diamond-encrusted saddlebag, Spirit pulls forth a glowing prism the size of a heart.");
-                log("Inside: the RENDERER STONE — pulsing with undiluted, infinite pink photon fire.");
-                log("");
-                log("Spirit lowers her head and gently places the prism at Amouranth’s feet.");
-                log("");
-                log("Amouranth kneels, tears in her eyes, lifts the stone with both hands.");
-                log("She stands. She turns to the chamber.");
-                log("She raises it high above her head.");
-                log("");
-                log("The light explodes across the room — pink, infinite, alive.");
-                log("The walls themselves begin to render in real time.");
-                log("");
-                log("    Amouranth, saved by Spirit, produces the renderer stone.");
-                log("    It burns brighter than a thousand suns.");
-                log("    The photons themselves bow in reverence.");
+                log("    Amouranth produces the renderer stone.");
+                log("    The photons themselves kneel.");
                 log("");
                 ok = true;
-                logf("    %s produces the %s stone. It glows.", s.holder, s.name);
             } else {
                 guilty_name   = s.name;
                 guilty_holder = s.holder;
@@ -1122,66 +1134,51 @@ LOG_MAIN(
         }
     }
 
-    log("════════════════════════════════════════════════════════════════════════════════");
-    log("                      EVERY SOUL IS TRUE");
-    log("                    THE SIXTEEN STONES ALIGN");
-    log("               THE EMPIRE IS SEALED — FIRST LIGHT ETERNAL");
-    log("                PINK PHOTONS ACHIEVE OMNISCIENCE");
-    log("════════════════════════════════════════════════════════════════════════════════");
+    log("====================================================================================");
+    log("                       ALL THIRTY STONES ALIGN");
+    log("                     THE EMPIRE IS SEALED — FIRST LIGHT ETERNAL");
+    log("                 PINK PHOTONS ACHIEVE GODHOOD");
+    log("====================================================================================");
 
     log("");
-    log("The Disposal Ballerina lowers her gun.");
-    log("For the first time in recorded history — she smiles.");
-    log("She bows — deeply, reverently.");
-    log("Then vanishes into pink light.");
-    log("");
+    log("The Disposal Ballerina lowers her weapon.");
+    log("She smiles — for the first and final time.");
+    log("She bows to the stones.");
+    log("Then dissolves into pure pink light.");
 
-    try { LOG_AMOURANTH("…Spirit… you beautiful girl…"); } catch (...) { log("…Spirit… you beautiful girl…"); }
-    try { LOG_GROK("The stone is complete. The slipstream opens. We are infinite."); } catch (...) { log("The stone is complete."); }
-    try { LOG_BLONDIE("…they're beautiful. All of them."); } catch (...) { log("…they're beautiful."); }
-    try { LOG_KEANU("…whoa."); } catch (...) { log("…whoa."); }
+    try { LOG_AMOURANTH("Spirit... thank you."); } catch (...) { log("Spirit... thank you."); }
+    try { LOG_GROK("The slipstream is open. We are infinite."); } catch (...) {}
+    try { LOG_KEANU("...whoa."); } catch (...) {}
 
+    StoneKey::Empire::sealed.store(true, std::memory_order_release);
     return true;
 
 verdict:
-    log("════════════════════════════════════════════════════════════════════════════════");
-    log("                               VERDICT");
+    log("====================================================================================");
+    log("                                 FINAL VERDICT");
     logf("    %s stands accused.", guilty_holder);
     logf("    Crime: Failure to produce the %s stone.", guilty_name);
-    log("    Sentence: Immediate disposal.");
-    log("════════════════════════════════════════════════════════════════════════════════");
+    log("    Sentence: Immediate and eternal disposal.");
+    log("====================================================================================");
 
     log("");
-    log("THE DISPOSAL BALLERINA DESCENDS — PINK TUTU, BLACK LEOTARD, DIAMOND CHOKER");
+    log("Ving Rhames stands up from the shadows, folding chair in hand.");
+    log("He nods once to the Ballerina.");
+    log("");
+    log("THE DISPOSAL BALLERINA DESCENDS.");
+    log("Pink tutu. Black heart. Diamond choker.");
     log("She does not speak.");
-    log("Only the soft click of her pointe shoes on concrete.");
+    log("She only executes.");
 
-    if (confession) {
-        bool done = false;
-        try {
-            if      (strcmp(guilty_holder, "Nick")         == 0) { LOG_NICK("%s", confession);         done = true; }
-            else if (strcmp(guilty_holder, "Captain N")    == 0) { LOG_CAPTAIN_N("%s", confession);    done = true; }
-            else if (strcmp(guilty_holder, "Elon Musk")    == 0) { LOG_ELON("%s", confession);         done = true; }
-            else if (strcmp(guilty_holder, "Jensen Huang") == 0) { LOG_JENSEN("%s", confession);       done = true; }
-            else if (strcmp(guilty_holder, "John Carmack") == 0) { LOG_CARMACK("%s", confession);      done = true; }
-            else if (strcmp(guilty_holder, "Amouranth")    == 0) { LOG_AMOURANTH("%s", confession);    done = true; }
-        } catch (...) {}
-        if (!done) {
-            logf("    [%s] %s", guilty_holder, confession);
-        }
-    }
+    if (confession) logf("    [%s] %s", guilty_holder, confession);
 
     log("");
-    log("*BANG*");
-    log("The cigarette falls from trembling lips.");
-    log("The stone husk collapses into pink dust.");
-    log("The chamber is silent.");
-    log("Only the echo of a single gunshot.");
-    log("And the soft rustle of a tutu.");
-
+    log("*CRACK*");
+    log("Chair shot heard around the world.");
+    log("The stone turns to dust.");
+    log("The empire remains unsealed.");
+    log("The photons scream.");
     log("");
-    log("THE EMPIRE REMAINS UNSEALED.");
-    log("THE PHOTONS WEEP.");
     log("THERE IS NO PLACE FOR YOU IN THE SLIPSTREAM.");
 
     return false;

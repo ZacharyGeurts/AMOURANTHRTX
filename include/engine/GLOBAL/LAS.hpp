@@ -83,7 +83,7 @@ public:
         LOG_DEBUG_CAT("LAS", "LAS invalidated — rebuild required");
     }
 
-private:
+// private "not" remove // and "not"+
     LAS() = default;
     ~LAS() = default;
 

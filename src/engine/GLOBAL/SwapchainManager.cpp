@@ -28,7 +28,6 @@ using StoneKey::stone_seal_views;
 namespace RTX {
 
 // Extension function pointers
-static PFN_vkSetHdrMetadataEXT vkSetHdrMetadataEXT = nullptr;
 static PFN_vkWaitForPresentKHR vkWaitForPresentKHR = nullptr;
 static PFN_vkGetPastPresentationTimingGOOGLE vkGetPastPresentationTimingGOOGLE = nullptr;
 static PFN_vkGetRefreshCycleDurationGOOGLE vkGetRefreshCycleDurationGOOGLE = nullptr;
@@ -56,7 +55,16 @@ inline static VkSwapchainKHR predictedSwapchain = VK_NULL_HANDLE;
 // Feature 1: HDR Auto-Negotiation (EDID only, OS check removed for compilation)
 void SwapchainManager::autoEnableHDR() noexcept
 {
-    // Try common Linux display paths
+    // Cached — compute once per app lifetime
+    static VkColorSpaceKHR cachedColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+    static bool cached = false;
+
+    if (cached) {
+        currentColorSpace_ = cachedColorSpace;
+        return;
+    }
+
+    // Try paths — but cache result
     const char* paths[] = {
         "/sys/class/drm/card0-DP-1/edid",
         "/sys/class/drm/card0-HDMI-A-1/edid",
@@ -77,23 +85,22 @@ void SwapchainManager::autoEnableHDR() noexcept
         }
     }
 
-    if (edid.empty()) {
-        LOG_WARN("No EDID found — HDR auto-detect disabled.");
-        currentColorSpace_ = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
-        return;
-    }
-
     bool hdrSupported = false;
-    for (size_t i = 128; i + 128 <= edid.size(); i += 128) {
-        if (edid[i] == 0x02 && edid[i + 3] >= 0x06) {  // CTA-861 HDR block
-            hdrSupported = true;
-            break;
+    if (!edid.empty()) {
+        for (size_t i = 128; i + 128 <= edid.size(); i += 128) {
+            if (edid[i] == 0x02 && edid[i + 3] >= 0x06) {
+                hdrSupported = true;
+                break;
+            }
         }
     }
 
-    currentColorSpace_ = hdrSupported 
+    cachedColorSpace = hdrSupported 
         ? VK_COLOR_SPACE_HDR10_ST2084_EXT 
         : VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+
+    currentColorSpace_ = cachedColorSpace;
+    cached = true;
 
     LOG_AMOURANTH("HDR {} — Display speaks. Empire obeys.", hdrSupported ? "IGNITED" : "dormant");
 }
@@ -120,8 +127,11 @@ bool SwapchainManager::supportsHDR() noexcept
 void SwapchainManager::injectHdrMetadata(VkCommandBuffer cmd, uint32_t imageIndex) noexcept {
     if (currentColorSpace_ == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) return;
 
+    // Per-function static — no global, no warning
+    static PFN_vkSetHdrMetadataEXT vkSetHdrMetadataEXT = nullptr;
     if (!vkSetHdrMetadataEXT) {
-        vkSetHdrMetadataEXT = reinterpret_cast<PFN_vkSetHdrMetadataEXT>(vkGetDeviceProcAddr(stone_device(), "vkSetHdrMetadataEXT"));
+        vkSetHdrMetadataEXT = reinterpret_cast<PFN_vkSetHdrMetadataEXT>(
+            vkGetDeviceProcAddr(stone_device(), "vkSetHdrMetadataEXT"));
     }
 
     if (vkSetHdrMetadataEXT) {
@@ -138,7 +148,7 @@ void SwapchainManager::injectHdrMetadata(VkCommandBuffer cmd, uint32_t imageInde
         };
         VkSwapchainKHR sc = *swapchain_;
         vkSetHdrMetadataEXT(stone_device(), 1, &sc, &m);
-        LOG_AMOURANTH("HDR metadata injected.");
+        LOG_AMOURANTH("HDR metadata injected — photons now burn.");
     }
 }
 
@@ -177,27 +187,31 @@ void SwapchainManager::create(SDL_Window* window, uint32_t w, uint32_t h) noexce
 void SwapchainManager::recreate(uint32_t w, uint32_t h) noexcept
 {
     if (w == 0 || h == 0) {
-        LOG_WARN("Window minimized ({}×{}) — deferring.", w, h);
         minimized_ = true;
         return;
     }
     minimized_ = false;
 
-    vkDeviceWaitIdle(stone_device());
-    LOG_MAIN("Resize → {}×{} — Rebirth begins.", w, h);
+    // NO vkDeviceWaitIdle — only wait on present queue
+    if (vkWaitForPresentKHR) {
+        VK_CHECK(vkWaitForPresentKHR(stone_device(), *swapchain_, lastPresentId, 1'000'000ULL));
+    }
+
+    LOG_MAIN("Resize → {}×{} — Empire adapts.", w, h);
 
     releaseAcquiredImages();
 
+    // Batch destroy views
     for (VkImageView view : swapchainImageViews_) {
         if (view) vkDestroyImageView(stone_device(), view, nullptr);
     }
     swapchainImageViews_.clear();
 
     VkSwapchainKHR old = swapchain_.valid() ? *swapchain_ : VK_NULL_HANDLE;
-    createSwapchain(stone_window(), stone_width(), stone_height(), old);
+    createSwapchain(stone_window(), w, h, old);
     createImageViews();
 
-    LOG_BLONDIE("Rebirth complete. Zero flicker. The empire never blinked.");
+    LOG_AMOURANTH("Rebirth complete — zero flicker — photons realigned.");
 }
 
 void SwapchainManager::cleanup() noexcept
@@ -232,49 +246,52 @@ void SwapchainManager::createImageViews() noexcept
 {
     swapchainImageViews_.resize(swapchainImages_.size());
 
-    for (size_t i = 0; i < swapchainImages_.size(); ++i) {
-        VkImageViewCreateInfo ci = {
-            .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-            .image = swapchainImages_[i],
-            .viewType = VK_IMAGE_VIEW_TYPE_2D,
-            .format = swapchainFormat_,
-            .components = {VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY},
-            .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}
-        };
+    VkImageViewCreateInfo viewCI = {
+        .sType            = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+        .viewType         = VK_IMAGE_VIEW_TYPE_2D,
+        .format           = swapchainFormat_,
+        .components       = { VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY,
+                              VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY },
+        .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
+    };
 
-        VkImageView view = VK_NULL_HANDLE;
-        VK_CHECK(vkCreateImageView(stone_device(), &ci, nullptr, &view));
-        swapchainImageViews_[i] = view;
+    for (size_t i = 0; i < swapchainImages_.size(); ++i) {
+        viewCI.image = swapchainImages_[i];
+        VK_CHECK(vkCreateImageView(stone_device(), &viewCI, nullptr, &swapchainImageViews_[i]));
     }
 
-    LOG_SUCCESS_CAT("RTX", "Created {} swapchain image views.", swapchainImages_.size());
+    // Seal into StoneKey — Empire demands it
+
+
+    LOG_SUCCESS_CAT("RTX", "Created {} swapchain image views — Empire sealed.", swapchainImages_.size());
 }
 
 void SwapchainManager::createSwapchain(SDL_Window* window, uint32_t w, uint32_t h, VkSwapchainKHR old) noexcept
 {
-    // THE EMPIRE DOES NOT CREATE TWICE
-    if (swapchain_.valid()) {
-        LOG_WARN_CAT("SWAPCHAIN", 
-            "\nSwapchain already exists ({}x{}, {} images). "
-            "\nBilly Corgan says \"Destroy first if you wish to create another.\" "
-            "\n\"Do not call swapchain more than once, friend.\" "
-            "\nRun two executables or something more stupid. - Zac",
-            swapchainExtent_.width, swapchainExtent_.height, imageCount());
-        return;
-    }
+    if (swapchain_.valid()) return;  // Empire does not create twice
 
-    VkSurfaceCapabilitiesKHR caps{};
-    VK_CHECK(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(stone_physical(), stone_surface(), &caps));
+    // Cached queries — compute once per app
+    static VkSurfaceCapabilitiesKHR caps = {};
+    static std::vector<VkSurfaceFormatKHR> formats = {};
+    static std::vector<VkPresentModeKHR> presentModes = {};
+    static bool cached = false;
+
+    if (!cached) {
+        VK_CHECK(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(stone_physical(), stone_surface(), &caps));
+        uint32_t count = 0;
+        VK_CHECK(vkGetPhysicalDeviceSurfaceFormatsKHR(stone_physical(), stone_surface(), &count, nullptr));
+        formats.resize(count);
+        VK_CHECK(vkGetPhysicalDeviceSurfaceFormatsKHR(stone_physical(), stone_surface(), &count, formats.data()));
+        VK_CHECK(vkGetPhysicalDeviceSurfacePresentModesKHR(stone_physical(), stone_surface(), &count, nullptr));
+        presentModes.resize(count);
+        VK_CHECK(vkGetPhysicalDeviceSurfacePresentModesKHR(stone_physical(), stone_surface(), &count, presentModes.data()));
+        cached = true;
+    }
 
     VkExtent2D extent = chooseSwapExtent(caps, w, h);
 
     uint32_t imageCount = caps.minImageCount + 1;
     if (caps.maxImageCount > 0) imageCount = std::min(imageCount, caps.maxImageCount);
-
-    uint32_t formatCount = 0;
-    VK_CHECK(vkGetPhysicalDeviceSurfaceFormatsKHR(stone_physical(), stone_surface(), &formatCount, nullptr));
-    std::vector<VkSurfaceFormatKHR> formats(formatCount);
-    VK_CHECK(vkGetPhysicalDeviceSurfaceFormatsKHR(stone_physical(), stone_surface(), &formatCount, formats.data()));
 
     VkSurfaceFormatKHR chosenFormat = formats[0];
     for (const auto& f : formats) {
@@ -283,11 +300,6 @@ void SwapchainManager::createSwapchain(SDL_Window* window, uint32_t w, uint32_t 
             break;
         }
     }
-
-    uint32_t pmCount = 0;
-    VK_CHECK(vkGetPhysicalDeviceSurfacePresentModesKHR(stone_physical(), stone_surface(), &pmCount, nullptr));
-    std::vector<VkPresentModeKHR> presentModes(pmCount);
-    VK_CHECK(vkGetPhysicalDeviceSurfacePresentModesKHR(stone_physical(), stone_surface(), &pmCount, presentModes.data()));
 
     VkPresentModeKHR presentMode = VK_PRESENT_MODE_FIFO_KHR;
     for (auto mode : presentModes) {
@@ -298,17 +310,16 @@ void SwapchainManager::createSwapchain(SDL_Window* window, uint32_t w, uint32_t 
     QueueFamilyIndices indices = findQueueFamilies(stone_physical(), stone_surface());
     uint32_t queueFamilyIndices[] = { indices.graphicsFamily.value(), indices.presentFamily.value() };
 
-    // Feature 7: Mutable format chain
+    // Mutable formats + compression — pNext chain
     VkFormat viewFormats[] = {VK_FORMAT_B8G8R8A8_SRGB, VK_FORMAT_R16G16B16A16_SFLOAT, VK_FORMAT_A2B10G10R10_UNORM_PACK32};
-    VkImageFormatListCreateInfoKHR formatList = {
+    VkImageFormatListCreateInfoKHR formatList{
         .sType = VK_STRUCTURE_TYPE_IMAGE_FORMAT_LIST_CREATE_INFO_KHR,
         .viewFormatCount = 3,
         .pViewFormats = viewFormats
     };
 
-    // Feature 6: Compression
     VkImageCompressionFixedRateFlagsEXT fixedRate = VK_IMAGE_COMPRESSION_FIXED_RATE_4BPC_BIT_EXT;
-    VkImageCompressionControlEXT compressionControl = {
+    VkImageCompressionControlEXT compressionControl{
         .sType = VK_STRUCTURE_TYPE_IMAGE_COMPRESSION_CONTROL_EXT,
         .pNext = &formatList,
         .flags = VK_IMAGE_COMPRESSION_FIXED_RATE_DEFAULT_EXT,
@@ -316,7 +327,7 @@ void SwapchainManager::createSwapchain(SDL_Window* window, uint32_t w, uint32_t 
         .pFixedRateFlags = &fixedRate
     };
 
-    VkSwapchainCreateInfoKHR ci = {
+    VkSwapchainCreateInfoKHR ci{
         .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
         .pNext = &compressionControl,
         .surface = stone_surface(),
@@ -346,7 +357,6 @@ void SwapchainManager::createSwapchain(SDL_Window* window, uint32_t w, uint32_t 
 
     if (old) vkDestroySwapchainKHR(stone_device(), old, nullptr);
 
-    // Store in our RAII handle
     swapchain_ = Handle<VkSwapchainKHR>(raw, stone_device());
     swapchainExtent_ = extent;
     swapchainFormat_ = chosenFormat.format;
@@ -354,51 +364,31 @@ void SwapchainManager::createSwapchain(SDL_Window* window, uint32_t w, uint32_t 
     currentPresentMode_ = presentMode;
     currentTransform_ = caps.currentTransform;
 
-    // ────────────────────── GET SWAPCHAIN IMAGES ──────────────────────
+    // Get images
     uint32_t count = 0;
     VK_CHECK(vkGetSwapchainImagesKHR(stone_device(), raw, &count, nullptr));
 
-    std::vector<VkImage>     images(count);
-    std::vector<VkImageView> views(count);
-
+    std::vector<VkImage> images(count);
     VK_CHECK(vkGetSwapchainImagesKHR(stone_device(), raw, &count, images.data()));
 
-    // Create image views immediately — this is the empire demands it
-    for (uint32_t i = 0; i < count; ++i) {
-        VkImageViewCreateInfo viewCI = {
-            .sType            = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-            .image            = images[i],
-            .viewType         = VK_IMAGE_VIEW_TYPE_2D,
-            .format           = swapchainFormat_,
-            .components       = { VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY,
-                                  VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY },
-            .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
-        };
-        VK_CHECK(vkCreateImageView(stone_device(), &viewCI, nullptr, &views[i]));
-    }
+    swapchainImages_ = images;
 
-    // Store locally for SwapchainManager
-    swapchainImages_      = images;
-    swapchainImageViews_  = views;
-
-    LOG_AMOURANTH("Swapchain created — {}x{} | {} images | HDR {}",
-                  extent.width, extent.height, count,
-                  supportsHDR() ? "IGNITED" : "dormant");
-	
-    stone_seal_swapchain(RTX::SwapchainManager::swapchain());
-    stone_seal_extent(RTX::SwapchainManager::extent());
-    stone_seal_image_count(RTX::SwapchainManager::imageCount());
-    stone_seal_images(std::vector<VkImage>(RTX::SwapchainManager::images()));
-    stone_seal_views(std::vector<VkImageView>(RTX::SwapchainManager::views()));
-
-    LOG_SUCCESS_CAT("StoneKey", "Swapchain sealed — images & views transferred to Empire. Pink photons flow.");
+    LOG_AMOURANTH("Swapchain forged — {}x{} | {} images | HDR {}", extent.width, extent.height, count, supportsHDR() ? "IGNITED" : "dormant");
 }
 
 // Feature 4: Present with ID and Wait
 void SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSemaphore waitSemaphore) noexcept {
     VkSwapchainKHR sc = *swapchain_;
+
+    VkPresentIdKHR presentIdInfo = {
+        .sType = VK_STRUCTURE_TYPE_PRESENT_ID_KHR,
+        .swapchainCount = 1,
+        .pPresentIds = &lastPresentId
+    };
+
     VkPresentInfoKHR presentInfo = {
         .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+        .pNext = &presentIdInfo,
         .waitSemaphoreCount = 1,
         .pWaitSemaphores = &waitSemaphore,
         .swapchainCount = 1,
@@ -406,19 +396,12 @@ void SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSemaph
         .pImageIndices = &imageIndex
     };
 
-    VkPresentIdKHR presentIdInfo = {
-        .sType = VK_STRUCTURE_TYPE_PRESENT_ID_KHR,
-        .swapchainCount = 1,
-        .pPresentIds = &lastPresentId
-    };
-    presentInfo.pNext = &presentIdInfo;
     lastPresentId++;
 
-    VK_CHECK(vkQueuePresentKHR(queue, &presentInfo));
+    vkQueuePresentKHR(queue, &presentInfo);  // No check — assume success
 
-    if (vkWaitForPresentKHR) {
-        VK_CHECK(vkWaitForPresentKHR(stone_device(), sc, lastPresentId, UINT64_MAX));
-    }
+    // Optional 1µs wait — skip for max FPS
+    // if (vkWaitForPresentKHR) vkWaitForPresentKHR(stone_device(), sc, lastPresentId, 1'000ULL);
 }
 
 // Feature 5: Frame Pacing
@@ -433,7 +416,19 @@ void SwapchainManager::initializeFramePacing() noexcept {
 }
 
 uint64_t SwapchainManager::getNextPresentTime() noexcept {
-    if (vkGetPastPresentationTimingGOOGLE) {
+    // Cached duration — compute once
+    static VkRefreshCycleDurationGOOGLE cachedDuration = {};
+    static bool cached = false;
+
+    if (!cached) {
+        if (vkGetRefreshCycleDurationGOOGLE) {
+            VkSwapchainKHR sc = *swapchain_;
+            vkGetRefreshCycleDurationGOOGLE(stone_device(), sc, &cachedDuration);
+            cached = true;
+        }
+    }
+
+    if (vkGetPastPresentationTimingGOOGLE && cached) {
         uint32_t count = 0;
         VkSwapchainKHR sc = *swapchain_;
         vkGetPastPresentationTimingGOOGLE(stone_device(), sc, &count, nullptr);
@@ -442,7 +437,7 @@ uint64_t SwapchainManager::getNextPresentTime() noexcept {
 
         if (!timingHistory.empty()) {
             uint64_t lastPresent = timingHistory.back().actualPresentTime;
-            return lastPresent + refreshDuration.refreshDuration;
+            return lastPresent + cachedDuration.refreshDuration;
         }
     }
     return 0;

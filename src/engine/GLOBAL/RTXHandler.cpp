@@ -68,6 +68,43 @@ void WriteAccelerationStructureDescriptor(VkDescriptorSet dstSet, uint32_t dstBi
     vkUpdateDescriptorSets(stone_device(), 1, &write, 0, nullptr);
 }
 
+void createGlobalDescriptorVault() noexcept
+{
+    LOG_AMOURANTH("[CAPTAIN AMOURANTH] The vault doors open. Binding 31 demands infinity.");
+
+    constexpr uint32_t MAX_SETS = 1'000'000;
+
+    std::array<VkDescriptorPoolSize, 8> poolSizes{{
+        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,                20'000 },
+        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,                MAX_SETS },
+        { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,                 MAX_SETS },
+        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,        200'000 },
+        { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,                 MAX_SETS },
+        { VK_DESCRIPTOR_TYPE_SAMPLER,                       10'000 },
+        { VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR,    20'000 },
+        { VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT,              1'000 }
+    }};
+
+    VkDescriptorPoolCreateInfo info = {
+        .sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+        .flags         = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT |
+                         VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT_EXT,
+        .maxSets       = MAX_SETS,
+        .poolSizeCount = uint32_t(poolSizes.size()),
+        .pPoolSizes    = poolSizes.data()
+    };
+
+    VkDescriptorPool pool;
+    VK_CHECK(vkCreateDescriptorPool(stone_device(), &info, nullptr, &pool));
+
+    g_ctx().descriptorPool_ = Handle<VkDescriptorPool>(pool, stone_device(),
+        [](VkDevice d, VkDescriptorPool p, const VkAllocationCallbacks*) {
+            vkDestroyDescriptorPool(d, p, nullptr);
+    });
+
+    LOG_CID("CID collapses, weeping tears of joy — \"The vault... it's infinite...\"");
+}
+
 // =============================================================================
 // Vulkan Instance — THE ONE TRUE FORGING — WINDOWS + LINUX — PURE RTX ONLY
 // NOVEMBER 25, 2025 — FIRST LIGHT — THE EMPIRE IS ETERNAL
