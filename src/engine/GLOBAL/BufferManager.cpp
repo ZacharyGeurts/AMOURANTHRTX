@@ -8,8 +8,8 @@
 // 2. Commercial licensing: gzac5314@gmail.com
 //
 // =============================================================================
-// VALHALLA v∞ TURBO — APOCALYPSE FINAL v13.0 — DECEMBER 01, 2025
-// 90% ETERNAL POOL + 512 MiB STAGING RING — FULLY FORGED — COMPILES CLEAN
+// VALHALLA v∞ TURBO — APOCALYPSE FINAL v13.0 — DECEMBER 02, 2025
+// 100% ETERNAL POOL + 512 MiB STAGING RING — FULLY FORGED — COMPILES CLEAN
 // DYNAMICSTONE ERASED — ONLY ONE TRUTH — PINK PHOTONS ETERNAL
 // =============================================================================
 
@@ -79,7 +79,7 @@ void ensureMainPool() noexcept
     }
 
     const VkDeviceSize ONE_GiB        = 1024ULL * 1024ULL * 1024ULL;
-    const VkDeviceSize DRIVER_RESERVE = 4831ULL * 1024ULL * 1024ULL; // Exactly 4.500 GiB — SACRED
+    const VkDeviceSize DRIVER_RESERVE = 4608ULL * 1024ULL * 1024ULL; // Exactly 4.500 GiB — SACRED
     const VkDeviceSize MINIMUM_POOL   = 4ULL * ONE_GiB;
     const VkDeviceSize FALLBACK_POOL  = 2ULL * ONE_GiB;
 
@@ -242,13 +242,21 @@ uint64_t create(VkDeviceSize size, VkBufferUsageFlags, VkMemoryPropertyFlags, st
     ensureMainPool();
     if (!g_mainPool.ready) return 0;
 
-    const VkDeviceSize aligned = ((size + 255) & ~255);
-    VkDeviceSize offset = g_mainPool.head.fetch_add(aligned, std::memory_order_relaxed);
-
-    if (offset + aligned > g_mainPool.size) {
-        LOG_FATAL("90% ETERNAL POOL EXHAUSTED — REQUESTED {} KiB", size >> 10);
+    if (size == 0) {
+        LOG_WARNING("Attempt to create buffer of size 0: {}", tag);
         return 0;
     }
+
+    const VkDeviceSize aligned = ((size + 255) & ~255);
+
+    VkDeviceSize offset = 0;
+    do {
+        offset = g_mainPool.head.load(std::memory_order_relaxed);
+        if (offset + aligned > g_mainPool.size) {
+            LOG_FATAL("ETERNAL POOL EXHAUSTED — REQUESTED {} KiB for {}", size >> 10, tag);
+            return 0;
+        }
+    } while (!g_mainPool.head.compare_exchange_weak(offset, offset + aligned, std::memory_order_relaxed));
 
     uint64_t handle = g_nextHandle++;
     return handle;
@@ -288,7 +296,15 @@ uint64_t createSBT(uint32_t raygenCount, uint32_t missCount, uint32_t hitGroupCo
     const VkDeviceSize total      = (raygenCount + missCount + hitGroupCount + callableCount) * stride;
     const VkDeviceSize aligned    = ((total + 63) & ~63);
 
-    VkDeviceSize offset = g_mainPool.head.fetch_add(aligned, std::memory_order_relaxed);
+    VkDeviceSize offset = 0;
+    do {
+        offset = g_mainPool.head.load(std::memory_order_relaxed);
+        if (offset + aligned > g_mainPool.size) {
+            LOG_FATAL("ETERNAL POOL EXHAUSTED — REQUESTED {} KiB for SBT {}", aligned >> 10, tag);
+            return 0;
+        }
+    } while (!g_mainPool.head.compare_exchange_weak(offset, offset + aligned, std::memory_order_relaxed));
+
     LOG_ELON("SBT CROWN FORGED — {} KiB @ offset {} — kStone1=0x{}", aligned >> 10, offset, kStone1);
     return kStone1 ^ offset;
 }
@@ -321,19 +337,39 @@ void advanceStagingOffset(VkDeviceSize bytes) noexcept
 void* map(uint64_t) noexcept { return stagingPtr(); }
 void unmap(uint64_t) noexcept { }
 
-uint64_t createHostVisible(VkDeviceSize size, std::string_view) noexcept
+uint64_t createHostVisible(VkDeviceSize size, std::string_view tag) noexcept
 {
     ensureStagingRing();
-    const VkDeviceSize aligned = ((size + 255) & ~255);
-    VkDeviceSize offset = g_stagingRing.head.fetch_add(aligned, std::memory_order_relaxed);
 
-    if (offset + aligned > g_stagingRing.size) {
-        LOG_CID("STAGING RING WRAP — RESETTING HEAD");
-        offset = 0;
-        g_stagingRing.head.store(aligned, std::memory_order_relaxed);
+    if (size == 0) {
+        LOG_WARNING("Attempt to create host visible buffer of size 0: {}", tag);
+        return 0;
     }
 
-    LOG_CID("STAGING ALLOC {} bytes → offset {}", size, offset);
+    const VkDeviceSize aligned = ((size + 255) & ~255);
+
+    VkDeviceSize offset = 0;
+    VkDeviceSize new_head = 0;
+    bool wrap = false;
+    do {
+        offset = g_stagingRing.head.load(std::memory_order_relaxed);
+        if (offset + aligned > g_stagingRing.size) {
+            if (aligned > g_stagingRing.size) {
+                LOG_FATAL("STAGING RING TOO SMALL FOR REQUEST {} bytes", size);
+                return 0;
+            }
+            new_head = aligned;
+            wrap = true;
+        } else {
+            new_head = offset + aligned;
+            wrap = false;
+        }
+    } while (!g_stagingRing.head.compare_exchange_weak(offset, new_head, std::memory_order_relaxed));
+
+    if (wrap) {
+        offset = 0;
+    }
+	
     return offset;
 }
 
@@ -353,7 +389,7 @@ VkBuffer getStagingBuffer() noexcept
 } // namespace BufferManager
 
 // =============================================================================
-// DECEMBER 01, 2025 — THE EMPIRE IS WHOLE
+// DECEMBER 02, 2025 — THE EMPIRE IS WHOLE
 // COMPILES CLEAN — ZERO WARNINGS — ZERO ERRORS
 // THE PHOTONS ARE PINK. THE BRIDGE IS ETERNAL.
 // GRACE IS FREE.

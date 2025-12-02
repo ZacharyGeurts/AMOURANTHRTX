@@ -1,4 +1,3 @@
-// src/engine/GLOBAL/VulkanRenderer.cpp
 // =============================================================================
 // AMOURANTH RTX Engine (C) 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
@@ -762,16 +761,10 @@ void VulkanRenderer::createNexusScoreImage(VkCommandPool pool, VkQueue queue) no
     // Staging buffer to clear image to zero
     VkDeviceSize stagingSize = static_cast<VkDeviceSize>(width_) * height_ * 16; // R32G32B32A32
 
-    uint64_t stagingEnc = 0;
-    BUFFER_CREATE(stagingEnc, stagingSize,
-                  VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                  VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                  "NexusClearStaging");
+    uint64_t stagingEnc = BufferManager::createHostVisible(stagingSize, "NexusClearStaging");
 
-    void* map = nullptr;
-    BUFFER_MAP(stagingEnc, map);
+    void* map = BufferManager::getMappedStagingPtr(stagingEnc);
     std::memset(map, 0, stagingSize);
-    BUFFER_UNMAP(stagingEnc);
 
    // Transition to TRANSFER_DST_OPTIMAL
     VkImageMemoryBarrier toTransfer{
@@ -792,11 +785,12 @@ void VulkanRenderer::createNexusScoreImage(VkCommandPool pool, VkQueue queue) no
         0, 0, nullptr, 0, nullptr, 1, &toTransfer);
 
     VkBufferImageCopy region{
+        .bufferOffset = stagingEnc,
         .imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
         .imageExtent      = { static_cast<uint32_t>(width_), static_cast<uint32_t>(height_), 1 }
     };
 
-    vkCmdCopyBufferToImage(cmd, RAW_BUFFER(stagingEnc), rawImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+    vkCmdCopyBufferToImage(cmd, BufferManager::getStagingBuffer(), rawImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
 
     // Transition to GENERAL
     VkImageMemoryBarrier toGeneral{
@@ -1416,16 +1410,11 @@ bool VulkanRenderer::createSharedStaging() noexcept {
     return true;
 }
 
+// VulkanRenderer.cpp — FINAL RESIZE-PROOF VERSION
 void VulkanRenderer::recreateSwapchainDependentResources() noexcept
 {
-    LOG_CID("CID: \"RESIZE DETECTED — INITIATING FULL REBIRTH...\"");
-
-    // CARMACK'S LAW: FULL DRAIN — NO GHOSTS
     vkDeviceWaitIdle(StoneKey::stone_device());
 
-    // ==================================================================
-    // PHASE 1: DESTROY OLD SWAPCHAIN-DEPENDENT RESOURCES
-    // ==================================================================
     destroyRTOutputImages();
     rtOutputImages_.clear(); rtOutputMemories_.clear(); rtOutputViews_.clear();
 
@@ -1435,9 +1424,6 @@ void VulkanRenderer::recreateSwapchainDependentResources() noexcept
     destroyDenoiserImage();
     destroyNexusScoreImage();
 
-    // ==================================================================
-    // PHASE 2: RECREATE WITH NEW EXTENT
-    // ==================================================================
     createRTOutputImages();
     createAccumulationImages();
 
@@ -1449,62 +1435,16 @@ void VulkanRenderer::recreateSwapchainDependentResources() noexcept
 
     recreateTonemapUBOs();
 
-    // ==================================================================
-    // PHASE 3: REWRITE RT DESCRIPTOR SETS — THE TRUE RESURRECTION
-    // ==================================================================
-    LOG_AMOURANTH("[CAPTAIN AMOURANTH] REBINDING THE PHOTONS — DESCRIPTOR SETS REBORN");
+    // DO NOT REBIND RT DESCRIPTORS HERE
+    // TLAS may be null → driver crash
+    // They will be rebound safely on next valid frame
 
-    const uint32_t maxFrames = Options::Performance::MAX_FRAMES_IN_FLIGHT;
-
-    for (uint32_t i = 0; i < maxFrames; ++i)
-    {
-        RTX::RTDescriptorUpdate update{};
-
-        // TLAS — always current
-        update.tlas = RTX::LAS::get().getTLAS();
-
-        // UBO — your uniformBufferEncs_ holds raw VkBuffer handles as uint64_t
-        update.ubo     = reinterpret_cast<VkBuffer>(uniformBufferEncs_[i]);
-        update.uboSize = 256;  // Your engine uses fixed 256-byte UBO
-
-        // Storage images — extract raw VkImageView from Handle
-        update.rtOutputViews[i]     = rtOutputViews_[i].get();
-        update.accumulationViews[i] = accumViews_[i].get();
-
-        // Nexus score (adaptive sampling) — only if enabled and valid
-        if (Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING && hypertraceScoreView_.valid())
-            update.nexusScoreViews[i] = hypertraceScoreView_.get();
-
-        // Environment map — always present
-        update.envSampler   = envMapSampler_.get();
-        update.envImageView = envMapImageView_.get();
-
-        // Materials buffer — single global buffer, stored in materialBufferEncs_[0]
-        update.materialsBuffer = reinterpret_cast<VkBuffer>(materialBufferEncs_[0]);
-        update.materialsSize   = 1024 * 1024;  // 1MB — your known size
-
-        // StoneKey buffer — NOT in StoneKey::Empire → you bind it globally elsewhere
-        // In your engine, this is bound once at startup and never changes
-        // So we skip it — your descriptor layout expects it in binding 31 (from logs)
-        // It's already bound in the global descriptor set — DO NOT TOUCH
-
-        // THE ONE TRUE CALL THAT FIXES THE RESIZE CRASH
-        RTX::pipeline().updateRTDescriptorSet(i, update);
-    }
-
-    // ==================================================================
-    // PHASE 4: FORCE ACCUMULATION RESET
-    // ==================================================================
     resetAccumulation_ = true;
     resetAccumNextFrame_ = true;
     accumulationFrame_ = 0;
     currentSpp_ = 0;
 
-    // Final sync
     vkDeviceWaitIdle(StoneKey::stone_device());
-
-    LOG_KEANU("[KEANU] ...Whoa. It didn’t crash. The empire... lives.");
-    LOG_SUCCESS_CAT("RENDERER", "Swapchain recreated — RT descriptors rebound — resize eternally defeated");
 }
 
 void VulkanRenderer::onWindowResize(uint32_t width, uint32_t height) noexcept
@@ -1518,53 +1458,61 @@ void VulkanRenderer::onWindowResize(uint32_t width, uint32_t height) noexcept
         minimized_ = false;
     }
 
+    // MATURE: Prevent recursive or overlapping resizes
+    if (s_resizeInProgress.exchange(true)) {
+        return;  // Another resize already in progress — drop this event
+    }
+
+    // Full drain — safe
     vkDeviceWaitIdle(StoneKey::stone_device());
 
+    // Reset accumulation
     accumulationFrame_ = 0;
     resetAccumulation_ = true;
     resetAccumNextFrame_ = true;
     currentSpp_ = 0;
 
+    // Classic cleanup
     cleanupFramebuffers();
     destroyRenderPass();
 
+    // Recreate swapchain
     RTX::SwapchainManager::recreate(width, height);
 
+    // Update StoneKey — pure and correct
     StoneKey::stone_seal_width(width);
     StoneKey::stone_seal_height(height);
-    StoneKey::stone_seal_extent(VkExtent2D{ width, height });
+    StoneKey::stone_seal_extent({width, height});
 
     width_  = static_cast<int>(width);
     height_ = static_cast<int>(height);
 
+    // Rebuild Vulkan state
     createRenderPass();
     createFramebuffers();
+    recreateSwapchainDependentResources();  // ← this calls recreateTonemapUBOs() ONCE
 
-    recreateSwapchainDependentResources();
-
+    // Rebuild command buffers
     if (!commandBuffers_.empty()) {
         vkFreeCommandBuffers(StoneKey::stone_device(), RTX::g_ctx().commandPool_,
                              static_cast<uint32_t>(commandBuffers_.size()),
                              commandBuffers_.data());
         commandBuffers_.clear();
     }
-
     createCommandBuffers();
 
-    for (uint32_t i = 0; i < Options::Performance::MAX_FRAMES_IN_FLIGHT; ++i) {
-        recordRayTracingCommands(commandBuffers_[i], i);
-    }
+    // Signal completion
+    g_resizeRequested.store(false, std::memory_order_release);
 
-    g_resizeRequested.store(false, std::memory_order_relaxed);
-    needsRecreateOnResize = false;
-    vkDeviceWaitIdle(StoneKey::stone_device());
+    // UNLOCK — allow next resize
+    s_resizeInProgress.store(false, std::memory_order_release);
 }
 
 void VulkanRenderer::waitForAllFences() const noexcept
 {
     if (!inFlightFences_.empty()) {
-        vkWaitForFences(StoneKey::stone_device(), inFlightFences_.size(), inFlightFences_.data(), VK_TRUE, UINT64_MAX);
-        vkResetFences(StoneKey::stone_device(), inFlightFences_.size(), inFlightFences_.data());
+        vkWaitForFences(stone_device(), inFlightFences_.size(), inFlightFences_.data(), VK_TRUE, UINT64_MAX);
+        vkResetFences(stone_device(), inFlightFences_.size(), inFlightFences_.data());
     }
 }
 
@@ -1714,22 +1662,17 @@ void VulkanRenderer::createRenderPass() noexcept {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Final Status
-// ──────────────────────────────────────────────────────────────────────────────
-/*
- * December 02, 2025 — PipelineManager Integration v10.7 — VUID-FREE RENDER LOOP
- * Grok AI: Rays dispatched, tonemap computed, buffers tripled—empire ascends. Binding 0? A ghost we greet or ignore. VUIDs? Vanquished. Pink photons? Supernova. What's next—shaders for the verse, or Core for the core? Command it.
- */
-
-// ──────────────────────────────────────────────────────────────────────────────
 // VulkanRenderer::renderFrame — FINAL PRODUCTION — RTX::g_ctx() + CAM — COMPILES
 // ──────────────────────────────────────────────────────────────────────────────
 void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
 {
-    // ==================================================================
-    // EARLY OUT — MINIMIZED / HIDDEN / RESIZING
-    // ==================================================================
     const uint32_t windowFlags = SDL_GetWindowFlags(StoneKey::stone_window());
+
+    if (s_resizeInProgress.load()) {
+        SDL_Delay(1);
+        frameNumber_++;
+        return;
+    }
 
     if (windowFlags & (SDL_WINDOW_MINIMIZED | SDL_WINDOW_HIDDEN))
     {
@@ -1738,31 +1681,18 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
         return;
     }
 
-    if (g_resizeRequested.load(std::memory_order_relaxed))
+    if (g_resizeRequested.load(std::memory_order_acquire) || !RTX::SwapchainManager::isValid())
     {
         SDL_Delay(1);
         frameNumber_++;
         return;
     }
 
-    if (!RTX::SwapchainManager::isValid())
-    {
-        SDL_Delay(1);
-        frameNumber_++;
-        return;
-    }
-
-    // ==================================================================
-    // FRAME INDEX
-    // ==================================================================
     const uint32_t f = currentFrame_++ % MAX_FRAMES_IN_FLIGHT;
 
     vkWaitForFences(StoneKey::stone_device(), 1, &inFlightFences_[f], VK_TRUE, 1'000'000ULL);
     vkResetFences(StoneKey::stone_device(), 1, &inFlightFences_[f]);
 
-    // ==================================================================
-    // ACQUIRE SWAPCHAIN IMAGE
-    // ==================================================================
     uint32_t imageIndex = 0;
     VkResult acquireResult = vkAcquireNextImageKHR(
         StoneKey::stone_device(),
@@ -1787,11 +1717,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
         return;
     }
 
-    // ==================================================================
-    // BEGIN COMMAND BUFFER
-    // ==================================================================
     VkCommandBuffer cmd = commandBuffers_[f];
-    vkResetCommandBuffer(cmd, 0);
 
     VkCommandBufferBeginInfo beginInfo{
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
@@ -1799,9 +1725,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     };
     VK_CHECK(vkBeginCommandBuffer(cmd, &beginInfo));
 
-    // ==================================================================
-    // TRANSITION SWAPCHAIN IMAGE → GENERAL
-    // ==================================================================
+    // Transition swapchain image → GENERAL
     VkImageMemoryBarrier acquireBarrier{
         .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
         .srcAccessMask       = 0,
@@ -1818,9 +1742,6 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
         VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
         0, 0, nullptr, 0, nullptr, 1, &acquireBarrier);
 
-    // ==================================================================
-    // RENDERING
-    // ==================================================================
     if (currentRenderMode() == 0)
     {
         VkClearColorValue pink{ 1.0f, 0.2f, 0.8f, 1.0f };
@@ -1829,7 +1750,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     }
     else
     {
-        // Reset accumulation on camera move / settings change
+        // Reset accumulation after resize or camera move
         if (resetAccumulation_ || resetAccumNextFrame_)
         {
             VkClearColorValue zero{};
@@ -1852,13 +1773,29 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
         updateUniformBuffer(f, camera, 0.0f);
         updateTonemapUniform(f);
 
-        // TLAS update (safe — only when changed)
-        static VkAccelerationStructureKHR lastTLAS = VK_NULL_HANDLE;
-        VkAccelerationStructureKHR currentTLAS = RTX::LAS::get().getTLAS();
-        if (currentTLAS != lastTLAS)
+        // FULL, SAFE DESCRIPTOR REBIND — NEVER NULL TLAS
         {
-            RTX::pipeline().updateRTDescriptorSet(f, { .tlas = currentTLAS });
-            lastTLAS = currentTLAS;
+            RTX::RTDescriptorUpdate update{};
+
+            VkAccelerationStructureKHR tlas = RTX::LAS::get().getTLAS();
+            update.tlas = (tlas != VK_NULL_HANDLE) ? tlas : RTX::pipeline().dummyTLAS();
+
+            update.ubo = reinterpret_cast<VkBuffer>(uniformBufferEncs_[f]);
+            update.uboSize = 256;
+
+            update.rtOutputViews[f]     = rtOutputViews_[f].get();
+            update.accumulationViews[f] = accumViews_[f].get();
+
+            if (Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING && hypertraceScoreView_.valid())
+                update.nexusScoreViews[f] = hypertraceScoreView_.get();
+
+            update.envSampler   = envMapSampler_.get();
+            update.envImageView = envMapImageView_.get();
+
+            update.materialsBuffer = reinterpret_cast<VkBuffer>(materialBufferEncs_[0]);
+            update.materialsSize   = 1024 * 1024;
+
+            RTX::pipeline().updateRTDescriptorSet(f, update);
         }
 
         if (Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING)
@@ -1866,7 +1803,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
 
         recordRayTracingCommands(cmd, f);
 
-        // Transition RT output → shader read
+        // Transition RT output → read-only
         VkImageMemoryBarrier rtToRead{
             .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
             .srcAccessMask       = VK_ACCESS_2_SHADER_WRITE_BIT,
@@ -1878,7 +1815,8 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
         };
         vkCmdPipelineBarrier(cmd,
             VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR,
-            VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &rtToRead);
+            VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+            0, 0, nullptr, 0, nullptr, 1, &rtToRead);
 
         VkImageView tonemapInput = denoisingEnabled_ && denoiserView_.valid()
             ? denoiserView_.get()
@@ -1895,9 +1833,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
         accumulationFrame_++;
     }
 
-    // ==================================================================
-    // TRANSITION SWAPCHAIN IMAGE → PRESENT
-    // ==================================================================
+    // Present transition
     VkImageMemoryBarrier presentBarrier{
         .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
         .srcAccessMask       = VK_ACCESS_2_SHADER_WRITE_BIT,
@@ -1908,13 +1844,12 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     };
     vkCmdPipelineBarrier(cmd,
         VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-        VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr, 1, &presentBarrier);
+        VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT,
+        0, 0, nullptr, 0, nullptr, 1, &presentBarrier);
 
     VK_CHECK(vkEndCommandBuffer(cmd));
 
-    // ==================================================================
-    // SUBMIT & PRESENT
-    // ==================================================================
+    // Submit
     VkSemaphoreSubmitInfo waitInfo{
         .sType     = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
         .semaphore = imageAvailableSemaphores_[f],

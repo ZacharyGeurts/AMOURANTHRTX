@@ -229,6 +229,7 @@ private:
     void updateUniformBuffer(uint32_t frame, const Camera& camera, float jitter) noexcept;
     void updateTonemapUniform(uint32_t frame) noexcept;
     bool recreateTonemapUBOs() noexcept;
+	static inline std::atomic<bool> s_resizeInProgress{false};
 
     VkDeviceAddress getShaderGroupHandle(uint32_t group) noexcept;
 
