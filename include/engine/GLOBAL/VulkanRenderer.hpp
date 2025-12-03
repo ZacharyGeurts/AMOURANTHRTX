@@ -69,6 +69,7 @@ public:
     void updateUniformBinding31(const void* data, VkDeviceSize size) noexcept;
     void setRenderMode(int mode) noexcept;
     void requestAccumulationReset() noexcept { resetAccumulation_ = true; resetAccumNextFrame_ = true; }
+	void requestResize(uint32_t newWidth, uint32_t newHeight) noexcept;
 
     void updateAllRTXDescriptors() noexcept;
     void updateRTDescriptorSet(uint32_t frameIndex);
@@ -91,8 +92,10 @@ public:
     [[nodiscard]] bool      overclockMode()     const noexcept { return overclockMode_; }
     [[nodiscard]] int       tonemapType()       const noexcept { return tonemapType_; }
     [[nodiscard]] FpsTarget fpsTarget()         const noexcept { return fpsTarget_; }
-    [[nodiscard]] bool      minimized()         const noexcept { return minimized_; }
     [[nodiscard]] int       currentRenderMode() const noexcept { return activeRenderMode_; }
+	[[nodiscard]] bool minimized() const noexcept { return minimized_; }
+    [[nodiscard]] int  width()     const noexcept { return width_; }
+    [[nodiscard]] int  height()    const noexcept { return height_; }
 
     void recordRayTrace(VkCommandBuffer cmd, const VkExtent2D& extent) noexcept;
 	static inline std::atomic<bool> s_resizeInProgress{false};

@@ -1013,6 +1013,89 @@ void VulkanRenderer::performDenoisingPass(VkCommandBuffer cmd) noexcept {
     vkCmdPipelineBarrier2(cmd, &dep);
 }
 
+void VulkanRenderer::requestResize(uint32_t newWidth, uint32_t newHeight) noexcept
+{
+    // Reject zero-size (minimized) windows
+    if (newWidth == 0 || newHeight == 0) {
+        minimized_ = true;
+        LOG_AMOURANTH("WINDOW MINIMIZED — PHOTONS ENTER MEDITATION");
+        return;
+    }
+
+    if (minimized_) {
+        minimized_ = false;
+        LOG_AMOURANTH("WINDOW RESTORED — PHOTONS AWAKEN FROM THE VOID");
+    }
+
+    // Prevent concurrent or recursive resize attempts
+    bool expected = false;
+    if (!s_resizeInProgress.compare_exchange_strong(expected, true)) {
+        LOG_WARN_CAT("RESIZE", "Resize already in progress — request queued and ignored", AMBER_YELLOW);
+        return;
+    }
+
+    LOG_AMOURANTH("RESIZE RITUAL INITIATED → {}×{} — REBIRTHING THE EMPIRE", newWidth, newHeight);
+
+    // ── 1. Full GPU idle — non-negotiable for swapchain rebuild ─────────────
+    vkDeviceWaitIdle(stone_device());
+
+    // ── 2. Wait for all TLAS builds to finish — safety first ───────────────
+    RTX::las().waitForAllFences();
+
+    // ── 3. Reset accumulation — new resolution = fresh photons ─────────────
+    resetAccumulation_   = true;
+    resetAccumNextFrame_ = true;
+    accumulationFrame_   = 0;
+    currentSpp_          = 0;
+
+    // ── 4. Destroy swapchain-dependent resources ───────────────────────────
+    cleanupFramebuffers();
+    destroyRenderPass();
+
+    // ── 5. Recreate swapchain — the beating heart of the empire ───────────
+    RTX::SwapchainManager::recreate(newWidth, newHeight);
+
+    // Seal new dimensions into the eternal StoneKey
+    stone_seal_width(newWidth);
+    stone_seal_height(newHeight);
+    stone_seal_extent({newWidth, newHeight});
+
+    // Update renderer state
+    width_  = static_cast<int>(newWidth);
+    height_ = static_cast<int>(newHeight);
+
+    // ── 6. Rebuild rendering infrastructure ─────────────────────────────
+    createRenderPass();
+    createFramebuffers();
+    recreateSwapchainDependentResources();
+
+    // ── 7. Full command buffer rebirth — old ones are corrupted ───────────
+    if (!commandBuffers_.empty()) {
+        vkFreeCommandBuffers(stone_device(),
+                             RTX::g_ctx().commandPool_,
+                             static_cast<uint32_t>(commandBuffers_.size()),
+                             commandBuffers_.data());
+        commandBuffers_.clear();
+    }
+    createCommandBuffers();
+
+    // ── 8. Reset in-flight fences — fresh start ────────────────────────────
+    if (!inFlightFences_.empty()) {
+        vkResetFences(stone_device(),
+                      static_cast<uint32_t>(inFlightFences_.size()),
+                      inFlightFences_.data());
+    }
+
+    // ── 9. Finalize — empire restored ─────────────────────────────────────
+    s_resizeInProgress.store(false, std::memory_order_release);
+    g_resizeRequested.store(false, std::memory_order_release);
+
+    LOG_AMOURANTH(
+        "RESIZE COMPLETE — {}×{} | SWAPCHAIN REBORN | ACCUMULATION PURGED | PHOTONS REALIGNED | RTX ETERNAL",
+        newWidth, newHeight
+    );
+}
+
 // ──────────────────────────────────────────────────────────────────────────────
 // FIXED performTonemapPass — now 100% safe with recreated descriptors
 // ──────────────────────────────────────────────────────────────────────────────
@@ -1429,109 +1512,6 @@ void VulkanRenderer::recreateSwapchainDependentResources() noexcept
     // NO SECOND vkDeviceWaitIdle() — THE GPU IS FREE TO WORK
     // The commands are already submitted and will complete naturally
     // This is how id Tech, Unreal, and every pro engine does it
-}
-
-void VulkanRenderer::onWindowResize(uint32_t width, uint32_t height) noexcept
-{
-    if (width == 0 || height == 0) {
-        minimized_ = true;
-        LOG_AMOURANTH("WINDOW MINIMIZED — PHOTONS ENTER MEDITATION");
-        return;
-    }
-
-    if (minimized_) {
-        minimized_ = false;
-        LOG_AMOURANTH("WINDOW RESTORED — PHOTONS AWAKEN");
-    }
-
-    // Prevent recursive or concurrent resizes — empire demands order
-    if (s_resizeInProgress.exchange(true)) {
-        LOG_WARN("Resize already in progress — request ignored");
-        return;
-    }
-
-    LOG_SUCCESS_CAT("RESIZE", "Window resize initiated: {}x{} — Rebirthing the empire...", width, height);
-
-    // ────────────────────────────────────────────────────────────────────────
-    // 1. FULL GPU IDLE — NON-NEGOTIABLE
-    // ────────────────────────────────────────────────────────────────────────
-    vkDeviceWaitIdle(stone_device());
-
-    // ────────────────────────────────────────────────────────────────────────
-    // 2. TLAS SAFETY — ALL BUILDS MUST FINISH
-    // ────────────────────────────────────────────────────────────────────────
-    RTX::las().waitForAllFences();
-
-    // ────────────────────────────────────────────────────────────────────────
-    // 3. ACCUMULATION RESET — NEW RESOLUTION = PURE PHOTONS
-    // ────────────────────────────────────────────────────────────────────────
-    accumulationFrame_     = 0;
-    currentSpp_            = 0;
-    resetAccumulation_     = true;
-    resetAccumNextFrame_   = true;
-
-    // ────────────────────────────────────────────────────────────────────────
-    // 4. DESTROY SWAPCHAIN-DEPENDENT EMPIRE
-    // ────────────────────────────────────────────────────────────────────────
-    cleanupFramebuffers();
-    destroyRenderPass();
-
-    // ────────────────────────────────────────────────────────────────────────
-    // 5. RECREATE SWAPCHAIN — THE HEART OF THE EMPIRE
-    // ────────────────────────────────────────────────────────────────────────
-    RTX::SwapchainManager::recreate(width, height);
-
-    // Seal the new dimensions into the StoneKey — eternal binding
-    stone_seal_width(width);
-    stone_seal_height(height);
-    stone_seal_extent({width, height});
-
-    // Update internal renderer state
-    width_  = static_cast<int>(width);
-    height_ = static_cast<int>(height);
-
-    // ────────────────────────────────────────────────────────────────────────
-    // 6. REBUILD RENDERING INFRASTRUCTURE
-    // ────────────────────────────────────────────────────────────────────────
-    createRenderPass();
-    createFramebuffers();
-    recreateSwapchainDependentResources();
-
-    // ────────────────────────────────────────────────────────────────────────
-    // 7. FULL COMMAND BUFFER REBIRTH — OLD ONES ARE DEAD
-    // ────────────────────────────────────────────────────────────────────────
-    if (!commandBuffers_.empty()) {
-        vkFreeCommandBuffers(
-            stone_device(),
-            RTX::g_ctx().commandPool_,
-            static_cast<uint32_t>(commandBuffers_.size()),
-            commandBuffers_.data()
-        );
-        commandBuffers_.clear();
-    }
-    createCommandBuffers();
-
-    // ────────────────────────────────────────────────────────────────────────
-    // 8. RESET IN-FLIGHT FENCES — BEGIN ANEW
-    // ────────────────────────────────────────────────────────────────────────
-    if (!inFlightFences_.empty()) {
-        vkResetFences(
-            stone_device(),
-            static_cast<uint32_t>(inFlightFences_.size()),
-            inFlightFences_.data()
-        );
-    }
-
-    // ────────────────────────────────────────────────────────────────────────
-    // 9. FINALIZE — RESIZE COMPLETE
-    // ────────────────────────────────────────────────────────────────────────
-    g_resizeRequested.store(false, std::memory_order_release);
-    s_resizeInProgress.store(false, std::memory_order_release);
-
-    LOG_AMOURANTH(
-        "SWAPCHAIN REBORN — {}x{} | TLAS SAFE | ACCUMULATION PURGED | COMMAND BUFFERS REFORGED | RTX ETERNAL",
-        width, height
-    );
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

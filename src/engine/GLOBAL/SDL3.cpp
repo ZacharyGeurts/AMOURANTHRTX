@@ -31,6 +31,7 @@
 #include <fstream>
 #include <memory>
 #include <source_location>
+#include <functional>
 
 using namespace Logging::Color;
 using namespace std::chrono;
@@ -55,9 +56,22 @@ void SDLWindowDeleter::operator()(SDL_Window* w) const noexcept
 }
 
 // =============================================================================
-// Namespace: SDL3Initializer — Input System
+// Namespace: SDL3Initializer — Input System (RESIZE IS FORBIDDEN HERE)
 // =============================================================================
 namespace SDL3Initializer {
+
+// ——————————————————————————————————————————————————————————————————————
+// Input callback types — defined locally so SDL3.cpp compiles standalone
+// ——————————————————————————————————————————————————————————————————————
+using KeyboardCallback       = std::function<void(const SDL_KeyboardEvent&)>;
+using MouseButtonCallback    = std::function<void(const SDL_MouseButtonEvent&)>;
+using MouseMotionCallback    = std::function<void(const SDL_MouseMotionEvent&)>;
+using MouseWheelCallback     = std::function<void(const SDL_MouseWheelEvent&)>;
+using TextInputCallback      = std::function<void(const SDL_TextInputEvent&)>;
+using TouchCallback          = std::function<void(const SDL_TouchFingerEvent&)>;
+using GamepadButtonCallback  = std::function<void(const SDL_GamepadButtonEvent&)>;
+using GamepadAxisCallback    = std::function<void(const SDL_GamepadAxisEvent&)>;
+using GamepadConnectCallback = std::function<void(bool connected, SDL_JoystickID id, SDL_Gamepad* gamepad)>;
 
 std::string SDL3Input::locationString(const std::source_location& loc)
 {
@@ -129,9 +143,10 @@ bool SDL3Input::pollEvents(SDL_Window* window, SDL_AudioDeviceID audioDevice, bo
                 LOG_INFO_CAT("Input", "{}Quit requested — goodbye, warrior{}", OCEAN_TEAL, RESET);
                 return !exitOnClose;
 
+            // RESIZE IS HANDLED EXCLUSIVELY BY SDL3Window::pollEvents()
+            // We do NOT touch it here — the empire demands order
             case SDL_EVENT_WINDOW_RESIZED:
-                LOG_INFO_CAT("Input", "{}Window resized: {}x{}{}", OCEAN_TEAL, ev.window.data1, ev.window.data2, RESET);
-                if (m_resizeCallback) m_resizeCallback(ev.window.data1, ev.window.data2);
+            case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
                 break;
 
             case SDL_EVENT_KEY_DOWN:
@@ -186,25 +201,9 @@ bool SDL3Input::pollEvents(SDL_Window* window, SDL_AudioDeviceID audioDevice, bo
     return true;
 }
 
-void SDL3Input::setCallbacks(KeyboardCallback kb, MouseButtonCallback mb, MouseMotionCallback mm,
-                             MouseWheelCallback mw, TextInputCallback ti, TouchCallback tc,
-                             GamepadButtonCallback gb, GamepadAxisCallback ga,
-                             GamepadConnectCallback gc, ResizeCallback resize)
-{
-    m_keyboardCallback      = std::move(kb);
-    m_mouseButtonCallback   = std::move(mb);
-    m_mouseMotionCallback   = std::move(mm);
-    m_mouseWheelCallback    = std::move(mw);
-    m_textInputCallback     = std::move(ti);
-    m_touchCallback         = std::move(tc);
-    m_gamepadButtonCallback = std::move(gb);
-    m_gamepadAxisCallback   = std::move(ga);
-    m_gamepadConnectCallback = std::move(gc);
-    m_resizeCallback        = std::move(resize);
-
-    LOG_SUCCESS_CAT("Input", "{}All 10 input callbacks registered — READY FOR DOMINATION{}", LIME_GREEN, RESET);
-}
-
+// ——————————————————————————————————————————————————————————————————————
+// 9 CALLBACKS ONLY — RESIZE IS DEAD HERE
+// ——————————————————————————————————————————————————————————————————————
 void SDL3Input::enableTextInput(SDL_Window* window, bool enable)
 {
     if (enable) {
@@ -237,20 +236,16 @@ void SDL3Input::handleKeyboard(const SDL_KeyboardEvent& k, SDL_Window* window, S
     if (!k.down) return;
 
     switch (k.key) {
-        case SDLK_F:
-            {
-                bool fs = (SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN) == 0;
-                SDL_SetWindowFullscreen(window, !fs);
-                LOG_INFO_CAT("Input", "{}Fullscreen → {}{}", OCEAN_TEAL, !fs ? "ENABLED" : "DISABLED", RESET);
-            }
-            break;
+        case SDLK_F: {
+            bool fs = (SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN) == 0;
+            SDL_SetWindowFullscreen(window, !fs);
+            LOG_INFO_CAT("Input", "{}Fullscreen → {}{}", OCEAN_TEAL, !fs ? "ENABLED" : "DISABLED", RESET);
+        } break;
 
-        case SDLK_ESCAPE:
-            {
-                SDL_Event quit{.type = SDL_EVENT_QUIT};
-                SDL_PushEvent(&quit);
-            }
-            break;
+        case SDLK_ESCAPE: {
+            SDL_Event quit{.type = SDL_EVENT_QUIT};
+            SDL_PushEvent(&quit);
+        } break;
 
         case SDLK_SPACE:
             if (audioDevice) {
@@ -291,12 +286,10 @@ void SDL3Input::handleGamepadButton(const SDL_GamepadButtonEvent& g, SDL_AudioDe
     if (!g.down) return;
 
     switch (g.button) {
-        case SDL_GAMEPAD_BUTTON_EAST:
-            {
-                SDL_Event quit{.type = SDL_EVENT_QUIT};
-                SDL_PushEvent(&quit);
-            }
-            break;
+        case SDL_GAMEPAD_BUTTON_EAST: {
+            SDL_Event quit{.type = SDL_EVENT_QUIT};
+            SDL_PushEvent(&quit);
+        } break;
 
         case SDL_GAMEPAD_BUTTON_START:
             if (audioDevice) {

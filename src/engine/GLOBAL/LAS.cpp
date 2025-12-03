@@ -427,6 +427,41 @@ VkDeviceAddress LAS::getTLASAddress() const noexcept
     return g_ext.vkGetAccelerationStructureDeviceAddressKHR(stone_device(), &info);
 }
 
+void RTX::LAS::waitForAllFences()
+{
+    if (g_ctx().device() == VK_NULL_HANDLE) {
+        LOG_WARN_CAT("LAS", "waitForAllFences() — device null, nothing to wait for");
+        return;
+    }
+
+    const size_t fenceCount = buildFences_.size();
+    if (fenceCount == 0) {
+        return; // No builds in flight
+    }
+
+    LOG_TRACE_CAT("LAS", "Waiting for {} in-flight AS build fence(s)...", fenceCount);
+
+    // Wait for all fences — non-blocking if already signaled
+    VkResult result = vkWaitForFences(
+        g_ctx().device(),
+        static_cast<uint32_t>(fenceCount),
+        buildFences_.data(),
+        VK_TRUE,           // waitAll = true
+        10'000'000'000ULL // 10 seconds — more than enough
+    );
+
+    if (result == VK_SUCCESS) {
+        LOG_TRACE_CAT("LAS", "All {} AS build fences signaled — safe to proceed", fenceCount);
+    } else if (result == VK_TIMEOUT) {
+        LOG_ERROR_CAT("LAS", "Timeout waiting for AS build fences — forcing reset anyway");
+    } else {
+        LOG_ERROR_CAT("LAS", "vkWaitForFences failed: {}", static_cast<int>(result));
+    }
+
+    // Reset all fences for reuse
+    vkResetFences(g_ctx().device(), static_cast<uint32_t>(fenceCount), buildFences_.data());
+}
+
 void LAS::beginFrame() noexcept
 {
     // Increment global frame counter
@@ -440,7 +475,7 @@ void LAS::beginFrame() noexcept
 
     // Wait for the GPU to finish using this slot (if it ever had a build)
     if (ctx.frameFence != VK_NULL_HANDLE) {
-        vkWaitForFences(stone_device(), 1, &ctx.frameFence, VK_TRUE, UINT64_MAX);
+        waitForAllFences();
         vkResetFences(stone_device(), 1, &ctx.frameFence);
         // fence is now ready for next buildTLAS()
     }

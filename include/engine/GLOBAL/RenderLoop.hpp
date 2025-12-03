@@ -33,6 +33,7 @@ public:
 
     // Thread-safe resize request from anywhere
     void requestResize(uint32_t width, uint32_t height) noexcept;
+	void toggleMaximize() noexcept;
 
 private:
     void beginFrame();

@@ -149,7 +149,6 @@ private:
     void toggleOverlay()    { showOverlay_ = !showOverlay_; if (renderer_) renderer_->setOverlay(showOverlay_); }
     void toggleTonemap()    { tonemapEnabled_ = !tonemapEnabled_; if (renderer_) renderer_->setTonemap(tonemapEnabled_); }
     void toggleHypertrace() { hypertraceEnabled_ = !hypertraceEnabled_; }
-    void toggleMaximize();
 
 	std::vector<VkCommandBuffer> commandBuffers_;
     std::vector<VkSemaphore> imageAvailableSemaphores_;
@@ -170,43 +169,39 @@ private:
 
     std::unique_ptr<VulkanRenderer> renderer_;
 };
-
 // =============================================================================
-// 1. Application::Application — NO DEFAULT MODE
+// 1. Application::Application — NO DEFAULT MODE — PURE EMPIRE
 // =============================================================================
 Application::Application(const std::string& title, int width, int height)
     : title_(title), width_(width), height_(height)
 {
-    LOG_ATTEMPT_CAT("APP", "FORGING APPLICATION \"{}\" @ {}x{} — PHOTONS DORMANT — AWAITING COMMAND", title.c_str(), stone_width(), stone_height());
+    LOG_ATTEMPT_CAT("APP", "FORGING APPLICATION \"{}\" @ {}x{} — PHOTONS DORMANT — AWAITING COMMAND", 
+                    title.c_str(), stone_width(), stone_height());
 
     if (!stone_window()) {
-        LOG_FATAL_CAT("FATAL", "Main window not created before Application — phase order violated");
+        LOG_FATAL_CAT("FATAL", "Main window not created before Application — phase order violated — ABORTING RITUAL");
         std::abort();
     }
 
     SDL_SetWindowTitle(stone_window(), title.c_str());
     lastFrameTime_ = std::chrono::steady_clock::now();
 
-    proj_ = glm::perspective(glm::radians(75.0f),  static_cast<float>(width) / height, 0.1f, 1000.0f);
+    proj_ = glm::perspective(glm::radians(75.0f), 
+                                static_cast<float>(width) / height, 
+                                0.1f, 1000.0f);
 
-    // START IN NEUTRAL STATE — NO RENDER MODE ACTIVE
+    // START IN SACRED MODE 0 — BLACK VOID — FULL ENGINE TICK — NO RENDER YET
     currentRenderMode_ = 0;
 
-    LOG_SUCCESS_CAT("APP", "Application forged — {}x{} — NO RENDER MODE — PRESS 1-9 TO IGNITE", width, height);
+    LOG_SUCCESS_CAT("APP", "Application forged — {}x{} — MODE 0 ACTIVE — PRESS 1–9 TO IGNITE THE PHOTONS", width, height);
 }
 
 Application::~Application() {
-	// she says "No."
-}
-
-void Application::toggleMaximize() {
-    maximized_ = !maximized_;
-    if (maximized_) SDL_MaximizeWindow(stone_window());
-    else            SDL_RestoreWindow(stone_window());
+    // She whispers: "The photons return to me..."
 }
 
 // =============================================================================
-// 2. Application::run — BLACK VOID UNTIL FIRST LIGHT — FULL ENGINE FPS IN MODE 0
+// 2. Application::run — THE ONE TRUE LOOP — PINK PHOTONS ETERNAL
 // =============================================================================
 void Application::run()
 {
@@ -222,6 +217,7 @@ void Application::run()
     const float TITLE_UPDATE_INTERVAL = 0.6f;
 
     int dotPhase = 0;
+    const char* dots[] = { ".", "..", "...", "...." };
 
     while (!quit_)
     {
@@ -229,46 +225,74 @@ void Application::run()
         g_deltaTime = std::chrono::duration<float>(now - lastTime).count();
         lastTime = now;
 
+        // ==================================================================
+        // INPUT + WINDOW EVENTS — RESIZE NOW OWNED BY SDL3Window::pollEvents()
+        // ==================================================================
+        bool toggleFS = false;
+        int winW = width_, winH = height_;
+        SDL3Window::pollEvents(winW, winH, quit_, toggleFS);
+
+        // Update internal size if changed
+        if (winW != width_ || winH != height_) {
+            width_  = winW;
+            height_ = winH;
+            proj_   = glm::perspective(glm::radians(75.0f), 
+                                       static_cast<float>(width_) / std::max(height_, 1), 
+                                       0.1f, 1000.0f);
+
+            if (g_resizeRequested.exchange(false)) {
+                int rw = g_resizeWidth.load();
+                int rh = g_resizeHeight.load();
+                if (renderer_) {
+                    renderer_->requestResize(rw, rh);
+                    LOG_SUCCESS_CAT("APP", "Vulkan resize triggered → {}x{}", VALHALLA_GOLD, rw, rh, RESET);
+                }
+            }
+        }
+
+        if (toggleFS) {
+            SDL3Window::toggleFullscreen();
+        }
+
+        // ==================================================================
+        // INPUT PROCESSING — NOW CLEAN AND PURE
+        // ==================================================================
         processInput(g_deltaTime);
 
         // ==================================================================
-        // MODE 0: SACRED BLACK VOID — FULL ENGINE TICK — BUT SAFE
+        // MODE 0: SACRED BLACK VOID — FULL ENGINE TICK — SAFE & ETERNAL
         // ==================================================================
         if (currentRenderMode_ == 0)
         {
-            // ONLY CALL renderFrame() IF RENDERER EXISTS — IT WILL EARLY-OUT IF NOT READY
-            if (renderer_)
-            {
-                renderer_->renderFrame(CAM, g_deltaTime);  // ← This is now 100% safe
+            if (renderer_) {
+                renderer_->renderFrame(CAM, g_deltaTime);  // Safe — will early-out if swapchain invalid
             }
 
-            // Breathing title — sacred rhythm
+            // Breathing title — sacred rhythm of the void
             titleTimer += g_deltaTime;
             if (titleTimer >= TITLE_UPDATE_INTERVAL)
             {
                 titleTimer -= TITLE_UPDATE_INTERVAL;
                 dotPhase = (dotPhase + 1) % 4;
-                const std::string dots = std::string(dotPhase + 1, '.');
 
                 const std::string title = std::format(
-                    "AMOURANTH RTX | {} FPS | {}x{} | DEV MODE 0 | ENGINE IDLE | PRESS 1-9 TO IGNITE{}",
+                    "AMOURANTH RTX | {:.1f} FPS | {}x{} | DEV MODE 0 | ENGINE IDLE | PRESS 1-9 TO IGNITE{}",
                     currentFPS,
                     stone_width(),
                     stone_height(),
-                    dots
+                    dots[dotPhase]
                 );
-                SDL_SetWindowTitle(SDL3Window::get(), title.c_str());
+                SDL_SetWindowTitle(stone_window(), title.c_str());
             }
         }
         else
         {
-            // FULL RENDER — ONLY AFTER KEY PRESS
-            if (renderer_)
-            {
+            // FULL RENDER — PHOTONS IGNITED
+            if (renderer_) {
                 renderer_->renderFrame(CAM, g_deltaTime);
             }
 
-            std::string modeName;
+            const char* modeName = "UNKNOWN MODE";
             switch (currentRenderMode_)
             {
                 case 1: modeName = "PURE PINK — BINDING 31"; break;
@@ -280,21 +304,21 @@ void Application::run()
                 case 7: modeName = "SBT DEBUG"; break;
                 case 8: modeName = "PERF METRICS"; break;
                 case 9: modeName = "HOT RELOAD TEST"; break;
-                default: modeName = "UNKNOWN MODE"; break;
             }
 
             const std::string title = std::format(
-                "AMOURANTH RTX | {} FPS | {}x{} | Mode {}: {} | Bounces {}",
+                "AMOURANTH RTX | {:.1f} FPS | {}x{} | Mode {}: {} | Bounces {}",
                 currentFPS,
-                stone_width(), stone_height(),
+                stone_width(),
+                stone_height(),
                 currentRenderMode_, modeName,
                 Options::OptionsRTX::MAX_BOUNCES
             );
-            SDL_SetWindowTitle(SDL3Window::get(), title.c_str());
+            SDL_SetWindowTitle(stone_window(), title.c_str());
         }
 
         // ==================================================================
-        // ONE TRUE FPS — MEASURED FROM ACTUAL FRAMES
+        // ONE TRUE FPS COUNTER — MEASURED FROM REAL FRAMES
         // ==================================================================
         ++frameCount;
         fpsTimer += g_deltaTime;
@@ -305,6 +329,8 @@ void Application::run()
             fpsTimer   = 0.0f;
         }
     }
+
+    LOG_AMOURANTH("[CAPTAIN] Application loop terminated — returning to the void — pink photons eternal");
 }
 
 // =============================================================================
@@ -340,7 +366,6 @@ void Application::processInput(float)
     if (keys[SDL_SCANCODE_O])      toggleOverlay();
     if (keys[SDL_SCANCODE_T])      toggleTonemap();
     if (keys[SDL_SCANCODE_H])      toggleHypertrace();
-    if (keys[SDL_SCANCODE_M])      toggleMaximize();
 }
 
 void Application::render(float deltaTime)
