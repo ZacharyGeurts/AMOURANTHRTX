@@ -133,6 +133,27 @@ void SDL3Input::initialize()
     }
 }
 
+void toggleFullscreen() noexcept
+{
+    if (!g_sdl_window) return;
+    bool isFS = (SDL_GetWindowFlags(g_sdl_window.get()) & SDL_WINDOW_FULLSCREEN) != 0;
+    SDL_SetWindowFullscreen(g_sdl_window.get(), !isFS);
+    LOG_AMOURANTH("FULLSCREEN {} — PHOTONS {}", isFS ? "DISABLED" : "ENABLED", isFS ? "CONTAINED" : "UNLEASHED");
+}
+
+void destroy() noexcept
+{
+    LOG_AMOURANTH("FINAL SHUTDOWN INITIATED — PHOTONS RETURNING TO THE VOID");
+
+    g_vulkanRenderer.reset();
+    RTX::cleanupAll();
+
+    g_sdl_window.reset();
+    SDL_Quit();
+
+    LOG_AMOURANTH("SDL3 + VULKAN SHUTDOWN COMPLETE — AMOURANTH SMILES ETERNALLY");
+}
+
 bool SDL3Input::pollEvents(SDL_Window* window, SDL_AudioDeviceID audioDevice, bool& consoleOpen, bool exitOnClose)
 {
     SDL_Event ev;

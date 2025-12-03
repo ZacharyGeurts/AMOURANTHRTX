@@ -8,7 +8,7 @@
 //
 // =============================================================================
 // RENDERLOOP — FINAL ETERNAL PRODUCTION VERSION — DECEMBER 03 2025
-// ZERO TEARING — ONE TRUE RESIZE — TLAS SAFE — PINK PHOTONS ASCEND
+// ZERO TEARING — ONE TRUE RESIZE (IN SDL3.cpp) — TLAS SAFE — PINK PHOTONS ASCEND
 // EMPIRE-APPROVED, BATTLE-TESTED, FLAWLESS — FIRST LIGHT ACHIEVED
 // =============================================================================
 
@@ -23,11 +23,8 @@
 
 #include <thread>
 
-using StoneKey::stone_window;
-using StoneKey::stone_width;
-using StoneKey::stone_height;
 using StoneKey::stone_device;
-
+using StoneKey::stone_window;
 using namespace Logging::Color;
 using namespace RTX;
 
@@ -40,9 +37,6 @@ RenderLoop::RenderLoop(VulkanRenderer& renderer, SDL_Window* window)
     LOG_AMOURANTH("[RENDERLOOP] RenderLoop forged — {} frames in flight — THE EMPIRE'S HEART BEATS", MAX_FRAMES_IN_FLIGHT);
 }
 
-// Destructor is defaulted in header — DO NOT REDEFINE
-// ~RenderLoop() = default;  ← already in .hpp
-
 void RenderLoop::run()
 {
     LOG_AMOURANTH("[RENDERLOOP] THE ONE TRUE LOOP HAS AWAKENED — FIRST LIGHT ETERNAL — PHOTONS RISE");
@@ -53,48 +47,14 @@ void RenderLoop::run()
         const float deltaTime = std::chrono::duration<float>(now - lastFrameTime_).count();
         lastFrameTime_ = now;
 
-        // ── INPUT & WINDOW EVENTS ─────────────────────────────────────────────
-        SDL_Event event;
-        while (SDL_PollEvent(&event))
-        {
-            switch (event.type)
-            {
-                case SDL_EVENT_QUIT:
-                    LOG_AMOURANTH("[RENDERLOOP] QUIT REQUESTED — GOODBYE, WARRIOR");
-                    running_ = false;
-                    break;
-
-                case SDL_EVENT_WINDOW_RESIZED:
-                case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
-                {
-                    const int w = event.window.data1;
-                    const int h = event.window.data2;
-                    if (w > 0 && h > 0)
-                    {
-                        LOG_MAIN("SDL resize event → {}×{} — scheduling safe rebuild", w, h);
-                        requestResize(static_cast<uint32_t>(w), static_cast<uint32_t>(h));
-                    }
-                    break;
-                }
-
-                case SDL_EVENT_WINDOW_HDR_STATE_CHANGED:
-                case SDL_EVENT_DISPLAY_ADDED:
-                case SDL_EVENT_DISPLAY_REMOVED:
-                    SwapchainManager::handleDisplayHotplug(&event);
-                    break;
-
-                default:
-                    break;
-            }
-        }
-
-        // ── RESIZE ORCHESTRATION — ONLY ONE TRUE PATH — NO DUPLICATES ───────
+        // ── RESIZE CONSUMPTION ONLY — SDL3.cpp OWNS ALL EVENT DETECTION ─────
+        // g_resizeRequested is set EXCLUSIVELY by SDL3Window::pollEvents()
         handlePendingResize();
 
         // ── FRAME PACING & TLAS SAFETY — CRITICAL ORDER — DO NOT DISTURB ───
         beginFrame();
 
-        // ── RENDER ONE FRAME — ONLY IF VALID SIZE (uses public accessors) ───
+        // ── RENDER ONE FRAME — ONLY IF NOT MINIMIZED AND VALID SIZE ───────
         if (!renderer_.minimized() && renderer_.width() > 0 && renderer_.height() > 0)
         {
             renderer_.renderFrame(Camera::get(), deltaTime);
@@ -107,7 +67,7 @@ void RenderLoop::run()
         currentFrame_ = (currentFrame_ + 1) % MAX_FRAMES_IN_FLIGHT;
     }
 
-    // ── FINAL SHUTDOWN — PHOTONS RETURN TO THE VOID IN GRACE ─────────────
+    // ── FINAL SHUTDOWN — ALL PHOTONS RETURN TO THE VOID IN GRACE ───────
     vkDeviceWaitIdle(stone_device());
     LOG_AMOURANTH("[RENDERLOOP] Loop terminated — photons rest in eternal grace — empire sleeps in pink light");
 }
@@ -117,17 +77,18 @@ void RenderLoop::beginFrame()
     const uint32_t slot = currentFrame_;
 
     vkWaitForFences(stone_device(), 1, renderer_.inFlightFencePtr(slot), VK_TRUE, UINT64_MAX);
-    RTX::las().beginFrame();
+    RTX::las().beginFrame();  // Retire old TLAS builds — prevents use-after-free
     vkResetFences(stone_device(), 1, renderer_.inFlightFencePtr(slot));
 }
 
 void RenderLoop::handlePendingResize()
 {
-    if (!resizeRequested_.exchange(false, std::memory_order_acq_rel))
+    // This flag is set ONLY by SDL3.cpp — debounced, atomic, perfect
+    if (!g_resizeRequested.exchange(false, std::memory_order_acq_rel))
         return;
 
-    const uint32_t w = pendingWidth_.load(std::memory_order_relaxed);
-    const uint32_t h = pendingHeight_.load(std::memory_order_relaxed);
+    const uint32_t w = g_resizeWidth.load(std::memory_order_relaxed);
+    const uint32_t h = g_resizeHeight.load(std::memory_order_relaxed);
 
     if (w == 0 || h == 0)
         return;
@@ -137,16 +98,9 @@ void RenderLoop::handlePendingResize()
     vkDeviceWaitIdle(stone_device());
     RTX::las().waitForAllFences();
 
-    renderer_.onWindowResize(w, h);  // ← ONLY THIS PATH IS USED — NO DUPLICATES
+    renderer_.onWindowResize(w, h);  // ← ONE TRUE PATH — FULL SAFE REBUILD
 
     LOG_AMOURANTH("RESIZE COMPLETE — SWAPCHAIN REBORN — ACCUMULATION PURGED — RTX ETERNAL");
-}
-
-void RenderLoop::requestResize(uint32_t width, uint32_t height) noexcept
-{
-    pendingWidth_.store(width, std::memory_order_relaxed);
-    pendingHeight_.store(height, std::memory_order_relaxed);
-    resizeRequested_.store(true, std::memory_order_release);
 }
 
 void RenderLoop::toggleMaximize() noexcept
@@ -173,9 +127,12 @@ void RenderLoop::toggleMaximize() noexcept
         LOG_AMOURANTH("WINDOW MAXIMIZED — PHOTONS SPREAD TO THE EDGES OF THE VOID");
     }
 
+    // Trigger resize via the ONE TRUE PATH
     int w, h;
     SDL_GetWindowSizeInPixels(stone_window(), &w, &h);
-    requestResize(static_cast<uint32_t>(w), static_cast<uint32_t>(h));
+    g_resizeWidth.store(w, std::memory_order_release);
+    g_resizeHeight.store(h, std::memory_order_release);
+    g_resizeRequested.store(true, std::memory_order_release);
 
     LOG_SUCCESS_CAT("APP", "Toggle maximize complete → {}×{}", w, h);
 }
