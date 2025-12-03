@@ -627,7 +627,7 @@ void VulkanRenderer::createEnvironmentMap() noexcept
     envMapImageView_    = RTX::MakeHandle(view, stone_device(), vkDestroyImageView, 0, "EnvMapView");
     envMapSampler_      = RTX::MakeHandle(sampler, stone_device(), vkDestroySampler, 0, "EnvMapSampler");
 
-    LOG_SUCCESS_CAT("RENDERER", "Environment map forged — {}×{} HDR sky active", w, h);
+    LOG_SUCCESS_CAT("RENDERER", "Environment map forged — {}x{} HDR sky active", w, h);
 }
 
 void VulkanRenderer::createNexusScoreImage(VkCommandPool pool, VkQueue queue) noexcept
@@ -1450,7 +1450,7 @@ void VulkanRenderer::onWindowResize(uint32_t width, uint32_t height) noexcept
         return;
     }
 
-    LOG_SUCCESS_CAT("RESIZE", "Window resize initiated: {}×{} — Rebirthing the empire...", width, height);
+    LOG_SUCCESS_CAT("RESIZE", "Window resize initiated: {}x{} — Rebirthing the empire...", width, height);
 
     // ────────────────────────────────────────────────────────────────────────
     // 1. FULL GPU IDLE — NON-NEGOTIABLE
@@ -1529,7 +1529,7 @@ void VulkanRenderer::onWindowResize(uint32_t width, uint32_t height) noexcept
     s_resizeInProgress.store(false, std::memory_order_release);
 
     LOG_AMOURANTH(
-        "SWAPCHAIN REBORN — {}×{} | TLAS SAFE | ACCUMULATION PURGED | COMMAND BUFFERS REFORGED | RTX ETERNAL",
+        "SWAPCHAIN REBORN — {}x{} | TLAS SAFE | ACCUMULATION PURGED | COMMAND BUFFERS REFORGED | RTX ETERNAL",
         width, height
     );
 }

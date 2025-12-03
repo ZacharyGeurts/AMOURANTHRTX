@@ -1,5 +1,12 @@
 // engine/GLOBAL/RenderLoop.cpp
 // =============================================================================
+//
+// Dual Licensed:
+// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
+//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
+// 2. Commercial licensing: gzac5314@gmail.com
+//
+// =============================================================================
 // RENDERLOOP — FINAL ETERNAL PRODUCTION VERSION — DECEMBER 03 2025
 // ZERO TEARING — PERFECT RESIZE — TLAS SAFE — PINK PHOTONS ASCEND
 // EMPIRE-APPROVED, BATTLE-TESTED, FLAWLESS
@@ -51,7 +58,7 @@ void RenderLoop::run()
                 int h = event.window.data2;
                 if (w > 0 && h > 0)
                 {
-                    LOG_MAIN("SDL resize event: {}×{} — scheduling safe rebuild", w, h);
+                    LOG_MAIN("SDL resize event: {}x{} — scheduling safe rebuild", w, h);
                     requestResize(static_cast<uint32_t>(w), static_cast<uint32_t>(h));
                 }
             }
@@ -110,7 +117,7 @@ void RenderLoop::handlePendingResize()
     if (w == 0 || h == 0)
         return;
 
-    LOG_AMOURANTH("RESIZE EXECUTED: {}×{} — FULL EMPIRE REBIRTH COMMENCING", w, h);
+    LOG_AMOURANTH("RESIZE EXECUTED: {}x{} — FULL EMPIRE REBIRTH COMMENCING", w, h);
 
     // THE FINAL SAFE SEQUENCE — NON-NEGOTIABLE
     vkDeviceWaitIdle(stone_device());           // GPU fully idle

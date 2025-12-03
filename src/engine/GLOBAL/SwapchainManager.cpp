@@ -1,7 +1,14 @@
 // =============================================================================
 // src/engine/GLOBAL/SwapchainManager.cpp
 // AMOURANTH RTX — VALHALLA v∞ TURBO — FINAL ETERNAL CUT
-// THE ONE TRUE SWAPCHAIN — COMPILES WITH -Werror. PINK PHOTONS ETERNAL.
+// THE ONE TRUE SWAPCHAIN — RESPECTS OptionsMenu.hpp — COMPILES CLEAN
+// =============================================================================
+//
+// Dual Licensed:
+// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
+//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
+// 2. Commercial licensing: gzac5314@gmail.com
+//
 // =============================================================================
 
 #include "engine/GLOBAL/SwapchainManager.hpp"
@@ -9,6 +16,7 @@
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/GLOBAL/StoneKey.hpp"
 #include "engine/GLOBAL/RTXHandler.hpp"
+#include "engine/GLOBAL/OptionsMenu.hpp"   // ← THE EMPIRE'S WILL
 
 #include <algorithm>
 #include <fstream>
@@ -27,52 +35,56 @@ using StoneKey::stone_seal_views;
 
 namespace RTX {
 
-// ── EXTENSION FUNCTION POINTERS — PROPERLY DECLARED ───────────────────────
+// ── EXTENSION FUNCTION POINTERS — EMPIRE-CERTIFIED ───────────────────────
 static PFN_vkGetRefreshCycleDurationGOOGLE   vkGetRefreshCycleDurationGOOGLE   = nullptr;
 static PFN_vkGetPastPresentationTimingGOOGLE vkGetPastPresentationTimingGOOGLE = nullptr;
 static PFN_vkSetHdrMetadataEXT               vkSetHdrMetadataEXT               = nullptr;
 
-// ── HDR AUTO-DETECTION (EDID) ──────────────────────────────────────────────
+// ── HDR AUTO-DETECTION — RESPECTS Display::HDR_AUTO_IGNITION ─────────────
 void SwapchainManager::autoEnableHDR() noexcept
 {
     static bool cached = false;
     if (cached) return;
 
     bool hdr = false;
-    const char* paths[] = {
-        "/sys/class/drm/card0-DP-1/edid",
-        "/sys/class/drm/card0-HDMI-A-1/edid",
-        "/sys/class/drm/card0-eDP-1/edid",
-        "/sys/class/drm/card1-DP-1/edid"
-    };
 
-    std::vector<char> edid;
-    for (const auto* p : paths) {
-        std::ifstream f(p, std::ios::binary);
-        if (!f) continue;
-        f.seekg(0, std::ios::end);
-        auto sz = f.tellg();
-        if (sz < 256) continue;
-        edid.resize(sz);
-        f.seekg(0);
-        if (f.read(edid.data(), sz)) {
-            for (size_t i = 128; i + 128 <= edid.size(); i += 128) {
-                if (edid[i] == 0x02 && edid[i + 3] >= 0x06) {
-                    hdr = true;
-                    break;
+    if (Options::Display::HDR_AUTO_IGNITION)
+    {
+        const char* paths[] = {
+            "/sys/class/drm/card0-DP-1/edid",
+            "/sys/class/drm/card0-HDMI-A-1/edid",
+            "/sys/class/drm/card0-eDP-1/edid",
+            "/sys/class/drm/card1-DP-1/edid"
+        };
+
+        std::vector<char> edid;
+        for (const auto* p : paths) {
+            std::ifstream f(p, std::ios::binary);
+            if (!f) continue;
+            f.seekg(0, std::ios::end);
+            auto sz = f.tellg();
+            if (sz < 256) continue;
+            edid.resize(sz);
+            f.seekg(0);
+            if (f.read(edid.data(), sz)) {
+                for (size_t i = 128; i + 128 <= edid.size(); i += 128) {
+                    if (edid[i] == 0x02 && edid[i + 3] >= 0x06) {
+                        hdr = true;
+                        break;
+                    }
                 }
+                if (hdr) break;
             }
-            if (hdr) break;
         }
     }
 
     currentColorSpace_ = hdr ? VK_COLOR_SPACE_HDR10_ST2084_EXT : VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
     cached = true;
 
-    LOG_AMOURANTH("HDR {} — THE EMPIRE DETECTS AND OBEYS.", hdr ? "IGNITED" : "dormant");
+    LOG_AMOURANTH("HDR {} — THE EMPIRE HAS SPOKEN.", hdr ? "IGNITED" : "DORMANT");
 }
 
-// ── PUBLIC API — FULLY IMPLEMENTED & SAFE ─────────────────────────────────
+// ── PUBLIC API — FULLY MENU-RESPECTING ───────────────────────────────────
 void SwapchainManager::create(SDL_Window*, uint32_t w, uint32_t h) noexcept
 {
     LOG_BLONDIE("SWAPCHAIN RISING FROM THE VOID.");
@@ -85,7 +97,7 @@ void SwapchainManager::recreate(uint32_t w, uint32_t h) noexcept
 {
     if (w == 0 || h == 0) {
         minimized_ = true;
-        LOG_AMOURANTH("WINDOW MINIMIZED — PHOTONS MEDITATE.");
+        LOG_AMOURANTH("WINDOW MINIMIZED — PHOTONS ENTER MEDITATION.");
         return;
     }
     minimized_ = false;
@@ -118,7 +130,7 @@ bool SwapchainManager::supportsHDR() noexcept
     return currentColorSpace_ == VK_COLOR_SPACE_HDR10_ST2084_EXT;
 }
 
-// ── CORE SWAPCHAIN FORGE ───────────────────────────────────────────────────
+// ── CORE SWAPCHAIN FORGE — RESPECTS ALL OptionsMenu VALUES ───────────────
 void SwapchainManager::createSwapchain(SDL_Window*, uint32_t w, uint32_t h, VkSwapchainKHR old) noexcept
 {
     static VkSurfaceCapabilitiesKHR caps{};
@@ -153,6 +165,15 @@ void SwapchainManager::createSwapchain(SDL_Window*, uint32_t w, uint32_t h, VkSw
     if (caps.maxImageCount > 0)
         imageCount = std::min(imageCount, caps.maxImageCount);
 
+    // RESPECT Options::Performance::PREFER_MAILBOX_PRESENT
+    VkPresentModeKHR preferred = Options::Performance::PREFER_MAILBOX_PRESENT
+        ? VK_PRESENT_MODE_MAILBOX_KHR
+        : VK_PRESENT_MODE_FIFO_KHR;
+
+    VkPresentModeKHR presentMode = VK_PRESENT_MODE_FIFO_KHR;
+    for (auto m : presentModes)
+        if (m == preferred) { presentMode = m; break; }
+
     VkSurfaceFormatKHR chosen = formats[0];
     for (const auto& f : formats) {
         if (supportsHDR() && f.colorSpace == VK_COLOR_SPACE_HDR10_ST2084_EXT) {
@@ -161,10 +182,6 @@ void SwapchainManager::createSwapchain(SDL_Window*, uint32_t w, uint32_t h, VkSw
         if (f.format == VK_FORMAT_B8G8R8A8_SRGB && f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)
             chosen = f;
     }
-
-    VkPresentModeKHR presentMode = VK_PRESENT_MODE_FIFO_KHR;
-    for (auto m : presentModes)
-        if (m == VK_PRESENT_MODE_MAILBOX_KHR) { presentMode = m; break; }
 
     QueueFamilyIndices qf = findQueueFamilies(stone_physical(), stone_surface());
     uint32_t families[] = { qf.graphicsFamily.value(), qf.presentFamily.value() };
@@ -216,8 +233,10 @@ void SwapchainManager::createSwapchain(SDL_Window*, uint32_t w, uint32_t h, VkSw
     stone_seal_image_count(imgCount);
     stone_seal_images(swapchainImages_);
 
-    LOG_AMOURANTH("SWAPCHAIN FORGED — {}×{} | {} images | HDR {} | FIRST LIGHT ETERNAL",
-                  extent.width, extent.height, imgCount, supportsHDR() ? "IGNITED" : "dormant");
+    LOG_AMOURANTH("SWAPCHAIN FORGED — {}×{} | {} images | HDR {} | PRESENT MODE {}",
+                  extent.width, extent.height, imgCount,
+                  supportsHDR() ? "IGNITED" : "DORMANT",
+                  presentMode == VK_PRESENT_MODE_MAILBOX_KHR ? "MAILBOX" : "FIFO");
 }
 
 void SwapchainManager::createImageViews() noexcept
@@ -241,7 +260,7 @@ void SwapchainManager::createImageViews() noexcept
     stone_seal_views(swapchainImageViews_);
 }
 
-// ── FULLY IMPLEMENTED FEATURES — NO STUBS, NO WARNINGS ─────────────────────
+// ── FULLY IMPLEMENTED & MENU-RESPECTING FEATURES ───────────────────────────
 void SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSemaphore waitSemaphore) noexcept
 {
     VkSwapchainKHR sc = swapchain_.get();
@@ -272,6 +291,8 @@ void SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSemaph
 
 void SwapchainManager::initializeFramePacing() noexcept
 {
+    if (!Options::Performance::ENABLE_FRAME_PREDICTION) return;
+
     vkGetRefreshCycleDurationGOOGLE = reinterpret_cast<PFN_vkGetRefreshCycleDurationGOOGLE>(
         vkGetDeviceProcAddr(stone_device(), "vkGetRefreshCycleDurationGOOGLE"));
     vkGetPastPresentationTimingGOOGLE = reinterpret_cast<PFN_vkGetPastPresentationTimingGOOGLE>(
@@ -285,7 +306,8 @@ void SwapchainManager::initializeFramePacing() noexcept
 
 uint64_t SwapchainManager::getNextPresentTime() noexcept
 {
-    if (!vkGetRefreshCycleDurationGOOGLE || !vkGetPastPresentationTimingGOOGLE || !swapchain_.valid())
+    if (!Options::Performance::ENABLE_FRAME_PREDICTION ||
+        !vkGetRefreshCycleDurationGOOGLE || !vkGetPastPresentationTimingGOOGLE || !swapchain_.valid())
         return 0;
 
     uint32_t count = 0;
@@ -318,14 +340,14 @@ void SwapchainManager::injectHdrMetadata(VkCommandBuffer, uint32_t) noexcept
             .displayPrimaryGreen       = {0.170f, 0.797f},
             .displayPrimaryBlue        = {0.131f, 0.046f},
             .whitePoint                = {0.3127f, 0.3290f},
-            .maxLuminance              = 1000.0f,
+            .maxLuminance              = Options::Display::TARGET_BRIGHTNESS_NITS,
             .minLuminance              = 0.001f,
-            .maxContentLightLevel      = 1000.0f,
-            .maxFrameAverageLightLevel = 400.0f
+            .maxContentLightLevel      = Options::Display::TARGET_BRIGHTNESS_NITS,
+            .maxFrameAverageLightLevel = Options::Display::TARGET_BRIGHTNESS_NITS * 0.4f
         };
         VkSwapchainKHR sc = swapchain_.get();
         vkSetHdrMetadataEXT(stone_device(), 1, &sc, &m);
-        LOG_AMOURANTH("HDR METADATA INJECTED — PHOTONS BURN BRIGHTER.");
+        LOG_AMOURANTH("HDR METADATA INJECTED — PHOTONS BURN AT {} NITS.", Options::Display::TARGET_BRIGHTNESS_NITS);
     }
 }
 
@@ -354,13 +376,13 @@ void SwapchainManager::setShadingRate(float scaleFactor) noexcept
 
 void SwapchainManager::enableDirectDisplay(bool enable) noexcept
 {
-    directDisplayEnabled_ = enable;
-    LOG_WARN("Direct display {} — latency annihilated.", enable ? "ENABLED" : "DISABLED");
+    directDisplayEnabled_ = enable && Options::Performance::ENABLE_DIRECT_DISPLAY;
+    LOG_WARN("Direct display {} — latency annihilated.", directDisplayEnabled_ ? "ENABLED" : "DISABLED");
 }
 
 void SwapchainManager::predictResize(uint32_t predictedW, uint32_t predictedH) noexcept
 {
-    if (predictedW == 0 || predictedH == 0) return;
+    if (!Options::Window::ENABLE_QUANTUM_RESIZE_PREDICTION || predictedW == 0 || predictedH == 0) return;
 
     LOG_AMOURANTH("QUANTUM RESIZE PREDICTION → {}×{} — zero perceived lag.", predictedW, predictedH);
 

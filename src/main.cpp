@@ -119,11 +119,20 @@ public:
     ~Application();
 
     void run();
-    void setRenderer(std::unique_ptr<VulkanRenderer> r) {
+
+	void setRenderer(std::unique_ptr<VulkanRenderer> r)
+    {
         renderer_ = std::move(r);
-        if (renderer_) {
+
+        if (renderer_)
+        {
             renderer_->setTonemap(tonemapEnabled_);
             renderer_->setOverlay(showOverlay_);
+            if (hypertraceEnabled_)
+                renderer_->toggleHypertrace();  // turns ON
+            else
+                renderer_->toggleHypertrace();  // turns OFF (idempotent)
+        LOG_AMOURANTH("RENDERER BOUND — tonemap={} | overlay={} | hypertrace={}", tonemapEnabled_ ? "ON" : "OFF", showOverlay_ ? "ON" : "OFF", hypertraceEnabled_ ? "IGNITED" : "DORMANT");
         }
     }
 
@@ -275,7 +284,7 @@ void Application::run()
             }
 
             const std::string title = std::format(
-                "AMOURANTH RTX | {:.1f} FPS | {}×{} | Mode {}: {} | Bounces {}",
+                "AMOURANTH RTX | {} FPS | {}x{} | Mode {}: {} | Bounces {}",
                 currentFPS,
                 stone_width(), stone_height(),
                 currentRenderMode_, modeName,
@@ -295,9 +304,6 @@ void Application::run()
             frameCount = 0;
             fpsTimer   = 0.0f;
         }
-
-        if (g_deltaTime < 0.0005f)
-            std::this_thread::sleep_for(std::chrono::microseconds(200));
     }
 }
 
@@ -604,7 +610,7 @@ static void createRealFinalWindow()
 
 static void showSacrificialSplash(const char* title, int w, int h, const char* pngPath)
 {
-    LOG_MAIN("[SACRIFICIAL SPLASH] FINAL BROADCAST ARMED — 1280×720 CANVAS LOCKED");
+    LOG_MAIN("[SACRIFICIAL SPLASH] FINAL BROADCAST ARMED — 1280x720 CANVAS LOCKED");
 
     const bool  enabled   = Options::Splash::ENABLE_SACRIFICIAL_SPLASH && !Options::Splash::SKIP_SPLASH_ENTIRELY;
     const float duration  = Options::Splash::SPLASH_DURATION_SECONDS;
