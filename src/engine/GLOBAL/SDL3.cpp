@@ -17,7 +17,6 @@
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/GLOBAL/StoneKey.hpp"
 #include "engine/GLOBAL/RTXHandler.hpp"
-#include "engine/GLOBAL/VulkanCore.hpp"
 #include "engine/GLOBAL/VulkanRenderer.hpp"
 
 #include <SDL3/SDL_vulkan.h>

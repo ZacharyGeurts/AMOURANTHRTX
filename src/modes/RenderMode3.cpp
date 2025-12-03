@@ -1,124 +1,93 @@
+// =============================================================================
 // src/modes/RenderMode3.cpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
-// =============================================================================
-//
-// Dual Licensed:
-// 1. GNU General Public License v3.0 (or later) (GPL v3)
-//    https://www.gnu.org/licenses/gpl-3.0.html
-// 2. Commercial licensing: gzac5314@gmail.com
-//
+// RENDERMODE 3 — FULL RTX SCENE — BINDING 31 — PINK ON FRAME 0 — ETERNAL
+// 100% public API. 100% compiling. 100% pink.
 // =============================================================================
 
 #include "modes/RenderMode3.hpp"
 #include "engine/GLOBAL/logging.hpp"
-#include "engine/GLOBAL/StoneKey.hpp"
 #include "engine/GLOBAL/RTXHandler.hpp"
-#include "engine/GLOBAL/VulkanCore.hpp"
-#include "engine/GLOBAL/BufferManager.hpp"
+#include "engine/GLOBAL/VulkanRenderer.hpp"
 
-using namespace Engine;
 using namespace Logging::Color;
 
-RenderMode3::RenderMode3(VulkanRTX& rtx, uint32_t width, uint32_t height)
-    : rtx_(rtx), width_(width), height_(height), gen_(0), rd_(), dist_(0.0f, 1.0f)
+RenderMode3::RenderMode3(uint32_t width, uint32_t height)
+    : width_(width), height_(height), frameCount_(0)
 {
-    gen_.seed(rd_());
-
-    LOG_INFO_CAT("RenderMode3", "VALHALLA MODE 3 INIT — {}×{} — RANDOM CLEAR ENGAGED", PLASMA_FUCHSIA, width, height, RESET);
-    initResources();
-    LOG_SUCCESS_CAT("RenderMode3", "Mode 3 Initialized — {}×{} — Stochastic Chaos Active", ELECTRIC_BLUE, width, height, RESET);
+    LOG_INFO_CAT("RTX", "MODE 3 — FULL RTX SCENE — BINDING 31 IGNITED — {}x{}", width, height);
+    LOG_SUCCESS_CAT("RTX", "TLAS ACTIVE. ACCUMULATION ENGAGED. PINK ON FRAME 0. THE EMPIRE IS ALIVE.");
 }
 
-RenderMode3::~RenderMode3() {
-    LOG_INFO_CAT("RenderMode3", "Destructor invoked — Safe cleanup");
-    vkDeviceWaitIdle(RTX::g_ctx().device_);
+void RenderMode3::updateUniforms(float)
+{
+    alignas(16) struct RTXCommand {
+        alignas(16) glm::vec3 cameraPos;
+        uint32_t      frame;
+        alignas(16) glm::mat4 view;
+        alignas(16) glm::mat4 proj;
+        alignas(16) glm::mat4 invView;
+        alignas(16) glm::mat4 invProj;
+        alignas(16) glm::vec4 jitter;
+        uint64_t      uKey1       = 0x9E37AF18C64D8A17UL;
+        uint64_t      uKey2       = 0xE4F8B29D71A3C56CUL;
+        uint64_t      uObfuscator = 0x9E37AF18C64D8A17UL ^ 0xE4F8B29D71A3C56CUL ^ 0x1337C0DE69F00D42UL;
+        uint64_t      uMode       = 3ULL;
+        float         time        = 0.0f;
+        uint32_t      spp         = 0;
+        uint32_t      _pad[2]     = {0};
+    } cmd{};
 
-    rtx_.updateRTXDescriptors(0,
-        VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,
-        VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,
-        VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE);
+    float t = static_cast<float>(frameCount_) * 0.016f;
+    glm::vec3 pos(
+        glm::sin(t * 0.3f) * 8.0f,
+        2.0f + glm::sin(t * 0.7f) * 1.5f,
+        glm::cos(t * 0.3f) * 8.0f
+    );
 
-    LOG_SUCCESS_CAT("RenderMode3", "Mode 3 destroyed — CHAOS PHOTONS ETERNAL");
+    glm::mat4 view = glm::lookAt(pos, glm::vec3(0,1,0), glm::vec3(0,1,0));
+    glm::mat4 proj = glm::perspective(glm::radians(60.0f), float(width_)/float(height_), 0.1f, 1000.0f);
+    proj[1][1] *= -1; // Vulkan Y flip
+
+    cmd.cameraPos = pos;
+    cmd.frame     = static_cast<uint32_t>(frameCount_);
+    cmd.view      = view;
+    cmd.proj      = proj;
+    cmd.invView   = glm::inverse(view);
+    cmd.invProj   = glm::inverse(proj);
+    cmd.jitter    = glm::vec4(0.0f);
+    cmd.time      = t;
+    cmd.spp       = static_cast<uint32_t>(frameCount_ + 1);
+
+    g_rtx().updateUniformBinding31(&cmd, sizeof(cmd));
 }
 
-void RenderMode3::initResources() {
-    LOG_INFO_CAT("RenderMode3", "initResources() — Creating output image only");
-    auto& ctx = g_ctx();
-    VkDevice device = ctx.device();
-
-    VkImageCreateInfo imgInfo{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
-    imgInfo.imageType = VK_IMAGE_TYPE_2D;
-    imgInfo.format = VK_FORMAT_R8G8B8A8_UNORM;
-    imgInfo.extent = {width_, height_, 1};
-    imgInfo.mipLevels = 1;
-    imgInfo.arrayLayers = 1;
-    imgInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-    imgInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-    imgInfo.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-    imgInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-
-    VkImage rawImg;
-    VK_CHECK(vkCreateImage(device, &imgInfo, nullptr, &rawImg), "Output image creation");
-    outputImage_ = RTX::Handle<VkImage>(rawImg, device, vkDestroyImage, 0, "OutputImage");
-
-    VkImageViewCreateInfo viewInfo{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
-    viewInfo.image = rawImg;
-    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    viewInfo.format = imgInfo.format;
-    viewInfo.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-    VkImageView rawView;
-    VK_CHECK(vkCreateImageView(device, &viewInfo, nullptr, &rawView), "Output view creation");
-    outputView_ = RTX::Handle<VkImageView>(rawView, device, vkDestroyImageView, 0, "OutputView");
-
-    rtx_.updateRTXDescriptors(0, VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,
-                              VK_NULL_HANDLE, *outputView_, VK_NULL_HANDLE, VK_NULL_HANDLE,
-                              VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE);
-
-    LOG_SUCCESS_CAT("RenderMode3", "initResources complete — Ready for pure chaos");
+void RenderMode3::traceRays(VkCommandBuffer cmd)
+{
+    g_rtx().recordRayTrace(cmd, {width_, height_});
 }
 
-void RenderMode3::renderFrame(VkCommandBuffer cmd, float /*deltaTime*/) {
-    clearRandom(cmd);
+void RenderMode3::renderFrame(VkCommandBuffer cmd, float deltaTime)
+{
+    updateUniforms(deltaTime);
+    traceRays(cmd);
+
+    if (frameCount_ == 0) {
+        g_rtx().requestAccumulationReset();
+    }
+
+    ++frameCount_;
 }
 
-void RenderMode3::clearRandom(VkCommandBuffer cmd) {
-    float r = dist_(gen_);
-    float g = dist_(gen_);
-    float b = dist_(gen_);
-
-    LOG_DEBUG_CAT("RenderMode3", "Chaos clear → R={:.3f} G={:.3f} B={:.3f}", r, g, b);
-
-    VkImageMemoryBarrier barrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
-    barrier.image = *outputImage_;
-    barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-    barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
-    barrier.srcAccessMask = 0;
-    barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
-
-    VkClearColorValue color{{r, g, b, 1.0f}};
-    vkCmdClearColorImage(cmd, *outputImage_, VK_IMAGE_LAYOUT_GENERAL, &color, 1, &barrier.subresourceRange);
-}
-
-void RenderMode3::onResize(uint32_t width, uint32_t height) {
-    LOG_INFO_CAT("RenderMode3", "onResize() — New: {}×{} → Re-seeding chaos", width, height);
-
-    vkDeviceWaitIdle(RTX::g_ctx().device_);
-
-    rtx_.updateRTXDescriptors(0, VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,
-                              VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,
-                              VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE);
-
-    outputImage_.reset();
-    outputView_.reset();
+void RenderMode3::onResize(uint32_t width, uint32_t height)
+{
+    if (width == width_ && height == height_) return;
 
     width_ = width;
     height_ = height;
+    frameCount_ = 0;
 
-    gen_.seed(rd_());
+    g_rtx().requestAccumulationReset();
 
-    initResources();
-    LOG_SUCCESS_CAT("RenderMode3", "Resize complete — New chaos seed planted");
+    LOG_INFO_CAT("RTX", "MODE 3 — RESIZED TO {}x{} — PINK FRAME 0 INCOMING", width, height);
 }

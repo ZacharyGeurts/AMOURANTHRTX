@@ -211,6 +211,9 @@ void SwapchainManager::recreate(uint32_t w, uint32_t h) noexcept
 
     VkSwapchainKHR old = swapchain_.valid() ? *swapchain_ : VK_NULL_HANDLE;
 
+    // THE MISSING LINE — THE EMPIRE WAS BLIND WITHOUT IT
+    swapchain_.reset();  // THIS IS THE FIX
+
     createSwapchain(stone_window(), w, h, old);
 
     if (old && old != *swapchain_)
@@ -257,8 +260,8 @@ void SwapchainManager::createImageViews() noexcept
 
 void SwapchainManager::createSwapchain(SDL_Window* window, uint32_t w, uint32_t h, VkSwapchainKHR old) noexcept
 {
-    if (swapchain_.valid()) return;  // Empire does not create twice
-
+	swapchain_.reset();
+	
     // Cached queries — compute once per app lifetime
     static VkSurfaceCapabilitiesKHR caps = {};
     static std::vector<VkSurfaceFormatKHR> formats = {};

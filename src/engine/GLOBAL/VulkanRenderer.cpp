@@ -65,6 +65,8 @@ using StoneKey::stone_seal_width;
 using StoneKey::stone_seal_height;
 using StoneKey::stone_seal_extent;
 
+uint32_t MAX_FRAMES_IN_FLIGHT = Options::Performance::MAX_FRAMES_IN_FLIGHT; 
+
 // ──────────────────────────────────────────────────────────────────────────────
 // Runtime Toggles — Immediate Effect
 // ──────────────────────────────────────────────────────────────────────────────

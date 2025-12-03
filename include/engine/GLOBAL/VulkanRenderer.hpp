@@ -30,7 +30,6 @@
 #include "engine/GLOBAL/RTXHandler.hpp"
 #include "engine/GLOBAL/LAS.hpp"           // ← LAS::get() used in .cpp
 #include "engine/GLOBAL/SDL3.hpp"
-#include "engine/GLOBAL/VulkanCore.hpp"
 #include "engine/GLOBAL/PipelineManager.hpp"
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/GLOBAL/BufferManager.hpp"
@@ -95,6 +94,7 @@ public:
     [[nodiscard]] int       currentRenderMode() const noexcept { return activeRenderMode_; }
     void recordRayTrace(VkCommandBuffer cmd, const VkExtent2D& extent) noexcept;
 	static inline std::atomic<bool> s_resizeInProgress{false};
+    bool     resetAccumulation_ = true;
 
 private:
     // Core state
@@ -107,7 +107,6 @@ private:
     uint32_t currentFrame_ = 0;
     uint64_t frameNumber_  = 0;
     uint32_t accumulationFrame_ = 0;
-    bool     resetAccumulation_ = true;
     bool     firstSwapchainAcquire_ = true;
     bool     resetAccumNextFrame_ = true;
 

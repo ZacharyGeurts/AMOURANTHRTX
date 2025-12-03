@@ -15,7 +15,6 @@
 
 #include "engine/GLOBAL/BufferManager.hpp"
 #include "engine/GLOBAL/Extensions.hpp"
-#include "engine/GLOBAL/VulkanCore.hpp"
 #include "engine/GLOBAL/StoneKey.hpp"
 #include "engine/GLOBAL/logging.hpp"
 

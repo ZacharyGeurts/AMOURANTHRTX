@@ -25,6 +25,7 @@
 using namespace Logging::Color;
 using namespace BufferManager;
 using namespace RTX;  // ← THE LIGHT FLOWS THROUGH THIS LINE
+using StoneKey::stone_graphics_queue;
 
 namespace MeshLoader {
 

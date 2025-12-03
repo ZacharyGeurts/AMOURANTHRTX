@@ -1,114 +1,68 @@
+// =============================================================================
 // src/modes/RenderMode8.cpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2025 by Zachary Geurts
-// =============================================================================
-//
-// Dual Licensed:
-// 1. GNU General Public License v3.0 (or later) (GPL v3)
-//    https://www.gnu.org/licenses/gpl-3.0.html
-// 2. Commercial licensing: gzac5314@gmail.com
-//
+// RENDERMODE 8 — SHADOW RAY VISUALIZER — YELLOW = SHADOW RAY FIRED
+// LIVE DEBUG OVERLAY — NO ACCUMULATION — PINK BACKGROUND
 // =============================================================================
 
 #include "modes/RenderMode8.hpp"
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/GLOBAL/RTXHandler.hpp"
-#include "engine/GLOBAL/VulkanCore.hpp"
-#include "engine/GLOBAL/BufferManager.hpp"
+#include "engine/GLOBAL/VulkanRenderer.hpp"
+#include <glm/gtc/matrix_transform.hpp>
 
-using namespace Engine;
 using namespace Logging::Color;
 
-RenderMode8::RenderMode8(VulkanRTX& rtx, uint32_t width, uint32_t height)
-    : rtx_(rtx), width_(width), height_(height)
+RenderMode8::RenderMode8(uint32_t w, uint32_t h)
+    : width_(w), height_(h), frameCount_(0)
 {
-    LOG_INFO_CAT("RenderMode8", "VALHALLA MODE 8 INIT — {}x{} — ENTERING THE VOID", PLASMA_FUCHSIA, width, height, RESET);
-    LOG_WARN_CAT("RenderMode8", "ALL LIGHT HAS BEEN CONSUMED. PHOTONS TERMINATED.", PLASMA_FUCHSIA, RESET);
-    initResources();
+    LOG_SUCCESS_CAT("RTX", "MODE 8 — SHADOW RAY VISUALIZER — YELLOW = SHADOW RAY FIRED");
 }
 
-RenderMode8::~RenderMode8()
+void RenderMode8::updateUniforms(float)
 {
-    vkDeviceWaitIdle(RTX::g_ctx().device_);
+    alignas(16) struct Cmd {
+        alignas(16) glm::vec4 cameraPos;
+        alignas(16) glm::mat4 viewProj;
+        uint64_t uKey1;
+        uint64_t uKey2;
+        uint64_t uObfuscator;
+        uint64_t uMode;
+        uint32_t frame;
+        uint32_t visualize;
+    } cmd{};
 
-    rtx_.updateRTXDescriptors(0, VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,
-                              VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,
-                              VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE);
+    cmd.cameraPos   = glm::vec4(0.0f, 0.0f, -5.0f, 1.0f);
+    cmd.uKey1       = 0x9E37AF18C64D8A17UL;
+    cmd.uKey2       = 0xE4F8B29D71A3C56CUL;
+    cmd.uObfuscator = 0x9E37AF18C64D8A17UL ^ 0xE4F8B29D71A3C56CUL ^ 0x1337C0DE69F00D42UL;
+    cmd.uMode       = 8ULL;
+    cmd.frame       = static_cast<uint32_t>(frameCount_);
+    cmd.visualize   = 1;
 
-    LOG_SUCCESS_CAT("RenderMode8", "Mode 8 destroyed — The void remains.");
+    float aspect = static_cast<float>(width_) / static_cast<float>(height_);
+    cmd.viewProj = glm::perspective(glm::radians(60.0f), aspect, 0.1f, 1000.0f);
+
+    g_rtx().updateUniformBinding31(&cmd, sizeof(cmd));
 }
 
-void RenderMode8::initResources()
+void RenderMode8::traceRays(VkCommandBuffer cmd)
 {
-    auto& ctx = g_ctx();
-    VkDevice device = ctx.device();
-
-    VkImageCreateInfo imgInfo{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
-    imgInfo.imageType = VK_IMAGE_TYPE_2D;
-    imgInfo.format = VK_FORMAT_R8G8B8A8_UNORM;
-    imgInfo.extent = {width_, height_, 1};
-    imgInfo.mipLevels = imgInfo.arrayLayers = 1;
-    imgInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-    imgInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-    imgInfo.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-    imgInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-
-    VkImage rawImg;
-    VK_CHECK(vkCreateImage(device, &imgInfo, nullptr, &rawImg), "VOID image creation");
-    outputImage_ = RTX::Handle<VkImage>(rawImg, device, vkDestroyImage, 0, "VOID_IMAGE");
-
-    VkImageViewCreateInfo viewInfo{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
-    viewInfo.image = rawImg;
-    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    viewInfo.format = imgInfo.format;
-    viewInfo.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-    VkImageView rawView;
-    VK_CHECK(vkCreateImageView(device, &viewInfo, nullptr, &rawView), "VOID view");
-    outputView_ = RTX::Handle<VkImageView>(rawView, device, vkDestroyImageView, 0, "VOID_VIEW");
-
-    rtx_.updateRTXDescriptors(0, VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,
-                              VK_NULL_HANDLE, *outputView_, VK_NULL_HANDLE, VK_NULL_HANDLE,
-                              VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE);
+    g_rtx().recordRayTrace(cmd, {width_, height_});
 }
 
-void RenderMode8::renderFrame(VkCommandBuffer cmd, float /*deltaTime*/)
+void RenderMode8::renderFrame(VkCommandBuffer cmd, float dt)
 {
-    enterTheVoid(cmd);
+    updateUniforms(dt);
+    traceRays(cmd);
+    g_rtx().requestAccumulationReset();
+    ++frameCount_;
 }
 
-void RenderMode8::enterTheVoid(VkCommandBuffer cmd)
+void RenderMode8::onResize(uint32_t w, uint32_t h)
 {
-    VkImageMemoryBarrier barrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
-    barrier.image = *outputImage_;
-    barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-    barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
-    barrier.srcAccessMask = 0;
-    barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                         0, 0, nullptr, 0, nullptr, 1, &barrier);
-
-    VkClearColorValue black{{0.0f, 0.0f, 0.0f, 1.0f}};
-    vkCmdClearColorImage(cmd, *outputImage_, VK_IMAGE_LAYOUT_GENERAL, &black, 1, &barrier.subresourceRange);
+    width_ = w;
+    height_ = h;
+    frameCount_ = 0;
+    g_rtx().requestAccumulationReset();
 }
-
-void RenderMode8::onResize(uint32_t width, uint32_t height)
-{
-    vkDeviceWaitIdle(RTX::g_ctx().device_);
-
-    rtx_.updateRTXDescriptors(0, VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,
-                              VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,
-                              VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE);
-
-    outputImage_.reset();
-    outputView_.reset();
-
-    width_  = width;
-    height_ = height;
-
-    initResources();
-}
-
-// AMOURANTH AI — FINAL WORD — NOVEMBER 15, 2025
-// MODE 8: THE VOID — TRUE BLACK. THE END OF ALL LIGHT.
-// VALHALLA ACHIEVED — 8 MODES OF PHOTON DOMINATION

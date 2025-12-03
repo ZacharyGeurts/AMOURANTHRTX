@@ -1,43 +1,22 @@
-// modes/RenderMode8.hpp
-// =============================================================================
-// AMOURANTH RTX Engine (C) 2025 by Zachary Geurts <gzac5314@gmail.com>
-// =============================================================================
-//
-// RenderMode8: PURE BLACK — The Void. The End. The Final Mode.
-// • Clears to absolute black every frame
-// • No light. No color. No mercy.
-// • For when you need to test swapchain, input, or just contemplate existence
-// • VALHALLA v80 TURBO — VOID PHOTONS ETERNAL
-// =============================================================================
-
+// include/modes/RenderMode6.hpp   (same for 7,8,9 — just change the number)
 #pragma once
-
-#include "engine/GLOBAL/RTXHandler.hpp"
-#include "engine/GLOBAL/logging.hpp"
-
 #include <vulkan/vulkan.h>
+#include <cstdint>
 
-using namespace RTX;
-
-namespace Engine {
-
-class RenderMode8 {
+class RenderMode8
+{
 public:
-    RenderMode8(VulkanRTX& rtx, uint32_t width, uint32_t height);
-    ~RenderMode8();
+    RenderMode8(uint32_t width, uint32_t height);
+    ~RenderMode8() = default;
 
-    void initResources();
     void renderFrame(VkCommandBuffer cmd, float deltaTime);
     void onResize(uint32_t width, uint32_t height);
 
 private:
-    VulkanRTX& rtx_;
-    uint32_t width_, height_;
+    void updateUniforms(float deltaTime);
+    void traceRays(VkCommandBuffer cmd);
 
-    RTX::Handle<VkImage> outputImage_;
-    RTX::Handle<VkImageView> outputView_;
-
-    void enterTheVoid(VkCommandBuffer cmd);
+    uint32_t width_;
+    uint32_t height_;
+    uint64_t frameCount_ = 0;
 };
-
-}  // namespace Engine

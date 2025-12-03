@@ -12,7 +12,6 @@
 // MESH LOADER — FULL STONEKEY v∞ — PINK PHOTONS ETERNAL — FIRST LIGHT ACHIEVED
 #pragma once
 
-#include "engine/GLOBAL/VulkanCore.hpp"
 #include <vulkan/vulkan.h>
 #include <memory>
 #include <vector>
@@ -20,9 +19,9 @@
 #include <glm/glm.hpp>
 #include <cstdint>
 #include <cstring>
+#include "engine/GLOBAL/logging.hpp"
 
 using namespace Logging::Color;
-using namespace StoneKey;
 
 namespace MeshLoader {
 

@@ -62,12 +62,43 @@ using StoneKey::stone_seal_width;
 using StoneKey::stone_seal_height;
 using StoneKey::stone_seal_mesh;
 using StoneKey::stone_seal_final;
+using StoneKey::stone_width;
+using StoneKey::stone_height;
+using StoneKey::stone_window;
+using StoneKey::stone_rtprops;
+using StoneKey::stone_pass;
+using StoneKey::stone_swapchain;
+using StoneKey::stone_transfer_queue;
+using StoneKey::stone_present_family;
+using StoneKey::stone_transfer_family;
+using StoneKey::stone_compute_family;
+using StoneKey::stone_image_count;
+using StoneKey::stone_compute_queue;
+using StoneKey::stone_present_queue;
+using StoneKey::stone_graphics_queue;
+using StoneKey::stone_physical;
+using StoneKey::stone_surface;
+using StoneKey::stone_instance;
+using StoneKey::stone_seal_transfer_queue;
+using StoneKey::stone_seal_compute_queue;
+using StoneKey::stone_seal_present_queue;
+using StoneKey::stone_seal_graphics_queue;
+using StoneKey::stone_seal_images;
+using StoneKey::stone_seal_image_count;
+using StoneKey::stone_seal_swapchain;
+using StoneKey::stone_seal_rtprops;
+using StoneKey::stone_seal_physical;
+using StoneKey::stone_seal_device;
+using StoneKey::stone_seal_surface;
+using StoneKey::stone_seal_window;
+using StoneKey::stone_seal_instance;
 
 // =============================================================================
 // GLOBALS — THE EMPIRE'S HEARTBEATS
 // =============================================================================
 std::unique_ptr<Application> g_app_ptr = nullptr;
 float g_deltaTime = 0.0f;
+#define MAX_FRAMES_IN_FLIGHT = Options::Performance::MAX_FRAMES_IN_FLIGHT;
 // =============================================================================
 // TRUTH ACCESSORS
 // =============================================================================
@@ -845,13 +876,13 @@ static void phase7_forgeTheRTX()
 {
     LOG_MAIN("[PHASE 7] FORGING THE RTX PIPELINE — PINK PHOTONS RISE");
 
-	createGlobalDescriptorVault();
+	RTX::createGlobalDescriptorVault();
 
-    auto& pipe = pipeline();  // The crown awakens
+    auto& pipe = RTX::pipeline();  // The crown awakens
 
     pipe.createPipelineLayout();
     pipe.createDescriptorPool();
-    pipe.createShaderBindingTable(g_ctx().commandPool(), stone_graphics_queue());
+    pipe.createShaderBindingTable(RTX::g_ctx().commandPool(), stone_graphics_queue());
     pipe.allocateDescriptorSets();
 
     stone_seal_pipeline(&pipe);
