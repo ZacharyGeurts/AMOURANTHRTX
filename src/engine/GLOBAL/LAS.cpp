@@ -34,6 +34,7 @@
 
 using namespace RTX;
 using StoneKey::stone_device;
+using StoneKey::stone_graphics_family;
 
 // Assume engine provides these (add to StoneKey.hpp if needed)
 VkQueue stone_async_compute_queue();  // Async compute queue for AS builds
@@ -55,11 +56,27 @@ inline VkFence createFence()
 // ---------------------------------------------------------------------------
 // Begin a one-time command buffer
 // ---------------------------------------------------------------------------
-[[nodiscard]] inline VkCommandBuffer beginOneTimeSubmit(VkCommandPool pool) noexcept
+[[nodiscard]] inline VkCommandBuffer beginOneTimeSubmit(VkCommandPool pool = VK_NULL_HANDLE) noexcept
 {
-    EMPIRE_GUARD(pool != VK_NULL_HANDLE, "beginOneTimeSubmit() — NULL COMMAND POOL");
+    // AUTO-CREATE COMMAND POOL IF MISSING — THE EMPIRE SHALL NOT FALL
+    if (pool == VK_NULL_HANDLE) {
+        LOG_WARN("beginOneTimeSubmit() called with NULL pool — forging emergency command pool");
+
+        VkCommandPoolCreateInfo poolInfo{
+            .sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+            .flags            = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT |
+                                VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
+            .queueFamilyIndex = stone_graphics_family()
+        };
+
+        VK_CHECK(vkCreateCommandPool(stone_device(), &poolInfo, nullptr, &pool));
+        RTX::g_ctx().commandPool_ = pool;  // Seal it globally
+
+        LOG_SUCCESS("Emergency command pool forged: 0x{:x}", (uint64_t)pool);
+    }
 
     VkCommandBuffer cmd = VK_NULL_HANDLE;
+
     VkCommandBufferAllocateInfo allocInfo{
         .sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
         .commandPool        = pool,
@@ -80,17 +97,11 @@ inline VkFence createFence()
 // ---------------------------------------------------------------------------
 // End and submit a one-time command buffer (now supports async queues)
 // ---------------------------------------------------------------------------
-inline void endOneTimeSubmit(VkCommandBuffer cmd, VkQueue queue, VkCommandPool pool) noexcept
+inline void endOneTimeSubmit(VkCommandBuffer cmd, VkQueue queue, VkCommandPool pool = VK_NULL_HANDLE) noexcept
 {
-    if (!cmd || !queue || !pool || !stone_device()) {
-        LOG_NICK("The engine is still warming. We'll try again when the stars align.");
-        if (cmd) vkFreeCommandBuffers(stone_device(), pool, 1, &cmd);
-        return;
-    }
+    if (cmd == VK_NULL_HANDLE) return;
 
     VK_CHECK(vkEndCommandBuffer(cmd));
-
-    VkFence fence = createFence();
 
     VkSubmitInfo submit{
         .sType              = VK_STRUCTURE_TYPE_SUBMIT_INFO,
@@ -98,24 +109,17 @@ inline void endOneTimeSubmit(VkCommandBuffer cmd, VkQueue queue, VkCommandPool p
         .pCommandBuffers    = &cmd
     };
 
-    VkResult r = vkQueueSubmit(queue, 1, &submit, fence);
-    if (r != VK_SUCCESS) {
-        LOG_ELON("The queue hesitated… but the photons are patient.");
-        vkDestroyFence(stone_device(), fence, nullptr);
+    VK_CHECK(vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE));
+    VK_CHECK(vkQueueWaitIdle(queue));
+
+    // Use global pool if none provided
+    if (pool == VK_NULL_HANDLE) {
+        pool = g_ctx().commandPool_;
+    }
+
+    if (pool != VK_NULL_HANDLE) {
         vkFreeCommandBuffers(stone_device(), pool, 1, &cmd);
-        return;
     }
-
-    r = vkWaitForFences(stone_device(), 1, &fence, VK_TRUE, 8'000'000'000ULL); // 8s
-
-    if (r == VK_TIMEOUT) {
-        LOG_CARMACK("GPU deep in thought. Giving it another heartbeat.");
-    } else if (r == VK_ERROR_DEVICE_LOST) {
-        LOG_GROK("A brief eclipse. The light always returns.");
-    }
-
-    vkDestroyFence(stone_device(), fence, nullptr);
-    vkFreeCommandBuffers(stone_device(), pool, 1, &cmd);
 }
 
 // ---------------------------------------------------------------------------

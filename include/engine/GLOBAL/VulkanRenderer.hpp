@@ -40,6 +40,8 @@ struct Camera;
 using namespace Logging::Color;
 using StoneKey::stone_renderer;
 
+[[nodiscard]] static inline VkCommandPool& g_commandPool() noexcept { return RTX::g_ctx().commandPool_; }
+
 enum class FpsTarget : uint32_t {
     FPS_60        = 60,
     FPS_120       = 120,
@@ -55,6 +57,7 @@ public:
     void onWindowResize(uint32_t w, uint32_t h) noexcept;
     void cleanup() noexcept;
     void createCommandPool() noexcept;
+	void createCommandBuffers() noexcept;
 
     void toggleHypertrace() noexcept;
     void toggleFpsTarget() noexcept;
@@ -74,7 +77,6 @@ public:
     void setOverlay(bool show) noexcept;
     void loadCriticalShaders() noexcept;
 
-    void createCommandBuffers() noexcept;
     void createSyncObjects() noexcept;
 
 	bool swapchainRecreated_ = false;
@@ -92,6 +94,7 @@ public:
     [[nodiscard]] bool      minimized()         const noexcept { return minimized_; }
     [[nodiscard]] int       currentRenderMode() const noexcept { return activeRenderMode_; }
     void recordRayTrace(VkCommandBuffer cmd, const VkExtent2D& extent) noexcept;
+	static inline std::atomic<bool> s_resizeInProgress{false};
 
 private:
     // Core state
@@ -228,8 +231,7 @@ private:
     void initializeAllBufferData(uint32_t frames, VkDeviceSize uniformSize, VkDeviceSize materialSize) noexcept;
     void updateUniformBuffer(uint32_t frame, const Camera& camera, float jitter) noexcept;
     void updateTonemapUniform(uint32_t frame) noexcept;
-    bool recreateTonemapUBOs() noexcept;
-	static inline std::atomic<bool> s_resizeInProgress{false};
+    bool recreateTonemapUBOs() noexcept;	
 
     VkDeviceAddress getShaderGroupHandle(uint32_t group) noexcept;
 

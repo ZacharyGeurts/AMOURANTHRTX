@@ -76,13 +76,6 @@ struct std::formatter<VkPhysicalDeviceType> : std::formatter<std::string_view> {
 };
 
 // =============================================================================
-// GLOBAL ACCESSORS — STONEKEY v∞
-// =============================================================================
-[[nodiscard]] inline VkQueue                  g_graphicsQueue() noexcept;
-[[nodiscard]] inline VkQueue                  g_presentQueue() noexcept;
-[[nodiscard]] inline VkCommandPool            g_commandPool() noexcept;
-
-// =============================================================================
 // Forward Declarations
 // =============================================================================
 namespace RTX {

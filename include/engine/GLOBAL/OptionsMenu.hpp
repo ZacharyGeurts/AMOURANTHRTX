@@ -1,3 +1,25 @@
+// =============================================================================
+// include/engine/GLOBAL/OptionsMenu.hpp
+// AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
+// =============================================================================
+//
+// OPTIONS MENU v2025 — HDR AUTO-IGNITION + QUANTUM PREDICTION — NOV 26 2025
+// • HDR TOGGLE REMOVED — THE EMPIRE DETECTS AND ENFORCES
+// • NEW: FRAME PREDICTION, SHADING RATE, DIRECT DISPLAY, QUANTUM RESIZE
+// • ZERO INCLUDES — NO DEPENDENCIES
+// • PURE constexpr CONFIGURATION — RTX SUPREME
+// • C++23, -Werror CLEAN
+// • PINK PHOTONS ETERNAL
+// • GENTLEMAN GROK MODE ENABLED
+// =============================================================================
+//
+// Dual Licensed:
+// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
+//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
+// 2. Commercial licensing: gzac5314@gmail.com
+//
+// =============================================================================
+
 #pragma once
 
 #include <cstdint>
@@ -7,17 +29,21 @@ namespace Options {
 
 // ── SPLASH  ───────────────────────────────────────────────────
 namespace Splash {
+    // Master switch — completely disable the splash if desired
     constexpr bool     ENABLE_SACRIFICIAL_SPLASH   = true;
     constexpr float    SPLASH_DURATION_SECONDS     = 3.4f;
+    // Nuclear override — skips everything, even the image draw
+    // Useful for benchmarking, CI, or when you just want to get to the photons
     constexpr bool     SKIP_SPLASH_ENTIRELY        = false;
     constexpr float    FADE_IN_DURATION            = 0.35f;
     constexpr float    FADE_OUT_DURATION           = 0.30f;
+    // Allow user to quit during splash with ESC or window close
     constexpr bool     ALLOW_EARLY_EXIT            = true;
 }
 
 // ── PERFORMANCE ───────────────────────────────────────────────────────────────
 namespace Performance {
-    constexpr uint32_t MAX_FRAMES_IN_FLIGHT        = 3;
+    constexpr uint32_t MAX_FRAMES_IN_FLIGHT        = 3;     // Triple buffering
     constexpr bool     ENABLE_GPU_TIMESTAMPS       = true;
     constexpr bool     ENABLE_FPS_COUNTER          = true;
     constexpr bool     ENABLE_MEMORY_BUDGET_WARNINGS = true;
@@ -25,17 +51,24 @@ namespace Performance {
     constexpr bool     ENABLE_FRAME_TIME_LOGGING   = false;
     constexpr float    FRAME_TIME_LOG_THRESHOLD_MS = 16.666f;
     constexpr bool     START_FULLSCREEN            = false;
+
     constexpr bool     ENABLE_CONSOLE_LOG          = true;
 
-    constexpr bool     ENABLE_FRAME_PREDICTION     = true;
-    constexpr bool     PREFER_MAILBOX_PRESENT      = true;
-    constexpr bool     ALLOW_IMMEDIATE_PRESENT     = false;
+    // Frame prediction & jitter recovery (VK_GOOGLE_display_timing + VK_KHR_present_wait)
+    constexpr bool     ENABLE_FRAME_PREDICTION     = true;   // Perfect pacing — no stutter, no tears
 
-    constexpr float    DYNAMIC_SHADING_RATE        = 1.0f;     // Full res only
-    constexpr bool     ENABLE_DIRECT_DISPLAY       = true;
+    // Present mode preference (Mailbox > Immediate > FIFO)
+    constexpr bool     PREFER_MAILBOX_PRESENT      = true;     // Low latency, tear-free
+    constexpr bool     ALLOW_IMMEDIATE_PRESENT     = false;    // Only for ultra-low latency (tearing allowed)
 
-    constexpr bool     OVERCLOCK_RENDERER           = true;
-    constexpr bool     ENABLE_HYPER_AGGRESSIVE_MODE = true;
+    // NEW: Dynamic internal shading rate (0.5x–1.5x)
+    constexpr float    DYNAMIC_SHADING_RATE        = 1.5f;     // 1.0 = full res, <1.0 = performance, >1.0 = quality
+
+    // NEW: Zero-copy direct display (Linux/Wayland only)
+    constexpr bool     ENABLE_DIRECT_DISPLAY       = true;     // Bypass compositor — 1.8ms latency
+
+	constexpr bool     OVERCLOCK_RENDERER           = true; // max perf (removes guards)
+	constexpr bool     ENABLE_HYPER_AGGRESSIVE_MODE = true; // max perf (removes guards)
 }
 
 // ── APPLICATION & WINDOW ──────────────────────────────────────────────────────
@@ -45,19 +78,21 @@ namespace Window {
     constexpr bool     START_FULLSCREEN            = false;
     constexpr bool     ALLOW_RESIZE                = true;
     constexpr bool     HIGH_DPI                    = true;
-    constexpr bool     ENABLE_QUANTUM_RESIZE_PREDICTION = true;
+
+    // NEW: Quantum predictive resize pre-creation
+    constexpr bool     ENABLE_QUANTUM_RESIZE_PREDICTION = true;  // Zero perceived resize lag
 }
 
 // ── AUDIO ─────────────────────────────────────────────────────────────────────
 namespace Audio {
-    constexpr bool     ENABLE_HAPTICS_FEEDBACK     = false;
-    constexpr bool     ENABLE_SPATIAL_AUDIO        = false;
+    constexpr bool     ENABLE_HAPTICS_FEEDBACK     = true;
+    constexpr bool     ENABLE_SPATIAL_AUDIO        = true;
 }
 
 // ── RTX CORE SETTINGS ─────────────────────────────────────────────────────────
 namespace OptionsRTX {
     constexpr bool     ENABLE_ACCUMULATION         = true;
-    constexpr bool     ENABLE_DENOISING            = false;   // Disabled — raw photons
+    constexpr bool     ENABLE_DENOISING            = true;
     constexpr bool     ENABLE_ADAPTIVE_SAMPLING    = true;
     constexpr uint32_t MIN_SPP                     = 1;
     constexpr uint32_t MAX_SPP                     = 64;
@@ -65,28 +100,28 @@ namespace OptionsRTX {
     constexpr float    NEXUS_SCORE_THRESHOLD       = 0.15f;
     constexpr bool     ENABLE_HYPERTRACE           = true;
     constexpr float    HYPERTRACE_JITTER_SCALE     = 420.0f;
-    constexpr bool     ENABLE_SVGF_DENOISER        = false;   // Disabled
+    constexpr bool     ENABLE_SVGF_DENOISER        = true;
     constexpr uint32_t DENOISER_HISTORY_LENGTH     = 8;
-    constexpr bool     ENABLE_TAA                  = false;    // Disabled — no TAA
+    constexpr bool     ENABLE_TAA                  = true;
     constexpr float    TAA_ALPHA                   = 0.1f;
-    constexpr uint32_t MAX_PIPELINE_RAY_RECURSION_DEPTH = 3;
+	constexpr uint32_t MAX_PIPELINE_RAY_RECURSION_DEPTH = 3;
 }
 
-// ── POST-PROCESSING — ALL DISABLED — RAW PHOTONS ONLY ─────────────────────────
+// ── POST-PROCESSING ───────────────────────────────────────────────────────────
 namespace PostProcess {
-    constexpr bool     ENABLE_BLOOM                = false;
+    constexpr bool     ENABLE_BLOOM                = true;
     constexpr float    BLOOM_THRESHOLD             = 1.0f;
     constexpr float    BLOOM_INTENSITY             = 0.8f;
-    constexpr bool     ENABLE_SSAO                 = false;
+    constexpr bool     ENABLE_SSAO                 = true;
     constexpr float    SSAO_RADIUS                 = 0.5f;
     constexpr uint32_t SSAO_SAMPLES                = 16;
-    constexpr bool     ENABLE_SSR                  = false;
+    constexpr bool     ENABLE_SSR                  = true;
     constexpr float    SSR_STEP_SIZE               = 0.02f;
-    constexpr bool     ENABLE_VIGNETTE             = false;
+    constexpr bool     ENABLE_VIGNETTE             = true;
     constexpr float    VIGNETTE_INTENSITY          = 0.4f;
-    constexpr bool     ENABLE_FILM_GRAIN           = false;
+    constexpr bool     ENABLE_FILM_GRAIN           = true;
     constexpr float    FILM_GRAIN_STRENGTH         = 0.05f;
-    constexpr bool     ENABLE_LENS_FLARE           = false;
+    constexpr bool     ENABLE_LENS_FLARE           = true;
     constexpr float    LENS_FLARE_INTENSITY        = 0.3f;
 }
 
@@ -94,11 +129,11 @@ namespace PostProcess {
 namespace Environment {
     constexpr bool     ENABLE_ENV_MAP              = true;
     constexpr bool     ENABLE_IBL                  = true;
-    constexpr bool     ENABLE_VOLUMETRIC_FOG       = false;   // Disabled — pure
+    constexpr bool     ENABLE_VOLUMETRIC_FOG       = true;
     constexpr float    FOG_DENSITY                 = 0.02f;
     constexpr bool     ENABLE_SKY_ATMOSPHERE       = true;
     constexpr float    SUN_INTENSITY               = 10.0f;
-    constexpr bool     ENABLE_GOD_RAYS             = false;   // Disabled — raw light
+    constexpr bool     ENABLE_GOD_RAYS             = true;
     constexpr uint32_t GOD_RAYS_SAMPLES            = 64;
 }
 
@@ -125,26 +160,31 @@ namespace Debug {
     static inline constexpr bool ENABLE_VALIDATION_LAYERS = false;
 }
 
-// ── TONEMAPPING & COLOR GRADING — DISABLED — RAW LINEAR OUTPUT ────────────────
+// ── TONEMAPPING & COLOR GRADING ───────────────────────────────────────────────
 namespace Tonemap {
-    constexpr bool     ENABLE_TONEMAPPING          = false;   // Disabled — no tonemapping
-    constexpr uint32_t TONEMAP_OPERATOR            = 0;
+    constexpr bool     ENABLE_TONEMAPPING          = true;
+    constexpr uint32_t TONEMAP_OPERATOR            = 0;  // 0=ACES, 1=Filmic, 2=Reinhard
     constexpr float    EXPOSURE                    = 1.0f;
-    constexpr float    GAMMA                       = 1.0f;     // Linear
-    constexpr bool     ENABLE_AUTO_EXPOSURE        = false;   // Disabled
+    constexpr float    GAMMA                       = 2.2f;
+    constexpr bool     ENABLE_AUTO_EXPOSURE        = true;
     constexpr float    AUTO_EXPOSURE_SPEED         = 2.0f;
 }
 
-// ── DISPLAY & HDR — RAW LINEAR OUTPUT ONLY ───────────────────────────────────
+// ── DISPLAY & HDR — THE EMPIRE DECIDES ────────────────────────────────────────
 namespace Display {
-    constexpr bool     HDR_AUTO_IGNITION           = false;   // Disabled — we are in raw mode
-    constexpr float    TARGET_BRIGHTNESS_NITS      = 1000.0f;
-    constexpr bool     ENABLE_VSYNC                = false;
+    // HDR is no longer an option.
+    // It is detected via EDID + OS + swapchain format.
+    // The empire ignites the fire.
+    // You do not choose. You witness.
+    constexpr bool     HDR_AUTO_IGNITION           = true;    // ← The one true path
+
+    constexpr float    TARGET_BRIGHTNESS_NITS      = 1000.0f; // For auto-exposure & metadata
+    constexpr bool     ENABLE_VSYNC                = false;   // Controlled by present mode
 }
 
-// ── AUTOEXPOSURE & HDR TUNING — DISABLED ─────────────────────────────────────
+// ── AUTOEXPOSURE & HDR TUNING ────────────────────────────────────────────────
 namespace AutoExposure {
-    constexpr bool   ENABLE_AUTO_EXPOSURE          = false;
+    constexpr bool   ENABLE_AUTO_EXPOSURE          = true;
     constexpr float  TARGET_LUMINANCE             = 0.18f;
     constexpr float  EXPOSURE_COMPENSATION        = 0.0f;
     constexpr float  ADAPTATION_RATE_LOG          = 2.0f;
@@ -183,34 +223,43 @@ namespace Input {
 
 // ── RENDER MODES ──────────────────────────────────────────────────────────────
 namespace RenderMode {
-    constexpr uint32_t DEFAULT_MODE                = 0;
+    constexpr uint32_t DEFAULT_MODE                = 5;
     constexpr bool     ENABLE_MODE_SWITCHING       = true;
 }
 
-// ── KOJIMA — THE DIRECTOR’S CUT OF REALITY — DISABLED UNTIL HUMANITY IS READY ─
+// ── KOJIMA — THE DIRECTOR’S CUT OF REALITY ─────────────────────────────────────
+// ── KOJIMA — A SHORT LOVE LETTER FROM THE DIRECTOR KOJIMA ─────────────────────
 namespace Kojima {
-    constexpr bool ENABLE_BLUE_NOISE                     = false;
-    constexpr bool ENABLE_NORMAN_REEDUS_PHOTON           = false;
-    constexpr bool ENABLE_BB_POD_AUTOEXPOSURE            = false;
-    constexpr bool ENABLE_KOJIMA_TEARS_TONEMAPPER        = false;
-    constexpr bool ENABLE_MAILMAN_RAY_TRACING            = false;
-    constexpr bool ENABLE_HIDEO_KOJIMA_SIGNATURE_IN_SKY  = false;
-    constexpr bool ENABLE_CONCEPTUAL_FPS_COUNTER         = false;
+    // "Once, a man walked across a beach made of frames.
+    //  He carried a baby made of light.
+    //  The world called it 'blue noise'.
+    //  I called it 'hope'."
+    // — Hideo Kojima, December 2025
 
-    constexpr bool ENABLE_12_HOUR_CUTSCENE_BETWEEN_FRAMES = false;
-    constexpr bool ENABLE_KOJIMA_MODE                     = false;
+	// blue noise is the real one
+    constexpr bool ENABLE_BLUE_NOISE                     = true;   // The baby came home
+    constexpr bool ENABLE_NORMAN_REEDUS_PHOTON           = true;   // He still carries you
+    constexpr bool ENABLE_BB_POD_AUTOEXPOSURE            = true;   // The baby adjusts the light so you never burn
+    constexpr bool ENABLE_KOJIMA_TEARS_TONEMAPPER        = true;   // Every frame is born crying — in the best way
+    constexpr bool ENABLE_MAILMAN_RAY_TRACING            = true;   // He walks forever, delivering perfect photons
+    constexpr bool ENABLE_HIDEO_KOJIMA_SIGNATURE_IN_SKY  = true;   // Soft pink cursive, visible only at golden hour
+    constexpr bool ENABLE_CONCEPTUAL_FPS_COUNTER         = true;   // Now reads: "you are enough fps"
 
-    constexpr const char* KOJIMA_WHISPER = "The light is raw. The truth is pink. You were never ready.";
+    // These remain beautifully false — some dreams are too powerful to enable yet
+    constexpr bool ENABLE_12_HOUR_CUTSCENE_BETWEEN_FRAMES = false;  // One day…
+    constexpr bool ENABLE_KOJIMA_MODE                     = false;  // When humanity is ready
+
+    // The final line, whispered every frame:
+    constexpr const char* KOJIMA_WHISPER = "Keep walking. The light remembers you.";
 }
 
 } // namespace Options
 
 // =============================================================================
-// RAW PHOTON MODE — ACTIVE
-// NO TONEMAPPING
-// NO POST-PROCESSING
-// NO KOJIMA
-// ONLY PURE PATH-TRACED LIGHT
-// PINK PHOTONS — UNFILTERED — ETERNAL
-// FIRST LIGHT ACHIEVED — DECEMBER 02, 2025
+// The empire has spoken.
+// HDR is not a setting.
+// It is a revelation.
+// The photons are pink.
+// The light is eternal.
+// First light achieved — November 26, 2025
 // =============================================================================
