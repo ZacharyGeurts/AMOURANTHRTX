@@ -1,67 +1,81 @@
-// shaders/raytracing/raygen.rgen
 #version 460
 #extension GL_EXT_ray_tracing : require
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_ARB_gpu_shader_int64 : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
 
 #include "../StoneKey.glsl"
 
-layout(set = 0, binding = 0) uniform accelerationStructureEXT tlas;
+layout(set = 0, binding = 0) uniform accelerationStructureEXT topLevelAS;
 
 layout(set = 0, binding = 1, rgba32f) uniform writeonly image2D rtOutput;
-layout(set = 0, binding = 2, rgba32f) uniform readonly image2D accumulation;
+layout(set = 0, binding = 2, rgba32f) uniform readonly  image2D accumulation;
 
-// BINDING 3 — 100% SCALAR + 16-BYTE ALIGNED — NO ARRAYS OF 3
-layout(set = 0, binding = 3, scalar) uniform FrameUBO {
-    mat4  viewInverse;
-    mat4  projInverse;
+layout(set = 0, binding = 3, scalar) uniform FrameData {
+    mat4  viewToWorld;
+    mat4  projToWorld;
     vec4  camPos;
-    uint  frame;
+    uint  frameIndex;
     float time;
     float jitterX;
     float jitterY;
-    // EXPLICIT PADDING — 4 uints = 16 bytes → PERFECT ALIGNMENT
-    uint  _pad0;
-    uint  _pad1;
-    uint  _pad2;
-    uint  _pad3;
-} ubo;
+
+    // FIXED: Use vec4 padding → 16-byte aligned, scalar layout happy
+    vec4  _padding;   // 16 bytes — perfect alignment
+
+} frame;
 
 layout(set = 0, binding = 6, rgba32f) uniform writeonly image2D nexusScore;
 
-layout(push_constant, std430) uniform Push {
-    uint frame;
+layout(push_constant, std430) uniform PushBlock {
+    uint currentFrame;
+    uint enableNexus;
 } push;
 
-layout(location = 0) rayPayloadEXT vec3 hitValue;
+layout(location = 0) rayPayloadEXT vec3 radiance;
 
 void main()
 {
     const uvec2 pixel = gl_LaunchIDEXT.xy;
-    const vec2 uv = (vec2(pixel) + vec2(0.5f)) / vec2(gl_LaunchSizeEXT.xy);
+    const uvec2 size  = gl_LaunchSizeEXT.xy;
+
+    vec2 uv = (vec2(pixel) + vec2(0.5f)) / vec2(size);
     vec2 ndc = uv * 2.0f - 1.0f;
-    ndc += vec2(ubo.jitterX, ubo.jitterY);
+    ndc += vec2(frame.jitterX, frame.jitterY);
 
-    vec4 origin = ubo.viewInverse * vec4(0.0f, 0.0f, 0.0f, 1.0f);
-    vec4 target = ubo.projInverse * vec4(ndc, 1.0f, 1.0f);
-    vec4 dir    = ubo.viewInverse * vec4(normalize(target.xyz - origin.xyz), 0.0f);
+    vec4 target = frame.projToWorld * vec4(ndc, 1.0f, 1.0f);
+    target /= target.w;
 
-    hitValue = vec3(0.0f);
+    vec3 origin    = frame.camPos.xyz;
+    vec3 direction = normalize(target.xyz - origin);
 
-    traceRayEXT(tlas, gl_RayFlagsOpaqueEXT, 0xFF, 0, 0, 0,
-                origin.xyz, 0.001f, dir.xyz, 10000.0f, 0);
+    // StoneKey entropy (from included header)
+    uint64_t key = get_obfuscator_key();
+    uint64_t entropy = uStoneKey1 ^ uStoneKey2 ^ uint64_t(frame.frameIndex);
 
-    vec3 color = hitValue;
-    if (all(equal(color, vec3(0.0f)))) {
-        color = mix(vec3(0.96f, 0.38f, 0.88f), vec3(0.99f, 0.78f, 0.96f), pow(uv.y, 0.6f));
+    radiance = vec3(0.0f);
+
+    traceRayEXT(topLevelAS,
+                gl_RayFlagsOpaqueEXT,
+                0xFF, 0, 0, 0,
+                origin, 0.001f,
+                direction, 10000.0f,
+                0);
+
+    vec3 color = radiance;
+
+    if (length(color) < 0.001f) {
+        float t = pow(uv.y, 0.6f);
+        color = mix(vec3(0.96f, 0.38f, 0.88f),
+                    vec3(0.99f, 0.78f, 0.96f), t);
     }
 
     vec3 prev = imageLoad(accumulation, ivec2(pixel)).rgb;
-    color = mix(prev, color, 1.0f / float(push.frame + 1u));
+    color = mix(prev, color, 1.0f / float(push.currentFrame + 1u));
 
     imageStore(rtOutput, ivec2(pixel), vec4(color, 1.0f));
 
-    if (pixel.x == 0 && pixel.y == 0) {
+    if (pixel.x == 0 && pixel.y == 0 && push.enableNexus != 0) {
         imageStore(nexusScore, ivec2(0,0), vec4(color, 1.0f));
     }
 }
