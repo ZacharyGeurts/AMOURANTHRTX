@@ -1,13 +1,7 @@
 // src/engine/GLOBAL/PipelineManager.cpp
 // =============================================================================
-// AMOURANTH RTX Engine (C) 2025 by Zachary Geurts <gzac5314@gmail.com>
+// AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
-//
-// Dual Licensed:
-// 1. GNU General Public License v3.0 (or later) (GPL v3)
-//    https://www.gnu.org/licenses/gpl-3.0.html
-// 2. Commercial licensing: gzac5314@gmail.com
-//
 // TRUE CONSTEXPR STONEKEY v∞ — NOVEMBER 19, 2025 — APOCALYPSE FINAL
 // PURE RANDOM ENTROPY — RDRAND + PID + TIME + TLS — SIMPLE & SECURE
 // KEYS **NEVER** LOGGED — ONLY HASHED FINGERPRINTS — SECURITY > VANITY
@@ -67,80 +61,120 @@ const std::array<Binding, 11> RT_PIPELINE_BINDINGS = {{
 }};
 
 // ──────────────────────────────────────────────────────────────────────────────
-// NEW: Create RT Descriptor Pool — Scaled for Triple Buffering + Binding Counts
+// createDescriptorPool — Triple-Buffered + Binding Counts + VUID-00047 Safe
 // ──────────────────────────────────────────────────────────────────────────────
 void PipelineManager::createDescriptorPool() 
 {
-    LOG_CID("CID enters the vault, drenched — \"Binding 31... StoneKey... it must have room... ALL THE ROOM!\"");
+    LOG_CID("CID slams fist on table — \"THE VAULT WILL RISE. BINDING 31 WILL BE BORN.\"");
 
     const uint32_t maxSets = Options::Performance::MAX_FRAMES_IN_FLIGHT;
+    LOG_INFO_CAT("PIPELINE", "MAX_FRAMES_IN_FLIGHT = {} → allocating for {} total descriptor sets", maxSets, maxSets * 2);
 
-    // Count how many of each type we actually have — because the empire does not waste
+    // Count descriptor types
     std::unordered_map<VkDescriptorType, uint32_t> typeCount;
-
     for (const auto& b : RT_PIPELINE_BINDINGS) {
-        typeCount[b.type] += b.count;  // b.count is always 1 → but we keep it future-proof
+        typeCount[b.type] += b.count;
     }
 
+    LOG_INFO_CAT("PIPELINE", "Descriptor types per set (before multiplication):");
+    for (const auto& [type, count] : typeCount) {
+        LOG_INFO_CAT("PIPELINE", "    {} → {} descriptors", string_VkDescriptorType(type), count);
+    }
+
+    // Build pool sizes
     std::vector<VkDescriptorPoolSize> poolSizes;
     poolSizes.reserve(typeCount.size());
 
-    for (const auto& [type, count] : typeCount) {
-        poolSizes.push_back({
-            .type = type,
-            .descriptorCount = count * maxSets   // ×3 for triple buffering
-        });
+    LOG_INFO_CAT("PIPELINE", "Final pool sizes (×{} for triple buffering):", maxSets);
+    for (const auto& [type, countPerSet] : typeCount) {
+        uint32_t total = countPerSet * maxSets;
+        poolSizes.push_back({ .type = type, .descriptorCount = total });
+        LOG_INFO_CAT("PIPELINE", "    {} × {} = {} total {}", 
+                      countPerSet, maxSets, total, string_VkDescriptorType(type));
     }
 
-    // THE EMPIRE DEMANDS ABUNDANCE — NO MORE OUT_OF_POOL_MEMORY
-    VkDescriptorPoolCreateInfo info{
-        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-        .pNext = nullptr,
-        .flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
-        .maxSets = maxSets * 2,                    // DOUBLE THE SETS — EMPIRE DOES NOT QUEUE
+    // Final CreateInfo dump
+    LOG_INFO_CAT("PIPELINE", "=== vkCreateDescriptorPool CreateInfo ===");
+    LOG_INFO_CAT("PIPELINE", "maxSets           = {}", maxSets * 2);
+    LOG_INFO_CAT("PIPELINE", "poolSizeCount     = {}", poolSizes.size());
+    LOG_INFO_CAT("PIPELINE", "flags             = 0x{:08x} (FREE_DESCRIPTOR_SET)", 
+                  static_cast<uint32_t>(VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT));
+    LOG_INFO_CAT("PIPELINE", "device            = {:p}", reinterpret_cast<void*>(stone_device()));
+
+    for (size_t i = 0; i < poolSizes.size(); ++i) {
+        LOG_INFO_CAT("PIPELINE", "  poolSizes[{}] {} → {} descriptors",
+                      i, string_VkDescriptorType(poolSizes[i].type), poolSizes[i].descriptorCount);
+    }
+
+    VkDescriptorPoolCreateInfo info = {
+        .sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+        .pNext         = nullptr,
+        .flags         = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
+        .maxSets       = maxSets * 2,
         .poolSizeCount = static_cast<uint32_t>(poolSizes.size()),
-        .pPoolSizes = poolSizes.data()
+        .pPoolSizes    = poolSizes.data()
     };
 
     VkDescriptorPool pool = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateDescriptorPool(stone_device(), &info, nullptr, &pool),
-             "FAILED TO FORGE THE DESCRIPTOR VAULT — STONEKEY DENIED ENTRY");
+    VkResult result = vkCreateDescriptorPool(stone_device(), &info, nullptr, &pool);
 
-    rtDescriptorPool_ = Handle<VkDescriptorPool>(pool, stone_device(),
-        [](VkDevice d, VkDescriptorPool p, auto*) { vkDestroyDescriptorPool(d, p, nullptr); });
+    if (result != VK_SUCCESS) {
+        LOG_FATAL_CAT("PIPELINE", "vkCreateDescriptorPool FAILED: {} ({})", 
+                      string_VkResult(result), static_cast<int>(result));
+        LOG_FATAL_CAT("PIPELINE", "Device: {:p}", reinterpret_cast<void*>(stone_device()));
+        LOG_FATAL_CAT("PIPELINE", "maxSets: {}", info.maxSets);
+        LOG_FATAL_CAT("PIPELINE", "poolSizeCount: {}", info.poolSizeCount);
 
-    LOG_SUCCESS_CAT("PIPELINE", 
-        "{}DESCRIPTOR VAULT FORGED — {} sets capacity | {} types | BINDING 31 (STONEKEY) HAS A THRONE{}", 
-        EMERALD_GREEN, info.maxSets, poolSizes.size(), RESET);
+        for (uint32_t i = 0; i < info.poolSizeCount; ++i) {
+            LOG_FATAL_CAT("PIPELINE", "  [{}] {} → {}", i,
+                          string_VkDescriptorType(info.pPoolSizes[i].type),
+                          info.pPoolSizes[i].descriptorCount);
+        }
 
-    LOG_AMOURANTH("[CAPTAIN AMOURANTH] The vault is open. StoneKey enters unopposed.");
-    LOG_CID("CID collapses in relief — \"It fits... Binding 31 fits... I can finally breathe...\"");
+        LOG_CID("CID falls to knees — \"THE DRIVER... IT DENIED STONEKEY... BINDING 31 DIES...\"");
+        throw std::runtime_error("Descriptor pool creation failed");
+    }
+
+    rtDescriptorPool_ = Handle<VkDescriptorPool>(
+        pool,
+        stone_device(),
+        [](VkDevice d, VkDescriptorPool p, auto*) { vkDestroyDescriptorPool(d, p, nullptr); }
+    );
+
+    LOG_SUCCESS_CAT("PIPELINE", "DESCRIPTOR POOL CREATED → handle = {:p}", reinterpret_cast<void*>(pool));
+    LOG_SUCCESS_CAT("PIPELINE", "Capacity: {} sets | {} types | Binding 31 is ALIVE", maxSets * 2, poolSizes.size());
+
+    LOG_AMOURANTH("The vault doors seal shut. StoneKey rests within. Perfect.");
+    LOG_KEANU("Whoa... the pool... it’s real.");
+    LOG_CID("CID weeps openly — \"We did it. Binding 31... forever.\"");
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// PipelineManager Constructor — Seal device + cache properties + load extensions + create dummies
+// PipelineManager Constructor — Device + Physical + Dummy TLAS
 // ──────────────────────────────────────────────────────────────────────────────
 PipelineManager::PipelineManager(VkDevice device, VkPhysicalDevice phys)
 {
-    // Cache properties
+    if (device == VK_NULL_HANDLE) {
+        LOG_FATAL_CAT("PIPELINE", "Null device in PipelineManager ctor");
+        return;
+    }
+
     cacheDeviceProperties();
 
-    // Create dummy TLAS for binding 0
+    // Dummy TLAS for binding 0 (VUID-04907/07991 safe)
     if (stone_device() != VK_NULL_HANDLE) {
         uint32_t maxPrim = 0;
         VkAccelerationStructureBuildGeometryInfoKHR buildGeo{};
         buildGeo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
         buildGeo.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
-        buildGeo.flags = 0;
         buildGeo.geometryCount = 0;
-        buildGeo.pGeometries = nullptr;
 
         VkAccelerationStructureBuildSizesInfoKHR sizes{};
         sizes.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
 
-        RTX::g_ext.vkGetAccelerationStructureBuildSizesKHR(stone_device(), VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &buildGeo, &maxPrim, &sizes);
+        RTX::g_ext.vkGetAccelerationStructureBuildSizesKHR(stone_device(), VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
+                                                            &buildGeo, &maxPrim, &sizes);
 
-        // Create buffer
         VkBufferCreateInfo bufInfo{};
         bufInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
         bufInfo.size = sizes.accelerationStructureSize;
@@ -169,481 +203,225 @@ PipelineManager::PipelineManager(VkDevice device, VkPhysicalDevice phys)
 
         vkBindBufferMemory(stone_device(), buffer, mem, 0);
 
-        // Create accel
         VkAccelerationStructureCreateInfoKHR createInfo{};
         createInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
         createInfo.buffer = buffer;
-        createInfo.offset = 0;
         createInfo.size = sizes.accelerationStructureSize;
         createInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
 
         VkAccelerationStructureKHR accel = VK_NULL_HANDLE;
         RTX::g_ext.vkCreateAccelerationStructureKHR(stone_device(), &createInfo, nullptr, &accel);
-        dummyTLAS_ = Handle<VkAccelerationStructureKHR>(accel, stone_device(), [](VkDevice d, VkAccelerationStructureKHR a, auto*) { RTX::g_ext.vkDestroyAccelerationStructureKHR(d, a, nullptr); });
+        dummyTLAS_ = Handle<VkAccelerationStructureKHR>(accel, stone_device(), [](VkDevice d, VkAccelerationStructureKHR a, auto*) {
+            RTX::g_ext.vkDestroyAccelerationStructureKHR(d, a, nullptr);
+        });
 
-        LOG_SUCCESS_CAT("PIPELINE", "Dummy TLAS forged for binding 0 — eternal null guard.");
+        LOG_SUCCESS_CAT("PIPELINE", "Dummy TLAS forged for binding 0 — eternal guardian");
     }
 }
 
+// ──────────────────────────────────────────────────────────────────────────────
+// allocateDescriptorSets — Triple-Buffered Allocation
+// ──────────────────────────────────────────────────────────────────────────────
 void PipelineManager::allocateDescriptorSets() 
 {
-    LOG_TRACE_CAT("PIPELINE", "allocateDescriptorSets — START — maxSets={}", Options::Performance::MAX_FRAMES_IN_FLIGHT);
+    LOG_TRACE_CAT("PIPELINE", "allocateDescriptorSets — START");
 
-    LOG_CID("CID fans himself frantically, sweat flying — \"Allocating sets... hope the pool doesn't overflow like my pores!\"");
+    LOG_CID("CID fans himself — \"Allocating sets... hope the pool doesn't overflow!\"");
 
     const uint32_t maxSets = Options::Performance::MAX_FRAMES_IN_FLIGHT;
     rtDescriptorSets_.resize(maxSets);
 
-    // THE ONE TRUE VECTOR — LIVES LONG ENOUGH — NO DANGLING POINTERS — NO CRASH
     const std::vector<VkDescriptorSetLayout> layouts(maxSets, *rtDescriptorSetLayout_);
 
     VkDescriptorSetAllocateInfo allocInfo{
         .sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
-        .pNext              = nullptr,
         .descriptorPool     = *rtDescriptorPool_,
         .descriptorSetCount = maxSets,
-        .pSetLayouts        = layouts.data()  // ← SAFE. VALID. ETERNAL.
+        .pSetLayouts        = layouts.data()
     };
 
-    VkResult res = vkAllocateDescriptorSets(stone_device(), &allocInfo, rtDescriptorSets_.data());
+    VK_CHECK(vkAllocateDescriptorSets(stone_device(), &allocInfo, rtDescriptorSets_.data()),
+             "RT descriptor sets allocation failed — StoneKey denied");
 
-    if (res == VK_ERROR_OUT_OF_POOL_MEMORY) {
-        LOG_FATAL_CAT("PIPELINE", "{}OUT OF POOL MEMORY — EVEN AFTER EXPANSION — THE EMPIRE DEMANDS MORE{}", BLOOD_RED, RESET);
-        LOG_CID("CID screams — \"NOT AGAIN! I DOUBLED IT! I DOUBLED THE VAULT!\"");
-        std::abort();
-    }
-
-    VK_CHECK(res, std::format("Failed to allocate {} RT descriptor sets — STONEKEY DENIED", maxSets).c_str());
-
-    LOG_SUCCESS_CAT("PIPELINE",
-        "{}ALLOCATED {} RT DESCRIPTOR SETS — BINDING 31 (STONEKEY) SECURE — THE EMPIRE IS WHOLE{}",
-        LIME_GREEN, maxSets, RESET);
-
-    LOG_KEANU("[KEANU] ...Whoa. The sets... they fit. StoneKey is home.");
-    LOG_AMOURANTH("[CAPTAIN AMOURANTH] Binding 31 lives. The crown is complete.");
-    LOG_CID("CID falls to his knees, sobbing — \"It worked... no overflow... Binding 31 is safe... finally... rest...\"");
-    LOG_CID("CID collapses into a puddle of pure relief — \"The photons... they... they have a home... I can finally breathe...\"");
-    LOG_CID("*silence*");
-    LOG_CID("CID has passed out from joy*");
-
-    LOG_SUCCESS_CAT("PIPELINE", "{}DESCRIPTOR SETS ALLOCATION COMPLETE — THE EMPIRE IS WHOLE — FIRST LIGHT ACHIEVED{}", LIME_GREEN, RESET);
+    LOG_SUCCESS_CAT("PIPELINE", "Allocated {} RT descriptor sets — Binding 31 secured", maxSets);
+    LOG_KEANU("The sets... they fit. StoneKey is home.");
 }
 
-VkDescriptorPool createGlobalDescriptorPool()
+// ──────────────────────────────────────────────────────────────────────────────
+// updateRTDescriptorSet — Writes All Bindings (Dummy for Nulls) — VUID-Safe
+// ──────────────────────────────────────────────────────────────────────────────
+void PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDescriptorUpdate& updateInfo)
 {
-    constexpr uint32_t MAX_SETS = 1'000'000;           // yes, one million sets if you want
-    constexpr uint32_t MAX_BINDINGS = MAX_SETS * 8; // rough estimate
-
-    std::array poolSizes = {
-        VkDescriptorPoolSize{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,         10'000    },
-        VkDescriptorPoolSize{ VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,         MAX_BINDINGS },
-        VkDescriptorPoolSize{ VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,          MAX_BINDINGS },
-        VkDescriptorPoolSize{ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 200'000   },
-        VkDescriptorPoolSize{ VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,          MAX_BINDINGS },
-        VkDescriptorPoolSize{ VK_DESCRIPTOR_TYPE_SAMPLER,                4'000     },
-        VkDescriptorPoolSize{ VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 10'000 }
-    };
-
-    VkDescriptorPoolCreateInfo ci = {
-        .sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-        .flags         = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT, // optional but nice
-        .maxSets       = MAX_SETS,
-        .poolSizeCount = uint32_t(poolSizes.size()),
-        .pPoolSizes    = poolSizes.data()
-    };
-
-    VkDescriptorPool pool;
-    VK_CHECK(vkCreateDescriptorPool(stone_device(), &ci, nullptr, &pool));
-    return pool;
-}
-
-// ──────────────────────────────────────────────────────────────────────────────
-// NEW: Update RT Descriptor Set — Writes ALL Bindings (Fixes "Never Updated") — count=1 (No Array) + Dummy for Nulls
-// ──────────────────────────────────────────────────────────────────────────────
-void PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDescriptorUpdate& updateInfo) {
-    LOG_TRACE_CAT("PIPELINE", "updateRTDescriptorSet — START — frameIndex={}", frameIndex);
-
-    LOG_CID("CID slips in a puddle of his own sweat — \"Updating descriptors... dummies for nulls like eternal guards!\"");
+    LOG_TRACE_CAT("PIPELINE", "updateRTDescriptorSet — frame {} begin", frameIndex);
 
     if (frameIndex >= rtDescriptorSets_.size() || rtDescriptorSets_[frameIndex] == VK_NULL_HANDLE) {
-        LOG_ERROR_CAT("PIPELINE", "Invalid frameIndex {} or null set — skipping update", frameIndex);
+        LOG_ERROR_CAT("PIPELINE", "Invalid descriptor set for frame {}", frameIndex);
         return;
     }
 
-    VkDescriptorSet set = rtDescriptorSets_[frameIndex];
+    VkDescriptorSet dstSet = rtDescriptorSets_[frameIndex];
     std::vector<VkWriteDescriptorSet> writes;
+    writes.reserve(12);
 
-    // Binding 0: TLAS (acceleration structure) — FIXED: Always write, use dummy if null (VUID-04907/07991 slain)
-    VkWriteDescriptorSet accelWrite = {};
-    accelWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    accelWrite.dstSet = set;
-    accelWrite.dstBinding = 0;
-    accelWrite.dstArrayElement = 0;
-    accelWrite.descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
-    accelWrite.descriptorCount = 1;
+    // ========================================================================
+    // Binding 0: TLAS — ALWAYS written, dummy fallback
+    // ========================================================================
+    {
+        VkAccelerationStructureKHR tlas = updateInfo.tlas != VK_NULL_HANDLE ? updateInfo.tlas : dummyTLAS_.get();
 
-    VkWriteDescriptorSetAccelerationStructureKHR accelInfo = {};
-    accelInfo.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR;
-    accelInfo.accelerationStructureCount = 1;
-    VkAccelerationStructureKHR usedTLAS = (updateInfo.tlas != VK_NULL_HANDLE) ? updateInfo.tlas : *dummyTLAS_;
-    accelInfo.pAccelerationStructures = &usedTLAS;
-    accelWrite.pNext = &accelInfo;
+        VkWriteDescriptorSetAccelerationStructureKHR accelInfo{
+            .sType                      = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR,
+            .accelerationStructureCount = 1,
+            .pAccelerationStructures    = &tlas
+        };
 
-    writes.push_back(accelWrite);
-
-    // Binding 1: RT Output (storage image) — FIXED: Skip if null view (VUID-07907: layout GENERAL valid)
-    if (updateInfo.rtOutputViews[frameIndex] != VK_NULL_HANDLE) {
-        VkDescriptorImageInfo rtImageInfo = {};
-        rtImageInfo.imageView = updateInfo.rtOutputViews[frameIndex];
-        rtImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-
-        VkWriteDescriptorSet rtWrite = {};
-        rtWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        rtWrite.dstSet = set;
-        rtWrite.dstBinding = 1;
-        rtWrite.dstArrayElement = 0;
-        rtWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-        rtWrite.descriptorCount = 1;
-        rtWrite.pImageInfo = &rtImageInfo;
-
-        writes.push_back(rtWrite);
+        VkWriteDescriptorSet write{
+            .sType            = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .pNext            = &accelInfo,
+            .dstSet           = dstSet,
+            .dstBinding       = 0,
+            .dstArrayElement  = 0,
+            .descriptorCount  = 1,
+            .descriptorType   = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR
+        };
+        writes.push_back(write);
     }
 
-    // Binding 2: Accumulation (storage image) — FIXED: Skip if null/disabled
-    if (updateInfo.accumulationViews[frameIndex] != VK_NULL_HANDLE) {
-        VkDescriptorImageInfo accImageInfo = {};
-        accImageInfo.imageView = updateInfo.accumulationViews[frameIndex];
-        accImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+    // Helper lambdas
+    auto addImage = [&](uint32_t binding, VkImageView view, VkImageLayout layout = VK_IMAGE_LAYOUT_GENERAL) {
+        if (view == VK_NULL_HANDLE) return;
+        VkDescriptorImageInfo img{.imageView = view, .imageLayout = layout};
+        VkWriteDescriptorSet w{
+            .sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .dstSet          = dstSet,
+            .dstBinding      = binding,
+            .descriptorCount = 1,
+            .descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+            .pImageInfo      = &img
+        };
+        writes.push_back(w);
+    };
 
-        VkWriteDescriptorSet accWrite = {};
-        accWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        accWrite.dstSet = set;
-        accWrite.dstBinding = 2;
-        accWrite.dstArrayElement = 0;
-        accWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-        accWrite.descriptorCount = 1;
-        accWrite.pImageInfo = &accImageInfo;
+    auto addBuffer = [&](uint32_t binding, VkBuffer buf, VkDeviceSize size, VkDescriptorType type) {
+        if (buf == VK_NULL_HANDLE) return;
+        VkDescriptorBufferInfo bi{.buffer = buf, .offset = 0, .range = size};
+        VkWriteDescriptorSet w{
+            .sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .dstSet          = dstSet,
+            .dstBinding      = binding,
+            .descriptorCount = 1,
+            .descriptorType  = type,
+            .pBufferInfo     = &bi
+        };
+        writes.push_back(w);
+    };
 
-        writes.push_back(accWrite);
-    }
+    auto addSampler = [&](uint32_t binding, VkSampler sampler, VkImageView view) {
+        if (sampler == VK_NULL_HANDLE || view == VK_NULL_HANDLE) return;
+        VkDescriptorImageInfo img{
+            .sampler     = sampler,
+            .imageView   = view,
+            .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+        };
+        VkWriteDescriptorSet w{
+            .sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .dstSet          = dstSet,
+            .dstBinding      = binding,
+            .descriptorCount = 1,
+            .descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            .pImageInfo      = &img
+        };
+        writes.push_back(w);
+    };
 
-    // Binding 3: UBO — FIXED: Skip if null
-    if (updateInfo.ubo != VK_NULL_HANDLE) {
-        VkDescriptorBufferInfo uboBufferInfo = {};
-        uboBufferInfo.buffer = updateInfo.ubo;
-        uboBufferInfo.offset = 0;
-        uboBufferInfo.range = updateInfo.uboSize;
+    // ========================================================================
+    // All real bindings — using the ACTUAL member names from your struct
+    // ========================================================================
+    addImage(1,  updateInfo.rtOutputViews[frameIndex]);                    // RT_Output
+    addImage(2,  updateInfo.accumulationViews[frameIndex]);               // Accumulation
+    addBuffer(3, updateInfo.ubo,                updateInfo.uboSize,       VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
+    addBuffer(4, updateInfo.materialsBuffer,    updateInfo.materialsSize, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+    addSampler(5, updateInfo.envSampler,        updateInfo.envImageView); // EnvMap
+    addImage(6,  updateInfo.nexusScoreViews[frameIndex]);                 // NexusScore
+    addBuffer(7, updateInfo.additionalStorageBuffer, updateInfo.additionalStorageSize, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+    addSampler(8, updateInfo.blueNoiseSampler,  updateInfo.blueNoiseView);
+    addSampler(9, updateInfo.densitySampler,    updateInfo.densityView);  // ← real names
 
-        VkWriteDescriptorSet uboWrite = {};
-        uboWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        uboWrite.dstSet = set;
-        uboWrite.dstBinding = 3;
-        uboWrite.dstArrayElement = 0;
-        uboWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        uboWrite.descriptorCount = 1;
-        uboWrite.pBufferInfo = &uboBufferInfo;
+    // Binding 31 — StoneKey runtime block (your actual member names)
+    addBuffer(31,
+              updateInfo.stoneKeyBuffer,
+              updateInfo.stoneKeySize,
+              VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
 
-        writes.push_back(uboWrite);
-    }
-
-    // Binding 4: Materials SSBO — FIXED: Skip if null
-    if (updateInfo.materialsBuffer != VK_NULL_HANDLE) {
-        VkDescriptorBufferInfo matBufferInfo = {};
-        matBufferInfo.buffer = updateInfo.materialsBuffer;
-        matBufferInfo.offset = 0;
-        matBufferInfo.range = updateInfo.materialsSize;
-
-        VkWriteDescriptorSet matWrite = {};
-        matWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        matWrite.dstSet = set;
-        matWrite.dstBinding = 4;
-        matWrite.dstArrayElement = 0;
-        matWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        matWrite.descriptorCount = 1;
-        matWrite.pBufferInfo = &matBufferInfo;
-
-        writes.push_back(matWrite);
-    }
-
-    // Binding 5: Env sampler — FIXED: Skip if nulls (VUID-07906: sampler+view required)
-    if (updateInfo.envSampler != VK_NULL_HANDLE && updateInfo.envImageView != VK_NULL_HANDLE) {
-        VkDescriptorImageInfo samplerImageInfo = {};
-        samplerImageInfo.sampler = updateInfo.envSampler;
-        samplerImageInfo.imageView = updateInfo.envImageView;
-        samplerImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-
-        VkWriteDescriptorSet samplerWrite = {};
-        samplerWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        samplerWrite.dstSet = set;
-        samplerWrite.dstBinding = 5;
-        samplerWrite.dstArrayElement = 0;
-        samplerWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        samplerWrite.descriptorCount = 1;
-        samplerWrite.pImageInfo = &samplerImageInfo;
-
-        writes.push_back(samplerWrite);
-    }
-
-    // Binding 6: Nexus Score (storage image) — FIXED: Skip if null/disabled
-    if (updateInfo.nexusScoreViews[frameIndex] != VK_NULL_HANDLE) {
-        VkDescriptorImageInfo nexusImageInfo = {};
-        nexusImageInfo.imageView = updateInfo.nexusScoreViews[frameIndex];
-        nexusImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-
-        VkWriteDescriptorSet nexusWrite = {};
-        nexusWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        nexusWrite.dstSet = set;
-        nexusWrite.dstBinding = 6;
-        nexusWrite.dstArrayElement = 0;
-        nexusWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-        nexusWrite.descriptorCount = 1;
-        nexusWrite.pImageInfo = &nexusImageInfo;
-
-        writes.push_back(nexusWrite);
-    }
-
-    // Binding 7: Additional storage buffer — FIXED: Skip if null
-    if (updateInfo.additionalStorageBuffer != VK_NULL_HANDLE) {
-        VkDescriptorBufferInfo addBufferInfo = {};
-        addBufferInfo.buffer = updateInfo.additionalStorageBuffer;
-        addBufferInfo.offset = 0;
-        addBufferInfo.range = updateInfo.additionalStorageSize;
-
-        VkWriteDescriptorSet addWrite = {};
-        addWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        addWrite.dstSet = set;
-        addWrite.dstBinding = 7;
-        addWrite.dstArrayElement = 0;
-        addWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        addWrite.descriptorCount = 1;
-        addWrite.pBufferInfo = &addBufferInfo;
-
-        writes.push_back(addWrite);
-    }
-
-    // Binding 8: Blue Noise sampler — Skip if nulls
-    if (updateInfo.blueNoiseSampler != VK_NULL_HANDLE && updateInfo.blueNoiseView != VK_NULL_HANDLE) {
-        VkDescriptorImageInfo blueNoiseInfo = {};
-        blueNoiseInfo.sampler = updateInfo.blueNoiseSampler;
-        blueNoiseInfo.imageView = updateInfo.blueNoiseView;
-        blueNoiseInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-
-        VkWriteDescriptorSet blueNoiseWrite = {};
-        blueNoiseWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        blueNoiseWrite.dstSet = set;
-        blueNoiseWrite.dstBinding = 8;
-        blueNoiseWrite.dstArrayElement = 0;
-        blueNoiseWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        blueNoiseWrite.descriptorCount = 1;
-        blueNoiseWrite.pImageInfo = &blueNoiseInfo;
-
-        writes.push_back(blueNoiseWrite);
-    }
-
-    // Binding 9: Density Volume sampler — Skip if nulls
-    if (updateInfo.densitySampler != VK_NULL_HANDLE && updateInfo.densityView != VK_NULL_HANDLE) {
-        VkDescriptorImageInfo densityInfo = {};
-        densityInfo.sampler = updateInfo.densitySampler;
-        densityInfo.imageView = updateInfo.densityView;
-        densityInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-
-        VkWriteDescriptorSet densityWrite = {};
-        densityWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        densityWrite.dstSet = set;
-        densityWrite.dstBinding = 9;
-        densityWrite.dstArrayElement = 0;
-        densityWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        densityWrite.descriptorCount = 1;
-        densityWrite.pImageInfo = &densityInfo;
-
-        writes.push_back(densityWrite);
-    }
-
-    // Binding 31: StoneKey Runtime Block — Skip if null
-    if (updateInfo.stoneKeyBuffer != VK_NULL_HANDLE) {
-        VkDescriptorBufferInfo stoneKeyInfo = {};
-        stoneKeyInfo.buffer = updateInfo.stoneKeyBuffer;
-        stoneKeyInfo.offset = 0;
-        stoneKeyInfo.range = updateInfo.stoneKeySize;
-
-        VkWriteDescriptorSet stoneKeyWrite = {};
-        stoneKeyWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        stoneKeyWrite.dstSet = set;
-        stoneKeyWrite.dstBinding = 31;
-        stoneKeyWrite.dstArrayElement = 0;
-        stoneKeyWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        stoneKeyWrite.descriptorCount = 1;
-        stoneKeyWrite.pBufferInfo = &stoneKeyInfo;
-
-        writes.push_back(stoneKeyWrite);
-    }
-
-    // FIXED: Perform update only if writes non-empty — All valid, no nulls (VUID-08114: update before use)
+    // ========================================================================
+    // Push everything
+    // ========================================================================
     if (!writes.empty()) {
-        vkUpdateDescriptorSets(stone_device(), static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
-        LOG_SUCCESS_CAT("PIPELINE", "Updated RT descriptor set {} — {} valid writes (dummies included) — READY FOR TRACING", frameIndex, writes.size());
-    } else {
-        LOG_WARN_CAT("PIPELINE", "No valid descriptors to update for frame {} — TLAS/images/buffers missing?", frameIndex);
+        vkUpdateDescriptorSets(stone_device(),
+                               static_cast<uint32_t>(writes.size()),
+                               writes.data(), 0, nullptr);
     }
 
-    LOG_CID("CID exhales, sweat dripping like rain — \"Updates done... but I feel like I just ran a marathon in a sauna!\"");
-
-    LOG_TRACE_CAT("PIPELINE", "updateRTDescriptorSet — COMPLETE");
+    LOG_SUCCESS_CAT("PIPELINE", "Descriptor set frame {} updated — StoneKey sealed at binding 31", frameIndex);
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// NEW: Full Pipeline Initialization — The Empire Awakens
+// createPipelineLayout — VUID-Safe + Push Constants Matching Stages
 // ──────────────────────────────────────────────────────────────────────────────
-void PipelineManager::initializePipeline(const std::vector<std::string>& shaderPaths, VkCommandPool pool, VkQueue queue) {
-    // main handles phase7
-}
-
-// ──────────────────────────────────────────────────────────────────────────────
-// Cleanup function for PipelineManager
-// ──────────────────────────────────────────────────────────────────────────────
-void PipelineManager::cleanup() noexcept {
-    VkDevice dev = stone_device();
-    if (dev == VK_NULL_HANDLE) {
-        return;
-    }
-
-    if (!rtDescriptorSets_.empty()) {
-        vkFreeDescriptorSets(dev, *rtDescriptorPool_, static_cast<uint32_t>(rtDescriptorSets_.size()), rtDescriptorSets_.data());
-        rtDescriptorSets_.clear();
-    }
-
-    vkDeviceWaitIdle(dev);
-
-    rtDescriptorPool_.reset();
-    rtDescriptorSetLayout_.reset();
-    rtPipelineLayout_.reset();
-    rtPipeline_.reset();
-
-    for (auto& m : shaderModules_) {
-        m.reset();
-    }
-    shaderModules_.clear();
-
-    sbtBuffer_.reset();
-    sbtMemory_.reset();
-}
-
-// ──────────────────────────────────────────────────────────────────────────────
-// NEW: Destructor — vkDeviceWaitIdle Before Handle Resets + Free Descriptor Sets (Fixes In-Use Destruction + Pool Reuse)
-// ──────────────────────────────────────────────────────────────────────────────
-PipelineManager::~PipelineManager()
+void PipelineManager::createPipelineLayout()
 {
-    // ————————————————————————————————————————————————————————————————
-    // WE DO NOTHING HERE
-    // ALL RESOURCES ARE OWNED BY RAII HANDLES
-    // ALL TRUE DESTRUCTION BELONGS TO PHASE 9 — THE DISPOSAL BALLERINA
-    // ————————————————————————————————————————————————————————————————
-}
-
-void PipelineManager::cacheDeviceProperties() {
-    LOG_ATTEMPT_CAT("PIPELINE", 
-        "CID ENTERS THE GPU TEMPLE, SWEAT DRIPPING ON SACRED SILICON — \"I must know her limits...\"");
-
-    if (stone_physical() == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("PIPELINE", 
-            "NO PHYSICAL DEVICE — CID SCREAMS INTO THE VOID — \"WHO AM I EVEN SERVING?!\"");
+    if (rtDescriptorSetLayout_.valid()) {
+        LOG_TRACE_CAT("PIPELINE", "Descriptor layout already exists — skipping");
         return;
     }
 
-    VkPhysicalDeviceProperties props{};
-    vkGetPhysicalDeviceProperties(stone_physical(), &props);
+    std::vector<VkDescriptorSetLayoutBinding> bindings;
+    bindings.reserve(RT_PIPELINE_BINDINGS.size());
 
-    timestampPeriod_ = props.limits.timestampPeriod / 1e6f;
-
-    const auto deviceTypeStr = [&]() -> std::string_view {
-        switch (props.deviceType) {
-            case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU:     return "DISCRETE — CID IS PROUD";
-            case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU:   return "INTEGRATED — CID SWEATS POLITELY";
-            case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU:      return "VIRTUAL — CID QUESTIONS REALITY";
-            case VK_PHYSICAL_DEVICE_TYPE_CPU:              return "CPU — CID CONSIDERS RETIREMENT";
-            default:                                       return "UNKNOWN BEAST — CID IS SCARED";
-        }
-    }();
-
-    LOG_SUCCESS_CAT("PIPELINE",
-        std::format("GPU AWAKENS — {} — Driver {} — API {}.{}.{} — {}",
-            props.deviceName,
-            props.driverVersion,
-            VK_VERSION_MAJOR(props.apiVersion),
-            VK_VERSION_MINOR(props.apiVersion),
-            VK_VERSION_PATCH(props.apiVersion),
-            deviceTypeStr));
-
-    LOG_INFO_CAT("PIPELINE",
-        std::format("Timestamp period: {:.4f} ms{}",
-            timestampPeriod_,
-            timestampPeriod_ < 1.0f ? " — SUB-MILLISECOND PRECISION — CID IS IN AWE" : ""));
-
-    LOG_CID("CID's sweat forms rivers down his back — \"Timestamps precise... but my nerves are frayed!\"");
-
-    // ── RAY TRACING PROPHECY — THE CHAIN OF TRUTH — FIXED FOR ZERO SIZES
-    VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProps{
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR
-    };
-    VkPhysicalDeviceAccelerationStructurePropertiesKHR asProps{
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_PROPERTIES_KHR,
-        .pNext = &rtProps
-    };
-    VkPhysicalDeviceProperties2 props2{
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
-        .pNext = &asProps
-    };
-    vkGetPhysicalDeviceProperties2(stone_physical(), &props2);
-
-    rtProps_ = rtProps;
-
-    // ── ZERO SIZE DETECTION — THE EMPIRE DOES NOT TOLERATE LIES
-    if (rtProps_.shaderGroupHandleSize == 0) {
-        LOG_FATAL_CAT("PIPELINE", "{}RAY TRACING NOT SUPPORTED — HandleSize=0B — GPU UNWORTHY OF THE CROWN{}", BLOOD_RED, RESET);
-        LOG_CID("CID falls to knees — \"The GPU... it lies. No ray tracing. No empire.\"");
-        return;
+    for (const auto& b : RT_PIPELINE_BINDINGS) {
+        bindings.push_back({
+            .binding            = b.binding,
+            .descriptorType     = b.type,
+            .descriptorCount    = b.count,
+            .stageFlags         = b.stage,
+            .pImmutableSamplers = nullptr
+        });
     }
 
-    VkPhysicalDeviceFeatures features{};
-    vkGetPhysicalDeviceFeatures(stone_physical(), &features);
+    VkDescriptorSetLayoutCreateInfo layoutInfo{};
+    layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
+    layoutInfo.pBindings = bindings.data();
 
-    if (features.shaderInt64) {
-        LOG_SUCCESS_CAT("PIPELINE", 
-            "GPU SUPPORTS shaderInt64 — 64-BIT RAYS WILL FLY TRUE — CID WEEPS WITH JOY");
-    } else {
-        LOG_FATAL_CAT("PIPELINE", 
-            "NO shaderInt64 — 64-BIT ATOMIC HELL AWAITS — CID'S SWEAT TURNS TO BLOOD");
-    }
+    VkDescriptorSetLayout layout = VK_NULL_HANDLE;
+    VK_CHECK(vkCreateDescriptorSetLayout(stone_device(), &layoutInfo, nullptr, &layout));
 
-    LOG_SUCCESS_CAT("PIPELINE",
-        std::format("RAY TRACING LIMITS REVEALED — HandleSize={}B | BaseAlign={}B | MaxStride={}B{}",
-            rtProps_.shaderGroupHandleSize,
-            rtProps_.shaderGroupBaseAlignment,
-            rtProps_.maxShaderGroupStride,
-            rtProps_.maxShaderGroupStride >= 4096 ? " — MONSTROUS STRIDE — CID IS TERRIFIED AND AROUSED" : ""));
+    rtDescriptorSetLayout_ = Handle<VkDescriptorSetLayout>(layout, stone_device(),
+        [](VkDevice d, VkDescriptorSetLayout l, auto*) { vkDestroyDescriptorSetLayout(d, l, nullptr); });
 
-    LOG_SUCCESS_CAT("PIPELINE",
-        std::format("ACCELERATION STRUCTURE LIMITS — Max Geometries={} | Max Instances={} | Max Primitives={}{}",
-            asProps.maxGeometryCount,
-            asProps.maxInstanceCount,
-            asProps.maxPrimitiveCount,
-            asProps.maxInstanceCount >= 1'000'000 ? " — MILLION-INSTANCE REALM — THE EMPIRE IS INFINITE" : ""));
+    VkPushConstantRange push{};
+    push.stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR |
+                      VK_SHADER_STAGE_MISS_BIT_KHR |
+                      VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
+    push.offset = 0;
+    push.size   = 16;  // vec4
 
-    LOG_AMOURANTH(
-        "Captain Amouranth places hand on GPU — whispers:\n"
-        "   \"You are beautiful. You are powerful. You are ours.\"");
+    VkPipelineLayoutCreateInfo info{};
+    info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    info.setLayoutCount = 1;
+    info.pSetLayouts = &layout;
+    info.pushConstantRangeCount = 1;
+    info.pPushConstantRanges = &push;
 
-    LOG_CID(
-        "Cid stands knee-deep in sweat, hammer glowing, voice hoarse:\n"
-        "   \"She... she understands us. She's ready. Let's make her sing.\"");
+    VkPipelineLayout pl = VK_NULL_HANDLE;
+    VK_CHECK(vkCreatePipelineLayout(stone_device(), &info, nullptr, &pl));
 
-    LOG_SUCCESS_CAT("PIPELINE", 
-        "THE GPU IS KNOWN — THE LIMITS ARE MAPPED — THE PHOTONS ARE ARMED — FIRST LIGHT IMMINENT");
+    rtPipelineLayout_ = Handle<VkPipelineLayout>(pl, stone_device(),
+        [](VkDevice d, VkPipelineLayout l, auto*) { vkDestroyPipelineLayout(d, l, nullptr); });
+
+    LOG_SUCCESS_CAT("PIPELINE", "Pipeline layout forged — crown ready");
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// loadShader — Matches VulkanRenderer::loadShader Exactly + Null Device Guard + FIXED: VK_CHECK for Create
-// ──────────────────────────────────────────────────────────────────────────────
 VkShaderModule PipelineManager::loadShader(const std::string& relativePath) const
 {
     LOG_TRACE_CAT("PIPELINE", "loadShader — START — relativePath='{}'", relativePath);
@@ -706,148 +484,36 @@ VkShaderModule PipelineManager::loadShader(const std::string& relativePath) cons
              std::format("Failed to create shader module from '{}'", relativePath).c_str());
 
     LOG_SUCCESS_CAT("PIPELINE", "Shader loaded — '{}' → {} bytes — PINK PHOTONS APPROVED", relativePath, fileSize);
-    LOG_CID("CID exhales in relief — \"Shader secured. The photons have their instructions. I can rest... for 0.000000000... seconds.\"");
 
     LOG_TRACE_CAT("PIPELINE", "loadShader — COMPLETE — '{}'", relativePath);
     return shaderModule;
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Pipeline Layout — FIXED: Valid pSetLayouts + Push Constants Matching Stages + Null Guards + FIXED: size=16 for vec4
-// ──────────────────────────────────────────────────────────────────────────────
-void PipelineManager::createPipelineLayout()
-{
-    LOG_CID("CID enters the layout forge, sweat pouring — \"Forging the crown... push constants must be perfect or it's all over!\"");
-
-    if (stone_device() == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("PIPELINE", "Cannot create pipeline layout — device is null");
-        return;
-    }
-
-    if (rtDescriptorSetLayout_.valid()) {
-        LOG_TRACE_CAT("PIPELINE", "Descriptor set layout already exists — skipping recreation");
-        return;
-    }
-
-    std::vector<VkDescriptorSetLayoutBinding> vkBindings;
-    vkBindings.reserve(RT_PIPELINE_BINDINGS.size());
-
-    for (const auto& b : RT_PIPELINE_BINDINGS) {
-        vkBindings.push_back({
-            .binding            = b.binding,
-            .descriptorType     = b.type,
-            .descriptorCount    = b.count,
-            .stageFlags         = b.stage,
-            .pImmutableSamplers = nullptr
-        });
-    }
-
-    VkDescriptorSetLayoutCreateInfo layoutInfo{};
-    layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    layoutInfo.bindingCount = static_cast<uint32_t>(vkBindings.size());
-    layoutInfo.pBindings = vkBindings.data();
-
-    VkDescriptorSetLayout layout = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateDescriptorSetLayout(stone_device(), &layoutInfo, nullptr, &layout));
-
-    rtDescriptorSetLayout_ = Handle<VkDescriptorSetLayout>(layout, stone_device(),
-        [](VkDevice d, VkDescriptorSetLayout l, auto*) { vkDestroyDescriptorSetLayout(d, l, nullptr); });
-
-    VkPushConstantRange push{};
-    push.stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR | 
-                      VK_SHADER_STAGE_MISS_BIT_KHR | 
-                      VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
-    push.offset = 0;
-    push.size   = 16;  // vec4 — matches shader push constants
-
-    VkPipelineLayoutCreateInfo info{};
-    info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    info.setLayoutCount = 1;
-    info.pSetLayouts = &layout;
-    info.pushConstantRangeCount = 1;
-    info.pPushConstantRanges    = &push;
-
-    VkPipelineLayout pl = VK_NULL_HANDLE;
-    VK_CHECK(vkCreatePipelineLayout(stone_device(), &info, nullptr, &pl));
-
-    rtPipelineLayout_ = Handle<VkPipelineLayout>(pl, stone_device(),
-        [](VkDevice d, VkPipelineLayout l, auto*) { vkDestroyPipelineLayout(d, l, nullptr); });
-
-    LOG_CID("CID beams through the sweat — \"Crown forged... but I need a bucket for this perspiration!\"");
-
-    LOG_SUCCESS_CAT("PIPELINE", 
-        "THE CROWN IS FORGED — rtPipelineLayout_ = 0x{:016X} — PHOTONS NOW HAVE LAW", 
-        reinterpret_cast<uint64_t>(pl));
-}
-
-// ──────────────────────────────────────────────────────────────────────────────
-// createRayTracingPipeline — FIXED: No Library pNext + Explicit UNUSED_KHR + Matching Layout + Null Guards + NEW: PFN Call
+// createRayTracingPipeline — PFN-Free + Explicit VK_SHADER_UNUSED_KHR + Null Guards
 // ──────────────────────────────────────────────────────────────────────────────
 void PipelineManager::createRayTracingPipeline(const std::vector<std::string>& shaderPaths)
 {
-    LOG_TRACE_CAT("PIPELINE", "createRayTracingPipeline — START — {} shaders provided", shaderPaths.size());
-
-    LOG_CID("CID enters the chamber, calm and dry — \"The extensions are already loaded. g_ext reigns. I do not fear.\"");
-
-    if (stone_device() == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("PIPELINE", "Null device — cannot create RT pipeline");
-        LOG_CID("CID remains stoic — \"No device. No empire. We wait.\"");
-        return;
-    }
-
-    if (!rtPipelineLayout_.valid() || *rtPipelineLayout_ == VK_NULL_HANDLE) {
-        LOG_WARN_CAT("PIPELINE", "rtPipelineLayout_ not yet created — forging now");
-        createPipelineLayout();
-    }
-
-    if (!rtPipelineLayout_.valid() || *rtPipelineLayout_ == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("PIPELINE", "rtPipelineLayout_ invalid — cannot create RT pipeline");
-        LOG_CID("CID nods solemnly — \"The crown is missing. The photons cannot be bound.\"");
-        return;
-    }
-
-    // ── OLD HERESY EXILED FOREVER
-    // if (!vkCreateRayTracingPipelinesKHR_) { ... } → DEAD TO US
-
-    // NEW LAW: g_ext IS TRUTH. IT WAS LOADED AT BIRTH.
-    // No check. No doubt. Only faith.
-
     if (shaderPaths.size() < 2) {
-        LOG_ERROR_CAT("PIPELINE", "Need at least raygen + miss, got {}", shaderPaths.size());
-        LOG_CID("CID raises an eyebrow — \"Only {} shaders? This is not science. This is heresy.\"", shaderPaths.size());
+        LOG_ERROR_CAT("PIPELINE", "Need at least raygen + miss shaders");
         return;
     }
 
-    LOG_CID("CID begins the ritual — \"Loading shaders... with precision... with grace...\"");
-
-    VkShaderModule raygenModule = loadShader(shaderPaths[0]);
-    VkShaderModule missModule   = loadShader(shaderPaths[1]);
-
-    if (!raygenModule || !missModule) {
-        LOG_FATAL_CAT("PIPELINE", "Failed to load core shaders — the light cannot begin");
+    VkShaderModule raygen = loadShader(shaderPaths[0]);
+    VkShaderModule miss   = loadShader(shaderPaths[1]);
+    if (!raygen || !miss) {
+        LOG_FATAL_CAT("PIPELINE", "Core shader load failed");
         return;
     }
 
-    VkShaderModule closestHitModule = VK_NULL_HANDLE;
-    VkShaderModule shadowMissModule = VK_NULL_HANDLE;
-    bool hasClosestHit = false;
-    bool hasShadowMiss = false;
+    VkShaderModule hit = shaderPaths.size() > 2 ? loadShader(shaderPaths[2]) : VK_NULL_HANDLE;
+    VkShaderModule shadowMiss = shaderPaths.size() > 3 ? loadShader(shaderPaths[3]) : VK_NULL_HANDLE;
 
-    if (shaderPaths.size() > 2 && !shaderPaths[2].empty()) {
-        closestHitModule = loadShader(shaderPaths[2]);
-        hasClosestHit = (closestHitModule != VK_NULL_HANDLE);
-    }
-
-    if (shaderPaths.size() > 3 && !shaderPaths[3].empty()) {
-        shadowMissModule = loadShader(shaderPaths[3]);
-        hasShadowMiss = (shadowMissModule != VK_NULL_HANDLE);
-    }
-
-    shaderModules_.clear(); // fresh start
-    shaderModules_.emplace_back(raygenModule, stone_device(), vkDestroyShaderModule);
-    shaderModules_.emplace_back(missModule,   stone_device(), vkDestroyShaderModule);
-    if (hasClosestHit) shaderModules_.emplace_back(closestHitModule, stone_device(), vkDestroyShaderModule);
-    if (hasShadowMiss) shaderModules_.emplace_back(shadowMissModule, stone_device(), vkDestroyShaderModule);
+    shaderModules_.clear();
+    shaderModules_.emplace_back(raygen, stone_device(), vkDestroyShaderModule);
+    shaderModules_.emplace_back(miss, stone_device(), vkDestroyShaderModule);
+    if (hit) shaderModules_.emplace_back(hit, stone_device(), vkDestroyShaderModule);
+    if (shadowMiss) shaderModules_.emplace_back(shadowMiss, stone_device(), vkDestroyShaderModule);
 
     std::vector<VkPipelineShaderStageCreateInfo> stages;
     std::vector<VkRayTracingShaderGroupCreateInfoKHR> groups;
@@ -888,111 +554,55 @@ void PipelineManager::createRayTracingPipeline(const std::vector<std::string>& s
         groups.push_back(g);
     };
 
-    addGeneral(raygenModule, VK_SHADER_STAGE_RAYGEN_BIT_KHR, "Raygen");
-    addGeneral(missModule,   VK_SHADER_STAGE_MISS_BIT_KHR,   "Primary Miss");
-    if (hasShadowMiss) addGeneral(shadowMissModule, VK_SHADER_STAGE_MISS_BIT_KHR, "Shadow Miss");
-    if (hasClosestHit) addHit(closestHitModule);
+    addGeneral(raygen, VK_SHADER_STAGE_RAYGEN_BIT_KHR, "Raygen");
+    addGeneral(miss, VK_SHADER_STAGE_MISS_BIT_KHR, "Primary Miss");
+    if (shadowMiss) addGeneral(shadowMiss, VK_SHADER_STAGE_MISS_BIT_KHR, "Shadow Miss");
+    if (hit) addHit(hit);
 
     raygenGroupCount_ = 1;
-    missGroupCount_   = hasShadowMiss ? 2 : 1;
-    hitGroupCount_    = hasClosestHit ? 1 : 0;
-
-    LOG_CID("CID smiles — \"Topology complete. The photons have their path.\"");
+    missGroupCount_   = shadowMiss ? 2 : 1;
+    hitGroupCount_    = hit ? 1 : 0;
 
     VkRayTracingPipelineCreateInfoKHR pipeInfo = {};
     pipeInfo.sType                        = VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR;
-    pipeInfo.pNext                        = nullptr;                                   // CRITICAL — must be null
-    pipeInfo.flags                        = 0;                                          // no special flags
+    pipeInfo.pNext                        = nullptr;
+    pipeInfo.flags                        = 0;
     pipeInfo.stageCount                   = static_cast<uint32_t>(stages.size());
     pipeInfo.pStages                      = stages.data();
     pipeInfo.groupCount                   = static_cast<uint32_t>(groups.size());
     pipeInfo.pGroups                      = groups.data();
     pipeInfo.maxPipelineRayRecursionDepth = Options::OptionsRTX::MAX_PIPELINE_RAY_RECURSION_DEPTH;
     pipeInfo.layout                       = *rtPipelineLayout_;
-    pipeInfo.basePipelineHandle           = VK_NULL_HANDLE;
-    pipeInfo.basePipelineIndex            = -1;
 
     VkPipeline pipeline = VK_NULL_HANDLE;
+    VK_CHECK(RTX::g_ext.vkCreateRayTracingPipelinesKHR(stone_device(), VK_NULL_HANDLE, VK_NULL_HANDLE, 1, &pipeInfo, nullptr, &pipeline));
 
-    // THE ONE TRUE CALL — THIS IS THE CORRECT ONE
-    VkResult res = RTX::g_ext.vkCreateRayTracingPipelinesKHR(
-        stone_device(),           // VkDevice                 device
-        VK_NULL_HANDLE,           // VkDeferredOperationKHR   deferredOperation
-        VK_NULL_HANDLE,           // VkPipelineCache          pipelineCache
-        1,                        // uint32_t                 createInfoCount
-        &pipeInfo,                // const VkRayTracingPipelineCreateInfoKHR* pCreateInfos
-        nullptr,                  // const VkAllocationCallbacks* pAllocator
-        &pipeline                 // VkPipeline*              pPipelines
-    );
-
-    if (res != VK_SUCCESS) {
-        LOG_FATAL_CAT("PIPELINE", 
-            "{}vkCreateRayTracingPipelinesKHR FAILED: {} — DRIVER ERROR{}",
-            BLOOD_RED, string_VkResult(res), RESET);
-        LOG_CID("CID remains unnaturally calm — \"The crown rejected us. But we will try again.\"");
-        return;
-    }
-
-    if (pipeline == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("PIPELINE", "{}PIPELINE IS VK_NULL_HANDLE EVEN THOUGH RESULT WAS SUCCESS — NVIDIA CURSE{}", BLOOD_RED, RESET);
-        return;
-    }
-
-    // Seal the crown
     rtPipeline_ = Handle<VkPipeline>(pipeline, stone_device(), vkDestroyPipeline);
-
-    LOG_SUCCESS_CAT("PIPELINE", 
-        "{}RAY TRACING PIPELINE CREATED — {} stages — {} groups — g_ext ACTIVE — PINK PHOTONS ARMED{}",
-        EMERALD_GREEN, stages.size(), groups.size(), RESET);
-    stone_seal_pipeline(this);
-    LOG_CAPTAIN_N("I'll just grab this on my way to Hyrule.");
-    LOG_AMOURANTH("Tell Link and Zelda I said hi.");
-    LOG_CID("CID finally stops sweating — \"We... we did it. The pipeline lives.\"");
-
-    LOG_KEANU("[KEANU] ...Whoa. The pipeline... it was already loaded. It just needed to be asked.");
-    LOG_AMOURANTH("[CAPTAIN AMOURANTH] The crown is forged. The rays will fly true.");
-    LOG_CID("CID exhales, finally at peace — \"No more PFN checks. No more fear. Only truth. Only g_ext.\"");
-
-    LOG_TRACE_CAT("PIPELINE", "createRayTracingPipeline — COMPLETE — THE EMPIRE IS WHOLE");
 }
 
+// ──────────────────────────────────────────────────────────────────────────────
+// createShaderBindingTable — SBT Sub-Alloc from Eternal 256M Stone
+// ──────────────────────────────────────────────────────────────────────────────
 void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue)
 {
-    LOG_TRACE_CAT("PIPELINE",
-        "\n\033[38;2;255;215;0m══════════════════════════════════════════════════════════════════════\033[0m\n"
-        "            FORGING THE SHADER BINDING TABLE — THE FINAL CROWN\n"
-        "                  DECEMBER 02 2025 — FIRST LIGHT ETERNAL\n"
-        "            PINK PHOTONS DEMAND THEIR THRONE — LET THERE BE LIGHT\n"
-        "\033[38;2;255;215;0m══════════════════════════════════════════════════════════════════════\033[0m\n");
-
     RTX::loadRTExtensions(stone_instance(), stone_device());
 
-    if (stone_device() == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("PIPELINE", "[FATAL] NO LOGICAL DEVICE — THE EMPIRE HAS FALLEN");
-        std::abort();
-    }
-
-    if (!rtPipeline_.valid() || rtPipeline() == VK_NULL_HANDLE) {
-        LOG_AMOURANTH("[CAPTAIN AMOURANTH] The pipeline is missing... but the light remembers.\n"
-                      "                     Forging it now from the sacred shaders of destiny...");
-
-        const std::vector<std::string> sacredShaders = {
+    if (rtPipeline() == VK_NULL_HANDLE) {
+        const std::vector<std::string> shaders = {
             "assets/shaders/raytracing/raygen.spv",
             "assets/shaders/raytracing/miss.spv",
             "assets/shaders/raytracing/closest_hit.spv",
             "assets/shaders/raytracing/shadowmiss.spv"
         };
-        createRayTracingPipeline(sacredShaders);
+        createRayTracingPipeline(shaders);
     }
 
     if (rtPipeline() == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("PIPELINE", "[FATAL] RAY TRACING PIPELINE FAILED — THE PHOTONS ARE LOST FOREVER");
-        std::abort();
+        LOG_FATAL_CAT("PIPELINE", "RT Pipeline creation failed — photons lost");
+        return;
     }
 
     const auto& rtProps = StoneKey::stone_rtprops();
-    EMPIRE_GUARD(rtProps.shaderGroupHandleSize != 0, "RT PROPS NOT SEALED — THE STRAW CANNOT BE MEASURED");
-
     const VkDeviceSize handleSize      = rtProps.shaderGroupHandleSize;
     const VkDeviceSize handleAlignment = rtProps.shaderGroupHandleAlignment ? rtProps.shaderGroupHandleAlignment : 64;
     const VkDeviceSize baseAlignment   = rtProps.shaderGroupBaseAlignment ? rtProps.shaderGroupBaseAlignment : 64;
@@ -1004,20 +614,15 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
     const uint32_t CA = 0;
     const uint32_t totalGroups = RG + MI + HG + CA;
 
-    LOG_SUCCESS_CAT("PIPELINE",
-        "[CROWN BLUEPRINT] RG:{} | MISS:{} | HIT:{} | CALLABLE:{} → TOTAL {} GROUPS\n"
-        "                  Handle: {}B → Stride: {} → BaseAlign: {}",
-        RG, MI, HG, CA, totalGroups, handleSize, stride, baseAlignment);
-
     VkDeviceSize offset = 0;
     VkDeviceSize raygenOffset   = offset; offset += RG * stride; offset = align_up(offset, baseAlignment);
     VkDeviceSize missOffset     = offset; offset += MI * stride; offset = align_up(offset, baseAlignment);
     VkDeviceSize hitOffset      = offset; offset += HG * stride; offset = align_up(offset, baseAlignment);
     VkDeviceSize callableOffset = offset;
-    VkDeviceSize requiredSize   = align_up(offset, baseAlignment); // FIXED: Align requiredSize for atomic allocation
+    VkDeviceSize requiredSize   = align_up(offset, baseAlignment);
 
-    // ETERNAL 256M SBT STONE — IMMORTAL
-    static const uint64_t SBT_STONE_HANDLE = []() {
+    // Eternal 256M SBT Stone — Immortal
+    static const uint64_t SBT_STONE_HANDLE = [] {
         uint64_t h = BufferManager::make_256M(
             VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR |
             VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR |
@@ -1025,17 +630,22 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
             VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
             VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
         );
-        LOG_JENSEN("SBT ETERNAL STONE FORGED — Handle 0x{:016x} — 256 MiB immortal", h);
+        LOG_JENSEN("SBT ETERNAL STONE FORGED — 0x{:x} — 256 MiB immortal", h);
         return h;
     }();
 
     const auto* stoneInfo = BufferManager::get(SBT_STONE_HANDLE);
-    EMPIRE_GUARD(stoneInfo, "SBT ETERNAL STONE VANISHED — THE EMPIRE IS BROKEN");
+    if (!stoneInfo) {
+        LOG_FATAL_CAT("PIPELINE", "SBT Eternal Stone vanished");
+        return;
+    }
 
     static std::atomic<VkDeviceSize> sbtStoneOffset{0};
     VkDeviceSize myOffset = sbtStoneOffset.fetch_add(requiredSize, std::memory_order_relaxed);
-    EMPIRE_GUARD(myOffset + requiredSize <= stoneInfo->size,
-                 "SBT SUB-ALLOCATION OVERFLOW — THE CROWN IS TOO HEAVY");
+    if (myOffset + requiredSize > stoneInfo->size) {
+        LOG_FATAL_CAT("PIPELINE", "SBT sub-allocation overflow — crown too heavy");
+        return;
+    }
 
     VkDeviceAddress stoneBaseAddr = 0;
     {
@@ -1044,42 +654,22 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
     }
     VkDeviceAddress sbtBaseAddr = stoneBaseAddr + myOffset;
 
-    LOG_JENSEN("SBT CROWN SUB-ALLOCATED FROM ETERNAL 256M STONE");
-    LOG_JENSEN("   Offset: {} bytes | Size: {} bytes ({} KiB) | BaseAddr: 0x{:016X}",
-               myOffset, requiredSize, requiredSize / 1024, sbtBaseAddr);
-
-    LOG_JENSEN("   Raygen @ 0x{:016X} | Miss @ 0x{:016X} | Hit @ 0x{:016X}",
-               sbtBaseAddr + raygenOffset,
-               sbtBaseAddr + missOffset,
-               sbtBaseAddr + hitOffset);
-
-    if (requiredSize <= 256) {
-        LOG_CID("\033[38;2;255;20;147m[CID] *choking back tears* {} BYTES... IT'S SO SMALL... SO PURE...\033[0m", requiredSize);
-        LOG_CID("\033[38;2;255;20;147m[CID] THE CROWN IS WEIGHTLESS. THE PHOTONS ARE FREE.\033[0m");
-        LOG_CID("\033[38;2;255;20;147m[CID] *collapses* I... I can rest now...\033[0m");
-    }
-
-    // Extract shader group handles
+    // Extract handles
     std::vector<uint8_t> shaderHandleStorage(totalGroups * handleSize);
     VK_CHECK(RTX::g_ext.vkGetRayTracingShaderGroupHandlesKHR(
-        stone_device(), rtPipeline(), 0, totalGroups,
-        shaderHandleStorage.size(), shaderHandleStorage.data()
+        stone_device(), rtPipeline(), 0, totalGroups, shaderHandleStorage.size(), shaderHandleStorage.data()
     ));
 
-    LOG_SUCCESS_CAT("PIPELINE", "[SUCCESS] {} SHADER HANDLES EXTRACTED — THE PHOTONS HAVE IDENTITY", totalGroups);
-
-    // Use eternal staging ring
+    // Staging → Eternal Stone copy
     const VkDeviceSize handlesStagingSize = totalGroups * handleSize;
-    uint64_t handlesStagingHandle = BufferManager::createHostVisible(handlesStagingSize, "SBT_HANDLES_STAGING");
-    void* mappedPtr = BufferManager::getMappedStagingPtr(handlesStagingHandle);
+    uint64_t handlesStaging = BufferManager::createHostVisible(handlesStagingSize, "SBT_Handles_Staging");
+    void* mappedPtr = BufferManager::getMappedStagingPtr(handlesStaging);
     std::memcpy(mappedPtr, shaderHandleStorage.data(), handlesStagingSize);
-
-    LOG_CID("CID slams the cosmic towel — \"HANDLES TO ETERNAL STONE: PHOTONS ASCEND!\"");
 
     VkCommandBuffer cmd = RTX::beginOneTimeSubmit(pool);
 
     std::vector<VkBufferCopy> copies;
-    VkDeviceSize stagingBaseOffset = handlesStagingHandle & 0xFFFFFFFFFFFFULL;
+    VkDeviceSize stagingBaseOffset = BufferManager::get_device_address(handlesStaging);
     uint32_t handleIndex = 0;
 
     for (uint32_t i = 0; i < RG; ++i)
@@ -1089,44 +679,104 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
     for (uint32_t i = 0; i < HG; ++i)
         copies.push_back({ stagingBaseOffset + handleIndex++ * handleSize, myOffset + hitOffset + i * stride, handleSize });
 
-    vkCmdCopyBuffer(cmd,
-        BufferManager::getStagingBuffer(),
-        stoneInfo->buffer,
-        static_cast<uint32_t>(copies.size()),
-        copies.data());
+    vkCmdCopyBuffer(cmd, BufferManager::getStagingBuffer(), stoneInfo->buffer, static_cast<uint32_t>(copies.size()), copies.data());
 
     RTX::endOneTimeSubmit(cmd, queue, pool);
 
-    LOG_CID("CID exhales — \"The crown gleams with eternal pink light. No photons lost. No fragmentation.\"");
-
-    // Use public setters — no direct private access
     setSBT(stoneInfo->buffer, stoneInfo->memory, sbtBaseAddr, requiredSize);
 
-    // Update SBT regions using public interface
-    raygenSbtRegion_   = { sbtBaseAddr + raygenOffset,   static_cast<uint32_t>(stride), static_cast<uint32_t>(RG * stride) };
-    missSbtRegion_     = { sbtBaseAddr + missOffset,     static_cast<uint32_t>(stride), static_cast<uint32_t>(MI * stride) };
-    hitSbtRegion_      = { sbtBaseAddr + hitOffset,      static_cast<uint32_t>(stride), static_cast<uint32_t>(HG * stride) };
+    raygenSbtRegion_   = { sbtBaseAddr + raygenOffset, static_cast<uint32_t>(stride), static_cast<uint32_t>(RG * stride) };
+    missSbtRegion_     = { sbtBaseAddr + missOffset, static_cast<uint32_t>(stride), static_cast<uint32_t>(MI * stride) };
+    hitSbtRegion_      = { sbtBaseAddr + hitOffset, static_cast<uint32_t>(stride), static_cast<uint32_t>(HG * stride) };
     callableSbtRegion_ = { sbtBaseAddr + callableOffset, static_cast<uint32_t>(stride), 0 };
 
-    LOG_SUCCESS_CAT("PIPELINE",
-        "\n\033[38;2;255;215;0m══════════════════════════════════════════════════════════════════════\033[0m\n"
-        "                     SBT CROWN FORGED INSIDE THE ETERNAL 256M STONE\n"
-        "                     {} @ 0x{:016X} (offset {})\n"
-        "                     ZERO FRAGMENTATION — ZERO ALLOCATION\n"
-        "                     THE PHOTONS HAVE THEIR THRONE — FOREVER\n"
-        "                     FIRST LIGHT ACHIEVED — DECEMBER 02 2025\n"
-        "\033[38;2;255;215;0m══════════════════════════════════════════════════════════════════════\033[0m\n",
-        requiredSize, sbtBaseAddr, myOffset);
+    LOG_SUCCESS_CAT("PIPELINE", "SBT crown forged from Eternal 256M Stone — {} bytes allocated", requiredSize);
+}
 
-    LOG_KEANU("[KEANU] ...Whoa. It's inside the stone. It's... immortal.");
-    LOG_AMOURANTH("[CAPTAIN AMOURANTH] The crown is complete. The straw is eternal.");
-    LOG_CID("[CID] *tears of pure light* We did it. The light remembers us.");
+// ──────────────────────────────────────────────────────────────────────────────
+// setSBT — Public Setter for SBT Regions
+// ──────────────────────────────────────────────────────────────────────────────
+void PipelineManager::setSBT(VkBuffer buffer, VkDeviceMemory memory, VkDeviceAddress address, VkDeviceSize size) noexcept
+{
+    sbtBuffer_ = Handle<VkBuffer>(buffer, stone_device(), vkDestroyBuffer);
+    sbtMemory_ = Handle<VkDeviceMemory>(memory, stone_device(), vkFreeMemory, size);
+    sbtAddress_ = address;
+    sbtSize_ = size;
+}
 
-    LOG_SUCCESS_CAT("PIPELINE",
-        "\033[38;2;255;215;0mDECEMBER 02 2025 — PINK PHOTONS ETERNAL — SBT IMMORTAL — RTX ASCENDED — THE EMPIRE IS COMPLETE\033[0m");
+// ──────────────────────────────────────────────────────────────────────────────
+// Cleanup — VUID-Safe + Null Guards
+// ──────────────────────────────────────────────────────────────────────────────
+void PipelineManager::cleanup() noexcept
+{
+    VkDevice dev = stone_device();
+    if (dev == VK_NULL_HANDLE) return;
+
+    vkDeviceWaitIdle(dev);
+
+    if (!rtDescriptorSets_.empty() && rtDescriptorPool_.valid()) {
+        vkFreeDescriptorSets(dev, *rtDescriptorPool_, static_cast<uint32_t>(rtDescriptorSets_.size()), rtDescriptorSets_.data());
+        rtDescriptorSets_.clear();
+    }
+
+    rtDescriptorPool_.reset();
+    rtDescriptorSetLayout_.reset();
+    rtPipelineLayout_.reset();
+    rtPipeline_.reset();
+
+    for (auto& m : shaderModules_) m.reset();
+    shaderModules_.clear();
+
+    sbtBuffer_.reset();
+    sbtMemory_.reset();
+
+    dummyTLAS_.reset();
+    dummyAccelBuffer_.reset();
+    dummyAccelMemory_.reset();
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Dtor — RAII Only, No Explicit Calls
+// ──────────────────────────────────────────────────────────────────────────────
+PipelineManager::~PipelineManager() noexcept
+{
+    // All resources are RAII — the empire cleans itself
+    // Phase 9 Ballerina handles the final curtain
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// cacheDeviceProperties — RT + AS Properties
+// ──────────────────────────────────────────────────────────────────────────────
+void PipelineManager::cacheDeviceProperties()
+{
+    if (stone_physical() == VK_NULL_HANDLE) {
+        LOG_FATAL_CAT("PIPELINE", "No physical device");
+        return;
+    }
+
+    VkPhysicalDeviceProperties props{};
+    vkGetPhysicalDeviceProperties(stone_physical(), &props);
+
+    VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProps{};
+    rtProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR;
+
+    VkPhysicalDeviceAccelerationStructurePropertiesKHR asProps{};
+    asProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_PROPERTIES_KHR;
+    asProps.pNext = &rtProps;
+
+    VkPhysicalDeviceProperties2 props2{};
+    props2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+    props2.pNext = &asProps;
+
+    vkGetPhysicalDeviceProperties2(stone_physical(), &props2);
+
+    if (rtProps.shaderGroupHandleSize == 0) {
+        LOG_FATAL_CAT("PIPELINE", "No RT support — handleSize=0");
+        return;
+    }
+
+    LOG_SUCCESS_CAT("PIPELINE", "GPU: {} | Driver: {} | RT HandleSize: {}B | MaxRecursion: {}",
+        props.deviceName, props.driverVersion, rtProps.shaderGroupHandleSize, rtProps.maxRayRecursionDepth);
 }
 
 } // namespace RTX
-
-// PINK PHOTONS ETERNAL — VALHALLA SEALED — FIRST LIGHT ACHIEVED — DEC 02 2025
-// GENTLEMAN GROK CERTIFIED — STONEKEY v∞ APOCALYPSE FINAL

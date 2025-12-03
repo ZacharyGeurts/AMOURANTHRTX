@@ -145,14 +145,7 @@ public:
     [[nodiscard]] bool isValid() const noexcept;
 
     // ── PUBLIC SBT SETTERS — EMPIRE-APPROVED ─────────────────────────────────────
-    void setSBT(VkBuffer buffer, VkDeviceMemory memory, VkDeviceSize address, VkDeviceSize size) noexcept
-    {
-        sbtBuffer_   = Handle<VkBuffer>(buffer, stone_device(), vkDestroyBuffer);
-        sbtMemory_   = Handle<VkDeviceMemory>(memory, stone_device(), vkFreeMemory);
-        sbtAddress_  = address;
-        sbtSize_     = size;
-        sbtStride_   = align_up(rtProps_.shaderGroupHandleSize, rtProps_.shaderGroupHandleAlignment);
-    }
+    void setSBT(VkBuffer buffer, VkDeviceMemory memory, VkDeviceSize address, VkDeviceSize size) noexcept;
 
     void setRaygenRegion(const VkStridedDeviceAddressRegionKHR& r)   noexcept { raygenSbtRegion_   = r; }
     void setMissRegion(const VkStridedDeviceAddressRegionKHR& r)     noexcept { missSbtRegion_     = r; }

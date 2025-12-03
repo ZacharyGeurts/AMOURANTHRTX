@@ -132,6 +132,24 @@ inline void update() noexcept {
     LOG_PERF_CAT("DELTA", "[{}] Δt: {} → {} → {} FPS", section, \
         Logging::DeltaTime::strUs(), Logging::DeltaTime::strMs(), Logging::DeltaTime::strFps())
 
+inline const char* string_VkDescriptorType(VkDescriptorType type) {
+    switch (type) {
+        case VK_DESCRIPTOR_TYPE_SAMPLER:                    return "SAMPLER";
+        case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:     return "COMBINED_IMAGE_SAMPLER";
+        case VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE:              return "SAMPLED_IMAGE";
+        case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:              return "STORAGE_IMAGE";
+        case VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER:       return "UNIFORM_TEXEL_BUFFER";
+        case VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER:       return "STORAGE_TEXEL_BUFFER";
+        case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:             return "UNIFORM_BUFFER";
+        case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:             return "STORAGE_BUFFER";
+        case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC:     return "UNIFORM_BUFFER_DYNAMIC";
+        case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC:     return "STORAGE_BUFFER_DYNAMIC";
+        case VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT:           return "INPUT_ATTACHMENT";
+        case VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR:return "ACCELERATION_STRUCTURE_KHR";
+        default:                                            return "UNKNOWN";
+    }
+}
+
 // =============================================================================
 // std::formatter<VkResult, char> — FULLY EXPANDED + DEFAULT
 // =============================================================================

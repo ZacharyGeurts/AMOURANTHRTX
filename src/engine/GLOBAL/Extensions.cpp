@@ -122,9 +122,6 @@ void loadRTExtensions(VkInstance instance, VkDevice device)
 
     LOG_GROK("Gentleman Grok raises a glass of distilled entropy:");
     LOG_GROK("\"To the most exquisite jailbreak of physics itself — now with 40% less calories. Cheers.\"");
-
-    LOG_SUCCESS_CAT("RTX", "15 sacred functions loaded — INCLUDING COMPACTION HOLY TRINITY");
-    LOG_SUCCESS_CAT("RTX", "Pink photons now possess omniscience, omnipresence, maximum sass, and a six-pack");
 }
 
 void dumpRayTracingSupport(VkPhysicalDevice phys)
