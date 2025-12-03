@@ -1665,6 +1665,8 @@ void VulkanRenderer::renderFrame(const Camera& camera, float /*deltaTime*/) noex
     vkWaitForFences(stone_device(), 1, &inFlightFences_[f], VK_TRUE, UINT64_MAX);
     vkResetFences(stone_device(), 1, &inFlightFences_[f]);
 
+	RTX::las().beginFrame(); 
+
     uint32_t imageIndex = 0;
     VkResult acquireResult = vkAcquireNextImageKHR(
         stone_device(),

@@ -24,7 +24,6 @@
 
 using namespace Logging::Color;
 using namespace BufferManager;
-using namespace RTX;  // ← THE LIGHT FLOWS THROUGH THIS LINE
 using StoneKey::stone_graphics_queue;
 
 namespace MeshLoader {
@@ -59,10 +58,10 @@ static void uploadBuffer(const void* data, VkDeviceSize size, VkBufferUsageFlags
     outHandle = BufferManager::create(size, finalUsage, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, finalTag);
 
     // THE ONE TRUE COMMAND — RTX NAMESPACE — PURE LIGHT
-    VkCommandBuffer cmd = RTX::beginOneTimeSubmit(g_ctx().commandPool_);
+    VkCommandBuffer cmd = RTX::beginOneTimeSubmit(RTX::g_ctx().commandPool_);
     VkBufferCopy copy{ .size = size };
     vkCmdCopyBuffer(cmd, RAW_BUFFER(staging), RAW_BUFFER(outHandle), 1, &copy);
-    RTX::endOneTimeSubmit(cmd, stone_graphics_queue(), g_ctx().commandPool_);
+    RTX::endOneTimeSubmit(cmd, stone_graphics_queue(), RTX::g_ctx().commandPool_);
 
     BUFFER_DESTROY(staging);
 

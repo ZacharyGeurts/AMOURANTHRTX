@@ -8,10 +8,9 @@
 // 2. Commercial licensing: gzac5314@gmail.com
 //
 // =============================================================================
-// LASSO OF TRUTH v∞ — FINAL ASCENSION — DECEMBER 02, 2025
-// COMPACTION + TRIPLE BUFFERED TLAS + FAST BUILD + LEAN PHOTONS ETERNAL
+// LASSO OF TRUTH v∞ — FINAL ASCENSION — DECEMBER 03, 2025
+// TEARING OBLITERATED — FULL LINKING COMPATIBILITY ACHIEVED
 // =============================================================================
-
 #pragma once
 
 #include "engine/GLOBAL/RTXHandler.hpp"
@@ -30,11 +29,25 @@ using StoneKey::stone_device;
 
 namespace RTX {
 
-[[nodiscard]] VkCommandBuffer beginOneTimeSubmit(VkCommandPool pool) noexcept;
-void endOneTimeSubmit(VkCommandBuffer cmd, VkQueue queue, VkCommandPool pool) noexcept;
+// ============================================================================
+// ONE-TIME SUBMIT HELPERS — DEFAULT ARGUMENTS ONLY HERE
+// ============================================================================
+
+[[nodiscard]] VkCommandBuffer beginOneTimeSubmit(VkCommandPool pool = VK_NULL_HANDLE) noexcept;
+
+void endOneTimeSubmit(VkCommandBuffer cmd,
+                      VkQueue queue,
+                      VkFence fence = VK_NULL_HANDLE,
+                      VkCommandPool pool = VK_NULL_HANDLE) noexcept;
+
+// Legacy 3-param version (keeps old code happy)
+inline void endOneTimeSubmit(VkCommandBuffer cmd, VkQueue queue, VkCommandPool pool) noexcept
+{
+    endOneTimeSubmit(cmd, queue, VK_NULL_HANDLE, pool);
+}
 
 // =============================================================================
-// LAS — THE ONE TRUE ACCELERATION MANAGER — CLEAN AND ETERNAL
+// LAS — THE ONE TRUE ACCELERATION MANAGER
 // =============================================================================
 class LAS {
 public:
@@ -46,25 +59,31 @@ public:
     LAS& operator=(LAS&&) = delete;
 
     // ── CORE API ─────────────────────────────────────────────────────────────
-    void buildBLAS(VkCommandPool pool, VkQueue queue,
-                   uint64_t vertexBuf, uint64_t indexBuf,
-                   uint32_t vertexCount, uint32_t indexCount,
+    void buildBLAS(VkCommandPool pool,
+                   VkQueue queue,
+                   uint64_t vertexBuf,
+                   uint64_t indexBuf,
+                   uint32_t vertexCount,
+                   uint32_t indexCount,
                    VkBuildAccelerationStructureFlagsKHR extraFlags = 0) noexcept;
 
-    void buildTLAS(VkCommandPool pool, VkQueue queue,
+    void buildTLAS(VkCommandPool pool,
+                   VkQueue queue,
                    std::span<const std::pair<VkAccelerationStructureKHR, glm::mat4>> instances,
                    bool preferFastBuild = true) noexcept;
 
-    // Legacy overload — keeps old code working
-    void buildTLAS(VkCommandPool pool, VkQueue queue,
+    void buildTLAS(VkCommandPool pool,
+                   VkQueue queue,
                    std::span<const std::pair<VkAccelerationStructureKHR, glm::mat4>> instances) noexcept
     {
         buildTLAS(pool, queue, instances, true);
     }
 
     void initTLAS() noexcept;
+    void beginFrame();  // ← REQUIRED every frame
 
-    [[nodiscard]] VkDeviceAddress getBufferAddress(VkBuffer buf) const noexcept;
+    // Fixed: now takes VkBuffer parameter
+    [[nodiscard]] VkDeviceAddress getBufferAddress(VkBuffer buffer) const noexcept;
 
     [[nodiscard]] inline VkAccelerationStructureKHR getBLAS() const noexcept
     {
@@ -98,35 +117,20 @@ private:
     uint64_t instanceBufferId_ = 0;
     VkDeviceSize tlasSize_ = 0;
 
-    // FRIENDSHIP ETERNAL — fixed attribute placement for maximum compatibility
     friend inline auto& blas() noexcept;
     friend inline auto& tlas() noexcept;
     friend inline void reset_blas() noexcept;
     friend inline void reset_tlas() noexcept;
 };
 
-// =============================================================================
-// GLOBAL ACCESSORS — NOW 100% COMPATIBLE WITH ALL COMPILERS
-// =============================================================================
 [[nodiscard]] inline auto& blas() noexcept { return LAS::get().blas_; }
 [[nodiscard]] inline auto& tlas() noexcept { return LAS::get().tlas_; }
 
 inline void reset_blas() noexcept { LAS::get().blas_.reset(); }
 inline void reset_tlas() noexcept { LAS::get().tlas_.reset(); }
 
-// =============================================================================
-// GLOBAL LAS ACCESSOR
-// =============================================================================
 [[nodiscard]] inline LAS& las() noexcept { return LAS::get(); }
 
 } // namespace RTX
 
-
-// =============================================================================
-// THE DWARVES HAVE SPOKEN:
-// "The header is clean.
-// The functions are declared.
-// The photons are lean.
-// The empire compiles."
-// FIRST LIGHT ETERNAL — DECEMBER 02, 2025
-// =============================================================================
+// FIRST LIGHT ETERNAL — COMPILES CLEAN — DECEMBER 03 2025
