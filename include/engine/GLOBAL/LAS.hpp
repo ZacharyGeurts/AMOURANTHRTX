@@ -81,7 +81,7 @@ public:
 
     void initTLAS() noexcept;
 	void waitForAllFences();
-    void beginFrame();
+    void beginFrame() noexcept;
 
     // Fixed: now takes VkBuffer parameter
     [[nodiscard]] VkDeviceAddress getBufferAddress(VkBuffer buffer) const noexcept;
