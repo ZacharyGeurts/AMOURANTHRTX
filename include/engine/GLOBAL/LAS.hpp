@@ -80,7 +80,8 @@ public:
     }
 
     void initTLAS() noexcept;
-    void beginFrame();  // ← REQUIRED every frame
+	void waitForAllFences();
+    void beginFrame();
 
     // Fixed: now takes VkBuffer parameter
     [[nodiscard]] VkDeviceAddress getBufferAddress(VkBuffer buffer) const noexcept;
@@ -106,6 +107,8 @@ public:
     void invalidate() noexcept {
         LOG_DEBUG_CAT("LAS", "LAS invalidated — rebuild required");
     }
+
+	std::vector<VkFence> buildFences_; 
 
 private:
     LAS() = default;

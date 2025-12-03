@@ -19,7 +19,13 @@
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/GLOBAL/StoneKey.hpp"
 #include "engine/GLOBAL/RTXHandler.hpp"
-#include "engine/GLOBAL/StoneKey.hpp"
+
+#include <algorithm>
+#include <vector>
+#include <fstream>
+#include <format>
+#include <string_view>
+#include <cstdint>
 
 using namespace Logging::Color;
 using StoneKey::stone_device;
@@ -44,7 +50,6 @@ static PFN_vkGetRefreshCycleDurationGOOGLE vkGetRefreshCycleDurationGOOGLE = nul
 inline static std::vector<VkPastPresentationTimingGOOGLE> timingHistory;
 inline static VkRefreshCycleDurationGOOGLE refreshDuration = {};
 inline static bool directDisplayMode = false;
-inline static VkSwapchainKHR predictedSwapchain = VK_NULL_HANDLE;
 
 // -----------------------------------------------------------------------------
 // Helpers
@@ -184,42 +189,39 @@ void SwapchainManager::create(SDL_Window* window, uint32_t w, uint32_t h) noexce
 {
     LOG_BLONDIE("New swapchain rising from the deep.");
     autoEnableHDR();
-    initializeFramePacing();
     enableDirectDisplay(true);
 
     createSwapchain(stone_window(), stone_width(), stone_height(), VK_NULL_HANDLE);
+    initializeFramePacing();
     createImageViews();
 }
 
 void SwapchainManager::recreate(uint32_t w, uint32_t h) noexcept
 {
-    if (w == 0 || h == 0)
-    {
+    if (w == 0 || h == 0) {
         minimized_ = true;
-        LOG_AMOURANTH("WINDOW MINIMIZED — PHOTONS ENTER SLEEP MODE");
+        LOG_AMOURANTH("WINDOW MINIMIZED — PHOTONS ENTER MEDITATION");
         return;
     }
-
     minimized_ = false;
 
     vkDeviceWaitIdle(stone_device());
     releaseAcquiredImages();
 
-    for (VkImageView view : swapchainImageViews_)
+    // Extract raw handle WITHOUT destroying (driver owns old swapchain lifetime)
+    VkSwapchainKHR oldSwapchain = swapchain_.get();   // ← get raw handle
+    swapchain_ = Handle<VkSwapchainKHR>();            // ← reset to null (no destroy!)
+
+    // Destroy old image views
+    for (VkImageView view : swapchainImageViews_) {
         if (view) vkDestroyImageView(stone_device(), view, nullptr);
+    }
     swapchainImageViews_.clear();
 
-    VkSwapchainKHR old = swapchain_.valid() ? *swapchain_ : VK_NULL_HANDLE;
-
-    // THE MISSING LINE — THE EMPIRE WAS BLIND WITHOUT IT
-    swapchain_.reset();  // THIS IS THE FIX
-
-    createSwapchain(stone_window(), w, h, old);
-
-    if (old && old != *swapchain_)
-        vkDestroySwapchainKHR(stone_device(), old, nullptr);
-
+    createSwapchain(stone_window(), w, h, oldSwapchain);
     createImageViews();
+
+    LOG_AMOURANTH("SWAPCHAIN REBORN — {}×{} — RESIZE ETERNAL", w, h);
 }
 
 void SwapchainManager::cleanup() noexcept
@@ -260,8 +262,8 @@ void SwapchainManager::createImageViews() noexcept
 
 void SwapchainManager::createSwapchain(SDL_Window* window, uint32_t w, uint32_t h, VkSwapchainKHR old) noexcept
 {
-	swapchain_.reset();
-	
+    swapchain_.reset();
+
     // Cached queries — compute once per app lifetime
     static VkSurfaceCapabilitiesKHR caps = {};
     static std::vector<VkSurfaceFormatKHR> formats = {};
@@ -309,26 +311,9 @@ void SwapchainManager::createSwapchain(SDL_Window* window, uint32_t w, uint32_t 
     QueueFamilyIndices indices = findQueueFamilies(stone_physical(), stone_surface());
     uint32_t queueFamilyIndices[] = { indices.graphicsFamily.value(), indices.presentFamily.value() };
 
-    // pNext chain — compression + mutable formats
-    VkFormat viewFormats[] = {VK_FORMAT_B8G8R8A8_SRGB, VK_FORMAT_R16G16B16A16_SFLOAT, VK_FORMAT_A2B10G10R10_UNORM_PACK32};
-    VkImageFormatListCreateInfoKHR formatList{
-        .sType = VK_STRUCTURE_TYPE_IMAGE_FORMAT_LIST_CREATE_INFO_KHR,
-        .viewFormatCount = 3,
-        .pViewFormats = viewFormats
-    };
-
-    VkImageCompressionFixedRateFlagsEXT fixedRate = VK_IMAGE_COMPRESSION_FIXED_RATE_4BPC_BIT_EXT;
-    VkImageCompressionControlEXT compressionControl{
-        .sType = VK_STRUCTURE_TYPE_IMAGE_COMPRESSION_CONTROL_EXT,
-        .pNext = &formatList,
-        .flags = VK_IMAGE_COMPRESSION_FIXED_RATE_DEFAULT_EXT,
-        .compressionControlPlaneCount = 1,
-        .pFixedRateFlags = &fixedRate
-    };
-
     VkSwapchainCreateInfoKHR ci{
         .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
-        .pNext = &compressionControl,
+        .pNext = nullptr,
         .surface = stone_surface(),
         .minImageCount = imageCount,
         .imageFormat = chosenFormat.format,
@@ -354,7 +339,8 @@ void SwapchainManager::createSwapchain(SDL_Window* window, uint32_t w, uint32_t 
     VkSwapchainKHR raw = VK_NULL_HANDLE;
     VK_CHECK(vkCreateSwapchainKHR(stone_device(), &ci, nullptr, &raw));
 
-    if (old) vkDestroySwapchainKHR(stone_device(), old, nullptr);
+    // DO NOT DESTROY OLD HERE — Vulkan may reuse it!
+    // if (old) vkDestroySwapchainKHR(...) ← DELETED FOREVER
 
     swapchain_ = Handle<VkSwapchainKHR>(raw, stone_device());
     swapchainExtent_ = extent;
@@ -366,11 +352,14 @@ void SwapchainManager::createSwapchain(SDL_Window* window, uint32_t w, uint32_t 
     // Retrieve swapchain images
     uint32_t count = 0;
     VK_CHECK(vkGetSwapchainImagesKHR(stone_device(), raw, &count, nullptr));
-
     std::vector<VkImage> images(count);
     VK_CHECK(vkGetSwapchainImagesKHR(stone_device(), raw, &count, images.data()));
-
     swapchainImages_ = std::move(images);
+
+    // ONLY NOW — destroy old swapchain if Vulkan did NOT reuse it
+    if (old && old != raw) {
+        vkDestroySwapchainKHR(stone_device(), old, nullptr);
+    }
 
     // SEAL THE EMPIRE — ALL STONES NOW ALIGN
     stone_seal_swapchain(raw);
@@ -463,14 +452,6 @@ void SwapchainManager::enableDirectDisplay(bool enable) noexcept {
     directDisplayMode = enable;
     constexpr std::string_view msg = "Direct display {}.";    
     LOG_WARN(std::format(msg, directDisplayMode ? "ENABLED" : "DISABLED"));
-}
-
-// Feature 10: Quantum Prediction
-void SwapchainManager::predictResize(uint32_t predictedW, uint32_t predictedH) noexcept {
-    VkSwapchainKHR oldPredicted = predictedSwapchain;
-    createSwapchain(stone_window(), predictedW, predictedH, oldPredicted);
-    predictedSwapchain = *swapchain_;
-    LOG_AMOURANTH("Quantum pre-creation for %ux%u.", predictedW, predictedH);
 }
 
 } // namespace RTX

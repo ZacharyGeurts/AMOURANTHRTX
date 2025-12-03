@@ -64,6 +64,7 @@ using StoneKey::stone_graphics_family;
 using StoneKey::stone_seal_width;
 using StoneKey::stone_seal_height;
 using StoneKey::stone_seal_extent;
+using StoneKey::stone_physical;
 
 uint32_t MAX_FRAMES_IN_FLIGHT = Options::Performance::MAX_FRAMES_IN_FLIGHT; 
 
@@ -292,9 +293,9 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, bool o
     VkFenceCreateInfo fenceInfo{ .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, .flags = VK_FENCE_CREATE_SIGNALED_BIT };
 
     for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
-        VK_CHECK(vkCreateSemaphore(StoneKey::stone_device(), &semInfo, nullptr, &imageAvailableSemaphores_[i]), "imageAvailable");
-        VK_CHECK(vkCreateSemaphore(StoneKey::stone_device(), &semInfo, nullptr, &renderFinishedSemaphores_[i]), "renderFinished");
-        VK_CHECK(vkCreateFence(StoneKey::stone_device(), &fenceInfo, nullptr, &inFlightFences_[i]), "inFlightFence");
+        VK_CHECK(vkCreateSemaphore(stone_device(), &semInfo, nullptr, &imageAvailableSemaphores_[i]), "imageAvailable");
+        VK_CHECK(vkCreateSemaphore(stone_device(), &semInfo, nullptr, &renderFinishedSemaphores_[i]), "renderFinished");
+        VK_CHECK(vkCreateFence(stone_device(), &fenceInfo, nullptr, &inFlightFences_[i]), "inFlightFence");
     }
 
     // GPU Timestamps
@@ -302,12 +303,12 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, bool o
         VkQueryPoolCreateInfo qpInfo{ .sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO };
         qpInfo.queryType = VK_QUERY_TYPE_TIMESTAMP;
         qpInfo.queryCount = MAX_FRAMES_IN_FLIGHT * 2;
-        VK_CHECK(vkCreateQueryPool(StoneKey::stone_device(), &qpInfo, nullptr, &timestampQueryPool_), "Timestamp pool");
+        VK_CHECK(vkCreateQueryPool(stone_device(), &qpInfo, nullptr, &timestampQueryPool_), "Timestamp pool");
     }
 
     // GPU Properties
     VkPhysicalDeviceProperties props{};
-    vkGetPhysicalDeviceProperties(StoneKey::stone_physical(), &props);
+    vkGetPhysicalDeviceProperties(stone_physical(), &props);
     timestampPeriod_ = props.limits.timestampPeriod / 1e6f;
     LOG_INFO_CAT("RENDERER", "GPU: {} | Timestamp period: {:.3f} ms", props.deviceName, timestampPeriod_);
 
@@ -316,7 +317,7 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, bool o
     createRTOutputImages();
     if (Options::OptionsRTX::ENABLE_ACCUMULATION) createAccumulationImages();
     if (Options::OptionsRTX::ENABLE_DENOISING) createDenoiserImage();
-    if (Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING) createNexusScoreImage(RTX::g_ctx().commandPool_, StoneKey::stone_graphics_queue());
+    if (Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING) createNexusScoreImage(RTX::g_ctx().commandPool_, stone_graphics_queue());
     createTonemapSampler();
 
     // Per-frame buffers
@@ -337,27 +338,11 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, bool o
         };
 
         VkDescriptorSetLayout layout = VK_NULL_HANDLE;
-        VK_CHECK(vkCreateDescriptorSetLayout(StoneKey::stone_device(), &layoutInfo, nullptr, &layout));
-        tonemapDescriptorSetLayout_ = Handle<VkDescriptorSetLayout>(layout, StoneKey::stone_device(), vkDestroyDescriptorSetLayout, 0, "TonemapSetLayout");
+        VK_CHECK(vkCreateDescriptorSetLayout(stone_device(), &layoutInfo, nullptr, &layout));
+        tonemapDescriptorSetLayout_ = Handle<VkDescriptorSetLayout>(layout, stone_device(), vkDestroyDescriptorSetLayout, 0, "TonemapSetLayout");
     }
 
     LOG_SUCCESS_CAT("RENDERER", "VulkanRenderer constructed — PINK PHOTONS ETERNAL");
-}
-
-void VulkanRenderer::createCommandPool() noexcept
-{
-    if (RTX::g_ctx().commandPool_ != VK_NULL_HANDLE)
-        return;
-
-    VkCommandPoolCreateInfo poolInfo{
-        .sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
-        .flags            = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT |
-                            VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
-        .queueFamilyIndex = stone_graphics_family()
-    };
-
-    VK_CHECK(vkCreateCommandPool(stone_device(), &poolInfo, nullptr, &RTX::g_ctx().commandPool_));
-    LOG_SUCCESS("Command pool forged");
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -414,11 +399,11 @@ void VulkanRenderer::createRTOutputImages() noexcept
                 .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
             };
 
-            VK_CHECK(vkCreateImage(StoneKey::stone_device(), &imageInfo, nullptr, &rawImage));
+            VK_CHECK(vkCreateImage(stone_device(), &imageInfo, nullptr, &rawImage));
 
             // === 2. MEMORY ===
             VkMemoryRequirements memReqs{};
-            vkGetImageMemoryRequirements(StoneKey::stone_device(), rawImage, &memReqs);
+            vkGetImageMemoryRequirements(stone_device(), rawImage, &memReqs);
 
             uint32_t memType = findMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
@@ -428,8 +413,8 @@ void VulkanRenderer::createRTOutputImages() noexcept
                 .memoryTypeIndex = memType
             };
 
-            VK_CHECK(vkAllocateMemory(StoneKey::stone_device(), &allocInfo, nullptr, &rawMemory));
-            VK_CHECK(vkBindImageMemory(StoneKey::stone_device(), rawImage, rawMemory, 0));
+            VK_CHECK(vkAllocateMemory(stone_device(), &allocInfo, nullptr, &rawMemory));
+            VK_CHECK(vkBindImageMemory(stone_device(), rawImage, rawMemory, 0));
 
             // === 3. TRANSITION TO GENERAL ===
             VkImageMemoryBarrier barrier{
@@ -453,19 +438,19 @@ void VulkanRenderer::createRTOutputImages() noexcept
                 .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
             };
 
-            VK_CHECK(vkCreateImageView(StoneKey::stone_device(), &viewInfo, nullptr, &rawView));
+            VK_CHECK(vkCreateImageView(stone_device(), &viewInfo, nullptr, &rawView));
 
             // === 5. HANDLES ===
-            rtOutputImages_.emplace_back(rawImage, StoneKey::stone_device(), vkDestroyImage, 0, "RTOutputImage");
-            rtOutputMemories_.emplace_back(rawMemory, StoneKey::stone_device(), vkFreeMemory, memReqs.size, "RTOutputMemory");
-            rtOutputViews_.emplace_back(rawView, StoneKey::stone_device(), vkDestroyImageView, 0, "RTOutputView");
+            rtOutputImages_.emplace_back(rawImage, stone_device(), vkDestroyImage, 0, "RTOutputImage");
+            rtOutputMemories_.emplace_back(rawMemory, stone_device(), vkFreeMemory, memReqs.size, "RTOutputMemory");
+            rtOutputViews_.emplace_back(rawView, stone_device(), vkDestroyImageView, 0, "RTOutputView");
 
         } catch (...) {
             LOG_FATAL_CAT("RENDERER", "Frame {} — Catastrophic failure during RT output creation", i);
             RTX::endOneTimeSubmit(cmd, queue, cmdPool);
-            if (rawView) vkDestroyImageView(StoneKey::stone_device(), rawView, nullptr);
-            if (rawMemory) vkFreeMemory(StoneKey::stone_device(), rawMemory, nullptr);
-            if (rawImage) vkDestroyImage(StoneKey::stone_device(), rawImage, nullptr);
+            if (rawView) vkDestroyImageView(stone_device(), rawView, nullptr);
+            if (rawMemory) vkFreeMemory(stone_device(), rawMemory, nullptr);
+            if (rawImage) vkDestroyImage(stone_device(), rawImage, nullptr);
             phase9_ballerina("RT OUTPUT FORGING FAILED", std::source_location::current());
         }
     }
@@ -513,9 +498,9 @@ void VulkanRenderer::createTonemapSampler() noexcept {
     samplerInfo.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
 
     VkSampler rawSampler = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateSampler(StoneKey::stone_device(), &samplerInfo, nullptr, &rawSampler), "Create tonemap sampler");
+    VK_CHECK(vkCreateSampler(stone_device(), &samplerInfo, nullptr, &rawSampler), "Create tonemap sampler");
 
-    tonemapSampler_ = RTX::Handle<VkSampler>(rawSampler, StoneKey::stone_device(),
+    tonemapSampler_ = RTX::Handle<VkSampler>(rawSampler, stone_device(),
         [](VkDevice d, VkSampler s, const VkAllocationCallbacks*) { vkDestroySampler(d, s, nullptr); },
         0, "TonemapSampler");
 
@@ -574,10 +559,10 @@ void VulkanRenderer::createEnvironmentMap() noexcept
     };
 
     VkImage img = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateImage(StoneKey::stone_device(), &imgInfo, nullptr, &img));
+    VK_CHECK(vkCreateImage(stone_device(), &imgInfo, nullptr, &img));
 
     VkMemoryRequirements memReqs{};
-    vkGetImageMemoryRequirements(StoneKey::stone_device(), img, &memReqs);
+    vkGetImageMemoryRequirements(stone_device(), img, &memReqs);
     uint32_t memType = findMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
     VkMemoryAllocateInfo allocInfo{
@@ -586,8 +571,8 @@ void VulkanRenderer::createEnvironmentMap() noexcept
         .memoryTypeIndex = memType
     };
     VkDeviceMemory mem = VK_NULL_HANDLE;
-    VK_CHECK(vkAllocateMemory(StoneKey::stone_device(), &allocInfo, nullptr, &mem));
-    VK_CHECK(vkBindImageMemory(StoneKey::stone_device(), img, mem, 0));
+    VK_CHECK(vkAllocateMemory(stone_device(), &allocInfo, nullptr, &mem));
+    VK_CHECK(vkBindImageMemory(stone_device(), img, mem, 0));
 
     // Transition + Copy
     VkImageMemoryBarrier barrier{
@@ -611,7 +596,7 @@ void VulkanRenderer::createEnvironmentMap() noexcept
     barrier.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT;
     vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
 
-    RTX::endOneTimeSubmit(cmd, StoneKey::stone_graphics_queue(), ctx.commandPool_);
+    RTX::endOneTimeSubmit(cmd, stone_graphics_queue(), ctx.commandPool_);
     BUFFER_DESTROY(staging);
 
     VkImageViewCreateInfo viewInfo{
@@ -622,7 +607,7 @@ void VulkanRenderer::createEnvironmentMap() noexcept
         .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
     };
     VkImageView view = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateImageView(StoneKey::stone_device(), &viewInfo, nullptr, &view));
+    VK_CHECK(vkCreateImageView(stone_device(), &viewInfo, nullptr, &view));
 
     VkSamplerCreateInfo samplerInfo{
         .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
@@ -635,12 +620,12 @@ void VulkanRenderer::createEnvironmentMap() noexcept
         .maxLod = 1.0f
     };
     VkSampler sampler = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateSampler(StoneKey::stone_device(), &samplerInfo, nullptr, &sampler));
+    VK_CHECK(vkCreateSampler(stone_device(), &samplerInfo, nullptr, &sampler));
 
-    envMapImage_        = RTX::MakeHandle(img, StoneKey::stone_device(), vkDestroyImage, 0, "EnvMapImage");
-    envMapImageMemory_  = RTX::MakeHandle(mem, StoneKey::stone_device(), vkFreeMemory, memReqs.size, "EnvMapMemory");
-    envMapImageView_    = RTX::MakeHandle(view, StoneKey::stone_device(), vkDestroyImageView, 0, "EnvMapView");
-    envMapSampler_      = RTX::MakeHandle(sampler, StoneKey::stone_device(), vkDestroySampler, 0, "EnvMapSampler");
+    envMapImage_        = RTX::MakeHandle(img, stone_device(), vkDestroyImage, 0, "EnvMapImage");
+    envMapImageMemory_  = RTX::MakeHandle(mem, stone_device(), vkFreeMemory, memReqs.size, "EnvMapMemory");
+    envMapImageView_    = RTX::MakeHandle(view, stone_device(), vkDestroyImageView, 0, "EnvMapView");
+    envMapSampler_      = RTX::MakeHandle(sampler, stone_device(), vkDestroySampler, 0, "EnvMapSampler");
 
     LOG_SUCCESS_CAT("RENDERER", "Environment map forged — {}×{} HDR sky active", w, h);
 }
@@ -673,15 +658,15 @@ void VulkanRenderer::createNexusScoreImage(VkCommandPool pool, VkQueue queue) no
     };
 
     VkImage rawImage = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateImage(StoneKey::stone_device(), &imageInfo, nullptr, &rawImage));
+    VK_CHECK(vkCreateImage(stone_device(), &imageInfo, nullptr, &rawImage));
 
     VkMemoryRequirements memReqs{};
-    vkGetImageMemoryRequirements(StoneKey::stone_device(), rawImage, &memReqs);
+    vkGetImageMemoryRequirements(stone_device(), rawImage, &memReqs);
 
     uint32_t memType = findMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
     if (memType == UINT32_MAX) {
         LOG_FATAL_CAT("RENDERER", "No suitable memory type for NexusScoreImage");
-        vkDestroyImage(StoneKey::stone_device(), rawImage, nullptr);
+        vkDestroyImage(stone_device(), rawImage, nullptr);
         phase9_ballerina("NO MEMORY TYPE FOR NEXUS", std::source_location::current());
     }
 
@@ -692,8 +677,8 @@ void VulkanRenderer::createNexusScoreImage(VkCommandPool pool, VkQueue queue) no
     };
 
     VkDeviceMemory rawMemory = VK_NULL_HANDLE;
-    VK_CHECK(vkAllocateMemory(StoneKey::stone_device(), &allocInfo, nullptr, &rawMemory));
-    VK_CHECK(vkBindImageMemory(StoneKey::stone_device(), rawImage, rawMemory, 0));
+    VK_CHECK(vkAllocateMemory(stone_device(), &allocInfo, nullptr, &rawMemory));
+    VK_CHECK(vkBindImageMemory(stone_device(), rawImage, rawMemory, 0));
 
     VkImageViewCreateInfo viewInfo{
         .sType                        = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
@@ -704,12 +689,12 @@ void VulkanRenderer::createNexusScoreImage(VkCommandPool pool, VkQueue queue) no
     };
 
     VkImageView rawView = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateImageView(StoneKey::stone_device(), &viewInfo, nullptr, &rawView));
+    VK_CHECK(vkCreateImageView(stone_device(), &viewInfo, nullptr, &rawView));
 
     // Wrap in RAII handles
-    hypertraceScoreImage_   = RTX::MakeHandle(rawImage,  StoneKey::stone_device(), vkDestroyImage,     0,           "NexusScoreImage");
-    hypertraceScoreMemory_  = RTX::MakeHandle(rawMemory, StoneKey::stone_device(), vkFreeMemory,       memReqs.size,"NexusScoreMemory");
-    hypertraceScoreView_    = RTX::MakeHandle(rawView,   StoneKey::stone_device(), vkDestroyImageView, 0,           "NexusScoreView");
+    hypertraceScoreImage_   = RTX::MakeHandle(rawImage,  stone_device(), vkDestroyImage,     0,           "NexusScoreImage");
+    hypertraceScoreMemory_  = RTX::MakeHandle(rawMemory, stone_device(), vkFreeMemory,       memReqs.size,"NexusScoreMemory");
+    hypertraceScoreView_    = RTX::MakeHandle(rawView,   stone_device(), vkDestroyImageView, 0,           "NexusScoreView");
 
     // ONE-TIME COMMAND BUFFER — THE PHOTONS DEMAND A CLEAN SLATE
     VkCommandBuffer cmd = RTX::beginOneTimeSubmit(pool);
@@ -1462,51 +1447,82 @@ void VulkanRenderer::onWindowResize(uint32_t width, uint32_t height) noexcept
         return;
     }
 
+    LOG_SUCCESS_CAT("RESIZE", "Window resize requested: {}×{} — Beginning full reconstruction", width, height);
+
+    // ────────────────────────────────────────────────────────────────────────
+    // 1. Wait for GPU to finish ALL work — non-negotiable
+    // ────────────────────────────────────────────────────────────────────────
     vkDeviceWaitIdle(stone_device());
 
-    // Reset accumulation
+    // ────────────────────────────────────────────────────────────────────────
+    // 2. Wait for all TLAS builds to finish (critical for safety)
+    // ────────────────────────────────────────────────────────────────────────
+    RTX::las().waitForAllFences();
+
+    // ────────────────────────────────────────────────────────────────────────
+    // 3. Reset accumulation — new resolution = fresh start
+    // ────────────────────────────────────────────────────────────────────────
     accumulationFrame_ = 0;
+    currentSpp_        = 0;
     resetAccumulation_ = true;
     resetAccumNextFrame_ = true;
-    currentSpp_ = 0;
 
+    // ────────────────────────────────────────────────────────────────────────
+    // 4. Destroy swapchain-dependent resources
+    // ────────────────────────────────────────────────────────────────────────
     cleanupFramebuffers();
     destroyRenderPass();
 
+    // ────────────────────────────────────────────────────────────────────────
+    // 5. Recreate swapchain
+    // ────────────────────────────────────────────────────────────────────────
     RTX::SwapchainManager::recreate(width, height);
 
+    // Update global stone seals
     stone_seal_width(width);
     stone_seal_height(height);
     stone_seal_extent({width, height});
 
+    // Update internal state
     width_  = static_cast<int>(width);
     height_ = static_cast<int>(height);
 
+    // ────────────────────────────────────────────────────────────────────────
+    // 6. Rebuild rendering pipeline
+    // ────────────────────────────────────────────────────────────────────────
     createRenderPass();
     createFramebuffers();
     recreateSwapchainDependentResources();
 
-    // CRITICAL: FREE AND RECREATE COMMAND BUFFERS — THE MISSING PIECE
+    // ────────────────────────────────────────────────────────────────────────
+    // 7. FULLY recreate command buffers — old ones are invalid
+    // ────────────────────────────────────────────────────────────────────────
     if (!commandBuffers_.empty()) {
         vkFreeCommandBuffers(stone_device(), RTX::g_ctx().commandPool_,
                              static_cast<uint32_t>(commandBuffers_.size()),
                              commandBuffers_.data());
         commandBuffers_.clear();
     }
-    createCommandBuffers();  // ← THIS WAS THE BREAK — NOW FIXED
+    createCommandBuffers();
 
+    // ────────────────────────────────────────────────────────────────────────
+    // 8. Reset in-flight fences
+    // ────────────────────────────────────────────────────────────────────────
+    if (!inFlightFences_.empty()) {
+        vkResetFences(stone_device(), 
+                      static_cast<uint32_t>(inFlightFences_.size()), 
+                      inFlightFences_.data());
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // 9. Finalize
+    // ────────────────────────────────────────────────────────────────────────
     g_resizeRequested.store(false, std::memory_order_release);
     s_resizeInProgress.store(false, std::memory_order_release);
 
-    LOG_SUCCESS_CAT("RESIZE", "Swapchain reborn {}×{} — Command buffers recreated — RTX eternal", width, height);
-}
-
-void VulkanRenderer::waitForAllFences() const noexcept
-{
-    if (!inFlightFences_.empty()) {
-        vkWaitForFences(stone_device(), inFlightFences_.size(), inFlightFences_.data(), VK_TRUE, UINT64_MAX);
-        vkResetFences(stone_device(), inFlightFences_.size(), inFlightFences_.data());
-    }
+    LOG_SUCCESS_CAT("RESIZE", 
+        "Swapchain reborn {}×{} — TLAS safe — Command buffers reborn — Accumulation reset — RTX ETERNAL", 
+        width, height);
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -1533,10 +1549,10 @@ void VulkanRenderer::createImage(RTX::Handle<VkImage>& image,
     };
 
     VkImage rawImg = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateImage(StoneKey::stone_device(), &info, nullptr, &rawImg));
+    VK_CHECK(vkCreateImage(stone_device(), &info, nullptr, &rawImg));
 
     VkMemoryRequirements reqs{};
-    vkGetImageMemoryRequirements(StoneKey::stone_device(), rawImg, &reqs);
+    vkGetImageMemoryRequirements(stone_device(), rawImg, &reqs);
 
     uint32_t memType = findMemoryType(reqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
@@ -1547,8 +1563,8 @@ void VulkanRenderer::createImage(RTX::Handle<VkImage>& image,
     };
 
     VkDeviceMemory rawMem = VK_NULL_HANDLE;
-    VK_CHECK(vkAllocateMemory(StoneKey::stone_device(), &alloc, nullptr, &rawMem));
-    VK_CHECK(vkBindImageMemory(StoneKey::stone_device(), rawImg, rawMem, 0));
+    VK_CHECK(vkAllocateMemory(stone_device(), &alloc, nullptr, &rawMem));
+    VK_CHECK(vkBindImageMemory(stone_device(), rawImg, rawMem, 0));
 
     VkImageViewCreateInfo vinfo{
         .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
@@ -1559,11 +1575,11 @@ void VulkanRenderer::createImage(RTX::Handle<VkImage>& image,
     };
 
     VkImageView rawView = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateImageView(StoneKey::stone_device(), &vinfo, nullptr, &rawView));
+    VK_CHECK(vkCreateImageView(stone_device(), &vinfo, nullptr, &rawView));
 
-    image  = RTX::MakeHandle(rawImg, StoneKey::stone_device(), vkDestroyImage, 0, name + "_Img");
-    memory = RTX::MakeHandle(rawMem, StoneKey::stone_device(), vkFreeMemory, reqs.size, name + "_Mem");
-    view   = RTX::MakeHandle(rawView, StoneKey::stone_device(), vkDestroyImageView, 0, name + "_View");
+    image  = RTX::MakeHandle(rawImg, stone_device(), vkDestroyImage, 0, name + "_Img");
+    memory = RTX::MakeHandle(rawMem, stone_device(), vkFreeMemory, reqs.size, name + "_Mem");
+    view   = RTX::MakeHandle(rawView, stone_device(), vkDestroyImageView, 0, name + "_View");
 
     const auto& ctx = RTX::g_ctx();
     VkCommandBuffer cmd = RTX::beginOneTimeSubmit(ctx.commandPool_);
@@ -1618,7 +1634,7 @@ void VulkanRenderer::createImageArray(std::vector<RTX::Handle<VkImage>>& images,
 
 void VulkanRenderer::destroyRenderPass() noexcept {
     if (renderPass_) {
-        vkDestroyRenderPass(StoneKey::stone_device(), renderPass_, nullptr);
+        vkDestroyRenderPass(stone_device(), renderPass_, nullptr);
         renderPass_ = VK_NULL_HANDLE;
     }
 }
@@ -1650,7 +1666,7 @@ void VulkanRenderer::createRenderPass() noexcept {
     renderPassInfo.subpassCount = 1;
     renderPassInfo.pSubpasses = &subpass;
 
-    VK_CHECK(vkCreateRenderPass(StoneKey::stone_device(), &renderPassInfo, nullptr, &renderPass_), "render pass");
+    VK_CHECK(vkCreateRenderPass(stone_device(), &renderPassInfo, nullptr, &renderPass_), "render pass");
 
 }
 

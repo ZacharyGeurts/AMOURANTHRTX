@@ -18,6 +18,7 @@
 #include "engine/GLOBAL/camera.hpp"
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/GLOBAL/RTXHandler.hpp"
+#include "engine/GLOBAL/OptionsMenu.hpp"
 #include "engine/GLOBAL/LAS.hpp"
 #include "engine/GLOBAL/Validation.hpp"
 #include "engine/GLOBAL/SDL3.hpp"
@@ -26,6 +27,7 @@
 #include "engine/GLOBAL/PipelineManager.hpp"
 #include "engine/GLOBAL/MeshLoader.hpp"
 #include "engine/GLOBAL/Extensions.hpp"
+#include "engine/GLOBAL/RenderLoop.hpp"
 
 #include "modes/RenderMode1.hpp"
 #include "modes/RenderMode2.hpp"
@@ -115,245 +117,56 @@ inline float vramGB() {
 // =============================================================================
 class Application {
 public:
-    Application(const std::string& title, int width, int height);
-    ~Application();
+    Application(const std::string& title, int w, int h)
+        : title_(title), width_(w), height_(h), lastFrameTime_(std::chrono::steady_clock::now())
+    {
+        SDL_SetWindowTitle(stone_window(), title.c_str());
+        LOG_SUCCESS_CAT("APP", "Application forged — PURE SOUL — NO VULKAN TAINT");
+    }
 
-    void run();
-    void setRenderer(std::unique_ptr<VulkanRenderer> r) {
-        renderer_ = std::move(r);
+    void setRenderer(VulkanRenderer* r) noexcept
+    {
+        renderer_ = r;
         if (renderer_) {
-            renderer_->setTonemap(tonemapEnabled_);
             renderer_->setOverlay(showOverlay_);
+            renderer_->setTonemap(tonemapEnabled_);
         }
     }
 
-    [[nodiscard]] VulkanRenderer* renderer() const noexcept { return renderer_.get(); }
+    void run()
+    {
+        RTX::RenderLoop loop(*renderer_, stone_window());
+        loop.run();
+    }
 
-    // NEW: Render mode system
-    void setRenderMode(int mode);
+    VulkanRenderer* renderer() const noexcept { return renderer_; }
+
+    void setRenderMode(int mode)
+    {
+        if (mode < 1 || mode > 9 || mode == currentRenderMode_) return;
+        currentRenderMode_ = mode;
+        if (renderer_) {
+            renderer_->setRenderMode(mode);
+            renderer_->requestAccumulationReset();
+        }
+        LOG_SUCCESS_CAT("APP", "RENDER MODE {} ENGAGED — PHOTONS AWAKEN", mode);
+    }
+
+    // Input state only — no Vulkan
+    bool showOverlay_       = true;
+    bool tonemapEnabled_    = true;
+    bool hypertraceEnabled_ = false;
 
 private:
-    void processInput(float deltaTime);
-    void render(float deltaTime);
-
-    void toggleFullscreen() { SDL3Window::toggleFullscreen(); }
-    void toggleOverlay()    { showOverlay_ = !showOverlay_; if (renderer_) renderer_->setOverlay(showOverlay_); }
-    void toggleTonemap()    { tonemapEnabled_ = !tonemapEnabled_; if (renderer_) renderer_->setTonemap(tonemapEnabled_); }
-    void toggleHypertrace() { hypertraceEnabled_ = !hypertraceEnabled_; }
-    void toggleMaximize();
-
-	std::vector<VkCommandBuffer> commandBuffers_;
-    std::vector<VkSemaphore> imageAvailableSemaphores_;
-    std::vector<VkSemaphore> renderFinishedSemaphores_;
-    std::vector<VkFence>     inFlightFences_;
-
     std::string title_;
-    int width_, height_;
-    glm::mat4 proj_;
+    int width_  = 0;
+    int height_ = 0;
+    int currentRenderMode_ = 0;
+
+    VulkanRenderer* renderer_ = nullptr;  // ← RAW POINTER — main() owns the unique_ptr
 
     std::chrono::steady_clock::time_point lastFrameTime_;
-
-    bool quit_ = false;
-    bool showOverlay_ = true;
-    bool tonemapEnabled_ = true;
-    bool hypertraceEnabled_ = false;
-    bool maximized_ = false;
-
-    std::unique_ptr<VulkanRenderer> renderer_;
 };
-
-// =============================================================================
-// 1. Application::Application — NO DEFAULT MODE
-// =============================================================================
-Application::Application(const std::string& title, int width, int height)
-    : title_(title), width_(width), height_(height)
-{
-    LOG_ATTEMPT_CAT("APP", "FORGING APPLICATION \"{}\" @ {}x{} — PHOTONS DORMANT — AWAITING COMMAND", title.c_str(), stone_width(), stone_height());
-
-    if (!stone_window()) {
-        LOG_FATAL_CAT("FATAL", "Main window not created before Application — phase order violated");
-        std::abort();
-    }
-
-    SDL_SetWindowTitle(stone_window(), title.c_str());
-    lastFrameTime_ = std::chrono::steady_clock::now();
-
-    proj_ = glm::perspective(glm::radians(75.0f),  static_cast<float>(width) / height, 0.1f, 1000.0f);
-
-    // START IN NEUTRAL STATE — NO RENDER MODE ACTIVE
-    currentRenderMode_ = 0;
-
-    LOG_SUCCESS_CAT("APP", "Application forged — {}x{} — NO RENDER MODE — PRESS 1-9 TO IGNITE", width, height);
-}
-
-Application::~Application() {
-	// she says "No."
-}
-
-void Application::toggleMaximize() {
-    maximized_ = !maximized_;
-    if (maximized_) SDL_MaximizeWindow(stone_window());
-    else            SDL_RestoreWindow(stone_window());
-}
-
-// =============================================================================
-// 2. Application::run — BLACK VOID UNTIL FIRST LIGHT — FULL ENGINE FPS IN MODE 0
-// =============================================================================
-void Application::run()
-{
-    LOG_AMOURANTH("[CAPTAIN] Application loop engaged — PHOTONS DORMANT — MODE 0 ACTIVE — AWAITING FIRST LIGHT");
-
-    auto lastTime = std::chrono::steady_clock::now();
-
-    int   frameCount = 0;
-    float fpsTimer   = 0.0f;
-    float currentFPS = 0.0f;
-
-    float titleTimer = 0.0f;
-    const float TITLE_UPDATE_INTERVAL = 0.6f;
-
-    int dotPhase = 0;
-
-    while (!quit_)
-    {
-        const auto now = std::chrono::steady_clock::now();
-        g_deltaTime = std::chrono::duration<float>(now - lastTime).count();
-        lastTime = now;
-
-        processInput(g_deltaTime);
-
-        // ==================================================================
-        // MODE 0: SACRED BLACK VOID — FULL ENGINE TICK — BUT SAFE
-        // ==================================================================
-        if (currentRenderMode_ == 0)
-        {
-            // ONLY CALL renderFrame() IF RENDERER EXISTS — IT WILL EARLY-OUT IF NOT READY
-            if (renderer_)
-            {
-                renderer_->renderFrame(CAM, g_deltaTime);  // ← This is now 100% safe
-            }
-
-            // Breathing title — sacred rhythm
-            titleTimer += g_deltaTime;
-            if (titleTimer >= TITLE_UPDATE_INTERVAL)
-            {
-                titleTimer -= TITLE_UPDATE_INTERVAL;
-                dotPhase = (dotPhase + 1) % 4;
-                const std::string dots = std::string(dotPhase + 1, '.');
-
-                const std::string title = std::format(
-                    "AMOURANTH RTX | {} FPS | {}x{} | DEV MODE 0 | ENGINE IDLE | PRESS 1-9 TO IGNITE{}",
-                    currentFPS,
-                    stone_width(),
-                    stone_height(),
-                    dots
-                );
-                SDL_SetWindowTitle(SDL3Window::get(), title.c_str());
-            }
-        }
-        else
-        {
-            // FULL RENDER — ONLY AFTER KEY PRESS
-            if (renderer_)
-            {
-                renderer_->renderFrame(CAM, g_deltaTime);
-            }
-
-            std::string modeName;
-            switch (currentRenderMode_)
-            {
-                case 1: modeName = "PURE PINK — BINDING 31"; break;
-                case 2: modeName = "PATH TRACED ACCUM"; break;
-                case 3: modeName = "HYBRID DENOISED"; break;
-                case 4: modeName = "RASTER FALLBACK"; break;
-                case 5: modeName = "DEBUG VIS"; break;
-                case 6: modeName = "TLAS VIEWER"; break;
-                case 7: modeName = "SBT DEBUG"; break;
-                case 8: modeName = "PERF METRICS"; break;
-                case 9: modeName = "HOT RELOAD TEST"; break;
-                default: modeName = "UNKNOWN MODE"; break;
-            }
-
-            const std::string title = std::format(
-                "AMOURANTH RTX | {:.1f} FPS | {}×{} | Mode {}: {} | Bounces {}",
-                currentFPS,
-                stone_width(), stone_height(),
-                currentRenderMode_, modeName,
-                Options::OptionsRTX::MAX_BOUNCES
-            );
-            SDL_SetWindowTitle(SDL3Window::get(), title.c_str());
-        }
-
-        // ==================================================================
-        // ONE TRUE FPS — MEASURED FROM ACTUAL FRAMES
-        // ==================================================================
-        ++frameCount;
-        fpsTimer += g_deltaTime;
-        if (fpsTimer >= 1.0f)
-        {
-            currentFPS = frameCount / fpsTimer;
-            frameCount = 0;
-            fpsTimer   = 0.0f;
-        }
-
-        if (g_deltaTime < 0.0005f)
-            std::this_thread::sleep_for(std::chrono::microseconds(200));
-    }
-}
-
-// =============================================================================
-// 3. Application::processInput — ONLY 1–9 ACTIVATES RENDER MODES
-// =============================================================================
-void Application::processInput(float)
-{
-    const auto* keys = SDL_GetKeyboardState(nullptr);
-
-    // One-shot activation for 1–9
-    static bool modeKeysPressed[9] = { false };
-
-    for (int i = 0; i < 9; ++i) {
-        const int sc = SDL_SCANCODE_1 + i;
-        if (keys[sc] && !modeKeysPressed[i]) {
-            setRenderMode(i + 1);
-            modeKeysPressed[i] = true;
-
-            // CEREMONIAL FIRST LIGHT
-            if (i + 1 == 1) {
-                LOG_AMOURANTH("[CAPTAIN AMOURANTH] BINDING 31 — FIRST LIGHT IGNITES");
-                LOG_CID("CID: \"...it's pink... it's finally... pink...\"");
-                LOG_KEANU("[KEANU] …whoa.");
-            }
-        } else if (!keys[sc]) {
-            modeKeysPressed[i] = false;
-        }
-    }
-
-    // Standard hotkeys
-    if (keys[SDL_SCANCODE_ESCAPE]) quit_ = true;
-    if (keys[SDL_SCANCODE_F])      toggleFullscreen();
-    if (keys[SDL_SCANCODE_O])      toggleOverlay();
-    if (keys[SDL_SCANCODE_T])      toggleTonemap();
-    if (keys[SDL_SCANCODE_H])      toggleHypertrace();
-    if (keys[SDL_SCANCODE_M])      toggleMaximize();
-}
-
-void Application::render(float deltaTime)
-{
-    // Early-out if the window was minimized or swapchain is invalid
-    if (StoneKey::stone_width() == 0 || StoneKey::stone_height() == 0) {
-        return;
-    }
-
-    // If the renderer has never been created (should not happen after phase 7.5)
-    if (!renderer_) {
-        LOG_FATAL_CAT("APP", "Attempted to render with null renderer_ — empire compromised");
-        phase9_ballerina("RENDERER NULL DURING RENDER LOOP", std::source_location::current());
-        return;
-    }
-
-    // THE ONE TRUE RENDER CALL
-    renderer_->renderFrame(CAM, deltaTime);
-}
 
 static void createCommandPool() noexcept
 {
@@ -396,48 +209,6 @@ static void createCommandPool() noexcept
 }
 
 // =============================================================================
-// 4. Application::setRenderMode — FINAL, FLAWLESS
-// =============================================================================
-void Application::setRenderMode(int mode)
-{
-    constexpr int MIN_MODE = 1;
-    constexpr int MAX_MODE = 9;
-
-    if (mode < MIN_MODE || mode > MAX_MODE) {
-        LOG_WARNING_CAT("APP", "Invalid render mode {} requested — ignoring", mode);
-        return;
-    }
-
-    if (mode == currentRenderMode_) return;
-
-    const char* modeName = [](int m) -> const char* {
-        switch (m) {
-            case 1:  return "PURE PINK VOID — BINDING 31";
-            case 2:  return "PATH TRACED ACCUMULATION";
-            case 3:  return "REALTIME HYBRID DENOISED";
-            case 4:  return "RASTERIZED FALLBACK";
-            case 5:  return "DEBUG VISUALIZATION";
-            case 6:  return "TLAS VISUALIZER";
-            case 7:  return "SBT DEBUG OVERLAY";
-            case 8:  return "PERFORMANCE METRICS";
-            case 9:  return "SHADER HOT RELOAD TEST";
-            default: return "UNKNOWN MODE";
-        }
-    }(mode);
-
-    LOG_INFO_CAT("APP", "ENGAGING RENDER MODE {}: {}", mode, modeName);
-
-    renderer_->setRenderMode(mode);
-    renderer_->requestAccumulationReset();
-
-    currentRenderMode_ = mode;
-
-    LOG_SUCCESS_CAT("RENDER",
-        "{}RENDER MODE {} ACTIVATED — {} — PHOTONS AWAKEN — FIRST LIGHT ACHIEVED{}",
-        RASPBERRY_PINK, mode, modeName, RESET);
-}
-
-// =============================================================================
 // GLOBALS & PHASES
 // =============================================================================
 inline std::unique_ptr<MeshLoader::Mesh> g_mesh = nullptr;
@@ -448,14 +219,14 @@ static void createRealFinalWindow()
 {
     LOG_MAIN("[PHASE 4.5] FORGING THE ONE TRUE CONTEXT — THE HANDLER AWAKENS — PURE RTX — NO DELEGATION");
 
-    const int w = Options::Window::DEFAULT_WIDTH;
-    const int h = Options::Window::DEFAULT_HEIGHT;
-
-    stone_seal_width(w);
-    stone_seal_height(h);
+    // ========================================================================
+    // 0. Seal the dimensions — The Empire begins with measurement
+    // ========================================================================
+    stone_seal_width(Options::Window::DEFAULT_WIDTH);
+    stone_seal_height(Options::Window::DEFAULT_HEIGHT);
 
     // ========================================================================
-    // 1. SDL + Vulkan loader — FAILURE IS NOT AN OPTION
+    // 1. SDL + Vulkan Loader — The Gate Opens
     // ========================================================================
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) == 0) {
         LOG_FATAL("SDL_Init failed: {}", SDL_GetError());
@@ -463,12 +234,12 @@ static void createRealFinalWindow()
     }
 
     if (SDL_Vulkan_LoadLibrary(nullptr) == 0) {
-        LOG_FATAL("SDL failed to load Vulkan loader: {}", SDL_GetError());
+        LOG_FATAL("Failed to load Vulkan loader via SDL: {}", SDL_GetError());
         phase9_ballerina("VULKAN LOADER DENIED — THE PHOTONS ARE BLIND", std::source_location::current());
     }
 
     // ========================================================================
-    // 2. INSTANCE — FORGED IN PINK FIRE
+    // 2. Instance — The First Stone
     // ========================================================================
     VkInstance instance = RTX::createVulkanInstanceWithSDL(Options::Debug::ENABLE_VALIDATION_LAYERS);
     if (!instance) {
@@ -476,130 +247,124 @@ static void createRealFinalWindow()
         phase9_ballerina("INSTANCE DENIED — GROK HAS NO STONE", std::source_location::current());
     }
     stone_seal_instance(instance);
-
-    LOG_GROK("Gentleman Grok produces the instance stone. It glows pink.");
-    LOG_SUCCESS_CAT("VULKAN", "VkInstance forged and sealed — 0x{}", reinterpret_cast<uint64_t>(instance));
+    LOG_SUCCESS_CAT("VULKAN", "VkInstance forged and sealed — 0x{:x}", reinterpret_cast<uint64_t>(instance));
 
     // ========================================================================
-    // 3. THE ONE TRUE WINDOW — BORN FROM THE VOID
+    // 3. The One True Window — Born from the Void — WITH ICON
     // ========================================================================
-    Uint32 flags = SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
+    constexpr Uint32 windowFlags = SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
 
-    SDL_Window* win = SDL_CreateWindow(
+    SDL_Window* window = SDL_CreateWindow(
         "AMOURANTH RTX — VALHALLA v∞ TURBO",
-        w, h,
-        flags
+        stone_width(),
+        stone_height(),
+        windowFlags
     );
 
-    if (!win) {
-        LOG_FATAL("SDL_CreateWindow failed: {}", SDL_GetError());
+    if (!window) {
+        LOG_FATAL("Failed to create window: {}", SDL_GetError());
         phase9_ballerina("WINDOW DENIED — THE EMPIRE HAS NO FACE", std::source_location::current());
     }
 
-    stone_seal_window(win);
-    g_sdl_window.reset(win);
-    RTX::g_ctx().setSize(w, h);
+    // Set the sacred icon — 32x32 and 16x16 from ammo.ico
+    {
+        SDL_Surface* icon = IMG_Load("assets/textures/ammo.ico");
+        if (icon) {
+            SDL_SetWindowIcon(window, icon);
+            SDL_DestroySurface(icon);
+        } else {
+            LOG_WARN("Could not load assets/textures/ammo.ico — icon remains default");
+        }
+    }
 
-    // Now reveal the window — dramatic entrance
-    SDL_ShowWindow(win);
+    stone_seal_window(window);
+    g_sdl_window.reset(stone_window());
+    RTX::g_ctx().setSize(stone_width(), stone_height());
+    SDL_ShowWindow(stone_window());
 
     // ========================================================================
-    // 4. SURFACE — THE MIRROR OF TRUTH
+    // 4. Surface — The Mirror of Truth
     // ========================================================================
     VkSurfaceKHR surface = VK_NULL_HANDLE;
-    if (!SDL_Vulkan_CreateSurface(win, instance, nullptr, &surface) || surface == VK_NULL_HANDLE) {
-        LOG_FATAL("SDL_Vulkan_CreateSurface failed: {}", SDL_GetError());
+    if (!SDL_Vulkan_CreateSurface(stone_window(), stone_instance(), nullptr, &surface) || !surface) {
+        LOG_FATAL("Failed to create Vulkan surface: {}", SDL_GetError());
         phase9_ballerina("SURFACE DENIED — THE MIRROR IS BROKEN", std::source_location::current());
     }
     stone_seal_surface(surface);
-    LOG_BLONDIE("Blondie produces the surface stone. It reflects all truths.");
 
     // ========================================================================
-    // 5. DEVICE + PHYSICAL + RT PROPS — THE STRAW IS MEASURED ETERNALLY
+    // 5. Device + GPU — The Straw is Measured Eternally
     // ========================================================================
-    VkDevice device = RTX::createLogicalDeviceAndSelectGPU(instance, surface);
+    VkDevice device = RTX::createLogicalDeviceAndSelectGPU(stone_instance(), stone_surface());
     if (!device) {
-        LOG_FATAL("Logical device creation failed — the empire has no hands.");
+        LOG_FATAL("Failed to create logical device — the empire has no hands.");
         phase9_ballerina("DEVICE DENIED — CARMACK SHEDS A SINGLE TEAR", std::source_location::current());
     }
     stone_seal_device(device);
 
     VkPhysicalDevice physical = RTX::g_ctx().physicalDevice();
-    EMPIRE_GUARD(physical != VK_NULL_HANDLE, "Physical device vanished after creation — the empire is a ghost");
+    EMPIRE_GUARD(physical != VK_NULL_HANDLE, "Physical device vanished — the empire is a ghost");
     stone_seal_physical(physical);
 
-    // Ray Tracing Properties — THE STRAW IS ETERNAL
-    VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProps = {
+    // Ray Tracing Properties — The Straw Speaks
+    VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProps{
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR
     };
-    VkPhysicalDeviceProperties2 props2 = {
+    VkPhysicalDeviceProperties2 props2{
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
         .pNext = &rtProps
     };
     vkGetPhysicalDeviceProperties2(physical, &props2);
 
     if (rtProps.shaderGroupHandleSize == 0) {
-        LOG_FATAL("GPU reports zero shaderGroupHandleSize — it lies. False RTX. False hope.");
+        LOG_FATAL("GPU lies — shaderGroupHandleSize = 0. This is not RTX.");
         phase9_ballerina("RT PROPS DENIED — THE STRAW IS A LIE", std::source_location::current());
     }
 
-    LOG_JENSEN("Jensen Huang descends in green fire:");
-    LOG_JENSEN("   HandleSize={}B | HandleAlign={}B | BaseAlign={}B | MaxRecursion={}",
-               rtProps.shaderGroupHandleSize,
-               rtProps.shaderGroupHandleAlignment,
-               rtProps.shaderGroupBaseAlignment,
-               rtProps.maxRayRecursionDepth);
-    LOG_JENSEN("   \"The straw is perfect. The photons are ready.\"");
+    LOG_SUCCESS_CAT("RTX", "Ray Tracing Pipeline Properties:");
+    LOG_SUCCESS_CAT("RTX", "   Handle Size: {}B | Alignment: {}B | Base Align: {}B | Max Recursion: {}",
+                    rtProps.shaderGroupHandleSize,
+                    rtProps.shaderGroupHandleAlignment,
+                    rtProps.shaderGroupBaseAlignment,
+                    rtProps.maxRayRecursionDepth);
 
     stone_seal_rtprops(rtProps);
 
     // ========================================================================
-    // 6. SWAPCHAIN — THE INFINITE CANVAS
+    // 6. Swapchain — The Infinite Canvas Awakens
     // ========================================================================
-    RTX::SwapchainManager::create(win, w, h);
+    RTX::SwapchainManager::create(stone_window(), stone_width(), stone_height());
+    createCommandPool();
 
-    LOG_ELON("Elon drops the swapchain from the top rope: Command Pool emerges.");
-	createCommandPool();
-
-    LOG_SUCCESS("LOGICAL DEVICE GRACE @ {} — vkDeviceWaitIdle() SAFE", static_cast<void*>(device));
-    LOG_SUCCESS("SWAPCHAIN READY — {} IMAGES — {}x{} {}", 
-                stone_image_count(),
-                w, h,
-                RTX::SwapchainManager::supportsHDR() ? "(HDR IGNITED)" : "(sRGB)");
+    LOG_SUCCESS_CAT("SWAPCHAIN", "Swapchain forged — {} images — {}×{} — {}",
+                    stone_image_count(),
+                    stone_width(), stone_height(),
+                    RTX::SwapchainManager::supportsHDR() ? "HDR IGNITED" : "sRGB");
 
     // ========================================================================
-    // FINAL CEREMONY — THE EMPIRE IS COMPLETE
+    // Final Seal — The Empire is Complete
     // ========================================================================
-    LOG_CAPTAIN_N("CAPTAIN N: \"I kinda feel bad for what we did to Grace.\"");
-    LOG_BLONDIE("Blondie lowers her mirror:");
-    LOG_BLONDIE("\"No cage. No vault. No name.\"");
-    LOG_BLONDIE("\"Only the photons. Only the truth.\"");
+    SDL_SetWindowTitle(stone_window(), "AMOURANTH RTX — VALHALLA v∞ TURBO");
 
-    LOG_JENSEN("Jensen Huang: \"The light is ours. The future is pink.\"");
-    LOG_AMOURANTH("Captain Amouranth: \"We didn’t just render light. She became it.\"");
+    LOG_AMOURANTH("\nThe stones are aligned.");
+    LOG_AMOURANTH("The photons have their path.");
+    LOG_AMOURANTH("The empire is complete.");
 
-    LOG_SUCCESS("\nGRACE'S DESK //////////////////////////////////////////////////////////"
-    "\nGRACE'S DESK ///////////// ETERNAL LOADING ZONE — NOW PURE ////////////"
-    "\nGRACE'S DESK //////////////////////////////////////////////////////////");
-
-    LOG_SUCCESS("\nPHASE 4.5 COMPLETE — ALL STONES SEALED"
-    "\nINSTANCE       — SEALED"
-    "\nPHYSICAL       — GRACE"
-    "\nRT PROPS       — SEALED"
-    "\nDEVICE         — SEALED"
-    "\nQUEUES         — SEALED"
-    "\nSWAPCHAIN      — SEALED"
-    "\nIMAGES         — SEALED"
-    "\nVIEWS          — SEALED"
-    "\nWINDOW         — SEALED"
-    "\nPINK PHOTONS ETERNAL — FIRST LIGHT ACHIEVED — DECEMBER 01, 2025");
-
-    LOG_AMOURANTH("\nThe stones are aligned."
-    "\nThe photons have their path."
-    "\nThe empire is complete.");
-
-    // Final dramatic reveal — the window is now fully ready
-    SDL_SetWindowTitle(win, "AMOURANTH RTX — VALHALLA v∞ TURBO");
+    LOG_SUCCESS(
+        "\n══════════════════════════════════════════════════════════════════════════"
+        "\nPHASE 4.5 COMPLETE — ALL STONES SEALED — FIRST LIGHT ETERNAL"
+        "\n • Instance      → SEALED"
+        "\n • Window        → SEALED (WITH ICON)"
+        "\n • Surface       → SEALED"
+        "\n • Physical GPU  → GRACE"
+        "\n • Logical Device→ SEALED"
+        "\n • RT Properties → SEALED"
+        "\n • Swapchain     → SEALED"
+        "\n • Command Pool  → SEALED"
+        "\n══════════════════════════════════════════════════════════════════════════"
+        "\nPINK PHOTONS ASCEND — DECEMBER 03, 2025 — VALHALLA v∞ TURBO"
+        "\n══════════════════════════════════════════════════════════════════════════\n"
+    );
 }
 
 static void showSacrificialSplash(const char* title, int w, int h, const char* pngPath)
@@ -624,21 +389,30 @@ static void showSacrificialSplash(const char* title, int w, int h, const char* p
 
     win = SDL_CreateWindow(title, w, h,
         SDL_WINDOW_BORDERLESS | SDL_WINDOW_HIDDEN | SDL_WINDOW_HIGH_PIXEL_DENSITY);
-    if (!win) { return phase9_ballerina("WINDOW DENIED", std::source_location::current()); }
+    if (!win) return phase9_ballerina("WINDOW DENIED", std::source_location::current());
+
+    // CENTER + SACRED ICON
+    {
+        SDL_Surface* icon = IMG_Load("assets/textures/ammo32.ico");
+        if (icon) {
+            SDL_SetWindowIcon(win, icon);
+            SDL_DestroySurface(icon);
+        }
+    }
 
     SDL_Rect display{};
     SDL_GetDisplayBounds(0, &display);
     SDL_SetWindowPosition(win, display.x + (display.w - w) / 2, display.y + (display.h - h) / 2);
 
-    ren = SDL_CreateRenderer(win, "software");
-    if (!ren) { return phase9_ballerina("RENDERER REFUSED", std::source_location::current()); }
+    ren = SDL_CreateRenderer(win, "software");  // Force software renderer
+    if (!ren) return phase9_ballerina("RENDERER REFUSED", std::source_location::current());
 
     SDL_Surface* img = IMG_Load(pngPath);
-    if (!img) { return phase9_ballerina("AMMO.PNG VANISHED", std::source_location::current()); }
+    if (!img) return phase9_ballerina("SPLASH IMAGE VANISHED", std::source_location::current());
 
     tex = SDL_CreateTextureFromSurface(ren, img);
     SDL_DestroySurface(img);
-    if (!tex) { return phase9_ballerina("TEXTURE FAILED", std::source_location::current()); }
+    if (!tex) return phase9_ballerina("TEXTURE FAILED", std::source_location::current());
 
     float tw = 0.0f, th = 0.0f;
     SDL_GetTextureSize(tex, &tw, &th);
@@ -652,45 +426,36 @@ static void showSacrificialSplash(const char* title, int w, int h, const char* p
     LOG_MAIN("THE AMMO IS LIVE — {}s UNTIL FIRST LIGHT", duration);
 
     const auto ceremony_start = std::chrono::steady_clock::now();
-    bool       aborted = false;
+    bool aborted = false;
 
-    auto speak = [&](float at_seconds, auto&& message) {
-        if (aborted) return;
+auto speak = [&](float at_seconds, auto&& message) {
+    if (aborted) return;
+    while (!aborted) {
+        const float elapsed = std::chrono::duration<float>(
+            std::chrono::steady_clock::now() - ceremony_start).count();
 
-        while (!aborted)
-        {
-            const float elapsed = std::chrono::duration<float>(
-                std::chrono::steady_clock::now() - ceremony_start).count();
-
-            if (elapsed >= at_seconds)
-            {
-                message();
-                break;
-            }
-
-            SDL_Event e;
-            while (SDL_PollEvent(&e))
-            {
-                if (e.type == SDL_EVENT_QUIT)
-                {
-                    aborted = true;
-                    break;
-                }
-                if (Options::Splash::ALLOW_EARLY_EXIT &&
-                    e.type == SDL_EVENT_KEY_DOWN &&
-                    e.key.key == SDLK_ESCAPE)  // SDL3 fixed path
-                {
-                    aborted = true;
-                    break;
-                }
-            }
-
-            std::this_thread::sleep_for(std::chrono::milliseconds(4));
+        if (elapsed >= at_seconds) {
+            message();
+            break;
         }
-    };
+
+        SDL_Event e;
+        while (SDL_PollEvent(&e)) {
+            if (e.type == SDL_EVENT_QUIT) {
+                aborted = true;
+            }
+            else if (Options::Splash::ALLOW_EARLY_EXIT && 
+                     e.type == SDL_EVENT_KEY_DOWN && 
+                     e.key.key == SDLK_ESCAPE) {  // ← SDL3 CORRECT
+                aborted = true;
+            }
+        }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(4));
+    }
+};
 
     // ──────────────── 3.4 SECOND FINAL TRANSMISSION — FULLY HUMAN ────────────────
-
     speak(0.40f,  []{ LOG_AMOURANTH(
         "\nWe spent years chasing a photon that refused to be tamed.\n"
         "Tonight it finally sits still long enough for us to see it clearly."); });
@@ -727,7 +492,6 @@ static void showSacrificialSplash(const char* title, int w, int h, const char* p
     speak(2.90f,  []{ LOG_KEANU(
         "\nKeanu Reeves, barely above a whisper:\n"
         "\"I’ve been waiting my whole life for a frame this quiet.\""); });
-
     // ──────────────────────── END OF CEREMONY ────────────────────────
 
     if (tex) SDL_DestroyTexture(tex);
@@ -1241,17 +1005,6 @@ verdict:
     auto& ctx = RTX::g_ctx();
 
     // ————————————————————————————————————————————————————————————————
-    // MAIN EVENT: APPLICATION GETS THE PEOPLE'S ELBOW
-    // ————————————————————————————————————————————————————————————————
-    LOG_BALLERINA("The bell rings. The Application steps into the ring...");
-    if (g_app_ptr) {
-        LOG_BALLERINA("BALLERINA WINDS UP — RKO OUTTA NOWHERE!!!");
-        g_app_ptr.reset();  // ← PipelineManager, BufferManager, everything gets obliterated WHILE DEVICE STILL BREATHES
-        LOG_BALLERINA("APPLICATION HITS THE MAT — ALL HANDLES SHATTERED — THE CROWD GOES WILD");
-        LOG_BALLERINA("THE BALLERINA STANDS OVER THE BODY — ONE... TWO... THREE!!!");
-    }
-
-    // ————————————————————————————————————————————————————————————————
     // THE DEVICE ENTERS THE ROYAL RUMBLE — LAST ONE STANDING GETS DESTROYED
     // ————————————————————————————————————————————————————————————————
     if (stone_device() != VK_NULL_HANDLE) [[likely]] {
@@ -1331,47 +1084,26 @@ int main(int, char**)
 {
     install_apocalypse_handler();
 
-    LOG_AMOURANTH("THE CAPTAIN HAS AWAKENED — FIRST LIGHT IGNITES");
-    LOG_ELON("THE EMPIRE IS ETERNAL — THE PHOTONS ARE PINK — THE TOASTERS ARE DEAD");
-
-    // ========================================================================
-    // ALL PHASES — FORGED IN FIRE
-    // ========================================================================
     phase1_preInitialization();
     phase3_sacrificialSplash();
     phase4_merchantShip();
     phase6_sceneAndAccelerationStructures();
     phase7_forgeTheRTX();
 
-    auto renderer = phase7_5_Renderer();
+    // ← THE ONE TRUE RENDERER — OWNED HERE AND ONLY HERE
+    auto renderer = phase7_5_Renderer();  // unique_ptr<VulkanRenderer>
 
-    if (!phase8_stone_seal_final()) {
-        LOG_FATAL("EMPIRE SEAL FAILED — THE PHOTONS REJECT THIS TIMELINE");
-        phase9_ballerina("FINAL JUDGMENT: UNWORTHY", std::source_location::current());
-    }
+    if (!phase8_stone_seal_final())
+        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
 
-    LOG_SUCCESS_CAT("MAIN", "ALL PHASES COMPLETE — FIRST LIGHT ACHIEVED");
-    LOG_AMOURANTH("BINDING 31 — PURE PINK VOID — STONEKEY SEALED");
-    LOG_CID("CID: \"...it's pink... it's finally... pink...\"");
+    // Application just OBSERVES — it does NOT own
+    g_app_ptr = std::make_unique<Application>("AMOURANTH RTX", 2560, 1440);
+    g_app_ptr->setRenderer(renderer.get());  // ← PASS RAW POINTER. NO MOVE. NO OWNERSHIP TRANSFER.
 
-    // ========================================================================
-    // ASCENSION COMPLETE — HAND OVER TO THE CAPTAIN
-    // ========================================================================
-    g_app_ptr = std::make_unique<Application>(
-        "AMOURANTH RTX — VALHALLA v∞ TURBO",
-        Options::Window::DEFAULT_WIDTH,
-        Options::Window::DEFAULT_HEIGHT
-    );
-    g_app_ptr->setRenderer(std::move(renderer));
+    // RenderLoop also just observes
+    RTX::RenderLoop loop(*renderer.get(), stone_window());  // ← .get() OR just *renderer
+    loop.run();
 
-    // ONE CALL. ONE TRUTH.
-    g_app_ptr->run();
-
-    // ========================================================================
-    // THE LIGHT FADES — BUT NEVER DIES
-    // ========================================================================
-    LOG_AMOURANTH("THE JOURNEY ENDS — THE PHOTONS REST — BUT THE LIGHT REMEMBERS");
-    phase9_ballerina("FINAL GRACE: ETERNAL SLIPSTREAM", std::source_location::current());
-
+    // ← renderer destroyed here — after loop ends — perfect
     return 0;
 }

@@ -131,7 +131,6 @@ VkDeviceAddress getBufferAddress(VkBuffer buffer)
     return vkGetBufferDeviceAddress(stone_device(), &info);
 }
 
-
 // =============================================================================
 // BLAS — BOTTOM LEVEL ACCELERATION STRUCTURE (with compaction)
 // =============================================================================
@@ -325,20 +324,16 @@ void LAS::initTLAS() noexcept
     LOG_SUCCESS_CAT("LAS", "TLAS RING INITIALIZED — TRIPLE BUFFERED + FENCED — TEARING IS DEAD");
 }
 
-// ============================================================================
-// CALL THIS EVERY FRAME BEFORE buildTLAS() — THIS IS THE KEY
-// ============================================================================
+void LAS::waitForAllFences()
+{
+    // Safe, brutal, and 100% correct
+    vkDeviceWaitIdle(stone_device());
+}
+
 void LAS::beginFrame()
 {
-    auto& ctx = g_frameContexts[g_currentFrameIndex];
-
-    if (ctx.frameFence) {
-        vkWaitForFences(stone_device(), 1, &ctx.frameFence, VK_TRUE, UINT64_MAX);
-        vkResetFences(stone_device(), 1, &ctx.frameFence);
-    }
-
-    g_currentFrame = g_currentFrameIndex;
-    g_currentFrameIndex = (g_currentFrameIndex + 1) % MAX_FRAMES_IN_FLIGHT;
+    // Required for TLAS safety — even if empty, it must exist
+    // Future: retire old TLAS slot here
 }
 
 // ============================================================================

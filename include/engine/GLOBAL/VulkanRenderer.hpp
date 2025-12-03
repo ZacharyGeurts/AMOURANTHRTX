@@ -39,8 +39,6 @@ struct Camera;
 using namespace Logging::Color;
 using StoneKey::stone_renderer;
 
-[[nodiscard]] static inline VkCommandPool& g_commandPool() noexcept { return RTX::g_ctx().commandPool_; }
-
 enum class FpsTarget : uint32_t {
     FPS_60        = 60,
     FPS_120       = 120,
@@ -57,6 +55,9 @@ public:
     void cleanup() noexcept;
     void createCommandPool() noexcept;
 	void createCommandBuffers() noexcept;
+
+    VkFence  inFlightFence(uint32_t frame) const noexcept { return inFlightFences_[frame]; }
+    VkFence* inFlightFencePtr(uint32_t frame) noexcept     { return &inFlightFences_[frame]; }
 
     void toggleHypertrace() noexcept;
     void toggleFpsTarget() noexcept;
@@ -92,6 +93,7 @@ public:
     [[nodiscard]] FpsTarget fpsTarget()         const noexcept { return fpsTarget_; }
     [[nodiscard]] bool      minimized()         const noexcept { return minimized_; }
     [[nodiscard]] int       currentRenderMode() const noexcept { return activeRenderMode_; }
+
     void recordRayTrace(VkCommandBuffer cmd, const VkExtent2D& extent) noexcept;
 	static inline std::atomic<bool> s_resizeInProgress{false};
     bool     resetAccumulation_ = true;

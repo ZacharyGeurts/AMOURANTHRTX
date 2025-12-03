@@ -70,6 +70,8 @@ namespace StoneKey {
             .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR
         };
 
+        static inline std::vector<VkCommandBuffer> commandBuffers;
+
         static inline std::atomic<bool> sealed{ false };
     };
 
@@ -107,6 +109,9 @@ namespace StoneKey {
 
     [[nodiscard]] inline VkPhysicalDeviceRayTracingPipelinePropertiesKHR& stone_rtprops() noexcept { return Empire::rtProps; }
 
+    [[nodiscard]] inline auto& stone_commandbuffers() noexcept { return Empire::commandBuffers; }
+    [[nodiscard]] inline VkCommandBuffer& stone_commandbuffer(uint32_t i) noexcept { return Empire::commandBuffers[i]; }
+
     struct StoneMesh {
         VkBuffer       vertexBuffer;
         VkDeviceMemory vertexMemory;
@@ -125,7 +130,7 @@ namespace StoneKey {
         };
     }
 
-    // SEALERS — NOW ACCEPTS BOTH LVALUE AND RVALUE — EMPIRE IS MERCIFUL
+    // SEALERS — ACCEPT BOTH LVALUE AND RVALUE REFERENCES
     inline void stone_seal_instance(VkInstance i) noexcept { Empire::instance = i; }
     inline void stone_seal_device(VkDevice d) noexcept { Empire::device = d; }
     inline void stone_seal_physical(VkPhysicalDevice p) noexcept { Empire::physical = p; }
@@ -149,12 +154,14 @@ namespace StoneKey {
     inline void stone_seal_width(uint32_t w) noexcept { Empire::extent.width = w; }
     inline void stone_seal_height(uint32_t h) noexcept { Empire::extent.height = h; }
 
-    // FIXED: Now accepts both const& and &&
     inline void stone_seal_images(const std::vector<VkImage>& imgs) noexcept { Empire::images = imgs; }
     inline void stone_seal_images(std::vector<VkImage>&& imgs) noexcept       { Empire::images = std::move(imgs); }
 
     inline void stone_seal_views(const std::vector<VkImageView>& vws) noexcept { Empire::views = vws; }
     inline void stone_seal_views(std::vector<VkImageView>&& vws) noexcept      { Empire::views = std::move(vws); }
+
+    inline void stone_seal_commandbuffers(const std::vector<VkCommandBuffer>& cbs) noexcept { Empire::commandBuffers = cbs; }
+    inline void stone_seal_commandbuffers(std::vector<VkCommandBuffer>&& cbs) noexcept { Empire::commandBuffers = std::move(cbs); }
 
     inline void stone_seal_pass(VkRenderPass p) noexcept { Empire::pass = p; }
     inline void stone_seal_extent(VkExtent2D ext) noexcept { Empire::extent = ext; }
@@ -173,7 +180,7 @@ namespace StoneKey {
         Empire::stone_mesh_index_count   = ic;
     }
 
-    // FINAL SEAL — UNCHANGED
+    // FINAL SEAL — VALIDATES ALL COMPONENTS
     inline void stone_seal_final() noexcept
     {
         const bool was_sealed = Empire::sealed.exchange(true, std::memory_order_acq_rel);
@@ -218,6 +225,8 @@ namespace StoneKey {
         CHECK(stone_present_family(),  "Present Family",    stone_present_family()  != ~0u);
         CHECK(stone_transfer_family(), "Transfer Family",   stone_transfer_family() != ~0u);
         CHECK(stone_compute_family(),  "Compute Family",    stone_compute_family()  != ~0u);
+
+        CHECK(stone_commandbuffers().size(), "Command Buffers", !stone_commandbuffers().empty());
 
         const auto& rt = stone_rtprops();
         if (rt.shaderGroupHandleSize != 0) {
