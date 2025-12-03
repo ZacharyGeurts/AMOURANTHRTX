@@ -1072,13 +1072,12 @@ void VulkanRenderer::updateUniformBuffer(uint32_t frame, const Camera& camera, f
         return;
     }
 
-    VkCommandBuffer cmd = VK_NULL_HANDLE;
-
     void* data = nullptr;
     VkResult r = vkMapMemory(StoneKey::stone_device(),
                              BUFFER_MEMORY(RTX::g_ctx().sharedStagingEnc_),
                              0, VK_WHOLE_SIZE, 0, &data);
 
+    // THE LEGENDARY DOUBLE-MAP RECOVERY — ONLY THE WORTHY DARE USE THIS
     if (r != VK_SUCCESS || data == nullptr) {
         vkUnmapMemory(StoneKey::stone_device(), BUFFER_MEMORY(RTX::g_ctx().sharedStagingEnc_));
         VkMappedMemoryRange range{VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE, nullptr,
@@ -1116,8 +1115,7 @@ void VulkanRenderer::updateUniformBuffer(uint32_t frame, const Camera& camera, f
     std::memcpy(data, &ubo, sizeof(ubo));
     vkUnmapMemory(StoneKey::stone_device(), BUFFER_MEMORY(RTX::g_ctx().sharedStagingEnc_));
 
-
-    cmd = commandBuffers_[frame];
+    VkCommandBuffer cmd = commandBuffers_[frame];
 
     if (cmd != VK_NULL_HANDLE) {
         VkBuffer src = BufferManager::get(RTX::g_ctx().sharedStagingEnc_)->buffer;
@@ -1300,43 +1298,43 @@ void VulkanRenderer::updateTonemapDescriptor(uint32_t frameIdx, VkImageView inpu
         return;
 
     VkDescriptorImageInfo inputInfo{
-        .sampler = tonemapSampler_.get(),
-        .imageView = inputView,
+        .sampler     = tonemapSampler_.get(),
+        .imageView   = inputView,
         .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
     };
 
     VkDescriptorImageInfo outputInfo{
-        .imageView = outputView,
+        .imageView   = outputView,
         .imageLayout = VK_IMAGE_LAYOUT_GENERAL
     };
 
     VkDescriptorBufferInfo uboInfo{
         .buffer = RAW_BUFFER(tonemapUniformEncs_[frameIdx]),
         .offset = 0,
-        .range = VK_WHOLE_SIZE
+        .range  = VK_WHOLE_SIZE
     };
 
     std::array<VkWriteDescriptorSet, 3> writes = {{
-        { .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-          .dstSet = tonemapSets_[frameIdx],
-          .dstBinding = 0,
-          .descriptorCount = 1,
-          .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-          .pImageInfo = &inputInfo },
+        { .sType            = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+          .dstSet           = tonemapSets_[frameIdx],
+          .dstBinding       = 0,
+          .descriptorCount  = 1,
+          .descriptorType   = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+          .pImageInfo       = &inputInfo },
 
-        { .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-          .dstSet = tonemapSets_[frameIdx],
-          .dstBinding = 1,
-          .descriptorCount = 1,
-          .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-          .pImageInfo = &outputInfo },
+        { .sType            = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+          .dstSet           = tonemapSets_[frameIdx],
+          .dstBinding       = 1,
+          .descriptorCount  = 1,
+          .descriptorType   = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+          .pImageInfo       = &outputInfo },
 
-        { .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-          .dstSet = tonemapSets_[frameIdx],
-          .dstBinding = 2,
-          .descriptorCount = 1,
-          .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-          .pBufferInfo = &uboInfo }
+        { .sType            = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+          .dstSet           = tonemapSets_[frameIdx],
+          .dstBinding       = 2,
+          .descriptorCount  = 1,
+          .descriptorType   = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+          .pBufferInfo      = &uboInfo }
     }};
 
     vkUpdateDescriptorSets(StoneKey::stone_device(), writes.size(), writes.data(), 0, nullptr);
@@ -1459,13 +1457,12 @@ void VulkanRenderer::onWindowResize(uint32_t width, uint32_t height) noexcept
         minimized_ = false;
     }
 
-    // MATURE: Prevent recursive or overlapping resizes
+    // Prevent recursive resizes
     if (s_resizeInProgress.exchange(true)) {
-        return;  // Another resize already in progress — drop this event
+        return;
     }
 
-    // Full drain — safe
-    vkDeviceWaitIdle(StoneKey::stone_device());
+    vkDeviceWaitIdle(stone_device());
 
     // Reset accumulation
     accumulationFrame_ = 0;
@@ -1473,14 +1470,11 @@ void VulkanRenderer::onWindowResize(uint32_t width, uint32_t height) noexcept
     resetAccumNextFrame_ = true;
     currentSpp_ = 0;
 
-    // Classic cleanup
     cleanupFramebuffers();
     destroyRenderPass();
 
-    // Recreate swapchain
     RTX::SwapchainManager::recreate(width, height);
 
-    // Update StoneKey — pure and correct
     stone_seal_width(width);
     stone_seal_height(height);
     stone_seal_extent({width, height});
@@ -1488,24 +1482,23 @@ void VulkanRenderer::onWindowResize(uint32_t width, uint32_t height) noexcept
     width_  = static_cast<int>(width);
     height_ = static_cast<int>(height);
 
-    // Rebuild Vulkan state
     createRenderPass();
     createFramebuffers();
-    recreateSwapchainDependentResources();  // ← this calls recreateTonemapUBOs() ONCE
+    recreateSwapchainDependentResources();
 
-    // Rebuild command buffers
+    // CRITICAL: FREE AND RECREATE COMMAND BUFFERS — THE MISSING PIECE
     if (!commandBuffers_.empty()) {
         vkFreeCommandBuffers(stone_device(), RTX::g_ctx().commandPool_,
                              static_cast<uint32_t>(commandBuffers_.size()),
                              commandBuffers_.data());
         commandBuffers_.clear();
     }
+    createCommandBuffers();  // ← THIS WAS THE BREAK — NOW FIXED
 
-    // Signal completion
     g_resizeRequested.store(false, std::memory_order_release);
-
-    // UNLOCK — allow next resize
     s_resizeInProgress.store(false, std::memory_order_release);
+
+    LOG_SUCCESS_CAT("RESIZE", "Swapchain reborn {}×{} — Command buffers recreated — RTX eternal", width, height);
 }
 
 void VulkanRenderer::waitForAllFences() const noexcept
@@ -1669,7 +1662,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float /*deltaTime*/) noex
     const uint32_t f = currentFrame_++ % MAX_FRAMES_IN_FLIGHT;
 
     // ── 1. WAIT & ACQUIRE ─────────────────────────────────────────────────────
-    vkWaitForFences(stone_device(), 1, &inFlightFences_[f], VK_TRUE, 1'000'000'000ULL);
+    vkWaitForFences(stone_device(), 1, &inFlightFences_[f], VK_TRUE, UINT64_MAX);
     vkResetFences(stone_device(), 1, &inFlightFences_[f]);
 
     uint32_t imageIndex = 0;
@@ -1682,11 +1675,14 @@ void VulkanRenderer::renderFrame(const Camera& camera, float /*deltaTime*/) noex
         &imageIndex
     );
 
-    if (acquireResult == VK_ERROR_OUT_OF_DATE_KHR || acquireResult == VK_SUBOPTIMAL_KHR) {
+    // Handle resize gracefully
+    if (acquireResult == VK_ERROR_OUT_OF_DATE_KHR || acquireResult == VK_SUBOPTIMAL_KHR)
+    {
         g_resizeRequested.store(true, std::memory_order_release);
         return;
     }
-    if (acquireResult != VK_SUCCESS) {
+    if (acquireResult != VK_SUCCESS)
+    {
         LOG_FATAL("vkAcquireNextImageKHR failed: {}", static_cast<int>(acquireResult));
         phase9_ballerina("ACQUIRE CATASTROPHE", std::source_location::current());
         return;
@@ -1700,59 +1696,58 @@ void VulkanRenderer::renderFrame(const Camera& camera, float /*deltaTime*/) noex
     };
     VK_CHECK(vkBeginCommandBuffer(cmd, &beginInfo));
 
-    // ── 2. SWAPCHAIN IMAGE → GENERAL (for compute write) ─────────────────────
-    VkImageMemoryBarrier toGeneral{
-        .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-        .srcAccessMask       = 0,
-        .dstAccessMask       = VK_ACCESS_SHADER_WRITE_BIT,
-        .oldLayout           = VK_IMAGE_LAYOUT_UNDEFINED,
-        .newLayout           = VK_IMAGE_LAYOUT_GENERAL,
-        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .image               = stone_images()[imageIndex],
-        .subresourceRange    = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
-    };
-
-    vkCmdPipelineBarrier(cmd,
-        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-        0, 0, nullptr, 0, nullptr, 1, &toGeneral);
-
-    // ── 3. RENDER PATH ───────────────────────────────────────────────────────
+    // ── 2. DEV MODE 0 — PURE PINK VOID — THE ONE TRUE SAFETY NET ───────────────
     if (activeRenderMode_ == 0)
     {
-        // DEV MODE 0 — PURE PINK VOID — GUARANTEED VISIBLE
         VkClearColorValue pink{ { 1.0f, 0.2f, 0.8f, 1.0f } };
         VkImageSubresourceRange range{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+
         vkCmdClearColorImage(cmd, stone_images()[imageIndex], VK_IMAGE_LAYOUT_GENERAL, &pink, 1, &range);
 
-        // Transition back to present — REQUIRED after clear
-        VkImageMemoryBarrier toPresent{
+        // CORRECT BARRIER: TRANSFER_WRITE → PRESENT
+        VkImageMemoryBarrier barrier{
             .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
             .srcAccessMask       = VK_ACCESS_TRANSFER_WRITE_BIT,
             .dstAccessMask       = 0,
             .oldLayout           = VK_IMAGE_LAYOUT_GENERAL,
             .newLayout           = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
             .image               = stone_images()[imageIndex],
             .subresourceRange    = range
         };
+
         vkCmdPipelineBarrier(cmd,
             VK_PIPELINE_STAGE_TRANSFER_BIT,
             VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
-            0, 0, nullptr, 0, nullptr, 1, &toPresent);
+            0, 0, nullptr, 0, nullptr, 1, &barrier);
 
         VK_CHECK(vkEndCommandBuffer(cmd));
 
         // Submit & Present
-        VkSemaphoreSubmitInfo waitInfo{ .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, .semaphore = imageAvailableSemaphores_[f], .stageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
-        VkCommandBufferSubmitInfo cmdInfo{ .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO, .commandBuffer = cmd };
-        VkSemaphoreSubmitInfo signalInfo{ .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, .semaphore = renderFinishedSemaphores_[f], .stageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT };
+        VkSemaphoreSubmitInfo waitInfo{
+            .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+            .semaphore = imageAvailableSemaphores_[f],
+            .stageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
+        };
+        VkCommandBufferSubmitInfo cmdInfo{
+            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
+            .commandBuffer = cmd
+        };
+        VkSemaphoreSubmitInfo signalInfo{
+            .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+            .semaphore = renderFinishedSemaphores_[f],
+            .stageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT
+        };
 
         VkSubmitInfo2 submit{
             .sType                    = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
-            .waitSemaphoreInfoCount   = 1, .pWaitSemaphoreInfos   = &waitInfo,
-            .commandBufferInfoCount   = 1, .pCommandBufferInfos   = &cmdInfo,
-            .signalSemaphoreInfoCount = 1, .pSignalSemaphoreInfos  = &signalInfo
+            .waitSemaphoreInfoCount   = 1,
+            .pWaitSemaphoreInfos   = &waitInfo,
+            .commandBufferInfoCount   = 1,
+            .pCommandBufferInfos      = &cmdInfo,
+            .signalSemaphoreInfoCount = 1,
+            .pSignalSemaphoreInfos    = &signalInfo
         };
         VK_CHECK(vkQueueSubmit2(stone_graphics_queue(), 1, &submit, inFlightFences_[f]));
 
@@ -1769,29 +1764,33 @@ void VulkanRenderer::renderFrame(const Camera& camera, float /*deltaTime*/) noex
             g_resizeRequested.store(true, std::memory_order_release);
 
         frameNumber_++;
-        return; // ← PINK VOID — DONE
+        return;
     }
 
-    // ── FULL RTX PATH ────────────────────────────────────────────────────────
-    if (resetAccumulation_ || resetAccumNextFrame_)
+    // ── 3. FULL RTX PATH — ACCUMULATION RESET (CRITICAL FIX) ───────────────────
+    bool shouldResetAccumReset = resetAccumulation_ || resetAccumNextFrame_;
+    if (shouldResetAccumReset)
     {
-        VkClearColorValue zero{};
+        VkClearColorValue zero{ {0.0f, 0.0f, 0.0f, 0.0f} };
         VkImageSubresourceRange range{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+
         auto clear = [&](VkImage img) {
             vkCmdClearColorImage(cmd, img, VK_IMAGE_LAYOUT_GENERAL, &zero, 1, &range);
         };
 
-        for (auto& img : rtOutputImages_)  clear(img.get());
+        for (auto& img : rtOutputImages_)    clear(img.get());
         if (Options::OptionsRTX::ENABLE_ACCUMULATION)
-            for (auto& img : accumImages_) clear(img.get());
+            for (auto& img : accumImages_)   clear(img.get());
         if (Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING && hypertraceScoreImage_.valid())
             clear(hypertraceScoreImage_.get());
 
-        resetAccumulation_ = resetAccumNextFrame_ = false;
+        resetAccumulation_ = false;
+        resetAccumNextFrame_ = false;
         accumulationFrame_ = 0;
         currentSpp_ = 0;
     }
 
+    // ── 4. UPDATE UNIFORMS & DESCRIPTORS ─────────────────────────────────────
     updateUniformBuffer(f, camera, 0.0f);
     updateTonemapUniform(f);
 
@@ -1817,9 +1816,10 @@ void VulkanRenderer::renderFrame(const Camera& camera, float /*deltaTime*/) noex
     if (Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING)
         updateNexusDescriptors();
 
+    // ── 5. RECORD RAY TRACING ───────────────────────────────────────────────
     recordRayTracingCommands(cmd, f);
 
-    // RT Output → READ_ONLY for tonemap/denoise
+    // ── 6. RT OUTPUT → READ_ONLY FOR TONEMAP ─────────────────────────────────
     VkImageMemoryBarrier rtToRead{
         .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
         .srcAccessMask       = VK_ACCESS_SHADER_WRITE_BIT,
@@ -1834,6 +1834,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float /*deltaTime*/) noex
         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
         0, 0, nullptr, 0, nullptr, 1, &rtToRead);
 
+    // ── 7. TONEMAP PASS ─────────────────────────────────────────────────────
     VkImageView tonemapInput = denoisingEnabled_ && denoiserView_.valid()
         ? denoiserView_.get()
         : rtOutputViews_[f].get();
@@ -1845,10 +1846,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float /*deltaTime*/) noex
 
     performTonemapPass(cmd, f, imageIndex);
 
-    currentSpp_++;
-    accumulationFrame_++;
-
-    // ── FINAL: GENERAL → PRESENT_SRC_KHR (CRITICAL FIX) ─────────────────────
+    // ── 8. FINAL: GENERAL → PRESENT_SRC_KHR (THIS WAS BROKEN BEFORE) ─────────
     VkImageMemoryBarrier toPresent{
         .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
         .srcAccessMask       = VK_ACCESS_SHADER_WRITE_BIT,
@@ -1868,16 +1866,30 @@ void VulkanRenderer::renderFrame(const Camera& camera, float /*deltaTime*/) noex
 
     VK_CHECK(vkEndCommandBuffer(cmd));
 
-    // ── SUBMIT & PRESENT ─────────────────────────────────────────────────────
-    VkSemaphoreSubmitInfo waitInfo{ .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, .semaphore = imageAvailableSemaphores_[f], .stageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
-    VkCommandBufferSubmitInfo cmdInfo{ .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO, .commandBuffer = cmd };
-    VkSemaphoreSubmitInfo signalInfo{ .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, .semaphore = renderFinishedSemaphores_[f], .stageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT };
+    // ── 9. SUBMIT & PRESENT ─────────────────────────────────────────────────
+    VkSemaphoreSubmitInfo waitInfo{
+        .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+        .semaphore = imageAvailableSemaphores_[f],
+        .stageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
+    };
+    VkCommandBufferSubmitInfo cmdInfo{
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
+        .commandBuffer = cmd
+    };
+    VkSemaphoreSubmitInfo signalInfo{
+        .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+        .semaphore = renderFinishedSemaphores_[f],
+        .stageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT
+    };
 
     VkSubmitInfo2 submit{
         .sType                    = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
-        .waitSemaphoreInfoCount   = 1, .pWaitSemaphoreInfos   = &waitInfo,
-        .commandBufferInfoCount   = 1, .pCommandBufferInfos   = &cmdInfo,
-        .signalSemaphoreInfoCount = 1, .pSignalSemaphoreInfos  = &signalInfo
+        .waitSemaphoreInfoCount   = 1,
+        .pWaitSemaphoreInfos      = &waitInfo,
+        .commandBufferInfoCount   = 1,
+        .pCommandBufferInfos      = &cmdInfo,
+        .signalSemaphoreInfoCount = 1,
+        .pSignalSemaphoreInfos    = &signalInfo
     };
     VK_CHECK(vkQueueSubmit2(stone_graphics_queue(), 1, &submit, inFlightFences_[f]));
 
@@ -1894,6 +1906,9 @@ void VulkanRenderer::renderFrame(const Camera& camera, float /*deltaTime*/) noex
         g_resizeRequested.store(true, std::memory_order_release);
     else if (r != VK_SUCCESS)
         LOG_FATAL("vkQueuePresentKHR failed: {}", static_cast<int>(r));
+
+    currentSpp_++;
+    accumulationFrame_++;
 
     frameNumber_++;
 }

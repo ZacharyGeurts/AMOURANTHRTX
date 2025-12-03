@@ -1,7 +1,7 @@
 #!/bin/bash
 # =============================================================================
-# linux.sh — AMOURANTH RTX ULTIMATE LINUX BUILD SCRIPT v3.2 — RAINBOW VALHALLA
-# FIRST BANNER PRESERVED — ONLY FINAL BANNER IS RAINBOW — single = -j1 ADDED
+# linux.sh — AMOURANTH RTX ULTIMATE LINUX BUILD SCRIPT v3.3 — RAINBOW VALHALLA
+# DEFAULT TO HELP — ACCEPT --help/help, --run/run — SINGLE = -j1 ADDED
 # PINK PHOTONS ETERNAL — STONEKEY v∞ — VALHALLA UNBREACHABLE
 # =============================================================================
 
@@ -34,16 +34,16 @@ show_help() {
     valhalla_banner
     echo -e "${W}AMOURANTH RTX BUILD DOCTRINE — ACCEPTED COMMANDS (any order):${N}"
     echo
-    echo -e "  ${G}./linux.sh${N}                     → Build Incremental with Make + all cores"
-    echo -e "  ${G}./linux.sh run${N}                 → Build Incremental + launch instantly = DO THIS"
-	echo -e "  ${G}./linux.sh release${N}             → Build Release (O3 + LTO)"
-    echo -e "  ${G}./linux.sh ninja${N}               → Use Ninja instead of Make"
-    echo -e "  ${G}./linux.sh single${N}              → Compile with -j1 (debugging templates/shaders)${N}"
-	echo -e "  ${G}./linux.sh gdb${N}                 → Compile with debugging${N}"
-    echo -e "  ${G}./linux.sh release ninja${N}       → Release + Ninja"
-    echo -e "  ${G}./linux.sh clean${N}               → Wipe if files are added or removed"
-    echo -e "  ${G}./linux.sh clear${N}               → Same as clean"
-    echo -e "  ${G}./linux.sh --help${N}              → This banner"
+    echo -e "  ${G}./linux.sh${N}                     → Show this help screen (default)"
+    echo -e "  ${G}./linux.sh run${N} or ${G}./linux.sh --run${N}                 → Build Incremental + launch instantly = DO THIS"
+    echo -e "  ${G}./linux.sh release${N} or ${G}./linux.sh --release${N}       → Build Release (O3 + LTO)"
+    echo -e "  ${G}./linux.sh ninja${N} or ${G}./linux.sh --ninja${N}           → Use Ninja instead of Make"
+    echo -e "  ${G}./linux.sh single${N} or ${G}./linux.sh --single${N}        → Compile with -j1 (debugging templates/shaders)${N}"
+    echo -e "  ${G}./linux.sh gdb${N} or ${G}./linux.sh --gdb${N}              → Compile with debugging${N}"
+    echo -e "  ${G}./linux.sh release ninja${N} or ${G}./linux.sh --release --ninja${N}       → Release + Ninja"
+    echo -e "  ${G}./linux.sh clean${N} or ${G}./linux.sh --clean${N}         → Wipe if files are added or removed"
+    echo -e "  ${G}./linux.sh clear${N} or ${G}./linux.sh --clear${N}         → Same as clean"
+    echo -e "  ${G}./linux.sh help${N} or ${G}./linux.sh --help${N}           → This banner"
     echo
     echo -e "${M}PINK PHOTONS ETERNAL — STONEKEY v∞ ACTIVE — BLUE CHECKMARK SECURE${N}"
     exit 0
@@ -58,26 +58,34 @@ nuke_empire() {
 }
 
 # =============================================================================
-# PARSE ARGUMENTS
+# PARSE ARGUMENTS — STRIP -- AND HANDLE SHORT/LONG
 # =============================================================================
 
 BUILD_TYPE="Debug"
 USE_NINJA="no"
 RUN_AFTER="no"
-GDB_MODE="no"           # ← NEW: ./linux.sh gdb
+GDB_MODE="no"
 SINGLE_THREAD="no"
+CLEAN_BUILD="no"
 
 for arg in "$@"; do
-    case "${arg,,}" in
-        --help|-h)     show_help ;;
-        clean|clear)   nuke_empire ;;
-        release)       BUILD_TYPE="Release" ;;
-        ninja)         USE_NINJA="yes" ;;
-        run)           RUN_AFTER="yes" ;;
-        gdb)           GDB_MODE="yes" ;;
-        single)        SINGLE_THREAD="yes" ;;
+    # Strip -- for consistency
+    local_arg="${arg#--}"
+    case "${local_arg,,}" in
+        help|h)     show_help ;;
+        clean|clear|c)   nuke_empire ;;
+        release|r)  BUILD_TYPE="Release" ;;
+        ninja|n)    USE_NINJA="yes" ;;
+        run)        RUN_AFTER="yes" ;;
+        gdb|g)      GDB_MODE="yes" ;;
+        single|s)   SINGLE_THREAD="yes" ;;
     esac
 done
+
+# Default to help if no args
+if [ $# -eq 0 ]; then
+    show_help
+fi
 
 # If run or gdb → build first, then launch
 if [[ "$RUN_AFTER" = "yes" || "$GDB_MODE" = "yes" ]]; then
@@ -87,7 +95,7 @@ if [[ "$RUN_AFTER" = "yes" || "$GDB_MODE" = "yes" ]]; then
     # Rebuild without the run/gdb flag
     BUILD_ARGS=()
     for arg in "$@"; do
-        [[ "${arg,,}" != "run" && "${arg,,}" != "gdb" ]] && BUILD_ARGS+=("$arg")
+        [[ "${arg,,}" != "run" && "${arg,,}" != "--run" && "${arg,,}" != "gdb" && "${arg,,}" != "--gdb" ]] && BUILD_ARGS+=("$arg")
     done
 
     "$0" "${BUILD_ARGS[@]}"

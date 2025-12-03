@@ -172,7 +172,7 @@ Application::Application(const std::string& title, int width, int height)
 
     if (!stone_window()) {
         LOG_FATAL_CAT("FATAL", "Main window not created before Application — phase order violated");
-        std::abort();
+        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
     }
 
     SDL_SetWindowTitle(stone_window(), title.c_str());
@@ -206,8 +206,8 @@ void Application::run()
     auto lastTime = std::chrono::steady_clock::now();
 
     int   frameCount = 0;
-    float fpsTimer   = 0.0f;
-    float currentFPS = 0.0f;
+    float fpsTimer    = 0.0f;
+    float currentFPS  = 0.0f;
 
     float titleTimer = 0.0f;
     const float TITLE_UPDATE_INTERVAL = 0.6f;
@@ -222,7 +222,7 @@ void Application::run()
         lastTime = now;
 
         // ================================================================
-        // 1. EVENTS — PUMP + POLL (SDL3 REQUIRES THIS ORDER)
+        // 1. EVENTS
         // ================================================================
         SDL_PumpEvents();
 
@@ -243,24 +243,26 @@ void Application::run()
         if (quit_) break;
 
         // ================================================================
-        // 2. RESIZE HANDLING — ONLY PLACE IN THE ENTIRE ENGINE
+        // 2. RESIZE
         // ================================================================
         if (g_resizeRequested.exchange(false, std::memory_order_acquire))
         {
             const int w = g_resizeWidth.load();
             const int h = g_resizeHeight.load();
 
-            if (w > 0 && h > 0 && renderer_)
+            if (w > 0 && h > 0)
             {
                 VulkanRenderer::s_resizeInProgress.store(true);
 
-                LOG_AMOURANTH("THE SEA SHIFTS — RESIZING TO {}x{} — PHOTONS REALIGN", w, h);
-                renderer_->onWindowResize(static_cast<uint32_t>(w), static_cast<uint32_t>(h));
-                proj_ = glm::perspective(glm::radians(75.0f), float(w) / h, 0.1f, 1000.0f);
-
-                // THE MISSING PIECE — UPDATE THE STONE
                 stone_seal_width(w);
                 stone_seal_height(h);
+
+                if (renderer_)
+                    renderer_->onWindowResize(static_cast<uint32_t>(w), static_cast<uint32_t>(h));
+
+                proj_ = glm::perspective(glm::radians(75.0f), float(w) / float(h), 0.1f, 1000.0f);
+
+                LOG_AMOURANTH("THE SEA SHIFTS — RESIZED TO {}x{} — PHOTONS REALIGN", w, h);
 
                 VulkanRenderer::s_resizeInProgress.store(false);
             }
@@ -268,10 +270,10 @@ void Application::run()
         }
 
         // ================================================================
-        // 3. INPUT — SDL3-CORRECT, ONE-SHOT, PURE
+        // 3. INPUT — SDL3 FINAL TRUTH
         // ================================================================
         int numkeys = 0;
-        const bool* keys = SDL_GetKeyboardState(&numkeys);
+        const bool* keys = SDL_GetKeyboardState(&numkeys);  // ← SDL3 RETURNS bool*
 
         if (keys)
         {
@@ -305,7 +307,7 @@ void Application::run()
         }
 
         // ================================================================
-        // 4. RENDER — ONLY WHEN SAFE
+        // 4. RENDER
         // ================================================================
         if (stone_width() > 0 && stone_height() > 0 && renderer_)
         {
@@ -313,7 +315,7 @@ void Application::run()
         }
 
         // ================================================================
-        // 5. TITLE — PINK AESTHETIC ETERNAL
+        // 5. TITLE — FINAL EMPIRE NAMES
         // ================================================================
         if (currentRenderMode_ == 0)
         {
@@ -333,22 +335,22 @@ void Application::run()
         }
         else
         {
-            const char* modeName = "UNKNOWN MODE";
+            const char* modeName = "UNKNOWN";
             switch (currentRenderMode_)
             {
-                case 1: modeName = "PURE PINK — BINDING 31";          break;
-                case 2: modeName = "PATH TRACED ACCUM";              break;
-                case 3: modeName = "HYBRID DENOISED";                break;
-                case 4: modeName = "RASTER FALLBACK";                break;
-                case 5: modeName = "DEBUG VIS";                      break;
-                case 6: modeName = "TLAS VIEWER";                    break;
-                case 7: modeName = "SBT DEBUG";                      break;
-                case 8: modeName = "PERF METRICS";                   break;
-                case 9: modeName = "HOT RELOAD TEST";                break;
+                case 1: modeName = "PURE PINK VOID";           break;
+                case 2: modeName = "RAYGEN + MISS";           break;
+                case 3: modeName = "FULL RTX SCENE";          break;
+                case 4: modeName = "FALLBACK RASTER";         break;
+                case 5: modeName = "NEXUS HEATMAP";           break;
+                case 6: modeName = "ALPHA TEST VIS";          break;
+                case 7: modeName = "ANYHIT VISUALIZER";       break;
+                case 8: modeName = "SHADOW RAY VIS";          break;
+                case 9: modeName = "RAY TYPE CHAOS";          break;
             }
 
             const std::string title = std::format(
-                "AMOURANTH RTX | {} FPS | {}x{} | Mode {}: {} | Bounces {}",
+                "AMOURANTH RTX | {} FPS | {}x{} | MODE {}: {} | Bounces {}",
                 static_cast<int>(currentFPS + 0.5f),
                 stone_width(), stone_height(),
                 currentRenderMode_, modeName,
@@ -358,7 +360,7 @@ void Application::run()
         }
 
         // ================================================================
-        // 6. FPS TRACKING
+        // 6. FPS
         // ================================================================
         ++frameCount;
         fpsTimer += g_deltaTime;
@@ -369,9 +371,8 @@ void Application::run()
             fpsTimer   = 0.0f;
         }
 
-        // Prevent CPU spiral of death
-        if (g_deltaTime < 0.0005f)
-            std::this_thread::sleep_for(std::chrono::microseconds(200));
+        if (g_deltaTime < 0.016f)
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
 
     LOG_AMOURANTH("WINDOW HIDDEN — PHOTONS RETURN TO THE VOID IN PERFECT SILENCE");
