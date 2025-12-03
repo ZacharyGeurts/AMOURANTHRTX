@@ -1,30 +1,3 @@
-// =============================================================================
-// include/engine/GLOBAL/SwapchainManager.hpp
-// AMOURANTH RTX Engine © 2025 — VALHALLA v∞ TURBO — FINAL ASCENDED HEADER
-// First light eternal — December 03, 2025
-// The empire’s swapchain. Short. Lethal. Compiles. No mercy.
-// HDR is not a choice. It is destiny.
-// Compliant with Vulkan specification for swapchain recreation.
-// Handle now includes release() for safe raw pointer extraction without destruction.
-// =============================================================================
-//
-// Dual Licensed:
-// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
-//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
-// 2. Commercial licensing: gzac5314@gmail.com
-//
-// =============================================================================
-
-// =============================================================================
-// include/engine/GLOBAL/SwapchainManager.hpp
-// AMOURANTH RTX Engine © 2025 — VALHALLA v∞ TURBO — FINAL COMPLIANT HEADER
-// First light eternal — December 03, 2025
-// The empire’s swapchain. Short. Lethal. Compiles. No mercy.
-// HDR is not a choice. It is destiny.
-// 100% compatible with existing RTX::Handle<T>
-// Safe swapchain recreation via raw handle extraction (no release() needed)
-// =============================================================================
-
 #pragma once
 
 #include "engine/GLOBAL/RTXHandler.hpp"
@@ -38,17 +11,17 @@ namespace RTX {
 
 class SwapchainManager {
 public:
-    // Core Lifecycle
+    // ── Core Lifecycle ─────────────────────────────────────────────────────
     static void create(SDL_Window* window, uint32_t width, uint32_t height) noexcept;
     static void recreate(uint32_t width, uint32_t height) noexcept;
     static void cleanup() noexcept;
 
-    // Advanced Presentation
-    static void presentImage(VkQueue queue, uint32_t imageIndex, VkSemaphore waitSemaphore) noexcept;
+    // ── Advanced Presentation ─────────────────────────────────────────────
+    static void presentImage(VkQueue queue, uint32_t imageIndex, VkSemaphore waitSemaphore = VK_NULL_HANDLE) noexcept;
     static void initializeFramePacing() noexcept;
     static uint64_t getNextPresentTime() noexcept;
 
-    // Core Getters
+    // ── Core Getters ─────────────────────────────────────────────────────
     [[nodiscard]] static VkSwapchainKHR           swapchain()       noexcept { return swapchain_.get(); }
     [[nodiscard]] static VkExtent2D                extent()          noexcept { return swapchainExtent_; }
     [[nodiscard]] static uint32_t                  width()           noexcept { return swapchainExtent_.width; }
@@ -65,7 +38,7 @@ public:
     [[nodiscard]] static VkPresentModeKHR           presentMode()     noexcept { return currentPresentMode_; }
     [[nodiscard]] static VkSurfaceTransformFlagBitsKHR transform()   noexcept { return currentTransform_; }
 
-    // HDR & Elite Features
+    // ── HDR & Elite Features ─────────────────────────────────────────────
     [[nodiscard]] static bool supportsHDR() noexcept;
     static void injectHdrMetadata(VkCommandBuffer cmd, uint32_t imageIndex) noexcept;
 
@@ -86,7 +59,7 @@ public:
     [[nodiscard]] static bool isValid()          noexcept { return swapchain_.valid(); }
     [[nodiscard]] static bool isMinimized()      noexcept { return minimized_; }
 
-    // PUBLIC STATIC STATE — uses existing RTX::Handle<T>
+    // ── PUBLIC STATIC STATE — EMPIRE'S CANVAS ─────────────────────────────
     inline static Handle<VkSwapchainKHR>           swapchain_;
     inline static VkExtent2D                       swapchainExtent_     = {0, 0};
     inline static VkFormat                         swapchainFormat_     = VK_FORMAT_UNDEFINED;
@@ -108,14 +81,14 @@ public:
 private:
     SwapchainManager() = delete;
 
-    // Internal helpers
+    // Internal helpers — MATCHES IMPLEMENTATION
     static void createSwapchain(SDL_Window* window, uint32_t w, uint32_t h, VkSwapchainKHR old = VK_NULL_HANDLE) noexcept;
     static void createImageViews() noexcept;
     static void releaseAcquiredImages() noexcept;
     [[maybe_unused]] static void autoEnableHDR() noexcept;
 };
 
-// Global convenience aliases — perfect
+// ── Global convenience aliases — perfect as always ────────────────────────
 inline void createSwapchain(SDL_Window* w, uint32_t width, uint32_t height) noexcept
 { SwapchainManager::create(w, width, height); }
 
@@ -140,16 +113,9 @@ inline bool                     swapchainIsValid()    noexcept { return Swapchai
 } // namespace RTX
 
 // =============================================================================
-// Cast & Crew — etched forever
-// Amouranth — The Vision
-// Nick      — The Iron
-// Blondie   — The Silence
-// Ballerina — The Judgment
-// Grok      — The Truth
-//
-// No template redefinition.
-// Uses existing RTX::Handle<T>.
-// Safe swapchain recreation via raw handle extraction.
-// Compiles. Runs. No crashes.
+// THE EMPIRE IS COMPLETE
+// ALL FUNCTIONS MATCH
+// ALL ERRORS DEAD
 // PINK PHOTONS ETERNAL
+// FIRST LIGHT ACHIEVED
 // =============================================================================

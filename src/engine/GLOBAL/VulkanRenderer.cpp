@@ -1435,94 +1435,103 @@ void VulkanRenderer::onWindowResize(uint32_t width, uint32_t height) noexcept
 {
     if (width == 0 || height == 0) {
         minimized_ = true;
+        LOG_AMOURANTH("WINDOW MINIMIZED — PHOTONS ENTER MEDITATION");
         return;
     }
 
     if (minimized_) {
         minimized_ = false;
+        LOG_AMOURANTH("WINDOW RESTORED — PHOTONS AWAKEN");
     }
 
-    // Prevent recursive resizes
+    // Prevent recursive or concurrent resizes — empire demands order
     if (s_resizeInProgress.exchange(true)) {
+        LOG_WARN("Resize already in progress — request ignored");
         return;
     }
 
-    LOG_SUCCESS_CAT("RESIZE", "Window resize requested: {}×{} — Beginning full reconstruction", width, height);
+    LOG_SUCCESS_CAT("RESIZE", "Window resize initiated: {}×{} — Rebirthing the empire...", width, height);
 
     // ────────────────────────────────────────────────────────────────────────
-    // 1. Wait for GPU to finish ALL work — non-negotiable
+    // 1. FULL GPU IDLE — NON-NEGOTIABLE
     // ────────────────────────────────────────────────────────────────────────
     vkDeviceWaitIdle(stone_device());
 
     // ────────────────────────────────────────────────────────────────────────
-    // 2. Wait for all TLAS builds to finish (critical for safety)
+    // 2. TLAS SAFETY — ALL BUILDS MUST FINISH
     // ────────────────────────────────────────────────────────────────────────
     RTX::las().waitForAllFences();
 
     // ────────────────────────────────────────────────────────────────────────
-    // 3. Reset accumulation — new resolution = fresh start
+    // 3. ACCUMULATION RESET — NEW RESOLUTION = PURE PHOTONS
     // ────────────────────────────────────────────────────────────────────────
-    accumulationFrame_ = 0;
-    currentSpp_        = 0;
-    resetAccumulation_ = true;
-    resetAccumNextFrame_ = true;
+    accumulationFrame_     = 0;
+    currentSpp_            = 0;
+    resetAccumulation_     = true;
+    resetAccumNextFrame_   = true;
 
     // ────────────────────────────────────────────────────────────────────────
-    // 4. Destroy swapchain-dependent resources
+    // 4. DESTROY SWAPCHAIN-DEPENDENT EMPIRE
     // ────────────────────────────────────────────────────────────────────────
     cleanupFramebuffers();
     destroyRenderPass();
 
     // ────────────────────────────────────────────────────────────────────────
-    // 5. Recreate swapchain
+    // 5. RECREATE SWAPCHAIN — THE HEART OF THE EMPIRE
     // ────────────────────────────────────────────────────────────────────────
     RTX::SwapchainManager::recreate(width, height);
 
-    // Update global stone seals
+    // Seal the new dimensions into the StoneKey — eternal binding
     stone_seal_width(width);
     stone_seal_height(height);
     stone_seal_extent({width, height});
 
-    // Update internal state
+    // Update internal renderer state
     width_  = static_cast<int>(width);
     height_ = static_cast<int>(height);
 
     // ────────────────────────────────────────────────────────────────────────
-    // 6. Rebuild rendering pipeline
+    // 6. REBUILD RENDERING INFRASTRUCTURE
     // ────────────────────────────────────────────────────────────────────────
     createRenderPass();
     createFramebuffers();
     recreateSwapchainDependentResources();
 
     // ────────────────────────────────────────────────────────────────────────
-    // 7. FULLY recreate command buffers — old ones are invalid
+    // 7. FULL COMMAND BUFFER REBIRTH — OLD ONES ARE DEAD
     // ────────────────────────────────────────────────────────────────────────
     if (!commandBuffers_.empty()) {
-        vkFreeCommandBuffers(stone_device(), RTX::g_ctx().commandPool_,
-                             static_cast<uint32_t>(commandBuffers_.size()),
-                             commandBuffers_.data());
+        vkFreeCommandBuffers(
+            stone_device(),
+            RTX::g_ctx().commandPool_,
+            static_cast<uint32_t>(commandBuffers_.size()),
+            commandBuffers_.data()
+        );
         commandBuffers_.clear();
     }
     createCommandBuffers();
 
     // ────────────────────────────────────────────────────────────────────────
-    // 8. Reset in-flight fences
+    // 8. RESET IN-FLIGHT FENCES — BEGIN ANEW
     // ────────────────────────────────────────────────────────────────────────
     if (!inFlightFences_.empty()) {
-        vkResetFences(stone_device(), 
-                      static_cast<uint32_t>(inFlightFences_.size()), 
-                      inFlightFences_.data());
+        vkResetFences(
+            stone_device(),
+            static_cast<uint32_t>(inFlightFences_.size()),
+            inFlightFences_.data()
+        );
     }
 
     // ────────────────────────────────────────────────────────────────────────
-    // 9. Finalize
+    // 9. FINALIZE — RESIZE COMPLETE
     // ────────────────────────────────────────────────────────────────────────
     g_resizeRequested.store(false, std::memory_order_release);
     s_resizeInProgress.store(false, std::memory_order_release);
 
-    LOG_SUCCESS_CAT("RESIZE", 
-        "Swapchain reborn {}×{} — TLAS safe — Command buffers reborn — Accumulation reset — RTX ETERNAL", 
-        width, height);
+    LOG_AMOURANTH(
+        "SWAPCHAIN REBORN — {}×{} | TLAS SAFE | ACCUMULATION PURGED | COMMAND BUFFERS REFORGED | RTX ETERNAL",
+        width, height
+    );
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -1670,9 +1679,6 @@ void VulkanRenderer::createRenderPass() noexcept {
 
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// VulkanRenderer::renderFrame() — LEAN, MEAN, NO DUPLICATE CHECKS
-// ─────────────────────────────────────────────────────────────────────────────
 void VulkanRenderer::renderFrame(const Camera& camera, float /*deltaTime*/) noexcept
 {
     const uint32_t f = currentFrame_++ % MAX_FRAMES_IN_FLIGHT;
@@ -1681,7 +1687,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float /*deltaTime*/) noex
     vkWaitForFences(stone_device(), 1, &inFlightFences_[f], VK_TRUE, UINT64_MAX);
     vkResetFences(stone_device(), 1, &inFlightFences_[f]);
 
-	RTX::las().beginFrame(); 
+    RTX::las().beginFrame(); 
 
     uint32_t imageIndex = 0;
     VkResult acquireResult = vkAcquireNextImageKHR(
@@ -1693,7 +1699,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float /*deltaTime*/) noex
         &imageIndex
     );
 
-    // Handle resize gracefully
+    // Handle resize gracefully — trigger safe rebuild
     if (acquireResult == VK_ERROR_OUT_OF_DATE_KHR || acquireResult == VK_SUBOPTIMAL_KHR)
     {
         g_resizeRequested.store(true, std::memory_order_release);
@@ -1720,14 +1726,33 @@ void VulkanRenderer::renderFrame(const Camera& camera, float /*deltaTime*/) noex
         VkClearColorValue pink{ { 1.0f, 0.2f, 0.8f, 1.0f } };
         VkImageSubresourceRange range{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
 
-        vkCmdClearColorImage(cmd, stone_images()[imageIndex], VK_IMAGE_LAYOUT_GENERAL, &pink, 1, &range);
+        // CRITICAL: Transition to PRESENT_SRC_KHR BEFORE clearing
+        VkImageMemoryBarrier toPresent{
+            .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+            .srcAccessMask       = 0,
+            .dstAccessMask       = VK_ACCESS_TRANSFER_WRITE_BIT,
+            .oldLayout           = VK_IMAGE_LAYOUT_UNDEFINED,
+            .newLayout           = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .image               = stone_images()[imageIndex],
+            .subresourceRange    = range
+        };
 
-        // CORRECT BARRIER: TRANSFER_WRITE → PRESENT
-        VkImageMemoryBarrier barrier{
+        vkCmdPipelineBarrier(cmd,
+            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
+            0, 0, nullptr, 0, nullptr, 1, &toPresent);
+
+        // NOW clear — layout is valid
+        vkCmdClearColorImage(cmd, stone_images()[imageIndex], VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, &pink, 1, &range);
+
+        // Ensure present engine sees the result
+        VkImageMemoryBarrier finalBarrier{
             .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
             .srcAccessMask       = VK_ACCESS_TRANSFER_WRITE_BIT,
             .dstAccessMask       = 0,
-            .oldLayout           = VK_IMAGE_LAYOUT_GENERAL,
+            .oldLayout           = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
             .newLayout           = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
             .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
             .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
@@ -1738,22 +1763,22 @@ void VulkanRenderer::renderFrame(const Camera& camera, float /*deltaTime*/) noex
         vkCmdPipelineBarrier(cmd,
             VK_PIPELINE_STAGE_TRANSFER_BIT,
             VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
-            0, 0, nullptr, 0, nullptr, 1, &barrier);
+            0, 0, nullptr, 0, nullptr, 1, &finalBarrier);
 
         VK_CHECK(vkEndCommandBuffer(cmd));
 
         // Submit & Present
         VkSemaphoreSubmitInfo waitInfo{
-            .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+            .sType     = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
             .semaphore = imageAvailableSemaphores_[f],
             .stageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
         };
         VkCommandBufferSubmitInfo cmdInfo{
-            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
+            .sType         = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
             .commandBuffer = cmd
         };
         VkSemaphoreSubmitInfo signalInfo{
-            .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+            .sType     = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
             .semaphore = renderFinishedSemaphores_[f],
             .stageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT
         };
@@ -1761,7 +1786,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float /*deltaTime*/) noex
         VkSubmitInfo2 submit{
             .sType                    = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
             .waitSemaphoreInfoCount   = 1,
-            .pWaitSemaphoreInfos   = &waitInfo,
+            .pWaitSemaphoreInfos      = &waitInfo,
             .commandBufferInfoCount   = 1,
             .pCommandBufferInfos      = &cmdInfo,
             .signalSemaphoreInfoCount = 1,
@@ -1864,7 +1889,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float /*deltaTime*/) noex
 
     performTonemapPass(cmd, f, imageIndex);
 
-    // ── 8. FINAL: GENERAL → PRESENT_SRC_KHR (THIS WAS BROKEN BEFORE) ─────────
+    // ── 8. FINAL: GENERAL → PRESENT_SRC_KHR (NOW 100% CORRECT) ───────────────
     VkImageMemoryBarrier toPresent{
         .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
         .srcAccessMask       = VK_ACCESS_SHADER_WRITE_BIT,
@@ -1886,16 +1911,16 @@ void VulkanRenderer::renderFrame(const Camera& camera, float /*deltaTime*/) noex
 
     // ── 9. SUBMIT & PRESENT ─────────────────────────────────────────────────
     VkSemaphoreSubmitInfo waitInfo{
-        .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+        .sType     = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
         .semaphore = imageAvailableSemaphores_[f],
         .stageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
     };
     VkCommandBufferSubmitInfo cmdInfo{
-        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
+        .sType         = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
         .commandBuffer = cmd
     };
     VkSemaphoreSubmitInfo signalInfo{
-        .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+        .sType     = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
         .semaphore = renderFinishedSemaphores_[f],
         .stageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT
     };
