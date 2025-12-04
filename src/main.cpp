@@ -254,7 +254,7 @@ void Application::run()
         }
 
         // ==================================================================
-        // CRITICAL: RESIZE REBUILD — NO vkDeviceWaitIdle() — INSTANT REBIRTH
+        // CRITICAL: RESIZE REBUILD — INSTANT, NO WAIT, NO DEADLOCK
         // ==================================================================
         if (g_resizeRequested.exchange(false))
         {
@@ -263,29 +263,26 @@ void Application::run()
 
             if (newW > 0 && newH > 0)
             {
-                LOG_AMOURANTH("RESIZE DETECTED → {}x{} — INSTANT REBIRTH — OLD FRAMES SACRIFICED", newW, newH);
+                LOG_AMOURANTH("RESIZE DETECTED → {}x{} — INITIATING INSTANT REBIRTH", newW, newH);
 
-                // DROP TO 2 FRAMES — SAFETY FIRST
-                currentMaxFramesInFlight = 2;
+                // DROP TO 1 FRAME IN FLIGHT — MAXIMUM SAFETY — NO CHANCE OF INDEX OVERFLOW
+                currentMaxFramesInFlight = 1;
+                if (renderer_) renderer_->setMaxFramesInFlight(1);
 
-                // NO vkDeviceWaitIdle() — THE OLD FRAMES WILL DIE WITH DIGNITY
-                // They will hit VK_ERROR_OUT_OF_DATE_KHR and return immediately
-                // This is the way of the photon.
-
+                // RECREATE SWAPCHAIN — OLD FRAMES WILL DIE PEACEFULLY
                 RTX::SwapchainManager::recreate(newW, newH);
 
+                // REBIRTH THE RENDERER — THIS RECREATES SYNC OBJECTS & COMMAND BUFFERS
                 if (renderer_)
                 {
                     renderer_->onSwapchainRebuilt(newW, newH);
                 }
 
-                // Restore triple buffering
+                // RESTORE NORMAL TRIPLE BUFFERING
                 currentMaxFramesInFlight = normalMaxFramesInFlight;
+                if (renderer_) renderer_->setMaxFramesInFlight(normalMaxFramesInFlight);
 
-                LOG_AMOURANTH("SWAPCHAIN REBORN — {}x{} — PHOTONS ASCEND — RESIZE COMPLETE IN <10ms", newW, newH);
-
-                // DO NOT continue — render this frame with the new swapchain
-                // The next renderFrame() will acquire from the new one
+                LOG_AMOURANTH("SWAPCHAIN + SYNC REBORN — {}x{} — PHOTONS ASCEND — RESIZE COMPLETE", newW, newH);
             }
         }
 
@@ -295,7 +292,7 @@ void Application::run()
         processInput(g_deltaTime);
 
         // ==================================================================
-        // RENDER — WITH DYNAMIC FRAME LIMIT
+        // RENDER — WITH CURRENT FIF
         // ==================================================================
         if (renderer_)
         {
@@ -366,13 +363,13 @@ void Application::run()
         }
     }
 
-    // Final shutdown — now it's safe to wait
+    // Final shutdown — now safe
     if (renderer_)
     {
         vkDeviceWaitIdle(stone_device());
     }
 
-    LOG_AMOURANTH("[CAPTAIN] Application loop terminated — returning to the void — pink photons eternal");
+    LOG_AMOURANTH("[CAPTAIN] Application loop terminated — returning to the void — pink photons eternal");	
 }
 
 // =============================================================================

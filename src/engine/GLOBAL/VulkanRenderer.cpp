@@ -1815,29 +1815,53 @@ void VulkanRenderer::setMaxFramesInFlight(uint32_t count) noexcept
 
 void VulkanRenderer::onSwapchainRebuilt(uint32_t w, uint32_t h) noexcept
 {
-    LOG_AMOURANTH("VulkanRenderer reborn → {}x{} — purging old photons", w, h);
+    LOG_AMOURANTH("VulkanRenderer reborn → {}x{} — SYNC REBIRTH PROTOCOL", w, h);
 
-    // DESTROY OLD IMAGES — AND THEIR MEMORY
-    rtOutputImages_.clear();
-    rtOutputViews_.clear();
-    accumImages_.clear();
-    accumViews_.clear();
-    denoiserImage_ = {};
-    denoiserView_ = {};
-    hypertraceScoreImage_ = {};
-    hypertraceScoreView_ = {};
+    // DESTROY OLD
+    for (auto s : imageAvailableSemaphores_)  if (s) vkDestroySemaphore(stone_device(), s, nullptr);
+    for (auto s : renderFinishedSemaphores_) if (s) vkDestroySemaphore(stone_device(), s, nullptr);
+    for (auto f : inFlightFences_)           if (f) vkDestroyFence(stone_device(), f, nullptr);
 
-    // MARK OVERLAY INVALID — WILL REBUILD ON NEXT FRAME
+    // CLEAR AND RESIZE PROPERLY
+    imageAvailableSemaphores_.clear();
+    renderFinishedSemaphores_.clear();
+    inFlightFences_.clear();
+
+    imageAvailableSemaphores_.resize(3);
+    renderFinishedSemaphores_.resize(3);
+    inFlightFences_.resize(3);
+
+    VkSemaphoreCreateInfo semInfo{.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
+    VkFenceCreateInfo fenceInfo{.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, .flags = VK_FENCE_CREATE_SIGNALED_BIT};
+
+    for (int i = 0; i < 3; ++i)
+    {
+        VK_CHECK(vkCreateSemaphore(stone_device(), &semInfo, nullptr, &imageAvailableSemaphores_[i]));
+        VK_CHECK(vkCreateSemaphore(stone_device(), &semInfo, nullptr, &renderFinishedSemaphores_[i]));
+        VK_CHECK(vkCreateFence(stone_device(), &fenceInfo, nullptr, &inFlightFences_[i]));  // NOW SAFE
+    }
+
+    // COMMAND BUFFERS
+    if (!commandBuffers_.empty())
+    {
+        vkFreeCommandBuffers(stone_device(), RTX::g_ctx().commandPool_,
+                             static_cast<uint32_t>(commandBuffers_.size()), commandBuffers_.data());
+        commandBuffers_.clear();
+    }
+    commandBuffers_.resize(3);
+    VkCommandBufferAllocateInfo allocInfo{
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .commandPool = RTX::g_ctx().commandPool_,
+        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+        .commandBufferCount = 3
+    };
+    VK_CHECK(vkAllocateCommandBuffers(stone_device(), &allocInfo, commandBuffers_.data()));
+
+    currentFrame_.store(0);
     overlayValid_ = false;
-
-    // RECREATE WITH NEW SIZE
-    createRTOutputImages();     // ← must use tracked allocations
-    createAccumulationImages();
-    createDenoiserImage();
-
     requestAccumulationReset();
 
-    LOG_AMOURANTH("INTERNAL IMAGES REBORN — {}x{} — MEMORY CLEANSED", w, h);
+    LOG_AMOURANTH("SYNC REBORN — 3 FIF — FENCES SIGNALED — READY");
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
