@@ -18,6 +18,7 @@
 #include "engine/GLOBAL/StoneKey.hpp"
 #include "engine/GLOBAL/RTXHandler.hpp"
 #include "engine/GLOBAL/VulkanRenderer.hpp"
+#include "engine/GLOBAL/SwapchainManager.hpp"
 
 #include <SDL3/SDL_vulkan.h>
 #include <vulkan/vulkan.h>
@@ -380,44 +381,70 @@ std::vector<std::string> getVulkanExtensions(SDL_Window* window)
     return exts ? std::vector<std::string>(exts, exts + count) : std::vector<std::string>{};
 }
 
+// Inside namespace SDL3Window (or wherever your pollEvents lives)
+// Inside src/engine/GLOBAL/SDL3.cpp → namespace SDL3Window
+
+namespace SDL3Window::detail {
+    inline std::atomic<Uint32> g_lastResizeTime{0};
+    inline std::atomic<int>     g_pendingWidth{0};
+    inline std::atomic<int>     g_pendingHeight{0};
+    inline std::atomic<bool>    g_resizePending{false};
+    inline constexpr Uint32     RESIZE_DEBOUNCE_MS = 120;
+}
+
 bool pollEvents(int& outW, int& outH, bool& quit, bool& toggleFS) noexcept
 {
     SDL_Event ev;
     quit = toggleFS = false;
-    bool resized = false;
+    bool eventSeen = false;
 
-    while (SDL_PollEvent(&ev)) {
-        switch (ev.type) {
+    while (SDL_PollEvent(&ev))
+    {
+        eventSeen = true;
+
+        switch (ev.type)
+        {
             case SDL_EVENT_QUIT:
                 quit = true;
                 break;
+
             case SDL_EVENT_KEY_DOWN:
-                if (ev.key.scancode == SDL_SCANCODE_F11) toggleFS = true;
+                if (ev.key.scancode == SDL_SCANCODE_F11)
+                    toggleFS = true;
                 break;
+
             case SDL_EVENT_WINDOW_RESIZED:
             case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
-                detail::g_pendingWidth  = ev.window.data1;
-                detail::g_pendingHeight = ev.window.data2;
-                detail::g_resizePending = true;
-                detail::g_lastResizeTime = SDL_GetTicks();
-                resized = true;
+            {
+                const int w = ev.window.data1;
+                const int h = ev.window.data2;
+                if (w > 0 && h > 0)
+                {
+                    // ONLY SET ATOMIC FLAG — NO VULKAN CALLS
+                    g_resizeWidth.store(w);
+                    g_resizeHeight.store(h);
+                    g_resizeRequested.store(true);
+
+                    LOG_MAIN("Resize requested → {}x{}", w, h);
+                }
+                break;
+            }
+
+            default:
                 break;
         }
     }
 
-    if (g_sdl_window) {
-        SDL_GetWindowSizeInPixels(g_sdl_window.get(), &outW, &outH);
+    // Always report current size
+    if (g_sdl_window)
+    {
+        int w, h;
+        SDL_GetWindowSizeInPixels(g_sdl_window.get(), &w, &h);
+        outW = (w > 0) ? w : 1;
+        outH = (h > 0) ? h : 1;
     }
 
-    if (detail::g_resizePending && (SDL_GetTicks() - detail::g_lastResizeTime >= detail::RESIZE_DEBOUNCE_MS)) {
-        g_resizeWidth.store(detail::g_pendingWidth);
-        g_resizeHeight.store(detail::g_pendingHeight);
-        g_resizeRequested.store(true);
-        detail::g_resizePending = false;
-        LOG_SUCCESS_CAT("Window", "{}RESIZE ACCEPTED → {}x{}{}", VALHALLA_GOLD, detail::g_pendingWidth.load(), detail::g_pendingHeight.load(), RESET);
-    }
-
-    return resized;
+    return eventSeen;
 }
 
 void toggleFullscreen() noexcept

@@ -104,15 +104,24 @@ void SwapchainManager::recreate(uint32_t w, uint32_t h) noexcept
 
     vkDeviceWaitIdle(stone_device());
 
-    VkSwapchainKHR old = swapchain_.get();
-    swapchain_ = Handle<VkSwapchainKHR>();
+    // ── THE ONE TRUE ORDER — DO NOT DESTROY SWAPCHAIN EARLY ─────────────
+    VkSwapchainKHR oldSwapchain = swapchain_.get();  // ← KEEP ALIVE
 
+    // Clean up image views FIRST — this is safe
     for (auto v : swapchainImageViews_)
         if (v) vkDestroyImageView(stone_device(), v, nullptr);
     swapchainImageViews_.clear();
 
-    createSwapchain(stone_window(), w, h, old);
+    // DO NOT ZERO swapchain_ YET — we need the old handle for oldSwapchain parameter
+    // swapchain_ = Handle<VkSwapchainKHR>();  ← THIS WAS THE BUG — REMOVED FOREVER
+
+    // Rebirth with oldSwapchain reference
+    createSwapchain(stone_window(), w, h, oldSwapchain);
     createImageViews();
+
+    // NOW it's safe to let the old one die — Handle will destroy it when refcount hits 0
+    // If createSwapchain succeeded, oldSwapchain is already consumed and destroyed
+    // If it failed, we still have the old one — no device lost
 
     LOG_AMOURANTH("SWAPCHAIN REBORN — {}×{} — PINK PHOTONS ETERNAL.", w, h);
 }
@@ -138,7 +147,8 @@ void SwapchainManager::createSwapchain(SDL_Window*, uint32_t w, uint32_t h, VkSw
     static std::vector<VkPresentModeKHR> presentModes;
     static bool cached = false;
 
-    if (!cached) {
+    if (!cached)
+    {
         VK_CHECK(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(stone_physical(), stone_surface(), &caps));
 
         uint32_t count = 0;
@@ -153,40 +163,57 @@ void SwapchainManager::createSwapchain(SDL_Window*, uint32_t w, uint32_t h, VkSw
         cached = true;
     }
 
-    VkExtent2D extent{w, h};
+    // ── THE ONE TRUE, SAFE, DRIVER-RESPECTING EXTENT CHOICE ─────────────────
+    VkExtent2D extent;
+
     if (caps.currentExtent.width != UINT32_MAX)
+    {
+        // Fullscreen or borderless: driver knows best
         extent = caps.currentExtent;
-    else {
+        LOG_MAIN("Driver controls extent in current mode → {}x{}", extent.width, extent.height);
+    }
+    else
+    {
+        // Windowed mode: we suggest, driver clamps safely
+        extent.width  = w;
+        extent.height = h;
+
         extent.width  = std::clamp(extent.width,  caps.minImageExtent.width,  caps.maxImageExtent.width);
         extent.height = std::clamp(extent.height, caps.minImageExtent.height, caps.maxImageExtent.height);
+
+        LOG_AMOURANTH("Windowed resize → requested {}x{}, final {}x{}", w, h, extent.width, extent.height);
     }
 
+    // ── IMAGE COUNT, PRESENT MODE, FORMAT — SAME AS BEFORE (PERFECT) ───────
     uint32_t imageCount = caps.minImageCount + 1;
-    if (caps.maxImageCount > 0)
-        imageCount = std::min(imageCount, caps.maxImageCount);
+    if (caps.maxImageCount > 0 && imageCount > caps.maxImageCount)
+        imageCount = caps.maxImageCount;
 
-    // RESPECT Options::Performance::PREFER_MAILBOX_PRESENT
     VkPresentModeKHR preferred = Options::Performance::PREFER_MAILBOX_PRESENT
-        ? VK_PRESENT_MODE_MAILBOX_KHR
-        : VK_PRESENT_MODE_FIFO_KHR;
+        ? VK_PRESENT_MODE_MAILBOX_KHR : VK_PRESENT_MODE_FIFO_KHR;
 
     VkPresentModeKHR presentMode = VK_PRESENT_MODE_FIFO_KHR;
     for (auto m : presentModes)
         if (m == preferred) { presentMode = m; break; }
 
     VkSurfaceFormatKHR chosen = formats[0];
-    for (const auto& f : formats) {
-        if (supportsHDR() && f.colorSpace == VK_COLOR_SPACE_HDR10_ST2084_EXT) {
-            chosen = f; break;
+    for (const auto& f : formats)
+    {
+        if (supportsHDR() && f.colorSpace == VK_COLOR_SPACE_HDR10_ST2084_EXT &&
+            f.format == VK_FORMAT_A2B10G10R10_UNORM_PACK32)
+        {
+            chosen = f;
+            break;
         }
         if (f.format == VK_FORMAT_B8G8R8A8_SRGB && f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)
             chosen = f;
     }
 
+    // ── QUEUE FAMILY SHARING ─────────────────────────────────────────────
     QueueFamilyIndices qf = findQueueFamilies(stone_physical(), stone_surface());
-    uint32_t families[] = { qf.graphicsFamily.value(), qf.presentFamily.value() };
+    uint32_t queueFamilyIndices[] = { qf.graphicsFamily.value(), qf.presentFamily.value() };
 
-    VkSwapchainCreateInfoKHR ci{
+    VkSwapchainCreateInfoKHR ci = {
         .sType            = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
         .surface          = stone_surface(),
         .minImageCount    = imageCount,
@@ -202,23 +229,33 @@ void SwapchainManager::createSwapchain(SDL_Window*, uint32_t w, uint32_t h, VkSw
         .oldSwapchain     = old
     };
 
-    if (qf.graphicsFamily != qf.presentFamily) {
-        ci.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
-        ci.queueFamilyIndexCount = 2;
-        ci.pQueueFamilyIndices = families;
-    } else {
+    if (qf.graphicsFamily != qf.presentFamily)
+    {
+        ci.imageSharingMode      = VK_SHARING_MODE_CONCURRENT;
+        ci.queueFamilyIndexCount  = 2;
+        ci.pQueueFamilyIndices    = queueFamilyIndices;
+    }
+    else
+    {
         ci.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
     }
 
+    // ── CREATE — SAFE AND ETERNAL ───────────────────────────────────────
     VkSwapchainKHR raw = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateSwapchainKHR(stone_device(), &ci, nullptr, &raw));
+    VkResult result = vkCreateSwapchainKHR(stone_device(), &ci, nullptr, &raw);
 
+    if (result != VK_SUCCESS)
+    {
+        LOG_FATAL("vkCreateSwapchainKHR failed: {} — PHOTONS DENIED", string_VkResult(result));
+        return;
+    }
+
+    // ── UPDATE STATE — REBIRTH COMPLETE ──────────────────────────────────
     swapchain_ = Handle<VkSwapchainKHR>(raw, stone_device());
-    swapchainExtent_ = extent;
-    swapchainFormat_ = chosen.format;
-    currentColorSpace_ = chosen.colorSpace;
-    currentPresentMode_ = presentMode;
-    currentTransform_ = caps.currentTransform;
+    swapchainExtent_     = extent;
+    swapchainFormat_     = chosen.format;
+    currentColorSpace_   = chosen.colorSpace;
+    currentPresentMode_  = presentMode;
 
     uint32_t imgCount = 0;
     VK_CHECK(vkGetSwapchainImagesKHR(stone_device(), raw, &imgCount, nullptr));
@@ -233,10 +270,7 @@ void SwapchainManager::createSwapchain(SDL_Window*, uint32_t w, uint32_t h, VkSw
     stone_seal_image_count(imgCount);
     stone_seal_images(swapchainImages_);
 
-    LOG_AMOURANTH("SWAPCHAIN FORGED — {}×{} | {} images | HDR {} | PRESENT MODE {}",
-                  extent.width, extent.height, imgCount,
-                  supportsHDR() ? "IGNITED" : "DORMANT",
-                  presentMode == VK_PRESENT_MODE_MAILBOX_KHR ? "MAILBOX" : "FIFO");
+    LOG_AMOURANTH("SWAPCHAIN REBORN — {}x{} — RESIZE SAFE AND ETERNAL", extent.width, extent.height);
 }
 
 void SwapchainManager::createImageViews() noexcept

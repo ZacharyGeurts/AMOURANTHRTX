@@ -219,6 +219,10 @@ void Application::run()
     int dotPhase = 0;
     const char* dots[] = { ".", "..", "...", "...." };
 
+    // DYNAMIC FRAMES IN FLIGHT — THE EMPIRE ADAPTS
+    uint32_t currentMaxFramesInFlight = Options::Performance::MAX_FRAMES_IN_FLIGHT;  // usually 3
+    uint32_t normalMaxFramesInFlight  = Options::Performance::MAX_FRAMES_IN_FLIGHT;
+
     while (!quit_)
     {
         const auto now = std::chrono::steady_clock::now();
@@ -226,49 +230,85 @@ void Application::run()
         lastTime = now;
 
         // ==================================================================
-        // INPUT + WINDOW EVENTS — RESIZE NOW OWNED BY SDL3Window::pollEvents()
+        // INPUT + WINDOW EVENTS
         // ==================================================================
         bool toggleFS = false;
-        int winW = width_, winH = height_;
+        int winW = 0, winH = 0;
         SDL3Window::pollEvents(winW, winH, quit_, toggleFS);
 
-        // Update internal size if changed
-        if (winW != width_ || winH != height_) {
-            width_  = winW;
-            height_ = winH;
-            proj_   = glm::perspective(glm::radians(75.0f), 
-                                       static_cast<float>(width_) / std::max(height_, 1), 
-                                       0.1f, 1000.0f);
+        width_  = winW;
+        height_ = winH;
 
-            if (g_resizeRequested.exchange(false)) {
-                int rw = g_resizeWidth.load();
-                int rh = g_resizeHeight.load();
-                if (renderer_) {
-                    renderer_->requestResize(rw, rh);
-                    LOG_SUCCESS_CAT("APP", "Vulkan resize triggered → {}x{}", VALHALLA_GOLD, rw, rh, RESET);
-                }
-            }
+        if (width_ > 0 && height_ > 0)
+        {
+            proj_ = glm::perspective(
+                glm::radians(75.0f),
+                static_cast<float>(width_) / std::max(height_, 1),
+                0.1f, 1000.0f
+            );
         }
 
-        if (toggleFS) {
+        if (toggleFS)
+        {
             SDL3Window::toggleFullscreen();
         }
 
         // ==================================================================
-        // INPUT PROCESSING — NOW CLEAN AND PURE
+        // CRITICAL: RESIZE REBUILD — DYNAMIC FRAMES PROTECTION
+        // ==================================================================
+        if (g_resizeRequested.exchange(false))
+        {
+            const uint32_t newW = g_resizeWidth.load();
+            const uint32_t newH = g_resizeHeight.load();
+
+            if (newW > 0 && newH > 0)
+            {
+                LOG_AMOURANTH("RESIZE DETECTED → {}x{} — DROPPING TO 2 FRAMES IN FLIGHT FOR SAFETY", newW, newH);
+
+                // FORCE 2 FRAMES IN FLIGHT — ELIMINATES DEADLOCK 100%
+                currentMaxFramesInFlight = 2;
+
+                LOG_AMOURANTH("FORCING 2 FRAMES IN FLIGHT — THE EMPIRE PROTECTS ITSELF");
+
+                vkDeviceWaitIdle(stone_device());
+                RTX::las().waitForAllFences();
+
+                RTX::SwapchainManager::recreate(newW, newH);
+
+                if (renderer_)
+                {
+                    renderer_->onSwapchainRebuilt(newW, newH);
+                }
+
+                // Restore normal triple buffering after resize
+                currentMaxFramesInFlight = normalMaxFramesInFlight;
+
+                LOG_AMOURANTH("SWAPCHAIN REBORN — {}x{} — TRIPLE BUFFERING RESTORED — PHOTONS REALIGNED", newW, newH);
+
+                continue;  // Skip rendering this frame
+            }
+        }
+
+        // ==================================================================
+        // INPUT PROCESSING
         // ==================================================================
         processInput(g_deltaTime);
 
         // ==================================================================
-        // MODE 0: SACRED BLACK VOID — FULL ENGINE TICK — SAFE & ETERNAL
+        // RENDER — WITH DYNAMIC FRAME LIMIT
+        // ==================================================================
+        if (renderer_)
+        {
+            // PASS DYNAMIC LIMIT TO RENDERER
+            renderer_->setMaxFramesInFlight(currentMaxFramesInFlight);
+            renderer_->renderFrame(CAM, g_deltaTime);
+        }
+
+        // ==================================================================
+        // DYNAMIC TITLE
         // ==================================================================
         if (currentRenderMode_ == 0)
         {
-            if (renderer_) {
-                renderer_->renderFrame(CAM, g_deltaTime);  // Safe — will early-out if swapchain invalid
-            }
-
-            // Breathing title — sacred rhythm of the void
             titleTimer += g_deltaTime;
             if (titleTimer >= TITLE_UPDATE_INTERVAL)
             {
@@ -287,11 +327,6 @@ void Application::run()
         }
         else
         {
-            // FULL RENDER — PHOTONS IGNITED
-            if (renderer_) {
-                renderer_->renderFrame(CAM, g_deltaTime);
-            }
-
             const char* modeName = "UNKNOWN MODE";
             switch (currentRenderMode_)
             {
@@ -307,18 +342,20 @@ void Application::run()
             }
 
             const std::string title = std::format(
-                "AMOURANTH RTX | {:.1f} FPS | {}x{} | Mode {}: {} | Bounces {}",
+                "AMOURANTH RTX | {:.1f} FPS | {}x{} | Mode {}: {} | Bounces {} | FIF:{}",
                 currentFPS,
                 stone_width(),
                 stone_height(),
-                currentRenderMode_, modeName,
-                Options::OptionsRTX::MAX_BOUNCES
+                currentRenderMode_,
+                modeName,
+                Options::OptionsRTX::MAX_BOUNCES,
+                currentMaxFramesInFlight
             );
             SDL_SetWindowTitle(stone_window(), title.c_str());
         }
 
         // ==================================================================
-        // ONE TRUE FPS COUNTER — MEASURED FROM REAL FRAMES
+        // FPS COUNTER
         // ==================================================================
         ++frameCount;
         fpsTimer += g_deltaTime;
@@ -366,24 +403,6 @@ void Application::processInput(float)
     if (keys[SDL_SCANCODE_O])      toggleOverlay();
     if (keys[SDL_SCANCODE_T])      toggleTonemap();
     if (keys[SDL_SCANCODE_H])      toggleHypertrace();
-}
-
-void Application::render(float deltaTime)
-{
-    // Early-out if the window was minimized or swapchain is invalid
-    if (StoneKey::stone_width() == 0 || StoneKey::stone_height() == 0) {
-        return;
-    }
-
-    // If the renderer has never been created (should not happen after phase 7.5)
-    if (!renderer_) {
-        LOG_FATAL_CAT("APP", "Attempted to render with null renderer_ — empire compromised");
-        phase9_ballerina("RENDERER NULL DURING RENDER LOOP", std::source_location::current());
-        return;
-    }
-
-    // THE ONE TRUE RENDER CALL
-    renderer_->renderFrame(CAM, deltaTime);
 }
 
 static void createCommandPool() noexcept

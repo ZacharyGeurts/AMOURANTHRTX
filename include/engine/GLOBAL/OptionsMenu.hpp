@@ -43,7 +43,6 @@ namespace Splash {
 }
 
 // ── PERFORMANCE ───────────────────────────────────────────────────────────────
-// ── PERFORMANCE ───────────────────────────────────────────────────────────────
 namespace Performance {
     // Maximum number of frames that can be in flight simultaneously
     // 3 = triple buffering — optimal for low latency + tear-free presentation
@@ -300,6 +299,8 @@ namespace Display {
 
     // Runtime toggle for uncapped FPS mode
     inline static std::atomic<bool> UNCAPPED_MODE_ACTIVE   = true;
+
+	constexpr bool FORCE_SWAPCHAIN_REQUERY = false;
 }
 
 // ── AUTOEXPOSURE & HDR TUNING ────────────────────────────────────────────────

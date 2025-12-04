@@ -96,8 +96,11 @@ public:
 	[[nodiscard]] bool minimized() const noexcept { return minimized_; }
     [[nodiscard]] int  width()     const noexcept { return width_; }
     [[nodiscard]] int  height()    const noexcept { return height_; }
+	
+	void onSwapchainRebuilt(uint32_t width, uint32_t height) noexcept;
+    void recordRayTrace(VkCommandBuffer cmd, const VkExtent2D& extent) noexcept;	
+    void setMaxFramesInFlight(uint32_t count) noexcept;
 
-    void recordRayTrace(VkCommandBuffer cmd, const VkExtent2D& extent) noexcept;
 	static inline std::atomic<bool> s_resizeInProgress{false};
     bool     resetAccumulation_ = true;
 
@@ -108,8 +111,11 @@ private:
     bool minimized_ = false;
     bool destroyed_ = false;
     bool needsRecreateOnResize = true;
+	bool overlayValid_ = false;
+	bool overlayEnabled_ = true; 
 
-    uint32_t currentFrame_ = 0;
+    std::atomic<uint32_t> currentFrame_{0};
+	uint32_t maxFramesInFlight_ = Options::Performance::MAX_FRAMES_IN_FLIGHT;
     uint64_t frameNumber_  = 0;
     uint32_t accumulationFrame_ = 0;
     bool     firstSwapchainAcquire_ = true;

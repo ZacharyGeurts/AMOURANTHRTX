@@ -30,6 +30,7 @@
 #include <string_view>
 #include <unordered_map>
 #include <vector>
+#include "engine/GLOBAL/SwapchainManager.hpp"
 
 #include "engine/GLOBAL/logging.hpp"
 

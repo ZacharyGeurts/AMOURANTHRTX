@@ -118,130 +118,7 @@ VulkanRenderer::~VulkanRenderer()
 }
 
 void VulkanRenderer::cleanup() noexcept {
-    if (destroyed_) return;          // ← THIS IS THE SHIELD
-    destroyed_ = true;
-    LOG_INFO_CAT("RENDERER", "Initiating renderer shutdown — PINK PHOTONS DIMMING");
-
-    VkDevice dev = StoneKey::stone_device();
-    if (dev == VK_NULL_HANDLE) {
-        LOG_WARN_CAT("RENDERER", "Device already destroyed — nothing to clean");
-        return;
-    }
-
-    // ── PHASE 1: Wait for all in-flight frames to finish ─────────────────────
-    LOG_TRACE_CAT("RENDERER", "cleanup — waiting for in-flight fences");
-    for (auto fence : inFlightFences_) {
-        if (fence) vkWaitForFences(dev, 1, &fence, VK_TRUE, UINT64_MAX);
-    }
-
-    // ── PHASE 2: Drain both graphics and compute queues completely ─────────
-    LOG_TRACE_CAT("RENDERER", "cleanup — FINAL vkDeviceWaitIdle (drains all queues)");
-    vkDeviceWaitIdle(dev);  // ← CRITICAL: Ensures no hidden submissions remain
-
-    // ── FRAMEBUFFERS: Destroy first (prevents dangling references) ───────────
-    cleanupFramebuffers();
-
-    // ── Free All Descriptor Sets BEFORE destroying images/views/pools ───────
-    LOG_TRACE_CAT("RENDERER", "cleanup — Freeing descriptor sets");
-    if (dev != VK_NULL_HANDLE) {
-        // RT sets
-        if (!rtDescriptorSets_.empty() && RTX::pipeline().rtDescriptorPool() != VK_NULL_HANDLE) {
-            vkFreeDescriptorSets(dev, RTX::pipeline().rtDescriptorPool(), static_cast<uint32_t>(rtDescriptorSets_.size()), rtDescriptorSets_.data());
-        }
-
-        // Tonemap + denoiser sets
-        std::vector<VkDescriptorSet> graphicsSets;
-        graphicsSets.insert(graphicsSets.end(), tonemapSets_.begin(), tonemapSets_.end());
-        graphicsSets.insert(graphicsSets.end(), denoiserSets_.begin(), denoiserSets_.end());
-
-        if (!graphicsSets.empty()) {
-            if (tonemapDescriptorPool_.valid() && *tonemapDescriptorPool_) {
-                vkFreeDescriptorSets(dev, *tonemapDescriptorPool_, static_cast<uint32_t>(graphicsSets.size()), graphicsSets.data());
-            } else if (descriptorPool_.valid() && *descriptorPool_) {
-                vkFreeDescriptorSets(dev, *descriptorPool_, static_cast<uint32_t>(graphicsSets.size()), graphicsSets.data());
-            }
-            tonemapSets_.clear();
-            denoiserSets_.clear();
-        }
-    } else {
-        rtDescriptorSets_.clear();
-        tonemapSets_.clear();
-        denoiserSets_.clear();
-    }
-
-    // ── Sync Objects ─────────────────────────────────────────────────────────
-    for (auto s : imageAvailableSemaphores_)     if (s) vkDestroySemaphore(dev, s, nullptr);
-    for (auto s : renderFinishedSemaphores_)     if (s) vkDestroySemaphore(dev, s, nullptr);
-    for (auto f : inFlightFences_)               if (f) vkDestroyFence(dev, f, nullptr);
-
-    imageAvailableSemaphores_.clear();
-    renderFinishedSemaphores_.clear();
-    inFlightFences_.clear();
-
-    // ── Timestamp Query Pool ─────────────────────────────────────────────────
-    if (timestampQueryPool_ != VK_NULL_HANDLE) {
-        vkDestroyQueryPool(dev, timestampQueryPool_, nullptr);
-        timestampQueryPool_ = VK_NULL_HANDLE;
-    }
-
-    // ── Images & Views (RT Output, Accumulation, Denoiser, Nexus) ───────────
-    destroyRTOutputImages();
-    destroyAccumulationImages();
-    destroyDenoiserImage();
-    destroyNexusScoreImage();
-
-    // Nullify handles (prevents accidental double-free on reinit)
-    for (auto& h : rtOutputImages_)           h.reset();
-    for (auto& h : rtOutputMemories_)         h.reset();
-    for (auto& h : rtOutputViews_)            h.reset();
-    for (auto& h : accumImages_)              h.reset();
-    for (auto& h : accumMemories_)            h.reset();
-    for (auto& h : accumViews_)               h.reset();
-
-    denoiserImage_.reset();       denoiserMemory_.reset();       denoiserView_.reset();
-    hypertraceScoreImage_.reset(); hypertraceScoreMemory_.reset(); hypertraceScoreView_.reset();
-
-    rtOutputImages_.clear(); rtOutputMemories_.clear(); rtOutputViews_.clear();
-    accumImages_.clear();    accumMemories_.clear();    accumViews_.clear();
-
-    // ── Environment Map & Samplers ──────────────────────────────────────────
-    envMapImage_.reset(); envMapImageMemory_.reset(); envMapImageView_.reset();
-    envMapSampler_.reset();
-    tonemapSampler_.reset();
-
-    // ── Descriptor Pools ────────────────────────────────────────────────────
-    descriptorPool_.reset();
-    tonemapDescriptorPool_.reset();
-
-    // ── Uniform Buffers (tonemap UBOs) ──────────────────────────────────────
-    for (auto& enc : tonemapUniformEncs_) {
-        if (enc != 0) BufferManager::destroy(enc);
-    }
-    tonemapUniformEncs_.clear();
-
-    // ── Shared Staging Buffer ───────────────────────────────────────────────
-    if (RTX::g_ctx().sharedStagingEnc_ != 0) {
-        BufferManager::destroy(RTX::g_ctx().sharedStagingEnc_);
-        RTX::g_ctx().sharedStagingEnc_ = 0;
-    }
-
-    // ── PipelineManager Cleanup ─────────────────────────────────────────────
-    pipelineManager_.cleanup();
-
-    // ── FINAL PHASE: Command Buffers & Pool (NOW 100% SAFE) ─────────────────
-    VkCommandPool pool = RTX::g_ctx().commandPool_;
-    if (pool != VK_NULL_HANDLE) {
-        if (!commandBuffers_.empty()) {
-            vkFreeCommandBuffers(dev, pool, static_cast<uint32_t>(commandBuffers_.size()), commandBuffers_.data());
-            commandBuffers_.clear();
-        }
-
-        // Optional but clean: release all allocations in the pool
-        vkResetCommandPool(dev, pool, VK_COMMAND_POOL_RESET_RELEASE_RESOURCES_BIT);
-    }
-
-    LOG_SUCCESS_CAT("RENDERER", "{}VUID-00047 EXORCISED — Renderer shutdown complete — ZERO LEAKS — PINK PHOTONS ETERNAL{}", 
-                    EMERALD_GREEN, RESET);
+    phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
 }
 
 void VulkanRenderer::destroyNexusScoreImage() noexcept {
@@ -1661,14 +1538,19 @@ void VulkanRenderer::createRenderPass() noexcept {
 
 void VulkanRenderer::renderFrame(const Camera& camera, float /*deltaTime*/) noexcept
 {
-    const uint32_t f = currentFrame_++ % MAX_FRAMES_IN_FLIGHT;
+    // DYNAMIC FRAMES IN FLIGHT — EMPIRE ADAPTS TO REALITY
+    const uint32_t f = currentFrame_++ % maxFramesInFlight_;
 
-    // ── 1. WAIT & ACQUIRE ─────────────────────────────────────────────────────
-    vkWaitForFences(stone_device(), 1, &inFlightFences_[f], VK_TRUE, UINT64_MAX);
-    vkResetFences(stone_device(), 1, &inFlightFences_[f]);
+    LOG_TRACE("renderFrame() START | frame#{} | flight#{} / {} | swapchain {}x{}", 
+              frameNumber_, f, maxFramesInFlight_, stone_width(), stone_height());
 
-    RTX::las().beginFrame(); 
+    // ── 1. WAIT FOR PREVIOUS FRAME TO FINISH ─────────────────────────────
+    VK_CHECK(vkWaitForFences(stone_device(), 1, &inFlightFences_[f], VK_TRUE, UINT64_MAX));
+    VK_CHECK(vkResetFences(stone_device(), 1, &inFlightFences_[f]));
 
+    RTX::las().beginFrame();
+
+    // ── 2. ACQUIRE SWAPCHAIN IMAGE ───────────────────────────────────────
     uint32_t imageIndex = 0;
     VkResult acquireResult = vkAcquireNextImageKHR(
         stone_device(),
@@ -1679,18 +1561,18 @@ void VulkanRenderer::renderFrame(const Camera& camera, float /*deltaTime*/) noex
         &imageIndex
     );
 
-    // Handle resize gracefully — trigger safe rebuild
     if (acquireResult == VK_ERROR_OUT_OF_DATE_KHR || acquireResult == VK_SUBOPTIMAL_KHR)
     {
-        g_resizeRequested.store(true, std::memory_order_release);
+        LOG_MAIN("Swapchain OUT OF DATE or SUBOPTIMAL — rebuild scheduled | result={}", string_VkResult(acquireResult));
         return;
     }
     if (acquireResult != VK_SUCCESS)
     {
-        LOG_FATAL("vkAcquireNextImageKHR failed: {}", static_cast<int>(acquireResult));
-        phase9_ballerina("ACQUIRE CATASTROPHE", std::source_location::current());
+        LOG_FATAL("vkAcquireNextImageKHR FAILED → {} | frame#{}", string_VkResult(acquireResult), frameNumber_);
         return;
     }
+
+    LOG_TRACE("Acquired imageIndex {} | flight {}", imageIndex, f);
 
     VkCommandBuffer cmd = commandBuffers_[f];
 
@@ -1700,54 +1582,40 @@ void VulkanRenderer::renderFrame(const Camera& camera, float /*deltaTime*/) noex
     };
     VK_CHECK(vkBeginCommandBuffer(cmd, &beginInfo));
 
-    // ── 2. DEV MODE 0 — PURE PINK VOID — THE ONE TRUE SAFETY NET ───────────────
+    // ── DEV MODE 0 — PURE PINK VOID (SAFETY NET) ─────────────────────────
     if (activeRenderMode_ == 0)
     {
-        VkClearColorValue pink{ { 1.0f, 0.2f, 0.8f, 1.0f } };
+        LOG_TRACE("DEV MODE 0 — PURE PINK VOID");
+
+        VkClearColorValue pink{ {1.0f, 0.2f, 0.8f, 1.0f} };
         VkImageSubresourceRange range{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
 
-        // CRITICAL: Transition to PRESENT_SRC_KHR BEFORE clearing
         VkImageMemoryBarrier toPresent{
             .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
             .srcAccessMask       = 0,
             .dstAccessMask       = VK_ACCESS_TRANSFER_WRITE_BIT,
             .oldLayout           = VK_IMAGE_LAYOUT_UNDEFINED,
             .newLayout           = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
             .image               = stone_images()[imageIndex],
             .subresourceRange    = range
         };
+        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &toPresent);
 
-        vkCmdPipelineBarrier(cmd,
-            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-            VK_PIPELINE_STAGE_TRANSFER_BIT,
-            0, 0, nullptr, 0, nullptr, 1, &toPresent);
-
-        // NOW clear — layout is valid
         vkCmdClearColorImage(cmd, stone_images()[imageIndex], VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, &pink, 1, &range);
 
-        // Ensure present engine sees the result
         VkImageMemoryBarrier finalBarrier{
             .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
             .srcAccessMask       = VK_ACCESS_TRANSFER_WRITE_BIT,
             .dstAccessMask       = 0,
             .oldLayout           = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
             .newLayout           = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
             .image               = stone_images()[imageIndex],
             .subresourceRange    = range
         };
-
-        vkCmdPipelineBarrier(cmd,
-            VK_PIPELINE_STAGE_TRANSFER_BIT,
-            VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
-            0, 0, nullptr, 0, nullptr, 1, &finalBarrier);
+        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr, 1, &finalBarrier);
 
         VK_CHECK(vkEndCommandBuffer(cmd));
 
-        // Submit & Present
         VkSemaphoreSubmitInfo waitInfo{
             .sType     = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
             .semaphore = imageAvailableSemaphores_[f],
@@ -1784,16 +1652,29 @@ void VulkanRenderer::renderFrame(const Camera& camera, float /*deltaTime*/) noex
         };
         VkResult r = vkQueuePresentKHR(stone_present_queue(), &present);
         if (r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_SUBOPTIMAL_KHR)
-            g_resizeRequested.store(true, std::memory_order_release);
+        {
+            LOG_MAIN("Present returned OUT OF DATE — rebuild scheduled");
+            frameNumber_++;
+            return;
+        }
 
-        frameNumber_++;
+        LOG_TRACE("DEV MODE 0 frame complete | frame#{}", frameNumber_++);
         return;
     }
 
-    // ── 3. FULL RTX PATH — ACCUMULATION RESET (CRITICAL FIX) ───────────────────
-    bool shouldResetAccumReset = resetAccumulation_ || resetAccumNextFrame_;
-    if (shouldResetAccumReset)
+    // ── OVERLAY REBUILD — ONLY WHEN SAFE (after successful acquire) ─────
+    if (!overlayValid_ && overlayEnabled_)
     {
+        LOG_AMOURANTH("REBUILDING OVERLAY — post-resize recovery");
+        setOverlay(true);
+        overlayValid_ = true;
+    }
+
+    // ── ACCUMULATION RESET ───────────────────────────────────────────────
+    if (resetAccumulation_ || resetAccumNextFrame_)
+    {
+        LOG_MAIN("ACCUMULATION RESET — fresh photons from frame 0");
+
         VkClearColorValue zero{ {0.0f, 0.0f, 0.0f, 0.0f} };
         VkImageSubresourceRange range{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
 
@@ -1801,19 +1682,17 @@ void VulkanRenderer::renderFrame(const Camera& camera, float /*deltaTime*/) noex
             vkCmdClearColorImage(cmd, img, VK_IMAGE_LAYOUT_GENERAL, &zero, 1, &range);
         };
 
-        for (auto& img : rtOutputImages_)    clear(img.get());
+        for (auto& img : rtOutputImages_) clear(img.get());
         if (Options::OptionsRTX::ENABLE_ACCUMULATION)
-            for (auto& img : accumImages_)   clear(img.get());
+            for (auto& img : accumImages_) clear(img.get());
         if (Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING && hypertraceScoreImage_.valid())
             clear(hypertraceScoreImage_.get());
 
-        resetAccumulation_ = false;
-        resetAccumNextFrame_ = false;
-        accumulationFrame_ = 0;
-        currentSpp_ = 0;
+        resetAccumulation_ = resetAccumNextFrame_ = false;
+        accumulationFrame_ = currentSpp_ = 0;
     }
 
-    // ── 4. UPDATE UNIFORMS & DESCRIPTORS ─────────────────────────────────────
+    // ── UPDATE UNIFORMS & DESCRIPTORS ───────────────────────────────────
     updateUniformBuffer(f, camera, 0.0f);
     updateTonemapUniform(f);
 
@@ -1824,14 +1703,12 @@ void VulkanRenderer::renderFrame(const Camera& camera, float /*deltaTime*/) noex
     desc.tlas = tlas;
     desc.ubo = reinterpret_cast<VkBuffer>(uniformBufferEncs_[f]);
     desc.uboSize = 368;
-
     desc.rtOutputViews[f]     = rtOutputViews_[f].get();
     desc.accumulationViews[f] = accumViews_[f].get();
     desc.envSampler           = envMapSampler_.get();
     desc.envImageView         = envMapImageView_.get();
     desc.materialsBuffer      = reinterpret_cast<VkBuffer>(materialBufferEncs_[0]);
     desc.materialsSize        = 16_MB;
-
     if (Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING && hypertraceScoreView_.valid())
         desc.nexusScoreViews[f] = hypertraceScoreView_.get();
 
@@ -1839,57 +1716,45 @@ void VulkanRenderer::renderFrame(const Camera& camera, float /*deltaTime*/) noex
     if (Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING)
         updateNexusDescriptors();
 
-    // ── 5. RECORD RAY TRACING ───────────────────────────────────────────────
+    // ── RAY TRACING ─────────────────────────────────────────────────────
     recordRayTracingCommands(cmd, f);
 
-    // ── 6. RT OUTPUT → READ_ONLY FOR TONEMAP ─────────────────────────────────
+    // ── TONEMAP CHAIN ───────────────────────────────────────────────────
     VkImageMemoryBarrier rtToRead{
-        .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-        .srcAccessMask       = VK_ACCESS_SHADER_WRITE_BIT,
-        .dstAccessMask       = VK_ACCESS_SHADER_READ_BIT,
-        .oldLayout           = VK_IMAGE_LAYOUT_GENERAL,
-        .newLayout           = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-        .image               = rtOutputImages_[f].get(),
-        .subresourceRange    = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
+        .sType            = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .srcAccessMask    = VK_ACCESS_SHADER_WRITE_BIT,
+        .dstAccessMask    = VK_ACCESS_SHADER_READ_BIT,
+        .oldLayout        = VK_IMAGE_LAYOUT_GENERAL,
+        .newLayout        = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        .image            = rtOutputImages_[f].get(),
+        .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
     };
-    vkCmdPipelineBarrier(cmd,
-        VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
-        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-        0, 0, nullptr, 0, nullptr, 1, &rtToRead);
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
+                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &rtToRead);
 
-    // ── 7. TONEMAP PASS ─────────────────────────────────────────────────────
     VkImageView tonemapInput = denoisingEnabled_ && denoiserView_.valid()
-        ? denoiserView_.get()
-        : rtOutputViews_[f].get();
+        ? denoiserView_.get() : rtOutputViews_[f].get();
 
     updateTonemapDescriptor(f, tonemapInput, stone_views()[imageIndex]);
-
-    if (denoisingEnabled_)
-        performDenoisingPass(cmd);
-
+    if (denoisingEnabled_) performDenoisingPass(cmd);
     performTonemapPass(cmd, f, imageIndex);
 
-    // ── 8. FINAL: GENERAL → PRESENT_SRC_KHR (NOW 100% CORRECT) ───────────────
+    // ── FINAL TRANSITION TO PRESENT ─────────────────────────────────────
     VkImageMemoryBarrier toPresent{
-        .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-        .srcAccessMask       = VK_ACCESS_SHADER_WRITE_BIT,
-        .dstAccessMask       = 0,
-        .oldLayout           = VK_IMAGE_LAYOUT_GENERAL,
-        .newLayout           = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .image               = stone_images()[imageIndex],
-        .subresourceRange    = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
+        .sType            = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .srcAccessMask    = VK_ACCESS_SHADER_WRITE_BIT,
+        .dstAccessMask    = 0,
+        .oldLayout        = VK_IMAGE_LAYOUT_GENERAL,
+        .newLayout        = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+        .image            = stone_images()[imageIndex],
+        .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
     };
-
-    vkCmdPipelineBarrier(cmd,
-        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-        VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
-        0, 0, nullptr, 0, nullptr, 1, &toPresent);
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr, 1, &toPresent);
 
     VK_CHECK(vkEndCommandBuffer(cmd));
 
-    // ── 9. SUBMIT & PRESENT ─────────────────────────────────────────────────
+    // ── SUBMIT & PRESENT ────────────────────────────────────────────────
     VkSemaphoreSubmitInfo waitInfo{
         .sType     = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
         .semaphore = imageAvailableSemaphores_[f],
@@ -1926,14 +1791,44 @@ void VulkanRenderer::renderFrame(const Camera& camera, float /*deltaTime*/) noex
     };
     VkResult r = vkQueuePresentKHR(stone_present_queue(), &present);
     if (r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_SUBOPTIMAL_KHR)
-        g_resizeRequested.store(true, std::memory_order_release);
-    else if (r != VK_SUCCESS)
-        LOG_FATAL("vkQueuePresentKHR failed: {}", static_cast<int>(r));
+    {
+        LOG_MAIN("Present returned OUT OF DATE — rebuild scheduled");
+        return;
+    }
 
     currentSpp_++;
     accumulationFrame_++;
 
-    frameNumber_++;
+    LOG_TRACE("renderFrame() END | frame#{} | spp={} | accum={} | FIF={}", 
+              frameNumber_++, currentSpp_, accumulationFrame_, maxFramesInFlight_);
+}
+
+void VulkanRenderer::setMaxFramesInFlight(uint32_t count) noexcept
+{
+    maxFramesInFlight_ = count;
+}
+
+void VulkanRenderer::onSwapchainRebuilt(uint32_t width, uint32_t height) noexcept
+{
+    // Destroy old size-dependent resources
+    destroyRTOutputImages();
+    destroyAccumulationImages();
+    destroyDenoiserImage();
+
+    // Recreate with new size
+    createRTOutputImages();
+    createAccumulationImages();
+    createDenoiserImage();
+
+    // CRITICAL: DO NOT TOUCH OVERLAY HERE
+    // overlay_ = false;  // ← DO NOT CALL setOverlay()!
+    // Just mark it invalid — will be rebuilt on next frame when safe
+    overlayValid_ = false;
+
+    // Reset accumulation
+    requestAccumulationReset();
+
+    LOG_AMOURANTH("VulkanRenderer reborn → {}x{} — images rebuilt, overlay deferred", width, height);
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
