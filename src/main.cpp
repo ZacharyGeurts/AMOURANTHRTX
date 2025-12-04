@@ -327,7 +327,6 @@ void Application::run()
     LOG_AMOURANTH("[CAPTAIN] Application loop terminated — returning to the void — pink photons eternal");
 }
 
-
 // =============================================================================
 // 1. Application::Application — NO DEFAULT MODE — PURE EMPIRE
 // =============================================================================
@@ -378,72 +377,58 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     LOG_AMOURANTH(">>> [PHASE 0] renderFrame START | global#{} | slot#{} | FIF={} | {}x{}", 
                   globalFrame, f, maxFramesInFlight_, stone_width(), stone_height());
 
-    // ── PHASE 1: FENCE WAIT — DEADLOCK-PROOF — FINAL FORM
-    // PHASE 1: FENCE WAIT — FINAL FORM — NO TIMEOUT — NO DEADLOCK
-    LOG_AMOURANTH("[PHASE 1] Starting fence wait for slot {}", f);
-    if (inFlightFences_[f] == VK_NULL_HANDLE)
+    // ── PHASE 1: FENCE WAIT — DEADLOCK-PROOF
+    if (inFlightFences_[f] != VK_NULL_HANDLE)
     {
-        LOG_AMOURANTH("[PHASE 1] FENCE[{}] IS VK_NULL_HANDLE — POST-RESIZE RECOVERY — SKIPPING WAIT", f);
-        // Safe — proceed directly to acquire
-    }
-    else
-    {
-        LOG_TRACE("[PHASE 1] Waiting on valid fence[{}] = 0x{:x}", f, reinterpret_cast<uint64_t>(inFlightFences_[f]));
-        // This fence is either:
-        // 1. New and signaled → returns instantly
-        // 2. Old and will never signal → but we destroyed it → so this path is never taken
         VK_CHECK(vkWaitForFences(stone_device(), 1, &inFlightFences_[f], VK_TRUE, UINT64_MAX));
-        LOG_TRACE("[PHASE 1] Fence ready — NOT resetting yet (defer to after acquire)");
     }
-    LOG_AMOURANTH("[PHASE 1] Fence wait complete");
 
-    // ── PHASE 2: ACQUIRE SWAPCHAIN IMAGE ───────────────────────────────
-    LOG_TRACE("[PHASE 2] Acquiring swapchain image for slot {}", f);
-
+    // ── PHASE 2: ACQUIRE SWAPCHAIN IMAGE
     uint32_t imageIndex = 0;
     VkResult acquireResult = vkAcquireNextImageKHR(
         stone_device(),
         RTX::SwapchainManager::swapchain(),
-        2'000'000,  // 2ms — never hang
+        2'000'000,
         imageAvailableSemaphores_[f],
         VK_NULL_HANDLE,
         &imageIndex
     );
 
-    LOG_AMOURANTH("[PHASE 2] Acquire result: {}", string_VkResult(acquireResult));
-
+    // CRITICAL FIX: DO NOT EARLY-RETURN ON OUT_OF_DATE
     if (acquireResult == VK_ERROR_OUT_OF_DATE_KHR || 
         acquireResult == VK_SUBOPTIMAL_KHR ||
         acquireResult == VK_TIMEOUT)
     {
-        LOG_AMOURANTH("[PHASE 2] ACQUIRE FAILED ({}) — SWAPCHAIN DEAD OR RESIZING — SACRIFICING FRAME {}", 
-                      string_VkResult(acquireResult), globalFrame);
-        currentFrame_.fetch_sub(1, std::memory_order_relaxed); // rollback
-        return;
-    }
+        LOG_AMOURANTH("[PHASE 2] Swapchain out of date / timeout → scheduling rebuild, but CONTINUING with pink");
 
-    if (acquireResult != VK_SUCCESS)
+        g_resizeRequested.store(true);
+        g_resizeWidth.store(stone_width());
+        g_resizeHeight.store(stone_height());
+
+        // DO NOT rollback frame counter — we will still present a pink frame
+        // This guarantees continuous presentation → no tearing, no black flash
+    }
+    else if (acquireResult != VK_SUCCESS)
     {
-        LOG_FATAL("[PHASE 2] vkAcquireNextImageKHR HARD FAILURE: {}", string_VkResult(acquireResult));
+        LOG_FATAL("[PHASE 2] vkAcquireNextImageKHR failed: {}", string_VkResult(acquireResult));
+        currentFrame_.fetch_sub(1, std::memory_order_relaxed);
         return;
     }
+    else
+    {
+        LOG_AMOURANTH("[PHASE 2] SUCCESS → Acquired imageIndex {} for slot {}", imageIndex, f);
+    }
 
-    LOG_AMOURANTH("[PHASE 2] SUCCESS → Acquired imageIndex {} for slot {}", imageIndex, f);
-
-    // Reset fence now that acquire succeeded and we will submit
+    // Reset fence only if we are going to submit
     VK_CHECK(vkResetFences(stone_device(), 1, &inFlightFences_[f]));
-    LOG_TRACE("[PHASE 2] Fence reset after successful acquire");
 
-    // ── PHASE 3: BEGIN COMMAND BUFFER ──────────────────────────────────
+    // ── PHASE 3: BEGIN COMMAND BUFFER
     VkCommandBuffer cmd = commandBuffers_[f];
-    LOG_TRACE("[PHASE 3] Beginning command buffer 0x{:x}", reinterpret_cast<uint64_t>(cmd));
-
     VkCommandBufferBeginInfo beginInfo{
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
         .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
     };
     VK_CHECK(vkBeginCommandBuffer(cmd, &beginInfo));
-    LOG_AMOURANTH("[PHASE 3] Command buffer begun");
 
     // ── PHASE 4: DEV MODE 0 — PURE PINK VOID ──────────────────────────
     if (activeRenderMode_ == 0)

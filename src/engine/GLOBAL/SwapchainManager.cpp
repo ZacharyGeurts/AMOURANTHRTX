@@ -384,15 +384,15 @@ void SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSemaph
     };
 
     LOG_AMOURANTH("Calling vkQueuePresentKHR");
-    VkResult result = vkQueuePresentKHR(queue, &presentInfo);
+VkResult result = vkQueuePresentKHR(queue, &presentInfo);
 
-    if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR)
-    {
-        LOG_MAIN("Present out-of-date/suboptimal → scheduling safe rebuild");
-        g_resizeRequested.store(true);
-        g_resizeWidth.store(swapchainExtent_.width);
-        g_resizeHeight.store(swapchainExtent_.height);
-    }
+if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR)
+{
+    LOG_MAIN("Present out-of-date/suboptimal → scheduling safe rebuild");
+    g_resizeRequested.store(true);
+    g_resizeWidth.store(swapchainExtent_.width);
+    g_resizeHeight.store(swapchainExtent_.height);
+}
     else if (result != VK_SUCCESS)
     {
         LOG_FATAL("vkQueuePresentKHR failed: {}", static_cast<int>(result));
