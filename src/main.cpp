@@ -256,25 +256,13 @@ void Application::run()
             // COALESCE: Only the LATEST size survives
             g_pendingWidth  = newW;
             g_pendingHeight = newH;
-
-            if (g_resizeInProgress.load())
-            {
-                LOG_AMOURANTH("RESIZE STORM DETECTED → COALESCING → FINAL SIZE WILL BE {}×{}", newW, newH);
-                // Current resize will pick up the latest size when it runs
-            }
-            else
-            {
-                g_resizeInProgress.store(true);
-            }
         }
 
         // EXECUTE PENDING RESIZE — ONLY ONE AT A TIME — BULLETPROOF
-        if (g_resizeInProgress.load() && g_pendingWidth != 0 && g_pendingHeight != 0)
+        if (g_pendingWidth != 0 && g_pendingHeight != 0)
         {
             uint32_t targetW = g_pendingWidth;
             uint32_t targetH = g_pendingHeight;
-
-            LOG_AMOURANTH("EXECUTING NUCLEAR-PROOF RESIZE → {}×{} — PHOTONS REBORN", targetW, targetH);
 
             vkDeviceWaitIdle(stone_device());
 
@@ -286,14 +274,11 @@ void Application::run()
             // Reset state
             g_pendingWidth = g_pendingHeight = 0;
             g_resizeInProgress.store(false);
-
-            LOG_AMOURANTH("RESIZE COMPLETE — {}×{} — TLAS FRESH — NO BLACK SCREEN — PHOTONS ETERNAL", targetW, targetH);
         }
 
         // ==================================================================
         // INPUT PROCESSING
         // ==================================================================
-        LOG_AMOURANTH("Processing input...");
         processInput(g_deltaTime);
 
         // ==================================================================
@@ -301,14 +286,8 @@ void Application::run()
         // ==================================================================
         if (renderer_)
         {
-            LOG_AMOURANTH("Submitting renderFrame() | FIF: {} | Mode: {}", 
-                          currentMaxFramesInFlight, currentRenderMode_);
             renderer_->setMaxFramesInFlight(currentMaxFramesInFlight);
             renderer_->renderFrame(CAM, g_deltaTime);
-        }
-        else
-        {
-            LOG_WARN("Renderer is null — skipping frame");
         }
 
         // ==================================================================
