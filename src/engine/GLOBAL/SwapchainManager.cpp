@@ -102,28 +102,23 @@ void SwapchainManager::recreate(uint32_t w, uint32_t h) noexcept
     }
     minimized_ = false;
 
-    vkDeviceWaitIdle(stone_device());
+    // ── NUCLEAR OPTION: THROW ALL FRAMES INTO THE VOID ─────────────────────
+    // No vkDeviceWaitIdle() — old frames will die screaming with OUT_OF_DATE
+    // This is the way of the photon.
+    LOG_AMOURANTH("RESIZE DETECTED → THROWING ALL FRAMES INTO THE VOID — INSTANT REBIRTH");
 
-    // ── THE ONE TRUE ORDER — DO NOT DESTROY SWAPCHAIN EARLY ─────────────
-    VkSwapchainKHR oldSwapchain = swapchain_.get();  // ← KEEP ALIVE
+    VkSwapchainKHR oldSwapchain = swapchain_.get();
 
-    // Clean up image views FIRST — this is safe
+    // Destroy image views — safe
     for (auto v : swapchainImageViews_)
         if (v) vkDestroyImageView(stone_device(), v, nullptr);
     swapchainImageViews_.clear();
 
-    // DO NOT ZERO swapchain_ YET — we need the old handle for oldSwapchain parameter
-    // swapchain_ = Handle<VkSwapchainKHR>();  ← THIS WAS THE BUG — REMOVED FOREVER
-
-    // Rebirth with oldSwapchain reference
+    // Rebirth — oldSwapchain passed for recycling
     createSwapchain(stone_window(), w, h, oldSwapchain);
     createImageViews();
 
-    // NOW it's safe to let the old one die — Handle will destroy it when refcount hits 0
-    // If createSwapchain succeeded, oldSwapchain is already consumed and destroyed
-    // If it failed, we still have the old one — no device lost
-
-    LOG_AMOURANTH("SWAPCHAIN REBORN — {}×{} — PINK PHOTONS ETERNAL.", w, h);
+    LOG_AMOURANTH("SWAPCHAIN REBORN — {}×{} — ALL OLD FRAMES SACRIFICED — PHOTONS ASCEND", w, h);
 }
 
 void SwapchainManager::cleanup() noexcept

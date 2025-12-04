@@ -368,7 +368,6 @@ namespace detail {
     std::atomic<int>      g_pendingWidth{0};
     std::atomic<int>      g_pendingHeight{0};
     std::atomic<bool>     g_resizePending{false};
-    constexpr uint64_t    RESIZE_DEBOUNCE_MS = 150;
 }
 
 std::vector<std::string> getVulkanExtensions(SDL_Window* window)

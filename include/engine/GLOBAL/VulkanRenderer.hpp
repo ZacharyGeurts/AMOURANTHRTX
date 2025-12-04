@@ -122,6 +122,7 @@ private:
     bool     resetAccumNextFrame_ = true;
 
     int  activeRenderMode_ = 0;
+	std::atomic<uint64_t> rendererRebuildFrame_{0}; 
 
     bool hypertraceEnabled_     = Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING;
     bool denoisingEnabled_      = Options::OptionsRTX::ENABLE_DENOISING;

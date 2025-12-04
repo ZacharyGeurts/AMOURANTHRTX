@@ -46,7 +46,7 @@ namespace Splash {
 namespace Performance {
     // Maximum number of frames that can be in flight simultaneously
     // 3 = triple buffering — optimal for low latency + tear-free presentation
-    constexpr uint32_t MAX_FRAMES_IN_FLIGHT        = 1;
+    constexpr uint32_t MAX_FRAMES_IN_FLIGHT        = 3;
 
     // GPU query timestamps for precise timing of render passes
     constexpr bool     ENABLE_GPU_TIMESTAMPS       = true;

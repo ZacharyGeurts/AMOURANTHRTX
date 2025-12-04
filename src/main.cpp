@@ -265,10 +265,6 @@ void Application::run()
             {
                 LOG_AMOURANTH("RESIZE DETECTED → {}x{} — INITIATING INSTANT REBIRTH", newW, newH);
 
-                // DROP TO 1 FRAME IN FLIGHT — MAXIMUM SAFETY — NO CHANCE OF INDEX OVERFLOW
-                currentMaxFramesInFlight = 1;
-                if (renderer_) renderer_->setMaxFramesInFlight(1);
-
                 // RECREATE SWAPCHAIN — OLD FRAMES WILL DIE PEACEFULLY
                 RTX::SwapchainManager::recreate(newW, newH);
 
@@ -283,6 +279,7 @@ void Application::run()
                 if (renderer_) renderer_->setMaxFramesInFlight(normalMaxFramesInFlight);
 
                 LOG_AMOURANTH("SWAPCHAIN + SYNC REBORN — {}x{} — PHOTONS ASCEND — RESIZE COMPLETE", newW, newH);
+				continue; 
             }
         }
 

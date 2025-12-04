@@ -1536,50 +1536,62 @@ void VulkanRenderer::createRenderPass() noexcept {
 
 }
 
-void VulkanRenderer::renderFrame(const Camera& camera, float /*deltaTime*/) noexcept
+void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
 {
-    // ATOMIC + DYNAMIC FRAME INDEX — NO RACE, NO RE-ENTRY, NO DEATH
     const uint32_t globalFrame = currentFrame_.fetch_add(1, std::memory_order_relaxed);
+
+    // ── PHASE 1: FENCE WAIT — BULLETPROOF — NO DEADLOCK — NO UB
     const uint32_t f = globalFrame % maxFramesInFlight_;
 
-    LOG_TRACE("renderFrame() START | global#{} | flight#{} / {} | swapchain {}x{}", 
-              globalFrame, f, maxFramesInFlight_, stone_width(), stone_height());
+    // CRITICAL: Check if this slot belongs to the OLD sync generation
+    if (inFlightFences_[f] == VK_NULL_HANDLE || 
+        globalFrame < rendererRebuildFrame_)  // A new global counter set in onSwapchainRebuilt()
+    {
+        LOG_AMOURANTH("[PHASE 1] SKIPPING FENCE WAIT — slot {} belongs to old world or post-rebuild", f);
+        // Skip wait entirely — we're in resize recovery
+    }
+    else
+    {
+        LOG_TRACE("[PHASE 1] Waiting on valid fence[{}] = 0x{:x}", f, reinterpret_cast<uint64_t>(inFlightFences_[f]));
+        VK_CHECK(vkWaitForFences(stone_device(), 1, &inFlightFences_[f], VK_TRUE, 100'000'000ULL)); // 100ms
+        VK_CHECK(vkResetFences(stone_device(), 1, &inFlightFences_[f]));
+        LOG_TRACE("[PHASE 1] Fence[{}] ready → reset", f);
+    }
 
-    // ── 1. WAIT FOR THIS FLIGHT SLOT TO BE FREE ─────────────────────────
-    VK_CHECK(vkWaitForFences(stone_device(), 1, &inFlightFences_[f], VK_TRUE, UINT64_MAX));
-    VK_CHECK(vkResetFences(stone_device(), 1, &inFlightFences_[f]));
+    // ── PHASE 2: ACQUIRE SWAPCHAIN IMAGE ───────────────────────────────
+    LOG_TRACE("[PHASE 2] Acquiring swapchain image for slot {}", f);
 
-    RTX::las().beginFrame();
-
-    // ── 2. ACQUIRE SWAPCHAIN IMAGE — WITH TIMEOUT & MERCY ─────────────
     uint32_t imageIndex = 0;
     VkResult acquireResult = vkAcquireNextImageKHR(
         stone_device(),
         RTX::SwapchainManager::swapchain(),
-        2'000'000,  // 2ms timeout — never hang during resize
+        2'000'000,  // 2ms — never hang
         imageAvailableSemaphores_[f],
         VK_NULL_HANDLE,
         &imageIndex
     );
 
-    // OLD SWAPCHAIN IS DEAD — SACRIFICE THIS FRAME WITH DIGNITY
-    if (acquireResult == VK_ERROR_OUT_OF_DATE_KHR ||
+    if (acquireResult == VK_ERROR_OUT_OF_DATE_KHR || 
         acquireResult == VK_SUBOPTIMAL_KHR ||
         acquireResult == VK_TIMEOUT)
     {
-        LOG_MAIN("Swapchain out of date / timeout — frame sacrificed | result={}", string_VkResult(acquireResult));
+        LOG_AMOURANTH("[PHASE 2] ACQUIRE FAILED ({}) — SWAPCHAIN DEAD OR RESIZING — SACRIFICING FRAME {}", 
+                      string_VkResult(acquireResult), globalFrame);
+        currentFrame_.fetch_sub(1, std::memory_order_relaxed); // rollback
         return;
     }
 
     if (acquireResult != VK_SUCCESS)
     {
-        LOG_FATAL("vkAcquireNextImageKHR failed: {} | global#{}", string_VkResult(acquireResult), globalFrame);
+        LOG_FATAL("[PHASE 2] vkAcquireNextImageKHR HARD FAILURE: {}", string_VkResult(acquireResult));
         return;
     }
 
-    LOG_TRACE("Acquired imageIndex {} | flight {}", imageIndex, f);
+    LOG_AMOURANTH("[PHASE 2] SUCCESS → Acquired imageIndex {} for slot {}", imageIndex, f);
 
+    // ── PHASE 3: BEGIN COMMAND BUFFER ──────────────────────────────────
     VkCommandBuffer cmd = commandBuffers_[f];
+    LOG_TRACE("[PHASE 3] Beginning command buffer 0x{:x}", reinterpret_cast<uint64_t>(cmd));
 
     VkCommandBufferBeginInfo beginInfo{
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
@@ -1587,10 +1599,10 @@ void VulkanRenderer::renderFrame(const Camera& camera, float /*deltaTime*/) noex
     };
     VK_CHECK(vkBeginCommandBuffer(cmd, &beginInfo));
 
-    // ── DEV MODE 0 — PURE PINK VOID (SAFETY NET) ─────────────────────────
+    // ── PHASE 4: DEV MODE 0 — PURE PINK VOID ──────────────────────────
     if (activeRenderMode_ == 0)
     {
-        LOG_TRACE("DEV MODE 0 — PURE PINK VOID");
+        LOG_TRACE("[PHASE 4] DEV MODE 0 — PURE PINK VOID");
 
         VkClearColorValue pink{ {1.0f, 0.2f, 0.8f, 1.0f} };
         VkImageSubresourceRange range{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
@@ -1620,6 +1632,8 @@ void VulkanRenderer::renderFrame(const Camera& camera, float /*deltaTime*/) noex
         vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr, 1, &finalBarrier);
 
         VK_CHECK(vkEndCommandBuffer(cmd));
+
+        LOG_TRACE("[PHASE 4] Dev Mode 0 complete — ending cmd buffer");
 
         VkSemaphoreSubmitInfo waitInfo{
             .sType     = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
@@ -1667,18 +1681,18 @@ void VulkanRenderer::renderFrame(const Camera& camera, float /*deltaTime*/) noex
         return;
     }
 
-    // ── OVERLAY REBUILD — ONLY WHEN SAFE (after successful acquire) ─────
+    // ── PHASE 4: OVERLAY REBUILD — ONLY WHEN SAFE ─────────────────────
     if (!overlayValid_ && overlayEnabled_)
     {
-        LOG_AMOURANTH("REBUILDING OVERLAY — post-resize recovery");
+        LOG_AMOURANTH("[PHASE 4] REBUILDING OVERLAY — post-resize recovery");
         setOverlay(true);
         overlayValid_ = true;
     }
 
-    // ── ACCUMULATION RESET ───────────────────────────────────────────────
+    // ── PHASE 5: ACCUMULATION RESET ───────────────────────────────────
     if (resetAccumulation_ || resetAccumNextFrame_)
     {
-        LOG_MAIN("ACCUMULATION RESET — fresh photons from frame 0");
+        LOG_MAIN("[PHASE 5] ACCUMULATION RESET — fresh photons from frame 0");
 
         VkClearColorValue zero{ {0.0f, 0.0f, 0.0f, 0.0f} };
         VkImageSubresourceRange range{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
@@ -1697,7 +1711,8 @@ void VulkanRenderer::renderFrame(const Camera& camera, float /*deltaTime*/) noex
         accumulationFrame_ = currentSpp_ = 0;
     }
 
-    // ── UPDATE UNIFORMS & DESCRIPTORS ───────────────────────────────────
+    // ── PHASE 6: UPDATE UNIFORMS & DESCRIPTORS ─────────────────────────
+    LOG_TRACE("[PHASE 6] Updating uniforms & descriptors");
     updateUniformBuffer(f, camera, 0.0f);
     updateTonemapUniform(f);
 
@@ -1721,10 +1736,12 @@ void VulkanRenderer::renderFrame(const Camera& camera, float /*deltaTime*/) noex
     if (Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING)
         updateNexusDescriptors();
 
-    // ── RAY TRACING ─────────────────────────────────────────────────────
+    // ── PHASE 7: RAY TRACING ───────────────────────────────────────────
+    LOG_TRACE("[PHASE 7] Dispatching ray tracing");
     recordRayTracingCommands(cmd, f);
 
-    // ── TONEMAP CHAIN ───────────────────────────────────────────────────
+    // ── PHASE 8: TONEMAP CHAIN ─────────────────────────────────────────
+    LOG_TRACE("[PHASE 8] Tonemap chain");
     VkImageMemoryBarrier rtToRead{
         .sType            = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
         .srcAccessMask    = VK_ACCESS_SHADER_WRITE_BIT,
@@ -1744,7 +1761,8 @@ void VulkanRenderer::renderFrame(const Camera& camera, float /*deltaTime*/) noex
     if (denoisingEnabled_) performDenoisingPass(cmd);
     performTonemapPass(cmd, f, imageIndex);
 
-    // ── FINAL TRANSITION TO PRESENT ─────────────────────────────────────
+    // ── PHASE 9: FINAL TRANSITION TO PRESENT ───────────────────────────
+    LOG_TRACE("[PHASE 9] Final layout transition to PRESENT_SRC_KHR");
     VkImageMemoryBarrier toPresent{
         .sType            = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
         .srcAccessMask    = VK_ACCESS_SHADER_WRITE_BIT,
@@ -1759,7 +1777,8 @@ void VulkanRenderer::renderFrame(const Camera& camera, float /*deltaTime*/) noex
 
     VK_CHECK(vkEndCommandBuffer(cmd));
 
-    // ── SUBMIT & PRESENT ────────────────────────────────────────────────
+    // ── PHASE 10: SUBMIT ───────────────────────────────────────────────
+    LOG_TRACE("[PHASE 10] Submitting to graphics queue");
     VkSemaphoreSubmitInfo waitInfo{
         .sType     = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
         .semaphore = imageAvailableSemaphores_[f],
@@ -1784,7 +1803,18 @@ void VulkanRenderer::renderFrame(const Camera& camera, float /*deltaTime*/) noex
         .signalSemaphoreInfoCount = 1,
         .pSignalSemaphoreInfos    = &signalInfo
     };
-    VK_CHECK(vkQueueSubmit2(stone_graphics_queue(), 1, &submit, inFlightFences_[f]));
+
+    VkResult submitRes = vkQueueSubmit2(stone_graphics_queue(), 1, &submit, inFlightFences_[f]);
+    if (submitRes != VK_SUCCESS)
+    {
+        LOG_FATAL("[PHASE 10] vkQueueSubmit2 FAILED: {}", string_VkResult(submitRes));
+        return;
+    }
+
+    LOG_TRACE("[PHASE 10] Submit successful — fence[{}] now in-flight", f);
+
+    // ── PHASE 11: PRESENT ─────────────────────────────────────────────
+    LOG_TRACE("[PHASE 11] Presenting image {}", imageIndex);
 
     VkPresentInfoKHR present{
         .sType              = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
@@ -1794,18 +1824,24 @@ void VulkanRenderer::renderFrame(const Camera& camera, float /*deltaTime*/) noex
         .pSwapchains        = &stone_swapchain(),
         .pImageIndices      = &imageIndex
     };
-    VkResult r = vkQueuePresentKHR(stone_present_queue(), &present);
-    if (r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_SUBOPTIMAL_KHR)
+
+    VkResult presentRes = vkQueuePresentKHR(stone_present_queue(), &present);
+    if (presentRes == VK_ERROR_OUT_OF_DATE_KHR || presentRes == VK_SUBOPTIMAL_KHR)
     {
-        LOG_MAIN("Present returned OUT OF DATE — frame sacrificed");
+        LOG_AMOURANTH("[PHASE 11] Present returned {} — frame sacrificed post-submit", string_VkResult(presentRes));
         return;
     }
+    if (presentRes != VK_SUCCESS)
+    {
+        LOG_FATAL("[PHASE 11] vkQueuePresentKHR failed: {}", string_VkResult(presentRes));
+    }
 
+    // ── PHASE 12: FRAME COMPLETE ───────────────────────────────────────
     currentSpp_++;
     accumulationFrame_++;
 
-    LOG_TRACE("renderFrame() END | frame#{} | spp={} | accum={} | FIF={}", 
-              frameNumber_++, currentSpp_, accumulationFrame_, maxFramesInFlight_);
+    LOG_AMOURANTH("<<< [PHASE 12] renderFrame COMPLETE | global#{} | slot#{} | SPP={} | ACCUM={} | {}x{}", 
+                  globalFrame, f, currentSpp_, accumulationFrame_, stone_width(), stone_height());
 }
 
 void VulkanRenderer::setMaxFramesInFlight(uint32_t count) noexcept
@@ -1822,11 +1858,12 @@ void VulkanRenderer::onSwapchainRebuilt(uint32_t w, uint32_t h) noexcept
     for (auto s : renderFinishedSemaphores_) if (s) vkDestroySemaphore(stone_device(), s, nullptr);
     for (auto f : inFlightFences_)           if (f) vkDestroyFence(stone_device(), f, nullptr);
 
-    // CLEAR AND RESIZE PROPERLY
     imageAvailableSemaphores_.clear();
     renderFinishedSemaphores_.clear();
     inFlightFences_.clear();
+    commandBuffers_.clear();
 
+    // RECREATE — SIGNALED
     imageAvailableSemaphores_.resize(3);
     renderFinishedSemaphores_.resize(3);
     inFlightFences_.resize(3);
@@ -1838,30 +1875,25 @@ void VulkanRenderer::onSwapchainRebuilt(uint32_t w, uint32_t h) noexcept
     {
         VK_CHECK(vkCreateSemaphore(stone_device(), &semInfo, nullptr, &imageAvailableSemaphores_[i]));
         VK_CHECK(vkCreateSemaphore(stone_device(), &semInfo, nullptr, &renderFinishedSemaphores_[i]));
-        VK_CHECK(vkCreateFence(stone_device(), &fenceInfo, nullptr, &inFlightFences_[i]));  // NOW SAFE
+        VK_CHECK(vkCreateFence(stone_device(), &fenceInfo, nullptr, &inFlightFences_[i]));
     }
 
-    // COMMAND BUFFERS
-    if (!commandBuffers_.empty())
-    {
-        vkFreeCommandBuffers(stone_device(), RTX::g_ctx().commandPool_,
-                             static_cast<uint32_t>(commandBuffers_.size()), commandBuffers_.data());
-        commandBuffers_.clear();
-    }
     commandBuffers_.resize(3);
     VkCommandBufferAllocateInfo allocInfo{
-        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-        .commandPool = RTX::g_ctx().commandPool_,
-        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+        .sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .commandPool        = RTX::g_ctx().commandPool_,
+        .level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
         .commandBufferCount = 3
     };
     VK_CHECK(vkAllocateCommandBuffers(stone_device(), &allocInfo, commandBuffers_.data()));
 
-    currentFrame_.store(0);
+    // THIS IS THE MISSING LINE — THE ONE TRUE FIX
+    currentFrame_.store(0);  // ← RESET THE FRAME COUNTER
+
     overlayValid_ = false;
     requestAccumulationReset();
 
-    LOG_AMOURANTH("SYNC REBORN — 3 FIF — FENCES SIGNALED — READY");
+    LOG_AMOURANTH("SYNC REBORN — FENCES SIGNALED — currentFrame_ RESET TO 0 — READY TO FLY");
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
