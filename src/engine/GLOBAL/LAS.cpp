@@ -47,7 +47,7 @@ static VkFence createFence() noexcept
 // One-Time Submit Helpers
 // ============================================================================
 
-[[nodiscard]] VkCommandBuffer beginOneTimeSubmit(VkCommandPool pool) noexcept
+[[nodiscard]] inline VkCommandBuffer beginOneTimeSubmit(VkCommandPool pool) noexcept
 {
     if (pool == VK_NULL_HANDLE) pool = g_ctx().commandPool_;
     if (pool == VK_NULL_HANDLE) {
@@ -56,43 +56,49 @@ static VkFence createFence() noexcept
     }
 
     VkCommandBuffer cmd = VK_NULL_HANDLE;
-    VkCommandBufferAllocateInfo allocInfo{
+    const VkCommandBufferAllocateInfo allocInfo{
         .sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
         .commandPool        = pool,
         .level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-        .commandBufferCount = 1
+        .commandBufferCount = 1u
     };
     VK_CHECK(vkAllocateCommandBuffers(stone_device(), &allocInfo, &cmd));
 
-    VkCommandBufferBeginInfo beginInfo{
+    const VkCommandBufferBeginInfo beginInfo{
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
         .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
     };
     VK_CHECK(vkBeginCommandBuffer(cmd, &beginInfo));
+
     return cmd;
 }
 
-void endOneTimeSubmit(VkCommandBuffer cmd,
-                      VkQueue queue,
-                      VkFence fence,
-                      VkCommandPool pool) noexcept
+inline void endOneTimeSubmit(VkCommandBuffer cmd,
+                            VkQueue queue,
+                            VkFence fence,
+                            VkCommandPool pool) noexcept
 {
     if (cmd == VK_NULL_HANDLE) return;
 
     VK_CHECK(vkEndCommandBuffer(cmd));
 
-    VkSubmitInfo submit{
+    if (queue == VK_NULL_HANDLE) queue = g_ctx().graphicsQueue_;
+
+    const VkSubmitInfo submit{
         .sType              = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-        .commandBufferCount = 1,
+        .commandBufferCount = 1u,
         .pCommandBuffers    = &cmd
     };
 
-    VK_CHECK(vkQueueSubmit(queue, 1, &submit, fence));
-    if (!fence) vkQueueWaitIdle(queue);
+    VK_CHECK(vkQueueSubmit(queue, 1u, &submit, fence));
+
+    if (fence == VK_NULL_HANDLE) {
+        vkQueueWaitIdle(queue);
+    }
 
     if (pool == VK_NULL_HANDLE) pool = g_ctx().commandPool_;
     if (pool != VK_NULL_HANDLE) {
-        vkFreeCommandBuffers(stone_device(), pool, 1, &cmd);
+        vkFreeCommandBuffers(stone_device(), pool, 1u, &cmd);
     }
 }
 

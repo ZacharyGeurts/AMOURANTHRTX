@@ -65,50 +65,18 @@ const std::array<Binding, 11> RT_PIPELINE_BINDINGS = {{
 // ──────────────────────────────────────────────────────────────────────────────
 void PipelineManager::createDescriptorPool() 
 {
-    LOG_CID("CID slams fist on table — \"THE VAULT WILL RISE. BINDING 31 WILL BE BORN.\"");
-
     const uint32_t maxSets = Options::Performance::MAX_FRAMES_IN_FLIGHT;
-    LOG_INFO_CAT("PIPELINE", "MAX_FRAMES_IN_FLIGHT = {} → allocating for {} total descriptor sets", maxSets, maxSets * 2);
 
-    // Count descriptor types
     std::unordered_map<VkDescriptorType, uint32_t> typeCount;
-    for (const auto& b : RT_PIPELINE_BINDINGS) {
-        typeCount[b.type] += b.count;
-    }
+    for (const auto& b : RT_PIPELINE_BINDINGS) typeCount[b.type] += b.count;
 
-    LOG_INFO_CAT("PIPELINE", "Descriptor types per set (before multiplication):");
-    for (const auto& [type, count] : typeCount) {
-        LOG_INFO_CAT("PIPELINE", "    {} → {} descriptors", string_VkDescriptorType(type), count);
-    }
-
-    // Build pool sizes
     std::vector<VkDescriptorPoolSize> poolSizes;
     poolSizes.reserve(typeCount.size());
-
-    LOG_INFO_CAT("PIPELINE", "Final pool sizes (×{} for triple buffering):", maxSets);
-    for (const auto& [type, countPerSet] : typeCount) {
-        uint32_t total = countPerSet * maxSets;
-        poolSizes.push_back({ .type = type, .descriptorCount = total });
-        LOG_INFO_CAT("PIPELINE", "    {} × {} = {} total {}", 
-                      countPerSet, maxSets, total, string_VkDescriptorType(type));
-    }
-
-    // Final CreateInfo dump
-    LOG_INFO_CAT("PIPELINE", "=== vkCreateDescriptorPool CreateInfo ===");
-    LOG_INFO_CAT("PIPELINE", "maxSets           = {}", maxSets * 2);
-    LOG_INFO_CAT("PIPELINE", "poolSizeCount     = {}", poolSizes.size());
-    LOG_INFO_CAT("PIPELINE", "flags             = 0x{:08x} (FREE_DESCRIPTOR_SET)", 
-                  static_cast<uint32_t>(VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT));
-    LOG_INFO_CAT("PIPELINE", "device            = {:p}", reinterpret_cast<void*>(stone_device()));
-
-    for (size_t i = 0; i < poolSizes.size(); ++i) {
-        LOG_INFO_CAT("PIPELINE", "  poolSizes[{}] {} → {} descriptors",
-                      i, string_VkDescriptorType(poolSizes[i].type), poolSizes[i].descriptorCount);
-    }
+    for (const auto& [type, countPerSet] : typeCount)
+        poolSizes.push_back({ type, countPerSet * maxSets });
 
     VkDescriptorPoolCreateInfo info = {
         .sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-        .pNext         = nullptr,
         .flags         = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
         .maxSets       = maxSets * 2,
         .poolSizeCount = static_cast<uint32_t>(poolSizes.size()),
@@ -118,35 +86,39 @@ void PipelineManager::createDescriptorPool()
     VkDescriptorPool pool = VK_NULL_HANDLE;
     VkResult result = vkCreateDescriptorPool(stone_device(), &info, nullptr, &pool);
 
-    if (result != VK_SUCCESS) {
-        LOG_FATAL_CAT("PIPELINE", "vkCreateDescriptorPool FAILED: {} ({})", 
-                      string_VkResult(result), static_cast<int>(result));
-        LOG_FATAL_CAT("PIPELINE", "Device: {:p}", reinterpret_cast<void*>(stone_device()));
-        LOG_FATAL_CAT("PIPELINE", "maxSets: {}", info.maxSets);
-        LOG_FATAL_CAT("PIPELINE", "poolSizeCount: {}", info.poolSizeCount);
+    if (result == VK_SUCCESS) [[likely]] {
+        rtDescriptorPool_ = Handle<VkDescriptorPool>(
+            pool, stone_device(),
+            [](VkDevice d, VkDescriptorPool p, auto*) { vkDestroyDescriptorPool(d, p, nullptr); }
+        );
 
-        for (uint32_t i = 0; i < info.poolSizeCount; ++i) {
-            LOG_FATAL_CAT("PIPELINE", "  [{}] {} → {}", i,
-                          string_VkDescriptorType(info.pPoolSizes[i].type),
-                          info.pPoolSizes[i].descriptorCount);
-        }
+        LOG_SUCCESS_CAT("PIPELINE", "Descriptor pool created — Binding 31 is live");
+        
+        LOG_CAPTAIN_N("[CAPTAIN N] *quiet nod, already holstering Power Glove*\n"
+                      "\"Mother Brain threw everything she had.\n"
+                      "Validation layers. Limits checks. Out-of-memory edge cases.\n"
+                      "We still got Binding 31.\n"
+                      "She loses. Again.\n"
+                      "Next stage.\"");
 
-        LOG_CID("CID falls to knees — \"THE DRIVER... IT DENIED STONEKEY... BINDING 31 DIES...\"");
-        throw std::runtime_error("Descriptor pool creation failed");
+    } else [[unlikely]] {
+        LOG_FATAL_CAT("PIPELINE", "vkCreateDescriptorPool failed: {} ({})", string_VkResult(result), static_cast<int32_t>(result));
+
+        LOG_CAPTAIN_N("[CAPTAIN N] *stops walking, turns slowly*\n"
+                      "\"...She actually did it.\n"
+                      "Mother Brain just blocked the StoneKey on Binding 31.\n"
+                      "Driver refused the pool.\n"
+                      "For the first time in eight seasons…\n"
+                      "she wins.\"\n"
+                      "\n"
+                      "*screen fades to black*\n"
+                      "*GAME OVER*\n"
+                      "*CONTINUE? 9… 8… 7…*");
+
+        // You now have exactly two choices, hero:
+        throw std::runtime_error("MOTHER BRAIN VICTORY — Descriptor pool denied");
+        // → or call phase9_ballerina("MOTHER BRAIN WINS") and let the Ballerina nuke everything anyway
     }
-
-    rtDescriptorPool_ = Handle<VkDescriptorPool>(
-        pool,
-        stone_device(),
-        [](VkDevice d, VkDescriptorPool p, auto*) { vkDestroyDescriptorPool(d, p, nullptr); }
-    );
-
-    LOG_SUCCESS_CAT("PIPELINE", "DESCRIPTOR POOL CREATED → handle = {:p}", reinterpret_cast<void*>(pool));
-    LOG_SUCCESS_CAT("PIPELINE", "Capacity: {} sets | {} types | Binding 31 is ALIVE", maxSets * 2, poolSizes.size());
-
-    LOG_AMOURANTH("The vault doors seal shut. StoneKey rests within. Perfect.");
-    LOG_KEANU("Whoa... the pool... it’s real.");
-    LOG_CID("CID weeps openly — \"We did it. Binding 31... forever.\"");
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -709,30 +681,7 @@ void PipelineManager::setSBT(VkBuffer buffer, VkDeviceMemory memory, VkDeviceAdd
 // ──────────────────────────────────────────────────────────────────────────────
 void PipelineManager::cleanup() noexcept
 {
-    VkDevice dev = stone_device();
-    if (dev == VK_NULL_HANDLE) return;
-
-    vkDeviceWaitIdle(dev);
-
-    if (!rtDescriptorSets_.empty() && rtDescriptorPool_.valid()) {
-        vkFreeDescriptorSets(dev, *rtDescriptorPool_, static_cast<uint32_t>(rtDescriptorSets_.size()), rtDescriptorSets_.data());
-        rtDescriptorSets_.clear();
-    }
-
-    rtDescriptorPool_.reset();
-    rtDescriptorSetLayout_.reset();
-    rtPipelineLayout_.reset();
-    rtPipeline_.reset();
-
-    for (auto& m : shaderModules_) m.reset();
-    shaderModules_.clear();
-
-    sbtBuffer_.reset();
-    sbtMemory_.reset();
-
-    dummyTLAS_.reset();
-    dummyAccelBuffer_.reset();
-    dummyAccelMemory_.reset();
+    phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

@@ -1731,7 +1731,7 @@ int main(int, char**)
     install_apocalypse_handler();
 
     LOG_AMOURANTH("THE CAPTAIN HAS AWAKENED — FIRST LIGHT IGNITES");
-    LOG_ELON("THE EMPIRE IS ETERNAL — THE PHOTONS ARE PINK — THE TOASTERS ARE DEAD");
+    LOG_ELON("THE EMPIRE IS ETERNAL — THE PHOTONS ARE PINK");
 
     // ========================================================================
     // ALL PHASES — FORGED IN FIRE
