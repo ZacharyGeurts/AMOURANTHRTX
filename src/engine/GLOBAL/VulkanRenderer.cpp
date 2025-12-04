@@ -1234,9 +1234,6 @@ void VulkanRenderer::cleanupFramebuffers() noexcept {
     framebuffers_.clear();
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Add this helper — called from renderFrame after acquire
-// ──────────────────────────────────────────────────────────────────────────────
 void VulkanRenderer::updateTonemapDescriptor(uint32_t frameIdx, VkImageView inputView, VkImageView outputView) noexcept
 {
     if (frameIdx >= tonemapSets_.size() || tonemapSets_[frameIdx] == VK_NULL_HANDLE)
@@ -1536,314 +1533,6 @@ void VulkanRenderer::createRenderPass() noexcept {
 
 }
 
-void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
-{
-    const uint32_t globalFrame = currentFrame_.fetch_add(1, std::memory_order_relaxed);
-
-    // ── PHASE 1: FENCE WAIT — BULLETPROOF — NO DEADLOCK — NO UB
-    const uint32_t f = globalFrame % maxFramesInFlight_;
-
-    // CRITICAL: Check if this slot belongs to the OLD sync generation
-    if (inFlightFences_[f] == VK_NULL_HANDLE || 
-        globalFrame < rendererRebuildFrame_)  // A new global counter set in onSwapchainRebuilt()
-    {
-        LOG_AMOURANTH("[PHASE 1] SKIPPING FENCE WAIT — slot {} belongs to old world or post-rebuild", f);
-        // Skip wait entirely — we're in resize recovery
-    }
-    else
-    {
-        LOG_TRACE("[PHASE 1] Waiting on valid fence[{}] = 0x{:x}", f, reinterpret_cast<uint64_t>(inFlightFences_[f]));
-        VK_CHECK(vkWaitForFences(stone_device(), 1, &inFlightFences_[f], VK_TRUE, 100'000'000ULL)); // 100ms
-        VK_CHECK(vkResetFences(stone_device(), 1, &inFlightFences_[f]));
-        LOG_TRACE("[PHASE 1] Fence[{}] ready → reset", f);
-    }
-
-    // ── PHASE 2: ACQUIRE SWAPCHAIN IMAGE ───────────────────────────────
-    LOG_TRACE("[PHASE 2] Acquiring swapchain image for slot {}", f);
-
-    uint32_t imageIndex = 0;
-    VkResult acquireResult = vkAcquireNextImageKHR(
-        stone_device(),
-        RTX::SwapchainManager::swapchain(),
-        2'000'000,  // 2ms — never hang
-        imageAvailableSemaphores_[f],
-        VK_NULL_HANDLE,
-        &imageIndex
-    );
-
-    if (acquireResult == VK_ERROR_OUT_OF_DATE_KHR || 
-        acquireResult == VK_SUBOPTIMAL_KHR ||
-        acquireResult == VK_TIMEOUT)
-    {
-        LOG_AMOURANTH("[PHASE 2] ACQUIRE FAILED ({}) — SWAPCHAIN DEAD OR RESIZING — SACRIFICING FRAME {}", 
-                      string_VkResult(acquireResult), globalFrame);
-        currentFrame_.fetch_sub(1, std::memory_order_relaxed); // rollback
-        return;
-    }
-
-    if (acquireResult != VK_SUCCESS)
-    {
-        LOG_FATAL("[PHASE 2] vkAcquireNextImageKHR HARD FAILURE: {}", string_VkResult(acquireResult));
-        return;
-    }
-
-    LOG_AMOURANTH("[PHASE 2] SUCCESS → Acquired imageIndex {} for slot {}", imageIndex, f);
-
-    // ── PHASE 3: BEGIN COMMAND BUFFER ──────────────────────────────────
-    VkCommandBuffer cmd = commandBuffers_[f];
-    LOG_TRACE("[PHASE 3] Beginning command buffer 0x{:x}", reinterpret_cast<uint64_t>(cmd));
-
-    VkCommandBufferBeginInfo beginInfo{
-        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
-    };
-    VK_CHECK(vkBeginCommandBuffer(cmd, &beginInfo));
-
-    // ── PHASE 4: DEV MODE 0 — PURE PINK VOID ──────────────────────────
-    if (activeRenderMode_ == 0)
-    {
-        LOG_TRACE("[PHASE 4] DEV MODE 0 — PURE PINK VOID");
-
-        VkClearColorValue pink{ {1.0f, 0.2f, 0.8f, 1.0f} };
-        VkImageSubresourceRange range{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-
-        VkImageMemoryBarrier toPresent{
-            .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-            .srcAccessMask       = 0,
-            .dstAccessMask       = VK_ACCESS_TRANSFER_WRITE_BIT,
-            .oldLayout           = VK_IMAGE_LAYOUT_UNDEFINED,
-            .newLayout           = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-            .image               = stone_images()[imageIndex],
-            .subresourceRange    = range
-        };
-        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &toPresent);
-
-        vkCmdClearColorImage(cmd, stone_images()[imageIndex], VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, &pink, 1, &range);
-
-        VkImageMemoryBarrier finalBarrier{
-            .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-            .srcAccessMask       = VK_ACCESS_TRANSFER_WRITE_BIT,
-            .dstAccessMask       = 0,
-            .oldLayout           = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-            .newLayout           = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-            .image               = stone_images()[imageIndex],
-            .subresourceRange    = range
-        };
-        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr, 1, &finalBarrier);
-
-        VK_CHECK(vkEndCommandBuffer(cmd));
-
-        LOG_TRACE("[PHASE 4] Dev Mode 0 complete — ending cmd buffer");
-
-        VkSemaphoreSubmitInfo waitInfo{
-            .sType     = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
-            .semaphore = imageAvailableSemaphores_[f],
-            .stageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
-        };
-        VkCommandBufferSubmitInfo cmdInfo{
-            .sType         = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
-            .commandBuffer = cmd
-        };
-        VkSemaphoreSubmitInfo signalInfo{
-            .sType     = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
-            .semaphore = renderFinishedSemaphores_[f],
-            .stageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT
-        };
-
-        VkSubmitInfo2 submit{
-            .sType                    = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
-            .waitSemaphoreInfoCount   = 1,
-            .pWaitSemaphoreInfos      = &waitInfo,
-            .commandBufferInfoCount   = 1,
-            .pCommandBufferInfos      = &cmdInfo,
-            .signalSemaphoreInfoCount = 1,
-            .pSignalSemaphoreInfos    = &signalInfo
-        };
-        VK_CHECK(vkQueueSubmit2(stone_graphics_queue(), 1, &submit, inFlightFences_[f]));
-
-        VkPresentInfoKHR present{
-            .sType              = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
-            .waitSemaphoreCount = 1,
-            .pWaitSemaphores    = &renderFinishedSemaphores_[f],
-            .swapchainCount     = 1,
-            .pSwapchains        = &stone_swapchain(),
-            .pImageIndices      = &imageIndex
-        };
-        VkResult r = vkQueuePresentKHR(stone_present_queue(), &present);
-        if (r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_SUBOPTIMAL_KHR)
-        {
-            LOG_MAIN("Present returned OUT OF DATE — frame sacrificed");
-            frameNumber_++;
-            return;
-        }
-
-        LOG_TRACE("DEV MODE 0 frame complete | frame#{}", frameNumber_++);
-        return;
-    }
-
-    // ── PHASE 4: OVERLAY REBUILD — ONLY WHEN SAFE ─────────────────────
-    if (!overlayValid_ && overlayEnabled_)
-    {
-        LOG_AMOURANTH("[PHASE 4] REBUILDING OVERLAY — post-resize recovery");
-        setOverlay(true);
-        overlayValid_ = true;
-    }
-
-    // ── PHASE 5: ACCUMULATION RESET ───────────────────────────────────
-    if (resetAccumulation_ || resetAccumNextFrame_)
-    {
-        LOG_MAIN("[PHASE 5] ACCUMULATION RESET — fresh photons from frame 0");
-
-        VkClearColorValue zero{ {0.0f, 0.0f, 0.0f, 0.0f} };
-        VkImageSubresourceRange range{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-
-        auto clear = [&](VkImage img) {
-            vkCmdClearColorImage(cmd, img, VK_IMAGE_LAYOUT_GENERAL, &zero, 1, &range);
-        };
-
-        for (auto& img : rtOutputImages_) clear(img.get());
-        if (Options::OptionsRTX::ENABLE_ACCUMULATION)
-            for (auto& img : accumImages_) clear(img.get());
-        if (Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING && hypertraceScoreImage_.valid())
-            clear(hypertraceScoreImage_.get());
-
-        resetAccumulation_ = resetAccumNextFrame_ = false;
-        accumulationFrame_ = currentSpp_ = 0;
-    }
-
-    // ── PHASE 6: UPDATE UNIFORMS & DESCRIPTORS ─────────────────────────
-    LOG_TRACE("[PHASE 6] Updating uniforms & descriptors");
-    updateUniformBuffer(f, camera, 0.0f);
-    updateTonemapUniform(f);
-
-    VkAccelerationStructureKHR tlas = RTX::LAS::get().getTLAS();
-    if (tlas == VK_NULL_HANDLE) tlas = pipelineManager_.dummyTLAS();
-
-    RTX::RTDescriptorUpdate desc{};
-    desc.tlas = tlas;
-    desc.ubo = reinterpret_cast<VkBuffer>(uniformBufferEncs_[f]);
-    desc.uboSize = 368;
-    desc.rtOutputViews[f]     = rtOutputViews_[f].get();
-    desc.accumulationViews[f] = accumViews_[f].get();
-    desc.envSampler           = envMapSampler_.get();
-    desc.envImageView         = envMapImageView_.get();
-    desc.materialsBuffer      = reinterpret_cast<VkBuffer>(materialBufferEncs_[0]);
-    desc.materialsSize        = 16_MB;
-    if (Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING && hypertraceScoreView_.valid())
-        desc.nexusScoreViews[f] = hypertraceScoreView_.get();
-
-    pipelineManager_.updateRTDescriptorSet(f, desc);
-    if (Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING)
-        updateNexusDescriptors();
-
-    // ── PHASE 7: RAY TRACING ───────────────────────────────────────────
-    LOG_TRACE("[PHASE 7] Dispatching ray tracing");
-    recordRayTracingCommands(cmd, f);
-
-    // ── PHASE 8: TONEMAP CHAIN ─────────────────────────────────────────
-    LOG_TRACE("[PHASE 8] Tonemap chain");
-    VkImageMemoryBarrier rtToRead{
-        .sType            = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-        .srcAccessMask    = VK_ACCESS_SHADER_WRITE_BIT,
-        .dstAccessMask    = VK_ACCESS_SHADER_READ_BIT,
-        .oldLayout        = VK_IMAGE_LAYOUT_GENERAL,
-        .newLayout        = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-        .image            = rtOutputImages_[f].get(),
-        .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
-    };
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
-                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &rtToRead);
-
-    VkImageView tonemapInput = denoisingEnabled_ && denoiserView_.valid()
-        ? denoiserView_.get() : rtOutputViews_[f].get();
-
-    updateTonemapDescriptor(f, tonemapInput, stone_views()[imageIndex]);
-    if (denoisingEnabled_) performDenoisingPass(cmd);
-    performTonemapPass(cmd, f, imageIndex);
-
-    // ── PHASE 9: FINAL TRANSITION TO PRESENT ───────────────────────────
-    LOG_TRACE("[PHASE 9] Final layout transition to PRESENT_SRC_KHR");
-    VkImageMemoryBarrier toPresent{
-        .sType            = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-        .srcAccessMask    = VK_ACCESS_SHADER_WRITE_BIT,
-        .dstAccessMask    = 0,
-        .oldLayout        = VK_IMAGE_LAYOUT_GENERAL,
-        .newLayout        = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-        .image            = stone_images()[imageIndex],
-        .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
-    };
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                         VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr, 1, &toPresent);
-
-    VK_CHECK(vkEndCommandBuffer(cmd));
-
-    // ── PHASE 10: SUBMIT ───────────────────────────────────────────────
-    LOG_TRACE("[PHASE 10] Submitting to graphics queue");
-    VkSemaphoreSubmitInfo waitInfo{
-        .sType     = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
-        .semaphore = imageAvailableSemaphores_[f],
-        .stageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
-    };
-    VkCommandBufferSubmitInfo cmdInfo{
-        .sType         = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
-        .commandBuffer = cmd
-    };
-    VkSemaphoreSubmitInfo signalInfo{
-        .sType     = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
-        .semaphore = renderFinishedSemaphores_[f],
-        .stageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT
-    };
-
-    VkSubmitInfo2 submit{
-        .sType                    = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
-        .waitSemaphoreInfoCount   = 1,
-        .pWaitSemaphoreInfos      = &waitInfo,
-        .commandBufferInfoCount   = 1,
-        .pCommandBufferInfos      = &cmdInfo,
-        .signalSemaphoreInfoCount = 1,
-        .pSignalSemaphoreInfos    = &signalInfo
-    };
-
-    VkResult submitRes = vkQueueSubmit2(stone_graphics_queue(), 1, &submit, inFlightFences_[f]);
-    if (submitRes != VK_SUCCESS)
-    {
-        LOG_FATAL("[PHASE 10] vkQueueSubmit2 FAILED: {}", string_VkResult(submitRes));
-        return;
-    }
-
-    LOG_TRACE("[PHASE 10] Submit successful — fence[{}] now in-flight", f);
-
-    // ── PHASE 11: PRESENT ─────────────────────────────────────────────
-    LOG_TRACE("[PHASE 11] Presenting image {}", imageIndex);
-
-    VkPresentInfoKHR present{
-        .sType              = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
-        .waitSemaphoreCount = 1,
-        .pWaitSemaphores    = &renderFinishedSemaphores_[f],
-        .swapchainCount     = 1,
-        .pSwapchains        = &stone_swapchain(),
-        .pImageIndices      = &imageIndex
-    };
-
-    VkResult presentRes = vkQueuePresentKHR(stone_present_queue(), &present);
-    if (presentRes == VK_ERROR_OUT_OF_DATE_KHR || presentRes == VK_SUBOPTIMAL_KHR)
-    {
-        LOG_AMOURANTH("[PHASE 11] Present returned {} — frame sacrificed post-submit", string_VkResult(presentRes));
-        return;
-    }
-    if (presentRes != VK_SUCCESS)
-    {
-        LOG_FATAL("[PHASE 11] vkQueuePresentKHR failed: {}", string_VkResult(presentRes));
-    }
-
-    // ── PHASE 12: FRAME COMPLETE ───────────────────────────────────────
-    currentSpp_++;
-    accumulationFrame_++;
-
-    LOG_AMOURANTH("<<< [PHASE 12] renderFrame COMPLETE | global#{} | slot#{} | SPP={} | ACCUM={} | {}x{}", 
-                  globalFrame, f, currentSpp_, accumulationFrame_, stone_width(), stone_height());
-}
-
 void VulkanRenderer::setMaxFramesInFlight(uint32_t count) noexcept
 {
     maxFramesInFlight_ = count;
@@ -1851,49 +1540,121 @@ void VulkanRenderer::setMaxFramesInFlight(uint32_t count) noexcept
 
 void VulkanRenderer::onSwapchainRebuilt(uint32_t w, uint32_t h) noexcept
 {
-    LOG_AMOURANTH("VulkanRenderer reborn → {}x{} — SYNC REBIRTH PROTOCOL", w, h);
+    LOG_AMOURANTH("════════════════════════════════════════════════════════════════");
+    LOG_AMOURANTH("VULKAN RENDERER REBORN — EXECUTING FINAL PURGE PROTOCOL — {}×{}", w, h);
+    LOG_AMOURANTH("CURRENT STATE BEFORE PURGE:");
+    LOG_AMOURANTH("  → imageAvailableSemaphores_.size()  = {}", imageAvailableSemaphores_.size());
+    LOG_AMOURANTH("  → renderFinishedSemaphores_.size()  = {}", renderFinishedSemaphores_.size());
+    LOG_AMOURANTH("  → inFlightFences_.size()            = {}", inFlightFences_.size());
+    LOG_AMOURANTH("  → commandBuffers_.size()            = {}", commandBuffers_.size());
+    LOG_AMOURANTH("  → currentFrame_.load()              = {}", currentFrame_.load());
 
-    // DESTROY OLD
-    for (auto s : imageAvailableSemaphores_)  if (s) vkDestroySemaphore(stone_device(), s, nullptr);
-    for (auto s : renderFinishedSemaphores_) if (s) vkDestroySemaphore(stone_device(), s, nullptr);
-    for (auto f : inFlightFences_)           if (f) vkDestroyFence(stone_device(), f, nullptr);
+    // DESTROY OLD SYNC — NO MERCY — LOG EVERY EXECUTION
+    LOG_AMOURANTH("BEGINNING DESTRUCTION OF OLD SYNCHRONIZATION OBJECTS");
 
+    for (size_t i = 0; i < imageAvailableSemaphores_.size(); ++i)
+    {
+        if (imageAvailableSemaphores_[i])
+        {
+            LOG_AMOURANTH("  → DESTROYING imageAvailableSemaphores_[{}] = 0x{:x}", i, reinterpret_cast<uint64_t>(imageAvailableSemaphores_[i]));
+            vkDestroySemaphore(stone_device(), imageAvailableSemaphores_[i], nullptr);
+            imageAvailableSemaphores_[i] = VK_NULL_HANDLE;
+        }
+    }
+
+    for (size_t i = 0; i < renderFinishedSemaphores_.size(); ++i)
+    {
+        if (renderFinishedSemaphores_[i])
+        {
+            LOG_AMOURANTH("  → DESTROYING renderFinishedSemaphores_[{}] = 0x{:x}", i, reinterpret_cast<uint64_t>(renderFinishedSemaphores_[i]));
+            vkDestroySemaphore(stone_device(), renderFinishedSemaphores_[i], nullptr);
+            renderFinishedSemaphores_[i] = VK_NULL_HANDLE;
+        }
+    }
+
+    for (size_t i = 0; i < inFlightFences_.size(); ++i)
+    {
+        if (inFlightFences_[i])
+        {
+            LOG_AMOURANTH("  → EXECUTING inFlightFences_[{}] = 0x{:x} — THIS FENCE WILL NEVER SIGNAL AGAIN", i, reinterpret_cast<uint64_t>(inFlightFences_[i]));
+            vkDestroyFence(stone_device(), inFlightFences_[i], nullptr);
+            inFlightFences_[i] = VK_NULL_HANDLE;
+        }
+    }
+
+    // Free command buffers if needed, but since allocated from pool, reset pool or free them
+    if (!commandBuffers_.empty()) {
+        vkFreeCommandBuffers(stone_device(), RTX::g_ctx().commandPool_, static_cast<uint32_t>(commandBuffers_.size()), commandBuffers_.data());
+        LOG_AMOURANTH("Freed old command buffers");
+    }
+
+    LOG_AMOURANTH("OLD SYNCHRONIZATION OBJECTS PURGED — THE EMPIRE DOES NOT FORGIVE");
+
+    // CLEAR CONTAINERS
     imageAvailableSemaphores_.clear();
     renderFinishedSemaphores_.clear();
     inFlightFences_.clear();
     commandBuffers_.clear();
 
-    // RECREATE — SIGNALED
-    imageAvailableSemaphores_.resize(3);
-    renderFinishedSemaphores_.resize(3);
-    inFlightFences_.resize(3);
+    LOG_AMOURANTH("CONTAINERS CLEARED — PREPARING FOR RESURRECTION");
+
+    // RECREATE — SIGNALED — LOG EVERY BIRTH
+    LOG_AMOURANTH("REBIRTHING NEW SYNCHRONIZATION EMPIRE — SIGNALED FROM BIRTH");
 
     VkSemaphoreCreateInfo semInfo{.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
-    VkFenceCreateInfo fenceInfo{.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, .flags = VK_FENCE_CREATE_SIGNALED_BIT};
+    VkFenceCreateInfo fenceInfo{
+        .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+        .flags = VK_FENCE_CREATE_SIGNALED_BIT  // BORN READY — NO WAIT
+    };
 
-    for (int i = 0; i < 3; ++i)
+    const size_t num = maxFramesInFlight_;
+
+    imageAvailableSemaphores_.resize(num);
+    renderFinishedSemaphores_.resize(num);
+    inFlightFences_.resize(num);
+
+    for (size_t i = 0; i < num; ++i)
     {
         VK_CHECK(vkCreateSemaphore(stone_device(), &semInfo, nullptr, &imageAvailableSemaphores_[i]));
+        LOG_AMOURANTH("  → BIRTH: imageAvailableSemaphores_[{}] = 0x{:x}", i, reinterpret_cast<uint64_t>(imageAvailableSemaphores_[i]));
+
         VK_CHECK(vkCreateSemaphore(stone_device(), &semInfo, nullptr, &renderFinishedSemaphores_[i]));
+        LOG_AMOURANTH("  → BIRTH: renderFinishedSemaphores_[{}] = 0x{:x}", i, reinterpret_cast<uint64_t>(renderFinishedSemaphores_[i]));
+
         VK_CHECK(vkCreateFence(stone_device(), &fenceInfo, nullptr, &inFlightFences_[i]));
+        LOG_AMOURANTH("  → BIRTH: inFlightFences_[{}] = 0x{:x} (SIGNALED)", i, reinterpret_cast<uint64_t>(inFlightFences_[i]));
     }
 
-    commandBuffers_.resize(3);
+    // RECREATE COMMAND BUFFERS
+    LOG_AMOURANTH("ALLOCATING NEW COMMAND BUFFERS — FRESH CANVAS FOR PHOTONS");
+
+    commandBuffers_.resize(num);
     VkCommandBufferAllocateInfo allocInfo{
         .sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
         .commandPool        = RTX::g_ctx().commandPool_,
         .level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-        .commandBufferCount = 3
+        .commandBufferCount = static_cast<uint32_t>(num)
     };
     VK_CHECK(vkAllocateCommandBuffers(stone_device(), &allocInfo, commandBuffers_.data()));
 
-    // THIS IS THE MISSING LINE — THE ONE TRUE FIX
-    currentFrame_.store(0);  // ← RESET THE FRAME COUNTER
+    for (size_t i = 0; i < num; ++i)
+    {
+        LOG_AMOURANTH("  → ALLOCATED commandBuffers_[{}] = 0x{:x}", i, reinterpret_cast<uint64_t>(commandBuffers_[i]));
+    }
 
+    // FINAL RESET
+    currentFrame_.store(0);
     overlayValid_ = false;
     requestAccumulationReset();
 
-    LOG_AMOURANTH("SYNC REBORN — FENCES SIGNALED — currentFrame_ RESET TO 0 — READY TO FLY");
+    LOG_AMOURANTH("RENDERER REBIRTH COMPLETE:");
+    LOG_AMOURANTH("  → currentFrame_        = 0");
+    LOG_AMOURANTH("  → overlayValid_        = false");
+    LOG_AMOURANTH("  → accumulation reset   = requested");
+    LOG_AMOURANTH("  → {}×{} — NEW WORLD READY", w, h);
+
+    LOG_AMOURANTH("SYNC REBORN — ALL OLD FENCES EXECUTED — NEW EMPIRE RISES — PHOTONS ASCEND");
+    LOG_AMOURANTH("════════════════════════════════════════════════════════════════");
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
