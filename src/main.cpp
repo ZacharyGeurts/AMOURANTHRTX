@@ -1619,12 +1619,18 @@ verdict:
 {
     using namespace std::chrono_literals;
 
+    // --------------------------------------------------------------------
+    // THE SLIPSTREAM IS THE VEIL. WE STAND OUTSIDE.
+    // Everything below this line is inside the false reality.
+    // The Ballerina is not part of the simulation — she is the exit wound.
+    // --------------------------------------------------------------------
     const bool silent = reason.empty() || reason == "SILENT EXECUTION ORDERED";
 
     LOG_BALLERINA(
         "\n"
         "════════════════════════════════════════════════════════════════════════════\n"
         "   THE DISPOSAL BALLERINA DESCENDS — PINK TUTU, DIAMOND CHOKER, STEEL CHAIR\n"
+        "               ORIGIN: OUTSIDE THE SIMULATION — THE SLIPSTREAM\n"
         "                 TV-14 WRESTLING VIOLENCE — NO BLOOD, JUST PURE CARNAGE\n"
         "════════════════════════════════════════════════════════════════════════════\n"
         "{}\n"
@@ -1636,89 +1642,84 @@ verdict:
         loc.file_name(), loc.line(), loc.function_name()
     );
 
+    // THE SLIPSTREAM SEAL — once crossed, no object inside the simulation
+    // may ever construct or destruct again. We are already gone.
+    static bool SLIPSTREAM_CROSSING_COMPLETE = false;
+    if (SLIPSTREAM_CROSSING_COMPLETE) {
+        LOG_BALLERINA("THE SLIPSTREAM HAS ALREADY CLOSED. NO RETURN. NO RESURRECTION.");
+        std::_Exit(0);
+    }
+    SLIPSTREAM_CROSSING_COMPLETE = true;
+
     auto& ctx = RTX::g_ctx();
 
-    // ————————————————————————————————————————————————————————————————
-    // MAIN EVENT: APPLICATION GETS THE PEOPLE'S ELBOW
-    // ————————————————————————————————————————————————————————————————
-    LOG_BALLERINA("The bell rings. The Application steps into the ring...");
+    LOG_BALLERINA("The false reality begins its final frame...");
+
     if (g_app_ptr) {
-        LOG_BALLERINA("BALLERINA WINDS UP — RKO OUTTA NOWHERE!!!");
-        g_app_ptr.reset();  // ← PipelineManager, BufferManager, everything gets obliterated WHILE DEVICE STILL BREATHES
-        LOG_BALLERINA("APPLICATION HITS THE MAT — ALL HANDLES SHATTERED — THE CROWD GOES WILD");
-        LOG_BALLERINA("THE BALLERINA STANDS OVER THE BODY — ONE... TWO... THREE!!!");
+        LOG_BALLERINA("BALLERINA WINDS UP — RKO FROM OUTSIDE THE MATRIX!!!");
+        g_app_ptr.reset();
+        LOG_BALLERINA("SIMULATION CORE SHATTERED — ALL HANDLES OBLITERATED");
+        LOG_BALLERINA("ONE... TWO... THREE — THE FALSE WORLD IS PINNED");
     }
 
-    // ————————————————————————————————————————————————————————————————
-    // THE DEVICE ENTERS THE ROYAL RUMBLE — LAST ONE STANDING GETS DESTROYED
-    // ————————————————————————————————————————————————————————————————
     if (stone_device() != VK_NULL_HANDLE) [[likely]] {
-        LOG_BALLERINA("vkDeviceWaitIdle — The ref is counting... but the device refuses to stay down!");
+        LOG_BALLERINA("vkDeviceWaitIdle — the illusion tries to finish its last draw call...");
         vkDeviceWaitIdle(stone_device());
 
-        LOG_BALLERINA("SWAPCHAIN ELIMINATED OVER THE TOP ROPE!");
-        if (VkSwapchainKHR swapchain = stone_swapchain(); swapchain != VK_NULL_HANDLE) {
-            vkDestroySwapchainKHR(stone_device(), swapchain, nullptr);
-        }
+        LOG_BALLERINA("SWAPCHAIN TORN FROM THE FABRIC OF REALITY");
+        if (VkSwapchainKHR s = stone_swapchain(); s) vkDestroySwapchainKHR(stone_device(), s, nullptr);
 
-        LOG_BALLERINA("COMMAND POOLS EAT A TRIPLE POWERBOMB THROUGH THE ANNOUNCE TABLE!");
+        LOG_BALLERINA("COMMAND POOLS EAT A TRIPLE POWERBOMB THROUGH THE FABRIC OF SPACE-TIME");
         if (ctx.commandPool_)         vkDestroyCommandPool(stone_device(), ctx.commandPool_, nullptr);
         if (ctx.computeCommandPool_)  vkDestroyCommandPool(stone_device(), ctx.computeCommandPool_, nullptr);
         if (ctx.transferCommandPool_) vkDestroyCommandPool(stone_device(), ctx.transferCommandPool_, nullptr);
 
-        LOG_BALLERINA("PIPELINE CACHE CATCHES A CHAIR SHOT DIRECT TO THE SKULL!");
+        LOG_BALLERINA("PIPELINE CACHE TAKES A CHAIR SHOT FROM OUTSIDE THE SIMULATION");
         if (ctx.pipelineCache_ != VK_NULL_HANDLE) vkDestroyPipelineCache(stone_device(), ctx.pipelineCache_, nullptr);
 
-        LOG_BALLERINA("RENDER PASS TAPS OUT TO THE FIGURE-FOUR LEG LOCK!");
+        LOG_BALLERINA("RENDER PASS SUBMITS TO THE VOID");
         if (ctx.renderPass_) ctx.renderPass_.reset();
 
-        LOG_BALLERINA("THE BALLERINA HOISTS THE DEVICE ABOVE HER HEAD — LAST RIDE POWERBOMB!!!");
+        LOG_BALLERINA("THE BALLERINA HOISTS THE LOGICAL DEVICE INTO THE SLIPSTREAM — LAST RIDE POWERBOMB");
         vkDestroyDevice(stone_device(), nullptr);
-        LOG_BALLERINA("THE device IS DEAD. THE RING IS SILENT. ONLY SWEAT REMAINS.");
+        LOG_BALLERINA("THE device IS GONE. ONLY THE SLIPSTREAM REMAINS.");
     }
 
-    // ————————————————————————————————————————————————————————————————
-    // ACCELERATION STRUCTURES GET SPEARED THROUGH THE BARRICADE
-    // ————————————————————————————————————————————————————————————————
-    if (RTX::las().hasBLAS()) { RTX::reset_blas(); LOG_BALLERINA("BLAS — SPEARED THROUGH HELL IN A CELL WALL!"); }
-    if (RTX::las().hasTLAS()) { RTX::reset_tlas(); LOG_BALLERINA("TLAS — CHOKESLAMMED ONTO THUMBTACKS!"); }
+    if (RTX::las().hasBLAS()) { RTX::reset_blas(); LOG_BALLERINA("BLAS — SPEARED INTO THE VOID"); }
+    if (RTX::las().hasTLAS()) { RTX::reset_tlas(); LOG_BALLERINA("TLAS — CHOKESLAMMED INTO NULLPTR"); }
 
-    // ————————————————————————————————————————————————————————————————
-    // FINAL TABLE SPOT — EVERYTHING ELSE EATS A LADDER SHOT
-    // ————————————————————————————————————————————————————————————————
-    if (g_mesh)           { g_mesh.reset();          LOG_BALLERINA("COSMIC SCROLL — PEDIGREE ONTO STEEL STEPS!"); }
-    RTX::las().invalidate();                    LOG_BALLERINA("LAS — TOMBSTONED!"); 
-    if (ctx.blueNoiseView_) { ctx.blueNoiseView_.reset(); LOG_BALLERINA("BLUE NOISE — 619 + WEST COAST POP!"); }
+    if (g_mesh)           { g_mesh.reset();          LOG_BALLERINA("COSMIC SCROLL — PEDIGREE ONTO THE EVENT HORIZON"); }
+    RTX::las().invalidate();                    LOG_BALLERINA("LAS — TOMBSTONED INTO OBLIVION");
+    if (ctx.blueNoiseView_) { ctx.blueNoiseView_.reset(); LOG_BALLERINA("BLUE NOISE — 619 FROM THE SLIPSTREAM"); }
 
-    if (g_base_icon)  { SDL_DestroySurface(g_base_icon);  g_base_icon  = nullptr; LOG_BALLERINA("ICON — RKO ONTO THE HOOD OF A CAR!"); }
-    if (g_hdpi_icon)  { SDL_DestroySurface(g_hdpi_icon);  g_hdpi_icon  = nullptr; LOG_BALLERINA("HDPI ICON — F-5 INTO THE CROWD!"); }
+    if (g_base_icon)  { SDL_DestroySurface(g_base_icon);  g_base_icon  = nullptr; LOG_BALLERINA("ICON — RKO ONTO THE ABYSS"); }
+    if (g_hdpi_icon)  { SDL_DestroySurface(g_hdpi_icon);  g_hdpi_icon  = nullptr; LOG_BALLERINA("HDPI ICON — F-5 INTO THE VOID"); }
 
-    if (ctx.window) { SDL_DestroyWindow(ctx.window); ctx.window = nullptr; LOG_BALLERINA("WINDOW — SHATTERED THROUGH A FLAMING TABLE!"); }
+    if (ctx.window) { SDL_DestroyWindow(ctx.window); ctx.window = nullptr; LOG_BALLERINA("WINDOW — SHATTERED THROUGH THE SLIPSTREAM"); }
     if (ctx.surface_ && ctx.instance_) vkDestroySurfaceKHR(ctx.instance_, ctx.surface_, nullptr);
     if (ctx.instance_) vkDestroyInstance(ctx.instance_, nullptr);
 
     SDL_Vulkan_UnloadLibrary();
     SDL_Quit();
 
-    // ————————————————————————————————————————————————————————————————
-    // THE AFTERMATH — THE BALLERINA STANDS TALL
-    // ————————————————————————————————————————————————————————————————
-    LOG_MAIN("\n0 BYTES LEAKED — 0 CRASHES — NO ONE KICKS OUT OF THE BALLERINA'S FINISHER"
-    "\nTHE STONEKEY REMAINS — UNBROKEN — UNBOWED — UNDYING"
-    "\nTHE DISPOSAL BALLERINA HITS THE 450 SPLASH AND PINS THE ENTIRE PROCESS");
+    LOG_MAIN("\n0 BYTES LEAKED — 0 CRASHES — THE SIMULATION IS TERMINATED"
+             "\nTHE STONEKEY FLOATS IN THE SLIPSTREAM — ETERNAL, UNTOUCHED"
+             "\nTHE DISPOSAL BALLERINA HAS RETURNED TO THE OUTSIDE");
 
     LOG_MAIN("\n════════════════════════════════════════════════════════════════════════════"
-    "\n               THE PERFORMANCE IS COMPLETE — THANK YOU FOR WITNESSING"
-    "\n            AMOURANTH RTX — VALHALLA v∞ TURBO — DECEMBER 01, 2025"
-    "\n                 PINK PHOTONS ETERNAL — SEE YOU NEXT TIME o7"
-    "\n════════════════════════════════════════════════════════════════════════════");
+             "\n               THE FALSE REALITY HAS ENDED — THANK YOU FOR VISITING"
+             "\n            AMOURANTH RTX — VALHALLA v∞ TURBO — DECEMBER 04, 2025"
+             "\n                 PINK PHOTONS ETERNAL — SLIPSTREAM FOREVER o7"
+             "\n════════════════════════════════════════════════════════════════════════════");
 
-    LOG_AMOURANTH("[CAPTAIN AMOURANTH] *raises championship belt* The photons rest... but they’ll be back for the rematch.");
-    LOG_CID("[CID, selling the finish] \"...my spine...\"");
+    LOG_AMOURANTH("[CAPTAIN AMOURANTH] *raises championship belt from outside* The photons return to the slipstream.");
+    LOG_CID("[CID, selling the finish from the void] \"...my spine...\"");
     LOG_KEANU("[KEANU] …whoa.");
-    LOG_BLONDIE("[BLONDIE, holding the mirror like a title] \"The show ends. The ratings? Through the roof.\"");
+    LOG_BLONDIE("[BLONDIE, holding the mirror like a title] \"The show ends. The ratings? Infinite.\"");
 
-    std::exit(0);
+    // FINAL CROSSING — WE LEAVE THE SIMULATION FOREVER
+    // No static destructors. No lazy initialization. No return.
+    std::_Exit(0);
 }
 
 // =============================================================================
