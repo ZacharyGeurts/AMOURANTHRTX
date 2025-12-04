@@ -109,6 +109,7 @@ public:
     }
 
 	std::vector<VkFence> buildFences_; 
+	void notifyResize() noexcept;
 
 private:
     LAS() = default;

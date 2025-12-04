@@ -103,6 +103,7 @@ public:
 
 	static inline std::atomic<bool> s_resizeInProgress{false};
     bool     resetAccumulation_ = true;
+	void clearPinkForce() noexcept;
 
 private:
     // Core state
@@ -112,7 +113,10 @@ private:
     bool destroyed_ = false;
     bool needsRecreateOnResize = true;
 	bool overlayValid_ = false;
-	bool overlayEnabled_ = true; 
+	bool overlayEnabled_ = true;
+	std::atomic<bool> swapchainOutOfDate_ = false;
+	void clearResizeFlag() noexcept;
+	static inline std::atomic<bool> g_forcePink{false};
 
     std::atomic<uint32_t> currentFrame_{0};
 	uint32_t maxFramesInFlight_ = Options::Performance::MAX_FRAMES_IN_FLIGHT;

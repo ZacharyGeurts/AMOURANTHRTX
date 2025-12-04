@@ -1657,6 +1657,18 @@ void VulkanRenderer::onSwapchainRebuilt(uint32_t w, uint32_t h) noexcept
     LOG_AMOURANTH("════════════════════════════════════════════════════════════════");
 }
 
+void VulkanRenderer::clearResizeFlag() noexcept
+{
+    swapchainOutOfDate_.store(false);
+    LOG_AMOURANTH("Swapchain rebuild complete — pink force mode DISABLED");
+}
+
+void VulkanRenderer::clearPinkForce() noexcept
+{
+    g_forcePink.store(false);
+    LOG_AMOURANTH("PINK FORCE MODE DISABLED — NORMAL RENDERING RESUMES — SHEARING ENDED");
+}
+
 // ──────────────────────────────────────────────────────────────────────────────
 // Final Status
 // ──────────────────────────────────────────────────────────────────────────────

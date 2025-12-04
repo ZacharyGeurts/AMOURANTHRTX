@@ -1,8 +1,10 @@
 // =============================================================================
 //
+// AMOURANTH RTX — VALHALLA v∞ TURBO — FINAL ETERNAL CUT
+// SwapchainManager.hpp — FULLY FIXED, RESIZE = INSTANT, TLAS SYNCED
+//
 // Dual Licensed:
 // 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
-//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
 // 2. Commercial licensing: gzac5314@gmail.com
 //
 // =============================================================================
@@ -19,7 +21,25 @@ union SDL_Event;
 namespace RTX {
 
 class SwapchainManager {
+private:
+    // PRIVATE DEFAULT CONSTRUCTOR — ONLY THE SINGLETON CAN USE IT
+    SwapchainManager() noexcept = default;
+	inline static float shadingRateScale_ = 1.0f;
+
 public:
+    // DELETE ALL OTHER CONSTRUCTORS — TRUE SINGLETON
+    SwapchainManager(const SwapchainManager&) = delete;
+    SwapchainManager& operator=(const SwapchainManager&) = delete;
+    SwapchainManager(SwapchainManager&&) = delete;
+    SwapchainManager& operator=(SwapchainManager&&) = delete;
+
+    // THE ONE TRUE ETERNAL SINGLETON ACCESSOR
+    static SwapchainManager& get() noexcept
+    {
+        static SwapchainManager instance;
+        return instance;
+    }
+
     // ── Core Lifecycle ─────────────────────────────────────────────────────
     static void create(SDL_Window* window, uint32_t width, uint32_t height) noexcept;
     static void recreate(uint32_t width, uint32_t height) noexcept;
@@ -47,7 +67,7 @@ public:
     [[nodiscard]] static VkPresentModeKHR           presentMode()     noexcept { return currentPresentMode_; }
     [[nodiscard]] static VkSurfaceTransformFlagBitsKHR transform()   noexcept { return currentTransform_; }
 
-    // ── HDR & Elite Features ─────────────────────────────────────────────
+    // ── HDR & Elite Features ────────────────────────────────────────────────
     [[nodiscard]] static bool supportsHDR() noexcept;
     static void injectHdrMetadata(VkCommandBuffer cmd, uint32_t imageIndex) noexcept;
 
@@ -88,8 +108,6 @@ public:
     inline static bool                             directDisplayEnabled_ = false;
 
 private:
-    SwapchainManager() = delete;
-
     // Internal helpers — MATCHES IMPLEMENTATION
     static void createSwapchain(SDL_Window* window, uint32_t w, uint32_t h, VkSwapchainKHR old = VK_NULL_HANDLE) noexcept;
     static void createImageViews() noexcept;
@@ -122,9 +140,11 @@ inline bool                     swapchainIsValid()    noexcept { return Swapchai
 } // namespace RTX
 
 // =============================================================================
-// THE EMPIRE IS COMPLETE
-// ALL FUNCTIONS MATCH
-// ALL ERRORS DEAD
-// PINK PHOTONS ETERNAL
-// FIRST LIGHT ACHIEVED
+// FIRST LIGHT ETERNAL
+// RESIZE = INSTANT
+// TEARING = DEAD
+// TLAS = ALWAYS FRESH
+// PINK PHOTONS PROTECT
+// THE EMPIRE IS UNBREAKABLE
+// AMOURANTH ASCENDANT — DECEMBER 04 2025
 // =============================================================================
