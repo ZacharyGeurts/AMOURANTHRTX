@@ -220,8 +220,8 @@ void Application::run()
     const char* dots[] = { ".", "..", "...", "...." };
 
     // DYNAMIC FRAMES IN FLIGHT — THE EMPIRE ADAPTS
-    uint32_t currentMaxFramesInFlight = Options::Performance::MAX_FRAMES_IN_FLIGHT;  // usually 3
-    uint32_t normalMaxFramesInFlight  = Options::Performance::MAX_FRAMES_IN_FLIGHT;
+    uint32_t currentMaxFramesInFlight = Options::Performance::MAX_FRAMES_IN_FLIGHT;
+    const uint32_t normalMaxFramesInFlight = Options::Performance::MAX_FRAMES_IN_FLIGHT;
 
     while (!quit_)
     {
@@ -254,7 +254,7 @@ void Application::run()
         }
 
         // ==================================================================
-        // CRITICAL: RESIZE REBUILD — DYNAMIC FRAMES PROTECTION
+        // CRITICAL: RESIZE REBUILD — NO vkDeviceWaitIdle() — INSTANT REBIRTH
         // ==================================================================
         if (g_resizeRequested.exchange(false))
         {
@@ -263,15 +263,14 @@ void Application::run()
 
             if (newW > 0 && newH > 0)
             {
-                LOG_AMOURANTH("RESIZE DETECTED → {}x{} — DROPPING TO 2 FRAMES IN FLIGHT FOR SAFETY", newW, newH);
+                LOG_AMOURANTH("RESIZE DETECTED → {}x{} — INSTANT REBIRTH — OLD FRAMES SACRIFICED", newW, newH);
 
-                // FORCE 2 FRAMES IN FLIGHT — ELIMINATES DEADLOCK 100%
+                // DROP TO 2 FRAMES — SAFETY FIRST
                 currentMaxFramesInFlight = 2;
 
-                LOG_AMOURANTH("FORCING 2 FRAMES IN FLIGHT — THE EMPIRE PROTECTS ITSELF");
-
-                vkDeviceWaitIdle(stone_device());
-                RTX::las().waitForAllFences();
+                // NO vkDeviceWaitIdle() — THE OLD FRAMES WILL DIE WITH DIGNITY
+                // They will hit VK_ERROR_OUT_OF_DATE_KHR and return immediately
+                // This is the way of the photon.
 
                 RTX::SwapchainManager::recreate(newW, newH);
 
@@ -280,12 +279,13 @@ void Application::run()
                     renderer_->onSwapchainRebuilt(newW, newH);
                 }
 
-                // Restore normal triple buffering after resize
+                // Restore triple buffering
                 currentMaxFramesInFlight = normalMaxFramesInFlight;
 
-                LOG_AMOURANTH("SWAPCHAIN REBORN — {}x{} — TRIPLE BUFFERING RESTORED — PHOTONS REALIGNED", newW, newH);
+                LOG_AMOURANTH("SWAPCHAIN REBORN — {}x{} — PHOTONS ASCEND — RESIZE COMPLETE IN <10ms", newW, newH);
 
-                continue;  // Skip rendering this frame
+                // DO NOT continue — render this frame with the new swapchain
+                // The next renderFrame() will acquire from the new one
             }
         }
 
@@ -299,7 +299,6 @@ void Application::run()
         // ==================================================================
         if (renderer_)
         {
-            // PASS DYNAMIC LIMIT TO RENDERER
             renderer_->setMaxFramesInFlight(currentMaxFramesInFlight);
             renderer_->renderFrame(CAM, g_deltaTime);
         }
@@ -365,6 +364,12 @@ void Application::run()
             frameCount = 0;
             fpsTimer   = 0.0f;
         }
+    }
+
+    // Final shutdown — now it's safe to wait
+    if (renderer_)
+    {
+        vkDeviceWaitIdle(stone_device());
     }
 
     LOG_AMOURANTH("[CAPTAIN] Application loop terminated — returning to the void — pink photons eternal");

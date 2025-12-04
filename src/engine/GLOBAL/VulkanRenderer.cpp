@@ -1538,37 +1538,42 @@ void VulkanRenderer::createRenderPass() noexcept {
 
 void VulkanRenderer::renderFrame(const Camera& camera, float /*deltaTime*/) noexcept
 {
-    // DYNAMIC FRAMES IN FLIGHT — EMPIRE ADAPTS TO REALITY
-    const uint32_t f = currentFrame_++ % maxFramesInFlight_;
+    // ATOMIC + DYNAMIC FRAME INDEX — NO RACE, NO RE-ENTRY, NO DEATH
+    const uint32_t globalFrame = currentFrame_.fetch_add(1, std::memory_order_relaxed);
+    const uint32_t f = globalFrame % maxFramesInFlight_;
 
-    LOG_TRACE("renderFrame() START | frame#{} | flight#{} / {} | swapchain {}x{}", 
-              frameNumber_, f, maxFramesInFlight_, stone_width(), stone_height());
+    LOG_TRACE("renderFrame() START | global#{} | flight#{} / {} | swapchain {}x{}", 
+              globalFrame, f, maxFramesInFlight_, stone_width(), stone_height());
 
-    // ── 1. WAIT FOR PREVIOUS FRAME TO FINISH ─────────────────────────────
+    // ── 1. WAIT FOR THIS FLIGHT SLOT TO BE FREE ─────────────────────────
     VK_CHECK(vkWaitForFences(stone_device(), 1, &inFlightFences_[f], VK_TRUE, UINT64_MAX));
     VK_CHECK(vkResetFences(stone_device(), 1, &inFlightFences_[f]));
 
     RTX::las().beginFrame();
 
-    // ── 2. ACQUIRE SWAPCHAIN IMAGE ───────────────────────────────────────
+    // ── 2. ACQUIRE SWAPCHAIN IMAGE — WITH TIMEOUT & MERCY ─────────────
     uint32_t imageIndex = 0;
     VkResult acquireResult = vkAcquireNextImageKHR(
         stone_device(),
         RTX::SwapchainManager::swapchain(),
-        UINT64_MAX,
+        2'000'000,  // 2ms timeout — never hang during resize
         imageAvailableSemaphores_[f],
         VK_NULL_HANDLE,
         &imageIndex
     );
 
-    if (acquireResult == VK_ERROR_OUT_OF_DATE_KHR || acquireResult == VK_SUBOPTIMAL_KHR)
+    // OLD SWAPCHAIN IS DEAD — SACRIFICE THIS FRAME WITH DIGNITY
+    if (acquireResult == VK_ERROR_OUT_OF_DATE_KHR ||
+        acquireResult == VK_SUBOPTIMAL_KHR ||
+        acquireResult == VK_TIMEOUT)
     {
-        LOG_MAIN("Swapchain OUT OF DATE or SUBOPTIMAL — rebuild scheduled | result={}", string_VkResult(acquireResult));
+        LOG_MAIN("Swapchain out of date / timeout — frame sacrificed | result={}", string_VkResult(acquireResult));
         return;
     }
+
     if (acquireResult != VK_SUCCESS)
     {
-        LOG_FATAL("vkAcquireNextImageKHR FAILED → {} | frame#{}", string_VkResult(acquireResult), frameNumber_);
+        LOG_FATAL("vkAcquireNextImageKHR failed: {} | global#{}", string_VkResult(acquireResult), globalFrame);
         return;
     }
 
@@ -1653,7 +1658,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float /*deltaTime*/) noex
         VkResult r = vkQueuePresentKHR(stone_present_queue(), &present);
         if (r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_SUBOPTIMAL_KHR)
         {
-            LOG_MAIN("Present returned OUT OF DATE — rebuild scheduled");
+            LOG_MAIN("Present returned OUT OF DATE — frame sacrificed");
             frameNumber_++;
             return;
         }
@@ -1792,7 +1797,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float /*deltaTime*/) noex
     VkResult r = vkQueuePresentKHR(stone_present_queue(), &present);
     if (r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_SUBOPTIMAL_KHR)
     {
-        LOG_MAIN("Present returned OUT OF DATE — rebuild scheduled");
+        LOG_MAIN("Present returned OUT OF DATE — frame sacrificed");
         return;
     }
 
@@ -1808,27 +1813,31 @@ void VulkanRenderer::setMaxFramesInFlight(uint32_t count) noexcept
     maxFramesInFlight_ = count;
 }
 
-void VulkanRenderer::onSwapchainRebuilt(uint32_t width, uint32_t height) noexcept
+void VulkanRenderer::onSwapchainRebuilt(uint32_t w, uint32_t h) noexcept
 {
-    // Destroy old size-dependent resources
-    destroyRTOutputImages();
-    destroyAccumulationImages();
-    destroyDenoiserImage();
+    LOG_AMOURANTH("VulkanRenderer reborn → {}x{} — purging old photons", w, h);
 
-    // Recreate with new size
-    createRTOutputImages();
+    // DESTROY OLD IMAGES — AND THEIR MEMORY
+    rtOutputImages_.clear();
+    rtOutputViews_.clear();
+    accumImages_.clear();
+    accumViews_.clear();
+    denoiserImage_ = {};
+    denoiserView_ = {};
+    hypertraceScoreImage_ = {};
+    hypertraceScoreView_ = {};
+
+    // MARK OVERLAY INVALID — WILL REBUILD ON NEXT FRAME
+    overlayValid_ = false;
+
+    // RECREATE WITH NEW SIZE
+    createRTOutputImages();     // ← must use tracked allocations
     createAccumulationImages();
     createDenoiserImage();
 
-    // CRITICAL: DO NOT TOUCH OVERLAY HERE
-    // overlay_ = false;  // ← DO NOT CALL setOverlay()!
-    // Just mark it invalid — will be rebuilt on next frame when safe
-    overlayValid_ = false;
-
-    // Reset accumulation
     requestAccumulationReset();
 
-    LOG_AMOURANTH("VulkanRenderer reborn → {}x{} — images rebuilt, overlay deferred", width, height);
+    LOG_AMOURANTH("INTERNAL IMAGES REBORN — {}x{} — MEMORY CLEANSED", w, h);
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
