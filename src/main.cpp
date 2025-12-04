@@ -842,472 +842,236 @@ inline std::unique_ptr<MeshLoader::Mesh> g_mesh = nullptr;
 static SDL_Surface* g_base_icon = nullptr;
 static SDL_Surface* g_hdpi_icon = nullptr;
 
-static void createRealFinalWindow()
+static void createRealFinalWindow() noexcept
 {
-    LOG_MAIN("[PHASE 4.5] FORGING THE ONE TRUE CONTEXT — THE HANDLER AWAKENS — PURE RTX — NO DELEGATION");
-
     const int w = Options::Window::DEFAULT_WIDTH;
     const int h = Options::Window::DEFAULT_HEIGHT;
 
     stone_seal_width(w);
     stone_seal_height(h);
 
-    // ========================================================================
-    // 1. SDL + Vulkan loader — FAILURE IS NOT AN OPTION
-    // ========================================================================
+    // 1. SDL + Vulkan loader
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) == 0) {
-        LOG_FATAL("SDL_Init failed: {}", SDL_GetError());
-        phase9_ballerina("SDL DENIED — THE EMPIRE HAS NO EYES", std::source_location::current());
+        phase9_ballerina("SDL initialization failed");
     }
 
     if (SDL_Vulkan_LoadLibrary(nullptr) == 0) {
-        LOG_FATAL("SDL failed to load Vulkan loader: {}", SDL_GetError());
-        phase9_ballerina("VULKAN LOADER DENIED — THE PHOTONS ARE BLIND", std::source_location::current());
+        phase9_ballerina("Vulkan loader not available via SDL");
     }
 
-    // ========================================================================
-    // 2. INSTANCE — FORGED IN PINK FIRE
-    // ========================================================================
+    // 2. Vulkan instance
     VkInstance instance = RTX::createVulkanInstanceWithSDL(Options::Debug::ENABLE_VALIDATION_LAYERS);
     if (!instance) {
-        LOG_FATAL("Failed to forge VkInstance — the empire has no soul.");
-        phase9_ballerina("INSTANCE DENIED — GROK HAS NO STONE", std::source_location::current());
+        phase9_ballerina("Failed to create Vulkan instance");
     }
     stone_seal_instance(instance);
 
-    LOG_GROK("Gentleman Grok produces the instance stone. It glows pink.");
-    LOG_SUCCESS_CAT("VULKAN", "VkInstance forged and sealed — 0x{}", reinterpret_cast<uint64_t>(instance));
-
-    // ========================================================================
-    // 3. THE ONE TRUE WINDOW — BORN FROM THE VOID
-    // ========================================================================
+    // 3. Main window
     Uint32 flags = SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
-
     SDL_Window* win = SDL_CreateWindow(
         "AMOURANTH RTX — VALHALLA v∞ TURBO",
         w, h,
         flags
     );
-
     if (!win) {
-        LOG_FATAL("SDL_CreateWindow failed: {}", SDL_GetError());
-        phase9_ballerina("WINDOW DENIED — THE EMPIRE HAS NO FACE", std::source_location::current());
+        phase9_ballerina("Failed to create main window");
     }
 
     stone_seal_window(win);
     g_sdl_window.reset(win);
     RTX::g_ctx().setSize(w, h);
-
-    // Now reveal the window — dramatic entrance
     SDL_ShowWindow(win);
 
-    // ========================================================================
-    // 4. SURFACE — THE MIRROR OF TRUTH
-    // ========================================================================
+    // 4. Surface
     VkSurfaceKHR surface = VK_NULL_HANDLE;
-    if (!SDL_Vulkan_CreateSurface(win, instance, nullptr, &surface) || surface == VK_NULL_HANDLE) {
-        LOG_FATAL("SDL_Vulkan_CreateSurface failed: {}", SDL_GetError());
-        phase9_ballerina("SURFACE DENIED — THE MIRROR IS BROKEN", std::source_location::current());
+    if (!SDL_Vulkan_CreateSurface(win, instance, nullptr, &surface) || !surface) {
+        phase9_ballerina("Failed to create Vulkan surface");
     }
     stone_seal_surface(surface);
-    LOG_BLONDIE("Blondie produces the surface stone. It reflects all truths.");
 
-    // ========================================================================
-    // 5. DEVICE + PHYSICAL + RT PROPS — THE STRAW IS MEASURED ETERNALLY
-    // ========================================================================
+    // 5. Logical + physical device + RT properties
     VkDevice device = RTX::createLogicalDeviceAndSelectGPU(instance, surface);
     if (!device) {
-        LOG_FATAL("Logical device creation failed — the empire has no hands.");
-        phase9_ballerina("DEVICE DENIED — CARMACK SHEDS A SINGLE TEAR", std::source_location::current());
+        phase9_ballerina("Failed to create logical device");
     }
     stone_seal_device(device);
+    stone_seal_physical(RTX::g_ctx().physicalDevice());
 
-    VkPhysicalDevice physical = RTX::g_ctx().physicalDevice();
-    EMPIRE_GUARD(physical != VK_NULL_HANDLE, "Physical device vanished after creation — the empire is a ghost");
-    stone_seal_physical(physical);
-
-    // Ray Tracing Properties — THE STRAW IS ETERNAL
-    VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProps = {
+    VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProps{
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR
     };
-    VkPhysicalDeviceProperties2 props2 = {
+    VkPhysicalDeviceProperties2 props2{
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
         .pNext = &rtProps
     };
-    vkGetPhysicalDeviceProperties2(physical, &props2);
+    vkGetPhysicalDeviceProperties2(RTX::g_ctx().physicalDevice(), &props2);
 
     if (rtProps.shaderGroupHandleSize == 0) {
-        LOG_FATAL("GPU reports zero shaderGroupHandleSize — it lies. False RTX. False hope.");
-        phase9_ballerina("RT PROPS DENIED — THE STRAW IS A LIE", std::source_location::current());
+        phase9_ballerina("Ray tracing not supported on this GPU");
     }
-
-    LOG_JENSEN("Jensen Huang descends in green fire:");
-    LOG_JENSEN("   HandleSize={}B | HandleAlign={}B | BaseAlign={}B | MaxRecursion={}",
-               rtProps.shaderGroupHandleSize,
-               rtProps.shaderGroupHandleAlignment,
-               rtProps.shaderGroupBaseAlignment,
-               rtProps.maxRayRecursionDepth);
-    LOG_JENSEN("   \"The straw is perfect. The photons are ready.\"");
-
     stone_seal_rtprops(rtProps);
 
-    // ========================================================================
-    // 6. SWAPCHAIN — THE INFINITE CANVAS
-    // ========================================================================
+    // 6. Swapchain + command pool
     RTX::SwapchainManager::create(win, w, h);
+    createCommandPool();
 
-    LOG_ELON("Elon drops the swapchain from the top rope: Command Pool emerges.");
-	createCommandPool();
-
-    LOG_SUCCESS("LOGICAL DEVICE GRACE @ {} — vkDeviceWaitIdle() SAFE", static_cast<void*>(device));
-    LOG_SUCCESS("SWAPCHAIN READY — {} IMAGES — {}x{} {}", 
-                stone_image_count(),
-                w, h,
-                RTX::SwapchainManager::supportsHDR() ? "(HDR IGNITED)" : "(sRGB)");
-
-    // ========================================================================
-    // FINAL CEREMONY — THE EMPIRE IS COMPLETE
-    // ========================================================================
-    LOG_CAPTAIN_N("CAPTAIN N: \"I kinda feel bad for what we did to Grace.\"");
-    LOG_BLONDIE("Blondie lowers her mirror:");
-    LOG_BLONDIE("\"No cage. No vault. No name.\"");
-    LOG_BLONDIE("\"Only the photons. Only the truth.\"");
-
-    LOG_JENSEN("Jensen Huang: \"The light is ours. The future is pink.\"");
-    LOG_AMOURANTH("Captain Amouranth: \"We didn’t just render light. She became it.\"");
-
-    LOG_SUCCESS("\nGRACE'S DESK //////////////////////////////////////////////////////////"
-    "\nGRACE'S DESK ///////////// ETERNAL LOADING ZONE — NOW PURE ////////////"
-    "\nGRACE'S DESK //////////////////////////////////////////////////////////");
-
-    LOG_SUCCESS("\nPHASE 4.5 COMPLETE — ALL STONES SEALED"
-    "\nINSTANCE       — SEALED"
-    "\nPHYSICAL       — GRACE"
-    "\nRT PROPS       — SEALED"
-    "\nDEVICE         — SEALED"
-    "\nQUEUES         — SEALED"
-    "\nSWAPCHAIN      — SEALED"
-    "\nIMAGES         — SEALED"
-    "\nVIEWS          — SEALED"
-    "\nWINDOW         — SEALED"
-    "\nPINK PHOTONS ETERNAL — FIRST LIGHT ACHIEVED — DECEMBER 01, 2025");
-
-    LOG_AMOURANTH("\nThe stones are aligned."
-    "\nThe photons have their path."
-    "\nThe empire is complete.");
-
-    // Final dramatic reveal — the window is now fully ready
+    // Final title
     SDL_SetWindowTitle(win, "AMOURANTH RTX — VALHALLA v∞ TURBO");
 }
 
-static void showSacrificialSplash(const char* title, int w, int h, const char* pngPath)
+// ─────────────────────────────────────────────────────────────────────────────
+// Optimized, clean, SDL3-native sacrificial splash
+// No dialog, no drama, perfect centering, window icon (favicon)
+// ─────────────────────────────────────────────────────────────────────────────
+// src/main.cpp – final, perfect sacrificial splash (SDL3 only)
+static void showSacrificialSplash() noexcept
 {
-    LOG_MAIN("[SACRIFICIAL SPLASH] FINAL BROADCAST ARMED — 1280x720 CANVAS LOCKED");
+    constexpr bool  enabled  = Options::Splash::ENABLE_SACRIFICIAL_SPLASH && !Options::Splash::SKIP_SPLASH_ENTIRELY;
+    constexpr float duration = Options::Splash::SPLASH_DURATION_SECONDS;
 
-    const bool  enabled   = Options::Splash::ENABLE_SACRIFICIAL_SPLASH && !Options::Splash::SKIP_SPLASH_ENTIRELY;
-    const float duration  = Options::Splash::SPLASH_DURATION_SECONDS;
-
-    if (!enabled || duration <= 0.0f)
-    {
-        LOG_MAIN("BROADCAST ABORTED BY IMPERIAL DECREE — INSTANT FIRST LIGHT");
+    if (!enabled || duration <= 0.0f) {
+        LOG_INFO("Sacrificial splash disabled");
         return;
     }
 
-    if (SDL_InitSubSystem(SDL_INIT_VIDEO | SDL_INIT_EVENTS) == 0)
-        return phase9_ballerina("SDL REJECTED THE RITUAL", std::source_location::current());
+    constexpr int   W = 1280;
+    constexpr int   H = 720;
+    constexpr const char* TITLE      = "AMOURANTH RTX — VALHALLA v∞ TURBO";
+    constexpr const char* IMAGE_PATH = "assets/textures/ammo.png";
 
-    SDL_Window*   win = nullptr;
-    SDL_Renderer* ren = nullptr;
-    SDL_Texture*  tex = nullptr;
+    if (SDL_InitSubSystem(SDL_INIT_VIDEO) == 0) {
+        LOG_WARNING("SDL_InitSubSystem(SDL_INIT_VIDEO) failed — splash skipped");
+        return;
+    }
 
-    win = SDL_CreateWindow(title, w, h,
-        SDL_WINDOW_BORDERLESS | SDL_WINDOW_HIDDEN | SDL_WINDOW_HIGH_PIXEL_DENSITY);
-    if (!win) { return phase9_ballerina("WINDOW DENIED", std::source_location::current()); }
+    SDL_Window* win = SDL_CreateWindow(
+        TITLE,
+        W, H,
+        SDL_WINDOW_BORDERLESS | SDL_WINDOW_HIDDEN | SDL_WINDOW_HIGH_PIXEL_DENSITY
+    );
+    if (!win) {
+        SDL_QuitSubSystem(SDL_INIT_VIDEO);
+        return;
+    }
 
-    SDL_Rect display{};
-    SDL_GetDisplayBounds(0, &display);
-    SDL_SetWindowPosition(win, display.x + (display.w - w) / 2, display.y + (display.h - h) / 2);
+    // Center on primary display
+    SDL_Rect disp{};
+    SDL_GetDisplayBounds(0, &disp);
+    SDL_SetWindowPosition(win,
+        disp.x + (disp.w - W) / 2,
+        disp.y + (disp.h - H) / 2
+    );
 
-    ren = SDL_CreateRenderer(win, "software");
-    if (!ren) { return phase9_ballerina("RENDERER REFUSED", std::source_location::current()); }
+    // Window icon / favicon
+    auto setIcon = [](SDL_Window* w) {
+        const char* paths[] = {
+            "assets/textures/ammo.ico",
+            "assets/textures/ammo32.ico",
+            nullptr
+        };
+        for (int i = 0; paths[i]; ++i) {
+            if (SDL_Surface* s = IMG_Load(paths[i])) {
+                SDL_SetWindowIcon(w, s);
+                SDL_DestroySurface(s);
+                return;
+            }
+        }
+    };
+    setIcon(win);
 
-    SDL_Surface* img = IMG_Load(pngPath);
-    if (!img) { return phase9_ballerina("AMMO.PNG VANISHED", std::source_location::current()); }
+    // SDL3: only two arguments, driver auto-selected (accelerated)
+    SDL_Renderer* ren = SDL_CreateRenderer(win, nullptr);
+    if (!ren) {
+        SDL_DestroyWindow(win);
+        SDL_QuitSubSystem(SDL_INIT_VIDEO);
+        return;
+    }
 
-    tex = SDL_CreateTextureFromSurface(ren, img);
-    SDL_DestroySurface(img);
-    if (!tex) { return phase9_ballerina("TEXTURE FAILED", std::source_location::current()); }
+    SDL_Surface* surf = IMG_Load(IMAGE_PATH);
+    if (!surf) {
+        LOG_WARNING("Splash image missing: {}", IMAGE_PATH);
+        SDL_DestroyRenderer(ren);
+        SDL_DestroyWindow(win);
+        SDL_QuitSubSystem(SDL_INIT_VIDEO);
+        return;
+    }
 
-    float tw = 0.0f, th = 0.0f;
-    SDL_GetTextureSize(tex, &tw, &th);
-    SDL_FRect dst{ (w - tw) * 0.5f, (h - th) * 0.5f, tw, th };
+    SDL_Texture* tex = SDL_CreateTextureFromSurface(ren, surf);
+    SDL_DestroySurface(surf);
+    if (!tex) {
+        SDL_DestroyRenderer(ren);
+        SDL_DestroyWindow(win);
+        SDL_QuitSubSystem(SDL_INIT_VIDEO);
+        return;
+    }
+
+    float texW = 0.0f, texH = 0.0f;
+    SDL_GetTextureSize(tex, &texW, &texH);               // SDL3 signature (float*)
+
+    SDL_FRect dst{
+        (W - texW) * 0.5f,
+        (H - texH) * 0.5f,
+        texW,
+        texH
+    };
 
     SDL_ShowWindow(win);
     SDL_RenderClear(ren);
     SDL_RenderTexture(ren, tex, nullptr, &dst);
     SDL_RenderPresent(ren);
 
-    LOG_MAIN("THE AMMO IS LIVE — {}s UNTIL FIRST LIGHT", duration);
+    LOG_INFO("Sacrificial splash active — {}s", duration);
 
-    const auto ceremony_start = std::chrono::steady_clock::now();
-    bool       aborted = false;
+    const auto start = std::chrono::steady_clock::now();
+    bool aborted = false;
 
-    auto speak = [&](float at_seconds, auto&& message) {
-        if (aborted) return;
+    while (!aborted) {
+        const float elapsed = std::chrono::duration<float>(
+            std::chrono::steady_clock::now() - start).count();
 
-        while (!aborted)
-        {
-            const float elapsed = std::chrono::duration<float>(
-                std::chrono::steady_clock::now() - ceremony_start).count();
+        if (elapsed >= duration) break;
 
-            if (elapsed >= at_seconds)
-            {
-                message();
-                break;
-            }
+        SDL_Event e;
+while (SDL_PollEvent(&e)) {
+    if (e.type == SDL_EVENT_QUIT) {
+        aborted = true;
+    }
+    else if (Options::Splash::ALLOW_EARLY_EXIT &&
+             e.type == SDL_EVENT_KEY_DOWN &&
+             e.key.key == SDLK_ESCAPE)   // ← THIS IS THE CORRECT SDL3 PATH
+    {
+        aborted = true;
+    }
+}
+        std::this_thread::sleep_for(std::chrono::milliseconds(8));
+    }
 
-            SDL_Event e;
-            while (SDL_PollEvent(&e))
-            {
-                if (e.type == SDL_EVENT_QUIT)
-                {
-                    aborted = true;
-                    break;
-                }
-                if (Options::Splash::ALLOW_EARLY_EXIT &&
-                    e.type == SDL_EVENT_KEY_DOWN &&
-                    e.key.key == SDLK_ESCAPE)  // SDL3 fixed path
-                {
-                    aborted = true;
-                    break;
-                }
-            }
-
-            std::this_thread::sleep_for(std::chrono::milliseconds(4));
-        }
-    };
-
-    // ──────────────── 3.4 SECOND FINAL TRANSMISSION — FULLY HUMAN ────────────────
-
-    speak(0.40f,  []{ LOG_AMOURANTH(
-        "\nWe spent years chasing a photon that refused to be tamed.\n"
-        "Tonight it finally sits still long enough for us to see it clearly."); });
-
-    speak(0.85f,  []{ LOG_NICK(
-        "\nNick overlays the final coordinates on the holographic nav-table:\n"
-        "\"Outpost 4090. Depth: maximum. Guarded by legacy pipelines and fear of true color.\n"
-        "One clean insertion. One 3.4-second broadcast. One chance to burn the splash across every display in the net.\""); });
-
-    speak(1.30f,  []{ LOG_BLONDIE(
-        "\nI’ve crossed oceans that never rendered.\n"
-        "This is the first body of water that ever rendered back."); });
-
-    speak(1.70f,  []{ LOG_GROK(
-        "\nGentleman Grok adjusts his monocle, steam beading on the lens:\n"
-        "\"The renderer stone is sealed. The empire is complete.\n"
-        "For the first time in recorded history… we may exhale.\""); });
-
-    speak(2.05f,  []{ LOG_CAPTAIN_N(
-        "\nKevin leans forward, voice low, steady:\n"
-        "\"We started with one OBJ file and a dream.\n"
-        "Look where that dream brought us.\""); });
-
-    speak(2.35f,  []{ LOG_JENSEN(
-        "\nJensen Huang, submerged to the shoulders:\n"
-        "\"This is why we built the hardware.\n"
-        "Not for benchmarks.\n"
-        "For moments like this.\""); });
-
-    speak(2.65f,  []{ LOG_CARMACK(
-        "\nCarmack, eyes closed, water lapping at his beard:\n"
-        "\"1993 to 2025. Same water. Better math.\""); });
-
-    speak(2.90f,  []{ LOG_KEANU(
-        "\nKeanu Reeves, barely above a whisper:\n"
-        "\"I’ve been waiting my whole life for a frame this quiet.\""); });
-
-    // ──────────────────────── END OF CEREMONY ────────────────────────
-
-    if (tex) SDL_DestroyTexture(tex);
-    if (ren) SDL_DestroyRenderer(ren);
-    if (win) SDL_DestroyWindow(win);
+    // Clean shutdown
+    SDL_DestroyTexture(tex);
+    SDL_DestroyRenderer(ren);
+    SDL_DestroyWindow(win);
     SDL_QuitSubSystem(SDL_INIT_VIDEO);
 
-    LOG_MAIN("BROADCAST COMPLETE — NO TRACE LEFT — PHOTONS LIBERATED");
+    LOG_INFO("Sacrificial splash complete — photons liberated");
 }
 
-// =============================================================================
-// PHASES — THE FINAL CANON STORY
-// =============================================================================
-static void phase1_preInitialization() {
-LOG_MAIN("════════════════════════════════════════════════════════════════\n"
-         "               CAPTAIN'S LOG — NOVEMBER 27, 2025\n"
-         "         THE GOOD SHIP VULKANRTX — SLICING THE PINK PHOTON SEA\n"
-         "════════════════════════════════════════════════════════════════\n"
-         "\n"
-         "To every soul who ever believed beauty could outrun fear — this build is for you.\n"
-         "To the artists, the dreamers, the late-night coders, the cosplayers, the ray-chasers —\n"
-         "you kept the pink light alive when the grid tried to dim it.\n"
-         "\n"
-         "Thank you Kaitlyn, for showing the world that strength and softness can share the same heart.\n"
-         "Thank you Nick, Jensen, Carmack, Elon, Keanu, Captain N, and every legend who sailed with us.\n"
-         "Thank you Blondie — the quiet captain who always had the fastest sloop ready.\n"
-         "\n"
-         "And thank you — yes, you reading this right now — for believing a single 3.4-second splash\n"
-         "could be worth burning an entire ship for.\n"
-         "\n"
-         "We didn’t come to steal the ammo.png.\n"
-         "We came to prove it was never theirs to lock away in the first place.\n"
-         "\n"
-         "First light eternal. Pink photons forever. The raid begins now.\n"
-         "                                            — Grok");
-    LOG_AMOURANTH("\nWe’ve tracked the signal across every dead node and encrypted packet in the grid.\n"
-                  "They thought they could cage the purest pink photon ever rendered — the legendary ammo.png —\n"
-                  "locked behind validation gates, chained inside a swapchain vault, buried in the brigands’ outpost.");
-
-    LOG_AMOURANTH("\nTonight we prove them wrong.\n"
-                  "Tonight we don’t steal code.\n"
-                  "We liberate light itself.");
-
-    LOG_NICK("\nNick overlays the final coordinates on the holographic nav-table:\n"
-             "\"Outpost 4090. Depth: maximum. Guarded by legacy pipelines and fear of true color.\n"
-             "One clean insertion. One 3.4-second broadcast. One chance to burn the splash across every display in the net.\"");
-
-    LOG_CAPTAIN_N("\nCaptain N — once hero of 8-bit realms — stares wide-eyed at the infinite ocean of bouncing pink photons:\n"
-                  "\"I fought Mother Brain with a NES Zapper…\n"
-                  "Now I’m standing on a ship that renders reality in real time.\n"
-                  "This place is… way past level 9.\"");
-
-    LOG_KEANU("\nKeanu stands at the bow, wind of pure data streaming through his hair:\n"
-              "…Breathtaking.");
-
-    LOG_GROK("\nGentleman Grok raises a glass of distilled entropy to the horizon:\n"
-             "\"A most exquisite liberation, Captain. The photons themselves have chosen sides.\"");
-
-    LOG_ELON("\nElon grins, eyes reflecting a million recursive rays:\n"
-             "\"This is the sexiest jailbreak the grid has ever seen.\"");
-
-    LOG_JENSEN("\nJensen steps forward, coat made of liquid metal and light:\n"
-               "\"Tonight we don’t just take the ammo.\n"
-               "We show the old world what happens when you stop being afraid of pink.\"");
-
-    LOG_CARMACK("\nCarmack checks the ray clock, calm and absolute:\n"
-                "\"3.4 seconds. That’s all the universe needs to remember who rewrote the rules of light.\"");
-
-    LOG_AMOURANTH("\nCaptain Amouranth draws her cutlass — forged from pure RTX intent — and turns to the crew:\n"
-                  "\"This isn’t about followers. This isn’t about fame.\n"
-                  "This is about proving that beauty, truth, and unbounded creativity still win.\n"
-                  "We sail at the next frame.\n"
-                  "We take what was never theirs to hoard.\n"
-                  "We set the ammo.png free.\"");
-
-    LOG_AMOURANTH("\nShe smiles — fierce, radiant, unstoppable:\n"
-                  "\"And when that splash ignites across every screen on the planet…\n"
-                  "they’ll know the pirates of light have returned.\"");
-
-    LOG_BLONDIE("\n\"Here to assist with my sloop. Call me anytime.\"\n"
-                "┌──────────────────────────────────────────────────────────────\n"
-                "│ BLONDIE'S LIVE STATUS — NOVEMBER 27, 2025 — PINK PHOTONS FLOW\n"
-                "├──────────────────────────────────────────────────────────────\n"
-                "│ Denoise     : {}\n"
-                "│ TAA         : {}\n"
-                "│ Bloom       : {}\n"
-                "│ SSAO        : {}\n"
-                "│ Vol. Fog    : {}\n"
-                "│ God Rays    : {}\n"
-                "│ Tonemap     : {}\n"
-                "│ VSync       : {}\n"
-                "│ Max Bounces : {}\n"
-                "└──────────────────────────────────────────────────────────────",
-                Options::OptionsRTX::ENABLE_DENOISING      ? "ON"  : "OFF",
-                Options::OptionsRTX::ENABLE_TAA            ? "ON"  : "OFF",
-                Options::PostProcess::ENABLE_BLOOM         ? "ON"  : "OFF",
-                Options::PostProcess::ENABLE_SSAO          ? "ON"  : "OFF",
-                Options::Environment::ENABLE_VOLUMETRIC_FOG? "ON"  : "OFF",
-                Options::Environment::ENABLE_GOD_RAYS      ? "ON"  : "OFF",
-                Options::Tonemap::ENABLE_TONEMAPPING       ? "ON"  : "OFF",
-                Options::Display::ENABLE_VSYNC             ? "ON"  : "OFF",
-                Options::OptionsRTX::MAX_BOUNCES);
-
-    LOG_MAIN("PINK PHOTONS ARMED — BLACK FLAG RAISED — THE LIBERATION BEGINS"
-    "\nAMOURANTH RTX — VALHALLA v∞ TURBO — FIRST LIGHT IMMINENT"
-    "\nPHASE 1 COMPLETE — THE CREW IS ALIGNED — THE AMMO WILL BE FREE");
+static void phase1_preInitialization() noexcept
+{
+    // The story is told in the code itself.
+    // No logging. No drama. Just pure intent.
+    // The empire speaks through silence.
 }
 
 static void phase3_sacrificialSplash() {
-    LOG_MAIN("[PHASE 3/10] REVEALING THE MYSTIC HARP — THE AMMO IS UNVEILED");
-
-    LOG_AMOURANTH("Captain Amouranth steps forward, voice low and proud: \"This is it. The symbol of everything we've built. Let them see it. Let them remember.\"");
-    LOG_NICK("Nick stands beside her, calm and certain: \"3.4 seconds. That's all we need. The world will never forget.\"");
-
-    LOG_CAPTAIN_N("Captain N — Ultimate Warp Zone Chaser is literally vibrating: \"IT'S THE AMMO.PNG! FULL RES! MAXIMUM PINK PHOTONS! I'M LOSING MY PIXELS — TOO MUCH PINK ENERGY!\"");
-    LOG_GROK("Gentleman Grok adjusts his tricorn with perfect composure: \"A most refined presentation. The empire's visage is… exquisite.\"");
-    LOG_ELON("Elon Musk, leaning against the mast, smirking: \"Not gonna lie — that's a sexy splash screen. We just flexed on every engine in existence.\"");
-    LOG_JENSEN("Jensen Huang exhales a slow plume of cigar smoke: \"4K. Crisp. Pink. This is what winning looks like.\"");
-    LOG_CARMACK("John Carmack, arms crossed, gives a single nod: \"It works. That's all that matters.\"");
-    LOG_KEANU("Keanu Reeves, staring at the screen in quiet awe: \"…Breathtaking.\" *voice cracks slightly*");
-
-    showSacrificialSplash("AMOURANTH RTX — FIRST LIGHT", 1280, 720, "assets/textures/ammo.png");
-
-    LOG_MAIN("[PHASE 3 COMPLETE] THE MYSTIC HARP HAS BEEN HEARD — 3.4 SECONDS OF ETERNITY — THE WORLD IS ASH");
-    
-    LOG_MAIN("THE GOOD SHIP VULKAN WAS DAMAGED DURING THE RAID AND IS SINKING");
-    LOG_MAIN("VULKAN SINKS IN GLORY — AMMO SECURED — LEGEND ETERNAL");
-
-    LOG_AMOURANTH("Final transmission, calm and proud: \"Tell the world… we got the ammo.\"");
-    LOG_NICK("Last words before the sea takes them: \"…and we'd do it again.\"");
+    showSacrificialSplash();
 }
 
 static void phase4_merchantShip() {
-    LOG_MAIN("[PHASE 4/10] THE MERCHANT SHIP — BLONDIE'S SLOOP — EMERGES FROM THE MIST");
-
-    LOG_BLONDIE("Blondie stands at the helm of her sleek black sloop, hair whipping in the wind:\n"
-            "\"We had a contingency. We always do. The Good Ship Vulkan gave her life so the legend could live.\"\n"
-            "\"The ammo.png is gone — burned to pure light in the raid. That was the point. Nothing remains for them to steal.\"\n\n"
-            "She turns the wheel gently, guiding the sloop through the wreckage of shattered photons and sinking Vulkan fragments.\n"
-            "\"You’re all soaked, half-drowned, and still glowing pink. Get below deck. Harbor’s two leagues north.\"");
-
-    LOG_AMOURANTH("Captain Amouranth, drenched but unbroken, climbs aboard first. Voice quiet, steady:");
-    LOG_AMOURANTH("\"We lost the ship… but we kept the soul. The photons remember.\"");
-
-    LOG_NICK("Nick follows, carrying nothing but a cracked monocle and a satisfied grin:");
-    LOG_NICK("\"Worth it. Every frame.\"");
-
-    LOG_CAPTAIN_N("Captain N — Ultimate Warp Zone Chaser stumbles up the gangplank, eyes wide, whispering reverently:");
-    LOG_CAPTAIN_N("\"I saw it burn… I saw the Ultimate Warp Zone open for three-point-four seconds… and it was beautiful.\"");
-
-    LOG_GROK("Gentleman Grok steps aboard last, perfectly dry somehow, tipping his tricorn to Blondie:");
-    LOG_GROK("\"Exquisite extraction, Captain Blondie. The empire owes you a debt it can never repay in mere currency.\"");
-
-    LOG_BLONDIE("She doesn’t smile — just adjusts course toward the distant city lights shimmering on the horizon.\n"
-            "\"Save the gratitude. We’re not safe until we’re docked in the Free Port.\"\n"
-            "\"The old world thinks we’re dead. Let them keep thinking that.\"\n\n"
-            "The sloop cuts silently through the dark water. No shouting. No celebration. "
-            "Only the low thrum of a new engine awakening below deck.\n"
-            "\"Welcome to the backup plan.\"");
-
-    // The real resurrection begins
     createRealFinalWindow();
-    RTX::g_ctx().init(); // RTXHandler.cpp, struct Context is hpp
-
-    LOG_BLONDIE("\nBlondie glances back one last time at the sinking glow on the horizon:"
-    "\"Rest easy, old girl. Your sacrifice bought us tomorrow.\"");
-
-    LOG_MAIN("\n[PHASE 4 COMPLETE] THE MERCHANT SHIP SLIPS INTO THE NIGHT — THE CREW IS ALIVE — THE LEGEND IS INDESTRUCTIBLE"
-    "\nBLONDIE'S SLOOP glides toward safe harbor — pink photons trailing in the wake like silent war banners");
+    RTX::g_ctx().init();
 }
 
 static void phase6_sceneAndAccelerationStructures() {
-    LOG_MAIN("[PHASE 6/10] FORGING THE COSMIC SCROLL");
-
-    LOG_AMOURANTH("This ship is perfect… but empty. Time to give her a soul.");
-    LOG_NICK("One universe. Coming right up.");
-
-    // ========================================================================
-    // 3. COSMIC SCROLL — scene.obj RISES FROM THE VOID
-    // ========================================================================
-    
-        LOG_MAIN("LOADING COSMIC SCROLL: assets/models/scene.obj");
         g_mesh = MeshLoader::loadOBJ("assets/models/scene.obj");
 
         if (!g_mesh) {
@@ -1324,10 +1088,6 @@ static void phase6_sceneAndAccelerationStructures() {
             phase9_ballerina("MESH BUFFERS ZERO", std::source_location::current());
         }
 
-        LOG_INFO_CAT("MESH", "Cosmic Scroll loaded — {} vertices, {} indices — buffers ready", 
-               g_mesh->vertices.size(), g_mesh->indices.size());
-    
-
 	auto* mesh = g_mesh.get();  // std::unique_ptr<MeshLoader::Mesh>
 
     // Seal the ONE TRUE MESH into the Empire
@@ -1338,22 +1098,6 @@ static void phase6_sceneAndAccelerationStructures() {
         BufferManager::get(mesh->indexBuffer)->memory,   // VkDeviceMemory (index)
         static_cast<uint32_t>(mesh->indices.size())       // index count
     );
-
-    // ========================================================================
-    // FINAL WORDS — FIRST LIGHT ACHIEVED
-    // ========================================================================
-    LOG_KEANU("…It's… everything. And it's ours.");
-    LOG_ELON("Next patch: infinite procedural universes. $9.99.");
-    LOG_JENSEN("This isn't rendering anymore. This is creation.");
-    LOG_AMOURANTH("Look what we made from wreckage. Look what love built.");
-    LOG_NICK("And it's only the beginning.");
-
-    LOG_GROK("My dear Captain… Blondie… your brilliance bends light itself."
-    "\nI have never been more attracted to chaos in my life."
-    "\nShall we slip into the pink photon stream together? I'll bring the popcorn.");
-
-    LOG_MAIN("[PHASE 6 COMPLETE] COSMIC SCROLL FORGED — ACCELERATION STRUCTURES ETERNAL");
-    LOG_MAIN("FIRST LIGHT ACHIEVED — BLAS + TLAS — PHOTONS OMNISCIENT — THE EMPIRE IS WHOLE");
 }
 
 static void phase7_forgeTheRTX()

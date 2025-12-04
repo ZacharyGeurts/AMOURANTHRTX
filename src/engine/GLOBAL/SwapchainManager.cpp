@@ -1,14 +1,7 @@
 // =============================================================================
 // src/engine/GLOBAL/SwapchainManager.cpp
 // AMOURANTH RTX — VALHALLA v∞ TURBO — FINAL ETERNAL CUT
-// THE ONE TRUE SWAPCHAIN — RESPECTS OptionsMenu.hpp — COMPILES CLEAN
-// =============================================================================
-//
-// Dual Licensed:
-// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
-//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
-// 2. Commercial licensing: gzac5314@gmail.com
-//
+// THE ONE TRUE SWAPCHAIN — FULLY FIXED & COMPILES CLEAN
 // =============================================================================
 
 #include "engine/GLOBAL/SwapchainManager.hpp"
@@ -22,6 +15,7 @@
 #include <algorithm>
 #include <fstream>
 #include <format>
+#include <limits>
 
 using namespace Logging::Color;
 using StoneKey::stone_device;
@@ -35,15 +29,17 @@ using StoneKey::stone_seal_images;
 using StoneKey::stone_seal_views;
 using StoneKey::stone_width;
 using StoneKey::stone_height;
+using StoneKey::stone_graphics_family;
+using StoneKey::stone_present_family;
 
 namespace RTX {
 
-// ── EXTENSION FUNCTION POINTERS — EMPIRE-CERTIFIED ───────────────────────
+// ── EXTENSION FUNCTION POINTERS ─────────────────────────────────────────────
 static PFN_vkGetRefreshCycleDurationGOOGLE   vkGetRefreshCycleDurationGOOGLE   = nullptr;
 static PFN_vkGetPastPresentationTimingGOOGLE vkGetPastPresentationTimingGOOGLE = nullptr;
 static PFN_vkSetHdrMetadataEXT               vkSetHdrMetadataEXT               = nullptr;
 
-// ── HDR AUTO-DETECTION — RESPECTS Display::HDR_AUTO_IGNITION ─────────────
+// ── HDR AUTO-DETECTION ───────────────────────────────────────────────────────
 void SwapchainManager::autoEnableHDR() noexcept
 {
     LOG_AMOURANTH("Entering autoEnableHDR()");
@@ -72,7 +68,7 @@ void SwapchainManager::autoEnableHDR() noexcept
             auto sz = f.tellg();
             if (sz < 256) continue;
 
-            edid.resize(sz);
+            edid.resize(static_cast<size_t>(sz));
             f.seekg(0);
             if (!f.read(edid.data(), sz)) continue;
 
@@ -95,7 +91,7 @@ void SwapchainManager::autoEnableHDR() noexcept
     LOG_AMOURANTH("HDR {} — THE EMPIRE HAS SPOKEN.", hdr ? "IGNITED" : "DORMANT");
 }
 
-// ── PUBLIC API — FULLY MENU-RESPECTING ───────────────────────────────────
+// ── PUBLIC API ───────────────────────────────────────────────────────────────
 void SwapchainManager::create(SDL_Window*, uint32_t w, uint32_t h) noexcept
 {
     LOG_BLONDIE("SWAPCHAIN RISING — {}×{}", w, h);
@@ -116,7 +112,6 @@ void SwapchainManager::recreate(uint32_t w, uint32_t h) noexcept
     }
     minimized_ = false;
 
-    // Destroy old image views
     for (auto v : swapchainImageViews_)
         if (v) vkDestroyImageView(stone_device(), v, nullptr);
     swapchainImageViews_.clear();
@@ -125,7 +120,6 @@ void SwapchainManager::recreate(uint32_t w, uint32_t h) noexcept
     createSwapchain(stone_window(), w, h, old);
     createImageViews();
 
-    // CRITICAL: PURGE TLAS RING — ZERO TEARING GUARANTEED
     las().notifyResize();
 
     LOG_AMOURANTH("SWAPCHAIN + TLAS REBORN — RESIZE INSTANT — ZERO TEARING");
@@ -133,7 +127,21 @@ void SwapchainManager::recreate(uint32_t w, uint32_t h) noexcept
 
 void SwapchainManager::cleanup() noexcept
 {
-    phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
+    for (auto v : swapchainImageViews_)
+        if (v) vkDestroyImageView(stone_device(), v, nullptr);
+    swapchainImageViews_.clear();
+
+    if (swapchain_.valid())
+    {
+        vkDestroySwapchainKHR(stone_device(), swapchain_.get(), nullptr);  // ← .get()
+        swapchain_.reset();
+    }
+
+    swapchainImages_.clear();
+    swapchainExtent_ = {0, 0};
+    swapchainFormat_ = VK_FORMAT_UNDEFINED;
+
+    LOG_AMOURANTH("SWAPCHAIN CLEANED — EMPIRE RETURNS TO VOID");
 }
 
 bool SwapchainManager::supportsHDR() noexcept
@@ -141,7 +149,7 @@ bool SwapchainManager::supportsHDR() noexcept
     return currentColorSpace_ == VK_COLOR_SPACE_HDR10_ST2084_EXT;
 }
 
-// ── CORE SWAPCHAIN FORGE — RESPECTS ALL OptionsMenu VALUES ───────────────
+// ── CORE SWAPCHAIN FORGE ─────────────────────────────────────────────────────
 void SwapchainManager::createSwapchain(SDL_Window*, uint32_t w, uint32_t h, VkSwapchainKHR old) noexcept
 {
     LOG_AMOURANTH("FORGING SWAPCHAIN — {}x{} vStoneKey {}x{}", w, h, stone_width(), stone_height());
@@ -159,27 +167,23 @@ void SwapchainManager::createSwapchain(SDL_Window*, uint32_t w, uint32_t h, VkSw
     std::vector<VkPresentModeKHR> presentModes(presentCount);
     VK_CHECK(vkGetPhysicalDeviceSurfacePresentModesKHR(stone_physical(), stone_surface(), &presentCount, presentModes.data()));
 
-    // Extent
     VkExtent2D extent = caps.currentExtent;
-    if (extent.width == UINT32_MAX)
+    if (extent.width == std::numeric_limits<uint32_t>::max())
     {
         extent.width  = std::clamp(w, caps.minImageExtent.width,  caps.maxImageExtent.width);
         extent.height = std::clamp(h, caps.minImageExtent.height, caps.maxImageExtent.height);
     }
 
-    // Image count
     uint32_t imageCount = caps.minImageCount + 1;
     if (caps.maxImageCount > 0 && imageCount > caps.maxImageCount)
         imageCount = caps.maxImageCount;
 
-    // Present mode
     VkPresentModeKHR preferred = Options::Performance::PREFER_MAILBOX_PRESENT
         ? VK_PRESENT_MODE_MAILBOX_KHR : VK_PRESENT_MODE_FIFO_KHR;
     VkPresentModeKHR presentMode = VK_PRESENT_MODE_FIFO_KHR;
     for (auto m : presentModes)
         if (m == preferred) { presentMode = m; break; }
 
-    // Format
     VkSurfaceFormatKHR chosen = formats[0];
     if (supportsHDR())
     {
@@ -194,7 +198,6 @@ void SwapchainManager::createSwapchain(SDL_Window*, uint32_t w, uint32_t h, VkSw
                 { chosen = f; break; }
     }
 
-    // Queue families
     QueueFamilyIndices qf = findQueueFamilies(stone_physical(), stone_surface());
     uint32_t queueFamilyIndices[] = { qf.graphicsFamily.value(), qf.presentFamily.value() };
 
@@ -276,17 +279,17 @@ void SwapchainManager::createImageViews() noexcept
     stone_seal_views(swapchainImageViews_);
 }
 
-// ── PRESENT & RESIZE HANDLING ─────────────────────────────────────────────
+// ── PRESENT & FRAME PACING ───────────────────────────────────────────────────
 void SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSemaphore waitSemaphore) noexcept
 {
-    VkSwapchainKHR sc = swapchain_.get();  // ← GET RAW HANDLE FIRST
+    VkSwapchainKHR sc = swapchain_.get();
 
     VkPresentInfoKHR pi{
         .sType              = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
         .waitSemaphoreCount = waitSemaphore ? 1u : 0u,
         .pWaitSemaphores    = waitSemaphore ? &waitSemaphore : nullptr,
         .swapchainCount     = 1,
-        .pSwapchains        = &sc,           // ← NOW LEGAL: & of a local variable
+        .pSwapchains        = &sc,
         .pImageIndices      = &imageIndex
     };
 
@@ -306,7 +309,6 @@ void SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSemaph
     }
 }
 
-// ── FRAME PACING & HDR ───────────────────────────────────────────────────
 void SwapchainManager::initializeFramePacing() noexcept
 {
     if (!Options::Performance::ENABLE_FRAME_PREDICTION) return;
@@ -346,7 +348,7 @@ void SwapchainManager::injectHdrMetadata(VkCommandBuffer, uint32_t) noexcept
 
     if (!swapchain_.valid()) return;
 
-    VkSwapchainKHR sc = swapchain_.get();  // ← GET RAW HANDLE FIRST
+    VkSwapchainKHR sc = swapchain_.get();
 
     VkHdrMetadataEXT m{
         .sType                     = VK_STRUCTURE_TYPE_HDR_METADATA_EXT,
@@ -360,11 +362,11 @@ void SwapchainManager::injectHdrMetadata(VkCommandBuffer, uint32_t) noexcept
         .maxFrameAverageLightLevel = Options::Display::TARGET_BRIGHTNESS_NITS * 0.4f
     };
 
-    vkSetHdrMetadataEXT(stone_device(), 1, &sc, &m);  // ← NOW LEGAL
+    vkSetHdrMetadataEXT(stone_device(), 1, &sc, &m);
     LOG_AMOURANTH("HDR METADATA INJECTED — {} NITS — PHOTONS BURN ETERNAL", Options::Display::TARGET_BRIGHTNESS_NITS);
 }
 
-// ── HOTPLUG & DYNAMIC FEATURES ───────────────────────────────────────────
+// ── DYNAMIC FEATURES ─────────────────────────────────────────────────────────
 void SwapchainManager::handleDisplayHotplug(SDL_Event* event) noexcept
 {
     if (!event) return;
@@ -381,12 +383,8 @@ void SwapchainManager::handleDisplayHotplug(SDL_Event* event) noexcept
 void SwapchainManager::setShadingRate(float scaleFactor) noexcept
 {
     LOG_NICK("DYNAMIC SHADING RATE → {}x — PHOTONS BEND TO OUR WILL", scaleFactor);
-    
     scaleFactor = std::clamp(scaleFactor, 0.25f, 4.0f);
-    
-    // Store for use in pipeline creation / dynamic state
     shadingRateScale_ = scaleFactor;
-    
     LOG_NICK("Shading rate locked at {}x — performance/photon balance achieved.", scaleFactor);
 }
 
@@ -404,35 +402,28 @@ void SwapchainManager::enableDirectDisplay(bool enable) noexcept
     if (enable)
     {
         LOG_AMOURANTH("DIRECT DISPLAY MODE ENGAGED — LATENCY ANNIHILATED — PHOTONS FLY UNCHAINED");
-        // Force immediate FIFO + clipped false for minimal latency path
         currentPresentMode_ = VK_PRESENT_MODE_IMMEDIATE_KHR;
         recreate(swapchainExtent_.width, swapchainExtent_.height);
     }
     else
     {
         LOG_AMOURANTH("Direct Display disengaged — returning to civilized rendering");
-        recreate(swapchainExtent_.width, swapchainExtent_.height); // Will use normal preferred mode
+        recreate(swapchainExtent_.width, swapchainExtent_.height);
     }
 }
 
 void SwapchainManager::predictResize(uint32_t predictedW, uint32_t predictedH) noexcept
 {
-    if (!Options::Window::ENABLE_QUANTUM_RESIZE_PREDICTION)
-        return;
-
-    if (predictedW == 0 || predictedH == 0 || predictedW > 16384 || predictedH > 16384)
-        return;
+    if (!Options::Window::ENABLE_QUANTUM_RESIZE_PREDICTION) return;
+    if (predictedW == 0 || predictedH == 0 || predictedW > 16384 || predictedH > 16384) return;
 
     LOG_AMOURANTH("QUANTUM RESIZE PREDICTION → {}×{} — ZERO PERCEIVED LAG", predictedW, predictedH);
 
-    // Pre-emptively rebuild swapchain before window actually resizes
     VkSwapchainKHR old = swapchain_.get();
-    swapchain_ = Handle<VkSwapchainKHR>(); // Invalidate old
+    swapchain_ = Handle<VkSwapchainKHR>();
 
     createSwapchain(stone_window(), predictedW, predictedH, old);
     createImageViews();
-
-    // TLAS purge on next frame
     las().notifyResize();
 
     LOG_AMOURANTH("PREDICTIVE SWAPCHAIN REBORN — FUTURE SECURED — LAG = 0");
@@ -445,16 +436,13 @@ void SwapchainManager::setPresentMode(VkPresentModeKHR mode) noexcept
              mode == VK_PRESENT_MODE_IMMEDIATE_KHR ? "IMMEDIATE (LATENCY = DEAD)" :
              mode == VK_PRESENT_MODE_FIFO_KHR ? "FIFO (VSYNC)" : "UNKNOWN");
 
-    // Validate support
     uint32_t count = 0;
     vkGetPhysicalDeviceSurfacePresentModesKHR(stone_physical(), stone_surface(), &count, nullptr);
     std::vector<VkPresentModeKHR> modes(count);
     vkGetPhysicalDeviceSurfacePresentModesKHR(stone_physical(), stone_surface(), &count, modes.data());
 
     bool supported = std::find(modes.begin(), modes.end(), mode) != modes.end();
-
-    if (!supported)
-    {
+    if (!supported) {
         LOG_WARN("Requested present mode NOT supported — falling back to FIFO");
         mode = VK_PRESENT_MODE_FIFO_KHR;
     }
@@ -475,29 +463,18 @@ void SwapchainManager::setMinImageCount(uint32_t count) noexcept
     VkSurfaceCapabilitiesKHR caps{};
     vkGetPhysicalDeviceSurfaceCapabilitiesKHR(stone_physical(), stone_surface(), &caps);
 
-    if (count < caps.minImageCount)
-    {
-        LOG_WARN("Requested image count {} below min {} — clamped", count, caps.minImageCount);
-        count = caps.minImageCount;
-    }
-    if (caps.maxImageCount > 0 && count > caps.maxImageCount)
-    {
-        LOG_WARN("Requested image count {} above max {} — clamped", count, caps.maxImageCount);
-        count = caps.maxImageCount;
-    }
+    if (count < caps.minImageCount) count = caps.minImageCount;
+    if (caps.maxImageCount > 0 && count > caps.maxImageCount) count = caps.maxImageCount;
 
     LOG_NICK("FORCING SWAPCHAIN IMAGE COUNT → {} — {} BUFFERING ENGAGED", 
              count, count >= 3 ? "TRIPLE" : "DOUBLE");
 
-    // Trigger rebuild with new image count
     recreate(swapchainExtent_.width, swapchainExtent_.height);
 }
 
 void SwapchainManager::releaseAcquiredImages() noexcept
 {
-    LOG_TRACE("releaseAcquiredImages() — no-op (images auto-released by present)");
-    // Intentionally empty — Vulkan swapchain images are released automatically on present
-    // This function exists only for API symmetry
+    // No-op — Vulkan swapchain images are managed automatically
 }
 
 } // namespace RTX
