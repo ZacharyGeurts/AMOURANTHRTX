@@ -59,7 +59,7 @@ Errors and bad code will not be tolerated.
 <img width="1300" alt="StoneKey" src="https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/media/Screenshot%20from%202025-11-08%2012-01-46.png" />  
 <img width="1300" alt="Hypertrace" src="https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/media/nexus.png" />  
 <img width="1300" alt="Renderer" src="https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/media/Screenshot%20from%202025-11-04%2008-26-37.png" />  
-<img width="1300" alt="Buffer" src="https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/media/Screenshot%20from%202025-10-30%2010-12-49.png" />  
+<img width="1300" alt="Disposal" src="https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/media/Screenshot%20from%202025-12-04%2013-24-06.png" />  
 
 - **Distribution**: gzac5314@gmail.com for AMOURANTH RTX engine license  
 - **Why AMOURANTH?** They said they were hiring so I figured I would try to bring in a customer.  
