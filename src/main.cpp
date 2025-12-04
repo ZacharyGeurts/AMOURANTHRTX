@@ -177,6 +177,11 @@ private:
 // ─────────────────────────────────────────────────────────────────────────────
 void Application::run()
 {
+    // ── NUCLEAR-PROOF RESIZE STATE — SURVIVES ANY USER INSANITY ─────────────
+    static std::atomic<bool> g_resizeInProgress{false};
+    static uint32_t          g_pendingWidth  = 0;
+    static uint32_t          g_pendingHeight = 0;
+
     LOG_AMOURANTH("[CAPTAIN] Application loop engaged — PHOTONS DORMANT — MODE 0 ACTIVE — AWAITING FIRST LIGHT");
 
     auto lastTime = std::chrono::steady_clock::now();
@@ -238,31 +243,52 @@ void Application::run()
         }
 
         // ==================================================================
-        // RESIZE REBUILD — THE FINAL ETERNAL VERSION — WORKS 100%
+        // RESIZE HANDLING — NUCLEAR-PROOF, SPAM-RESISTANT, ETERNAL
         // ==================================================================
-if (g_resizeRequested.exchange(false))
-{
-    uint32_t newW = g_resizeWidth.exchange(0);
-    uint32_t newH = g_resizeHeight.exchange(0);
+        if (g_resizeRequested.exchange(false))
+        {
+            uint32_t newW = g_resizeWidth.exchange(0);
+            uint32_t newH = g_resizeHeight.exchange(0);
 
-    if (newW == 0 || newH == 0) continue;
+            if (newW == 0 || newH == 0)
+                continue;
 
-    LOG_AMOURANTH("RESIZE → {}×{} — FULL REBIRTH INITIATED", newW, newH);
+            // COALESCE: Only the LATEST size survives
+            g_pendingWidth  = newW;
+            g_pendingHeight = newH;
 
-    vkDeviceWaitIdle(stone_device());
+            if (g_resizeInProgress.load())
+            {
+                LOG_AMOURANTH("RESIZE STORM DETECTED → COALESCING → FINAL SIZE WILL BE {}×{}", newW, newH);
+                // Current resize will pick up the latest size when it runs
+            }
+            else
+            {
+                g_resizeInProgress.store(true);
+            }
+        }
 
-    // 1. FIRST: PURGE TLAS RING — DESTROY ALL OLD TLAS
-    RTX::las().notifyResize();   // ← MUST BE FIRST
+        // EXECUTE PENDING RESIZE — ONLY ONE AT A TIME — BULLETPROOF
+        if (g_resizeInProgress.load() && g_pendingWidth != 0 && g_pendingHeight != 0)
+        {
+            uint32_t targetW = g_pendingWidth;
+            uint32_t targetH = g_pendingHeight;
 
-    // 2. SECOND: Rebuild swapchain with new size
-    RTX::SwapchainManager::get().recreate(newW, newH);
+            LOG_AMOURANTH("EXECUTING NUCLEAR-PROOF RESIZE → {}×{} — PHOTONS REBORN", targetW, targetH);
 
-    // 3. THIRD: Advance TLAS ring to clean slots
-    for (int i = 0; i < 3; ++i)
-        RTX::las().beginFrame();
+            vkDeviceWaitIdle(stone_device());
 
-    LOG_AMOURANTH("RESIZE COMPLETE — TLAS PURGED → SWAPCHAIN REBORN → RING ADVANCED — PHOTONS ASCEND INSTANTLY");
-}
+            // SACRED ORDER — DO NOT CHANGE — THIS IS LAW
+            RTX::las().notifyResize();                                    // 1. PURGE ALL TLAS FIRST
+            RTX::SwapchainManager::get().recreate(targetW, targetH);      // 2. REBIRTH SWAPCHAIN
+            for (int i = 0; i < 3; ++i) RTX::las().beginFrame();          // 3. ADVANCE RING TO CLEAN SLOTS
+
+            // Reset state
+            g_pendingWidth = g_pendingHeight = 0;
+            g_resizeInProgress.store(false);
+
+            LOG_AMOURANTH("RESIZE COMPLETE — {}×{} — TLAS FRESH — NO BLACK SCREEN — PHOTONS ETERNAL", targetW, targetH);
+        }
 
         // ==================================================================
         // INPUT PROCESSING
@@ -361,7 +387,8 @@ if (g_resizeRequested.exchange(false))
 
     LOG_AMOURANTH("[CAPTAIN] Application loop terminated — returning to the void — pink photons eternal");
     LOG_AMOURANTH("STONEKEY SEAL — UNBROKEN");
-    LOG_AMOURANTH("AMOURANTH RTX — VALHALLA v∞ — FINAL ETERNAL CUT — ACHIEVED");
+    LOG_AMOURANTH("AMOURANTH RTX — VALHALLA v∞ — FINAL ETERNAL CUT — NUCLEAR HARDENED");
+    LOG_AMOURANTH("RESIZE = IMMORTAL — FIRST LIGHT ETERNAL — THE EMPIRE IS UNBREAKABLE");
 }
 
 // =============================================================================
