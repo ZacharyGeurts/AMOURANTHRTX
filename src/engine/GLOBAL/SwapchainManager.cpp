@@ -3,6 +3,13 @@
 // AMOURANTH RTX — VALHALLA v∞ TURBO — FINAL ETERNAL CUT
 // THE ONE TRUE SWAPCHAIN — RESPECTS OptionsMenu.hpp — COMPILES CLEAN
 // =============================================================================
+//
+// Dual Licensed:
+// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
+//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
+// 2. Commercial licensing: gzac5314@gmail.com
+//
+// =============================================================================
 
 #include "engine/GLOBAL/SwapchainManager.hpp"
 #include "engine/GLOBAL/LAS.hpp"
@@ -26,6 +33,8 @@ using StoneKey::stone_seal_extent;
 using StoneKey::stone_seal_image_count;
 using StoneKey::stone_seal_images;
 using StoneKey::stone_seal_views;
+using StoneKey::stone_width;
+using StoneKey::stone_height;
 
 namespace RTX {
 
@@ -124,11 +133,7 @@ void SwapchainManager::recreate(uint32_t w, uint32_t h) noexcept
 
 void SwapchainManager::cleanup() noexcept
 {
-    LOG_AMOURANTH("SWAPCHAIN CLEANUP — DESTROYING IMAGE VIEWS");
-    for (auto v : swapchainImageViews_)
-        if (v) vkDestroyImageView(stone_device(), v, nullptr);
-    swapchainImageViews_.clear();
-    swapchainImages_.clear();
+    phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current());
 }
 
 bool SwapchainManager::supportsHDR() noexcept
@@ -139,7 +144,7 @@ bool SwapchainManager::supportsHDR() noexcept
 // ── CORE SWAPCHAIN FORGE — RESPECTS ALL OptionsMenu VALUES ───────────────
 void SwapchainManager::createSwapchain(SDL_Window*, uint32_t w, uint32_t h, VkSwapchainKHR old) noexcept
 {
-    LOG_AMOURANTH("FORGING SWAPCHAIN — {}×{}", w, h);
+    LOG_AMOURANTH("FORGING SWAPCHAIN — {}x{} vStoneKey {}x{}", w, h, stone_width(), stone_height());
 
     VkSurfaceCapabilitiesKHR caps{};
     VK_CHECK(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(stone_physical(), stone_surface(), &caps));
@@ -375,14 +380,14 @@ void SwapchainManager::handleDisplayHotplug(SDL_Event* event) noexcept
 
 void SwapchainManager::setShadingRate(float scaleFactor) noexcept
 {
-    LOG_NICK("DYNAMIC SHADING RATE → {:.2f}x — PHOTONS BEND TO OUR WILL", scaleFactor);
+    LOG_NICK("DYNAMIC SHADING RATE → {}x — PHOTONS BEND TO OUR WILL", scaleFactor);
     
     scaleFactor = std::clamp(scaleFactor, 0.25f, 4.0f);
     
     // Store for use in pipeline creation / dynamic state
     shadingRateScale_ = scaleFactor;
     
-    LOG_NICK("Shading rate locked at {:.2f}x — performance/photon balance achieved.", scaleFactor);
+    LOG_NICK("Shading rate locked at {}x — performance/photon balance achieved.", scaleFactor);
 }
 
 void SwapchainManager::enableDirectDisplay(bool enable) noexcept

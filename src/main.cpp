@@ -1637,7 +1637,7 @@ verdict:
         "LOCATION → {}:{}\n"
         "FUNCTION → {}\n"
         "════════════════════════════════════════════════════════════════════════════",
-        silent ? "SHE DOES NOT SPEAK. SHE JUST HITS A 450 SPLASH."
+        silent ? "SHE DOES NOT SPEAK. SHE JUST HITS A 4070ti SPLASH."
                : std::format("LAST RIDE POWERBOMB | REASON: \"{}\"", reason),
         loc.file_name(), loc.line(), loc.function_name()
     );

@@ -1,5 +1,13 @@
 // include/engine/camera_utils.hpp
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts gzac5314@gmail.com
+// =============================================================================
+//
+// Dual Licensed:
+// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
+//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
+// 2. Commercial licensing: gzac5314@gmail.com
+//
+// =============================================================================
 // LAZY CAMERA v∞ — BEST IN THE WORLD — POWER + SIMPLICITY = VALHALLA OVERCLOCKED
 // • ONE-LINE GLOBAL CAMERA — ZERO HEAP AFTER FIRST CALL — C++23 ZERO COST
 // • AUTO-ASPECT + AUTO-RESIZE DETECTION — THREAD-SAFE STATIC INIT

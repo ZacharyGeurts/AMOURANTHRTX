@@ -171,7 +171,7 @@ void ensureMainPool() noexcept
     VkBufferDeviceAddressInfo addrInfo{.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO, .buffer = buffer};
     VkDeviceAddress addr = vkGetBufferDeviceAddress(stone_device(), &addrInfo);
 
-    LOG_SUCCESS_CAT("BUFFER", "ETERNAL MAIN POOL FORGED — {} GiB @ 0x{:X}",
+    LOG_SUCCESS_CAT("BUFFER", "ETERNAL MAIN POOL FORGED — {} GiB @ 0x{}",
                     static_cast<double>(current)/(1024.0*1024*1024), addr);
 
     if (current >= safeMax * 0.99) {
@@ -185,7 +185,7 @@ void ensureMainPool() noexcept
                     static_cast<double>(current)/(1024.0*1024*1024));
     }
 
-    LOG_SUCCESS_CAT("BUFFER", "kStone1=0x{:X} kStone2=0x{:X} — THE EMPIRE IS ETERNAL", kStone1, kStone2);
+    LOG_SUCCESS_CAT("BUFFER", "kStone1=0x{} kStone2=0x{} — THE EMPIRE IS ETERNAL", kStone1, kStone2);
 }
 
 // =============================================================================

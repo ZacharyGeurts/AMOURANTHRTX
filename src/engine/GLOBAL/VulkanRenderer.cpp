@@ -1556,7 +1556,7 @@ void VulkanRenderer::onSwapchainRebuilt(uint32_t w, uint32_t h) noexcept
     {
         if (imageAvailableSemaphores_[i])
         {
-            LOG_AMOURANTH("  → DESTROYING imageAvailableSemaphores_[{}] = 0x{:x}", i, reinterpret_cast<uint64_t>(imageAvailableSemaphores_[i]));
+            LOG_AMOURANTH("  → DESTROYING imageAvailableSemaphores_[{}] = 0x{}", i, reinterpret_cast<uint64_t>(imageAvailableSemaphores_[i]));
             vkDestroySemaphore(stone_device(), imageAvailableSemaphores_[i], nullptr);
             imageAvailableSemaphores_[i] = VK_NULL_HANDLE;
         }
@@ -1566,7 +1566,7 @@ void VulkanRenderer::onSwapchainRebuilt(uint32_t w, uint32_t h) noexcept
     {
         if (renderFinishedSemaphores_[i])
         {
-            LOG_AMOURANTH("  → DESTROYING renderFinishedSemaphores_[{}] = 0x{:x}", i, reinterpret_cast<uint64_t>(renderFinishedSemaphores_[i]));
+            LOG_AMOURANTH("  → DESTROYING renderFinishedSemaphores_[{}] = 0x{}", i, reinterpret_cast<uint64_t>(renderFinishedSemaphores_[i]));
             vkDestroySemaphore(stone_device(), renderFinishedSemaphores_[i], nullptr);
             renderFinishedSemaphores_[i] = VK_NULL_HANDLE;
         }
@@ -1576,7 +1576,7 @@ void VulkanRenderer::onSwapchainRebuilt(uint32_t w, uint32_t h) noexcept
     {
         if (inFlightFences_[i])
         {
-            LOG_AMOURANTH("  → EXECUTING inFlightFences_[{}] = 0x{:x} — THIS FENCE WILL NEVER SIGNAL AGAIN", i, reinterpret_cast<uint64_t>(inFlightFences_[i]));
+            LOG_AMOURANTH("  → EXECUTING inFlightFences_[{}] = 0x{} — THIS FENCE WILL NEVER SIGNAL AGAIN", i, reinterpret_cast<uint64_t>(inFlightFences_[i]));
             vkDestroyFence(stone_device(), inFlightFences_[i], nullptr);
             inFlightFences_[i] = VK_NULL_HANDLE;
         }
@@ -1616,13 +1616,13 @@ void VulkanRenderer::onSwapchainRebuilt(uint32_t w, uint32_t h) noexcept
     for (size_t i = 0; i < num; ++i)
     {
         VK_CHECK(vkCreateSemaphore(stone_device(), &semInfo, nullptr, &imageAvailableSemaphores_[i]));
-        LOG_AMOURANTH("  → BIRTH: imageAvailableSemaphores_[{}] = 0x{:x}", i, reinterpret_cast<uint64_t>(imageAvailableSemaphores_[i]));
+        LOG_AMOURANTH("  → BIRTH: imageAvailableSemaphores_[{}] = 0x{}", i, reinterpret_cast<uint64_t>(imageAvailableSemaphores_[i]));
 
         VK_CHECK(vkCreateSemaphore(stone_device(), &semInfo, nullptr, &renderFinishedSemaphores_[i]));
-        LOG_AMOURANTH("  → BIRTH: renderFinishedSemaphores_[{}] = 0x{:x}", i, reinterpret_cast<uint64_t>(renderFinishedSemaphores_[i]));
+        LOG_AMOURANTH("  → BIRTH: renderFinishedSemaphores_[{}] = 0x{}", i, reinterpret_cast<uint64_t>(renderFinishedSemaphores_[i]));
 
         VK_CHECK(vkCreateFence(stone_device(), &fenceInfo, nullptr, &inFlightFences_[i]));
-        LOG_AMOURANTH("  → BIRTH: inFlightFences_[{}] = 0x{:x} (SIGNALED)", i, reinterpret_cast<uint64_t>(inFlightFences_[i]));
+        LOG_AMOURANTH("  → BIRTH: inFlightFences_[{}] = 0x{} (SIGNALED)", i, reinterpret_cast<uint64_t>(inFlightFences_[i]));
     }
 
     // RECREATE COMMAND BUFFERS
@@ -1639,7 +1639,7 @@ void VulkanRenderer::onSwapchainRebuilt(uint32_t w, uint32_t h) noexcept
 
     for (size_t i = 0; i < num; ++i)
     {
-        LOG_AMOURANTH("  → ALLOCATED commandBuffers_[{}] = 0x{:x}", i, reinterpret_cast<uint64_t>(commandBuffers_[i]));
+        LOG_AMOURANTH("  → ALLOCATED commandBuffers_[{}] = 0x{}", i, reinterpret_cast<uint64_t>(commandBuffers_[i]));
     }
 
     // FINAL RESET
