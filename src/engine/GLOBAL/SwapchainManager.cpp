@@ -1,7 +1,16 @@
-// =============================================================================
 // src/engine/GLOBAL/SwapchainManager.cpp
+// =============================================================================
 // AMOURANTH RTX — VALHALLA v∞ TURBO — FINAL ETERNAL CUT
 // THE ONE TRUE SWAPCHAIN — FULLY FIXED & COMPILES CLEAN
+// =============================================================================
+// AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
+// =============================================================================
+//
+// Dual Licensed:
+// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
+//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
+// 2. Commercial licensing: gzac5314@gmail.com
+//
 // =============================================================================
 
 #include "engine/GLOBAL/SwapchainManager.hpp"
@@ -16,6 +25,7 @@
 #include <fstream>
 #include <format>
 #include <limits>
+#include <vector>
 
 using namespace Logging::Color;
 using StoneKey::stone_device;
@@ -158,35 +168,45 @@ void SwapchainManager::createSwapchain(SDL_Window*, uint32_t w, uint32_t h, VkSw
     uint32_t formatCount = 0;
     vkGetPhysicalDeviceSurfaceFormatsKHR(stone_physical(), stone_surface(), &formatCount, nullptr);
     std::vector<VkSurfaceFormatKHR> formats(formatCount);
-    if (formatCount) {
-        vkGetPhysicalDeviceSurfaceFormatsKHR(stone_physical(), stone_surface(), &formatCount, formats.data());
-    }
+    if (formatCount) vkGetPhysicalDeviceSurfaceFormatsKHR(stone_physical(), stone_surface(), &formatCount, formats.data());
 
     uint32_t presentCount = 0;
     vkGetPhysicalDeviceSurfacePresentModesKHR(stone_physical(), stone_surface(), &presentCount, nullptr);
     std::vector<VkPresentModeKHR> presentModes(presentCount);
-    if (presentCount) {
-        vkGetPhysicalDeviceSurfacePresentModesKHR(stone_physical(), stone_surface(), &presentCount, presentModes.data());
-    }
+    if (presentCount) vkGetPhysicalDeviceSurfacePresentModesKHR(stone_physical(), stone_surface(), &presentCount, presentModes.data());
 
-    // Resolve extent — use currentExtent if valid (SDL3 + Wayland/X11)
     VkExtent2D extent = caps.currentExtent;
     if (extent.width == std::numeric_limits<uint32_t>::max()) {
         extent.width  = std::clamp(w, caps.minImageExtent.width,  caps.maxImageExtent.width);
         extent.height = std::clamp(h, caps.minImageExtent.height, caps.maxImageExtent.height);
     }
 
-    // Triple buffering preferred — never drop below double
     uint32_t imageCount = caps.minImageCount + 1;
+    if (Options::Performance::MAX_FRAMES_IN_FLIGHT > 0 && imageCount > Options::Performance::MAX_FRAMES_IN_FLIGHT) {
+        imageCount = Options::Performance::MAX_FRAMES_IN_FLIGHT;
+    }
     if (caps.maxImageCount > 0 && imageCount > caps.maxImageCount)
         imageCount = caps.maxImageCount;
 
-    // Prefer MAILBOX for tear-free, fall back to FIFO
-    VkPresentModeKHR presentMode = VK_PRESENT_MODE_FIFO_KHR;
-    if (std::find(presentModes.begin(), presentModes.end(), VK_PRESENT_MODE_MAILBOX_KHR) != presentModes.end())
-        presentMode = VK_PRESENT_MODE_MAILBOX_KHR;
+    // ── PRESENT MODE: HONOR PRESET REQUEST FIRST ─────────────────────
+    VkPresentModeKHR desired;
+    if (Options::Display::UNCAPPED_MODE_ACTIVE) {
+        desired = Options::Performance::ALLOW_IMMEDIATE_PRESENT ? VK_PRESENT_MODE_IMMEDIATE_KHR : VK_PRESENT_MODE_FIFO_KHR;
+    } else if (Options::Performance::PREFER_MAILBOX_PRESENT) {
+        desired = VK_PRESENT_MODE_MAILBOX_KHR;
+    } else {
+        desired = VK_PRESENT_MODE_FIFO_KHR;
+    }
 
-    // HDR → 10-bit, otherwise sRGB
+    VkPresentModeKHR presentMode = VK_PRESENT_MODE_FIFO_KHR;  // Safe default
+    for (auto mode : { desired, VK_PRESENT_MODE_MAILBOX_KHR, VK_PRESENT_MODE_IMMEDIATE_KHR, VK_PRESENT_MODE_FIFO_KHR }) {
+        if (std::find(presentModes.begin(), presentModes.end(), mode) != presentModes.end()) {
+            presentMode = mode;
+            break;
+        }
+    }
+
+    // HDR format selection
     VkSurfaceFormatKHR chosen = formats[0];
     if (supportsHDR()) {
         for (const auto& f : formats)
@@ -198,7 +218,6 @@ void SwapchainManager::createSwapchain(SDL_Window*, uint32_t w, uint32_t h, VkSw
                 { chosen = f; break; }
     }
 
-    // Queue family sharing
     QueueFamilyIndices qf = findQueueFamilies(stone_physical(), stone_surface());
     uint32_t queueFamilyIndices[] = { qf.graphicsFamily.value(), qf.presentFamily.value() };
 
@@ -229,25 +248,20 @@ void SwapchainManager::createSwapchain(SDL_Window*, uint32_t w, uint32_t h, VkSw
     VkSwapchainKHR raw = VK_NULL_HANDLE;
     VK_CHECK(vkCreateSwapchainKHR(stone_device(), &ci, nullptr, &raw));
 
-    // Update internal state
     swapchain_ = Handle<VkSwapchainKHR>(raw, stone_device());
     swapchainExtent_    = extent;
     swapchainFormat_    = chosen.format;
     currentColorSpace_  = chosen.colorSpace;
     currentPresentMode_ = presentMode;
 
-    // Acquire images
     uint32_t imgCount = 0;
     VK_CHECK(vkGetSwapchainImagesKHR(stone_device(), raw, &imgCount, nullptr));
     swapchainImages_.resize(imgCount);
     VK_CHECK(vkGetSwapchainImagesKHR(stone_device(), raw, &imgCount, swapchainImages_.data()));
 
-    // Destroy old swapchain (safe after new one is created)
-    if (old && old != raw) {
+    if (old && old != raw)
         vkDestroySwapchainKHR(stone_device(), old, nullptr);
-    }
 
-    // Seal into StoneKey
     stone_seal_swapchain(raw);
     stone_seal_extent(extent);
     stone_seal_image_count(imgCount);
@@ -388,24 +402,31 @@ void SwapchainManager::setShadingRate(float scaleFactor) noexcept
 
 void SwapchainManager::enableDirectDisplay(bool enable) noexcept
 {
-    if (!Options::Performance::ENABLE_DIRECT_DISPLAY)
-    {
-        LOG_WARN("Direct Display blocked by OptionsMenu — denied.");
+    if (!Options::Performance::ENABLE_DIRECT_DISPLAY) {
         directDisplayEnabled_ = false;
         return;
     }
 
     directDisplayEnabled_ = enable;
 
+    VkPresentModeKHR restoreMode;
+    if (Options::Performance::PREFER_MAILBOX_PRESENT) {
+        restoreMode = VK_PRESENT_MODE_MAILBOX_KHR;
+    } else if (Options::Performance::ALLOW_IMMEDIATE_PRESENT) {
+        restoreMode = VK_PRESENT_MODE_IMMEDIATE_KHR;
+    } else {
+        restoreMode = VK_PRESENT_MODE_FIFO_KHR;
+    }
+
     if (enable)
     {
-        LOG_AMOURANTH("DIRECT DISPLAY MODE ENGAGED — LATENCY ANNIHILATED — PHOTONS FLY UNCHAINED");
-        currentPresentMode_ = VK_PRESENT_MODE_IMMEDIATE_KHR;
+        currentPresentMode_ = VK_PRESENT_MODE_IMMEDIATE_KHR;  // Uncapped, zero-latency
         recreate(swapchainExtent_.width, swapchainExtent_.height);
     }
     else
     {
-        LOG_AMOURANTH("Direct Display disengaged — returning to civilized rendering");
+        // Restore civilized mode
+        currentPresentMode_ = restoreMode;
         recreate(swapchainExtent_.width, swapchainExtent_.height);
     }
 }
@@ -415,42 +436,29 @@ void SwapchainManager::predictResize(uint32_t predictedW, uint32_t predictedH) n
     if (!Options::Window::ENABLE_QUANTUM_RESIZE_PREDICTION) return;
     if (predictedW == 0 || predictedH == 0 || predictedW > 16384 || predictedH > 16384) return;
 
-    LOG_AMOURANTH("QUANTUM RESIZE PREDICTION → {}×{} — ZERO PERCEIVED LAG", predictedW, predictedH);
-
     VkSwapchainKHR old = swapchain_.get();
-    swapchain_ = Handle<VkSwapchainKHR>();
+    swapchain_ = Handle<VkSwapchainKHR>();  // Invalidate old
 
     createSwapchain(stone_window(), predictedW, predictedH, old);
     createImageViews();
     las().notifyResize();
-
-    LOG_AMOURANTH("PREDICTIVE SWAPCHAIN REBORN — FUTURE SECURED — LAG = 0");
 }
 
 void SwapchainManager::setPresentMode(VkPresentModeKHR mode) noexcept
 {
-    LOG_NICK("REQUESTED PRESENT MODE → {}", 
-             mode == VK_PRESENT_MODE_MAILBOX_KHR ? "MAILBOX (TEARING = DEAD)" :
-             mode == VK_PRESENT_MODE_IMMEDIATE_KHR ? "IMMEDIATE (LATENCY = DEAD)" :
-             mode == VK_PRESENT_MODE_FIFO_KHR ? "FIFO (VSYNC)" : "UNKNOWN");
-
+    // Validate support
     uint32_t count = 0;
     vkGetPhysicalDeviceSurfacePresentModesKHR(stone_physical(), stone_surface(), &count, nullptr);
     std::vector<VkPresentModeKHR> modes(count);
-    vkGetPhysicalDeviceSurfacePresentModesKHR(stone_physical(), stone_surface(), &count, modes.data());
+    if (count) vkGetPhysicalDeviceSurfacePresentModesKHR(stone_physical(), stone_surface(), &count, modes.data());
 
     bool supported = std::find(modes.begin(), modes.end(), mode) != modes.end();
     if (!supported) {
-        LOG_WARN("Requested present mode NOT supported — falling back to FIFO");
         mode = VK_PRESENT_MODE_FIFO_KHR;
     }
 
     currentPresentMode_ = mode;
     recreate(swapchainExtent_.width, swapchainExtent_.height);
-
-    LOG_NICK("PRESENT MODE ENFORCED → {} — EMPIRE'S WILL IS LAW",
-             mode == VK_PRESENT_MODE_MAILBOX_KHR ? "MAILBOX" :
-             mode == VK_PRESENT_MODE_IMMEDIATE_KHR ? "IMMEDIATE" : "FIFO");
 }
 
 void SwapchainManager::setMinImageCount(uint32_t count) noexcept
@@ -464,9 +472,7 @@ void SwapchainManager::setMinImageCount(uint32_t count) noexcept
     if (count < caps.minImageCount) count = caps.minImageCount;
     if (caps.maxImageCount > 0 && count > caps.maxImageCount) count = caps.maxImageCount;
 
-    LOG_NICK("FORCING SWAPCHAIN IMAGE COUNT → {} — {} BUFFERING ENGAGED", 
-             count, count >= 3 ? "TRIPLE" : "DOUBLE");
-
+    // Trigger rebuild with new image count
     recreate(swapchainExtent_.width, swapchainExtent_.height);
 }
 
