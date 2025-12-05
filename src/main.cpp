@@ -789,6 +789,23 @@ static void createRealFinalWindow() noexcept
         phase9_ballerina("Failed to create main window");
     }
 
+	// Window icon / favicon
+    auto setIcon = [](SDL_Window* w) {
+        const char* paths[] = {
+            "assets/textures/ammo.ico",
+            "assets/textures/ammo32.ico",
+            nullptr
+        };
+        for (int i = 0; paths[i]; ++i) {
+            if (SDL_Surface* s = IMG_Load(paths[i])) {
+                SDL_SetWindowIcon(w, s);
+                SDL_DestroySurface(s);
+                return;
+            }
+        }
+    };
+    setIcon(win);
+
     stone_seal_window(win);
     g_sdl_window.reset(win);
     RTX::g_ctx().setSize(w, h);
@@ -839,7 +856,7 @@ static void createRealFinalWindow() noexcept
 static void showSacrificialSplash() noexcept
 {
     //constexpr bool  enabled  = Options::Splash::ENABLE_SACRIFICIAL_SPLASH && !Options::Splash::SKIP_SPLASH_ENTIRELY;
-    constexpr bool  enabled  = true;
+    constexpr bool  enabled  = true; // I prefer to mandate
     constexpr float duration = Options::Splash::SPLASH_DURATION_SECONDS;
 
     if (!enabled || duration <= 0.0f) {
