@@ -2,6 +2,13 @@
 // =============================================================================
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
+//
+// Dual Licensed:
+// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
+//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
+// 2. Commercial licensing: gzac5314@gmail.com
+//
+// =============================================================================
 // TRUE CONSTEXPR STONEKEY v∞ — NOVEMBER 19, 2025 — APOCALYPSE FINAL
 // PURE RANDOM ENTROPY — RDRAND + PID + TIME + TLS — SIMPLE & SECURE
 // KEYS **NEVER** LOGGED — ONLY HASHED FINGERPRINTS — SECURITY > VANITY
@@ -319,7 +326,7 @@ void PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDescrip
     if (Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING)
         addImage(6,  updateInfo.nexusScoreViews[frameIndex]);                 // NexusScore
     addBuffer(7, updateInfo.additionalStorageBuffer, updateInfo.additionalStorageSize, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
-    if (Options::Kojima::ENABLE_BLUE_NOISE)
+    if (Options::Environment::ENABLE_BLUE_NOISE)
         addSampler(8, updateInfo.blueNoiseSampler,  updateInfo.blueNoiseView);
     addSampler(9, updateInfo.densitySampler,    updateInfo.densityView);  // ← real names
 

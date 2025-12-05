@@ -365,33 +365,42 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     VkResult acquireResult = vkAcquireNextImageKHR(
         stone_device(),
         RTX::SwapchainManager::swapchain(),
-        16'666'667,  // ~16.67ms timeout for 60 FPS
+        100'000'000,  // 100ms timeout — safe for 30–144 Hz monitors
         imageAvailableSemaphores_[slot],
         VK_NULL_HANDLE,
         &imageIndex
     );
 
-    bool swapchainInvalid = (acquireResult == VK_ERROR_OUT_OF_DATE_KHR ||
-                             acquireResult == VK_SUBOPTIMAL_KHR ||
-                             acquireResult == VK_TIMEOUT);
+    bool acquired = (acquireResult == VK_SUCCESS || acquireResult == VK_SUBOPTIMAL_KHR);
 
-    if (swapchainInvalid)
+    if (!acquired)
     {
-        g_resizeRequested.store(true);
-        g_resizeWidth.store(stone_width());
-        g_resizeHeight.store(stone_height());
-        LOG_AMOURANTH("[PHASE 2] Swapchain invalid ({}), skipping frame — resize pending", string_VkResult(acquireResult));
-        currentFrame_.fetch_sub(1);
+        if (acquireResult == VK_ERROR_OUT_OF_DATE_KHR)
+        {
+            g_resizeRequested.store(true);
+            g_resizeWidth.store(stone_width());
+            g_resizeHeight.store(stone_height());
+            LOG_AMOURANTH("[PHASE 2] Swapchain out of date → resize requested, skipping frame");
+        }
+        else if (acquireResult == VK_TIMEOUT)
+        {
+            LOG_AMOURANTH("[PHASE 2] Acquire timeout → skipping frame");
+        }
+        else
+        {
+            LOG_FATAL("[PHASE 2] vkAcquireNextImageKHR HARD FAILURE: {}", string_VkResult(acquireResult));
+            currentFrame_.fetch_sub(1, std::memory_order_relaxed);
+        }
         return;
     }
-    else if (acquireResult != VK_SUCCESS)
+
+    bool needsResize = (acquireResult == VK_SUBOPTIMAL_KHR);
+    if (needsResize)
     {
-        LOG_FATAL("[PHASE 2] vkAcquireNextImageKHR HARD FAILURE: {}", string_VkResult(acquireResult));
-        currentFrame_.fetch_sub(1);
-        return;
+        LOG_AMOURANTH("[PHASE 2] Swapchain suboptimal → will request resize after present");
     }
 
-    // ── PHASE 3: RESET FENCE (we're definitely submitting this frame) ─────
+    // ── PHASE 3: RESET FENCE — we are 100% submitting this frame ──────────
     VK_CHECK(vkResetFences(stone_device(), 1, &inFlightFences_[slot]));
 
     // ── PHASE 4: BEGIN COMMAND BUFFER ─────────────────────────────────────
@@ -402,15 +411,19 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     };
     VK_CHECK(vkBeginCommandBuffer(cmd, &beginInfo));
 
-    // ── PHASE 5: PINK SAFETY FRAME — ALWAYS WINS (only on valid swapchain) ─
-    bool drawPink = (activeRenderMode_ == 0) || g_forcePink.load();
+    // ── PHASE 5: PINK SAFETY FRAME — NOW ALSO USED FOR RESIZE RECOVERY ────
+    bool drawPink = (activeRenderMode_ == 0) || 
+                    g_forcePink.load() || 
+                    g_resizeRequested.load();  // Critical: never skip submit!
 
     if (drawPink)
     {
+        LOG_AMOURANTH("[PHASE 5] PINK SAFETY FRAME ENGAGED — {} mode", 
+                      activeRenderMode_ == 0 ? "DEV MODE 0" : "RESIZE/RECOVERY");
+
         VkClearColorValue pink{ {1.0f, 0.2f, 0.8f, 1.0f} };
         VkImageSubresourceRange range{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
 
-        // Robust layout transition — works even on half-dead swapchain
         VkImageMemoryBarrier barrier = {
             .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
             .srcAccessMask       = 0,
@@ -439,7 +452,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
 
         VK_CHECK(vkEndCommandBuffer(cmd));
 
-        // ── PHASE 6: SUBMIT PINK FRAME ─────────────────────────────────────
+        // ── SUBMIT PINK FRAME ─────────────────────────────────────────────
         VkSemaphoreSubmitInfo waitInfo{
             .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
             .semaphore = imageAvailableSemaphores_[slot],
@@ -467,7 +480,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
 
         VK_CHECK(vkQueueSubmit2(stone_graphics_queue(), 1, &submit, inFlightFences_[slot]));
 
-        // ── PHASE 7: PRESENT PINK FRAME ───────────────────────────────────
+        // ── PRESENT PINK FRAME ────────────────────────────────────────────
         VkPresentInfoKHR presentInfo{
             .sType              = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
             .waitSemaphoreCount = 1,
@@ -484,14 +497,14 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
             g_resizeRequested.store(true);
             g_resizeWidth.store(stone_width());
             g_resizeHeight.store(stone_height());
-            LOG_AMOURANTH("[PHASE 7] Present out-of-date during pink — resize triggered");
         }
 
         frameNumber_++;
-        return;  // ← Exit early — we did our job
+        LOG_AMOURANTH("<<< PINK SAFETY FRAME COMPLETE | global#{} | visibility secured", globalFrame);
+        return; // ← Safe: we submitted and presented
     }
 
-    // ── PHASE 8: NORMAL RENDERING PATH (swapchain is valid) ───────────────
+    // ── PHASE 8: NORMAL RENDERING PATH — swapchain is valid ───────────────
     LOG_AMOURANTH("[PHASE 8] Entering normal rendering path — swapchain valid");
 
     // Accumulation reset
@@ -547,7 +560,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     VkImageMemoryBarrier rtToRead = {
         .sType            = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
         .srcAccessMask    = VK_ACCESS_SHADER_WRITE_BIT,
-        .dstAccessMask       = VK_ACCESS_SHADER_READ_BIT,
+        .dstAccessMask    = VK_ACCESS_SHADER_READ_BIT,
         .oldLayout        = VK_IMAGE_LAYOUT_GENERAL,
         .newLayout        = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
         .image            = rtOutputImages_[slot].get(),
@@ -622,12 +635,11 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     VkResult presentResult = vkQueuePresentKHR(stone_present_queue(), &presentInfo);
     LOG_AMOURANTH("[PHASE 10] Frame presented | result: {}", string_VkResult(presentResult));
 
-    if (presentResult == VK_ERROR_OUT_OF_DATE_KHR || presentResult == VK_SUBOPTIMAL_KHR)
+    if (presentResult == VK_ERROR_OUT_OF_DATE_KHR || presentResult == VK_SUBOPTIMAL_KHR || needsResize)
     {
         g_resizeRequested.store(true);
         g_resizeWidth.store(stone_width());
         g_resizeHeight.store(stone_height());
-        LOG_AMOURANTH("[PHASE 10] Present out-of-date — resize triggered for next frame");
     }
 
     currentSpp_++;

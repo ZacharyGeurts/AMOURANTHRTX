@@ -33,11 +33,11 @@ constexpr Preset CURRENT_PRESET = Preset::UncappedPerformance;
 // ── SPLASH  ───────────────────────────────────────────────────
 namespace Splash {
     // Master switch — completely disable the splash if desired
-    constexpr bool     ENABLE_SACRIFICIAL_SPLASH   = (CURRENT_PRESET == Preset::BestQuality);
+    constexpr bool     ENABLE_SACRIFICIAL_SPLASH   = true;
     constexpr float    SPLASH_DURATION_SECONDS     = 3.4f;
     // Nuclear override — skips everything, even the image draw
     // Useful for benchmarking, CI, or when you just want to get to the photons
-    constexpr bool     SKIP_SPLASH_ENTIRELY        = (CURRENT_PRESET == Preset::UncappedPerformance);
+    constexpr bool     SKIP_SPLASH_ENTIRELY        = false;
     constexpr float    FADE_IN_DURATION            = 0.35f;
     constexpr float    FADE_OUT_DURATION           = 0.30f;
     // Allow user to quit during splash with ESC or window close
@@ -63,7 +63,7 @@ namespace Performance {
     constexpr uint32_t GPU_TIMESTAMP_QUERY_COUNT   = 128;
 
     // Log frame time warnings when exceeding threshold
-    constexpr bool     ENABLE_FRAME_TIME_LOGGING   = (CURRENT_PRESET == Preset::UncappedPerformance);
+    constexpr bool     ENABLE_FRAME_TIME_LOGGING   = false;
     constexpr float    FRAME_TIME_LOG_THRESHOLD_MS = 16.666f;  // ~60 Hz
 
     // Enable console output (stdout/stderr)
@@ -73,22 +73,22 @@ namespace Performance {
     constexpr bool     ENABLE_FRAME_PREDICTION     = (CURRENT_PRESET == Preset::BestQuality);
 
     // Prefer Mailbox present mode (tear-free, low latency, soft FPS cap at refresh+1)
-    constexpr bool     PREFER_MAILBOX_PRESENT      = (CURRENT_PRESET == Preset::BestQuality);
+    constexpr bool     PREFER_MAILBOX_PRESENT      = (CURRENT_PRESET == Preset::UncappedPerformance);
 
     // Allow fallback to Immediate present mode (uncapped, may tear)
     constexpr bool     ALLOW_IMMEDIATE_PRESENT     = (CURRENT_PRESET == Preset::UncappedPerformance);
 
     // Dynamic fragment shading rate multiplier (VRS) — >1.0 = higher quality, <1.0 = performance
-    constexpr float    DYNAMIC_SHADING_RATE        = (CURRENT_PRESET == Preset::BestQuality) ? 1.5f : 0.5f;
+    constexpr float    DYNAMIC_SHADING_RATE        = 1.5f;
 
     // Bypass compositor on Linux/Wayland (zero-copy, ~1.8ms input-to-photon)
-    constexpr bool     ENABLE_DIRECT_DISPLAY       = true;
+    constexpr bool     ENABLE_DIRECT_DISPLAY       = (CURRENT_PRESET == Preset::UncappedPerformance);
 
     // Remove runtime safety checks and asserts — maximum performance
-    constexpr bool     OVERCLOCK_RENDERER          = (CURRENT_PRESET == Preset::UncappedPerformance);
+    constexpr bool     OVERCLOCK_RENDERER          = false;
 
     // Enable hyper-aggressive optimizations (may reduce debuggability)
-    constexpr bool     ENABLE_HYPER_AGGRESSIVE_MODE = (CURRENT_PRESET == Preset::UncappedPerformance);
+    constexpr bool     ENABLE_HYPER_AGGRESSIVE_MODE = false;
 }
 
 // ── APPLICATION & WINDOW ──────────────────────────────────────────────────────
@@ -107,101 +107,103 @@ namespace Window {
     constexpr bool     HIGH_DPI                    = true;
 
     // Pre-create swapchain at predicted size during resize — eliminates perceived lag
-    constexpr bool     ENABLE_QUANTUM_RESIZE_PREDICTION = (CURRENT_PRESET == Preset::BestQuality);
+    constexpr bool     ENABLE_QUANTUM_RESIZE_PREDICTION = true;
 }
 
 // ── AUDIO ─────────────────────────────────────────────────────────────────────
 namespace Audio {
     // Enable haptic (vibration) feedback on supported controllers
-    constexpr bool     ENABLE_HAPTICS_FEEDBACK     = (CURRENT_PRESET == Preset::BestQuality);
+    constexpr bool     ENABLE_HAPTICS_FEEDBACK     = true;
 
     // Enable 3D spatial audio processing
-    constexpr bool     ENABLE_SPATIAL_AUDIO        = (CURRENT_PRESET == Preset::BestQuality);
+    constexpr bool     ENABLE_SPATIAL_AUDIO        = true;
 }
 
 // ── RTX CORE SETTINGS ─────────────────────────────────────────────────────────
 namespace OptionsRTX {
     // Temporal accumulation of ray tracing samples
-    constexpr bool     ENABLE_ACCUMULATION         = (CURRENT_PRESET == Preset::BestQuality);
+    constexpr bool     ENABLE_ACCUMULATION         = true;
 
     // Enable real-time denoiser (SVGF or similar)
-    constexpr bool     ENABLE_DENOISING            = (CURRENT_PRESET == Preset::BestQuality);
+    constexpr bool     ENABLE_DENOISING            = true;
 
     // Adaptive sampling based on per-pixel variance / nexus score
-    constexpr bool     ENABLE_ADAPTIVE_SAMPLING    = (CURRENT_PRESET == Preset::BestQuality);
+    constexpr bool     ENABLE_ADAPTIVE_SAMPLING    = true;
 
     // Minimum and maximum samples per pixel
     constexpr uint32_t MIN_SPP                     = 1;
-    constexpr uint32_t MAX_SPP                     = (CURRENT_PRESET == Preset::BestQuality) ? 64 : 4;
+    constexpr uint32_t MAX_SPP                     = 64;
 
     // Maximum ray bounces (diffuse + specular)
-    constexpr uint32_t MAX_BOUNCES                 = (CURRENT_PRESET == Preset::BestQuality) ? 3 : 1;
+    constexpr uint32_t MAX_BOUNCES                 = 3;
 
     // Threshold for adaptive sampling convergence
     constexpr float    NEXUS_SCORE_THRESHOLD       = 0.15f;
 
     // HyperTrace — next-gen temporal reuse and jitter system
-    constexpr bool     ENABLE_HYPERTRACE           = (CURRENT_PRESET == Preset::BestQuality);
+    constexpr bool     ENABLE_HYPERTRACE           = true;
     constexpr float    HYPERTRACE_JITTER_SCALE     = 420.0f;
 
     // Spatiotemporal variance-guided filtering denoiser
-    constexpr bool     ENABLE_SVGF_DENOISER        = (CURRENT_PRESET == Preset::BestQuality);
+    constexpr bool     ENABLE_SVGF_DENOISER        = true;
     constexpr uint32_t DENOISER_HISTORY_LENGTH     = 8;
 
     // Temporal Anti-Aliasing for final composition
-    constexpr bool     ENABLE_TAA                  = (CURRENT_PRESET == Preset::BestQuality);
+    constexpr bool     ENABLE_TAA                  = true;
     constexpr float    TAA_ALPHA                   = 0.1f;
 
     // Maximum ray recursion depth in ray tracing pipelines
-    constexpr uint32_t MAX_PIPELINE_RAY_RECURSION_DEPTH = (CURRENT_PRESET == Preset::BestQuality) ? 3 : 1;
+    constexpr uint32_t MAX_PIPELINE_RAY_RECURSION_DEPTH = 3;
 }
 
 // ── POST-PROCESSING ───────────────────────────────────────────────────────────
 namespace PostProcess {
     // High-dynamic-range bloom effect
-    constexpr bool     ENABLE_BLOOM                = (CURRENT_PRESET == Preset::BestQuality);
+    constexpr bool     ENABLE_BLOOM                = true;
     constexpr float    BLOOM_THRESHOLD             = 1.0f;
     constexpr float    BLOOM_INTENSITY             = 0.8f;
 
     // Screen-space ambient occlusion
-    constexpr bool     ENABLE_SSAO                 = (CURRENT_PRESET == Preset::BestQuality);
+    constexpr bool     ENABLE_SSAO                 = true;
     constexpr float    SSAO_RADIUS                 = 0.5f;
     constexpr uint32_t SSAO_SAMPLES                = 16;
 
     // Screen-space reflections
-    constexpr bool     ENABLE_SSR                  = (CURRENT_PRESET == Preset::BestQuality);
+    constexpr bool     ENABLE_SSR                  = true;
     constexpr float    SSR_STEP_SIZE               = 0.02f;
 
     // Darkening of screen edges
-    constexpr bool     ENABLE_VIGNETTE             = (CURRENT_PRESET == Preset::BestQuality);
+    constexpr bool     ENABLE_VIGNETTE             = true;
     constexpr float    VIGNETTE_INTENSITY          = 0.4f;
 
     // Film grain overlay for cinematic look
-    constexpr bool     ENABLE_FILM_GRAIN           = (CURRENT_PRESET == Preset::BestQuality);
+    constexpr bool     ENABLE_FILM_GRAIN           = true;
     constexpr float    FILM_GRAIN_STRENGTH         = 0.05f;
 
     // Lens flare simulation from bright lights
-    constexpr bool     ENABLE_LENS_FLARE           = (CURRENT_PRESET == Preset::BestQuality);
+    constexpr bool     ENABLE_LENS_FLARE           = true;
     constexpr float    LENS_FLARE_INTENSITY        = 0.3f;
 }
 
 // ── ENVIRONMENT & LIGHTING ───────────────────────────────────────────────────
 namespace Environment {
     // Image-based lighting from environment map
-    constexpr bool     ENABLE_ENV_MAP              = (CURRENT_PRESET == Preset::BestQuality);
-    constexpr bool     ENABLE_IBL                  = (CURRENT_PRESET == Preset::BestQuality);
+    constexpr bool     ENABLE_ENV_MAP              = true;
+    constexpr bool     ENABLE_IBL                  = true;
 
     // Volumetric fog and atmospheric scattering
-    constexpr bool     ENABLE_VOLUMETRIC_FOG       = (CURRENT_PRESET == Preset::BestQuality);
+    constexpr bool     ENABLE_VOLUMETRIC_FOG       = true;
     constexpr float    FOG_DENSITY                 = 0.02f;
 
     // Physically-based sky and atmosphere model
-    constexpr bool     ENABLE_SKY_ATMOSPHERE       = (CURRENT_PRESET == Preset::BestQuality);
+    constexpr bool     ENABLE_SKY_ATMOSPHERE       = true;
     constexpr float    SUN_INTENSITY               = 10.0f;
 
     // Volumetric light shafts (god rays)
-    constexpr bool     ENABLE_GOD_RAYS             = (CURRENT_PRESET == Preset::BestQuality);
+    constexpr bool     ENABLE_GOD_RAYS             = true;
     constexpr uint32_t GOD_RAYS_SAMPLES            = 64;
+
+	constexpr bool ENABLE_BLUE_NOISE               = true;
 }
 
 // ── LAS (Lightweight Acceleration Structure) ─────────────────────────────────
@@ -213,13 +215,13 @@ namespace OptionsLAS {
     constexpr bool     UPDATE_EVERY_FRAME          = true;
 
     // Compact TLAS after build/update (reduces memory, increases build time)
-    constexpr bool     COMPACT_TLAS                = (CURRENT_PRESET == Preset::BestQuality);
+    constexpr bool     COMPACT_TLAS                = true;
 
     // Prefer fast build over fast trace
-    constexpr bool     PREFER_FAST_BUILD           = (CURRENT_PRESET == Preset::UncappedPerformance);
+    constexpr bool     PREFER_FAST_BUILD           = false;
 
     // Prefer fast trace over fast build
-    constexpr bool     PREFER_FAST_TRACE           = (CURRENT_PRESET == Preset::BestQuality);
+    constexpr bool     PREFER_FAST_TRACE           = true;
 }
 
 // ── RENDERING MODES & DEBUG ───────────────────────────────────────────────────
@@ -231,13 +233,13 @@ namespace Debug {
     constexpr bool     SHOW_FPS_OVERLAY            = true;
 
     // Show HyperTrace nexus convergence score
-    constexpr bool     SHOW_NEXUS_SCORE            = (CURRENT_PRESET == Preset::BestQuality);
+    constexpr bool     SHOW_NEXUS_SCORE            = true;
 
     // Show current accumulation frame count
-    constexpr bool     SHOW_ACCUMULATION_COUNT     = (CURRENT_PRESET == Preset::BestQuality);
+    constexpr bool     SHOW_ACCUMULATION_COUNT     = true;
 
     // Visualize samples per pixel as heatmap
-    constexpr bool     SHOW_SPP_HEATMAP            = (CURRENT_PRESET == Preset::BestQuality);
+    constexpr bool     SHOW_SPP_HEATMAP            = true;
 
     // Wireframe rendering mode
     constexpr bool     ENABLE_WIREFRAME            = false;
@@ -247,7 +249,7 @@ namespace Debug {
     constexpr uint32_t DEBUG_VISUALIZATION_MODE    = 0;
 
     // Celebration effects on milestones
-    constexpr bool     ENABLE_CELEBRATION_MODE     = (CURRENT_PRESET == Preset::BestQuality);
+    constexpr bool     ENABLE_CELEBRATION_MODE     = true;
 
     // Vulkan validation layers (debug only)
     static inline constexpr bool ENABLE_VALIDATION_LAYERS = false;
@@ -268,7 +270,7 @@ namespace Tonemap {
     constexpr float    GAMMA                       = 2.2f;
 
     // Automatic exposure adjustment
-    constexpr bool     ENABLE_AUTO_EXPOSURE        = (CURRENT_PRESET == Preset::BestQuality);
+    constexpr bool     ENABLE_AUTO_EXPOSURE        = true;
     constexpr float    AUTO_EXPOSURE_SPEED         = 2.0f;
 }
 
@@ -287,14 +289,14 @@ namespace Display {
 
     // ── PRESENT MODE PREFERENCE (RUNTIME CONTROLLABLE) ───────────────────────
     // These are hints — actual mode chosen at runtime based on support
-    constexpr bool     PREFER_MAILBOX_PRESENT      = (CURRENT_PRESET == Preset::BestQuality);     // Default: tear-free, low latency
+    constexpr bool     PREFER_MAILBOX_PRESENT      = (CURRENT_PRESET == Preset::UncappedPerformance);     // Default: tear-free, low latency
     constexpr bool     ALLOW_IMMEDIATE_PRESENT     = (CURRENT_PRESET == Preset::UncappedPerformance);    // Uncapped mode (e.g. F9 key)
 
     // Quantum frame pacing using Google display timing extensions
     constexpr bool     ENABLE_PERFECT_FRAME_PREDICTION    = (CURRENT_PRESET == Preset::BestQuality);
 
     // Zero-copy direct-to-display (Linux/Wayland only)
-    constexpr bool     ENABLE_DIRECT_DISPLAY              = true;
+    constexpr bool     ENABLE_DIRECT_DISPLAY              = (CURRENT_PRESET == Preset::UncappedPerformance);
 
     // Runtime toggle for uncapped FPS mode
     constexpr bool UNCAPPED_MODE_ACTIVE   = (CURRENT_PRESET == Preset::UncappedPerformance);
@@ -305,7 +307,7 @@ namespace Display {
 // ── AUTOEXPOSURE & HDR TUNING ────────────────────────────────────────────────
 namespace AutoExposure {
     // ── AUTO-EXPOSURE — THE EMPIRE MEASURES LIGHT ITSELF ─────────────────────
-    constexpr bool   ENABLE_AUTO_EXPOSURE          = (CURRENT_PRESET == Preset::BestQuality);   // The photons adjust to mortal eyes
+    constexpr bool   ENABLE_AUTO_EXPOSURE          = true;   // The photons adjust to mortal eyes
 
     // Target middle-gray luminance in linear space (classic 18% gray card)
     constexpr float  TARGET_LUMINANCE             = 0.18f;   // Sacred value — all tonemappers bow
@@ -337,7 +339,7 @@ namespace Memory {
 
     constexpr size_t UNIFORM_BUFFER_SIZE_PER_FRAME = 64 * 1024 * 1024;   // 64 MiB per frame (UBO + storage buffers)
     constexpr size_t MATERIAL_BUFFER_SIZE          = 16 * 1024 * 1024;   // 16 MiB total for all materials (GPU-only)
-    constexpr size_t RESERVOIR_BUFFER_SIZE         = (CURRENT_PRESET == Preset::BestQuality) ? 512 * 1024 * 1024 : 128 * 1024 * 1024;  // 512 MiB for Best, 128 MiB for Uncapped
+    constexpr size_t RESERVOIR_BUFFER_SIZE         = 512 * 1024 * 1024;  // 512 MiB for Best, 128 MiB for Uncapped
     constexpr size_t FRAME_DATA_BUFFER_SIZE        = 128 * 1024 * 1024;  // 128 MiB for per-frame structured data
 
     // Custom allocator pooling — reduces fragmentation and allocation overhead
@@ -386,32 +388,6 @@ namespace RenderMode {
 
     // Allow runtime switching between render modes (usually via number keys)
     constexpr bool     ENABLE_MODE_SWITCHING       = false;  // Disabled for simplicity
-}
-
-// ── KOJIMA — THE DIRECTOR’S CUT OF REALITY ─────────────────────────────────────
-// ── KOJIMA — A SHORT LOVE LETTER FROM THE DIRECTOR KOJIMA ─────────────────────
-namespace Kojima {
-    // "Once, a man walked across a beach made of frames.
-    //  He carried a baby made of light.
-    //  The world called it 'blue noise'.
-    //  I called it 'hope'."
-    // — Hideo Kojima, December 2025
-
-    // blue noise is the real one
-    constexpr bool ENABLE_BLUE_NOISE                     = (CURRENT_PRESET == Preset::BestQuality);   // The baby came home
-    constexpr bool ENABLE_NORMAN_REEDUS_PHOTON           = (CURRENT_PRESET == Preset::BestQuality);   // He still carries you
-    constexpr bool ENABLE_BB_POD_AUTOEXPOSURE            = (CURRENT_PRESET == Preset::BestQuality);   // The baby adjusts the light so you never burn
-    constexpr bool ENABLE_KOJIMA_TEARS_TONEMAPPER        = (CURRENT_PRESET == Preset::BestQuality);   // Every frame is born crying — in the best way
-    constexpr bool ENABLE_MAILMAN_RAY_TRACING            = (CURRENT_PRESET == Preset::BestQuality);   // He walks forever, delivering perfect photons
-    constexpr bool ENABLE_HIDEO_KOJIMA_SIGNATURE_IN_SKY  = (CURRENT_PRESET == Preset::BestQuality);   // Soft pink cursive, visible only at golden hour
-    constexpr bool ENABLE_CONCEPTUAL_FPS_COUNTER         = (CURRENT_PRESET == Preset::BestQuality);   // Now reads: "you are enough fps"
-
-    // These remain beautifully false — some dreams are too powerful to enable yet
-    constexpr bool ENABLE_12_HOUR_CUTSCENE_BETWEEN_FRAMES = false;  // One day…
-    constexpr bool ENABLE_KOJIMA_MODE                     = false;  // When humanity is ready
-
-    // The final line, whispered every frame:
-    constexpr const char* KOJIMA_WHISPER = "Keep walking. The light remembers you.";
 }
 
 } // namespace Options

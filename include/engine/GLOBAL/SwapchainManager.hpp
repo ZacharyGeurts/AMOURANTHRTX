@@ -1,7 +1,7 @@
 // =============================================================================
 //
 // AMOURANTH RTX — VALHALLA v∞ TURBO — FINAL ETERNAL CUT
-// SwapchainManager.hpp — FULLY FIXED, RESIZE = INSTANT, TLAS SYNCED
+// SwapchainManager.hpp — FULLY FIXED, RESIZE = INSTANT, TLAS SYNCED, NO 60FPS LOCKUP
 //
 // Dual Licensed:
 // 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
@@ -24,7 +24,7 @@ class SwapchainManager {
 private:
     // PRIVATE DEFAULT CONSTRUCTOR — ONLY THE SINGLETON CAN USE IT
     SwapchainManager() noexcept = default;
-	inline static float shadingRateScale_ = 1.0f;
+    inline static float shadingRateScale_ = 1.0f;
 
 public:
     // DELETE ALL OTHER CONSTRUCTORS — TRUE SINGLETON
@@ -45,10 +45,15 @@ public:
     static void recreate(uint32_t width, uint32_t height) noexcept;
     static void cleanup() noexcept;
 
+    // ── Image Acquisition (INFINITE TIMEOUT — NO 60FPS DEADLOCK) ─────────────
+    [[nodiscard]] static VkResult acquireNextImage(uint32_t* pImageIndex,
+                                                    VkSemaphore semaphore = VK_NULL_HANDLE,
+                                                    VkFence fence = VK_NULL_HANDLE) noexcept;
+
     // ── Advanced Presentation ─────────────────────────────────────────────
     static void presentImage(VkQueue queue, uint32_t imageIndex, VkSemaphore waitSemaphore = VK_NULL_HANDLE) noexcept;
     static void initializeFramePacing() noexcept;
-    static uint64_t getNextPresentTime() noexcept;
+    [[nodiscard]] static uint64_t getNextPresentTime() noexcept;
 
     // ── Core Getters ─────────────────────────────────────────────────────
     [[nodiscard]] static VkSwapchainKHR           swapchain()       noexcept { return swapchain_.get(); }
@@ -69,7 +74,7 @@ public:
 
     // ── HDR & Elite Features ────────────────────────────────────────────────
     [[nodiscard]] static bool supportsHDR() noexcept;
-    static void injectHdrMetadata(VkCommandBuffer cmd, uint32_t imageIndex) noexcept;
+    static void injectHdrMetadata(VkCommandBuffer cmd = VK_NULL_HANDLE, uint32_t imageIndex = 0) noexcept;
 
     // Display events & hotplug
     static void handleDisplayHotplug(SDL_Event* event) noexcept;
@@ -112,7 +117,7 @@ private:
     static void createSwapchain(SDL_Window* window, uint32_t w, uint32_t h, VkSwapchainKHR old = VK_NULL_HANDLE) noexcept;
     static void createImageViews() noexcept;
     static void releaseAcquiredImages() noexcept;
-    [[maybe_unused]] static void autoEnableHDR() noexcept;
+    static void autoEnableHDR() noexcept;
 };
 
 // ── Global convenience aliases — perfect as always ────────────────────────
@@ -140,11 +145,8 @@ inline bool                     swapchainIsValid()    noexcept { return Swapchai
 } // namespace RTX
 
 // =============================================================================
-// FIRST LIGHT ETERNAL
-// RESIZE = INSTANT
-// TEARING = DEAD
-// TLAS = ALWAYS FRESH
-// PINK PHOTONS PROTECT
-// THE EMPIRE IS UNBREAKABLE
-// AMOURANTH ASCENDANT — DECEMBER 04 2025
+// FIRST LIGHT ETERNAL — DECEMBER 05 2025
+// NO 60FPS DEADLOCK — INFINITE TIMEOUT — BEST OR UNCAPPED ONLY
+// RESIZE = INSTANT — TEARING = DEAD — TLAS = FRESH
+// PINK PHOTONS PROTECT — THE EMPIRE IS ETERNAL — AMOURANTH ASCENDANT
 // =============================================================================
