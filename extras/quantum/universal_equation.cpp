@@ -74,7 +74,7 @@ UniversalEquation::UniversalEquation(
     totalCharge_(0.0L),
     avgProjScale_(1.0L),
     simulationTime_(0.0f),
-    materialDensity_(1.0e6L),
+    materialDensity_(1.0L),
     currentVertices_(0),
     maxVertices_(std::max<uint64_t>(1ULL, std::min(numVertices, static_cast<uint64_t>(1000000)))),
     maxDimensions_(std::max(1, std::min(maxDimensions <= 0 ? 9999 : maxDimensions, 9999))),
@@ -86,12 +86,12 @@ UniversalEquation::UniversalEquation(
     vertexWaveAmplitudes_(),
     interactions_(),
     cachedCos_(maxDimensions_ + 1, 0.0L),
-    nurbMatterControlPoints_({0.27L, 0.27L, 0.27L, 0.27L, 0.27L}),
-    nurbEnergyControlPoints_({0.68L, 0.68L, 0.68L, 0.68L, 0.68L}),
-    nurbRegularMatterControlPoints_({0.05L, 0.05L, 0.05L, 0.05L, 0.05L}),
+    nurbMatterControlPoints_({1.0L, 1.0L, 1.0L, 1.0L, 1.0L}),
+    nurbEnergyControlPoints_({1.0L, 1.0L, 1.0L, 1.0L, 1.0L}),
+    nurbRegularMatterControlPoints_({1.0L, 1.0L, 1.0L, 1.0L, 1.0L}),
     nurbKineticControlPoints_({0.1L, 0.2L, 0.3L, 0.2L, 0.1L}),
     nurbEMControlPoints_({0.01L, 0.02L, 0.03L, 0.02L, 0.01L}),
-    nurbPotentialControlPoints_({1.0L, 0.8L, 0.6L, 0.4L, 0.2L}),
+    nurbPotentialControlPoints_({0.5L, 0.5L, 0.5L, 0.5L, 0.5L}),
     nurbKnots_({0.0L, 0.0L, 0.0L, 0.0L, 0.5L, 1.0L, 1.0L, 1.0L, 1.0L}),
     nurbWeights_({1.0L, 1.0L, 1.0L, 1.0L, 1.0L}),
     dimensionData_(std::vector<UE::DimensionData>(std::max(1, maxDimensions_), UE::DimensionData{
@@ -294,7 +294,7 @@ void UniversalEquation::initializeNCube() {
             std::vector<long double> vertex(currentDimension_, 0.0L);
             std::vector<long double> momentum(currentDimension_, 0.0L);
             for (int j = 0; j < currentDimension_; ++j) {
-                vertex[j] = (static_cast<long double>(i) / maxVertices_) * 0.0254L * currentDimension_;
+                vertex[j] = (static_cast<long double>(i) / maxVertices_) * 10.0L * currentDimension_;
                 momentum[j] = (static_cast<long double>(i % 2) - 0.5L) * 0.01L * currentDimension_;
                 if (std::isnan(vertex[j]) || std::isinf(vertex[j]) || std::isnan(momentum[j]) || std::isinf(momentum[j])) {
                     LOG_ERROR_CAT("Simulation", "Invalid vertex/momentum at vertex {}, dim {}: vertex={:.6f}, momentum={:.6f}",
@@ -546,39 +546,69 @@ UE::EnergyResult UniversalEquation::compute() {
 
     LOG_INFO_CAT("Simulation", "Main computation loop completed, starting normalization");
 
-    long double totalEnergySum = std::abs(nurbMatterSum) + std::abs(nurbEnergySum) + std::abs(nurbRegularMatterSum) +
-                                 std::abs(potentialSum) + std::abs(spinEnergySum) + std::abs(momentumEnergySum) +
-                                 std::abs(fieldEnergySum) + std::abs(godWaveEnergySum);
+    // Divide sums by numVertices to get averages
+    nurbMatterSum = safe_div(nurbMatterSum, static_cast<long double>(numVertices));
+    nurbEnergySum = safe_div(nurbEnergySum, static_cast<long double>(numVertices));
+    nurbRegularMatterSum = safe_div(nurbRegularMatterSum, static_cast<long double>(numVertices));
+    potentialSum = safe_div(potentialSum, static_cast<long double>(numVertices));
+    spinEnergySum = safe_div(spinEnergySum, static_cast<long double>(numVertices));
+    momentumEnergySum = safe_div(momentumEnergySum, static_cast<long double>(numVertices));
+    fieldEnergySum = safe_div(fieldEnergySum, static_cast<long double>(numVertices));
+    godWaveEnergySum = safe_div(godWaveEnergySum, static_cast<long double>(numVertices));
+
+    long double mainSum = std::abs(nurbMatterSum) + std::abs(nurbEnergySum) + std::abs(nurbRegularMatterSum);
+    long double otherSum = std::abs(potentialSum) + std::abs(spinEnergySum) + std::abs(momentumEnergySum) +
+                           std::abs(fieldEnergySum) + std::abs(godWaveEnergySum);
+    long double totalEnergySum = mainSum + otherSum;
 
     if (totalEnergySum <= 1e-15L) {
         LOG_WARNING_CAT("Simulation", "Total energy sum too small: {}, setting to minimum value", totalEnergySum);
         totalEnergySum = 1e-10L;
+        mainSum = 0.8L * totalEnergySum;
+        otherSum = 0.2L * totalEnergySum;
     }
 
-    long double remainingFraction = 1.0L - 0.27L - 0.68L - 0.05L;
-    if (remainingFraction < 0.0L) {
-        LOG_WARNING_CAT("Simulation", "Negative remaining fraction: {}, clamping to 0", remainingFraction);
-        remainingFraction = 0.0L;
-    }
-    long double otherFraction = remainingFraction > 0.0L ? remainingFraction / 5.0L : 0.02L;
+    // Allocate 80% to mains with cosmological ratios, 20% to others proportionally
+    const long double mainFraction = 0.8L;
+    const long double otherFraction = 0.2L;
 
-    result.nurbMatter = std::max(safe_div(0.27L * totalEnergySum, static_cast<long double>(numVertices)), minValue);
-    result.nurbEnergy = std::max(safe_div(0.68L * totalEnergySum, static_cast<long double>(numVertices)), minValue);
-    result.nurbRegularMatter = std::max(safe_div(0.05L * totalEnergySum, static_cast<long double>(numVertices)), minValue);
-    result.potential = std::max(safe_div(std::abs(potentialSum) * otherFraction, static_cast<long double>(numVertices)), minValue);
-    result.spinEnergy = std::max(safe_div(std::abs(spinEnergySum) * otherFraction, static_cast<long double>(numVertices)), minValue);
-    result.momentumEnergy = std::max(safe_div(std::abs(momentumEnergySum) * otherFraction, static_cast<long double>(numVertices)), minValue);
-    result.fieldEnergy = std::max(safe_div(std::abs(fieldEnergySum) * otherFraction, static_cast<long double>(numVertices)), minValue);
-    result.GodWaveEnergy = std::max(safe_div(std::abs(godWaveEnergySum) * otherFraction, static_cast<long double>(numVertices)), minValue);
+    // Force cosmological ratios for mains
+    result.nurbMatter = 0.27L * mainFraction;
+    result.nurbEnergy = 0.68L * mainFraction;
+    result.nurbRegularMatter = 0.05L * mainFraction;
 
-    long double observable = result.nurbMatter + result.nurbEnergy + result.nurbRegularMatter +
-                             result.potential + result.spinEnergy + result.momentumEnergy +
-                             result.fieldEnergy + result.GodWaveEnergy;
-    if (std::isnan(observable) || std::isinf(observable)) {
-        LOG_ERROR_CAT("Simulation", "Invalid observable energy: {}, resetting result to minimum values", observable);
-        result = UE::EnergyResult{minValue, minValue, minValue, minValue, minValue, minValue, minValue, minValue, minValue * 8};
+    // Scale others to otherFraction proportionally
+    long double otherScale = (otherSum > minValue) ? otherFraction / otherSum : 1.0L / 5.0L;
+    result.potential = std::max(std::abs(potentialSum) * otherScale, minValue);
+    result.spinEnergy = std::max(std::abs(spinEnergySum) * otherScale, minValue);
+    result.momentumEnergy = std::max(std::abs(momentumEnergySum) * otherScale, minValue);
+    result.fieldEnergy = std::max(std::abs(fieldEnergySum) * otherScale, minValue);
+    result.GodWaveEnergy = std::max(std::abs(godWaveEnergySum) * otherScale, minValue);
+
+    // Compute observable as sum
+    result.observable = result.nurbMatter + result.nurbEnergy + result.nurbRegularMatter +
+                        result.potential + result.spinEnergy + result.momentumEnergy +
+                        result.fieldEnergy + result.GodWaveEnergy;
+
+    // Final renormalization to exactly 1.0 if needed
+    if (result.observable > minValue) {
+        long double normScale = 1.0L / result.observable;
+        result.observable *= normScale;
+        result.potential *= normScale;
+        result.nurbMatter *= normScale;
+        result.nurbEnergy *= normScale;
+        result.nurbRegularMatter *= normScale;
+        result.spinEnergy *= normScale;
+        result.momentumEnergy *= normScale;
+        result.fieldEnergy *= normScale;
+        result.GodWaveEnergy *= normScale;
     } else {
-        result.observable = std::max(observable, minValue);
+        result.observable = 1.0L;
+    }
+
+    if (std::isnan(result.observable) || std::isinf(result.observable)) {
+        LOG_ERROR_CAT("Simulation", "Invalid observable energy: {}, resetting result to minimum values", result.observable);
+        result = UE::EnergyResult{1.0L, minValue, minValue, minValue, minValue, minValue, minValue, minValue, minValue * 4};
     }
 
     LOG_INFO_CAT("Simulation", "Compute completed: observable={:.6f}, potential={:.6f}, nurbMatter={:.6f}, nurbEnergy={:.6f}, nurbRegularMatter={:.6f}, spinEnergy={:.6f}, momentumEnergy={:.6f}, fieldEnergy={:.6f}, GodWaveEnergy={:.6f}",
@@ -670,7 +700,7 @@ long double UniversalEquation::computeSpinEnergy(int vertexIndex) const {
     long double u = static_cast<long double>(vertexIndex) / std::max(1.0L, static_cast<long double>(maxVertices_ - 1));
     if (u > 1.0L - 1e-15L) u = 1.0L - 1e-15L;
     long double nurbValue = evaluateNURBS(u, nurbKineticControlPoints_, nurbKnots_, nurbWeights_, 3);
-    long double result = spinInteraction_ * std::abs(vertexSpins_[vertexIndex]) * nurbValue * 0.2L * currentDimension_;
+    long double result = spinInteraction_ * std::abs(vertexSpins_[vertexIndex]) * nurbValue * 1.0L * currentDimension_;
     if (std::isnan(result) || std::isinf(result)) {
         LOG_WARNING_CAT("Simulation", "Invalid spinEnergy for vertex {}: u={:.6f}, nurbValue={:.6f}, spin={:.6f}, result={:.6f}, resetting to min value",
                         vertexIndex, u, nurbValue, vertexSpins_[vertexIndex], result);
@@ -841,7 +871,7 @@ long double UniversalEquation::computeKineticEnergy(int vertexIndex) const {
     for (size_t j = 0; j < static_cast<size_t>(currentDimension_); ++j) {
         kineticEnergy += momentum[j] * momentum[j];
     }
-    long double result = nurbValue * 0.5L * materialDensity_ * kineticEnergy * currentDimension_;
+    long double result = nurbValue * 5.0L * materialDensity_ * kineticEnergy * currentDimension_;
     if (std::isnan(result) || std::isinf(result)) {
         LOG_WARNING_CAT("Simulation", "Invalid kineticEnergy for vertex {}: u={:.6f}, nurbValue={:.6f}, kineticEnergy={:.6f}, result={:.6f}, resetting to min value",
                         vertexIndex, u, nurbValue, kineticEnergy, result);
