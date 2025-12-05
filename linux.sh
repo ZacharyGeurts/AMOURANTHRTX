@@ -1,23 +1,25 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # =============================================================================
-# linux.sh — AMOURANTH RTX ULTIMATE LINUX BUILD SCRIPT v3.2 — RAINBOW VALHALLA
-# FIRST BANNER PRESERVED — ONLY FINAL BANNER IS RAINBOW — single = -j1 ADDED
-# PINK PHOTONS ETERNAL — STONEKEY v∞ — VALHALLA UNBREACHABLE
+# linux.sh — Amouranth RTX — THE ONE THAT JUST WORKS™ (Lazy Genius Edition)
+# Always runs from project root → assets load
+# Always returns you to where you started → no mess
 # =============================================================================
 
-set -e
+set -euo pipefail
 
 BUILD_DIR="build"
 BIN_DIR="build/bin/Linux"
-SHADERS_OUT="$BIN_DIR/assets/shaders"
-BINARY="Navigator"
+BINARY_NAME="Navigator"
 
-# Empire Colors
-R='\033[0;31m' G='\033[0;32m' Y='\033[1;33m' B='\033[0;34m' M='\033[0;35m' C='\033[0;36m' W='\033[1;37m' N='\033[0m'
+# Colors
+R="\033[0;31m" G="\033[0;32m" Y="\033[1;33m" B="\033[0;34m" M="\033[0;35m" C="\033[0;36m" W="\033[1;37m" N="\033[0m"
 
-valhalla_banner() {
+# Save where we started — we will return here like a good warrior
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR" && pwd)"   # in case script is symlinked
+
+banner() {
     clear
-    echo -e "${M}"
     cat << "EOF"
           █████╗ ███╗   ███╗ ██████╗ ██╗   ██╗██████╗  █████╗ ███╗   ██╗████████╗██╗  ██╗
          ██╔══██╗████╗ ████║██╔═══██╗██║   ██║██╔══██╗██╔══██╗████╗  ██║╚══██╔══╝██║  ██║
@@ -26,165 +28,99 @@ valhalla_banner() {
          ██║  ██║██║ ╚═╝ ██║╚██████╔╝╚██████╔╝██║  ██║██║  ██║██║ ╚████║   ██║   ██║  ██║
          ╚═╝  ╚═╝╚═╝     ╚═╝ ╚═════╝  ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝   ╚═╝   ╚═╝  ╚═╝
 EOF
-    echo -e "${C}                        VALHALLA v80 TURBO — PINK PHOTONS ETERNAL — NOVEMBER 20 2025${N}"
-    echo
+    echo -e "${C}                       AMOURANTH RTX — $(date '+%B %d, %Y')${N}\n"
 }
 
 show_help() {
-    valhalla_banner
-    echo -e "${W}AMOURANTH RTX BUILD DOCTRINE — ACCEPTED COMMANDS (any order):${N}"
+    banner
+    echo -e "${W}Usage:${N}"
+    echo -e "  ./linux.sh            → help"
+    echo -e "  ./linux.sh run        → build + run (assets always load)"
+    echo -e "  ./linux.sh clean      → nuke everything"
+    echo -e "  ./linux.sh --ninja run → use Ninja"
     echo
-    echo -e "  ${G}./linux.sh${N}                     → Build Incremental with Make + all cores"
-    echo -e "  ${G}./linux.sh run${N}                 → Build Incremental + launch instantly = DO THIS"
-	echo -e "  ${G}./linux.sh release${N}             → Build Release (O3 + LTO)"
-    echo -e "  ${G}./linux.sh ninja${N}               → Use Ninja instead of Make"
-    echo -e "  ${G}./linux.sh single${N}              → Compile with -j1 (debugging templates/shaders)${N}"
-	echo -e "  ${G}./linux.sh gdb${N}                 → Compile with debugging${N}"
-    echo -e "  ${G}./linux.sh release ninja${N}       → Release + Ninja"
-    echo -e "  ${G}./linux.sh clean${N}               → Wipe if files are added or removed"
-    echo -e "  ${G}./linux.sh clear${N}               → Same as clean"
-    echo -e "  ${G}./linux.sh --help${N}              → This banner"
-    echo
-    echo -e "${M}PINK PHOTONS ETERNAL — STONEKEY v∞ ACTIVE — BLUE CHECKMARK SECURE${N}"
     exit 0
 }
 
-nuke_empire() {
-    valhalla_banner
-    echo -e "${R}NUCLEAR PURGE INITIATED — ALL ARTIFACTS ANNIHILATED${N}"
-    rm -rf "$BUILD_DIR" "$BIN_DIR" .shader_hash_cache
-    echo -e "${G}Empire reborn. Fresh start achieved.${N}"
+clean() {
+    banner
+    echo -e "${Y}Nuking build directory...${N}"
+    rm -rf "$BUILD_DIR" CMakeCache.txt CMakeFiles .shader_hash_cache compile_commands.json 2>/dev/null || true
+    echo -e "${G}Clean complete.${N}"
     exit 0
 }
 
-# =============================================================================
-# PARSE ARGUMENTS
-# =============================================================================
-
-BUILD_TYPE="Debug"
-USE_NINJA="no"
-RUN_AFTER="no"
-GDB_MODE="no"           # ← NEW: ./linux.sh gdb
-SINGLE_THREAD="no"
+# ─── Args ───
+ACTION="help"
+USE_NINJA=""
 
 for arg in "$@"; do
     case "${arg,,}" in
-        --help|-h)     show_help ;;
-        clean|clear)   nuke_empire ;;
-        release)       BUILD_TYPE="Release" ;;
-        ninja)         USE_NINJA="yes" ;;
-        run)           RUN_AFTER="yes" ;;
-        gdb)           GDB_MODE="yes" ;;
-        single)        SINGLE_THREAD="yes" ;;
+        run)           ACTION="run" ;;
+        clean)         clean ;;
+        --ninja|ninja) USE_NINJA="yes" ;;
+        --help|-h|help|"") show_help ;;
+        *)             echo -e "${R}Invalid: $arg${N}"; show_help ;;
     esac
 done
 
-# If run or gdb → build first, then launch
-if [[ "$RUN_AFTER" = "yes" || "$GDB_MODE" = "yes" ]]; then
-    valhalla_banner
-    echo -e "${Y}Building $BUILD_TYPE + launching...${N}"
+[[ "$USE_NINJA" && "$ACTION" == "help" ]] && ACTION="run"
+GENERATOR="Unix Makefiles"
+[[ "$USE_NINJA" ]] && GENERATOR="Ninja"
 
-    # Rebuild without the run/gdb flag
-    BUILD_ARGS=()
-    for arg in "$@"; do
-        [[ "${arg,,}" != "run" && "${arg,,}" != "gdb" ]] && BUILD_ARGS+=("$arg")
-    done
-
-    "$0" "${BUILD_ARGS[@]}"
-    [[ $? -ne 0 ]] && exit 1
-
-    CMD="./$BIN_DIR/$BINARY"
-
-    if [[ "$GDB_MODE" = "yes" ]]; then
-        echo -e "${C}GDB ENGAGED — PINK PHOTONS UNDER ARREST${N}"
-        gdb -q --args "$CMD" "${@: -1}"
-    else
-        echo -e "${M}FIRST LIGHT — ENTERING VALHALLA${N}"
-        "$CMD" "${@: -1}"
-    fi
-    exit $?
-fi
-
-# =============================================================================
-# SHADER SMART HASH CACHING (unchanged)
-# =============================================================================
-SHADER_CACHE=".shader_hash_cache"
-compile_shader_if_changed() {
-    local src="$1" dst="$2" stage="$3"
-    local hash_new=$(sha256sum "$src" | cut -d' ' -f1)
-    local hash_old=$(grep -F "$src" "$SHADER_CACHE" 2>/dev/null | awk '{print $1}' || echo "")
-
-    if [ "$hash_new" != "$hash_old" ]; then
-        echo -e "${C}Shader → $(basename "$src") → $stage.spv${N}"
-        glslc -std=460 -fshader-stage="$stage" \
-              -I shaders -I include/engine/Vulkan \
-              "$src" -o "$dst" || { echo -e "${R}Shader compilation failed${N}"; exit 1; }
-        sed -i "/^$hash_new /d" "$SHADER_CACHE" 2>/dev/null || true
-        sed -i "/$src/d" "$SHADER_CACHE" 2>/dev/null || true
-        echo "$hash_new $src $stage" >> "$SHADER_CACHE"
-    fi
-}
-
-if [ -d "shaders" ]; then
-    find shaders -type f -name "*.glsl" | while read src; do
-        filename=$(basename "$src")
-        dir=$(dirname "$src" | sed 's|^shaders/||')
-        case "$filename" in
-            *vert.glsl|*_vert.glsl)   stage="vert" ;;
-            *frag.glsl|*_frag.glsl)   stage="frag" ;;
-            *comp.glsl|*_comp.glsl)   stage="comp" ;;
-            *rgen.glsl|*_rgen.glsl)   stage="rgen" ;;
-            *rmiss.glsl|*_rmiss.glsl) stage="rmiss" ;;
-            *rchit.glsl|*_rchit.glsl) stage="rchit" ;;
-            *rahit.glsl|*_rahit.glsl) stage="rahit" ;;
-            *rint.glsl|*_rint.glsl)   stage="rint" ;;
-            *rcall.glsl|*_rcall.glsl) stage="rcall" ;;
-            *) continue ;;
-        esac
-        dst="$SHADERS_OUT/$dir/${filename%.glsl}.spv"
-        mkdir -p "$(dirname "$dst")"
-        compile_shader_if_changed "$src" "$dst" "$stage"
-    done
-fi
-
-# =============================================================================
-# BUILD
-# =============================================================================
-
-valhalla_banner
-echo -e "${C}AMOURANTH RTX — LINUX BUILD — STONEKEY v∞ ACTIVE${N}"
-echo -e "Mode     : ${Y}$BUILD_TYPE${N} $( [ "$USE_NINJA" = "yes" ] && echo "(Ninja)" || echo "(Make)" ) $( [ "$SINGLE_THREAD" = "yes" ] && echo "${R}(SINGLE THREAD -j1)${N}" || echo "" )"
-echo -e "Standard : ${W}C++23 ENFORCED${N}"
-echo -e "Shaders  : Smart hash caching active${N}"
-echo
+# ─── Build ───
+banner
+echo -e "${C}Building with $GENERATOR (-j$(nproc))...${N}"
 
 mkdir -p "$BUILD_DIR"
 cd "$BUILD_DIR"
 
-GENERATOR="Unix Makefiles"
-[ "$USE_NINJA" = "yes" ] && GENERATOR="Ninja"
-
-if [ ! -f CMakeCache.txt ] || ! grep -q "$GENERATOR" CMakeCache.txt 2>/dev/null; then
-    echo -e "${Y}Configuring CMake ($BUILD_TYPE) → $GENERATOR${N}"
+if [[ ! -f CMakeCache.txt ]] || ! grep -q "CMAKE_GENERATOR:INTERNAL=$GENERATOR" CMakeCache.txt 2>/dev/null; then
+    echo -e "${Y}Configuring CMake...${N}"
     cmake .. -G "$GENERATOR" \
-        -DCMAKE_CXX_COMPILER=g++-14 \
-        -DCMAKE_C_COMPILER=gcc-14 \
-        -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
+        -DCMAKE_BUILD_TYPE=Debug \
         -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
-        -DCMAKE_CXX_STANDARD=23 \
-        -DCMAKE_CXX_STANDARD_REQUIRED=ON
-else
-    echo -e "${G}CMake cached — incremental build engaged${N}"
+        -DCMAKE_CXX_COMPILER=g++-14 \
+        -DCMAKE_C_COMPILER=gcc-14
 fi
 
-JOBS=$(nproc)
-[ "$SINGLE_THREAD" = "yes" ] && JOBS=1
+echo -e "${Y}Compiling...${N}"
+cmake --build . -j$(nproc)
 
-echo -e "${M}Building with -j$JOBS — PINK PHOTONS RISING...${N}"
-cmake --build . --config $BUILD_TYPE -j$JOBS
+# ─── Binary handling ───
+SOURCE_BINARY="./bin/Linux/$BINARY_NAME"
+DEST_BINARY="../$BIN_DIR/$BINARY_NAME"
 
-mkdir -p "../$BIN_DIR"
-cp amouranth_engine "../$BIN_DIR/$BINARY" 2>/dev/null || cp Navigator "../$BIN_DIR/$BINARY" || true
+if [[ ! -f "$SOURCE_BINARY" ]]; then
+    echo -e "${R}FATAL: Binary not found at $SOURCE_BINARY${N}"
+    exit 1
+fi
+
+mkdir -p "$(dirname "$DEST_BINARY")"
+if [[ "$(realpath "$SOURCE_BINARY")" != "$(realpath "$DEST_BINARY" 2>/dev/null || echo "")" ]]; then
+    cp -f "$SOURCE_BINARY" "$DEST_BINARY"
+    echo -e "${G}Binary deployed → $DEST_BINARY${N}"
+else
+    echo -e "${G}Binary already in position${N}"
+fi
+
+FINAL_BINARY="$(realpath "$DEST_BINARY")"
+
+# ─── Run — The Lazy Genius Way (assets load + we return home) ───
+if [[ "$ACTION" == "run" ]]; then
+    echo -e "${M}FIRST LIGHT — Launching from the sacred root...${N}\n"
+    # This is the magic: run from project root, then return to where we were
+    (cd "$PROJECT_ROOT" && exec "$FINAL_BINARY" "${@:2}")
+    # If exec fails (extremely rare), we still return:
+    cd "$SCRIPT_DIR"
+    exit 0
+fi
+
+# Victory
+echo
+echo -e "${G}Build Complete — Navigator ready${N}"
+echo -e "Run: ${M}./linux.sh run${N} or ${M}./$BIN_DIR/$BINARY${N}"
+echo
 
 echo ""
 echo " "
