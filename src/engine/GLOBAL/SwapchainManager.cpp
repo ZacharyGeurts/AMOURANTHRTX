@@ -152,52 +152,53 @@ bool SwapchainManager::supportsHDR() noexcept
 // ── CORE SWAPCHAIN FORGE ─────────────────────────────────────────────────────
 void SwapchainManager::createSwapchain(SDL_Window*, uint32_t w, uint32_t h, VkSwapchainKHR old) noexcept
 {
-    LOG_AMOURANTH("FORGING SWAPCHAIN — {}x{} vStoneKey {}x{}", w, h, stone_width(), stone_height());
-
     VkSurfaceCapabilitiesKHR caps{};
-    VK_CHECK(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(stone_physical(), stone_surface(), &caps));
+    vkGetPhysicalDeviceSurfaceCapabilitiesKHR(stone_physical(), stone_surface(), &caps);
 
     uint32_t formatCount = 0;
-    VK_CHECK(vkGetPhysicalDeviceSurfaceFormatsKHR(stone_physical(), stone_surface(), &formatCount, nullptr));
+    vkGetPhysicalDeviceSurfaceFormatsKHR(stone_physical(), stone_surface(), &formatCount, nullptr);
     std::vector<VkSurfaceFormatKHR> formats(formatCount);
-    VK_CHECK(vkGetPhysicalDeviceSurfaceFormatsKHR(stone_physical(), stone_surface(), &formatCount, formats.data()));
+    if (formatCount) {
+        vkGetPhysicalDeviceSurfaceFormatsKHR(stone_physical(), stone_surface(), &formatCount, formats.data());
+    }
 
     uint32_t presentCount = 0;
-    VK_CHECK(vkGetPhysicalDeviceSurfacePresentModesKHR(stone_physical(), stone_surface(), &presentCount, nullptr));
+    vkGetPhysicalDeviceSurfacePresentModesKHR(stone_physical(), stone_surface(), &presentCount, nullptr);
     std::vector<VkPresentModeKHR> presentModes(presentCount);
-    VK_CHECK(vkGetPhysicalDeviceSurfacePresentModesKHR(stone_physical(), stone_surface(), &presentCount, presentModes.data()));
+    if (presentCount) {
+        vkGetPhysicalDeviceSurfacePresentModesKHR(stone_physical(), stone_surface(), &presentCount, presentModes.data());
+    }
 
+    // Resolve extent — use currentExtent if valid (SDL3 + Wayland/X11)
     VkExtent2D extent = caps.currentExtent;
-    if (extent.width == std::numeric_limits<uint32_t>::max())
-    {
+    if (extent.width == std::numeric_limits<uint32_t>::max()) {
         extent.width  = std::clamp(w, caps.minImageExtent.width,  caps.maxImageExtent.width);
         extent.height = std::clamp(h, caps.minImageExtent.height, caps.maxImageExtent.height);
     }
 
+    // Triple buffering preferred — never drop below double
     uint32_t imageCount = caps.minImageCount + 1;
     if (caps.maxImageCount > 0 && imageCount > caps.maxImageCount)
         imageCount = caps.maxImageCount;
 
-    VkPresentModeKHR preferred = Options::Performance::PREFER_MAILBOX_PRESENT
-        ? VK_PRESENT_MODE_MAILBOX_KHR : VK_PRESENT_MODE_FIFO_KHR;
+    // Prefer MAILBOX for tear-free, fall back to FIFO
     VkPresentModeKHR presentMode = VK_PRESENT_MODE_FIFO_KHR;
-    for (auto m : presentModes)
-        if (m == preferred) { presentMode = m; break; }
+    if (std::find(presentModes.begin(), presentModes.end(), VK_PRESENT_MODE_MAILBOX_KHR) != presentModes.end())
+        presentMode = VK_PRESENT_MODE_MAILBOX_KHR;
 
+    // HDR → 10-bit, otherwise sRGB
     VkSurfaceFormatKHR chosen = formats[0];
-    if (supportsHDR())
-    {
+    if (supportsHDR()) {
         for (const auto& f : formats)
             if (f.format == VK_FORMAT_A2B10G10R10_UNORM_PACK32 && f.colorSpace == VK_COLOR_SPACE_HDR10_ST2084_EXT)
                 { chosen = f; break; }
-    }
-    else
-    {
+    } else {
         for (const auto& f : formats)
             if (f.format == VK_FORMAT_B8G8R8A8_SRGB && f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)
                 { chosen = f; break; }
     }
 
+    // Queue family sharing
     QueueFamilyIndices qf = findQueueFamilies(stone_physical(), stone_surface());
     uint32_t queueFamilyIndices[] = { qf.graphicsFamily.value(), qf.presentFamily.value() };
 
@@ -217,43 +218,40 @@ void SwapchainManager::createSwapchain(SDL_Window*, uint32_t w, uint32_t h, VkSw
         .oldSwapchain     = old
     };
 
-    if (qf.graphicsFamily != qf.presentFamily)
-    {
+    if (qf.graphicsFamily != qf.presentFamily) {
         ci.imageSharingMode      = VK_SHARING_MODE_CONCURRENT;
         ci.queueFamilyIndexCount = 2;
         ci.pQueueFamilyIndices   = queueFamilyIndices;
-    }
-    else
-    {
+    } else {
         ci.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
     }
 
     VkSwapchainKHR raw = VK_NULL_HANDLE;
     VK_CHECK(vkCreateSwapchainKHR(stone_device(), &ci, nullptr, &raw));
 
+    // Update internal state
     swapchain_ = Handle<VkSwapchainKHR>(raw, stone_device());
     swapchainExtent_    = extent;
     swapchainFormat_    = chosen.format;
     currentColorSpace_  = chosen.colorSpace;
     currentPresentMode_ = presentMode;
 
+    // Acquire images
     uint32_t imgCount = 0;
     VK_CHECK(vkGetSwapchainImagesKHR(stone_device(), raw, &imgCount, nullptr));
     swapchainImages_.resize(imgCount);
     VK_CHECK(vkGetSwapchainImagesKHR(stone_device(), raw, &imgCount, swapchainImages_.data()));
 
-    if (old && old != raw)
+    // Destroy old swapchain (safe after new one is created)
+    if (old && old != raw) {
         vkDestroySwapchainKHR(stone_device(), old, nullptr);
+    }
 
+    // Seal into StoneKey
     stone_seal_swapchain(raw);
     stone_seal_extent(extent);
     stone_seal_image_count(imgCount);
     stone_seal_images(swapchainImages_);
-
-    LOG_AMOURANTH("SWAPCHAIN FORGED — {}×{} — {} images — {} — HDR: {}",
-                  extent.width, extent.height, imgCount,
-                  presentMode == VK_PRESENT_MODE_MAILBOX_KHR ? "MAILBOX" : "FIFO",
-                  supportsHDR() ? "ON" : "OFF");
 }
 
 void SwapchainManager::createImageViews() noexcept

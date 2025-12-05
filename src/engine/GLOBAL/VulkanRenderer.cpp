@@ -1540,94 +1540,48 @@ void VulkanRenderer::setMaxFramesInFlight(uint32_t count) noexcept
 
 void VulkanRenderer::onSwapchainRebuilt(uint32_t w, uint32_t h) noexcept
 {
-    LOG_AMOURANTH("════════════════════════════════════════════════════════════════");
-    LOG_AMOURANTH("VULKAN RENDERER REBORN — EXECUTING FINAL PURGE PROTOCOL — {}×{}", w, h);
-    LOG_AMOURANTH("CURRENT STATE BEFORE PURGE:");
-    LOG_AMOURANTH("  → imageAvailableSemaphores_.size()  = {}", imageAvailableSemaphores_.size());
-    LOG_AMOURANTH("  → renderFinishedSemaphores_.size()  = {}", renderFinishedSemaphores_.size());
-    LOG_AMOURANTH("  → inFlightFences_.size()            = {}", inFlightFences_.size());
-    LOG_AMOURANTH("  → commandBuffers_.size()            = {}", commandBuffers_.size());
-    LOG_AMOURANTH("  → currentFrame_.load()              = {}", currentFrame_.load());
+    // Destroy old synchronization objects
+    for (auto sem : imageAvailableSemaphores_)
+        if (sem) vkDestroySemaphore(stone_device(), sem, nullptr);
+    for (auto sem : renderFinishedSemaphores_)
+        if (sem) vkDestroySemaphore(stone_device(), sem, nullptr);
+    for (auto fence : inFlightFences_)
+        if (fence) vkDestroyFence(stone_device(), fence, nullptr);
 
-    // DESTROY OLD SYNC — NO MERCY — LOG EVERY EXECUTION
-    LOG_AMOURANTH("BEGINNING DESTRUCTION OF OLD SYNCHRONIZATION OBJECTS");
-
-    for (size_t i = 0; i < imageAvailableSemaphores_.size(); ++i)
-    {
-        if (imageAvailableSemaphores_[i])
-        {
-            LOG_AMOURANTH("  → DESTROYING imageAvailableSemaphores_[{}] = 0x{}", i, reinterpret_cast<uint64_t>(imageAvailableSemaphores_[i]));
-            vkDestroySemaphore(stone_device(), imageAvailableSemaphores_[i], nullptr);
-            imageAvailableSemaphores_[i] = VK_NULL_HANDLE;
-        }
-    }
-
-    for (size_t i = 0; i < renderFinishedSemaphores_.size(); ++i)
-    {
-        if (renderFinishedSemaphores_[i])
-        {
-            LOG_AMOURANTH("  → DESTROYING renderFinishedSemaphores_[{}] = 0x{}", i, reinterpret_cast<uint64_t>(renderFinishedSemaphores_[i]));
-            vkDestroySemaphore(stone_device(), renderFinishedSemaphores_[i], nullptr);
-            renderFinishedSemaphores_[i] = VK_NULL_HANDLE;
-        }
-    }
-
-    for (size_t i = 0; i < inFlightFences_.size(); ++i)
-    {
-        if (inFlightFences_[i])
-        {
-            LOG_AMOURANTH("  → EXECUTING inFlightFences_[{}] = 0x{} — THIS FENCE WILL NEVER SIGNAL AGAIN", i, reinterpret_cast<uint64_t>(inFlightFences_[i]));
-            vkDestroyFence(stone_device(), inFlightFences_[i], nullptr);
-            inFlightFences_[i] = VK_NULL_HANDLE;
-        }
-    }
-
-    // Free command buffers if needed, but since allocated from pool, reset pool or free them
+    // Free old command buffers
     if (!commandBuffers_.empty()) {
-        vkFreeCommandBuffers(stone_device(), RTX::g_ctx().commandPool_, static_cast<uint32_t>(commandBuffers_.size()), commandBuffers_.data());
-        LOG_AMOURANTH("Freed old command buffers");
+        vkFreeCommandBuffers(stone_device(),
+                             RTX::g_ctx().commandPool_,
+                             static_cast<uint32_t>(commandBuffers_.size()),
+                             commandBuffers_.data());
     }
 
-    LOG_AMOURANTH("OLD SYNCHRONIZATION OBJECTS PURGED — THE EMPIRE DOES NOT FORGIVE");
-
-    // CLEAR CONTAINERS
+    // Clear containers
     imageAvailableSemaphores_.clear();
     renderFinishedSemaphores_.clear();
     inFlightFences_.clear();
     commandBuffers_.clear();
 
-    LOG_AMOURANTH("CONTAINERS CLEARED — PREPARING FOR RESURRECTION");
-
-    // RECREATE — SIGNALED — LOG EVERY BIRTH
-    LOG_AMOURANTH("REBIRTHING NEW SYNCHRONIZATION EMPIRE — SIGNALED FROM BIRTH");
+    // Recreate everything — born signaled
+    const size_t num = maxFramesInFlight_;
 
     VkSemaphoreCreateInfo semInfo{.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
     VkFenceCreateInfo fenceInfo{
         .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
-        .flags = VK_FENCE_CREATE_SIGNALED_BIT  // BORN READY — NO WAIT
+        .flags = VK_FENCE_CREATE_SIGNALED_BIT
     };
-
-    const size_t num = maxFramesInFlight_;
 
     imageAvailableSemaphores_.resize(num);
     renderFinishedSemaphores_.resize(num);
     inFlightFences_.resize(num);
 
-    for (size_t i = 0; i < num; ++i)
-    {
+    for (size_t i = 0; i < num; ++i) {
         VK_CHECK(vkCreateSemaphore(stone_device(), &semInfo, nullptr, &imageAvailableSemaphores_[i]));
-        LOG_AMOURANTH("  → BIRTH: imageAvailableSemaphores_[{}] = 0x{}", i, reinterpret_cast<uint64_t>(imageAvailableSemaphores_[i]));
-
         VK_CHECK(vkCreateSemaphore(stone_device(), &semInfo, nullptr, &renderFinishedSemaphores_[i]));
-        LOG_AMOURANTH("  → BIRTH: renderFinishedSemaphores_[{}] = 0x{}", i, reinterpret_cast<uint64_t>(renderFinishedSemaphores_[i]));
-
         VK_CHECK(vkCreateFence(stone_device(), &fenceInfo, nullptr, &inFlightFences_[i]));
-        LOG_AMOURANTH("  → BIRTH: inFlightFences_[{}] = 0x{} (SIGNALED)", i, reinterpret_cast<uint64_t>(inFlightFences_[i]));
     }
 
-    // RECREATE COMMAND BUFFERS
-    LOG_AMOURANTH("ALLOCATING NEW COMMAND BUFFERS — FRESH CANVAS FOR PHOTONS");
-
+    // Reallocate command buffers
     commandBuffers_.resize(num);
     VkCommandBufferAllocateInfo allocInfo{
         .sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
@@ -1637,24 +1591,10 @@ void VulkanRenderer::onSwapchainRebuilt(uint32_t w, uint32_t h) noexcept
     };
     VK_CHECK(vkAllocateCommandBuffers(stone_device(), &allocInfo, commandBuffers_.data()));
 
-    for (size_t i = 0; i < num; ++i)
-    {
-        LOG_AMOURANTH("  → ALLOCATED commandBuffers_[{}] = 0x{}", i, reinterpret_cast<uint64_t>(commandBuffers_[i]));
-    }
-
-    // FINAL RESET
+    // Reset renderer state
     currentFrame_.store(0);
     overlayValid_ = false;
     requestAccumulationReset();
-
-    LOG_AMOURANTH("RENDERER REBIRTH COMPLETE:");
-    LOG_AMOURANTH("  → currentFrame_        = 0");
-    LOG_AMOURANTH("  → overlayValid_        = false");
-    LOG_AMOURANTH("  → accumulation reset   = requested");
-    LOG_AMOURANTH("  → {}×{} — NEW WORLD READY", w, h);
-
-    LOG_AMOURANTH("SYNC REBORN — ALL OLD FENCES EXECUTED — NEW EMPIRE RISES — PHOTONS ASCEND");
-    LOG_AMOURANTH("════════════════════════════════════════════════════════════════");
 }
 
 void VulkanRenderer::clearResizeFlag() noexcept

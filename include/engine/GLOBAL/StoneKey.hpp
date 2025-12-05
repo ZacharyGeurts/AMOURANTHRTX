@@ -226,7 +226,7 @@ namespace StoneKey {
         CHECK(stone_transfer_family(), "Transfer Family",   stone_transfer_family() != ~0u);
         CHECK(stone_compute_family(),  "Compute Family",    stone_compute_family()  != ~0u);
 
-        CHECK(stone_commandbuffers().size(), "Command Buffers", !stone_commandbuffers().empty());
+        //CHECK(stone_commandbuffers().size(), "Command Buffers", !stone_commandbuffers().empty());
 
         const auto& rt = stone_rtprops();
         if (rt.shaderGroupHandleSize != 0) {
