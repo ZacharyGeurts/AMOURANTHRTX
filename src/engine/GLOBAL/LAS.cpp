@@ -551,9 +551,6 @@ void LAS::beginFrame() noexcept
 
     ++g_currentFrameIndex;
     g_currentWriteSlot = g_currentFrameIndex % MAX_FRAMES_IN_FLIGHT;
-
-    LOG_TRACE_CAT("LAS", "beginFrame() → global#{} | retired#{} | nextWrite#{}",
-                  g_globalFrameCounter, retiredSlot, g_currentWriteSlot);
 }
 
 // ============================================================================

@@ -343,7 +343,7 @@ Application::~Application() {
 // =============================================================================
 void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
 {
-	RTX::LAS::get().beginFrame();
+    RTX::LAS::get().beginFrame();
 
     if (RTX::SwapchainManager::minimized_)
     {
@@ -365,7 +365,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     VkResult acquireResult = vkAcquireNextImageKHR(
         stone_device(),
         RTX::SwapchainManager::swapchain(),
-        2'000'000,  // 2ms timeout
+        16'666'667,  // ~16.67ms timeout for 60 FPS
         imageAvailableSemaphores_[slot],
         VK_NULL_HANDLE,
         &imageIndex
@@ -380,7 +380,9 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
         g_resizeRequested.store(true);
         g_resizeWidth.store(stone_width());
         g_resizeHeight.store(stone_height());
-        // DO NOT RETURN — we will draw pink below
+        LOG_AMOURANTH("[PHASE 2] Swapchain invalid ({}), skipping frame — resize pending", string_VkResult(acquireResult));
+        currentFrame_.fetch_sub(1);
+        return;
     }
     else if (acquireResult != VK_SUCCESS)
     {
@@ -388,14 +390,9 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
         currentFrame_.fetch_sub(1);
         return;
     }
-    else
-    {
-        LOG_AMOURANTH("[PHASE 2] SUCCESS — acquired imageIndex {} for slot {}", imageIndex, slot);
-    }
 
     // ── PHASE 3: RESET FENCE (we're definitely submitting this frame) ─────
     VK_CHECK(vkResetFences(stone_device(), 1, &inFlightFences_[slot]));
-    LOG_AMOURANTH("[PHASE 3] Fence[{}] reset — ready for new submission", slot);
 
     // ── PHASE 4: BEGIN COMMAND BUFFER ─────────────────────────────────────
     VkCommandBuffer cmd = commandBuffers_[slot];
@@ -404,27 +401,12 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
         .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
     };
     VK_CHECK(vkBeginCommandBuffer(cmd, &beginInfo));
-    LOG_AMOURANTH("[PHASE 4] Command buffer begun for slot {}", slot);
 
-    // ── PHASE 5: PINK SAFETY FRAME — ALWAYS WINS ───────────────────────────
+    // ── PHASE 5: PINK SAFETY FRAME — ALWAYS WINS (only on valid swapchain) ─
     bool drawPink = (activeRenderMode_ == 0) || g_forcePink.load();
-
-    if (acquireResult == VK_ERROR_OUT_OF_DATE_KHR || 
-        acquireResult == VK_SUBOPTIMAL_KHR ||
-        acquireResult == VK_TIMEOUT)
-    {
-        LOG_AMOURANTH("Swapchain invalid → enabling one-shot pink protection");
-        g_forcePink.store(true);  // Only once!
-        g_resizeRequested.store(true);
-        g_resizeWidth.store(stone_width());
-        g_resizeHeight.store(stone_height());
-    }
 
     if (drawPink)
     {
-        LOG_AMOURANTH("[PHASE 5] PINK SAFETY FRAME ENGAGED — {} mode", 
-                      activeRenderMode_ == 0 ? "DEV MODE 0" : "RESIZE RECOVERY");
-
         VkClearColorValue pink{ {1.0f, 0.2f, 0.8f, 1.0f} };
         VkImageSubresourceRange range{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
 
@@ -456,7 +438,6 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
                              0, 0, nullptr, 0, nullptr, 1, &presentBarrier);
 
         VK_CHECK(vkEndCommandBuffer(cmd));
-        LOG_AMOURANTH("[PHASE 5] Pink clear recorded — command buffer ended");
 
         // ── PHASE 6: SUBMIT PINK FRAME ─────────────────────────────────────
         VkSemaphoreSubmitInfo waitInfo{
@@ -485,7 +466,6 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
         };
 
         VK_CHECK(vkQueueSubmit2(stone_graphics_queue(), 1, &submit, inFlightFences_[slot]));
-        LOG_AMOURANTH("[PHASE 6] Pink frame submitted to GPU");
 
         // ── PHASE 7: PRESENT PINK FRAME ───────────────────────────────────
         VkPresentInfoKHR presentInfo{
@@ -498,10 +478,16 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
         };
 
         VkResult presentResult = vkQueuePresentKHR(stone_present_queue(), &presentInfo);
-        LOG_AMOURANTH("[PHASE 7] Pink frame presented | result: {}", string_VkResult(presentResult));
+
+        if (presentResult == VK_ERROR_OUT_OF_DATE_KHR || presentResult == VK_SUBOPTIMAL_KHR)
+        {
+            g_resizeRequested.store(true);
+            g_resizeWidth.store(stone_width());
+            g_resizeHeight.store(stone_height());
+            LOG_AMOURANTH("[PHASE 7] Present out-of-date during pink — resize triggered");
+        }
 
         frameNumber_++;
-        LOG_AMOURANTH("<<< PINK FRAME COMPLETE | global#{} | visibility secured", globalFrame);
         return;  // ← Exit early — we did our job
     }
 
@@ -638,11 +624,16 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
 
     if (presentResult == VK_ERROR_OUT_OF_DATE_KHR || presentResult == VK_SUBOPTIMAL_KHR)
     {
-        LOG_AMOURANTH("[PHASE 10] Present out-of-date — next frame will be pink");
+        g_resizeRequested.store(true);
+        g_resizeWidth.store(stone_width());
+        g_resizeHeight.store(stone_height());
+        LOG_AMOURANTH("[PHASE 10] Present out-of-date — resize triggered for next frame");
     }
 
     currentSpp_++;
     accumulationFrame_++;
+    frameNumber_++;
+    LOG_AMOURANTH("<<< NORMAL FRAME COMPLETE | global#{} | spp={} | accum={}", globalFrame, currentSpp_, accumulationFrame_);
 }
 
 // =============================================================================
@@ -847,7 +838,8 @@ static void createRealFinalWindow() noexcept
 // src/main.cpp – final, perfect sacrificial splash (SDL3 only)
 static void showSacrificialSplash() noexcept
 {
-    constexpr bool  enabled  = Options::Splash::ENABLE_SACRIFICIAL_SPLASH && !Options::Splash::SKIP_SPLASH_ENTIRELY;
+    //constexpr bool  enabled  = Options::Splash::ENABLE_SACRIFICIAL_SPLASH && !Options::Splash::SKIP_SPLASH_ENTIRELY;
+    constexpr bool  enabled  = true;
     constexpr float duration = Options::Splash::SPLASH_DURATION_SECONDS;
 
     if (!enabled || duration <= 0.0f) {
@@ -1056,6 +1048,9 @@ static std::unique_ptr<VulkanRenderer> phase7_5_Renderer() noexcept
     return renderer;
 }
 
+// =============================================================================
+// PHASE 9 - Disposal RAII
+// =============================================================================
 [[noreturn]] void phase9_ballerina(std::string_view reason, std::source_location loc) noexcept
 {
     using namespace std::chrono_literals;
