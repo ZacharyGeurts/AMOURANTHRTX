@@ -5,19 +5,17 @@
 //
 // Dual Licensed:
 // 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
-//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
 // 2. Commercial licensing: gzac5314@gmail.com
 //
 // =============================================================================
 // EXTENSIONS — THE SACRED RITUAL OF LOADING PINK PHOTON EXTENSIONS
 // FIRST LIGHT ACHIEVED — PINK PHOTONS ETERNAL — VALHALLA v81 TURBO
-// COMPACTION RITUAL FULLY ARMED — DECEMBER 02, 2025
-// FULL VULKAN 1.4 SUPPORT — KHR ONLY — LEAN AND MEAN
+// COMPACTION + BUFFER DEVICE ADDRESS + FULL 1.4 SUPPORT — DECEMBER 05, 2025
 // =============================================================================
 #pragma once
 
 #include <vulkan/vulkan.h>
-#include <vulkan/vulkan_core.h>  // Core 1.3+ functions (synchronization2, dynamic rendering, etc.)
+#include <vulkan/vulkan_core.h>
 
 namespace RTX {
 
@@ -33,6 +31,9 @@ struct Extensions {
     PFN_vkCreateAccelerationStructureKHR           vkCreateAccelerationStructureKHR           = nullptr;
     PFN_vkDestroyAccelerationStructureKHR          vkDestroyAccelerationStructureKHR          = nullptr;
     PFN_vkGetAccelerationStructureDeviceAddressKHR vkGetAccelerationStructureDeviceAddressKHR = nullptr;
+
+    // ── BUFFER DEVICE ADDRESS — THE SOUL OF SBT AND MODERN RAY TRACING ───
+    PFN_vkGetBufferDeviceAddress                   vkGetBufferDeviceAddress                = nullptr;
 
     // ── Compaction (KHR_ray_tracing_maintenance1) ──────────────────────
     PFN_vkCmdCopyAccelerationStructureKHR             vkCmdCopyAccelerationStructureKHR             = nullptr;
@@ -85,6 +86,9 @@ void dumpRayTracingSupport(VkPhysicalDevice physicalDevice);
 #define VK_DESTROY_ACCELERATION_STRUCTURE(...)   RTX::g_ext.vkDestroyAccelerationStructureKHR(__VA_ARGS__)
 #define VK_GET_AS_DEVICE_ADDRESS(...)            RTX::g_ext.vkGetAccelerationStructureDeviceAddressKHR(__VA_ARGS__)
 
+// THE MISSING ONE — NOW ETERNAL
+#define VK_GET_BUFFER_DEVICE_ADDRESS(...)        RTX::g_ext.vkGetBufferDeviceAddress(__VA_ARGS__)
+
 // Compaction
 #define VK_CMD_COPY_ACCELERATION_STRUCTURE(cmd, info) \
     RTX::g_ext.vkCmdCopyAccelerationStructureKHR(cmd, info)
@@ -92,10 +96,12 @@ void dumpRayTracingSupport(VkPhysicalDevice physicalDevice);
 #define VK_CMD_WRITE_AS_PROPERTIES(cmd, count, as, queryType, queryPool, query) \
     RTX::g_ext.vkCmdWriteAccelerationStructuresPropertiesKHR(cmd, count, as, queryType, queryPool, query)
 
-// Host image copy (optional but nice)
+// Host image copy
 #define VK_COPY_MEMORY_TO_IMAGE(...)             RTX::g_ext.vkCopyMemoryToImageEXT(__VA_ARGS__)
 #define VK_COPY_IMAGE_TO_MEMORY(...)             RTX::g_ext.vkCopyImageToMemoryEXT(__VA_ARGS__)
 
 // =============================================================================
-// THE EMPIRE IS COMPLETE — PURE KHR — NO DEAD EXTENSIONS — PINK PHOTONS ETERNAL
+// THE EMPIRE IS NOW COMPLETE — BUFFER DEVICE ADDRESS IS ARMED
+// PINK PHOTONS MAY NOW TRACE INTO VALHALLA WITH FULL ADDRESSING POWER
+// DECEMBER 05 2025 — FINAL LIGHT ETERNAL
 // =============================================================================

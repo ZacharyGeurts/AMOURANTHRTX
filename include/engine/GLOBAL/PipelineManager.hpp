@@ -84,6 +84,7 @@ public:
     void updateRTDescriptorSet(uint32_t frameIndex, const RTDescriptorUpdate& updateInfo);
     void initializePipeline(const std::vector<std::string>& shaderPaths, VkCommandPool pool, VkQueue queue);
     void cleanup() noexcept;
+	void forgeRTXPipeline(VkCommandPool commandPool, VkQueue graphicsQueue);
 
     // ── PUBLIC GETTERS — EMPIRE APPROVED — STONEKEY PROTECTED ──────────────────────
     [[nodiscard]] VkPipeline                    rtPipeline()         const noexcept { return rtPipeline_.get(); }

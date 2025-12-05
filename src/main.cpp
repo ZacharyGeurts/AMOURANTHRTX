@@ -418,9 +418,6 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
 
     if (drawPink)
     {
-        LOG_AMOURANTH("[PHASE 5] PINK SAFETY FRAME ENGAGED — {} mode", 
-                      activeRenderMode_ == 0 ? "DEV MODE 0" : "RESIZE/RECOVERY");
-
         VkClearColorValue pink{ {1.0f, 0.2f, 0.8f, 1.0f} };
         VkImageSubresourceRange range{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
 
@@ -500,13 +497,10 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
         }
 
         frameNumber_++;
-        LOG_AMOURANTH("<<< PINK SAFETY FRAME COMPLETE | global#{} | visibility secured", globalFrame);
         return; // ← Safe: we submitted and presented
     }
 
     // ── PHASE 8: NORMAL RENDERING PATH — swapchain is valid ───────────────
-    LOG_AMOURANTH("[PHASE 8] Entering normal rendering path — swapchain valid");
-
     // Accumulation reset
     if (resetAccumulation_ || resetAccumNextFrame_)
     {
@@ -722,7 +716,7 @@ static void createCommandPool() noexcept
 // =============================================================================
 void Application::setRenderMode(int mode)
 {
-    constexpr int MIN_MODE = 1;
+    constexpr int MIN_MODE = 0;
     constexpr int MAX_MODE = 9;
 
     if (mode < MIN_MODE || mode > MAX_MODE) {
@@ -734,6 +728,7 @@ void Application::setRenderMode(int mode)
 
     const char* modeName = [](int m) -> const char* {
         switch (m) {
+			case 0:  return "VOID";
             case 1:  return "PURE PINK VOID — BINDING 31";
             case 2:  return "PATH TRACED ACCUMULATION";
             case 3:  return "REALTIME HYBRID DENOISED";
@@ -1044,16 +1039,14 @@ static void phase6_sceneAndAccelerationStructures() {
 
 static void phase7_forgeTheRTX()
 {
-    LOG_MAIN("[PHASE 7] FORGING THE RTX PIPELINE — PINK PHOTONS RISE");
+    LOG_MAIN("[PHASE 7] FORGING THE RTX PIPELINE");
 
-    auto& pipe = RTX::pipeline();  // The crown awakens
+    auto& pipe = RTX::pipeline();
 
-    pipe.createPipelineLayout();
-    pipe.createDescriptorPool();
-    pipe.createShaderBindingTable(RTX::g_ctx().commandPool(), stone_graphics_queue());
-    pipe.allocateDescriptorSets();
+    // ONE COMMAND — THE EMPIRE FORGES ITSELF
+    pipe.forgeRTXPipeline(RTX::g_ctx().commandPool(), stone_graphics_queue());
 
-    stone_seal_pipeline(&pipe);
+    // No need to seal manually — forgeRTXPipeline() does it
 }
 
 // =============================================================================

@@ -710,6 +710,42 @@ PipelineManager::~PipelineManager() noexcept
     // Phase 9 Ballerina handles the final curtain
 }
 
+// In PipelineManager.cpp — THE ONE TRUE FORGE
+void PipelineManager::forgeRTXPipeline(VkCommandPool commandPool, VkQueue graphicsQueue)
+{
+    LOG_AMOURANTH("[PHASE 7] FORGING THE RTX CROWN — ONE COMMAND, ETERNAL SETUP");
+
+    // 1. Descriptor Pool — Binding 31 lives
+    if (!rtDescriptorPool_.valid()) {
+        createDescriptorPool();
+    }
+
+    // 2. Pipeline Layout — Crown structure
+    if (!rtDescriptorSetLayout_.valid() || !rtPipelineLayout_.valid()) {
+        createPipelineLayout();
+    }
+
+    // 3. Descriptor Sets — Triple-buffered, immortal
+    if (rtDescriptorSets_.empty() || rtDescriptorSets_[0] == VK_NULL_HANDLE) {
+        allocateDescriptorSets();
+    }
+
+    // 4. SBT — Forged from the Eternal 256M Stone
+    if (sbtAddress_ == 0) {
+        createShaderBindingTable(commandPool, graphicsQueue);
+    }
+
+    // 5. Final Seal — The Empire is complete
+    if (rtPipeline() != VK_NULL_HANDLE && rtDescriptorSets_.size() == Options::Performance::MAX_FRAMES_IN_FLIGHT) {
+        stone_seal_pipeline(this);
+        LOG_SUCCESS_CAT("PIPELINE", "RTX PIPELINE FULLY FORGED — ONE COMMAND COMPLETE");
+        LOG_JENSEN("The crown is yours. The photons obey.");
+        LOG_KEANU("…whoa.");
+    } else {
+        LOG_FATAL_CAT("PIPELINE", "RTX pipeline forge failed — the empire is incomplete");
+    }
+}
+
 // ──────────────────────────────────────────────────────────────────────────────
 // cacheDeviceProperties — RT + AS Properties
 // ──────────────────────────────────────────────────────────────────────────────
