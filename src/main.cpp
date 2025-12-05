@@ -859,7 +859,6 @@ static void createRealFinalWindow() noexcept
 // Optimized, clean, SDL3-native sacrificial splash
 // No dialog, no drama, perfect centering, window icon (favicon)
 // ─────────────────────────────────────────────────────────────────────────────
-// src/main.cpp – final, perfect sacrificial splash (SDL3 only)
 static void showSacrificialSplash() noexcept
 {
     //constexpr bool  enabled  = Options::Splash::ENABLE_SACRIFICIAL_SPLASH && !Options::Splash::SKIP_SPLASH_ENTIRELY;
@@ -994,9 +993,48 @@ while (SDL_PollEvent(&e)) {
 
 static void phase1_preInitialization() noexcept
 {
-    // The story is told in the code itself.
-    // No logging. No drama. Just pure intent.
-    // The empire speaks through silence.
+    // ── BLONDIE'S LIVE STATUS — EMPIRE-SEALED, 2025 FINAL EDITION ─────────────
+    LOG_BLONDIE("\n\"Here to assist with my sloop. Call me anytime.\"\n"
+                "┌──────────────────────────────────────────────────────────────\n"
+                "│ BLONDIE'S LIVE STATUS                                        \n"
+                "├──────────────────────────────────────────────────────────────\n"
+                "│ Denoising           : {}\n"
+                "│ Temporal AA         : {}\n"
+                "│ Bloom               : {}\n"
+                "│ SSAO                : {}\n"
+                "│ Volumetric Fog      : {}\n"
+                "│ God Rays            : {}\n"
+                "│ Tonemapping         : {}\n"
+                "│ VSync               : {}\n"
+                "│ Max Ray Bounces     : {}\n"
+                "│ Adaptive Sampling   : {}\n"
+                "│ HyperTrace          : {}\n"
+                "│ Perfect Frame Pacing: {}\n"
+                "│ Direct Display      : {}\n"
+                "│ HDR Auto-Ignition   : {}\n"
+                "│ Quantum Resize Pred : {}\n"
+                "│ Shading Rate        : {:.2f}x\n"
+                "│ Present Mode        : {}\n"
+                "└──────────────────────────────────────────────────────────────",
+                Options::OptionsRTX::ENABLE_DENOISING            ? "ON  " : "OFF",
+                Options::OptionsRTX::ENABLE_TAA                  ? "ON  " : "OFF",
+                Options::PostProcess::ENABLE_BLOOM               ? "ON  " : "OFF",
+                Options::PostProcess::ENABLE_SSAO                ? "ON  " : "OFF",
+                Options::Environment::ENABLE_VOLUMETRIC_FOG      ? "ON  " : "OFF",
+                Options::Environment::ENABLE_GOD_RAYS           ? "ON  " : "OFF",
+                Options::Tonemap::ENABLE_TONEMAPPING             ? "ON  " : "OFF",
+                Options::Display::ENABLE_VSYNC                   ? "ON  " : "OFF",
+                Options::OptionsRTX::MAX_BOUNCES,
+                Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING    ? "ON  " : "OFF",
+                Options::OptionsRTX::ENABLE_HYPERTRACE           ? "ON  " : "OFF",
+                Options::Performance::ENABLE_FRAME_PREDICTION    ? "ON  " : "OFF",
+                Options::Performance::ENABLE_DIRECT_DISPLAY       ? "ON  " : "OFF",
+                Options::Display::HDR_AUTO_IGNITION              ? "IGNITED" : "DORMANT",
+                Options::Window::ENABLE_QUANTUM_RESIZE_PREDICTION ? "ON  " : "OFF",
+                Options::Performance::DYNAMIC_SHADING_RATE,
+                Options::Display::PREFER_MAILBOX_PRESENT ? "Mailbox" :
+                Options::Display::ALLOW_IMMEDIATE_PRESENT ? "Immediate" : "FIFO"
+    );
 }
 
 static void phase3_sacrificialSplash() {

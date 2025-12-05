@@ -1,45 +1,60 @@
 // File: shaders/StoneKey.glsl
-// AMOURANTH RTX Engine © 2025 — StoneKey GLSL Integration v∞
-// PINK PHOTONS ETERNAL — APOCALYPSE v3.2
-// This file is #included — DO NOT put #version here!
+// AMOURANTH RTX — STONEKEY v∞ ETERNAL — FINAL SEALED CUT
+// DECEMBER 2025 — PINK PHOTONS ASCENDANT — NO REDEFINITIONS — EMPIRE PROTECTED
 
 #ifndef STONEKEY_GLSL_INCLUDED
 #define STONEKEY_GLSL_INCLUDED
 
 // -----------------------------------------------------------------------------
-// 1. Compile-time StoneKey bases (pre-computed Nov 15 2025)
+// 1. Compile-time bases — frozen forever
 // -----------------------------------------------------------------------------
 const uint64_t kStone1_base           = 0x9E37AF18C64D8A17UL;
 const uint64_t kStone2_base           = 0xE4F8B29D71A3C56CUL;
 const uint64_t kHandleObfuscator_base = kStone1_base ^ kStone2_base ^ 0x1337C0DE69F00D42UL;
 
 // -----------------------------------------------------------------------------
-// 2. Zero-cost XOR obfuscation
+// 2. ZERO-COST, FINAL, NON-REDEFINABLE MACROS
 // -----------------------------------------------------------------------------
-uint64_t stone_obfuscate(uint64_t v, uint64_t key)   { return v ^ key; }
-uint64_t stone_deobfuscate(uint64_t v, uint64_t key) { return v ^ key; }
+#if defined(STONE_OBFUSCATE) || defined(STONE_DEOBFUSCATE)
+    #error "STONE_OBFUSCATE or STONE_DEOBFUSCATE already defined — remove old StoneKey.glsl!"
+#endif
 
-#define STONE_OBFUSCATE(val)   stone_obfuscate(uint64_t(val), kHandleObfuscator_base)
-#define STONE_DEOBFUSCATE(val) stone_deobfuscate(uint64_t(val), kHandleObfuscator_base)
-
-// -----------------------------------------------------------------------------
-// 3. Fingerprint (compile-time constant)
-// -----------------------------------------------------------------------------
-const uint64_t kStoneFingerprint = ((kStone1_base ^ kStone2_base) * 0x517cc1b727220a95UL);
+#define STONE_OBFUSCATE(val)   (uint64_t(val) ^ kHandleObfuscator_base)
+#define STONE_DEOBFUSCATE(val) (uint64_t(val) ^ kHandleObfuscator_base)
 
 // -----------------------------------------------------------------------------
-// 4. Optional runtime override (push via uniform if you ever need it)
+// 3. Runtime override support (binding 31 — Empire reserved)
 // -----------------------------------------------------------------------------
 layout(std140, binding = 31) uniform StoneKeyRuntimeBlock
 {
     uint64_t uStoneKey1;
     uint64_t uStoneKey2;
-    uint64_t uHandleObfuscator;
-};
+    uint64_t uHandleObfuscator;   // 0 = use compile-time base
+} stoneRuntime;
 
-uint64_t get_obfuscator_key()
+uint64_t stone_get_obfuscator()
 {
-    return (uHandleObfuscator != 0UL) ? uHandleObfuscator : kHandleObfuscator_base;
+    return (stoneRuntime.uHandleObfuscator != 0UL)
+        ? stoneRuntime.uHandleObfuscator
+        : kHandleObfuscator_base;
 }
 
+// Final runtime-safe versions
+#define STONE_FINAL_OBFUSCATE(val)   (uint64_t(val) ^ stone_get_obfuscator())
+#define STONE_FINAL_DEOBFUSCATE(val) (uint64_t(val) ^ stone_get_obfuscator())
+
+// Backward compat — safe to use in all shaders
+#define STONE_OBFUSCATE_RT(val) STONE_FINAL_OBFUSCATE(val)
+#define STONE_DEOBFUSCATE_RT(val) STONE_FINAL_DEOBFUSCATE(val)
+
+// -----------------------------------------------------------------------------
+// 4. Eternal Pink Photon Constants
+// -----------------------------------------------------------------------------
+const vec3  kPinkPhoton      = vec3(1.0, 0.2, 0.8);
+const vec3  kHotPink         = vec3(1.0, 0.078, 0.576);
+const float kStrawEternal    = 1.337;
+
+// -----------------------------------------------------------------------------
+// THE EMPIRE IS SEALED — NO MORE REDEFINITIONS
+// -----------------------------------------------------------------------------
 #endif // STONEKEY_GLSL_INCLUDED
