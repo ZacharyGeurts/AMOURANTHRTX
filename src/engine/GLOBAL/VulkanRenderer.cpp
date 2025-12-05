@@ -1362,7 +1362,8 @@ void VulkanRenderer::recreateSwapchainDependentResources() noexcept
     // 2. CREATE NEW ONES
     // ====================================================================
     createRTOutputImages();
-    createAccumulationImages();
+    if (Options::OptionsRTX::ENABLE_ACCUMULATION)
+        createAccumulationImages();
 
     if (Options::OptionsRTX::ENABLE_DENOISING)
         createDenoiserImage();

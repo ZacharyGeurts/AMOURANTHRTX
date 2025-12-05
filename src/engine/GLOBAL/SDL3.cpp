@@ -134,27 +134,6 @@ void SDL3Input::initialize()
     }
 }
 
-void toggleFullscreen() noexcept
-{
-    if (!g_sdl_window) return;
-    bool isFS = (SDL_GetWindowFlags(g_sdl_window.get()) & SDL_WINDOW_FULLSCREEN) != 0;
-    SDL_SetWindowFullscreen(g_sdl_window.get(), !isFS);
-    LOG_AMOURANTH("FULLSCREEN {} — PHOTONS {}", isFS ? "DISABLED" : "ENABLED", isFS ? "CONTAINED" : "UNLEASHED");
-}
-
-void destroy() noexcept
-{
-    LOG_AMOURANTH("FINAL SHUTDOWN INITIATED — PHOTONS RETURNING TO THE VOID");
-
-    g_vulkanRenderer.reset();
-    RTX::cleanupAll();
-
-    g_sdl_window.reset();
-    SDL_Quit();
-
-    LOG_AMOURANTH("SDL3 + VULKAN SHUTDOWN COMPLETE — AMOURANTH SMILES ETERNALLY");
-}
-
 bool SDL3Input::pollEvents(SDL_Window* window, SDL_AudioDeviceID audioDevice, bool& consoleOpen, bool exitOnClose)
 {
     SDL_Event ev;
@@ -414,20 +393,24 @@ bool pollEvents(int& outW, int& outH, bool& quit, bool& toggleFS) noexcept
 
             case SDL_EVENT_WINDOW_RESIZED:
             case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
-            {
-                const int w = ev.window.data1;
-                const int h = ev.window.data2;
-                if (w > 0 && h > 0)
+                if (!Options::Window::ALLOW_RESIZE) {
+                    // Ignore resize if not allowed
+                    break;
+                }
                 {
-                    // ONLY SET ATOMIC FLAG — NO VULKAN CALLS
-                    g_resizeWidth.store(w);
-                    g_resizeHeight.store(h);
-                    g_resizeRequested.store(true);
+                    const int w = ev.window.data1;
+                    const int h = ev.window.data2;
+                    if (w > 0 && h > 0)
+                    {
+                        // ONLY SET ATOMIC FLAG — NO VULKAN CALLS
+                        g_resizeWidth.store(w);
+                        g_resizeHeight.store(h);
+                        g_resizeRequested.store(true);
 
-                    LOG_MAIN("Resize requested → {}x{}", w, h);
+                        LOG_MAIN("Resize requested → {}x{}", w, h);
+                    }
                 }
                 break;
-            }
 
             default:
                 break;
@@ -626,82 +609,7 @@ namespace AmouranthRTX::ImageLoader {
         return nullptr;
     }
 
-    SDL_Surface* surf = nullptr;
-
-    // Try PNG first (works if SDL3 was built with PNG support)
-#ifdef SDL3_IMAGE_ENABLED
-    if (SDL_Surface* surf = IMG_Load(path)) {
-        LOG_SUCCESS_CAT("IMG", "SDL3_image loaded {} ({}x{})", PLASMA_FUCHSIA, path, surf->w, surf->h, RESET);
-        return surf;
-    }
-#endif
-
-    LOG_FATAL_CAT("IMG", "IMAGE RITUAL FAILED — SDL3_image missing or file corrupt: {}", BLOOD_RED, path, RESET);
-    return nullptr;
-#ifdef SDL3_IMAGE_ENABLED
-    if (SDL_Surface* surf = IMG_Load(path)) {
-        LOG_SUCCESS_CAT("IMG", "SDL3_image loaded {} ({}x{})", PLASMA_FUCHSIA, path, surf->w, surf->h, RESET);
-        return surf;
-    }
-#endif
-
-    LOG_FATAL_CAT("IMG", "IMAGE RITUAL FAILED — SDL3_image missing or file corrupt: {}", BLOOD_RED, path, RESET);
-    return nullptr;
-#ifdef SDL3_IMAGE_ENABLED
-    if (SDL_Surface* surf = IMG_Load(path)) {
-        LOG_SUCCESS_CAT("IMG", "SDL3_image loaded {} ({}x{})", PLASMA_FUCHSIA, path, surf->w, surf->h, RESET);
-        return surf;
-    }
-#endif
-
-    LOG_FATAL_CAT("IMG", "IMAGE RITUAL FAILED — SDL3_image missing or file corrupt: {}", BLOOD_RED, path, RESET);
-    return nullptr;
-#ifdef SDL3_IMAGE_ENABLED
-    if (SDL_Surface* surf = IMG_Load(path)) {
-        LOG_SUCCESS_CAT("IMG", "SDL3_image loaded {} ({}x{})", PLASMA_FUCHSIA, path, surf->w, surf->h, RESET);
-        return surf;
-    }
-#endif
-
-    LOG_FATAL_CAT("IMG", "IMAGE RITUAL FAILED — SDL3_image missing or file corrupt: {}", BLOOD_RED, path, RESET);
-    return nullptr;
-#ifdef SDL3_IMAGE_ENABLED
-    if (SDL_Surface* surf = IMG_Load(path)) {
-        LOG_SUCCESS_CAT("IMG", "SDL3_image loaded {} ({}x{})", PLASMA_FUCHSIA, path, surf->w, surf->h, RESET);
-        return surf;
-    }
-#endif
-
-    LOG_FATAL_CAT("IMG", "IMAGE RITUAL FAILED — SDL3_image missing or file corrupt: {}", BLOOD_RED, path, RESET);
-    return nullptr;
-#ifdef SDL3_IMAGE_ENABLED
-    if (SDL_Surface* surf = IMG_Load(path)) {
-        LOG_SUCCESS_CAT("IMG", "SDL3_image loaded {} ({}x{})", PLASMA_FUCHSIA, path, surf->w, surf->h, RESET);
-        return surf;
-    }
-#endif
-
-    LOG_FATAL_CAT("IMG", "IMAGE RITUAL FAILED — SDL3_image missing or file corrupt: {}", BLOOD_RED, path, RESET);
-    return nullptr;
-#ifdef SDL3_IMAGE_ENABLED
-    if (SDL_Surface* surf = IMG_Load(path)) {
-        LOG_SUCCESS_CAT("IMG", "SDL3_image loaded {} ({}x{})", PLASMA_FUCHSIA, path, surf->w, surf->h, RESET);
-        return surf;
-    }
-#endif
-
-    LOG_FATAL_CAT("IMG", "IMAGE RITUAL FAILED — SDL3_image missing or file corrupt: {}", BLOOD_RED, path, RESET);
-    return nullptr;
-#ifdef SDL3_IMAGE_ENABLED
-    if (SDL_Surface* surf = IMG_Load(path)) {
-        LOG_SUCCESS_CAT("IMG", "SDL3_image loaded {} ({}x{})", PLASMA_FUCHSIA, path, surf->w, surf->h, RESET);
-        return surf;
-    }
-#endif
-
-    LOG_FATAL_CAT("IMG", "IMAGE RITUAL FAILED — SDL3_image missing or file corrupt: {}", BLOOD_RED, path, RESET);
-    return nullptr;
-    surf = SDL_LoadBMP_IO(io, true);  // true = auto-close
+    SDL_Surface* surf = SDL_LoadBMP_IO(io, true);  // true = auto-close
     if (surf) {
         LOG_SUCCESS_CAT("IMG", "Core SDL3 loaded BMP: {}", SAPPHIRE_BLUE, path, RESET);
         return surf;
@@ -709,6 +617,11 @@ namespace AmouranthRTX::ImageLoader {
 
     LOG_FATAL_CAT("IMG", "ALL IMAGE RITUALS FAILED for {} — Error: {}", BLOOD_RED, path, SDL_GetError(), RESET);
     return nullptr;
+}
+
+[[nodiscard]] inline SDL_Surface* loadSurface(const std::string& path) noexcept
+{
+    return loadSurface(path.c_str());
 }
 
 [[nodiscard]] inline SDL_Texture* loadTexture(SDL_Renderer* renderer, const char* path) noexcept

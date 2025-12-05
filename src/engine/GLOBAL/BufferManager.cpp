@@ -8,15 +8,16 @@
 // 2. Commercial licensing: gzac5314@gmail.com
 //
 // =============================================================================
-// VALHALLA v∞ TURBO — APOCALYPSE FINAL v13.0 — DECEMBER 02, 2025
-// 100% ETERNAL POOL + 512 MiB STAGING RING — FULLY FORGED — COMPILES CLEAN
-// DYNAMICSTONE ERASED — ONLY ONE TRUTH — PINK PHOTONS ETERNAL
+// VALHALLA v∞ TURBO — APOCALYPSE FINAL v13.1 — DECEMBER 02, 2025
+// 4.5 GiB IS THE SACRED DRIVER RESERVE — WE TAKE EVERYTHING ELSE
+// THE EMPIRE HAS SPOKEN — PINK PHOTONS ETERNAL
 // =============================================================================
 
 #include "engine/GLOBAL/BufferManager.hpp"
 #include "engine/GLOBAL/Extensions.hpp"
 #include "engine/GLOBAL/StoneKey.hpp"
 #include "engine/GLOBAL/logging.hpp"
+#include "engine/GLOBAL/OptionsMenu.hpp"
 
 #include <atomic>
 #include <format>
@@ -46,7 +47,7 @@ struct Pool {
 struct StagingRing {
     VkBuffer            buffer = VK_NULL_HANDLE;
     VkDeviceMemory      memory = VK_NULL_HANDLE;
-    VkDeviceSize        size   = 512ULL * 1024 * 1024;  // 512 MiB
+    VkDeviceSize        size   = 0;
     void*               mapped = nullptr;
     std::atomic<VkDeviceSize> head{0};
     bool                ready  = false;
@@ -57,9 +58,9 @@ static StagingRing g_stagingRing{};
 static uint64_t    g_nextHandle = 1;
 
 // =============================================================================
-// ETERNAL MAIN POOL — MAXIMUM DOMINATION EDITION — DECEMBER 02, 2025
-// 100% of (totalDeviceLocal − 4.500 GiB) — NO MORE 90% HERESY
-// THE EMPIRE CLAIMS WHAT IS RIGHTFULLY ITS OWN
+// ETERNAL MAIN POOL — THE FINAL TRUTH — DECEMBER 02, 2025
+// DRIVER RESERVE = EXACTLY 4.5 GiB — NO MORE, NO LESS
+// WE TAKE 100% OF WHAT REMAINS — MAXIMUM DOMINATION ACHIEVED
 // =============================================================================
 void ensureMainPool() noexcept
 {
@@ -77,22 +78,19 @@ void ensureMainPool() noexcept
         }
     }
 
-    const VkDeviceSize ONE_GiB        = 1024ULL * 1024ULL * 1024ULL;
-    const VkDeviceSize DRIVER_RESERVE = 4608ULL * 1024ULL * 1024ULL; // Exactly 4.500 GiB — SACRED
-    const VkDeviceSize MINIMUM_POOL   = 4ULL * ONE_GiB;
-    const VkDeviceSize FALLBACK_POOL  = 2ULL * ONE_GiB;
+    const VkDeviceSize ONE_GiB            = 1024ULL * 1024ULL * 1024ULL;
+    const VkDeviceSize SACRED_RESERVE     = 4831838208ULL; // Exactly 4.5 GiB = 4,831,838,208 bytes
+    const VkDeviceSize MINIMUM_POOL       = 4ULL * ONE_GiB;
+    const VkDeviceSize FALLBACK_POOL      = 2ULL * ONE_GiB;
 
-    VkDeviceSize safeMax = (totalDeviceLocal > DRIVER_RESERVE)
-                           ? totalDeviceLocal - DRIVER_RESERVE
-                           : MINIMUM_POOL;
-
-    // MAXIMUM DOMINATION — NO 90% CAP — CLAIM EVERY LAST PHOTON
-    VkDeviceSize current = safeMax;
+    VkDeviceSize poolSize = totalDeviceLocal > SACRED_RESERVE
+                            ? totalDeviceLocal - SACRED_RESERVE
+                            : MINIMUM_POOL;
 
     LOG_ELON("BUFFER MANAGER — ETERNAL POOL NEGOTIATION");
-    LOG_ELON("Total device-local VRAM    : {} GiB", static_cast<double>(totalDeviceLocal)/(1024.0*1024*1024));
-    LOG_ELON("Driver reserve (mandated)  : 4.50000000 GiB");
-    LOG_ELON("Maximum safe pool size     : {} GiB → CLAIMING 100%", static_cast<double>(safeMax)/(1024.0*1024*1024));
+    LOG_ELON("Total device-local VRAM : {} GiB", static_cast<double>(totalDeviceLocal)/(1024.0*1024*1024));
+    LOG_ELON("Sacred driver reserve     : exactly 4.500000 GiB (4831838208 bytes)");
+    LOG_ELON("Empire claims             : {} GiB (100% of remainder)", static_cast<double>(poolSize)/(1024.0*1024*1024));
 
     auto tryCreateBuffer = [&](VkDeviceSize size) -> VkBuffer {
         VkBufferCreateInfo bci{
@@ -130,31 +128,29 @@ void ensureMainPool() noexcept
         return mem;
     };
 
-    VkBuffer       buffer = tryCreateBuffer(current);
+    VkBuffer       buffer = VK_NULL_HANDLE;
     VkDeviceMemory memory = VK_NULL_HANDLE;
+    VkDeviceSize   current = poolSize;
 
-    while (!buffer && current > MINIMUM_POOL) {
-        current -= ONE_GiB;
-        LOG_WARNING("vkCreateBuffer failed — descending to {} GiB (driver resistance detected)", 
-                    static_cast<double>(current)/(1024.0*1024*1024));
+    // First attempt — full claim
+    buffer = tryCreateBuffer(current);
+    if (buffer) memory = tryAllocateMemory(buffer);
+
+    // If failed, descend in 512 MiB steps until success
+    while (!memory && current > MINIMUM_POOL) {
+        current -= 512ULL * 1024 * 1024;
+        LOG_WARNING("OOM during pool forge — reducing to {} GiB", static_cast<double>(current)/(1024.0*1024*1024));
         buffer = tryCreateBuffer(current);
+        if (buffer) memory = tryAllocateMemory(buffer);
     }
 
-    while (buffer && !(memory = tryAllocateMemory(buffer))) {
-        vkDestroyBuffer(stone_device(), buffer, nullptr);
-        buffer = VK_NULL_HANDLE;
-        current -= ONE_GiB;
-        if (current < FALLBACK_POOL) break;
-        LOG_WARNING("vkAllocateMemory failed — descending to {} GiB", 
-                    static_cast<double>(current)/(1024.0*1024*1024));
-        buffer = tryCreateBuffer(current);
-    }
-
-    if (!buffer) {
-        LOG_FATAL("VRAM APOCALYPSE — 2 GiB LAST STAND");
+    // Last stand
+    if (!memory) {
+        LOG_FATAL("VRAM APOCALYPSE — FINAL STAND");
         current = FALLBACK_POOL;
         buffer = tryCreateBuffer(current);
-        if (!buffer || !(memory = tryAllocateMemory(buffer))) {
+        memory = buffer ? tryAllocateMemory(buffer) : VK_NULL_HANDLE;
+        if (!memory) {
             LOG_FATAL("UNRECOVERABLE: Even 2 GiB failed — the empire falls silent");
             phase9_ballerina("TOTAL VRAM COLLAPSE", std::source_location::current());
             return;
@@ -171,21 +167,11 @@ void ensureMainPool() noexcept
     VkBufferDeviceAddressInfo addrInfo{.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO, .buffer = buffer};
     VkDeviceAddress addr = vkGetBufferDeviceAddress(stone_device(), &addrInfo);
 
-    LOG_SUCCESS_CAT("BUFFER", "ETERNAL MAIN POOL FORGED — {} GiB @ 0x{}",
-                    static_cast<double>(current)/(1024.0*1024*1024), addr);
+    LOG_AMOURANTH("ETERNAL MAIN POOL FORGED — {} GiB @ 0x{:x} — 4.5 GiB RESERVED — MAXIMUM DOMINATION ACHIEVED",
+                  static_cast<double>(current)/(1024.0*1024*1024), addr);
+    LOG_AMOURANTH("THE DRIVER BOWS. THE PHOTONS ARE OURS. THE EMPIRE IS COMPLETE.");
 
-    if (current >= safeMax * 0.99) {
-        LOG_AMOURANTH("MAXIMUM DOMINATION ACHIEVED — 100% OF REMAINING VRAM CLAIMED — PHOTONS ASCEND UNHINDERED");
-        LOG_AMOURANTH("THE 90% HERESY IS DEAD. ONLY TOTALITY REMAINS.");
-    } else if (current >= 7500ULL * 1024ULL * 1024ULL) {
-        LOG_JENSEN("PERFECT BALANCE — {} GiB secured with full driver compliance",
-                   static_cast<double>(current)/(1024.0*1024*1024));
-    } else {
-        LOG_CARMACK("SURVIVAL MODE — {} GiB minimal viable empire",
-                    static_cast<double>(current)/(1024.0*1024*1024));
-    }
-
-    LOG_SUCCESS_CAT("BUFFER", "kStone1=0x{} kStone2=0x{} — THE EMPIRE IS ETERNAL", kStone1, kStone2);
+    LOG_SUCCESS_CAT("BUFFER", "kStone1=0x{:x} kStone2=0x{:x} — THE EMPIRE IS ETERNAL", kStone1, kStone2);
 }
 
 // =============================================================================
@@ -196,9 +182,15 @@ static void ensureStagingRing() noexcept
     if (g_stagingRing.ready) return;
     ensureMainPool();
 
+    VkDeviceSize stagingSize = Options::CURRENT_PRESET == Options::Preset::BestQuality 
+                               ? 512ULL * 1024 * 1024
+                               : 256ULL * 1024 * 1024;
+
+    g_stagingRing.size = stagingSize;
+
     VkBufferCreateInfo bci{
         .sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-        .size        = g_stagingRing.size,
+        .size        = stagingSize,
         .usage       = VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
         .sharingMode = VK_SHARING_MODE_EXCLUSIVE
     };
@@ -227,9 +219,8 @@ static void ensureStagingRing() noexcept
 
     g_stagingRing.ready = true;
 
-    LOG_CID("STAGING RING FORGED — 512 MiB PERSISTENTLY MAPPED @ {} — THE BRIDGE IS ETERNAL", g_stagingRing.mapped);
-    LOG_CID("THE PHOTONS CAN FLOW. THE BRIDGE IS ALIVE.");
-    LOG_CID("CID HAS ASCENDED. CID IS AT PEACE.");
+    LOG_CID("STAGING RING FORGED — {} MiB PERSISTENTLY MAPPED — THE BRIDGE IS ETERNAL", 
+            stagingSize / (1024 * 1024));
 }
 
 // =============================================================================
@@ -308,7 +299,7 @@ uint64_t createSBT(uint32_t raygenCount, uint32_t missCount, uint32_t hitGroupCo
     return kStone1 ^ offset;
 }
 
-// Eternal stone shortcuts — NO DEFAULT ARGS IN .cpp
+// Eternal stone shortcuts
 uint64_t make_64M (VkBufferUsageFlags, VkMemoryPropertyFlags) noexcept { ensureMainPool(); return kStone1 ^ 64ULL; }
 uint64_t make_128M(VkBufferUsageFlags, VkMemoryPropertyFlags) noexcept { ensureMainPool(); return kStone1 ^ 128ULL; }
 uint64_t make_256M(VkBufferUsageFlags, VkMemoryPropertyFlags) noexcept { ensureMainPool(); return kStone1 ^ 256ULL; }
@@ -368,7 +359,7 @@ uint64_t createHostVisible(VkDeviceSize size, std::string_view tag) noexcept
     if (wrap) {
         offset = 0;
     }
-	
+    
     return offset;
 }
 
@@ -389,7 +380,6 @@ VkBuffer getStagingBuffer() noexcept
 
 // =============================================================================
 // DECEMBER 02, 2025 — THE EMPIRE IS WHOLE
-// COMPILES CLEAN — ZERO WARNINGS — ZERO ERRORS
-// THE PHOTONS ARE PINK. THE BRIDGE IS ETERNAL.
-// GRACE IS FREE.
+// 4.5 GiB RESERVED — EVERYTHING ELSE IS OURS
+// THE PHOTONS ARE PINK. THE EMPIRE IS ETERNAL.
 // =============================================================================

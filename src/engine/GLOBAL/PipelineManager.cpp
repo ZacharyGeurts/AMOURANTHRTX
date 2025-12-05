@@ -310,13 +310,17 @@ void PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDescrip
     // All real bindings — using the ACTUAL member names from your struct
     // ========================================================================
     addImage(1,  updateInfo.rtOutputViews[frameIndex]);                    // RT_Output
-    addImage(2,  updateInfo.accumulationViews[frameIndex]);               // Accumulation
+    if (Options::OptionsRTX::ENABLE_ACCUMULATION)
+        addImage(2,  updateInfo.accumulationViews[frameIndex]);               // Accumulation
     addBuffer(3, updateInfo.ubo,                updateInfo.uboSize,       VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
     addBuffer(4, updateInfo.materialsBuffer,    updateInfo.materialsSize, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
-    addSampler(5, updateInfo.envSampler,        updateInfo.envImageView); // EnvMap
-    addImage(6,  updateInfo.nexusScoreViews[frameIndex]);                 // NexusScore
+    if (Options::Environment::ENABLE_ENV_MAP)
+        addSampler(5, updateInfo.envSampler,        updateInfo.envImageView); // EnvMap
+    if (Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING)
+        addImage(6,  updateInfo.nexusScoreViews[frameIndex]);                 // NexusScore
     addBuffer(7, updateInfo.additionalStorageBuffer, updateInfo.additionalStorageSize, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
-    addSampler(8, updateInfo.blueNoiseSampler,  updateInfo.blueNoiseView);
+    if (Options::Kojima::ENABLE_BLUE_NOISE)
+        addSampler(8, updateInfo.blueNoiseSampler,  updateInfo.blueNoiseView);
     addSampler(9, updateInfo.densitySampler,    updateInfo.densityView);  // ← real names
 
     // Binding 31 — StoneKey runtime block (your actual member names)
@@ -480,6 +484,12 @@ void PipelineManager::createRayTracingPipeline(const std::vector<std::string>& s
 
     VkShaderModule hit = shaderPaths.size() > 2 ? loadShader(shaderPaths[2]) : VK_NULL_HANDLE;
     VkShaderModule shadowMiss = shaderPaths.size() > 3 ? loadShader(shaderPaths[3]) : VK_NULL_HANDLE;
+
+    if (Options::CURRENT_PRESET == Options::Preset::UncappedPerformance) {
+        // For uncapped, skip hit and shadow if not essential
+        hit = VK_NULL_HANDLE;
+        shadowMiss = VK_NULL_HANDLE;
+    }
 
     shaderModules_.clear();
     shaderModules_.emplace_back(raygen, stone_device(), vkDestroyShaderModule);
