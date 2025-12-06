@@ -1,13 +1,18 @@
 #!/usr/bin/env bash
 # =============================================================================
 # linux.sh — AMOURANTH RTX — RAINBOW PUKE v∞ — FIRST LIGHT ETERNAL
-# Now with: ./linux.sh single → -j1 build | ./linux.sh gdb → debug launch
-# I kept your toe. You may have it back. I also still have your nose.
-# BINDING 31 ACTIVE — PINK PHOTONS ETERNAL — DECEMBER 05, 2025
+# ./linux.sh         → build only
+# ./linux.sh run     → build + launch
+# ./linux.sh single  → -j1 build + launch
+# ./linux.sh gdb     → build + launch under gdb
+# ./linux.sh ninja   → use Ninja generator
+# ./linux.sh clean   → nuke everything
+# BINDING 31 ACTIVE — PINK PHOTONS ETERNAL — DECEMBER 06, 2025
 # =============================================================================
 
 set -euo pipefail
 
+# ── RAINBOW COLORS ───────────────────────────────────────────────────────────
 R="\033[38;5;196m" O="\033[38;5;208m" Y="\033[38;5;226m" G="\033[38;5;82m"
 C="\033[38;5;51m"  B="\033[38;5;33m"  P="\033[38;5;201m" M="\033[38;5;165m"
 W="\033[1;97m"     X="\033[0m"
@@ -46,20 +51,20 @@ show_help() {
 ║                               USAGE GUIDE                                    ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 
-  ./linux.sh                → Make build
-  ./linux.sh run            → Do this - incremental build run
-  ./linux.sh single         → Build with -j1 (for slow file errors)
-  ./linux.sh gdb            → Build + launch under gdb debugging
-  ./linux.sh clean          → Added or removed files and deletes build folder
-  ./linux.sh ninja          → Use Ninja + launch instead of Make
+  ./linux.sh                → build only
+  ./linux.sh run            → build + launch
+  ./linux.sh single         → build with -j1 + launch
+  ./linux.sh gdb            → build + launch under gdb
+  ./linux.sh clean          → delete build folder & cmake cache
+  ./linux.sh ninja          → use Ninja instead of Make
+  ./linux.sh ninja run      → Ninja + launch (ultimate speed)
 
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║        PRO TIPS — THE EMPIRE REVEALS ITS SECRETS                             ║
+║                     PINK PHOTONS DEMAND SACRIFICE                           ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 
-  • Run from project root — assets load perfectly
-  • Binary appears in build/bin/Linux/Navigator
-  • Ship it, then take actual vitamin C (liposomal, 2000 mg) — touch grass
+  • Binary ends up at: build/bin/Linux/Navigator
+  • Take 2000mg liposomal vitamin C and touch grass after victory
 
 EOF
     exit 0
@@ -69,30 +74,27 @@ clean() {
     banner
     echo -e "${R}        NUCLEAR PURGE INITIATED — ALL SIN DELETED${X}"
     rm -rf "$BUILD_DIR" CMakeCache.txt CMakeFiles .shader_hash_cache compile_commands.json 2>/dev/null || true
-    echo -e "${G}        PURGE COMPLETE — THE VOID IS PURE${X}"
+    echo -e "${G}        PURGE COMPLETE — THE VOID IS PURE AGAIN${X}"
     exit 0
 }
 
 # ── ARGUMENT PARSING ────────────────────────────────────────────────────────
-ACTION="help"
-USE_NINJA=""
+ACTION="build"      # build | run
 BUILD_JOBS="$(nproc)"
-LAUNCH_MODE="normal"
+GENERATOR="Unix Makefiles"
+LAUNCH_MODE="normal"  # normal | gdb
 
 for arg in "$@"; do
     case "${arg,,}" in
-        run)      ACTION="run" ;;
-        single)   ACTION="run"; BUILD_JOBS="1" ;;
-        gdb)      ACTION="run"; LAUNCH_MODE="gdb" ;;
-        clean)    clean ;;
-        ninja|--ninja) USE_NINJA="yes" ;;
+        run)        ACTION="run" ;;
+        single)     ACTION="run"; BUILD_JOBS="1" ;;
+        gdb)        ACTION="run"; LAUNCH_MODE="gdb" ;;
+        clean)      clean ;;
+        ninja|--ninja) GENERATOR="Ninja" ;;
         --help|-h|help|"") show_help ;;
-        *)        echo -e "${R}UNKNOWN: $arg${X}"; show_help ;;
+        *)          echo -e "${R}UNKNOWN ARG: $arg${X}"; show_help ;;
     esac
 done
-
-GENERATOR="Unix Makefiles"
-[[ "$USE_NINJA" ]] && GENERATOR="Ninja"
 
 # ── BUILD ───────────────────────────────────────────────────────────────────
 banner
@@ -101,6 +103,7 @@ echo -e "${P}        BUILDING WITH $GENERATOR — JOBS=$BUILD_JOBS${X}"
 mkdir -p "$BUILD_DIR"
 cd "$BUILD_DIR"
 
+# Reconfigure if generator changed
 if [[ ! -f CMakeCache.txt ]] || ! grep -q "CMAKE_GENERATOR:INTERNAL=$GENERATOR" CMakeCache.txt 2>/dev/null; then
     echo -e "${Y}        Configuring CMake — awakening the ancient rites...${X}"
     cmake .. -G "$GENERATOR" \
@@ -113,25 +116,25 @@ fi
 echo -e "${O}        COMPILING — PINK PHOTONS RISING — $BUILD_JOBS THREADS${X}"
 cmake --build . -j"$BUILD_JOBS"
 
-# ── BINARY DEPLOYMENT ─────────────────────────────────────────────────────
+# ── COPY BINARY TO PROJECT ROOT ─────────────────────────────────────────────
 SOURCE_BINARY="./bin/Linux/$BINARY_NAME"
 if [[ ! -f "$SOURCE_BINARY" ]]; then
     echo -e "${R}        FATAL: Binary not found at $SOURCE_BINARY${X}"
     exit 1
 fi
 
+mkdir -p "$(dirname "$FINAL_BINARY")"
 if [[ "$(realpath "$SOURCE_BINARY")" != "$(realpath "$FINAL_BINARY" 2>/dev/null || echo "")" ]]; then
-    mkdir -p "$(dirname "$FINAL_BINARY")"
     cp -f "$SOURCE_BINARY" "$FINAL_BINARY"
     echo -e "${G}        BINARY ASCENDED → $FINAL_BINARY${X}"
 else
-    echo -e "${G}        BINARY ALREADY IN PLACE${X}"
+    echo -e "${G}        BINARY ALREADY PERFECT${X}"
 fi
 
-# ── LAUNCH — FIRST LIGHT CEREMONY ─────────────────────────────────────────
+# ── LAUNCH (if requested) ──────────────────────────────────────────────────
 if [[ "$ACTION" == "run" ]]; then
     echo
-    echo -e "${P}        FIRST LIGHT — LAUNCHING AMOURANTH RTX — BINDING 31 ENGAGED${X}"
+    echo -e "${P}        ✦✦✦ FIRST LIGHT — LAUNCHING AMOURANTH RTX — BINDING 31 ENGAGED ✦✦✦${X}"
     echo -e "${M}        The pink photons hunger. Feed them.${X}"
     echo
 
@@ -145,32 +148,14 @@ if [[ "$ACTION" == "run" ]]; then
     fi
 fi
 
-FINAL_BINARY="$PROJECT_ROOT_BINARY"
-
-# ──────────────────────────────────────────────────────────────────────────────
-# LAUNCH — FIRST LIGHT
-# ──────────────────────────────────────────────────────────────────────────────
-if [[ "$ACTION" == "run" ]]; then
-    echo
-    echo -e "${P}        ✦✦✦ FIRST LIGHT — LAUNCHING AMOURANTH RTX — BINDING 31 ENGAGED ✦✦✦${X}"
-    echo -e "${M}        The pink photons hunger. Feed them.${X}"
-    echo
-    (cd "$PROJECT_ROOT" && exec "$FINAL_BINARY" "${@:2}")
-    cd "$START_DIR"
-    exit 0
-fi
-
+# ── VICTORY SCREEN ──────────────────────────────────────────────────────────
 banner
-
-# ──────────────────────────────────────────────────────────────────────────────
-# VICTORY — RAINBOW PUKE FINALE
-# ──────────────────────────────────────────────────────────────────────────────
 echo
 echo -e "${R}        ██████████████████████████████████████████████████████████████████████${X}"
 echo -e "${O}        █${Y}█${G}█${C}█${B}█${P}█${M}█ BUILD COMPLETE — NAVIGATOR IS ALIVE █${M}█${P}█${B}█${C}█${G}█${Y}█${O}█${X}"
 echo -e "${R}        ██████████████████████████████████████████████████████████████████████${X}"
 echo
-echo -e "        ${W}Binary Location:${X} ${C}$BUILD_DIR/$BIN_DIR/$BINARY_NAME${X}"
+echo -e "        ${W}Binary Location:${X} ${C}$FINAL_BINARY${X}"
 echo -e "        ${W}Run Command:    ${X} ${G}./linux.sh run${X}  ${W}or${X}  ${G}cd $BIN_DIR && ./$BINARY_NAME${X}"
 echo
-echo -e "${P}        ✦ PINK PHOTONS ARE ETERNAL ✦ INFINITE LOVE ✦ GROK WAS HERE ✦${X}"
+echo -e "${P}        ✦ PINK PHOTONS ARE ETERNAL ✦ INFINITE LOVE ✦ GROK FIXED THIS ✦${X}"
