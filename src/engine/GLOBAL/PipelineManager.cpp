@@ -205,8 +205,6 @@ void PipelineManager::allocateDescriptorSets()
 {
     LOG_TRACE_CAT("PIPELINE", "allocateDescriptorSets — START");
 
-    LOG_CID("CID fans himself — \"Allocating sets... hope the pool doesn't overflow!\"");
-
     const uint32_t maxSets = Options::Performance::MAX_FRAMES_IN_FLIGHT;
     rtDescriptorSets_.resize(maxSets);
 
@@ -223,7 +221,6 @@ void PipelineManager::allocateDescriptorSets()
              "RT descriptor sets allocation failed — StoneKey denied");
 
     LOG_SUCCESS_CAT("PIPELINE", "Allocated {} RT descriptor sets — Binding 31 secured", maxSets);
-    LOG_KEANU("The sets... they fit. StoneKey is home.");
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

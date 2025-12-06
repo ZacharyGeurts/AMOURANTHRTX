@@ -1,6 +1,13 @@
 // =============================================================================
 // src/engine/GLOBAL/SwapchainManager.cpp
 // =============================================================================
+//
+// Dual Licensed:
+// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
+//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
+// 2. Commercial licensing: gzac5314@gmail.com
+//
+// =============================================================================
 // AMOURANTH RTX — VALHALLA v∞ TURBO — FINAL ETERNAL CUT
 // THE ONE TRUE SWAPCHAIN — COMPILES CLEAN, NO 60FPS DEADLOCK, NO const ON STATICS
 // =============================================================================

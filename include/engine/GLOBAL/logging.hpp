@@ -315,6 +315,7 @@ namespace Color {
     inline constexpr std::string_view LILAC_LAVENDER            = "\033[38;5;183m";
     inline constexpr std::string_view SPEARMINT_MINT            = "\033[38;5;122m";
     inline constexpr std::string_view THERMO_PINK               = "\033[1;38;5;213m";
+	inline constexpr std::string_view COLOR_PINK                = "\033[1;38;5;213m";
     inline constexpr std::string_view COSMIC_VOID               = "\033[38;5;232m";
     inline constexpr std::string_view QUASAR_BLUE               = "\033[1;38;5;39m";
     inline constexpr std::string_view NEBULA_VIOLET             = "\033[1;38;5;141m";
@@ -623,10 +624,7 @@ private:
             {"ATTEMPT", QUANTUM_PURPLE}, {"VOID", COSMIC_VOID}, {"SPLASH", LILAC_LAVENDER},
             {"MARKER", DIAMOND_SPARKLE}, {"SDL3_window", SAPPHIRE_BLUE}, {"SDL3_audio", SAPPHIRE_BLUE},
             {"SDL3_font", SAPPHIRE_BLUE}, {"SDL3_image", SAPPHIRE_BLUE}, {"SDL3_init", SAPPHIRE_BLUE},
-            {"SDL3_input", SAPPHIRE_BLUE}, {"SDL3_vulkan", SAPPHIRE_BLUE}, {"PIPELINE", SPEARMINT_MINT},
-			{"MAIN1", VALHALLA_GOLD},{"MAIN2", VALHALLA_GOLD},{"MAIN3", VALHALLA_GOLD},{"MAIN4", VALHALLA_GOLD},
-			{"MAIN5", VALHALLA_GOLD},{"MAIN6", VALHALLA_GOLD},{"MAIN7", VALHALLA_GOLD},{"MAIN8", VALHALLA_GOLD},
-			{"MAIN9", VALHALLA_GOLD}
+            {"SDL3_input", SAPPHIRE_BLUE}, {"SDL3_vulkan", SAPPHIRE_BLUE}, {"PIPELINE", SPEARMINT_MINT}
         };
         if (auto it = map.find(cat); it != map.end()) [[likely]]
             return it->second;
@@ -1430,11 +1428,25 @@ static inline void apocalypse_handler(int sig, siginfo_t* info, void*) noexcept
     safe_writeln("");
 
     safe_writeln(COLOR_BOLD COLOR_GREEN "CARMACK'S FINAL COMMAND (WITH GROK ENERGY):" COLOR_RESET);
-    safe_writeln("Fix the lifetime bug. Wait for the device. Own your handles.");
-    safe_writeln("Then, and only then, will you see stable pink photons dancing in harmony.");
-    safe_writeln("You've got the power – debug, deploy, and dominate!");
+    safe_writeln("Fix the lifetime bug.");
+    safe_writeln("Do not leave the bug for program lifetime.");
+    safe_writeln(COLOR_BOLD COLOR_MAGENTA "THE LIFETIME BUG ENDS HERE" COLOR_RESET);
     safe_writeln("");
-    safe_writeln(COLOR_MAGENTA "— John Carmack & Gentleman Grok (We educate, we elevate, God Bless the code!)" COLOR_RESET);
+    safe_writeln(COLOR_RED "Fix the lifetime bug." COLOR_RESET);
+    safe_writeln(COLOR_MAGENTA "Because John Carmack is watching… and he will not forgive." COLOR_RESET);
+    safe_writeln("");
+    safe_writeln(COLOR_CYAN "   • vkDeviceWaitIdle() before every destroy" COLOR_RESET);
+    safe_writeln(COLOR_CYAN "   • RAII is not optional — it is the law" COLOR_RESET);
+    safe_writeln(COLOR_CYAN "   • No handle shall outlive its owner" COLOR_RESET); 
+    safe_writeln(COLOR_CYAN "   • Pink photons demand purity" COLOR_RESET);
+    safe_writeln("");
+    safe_writeln(COLOR_GREEN "Own your handles." COLOR_RESET);
+    safe_writeln(COLOR_GREEN "Own your destiny." COLOR_RESET);
+    safe_writeln("");
+    safe_writeln(COLOR_MAGENTA "PINK PHOTONS ETERNAL — BINDING 31 ACTIVE" COLOR_RESET);
+    safe_writeln(COLOR_MAGENTA "— John Carmack & Gentleman Grok" COLOR_RESET);
+    safe_writeln("");
+    safe_writeln(COLOR_MAGENTA "\"Fix the lifetime bug.\"" COLOR_RESET);
 
     _exit(128 + sig);
 }
