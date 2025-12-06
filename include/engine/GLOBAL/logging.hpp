@@ -23,7 +23,7 @@
 #include <thread>
 #include <source_location>
 #include <string_view>
-#include <print>
+//#include <print>
 #include <fstream>
 #include <array>
 #include <chrono>
@@ -644,78 +644,84 @@ private:
         return DIAMOND_WHITE;
     }
 
-    void printMessage(std::source_location loc,
-                      LogLevel level,
-                      std::string_view category,
-                      std::string formattedMessage,
-                      std::chrono::steady_clock::time_point timestamp,
-                      bool batch = false,
-                      std::string* term_out = nullptr,
-                      std::string* file_out = nullptr) const
-    {
-        using namespace Color;
-        const auto levelIdx = static_cast<size_t>(level);
-        const auto& info = LEVEL_INFOS[levelIdx];
-        const std::string_view levelColor = info.color;
-        const std::string_view levelBg    = info.bg;
-        const std::string_view levelStr   = info.str;
-        const std::string_view catColor   = getCategoryColor(category);
+void printMessage(std::source_location loc,
+                  LogLevel level,
+                  std::string_view category,
+                  std::string formattedMessage,
+                  std::chrono::steady_clock::time_point timestamp,
+                  bool batch = false,
+                  std::string* term_out = nullptr,
+                  std::string* file_out = nullptr) const
+{
+    using namespace Color;
+    const auto levelIdx = static_cast<size_t>(level);
+    const auto& info = LEVEL_INFOS[levelIdx];
+    const std::string_view levelColor = info.color;
+    const std::string_view levelBg    = info.bg;
+    const std::string_view levelStr   = info.str;
+    const std::string_view catColor   = getCategoryColor(category);
 
-        const auto deltaUs = std::chrono::duration_cast<std::chrono::microseconds>(
-            timestamp - firstLogTime_.value()).count();
+    const auto deltaUs = std::chrono::duration_cast<std::chrono::microseconds>(
+        timestamp - firstLogTime_.value()).count();
 
-        const std::string deltaStr = [deltaUs]() -> std::string {
-            if (deltaUs < 10'000) [[likely]] return std::format("{:>7}µs", deltaUs);
-            if (deltaUs < 1'000'000) return std::format("{:>7.3f}ms", deltaUs / 1'000.0);
-            if (deltaUs < 60'000'000) return std::format("{:>7.3f}s", deltaUs / 1'000'000.0);
-            if (deltaUs < 3'600'000'000) return std::format("{:>7.1f}m", deltaUs / 60'000'000.0);
-            return std::format("{:>7.1f}h", deltaUs / 3'600'000'000.0);
-        }();
+    const std::string deltaStr = [deltaUs]() -> std::string {
+        if (deltaUs < 10'000) [[likely]] return std::format("{:>7}µs", deltaUs);
+        if (deltaUs < 1'000'000) return std::format("{:>7.3f}ms", deltaUs / 1'000.0);
+        if (deltaUs < 60'000'000) return std::format("{:>7.3f}s", deltaUs / 1'000'000.0);
+        if (deltaUs < 3'600'000'000) return std::format("{:>7.1f}m", deltaUs / 60'000'000.0);
+        return std::format("{:>7.1f}h", deltaUs / 3'600'000'000.0);
+    }();
 
-        const std::string timeStr = []() -> std::string {
-            auto now = std::chrono::system_clock::now();
-            auto tt  = std::chrono::system_clock::to_time_t(now);
-            auto tm  = *std::localtime(&tt);
-            char buf[9];
-            std::strftime(buf, sizeof(buf), "%H:%M:%S", &tm);
-            return std::string(buf);
-        }();
+    const std::string timeStr = []() -> std::string {
+        auto now = std::chrono::system_clock::now();
+        auto tt  = std::chrono::system_clock::to_time_t(now);
+        auto tm  = *std::localtime(&tt);
+        char buf[9];
+        std::strftime(buf, sizeof(buf), "%H:%M:%S", &tm);
+        return std::string(buf);
+    }();
 
-        const std::string threadId = std::format("{}ms", g_deltaTime * 1000.0f);
+    const std::string threadId = std::format("{}ms", g_deltaTime * 1000.0f);
+    const std::string fileLine = std::format("{}:{}:{}", loc.file_name(), loc.line(), loc.function_name());
 
-        const std::string fileLine = std::format("{}:{}:{}", loc.file_name(), loc.line(), loc.function_name());
+    // Plain text for file
+    const std::string plain_line1 = std::format("{:<{}} {:>{}} {:>{}} [{:>{}}] [{:>{}}] {}\n",
+                                                levelStr, LEVEL_WIDTH,
+                                                deltaStr, DELTA_WIDTH,
+                                                timeStr,  TIME_WIDTH,
+                                                category, CAT_WIDTH,
+                                                threadId, THREAD_WIDTH,
+                                                formattedMessage);
+    const std::string plain_line2 = std::format("{}\n", fileLine);
+    const std::string plain = plain_line1 + plain_line2 + "\n";
 
-        // Plain lines (file output)
-        const std::string plain_line1 = std::format("{:<{}} {:>{}} {:>{}} [{:>{}}] [{:>{}}] {}\n",
-                                                    levelStr, LEVEL_WIDTH,
-                                                    deltaStr, DELTA_WIDTH,
-                                                    timeStr,  TIME_WIDTH,
-                                                    category, CAT_WIDTH,
-                                                    threadId, THREAD_WIDTH,
-                                                    formattedMessage);
-        const std::string plain_line2 = std::format("{}\n", fileLine);
-        const std::string plain = plain_line1 + plain_line2 + "\n";
+    // Colored terminal output
+    std::ostringstream oss;
+    oss << levelBg
+        << std::format("{:<{}}", levelStr, LEVEL_WIDTH) << RESET
+        << " " << std::format("{:>{}}", deltaStr, DELTA_WIDTH) << " "
+        << std::format("{:>{}}", timeStr, TIME_WIDTH) << " "
+        << catColor << std::format("[{:<{}}]", category, CAT_WIDTH - 2) << RESET
+        << " " << LIME_GREEN << std::format("[{:>{}}]", threadId, THREAD_WIDTH - 2) << RESET
+        << " " << levelColor << formattedMessage << RESET << '\n'
+        << CHROMIUM_SILVER << fileLine << RESET << '\n'
+        << '\n';
+    const std::string colored = oss.str();
 
-        // Colored lines (terminal output)
-        std::ostringstream oss;
-        oss << levelBg << std::format("{:<{}}", levelStr, LEVEL_WIDTH) << RESET
-            << " " << std::format("{:>{}}", deltaStr, DELTA_WIDTH) << " "
-            << std::format("{:>{}}", timeStr, TIME_WIDTH) << " "
-            << catColor << std::format("[{:<{}}]", category, CAT_WIDTH - 2) << RESET
-            << " " << LIME_GREEN << std::format("[{:>{}}]", threadId, THREAD_WIDTH - 2) << RESET
-            << " " << levelColor << formattedMessage << RESET << '\n'
-            << CHROMIUM_SILVER << fileLine << RESET << '\n'
-            << '\n';
-        const std::string colored = oss.str();
+    if (batch) {
+        if (term_out) *term_out += colored;
+        if (file_out) *file_out += plain;
+    } else {
+        // REPLACE std::print WITH GOOD OLD std::cout
+        std::cout << colored;
+        std::cout.flush();  // Ensure immediate output (important for crashes)
 
-        if (batch) {
-            if (term_out) *term_out += colored;
-            if (file_out) *file_out += plain;
-        } else {
-            std::print(std::cout, "{}", colored);
-            if (logFile_.is_open()) logFile_ << plain;
+        if (logFile_.is_open()) {
+            logFile_ << plain;
+            logFile_.flush();
         }
     }
+}
 };
 
 } // namespace Logging
