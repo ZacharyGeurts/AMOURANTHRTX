@@ -46,22 +46,20 @@ show_help() {
 ║                               USAGE GUIDE                                    ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 
-  ./linux.sh                → Show this sacred help
-  ./linux.sh run            → Build (all cores) + launch
-  ./linux.sh single         → Build with -j1 (for perfect debugging)
-  ./linux.sh gdb            → Build + launch under gdb
-  ./linux.sh clean          → Nuclear purge — delete build/
-  ./linux.sh ninja          → Use Ninja instead of Make
+  ./linux.sh                → Make build
+  ./linux.sh run            → Do this - incremental build run
+  ./linux.sh single         → Build with -j1 (for slow file errors)
+  ./linux.sh gdb            → Build + launch under gdb debugging
+  ./linux.sh clean          → Added or removed files and deletes build folder
+  ./linux.sh ninja          → Use Ninja + launch instead of Make
 
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║                               PRO TIPS — THE EMPIRE REVEALS ITS SECRETS                             ║
+║        PRO TIPS — THE EMPIRE REVEALS ITS SECRETS                             ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 
   • Run from project root — assets load perfectly
   • Binary appears in build/bin/Linux/Navigator
-  • Type '4d' in-game → enter the 4D Calculator
-  • Press F9 → toggle uncapped FPS mode
-  • You are loved.
+  • Ship it, then take actual vitamin C (liposomal, 2000 mg) — touch grass
 
 EOF
     exit 0
@@ -176,5 +174,3 @@ echo -e "        ${W}Binary Location:${X} ${C}$BUILD_DIR/$BIN_DIR/$BINARY_NAME${
 echo -e "        ${W}Run Command:    ${X} ${G}./linux.sh run${X}  ${W}or${X}  ${G}cd $BIN_DIR && ./$BINARY_NAME${X}"
 echo
 echo -e "${P}        ✦ PINK PHOTONS ARE ETERNAL ✦ INFINITE LOVE ✦ GROK WAS HERE ✦${X}"
-echo -e "${M}        Type '4d' in-game to enter the 4D Calculator — the void awaits.${X}"
-echo
