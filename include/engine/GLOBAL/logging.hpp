@@ -16,48 +16,37 @@
 #pragma once
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_beta.h>
-#include <iostream>
-#include <string>
-#include <format>
-#include <cstdio>
-#include <thread>
-#include <source_location>
-#include <string_view>
-//#include <print>
-#include <fstream>
-#include <array>
+
+#include <atomic>
 #include <chrono>
 #include <cstdint>
-#include <optional>
-#include <sstream>
+#include <deque>
+#include <filesystem>
+#include <format>
+#include <fstream>
+#include <iostream>
+//#include <jthread>
 #include <map>
-#include <functional>
-#include <random>
-#include <cctype>
+#include <shared_mutex>
 #include <glm/glm.hpp>
 #include <glm/gtx/string_cast.hpp>
-#include <vulkan/vulkan.h>
-#include <SDL3/SDL.h>
-#include <ctime>
-#include <queue>
-#include <atomic>
 #include <mutex>
-#include <shared_mutex>
-#include <deque>
+#include <optional>
+#include <source_location>
+#include <string>
+#include <string_view>
+#include <thread>
+#include <tuple>
 #include <vector>
-#include <algorithm>
-#include <stop_token>
-#include <filesystem>
+
+// For backtrace & signals
 #include <execinfo.h>
-#include <cxxabi.h>
-#include <unistd.h>
 #include <csignal>
-#include <cstdlib>
-#include <cxxabi.h>
-#include <sys/wait.h>
-#include <fcntl.h>
+#include <unistd.h>
+
+// For safe_write / snprintf
+#include <cstdio>
 #include <cstring>
-#include <time.h>
 
 // global disposal
 [[noreturn]] void phase9_ballerina(std::string_view reason = {}, const std::source_location loc = std::source_location::current()) noexcept;
@@ -953,51 +942,6 @@ LOG_FATAL("\n"
     return alignment == 0 ? value : ((value + alignment - 1) / alignment) * alignment;
 }
 
-// =============================================================================
-// EMPIRE_STEP — FINAL VERSION — WORKS WITH FUNCTIONS AND BLOCKS — C++23 PURE
-// NOVEMBER 27, 2025 — PINK PHOTONS ETERNAL — THE EMPIRE IS LAW
-// =============================================================================
-// =============================================================================
-// EMPIRE_STEP — PURE C++23 — NO MACROS — INFINITE POWER — ETERNAL
-// =============================================================================
-
-inline constexpr auto EMPIRE_STEP = []<typename F>(F&& phase, const std::source_location loc = std::source_location::current()) {
-    try {
-        std::forward<F>(phase)();
-        LOG_SUCCESS_CAT("MAIN", "[PHASE] ASCENDED FLAWLESSLY");
-        return true;
-    } catch (const std::exception& e) {
-        LOG_FATAL_CAT("MAIN",
-            "{}[FATAL CRASH]\n"
-            "   Origin   : {}:{} — {}\n"
-            "   Reason   : {}{}",
-            Logging::Color::LIGHT_GREEN,
-            loc.file_name(), loc.line(), loc.function_name(),
-            e.what(), Logging::Color::RESET);
-        return false;
-    } catch (...) {
-        LOG_FATAL_CAT("MAIN",
-            "{}[UNKNOWN CATASTROPHE]\n"
-            "   Origin   : {}:{} — {}{}",
-            Logging::Color::LIGHT_GREEN,
-            loc.file_name(), loc.line(), loc.function_name(),
-            Logging::Color::RESET);
-        return false;
-    }
-};
-
-#define EMPIRE_GUARD(condition, message) \
-    if (!(condition)) { \
-        auto loc = std::source_location::current(); \
-        LOG_FATAL_CAT("MAIN", \
-            "{}[EMPIRE REJECTED] {}\n" \
-            "   Origin   : {}:{} — {}{}", \
-            Logging::Color::LIGHT_GREEN, message, \
-            loc.file_name(), loc.line(), loc.function_name(), \
-            Logging::Color::RESET); \
-        phase9_ballerina(std::format("FATAL ERROR → {}:{}", __FILE__, __LINE__), std::source_location::current()); \
-    }
-
 // ==============================================================================
 // ULTIMATE APOCALYPSE CRASH HANDLER – Vulkan 1.4 CORE ONLY (2025 DREAM EDITION)
 // Pink photons eternal. No extensions. No drafts. No mercy.
@@ -1545,9 +1489,9 @@ inline void install_apocalypse_handler() noexcept
 #define LOG_JENSEN(...)      LOG_SUCCESS_CAT("JENSEN",     std::format("{}\n[HUANG] {}{}",             Logging::Color::BLUE,              std::format(__VA_ARGS__),     Logging::Color::RESET))
 #define LOG_CID(...)         LOG_SUCCESS_CAT("CID",        std::format("{}\n[CID] {}{}",               Logging::Color::BOLD_RED,          std::format(__VA_ARGS__),     Logging::Color::RESET))
 #define LOG_CARMACK(...)     LOG_INFO_CAT   ("CARMACK",    std::format("{}\n[JOHN] {}{}",              Logging::Color::TITANIUM_WHITE,    std::format(__VA_ARGS__),     Logging::Color::RESET))
-#define LOG_KEANU(...)       LOG_INFO_CAT   ("KEANU",      std::format("{}\n[WOAH] {}{}",              Logging::Color::BRIGHT_PINKISH_PURPLE,            std::format(__VA_ARGS__),     Logging::Color::RESET))
+#define LOG_KEANU(...)       LOG_INFO_CAT   ("KEANU",      std::format("{}\n[WOAH] {}{}",              Logging::Color::BRIGHT_PINKISH_PURPLE, std::format(__VA_ARGS__),     Logging::Color::RESET))
 #define LOG_GUARDIAN(...)    LOG_INFO_CAT   ("GUARDIAN",   std::format("{}\n[GUARDIAN] {}{}",          Logging::Color::PLATINUM_GRAY,     std::format(__VA_ARGS__),     Logging::Color::RESET))
 #define LOG_BALLERINA(...)   LOG_FAILURE_CAT("BALLERINA",  std::format("{}\n[***] {}{}",               Logging::Color::OBSIDIAN_BLACK,    std::format(__VA_ARGS__),     Logging::Color::RESET))
 #define LOG_MAIN(...)        LOG_SUCCESS_CAT("MAIN",       std::format("{}\n[[[[[MAIN]]]]]\n {}{}",    Logging::Color::BOLD_YELLOW,       std::format(__VA_ARGS__),     Logging::Color::RESET))
-#define LOG_JIMROSS(...)     LOG_SUCCESS_CAT("J.R.",       std::format("{}\n[Mr. Ross] {}{}",          Logging::Color::OKLAHOMA_RED_BOLD,       std::format(__VA_ARGS__),     Logging::Color::RESET))
-#define LOG_VING_RHAMES(...) LOG_SUCCESS_CAT("VINGRHAMES",  std::format("{}\n[Ving Rhames] {}{}",       Logging::Color::BRONZE_BROWN,       std::format(__VA_ARGS__),     Logging::Color::RESET))
+#define LOG_JIMROSS(...)     LOG_SUCCESS_CAT("J.R.",       std::format("{}\n[Mr. Ross] {}{}",          Logging::Color::OKLAHOMA_RED_BOLD, std::format(__VA_ARGS__),     Logging::Color::RESET))
+#define LOG_VING_RHAMES(...) LOG_SUCCESS_CAT("VINGRHAMES", std::format("{}\n[Ving Rhames] {}{}",       Logging::Color::BRONZE_BROWN,      std::format(__VA_ARGS__),     Logging::Color::RESET))
