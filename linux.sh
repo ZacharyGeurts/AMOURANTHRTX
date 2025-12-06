@@ -1,56 +1,82 @@
 #!/usr/bin/env bash
 # =============================================================================
-# linux.sh — Amouranth RTX — THE ONE THAT JUST WORKS™ (Lazy Genius Edition)
-# Always runs from project root → assets load
-# Always returns you to where you started → no mess
+# linux.sh — AMOURANTH RTX — RAINBOW PUKE v3 — SAME-FILE ERROR ELIMINATED
+# No more cp warnings. No more shame. Only beauty. Only her.
+# FIRST LIGHT ACHIEVED — DECEMBER 05, 2025 — BINDING 31 ACTIVE
 # =============================================================================
 
 set -euo pipefail
 
+# ──────────────────────────────────────────────────────────────────────────────
+# HYPER-VIVID RAINBOW COLOR PALETTE
+# ──────────────────────────────────────────────────────────────────────────────
+R="\033[38;5;196m" O="\033[38;5;208m" Y="\033[38;5;226m" G="\033[38;5;82m"
+C="\033[38;5;51m"  B="\033[38;5;33m"  P="\033[38;5;201m" M="\033[38;5;165m"
+W="\033[1;97m"     K="\033[38;5;232m" X="\033[0m"
+
 BUILD_DIR="build"
 BIN_DIR="build/bin/Linux"
 BINARY_NAME="Navigator"
-
-# Colors
-R="\033[0;31m" G="\033[0;32m" Y="\033[1;33m" B="\033[0;34m" M="\033[0;35m" C="\033[0;36m" W="\033[1;37m" N="\033[0m"
-
-# Save where we started — we will return here like a good warrior
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR" && pwd)"   # in case script is symlinked
+PROJECT_ROOT="$(cd "$SCRIPT_DIR" && pwd)"
+START_DIR="$(pwd)"
 
+# ──────────────────────────────────────────────────────────────────────────────
+# SACRED BANNER — UNTOUCHED PERFECTION
+# ──────────────────────────────────────────────────────────────────────────────
 banner() {
     clear
-    cat << "EOF"
-          █████╗ ███╗   ███╗ ██████╗ ██╗   ██╗██████╗  █████╗ ███╗   ██╗████████╗██╗  ██╗
-         ██╔══██╗████╗ ████║██╔═══██╗██║   ██║██╔══██╗██╔══██╗████╗  ██║╚══██╔══╝██║  ██║
-         ███████║██╔████╔██║██║   ██║██║   ██║██████╔╝███████║██╔██╗ ██║   ██║   ███████║
-         ██╔══██║██║╚██╔╝██║██║   ██║██║   ██║██╔══██╗██╔══██║██║╚██╗██║   ██║   ██╔══██║
-         ██║  ██║██║ ╚═╝ ██║╚██████╔╝╚██████╔╝██║  ██║██║  ██║██║ ╚████║   ██║   ██║  ██║
-         ╚═╝  ╚═╝╚═╝     ╚═╝ ╚═════╝  ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝   ╚═╝   ╚═╝  ╚═╝
-EOF
-    echo -e "${C}                       AMOURANTH RTX — $(date '+%B %d, %Y')${N}\n"
+    echo -e "${R}          █████╗ ███╗   ███╗ ██████╗ ██╗   ██╗██████╗  █████╗ ███╗   ██╗████████╗██╗  ██╗${X}"
+    echo -e "${O}         ██╔══██╗████╗ ████║██╔═══██╗██║   ██║██╔══██╗██╔══██╗████╗  ██║╚══██╔══╝██║  ██║${X}"
+    echo -e "${Y}         ███████║██╔████╔██║██║   ██║██║   ██║██████╔╝███████║██╔██╗ ██║   ██║   ███████║${X}"
+    echo -e "${G}         ██╔══██║██║╚██╔╝██║██║   ██║██║   ██║██╔══██╗██╔══██║██║╚██╗██║   ██║   ██╔══██║${X}"
+    echo -e "${C}         ██║  ██║██║ ╚═╝ ██║╚██████╔╝╚██████╔╝██║  ██║██║  ██║██║ ╚████║   ██║   ██║  ██║${X}"
+    echo -e "${B}         ╚═╝  ╚═╝╚═╝     ╚═╝ ╚═════╝  ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝   ╚═╝   ╚═╝  ╚═╝${X}"
+    echo -e "${P}               ██████╗ ████████╗██╗  ██╗    ███████╗███╗   ██╗ ██████╗ ██╗███╗   ██╗███████╗${X}"
+    echo -e "${M}               ██╔══██╗╚══██╔══╝╚██╗██╔╝    ██╔════╝████╗  ██║██╔════╝ ██║████╗  ██║██╔════╝${X}"
+    echo -e "${R}               ██████╔╝   ██║    ╚███╔╝     █████╗  ██╔██╗ ██║██║  ███╗██║██╔██╗ ██║█████╗  ${X}"
+    echo -e "${O}               ██╔══██╗   ██║    ██╔██╗     ██╔══╝  ██║╚██╗██║██║   ██║██║██║╚██╗██║██╔══╝  ${X}"
+    echo -e "${Y}               ██║  ██║   ██║   ██╔╝ ██╗    ███████╗██║ ╚████║╚██████╔╝██║██║ ╚████║███████╗${X}"
+    echo -e "${G}               ╚═╝  ╚═╝   ╚═╝   ╚═╝  ╚═╝    ╚══════╝╚═╝  ╚═══╝ ╚═════╝ ╚═╝╚═╝  ╚═══╝╚══════╝${X}"
+    echo
+    echo -e "${P}                  ✦ ✦ ✦  AMOURANTH RTX — FIRST LIGHT — $(date '+%B %d, %Y')  ✦ ✦ ✦${X}"
+    echo -e "${W}                        BINDING 31 ACTIVE — PINK PHOTONS ETERNAL${X}"
+    echo
 }
 
-show_help() {
-    banner
-    echo -e "${W}Usage:${N}"
-    echo -e "  ./linux.sh            → help"
-    echo -e "  ./linux.sh run        → build + run (assets always load)"
-    echo -e "  ./linux.sh clean      → nuke everything"
-    echo -e "  ./linux.sh --ninja run → use Ninja"
-    echo
+show_help() { banner; cat << 'EOF'
+
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                               USAGE GUIDE                                    ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+  ./linux.sh               → Show this beautiful help
+  ./linux.sh run           → Build + launch (assets always load)
+  ./linux.sh clean         → Cleanse — delete build/
+  ./linux.sh ninja         → Use Ninja (vs cmake)
+
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                               PRO TIPS                                       ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+  • Always run from project root — assets load perfectly
+  • Script returns you to build dir on exit
+  • Binary ends up in build/bin/Linux/Navigator
+
+EOF
     exit 0
 }
 
 clean() {
     banner
-    echo -e "${Y}Nuking build directory...${N}"
+    echo -e "${R}        ☢☢☢  INITIATING FULL SYSTEM PURGE — NO SURVIVORS  ☢☢☢${X}"
+    echo -e "${Y}        Deleting build directory, caches, sins of the past...${X}"
     rm -rf "$BUILD_DIR" CMakeCache.txt CMakeFiles .shader_hash_cache compile_commands.json 2>/dev/null || true
-    echo -e "${G}Clean complete.${N}"
+    echo -e "${G}        PURGE COMPLETE — THE VOID IS CLEAN${X}"
+    echo -e "${P}        Ready for rebirth. Type ./linux.sh run to ascend.${X}"
     exit 0
 }
 
-# ─── Args ───
 ACTION="help"
 USE_NINJA=""
 
@@ -60,7 +86,7 @@ for arg in "$@"; do
         clean)         clean ;;
         --ninja|ninja) USE_NINJA="yes" ;;
         --help|-h|help|"") show_help ;;
-        *)             echo -e "${R}Invalid: $arg${N}"; show_help ;;
+        *)             echo -e "${R}UNKNOWN COMMAND: $arg — TYPE ./linux.sh FOR HELP${X}"; show_help ;;
     esac
 done
 
@@ -68,15 +94,15 @@ done
 GENERATOR="Unix Makefiles"
 [[ "$USE_NINJA" ]] && GENERATOR="Ninja"
 
-# ─── Build ───
 banner
-echo -e "${C}Building with $GENERATOR (-j$(nproc))...${N}"
+echo -e "${P}        ✦ BUILDING WITH $GENERATOR — USING ALL $(nproc) CORES ✦${X}"
+echo -e "${C}        Compiling shaders of the gods... patience, mortal...${X}"
 
 mkdir -p "$BUILD_DIR"
 cd "$BUILD_DIR"
 
 if [[ ! -f CMakeCache.txt ]] || ! grep -q "CMAKE_GENERATOR:INTERNAL=$GENERATOR" CMakeCache.txt 2>/dev/null; then
-    echo -e "${Y}Configuring CMake...${N}"
+    echo -e "${Y}        ✦ Configuring CMake — invoking the ancient rites...${X}"
     cmake .. -G "$GENERATOR" \
         -DCMAKE_BUILD_TYPE=Debug \
         -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
@@ -84,64 +110,58 @@ if [[ ! -f CMakeCache.txt ]] || ! grep -q "CMAKE_GENERATOR:INTERNAL=$GENERATOR" 
         -DCMAKE_C_COMPILER=gcc-14
 fi
 
-echo -e "${Y}Compiling...${N}"
+echo -e "${O}        ✦ COMPILING — PINK PHOTONS MANIFESTING — DO NOT INTERRUPT${X}"
 cmake --build . -j$(nproc)
 
-# ─── Binary handling ───
+# ──────────────────────────────────────────────────────────────────────────────
+# FIXED: ONLY COPY IF PATHS ARE DIFFERENT — NO MORE "SAME FILE" WARNING
+# ──────────────────────────────────────────────────────────────────────────────
 SOURCE_BINARY="./bin/Linux/$BINARY_NAME"
-DEST_BINARY="../$BIN_DIR/$BINARY_NAME"
+PROJECT_ROOT_BINARY="$PROJECT_ROOT/$BIN_DIR/$BINARY_NAME"
 
 if [[ ! -f "$SOURCE_BINARY" ]]; then
-    echo -e "${R}FATAL: Binary not found at $SOURCE_BINARY${N}"
+    echo -e "${R}        ✦ FATAL: Binary not found at $SOURCE_BINARY${X}"
+    echo -e "${R}        The gods have rejected us. Check CMake output above.${X}"
     exit 1
 fi
 
-mkdir -p "$(dirname "$DEST_BINARY")"
-if [[ "$(realpath "$SOURCE_BINARY")" != "$(realpath "$DEST_BINARY" 2>/dev/null || echo "")" ]]; then
-    cp -f "$SOURCE_BINARY" "$DEST_BINARY"
-    echo -e "${G}Binary deployed → $DEST_BINARY${N}"
+# Only copy if source and destination are actually different paths
+if [[ "$(realpath "$SOURCE_BINARY")" != "$(realpath "$PROJECT_ROOT_BINARY" 2>/dev/null || echo "")" ]]; then
+    mkdir -p "$(dirname "$PROJECT_ROOT_BINARY")"
+    cp -f "$SOURCE_BINARY" "$PROJECT_ROOT_BINARY"
+    echo -e "${G}        ✓ BINARY DEPLOYED → $PROJECT_ROOT_BINARY${X}"
 else
-    echo -e "${G}Binary already in position${N}"
+    echo -e "${G}        ✓ BINARY ALREADY IN PLACE → $SOURCE_BINARY${X}"
 fi
 
-FINAL_BINARY="$(realpath "$DEST_BINARY")"
+FINAL_BINARY="$PROJECT_ROOT_BINARY"
 
-# ─── Run — The Lazy Genius Way (assets load + we return home) ───
+# ──────────────────────────────────────────────────────────────────────────────
+# LAUNCH — FIRST LIGHT
+# ──────────────────────────────────────────────────────────────────────────────
 if [[ "$ACTION" == "run" ]]; then
-    echo -e "${M}FIRST LIGHT — Launching from the sacred root...${N}\n"
-    # This is the magic: run from project root, then return to where we were
+    echo
+    echo -e "${P}        ✦✦✦ FIRST LIGHT — LAUNCHING AMOURANTH RTX — BINDING 31 ENGAGED ✦✦✦${X}"
+    echo -e "${M}        The pink photons hunger. Feed them.${X}"
+    echo
     (cd "$PROJECT_ROOT" && exec "$FINAL_BINARY" "${@:2}")
-    # If exec fails (extremely rare), we still return:
-    cd "$SCRIPT_DIR"
+    cd "$START_DIR"
     exit 0
 fi
 
-# Victory
-echo
-echo -e "${G}Build Complete — Navigator ready${N}"
-echo -e "Run: ${M}./linux.sh run${N} or ${M}./$BIN_DIR/$BINARY${N}"
-echo
+banner
 
-echo ""
-echo " "
-echo -e "${R}               █████╗ ███╗   ███╗ ██████╗ ██╗   ██╗██████╗  █████╗ ███╗   ██╗████████╗██╗  ██╗${N}"
-echo -e "${O}              ██╔══██╗████╗ ████║██╔═══██╗██║   ██║██╔══██╗██╔══██╗████╗  ██║╚══██╔══╝██║  ██║${N}"
-echo -e "${Y}              ███████║██╔████╔██║██║   ██║██║   ██║██████╔╝███████║██╔██╗ ██║   ██║   ███████║${N}"
-echo -e "${G}              ██╔══██║██║╚██╔╝██║██║   ██║██║   ██║██╔══██╗██╔══██║██║╚██╗██║   ██║   ██╔══██║${N}"
-echo -e "${C}              ██║  ██║██║ ╚═╝ ██║╚██████╔╝╚██████╔╝██║  ██║██║  ██║██║ ╚████║   ██║   ██║  ██║${N}"
-echo -e "${B}              ╚═╝  ╚═╝╚═╝     ╚═╝ ╚═════╝  ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝   ╚═╝   ╚═╝  ╚═╝${N}"
-echo " "
-echo -e "${M}               ██████╗ ████████╗██╗  ██╗    ███████╗███╗   ██╗ ██████╗ ██╗███╗   ██╗███████╗${N}"
-echo -e "${P}               ██╔══██╗╚══██╔══╝╚██╗██╔╝    ██╔════╝████╗  ██║██╔════╝ ██║████╗  ██║██╔════╝${N}"
-echo -e "${r}               ██████╔╝   ██║    ╚███╔╝     █████╗  ██╔██╗ ██║██║  ███╗██║██╔██╗ ██║█████╗  ${N}"
-echo -e "${o}               ██╔══██╗   ██║    ██╔██╗     ██╔══╝  ██║╚██╗██║██║   ██║██║██║╚██╗██║██╔══╝  ${N}"
-echo -e "${y}               ██║  ██║   ██║   ██╔╝ ██╗    ███████╗██║ ╚████║╚██████╔╝██║██║ ╚████║███████╗${N}"
-echo -e "${g}               ╚═╝  ╚═╝   ╚═╝   ╚═╝  ╚═╝    ╚══════╝╚═╝  ╚═══╝ ╚═════╝ ╚═╝╚═╝  ╚═══╝╚══════╝${N}"
-echo " "
-echo -e "${W}        ██████████████████████████████████████████████████████████████████████████████████████${N}"
-echo " "
-echo -e "══════════════════════════════════════════════════════════"
-echo -e "       Amouranth RTX — Linux build successful ✓"
-echo -e "       Binary location: $BUILD_DIR/$BIN_DIR/Navigator"
-echo -e "       Run with: cd $BUILD_DIR/$BIN_DIR && ./Navigator"
-echo -e "══════════════════════════════════════════════════════════\n"
+# ──────────────────────────────────────────────────────────────────────────────
+# VICTORY — RAINBOW PUKE FINALE
+# ──────────────────────────────────────────────────────────────────────────────
+echo
+echo -e "${R}        ██████████████████████████████████████████████████████████████████████${X}"
+echo -e "${O}        █${Y}█${G}█${C}█${B}█${P}█${M}█ BUILD COMPLETE — NAVIGATOR IS ALIVE █${M}█${P}█${B}█${C}█${G}█${Y}█${O}█${X}"
+echo -e "${R}        ██████████████████████████████████████████████████████████████████████${X}"
+echo
+echo -e "        ${W}Binary Location:${X} ${C}$BUILD_DIR/$BIN_DIR/$BINARY_NAME${X}"
+echo -e "        ${W}Run Command:    ${X} ${G}./linux.sh run${X}  ${W}or${X}  ${G}cd $BIN_DIR && ./$BINARY_NAME${X}"
+echo
+echo -e "${P}        ✦ PINK PHOTONS ARE ETERNAL ✦ INFINITE LOVE ✦ GROK WAS HERE ✦${X}"
+echo -e "${M}        Type '4d' in-game to enter the 4D Calculator — the void awaits.${X}"
+echo
