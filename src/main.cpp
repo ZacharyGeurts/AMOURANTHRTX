@@ -724,6 +724,58 @@ inline std::unique_ptr<MeshLoader::Mesh> g_mesh = nullptr;
 static SDL_Surface* g_base_icon = nullptr;
 static SDL_Surface* g_hdpi_icon = nullptr;
 
+inline void AdvanceEternalRing() noexcept
+{
+    static constexpr uint32_t FRAMES = Options::Performance::MAX_FRAMES_IN_FLIGHT;
+
+    static std::array<VkCommandPool,   FRAMES> g_pools   = {};
+    static std::array<VkCommandBuffer, FRAMES> g_cmds    = {};
+    static std::array<VkFence,         FRAMES> g_fences  = {};
+    static uint32_t                           g_current = 0;
+    static bool                               g_initialized = false;
+
+    if (!g_initialized) {
+        const VkDevice dev = stone_device();
+
+        VkCommandPoolCreateInfo poolInfo{
+            .sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+            .flags            = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT |
+                                VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
+            .queueFamilyIndex = RTX::g_ctx().graphicsFamily()
+        };
+
+        VkFenceCreateInfo fenceInfo{
+            .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+            .flags = VK_FENCE_CREATE_SIGNALED_BIT
+        };
+
+        for (uint32_t i = 0; i < FRAMES; ++i) {
+            VK_CHECK(vkCreateCommandPool(dev, &poolInfo, nullptr, &g_pools[i]));
+            VkCommandBufferAllocateInfo allocInfo{
+                .sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+                .commandPool        = g_pools[i],
+                .level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+                .commandBufferCount = 1
+            };
+            VK_CHECK(vkAllocateCommandBuffers(dev, &allocInfo, &g_cmds[i]));
+            VK_CHECK(vkCreateFence(dev, &fenceInfo, nullptr, &g_fences[i]));
+        }
+
+        RTX::g_ctx().commandPool_ = g_pools[0];
+        g_initialized = true;
+
+        LOG_AMOURANTH("ETERNAL COMMAND RING FORGED — {} SLOTS — g_ctx().commandPool_ = IMMORTAL", FRAMES);
+    }
+
+    // Advance to next frame
+    vkWaitForFences(stone_device(), 1, &g_fences[g_current], VK_TRUE, UINT64_MAX);
+    vkResetFences(stone_device(), 1, &g_fences[g_current]);
+    vkResetCommandPool(stone_device(), g_pools[g_current], 0);
+
+    g_current = (g_current + 1) % FRAMES;
+    RTX::g_ctx().commandPool_ = g_pools[g_current];  // ← Keeps all old code working
+}
+
 static void createRealFinalWindow() noexcept
 {
     const int w = Options::Window::DEFAULT_WIDTH;
@@ -1145,9 +1197,6 @@ int main(int, char**)
 {
     install_apocalypse_handler();
 
-    // ========================================================================
-    // ALL PHASES — FORGED IN FIRE
-    // ========================================================================
     phase1_preInitialization();
     phase3_sacrificialSplash();
     phase4_merchantShip();
@@ -1155,11 +1204,77 @@ int main(int, char**)
     phase7_forgeTheRTX();
 
     auto renderer = phase7_5_Renderer();
-
     stone_seal_final();
 
+	AdvanceEternalRing();
+
     // ========================================================================
-    // ASCENSION COMPLETE — HAND OVER TO THE CAPTAIN
+    // ETERNAL COMMAND RING — FORGED WITH PURE STATIC MAGIC
+    // g_ctx().commandPool_ IS NOW ETERNAL AND ALWAYS VALID
+    // NO LOCAL CLASSES. NO STATIC MEMBERS. NO ERRORS.
+    // ========================================================================
+
+    static constexpr uint32_t FRAMES = Options::Performance::MAX_FRAMES_IN_FLIGHT;
+
+    static std::array<VkCommandPool,   FRAMES> g_pools   = {};
+    static std::array<VkCommandBuffer, FRAMES> g_cmds    = {};
+    static std::array<VkFence,         FRAMES> g_fences  = {};
+    static uint32_t                           g_current = 0;
+    static bool                               g_ringInitialized = false;
+
+    if (!g_ringInitialized) {
+        const VkDevice dev = stone_device();
+
+        const VkCommandPoolCreateInfo poolInfo{
+            .sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+            .flags            = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT |
+                                VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
+            .queueFamilyIndex = RTX::g_ctx().graphicsFamily()  // ← Correct call
+        };
+
+        const VkFenceCreateInfo fenceInfo{
+            .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+            .flags = VK_FENCE_CREATE_SIGNALED_BIT
+        };
+
+        for (uint32_t i = 0; i < FRAMES; ++i) {
+            VK_CHECK(vkCreateCommandPool(dev, &poolInfo, nullptr, &g_pools[i]));
+
+            VkCommandBufferAllocateInfo allocInfo{
+                .sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+                .commandPool        = g_pools[i],
+                .level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+                .commandBufferCount = 1
+            };
+            VK_CHECK(vkAllocateCommandBuffers(dev, &allocInfo, &g_cmds[i]));
+            VK_CHECK(vkCreateFence(dev, &fenceInfo, nullptr, &g_fences[i]));
+        }
+
+        // SACRED PATCH — g_ctx().commandPool_ NOW POINTS TO ETERNAL RING
+        RTX::g_ctx().commandPool_ = g_pools[0];
+
+        LOG_AMOURANTH("ETERNAL COMMAND RING FORGED — {} SLOTS — g_ctx().commandPool_ = ETERNAL", FRAMES);
+        g_ringInitialized = true;
+    }
+
+    // ========================================================================
+    // HELPER: Advance ring and keep g_ctx().commandPool_ in sync
+    // Call this at the start of each frame if you want perfect sync
+    // ========================================================================
+    [[maybe_unused]] static const auto advanceEternalRing = []() {
+        vkWaitForFences(stone_device(), 1, &g_fences[g_current], VK_TRUE, UINT64_MAX);
+        vkResetFences(stone_device(), 1, &g_fences[g_current]);
+        vkResetCommandPool(stone_device(), g_pools[g_current], 0);
+
+        g_current = (g_current + 1) % FRAMES;
+        RTX::g_ctx().commandPool_ = g_pools[g_current];  // Keep legacy code happy forever
+    };
+
+    // Optional: call once per frame
+    // advanceEternalRing();
+
+    // ========================================================================
+    // ASCENSION — NOW GO FULL ROBOT HEAVY
     // ========================================================================
     g_app_ptr = std::make_unique<Application>(
         "AMOURANTH RTX — VALHALLA v∞ TURBO",
@@ -1168,9 +1283,19 @@ int main(int, char**)
     );
     g_app_ptr->setRenderer(std::move(renderer));
 
-    // ONE CALL. ONE TRUTH.
     g_app_ptr->run();
+
     phase9_ballerina("FINAL GRACE: ETERNAL SLIPSTREAM", std::source_location::current());
+
+    // Cleanup on exit
+    vkDeviceWaitIdle(stone_device());
+    for (uint32_t i = 0; i < FRAMES; ++i) {
+        if (g_cmds[i])   vkFreeCommandBuffers(stone_device(), g_pools[i], 1, &g_cmds[i]);
+        if (g_fences[i]) vkDestroyFence(stone_device(), g_fences[i], nullptr);
+        if (g_pools[i])  vkDestroyCommandPool(stone_device(), g_pools[i], nullptr);
+    }
+
+    LOG_AMOURANTH("ETERNAL COMMAND RING — RETURNED TO VALHALLA");
 
     return 0;
 }
