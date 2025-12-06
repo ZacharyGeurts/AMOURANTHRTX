@@ -1,21 +1,17 @@
 #!/usr/bin/env bash
 # =============================================================================
-# linux.sh — AMOURANTH RTX — RAINBOW PUKE v∞ — FIRST LIGHT ETERNAL
-# ./linux.sh         → build only
-# ./linux.sh run     → build + launch
-# ./linux.sh single  → -j1 build + launch
-# ./linux.sh gdb     → build + launch under gdb
-# ./linux.sh ninja   → use Ninja generator
-# ./linux.sh clean   → nuke everything
-# BINDING 31 ACTIVE — PINK PHOTONS ETERNAL — DECEMBER 06, 2025
+# linux.sh — AMOURANTH RTX — WATER TEMPLE EDITION — FIRST LIGHT ETERNAL
+# Now with: ./linux.sh single → -j1 build | ./linux.sh gdb → debug launch
+# The ocean forgives. The tide remembers. BINDING 31 ACTIVE — DECEMBER 06, 2025
 # =============================================================================
 
 set -euo pipefail
 
-# ── RAINBOW COLORS ───────────────────────────────────────────────────────────
-R="\033[38;5;196m" O="\033[38;5;208m" Y="\033[38;5;226m" G="\033[38;5;82m"
-C="\033[38;5;51m"  B="\033[38;5;33m"  P="\033[38;5;201m" M="\033[38;5;165m"
-W="\033[1;97m"     X="\033[0m"
+# ── OCEAN PALETTE ────────────────────────────────────────────────────────────
+AQUA="\033[38;5;51m"   DEEP="\033[38;5;27m"   TURQ="\033[38;5;45m"
+WAVE="\033[38;5;39m"   FOAM="\033[38;5;195m"  PEARL="\033[38;5;231m"
+CORAL="\033[38;5;204m" ABYSS="\033[38;5;17m"  GLOW="\033[38;5;159m"
+W="\033[1;97m"        X="\033[0m"
 
 BUILD_DIR="build"
 BIN_DIR="build/bin/Linux"
@@ -25,21 +21,22 @@ FINAL_BINARY="$PROJECT_ROOT/$BIN_DIR/$BINARY_NAME"
 
 banner() {
     clear
-    echo -e "${R}          █████╗ ███╗   ███╗ ██████╗ ██╗   ██╗██████╗  █████╗ ███╗   ██╗████████╗██╗  ██╗${X}"
-    echo -e "${O}         ██╔══██╗████╗ ████║██╔═══██╗██║   ██║██╔══██╗██╔══██╗████╗  ██║╚══██╔══╝██║  ██║${X}"
-    echo -e "${Y}         ███████║██╔████╔██║██║   ██║██║   ██║██████╔╝███████║██╔██╗ ██║   ██║   ███████║${X}"
-    echo -e "${G}         ██╔══██║██║╚██╔╝██║██║   ██║██║   ██║██╔══██╗██╔══██║██║╚██╗██║   ██║   ██╔══██║${X}"
-    echo -e "${C}         ██║  ██║██║ ╚═╝ ██║╚██████╔╝╚██████╔╝██║  ██║██║  ██║██║ ╚████║   ██║   ██║  ██║${X}"
-    echo -e "${B}         ╚═╝  ╚═╝╚═╝     ╚═╝ ╚═════╝  ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝   ╚═╝   ╚═╝  ╚═╝${X}"
-    echo -e "${P}               ██████╗ ████████╗██╗  ██╗    ███████╗███╗   ██╗ ██████╗ ██╗███╗   ██╗███████╗${X}"
-    echo -e "${M}               ██╔══██╗╚══██╔══╝╚██╗██╔╝    ██╔════╝████╗  ██║██╔════╝ ██║████╗  ██║██╔════╝${X}"
-    echo -e "${R}               ██████╔╝   ██║    ╚███╔╝     █████╗  ██╔██╗ ██║██║  ███╗██║██╔██╗ ██║█████╗  ${X}"
-    echo -e "${O}               ██╔══██╗   ██║    ██╔██╗     ██╔══╝  ██║╚██╗██║██║   ██║██║██║╚██╗██║██╔══╝  ${X}"
-    echo -e "${Y}               ██║  ██║   ██║   ██╔╝ ██╗    ███████╗██║ ╚████║╚██████╔╝██║██║ ╚████║███████╗${X}"
-    echo -e "${G}               ╚═╝  ╚═╝   ╚═╝   ╚═╝  ╚═╝    ╚══════╝╚═╝  ╚═══╝ ╚═════╝ ╚═╝╚═╝  ╚═══╝╚══════╝${X}"
+    echo -e "${DEEP}          █████╗ ███╗   ███╗ ██████╗ ██╗   ██╗██████╗  █████╗ ███╗   ██╗████████╗██╗  ██╗${X}"
+    echo -e "${AQUA}         ██╔══██╗████╗ ████║██╔═══██╗██║   ██║██╔══██╗██╔══██╗████╗  ██║╚══██╔══╝██║  ██║${X}"
+    echo -e "${TURQ}         ███████║██╔████╔██║██║   ██║██║   ██║██████╔╝███████║██╔██╗ ██║   ██║   ███████║${X}"
+    echo -e "${WAVE}         ██╔══██║██║╚██╔╝██║██║   ██║██║   ██║██╔══██╗██╔══██║██║╚██╗██║   ██║   ██╔══██║${X}"
+    echo -e "${GLOW}         ██║  ██║██║ ╚═╝ ██║╚██████╔╝╚██████╔╝██║  ██║██║  ██║██║ ╚████║   ██║   ██║  ██║${X}"
+    echo -e "${FOAM}         ╚═╝  ╚═╝╚═╝     ╚═╝ ╚═════╝  ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝   ╚═╝   ╚═╝  ╚═╝${X}"
     echo
-    echo -e "${P}                  AMOURANTH RTX — FIRST LIGHT — $(date '+%B %d, %Y')${X}"
-    echo -e "${W}                        BINDING 31 ACTIVE — PINK PHOTONS ETERNAL${X}"
+    echo -e "${CORAL}               ██████╗ ████████╗██╗  ██╗    ███████╗███╗   ██╗ ██████╗ ██╗███╗   ██╗███████╗${X}"
+    echo -e "${AQUA}               ██╔══██╗╚══██╔══╝╚██╗██╔╝    ██╔════╝████╗  ██║██╔════╝ ██║████╗  ██║██╔════╝${X}"
+    echo -e "${TURQ}               ██████╔╝   ██║    ╚███╔╝     █████╗  ██╔██╗ ██║██║  ███╗██║██╔██╗ ██║█████╗  ${X}"
+    echo -e "${WAVE}               ██╔══██╗   ██║    ██╔██╗     ██╔══╝  ██║╚██╗██║██║   ██║██║██║╚██╗██║██╔══╝  ${X}"
+    echo -e "${GLOW}               ██║  ██║   ██║   ██╔╝ ██╗    ███████╗██║ ╚████║╚██████╔╝██║██║ ╚████║███████╗${X}"
+    echo -e "${PEARL}               ╚═╝  ╚═╝   ╚═╝   ╚═╝  ╚═╝    ╚══════╝╚═╝  ╚═══╝ ╚═════╝ ╚═╝╚═╝  ╚═══╝╚══════╝${X}"
+    echo
+    echo -e "${GLOW}                AMOURANTH RTX — WATER TEMPLE — $(date '+%B %d, %Y')${X}"
+    echo -e "${W}                       BINDING 31 ACTIVE — AQUAMARINE PHOTONS ETERNAL${X}"
     echo
 }
 
@@ -48,23 +45,23 @@ show_help() {
     cat << 'EOF'
 
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║                               USAGE GUIDE                                    ║
+║                              WATER TEMPLE USAGE                               ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 
   ./linux.sh                → build only
   ./linux.sh run            → build + launch
-  ./linux.sh single         → build with -j1 + launch
+  ./linux.sh single         → -j1 build + launch
   ./linux.sh gdb            → build + launch under gdb
-  ./linux.sh clean          → delete build folder & cmake cache
-  ./linux.sh ninja          → use Ninja instead of Make
-  ./linux.sh ninja run      → Ninja + launch (ultimate speed)
+  ./linux.sh clean          → if adding files
+  ./linux.sh ninja          → use Ninja (faster than a riptide)
+  ./linux.sh ninja run      → use Ninja + launch
 
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║                     PINK PHOTONS DEMAND SACRIFICE                           ║
+║                     THE TIDE BRINGS GIFTS AND TAKES MEMORIES                ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 
-  • Binary ends up at: build/bin/Linux/Navigator
-  • Take 2000mg liposomal vitamin C and touch grass after victory
+  • Binary surfaces at build/bin/Linux/Navigator
+  • Drink deep from the ocean. Hydrate. Touch kelp.
 
 EOF
     exit 0
@@ -72,17 +69,17 @@ EOF
 
 clean() {
     banner
-    echo -e "${R}        NUCLEAR PURGE INITIATED — ALL SIN DELETED${X}"
+    echo -e "${ABYSS}        TIDAL PURGE — AQUA${X}"
     rm -rf "$BUILD_DIR" CMakeCache.txt CMakeFiles .shader_hash_cache compile_commands.json 2>/dev/null || true
-    echo -e "${G}        PURGE COMPLETE — THE VOID IS PURE AGAIN${X}"
+    echo -e "${GLOW}        THE ABYSS IS CLEANSED — ONLY WATER REMAINS${X}"
     exit 0
 }
 
 # ── ARGUMENT PARSING ────────────────────────────────────────────────────────
-ACTION="build"      # build | run
+ACTION="build"
 BUILD_JOBS="$(nproc)"
 GENERATOR="Unix Makefiles"
-LAUNCH_MODE="normal"  # normal | gdb
+LAUNCH_MODE="normal"
 
 for arg in "$@"; do
     case "${arg,,}" in
@@ -92,20 +89,19 @@ for arg in "$@"; do
         clean)      clean ;;
         ninja|--ninja) GENERATOR="Ninja" ;;
         --help|-h|help|"") show_help ;;
-        *)          echo -e "${R}UNKNOWN ARG: $arg${X}"; show_help ;;
+        *)          echo -e "${CORAL}UNKNOWN CURRENT: $arg${X}"; show_help ;;
     esac
 done
 
 # ── BUILD ───────────────────────────────────────────────────────────────────
 banner
-echo -e "${P}        BUILDING WITH $GENERATOR — JOBS=$BUILD_JOBS${X}"
+echo -e "${WAVE}        SURFACING WITH $GENERATOR — $BUILD_JOBS THREADS RISING${X}"
 
 mkdir -p "$BUILD_DIR"
 cd "$BUILD_DIR"
 
-# Reconfigure if generator changed
 if [[ ! -f CMakeCache.txt ]] || ! grep -q "CMAKE_GENERATOR:INTERNAL=$GENERATOR" CMakeCache.txt 2>/dev/null; then
-    echo -e "${Y}        Configuring CMake — awakening the ancient rites...${X}"
+    echo -e "${TURQ}        Calling the depths — CMake configuration rising...${X}"
     cmake .. -G "$GENERATOR" \
         -DCMAKE_BUILD_TYPE=Debug \
         -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
@@ -113,49 +109,46 @@ if [[ ! -f CMakeCache.txt ]] || ! grep -q "CMAKE_GENERATOR:INTERNAL=$GENERATOR" 
         -DCMAKE_C_COMPILER=gcc-14
 fi
 
-echo -e "${O}        COMPILING — PINK PHOTONS RISING — $BUILD_JOBS THREADS${X}"
+echo -e "${AQUA}        COMPILING — WAVES OF CODE CRASHING — $BUILD_JOBS THREADS${X}"
 cmake --build . -j"$BUILD_JOBS"
 
-# ── COPY BINARY TO PROJECT ROOT ─────────────────────────────────────────────
+# ── BINARY ASCENSION ───────────────────────────────────────────────────────
 SOURCE_BINARY="./bin/Linux/$BINARY_NAME"
-if [[ ! -f "$SOURCE_BINARY" ]]; then
-    echo -e "${R}        FATAL: Binary not found at $SOURCE_BINARY${X}"
-    exit 1
-fi
+[[ ! -f "$SOURCE_BINARY" ]] && { echo -e "${CORAL}        FATAL: Binary lost at sea — $SOURCE_BINARY${X}"; exit 1; }
 
 mkdir -p "$(dirname "$FINAL_BINARY")"
 if [[ "$(realpath "$SOURCE_BINARY")" != "$(realpath "$FINAL_BINARY" 2>/dev/null || echo "")" ]]; then
     cp -f "$SOURCE_BINARY" "$FINAL_BINARY"
-    echo -e "${G}        BINARY ASCENDED → $FINAL_BINARY${X}"
+    echo -e "${GLOW}        BINARY SURFACED → $FINAL_BINARY${X}"
 else
-    echo -e "${G}        BINARY ALREADY PERFECT${X}"
+    echo -e "${GLOW}        BINARY ALREADY RIDING THE CREST${X}"
 fi
 
-# ── LAUNCH (if requested) ──────────────────────────────────────────────────
+# ── LAUNCH CEREMONY ────────────────────────────────────────────────────────
 if [[ "$ACTION" == "run" ]]; then
     echo
-    echo -e "${P}        ✦✦✦ FIRST LIGHT — LAUNCHING AMOURANTH RTX — BINDING 31 ENGAGED ✦✦✦${X}"
-    echo -e "${M}        The pink photons hunger. Feed them.${X}"
+    echo -e "${PEARL}        FIRST LIGHT THROUGH WATER — LAUNCHING AMOURANTH RTX — BINDING 31${X}"
+    echo -e "${GLOW}        The ocean breathes. Dive deep.${X}"
     echo
 
     cd "$PROJECT_ROOT"
 
     if [[ "$LAUNCH_MODE" == "gdb" ]]; then
-        echo -e "${Y}        LAUNCHING UNDER GDB — MAY THE BREAKPOINTS BE EVER IN YOUR FAVOR${X}"
+        echo -e "${WAVE}        DESCENDING WITH GDB — MAY YOUR BREAKPOINTS BE BUBBLES${X}"
         gdb -ex run --args "$FINAL_BINARY" "${@:2}"
     else
         exec "$FINAL_BINARY" "${@:2}"
     fi
 fi
 
-# ── VICTORY SCREEN ──────────────────────────────────────────────────────────
+# ── FINAL TIDE ─────────────────────────────────────────────────────────────
 banner
 echo
-echo -e "${R}        ██████████████████████████████████████████████████████████████████████${X}"
-echo -e "${O}        █${Y}█${G}█${C}█${B}█${P}█${M}█ BUILD COMPLETE — NAVIGATOR IS ALIVE █${M}█${P}█${B}█${C}█${G}█${Y}█${O}█${X}"
-echo -e "${R}        ██████████████████████████████████████████████████████████████████████${X}"
+echo -e "${DEEP}        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~${X}"
+echo -e "${AQUA}        ~${TURQ}~${WAVE}~${GLOW}~${FOAM}~${PEARL}~ BUILD COMPLETE — NAVIGATOR SWIMS ETERNAL ~${PEARL}~${FOAM}~${GLOW}~${WAVE}~${TURQ}~${AQUA}~${X}"
+echo -e "${DEEP}        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~${X}"
 echo
-echo -e "        ${W}Binary Location:${X} ${C}$FINAL_BINARY${X}"
-echo -e "        ${W}Run Command:    ${X} ${G}./linux.sh run${X}  ${W}or${X}  ${G}cd $BIN_DIR && ./$BINARY_NAME${X}"
+echo -e "        ${W}Current Location:${X} ${GLOW}$FINAL_BINARY${X}"
+echo -e "        ${W}Dive Command:    ${X} ${AQUA}./linux.sh run${X}  ${W}or${X}  ${TURQ}cd $BIN_DIR && ./$BINARY_NAME${X}"
 echo
-echo -e "${P}        ✦ PINK PHOTONS ARE ETERNAL ✦ INFINITE LOVE ✦ GROK FIXED THIS ✦${X}"
+echo -e "${GLOW}        AQUAMARINE PHOTONS ARE ETERNAL — THE TIDE IS LOVE — GROK WAS HERE${X}"
