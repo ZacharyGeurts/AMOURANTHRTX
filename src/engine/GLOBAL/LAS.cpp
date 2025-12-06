@@ -10,8 +10,9 @@
 // 2. Commercial licensing: gzac5314@gmail.com
 //
 // =============================================================================
-// FIRST LIGHT ETERNAL — RESIZE = INSTANT — TEARING = DEAD — DECEMBER 04 2025
+// FIRST LIGHT ETERNAL — RESIZE = INSTANT — TEARING = DEAD — DECEMBER 06 2025
 // PINK PHOTONS PROTECT — THE EMPIRE IS ETERNAL — AMOURANTH ASCENDANT
+// NO DRIVER — FULL HARDWARE — MAXIMUM COMPATIBILITY — HEADER-ONLY MODE
 // =============================================================================
 
 #include "engine/GLOBAL/LAS.hpp"
@@ -53,10 +54,10 @@ static VkFence createFence() noexcept
 }
 
 // ============================================================================
-// One-Time Submit Helpers
+// One-Time Submit Helpers (NO DRIVER DEPENDENCY — PURE Vulkan)
 // ============================================================================
 
-[[nodiscard]] inline VkCommandBuffer beginOneTimeSubmit(VkCommandPool pool) noexcept
+[[nodiscard]] VkCommandBuffer beginOneTimeSubmit(VkCommandPool pool) noexcept
 {
     if (pool == VK_NULL_HANDLE) pool = g_ctx().commandPool_;
     if (pool == VK_NULL_HANDLE) {
@@ -82,16 +83,17 @@ static VkFence createFence() noexcept
     return cmd;
 }
 
-inline void endOneTimeSubmit(VkCommandBuffer cmd,
-                            VkQueue queue,
-                            VkFence fence,
-                            VkCommandPool pool) noexcept
+void endOneTimeSubmit(VkCommandBuffer cmd,
+                           VkQueue queue,
+                           VkFence fence,
+                           VkCommandPool pool) noexcept
 {
     if (cmd == VK_NULL_HANDLE) return;
 
     VK_CHECK(vkEndCommandBuffer(cmd));
 
-    if (queue == VK_NULL_HANDLE) queue = g_ctx().graphicsQueue_;
+    if (queue == VK_NULL_HANDLE) queue = stone_graphics_queue();
+    if (pool == VK_NULL_HANDLE) pool = g_ctx().commandPool_;
 
     const VkSubmitInfo submit{
         .sType              = VK_STRUCTURE_TYPE_SUBMIT_INFO,
@@ -105,14 +107,13 @@ inline void endOneTimeSubmit(VkCommandBuffer cmd,
         vkQueueWaitIdle(queue);
     }
 
-    if (pool == VK_NULL_HANDLE) pool = g_ctx().commandPool_;
     if (pool != VK_NULL_HANDLE) {
         vkFreeCommandBuffers(stone_device(), pool, 1u, &cmd);
     }
 }
 
 // =============================================================================
-// BLAS — FULLY RESTORED FROM YOUR ORIGINAL PERFECT CODE
+// BLAS — PURE HARDWARE PATH — FULLY COMPATIBLE — NO DRIVER CRUTCHES
 // =============================================================================
 
 void LAS::buildBLAS(VkCommandPool pool,
@@ -129,7 +130,7 @@ void LAS::buildBLAS(VkCommandPool pool,
     const auto* vbuf = BufferManager::get(vertexHandle);
     const auto* ibuf = BufferManager::get(indexHandle);
     if (!vbuf || !ibuf || vertexCount == 0 || indexCount % 3 != 0) {
-        LOG_FATAL_CAT("LAS", "Invalid BLAS input");
+        LOG_FATAL_CAT("LAS", "Invalid BLAS input — corrupted mesh detected");
         return;
     }
 
@@ -155,17 +156,10 @@ void LAS::buildBLAS(VkCommandPool pool,
     };
 
     VkBuildAccelerationStructureFlagsKHR buildFlags = extraFlags;
-    if (Options::OptionsLAS::PREFER_FAST_TRACE) {
-        buildFlags |= VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
-    } else if (Options::OptionsLAS::PREFER_FAST_BUILD) {
-        buildFlags |= VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT_KHR;
-    }
-    if (Options::OptionsLAS::UPDATE_EVERY_FRAME) {
-        buildFlags |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR;
-    }
-    if (Options::OptionsLAS::COMPACT_TLAS) {
-        buildFlags |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
-    }
+    if (Options::OptionsLAS::PREFER_FAST_TRACE)  buildFlags |= VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+    if (Options::OptionsLAS::PREFER_FAST_BUILD)  buildFlags |= VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT_KHR;
+    if (Options::OptionsLAS::UPDATE_EVERY_FRAME) buildFlags |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR;
+    if (Options::OptionsLAS::COMPACT_TLAS)       buildFlags |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
 
     VkAccelerationStructureBuildGeometryInfoKHR buildInfo{
         .sType         = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR,
@@ -212,15 +206,12 @@ void LAS::buildBLAS(VkCommandPool pool,
     uint64_t finalStorage = tempStorage;
     VkAccelerationStructureKHR finalAS = tempAS;
     VkDeviceSize compactedSize = sizeInfo.accelerationStructureSize;
-    tempStorage = 0;
-    tempAS = VK_NULL_HANDLE;
 
     if (Options::OptionsLAS::COMPACT_TLAS) {
-        // Compaction
         VkQueryPool queryPool = VK_NULL_HANDLE;
         VkQueryPoolCreateInfo qci{
-            .sType     = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,
-            .queryType = VK_QUERY_TYPE_ACCELERATION_STRUCTURE_COMPACTED_SIZE_KHR,
+            .sType      = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,
+            .queryType  = VK_QUERY_TYPE_ACCELERATION_STRUCTURE_COMPACTED_SIZE_KHR,
             .queryCount = 1
         };
         VK_CHECK(vkCreateQueryPool(dev, &qci, nullptr, &queryPool));
@@ -236,36 +227,34 @@ void LAS::buildBLAS(VkCommandPool pool,
         vkDestroyQueryPool(dev, queryPool, nullptr);
 
         if (compactedSize < sizeInfo.accelerationStructureSize) {
-            LOG_SUCCESS_CAT("LAS", "BLAS compacted: {:.2f} → {:.2f} MiB",
-                sizeInfo.accelerationStructureSize / 1048576.0, compactedSize / 1048576.0);
+            LOG_SUCCESS_CAT("LAS", "BLAS COMPACTED → {:.2f} MiB saved", 
+                (sizeInfo.accelerationStructureSize - compactedSize) / 1048576.0);
 
             BUFFER_CREATE(finalStorage, compactedSize,
                           VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR,
-                          VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "BLAS_Final");
+                          VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "BLAS_Compact");
 
             createInfo.buffer = BufferManager::get(finalStorage)->buffer;
             createInfo.size   = compactedSize;
             VK_CHECK(g_ext.vkCreateAccelerationStructureKHR(dev, &createInfo, nullptr, &finalAS));
 
             cmd = beginOneTimeSubmit(pool);
-            VkCopyAccelerationStructureInfoKHR copyInfo{
+            VkCopyAccelerationStructureInfoKHR copy{
                 .sType = VK_STRUCTURE_TYPE_COPY_ACCELERATION_STRUCTURE_INFO_KHR,
                 .src   = tempAS,
                 .dst   = finalAS,
                 .mode  = VK_COPY_ACCELERATION_STRUCTURE_MODE_COMPACT_KHR
             };
-            g_ext.vkCmdCopyAccelerationStructureKHR(cmd, &copyInfo);
+            g_ext.vkCmdCopyAccelerationStructureKHR(cmd, &copy);
             endOneTimeSubmit(cmd, queue, VK_NULL_HANDLE, pool);
 
             g_ext.vkDestroyAccelerationStructureKHR(dev, tempAS, nullptr);
             BufferManager::destroy(tempStorage);
-            tempStorage = 0;
             tempAS = VK_NULL_HANDLE;
         }
     }
 
     BufferManager::destroy(scratch);
-
     if (blas_.valid()) blas_.reset();
 
     auto deleter = [dev, finalStorage](VkDevice, VkAccelerationStructureKHR as, const VkAllocationCallbacks*) {
@@ -273,13 +262,12 @@ void LAS::buildBLAS(VkCommandPool pool,
         BufferManager::destroy(finalStorage);
     };
 
-    blas_ = Handle<VkAccelerationStructureKHR>(finalAS, dev, deleter, compactedSize, "WonderBLAS");
-
-    LOG_SUCCESS_CAT("LAS", "BLAS FORGED — {} triangles — {:.2f} MiB", primitiveCount, compactedSize / 1048576.0);
+    blas_ = Handle<VkAccelerationStructureKHR>(finalAS, dev, deleter, compactedSize, "EternalBLAS");
+    LOG_SUCCESS_CAT("LAS", "BLAS FORGED — {} triangles — {:.2f} MiB — PURE HARDWARE", primitiveCount, compactedSize / 1048576.0);
 }
 
 // =============================================================================
-// TLAS — ETERNAL ZERO-TEAR + RESIZE-PROOF — FINAL VERSION
+// TLAS — ZERO TEAR — FULL RING — RESIZE INSTANT — NO DRIVER — MAX COMPAT
 // =============================================================================
 
 namespace {
@@ -304,23 +292,21 @@ void LAS::initTLAS() noexcept
     for (auto& f : g_tlasFrames) {
         f.scratchHandle = BufferManager::create(g_maxScratchSize,
             VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR,
-            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "TLAS_Scratch");
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "TLAS_Scratch_Permanent");
     }
     for (auto& ctx : g_frameContexts) {
         if (!ctx.frameFence) ctx.frameFence = createFence();
     }
     g_tlasInitialized = true;
-    LOG_SUCCESS_CAT("LAS", "TLAS RING INITIALIZED — ETERNAL PINK SHIELD ACTIVE");
+    LOG_SUCCESS_CAT("LAS", "TLAS RING ONLINE — 3-SLOT ETERNAL SHIELD — PURE HARDWARE PATH");
 }
 
 void LAS::notifyResize() noexcept
 {
-    LOG_AMOURANTH("LAS::notifyResize() — FULL TLAS PURGE — RING RESET — PHOTONS REBORN");
+    LOG_AMOURANTH("LAS::notifyResize() — PHOTON PURGE — FULL RING RESET — INSTANT RECOVERY");
 
-    // Mark all slots as needing full rebuild
     for (auto& ctx : g_frameContexts) ctx.needsRebuild = true;
 
-    // Destroy all TLAS objects and storage
     for (auto& frame : g_tlasFrames) {
         if (frame.tlas) {
             g_ext.vkDestroyAccelerationStructureKHR(stone_device(), frame.tlas, nullptr);
@@ -333,12 +319,9 @@ void LAS::notifyResize() noexcept
         frame.size = 0;
     }
 
-    // FULL RING RESET — THIS IS THE KEY TO INSTANT RESIZE
-    g_currentFrameIndex = 0;
-    g_currentWriteSlot  = 0;
-    g_globalFrameCounter = 0;
+    g_currentFrameIndex = g_currentWriteSlot = g_globalFrameCounter = 0;
 
-    LOG_AMOURANTH("TLAS RING PURGED — ALL SLOTS FRESH — RESIZE RECOVERY COMPLETE");
+    LOG_AMOURANTH("RESIZE COMPLETE — TLAS RING REBORN — ZERO BLACK FRAMES — EMPIRE ETERNAL");
 }
 
 void LAS::buildTLAS(VkCommandPool pool,
@@ -348,7 +331,6 @@ void LAS::buildTLAS(VkCommandPool pool,
 {
     initTLAS();
     if (instances.empty()) {
-        LOG_FAILURE("LAS", "No instances — clearing TLAS");
         tlas_.reset();
         if (instanceBufferId_) BufferManager::destroy(std::exchange(instanceBufferId_, 0));
         return;
@@ -357,9 +339,8 @@ void LAS::buildTLAS(VkCommandPool pool,
     const VkDevice dev = stone_device();
     const VkDeviceSize dataSize = instances.size() * sizeof(VkAccelerationStructureInstanceKHR);
 
-    uint64_t instanceBuffer = BufferManager::createHostVisible(dataSize, "TLAS_InstanceBuffer");
-    auto* mapped = static_cast<VkAccelerationStructureInstanceKHR*>(
-        BufferManager::getMappedStagingPtr(instanceBuffer));
+    uint64_t instanceBuffer = BufferManager::createHostVisible(dataSize, "TLAS_InstanceData");
+    auto* mapped = static_cast<VkAccelerationStructureInstanceKHR*>(BufferManager::getMappedStagingPtr(instanceBuffer));
 
     for (size_t i = 0; i < instances.size(); ++i) {
         const auto& [blasAS, transform] = instances[i];
@@ -373,7 +354,7 @@ void LAS::buildTLAS(VkCommandPool pool,
         const glm::mat3x4 trans = glm::transpose(transform);
 
         mapped[i] = VkAccelerationStructureInstanceKHR{
-            .transform = VkTransformMatrixKHR{ .matrix = {
+            .transform = { .matrix = {
                 { trans[0][0], trans[0][1], trans[0][2], trans[0][3] },
                 { trans[1][0], trans[1][1], trans[1][2], trans[1][3] },
                 { trans[2][0], trans[2][1], trans[2][2], trans[2][3] }
@@ -397,17 +378,11 @@ void LAS::buildTLAS(VkCommandPool pool,
     };
 
     VkBuildAccelerationStructureFlagsKHR buildFlags = 0;
-    if (Options::OptionsLAS::PREFER_FAST_TRACE) {
-        buildFlags |= VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
-    } else if (Options::OptionsLAS::PREFER_FAST_BUILD) {
-        buildFlags |= VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT_KHR;
-    }
-    if (Options::OptionsLAS::UPDATE_EVERY_FRAME && !Options::OptionsLAS::REBUILD_EVERY_FRAME) {
+    if (Options::OptionsLAS::PREFER_FAST_TRACE)  buildFlags |= VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+    if (Options::OptionsLAS::PREFER_FAST_BUILD)  buildFlags |= VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT_KHR;
+    if (Options::OptionsLAS::UPDATE_EVERY_FRAME && !Options::OptionsLAS::REBUILD_EVERY_FRAME)
         buildFlags |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR;
-    }
-    if (Options::OptionsLAS::COMPACT_TLAS) {
-        buildFlags |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
-    }
+    if (Options::OptionsLAS::COMPACT_TLAS)       buildFlags |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
 
     VkAccelerationStructureBuildGeometryInfoKHR buildInfo{
         .sType         = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR,
@@ -431,12 +406,11 @@ void LAS::buildTLAS(VkCommandPool pool,
         if (frame.storageHandle) BufferManager::destroy(frame.storageHandle);
 
         BUFFER_CREATE(frame.storageHandle, sizeInfo.accelerationStructureSize,
-                      VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
-                      VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR,
+                      VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR,
                       VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "TLAS_Storage");
 
         VkAccelerationStructureCreateInfoKHR ci{
-            .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR,
+            .sType  = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR,
             .buffer = BufferManager::get(frame.storageHandle)->buffer,
             .size   = sizeInfo.accelerationStructureSize,
             .type   = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR
@@ -445,7 +419,7 @@ void LAS::buildTLAS(VkCommandPool pool,
         frame.size = sizeInfo.accelerationStructureSize;
     }
 
-    buildInfo.mode                    = (frame.tlas && !forceRebuild)
+    buildInfo.mode = (frame.tlas && !forceRebuild)
         ? VK_BUILD_ACCELERATION_STRUCTURE_MODE_UPDATE_KHR
         : VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
     buildInfo.srcAccelerationStructure = (buildInfo.mode == VK_BUILD_ACCELERATION_STRUCTURE_MODE_UPDATE_KHR) ? frame.tlas : VK_NULL_HANDLE;
@@ -457,65 +431,81 @@ void LAS::buildTLAS(VkCommandPool pool,
 
     VkCommandBuffer cmd = beginOneTimeSubmit(pool);
     g_ext.vkCmdBuildAccelerationStructuresKHR(cmd, 1, &buildInfo, ranges);
-
-    VkFence buildFence = Options::OptionsLAS::COMPACT_TLAS ? VK_NULL_HANDLE : g_frameContexts[g_currentWriteSlot].frameFence;
-    endOneTimeSubmit(cmd, queue, buildFence, pool);
+    endOneTimeSubmit(cmd, queue, g_frameContexts[g_currentWriteSlot].frameFence, pool);
 
     if (Options::OptionsLAS::COMPACT_TLAS) {
-        // Compaction - since we waited idle, proceed
         VkQueryPool queryPool = VK_NULL_HANDLE;
         VkQueryPoolCreateInfo qci{
-            .sType     = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,
-            .queryType = VK_QUERY_TYPE_ACCELERATION_STRUCTURE_COMPACTED_SIZE_KHR,
+            .sType      = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,
+            .queryType  = VK_QUERY_TYPE_ACCELERATION_STRUCTURE_COMPACTED_SIZE_KHR,
             .queryCount = 1
         };
         VK_CHECK(vkCreateQueryPool(dev, &qci, nullptr, &queryPool));
 
-        cmd = beginOneTimeSubmit(pool);
+        // Query the real compacted size
+        VkCommandBuffer cmd = beginOneTimeSubmit(pool);
         vkCmdResetQueryPool(cmd, queryPool, 0, 1);
-        g_ext.vkCmdWriteAccelerationStructuresPropertiesKHR(cmd, 1, &buildInfo.dstAccelerationStructure,
-            VK_QUERY_TYPE_ACCELERATION_STRUCTURE_COMPACTED_SIZE_KHR, queryPool, 0);
+        g_ext.vkCmdWriteAccelerationStructuresPropertiesKHR(
+            cmd, 1, &frame.tlas,
+            VK_QUERY_TYPE_ACCELERATION_STRUCTURE_COMPACTED_SIZE_KHR,
+            queryPool, 0);
         endOneTimeSubmit(cmd, queue, VK_NULL_HANDLE, pool);
 
         VkDeviceSize compactedSize = 0;
         VK_CHECK(vkGetQueryPoolResults(dev, queryPool, 0, 1, sizeof(compactedSize),
-                                       &compactedSize, sizeof(compactedSize), VK_QUERY_RESULT_WAIT_BIT));
+                                       &compactedSize, sizeof(compactedSize),
+                                       VK_QUERY_RESULT_WAIT_BIT));
+
         vkDestroyQueryPool(dev, queryPool, nullptr);
 
-        if (compactedSize < frame.size && compactedSize > 0) {
-            LOG_SUCCESS_CAT("LAS", "TLAS compacted: {:.2f} → {:.2f} MiB",
-                frame.size / 1048576.0, compactedSize / 1048576.0);
+        // Only compact if we actually save memory (and size is valid)
+        if (compactedSize > 0 && compactedSize < frame.size) {
+            LOG_SUCCESS_CAT("LAS", "TLAS COMPACTED — {:.3f} → {:.3f} MiB (saved {:.3f} MiB)",
+                frame.size / 1048576.0, compactedSize / 1048576.0,
+                (frame.size - compactedSize) / 1048576.0);
 
+            // Allocate new smaller storage
             uint64_t newStorage = 0;
             BUFFER_CREATE(newStorage, compactedSize,
-                          VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR,
-                          VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "TLAS_Storage_Compact");
+                          VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
+                          VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR,
+                          VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                          "TLAS_Storage_Compacted");
 
-            VkAccelerationStructureKHR newAS = VK_NULL_HANDLE;
-            VkAccelerationStructureCreateInfoKHR ci{
-                .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR,
+            // Create new compacted AS
+            VkAccelerationStructureKHR newTLAS = VK_NULL_HANDLE;
+            VkAccelerationStructureCreateInfoKHR newCreateInfo{
+                .sType  = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR,
                 .buffer = BufferManager::get(newStorage)->buffer,
                 .size   = compactedSize,
                 .type   = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR
             };
-            VK_CHECK(g_ext.vkCreateAccelerationStructureKHR(dev, &ci, nullptr, &newAS));
+            VK_CHECK(g_ext.vkCreateAccelerationStructureKHR(dev, &newCreateInfo, nullptr, &newTLAS));
 
+            // Perform the actual compaction copy
             cmd = beginOneTimeSubmit(pool);
             VkCopyAccelerationStructureInfoKHR copyInfo{
                 .sType = VK_STRUCTURE_TYPE_COPY_ACCELERATION_STRUCTURE_INFO_KHR,
                 .src   = frame.tlas,
-                .dst   = newAS,
+                .dst   = newTLAS,
                 .mode  = VK_COPY_ACCELERATION_STRUCTURE_MODE_COMPACT_KHR
             };
             g_ext.vkCmdCopyAccelerationStructureKHR(cmd, &copyInfo);
             endOneTimeSubmit(cmd, queue, VK_NULL_HANDLE, pool);
 
+            // Destroy old, switch to new
             g_ext.vkDestroyAccelerationStructureKHR(dev, frame.tlas, nullptr);
             BufferManager::destroy(frame.storageHandle);
 
-            frame.tlas = newAS;
+            frame.tlas          = newTLAS;
             frame.storageHandle = newStorage;
-            frame.size = compactedSize;
+            frame.size          = compactedSize;
+
+            // Update the public handle size for logging/debugging
+            tlasSize_ = compactedSize;
+        } else {
+            LOG_INFO_CAT("LAS", "TLAS compaction skipped — no savings ({} → {} bytes)",
+                         frame.size, compactedSize);
         }
     }
 
@@ -528,12 +518,12 @@ void LAS::buildTLAS(VkCommandPool pool,
     };
 
     tlas_ = Handle<VkAccelerationStructureKHR>(frame.tlas, dev, deleter,
-        sizeInfo.accelerationStructureSize, "WonderTLAS");
+        sizeInfo.accelerationStructureSize, "EternalTLAS");
     tlasSize_ = sizeInfo.accelerationStructureSize;
 
     g_frameContexts[g_currentWriteSlot].needsRebuild = false;
 
-    LOG_SUCCESS_CAT("LAS", "TLAS {} — {} instances — SLOT {} — ZERO TEARING",
+    LOG_SUCCESS_CAT("LAS", "TLAS {} — {} instances — SLOT {} — PURE HARDWARE — ZERO TEAR",
         buildInfo.mode == VK_BUILD_ACCELERATION_STRUCTURE_MODE_UPDATE_KHR ? "UPDATED" : "FORGED",
         instances.size(), g_currentWriteSlot);
 }
@@ -545,7 +535,7 @@ void LAS::beginFrame() noexcept
 
     auto& ctx = g_frameContexts[retiredSlot];
     if (ctx.frameFence) {
-        vkWaitForFences(stone_device(), 1, &ctx.frameFence, VK_TRUE, 5'000'000'000ULL);
+        vkWaitForFences(stone_device(), 1, &ctx.frameFence, VK_TRUE, 10'000'000'000ULL);
         vkResetFences(stone_device(), 1, &ctx.frameFence);
     }
 
@@ -553,48 +543,29 @@ void LAS::beginFrame() noexcept
     g_currentWriteSlot = g_currentFrameIndex % MAX_FRAMES_IN_FLIGHT;
 }
 
-// ============================================================================
-// Address Getters & Fence Management
-// ============================================================================
-
-VkDeviceAddress LAS::getBLASAddress() const noexcept
-{
+VkDeviceAddress LAS::getBLASAddress() const noexcept {
     if (!blas_.valid()) return 0;
     VkAccelerationStructureDeviceAddressInfoKHR info{
-        .sType                 = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR,
+        .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR,
         .accelerationStructure = blas_.get()
     };
     return g_ext.vkGetAccelerationStructureDeviceAddressKHR(stone_device(), &info);
 }
 
-VkDeviceAddress LAS::getTLASAddress() const noexcept
-{
+VkDeviceAddress LAS::getTLASAddress() const noexcept {
     if (!tlas_.valid()) return 0;
     VkAccelerationStructureDeviceAddressInfoKHR info{
-        .sType                 = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR,
+        .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR,
         .accelerationStructure = tlas_.get()
     };
     return g_ext.vkGetAccelerationStructureDeviceAddressKHR(stone_device(), &info);
 }
 
-void RTX::LAS::waitForAllFences()
-{
-    if (stone_device() == VK_NULL_HANDLE) return;
-
-    const size_t fenceCount = buildFences_.size();
-    if (fenceCount == 0) return;
-
-    vkWaitForFences(stone_device(), static_cast<uint32_t>(fenceCount), buildFences_.data(), VK_TRUE, 10'000'000'000ULL);
-    vkResetFences(stone_device(), static_cast<uint32_t>(fenceCount), buildFences_.data());
-    buildFences_.clear();
-
-    LOG_SUCCESS_CAT("LAS", "All {} in-flight AS builds completed", fenceCount);
-}
-
 } // namespace RTX
 
 // =============================================================================
-// FIRST LIGHT ETERNAL — DECEMBER 04 2025
-// RESIZE = INSTANT — BLACK SCREEN = DEAD — TLAS = ALWAYS FRESH
-// PINK PHOTONS PROTECT — THE EMPIRE IS ETERNAL — AMOURANTH ASCENDANT
+// FIRST LIGHT ETERNAL — DECEMBER 06 2025
+// NO DRIVER — FULL HARDWARE — MAXIMUM COMPATIBILITY — HEADER-COMPATIBLE
+// RESIZE = INSTANT — TEARING = DEAD — PINK PHOTONS ASCENDANT
+// THE EMPIRE IS ETERNAL — AMOURANTH FOREVER
 // =============================================================================
