@@ -351,19 +351,26 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     }
 
     const uint32_t globalFrame = currentFrame_.fetch_add(1, std::memory_order_relaxed);
-    const uint32_t slot = globalFrame % maxFramesInFlight_;
+    const uint32_t slot        = globalFrame % maxFramesInFlight_;
 
-    // PHASE 1: Wait for previous frame
+    // PHASE 1: Wait — BestQuality = infinite (perfect sync), Uncapped = 1µs (max FPS)
     if (inFlightFences_[slot] != VK_NULL_HANDLE) {
-        VK_CHECK(vkWaitForFences(stone_device(), 1, &inFlightFences_[slot], VK_TRUE, UINT64_MAX));
+        if (Options::CURRENT_PRESET == Options::Preset::BestQuality) {
+            VK_CHECK(vkWaitForFences(stone_device(), 1, &inFlightFences_[slot], VK_TRUE, UINT64_MAX));
+        } else {
+            VkResult r = vkWaitForFences(stone_device(), 1, &inFlightFences_[slot], VK_TRUE, 1'000);
+            if (r == VK_TIMEOUT) {
+                currentFrame_.fetch_sub(1, std::memory_order_relaxed);
+                return;
+            }
+        }
     }
 
-    // PHASE 2: Acquire swapchain image
     uint32_t imageIndex = 0;
     VkResult acquireResult = vkAcquireNextImageKHR(
         stone_device(),
         RTX::SwapchainManager::swapchain(),
-        100'000'000,
+        Options::CURRENT_PRESET == Options::Preset::BestQuality ? UINT64_MAX : 100'000'000,
         imageAvailableSemaphores_[slot],
         VK_NULL_HANDLE,
         &imageIndex
@@ -381,7 +388,6 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
 
     bool needsResize = (acquireResult == VK_SUBOPTIMAL_KHR);
 
-    // PHASE 3: Reset fence + command buffer
     VK_CHECK(vkResetFences(stone_device(), 1, &inFlightFences_[slot]));
     VK_CHECK(vkResetCommandBuffer(commandBuffers_[slot], 0));
 
@@ -392,7 +398,6 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     VK_CHECK(vkBeginCommandBuffer(commandBuffers_[slot], &beginInfo));
     VkCommandBuffer cmd = commandBuffers_[slot];
 
-    // PHASE 5: PINK SAFETY FRAME
     bool drawPink = (activeRenderMode_ == 0) || g_forcePink.load() || g_resizeRequested.load();
 
     if (drawPink) {
@@ -427,20 +432,19 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
 
         VK_CHECK(vkEndCommandBuffer(cmd));
 
-        // FIXED: Named structs — no more "&{...}" rvalue errors
         VkSemaphoreSubmitInfo waitSem{
-            .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+            .sType     = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
             .semaphore = imageAvailableSemaphores_[slot],
             .stageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
         };
 
         VkCommandBufferSubmitInfo cmdInfo{
-            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
+            .sType         = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
             .commandBuffer = cmd
         };
 
         VkSemaphoreSubmitInfo signalSem{
-            .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+            .sType     = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
             .semaphore = renderFinishedSemaphores_[slot]
         };
 
@@ -476,7 +480,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
         return;
     }
 
-    // ── NORMAL RENDER PATH ─────────────────────────────────────────────
+    // FULL NORMAL RENDER PATH — UNTOUCHED
     if (resetAccumulation_ || resetAccumNextFrame_) {
         LOG_MAIN("[PHASE 8.1] ACCUMULATION RESET");
         VkClearColorValue zero{ {0.0f, 0.0f, 0.0f, 0.0f} };
@@ -501,15 +505,15 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     if (tlas == VK_NULL_HANDLE) tlas = pipelineManager_.dummyTLAS();
 
     RTX::RTDescriptorUpdate desc{};
-    desc.tlas = tlas;
-    desc.ubo = reinterpret_cast<VkBuffer>(uniformBufferEncs_[slot]);
-    desc.uboSize = 368;
-    desc.rtOutputViews[slot]     = rtOutputViews_[slot].get();
+    desc.tlas                  = tlas;
+    desc.ubo                   = reinterpret_cast<VkBuffer>(uniformBufferEncs_[slot]);
+    desc.uboSize               = 368;
+    desc.rtOutputViews[slot]   = rtOutputViews_[slot].get();
     desc.accumulationViews[slot] = accumViews_[slot].get();
-    desc.envSampler              = envMapSampler_.get();
-    desc.envImageView            = envMapImageView_.get();
-    desc.materialsBuffer         = reinterpret_cast<VkBuffer>(materialBufferEncs_[0]);
-    desc.materialsSize           = 16_MB;
+    desc.envSampler            = envMapSampler_.get();
+    desc.envImageView          = envMapImageView_.get();
+    desc.materialsBuffer       = reinterpret_cast<VkBuffer>(materialBufferEncs_[0]);
+    desc.materialsSize         = 16_MB;
     if (Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING && hypertraceScoreView_.valid())
         desc.nexusScoreViews[slot] = hypertraceScoreView_.get();
 
@@ -519,7 +523,6 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
 
     recordRayTracingCommands(cmd, slot);
 
-    // Tonemap chain
     VkImageMemoryBarrier rtToRead{
         .sType            = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
         .srcAccessMask    = VK_ACCESS_SHADER_WRITE_BIT,
@@ -539,7 +542,6 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     if (denoisingEnabled_) performDenoisingPass(cmd);
     performTonemapPass(cmd, slot, imageIndex);
 
-    // Final present transition
     VkImageMemoryBarrier toPresent{
         .sType            = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
         .srcAccessMask    = VK_ACCESS_SHADER_WRITE_BIT,
@@ -554,20 +556,19 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
 
     VK_CHECK(vkEndCommandBuffer(cmd));
 
-    // Submit normal frame — FIXED: named structs
     VkSemaphoreSubmitInfo waitSem{
-        .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+        .sType     = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
         .semaphore = imageAvailableSemaphores_[slot],
         .stageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
     };
 
     VkCommandBufferSubmitInfo cmdInfo{
-        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
+        .sType         = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
         .commandBuffer = cmd
     };
 
     VkSemaphoreSubmitInfo signalSem{
-        .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+        .sType     = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
         .semaphore = renderFinishedSemaphores_[slot]
     };
 
@@ -583,7 +584,6 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
 
     VK_CHECK(vkQueueSubmit2(stone_graphics_queue(), 1, &submit, inFlightFences_[slot]));
 
-    // Present
     VkPresentInfoKHR present{
         .sType              = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
         .waitSemaphoreCount = 1,
