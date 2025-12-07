@@ -123,9 +123,6 @@ void Context::enableHyperAggressiveMode() noexcept
         }
     }
 
-    LOG_AMOURANTH("6000+ FPS INCOMING");
-    LOG_AMOURANTH("THE GPU IS NO LONGER A CARD");
-    LOG_AMOURANTH("IT IS A WEAPON");
     LOG_AMOURANTH("THE PHOTONS ARE WHITE-HOT");
     LOG_AMOURANTH("THE EMPIRE HAS ASCENDED");
 }

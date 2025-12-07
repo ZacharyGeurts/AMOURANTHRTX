@@ -648,130 +648,133 @@ bool VulkanRenderer::isAlive() const noexcept
 void VulkanRenderer::createNexusScoreImage(VkCommandPool pool, VkQueue queue) noexcept
 {
     if (width_ == 0 || height_ == 0) return;
-    // Early out if disabled
-    if (!Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING) {
+
+    if (!Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING)
+    {
         LOG_TRACE_CAT("RENDERER", "Adaptive sampling disabled — NexusScoreImage not created");
         return;
     }
 
-    // Destroy old one first
+    // Destroy old image first — RAII safety
     destroyNexusScoreImage();
 
-    VkFormat format = VK_FORMAT_R32G32B32A32_SFLOAT;
+    const VkFormat format = VK_FORMAT_R32G32B32A32_SFLOAT;
 
-    VkImageCreateInfo imageInfo{
-        .sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-        .imageType     = VK_IMAGE_TYPE_2D,
-        .format        = format,
-        .extent        = { static_cast<uint32_t>(width_), static_cast<uint32_t>(height_), 1 },
-        .mipLevels     = 1,
-        .arrayLayers   = 1,
-        .samples       = VK_SAMPLE_COUNT_1_BIT,
-        .tiling        = VK_IMAGE_TILING_OPTIMAL,
-        .usage         = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
-        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
-    };
+    // 1. Create image
+    VkImageCreateInfo imageInfo{};
+    imageInfo.sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    imageInfo.imageType     = VK_IMAGE_TYPE_2D;
+    imageInfo.format        = format;
+    imageInfo.extent        = { static_cast<uint32_t>(width_), static_cast<uint32_t>(height_), 1 };
+    imageInfo.mipLevels     = 1;
+    imageInfo.arrayLayers   = 1;
+    imageInfo.samples       = VK_SAMPLE_COUNT_1_BIT;
+    imageInfo.tiling        = VK_IMAGE_TILING_OPTIMAL;
+    imageInfo.usage         = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
     VkImage rawImage = VK_NULL_HANDLE;
     VK_CHECK(vkCreateImage(stone_device(), &imageInfo, nullptr, &rawImage));
 
+    // 2. Allocate memory
     VkMemoryRequirements memReqs{};
     vkGetImageMemoryRequirements(stone_device(), rawImage, &memReqs);
 
-    uint32_t memType = findMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-    if (memType == UINT32_MAX) {
+    const uint32_t memType = findMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    if (memType == UINT32_MAX)
+    {
         LOG_FATAL_CAT("RENDERER", "No suitable memory type for NexusScoreImage");
         vkDestroyImage(stone_device(), rawImage, nullptr);
         phase9_ballerina("NO MEMORY TYPE FOR NEXUS", std::source_location::current());
     }
 
-    VkMemoryAllocateInfo allocInfo{
-        .sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-        .allocationSize  = memReqs.size,
-        .memoryTypeIndex = memType
-    };
+    VkMemoryAllocateInfo allocInfo{};
+    allocInfo.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    allocInfo.allocationSize  = memReqs.size;
+    allocInfo.memoryTypeIndex = memType;
 
     VkDeviceMemory rawMemory = VK_NULL_HANDLE;
     VK_CHECK(vkAllocateMemory(stone_device(), &allocInfo, nullptr, &rawMemory));
     VK_CHECK(vkBindImageMemory(stone_device(), rawImage, rawMemory, 0));
 
-    VkImageViewCreateInfo viewInfo{
-        .sType                        = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-        .image                        = rawImage,
-        .viewType                     = VK_IMAGE_VIEW_TYPE_2D,
-        .format                       = format,
-        .subresourceRange             = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
-    };
+    // 3. Create view
+    VkImageViewCreateInfo viewInfo{};
+    viewInfo.sType                           = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    viewInfo.image                           = rawImage;
+    viewInfo.viewType                        = VK_IMAGE_VIEW_TYPE_2D;
+    viewInfo.format                          = format;
+    viewInfo.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
+    viewInfo.subresourceRange.baseMipLevel   = 0;
+    viewInfo.subresourceRange.levelCount     = 1;
+    viewInfo.subresourceRange.baseArrayLayer = 0;
+    viewInfo.subresourceRange.layerCount     = 1;
 
     VkImageView rawView = VK_NULL_HANDLE;
     VK_CHECK(vkCreateImageView(stone_device(), &viewInfo, nullptr, &rawView));
 
-    // Wrap in RAII handles
+    // 4. RAII handles — the empire never leaks
     hypertraceScoreImage_   = RTX::MakeHandle(rawImage,  stone_device(), vkDestroyImage,     0,           "NexusScoreImage");
     hypertraceScoreMemory_  = RTX::MakeHandle(rawMemory, stone_device(), vkFreeMemory,       memReqs.size,"NexusScoreMemory");
     hypertraceScoreView_    = RTX::MakeHandle(rawView,   stone_device(), vkDestroyImageView, 0,           "NexusScoreView");
 
-    // ONE-TIME COMMAND BUFFER — THE PHOTONS DEMAND A CLEAN SLATE
+    // 5. Clear to zero — one-time command buffer
     VkCommandBuffer cmd = RTX::beginOneTimeSubmit(pool);
-    if (cmd == VK_NULL_HANDLE) {
+    if (!cmd)
+    {
         LOG_FATAL_CAT("RENDERER", "Failed to begin one-time command buffer for NexusScoreImage clear");
         phase9_ballerina("NO CMD FOR NEXUS", std::source_location::current());
     }
 
-    // Staging buffer to clear image to zero
-    VkDeviceSize stagingSize = static_cast<VkDeviceSize>(width_) * height_ * 16; // R32G32B32A32
+    // Transition to transfer dst
+    transitionImageForTransferWrite(cmd, rawImage, VK_IMAGE_LAYOUT_UNDEFINED);
 
-    uint64_t stagingEnc = BufferManager::createHostVisible(stagingSize, "NexusClearStaging");
+    // Clear to zero
+    VkClearColorValue clearZero = {{0.0f, 0.0f, 0.0f, 0.0f}};
+    VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    vkCmdClearColorImage(cmd, rawImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clearZero, 1, &range);
 
-    void* map = BufferManager::getMappedStagingPtr(stagingEnc);
-    std::memset(map, 0, stagingSize);
-
-   // Transition to TRANSFER_DST_OPTIMAL
-    VkImageMemoryBarrier toTransfer{
-        .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-        .pNext               = nullptr,
-        .srcAccessMask       = 0,
-        .dstAccessMask       = VK_ACCESS_2_TRANSFER_WRITE_BIT,
-        .oldLayout           = VK_IMAGE_LAYOUT_UNDEFINED,
-        .newLayout           = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .image               = rawImage,
-        .subresourceRange    = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
-    };
-
-    vkCmdPipelineBarrier(cmd,
-        VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-        0, 0, nullptr, 0, nullptr, 1, &toTransfer);
-
-    VkBufferImageCopy region{
-        .bufferOffset = stagingEnc,
-        .imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
-        .imageExtent      = { static_cast<uint32_t>(width_), static_cast<uint32_t>(height_), 1 }
-    };
-
-    vkCmdCopyBufferToImage(cmd, BufferManager::getStagingBuffer(), rawImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
-
-    // Transition to GENERAL
-    VkImageMemoryBarrier toGeneral{
-        .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-        .pNext               = nullptr,
-        .srcAccessMask       = VK_ACCESS_2_TRANSFER_WRITE_BIT,
-        .dstAccessMask       = VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT,
-        .oldLayout           = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-        .newLayout           = VK_IMAGE_LAYOUT_GENERAL,
-        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .image               = rawImage,
-        .subresourceRange    = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
-    };
-
-    vkCmdPipelineBarrier(cmd,
-        VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR,
-        0, 0, nullptr, 0, nullptr, 1, &toGeneral);
+    // Transition to general for RT use
+    transitionImage(cmd, rawImage,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        VK_IMAGE_LAYOUT_GENERAL,
+        VK_ACCESS_TRANSFER_WRITE_BIT,
+        VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR);
 
     RTX::endOneTimeSubmit(cmd, queue, pool);
-    BUFFER_DESTROY(stagingEnc);
+
+    LOG_SUCCESS_CAT("RENDERER", "NexusScoreImage created and cleared — adaptive sampling ready");
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// CONVENIENCE: Transition image to transfer dst (before clear/copy)
+// ──────────────────────────────────────────────────────────────────────────────
+void VulkanRenderer::transitionImageForTransferWrite(VkCommandBuffer cmd, VkImage image, VkImageLayout oldLayout) noexcept
+{
+    transitionImage(cmd, image,
+        oldLayout,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        0,
+        VK_ACCESS_TRANSFER_WRITE_BIT,
+        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+        VK_PIPELINE_STAGE_TRANSFER_BIT
+    );
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// CONVENIENCE: Transition image to shader read (after clear/copy)
+// ──────────────────────────────────────────────────────────────────────────────
+void VulkanRenderer::transitionImageForShaderRead(VkCommandBuffer cmd, VkImage image, VkImageLayout oldLayout) noexcept
+{
+    transitionImage(cmd, image,
+        oldLayout,
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        VK_ACCESS_TRANSFER_WRITE_BIT,
+        VK_ACCESS_SHADER_READ_BIT,
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR
+    );
 }
 
 void VulkanRenderer::recordRayTracingCommands(VkCommandBuffer cmd, uint32_t frameIndex)
@@ -857,44 +860,55 @@ void VulkanRenderer::recordRayTracingCommands(VkCommandBuffer cmd, uint32_t fram
 // ──────────────────────────────────────────────────────────────────────────────
 // Utility Functions (Reduced: findMemoryType delegated to PipelineManager)
 // ──────────────────────────────────────────────────────────────────────────────
-void VulkanRenderer::initializeAllBufferData(uint32_t frames, VkDeviceSize uniformSize, VkDeviceSize materialSize) noexcept {
-    // Harden: Validate inputs to prevent overflows or invalid states
-    if (frames == 0) {
-        LOG_ERROR_CAT("RENDERER", "initializeAllBufferData: Invalid frames count: {}", frames);
-        return;
-    }
-    if (uniformSize > (1ULL << 32) || materialSize > (1ULL << 32)) {  // Arbitrary sane limit for debug
-        LOG_WARN_CAT("RENDERER", "initializeAllBufferData: Large buffer sizes detected — uniform={}, material={}", uniformSize, materialSize);
-    }
-
-    LOG_INFO_CAT("RENDERER", "Initializing buffer data: {} frames | Uniform: {} bytes | Material: {} MB", 
-        frames, uniformSize, materialSize / (1024ULL*1024ULL));
-
-    uniformBufferEncs_.resize(frames);
-    materialBufferEncs_.resize(frames);
-    dimensionBufferEncs_.resize(frames);
-    tonemapUniformEncs_.resize(frames);
-    if (uniformBufferEncs_.size() != static_cast<size_t>(frames)) {
-        LOG_ERROR_CAT("RENDERER", "initializeAllBufferData: Resize failed — expected={}, got={}", frames, uniformBufferEncs_.size());
-        uniformBufferEncs_.clear();
+void VulkanRenderer::initializeAllBufferData(uint32_t frames, VkDeviceSize uniformSize, VkDeviceSize materialSize) noexcept
+{
+    if (frames == 0 || frames > Options::Performance::MAX_FRAMES_IN_FLIGHT) {
+        LOG_FATAL_CAT("RENDERER", "Invalid frame count in initializeAllBufferData: {}", frames);
         return;
     }
 
-    VkDeviceSize dimSize = 64;
-    VkDeviceSize tonemapSize = 64;
+    LOG_AMOURANTH("INITIALIZING RTX BUFFERS — {} frames | UBO: {} bytes | Materials: {} MiB",
+                  frames, uniformSize, materialSize / (1024*1024));
 
-    for (uint32_t i = 0; i < frames; ++i) {
-        BUFFER_CREATE(uniformBufferEncs_[i], uniformSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, std::format("UBO[{}]", i).c_str());
+    // Clear old buffers — the empire does not leak
+    uniformBufferEncs_.clear();
+    materialBufferEncs_.clear();
+    dimensionBufferEncs_.clear();
+    tonemapUniformEncs_.clear();
 
-        BUFFER_CREATE(materialBufferEncs_[i], materialSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, std::format("Materials[{}]", i).c_str());
+    // Reserve exactly what we need — no reallocations
+    uniformBufferEncs_.reserve(frames);
+    materialBufferEncs_.reserve(frames);
+    dimensionBufferEncs_.reserve(frames);
+    tonemapUniformEncs_.reserve(frames);
 
-        BUFFER_CREATE(dimensionBufferEncs_[i], dimSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, std::format("Dimensions[{}]", i).c_str());
+    const VkBufferUsageFlags uboUsage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    const VkBufferUsageFlags ssboUsage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
 
-        BUFFER_CREATE(tonemapUniformEncs_[i], tonemapSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, std::format("TonemapUBO[{}]", i).c_str());
+    for (uint32_t i = 0; i < frames; ++i)
+    {
+        // UBO — per-frame camera, time, jitter
+        BUFFER_CREATE(uniformBufferEncs_[i], uniformSize, uboUsage, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                      std::format("FrameUBO[{}]", i));
+
+        // Materials — shared across frames, but we keep one per frame for safety
+        BUFFER_CREATE(materialBufferEncs_[i], materialSize, ssboUsage, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                      std::format("Materials[{}]", i));
+
+        // Dimension data — tiny, but per-frame for alignment
+        BUFFER_CREATE(dimensionBufferEncs_[i], 256, ssboUsage, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                      std::format("DimensionData[{}]", i));
+
+        // Tonemap UBO — exposure, bloom, etc.
+        BUFFER_CREATE(tonemapUniformEncs_[i], 256, uboUsage, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                      std::format("TonemapUBO[{}]", i));
     }
 
-    LOG_TRACE_CAT("RENDERER", "Resized & created buffers for {} frames (UBO/Mat/Dim/Tonemap)", frames);
-    LOG_TRACE_CAT("RENDERER", "initializeAllBufferData — COMPLETE");
+    LOG_SUCCESS_CAT("RENDERER", "RTX buffers initialized — {} frames ready — photons aligned", frames);
+    LOG_CAPTAIN_N("[CAPTAIN N] \"The buffers are forged.\n"
+                  "               The crown is complete.\n"
+                  "               The empire is ready.\"\n"
+                  "*salutes*");
 }
 
 void VulkanRenderer::createSyncObjects() noexcept

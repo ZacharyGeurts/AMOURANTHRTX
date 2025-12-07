@@ -88,6 +88,9 @@ public:
     void setTonemapType(int type) noexcept;
     void setOverclockMode(bool enabled) noexcept;
 
+	void transitionImageForTransferWrite(VkCommandBuffer cmd, VkImage image, VkImageLayout oldLayout) noexcept;
+	void transitionImageForShaderRead(VkCommandBuffer cmd, VkImage image, VkImageLayout oldLayout) noexcept;
+
     void updateUniformBinding31(const void* data, VkDeviceSize size) noexcept;
     void setRenderMode(int mode) noexcept;
     void requestAccumulationReset() noexcept { resetAccumulation_ = true; resetAccumNextFrame_ = true; }
