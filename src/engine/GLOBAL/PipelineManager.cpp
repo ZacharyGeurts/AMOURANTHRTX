@@ -462,6 +462,7 @@ VkShaderModule PipelineManager::loadShader(const std::string& relativePath) cons
 // ──────────────────────────────────────────────────────────────────────────────
 // createRayTracingPipeline — PFN-Free + Explicit VK_SHADER_UNUSED_KHR + Null Guards
 // ──────────────────────────────────────────────────────────────────────────────
+// PipelineManager.cpp — keep the old signature for now
 void PipelineManager::createRayTracingPipeline(const std::vector<std::string>& shaderPaths)
 {
     if (shaderPaths.size() < 2) {
@@ -469,91 +470,104 @@ void PipelineManager::createRayTracingPipeline(const std::vector<std::string>& s
         return;
     }
 
+    // Fixed loading order and null checks
     VkShaderModule raygen = loadShader(shaderPaths[0]);
     VkShaderModule miss   = loadShader(shaderPaths[1]);
+    VkShaderModule chit   = shaderPaths.size() > 2 ? loadShader(shaderPaths[2]) : VK_NULL_HANDLE;
+    VkShaderModule miss2  = shaderPaths.size() > 3 ? loadShader(shaderPaths[3]) : VK_NULL_HANDLE;
+
     if (!raygen || !miss) {
-        LOG_FATAL_CAT("PIPELINE", "Core shader load failed");
+        LOG_FATAL_CAT("PIPELINE", "Failed to load raygen or primary miss shader");
         return;
     }
 
-    VkShaderModule hit = shaderPaths.size() > 2 ? loadShader(shaderPaths[2]) : VK_NULL_HANDLE;
-    VkShaderModule shadowMiss = shaderPaths.size() > 3 ? loadShader(shaderPaths[3]) : VK_NULL_HANDLE;
-
+    // Performance preset: disable hit shading completely
     if (Options::CURRENT_PRESET == Options::Preset::UncappedPerformance) {
-        // For uncapped, skip hit and shadow if not essential
-        hit = VK_NULL_HANDLE;
-        shadowMiss = VK_NULL_HANDLE;
+        if (chit)  { vkDestroyShaderModule(stone_device(), chit, nullptr); chit = VK_NULL_HANDLE; }
+        if (miss2) { vkDestroyShaderModule(stone_device(), miss2, nullptr); miss2 = VK_NULL_HANDLE; }
     }
 
     shaderModules_.clear();
     shaderModules_.emplace_back(raygen, stone_device(), vkDestroyShaderModule);
-    shaderModules_.emplace_back(miss, stone_device(), vkDestroyShaderModule);
-    if (hit) shaderModules_.emplace_back(hit, stone_device(), vkDestroyShaderModule);
-    if (shadowMiss) shaderModules_.emplace_back(shadowMiss, stone_device(), vkDestroyShaderModule);
+    shaderModules_.emplace_back(miss,   stone_device(), vkDestroyShaderModule);
+    if (chit)  shaderModules_.emplace_back(chit,  stone_device(), vkDestroyShaderModule);
+    if (miss2) shaderModules_.emplace_back(miss2, stone_device(), vkDestroyShaderModule);
 
     std::vector<VkPipelineShaderStageCreateInfo> stages;
     std::vector<VkRayTracingShaderGroupCreateInfoKHR> groups;
     stages.reserve(4);
     groups.reserve(4);
 
-    uint32_t stageIdx = 0;
+    uint32_t stageIndex = 0;
 
-    auto addGeneral = [&](VkShaderModule mod, VkShaderStageFlagBits flag, const char* name) {
-        VkPipelineShaderStageCreateInfo s{};
-        s.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-        s.stage = flag;
-        s.module = mod;
-        s.pName = "main";
-        stages.push_back(s);
+    auto addStageAndGeneralGroup = [&](VkShaderModule mod, VkShaderStageFlagBits stage) {
+        VkPipelineShaderStageCreateInfo stageInfo = {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+            .stage = stage,
+            .module = mod,
+            .pName = "main"
+        };
+        stages.push_back(stageInfo);
 
-        VkRayTracingShaderGroupCreateInfoKHR g{};
-        g.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
-        g.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR;
-        g.generalShader = stageIdx++;
-        g.closestHitShader = g.anyHitShader = g.intersectionShader = VK_SHADER_UNUSED_KHR;
-        groups.push_back(g);
+        VkRayTracingShaderGroupCreateInfoKHR group = {
+            .sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
+            .type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR,
+            .generalShader = stageIndex++,
+            .closestHitShader = VK_SHADER_UNUSED_KHR,
+            .anyHitShader = VK_SHADER_UNUSED_KHR,
+            .intersectionShader = VK_SHADER_UNUSED_KHR
+        };
+        groups.push_back(group);
     };
 
-    auto addHit = [&](VkShaderModule mod) {
-        VkPipelineShaderStageCreateInfo s{};
-        s.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-        s.stage = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
-        s.module = mod;
-        s.pName = "main";
-        stages.push_back(s);
+    auto addClosestHit = [&](VkShaderModule mod) {
+        VkPipelineShaderStageCreateInfo stageInfo = {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+            .stage = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR,
+            .module = mod,
+            .pName = "main"
+        };
+        stages.push_back(stageInfo);
 
-        VkRayTracingShaderGroupCreateInfoKHR g{};
-        g.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
-        g.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR;
-        g.closestHitShader = stageIdx++;
-        g.generalShader = g.anyHitShader = g.intersectionShader = VK_SHADER_UNUSED_KHR;
-        groups.push_back(g);
+        VkRayTracingShaderGroupCreateInfoKHR group = {
+            .sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
+            .type = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR,
+            .generalShader = VK_SHADER_UNUSED_KHR,
+            .closestHitShader = stageIndex++,
+            .anyHitShader = VK_SHADER_UNUSED_KHR,
+            .intersectionShader = VK_SHADER_UNUSED_KHR
+        };
+        groups.push_back(group);
     };
 
-    addGeneral(raygen, VK_SHADER_STAGE_RAYGEN_BIT_KHR, "Raygen");
-    addGeneral(miss, VK_SHADER_STAGE_MISS_BIT_KHR, "Primary Miss");
-    if (shadowMiss) addGeneral(shadowMiss, VK_SHADER_STAGE_MISS_BIT_KHR, "Shadow Miss");
-    if (hit) addHit(hit);
+    // Correct order and indexing
+    addStageAndGeneralGroup(raygen, VK_SHADER_STAGE_RAYGEN_BIT_KHR);
+    addStageAndGeneralGroup(miss,   VK_SHADER_STAGE_MISS_BIT_KHR);
+    if (miss2) addStageAndGeneralGroup(miss2, VK_SHADER_STAGE_MISS_BIT_KHR);
+    if (chit)  addClosestHit(chit);
 
+    // Store SBT layout
     raygenGroupCount_ = 1;
-    missGroupCount_   = shadowMiss ? 2 : 1;
-    hitGroupCount_    = hit ? 1 : 0;
+    missGroupCount_   = miss2 ? 2 : 1;
+    hitGroupCount_    = chit ? 1 : 0;
 
-    VkRayTracingPipelineCreateInfoKHR pipeInfo = {};
-    pipeInfo.sType                        = VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR;
-    pipeInfo.pNext                        = nullptr;
-    pipeInfo.flags                        = 0;
-    pipeInfo.stageCount                   = static_cast<uint32_t>(stages.size());
-    pipeInfo.pStages                      = stages.data();
-    pipeInfo.groupCount                   = static_cast<uint32_t>(groups.size());
-    pipeInfo.pGroups                      = groups.data();
-    pipeInfo.maxPipelineRayRecursionDepth = Options::OptionsRTX::MAX_PIPELINE_RAY_RECURSION_DEPTH;
-    pipeInfo.layout                       = *rtPipelineLayout_;
+    VkRayTracingPipelineCreateInfoKHR createInfo = {
+        .sType                        = VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR,
+        .stageCount                   = static_cast<uint32_t>(stages.size()),
+        .pStages                      = stages.data(),
+        .groupCount                   = static_cast<uint32_t>(groups.size()),
+        .pGroups                      = groups.data(),
+        .maxPipelineRayRecursionDepth = Options::OptionsRTX::MAX_PIPELINE_RAY_RECURSION_DEPTH,
+        .layout                       = *rtPipelineLayout_
+    };
 
     VkPipeline pipeline = VK_NULL_HANDLE;
-    VK_CHECK(RTX::g_ext.vkCreateRayTracingPipelinesKHR(stone_device(), VK_NULL_HANDLE, VK_NULL_HANDLE, 1, &pipeInfo, nullptr, &pipeline));
+    VK_CHECK(RTX::g_ext.vkCreateRayTracingPipelinesKHR(stone_device(), VK_NULL_HANDLE, VK_NULL_HANDLE, 1, &createInfo, nullptr, &pipeline));
 
     rtPipeline_ = Handle<VkPipeline>(pipeline, stone_device(), vkDestroyPipeline);
+
+    LOG_SUCCESS_CAT("PIPELINE", "RT pipeline created — {} stages, {} groups (raygen:1, miss:{}, hit:{})",
+                    stages.size(), groups.size(), missGroupCount_, hitGroupCount_);
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
