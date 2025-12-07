@@ -45,6 +45,27 @@ enum class FpsTarget : uint32_t {
     FPS_UNLIMITED = 0
 };
 
+// ──────────────────────────────────────────────────────────────────────────────
+// Environment Map — returned from createEnvironmentMap()
+// ──────────────────────────────────────────────────────────────────────────────
+struct EnvironmentMap {
+    VkImage        image   = VK_NULL_HANDLE;
+    VkDeviceMemory memory  = VK_NULL_HANDLE;
+    VkImageView    view    = VK_NULL_HANDLE;
+    VkSampler      sampler = VK_NULL_HANDLE;
+
+    // True if the map was successfully created
+    explicit operator bool() const noexcept { return view != VK_NULL_HANDLE; }
+
+    // Optional: auto-cleanup on destruction (RAII)
+    ~EnvironmentMap() {
+        if (view)    vkDestroyImageView(stone_device(), view, nullptr);
+        if (sampler) vkDestroySampler(stone_device(), sampler, nullptr);
+        if (image)   vkDestroyImage(stone_device(), image, nullptr);
+        if (memory)  vkFreeMemory(stone_device(), memory, nullptr);
+    }
+};
+
 class VulkanRenderer {
 public:
     VulkanRenderer(int width, int height, SDL_Window* window, bool overclock = false);
@@ -97,7 +118,7 @@ public:
 	[[nodiscard]] bool minimized() const noexcept { return minimized_; }
     [[nodiscard]] int  width()     const noexcept { return width_; }
     [[nodiscard]] int  height()    const noexcept { return height_; }
-	
+	void recordPinkScreen(VkCommandBuffer cmd, VkImage swapImage);
 	void onSwapchainRebuilt(uint32_t width, uint32_t height) noexcept;
     void recordRayTrace(VkCommandBuffer cmd, const VkExtent2D& extent) noexcept;	
     void setMaxFramesInFlight(uint32_t count) noexcept;
@@ -105,6 +126,10 @@ public:
 	static inline std::atomic<bool> s_resizeInProgress{false};
     bool     resetAccumulation_ = true;
 	void clearPinkForce() noexcept;
+    EnvironmentMap createEnvironmentMap() noexcept;
+    // Command buffers
+    std::vector<VkCommandBuffer> commandBuffers_;
+    std::vector<VkCommandBuffer> computeCommandBuffers_;
 
 private:
     // Core state
@@ -129,7 +154,6 @@ private:
     int  activeRenderMode_ = 0;
 	std::atomic<uint64_t> rendererRebuildFrame_{0};
 
-	void recordPinkScreen(VkCommandBuffer cmd, VkImage swapImage);
     void submitAndPresent(uint32_t slot, uint32_t imageIndex);
     void clearAccumulationImages(VkCommandBuffer cmd);
     void transitionImage(VkCommandBuffer cmd,
@@ -159,10 +183,6 @@ private:
     std::vector<VkSemaphore> computeFinishedSemaphores_;
     std::vector<VkSemaphore> computeToGraphicsSemaphores_;
     std::vector<VkFence>     inFlightFences_;
-
-    // Command buffers
-    std::vector<VkCommandBuffer> commandBuffers_;
-    std::vector<VkCommandBuffer> computeCommandBuffers_;
 
     VkQueryPool timestampQueryPool_ = VK_NULL_HANDLE;
     double      timestampPeriod_    = 0.0;
@@ -234,7 +254,6 @@ private:
     void createAccumulationImages() noexcept;
     void createDenoiserImage() noexcept;
     void createNexusScoreImage(VkCommandPool pool, VkQueue queue) noexcept;
-    void createEnvironmentMap() noexcept;
     void createTonemapSampler() noexcept;
 
     void destroyRTOutputImages() noexcept;

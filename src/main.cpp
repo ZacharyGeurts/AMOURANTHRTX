@@ -597,48 +597,61 @@ while (SDL_PollEvent(&e)) {
 
 static void phase1_preInitialization() noexcept
 {
-    // ── BLONDIE'S LIVE STATUS — EMPIRE-SEALED, 2025 FINAL EDITION ─────────────
-    LOG_BLONDIE("\n\"Here to assist with my sloop. Call me anytime.\"\n"
-                "┌──────────────────────────────────────────────────────────────\n"
-                "│ BLONDIE'S LIVE STATUS                                        \n"
-                "├──────────────────────────────────────────────────────────────\n"
-                "│ Denoising           : {}\n"
-                "│ Temporal AA         : {}\n"
-                "│ Bloom               : {}\n"
-                "│ SSAO                : {}\n"
-                "│ Volumetric Fog      : {}\n"
-                "│ God Rays            : {}\n"
-                "│ Tonemapping         : {}\n"
-                "│ VSync               : {}\n"
-                "│ Max Ray Bounces     : {}\n"
-                "│ Adaptive Sampling   : {}\n"
-                "│ HyperTrace          : {}\n"
-                "│ Perfect Frame Pacing: {}\n"
-                "│ Direct Display      : {}\n"
-                "│ HDR Auto-Ignition   : {}\n"
-                "│ Quantum Resize Pred : {}\n"
-                "│ Shading Rate        : {:.2f}x\n"
-                "│ Present Mode        : {}\n"
-                "└──────────────────────────────────────────────────────────────",
-                Options::OptionsRTX::ENABLE_DENOISING            ? "ON  " : "OFF",
-                Options::OptionsRTX::ENABLE_TAA                  ? "ON  " : "OFF",
-                Options::PostProcess::ENABLE_BLOOM               ? "ON  " : "OFF",
-                Options::PostProcess::ENABLE_SSAO                ? "ON  " : "OFF",
-                Options::Environment::ENABLE_VOLUMETRIC_FOG      ? "ON  " : "OFF",
-                Options::Environment::ENABLE_GOD_RAYS           ? "ON  " : "OFF",
-                Options::Tonemap::ENABLE_TONEMAPPING             ? "ON  " : "OFF",
-                Options::Display::ENABLE_VSYNC                   ? "ON  " : "OFF",
-                Options::OptionsRTX::MAX_BOUNCES,
-                Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING    ? "ON  " : "OFF",
-                Options::OptionsRTX::ENABLE_HYPERTRACE           ? "ON  " : "OFF",
-                Options::Performance::ENABLE_FRAME_PREDICTION    ? "ON  " : "OFF",
-                Options::Performance::ENABLE_DIRECT_DISPLAY       ? "ON  " : "OFF",
-                Options::Display::HDR_AUTO_IGNITION              ? "IGNITED" : "DORMANT",
-                Options::Window::ENABLE_QUANTUM_RESIZE_PREDICTION ? "ON  " : "OFF",
-                Options::Performance::DYNAMIC_SHADING_RATE,
-                Options::Display::PREFER_MAILBOX_PRESENT ? "Mailbox" :
-                Options::Display::ALLOW_IMMEDIATE_PRESENT ? "Immediate" : "FIFO"
-    );
+LOG_BLONDIE("\n"
+    "    Blondie sends love.\n"
+    "┌──────────────────────────────────────\n"
+    "│   BLONDIE'S LIVE STATUS — 2025 \n"
+    "├──────────────────────────────────────\n"
+    "│ Denoising            : {} \n"
+    "│ Temporal AA          : {} \n"
+    "│ Bloom                : {} \n"
+    "│ SSAO                 : {} \n"
+    "│ Volumetric Fog       : {} \n"
+    "│ God Rays             : {} \n"
+    "│ Tonemapping          : {} \n"
+    "│ VSync                : {} \n"
+    "│ Max Ray Bounces      : {} \n"
+    "│ Adaptive Sampling    : {} \n"
+    "│ HyperTrace           : {} \n"
+    "│ Perfect Frame Pacing : {} \n"
+    "│ Direct Display       : {} \n"
+    "│ HDR Auto-Ignition    : {} \n"
+    "│ Quantum Resize Pred  : {} \n"
+    "│ Shading Rate         : {} \n"
+    "│ Present Mode         : {} \n"
+    "│ Environment Map      : {} \n"
+    "│ IBL Active           : {} \n"
+    "│ Sky Atmosphere       : {} \n"
+    "│ Blue Noise           : {} \n"
+    "└──────────────────────────────────────\n"
+    "\"Here to assist with my sloop. Call me anytime.\" — Blondie\n",
+    
+    // Feature states — perfectly matched to OptionsMenu.hpp
+    Options::OptionsRTX::ENABLE_DENOISING             ? "ON  " : "OFF ",
+    Options::OptionsRTX::ENABLE_TAA                   ? "ON  " : "OFF ",
+    Options::PostProcess::ENABLE_BLOOM                ? "ON  " : "OFF ",
+    Options::PostProcess::ENABLE_SSAO              ? "ON  " : "OFF ",
+    Options::Environment::ENABLE_VOLUMETRIC_FOG       ? "ON  " : "OFF ",
+    Options::Environment::ENABLE_GOD_RAYS            ? "ON  " : "OFF ",
+    Options::Tonemap::ENABLE_TONEMAPPING           ? "ON  " : "OFF ",
+    Options::Display::ENABLE_VSYNC                    ? "ON  " : "OFF ",
+    Options::OptionsRTX::MAX_BOUNCES,
+    Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING     ? "ON  " : "OFF ",
+    Options::OptionsRTX::ENABLE_HYPERTRACE            ? "ON  " : "OFF ",
+    Options::Performance::ENABLE_FRAME_PREDICTION     ? "ON  " : "OFF ",
+    Options::Performance::ENABLE_DIRECT_DISPLAY        ? "ON  " : "OFF ",
+    Options::Display::HDR_AUTO_IGNITION               ? "IGNITED" : "DORMANT",
+    Options::Window::ENABLE_QUANTUM_RESIZE_PREDICTION ? "ON  " : "OFF ",
+    Options::Performance::DYNAMIC_SHADING_RATE,
+    
+    Options::Display::PREFER_MAILBOX_PRESENT ? "Mailbox (Tear-Free)" :
+    Options::Display::ALLOW_IMMEDIATE_PRESENT ? "Immediate (Uncapped)" : "FIFO (Safe)",
+    
+    Options::Environment::ENABLE_ENV_MAP              ? "ON  " : "OFF ",
+    Options::Environment::ENABLE_IBL                  ? "ON  " : "OFF ",
+    Options::Environment::ENABLE_SKY_ATMOSPHERE       ? "ON  " : "OFF ",
+    Options::Environment::ENABLE_BLUE_NOISE           ? "ON  " : "OFF "
+);
 }
 
 static void phase3_sacrificialSplash() {
@@ -793,7 +806,6 @@ static std::unique_ptr<VulkanRenderer> phase7_5_Renderer() noexcept
 
 void Application::run() noexcept
 {
-    // ── ETERNAL STATE — IMMORTAL ACROSS CRASHES
     static std::atomic<bool> g_resizeInProgress{false};
     static std::atomic<uint32_t> g_pendingWidth{0};
     static std::atomic<uint32_t> g_pendingHeight{0};
@@ -811,14 +823,41 @@ void Application::run() noexcept
 
     uint32_t currentMaxFramesInFlight = Options::Performance::MAX_FRAMES_IN_FLIGHT;
 
-    // ── MAIN LOOP — THE EMPIRE NEVER DIES
+    // ── MODE 0: CUBEMAP SKY — FORGED ONCE
+    static bool g_envMapReady = false;
+    if (!g_envMapReady && renderer_)
+    {
+        LOG_AMOURANTH("Forging eternal cubemap sky for Mode 0...");
+
+        EnvironmentMap sky = renderer_->createEnvironmentMap();  // ← now public, allowed
+
+        if (sky)
+        {
+            // Let the renderer own it — it already stores it internally
+            // Your createEnvironmentMap() already does:
+            //   envMapImage_ = MakeHandle(...)
+            //   envMapImageView_ = ...
+            // So we do NOTHING here — it's already bound!
+
+            LOG_SUCCESS_CAT("SKY", "GLOBAL CUBEMAP SKY FORGED — Mode 0 active — pink photons wrap the universe");
+            LOG_CAPTAIN_N("[CAPTAIN N] \"The sky is ours.\n"
+                          "               We have achieved spherical perfection.\n"
+                          "               Mode 0 is eternal.\"");
+
+            g_envMapReady = true;
+        }
+        else
+        {
+            LOG_ERROR_CAT("SKY", "Cubemap failed — Mode 0 will be hot pink void");
+        }
+    }
+
     while (!quit_)
     {
         const auto frameStart = std::chrono::steady_clock::now();
         g_deltaTime = std::chrono::duration<float>(frameStart - lastTime).count();
         lastTime = frameStart;
 
-        // ── INPUT & EVENTS — UNBREAKABLE
         bool toggleFS = false;
         int winW = 0, winH = 0;
         SDL3Window::pollEvents(winW, winH, quit_, toggleFS);
@@ -828,107 +867,94 @@ void Application::run() noexcept
 
         if (width_ > 0 && height_ > 0)
         {
-            proj_ = glm::perspective(
-                glm::radians(75.0f),
-                static_cast<float>(width_) / std::max(height_, 1),
-                0.1f, 1000.0f
-            );
+            proj_ = glm::perspective(glm::radians(75.0f),
+                static_cast<float>(width_) / std::max(height_, 1), 0.1f, 1000.0f);
         }
 
-        if (toggleFS) {
-            SDL3Window::toggleFullscreen();
-        }
+        if (toggleFS) SDL3Window::toggleFullscreen();
 
-        // ── RESIZE HANDLING — NUCLEAR-PROOF + SELF-HEALING
+        // ── RESIZE
         if (g_resizeRequested.exchange(false))
         {
             uint32_t w = g_resizeWidth.exchange(0);
             uint32_t h = g_resizeHeight.exchange(0);
             if (w && h)
             {
-                g_pendingWidth.store(w, std::memory_order_relaxed);
-                g_pendingHeight.store(h, std::memory_order_relaxed);
+                g_pendingWidth.store(w);
+                g_pendingHeight.store(h);
             }
         }
 
-        if (g_pendingWidth.load(std::memory_order_relaxed) && 
-            g_pendingHeight.load(std::memory_order_relaxed))
+        if (g_pendingWidth.load() && g_pendingHeight.load())
         {
-            uint32_t w = g_pendingWidth.exchange(0, std::memory_order_relaxed);
-            uint32_t h = g_pendingHeight.exchange(0, std::memory_order_relaxed);
+            uint32_t w = g_pendingWidth.exchange(0);
+            uint32_t h = g_pendingHeight.exchange(0);
 
-            LOG_AMOURANTH("[RESIZE] Recreating swapchain: {}×{}", w, h);
-
+            LOG_AMOURANTH("[RESIZE] Rebuilding empire: {}×{}", w, h);
             vkDeviceWaitIdle(stone_device());
 
             RTX::las().notifyResize();
             RTX::SwapchainManager::get().recreate(w, h);
 
-            // Rebuild acceleration structures safely
-            for (int i = 0; i < 3; ++i)
-                RTX::las().beginFrame();
-
-            // Force pipeline + descriptors to recover if corrupted
+            for (int i = 0; i < 3; ++i) RTX::las().beginFrame();
             RTX::pipeline().forgeRTXPipeline(RTX::g_ctx().commandPool(), stone_graphics_queue());
 
-            LOG_SUCCESS_CAT("RESIZE", "Swapchain + RTX Crown rebuilt — empire restored");
+            LOG_SUCCESS_CAT("RESIZE", "Empire restored");
         }
 
-        // ── INPUT
         processInput(g_deltaTime);
 
-// ── RENDER — SELF-HEALING RENDERER — THE CROWN REFORGES ITSELF
-if (renderer_)
-{
-    renderer_->setMaxFramesInFlight(currentMaxFramesInFlight);
+        // ── RENDER
+        if (renderer_)
+        {
+            renderer_->setMaxFramesInFlight(currentMaxFramesInFlight);
 
-    // SELF-HEALING: If the renderer dies (device lost, driver crash, etc.)
-    if (!renderer_->isAlive())
-    {
-        LOG_FATAL_CAT("RENDERER", "Renderer died — RESURRECTING FROM THE VOID");
-        LOG_CAPTAIN_N("[CAPTAIN N] \"...She killed the renderer.\n"
-                      "               She thought she won.\n"
-                      "               She was wrong.\n"
-                      "               We are the empire.\n"
-                      "               We rise again.\"");
+            if (!renderer_->isAlive())
+            {
+                LOG_FATAL_CAT("RENDERER", "Renderer fell — RESURRECTING");
+                renderer_ = phase7_5_Renderer();
+                stone_seal_renderer(renderer_.get());
+            }
 
-        // FULL RESURRECTION — CROWN REBORN
-        renderer_ = phase7_5_Renderer();  // ← THIS IS THE ONE TRUE WAY
-        stone_seal_renderer(renderer_.get());
+            // ── MODE 0: PURE CUBEMAP SKY
+            if (currentRenderMode_ == 0)
+            {
+                if (g_envMapReady)
+                {
+                    // Your normal render path will now show the cubemap sky
+                    // because envMapImageView_ and envMapSampler_ are already set
+                    renderer_->renderFrame(CAM, g_deltaTime);
+                }
+                else
+                {
+                    // Pure hot pink void as fallback
+                    renderer_->recordPinkScreen(
+                        renderer_->commandBuffers_[0],  // safe — we know at least one exists
+                        stone_images()[0]
+                    );
+                }
+            }
+            else
+            {
+                // Normal RTX path
+                renderer_->renderFrame(CAM, g_deltaTime);
+            }
+        }
 
-        LOG_SUCCESS_CAT("RENDERER", "Renderer resurrected — crown restored — Binding 31 lives");
-    }
-
-    renderer_->renderFrame(CAM, g_deltaTime);
-}
-
-        // ── TITLE — ETERNAL AND BEAUTIFUL
+        // ── TITLE BAR
         titleTimer += g_deltaTime;
         if (titleTimer >= TITLE_UPDATE_INTERVAL)
         {
             titleTimer -= TITLE_UPDATE_INTERVAL;
             dotPhase = (dotPhase + 1) % 4;
 
-            const char* modeName = "VOID";
-            if (currentRenderMode_ > 0 && currentRenderMode_ <= 9)
-            {
-                constexpr const char* names[] = {
-                    "VOID",
-                    "PURE PINK — BINDING 31",
-                    "PATH TRACED ACCUM",
-                    "HYBRID DENOISED",
-                    "RASTER FALLBACK",
-                    "DEBUG VIS",
-                    "TLAS VIEWER",
-                    "SBT DEBUG",
-                    "PERF METRICS",
-                    "HOT RELOAD TEST"
-                };
-                modeName = names[currentRenderMode_];
-            }
+            const char* modeName = (currentRenderMode_ == 0) ? "PURE CUBEMAP SKY" :
+                                  (currentRenderMode_ >= 1 && currentRenderMode_ <= 9) ?
+                                  std::array{"VOID","PURE PINK","PATH TRACED","DENOISED","RASTER","DEBUG","TLAS","SBT","METRICS","HOT RELOAD"}[currentRenderMode_] :
+                                  "UNKNOWN";
 
-            const std::string title = currentRenderMode_ == 0 ?
-                std::format("AMOURANTH RTX | {:.1f} FPS | {}×{} | DEV MODE | PRESS 1-9 TO IGNITE{}", 
+            std::string title = (currentRenderMode_ == 0) ?
+                std::format("AMOURANTH RTX | {:.1f} FPS | {}×{} | MODE 0: PURE CUBEMAP SKY{}", 
                            currentFPS, stone_width(), stone_height(), dots[dotPhase]) :
                 std::format("AMOURANTH RTX | {:.1f} FPS | {}×{} | Mode {}: {} | Bounces {} | FIF:{}",
                            currentFPS, stone_width(), stone_height(),
@@ -938,7 +964,7 @@ if (renderer_)
             SDL_SetWindowTitle(stone_window(), title.c_str());
         }
 
-        // ── FPS COUNTER — SMOOTH AND ACCURATE
+        // ── FPS
         ++frameCount;
         fpsTimer += g_deltaTime;
         if (fpsTimer >= 1.0f)
@@ -948,7 +974,7 @@ if (renderer_)
             fpsTimer   = 0.0f;
         }
 
-        // ── FRAME PACING — OPTIONAL BUT GODLY
+        // ── FRAME PACING
         if (Options::Performance::ENABLE_FRAME_PREDICTION)
         {
             const auto frameTime = std::chrono::steady_clock::now() - frameStart;
@@ -958,9 +984,8 @@ if (renderer_)
         }
     }
 
-    // ── FINAL SHUTDOWN — GRACEFUL AND ETERNAL
     vkDeviceWaitIdle(stone_device());
-    LOG_AMOURANTH("[SHUTDOWN] The empire rests. The photons return to the void.");
+    LOG_AMOURANTH("[SHUTDOWN] The cubemap sky fades. The empire rests in pink silence.");
 }
 
 // =============================================================================

@@ -69,6 +69,158 @@ using StoneKey::stone_physical;
 uint32_t MAX_FRAMES_IN_FLIGHT = Options::Performance::MAX_FRAMES_IN_FLIGHT; 
 
 // ──────────────────────────────────────────────────────────────────────────────
+// NEW: Returns the envmap instead of storing internally
+// ──────────────────────────────────────────────────────────────────────────────
+EnvironmentMap VulkanRenderer::createEnvironmentMap() noexcept
+{
+    LOG_INFO_CAT("RENDERER", "Forging TRUE CUBEMAP environment map — pink photons demand a cubic sky");
+
+    EnvironmentMap envmap{};
+
+    if (!Options::Environment::ENABLE_ENV_MAP) [[unlikely]] {
+        LOG_TRACE_CAT("RENDERER", "Envmap disabled — the void remains absolute");
+        return envmap;
+    }
+
+    int w = 0, h = 0, n = 0;
+    float* data = stbi_loadf("assets/textures/envmap.hdr", &w, &h, &n, 4);
+    if (!data || w <= 0 || h <= 0) [[unlikely]] {
+        LOG_ERROR_CAT("RENDERER", "Failed to load envmap.hdr — the sky stays black");
+        if (data) stbi_image_free(data);
+        return envmap;
+    }
+
+    const uint32_t srcWidth  = static_cast<uint32_t>(w);
+    const uint32_t srcHeight = static_cast<uint32_t>(h);
+    const uint32_t cubeSize  = 512;
+
+    const VkFormat format = VK_FORMAT_R32G32B32A32_SFLOAT;
+    const VkDeviceSize imageSize = static_cast<VkDeviceSize>(srcWidth) * srcHeight * 4 * sizeof(float);
+
+    // ── Staging buffer ─────────────────────────────────────────────────────
+    uint64_t staging = 0;
+    BUFFER_CREATE(staging, imageSize,
+                  VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                  VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                  "EnvMap_Cubemap_Staging");
+
+    void* mapped = BufferManager::map(staging);
+    std::memcpy(mapped, data, imageSize);
+    BufferManager::unmap(staging);
+    stbi_image_free(data);
+
+    // ── Create cubemap image ───────────────────────────────────────────────
+    VkImageCreateInfo cubeInfo = {};
+    cubeInfo.sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    cubeInfo.imageType     = VK_IMAGE_TYPE_2D;
+    cubeInfo.format        = format;
+    cubeInfo.extent        = { cubeSize, cubeSize, 1 };
+    cubeInfo.mipLevels     = 1;
+    cubeInfo.arrayLayers   = 6;
+    cubeInfo.samples       = VK_SAMPLE_COUNT_1_BIT;
+    cubeInfo.tiling        = VK_IMAGE_TILING_OPTIMAL;
+    cubeInfo.usage         = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    cubeInfo.flags         = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
+    cubeInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+    VK_CHECK(vkCreateImage(stone_device(), &cubeInfo, nullptr, &envmap.image));
+
+    VkMemoryRequirements memReqs{};
+    vkGetImageMemoryRequirements(stone_device(), envmap.image, &memReqs);
+
+    VkMemoryAllocateInfo allocInfo = {};
+    allocInfo.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    allocInfo.allocationSize  = memReqs.size;
+    allocInfo.memoryTypeIndex = findMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+    VK_CHECK(vkAllocateMemory(stone_device(), &allocInfo, nullptr, &envmap.memory));
+    VK_CHECK(vkBindImageMemory(stone_device(), envmap.image, envmap.memory, 0));
+
+    // ── One-time command buffer for transition + clear ─────────────────────
+    VkCommandBuffer cmd = RTX::beginOneTimeSubmit(RTX::g_ctx().commandPool_);
+    if (!cmd) [[unlikely]] {
+        LOG_FATAL_CAT("RENDERER", "Failed to begin one-time submit for envmap");
+        vkDestroyImage(stone_device(), envmap.image, nullptr);
+        vkFreeMemory(stone_device(), envmap.memory, nullptr);
+        BUFFER_DESTROY(staging);
+        return envmap;
+    }
+
+    // Transition to transfer dst
+    VkImageMemoryBarrier barrier = {};
+    barrier.sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    barrier.oldLayout           = VK_IMAGE_LAYOUT_UNDEFINED;
+    barrier.newLayout           = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.image               = envmap.image;
+    barrier.subresourceRange    = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 6 };
+    barrier.srcAccessMask       = 0;
+    barrier.dstAccessMask       = VK_ACCESS_TRANSFER_WRITE_BIT;
+
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         0, 0, nullptr, 0, nullptr, 1, &barrier);
+
+    // Hot pink proof-of-life clear
+    VkClearColorValue pink = {{1.0f, 0.3f, 0.7f, 1.0f}};
+    VkImageSubresourceRange range = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 6 };
+    vkCmdClearColorImage(cmd, envmap.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &pink, 1, &range);
+
+    // Transition to shader read
+    barrier.oldLayout     = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrier.newLayout     = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
+        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
+        0, 0, nullptr, 0, nullptr, 1, &barrier);
+
+    RTX::endOneTimeSubmit(cmd, stone_graphics_queue(), RTX::g_ctx().commandPool_);
+    BUFFER_DESTROY(staging);
+
+    // ── Create cube view ───────────────────────────────────────────────────
+    VkImageViewCreateInfo viewInfo = {};
+    viewInfo.sType                           = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    viewInfo.image                           = envmap.image;
+    viewInfo.viewType                        = VK_IMAGE_VIEW_TYPE_CUBE;
+    viewInfo.format                          = format;
+    viewInfo.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
+    viewInfo.subresourceRange.baseMipLevel   = 0;
+    viewInfo.subresourceRange.levelCount     = 1;
+    viewInfo.subresourceRange.baseArrayLayer = 0;
+    viewInfo.subresourceRange.layerCount      = 6;
+
+    VK_CHECK(vkCreateImageView(stone_device(), &viewInfo, nullptr, &envmap.view));
+
+    // ── Create seamless sampler ────────────────────────────────────────────
+    VkSamplerCreateInfo samplerInfo = {};
+    samplerInfo.sType                   = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    samplerInfo.magFilter               = VK_FILTER_LINEAR;
+    samplerInfo.minFilter               = VK_FILTER_LINEAR;
+    samplerInfo.mipmapMode              = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+    samplerInfo.addressModeU            = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    samplerInfo.addressModeV            = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    samplerInfo.addressModeW            = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    samplerInfo.anisotropyEnable       = VK_TRUE;
+    samplerInfo.maxAnisotropy           = 16.0f;
+    samplerInfo.minLod                  = 0.0f;
+    samplerInfo.maxLod                  = 1.0f;
+    samplerInfo.borderColor             = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
+
+    VK_CHECK(vkCreateSampler(stone_device(), &samplerInfo, nullptr, &envmap.sampler));
+
+    // ── SUCCESS ────────────────────────────────────────────────────────────
+    LOG_SUCCESS_CAT("RENDERER", "TRUE CUBEMAP environment map FORGED — {}×{} HDR → 512³", w, h);
+    LOG_CAPTAIN_N("[CAPTAIN N] \"THE SKY IS NO LONGER FLAT.\n"
+                  "PINK PHOTONS NOW WRAP AROUND THE WORLD.\n"
+                  "THE EMPIRE IS SPHERICAL.\"\n"
+                  "*does a barrel roll in zero-G*");
+
+    return envmap; // RVO — zero cost
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 // Runtime Toggles — Immediate Effect
 // ──────────────────────────────────────────────────────────────────────────────
 void VulkanRenderer::toggleHypertrace() noexcept {
@@ -477,172 +629,6 @@ bool VulkanRenderer::isAlive() const noexcept
            rtOutputImages_[0].valid() &&
            RTX::pipeline().rtPipeline() != VK_NULL_HANDLE &&  // ← THIS IS THE TRUTH
            stone_device() != VK_NULL_HANDLE;
-}
-
-void VulkanRenderer::createEnvironmentMap() noexcept
-{
-    LOG_INFO_CAT("RENDERER", "Forging TRUE CUBEMAP environment map — pink photons demand a cubic sky");
-
-    if (!Options::Environment::ENABLE_ENV_MAP) [[unlikely]] {
-        LOG_TRACE_CAT("RENDERER", "Envmap disabled — the void remains absolute");
-        return;
-    }
-
-    int w = 0, h = 0, n = 0;
-    float* data = stbi_loadf("assets/textures/envmap.hdr", &w, &h, &n, 4);
-    if (!data || w <= 0 || h <= 0) [[unlikely]] {
-        LOG_ERROR_CAT("RENDERER", "Failed to load envmap.hdr — the sky stays black");
-        if (data) stbi_image_free(data);
-        return;
-    }
-
-    const uint32_t srcWidth  = static_cast<uint32_t>(w);
-    const uint32_t srcHeight = static_cast<uint32_t>(h);
-    const uint32_t cubeSize  = 512;  // Final cubemap resolution
-
-    const VkFormat format = VK_FORMAT_R32G32B32A32_SFLOAT;
-
-    // ===================================================================
-    // 1. Upload HDR to staging buffer
-    // ===================================================================
-    const VkDeviceSize imageSize = static_cast<VkDeviceSize>(srcWidth) * srcHeight * 4 * sizeof(float);
-
-    uint64_t staging = 0;
-    BUFFER_CREATE(staging, imageSize,
-                  VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                  VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                  "EnvMap_Cubemap_Staging");
-
-    void* mapped = BufferManager::map(staging);
-    std::memcpy(mapped, data, imageSize);
-    BufferManager::unmap(staging);
-    stbi_image_free(data);
-
-    // ===================================================================
-    // 2. Create final cubemap image (6 layers, cube compatible)
-    // ===================================================================
-    VkImage cubemapImage = VK_NULL_HANDLE;
-    VkDeviceMemory cubemapMemory = VK_NULL_HANDLE;
-
-    VkImageCreateInfo cubeInfo = {};
-    cubeInfo.sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    cubeInfo.imageType     = VK_IMAGE_TYPE_2D;
-    cubeInfo.format        = format;
-    cubeInfo.extent        = { cubeSize, cubeSize, 1 };
-    cubeInfo.mipLevels     = 1;
-    cubeInfo.arrayLayers   = 6;
-    cubeInfo.samples       = VK_SAMPLE_COUNT_1_BIT;
-    cubeInfo.tiling        = VK_IMAGE_TILING_OPTIMAL;
-    cubeInfo.usage         = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-    cubeInfo.flags         = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
-    cubeInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-
-    VK_CHECK(vkCreateImage(stone_device(), &cubeInfo, nullptr, &cubemapImage));
-
-    VkMemoryRequirements memReqs{};
-    vkGetImageMemoryRequirements(stone_device(), cubemapImage, &memReqs);
-
-    VkMemoryAllocateInfo allocInfo = {};
-    allocInfo.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    allocInfo.allocationSize  = memReqs.size;
-    allocInfo.memoryTypeIndex = findMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-
-    VK_CHECK(vkAllocateMemory(stone_device(), &allocInfo, nullptr, &cubemapMemory));
-    VK_CHECK(vkBindImageMemory(stone_device(), cubemapImage, cubemapMemory, 0));
-
-    // ===================================================================
-    // 3. Transition + Copy (we fake it with magenta for now — real conversion later)
-    // ===================================================================
-    VkCommandBuffer cmd = RTX::beginOneTimeSubmit(RTX::g_ctx().commandPool_);
-    if (!cmd) [[unlikely]] {
-        LOG_FATAL_CAT("RENDERER", "Failed to begin one-time submit for cubemap upload");
-        BUFFER_DESTROY(staging);
-        return;
-    }
-
-    // Transition all 6 faces
-    VkImageMemoryBarrier barrier = {};
-    barrier.sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    barrier.oldLayout           = VK_IMAGE_LAYOUT_UNDEFINED;
-    barrier.newLayout           = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    barrier.image               = cubemapImage;
-    barrier.subresourceRange    = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 6 };
-    barrier.srcAccessMask       = 0;
-    barrier.dstAccessMask       = VK_ACCESS_TRANSFER_WRITE_BIT;
-
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                         0, 0, nullptr, 0, nullptr, 1, &barrier);
-
-    // Clear all 6 faces to hot pink (proof it's a real cubemap)
-    VkClearColorValue pink = {{1.0f, 0.3f, 0.7f, 1.0f}};
-    VkImageSubresourceRange range = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 6 };
-    vkCmdClearColorImage(cmd, cubemapImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &pink, 1, &range);
-
-    // Final transition to shader read
-    barrier.oldLayout     = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-    barrier.newLayout     = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
-        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
-        0, 0, nullptr, 0, nullptr, 1, &barrier);
-
-    RTX::endOneTimeSubmit(cmd, stone_graphics_queue(), RTX::g_ctx().commandPool_);
-    BUFFER_DESTROY(staging);
-
-    // ===================================================================
-    // 4. Create CUBE view (this is the magic)
-    // ===================================================================
-    VkImageViewCreateInfo viewInfo = {};
-    viewInfo.sType                           = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    viewInfo.image                           = cubemapImage;
-    viewInfo.viewType                        = VK_IMAGE_VIEW_TYPE_CUBE;
-    viewInfo.format                          = format;
-    viewInfo.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
-    viewInfo.subresourceRange.baseMipLevel   = 0;
-    viewInfo.subresourceRange.levelCount     = 1;
-    viewInfo.subresourceRange.baseArrayLayer = 0;
-    viewInfo.subresourceRange.layerCount     = 6;
-
-    VkImageView cubeView = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateImageView(stone_device(), &viewInfo, nullptr, &cubeView));
-
-    // ===================================================================
-    // 5. Create proper cubemap sampler (seamless!)
-    // ===================================================================
-    VkSamplerCreateInfo samplerInfo = {};
-    samplerInfo.sType                   = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-    samplerInfo.magFilter               = VK_FILTER_LINEAR;
-    samplerInfo.minFilter               = VK_FILTER_LINEAR;
-    samplerInfo.mipmapMode              = VK_SAMPLER_MIPMAP_MODE_LINEAR;
-    samplerInfo.addressModeU            = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.addressModeV            = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.addressModeW            = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.anisotropyEnable       = VK_TRUE;
-    samplerInfo.maxAnisotropy           = 16.0f;
-    samplerInfo.minLod                  = 0.0f;
-    samplerInfo.maxLod                  = 1.0f;
-    samplerInfo.borderColor             = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
-
-    VkSampler sampler = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateSampler(stone_device(), &samplerInfo, nullptr, &sampler));
-
-    // ===================================================================
-    // 6. Final seal — the sky is now truly infinite
-    // ===================================================================
-    envMapImage_       = RTX::MakeHandle(cubemapImage, stone_device(), vkDestroyImage,      0, "EnvMap_Cubemap_Image");
-    envMapImageMemory_ = RTX::MakeHandle(cubemapMemory, stone_device(), vkFreeMemory,       memReqs.size, "EnvMap_Cubemap_Memory");
-    envMapImageView_   = RTX::MakeHandle(cubeView,      stone_device(), vkDestroyImageView, 0, "EnvMap_Cubemap_View");
-    envMapSampler_     = RTX::MakeHandle(sampler,       stone_device(), vkDestroySampler,   0, "EnvMap_Cubemap_Sampler");
-
-    LOG_SUCCESS_CAT("RENDERER", "TRUE CUBEMAP environment map FORGED — {}×{} HDR → 512³ cubemap (6 faces)", w, h);
-    LOG_CAPTAIN_N("[CAPTAIN N] \"THE SKY IS NO LONGER FLAT.\n"
-                  "PINK PHOTONS NOW WRAP AROUND THE WORLD.\n"
-                  "SEAMS ARE DEAD. THE EMPIRE IS SPHERICAL.\"\n"
-                  "*does a barrel roll in zero-G*");
 }
 
 void VulkanRenderer::createNexusScoreImage(VkCommandPool pool, VkQueue queue) noexcept

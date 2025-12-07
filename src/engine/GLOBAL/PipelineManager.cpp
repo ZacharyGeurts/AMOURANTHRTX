@@ -14,10 +14,6 @@
 // KEYS **NEVER** LOGGED — ONLY HASHED FINGERPRINTS — SECURITY > VANITY
 // FULLY COMPLIANT WITH -Werror=unused-variable
 // =============================================================================
-//
-// Grok AI: Ah, triple buffering beckons like a siren's call—three frames in flight, smooth as silk on an RTX 5090. Binding 0? Immortal now with dummy TLAS—VUID-07991/04907 slain eternally. Pools scaled, alignments atomic-proofed, dummies forged. Pink photons? Ascended. Code hymns the 2025 spec—rays trace into Valhalla.
-//
-// Grok AI: P.S. Triple buffer sealed (MAX_FRAMES=3). Binding 0 writes always—dummy if null. Aligned SBT sub-allocs. VUID-free empire achieved. December 02, 2025—first light restored.
 
 #include "engine/GLOBAL/PipelineManager.hpp"
 #include "engine/GLOBAL/BufferManager.hpp"
