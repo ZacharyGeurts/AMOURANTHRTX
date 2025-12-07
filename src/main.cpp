@@ -202,154 +202,60 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     RTX::LAS::get().beginFrame();
 
     if (RTX::SwapchainManager::minimized_) {
-        LOG_AMOURANTH("[PHASE 0] Window minimized — photons meditate in silence");
+        LOG_AMOURANTH("[FRAME {}] Window minimized — CID meditates in the pink void", frameNumber_);
         return;
     }
 
-    const uint32_t globalFrame = currentFrame_.fetch_add(1, std::memory_order_relaxed);
-    const uint32_t slot        = globalFrame % maxFramesInFlight_;
+    const uint32_t frameIndex = frameNumber_++;
+    const uint32_t slot       = frameIndex % maxFramesInFlight_;
 
-    // PHASE 1: Wait — BestQuality = infinite (perfect sync), Uncapped = 1µs (max FPS)
+    // ── SYNC ──
     if (inFlightFences_[slot] != VK_NULL_HANDLE) {
         if (Options::CURRENT_PRESET == Options::Preset::BestQuality) {
-            VK_CHECK(vkWaitForFences(stone_device(), 1, &inFlightFences_[slot], VK_TRUE, UINT64_MAX));
+            vkWaitForFences(stone_device(), 1, &inFlightFences_[slot], VK_TRUE, UINT64_MAX);
         } else {
-            VkResult r = vkWaitForFences(stone_device(), 1, &inFlightFences_[slot], VK_TRUE, 1'000);
-            if (r == VK_TIMEOUT) {
-                currentFrame_.fetch_sub(1, std::memory_order_relaxed);
+            if (vkWaitForFences(stone_device(), 1, &inFlightFences_[slot], VK_TRUE, 500'000) == VK_TIMEOUT)
                 return;
-            }
         }
+        vkResetFences(stone_device(), 1, &inFlightFences_[slot]);
     }
 
+    // ── ACQUIRE ──
     uint32_t imageIndex = 0;
-    VkResult acquireResult = vkAcquireNextImageKHR(
-        stone_device(),
-        RTX::SwapchainManager::swapchain(),
-        Options::CURRENT_PRESET == Options::Preset::BestQuality ? UINT64_MAX : 100'000'000,
-        imageAvailableSemaphores_[slot],
-        VK_NULL_HANDLE,
-        &imageIndex
+    VkResult acquireRes = vkAcquireNextImageKHR(
+        stone_device(), stone_swapchain(),
+        Options::CURRENT_PRESET == Options::Preset::BestQuality ? UINT64_MAX : 1'000'000,
+        imageAvailableSemaphores_[slot], VK_NULL_HANDLE, &imageIndex
     );
 
-    if (acquireResult != VK_SUCCESS && acquireResult != VK_SUBOPTIMAL_KHR) {
-        if (acquireResult == VK_ERROR_OUT_OF_DATE_KHR) {
-            g_resizeRequested.store(true);
-            g_resizeWidth.store(stone_width());
-            g_resizeHeight.store(stone_height());
-        }
-        LOG_AMOURANTH("[PHASE 2] Acquire failed: {} → skipping frame", string_VkResult(acquireResult));
+    if (acquireRes == VK_ERROR_OUT_OF_DATE_KHR || acquireRes == VK_TIMEOUT) {
+        RTX::recreateSwapchain(stone_width(), stone_height());
+        return;
+    }
+    if (acquireRes != VK_SUCCESS && acquireRes != VK_SUBOPTIMAL_KHR) {
         return;
     }
 
-    bool needsResize = (acquireResult == VK_SUBOPTIMAL_KHR);
-
-    VK_CHECK(vkResetFences(stone_device(), 1, &inFlightFences_[slot]));
-    VK_CHECK(vkResetCommandBuffer(commandBuffers_[slot], 0));
-
-    VkCommandBufferBeginInfo beginInfo{
-        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
-    };
-    VK_CHECK(vkBeginCommandBuffer(commandBuffers_[slot], &beginInfo));
     VkCommandBuffer cmd = commandBuffers_[slot];
+    vkResetCommandBuffer(cmd, 0);
 
-    bool drawPink = (activeRenderMode_ == 0) || g_forcePink.load() || g_resizeRequested.load();
+    // ── BEGIN COMMAND BUFFER — GCC-SAFE VERSION ──
+    VkCommandBufferBeginInfo beginInfo = {};
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    vkBeginCommandBuffer(cmd, &beginInfo);
 
-    if (drawPink) {
-        VkClearColorValue pink{ {1.0f, 0.2f, 0.8f, 1.0f} };
-        VkImageSubresourceRange range{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-
-        VkImageMemoryBarrier toTransfer{
-            .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-            .srcAccessMask       = 0,
-            .dstAccessMask       = VK_ACCESS_TRANSFER_WRITE_BIT,
-            .oldLayout           = VK_IMAGE_LAYOUT_UNDEFINED,
-            .newLayout           = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-            .image               = stone_images()[imageIndex],
-            .subresourceRange    = range
-        };
-        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                             0, 0, nullptr, 0, nullptr, 1, &toTransfer);
-
-        vkCmdClearColorImage(cmd, stone_images()[imageIndex], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &pink, 1, &range);
-
-        VkImageMemoryBarrier toPresent{
-            .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-            .srcAccessMask       = VK_ACCESS_TRANSFER_WRITE_BIT,
-            .dstAccessMask       = 0,
-            .oldLayout           = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-            .newLayout           = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-            .image               = stone_images()[imageIndex],
-            .subresourceRange    = range
-        };
-        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
-                             0, 0, nullptr, 0, nullptr, 1, &toPresent);
-
-        VK_CHECK(vkEndCommandBuffer(cmd));
-
-        VkSemaphoreSubmitInfo waitSem{
-            .sType     = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
-            .semaphore = imageAvailableSemaphores_[slot],
-            .stageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
-        };
-
-        VkCommandBufferSubmitInfo cmdInfo{
-            .sType         = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
-            .commandBuffer = cmd
-        };
-
-        VkSemaphoreSubmitInfo signalSem{
-            .sType     = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
-            .semaphore = renderFinishedSemaphores_[slot]
-        };
-
-        VkSubmitInfo2 submit{
-            .sType                    = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
-            .waitSemaphoreInfoCount   = 1,
-            .pWaitSemaphoreInfos      = &waitSem,
-            .commandBufferInfoCount   = 1,
-            .pCommandBufferInfos      = &cmdInfo,
-            .signalSemaphoreInfoCount = 1,
-            .pSignalSemaphoreInfos    = &signalSem
-        };
-
-        VK_CHECK(vkQueueSubmit2(stone_graphics_queue(), 1, &submit, inFlightFences_[slot]));
-
-        VkPresentInfoKHR present{
-            .sType              = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
-            .waitSemaphoreCount = 1,
-            .pWaitSemaphores    = &renderFinishedSemaphores_[slot],
-            .swapchainCount     = 1,
-            .pSwapchains        = &stone_swapchain(),
-            .pImageIndices      = &imageIndex
-        };
-
-        VkResult presentResult = vkQueuePresentKHR(stone_present_queue(), &present);
-        if (presentResult == VK_ERROR_OUT_OF_DATE_KHR || presentResult == VK_SUBOPTIMAL_KHR) {
-            g_resizeRequested.store(true);
-            g_resizeWidth.store(stone_width());
-            g_resizeHeight.store(stone_height());
-        }
-
-        frameNumber_++;
+    // ── PINK MODE ──
+    if (activeRenderMode_ == 0 || g_forcePink.load() || g_resizeRequested.load()) {
+        recordPinkScreen(cmd, stone_images()[imageIndex]);
+        vkEndCommandBuffer(cmd);
+        submitAndPresent(slot, imageIndex);
         return;
     }
 
-    // FULL NORMAL RENDER PATH — UNTOUCHED
-    if (resetAccumulation_ || resetAccumNextFrame_) {
-        LOG_MAIN("[PHASE 8.1] ACCUMULATION RESET");
-        VkClearColorValue zero{ {0.0f, 0.0f, 0.0f, 0.0f} };
-        VkImageSubresourceRange range{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-        auto clear = [&](VkImage img) {
-            vkCmdClearColorImage(cmd, img, VK_IMAGE_LAYOUT_GENERAL, &zero, 1, &range);
-        };
-        for (auto& img : rtOutputImages_) clear(img.get());
-        if (Options::OptionsRTX::ENABLE_ACCUMULATION)
-            for (auto& img : accumImages_) clear(img.get());
-        if (Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING && hypertraceScoreImage_.valid())
-            clear(hypertraceScoreImage_.get());
-
+    // ── ACCUMULATION RESET ──
+    if (resetAccumulation_ || resetAccumNextFrame_ || g_resizeRequested.load()) {
+        clearAccumulationImages(cmd);
         resetAccumulation_ = resetAccumNextFrame_ = false;
         accumulationFrame_ = currentSpp_ = 0;
     }
@@ -358,108 +264,47 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     updateTonemapUniform(slot);
 
     VkAccelerationStructureKHR tlas = RTX::LAS::get().getTLAS();
-    if (tlas == VK_NULL_HANDLE) tlas = pipelineManager_.dummyTLAS();
+    if (!tlas) tlas = pipelineManager_.dummyTLAS();
 
-    RTX::RTDescriptorUpdate desc{};
-    desc.tlas                  = tlas;
-    desc.ubo                   = reinterpret_cast<VkBuffer>(uniformBufferEncs_[slot]);
-    desc.uboSize               = 368;
-    desc.rtOutputViews[slot]   = rtOutputViews_[slot].get();
-    desc.accumulationViews[slot] = accumViews_[slot].get();
-    desc.envSampler            = envMapSampler_.get();
-    desc.envImageView          = envMapImageView_.get();
-    desc.materialsBuffer       = reinterpret_cast<VkBuffer>(materialBufferEncs_[0]);
-    desc.materialsSize         = 16_MB;
-    if (Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING && hypertraceScoreView_.valid())
-        desc.nexusScoreViews[slot] = hypertraceScoreView_.get();
+    // ── RT DESCRIPTOR UPDATE — NO DESIGNATED INITIALIZERS, NO UB ──
+    RTX::RTDescriptorUpdate descUpdate = {};
+    descUpdate.tlas                  = tlas;
+    descUpdate.ubo                   = reinterpret_cast<VkBuffer>(uniformBufferEncs_[slot]); // ← cast uint64_t → VkBuffer
+    descUpdate.uboSize               = 368;
+    descUpdate.rtOutputViews[slot]   = rtOutputViews_[slot].get();
+    descUpdate.accumulationViews[slot] = accumViews_[slot].get();
+    descUpdate.envSampler            = envMapSampler_.get();
+    descUpdate.envImageView          = envMapImageView_.get();
+    descUpdate.materialsBuffer       = reinterpret_cast<VkBuffer>(materialBufferEncs_[0]);
+    descUpdate.materialsSize         = 16_MB;
 
-    pipelineManager_.updateRTDescriptorSet(slot, desc);
-    if (Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING)
-        updateNexusDescriptors();
+    pipelineManager_.updateRTDescriptorSet(slot, descUpdate);
 
     recordRayTracingCommands(cmd, slot);
 
-    VkImageMemoryBarrier rtToRead{
-        .sType            = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-        .srcAccessMask    = VK_ACCESS_SHADER_WRITE_BIT,
-        .dstAccessMask    = VK_ACCESS_SHADER_READ_BIT,
-        .oldLayout        = VK_IMAGE_LAYOUT_GENERAL,
-        .newLayout        = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-        .image            = rtOutputImages_[slot].get(),
-        .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
-    };
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
-                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &rtToRead);
+    transitionImage(cmd, rtOutputImages_[slot].get(),
+        VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
+        VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
 
-    VkImageView tonemapInput = denoisingEnabled_ && denoiserView_.valid()
+    VkImageView tonemapSrc = denoisingEnabled_ && denoiserView_.valid()
         ? denoiserView_.get() : rtOutputViews_[slot].get();
 
-    updateTonemapDescriptor(slot, tonemapInput, stone_views()[imageIndex]);
+    updateTonemapDescriptor(slot, tonemapSrc, stone_views()[imageIndex]);
     if (denoisingEnabled_) performDenoisingPass(cmd);
     performTonemapPass(cmd, slot, imageIndex);
 
-    VkImageMemoryBarrier toPresent{
-        .sType            = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-        .srcAccessMask    = VK_ACCESS_SHADER_WRITE_BIT,
-        .dstAccessMask    = 0,
-        .oldLayout        = VK_IMAGE_LAYOUT_GENERAL,
-        .newLayout        = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-        .image            = stone_images()[imageIndex],
-        .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
-    };
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                         VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr, 1, &toPresent);
+    transitionImage(cmd, stone_images()[imageIndex],
+        VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+        VK_ACCESS_SHADER_WRITE_BIT, 0,
+        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
 
-    VK_CHECK(vkEndCommandBuffer(cmd));
-
-    VkSemaphoreSubmitInfo waitSem{
-        .sType     = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
-        .semaphore = imageAvailableSemaphores_[slot],
-        .stageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
-    };
-
-    VkCommandBufferSubmitInfo cmdInfo{
-        .sType         = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
-        .commandBuffer = cmd
-    };
-
-    VkSemaphoreSubmitInfo signalSem{
-        .sType     = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
-        .semaphore = renderFinishedSemaphores_[slot]
-    };
-
-    VkSubmitInfo2 submit{
-        .sType                    = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
-        .waitSemaphoreInfoCount   = 1,
-        .pWaitSemaphoreInfos      = &waitSem,
-        .commandBufferInfoCount   = 1,
-        .pCommandBufferInfos      = &cmdInfo,
-        .signalSemaphoreInfoCount = 1,
-        .pSignalSemaphoreInfos    = &signalSem
-    };
-
-    VK_CHECK(vkQueueSubmit2(stone_graphics_queue(), 1, &submit, inFlightFences_[slot]));
-
-    VkPresentInfoKHR present{
-        .sType              = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
-        .waitSemaphoreCount = 1,
-        .pWaitSemaphores    = &renderFinishedSemaphores_[slot],
-        .swapchainCount     = 1,
-        .pSwapchains        = &stone_swapchain(),
-        .pImageIndices      = &imageIndex
-    };
-
-    VkResult presentResult = vkQueuePresentKHR(stone_present_queue(), &present);
-    if (presentResult == VK_ERROR_OUT_OF_DATE_KHR || presentResult == VK_SUBOPTIMAL_KHR || needsResize) {
-        g_resizeRequested.store(true);
-        g_resizeWidth.store(stone_width());
-        g_resizeHeight.store(stone_height());
-    }
+    vkEndCommandBuffer(cmd);
+    submitAndPresent(slot, imageIndex);
 
     currentSpp_++;
     accumulationFrame_++;
-    frameNumber_++;
-    LOG_AMOURANTH("FRAME COMPLETE | #{} | spp={} | accum={}", globalFrame, currentSpp_, accumulationFrame_);
+    LOG_AMOURANTH("FRAME {} | spp={} | accum={} | FPS: {:.1f}", frameIndex, currentSpp_, accumulationFrame_, 1.0f/deltaTime);
 }
 // =============================================================================
 // 3. Application::processInput — ONLY 1–9 ACTIVATES RENDER MODES

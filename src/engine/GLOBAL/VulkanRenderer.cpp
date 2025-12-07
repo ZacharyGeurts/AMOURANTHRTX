@@ -345,6 +345,92 @@ void VulkanRenderer::createRTOutputImages() noexcept
     }
 }
 
+void VulkanRenderer::recordPinkScreen(VkCommandBuffer cmd, VkImage swapImage)
+{
+    const VkClearColorValue PINK = {{1.0f, 0.2f, 0.8f, 1.0f}};
+    const VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+
+    transitionImage(cmd, swapImage,
+        VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        0, VK_ACCESS_TRANSFER_WRITE_BIT,
+        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+
+    vkCmdClearColorImage(cmd, swapImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &PINK, 1, &range);
+
+    transitionImage(cmd, swapImage,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+        VK_ACCESS_TRANSFER_WRITE_BIT, 0,
+        VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
+}
+
+void VulkanRenderer::submitAndPresent(uint32_t slot, uint32_t imageIndex)
+{
+    // 100% GCC-safe — no &{} rvalue nonsense
+    VkSemaphoreSubmitInfo waitInfo = {};
+    waitInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
+    waitInfo.semaphore = imageAvailableSemaphores_[slot];
+    waitInfo.stageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+
+    VkCommandBufferSubmitInfo cmdInfo = {};
+    cmdInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO;
+    cmdInfo.commandBuffer = commandBuffers_[slot];
+
+    VkSemaphoreSubmitInfo signalInfo = {};
+    signalInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
+    signalInfo.semaphore = renderFinishedSemaphores_[slot];
+
+    VkSubmitInfo2 submit = {};
+    submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2;
+    submit.waitSemaphoreInfoCount = 1;
+    submit.pWaitSemaphoreInfos = &waitInfo;
+    submit.commandBufferInfoCount = 1;
+    submit.pCommandBufferInfos = &cmdInfo;
+    submit.signalSemaphoreInfoCount = 1;
+    submit.pSignalSemaphoreInfos = &signalInfo;
+
+    VK_CHECK(vkQueueSubmit2(stone_graphics_queue(), 1, &submit, inFlightFences_[slot]));
+
+    VkPresentInfoKHR present = {};
+    present.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+    present.waitSemaphoreCount = 1;
+    present.pWaitSemaphores = &renderFinishedSemaphores_[slot];
+    present.swapchainCount = 1;
+    present.pSwapchains = &stone_swapchain();
+    present.pImageIndices = &imageIndex;
+
+    VkResult r = vkQueuePresentKHR(stone_present_queue(), &present);
+    if (r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_SUBOPTIMAL_KHR || g_resizeRequested.exchange(false)) {
+        RTX::recreateSwapchain(stone_width(), stone_height());
+    }
+}
+
+void VulkanRenderer::clearAccumulationImages(VkCommandBuffer cmd)
+{
+    VkClearColorValue zero{{0,0,0,0}};
+    VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    for (auto& img : rtOutputImages_)  vkCmdClearColorImage(cmd, img.get(), VK_IMAGE_LAYOUT_GENERAL, &zero, 1, &range);
+    for (auto& img : accumImages_)     vkCmdClearColorImage(cmd, img.get(), VK_IMAGE_LAYOUT_GENERAL, &zero, 1, &range);
+    if (hypertraceScoreImage_.valid())
+        vkCmdClearColorImage(cmd, hypertraceScoreImage_.get(), VK_IMAGE_LAYOUT_GENERAL, &zero, 1, &range);
+}
+
+void VulkanRenderer::transitionImage(VkCommandBuffer cmd, VkImage image,
+    VkImageLayout oldLayout, VkImageLayout newLayout,
+    VkAccessFlags srcAccess, VkAccessFlags dstAccess,
+    VkPipelineStageFlags srcStage, VkPipelineStageFlags dstStage)
+{
+    VkImageMemoryBarrier barrier{
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .srcAccessMask = srcAccess,
+        .dstAccessMask = dstAccess,
+        .oldLayout = oldLayout,
+        .newLayout = newLayout,
+        .image = image,
+        .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}
+    };
+    vkCmdPipelineBarrier(cmd, srcStage, dstStage, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+}
+
 void VulkanRenderer::createAccumulationImages() noexcept {
     if (width_ == 0 || height_ == 0) return;
     if (!Options::OptionsRTX::ENABLE_ACCUMULATION) {

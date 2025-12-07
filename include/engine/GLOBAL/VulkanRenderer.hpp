@@ -127,7 +127,16 @@ private:
     bool     resetAccumNextFrame_ = true;
 
     int  activeRenderMode_ = 0;
-	std::atomic<uint64_t> rendererRebuildFrame_{0}; 
+	std::atomic<uint64_t> rendererRebuildFrame_{0};
+
+	void recordPinkScreen(VkCommandBuffer cmd, VkImage swapImage);
+    void submitAndPresent(uint32_t slot, uint32_t imageIndex);
+    void clearAccumulationImages(VkCommandBuffer cmd);
+    void transitionImage(VkCommandBuffer cmd,
+                         VkImage image,
+                         VkImageLayout oldLayout, VkImageLayout newLayout,
+                         VkAccessFlags srcAccess, VkAccessFlags dstAccess,
+                         VkPipelineStageFlags srcStage, VkPipelineStageFlags dstStage);
 
     bool hypertraceEnabled_     = Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING;
     bool denoisingEnabled_      = Options::OptionsRTX::ENABLE_DENOISING;
