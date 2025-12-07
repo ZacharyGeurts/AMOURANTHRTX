@@ -823,9 +823,9 @@ void Application::run() noexcept
 
     uint32_t currentMaxFramesInFlight = Options::Performance::MAX_FRAMES_IN_FLIGHT;
 
-    // MODE 0: PURE HDR CUBEMAP SKY — FORGED ONCE
-    static bool g_envMapInitialized = false;
-    if (!g_envMapInitialized && renderer_)
+    // MODE 0: HDR CUBEMAP SKY — FORGED ONCE, ETERNALLY
+    static bool g_envMapReady = false;
+    if (!g_envMapReady && renderer_)
     {
         LOG_AMOURANTH("Forging eternal HDR cubemap sky for Mode 0...");
 
@@ -835,15 +835,15 @@ void Application::run() noexcept
         {
             LOG_SUCCESS_CAT("SKY", "HDR CUBEMAP SKY FORGED — Mode 0 active — the void is infinite");
             LOG_CAPTAIN_N("[CAPTAIN N] \"The sky is real.\n"
-                          "               No fallback.\n"
                           "               No lies.\n"
+                          "               No fallback.\n"
                           "               Only truth.\"\n"
                           "*salutes*");
-            g_envMapInitialized = true;
+            g_envMapReady = true;
         }
         else
         {
-            LOG_ERROR_CAT("SKY", "Failed to load envmap.hdr — Mode 0 will show nothing (black)");
+            LOG_ERROR_CAT("SKY", "Failed to load envmap.hdr — Mode 0 will be black");
         }
     }
 
@@ -855,8 +855,7 @@ void Application::run() noexcept
 
         // INPUT
         bool toggleFS = false;
-        int winW = 0;
-        int winH  = 0;
+        int winW = 0, winH = 0;
         SDL3Window::pollEvents(winW, winH, quit_, toggleFS);
 
         width_  = winW > 0 ? winW : width_;
@@ -901,7 +900,7 @@ void Application::run() noexcept
 
         processInput(g_deltaTime);
 
-        // RENDER — ALL MODES USE THE SAME PATH
+        // RENDER — ONE PATH TO RULE THEM ALL
         if (renderer_)
         {
             renderer_->setMaxFramesInFlight(currentMaxFramesInFlight);
@@ -913,9 +912,10 @@ void Application::run() noexcept
                 stone_seal_renderer(renderer_.get());
             }
 
-            // MODE 0: PURE HDR SKY — NO SPECIAL CASE, NO CLEAR, NO PINK
-            // The ray tracer will naturally sample the envmap on miss
-            // This is the truth. This is the way.
+            // ALL MODES — INCLUDING MODE 0 — USE THE SAME RENDER PATH
+            // The ray tracer decides what to show:
+            // - Mode 0: no geometry → miss shader → envmap sky
+            // - Mode 1+: full scene + sky
             renderer_->renderFrame(CAM, g_deltaTime);
         }
 

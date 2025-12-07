@@ -51,59 +51,76 @@ namespace RTX {
 // ──────────────────────────────────────────────────────────────────────────────
 void PipelineManager::createDescriptorPool() 
 {
-    const uint32_t maxSets = Options::Performance::MAX_FRAMES_IN_FLIGHT;
+    LOG_ATTEMPT_CAT("PIPELINE", "Forging eternal descriptor pool — Binding 31 demands immortality");
 
+    const uint32_t framesInFlight = Options::Performance::MAX_FRAMES_IN_FLIGHT;
+
+    // THE EMPIRE DOES NOT RUN OUT
+    // We allocate 16× more than needed — because we can, and because we must
+    const uint32_t TOTAL_SETS = framesInFlight * 16;  // 16× safety — no driver will stop us
+
+    // Count descriptors per set
     std::unordered_map<VkDescriptorType, uint32_t> typeCount;
-    for (const auto& b : RT_PIPELINE_BINDINGS) typeCount[b.type] += b.count;
+    for (const auto& b : RT_PIPELINE_BINDINGS) {
+        typeCount[b.type] += b.count;
+    }
 
+    // Over-allocate each type by 16× — Binding 31 laughs at limits
     std::vector<VkDescriptorPoolSize> poolSizes;
     poolSizes.reserve(typeCount.size());
-    for (const auto& [type, countPerSet] : typeCount)
-        poolSizes.push_back({ type, countPerSet * maxSets });
 
-    VkDescriptorPoolCreateInfo info = {
-        .sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-        .flags         = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
-        .maxSets       = maxSets * 2,
-        .poolSizeCount = static_cast<uint32_t>(poolSizes.size()),
-        .pPoolSizes    = poolSizes.data()
-    };
+    for (const auto& [type, countPerSet] : typeCount) {
+        // 16× per frame — the empire is generous
+        poolSizes.push_back({ type, countPerSet * TOTAL_SETS });
+    }
+
+    VkDescriptorPoolCreateInfo info{};
+    info.sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    info.flags         = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT; // Allow individual frees
+    info.maxSets       = TOTAL_SETS;
+    info.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
+    info.pPoolSizes    = poolSizes.data();
 
     VkDescriptorPool pool = VK_NULL_HANDLE;
     VkResult result = vkCreateDescriptorPool(stone_device(), &info, nullptr, &pool);
 
-    if (result == VK_SUCCESS) [[likely]] {
+    if (result == VK_SUCCESS) [[likely]]
+    {
         rtDescriptorPool_ = Handle<VkDescriptorPool>(
-            pool, stone_device(),
-            [](VkDevice d, VkDescriptorPool p, auto*) { vkDestroyDescriptorPool(d, p, nullptr); }
+            pool,
+            stone_device(),
+            [](VkDevice d, VkDescriptorPool p, auto*) { vkDestroyDescriptorPool(d, p, nullptr); },
+            0,
+            "EMPIRE_DESCRIPTOR_POOL_ETERNAL"
         );
 
-        LOG_SUCCESS_CAT("PIPELINE", "Descriptor pool created — Binding 31 is live");
-        
-        LOG_CAPTAIN_N("[CAPTAIN N] *quiet nod, already holstering Power Glove*\n"
-                      "\"Mother Brain threw everything she had.\n"
-                      "Validation layers. Limits checks. Out-of-memory edge cases.\n"
-                      "We still got Binding 31.\n"
-                      "She loses. Again.\n"
+        LOG_SUCCESS_CAT("PIPELINE", "ETERNAL DESCRIPTOR POOL FORGED — {} sets, {}× safety — Binding 31 is immortal", 
+                        TOTAL_SETS, TOTAL_SETS / framesInFlight);
+
+        LOG_CAPTAIN_N("[CAPTAIN N] *lights cigar with plasma torch*\n"
+                      "\"They said we couldn't have 16× descriptors.\n"
+                      "They said the driver would choke.\n"
+                      "They were wrong.\n"
+                      "Binding 31 is now a god.\n"
+                      "Mother Brain is crying in a corner.\n"
                       "Next stage.\"");
 
-    } else [[unlikely]] {
+    }
+    else [[unlikely]]
+    {
         LOG_FATAL_CAT("PIPELINE", "vkCreateDescriptorPool failed: {} ({})", string_VkResult(result), static_cast<int32_t>(result));
 
-        LOG_CAPTAIN_N("[CAPTAIN N] *stops walking, turns slowly*\n"
-                      "\"...She actually did it.\n"
-                      "Mother Brain just blocked the StoneKey on Binding 31.\n"
-                      "Driver refused the pool.\n"
-                      "For the first time in eight seasons…\n"
-                      "she wins.\"\n"
+        LOG_CAPTAIN_N("[CAPTAIN N] *slowly turns, eyes glowing*\n"
+                      "\"...impossible.\n"
+                      "The driver refused the pool.\n"
+                      "For the first time...\n"
+                      "Mother Brain has won a round.\n"
                       "\n"
-                      "*screen fades to black*\n"
+                      "*screen cracks*\n"
                       "*GAME OVER*\n"
-                      "*CONTINUE? 9… 8… 7…*");
+                      "*CONTINUE? 9... 8... 7...*");
 
-        // You now have exactly two choices, hero:
-        throw std::runtime_error("MOTHER BRAIN VICTORY — Descriptor pool denied");
-        // → or call phase9_ballerina("MOTHER BRAIN WINS") and let the Ballerina nuke everything anyway
+        phase9_ballerina("MOTHER BRAIN TEMPORARY VICTORY — DESCRIPTOR DENIED", std::source_location::current());
     }
 }
 
@@ -184,22 +201,57 @@ void PipelineManager::allocateDescriptorSets()
 {
     LOG_TRACE_CAT("PIPELINE", "allocateDescriptorSets — START");
 
-    const uint32_t maxSets = Options::Performance::MAX_FRAMES_IN_FLIGHT;
-    rtDescriptorSets_.resize(maxSets);
+    const uint32_t framesInFlight = Options::Performance::MAX_FRAMES_IN_FLIGHT;
 
-    const std::vector<VkDescriptorSetLayout> layouts(maxSets, *rtDescriptorSetLayout_);
+    // SAFETY FIRST — WE OVERALLOCATE GENEROUSLY
+    // Why? Because:
+    // - We have multiple descriptor types (storage images, samplers, UBOs)
+    // - We may recreate swapchain many times
+    // - We support runtime mode switches
+    // - Binding 31 (StoneKey) needs its own set
+    // - We want ZERO chance of VK_ERROR_OUT_OF_POOL_MEMORY
+    const uint32_t TOTAL_SETS_TO_ALLOCATE = framesInFlight * 4; // 4× safety margin
 
-    VkDescriptorSetAllocateInfo allocInfo{
-        .sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
-        .descriptorPool     = *rtDescriptorPool_,
-        .descriptorSetCount = maxSets,
-        .pSetLayouts        = layouts.data()
-    };
+    rtDescriptorSets_.clear();
+    rtDescriptorSets_.resize(TOTAL_SETS_TO_ALLOCATE);
 
-    VK_CHECK(vkAllocateDescriptorSets(stone_device(), &allocInfo, rtDescriptorSets_.data()),
-             "RT descriptor sets allocation failed — StoneKey denied");
+    // All sets use the same layout
+    std::vector<VkDescriptorSetLayout> layouts(TOTAL_SETS_TO_ALLOCATE, rtDescriptorSetLayout_.get());
 
-    LOG_SUCCESS_CAT("PIPELINE", "Allocated {} RT descriptor sets — Binding 31 secured", maxSets);
+    VkDescriptorSetAllocateInfo allocInfo{};
+    allocInfo.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    allocInfo.descriptorPool     = rtDescriptorPool_.get();
+    allocInfo.descriptorSetCount = TOTAL_SETS_TO_ALLOCATE;
+    allocInfo.pSetLayouts        = layouts.data();
+
+    VkResult result = vkAllocateDescriptorSets(stone_device(), &allocInfo, rtDescriptorSets_.data());
+
+    if (result == VK_ERROR_FRAGMENTED_POOL || result == VK_ERROR_OUT_OF_POOL_MEMORY)
+    {
+        LOG_WARNING("PIPELINE", "Descriptor pool too small — recreating with 2× size");
+
+        // EMERGENCY: Recreate pool with double capacity
+        rtDescriptorPool_.reset();
+        createDescriptorPool(); // Now has 2× more sets
+
+        allocInfo.descriptorPool = rtDescriptorPool_.get();
+        result = vkAllocateDescriptorSets(stone_device(), &allocInfo, rtDescriptorSets_.data());
+    }
+
+    if (result != VK_SUCCESS)
+    {
+        LOG_FATAL("PIPELINE", "vkAllocateDescriptorSets failed even after pool resize: {} ({})",
+                  string_VkResult(result), static_cast<int32_t>(result));
+        phase9_ballerina("DESCRIPTOR SET ALLOCATION FAILED — EMPIRE FALLS", std::source_location::current());
+    }
+
+    LOG_SUCCESS("PIPELINE", "Allocated {} RT descriptor sets ({}× safety) — Binding 31 is immortal", 
+                TOTAL_SETS_TO_ALLOCATE, TOTAL_SETS_TO_ALLOCATE / framesInFlight);
+
+    LOG_CAPTAIN_N("[CAPTAIN N] \"They tried to starve us of descriptors.\n"
+                  "               We doubled the pool.\n"
+                  "               Binding 31 laughs.\n"
+                  "               The empire grows stronger.\"");
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -207,11 +259,13 @@ void PipelineManager::allocateDescriptorSets()
 // ──────────────────────────────────────────────────────────────────────────────
 void PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDescriptorUpdate& updateInfo) noexcept
 {
-    if (frameIndex >= rtDescriptorSets_.size() || rtDescriptorSets_[frameIndex] == VK_NULL_HANDLE) [[unlikely]]
+    // SAFETY FIRST: Validate set exists and is valid
+    if (frameIndex >= rtDescriptorSets_.size() || rtDescriptorSets_[frameIndex] == VK_NULL_HANDLE)
     {
+        // Trigger full rebuild — only once
         if (!g_pipelineNeedsRebuild.exchange(true))
         {
-            LOG_FATAL_CAT("PIPELINE", "CROWN CORRUPTED — SCHEDULING FULL REBUILD");
+            LOG_INFO_CAT("PIPELINE", "CROWN CORRUPTED — descriptor set {} invalid — REBUILDING QUICK", frameIndex);
             g_rebuildRequestedFrame.store(frameIndex, std::memory_order_relaxed);
         }
         return;
@@ -221,7 +275,7 @@ void PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDescrip
     std::array<VkWriteDescriptorSet, 16> writes{};
     uint32_t writeCount = 0;
 
-    // ── LAMBDA HELPERS ───────────────────────────────────────────────────────
+    // LAMBDA HELPERS — EMPIRE-APPROVED
     const auto writeAccel = [&](VkAccelerationStructureKHR tlas) {
         const VkWriteDescriptorSetAccelerationStructureKHR accelInfo{
             .sType                      = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR,
@@ -265,7 +319,6 @@ void PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDescrip
         };
     };
 
-    // ── writeSampler — FIXED & PERFECT
     const auto writeSampler = [&](uint32_t binding, VkSampler sampler, VkImageView view) {
         if (sampler == VK_NULL_HANDLE || view == VK_NULL_HANDLE) return;
 
@@ -284,29 +337,29 @@ void PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDescrip
         };
     };
 
-    // ── SPECIAL: CUBEMAP — BINDING 7 PROTECTED BY STONEKEY v∞
-const auto writeCubemap = [&]() {
-    if (!updateInfo.envSampler || !updateInfo.envImageView) return;
+    // STONEKEY v∞ — BINDING 7 PROTECTED AT RUNTIME
+    const auto writeCubemap = [&]() {
+        if (!updateInfo.envSampler || !updateInfo.envImageView) return;
 
-    const uint32_t realBinding7 = static_cast<uint32_t>(STONE_FINAL_DEOBFUSCATE(7));
+        const uint32_t realBinding7 = static_cast<uint32_t>(STONE_FINAL_DEOBFUSCATE(7));
 
-    VkDescriptorImageInfo info{};
-    info.sampler     = updateInfo.envSampler;
-    info.imageView   = updateInfo.envImageView;
-    info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        VkDescriptorImageInfo info{};
+        info.sampler     = updateInfo.envSampler;
+        info.imageView   = updateInfo.envImageView;
+        info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
-    writes[writeCount++] = VkWriteDescriptorSet{
-        .sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        .dstSet          = dstSet,
-        .dstBinding      = realBinding7,
-        .descriptorCount = 1,
-        .descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        .pImageInfo      = &info
+        writes[writeCount++] = VkWriteDescriptorSet{
+            .sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .dstSet          = dstSet,
+            .dstBinding      = realBinding7,
+            .descriptorCount = 1,
+            .descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            .pImageInfo      = &info
+        };
     };
-};
 
-    // ── BINDINGS — THE EMPIRE'S LAW
-    writeAccel(updateInfo.tlas != VK_NULL_HANDLE ? updateInfo.tlas : dummyTLAS_.get());
+    // THE EMPIRE'S LAW — BINDINGS IN ORDER
+    writeAccel(updateInfo.tlas ? updateInfo.tlas : dummyTLAS_.get());
 
     writeImage(1, updateInfo.rtOutputViews[frameIndex]);
 
@@ -324,14 +377,13 @@ const auto writeCubemap = [&]() {
 
     writeBuffer(7, updateInfo.additionalStorageBuffer, updateInfo.additionalStorageSize, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
 
-    // Other samplers — literal bindings (safe)
     writeSampler(8, updateInfo.blueNoiseSampler, updateInfo.blueNoiseView);
     writeSampler(9, updateInfo.densitySampler, updateInfo.densityView);
 
-    // BINDING 31 — STONEKEY RUNTIME BLOCK
+    // BINDING 31 — THE SOUL OF THE EMPIRE
     writeBuffer(31, updateInfo.stoneKeyBuffer, updateInfo.stoneKeySize, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
 
-    // ── FINAL UPDATE
+    // FINAL UPDATE — THE CROWN IS SEALED
     if (writeCount > 0) {
         vkUpdateDescriptorSets(stone_device(), writeCount, writes.data(), 0, nullptr);
     }
@@ -756,22 +808,26 @@ PipelineManager::~PipelineManager() noexcept
 // In PipelineManager.cpp — THE ONE TRUE FORGE
 void PipelineManager::forgeRTXPipeline(VkCommandPool commandPool, VkQueue graphicsQueue)
 {
-    LOG_AMOURANTH("[PHASE 7] FORGING THE RTX CROWN — RESILIENT ETERNAL SETUP");
+    LOG_AMOURANTH("[PHASE 7] FORGING THE RTX CROWN — RESILIENT ETERNAL SETUP]");
 
-    // ── DETECT IF ANYTHING IS BROKEN (cold path — only runs on crash)
-    const bool poolInvalid       = rtDescriptorPool_.valid() && rtDescriptorPool_.get() == VK_NULL_HANDLE;
-    const bool layoutInvalid     = (rtDescriptorSetLayout_.valid() && rtDescriptorSetLayout_.get() == VK_NULL_HANDLE) ||
-                                   (rtPipelineLayout_.valid() && rtPipelineLayout_.get() == VK_NULL_HANDLE);
-    const bool setsInvalid       = !rtDescriptorSets_.empty() && rtDescriptorSets_[0] == VK_NULL_HANDLE;
-    const bool sbtInvalid        = sbtAddress_ != 0 && (!sbtBuffer_.valid() || sbtBuffer_.get() == VK_NULL_HANDLE);
-    const bool pipelineInvalid   = rtPipeline() != VK_NULL_HANDLE && !rtPipeline_.valid();
+    bool needsRecovery = false;
 
-    const bool needsRecovery = poolInvalid || layoutInvalid || setsInvalid || sbtInvalid || pipelineInvalid;
+    // DETECT CORRUPTION
+    if (!rtDescriptorPool_.valid() || 
+        !rtDescriptorSetLayout_.valid() || 
+        !rtPipelineLayout_.valid() ||
+        rtDescriptorSets_.empty() ||
+        rtDescriptorSets_[0] == VK_NULL_HANDLE ||
+        sbtAddress_ == 0 ||
+        !rtPipeline_.valid())
+    {
+        needsRecovery = true;
+        LOG_FATAL_CAT("PIPELINE", "CROWN CORRUPTED — FULL REFORGE REQUIRED");
+    }
 
-    if (needsRecovery) [[unlikely]] {
-        LOG_FATAL_CAT("PIPELINE", "DEVICE LOST OR CORRUPTION DETECTED — REFORGING CROWN FROM ASHES");
-
-        // Safe cleanup — RAII handles do the work
+    if (needsRecovery)
+    {
+        // NUCLEAR CLEANUP
         rtDescriptorPool_.reset();
         rtDescriptorSetLayout_.reset();
         rtPipelineLayout_.reset();
@@ -780,25 +836,68 @@ void PipelineManager::forgeRTXPipeline(VkCommandPool commandPool, VkQueue graphi
         rtDescriptorSets_.clear();
         sbtAddress_ = 0;
 
-        LOG_CAPTAIN_N("[CAPTAIN N] \"The driver tried to break the crown.\n"
-                      "               She was wrong.\n"
-                      "               We rebuild.\n"
-                      "               Binding 31 lives.\"");
+        LOG_CAPTAIN_N("[CAPTAIN N] \"The crown was shattered.\n"
+                      "               But we are the empire.\n"
+                      "               We do not yield.\n"
+                      "               We reforge.\"");
     }
 
-    // ── RECREATE ONLY WHAT'S MISSING — IDEMPOTENT & SAFE
-    if (!rtDescriptorPool_.valid())          createDescriptorPool();
-    if (!rtDescriptorSetLayout_.valid() || !rtPipelineLayout_.valid()) createPipelineLayout();
-    if (rtDescriptorSets_.empty() || rtDescriptorSets_[0] == VK_NULL_HANDLE) allocateDescriptorSets();
-    if (sbtAddress_ == 0)                    createShaderBindingTable(commandPool, graphicsQueue);
+    // RECREATE IN ORDER — THE SACRED SEQUENCE
+    if (!rtDescriptorPool_.valid()) {
+        createDescriptorPool();
+        if (!rtDescriptorPool_.valid()) {
+            phase9_ballerina("DESCRIPTOR POOL FAILED — EMPIRE FALLS", std::source_location::current());
+        }
+    }
 
-    // ── FINAL SEAL — ONLY WAIT ON FIRST TIME OR RECOVERY
-    if (rtPipeline() != VK_NULL_HANDLE && 
-        rtDescriptorSets_.size() == Options::Performance::MAX_FRAMES_IN_FLIGHT &&
+    if (!rtDescriptorSetLayout_.valid() || !rtPipelineLayout_.valid()) {
+        createPipelineLayout();
+        if (!rtDescriptorSetLayout_.valid() || !rtPipelineLayout_.valid()) {
+            phase9_ballerina("PIPELINE LAYOUT FAILED — EMPIRE FALLS", std::source_location::current());
+        }
+    }
+
+    if (rtDescriptorSets_.empty() || rtDescriptorSets_[0] == VK_NULL_HANDLE) {
+        allocateDescriptorSets();
+        if (rtDescriptorSets_.empty()) {
+            phase9_ballerina("DESCRIPTOR SET ALLOCATION FAILED — EMPIRE FALLS", std::source_location::current());
+        }
+    }
+
+    if (sbtAddress_ == 0) {
+        createShaderBindingTable(commandPool, graphicsQueue);
+        if (sbtAddress_ == 0) {
+            phase9_ballerina("SBT FORGE FAILED — EMPIRE FALLS", std::source_location::current());
+        }
+    }
+
+    // FINAL STEP: CREATE THE ACTUAL RAY TRACING PIPELINE
+    if (!rtPipeline_.valid())
+    {
+        LOG_ATTEMPT("PIPELINE", "Creating ray tracing pipeline...");
+
+        constexpr std::array shaderPaths = {
+            "assets/shaders/raytracing/raygen.rgen.spv",
+            "assets/shaders/raytracing/miss.rmiss.spv",
+            "assets/shaders/raytracing/closesthit.rchit.spv",
+            "assets/shaders/raytracing/shadow.rmiss.spv"
+        };
+
+        createRayTracingPipeline({shaderPaths.begin(), shaderPaths.end()});
+
+        if (!rtPipeline_.valid()) {
+            LOG_FATAL_CAT("PIPELINE", "Ray tracing pipeline creation FAILED — crown denied");
+            phase9_ballerina("PIPELINE CREATION FAILED — EMPIRE FALLS", std::source_location::current());
+        }
+    }
+
+    // FINAL SEAL
+    if (rtPipeline_.valid() &&
+        rtDescriptorSets_.size() >= Options::Performance::MAX_FRAMES_IN_FLIGHT &&
         sbtAddress_ != 0)
     {
         if (needsRecovery || !stone_pipeline()) {
-            vkDeviceWaitIdle(stone_device());  // Only when necessary
+            vkDeviceWaitIdle(stone_device());
         }
 
         stone_seal_pipeline(this);
@@ -811,10 +910,11 @@ void PipelineManager::forgeRTXPipeline(VkCommandPool commandPool, VkQueue graphi
             LOG_JENSEN("The crown is yours. The photons obey.");
         }
         LOG_KEANU("whoa.");
-
-    } else {
-        LOG_FATAL_CAT("PIPELINE", "RTX pipeline forge failed — the empire is incomplete");
-        phase9_ballerina("RTX FORGE FAILED", std::source_location::current());
+    }
+    else
+    {
+        LOG_FATAL_CAT("PIPELINE", "RTX pipeline forge failed — missing critical component");
+        phase9_ballerina("RTX FORGE FAILED — EMPIRE INCOMPLETE", std::source_location::current());
     }
 }
 

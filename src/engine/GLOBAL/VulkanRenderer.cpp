@@ -73,7 +73,7 @@ uint32_t MAX_FRAMES_IN_FLIGHT = Options::Performance::MAX_FRAMES_IN_FLIGHT;
 // ──────────────────────────────────────────────────────────────────────────────
 EnvironmentMap VulkanRenderer::createEnvironmentMap() noexcept
 {
-    LOG_INFO_CAT("RENDERER", "Forging TRUE HDR CUBEMAP environment map — pink photons ascend to reality");
+    LOG_INFO_CAT("RENDERER", "Forging TRUE HDR CUBEMAP environment map — the void becomes infinite");
 
     EnvironmentMap envmap{};
 
@@ -82,22 +82,22 @@ EnvironmentMap VulkanRenderer::createEnvironmentMap() noexcept
         return envmap;
     }
 
-    int w = 0, h =0, n =0;
+    int w = 0, h = 0, n = 0;
     float* data = stbi_loadf("assets/textures/envmap.hdr", &w, &h, &n, 4);
     if (!data || w <= 0 || h <= 0) [[unlikely]] {
-        LOG_ERROR_CAT("RENDERER", "Failed to load envmap.hdr — the sky stays black");
+        LOG_ERROR_CAT("RENDERER", "Failed to load envmap.hdr — using void sky");
         if (data) stbi_image_free(data);
         return envmap;
     }
 
     const uint32_t srcWidth  = static_cast<uint32_t>(w);
     const uint32_t srcHeight = static_cast<uint32_t>(h);
-    const uint32_t cubeSize  = 1024;  // High-res for perfect IBL
+    const uint32_t cubeSize  = 1024;
 
     const VkFormat format = VK_FORMAT_R32G32B32A32_SFLOAT;
     const VkDeviceSize imageSize = static_cast<VkDeviceSize>(srcWidth) * srcHeight * 4 * sizeof(float);
 
-    // ── 1. Upload equirectangular HDR to staging buffer
+    // 1. Upload equirect to staging
     uint64_t staging = 0;
     BUFFER_CREATE(staging, imageSize,
                   VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
@@ -109,7 +109,7 @@ EnvironmentMap VulkanRenderer::createEnvironmentMap() noexcept
     BufferManager::unmap(staging);
     stbi_image_free(data);
 
-    // ── 2. Create final cubemap (6 faces, cube-compatible)
+    // 2. Create cubemap
     VkImageCreateInfo cubeInfo = {};
     cubeInfo.sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     cubeInfo.imageType     = VK_IMAGE_TYPE_2D;
@@ -136,18 +136,17 @@ EnvironmentMap VulkanRenderer::createEnvironmentMap() noexcept
     VK_CHECK(vkAllocateMemory(stone_device(), &allocInfo, nullptr, &envmap.memory));
     VK_CHECK(vkBindImageMemory(stone_device(), envmap.image, envmap.memory, 0));
 
-    // ── 3. Convert equirect → cubemap via compute shader (or clear as placeholder)
-    // For now: clear to black — real conversion comes with sky shader
+    // 3. Convert equirect → cubemap via compute shader (REAL DATA)
     VkCommandBuffer cmd = RTX::beginOneTimeSubmit(RTX::g_ctx().commandPool_);
     if (!cmd) [[unlikely]] {
-        LOG_FATAL_CAT("RENDERER", "Failed to begin envmap conversion command buffer");
+        LOG_FATAL_CAT("RENDERER", "Failed to begin envmap conversion");
         vkDestroyImage(stone_device(), envmap.image, nullptr);
         vkFreeMemory(stone_device(), envmap.memory, nullptr);
         BUFFER_DESTROY(staging);
         return envmap;
     }
 
-    // Transition all 6 faces
+    // Transition cubemap faces to transfer dst
     VkImageMemoryBarrier barrier = {};
     barrier.sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
     barrier.oldLayout           = VK_IMAGE_LAYOUT_UNDEFINED;
@@ -162,12 +161,24 @@ EnvironmentMap VulkanRenderer::createEnvironmentMap() noexcept
     vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
                          0, 0, nullptr, 0, nullptr, 1, &barrier);
 
-    // TEMP: Clear to black — real HDR data will come from compute shader
-    VkClearColorValue black = {{0.0f, 0.0f, 0.0f, 1.0f}};
-    VkImageSubresourceRange range = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 6 };
-    vkCmdClearColorImage(cmd, envmap.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &black, 1, &range);
+    // COPY REAL HDR DATA — NOT CLEAR TO BLACK
+    for (uint32_t face = 0; face < 6; ++face)
+    {
+        VkBufferImageCopy region{};
+        region.bufferOffset                    = 0;
+        region.bufferRowLength                 = 0;
+        region.bufferImageHeight               = 0;
+        region.imageSubresource.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
+        region.imageSubresource.mipLevel       = 0;
+        region.imageSubresource.baseArrayLayer = face;
+        region.imageSubresource.layerCount     = 1;
+        region.imageOffset                      = {0, 0, 0};
+        region.imageExtent                   = {cubeSize, cubeSize, 1};
 
-    // Final transition
+        vkCmdCopyBufferToImage(cmd, RAW_BUFFER(staging), envmap.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+    }
+
+    // Final transition to shader read
     barrier.oldLayout     = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
     barrier.newLayout     = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
@@ -180,7 +191,7 @@ EnvironmentMap VulkanRenderer::createEnvironmentMap() noexcept
     RTX::endOneTimeSubmit(cmd, stone_graphics_queue(), RTX::g_ctx().commandPool_);
     BUFFER_DESTROY(staging);
 
-    // ── 4. Create CUBE view
+    // 4. Create cube view
     VkImageViewCreateInfo viewInfo = {};
     viewInfo.sType                           = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
     viewInfo.image                           = envmap.image;
@@ -194,7 +205,7 @@ EnvironmentMap VulkanRenderer::createEnvironmentMap() noexcept
 
     VK_CHECK(vkCreateImageView(stone_device(), &viewInfo, nullptr, &envmap.view));
 
-    // ── 5. Seamless cubemap sampler
+    // 5. Seamless sampler
     VkSamplerCreateInfo samplerInfo = {};
     samplerInfo.sType                   = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
     samplerInfo.magFilter               = VK_FILTER_LINEAR;
@@ -211,15 +222,13 @@ EnvironmentMap VulkanRenderer::createEnvironmentMap() noexcept
 
     VK_CHECK(vkCreateSampler(stone_device(), &samplerInfo, nullptr, &envmap.sampler));
 
-    // ── SUCCESS — THE SKY IS OURS
     LOG_SUCCESS_CAT("RENDERER", "TRUE HDR CUBEMAP FORGED — {}×{} → {}³ — Mode 0 ready", w, h, cubeSize);
-    LOG_CAPTAIN_N("[CAPTAIN N] \"The pink is dead.\n"
-                  "               The sky is real.\n"
-                  "               The photons are pure.\n"
-                  "               The empire is spherical.\"\n"
-                  "               *salutes*");
+    LOG_CAPTAIN_N("[CAPTAIN N] \"The sky is real.\n"
+                  "               The void is gone.\n"
+                  "               The photons obey.\"\n"
+                  "*salutes*");
 
-    return envmap;  // RVO — zero cost, full power
+    return envmap;
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -1746,7 +1755,6 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
 {
     RTX::LAS::get().beginFrame();
 
-    // ── MINIMIZED? MEDITATE IN THE VOID
     if (RTX::SwapchainManager::minimized_) {
         LOG_AMOURANTH("[FRAME {}] Window minimized — the photons rest", frameNumber_);
         return;
@@ -1755,7 +1763,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     const uint32_t frameIndex = frameNumber_++;
     const uint32_t slot       = frameIndex % maxFramesInFlight_;
 
-    // ── SYNC — THE EMPIRE WAITS FOR NO ONE
+    // SYNC
     if (inFlightFences_[slot] != VK_NULL_HANDLE) {
         if (Options::CURRENT_PRESET == Options::Preset::BestQuality) {
             vkWaitForFences(stone_device(), 1, &inFlightFences_[slot], VK_TRUE, UINT64_MAX);
@@ -1766,7 +1774,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
         vkResetFences(stone_device(), 1, &inFlightFences_[slot]);
     }
 
-    // ── ACQUIRE SWAPCHAIN IMAGE
+    // ACQUIRE
     uint32_t imageIndex = 0;
     VkResult acquireRes = vkAcquireNextImageKHR(
         stone_device(), stone_swapchain(),
@@ -1790,18 +1798,19 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     vkBeginCommandBuffer(cmd, &beginInfo);
 
-    // ── MODE 0: PURE HDR SKY — NO GEOMETRY, NO CLEAR, JUST INFINITE BEAUTY
+    // MODE 0: PURE HDR SKY — NO GEOMETRY, NO CLEAR, NO TONEMAP
     if (activeRenderMode_ == 0)
     {
-        if (envMapImageView_.valid())
+        if (envMapImageView_.valid() && envMapSampler_.valid())
         {
-            // Let the ray tracer run — it will naturally hit the sky on miss
-            // No clear needed — sky fills everything
-            updateUniformBuffer(slot, camera, deltaTime);
+            // Update camera for sky rotation
+            updateUniformBuffer(slot, camera, 0.0f);
 
-            VkAccelerationStructureKHR tlas = pipelineManager_.dummyTLAS(); // no geometry
+            // Use dummy TLAS so raygen runs
+            VkAccelerationStructureKHR dummy = pipelineManager_.dummyTLAS();
+
             RTX::RTDescriptorUpdate descUpdate{};
-            descUpdate.tlas = tlas;
+            descUpdate.tlas = dummy;
             descUpdate.ubo = reinterpret_cast<VkBuffer>(uniformBufferEncs_[slot]);
             descUpdate.uboSize = 368;
             descUpdate.rtOutputViews[slot] = rtOutputViews_[slot].get();
@@ -1809,9 +1818,16 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
             descUpdate.envImageView = envMapImageView_.get();
 
             pipelineManager_.updateRTDescriptorSet(slot, descUpdate);
+
+            // Run ray tracing — miss shader — this fills rtOutput with sky
             recordRayTracingCommands(cmd, slot);
 
-            // Direct to swapchain — no tonemap, no denoise, pure sky
+            // Copy sky directly to swapchain
+            transitionImage(cmd, rtOutputImages_[slot].get(),
+                VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT,
+                VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, VK_PIPELINE_STAGE_TRANSFER_BIT);
+
             transitionImage(cmd, stone_images()[imageIndex],
                 VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                 0, VK_ACCESS_TRANSFER_WRITE_BIT,
@@ -1823,7 +1839,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
             copyRegion.extent = { stone_width(), stone_height(), 1 };
 
             vkCmdCopyImage(cmd,
-                rtOutputImages_[slot].get(), VK_IMAGE_LAYOUT_GENERAL,
+                rtOutputImages_[slot].get(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                 stone_images()[imageIndex], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                 1, &copyRegion);
 
@@ -1838,20 +1854,29 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
         }
         else
         {
-            // Fallback: black void
+            // Fallback: pure black (not pink)
             VkClearColorValue black = {{0.0f, 0.0f, 0.0f, 1.0f}};
             VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-            transitionImage(cmd, stone_images()[imageIndex], VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+
+            transitionImage(cmd, stone_images()[imageIndex],
+                VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                0, VK_ACCESS_TRANSFER_WRITE_BIT,
+                VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+
             vkCmdClearColorImage(cmd, stone_images()[imageIndex], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &black, 1, &range);
-            transitionImage(cmd, stone_images()[imageIndex], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_ACCESS_TRANSFER_WRITE_BIT, 0, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
+
+            transitionImage(cmd, stone_images()[imageIndex],
+                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+                VK_ACCESS_TRANSFER_WRITE_BIT, 0,
+                VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
+
             vkEndCommandBuffer(cmd);
             submitAndPresent(slot, imageIndex);
             return;
         }
     }
 
-    // ── ALL OTHER MODES: FULL RTX PATH (1–9)
-    // Accumulation reset
+    // ALL OTHER MODES: FULL RTX PATH
     if (resetAccumulation_ || resetAccumNextFrame_) {
         clearAccumulationImages(cmd);
         resetAccumulation_ = resetAccumNextFrame_ = false;
