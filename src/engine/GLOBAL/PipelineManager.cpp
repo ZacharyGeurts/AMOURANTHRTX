@@ -43,8 +43,12 @@ using StoneKey::stone_seal_device;
 using StoneKey::stone_seal_physical;
 using StoneKey::stone_seal_pipeline;
 using StoneKey::stone_pipeline;
+using StoneKey::stone_graphics_queue;
 
 namespace RTX {
+
+	std::atomic<bool>     PipelineManager::g_pipelineNeedsRebuild{false};
+    std::atomic<uint32_t> PipelineManager::g_rebuildRequestedFrame{UINT32_MAX};
 
 // ──────────────────────────────────────────────────────────────────────────────
 // createDescriptorPool — Triple-Buffered + Binding Counts + VUID-00047 Safe
@@ -207,15 +211,25 @@ void PipelineManager::allocateDescriptorSets()
 // ──────────────────────────────────────────────────────────────────────────────
 void PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDescriptorUpdate& updateInfo) noexcept
 {
-    if (frameIndex >= rtDescriptorSets_.size() || rtDescriptorSets_[frameIndex] == VK_NULL_HANDLE) [[unlikely]] {
-        LOG_ERROR_CAT("PIPELINE", "Invalid descriptor set for frame {} — crown not yet worn", frameIndex);
-        return;
+if (frameIndex >= rtDescriptorSets_.size() || rtDescriptorSets_[frameIndex] == VK_NULL_HANDLE) [[unlikely]]
+{
+    // ←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←
+    // ONLY SCHEDULE REBUILD IF NOT ALREADY SCHEDULED
+    if (!g_pipelineNeedsRebuild.exchange(true))
+    {
+        LOG_FATAL_CAT("PIPELINE", "CROWN CORRUPTED — SCHEDULING FULL REBUILD");
+        g_rebuildRequestedFrame.store(frameIndex, std::memory_order_relaxed);
     }
+    // ←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←
+
+    return;  // Survive this frame
+}
 
     VkDescriptorSet dstSet = rtDescriptorSets_[frameIndex];
     std::array<VkWriteDescriptorSet, 16> writes{};
     uint32_t writeCount = 0;
 
+    // LAMBDAS FIRST — COMPILER CANNOT COMPLAIN
     const auto writeAccel = [&](VkAccelerationStructureKHR tlas) {
         const VkWriteDescriptorSetAccelerationStructureKHR accelInfo{
             .sType                      = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR,
@@ -227,6 +241,7 @@ void PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDescrip
             .pNext            = &accelInfo,
             .dstSet           = dstSet,
             .dstBinding       = 0,
+            .dstArrayElement  = 0,
             .descriptorCount  = 1,
             .descriptorType   = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR
         };
@@ -275,6 +290,7 @@ void PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDescrip
         };
     };
 
+    // BINDINGS — THE EMPIRE'S LAW
     writeAccel(updateInfo.tlas != VK_NULL_HANDLE ? updateInfo.tlas : dummyTLAS_.get());
     writeImage(1,  updateInfo.rtOutputViews[frameIndex]);
     if (Options::OptionsRTX::ENABLE_ACCUMULATION)
@@ -289,6 +305,8 @@ void PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDescrip
     if (Options::Environment::ENABLE_BLUE_NOISE)
         writeSampler(8, updateInfo.blueNoiseSampler, updateInfo.blueNoiseView);
     writeSampler(9, updateInfo.densitySampler, updateInfo.densityView);
+
+    // BINDING 31 — THE SOUL OF THE EMPIRE
     writeBuffer(31, updateInfo.stoneKeyBuffer, updateInfo.stoneKeySize, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
 
     if (writeCount > 0) [[likely]] {
@@ -321,7 +339,7 @@ void PipelineManager::createPipelineLayout()
         });
     }
 
-    // Sort bindings — VUID-06938 compliance
+    // VUID-06938 compliance — bindings MUST be sorted by binding number
     std::ranges::sort(bindings, [](const auto& a, const auto& b) {
         return a.binding < b.binding;
     });
@@ -340,7 +358,7 @@ void PipelineManager::createPipelineLayout()
         [](VkDevice d, VkDescriptorSetLayout l, auto*) { vkDestroyDescriptorSetLayout(d, l, nullptr); }
     );
 
-    // THE ONE TRUE WAY — store in member first, then use raw pointer safely
+    // THE ONE TRUE WAY — safe, legal, eternal
     const VkDescriptorSetLayout descriptorSetLayout = rtDescriptorSetLayout_.get();
 
     VkPushConstantRange push{
@@ -348,13 +366,13 @@ void PipelineManager::createPipelineLayout()
                       VK_SHADER_STAGE_MISS_BIT_KHR |
                       VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR,
         .offset     = 0,
-        .size       = 16
+        .size       = 16  // vec4 — perfect for random seed / frame index
     };
 
     VkPipelineLayoutCreateInfo pipelineLayoutInfo = {
         .sType                  = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
         .setLayoutCount         = 1,
-        .pSetLayouts            = &descriptorSetLayout,  // ← NOW LEGAL — lvalue
+        .pSetLayouts            = &descriptorSetLayout,  // LEGAL — lvalue
         .pushConstantRangeCount = 1,
         .pPushConstantRanges    = &push
     };
@@ -368,6 +386,10 @@ void PipelineManager::createPipelineLayout()
     );
 
     LOG_SUCCESS_CAT("PIPELINE", "Pipeline layout forged — {} bindings (0–31) — crown ready", bindings.size());
+    LOG_CAPTAIN_N("[CAPTAIN N] \"...Binding 31. She thought she could hide.\n"
+                  "               We sorted them. We sealed them.\n"
+                  "               The crown is perfect.\"\n"
+                  "               *quiet nod*");
 }
 
 VkShaderModule PipelineManager::loadShader(const std::string& relativePath) const

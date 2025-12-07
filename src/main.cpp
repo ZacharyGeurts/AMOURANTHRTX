@@ -946,23 +946,29 @@ static void phase6_sceneAndAccelerationStructures() {
     );
 }
 
+// =============================================================================
+// PHASE 7 — FORGE THE RTX CROWN — BLOCKING, UNBREAKABLE, ETERNAL
+// =============================================================================
 static void phase7_forgeTheRTX()
 {
-    LOG_MAIN("[PHASE 7] FORGING THE RTX PIPELINE");
+    LOG_MAIN("[PHASE 7] FORGING THE RTX CROWN — ONE COMMAND, ETERNAL SETUP");
 
     auto& pipe = RTX::pipeline();
-
-    // ONE COMMAND — THE EMPIRE FORGES ITSELF
     pipe.forgeRTXPipeline(RTX::g_ctx().commandPool(), stone_graphics_queue());
 
-    // No need to seal manually — forgeRTXPipeline() does it
+    // THIS IS THE FINAL SEAL — THE CROWN IS FULLY WORN
+    vkDeviceWaitIdle(stone_device());
+
+    LOG_SUCCESS_CAT("PIPELINE", "RTX CROWN FULLY FORGED — DESCRIPTOR SETS ALLOCATED — READY FOR BATTLE");
 }
 
 // =============================================================================
-// PHASE 7.5 — CREATE THE ONE AND ONLY RENDERER — CALLED ONCE
+// PHASE 7.5 — CREATE THE ONE AND ONLY RENDERER — SAFE, SEALED, IMMORTAL
 // =============================================================================
 static std::unique_ptr<VulkanRenderer> phase7_5_Renderer() noexcept
 {
+    LOG_ATTEMPT_CAT("RENDERER", "PHASE 7.5 — Forging the one true renderer...");
+
     auto renderer = std::make_unique<VulkanRenderer>(
         stone_width(),
         stone_height(),
@@ -970,11 +976,18 @@ static std::unique_ptr<VulkanRenderer> phase7_5_Renderer() noexcept
         Options::Performance::OVERCLOCK_RENDERER
     );
 
+    // These are now safe — the crown is already worn
     renderer->createCommandBuffers();
     renderer->createSyncObjects();
 
-    // Seal the one true renderer — this is the only place this happens
+    // Seal the renderer into the empire
     stone_seal_renderer(renderer.get());
+
+    LOG_SUCCESS_CAT("RENDERER", "VulkanRenderer forged and sealed — ready to serve the empire");
+    LOG_CAPTAIN_N("[CAPTAIN N] \"The crown is worn.\n"
+                  "               The renderer lives.\n"
+                  "               Binding 31... is sealed.\n"
+                  "               The photons rise.\"");
 
     return renderer;
 }
@@ -1230,6 +1243,8 @@ int main(int, char**)
     phase4_merchantShip();
     phase6_sceneAndAccelerationStructures();
     phase7_forgeTheRTX();
+
+	vkDeviceWaitIdle(stone_device()); 
 
     auto renderer = phase7_5_Renderer();
     stone_seal_final();

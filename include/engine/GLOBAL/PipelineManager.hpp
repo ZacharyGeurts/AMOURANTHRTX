@@ -116,6 +116,9 @@ public:
     void cleanup() noexcept;
     void forgeRTXPipeline(VkCommandPool commandPool, VkQueue graphicsQueue);
 
+    static std::atomic<bool>     g_pipelineNeedsRebuild;
+    static std::atomic<uint32_t> g_rebuildRequestedFrame;
+
     // ── PUBLIC GETTERS — STONEKEY PROTECTED ───────────────────────────────────
     [[nodiscard]] VkPipeline                    rtPipeline()         const noexcept { return rtPipeline_.get(); }
     [[nodiscard]] VkPipelineLayout              rtPipelineLayout()   const noexcept { return rtPipelineLayout_.get(); }
