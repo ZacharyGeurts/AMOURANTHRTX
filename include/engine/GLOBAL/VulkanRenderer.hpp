@@ -55,6 +55,7 @@ public:
     void cleanup() noexcept;
     void createCommandPool() noexcept;
 	void createCommandBuffers() noexcept;
+	bool isAlive() const noexcept;
 
     VkFence  inFlightFence(uint32_t frame) const noexcept { return inFlightFences_[frame]; }
     VkFence* inFlightFencePtr(uint32_t frame) noexcept     { return &inFlightFences_[frame]; }

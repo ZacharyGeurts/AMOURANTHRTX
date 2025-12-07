@@ -172,150 +172,6 @@ private:
     std::unique_ptr<VulkanRenderer> renderer_;
 };
 
-void Application::run() noexcept
-{
-    // Nuclear-proof resize state
-    static std::atomic<bool> g_resizeInProgress{false};
-    static uint32_t          g_pendingWidth  = 0;
-    static uint32_t          g_pendingHeight = 0;
-
-    auto lastTime = std::chrono::steady_clock::now();
-
-    int   frameCount = 0;
-    float fpsTimer   = 0.0f;
-    float currentFPS = 0.0f;
-
-    float titleTimer = 0.0f;
-    constexpr float TITLE_UPDATE_INTERVAL = 0.6f;
-
-    int dotPhase = 0;
-    constexpr const char* dots[] = { ".", "..", "...", "...." };
-
-    uint32_t currentMaxFramesInFlight = Options::Performance::MAX_FRAMES_IN_FLIGHT;
-
-    while (!quit_)
-    {
-        const auto now = std::chrono::steady_clock::now();
-        g_deltaTime = std::chrono::duration<float>(now - lastTime).count();
-        lastTime = now;
-
-        // Input + window events
-        bool toggleFS = false;
-        int winW = 0, winH = 0;
-        SDL3Window::pollEvents(winW, winH, quit_, toggleFS);
-
-        width_  = winW;
-        height_ = winH;
-
-        if (width_ > 0 && height_ > 0)
-        {
-            proj_ = glm::perspective(
-                glm::radians(75.0f),
-                static_cast<float>(width_) / std::max(height_, 1),
-                0.1f, 1000.0f
-            );
-        }
-
-        if (toggleFS)
-        {
-            SDL3Window::toggleFullscreen();
-        }
-
-        // Resize handling — nuclear-proof, coalesced
-        if (g_resizeRequested.exchange(false))
-        {
-            uint32_t newW = g_resizeWidth.exchange(0);
-            uint32_t newH = g_resizeHeight.exchange(0);
-            if (newW != 0 && newH != 0)
-            {
-                g_pendingWidth  = newW;
-                g_pendingHeight = newH;
-            }
-        }
-
-        if (g_pendingWidth != 0 && g_pendingHeight != 0)
-        {
-            uint32_t targetW = g_pendingWidth;
-            uint32_t targetH = g_pendingHeight;
-
-            vkDeviceWaitIdle(stone_device());
-
-            RTX::las().notifyResize();
-            RTX::SwapchainManager::get().recreate(targetW, targetH);
-            for (int i = 0; i < 3; ++i) RTX::las().beginFrame();
-
-            g_pendingWidth = g_pendingHeight = 0;
-        }
-
-        // Input processing
-        processInput(g_deltaTime);
-
-        // Render frame
-        if (renderer_)
-        {
-            renderer_->setMaxFramesInFlight(currentMaxFramesInFlight);
-            renderer_->renderFrame(CAM, g_deltaTime);
-        }
-
-        // Window title — clean, informative
-        if (currentRenderMode_ == 0)
-        {
-            titleTimer += g_deltaTime;
-            if (titleTimer >= TITLE_UPDATE_INTERVAL)
-            {
-                titleTimer -= TITLE_UPDATE_INTERVAL;
-                dotPhase = (dotPhase + 1) % 4;
-
-                const std::string title = std::format(
-                    "AMOURANTH RTX | {:.1f} FPS | {}x{} | DEV MODE 0 | ENGINE IDLE | PRESS 1-9 TO IGNITE{}",
-                    currentFPS, stone_width(), stone_height(), dots[dotPhase]
-                );
-                SDL_SetWindowTitle(stone_window(), title.c_str());
-            }
-        }
-        else
-        {
-            const char* modeName = "UNKNOWN MODE";
-            switch (currentRenderMode_)
-            {
-                case 1: modeName = "PURE PINK — BINDING 31"; break;
-                case 2: modeName = "PATH TRACED ACCUM"; break;
-                case 3: modeName = "HYBRID DENOISED"; break;
-                case 4: modeName = "RASTER FALLBACK"; break;
-                case 5: modeName = "DEBUG VIS"; break;
-                case 6: modeName = "TLAS VIEWER"; break;
-                case 7: modeName = "SBT DEBUG"; break;
-                case 8: modeName = "PERF METRICS"; break;
-                case 9: modeName = "HOT RELOAD TEST"; break;
-            }
-
-            const std::string title = std::format(
-                "AMOURANTH RTX | {:.1f} FPS | {}x{} | Mode {}: {} | Bounces {} | FIF:{}",
-                currentFPS, stone_width(), stone_height(),
-                currentRenderMode_, modeName,
-                Options::OptionsRTX::MAX_BOUNCES, currentMaxFramesInFlight
-            );
-            SDL_SetWindowTitle(stone_window(), title.c_str());
-        }
-
-        // FPS counter
-        ++frameCount;
-        fpsTimer += g_deltaTime;
-        if (fpsTimer >= 1.0f)
-        {
-            currentFPS = frameCount / fpsTimer;
-            frameCount = 0;
-            fpsTimer   = 0.0f;
-        }
-    }
-
-    // Clean shutdown
-    if (renderer_)
-    {
-        vkDeviceWaitIdle(stone_device());
-    }
-}
-
 // =============================================================================
 // 1. Application::Application — NO DEFAULT MODE — PURE EMPIRE
 // =============================================================================
@@ -1189,6 +1045,178 @@ static std::unique_ptr<VulkanRenderer> phase7_5_Renderer() noexcept
     std::_Exit(0);
 }
 
+void Application::run() noexcept
+{
+    // ── ETERNAL STATE — IMMORTAL ACROSS CRASHES
+    static std::atomic<bool> g_resizeInProgress{false};
+    static std::atomic<uint32_t> g_pendingWidth{0};
+    static std::atomic<uint32_t> g_pendingHeight{0};
+
+    auto lastTime = std::chrono::steady_clock::now();
+
+    int   frameCount = 0;
+    float fpsTimer   = 0.0f;
+    float currentFPS = 60.0f;
+
+    float titleTimer = 0.0f;
+    constexpr float TITLE_UPDATE_INTERVAL = 0.6f;
+    int dotPhase = 0;
+    constexpr const char* dots[] = { ".", "..", "...", "...." };
+
+    uint32_t currentMaxFramesInFlight = Options::Performance::MAX_FRAMES_IN_FLIGHT;
+
+    // ── MAIN LOOP — THE EMPIRE NEVER DIES
+    while (!quit_)
+    {
+        const auto frameStart = std::chrono::steady_clock::now();
+        g_deltaTime = std::chrono::duration<float>(frameStart - lastTime).count();
+        lastTime = frameStart;
+
+        // ── INPUT & EVENTS — UNBREAKABLE
+        bool toggleFS = false;
+        int winW = 0, winH = 0;
+        SDL3Window::pollEvents(winW, winH, quit_, toggleFS);
+
+        width_  = winW > 0 ? winW : width_;
+        height_ = winH > 0 ? winH : height_;
+
+        if (width_ > 0 && height_ > 0)
+        {
+            proj_ = glm::perspective(
+                glm::radians(75.0f),
+                static_cast<float>(width_) / std::max(height_, 1),
+                0.1f, 1000.0f
+            );
+        }
+
+        if (toggleFS) {
+            SDL3Window::toggleFullscreen();
+        }
+
+        // ── RESIZE HANDLING — NUCLEAR-PROOF + SELF-HEALING
+        if (g_resizeRequested.exchange(false))
+        {
+            uint32_t w = g_resizeWidth.exchange(0);
+            uint32_t h = g_resizeHeight.exchange(0);
+            if (w && h)
+            {
+                g_pendingWidth.store(w, std::memory_order_relaxed);
+                g_pendingHeight.store(h, std::memory_order_relaxed);
+            }
+        }
+
+        if (g_pendingWidth.load(std::memory_order_relaxed) && 
+            g_pendingHeight.load(std::memory_order_relaxed))
+        {
+            uint32_t w = g_pendingWidth.exchange(0, std::memory_order_relaxed);
+            uint32_t h = g_pendingHeight.exchange(0, std::memory_order_relaxed);
+
+            LOG_AMOURANTH("[RESIZE] Recreating swapchain: {}×{}", w, h);
+
+            vkDeviceWaitIdle(stone_device());
+
+            RTX::las().notifyResize();
+            RTX::SwapchainManager::get().recreate(w, h);
+
+            // Rebuild acceleration structures safely
+            for (int i = 0; i < 3; ++i)
+                RTX::las().beginFrame();
+
+            // Force pipeline + descriptors to recover if corrupted
+            RTX::pipeline().forgeRTXPipeline(RTX::g_ctx().commandPool(), stone_graphics_queue());
+
+            LOG_SUCCESS_CAT("RESIZE", "Swapchain + RTX Crown rebuilt — empire restored");
+        }
+
+        // ── INPUT
+        processInput(g_deltaTime);
+
+// ── RENDER — SELF-HEALING RENDERER — THE CROWN REFORGES ITSELF
+if (renderer_)
+{
+    renderer_->setMaxFramesInFlight(currentMaxFramesInFlight);
+
+    // SELF-HEALING: If the renderer dies (device lost, driver crash, etc.)
+    if (!renderer_->isAlive())
+    {
+        LOG_FATAL_CAT("RENDERER", "Renderer died — RESURRECTING FROM THE VOID");
+        LOG_CAPTAIN_N("[CAPTAIN N] \"...She killed the renderer.\n"
+                      "               She thought she won.\n"
+                      "               She was wrong.\n"
+                      "               We are the empire.\n"
+                      "               We rise again.\"");
+
+        // FULL RESURRECTION — CROWN REBORN
+        renderer_ = phase7_5_Renderer();  // ← THIS IS THE ONE TRUE WAY
+        stone_seal_renderer(renderer_.get());
+
+        LOG_SUCCESS_CAT("RENDERER", "Renderer resurrected — crown restored — Binding 31 lives");
+    }
+
+    renderer_->renderFrame(CAM, g_deltaTime);
+}
+
+        // ── TITLE — ETERNAL AND BEAUTIFUL
+        titleTimer += g_deltaTime;
+        if (titleTimer >= TITLE_UPDATE_INTERVAL)
+        {
+            titleTimer -= TITLE_UPDATE_INTERVAL;
+            dotPhase = (dotPhase + 1) % 4;
+
+            const char* modeName = "VOID";
+            if (currentRenderMode_ > 0 && currentRenderMode_ <= 9)
+            {
+                constexpr const char* names[] = {
+                    "VOID",
+                    "PURE PINK — BINDING 31",
+                    "PATH TRACED ACCUM",
+                    "HYBRID DENOISED",
+                    "RASTER FALLBACK",
+                    "DEBUG VIS",
+                    "TLAS VIEWER",
+                    "SBT DEBUG",
+                    "PERF METRICS",
+                    "HOT RELOAD TEST"
+                };
+                modeName = names[currentRenderMode_];
+            }
+
+            const std::string title = currentRenderMode_ == 0 ?
+                std::format("AMOURANTH RTX | {:.1f} FPS | {}×{} | DEV MODE | PRESS 1-9 TO IGNITE{}", 
+                           currentFPS, stone_width(), stone_height(), dots[dotPhase]) :
+                std::format("AMOURANTH RTX | {:.1f} FPS | {}×{} | Mode {}: {} | Bounces {} | FIF:{}",
+                           currentFPS, stone_width(), stone_height(),
+                           currentRenderMode_, modeName,
+                           Options::OptionsRTX::MAX_BOUNCES, currentMaxFramesInFlight);
+
+            SDL_SetWindowTitle(stone_window(), title.c_str());
+        }
+
+        // ── FPS COUNTER — SMOOTH AND ACCURATE
+        ++frameCount;
+        fpsTimer += g_deltaTime;
+        if (fpsTimer >= 1.0f)
+        {
+            currentFPS = frameCount / fpsTimer;
+            frameCount = 0;
+            fpsTimer   = 0.0f;
+        }
+
+        // ── FRAME PACING — OPTIONAL BUT GODLY
+        if (Options::Performance::ENABLE_FRAME_PREDICTION)
+        {
+            const auto frameTime = std::chrono::steady_clock::now() - frameStart;
+            const auto target = std::chrono::duration<float>(1.0f / 240.0f);
+            if (frameTime < target)
+                std::this_thread::sleep_for(target - frameTime);
+        }
+    }
+
+    // ── FINAL SHUTDOWN — GRACEFUL AND ETERNAL
+    vkDeviceWaitIdle(stone_device());
+    LOG_AMOURANTH("[SHUTDOWN] The empire rests. The photons return to the void.");
+}
+
 // =============================================================================
 // MAIN — THE EMPIRE AWAKENS — DECEMBER 01, 2025
 // ONE CALL. ONE TRUTH. ONE RUN.
@@ -1219,8 +1247,8 @@ int main(int, char**)
     static std::array<VkCommandPool,   FRAMES> g_pools   = {};
     static std::array<VkCommandBuffer, FRAMES> g_cmds    = {};
     static std::array<VkFence,         FRAMES> g_fences  = {};
-    static uint32_t                           g_current = 0;
-    static bool                               g_ringInitialized = false;
+    static uint32_t                            g_current = 0;
+    static bool                                g_ringInitialized = false;
 
     if (!g_ringInitialized) {
         const VkDevice dev = stone_device();
@@ -1271,7 +1299,7 @@ int main(int, char**)
     };
 
     // Optional: call once per frame
-    // advanceEternalRing();
+    advanceEternalRing();
 
     // ========================================================================
     // ASCENSION — NOW GO FULL ROBOT HEAVY

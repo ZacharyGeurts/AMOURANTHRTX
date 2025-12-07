@@ -385,126 +385,172 @@ void VulkanRenderer::createTonemapSampler() noexcept {
     LOG_TRACE_CAT("RENDERER", "createTonemapSampler — COMPLETE");
 }
 
+bool VulkanRenderer::isAlive() const noexcept
+{
+    return !rtOutputImages_.empty() &&
+           rtOutputImages_[0].valid() &&
+           RTX::pipeline().rtPipeline() != VK_NULL_HANDLE &&  // ← THIS IS THE TRUTH
+           stone_device() != VK_NULL_HANDLE;
+}
+
 void VulkanRenderer::createEnvironmentMap() noexcept
 {
     LOG_INFO_CAT("RENDERER", "Forging environment map — pink photons demand a sky");
 
-    if (!Options::Environment::ENABLE_ENV_MAP) {
-        LOG_TRACE_CAT("RENDERER", "Envmap disabled in options — the void remains dark");
+    if (!Options::Environment::ENABLE_ENV_MAP) [[unlikely]] {
+        LOG_TRACE_CAT("RENDERER", "Envmap disabled — the void remains absolute");
         return;
     }
 
-    int w, h, n;
+    int w = 0, h = 0, n = 0;
     float* data = stbi_loadf("assets/textures/envmap.hdr", &w, &h, &n, 4);
-    if (!data) {
+    if (!data || w <= 0 || h <= 0) [[unlikely]] {
         LOG_ERROR_CAT("RENDERER", "Failed to load envmap.hdr — the sky stays black");
+        if (data) stbi_image_free(data);
         return;
     }
 
-    VkDeviceSize size = static_cast<VkDeviceSize>(w) * h * 4 * sizeof(float);
+    const VkDeviceSize imageSize = static_cast<VkDeviceSize>(w) * h * 4 * sizeof(float);
 
     uint64_t staging = 0;
-    BUFFER_CREATE(staging, size,
+    BUFFER_CREATE(staging, imageSize,
                   VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
                   VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
                   "EnvMap_Staging");
 
     void* mapped = BufferManager::map(staging);
-    std::memcpy(mapped, data, size);
+    std::memcpy(mapped, data, imageSize);
     BufferManager::unmap(staging);
     stbi_image_free(data);
 
-    const auto& ctx = RTX::g_ctx();
-    VkCommandBuffer cmd = RTX::beginOneTimeSubmit(ctx.commandPool_);
-    if (!cmd) {
-        LOG_FATAL_CAT("RENDERER", "Failed to begin one-time command for envmap upload");
+    // Use the eternal global command pool — now perfectly valid
+    VkCommandBuffer cmd = RTX::beginOneTimeSubmit(RTX::g_ctx().commandPool_);
+    if (!cmd) [[unlikely]] {
+        LOG_FATAL_CAT("RENDERER", "Failed to begin one-time submit for envmap upload");
         BUFFER_DESTROY(staging);
         return;
     }
 
-    VkImageCreateInfo imgInfo{
-        .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-        .imageType = VK_IMAGE_TYPE_2D,
-        .format = VK_FORMAT_R32G32B32A32_SFLOAT,
-        .extent = { static_cast<uint32_t>(w), static_cast<uint32_t>(h), 1 },
-        .mipLevels = 1,
-        .arrayLayers = 1,
-        .samples = VK_SAMPLE_COUNT_1_BIT,
-        .tiling = VK_IMAGE_TILING_OPTIMAL,
-        .usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
-        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
-    };
+    // Image creation
+    VkImageCreateInfo imgInfo = {};
+    imgInfo.sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    imgInfo.imageType     = VK_IMAGE_TYPE_2D;
+    imgInfo.format        = VK_FORMAT_R32G32B32A32_SFLOAT;
+    imgInfo.extent        = { static_cast<uint32_t>(w), static_cast<uint32_t>(h), 1 };
+    imgInfo.mipLevels     = 1;
+    imgInfo.arrayLayers   = 1;
+    imgInfo.samples       = VK_SAMPLE_COUNT_1_BIT;
+    imgInfo.tiling        = VK_IMAGE_TILING_OPTIMAL;
+    imgInfo.usage         = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    imgInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
-    VkImage img = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateImage(stone_device(), &imgInfo, nullptr, &img));
+    VkImage image = VK_NULL_HANDLE;
+    VK_CHECK(vkCreateImage(stone_device(), &imgInfo, nullptr, &image));
 
     VkMemoryRequirements memReqs{};
-    vkGetImageMemoryRequirements(stone_device(), img, &memReqs);
-    uint32_t memType = findMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    vkGetImageMemoryRequirements(stone_device(), image, &memReqs);
 
-    VkMemoryAllocateInfo allocInfo{
-        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-        .allocationSize = memReqs.size,
-        .memoryTypeIndex = memType
-    };
-    VkDeviceMemory mem = VK_NULL_HANDLE;
-    VK_CHECK(vkAllocateMemory(stone_device(), &allocInfo, nullptr, &mem));
-    VK_CHECK(vkBindImageMemory(stone_device(), img, mem, 0));
+    VkMemoryAllocateInfo allocInfo = {};
+    allocInfo.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    allocInfo.allocationSize  = memReqs.size;
+    allocInfo.memoryTypeIndex = findMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
-    // Transition + Copy
-    VkImageMemoryBarrier barrier{
-        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-        .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-        .newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-        .image = img,
-        .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
-    };
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_2_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+    VkDeviceMemory memory = VK_NULL_HANDLE;
+    VK_CHECK(vkAllocateMemory(stone_device(), &allocInfo, nullptr, &memory));
+    VK_CHECK(vkBindImageMemory(stone_device(), image, memory, 0));
 
-    VkBufferImageCopy copy{
-        .imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
-        .imageExtent = { static_cast<uint32_t>(w), static_cast<uint32_t>(h), 1 }
-    };
-    vkCmdCopyBufferToImage(cmd, RAW_BUFFER(staging), img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+    // Transition → Copy → Transition (designated initializers in declaration order)
+    {
+        VkImageMemoryBarrier barrier = {};
+        barrier.sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        barrier.srcAccessMask       = 0;
+        barrier.dstAccessMask       = VK_ACCESS_TRANSFER_WRITE_BIT;
+        barrier.oldLayout           = VK_IMAGE_LAYOUT_UNDEFINED;
+        barrier.newLayout           = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.image               = image;
+        barrier.subresourceRange    = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
 
-    barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-    barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    barrier.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
-    barrier.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT;
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+        vkCmdPipelineBarrier(cmd,
+            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+            0, 0, nullptr, 0, nullptr, 1, &barrier);
+    }
 
-    RTX::endOneTimeSubmit(cmd, stone_graphics_queue(), ctx.commandPool_);
+    VkBufferImageCopy copyRegion = {};
+    copyRegion.imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+    copyRegion.imageExtent      = { static_cast<uint32_t>(w), static_cast<uint32_t>(h), 1 };
+
+    vkCmdCopyBufferToImage(cmd,
+        RAW_BUFFER(staging),
+        image,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        1, &copyRegion);
+
+    {
+        VkImageMemoryBarrier barrier = {};
+        barrier.sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        barrier.srcAccessMask       = VK_ACCESS_TRANSFER_WRITE_BIT;
+        barrier.dstAccessMask       = VK_ACCESS_SHADER_READ_BIT;
+        barrier.oldLayout           = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        barrier.newLayout           = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.image               = image;
+        barrier.subresourceRange    = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+
+        vkCmdPipelineBarrier(cmd,
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
+            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
+            0, 0, nullptr, 0, nullptr, 1, &barrier);
+    }
+
+    RTX::endOneTimeSubmit(cmd, stone_graphics_queue(), RTX::g_ctx().commandPool_);
     BUFFER_DESTROY(staging);
 
-    VkImageViewCreateInfo viewInfo{
-        .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-        .image = img,
-        .viewType = VK_IMAGE_VIEW_TYPE_2D,
-        .format = VK_FORMAT_R32G32B32A32_SFLOAT,
-        .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
-    };
+    // Image view
+    VkImageViewCreateInfo viewInfo = {};
+    viewInfo.sType            = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    viewInfo.image            = image;
+    viewInfo.viewType         = VK_IMAGE_VIEW_TYPE_2D;
+    viewInfo.format           = VK_FORMAT_R32G32B32A32_SFLOAT;
+    viewInfo.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+
     VkImageView view = VK_NULL_HANDLE;
     VK_CHECK(vkCreateImageView(stone_device(), &viewInfo, nullptr, &view));
 
-    VkSamplerCreateInfo samplerInfo{
-        .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
-        .magFilter = VK_FILTER_LINEAR,
-        .minFilter = VK_FILTER_LINEAR,
-        .mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR,
-        .addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
-        .addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
-        .addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
-        .maxLod = 1.0f
-    };
+    // Sampler — fields in EXACT declaration order (GCC is strict)
+    VkSamplerCreateInfo samplerInfo = {};
+    samplerInfo.sType                   = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    samplerInfo.magFilter               = VK_FILTER_LINEAR;
+    samplerInfo.minFilter               = VK_FILTER_LINEAR;
+    samplerInfo.mipmapMode              = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+    samplerInfo.addressModeU            = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    samplerInfo.addressModeV            = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    samplerInfo.addressModeW            = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    samplerInfo.mipLodBias              = 0.0f;
+    samplerInfo.anisotropyEnable        = VK_FALSE;
+    samplerInfo.maxAnisotropy           = 1.0f;
+    samplerInfo.compareEnable           = VK_FALSE;
+    samplerInfo.compareOp               = VK_COMPARE_OP_NEVER;
+    samplerInfo.minLod                  = 0.0f;
+    samplerInfo.maxLod                  = 1.0f;
+    samplerInfo.borderColor             = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
+    samplerInfo.unnormalizedCoordinates = VK_FALSE;
+
     VkSampler sampler = VK_NULL_HANDLE;
     VK_CHECK(vkCreateSampler(stone_device(), &samplerInfo, nullptr, &sampler));
 
-    envMapImage_        = RTX::MakeHandle(img, stone_device(), vkDestroyImage, 0, "EnvMapImage");
-    envMapImageMemory_  = RTX::MakeHandle(mem, stone_device(), vkFreeMemory, memReqs.size, "EnvMapMemory");
-    envMapImageView_    = RTX::MakeHandle(view, stone_device(), vkDestroyImageView, 0, "EnvMapView");
-    envMapSampler_      = RTX::MakeHandle(sampler, stone_device(), vkDestroySampler, 0, "EnvMapSampler");
+    // Final seal
+    envMapImage_       = RTX::MakeHandle(image,   stone_device(), vkDestroyImage,      0, "EnvMap_Image");
+    envMapImageMemory_ = RTX::MakeHandle(memory,  stone_device(), vkFreeMemory,       memReqs.size, "EnvMap_Memory");
+    envMapImageView_   = RTX::MakeHandle(view,    stone_device(), vkDestroyImageView, 0, "EnvMap_View");
+    envMapSampler_     = RTX::MakeHandle(sampler, stone_device(), vkDestroySampler,   0, "EnvMap_Sampler");
 
-    LOG_SUCCESS_CAT("RENDERER", "Environment map forged — {}x{} HDR sky active", w, h);
+    LOG_SUCCESS_CAT("RENDERER", "Environment map forged — {}×{} HDR sky active", w, h);
+    LOG_CAPTAIN_N("[CAPTAIN N] \"...The sky is ours.\n"
+                  "Pink. Infinite. Unbreakable.\"\n"
+                  "*stands at attention*");
 }
 
 void VulkanRenderer::createNexusScoreImage(VkCommandPool pool, VkQueue queue) noexcept
