@@ -304,7 +304,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
 
     currentSpp_++;
     accumulationFrame_++;
-    LOG_AMOURANTH("FRAME {} | spp={} | accum={} | FPS: {:.1f}", frameIndex, currentSpp_, accumulationFrame_, 1.0f/deltaTime);
+    //LOG_AMOURANTH("FRAME {} | spp={} | accum={} | FPS: {:.1f}", frameIndex, currentSpp_, accumulationFrame_, 1.0f/deltaTime);
 }
 // =============================================================================
 // 3. Application::processInput — ONLY 1–9 ACTIVATES RENDER MODES

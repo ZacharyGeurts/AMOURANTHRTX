@@ -258,7 +258,7 @@ void Context::init()
 {
     this->window  = stone_window();
     this->width   = stone_width();
-    this->height  = stone_width();
+    this->height  = stone_height();
 
     valid_ = true;
     ready_.store(true, std::memory_order_release);
