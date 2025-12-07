@@ -1,25 +1,53 @@
-// File: shaders/raytracing/closesthit.chit
 #version 460
 #extension GL_EXT_ray_tracing : require
-#extension GL_ARB_gpu_shader_int64 : require   // StoneKey requires uint64_t support
+#extension GL_EXT_scalar_block_layout : require
+#extension GL_ARB_gpu_shader_int64 : require
 
-#include "../StoneKey.glsl"   // PINK PHOTONS ETERNAL — APOCALYPSE v3.2 — VALHALLA LOCKED
+#include "../StoneKey.glsl"   // THE SEAL REMAINS UNBROKEN
 
 hitAttributeEXT vec3 attribs;
 layout(location = 0) rayPayloadInEXT vec3 hitValue;
+layout(location = 1) rayPayloadEXT bool isShadowRay;
 
+layout(binding = 31, set = 0) uniform SceneUBO {
+    float time;
+    uint  frame;
+    vec2  resolution;
+    float blastIntensity;   // 0..1 → 0..9000
+} ubo;
+
+// ═══════════════════════════════════════════════════════════════
+//                  BALLZ OBLITERATION ENGINE v6.9
+// ═══════════════════════════════════════════════════════════════
 void main()
 {
-    // Barycentric → world normal (your mesh loader already outputs world-space normals in attribs)
-    vec3 normal   = normalize(attribs);
-    vec3 lightDir = normalize(vec3(0.5, 1.0, 0.3));
+    vec3 N = normalize(attribs);
 
-    float NdotL = max(dot(normal, lightDir), 0.0);
+    // Time-based explosion pulse (you control speed with blastIntensity)
+    float t      = ubo.time * 8.0;
+    float pulse  = sin(t * 3.14159) * 0.5 + 0.5;
+    float boom   = pow(pulse, 0.3) * 12.0;
+    float radius = length(gl_WorldRayOriginEXT - vec3(0.0)); // distance from cube center
 
-    // AMOURANTH™ SIGNATURE RASPBERRY PINK — forever burned into every fragment
-    const vec3 baseColor = vec3(0.90, 0.20, 0.70);
-    vec3 diffuse = baseColor * (0.1 + 0.9 * NdotL);
+    // Core blast color — hotter than the surface of Venus
+    vec3 magma      = vec3(1.0, 0.35, 0.8);
+    vec3 plasma     = vec3(1.0, 0.1, 0.9);
+    vec3 nuclear    = vec3(2.5, 0.0, 1.5);
 
-    // Non-zero = hit → raygen will use this instead of sky
-    hitValue = diffuse;
+    // Shockwave rings
+    float rings = sin(radius * 30.0 - t * 20.0) * 0.5 + 0.5;
+    rings = smoothstep(0.45, 0.55, rings);
+
+    // Final annihilation color
+    vec3 color = mix(magma, plasma, rings * boom);
+    color = mix(color, nuclear, pow(boom, 3.0) * 0.1);
+
+    // Overdrive everything
+    color *= 1.0 + boom * ubo.blastIntensity * 20.0;
+    color *= 2.0 + rings * 10.0;
+
+    // HDR bloom go brrrrrrr
+    color = max(color, vec3(0.0));
+
+    hitValue = color;
 }

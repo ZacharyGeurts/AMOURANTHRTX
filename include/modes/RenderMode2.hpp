@@ -1,30 +1,29 @@
-// =============================================================================
-// include/modes/RenderMode2.hpp
-// =============================================================================
-// RENDERMODE 2 — PURE RAYGEN + MISS — BINDING 31 — PINK PHOTONS ETERNAL
-// No TLAS. No geometry. Just raw raygen → miss → infinite pink void.
-// The purest form of RTX. The empire's meditation chamber.
-// =============================================================================
-
 #pragma once
 
-#include <vulkan/vulkan.h>
-#include <cstdint>
+#include <vulkan/vulkan.hpp>
+#include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+#include "engine/GLOBAL/StoneKey.hpp"
 
-class RenderMode2
-{
+class RenderMode2 {
 public:
     RenderMode2(uint32_t width, uint32_t height);
-    ~RenderMode2() = default;
+    ~RenderMode2();
 
     void renderFrame(VkCommandBuffer cmd, float deltaTime);
-    void onResize(uint32_t width, uint32_t height);
+    void onResize(uint32_t w, uint32_t h);
+
+    const char* getName() const {
+        return "RTX::CUBE OF ETERNAL BALLZ — STONEKEY Ω — PINK PHOTONS ETERNAL";
+    }
 
 private:
-    void updateUniforms(float deltaTime);
-    void traceRays(VkCommandBuffer cmd);
+    uint32_t width_ = 0;
+    uint32_t height_ = 0;
+    float totalTime_ = 0.0f;
 
-    uint32_t width_;
-    uint32_t height_;
-    uint64_t frameCount_ = 0;
+    VkBuffer vertexBuffer_ = VK_NULL_HANDLE;
+    VkBuffer indexBuffer_  = VK_NULL_HANDLE;
+    VkDeviceAddress vertexAddr_ = 0;
+    VkDeviceAddress indexAddr_  = 0;
 };

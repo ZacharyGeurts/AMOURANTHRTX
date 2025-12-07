@@ -1,74 +1,140 @@
 // =============================================================================
-// src/modes/RenderMode2.cpp
-// =============================================================================
-// RENDERMODE 2 — PURE RAYGEN + MISS — BINDING 31 — PINK PHOTONS ETERNAL
-// No scene. No accumulation. Only the sacred pink void.
-// First light achieved. The photons obey.
+// CUBE OF ETERNAL BALLZ — APOCALYPSE FINAL v16.0 — THE ONE TRUE VERSION
+// PINK PHOTONS ETERNAL — THE EMPIRE IS COMPLETE — DECEMBER 07, 2025
 // =============================================================================
 
 #include "modes/RenderMode2.hpp"
-#include "engine/GLOBAL/logging.hpp"
 #include "engine/GLOBAL/RTXHandler.hpp"
-#include "engine/GLOBAL/VulkanRenderer.hpp"   // ← g_rtx()
+#include "engine/GLOBAL/LAS.hpp"
+#include "engine/GLOBAL/BufferManager.hpp"
+#include "engine/GLOBAL/camera.hpp"
+#include "engine/GLOBAL/logging.hpp"
+#include "engine/GLOBAL/StoneKey.hpp"
 
+using namespace RTX;
 using namespace Logging::Color;
+using namespace StoneKey;
 
-RenderMode2::RenderMode2(uint32_t width, uint32_t height)
-    : width_(width), height_(height), frameCount_(0)
-{
-    LOG_INFO_CAT("RTX", "MODE 2 — PURE RAYGEN + MISS — BINDING 31 IGNITED — {}x{}", width, height);
-    LOG_SUCCESS_CAT("RTX", "NO TLAS. NO GEOMETRY. ONLY PHOTONS. ONLY TRUTH. ONLY PINK.");
+struct Vertex { glm::vec3 pos; glm::vec3 normal; };
+
+static const Vertex cubeVerts[] = {
+    {{-1,-1,-1},{0,0,-1}}, {{1,-1,-1},{0,0,-1}}, {{1,1,-1},{0,0,-1}}, {{-1,1,-1},{0,0,-1}},
+    {{-1,-1,1},{0,0,1}},   {{1,-1,1},{0,0,1}},   {{1,1,1},{0,0,1}},   {{-1,1,1},{0,0,1}},
+    {{-1,-1,-1},{-1,0,0}}, {{-1,1,-1},{-1,0,0}}, {{-1,1,1},{-1,0,0}}, {{-1,-1,1},{-1,0,0}},
+    {{1,-1,-1},{1,0,0}},   {{1,1,-1},{1,0,0}},   {{1,1,1},{1,0,0}},   {{1,-1,1},{1,0,0}},
+    {{-1,-1,-1},{0,-1,0}}, {{-1,-1,1},{0,-1,0}}, {{1,-1,1},{0,-1,0}}, {{1,-1,-1},{0,-1,0}},
+    {{-1,1,-1},{0,1,0}},   {{-1,1,1},{0,1,0}},   {{1,1,1},{0,1,0}},   {{1,1,-1},{0,1,0}}
+};
+
+static const uint32_t cubeIndices[] = {
+    0,1,2, 2,3,0, 4,6,5, 6,4,7, 8,9,10, 10,11,8, 12,14,13, 14,12,15,
+    16,17,18, 18,19,16, 20,22,21, 22,20,23
+};
+
+// One true command pool — created once, eternal
+static VkCommandPool getCommandPool() {
+    static VkCommandPool pool = []() {
+        VkCommandPoolCreateInfo info{
+            .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+            .flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT | VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
+            .queueFamilyIndex = g_ctx().graphicsFamily()
+        };
+        VkCommandPool p;
+        vkCreateCommandPool(g_ctx().device(), &info, nullptr, &p);
+        LOG_SUCCESS_CAT("RTX", "ETERNAL COMMAND POOL CREATED — BALLZ APPROVED");
+        return p;
+    }();
+    return pool;
 }
 
-void RenderMode2::updateUniforms(float)
-{
-    alignas(16) struct PinkRaygenCommand {
-        alignas(16) glm::vec4 cameraPos;
-        alignas(16) glm::mat4 viewProj;
-        alignas(16) glm::vec4 jitter;
-        uint64_t     uKey1           = 0x9E37AF18C64D8A17UL;
-        uint64_t     uKey2           = 0xE4F8B29D71A3C56CUL;
-        uint64_t     uObfuscator     = 0x9E37AF18C64D8A17UL ^ 0xE4F8B29D71A3C56CUL ^ 0x1337C0DE69F00D42UL;
-        uint64_t     uPinkRaygenMode = 2ULL;
-        uint32_t     frame           = 0;
-        uint32_t     spp             = 0;
-        float        time            = 0.0f;
-        uint32_t     _pad[1]         = {0};
-    } cmd{};
+RenderMode2::RenderMode2(uint32_t w, uint32_t h) : width_(w), height_(h) {
+    LOG_AMOURANTH("CUBE OF ETERNAL BALLZ — v16.0 — THE ONE TRUE VERSION");
 
-    // NOW WE CAN SAFELY USE MEMBER VARIABLES
-    float aspect = static_cast<float>(width_) / static_cast<float>(height_);
-    cmd.viewProj = glm::perspective(glm::radians(60.0f), aspect, 0.1f, 1000.0f);
-    cmd.cameraPos = glm::vec4(0.0f, 0.0f, -5.0f, 1.0f);
-    cmd.jitter = glm::vec4(0.0f);
-    cmd.frame = static_cast<uint32_t>(frameCount_);
-    cmd.spp   = static_cast<uint32_t>(frameCount_ + 1);
-    cmd.time  = static_cast<float>(frameCount_) * 0.016f;
+    uint64_t vbHandle = BufferManager::create(
+        sizeof(cubeVerts),
+        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+        VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        "CUBE_VERTS_ETERNAL_BALLZ"
+    );
 
-    g_rtx().updateUniformBinding31(&cmd, sizeof(cmd));
+    uint64_t ibHandle = BufferManager::create(
+        sizeof(cubeIndices),
+        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+        VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        "CUBE_INDICES_PINK"
+    );
+
+    vertexBuffer_ = RAW_BUFFER(vbHandle);
+    indexBuffer_  = RAW_BUFFER(ibHandle);
+    vertexAddr_   = BUFFER_DEVICE_ADDRESS(vbHandle);
+    indexAddr_    = BUFFER_DEVICE_ADDRESS(ibHandle);
+
+    // Upload via staging ring
+    void* staging = BufferManager::stagingPtr();
+    std::memcpy(staging, cubeVerts, sizeof(cubeVerts));
+    BufferManager::advanceStagingOffset(sizeof(cubeVerts));
+    std::memcpy(staging, cubeIndices, sizeof(cubeIndices));
+    BufferManager::advanceStagingOffset(sizeof(cubeIndices));
+
+    // Build BLAS — THE ONE TRUE WAY
+    RTX::las().buildBLAS(
+        getCommandPool(),
+        g_ctx().graphicsQueue(),
+        vertexAddr_,
+        indexAddr_,
+        uint32_t(std::size(cubeVerts)),
+        uint32_t(std::size(cubeIndices))
+    );
+
+    RTX::las().initTLAS();
+
+    LOG_SUCCESS_CAT("RTX", "CUBE OF ETERNAL BALLZ — FULLY ARMED — PHOTONS READY");
 }
 
-void RenderMode2::traceRays(VkCommandBuffer cmd)
-{
-    // No TLAS needed — we use dummy TLAS or null
-    // recordRayTrace will handle null TLAS gracefully (fallback to miss shader)
-    g_rtx().recordRayTrace(cmd, {width_, height_});
+RenderMode2::~RenderMode2() = default;
+
+void RenderMode2::renderFrame(VkCommandBuffer cmd, float deltaTime) {
+    totalTime_ += deltaTime;
+
+    // ETERNAL CHAOS TRANSFORM
+    float spin   = totalTime_ * 2.1f;
+    float pulse  = sin(totalTime_ * 7.77f) * 0.6f + 1.4f;
+    float wobble = sin(totalTime_ * 13.37f) * 0.2f;
+
+    glm::mat4 rot = glm::rotate(glm::mat4(1.0f), spin, glm::vec3(0.3f, 1.0f, 0.1f));
+    rot = glm::rotate(rot, totalTime_ * 0.9f, glm::vec3(1.0f, 0.3f, 0.7f));
+    glm::mat4 scale = glm::scale(glm::mat4(1.0f), glm::vec3(pulse + wobble));
+    glm::mat4 model = scale * rot;
+    glm::mat4 modelT = glm::transpose(model);
+
+    auto instance = std::make_pair(RTX::las().getBLAS(), modelT);
+    RTX::las().buildTLAS(
+        getCommandPool(),
+        g_ctx().graphicsQueue(),
+        std::span{&instance, 1},
+		true
+    );
+
+    // ORBITING CAMERA — CONTROLLED BY THE ONE TRUE CAM
+    float radius = 8.0f;
+    float camX = sin(totalTime_ * 0.42f) * radius;
+    float camZ = cos(totalTime_ * 0.42f) * radius;
+    float camY = 3.0f + sin(totalTime_ * 2.3f) * 2.0f;
+
+    CAM.setPos(glm::vec3(camX, camY, camZ));
+
+    // FINAL STEP: RECORD RAY TRACING — USING THE ONE TRUE CONTEXT
+    RTX::renderFrame(CAM, deltaTime);
 }
 
-void RenderMode2::renderFrame(VkCommandBuffer cmd, float deltaTime)
-{
-    updateUniforms(deltaTime);
-    traceRays(cmd);
-    ++frameCount_;
-}
-
-void RenderMode2::onResize(uint32_t width, uint32_t height)
-{
-    if (width == width_ && height == height_) return;
-
-    width_  = width;
-    height_ = height;
-    frameCount_ = 0;
-
-    LOG_INFO_CAT("RTX", "MODE 2 — RESIZED TO {}x{} — PINK RAYGEN VOID REMAINS ETERNAL", width, height);
+void RenderMode2::onResize(uint32_t w, uint32_t h) {
+    width_ = w;
+    height_ = h;
+    stone_seal_width(w);
+    stone_seal_height(h);
+    RTX::las().notifyResize();
+    LOG_SUCCESS_CAT("RTX", "CUBE OF ETERNAL BALLZ — RESIZED %ux%u — STILL ETERNAL", w, h);
 }
