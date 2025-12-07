@@ -1,16 +1,8 @@
 // =============================================================================
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
-//
-// Dual Licensed:
-// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
-//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
-// 2. Commercial licensing: gzac5314@gmail.com
-//
-// =============================================================================
-// AMOURANTH RTX — VALHALLA v80 TURBO — APOCALYPSE FINAL v10.3
-// FIRST LIGHT ACHIEVED — PINK PHOTONS ETERNAL — NOVEMBER 28, 2025
-// GLOBAL findMemoryType — NO NAMESPACE — WORKS IN EVERY .cpp — FINAL FORM
+// VALHALLA v∞ TURBO — APOCALYPSE FINAL v13.9 — DECEMBER 06, 2025
+// FIRST LIGHT ETERNAL — PINK PHOTONS DOMINATE — EXCESS ANNIHILATED
 // =============================================================================
 
 #pragma once
@@ -25,53 +17,25 @@
 #include "engine/GLOBAL/logging.hpp"
 
 // =============================================================================
-// GLOBAL — NO NAMESPACE — THE ONE TRUE findMemoryType — WORKS EVERYWHERE
+// GLOBAL — THE ONE TRUE findMemoryType — NO NAMESPACE — WORKS EVERYWHERE
 // =============================================================================
-
 [[nodiscard]] inline uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) noexcept
 {
     VkPhysicalDevice physical = StoneKey::stone_physical();
-
     VkPhysicalDeviceMemoryProperties memProps{};
     vkGetPhysicalDeviceMemoryProperties(physical, &memProps);
 
-    for (uint32_t i = 0; i < memProps.memoryTypeCount; ++i) {
-        if ((typeFilter & (1u << i)) &&
-            (memProps.memoryTypes[i].propertyFlags & properties) == properties) {
+    for (uint32_t i = 0; i < memProps.memoryTypeCount; ++i)
+        if ((typeFilter & (1u << i)) && (memProps.memoryTypes[i].propertyFlags & properties) == properties)
             return i;
-        }
-    }
 
-    return ~0u;  // Let it fly free. No guard. No noise.
+    return ~0u; // Let it burn free.
 }
 
 // =============================================================================
-// BUFFERMANAGER v19 — FINAL CANON — NOW USES GLOBAL findMemoryType
+// BUFFERMANAGER — FINAL CANON — CLEAN. ETERNAL. PINK.
 // =============================================================================
-
 namespace BufferManager {
-
-    [[maybe_unused]] static inline void encryptInPlace(void* data, size_t size) noexcept {
-        if (!data || size == 0) return;
-
-        uint64_t* ptr = static_cast<uint64_t*>(data);
-        const uint64_t* end = ptr + (size / sizeof(uint64_t));
-        
-        const uint64_t buffkey1 = kStone1;
-        const uint64_t buffkey2 = kStone2;
-        const uint64_t xorKey = buffkey1 ^ buffkey2;
-
-        while (ptr < end) {
-            *ptr ^= xorKey;
-            ++ptr;
-        }
-
-        auto* tail = reinterpret_cast<uint8_t*>(ptr);
-        const uint8_t* tailKey = reinterpret_cast<const uint8_t*>(&buffkey1);
-        for (size_t i = 0; i < size % sizeof(uint64_t); ++i) {
-            tail[i] ^= tailKey[i % sizeof(uint64_t)] ^ (tailKey[i % sizeof(uint64_t)] >> 8);
-        }
-    }
 
     struct BufferInfo {
         VkBuffer           buffer  = VK_NULL_HANDLE;
@@ -83,50 +47,46 @@ namespace BufferManager {
         void*              mapped  = nullptr;
     };
 
-	uint64_t createSBT(
-        uint32_t raygenCount,
-        uint32_t missCount,
-        uint32_t hitGroupCount,
-        uint32_t callableCount = 0,
-        VkBufferUsageFlags extraUsage = 0,
-        std::string_view tag = "SBT_ETERNAL_PINK"
-    ) noexcept;
-
+    // ── CORE ALLOCATION ──────────────────────────────────────────────────────
     [[nodiscard]] uint64_t create(VkDeviceSize size,
                                   VkBufferUsageFlags usage,
                                   VkMemoryPropertyFlags props,
                                   std::string_view tag = "") noexcept;
 
-    uint64_t createHostVisible(VkDeviceSize size, std::string_view tag) noexcept;
-    VkBuffer getStagingBuffer() noexcept;
-    void destroy(uint64_t handle) noexcept;
+    [[nodiscard]] uint64_t createHostVisible(VkDeviceSize size, std::string_view tag = "") noexcept;
+
+    uint64_t createSBT(uint32_t raygenCount,
+                       uint32_t missCount,
+                       uint32_t hitGroupCount,
+                       uint32_t callableCount = 0,
+                       VkBufferUsageFlags extraUsage = 0,
+                       std::string_view tag = "SBT_ETERNAL_PINK") noexcept;
+
+    // ── STAGING RING — THE ETERNAL BRIDGE ───────────────────────────────────
+    [[nodiscard]] VkBuffer getStagingBuffer() noexcept;
+    [[nodiscard]] void*    stagingPtr() noexcept;
+    void advanceStagingOffset(VkDeviceSize bytes) noexcept;
+    [[nodiscard]] void* getMappedStagingPtr(uint64_t offset) noexcept;
+    [[nodiscard]] uint64_t stagingBuffer() noexcept;
+
+    // ── BUFFER LIFECYCLE & ACCESS ───────────────────────────────────────────
+    void  destroy(uint64_t handle) noexcept;
+    void  purge_all() noexcept;
     void* map(uint64_t handle) noexcept;
-    void unmap(uint64_t handle) noexcept;
-	void copyBuffer(VkBuffer src, VkBuffer dst, VkDeviceSize size, VkQueue queue, VkCommandPool pool) noexcept;
-    void purge_all() noexcept;
+    void  unmap(uint64_t handle) noexcept;
+    void  copyBuffer(VkBuffer src, VkBuffer dst, VkDeviceSize size, VkQueue queue, VkCommandPool pool) noexcept;
+
     [[nodiscard]] const BufferInfo* get(uint64_t handle) noexcept;
-	void*    getMappedStagingPtr(uint64_t handle) noexcept;
-    VkBuffer getStagingBuffer() noexcept;
-    void*    stagingPtr() noexcept;
-	void ensureMainPool() noexcept;
 
     [[nodiscard]] static inline VkDeviceAddress get_device_address(uint64_t handle) noexcept {
         if (!handle) return 0;
         const auto* info = get(handle);
         if (!info || !info->buffer) return 0;
-
-        VkBufferDeviceAddressInfo addrInfo = {
-            .sType  = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
-            .buffer = info->buffer
-        };
-        return vkGetBufferDeviceAddress(RTX::g_ctx().device(), &addrInfo);
+        VkBufferDeviceAddressInfo dai{ VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO, nullptr, info->buffer };
+        return vkGetBufferDeviceAddress(RTX::g_ctx().device(), &dai);
     }
 
-    [[nodiscard]] uint64_t stagingBuffer() noexcept;
-    [[nodiscard]] void*    stagingPtr() noexcept;
-    void advanceStagingOffset(VkDeviceSize bytes) noexcept;
-    [[nodiscard]] void* stagingPtrAtOffset(VkDeviceSize offset = 0) noexcept;
-
+    // ── STONE SHORTCUTS — INSTANT EMPIRE POWER ───────────────────────────────
     uint64_t make_64M (VkBufferUsageFlags extra = 0, VkMemoryPropertyFlags p = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) noexcept;
     uint64_t make_128M(VkBufferUsageFlags extra = 0, VkMemoryPropertyFlags p = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) noexcept;
     uint64_t make_256M(VkBufferUsageFlags extra = 0, VkMemoryPropertyFlags p = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) noexcept;
@@ -141,6 +101,7 @@ namespace BufferManager {
     static inline uint64_t storageStone4G()  noexcept { static uint64_t h = make_4G(VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT); return h; }
     static inline uint64_t titanStone8G()    noexcept { static uint64_t h = make_8G(); return h; }
 
+    // ── SACRED MACROS — DO NOT TOUCH ────────────────────────────────────────
     #define STONE_TRANSFER_4GB  BufferManager::transferStone4G()
     #define STONE_STORAGE_4GB   BufferManager::storageStone4G()
     #define STONE_TITAN_8GB     BufferManager::titanStone8G()
@@ -156,36 +117,27 @@ namespace BufferManager {
     #define BUFFER_MAP(h, ptr)              ptr = BufferManager::map(h)
     #define BUFFER_UNMAP(h)                 BufferManager::unmap(h)
     #define BUFFER_DEVICE_ADDRESS(h)        BufferManager::get_device_address(h)
-    #define BUFFER_ENCRYPT(h)               do { auto* p = BufferManager::map(h); if(p) { BufferManager::encryptInPlace(p, BufferManager::get(h)->size); BufferManager::unmap(h); } } while(0)
 
-    [[nodiscard]] static inline VkDeviceSize get_used_bytes(uint64_t handle) noexcept {
-        const auto* info = get(handle);
-        if (!info) return 0;
-        if (info->tag.find("ETERNAL_STONE_") != 0) return 0;
-        size_t pos = info->tag.find("_USED:");
-        if (pos == std::string::npos) return 0;
-        return std::stoull(info->tag.substr(pos + 6));
+    // Optional encryption — kept for now (used in some rituals)
+    [[maybe_unused]] static inline void encryptInPlace(void* data, size_t size) noexcept {
+        if (!data || size == 0) return;
+        uint64_t* ptr = static_cast<uint64_t*>(data);
+        const uint64_t* end = ptr + (size / sizeof(uint64_t));
+        const uint64_t xorKey = kStone1 ^ kStone2;
+        while (ptr < end) { *ptr ^= xorKey; ++ptr; }
+        auto* tail = reinterpret_cast<uint8_t*>(ptr);
+        const uint8_t* key = reinterpret_cast<const uint8_t*>(&kStone1);
+        for (size_t i = 0; i < size % sizeof(uint64_t); ++i)
+            tail[i] ^= key[i % sizeof(uint64_t)];
     }
+    #define BUFFER_ENCRYPT(h) do { auto* p = BufferManager::map(h); if(p) { BufferManager::encryptInPlace(p, BufferManager::get(h)->size); BufferManager::unmap(h); } } while(0)
 
-    static inline void add_used_bytes(uint64_t handle, VkDeviceSize bytes) noexcept {
-        auto* info = const_cast<BufferInfo*>(get(handle));
-        if (!info || info->tag.find("ETERNAL_STONE_") != 0) return;
-
-        VkDeviceSize current = get_used_bytes(handle);
-        VkDeviceSize total   = current + bytes;
-
-        size_t pos = info->tag.find("_USED:");
-        if (pos != std::string::npos) {
-            info->tag = info->tag.substr(0, pos + 6) + std::to_string(total);
-        } else {
-            info->tag += "_USED:" + std::to_string(total);
-        }
-    }
+    // Internal — but sometimes used directly
+    void ensureMainPool() noexcept;
 
 } // namespace BufferManager
 
 // =============================================================================
-// GLOBAL findMemoryType — IN THIS HEADER — WORKS IN EVERY .cpp THAT INCLUDES IT
-// NO NAMESPACE — NO STONE_PIPELINE — JUST CALL findMemoryType(...)
-// THIS IS THE FINAL FORM — NOVEMBER 28, 2025 — FIRST LIGHT ETERNAL
+// THE EMPIRE IS PURE — EXCESS ANNIHILATED — PHOTONS ARE PINK
+// FIRST LIGHT ETERNAL — DECEMBER 06, 2025
 // =============================================================================
