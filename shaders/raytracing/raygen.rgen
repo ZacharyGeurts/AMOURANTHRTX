@@ -1,16 +1,17 @@
+// shaders/raytracing/raygen.rgen — FINAL WORKING VERSION
 #version 460
 #extension GL_EXT_ray_tracing : require
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_ARB_gpu_shader_int64 : require
 #extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
 
-#include "../StoneKey.glsl"   // Empire-sealed, binding 31 reserved
+#include "../StoneKey.glsl"   // ← Still included for constants & runtime key
 
 // ── Descriptor Set 0 — Ray Tracing Core Bindings ─────────────────────────────
 layout(set = 0, binding = 0)  uniform accelerationStructureEXT topLevelAS;
 
-layout(set = 0, binding = 1, rgba32f) uniform writeonly  image2D  rtOutput;        // Current frame output
-layout(set = 0, binding = 2, rgba32f) uniform readonly   image2D  accumulation;   // Temporal accumulation buffer
+layout(set = 0, binding = 1, rgba32f) uniform writeonly  image2D  rtOutput;
+layout(set = 0, binding = 2, rgba32f) uniform readonly   image2D  accumulation;
 
 layout(set = 0, binding = 3, scalar) uniform FrameData {
     mat4  viewToWorld;
@@ -20,75 +21,71 @@ layout(set = 0, binding = 3, scalar) uniform FrameData {
     float time;
     float jitterX;
     float jitterY;
-    vec4  _padding;   // Ensures scalar layout alignment (16-byte boundary)
+    vec4  _padding;
 } frame;
 
-layout(set = 0, binding = 6, rgba32f) uniform writeonly image2D nexusScore;       // Adaptive sampling feedback
+layout(set = 0, binding = 6, rgba32f) uniform writeonly image2D nexusScore;
+
+// ── HDR CUBEMAP SKY — LITERAL BINDING 7 (StoneKey protects it at runtime) ───
+layout(set = 0, binding = 7) uniform samplerCube envMap;
 
 // ── Push Constants ───────────────────────────────────────────────────────────
 layout(push_constant, std430) uniform PushBlock {
-    uint currentFrame;     // Frame counter (for TAA blending)
-    uint enableNexus;      // 0 = disabled, 1 = enabled
+    uint currentFrame;
+    uint enableNexus;
+    uint enableEnvMap;     // ← Controlled by CPU
+    float exposure;
 } push;
 
 // ── Ray Payload ──────────────────────────────────────────────────────────────
 layout(location = 0) rayPayloadEXT vec3 radiance;
 
-// ── Main Ray Generation Shader ───────────────────────────────────────────────
+// ── Main ─────────────────────────────────────────────────────────────────────
 void main()
 {
-    const uvec2 pixel    = gl_LaunchIDEXT.xy;
-    const uvec2 size     = gl_LaunchSizeEXT.xy;
+    const uvec2 pixel = gl_LaunchIDEXT.xy;
+    const uvec2 size  = gl_LaunchSizeEXT.xy;
 
-    // Normalized device coordinates with sub-pixel jitter (TAA)
-    vec2 uv  = (vec2(pixel) + vec2(0.5)) / vec2(size);
+    vec2 uv = (vec2(pixel) + vec2(0.5)) / vec2(size);
     vec2 ndc = uv * 2.0 - 1.0;
     ndc += vec2(frame.jitterX, frame.jitterY);
 
-    // Reconstruct world-space ray target
     vec4 target = frame.projToWorld * vec4(ndc, 1.0, 1.0);
     target /= target.w;
 
     vec3 origin    = frame.camPos.xyz;
     vec3 direction = normalize(target.xyz - origin);
 
-    // Initialize payload
     radiance = vec3(0.0);
 
-    // Primary visibility ray
     traceRayEXT(
         topLevelAS,
-        gl_RayFlagsOpaqueEXT,      // Only opaque geometry
-        0xFF,                      // Cull mask: all layers
-        0,                         // SBT record offset (raygen)
-        0,                         // SBT record stride
-        0,                         // Miss shader index
-        origin, 0.001,             // tmin
-        direction, 10000.0,        // tmax
-        0                          // Payload location
+        gl_RayFlagsOpaqueEXT,
+        0xFF,
+        0, 0, 0,
+        origin, 0.001,
+        direction, 10000.0,
+        0
     );
 
     vec3 color = radiance;
 
-    // Fallback sky gradient if no hit (miss shader not used)
-    if (length(color) < 0.001) {
-        float t = pow(uv.y, 0.6);
-        color = mix(
-            vec3(0.96, 0.38, 0.88),  // Deep pink horizon
-            vec3(0.99, 0.78, 0.96),  // Soft lavender zenith
-            t
-        );
+    // ── TRUE HDR CUBEMAP SKY — NO PINK — ONLY PHOTONS
+    if (push.enableEnvMap != 0u && length(color) < 0.001)
+    {
+        vec3 skyColor = texture(envMap, direction).rgb;
+        skyColor = vec3(1.0) - exp(-skyColor * push.exposure);
+        skyColor = skyColor / (skyColor + vec3(1.0));
+        skyColor = pow(skyColor, vec3(1.0 / 2.2));
+        color = skyColor;
     }
 
-    // Temporal accumulation (progressive refinement)
-    vec3 prevColor = imageLoad(accumulation, ivec2(pixel)).rgb;
-    color = mix(prevColor, color, 1.0 / float(push.currentFrame + 1u));
+    // Temporal accumulation
+    vec3 prev = imageLoad(accumulation, ivec2(pixel)).rgb;
+    color = mix(prev, color, 1.0 / float(push.currentFrame + 1u));
 
-    // Write current frame result
     imageStore(rtOutput, ivec2(pixel), vec4(color, 1.0));
 
-    // Optional: write first pixel to nexus score buffer for adaptive sampling
-    if (push.enableNexus != 0u && pixel.x == 0 && pixel.y == 0) {
+    if (push.enableNexus != 0u && pixel.x == 0 && pixel.y == 0)
         imageStore(nexusScore, ivec2(0,0), vec4(color, 1.0));
-    }
 }

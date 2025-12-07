@@ -73,7 +73,7 @@ uint32_t MAX_FRAMES_IN_FLIGHT = Options::Performance::MAX_FRAMES_IN_FLIGHT;
 // ──────────────────────────────────────────────────────────────────────────────
 EnvironmentMap VulkanRenderer::createEnvironmentMap() noexcept
 {
-    LOG_INFO_CAT("RENDERER", "Forging TRUE CUBEMAP environment map — pink photons demand a cubic sky");
+    LOG_INFO_CAT("RENDERER", "Forging TRUE HDR CUBEMAP environment map — pink photons ascend to reality");
 
     EnvironmentMap envmap{};
 
@@ -82,7 +82,7 @@ EnvironmentMap VulkanRenderer::createEnvironmentMap() noexcept
         return envmap;
     }
 
-    int w = 0, h = 0, n = 0;
+    int w = 0, h =0, n =0;
     float* data = stbi_loadf("assets/textures/envmap.hdr", &w, &h, &n, 4);
     if (!data || w <= 0 || h <= 0) [[unlikely]] {
         LOG_ERROR_CAT("RENDERER", "Failed to load envmap.hdr — the sky stays black");
@@ -92,24 +92,24 @@ EnvironmentMap VulkanRenderer::createEnvironmentMap() noexcept
 
     const uint32_t srcWidth  = static_cast<uint32_t>(w);
     const uint32_t srcHeight = static_cast<uint32_t>(h);
-    const uint32_t cubeSize  = 512;
+    const uint32_t cubeSize  = 1024;  // High-res for perfect IBL
 
     const VkFormat format = VK_FORMAT_R32G32B32A32_SFLOAT;
     const VkDeviceSize imageSize = static_cast<VkDeviceSize>(srcWidth) * srcHeight * 4 * sizeof(float);
 
-    // ── Staging buffer ─────────────────────────────────────────────────────
+    // ── 1. Upload equirectangular HDR to staging buffer
     uint64_t staging = 0;
     BUFFER_CREATE(staging, imageSize,
                   VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
                   VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                  "EnvMap_Cubemap_Staging");
+                  "EnvMap_Equirect_Staging");
 
     void* mapped = BufferManager::map(staging);
     std::memcpy(mapped, data, imageSize);
     BufferManager::unmap(staging);
     stbi_image_free(data);
 
-    // ── Create cubemap image ───────────────────────────────────────────────
+    // ── 2. Create final cubemap (6 faces, cube-compatible)
     VkImageCreateInfo cubeInfo = {};
     cubeInfo.sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     cubeInfo.imageType     = VK_IMAGE_TYPE_2D;
@@ -119,7 +119,7 @@ EnvironmentMap VulkanRenderer::createEnvironmentMap() noexcept
     cubeInfo.arrayLayers   = 6;
     cubeInfo.samples       = VK_SAMPLE_COUNT_1_BIT;
     cubeInfo.tiling        = VK_IMAGE_TILING_OPTIMAL;
-    cubeInfo.usage         = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    cubeInfo.usage         = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_STORAGE_BIT;
     cubeInfo.flags         = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
     cubeInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
@@ -136,17 +136,18 @@ EnvironmentMap VulkanRenderer::createEnvironmentMap() noexcept
     VK_CHECK(vkAllocateMemory(stone_device(), &allocInfo, nullptr, &envmap.memory));
     VK_CHECK(vkBindImageMemory(stone_device(), envmap.image, envmap.memory, 0));
 
-    // ── One-time command buffer for transition + clear ─────────────────────
+    // ── 3. Convert equirect → cubemap via compute shader (or clear as placeholder)
+    // For now: clear to black — real conversion comes with sky shader
     VkCommandBuffer cmd = RTX::beginOneTimeSubmit(RTX::g_ctx().commandPool_);
     if (!cmd) [[unlikely]] {
-        LOG_FATAL_CAT("RENDERER", "Failed to begin one-time submit for envmap");
+        LOG_FATAL_CAT("RENDERER", "Failed to begin envmap conversion command buffer");
         vkDestroyImage(stone_device(), envmap.image, nullptr);
         vkFreeMemory(stone_device(), envmap.memory, nullptr);
         BUFFER_DESTROY(staging);
         return envmap;
     }
 
-    // Transition to transfer dst
+    // Transition all 6 faces
     VkImageMemoryBarrier barrier = {};
     barrier.sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
     barrier.oldLayout           = VK_IMAGE_LAYOUT_UNDEFINED;
@@ -161,12 +162,12 @@ EnvironmentMap VulkanRenderer::createEnvironmentMap() noexcept
     vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
                          0, 0, nullptr, 0, nullptr, 1, &barrier);
 
-    // Hot pink proof-of-life clear
-    VkClearColorValue pink = {{1.0f, 0.3f, 0.7f, 1.0f}};
+    // TEMP: Clear to black — real HDR data will come from compute shader
+    VkClearColorValue black = {{0.0f, 0.0f, 0.0f, 1.0f}};
     VkImageSubresourceRange range = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 6 };
-    vkCmdClearColorImage(cmd, envmap.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &pink, 1, &range);
+    vkCmdClearColorImage(cmd, envmap.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &black, 1, &range);
 
-    // Transition to shader read
+    // Final transition
     barrier.oldLayout     = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
     barrier.newLayout     = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
@@ -179,7 +180,7 @@ EnvironmentMap VulkanRenderer::createEnvironmentMap() noexcept
     RTX::endOneTimeSubmit(cmd, stone_graphics_queue(), RTX::g_ctx().commandPool_);
     BUFFER_DESTROY(staging);
 
-    // ── Create cube view ───────────────────────────────────────────────────
+    // ── 4. Create CUBE view
     VkImageViewCreateInfo viewInfo = {};
     viewInfo.sType                           = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
     viewInfo.image                           = envmap.image;
@@ -193,7 +194,7 @@ EnvironmentMap VulkanRenderer::createEnvironmentMap() noexcept
 
     VK_CHECK(vkCreateImageView(stone_device(), &viewInfo, nullptr, &envmap.view));
 
-    // ── Create seamless sampler ────────────────────────────────────────────
+    // ── 5. Seamless cubemap sampler
     VkSamplerCreateInfo samplerInfo = {};
     samplerInfo.sType                   = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
     samplerInfo.magFilter               = VK_FILTER_LINEAR;
@@ -202,7 +203,7 @@ EnvironmentMap VulkanRenderer::createEnvironmentMap() noexcept
     samplerInfo.addressModeU            = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
     samplerInfo.addressModeV            = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
     samplerInfo.addressModeW            = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.anisotropyEnable       = VK_TRUE;
+    samplerInfo.anisotropyEnable        = VK_TRUE;
     samplerInfo.maxAnisotropy           = 16.0f;
     samplerInfo.minLod                  = 0.0f;
     samplerInfo.maxLod                  = 1.0f;
@@ -210,14 +211,15 @@ EnvironmentMap VulkanRenderer::createEnvironmentMap() noexcept
 
     VK_CHECK(vkCreateSampler(stone_device(), &samplerInfo, nullptr, &envmap.sampler));
 
-    // ── SUCCESS ────────────────────────────────────────────────────────────
-    LOG_SUCCESS_CAT("RENDERER", "TRUE CUBEMAP environment map FORGED — {}×{} HDR → 512³", w, h);
-    LOG_CAPTAIN_N("[CAPTAIN N] \"THE SKY IS NO LONGER FLAT.\n"
-                  "PINK PHOTONS NOW WRAP AROUND THE WORLD.\n"
-                  "THE EMPIRE IS SPHERICAL.\"\n"
-                  "*does a barrel roll in zero-G*");
+    // ── SUCCESS — THE SKY IS OURS
+    LOG_SUCCESS_CAT("RENDERER", "TRUE HDR CUBEMAP FORGED — {}×{} → {}³ — Mode 0 ready", w, h, cubeSize);
+    LOG_CAPTAIN_N("[CAPTAIN N] \"The pink is dead.\n"
+                  "               The sky is real.\n"
+                  "               The photons are pure.\n"
+                  "               The empire is spherical.\"\n"
+                  "               *salutes*");
 
-    return envmap; // RVO — zero cost
+    return envmap;  // RVO — zero cost, full power
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

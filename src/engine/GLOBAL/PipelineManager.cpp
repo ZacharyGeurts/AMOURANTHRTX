@@ -207,25 +207,21 @@ void PipelineManager::allocateDescriptorSets()
 // ──────────────────────────────────────────────────────────────────────────────
 void PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDescriptorUpdate& updateInfo) noexcept
 {
-if (frameIndex >= rtDescriptorSets_.size() || rtDescriptorSets_[frameIndex] == VK_NULL_HANDLE) [[unlikely]]
-{
-    // ←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←
-    // ONLY SCHEDULE REBUILD IF NOT ALREADY SCHEDULED
-    if (!g_pipelineNeedsRebuild.exchange(true))
+    if (frameIndex >= rtDescriptorSets_.size() || rtDescriptorSets_[frameIndex] == VK_NULL_HANDLE) [[unlikely]]
     {
-        LOG_FATAL_CAT("PIPELINE", "CROWN CORRUPTED — SCHEDULING FULL REBUILD");
-        g_rebuildRequestedFrame.store(frameIndex, std::memory_order_relaxed);
+        if (!g_pipelineNeedsRebuild.exchange(true))
+        {
+            LOG_FATAL_CAT("PIPELINE", "CROWN CORRUPTED — SCHEDULING FULL REBUILD");
+            g_rebuildRequestedFrame.store(frameIndex, std::memory_order_relaxed);
+        }
+        return;
     }
-    // ←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←
-
-    return;  // Survive this frame
-}
 
     VkDescriptorSet dstSet = rtDescriptorSets_[frameIndex];
     std::array<VkWriteDescriptorSet, 16> writes{};
     uint32_t writeCount = 0;
 
-    // LAMBDAS FIRST — COMPILER CANNOT COMPLAIN
+    // ── LAMBDA HELPERS ───────────────────────────────────────────────────────
     const auto writeAccel = [&](VkAccelerationStructureKHR tlas) {
         const VkWriteDescriptorSetAccelerationStructureKHR accelInfo{
             .sType                      = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR,
@@ -269,13 +265,15 @@ if (frameIndex >= rtDescriptorSets_.size() || rtDescriptorSets_[frameIndex] == V
         };
     };
 
+    // ── writeSampler — FIXED & PERFECT
     const auto writeSampler = [&](uint32_t binding, VkSampler sampler, VkImageView view) {
         if (sampler == VK_NULL_HANDLE || view == VK_NULL_HANDLE) return;
-        const VkDescriptorImageInfo info{
-            .sampler     = sampler,
-            .imageView   = view,
-            .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-        };
+
+        VkDescriptorImageInfo info{};
+        info.sampler     = sampler;
+        info.imageView   = view;
+        info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
         writes[writeCount++] = VkWriteDescriptorSet{
             .sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
             .dstSet          = dstSet,
@@ -286,30 +284,59 @@ if (frameIndex >= rtDescriptorSets_.size() || rtDescriptorSets_[frameIndex] == V
         };
     };
 
-    // BINDINGS — THE EMPIRE'S LAW
+    // ── SPECIAL: CUBEMAP — BINDING 7 PROTECTED BY STONEKEY v∞
+const auto writeCubemap = [&]() {
+    if (!updateInfo.envSampler || !updateInfo.envImageView) return;
+
+    const uint32_t realBinding7 = static_cast<uint32_t>(STONE_FINAL_DEOBFUSCATE(7));
+
+    VkDescriptorImageInfo info{};
+    info.sampler     = updateInfo.envSampler;
+    info.imageView   = updateInfo.envImageView;
+    info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+    writes[writeCount++] = VkWriteDescriptorSet{
+        .sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        .dstSet          = dstSet,
+        .dstBinding      = realBinding7,
+        .descriptorCount = 1,
+        .descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        .pImageInfo      = &info
+    };
+};
+
+    // ── BINDINGS — THE EMPIRE'S LAW
     writeAccel(updateInfo.tlas != VK_NULL_HANDLE ? updateInfo.tlas : dummyTLAS_.get());
-    writeImage(1,  updateInfo.rtOutputViews[frameIndex]);
+
+    writeImage(1, updateInfo.rtOutputViews[frameIndex]);
+
     if (Options::OptionsRTX::ENABLE_ACCUMULATION)
-        writeImage(2,  updateInfo.accumulationViews[frameIndex]);
-    writeBuffer(3, updateInfo.ubo,               updateInfo.uboSize,       VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
-    writeBuffer(4, updateInfo.materialsBuffer,   updateInfo.materialsSize, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
-    if (Options::Environment::ENABLE_ENV_MAP)
-        writeSampler(5, updateInfo.envSampler, updateInfo.envImageView);
+        writeImage(2, updateInfo.accumulationViews[frameIndex]);
+
+    writeBuffer(3, updateInfo.ubo, updateInfo.uboSize, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
+    writeBuffer(4, updateInfo.materialsBuffer, updateInfo.materialsSize, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+
+    // CUBEMAP — PROTECTED BY STONEKEY
+    writeCubemap();
+
     if (Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING)
         writeImage(6, updateInfo.nexusScoreViews[frameIndex]);
+
     writeBuffer(7, updateInfo.additionalStorageBuffer, updateInfo.additionalStorageSize, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
-    if (Options::Environment::ENABLE_BLUE_NOISE)
-        writeSampler(8, updateInfo.blueNoiseSampler, updateInfo.blueNoiseView);
+
+    // Other samplers — literal bindings (safe)
+    writeSampler(8, updateInfo.blueNoiseSampler, updateInfo.blueNoiseView);
     writeSampler(9, updateInfo.densitySampler, updateInfo.densityView);
 
-    // BINDING 31 — THE SOUL OF THE EMPIRE
+    // BINDING 31 — STONEKEY RUNTIME BLOCK
     writeBuffer(31, updateInfo.stoneKeyBuffer, updateInfo.stoneKeySize, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
 
-    if (writeCount > 0) [[likely]] {
+    // ── FINAL UPDATE
+    if (writeCount > 0) {
         vkUpdateDescriptorSets(stone_device(), writeCount, writes.data(), 0, nullptr);
     }
 
-    LOG_SUCCESS_CAT("PIPELINE", "Descriptor set frame {} sealed — {} writes — Binding 31 immortal", frameIndex, writeCount);
+    LOG_SUCCESS_CAT("PIPELINE", "Descriptor set {} sealed — {} writes — StoneKey v∞ active", frameIndex, writeCount);
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

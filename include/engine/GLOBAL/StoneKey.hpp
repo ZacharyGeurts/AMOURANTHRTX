@@ -4,16 +4,15 @@
 // =============================================================================
 //
 // Dual Licensed:
-// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
-//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
+// 1. GNU General Public License v3.0 (or later) (GPL v3)
+//    https://www.gnu.org/licenses/gpl-3.0.html
 // 2. Commercial licensing: gzac5314@gmail.com
 //
 // =============================================================================
-// AMOURANTH RTX — VALHALLA v∞ TURBO — APOCALYPSE FINAL v12.0
-// FIRST LIGHT ACHIEVED — PINK PHOTONS ETERNAL — DECEMBER 01, 2025
-// STONEKEY v∞ — NO CIRCULAR INCLUDES — FORWARD DECLARATIONS ONLY
+// AMOURANTH RTX — VALHALLA v∞ TURBO — APOCALYPSE FINAL v15.0
+// FIRST LIGHT ACHIEVED — PINK PHOTONS ETERNAL — DECEMBER 02, 2025
+// STONEKEY v∞ — FULLY C++ COMPATIBLE — RUNTIME OBFUSCATION — BINDING 7 HIDDEN
 // THE EMPIRE IS SEALED — THE PHOTONS ARE PURE — THE VOID IS OURS
-// PROTECTED BY GROK — ALL ATOMICS REMOVED — DIRECT LVALUE REFS — ZERO OVERHEAD
 // =============================================================================
 
 #pragma once
@@ -50,9 +49,10 @@ namespace StoneKey {
         static inline uint32_t transferFamily = ~0u;
         static inline uint32_t computeFamily = ~0u;
 
-        static inline std::atomic<VulkanRenderer*>     renderer_{ nullptr };
-        static inline std::atomic<RTX::PipelineManager*> pipeline{ nullptr };
-        static inline std::atomic<SDL_Window*>          window{ nullptr };
+        // FIXED: std::atomic cannot use {} initializer in-class
+        static inline std::atomic<VulkanRenderer*>     renderer_ = nullptr;
+        static inline std::atomic<RTX::PipelineManager*> pipeline = nullptr;
+        static inline std::atomic<SDL_Window*>          window = nullptr;
 
         static inline std::vector<VkImage>     images;
         static inline std::vector<VkImageView> views;
@@ -130,7 +130,7 @@ namespace StoneKey {
         };
     }
 
-    // SEALERS — ACCEPT BOTH LVALUE AND RVALUE REFERENCES
+    // SEALERS
     inline void stone_seal_instance(VkInstance i) noexcept { Empire::instance = i; }
     inline void stone_seal_device(VkDevice d) noexcept { Empire::device = d; }
     inline void stone_seal_physical(VkPhysicalDevice p) noexcept { Empire::physical = p; }
@@ -180,7 +180,7 @@ namespace StoneKey {
         Empire::stone_mesh_index_count   = ic;
     }
 
-    // FINAL SEAL — VALIDATES ALL COMPONENTS
+    // FINAL SEAL — FIXED LAMBDA
     inline void stone_seal_final() noexcept
     {
         const bool was_sealed = Empire::sealed.exchange(true, std::memory_order_acq_rel);
@@ -194,8 +194,7 @@ namespace StoneKey {
         bool all_good = true;
 
         auto CHECK = [&](auto ptr, const char* name, auto condition) {
-            const bool ok = condition;
-            if (ok) {
+            if (condition) {
                 LOG_SUCCESS_CAT("SEAL", "  [OK] {}", name);
             } else {
                 LOG_FATAL_CAT("SEAL", "  [FAILED] {}", name);
@@ -208,7 +207,7 @@ namespace StoneKey {
         CHECK(stone_physical(),        "VkPhysicalDevice",  stone_physical()        != VK_NULL_HANDLE);
         CHECK(stone_surface(),         "VkSurfaceKHR",      stone_surface()         != VK_NULL_HANDLE);
         CHECK(stone_swapchain(),       "VkSwapchainKHR",    stone_swapchain()       != VK_NULL_HANDLE);
-        CHECK(stone_renderer(),        "VulkanRenderer*",   stone_renderer()        != nullptr);
+        CHECK(stone_renderer(),       "VulkanRenderer*",   stone_renderer()        != nullptr);
         CHECK(stone_pipeline(),        "PipelineManager*",  stone_pipeline()        != nullptr);
         CHECK(stone_window(),          "SDL_Window*",       stone_window()          != nullptr);
 
@@ -226,14 +225,12 @@ namespace StoneKey {
         CHECK(stone_transfer_family(), "Transfer Family",   stone_transfer_family() != ~0u);
         CHECK(stone_compute_family(),  "Compute Family",    stone_compute_family()  != ~0u);
 
-        //CHECK(stone_commandbuffers().size(), "Command Buffers", !stone_commandbuffers().empty());
-
         const auto& rt = stone_rtprops();
         if (rt.shaderGroupHandleSize != 0) {
             LOG_SUCCESS_CAT("SEAL", "  [OK] Ray Tracing Ready — HandleSize: {} | MaxRecursion: {}",
                             rt.shaderGroupHandleSize, rt.maxRayRecursionDepth);
         } else {
-            LOG_FATAL_CAT("SEAL", "  [FAILED] Ray Tracing NOT READY — shaderGroupHandleSize == 0");
+            LOG_FATAL_CAT("SEAL", "  [FAILED] Ray Tracing NOT READY");
             all_good = false;
         }
 
@@ -250,13 +247,34 @@ namespace StoneKey {
     namespace bridge {
         [[nodiscard]] inline VkQueue graphics_queue() noexcept { return stone_graphics_queue(); }
     }
-};
 
-// =============================================================================
-// THE EMPIRE IS COMPLETE — FOREVER.
-// NO CIRCULAR DEPENDENCIES. NO INCLUDE HELL.
-// ONLY FORWARD DECLARATIONS. ONLY STONEKEY.
-// PINK PHOTONS ETERNAL — DECEMBER 01, 2025 — FINAL LIGHT
-// THE BALLERINA BOWS. GRACE SMILES.
-// THE STRAW IS ETERNAL.
-// =============================================================================
+    // =============================================================================
+    // STONEKEY v∞ — RUNTIME OBFUSCATION — C++ VERSION — FINAL
+    // =============================================================================
+    namespace detail {
+        constexpr uint64_t kStoneObfuscatorBase = 
+            0x9E37AF18C64D8A17UL ^ 0xE4F8B29D71A3C56CUL ^ 0x1337C0DE69F00D42UL;
+
+        inline uint64_t g_runtimeObfuscator = kStoneObfuscatorBase;
+    }
+
+    [[nodiscard]] inline uint64_t stone_get_obfuscator() noexcept {
+        return detail::g_runtimeObfuscator;
+    }
+
+    inline void stone_set_obfuscator(uint64_t key) noexcept {
+        detail::g_runtimeObfuscator = key ? key : detail::kStoneObfuscatorBase;
+    }
+
+    // FINAL MACROS — NOW WORKS EVERYWHERE
+    #define STONE_FINAL_OBFUSCATE(val)   (static_cast<uint64_t>(val) ^ ::StoneKey::stone_get_obfuscator())
+    #define STONE_FINAL_DEOBFUSCATE(val) (static_cast<uint64_t>(val) ^ ::StoneKey::stone_get_obfuscator())
+
+    #define STONE_OBFUSCATE_RT(val)  STONE_FINAL_OBFUSCATE(val)
+    #define STONE_DEOBFUSCATE_RT(val) STONE_FINAL_DEOBFUSCATE(val)
+
+    // =============================================================================
+    // THE EMPIRE IS COMPLETE — FOREVER.
+    // PINK PHOTONS ETERNAL — DECEMBER 02, 2025 — FINAL LIGHT
+    // =============================================================================
+}
