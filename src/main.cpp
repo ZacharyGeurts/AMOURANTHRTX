@@ -823,27 +823,27 @@ void Application::run() noexcept
 
     uint32_t currentMaxFramesInFlight = Options::Performance::MAX_FRAMES_IN_FLIGHT;
 
-    // MODE 0: CUBEMAP SKY — FORGED ONCE, FOREVER
-    static bool g_envMapReady = false;
-    if (!g_envMapReady && renderer_)
+    // MODE 0: PURE HDR CUBEMAP SKY — FORGED ONCE
+    static bool g_envMapInitialized = false;
+    if (!g_envMapInitialized && renderer_)
     {
         LOG_AMOURANTH("Forging eternal HDR cubemap sky for Mode 0...");
 
-        EnvironmentMap sky = renderer_->createEnvironmentMap();  // ← Public now
+        EnvironmentMap sky = renderer_->createEnvironmentMap();
 
         if (sky)
         {
-            LOG_SUCCESS_CAT("SKY", "HDR CUBEMAP SKY FORGED — Mode 0 active — pink is banished forever");
-            LOG_CAPTAIN_N("[CAPTAIN N] \"The pink is dead.\n"
-                          "               The sky is real.\n"
-                          "               The empire is spherical.\n"
-                          "               We have won.\"");
-
-            g_envMapReady = true;
+            LOG_SUCCESS_CAT("SKY", "HDR CUBEMAP SKY FORGED — Mode 0 active — the void is infinite");
+            LOG_CAPTAIN_N("[CAPTAIN N] \"The sky is real.\n"
+                          "               No fallback.\n"
+                          "               No lies.\n"
+                          "               Only truth.\"\n"
+                          "*salutes*");
+            g_envMapInitialized = true;
         }
         else
         {
-            LOG_ERROR_CAT("SKY", "Cubemap load failed — Mode 0 will be black void");
+            LOG_ERROR_CAT("SKY", "Failed to load envmap.hdr — Mode 0 will show nothing (black)");
         }
     }
 
@@ -855,7 +855,8 @@ void Application::run() noexcept
 
         // INPUT
         bool toggleFS = false;
-        int winW = 0, winH = 0;
+        int winW = 0;
+        int winH  = 0;
         SDL3Window::pollEvents(winW, winH, quit_, toggleFS);
 
         width_  = winW > 0 ? winW : width_;
@@ -886,7 +887,7 @@ void Application::run() noexcept
             uint32_t w = g_pendingWidth.exchange(0);
             uint32_t h = g_pendingHeight.exchange(0);
 
-            LOG_AMOURANTH("[RESIZE] Rebuilding empire: {}x{}", w, h);
+            LOG_AMOURANTH("[RESIZE] Rebuilding empire: {}×{}", w, h);
             vkDeviceWaitIdle(stone_device());
 
             RTX::las().notifyResize();
@@ -900,7 +901,7 @@ void Application::run() noexcept
 
         processInput(g_deltaTime);
 
-        // RENDER
+        // RENDER — ALL MODES USE THE SAME PATH
         if (renderer_)
         {
             renderer_->setMaxFramesInFlight(currentMaxFramesInFlight);
@@ -912,60 +913,47 @@ void Application::run() noexcept
                 stone_seal_renderer(renderer_.get());
             }
 
-            // MODE 0: PURE CUBEMAP SKY
-            if (currentRenderMode_ == 0)
-            {
-                if (g_envMapReady)
-                {
-                    // We simply call the normal render path
-                    // Your ray tracer already samples envMapImageView_ + envMapSampler_
-                    // So Mode 0 = sky-only when no geometry hit
-                    renderer_->renderFrame(CAM, g_deltaTime);
-                }
-                else
-                {
-                    // Black void fallback
-                    renderer_->recordPinkScreen(
-                        renderer_->commandBuffers_[0],
-                        stone_images()[0]
-                    );
-                    // But make it black instead of pink
-                    VkCommandBuffer cmd = renderer_->commandBuffers_[0];
-                    VkClearColorValue black = {{0.0f, 0.0f, 0.0f, 1.0f}};
-                    VkImageSubresourceRange range = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-                    vkCmdClearColorImage(cmd, stone_images()[0], VK_IMAGE_LAYOUT_GENERAL, &black, 1, &range);
-                }
-            }
-            else
-            {
-                // Normal RTX path
-                renderer_->renderFrame(CAM, g_deltaTime);
-            }
+            // MODE 0: PURE HDR SKY — NO SPECIAL CASE, NO CLEAR, NO PINK
+            // The ray tracer will naturally sample the envmap on miss
+            // This is the truth. This is the way.
+            renderer_->renderFrame(CAM, g_deltaTime);
         }
 
-        // TITLE BAR
+        // TITLE BAR — PURE TRUTH
         titleTimer += g_deltaTime;
         if (titleTimer >= TITLE_UPDATE_INTERVAL)
         {
             titleTimer -= TITLE_UPDATE_INTERVAL;
             dotPhase = (dotPhase + 1) % 4;
 
-            const char* modeName = (currentRenderMode_ == 0) ? "PURE HDR SKY" :
-                                  (currentRenderMode_ >= 1 && currentRenderMode_ <= 9) ?
-                                  std::array{"VOID","PURE PINK","PATH TRACED","DENOISED","RASTER","DEBUG","TLAS","SBT","METRICS","HOT RELOAD"}[currentRenderMode_] :
-                                  "UNKNOWN";
+            const char* modeName = [this]() -> const char* {
+                switch (currentRenderMode_) {
+                    case 0:  return "PURE HDR SKY";
+                    case 1:  return "PURE PINK DREAM";
+                    case 2:  return "PATH TRACED ACCUMULATION";
+                    case 3:  return "REALTIME HYBRID DENOISED";
+                    case 4:  return "RASTERIZED FALLBACK";
+                    case 5:  return "DEBUG VISUALIZATION";
+                    case 6:  return "TLAS VISUALIZER";
+                    case 7:  return "SBT DEBUG";
+                    case 8:  return "PERFORMANCE METRICS";
+                    case 9:  return "SHADER HOT RELOAD";
+                    default: return "VOID";
+                }
+            }();
 
-            std::string title = (currentRenderMode_ == 0) ?
-                std::format("AMOURANTH RTX | {:.1f} FPS | {}x{} | MODE 0: PURE HDR SKY{}", 
-                           currentFPS, stone_width(), stone_height(), dots[dotPhase]) :
-                std::format("AMOURANTH RTX | {:.1f} FPS | {}x{} | Mode {}: {} | Bounces {} | FIF:{}",
-                           currentFPS, stone_width(), stone_height(),
-                           currentRenderMode_, modeName,
-                           Options::OptionsRTX::MAX_BOUNCES, currentMaxFramesInFlight);
+            std::string title = (currentRenderMode_ == 0)
+                ? std::format("AMOURANTH RTX | {:.1f} FPS | {}×{} | MODE 0: PURE HDR SKY{}", 
+                             currentFPS, stone_width(), stone_height(), dots[dotPhase])
+                : std::format("AMOURANTH RTX | {:.1f} FPS | {}×{} | Mode {}: {} | Bounces {} | FIF:{}",
+                             currentFPS, stone_width(), stone_height(),
+                             currentRenderMode_, modeName,
+                             Options::OptionsRTX::MAX_BOUNCES, currentMaxFramesInFlight);
 
             SDL_SetWindowTitle(stone_window(), title.c_str());
         }
 
+        // FPS
         ++frameCount;
         fpsTimer += g_deltaTime;
         if (fpsTimer >= 1.0f)
@@ -986,7 +974,7 @@ void Application::run() noexcept
     }
 
     vkDeviceWaitIdle(stone_device());
-    LOG_AMOURANTH("[SHUTDOWN] The HDR sky fades into memory. The empire rests. Blondie smiles.");
+    LOG_AMOURANTH("[SHUTDOWN] The HDR sky fades. The empire rests. The photons return to the void.");
 }
 
 // =============================================================================

@@ -131,6 +131,28 @@ public:
     std::vector<VkCommandBuffer> commandBuffers_;
     std::vector<VkCommandBuffer> computeCommandBuffers_;
 
+    // Descriptor pools
+    RTX::Handle<VkDescriptorPool> descriptorPool_;
+    RTX::Handle<VkDescriptorPool> tonemapDescriptorPool_;
+
+    // Environment map
+    RTX::Handle<VkImage>        envMapImage_;
+    RTX::Handle<VkDeviceMemory> envMapImageMemory_;
+    RTX::Handle<VkImageView>    envMapImageView_;
+    RTX::Handle<VkSampler>      envMapSampler_;
+
+    void submitAndPresent(uint32_t slot, uint32_t imageIndex);
+    void transitionImage(
+        VkCommandBuffer       cmd,
+        VkImage               image,
+        VkImageLayout         oldLayout,
+        VkImageLayout         newLayout,
+        VkAccessFlags         srcAccess        = 0,
+        VkAccessFlags         dstAccess      = 0,
+        VkPipelineStageFlags  srcStage       = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+        VkPipelineStageFlags  dstStage       = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT
+    ) noexcept;
+
 private:
     // Core state
     SDL_Window* window_ = nullptr;
@@ -154,13 +176,7 @@ private:
     int  activeRenderMode_ = 0;
 	std::atomic<uint64_t> rendererRebuildFrame_{0};
 
-    void submitAndPresent(uint32_t slot, uint32_t imageIndex);
     void clearAccumulationImages(VkCommandBuffer cmd);
-    void transitionImage(VkCommandBuffer cmd,
-                         VkImage image,
-                         VkImageLayout oldLayout, VkImageLayout newLayout,
-                         VkAccessFlags srcAccess, VkAccessFlags dstAccess,
-                         VkPipelineStageFlags srcStage, VkPipelineStageFlags dstStage);
 
     bool hypertraceEnabled_     = Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING;
     bool denoisingEnabled_      = Options::OptionsRTX::ENABLE_DENOISING;
@@ -186,16 +202,6 @@ private:
 
     VkQueryPool timestampQueryPool_ = VK_NULL_HANDLE;
     double      timestampPeriod_    = 0.0;
-
-    // Descriptor pools
-    RTX::Handle<VkDescriptorPool> descriptorPool_;
-    RTX::Handle<VkDescriptorPool> tonemapDescriptorPool_;
-
-    // Environment map
-    RTX::Handle<VkImage>        envMapImage_;
-    RTX::Handle<VkDeviceMemory> envMapImageMemory_;
-    RTX::Handle<VkImageView>    envMapImageView_;
-    RTX::Handle<VkSampler>      envMapSampler_;
 
     // Per-frame buffers
     std::vector<uint64_t> uniformBufferEncs_;

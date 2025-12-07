@@ -499,24 +499,6 @@ void VulkanRenderer::createRTOutputImages() noexcept
     }
 }
 
-void VulkanRenderer::recordPinkScreen(VkCommandBuffer cmd, VkImage swapImage)
-{
-    const VkClearColorValue PINK = {{1.0f, 0.2f, 0.8f, 1.0f}};
-    const VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-
-    transitionImage(cmd, swapImage,
-        VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-        0, VK_ACCESS_TRANSFER_WRITE_BIT,
-        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
-
-    vkCmdClearColorImage(cmd, swapImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &PINK, 1, &range);
-
-    transitionImage(cmd, swapImage,
-        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-        VK_ACCESS_TRANSFER_WRITE_BIT, 0,
-        VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
-}
-
 void VulkanRenderer::submitAndPresent(uint32_t slot, uint32_t imageIndex)
 {
     // 100% GCC-safe — no &{} rvalue nonsense
@@ -568,21 +550,42 @@ void VulkanRenderer::clearAccumulationImages(VkCommandBuffer cmd)
         vkCmdClearColorImage(cmd, hypertraceScoreImage_.get(), VK_IMAGE_LAYOUT_GENERAL, &zero, 1, &range);
 }
 
-void VulkanRenderer::transitionImage(VkCommandBuffer cmd, VkImage image,
-    VkImageLayout oldLayout, VkImageLayout newLayout,
-    VkAccessFlags srcAccess, VkAccessFlags dstAccess,
-    VkPipelineStageFlags srcStage, VkPipelineStageFlags dstStage)
+void VulkanRenderer::transitionImage(
+    VkCommandBuffer       cmd,
+    VkImage               image,
+    VkImageLayout         oldLayout,
+    VkImageLayout         newLayout,
+    VkAccessFlags         srcAccess,
+    VkAccessFlags         dstAccess,
+    VkPipelineStageFlags  srcStage,
+    VkPipelineStageFlags  dstStage) noexcept
 {
-    VkImageMemoryBarrier barrier{
-        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-        .srcAccessMask = srcAccess,
-        .dstAccessMask = dstAccess,
-        .oldLayout = oldLayout,
-        .newLayout = newLayout,
-        .image = image,
-        .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}
+    VkImageMemoryBarrier barrier = {};
+    barrier.sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    barrier.srcAccessMask       = srcAccess;
+    barrier.dstAccessMask       = dstAccess;
+    barrier.oldLayout           = oldLayout;
+    barrier.newLayout           = newLayout;
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.image               = image;
+    barrier.subresourceRange    = {
+        .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
+        .baseMipLevel   = 0,
+        .levelCount     = 1,
+        .baseArrayLayer = 0,
+        .layerCount     = 1
     };
-    vkCmdPipelineBarrier(cmd, srcStage, dstStage, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+
+    vkCmdPipelineBarrier(
+        cmd,
+        srcStage,
+        dstStage,
+        0,
+        0, nullptr,  // memory barriers
+        0, nullptr,  // buffer memory barriers
+        1, &barrier  // image memory barriers
+    );
 }
 
 void VulkanRenderer::createAccumulationImages() noexcept {
@@ -1743,15 +1746,16 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
 {
     RTX::LAS::get().beginFrame();
 
+    // ── MINIMIZED? MEDITATE IN THE VOID
     if (RTX::SwapchainManager::minimized_) {
-        LOG_AMOURANTH("[FRAME {}] Window minimized — CID meditates in the pink void", frameNumber_);
+        LOG_AMOURANTH("[FRAME {}] Window minimized — the photons rest", frameNumber_);
         return;
     }
 
     const uint32_t frameIndex = frameNumber_++;
     const uint32_t slot       = frameIndex % maxFramesInFlight_;
 
-    // ── SYNC ──
+    // ── SYNC — THE EMPIRE WAITS FOR NO ONE
     if (inFlightFences_[slot] != VK_NULL_HANDLE) {
         if (Options::CURRENT_PRESET == Options::Preset::BestQuality) {
             vkWaitForFences(stone_device(), 1, &inFlightFences_[slot], VK_TRUE, UINT64_MAX);
@@ -1762,7 +1766,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
         vkResetFences(stone_device(), 1, &inFlightFences_[slot]);
     }
 
-    // ── ACQUIRE ──
+    // ── ACQUIRE SWAPCHAIN IMAGE
     uint32_t imageIndex = 0;
     VkResult acquireRes = vkAcquireNextImageKHR(
         stone_device(), stone_swapchain(),
@@ -1781,22 +1785,74 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     VkCommandBuffer cmd = commandBuffers_[slot];
     vkResetCommandBuffer(cmd, 0);
 
-    // ── BEGIN COMMAND BUFFER — GCC-SAFE VERSION ──
     VkCommandBufferBeginInfo beginInfo = {};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     vkBeginCommandBuffer(cmd, &beginInfo);
 
-    // ── PINK MODE ──
-    if (activeRenderMode_ == 0 || g_forcePink.load() || g_resizeRequested.load()) {
-        recordPinkScreen(cmd, stone_images()[imageIndex]);
-        vkEndCommandBuffer(cmd);
-        submitAndPresent(slot, imageIndex);
-        return;
+    // ── MODE 0: PURE HDR SKY — NO GEOMETRY, NO CLEAR, JUST INFINITE BEAUTY
+    if (activeRenderMode_ == 0)
+    {
+        if (envMapImageView_.valid())
+        {
+            // Let the ray tracer run — it will naturally hit the sky on miss
+            // No clear needed — sky fills everything
+            updateUniformBuffer(slot, camera, deltaTime);
+
+            VkAccelerationStructureKHR tlas = pipelineManager_.dummyTLAS(); // no geometry
+            RTX::RTDescriptorUpdate descUpdate{};
+            descUpdate.tlas = tlas;
+            descUpdate.ubo = reinterpret_cast<VkBuffer>(uniformBufferEncs_[slot]);
+            descUpdate.uboSize = 368;
+            descUpdate.rtOutputViews[slot] = rtOutputViews_[slot].get();
+            descUpdate.envSampler = envMapSampler_.get();
+            descUpdate.envImageView = envMapImageView_.get();
+
+            pipelineManager_.updateRTDescriptorSet(slot, descUpdate);
+            recordRayTracingCommands(cmd, slot);
+
+            // Direct to swapchain — no tonemap, no denoise, pure sky
+            transitionImage(cmd, stone_images()[imageIndex],
+                VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                0, VK_ACCESS_TRANSFER_WRITE_BIT,
+                VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+
+            VkImageCopy copyRegion{};
+            copyRegion.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+            copyRegion.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+            copyRegion.extent = { stone_width(), stone_height(), 1 };
+
+            vkCmdCopyImage(cmd,
+                rtOutputImages_[slot].get(), VK_IMAGE_LAYOUT_GENERAL,
+                stone_images()[imageIndex], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                1, &copyRegion);
+
+            transitionImage(cmd, stone_images()[imageIndex],
+                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+                VK_ACCESS_TRANSFER_WRITE_BIT, 0,
+                VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
+
+            vkEndCommandBuffer(cmd);
+            submitAndPresent(slot, imageIndex);
+            return;
+        }
+        else
+        {
+            // Fallback: black void
+            VkClearColorValue black = {{0.0f, 0.0f, 0.0f, 1.0f}};
+            VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+            transitionImage(cmd, stone_images()[imageIndex], VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+            vkCmdClearColorImage(cmd, stone_images()[imageIndex], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &black, 1, &range);
+            transitionImage(cmd, stone_images()[imageIndex], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_ACCESS_TRANSFER_WRITE_BIT, 0, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
+            vkEndCommandBuffer(cmd);
+            submitAndPresent(slot, imageIndex);
+            return;
+        }
     }
 
-    // ── ACCUMULATION RESET ──
-    if (resetAccumulation_ || resetAccumNextFrame_ || g_resizeRequested.load()) {
+    // ── ALL OTHER MODES: FULL RTX PATH (1–9)
+    // Accumulation reset
+    if (resetAccumulation_ || resetAccumNextFrame_) {
         clearAccumulationImages(cmd);
         resetAccumulation_ = resetAccumNextFrame_ = false;
         accumulationFrame_ = currentSpp_ = 0;
@@ -1808,20 +1864,18 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     VkAccelerationStructureKHR tlas = RTX::LAS::get().getTLAS();
     if (!tlas) tlas = pipelineManager_.dummyTLAS();
 
-    // ── RT DESCRIPTOR UPDATE — NO DESIGNATED INITIALIZERS, NO UB ──
-    RTX::RTDescriptorUpdate descUpdate = {};
-    descUpdate.tlas                  = tlas;
-    descUpdate.ubo                   = reinterpret_cast<VkBuffer>(uniformBufferEncs_[slot]); // ← cast uint64_t → VkBuffer
-    descUpdate.uboSize               = 368;
-    descUpdate.rtOutputViews[slot]   = rtOutputViews_[slot].get();
+    RTX::RTDescriptorUpdate descUpdate{};
+    descUpdate.tlas = tlas;
+    descUpdate.ubo = reinterpret_cast<VkBuffer>(uniformBufferEncs_[slot]);
+    descUpdate.uboSize = 368;
+    descUpdate.rtOutputViews[slot] = rtOutputViews_[slot].get();
     descUpdate.accumulationViews[slot] = accumViews_[slot].get();
-    descUpdate.envSampler            = envMapSampler_.get();
-    descUpdate.envImageView          = envMapImageView_.get();
-    descUpdate.materialsBuffer       = reinterpret_cast<VkBuffer>(materialBufferEncs_[0]);
-    descUpdate.materialsSize         = 16_MB;
+    descUpdate.envSampler = envMapSampler_.get();
+    descUpdate.envImageView = envMapImageView_.get();
+    descUpdate.materialsBuffer = reinterpret_cast<VkBuffer>(materialBufferEncs_[0]);
+    descUpdate.materialsSize = 16_MB;
 
     pipelineManager_.updateRTDescriptorSet(slot, descUpdate);
-
     recordRayTracingCommands(cmd, slot);
 
     transitionImage(cmd, rtOutputImages_[slot].get(),
@@ -1846,7 +1900,6 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
 
     currentSpp_++;
     accumulationFrame_++;
-    //LOG_AMOURANTH("FRAME {} | spp={} | accum={} | FPS: {:.1f}", frameIndex, currentSpp_, accumulationFrame_, 1.0f/deltaTime);
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
