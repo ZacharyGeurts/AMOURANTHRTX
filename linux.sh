@@ -124,9 +124,8 @@ done
 
 # ── CROSS-COMPILE TOOLCHAIN CHECK ───────────────────────────────────────────
 if [[ "$TARGET" == "windows" ]]; then
-    if ! command -v x86_64-w64-mingw32-g++-14 >/dev/null 2>&1; then
-        echo -e "${CORAL}        FATAL: x86_64-w64-mingw32-g++-14 not found${X}"
-        echo -e "${WAVE}        Install: sudo apt install g++-14-mingw-w64-x86-64${X}"
+    if ! command -v x86_64-w64-mingw32-g++ >/dev/null 2>&1; then
+        echo -e "${CORAL}        FATAL: x86_64-w64-mingw32-g++ not found${X}"
         exit 1
     fi
     [[ "$ACTION" == "run" ]] && command -v wine64 >/dev/null 2>&1 && WINE_RUN=true
