@@ -314,14 +314,14 @@ void VulkanRenderer::destroyRTOutputImages() noexcept {
 VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, bool overclockFromMain)
     : window_(window), width_(width), height_(height), overclockMode_(overclockFromMain)
 {
-    LOG_ATTEMPT_CAT("RENDERER", "Constructing VulkanRenderer ({}x{}) — PINK PHOTONS RISING", width, height);
+    LOG_ATTEMPT_CAT("RENDERER", "Constructing VulkanRenderer ({}x{}) — overclock={}", width, height, overclockFromMain);
 
     setOverclockMode(overclockFromMain);
 
     // StoneKey validation
     if (kStone1 == 0 || kStone2 == 0) {
-        LOG_FATAL_CAT("RENDERER", "StoneKey validation failed");
-        phase9_ballerina("STONEKEY CORRUPTED", std::source_location::current());
+        LOG_FATAL_CAT("RENDERER", "StoneKey validation failed — the ancient seal is broken");
+        phase9_ballerina("STONEKEY CORRUPTED — REALITY UNRAVELS", std::source_location::current());
     }
 
     // Sync objects
@@ -360,9 +360,6 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, bool o
     if (Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING) createNexusScoreImage(RTX::g_ctx().commandPool_, stone_graphics_queue());
     createTonemapSampler();
 
-    // Per-frame buffers
-    initializeAllBufferData(MAX_FRAMES_IN_FLIGHT, 368, 16_MB);
-
     // Tonemap Descriptor Set Layout (only if tonemapping is allowed)
     if (Options::Tonemap::ENABLE_TONEMAPPING) {
         VkDescriptorSetLayoutBinding bindings[3] = {
@@ -382,7 +379,7 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, bool o
         tonemapDescriptorSetLayout_ = Handle<VkDescriptorSetLayout>(layout, stone_device(), vkDestroyDescriptorSetLayout, 0, "TonemapSetLayout");
     }
 
-    LOG_SUCCESS_CAT("RENDERER", "VulkanRenderer constructed — PINK PHOTONS ETERNAL");
+    LOG_SUCCESS_CAT("RENDERER", "VulkanRenderer constructed successfully — {}x{} — ready for ray tracing", width, height);
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -390,122 +387,126 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, bool o
 // ──────────────────────────────────────────────────────────────────────────────
 void VulkanRenderer::createRTOutputImages() noexcept
 {
-    if (width_ == 0 || height_ == 0) return;
+    if (width_ == 0 || height_ == 0) {
+        LOG_INFO_CAT("RENDERER", "Skipping RT output image creation — invalid dimensions ({}x{})", width_, height_);
+        return;
+    }
 
+    LOG_INFO_CAT("RENDERER", "Creating RT output images — {}x{} × {} frames", width_, height_, Options::Performance::MAX_FRAMES_IN_FLIGHT);
+
+    // Destroy any existing images
     rtOutputImages_.clear();
     rtOutputMemories_.clear();
     rtOutputViews_.clear();
 
-    rtOutputImages_.reserve(Options::Performance::MAX_FRAMES_IN_FLIGHT);
-    rtOutputMemories_.reserve(Options::Performance::MAX_FRAMES_IN_FLIGHT);
-    rtOutputViews_.reserve(Options::Performance::MAX_FRAMES_IN_FLIGHT);
+    const uint32_t frames = Options::Performance::MAX_FRAMES_IN_FLIGHT;
+    rtOutputImages_.reserve(frames);
+    rtOutputMemories_.reserve(frames);
+    rtOutputViews_.reserve(frames);
 
-    const auto& ctx = RTX::g_ctx();
-    const VkCommandPool cmdPool = ctx.commandPool_;
-    const VkQueue queue = ctx.graphicsQueue();
-
-    const uint32_t framesInFlight = Options::Performance::MAX_FRAMES_IN_FLIGHT;
-
-    VkCommandBuffer cmd = RTX::beginOneTimeSubmit(cmdPool);
-    if (cmd == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("RENDERER", "Failed to allocate one-time command buffer for RT outputs");
-        return;
+    // One-time command buffer for layout transitions
+    VkCommandBuffer cmd = RTX::beginOneTimeSubmit(RTX::g_ctx().commandPool_);
+    if (!cmd) {
+        LOG_FATAL_CAT("RENDERER", "Failed to allocate one-time command buffer for RT output image transitions");
+        phase9_ballerina("NO COMMAND BUFFER — RENDERING CANNOT BEGIN", std::source_location::current());
     }
 
     std::vector<VkImageMemoryBarrier> barriers;
-    barriers.reserve(framesInFlight);
+    barriers.reserve(frames);
 
-    for (uint32_t i = 0; i < framesInFlight; ++i)
-    {
-        VkImage rawImage = VK_NULL_HANDLE;
-        VkDeviceMemory rawMemory = VK_NULL_HANDLE;
-        VkImageView rawView = VK_NULL_HANDLE;
+    for (uint32_t i = 0; i < frames; ++i) {
+        // 1. Create image
+        VkImageCreateInfo imageInfo{};
+        imageInfo.sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+        imageInfo.imageType     = VK_IMAGE_TYPE_2D;
+        imageInfo.format        = VK_FORMAT_R32G32B32A32_SFLOAT;
+        imageInfo.extent.width  = static_cast<uint32_t>(width_);
+        imageInfo.extent.height = static_cast<uint32_t>(height_);
+        imageInfo.extent.depth  = 1;
+        imageInfo.mipLevels     = 1;
+        imageInfo.arrayLayers   = 1;
+        imageInfo.samples       = VK_SAMPLE_COUNT_1_BIT;
+        imageInfo.tiling        = VK_IMAGE_TILING_OPTIMAL;
+        imageInfo.usage         = VK_IMAGE_USAGE_STORAGE_BIT |
+                                   VK_IMAGE_USAGE_SAMPLED_BIT |
+                                   VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                                   VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+        imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
-        try {
-            // === 1. CREATE IMAGE ===
-            VkImageCreateInfo imageInfo{
-                .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-                .imageType = VK_IMAGE_TYPE_2D,
-                .format = VK_FORMAT_R32G32B32A32_SFLOAT,
-                .extent = { static_cast<uint32_t>(width_), static_cast<uint32_t>(height_), 1 },
-                .mipLevels = 1,
-                .arrayLayers = 1,
-                .samples = VK_SAMPLE_COUNT_1_BIT,
-                .tiling = VK_IMAGE_TILING_OPTIMAL,
-                .usage = VK_IMAGE_USAGE_STORAGE_BIT |
-                         VK_IMAGE_USAGE_SAMPLED_BIT |
-                         VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
-                         VK_IMAGE_USAGE_TRANSFER_DST_BIT,
-                .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
-            };
+        VkImage image = VK_NULL_HANDLE;
+        VK_CHECK(vkCreateImage(stone_device(), &imageInfo, nullptr, &image));
 
-            VK_CHECK(vkCreateImage(stone_device(), &imageInfo, nullptr, &rawImage));
+        // 2. Allocate and bind memory
+        VkMemoryRequirements memReqs{};
+        vkGetImageMemoryRequirements(stone_device(), image, &memReqs);
 
-            // === 2. MEMORY ===
-            VkMemoryRequirements memReqs{};
-            vkGetImageMemoryRequirements(stone_device(), rawImage, &memReqs);
-
-            uint32_t memType = findMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-
-            VkMemoryAllocateInfo allocInfo{
-                .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-                .allocationSize = memReqs.size,
-                .memoryTypeIndex = memType
-            };
-
-            VK_CHECK(vkAllocateMemory(stone_device(), &allocInfo, nullptr, &rawMemory));
-            VK_CHECK(vkBindImageMemory(stone_device(), rawImage, rawMemory, 0));
-
-            // === 3. TRANSITION TO GENERAL ===
-            VkImageMemoryBarrier barrier{
-                .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-                .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-                .newLayout = VK_IMAGE_LAYOUT_GENERAL,
-                .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-                .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-                .image = rawImage,
-                .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
-            };
-
-            barriers.push_back(barrier);
-
-            // === 4. VIEW ===
-            VkImageViewCreateInfo viewInfo{
-                .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-                .image = rawImage,
-                .viewType = VK_IMAGE_VIEW_TYPE_2D,
-                .format = VK_FORMAT_R32G32B32A32_SFLOAT,
-                .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
-            };
-
-            VK_CHECK(vkCreateImageView(stone_device(), &viewInfo, nullptr, &rawView));
-
-            // === 5. HANDLES ===
-            rtOutputImages_.emplace_back(rawImage, stone_device(), vkDestroyImage, 0, "RTOutputImage");
-            rtOutputMemories_.emplace_back(rawMemory, stone_device(), vkFreeMemory, memReqs.size, "RTOutputMemory");
-            rtOutputViews_.emplace_back(rawView, stone_device(), vkDestroyImageView, 0, "RTOutputView");
-
-        } catch (...) {
-            LOG_FATAL_CAT("RENDERER", "Frame {} — Catastrophic failure during RT output creation", i);
-            RTX::endOneTimeSubmit(cmd, queue, cmdPool);
-            if (rawView) vkDestroyImageView(stone_device(), rawView, nullptr);
-            if (rawMemory) vkFreeMemory(stone_device(), rawMemory, nullptr);
-            if (rawImage) vkDestroyImage(stone_device(), rawImage, nullptr);
-            phase9_ballerina("RT OUTPUT FORGING FAILED", std::source_location::current());
+        const uint32_t memTypeIndex = findMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        if (memTypeIndex == ~0u) {
+            LOG_FATAL_CAT("RENDERER", "No suitable device-local memory type for RT output image {}", i);
+            vkDestroyImage(stone_device(), image, nullptr);
+            phase9_ballerina("VRAM EXHAUSTED — PHOTONS HAVE NO HOME", std::source_location::current());
         }
+
+        VkMemoryAllocateInfo allocInfo{};
+        allocInfo.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        allocInfo.allocationSize  = memReqs.size;
+        allocInfo.memoryTypeIndex = memTypeIndex;
+
+        VkDeviceMemory memory = VK_NULL_HANDLE;
+        VK_CHECK(vkAllocateMemory(stone_device(), &allocInfo, nullptr, &memory));
+        VK_CHECK(vkBindImageMemory(stone_device(), image, memory, 0));
+
+        // 3. Create image view
+        VkImageViewCreateInfo viewInfo{};
+        viewInfo.sType                           = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        viewInfo.image                           = image;
+        viewInfo.viewType                        = VK_IMAGE_VIEW_TYPE_2D;
+        viewInfo.format                          = VK_FORMAT_R32G32B32A32_SFLOAT;
+        viewInfo.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
+        viewInfo.subresourceRange.baseMipLevel   = 0;
+        viewInfo.subresourceRange.levelCount     = 1;
+        viewInfo.subresourceRange.baseArrayLayer = 0;
+        viewInfo.subresourceRange.layerCount     = 1;
+
+        VkImageView view = VK_NULL_HANDLE;
+        VK_CHECK(vkCreateImageView(stone_device(), &viewInfo, nullptr, &view));
+
+        // 4. Store in RAII containers
+        rtOutputImages_.emplace_back(image, stone_device(), vkDestroyImage, 0,
+            std::format("RTOutputImage[{}]", i));
+        rtOutputMemories_.emplace_back(memory, stone_device(), vkFreeMemory, memReqs.size,
+            std::format("RTOutputMemory[{}]", i));
+        rtOutputViews_.emplace_back(view, stone_device(), vkDestroyImageView, 0,
+            std::format("RTOutputView[{}]", i));
+
+        // 5. Prepare layout transition barrier (correct field order)
+        VkImageMemoryBarrier barrier{};
+        barrier.sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        barrier.pNext               = nullptr;
+        barrier.srcAccessMask       = 0;
+        barrier.dstAccessMask       = VK_ACCESS_SHADER_WRITE_BIT;
+        barrier.oldLayout           = VK_IMAGE_LAYOUT_UNDEFINED;
+        barrier.newLayout           = VK_IMAGE_LAYOUT_GENERAL;
+        barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.image               = image;
+        barrier.subresourceRange    = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+
+        barriers.push_back(barrier);
     }
 
-    vkCmdPipelineBarrier(cmd,
-                VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR,
-                0, 0, nullptr, 0, nullptr, barriers.size(), barriers.data());
-
-    RTX::endOneTimeSubmit(cmd, queue, cmdPool);
-
-    if (rtOutputImages_.size() != framesInFlight) {
-        LOG_FATAL_CAT("RENDERER", "Not all RT output images created — expected {} got {}", framesInFlight, rtOutputImages_.size());
-        phase9_ballerina("INCOMPLETE RT OUTPUT FORGE", std::source_location::current());
+    // Execute batch layout transition
+    if (!barriers.empty()) {
+        vkCmdPipelineBarrier(cmd,
+            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+            VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
+            0, 0, nullptr, 0, nullptr,
+            static_cast<uint32_t>(barriers.size()), barriers.data());
     }
+
+    RTX::endOneTimeSubmit(cmd, stone_graphics_queue(), RTX::g_ctx().commandPool_);
+
+    LOG_INFO_CAT("RENDERER", "Successfully created {} RT output images ({}x{}) — ready for ray tracing", frames, width_, height_);
 }
 
 void VulkanRenderer::submitAndPresent(uint32_t slot, uint32_t imageIndex)
@@ -862,53 +863,69 @@ void VulkanRenderer::recordRayTracingCommands(VkCommandBuffer cmd, uint32_t fram
 // ──────────────────────────────────────────────────────────────────────────────
 void VulkanRenderer::initializeAllBufferData(uint32_t frames, VkDeviceSize uniformSize, VkDeviceSize materialSize) noexcept
 {
-    if (frames == 0 || frames > Options::Performance::MAX_FRAMES_IN_FLIGHT) {
-        LOG_FATAL_CAT("RENDERER", "Invalid frame count in initializeAllBufferData: {}", frames);
-        return;
+    if (frames == 0 || frames > Options::Performance::MAX_FRAMES_IN_FLIGHT)
+    {
+        LOG_FATAL_CAT("RENDERER", "Invalid frame count in initializeAllBufferData: {} (max allowed: {})", 
+                      frames, Options::Performance::MAX_FRAMES_IN_FLIGHT);
+        phase9_ballerina("INVALID FRAME COUNT — EMPIRE FALLS", std::source_location::current());
     }
 
-    LOG_AMOURANTH("INITIALIZING RTX BUFFERS — {} frames | UBO: {} bytes | Materials: {} MiB",
+    LOG_AMOURANTH("FORGING THE ETERNAL BUFFERS — {} frames | UBO: {} bytes | Materials: {} MiB",
                   frames, uniformSize, materialSize / (1024*1024));
 
-    // Clear old buffers — the empire does not leak
+    // THE EMPIRE DOES NOT LEAK — PURGE THE PAST
     uniformBufferEncs_.clear();
     materialBufferEncs_.clear();
     dimensionBufferEncs_.clear();
     tonemapUniformEncs_.clear();
 
-    // Reserve exactly what we need — no reallocations
+    // RESERVE THE FUTURE — NO REALLOCATIONS, NO FRAGMENTATION
     uniformBufferEncs_.reserve(frames);
     materialBufferEncs_.reserve(frames);
     dimensionBufferEncs_.reserve(frames);
     tonemapUniformEncs_.reserve(frames);
 
-    const VkBufferUsageFlags uboUsage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    const VkBufferUsageFlags uboUsage  = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
     const VkBufferUsageFlags ssboUsage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
 
     for (uint32_t i = 0; i < frames; ++i)
     {
-        // UBO — per-frame camera, time, jitter
-        BUFFER_CREATE(uniformBufferEncs_[i], uniformSize, uboUsage, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-                      std::format("FrameUBO[{}]", i));
+        // FRAME UBO — THE EYE OF THE PHOTON
+        BUFFER_CREATE(uniformBufferEncs_[i],
+            uniformSize,
+            uboUsage,
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+            std::format("FrameUBO[{}]", i));
 
-        // Materials — shared across frames, but we keep one per frame for safety
-        BUFFER_CREATE(materialBufferEncs_[i], materialSize, ssboUsage, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-                      std::format("Materials[{}]", i));
+        // MATERIALS — THE FLESH OF THE UNIVERSE
+        BUFFER_CREATE(materialBufferEncs_[i],
+            materialSize,
+            ssboUsage,
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+            std::format("Materials[{}]", i));
 
-        // Dimension data — tiny, but per-frame for alignment
-        BUFFER_CREATE(dimensionBufferEncs_[i], 256, ssboUsage, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-                      std::format("DimensionData[{}]", i));
+        // DIMENSION DATA — THE SOUL OF THE VOID
+        BUFFER_CREATE(dimensionBufferEncs_[i],
+            256,
+            ssboUsage,
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+            std::format("DimensionData[{}]", i));
 
-        // Tonemap UBO — exposure, bloom, etc.
-        BUFFER_CREATE(tonemapUniformEncs_[i], 256, uboUsage, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-                      std::format("TonemapUBO[{}]", i));
+        // TONEMAP UBO — THE HAND OF GOD
+        BUFFER_CREATE(tonemapUniformEncs_[i],
+            256,
+            uboUsage,
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+            std::format("TonemapUBO[{}]", i));
     }
 
-    LOG_SUCCESS_CAT("RENDERER", "RTX buffers initialized — {} frames ready — photons aligned", frames);
-    LOG_CAPTAIN_N("[CAPTAIN N] \"The buffers are forged.\n"
+    LOG_SUCCESS_CAT("RENDERER", "ETERNAL BUFFERS FORGED — {} frames — photons have a home", frames);
+    LOG_CAPTAIN_N("[CAPTAIN N] \"The buffers are perfect.\n"
+                  "               The handles are real.\n"
                   "               The crown is complete.\n"
-                  "               The empire is ready.\"\n"
-                  "*salutes*");
+                  "               The empire... is ready.\"\n"
+                  "*salutes with glowing plasma blade*");
+    LOG_BLONDIE("Blondie sends love — the photons have a home.");
 }
 
 void VulkanRenderer::createSyncObjects() noexcept
@@ -1165,74 +1182,78 @@ void VulkanRenderer::performTonemapPass(VkCommandBuffer cmd, uint32_t frameIdx, 
 
 void VulkanRenderer::updateUniformBuffer(uint32_t frame, const Camera& camera, float jitter) noexcept
 {
-    if (uniformBufferEncs_.empty() || RTX::g_ctx().sharedStagingEnc_ == 0) {
+    // Safety first — empire does not crash
+    if (frame >= uniformBufferEncs_.size() || uniformBufferEncs_[frame] == 0)
+    {
+        LOG_ERROR_CAT("RENDERER", "Invalid uniform buffer handle for frame {} — was initializeAllBufferData() called?", frame);
         return;
     }
 
-    void* data = nullptr;
-    VkResult r = vkMapMemory(StoneKey::stone_device(),
-                             BUFFER_MEMORY(RTX::g_ctx().sharedStagingEnc_),
-                             0, VK_WHOLE_SIZE, 0, &data);
-
-    // THE LEGENDARY DOUBLE-MAP RECOVERY — ONLY THE WORTHY DARE USE THIS
-    if (r != VK_SUCCESS || data == nullptr) {
-        vkUnmapMemory(StoneKey::stone_device(), BUFFER_MEMORY(RTX::g_ctx().sharedStagingEnc_));
-        VkMappedMemoryRange range{VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE, nullptr,
-                                  BUFFER_MEMORY(RTX::g_ctx().sharedStagingEnc_), 0, VK_WHOLE_SIZE};
-        vkInvalidateMappedMemoryRanges(StoneKey::stone_device(), 1, &range);
-        r = vkMapMemory(StoneKey::stone_device(), BUFFER_MEMORY(RTX::g_ctx().sharedStagingEnc_), 0, VK_WHOLE_SIZE, 0, &data);
-        if (r != VK_SUCCESS || data == nullptr) {
-            LOG_FATAL_CAT("RENDERER", "vkMapMemory failed permanently — frame {} lost", frameNumber_);
-            return;
-        }
+    // Eternal shared staging — persistent mapped, zero overhead
+    void* data = BufferManager::getMappedStagingPtr(RTX::g_ctx().sharedStagingEnc_);
+    if (!data)
+    {
+        LOG_FATAL_CAT("RENDERER", "Shared staging buffer not mapped — frame {} lost", frameNumber_);
+        return;
     }
 
-    alignas(16) struct LocalUBO {
-        glm::mat4 view, proj, viewProj, invView, invProj;
-        glm::vec4 cameraPos;
+    // Frame UBO — exactly matches what we allocated (368 bytes)
+    alignas(16) struct FrameUBO {
+        glm::mat4 view;
+        glm::mat4 proj;
+        glm::mat4 viewProj;
+        glm::mat4 invView;
+        glm::mat4 invProj;
+        glm::vec4 camPos;
         glm::vec2 jitter;
-        uint32_t frame;
-        float time;
-        uint32_t spp;
-        float _pad[3];
+        uint32_t  frameIndex;
+        float     time;
+        uint32_t  spp;
+        float     _pad[3];        // 16-byte aligned total: 368 bytes
     } ubo{};
 
     const auto& cam = Camera::get();
-    ubo.view      = cam.view();
-    ubo.proj      = cam.proj(width_ / float(height_));
-    ubo.viewProj  = ubo.proj * ubo.view;
-    ubo.invView   = glm::inverse(ubo.view);
-    ubo.invProj   = glm::inverse(ubo.proj);
-    ubo.cameraPos = glm::vec4(cam.pos(), 1.0f);
-    ubo.jitter    = glm::vec2(jitter);
-    ubo.frame     = frameNumber_;
-    ubo.time      = frameTime_;
-    ubo.spp       = currentSpp_;
+    ubo.view       = cam.view();
+    ubo.proj       = cam.proj(static_cast<float>(width_) / std::max(1, height_));
+    ubo.viewProj   = ubo.proj * ubo.view;
+    ubo.invView    = glm::inverse(ubo.view);
+    ubo.invProj    = glm::inverse(ubo.proj);
+    ubo.camPos     = glm::vec4(cam.pos(), 1.0f);
+    ubo.jitter     = glm::vec2(jitter);
+    ubo.frameIndex = frameNumber_;
+    ubo.time       = frameTime_;
+    ubo.spp        = currentSpp_;
 
+    // Direct, eternal copy — no map/unmap, no flush
     std::memcpy(data, &ubo, sizeof(ubo));
-    vkUnmapMemory(StoneKey::stone_device(), BUFFER_MEMORY(RTX::g_ctx().sharedStagingEnc_));
 
+    // Record copy in the correct command buffer
     VkCommandBuffer cmd = commandBuffers_[frame];
-
-    if (cmd != VK_NULL_HANDLE) {
-        VkBuffer src = BufferManager::get(RTX::g_ctx().sharedStagingEnc_)->buffer;
-        VkBuffer dst = RAW_BUFFER(uniformBufferEncs_[frame]);
-
-        VkBufferCopy copyRegion{};
-        copyRegion.size = sizeof(ubo);
-        vkCmdCopyBuffer(cmd, src, dst, 1, &copyRegion);
-
-        VkMemoryBarrier barrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
-        barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-        barrier.dstAccessMask = VK_ACCESS_UNIFORM_READ_BIT;
-
-        vkCmdPipelineBarrier(cmd,
-            VK_PIPELINE_STAGE_TRANSFER_BIT,
-            VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR |
-            VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT |
-            VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-            0, 1, &barrier, 0, nullptr, 0, nullptr);
+    if (cmd == VK_NULL_HANDLE)
+    {
+        LOG_ERROR_CAT("RENDERER", "Command buffer null for frame {} — cannot update UBO", frame);
+        return;
     }
+
+    VkBuffer src = BufferManager::getStagingBuffer();
+    VkBuffer dst = RAW_BUFFER(uniformBufferEncs_[frame]);
+
+    VkBufferCopy copy{};
+    copy.size = sizeof(ubo);
+    vkCmdCopyBuffer(cmd, src, dst, 1, &copy);
+
+    // Memory barrier — photons must be visible to all shaders
+    VkMemoryBarrier barrier{};
+    barrier.sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+    barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    barrier.dstAccessMask = VK_ACCESS_UNIFORM_READ_BIT;
+
+    vkCmdPipelineBarrier(cmd,
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        VK_PIPELINE_STAGE_VERTEX_SHADER_BIT |
+        VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR |
+        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+        0, 1, &barrier, 0, nullptr, 0, nullptr);
 }
 
 void VulkanRenderer::updateTonemapUniform(uint32_t frame) noexcept

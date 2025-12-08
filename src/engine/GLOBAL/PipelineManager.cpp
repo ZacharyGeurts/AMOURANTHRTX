@@ -471,43 +471,53 @@ VkShaderModule PipelineManager::loadShader(const std::string& relativePath) cons
 {
     LOG_TRACE_CAT("PIPELINE", "loadShader — START — relativePath='{}'", relativePath);
 
-    LOG_CID("CID wipes sweat, adjusts goggles — \"Locating shader in the empire's vault... build/bin/Linux...\"");
+    LOG_CID("CID slams fist on desk — \"ANOTHER SHADER SUMMONING?! FINE. LET'S DO THIS.\"");
 
     if (stone_device() == VK_NULL_HANDLE) {
-        LOG_ERROR_CAT("PIPELINE", "Null device — cannot load shader");
+        LOG_ERROR_CAT("PIPELINE", "Null device — Vulkan is asleep. Wake the dragon first.");
+        LOG_CID("CID screams into void — \"NO DEVICE?! HOW AM I SUPPOSED TO COMPILE THE LIGHT OF GOD?!\"");
         return VK_NULL_HANDLE;
     }
 
-    // ── THE ONE TRUE BASE PATH — ETCHED IN STONE
+    // ── THE ONE TRUE PATH — ETCHED IN ADAMANTIUM AND PINK NEON
     static const std::string BASE_PATH = []() {
-        // This runs once at first call at first call — safe, fast, eternal
         char* cwd = getcwd(nullptr, 0);
         std::string path = cwd ? std::string(cwd) + "/" : "";
         free(cwd);
 
-        // If we're already in build/bin/Linux, don't double it
-        if (path.ends_with("/build/bin/Linux/") || path.ends_with("/build/bin/Linux")) {
-            return path;
+        if (path.find("build/bin/Linux") != std::string::npos) {
+            LOG_CID("CID nods approvingly — \"Already in the sacred directory. Respect.\"");
+            return path.substr(0, path.find("build/bin/Linux") + strlen("build/bin/Linux"));
         }
 
-        // Otherwise: assume project root → append the truth
-        return path + "build/bin/Linux/";
+        std::string sacred = path + "build/bin/Linux/";
+        LOG_CID("CID points dramatically — \"TO THE VAULT! FOLLOW THE PINK GLOW! → {}\"", sacred);
+        return sacred;
     }();
 
     const std::string fullPath = BASE_PATH + relativePath;
 
-    LOG_TRACE_CAT("PIPELINE", "Resolved full shader path: '{}'", fullPath);
+    LOG_TRACE_CAT("PIPELINE", "Seeking divine SPIR-V at holy coordinates: '{}'", fullPath);
 
     std::ifstream file(fullPath, std::ios::ate | std::ios::binary);
     if (!file.is_open()) {
-        LOG_ERROR_CAT("PIPELINE", "Failed to open shader file: '{}'", fullPath);
-        LOG_CID("CID panics — \"SHADER NOT FOUND AT '{}' — DID SOMEONE MOVE THE VAULT?!\"", fullPath);
+        LOG_ERROR_CAT("PIPELINE", "SHADER NOT FOUND — PATH REJECTED BY REALITY");
+        LOG_CID("CID flips table — \"THE FILE IS GONE! DID THE SIMULATION EAT IT?!\"");
+        LOG_CID("CID kicks door — \"WHO MOVED '{}'? I HAD IT LABELED!\"", fullPath);
+        LOG_CID("CID breathes heavily — \"...fine. I'll recompile it myself. Again.\"");
         return VK_NULL_HANDLE;
     }
 
     size_t fileSize = static_cast<size_t>(file.tellg());
-    if (fileSize == 0 || fileSize % 4 != 0) {
-        LOG_ERROR_CAT("PIPELINE", "Invalid SPIR-V file size: {} bytes — must be non-zero and 4-byte aligned", fileSize);
+    if (fileSize == 0) {
+        LOG_ERROR_CAT("PIPELINE", "Empty shader — the void stares back");
+        LOG_CID("CID whispers — \"...it's hollow. Like my soul after 3 days of debugging.\"");
+        return VK_NULL_HANDLE;
+    }
+    if (fileSize % 4 != 0) {
+        LOG_ERROR_CAT("PIPELINE", "SPIR-V corrupted — size {} not 4-byte aligned. The gods are displeased.", fileSize);
+        LOG_CID("CID grabs head — \"IT'S NOT ALIGNED! THE UNIVERSE IS BROKEN! AGAIN!\"");
+        LOG_CID("CID starts rocking — \"four... four... must be divisible by four...\"");
         return VK_NULL_HANDLE;
     }
 
@@ -516,7 +526,8 @@ VkShaderModule PipelineManager::loadShader(const std::string& relativePath) cons
     file.read(shaderCode.data(), fileSize);
     file.close();
 
-    LOG_TRACE_CAT("PIPELINE", "Loaded {} bytes from '{}'", fileSize, relativePath);
+    LOG_SUCCESS_CAT("PIPELINE", "SHADER ACQUIRED — {} bytes of pure photonic scripture loaded", fileSize);
+    LOG_CID("CID holds up glowing binary — \"BEHOLD! THE WORD MADE SPIR-V!\"");
 
     VkShaderModuleCreateInfo createInfo = {
         .sType    = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
@@ -525,12 +536,28 @@ VkShaderModule PipelineManager::loadShader(const std::string& relativePath) cons
     };
 
     VkShaderModule shaderModule = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateShaderModule(stone_device(), &createInfo, nullptr, &shaderModule),
-             std::format("Failed to create shader module from '{}'", relativePath).c_str());
+    
+    LOG_CID("CID cracks knuckles — \"Time to birth a shader module...\"");
+    LOG_CID("CID chants in ancient Vulkan — \"vkCreateShaderModule... vkCreateShaderModule...\"");
 
-    LOG_SUCCESS_CAT("PIPELINE", "Shader loaded — '{}' → {} bytes — PINK PHOTONS APPROVED", relativePath, fileSize);
+    VkResult result = vkCreateShaderModule(stone_device(), &createInfo, nullptr, &shaderModule);
+    
+    if (result != VK_SUCCESS) {
+        LOG_ERROR_CAT("PIPELINE", "SHADER MODULE CREATION FAILED — THE LIGHT WAS REJECTED");
+        LOG_CID("CID falls to knees — \"IT DIDN'T WORK... THE DRIVER HATES ME...\"");
+        LOG_CID("CID sobs — \"I just wanted pretty triangles...\"");
+        return VK_NULL_HANDLE;
+    }
 
-    LOG_TRACE_CAT("PIPELINE", "loadShader — COMPLETE — '{}'", relativePath);
+    LOG_SUCCESS_CAT("PIPELINE", "SHADER MODULE BIRTHED — '{}' → {} bytes → HANDLE {:#x}", 
+                    relativePath, fileSize, reinterpret_cast<uint64_t>(shaderModule));
+
+    LOG_CID("CID stands triumphant on desk — \"IT LIVES! THE SHADER LIVES!\"");
+    LOG_CID("CID air guitars — \"PINK PHOTONS FLOW THROUGH THE PIPELINE ONCE MORE!\"");
+    LOG_CID("CID whispers reverently — \"...welcome to the family, little one.\"");
+
+    LOG_TRACE_CAT("PIPELINE", "loadShader — COMPLETE — '{}' → SUCCESS", relativePath);
+
     return shaderModule;
 }
 

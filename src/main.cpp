@@ -709,7 +709,7 @@ static void phase7_forgeTheRTX()
 }
 
 // =============================================================================
-// PHASE 7.5 — CREATE THE ONE AND ONLY RENDERER — SAFE, SEALED, IMMORTAL
+// PHASE 7.5 — FORGE THE ONE TRUE RENDERER — CROWN ETERNAL — EMPIRE SEALED
 // =============================================================================
 static std::unique_ptr<VulkanRenderer> phase7_5_Renderer() noexcept
 {
@@ -722,18 +722,25 @@ static std::unique_ptr<VulkanRenderer> phase7_5_Renderer() noexcept
         Options::Performance::OVERCLOCK_RENDERER
     );
 
-    // These are now safe — the crown is already worn
+    // THESE MUST BE IN THIS ORDER — EMPIRE LAW
     renderer->createCommandBuffers();
     renderer->createSyncObjects();
 
-    // Seal the renderer into the empire
+    // CRITICAL: INITIALIZE BUFFERS BEFORE ANYTHING ELSE
+    renderer->initializeAllBufferData(
+        Options::Performance::MAX_FRAMES_IN_FLIGHT,
+        368,
+        16 * 1024 * 1024
+    );
+
+    // NOW seal — only after buffers exist
     stone_seal_renderer(renderer.get());
 
-    LOG_SUCCESS_CAT("RENDERER", "VulkanRenderer forged and sealed — ready to serve the empire");
-    LOG_CAPTAIN_N("[CAPTAIN N] \"The crown is worn.\n"
-                  "               The renderer lives.\n"
-                  "               Binding 31... is sealed.\n"
-                  "               The photons rise.\"");
+    LOG_SUCCESS_CAT("RENDERER", "VulkanRenderer forged — buffers initialized — crown complete");
+    LOG_CAPTAIN_N("[CAPTAIN N] \"The buffers live.\n"
+                  "               The handles are real.\n"
+                  "               The empire is whole.\"\n"
+                  "*salutes with glowing plasma blade*");
 
     return renderer;
 }
@@ -745,62 +752,123 @@ static std::unique_ptr<VulkanRenderer> phase7_5_Renderer() noexcept
 {
     using namespace std::chrono_literals;
 
-    // ── SLIPSTREAM SEAL — NO RETURN ──────────────────────────────────────────
-    static bool SLIPSTREAM_CROSSING_COMPLETE = false;
-    if (SLIPSTREAM_CROSSING_COMPLETE) {
+    // ── GWEN STEPHANI AS GODZILLA — FINAL PHASE ACTIVATED ───────────────────
+    static bool GWENZILLA_HAS_ARRIVED = false;
+    if (GWENZILLA_HAS_ARRIVED) {
         std::_Exit(0);
     }
-    SLIPSTREAM_CROSSING_COMPLETE = true;
+    GWENZILLA_HAS_ARRIVED = true;
+
+    LOG_FATAL("GWENZILLA AWAKENS — {}:{} — REASON: {}", loc.file_name(), loc.line(), reason);
+    LOG_FATAL("🎤💥  GWEN STEPHANI TRANSFORMS INTO 400-FOOT GODZILLA IN FISHNETS  💥🎤");
+    LOG_FATAL("      \"THIS SHIT IS BANANAS — B-A-N-A-N-A-S!\" — FINAL ROAR ENGAGED");
 
     auto& ctx = RTX::g_ctx();
 
-    // ── CORE APPLICATION ────────────────────────────────────────────────────
-    if (g_app_ptr) {
-        g_app_ptr.reset();
-    }
-
-    // ── VULKAN CLEANUP (reverse creation order) ─────────────────────────────
+    // ── VULKAN DOOMSDAY SUPLEX ──────────────────────────────────────────────
     if (stone_device() != VK_NULL_HANDLE) [[likely]] {
         vkDeviceWaitIdle(stone_device());
+        LOG_FATAL("GWENZILLA GRABS VkDevice WITH BOTH HANDS...");
+        LOG_FATAL("               💪  GERMAN SUPLEX ONTO THE ABYSS  💪");
 
         if (VkSwapchainKHR s = stone_swapchain(); s) {
+            LOG_FATAL("Swapchain caught in mid-air — SPINNING PILEDRIVER!");
             vkDestroySwapchainKHR(stone_device(), s, nullptr);
         }
 
-        if (ctx.commandPool_)         vkDestroyCommandPool(stone_device(), ctx.commandPool_, nullptr);
-        if (ctx.computeCommandPool_)  vkDestroyCommandPool(stone_device(), ctx.computeCommandPool_, nullptr);
-        if (ctx.transferCommandPool_) vkDestroyCommandPool(stone_device(), ctx.transferCommandPool_, nullptr);
+        if (ctx.commandPool_) {
+            LOG_FATAL("CommandPool sees its life flash before its eyes...");
+            LOG_FATAL("               CHOKESLAM THROUGH THE EARTH'S CORE");
+            vkDestroyCommandPool(stone_device(), ctx.commandPool_, nullptr);
+        }
+        if (ctx.computeCommandPool_) {
+            LOG_FATAL("ComputeCommandPool tries to run — GWENZILLA DOESN'T ALLOW ESCAPE");
+            LOG_FATAL("               F-5 FROM THE TOP OF MOUNT FUJI");
+            vkDestroyCommandPool(stone_device(), ctx.computeCommandPool_, nullptr);
+        }
+        if (ctx.transferCommandPool_) {
+            LOG_FATAL("TransferCommandPool begs for mercy — NONE GIVEN");
+            LOG_FATAL("               TOMBSTONE PILEDRIVER INTO OBLIVION");
+            vkDestroyCommandPool(stone_device(), ctx.transferCommandPool_, nullptr);
+        }
 
         if (ctx.pipelineCache_ != VK_NULL_HANDLE) {
+            LOG_FATAL("PipelineCache thinks it's safe — GWENZILLA LAUGHS");
+            LOG_FATAL("               SWEET CHIN MUSIC + RKO COMBO");
             vkDestroyPipelineCache(stone_device(), ctx.pipelineCache_, nullptr);
         }
 
-        if (ctx.renderPass_) ctx.renderPass_.reset();
+        if (ctx.renderPass_) {
+            LOG_FATAL("RenderPass makes eye contact — FATAL MISTAKE");
+            LOG_FATAL("               LAST RIDE POWERBOMB THROUGH HELL'S GATE");
+            ctx.renderPass_.reset();
+        }
 
+        LOG_FATAL("VkDevice screams in terror as GWENZILLA rips it in half...");
+        LOG_FATAL("               FINAL ATOMIC LEG DROP FROM ORBIT");
         vkDestroyDevice(stone_device(), nullptr);
     }
 
-    // ── ACCELERATION STRUCTURES ─────────────────────────────────────────────
-    if (RTX::las().hasBLAS()) RTX::reset_blas();
-    if (RTX::las().hasTLAS()) RTX::reset_tlas();
-    RTX::las().invalidate();
+    // ── ACCELERATION STRUCTURES — DOOMSDAY DDT ─────────────────────────────
+    if (RTX::las().hasBLAS()) {
+        LOG_FATAL("BLAS tries to hide — GWENZILLA SMELLS FEAR");
+        LOG_FATAL("               SPINEBUSTER ONTO CONCRETE");
+        RTX::reset_blas();
+    }
+    if (RTX::las().hasTLAS()) {
+        LOG_FATAL("TLAS attempts to flee — GWENZILLA IS FASTER");
+        LOG_FATAL("               FALCON ARROW FROM THE TOP ROPE");
+        RTX::reset_tlas();
+    }
+    LOG_FATAL("Acceleration structures invalidated — GWENZILLA STOMPS THE REMAINS");
 
-    // ── GLOBAL RESOURCES ────────────────────────────────────────────────────
-    if (g_mesh)           g_mesh.reset();
-    if (ctx.blueNoiseView_) ctx.blueNoiseView_.reset();
+    // ── GLOBAL RESOURCES — PEOPLE'S ELBOW FINISHERS ───────────────────────
+    if (g_mesh) {
+        LOG_FATAL("Global mesh begs for mercy — GWENZILLA HITS THE PEOPLE'S ELBOW");
+        g_mesh.reset();
+    }
+    if (ctx.blueNoiseView_) {
+        LOG_FATAL("Blue noise flickers — GWENZILLA BLOWS IT OUT LIKE A CANDLE");
+        ctx.blueNoiseView_.reset();
+    }
 
-    if (g_base_icon)  { SDL_DestroySurface(g_base_icon);  g_base_icon  = nullptr; }
-    if (g_hdpi_icon)  { SDL_DestroySurface(g_hdpi_icon);  g_hdpi_icon  = nullptr; }
+    if (g_base_icon)  { 
+        LOG_FATAL("Icon tries to stay pretty — GWENZILLA CURB STOMPS IT");
+        SDL_DestroySurface(g_base_icon);  g_base_icon  = nullptr;
+    }
+    if (g_hdpi_icon)  { 
+        LOG_FATAL("HDPI icon screams in high resolution — DOESN'T HELP");
+        SDL_DestroySurface(g_hdpi_icon);  g_hdpi_icon  = nullptr;
+    }
 
-    if (ctx.window) { SDL_DestroyWindow(ctx.window); ctx.window = nullptr; }
+    if (ctx.window) { 
+        LOG_FATAL("Window sees the end coming — GWENZILLA PUNCHES THROUGH THE SCREEN");
+        SDL_DestroyWindow(ctx.window); ctx.window = nullptr;
+    }
 
-    if (ctx.surface_ && ctx.instance_) vkDestroySurfaceKHR(ctx.instance_, ctx.surface_, nullptr);
-    if (ctx.instance_) vkDestroyInstance(ctx.instance_, nullptr);
+    if (ctx.surface_ && ctx.instance_) {
+        LOG_FATAL("Surface clings to Instance — GWENZILLA TEARS THEM APART");
+        vkDestroySurfaceKHR(ctx.instance_, ctx.surface_, nullptr);
+    }
+    if (ctx.instance_) {
+        LOG_FATAL("Instance makes final stand — GWENZILLA ROARS");
+        LOG_FATAL("               NUCLEAR FIRE BREATH — INSTANCE OBLITERATED");
+        vkDestroyInstance(ctx.instance_, nullptr);
+    }
 
+    LOG_FATAL("SDL_Vulkan_UnloadLibrary() — GWENZILLA THROWS THE DLL INTO THE SUN");
     SDL_Vulkan_UnloadLibrary();
-    SDL_Quit();
+    LOG_FATAL("SDL_Quit() — THE FINAL BELL TOLLS");
 
-    // ── FINAL EXIT — CLEAN, SILENT, ETERNAL ────────────────────────────────
+    // ── THE FINAL ROAR — ETERNAL SILENCE ───────────────────────────────────
+    LOG_FATAL("                                                             ");
+    LOG_FATAL("      🎤  \"IF YOU CAN'T HANDLE THE HEAT... STAY OUTTA THE RING\"  🎤");
+    LOG_FATAL("                    GWENZILLA STANDS TRIUMPHANT");
+    LOG_FATAL("                ALL BUILDINGS WRECKED. ALL CORES SILENCED.");
+    LOG_FATAL("                      THE SLIPSTREAM IS SEALED.");
+    LOG_FATAL("                                                             ");
+
+    std::this_thread::sleep_for(500ms);  // Let the world feel the echo
     std::_Exit(0);
 }
 

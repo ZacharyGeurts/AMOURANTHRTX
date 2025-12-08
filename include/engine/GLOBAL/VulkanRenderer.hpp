@@ -123,7 +123,8 @@ public:
     [[nodiscard]] int  height()    const noexcept { return height_; }
 	void recordPinkScreen(VkCommandBuffer cmd, VkImage swapImage);
 	void onSwapchainRebuilt(uint32_t width, uint32_t height) noexcept;
-    void recordRayTrace(VkCommandBuffer cmd, const VkExtent2D& extent) noexcept;	
+    void recordRayTrace(VkCommandBuffer cmd, const VkExtent2D& extent) noexcept;
+    void initializeAllBufferData(uint32_t frames, VkDeviceSize uniformSize, VkDeviceSize materialSize) noexcept;
     void setMaxFramesInFlight(uint32_t count) noexcept;
 
 	static inline std::atomic<bool> s_resizeInProgress{false};
@@ -281,7 +282,6 @@ private:
     void updateDenoiserDescriptors() noexcept;
     void updateTonemapDescriptor(uint32_t frameIdx, VkImageView inputView, VkImageView output) noexcept;
 
-    void initializeAllBufferData(uint32_t frames, VkDeviceSize uniformSize, VkDeviceSize materialSize) noexcept;
     void updateUniformBuffer(uint32_t frame, const Camera& camera, float jitter) noexcept;
     void updateTonemapUniform(uint32_t frame) noexcept;
     bool recreateTonemapUBOs() noexcept;	

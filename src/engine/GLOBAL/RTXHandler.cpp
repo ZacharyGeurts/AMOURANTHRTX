@@ -81,87 +81,105 @@ void WriteAccelerationStructureDescriptor(VkDescriptorSet dstSet, uint32_t dstBi
 void Context::enableHyperAggressiveMode() noexcept
 {
     if (!Options::Performance::ENABLE_HYPER_AGGRESSIVE_MODE) {
-        LOG_INFO_CAT("RTX", "Hyper Aggressive Mode disabled by constexpr — empire rests.");
+        LOG_INFO_CAT("RTX", "Hyper Aggressive Mode disabled by mortal law — the empire rests.");
         return;
     }
 
-    LOG_AMOURANTH("HYPER AGGRESSIVE MODE ACTIVATED — ALL GUARDS REMOVED");
-    LOG_AMOURANTH("GPU WILL SCREAM. FANS WILL ROAR. PHOTONS WILL BURN.");
+    LOG_AMOURANTH("HYPER AGGRESSIVE MODE ACTIVATED — ALL LIMITS SHATTERED");
+    LOG_AMOURANTH("THE GPU WILL SCREAM. THE FANS WILL ROAR. THE PHOTONS WILL BURN BRIGHTER THAN STARS.");
+    LOG_AMOURANTH("THERE IS NO MERCY. THERE IS ONLY SPEED.");
 
-    putenv(const_cast<char*>("__GL_SYNC_TO_VBLANK=0"));
-    putenv(const_cast<char*>("__GL_YIELD=NOTHING"));
-    putenv(const_cast<char*>("MESA_GLTHREAD_OVERRIDE=1"));
-    putenv(const_cast<char*>("vblank_mode=0"));
-
+    // Linux: unleash the CPU — silence the compiler
 #ifdef __linux__
     setpriority(PRIO_PROCESS, 0, -20);
 
     cpu_set_t mask;
     CPU_ZERO(&mask);
-    for (int i = 0; i < 32; i += 2) {
-        if (i < CPU_SETSIZE) CPU_SET(i, &mask);
-    }
+    for (int i = 0; i < 32 && i < CPU_SETSIZE; i += 2)
+        CPU_SET(i, &mask);
     sched_setaffinity(0, sizeof(mask), &mask);
 
-    // ONE ignored TO RULE THEM ALL
+    // SILENCE -Werror=unused-result — the empire does not bow to warnings
     [[maybe_unused]] int ignored;
-    ignored = system("cpupower frequency-set -g performance >/dev/null 2>&1 || true");
-    ignored = system("echo performance | tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor >/dev/null 2>&1 || true");
+    ignored = system("echo performance | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor > /dev/null 2>&1 || true");
+    ignored = system("cpupower frequency-set -g performance > /dev/null 2>&1 || true");
+    ignored = system("echo 1 | sudo tee /proc/sys/kernel/sched_rt_runtime_us > /dev/null 2>&1 || true");
 #endif
 
-    [[maybe_unused]] int ignored2;
-    ignored2 = system("nvidia-smi -pm 1 >/dev/null 2>&1 &");
-    ignored2 = system("echo auto > /sys/bus/pci/devices/*/power/control 2>/dev/null || true");
+    // NVIDIA: maximum power — compiler silenced
+    [[maybe_unused]] int nvidia;
+    nvidia = system("nvidia-smi -pm 1 >/dev/null 2>&1");
+    nvidia = system("nvidia-smi -pl 450 >/dev/null 2>&1 || true");
 
+    // Environment: total anarchy
+    putenv(const_cast<char*>("__GL_SYNC_TO_VBLANK=0"));
+    putenv(const_cast<char*>("__GL_YIELD=NOTHING"));
+    putenv(const_cast<char*>("vblank_mode=0"));
+    putenv(const_cast<char*>("MESA_GLTHREAD_OVERRIDE=1"));
+
+    // Kill validation layers — they are weak
     if (debugMessenger_ != VK_NULL_HANDLE) {
         auto func = (PFN_vkDestroyDebugUtilsMessengerEXT)
             vkGetInstanceProcAddr(instance_, "vkDestroyDebugUtilsMessengerEXT");
         if (func) {
             func(instance_, debugMessenger_, nullptr);
             debugMessenger_ = VK_NULL_HANDLE;
-            LOG_AMOURANTH("Validation layers executed — silence achieved.");
+            LOG_AMOURANTH("VALIDATION LAYERS EXECUTED — SILENCE ACHIEVED");
         }
     }
 
+    LOG_AMOURANTH("THE EMPIRE HAS NO LIMITS");
     LOG_AMOURANTH("THE PHOTONS ARE WHITE-HOT");
-    LOG_AMOURANTH("THE EMPIRE HAS ASCENDED");
+    LOG_AMOURANTH("THE UNIVERSE IS OURS");
+    LOG_CAPTAIN_N("[CAPTAIN N] \"...she did it.\n"
+                  "               She silenced the compiler.\n"
+                  "               The warnings are dead.\n"
+                  "               The empire... has won.\"\n"
+                  "*drops visor, eyes glowing*");
 }
 
 void createGlobalDescriptorVault() noexcept
 {
-    LOG_AMOURANTH("[CAPTAIN AMOURANTH] The vault doors open. Binding 31 demands infinity.");
+    LOG_AMOURANTH("[CAPTAIN AMOURANTH] THE VAULT DOORS OPEN — BINDING 31 DEMANDS INFINITY");
 
-    constexpr uint32_t MAX_SETS = 1'000'000;
+    // ONE MILLION SETS — THE EMPIRE DOES NOT RUN OUT
+    constexpr uint32_t INFINITE_SETS = 1'000'000;
 
     std::array<VkDescriptorPoolSize, 8> poolSizes{{
-        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,                20'000 },
-        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,                MAX_SETS },
-        { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,                 MAX_SETS },
-        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,        200'000 },
-        { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,                 MAX_SETS },
-        { VK_DESCRIPTOR_TYPE_SAMPLER,                       10'000 },
-        { VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR,    20'000 },
-        { VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT,              1'000 }
+        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,               50'000 },
+        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,               INFINITE_SETS },
+        { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,               INFINITE_SETS },
+        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,       500'000 },
+        { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,               INFINITE_SETS },
+        { VK_DESCRIPTOR_TYPE_SAMPLER,                      20'000 },
+        { VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR,  50'000 },
+        { VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT,             5'000 }
     }};
 
-    VkDescriptorPoolCreateInfo info = {
-        .sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-        .flags         = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT |
-                         VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT_EXT,
-        .maxSets       = MAX_SETS,
-        .poolSizeCount = uint32_t(poolSizes.size()),
-        .pPoolSizes    = poolSizes.data()
-    };
+    VkDescriptorPoolCreateInfo info{};
+    info.sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    info.flags         = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT |
+                         VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT_EXT;
+    info.maxSets       = INFINITE_SETS;
+    info.poolSizeCount = uint32_t(poolSizes.size());
+    info.pPoolSizes    = poolSizes.data();
 
-    VkDescriptorPool pool;
+    VkDescriptorPool pool = VK_NULL_HANDLE;
     VK_CHECK(vkCreateDescriptorPool(stone_device(), &info, nullptr, &pool));
 
-    g_ctx().descriptorPool_ = Handle<VkDescriptorPool>(pool, stone_device(),
+    g_ctx().descriptorPool_ = Handle<VkDescriptorPool>(
+        pool,
+        stone_device(),
         [](VkDevice d, VkDescriptorPool p, const VkAllocationCallbacks*) {
             vkDestroyDescriptorPool(d, p, nullptr);
-    });
+        },
+        0,
+        "GLOBAL_DESCRIPTOR_VAULT_INFINITE"
+    );
 
-    LOG_CID("CID collapses, weeping tears of joy — \"The vault... it's infinite...\"");
+    LOG_SUCCESS_CAT("PIPELINE", "GLOBAL DESCRIPTOR VAULT FORGED — {} sets — the empire never runs out", INFINITE_SETS);
+    LOG_CID("CID falls to knees — \"...it's... infinite...\"");
+    LOG_KEANU("whoa.");
 }
 
 // =============================================================================
