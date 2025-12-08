@@ -1446,76 +1446,122 @@ VkResult VulkanRenderer::recordCommandBuffer(uint32_t frame) noexcept
 
 void VulkanRenderer::updateUniformBuffer(uint32_t frame, const Camera& camera, float jitter) noexcept
 {
-    // PHASE 1: BULLETPROOF VALIDATION + MIGHTY SELF-HEALING FOR UNIFORM BUFFERS
+    // ╔══════════════════════════════════════════════════════════════════════════╗
+    // ║ PHASE 1: BULLETPROOF VALIDATION — THE CASTLE WALLS ARE TESTED            ║
+    // ╚══════════════════════════════════════════════════════════════════════════╝
     if (frame >= uniformBufferEncs_.size() || uniformBufferEncs_[frame] == 0)
     {
-        LOG_ERROR_CAT("RENDERER", "Invalid uniform buffer for frame {} — initiating MIGHTY RECOVERY", frame);
+        LOG_ERROR_CAT("RENDERER", "Invalid uniform buffer for frame {} — the castle's vault is breached. Initiating MIGHTY RESTORATION", frame);
         const uint32_t framesInFlight = Options::Performance::MAX_FRAMES_IN_FLIGHT;
         const VkDeviceSize uboSize = 368;
         initializeAllBufferData(framesInFlight, uboSize, uboSize * framesInFlight);
 
         if (frame >= uniformBufferEncs_.size() || uniformBufferEncs_[frame] == 0)
         {
-            LOG_FATAL_CAT("RENDERER", "MIGHTY RECOVERY FAILED — frame {} lost to the void", frame);
+            LOG_FATAL_CAT("RENDERER", "MIGHTY RESTORATION FAILED — frame {} falls into the abyss. The castle mourns.");
             return;
         }
     }
 
     uint64_t& stagingHandle = RTX::g_ctx().sharedStagingEnc_;
 
-    // ── SWEEP THE EMPIRE FOR THE SHARED STAGING STONE ──
-    // If it's missing, corrupted, or unmapped → find it or rebirth it
+    // ╔══════════════════════════════════════════════════════════════════════════╗
+    // ║ PHASE 2: THE GREAT HALL — SWEEP THE EMPIRE FOR THE SACRED STAGING STONE  ║
+    // ╚══════════════════════════════════════════════════════════════════════════╝
     const auto* stagingInfo = BufferManager::get(stagingHandle);
 
     if (stagingHandle == 0 || !stagingInfo || stagingInfo->mapped == nullptr)
     {
-        LOG_WARNING_CAT("RENDERER", "Shared staging stone lost or corrupted (handle: {}) — commencing MIGHTY SWEEP AND REBIRTH", stagingHandle);
+        LOG_WARNING_CAT("RENDERER", 
+            "The sacred staging stone is lost or corrupted (handle: {:#x}) — "
+            "the castle bells toll. Commencing MIGHTY SWEEP AND ETERNAL REBIRTH", stagingHandle);
 
-        // DESTROY OLD (if exists)
+        // Raze the ruins of the old stone
         if (stagingHandle != 0)
             BufferManager::destroy(stagingHandle);
 
-        // SWEEP: Look for any existing buffer with the sacred tag
+        // Sweep every chamber of the empire for a surviving stone
         bool foundExisting = false;
         for (const auto& [handle, info] : BufferManager::s_buffers)
         {
             if (info.tag == "SharedFrameUBO_Staging_MIGHTY" && info.mapped != nullptr)
             {
                 stagingHandle = handle;
-                stagingInfo = &info;
+                stagingInfo   = &info;
                 foundExisting = true;
-                LOG_SUCCESS_CAT("RENDERER", "MIGHTY SWEEP SUCCESS — found existing staging stone (handle: {})", handle);
+                LOG_SUCCESS_CAT("RENDERER", 
+                    "MIGHTY SWEEP SUCCESS — ancient staging stone recovered from the crypts (handle {:#x})", handle);
                 break;
             }
         }
 
-        // If sweep failed → REBIRTH THE STONE ETERNALLY
+        // If no stone survives → raise a new eternal fortress
         if (!foundExisting)
         {
             const VkDeviceSize requiredSize = 368 * Options::Performance::MAX_FRAMES_IN_FLIGHT;
 
-            LOG_INFO_CAT("RENDERER", "No existing staging stone found — forging new eternal shared staging stone ({} MiB)", requiredSize / (1024*1024));
+            LOG_INFO_CAT("RENDERER", 
+                "No surviving stone found — the masons forge a new eternal castle keep ({} MiB)", 
+                requiredSize / (1024 * 1024));
 
             stagingHandle = BufferManager::createHostVisible(requiredSize, "SharedFrameUBO_Staging_MIGHTY");
-            stagingInfo = BufferManager::get(stagingHandle);
+            stagingInfo   = BufferManager::get(stagingHandle);
 
+            // FINAL DEFENSE: Even if the scribes lag, the castle shall stand
             if (stagingHandle == 0 || !stagingInfo || stagingInfo->mapped == nullptr)
             {
-                LOG_FATAL_CAT("RENDERER", "ETERNAL REBIRTH FAILED — cannot forge shared staging stone. Photons have no bridge.");
-                return;
+                LOG_WARNING_CAT("RENDERER", 
+                    "New stone forged but scribes hesitate (handle {:#x}) — forcing the royal seal", stagingHandle);
+
+                void* forcedMap = BufferManager::map(stagingHandle);
+                if (!forcedMap)
+                {
+                    LOG_FATAL_CAT("RENDERER", 
+                        "THE CASTLE FALLS — cannot map the new staging stone. Pink photons are trapped forever.");
+                    BufferManager::destroy(stagingHandle);
+                    stagingHandle = 0;
+                    stagingInfo = nullptr;
+                    return;
+                }
+                stagingInfo = BufferManager::get(stagingHandle); // refresh after forced map
             }
 
-            LOG_SUCCESS_CAT("RENDERER", "New eternal staging stone forged successfully — handle: {}", stagingHandle);
+            LOG_SUCCESS_CAT("RENDERER", 
+                "New eternal staging stone raised — handle {:#x} — the castle is impregnable once more", stagingHandle);
         }
+        else
+        {
+            LOG_SUCCESS_CAT("RENDERER", 
+                "Ancient staging stone recovered — handle {:#x} — the empire endures", stagingHandle);
+        }
+
+        // CRITICAL: persist the new/recovered handle back to the global context in ALL paths
+        RTX::g_ctx().sharedStagingEnc_ = stagingHandle;
+    }
+
+    // ╔══════════════════════════════════════════════════════════════════════════╗
+    // ║ ULTIMATE BULWARK — EVEN IF EVERYTHING FAILED, WE DO NOT DEREFERENCE NULL ║
+    // ╚══════════════════════════════════════════════════════════════════════════╝
+    if (!stagingInfo || !stagingInfo->mapped)
+    {
+        LOG_FATAL_CAT("RENDERER",
+            "THE ETERNAL STAGING STONE IS TRULY LOST — handle {:#x}, info {:p}, mapped {:p} — "
+            "pink photons cannot march this frame. The castle endures, but the frame is forsaken.",
+            stagingHandle,
+            static_cast<const void*>(stagingInfo),
+            stagingInfo ? static_cast<const void*>(stagingInfo->mapped) : nullptr);
+        return;
     }
 
     void* data = stagingInfo->mapped;
 
-    // Validate command buffer
+    // ╔══════════════════════════════════════════════════════════════════════════╗
+    // ║ PHASE 3: THE COMMAND TOWER — ENSURE THE BATTLE PLANS ARE READY           ║
+    // ╚══════════════════════════════════════════════════════════════════════════╝
     VkCommandBuffer cmd = commandBuffers_[frame];
     if (cmd == VK_NULL_HANDLE)
     {
-        LOG_ERROR_CAT("RENDERER", "Command buffer null for frame {} — rebuilding", frame);
+        LOG_ERROR_CAT("RENDERER", "Command buffer missing for frame {} — re-issuing royal decrees", frame);
         vkResetCommandBuffer(commandBuffers_[frame], 0);
         if (recordCommandBuffer(frame) != VK_SUCCESS)
             return;
@@ -1525,11 +1571,13 @@ void VulkanRenderer::updateUniformBuffer(uint32_t frame, const Camera& camera, f
     VkBuffer dstBuffer = RAW_BUFFER(uniformBufferEncs_[frame]);
     if (dstBuffer == VK_NULL_HANDLE)
     {
-        LOG_FATAL_CAT("RENDERER", "Destination uniform buffer corrupted — empire cannot render");
+        LOG_FATAL_CAT("RENDERER", "Destination uniform buffer destroyed — the castle's library burns");
         return;
     }
 
-    // PHASE 2: SACRED UBO — KATE BUSH-APPROVED ALIGNAS(16) PERFECTION
+    // ╔══════════════════════════════════════════════════════════════════════════╗
+    // ║ PHASE 4: THE SACRED RELIC — KATE BUSH-APPROVED UBO OF PERFECT ALIGNMENT ║
+    // ╚══════════════════════════════════════════════════════════════════════════╝
     struct alignas(16) FrameUBO {
         glm::mat4 view;
         glm::mat4 proj;
@@ -1545,8 +1593,8 @@ void VulkanRenderer::updateUniformBuffer(uint32_t frame, const Camera& camera, f
     };
 
     FrameUBO ubo{};
-    const auto& cam = Camera::get();
-    const float aspect = height_ > 0 ? static_cast<float>(width_) / height_ : 1.0f;
+    const auto& cam   = Camera::get();
+    const float  aspect = height_ > 0 ? static_cast<float>(width_) / height_ : 1.0f;
 
     ubo.view       = cam.view();
     ubo.proj       = cam.proj(aspect);
@@ -1559,20 +1607,24 @@ void VulkanRenderer::updateUniformBuffer(uint32_t frame, const Camera& camera, f
     ubo.time       = frameTime_;
     ubo.spp        = currentSpp_;
 
-    // PHASE 3: ETERNAL COPY — SAFE, MIGHTY, AND UNSTOPPABLE
+    // ╔══════════════════════════════════════════════════════════════════════════╗
+    // ║ PHASE 5: THE ETERNAL COPY — PHOTONS MARCH INTO BATTLE                    ║
+    // ╚══════════════════════════════════════════════════════════════════════════╝
     const VkDeviceSize offset = frame * sizeof(FrameUBO);
     void* dest = static_cast<char*>(data) + offset;
 
     if (offset + sizeof(ubo) > stagingInfo->size)
     {
-        LOG_FATAL_CAT("RENDERER", "Staging buffer overflow — required {} bytes, only {} available", offset + sizeof(ubo), stagingInfo->size);
+        LOG_FATAL_CAT("RENDERER", "Staging overflow — the castle's granary cannot hold the harvest");
         return;
     }
 
     std::memcpy(dest, &ubo, sizeof(ubo));
 
-    // PHASE 4: GPU COPY + BARRIER — PHOTONS FLOW ETERNALLY
-    VkBuffer srcBuffer = BufferManager::getStagingBuffer(); // This is the actual VkBuffer backing the mapped memory
+    // ╔══════════════════════════════════════════════════════════════════════════╗
+    // ║ PHASE 6: THE ROYAL COURIER — DISPATCH TO GPU AND RAISE THE DRAWBRIDGE   ║
+    // ╚══════════════════════════════════════════════════════════════════════════╝
+    VkBuffer srcBuffer = BufferManager::getStagingBuffer();
 
     VkBufferCopy copy{
         .srcOffset = offset,
@@ -1583,6 +1635,7 @@ void VulkanRenderer::updateUniformBuffer(uint32_t frame, const Camera& camera, f
 
     VkMemoryBarrier barrier{
         .sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
+        .pNext         = nullptr,
         .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
         .dstAccessMask = VK_ACCESS_UNIFORM_READ_BIT
     };
@@ -1592,7 +1645,8 @@ void VulkanRenderer::updateUniformBuffer(uint32_t frame, const Camera& camera, f
         VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
         0, 1, &barrier, 0, nullptr, 0, nullptr);
 
-    LOG_TRACE_CAT("RENDERER", "Frame {} UBO updated eternally — MIGHTY and PINK — photons aligned", frameNumber_);
+    LOG_TRACE_CAT("RENDERER", 
+        "Frame {} UBO updated — the castle stands eternal under pink photon banners", frameNumber_);
 }
 
 void VulkanRenderer::updateTonemapUniform(uint32_t frame) noexcept

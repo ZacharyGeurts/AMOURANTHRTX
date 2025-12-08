@@ -1,7 +1,7 @@
 // =============================================================================
-// AMOURANTH RTX – NOVEMBER 29 2025 – STONEKEY INPUT SUPREMACY v3
+// AMOURANTH RTX – DECEMBER 08 2025 – STONEKEY INPUT SUPREMACY v4 (SDL3 FIXED)
 // FULL SDL3 — 4 CONTROLLERS — TRIGGERS — RUMBLE — GYRO — KEYBOARD — MOUSE
-// NO LAZYCAM — CAM ONLY — CIRCULAR INCLUDE HELL OBLITERATED
+// ONE-SHOT MODE KEYS (1–9) WITH 0.5s PRESS WINDOW — NO FLICKER
 // PINK PHOTONS × INFINITY × 4 — FIRST LIGHT ETERNAL
 // =============================================================================
 
@@ -18,8 +18,6 @@
 
 #include "engine/GLOBAL/camera.hpp"
 #include "engine/GLOBAL/logging.hpp"
-
-class Application;  // ← Forward declare only — NO MORE CIRCULAR INCLUDE
 
 using namespace Logging::Color;
 
@@ -40,7 +38,7 @@ public:
         generation_.store(1);
         openAllControllers();
 
-        LOG_SUCCESS_CAT("INPUT", "{}STONEKEY INPUT v3 ONLINE — SDL3 — 4× CONTROLLER — TRIGGERS — RUMBLE GYRO — PINK PHOTONS ∞×4{}", 
+        LOG_SUCCESS_CAT("INPUT", "{}STONEKEY INPUT v4 ONLINE — SDL3 — 4× CONTROLLERS — ONE-SHOT KEYS 1-9 — PINK PHOTONS ∞×4{}", 
                         RASPBERRY_PINK, RESET);
     }
 
@@ -66,7 +64,8 @@ public:
         }
     }
 
-    void pumpEvents(Application& app) noexcept {
+    // Updated signature to avoid incomplete type issues and pass required SDL3 params
+    void pumpEvents(float dt, std::function<void(int)> setRenderMode, SDL_Window* window) noexcept {
         SDL_Event ev;
         while (SDL_PollEvent(&ev)) {
             uint64_t gen = generation_.load();
@@ -82,7 +81,7 @@ public:
             for (const auto& cb : active) cb(ev);
         }
 
-        updateDefaultControls(app);
+        updateDefaultControls(dt, setRenderMode, window);
     }
 
     void invalidateAll() noexcept {
@@ -98,7 +97,7 @@ public:
     float rightStickX(int idx) const noexcept { return getAxis(idx, SDL_GAMEPAD_AXIS_RIGHTX); }
     float rightStickY(int idx) const noexcept { return getAxis(idx, SDL_GAMEPAD_AXIS_RIGHTY); }
     float leftTrigger(int idx) const noexcept { return getAxis(idx, SDL_GAMEPAD_AXIS_LEFT_TRIGGER); }
-    float rightTrigger(int idx)const noexcept { return getAxis(idx, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER); }
+    float rightTrigger(int idx) const noexcept { return getAxis(idx, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER); }
 
     bool button(int idx, SDL_GamepadButton btn) const noexcept {
         return isConnected(idx) && SDL_GetGamepadButton(controllers_[idx].gamepad, btn);
@@ -126,9 +125,17 @@ private:
         uint64_t gen = 0;
     };
 
+    // One-shot state for keys 1–9 (0.5 second press window)
+    struct ModeKeyState {
+        bool  down  = false;
+        float timer = 0.0f;
+        static constexpr float maxPressTime = 0.5f;
+    };
+
     mutable std::mutex mutex_;
     std::unordered_map<uint64_t, Sub> callbacks_;
     std::array<Controller, 4> controllers_;
+    std::array<ModeKeyState, 9> modeKeys_{};  // Keys 1–9
     std::atomic<uint64_t> generation_{1};
     std::atomic<uint64_t> nextId_{0};
 
@@ -139,77 +146,131 @@ private:
     }
 
     void openAllControllers() noexcept {
-        int n = SDL_GetNumGamepads();
-        for (int i = 0; i < n && i < 32; ++i) {
-            if (!SDL_IsGamepad(i)) continue;
+        // SDL3: Use SDL_GetGamepads instead of SDL_GetNumGamepads
+        int numJoysticks = 0;
+        SDL_JoystickID* joysticks = SDL_GetGamepads(&numJoysticks);
 
-            SDL_Gamepad* pad = SDL_OpenGamepad(i);
+        for (int i = 0; i < numJoysticks && i < 32; ++i)
+        {
+            SDL_Gamepad* pad = SDL_OpenGamepad(joysticks[i]);
             if (!pad) continue;
 
             int slot = -1;
-            for (int j = 0; j < 4; ++j) {
-                if (!controllers_[j].gamepad) { slot = j; break; }
+            for (int j = 0; j < 4; ++j)
+            {
+                if (!controllers_[j].gamepad) {
+                    slot = j;
+                    break;
+                }
             }
-            if (slot == -1) { SDL_CloseGamepad(pad); continue; }
+            if (slot == -1) {
+                SDL_CloseGamepad(pad);
+                continue;
+            }
 
-            controllers_[slot] = {
-                .gamepad = pad,
-                .id = SDL_GetGamepadInstanceID(pad),
-                .rumbleSupported = SDL_GamepadHasRumble(pad),
-                .gyroSupported = SDL_GamepadHasSensor(pad, SDL_SENSOR_GYRO)
-            };
+            controllers_[slot].gamepad          = pad;
+            controllers_[slot].id               = joysticks[i];
+            controllers_[slot].rumbleSupported  = false;
+            SDL_PropertiesID props = SDL_GetGamepadProperties(pad);
+            if (props != 0) {
+                controllers_[slot].rumbleSupported = SDL_GetBooleanProperty(props, SDL_PROP_GAMEPAD_CAP_RUMBLE_BOOLEAN, false);
+            }
+            controllers_[slot].gyroSupported    = SDL_GamepadHasSensor(pad, SDL_SENSOR_GYRO);
 
             LOG_SUCCESS_CAT("INPUT", "{}CONTROLLER {} → {}{}{}", 
                             ELECTRIC_BLUE, slot+1, SDL_GetGamepadName(pad), 
-                            controllers_[slot].rumbleSupported ? " RUMBLE" : "",
-                            RESET);
+                            controllers_[slot].rumbleSupported ? " RUMBLE" : "", RESET);
         }
+
+        if (joysticks) SDL_free(joysticks);
     }
 
-    void updateDefaultControls(Application& app) noexcept {
+    // Updated signature to avoid incomplete type issues and pass required SDL3 params
+    void updateDefaultControls(float dt, std::function<void(int)> setRenderMode, SDL_Window* window) noexcept {
         const float moveSpeed = 20.0f;
-        const float lookSens = 0.1f;
+        const float lookSens  = 0.1f;
 
-        // Mouse
-        if (SDL_GetRelativeMouseMode()) {
-            float dx, dy;
+        // ── ONE-SHOT MODE KEYS 1–9 (0.5s press window) ──
+        int numKeys = 0;
+        const bool* keys = SDL_GetKeyboardState(&numKeys);  // SDL3: returns const bool*
+
+        for (int i = 0; i < 9; ++i)
+        {
+            const int sc = SDL_SCANCODE_1 + i;
+            if (sc >= numKeys) continue;
+
+            bool pressed = keys[sc];
+
+            if (pressed && !modeKeys_[i].down)
+            {
+                modeKeys_[i].down  = true;
+                modeKeys_[i].timer = 0.0f;
+            }
+            else if (!pressed && modeKeys_[i].down)
+            {
+                if (modeKeys_[i].timer <= ModeKeyState::maxPressTime)
+                {
+                    if (setRenderMode) setRenderMode(i + 1);
+                }
+
+                modeKeys_[i] = {};  // Reset
+            }
+
+            if (modeKeys_[i].down)
+            {
+                modeKeys_[i].timer += dt;
+            }
+        }
+
+        // ── MOUSE LOOK ──
+        if (window && SDL_GetWindowRelativeMouseMode(window))
+        {
+            float dx = 0.0f, dy = 0.0f;
             SDL_GetRelativeMouseState(&dx, &dy);
-            if (dx || dy) {
+            if (dx != 0.0f || dy != 0.0f)
+            {
                 CAM.rotate(-dx * lookSens, -dy * lookSens);
             }
         }
 
-        // Keyboard
-        const Uint8* keys = SDL_GetKeyboardState(nullptr);
-        if (keys[SDL_SCANCODE_W]) CAM.moveForward( moveSpeed * app.deltaTime);
-        if (keys[SDL_SCANCODE_S]) CAM.moveForward(-moveSpeed * app.deltaTime);
-        if (keys[SDL_SCANCODE_A]) CAM.moveRight(  -moveSpeed * app.deltaTime);
-        if (keys[SDL_SCANCODE_D]) CAM.moveRight(   moveSpeed * app.deltaTime);
-        if (keys[SDL_SCANCODE_SPACE])  CAM.moveUp( moveSpeed * app.deltaTime);
-        if (keys[SDL_SCANCODE_LCTRL])   CAM.moveUp(-moveSpeed * app.deltaTime);
+        // ── KEYBOARD MOVEMENT ──
+        if (keys[SDL_SCANCODE_W]) CAM.moveForward( moveSpeed * dt);
+        if (keys[SDL_SCANCODE_S]) CAM.moveForward(-moveSpeed * dt);
+        if (keys[SDL_SCANCODE_A]) CAM.moveRight(   -moveSpeed * dt);
+        if (keys[SDL_SCANCODE_D]) CAM.moveRight(    moveSpeed * dt);
+        if (keys[SDL_SCANCODE_SPACE])  CAM.moveUp( moveSpeed * dt);
+        if (keys[SDL_SCANCODE_LCTRL])  CAM.moveUp(-moveSpeed * dt);
 
-        // Controller 0
-        if (isConnected(0)) {
+        // ── CONTROLLER 0 MOVEMENT & LOOK ──
+        if (isConnected(0))
+        {
             float lx = leftStickX(0), ly = leftStickY(0);
             float rx = rightStickX(0), ry = rightStickY(0);
 
-            if (std::abs(lx) > 0.15f || std::abs(ly) > 0.15f) {
-                CAM.moveForward(-ly * moveSpeed * app.deltaTime);
-                CAM.moveRight(  lx * moveSpeed * app.deltaTime);
+            if (std::abs(lx) > 0.15f || std::abs(ly) > 0.15f)
+            {
+                CAM.moveForward(-ly * moveSpeed * dt);
+                CAM.moveRight(  lx * moveSpeed * dt);
             }
-            if (std::abs(rx) > 0.15f || std::abs(ry) > 0.15f) {
+            if (std::abs(rx) > 0.15f || std::abs(ry) > 0.15f)
+            {
                 CAM.rotate(rx * 3.0f, ry * 3.0f);
             }
         }
 
-        // Toggle mouse capture with F
+        // ── TOGGLE MOUSE CAPTURE (F key) ──
         static bool fDown = false;
-        if (keys[SDL_SCANCODE_F] && !fDown) {
-            bool on = SDL_GetRelativeMouseMode();
-            SDL_SetRelativeMouseMode(on ? SDL_FALSE : SDL_TRUE);
-            LOG_SUCCESS_CAT("INPUT", "{}MOUSE CAPTURE → {}{}", RASPBERRY_PINK, on ? "OFF" : "ON", RESET);
+        if (keys[SDL_SCANCODE_F] && !fDown)
+        {
+            if (window) {
+                bool captured = SDL_GetWindowRelativeMouseMode(window);
+                SDL_SetWindowRelativeMouseMode(window, !captured);
+                LOG_SUCCESS_CAT("INPUT", "{}MOUSE CAPTURE → {}{}", RASPBERRY_PINK, captured ? "OFF" : "ON", RESET);
+            }
             fDown = true;
-        } else if (!keys[SDL_SCANCODE_F]) {
+        }
+        else if (!keys[SDL_SCANCODE_F])
+        {
             fDown = false;
         }
     }
@@ -222,5 +283,3 @@ private:
 // GLOBAL MACROS — CLEAN AND ETERNAL
 #define INPUT GlobalInputManager::get()
 #define ON_EVENT(cb) INPUT.subscribe(cb, #cb)
-
-#endif // INCLUDE_GUARD

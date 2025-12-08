@@ -23,6 +23,7 @@
 #include "engine/GLOBAL/SDL3.hpp"
 #include "engine/GLOBAL/VulkanRenderer.hpp"
 #include "engine/GLOBAL/SwapchainManager.hpp"
+#include "engine/GLOBAL/InputManager.hpp"
 #include "engine/GLOBAL/PipelineManager.hpp"
 #include "engine/GLOBAL/MeshLoader.hpp"
 #include "engine/GLOBAL/Extensions.hpp"
@@ -122,7 +123,7 @@ public:
 
     void run() noexcept;
 
-	void setRenderer(std::unique_ptr<VulkanRenderer> r)
+    void setRenderer(std::unique_ptr<VulkanRenderer> r)
     {
         renderer_ = std::move(r);
 
@@ -152,7 +153,7 @@ private:
     void toggleTonemap()    { tonemapEnabled_ = !tonemapEnabled_; if (renderer_) renderer_->setTonemap(tonemapEnabled_); }
     void toggleHypertrace() { hypertraceEnabled_ = !hypertraceEnabled_; }
 
-	std::vector<VkCommandBuffer> commandBuffers_;
+    std::vector<VkCommandBuffer> commandBuffers_;
     std::vector<VkSemaphore> imageAvailableSemaphores_;
     std::vector<VkSemaphore> renderFinishedSemaphores_;
     std::vector<VkFence>     inFlightFences_;
@@ -192,41 +193,6 @@ Application::Application(const std::string& title, int width, int height)
 
 Application::~Application() {
     // She whispers: "The photons return to me..."
-}
-
-// =============================================================================
-// 3. Application::processInput — ONLY 1–9 ACTIVATES RENDER MODES
-// =============================================================================
-void Application::processInput(float)
-{
-    const auto* keys = SDL_GetKeyboardState(nullptr);
-
-    // One-shot activation for 1–9
-    static bool modeKeysPressed[9] = { false };
-
-    for (int i = 0; i < 9; ++i) {
-        const int sc = SDL_SCANCODE_1 + i;
-        if (keys[sc] && !modeKeysPressed[i]) {
-            setRenderMode(i + 1);
-            modeKeysPressed[i] = true;
-
-            // CEREMONIAL FIRST LIGHT
-            if (i + 1 == 1) {
-                LOG_AMOURANTH("[CAPTAIN AMOURANTH] BINDING 31 — FIRST LIGHT IGNITES");
-                LOG_CID("CID: \"...it's pink... it's finally... pink...\"");
-                LOG_KEANU("[KEANU] …whoa.");
-            }
-        } else if (!keys[sc]) {
-            modeKeysPressed[i] = false;
-        }
-    }
-
-    // Standard hotkeys
-    if (keys[SDL_SCANCODE_ESCAPE]) quit_ = true;
-    if (keys[SDL_SCANCODE_F])      toggleFullscreen();
-    if (keys[SDL_SCANCODE_O])      toggleOverlay();
-    if (keys[SDL_SCANCODE_T])      toggleTonemap();
-    if (keys[SDL_SCANCODE_H])      toggleHypertrace();
 }
 
 static void createCommandPool() noexcept
@@ -280,7 +246,7 @@ void Application::setRenderMode(int mode)
 
     const char* modeName = [](int m) -> const char* {
         switch (m) {
-			case 0:  return "VOID";
+            case 0:  return "VOID";
             case 1:  return "PURE PINK VOID — BINDING 31";
             case 2:  return "PATH TRACED ACCUMULATION";
             case 3:  return "REALTIME HYBRID DENOISED";
@@ -952,7 +918,7 @@ void Application::run() noexcept
         EnvironmentMap sky = renderer_->createEnvironmentMap();
         if (sky) {
             LOG_SUCCESS_CAT("SKY", "HDR CUBEMAP SKY FORGED — Mode 0 ready");
-            envMapReady = true;  // ← fixed: was g_envMapReady
+            envMapReady = true;
         }
     }
 
@@ -989,34 +955,42 @@ void Application::run() noexcept
                 RTX::las().notifyResize();
                 RTX::SwapchainManager::get().recreate(w, h);
 
-                // Rebuild pipeline using current command pool
                 RTX::pipeline().forgeRTXPipeline(
-                    RTX::g_ctx().commandPool(),  // ← fixed: currentCommandPool() doesn't exist
+                    RTX::g_ctx().commandPool(),
                     stone_graphics_queue()
                 );
 
-                // Reset accumulation
-                if (renderer_) renderer_->resetAccumulation_;  // ← fixed: was resetAccumulation()
+                if (renderer_) renderer_->resetAccumulation_;
 
                 LOG_SUCCESS_CAT("RESIZE", "Empire restored — rendering resumes");
             }
         }
 
-        processInput(g_deltaTime);
+        INPUT.pumpEvents(g_deltaTime, [this](int mode) { setRenderMode(mode); }, stone_window());
+        LOG_SUCCESS_CAT("INPUT", "Events pump - Ohhhhhh!");
 
-        // RENDER — ONLY IF WE HAVE A VALID SWAPCHAIN
-        if (renderer_ && renderer_->isAlive() && stone_swapchain() != VK_NULL_HANDLE)
+        // RENDER — SAFE AGAINST SWAPCHAIN DEATH — EMPIRE NEVER DIES
+        bool swapchainValid = (stone_swapchain() != VK_NULL_HANDLE);
+
+        if (renderer_ && renderer_->isAlive() && swapchainValid)
         {
             renderer_->setMaxFramesInFlight(Options::Performance::MAX_FRAMES_IN_FLIGHT);
             renderer_->renderFrame(CAM, g_deltaTime);
         }
-        else if (!renderer_ || !renderer_->isAlive())
+        else
         {
-            LOG_FATAL_CAT("RENDERER", "Renderer is dead — cannot continue");
-            break;
+            if (!renderer_ || !renderer_->isAlive())
+            {
+                LOG_FATAL_CAT("RENDERER", "Renderer is dead — cannot continue");
+                break;
+            }
+            else if (!swapchainValid)
+            {
+                LOG_WARNING_CAT("RENDER", "Swapchain temporarily invalid (minimized/resizing) — skipping frame gracefully — PHOTONS PAUSED");
+            }
         }
 
-        // TITLE BAR
+        // TITLE BAR — ALWAYS UPDATE (keeps window responsive even when minimized)
         titleTimer += g_deltaTime;
         if (titleTimer >= TITLE_UPDATE_INTERVAL)
         {
@@ -1048,7 +1022,7 @@ void Application::run() noexcept
             SDL_SetWindowTitle(stone_window(), title.c_str());
         }
 
-        // FPS
+        // FPS COUNTER — KEEP RUNNING (accurate resumption after minimize)
         ++frameCount;
         fpsTimer += g_deltaTime;
         if (fpsTimer >= 1.0f)
@@ -1058,8 +1032,8 @@ void Application::run() noexcept
             fpsTimer = 0.0f;
         }
 
-        // FRAME PACING
-        if (Options::Performance::ENABLE_FRAME_PREDICTION)
+        // FRAME PACING — ONLY WHEN WE'RE ACTUALLY RENDERING
+        if (Options::Performance::ENABLE_FRAME_PREDICTION && swapchainValid)
         {
             const auto elapsed = std::chrono::steady_clock::now() - frameStart;
             const auto target = std::chrono::duration<float>(1.0f / 240.0f);
@@ -1086,12 +1060,12 @@ int main(int, char**)
     phase6_sceneAndAccelerationStructures();
     phase7_forgeTheRTX();
 
-	vkDeviceWaitIdle(stone_device()); 
+    vkDeviceWaitIdle(stone_device()); 
 
     auto renderer = phase7_5_Renderer();
     stone_seal_final();
 
-	AdvanceEternalRing();
+    AdvanceEternalRing();
 
     // ========================================================================
     // ETERNAL COMMAND RING — FORGED WITH PURE STATIC MAGIC

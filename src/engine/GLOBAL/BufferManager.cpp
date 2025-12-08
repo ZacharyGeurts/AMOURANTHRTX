@@ -238,37 +238,41 @@ uint64_t create(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFla
 // ── ETERNAL HOST-VISIBLE BUFFER — PINK PHOTONS FLOW FOREVER ──────────────────
 [[nodiscard]] uint64_t createHostVisible(VkDeviceSize size, std::string_view tag) noexcept
 {
-    ensureStagingRing(); // This creates the persistent ring
+    ensureStagingRing(); // Forges the eternal persistent ring if missing
 
     if (size == 0) {
-        LOG_ERROR_CAT("BUFFER", "createHostVisible called with size 0");
+        LOG_ERROR_CAT("BUFFER", "createHostVisible called with size 0 — the empire demands substance");
         return 0;
     }
 
-    // Allocate from the eternal staging ring
+    // ── Allocate from the eternal staging ring ──
     VkDeviceSize offset = g_stagingRing.head.fetch_add(size, std::memory_order_relaxed);
 
     if (offset + size > g_stagingRing.size)
     {
-        LOG_FATAL_CAT("BUFFER", "Staging ring overflow! Requested: {} bytes, Available: {} bytes",
+        LOG_FATAL_CAT("BUFFER", "STAGING RING OVERFLOW — Requested: {} bytes | Available: {} bytes | The photons grow too numerous",
                       size, g_stagingRing.size - offset);
         return 0;
     }
 
+    // Generate unique handle
     uint64_t handle = ++g_nextHandle;
 
-    // Store metadata — buffer is the global staging buffer
-    s_buffers[handle] = {
-        .buffer  = g_stagingRing.buffer,
-        .memory  = g_stagingRing.memory,
-        .size    = size,
-        .aligned = size,
-        .usage   = VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-        .tag     = std::string(tag),
-        .mapped  = static_cast<char*>(g_stagingRing.mapped) + offset
-    };
+    // Fully populate BufferInfo before insertion — guarantees immediate visibility
+    BufferInfo info;
+    info.buffer  = g_stagingRing.buffer;
+    info.memory  = g_stagingRing.memory;
+    info.size    = size;
+    info.aligned = size;
+    info.usage   = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+    info.tag     = std::string(tag);
+    info.mapped  = static_cast<char*>(g_stagingRing.mapped) + offset;
 
-    LOG_SUCCESS_CAT("BUFFER", "Host-visible buffer allocated — {} bytes @ offset {} | handle: {} | tag: {}",
+    // Insert only when completely ready
+    s_buffers[handle] = info;
+
+    LOG_SUCCESS_CAT("BUFFER", 
+                    "Host-visible buffer allocated — {} bytes @ offset {} | handle {:#x} | tag: \"{}\"",
                     size, offset, handle, tag.empty() ? "unnamed" : tag);
 
     return handle;
