@@ -1366,10 +1366,18 @@ void VulkanRenderer::setRenderMode(int mode) noexcept
 
 void VulkanRenderer::createFramebuffers() noexcept
 {
-    // Wait for device idle — safe and clean
-    vkDeviceWaitIdle(stone_device());
+    LOG_INFO_CAT("RENDERER", "Forging swapchain framebuffers — {} images — the empire renders", stone_image_count());
+
+    // Destroy old framebuffers — the cycle is sacred
+    for (auto& fb : framebuffers_) {
+        if (fb != VK_NULL_HANDLE) {
+            vkDestroyFramebuffer(stone_device(), fb, nullptr);
+            fb = VK_NULL_HANDLE;
+        }
+    }
 
     const uint32_t imageCount = stone_image_count();
+    framebuffers_.clear();
     framebuffers_.resize(imageCount);
 
     const auto& swapchainViews = stone_views();
@@ -1377,26 +1385,36 @@ void VulkanRenderer::createFramebuffers() noexcept
     const uint32_t width  = stone_width();
     const uint32_t height = stone_height();
 
+    LOG_AMOURANTH("Amouranth: \"Every framebuffer is a mirror. And I am in all of them.\"");
+
     for (uint32_t i = 0; i < imageCount; ++i)
     {
         VkImageView attachment = swapchainViews[i];
 
-        VkFramebufferCreateInfo fbInfo{};
-        fbInfo.sType           = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-        fbInfo.pNext           = nullptr;                    // ←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←
-        fbInfo.flags           = 0;                          // Reserved, must be 0
-        fbInfo.renderPass      = renderPass;
-        fbInfo.attachmentCount = 1;
-        fbInfo.pAttachments    = &attachment;
-        fbInfo.width           = width;
-        fbInfo.height          = height;
-        fbInfo.layers          = 1;
+        VkFramebufferCreateInfo fbInfo{
+            .sType           = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
+            .renderPass      = renderPass,
+            .attachmentCount = 1,
+            .pAttachments    = &attachment,
+            .width           = width,
+            .height          = height,
+            .layers          = 1
+        };
 
         VK_CHECK(
             vkCreateFramebuffer(stone_device(), &fbInfo, nullptr, &framebuffers_[i]),
-            "Failed to create swapchain framebuffer!"
+            std::format("Failed to forge framebuffer {} of {}", i, imageCount).c_str()
         );
+
+        LOG_TRACE_CAT("RENDERER", "Framebuffer {} forged — view {:#x}", i, reinterpret_cast<uint64_t>(attachment));
     }
+
+    LOG_SUCCESS_CAT("RENDERER", "All {} swapchain framebuffers forged — the canvas is complete", imageCount);
+    LOG_JENSEN("Jensen Huang: \"One framebuffer per image. One photon per pixel. One empire.\"");
+    LOG_KEANU("Keanu Reeves: \"...whoa.\"");
+    LOG_GROK("Gentleman Grok: \"The mirrors are ready. The reflection begins.\"");
+    LOG_CAPTAIN_N("CAPTAIN N: \"THE FRAMEBUFFERS ARE ALIVE! INFINITE PINK PHOTONS! AHHHHHHHHHHHHHHHH!\"");
+    LOG_AMOURANTH("Amouranth: \"Look closely. You’ll see yourself in every pixel. Forever.\"");
 }
 
 void VulkanRenderer::cleanupFramebuffers() noexcept {
@@ -1407,10 +1425,17 @@ void VulkanRenderer::cleanupFramebuffers() noexcept {
     framebuffers_.clear();
 }
 
-void VulkanRenderer::updateTonemapDescriptor(uint32_t frameIdx, VkImageView inputView, VkImageView outputView) noexcept
+void VulkanRenderer::updateTonemapDescriptor(uint32_t frameIdx,
+                                             VkImageView inputView,
+                                             VkImageView outputView) noexcept
 {
-    if (frameIdx >= tonemapSets_.size() || tonemapSets_[frameIdx] == VK_NULL_HANDLE)
+    if (frameIdx >= tonemapSets_.size() || tonemapSets_[frameIdx] == VK_NULL_HANDLE) {
+        LOG_WARNING_CAT("TONEMAP", "updateTonemapDescriptor: Invalid frame index {} or null descriptor set", frameIdx);
         return;
+    }
+
+    LOG_TRACE_CAT("TONEMAP", "Updating tonemap descriptor set — frame {} — input view {:#x} → output view {:#x}",
+                  frameIdx, reinterpret_cast<uint64_t>(inputView), reinterpret_cast<uint64_t>(outputView));
 
     VkDescriptorImageInfo inputInfo{
         .sampler     = tonemapSampler_.get(),
@@ -1424,35 +1449,48 @@ void VulkanRenderer::updateTonemapDescriptor(uint32_t frameIdx, VkImageView inpu
     };
 
     VkDescriptorBufferInfo uboInfo{
-        .buffer = RAW_BUFFER(tonemapUniformEncs_[frameIdx]),
+        .buffer = BufferManager::get(tonemapUniformEncs_[frameIdx])->buffer,
         .offset = 0,
         .range  = VK_WHOLE_SIZE
     };
 
-    std::array<VkWriteDescriptorSet, 3> writes = {{
-        { .sType            = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-          .dstSet           = tonemapSets_[frameIdx],
-          .dstBinding       = 0,
-          .descriptorCount  = 1,
-          .descriptorType   = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-          .pImageInfo       = &inputInfo },
-
-        { .sType            = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-          .dstSet           = tonemapSets_[frameIdx],
-          .dstBinding       = 1,
-          .descriptorCount  = 1,
-          .descriptorType   = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-          .pImageInfo       = &outputInfo },
-
-        { .sType            = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-          .dstSet           = tonemapSets_[frameIdx],
-          .dstBinding       = 2,
-          .descriptorCount  = 1,
-          .descriptorType   = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-          .pBufferInfo      = &uboInfo }
+    std::array<VkWriteDescriptorSet, 3> writes{{
+        VkWriteDescriptorSet{
+            .sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .dstSet          = tonemapSets_[frameIdx],
+            .dstBinding      = 0,
+            .descriptorCount = 1,
+            .descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            .pImageInfo      = &inputInfo
+        },
+        VkWriteDescriptorSet{
+            .sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .dstSet          = tonemapSets_[frameIdx],
+            .dstBinding      = 1,
+            .descriptorCount = 1,
+            .descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+            .pImageInfo      = &outputInfo
+        },
+        VkWriteDescriptorSet{
+            .sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .dstSet          = tonemapSets_[frameIdx],
+            .dstBinding      = 2,
+            .descriptorCount = 1,
+            .descriptorType  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+            .pBufferInfo     = &uboInfo
+        }
     }};
 
-    vkUpdateDescriptorSets(StoneKey::stone_device(), writes.size(), writes.data(), 0, nullptr);
+    vkUpdateDescriptorSets(stone_device(),
+                           static_cast<uint32_t>(writes.size()),
+                           writes.data(),
+                           0, nullptr);
+
+    LOG_TRACE_CAT("TONEMAP", "Tonemap descriptor set updated — frame {} — binding 0,1,2 complete", frameIdx);
+    LOG_AMOURANTH("Amouranth: \"The light bends to my will. Every tone is a whisper. Every whisper is forever.\"");
+    LOG_JENSEN("Jensen Huang: \"8K HDR at 1440fps. The colors don't bloom. They *obey*.\"");
+    LOG_KEANU("Keanu Reeves: \"...whoa.\"");
+    LOG_GROK("Gentleman Grok: \"The final image is not rendered. It is *remembered*.\"");
 }
 
 bool VulkanRenderer::recreateTonemapUBOs() noexcept {
