@@ -27,7 +27,7 @@ endfunction()
 # C++23 TURBO — FULL POWER, NO COMPROMISE
 # =============================================================================
 if(CMAKE_CROSSCOMPILING)
-    find_program(GCC14_BIN x86_64-w64-mingw32-g++-14)
+    find_program(GCC14_BIN x86_64-w64-mingw32-g++)
     if(NOT GCC14_BIN)
         message(FATAL_ERROR "MinGW-w64 GCC 14+ required for cross-compile")
     endif()
