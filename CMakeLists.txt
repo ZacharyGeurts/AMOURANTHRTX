@@ -139,7 +139,7 @@ endif()
 find_program(GLSLC glslc REQUIRED HINTS $ENV{VULKAN_SDK}/bin /usr/bin)
 find_program(SPIRV_VAL spirv-val HINTS $ENV{VULKAN_SDK}/bin /usr/bin)
 
-find_package(TBB REQUIRED)
+# find_package(TBB REQUIRED)
 find_package(OpenMP REQUIRED)
 find_package(Freetype REQUIRED)
 find_package(glm REQUIRED)
