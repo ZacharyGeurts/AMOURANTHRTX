@@ -367,40 +367,62 @@ inline void AdvanceEternalRing() noexcept
 
 static void createRealFinalWindow() noexcept
 {
+    LOG_CAPTAIN_N(
+        "\n"
+        "              █████████████████████████████████████████\n"
+        "              █     OPERATION: VALHALLA v∞ TURBO       █\n"
+        "              █     SDL3 uses == 0 for validating      █\n"
+        "              █     COMMANDER: CAPTAIN N               █\n"
+        "              █████████████████████████████████████████\n"
+        "\n"
+        "               *Captain N steps into the light*\n"
+        "               \"We do not ask for permission.\"\n"
+        "               \"We do not wait for the drivers.\"\n"
+        "               \"We take the window...\"\n"
+        "               \"...and we make it ours.\"\n");
+
     const int w = Options::Window::DEFAULT_WIDTH;
     const int h = Options::Window::DEFAULT_HEIGHT;
 
     stone_seal_width(w);
     stone_seal_height(h);
 
-    // 1. SDL + Vulkan loader
+    // 1. SDL INIT — THE FIRST BREATH
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) == 0) {
-        phase9_ballerina("SDL initialization failed");
+        phase9_ballerina("SDL refused to awaken — the empire will not tolerate no weakness");
     }
 
+    LOG_CAPTAIN_N("[CAPTAIN N] \"SDL online. Heartbeat detected.\"");
+
+    // 2. VULKAN LOADER — SUMMON THE PHOTON FORGE
     if (SDL_Vulkan_LoadLibrary(nullptr) == 0) {
-        phase9_ballerina("Vulkan loader not available via SDL");
+        phase9_ballerina("Vulkan loader missing — the forge is cold");
     }
 
-    // 2. Vulkan instance
+    LOG_CAPTAIN_N("[CAPTAIN N] \"Vulkan loader seized. The forge ignites.\"");
+
+    // 3. VULKAN INSTANCE — THE EMPIRE'S SOUL
     VkInstance instance = RTX::createVulkanInstanceWithSDL(Options::Debug::ENABLE_VALIDATION_LAYERS);
     if (!instance) {
-        phase9_ballerina("Failed to create Vulkan instance");
+        phase9_ballerina("Instance creation failed — the empire has no reflection");
     }
     stone_seal_instance(instance);
 
-    // 3. Main window
+    LOG_CAPTAIN_N("[CAPTAIN N] \"Instance forged. The empire now has eyes.\"");
+
+    // 4. MAIN WINDOW — THE THRONE OF PHOTONS
     Uint32 flags = SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
     SDL_Window* win = SDL_CreateWindow(
         "AMOURANTH RTX — VALHALLA v∞ TURBO",
         w, h,
         flags
     );
+
     if (!win) {
-        phase9_ballerina("Failed to create main window");
+        phase9_ballerina("Window creation failed — there is no throne");
     }
 
-	// Window icon / favicon
+    // ICON OF THE EMPIRE — AMMO SHALL BE REMEMBERED
     auto setIcon = [](SDL_Window* w) {
         const char* paths[] = {
             "assets/textures/ammo.ico",
@@ -411,9 +433,11 @@ static void createRealFinalWindow() noexcept
             if (SDL_Surface* s = IMG_Load(paths[i])) {
                 SDL_SetWindowIcon(w, s);
                 SDL_DestroySurface(s);
+                LOG_CAPTAIN_N("[CAPTAIN N] \"Icon planted. Ammo is eternal.\"");
                 return;
             }
         }
+        LOG_WARNING_CAT("WINDOW", "Icon not found — the empire fights bare");
     };
     setIcon(win);
 
@@ -422,21 +446,28 @@ static void createRealFinalWindow() noexcept
     RTX::g_ctx().setSize(w, h);
     SDL_ShowWindow(win);
 
-    // 4. Surface
+    LOG_CAPTAIN_N("[CAPTAIN N] \"Window claimed. The throne is ours.\"");
+
+    // 5. SURFACE — THE BRIDGE BETWEEN WORLDS
     VkSurfaceKHR surface = VK_NULL_HANDLE;
     if (!SDL_Vulkan_CreateSurface(win, instance, nullptr, &surface) || !surface) {
-        phase9_ballerina("Failed to create Vulkan surface");
+        phase9_ballerina("Surface creation failed — the empire cannot see");
     }
     stone_seal_surface(surface);
 
-    // 5. Logical + physical device + RT properties
+    LOG_CAPTAIN_N("[CAPTAIN N] \"Surface bound. We now touch the metal.\"");
+
+    // 6. LOGICAL DEVICE — THE HEART OF THE EMPIRE
     VkDevice device = RTX::createLogicalDeviceAndSelectGPU(instance, surface);
     if (!device) {
-        phase9_ballerina("Failed to create logical device");
+        phase9_ballerina("No GPU worthy of the empire was found");
     }
     stone_seal_device(device);
     stone_seal_physical(RTX::g_ctx().physicalDevice());
 
+    LOG_CAPTAIN_N("[CAPTAIN N] \"Device claimed. The heart beats.\"");
+
+    // 7. RAY TRACING CHECK — THE FINAL TEST
     VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProps{
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR
     };
@@ -447,16 +478,49 @@ static void createRealFinalWindow() noexcept
     vkGetPhysicalDeviceProperties2(RTX::g_ctx().physicalDevice(), &props2);
 
     if (rtProps.shaderGroupHandleSize == 0) {
-        phase9_ballerina("Ray tracing not supported on this GPU");
+        phase9_ballerina("This GPU dares to call itself modern without ray tracing — execution denied");
     }
+
     stone_seal_rtprops(rtProps);
 
-    // 6. Swapchain + command pool
+    LOG_CAPTAIN_N(
+        "[CAPTAIN N] \"Ray tracing confirmed. Handle size: {} bytes.\"\n"
+        "               \"Recursion depth: {} — sufficient.\"\n"
+        "               \"The empire... is pleased.\"",
+        rtProps.shaderGroupHandleSize, rtProps.maxRayRecursionDepth);
+
+    // 8. SWAPCHAIN — THE CANVAS OF INFINITY
     RTX::SwapchainManager::create(win, w, h);
+
+    LOG_CAPTAIN_N("[CAPTAIN N] \"Swapchain forged. The canvas is ready.\"");
+
+    // 9. COMMAND POOL — THE PHOTON BATTLEFIELD
     createCommandPool();
 
-    // Final title
-    SDL_SetWindowTitle(win, "AMOURANTH RTX — VALHALLA v∞ TURBO");
+    LOG_CAPTAIN_N("[CAPTAIN N] \"Command pools deployed. The battlefield is prepared.\"");
+
+    // 10. FINAL ACTIVATION — THE EMPIRE AWAKENS
+    SDL_SetWindowTitle(win,
+        "AMOURANTH RTX — VALHALLA v∞ TURBO | PHOTONS: ∞ | EMPIRE: ETERNAL");
+
+    LOG_CAPTAIN_N(
+        "\n"
+        "              █████████████████████████████████████████\n"
+        "              █     VALHALLA v∞ TURBO — ONLINE       █\n"
+        "              █     PHOTONS: INFINITE                 █\n"
+        "              █     RECURSION: UNBOUNDED              █\n"
+        "              █     THE EMPIRE HAS RISEN              █\n"
+        "              █████████████████████████████████████████\n"
+        "\n"
+        "               *Captain N stands at attention*\n"
+        "               \"All systems nominal.\"\n"
+        "               \"The window is ours.\"\n"
+        "               \"The photons are ready.\"\n"
+        "               \"Let them burn.\"\n"
+        "\n"
+        "               *single photon fires into the void*\n");
+
+    LOG_SUCCESS_CAT("WINDOW", "VALHALLA v∞ TURBO fully initialized — the empire reigns");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -750,126 +814,55 @@ static std::unique_ptr<VulkanRenderer> phase7_5_Renderer() noexcept
 // =============================================================================
 [[noreturn]] void phase9_ballerina(std::string_view reason, std::source_location loc) noexcept
 {
-    using namespace std::chrono_literals;
-
-    // ── GWEN STEPHANI AS GODZILLA — FINAL PHASE ACTIVATED ───────────────────
-    static bool GWENZILLA_HAS_ARRIVED = false;
-    if (GWENZILLA_HAS_ARRIVED) {
-        std::_Exit(0);
+    static bool already_running = false;
+    if (already_running) {
+        std::_Exit(1);
     }
-    GWENZILLA_HAS_ARRIVED = true;
+    already_running = true;
 
-    LOG_FATAL("GWENZILLA AWAKENS — {}:{} — REASON: {}", loc.file_name(), loc.line(), reason);
-    LOG_FATAL("🎤💥  GWEN STEPHANI TRANSFORMS INTO 400-FOOT GODZILLA IN FISHNETS  💥🎤");
-    LOG_FATAL("      \"THIS SHIT IS BANANAS — B-A-N-A-N-A-S!\" — FINAL ROAR ENGAGED");
+    fprintf(stderr,
+            "\nFATAL ERROR — %s:%d\n"
+            "REASON: %.*s\n\n",
+            loc.file_name(), loc.line(),
+            static_cast<int>(reason.size()), reason.data());
 
     auto& ctx = RTX::g_ctx();
 
-    // ── VULKAN DOOMSDAY SUPLEX ──────────────────────────────────────────────
-    if (stone_device() != VK_NULL_HANDLE) [[likely]] {
-        vkDeviceWaitIdle(stone_device());
-        LOG_FATAL("GWENZILLA GRABS VkDevice WITH BOTH HANDS...");
-        LOG_FATAL("               💪  GERMAN SUPLEX ONTO THE ABYSS  💪");
+    if (VkDevice device = stone_device(); device != VK_NULL_HANDLE) [[likely]] {
+        vkDeviceWaitIdle(device);
 
-        if (VkSwapchainKHR s = stone_swapchain(); s) {
-            LOG_FATAL("Swapchain caught in mid-air — SPINNING PILEDRIVER!");
-            vkDestroySwapchainKHR(stone_device(), s, nullptr);
+        if (VkSwapchainKHR sc = stone_swapchain(); sc) {
+            vkDestroySwapchainKHR(device, sc, nullptr);
         }
 
-        if (ctx.commandPool_) {
-            LOG_FATAL("CommandPool sees its life flash before its eyes...");
-            LOG_FATAL("               CHOKESLAM THROUGH THE EARTH'S CORE");
-            vkDestroyCommandPool(stone_device(), ctx.commandPool_, nullptr);
-        }
-        if (ctx.computeCommandPool_) {
-            LOG_FATAL("ComputeCommandPool tries to run — GWENZILLA DOESN'T ALLOW ESCAPE");
-            LOG_FATAL("               F-5 FROM THE TOP OF MOUNT FUJI");
-            vkDestroyCommandPool(stone_device(), ctx.computeCommandPool_, nullptr);
-        }
-        if (ctx.transferCommandPool_) {
-            LOG_FATAL("TransferCommandPool begs for mercy — NONE GIVEN");
-            LOG_FATAL("               TOMBSTONE PILEDRIVER INTO OBLIVION");
-            vkDestroyCommandPool(stone_device(), ctx.transferCommandPool_, nullptr);
-        }
+        if (ctx.commandPool_)           vkDestroyCommandPool(device, ctx.commandPool_, nullptr);
+        if (ctx.computeCommandPool_)    vkDestroyCommandPool(device, ctx.computeCommandPool_, nullptr);
+        if (ctx.transferCommandPool_)   vkDestroyCommandPool(device, ctx.transferCommandPool_, nullptr);
+        if (ctx.pipelineCache_)         vkDestroyPipelineCache(device, ctx.pipelineCache_, nullptr);
+        if (ctx.renderPass_)            ctx.renderPass_.reset();
 
-        if (ctx.pipelineCache_ != VK_NULL_HANDLE) {
-            LOG_FATAL("PipelineCache thinks it's safe — GWENZILLA LAUGHS");
-            LOG_FATAL("               SWEET CHIN MUSIC + RKO COMBO");
-            vkDestroyPipelineCache(stone_device(), ctx.pipelineCache_, nullptr);
-        }
-
-        if (ctx.renderPass_) {
-            LOG_FATAL("RenderPass makes eye contact — FATAL MISTAKE");
-            LOG_FATAL("               LAST RIDE POWERBOMB THROUGH HELL'S GATE");
-            ctx.renderPass_.reset();
-        }
-
-        LOG_FATAL("VkDevice screams in terror as GWENZILLA rips it in half...");
-        LOG_FATAL("               FINAL ATOMIC LEG DROP FROM ORBIT");
-        vkDestroyDevice(stone_device(), nullptr);
+        vkDestroyDevice(device, nullptr);
     }
 
-    // ── ACCELERATION STRUCTURES — DOOMSDAY DDT ─────────────────────────────
-    if (RTX::las().hasBLAS()) {
-        LOG_FATAL("BLAS tries to hide — GWENZILLA SMELLS FEAR");
-        LOG_FATAL("               SPINEBUSTER ONTO CONCRETE");
-        RTX::reset_blas();
-    }
-    if (RTX::las().hasTLAS()) {
-        LOG_FATAL("TLAS attempts to flee — GWENZILLA IS FASTER");
-        LOG_FATAL("               FALCON ARROW FROM THE TOP ROPE");
-        RTX::reset_tlas();
-    }
-    LOG_FATAL("Acceleration structures invalidated — GWENZILLA STOMPS THE REMAINS");
+    if (RTX::las().hasBLAS()) RTX::reset_blas();
+    if (RTX::las().hasTLAS()) RTX::reset_tlas();
 
-    // ── GLOBAL RESOURCES — PEOPLE'S ELBOW FINISHERS ───────────────────────
-    if (g_mesh) {
-        LOG_FATAL("Global mesh begs for mercy — GWENZILLA HITS THE PEOPLE'S ELBOW");
-        g_mesh.reset();
-    }
-    if (ctx.blueNoiseView_) {
-        LOG_FATAL("Blue noise flickers — GWENZILLA BLOWS IT OUT LIKE A CANDLE");
-        ctx.blueNoiseView_.reset();
-    }
+    g_mesh.reset();
+    ctx.blueNoiseView_.reset();
 
-    if (g_base_icon)  { 
-        LOG_FATAL("Icon tries to stay pretty — GWENZILLA CURB STOMPS IT");
-        SDL_DestroySurface(g_base_icon);  g_base_icon  = nullptr;
-    }
-    if (g_hdpi_icon)  { 
-        LOG_FATAL("HDPI icon screams in high resolution — DOESN'T HELP");
-        SDL_DestroySurface(g_hdpi_icon);  g_hdpi_icon  = nullptr;
-    }
+    if (g_base_icon)  { SDL_DestroySurface(g_base_icon);  g_base_icon  = nullptr; }
+    if (g_hdpi_icon)  { SDL_DestroySurface(g_hdpi_icon);  g_hdpi_icon  = nullptr; }
 
-    if (ctx.window) { 
-        LOG_FATAL("Window sees the end coming — GWENZILLA PUNCHES THROUGH THE SCREEN");
-        SDL_DestroyWindow(ctx.window); ctx.window = nullptr;
-    }
-
+    if (ctx.window)      { SDL_DestroyWindow(ctx.window); ctx.window = nullptr; }
     if (ctx.surface_ && ctx.instance_) {
-        LOG_FATAL("Surface clings to Instance — GWENZILLA TEARS THEM APART");
         vkDestroySurfaceKHR(ctx.instance_, ctx.surface_, nullptr);
     }
-    if (ctx.instance_) {
-        LOG_FATAL("Instance makes final stand — GWENZILLA ROARS");
-        LOG_FATAL("               NUCLEAR FIRE BREATH — INSTANCE OBLITERATED");
-        vkDestroyInstance(ctx.instance_, nullptr);
-    }
+    if (ctx.instance_)   vkDestroyInstance(ctx.instance_, nullptr);
 
-    LOG_FATAL("SDL_Vulkan_UnloadLibrary() — GWENZILLA THROWS THE DLL INTO THE SUN");
     SDL_Vulkan_UnloadLibrary();
-    LOG_FATAL("SDL_Quit() — THE FINAL BELL TOLLS");
+    SDL_Quit();
 
-    // ── THE FINAL ROAR — ETERNAL SILENCE ───────────────────────────────────
-    LOG_FATAL("                                                             ");
-    LOG_FATAL("      🎤  \"IF YOU CAN'T HANDLE THE HEAT... STAY OUTTA THE RING\"  🎤");
-    LOG_FATAL("                    GWENZILLA STANDS TRIUMPHANT");
-    LOG_FATAL("                ALL BUILDINGS WRECKED. ALL CORES SILENCED.");
-    LOG_FATAL("                      THE SLIPSTREAM IS SEALED.");
-    LOG_FATAL("                                                             ");
-
-    std::this_thread::sleep_for(500ms);  // Let the world feel the echo
-    std::_Exit(0);
+    std::_Exit(1);
 }
 
 void Application::run() noexcept

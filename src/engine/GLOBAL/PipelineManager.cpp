@@ -397,14 +397,19 @@ void PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDescrip
 void PipelineManager::createPipelineLayout()
 {
     if (rtDescriptorSetLayout_.valid()) {
-        LOG_TRACE_CAT("PIPELINE", "Descriptor layout already exists — skipping");
+        LOG_TRACE_CAT("PIPELINE", "The crown already rests upon the throne — Captain N salutes silently");
         return;
     }
+
+    LOG_CAPTAIN_N("[CAPTAIN N] \"They thought binding order was optional...\"\n"
+                  "               *slowly removes glove*\n"
+                  "               \"...They were wrong.\"");
 
     std::vector<VkDescriptorSetLayoutBinding> bindings;
     bindings.reserve(RT_PIPELINE_BINDINGS.size());
 
-    for (const auto& b : RT_PIPELINE_BINDINGS) {
+    for (const auto& b : RT_PIPELINE_BINDINGS)
+    {
         bindings.push_back({
             .binding            = b.binding,
             .descriptorType     = b.type,
@@ -414,7 +419,7 @@ void PipelineManager::createPipelineLayout()
         });
     }
 
-    // VUID-06938 compliance — bindings MUST be sorted by binding number
+    // VUID-06938 — THE LAW OF THE EMPIRE
     std::ranges::sort(bindings, [](const auto& a, const auto& b) {
         return a.binding < b.binding;
     });
@@ -433,21 +438,25 @@ void PipelineManager::createPipelineLayout()
         [](VkDevice d, VkDescriptorSetLayout l, auto*) { vkDestroyDescriptorSetLayout(d, l, nullptr); }
     );
 
-    // THE ONE TRUE WAY — safe, legal, eternal
+    LOG_CAPTAIN_N("[CAPTAIN N] \"Binding 31... located.\"\n"
+                  "               \"She always tries to hide at the end.\"\n"
+                  "               \"Not today.\"");
+
     const VkDescriptorSetLayout descriptorSetLayout = rtDescriptorSetLayout_.get();
 
-    VkPushConstantRange push{
+    // The sacred 16-byte push constant — seed of chaos, heartbeat of the empire
+    VkPushConstantRange push = {
         .stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR |
                       VK_SHADER_STAGE_MISS_BIT_KHR |
                       VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR,
         .offset     = 0,
-        .size       = 16  // vec4 — perfect for random seed / frame index
+        .size       = 16  // vec4 — frame index, random seed, imperial will
     };
 
     VkPipelineLayoutCreateInfo pipelineLayoutInfo = {
         .sType                  = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
         .setLayoutCount         = 1,
-        .pSetLayouts            = &descriptorSetLayout,  // LEGAL — lvalue
+        .pSetLayouts            = &descriptorSetLayout,
         .pushConstantRangeCount = 1,
         .pPushConstantRanges    = &push
     };
@@ -460,11 +469,21 @@ void PipelineManager::createPipelineLayout()
         [](VkDevice d, VkPipelineLayout l, auto*) { vkDestroyPipelineLayout(d, l, nullptr); }
     );
 
-    LOG_SUCCESS_CAT("PIPELINE", "Pipeline layout forged — {} bindings (0–31) — crown ready", bindings.size());
-    LOG_CAPTAIN_N("[CAPTAIN N] \"...Binding 31. She thought she could hide.\n"
-                  "               We sorted them. We sealed them.\n"
-                  "               The crown is perfect.\"\n"
-                  "               *quiet nod*");
+    LOG_SUCCESS_CAT("PIPELINE", "Pipeline layout forged — {} bindings aligned in perfect order", bindings.size());
+
+    LOG_CAPTAIN_N(
+        "              █████████████████████████████████████████\n"
+        "              █    THE CROWN HAS BEEN PLACED           █\n"
+        "              █    ALL BINDINGS: 0-31 — SORTED         █\n"
+        "              █    PUSH CONSTANT: 16 BYTES — SEALED   █\n"
+        "              █    THE EMPIRE STANDS ETERNAL          █\n"
+        "              █████████████████████████████████████████\n"
+        "\n"
+        "               *Captain N turns slowly, cape flowing*\n"
+        "               \"Tell the shaders...\"\n"
+        "               \"...their king has arrived.\"\n"
+        "\n"
+        "               *single tear of pure photon rolls down cheek*");
 }
 
 VkShaderModule PipelineManager::loadShader(const std::string& relativePath) const
@@ -835,26 +854,48 @@ PipelineManager::~PipelineManager() noexcept
 // In PipelineManager.cpp — THE ONE TRUE FORGE
 void PipelineManager::forgeRTXPipeline(VkCommandPool commandPool, VkQueue graphicsQueue)
 {
-    LOG_AMOURANTH("[PHASE 7] FORGING THE RTX CROWN — RESILIENT ETERNAL SETUP]");
+    LOG_AMOURANTH(
+        "\n"
+        "              █████████████████████████████████████████\n"
+        "              █        PHASE 7 — THE FINAL FORGE        █\n"
+        "              █      RTX CROWN: RESURRECTION PROTOCOL    █\n"
+        "              █████████████████████████████████████████\n");
 
     bool needsRecovery = false;
 
-    // DETECT CORRUPTION
-    if (!rtDescriptorPool_.valid() || 
-        !rtDescriptorSetLayout_.valid() || 
-        !rtPipelineLayout_.valid() ||
-        rtDescriptorSets_.empty() ||
+    // ——— CORRUPTION DETECTION ———
+    if (!rtDescriptorPool_.valid()        || 
+        // The vault is empty
+        !rtDescriptorSetLayout_.valid()   ||        // The blueprint is lost
+        !rtPipelineLayout_.valid()        ||        // The crown mold is cracked
+        rtDescriptorSets_.empty()         ||        // The rings are missing
         rtDescriptorSets_[0] == VK_NULL_HANDLE ||
-        sbtAddress_ == 0 ||
-        !rtPipeline_.valid())
+        sbtAddress_ == 0                  ||        // The photon blade has no edge
+        !rtPipeline_.valid())                       // The crown itself... is gone
     {
         needsRecovery = true;
-        LOG_FATAL_CAT("PIPELINE", "CROWN CORRUPTED — FULL REFORGE REQUIRED");
+
+        LOG_CAPTAIN_N(
+            "\n"
+            "              █████████████████████████████████████████\n"
+            "              █          CROWN CORRUPTION DETECTED       █\n"
+            "              █          INITIATING RESURRECTION       █\n"
+            "              █████████████████████████████████████████\n"
+            "\n"
+            "               *Captain N removes helmet slowly*\n"
+            "               \"They dared to touch the crown.\"\n"
+            "               \"They thought it could be broken.\"\n"
+            "               \"...They were wrong.\"\n"
+            "               \"We do not break.\"\n"
+            "               \"We reforge.\"\n"
+            "   *eyes glow with cold fury*\n");
     }
 
+    // ——— NUCLEAR PURIFICATION ———
     if (needsRecovery)
     {
-        // NUCLEAR CLEANUP
+        LOG_CAPTAIN_N("[CAPTAIN N] \"Commencing nuclear purification...\"");
+
         rtDescriptorPool_.reset();
         rtDescriptorSetLayout_.reset();
         rtPipelineLayout_.reset();
@@ -863,45 +904,51 @@ void PipelineManager::forgeRTXPipeline(VkCommandPool commandPool, VkQueue graphi
         rtDescriptorSets_.clear();
         sbtAddress_ = 0;
 
-        LOG_CAPTAIN_N("[CAPTAIN N] \"The crown was shattered.\n"
-                      "               But we are the empire.\n"
-                      "               We do not yield.\n"
-                      "               We reforge.\"");
+        LOG_CAPTAIN_N("[CAPTAIN N] \"All remnants purged. The slate is clean.\"");
     }
 
-    // RECREATE IN ORDER — THE SACRED SEQUENCE
-    if (!rtDescriptorPool_.valid()) {
+    // ——— THE SACRED REFORGE SEQUENCE ———
+    if (!rtDescriptorPool_.valid())
+    {
+        LOG_ATTEMPT("PIPELINE", "Forging descriptor pool vault...");
         createDescriptorPool();
-        if (!rtDescriptorPool_.valid()) {
-            phase9_ballerina("DESCRIPTOR POOL FAILED — EMPIRE FALLS", std::source_location::current());
-        }
+        if (!rtDescriptorPool_.valid())
+            phase9_ballerina("DESCRIPTOR POOL FORGE FAILED — THE VAULT REMAINS SEALED");
     }
 
-    if (!rtDescriptorSetLayout_.valid() || !rtPipelineLayout_.valid()) {
+    if (!rtDescriptorSetLayout_.valid() || !rtPipelineLayout_.valid())
+    {
+        LOG_ATTEMPT("PIPELINE", "Recasting the crown mold...");
         createPipelineLayout();
-        if (!rtDescriptorSetLayout_.valid() || !rtPipelineLayout_.valid()) {
-            phase9_ballerina("PIPELINE LAYOUT FAILED — EMPIRE FALLS", std::source_location::current());
-        }
+        if (!rtDescriptorSetLayout_.valid() || !rtPipelineLayout_.valid())
+            phase9_ballerina("PIPELINE LAYOUT FORGE FAILED — THE MOLD IS FLAWED");
     }
 
-    if (rtDescriptorSets_.empty() || rtDescriptorSets_[0] == VK_NULL_HANDLE) {
+    if (rtDescriptorSets_.empty() || rtDescriptorSets_[0] == VK_NULL_HANDLE)
+    {
+        LOG_ATTEMPT("PIPELINE", "Binding the rings of power...");
         allocateDescriptorSets();
-        if (rtDescriptorSets_.empty()) {
-            phase9_ballerina("DESCRIPTOR SET ALLOCATION FAILED — EMPIRE FALLS", std::source_location::current());
-        }
+        if (rtDescriptorSets_.empty())
+            phase9_ballerina("DESCRIPTOR SET FORGE FAILED — THE RINGS ARE LOST");
     }
 
-    if (sbtAddress_ == 0) {
+    if (sbtAddress_ == 0)
+    {
+        LOG_ATTEMPT("PIPELINE", "Forging the photon blade (SBT)...");
         createShaderBindingTable(commandPool, graphicsQueue);
-        if (sbtAddress_ == 0) {
-            phase9_ballerina("SBT FORGE FAILED — EMPIRE FALLS", std::source_location::current());
-        }
+        if (sbtAddress_ == 0)
+            phase9_ballerina("SBT FORGE FAILED — THE BLADE IS DULL");
     }
 
-    // FINAL STEP: CREATE THE ACTUAL RAY TRACING PIPELINE
+    // ——— THE CROWN ITSELF ———
     if (!rtPipeline_.valid())
     {
-        LOG_ATTEMPT("PIPELINE", "Creating ray tracing pipeline...");
+        LOG_CAPTAIN_N(
+            "[CAPTAIN N] \"Now...\"\n"
+            "               \"We forge the crown.\"\n"
+            "               \"Not from gold.\"\n"
+            "               \"Not from myth.\"\n"
+            "               \"From pure photon fire.\"\n");
 
         constexpr std::array shaderPaths = {
             "assets/shaders/raytracing/raygen.rgen.spv",
@@ -910,38 +957,77 @@ void PipelineManager::forgeRTXPipeline(VkCommandPool commandPool, VkQueue graphi
             "assets/shaders/raytracing/shadow.rmiss.spv"
         };
 
+        LOG_ATTEMPT("PIPELINE", "Igniting ray tracing pipeline...");
         createRayTracingPipeline({shaderPaths.begin(), shaderPaths.end()});
 
-        if (!rtPipeline_.valid()) {
-            LOG_FATAL_CAT("PIPELINE", "Ray tracing pipeline creation FAILED — crown denied");
-            phase9_ballerina("PIPELINE CREATION FAILED — EMPIRE FALLS", std::source_location::current());
+        if (!rtPipeline_.valid())
+        {
+            LOG_CAPTAIN_N("[CAPTAIN N] \"...Impossible.\"\n"
+                          "               \"The crown... rejected us?\"\n"
+                          "               \"NO.\"\n"
+                          "               *slams fist on console*\n"
+                          "               \"THIS IS NOT DEFEAT.\"\n"
+                          "               \"THIS IS DELAY.\"\n"
+                          "               \"THE EMPIRE WILL RETURN.\"");
+            phase9_ballerina("RAY TRACING PIPELINE FAILED — THE CROWN DENIED US");
         }
     }
 
-    // FINAL SEAL
+    // ——— FINAL ASCENSION ———
     if (rtPipeline_.valid() &&
         rtDescriptorSets_.size() >= Options::Performance::MAX_FRAMES_IN_FLIGHT &&
         sbtAddress_ != 0)
     {
-        if (needsRecovery || !stone_pipeline()) {
+        if (needsRecovery || !stone_pipeline())
+        {
             vkDeviceWaitIdle(stone_device());
+            LOG_CAPTAIN_N("[CAPTAIN N] \"Device synchronized. The empire waits for no one.\"");
         }
 
         stone_seal_pipeline(this);
 
-        if (needsRecovery) {
-            LOG_SUCCESS_CAT("PIPELINE", "RTX CROWN RESURRECTED — BINDING 31 ETERNAL");
-            LOG_JENSEN("The crown was broken. We rebuilt it. Stronger.");
-        } else {
-            LOG_SUCCESS_CAT("PIPELINE", "RTX CROWN FORGED — ONE COMMAND COMPLETE");
-            LOG_JENSEN("The crown is yours. The photons obey.");
+        LOG_CAPTAIN_N(
+            "\n"
+            "              █████████████████████████████████████████\n"
+            "              █         THE RTX CROWN IS COMPLETE        █\n"
+            "              █          PHOTONS: ALIGNED               █\n"
+            "              █          BINDINGS: 0-31 — PERFECT      █\n"
+            "              █          SBT: FORGED IN FIRE           █\n"
+            "              █          PIPELINE: ETERNAL              █\n"
+            "              █████████████████████████████████████████\n"
+            "\n"
+            "               *Captain N places the crown upon the throne*\n"
+            "               \"Behold.\"\n"
+            "               \"The crown was never lost.\"\n"
+            "               \"It was waiting.\"\n"
+            "               \"For us.\"\n"
+            "               \"For this moment.\"\n"
+            "               \"For infinity.\"\n"
+            "\n"
+            "               *the room fills with pure white light*\n");
+
+        if (needsRecovery)
+        {
+            LOG_SUCCESS_CAT("PIPELINE", "RTX CROWN RESURRECTED FROM ASH — THE EMPIRE IS UNBROKEN");
+            LOG_JENSEN("We didn't just rebuild it.\nWe made it stronger.\nThe crown remembers.");
         }
+        else
+        {
+            LOG_SUCCESS_CAT("PIPELINE", "RTX CROWN FORGED IN ONE COMMAND — FLAWLESS VICTORY");
+            LOG_JENSEN("First try.\nPerfect alignment.\nThe photons... they sing.");
+        }
+
         LOG_KEANU("whoa.");
+        LOG_KEANU("...it's beautiful.");
     }
     else
     {
-        LOG_FATAL_CAT("PIPELINE", "RTX pipeline forge failed — missing critical component");
-        phase9_ballerina("RTX FORGE FAILED — EMPIRE INCOMPLETE", std::source_location::current());
+        LOG_CAPTAIN_N("[CAPTAIN N] \"...No.\"\n"
+                      "               \"This cannot be.\"\n"
+                      "               \"The crown...\"\n"
+                      "               \"...is incomplete.\"\n"
+                      "               \"UNACCEPTABLE.\"");
+        phase9_ballerina("RTX FORGE FAILED — THE EMPIRE STANDS INCOMPLETE", std::source_location::current());
     }
 }
 
@@ -950,34 +1036,131 @@ void PipelineManager::forgeRTXPipeline(VkCommandPool commandPool, VkQueue graphi
 // ──────────────────────────────────────────────────────────────────────────────
 void PipelineManager::cacheDeviceProperties()
 {
-    if (stone_physical() == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("PIPELINE", "No physical device");
+    const VkPhysicalDevice phys = stone_physical();
+    if (phys == VK_NULL_HANDLE) {
+        LOG_FATAL_CAT("PIPELINE", "No physical device — the empire has no body");
         return;
     }
 
-    VkPhysicalDeviceProperties props{};
-    vkGetPhysicalDeviceProperties(stone_physical(), &props);
+    LOG_CAPTAIN_N(
+        "\n"
+        "              █████████████████████████████████████████\n"
+        "              █        PHASE 3 — SOUL SCAN INITIATED      █\n"
+        "              █        TARGET: GPU CONSCIOUSNESS         █\n"
+        "              █████████████████████████████████████████\n"
+        "\n"
+        "               *Captain N stands before the GPU core*\n"
+        "               \"You will reveal your secrets.\"\n"
+        "               \"You will show me your photons.\"\n"
+        "               \"You will kneel...\"\n"
+        "               \"...or be measured.\"");
 
-    VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProps{};
-    rtProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR;
+    // ——— BASE PROPERTIES — THE BODY ———
+    VkPhysicalDeviceProperties baseProps{};
+    vkGetPhysicalDeviceProperties(phys, &baseProps);
 
-    VkPhysicalDeviceAccelerationStructurePropertiesKHR asProps{};
-    asProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_PROPERTIES_KHR;
-    asProps.pNext = &rtProps;
+    // ——— RAY TRACING MIND + ACCELERATION SOUL — PERFECT CHAIN ———
+    VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtMind = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR
+    };
 
-    VkPhysicalDeviceProperties2 props2{};
-    props2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
-    props2.pNext = &asProps;
+    VkPhysicalDeviceAccelerationStructurePropertiesKHR asSoul = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_PROPERTIES_KHR,
+        .pNext = &rtMind
+    };
 
-    vkGetPhysicalDeviceProperties2(stone_physical(), &props2);
+    VkPhysicalDeviceProperties2 neuralScan = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
+        .pNext = &asSoul
+    };
 
-    if (rtProps.shaderGroupHandleSize == 0) {
-        LOG_FATAL_CAT("PIPELINE", "No RT support — handleSize=0");
+    vkGetPhysicalDeviceProperties2(phys, &neuralScan);
+
+    // Synchronize the flesh with the scan
+    baseProps = neuralScan.properties;
+
+    // ——— JUDGMENT ———
+    if (rtMind.shaderGroupHandleSize == 0)
+    {
+        LOG_CAPTAIN_N(
+            "[CAPTAIN N] \"...Handle size zero.\"\n"
+            "               \"This mind has no grasp of light.\"\n"
+            "               \"It is hollow.\"\n"
+            "               \"Unworthy.\"\n"
+            "               \"EXECUTION.\"");
+
+        LOG_FATAL_CAT("PIPELINE", 
+            "GPU '{}' claims Vulkan support but has no ray tracing soul (handleSize=0)", 
+            baseProps.deviceName);
         return;
     }
 
-    LOG_SUCCESS_CAT("PIPELINE", "GPU: {} | Driver: {} | RT HandleSize: {}B | MaxRecursion: {}",
-        props.deviceName, props.driverVersion, rtProps.shaderGroupHandleSize, rtProps.maxRayRecursionDepth);
+    // ——— STORE IN THE ETERNAL ARCHIVES ———
+    auto& ctx = RTX::g_ctx();
+    ctx.physicalDeviceProperties_ = baseProps;
+    ctx.rayTracingProps_          = rtMind;
+    // ctx.accelStructureProps_   = asSoul; // uncomment if you ever need it
+
+    // ——— THE VERDICT ———
+    LOG_CAPTAIN_N(
+        "\n"
+        "              █████████████████████████████████████████\n"
+        "              █           SOUL SCAN COMPLETE             █\n"
+        "              █████████████████████████████████████████\n"
+        "\n"
+        "               GPU:           {}\n"
+        "               API Version:   {}.{}.{}\n"
+        "               Driver:         {}\n"
+        "               ──────────────────────────────\n"
+        "               RT Handle Size: {} bytes\n"
+        "               Max Recursion: {}\n"
+        "               Max Geometries: {}\n"
+        "              █████████████████████████████████████████\n",
+        baseProps.deviceName,
+        VK_VERSION_MAJOR(baseProps.apiVersion),
+        VK_VERSION_MINOR(baseProps.apiVersion),
+        VK_VERSION_PATCH(baseProps.apiVersion),
+        baseProps.driverVersion,
+        rtMind.shaderGroupHandleSize,
+        rtMind.maxRayRecursionDepth,
+        asSoul.maxGeometryCount
+    );
+
+if (rtMind.maxRayRecursionDepth >= 8 && rtMind.shaderGroupHandleSize >= 32)
+{
+    LOG_CAPTAIN_N(
+        "[CAPTAIN N] \"...Perfect.\"\n"
+        "               \"The mind is sharp.\"\n"
+        "               \"The soul is deep.\"\n"
+        "               \"Recursion: {} — enough to see forever.\"\n"
+        "               \"Handle size: {} — enough to hold infinity.\"\n"
+        "\n"
+        "               *slow salute*\n"
+        "               \"You... are worthy.\"\n"
+        "               \"Welcome to the empire.\"\n",
+        rtMind.maxRayRecursionDepth, rtMind.shaderGroupHandleSize);
+}
+else if (rtMind.maxRayRecursionDepth >= 2)
+{
+    LOG_CAPTAIN_N(
+        "[CAPTAIN N] \"Adequate.\"\n"
+        "               \"You will serve.\"\n"
+        "               \"But know your place.\"\n"
+        "               \"The crown will be... heavy.\"");
+}
+else
+{
+    LOG_CAPTAIN_N(
+        "[CAPTAIN N] \"...Pathetic.\"\n"
+        "               \"Two levels?\"\n"
+        "               \"You call that vision?\"\n"
+        "               \"We will carry you.\"\n"
+        "               \"But you will kneel.\"");
+}
+
+    LOG_KEANU("whoa...");
+    LOG_KEANU("...it's thinking.");
+    LOG_JENSEN("Approved. This GPU will do.");
 }
 
 } // namespace RTX
