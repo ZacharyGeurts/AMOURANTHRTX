@@ -39,6 +39,15 @@ using StoneKey::stone_seal_views;
 
 namespace RTX {
 
+static std::string_view presentModeToString(VkPresentModeKHR mode) noexcept {
+    switch (mode) {
+        case VK_PRESENT_MODE_IMMEDIATE_KHR: return "IMMEDIATE (uncapped)";
+        case VK_PRESENT_MODE_MAILBOX_KHR: return "MAILBOX (tearing-free)";
+        case VK_PRESENT_MODE_FIFO_KHR: return "FIFO (vsync)";
+        default: return "UNKNOWN";
+    }
+}
+
 // ── EXTENSION FUNCTION POINTERS ─────────────────────────────────────────────
 static PFN_vkGetRefreshCycleDurationGOOGLE   vkGetRefreshCycleDurationGOOGLE   = nullptr;
 static PFN_vkGetPastPresentationTimingGOOGLE vkGetPastPresentationTimingGOOGLE = nullptr;
@@ -117,6 +126,67 @@ void SwapchainManager::recreate(uint32_t w, uint32_t h) noexcept
     las().notifyResize();
 }
 
+// ── IMAGE VIEW FORGE — THE EMPIRE SEES ITS CANVAS ───────────────────────────
+void SwapchainManager::createImageViews() noexcept
+{
+    LOG_AMOURANTH("Forging image views for {} swapchain images — THE PHOTONS WILL BE SEEN", swapchainImages_.size());
+
+    swapchainImageViews_.resize(swapchainImages_.size());
+
+    VkImageViewCreateInfo ci{
+        .sType            = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+        .viewType         = VK_IMAGE_VIEW_TYPE_2D,
+        .format           = swapchainFormat_,
+        .components       = {
+            VK_COMPONENT_SWIZZLE_IDENTITY,
+            VK_COMPONENT_SWIZZLE_IDENTITY,
+            VK_COMPONENT_SWIZZLE_IDENTITY,
+            VK_COMPONENT_SWIZZLE_IDENTITY
+        },
+        .subresourceRange = {
+            .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
+            .baseMipLevel   = 0,
+            .levelCount     = 1,
+            .baseArrayLayer = 0,
+            .layerCount     = 1
+        }
+    };
+
+    for (size_t i = 0; i < swapchainImages_.size(); ++i)
+    {
+        ci.image = swapchainImages_[i];
+
+        VkImageView view = VK_NULL_HANDLE;
+        VkResult result = vkCreateImageView(stone_device(), &ci, nullptr, &view);
+
+        if (result != VK_SUCCESS)
+        {
+            LOG_FATAL_CAT("SWAPCHAIN", 
+                "Failed to create image view [{}] — error: {} — triggering emergency recovery",
+                i, string_VkResult(result));
+            recreate(swapchainExtent_.width, swapchainExtent_.height);
+            return;
+        }
+
+        swapchainImageViews_[i] = view;
+    }
+
+    // Seal the empire's vision
+    stone_seal_views(swapchainImageViews_);
+
+    LOG_AMOURANTH(
+        "              {} IMAGE VIEWS FORGED SUCCESSFULLY\n"
+        "              EACH PHOTON NOW HAS A WINDOW\n"
+        "              THE EMPIRE SEES ALL",
+        swapchainImageViews_.size());
+
+    LOG_CAPTAIN_N("[CAPTAIN N] \"The eyes are open.\"\n"
+                  "               \"Every pixel — watched.\"\n"
+                  "               \"Every photon — accounted for.\"\n"
+                  "               \"We see everything.\"\n"
+                  "               \"...and they see us.\"");
+}
+
 void SwapchainManager::cleanup() noexcept
 {
     for (auto v : swapchainImageViews_)
@@ -139,19 +209,6 @@ bool SwapchainManager::supportsHDR() noexcept
     return currentColorSpace_ == VK_COLOR_SPACE_HDR10_ST2084_EXT;
 }
 
-// ── ROBUST IMAGE ACQUISITION (INFINITE TIMEOUT — NO 60FPS DEADLOCK) ─────────
-VkResult SwapchainManager::acquireNextImage(uint32_t* pImageIndex,
-                                            VkSemaphore semaphore,
-                                            VkFence fence) noexcept
-{
-    return vkAcquireNextImageKHR(stone_device(),
-                                 swapchain_.get(),
-                                 1000000000ULL,     // 1 second timeout instead of infinite
-                                 semaphore,
-                                 fence,
-                                 pImageIndex);
-}
-
 // ── CORE SWAPCHAIN FORGE ─────────────────────────────────────────────────────
 void SwapchainManager::createSwapchain(SDL_Window* window,
                                        uint32_t w,
@@ -160,8 +217,10 @@ void SwapchainManager::createSwapchain(SDL_Window* window,
 {
     LOG_AMOURANTH(
         "\n"
-        "              SWAPCHAIN FORGE ACTIVATED\n"
-        "              THE CANVAS OF INFINITY IS BEING REBORN");
+        "              █████████████████████████████████████████\n"
+        "              █        PHASE 6 — SWAPCHAIN FORGE         █\n"
+        "              █      THE CANVAS OF INFINITY REBORN      █\n"
+        "              █████████████████████████████████████████\n");
 
     VkSurfaceCapabilitiesKHR caps{};
     VK_CHECK(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(stone_physical(), stone_surface(), &caps));
@@ -219,11 +278,8 @@ void SwapchainManager::createSwapchain(SDL_Window* window,
     }
 
     LOG_AMOURANTH("Present mode secured: {} ({} requested)",
-        presentMode == VK_PRESENT_MODE_MAILBOX_KHR     ? "MAILBOX (tearing-free)" :
-        presentMode == VK_PRESENT_MODE_IMMEDIATE_KHR   ? "IMMEDIATE (uncapped)" :
-        presentMode == VK_PRESENT_MODE_FIFO_KHR        ? "FIFO (vsync)" : "unknown",
-        desired == VK_PRESENT_MODE_MAILBOX_KHR     ? "MAILBOX" :
-        desired == VK_PRESENT_MODE_IMMEDIATE_KHR   ? "IMMEDIATE" : "FIFO");
+        presentModeToString(presentMode),
+        presentModeToString(desired));
 
     // ── HDR OR SRGB — THE EMPIRE CHOOSES ITS LIGHT ──
     VkSurfaceFormatKHR chosen = formats[0];
@@ -263,7 +319,7 @@ void SwapchainManager::createSwapchain(SDL_Window* window,
         .sType            = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
         .surface          = stone_surface(),
         .minImageCount    = imageCount,
-        .imageFormat        = chosen.format,
+        .imageFormat      = chosen.format,
         .imageColorSpace  = chosen.colorSpace,
         .imageExtent      = extent,
         .imageArrayLayers = 1,
@@ -322,8 +378,7 @@ void SwapchainManager::createSwapchain(SDL_Window* window,
         "              THE PHOTONS HAVE A HOME\n"
         "              THE EMPIRE RENDERS ETERNALLY",
         extent.width, extent.height, imgCount,
-        presentMode == VK_PRESENT_MODE_MAILBOX_KHR ? "MAILBOX" :
-        presentMode == VK_PRESENT_MODE_IMMEDIATE_KHR ? "IMMEDIATE" : "FIFO");
+        presentModeToString(presentMode));
 
     LOG_CAPTAIN_N(
         "[CAPTAIN N] \"The canvas lives again.\"\n"
@@ -335,54 +390,45 @@ void SwapchainManager::createSwapchain(SDL_Window* window,
         "               \"Begin transmission.\"");
 }
 
-void SwapchainManager::createImageViews() noexcept
+// ── ROBUST IMAGE ACQUISITION (INFINITE TIMEOUT — NO 60FPS DEADLOCK) ─────────
+VkResult SwapchainManager::acquireNextImage(uint32_t* pImageIndex,
+                                            VkSemaphore semaphore,
+                                            VkFence fence) noexcept
 {
-    swapchainImageViews_.resize(swapchainImages_.size());
+    VkResult result = vkAcquireNextImageKHR(stone_device(),
+                                 swapchain_.get(),
+                                 UINT64_MAX,
+                                 semaphore,
+                                 fence,
+                                 pImageIndex);
 
-    VkImageViewCreateInfo ci{
-        .sType            = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-        .viewType         = VK_IMAGE_VIEW_TYPE_2D,
-        .format           = swapchainFormat_,
-        .components       = { VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY,
-                              VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY },
-        .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
-    };
-
-    for (size_t i = 0; i < swapchainImages_.size(); ++i)
-    {
-        ci.image = swapchainImages_[i];
-        VK_CHECK(vkCreateImageView(stone_device(), &ci, nullptr, &swapchainImageViews_[i]));
+    // Dynamic recovery
+    if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || result == VK_TIMEOUT) {
+        recreate(swapchainExtent_.width, swapchainExtent_.height);
+        return VK_ERROR_OUT_OF_DATE_KHR;  // Signal to retry
     }
 
-    stone_seal_views(swapchainImageViews_);
+    return result;
 }
 
 // ── PRESENT (robust, handles SUBOPTIMAL) ───────────────────────────────────
 void SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSemaphore waitSemaphore) noexcept
 {
-    VkSwapchainKHR rawSwapchain = swapchain_.get();  // <-- THIS LINE IS REQUIRED
+    VkSwapchainKHR rawSwapchain = swapchain_.get();  // Valid lvalue
 
     VkPresentInfoKHR pi{
         .sType              = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
         .waitSemaphoreCount = waitSemaphore ? 1u : 0u,
         .pWaitSemaphores    = waitSemaphore ? &waitSemaphore : nullptr,
         .swapchainCount     = 1,
-        .pSwapchains        = &rawSwapchain,   // <-- now valid lvalue
+        .pSwapchains        = &rawSwapchain,
         .pImageIndices      = &imageIndex
     };
 
     VkResult result = vkQueuePresentKHR(queue, &pi);
 
-    if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR)
-    {
-        g_resizeRequested.store(true);
-        g_resizeWidth.store(swapchainExtent_.width);
-        g_resizeHeight.store(swapchainExtent_.height);
-        las().notifyResize();
-    }
-    else if (result != VK_SUCCESS)
-    {
-        LOG_FATAL("vkQueuePresentKHR failed: {}", string_VkResult(result));
+    if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
+        recreate(swapchainExtent_.width, swapchainExtent_.height);
     }
 }
 
@@ -427,7 +473,7 @@ void SwapchainManager::injectHdrMetadata(VkCommandBuffer, uint32_t) noexcept
 
     if (!swapchain_.valid()) return;
 
-    VkSwapchainKHR rawSwapchain = swapchain_.get();  // <-- THIS LINE IS REQUIRED
+    VkSwapchainKHR rawSwapchain = swapchain_.get();  // Valid lvalue
 
     VkHdrMetadataEXT m{
         .sType                     = VK_STRUCTURE_TYPE_HDR_METADATA_EXT,

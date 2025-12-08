@@ -24,6 +24,9 @@
 
 using StoneKey::stone_device;
 
+inline PFN_vkGetRayTracingShaderGroupHandlesKHR g_vkGetRayTracingShaderGroupHandlesKHR = nullptr;
+inline PFN_vkCreateRayTracingPipelinesKHR       g_vkCreateRayTracingPipelinesKHR       = nullptr;
+
 namespace RTX {
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -115,6 +118,8 @@ public:
     void initializePipeline(const std::vector<std::string>& shaderPaths, VkCommandPool pool, VkQueue queue);
     void cleanup() noexcept;
     void forgeRTXPipeline(VkCommandPool commandPool, VkQueue graphicsQueue);
+	
+	[[nodiscard]] VkResult recordCommandBuffer(uint32_t frame) const noexcept;
 
     static std::atomic<bool>     g_pipelineNeedsRebuild;
     static std::atomic<uint32_t> g_rebuildRequestedFrame;
@@ -152,7 +157,15 @@ public:
 
     void setSBT(VkBuffer buffer, VkDeviceMemory memory, VkDeviceSize address, VkDeviceSize size) noexcept;
 
+	[[nodiscard]] PFN_vkCmdTraceRaysKHR                    cmdTraceRays()           const noexcept { return vkCmdTraceRaysKHR_; }
+    [[nodiscard]] PFN_vkCreateRayTracingPipelinesKHR       createRTPipelines()      const noexcept { return vkCreateRayTracingPipelinesKHR_; }
+    [[nodiscard]] PFN_vkGetRayTracingShaderGroupHandlesKHR getRTShaderGroups()      const noexcept { return vkGetRayTracingShaderGroupHandlesKHR_; }
+
 private:
+    PFN_vkCmdTraceRaysKHR                    vkCmdTraceRaysKHR_                    = nullptr;
+    PFN_vkCreateRayTracingPipelinesKHR       vkCreateRayTracingPipelinesKHR_       = nullptr;
+    PFN_vkGetRayTracingShaderGroupHandlesKHR vkGetRayTracingShaderGroupHandlesKHR_ = nullptr;
+
     float timestampPeriod_{0.0f};
 
     Handle<VkDescriptorSetLayout> rtDescriptorSetLayout_;
@@ -182,12 +195,8 @@ private:
     Handle<VkDeviceMemory>            dummyAccelMemory_;
     Handle<VkAccelerationStructureKHR> dummyTLAS_;
 
-    PFN_vkCreateRayTracingPipelinesKHR       vkCreateRayTracingPipelinesKHR_{nullptr};
-    PFN_vkGetRayTracingShaderGroupHandlesKHR vkGetRayTracingShaderGroupHandlesKHR_{nullptr};
-    PFN_vkCmdTraceRaysKHR                    vkCmdTraceRaysKHR_{nullptr};
-
     void cacheDeviceProperties();
-    void loadRayTracingExtensions();
+    void loadRayTracingExtensions() noexcept;
     [[nodiscard]] VkShaderModule loadShader(const std::string& path) const;
 
     static constexpr VkDeviceSize align_up(VkDeviceSize size, VkDeviceSize alignment) noexcept {

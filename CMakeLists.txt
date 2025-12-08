@@ -407,8 +407,8 @@ add_custom_command(
 # =============================================================================
 message(STATUS "")
 message(STATUS "==================================================================")
-message(STATUS " AMOURANTH RTX — FULLY FIXED + Dear ImGui (SDL3+Vulkan) — NOVEMBER 17 2025")
+message(STATUS " AMOURANTH RTX — FULLY FIXED + (SDL3+Vulkan)")
 message(STATUS " Target: ${BIN_DIR}/Navigator${EXE_SUFFIX}")
 message(STATUS " Run: ./linux.sh clean")
-message(STATUS " HDR: 10-bit invisible HDR via GBM — works even on Cinnamon/GNOME")
+message(STATUS " HDR: 10-bit invisible HDR via GBM — works even on Cinnamon/GNOME?")
 message(STATUS "==================================================================")

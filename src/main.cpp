@@ -661,90 +661,133 @@ while (SDL_PollEvent(&e)) {
 
 static void phase1_preInitialization() noexcept
 {
-LOG_BLONDIE("\n"
-    "    Blondie sends love.\n"
-    "┌──────────────────────────────────────\n"
-    "│   BLONDIE'S LIVE STATUS — 2025 \n"
-    "├──────────────────────────────────────\n"
-    "│ Denoising            : {} \n"
-    "│ Temporal AA          : {} \n"
-    "│ Bloom                : {} \n"
-    "│ SSAO                 : {} \n"
-    "│ Volumetric Fog       : {} \n"
-    "│ God Rays             : {} \n"
-    "│ Tonemapping          : {} \n"
-    "│ VSync                : {} \n"
-    "│ Max Ray Bounces      : {} \n"
-    "│ Adaptive Sampling    : {} \n"
-    "│ HyperTrace           : {} \n"
-    "│ Perfect Frame Pacing : {} \n"
-    "│ Direct Display       : {} \n"
-    "│ HDR Auto-Ignition    : {} \n"
-    "│ Quantum Resize Pred  : {} \n"
-    "│ Shading Rate         : {} \n"
-    "│ Present Mode         : {} \n"
-    "│ Environment Map      : {} \n"
-    "│ IBL Active           : {} \n"
-    "│ Sky Atmosphere       : {} \n"
-    "│ Blue Noise           : {} \n"
-    "└──────────────────────────────────────\n"
-    "\"Here to assist with my sloop. Call me anytime.\" — Blondie\n",
-    
-    // Feature states — perfectly matched to OptionsMenu.hpp
-    Options::OptionsRTX::ENABLE_DENOISING             ? "ON  " : "OFF ",
-    Options::OptionsRTX::ENABLE_TAA                   ? "ON  " : "OFF ",
-    Options::PostProcess::ENABLE_BLOOM                ? "ON  " : "OFF ",
-    Options::PostProcess::ENABLE_SSAO              ? "ON  " : "OFF ",
-    Options::Environment::ENABLE_VOLUMETRIC_FOG       ? "ON  " : "OFF ",
-    Options::Environment::ENABLE_GOD_RAYS            ? "ON  " : "OFF ",
-    Options::Tonemap::ENABLE_TONEMAPPING           ? "ON  " : "OFF ",
-    Options::Display::ENABLE_VSYNC                    ? "ON  " : "OFF ",
-    Options::OptionsRTX::MAX_BOUNCES,
-    Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING     ? "ON  " : "OFF ",
-    Options::OptionsRTX::ENABLE_HYPERTRACE            ? "ON  " : "OFF ",
-    Options::Performance::ENABLE_FRAME_PREDICTION     ? "ON  " : "OFF ",
-    Options::Performance::ENABLE_DIRECT_DISPLAY        ? "ON  " : "OFF ",
-    Options::Display::HDR_AUTO_IGNITION               ? "IGNITED" : "DORMANT",
-    Options::Window::ENABLE_QUANTUM_RESIZE_PREDICTION ? "ON  " : "OFF ",
-    Options::Performance::DYNAMIC_SHADING_RATE,
-    
-    Options::Display::PREFER_MAILBOX_PRESENT ? "Mailbox (Tear-Free)" :
-    Options::Display::ALLOW_IMMEDIATE_PRESENT ? "Immediate (Uncapped)" : "FIFO (Safe)",
-    
-    Options::Environment::ENABLE_ENV_MAP              ? "ON  " : "OFF ",
-    Options::Environment::ENABLE_IBL                  ? "ON  " : "OFF ",
-    Options::Environment::ENABLE_SKY_ATMOSPHERE       ? "ON  " : "OFF ",
-    Options::Environment::ENABLE_BLUE_NOISE           ? "ON  " : "OFF "
-);
+    LOG_MAIN(
+        "\n"
+        "╔══════════════════════════════════════════════════════════════════════════════╗\n"
+        "║                           PHASE 1 — PRE-INITIALIZATION                       ║\n"
+        "║                              BLONDIE'S LIVE STATUS — 2025                    ║\n"
+        "╚══════════════════════════════════════════════════════════════════════════════╝\n");
+
+    LOG_BLONDIE("\n"
+        "    Blondie sends love.\n"
+        "┌──────────────────────────────────────\n"
+        "│   BLONDIE'S LIVE STATUS — 2025 \n"
+        "├──────────────────────────────────────\n"
+        "│ Denoising            : {}   \n"
+        "│ Temporal AA          : {}   \n"
+        "│ Bloom                : {}   \n"
+        "│ SSAO                 : {}   \n"
+        "│ Volumetric Fog       : {}   \n"
+        "│ God Rays             : {}   \n"
+        "│ Tonemapping          : {}   \n"
+        "│ VSync                : {}   \n"
+        "│ Max Ray Bounces      : {}   \n"
+        "│ Adaptive Sampling    : {}   \n"
+        "│ HyperTrace           : {}   \n"
+        "│ Perfect Frame Pacing : {}   \n"
+        "│ Direct Display       : {}   \n"
+        "│ HDR Auto-Ignition    : {}   \n"
+        "│ Quantum Resize Pred  : {}   \n"
+        "│ Shading Rate         : {}   \n"
+        "│ Present Mode         : {}   \n"
+        "│ Environment Map      : {}   \n"
+        "│ IBL Active           : {}   \n"
+        "│ Sky Atmosphere       : {}   \n"
+        "│ Blue Noise           : {}   \n"
+        "└──────────────────────────────────────\n"
+        "\"Here to assist with my sloop. Call me anytime.\" — Blondie\n",
+        
+        // Feature states — perfectly matched to OptionsMenu.hpp
+        Options::OptionsRTX::ENABLE_DENOISING             ? "ON  " : "OFF ",
+        Options::OptionsRTX::ENABLE_TAA                   ? "ON  " : "OFF ",
+        Options::PostProcess::ENABLE_BLOOM                ? "ON  " : "OFF ",
+        Options::PostProcess::ENABLE_SSAO                 ? "ON  " : "OFF ",
+        Options::Environment::ENABLE_VOLUMETRIC_FOG       ? "ON  " : "OFF ",
+        Options::Environment::ENABLE_GOD_RAYS             ? "ON  " : "OFF ",
+        Options::Tonemap::ENABLE_TONEMAPPING              ? "ON  " : "OFF ",
+        Options::Display::ENABLE_VSYNC                    ? "ON  " : "OFF ",
+        Options::OptionsRTX::MAX_BOUNCES,
+        Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING     ? "ON  " : "OFF ",
+        Options::OptionsRTX::ENABLE_HYPERTRACE            ? "ON  " : "OFF ",
+        Options::Performance::ENABLE_FRAME_PREDICTION     ? "ON  " : "OFF ",
+        Options::Performance::ENABLE_DIRECT_DISPLAY       ? "ON  " : "OFF ",
+        Options::Display::HDR_AUTO_IGNITION               ? "IGNITED" : "DORMANT",
+        Options::Window::ENABLE_QUANTUM_RESIZE_PREDICTION ? "ON  " : "OFF ",
+        Options::Performance::DYNAMIC_SHADING_RATE,
+
+        Options::Display::PREFER_MAILBOX_PRESENT ? "Mailbox (Tear-Free)" :
+        Options::Display::ALLOW_IMMEDIATE_PRESENT ? "Immediate (Uncapped)" : "FIFO (Safe)",
+
+        Options::Environment::ENABLE_ENV_MAP              ? "ON  " : "OFF ",
+        Options::Environment::ENABLE_IBL                  ? "ON  " : "OFF ",
+        Options::Environment::ENABLE_SKY_ATMOSPHERE       ? "ON  " : "OFF ",
+        Options::Environment::ENABLE_BLUE_NOISE           ? "ON  " : "OFF "
+    );
+
+    LOG_MAIN(
+        "╔══════════════════════════════════════════════════════════════════════════════╗\n"
+        "║                       PHASE 1 — COMPLETE — EMPIRE AWAKENS                   ║\n"
+        "╚══════════════════════════════════════════════════════════════════════════════╝\n");
 }
 
-static void phase3_sacrificialSplash() {
+static void phase3_sacrificialSplash()
+{
+    LOG_MAIN(
+        "\n"
+        "╔══════════════════════════════════════════════════════════════════════════════╗\n"
+        "║                          PHASE 3 — SACRIFICIAL SPLASH                        ║\n"
+        "╚══════════════════════════════════════════════════════════════════════════════╝\n");
+
     showSacrificialSplash();
+
+    LOG_MAIN(
+        "╔══════════════════════════════════════════════════════════════════════════════╗\n"
+        "║                     PHASE 3 — COMPLETE — PHOTONS LIBERATED                  ║\n"
+        "╚══════════════════════════════════════════════════════════════════════════════╝\n");
 }
 
-static void phase4_merchantShip() {
+static void phase4_merchantShip()
+{
+    LOG_MAIN(
+        "\n"
+        "╔══════════════════════════════════════════════════════════════════════════════╗\n"
+        "║                           PHASE 4 — MERCHANT SHIP                            ║\n"
+        "╚══════════════════════════════════════════════════════════════════════════════╝\n");
+
     createRealFinalWindow();
     RTX::g_ctx().init();
+
+    LOG_MAIN(
+        "╔══════════════════════════════════════════════════════════════════════════════╗\n"
+        "║                   PHASE 4 — COMPLETE — WINDOW CLAIMED — CTX INITED          ║\n"
+        "╚══════════════════════════════════════════════════════════════════════════════╝\n");
 }
 
-static void phase6_sceneAndAccelerationStructures() {
-        g_mesh = MeshLoader::loadOBJ("assets/models/scene.obj");
+static void phase6_sceneAndAccelerationStructures()
+{
+    LOG_MAIN(
+        "\n"
+        "╔══════════════════════════════════════════════════════════════════════════════╗\n"
+        "║                PHASE 6 — SCENE & ACCELERATION STRUCTURES FORGED              ║\n"
+        "╚══════════════════════════════════════════════════════════════════════════════╝\n");
 
-        if (!g_mesh) {
-            LOG_FATAL_CAT("MESH", "scene.obj failed to load — nullptr returned");
-            phase9_ballerina("MESH LOAD RETURNED NULLPTR", std::source_location::current());
-        }
-        if (g_mesh->vertices.empty()) {
-            LOG_FATAL_CAT("MESH", "scene.obj loaded but vertex array is empty — corrupted or unsupported format");
-            phase9_ballerina("MESH VERTICES EMPTY", std::source_location::current());
-        }
-        if (g_mesh->vertexBuffer == 0 || g_mesh->indexBuffer == 0) {
-            LOG_FATAL_CAT("MESH", "MESH BUFFERS NOT ALLOCATED — vertexBuffer=0x{} indexBuffer=0x{}",
-                          g_mesh->vertexBuffer, g_mesh->indexBuffer);
-            phase9_ballerina("MESH BUFFERS ZERO", std::source_location::current());
-        }
+    g_mesh = MeshLoader::loadOBJ("assets/models/scene.obj");
 
-	auto* mesh = g_mesh.get();  // std::unique_ptr<MeshLoader::Mesh>
+    if (!g_mesh) {
+        LOG_FATAL_CAT("MESH", "scene.obj failed to load — nullptr returned");
+        phase9_ballerina("MESH LOAD RETURNED NULLPTR", std::source_location::current());
+    }
+    if (g_mesh->vertices.empty()) {
+        LOG_FATAL_CAT("MESH", "scene.obj loaded but vertex array is empty — corrupted or unsupported format");
+        phase9_ballerina("MESH VERTICES EMPTY", std::source_location::current());
+    }
+    if (g_mesh->vertexBuffer == 0 || g_mesh->indexBuffer == 0) {
+        LOG_FATAL_CAT("MESH", "MESH BUFFERS NOT ALLOCATED — vertexBuffer=0x{:X} indexBuffer=0x{:X}",
+                      g_mesh->vertexBuffer, g_mesh->indexBuffer);
+        phase9_ballerina("MESH BUFFERS ZERO", std::source_location::current());
+    }
+
+    auto* mesh = g_mesh.get();  // std::unique_ptr<MeshLoader::Mesh>
 
     // Seal the ONE TRUE MESH into the Empire
     stone_seal_mesh(
@@ -754,6 +797,11 @@ static void phase6_sceneAndAccelerationStructures() {
         BufferManager::get(mesh->indexBuffer)->memory,   // VkDeviceMemory (index)
         static_cast<uint32_t>(mesh->indices.size())       // index count
     );
+
+    LOG_MAIN(
+        "╔══════════════════════════════════════════════════════════════════════════════╗\n"
+        "║                PHASE 6 — COMPLETE — MESH SEALED — EMPIRE REMEMBERS           ║\n"
+        "╚══════════════════════════════════════════════════════════════════════════════╝\n");
 }
 
 // =============================================================================
@@ -761,7 +809,11 @@ static void phase6_sceneAndAccelerationStructures() {
 // =============================================================================
 static void phase7_forgeTheRTX()
 {
-    LOG_MAIN("[PHASE 7] FORGING THE RTX CROWN — ONE COMMAND, ETERNAL SETUP");
+    LOG_MAIN(
+        "\n"
+        "╔══════════════════════════════════════════════════════════════════════════════╗\n"
+        "║                     PHASE 7 — FORGING THE RTX CROWN                         ║\n"
+        "╚══════════════════════════════════════════════════════════════════════════════╝\n");
 
     auto& pipe = RTX::pipeline();
     pipe.forgeRTXPipeline(RTX::g_ctx().commandPool(), stone_graphics_queue());
@@ -770,6 +822,11 @@ static void phase7_forgeTheRTX()
     vkDeviceWaitIdle(stone_device());
 
     LOG_SUCCESS_CAT("PIPELINE", "RTX CROWN FULLY FORGED — DESCRIPTOR SETS ALLOCATED — READY FOR BATTLE");
+
+    LOG_MAIN(
+        "╔══════════════════════════════════════════════════════════════════════════════╗\n"
+        "║                     PHASE 7 — COMPLETE — RTX CROWN WORN                     ║\n"
+        "╚══════════════════════════════════════════════════════════════════════════════╝\n");
 }
 
 // =============================================================================
@@ -777,6 +834,12 @@ static void phase7_forgeTheRTX()
 // =============================================================================
 static std::unique_ptr<VulkanRenderer> phase7_5_Renderer() noexcept
 {
+    LOG_MAIN(
+        "\n"
+        "╔══════════════════════════════════════════════════════════════════════════════╗\n"
+        "║                    PHASE 7.5 — FORGING THE ONE TRUE RENDERER                ║\n"
+        "╚══════════════════════════════════════════════════════════════════════════════╝\n");
+
     LOG_ATTEMPT_CAT("RENDERER", "PHASE 7.5 — Forging the one true renderer...");
 
     auto renderer = std::make_unique<VulkanRenderer>(
@@ -806,11 +869,16 @@ static std::unique_ptr<VulkanRenderer> phase7_5_Renderer() noexcept
                   "               The empire is whole.\"\n"
                   "*salutes with glowing plasma blade*");
 
+    LOG_MAIN(
+        "╔══════════════════════════════════════════════════════════════════════════════╗\n"
+        "║                PHASE 7.5 — COMPLETE — RENDERER FORGED — EMPIRE SEALED       ║\n"
+        "╚══════════════════════════════════════════════════════════════════════════════╝\n");
+
     return renderer;
 }
 
 // =============================================================================
-// PHASE 9 - Disposal RAII
+// PHASE 9 - Disposal RAII — THE BALLERINA SPINS ETERNAL
 // =============================================================================
 [[noreturn]] void phase9_ballerina(std::string_view reason, std::source_location loc) noexcept
 {

@@ -75,8 +75,8 @@ public:
     void onWindowResize(uint32_t w, uint32_t h) noexcept;
     void cleanup() noexcept;
     void createCommandPool() noexcept;
-	void createCommandBuffers() noexcept;
-	bool isAlive() const noexcept;
+    void createCommandBuffers() noexcept;
+    bool isAlive() const noexcept;
 
     VkFence  inFlightFence(uint32_t frame) const noexcept { return inFlightFences_[frame]; }
     VkFence* inFlightFencePtr(uint32_t frame) noexcept     { return &inFlightFences_[frame]; }
@@ -88,13 +88,13 @@ public:
     void setTonemapType(int type) noexcept;
     void setOverclockMode(bool enabled) noexcept;
 
-	void transitionImageForTransferWrite(VkCommandBuffer cmd, VkImage image, VkImageLayout oldLayout) noexcept;
-	void transitionImageForShaderRead(VkCommandBuffer cmd, VkImage image, VkImageLayout oldLayout) noexcept;
+    void transitionImageForTransferWrite(VkCommandBuffer cmd, VkImage image, VkImageLayout oldLayout) noexcept;
+    void transitionImageForShaderRead(VkCommandBuffer cmd, VkImage image, VkImageLayout oldLayout) noexcept;
 
     void updateUniformBinding31(const void* data, VkDeviceSize size) noexcept;
     void setRenderMode(int mode) noexcept;
     void requestAccumulationReset() noexcept { resetAccumulation_ = true; resetAccumNextFrame_ = true; }
-	void requestResize(uint32_t newWidth, uint32_t newHeight) noexcept;
+    void requestResize(uint32_t newWidth, uint32_t newHeight) noexcept;
 
     void updateAllRTXDescriptors() noexcept;
     void updateRTDescriptorSet(uint32_t frameIndex);
@@ -105,7 +105,7 @@ public:
 
     void createSyncObjects() noexcept;
 
-	bool swapchainRecreated_ = false;
+    bool swapchainRecreated_ = false;
 
     [[nodiscard]] VulkanRenderer* renderer() noexcept { return this; }
     [[nodiscard]] uint32_t  accumulationFrame() const noexcept { return accumulationFrame_; }
@@ -118,22 +118,22 @@ public:
     [[nodiscard]] int       tonemapType()       const noexcept { return tonemapType_; }
     [[nodiscard]] FpsTarget fpsTarget()         const noexcept { return fpsTarget_; }
     [[nodiscard]] int       currentRenderMode() const noexcept { return activeRenderMode_; }
-	[[nodiscard]] bool minimized() const noexcept { return minimized_; }
+    [[nodiscard]] bool minimized() const noexcept { return minimized_; }
     [[nodiscard]] int  width()     const noexcept { return width_; }
     [[nodiscard]] int  height()    const noexcept { return height_; }
-	void recordPinkScreen(VkCommandBuffer cmd, VkImage swapImage);
-	void onSwapchainRebuilt(uint32_t width, uint32_t height) noexcept;
+    void recordPinkScreen(VkCommandBuffer cmd, VkImage swapImage);
+    void onSwapchainRebuilt(uint32_t width, uint32_t height) noexcept;
     void recordRayTrace(VkCommandBuffer cmd, const VkExtent2D& extent) noexcept;
     void initializeAllBufferData(uint32_t frames, VkDeviceSize uniformSize, VkDeviceSize materialSize) noexcept;
     void setMaxFramesInFlight(uint32_t count) noexcept;
-	void createTonemapDescriptorSets() noexcept;
-	void createTonemapDescriptorPool() noexcept;
+    void createTonemapDescriptorSets() noexcept;
+    void createTonemapDescriptorPool() noexcept;
     void createTonemapDescriptorSetLayout() noexcept;
-	void createDepthResources() noexcept;
+    void createDepthResources() noexcept;
 
-	static inline std::atomic<bool> s_resizeInProgress{false};
+    static inline std::atomic<bool> s_resizeInProgress{false};
     bool     resetAccumulation_ = true;
-	void clearPinkForce() noexcept;
+    void clearPinkForce() noexcept;
     EnvironmentMap createEnvironmentMap() noexcept;
     // Command buffers
     std::vector<VkCommandBuffer> commandBuffers_;
@@ -145,7 +145,7 @@ public:
 
     // Environment map
     RTX::Handle<VkImage>        envMapImage_;
-    RTX::Handle<VkDeviceMemory> envMapImageMemory_;
+    RTX::Handle<VkDeviceMemory> envMapMemory_;
     RTX::Handle<VkImageView>    envMapImageView_;
     RTX::Handle<VkSampler>      envMapSampler_;
 
@@ -168,20 +168,20 @@ private:
     bool minimized_ = false;
     bool destroyed_ = false;
     bool needsRecreateOnResize = true;
-	bool overlayValid_ = false;
-	bool overlayEnabled_ = true;
-	std::atomic<bool> swapchainOutOfDate_ = false;
-	void clearResizeFlag() noexcept;
-	static inline std::atomic<bool> g_forcePink{false};
+    bool overlayValid_ = false;
+    bool overlayEnabled_ = true;
+    std::atomic<bool> swapchainOutOfDate_ = false;
+    void clearResizeFlag() noexcept;
+    static inline std::atomic<bool> g_forcePink{false};
 
     std::atomic<uint32_t> currentFrame_{0};
-	uint32_t maxFramesInFlight_ = Options::Performance::MAX_FRAMES_IN_FLIGHT;
+    uint32_t maxFramesInFlight_ = Options::Performance::MAX_FRAMES_IN_FLIGHT;
     uint64_t frameNumber_  = 0;
     uint32_t accumulationFrame_ = 0;
     bool     firstSwapchainAcquire_ = true;
     bool     resetAccumNextFrame_ = true;
 
-	RTX::Handle<VkImage>         depthImage_;
+    RTX::Handle<VkImage>         depthImage_;
     RTX::Handle<VkDeviceMemory>  depthImageMemory_;
 
     // Tonemap render targets (created during swapchain rebuild)
@@ -193,7 +193,7 @@ private:
     std::vector<RTX::Handle<VkFramebuffer>>  tonemapFramebuffers_;
 
     int  activeRenderMode_ = 0;
-	std::atomic<uint64_t> rendererRebuildFrame_{0};
+    std::atomic<uint64_t> rendererRebuildFrame_{0};
 
     void clearAccumulationImages(VkCommandBuffer cmd);
 
@@ -292,15 +292,20 @@ private:
     void performDenoisingPass(VkCommandBuffer cmd) noexcept;
     void performTonemapPass(VkCommandBuffer cmd, uint32_t frameIdx, uint32_t swapImageIdx) noexcept;
 
+    VkResult recordCommandBuffer(uint32_t frame) noexcept;
+
     void updateRTXDescriptors(uint32_t frame = 0) noexcept;
     void updateNexusDescriptors() noexcept;
     void updateDenoiserDescriptors() noexcept;
     void updateTonemapDescriptor(uint32_t frameIdx, VkImageView inputView, VkImageView output) noexcept;
+    void updateTonemapUBO(uint32_t frame) noexcept;
 
     void updateUniformBuffer(uint32_t frame, const Camera& camera, float jitter) noexcept;
     void updateTonemapUniform(uint32_t frame) noexcept;
     bool recreateTonemapUBOs() noexcept;
-	void waitForGPU() noexcept;
+    void waitForGPU() noexcept;
+
+    std::vector<uint64_t>                 rtOutputHandles_;     // BufferManager handles
 
     VkDeviceAddress getShaderGroupHandle(uint32_t group) noexcept;
 
@@ -312,7 +317,7 @@ private:
                  RTX::Handle<VkDeviceMemory>& memory,
                  const std::string& tag = "") noexcept;
 
-	void createImageArray(std::vector<RTX::Handle<VkImage>>& images,
+    void createImageArray(std::vector<RTX::Handle<VkImage>>& images,
                                       std::vector<RTX::Handle<VkDeviceMemory>>& memories,
                                       std::vector<RTX::Handle<VkImageView>>& views,
                                       uint32_t count,
