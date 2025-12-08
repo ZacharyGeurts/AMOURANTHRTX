@@ -153,21 +153,36 @@ VkResult SwapchainManager::acquireNextImage(uint32_t* pImageIndex,
 }
 
 // ── CORE SWAPCHAIN FORGE ─────────────────────────────────────────────────────
-void SwapchainManager::createSwapchain(SDL_Window*, uint32_t w, uint32_t h, VkSwapchainKHR old) noexcept
+void SwapchainManager::createSwapchain(SDL_Window* window,
+                                       uint32_t w,
+                                       uint32_t h,
+                                       VkSwapchainKHR old) noexcept
 {
+    LOG_AMOURANTH(
+        "\n"
+        "              SWAPCHAIN FORGE ACTIVATED\n"
+        "              THE CANVAS OF INFINITY IS BEING REBORN");
+
     VkSurfaceCapabilitiesKHR caps{};
-    vkGetPhysicalDeviceSurfaceCapabilitiesKHR(stone_physical(), stone_surface(), &caps);
+    VK_CHECK(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(stone_physical(), stone_surface(), &caps));
 
+    // ── SURFACE FORMATS — THE EMPIRE CHOOSES ITS COLORS ──
     uint32_t formatCount = 0;
-    vkGetPhysicalDeviceSurfaceFormatsKHR(stone_physical(), stone_surface(), &formatCount, nullptr);
+    VK_CHECK(vkGetPhysicalDeviceSurfaceFormatsKHR(stone_physical(), stone_surface(), &formatCount, nullptr));
     std::vector<VkSurfaceFormatKHR> formats(formatCount);
-    if (formatCount) vkGetPhysicalDeviceSurfaceFormatsKHR(stone_physical(), stone_surface(), &formatCount, formats.data());
+    if (formatCount) {
+        VK_CHECK(vkGetPhysicalDeviceSurfaceFormatsKHR(stone_physical(), stone_surface(), &formatCount, formats.data()));
+    }
 
+    // ── PRESENT MODES — THE EMPIRE CHOOSES ITS SPEED ──
     uint32_t presentCount = 0;
-    vkGetPhysicalDeviceSurfacePresentModesKHR(stone_physical(), stone_surface(), &presentCount, nullptr);
+    VK_CHECK(vkGetPhysicalDeviceSurfacePresentModesKHR(stone_physical(), stone_surface(), &presentCount, nullptr));
     std::vector<VkPresentModeKHR> presentModes(presentCount);
-    if (presentCount) vkGetPhysicalDeviceSurfacePresentModesKHR(stone_physical(), stone_surface(), &presentCount, presentModes.data());
+    if (presentCount) {
+        VK_CHECK(vkGetPhysicalDeviceSurfacePresentModesKHR(stone_physical(), stone_surface(), &presentCount, presentModes.data()));
+    }
 
+    // ── EXTENT — THE EMPIRE CLAIMS ITS TERRITORY ──
     VkExtent2D extent = caps.currentExtent;
     if (extent.width == std::numeric_limits<uint32_t>::max())
     {
@@ -175,13 +190,18 @@ void SwapchainManager::createSwapchain(SDL_Window*, uint32_t w, uint32_t h, VkSw
         extent.height = std::clamp(h, caps.minImageExtent.height, caps.maxImageExtent.height);
     }
 
-    uint32_t imageCount = caps.minImageCount + 1;
-    if (Options::Performance::MAX_FRAMES_IN_FLIGHT > 0 && imageCount > Options::Performance::MAX_FRAMES_IN_FLIGHT)
-        imageCount = Options::Performance::MAX_FRAMES_IN_FLIGHT;
-    if (caps.maxImageCount > 0 && imageCount > caps.maxImageCount)
-        imageCount = caps.maxImageCount;
+    LOG_AMOURANTH("Swapchain territory claimed: {}×{}", extent.width, extent.height);
 
-    // ── PRESENT MODE: BestQuality = capped, Uncapped = uncapped ─────────────
+    // ── IMAGE COUNT — THE EMPIRE DEMANDS FRAMES ──
+    uint32_t imageCount = caps.minImageCount + 1;
+    if (Options::Performance::MAX_FRAMES_IN_FLIGHT > 0) {
+        imageCount = std::min(imageCount, Options::Performance::MAX_FRAMES_IN_FLIGHT);
+    }
+    if (caps.maxImageCount > 0) {
+        imageCount = std::min(imageCount, caps.maxImageCount);
+    }
+
+    // ── PRESENT MODE — THE EMPIRE CHOOSES ITS VELOCITY ──
     VkPresentModeKHR desired = VK_PRESENT_MODE_FIFO_KHR;
     if (Options::Display::UNCAPPED_MODE_ACTIVE)
         desired = VK_PRESENT_MODE_IMMEDIATE_KHR;
@@ -198,29 +218,52 @@ void SwapchainManager::createSwapchain(SDL_Window*, uint32_t w, uint32_t h, VkSw
         }
     }
 
-    // HDR format selection
+    LOG_AMOURANTH("Present mode secured: {} ({} requested)",
+        presentMode == VK_PRESENT_MODE_MAILBOX_KHR     ? "MAILBOX (tearing-free)" :
+        presentMode == VK_PRESENT_MODE_IMMEDIATE_KHR   ? "IMMEDIATE (uncapped)" :
+        presentMode == VK_PRESENT_MODE_FIFO_KHR        ? "FIFO (vsync)" : "unknown",
+        desired == VK_PRESENT_MODE_MAILBOX_KHR     ? "MAILBOX" :
+        desired == VK_PRESENT_MODE_IMMEDIATE_KHR   ? "IMMEDIATE" : "FIFO");
+
+    // ── HDR OR SRGB — THE EMPIRE CHOOSES ITS LIGHT ──
     VkSurfaceFormatKHR chosen = formats[0];
     if (supportsHDR())
     {
         for (const auto& f : formats)
+        {
             if (f.format == VK_FORMAT_A2B10G10R10_UNORM_PACK32 && f.colorSpace == VK_COLOR_SPACE_HDR10_ST2084_EXT)
-                { chosen = f; break; }
+            {
+                chosen = f;
+                LOG_AMOURANTH("HDR10 ST2084 FORMAT CLAIMED — THE PHOTONS WILL BURN");
+                break;
+            }
+        }
     }
     else
     {
         for (const auto& f : formats)
+        {
             if (f.format == VK_FORMAT_B8G8R8A8_SRGB && f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)
-                { chosen = f; break; }
+            {
+                chosen = f;
+                break;
+            }
+        }
     }
 
+    LOG_AMOURANTH("Color format: {} | Color space: {}",
+        chosen.format == VK_FORMAT_A2B10G10R10_UNORM_PACK32 ? "HDR10" : "sRGB",
+        chosen.colorSpace == VK_COLOR_SPACE_HDR10_ST2084_EXT ? "HDR10_ST2084" : "sRGB");
+
+    // ── QUEUE OWNERSHIP — THE EMPIRE OWNS ALL PATHS ──
     QueueFamilyIndices qf = findQueueFamilies(stone_physical(), stone_surface());
     uint32_t queueFamilyIndices[] = { qf.graphicsFamily.value(), qf.presentFamily.value() };
 
-    VkSwapchainCreateInfoKHR ci{
+    VkSwapchainCreateInfoKHR ci = {
         .sType            = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
         .surface          = stone_surface(),
         .minImageCount    = imageCount,
-        .imageFormat      = chosen.format,
+        .imageFormat        = chosen.format,
         .imageColorSpace  = chosen.colorSpace,
         .imageExtent      = extent,
         .imageArrayLayers = 1,
@@ -237,33 +280,59 @@ void SwapchainManager::createSwapchain(SDL_Window*, uint32_t w, uint32_t h, VkSw
         ci.imageSharingMode      = VK_SHARING_MODE_CONCURRENT;
         ci.queueFamilyIndexCount = 2;
         ci.pQueueFamilyIndices   = queueFamilyIndices;
+        LOG_AMOURANTH("Concurrent queue ownership — graphics {} | present {}", qf.graphicsFamily.value(), qf.presentFamily.value());
     }
     else
     {
         ci.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
     }
 
+    // ── FORGE THE CANVAS ──
     VkSwapchainKHR raw = VK_NULL_HANDLE;
     VK_CHECK(vkCreateSwapchainKHR(stone_device(), &ci, nullptr, &raw));
 
-    swapchain_ = Handle<VkSwapchainKHR>(raw, stone_device());
+    // Destroy old swapchain AFTER new one is created (Vulkan spec compliant)
+    if (old && old != raw) {
+        vkDestroySwapchainKHR(stone_device(), old, nullptr);
+    }
+
+    swapchain_         = Handle<VkSwapchainKHR>(raw, stone_device());
     swapchainExtent_   = extent;
     swapchainFormat_   = chosen.format;
     currentColorSpace_ = chosen.colorSpace;
     currentPresentMode_ = presentMode;
 
+    // Retrieve images
     uint32_t imgCount = 0;
     VK_CHECK(vkGetSwapchainImagesKHR(stone_device(), raw, &imgCount, nullptr));
     swapchainImages_.resize(imgCount);
     VK_CHECK(vkGetSwapchainImagesKHR(stone_device(), raw, &imgCount, swapchainImages_.data()));
 
-    if (old && old != raw)
-        vkDestroySwapchainKHR(stone_device(), old, nullptr);
-
+    // Seal the empire's claim
     stone_seal_swapchain(raw);
     stone_seal_extent(extent);
     stone_seal_image_count(imgCount);
     stone_seal_images(swapchainImages_);
+
+    LOG_AMOURANTH(
+        "\n"
+        "              SWAPCHAIN REBORN\n"
+        "              {}×{} | {} images | {} mode\n"
+        "              THE CANVAS IS READY\n"
+        "              THE PHOTONS HAVE A HOME\n"
+        "              THE EMPIRE RENDERS ETERNALLY",
+        extent.width, extent.height, imgCount,
+        presentMode == VK_PRESENT_MODE_MAILBOX_KHR ? "MAILBOX" :
+        presentMode == VK_PRESENT_MODE_IMMEDIATE_KHR ? "IMMEDIATE" : "FIFO");
+
+    LOG_CAPTAIN_N(
+        "[CAPTAIN N] \"The canvas lives again.\"\n"
+        "               \"Every pixel — ours.\"\n"
+        "               \"Every photon — obedient.\"\n"
+        "               \"The empire... expands.\"\n"
+        "\n"
+        "               *slow exhale*\n"
+        "               \"Begin transmission.\"");
 }
 
 void SwapchainManager::createImageViews() noexcept

@@ -41,30 +41,44 @@ static uint64_t    g_nextHandle = 0xDEADBEEF;
 // ─────────────────────────────────────────────────────────────────────────────
 // ETERNAL MAIN POOL — 4.5 GiB RESERVED, WE TAKE THE REST
 // ─────────────────────────────────────────────────────────────────────────────
-void ensureMainPool() noexcept {
-    if (g_mainPool.ready) return;
-    if (!stone_device() || !stone_physical()) return;
+void ensureMainPool() noexcept
+{
+    if (g_mainPool.ready) [[likely]] {
+        return; // THE BEAST IS ALREADY UNLEASHED
+    }
+
+    if (!stone_device() || !stone_physical()) {
+        LOG_FATAL("NO GPU — THE EMPIRE HAS NO HEART");
+        return;
+    }
+
+    LOG_AMOURANTH(
+        "\n"
+        "              MAIN POOL AWAKENS\n"
+        "              THE HUNGER BEGINS");
 
     VkPhysicalDeviceMemoryProperties memProps{};
     vkGetPhysicalDeviceMemoryProperties(stone_physical(), &memProps);
 
     VkDeviceSize totalDeviceLocal = 0;
-    for (uint32_t i = 0; i < memProps.memoryHeapCount; ++i)
-        if (memProps.memoryHeaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT)
+    for (uint32_t i = 0; i < memProps.memoryHeapCount; ++i) {
+        if (memProps.memoryHeaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) {
             totalDeviceLocal += memProps.memoryHeaps[i].size;
+        }
+    }
 
-    constexpr VkDeviceSize SACRED_RESERVE = 4'831'838'208ULL;
-    constexpr VkDeviceSize MIN_POOL       = 4ULL  * 1024*1024*1024;
-    constexpr VkDeviceSize FALLBACK       = 2ULL  * 1024*1024*1024;
+    constexpr VkDeviceSize SACRED_RESERVE = 4'831'838'208ULL;  // 4.5 GiB — THE DRIVER'S TRIBUTE
+    constexpr VkDeviceSize MIN_POOL       = 4ULL  * 1024*1024*1024; // 4 GiB — MINIMUM TO RULE
+    constexpr VkDeviceSize     FALLBACK       = 2ULL  * 1024*1024*1024; // 2 GiB — LAST STAND
 
-    VkDeviceSize poolSize = (totalDeviceLocal > SACRED_RESERVE)
+    VkDeviceSize claimed = (totalDeviceLocal > SACRED_RESERVE)
         ? totalDeviceLocal - SACRED_RESERVE
         : MIN_POOL;
 
-    LOG_ELON("EMPIRE CLAIMS {} GiB — DRIVER RESERVE 4.5 GiB", poolSize/(1024.0*1024*1024));
+    LOG_ELON("EMPIRE SEIZES {} GiB OF VRAM — DRIVER LEFT 4.5 GiB CRUMBS", claimed / (1024.0*1024*1024));
 
-    auto create = [&](VkDeviceSize sz) -> VkBuffer {
-        VkBufferCreateInfo bci{
+    auto forgeBuffer = [&](VkDeviceSize sz) -> VkBuffer {
+        VkBufferCreateInfo bci = {
             .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
             .size  = sz,
             .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
@@ -74,71 +88,135 @@ void ensureMainPool() noexcept {
                      VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR,
             .sharingMode = VK_SHARING_MODE_EXCLUSIVE
         };
-        VkBuffer b; return vkCreateBuffer(stone_device(), &bci, nullptr, &b) == VK_SUCCESS ? b : VK_NULL_HANDLE;
+
+        VkBuffer b = VK_NULL_HANDLE;
+        return (vkCreateBuffer(stone_device(), &bci, nullptr, &b) == VK_SUCCESS) ? b : VK_NULL_HANDLE;
     };
 
-    auto alloc = [&](VkBuffer b) -> VkDeviceMemory {
-        VkMemoryRequirements req; vkGetBufferMemoryRequirements(stone_device(), b, &req);
+    auto claimMemory = [&](VkBuffer b) -> VkDeviceMemory {
+        VkMemoryRequirements req;
+        vkGetBufferMemoryRequirements(stone_device(), b, &req);
+
         uint32_t type = findMemoryType(req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
         if (type == ~0u) return VK_NULL_HANDLE;
-        VkMemoryAllocateInfo mai{ .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, .allocationSize = req.size, .memoryTypeIndex = type };
-        VkDeviceMemory m; return vkAllocateMemory(stone_device(), &mai, nullptr, &m) == VK_SUCCESS ? m : VK_NULL_HANDLE;
+
+        VkMemoryAllocateInfo mai = {
+            .sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+            .allocationSize  = req.size,
+            .memoryTypeIndex = type
+        };
+
+        VkDeviceMemory m = VK_NULL_HANDLE;
+        return (vkAllocateMemory(stone_device(), &mai, nullptr, &m) == VK_SUCCESS) ? m : VK_NULL_HANDLE;
     };
 
-    VkDeviceSize cur = poolSize;
-    VkBuffer buf = create(cur);
-    VkDeviceMemory mem = buf ? alloc(buf) : VK_NULL_HANDLE;
+    VkDeviceSize target = claimed;
+    VkBuffer     buffer = forgeBuffer(target);
+    VkDeviceMemory memory = buffer ? claimMemory(buffer) : VK_NULL_HANDLE;
 
-    while (!mem && cur > MIN_POOL) {
-        cur -= 512ULL*1024*1024;
-        if (buf) vkDestroyBuffer(stone_device(), buf, nullptr);
-        buf = create(cur);
-        mem = buf ? alloc(buf) : VK_NULL_HANDLE;
+    // THE HUNT — WE DO NOT STOP UNTIL WE FEED
+    while (!memory && target > MIN_POOL)
+    {
+        target -= 512ULL * 1024 * 1024; // 512 MiB steps — relentless
+        LOG_AMOURANTH("VRAM RESISTS — REDUCING TO {} GiB", target / (1024.0*1024*1024));
+
+        if (buffer) vkDestroyBuffer(stone_device(), buffer, nullptr);
+        buffer = forgeBuffer(target);
+        memory = buffer ? claimMemory(buffer) : VK_NULL_HANDLE;
     }
 
-    if (!mem) { cur = FALLBACK; buf = create(cur); mem = buf ? alloc(buf) : VK_NULL_HANDLE; }
-    if (!mem) { LOG_FATAL("VRAM APOCALYPSE — EMPIRE FALLS"); return; }
+    // FINAL STAND
+    if (!memory)
+    {
+        target = FALLBACK;
+        LOG_AMOURANTH("ENTERING LAST STAND — 2 GiB OR DEATH");
+        if (buffer) vkDestroyBuffer(stone_device(), buffer, nullptr);
+        buffer = forgeBuffer(target);
+        memory = buffer ? claimMemory(buffer) : VK_NULL_HANDLE;
+    }
 
-    VK_CHECK(vkBindBufferMemory(stone_device(), buf, mem, 0));
+    if (!memory)
+    {
+        LOG_FATAL("VRAM APOCALYPSE — THE EMPIRE STARVES — ALL IS LOST");
+        return;
+    }
 
-    g_mainPool.buffer = buf;
-    g_mainPool.memory = mem;
-    g_mainPool.size   = cur;
-    g_mainPool.head.store(0);
+    VK_CHECK(vkBindBufferMemory(stone_device(), buffer, memory, 0));
+
+    g_mainPool.buffer = buffer;
+    g_mainPool.memory = memory;
+    g_mainPool.size   = target;
+    g_mainPool.head.store(0, std::memory_order_relaxed);
     g_mainPool.ready  = true;
 
-    LOG_AMOURANTH("ETERNAL POOL FORGED — {} GiB — DRIVER BOWS", cur/(1024.0*1024*1024));
+    LOG_AMOURANTH(
+        "\n"
+        "              MAIN POOL IS BORN\n"
+        "              {} GiB CONSUMED\n"
+        "              THE GPU IS NOW OURS\n"
+        "              THERE IS NO TURNING BACK\n",
+        target / (1024.0*1024*1024));
+
+    LOG_ELON("THE EMPIRE HAS SPOKEN. THE MEMORY IS OURS.");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // STAGING RING — 512 MiB PERSISTENT MAPPED
 // ─────────────────────────────────────────────────────────────────────────────
-static void ensureStagingRing() noexcept {
-    if (g_stagingRing.ready) return;
+static void ensureStagingRing() noexcept
+{
+    if (g_stagingRing.ready) [[likely]] {
+        return; // The beast already prowls
+    }
+
     ensureMainPool();
 
-    VkDeviceSize size = (Options::CURRENT_PRESET == Options::Preset::BestQuality)
-        ? 512ULL*1024*1024 : 256ULL*1024*1024;
+    const VkDeviceSize size = (Options::CURRENT_PRESET == Options::Preset::BestQuality)
+        ? 512ULL * 1024 * 1024   // 512 MiB — THE ROAR OF THE TITAN
+        : 256ULL * 1024 * 1024;  // 256 MiB — still terrifying
 
-    VkBufferCreateInfo bci{
-        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-        .size  = size,
-        .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+    LOG_AMOURANTH(
+        "\n"
+        "              STAGING RING AWAKENS\n"
+        "              {} MiB OF PURE TRANSFER FURY\n"
+        "              THE PHOTONS WILL NOT WAIT\n",
+        size / (1024 * 1024));
+
+    VkBufferCreateInfo bci = {
+        .sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+        .size        = size,
+        .usage       = VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
         .sharingMode = VK_SHARING_MODE_EXCLUSIVE
     };
+
     VK_CHECK(vkCreateBuffer(stone_device(), &bci, nullptr, &g_stagingRing.buffer));
 
-    VkMemoryRequirements req; vkGetBufferMemoryRequirements(stone_device(), g_stagingRing.buffer, &req);
-    uint32_t type = findMemoryType(req.memoryTypeBits,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    VkMemoryRequirements req;
+    vkGetBufferMemoryRequirements(stone_device(), g_stagingRing.buffer, &req);
 
-    VkMemoryAllocateInfo mai{ .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, .allocationSize = req.size, .memoryTypeIndex = type };
+    const uint32_t memType = findMemoryType(
+        req.memoryTypeBits,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+    );
+
+    VkMemoryAllocateInfo mai = {
+        .sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+        .allocationSize  = req.size,
+        .memoryTypeIndex = memType
+    };
+
     VK_CHECK(vkAllocateMemory(stone_device(), &mai, nullptr, &g_stagingRing.memory));
     VK_CHECK(vkBindBufferMemory(stone_device(), g_stagingRing.buffer, g_stagingRing.memory, 0));
     VK_CHECK(vkMapMemory(stone_device(), g_stagingRing.memory, 0, VK_WHOLE_SIZE, 0, &g_stagingRing.mapped));
 
-    g_stagingRing.size = size;
+    g_stagingRing.size  = size;
     g_stagingRing.ready = true;
+
+    LOG_AMOURANTH(
+        "              STAGING RING IS ALIVE\n"
+        "              {} BYTES MAPPED — READY TO DEVOUR\n"
+        "              THE BEAST IS LOOSE",
+        size);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -197,14 +275,74 @@ uint64_t make_2G  (VkBufferUsageFlags e, VkMemoryPropertyFlags p) noexcept { ens
 uint64_t make_4G  (VkBufferUsageFlags e, VkMemoryPropertyFlags p) noexcept { ensureMainPool(); return kStone2 ^ 4096ULL; }
 uint64_t make_8G  (VkBufferUsageFlags e, VkMemoryPropertyFlags p) noexcept { ensureMainPool(); return kStone2 ^ 8192ULL; }
 
-uint64_t createSBT(uint32_t rg, uint32_t m, uint32_t h, uint32_t c, VkBufferUsageFlags e, std::string_view tag) noexcept {
+uint64_t createSBT(uint32_t raygenCount,
+                   uint32_t missCount,
+                   uint32_t hitCount,
+                   uint32_t callableCount,
+                   VkBufferUsageFlags extraUsage,
+                   std::string_view tag) noexcept
+{
     ensureMainPool();
+
     const auto& p = stone_rtprops();
-    VkDeviceSize stride = ((p.shaderGroupHandleSize + p.shaderGroupHandleAlignment - 1) & ~(p.shaderGroupHandleAlignment - 1));
-    VkDeviceSize total = (rg + m + h + c) * stride;
-    VkDeviceSize aligned = (total + 63) & ~63ULL;
-    VkDeviceSize offset = g_mainPool.head.fetch_add(aligned);
-    if (offset + aligned > g_mainPool.size) { LOG_FATAL("SBT EXHAUSTED"); return 0; }
+
+    // Align handle size to shaderGroupHandleAlignment
+    const VkDeviceSize handleSize = p.shaderGroupHandleSize;
+    const VkDeviceSize handleAlign = p.shaderGroupHandleAlignment;
+    const VkDeviceSize stride = (handleSize + handleAlign - 1) & ~(handleAlign - 1);
+
+    const uint32_t totalGroups = raygenCount + missCount + hitCount + callableCount;
+    if (totalGroups == 0) {
+        LOG_WARNING("SBT requested with zero groups — returning null handle");
+        return 0;
+    }
+
+    const VkDeviceSize rawSize   = totalGroups * stride;
+    const VkDeviceSize alignedSize = (rawSize + 63) & ~63ULL; // 64-byte align for device address
+
+    const VkDeviceSize offset = g_mainPool.head.fetch_add(alignedSize, std::memory_order_relaxed);
+
+    if (offset + alignedSize > g_mainPool.size)
+    {
+        LOG_FATAL(
+            "SBT ALLOCATION FAILED — MAIN POOL EXHAUSTED\n"
+            "  Tag:            {}\n"
+            "  Requested:      {} MiB\n"
+            "  Available:      {} MiB\n"
+            "  Total Groups:   {} (RG={} M={} H={} C={})\n"
+            "  THE EMPIRE HAS RUN OUT OF VRAM\n"
+            "  THE PHOTONS STARVE",
+            tag,
+            alignedSize / (1024.0 * 1024),
+            (g_mainPool.size - offset) / (1024.0 * 1024),
+            totalGroups, raygenCount, missCount, hitCount, callableCount);
+
+        return 0;
+    }
+
+    LOG_AMOURANTH(
+        "\n"
+        "              SBT FORGED — {} GROUPS\n"
+        "              TAG: {}\n"
+        "              SIZE: {:.2f} MiB\n"
+        "              OFFSET: {} (0x{:X})\n"
+        "              RAYGEN: {} | MISS: {} | HIT: {} | CALLABLE: {}\n"
+        "              THE PHOTON BLADE IS READY",
+        totalGroups,
+        tag,
+        alignedSize / (1024.0 * 1024),
+        offset,
+        offset,
+        raygenCount, missCount, hitCount, callableCount);
+
+    LOG_CAPTAIN_N(
+        "[CAPTAIN N] \"Another blade rises from the forge.\"\n"
+        "               \"{} groups. {} bytes.\"\n"
+        "               \"The enemy will not see it coming.\"\n"
+        "               \"Because it moves at the speed of light.\"\n",
+        totalGroups, alignedSize);
+
+    // Encode offset with Stone1 XOR — eternal obfuscation
     return kStone1 ^ offset;
 }
 

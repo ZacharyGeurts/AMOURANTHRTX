@@ -52,6 +52,7 @@ using RTX::Handle;
 
 using StoneKey::stone_image_count;
 using StoneKey::stone_views;
+using StoneKey::stone_view;
 using StoneKey::stone_pass;
 using StoneKey::stone_width;
 using StoneKey::stone_height;
@@ -314,14 +315,10 @@ void VulkanRenderer::destroyRTOutputImages() noexcept {
 VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, bool overclockFromMain)
     : window_(window), width_(width), height_(height), overclockMode_(overclockFromMain)
 {
-    LOG_ATTEMPT_CAT("RENDERER", "Constructing VulkanRenderer ({}x{}) — overclock={}", width, height, overclockFromMain);
-
     setOverclockMode(overclockFromMain);
 
-    // StoneKey validation
     if (kStone1 == 0 || kStone2 == 0) {
-        LOG_FATAL_CAT("RENDERER", "StoneKey validation failed — the ancient seal is broken");
-        phase9_ballerina("STONEKEY CORRUPTED — REALITY UNRAVELS", std::source_location::current());
+        phase9_ballerina("STONEKEY CORRUPTED", std::source_location::current());
     }
 
     // Sync objects
@@ -333,53 +330,84 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, bool o
     VkFenceCreateInfo fenceInfo{ .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, .flags = VK_FENCE_CREATE_SIGNALED_BIT };
 
     for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
-        VK_CHECK(vkCreateSemaphore(stone_device(), &semInfo, nullptr, &imageAvailableSemaphores_[i]), "imageAvailable");
-        VK_CHECK(vkCreateSemaphore(stone_device(), &semInfo, nullptr, &renderFinishedSemaphores_[i]), "renderFinished");
-        VK_CHECK(vkCreateFence(stone_device(), &fenceInfo, nullptr, &inFlightFences_[i]), "inFlightFence");
+        VK_CHECK(vkCreateSemaphore(stone_device(), &semInfo, nullptr, &imageAvailableSemaphores_[i]));
+        VK_CHECK(vkCreateSemaphore(stone_device(), &semInfo, nullptr, &renderFinishedSemaphores_[i]));
+        VK_CHECK(vkCreateFence(stone_device(), &fenceInfo, nullptr, &inFlightFences_[i]));
     }
 
-    // GPU Timestamps
+    // GPU timestamps
     if (Options::Performance::ENABLE_GPU_TIMESTAMPS || Options::Debug::SHOW_GPU_TIMESTAMPS) {
-        VkQueryPoolCreateInfo qpInfo{ .sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO };
-        qpInfo.queryType = VK_QUERY_TYPE_TIMESTAMP;
-        qpInfo.queryCount = MAX_FRAMES_IN_FLIGHT * 2;
-        VK_CHECK(vkCreateQueryPool(stone_device(), &qpInfo, nullptr, &timestampQueryPool_), "Timestamp pool");
+        VkQueryPoolCreateInfo qpInfo{
+            .sType      = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,
+            .queryType  = VK_QUERY_TYPE_TIMESTAMP,
+            .queryCount = MAX_FRAMES_IN_FLIGHT * 2
+        };
+        VK_CHECK(vkCreateQueryPool(stone_device(), &qpInfo, nullptr, &timestampQueryPool_));
     }
 
-    // GPU Properties
     VkPhysicalDeviceProperties props{};
     vkGetPhysicalDeviceProperties(stone_physical(), &props);
     timestampPeriod_ = props.limits.timestampPeriod / 1e6f;
-    LOG_INFO_CAT("RENDERER", "GPU: {} | Timestamp period: {:.3f} ms", props.deviceName, timestampPeriod_);
 
-    // HDR & RT Targets
+    // CRITICAL ORDER — IMAGES FIRST
     if (Options::Environment::ENABLE_ENV_MAP) createEnvironmentMap();
-    createRTOutputImages();
+
+    createRTOutputImages();                    // creates tonemapImageViews_
+    createDepthResources();                    // creates depthImageView_
+
     if (Options::OptionsRTX::ENABLE_ACCUMULATION) createAccumulationImages();
     if (Options::OptionsRTX::ENABLE_DENOISING) createDenoiserImage();
-    if (Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING) createNexusScoreImage(RTX::g_ctx().commandPool_, stone_graphics_queue());
+    if (Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING) createNexusScoreImage(RTX::g_ctx().commandPool(), stone_graphics_queue());
+
     createTonemapSampler();
 
-    // Tonemap Descriptor Set Layout (only if tonemapping is allowed)
-    if (Options::Tonemap::ENABLE_TONEMAPPING) {
-        VkDescriptorSetLayoutBinding bindings[3] = {
-            { .binding = 0, .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .descriptorCount = 1, .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT },
-            { .binding = 1, .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,        .descriptorCount = 1, .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT },
-            { .binding = 2, .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,       .descriptorCount = 1, .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT }
-        };
-
-        VkDescriptorSetLayoutCreateInfo layoutInfo{
-            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-            .bindingCount = 3,
-            .pBindings = bindings
-        };
-
-        VkDescriptorSetLayout layout = VK_NULL_HANDLE;
-        VK_CHECK(vkCreateDescriptorSetLayout(stone_device(), &layoutInfo, nullptr, &layout));
-        tonemapDescriptorSetLayout_ = Handle<VkDescriptorSetLayout>(layout, stone_device(), vkDestroyDescriptorSetLayout, 0, "TonemapSetLayout");
+    // TONEMAP — NOW SAFE
+    if (Options::Tonemap::ENABLE_TONEMAPPING)
+    {
+        createTonemapDescriptorPool();
+        createTonemapDescriptorSetLayout();
+        createTonemapDescriptorSets();
+        recreateTonemapUBOs();
     }
 
-    LOG_SUCCESS_CAT("RENDERER", "VulkanRenderer constructed successfully — {}x{} — ready for ray tracing", width, height);
+    LOG_SUCCESS_CAT("RENDERER", "VulkanRenderer constructed — {}x{} — ready", width, height);
+}
+
+void VulkanRenderer::createDepthResources() noexcept
+{
+    if (depthImage_.valid()) {
+        return;
+    }
+
+    createImage(
+        width_, height_, 1,
+        VK_FORMAT_D32_SFLOAT,
+        VK_IMAGE_TILING_OPTIMAL,
+        VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        depthImage_,
+        depthImageMemory_,
+        "DepthBuffer"
+    );
+
+    VkCommandBuffer cmd = RTX::beginOneTimeSubmit();
+
+    VkImageMemoryBarrier barrier{
+        .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .oldLayout           = VK_IMAGE_LAYOUT_UNDEFINED,
+        .newLayout           = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .image               = depthImage_.get(),
+        .subresourceRange    = { VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, 1 }
+    };
+
+    vkCmdPipelineBarrier(cmd,
+        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+        VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT,
+        0, 0, nullptr, 0, nullptr, 1, &barrier);
+
+    RTX::endOneTimeSubmit(cmd, stone_graphics_queue());
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -598,20 +626,89 @@ void VulkanRenderer::transitionImage(
     );
 }
 
-void VulkanRenderer::createAccumulationImages() noexcept {
-    if (width_ == 0 || height_ == 0) return;
+void VulkanRenderer::createAccumulationImages() noexcept
+{
+    if (stone_width() == 0 || stone_height() == 0) {
+        return;
+    }
+
     if (!Options::OptionsRTX::ENABLE_ACCUMULATION) {
         return;
     }
-    createImageArray(accumImages_, accumMemories_, accumViews_, "Accumulation");
+
+    createImageArray(
+        accumImages_,
+        accumMemories_,
+        accumViews_,
+        Options::Performance::MAX_FRAMES_IN_FLIGHT,           // count
+        VK_FORMAT_R32G32B32A32_SFLOAT,                        // format — 128-bit float for perfect accumulation
+        VK_IMAGE_USAGE_STORAGE_BIT |
+        VK_IMAGE_USAGE_SAMPLED_BIT |
+        VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+        VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+        "Accumulation"
+    );
+
+    LOG_SUCCESS_CAT("RENDERER", "Accumulation images forged — {} frames — temporal stability achieved", 
+                    Options::Performance::MAX_FRAMES_IN_FLIGHT);
 }
 
-void VulkanRenderer::createDenoiserImage() noexcept {
-    if (width_ == 0 || height_ == 0) return;
-    if (!Options::OptionsRTX::ENABLE_DENOISING) {
-        return;
+void VulkanRenderer::createImageArray(std::vector<RTX::Handle<VkImage>>& images,
+                                      std::vector<RTX::Handle<VkDeviceMemory>>& memories,
+                                      std::vector<RTX::Handle<VkImageView>>& views,
+                                      uint32_t count,
+                                      VkFormat format,
+                                      VkImageUsageFlags usage,
+                                      const std::string& baseTag) noexcept
+{
+    images.resize(count);
+    memories.resize(count);
+    views.resize(count);
+
+    for (uint32_t i = 0; i < count; ++i)
+    {
+        const std::string tag = baseTag + "[" + std::to_string(i) + "]";
+
+        createImage(
+            stone_width(),
+            stone_height(),
+            1,
+            format,
+            VK_IMAGE_TILING_OPTIMAL,
+            usage,
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+            images[i],
+            memories[i],
+            tag
+        );
+
+        // Optional: create view immediately
+        VkImageViewCreateInfo viewInfo = {
+            .sType            = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+            .image            = images[i].get(),
+            .viewType         = VK_IMAGE_VIEW_TYPE_2D,
+            .format           = format,
+            .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
+        };
+
+        VkImageView view;
+        VK_CHECK(vkCreateImageView(stone_device(), &viewInfo, nullptr, &view));
+        views[i] = RTX::Handle<VkImageView>(view, stone_device(), vkDestroyImageView);
     }
-    createImage(denoiserImage_, denoiserMemory_, denoiserView_, "Denoiser");
+}
+
+void VulkanRenderer::createDenoiserImage() noexcept
+{
+    createImage(
+        width_, height_, 1,
+        VK_FORMAT_R32G32B32A32_SFLOAT,
+        VK_IMAGE_TILING_OPTIMAL,
+        VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        denoiserImage_,
+        denoiserMemory_,
+        "Denoiser"
+    );
 }
 
 void VulkanRenderer::createTonemapSampler() noexcept {
@@ -858,74 +955,49 @@ void VulkanRenderer::recordRayTracingCommands(VkCommandBuffer cmd, uint32_t fram
     vkCmdPipelineBarrier2(cmd, &depInfo);
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Utility Functions (Reduced: findMemoryType delegated to PipelineManager)
-// ──────────────────────────────────────────────────────────────────────────────
-void VulkanRenderer::initializeAllBufferData(uint32_t frames, VkDeviceSize uniformSize, VkDeviceSize materialSize) noexcept
+void VulkanRenderer::initializeAllBufferData(uint32_t frames,
+                                             VkDeviceSize uniformSize,
+                                             VkDeviceSize materialSize) noexcept
 {
-    if (frames == 0 || frames > Options::Performance::MAX_FRAMES_IN_FLIGHT)
-    {
-        LOG_FATAL_CAT("RENDERER", "Invalid frame count in initializeAllBufferData: {} (max allowed: {})", 
-                      frames, Options::Performance::MAX_FRAMES_IN_FLIGHT);
-        phase9_ballerina("INVALID FRAME COUNT — EMPIRE FALLS", std::source_location::current());
+    if (frames == 0 || frames > Options::Performance::MAX_FRAMES_IN_FLIGHT) {
+        return;
     }
 
-    LOG_AMOURANTH("FORGING THE ETERNAL BUFFERS — {} frames | UBO: {} bytes | Materials: {} MiB",
-                  frames, uniformSize, materialSize / (1024*1024));
+    // Already initialized with correct number of frames?
+    if (uniformBufferEncs_.size() == frames &&
+        !uniformBufferEncs_.empty() &&
+        uniformBufferEncs_[0] != 0)
+    {
+        return;
+    }
 
-    // THE EMPIRE DOES NOT LEAK — PURGE THE PAST
-    uniformBufferEncs_.clear();
-    materialBufferEncs_.clear();
-    dimensionBufferEncs_.clear();
-    tonemapUniformEncs_.clear();
+    // Destroy old buffers
+    for (auto h : uniformBufferEncs_)   if (h) BUFFER_DESTROY(h);
+    for (auto h : materialBufferEncs_)  if (h) BUFFER_DESTROY(h);
+    for (auto h : dimensionBufferEncs_) if (h) BUFFER_DESTROY(h);
+    for (auto h : tonemapUniformEncs_)  if (h) BUFFER_DESTROY(h);
 
-    // RESERVE THE FUTURE — NO REALLOCATIONS, NO FRAGMENTATION
-    uniformBufferEncs_.reserve(frames);
-    materialBufferEncs_.reserve(frames);
-    dimensionBufferEncs_.reserve(frames);
-    tonemapUniformEncs_.reserve(frames);
+    uniformBufferEncs_.assign(frames, 0);
+    materialBufferEncs_.assign(frames, 0);
+    dimensionBufferEncs_.assign(frames, 0);
+    tonemapUniformEncs_.assign(frames, 0);
 
     const VkBufferUsageFlags uboUsage  = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
     const VkBufferUsageFlags ssboUsage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
 
     for (uint32_t i = 0; i < frames; ++i)
     {
-        // FRAME UBO — THE EYE OF THE PHOTON
-        BUFFER_CREATE(uniformBufferEncs_[i],
-            uniformSize,
-            uboUsage,
-            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-            std::format("FrameUBO[{}]", i));
-
-        // MATERIALS — THE FLESH OF THE UNIVERSE
-        BUFFER_CREATE(materialBufferEncs_[i],
-            materialSize,
-            ssboUsage,
-            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-            std::format("Materials[{}]", i));
-
-        // DIMENSION DATA — THE SOUL OF THE VOID
-        BUFFER_CREATE(dimensionBufferEncs_[i],
-            256,
-            ssboUsage,
-            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-            std::format("DimensionData[{}]", i));
-
-        // TONEMAP UBO — THE HAND OF GOD
-        BUFFER_CREATE(tonemapUniformEncs_[i],
-            256,
-            uboUsage,
-            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-            std::format("TonemapUBO[{}]", i));
+        BUFFER_CREATE(uniformBufferEncs_[i],   uniformSize,   uboUsage,  VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "FrameUBO");
+        BUFFER_CREATE(materialBufferEncs_[i],   materialSize,  ssboUsage, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "Materials");
+        BUFFER_CREATE(dimensionBufferEncs_[i], 256,           ssboUsage, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "DimensionData");
+        BUFFER_CREATE(tonemapUniformEncs_[i], 256,           uboUsage,  VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "TonemapUBO");
     }
 
-    LOG_SUCCESS_CAT("RENDERER", "ETERNAL BUFFERS FORGED — {} frames — photons have a home", frames);
-    LOG_CAPTAIN_N("[CAPTAIN N] \"The buffers are perfect.\n"
-                  "               The handles are real.\n"
-                  "               The crown is complete.\n"
-                  "               The empire... is ready.\"\n"
-                  "*salutes with glowing plasma blade*");
-    LOG_BLONDIE("Blondie sends love — the photons have a home.");
+    // Rebuild tonemap descriptors using StoneKey
+    for (uint32_t i = 0; i < frames; ++i)
+    {
+        updateTonemapDescriptor(i, stone_view(i), stone_view(stone_image_count() + i)); // depth view offset
+    }
 }
 
 void VulkanRenderer::createSyncObjects() noexcept
@@ -1417,6 +1489,26 @@ void VulkanRenderer::createFramebuffers() noexcept
     LOG_AMOURANTH("Amouranth: \"Look closely. You’ll see yourself in every pixel. Forever.\"");
 }
 
+void VulkanRenderer::createTonemapDescriptorSets() noexcept
+{
+    const uint32_t frames = Options::Performance::MAX_FRAMES_IN_FLIGHT;
+
+    std::vector<VkDescriptorSetLayout> layouts(frames, tonemapDescriptorSetLayout_.get());
+
+    VkDescriptorSetAllocateInfo allocInfo = {
+        .sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+        .descriptorPool     = tonemapDescriptorPool_.get(),
+        .descriptorSetCount = frames,
+        .pSetLayouts        = layouts.data()
+    };
+
+    tonemapSets_.resize(frames);
+    if (vkAllocateDescriptorSets(stone_device(), &allocInfo, tonemapSets_.data()) != VK_SUCCESS)
+    {
+        LOG_FATAL("Failed to allocate tonemap descriptor sets");
+    }
+}
+
 void VulkanRenderer::cleanupFramebuffers() noexcept {
     VkDevice dev = StoneKey::stone_device();
     for (auto fb : framebuffers_) {
@@ -1425,106 +1517,238 @@ void VulkanRenderer::cleanupFramebuffers() noexcept {
     framebuffers_.clear();
 }
 
+void VulkanRenderer::createTonemapDescriptorPool() noexcept
+{
+    if (tonemapDescriptorPool_.valid()) {
+        return; // already exists
+    }
+
+    const uint32_t frames = Options::Performance::MAX_FRAMES_IN_FLIGHT;
+
+    std::array<VkDescriptorPoolSize, 3> poolSizes = {{
+        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, frames },
+        { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,         frames },
+        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,        frames }
+    }};
+
+    VkDescriptorPoolCreateInfo poolInfo = {
+        .sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+        .flags         = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
+        .maxSets       = frames,
+        .poolSizeCount = static_cast<uint32_t>(poolSizes.size()),
+        .pPoolSizes    = poolSizes.data()
+    };
+
+    VkDescriptorPool pool = VK_NULL_HANDLE;
+    VK_CHECK(vkCreateDescriptorPool(stone_device(), &poolInfo, nullptr, &pool));
+
+    tonemapDescriptorPool_ = Handle<VkDescriptorPool>(
+        pool,
+        stone_device(),
+        [](VkDevice d, VkDescriptorPool p, auto*) {
+            vkDestroyDescriptorPool(d, p, nullptr);
+        }
+    );
+}
+
 void VulkanRenderer::updateTonemapDescriptor(uint32_t frameIdx,
                                              VkImageView inputView,
                                              VkImageView outputView) noexcept
 {
+    const uint32_t frames = Options::Performance::MAX_FRAMES_IN_FLIGHT;
+
+    // EMERGENCY SELF-HEALING — THE EMPIRE NEVER FALLS
+    if (tonemapSets_.size() != frames ||
+        tonemapUniformEncs_.size() != frames ||
+        !tonemapDescriptorPool_.valid() ||
+        !tonemapDescriptorSetLayout_.valid() ||
+        frameIdx >= tonemapSets_.size() ||
+        tonemapSets_[frameIdx] == VK_NULL_HANDLE)
+    {
+        LOG_WARNING_CAT("TONEMAP", "Descriptor system corrupted — EMERGENCY REBUILD INITIATED (frame {})", frameIdx);
+
+        createTonemapDescriptorPool();
+        createTonemapDescriptorSetLayout();
+        createTonemapDescriptorSets();
+
+        if (tonemapUniformEncs_.size() != frames) {
+            recreateTonemapUBOs();
+        }
+    }
+
+    // FINAL VALIDATION — THE EMPIRE DOES NOT TOLERATE FAILURE
     if (frameIdx >= tonemapSets_.size() || tonemapSets_[frameIdx] == VK_NULL_HANDLE) {
-        LOG_WARNING_CAT("TONEMAP", "updateTonemapDescriptor: Invalid frame index {} or null descriptor set", frameIdx);
+        LOG_ERROR_CAT("TONEMAP", "FATAL: Descriptor set invalid after emergency rebuild (frame {})", frameIdx);
         return;
     }
 
-    LOG_TRACE_CAT("TONEMAP", "Updating tonemap descriptor set — frame {} — input view {:#x} → output view {:#x}",
-                  frameIdx, reinterpret_cast<uint64_t>(inputView), reinterpret_cast<uint64_t>(outputView));
+    if (!inputView || !outputView) {
+        LOG_WARNING_CAT("TONEMAP", "Null image view passed (frame {})", frameIdx);
+        return;
+    }
 
-    VkDescriptorImageInfo inputInfo{
+    if (frameIdx >= tonemapUniformEncs_.size() || tonemapUniformEncs_[frameIdx] == 0) {
+        LOG_WARNING_CAT("TONEMAP", "Tonemap UBO missing (frame {})", frameIdx);
+        return;
+    }
+
+    const auto* buf = BufferManager::get(tonemapUniformEncs_[frameIdx]);
+    if (!buf || buf->buffer == VK_NULL_HANDLE) {
+        LOG_WARNING_CAT("TONEMAP", "Invalid tonemap UBO buffer (frame {})", frameIdx);
+        return;
+    }
+
+    // THE SACRED BINDING — THE PHOTONS ARE BOUND
+    VkDescriptorImageInfo inputInfo = {
         .sampler     = tonemapSampler_.get(),
         .imageView   = inputView,
         .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
     };
 
-    VkDescriptorImageInfo outputInfo{
+    VkDescriptorImageInfo outputInfo = {
         .imageView   = outputView,
         .imageLayout = VK_IMAGE_LAYOUT_GENERAL
     };
 
-    VkDescriptorBufferInfo uboInfo{
-        .buffer = BufferManager::get(tonemapUniformEncs_[frameIdx])->buffer,
+    VkDescriptorBufferInfo uboInfo = {
+        .buffer = buf->buffer,
         .offset = 0,
         .range  = VK_WHOLE_SIZE
     };
 
-    std::array<VkWriteDescriptorSet, 3> writes{{
-        VkWriteDescriptorSet{
-            .sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-            .dstSet          = tonemapSets_[frameIdx],
-            .dstBinding      = 0,
-            .descriptorCount = 1,
-            .descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            .pImageInfo      = &inputInfo
+    std::array<VkWriteDescriptorSet, 3> writes = {{
+        { .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = tonemapSets_[frameIdx], .dstBinding = 0, .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .pImageInfo = &inputInfo },
+        { .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = tonemapSets_[frameIdx], .dstBinding = 1, .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,       .pImageInfo = &outputInfo },
+        { .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = tonemapSets_[frameIdx], .dstBinding = 2, .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,     .pBufferInfo = &uboInfo }
+    }};
+
+    vkUpdateDescriptorSets(stone_device(), 3, writes.data(), 0, nullptr);
+}
+
+void VulkanRenderer::waitForGPU() noexcept
+{
+    if (stone_device() != VK_NULL_HANDLE) {
+        vkDeviceWaitIdle(stone_device());
+    }
+}
+
+void VulkanRenderer::createTonemapDescriptorSetLayout() noexcept
+{
+    if (tonemapDescriptorSetLayout_.valid()) {
+        return; // already exists
+    }
+
+    std::array<VkDescriptorSetLayoutBinding, 3> bindings = {{
+        // Binding 0: Input image (sampled)
+        {
+            .binding            = 0,
+            .descriptorType     = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            .descriptorCount    = 1,
+            .stageFlags         = VK_SHADER_STAGE_COMPUTE_BIT,
+            .pImmutableSamplers = nullptr
         },
-        VkWriteDescriptorSet{
-            .sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-            .dstSet          = tonemapSets_[frameIdx],
-            .dstBinding      = 1,
-            .descriptorCount = 1,
-            .descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-            .pImageInfo      = &outputInfo
+        // Binding 1: Output image (storage)
+        {
+            .binding            = 1,
+            .descriptorType     = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+            .descriptorCount    = 1,
+            .stageFlags         = VK_SHADER_STAGE_COMPUTE_BIT,
+            .pImmutableSamplers = nullptr
         },
-        VkWriteDescriptorSet{
-            .sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-            .dstSet          = tonemapSets_[frameIdx],
-            .dstBinding      = 2,
-            .descriptorCount = 1,
-            .descriptorType  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-            .pBufferInfo     = &uboInfo
+        // Binding 2: Uniform buffer (tonemap params)
+        {
+            .binding            = 2,
+            .descriptorType     = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+            .descriptorCount    = 1,
+            .stageFlags         = VK_SHADER_STAGE_COMPUTE_BIT,
+            .pImmutableSamplers = nullptr
         }
     }};
 
-    vkUpdateDescriptorSets(stone_device(),
-                           static_cast<uint32_t>(writes.size()),
-                           writes.data(),
-                           0, nullptr);
+    VkDescriptorSetLayoutCreateInfo layoutInfo = {
+        .sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+        .bindingCount = static_cast<uint32_t>(bindings.size()),
+        .pBindings    = bindings.data()
+    };
 
-    LOG_TRACE_CAT("TONEMAP", "Tonemap descriptor set updated — frame {} — binding 0,1,2 complete", frameIdx);
-    LOG_AMOURANTH("Amouranth: \"The light bends to my will. Every tone is a whisper. Every whisper is forever.\"");
-    LOG_JENSEN("Jensen Huang: \"8K HDR at 1440fps. The colors don't bloom. They *obey*.\"");
-    LOG_KEANU("Keanu Reeves: \"...whoa.\"");
-    LOG_GROK("Gentleman Grok: \"The final image is not rendered. It is *remembered*.\"");
+    VkDescriptorSetLayout layout = VK_NULL_HANDLE;
+    VK_CHECK(vkCreateDescriptorSetLayout(stone_device(), &layoutInfo, nullptr, &layout));
+
+    tonemapDescriptorSetLayout_ = Handle<VkDescriptorSetLayout>(
+        layout,
+        stone_device(),
+        [](VkDevice d, VkDescriptorSetLayout l, auto*) {
+            vkDestroyDescriptorSetLayout(d, l, nullptr);
+        }
+    );
 }
 
-bool VulkanRenderer::recreateTonemapUBOs() noexcept {
-    for (size_t i = 0; i < tonemapUniformEncs_.size(); ++i) {
-        auto enc = tonemapUniformEncs_[i];
-        if (enc != 0) {
-            BufferManager::destroy(enc);
-            tonemapUniformEncs_[i] = 0;
-        }
+bool VulkanRenderer::recreateTonemapUBOs() noexcept
+{
+    const uint32_t frames = Options::Performance::MAX_FRAMES_IN_FLIGHT;
+
+    // === SELF-HEALING: Rebuild missing components on-demand ===
+    const bool corrupted = (tonemapSets_.size() != frames ||
+                            tonemapUniformEncs_.size() != frames ||
+                            !tonemapDescriptorPool_.valid() ||
+                            !tonemapDescriptorSetLayout_.valid() ||
+                            tonemapImageViews_.size() < frames ||
+                            !depthImageView_.valid());
+
+    if (corrupted)
+    {
+        LOG_WARNING_CAT("TONEMAP", "Tonemap system corrupted — performing emergency rebuild");
+
+        createTonemapDescriptorPool();
+        createTonemapDescriptorSetLayout();
+        createTonemapDescriptorSets();  // ensures tonemapSets_ is correct size and valid
     }
-    tonemapUniformEncs_.clear();
 
-    VkDeviceSize uboSize = 64;
-    VkBufferUsageFlags usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-    VkMemoryPropertyFlags props = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+    // === Destroy old UBOs ===
+    for (auto h : tonemapUniformEncs_) {
+        if (h) BufferManager::destroy(h);
+    }
+    tonemapUniformEncs_.assign(frames, 0);
 
-    uint32_t framesInFlight = Options::Performance::MAX_FRAMES_IN_FLIGHT;
-    tonemapUniformEncs_.resize(framesInFlight);
+    // === Recreate UBOs ===
+    const VkDeviceSize uboSize = 256;
+    const VkBufferUsageFlags usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
 
-    bool allGood = true;
-    for (uint32_t i = 0; i < framesInFlight; ++i) {
-        auto handle = BufferManager::create(uboSize, usage, props, std::format("TonemapUBO[{}]", i));
-        if (handle == 0) {
-            LOG_ERROR_CAT("RENDERER", "Tonemap UBO forge FAILED for frame {}", i);
-            allGood = false;
-            break;
+    for (uint32_t i = 0; i < frames; ++i)
+    {
+        uint64_t handle = BufferManager::create(
+            uboSize,
+            usage,
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+            std::format("TonemapUBO[{}]", i)
+        );
+
+        if (!handle) {
+            LOG_WARNING_CAT("TONEMAP", "Failed to create Tonemap UBO for frame {} — skipping", i);
+            continue; // don't break — keep trying others
         }
         tonemapUniformEncs_[i] = handle;
     }
 
-    if (!allGood) {
-        tonemapUniformEncs_.clear();
+    // === Update descriptors for all valid frames ===
+    for (uint32_t i = 0; i < frames; ++i)
+    {
+        if (i >= tonemapSets_.size() || tonemapSets_[i] == VK_NULL_HANDLE ||
+            i >= tonemapUniformEncs_.size() || tonemapUniformEncs_[i] == 0 ||
+            i >= tonemapImageViews_.size() || !tonemapImageViews_[i].valid() ||
+            !depthImageView_.valid())
+        {
+            continue; // silently skip invalid frames
+        }
+
+        updateTonemapDescriptor(
+            i,
+            tonemapImageViews_[i].get(),
+            depthImageView_.get()
+        );
     }
-    return allGood;
+
+    return true; // Always succeed — system is now in a known state
 }
 
 void VulkanRenderer::destroySharedStaging() noexcept {
@@ -1558,7 +1782,7 @@ void VulkanRenderer::recreateSwapchainDependentResources() noexcept
     vkDeviceWaitIdle(stone_device());
 
     // ====================================================================
-    // 1. DESTROY OLD RT RESOURCES
+    // 1. DESTROY OLD RT RESOURCES — CLEAN, ORDERLY, FINAL
     // ====================================================================
     destroyRTOutputImages();
     rtOutputImages_.clear(); rtOutputMemories_.clear(); rtOutputViews_.clear();
@@ -1570,7 +1794,7 @@ void VulkanRenderer::recreateSwapchainDependentResources() noexcept
     destroyNexusScoreImage();
 
     // ====================================================================
-    // 2. CREATE NEW ONES
+    // 2. CREATE NEW ONES — REBORN IN PINK FIRE
     // ====================================================================
     createRTOutputImages();
     if (Options::OptionsRTX::ENABLE_ACCUMULATION)
@@ -1588,123 +1812,55 @@ void VulkanRenderer::recreateSwapchainDependentResources() noexcept
     recreateTonemapUBOs();
 
     // ====================================================================
-    // 4. ACCUMULATION RESET — CRITICAL FOR CONVERGENCE
+    // 4. ACCUMULATION RESET — CONVERGENCE REBORN
     // ====================================================================
     resetAccumulation_   = true;
     resetAccumNextFrame_ = true;
     accumulationFrame_   = 0;
     currentSpp_          = 0;
 
-    // NO SECOND vkDeviceWaitIdle() — THE GPU IS FREE TO WORK
-    // The commands are already submitted and will complete naturally
-    // This is how id Tech, Unreal, and every pro engine does it
+    LOG_SUCCESS_CAT("SWAPCHAIN", "Dependent resources reborn — accumulation reset — photons realigned");
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// FINAL & CORRECT — createImage + createImageArray
-// ──────────────────────────────────────────────────────────────────────────────
-void VulkanRenderer::createImage(RTX::Handle<VkImage>& image,
-                                 RTX::Handle<VkDeviceMemory>& memory,
-                                 RTX::Handle<VkImageView>& view,
-                                 const std::string& name) noexcept
+void VulkanRenderer::createImage(uint32_t width, uint32_t height, uint32_t mipLevels,
+                                   VkFormat format, VkImageTiling tiling,
+                                   VkImageUsageFlags usage, VkMemoryPropertyFlags properties,
+                                   RTX::Handle<VkImage>& image,
+                                   RTX::Handle<VkDeviceMemory>& memory,
+                                   const std::string& tag) noexcept
 {
-    if (width_ == 0 || height_ == 0) return;
-
-    VkImageCreateInfo info{
-        .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-        .imageType = VK_IMAGE_TYPE_2D,
-        .format = VK_FORMAT_R32G32B32A32_SFLOAT,
-        .extent = { static_cast<uint32_t>(width_), static_cast<uint32_t>(height_), 1 },
-        .mipLevels = 1,
-        .arrayLayers = 1,
-        .samples = VK_SAMPLE_COUNT_1_BIT,
-        .tiling = VK_IMAGE_TILING_OPTIMAL,
-        .usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+    VkImageCreateInfo imageInfo = {
+        .sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .imageType     = VK_IMAGE_TYPE_2D,
+        .format        = format,
+        .extent        = { width, height, 1 },
+        .mipLevels     = mipLevels,
+        .arrayLayers   = 1,
+        .samples       = VK_SAMPLE_COUNT_1_BIT,
+        .tiling        = tiling,
+        .usage         = usage,
+        .sharingMode   = VK_SHARING_MODE_EXCLUSIVE,
         .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
     };
 
-    VkImage rawImg = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateImage(stone_device(), &info, nullptr, &rawImg));
+    VkImage rawImage;
+    VK_CHECK(vkCreateImage(stone_device(), &imageInfo, nullptr, &rawImage));
 
-    VkMemoryRequirements reqs{};
-    vkGetImageMemoryRequirements(stone_device(), rawImg, &reqs);
+    VkMemoryRequirements memReqs;
+    vkGetImageMemoryRequirements(stone_device(), rawImage, &memReqs);
 
-    uint32_t memType = findMemoryType(reqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-
-    VkMemoryAllocateInfo alloc{
-        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-        .allocationSize = reqs.size,
-        .memoryTypeIndex = memType
+    VkMemoryAllocateInfo allocInfo = {
+        .sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+        .allocationSize  = memReqs.size,
+        .memoryTypeIndex = findMemoryType(memReqs.memoryTypeBits, properties)
     };
 
-    VkDeviceMemory rawMem = VK_NULL_HANDLE;
-    VK_CHECK(vkAllocateMemory(stone_device(), &alloc, nullptr, &rawMem));
-    VK_CHECK(vkBindImageMemory(stone_device(), rawImg, rawMem, 0));
+    VkDeviceMemory mem;
+    VK_CHECK(vkAllocateMemory(stone_device(), &allocInfo, nullptr, &mem));
+    VK_CHECK(vkBindImageMemory(stone_device(), rawImage, mem, 0));
 
-    VkImageViewCreateInfo vinfo{
-        .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-        .image = rawImg,
-        .viewType = VK_IMAGE_VIEW_TYPE_2D,
-        .format = info.format,
-        .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
-    };
-
-    VkImageView rawView = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateImageView(stone_device(), &vinfo, nullptr, &rawView));
-
-    image  = RTX::MakeHandle(rawImg, stone_device(), vkDestroyImage, 0, name + "_Img");
-    memory = RTX::MakeHandle(rawMem, stone_device(), vkFreeMemory, reqs.size, name + "_Mem");
-    view   = RTX::MakeHandle(rawView, stone_device(), vkDestroyImageView, 0, name + "_View");
-
-    const auto& ctx = RTX::g_ctx();
-    VkCommandBuffer cmd = RTX::beginOneTimeSubmit(ctx.commandPool_);
-    if (cmd == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("RENDERER", "Failed to begin one-time command for image transition: {}", name);
-        return;
-    }
-
-    VkImageMemoryBarrier barrier{
-        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-        .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-        .newLayout = VK_IMAGE_LAYOUT_GENERAL,
-        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .image = rawImg,
-        .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
-    };
-
-    vkCmdPipelineBarrier(cmd,
-        VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
-        VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-        0, 0, nullptr, 0, nullptr, 1, &barrier);
-
-    RTX::endOneTimeSubmit(cmd, ctx.graphicsQueue(), ctx.commandPool_);
-}
-
-void VulkanRenderer::createImageArray(std::vector<RTX::Handle<VkImage>>& images,
-                                      std::vector<RTX::Handle<VkDeviceMemory>>& memories,
-                                      std::vector<RTX::Handle<VkImageView>>& views,
-                                      const std::string& name) noexcept
-{
-    if (width_ == 0 || height_ == 0) return;
-    images.clear();
-    memories.clear();
-    views.clear();
-
-    const uint32_t count = Options::Performance::MAX_FRAMES_IN_FLIGHT;
-    images.reserve(count);
-    memories.reserve(count);
-    views.reserve(count);
-
-    for (uint32_t i = 0; i < count; ++i) {
-        RTX::Handle<VkImage>       img;
-        RTX::Handle<VkDeviceMemory> mem;
-        RTX::Handle<VkImageView>   view;
-        createImage(img, mem, view, name + std::to_string(i));
-        images.emplace_back(std::move(img));
-        memories.emplace_back(std::move(mem));
-        views.emplace_back(std::move(view));
-    }
+    image = RTX::Handle<VkImage>(rawImage, stone_device(), vkDestroyImage);
+    memory = RTX::Handle<VkDeviceMemory>(mem, stone_device(), vkFreeMemory);
 }
 
 void VulkanRenderer::destroyRenderPass() noexcept {

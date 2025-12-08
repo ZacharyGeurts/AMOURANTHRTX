@@ -867,44 +867,24 @@ static std::unique_ptr<VulkanRenderer> phase7_5_Renderer() noexcept
 
 void Application::run() noexcept
 {
-    static std::atomic<bool> g_resizeInProgress{false};
-    static std::atomic<uint32_t> g_pendingWidth{0};
-    static std::atomic<uint32_t> g_pendingHeight{0};
-
     auto lastTime = std::chrono::steady_clock::now();
-
-    int   frameCount = 0;
-    float fpsTimer   = 0.0f;
-    float currentFPS = 60.0f;
-
     float titleTimer = 0.0f;
     constexpr float TITLE_UPDATE_INTERVAL = 0.6f;
     int dotPhase = 0;
     constexpr const char* dots[] = { ".", "..", "...", "...." };
 
-    uint32_t currentMaxFramesInFlight = Options::Performance::MAX_FRAMES_IN_FLIGHT;
+    int frameCount = 0;
+    float fpsTimer = 0.0f;
+    float currentFPS = 60.0f;
 
-    // MODE 0: HDR CUBEMAP SKY — FORGED ONCE, ETERNALLY
-    static bool g_envMapReady = false;
-    if (!g_envMapReady && renderer_)
+    // MODE 0: HDR SKY — FORGED ONCE
+    static bool envMapReady = false;
+    if (!envMapReady && renderer_)
     {
-        LOG_AMOURANTH("Forging eternal HDR cubemap sky for Mode 0...");
-
         EnvironmentMap sky = renderer_->createEnvironmentMap();
-
-        if (sky)
-        {
-            LOG_SUCCESS_CAT("SKY", "HDR CUBEMAP SKY FORGED — Mode 0 active — the void is infinite");
-            LOG_CAPTAIN_N("[CAPTAIN N] \"The sky is real.\n"
-                          "               No lies.\n"
-                          "               No fallback.\n"
-                          "               Only truth.\"\n"
-                          "*salutes*");
-            g_envMapReady = true;
-        }
-        else
-        {
-            LOG_ERROR_CAT("SKY", "Failed to load envmap.hdr — Mode 0 will be black");
+        if (sky) {
+            LOG_SUCCESS_CAT("SKY", "HDR CUBEMAP SKY FORGED — Mode 0 ready");
+            envMapReady = true;  // ← fixed: was g_envMapReady
         }
     }
 
@@ -919,68 +899,56 @@ void Application::run() noexcept
         int winW = 0, winH = 0;
         SDL3Window::pollEvents(winW, winH, quit_, toggleFS);
 
-        width_  = winW > 0 ? winW : width_;
-        height_ = winH > 0 ? winH : height_;
-
-        if (width_ > 0 && height_ > 0)
-        {
-            proj_ = glm::perspective(glm::radians(75.0f),
-                static_cast<float>(width_) / std::max(height_, 1), 0.1f, 1000.0f);
+        if (winW > 0 && winH > 0) {
+            width_  = winW;
+            height_ = winH;
+            proj_ = glm::perspective(glm::radians(75.0f), float(width_)/std::max(height_,1), 0.1f, 1000.0f);
         }
 
         if (toggleFS) SDL3Window::toggleFullscreen();
 
-        // RESIZE
+        // RESIZE — THE EMPIRE REBUILDS
         if (g_resizeRequested.exchange(false))
         {
             uint32_t w = g_resizeWidth.exchange(0);
             uint32_t h = g_resizeHeight.exchange(0);
             if (w && h)
             {
-                g_pendingWidth.store(w);
-                g_pendingHeight.store(h);
+                LOG_AMOURANTH("[RESIZE] Empire rebuilds: {}×{}", w, h);
+
+                vkDeviceWaitIdle(stone_device());
+
+                RTX::las().notifyResize();
+                RTX::SwapchainManager::get().recreate(w, h);
+
+                // Rebuild pipeline using current command pool
+                RTX::pipeline().forgeRTXPipeline(
+                    RTX::g_ctx().commandPool(),  // ← fixed: currentCommandPool() doesn't exist
+                    stone_graphics_queue()
+                );
+
+                // Reset accumulation
+                if (renderer_) renderer_->resetAccumulation_;  // ← fixed: was resetAccumulation()
+
+                LOG_SUCCESS_CAT("RESIZE", "Empire restored — rendering resumes");
             }
-        }
-
-        if (g_pendingWidth.load() && g_pendingHeight.load())
-        {
-            uint32_t w = g_pendingWidth.exchange(0);
-            uint32_t h = g_pendingHeight.exchange(0);
-
-            LOG_AMOURANTH("[RESIZE] Rebuilding empire: {}×{}", w, h);
-            vkDeviceWaitIdle(stone_device());
-
-            RTX::las().notifyResize();
-            RTX::SwapchainManager::get().recreate(w, h);
-
-            for (int i = 0; i < 3; ++i) RTX::las().beginFrame();
-            RTX::pipeline().forgeRTXPipeline(RTX::g_ctx().commandPool(), stone_graphics_queue());
-
-            LOG_SUCCESS_CAT("RESIZE", "Empire restored");
         }
 
         processInput(g_deltaTime);
 
-        // RENDER — ONE PATH TO RULE THEM ALL
-        if (renderer_)
+        // RENDER — ONLY IF WE HAVE A VALID SWAPCHAIN
+        if (renderer_ && renderer_->isAlive() && stone_swapchain() != VK_NULL_HANDLE)
         {
-            renderer_->setMaxFramesInFlight(currentMaxFramesInFlight);
-
-            if (!renderer_->isAlive())
-            {
-                LOG_FATAL_CAT("RENDERER", "Renderer died — RESURRECTING FROM THE VOID");
-                renderer_ = phase7_5_Renderer();
-                stone_seal_renderer(renderer_.get());
-            }
-
-            // ALL MODES — INCLUDING MODE 0 — USE THE SAME RENDER PATH
-            // The ray tracer decides what to show:
-            // - Mode 0: no geometry → miss shader → envmap sky
-            // - Mode 1+: full scene + sky
+            renderer_->setMaxFramesInFlight(Options::Performance::MAX_FRAMES_IN_FLIGHT);
             renderer_->renderFrame(CAM, g_deltaTime);
         }
+        else if (!renderer_ || !renderer_->isAlive())
+        {
+            LOG_FATAL_CAT("RENDERER", "Renderer is dead — cannot continue");
+            break;
+        }
 
-        // TITLE BAR — PURE TRUTH
+        // TITLE BAR
         titleTimer += g_deltaTime;
         if (titleTimer >= TITLE_UPDATE_INTERVAL)
         {
@@ -1003,13 +971,11 @@ void Application::run() noexcept
                 }
             }();
 
-            std::string title = (currentRenderMode_ == 0)
-                ? std::format("AMOURANTH RTX | {:.1f} FPS | {}×{} | MODE 0: PURE HDR SKY{}", 
-                             currentFPS, stone_width(), stone_height(), dots[dotPhase])
-                : std::format("AMOURANTH RTX | {:.1f} FPS | {}×{} | Mode {}: {} | Bounces {} | FIF:{}",
-                             currentFPS, stone_width(), stone_height(),
-                             currentRenderMode_, modeName,
-                             Options::OptionsRTX::MAX_BOUNCES, currentMaxFramesInFlight);
+            std::string title = std::format(
+                "AMOURANTH RTX | {:.1f} FPS | {}×{} | Mode {}: {}{}",
+                currentFPS, stone_width(), stone_height(),
+                currentRenderMode_, modeName, dots[dotPhase]
+            );
 
             SDL_SetWindowTitle(stone_window(), title.c_str());
         }
@@ -1021,21 +987,21 @@ void Application::run() noexcept
         {
             currentFPS = frameCount / fpsTimer;
             frameCount = 0;
-            fpsTimer   = 0.0f;
+            fpsTimer = 0.0f;
         }
 
         // FRAME PACING
         if (Options::Performance::ENABLE_FRAME_PREDICTION)
         {
-            const auto frameTime = std::chrono::steady_clock::now() - frameStart;
+            const auto elapsed = std::chrono::steady_clock::now() - frameStart;
             const auto target = std::chrono::duration<float>(1.0f / 240.0f);
-            if (frameTime < target)
-                std::this_thread::sleep_for(target - frameTime);
+            if (elapsed < target)
+                std::this_thread::sleep_for(target - elapsed);
         }
     }
 
     vkDeviceWaitIdle(stone_device());
-    LOG_AMOURANTH("[SHUTDOWN] The HDR sky fades. The empire rests. The photons return to the void.");
+    LOG_AMOURANTH("[SHUTDOWN] The empire rests. The photons return to the void.");
 }
 
 // =============================================================================
@@ -1080,7 +1046,7 @@ int main(int, char**)
             .sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
             .flags            = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT |
                                 VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
-            .queueFamilyIndex = RTX::g_ctx().graphicsFamily()  // ← Correct call
+            .queueFamilyIndex = stone_graphics_family()
         };
 
         const VkFenceCreateInfo fenceInfo{

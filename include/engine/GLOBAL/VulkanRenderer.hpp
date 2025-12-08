@@ -126,6 +126,10 @@ public:
     void recordRayTrace(VkCommandBuffer cmd, const VkExtent2D& extent) noexcept;
     void initializeAllBufferData(uint32_t frames, VkDeviceSize uniformSize, VkDeviceSize materialSize) noexcept;
     void setMaxFramesInFlight(uint32_t count) noexcept;
+	void createTonemapDescriptorSets() noexcept;
+	void createTonemapDescriptorPool() noexcept;
+    void createTonemapDescriptorSetLayout() noexcept;
+	void createDepthResources() noexcept;
 
 	static inline std::atomic<bool> s_resizeInProgress{false};
     bool     resetAccumulation_ = true;
@@ -176,6 +180,17 @@ private:
     uint32_t accumulationFrame_ = 0;
     bool     firstSwapchainAcquire_ = true;
     bool     resetAccumNextFrame_ = true;
+
+	RTX::Handle<VkImage>         depthImage_;
+    RTX::Handle<VkDeviceMemory>  depthImageMemory_;
+
+    // Tonemap render targets (created during swapchain rebuild)
+    std::vector<RTX::Handle<VkImage>>        tonemapImages_;
+    std::vector<RTX::Handle<VkImageView>>    tonemapImageViews_;
+    RTX::Handle<VkImageView>                 depthImageView_;        // Single depth view (or per-frame if you want)
+
+    // Optional: if you have a separate tonemap framebuffer
+    std::vector<RTX::Handle<VkFramebuffer>>  tonemapFramebuffers_;
 
     int  activeRenderMode_ = 0;
 	std::atomic<uint64_t> rendererRebuildFrame_{0};
@@ -284,19 +299,26 @@ private:
 
     void updateUniformBuffer(uint32_t frame, const Camera& camera, float jitter) noexcept;
     void updateTonemapUniform(uint32_t frame) noexcept;
-    bool recreateTonemapUBOs() noexcept;	
+    bool recreateTonemapUBOs() noexcept;
+	void waitForGPU() noexcept;
 
     VkDeviceAddress getShaderGroupHandle(uint32_t group) noexcept;
 
-    void createImage(RTX::Handle<VkImage>& image,
-                     RTX::Handle<VkDeviceMemory>& memory,
-                     RTX::Handle<VkImageView>& view,
-                     const std::string& tag) noexcept;
+// VulkanRenderer.hpp — ONLY THIS
+    void createImage(uint32_t width, uint32_t height, uint32_t mipLevels,
+                 VkFormat format, VkImageTiling tiling,
+                 VkImageUsageFlags usage, VkMemoryPropertyFlags properties,
+                 RTX::Handle<VkImage>& image,
+                 RTX::Handle<VkDeviceMemory>& memory,
+                 const std::string& tag = "") noexcept;
 
-    void createImageArray(std::vector<RTX::Handle<VkImage>>& images,
-                          std::vector<RTX::Handle<VkDeviceMemory>>& memories,
-                          std::vector<RTX::Handle<VkImageView>>& views,
-                          const std::string& tag) noexcept;
+	void createImageArray(std::vector<RTX::Handle<VkImage>>& images,
+                                      std::vector<RTX::Handle<VkDeviceMemory>>& memories,
+                                      std::vector<RTX::Handle<VkImageView>>& views,
+                                      uint32_t count,
+                                      VkFormat format,
+                                      VkImageUsageFlags usage,
+                                      const std::string& baseTag) noexcept;
 
     void updateTonemapDescriptorsInitial() noexcept;
     void destroySharedStaging() noexcept;
