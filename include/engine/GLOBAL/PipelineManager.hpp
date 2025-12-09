@@ -80,6 +80,8 @@ struct RTDescriptorUpdate {
     VkSampler   envSampler = VK_NULL_HANDLE;
     VkImageView envImageView = VK_NULL_HANDLE;
 
+	VkImageView swapchainImageView = VK_NULL_HANDLE;
+
     std::array<VkImageView, Options::Performance::MAX_FRAMES_IN_FLIGHT> rtOutputViews{};
     std::array<VkImageView, Options::Performance::MAX_FRAMES_IN_FLIGHT> accumulationViews{};
     std::array<VkImageView, Options::Performance::MAX_FRAMES_IN_FLIGHT> nexusScoreViews{};

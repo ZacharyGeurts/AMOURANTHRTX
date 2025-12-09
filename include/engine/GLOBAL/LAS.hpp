@@ -83,6 +83,10 @@ public:
 	void waitForAllFences();
     void beginFrame() noexcept;
 
+	VkAccelerationStructureKHR getCurrentTLAS() const noexcept {
+        return tlas_.valid() ? tlas_.get() : VK_NULL_HANDLE;
+    }
+
     // Fixed: now takes VkBuffer parameter
     [[nodiscard]] VkDeviceAddress getBufferAddress(VkBuffer buffer) const noexcept;
 

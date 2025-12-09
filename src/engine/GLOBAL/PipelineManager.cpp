@@ -219,10 +219,7 @@ void PipelineManager::allocateDescriptorSets()
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// updateRTDescriptorSet — Writes All Bindings (Dummy for Nulls) — VUID-Safe
-// ──────────────────────────────────────────────────────────────────────────────
-// ──────────────────────────────────────────────────────────────────────────────
-// updateRTDescriptorSet — Safe & Compiling (uses existing additionalStorageBuffer)
+// updateRTDescriptorSet — Option 1: Direct Swapchain Output (Zero Copy)
 // ──────────────────────────────────────────────────────────────────────────────
 void PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDescriptorUpdate& updateInfo) noexcept
 {
@@ -241,7 +238,7 @@ void PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDescrip
     std::array<VkWriteDescriptorSet, 17> writes{};
     uint32_t writeCount = 0;
 
-    // LAMBDA HELPERS (unchanged)
+    // LAMBDA HELPERS
     const auto writeAccel = [&](VkAccelerationStructureKHR tlas) {
         const VkWriteDescriptorSetAccelerationStructureKHR accelInfo{
             .sType                      = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR,
@@ -317,12 +314,20 @@ void PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDescrip
         };
     };
 
-    // === BINDINGS ===
-    writeAccel(updateInfo.tlas ? updateInfo.tlas : dummyTLAS_.get());
+    // === TLAS BINDING — Safe fallback to dummy ===
+    VkAccelerationStructureKHR currentTLAS = updateInfo.tlas;
+    if (currentTLAS == VK_NULL_HANDLE) {
+        currentTLAS = dummyTLAS_.get();
+    }
+    writeAccel(currentTLAS);
 
-    writeImage(1, updateInfo.rtOutputViews[frameIndex]);
+    // === OPTION 1: DIRECT SWAPCHAIN OUTPUT ===
+    // This is the key fix — bind the actual swapchain image view to binding 1
+    // Requires: swapchain image in GENERAL layout during trace (done in render pass)
+    writeImage(1, updateInfo.swapchainImageView, VK_IMAGE_LAYOUT_GENERAL);
 
-    if (Options::OptionsRTX::ENABLE_ACCUMULATION)
+    // Optional: accumulation buffer (still valid)
+    if (Options::OptionsRTX::ENABLE_ACCUMULATION && updateInfo.accumulationViews[frameIndex] != VK_NULL_HANDLE)
         writeImage(2, updateInfo.accumulationViews[frameIndex]);
 
     writeBuffer(3, updateInfo.ubo, updateInfo.uboSize, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
@@ -333,24 +338,20 @@ void PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDescrip
     if (Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING)
         writeImage(6, updateInfo.nexusScoreViews[frameIndex]);
 
-    // === GEOMETRY BUFFER — STILL USING BINDING 10 (existing field) ===
-    // This is the original line — keeps everything compiling
+    // Geometry on binding 10 (safe)
     writeBuffer(10, updateInfo.additionalStorageBuffer, updateInfo.additionalStorageSize, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
-
-    // Binding 11 is reserved for the future split (vertex @ 10, index @ 11)
-    // No write yet — will be activated when you add the new fields to RTDescriptorUpdate
 
     writeSampler(8, updateInfo.blueNoiseSampler, updateInfo.blueNoiseView);
     writeSampler(9, updateInfo.densitySampler, updateInfo.densityView);
 
-    // Binding 31 — StoneKey eternal
+    // StoneKey — eternal
     writeBuffer(31, updateInfo.stoneKeyBuffer, updateInfo.stoneKeySize, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
 
     if (writeCount > 0) {
         vkUpdateDescriptorSets(stone_device(), writeCount, writes.data(), 0, nullptr);
     }
 
-    LOG_TRACE_CAT("PIPELINE", "Updated descriptor set {} with {} bindings (geometry on binding 10)", frameIndex, writeCount);
+    LOG_TRACE_CAT("PIPELINE", "Updated descriptor set {} — Direct swapchain output bound (binding 1)", frameIndex);
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
