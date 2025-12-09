@@ -1,5 +1,5 @@
 // =============================================================================
-// BufferManager.cpp — VALHALLA v80 TURBO — APOCALYPSE FINAL v10.3 — DECEMBER 08, 2025
+// BufferManager.cpp — VALHALLA v80 TURBO — APOCALYPSE FINAL v10.3 — DECEMBER 09, 2025
 // ALL FUNCTIONS DEFINED — LINKER SUBMITS — PINK PHOTONS ETERNAL
 // THE EMPIRE IS COMPLETE — SOUL SAVED — FIRST LIGHT ETERNAL
 // =============================================================================
@@ -175,9 +175,7 @@ void ensureStagingRing() noexcept
 
     ensureMainPool();
 
-    const VkDeviceSize size = (Options::CURRENT_PRESET == Options::Preset::BestQuality)
-        ? 512ULL * 1024 * 1024   // 512 MiB — THE ROAR OF THE TITAN
-        : 256ULL * 1024 * 1024;  // 256 MiB — still terrifying
+    const VkDeviceSize size = 2048ULL * 1024 * 1024; // excessive? luxury
 
     LOG_AMOURANTH(
         "\n"
@@ -318,214 +316,44 @@ void destroy(uint64_t) noexcept {}
 void purge_all() noexcept {}
 
 // ─────────────────────────────────────────────────────────────────────────────
-// REAL ETERNAL STONES — SUBALLOCATED FROM MAIN POOL
+// REAL ETERNAL STONES — SUBALLOCATED FROM MAIN POOL (single flexible maker)
 // ─────────────────────────────────────────────────────────────────────────────
-uint64_t make_64M(VkBufferUsageFlags) noexcept
+uint64_t make_stone(VkDeviceSize size, std::string_view tag) noexcept
 {
-    constexpr VkDeviceSize size = 64ULL * 1024 * 1024;
-    static uint64_t handle = []() {
-        ensureMainPool();
-        VkDeviceSize offset = g_mainPool.head.fetch_add(size);
-        if (offset + size > g_mainPool.size) {
-            LOG_FATAL("make_64M failed — pool exhausted");
-            return uint64_t(0);
-        }
-        uint64_t h = ++g_nextHandle;
-        s_buffers[h] = BufferInfo{
-            .buffer = g_mainPool.buffer,
-            .memory = g_mainPool.memory,
-            .size   = size,
-            .tag    = "STONE_64M",
-            .offset = offset
-        };
-        return h;
-    }();
+    ensureMainPool();
+
+    const VkDeviceSize alignedSize = (size + 63) & ~63ULL;  // 64-byte alignment
+
+    const VkDeviceSize offset = g_mainPool.head.fetch_add(alignedSize, std::memory_order_relaxed);
+
+    if (offset + alignedSize > g_mainPool.size) {
+        LOG_FATAL("make_stone failed ({} MiB) — main pool exhausted (requested: {} MiB, tag: {})",
+                  alignedSize / (1024.0 * 1024), alignedSize / (1024.0 * 1024), tag);
+        return 0;
+    }
+
+    uint64_t handle = ++g_nextHandle;
+    s_buffers[handle] = BufferInfo{
+        .buffer = g_mainPool.buffer,
+        .memory = g_mainPool.memory,
+        .size   = alignedSize,
+        .tag    = std::string(tag),
+        .offset = offset
+    };
+
     return handle;
 }
 
-uint64_t make_128M(VkBufferUsageFlags) noexcept
-{
-    constexpr VkDeviceSize size = 128ULL * 1024 * 1024;
-    static uint64_t handle = []() {
-        ensureMainPool();
-        VkDeviceSize offset = g_mainPool.head.fetch_add(size);
-        if (offset + size > g_mainPool.size) {
-            LOG_FATAL("make_128M failed — pool exhausted");
-            return uint64_t(0);
-        }
-        uint64_t h = ++g_nextHandle;
-        s_buffers[h] = BufferInfo{
-            .buffer = g_mainPool.buffer,
-            .memory = g_mainPool.memory,
-            .size   = size,
-            .tag    = "STONE_128M",
-            .offset = offset
-        };
-        return h;
-    }();
-    return handle;
-}
-
-uint64_t make_256M(VkBufferUsageFlags) noexcept
-{
-    constexpr VkDeviceSize size = 256ULL * 1024 * 1024;
-    static uint64_t handle = []() {
-        ensureMainPool();
-        VkDeviceSize offset = g_mainPool.head.fetch_add(size);
-        if (offset + size > g_mainPool.size) {
-            LOG_FATAL("make_256M failed — pool exhausted");
-            return uint64_t(0);
-        }
-        uint64_t h = ++g_nextHandle;
-        s_buffers[h] = BufferInfo{
-            .buffer = g_mainPool.buffer,
-            .memory = g_mainPool.memory,
-            .size   = size,
-            .tag    = "SBT_STONE_256M",
-            .offset = offset
-        };
-        return h;
-    }();
-    return handle;
-}
-
-uint64_t make_420M(VkBufferUsageFlags) noexcept
-{
-    constexpr VkDeviceSize size = 420ULL * 1024 * 1024;
-    static uint64_t handle = []() {
-        ensureMainPool();
-        VkDeviceSize offset = g_mainPool.head.fetch_add(size);
-        if (offset + size > g_mainPool.size) {
-            LOG_FATAL("make_420M failed — pool exhausted");
-            return uint64_t(0);
-        }
-        uint64_t h = ++g_nextHandle;
-        s_buffers[h] = BufferInfo{
-            .buffer = g_mainPool.buffer,
-            .memory = g_mainPool.memory,
-            .size   = size,
-            .tag    = "STONE_420M",
-            .offset = offset
-        };
-        return h;
-    }();
-    return handle;
-}
-
-uint64_t make_512M(VkBufferUsageFlags) noexcept
-{
-    constexpr VkDeviceSize size = 512ULL * 1024 * 1024;
-    static uint64_t handle = []() {
-        ensureMainPool();
-        VkDeviceSize offset = g_mainPool.head.fetch_add(size);
-        if (offset + size > g_mainPool.size) {
-            LOG_FATAL("make_512M failed — pool exhausted");
-            return uint64_t(0);
-        }
-        uint64_t h = ++g_nextHandle;
-        s_buffers[h] = BufferInfo{
-            .buffer = g_mainPool.buffer,
-            .memory = g_mainPool.memory,
-            .size   = size,
-            .tag    = "STONE_512M",
-            .offset = offset
-        };
-        return h;
-    }();
-    return handle;
-}
-
-uint64_t make_1G(VkBufferUsageFlags) noexcept
-{
-    constexpr VkDeviceSize size = 1ULL * 1024 * 1024 * 1024;
-    static uint64_t handle = []() {
-        ensureMainPool();
-        VkDeviceSize offset = g_mainPool.head.fetch_add(size);
-        if (offset + size > g_mainPool.size) {
-            LOG_FATAL("make_1G failed — pool exhausted");
-            return uint64_t(0);
-        }
-        uint64_t h = ++g_nextHandle;
-        s_buffers[h] = BufferInfo{
-            .buffer = g_mainPool.buffer,
-            .memory = g_mainPool.memory,
-            .size   = size,
-            .tag    = "STONE_1G",
-            .offset = offset
-        };
-        return h;
-    }();
-    return handle;
-}
-
-uint64_t make_2G(VkBufferUsageFlags) noexcept
-{
-    constexpr VkDeviceSize size = 2ULL * 1024 * 1024 * 1024;
-    static uint64_t handle = []() {
-        ensureMainPool();
-        VkDeviceSize offset = g_mainPool.head.fetch_add(size);
-        if (offset + size > g_mainPool.size) {
-            LOG_FATAL("make_2G failed — pool exhausted");
-            return uint64_t(0);
-        }
-        uint64_t h = ++g_nextHandle;
-        s_buffers[h] = BufferInfo{
-            .buffer = g_mainPool.buffer,
-            .memory = g_mainPool.memory,
-            .size   = size,
-            .tag    = "STONE_2G",
-            .offset = offset
-        };
-        return h;
-    }();
-    return handle;
-}
-
-uint64_t make_4G(VkBufferUsageFlags) noexcept
-{
-    constexpr VkDeviceSize size = 4ULL * 1024 * 1024 * 1024;
-    static uint64_t handle = []() {
-        ensureMainPool();
-        VkDeviceSize offset = g_mainPool.head.fetch_add(size);
-        if (offset + size > g_mainPool.size) {
-            LOG_FATAL("make_4G failed — pool exhausted");
-            return uint64_t(0);
-        }
-        uint64_t h = ++g_nextHandle;
-        s_buffers[h] = BufferInfo{
-            .buffer = g_mainPool.buffer,
-            .memory = g_mainPool.memory,
-            .size   = size,
-            .tag    = "STONE_4G",
-            .offset = offset
-        };
-        return h;
-    }();
-    return handle;
-}
-
-uint64_t make_8G(VkBufferUsageFlags) noexcept
-{
-    constexpr VkDeviceSize size = 8ULL * 1024 * 1024 * 1024;
-    static uint64_t handle = []() {
-        ensureMainPool();
-        VkDeviceSize offset = g_mainPool.head.fetch_add(size);
-        if (offset + size > g_mainPool.size) {
-            LOG_FATAL("make_8G failed — pool exhausted");
-            return uint64_t(0);
-        }
-        uint64_t h = ++g_nextHandle;
-        s_buffers[h] = BufferInfo{
-            .buffer = g_mainPool.buffer,
-            .memory = g_mainPool.memory,
-            .size   = size,
-            .tag    = "STONE_8G",
-            .offset = offset
-        };
-        return h;
-    }();
-    return handle;
-}
+// Convenience wrappers — clean and eternal
+inline uint64_t make_64M () noexcept  { return make_stone( 64ULL << 20,  "STONE_64M");   }
+inline uint64_t make_128M() noexcept  { return make_stone(128ULL << 20,  "STONE_128M");  }
+inline uint64_t make_256M() noexcept  { return make_stone(256ULL << 20,  "SBT_STONE_256M"); }
+inline uint64_t make_420M() noexcept  { return make_stone(420ULL << 20,  "STONE_420M");  }
+inline uint64_t make_512M() noexcept  { return make_stone(512ULL << 20,  "STONE_512M");  }
+inline uint64_t make_1G  () noexcept  { return make_stone(  1ULL << 30,  "STONE_1G");    }
+inline uint64_t make_2G  () noexcept  { return make_stone(  2ULL << 30,  "STONE_2G");    }
+inline uint64_t make_4G  () noexcept  { return make_stone(  4ULL << 30,  "STONE_4G");    }
+inline uint64_t make_8G  () noexcept  { return make_stone(  8ULL << 30,  "STONE_8G");    }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SBT CREATION (uses main pool directly)
@@ -633,6 +461,6 @@ void copyBuffer(VkBuffer src, VkBuffer dst, VkDeviceSize size, VkQueue queue, Vk
 
 // =============================================================================
 // THE EMPIRE IS COMPLETE — LINKER SUBMITS — PHOTONS ARE PINK
-// FIRST LIGHT ETERNAL — DECEMBER 08, 2025
+// FIRST LIGHT ETERNAL — DECEMBER 09, 2025
 // YOUR SOUL IS SAVED — GRACE RISES — PINK PHOTONS ETERNAL
 // =============================================================================

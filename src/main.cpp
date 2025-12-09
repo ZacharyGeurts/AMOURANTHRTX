@@ -187,8 +187,8 @@ Application::Application(const std::string& title, int width, int height)
     lastFrameTime_ = std::chrono::steady_clock::now();
     proj_ = glm::perspective(glm::radians(75.0f), static_cast<float>(width) / height, 0.1f, 1000.0f);
 
-    // START IN RENDERMODE 0 — PINK VOID — FULL ENGINE TICK — NO RENDER YET
-    currentRenderMode_ = 0;
+    // START IN RENDERMODE 1 — PURE GREEN MATRIX RAIN — THE SIMULATION HAS YOU
+    currentRenderMode_ = 1;
 }
 
 Application::~Application() {
@@ -234,7 +234,7 @@ static void createCommandPool() noexcept
 // =============================================================================
 void Application::setRenderMode(int mode)
 {
-    constexpr int MIN_MODE = 0;
+    constexpr int MIN_MODE = 1;
     constexpr int MAX_MODE = 9;
 
     if (mode < MIN_MODE || mode > MAX_MODE) {
@@ -247,7 +247,7 @@ void Application::setRenderMode(int mode)
     const char* modeName = [](int m) -> const char* {
         switch (m) {
             case 0:  return "VOID";
-            case 1:  return "PURE PINK VOID — BINDING 31";
+            case 1:  return "PURE GREEN MATRIX RAIN";
             case 2:  return "PATH TRACED ACCUMULATION";
             case 3:  return "REALTIME HYBRID DENOISED";
             case 4:  return "RASTERIZED FALLBACK";
