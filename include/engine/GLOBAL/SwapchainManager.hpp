@@ -33,6 +33,9 @@ public:
     SwapchainManager(SwapchainManager&&) = delete;
     SwapchainManager& operator=(SwapchainManager&&) = delete;
 
+	const std::vector<VkImageView>& getImageViews() const noexcept;
+    VkImageView getImageView(uint32_t index) const noexcept;
+
     // THE ONE TRUE ETERNAL SINGLETON ACCESSOR
     static SwapchainManager& get() noexcept
     {

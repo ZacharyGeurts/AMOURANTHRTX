@@ -79,9 +79,10 @@ public:
         buildTLAS(pool, queue, instances, true);
     }
 
-    void initTLAS() noexcept;
+	void initTLAS() noexcept;
 	void waitForAllFences();
     void beginFrame() noexcept;
+    const std::vector<VkImageView>& getImageViews() const noexcept;
 
 	VkAccelerationStructureKHR getCurrentTLAS() const noexcept {
         return tlas_.valid() ? tlas_.get() : VK_NULL_HANDLE;

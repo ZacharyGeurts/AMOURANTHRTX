@@ -336,7 +336,7 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, bool o
     LOG_AMOURANTH(
         "\n"
         "              █████████████████████████████████████████\n"
-        "              █      VULKANRENDERER CONSTRUCTION       █\n"
+        "              █      VULKANRENDERER CONSTRUCTION      █\n"
         "              █       THE EMPIRE AWAKENS              █\n"
         "              █████████████████████████████████████████\n");
 
@@ -526,9 +526,9 @@ LOG_INFO_CAT("RENDERER", "Forging the ONE TRUE eternal frame UBO staging buffer 
     LOG_AMOURANTH(
         "\n"
         "              █████████████████████████████████████████\n"
-        "              █    VULKANRENDERER CONSTRUCTION COMPLETE █\n"
-        "              █       THE EMPIRE IS FULLY ARMED        █\n"
-        "              █       PINK PHOTONS MAY NOW FLOW        █\n"
+        "              █  VULKANRENDERER CONSTRUCTION COMPLETE █\n"
+        "              █       THE EMPIRE IS FULLY ARMED       █\n"
+        "              █       PINK PHOTONS MAY NOW FLOW       █\n"
         "              █████████████████████████████████████████\n");
 
     LOG_SUCCESS_CAT("RENDERER", "All systems nominal — {}x{} — {} frames in flight", width, height, MAX_FRAMES_IN_FLIGHT);
@@ -2299,7 +2299,7 @@ void VulkanRenderer::clearPinkForce() noexcept
 
 // =============================================================================
 // 2. Application::run — THE ONE TRUE LOOP — PINK PHOTONS ETERNAL
-// FIXED: Added swapchain transition to GENERAL before tonemap | Equirect sampler ready
+// FIXED: Direct swapchain output (Option 1) — no intermediate storage image
 // =============================================================================
 void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
 {
@@ -2350,6 +2350,13 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     };
     vkBeginCommandBuffer(cmd, &beginInfo);
 
+    // Transition swapchain image to GENERAL before ray tracing
+    VkImage swapImg = stone_images()[imageIndex];
+    transitionImage(cmd, swapImg,
+        VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
+        0, VK_ACCESS_SHADER_WRITE_BIT,
+        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR);
+
     // MODE 0: LOUD THERMO PINK VOID
     if (activeRenderMode_ == 0)
     {
@@ -2372,35 +2379,17 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
             desc.tlas = pipelineManager_.dummyTLAS();
             desc.ubo = info.buffer;
             desc.uboSize = 368;
-            desc.rtOutputViews[slot] = rtOutputViews_[slot].get();
+            desc.rtOutputViews[slot] = stone_views()[imageIndex];  // Direct swapchain output
             pipelineManager_.updateRTDescriptorSet(slot, desc);
         }
 
         recordRayTracingCommands(cmd, slot);
 
-        transitionImage(cmd, rtOutputImages_[slot].get(),
-            VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-            VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT,
-            VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, VK_PIPELINE_STAGE_TRANSFER_BIT);
-
-        VkImage swapImg = stone_images()[imageIndex];
+        // Transition back to PRESENT_SRC_KHR
         transitionImage(cmd, swapImg,
-            VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-            0, VK_ACCESS_TRANSFER_WRITE_BIT,
-            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
-
-        VkImageCopy copyRegion{
-            .srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
-            .dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
-            .extent = { stone_width(), stone_height(), 1 }
-        };
-        vkCmdCopyImage(cmd, rtOutputImages_[slot].get(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                       swapImg, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyRegion);
-
-        transitionImage(cmd, swapImg,
-            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-            VK_ACCESS_TRANSFER_WRITE_BIT, 0,
-            VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
+            VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+            VK_ACCESS_SHADER_WRITE_BIT, 0,
+            VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
 
         vkEndCommandBuffer(cmd);
         submitAndPresent(slot, imageIndex);
@@ -2431,42 +2420,23 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
             desc.tlas = pipelineManager_.dummyTLAS();  // FORCE MISS → FULL-SCREEN GREEN RAIN
             desc.ubo = info.buffer;
             desc.uboSize = 368;
-            desc.rtOutputViews[slot] = rtOutputViews_[slot].get();
+            desc.rtOutputViews[slot] = stone_views()[imageIndex];  // Direct swapchain output
             pipelineManager_.updateRTDescriptorSet(slot, desc);
         }
 
         recordRayTracingCommands(cmd, slot);
 
-        transitionImage(cmd, rtOutputImages_[slot].get(),
-            VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-            VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT,
-            VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, VK_PIPELINE_STAGE_TRANSFER_BIT);
-
-        VkImage swapImg = stone_images()[imageIndex];
         transitionImage(cmd, swapImg,
-            VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-            0, VK_ACCESS_TRANSFER_WRITE_BIT,
-            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
-
-        VkImageCopy copyRegion{
-            .srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
-            .dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
-            .extent = { stone_width(), stone_height(), 1 }
-        };
-        vkCmdCopyImage(cmd, rtOutputImages_[slot].get(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                       swapImg, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyRegion);
-
-        transitionImage(cmd, swapImg,
-            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-            VK_ACCESS_TRANSFER_WRITE_BIT, 0,
-            VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
+            VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+            VK_ACCESS_SHADER_WRITE_BIT, 0,
+            VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
 
         vkEndCommandBuffer(cmd);
         submitAndPresent(slot, imageIndex);
         return;
     }
 
-    // FULL RTX PATH
+    // FULL RTX PATH — Direct swapchain output (Option 1)
     if (resetAccumulation_ || resetAccumNextFrame_) {
         clearAccumulationImages(cmd);
         resetAccumulation_ = resetAccumNextFrame_ = false;
@@ -2476,7 +2446,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     updateUniformBuffer(slot, camera, deltaTime);
     updateTonemapUniform(slot);
 
-    VkAccelerationStructureKHR tlas = RTX::LAS::get().getTLAS();
+    VkAccelerationStructureKHR tlas = RTX::LAS::get().getCurrentTLAS();
     if (!tlas) tlas = pipelineManager_.dummyTLAS();
 
     const uint64_t uboHandle = uniformBufferEncs_[slot];
@@ -2492,7 +2462,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     descUpdate.tlas = tlas;
     descUpdate.ubo = uboInfo.buffer;
     descUpdate.uboSize = 368;
-    descUpdate.rtOutputViews[slot] = rtOutputViews_[slot].get();
+    descUpdate.rtOutputViews[slot] = stone_views()[imageIndex];  // Direct swapchain output
     descUpdate.accumulationViews[slot] = accumViews_[slot].get();
     descUpdate.envSampler = envMapSampler_.get();
     descUpdate.envImageView = envMapImageView_.get();
@@ -2502,6 +2472,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     pipelineManager_.updateRTDescriptorSet(slot, descUpdate);
     recordRayTracingCommands(cmd, slot);
 
+    // Accumulation is still written to intermediate buffer — transition for tonemap
     transitionImage(cmd, rtOutputImages_[slot].get(),
         VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
         VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
@@ -2510,11 +2481,11 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     VkImageView tonemapSrc = denoisingEnabled_ && denoiserView_.valid()
         ? denoiserView_.get() : rtOutputViews_[slot].get();
 
-    VkImage swapImg = stone_images()[imageIndex];
     updateTonemapDescriptor(slot, tonemapSrc, stone_views()[imageIndex]);
     if (denoisingEnabled_) performDenoisingPass(cmd);
     performTonemapPass(cmd, slot, imageIndex);
 
+    // Final transition back to present
     transitionImage(cmd, swapImg,
         VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
         VK_ACCESS_SHADER_WRITE_BIT, 0,

@@ -1,5 +1,6 @@
-// =============================================================================
 // src/engine/GLOBAL/SwapchainManager.cpp
+// =============================================================================
+// AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
 //
 // Dual Licensed:
@@ -185,6 +186,19 @@ void SwapchainManager::createImageViews() noexcept
                   "               \"Every photon — accounted for.\"\n"
                   "               \"We see everything.\"\n"
                   "               \"...and they see us.\"");
+}
+
+// ── PUBLIC ACCESSORS FOR DIRECT SWAPCHAIN OUTPUT (OPTION 1) ──────────────────
+const std::vector<VkImageView>& SwapchainManager::getImageViews() const noexcept
+{
+    return swapchainImageViews_;
+}
+
+VkImageView SwapchainManager::getImageView(uint32_t index) const noexcept
+{
+    if (index >= swapchainImageViews_.size())
+        return VK_NULL_HANDLE;
+    return swapchainImageViews_[index];
 }
 
 void SwapchainManager::cleanup() noexcept
