@@ -17,7 +17,7 @@ namespace MeshLoader {
 
 static void uploadBuffer(const void* data, VkDeviceSize size, VkBufferUsageFlags usage, uint64_t& outHandle)
 {
-    LOG_INFO_CAT("MeshLoader", "uploadBuffer() START — size: {} bytes | usage: 0x{:X}", size, (uint32_t)usage);
+    LOG_INFO_CAT("MeshLoader", "uploadBuffer() START — size: {} bytes | usage: 0x{}", size, (uint32_t)usage);
 
     // 1. Staging buffer (host-visible)
     uint64_t staging = BufferManager::create(
@@ -61,7 +61,7 @@ static void uploadBuffer(const void* data, VkDeviceSize size, VkBufferUsageFlags
     // 4. Destroy staging buffer immediately
     BufferManager::destroy(staging);
 
-    LOG_SUCCESS_CAT("MeshLoader", "uploadBuffer() COMPLETE — final handle: 0x{:X}", outHandle);
+    LOG_SUCCESS_CAT("MeshLoader", "uploadBuffer() COMPLETE — final handle: 0x{}", outHandle);
 }
 
 std::unique_ptr<Mesh> loadOBJ(const std::string& path)
@@ -141,7 +141,7 @@ std::unique_ptr<Mesh> loadOBJ(const std::string& path)
         0xDEADC0DE1337BABEULL;
 
     LOG_SUCCESS_CAT("MeshLoader",
-        "MESH FORGED — fingerprint 0x{:X} | VB 0x{:X} | IB 0x{:X}",
+        "MESH FORGED — fingerprint 0x{} | VB 0x{} | IB 0x{}",
         mesh->stonekey_fingerprint, mesh->vertexBuffer, mesh->indexBuffer);
 
     return mesh;

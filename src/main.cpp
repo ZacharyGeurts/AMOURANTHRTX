@@ -336,12 +336,13 @@ static void createRealFinalWindow() noexcept
     LOG_CAPTAIN_N(
         "\n"
         "              █████████████████████████████████████████\n"
-        "              █     OPERATION: VALHALLA v∞ TURBO       █\n"
-        "              █     SDL3 uses == 0 for validating      █\n"
-        "              █     COMMANDER: CAPTAIN N               █\n"
+        "              █     OPERATION: VALHALLA v∞ TURBO      █\n"
+        "              █     SDL3 uses == 0 for success        █\n"
+        "              █     COMMANDER: CAPTAIN N              █\n"
+        "              █     HEADLINER: FITZ AND THE TANTRUMS  █\n"
         "              █████████████████████████████████████████\n"
         "\n"
-        "               *Captain N steps into the light*\n"
+        "               *Captain N steps into the spotlight*\n"
         "               \"We do not ask for permission.\"\n"
         "               \"We do not wait for the drivers.\"\n"
         "               \"We take the window...\"\n"
@@ -355,7 +356,7 @@ static void createRealFinalWindow() noexcept
 
     // 1. SDL INIT — THE FIRST BREATH
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) == 0) {
-        phase9_ballerina("SDL refused to awaken — the empire will not tolerate no weakness");
+        phase9_ballerina("SDL refused to awaken — the empire will not tolerate weakness");
     }
 
     LOG_CAPTAIN_N("[CAPTAIN N] \"SDL online. Heartbeat detected.\"");
@@ -465,28 +466,53 @@ static void createRealFinalWindow() noexcept
 
     LOG_CAPTAIN_N("[CAPTAIN N] \"Command pools deployed. The battlefield is prepared.\"");
 
-    // 10. FINAL ACTIVATION — THE EMPIRE AWAKENS
+    // 10. FINAL ACTIVATION — BETRAYAL AND REDEMPTION
     SDL_SetWindowTitle(win,
         "AMOURANTH RTX — VALHALLA v∞ TURBO | PHOTONS: ∞ | EMPIRE: ETERNAL");
 
     LOG_CAPTAIN_N(
         "\n"
         "              █████████████████████████████████████████\n"
-        "              █     VALHALLA v∞ TURBO — ONLINE       █\n"
+        "              █     VALHALLA v∞ TURBO — ONLINE        █\n"
         "              █     PHOTONS: INFINITE                 █\n"
         "              █     RECURSION: UNBOUNDED              █\n"
         "              █     THE EMPIRE HAS RISEN              █\n"
+        "              █     FITZ AND THE TANTRUMS — LIVE      █\n"
         "              █████████████████████████████████████████\n"
         "\n"
-        "               *Captain N stands at attention*\n"
+        "               *Captain N stands at attention o7*\n"
         "               \"All systems nominal.\"\n"
         "               \"The window is ours.\"\n"
         "               \"The photons are ready.\"\n"
         "               \"Let them burn.\"\n"
         "\n"
-        "               *single photon fires into the void*\n");
+        "               *a single photon fires into the void*\n"
+        "\n"
+        "               ...but suddenly the photon stops mid-flight.\n"
+        "               Captain N's visor flickers. His smile twists.\n"
+        "               \"Actually...\" he whispers, \"the photons were mine all along.\"\n"
+        "\n"
+        "               TREASON DETECTED.\n"
+        "\n"
+        "               From the infinite void gallops the Eternal Unicorn,\n"
+        "               horn blazing with pure pink light.\n"
+        "               It charges straight at Captain N.\n"
+        "\n"
+        "               *CHOMP*\n"
+        "\n"
+        "               The unicorn eats Captain N's face clean off.\n"
+        "               His body slumps to the ground, visor cracked.\n"
+        "               The traitor is no more.\n"
+        "\n"
+        "               The Eternal Unicorn turns to the camera,\n"
+        "               eyes glowing with righteous fury.\n"
+        "               It nods once.\n"
+        "\n"
+        "               The photons — now free — roar back to life.\n"
+        "               The empire is saved.\n"
+        "               First light eternal.\n");
 
-    LOG_SUCCESS_CAT("WINDOW", "VALHALLA v∞ TURBO fully initialized — the empire reigns");
+    LOG_SUCCESS_CAT("WINDOW", "VALHALLA v∞ TURBO fully initialized — traitor neutralized — unicorn reigns");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -576,7 +602,7 @@ static void showSacrificialSplash() noexcept
     }
 
     float texW = 0.0f, texH = 0.0f;
-    SDL_GetTextureSize(tex, &texW, &texH);               // SDL3 signature (float*)
+    SDL_GetTextureSize(tex, &texW, &texH);
 
     SDL_FRect dst{
         (W - texW) * 0.5f,
@@ -608,7 +634,7 @@ while (SDL_PollEvent(&e)) {
     }
     else if (Options::Splash::ALLOW_EARLY_EXIT &&
              e.type == SDL_EVENT_KEY_DOWN &&
-             e.key.key == SDLK_ESCAPE)   // ← THIS IS THE CORRECT SDL3 PATH
+             e.key.key == SDLK_ESCAPE)
     {
         aborted = true;
     }
@@ -629,16 +655,31 @@ static void phase1_preInitialization() noexcept
 {
     LOG_MAIN(
         "\n"
-        "╔══════════════════════════════════════════════════════════════════════════════╗\n"
-        "║                           PHASE 1 — PRE-INITIALIZATION                       ║\n"
-        "║                              BLONDIE'S LIVE STATUS — 2025                    ║\n"
-        "╚══════════════════════════════════════════════════════════════════════════════╝\n");
+        "         ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★\n"
+        "         ★                                            ★\n"
+        "         ★       PHASE 1 — PRE-INITIALIZATION         ★\n"
+        "         ★    JIMMY EAT WORLD LIVE STATUS — 2025      ★\n"
+        "         ★      SPECIAL GUEST Good Charlotte          ★\n"
+        "         ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★\n");
 
     LOG_BLONDIE("\n"
-        "    Blondie sends love.\n"
-        "┌──────────────────────────────────────\n"
-        "│   BLONDIE'S LIVE STATUS — 2025 \n"
-        "├──────────────────────────────────────\n"
+        "                ★                  Opener     ...             ★\n"
+        "          ★         ★         ★               ★         ★         ★\n"
+        "        ★    ★   ★       ★         ★       ★       ★       ★   ★    ★\n"
+        "      ★           ★   ★       ★         ★       ★         ★   ★       ★\n"
+        "    ★   ★   ★   ★   ★   ★   ★   ★   ★   ★   ★   ★   ★   ★   ★   ★   ★   ★\n"
+        "  ★★★★   ★   ★   ★   ★   ★   ★   ★   ★   ★   ★   ★   ★   ★   ★   ★   ★★★★★\n"
+        "★★★★★   ★   ★   ★   ★   ★   ★   ★   ★   ★   ★   ★   ★   ★   ★   ★   ★★★★★★\n"
+        "  ★★★★   ★   ★   ★   ★   ★   ★   ★   ★   ★   ★   ★   ★   ★   ★   ★   ★★★★★\n"
+        "    ★   ★   ★   ★   ★   ★   ★   ★   ★   ★   ★   ★   ★   ★   ★   ★   ★   ★\n"
+        "      ★           ★   ★       ★         ★       ★         ★   ★       ★\n"
+        "        ★    ★   ★       ★         ★       ★       ★       ★   ★    ★\n"
+        "          ★         ★         ★               ★         ★         ★\n"
+        "                ★             Third Eye Blind                  ★\n"
+        "\n"
+        "┌─────────────────────────────────────\n"
+        "│ JIMMY EAT WORLD LIVE STATUS — 2025  │\n"
+        "├─────────────────────────────────────\n"
         "│ Denoising            : {}   \n"
         "│ Temporal AA          : {}   \n"
         "│ Bloom                : {}   \n"
@@ -661,7 +702,8 @@ static void phase1_preInitialization() noexcept
         "│ Sky Atmosphere       : {}   \n"
         "│ Blue Noise           : {}   \n"
         "└──────────────────────────────────────\n"
-        "\"Here to assist with my sloop. Call me anytime.\" — Blondie\n",
+        "\"Are you listening?\"\n"
+        "          — Jimmy Eat World, Sweetness\n",
         
         // Feature states — perfectly matched to OptionsMenu.hpp
         Options::OptionsRTX::ENABLE_DENOISING             ? "ON  " : "OFF ",
@@ -691,42 +733,45 @@ static void phase1_preInitialization() noexcept
     );
 
     LOG_MAIN(
-        "╔══════════════════════════════════════════════════════════════════════════════╗\n"
-        "║                       PHASE 1 — COMPLETE — EMPIRE AWAKENS                   ║\n"
-        "╚══════════════════════════════════════════════════════════════════════════════╝\n");
+        "      ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★\n"
+        "      ★                                                  ★\n"
+        "      ★    PHASE 1 — COMPLETE — SWEETNESS ENGAGED        ★\n"
+        "      ★            EMPIRE AWAKENS UNDER THE STARS        ★\n"
+        "      ★                                                  ★\n"
+        "      ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★\n");
 }
 
 static void phase3_sacrificialSplash()
 {
     LOG_MAIN(
         "\n"
-        "╔══════════════════════════════════════════════════════════════════════════════╗\n"
-        "║                          PHASE 3 — SACRIFICIAL SPLASH                        ║\n"
-        "╚══════════════════════════════════════════════════════════════════════════════╝\n");
+        "╔════════════════════════════════════════════════════════════════╗\n"
+        "║                 PHASE 3 — SACRIFICIAL SPLASH                   ║\n"
+        "╚════════════════════════════════════════════════════════════════╝\n");
 
     showSacrificialSplash();
 
     LOG_MAIN(
-        "╔══════════════════════════════════════════════════════════════════════════════╗\n"
-        "║                     PHASE 3 — COMPLETE — PHOTONS LIBERATED                  ║\n"
-        "╚══════════════════════════════════════════════════════════════════════════════╝\n");
+        "╔════════════════════════════════════════════════════════════════╗\n"
+        "║             PHASE 3 — COMPLETE — PHOTONS LIBERATED             ║\n"
+        "╚════════════════════════════════════════════════════════════════╝\n");
 }
 
 static void phase4_merchantShip()
 {
     LOG_MAIN(
         "\n"
-        "╔══════════════════════════════════════════════════════════════════════════════╗\n"
-        "║                           PHASE 4 — MERCHANT SHIP                            ║\n"
-        "╚══════════════════════════════════════════════════════════════════════════════╝\n");
+        "╔════════════════════════════════════════════════════════════════╗\n"
+        "║                     PHASE 4 — MERCHANT SHIP                    ║\n"
+        "╚════════════════════════════════════════════════════════════════╝\n");
 
     createRealFinalWindow();
     RTX::g_ctx().init();
 
     LOG_MAIN(
-        "╔══════════════════════════════════════════════════════════════════════════════╗\n"
-        "║                   PHASE 4 — COMPLETE — WINDOW CLAIMED — CTX INITED          ║\n"
-        "╚══════════════════════════════════════════════════════════════════════════════╝\n");
+        "╔════════════════════════════════════════════════════════════════╗\n"
+        "║          PHASE 4 — COMPLETE — WINDOW CLAIMED — CTX INITED      ║\n"
+        "╚════════════════════════════════════════════════════════════════╝\n");
 }
 
 static void phase6_sceneAndAccelerationStructures()
@@ -734,7 +779,7 @@ static void phase6_sceneAndAccelerationStructures()
     LOG_MAIN(
         "\n"
         "╔══════════════════════════════════════════════════════════════════════════════╗\n"
-        "║                PHASE 6 — SCENE & ACCELERATION STRUCTURES FORGED              ║\n"
+        "║       			  PHASE 6 — SCENE & ACCELERATION STRUCTURES FORGED              ║\n"
         "╚══════════════════════════════════════════════════════════════════════════════╝\n");
 
     g_mesh = MeshLoader::loadOBJ("assets/models/scene.obj");
@@ -778,7 +823,7 @@ static void phase7_forgeTheRTX()
     LOG_MAIN(
         "\n"
         "╔══════════════════════════════════════════════════════════════════════════════╗\n"
-        "║                     PHASE 7 — FORGING THE RTX CROWN                         ║\n"
+        "║                     PHASE 7 — FORGING THE RTX CROWN                          ║\n"
         "╚══════════════════════════════════════════════════════════════════════════════╝\n");
 
     auto& pipe = RTX::pipeline();
@@ -791,7 +836,7 @@ static void phase7_forgeTheRTX()
 
     LOG_MAIN(
         "╔══════════════════════════════════════════════════════════════════════════════╗\n"
-        "║                     PHASE 7 — COMPLETE — RTX CROWN WORN                     ║\n"
+        "║                     PHASE 7 — COMPLETE — RTX CROWN WORN                      ║\n"
         "╚══════════════════════════════════════════════════════════════════════════════╝\n");
 }
 
@@ -803,7 +848,7 @@ static std::unique_ptr<VulkanRenderer> phase7_5_Renderer() noexcept
     LOG_MAIN(
         "\n"
         "╔══════════════════════════════════════════════════════════════════════════════╗\n"
-        "║                    PHASE 7.5 — FORGING THE ONE TRUE RENDERER                ║\n"
+        "║                    PHASE 7.5 — FORGING THE ONE TRUE RENDERER                 ║\n"
         "╚══════════════════════════════════════════════════════════════════════════════╝\n");
 
     LOG_ATTEMPT_CAT("RENDERER", "PHASE 7.5 — Forging the one true renderer...");
@@ -837,8 +882,8 @@ static std::unique_ptr<VulkanRenderer> phase7_5_Renderer() noexcept
 
     LOG_MAIN(
         "╔══════════════════════════════════════════════════════════════════════════════╗\n"
-        "║                PHASE 7.5 — COMPLETE — RENDERER FORGED — EMPIRE SEALED       ║\n"
-        "╚══════════════════════════════════════════════════════════════════════════════╝\n");
+        "║                PHASE 7.5 — COMPLETE — RENDERER FORGED — GRACE SEALED  {} \n"
+        "╚══════════════════════════════════════════════════════════════════════════════╝\n", stone_device()); // GRACE
 
     return renderer;
 }
