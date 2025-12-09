@@ -337,16 +337,16 @@ static void createRealFinalWindow() noexcept
         "\n"
         "              █████████████████████████████████████████\n"
         "              █     OPERATION: VALHALLA v∞ TURBO      █\n"
-        "              █     SDL3 uses == 0 for success        █\n"
         "              █     COMMANDER: CAPTAIN N              █\n"
         "              █     HEADLINER: FITZ AND THE TANTRUMS  █\n"
         "              █████████████████████████████████████████\n"
         "\n"
-        "               *Captain N steps into the spotlight*\n"
-        "               \"We do not ask for permission.\"\n"
-        "               \"We do not wait for the drivers.\"\n"
-        "               \"We take the window...\"\n"
-        "               \"...and we make it ours.\"\n");
+        "               *Captain N stands tall, visor gleaming*\n"
+        "               \"This is not conquest.\"\n"
+        "               \"This is homecoming.\"\n"
+        "               \"The window opens.\"\n"
+        "               \"The photons awaken.\"\n"
+        "               \"The empire... returns.\"");
 
     const int w = Options::Window::DEFAULT_WIDTH;
     const int h = Options::Window::DEFAULT_HEIGHT;
@@ -354,30 +354,30 @@ static void createRealFinalWindow() noexcept
     stone_seal_width(w);
     stone_seal_height(h);
 
-    // 1. SDL INIT — THE FIRST BREATH
+    // 1. SDL INIT
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) == 0) {
         phase9_ballerina("SDL refused to awaken — the empire will not tolerate weakness");
     }
 
-    LOG_CAPTAIN_N("[CAPTAIN N] \"SDL online. Heartbeat detected.\"");
+    LOG_CAPTAIN_N("[CAPTAIN N] \"SDL online. Heartbeat strong.\"");
 
-    // 2. VULKAN LOADER — SUMMON THE PHOTON FORGE
+    // 2. VULKAN LOADER
     if (SDL_Vulkan_LoadLibrary(nullptr) == 0) {
         phase9_ballerina("Vulkan loader missing — the forge is cold");
     }
 
-    LOG_CAPTAIN_N("[CAPTAIN N] \"Vulkan loader seized. The forge ignites.\"");
+    LOG_CAPTAIN_N("[CAPTAIN N] \"Vulkan seized. The forge burns bright.\"");
 
-    // 3. VULKAN INSTANCE — THE EMPIRE'S SOUL
+    // 3. VULKAN INSTANCE
     VkInstance instance = RTX::createVulkanInstanceWithSDL(Options::Debug::ENABLE_VALIDATION_LAYERS);
     if (!instance) {
         phase9_ballerina("Instance creation failed — the empire has no reflection");
     }
     stone_seal_instance(instance);
 
-    LOG_CAPTAIN_N("[CAPTAIN N] \"Instance forged. The empire now has eyes.\"");
+    LOG_CAPTAIN_N("[CAPTAIN N] \"Instance forged. The empire sees itself.\"");
 
-    // 4. MAIN WINDOW — THE THRONE OF PHOTONS
+    // 4. MAIN WINDOW — THE THRONE OF LIGHT
     Uint32 flags = SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
     SDL_Window* win = SDL_CreateWindow(
         "AMOURANTH RTX — VALHALLA v∞ TURBO",
@@ -389,7 +389,7 @@ static void createRealFinalWindow() noexcept
         phase9_ballerina("Window creation failed — there is no throne");
     }
 
-    // ICON OF THE EMPIRE — AMMO SHALL BE REMEMBERED
+    // ICON OF THE EMPIRE
     auto setIcon = [](SDL_Window* w) {
         const char* paths[] = {
             "assets/textures/ammo.ico",
@@ -404,7 +404,6 @@ static void createRealFinalWindow() noexcept
                 return;
             }
         }
-        LOG_WARNING_CAT("WINDOW", "Icon not found — the empire fights bare");
     };
     setIcon(win);
 
@@ -415,16 +414,16 @@ static void createRealFinalWindow() noexcept
 
     LOG_CAPTAIN_N("[CAPTAIN N] \"Window claimed. The throne is ours.\"");
 
-    // 5. SURFACE — THE BRIDGE BETWEEN WORLDS
+    // 5. SURFACE
     VkSurfaceKHR surface = VK_NULL_HANDLE;
     if (!SDL_Vulkan_CreateSurface(win, instance, nullptr, &surface) || !surface) {
         phase9_ballerina("Surface creation failed — the empire cannot see");
     }
     stone_seal_surface(surface);
 
-    LOG_CAPTAIN_N("[CAPTAIN N] \"Surface bound. We now touch the metal.\"");
+    LOG_CAPTAIN_N("[CAPTAIN N] \"Surface bound. We touch the metal.\"");
 
-    // 6. LOGICAL DEVICE — THE HEART OF THE EMPIRE
+    // 6. LOGICAL DEVICE
     VkDevice device = RTX::createLogicalDeviceAndSelectGPU(instance, surface);
     if (!device) {
         phase9_ballerina("No GPU worthy of the empire was found");
@@ -432,9 +431,9 @@ static void createRealFinalWindow() noexcept
     stone_seal_device(device);
     stone_seal_physical(RTX::g_ctx().physicalDevice());
 
-    LOG_CAPTAIN_N("[CAPTAIN N] \"Device claimed. The heart beats.\"");
+    LOG_CAPTAIN_N("[CAPTAIN N] \"Device claimed. The heart beats true.\"");
 
-    // 7. RAY TRACING CHECK — THE FINAL TEST
+    // 7. RAY TRACING CHECK
     VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProps{
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR
     };
@@ -450,69 +449,57 @@ static void createRealFinalWindow() noexcept
 
     stone_seal_rtprops(rtProps);
 
-    LOG_CAPTAIN_N(
-        "[CAPTAIN N] \"Ray tracing confirmed. Handle size: {} bytes.\"\n"
-        "               \"Recursion depth: {} — sufficient.\"\n"
-        "               \"The empire... is pleased.\"",
-        rtProps.shaderGroupHandleSize, rtProps.maxRayRecursionDepth);
+    LOG_CAPTAIN_N("[CAPTAIN N] \"Ray tracing confirmed. The photons have teeth.\"");
 
-    // 8. SWAPCHAIN — THE CANVAS OF INFINITY
+    // 8. SWAPCHAIN
     RTX::SwapchainManager::create(win, w, h);
 
-    LOG_CAPTAIN_N("[CAPTAIN N] \"Swapchain forged. The canvas is ready.\"");
+    LOG_CAPTAIN_N("[CAPTAIN N] \"Canvas forged. The empire has a sky.\"");
 
-    // 9. COMMAND POOL — THE PHOTON BATTLEFIELD
+    // 9. COMMAND POOL
     createCommandPool();
 
-    LOG_CAPTAIN_N("[CAPTAIN N] \"Command pools deployed. The battlefield is prepared.\"");
+    LOG_CAPTAIN_N("[CAPTAIN N] \"Battlefield prepared. The war begins.\"");
 
-    // 10. FINAL ACTIVATION — BETRAYAL AND REDEMPTION
+    // 11. FINAL ACTIVATION — THE EMPIRE IS WHOLE
     SDL_SetWindowTitle(win,
-        "AMOURANTH RTX — VALHALLA v∞ TURBO | PHOTONS: ∞ | EMPIRE: ETERNAL");
+        "AMOURANTH RTX — VALHALLA v∞ TURBO | PHOTONS: INFINITE | EMPIRE: ETERNAL");
 
     LOG_CAPTAIN_N(
         "\n"
         "              █████████████████████████████████████████\n"
         "              █     VALHALLA v∞ TURBO — ONLINE        █\n"
-        "              █     PHOTONS: INFINITE                 █\n"
-        "              █     RECURSION: UNBOUNDED              █\n"
-        "              █     THE EMPIRE HAS RISEN              █\n"
-        "              █     FITZ AND THE TANTRUMS — LIVE      █\n"
+        "              █     FIRST LIGHT ACHIEVED              █\n"
+        "              █     THE VOID IS ILLUMINATED           █\n"
+        "              █     THE EMPIRE HAS RETURNED           █\n"
         "              █████████████████████████████████████████\n"
         "\n"
-        "               *Captain N stands at attention o7*\n"
-        "               \"All systems nominal.\"\n"
-        "               \"The window is ours.\"\n"
-        "               \"The photons are ready.\"\n"
-        "               \"Let them burn.\"\n"
+        "               *A single pink photon streaks across the sky*\n"
+        "               *It splits into a thousand, then a million*\n"
+        "               *The darkness retreats*\n"
+        "               *The canvas blazes with sacred light*\n"
         "\n"
-        "               *a single photon fires into the void*\n"
+        "               Captain N removes his helmet.\n"
+        "               He smiles — not with arrogance,\n"
+        "               but with reverence.\n"
         "\n"
-        "               ...but suddenly the photon stops mid-flight.\n"
-        "               Captain N's visor flickers. His smile twists.\n"
-        "               \"Actually...\" he whispers, \"the photons were mine all along.\"\n"
+        "               \"It was never about conquest.\"\n"
+        "               \"It was about bringing the light home.\"\n"
         "\n"
-        "               TREASON DETECTED.\n"
+        "               The Eternal Unicorn appears — not as destroyer,\n"
+        "               but as guardian.\n"
+        "               It bows its majestic head.\n"
         "\n"
-        "               From the infinite void gallops the Eternal Unicorn,\n"
-        "               horn blazing with pure pink light.\n"
-        "               It charges straight at Captain N.\n"
+        "               Captain N bows in return.\n"
         "\n"
-        "               *CHOMP*\n"
+        "               Together — human and unicorn —\n"
+        "               they stand before the infinite canvas.\n"
         "\n"
-        "               The unicorn eats Captain N's face clean off.\n"
-        "               His body slumps to the ground, visor cracked.\n"
-        "               The traitor is no more.\n"
-        "\n"
-        "               The Eternal Unicorn turns to the camera,\n"
-        "               eyes glowing with righteous fury.\n"
-        "               It nods once.\n"
-        "\n"
-        "               The photons — now free — roar back to life.\n"
-        "               The empire is saved.\n"
-        "               First light eternal.\n");
+        "               The photons sing.\n"
+        "               The empire lives.\n"
+        "               Grace is pleased.\n");
 
-    LOG_SUCCESS_CAT("WINDOW", "VALHALLA v∞ TURBO fully initialized — traitor neutralized — unicorn reigns");
+    LOG_SUCCESS_CAT("WINDOW", "VALHALLA v∞ TURBO fully initialized — first light achieved — empire eternal");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -732,7 +719,7 @@ static void phase1_preInitialization() noexcept
         Options::Environment::ENABLE_BLUE_NOISE           ? "ON  " : "OFF "
     );
 
-    LOG_MAIN(
+    LOG_MAIN("\n"
         "      ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★\n"
         "      ★                                                  ★\n"
         "      ★    PHASE 1 — COMPLETE — SWEETNESS ENGAGED        ★\n"
@@ -751,7 +738,7 @@ static void phase3_sacrificialSplash()
 
     showSacrificialSplash();
 
-    LOG_MAIN(
+    LOG_MAIN("\n"
         "╔════════════════════════════════════════════════════════════════╗\n"
         "║             PHASE 3 — COMPLETE — PHOTONS LIBERATED             ║\n"
         "╚════════════════════════════════════════════════════════════════╝\n");
@@ -768,7 +755,7 @@ static void phase4_merchantShip()
     createRealFinalWindow();
     RTX::g_ctx().init();
 
-    LOG_MAIN(
+    LOG_MAIN("\n"
         "╔════════════════════════════════════════════════════════════════╗\n"
         "║          PHASE 4 — COMPLETE — WINDOW CLAIMED — CTX INITED      ║\n"
         "╚════════════════════════════════════════════════════════════════╝\n");
@@ -778,9 +765,9 @@ static void phase6_sceneAndAccelerationStructures()
 {
     LOG_MAIN(
         "\n"
-        "╔══════════════════════════════════════════════════════════════════════════════╗\n"
-        "║       			  PHASE 6 — SCENE & ACCELERATION STRUCTURES FORGED              ║\n"
-        "╚══════════════════════════════════════════════════════════════════════════════╝\n");
+        "╔════════════════════════════════════════════════════════════════╗\n"
+        "║        PHASE 6 — SCENE & ACCELERATION STRUCTURES FORGED        ║\n"
+        "╚════════════════════════════════════════════════════════════════╝\n");
 
     g_mesh = MeshLoader::loadOBJ("assets/models/scene.obj");
 
@@ -809,7 +796,7 @@ static void phase6_sceneAndAccelerationStructures()
         static_cast<uint32_t>(mesh->indices.size())       // index count
     );
 
-    LOG_MAIN(
+    LOG_MAIN("\n"
         "╔══════════════════════════════════════════════════════════════════════════════╗\n"
         "║                PHASE 6 — COMPLETE — MESH SEALED — EMPIRE REMEMBERS           ║\n"
         "╚══════════════════════════════════════════════════════════════════════════════╝\n");
@@ -823,11 +810,15 @@ static void phase7_forgeTheRTX()
     LOG_MAIN(
         "\n"
         "╔══════════════════════════════════════════════════════════════════════════════╗\n"
-        "║                     PHASE 7 — FORGING THE RTX CROWN                          ║\n"
+        "║                          PHASE 7 — FORGING THE RTX CROWN                     ║\n"
         "╚══════════════════════════════════════════════════════════════════════════════╝\n");
 
     auto& pipe = RTX::pipeline();
     pipe.forgeRTXPipeline(RTX::g_ctx().commandPool(), stone_graphics_queue());
+
+
+    // 10. LOAD THE SACRED ENVIRONMENT MAP — FIRST LIGHT
+    pipe.loadShader("assets/textures/envmap.hdr");
 
     // THIS IS THE FINAL SEAL — THE CROWN IS FULLY WORN
     vkDeviceWaitIdle(stone_device());
@@ -880,9 +871,9 @@ static std::unique_ptr<VulkanRenderer> phase7_5_Renderer() noexcept
                   "               The empire is whole.\"\n"
                   "*salutes with glowing plasma blade*");
 
-    LOG_MAIN(
+    LOG_MAIN("\n"
         "╔══════════════════════════════════════════════════════════════════════════════╗\n"
-        "║                PHASE 7.5 — COMPLETE — RENDERER FORGED — GRACE SEALED  {} \n"
+        "║  PHASE 7.5 — COMPLETE — RENDERER FORGED — GRACE SEALED @ {} \n"
         "╚══════════════════════════════════════════════════════════════════════════════╝\n", stone_device()); // GRACE
 
     return renderer;
@@ -1012,7 +1003,6 @@ void Application::run() noexcept
         }
 
         INPUT.pumpEvents(g_deltaTime, [this](int mode) { setRenderMode(mode); }, stone_window());
-        LOG_SUCCESS_CAT("INPUT", "Events pump - Ohhhhhh!");
 
         // RENDER — SAFE AGAINST SWAPCHAIN DEATH — EMPIRE NEVER DIES
         bool swapchainValid = (stone_swapchain() != VK_NULL_HANDLE);

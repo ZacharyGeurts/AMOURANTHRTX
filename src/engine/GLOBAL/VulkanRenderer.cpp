@@ -1127,7 +1127,7 @@ void VulkanRenderer::initializeAllBufferData(uint32_t frames, VkDeviceSize unifo
         return;
     }
 
-    LOG_AMOURANTH("INITIALIZING ALL BUFFER DATA — %u frames | UBO: %llu bytes | Materials: %llu bytes", 
+    LOG_AMOURANTH("INITIALIZING ALL BUFFER DATA — {} frames | UBO: {} bytes | Materials: {} bytes", 
                   frames, static_cast<unsigned long long>(uniformSize), static_cast<unsigned long long>(materialSize));
 
     // DESTROY OLD FIRST — ALWAYS
@@ -1503,8 +1503,6 @@ VkResult VulkanRenderer::recordCommandBuffer(uint32_t frame) noexcept
 
 void VulkanRenderer::updateUniformBuffer(uint32_t frame, const Camera& camera, float jitter) noexcept
 {
-    LOG_TRACE_CAT("RENDERER", "updateUniformBuffer — START — frame {} | jitter {}", frame, jitter);
-
     // PHASE 1: BULLETPROOF VALIDATION + MIGHTY RESTORATION
     if (frame >= uniformBufferEncs_.size() || uniformBufferEncs_[frame] == 0)
     {
@@ -1544,7 +1542,7 @@ void VulkanRenderer::updateUniformBuffer(uint32_t frame, const Camera& camera, f
         g_eternalStagingPtr  = info && info->mapped ? info->mapped : BufferManager::stagingPtr();
         g_eternalStagingSize = info ? info->size : required;
 
-        LOG_AMOURANTH("ETERNAL FRAME UBO STAGING READY AT %p — %llu bytes — handle %#llx",
+        LOG_AMOURANTH("ETERNAL FRAME UBO STAGING READY AT {} — {} bytes — handle {}",
                       g_eternalStagingPtr, static_cast<unsigned long long>(g_eternalStagingSize), handle);
     }
 
@@ -1617,15 +1615,11 @@ void VulkanRenderer::updateUniformBuffer(uint32_t frame, const Camera& camera, f
         VK_PIPELINE_STAGE_TRANSFER_BIT,
         VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
         0, 1, &barrier, 0, nullptr, 0, nullptr);
-
-    LOG_TRACE_CAT("RENDERER", "updateUniformBuffer — COMPLETE — frame {} | time {} | spp {}", frame, ubo.time, ubo.spp);
 }
 
 // VulkanRenderer::updateTonemapUniform — RAW BOI DIRECT WRITE (no staging, no null poop)
 void VulkanRenderer::updateTonemapUniform(uint32_t frame) noexcept
 {
-    LOG_TRACE_CAT("RENDERER", "updateTonemapUniform — START — frame {}", frame);
-
     if (frame >= tonemapUniformEncs_.size() || tonemapUniformEncs_[frame] == 0) {
         LOG_WARN_CAT("RENDERER", "Tonemap UBO handle invalid or zero for frame {} — skipping", frame);
         return;
@@ -1663,9 +1657,6 @@ void VulkanRenderer::updateTonemapUniform(uint32_t frame) noexcept
 
     // Direct eternal write — raw boi, no staging, no bullshit
     std::memcpy(info.mapped, &ubo, sizeof(ubo));
-
-    LOG_TRACE_CAT("RENDERER", "Tonemap UBO updated directly (frame {}) — exposure {} | spp {}", 
-                  frame, ubo.exposure, ubo.spp);
 }
 
 void VulkanRenderer::setTonemap(bool enabled) noexcept
@@ -2301,6 +2292,10 @@ void VulkanRenderer::clearPinkForce() noexcept
 // 2. Application::run — THE ONE TRUE LOOP — PINK PHOTONS ETERNAL
 // FIXED: Direct swapchain output (Option 1) — no intermediate storage image
 // =============================================================================
+// =============================================================================
+// renderFrame — ONE TRUE MODE: HDR Environment Map + Full RTX Path
+// NO MORE MODE 0 — ONLY THE SACRED LIGHT REMAINS
+// =============================================================================
 void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
 {
     RTX::LAS::get().beginFrame();
@@ -2350,93 +2345,14 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     };
     vkBeginCommandBuffer(cmd, &beginInfo);
 
-    // Transition swapchain image to GENERAL before ray tracing
+    // Transition swapchain image to GENERAL — we write directly into it
     VkImage swapImg = stone_images()[imageIndex];
     transitionImage(cmd, swapImg,
         VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
         0, VK_ACCESS_SHADER_WRITE_BIT,
         VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR);
 
-    // MODE 0: LOUD THERMO PINK VOID
-    if (activeRenderMode_ == 0)
-    {
-        updateUniformBuffer(slot, camera, deltaTime);
-
-        const uint64_t handle = uniformBufferEncs_[slot];
-        auto it = BufferManager::s_buffers.find(handle);
-        if (it == BufferManager::s_buffers.end()) {
-            LOG_ERROR_CAT("RENDERER", "DreamUBO handle %#llx missing — no pink pulse this frame (slot %u)", handle, slot);
-        } else {
-            const BufferManager::BufferInfo& info = it->second;
-
-            if (info.mapped) {
-                DreamUBO* uboPtr = static_cast<DreamUBO*>(info.mapped);
-                uboPtr->enableEnvMap = 0;
-                uboPtr->time = totalTime_;
-            }
-
-            RTX::RTDescriptorUpdate desc{};
-            desc.tlas = pipelineManager_.dummyTLAS();
-            desc.ubo = info.buffer;
-            desc.uboSize = 368;
-            desc.rtOutputViews[slot] = stone_views()[imageIndex];  // Direct swapchain output
-            pipelineManager_.updateRTDescriptorSet(slot, desc);
-        }
-
-        recordRayTracingCommands(cmd, slot);
-
-        // Transition back to PRESENT_SRC_KHR
-        transitionImage(cmd, swapImg,
-            VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-            VK_ACCESS_SHADER_WRITE_BIT, 0,
-            VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
-
-        vkEndCommandBuffer(cmd);
-        submitAndPresent(slot, imageIndex);
-        return;
-    }
-
-    // MODE 1: GREEN MATRIX RAIN — FULL-SCREEN MISS SHADER
-    if (activeRenderMode_ == 1)
-    {
-        updateUniformBuffer(slot, camera, deltaTime);
-
-        const uint64_t handle = uniformBufferEncs_[slot];
-        auto it = BufferManager::s_buffers.find(handle);
-        if (it == BufferManager::s_buffers.end()) {
-            LOG_ERROR_CAT("RENDERER", "Green Matrix UBO handle %#llx missing — no rain this frame (slot %u)", handle, slot);
-        } else {
-            const BufferManager::BufferInfo& info = it->second;
-
-            if (info.mapped) {
-                DreamUBO* uboPtr = static_cast<DreamUBO*>(info.mapped);
-                uboPtr->enableEnvMap = 0;
-                uboPtr->time = totalTime_;
-                uboPtr->baseColor = glm::vec3(0.0f, 1.0f, 0.12f);  // MATRIX GREEN
-                uboPtr->intensity = 0.75f + 0.25f * std::sin(totalTime_ * 4.0f);
-            }
-
-            RTX::RTDescriptorUpdate desc{};
-            desc.tlas = pipelineManager_.dummyTLAS();  // FORCE MISS → FULL-SCREEN GREEN RAIN
-            desc.ubo = info.buffer;
-            desc.uboSize = 368;
-            desc.rtOutputViews[slot] = stone_views()[imageIndex];  // Direct swapchain output
-            pipelineManager_.updateRTDescriptorSet(slot, desc);
-        }
-
-        recordRayTracingCommands(cmd, slot);
-
-        transitionImage(cmd, swapImg,
-            VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-            VK_ACCESS_SHADER_WRITE_BIT, 0,
-            VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
-
-        vkEndCommandBuffer(cmd);
-        submitAndPresent(slot, imageIndex);
-        return;
-    }
-
-    // FULL RTX PATH — Direct swapchain output (Option 1)
+    // === FULL RTX PATH — HDR ENVIRONMENT MAP ACTIVE ===
     if (resetAccumulation_ || resetAccumNextFrame_) {
         clearAccumulationImages(cmd);
         resetAccumulation_ = resetAccumNextFrame_ = false;
@@ -2464,15 +2380,18 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     descUpdate.uboSize = 368;
     descUpdate.rtOutputViews[slot] = stone_views()[imageIndex];  // Direct swapchain output
     descUpdate.accumulationViews[slot] = accumViews_[slot].get();
-    descUpdate.envSampler = envMapSampler_.get();
-    descUpdate.envImageView = envMapImageView_.get();
+
+    // HDR Environment Map — the sacred light
+    descUpdate.envSampler   = pipelineManager_.envMapSampler_.get();
+    descUpdate.envImageView = pipelineManager_.envMapImageView_.get();
+
     descUpdate.materialsBuffer = reinterpret_cast<VkBuffer>(materialBufferEncs_[0]);
-    descUpdate.materialsSize = MATERIAL_BUFFER_SIZE;
+    descUpdate.materialsSize   = MATERIAL_BUFFER_SIZE;
 
     pipelineManager_.updateRTDescriptorSet(slot, descUpdate);
     recordRayTracingCommands(cmd, slot);
 
-    // Accumulation is still written to intermediate buffer — transition for tonemap
+    // Transition accumulation result for tonemap
     transitionImage(cmd, rtOutputImages_[slot].get(),
         VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
         VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,

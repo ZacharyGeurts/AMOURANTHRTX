@@ -232,8 +232,8 @@ void SwapchainManager::createSwapchain(SDL_Window* window,
     LOG_AMOURANTH(
         "\n"
         "              █████████████████████████████████████████\n"
-        "              █        PHASE 6 — SWAPCHAIN FORGE         █\n"
-        "              █      THE CANVAS OF INFINITY REBORN      █\n"
+        "              █        PHASE 6 — SWAPCHAIN FORGE      █\n"
+        "              █      THE CANVAS OF INFINITY REBORN    █\n"
         "              █████████████████████████████████████████\n");
 
     VkSurfaceCapabilitiesKHR caps{};

@@ -172,6 +172,8 @@ public:
     [[nodiscard]] PFN_vkCreateRayTracingPipelinesKHR       createRTPipelines()      const noexcept { return vkCreateRayTracingPipelinesKHR_; }
     [[nodiscard]] PFN_vkGetRayTracingShaderGroupHandlesKHR getRTShaderGroups()      const noexcept { return vkGetRayTracingShaderGroupHandlesKHR_; }
 
+	VkShaderModule loadShader(const std::string& path) const;
+
 private:
     PFN_vkCmdTraceRaysKHR                    vkCmdTraceRaysKHR_                    = nullptr;
     PFN_vkCreateRayTracingPipelinesKHR       vkCreateRayTracingPipelinesKHR_       = nullptr;
@@ -208,7 +210,6 @@ private:
 
     void cacheDeviceProperties();
     void loadRayTracingExtensions() noexcept;
-    [[nodiscard]] VkShaderModule loadShader(const std::string& path) const;
 
     static constexpr VkDeviceSize align_up(VkDeviceSize size, VkDeviceSize alignment) noexcept {
         return (size + alignment - 1) & ~(alignment - 1);

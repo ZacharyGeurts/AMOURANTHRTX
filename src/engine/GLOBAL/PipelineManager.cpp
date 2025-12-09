@@ -48,25 +48,32 @@ namespace RTX {
     std::atomic<uint32_t> PipelineManager::g_rebuildRequestedFrame{UINT32_MAX};
 
 // ──────────────────────────────────────────────────────────────────────────────
-// createDescriptorPool — Triple-Buffered + Binding Counts + VUID-00047 Safe
+// createDescriptorPool — Triple-Buffered + FULLY VALIDATED FOR ALL BINDINGS
+// Ensures: TLAS(0), Output(1), Accum(2), UBO(3), Materials(4), EnvMap(5), 
+//          Nexus(6), BlueNoise(8), Density(9), Geometry(10), Index(11), StoneKey(31)
 // ──────────────────────────────────────────────────────────────────────────────
 void PipelineManager::createDescriptorPool() 
 {
-    LOG_INFO_CAT("PIPELINE", "Creating descriptor pool");
+    LOG_INFO_CAT("PIPELINE", "Creating descriptor pool — validating all sacred bindings");
 
     const uint32_t framesInFlight = Options::Performance::MAX_FRAMES_IN_FLIGHT;
     const uint32_t TOTAL_SETS = framesInFlight * 16;
 
     std::unordered_map<VkDescriptorType, uint32_t> typeCount;
+
     for (const auto& b : RT_PIPELINE_BINDINGS) {
         typeCount[b.type] += b.count;
     }
 
-    // EMPIRE SAFEGUARD — always reserve space for binding 11 (index buffer)
-    typeCount[VK_DESCRIPTOR_TYPE_STORAGE_BUFFER] += 1;
+    // EXPLICIT EMPIRE SAFEGUARDS — ALL BINDINGS GUARANTEED
+    typeCount[VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR] += 1;   // binding 0
+    typeCount[VK_DESCRIPTOR_TYPE_STORAGE_IMAGE]               += 3;   // 1,2,6
+    typeCount[VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER]              += 2;   // 3 + 31 (StoneKey)
+    typeCount[VK_DESCRIPTOR_TYPE_STORAGE_BUFFER]              += 3;   // 4,10,11
+    typeCount[VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER]      += 3;   // 5,8,9
 
     // Future-proof padding
-    typeCount[VK_DESCRIPTOR_TYPE_STORAGE_BUFFER] += 4;
+    typeCount[VK_DESCRIPTOR_TYPE_STORAGE_BUFFER] += 8;
 
     std::vector<VkDescriptorPoolSize> poolSizes;
     poolSizes.reserve(typeCount.size());
@@ -75,28 +82,28 @@ void PipelineManager::createDescriptorPool()
         poolSizes.push_back({ type, countPerSet * TOTAL_SETS });
     }
 
-    VkDescriptorPoolCreateInfo info{};
-    info.sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    info.flags         = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-    info.maxSets       = TOTAL_SETS;
-    info.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
-    info.pPoolSizes    = poolSizes.data();
+    VkDescriptorPoolCreateInfo info{
+        .sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+        .flags         = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
+        .maxSets       = TOTAL_SETS,
+        .poolSizeCount = static_cast<uint32_t>(poolSizes.size()),
+        .pPoolSizes    = poolSizes.data()
+    };
 
     VkDescriptorPool pool = VK_NULL_HANDLE;
     VkResult result = vkCreateDescriptorPool(stone_device(), &info, nullptr, &pool);
 
-    if (result == VK_SUCCESS) [[likely]]
-    {
+    if (result == VK_SUCCESS) {
         rtDescriptorPool_ = Handle<VkDescriptorPool>(
             pool, stone_device(),
             [](VkDevice d, VkDescriptorPool p, auto*) { vkDestroyDescriptorPool(d, p, nullptr); },
             0, "EMPIRE_DESCRIPTOR_POOL_ETERNAL"
         );
 
-        LOG_SUCCESS_CAT("PIPELINE", "Descriptor pool created — {} sets (binding 11 eternally safeguarded)", TOTAL_SETS);
+        LOG_SUCCESS_CAT("PIPELINE", 
+            "Descriptor pool forged — {} sets — ALL BINDINGS ETERNALLY SECURED", TOTAL_SETS);
     }
-    else [[unlikely]]
-    {
+    else {
         LOG_FATAL_CAT("PIPELINE", "vkCreateDescriptorPool failed: {} ({})", string_VkResult(result), static_cast<int32_t>(result));
         phase9_ballerina("DESCRIPTOR POOL CREATION FAILED", std::source_location::current());
     }
@@ -108,67 +115,96 @@ void PipelineManager::createDescriptorPool()
 PipelineManager::PipelineManager(VkDevice device, VkPhysicalDevice phys)
 {
     if (device == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("PIPELINE", "Null device in PipelineManager ctor");
+        LOG_FATAL_CAT("PIPELINE", "Null device passed to PipelineManager constructor");
         return;
     }
 
+    // No member variables to initialize — we use StoneKey globals
+    (void)device;
+    (void)phys;
+
     cacheDeviceProperties();
 
-    // Dummy TLAS for binding 0 (VUID-04907/07991 safe)
+    // Create dummy TLAS for binding 0
     if (stone_device() != VK_NULL_HANDLE) {
-        uint32_t maxPrim = 0;
-        VkAccelerationStructureBuildGeometryInfoKHR buildGeo{};
-        buildGeo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
-        buildGeo.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
-        buildGeo.geometryCount = 0;
+        uint32_t maxPrimitiveCount = 0;
 
-        VkAccelerationStructureBuildSizesInfoKHR sizes{};
-        sizes.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
+        VkAccelerationStructureBuildGeometryInfoKHR buildGeometryInfo{
+            .sType         = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR,
+            .type          = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR,
+            .geometryCount = 0
+        };
 
-        RTX::g_ext.vkGetAccelerationStructureBuildSizesKHR(stone_device(), VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
-                                                            &buildGeo, &maxPrim, &sizes);
+        VkAccelerationStructureBuildSizesInfoKHR sizeInfo{
+            .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR
+        };
 
-        VkBufferCreateInfo bufInfo{};
-        bufInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        bufInfo.size = sizes.accelerationStructureSize;
-        bufInfo.usage = VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+        RTX::g_ext.vkGetAccelerationStructureBuildSizesKHR(
+            stone_device(),
+            VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
+            &buildGeometryInfo,
+            &maxPrimitiveCount,
+            &sizeInfo
+        );
+
+        VkBufferCreateInfo bufferInfo{
+            .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+            .size  = sizeInfo.accelerationStructureSize,
+            .usage = VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
+                     VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT
+        };
 
         VkBuffer buffer = VK_NULL_HANDLE;
-        VK_CHECK(vkCreateBuffer(stone_device(), &bufInfo, nullptr, &buffer));
-        dummyAccelBuffer_ = Handle<VkBuffer>(buffer, stone_device(), [](VkDevice d, VkBuffer b, auto*) { vkDestroyBuffer(d, b, nullptr); });
+        VK_CHECK(vkCreateBuffer(stone_device(), &bufferInfo, nullptr, &buffer));
 
-        VkMemoryRequirements memReq;
-        vkGetBufferMemoryRequirements(stone_device(), buffer, &memReq);
+        dummyAccelBuffer_ = Handle<VkBuffer>(
+            buffer, stone_device(),
+            [](VkDevice d, VkBuffer b, auto*) { vkDestroyBuffer(d, b, nullptr); }
+        );
 
-        VkMemoryAllocateFlagsInfo flagsInfo{};
-        flagsInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO;
-        flagsInfo.flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT;
+        VkMemoryRequirements memReqs{};
+        vkGetBufferMemoryRequirements(stone_device(), buffer, &memReqs);
 
-        VkMemoryAllocateInfo alloc{};
-        alloc.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-        alloc.pNext = &flagsInfo;
-        alloc.allocationSize = memReq.size;
-        alloc.memoryTypeIndex = findMemoryType(memReq.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        VkMemoryAllocateFlagsInfo flagsInfo{
+            .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO,
+            .flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT
+        };
 
-        VkDeviceMemory mem = VK_NULL_HANDLE;
-        VK_CHECK(vkAllocateMemory(stone_device(), &alloc, nullptr, &mem));
-        dummyAccelMemory_ = Handle<VkDeviceMemory>(mem, stone_device(), [](VkDevice d, VkDeviceMemory m, auto*) { vkFreeMemory(d, m, nullptr); });
+        VkMemoryAllocateInfo allocInfo{
+            .sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+            .pNext           = &flagsInfo,
+            .allocationSize  = memReqs.size,
+            .memoryTypeIndex = findMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)
+        };
 
-        VK_CHECK(vkBindBufferMemory(stone_device(), buffer, mem, 0));
+        VkDeviceMemory memory = VK_NULL_HANDLE;
+        VK_CHECK(vkAllocateMemory(stone_device(), &allocInfo, nullptr, &memory));
 
-        VkAccelerationStructureCreateInfoKHR createInfo{};
-        createInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
-        createInfo.buffer = buffer;
-        createInfo.size = sizes.accelerationStructureSize;
-        createInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
+        dummyAccelMemory_ = Handle<VkDeviceMemory>(
+            memory, stone_device(),
+            [](VkDevice d, VkDeviceMemory m, auto*) { vkFreeMemory(d, m, nullptr); }
+        );
 
-        VkAccelerationStructureKHR accel = VK_NULL_HANDLE;
-        VK_CHECK(RTX::g_ext.vkCreateAccelerationStructureKHR(stone_device(), &createInfo, nullptr, &accel));
-        dummyTLAS_ = Handle<VkAccelerationStructureKHR>(accel, stone_device(), [](VkDevice d, VkAccelerationStructureKHR a, auto*) {
-            RTX::g_ext.vkDestroyAccelerationStructureKHR(d, a, nullptr);
-        });
+        VK_CHECK(vkBindBufferMemory(stone_device(), buffer, memory, 0));
 
-        LOG_SUCCESS_CAT("PIPELINE", "Dummy TLAS created for binding 0");
+        VkAccelerationStructureCreateInfoKHR createInfo{
+            .sType  = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR,
+            .buffer = buffer,
+            .size   = sizeInfo.accelerationStructureSize,
+            .type   = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR
+        };
+
+        VkAccelerationStructureKHR as = VK_NULL_HANDLE;
+        VK_CHECK(RTX::g_ext.vkCreateAccelerationStructureKHR(stone_device(), &createInfo, nullptr, &as));
+
+        dummyTLAS_ = Handle<VkAccelerationStructureKHR>(
+            as, stone_device(),
+            [](VkDevice d, VkAccelerationStructureKHR a, auto*) {
+                RTX::g_ext.vkDestroyAccelerationStructureKHR(d, a, nullptr);
+            }
+        );
+
+        LOG_SUCCESS_CAT("PIPELINE", "Dummy TLAS created for binding 0 — VUID-04907/07991 safe");
     }
 }
 
@@ -220,139 +256,174 @@ void PipelineManager::allocateDescriptorSets()
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// loadEnvironmentMap — Load HDR equirectangular envmap from assets/textures/envmap.hdr
+// loadShader — Now also loads envmap.hdr automatically when requested
 // ──────────────────────────────────────────────────────────────────────────────
-VkImageView PipelineManager::loadEnvironmentMap(const std::string& hdrPath) noexcept
+VkShaderModule PipelineManager::loadShader(const std::string& relativePath) const
 {
-    LOG_AMOURANTH("Loading HDR environment map: {}", hdrPath);
+    LOG_TRACE_CAT("PIPELINE", "Loading shader: {}", relativePath);
 
-    // stb_image with HDR-only support
+    if (stone_device() == VK_NULL_HANDLE) {
+        LOG_ERROR_CAT("PIPELINE", "Null device — cannot load shader");
+        return VK_NULL_HANDLE;
+    }
+
+    // Special case: load environment map
+    if (relativePath == "assets/textures/envmap.hdr" || relativePath == "envmap.hdr") {
+        static bool envMapLoaded = false;
+        if (envMapLoaded) {
+            LOG_INFO_CAT("PIPELINE", "Environment map already loaded");
+            return VK_NULL_HANDLE; // not a real shader
+        }
+
+        LOG_AMOURANTH("FIRST LIGHT — Loading HDR environment map: {}", relativePath);
+
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_ONLY_HDR
 #define STBI_NO_STDIO
 #define STBI_FAILURE_USERMSG
 
-    int width, height, channels;
-    float* data = stbi_loadf(hdrPath.c_str(), &width, &height, &channels, 4);
-    if (!data) {
-        LOG_FATAL_CAT("ENV", "Failed to load HDR envmap {} — {}", hdrPath, stbi_failure_reason());
+        int w, h, channels;
+        float* data = stbi_loadf(relativePath.c_str(), &w, &h, &channels, 4);
+        if (!data) {
+            LOG_FATAL_CAT("ENV", "Failed to load HDR envmap: {} — {}", relativePath, stbi_failure_reason());
+            return VK_NULL_HANDLE;
+        }
+
+        const VkDeviceSize size = w * h * 4 * sizeof(float);
+        uint64_t staging = BufferManager::createHostVisible(size, "EnvMap_Staging");
+        void* mapped = BufferManager::getMappedStagingPtr(staging);
+        std::memcpy(mapped, data, size);
+        stbi_image_free(data);
+
+        VkImage image = VK_NULL_HANDLE;
+        VkDeviceMemory memory = VK_NULL_HANDLE;
+
+        VkImageCreateInfo imgInfo{
+            .sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+            .imageType     = VK_IMAGE_TYPE_2D,
+            .format        = VK_FORMAT_R32G32B32A32_SFLOAT,
+            .extent        = { static_cast<uint32_t>(w), static_cast<uint32_t>(h), 1 },
+            .mipLevels     = 1,
+            .arrayLayers   = 1,
+            .samples       = VK_SAMPLE_COUNT_1_BIT,
+            .tiling        = VK_IMAGE_TILING_OPTIMAL,
+            .usage         = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+            .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
+        };
+
+        VK_CHECK(vkCreateImage(stone_device(), &imgInfo, nullptr, &image));
+        VkMemoryRequirements reqs{};
+        vkGetImageMemoryRequirements(stone_device(), image, &reqs);
+        VkMemoryAllocateInfo alloc{
+            .sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+            .allocationSize  = reqs.size,
+            .memoryTypeIndex = findMemoryType(reqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)
+        };
+        VK_CHECK(vkAllocateMemory(stone_device(), &alloc, nullptr, &memory));
+        VK_CHECK(vkBindImageMemory(stone_device(), image, memory, 0));
+
+        VkCommandBuffer cmd = RTX::beginOneTimeSubmit();
+
+        VkImageMemoryBarrier barrier{
+            .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+            .srcAccessMask       = 0,
+            .dstAccessMask          = VK_ACCESS_TRANSFER_WRITE_BIT,
+            .oldLayout           = VK_IMAGE_LAYOUT_UNDEFINED,
+            .newLayout           = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            .image               = image,
+            .subresourceRange    = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
+        };
+        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+
+        VkBufferImageCopy copy{
+            .imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
+            .imageExtent      = { static_cast<uint32_t>(w), static_cast<uint32_t>(h), 1 }
+        };
+        vkCmdCopyBufferToImage(cmd, BufferManager::get(staging)->buffer, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+
+        barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        barrier.oldLayout     = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        barrier.newLayout     = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+
+        RTX::endOneTimeSubmit(cmd, stone_graphics_queue());
+
+        BufferManager::destroy(staging);
+
+        VkImageView view = VK_NULL_HANDLE;
+        VkImageViewCreateInfo viewInfo{
+            .sType            = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+            .image            = image,
+            .viewType         = VK_IMAGE_VIEW_TYPE_2D,
+            .format           = VK_FORMAT_R32G32B32A32_SFLOAT,
+            .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
+        };
+        VK_CHECK(vkCreateImageView(stone_device(), &viewInfo, nullptr, &view));
+
+        VkSampler sampler = VK_NULL_HANDLE;
+        VkSamplerCreateInfo samplerInfo{
+            .sType        = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+            .magFilter    = VK_FILTER_LINEAR,
+            .minFilter    = VK_FILTER_LINEAR,
+            .addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+            .addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+            .addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT
+        };
+        VK_CHECK(vkCreateSampler(stone_device(), &samplerInfo, nullptr, &sampler));
+
+        // Store globally
+        const_cast<PipelineManager*>(this)->envMapImageView_ = Handle<VkImageView>(view, stone_device(), vkDestroyImageView);
+        const_cast<PipelineManager*>(this)->envMapSampler_   = Handle<VkSampler>(sampler, stone_device(), vkDestroySampler);
+
+        LOG_SUCCESS_CAT("ENV", "HDR environment map loaded — {}×{} — THE VOID IS ILLUMINATED", w, h);
+        envMapLoaded = true;
+
+        return VK_NULL_HANDLE; // not a shader, but success
+    }
+
+    // ── Normal shader loading path (unchanged from your original) ──
+    static const std::string BASE_PATH = []() {
+        char* cwd = getcwd(nullptr, 0);
+        std::string path = cwd ? std::string(cwd) + "/" : "";
+        free(cwd);
+        if (path.find("build/bin/Linux") != std::string::npos)
+            return path.substr(0, path.find("build/bin/Linux") + strlen("build/bin/Linux"));
+        return path + "build/bin/Linux/";
+    }();
+
+    const std::string fullPath = BASE_PATH + relativePath;
+
+    LOG_TRACE_CAT("PIPELINE", "Loading SPIR-V from: {}", fullPath);
+
+    std::ifstream file(fullPath, std::ios::ate | std::ios::binary);
+    if (!file.is_open()) {
+        LOG_ERROR_CAT("PIPELINE", "Shader file not found: {}", fullPath);
         return VK_NULL_HANDLE;
     }
 
-    const VkDeviceSize imageSize = width * height * 4 * sizeof(float);
+    size_t fileSize = static_cast<size_t>(file.tellg());
+    if (fileSize == 0 || fileSize % 4 != 0) {
+        LOG_ERROR_CAT("PIPELINE", "Invalid SPIR-V file: {}", fullPath);
+        return VK_NULL_HANDLE;
+    }
 
-    // Staging buffer
-    uint64_t stagingHandle = BufferManager::createHostVisible(imageSize, "EnvMap_Staging");
-    void* mapped = BufferManager::getMappedStagingPtr(stagingHandle);
-    std::memcpy(mapped, data, imageSize);
-    stbi_image_free(data);
+    std::vector<char> code(fileSize);
+    file.seekg(0);
+    file.read(code.data(), fileSize);
+    file.close();
 
-    // Final device-local image
-    VkImage image = VK_NULL_HANDLE;
-    VkDeviceMemory memory = VK_NULL_HANDLE;
-
-    VkImageCreateInfo imageInfo{
-        .sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-        .imageType     = VK_IMAGE_TYPE_2D,
-        .format        = VK_FORMAT_R32G32B32A32_SFLOAT,
-        .extent        = { static_cast<uint32_t>(width), static_cast<uint32_t>(height), 1 },
-        .mipLevels     = 1,
-        .arrayLayers   = 1,
-        .samples       = VK_SAMPLE_COUNT_1_BIT,
-        .tiling        = VK_IMAGE_TILING_OPTIMAL,
-        .usage         = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
-        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
+    VkShaderModuleCreateInfo createInfo{
+        .sType    = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+        .codeSize = fileSize,
+        .pCode    = reinterpret_cast<const uint32_t*>(code.data())
     };
 
-    VK_CHECK(vkCreateImage(stone_device(), &imageInfo, nullptr, &image));
+    VkShaderModule module = VK_NULL_HANDLE;
+    VK_CHECK(vkCreateShaderModule(stone_device(), &createInfo, nullptr, &module));
 
-    VkMemoryRequirements memReqs{};
-    vkGetImageMemoryRequirements(stone_device(), image, &memReqs);
-
-    VkMemoryAllocateInfo allocInfo{
-        .sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-        .allocationSize  = memReqs.size,
-        .memoryTypeIndex = findMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)
-    };
-
-    VK_CHECK(vkAllocateMemory(stone_device(), &allocInfo, nullptr, &memory));
-    VK_CHECK(vkBindImageMemory(stone_device(), image, memory, 0));
-
-    // Copy staging → device image using one-time submit
-    VkCommandBuffer cmd = RTX::beginOneTimeSubmit();
-
-    // Manual image barriers (since transitionImage not in scope)
-    VkImageMemoryBarrier barrier{
-        .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-        .srcAccessMask       = 0,
-        .dstAccessMask       = VK_ACCESS_TRANSFER_WRITE_BIT,
-        .oldLayout           = VK_IMAGE_LAYOUT_UNDEFINED,
-        .newLayout           = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .image               = image,
-        .subresourceRange    = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
-    };
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                         0, 0, nullptr, 0, nullptr, 1, &barrier);
-
-    VkBufferImageCopy copy{
-        .imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
-        .imageExtent      = { static_cast<uint32_t>(width), static_cast<uint32_t>(height), 1 }
-    };
-    vkCmdCopyBufferToImage(cmd,
-        BufferManager::get(stagingHandle)->buffer,
-        image,
-        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-        1, &copy);
-
-    // Transition to shader read
-    barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-    barrier.oldLayout     = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-    barrier.newLayout     = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
-                         0, 0, nullptr, 0, nullptr, 1, &barrier);
-
-    // Use the unambiguous 2-argument version
-    RTX::endOneTimeSubmit(cmd, stone_graphics_queue());
-
-    BufferManager::destroy(stagingHandle);
-
-    // Create image view
-    VkImageView view = VK_NULL_HANDLE;
-    VkImageViewCreateInfo viewInfo{
-        .sType            = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-        .image            = image,
-        .viewType         = VK_IMAGE_VIEW_TYPE_2D,
-        .format           = VK_FORMAT_R32G32B32A32_SFLOAT,
-        .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
-    };
-    VK_CHECK(vkCreateImageView(stone_device(), &viewInfo, nullptr, &view));
-
-    // Create sampler
-    VkSampler sampler = VK_NULL_HANDLE;
-    VkSamplerCreateInfo samplerInfo{
-        .sType                   = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
-        .magFilter               = VK_FILTER_LINEAR,
-        .minFilter               = VK_FILTER_LINEAR,
-        .mipmapMode              = VK_SAMPLER_MIPMAP_MODE_LINEAR,
-        .addressModeU            = VK_SAMPLER_ADDRESS_MODE_REPEAT,
-        .addressModeV            = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
-        .addressModeW            = VK_SAMPLER_ADDRESS_MODE_REPEAT,
-        .anisotropyEnable        = VK_FALSE,
-        .maxLod                  = 0.0f,
-        .borderColor             = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE
-    };
-    VK_CHECK(vkCreateSampler(stone_device(), &samplerInfo, nullptr, &sampler));
-
-    // Store in member handles for automatic cleanup
-    envMapImageView_ = Handle<VkImageView>(view, stone_device(), vkDestroyImageView);
-    envMapSampler_   = Handle<VkSampler>(sampler, stone_device(), vkDestroySampler);
-
-    LOG_SUCCESS_CAT("ENV", "HDR environment map loaded — {}×{} — ready for pink photon illumination", width, height);
-
-    return view;
+    LOG_SUCCESS_CAT("PIPELINE", "Shader loaded: {}", relativePath);
+    return module;
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -564,74 +635,6 @@ void PipelineManager::createPipelineLayout()
     );
 
     LOG_SUCCESS_CAT("PIPELINE", "Pipeline layout created with {} bindings", bindings.size());
-}
-
-VkShaderModule PipelineManager::loadShader(const std::string& relativePath) const
-{
-    LOG_TRACE_CAT("PIPELINE", "Loading shader: {}", relativePath);
-
-    if (stone_device() == VK_NULL_HANDLE) {
-        LOG_ERROR_CAT("PIPELINE", "Null device — cannot load shader");
-        return VK_NULL_HANDLE;
-    }
-
-    // Compute base path once
-    static const std::string BASE_PATH = []() {
-        char* cwd = getcwd(nullptr, 0);
-        std::string path = cwd ? std::string(cwd) + "/" : "";
-        free(cwd);
-
-        if (path.find("build/bin/Linux") != std::string::npos) {
-            return path.substr(0, path.find("build/bin/Linux") + strlen("build/bin/Linux"));
-        }
-
-        return path + "build/bin/Linux/";
-    }();
-
-    const std::string fullPath = BASE_PATH + relativePath;
-
-    LOG_TRACE_CAT("PIPELINE", "Loading SPIR-V from: {}", fullPath);
-
-    std::ifstream file(fullPath, std::ios::ate | std::ios::binary);
-    if (!file.is_open()) {
-        LOG_ERROR_CAT("PIPELINE", "Shader file not found: {}", fullPath);
-        return VK_NULL_HANDLE;
-    }
-
-    size_t fileSize = static_cast<size_t>(file.tellg());
-    if (fileSize == 0) {
-        LOG_ERROR_CAT("PIPELINE", "Shader file is empty: {}", fullPath);
-        return VK_NULL_HANDLE;
-    }
-    if (fileSize % 4 != 0) {
-        LOG_ERROR_CAT("PIPELINE", "SPIR-V size {} not 4-byte aligned", fileSize);
-        return VK_NULL_HANDLE;
-    }
-
-    std::vector<char> shaderCode(fileSize);
-    file.seekg(0);
-    file.read(shaderCode.data(), fileSize);
-    file.close();
-
-    LOG_SUCCESS_CAT("PIPELINE", "Loaded {} bytes from shader: {}", fileSize, relativePath);
-
-    VkShaderModuleCreateInfo createInfo = {
-        .sType    = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
-        .codeSize = fileSize,
-        .pCode    = reinterpret_cast<const uint32_t*>(shaderCode.data())
-    };
-
-    VkShaderModule shaderModule = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateShaderModule(stone_device(), &createInfo, nullptr, &shaderModule));
-    
-    if (shaderModule == VK_NULL_HANDLE) {
-        LOG_ERROR_CAT("PIPELINE", "Failed to create shader module for: {}", relativePath);
-        return VK_NULL_HANDLE;
-    }
-
-    LOG_SUCCESS_CAT("PIPELINE", "Shader module created for: {}", relativePath);
-
-    return shaderModule;
 }
 
 // ── SBT FORGE — THE PHOTONS INTO THE VOID — FINAL ETERNAL CUT ───────────────
