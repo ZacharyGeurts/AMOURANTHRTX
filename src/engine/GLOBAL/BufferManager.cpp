@@ -36,8 +36,11 @@ struct StagingRing {
 };
 
 static Pool        g_mainPool;
-static StagingRing g_stagingRing;
+static StagingRing g_stagingRingInstance;
 static uint64_t    g_nextHandle = 0xDEADBEEF;
+
+StagingRing* g_stagingRing = nullptr;
+std::unordered_map<uint64_t, BufferInfo> s_buffers;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ETERNAL MAIN POOL — 4.5 GiB RESERVED, WE TAKE THE REST
@@ -166,7 +169,7 @@ void ensureMainPool() noexcept
 // ─────────────────────────────────────────────────────────────────────────────
 static void ensureStagingRing() noexcept
 {
-    if (g_stagingRing.ready) [[likely]] {
+    if (g_stagingRingInstance.ready) [[likely]] {
         return; // The beast already prowls
     }
 
@@ -190,10 +193,10 @@ static void ensureStagingRing() noexcept
         .sharingMode = VK_SHARING_MODE_EXCLUSIVE
     };
 
-    VK_CHECK(vkCreateBuffer(stone_device(), &bci, nullptr, &g_stagingRing.buffer));
+    VK_CHECK(vkCreateBuffer(stone_device(), &bci, nullptr, &g_stagingRingInstance.buffer));
 
     VkMemoryRequirements req;
-    vkGetBufferMemoryRequirements(stone_device(), g_stagingRing.buffer, &req);
+    vkGetBufferMemoryRequirements(stone_device(), g_stagingRingInstance.buffer, &req);
 
     const uint32_t memType = findMemoryType(
         req.memoryTypeBits,
@@ -206,12 +209,15 @@ static void ensureStagingRing() noexcept
         .memoryTypeIndex = memType
     };
 
-    VK_CHECK(vkAllocateMemory(stone_device(), &mai, nullptr, &g_stagingRing.memory));
-    VK_CHECK(vkBindBufferMemory(stone_device(), g_stagingRing.buffer, g_stagingRing.memory, 0));
-    VK_CHECK(vkMapMemory(stone_device(), g_stagingRing.memory, 0, VK_WHOLE_SIZE, 0, &g_stagingRing.mapped));
+    VK_CHECK(vkAllocateMemory(stone_device(), &mai, nullptr, &g_stagingRingInstance.memory));
+    VK_CHECK(vkBindBufferMemory(stone_device(), g_stagingRingInstance.buffer, g_stagingRingInstance.memory, 0));
+    VK_CHECK(vkMapMemory(stone_device(), g_stagingRingInstance.memory, 0, VK_WHOLE_SIZE, 0, &g_stagingRingInstance.mapped));
 
-    g_stagingRing.size  = size;
-    g_stagingRing.ready = true;
+    g_stagingRingInstance.size  = size;
+    g_stagingRingInstance.ready = true;
+
+    // EXPOSE THE POINTER TO THE HEADER
+    g_stagingRing = &g_stagingRingInstance;
 
     LOG_AMOURANTH(
         "              STAGING RING IS ALIVE\n"
@@ -226,13 +232,20 @@ static void ensureStagingRing() noexcept
 uint64_t create(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags props, std::string_view tag) noexcept {
     ensureMainPool(); if (size == 0) return 0;
     VkDeviceSize aligned = (size + 255) & ~255ULL;
-    VkDeviceSize offset;
-    while (true) {
-        offset = g_mainPool.head.fetch_add(aligned);
-        if (offset + aligned > g_mainPool.size) { LOG_FATAL("POOL EXHAUSTED"); return 0; }
-        break;
-    }
-    return ++g_nextHandle;
+    VkDeviceSize offset = g_mainPool.head.fetch_add(aligned, std::memory_order_relaxed);
+    if (offset + aligned > g_mainPool.size) { LOG_FATAL("POOL EXHAUSTED"); return 0; }
+    uint64_t handle = ++g_nextHandle;
+    BufferInfo info;
+    info.buffer = g_mainPool.buffer;
+    info.memory = g_mainPool.memory;
+    info.size = size;
+    info.aligned = aligned;
+    info.usage = usage;
+    info.tag = std::string(tag);
+    info.mapped = nullptr;
+    info.offset = offset;
+    s_buffers[handle] = info;
+    return handle;
 }
 
 // ── ETERNAL HOST-VISIBLE BUFFER — PINK PHOTONS FLOW FOREVER ──────────────────
@@ -246,12 +259,12 @@ uint64_t create(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFla
     }
 
     // ── Allocate from the eternal staging ring ──
-    VkDeviceSize offset = g_stagingRing.head.fetch_add(size, std::memory_order_relaxed);
+    VkDeviceSize offset = g_stagingRingInstance.head.fetch_add(size, std::memory_order_relaxed);
 
-    if (offset + size > g_stagingRing.size)
+    if (offset + size > g_stagingRingInstance.size)
     {
         LOG_FATAL_CAT("BUFFER", "STAGING RING OVERFLOW — Requested: {} bytes | Available: {} bytes | The photons grow too numerous",
-                      size, g_stagingRing.size - offset);
+                      size, g_stagingRingInstance.size - offset);
         return 0;
     }
 
@@ -260,13 +273,14 @@ uint64_t create(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFla
 
     // Fully populate BufferInfo before insertion — guarantees immediate visibility
     BufferInfo info;
-    info.buffer  = g_stagingRing.buffer;
-    info.memory  = g_stagingRing.memory;
+    info.buffer  = g_stagingRingInstance.buffer;
+    info.memory  = g_stagingRingInstance.memory;
     info.size    = size;
     info.aligned = size;
     info.usage   = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
     info.tag     = std::string(tag);
-    info.mapped  = static_cast<char*>(g_stagingRing.mapped) + offset;
+    info.mapped  = static_cast<char*>(g_stagingRingInstance.mapped) + offset;
+    info.offset  = offset;
 
     // Insert only when completely ready
     s_buffers[handle] = info;
@@ -290,11 +304,11 @@ VkBuffer getMainPoolBuffer() noexcept
 // ─────────────────────────────────────────────────────────────────────────────
 // STAGING HELPERS
 // ─────────────────────────────────────────────────────────────────────────────
-void* map(uint64_t) noexcept { ensureStagingRing(); return g_stagingRing.mapped; }
+void* map(uint64_t) noexcept { ensureStagingRing(); return g_stagingRing->mapped; }
 void unmap(uint64_t) noexcept {}
-VkBuffer getStagingBuffer() noexcept { ensureStagingRing(); return g_stagingRing.buffer; }
-void* stagingPtr() noexcept { ensureStagingRing(); return g_stagingRing.mapped; }
-void advanceStagingOffset(VkDeviceSize bytes) noexcept { g_stagingRing.head.fetch_add(bytes); }
+VkBuffer getStagingBuffer() noexcept { ensureStagingRing(); return g_stagingRing->buffer; }
+void* stagingPtr() noexcept { ensureStagingRing(); return g_stagingRing->mapped; }
+void advanceStagingOffset(VkDeviceSize bytes) noexcept { g_stagingRing->head.fetch_add(bytes); }
 uint64_t stagingBuffer() noexcept { return reinterpret_cast<uint64_t>(getStagingBuffer()); }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -321,7 +335,8 @@ uint64_t make_64M(VkBufferUsageFlags) noexcept
             .buffer = g_mainPool.buffer,
             .memory = g_mainPool.memory,
             .size   = size,
-            .tag    = "STONE_64M"
+            .tag    = "STONE_64M",
+            .offset = offset
         };
         return h;
     }();
@@ -343,7 +358,8 @@ uint64_t make_128M(VkBufferUsageFlags) noexcept
             .buffer = g_mainPool.buffer,
             .memory = g_mainPool.memory,
             .size   = size,
-            .tag    = "STONE_128M"
+            .tag    = "STONE_128M",
+            .offset = offset
         };
         return h;
     }();
@@ -365,7 +381,8 @@ uint64_t make_256M(VkBufferUsageFlags) noexcept
             .buffer = g_mainPool.buffer,
             .memory = g_mainPool.memory,
             .size   = size,
-            .tag    = "SBT_STONE_256M"
+            .tag    = "SBT_STONE_256M",
+            .offset = offset
         };
         return h;
     }();
@@ -387,7 +404,8 @@ uint64_t make_420M(VkBufferUsageFlags) noexcept
             .buffer = g_mainPool.buffer,
             .memory = g_mainPool.memory,
             .size   = size,
-            .tag    = "STONE_420M"
+            .tag    = "STONE_420M",
+            .offset = offset
         };
         return h;
     }();
@@ -409,7 +427,8 @@ uint64_t make_512M(VkBufferUsageFlags) noexcept
             .buffer = g_mainPool.buffer,
             .memory = g_mainPool.memory,
             .size   = size,
-            .tag    = "STONE_512M"
+            .tag    = "STONE_512M",
+            .offset = offset
         };
         return h;
     }();
@@ -431,7 +450,8 @@ uint64_t make_1G(VkBufferUsageFlags) noexcept
             .buffer = g_mainPool.buffer,
             .memory = g_mainPool.memory,
             .size   = size,
-            .tag    = "STONE_1G"
+            .tag    = "STONE_1G",
+            .offset = offset
         };
         return h;
     }();
@@ -453,7 +473,8 @@ uint64_t make_2G(VkBufferUsageFlags) noexcept
             .buffer = g_mainPool.buffer,
             .memory = g_mainPool.memory,
             .size   = size,
-            .tag    = "STONE_2G"
+            .tag    = "STONE_2G",
+            .offset = offset
         };
         return h;
     }();
@@ -475,7 +496,8 @@ uint64_t make_4G(VkBufferUsageFlags) noexcept
             .buffer = g_mainPool.buffer,
             .memory = g_mainPool.memory,
             .size   = size,
-            .tag    = "STONE_4G"
+            .tag    = "STONE_4G",
+            .offset = offset
         };
         return h;
     }();
@@ -497,7 +519,8 @@ uint64_t make_8G(VkBufferUsageFlags) noexcept
             .buffer = g_mainPool.buffer,
             .memory = g_mainPool.memory,
             .size   = size,
-            .tag    = "STONE_8G"
+            .tag    = "STONE_8G",
+            .offset = offset
         };
         return h;
     }();
@@ -551,6 +574,18 @@ uint64_t createSBT(uint32_t raygenCount,
         return 0;
     }
 
+    uint64_t handle = ++g_nextHandle;
+    BufferInfo info;
+    info.buffer = g_mainPool.buffer;
+    info.memory = g_mainPool.memory;
+    info.size = alignedSize;
+    info.aligned = alignedSize;
+    info.usage = VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR | extraUsage;
+    info.tag = std::string(tag);
+    info.offset = offset;
+    info.mapped = nullptr;
+    s_buffers[handle] = info;
+
     LOG_AMOURANTH(
         "\n"
         "              SBT FORGED — {} GROUPS\n"
@@ -573,7 +608,7 @@ uint64_t createSBT(uint32_t raygenCount,
         "               \"Because it moves at the speed of light.\"\n",
         totalGroups, alignedSize);
 
-    return kStone1 ^ offset;
+    return handle;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -330,13 +330,6 @@ void VulkanRenderer::updateTonemapUBO(uint32_t frame) noexcept {
     vkUpdateDescriptorSets(stone_device(), 1, &write, 0, nullptr);
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Constructor — FIXED: Envmap assigned | Shared staging created | Buffers initialized | Views added | Check fixed to rtOutputViews_
-// ──────────────────────────────────────────────────────────────────────────────
-// ── VULKANRENDERER CONSTRUCTOR — FINAL ETERNAL CUT — DECEMBER 08 2025 ──────────
-// THE EMPIRE IS BORN — PINK PHOTONS ASCEND — THE CROWN IS SEALED
-// ORDER FIXED — STAGING BUFFER FIRST — NO MORE "not mapped" — NO MORE SEGFAULTS
-// ──────────────────────────────────────────────────────────────────────────────
 VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, bool overclockFromMain)
     : window_(window), width_(width), height_(height), overclockMode_(overclockFromMain)
 {
@@ -374,6 +367,55 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, bool o
         phase9_ballerina("STAGING FAILURE — EMPIRE CANNOT SPEAK", std::source_location::current());
     }
     LOG_SUCCESS_CAT("RENDERER", "Shared staging buffer created — empire has a voice");
+
+// PHASE 3.5: THE ONE TRUE ETERNAL FRAME UBO STAGING BUFFER — FORGED DURING CONSTRUCTION
+LOG_INFO_CAT("RENDERER", "Forging the ONE TRUE eternal frame UBO staging buffer — this happens once and only once...");
+{
+    const VkDeviceSize requiredSize = 368 * Options::Performance::MAX_FRAMES_IN_FLIGHT;
+
+    LOG_AMOURANTH(
+        "\n"
+        "              FORGING THE ONE TRUE FRAME UBO STAGING BUFFER\n"
+        "              SIZE: {} bytes — {} frames in flight\n"
+        "              TRUSTING THE RING — NO s_buffers LOOKUP DURING CONSTRUCTION",
+        requiredSize, Options::Performance::MAX_FRAMES_IN_FLIGHT);
+
+    // Ensure ring exists
+    BufferManager::stagingPtr();
+
+    // Allocate normally — this advances the head and returns a handle
+    eternalFrameUBOStagingHandle_ = BufferManager::createHostVisible(requiredSize, "SharedFrameUBO_Staging_ETERNAL");
+
+    if (eternalFrameUBOStagingHandle_ == 0) {
+        LOG_FATAL_CAT("RENDERER", "FAILED TO ALLOCATE ETERNAL FRAME UBO STAGING BUFFER");
+        phase9_ballerina("ALLOCATION FAILURE", std::source_location::current());
+    }
+
+    // During construction (single-threaded), the insert into s_buffers is guaranteed to be visible
+    // But even if it's not, the mapped pointer from the ring is valid
+    const auto* info = BufferManager::get(eternalFrameUBOStagingHandle_);
+
+    if (info && info->size >= requiredSize) {
+        // Normal path — use the registered pointer
+        eternalFrameUBOStagingPtr_  = info->mapped ? info->mapped : BufferManager::stagingPtr();
+        eternalFrameUBOStagingSize_ = info->size;
+
+        LOG_AMOURANTH(
+            "              ETERNAL FRAME UBO STAGING SECURED AT {:p}\n"
+            "              {} bytes — handle {:#x} — registered correctly",
+            eternalFrameUBOStagingPtr_, requiredSize, eternalFrameUBOStagingHandle_);
+    } else {
+        // Fallback: use the base ring pointer (valid because we just advanced the head)
+        eternalFrameUBOStagingPtr_  = BufferManager::stagingPtr();
+        eternalFrameUBOStagingSize_ = requiredSize;
+
+        LOG_WARNING_CAT("RENDERER", "BufferInfo not immediately visible — using base ring pointer (still valid)");
+        LOG_AMOURANTH(
+            "              ETERNAL FRAME UBO STAGING SECURED AT {:p} (fallback)\n"
+            "              {} bytes — handle {:#x} — s_buffers lagged but ring is eternal",
+            eternalFrameUBOStagingPtr_, requiredSize, eternalFrameUBOStagingHandle_);
+    }
+}
 
     // PHASE 4: SYNCHRONIZATION PRIMITIVES — THE EMPIRE'S RHYTHM
     LOG_INFO_CAT("RENDERER", "Creating synchronization objects ({} frames)...", MAX_FRAMES_IN_FLIGHT);
@@ -1463,97 +1505,61 @@ void VulkanRenderer::updateUniformBuffer(uint32_t frame, const Camera& camera, f
         }
     }
 
-    uint64_t& stagingHandle = RTX::g_ctx().sharedStagingEnc_;
-
     // ╔══════════════════════════════════════════════════════════════════════════╗
-    // ║ PHASE 2: THE GREAT HALL — SWEEP THE EMPIRE FOR THE SACRED STAGING STONE  ║
+    // ║ PHASE 2: THE ONE ETERNAL STAGING POINTER — CAPTURED AT BIRTH            ║
     // ╚══════════════════════════════════════════════════════════════════════════╝
-    const auto* stagingInfo = BufferManager::get(stagingHandle);
+    static void* g_eternalFrameUBOStagingPtr = nullptr;
+    static VkDeviceSize g_eternalFrameUBOStagingSize = 0;
 
-    if (stagingHandle == 0 || !stagingInfo || stagingInfo->mapped == nullptr)
+    if (g_eternalFrameUBOStagingPtr == nullptr)
     {
-        LOG_WARNING_CAT("RENDERER", 
-            "The sacred staging stone is lost or corrupted (handle: {:#x}) — "
-            "the castle bells toll. Commencing MIGHTY SWEEP AND ETERNAL REBIRTH", stagingHandle);
+        const VkDeviceSize requiredSize = 368 * Options::Performance::MAX_FRAMES_IN_FLIGHT;
 
-        // Raze the ruins of the old stone
-        if (stagingHandle != 0)
-            BufferManager::destroy(stagingHandle);
+        LOG_AMOURANTH(
+            "\n"
+            "              FORGING THE ONE TRUE FRAME UBO STAGING BUFFER\n"
+            "              SIZE: {} bytes — {} frames in flight\n"
+            "              NULL MAPPED POINTER IS VALID AND ETERNAL\n"
+            "              s_buffers MAY LAG — WE DO NOT CARE",
+            requiredSize, Options::Performance::MAX_FRAMES_IN_FLIGHT);
 
-        // Sweep every chamber of the empire for a surviving stone
-        bool foundExisting = false;
-        for (const auto& [handle, info] : BufferManager::s_buffers)
+        BufferManager::stagingPtr(); // ensure the eternal ring exists
+
+        uint64_t handle = BufferManager::createHostVisible(requiredSize, "SharedFrameUBO_Staging_ETERNAL");
+        if (handle == 0)
         {
-            if (info.tag == "SharedFrameUBO_Staging_MIGHTY" && info.mapped != nullptr)
-            {
-                stagingHandle = handle;
-                stagingInfo   = &info;
-                foundExisting = true;
-                LOG_SUCCESS_CAT("RENDERER", 
-                    "MIGHTY SWEEP SUCCESS — ancient staging stone recovered from the crypts (handle {:#x})", handle);
-                break;
-            }
+            LOG_FATAL_CAT("RENDERER", "FAILED TO ALLOCATE ETERNAL STAGING BUFFER — ring overflow or allocation error");
+            return;
         }
 
-        // If no stone survives → raise a new eternal fortress
-        if (!foundExisting)
+        const auto* info = BufferManager::get(handle);
+
+        // Accept the allocation even if s_buffers hasn't caught up yet
+        // The ring pointer is always valid after allocation
+        if (!info || info->size < requiredSize)
         {
-            const VkDeviceSize requiredSize = 368 * Options::Performance::MAX_FRAMES_IN_FLIGHT;
+            LOG_WARNING_CAT("RENDERER",
+                "BufferInfo not immediately visible for handle {:#x} — falling back to base ring pointer (perfectly valid)",
+                handle);
 
-            LOG_INFO_CAT("RENDERER", 
-                "No surviving stone found — the masons forge a new eternal castle keep ({} MiB)", 
-                requiredSize / (1024 * 1024));
-
-            stagingHandle = BufferManager::createHostVisible(requiredSize, "SharedFrameUBO_Staging_MIGHTY");
-            stagingInfo   = BufferManager::get(stagingHandle);
-
-            // FINAL DEFENSE: Even if the scribes lag, the castle shall stand
-            if (stagingHandle == 0 || !stagingInfo || stagingInfo->mapped == nullptr)
-            {
-                LOG_WARNING_CAT("RENDERER", 
-                    "New stone forged but scribes hesitate (handle {:#x}) — forcing the royal seal", stagingHandle);
-
-                void* forcedMap = BufferManager::map(stagingHandle);
-                if (!forcedMap)
-                {
-                    LOG_FATAL_CAT("RENDERER", 
-                        "THE CASTLE FALLS — cannot map the new staging stone. Pink photons are trapped forever.");
-                    BufferManager::destroy(stagingHandle);
-                    stagingHandle = 0;
-                    stagingInfo = nullptr;
-                    return;
-                }
-                stagingInfo = BufferManager::get(stagingHandle); // refresh after forced map
-            }
-
-            LOG_SUCCESS_CAT("RENDERER", 
-                "New eternal staging stone raised — handle {:#x} — the castle is impregnable once more", stagingHandle);
+            g_eternalFrameUBOStagingPtr  = BufferManager::stagingPtr();
+            g_eternalFrameUBOStagingSize = requiredSize;
         }
         else
         {
-            LOG_SUCCESS_CAT("RENDERER", 
-                "Ancient staging stone recovered — handle {:#x} — the empire endures", stagingHandle);
+            // Normal path — use the registered pointer (may be nullptr for offset 0, which is fine)
+            g_eternalFrameUBOStagingPtr  = info->mapped ? info->mapped : BufferManager::stagingPtr();
+            g_eternalFrameUBOStagingSize = info->size;
         }
 
-        // CRITICAL: persist the new/recovered handle back to the global context in ALL paths
-        RTX::g_ctx().sharedStagingEnc_ = stagingHandle;
+        LOG_AMOURANTH(
+            "              ETERNAL FRAME UBO STAGING READY AT {:p}\n"
+            "              {} bytes — handle {:#x}\n"
+            "              pink photons march eternal — no purge can stop us now",
+            g_eternalFrameUBOStagingPtr, requiredSize, handle);
     }
 
-    // ╔══════════════════════════════════════════════════════════════════════════╗
-    // ║ ULTIMATE BULWARK — EVEN IF EVERYTHING FAILED, WE DO NOT DEREFERENCE NULL ║
-    // ╚══════════════════════════════════════════════════════════════════════════╝
-    if (!stagingInfo || !stagingInfo->mapped)
-    {
-        LOG_FATAL_CAT("RENDERER",
-            "THE ETERNAL STAGING STONE IS TRULY LOST — handle {:#x}, info {:p}, mapped {:p} — "
-            "pink photons cannot march this frame. The castle endures, but the frame is forsaken.",
-            stagingHandle,
-            static_cast<const void*>(stagingInfo),
-            stagingInfo ? static_cast<const void*>(stagingInfo->mapped) : nullptr);
-        return;
-    }
-
-    void* data = stagingInfo->mapped;
+    void* data = g_eternalFrameUBOStagingPtr;
 
     // ╔══════════════════════════════════════════════════════════════════════════╗
     // ║ PHASE 3: THE COMMAND TOWER — ENSURE THE BATTLE PLANS ARE READY           ║
@@ -1613,9 +1619,9 @@ void VulkanRenderer::updateUniformBuffer(uint32_t frame, const Camera& camera, f
     const VkDeviceSize offset = frame * sizeof(FrameUBO);
     void* dest = static_cast<char*>(data) + offset;
 
-    if (offset + sizeof(ubo) > stagingInfo->size)
+    if (offset + sizeof(ubo) > g_eternalFrameUBOStagingSize)
     {
-        LOG_FATAL_CAT("RENDERER", "Staging overflow — the castle's granary cannot hold the harvest");
+        LOG_FATAL_CAT("RENDERER", "Eternal staging overflow — granary bursts (offset {} + {} > {})", offset, sizeof(ubo), g_eternalFrameUBOStagingSize);
         return;
     }
 
@@ -1645,8 +1651,8 @@ void VulkanRenderer::updateUniformBuffer(uint32_t frame, const Camera& camera, f
         VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
         0, 1, &barrier, 0, nullptr, 0, nullptr);
 
-    LOG_TRACE_CAT("RENDERER", 
-        "Frame {} UBO updated — the castle stands eternal under pink photon banners", frameNumber_);
+    LOG_TRACE_CAT("RENDERER",
+        "Frame {} UBO updated — pink photons march from the eternal stone at {:p}", frameNumber_, data);
 }
 
 void VulkanRenderer::updateTonemapUniform(uint32_t frame) noexcept

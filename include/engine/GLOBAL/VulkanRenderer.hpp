@@ -80,6 +80,7 @@ public:
 
     VkFence  inFlightFence(uint32_t frame) const noexcept { return inFlightFences_[frame]; }
     VkFence* inFlightFencePtr(uint32_t frame) noexcept     { return &inFlightFences_[frame]; }
+	const BufferManager::BufferInfo* stagingInfoLocal_ = nullptr;
 
     void toggleHypertrace() noexcept;
     void toggleFpsTarget() noexcept;
@@ -173,6 +174,10 @@ private:
     std::atomic<bool> swapchainOutOfDate_ = false;
     void clearResizeFlag() noexcept;
     static inline std::atomic<bool> g_forcePink{false};
+
+	uint64_t     eternalFrameUBOStagingHandle_ = 0;
+    void*        eternalFrameUBOStagingPtr_    = nullptr;
+    VkDeviceSize eternalFrameUBOStagingSize_   = 0;
 
     std::atomic<uint32_t> currentFrame_{0};
     uint32_t maxFramesInFlight_ = Options::Performance::MAX_FRAMES_IN_FLIGHT;

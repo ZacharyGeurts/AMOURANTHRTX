@@ -34,6 +34,9 @@
 // BUFFERMANAGER — FINAL CANON — CLEAN. ETERNAL. PINK.
 namespace BufferManager {
 
+    // Forward-declare the StagingRing struct (defined in .cpp)
+    struct StagingRing;
+
     struct BufferInfo {
         VkBuffer           buffer  = VK_NULL_HANDLE;
         VkDeviceMemory     memory  = VK_NULL_HANDLE;
@@ -42,10 +45,15 @@ namespace BufferManager {
         VkBufferUsageFlags usage   = 0;
         std::string        tag;
         void*              mapped  = nullptr;
+        VkDeviceSize       offset  = 0;
     };
 
     // Forward accessor for the giant main pool buffer (defined in .cpp)
     [[nodiscard]] VkBuffer getMainPoolBuffer() noexcept;
+
+    // Expose the eternal staging ring — required for the one true frame UBO
+    // This is safe: only used during single-threaded construction
+    extern StagingRing* g_stagingRing;
 
     // CORE ALLOCATION
     [[nodiscard]] uint64_t create(VkDeviceSize size,
@@ -64,7 +72,7 @@ namespace BufferManager {
 
     // STAGING RING — THE ETERNAL BRIDGE
     [[nodiscard]] VkBuffer getStagingBuffer() noexcept;
-    [[nodiscard]] void* stagingPtr() noexcept;
+    void* stagingPtr() noexcept;
     void advanceStagingOffset(VkDeviceSize bytes) noexcept;
     [[nodiscard]] uint64_t stagingBuffer() noexcept;
 
@@ -76,7 +84,7 @@ namespace BufferManager {
     void copyBuffer(VkBuffer src, VkBuffer dst, VkDeviceSize size, VkQueue queue, VkCommandPool pool) noexcept;
 
     // INTERNAL STORAGE — RAW DOGGING STYLE
-    inline static std::unordered_map<uint64_t, BufferInfo> s_buffers;
+    extern std::unordered_map<uint64_t, BufferInfo> s_buffers;
 
     // PUBLIC ACCESS — CLEAN AND ETERNAL
     [[nodiscard]] static const BufferInfo* get(uint64_t handle) noexcept
@@ -111,19 +119,19 @@ namespace BufferManager {
         const auto* info = get(handle);
         if (!info || !info->buffer) return 0;
         VkBufferDeviceAddressInfo dai{ VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO, nullptr, info->buffer };
-        return vkGetBufferDeviceAddress(RTX::g_ctx().device(), &dai);
+        return vkGetBufferDeviceAddress(RTX::g_ctx().device(), &dai) + info->offset;
     }
 
     // STONE SHORTCUTS — REAL ETERNAL ALLOCATIONS FROM MAIN POOL (implemented in .cpp)
-[[nodiscard]] uint64_t make_64M (VkBufferUsageFlags extra = 0) noexcept;
-[[nodiscard]] uint64_t make_128M(VkBufferUsageFlags extra = 0) noexcept;
-[[nodiscard]] uint64_t make_256M(VkBufferUsageFlags extra = 0) noexcept;
-[[nodiscard]] uint64_t make_420M(VkBufferUsageFlags extra = 0) noexcept;
-[[nodiscard]] uint64_t make_512M(VkBufferUsageFlags extra = 0) noexcept;
-[[nodiscard]] uint64_t make_1G  (VkBufferUsageFlags extra = 0) noexcept;
-[[nodiscard]] uint64_t make_2G  (VkBufferUsageFlags extra = 0) noexcept;
-[[nodiscard]] uint64_t make_4G  (VkBufferUsageFlags extra = 0) noexcept;
-[[nodiscard]] uint64_t make_8G  (VkBufferUsageFlags extra = 0) noexcept;
+    [[nodiscard]] uint64_t make_64M (VkBufferUsageFlags extra = 0) noexcept;
+    [[nodiscard]] uint64_t make_128M(VkBufferUsageFlags extra = 0) noexcept;
+    [[nodiscard]] uint64_t make_256M(VkBufferUsageFlags extra = 0) noexcept;
+    [[nodiscard]] uint64_t make_420M(VkBufferUsageFlags extra = 0) noexcept;
+    [[nodiscard]] uint64_t make_512M(VkBufferUsageFlags extra = 0) noexcept;
+    [[nodiscard]] uint64_t make_1G  (VkBufferUsageFlags extra = 0) noexcept;
+    [[nodiscard]] uint64_t make_2G  (VkBufferUsageFlags extra = 0) noexcept;
+    [[nodiscard]] uint64_t make_4G  (VkBufferUsageFlags extra = 0) noexcept;
+    [[nodiscard]] uint64_t make_8G  (VkBufferUsageFlags extra = 0) noexcept;
 
     // Pre-configured eternal stones
     static inline uint64_t transferStone4G() noexcept { static uint64_t h = make_4G(VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT); return h; }
