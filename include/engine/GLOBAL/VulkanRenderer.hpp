@@ -25,6 +25,7 @@
 #include <glm/gtc/type_ptr.hpp>
 #include <glm/gtc/matrix_inverse.hpp>
 #include <cstdint>
+#include <cstddef> 
 
 #include "engine/GLOBAL/OptionsMenu.hpp"
 #include "engine/GLOBAL/RTXHandler.hpp"
@@ -174,6 +175,8 @@ private:
     std::atomic<bool> swapchainOutOfDate_ = false;
     void clearResizeFlag() noexcept;
     static inline std::atomic<bool> g_forcePink{false};
+
+	float totalTime_ = 0.0f;
 
 	uint64_t     eternalFrameUBOStagingHandle_ = 0;
     void*        eternalFrameUBOStagingPtr_    = nullptr;
@@ -339,6 +342,33 @@ private:
     [[nodiscard]] constexpr VkExtent2D currentExtent() const noexcept {
         return { static_cast<uint32_t>(width_), static_cast<uint32_t>(height_) };
     }
+
+struct DreamUBO
+{
+    float    time;          // offset 0,  size 4
+    uint32_t frame;         // offset 4,  size 4
+    float    resolution[2]; // offset 8,  size 8
+    float    exposure;      // offset 16, size 4
+    uint32_t enableEnvMap;  // offset 20, size 4
+
+    // Padding to reach exactly 368 bytes
+    // 368 - 24 = 344 bytes → 86 × uint32_t
+    uint32_t padding[86];  // offset 24 → total 368 bytes
+};
+
+// -------------------------------------------------------------------
+// All static asserts must be OUTSIDE the struct definition
+// (offsetof and sizeof cannot be used on an incomplete type)
+// -------------------------------------------------------------------
+static_assert(offsetof(DreamUBO, time)         == 0,   "time must be at offset 0");
+static_assert(offsetof(DreamUBO, frame)        == 4,   "frame must be at offset 4");
+static_assert(offsetof(DreamUBO, resolution)   == 8,   "resolution must be at offset 8");
+static_assert(offsetof(DreamUBO, exposure)     == 16,  "exposure must be at offset 16");
+static_assert(offsetof(DreamUBO, enableEnvMap) == 20,  "enableEnvMap must be at offset 20");
+static_assert(offsetof(DreamUBO, padding)      == 24,  "padding must start at offset 24");
+
+static_assert(sizeof(DreamUBO) == 368, "DreamUBO must be exactly 368 bytes to match shader layout");
+
 };
 
 // =============================================================================

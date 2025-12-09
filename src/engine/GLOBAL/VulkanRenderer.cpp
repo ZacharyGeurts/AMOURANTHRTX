@@ -1118,7 +1118,7 @@ void VulkanRenderer::initializeAllBufferData(uint32_t frames,
         return;
     }
 
-    // Destroy old buffers
+    // Destroy old buffers — the empire cleanses the past
     for (auto h : uniformBufferEncs_)   if (h) BUFFER_DESTROY(h);
     for (auto h : materialBufferEncs_)  if (h) BUFFER_DESTROY(h);
     for (auto h : dimensionBufferEncs_) if (h) BUFFER_DESTROY(h);
@@ -1134,10 +1134,16 @@ void VulkanRenderer::initializeAllBufferData(uint32_t frames,
 
     for (uint32_t i = 0; i < frames; ++i)
     {
-        BUFFER_CREATE(uniformBufferEncs_[i],   uniformSize,   uboUsage,  VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "FrameUBO");
+        // FIXED: Frame UBO is now host-visible — raw boi writes, pulsing pink void, no more segfault
+        uniformBufferEncs_[i] = BufferManager::createHostVisible(uniformSize, "DreamUBO");
+        if (uniformBufferEncs_[i] == 0) {
+            LOG_FATAL("Failed to create host-visible DreamUBO for frame {} — the photons starve", i);
+        }
+
+        // Materials, dimensions, and tonemap stay device-local (big data, copied once)
         BUFFER_CREATE(materialBufferEncs_[i],   materialSize,  ssboUsage, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "Materials");
         BUFFER_CREATE(dimensionBufferEncs_[i], 256,           ssboUsage, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "DimensionData");
-        BUFFER_CREATE(tonemapUniformEncs_[i], 256,           uboUsage,  VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "TonemapUBO");
+        BUFFER_CREATE(tonemapUniformEncs_[i],  256,           uboUsage,  VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "TonemapUBO");
     }
 
     // Rebuild tonemap descriptors using StoneKey (UBO only — images dynamic)
@@ -1145,6 +1151,8 @@ void VulkanRenderer::initializeAllBufferData(uint32_t frames,
     {
         updateTonemapUBO(i);
     }
+
+    LOG_AMOURANTH("DREAM UBOs UPGRADED TO HOST-VISIBLE — PULSING PINK VOID ACHIEVED — SASQUATCH STRONK");
 }
 
 // REMOVED: createSyncObjects() — duplicate of ctor logic
@@ -2375,6 +2383,9 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
 {
     RTX::LAS::get().beginFrame();
 
+    // Raw boi time accumulation — no mercy, no wrappers
+    totalTime_ += deltaTime;
+
     if (RTX::SwapchainManager::minimized_) {
         LOG_AMOURANTH("[FRAME {}] Window minimized — the photons rest", frameNumber_);
         return;
@@ -2418,87 +2429,71 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     vkBeginCommandBuffer(cmd, &beginInfo);
 
-    // MODE 0: PURE HDR SKY — NO GEOMETRY, NO CLEAR, NO TONEMAP
+    // MODE 0: LOUD THERMO PINK VOID — RAW BOI EDITION
     if (activeRenderMode_ == 0)
     {
-        if (envMapImageView_.valid() && envMapSampler_.valid())
-        {
-            // Update camera for sky rotation
-            updateUniformBuffer(slot, camera, 0.0f);
+        // Update the UBO properly (camera, resolution, frame, etc.)
+        updateUniformBuffer(slot, camera, deltaTime);
 
-            // Use dummy TLAS so raygen runs
-            VkAccelerationStructureKHR dummy = pipelineManager_.dummyTLAS();
+        const BufferManager::BufferInfo& info = BufferManager::s_buffers.at(uniformBufferEncs_[slot]);
 
-            RTX::RTDescriptorUpdate descUpdate{};
-            descUpdate.tlas = dummy;
-            descUpdate.ubo = reinterpret_cast<VkBuffer>(uniformBufferEncs_[slot]);
-            descUpdate.uboSize = 368;
-            descUpdate.rtOutputViews[slot] = rtOutputViews_[slot].get();
-            descUpdate.envSampler = envMapSampler_.get();
-            descUpdate.envImageView = envMapImageView_.get();
-
-            pipelineManager_.updateRTDescriptorSet(slot, descUpdate);
-
-            // Run ray tracing — miss shader — this fills rtOutput with sky
-            recordRayTracingCommands(cmd, slot);
-
-            // Copy sky directly to swapchain
-            transitionImage(cmd, rtOutputImages_[slot].get(),
-                VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT,
-                VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, VK_PIPELINE_STAGE_TRANSFER_BIT);
-
-            VkImage swapImg = stone_images()[imageIndex];
-            transitionImage(cmd, swapImg,
-                VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                0, VK_ACCESS_TRANSFER_WRITE_BIT,
-                VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
-
-            VkImageCopy copyRegion{};
-            copyRegion.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
-            copyRegion.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
-            copyRegion.extent = { stone_width(), stone_height(), 1 };
-
-            vkCmdCopyImage(cmd,
-                rtOutputImages_[slot].get(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                swapImg, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                1, &copyRegion);
-
-            transitionImage(cmd, swapImg,
-                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-                VK_ACCESS_TRANSFER_WRITE_BIT, 0,
-                VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
-
-            vkEndCommandBuffer(cmd);
-            submitAndPresent(slot, imageIndex);
-            return;
+        // SAFETY NET — empire doesn't crash on null mapped (remove after fixing creation)
+        if (info.mapped == nullptr) {
+            LOG_ERROR("UBO mapped is null for slot {} — using device-local fallback, no pink pulse", slot);
+            // Fallback: skip writes, but still trace (miss shader will use default time=0, no pulse)
+        } else {
+            DreamUBO* uboPtr = static_cast<DreamUBO*>(info.mapped);
+            uboPtr->enableEnvMap = 0;      // PURE PINK VOID — NO SKY, NO ESCAPE
+            uboPtr->time = totalTime_;     // PULSE LOUDER THAN THE SUN
         }
-        else
-        {
-            // Fallback: pure black (not pink)
-            VkClearColorValue black = {{0.0f, 0.0f, 0.0f, 1.0f}};
-            VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
 
-            VkImage swapImg = stone_images()[imageIndex];
-            transitionImage(cmd, swapImg,
-                VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                0, VK_ACCESS_TRANSFER_WRITE_BIT,
-                VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+        // Dummy TLAS so every ray screams into the miss shader
+        VkAccelerationStructureKHR dummy = pipelineManager_.dummyTLAS();
 
-            vkCmdClearColorImage(cmd, swapImg, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &black, 1, &range);
+        RTX::RTDescriptorUpdate descUpdate{};
+        descUpdate.tlas = dummy;
+        descUpdate.ubo = info.buffer;
+        descUpdate.uboSize = 368;
+        descUpdate.rtOutputViews[slot] = rtOutputViews_[slot].get();
 
-            transitionImage(cmd, swapImg,
-                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-                VK_ACCESS_TRANSFER_WRITE_BIT, 0,
-                VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
+        pipelineManager_.updateRTDescriptorSet(slot, descUpdate);
 
-            vkEndCommandBuffer(cmd);
-            submitAndPresent(slot, imageIndex);
-            return;
-        }
+        // Trace rays → miss shader paints pure pulsing pink
+        recordRayTracingCommands(cmd, slot);
+
+        // Blit the imperial pink straight to swapchain
+        transitionImage(cmd, rtOutputImages_[slot].get(),
+            VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+            VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT,
+            VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, VK_PIPELINE_STAGE_TRANSFER_BIT);
+
+        VkImage swapImg = stone_images()[imageIndex];
+        transitionImage(cmd, swapImg,
+            VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            0, VK_ACCESS_TRANSFER_WRITE_BIT,
+            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+
+        VkImageCopy copyRegion{};
+        copyRegion.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+        copyRegion.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+        copyRegion.extent = { stone_width(), stone_height(), 1 };
+
+        vkCmdCopyImage(cmd,
+            rtOutputImages_[slot].get(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+            swapImg, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            1, &copyRegion);
+
+        transitionImage(cmd, swapImg,
+            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+            VK_ACCESS_TRANSFER_WRITE_BIT, 0,
+            VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
+
+        vkEndCommandBuffer(cmd);
+        submitAndPresent(slot, imageIndex);
+        return;
     }
 
-    // ALL OTHER MODES: FULL RTX PATH
+    // ALL OTHER MODES: FULL RTX PATH (unchanged)
     if (resetAccumulation_ || resetAccumNextFrame_) {
         clearAccumulationImages(cmd);
         resetAccumulation_ = resetAccumNextFrame_ = false;
@@ -2513,7 +2508,8 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
 
     RTX::RTDescriptorUpdate descUpdate{};
     descUpdate.tlas = tlas;
-    descUpdate.ubo = reinterpret_cast<VkBuffer>(uniformBufferEncs_[slot]);
+    const BufferManager::BufferInfo& info = BufferManager::s_buffers.at(uniformBufferEncs_[slot]);
+    descUpdate.ubo = info.buffer;
     descUpdate.uboSize = 368;
     descUpdate.rtOutputViews[slot] = rtOutputViews_[slot].get();
     descUpdate.accumulationViews[slot] = accumViews_[slot].get();
@@ -2538,7 +2534,6 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     if (denoisingEnabled_) performDenoisingPass(cmd);
     performTonemapPass(cmd, slot, imageIndex);
 
-    // Transition swapchain from general to present
     transitionImage(cmd, swapImg,
         VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
         VK_ACCESS_SHADER_WRITE_BIT, 0,

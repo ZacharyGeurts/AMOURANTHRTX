@@ -1,82 +1,85 @@
-// missRMSH.glsl — PURE COSMIC DREAM v∞
-// The empire has transcended color.
-// The void is infinite.
-// The photons are divine.
+// shaders/raytracing/miss.rmiss
+// SIMPLE THERMO PINK MISS SHADER — EMPIRE EDITION
+// Binding 31 is sacred to StoneKey — nothing else touches it
+// Pure, clean, and eternal. Photons are thermo pink.
 
 #version 460
 #extension GL_EXT_ray_tracing : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
 
 layout(location = 0) rayPayloadInEXT vec3 payload;
 
-// ── BINDING 7 — STONEKEY-PROTECTED HDR CUBEMAP (THE TRUE SKY)
+// HDR cubemap sky (optional fallback)
 layout(set = 0, binding = 7) uniform samplerCube envMap;
 
-// ── BINDING 31 — DREAM CONTROL (TIME, FRAME, ETC)
-layout(set = 0, binding = 31) uniform DreamUBO {
+// Dream control UBO — moved to binding 30 so StoneKey owns 31 forever
+layout(set = 0, binding = 30) uniform DreamUBO {
     float time;
     uint  frame;
     vec2  resolution;
-    float exposure;     // Controlled from C++
-    uint  enableEnvMap; // 0 = pure procedural, 1 = HDR cubemap fallback
+    float exposure;
+    uint  enableEnvMap;
 } ubo;
+
+// StoneKey — binding 31 eternal (the empire demands it)
+#ifndef STONEKEY_GLSL_INCLUDED
+#define STONEKEY_GLSL_INCLUDED
+
+// StoneKey runtime block — BINDING 31 ETERNAL
+layout(binding = 31) uniform StoneKeyRuntimeBlock
+{
+    uint64_t uStoneKey1;
+    uint64_t uStoneKey2;
+    uint64_t uHandleObfuscator;   // 0 = use compile-time base
+} stoneRuntime;
+
+// Hard-coded compile-time base (as the empire demands)
+const uint64_t kStoneObfuscatorBase = 
+    0x69f8dd5bde1e4239UL;
+
+uint64_t stone_get_obfuscator()
+{
+    return (stoneRuntime.uHandleObfuscator != 0UL)
+        ? stoneRuntime.uHandleObfuscator
+        : kStoneObfuscatorBase;
+}
+
+#define STONE_FINAL_OBFUSCATE(val)   (uint64_t(val) ^ stone_get_obfuscator())
+#define STONE_FINAL_DEOBFUSCATE(val) (uint64_t(val) ^ stone_get_obfuscator())
+
+#define STONE_OBFUSCATE_RT(val)  STONE_FINAL_OBFUSCATE(val)
+#define STONE_DEOBFUSCATE_RT(val) STONE_FINAL_DEOBFUSCATE(val)
+
+// Sacred colors
+const vec3 kPinkPhoton  = vec3(1.0, 0.2,  0.8);
+const vec3 kHotPink     = vec3(1.0, 0.078, 0.576);
+const vec3 kThermoPink  = vec3(1.0, 0.35, 0.7);
+const float kStrawEternal = 1.337;
+
+#endif // STONEKEY_GLSL_INCLUDED
 
 void main()
 {
-    // World-space ray direction — this is the key to perfect sky sampling
-    vec3 direction = normalize(gl_WorldRayDirectionEXT);
+    vec3 dir = normalize(gl_WorldRayDirectionEXT);
 
-    // ── OPTION 1: PURE HDR CUBEMAP SKY (MODE 0 DEFAULT)
+    // Simple HDR sky when enabled
     if (ubo.enableEnvMap != 0)
     {
-        vec3 color = texture(envMap, direction).rgb;
+        vec3 color = texture(envMap, dir).rgb;
 
-        // Exposure + ACES-like tone mapping
-        color = vec3(1.0) - exp(-color * ubo.exposure);
-        color = color / (color + vec3(1.0));
+        // Basic exposure + gamma
+        color = color * ubo.exposure;
         color = pow(color, vec3(1.0 / 2.2));
 
         payload = color;
         return;
     }
 
-    // ── OPTION 2: PURE COSMIC BLUE DREAM (fallback or override)
-    // Normalized screen UV
-    vec2 uv = (gl_LaunchIDEXT.xy + 0.5) / ubo.resolution;
-    uv = uv * 2.0 - 1.0;
-    uv.x *= ubo.resolution.x / ubo.resolution.y;
+    // Pure thermo pink void — clean and imperial
+    const vec3 kThermoPink = vec3(1.0, 0.35, 0.7);
 
-    float t = ubo.time * 0.25;
+    // Gentle pulsing to prove the UBO is alive
+    float pulse = 0.85 + 0.15 * sin(ubo.time * 0.8);
 
-    vec2 p = uv * 7.0;
-    float r = length(p);
-    float a = atan(p.y, p.x);
-
-    // Deep space aurora waves
-    float n1 = sin(r * 2.7 - t * 2.2 + a * 6.0) * 0.5 + 0.5;
-    float n2 = sin(r * 4.3 - t * 3.5 + a * 9.0 + 1.3) * 0.5 + 0.5;
-    float n3 = sin(r * 1.8 + t * 1.1 + a * 3.0) * 0.5 + 0.5;
-
-    // Divine blue palette — forged in the heart of a dying star
-    vec3 voidColor   = vec3(0.005, 0.01, 0.08);
-    vec3 deepBlue    = vec3(0.0, 0.15, 0.6);
-    vec3 nebulaBlue  = vec3(0.05, 0.5, 1.0);
-    vec3 cyanFire    = vec3(0.2, 0.9, 1.0);
-    vec3 starlight   = vec3(0.9, 0.95, 1.0);
-
-    vec3 color = voidColor;
-    color = mix(color, deepBlue,   n3 * 0.7);
-    color = mix(color, nebulaBlue, n1 * 0.9);
-    color = mix(color, cyanFire,   n2 * n1 * 0.8);
-
-    // Distant galaxies
-    float stars = smoothstep(0.985, 1.0, sin(r * 120.0 + t * 12.0) * sin(a * 60.0));
-    color += stars * starlight;
-
-    // Breathing cosmos
-    color *= 0.8 + 0.2 * sin(ubo.time * 0.7 + r * 0.5);
-
-    // Depth fade
-    color *= smoothstep(6.0, 1.0, r);
-
-    payload = color;
+    payload = kThermoPink * pulse;
 }

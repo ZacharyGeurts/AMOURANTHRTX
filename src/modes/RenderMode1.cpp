@@ -5,6 +5,7 @@
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/GLOBAL/RTXHandler.hpp"
 #include "engine/GLOBAL/VulkanRenderer.hpp"
+#include "engine/GLOBAL/BufferManager.hpp"
 
 #include <glm/glm.hpp>
 using namespace Logging::Color;
@@ -12,6 +13,11 @@ using namespace Logging::Color;
 RenderMode1::RenderMode1(uint32_t w, uint32_t h)
     : width_(w), height_(h), frameCount_(0)
 {
+    // Force early creation of the eternal staging ring.
+    // This eliminates the "Shared staging memory null — skipping tonemap update" warnings
+    // because the tonemap uniform (and other host-visible updates) rely on the staging ring being ready.
+    BufferManager::ensureStagingRing();
+
     LOG_SUCCESS_CAT("RTX", "GREEN DREAM MODE ENGAGED — WELCOME TO THE MATRIX");
     LOG_AMOURANTH("The photons are now green. The empire has transcended pink.");
     LOG_CAPTAIN_N("[CAPTAIN N] \"...She went green.\n"

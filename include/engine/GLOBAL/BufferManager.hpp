@@ -52,7 +52,6 @@ namespace BufferManager {
     [[nodiscard]] VkBuffer getMainPoolBuffer() noexcept;
 
     // Expose the eternal staging ring — required for the one true frame UBO
-    // This is safe: only used during single-threaded construction
     extern StagingRing* g_stagingRing;
 
     // CORE ALLOCATION
@@ -75,6 +74,8 @@ namespace BufferManager {
     void* stagingPtr() noexcept;
     void advanceStagingOffset(VkDeviceSize bytes) noexcept;
     [[nodiscard]] uint64_t stagingBuffer() noexcept;
+
+    void ensureStagingRing() noexcept;   // Force creation of the eternal staging ring (idempotent)
 
     // BUFFER LIFECYCLE & ACCESS
     void destroy(uint64_t handle) noexcept;

@@ -167,7 +167,7 @@ void ensureMainPool() noexcept
 // ─────────────────────────────────────────────────────────────────────────────
 // STAGING RING — 512 MiB PERSISTENT MAPPED
 // ─────────────────────────────────────────────────────────────────────────────
-static void ensureStagingRing() noexcept
+void ensureStagingRing() noexcept
 {
     if (g_stagingRingInstance.ready) [[likely]] {
         return; // The beast already prowls
