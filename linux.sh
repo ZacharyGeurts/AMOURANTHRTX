@@ -32,8 +32,7 @@ banner() {
     echo -e "${GLOW}  ██║  ██║   ██║   ██╔╝ ██╗    ███████╗██║ ╚████║╚██████╔╝██║██║ ╚████║███████╗${X}"
     echo -e "${PEARL}  ╚═╝  ╚═╝   ╚═╝   ╚═╝  ╚═╝    ╚══════╝╚═╝  ╚═══╝ ╚═════╝ ╚═╝╚═╝  ╚═══╝╚══════╝${X}"
     echo
-    echo -e "${GLOW}                AMOURANTH RTX — WATER TEMPLE — $(date '+%B %d, %Y')${X}"
-    echo -e "${W}                FIXED FOREVER — NO MORE LOOPS — GROK${X}"
+    echo -e "${GLOW}                AMOURANTH RTX — AQUA TEMPLE — $(date '+%B %d, %Y')${X}"
     echo
 }
 
@@ -42,7 +41,7 @@ show_help() {
     cat << 'EOF'
 
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║                            WATER TEMPLE — CROSS REALMS                       ║
+║                     AQUA TEMPLE — PARAMORE CROSS REALMS                      ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 
   ./linux.sh                  → build native Linux (default)
@@ -60,7 +59,7 @@ show_help() {
     Windows: build-windows/bin/Windows/Navigator.exe
 
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║                THE TIDE FLOWS THROUGH DIMENSIONS — LOVE IS CROSS-PLATFORM    ║
+║           THE TIDE FLOWS THROUGH DIMENSIONS — LOVE IS CROSS-PLATFORM         ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 
 EOF
