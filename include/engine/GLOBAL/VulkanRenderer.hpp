@@ -163,8 +163,14 @@ public:
         VkPipelineStageFlags  dstStage       = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT
     ) noexcept;
 
-private:
-    // Core state
+    // Pipeline manager
+    RTX::PipelineManager pipelineManager_;
+
+	uint32_t maxFramesInFlight_ = Options::Performance::MAX_FRAMES_IN_FLIGHT;
+
+    std::vector<RTX::Handle<VkImageView>>   rtOutputViews_;
+
+	// Core state
     SDL_Window* window_ = nullptr;
     int width_ = 0, height_ = 0;
     bool minimized_ = false;
@@ -183,7 +189,6 @@ private:
     VkDeviceSize eternalFrameUBOStagingSize_   = 0;
 
     std::atomic<uint32_t> currentFrame_{0};
-    uint32_t maxFramesInFlight_ = Options::Performance::MAX_FRAMES_IN_FLIGHT;
     uint64_t frameNumber_  = 0;
     uint32_t accumulationFrame_ = 0;
     bool     firstSwapchainAcquire_ = true;
@@ -239,7 +244,6 @@ private:
     // HDR targets
     std::vector<RTX::Handle<VkImage>>       rtOutputImages_;
     std::vector<RTX::Handle<VkDeviceMemory>>rtOutputMemories_;
-    std::vector<RTX::Handle<VkImageView>>   rtOutputViews_;
 
     std::vector<RTX::Handle<VkImage>>       accumImages_;
     std::vector<RTX::Handle<VkDeviceMemory>>accumMemories_;
@@ -273,9 +277,6 @@ private:
 
     // RT descriptors
     std::vector<VkDescriptorSet> rtDescriptorSets_;
-
-    // Pipeline manager
-    RTX::PipelineManager pipelineManager_;
 
     // ── PRIVATE METHODS (all used in .cpp) ─────────────────────────────────────
     void createRenderPass() noexcept;
@@ -351,23 +352,31 @@ struct DreamUBO
     float    exposure;      // offset 16, size 4
     uint32_t enableEnvMap;  // offset 20, size 4
 
-    // Padding to reach exactly 368 bytes
-    // 368 - 24 = 344 bytes → 86 × uint32_t
-    uint32_t padding[86];  // offset 24 → total 368 bytes
+    // MODE 1: GREEN MATRIX RAIN — custom parameters (placed in original padding area)
+    glm::vec3 baseColor;    // offset 24, size 12
+    float    intensity;     // offset 36, size 4
+
+    // Padding keeps original offset 24 start and total 368 bytes
+    // Original padding started at 24 — we use first 16 bytes for baseColor+intensity
+    // Remaining padding: 368 - 40 = 328 bytes → 82 × uint32_t, starting at offset 40
+    uint32_t padding[82];   // offset 40 → total 368 bytes
 };
 
-// -------------------------------------------------------------------
-// All static asserts must be OUTSIDE the struct definition
-// (offsetof and sizeof cannot be used on an incomplete type)
-// -------------------------------------------------------------------
+// ALL static_asserts OUTSIDE the struct — fixes "incomplete type" + keeps old checks
+static_assert(sizeof(DreamUBO) == 368, "DreamUBO must be exactly 368 bytes — the shaders demand it");
 static_assert(offsetof(DreamUBO, time)         == 0,   "time must be at offset 0");
 static_assert(offsetof(DreamUBO, frame)        == 4,   "frame must be at offset 4");
 static_assert(offsetof(DreamUBO, resolution)   == 8,   "resolution must be at offset 8");
 static_assert(offsetof(DreamUBO, exposure)     == 16,  "exposure must be at offset 16");
 static_assert(offsetof(DreamUBO, enableEnvMap) == 20,  "enableEnvMap must be at offset 20");
-static_assert(offsetof(DreamUBO, padding)      == 24,  "padding must start at offset 24");
 
-static_assert(sizeof(DreamUBO) == 368, "DreamUBO must be exactly 368 bytes to match shader layout");
+// Keep original assertion happy — padding field still "starts" at 24 in the layout sense
+// (even though we use the space before it — the field itself is at offset 40)
+static_assert(offsetof(DreamUBO, padding) == 40, "padding field starts at offset 40 (after custom params)");
+
+// New members are exactly where we want them
+static_assert(offsetof(DreamUBO, baseColor) == 24, "baseColor must be at offset 24");
+static_assert(offsetof(DreamUBO, intensity) == 36, "intensity must be at offset 36");
 
 };
 

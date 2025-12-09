@@ -2308,7 +2308,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     totalTime_ += deltaTime;
 
     if (RTX::SwapchainManager::minimized_) {
-        LOG_AMOURANTH("[FRAME {}] Window minimized — the photons rest", frameNumber_);
+        LOG_AMOURANTH("[FRAME %u] Window minimized — the photons rest", frameNumber_);
         return;
     }
 
@@ -2344,7 +2344,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     VkCommandBuffer cmd = commandBuffers_[slot];
     vkResetCommandBuffer(cmd, 0);
 
-    VkCommandBufferBeginInfo beginInfo = {
+    VkCommandBufferBeginInfo beginInfo{
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
         .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
     };
@@ -2358,7 +2358,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
         const uint64_t handle = uniformBufferEncs_[slot];
         auto it = BufferManager::s_buffers.find(handle);
         if (it == BufferManager::s_buffers.end()) {
-            LOG_ERROR_CAT("RENDERER", "DreamUBO handle {} missing — no pink pulse this frame (slot {})", handle, slot);
+            LOG_ERROR_CAT("RENDERER", "DreamUBO handle %#llx missing — no pink pulse this frame (slot %u)", handle, slot);
         } else {
             const BufferManager::BufferInfo& info = it->second;
 
@@ -2368,12 +2368,71 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
                 uboPtr->time = totalTime_;
             }
 
-            RTX::RTDescriptorUpdate descUpdate{};
-            descUpdate.tlas = pipelineManager_.dummyTLAS();
-            descUpdate.ubo = info.buffer;
-            descUpdate.uboSize = 368;
-            descUpdate.rtOutputViews[slot] = rtOutputViews_[slot].get();
-            pipelineManager_.updateRTDescriptorSet(slot, descUpdate);
+            RTX::RTDescriptorUpdate desc{};
+            desc.tlas = pipelineManager_.dummyTLAS();
+            desc.ubo = info.buffer;
+            desc.uboSize = 368;
+            desc.rtOutputViews[slot] = rtOutputViews_[slot].get();
+            pipelineManager_.updateRTDescriptorSet(slot, desc);
+        }
+
+        recordRayTracingCommands(cmd, slot);
+
+        transitionImage(cmd, rtOutputImages_[slot].get(),
+            VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+            VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT,
+            VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, VK_PIPELINE_STAGE_TRANSFER_BIT);
+
+        VkImage swapImg = stone_images()[imageIndex];
+        transitionImage(cmd, swapImg,
+            VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            0, VK_ACCESS_TRANSFER_WRITE_BIT,
+            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+
+        VkImageCopy copyRegion{
+            .srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
+            .dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
+            .extent = { stone_width(), stone_height(), 1 }
+        };
+        vkCmdCopyImage(cmd, rtOutputImages_[slot].get(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                       swapImg, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyRegion);
+
+        transitionImage(cmd, swapImg,
+            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+            VK_ACCESS_TRANSFER_WRITE_BIT, 0,
+            VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
+
+        vkEndCommandBuffer(cmd);
+        submitAndPresent(slot, imageIndex);
+        return;
+    }
+
+    // MODE 1: GREEN MATRIX RAIN — FULL-SCREEN MISS SHADER
+    if (activeRenderMode_ == 1)
+    {
+        updateUniformBuffer(slot, camera, deltaTime);
+
+        const uint64_t handle = uniformBufferEncs_[slot];
+        auto it = BufferManager::s_buffers.find(handle);
+        if (it == BufferManager::s_buffers.end()) {
+            LOG_ERROR_CAT("RENDERER", "Green Matrix UBO handle %#llx missing — no rain this frame (slot %u)", handle, slot);
+        } else {
+            const BufferManager::BufferInfo& info = it->second;
+
+            if (info.mapped) {
+                DreamUBO* uboPtr = static_cast<DreamUBO*>(info.mapped);
+                uboPtr->enableEnvMap = 0;
+                uboPtr->time = totalTime_;
+                uboPtr->baseColor = glm::vec3(0.0f, 1.0f, 0.12f);  // MATRIX GREEN
+                uboPtr->intensity = 0.75f + 0.25f * std::sin(totalTime_ * 4.0f);
+            }
+
+            RTX::RTDescriptorUpdate desc{};
+            desc.tlas = pipelineManager_.dummyTLAS();  // FORCE MISS → FULL-SCREEN GREEN RAIN
+            desc.ubo = info.buffer;
+            desc.uboSize = 368;
+            desc.rtOutputViews[slot] = rtOutputViews_[slot].get();
+            pipelineManager_.updateRTDescriptorSet(slot, desc);
         }
 
         recordRayTracingCommands(cmd, slot);
@@ -2423,7 +2482,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     const uint64_t uboHandle = uniformBufferEncs_[slot];
     auto uboIt = BufferManager::s_buffers.find(uboHandle);
     if (uboIt == BufferManager::s_buffers.end()) {
-        LOG_ERROR_CAT("RENDERER", "Uniform buffer handle {} missing — fatal sync error (slot {})", uboHandle, slot);
+        LOG_ERROR_CAT("RENDERER", "Uniform buffer handle %#llx missing — fatal sync error (slot %u)", uboHandle, slot);
         submitAndPresent(slot, imageIndex);
         return;
     }
